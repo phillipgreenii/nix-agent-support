@@ -23,6 +23,7 @@ import (
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/plugin/scriptout"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/provider/vcs/github"
 )
 
 // State enumerates the four auth states the CLI surface reports.
@@ -166,7 +167,12 @@ func checkOne(ctx context.Context, name string, r Runners) Status {
 //
 // Non-zero exit + "not logged" / "no oauth token" in output → MISSING.
 // Non-zero exit + "expired" / "401" → EXPIRED.
-// Anything else non-zero is reported as MISSING with the message body.
+// Anything else non-zero is reported as MISSING with the message body — which
+// is the branch a token-resolution failure lands in: the runner returns before
+// gh is executed, with empty output and an error naming `gh auth login`, so the
+// status is MISSING carrying that message (bead pg2-ilzq9). Reporting a state is
+// the whole job here, so failing to resolve is never a reason to hand control to
+// an interactive gh.
 func checkGitHub(ctx context.Context, name string, r Runners) Status {
 	stdout, stderr, err := r.GH(ctx, "auth", "status")
 	out := stdout + stderr
@@ -184,10 +190,13 @@ func checkGitHub(ctx context.Context, name string, r Runners) Status {
 	case strings.Contains(low, "not logged") || strings.Contains(low, "no oauth token") || strings.Contains(low, "no token"):
 		return Status{Provider: name, State: string(StateMissing), Detail: firstLine(out)}
 	default:
-		// gh may not be on PATH at all; the runner error itself is useful.
+		// gh may not be on PATH at all, or the token never resolved so gh was
+		// never run — either way the runner error itself is the useful detail.
+		// firstLine keeps it to one line: a token-resolution failure wraps a
+		// joined error whose Error() spans several.
 		detail := firstLine(out)
 		if detail == "" {
-			detail = err.Error()
+			detail = firstLine(err.Error())
 		}
 		return Status{Provider: name, State: string(StateMissing), Detail: detail}
 	}
@@ -207,13 +216,48 @@ func summarizeGHScopes(s string) string {
 	return ""
 }
 
-// defaultGH invokes the real gh binary.
+// ghCommander builds a token-protected `gh` command. *github.CLI is the
+// production implementation; tests inject a fake. Declared here so this package
+// depends on the one method it needs.
+type ghCommander interface {
+	Command(ctx context.Context, args ...string) (*exec.Cmd, error)
+}
+
+// defaultGHCommander is the process-wide gateway used by defaultGH.
+// Construction does no I/O; the token resolves lazily on first use and is
+// cached, so the (at most three) github provider checks share one resolution.
+var defaultGHCommander ghCommander = github.NewCLI()
+
+// defaultGH invokes the real gh binary through the token-protected gateway
+// (bead pg2-ilzq9): the token is resolved BEFORE the process is created, so
+// `pg-pr auth status` can never hand control to an unauthenticated gh — which
+// would start its own interactive login instead of reporting a state.
 func defaultGH(ctx context.Context, args ...string) (string, string, error) {
-	cmd := exec.CommandContext(ctx, "gh", args...)
+	return runGH(ctx, defaultGHCommander, args...)
+}
+
+// runGH is the injectable body of defaultGH.
+//
+// Token-resolution failure returns before any exec, so gh is never executed;
+// the error wraps github.ErrGHAuthInvalid and names `gh auth login`, which
+// checkGitHub maps to a MISSING status carrying that message.
+func runGH(ctx context.Context, c ghCommander, args ...string) (string, string, error) {
+	cmd, err := c.Command(ctx, args...)
+	if err != nil {
+		return "", "", err
+	}
 	var stdout, stderr strings.Builder
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	err := cmd.Run()
+	err = cmd.Run()
+	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) &&
+			github.IsAuthFailure(exitErr.ExitCode(), stdout.String()+stderr.String()) {
+			err = fmt.Errorf("gh %s: %w: run `gh auth login`: %w",
+				strings.Join(args, " "), err, github.ErrGHAuthInvalid)
+		}
+	}
 	return stdout.String(), stderr.String(), err
 }
 

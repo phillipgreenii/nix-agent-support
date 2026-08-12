@@ -16,7 +16,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -30,9 +29,10 @@ type Provider struct {
 	gh ghRunner
 }
 
-// New constructs a GitHub VCS provider backed by the gh CLI on PATH.
+// New constructs a GitHub VCS provider backed by the gh CLI on PATH, reached
+// only through the token-protected CLI gateway (see ghexec.go).
 func New() *Provider {
-	return &Provider{gh: &cliGHRunner{src: defaultTokenSource()}}
+	return &Provider{gh: NewCLI()}
 }
 
 // NewWithRunner constructs a Provider with an injected ghRunner — used by
@@ -82,12 +82,12 @@ func (r *cliGHRunner) Run(ctx context.Context, args ...string) ([]byte, error) {
 }
 
 func (r *cliGHRunner) RunStdin(ctx context.Context, stdin []byte, args ...string) ([]byte, error) {
-	tok, err := r.token(ctx)
+	// The token-resolution preflight lives in command() (ghexec.go) — the one
+	// choke point every gh invocation in this module goes through.
+	cmd, err := r.command(ctx, args...)
 	if err != nil {
-		return nil, fmt.Errorf("gh %s: %w", strings.Join(args, " "), errors.Join(ErrGHAuthInvalid, err))
+		return nil, err
 	}
-	cmd := exec.CommandContext(ctx, "gh", args...)
-	cmd.Env = envWithGHToken(os.Environ(), tok)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if stdin != nil {
@@ -98,7 +98,8 @@ func (r *cliGHRunner) RunStdin(ctx context.Context, stdin []byte, args ...string
 		if errors.As(err, &exitErr) {
 			st := strings.TrimSpace(stderr.String())
 			if isAuthFailure(exitErr.ExitCode(), st) {
-				return stdout.Bytes(), fmt.Errorf("gh %s: %s: %w", strings.Join(args, " "), st, ErrGHAuthInvalid)
+				return stdout.Bytes(), fmt.Errorf("gh %s: %s: run `gh auth login`: %w",
+					strings.Join(args, " "), st, ErrGHAuthInvalid)
 			}
 			return stdout.Bytes(), fmt.Errorf("gh %s: %w: %s", strings.Join(args, " "), err, st)
 		}

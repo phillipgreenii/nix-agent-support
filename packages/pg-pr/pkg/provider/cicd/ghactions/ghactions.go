@@ -9,6 +9,13 @@
 // the provider needs a way to resolve PR # → head branch. The PRResolver
 // dependency is injectable; production wiring passes the github VCS
 // provider.
+//
+// This package imports the github VCS provider package for ONE thing: its
+// token-protected gh gateway (github.CLI), so this provider cannot exec an
+// unauthenticated gh. That is a compile-time dependency on the gateway only —
+// the PROVIDER relationship stays inverted through the injectable PRResolver
+// (SetPRResolver below), and pkg/provider/vcs/github imports nothing from
+// pkg/provider/cicd, so there is no import cycle.
 package ghactions
 
 import (
@@ -22,6 +29,7 @@ import (
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/provider/cicd"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/provider/vcs/github"
 )
 
 // ProviderName is the registered name of the github-actions provider.
@@ -38,19 +46,55 @@ type ghRunner interface {
 	Run(ctx context.Context, args ...string) (stdout []byte, err error)
 }
 
-// cliGHRunner is the production runner that invokes the real `gh` binary.
-type cliGHRunner struct{}
+// ghCommander builds a token-protected `gh` command. *github.CLI is the
+// production implementation; tests inject a fake. The interface is declared
+// here (rather than imported) so this package depends only on the one method it
+// needs.
+type ghCommander interface {
+	Command(ctx context.Context, args ...string) (*exec.Cmd, error)
+}
 
-func (cliGHRunner) Run(ctx context.Context, args ...string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, "gh", args...)
+// cliGHRunner is the production runner that invokes the real `gh` binary. It
+// never execs gh itself: the command is built by a token-protected commander
+// (bead pg2-ilzq9), so a missing/expired credential fails fast with an
+// ErrGHAuthInvalid-wrapped error instead of letting an unauthenticated gh open
+// its own interactive login.
+type cliGHRunner struct{ gh ghCommander }
+
+// defaultGHCommander is the shared gateway used when no commander is injected.
+// Construction does no I/O; the token resolves lazily and is cached.
+var defaultGHCommander ghCommander = github.NewCLI()
+
+// commander returns the injected commander, defaulting to the shared
+// token-protected gateway so a zero-value runner is still safe.
+func (r cliGHRunner) commander() ghCommander {
+	if r.gh != nil {
+		return r.gh
+	}
+	return defaultGHCommander
+}
+
+func (r cliGHRunner) Run(ctx context.Context, args ...string) ([]byte, error) {
+	cmd, err := r.commander().Command(ctx, args...)
+	if err != nil {
+		// Token resolution failed: no process was created, so gh was never
+		// executed. The error already wraps ErrGHAuthInvalid and names
+		// `gh auth login`.
+		return nil, fmt.Errorf("github-actions: %w", err)
+	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
+			st := strings.TrimSpace(stderr.String())
+			if github.IsAuthFailure(exitErr.ExitCode(), st) {
+				return stdout.Bytes(), fmt.Errorf("gh %s: %s: run `gh auth login`: %w",
+					strings.Join(args, " "), st, github.ErrGHAuthInvalid)
+			}
 			return stdout.Bytes(), fmt.Errorf("gh %s: %w: %s",
-				strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
+				strings.Join(args, " "), err, st)
 		}
 		return stdout.Bytes(), fmt.Errorf("gh %s: %w (is gh on PATH?)",
 			strings.Join(args, " "), err)
@@ -67,7 +111,7 @@ type Provider struct {
 // New constructs a Provider backed by the gh CLI on PATH. The PRResolver
 // is nil here; callers that need PR-scoped ListRuns must use NewWithDeps.
 func New() *Provider {
-	return &Provider{gh: cliGHRunner{}}
+	return &Provider{gh: cliGHRunner{gh: github.NewCLI()}}
 }
 
 // NewWithDeps constructs a Provider with injected dependencies (used in
@@ -75,7 +119,7 @@ func New() *Provider {
 // production).
 func NewWithDeps(gh ghRunner, pr PRResolver) *Provider {
 	if gh == nil {
-		gh = cliGHRunner{}
+		gh = cliGHRunner{gh: github.NewCLI()}
 	}
 	return &Provider{gh: gh, pr: pr}
 }

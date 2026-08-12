@@ -22,6 +22,7 @@ import (
 	"strings"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/provider/vcs/github"
 )
 
 // Options carries injectable dependencies for Detect. Production callers
@@ -72,7 +73,10 @@ func Detect(ctx context.Context, cwd string, opts Options) (*api.BranchInfo, err
 		}
 	}
 
-	// PR lookup is best-effort: any failure -> nil PR.
+	// PR lookup is best-effort: any failure -> nil PR. That deliberately
+	// includes an unresolvable gh credential — `branch detect` still reports the
+	// local git facts, and the GH client refused before executing gh, so no
+	// interactive login can be triggered here (bead pg2-ilzq9).
 	var prNum *int
 	if n, err := opts.GH.PRForBranch(ctx, cwd); err == nil {
 		prNum = n
@@ -172,12 +176,40 @@ type GHClient interface {
 	PRForBranch(ctx context.Context, dir string) (*int, error)
 }
 
+// ghCommander builds a token-protected `gh` command. *github.CLI is the
+// production implementation; tests inject a fake. Declared here so this package
+// depends on the one method it needs.
+type ghCommander interface {
+	Command(ctx context.Context, args ...string) (*exec.Cmd, error)
+}
+
+// defaultGHCommander is the shared gateway used when no commander is injected.
+// Construction does no I/O; the token resolves lazily and is cached.
+var defaultGHCommander ghCommander = github.NewCLI()
+
 // CLIGHClient invokes the `gh` binary. It uses `gh pr view --json
 // number,baseRefName` which infers the PR from the current branch.
-type CLIGHClient struct{}
+//
+// It never execs gh directly: the command is built by a token-protected
+// commander (bead pg2-ilzq9), so a missing/expired credential yields an
+// ErrGHAuthInvalid-wrapped error with no process created — an unauthenticated gh
+// (which would start its own interactive login) is unreachable from here.
+type CLIGHClient struct {
+	// gh is the commander used to build the `gh` invocation. nil selects the
+	// shared default, so the zero value is safe.
+	gh ghCommander
+}
 
 // NewCLIGHClient returns a CLI-backed GHClient.
 func NewCLIGHClient() GHClient { return &CLIGHClient{} }
+
+// commander returns the injected commander or the shared default.
+func (c *CLIGHClient) commander() ghCommander {
+	if c.gh != nil {
+		return c.gh
+	}
+	return defaultGHCommander
+}
 
 // noPRPatterns are substrings that indicate "no PR exists" — not a
 // real error. Empirically `gh pr view` prints "no pull requests found
@@ -189,9 +221,15 @@ var noPRPatterns = []string{
 }
 
 func (c *CLIGHClient) PRForBranch(ctx context.Context, dir string) (*int, error) {
-	cmd := exec.CommandContext(ctx, "gh", "pr", "view",
+	cmd, err := c.commander().Command(ctx, "pr", "view",
 		"--json", "number,baseRefName",
 		"--jq", "{n: .number, b: .baseRefName}")
+	if err != nil {
+		// Token resolution failed: no process was created, so gh was never
+		// executed. The error already wraps ErrGHAuthInvalid and names
+		// `gh auth login`.
+		return nil, err
+	}
 	cmd.Dir = dir
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -205,8 +243,12 @@ func (c *CLIGHClient) PRForBranch(ctx context.Context, dir string) (*int, error)
 		}
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
-			return nil, fmt.Errorf("gh pr view: %s",
-				strings.TrimSpace(stderr.String()))
+			st := strings.TrimSpace(stderr.String())
+			if github.IsAuthFailure(exitErr.ExitCode(), st) {
+				return nil, fmt.Errorf("gh pr view: %s: run `gh auth login`: %w",
+					st, github.ErrGHAuthInvalid)
+			}
+			return nil, fmt.Errorf("gh pr view: %s", st)
 		}
 		return nil, fmt.Errorf("invoke gh: %w (is the gh CLI on PATH?)", err)
 	}
