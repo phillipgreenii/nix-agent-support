@@ -1866,8 +1866,11 @@
 
                   hasSub = needle: haystack: lib.hasInfix needle haystack;
 
-                  # Every sibling option left at its null default. Only noFlicker and the
-                  # promptCacheTtl null-cleanup emit filters in this state.
+                  # Every option left at its default. NOTE this is no longer an
+                  # "everything null" state: cleanupPeriodDays defaults to 365 and so
+                  # emits its assignment here (asserted below — that is the fleet-wide
+                  # retention guarantee). noFlicker and the promptCacheTtl null-cleanup
+                  # are the only other filters emitted.
                   allNull = activationWith { };
 
                   # Positive controls: a set value must emit its assignment.
@@ -1888,6 +1891,13 @@
                   };
                   # sandboxEnabled is guarded by `sandbox == null`, so leave sandbox unset.
                   sandboxEnabledSet = activationWith { sandboxEnabled = true; };
+
+                  # cleanupPeriodDays inverts the sibling convention: non-null DEFAULT
+                  # (so every machine retains history), with null as the opt-out no-op
+                  # (pg2-3sca9). Both halves are pinned so a future "make it consistent
+                  # with its siblings" refactor cannot silently restore the 30-day sweep.
+                  cleanupNull = activationWith { cleanupPeriodDays = null; };
+                  cleanupSet = activationWith { cleanupPeriodDays = 180; };
                 in
                 # null ⇒ neither an assignment nor a del for these top-level keys. The del
                 # forms are the real regression guard (a silent scrub would add them). The
@@ -1917,6 +1927,18 @@
                 assert hasSub ".sandbox = " sandboxSet;
                 assert hasSub ".sandbox.enabled = true" sandboxEnabledSet;
                 assert !(hasSub ".sandbox = " sandboxEnabledSet);
+                # cleanupPeriodDays: the DEFAULT must write 365 with no per-machine
+                # wiring — this is the assertion that keeps the fleet off Claude Code's
+                # 30-day transcript sweep, so it is the one to read first if it fails.
+                assert hasSub ".cleanupPeriodDays = 365" allNull;
+                # An explicit value overrides the default.
+                assert hasSub ".cleanupPeriodDays = 180" cleanupSet;
+                assert !(hasSub ".cleanupPeriodDays = 365" cleanupSet);
+                # Explicit null is the sibling-style no-op: neither an assignment nor a
+                # del, so a hand-set value survives. Matching `.cleanupPeriodDays = `
+                # (space-equals) keeps this from cross-matching the del form.
+                assert !(hasSub ".cleanupPeriodDays = " cleanupNull);
+                assert !(hasSub "del(.cleanupPeriodDays)" cleanupNull);
                 pkgs.runCommand "claude-settings-nullor-noop-ok" { } "touch $out";
 
               # Plan 5: agent-tooling capability/bundle -> feature-flag wiring

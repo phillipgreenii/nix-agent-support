@@ -51,6 +51,14 @@ let
       cfg.sandbox == null && cfg.sandboxEnabled != null
     ) ".sandbox.enabled = ${builtins.toJSON cfg.sandboxEnabled}"
     ++ lib.optional (cfg.theme != null) ".theme = ${builtins.toJSON cfg.theme}"
+    # cleanupPeriodDays is the one option in this list with a NON-NULL default, so
+    # unlike its siblings it emits a filter on every machine that has not opted out
+    # (pg2-3sca9). That is the point: an unset key means Claude Code's 30-day sweep,
+    # and the loss is silent and unrecoverable. `null` is still the sibling-style
+    # no-op escape hatch.
+    ++ lib.optional (
+      cfg.cleanupPeriodDays != null
+    ) ".cleanupPeriodDays = ${builtins.toJSON cfg.cleanupPeriodDays}"
     ++ lib.mapAttrsToList (name: val: ".env[\"${name}\"] = ${builtins.toJSON val}") cfg.env
     ++ [
       (
@@ -296,6 +304,45 @@ in
         pick a theme with `/theme`, and there is no per-key escape hatch for
         top-level settings, so a scrub-on-null would fight an interactive theme
         choice.
+      '';
+    };
+
+    cleanupPeriodDays = lib.mkOption {
+      type = lib.types.nullOr lib.types.ints.positive;
+      default = 365;
+      example = 180;
+      description = ''
+        How long Claude Code retains local chat transcripts, by LAST ACTIVITY date,
+        written as `.cleanupPeriodDays` in `~/.claude/settings.json`. Claude Code's
+        own default is 30 days.
+
+        This is the ONLY option here with a non-null default, and the deviation is
+        deliberate (pg2-3sca9). The sibling top-level options default to `null`
+        because Claude Code writes them itself at runtime (`/theme`,
+        `/statusline`), so a default would fight an interactive choice. Nothing in
+        Claude Code writes `.cleanupPeriodDays`, so there is no interactive choice
+        to fight — and leaving it unset is not neutral: it silently deletes
+        transcript history. Measured on the darwin machine 2026-08-12: 686
+        transcripts aged 0-30d and ZERO older, oldest surviving file exactly 30
+        days back. With no APFS local snapshot and no Time Machine destination,
+        that data is unrecoverable. A non-null default is therefore what makes
+        every machine that enables claude-code retain history with no per-machine
+        wiring.
+
+        The sweep covers more than the transcripts: `~/.claude/projects` (including
+        each session's `subagents/` and `tool-results/`), plus `~/.claude/tasks/`,
+        `~/.claude/shell-snapshots/` and `~/.claude/backups/`.
+
+        Disk cost scales linearly and is worth checking before raising this: 1.5GB
+        per 30-day window measured on the darwin machine (~50MB/day), so 365 is
+        ~18GB. A very large value is NOT free — 3650 would be ~180GB.
+
+        The type is `ints.positive` because Claude Code REJECTS
+        `cleanupPeriodDays: 0` with a validation error (it once silently disabled
+        persistence), so 0 is caught at eval rather than breaking the app.
+
+        `null` is the sibling-style opt-out no-op: no filter is emitted, so a value
+        a previous generation wrote is left in place, not deleted.
       '';
     };
 
