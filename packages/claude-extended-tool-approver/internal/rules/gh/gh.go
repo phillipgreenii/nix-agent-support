@@ -29,12 +29,21 @@ var readOnlyRelease = map[string]bool{
 	"view": true, "list": true,
 }
 
-var modifyingPR = map[string]bool{
-	"create": true,
-}
+// There is no modifyingPR map. `gh pr create` used to be its only member, at Ask; it now
+// has a draft-aware verdict of its own in pr.go (operator ruling pg2-4yy4r item 2), and a
+// one-entry map whose entry moved out would only invite the next modifying `pr`
+// subcommand to be added where nothing reads it.
 
 var modifyingIssue = map[string]bool{
 	"create": true,
+}
+
+// prCreateSubcommands are the spellings that CREATE a pull request. `new` is a
+// documented ALIAS of `create` (`gh pr create --help`, ALIASES section) and is live —
+// measured on gh 2.97.0, 2026-08-12, `gh pr new -d` parses exactly as `gh pr create -d`.
+// Gating only `create` would leave the verdict one synonym away from a bypass.
+var prCreateSubcommands = map[string]bool{
+	"create": true, "new": true,
 }
 
 // BranchResolver looks up branch context for runtime decisions.
@@ -69,11 +78,16 @@ func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 			continue
 		}
 		resource, subcmd := "", ""
+		// rest are the tokens AFTER the `<resource> <subcommand>` pair — the argv slice
+		// every flag test below is asked about, so a verdict cannot be changed by the
+		// subcommand words themselves and is independent of where in `rest` a flag sits.
+		var rest []string
 		if len(pc.Args) >= 1 {
 			resource = pc.Args[0]
 		}
 		if len(pc.Args) >= 2 {
 			subcmd = pc.Args[1]
+			rest = pc.Args[2:]
 		}
 		if resource == "status" {
 			return hookio.RuleResult{
@@ -100,13 +114,19 @@ func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 			}
 		}
 		if resource == "pr" && subcmd == "merge" {
-			if hasFlag(pc.Args, "--auto") {
-				// Intentionally Abstain — NOT a bypass. PRs open as draft, so --auto cannot
-				// merge until a human un-drafts (the real gate); toggling --auto also refreshes
-				// the merge-commit message from the current PR title/body. Do not change to Reject.
+			if v, ok := lastLongFlag(rest, "auto"); ok && boolFlagIsTrue(v) {
+				// Intentionally Abstain — NOT a bypass, and the gate it defers to is now REAL.
+				// --auto cannot merge while the PR is a draft, and since pg2-4yy4r item 2 the
+				// un-drafting is ENFORCED as a human step: non-draft creation is Rejected and
+				// `gh pr ready` Asks (see pr.go). This comment previously ASSUMED that gate —
+				// it did not exist, because `gh pr ready` was ungated and emitted `{}`, so the
+				// chain ran end to end un-prompted. Abstain also keeps the second reason
+				// intact: toggling --auto refreshes the merge-commit message from the current
+				// PR title/body. Do not change to Reject; do not weaken the `gh pr ready` Ask
+				// without moving this branch with it, because the two together ARE the gate.
 				return hookio.RuleResult{
 					Decision: hookio.Abstain,
-					Reason:   "gh pr merge --auto: allowed (draft-gated; --auto refreshes merge message from PR title/body)",
+					Reason:   "gh pr merge --auto: allowed (cannot merge until `gh pr ready`, which Asks; --auto refreshes merge message from PR title/body)",
 					Module:   r.Name(),
 				}
 			}
@@ -116,12 +136,15 @@ func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 				Module:   r.Name(),
 			}
 		}
-		if modifyingPR[subcmd] && resource == "pr" {
-			return hookio.RuleResult{
-				Decision: hookio.Ask,
-				Reason:   "modifying gh pr command",
-				Module:   r.Name(),
-			}
+		// The draft-first PR gate (pg2-25oru). Both branches live in pr.go; they are
+		// tested here rather than under readOnlyPR/modifyingIssue because `create` and
+		// `ready` are the two acts the draft-first ruling keys on, and `ready` reached the
+		// final Abstain before this existed.
+		if resource == "pr" && prCreateSubcommands[subcmd] {
+			return r.prCreateVerdict(rest)
+		}
+		if resource == "pr" && subcmd == "ready" {
+			return r.prReadyVerdict(rest)
 		}
 		if modifyingIssue[subcmd] && resource == "issue" {
 			return hookio.RuleResult{
@@ -219,14 +242,13 @@ func isGhExecutable(exec string) bool {
 	return exec == "gh" || filepath.Base(exec) == "gh"
 }
 
-func hasFlag(args []string, flag string) bool {
-	for _, a := range args {
-		if a == flag {
-			return true
-		}
-	}
-	return false
-}
+// There is no local hasFlag. It was an EXACT-TOKEN test, which is the wrong shape for
+// every flag question this rule asks: it misses a short form (`-d` for `--draft`), a
+// clustered short (`-dw`), and an `=`-glued value (`--draft=false`, `--auto=false` — the
+// latter being an IMMEDIATE merge that must not reach the --auto Abstain). Flag matching
+// now goes through cmdparse.HasShortFlag / cmdparse.HasLongFlag, with the arity and
+// precedence answers those primitives push to their caller supplied in pr.go
+// (prCreateShortFlagTokens, lastLongFlag).
 
 // extractRunID returns the first positional (non-flag) argument after the
 // "rerun" subcommand in a gh run rerun invocation. Returns "" if not found.

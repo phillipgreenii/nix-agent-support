@@ -108,16 +108,29 @@ existing **open** PR whose head is `<FB>`, rather than trusting a caller-supplie
 `open_pr` value (it may be stale by the time this handler runs):
 
 - **`gh` (GitHub CLI) present:**
+
   ```bash
   gh pr view "$FB" --json url,state,number
   ```
+
   A found PR in `state: "OPEN"` means PR-1's push already updated it — report
   `pr-updated` with its `url`. Nothing found (or a non-open state, e.g. it was
   closed/merged and this is fresh work) → open one:
+
   ```bash
-  gh pr create --head "$FB" --base "$PRIMARY" --fill
+  gh pr create --draft --head "$FB" --base "$PRIMARY" --fill
   ```
+
   and report `pr-opened` with the printed URL.
+
+  `--draft` is **REQUIRED**, not a preference: this workspace lands draft first, and
+  the `claude-extended-tool-approver` PreToolUse hook **hard-rejects** a `gh pr create`
+  without it (operator ruling 2026-07-30) — a Reject is not overridable in-session, so
+  a non-draft spelling does not prompt, it FAILS with a message naming this two-step.
+  Promoting the PR to ready is the second step and a **human** one (`gh pr ready`,
+  which prompts); this handler MUST NOT run it, for the same reason PR-3 forbids the
+  merge verbs.
+
 - **`pg-pr` present (no `gh`):** consult its own listing (e.g. `pg-pr pr list
 --json`, filtered to a head of `<FB>`) for an existing open PR. Found → report
   `pr-updated`. Not found → `pg-pr pr create --head "$FB" --base "$PRIMARY" --title

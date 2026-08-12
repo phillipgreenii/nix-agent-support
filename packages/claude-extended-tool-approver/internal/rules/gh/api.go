@@ -14,7 +14,8 @@ import (
 // method, which made two deliberate sibling controls in Evaluate decorative:
 // measured `allow` on 2026-07-30 for `gh api --method PUT repos/o/r/pulls/5/merge`
 // (the operation `gh pr merge` REJECTS) and for `gh api -X POST repos/o/r/pulls
-// -f title=x` (the operation modifyingPR gates at Ask).
+// -f title=x` (the operation `gh pr create` gated at Ask on that date; since
+// pg2-25oru the porcelain is draft-aware — Approve with `--draft`, Reject without).
 //
 // SCANNER CLASS — everything here is TOKEN-LEVEL and POST-unquote: it consumes
 // cmdparse.ParsedCommand.Args, never raw command text, and holds no quote state.
@@ -94,14 +95,25 @@ import (
 //
 // EVERY OTHER MUTATION is ASK — the conservative floor. Ask and not Approve because
 // `gh api` can perform any write the token permits, and the blanket Approve was
-// already measured bypassing modifyingPR's Ask on `gh pr create` (`gh api -X POST
-// repos/o/r/pulls -f title=x` measured `allow`). Ask and not Reject because `gh
-// api` has no single operation to rule on: it is the whole REST surface, most of it
-// unremarkable, and a Reject would be a blanket prohibition on writing to GitHub
-// that no operator ruling covers. Ask lands each write in front of the person who
-// can judge it, and matches the verdict the equivalent porcelain (`gh pr create`,
-// `gh issue create`) already carries — which is the property that makes the two
-// consistent rather than one being the other's bypass.
+// already measured bypassing the Ask that `gh pr create` carried at the time
+// (`gh api -X POST repos/o/r/pulls -f title=x` measured `allow`). Ask and not Reject
+// because `gh api` has no single operation to rule on: it is the whole REST surface,
+// most of it unremarkable, and a Reject would be a blanket prohibition on writing to
+// GitHub that no operator ruling covers. Ask lands each write in front of the person
+// who can judge it, and matches the verdict the equivalent porcelain
+// (`gh issue create`) carries — which is the property that makes the two consistent
+// rather than one being the other's bypass.
+//
+// PR CREATION IS NOW THE ONE PLACE THE TWO DIVERGE, DELIBERATELY (pg2-25oru). The
+// porcelain `gh pr create` is Reject without `--draft`, while `POST .../pulls` stays
+// at this Ask, because GitHub's `draft` is a BODY PARAMETER and parseGhAPICall reads
+// body parameters only as a presence boolean, never their values — `--input
+// payload.json` hides them entirely. Following the porcelain to Reject would
+// therefore also reject `-f draft=true`, the BLESSED create, with no in-session
+// override. The residual gap is real and named rather than papered over: Ask is
+// auto-accepted in an auto-approving session, so this path can still create a
+// non-draft PR the porcelain would refuse. TestGH_ApiCreate_NotWeakerThanDraftCreate
+// pins the half that still holds.
 //
 // WHAT WOULD JUSTIFY CHANGING IT: for the merge Reject, only a new operator ruling
 // on immediate merges — the same ruling that governs the `gh pr merge` branch it
@@ -109,7 +121,10 @@ import (
 // specific endpoint class is read-only in practice (then narrow it by MEASURING the
 // method, not by re-widening the branch), or an operator ruling extending the merge
 // Reject to a broader endpoint set (`/merges`, `merge-upstream`, a `graphql`
-// mutation) — see IsPullRequestMerge for why those are Ask today.
+// mutation) — see IsPullRequestMerge for why those are Ask today. For the PR-create
+// divergence, a draft-body-parameter reader (the `-f`/`-F`/`--field`/`--raw-field`
+// values, a fail-closed reading of `--input`, and the `graphql`
+// createPullRequest mutation) is the prerequisite, not a ruling.
 func (r *Rule) apiVerdict(args []string) hookio.RuleResult {
 	call := parseGhAPICall(args)
 	if !call.IsMutating() {

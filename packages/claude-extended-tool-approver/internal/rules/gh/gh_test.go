@@ -3,6 +3,7 @@ package gh
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
@@ -54,8 +55,10 @@ func TestGH_ReadOnly_Approve(t *testing.T) {
 }
 
 func TestGH_Modifying_Ask(t *testing.T) {
+	// `gh pr create` used to belong here. It has a draft-aware verdict of its own since
+	// pg2-25oru (Approve with --draft, Reject without), pinned by the draft-first
+	// fixtures below; `gh issue create` is deliberately untouched by that ruling.
 	modifying := []string{
-		"gh pr create",
 		"gh issue create",
 	}
 	r := New(nil)
@@ -112,6 +115,194 @@ func TestGH_PrMergeAutoMerge_Reject(t *testing.T) {
 	got := r.Evaluate(input)
 	if got.Decision != hookio.Reject {
 		t.Errorf("gh pr merge --auto-merge: got %s, want reject", got.Decision)
+	}
+}
+
+// TestGH_DraftFirstRuledTable pins EVERY row of the operator ruling VERBATIM as the
+// ruling table wrote it (2026-07-30, pg2-4yy4r item 2; implemented as pg2-25oru). The
+// last two rows are the UNCHANGED ones and belong here precisely because they are
+// unchanged: the `--auto` Abstain is only defensible while the `gh pr ready` Ask above it
+// holds, so a change to either must be read against the whole table.
+func TestGH_DraftFirstRuledTable(t *testing.T) {
+	tests := []struct {
+		cmd  string
+		want hookio.Decision
+	}{
+		{"gh pr create --draft", hookio.Approve},
+		{"gh pr create", hookio.Reject},
+		{"gh pr create --web", hookio.Approve},
+		{"gh pr ready", hookio.Ask},
+		{"gh pr ready --undo", hookio.Approve},
+		{"gh pr merge --auto", hookio.Abstain},
+		{"gh pr merge", hookio.Reject},
+	}
+	for _, tt := range tests {
+		got := evalGH(t, tt.cmd)
+		if got.Decision != tt.want {
+			t.Errorf("cmd %q: got %s (%s), want %s", tt.cmd, got.Decision, got.Reason, tt.want)
+		}
+	}
+}
+
+// TestGH_PrCreateDraft_Approve pins the draft spellings that MUST reach Approve. Every
+// row was measured accepted by gh 2.97.0 on 2026-08-12 (see pr.go's spelling table): the
+// short `-d` exists, so an exact-token `--draft` test would REJECT the blessed path;
+// clusters are one token; and `-dtx` proves the arity truncation keeps a draft letter
+// that sits BEFORE a value-taking one.
+func TestGH_PrCreateDraft_Approve(t *testing.T) {
+	cmds := []string{
+		"gh pr create --draft",
+		"gh pr create -d",
+		"gh pr create -dw",  // clustered draft + web
+		"gh pr create -wd",  // ... in the other order
+		"gh pr create -df",  // clustered draft + fill
+		"gh pr create -dtx", // cluster: -d boolean, then -t with value "x"
+		"gh pr create --draft=true",
+		"gh pr create --draft=1",
+		"gh pr create --fill --draft",                        // flag AFTER another flag
+		"gh pr create --title x --body y --draft",            // draft LAST, after values
+		"gh pr create --draft --title x --body y",            // draft FIRST
+		"gh pr create -t 'add d' --draft",                    // a `d` in a separated value
+		"gh pr create --base main --head feat -d",            // short LAST
+		"gh pr new --draft",                                  // the `new` alias
+		"gh pr new -d",                                       //
+		"gh pr create --draft --reviewer me --label bug -dw", // repeated, mixed forms
+	}
+	for _, cmd := range cmds {
+		got := evalGH(t, cmd)
+		if got.Decision != hookio.Approve {
+			t.Errorf("cmd %q: got %s (%s), want approve — a draft create is the blessed landing step", cmd, got.Decision, got.Reason)
+		}
+	}
+}
+
+// TestGH_PrCreateNonDraft_Reject pins the non-draft spellings that MUST reach Reject.
+// The `-tdocs` / `-Rme/draft-tool` rows are the ARITY trap: an arity-blind letter scan
+// finds a `d` inside a VALUE and would approve a mergeable PR (measured: `-tdocs` sets
+// title "docs" and is not a draft). `--draft=false` / `--draft=0` are the pflag negation,
+// and `--draft --draft=false` is pflag's last-one-wins, which cmdparse.HasLongFlag alone
+// reads the other way round.
+func TestGH_PrCreateNonDraft_Reject(t *testing.T) {
+	cmds := []string{
+		"gh pr create",
+		"gh pr create --fill",
+		"gh pr create --title x --body y",
+		"gh pr create --draft=false",
+		"gh pr create --draft=0",
+		"gh pr create --draft=f",
+		"gh pr create --title x --draft=false", // negation AFTER a value flag
+		"gh pr create --draft --draft=false",   // pflag last-one-wins: NON-draft
+		"gh pr create -tdocs --fill",           // `d` inside the -t VALUE
+		"gh pr create -tdraft-support",         // ... spelling the whole word
+		"gh pr create -Rme/draft-tool --fill",  // `d` inside the inherited -R VALUE
+		"gh pr create -bfixed --title x",       // `d` inside the -b VALUE
+		"gh pr create -t 'add d thing' --fill", // ... in a SEPARATED value
+		"gh pr create --head feat --base main", //
+		"gh pr create -- --draft",              // after end-of-options it is not a flag
+		"gh pr new",                            // the `new` alias
+		"gh pr new --fill",                     //
+	}
+	for _, cmd := range cmds {
+		got := evalGH(t, cmd)
+		if got.Decision != hookio.Reject {
+			t.Errorf("cmd %q: got %s (%s), want reject — a non-draft PR is immediately mergeable", cmd, got.Decision, got.Reason)
+		}
+	}
+}
+
+// TestGH_PrCreateNonDraft_ReasonNamesRemedy pins the acceptance criterion on the REASON
+// text, not just the level: a Reject is not user-overridable in-session, so the message
+// is the only thing that tells the caller what to run instead. It must name the
+// draft-first flow and BOTH halves of the two-step remedy.
+func TestGH_PrCreateNonDraft_ReasonNamesRemedy(t *testing.T) {
+	reason := evalGH(t, "gh pr create --fill").Reason
+	for _, want := range []string{"DRAFT FIRST", "gh pr create --draft", "gh pr ready"} {
+		if !strings.Contains(reason, want) {
+			t.Errorf("reason %q does not name %q", reason, want)
+		}
+	}
+}
+
+// TestGH_PrCreateWeb_Approve pins the `--web` row. The CLI does not create the PR — the
+// browser opens and the human picks draft-or-not — so this is human-in-the-loop by
+// construction. This row was NOT explicitly ruled; see pr.go's WEB paragraph.
+func TestGH_PrCreateWeb_Approve(t *testing.T) {
+	cmds := []string{
+		"gh pr create --web",
+		"gh pr create -w",
+		"gh pr create --fill --web",        // flag AFTER another flag
+		"gh pr create --title x --web",     //
+		"gh pr create --web --draft=false", // explicit non-draft, but still the browser
+		"gh pr new -w",                     // the `new` alias
+	}
+	for _, cmd := range cmds {
+		got := evalGH(t, cmd)
+		if got.Decision != hookio.Approve {
+			t.Errorf("cmd %q: got %s (%s), want approve — --web defers the draft choice to a human in the browser", cmd, got.Decision, got.Reason)
+		}
+	}
+}
+
+// TestGH_PrReady_Ask is the row the whole design rests on: before pg2-25oru `gh pr ready`
+// matched no branch and emitted `{}`, so create -> ready -> `merge --auto` ran end to end
+// with no person in it. `--undo=false` is a mark-ready in pflag terms and must NOT reach
+// the --undo Approve.
+func TestGH_PrReady_Ask(t *testing.T) {
+	cmds := []string{
+		"gh pr ready",
+		"gh pr ready 123",
+		"gh pr ready feature-branch",
+		"gh pr ready https://github.com/o/r/pull/123",
+		"gh pr ready --repo o/r",
+		"gh pr ready --undo=false",
+		"gh pr ready --undo=0",
+		"gh pr ready 123 --undo=false", // flag AFTER the positional
+		"gh pr ready --undo --undo=false",
+		"gh pr ready -- --undo", // after end-of-options it is not a flag
+	}
+	for _, cmd := range cmds {
+		got := evalGH(t, cmd)
+		if got.Decision != hookio.Ask {
+			t.Errorf("cmd %q: got %s (%s), want ask — marking ready is the single point at which a PR becomes mergeable", cmd, got.Decision, got.Reason)
+		}
+	}
+}
+
+// TestGH_PrReadyUndo_Approve pins the reverse direction: `--undo` moves the PR AWAY from
+// mergeable, which is where the draft-first flow wants it, and it is the documented
+// repair when a PR came back non-draft.
+func TestGH_PrReadyUndo_Approve(t *testing.T) {
+	cmds := []string{
+		"gh pr ready --undo",
+		"gh pr ready --undo 123",
+		"gh pr ready 123 --undo", // flag AFTER the positional
+		"gh pr ready --undo=true",
+		"gh pr ready --repo o/r --undo",
+		"gh pr ready --undo=false --undo", // pflag last-one-wins: back to draft
+	}
+	for _, cmd := range cmds {
+		got := evalGH(t, cmd)
+		if got.Decision != hookio.Approve {
+			t.Errorf("cmd %q: got %s (%s), want approve — --undo converts back to draft", cmd, got.Decision, got.Reason)
+		}
+	}
+}
+
+// TestGH_PrMergeAutoNegated_Reject pins the spelling the deleted exact-token hasFlag got
+// right only by accident and the new matcher must get right on purpose:
+// `gh pr merge --auto=false` is an IMMEDIATE merge (pflag bool), so it must reach the
+// Reject and not the --auto Abstain. `gh pr merge --auto=true` is the converse — a real
+// --auto that an exact-token test would have Rejected.
+func TestGH_PrMergeAutoNegated_Reject(t *testing.T) {
+	for _, cmd := range []string{"gh pr merge --auto=false", "gh pr merge --auto=0", "gh pr merge --auto --auto=false"} {
+		if got := evalGH(t, cmd); got.Decision != hookio.Reject {
+			t.Errorf("cmd %q: got %s (%s), want reject — an explicitly false --auto merges NOW", cmd, got.Decision, got.Reason)
+		}
+	}
+	for _, cmd := range []string{"gh pr merge --auto=true", "gh pr merge --auto=1", "gh pr merge 123 --auto"} {
+		if got := evalGH(t, cmd); got.Decision != hookio.Abstain {
+			t.Errorf("cmd %q: got %s (%s), want abstain — this IS --auto", cmd, got.Decision, got.Reason)
+		}
 	}
 }
 
@@ -260,11 +451,13 @@ func TestGH_ApiPullRequestMerge_Reject(t *testing.T) {
 
 // TestGH_ApiOtherMutation_Ask pins the PATH-BLIND floor: every mutation that is not
 // the pull-request merge gets the conservative Ask, matching the verdict the
-// equivalent porcelain already carries (`gh pr create`, `gh issue create` are Ask).
+// equivalent porcelain already carries (`gh issue create` is Ask; `gh pr create` was
+// too until pg2-25oru made it draft-aware — see apiVerdict's PR-CREATION paragraph for
+// why the api path deliberately stays at Ask rather than following it to Reject).
 // The `pulls` row is the one the blanket approval measurably bypassed.
 func TestGH_ApiOtherMutation_Ask(t *testing.T) {
 	cmds := []string{
-		"gh api -X POST repos/o/r/pulls -f title=x", // probed VERBATIM; bypassed modifyingPR's Ask
+		"gh api -X POST repos/o/r/pulls -f title=x", // probed VERBATIM; bypassed the Ask `gh pr create` carried then
 		"gh api -X PATCH repos/o/r/pulls/5 -f draft=false",
 		"gh api repos/o/r/issues -f title=x",
 		"gh api graphql -f query=mutation{}",
@@ -313,15 +506,33 @@ func TestGH_ApiMerge_MirrorsPrMergeVerdict(t *testing.T) {
 	}
 }
 
-// TestGH_ApiCreate_MirrorsPrCreateVerdict is the same consistency guard for the
-// OTHER control the blanket approval bypassed: `gh pr create` is an Ask, so creating
-// a PR through `gh api` must be at least an Ask.
-func TestGH_ApiCreate_MirrorsPrCreateVerdict(t *testing.T) {
-	porcelain := evalGH(t, "gh pr create")
+// TestGH_ApiCreate_NotWeakerThanDraftCreate is the same consistency guard for the OTHER
+// control the blanket approval bypassed, RESTATED where pg2-25oru moved the porcelain.
+//
+// It used to compare against `gh pr create` directly, when that was an Ask. Since
+// pg2-25oru the porcelain has TWO verdicts — Approve with --draft, Reject without — and
+// `gh api -X POST repos/o/r/pulls` cannot be sorted between them: GitHub's `draft` is a
+// BODY PARAMETER, and parseGhAPICall reads body parameters only as a presence boolean,
+// never their values (`--input file.json` hides them entirely). So the guard is stated as
+// what still holds: the api path must be STRICTLY MORE restrictive than the blessed draft
+// create, and at least the Ask floor pg2-cl0v2 established.
+//
+// THE RESIDUAL GAP IS DELIBERATE AND NAMED: Ask is auto-accepted in an auto-approving
+// session, so `gh api -X POST repos/o/r/pulls` can still create a NON-DRAFT PR that
+// `gh pr create` would Reject. Following the porcelain to Reject was not done here
+// because it would also reject `-f draft=true`, the blessed create, with no in-session
+// override. Closing it needs a draft-body-parameter reader (`-f`/`-F`/`--field`/
+// `--raw-field` values, plus a fail-closed reading of `--input`) and the matching
+// `graphql` mutation case — its own change, not a tidy-up.
+func TestGH_ApiCreate_NotWeakerThanDraftCreate(t *testing.T) {
+	draftPorcelain := evalGH(t, "gh pr create --draft")
 	viaAPI := evalGH(t, "gh api -X POST repos/o/r/pulls -f title=x")
-	if viaAPI.Decision < porcelain.Decision {
-		t.Errorf("gh api PR create is WEAKER than gh pr create: api=%s (%s) vs porcelain=%s (%s)",
-			viaAPI.Decision, viaAPI.Reason, porcelain.Decision, porcelain.Reason)
+	if viaAPI.Decision <= draftPorcelain.Decision {
+		t.Errorf("gh api PR create is not MORE restrictive than the blessed draft create: api=%s (%s) vs porcelain=%s (%s)",
+			viaAPI.Decision, viaAPI.Reason, draftPorcelain.Decision, draftPorcelain.Reason)
+	}
+	if viaAPI.Decision < hookio.Ask {
+		t.Errorf("gh api PR create is below the pg2-cl0v2 Ask floor: got %s (%s)", viaAPI.Decision, viaAPI.Reason)
 	}
 }
 
