@@ -80,51 +80,215 @@ import (
 // and the measurement table above it in gh.go. The verdicts here are unchanged by that
 // work: TestGH_GlobalFlagBeforeCommandPath pins each spelling to the SAME verdict as its
 // plain form, so a regression in the extraction fails as a draft-first failure too.
+//
+// A SEPARATED VALUE THAT LOOKS LIKE A FLAG IS ALSO CLOSED (pg2-ylrda), and it is why arity
+// is now MODELED here rather than only truncated. pg2-25oru handled a value GLUED to a short
+// (`-tdocs`) by truncating the cluster, but not a value passed as its OWN argv token, so
+// every gate below could be fed its own trigger word as somebody else's value:
+//
+//	gh pr create --title -d --body y   gh binds `-d` as the TITLE and creates a NON-DRAFT
+//	                                   PR, yet a bare `-d` token was still in the args this
+//	                                   file scanned -> APPROVE. A false Approve on exactly
+//	                                   the command pg2-25oru made a Reject, and worse than
+//	                                   the Abstain fall-through pg2-by1ij closed: an Abstain
+//	                                   at least lands on a lower floor, whereas this ASSERTS
+//	                                   the blessed verdict for the forbidden action.
+//	gh pr create -t -d                 the same defect through the SHORT spelling.
+//	gh pr ready -R --undo              `--undo` becomes the REPO and the PR is marked READY,
+//	                                   yet the Ask that is this flow's single human gate was
+//	                                   answered with the `--undo` Approve.
+//	gh pr merge -b --auto              `--auto` becomes the merge BODY and the merge is
+//	                                   IMMEDIATE, yet the branch in gh.go took the --auto
+//	                                   Abstain instead of its Reject.
+//
+// `gh issue create` is the one gated branch this class CANNOT reach: its verdict is a flat
+// Ask that reads no flag at all, so no value can move it. TestGH_SeparatedValue_IssueCreate
+// pins that, so the day that branch becomes flag-aware the gap is already visible.
+//
+// MEASURED, gh 2.97.0 (nixpkgs), 2026-08-12, outside a git repository. Each binding is proven
+// by a MUTUAL-EXCLUSION message gh emits only while BOTH tokens are still flags — "the
+// `--draft` flag is not supported with `--web`" for `gh pr create`, and "specify only one of
+// `--auto`, `--disable-auto`, or `--admin`" for `gh pr merge`. Its ABSENCE is the evidence
+// that the token was swallowed as a value:
+//
+//	gh pr create --title -d --web         -> no draft conflict: `-d` is the TITLE
+//	gh pr create -t -d --web              -> no draft conflict: likewise via the short
+//	gh pr create --title x -d --web       -> DRAFT CONFLICT: a real -d after a consumed value
+//	gh pr create -t -d --draft --web      -> DRAFT CONFLICT: `-t` ate `-d`, `--draft` is real
+//	gh pr create --title=-d --web         -> no draft conflict: '='-glued binds in ONE token
+//	gh pr create -td --web                -> no draft conflict: title "d", GLUED to the short
+//	gh pr create -dt --web                -> `must provide --title and --body`: `-d` IS draft
+//	                                         and the cluster's last letter ate `--web`
+//	gh pr create --title -- --draft --web -> DRAFT CONFLICT: pflag hands `--` to the flag as
+//	                                         its VALUE, so it is NOT a terminator there
+//	gh pr create -t -- --draft --web      -> DRAFT CONFLICT: same for a bare short
+//	gh pr create -- -d --web              -> `unknown arguments ["-d" "--web"]`: a REAL `--`
+//	gh pr ready --repo / -R               -> `flag needs an argument: --repo` / `'R' in -R`
+//	gh pr ready --repo --undo             -> that error is GONE: `--undo` is the repo value
+//	gh pr merge -b --admin --disable-auto -> no auto conflict: `-b` ate `--admin`
+//	gh pr merge -F --admin --disable-auto -> `open --admin: no such file or directory`
+//	gh pr merge -d --admin --disable-auto -> AUTO CONFLICT: `-d` is boolean, ate nothing
+//	gh issue create --title --web         -> `must provide --title and --body`: `--web` is
+//	                                         the title, and the verdict is Ask regardless
 
-// prCreateValueShorts are the `gh pr create` short flags that CONSUME A VALUE, read off
-// `gh pr create --help` on gh 2.97.0 (2026-08-12): -a/--assignee, -B/--base, -b/--body,
-// -F/--body-file, -H/--head, -l/--label, -m/--milestone, -p/--project, -r/--reviewer,
-// -T/--template, -t/--title, plus the inherited -R/--repo.
+// FLAG ARITY FOR THE GATED `gh pr` SUBCOMMANDS (pg2-ylrda)
 //
-// The BOOLEAN shorts — -d/--draft, -e/--editor, -f/--fill, -w/--web — are deliberately
-// absent: those are the letters this rule asks about, and a boolean short carries no
-// value for a letter to hide in.
-const prCreateValueShorts = "aBbFHlmprTtR"
+// Each table below enumerates the flags that consume NO value; EVERY OTHER flag — including
+// one the table has never heard of — is treated as consuming the following argv token. That
+// is the SAME polarity gh.go's ghNoValueLongFlags argues for, and it is restated here because
+// the two error directions are again unequal, in the direction this bead is about:
+//
+//   - A value-taking flag MISSING from a value-taking list leaves its VALUE rescanned as a
+//     flag, which is the false Approve above. Enumerating the value-taking side therefore
+//     FAILS OPEN the moment gh adds a flag: `gh pr create --new-thing -d` would read as a
+//     draft while gh titled nothing and created a mergeable PR.
+//   - A no-value flag MISSING from a NO-VALUE list consumes one token too many, so a real
+//     `-d` / `--undo` / `--auto` can be swallowed. That loses a POSITIVE signal, which for
+//     every gate here moves the verdict toward the STRICTER side — Reject instead of the
+//     draft Approve, Ask instead of the `--undo` Approve, Reject instead of the `--auto`
+//     Abstain. Never past a gate.
+//
+// So an unknown flag defaults to value-taking on purpose, and a gh that grows a new BOOLEAN
+// flag is the only change needing a re-measurement to stay ACCURATE — as opposed to safe.
+type ghFlagArity struct {
+	// longs are long-flag names WITHOUT the leading `--` that consume no value.
+	longs map[string]bool
+	// shorts are short-flag letters that consume no value. A nil map means the subcommand
+	// has no boolean short at all, so every short letter is value-taking.
+	shorts map[byte]bool
+}
 
-// prCreateShortFlagTokens returns args with every short-flag cluster TRUNCATED at its
-// first value-taking letter (prCreateValueShorts). Everything after that letter is the
-// option's VALUE, not more flag letters, so scanning it would let a value that happens
-// to contain a `d` or a `w` manufacture a false DRAFT signal — and here that error
-// direction is the unsafe one: it would APPROVE a non-draft create. Measured,
-// gh 2.97.0, 2026-08-12: `gh pr create -tdocs` sets title "docs" and is NOT a draft,
-// yet an arity-blind letter scan sees the `d`.
+// prCreateArity is `gh pr create`'s (and its `new` alias's) no-value flag set, enumerated from
+// the FLAGS and INHERITED FLAGS sections of `gh pr create --help` on gh 2.97.0 (nixpkgs) and
+// CONFIRMED PER FLAG by running `gh pr create <flag> --draft --web` outside a git repository,
+// 2026-08-12: gh answers "the `--draft` flag is not supported with `--web`" iff the `--draft`
+// token is still a FLAG. Every entry below produced that answer. Every OTHER flag in the help
+// swallowed the token instead, i.e. is value-taking: -a/--assignee, -B/--base, -b/--body,
+// -F/--body-file, -H/--head, -l/--label, -m/--milestone, -p/--project, --recover,
+// -r/--reviewer, -T/--template, -t/--title, and the inherited -R/--repo.
 //
-// TRUNCATION IS LOSSLESS for what this rule asks, by the same reading git's
-// pushShortFlagTokens/branchShortFlagTokens record: a `d` or `w` AFTER a value-taking
-// letter is part of that letter's value, so nothing that really requests draft or web
-// is dropped, while `-dtx` and `-wt"title"` carry their letter BEFORE the truncation
-// point and survive (measured: `-dtx` is draft plus title "x").
+// RE-MEASURE, DO NOT RE-READ: the help's argument column is not sufficient on its own, and
+// the probe must match gh's draft line EXACTLY. `--reviewer` was first mis-classified as
+// boolean here because its own conflict message ("the `--reviewer` flag is not supported with
+// `--web`") matched a looser test. WHAT TO RE-MEASURE when gh changes: any flag that moved
+// INTO this set, which would rescan its value and restore the pg2-ylrda defect; and any NEW
+// boolean flag, whose absence costs only accuracy (see the block above).
+var prCreateArity = ghFlagArity{
+	longs: map[string]bool{
+		"draft": true, "dry-run": true, "editor": true, "fill": true,
+		"fill-first": true, "fill-verbose": true, "no-maintainer-edit": true,
+		"web": true, "help": true,
+	},
+	shorts: map[byte]bool{'d': true, 'e': true, 'f': true, 'w': true},
+}
+
+// prReadyArity is `gh pr ready`'s no-value flag set: its own `--undo` plus the inherited
+// `--help`. Its ONLY value-taking flag is the inherited -R/--repo — measured 2026-08-12,
+// `gh pr ready --repo` and `gh pr ready -R` answer pflag's `flag needs an argument: --repo`
+// and `flag needs an argument: 'R' in -R`, while `gh pr ready --repo --undo` and
+// `gh pr ready -R --undo` do NOT, so there the `--undo` token was consumed as the repo value.
 //
-// cmdparse.HasShortFlag documents that it models no arity and pushes exactly this
-// question to its caller; this is the answer for `gh pr create`, and the actual flag
-// MATCHING stays in the primitive. An UNRECOGNISED letter is treated as boolean and
-// scanning continues, which for a newer gh that adds a value-taking short this table
-// does not know could scan that value — so a spelling using one MUST be re-measured
-// when the table is refreshed.
+// shorts is nil, and that is measured rather than forgotten: gh registers no shorthand for
+// `--undo` or `--help`, so every short letter here is value-taking.
+var prReadyArity = ghFlagArity{
+	longs:  map[string]bool{"undo": true, "help": true},
+	shorts: nil,
+}
+
+// prMergeArity is `gh pr merge`'s no-value flag set, enumerated from `gh pr merge --help` on
+// gh 2.97.0 and CONFIRMED PER FLAG the same way against a DIFFERENT mutual exclusion, since
+// `--auto` has no `--web` to clash with: gh answers "specify only one of `--auto`,
+// `--disable-auto`, or `--admin`" iff two of that trio are still flags, so each candidate ran
+// as `gh pr merge <flag> --admin --disable-auto`, 2026-08-12. -d/-m/-r/-s produced the
+// conflict (boolean); -A/-b/-F/-t/-R and --body/--match-head-commit swallowed the `--admin`
+// token instead, -F decisively (`open --admin: no such file or directory`).
 //
-// `--`, long flags and a lone `-` are returned untouched so HasShortFlag's own
-// end-of-options and operand handling still applies.
-func prCreateShortFlagTokens(args []string) []string {
-	out := make([]string, len(args))
-	for i, a := range args {
-		if len(a) > 1 && a[0] == '-' && a[1] != '-' {
-			if v := strings.IndexAny(a, prCreateValueShorts); v > 0 {
-				a = a[:v] // drop the value-taking letter and everything after it
+// IT IS A SEPARATE TABLE FROM prCreateArity AND MUST STAY ONE: the letters collide with
+// opposite arities. `-t` is `--subject` here and `--title` there (both value-taking), but
+// `-m`/`-r` are BOOLEAN here (`--merge`, `--rebase`) and VALUE-TAKING on create
+// (`--milestone`, `--reviewer`), while `-d` is boolean in both for different flags
+// (`--delete-branch` vs `--draft`). One merged table would misread half of them.
+var prMergeArity = ghFlagArity{
+	longs: map[string]bool{
+		"admin": true, "auto": true, "delete-branch": true, "disable-auto": true,
+		"merge": true, "rebase": true, "squash": true, "help": true,
+	},
+	shorts: map[byte]bool{'d': true, 'm': true, 'r': true, 's': true},
+}
+
+// ghFlagTokens returns args reduced to the tokens that really are FLAGS of a subcommand with
+// arity ar: a SEPARATED flag value is dropped, and a short-flag cluster is TRUNCATED at its
+// first value-taking letter so a GLUED value goes with it. Long flags are returned VERBATIM,
+// `=`-glued value and all, because lastLongFlag must still read that value.
+//
+// It is the SINGLE arity walk behind every flag question the `gh pr` branches ask, and it is
+// the answer cmdparse.HasShortFlag and HasLongFlag each document pushing to their caller —
+// the flag MATCHING stays in those primitives, asked about this slice. It REPLACES pg2-25oru's
+// prCreateShortFlagTokens, which truncated clusters but modeled no separated value; see the
+// pg2-ylrda block above for what that left open and for the measurement behind each form:
+//
+//	--title -d      the `-d` is the VALUE; the flag is kept, the value dropped
+//	--title=-d      '='-glued: ONE token, so there is no separated value to drop
+//	-t -d           a BARE short consumes the next token too
+//	-dt -d          ... including the LAST letter of a cluster (`-dt` keeps `-d`)
+//	-tdocs          a GLUED short value: truncate to `-`, consume nothing
+//	--draft -d      a no-value long consumes nothing, so a real `-d` survives
+//	--title --      pflag hands the `--` to the flag as its VALUE — NOT a terminator
+//	-- -d           a real `--`: nothing after it is a flag, so the walk stops
+//	-               a lone `-` is an operand and consumes nothing
+func ghFlagTokens(args []string, ar ghFlagArity) []string {
+	out := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--":
+			// End of options: every remaining token is an operand. The terminator itself is
+			// kept so HasShortFlag/HasLongFlag stop here for their own reasons too.
+			return append(out, a)
+		case strings.HasPrefix(a, "--"):
+			out = append(out, a)
+			if name, _, glued := strings.Cut(a[2:], "="); !glued && !ar.longs[name] && i+1 < len(args) {
+				i++ // `--title -d`: the next token is this flag's VALUE
 			}
+		case len(a) > 1 && a[0] == '-':
+			flags, separated := shortClusterFlags(a, ar.shorts)
+			out = append(out, flags)
+			if separated && i+1 < len(args) {
+				i++ // `-t -d`: likewise
+			}
+		default:
+			out = append(out, a) // an operand, or a lone `-`
 		}
-		out[i] = a
 	}
 	return out
+}
+
+// shortClusterFlags splits ONE short-flag cluster at its first letter that is NOT in noValue,
+// returning the flag-letter prefix and whether that letter's value is the NEXT argv token.
+//
+// Everything after a value-taking letter is that option's VALUE, not more flag letters, so it
+// is dropped: scanning it would let a value containing a `d` or a `w` manufacture a false
+// DRAFT signal, and there the error direction is the unsafe one — measured, `gh pr create
+// -tdocs` sets title "docs" and is NOT a draft. TRUNCATION IS LOSSLESS for what these rules
+// ask, by the same reading git's pushShortFlagTokens/branchShortFlagTokens record: a letter
+// BEFORE the truncation point survives, so `-dtx` is still read as the draft it is.
+//
+// An EMPTY remainder means the value is the next token (`-t -d`, `-dt -d`); a non-empty one
+// means the value was glued (`-tdocs`, and pflag's `-t=docs`, whose `=` is part of the value).
+//
+// The byte loop is a deliberate look at ONE already-tokenized, already-unquoted argument — the
+// same pg2-x9452 Guard 2 false positive cmdparse's HasShortFlag, parseGhAPICall and
+// ghCommandWordIndexes each record; no lexical or quoting decision is made here.
+func shortClusterFlags(tok string, noValue map[byte]bool) (flags string, separatedValue bool) {
+	for j := 1; j < len(tok); j++ {
+		if noValue[tok[j]] {
+			continue
+		}
+		// tok[j] takes a value, so the cluster ends here — as it does for a letter this table
+		// does not know, which is the fail-closed default the arity block above explains.
+		return tok[:j], j == len(tok)-1
+	}
+	return tok, false
 }
 
 // lastLongFlag is cmdparse.HasLongFlag's LAST-ONE-WINS sibling. HasLongFlag returns the
@@ -168,32 +332,33 @@ func boolFlagIsTrue(value string) bool {
 	return err == nil && b
 }
 
-// draftRequested reports whether a `gh pr create` argv asks for a DRAFT pull request,
-// in any spelling gh accepts and INDEPENDENTLY OF FLAG POSITION.
+// boolFlagRequested reports whether a pflag BOOLEAN flag is asked for in any spelling gh
+// accepts and INDEPENDENTLY OF FLAG POSITION. long is the long name (without `--`); short is
+// its one-letter form, or 0 when gh registers none (`--undo` and `--auto` have none).
 //
-// The long form is authoritative when present, because it is the only form that can
-// carry an explicit `=false`. Falling back to the short form only when no `--draft`
-// appears at all leaves ONE mixed spelling read differently from gh: `--draft=false -d`
-// resolves to draft under pflag's last-one-wins but to NON-draft here, so it is
-// Rejected. That is the safe direction and the spelling is pathological (it sets the
-// same boolean twice, in opposite senses, via two different forms); a caller who needs
-// the exact pflag reading of a mixed spelling would have to model per-form ORDER, which
-// no cmdparse primitive exposes.
-func draftRequested(args []string) bool {
-	if v, ok := lastLongFlag(args, "draft"); ok {
+// flags MUST already be arity-filtered by ghFlagTokens, with the arity table of the
+// subcommand being judged: this helper asks cmdparse's primitives about the tokens it is
+// given, and those primitives model no arity at all, so handing it a raw argv is the
+// pg2-ylrda defect. Making the caller do the filtering is deliberate — one walk serves both
+// questions `gh pr create` asks, and the arity table used is visible at the call site.
+//
+// The LONG form is authoritative when present, because it is the only form that can carry an
+// explicit `=false`. Falling back to the short form only when no long spelling appears at all
+// leaves ONE mixed spelling read differently from gh: `--draft=false -d` resolves to draft
+// under pflag's last-one-wins but to NON-draft here, so it is Rejected. That is the safe
+// direction and the spelling is pathological (it sets the same boolean twice, in opposite
+// senses, via two different forms); a caller needing the exact pflag reading of a mixed
+// spelling would have to model per-form ORDER, which no cmdparse primitive exposes.
+//
+// It replaces pg2-25oru's identical draftRequested/webRequested pair. The four gated booleans
+// — create's --draft and --web, ready's --undo, merge's --auto — are now read by ONE function,
+// so a precedence or arity fix cannot land on some of them and not the others, which is how
+// the separated-value hole reached three branches at once.
+func boolFlagRequested(flags []string, long string, short byte) bool {
+	if v, ok := lastLongFlag(flags, long); ok {
 		return boolFlagIsTrue(v)
 	}
-	return cmdparse.HasShortFlag(prCreateShortFlagTokens(args), 'd')
-}
-
-// webRequested reports whether a `gh pr create` argv defers creation to the BROWSER
-// (`--web` / `-w`), read exactly as draftRequested reads draft — see its doc for the
-// long-form precedence and the one mixed spelling that differs from pflag.
-func webRequested(args []string) bool {
-	if v, ok := lastLongFlag(args, "web"); ok {
-		return boolFlagIsTrue(v)
-	}
-	return cmdparse.HasShortFlag(prCreateShortFlagTokens(args), 'w')
+	return short != 0 && cmdparse.HasShortFlag(flags, short)
 }
 
 // prCreateVerdict returns the verdict for a `gh pr create` (or its `new` alias) — args
@@ -223,14 +388,17 @@ func webRequested(args []string) bool {
 // --auto` Abstain below, so all three MUST move together (an un-drafted PR plus
 // auto-merge is the merge this rule set exists to keep a person in front of).
 func (r *Rule) prCreateVerdict(args []string) hookio.RuleResult {
-	if draftRequested(args) {
+	// One arity walk, both questions: a token consumed as some other flag's VALUE is neither
+	// a draft nor a web request, however much it looks like one (pg2-ylrda).
+	flags := ghFlagTokens(args, prCreateArity)
+	if boolFlagRequested(flags, "draft", 'd') {
 		return hookio.RuleResult{
 			Decision: hookio.Approve,
 			Reason:   "gh pr create --draft: the blessed draft-first landing step (creates nothing mergeable)",
 			Module:   r.Name(),
 		}
 	}
-	if webRequested(args) {
+	if boolFlagRequested(flags, "web", 'w') {
 		return hookio.RuleResult{
 			Decision: hookio.Approve,
 			Reason:   "gh pr create --web: the browser opens and a human chooses draft-or-not, so the PR is not created by this call",
@@ -264,14 +432,16 @@ func (r *Rule) prCreateVerdict(args []string) hookio.RuleResult {
 //
 // `--undo` (back to draft) is APPROVE: it moves the PR AWAY from mergeable, which is the
 // direction the flow wants, and it is the documented repair when a PR came back
-// non-draft. `--undo=false` is a mark-ready and so gets the Ask.
+// non-draft. `--undo=false` is a mark-ready and so gets the Ask. So is a `--undo` that gh
+// swallowed as the value of `-R`/`--repo`, which is a MARK-READY and was reaching this Approve
+// before pg2-ylrda — the arity filter is what tells the two apart.
 //
 // WHAT WOULD JUSTIFY CHANGING IT: a new operator ruling on the draft-first flow, or
 // evidence that Ask is unreachable in practice (e.g. a session mode in which Ask is
 // auto-accepted for this rule) — in which case the answer is Reject with a named
 // alternative path, never Abstain.
 func (r *Rule) prReadyVerdict(args []string) hookio.RuleResult {
-	if v, ok := lastLongFlag(args, "undo"); ok && boolFlagIsTrue(v) {
+	if boolFlagRequested(ghFlagTokens(args, prReadyArity), "undo", 0) {
 		return hookio.RuleResult{
 			Decision: hookio.Approve,
 			Reason:   "gh pr ready --undo converts the PR back to draft, away from mergeable",

@@ -114,7 +114,11 @@ func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 			}
 		}
 		if resource == "pr" && subcmd == "merge" {
-			if v, ok := lastLongFlag(rest, "auto"); ok && boolFlagIsTrue(v) {
+			// ghFlagTokens with `gh pr merge`'s OWN arity table, not create's: `-m`/`-r` are
+			// boolean here and value-taking there, and without the filter a `--auto` gh
+			// swallowed as the value of `-b`/`-t`/`-F`/`-A`/`-R`/`--body`/
+			// `--match-head-commit` took this Abstain while gh merged IMMEDIATELY (pg2-ylrda).
+			if boolFlagRequested(ghFlagTokens(rest, prMergeArity), "auto", 0) {
 				// Intentionally Abstain — NOT a bypass, and the gate it defers to is now REAL.
 				// --auto cannot merge while the PR is a draft, and since pg2-4yy4r item 2 the
 				// un-drafting is ENFORCED as a human step: non-draft creation is Rejected and
@@ -433,7 +437,8 @@ func omitIndexes(args []string, drop []int) []string {
 // latter being an IMMEDIATE merge that must not reach the --auto Abstain). Flag matching
 // now goes through cmdparse.HasShortFlag / cmdparse.HasLongFlag, with the arity and
 // precedence answers those primitives push to their caller supplied in pr.go
-// (prCreateShortFlagTokens, lastLongFlag).
+// (ghFlagTokens over a measured per-subcommand ghFlagArity, plus lastLongFlag), and asked
+// through the one boolFlagRequested every gated boolean shares.
 
 // extractRunID returns the first positional (non-flag) argument after the
 // "rerun" subcommand in a gh run rerun invocation. Returns "" if not found.

@@ -307,6 +307,268 @@ func TestGH_PrMergeAutoNegated_Reject(t *testing.T) {
 	}
 }
 
+// SEPARATED-VALUE FIXTURES (pg2-ylrda)
+//
+// A value passed as its OWN argv token can spell any flag, and pg2-25oru's scan modeled only a
+// value GLUED to a short. So `gh pr create --title -d --body y` — which gh titles `-d` and
+// creates a NON-DRAFT, immediately mergeable PR — read as a draft and was APPROVED: a false
+// Approve on precisely the command that rule set exists to Reject, and worse than the Abstain
+// fall-through pg2-by1ij closed, because Abstain at least lands on a lower floor.
+//
+// EVERY binding below is MEASURED on gh 2.97.0 (nixpkgs), 2026-08-12, via a mutual-exclusion
+// message gh emits only while both tokens are still flags; pr.go's pg2-ylrda block records each
+// probe and its decisive output. These fixtures assert the VERDICT; TestGH_FlagTokens asserts
+// the walk that produces it, so a regression is reported as a parse fact too.
+
+// TestGH_SeparatedValue_PrCreate is the bead's headline case plus the converse it must not
+// break: a GENUINE draft/web flag standing AFTER a consumed value has to survive.
+func TestGH_SeparatedValue_PrCreate(t *testing.T) {
+	tests := []struct {
+		cmd  string
+		want hookio.Decision
+		why  string
+	}{
+		// The defect: gh binds the `-d` as a VALUE and creates a MERGEABLE PR.
+		{"gh pr create --title -d --body y", hookio.Reject, "`-d` is the --title VALUE, so this is a NON-draft create"},
+		{"gh pr create -t -d", hookio.Reject, "the same defect through the SHORT spelling"},
+		{"gh pr create -t -d --body y", hookio.Reject, ""},
+		{"gh pr create --body -d --title x", hookio.Reject, "any value-taking flag, not only --title"},
+		{"gh pr create --template -d --fill", hookio.Reject, ""},
+		{"gh pr create --recover -d --fill", hookio.Reject, "a value-taking long with NO short form"},
+		{"gh pr create -R -d --fill", hookio.Reject, "including the INHERITED -R/--repo"},
+		{"gh pr create --repo -d --fill", hookio.Reject, ""},
+		{"gh pr create --title -w --body y", hookio.Reject, "`-w` is the TITLE, so no browser ever opens"},
+		{"gh pr create -t -w", hookio.Reject, ""},
+		{"gh pr create --title --draft=false", hookio.Reject, "the title is the literal string `--draft=false`"},
+		// A REAL flag after a consumed value must still be seen, or the fix would have bought
+		// the Reject by making the blessed path unreachable.
+		{"gh pr create --title x -d", hookio.Approve, "a real -d AFTER a consumed value"},
+		{"gh pr create -t -d --draft", hookio.Approve, "`-t` ate `-d`; the `--draft` is real"},
+		{"gh pr create --title -d --draft", hookio.Approve, ""},
+		{"gh pr create --title=-d --draft", hookio.Approve, "'='-glued: the value binds in ONE token"},
+		{"gh pr create -dt -d", hookio.Approve, "cluster: -d boolean, then -t eats the next token"},
+		{"gh pr create --title x -w", hookio.Approve, "a real -w after a consumed value"},
+		// Each no-value flag consumes NOTHING, which is what the complement table buys.
+		{"gh pr create --fill -d", hookio.Approve, ""},
+		{"gh pr create --dry-run -d", hookio.Approve, ""},
+		{"gh pr create --fill-first -d", hookio.Approve, ""},
+		{"gh pr create --fill-verbose -d", hookio.Approve, ""},
+		{"gh pr create --no-maintainer-edit -d", hookio.Approve, ""},
+		{"gh pr create --editor -d", hookio.Approve, ""},
+		{"gh pr create --draft -d", hookio.Approve, ""},
+		// `--` is NOT an end-of-options terminator while a value-taking flag is expecting a
+		// value: measured, `gh pr create --title -- --draft --web` and `-t -- -d --web` BOTH
+		// still report the draft+web conflict, so the `--draft`/`-d` after it really is a flag.
+		{"gh pr create --title -- --draft", hookio.Approve, "the `--` was eaten as the title"},
+		{"gh pr create -t -- --draft", hookio.Approve, ""},
+		{"gh pr create -t -- -d", hookio.Approve, ""},
+		// THE ONE ROW THIS CHANGE MAKES MORE PERMISSIVE, and it is a corrected FALSE REJECT,
+		// not a weakened gate: measured, `gh pr create -d --title --draft=false --web` still
+		// reports the draft+web conflict, so `--draft=false` is the TITLE and `-d` really does
+		// make it a draft. pg2-25oru read the swallowed token as pflag's last-one-wins negation
+		// and Rejected the blessed path. Every other direction of this change is strictly
+		// stricter; see pr.go's arity block for why an unknown flag defaults to value-taking.
+		{"gh pr create -d --title --draft=false", hookio.Approve, "the negation is the TITLE; `-d` stands"},
+	}
+	for _, tt := range tests {
+		got := evalGH(t, tt.cmd)
+		if got.Decision != tt.want {
+			t.Errorf("cmd %q: got %s (%s), want %s — %s", tt.cmd, got.Decision, got.Reason, tt.want, tt.why)
+		}
+	}
+	// The Reject must still NAME the draft-first flow, per the acceptance criterion: a Reject
+	// is not user-overridable in-session, so the reason is the only remedy the caller gets.
+	reason := evalGH(t, "gh pr create --title -d --body y").Reason
+	for _, want := range []string{"DRAFT FIRST", "gh pr create --draft", "gh pr ready"} {
+		if !strings.Contains(reason, want) {
+			t.Errorf("reason %q does not name %q", reason, want)
+		}
+	}
+}
+
+// TestGH_SeparatedValue_PrReady pins the same class on the branch that matters most: a `--undo`
+// swallowed as the value of -R/--repo is a MARK-READY, the single act the draft-first flow puts
+// a person in front of, and it was taking the `--undo` Approve.
+func TestGH_SeparatedValue_PrReady(t *testing.T) {
+	for _, cmd := range []string{
+		"gh pr ready -R --undo",
+		"gh pr ready --repo --undo",
+		"gh pr ready -R --undo 123",
+	} {
+		if got := evalGH(t, cmd); got.Decision != hookio.Ask {
+			t.Errorf("cmd %q: got %s (%s), want ask — the `--undo` is the REPO value, so this MARKS THE PR READY",
+				cmd, got.Decision, got.Reason)
+		}
+	}
+	for _, cmd := range []string{
+		"gh pr ready -R o/r --undo", // a real --undo AFTER a consumed value
+		"gh pr ready --repo o/r --undo",
+		"gh pr ready -R -- --undo", // measured: `-R` eats the `--`, so `--undo` IS a flag
+	} {
+		if got := evalGH(t, cmd); got.Decision != hookio.Approve {
+			t.Errorf("cmd %q: got %s (%s), want approve — this `--undo` is a real flag", cmd, got.Decision, got.Reason)
+		}
+	}
+}
+
+// TestGH_SeparatedValue_PrMerge pins the class on the `--auto` branch. Its Abstain is
+// deliberate and defensible ONLY for a real `--auto`, which cannot merge a draft; an `--auto`
+// swallowed as the merge body/subject/repo is an IMMEDIATE merge and must reach the Reject.
+func TestGH_SeparatedValue_PrMerge(t *testing.T) {
+	for _, cmd := range []string{
+		"gh pr merge -b --auto",
+		"gh pr merge --body --auto",
+		"gh pr merge -t --auto",
+		"gh pr merge --subject --auto",
+		"gh pr merge -A --auto",
+		"gh pr merge --author-email --auto",
+		"gh pr merge -F --auto",
+		"gh pr merge --body-file --auto",
+		"gh pr merge --match-head-commit --auto",
+		"gh pr merge -R --auto",
+		"gh pr merge --repo --auto",
+	} {
+		if got := evalGH(t, cmd); got.Decision != hookio.Reject {
+			t.Errorf("cmd %q: got %s (%s), want reject — the `--auto` is a flag VALUE, so this merges NOW",
+				cmd, got.Decision, got.Reason)
+		}
+	}
+	for _, cmd := range []string{
+		"gh pr merge -b x --auto", // a real --auto AFTER a consumed value
+		"gh pr merge -R o/r --auto",
+		"gh pr merge -d --auto", // -d/--delete-branch is BOOLEAN here, unlike create's -d
+		"gh pr merge -m --auto", // -m is --merge here, but --milestone (value-taking) on create
+		"gh pr merge -r --auto", // -r is --rebase here, but --reviewer (value-taking) on create
+		"gh pr merge -s --auto",
+		"gh pr merge --delete-branch --auto",
+	} {
+		if got := evalGH(t, cmd); got.Decision != hookio.Abstain {
+			t.Errorf("cmd %q: got %s (%s), want abstain — this IS --auto", cmd, got.Decision, got.Reason)
+		}
+	}
+}
+
+// TestGH_SeparatedValue_IssueCreate pins the ONE gated branch this class cannot reach, so the
+// gap is recorded rather than discovered later. `gh issue create` is a flat Ask that reads no
+// flag at all, so no value — however it is spelled — can move its verdict; measured,
+// `gh issue create --title --web` answers "must provide `--title` and `--body`", i.e. gh really
+// does bind `--web` as the title, and the verdict is Ask either way. What would make it
+// reachable: a ruling that makes this branch flag-aware, at which point it needs an
+// `issueCreateArity` table measured the same way (`gh issue create --help`: the no-value flags
+// are -e/--editor, -w/--web and --help; every other flag there takes a value).
+func TestGH_SeparatedValue_IssueCreate(t *testing.T) {
+	for _, cmd := range []string{
+		"gh issue create --title --web",
+		"gh issue create -t --web",
+		"gh issue create --title x --body y",
+		"gh issue create -R --title",
+	} {
+		if got := evalGH(t, cmd); got.Decision != hookio.Ask {
+			t.Errorf("cmd %q: got %s (%s), want ask — this branch reads no flag, so a separated value cannot move it",
+				cmd, got.Decision, got.Reason)
+		}
+	}
+}
+
+// TestGH_FlagTokens pins the arity walk itself, so a regression is reported as a PARSE fact and
+// not only as a changed verdict — the same reason TestGH_CommandPath and TestGH_ParseGhAPICall
+// exist. Each expectation follows from a MEASURED binding recorded in pr.go's pg2-ylrda block.
+func TestGH_FlagTokens(t *testing.T) {
+	tests := []struct {
+		name  string
+		args  []string
+		arity ghFlagArity
+		want  []string
+	}{
+		{
+			"separated long value is dropped",
+			[]string{"--title", "-d", "--body", "y"},
+			prCreateArity,
+			[]string{"--title", "--body"},
+		},
+		{
+			"'='-glued long keeps its value",
+			[]string{"--title=-d", "--draft"},
+			prCreateArity,
+			[]string{"--title=-d", "--draft"},
+		},
+		{"bare short takes the next token", []string{"-t", "-d"}, prCreateArity, []string{"-"}},
+		{"a cluster's LAST letter takes it too", []string{"-dt", "-d"}, prCreateArity, []string{"-d"}},
+		{"glued short value consumes nothing", []string{"-tdocs"}, prCreateArity, []string{"-"}},
+		{"a boolean letter BEFORE the value survives", []string{"-dtx"}, prCreateArity, []string{"-d"}},
+		{"an all-boolean cluster is untouched", []string{"-dw"}, prCreateArity, []string{"-dw"}},
+		{
+			"a no-value long consumes nothing",
+			[]string{"--draft", "-d"},
+			prCreateArity,
+			[]string{"--draft", "-d"},
+		},
+		{
+			"pflag hands `--` to a waiting flag as its VALUE",
+			[]string{"--title", "--", "--draft"},
+			prCreateArity,
+			[]string{"--title", "--draft"},
+		},
+		{"... and to a waiting short", []string{"-t", "--", "-d"}, prCreateArity, []string{"-", "-d"}},
+		{"a REAL `--` stops the walk", []string{"--", "-d"}, prCreateArity, []string{"--"}},
+		{"a lone `-` is an operand", []string{"-", "-d"}, prCreateArity, []string{"-", "-d"}},
+		{
+			"a trailing value-taking long has nothing to eat",
+			[]string{"--title"},
+			prCreateArity,
+			[]string{"--title"},
+		},
+		{"a trailing value-taking short likewise", []string{"-t"}, prCreateArity, []string{"-"}},
+		{
+			"an UNKNOWN long defaults to value-taking",
+			[]string{"--new-thing", "-d"},
+			prCreateArity,
+			[]string{"--new-thing"},
+		},
+		// An unknown letter is value-taking, so it ends the cluster AND eats a separated value.
+		// Both rows lose a signal rather than invent one — the fail-closed direction: here the
+		// second `-d` is dropped, which can only make the verdict stricter.
+		{
+			"an UNKNOWN short letter ends the cluster",
+			[]string{"-dZx", "-d"},
+			prCreateArity,
+			[]string{"-d", "-d"},
+		},
+		{
+			"... and eats a separated value when last",
+			[]string{"-dZ", "-d"},
+			prCreateArity,
+			[]string{"-d"},
+		},
+		{
+			"operands are kept in place",
+			[]string{"--repo", "o/r", "123", "--draft"},
+			prCreateArity,
+			[]string{"--repo", "123", "--draft"},
+		},
+		// The other two tables, whose whole point is that they differ from create's.
+		{"ready: -R eats the --undo", []string{"-R", "--undo"}, prReadyArity, []string{"-"}},
+		{"ready: --undo eats nothing", []string{"--undo", "123"}, prReadyArity, []string{"--undo", "123"}},
+		{"merge: -b eats the --auto", []string{"-b", "--auto"}, prMergeArity, []string{"-"}},
+		{"merge: -d is BOOLEAN here", []string{"-d", "--auto"}, prMergeArity, []string{"-d", "--auto"}},
+		{"merge: -m/-r are BOOLEAN here", []string{"-mr", "--auto"}, prMergeArity, []string{"-mr", "--auto"}},
+		{
+			"merge: booleans plus an operand",
+			[]string{"--squash", "--auto", "1234"},
+			prMergeArity,
+			[]string{"--squash", "--auto", "1234"},
+		},
+		{"no args at all", nil, prCreateArity, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ghFlagTokens(tt.args, tt.arity); !slices.Equal(got, tt.want) {
+				t.Errorf("ghFlagTokens(%q) = %q, want %q", tt.args, got, tt.want)
+			}
+		})
+	}
+}
+
 // evalGH is the shared one-command driver for the pg2-cl0v2 `gh api` fixtures.
 func evalGH(t *testing.T, cmd string) hookio.RuleResult {
 	t.Helper()
