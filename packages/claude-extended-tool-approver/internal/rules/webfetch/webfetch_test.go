@@ -2,6 +2,7 @@ package webfetch
 
 import (
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
@@ -146,4 +147,40 @@ func TestWebFetch_Name(t *testing.T) {
 	if got := r.Name(); got != "webfetch" {
 		t.Errorf("Name() = %q, want webfetch", got)
 	}
+}
+
+// TestWebFetch_UnparseableURLIsAGenuineError pins webfetch's one error site, which
+// the corpus replay cannot reach (a logged row carries a URL Claude Code already
+// accepted).
+//
+// Before ADR 0043 the url.Parse failure folded into the same Abstain as "this is not
+// a WebFetch tool" and "this host is not one I govern". The chain outcome is
+// unchanged — still continue — but the failure is now countable, and the two
+// not-applicable neighbours are asserted alongside it so the conversion cannot have
+// swept them in as well.
+func TestWebFetch_UnparseableURLIsAGenuineError(t *testing.T) {
+	r := new(Rule)
+
+	t.Run("unparseable url", func(t *testing.T) {
+		// An unterminated IPv6 literal: url.Parse rejects it outright.
+		_, err := r.Evaluate(makeWebFetchInput("http://[::1"))
+		if err == nil || errors.Is(err, hookio.ErrNotApplicable) {
+			t.Fatalf("err = %v, want a GENUINE error (not ErrNotApplicable): the tool IS WebFetch, so "+
+				"this rule governs the call and merely could not read the URL", err)
+		}
+	})
+
+	t.Run("empty url is not-applicable", func(t *testing.T) {
+		_, err := r.Evaluate(makeWebFetchInput(""))
+		if !errors.Is(err, hookio.ErrNotApplicable) {
+			t.Errorf("err = %v, want ErrNotApplicable: no URL to judge is not a failure", err)
+		}
+	})
+
+	t.Run("non-WebFetch tool is not-applicable", func(t *testing.T) {
+		_, err := r.Evaluate(&hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": "ls"})})
+		if !errors.Is(err, hookio.ErrNotApplicable) {
+			t.Errorf("err = %v, want ErrNotApplicable", err)
+		}
+	})
 }

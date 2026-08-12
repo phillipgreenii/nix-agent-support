@@ -92,6 +92,25 @@ func newEngineForCWD(cwd string, shells killshell.ShellStore) *engine.Engine {
 // Therefore: register new rules HERE and nowhere else. Do not reintroduce a
 // second, hand-maintained rule list in a test.
 //
+// VOCABULARY, for anyone adding a rule (ADR 0043). A rule returns
+// (hookio.RuleResult, error) and the three outcomes are NOT interchangeable:
+//
+//	hookio.NotApplicable()          "not my business" — the chain CONTINUES. This is
+//	                                what almost every pre-ADR-0043 `Abstain` meant,
+//	                                and it is what a rule ordered BEFORE another rule
+//	                                that owns the input must return.
+//	{Decision: NoOpinion, …}, nil   "handled, and my answer is no gate" — TERMINAL.
+//	                                Emits {} and STOPS the chain, so no later rule can
+//	                                approve. Only pathsafety's agent-config write
+//	                                branch uses it today (ADR 0041).
+//	{}, someOtherError              "I could not determine" — counted per rule in
+//	                                internal/metrics, then the chain continues.
+//
+// Older comments in this package and in internal/rules still say "Abstain" and
+// "Abstains" for the pre-ADR-0043 combined sentinel; read those as not-applicable
+// unless the surrounding code says otherwise. The SERIALIZED value is still
+// "abstain" for both NoOpinion and an exhausted chain.
+//
 // eng is passed back in because the recursive rules (nix, kubectl, envvars,
 // docker) take the engine as their Evaluator so a nested command/substitution
 // body can be re-evaluated through the whole chain. shells MAY be nil — the

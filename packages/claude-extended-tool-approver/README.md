@@ -41,6 +41,33 @@ were stored as `denied`, which made every SessionEnd sweep look like "the user
 denied it but the hook allows it" — a phantom false-allow. Schema migration 7
 backfills historical rows by inverting the three writers' fingerprints.
 
+### Rule failures (`rule_errors`)
+
+A rule that could not GATHER THE EVIDENCE it needs — a resolver subprocess that timed
+out, a `tool_input` it could not parse — reports that separately from its verdict
+(`docs/adr/0043-ceta-rule-verdict-vocabulary.md`). The chain continues, so the
+decision is unaffected, but the failure is counted per rule and written to
+`rule_errors` at PreToolUse.
+
+A row means "this rule failed on this call", so the ABSENCE of rows for a rule is the
+evidence it is healthy — no zero-count rows are written. The table exists because the
+hook is one short-lived process per tool call: an in-process counter can never show
+that a resolver is failing *systematically*.
+
+```bash
+# Which rules are failing, and how often (last 7 days)
+sqlite3 "$DB" \
+  "SELECT rule_name, SUM(error_count) n, MAX(created_at) last_seen,
+          MIN(error_sample) sample
+     FROM rule_errors
+    WHERE created_at >= datetime('now','-7 days')
+    GROUP BY rule_name ORDER BY n DESC"
+```
+
+`Decision`'s serialized value for "ceta has no opinion" remains `abstain` — the Go
+identifier was renamed to `NoOpinion` by that ADR, but the stored string is unchanged,
+so every query above keeps working against historical rows.
+
 ### Example Queries
 
 ```bash

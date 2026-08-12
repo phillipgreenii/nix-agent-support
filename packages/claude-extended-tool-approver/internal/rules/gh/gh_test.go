@@ -1195,3 +1195,63 @@ func TestGH_RunRerun(t *testing.T) {
 		})
 	}
 }
+
+// TestGH_RunRerunResolverFailureIsAGenuineError pins ADR 0043's CANONICAL error site
+// — the one its Context quotes verbatim — on the channel, not just on the verdict.
+//
+// TestGH_RunRerun above already asserts that a resolver failure still lets the chain
+// continue, which is the decision-preservation half. It cannot see the other half:
+// before ADR 0043 the failure was folded into the loop sentinel and the error was
+// DISCARDED, so "the resolver timed out" and "this rule does not apply" were the same
+// value. Only the assertions below separate them, and that separation is what lets a
+// systematically-failing `git rev-parse` be counted per rule instead of vanishing.
+//
+// The two NOT-applicable rows are asserted in the same place on purpose: they are the
+// nearby sites that MUST NOT have been converted to errors, since neither is a
+// failure (no run ID in the command; no resolver injected at construction).
+func TestGH_RunRerunResolverFailureIsAGenuineError(t *testing.T) {
+	errFailed := errors.New("simulated failure")
+	input := func(cmd string) *hookio.HookInput {
+		return &hookio.HookInput{
+			ToolName:  "Bash",
+			ToolInput: mustJSON(map[string]string{"command": cmd}),
+			CWD:       "/tmp/test-repo",
+		}
+	}
+
+	t.Run("current branch resolver failure", func(t *testing.T) {
+		_, err := New(&stubResolver{currentErr: errFailed}).Evaluate(input("gh run rerun 12345"))
+		if err == nil || errors.Is(err, hookio.ErrNotApplicable) {
+			t.Fatalf("err = %v, want a GENUINE error (not ErrNotApplicable): the rule owns `gh run rerun` "+
+				"and merely could not resolve the branch", err)
+		}
+		if !errors.Is(err, errFailed) {
+			t.Errorf("err = %v, want it to wrap the resolver's own error so the cause survives", err)
+		}
+	})
+
+	t.Run("run branch resolver failure", func(t *testing.T) {
+		_, err := New(&stubResolver{currentBranch: "feature-x", runErr: errFailed}).Evaluate(input("gh run rerun 12345"))
+		if err == nil || errors.Is(err, hookio.ErrNotApplicable) {
+			t.Fatalf("err = %v, want a GENUINE error (not ErrNotApplicable)", err)
+		}
+		if !errors.Is(err, errFailed) {
+			t.Errorf("err = %v, want it to wrap the resolver's own error", err)
+		}
+	})
+
+	t.Run("no run ID is not-applicable, not an error", func(t *testing.T) {
+		_, err := New(&stubResolver{currentBranch: "feature-x"}).Evaluate(input("gh run rerun"))
+		if !errors.Is(err, hookio.ErrNotApplicable) {
+			t.Errorf("err = %v, want ErrNotApplicable: there is nothing to resolve, which is not a failure", err)
+		}
+	})
+
+	t.Run("no resolver is not-applicable, not an error", func(t *testing.T) {
+		_, err := New(nil).Evaluate(input("gh run rerun 12345"))
+		if !errors.Is(err, hookio.ErrNotApplicable) {
+			t.Errorf("err = %v, want ErrNotApplicable: an uninjected resolver is a CONSTRUCTION condition, "+
+				"not a runtime failure, so it must not inflate the per-rule failure count", err)
+		}
+	})
+}

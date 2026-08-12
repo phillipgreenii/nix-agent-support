@@ -533,6 +533,45 @@ var migrations = []migration{
 			return err
 		},
 	},
+	{
+		version: 8,
+		up: func(tx *sql.Tx) error {
+			// rule_errors is the DURABLE half of ADR 0043's per-rule failure sink.
+			//
+			// The ADR requires genuine rule failures to be recorded per rule "so a
+			// systematically-failing resolver is detectable", and explicitly refuses
+			// to accept a stderr line as discharge of that. internal/metrics does the
+			// counting, but the hook is ONE SHORT-LIVED PROCESS PER TOOL CALL, so an
+			// in-process counter can never aggregate — "systematically" is only
+			// observable across calls, which means across processes, which means on
+			// disk.
+			//
+			// It deliberately does NOT reuse decision_trace_entries: those rows are
+			// written only when tracing is enabled (RecordPreToolDecision keys on
+			// result.Trace != nil), so a failure on an untraced call — i.e. almost
+			// every real call — would leave no row at all.
+			//
+			// tool_decision_id is nullable and carries NO foreign key: a failure is
+			// worth keeping even when the decision INSERT that would have anchored it
+			// failed or was skipped, and losing the failure record because its anchor
+			// is missing is the opposite of what this table is for.
+			_, err := tx.Exec(`
+			CREATE TABLE IF NOT EXISTS rule_errors (
+				id               INTEGER PRIMARY KEY AUTOINCREMENT,
+				tool_decision_id INTEGER,
+				session_id       TEXT,
+				cwd              TEXT,
+				tool_name        TEXT,
+				rule_name        TEXT NOT NULL,
+				error_count      INTEGER NOT NULL,
+				error_sample     TEXT,
+				created_at       TEXT NOT NULL
+			);
+			CREATE INDEX IF NOT EXISTS idx_rule_errors_rule ON rule_errors(rule_name, created_at);
+			`)
+			return err
+		},
+	},
 }
 
 func migrate(db *sql.DB) error {

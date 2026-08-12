@@ -9,6 +9,7 @@ import (
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/engine"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/inputproc"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/metrics"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/sandboxdetect"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/setup"
 	"github.com/spf13/cobra"
@@ -187,6 +188,18 @@ func handlePreToolUse(input *hookio.HookInput) {
 	if store != nil {
 		if err := asklog.RecordPreToolDecision(store, input, result); err != nil {
 			fmt.Fprintf(os.Stderr, "claude-extended-tool-approver: asklog: %v\n", err)
+		}
+		// FLUSH the per-rule GENUINE-failure window (ADR 0043). The engine counted
+		// into metrics.DefaultRuleErrors while deciding; this is the only point where
+		// those counts can outlive the process, and the hook is one process per tool
+		// call, so without this flush "a systematically-failing resolver is
+		// detectable" would be false no matter how carefully the counter was kept.
+		//
+		// AFTER the decision has been made and BEFORE the output is written, so a
+		// failure to persist an observability row can neither change the verdict nor
+		// be mistaken for one.
+		if err := asklog.RecordRuleErrors(store, input, metrics.DefaultRuleErrors.Snapshot()); err != nil {
+			fmt.Fprintf(os.Stderr, "claude-extended-tool-approver: asklog rule_errors: %v\n", err)
 		}
 	}
 

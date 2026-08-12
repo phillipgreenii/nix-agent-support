@@ -310,7 +310,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 	}
 	cmdStr, err := input.BashCommand()
 	if err != nil {
-		return hookio.RuleResult{}, fmt.Errorf("envvars: read bash command: %w", err)
+		return hookio.RuleResult{}, fmt.Errorf("env-vars: read bash command: %w", err)
 	}
 	parsed := cmdparse.Parse(cmdStr)
 
