@@ -127,21 +127,25 @@ func TestGit_ResetHard_Ask(t *testing.T) {
 	}
 }
 
-// TestGit_Destructive_Ask pins what remains on a destructive Ask after two splits.
+// TestGit_Destructive_Ask pins what remains on a destructive Ask after three splits.
 // `git push --force` and `git push -f` USED to be pinned here as Ask; they are now
 // Reject (TestGit_PushForce_Reject) per the operator ruling of 2026-07-30. `git branch
 // -D` was pinned here too, and moved to Abstain per the operator ruling of 2026-07-31
 // (pg2-4yy4r item 5, implemented by pg2-fkmg4) — see
-// TestGit_BranchForceDelete_NeverApproves for its replacement assertion. Both absences
-// are the intended change, not a weakened test.
+// TestGit_BranchForceDelete_NeverApproves for its replacement assertion. `git clean -fd`
+// was the LAST row to leave, moved to Abstain by the operator ruling of 2026-07-30
+// (pg2-4yy4r item 3, implemented by pg2-u0e0c) — see TestGit_Clean_UniformAbstain and
+// TestGit_Clean_EmitsEmptyHookOutput. All three absences are the intended change, not a
+// weakened test.
 //
-// WITH `branch` GONE, THE SHARED `isDestructive` SITE IS GONE TOO: it had exactly one
-// caller left, so pg2-fkmg4 deleted it and gave `git branch` its own arm. The two rows
-// remaining here are answered by their OWN arms in classify, each with its own reason.
+// WITH `branch` GONE, THE SHARED `isDestructive` SITE WENT TOO: it had exactly one
+// caller left, so pg2-fkmg4 deleted it and gave `git branch` its own arm. `git reset
+// --hard` is now the ONLY row here, answered by its own arm in classify with its own
+// reason. If the next ruling moves it as well, delete this test rather than leaving an
+// empty table that asserts nothing.
 func TestGit_Destructive_Ask(t *testing.T) {
 	destructive := []string{
 		"git reset --hard HEAD",
-		"git clean -fd",
 	}
 	r := New(nil)
 	for _, cmd := range destructive {
@@ -1248,36 +1252,91 @@ func TestGit_ConfigSeparatedFlagValue(t *testing.T) {
 	}
 }
 
-// TestGit_Clean_StaysDecisiveAsk pins `git clean` at its present UNCONDITIONAL Ask.
-// pg2-szadj gates the `clean.requireForce` WRITE and deliberately leaves this arm
-// alone: a flag-aware re-classification was reviewed and rejected because the
-// clustered form `-fdx` is a SINGLE token, so an exact-token `-f` test would sort
-// the MOST destructive spelling into the "no force given" branch and approve it.
-// The `-fdx` and `-f -d -x` rows are that trap; if a later edit splits this Ask by
-// flag, they are what catches it.
-func TestGit_Clean_StaysDecisiveAsk(t *testing.T) {
+// TestGit_Clean_UniformAbstain pins `git clean` at ONE verdict for EVERY spelling.
+//
+// THE VERDICT MOVED FROM Ask TO Abstain, and this test was
+// TestGit_Clean_StaysDecisiveAsk when it asserted the Ask. Operator ruling 2026-07-30,
+// recorded as pg2-4yy4r item 3 and implemented by pg2-u0e0c: the flag-aware row design
+// is REJECTED, not deferred, and the level is Abstain. The rename is the change, not a
+// weakened test — what this guards is UNIFORMITY, and that is unchanged.
+//
+// WHAT IT CATCHES IS A FLAG TEST, from either direction. `-fdx` is a SINGLE token, so
+// an exact-token `-f` test sorts the MOST destructive spelling into a "no force given"
+// branch; the `-fdx`, `-xdf` and `-f -d -x` rows are that trap. The abbreviation rows
+// (`--forc` … `--f`) are the other half: git's parse-options accepts any unambiguous
+// prefix, so a hand-enumerated long-flag test misses spellings silently. Since the arm
+// inspects NO flag, EVERY row here must answer identically — a row that diverges means
+// a flag test was reintroduced.
+//
+// `-n` / `--dry-run` ARE HERE AS Abstain ON PURPOSE. They are provably read-only and
+// were deliberately NOT carved out to Approve; a row moving them to Approve is the
+// rejected design creeping back in.
+func TestGit_Clean_UniformAbstain(t *testing.T) {
 	r := New(nil)
-	ask := []string{
+	// Every spelling the acceptance criteria enumerate, plus the clustered and
+	// operand-bearing forms.
+	spellings := []string{
 		"git clean",
 		"git clean -n",
+		"git clean --dry-run",
 		"git clean -f",
-		"git clean -fd",
 		"git clean -fdx",
-		"git clean -f -d -x",
+		"git clean -df",
 		"git clean --force",
+		"git clean --forc",
+		"git clean --for",
+		"git clean --fo",
+		"git clean --f",
+		"git clean -fd",
+		"git clean -f -d -x",
 		"git clean -xdf",
+		"git clean -e node_modules -fdx",
+		"git clean --exclude=node_modules -fdx",
+		"git clean -x -f -- src/",
+		"git clean -i",
+		"git clean -q -fdx",
 	}
-	for _, cmd := range ask {
+	for _, cmd := range spellings {
 		input := &hookio.HookInput{
 			ToolName:  "Bash",
 			ToolInput: mustJSON(map[string]string{"command": cmd}),
 		}
 		got := r.Evaluate(input)
 		if got.Decision == hookio.Approve {
-			t.Fatalf("cmd %q: got APPROVE (%s) — a flag-aware split of the clean arm misclassified a clustered force", cmd, got.Reason)
+			t.Fatalf("cmd %q: got APPROVE (%s) — a flag-aware split of the clean arm approved a spelling; the ruling forbids inspecting a clean flag at all", cmd, got.Reason)
 		}
-		if got.Decision != hookio.Ask {
-			t.Errorf("cmd %q: got %s (%s), want ask (unchanged by pg2-szadj)", cmd, got.Decision, got.Reason)
+		if got.Decision != hookio.Abstain {
+			t.Errorf("cmd %q: got %s (%s), want abstain — pg2-u0e0c gives every clean spelling ONE verdict", cmd, got.Decision, got.Reason)
+		}
+	}
+}
+
+// TestGit_Clean_EmitsEmptyHookOutput is the BOUNDARY-LEVEL assertion pg2-u0e0c's
+// acceptance criteria require, and it is not redundant with the rule-level test above:
+// asserting the internal Decision cannot show what Claude Code actually RECEIVES.
+// Abstain is the decision that emits `{}`, and `{}` is what defers the verdict to
+// Claude Code's own layers — so the property that matters is the OUTPUT, asserted here
+// on hookio.FormatOutput, the exact function cmd/claude-extended-tool-approver's
+// handlePreToolUse writes to stdout.
+//
+// The chain-level twin lives in the engine integration suite
+// (TestIntegration_CleanEmitsEmptyHookOutput), which additionally proves no LATER rule
+// in the production chain re-approves the leaf this one declined to answer.
+func TestGit_Clean_EmitsEmptyHookOutput(t *testing.T) {
+	for _, cmd := range []string{
+		"git clean -fdx",
+		"git clean -fdx && echo done",
+		"git clean",
+		"git clean -n",
+	} {
+		input := &hookio.HookInput{
+			ToolName:  "Bash",
+			ToolInput: mustJSON(map[string]string{"command": cmd}),
+		}
+		got := New(nil).Evaluate(input)
+		out := string(hookio.FormatOutput(got, nil))
+		if out != "{}" {
+			t.Errorf("cmd %q: emitted %s, want {} — anything else is a DECISION handed to Claude Code, and `permissionDecision: \"allow\"` would auto-approve an irreversible delete of untracked files", cmd, out)
 		}
 	}
 }

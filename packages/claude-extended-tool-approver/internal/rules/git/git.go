@@ -284,25 +284,94 @@ func (r *Rule) classify(pc cmdparse.ParsedCommand, subcmd string, rest []string)
 		}
 		return hookio.RuleResult{Decision: hookio.Approve, Reason: "git:modifying: git reset (soft) is safe", Module: r.Name()}
 	}
-	// clean: a DECISIVE Ask in every spelling, and it MUST STAY decisive.
+	// clean: ABSTAIN, IN EVERY SPELLING, WITH NO FLAG INSPECTION AT ALL — operator
+	// ruling 2026-07-30, recorded as pg2-4yy4r item 3 and implemented by pg2-u0e0c.
+	// The flag-aware row design that would have split this arm is REJECTED, not
+	// deferred.
 	//
-	// WHAT THE OPERATOR IS ANSWERING, written down here because its absence was half
-	// of pg2-szadj: this prompt is worth answering only while `clean.requireForce`
-	// is TRUE — git's default, and the invariant that makes git refuse to delete
-	// untracked files without an explicit force flag. A prior `git config
-	// clean.requireForce false` removes that refusal and leaves this prompt
-	// unchanged, so the operator would be answering under a belief that is no longer
-	// true. configVerdict gates that write for exactly this reason; the two are one
-	// control and neither is sufficient alone.
+	// WHY ABSTAIN AND NOT THE ADJACENT Ask. `git reset --hard`, one arm up, answers
+	// Ask, and so did this arm until the ruling. An Ask poses a QUESTION; the ruling is
+	// that this rule has no answer to add for `git clean` and the verdict belongs to
+	// Claude Code, which already has three layers for it — an auto-approving mode,
+	// then the settings pre-authorization, then the prompt. Abstain emits `{}`
+	// (hookio.FormatOutput), and `{}` is what hands it over.
 	//
-	// NO FLAG-AWARE RE-CLASSIFICATION HERE, deliberately (reviewed and rejected,
-	// 2026-07-30): the clustered form `-fdx` is a SINGLE token, so an exact-token
-	// `-f` test would sort the most destructive spelling into the "no force given"
-	// branch and approve it. Splitting this Ask by flag needs cmdparse.HasShortFlag
-	// and a ruling of its own; until then the unconditional Ask is the correct
-	// verdict for every spelling.
+	// THE CONSEQUENCE THE OPERATOR ACCEPTED, AND IT MUST NOT BE RE-LITIGATED HERE.
+	// `{}` means `git clean -fdx` still PROMPTS in `default` mode but is AUTO-APPROVED,
+	// unprompted, in an auto-approving mode. That was raised explicitly — the deletion
+	// of untracked files is irreversible and can take uncommitted work and un-ignored
+	// `.env` files with it, and it leaves this arm LESS strict than a force-push
+	// (Reject) or `reset --hard` (Ask) — and the ruling was REAFFIRMED against it.
+	// Raising this back to Ask, or up to Reject, needs a NEW ruling and its own bead.
+	//
+	// `-n` / `--dry-run` ARE ABSTAIN TOO, NOT Approve, and that is equally deliberate:
+	// the provably-safe read-only spellings were NOT carved out, so a dry run prompts in
+	// `default` mode. Carving them out would reintroduce the very flag test this arm
+	// exists in order not to have.
+	//
+	// WHY ONE UNIFORM VERDICT IS A STRICT SIMPLIFICATION AND NOT A WEAKENING. The
+	// design it replaces (Approve a no-force / `-n` / `--dry-run` clean, Abstain
+	// `-f…`) was refuted because THE FLAG TEST IS THE BUG SURFACE, in two independent
+	// ways:
+	//
+	//   - `-fdx` is a SINGLE token, so an exact-token `-f` test sorts the MOST
+	//     destructive spelling into the "no force given" branch and APPROVES it.
+	//   - git's parse-options accepts any UNAMBIGUOUS PREFIX of a long option, so
+	//     `--force` is also `--forc`, `--for`, `--fo` and `--f`. cmdparse.HasLongFlag
+	//     documents that it covers no abbreviation and that a caller needing them
+	//     "MUST NOT enumerate spellings by hand — that is how one gets missed", which
+	//     is the defect pg2-os1kq closed for `reset --hard` and `rebase -i`. Every
+	//     spelling a matcher misses is a silent misclassification, and the miss
+	//     direction is toward Approve.
+	//
+	// A verdict with no flag test can have neither defect. SO DO NOT ADD ONE: a diff
+	// that inspects a `clean` flag contradicts the ruling whichever way it then decides.
+	// This is also why `git branch`'s safe/unsafe principle was NOT widened to here —
+	// isBranchUnsafe reads flags, and pg2-fkmg4 scoped itself to `branch` saying so.
+	//
+	// THE `clean.requireForce` INTERLOCK IS GATED ELSEWHERE NOW, which closes the half
+	// of pg2-szadj that used to live in this comment. A prior `git config
+	// clean.requireForce false` removes git's own refusal to delete untracked files
+	// without an explicit force flag; while this arm posed a QUESTION, that write could
+	// leave the operator answering under a belief that was no longer true. configVerdict
+	// gates the write (measured 2026-07-31 against main @ 9c52f66b: `git config
+	// clean.requireForce false` and its `--global` form both answer Ask), and this arm
+	// now poses no question of its own, so the two-step concern is closed from both ends.
+	//
+	// MEASURED, this worktree, 2026-08-12, via scripts/probe-pg2-u0e0c.sh: every
+	// spelling in the acceptance criteria — bare, `-n`, `--dry-run`, `-f`, `-fdx`,
+	// `-df`, `--force`, `--forc`, `--for`, `--fo`, `--f` — emits `{}`, and so does the
+	// compound `git clean -fdx && echo done`. `{}` IS NOT AUTOMATIC when an Ask is
+	// flipped to an Abstain: a LATER rule in the chain can re-approve the leaf. It holds
+	// here for two independent reasons — `git` is absent from safecmds' approve lists
+	// (`alwaysSafe` / `safeReadCmds` / `safeWriteCmds`) and appears only in
+	// `hasSubcommands`, so no later rule approves a bare `git` leaf; and Abstain
+	// outranks Approve in hookio.MostRestrictive (Approve < Abstain < Ask < Reject,
+	// pg2-t4uyx), so the approving `echo done` sibling cannot green-light the compound.
+	// Both are asserted at the BOUNDARY rather than merely observed once — see
+	// TestGit_Clean_EmitsEmptyHookOutput here and the chain-level
+	// TestIntegration_CleanEmitsEmptyHookOutput in the engine suite.
+	//
+	// TWO SPELLINGS ARE NOT `{}`, AND NEITHER IS THIS ARM'S DOING — measured 2026-08-12:
+	//
+	//   - `GIT_DIR=/other/.git git clean -fdx` measures `deny`, from the `gitdir` rule
+	//     (module `git-directory`), whose Reject outranks this Abstain in the same fold.
+	//     It fires on the LITERAL `.git/` path in the env value, not on the redirection:
+	//     `GIT_DIR=/other git clean -fdx` and the `GIT_WORK_TREE=` form both measure
+	//     `{}`. So it is a `.git`-write refusal that happens to be spelled on a `clean`,
+	//     not a `clean` verdict, and this arm neither strengthens nor weakens it.
+	//   - `git clean --help` measures `allow`, from safecmds: isHelpRequest keys on
+	//     hasSubcommands["git"], so `<cmd> <subcmd> --help` is approved as a man-page
+	//     read. It was Ask before this change and is the ONE `git clean` leaf a later
+	//     rule approves. Correct — `--help` deletes nothing — but it is why the "no
+	//     later rule approves a `git` leaf" claim above is scoped to a BARE leaf. `git
+	//     clean -h` is NOT that form (isHelpRequest wants `--help`) and measures `{}`.
 	if subcmd == "clean" {
-		return hookio.RuleResult{Decision: hookio.Ask, Reason: "git:destructive: git clean is destructive", Module: r.Name()}
+		return hookio.RuleResult{
+			Decision: hookio.Abstain,
+			Reason:   "git: git clean irreversibly deletes untracked files; deferring to prompt",
+			Module:   r.Name(),
+		}
 	}
 	return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
 }
@@ -405,7 +474,7 @@ const (
 // MECHANISM, and the verdict follows the mechanism:
 //
 //	KEY                        MECHANISM  VERDICT  RATIONALE
-//	clean.requireForce         interlock  Ask      git's refusal to delete untracked files without an explicit force flag. `false` removes it AND leaves the `git clean` prompt unchanged, so the operator answers under a belief that is no longer true — the defect this bead names.
+//	clean.requireForce         interlock  Ask      git's refusal to delete untracked files without an explicit force flag. `false` removes it, and nothing at the `git clean` site shows that it is gone, so this write is the only place the loss is visible. (When pg2-szadj weighed the key, `git clean` still ASKED and the write left THAT prompt unchanged — the operator answering under a belief already falsified was the defect it named. pg2-u0e0c has since moved the `clean` arm to a uniform Abstain, which retires the misleading prompt; it does NOT retire this gate.)
 //	core.hooksPath             sink       Ask      points hook execution at a caller-chosen directory: arbitrary code on the NEXT git operation, whatever that operation is.
 //	core.pager                 sink       Ask      git spawns the value on nearly every read command; it is the same sink the pre-subcommand `-c core.pager=…` guard already defers.
 //	core.fsmonitor             sink       Ask      the value MAY be a hook program git runs on every index refresh. Over-approximate: the harmless `true`/`false` spelling is gated too (see the OVER-APPROXIMATIONS note).
@@ -854,13 +923,18 @@ func gatedConfigKey(args []string) (string, configGateClass, bool) {
 // `.git`-write guard deliberately exempts git's own arguments ("git is the
 // sanctioned porcelain"), so there was no second line of defence.
 //
-// WHAT MADE IT WORSE THAN A MISSING PROMPT: `git clean` still Asked. The operator
-// answering that prompt did so under the belief that git would refuse to delete
-// without an explicit force flag — an invariant the config write had already
-// removed. The prompt survived; the information behind it did not. See the `clean`
-// arm in classify, which now records that invariant, and gatedConfigKeys for the
-// per-key survey, the Ask-vs-Reject reasoning, and the invariant each verdict
-// rests on.
+// WHAT MADE IT WORSE THAN A MISSING PROMPT, AS THE `clean` ARM STOOD IN JULY 2026:
+// `git clean` still Asked. The operator answering that prompt did so under the belief
+// that git would refuse to delete without an explicit force flag — an invariant the
+// config write had already removed. The prompt survived; the information behind it did
+// not.
+//
+// THAT HALF IS NOW MOOT; THIS GATE IS NOT. pg2-u0e0c moved the `clean` arm to a
+// uniform Abstain (operator ruling pg2-4yy4r item 3), so this rule no longer poses a
+// question a config write could falsify. The write stays gated because removing git's
+// own refusal is still a real loss and this is the only site that sees it happen. See
+// the `clean` arm in classify, and gatedConfigKeys for the per-key survey, the
+// Ask-vs-Reject reasoning, and the invariant each verdict rests on.
 //
 // THE INVARIANTS THE GATED VERDICTS REST ON, so a later reader can check whether
 // they are still true:

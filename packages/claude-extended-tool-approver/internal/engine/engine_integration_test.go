@@ -2443,3 +2443,73 @@ func TestIntegration_BranchUnguardedEmitsEmptyHookOutput(t *testing.T) {
 		})
 	}
 }
+
+// TestIntegration_CleanEmitsEmptyHookOutput is the CHAIN-LEVEL boundary assertion for
+// pg2-u0e0c's `git clean` ruling (operator ruling pg2-4yy4r item 3, 2026-07-30: Abstain
+// for EVERY spelling, with no flag inspection; the flag-aware row design is REJECTED).
+//
+// IT EXISTS BECAUSE THE RULE-LEVEL ASSERTION IS INSUFFICIENT, and that is stated in the
+// acceptance criteria in terms. Flipping an Ask to an Abstain can produce `allow`:
+// Abstain means "this rule declines to answer", so evaluation CONTINUES and a later
+// rule may approve the leaf the git rule just let go. Only the production chain can
+// show it did not, and only the emitted BYTES can show what Claude Code receives —
+// hookio.FormatOutput is the same function cmd/claude-extended-tool-approver's
+// handlePreToolUse writes to stdout, and updatedInput is nil here because
+// handlePreToolUse only computes one for Approve/Ask.
+//
+// THE COMPOUND ROWS ARE THE OTHER HALF, and they fail differently. `git clean -fdx &&
+// echo done` has an APPROVING sibling leaf; if aggregation took the most PERMISSIVE
+// verdict, `echo done` would green-light the whole expression. It does not, because
+// hookio.MostRestrictive orders Approve < Abstain < Ask < Reject (pg2-t4uyx). A row
+// here going green is that fold inverting, which no `git clean` test could otherwise
+// see.
+//
+// TWO SPELLINGS ARE DELIBERATELY ABSENT, both measured 2026-08-12 and both correct.
+// `GIT_DIR=/other/.git git clean -fdx` emits a DENY from the `git-directory` rule,
+// whose Reject outranks Abstain in the same fold; it fires on the literal `.git/` path
+// in the env value rather than on the redirection, since `GIT_DIR=/other git clean
+// -fdx` emits `{}`. And `git clean --help` emits an ALLOW from safecmds, whose
+// isHelpRequest approves `<cmd> <subcmd> --help` as a man-page read — the ONE `git
+// clean` leaf a later rule approves, which is why the "no later rule approves a `git`
+// leaf" reasoning is scoped to a BARE leaf.
+func TestIntegration_CleanEmitsEmptyHookOutput(t *testing.T) {
+	t.Setenv("WORKSPACE_ROOT", "/Users/testuser/workspace")
+	projectRoot := "/Users/testuser/workspace/my-project"
+	eng := buildFullEngine(projectRoot, projectRoot)
+
+	emit := func(command string) string {
+		input := &hookio.HookInput{ToolName: "Bash", CWD: projectRoot, ToolInput: makeBashJSON(command)}
+		return string(hookio.FormatOutput(eng.EvaluateHook(input), nil))
+	}
+
+	for _, tt := range []struct{ name, command string }{
+		// The two rows the acceptance criteria name explicitly.
+		{"clustered force", "git clean -fdx"},
+		{"compound with an approving sibling", "git clean -fdx && echo done"},
+		// The uniform verdict, end to end: no spelling may differ from another.
+		{"bare", "git clean"},
+		{"dry run short", "git clean -n"},
+		{"dry run long", "git clean --dry-run"},
+		{"force short", "git clean -f"},
+		{"force long", "git clean --force"},
+		{"force abbreviated", "git clean --forc"},
+		{"force shortest abbreviation", "git clean --f"},
+		{"reversed cluster", "git clean -df"},
+		// More compound shapes: the approving sibling on the other side, and the
+		// other two operators.
+		{"approving sibling first", "echo start && git clean -fdx"},
+		{"sequence", "git clean -fdx; git status"},
+		{"or-else", "git clean -fdx || true"},
+		{"cd then clean", "cd /tmp && git clean -fdx"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			out := emit(tt.command)
+			if out != "{}" {
+				t.Errorf("command %q emitted %s, want {} — the ruling hands this verdict to Claude Code, and `permissionDecision: \"allow\"` would auto-approve an irreversible delete of untracked files", tt.command, out)
+			}
+			if strings.Contains(out, `"allow"`) {
+				t.Errorf("command %q emitted %s, which carries an allow decision", tt.command, out)
+			}
+		})
+	}
+}

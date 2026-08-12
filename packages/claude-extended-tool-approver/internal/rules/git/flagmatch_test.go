@@ -294,9 +294,13 @@ func TestGit_SiblingBeadVerdicts_Unchanged(t *testing.T) {
 		{"pg2-szadj config read behind -f", "git config -f .git/config --get core.fsmonitor", hookio.Approve},
 		{"pg2-szadj --unset of a gated key", "git config --unset clean.requireForce", hookio.Ask},
 		{"pg2-szadj git config set form", "git config set core.hooksPath /tmp/h", hookio.Ask},
-		{"pg2-u0e0c git clean stays a flag-blind ask", "git clean", hookio.Ask},
-		{"pg2-u0e0c git clean -fdx", "git clean -fdx", hookio.Ask},
-		{"pg2-u0e0c git clean --f", "git clean --f", hookio.Ask},
+		// These three were pinned as Ask when the `clean` arm was one, and they keep
+		// their PURPOSE at the new level: the arm is FLAG-BLIND, so all three must
+		// agree. `--f` is the abbreviation row — if it ever diverges from bare `git
+		// clean`, a long-flag test was reintroduced (pg2-u0e0c).
+		{"pg2-u0e0c git clean stays flag-blind", "git clean", hookio.Abstain},
+		{"pg2-u0e0c git clean -fdx", "git clean -fdx", hookio.Abstain},
+		{"pg2-u0e0c git clean --f", "git clean --f", hookio.Abstain},
 		// `git branch -D` was pinned here as Ask from pg2-bohpm until pg2-fkmg4's
 		// operator ruling (2026-07-31) moved every UNGUARDED `git branch` spelling to
 		// Abstain. The row stays, at its new verdict, because what it guards is that
@@ -630,9 +634,17 @@ func TestGit_BranchNegations_AreNotTheFlag(t *testing.T) {
 
 // TestGit_BranchScope_OtherSubcommandsUnchanged guards pg2-fkmg4's explicit scope
 // boundary. The operator stated the safe/unsafe principle generally but ruled it for
-// `git branch` ONLY, so no other subcommand's verdict may move — in particular the
-// flag-blind Asks (`git clean`) and the Rejects (`git push --force`, `git tag`) that
-// the same principle would rewrite if it were widened without a ruling.
+// `git branch` ONLY, so no other subcommand's verdict may move as a SIDE EFFECT of a
+// `branch` edit — in particular the flag-blind `git clean` and the Rejects (`git push
+// --force`, `git tag`) that the same principle would rewrite if it were widened without
+// a ruling.
+//
+// THE TWO `git clean` ROWS ARE Abstain, NOT Ask, SINCE pg2-u0e0c. That is its OWN
+// operator ruling (2026-07-30, pg2-4yy4r item 3), not the widening this test forbids —
+// `git clean` keeps ONE flag-blind verdict for every spelling, and pg2-fkmg4's
+// flag-reading predicate is still not reachable from it. What these rows guard is
+// therefore unchanged: the two must AGREE with each other, and neither may become
+// Approve.
 func TestGit_BranchScope_OtherSubcommandsUnchanged(t *testing.T) {
 	rows := []struct {
 		cmd  string
@@ -640,8 +652,8 @@ func TestGit_BranchScope_OtherSubcommandsUnchanged(t *testing.T) {
 	}{
 		{"git reset --hard HEAD~1", hookio.Ask},
 		{"git reset --soft HEAD~1", hookio.Approve},
-		{"git clean", hookio.Ask},
-		{"git clean -fdx", hookio.Ask},
+		{"git clean", hookio.Abstain},
+		{"git clean -fdx", hookio.Abstain},
 		{"git push --force origin main", hookio.Reject},
 		{"git push -f origin main", hookio.Reject},
 		{"git push --delete origin main", hookio.Reject},
