@@ -46,6 +46,9 @@ let
     ++ lib.optional (
       cfg.includeCoAuthoredBy != null
     ) ".includeCoAuthoredBy = ${builtins.toJSON cfg.includeCoAuthoredBy}"
+    ++ lib.optional (
+      cfg.disableClaudeAiConnectors != null
+    ) ".disableClaudeAiConnectors = ${builtins.toJSON cfg.disableClaudeAiConnectors}"
     ++ lib.optional (cfg.sandbox != null) ".sandbox = ${builtins.toJSON cfg.sandbox}"
     ++ lib.optional (
       cfg.sandbox == null && cfg.sandboxEnabled != null
@@ -176,6 +179,38 @@ in
         (default) is a deliberate no-op — a previously written
         `.includeCoAuthoredBy` is left in place, not deleted (top-level key, no
         escape hatch, unlike `promptCacheTtl`).
+      '';
+    };
+
+    disableClaudeAiConnectors = lib.mkOption {
+      type = lib.types.nullOr lib.types.bool;
+      default = null;
+      description = ''
+        Whether to stop auto-fetching the claude.ai account's MCP cloud
+        connectors. Claude Code's own settings schema defines the key as: "When
+        true in any settings source, claude.ai MCP cloud connectors are not
+        auto-fetched or connected. Only gates auto-fetched connectors — a
+        claudeai-proxy server passed explicitly (e.g. via `--mcp-config` or the
+        SDK `mcpServers` option) still follows the normal MCP config trust flow.
+        Any-source-true wins: a project can opt out, but a project-level false
+        cannot override a user-level true."
+
+        Consequences a consumer MUST weigh before setting `true`:
+
+        - It is ALL-OR-NOTHING. There is no per-connector form, so every
+          claude.ai connector goes inert together. Selective suppression exists
+          only as the enterprise `allowedMcpServers` / `deniedMcpServers` policy
+          keys, which require a root-owned `managed-settings.json`.
+        - A connector still WANTED after opting out MUST be re-declared as an
+          ordinary MCP server (`claude mcp add --scope user …`). Explicitly
+          configured servers are not gated by this key, so that is the supported
+          escape hatch.
+        - Servers from a project's own `.mcp.json` are unaffected — this gates
+          only the account-level auto-fetch.
+
+        `null` (default) is a deliberate no-op — a previously written
+        `.disableClaudeAiConnectors` is left in place, not deleted (top-level
+        key, no escape hatch, unlike `promptCacheTtl`).
       '';
     };
 

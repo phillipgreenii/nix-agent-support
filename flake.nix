@@ -1884,6 +1884,14 @@
                   thinkingSet = activationWith { showThinkingSummaries = true; };
                   coauthSet = activationWith { includeCoAuthoredBy = true; };
                   clearCtxSet = activationWith { showClearContextOnPlanAccept = true; };
+                  connectorsSet = activationWith { disableClaudeAiConnectors = true; };
+                  # An explicit `false` MUST still emit its assignment. The guard is
+                  # `!= null`, not truthiness, so a consumer that deliberately opts BACK
+                  # IN to claude.ai connectors gets `false` written rather than silently
+                  # dropped into the null no-op. Upstream resolves the key as
+                  # any-source-true-wins, so a written `false` is how a source records
+                  # "not disabled here" — it cannot override another source's `true`.
+                  connectorsFalse = activationWith { disableClaudeAiConnectors = false; };
                   sandboxSet = activationWith {
                     sandbox = {
                       enabled = true;
@@ -1911,6 +1919,8 @@
                 assert !(hasSub "del(.showThinkingSummaries)" allNull);
                 assert !(hasSub ".includeCoAuthoredBy = " allNull);
                 assert !(hasSub "del(.includeCoAuthoredBy)" allNull);
+                assert !(hasSub ".disableClaudeAiConnectors = " allNull);
+                assert !(hasSub "del(.disableClaudeAiConnectors)" allNull);
                 assert !(hasSub ".theme = " allNull);
                 assert !(hasSub "del(.theme)" allNull);
                 # Positive controls: a set value emits its assignment.
@@ -1919,6 +1929,8 @@
                 assert hasSub ".showThinkingSummaries = true" thinkingSet;
                 assert hasSub ".includeCoAuthoredBy = true" coauthSet;
                 assert hasSub ".showClearContextOnPlanAccept = true" clearCtxSet;
+                assert hasSub ".disableClaudeAiConnectors = true" connectorsSet;
+                assert hasSub ".disableClaudeAiConnectors = false" connectorsFalse;
                 # The sandbox object writes `.sandbox = <json>`; the sandboxEnabled alias
                 # writes the dotted `.sandbox.enabled` and NOT the object form. Matching
                 # `.sandbox = ` (space-equals) vs `.sandbox.enabled` keeps the two from
