@@ -323,8 +323,11 @@ func TestGitDir_ReadWriteAsymmetry(t *testing.T) {
 
 	// The asymmetry itself: same path, three distinct verdicts in increasing
 	// restrictiveness. This is the assertion a collapse of the direction split must
-	// break, whichever pair it collapses.
-	if !(read.Decision < copyOut.Decision && copyOut.Decision < write.Decision) {
+	// break, whichever pair it collapses. The property is NAMED rather than inlined
+	// under a `!` so it reads in the positive form the doc comment states it in
+	// (staticcheck QF1001 rejects the inline negated conjunction).
+	strictlyIncreasing := read.Decision < copyOut.Decision && copyOut.Decision < write.Decision
+	if !strictlyIncreasing {
 		t.Fatalf("directions on %s are not strictly increasing: read %v, copy-out %v, write %v",
 			path, read.Decision, copyOut.Decision, write.Decision)
 	}

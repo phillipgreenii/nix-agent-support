@@ -971,3 +971,82 @@ func TestBuildtools_BaseVerbIs_UnknownToolFailsClosed(t *testing.T) {
 		t.Error("baseVerbIs resolved a verb for a tool with no compiled policy")
 	}
 }
+
+// TestBuildtools_FirstSubcommand_StrictGuardTruthTable pins firstSubcommand's
+// strict guard over the COMPLETE boolean space its condition reads: strict ×
+// declared-value-flag × declared-allowed-flag × glued = 16 rows, all enumerated.
+//
+// It exists because that guard is the security-relevant one — it is what stops a
+// glued value (`--shell=/bin/x <verb>`) from being skipped as a single dash-token
+// so the real verb resolves and approves — and because the guard was rewritten
+// from `!(p.allowed[name] && !glued)` to a named `bareAllowed` for staticcheck
+// QF1001. Enumerating the space makes any future re-spelling of the condition
+// (De Morgan or otherwise) provably behavior-preserving rather than asserted to be.
+//
+// Every row uses the SAME argv shape — `<dash-token> VAL verb` — so the outcome
+// alone distinguishes the three reachable behaviors: "" (guard fired, nothing can
+// approve), "VAL" (the dash-token was skipped and consumed no following token), and
+// "verb" (the dash-token consumed VAL as its value, so the verb slot resolved).
+func TestBuildtools_FirstSubcommand_StrictGuardTruthTable(t *testing.T) {
+	const flag = "-f"
+	tests := []struct {
+		strict  bool
+		valFlag bool // flag is a declared value flag (arity 1)
+		allowed bool // flag is a declared allowed (boolean) flag
+		glued   bool // spelled `-f=VAL` rather than bare `-f`
+		want    string
+	}{
+		// Not strict: a dash-token is always skipped, so the guard is unreachable
+		// and only the declared arity moves the result.
+		{strict: false, valFlag: false, allowed: false, glued: false, want: "VAL"},
+		{strict: false, valFlag: false, allowed: false, glued: true, want: "VAL"},
+		{strict: false, valFlag: false, allowed: true, glued: false, want: "VAL"},
+		{strict: false, valFlag: false, allowed: true, glued: true, want: "VAL"},
+		{strict: false, valFlag: true, allowed: false, glued: false, want: "verb"},
+		{strict: false, valFlag: true, allowed: false, glued: true, want: "VAL"},
+		{strict: false, valFlag: true, allowed: true, glued: false, want: "verb"},
+		{strict: false, valFlag: true, allowed: true, glued: true, want: "VAL"},
+
+		// Strict + NOT a declared value flag: the guard's live quadrant. Only the
+		// BARE declared allowed flag survives; an undeclared flag dies either
+		// spelling, and an allowed flag carrying a glued value dies because a
+		// boolean-by-declaration flag taking a value contradicts the declaration.
+		{strict: true, valFlag: false, allowed: false, glued: false, want: ""},
+		{strict: true, valFlag: false, allowed: false, glued: true, want: ""},
+		{strict: true, valFlag: false, allowed: true, glued: false, want: "VAL"},
+		{strict: true, valFlag: false, allowed: true, glued: true, want: ""},
+
+		// Strict + a declared value flag: declared arity wins, guard never fires.
+		{strict: true, valFlag: true, allowed: false, glued: false, want: "verb"},
+		{strict: true, valFlag: true, allowed: false, glued: true, want: "VAL"},
+		{strict: true, valFlag: true, allowed: true, glued: false, want: "verb"},
+		{strict: true, valFlag: true, allowed: true, glued: true, want: "VAL"},
+	}
+	if len(tests) != 16 {
+		t.Fatalf("truth table has %d rows, want all 16 combinations", len(tests))
+	}
+	seen := map[[4]bool]bool{}
+	for _, tt := range tests {
+		key := [4]bool{tt.strict, tt.valFlag, tt.allowed, tt.glued}
+		if seen[key] {
+			t.Fatalf("duplicate combination %v in truth table", key)
+		}
+		seen[key] = true
+
+		p := flagPolicy{strict: tt.strict}
+		if tt.valFlag {
+			p.valueFlags = map[string]int{flag: 1}
+		}
+		if tt.allowed {
+			p.allowed = map[string]bool{flag: true}
+		}
+		tok := flag
+		if tt.glued {
+			tok = flag + "=x"
+		}
+		if got := firstSubcommand([]string{tok, "VAL", "verb"}, p); got != tt.want {
+			t.Errorf("firstSubcommand(%q strict=%v valFlag=%v allowed=%v) = %q, want %q",
+				tok, tt.strict, tt.valFlag, tt.allowed, got, tt.want)
+		}
+	}
+}

@@ -357,12 +357,19 @@ func firstSubcommand(args []string, p flagPolicy) string {
 			name, glued = a[:eq], true
 		}
 		n, ok := p.valueFlags[name]
-		if p.strict && !ok && !(p.allowed[name] && !glued) {
-			// Not a declared value flag, so it must be a declared allowed flag
-			// AND spelled bare. An allowed flag is boolean by declaration, so
-			// `--allowed=value` contradicts the declaration — which is exactly
-			// how a mis-declared dangerous flag (`--shell` listed as allowed)
-			// would otherwise smuggle its value past the verb slot.
+		// bareAllowed is the ONE shape a non-value-flag dash-token may take under a
+		// strict policy: a declared allowed flag, spelled BARE. An allowed flag is
+		// boolean by declaration, so `--allowed=value` contradicts the declaration —
+		// which is exactly how a mis-declared dangerous flag (`--shell` listed as
+		// allowed) would otherwise smuggle its value past the verb slot. The
+		// condition is NAMED rather than inlined as `!(p.allowed[name] && !glued)`
+		// so the guard still reads in the POSITIVE form the rule is stated in
+		// (staticcheck QF1001 rejects the inline negated conjunction); the extra map
+		// read when the policy is not strict is side-effect-free.
+		bareAllowed := p.allowed[name] && !glued
+		if p.strict && !ok && !bareAllowed {
+			// Neither a declared value flag nor a bare declared allowed flag: verb
+			// resolution ends here, and "" can never approve.
 			return ""
 		}
 		if !ok {
