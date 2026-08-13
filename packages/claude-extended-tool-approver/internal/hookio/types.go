@@ -60,6 +60,63 @@ func (d Decision) String() string {
 	}
 }
 
+// Provenance is the SECOND, EXPLICIT channel ADR 0044 adds beside Decision: for a
+// NoOpinion verdict it reports WHY there is no opinion.
+//
+// ADR 0043 narrowed NoOpinion to exactly one meaning — "handled, no gate" — and this
+// type MUST NOT be read as re-widening it. Decision still answers only "how
+// restrictive is this verdict?"; Provenance answers the ORTHOGONAL question "did any
+// rule form that verdict, or did the chain simply run out of rules?". The
+// restrictiveness order, MostRestrictive and the serialized "abstain" are untouched.
+//
+// WHY A CALLER NEEDS IT. A rule that delegates to Evaluator.EvaluateExpression gets a
+// bare RuleResult back, and an exhausted inner chain surfaces as the same terminal
+// NoOpinion a refusing rule produces (pg2-d0ja3). Without this channel the delegating
+// rule cannot tell "no rule models `seq 1 3`" from "safe-commands looked at
+// `rm -rf /etc` and would not clear it", so its only safe move is to escalate BOTH —
+// which is why the envvars fallback had to be an unconditional Ask and why the static
+// substitution allowlist had to be hand-extended per basename.
+//
+// FAIL-SAFE ZERO VALUE. ProvenanceRefusal is 0, so every RuleResult literal in the
+// tree — 150-odd of them — reads as a refusal without being touched, and a site that
+// forgets to declare its provenance can never be MISTAKEN FOR AN EXHAUSTION.
+// Exhaustion is the half that lets a consumer clear a body, so it must be claimed
+// explicitly and in exactly one place (engine.Evaluate's loop exhaustion).
+type Provenance int
+
+const (
+	// ProvenanceRefusal means a rule, or an engine floor, formed this verdict. It is
+	// the ZERO VALUE and therefore the default for every unannotated RuleResult.
+	ProvenanceRefusal Provenance = iota
+	// ProvenanceExhaustion means NO rule claimed the input: every rule in the chain
+	// reported ErrNotApplicable, none failed, and none refused. It is claimed by
+	// engine.Evaluate when the loop runs out, and it survives an expression-level
+	// fold only under the conditions engine.EvaluateExpression documents.
+	ProvenanceExhaustion
+)
+
+func (p Provenance) String() string {
+	if p == ProvenanceExhaustion {
+		return "exhaustion"
+	}
+	return "refusal"
+}
+
+// mergeProvenance folds two provenances CONSERVATIVELY: the result is an exhaustion
+// only if BOTH inputs are. One rule refusing is enough to make the pair a refusal, so
+// the merge is an AND over "exhaustion" and the fail-safe zero value wins by default.
+//
+// It exists so MostRestrictive stays ORDER-INDEPENDENT. Without it a tie between an
+// exhaustion leaf and a refusal leaf would resolve to whichever the caller happened to
+// fold first, and the verdict of `seq 1 3 && cat <<EOF` would depend on the order of
+// the operands.
+func mergeProvenance(a, b Provenance) Provenance {
+	if a == ProvenanceExhaustion && b == ProvenanceExhaustion {
+		return ProvenanceExhaustion
+	}
+	return ProvenanceRefusal
+}
+
 // ErrNotApplicable reports that this rule does not govern this input. It is a
 // CONTROL SIGNAL, not a failure (cf. fs.SkipDir): the engine's first-match chain
 // treats it as "continue to the next rule" and ignores the returned RuleResult
@@ -77,6 +134,67 @@ var ErrNotApplicable = errors.New("rule does not apply")
 // of spelling the pair out, so the "bare error, zero-value result" contract is
 // stated in exactly one place.
 func NotApplicable() (RuleResult, error) { return RuleResult{}, ErrNotApplicable }
+
+// refusalError is the concrete type behind ErrRefused. It DELIBERATELY matches
+// ErrNotApplicable under errors.Is, and that is the whole reason it is a type rather
+// than another package-level errors.New value.
+//
+// The match is a SUBTYPE claim, not a wrap. At the chain level a refusal says exactly
+// what ErrNotApplicable says — "do not stop here, keep going" — and adds one fact on
+// top: "and whatever you conclude, it cannot be less restrictive than the RuleResult I
+// returned". So every existing consumer that only knows ErrNotApplicable keeps
+// behaving as it does today, which is what makes the 46 site conversions in this
+// change test-compatible and makes an un-upgraded consumer fail SAFE (it merely loses
+// the floor, it does not mis-read a refusal as a verdict).
+//
+// It is NOT the wrap ADR 0043's Decision point 5 forbids, and the distinction is
+// worth stating because the shapes look alike. That prohibition guards two failures:
+// (i) BURYING ErrNotApplicable so errors.Is stops matching it, and (ii) making a
+// GENUINE FAILURE match it by accident, silently converting an error into "absent".
+// This type does neither. It never carries a cause, so nothing can be buried in it and
+// no failure can arrive wearing it — errors.Is(someRuleError, ErrNotApplicable) is
+// still false. It uses no fmt.Errorf("%w") and no errors.Join, so
+// TestErrNotApplicableIsNeverWrappedInSource still passes on its own terms.
+// TestRefusalIsANotApplicableSubtype pins the intended relationship in both
+// directions.
+type refusalError struct{}
+
+func (refusalError) Error() string {
+	return "rule refuses to clear this input (chain continues, floored)"
+}
+
+// Is makes a refusal match ErrNotApplicable — see refusalError's doc for why this is
+// a subtype claim and not the forbidden wrap.
+func (refusalError) Is(target error) bool { return target == ErrNotApplicable }
+
+// ErrRefused reports that this rule EXAMINED the input, will not clear it, and yet
+// must not stop the chain — the fourth chain outcome ADR 0044 adds.
+//
+// It is the outcome ADR 0043 had no room for. That ADR mapped every rule site onto
+// three cases, and the sites whose Abstain meant "I looked and this is not clearable,
+// but a LATER rule may still own it" had nowhere to go: a terminal NoOpinion would
+// SHADOW that later rule (Shape A/B), so they became ErrNotApplicable and their
+// REASONS were demoted to comments. 46 of those comments survive in the tree, each
+// opening "Former Reason, kept because it is the only record of WHY" — a written
+// record of information the vocabulary could not carry. This is where they go back.
+//
+// The engine folds the returned RuleResult into the leaf's verdict as a FLOOR through
+// MostRestrictive and continues the chain. So it can only ever make a leaf MORE
+// restrictive, it never shadows a later rule (the later rule still runs and its
+// Ask/Reject still wins), and it never suppresses a Reject.
+var ErrRefused error = refusalError{}
+
+// Refuse pairs an arbitrary verdict FLOOR with the sentinel. The floor may be any
+// Decision: NoOpinion for "I cannot clear this", Ask for "this needs a person" — the
+// difference from returning the same verdict with a nil error is only that the chain
+// KEEPS GOING, so a later rule's stronger verdict still wins and nothing is shadowed.
+func Refuse(floor RuleResult) (RuleResult, error) { return floor, ErrRefused }
+
+// Refused is the common case of Refuse: the NoOpinion floor, spelled as module+reason.
+// Provenance is left at its zero value ProvenanceRefusal, which is the point.
+func Refused(module, reason string) (RuleResult, error) {
+	return Refuse(RuleResult{Decision: NoOpinion, Reason: reason, Module: module})
+}
 
 // FromRecursion translates the verdict of a recursively-evaluated INNER expression
 // (Evaluator.EvaluateExpression, which returns a bare RuleResult) into the
@@ -97,6 +215,17 @@ func NotApplicable() (RuleResult, error) { return RuleResult{}, ErrNotApplicable
 // inner verdict with its own (envvars) must fold the RuleResult first — inside a
 // MostRestrictive fold NoOpinion is the floor and an error has no representation —
 // and apply this translation only to the folded result.
+//
+// ADR 0044 DELIBERATELY DOES NOT CHANGE THIS FUNCTION'S DECISION BEHAVIOUR, and the
+// restraint is the point rather than an omission. A NoOpinion inner verdict that is a
+// REFUSAL could now be forwarded as ErrRefused instead of ErrNotApplicable, which
+// would be the coherent end state — the outer leaf would keep the inner refusal as a
+// floor instead of dropping it. But nix, docker and kubectl all route through here, so
+// that conversion moves rows in the MORE-restrictive direction across three rules at
+// once, and ADR 0043's Consequences require each such conversion to land separately
+// with its own before/after measurement. It is recorded as follow-up work, not done
+// here. envvars needs the refusal channel for its own fold and so spells its
+// translation out locally rather than borrowing this one.
 func FromRecursion(inner RuleResult) (RuleResult, error) {
 	if inner.Decision == NoOpinion {
 		return NotApplicable()
@@ -109,6 +238,17 @@ type RuleResult struct {
 	Reason   string
 	Module   string
 	Trace    []TraceEntry // nil when tracing is disabled
+
+	// Provenance qualifies a NoOpinion Decision: did a rule form this verdict, or
+	// did the chain run out of rules? It is meaningful only for NoOpinion and is
+	// ignored for every other Decision (an Approve/Ask/Reject is affirmative by
+	// construction). NOT SERIALIZED and deliberately so: ADR 0043 pinned the four
+	// emitters of the "abstain" string and the live log holds tens of thousands of
+	// rows keyed on it, so this channel adds no column and no new persisted value.
+	//
+	// Its zero value is ProvenanceRefusal, so every existing literal is a refusal
+	// and only an explicit claim can be an exhaustion.
+	Provenance Provenance
 }
 
 // MostRestrictive returns whichever of current/candidate is more restrictive
@@ -125,9 +265,25 @@ type RuleResult struct {
 // would contribute the Approve identity and manufacture an approval, reinstating
 // pg2-wguam and pg2-2u5jf. Errors consequently have no representation in this
 // function's inputs at all: they are consumed at the engine's chain chokepoint.
+//
+// PROVENANCE (ADR 0044) is merged only on a TIE, and the asymmetry is deliberate:
+//
+//   - candidate STRICTLY MORE restrictive: the candidate IS the verdict and its
+//     provenance comes with it. The loser is discarded whole.
+//   - candidate STRICTLY LESS restrictive: discarded whole, provenance included. This
+//     is what keeps the neutral Approve seeds ("no redirections to evaluate", "no
+//     substitutions to evaluate") — which carry the zero-value refusal provenance —
+//     from tainting every fold they take part in.
+//   - TIE: current's Reason/Module win as before, and the provenances merge
+//     conservatively (exhaustion only if both are). Two equally-restrictive NoOpinions
+//     are jointly the verdict, so if either was a refusal the pair is one, and the
+//     result cannot depend on fold order.
 func MostRestrictive(current, candidate RuleResult) RuleResult {
 	if candidate.Decision > current.Decision {
 		return candidate
+	}
+	if candidate.Decision == current.Decision {
+		current.Provenance = mergeProvenance(current.Provenance, candidate.Provenance)
 	}
 	return current
 }
@@ -233,8 +389,8 @@ type WebFetchToolInput struct {
 
 // RuleModule is one rule in the engine's first-match-wins chain.
 //
-// Evaluate returns THREE distinguishable outcomes (ADR 0043), which the engine
-// discriminates at one chokepoint:
+// Evaluate returns FOUR distinguishable outcomes — ADR 0043's three plus ADR 0044's
+// refusal — which the engine discriminates at one chokepoint:
 //
 //	(res, nil)                       HANDLED — res.Decision is the verdict and the
 //	                                 chain STOPS here. NoOpinion is a legitimate
@@ -243,6 +399,10 @@ type WebFetchToolInput struct {
 //	(RuleResult{}, ErrNotApplicable) NOT MY BUSINESS — the chain CONTINUES and the
 //	                                 RuleResult is ignored. This is what the old
 //	                                 Abstain-as-loop-sentinel meant.
+//	(floor, ErrRefused)              REFUSED — I examined this and will not clear it,
+//	                                 but a LATER rule may still own it. The chain
+//	                                 CONTINUES and `floor` is folded into whatever it
+//	                                 concludes (hookio.Refused; ADR 0044).
 //	(RuleResult{}, otherErr)         COULD NOT DETERMINE — evidence gathering failed.
 //	                                 The engine records it per rule and continues.
 //
@@ -254,6 +414,14 @@ type WebFetchToolInput struct {
 // rule"). If the chain must STOP here it MUST be NoOpinion (ErrNotApplicable would
 // let a later rule approve — the shape pathsafety's agent-config write branch has,
 // required by ADR 0041's Decision).
+//
+// ADR 0044 splits that choice into THREE, and the new middle option is what most of
+// the converted sites actually meant: if a later rule must still act AND this rule has
+// nothing to say, ErrNotApplicable; if a later rule must still act BUT this rule has
+// looked and will not clear the input, ErrRefused; if the chain must stop here,
+// NoOpinion. Choosing ErrNotApplicable where ErrRefused is meant is the
+// APPROVAL-WIDENING mistake, because it lets the leaf be reported as an EXHAUSTION —
+// see Provenance.
 //
 // A rule that CANNOT complete an identity or ownership check MAY instead return its
 // own fail-closed verdict with a nil error; killshell does exactly that and its Ask
@@ -346,6 +514,16 @@ func IsSafeRedirectTarget(path string) bool {
 // only thing left is a verdict. An exhausted inner chain surfaces as the terminal
 // NoOpinion. A rule forwarding that verdict as its OWN must translate it — see
 // FromRecursion, which is where the ADR 0043 recursion-boundary rule lives.
+//
+// The returned RuleResult's Provenance is the ADR 0044 channel that makes that
+// NoOpinion actionable: ProvenanceExhaustion means no rule owned the inner expression
+// (so ceta's own verdict for it, standing alone, is `{}`), while ProvenanceRefusal
+// means a rule or an engine floor formed the verdict. A consumer MUST treat
+// ProvenanceRefusal as the default and MUST NOT infer safety from an exhaustion — an
+// exhaustion says only "ceta has no model for this", which is the SAME thing ceta
+// would answer for the expression standing alone, never that the expression is safe.
+// engine.EvaluateExpression documents the exact conditions under which an exhaustion
+// survives its fold.
 type Evaluator interface {
 	EvaluateExpression(expr string, stack []StackFrame, origin *HookInput) RuleResult
 }

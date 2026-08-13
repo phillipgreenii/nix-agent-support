@@ -1,5 +1,7 @@
 package hookio
 
+import "errors"
+
 // Verdict collapses a RuleModule.Evaluate pair into the single verdict a chain of
 // EXACTLY THAT ONE RULE would produce, so a caller holding one rule (a unit test,
 // or an adapter that owns no chain) can reason about it the way the engine does.
@@ -21,8 +23,33 @@ package hookio
 // honour a rule's fail-closed carve-out beyond whatever RuleResult that rule
 // already returned. TestVerdictHasNoProductionCallers pins that scope
 // mechanically.
+// PROVENANCE (ADR 0044) is set the same way engine.Evaluate sets it, so a one-rule
+// chain classifies identically to the real one. The Decision, Reason and Module of
+// every outcome are BYTE-IDENTICAL to before this change — only the new field moves —
+// so no existing assertion is affected:
+//
+//   - ErrRefused: the rule did not decide, but its FLOOR is a real contribution, so the
+//     manufactured verdict is folded WITH it exactly as the engine folds it. Discarding
+//     it here would make a one-rule chain disagree with the engine on every refusal —
+//     an Ask floor would read as an abstain — which is the whole reason this function
+//     exists.
+//   - ErrNotApplicable: nothing claimed the input and nothing failed — the one
+//     legitimate EXHAUSTION.
+//   - any other error: a genuine failure is NOT an exhaustion. Reporting one as such
+//     would let a systematically-failing resolver clear bodies wholesale, which is the
+//     fail-safe default's whole purpose.
 func Verdict(res RuleResult, err error) RuleResult {
 	if err != nil {
+		// ErrRefused matches ErrNotApplicable under errors.Is (see refusalError), so
+		// this order is load-bearing: the specific case MUST be tested first.
+		if errors.Is(err, ErrRefused) {
+			// The floor is `current`, so its Reason survives a tie with the reason-less
+			// manufactured verdict — matching engine.Evaluate's exhaustion fold.
+			return MostRestrictive(res, RuleResult{Decision: NoOpinion})
+		}
+		if errors.Is(err, ErrNotApplicable) {
+			return RuleResult{Decision: NoOpinion, Provenance: ProvenanceExhaustion}
+		}
 		return RuleResult{Decision: NoOpinion}
 	}
 	return res

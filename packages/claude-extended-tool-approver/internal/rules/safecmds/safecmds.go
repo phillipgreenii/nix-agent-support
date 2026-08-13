@@ -76,6 +76,26 @@ func (r *Rule) Name() string {
 	return "safe-commands"
 }
 
+// refuse is this rule's ADR 0044 refusal-and-continue return, and every site that
+// uses it carries the same shape: safe-commands KNOWS this command family, has
+// examined this invocation, will not clear it — and yet must not stop the chain,
+// because kubectl, build-tools and sqlite3 still run after it.
+//
+// ADR 0043 had no outcome for that. Those sites became ErrNotApplicable and their
+// reasons were demoted to comments opening "Former Reason, kept because it is the only
+// record of WHY". This restores each one as a real Reason, and the restoration is not
+// cosmetic: a not-applicable leaves the leaf indistinguishable from one NO rule ever
+// examined, so `rm -rf /etc` reported as a chain EXHAUSTION (measured on this tree,
+// 2026-08-13: every one of the 26 rules answered "rule does not apply"). A consumer
+// acting on an exhaustion — envvars' cleared-body predicate — would then have cleared
+// it. The refusal is what makes the classification true.
+//
+// It can only make a leaf MORE restrictive: the engine folds it as a floor and keeps
+// going, so a later rule's Ask or Reject still wins and nothing is shadowed.
+func (r *Rule) refuse(reason string) (hookio.RuleResult, error) {
+	return hookio.Refused(r.Name(), reason)
+}
+
 func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 	if input.ToolName != "Bash" {
 		return hookio.NotApplicable()
@@ -104,9 +124,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		}
 		if browsingCmds[basename] {
 			if hasRejectPath(pc.Args, pe) {
-				// Not applicable (ADR 0043): the chain must continue. Former Reason,
-				// kept because it is the only record of WHY: "safe-commands: " + basename + " references rejected path (deferred to claude-code)"
-				return hookio.NotApplicable()
+				return r.refuse("safe-commands: " + basename + " references rejected path (deferred to claude-code)")
 			}
 			continue
 		}
@@ -140,8 +158,13 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 				// the error keeps that, and never converts a genuine failure into a
 				// not-applicable (or the reverse).
 				result, err := r.Evaluate(syntheticInput)
+				// Forwarded WITH the RuleResult since ADR 0044: an inner REFUSAL's floor
+				// is the only record of why the inner command was not clearable, and
+				// dropping it would report `xargs sh -c '<refused>'` as a leaf nobody
+				// examined. A genuine failure still carries the zero RuleResult, so the
+				// pre-ADR-0044 behaviour is unchanged for that case.
 				if err != nil {
-					return hookio.RuleResult{}, err
+					return result, err
 				}
 				if result.Decision != hookio.Approve {
 					return result, nil
@@ -153,9 +176,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 			}
 			if browsingCmds[innerBase] {
 				if hasRejectPath(innerArgs, pe) {
-					// Not applicable (ADR 0043): the chain must continue. Former Reason,
-					// kept because it is the only record of WHY: "safe-commands: xargs " + innerBase + " references rejected path (deferred to claude-code)"
-					return hookio.NotApplicable()
+					return r.refuse("safe-commands: xargs " + innerBase + " references rejected path (deferred to claude-code)")
 				}
 				continue
 			}
@@ -163,9 +184,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 			if innerBase == "grep" || innerBase == "rg" {
 				fileArgs := cmdparse.SkipGrepPattern(innerBase, innerArgs)
 				if issue := readPathIssue(fileArgs, pe, ""); issue != "" {
-					// Not applicable (ADR 0043): the chain must continue. Former Reason,
-					// kept because it is the only record of WHY: "safe-commands: xargs " + innerBase + " " + issue + " (deferred to claude-code)"
-					return hookio.NotApplicable()
+					return r.refuse("safe-commands: xargs " + innerBase + " " + issue + " (deferred to claude-code)")
 				}
 				continue
 			}
@@ -174,17 +193,13 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 			// safe one to take for it.
 			if safeReadCmds[innerBase] {
 				if issue := readPathIssue(innerArgs, pe, ""); issue != "" {
-					// Not applicable (ADR 0043): the chain must continue. Former Reason,
-					// kept because it is the only record of WHY: "safe-commands: xargs " + innerBase + " " + issue + " (deferred to claude-code)"
-					return hookio.NotApplicable()
+					return r.refuse("safe-commands: xargs " + innerBase + " " + issue + " (deferred to claude-code)")
 				}
 				continue
 			}
 			if safeWriteCmds[innerBase] {
-				if unsafe, _ := hasUnsafeWritePath(innerArgs, pe); unsafe {
-					// Not applicable (ADR 0043): the chain must continue. Former Reason,
-					// kept because it is the only record of WHY: "safe-commands: xargs " + innerBase + " references non-writable path " + path + " (deferred to claude-code)"
-					return hookio.NotApplicable()
+				if unsafe, path := hasUnsafeWritePath(innerArgs, pe); unsafe {
+					return r.refuse("safe-commands: xargs " + innerBase + " references non-writable path " + path + " (deferred to claude-code)")
 				}
 				continue
 			}
@@ -195,17 +210,16 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		if (basename == "bash" || basename == "sh") && hasBashSyntaxCheckFlag(pc.Args) {
 			fileArgs := extractBashSyntaxCheckFiles(pc.Args)
 			if issue := readPathIssue(fileArgs, pe, ""); issue != "" {
-				// Not applicable (ADR 0043): the chain must continue. Former Reason,
-				// kept because it is the only record of WHY: "safe-commands: " + basename + " -n " + issue + " (deferred to claude-code)"
-				return hookio.NotApplicable()
+				return r.refuse("safe-commands: " + basename + " -n " + issue + " (deferred to claude-code)")
 			}
 			continue
 		}
 		// unzip: read archive, optionally write to -d destination or cwd
 		if basename == "unzip" {
 			result, err := evaluateUnzip(pc.Args, pe, cwd, r.Name())
+			// See the cp call site for why the RuleResult is forwarded with the error.
 			if err != nil {
-				return hookio.RuleResult{}, err
+				return result, err
 			}
 			if result.Decision != hookio.Approve {
 				return result, nil
@@ -216,9 +230,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		if basename == "jar" {
 			if len(pc.Args) >= 1 && (pc.Args[0] == "tf" || pc.Args[0] == "xf") {
 				if issue := readPathIssue(pc.Args[1:], pe, ""); issue != "" {
-					// Not applicable (ADR 0043): the chain must continue. Former Reason,
-					// kept because it is the only record of WHY: "safe-commands: jar " + pc.Args[0] + " " + issue + " (deferred to claude-code)"
-					return hookio.NotApplicable()
+					return r.refuse("safe-commands: jar " + pc.Args[0] + " " + issue + " (deferred to claude-code)")
 				}
 				continue
 			}
@@ -242,34 +254,26 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		// yq: read command unless -i/--inplace is present
 		if basename == "yq" {
 			if isYqInPlace(pc.Args) {
-				if unsafe, _ := hasUnsafeWritePath(pc.Args, pe); unsafe {
-					// Not applicable (ADR 0043): the chain must continue. Former Reason,
-					// kept because it is the only record of WHY: "safe-commands: yq -i references non-writable path " + path + " (deferred to claude-code)"
-					return hookio.NotApplicable()
+				if unsafe, path := hasUnsafeWritePath(pc.Args, pe); unsafe {
+					return r.refuse("safe-commands: yq -i references non-writable path " + path + " (deferred to claude-code)")
 				}
 				continue
 			}
 			if issue := readPathIssue(pc.Args, pe, ""); issue != "" {
-				// Not applicable (ADR 0043): the chain must continue. Former Reason,
-				// kept because it is the only record of WHY: "safe-commands: yq " + issue + " (deferred to claude-code)"
-				return hookio.NotApplicable()
+				return r.refuse("safe-commands: yq " + issue + " (deferred to claude-code)")
 			}
 			continue
 		}
 		// sed: read command unless -i/--in-place is present
 		if basename == "sed" {
 			if isSedInPlace(pc.Args) {
-				if unsafe, _ := hasUnsafeWritePath(pc.Args, pe); unsafe {
-					// Not applicable (ADR 0043): the chain must continue. Former Reason,
-					// kept because it is the only record of WHY: "safe-commands: sed -i references non-writable path " + path + " (deferred to claude-code)"
-					return hookio.NotApplicable()
+				if unsafe, path := hasUnsafeWritePath(pc.Args, pe); unsafe {
+					return r.refuse("safe-commands: sed -i references non-writable path " + path + " (deferred to claude-code)")
 				}
 				continue
 			}
 			if issue := readPathIssue(pc.Args, pe, programOperand("sed", pc.Args)); issue != "" {
-				// Not applicable (ADR 0043): the chain must continue. Former Reason,
-				// kept because it is the only record of WHY: "safe-commands: sed " + issue + " (deferred to claude-code)"
-				return hookio.NotApplicable()
+				return r.refuse("safe-commands: sed " + issue + " (deferred to claude-code)")
 			}
 			continue
 		}
@@ -283,9 +287,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 				return hookio.NotApplicable()
 			}
 			if issue := readPathIssue(pc.Args, pe, ""); issue != "" {
-				// Not applicable (ADR 0043): the chain must continue. Former Reason,
-				// kept because it is the only record of WHY: "safe-commands: gofmt " + issue + " (deferred to claude-code)"
-				return hookio.NotApplicable()
+				return r.refuse("safe-commands: gofmt " + issue + " (deferred to claude-code)")
 			}
 			continue
 		}
@@ -293,9 +295,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		if basename == "grep" || basename == "rg" {
 			fileArgs := cmdparse.SkipGrepPattern(basename, pc.Args)
 			if issue := readPathIssue(fileArgs, pe, ""); issue != "" {
-				// Not applicable (ADR 0043): the chain must continue. Former Reason,
-				// kept because it is the only record of WHY: "safe-commands: " + basename + " " + issue + " (deferred to claude-code)"
-				return hookio.NotApplicable()
+				return r.refuse("safe-commands: " + basename + " " + issue + " (deferred to claude-code)")
 			}
 			continue
 		}
@@ -304,17 +304,13 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		if basename == "jq" {
 			fileArgs := cmdparse.SkipJqValueFlags(pc.Args)
 			if issue := readPathIssue(fileArgs, pe, programOperand("jq", fileArgs)); issue != "" {
-				// Not applicable (ADR 0043): the chain must continue. Former Reason,
-				// kept because it is the only record of WHY: "safe-commands: jq " + issue + " (deferred to claude-code)"
-				return hookio.NotApplicable()
+				return r.refuse("safe-commands: jq " + issue + " (deferred to claude-code)")
 			}
 			continue
 		}
 		if safeReadCmds[basename] {
 			if issue := readPathIssue(pc.Args, pe, programOperand(basename, pc.Args)); issue != "" {
-				// Not applicable (ADR 0043): the chain must continue. Former Reason,
-				// kept because it is the only record of WHY: "safe-commands: " + basename + " " + issue + " (deferred to claude-code)"
-				return hookio.NotApplicable()
+				return r.refuse("safe-commands: " + basename + " " + issue + " (deferred to claude-code)")
 			}
 			continue
 		}
@@ -328,14 +324,16 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		// CONTENT, so `ls $d` is not an exfiltration primitive. Command substitution
 		// is also caught at the engine choke point for all commands.
 		if safeWriteCmds[basename] && argsHaveDynamicExpansion(pc.Args) {
-			// Not applicable (ADR 0043): the chain must continue. Former Reason,
-			// kept because it is the only record of WHY: "safe-commands: " + basename + " has a dynamically-expanded path arg (deferred to claude-code)"
-			return hookio.NotApplicable()
+			return r.refuse("safe-commands: " + basename + " has a dynamically-expanded path arg (deferred to claude-code)")
 		}
 		if basename == "cp" {
 			result, err := evaluateCp(pc.Args, pe, r.Name())
+			// `return result, err` rather than `return RuleResult{}, err`: since ADR
+			// 0044 the helper's non-nil error may be a REFUSAL, whose RuleResult is the
+			// floor and must not be dropped. For a genuine failure the helper returns
+			// the zero RuleResult anyway, so this is behaviour-preserving there.
 			if err != nil {
-				return hookio.RuleResult{}, err
+				return result, err
 			}
 			if result.Decision != hookio.Approve {
 				return result, nil
@@ -343,10 +341,8 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 			continue
 		}
 		if safeWriteCmds[basename] {
-			if unsafe, _ := hasUnsafeWritePath(pc.Args, pe); unsafe {
-				// Not applicable (ADR 0043): the chain must continue. Former Reason,
-				// kept because it is the only record of WHY: "safe-commands: " + basename + " references non-writable path " + path + " (deferred to claude-code)"
-				return hookio.NotApplicable()
+			if unsafe, path := hasUnsafeWritePath(pc.Args, pe); unsafe {
+				return r.refuse("safe-commands: " + basename + " references non-writable path " + path + " (deferred to claude-code)")
 			}
 			continue
 		}
@@ -722,9 +718,7 @@ func evaluateCp(args []string, pe *patheval.PathEvaluator, module string) (hooki
 
 	if targetDir != "" {
 		if looksLikePath(targetDir) && !pe.Evaluate(targetDir).CanWrite() {
-			// Not applicable (ADR 0043): the chain must continue. Former Reason,
-			// kept because it is the only record of WHY: "safe-commands: cp target directory is not writable " + targetDir + " (deferred to claude-code)"
-			return hookio.NotApplicable()
+			return hookio.Refused(module, "safe-commands: cp target directory is not writable "+targetDir+" (deferred to claude-code)")
 		}
 		for _, a := range args {
 			if strings.HasPrefix(a, "-") {
@@ -734,9 +728,7 @@ func evaluateCp(args []string, pe *patheval.PathEvaluator, module string) (hooki
 				continue
 			}
 			if looksLikePath(a) && !pe.Evaluate(a).CanRead() {
-				// Not applicable (ADR 0043): the chain must continue. Former Reason,
-				// kept because it is the only record of WHY: "safe-commands: cp source references non-readable path " + a + " (deferred to claude-code)"
-				return hookio.NotApplicable()
+				return hookio.Refused(module, "safe-commands: cp source references non-readable path "+a+" (deferred to claude-code)")
 			}
 		}
 		return hookio.RuleResult{Decision: hookio.Approve, Reason: "safe-commands: cp with known paths", Module: module}, nil
@@ -759,16 +751,12 @@ func evaluateCp(args []string, pe *patheval.PathEvaluator, module string) (hooki
 
 	dest := pathArgs[len(pathArgs)-1]
 	if !pe.Evaluate(dest).CanWrite() {
-		// Not applicable (ADR 0043): the chain must continue. Former Reason,
-		// kept because it is the only record of WHY: "safe-commands: cp destination is not writable " + dest + " (deferred to claude-code)"
-		return hookio.NotApplicable()
+		return hookio.Refused(module, "safe-commands: cp destination is not writable "+dest+" (deferred to claude-code)")
 	}
 
 	for _, src := range pathArgs[:len(pathArgs)-1] {
 		if !pe.Evaluate(src).CanRead() {
-			// Not applicable (ADR 0043): the chain must continue. Former Reason,
-			// kept because it is the only record of WHY: "safe-commands: cp source references non-readable path " + src + " (deferred to claude-code)"
-			return hookio.NotApplicable()
+			return hookio.Refused(module, "safe-commands: cp source references non-readable path "+src+" (deferred to claude-code)")
 		}
 	}
 
@@ -905,9 +893,7 @@ func evaluateUnzip(args []string, pe *patheval.PathEvaluator, cwd string, module
 	// Validate archive path is readable
 	if archivePath != "" && looksLikePath(archivePath) {
 		if !pe.Evaluate(archivePath).CanRead() {
-			// Not applicable (ADR 0043): the chain must continue. Former Reason,
-			// kept because it is the only record of WHY: "safe-commands: unzip archive references unknown path " + archivePath + " (deferred to claude-code)"
-			return hookio.NotApplicable()
+			return hookio.Refused(module, "safe-commands: unzip archive references unknown path "+archivePath+" (deferred to claude-code)")
 		}
 	}
 
@@ -922,9 +908,7 @@ func evaluateUnzip(args []string, pe *patheval.PathEvaluator, cwd string, module
 		writeDest = cwd
 	}
 	if looksLikePath(writeDest) && !pe.Evaluate(writeDest).CanWrite() {
-		// Not applicable (ADR 0043): the chain must continue. Former Reason,
-		// kept because it is the only record of WHY: "safe-commands: unzip destination is not writable " + writeDest + " (deferred to claude-code)"
-		return hookio.NotApplicable()
+		return hookio.Refused(module, "safe-commands: unzip destination is not writable "+writeDest+" (deferred to claude-code)")
 	}
 
 	return hookio.RuleResult{Decision: hookio.Approve, Reason: "safe-commands: unzip with known paths", Module: module}, nil

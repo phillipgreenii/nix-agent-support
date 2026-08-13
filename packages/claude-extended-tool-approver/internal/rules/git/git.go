@@ -60,6 +60,19 @@ func New(eval *patheval.PathEvaluator) *Rule {
 	return &Rule{eval: eval}
 }
 
+// refuse is this rule's ADR 0044 refusal-and-continue return: git OWNS this leaf, has
+// examined it, will not clear it, and yet must not stop the chain. It restores the
+// Reason ADR 0043 had to demote to a comment at each of these sites.
+//
+// The restoration is what makes the leaf report as a REFUSAL instead of as a chain
+// EXHAUSTION (hookio.Provenance). Without it `git clean -fd` and `git reset --hard`
+// were indistinguishable from a basename no rule has ever heard of, so a consumer
+// acting on an exhaustion would have cleared them — and these are the destructive
+// spellings the rule exists to keep out of an auto-approval.
+func (r *Rule) refuse(reason string) (hookio.RuleResult, error) {
+	return hookio.Refused(r.Name(), reason)
+}
+
 func (r *Rule) Name() string {
 	return "git"
 }
@@ -83,9 +96,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		// pre-subcommand span so `git commit -c <commit>` (a different flag) and
 		// `git -C <path>` are NOT falsely abstained.
 		if hasGitConfigInjection(pc.Args) {
-			// Not applicable (ADR 0043): the chain must continue. Former Reason,
-			// kept because it is the only record of WHY: "git: -c/--config-env injects config; deferring to prompt"
-			return hookio.NotApplicable()
+			return r.refuse("git: -c/--config-env injects config; deferring to prompt")
 		}
 		chdirs, subcmd, rest := cmdparse.GitInvocation(pc.Args)
 		if subcmd == "" {
@@ -98,7 +109,12 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		// demotes an Approve, and there is no Approve to demote here.
 		res, err := r.classify(pc, subcmd, rest)
 		if err != nil {
-			return hookio.RuleResult{}, err
+			// `res` is forwarded WITH the error since ADR 0044: classify's error may be
+			// a REFUSAL whose RuleResult is the floor, and dropping it would report
+			// `git clean -fd` / `git reset --hard` as a leaf NO rule examined. For a
+			// not-applicable or a genuine failure `res` is the zero value, so the
+			// pre-ADR-0044 `return RuleResult{}, err` is unchanged for both.
+			return res, err
 		}
 		// THE ENV SPELLING OF THE `-c` INJECTION ABOVE (pg2-a12rl). A
 		// `GIT_CONFIG_*` assignment on this leaf hands git configuration of the
@@ -124,9 +140,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		// Order against the chdir demotion below does not matter — both withdraw the
 		// same Approve and return the same not-applicable.
 		if res.Decision == hookio.Approve && hasGitConfigEnvInjection(pc) {
-			// Not applicable (ADR 0043): the chain must continue. Former Reason,
-			// kept because it is the only record of WHY: "git: a GIT_CONFIG_* env assignment injects config; deferring to prompt"
-			return hookio.NotApplicable()
+			return r.refuse("git: a GIT_CONFIG_* env assignment injects config; deferring to prompt")
 		}
 		// THE ENV SPELLING THAT SKIPS THE CONFIG KEY ENTIRELY (pg2-6c85x). The block
 		// above screens the variables that hand git CONFIGURATION; these hand it the
@@ -150,9 +164,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		// Order against the sibling demotions does not matter — all withdraw the same
 		// Approve and return the same not-applicable.
 		if res.Decision == hookio.Approve && hasGitProgramEnvVar(pc) {
-			// Not applicable (ADR 0043): the chain must continue. Former Reason,
-			// kept because it is the only record of WHY: "git: a GIT_* env assignment names the program git will execute; deferring to prompt"
-			return hookio.NotApplicable()
+			return r.refuse("git: a GIT_* env assignment names the program git will execute; deferring to prompt")
 		}
 		// A `-C <path>` chdir runs the subcommand against a directory other than
 		// the invocation CWD. When the rule would otherwise Approve, withdraw the
@@ -164,9 +176,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		// unknown zone (pg2-b3eow). Gated to a non-empty -C so a bare git command
 		// keeps its verdict regardless of the CWD's zone.
 		if res.Decision == hookio.Approve && !r.chdirSafe(input.CWD, chdirs, subcmd) {
-			// Not applicable (ADR 0043): the chain must continue. Former Reason,
-			// kept because it is the only record of WHY: "git: -C target directory is unsafe for a " + subcmd + " (deferred to claude-code)"
-			return hookio.NotApplicable()
+			return r.refuse("git: -C target directory is unsafe for a " + subcmd + " (deferred to claude-code)")
 		}
 		return res, nil
 	}
@@ -253,9 +263,7 @@ func (r *Rule) classify(pc cmdparse.ParsedCommand, subcmd string, rest []string)
 	// (`GIT_DIR=/other git branch -d foo`) and the `-C <path>` chdir demotion applying
 	// to a safe `git branch` exactly as they did before. See isBranchUnsafe.
 	if subcmd == "branch" && isBranchUnsafe(rest) {
-		// Not applicable (ADR 0043): the chain must continue. Former Reason,
-		// kept because it is the only record of WHY: "git: git branch with git's own guard removed (-D/-M/-C, or an explicit -f/--force); deferring to prompt"
-		return hookio.NotApplicable()
+		return r.refuse("git: git branch with git's own guard removed (-D/-M/-C, or an explicit -f/--force); deferring to prompt")
 	}
 	if readOnlySubcommands[subcmd] {
 		return hookio.RuleResult{
@@ -288,9 +296,7 @@ func (r *Rule) classify(pc cmdparse.ParsedCommand, subcmd string, rest []string)
 	if subcmd == "rebase" {
 		if hasFlag(rest, "-i") || cmdparse.HasLongFlagPrefix(rest, "interactive") {
 			if !hasSequenceEditorEnvVar(pc) {
-				// Not applicable (ADR 0043): the chain must continue. Former Reason,
-				// kept because it is the only record of WHY: "git rebase -i requires editor"
-				return hookio.NotApplicable()
+				return r.refuse("git rebase -i requires editor")
 			}
 		}
 		if hasRedirectEnvVar(pc) {
@@ -415,9 +421,8 @@ func (r *Rule) classify(pc cmdparse.ParsedCommand, subcmd string, rest []string)
 			return hookio.RuleResult{Decision: hookio.Ask, Reason: "git command with redirected context", Module: r.Name()}, nil
 		}
 		if cmdparse.HasLongFlagPrefix(rest, "hard") {
-			// Not applicable (ADR 0043): the chain must continue. Former Reason,
-			// kept because it is the only record of WHY: "git:destructive: git reset --hard is destructive — not prompted by this rule per operator ruling 2026-07-30, " + "deferred to claude-code (auto-approve mode, then settings, then the prompt)"
-			return hookio.NotApplicable()
+			return r.refuse("git:destructive: git reset --hard is destructive — not prompted by this rule per operator ruling 2026-07-30, " +
+				"deferred to claude-code (auto-approve mode, then settings, then the prompt)")
 		}
 		return hookio.RuleResult{Decision: hookio.Approve, Reason: "git:modifying: git reset (soft) is safe", Module: r.Name()}, nil
 	}
@@ -504,9 +509,17 @@ func (r *Rule) classify(pc cmdparse.ParsedCommand, subcmd string, rest []string)
 	//     later rule approves a `git` leaf" claim above is scoped to a BARE leaf. `git
 	//     clean -h` is NOT that form (isHelpRequest wants `--help`) and measures `{}`.
 	if subcmd == "clean" {
-		// Not applicable (ADR 0043): the chain must continue. Former Reason,
-		// kept because it is the only record of WHY: "git: git clean irreversibly deletes untracked files; deferring to prompt"
-		return hookio.NotApplicable()
+		// `--help` IS CARVED OUT, and it is the one carve-out in this file's ADR 0044
+		// conversion. The note above records that `git clean --help` is the single
+		// `git clean` leaf a LATER rule approves (safecmds' isHelpRequest, as a man-page
+		// read) and that it measures `allow` today. A refusal floors that Approve to
+		// abstain, so refusing here would take a measured allow off a leaf that deletes
+		// nothing — a regression, and one this rule has no reason to want. `git clean -h`
+		// is not this form and keeps its refusal, exactly as it keeps its `{}` today.
+		if cmdparse.HasLongFlagPrefix(rest, "help") {
+			return hookio.NotApplicable()
+		}
+		return r.refuse("git: git clean irreversibly deletes untracked files; deferring to prompt")
 	}
 	return hookio.NotApplicable()
 }

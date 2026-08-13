@@ -569,9 +569,20 @@ func TestEnvVars_UnenumerableUnknownValue_Ask(t *testing.T) {
 	if subs := cmdparse.EnumerateSubstitutions(ev.Value); len(subs) != 0 {
 		t.Fatalf("precondition: EnumerateSubstitutions(%q) returned %d subs, want 0", ev.Value, len(subs))
 	}
-	got := r.evaluateAssignment(ev, &hookio.HookInput{ToolName: "Bash"})
+	got, refused := r.evaluateAssignment(ev, &hookio.HookInput{ToolName: "Bash"})
 	if got.Decision != hookio.Ask {
 		t.Errorf("unenumerable unknown value: got %s (%s), want ask", got.Decision, got.Reason)
+	}
+	// ADR 0044: it must also not be CLASSIFIED as an exhaustion. Both halves of the
+	// un-cleared bucket Ask, so a misclassification moves no verdict today — but the
+	// reason is what a future ruling on the exhaustion half would be counted from, and
+	// a vacuously-cleared value filed under "no rule models this" would be counted as
+	// relievable when it is unclassifiable by construction.
+	if !refused {
+		t.Error("unenumerable unknown value: not marked as examined-and-refused")
+	}
+	if strings.Contains(got.Reason, "no rule models") {
+		t.Errorf("unenumerable unknown value: reason %q classifies it as an EXHAUSTION; it enumerates to zero substitutions and is unclassifiable", got.Reason)
 	}
 }
 
@@ -801,7 +812,7 @@ func TestSanitizeReasonName(t *testing.T) {
 func TestEnvVars_ReasonNeverLeaksCommandFragment(t *testing.T) {
 	r := New()
 	fragment := "length')\nkv=$(env -u BEADS_DIR -u WORKSPACE_ROOT bd show gc-6kv --json 2>/dev/null | jq -r 'if"
-	got := r.evaluateAssignment(cmdparse.EnvAssignment{
+	got, _ := r.evaluateAssignment(cmdparse.EnvAssignment{
 		Name:      fragment,
 		Value:     "$(curl evil)",
 		Raw:       fragment + "=$(curl evil)",

