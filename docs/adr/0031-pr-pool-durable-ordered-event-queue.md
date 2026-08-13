@@ -1,8 +1,34 @@
 # pr-pool core holds a durable, ordered, de-duped, TTL-bounded event queue
 
-**Status**: Accepted
+**Status**: Accepted (Amended in part by `DEC-EVENT-1`)
 **Date**: 2026-07-24
 **Deciders**: Phillip Green II
+
+> **Amended in part 2026-08-13 by `DEC-EVENT-1`** (uuid `f2bbe7cf-726d-4ea1-99f5-9582ef4d16c4`, in
+> `phillipgreenii-nix-agent-support · packages/pr-pool/docs/decisions` —
+> [`event.md`](../../packages/pr-pool/docs/decisions/event.md)). The queue decision below **stands**:
+> durable, ordered, de-duped, at-least-once, retry-only-until-acceptance, per-consumer serial FIFO,
+> consumer-enforced capacity, opt-in early eviction. What changed is the **expiry bound**. The
+> event's duration-valued `ttl` field is **gone**, replaced by an optional `at` (the source stamp,
+> defaulting to the core's ingest-now) and an optional `expiresAt` (an **absolute instant**,
+> defaulting to `at`) — `INV-EVT-1`, `INV-EVT-4`. A reader MUST read every "until its TTL" phrasing
+> below against that shape, and MUST treat these three as no longer the contract:
+>
+> - Requirements 3, 5, 6 and 7 state the bound as a positive duration. Because both replacement
+>   fields default, the default event is **born expired**, so the default behavior is "offer once to
+>   every matching consumer, then drop".
+> - **Retention** runs through `expiresAt` **and** the last attempt any matching consumer is still
+>   owed — not to a TTL boundary. Under the default that collapses the de-duplication window
+>   (`INV-EVT-3`) to roughly one dispatch cycle, so a pull source's next-trigger re-emit is **not**
+>   absorbed.
+> - The **new-listener catch-up** benefit claimed under Positive, and the half of the
+>   opt-in-early-eviction trade-off that rests on it, are **withdrawn**: an event is retained past
+>   acceptance so that every matching consumer still owed an attempt gets one and so de-duplication
+>   still covers delivered ids — explicitly **not** so a late-binding consumer can pick it up.
+>   Consequently the "keep TTLs small" guidance below now reads "leave `expiresAt` unset unless
+>   retries are wanted", because `expiresAt` **is** the retry window.
+>
+> The behavior set also renamed this ADR's **listener** to **handler**; they are the same actor.
 
 ## Context
 
@@ -105,5 +131,12 @@ a listener that needs current truth looks it up itself.
   behavior.
 - The best-effort **`crashing` lifecycle signal** (`INV-LIFE-1`) is unchanged: it remains
   best-effort. Only event **delivery** is made durable; the lifecycle signal is a separate concern.
-- **TTL clock origin** (event `at` vs ingest time) is left as an open question (`OQ-EVT-TTL-ORIGIN`,
-  recorded in the pr-pool invariants).
+- **TTL clock origin — resolved by restructure, not answered.** This ADR left open which instant
+  starts the expiry clock (the event's `at`, or the moment the core ingested it), and the pr-pool
+  behavior set carried that as an open question. Expiry then became an **absolute instant**
+  (`expiresAt`, defaulting to `at`, itself defaulting to the core's ingest-now), and an absolute
+  instant has no origin to be measured from — so the question lost its content and was **dissolved
+  rather than decided in favor of either candidate**. The open question is therefore deleted from the
+  pr-pool behavior set, not marked answered there; the resolution and its behavior consequences are
+  recorded as [`DEC-EVENT-1`](../../packages/pr-pool/docs/decisions/event.md), which names this ADR
+  as the decision whose residue it closes.
