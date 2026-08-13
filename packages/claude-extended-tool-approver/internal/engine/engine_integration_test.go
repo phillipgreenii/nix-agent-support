@@ -729,6 +729,83 @@ func TestIntegration_SubstitutionBodyRecursion(t *testing.T) {
 	}
 }
 
+// TestIntegration_F3NextFreeIdProbeStillPrompts PINS pg2-mgs91's ruling on the
+// command that bead was filed about, end to end through the real chain.
+//
+// THE COMMAND is the `next-free-id?` row of this repo's own global CLAUDE.md
+// "Premise Freshness" table — the probe an agent runs before landing an ADR to check
+// that the number it drafted against is still free. pg2-qcw5w's census found it
+// prompting on every single use: 6 of the 8 rows that census collected.
+//
+// THE RULING has two halves, and this test is here because the second half is a
+// DECISION rather than a defect, so it must be VISIBLE and not merely emergent:
+//
+//  1. `git ls-tree` was missing from cmdparse's gitReadSubcommands and is now added
+//     — it is a pure metadata read. The `justTheLsTree` row below is the proof that
+//     the addition has effect through the whole chain, not just in cmdparse's unit
+//     test: the same body, alone in a substitution, APPROVES.
+//  2. The static allowlist's sole-simple-command shape test was reviewed and
+//     DELIBERATELY NOT relaxed to admit a pipeline of individually-allowlisted
+//     stages. See cmdparse.IsSafeSubstitutionBody's DECLINED note for the argument
+//     and ADR 0039's Alternatives Considered, "Shape-gated approval", for the
+//     in-repo precedent.
+//
+// SO THE PROBE STILL PROMPTS, and that is the accepted answer, not an unfinished
+// one. It is a 4-stage pipeline, so half 2 floors it regardless of what
+// gitReadSubcommands contains. Anyone reading the `ls-tree` addition as "the probe
+// is fixed now" is reading it wrong, and this row is what tells them so.
+//
+// Do NOT "fix" this test by relaxing the shape test to make the probe approve. That
+// reverses a recorded decision; reopen it on the bead first. If it is ever reopened
+// and the relaxation is adopted, this row's expectation changes IN THE SAME COMMIT as
+// the code and the DECLINED note — never on its own.
+func TestIntegration_F3NextFreeIdProbeStillPrompts(t *testing.T) {
+	t.Setenv("WORKSPACE_ROOT", "/Users/testuser/workspace")
+	projectRoot := "/Users/testuser/workspace/my-project"
+	cwd := projectRoot
+	eng := buildFullEngine(projectRoot, cwd)
+
+	// The probe VERBATIM from the CLAUDE.md table, and the two reductions that
+	// isolate which half of the ruling each verdict comes from.
+	const wholeProbe = `printf '%04d\n' "$(( 10#$(git ls-tree -r --name-only main -- docs/adr | rg -o '/(\d{4})-' -r '$1' | sort -n | tail -1) + 1 ))"`
+	const justThePipeline = `echo "$(git ls-tree -r --name-only main -- docs/adr | rg -o '/(\d{4})-' -r '$1' | sort -n | tail -1)"`
+	const justTheLsTree = `echo "$(git ls-tree -r --name-only main -- docs/adr)"`
+
+	for _, tt := range []struct {
+		name    string
+		command string
+		want    hookio.Decision
+		why     string
+	}{
+		{
+			name:    "the whole F-3 probe still prompts",
+			command: wholeProbe,
+			want:    hookio.NoOpinion,
+			why:     "the substitution body is a 4-stage pipeline, which the static allowlist's shape test refuses by design",
+		},
+		{
+			name:    "the pipeline alone still prompts",
+			command: justThePipeline,
+			want:    hookio.NoOpinion,
+			why:     "same shape test; the arithmetic wrapper is not what floors the probe",
+		},
+		{
+			name:    "the bare git ls-tree body APPROVES",
+			command: justTheLsTree,
+			want:    hookio.Approve,
+			why:     "gitReadSubcommands now admits ls-tree, so a sole-simple-command body of it clears the floor",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			in := &hookio.HookInput{ToolName: "Bash", CWD: cwd, ToolInput: makeBashJSON(tt.command)}
+			if got := eng.EvaluateHook(in); got.Decision != tt.want {
+				t.Errorf("EvaluateHook(%q) = %s (%s: %s), want %s — %s",
+					tt.command, got.Decision, got.Module, got.Reason, tt.want, tt.why)
+			}
+		})
+	}
+}
+
 // TestIntegration_HashInAMultiLineQuotedSpanNeverHidesASubstitution is the SECURITY
 // half of the multi-line-quoted-`#` defect. The PARSEABILITY half is
 // cmdparse's TestFlip_HashInsideAQuotedArgumentIsNotAComment (owed by pg2-fez3d);

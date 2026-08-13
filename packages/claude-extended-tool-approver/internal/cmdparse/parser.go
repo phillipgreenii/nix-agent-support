@@ -50,9 +50,77 @@ var fileReaderSubstitutions = map[string]bool{
 
 // gitReadSubcommands: git subcommands that only read metadata (no diff/show/log —
 // those honor textconv/external-diff, an RCE surface a hook cannot neutralize).
+//
+// ADMISSION TEST (pg2-mgs91 audit). An entry must satisfy ALL FIVE. They are written
+// out so a later reader RE-DERIVES an entry rather than inheriting it, and so a
+// candidate's rejection does not have to be re-argued from scratch:
+//
+//  1. It emits no object CONTENT. Content emission is what reaches the
+//     clean/textconv/`diff.external` filter chain, and every link in that chain is a
+//     PROGRAM NAMED BY REPO-LOCAL CONFIG (`.gitattributes` + `.git/config`) — so a
+//     command that merely "reads" executes attacker-controlled code. This is the
+//     original one-line rationale above, unchanged; it is criterion 1 because it
+//     disposes of most candidates.
+//  2. No FLAG turns it into a content path or names a program. The lookup below keys
+//     on `tokens[1]` ALONE, so admitting a subcommand admits EVERY spelling of it. A
+//     subcommand with one dangerous flag is inadmissible at this granularity — it
+//     would need a flag-aware predicate this one is not.
+//  3. It consults no INDEX. Index refresh compares the index against the worktree,
+//     which is the path that honors `core.fsmonitor` — again a repo-local config
+//     naming a program git EXECUTES, the same class as criterion 1.
+//  4. It contacts no REMOTE. Egress is a different risk class from a local read:
+//     the destination is itself config-controlled (`url.*.insteadOf`, remote
+//     helpers, `core.sshCommand`), so the command both runs a config-named program
+//     and chooses where the bytes go.
+//  5. It writes nothing and moves no ref.
+//
+// REMOVAL IS THE ESCALATION PATH and needs no new mechanism — the same posture the
+// README states for the consumer `approvedCommands` list. Delete the entry and the
+// body falls back to the prompt. Remove one when any of (1)-(5) stops holding for
+// it: a git release adding a content-emitting `--format` atom, a filter-honoring
+// flag, or an index/remote dependency it did not have.
+//
+// DECLINED CANDIDATES, recorded so the audit is not re-run and so nobody reads their
+// absence as an oversight:
+//
+//   - `show`, `log`, `diff-tree` — fail (1) and (2). All three emit diffs or content
+//     and honor textconv and `diff.external`. This is the incumbent rationale.
+//   - `cat-file` — fails (1) and (2) hardest. `--textconv` and `--filters` run the
+//     filter programs BY NAME, and `-p HEAD:.env` prints a secret's bytes from a
+//     `<rev>:<path>` spec that the fileReaderSubstitutions secretpath screen below
+//     structurally cannot see (it screens argv PATHS).
+//   - `ls-files` — fails (3). Its stat-comparing spellings (`-m`, `-d`, `-o` with
+//     exclusions) compare the index against the worktree, so `core.fsmonitor` is
+//     reachable, and (2) means admitting the subcommand admits those spellings.
+//   - `for-each-ref` — fails (2). The `--format` atom set includes the
+//     `%(contents…)` family, which prints an object's own bytes, and a ref MAY point
+//     at a blob; the subcommand-only key cannot separate "print refnames" from
+//     "print an object". (`--shell`/`--python`/`--perl`/`--tcl` are output QUOTING
+//     modes, not interpreters — those are not the objection.)
+//   - `ls-remote` — fails (4).
+//
+// KNOWN INCUMBENT EXCEPTION, recorded rather than silently fixed: `status` — and
+// `describe --dirty` — fail (3) for the same reason `ls-files` does. Both PREDATE
+// this audit. They are LEFT AS THEY ARE: removing them is a MORE-restrictive change
+// with its own corpus replay to run and its own over-blocking risk, which is not a
+// side effect a gate-widening bead may smuggle in.
 var gitReadSubcommands = map[string]bool{
 	"rev-parse": true, "rev-list": true, "symbolic-ref": true,
 	"merge-base": true, "describe": true, "status": true,
+	// ls-tree PASSES ALL FIVE. It reads a TREE object and prints only
+	// mode/type/oid/size/path; its tree-ish operand is mandatory, so it never stats
+	// the worktree (no index refresh, no fsmonitor); no flag emits blob content —
+	// `-l` adds a size and `--format`'s atoms are `%(objectmode)`, `%(objecttype)`,
+	// `%(objectname)`, `%(objectsize)`, `%(objectsize:disk)`, `%(path)`, none of
+	// which routes through a filter; and it is local-only and read-only.
+	//
+	// It is here because this repo's own CLAUDE.md "Premise Freshness"
+	// `next-free-id?` probe uses it, and pg2-qcw5w's census found that probe to be 6
+	// of the 8 prompting rows it collected. Adding it is NOT sufficient to clear that
+	// probe — see IsSafeSubstitutionBody's DECLINED PIPELINE RELAXATION note, which
+	// is the reason, and engine_integration_test.go's
+	// TestIntegration_F3NextFreeIdProbeStillPrompts, which pins the outcome.
+	"ls-tree": true,
 }
 
 func isSafeSubstitutionCommand(tokens []string) bool {
@@ -140,6 +208,60 @@ func isGoEnvMutatingFlag(t string) bool {
 // restrictive by full-engine recursion (e.g. `git show HEAD` is approved by the
 // git rule but deliberately excluded here for the textconv/external-diff RCE
 // surface). Recursion may only ADD demotions, never unlock what this blocks.
+//
+// # DECLINED: admitting a pipeline whose every stage is allowlisted
+//
+// The SOLE-SIMPLE-COMMAND shape is deliberate, and the proposal to widen it to "a
+// PIPELINE all of whose stages individually pass isSafeSubstitutionCommand" is
+// DECLINED. pg2-mgs91 asked the question and accepted this answer; do not re-open it
+// without new evidence, and note that "the probe still prompts" is not new evidence —
+// it is the accepted consequence, recorded below.
+//
+// The motivating case was this repo's own CLAUDE.md "Premise Freshness"
+// `next-free-id?` probe, whose body is
+// `git ls-tree -r --name-only main -- docs/adr | rg … | sort -n | tail -1` — four
+// stages, each of which the allowlist would clear on its own. Three grounds:
+//
+//  1. THE ALLOWLIST'S SAFETY CLAIM IS ARGV-ONLY; A PIPELINE ADDS STDIN.
+//     isSafeSubstitutionCommand decides on the command name plus the ARGUMENT tokens
+//     — that IS the whole of the fileReaderSubstitutions branch, which clears `grep`
+//     only after screening each argv path through secretpath. Its claim is therefore
+//     "every byte this command reads is a path I inspected", and in a pipeline that
+//     claim is FALSE for every stage after the first: its input is the pipe. So the
+//     relaxation does not merely admit a new shape, it changes the AUDIT UNIT from
+//     command+argv to command+argv+stdin, and silently re-opens the safety argument
+//     for every entry ALREADY on the lists above — none of which was audited as a
+//     SINK fed attacker-influenced bytes — and for every entry added later, which
+//     nobody would audit that way either. ADR 0040 settles the analogous question
+//     for the consumer allowlist: the unit of trust is the COMMAND. A pipeline is
+//     not one command.
+//  2. IT IS SHAPE-GATED APPROVAL, WHICH ADR 0039 PRICED AND DEFERRED. See that
+//     ADR's Alternatives Considered, "Shape-gated approval": making Approve
+//     conditional on a shape carries the geometry the pre-parse fast path was
+//     rejected for, moved one layer down — a predicate that wrongly reports a shape
+//     as admissible WIDENS approval — and adopting it requires its own fuzz
+//     invariant and its own replay, i.e. its own bead. The pipeline predicate is
+//     exactly that: a recursive walk over a *syntax.BinaryCmd tree whose accept set
+//     must be Pipe/PipeAll and nothing else, where one missed operator admits `&&`
+//     — arbitrary command sequencing — into the static allowlist.
+//  3. THE MEASURED BENEFIT IS ONE PROMPT. pg2-qcw5w's census found 8 prompting rows
+//     of this class; 6 are the one probe above. A prompt on a probe whose output the
+//     agent then reads is cheap. pg2-wguam's floor is not.
+//
+// What this does NOT rest on, so the argument is not overstated: it is NOT a claim
+// that a pipeline of allowlisted stages is exploitable today, and NOT a claim that
+// the relaxation could not be written fail-closed (soleSimpleCommandLeaf's `ok=false`
+// covers unparseable input, and a pipeline variant could do the same). It rests on
+// (1) the audit unit changing for entries already trusted, and (2) ADR 0039 having
+// already decided that this class of widening buys its own bead.
+//
+// CONSEQUENCE, stated so the `ls-tree` entry above is not misread as a fix: THE
+// `next-free-id?` PROBE STILL PROMPTS. It is a 4-stage pipeline, so this shape test
+// floors it whatever gitReadSubcommands contains — the two reasons pg2-mgs91 names
+// are independent and only one of them was removed. That verdict is PINNED, not
+// emergent, by engine_integration_test.go's
+// TestIntegration_F3NextFreeIdProbeStillPrompts and by
+// TestIsSafeSubstitutionBody_GitReadSubcommandAudit here in cmdparse.
 func IsSafeSubstitutionBody(cmdStr string) bool {
 	leaf, ok := soleSimpleCommandLeaf(cmdStr)
 	if !ok {

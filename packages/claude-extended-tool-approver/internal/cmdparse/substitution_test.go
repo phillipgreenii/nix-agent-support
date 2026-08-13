@@ -326,6 +326,75 @@ func TestIsSafeSubstitutionBody_OnlyASoleSimpleCommand(t *testing.T) {
 	}
 }
 
+// f3NextFreeIdProbeBody is the BODY of the command substitution in this repo's own
+// CLAUDE.md "Premise Freshness" `next-free-id?` probe — the command pg2-mgs91 was
+// filed about. The whole probe is pinned end-to-end through the rule chain by
+// engine_integration_test.go's TestIntegration_F3NextFreeIdProbeStillPrompts; this
+// copy exists so the cmdparse half of the verdict is assertable without the engine.
+const f3NextFreeIdProbeBody = `git ls-tree -r --name-only main -- docs/adr | rg -o '/(\d{4})-' -r '$1' | sort -n | tail -1`
+
+// TestIsSafeSubstitutionBody_GitReadSubcommandAudit pins BOTH halves of pg2-mgs91's
+// ruling on the git side of the static substitution allowlist, so each is visible
+// rather than emergent.
+//
+// HALF ONE — the ADDITION. `git ls-tree` was absent from gitReadSubcommands even
+// though it satisfies every criterion of that list's admission test, so a body that
+// is nothing but a bare `git ls-tree …` could never clear the floor. It now does.
+//
+// HALF TWO — the DECLINE. The sole-simple-command shape test is NOT relaxed to admit
+// a pipeline of individually-allowlisted stages; see IsSafeSubstitutionBody's
+// DECLINED note for the argument. The two pipeline rows below are the pin: both are
+// built ENTIRELY out of stages this file's own lists clear, and both are refused. If
+// a later change relaxes the shape test, these rows fail — which is the point.
+//
+// The declined-candidate rows are the audit's other half, and they are here rather
+// than only in a comment so that "someone quietly added `cat-file`" is a test
+// failure. Each row's reason is the criterion it fails; the comment on
+// gitReadSubcommands holds the reasons.
+func TestIsSafeSubstitutionBody_GitReadSubcommandAudit(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		safe bool
+	}{
+		// The addition, and an incumbent as the control that the git branch works at all.
+		{"a bare git ls-tree is on the allowlist", "git ls-tree -r --name-only main -- docs/adr", true},
+		// A `--format` atom must be QUOTED to be valid bash at all — bare `%(path)`
+		// makes `(` a metacharacter, so the body does not parse and lands on the
+		// fail-closed branch. Quoted, it is judged on the subcommand as intended.
+		{"git ls-tree with a quoted --format of metadata atoms", "git ls-tree --format='%(path)' HEAD", true},
+		{"an UNQUOTED --format atom is not valid bash and is refused", "git ls-tree --format=%(path) HEAD", false},
+		{"incumbent control: git rev-parse", "git rev-parse HEAD", true},
+
+		// The DECLINE. Every stage of both pipelines is individually allowlisted.
+		{"the F-3 next-free-id probe body is a pipeline and is REFUSED", f3NextFreeIdProbeBody, false},
+		{"even a 2-stage all-allowlisted pipeline is REFUSED", "git ls-tree -r --name-only main -- docs/adr | tail -1", false},
+
+		// Declined candidates from the pg2-mgs91 audit.
+		{"show is declined (textconv/external-diff)", "git show HEAD", false},
+		{"log is declined (textconv/external-diff)", "git log --oneline -1", false},
+		{"diff-tree is declined (textconv/external-diff)", "git diff-tree --no-commit-id -r HEAD", false},
+		{"cat-file is declined (--textconv/--filters, and <rev>:<path> secrets)", "git cat-file -p HEAD:.env", false},
+		{"for-each-ref is declined (%(contents) prints an object)", "git for-each-ref --format='%(refname)'", false},
+		{"ls-files is declined (index refresh reaches core.fsmonitor)", "git ls-files -m", false},
+		{"ls-remote is declined (network egress, config-named helpers)", "git ls-remote origin", false},
+
+		// The lookup keys on tokens[1], so a PRE-SUBCOMMAND flag is not the
+		// subcommand and the body is refused. That strictness is what stops
+		// `-c core.pager=<program>` config injection riding in on an allowlisted
+		// subcommand, and it must not be "fixed" by skipping leading git flags.
+		{"a -c config injection before ls-tree is refused", "git -c core.pager=id ls-tree HEAD", false},
+		{"a -C chdir before ls-tree is refused", "git -C /tmp ls-tree HEAD", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsSafeSubstitutionBody(tt.body); got != tt.safe {
+				t.Errorf("IsSafeSubstitutionBody(%q) = %v, want %v", tt.body, got, tt.safe)
+			}
+		})
+	}
+}
+
 // TestScanSubstitutions_NestedInArithmeticIsEnumerated pins a live auto-approve
 // hole that ADR 0039 step 2a closed as a side effect, found by this step's corpus
 // replay (6 rows moved Approve -> Abstain because of it).
