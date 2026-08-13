@@ -32,13 +32,21 @@
 
 `pg-pr open`
 
-- List that selection instead of opening a browser (titles are clickable in terminals that support it):
+- List that selection instead of opening a browser (each row shows its URL; titles are also hyperlinked on a terminal):
 
 `pg-pr open --print`
 
 - Open the whole review set, skipping the ones a human already approved:
 
 `pg-pr open --all --unapproved`
+
+- Open all of your own pull requests (`--mine` defaults to all of them, not just the actionable ones):
+
+`pg-pr open --mine`
+
+- Narrow either set to just what is waiting on you:
+
+`pg-pr open --mine --needs-attention`
 
 - Daemon dashboard snapshot (JSON):
 

@@ -17,16 +17,17 @@ import (
 
 // openFlags holds the flags for `pg-pr open`.
 type openFlags struct {
-	all          bool
-	mine         bool
-	reason       string
-	owner        string
-	notOwner     string
-	unapproved   bool
-	max          int
-	printOnly    bool
-	noHyperlinks bool
-	addr         string
+	all            bool
+	needsAttention bool
+	mine           bool
+	reason         string
+	owner          string
+	notOwner       string
+	unapproved     bool
+	max            int
+	printOnly      bool
+	noHyperlinks   bool
+	addr           string
 }
 
 var opFlags openFlags
@@ -63,9 +64,15 @@ cheap source: the daemon computes the set from live provider enrichment and
 holds it in memory, so a one-shot command cannot re-derive it without repeating
 every per-PR round-trip.
 
-By default only PRs needing attention are opened. Pass --all for the whole
-review set, or --print to list the selection without opening a browser (each
-title is a clickable hyperlink when stdout is a terminal that supports them).
+The attention filter defaults per source: the team's review set defaults to just
+the PRs needing attention (it is large, and most of it is not waiting on you),
+while --mine defaults to ALL of your own PRs. Override in whichever direction the
+default forecloses — --all widens, --needs-attention narrows.
+
+Pass --print to list the selection instead of opening a browser. Each row shows
+its URL, which your terminal makes clickable on its own; where stdout is a
+terminal the title is additionally an OSC 8 hyperlink (rendered as plain text
+until hovered, opened with a modifier-click). --no-hyperlinks forces plain output.
 
 Because the daemon's snapshot ages between ticks, a stale payload is reported as
 a warning on stderr and then opened anyway — the operator decides whether
@@ -104,12 +111,40 @@ slightly old data is worth acting on.`,
 	},
 }
 
+// attentionOnly decides whether the needs-attention filter applies. The default
+// is PER SOURCE, which is the whole point:
+//
+//	team  — default attention-only. The review set is large (24 PRs at the time
+//	        of writing) and most of it is not waiting on me, so the useful
+//	        default is the subset that is.
+//	mine  — default everything. For my OWN PRs I want the whole list; the
+//	        composed attention signal (see projectRows) is frequently all-false,
+//	        so defaulting to it made `--mine` alone print "(no PRs match)".
+//
+// Either default is overridable in the direction that default forecloses:
+// --all widens, --needs-attention narrows.
+func attentionOnly(f openFlags) bool {
+	switch {
+	case f.needsAttention:
+		return true
+	case f.all:
+		return false
+	default:
+		return !f.mine
+	}
+}
+
 // validateOpenFlags rejects flag combinations that could only ever match
-// nothing. --reason, --owner and --not-owner all read fields that exist on a
-// TeamRow but not a MineRow, so pairing them with --mine would silently return
-// an empty selection — indistinguishable from "you have no work". Failing with
-// a usage error says which flag is wrong instead.
+// nothing, or that ask for two contradictory things.
+//
+// --reason, --owner and --not-owner all read fields that exist on a TeamRow but
+// not a MineRow, so pairing them with --mine would silently return an empty
+// selection — indistinguishable from "you have no work". Failing with a usage
+// error says which flag is wrong instead.
 func validateOpenFlags(f openFlags) error {
+	if f.all && f.needsAttention {
+		return fmt.Errorf("--all and --needs-attention are contradictory: one widens the selection, the other narrows it")
+	}
 	if !f.mine {
 		return nil
 	}
@@ -173,10 +208,11 @@ func projectRows(snap *snapshot.Snapshot, mine bool) []openRow {
 // selectRows applies every filter, preserving the snapshot's own ordering. It
 // does NOT apply --max: truncation warns on stderr, which is the caller's job.
 func selectRows(rows []openRow, f openFlags) []openRow {
+	attention := attentionOnly(f)
 	out := make([]openRow, 0, len(rows))
 	for _, r := range rows {
 		switch {
-		case !f.all && !r.NeedsAttention:
+		case attention && !r.NeedsAttention:
 		case f.reason != "" && !hasReason(r.MatchReason, f.reason):
 		case f.owner != "" && r.Owner != f.owner:
 		case f.notOwner != "" && r.Owner == f.notOwner:
@@ -243,35 +279,36 @@ func hyperlink(url, text string) string {
 
 // renderOpenRows writes the human listing.
 //
-// The link rides on the TITLE column deliberately: it is both the largest click
-// target and the LAST column, and tabwriter measures cell width in bytes — an
-// OSC 8 escape in any earlier column would inflate its apparent width and skew
-// every following column. When hyperlinks are off (piped, or --no-hyperlinks)
-// the URL becomes its own column instead, so the listing stays greppable and
-// the URLs stay visible.
+// The URL is ALWAYS its own visible column, hyperlinked or not. An OSC 8 link
+// renders as ordinary text until hovered and needs a modifier-click to open, so
+// a listing that carried only the hyperlink left an operator who did not notice
+// it with nothing to click and no URL to copy or pipe. A bare URL, by contrast,
+// is clickable via the terminal's own URL detection in every terminal worth
+// using — so it is the reliable affordance and the hyperlink is the bonus.
+//
+// The optional link rides on the TITLE column because that is the LAST column
+// and tabwriter measures cell width in BYTES: an OSC 8 escape in any earlier
+// column would inflate its apparent width and skew every column after it.
 func renderOpenRows(w io.Writer, rows []openRow, link bool) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 
-	header := "PR\tOWNER\tCI\tAPPROVED\tSIZE\tTITLE\n"
-	if !link {
-		header = "PR\tOWNER\tCI\tAPPROVED\tSIZE\tURL\tTITLE\n"
-	}
-	if _, err := io.WriteString(tw, header); err != nil {
+	if _, err := io.WriteString(tw, "PR\tOWNER\tCI\tAPPROVED\tSIZE\tURL\tTITLE\n"); err != nil {
 		return err
 	}
 
 	for _, r := range rows {
+		title := r.Title
+		if link {
+			title = hyperlink(r.URL, title)
+		}
 		cells := []string{
 			"#" + strconv.Itoa(r.Number),
 			orDash(r.Owner),
 			orDash(r.CIStatus),
 			approvedCell(r),
 			sizeCell(r),
-		}
-		if link {
-			cells = append(cells, hyperlink(r.URL, r.Title))
-		} else {
-			cells = append(cells, r.URL, r.Title)
+			r.URL,
+			title,
 		}
 		if _, err := io.WriteString(tw, strings.Join(cells, "\t")+"\n"); err != nil {
 			return err
@@ -304,9 +341,11 @@ func sizeCell(r openRow) string {
 
 func init() {
 	openCmd.Flags().BoolVar(&opFlags.all, "all", false,
-		"Open the whole review set, not just the PRs needing attention")
+		"Widen to the whole set (the default already, with --mine)")
+	openCmd.Flags().BoolVar(&opFlags.needsAttention, "needs-attention", false,
+		"Narrow to the PRs needing attention (the default already, without --mine)")
 	openCmd.Flags().BoolVar(&opFlags.mine, "mine", false,
-		"Open your own PRs instead of the team's review set")
+		"Open your own PRs instead of the team's review set; defaults to all of them")
 	openCmd.Flags().StringVar(&opFlags.reason, "reason", "",
 		"Keep only PRs matched for this reason; exact or prefix (team-authored, review-requested, label:team/findev, label:)")
 	openCmd.Flags().StringVar(&opFlags.owner, "owner", "",

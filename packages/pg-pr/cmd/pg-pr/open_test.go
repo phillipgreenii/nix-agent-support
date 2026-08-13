@@ -73,6 +73,48 @@ func TestSelectRows(t *testing.T) {
 	}
 }
 
+// TestAttentionOnlyDefaultsPerSource is the regression test for the defect the
+// operator hit: --mine alone printed "(no PRs match)" because the
+// needs-attention default was applied uniformly, and a MineRow's attention
+// signal is composed and frequently all-false. The default must differ by
+// source, and stay overridable in the direction it forecloses.
+func TestAttentionOnlyDefaultsPerSource(t *testing.T) {
+	tests := []struct {
+		name  string
+		flags openFlags
+		want  bool
+	}{
+		{"team default narrows to attention", openFlags{}, true},
+		{"mine default shows everything", openFlags{mine: true}, false},
+		{"--all widens team", openFlags{all: true}, false},
+		{"--needs-attention narrows mine", openFlags{mine: true, needsAttention: true}, true},
+		{"--all is a no-op for mine", openFlags{mine: true, all: true}, false},
+		{"--needs-attention is a no-op for team", openFlags{needsAttention: true}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := attentionOnly(tt.flags); got != tt.want {
+				t.Errorf("attentionOnly(%+v) = %v, want %v", tt.flags, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestSelectRowsMineDefaultKeepsUnactionableRows exercises the same fix through
+// selectRows, using rows whose attention signal is all-false — the exact shape
+// that made --mine look empty.
+func TestSelectRowsMineDefaultKeepsUnactionableRows(t *testing.T) {
+	rows := []openRow{
+		{Number: 11, URL: "u11", NeedsAttention: false},
+		{Number: 12, URL: "u12", NeedsAttention: false},
+		{Number: 13, URL: "u13", NeedsAttention: true},
+	}
+	assertNumbers(t, selectRows(rows, openFlags{mine: true}), 11, 12, 13)
+	assertNumbers(t, selectRows(rows, openFlags{mine: true, needsAttention: true}), 13)
+	// Team with the same rows still narrows — the fix must not leak across.
+	assertNumbers(t, selectRows(rows, openFlags{}), 13)
+}
+
 // TestSelectRowsPreservesSnapshotOrder pins that filtering never reorders: the
 // daemon's ordering is the review order the operator sees in Grafana, and tab
 // order in the opened window must match it.
@@ -178,12 +220,25 @@ func TestValidateOpenFlagsRejectsTeamOnlyFlagsWithMine(t *testing.T) {
 	}
 }
 
+func TestValidateOpenFlagsRejectsContradictoryAttentionFlags(t *testing.T) {
+	err := validateOpenFlags(openFlags{all: true, needsAttention: true})
+	if err == nil {
+		t.Fatal("--all with --needs-attention = nil, want a usage error")
+	}
+	if !strings.Contains(err.Error(), "--all") || !strings.Contains(err.Error(), "--needs-attention") {
+		t.Errorf("error %q does not name both flags", err)
+	}
+}
+
 func TestValidateOpenFlagsAllowsValidCombinations(t *testing.T) {
 	for _, f := range []openFlags{
 		{},
 		{mine: true},
+		{mine: true, needsAttention: true},
+		{mine: true, all: true},
 		{mine: true, unapproved: true, max: 5},
 		{all: true, owner: "alice", reason: "label:"},
+		{needsAttention: true, owner: "alice"},
 	} {
 		if err := validateOpenFlags(f); err != nil {
 			t.Errorf("validateOpenFlags(%+v) = %v, want nil", f, err)
@@ -206,13 +261,48 @@ func TestRenderOpenRowsHyperlinksTheTitle(t *testing.T) {
 	if !strings.Contains(out, "\x1b]8;;https://example.test/pull/7\x1b\\fix the thing\x1b]8;;\x1b\\") {
 		t.Errorf("title is not wrapped in an OSC 8 hyperlink:\n%q", out)
 	}
-	// The URL must appear ONLY inside the escape, never as its own column —
-	// otherwise the hyperlinked layout gained a redundant column.
-	if strings.Contains(out, "URL") {
-		t.Errorf("hyperlinked layout must not carry a URL column:\n%s", out)
-	}
 	if !strings.Contains(out, "#7") || !strings.Contains(out, "3f/40L") {
 		t.Errorf("row cells missing:\n%s", out)
+	}
+}
+
+// stripOSC8 removes OSC 8 hyperlink escapes, leaving what a terminal that
+// ignores them would still put on screen. It is how the tests below assert the
+// URL is VISIBLE rather than merely embedded as a link target.
+func stripOSC8(s string) string {
+	for {
+		start := strings.Index(s, "\x1b]8;;")
+		if start < 0 {
+			return s
+		}
+		rest := s[start:]
+		end := strings.Index(rest, "\x1b\\")
+		if end < 0 {
+			return s
+		}
+		s = s[:start] + rest[end+2:]
+	}
+}
+
+// TestRenderOpenRowsAlwaysShowsAVisibleURL is the regression test for the defect
+// the operator hit: the hyperlinked layout used to drop the URL column, and
+// because an OSC 8 link renders as ordinary text until hovered, that left
+// nothing to click and no URL to copy. Asserted with the escapes STRIPPED,
+// which is precisely what a terminal ignoring OSC 8 shows.
+func TestRenderOpenRowsAlwaysShowsAVisibleURL(t *testing.T) {
+	rows := []openRow{{Number: 7, Owner: "alice", Title: "fix the thing", URL: "https://example.test/pull/7"}}
+	for _, link := range []bool{true, false} {
+		var buf bytes.Buffer
+		if err := renderOpenRows(&buf, rows, link); err != nil {
+			t.Fatalf("link=%v: renderOpenRows() error = %v", link, err)
+		}
+		out := buf.String()
+		if !strings.Contains(out, "URL") {
+			t.Errorf("link=%v: listing has no URL column:\n%s", link, out)
+		}
+		if visible := stripOSC8(out); !strings.Contains(visible, "https://example.test/pull/7") {
+			t.Errorf("link=%v: no VISIBLE URL once OSC 8 is stripped — an operator whose terminal ignores hyperlinks has nothing to click or copy:\n%q", link, visible)
+		}
 	}
 }
 
@@ -427,6 +517,34 @@ func TestOpenCmdPrintListsWithoutOpeningBrowser(t *testing.T) {
 	// stdout is a bytes.Buffer here, so the plain (greppable) layout applies.
 	if !strings.Contains(stdout, "https://example.test/pull/1") {
 		t.Errorf("stdout does not carry bare URLs:\n%s", stdout)
+	}
+}
+
+// TestOpenCmdMineAloneOpensAllOfMyPRs is the end-to-end regression test for the
+// operator's report: `pg-pr open --mine` returned nothing and they had to type
+// `--mine --all`. The fixture's rows are all unactionable, which is the common
+// real shape.
+func TestOpenCmdMineAloneOpensAllOfMyPRs(t *testing.T) {
+	snap := snapshot.Snapshot{Mine: []snapshot.MineRow{
+		{Number: 11, URL: "https://example.test/pull/11"},
+		{Number: 12, URL: "https://example.test/pull/12", WaitingOnMe: true},
+		{Number: 13, URL: "https://example.test/pull/13"},
+	}}
+
+	opened, stdout, _, err := runOpenCmd(t, snap, openFlags{mine: true})
+	if err != nil {
+		t.Fatalf("RunE() error = %v", err)
+	}
+	if len(opened) != 3 {
+		t.Errorf("--mine alone opened %d of 3 PRs (stdout: %q) — it must not need --all", len(opened), stdout)
+	}
+
+	narrowed, _, _, err := runOpenCmd(t, snap, openFlags{mine: true, needsAttention: true})
+	if err != nil {
+		t.Fatalf("RunE() --needs-attention error = %v", err)
+	}
+	if len(narrowed) != 1 || narrowed[0] != "https://example.test/pull/12" {
+		t.Errorf("--mine --needs-attention opened %v, want only the WaitingOnMe PR", narrowed)
 	}
 }
 
