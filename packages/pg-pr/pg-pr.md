@@ -28,6 +28,18 @@
 
 `pg-pr sync duplicates`
 
+- Open the pull requests needing your review in one new browser window, a tab per PR:
+
+`pg-pr open`
+
+- List that selection instead of opening a browser (titles are clickable in terminals that support it):
+
+`pg-pr open --print`
+
+- Open the whole review set, skipping the ones a human already approved:
+
+`pg-pr open --all --unapproved`
+
 - Daemon dashboard snapshot (JSON):
 
 `curl http://127.0.0.1:9818/api/v1/dashboard`
