@@ -21,15 +21,20 @@
 // session, and the worktree discipline remains the primary control.
 //
 // The one case that is DECISIVE IN EVERY MODE is a commit whose target directory does
-// not resolve to a literal path — `git -C $WT commit`, `cd $WT && git commit`. There
-// the rule has not established that the commit is on primary; it has established that
-// it CANNOT TELL, and the fail-open Abstain above is unavailable because the generic
-// git rule behind it approves a plain `git commit`. So an unresolved target gets a
-// fail-safe verdict of its own — Ask interactively, Reject in an auto-approving session
-// where an Ask would be silently accepted — and NEVER reaches Approve. This is the
-// same "identity check I could not complete" carve-out ADR 0043's error policy names
-// for killshell, and its rationale, the resolution model, and the coupling to the
-// engine's `cd` handling are all in dirresolve.go's DIRECTORY RESOLUTION comment.
+// not resolve to a literal path — `git -C $WT commit`, `cd $WT && git commit`, where
+// nothing in the command says what `$WT` is. There the rule has not established that the
+// commit is on primary; it has established that it CANNOT TELL, and the fail-open Abstain
+// above is unavailable because the generic git rule behind it approves a plain
+// `git commit`. So an unresolved target gets a fail-safe verdict of its own — Ask
+// interactively, Reject in an auto-approving session where an Ask would be silently
+// accepted — and NEVER reaches Approve. This is the same "identity check I could not
+// complete" carve-out ADR 0043's error policy names for killshell.
+//
+// A target the COMMAND ITSELF establishes is not that case: in
+// `WT=/abs/worktree && git -C "$WT" commit` the value is written down in the command
+// text, so the rule resolves it and judges the real directory (pg2-wq3ki). The
+// rationale, the resolution model, the DECLINED `$(…)` derivation and the coupling to
+// the engine's `cd` handling are all in dirresolve.go's DIRECTORY RESOLUTION comment.
 package primarycommit
 
 import (
@@ -85,7 +90,8 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		// Genuine failure: the tool IS Bash, so this rule governs the input.
 		return hookio.RuleResult{}, fmt.Errorf("primary-commit: read bash command: %w", err)
 	}
-	for _, pc := range cmdparse.Parse(cmdStr) {
+	leaves := cmdparse.Parse(cmdStr)
+	for i, pc := range leaves {
 		if !isGit(pc.Executable) {
 			continue
 		}
@@ -95,7 +101,13 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		if r.resolver == nil {
 			return hookio.NotApplicable()
 		}
-		f := r.inspectCommit(pc, input.CWD, true)
+		// The variables this command establishes for itself (pg2-wq3ki). Under the
+		// engine they arrive on the input, already computed from the EARLIER leaves of
+		// the expression; a direct caller is handed the whole expression, and LeafVars
+		// reads them off the leaves before this one. Empty in the ordinary case, and an
+		// empty environment resolves nothing — every verdict is then the one this rule
+		// reached before the environment existed.
+		f := r.inspectCommit(pc, input.CWD, LeafVars(input.InCommandVars, leaves, i), true)
 		auto := autoApprovingModes[input.PermissionMode]
 		switch f.kind {
 		case findingUnresolved:
@@ -191,9 +203,10 @@ func (f commitFinding) unresolvedReason(deny bool) string {
 // re-parsed and each git command in it checked with expansion OFF (single-pass, which
 // also bounds recursion). A resolver error, a linked worktree, or being off primary all
 // yield findingNone — the fail-open posture the worktree discipline relies on.
-func (r *Rule) inspectCommit(pc cmdparse.ParsedCommand, cwd string, expandAliases bool) commitFinding {
+func (r *Rule) inspectCommit(pc cmdparse.ParsedCommand, cwd string, vars map[string]string, expandAliases bool) commitFinding {
 	chdirs, subcmd, rest := cmdparse.GitInvocation(pc.Args)
-	dir := effectiveDir(cwd, chdirs)
+	res := ResolveDir(cwd, chdirs, vars)
+	dir := res.Dir
 	if expandAliases {
 		effSubcmd, _, shellBody := ResolveGitAlias(subcmd, rest, r.mergedAliases(dir, pc.Args))
 		if shellBody != "" {
@@ -202,8 +215,10 @@ func (r *Rule) inspectCommit(pc cmdparse.ParsedCommand, cwd string, expandAliase
 					continue
 				}
 				// dir is passed as the recursion's cwd, so an unresolved OUTER `-C` is
-				// still visible to the inner unresolvedDir check below.
-				if f := r.inspectCommit(sub, dir, false); f.kind != findingNone {
+				// still visible to the inner resolution below. The environment is
+				// threaded too: an alias body is part of the SAME command, so a
+				// variable the command established is in scope inside it.
+				if f := r.inspectCommit(sub, dir, vars, false); f.kind != findingNone {
 					return f
 				}
 			}
@@ -219,8 +234,8 @@ func (r *Rule) inspectCommit(pc cmdparse.ParsedCommand, cwd string, expandAliase
 	// the resolver, for two reasons: `git -C $WT status` must stay untouched (this rule
 	// only ever governs a commit), and the resolver's walk-up is precisely what turns an
 	// unresolvable path into a confident wrong answer, so it must not run on one.
-	if token, source := unresolvedDir(cwd, chdirs); token != "" {
-		return commitFinding{kind: findingUnresolved, token: token, source: source}
+	if res.Unresolved() {
+		return commitFinding{kind: findingUnresolved, token: res.Token, source: res.Source}
 	}
 	canonical, err := r.resolver.IsCanonical(dir)
 	if err != nil || !canonical {
@@ -234,7 +249,7 @@ func (r *Rule) inspectCommit(pc cmdparse.ParsedCommand, cwd string, expandAliase
 	if err != nil || cur == "" || cur != primary {
 		return commitFinding{}
 	}
-	return commitFinding{kind: findingPrimary, primary: primary, dir: dir, chosen: dirProvenance(chdirs)}
+	return commitFinding{kind: findingPrimary, primary: primary, dir: dir, chosen: res.Chosen}
 }
 
 // mergedAliases returns the aliases visible to this invocation — config-defined

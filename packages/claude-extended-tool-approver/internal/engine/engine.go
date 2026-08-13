@@ -275,7 +275,16 @@ func (e *Engine) EvaluateExpression(expr string, stack []hookio.StackFrame, orig
 	// floor after the loop).
 	judgedLeaf := false
 
-	for _, pc := range parsed {
+	for i, pc := range parsed {
+		// The variables the EARLIER leaves of this expression established, for the
+		// rules that must judge a path (primary-commit) and for this loop's own
+		// `cd`/`pushd` re-root below. Recomputed per leaf rather than folded
+		// incrementally so the map handed to a rule is a snapshot no later leaf can
+		// mutate, and so no `continue` in this loop can skip an accumulation step.
+		// `before` is the leaf's own index, which is what excludes a leaf's own prefix
+		// assignments from its own expansions — see cmdparse.InCommandVars.
+		inCommandVars := cmdparse.InCommandVars(parsed, i)
+
 		if pc.Executable == "" {
 			// Command-less leaf: no executable, but it may carry env assignments
 			// (`LD_PRELOAD=/evil.so && cmd`, pg2-mtnmb) or redirections/a heredoc (the
@@ -327,6 +336,7 @@ func (e *Engine) EvaluateExpression(expr string, stack []hookio.StackFrame, orig
 			HookEventName:  origin.HookEventName,
 			PathEval:       currentPathEval,
 			RootExpression: expr,
+			InCommandVars:  inCommandVars,
 		}
 
 		// Evaluate through rule chain
@@ -384,9 +394,21 @@ func (e *Engine) EvaluateExpression(expr string, stack []hookio.StackFrame, orig
 		// confidently resolving the session cwd. primary-commit depends on it — see
 		// internal/rules/primarycommit/dirresolve.go's DIRECTORY RESOLUTION comment —
 		// so this branch MUST NOT be "fixed" to drop such targets.
+		//
+		// A target the COMMAND ITSELF writes down (`WT=/abs && cd "$WT"`) is a
+		// different case and IS expanded, from the in-command environment above
+		// (pg2-wq3ki). It has to happen HERE rather than in a rule: the verbatim join
+		// is what loses the value's ABSOLUTENESS, so once `$WT` has been joined onto
+		// the running cwd no consumer can recover the directory the shell will really
+		// be in. Expansion is all-or-nothing (cmdparse.ExpandInCommand), so a target
+		// this environment cannot resolve falls through to the verbatim join unchanged
+		// and every existing verdict for it stands.
 		if basePE != nil && (pc.Executable == "cd" || pc.Executable == "pushd") && len(pc.Args) == 1 &&
 			!strings.HasPrefix(pc.Args[0], "-") && !strings.HasPrefix(pc.Args[0], "~") {
 			dir := pc.Args[0]
+			if expanded, ok := cmdparse.ExpandInCommand(dir, inCommandVars); ok {
+				dir = expanded
+			}
 			var newCWD string
 			if filepath.IsAbs(dir) {
 				newCWD = filepath.Clean(dir)

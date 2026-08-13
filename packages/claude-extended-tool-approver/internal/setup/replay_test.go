@@ -40,7 +40,18 @@ package setup
 //
 //	CETA_REPLAY_SNAPSHOT=/path/to/replay-rows.jsonl \
 //	CETA_REPLAY_OUT=/path/to/verdicts.tsv \
-//	  go test ./internal/engine/ -run TestCorpusVerdictReplay -timeout 6h -v
+//	  go test ./internal/setup/ -run TestCorpusVerdictReplay -timeout 6h -v
+//
+// The package is `./internal/setup/` — where this file lives, and where it MUST live for
+// the reason given above (the engine factory is here). The path was recorded as
+// `./internal/engine/` until pg2-wq3ki ran it: that spelling matches no test, so it exits
+// 0 with "no tests to run" and a reader following it measures NOTHING while believing the
+// replay ran.
+//
+// A SECOND TREE IS REQUIRED and the harness cannot supply it: the gate is a DIFF of two
+// runs, so compile the test binary once per tree (`go test -c -o /scratch/<tree>.test
+// ./internal/setup`) and run each against the SAME snapshot, then join the two output
+// files on the row index.
 //
 // Each input line is `{"command": "...", "cwd": "...", "permission_mode": "..."}`.
 // Extract it READ-ONLY from a `VACUUM INTO` snapshot opened with `?immutable=1`:

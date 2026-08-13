@@ -187,6 +187,27 @@ type HookInput struct {
 	// `json:"-"` is load-bearing: this is engine-derived provenance, never
 	// something a hook payload may assert.
 	RootExpression string `json:"-"`
+
+	// InCommandVars holds the shell variables that EARLIER LEAVES of this same
+	// expression established, mapped to their LITERAL values —
+	// `WT=/abs/worktree && git -C "$WT" commit` binds `WT`. It is
+	// cmdparse.InCommandVars, computed once per leaf by
+	// engine.EvaluateExpression, so a rule that must judge a PATH can resolve a
+	// variable the command itself writes down instead of treating every `$WT` as
+	// unknowable (pg2-wq3ki).
+	//
+	// IT IS NOT THE ENVIRONMENT. CETA receives no environment, so an inherited
+	// export, a `$(…)` value and anything set by an earlier Bash call are all
+	// ABSENT here — not empty-valued, absent — and a consumer MUST keep its
+	// existing fail-safe path for a name it does not find. nil is the ordinary
+	// case (no assignment in the command) and nil for a rule invoked outside
+	// EvaluateExpression, which is why every consumer's no-binding branch must be
+	// the behaviour it had before this field existed.
+	//
+	// `json:"-"` for the same reason as RootExpression, and it matters more here:
+	// a hook payload that could assert a variable's value would be asserting the
+	// directory a commit lands in.
+	InCommandVars map[string]string `json:"-"`
 }
 
 type BashToolInput struct {
