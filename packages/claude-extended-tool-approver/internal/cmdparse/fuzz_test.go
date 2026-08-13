@@ -721,14 +721,3 @@ func FuzzEnumerateSubstitutions(f *testing.F) {
 		}
 	})
 }
-
-// hasEmptyHeredocDelimiter reports whether any of leaf's extents was opened with an
-// EMPTY delimiter. See the exemption in FuzzParse.
-func hasEmptyHeredocDelimiter(leaf ParsedCommand) bool {
-	for _, hd := range leaf.Heredocs {
-		if hd.Delimiter == "" {
-			return true
-		}
-	}
-	return false
-}
