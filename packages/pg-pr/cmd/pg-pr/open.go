@@ -69,10 +69,11 @@ the PRs needing attention (it is large, and most of it is not waiting on you),
 while --mine defaults to ALL of your own PRs. Override in whichever direction the
 default forecloses — --all widens, --needs-attention narrows.
 
-Pass --print to list the selection instead of opening a browser. Each row shows
-its URL, which your terminal makes clickable on its own; where stdout is a
-terminal the title is additionally an OSC 8 hyperlink (rendered as plain text
-until hovered, opened with a modifier-click). --no-hyperlinks forces plain output.
+Pass --print to list the selection instead of opening a browser. On a terminal
+each title is an OSC 8 hyperlink (rendered as plain text until hovered, opened
+with a modifier-click). When output is piped or redirected — or with
+--no-hyperlinks — the bare URL is printed as its own column instead, so the
+listing stays greppable and pipeable.
 
 Because the daemon's snapshot ages between ticks, a stale payload is reported as
 a warning on stderr and then opened anyway — the operator decides whether
@@ -277,38 +278,50 @@ func hyperlink(url, text string) string {
 	return "\x1b]8;;" + url + "\x1b\\" + text + "\x1b]8;;\x1b\\"
 }
 
-// renderOpenRows writes the human listing.
+// renderOpenRows writes the human listing. The URL column is present exactly
+// when the title is NOT hyperlinked:
 //
-// The URL is ALWAYS its own visible column, hyperlinked or not. An OSC 8 link
-// renders as ordinary text until hovered and needs a modifier-click to open, so
-// a listing that carried only the hyperlink left an operator who did not notice
-// it with nothing to click and no URL to copy or pipe. A bare URL, by contrast,
-// is clickable via the terminal's own URL detection in every terminal worth
-// using — so it is the reliable affordance and the hyperlink is the bonus.
+//	hyperlinked (a terminal) — no URL column. The hyperlinked title IS the link,
+//	  so a URL column only spends horizontal width to repeat it.
+//	plain (piped, redirected, or --no-hyperlinks) — URL column. There is no link
+//	  to carry the target, and a bare URL keeps the listing greppable and
+//	  pipeable into xargs.
 //
-// The optional link rides on the TITLE column because that is the LAST column
-// and tabwriter measures cell width in BYTES: an OSC 8 escape in any earlier
-// column would inflate its apparent width and skew every column after it.
+// This deliberately reverts an earlier always-show-the-URL layout, which existed
+// because an OSC 8 link renders as ordinary text until hovered and opens only on
+// a modifier-click — so if the terminal silently ignored the escape, the listing
+// offered nothing to click and no URL to copy. That premise was tested and did
+// not hold: both affordances work here. --no-hyperlinks remains the one-flag
+// recovery for a terminal that genuinely does not honour OSC 8 (ssh, a
+// multiplexer without passthrough), which keeps that failure mode reachable
+// rather than merely reintroduced.
+//
+// The link rides on the TITLE column because that is the LAST column and
+// tabwriter measures cell width in BYTES: an OSC 8 escape in any earlier column
+// would inflate its apparent width and skew every column after it.
 func renderOpenRows(w io.Writer, rows []openRow, link bool) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 
-	if _, err := io.WriteString(tw, "PR\tOWNER\tCI\tAPPROVED\tSIZE\tURL\tTITLE\n"); err != nil {
+	header := "PR\tOWNER\tCI\tAPPROVED\tSIZE\tTITLE\n"
+	if !link {
+		header = "PR\tOWNER\tCI\tAPPROVED\tSIZE\tURL\tTITLE\n"
+	}
+	if _, err := io.WriteString(tw, header); err != nil {
 		return err
 	}
 
 	for _, r := range rows {
-		title := r.Title
-		if link {
-			title = hyperlink(r.URL, title)
-		}
 		cells := []string{
 			"#" + strconv.Itoa(r.Number),
 			orDash(r.Owner),
 			orDash(r.CIStatus),
 			approvedCell(r),
 			sizeCell(r),
-			r.URL,
-			title,
+		}
+		if link {
+			cells = append(cells, hyperlink(r.URL, r.Title))
+		} else {
+			cells = append(cells, r.URL, r.Title)
 		}
 		if _, err := io.WriteString(tw, strings.Join(cells, "\t")+"\n"); err != nil {
 			return err

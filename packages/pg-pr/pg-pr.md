@@ -32,7 +32,7 @@
 
 `pg-pr open`
 
-- List that selection instead of opening a browser (each row shows its URL; titles are also hyperlinked on a terminal):
+- List that selection instead of opening a browser (titles are clickable hyperlinks on a terminal; piped output prints a bare URL column instead):
 
 `pg-pr open --print`
 

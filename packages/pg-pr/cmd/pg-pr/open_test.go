@@ -284,44 +284,43 @@ func stripOSC8(s string) string {
 	}
 }
 
-// TestRenderOpenRowsAlwaysShowsAVisibleURL is the regression test for the defect
-// the operator hit: the hyperlinked layout used to drop the URL column, and
-// because an OSC 8 link renders as ordinary text until hovered, that left
-// nothing to click and no URL to copy. Asserted with the escapes STRIPPED,
-// which is precisely what a terminal ignoring OSC 8 shows.
-func TestRenderOpenRowsAlwaysShowsAVisibleURL(t *testing.T) {
+// TestRenderOpenRowsURLColumnOnlyWhenNotHyperlinked pins the layout split: the
+// URL column exists exactly when the title is not carrying the link.
+//
+// It replaces an earlier always-show-the-URL assertion. That one guarded against
+// a terminal silently ignoring OSC 8, which would leave nothing clickable and no
+// URL to copy — a real failure the operator hit. The premise was then tested
+// directly and did not hold (both affordances work), so the redundant column no
+// longer earns its width on a terminal. The plain half of this test is what keeps
+// the recovery path honest: --no-hyperlinks and redirected output must still
+// carry a bare, greppable URL.
+func TestRenderOpenRowsURLColumnOnlyWhenNotHyperlinked(t *testing.T) {
 	rows := []openRow{{Number: 7, Owner: "alice", Title: "fix the thing", URL: "https://example.test/pull/7"}}
-	for _, link := range []bool{true, false} {
-		var buf bytes.Buffer
-		if err := renderOpenRows(&buf, rows, link); err != nil {
-			t.Fatalf("link=%v: renderOpenRows() error = %v", link, err)
-		}
-		out := buf.String()
-		if !strings.Contains(out, "URL") {
-			t.Errorf("link=%v: listing has no URL column:\n%s", link, out)
-		}
-		if visible := stripOSC8(out); !strings.Contains(visible, "https://example.test/pull/7") {
-			t.Errorf("link=%v: no VISIBLE URL once OSC 8 is stripped — an operator whose terminal ignores hyperlinks has nothing to click or copy:\n%q", link, visible)
-		}
-	}
-}
 
-func TestRenderOpenRowsPlainKeepsURLGreppable(t *testing.T) {
-	rows := []openRow{{Number: 7, Owner: "alice", Title: "fix the thing", URL: "https://example.test/pull/7"}}
-	var buf bytes.Buffer
-	if err := renderOpenRows(&buf, rows, false); err != nil {
-		t.Fatalf("renderOpenRows() error = %v", err)
+	var linked bytes.Buffer
+	if err := renderOpenRows(&linked, rows, true); err != nil {
+		t.Fatalf("renderOpenRows(link) error = %v", err)
 	}
-	out := buf.String()
+	out := linked.String()
+	if strings.Contains(out, "URL") {
+		t.Errorf("hyperlinked layout must not spend a column repeating the link target:\n%s", out)
+	}
+	// Stripping the escapes must leave NO bare URL — proof the column is gone
+	// rather than merely relocated.
+	if visible := stripOSC8(out); strings.Contains(visible, "https://example.test/pull/7") {
+		t.Errorf("hyperlinked layout still prints the URL outside the escape:\n%q", visible)
+	}
 
+	var plain bytes.Buffer
+	if err := renderOpenRows(&plain, rows, false); err != nil {
+		t.Fatalf("renderOpenRows(plain) error = %v", err)
+	}
+	out = plain.String()
 	if strings.Contains(out, "\x1b") {
-		t.Errorf("plain layout must contain no escape sequences:\n%q", out)
+		t.Errorf("plain layout must contain no escapes:\n%q", out)
 	}
-	if !strings.Contains(out, "URL") {
-		t.Errorf("plain layout must carry a URL column:\n%s", out)
-	}
-	if !strings.Contains(out, "https://example.test/pull/7") {
-		t.Errorf("plain layout must print the bare URL:\n%s", out)
+	if !strings.Contains(out, "URL") || !strings.Contains(out, "https://example.test/pull/7") {
+		t.Errorf("plain layout must carry a bare, greppable URL — it is the only target there:\n%s", out)
 	}
 }
 
