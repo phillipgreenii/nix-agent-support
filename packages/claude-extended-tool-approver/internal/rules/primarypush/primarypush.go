@@ -8,7 +8,9 @@
 // the set {bypassPermissions, auto, dontAsk} — because such a session would silently
 // accept an Ask, so a hard deny is the only thing that stops it. Interactive modes
 // (default/plan/acceptEdits/empty) get Abstain — no every-push prompt; a human
-// directing a push to primary is permitted (R-6) and left to the normal flow.
+// directing a push to primary is permitted (R-6) and left to the normal flow. The ONE
+// exception, and the only verdict this rule ever puts in front of a human, is the
+// unresolved-directory branch described below.
 //
 // A push is judged to advance primary when any of:
 //   - a refspec's REMOTE side names the primary branch — `origin HEAD:main`,
@@ -28,6 +30,18 @@
 // A push of a FEATURE branch (remote side != primary) stays Approve; pushes from a
 // linked worktree, non-push git, and any resolver error all Abstain (fail-open; the
 // worktree discipline is the primary control — R-2/R-8).
+//
+// The one case that is DECISIVE IN EVERY MODE is a push whose target directory does not
+// resolve to a literal path — `git -C $WT push`, `cd $WT && git push`, where nothing in
+// the command says what `$WT` is. There the rule has not established that the push
+// advances primary; it has established that it CANNOT TELL. So an unresolved target gets
+// a fail-safe verdict of its own — Ask interactively, Reject in an auto-approving session
+// where an Ask would be silently accepted — and NEVER reaches Approve. This mirrors
+// primary-commit exactly (pg2-h2npt), and the resolution model, its three directory
+// sources and its reconciliation with the fail-open posture above are documented on
+// inspectPush and in primarycommit's dirresolve.go DIRECTORY RESOLUTION comment. This
+// rule holds NO directory-resolution code of its own: it consumes primarycommit's
+// exported ResolveDir/LeafVars seam, so the two rules cannot drift (pg2-eqacu).
 //
 // A push hidden behind a git alias — command-line `git -c alias.p='push …' p` or a
 // config `[alias] p = push …` (global or local) — IS recognized: the rule expands the
@@ -83,7 +97,8 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		// Genuine failure: the tool IS Bash, so this rule governs the input.
 		return hookio.RuleResult{}, fmt.Errorf("primary-push: read bash command: %w", err)
 	}
-	for _, pc := range cmdparse.Parse(cmdStr) {
+	leaves := cmdparse.Parse(cmdStr)
+	for i, pc := range leaves {
 		if !isGit(pc.Executable) {
 			continue
 		}
@@ -91,38 +106,161 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		if r.resolver == nil {
 			return hookio.NotApplicable()
 		}
-		advances, primary := r.pushAdvancesPrimary(pc, input.CWD, true)
-		if !advances {
-			continue
+		// The variables this command establishes for itself (pg2-wq3ki), read through
+		// the same seam primary-commit uses. Under the engine they arrive on the input,
+		// already computed from the EARLIER leaves; a direct caller is handed the whole
+		// expression and LeafVars reads them off the leaves before this one. Empty in the
+		// ordinary case, and an empty environment resolves nothing — so every verdict is
+		// then the one this rule reached before the environment existed.
+		f := r.inspectPush(pc, input.CWD, primarycommit.LeafVars(input.InCommandVars, leaves, i), true)
+		auto := autoApprovingModes[input.PermissionMode]
+		switch f.kind {
+		case findingUnresolved:
+			// FAIL-SAFE, and the ONLY branch of this rule that is decisive in an
+			// interactive session. See inspectPush for why this does not contradict the
+			// fail-open posture the rest of the rule keeps.
+			if auto {
+				return hookio.RuleResult{Decision: hookio.Reject, Reason: f.unresolvedReason(true), Module: r.Name()}, nil
+			}
+			return hookio.RuleResult{Decision: hookio.Ask, Reason: f.unresolvedReason(false), Module: r.Name()}, nil
+		case findingPrimary:
+			// Push advances the canonical primary. Block only an auto-approving session
+			// (which would otherwise silently accept); trust interactive/default
+			// sessions (R-6), where the git rule after us still judges the command on
+			// its own merits.
+			if auto {
+				return hookio.RuleResult{Decision: hookio.Reject, Reason: f.primaryReason(), Module: r.Name()}, nil
+			}
+			return hookio.NotApplicable()
 		}
-		// Push advances the canonical primary. Block only an auto-approving session
-		// (which would otherwise silently accept); trust interactive/default sessions (R-6).
-		if autoApprovingModes[input.PermissionMode] {
-			return hookio.RuleResult{
-				Decision: hookio.Reject,
-				Reason:   "primary-push: refusing a push that advances the primary branch (" + primary + ") of the canonical clone in an auto-approving session — advancing shared primary requires explicit human direction / PR flow (R-6/R-8); push a feature branch instead.",
-				Module:   r.Name(),
-			}, nil
-		}
-		// Push advances primary in an interactive/default session: trusted (R-6/R-8),
-		// and the git rule after us still judges the command on its own merits.
-		return hookio.NotApplicable()
 	}
 	// No git leaf, or none that advances primary.
 	return hookio.NotApplicable()
 }
 
-// pushAdvancesPrimary reports whether a single parsed git invocation would advance the
-// canonical clone's primary branch on the shared remote, and returns that primary's
-// name. When expandAliases is true it first expands a git alias hiding the subcommand
-// (tc-2phi8): a normal alias is expanded once and re-checked; a SHELL alias (`!…`) has
-// its body re-parsed and each git command in it checked with expansion OFF (single-pass,
-// which also bounds recursion). A resolver error, a linked worktree, or a feature-branch
-// push all return false — the fail-open posture (R-2/R-8: the worktree discipline is the
-// primary control).
-func (r *Rule) pushAdvancesPrimary(pc cmdparse.ParsedCommand, cwd string, expandAliases bool) (bool, string) {
+// findingKind classifies what the rule established about one parsed git invocation.
+// The third member is the pg2-eqacu fix: "this push advances the canonical primary" and
+// "I could not work out which repository this push would even reach" are different facts
+// with different remedies, and folding the second into the first is the false REJECT
+// pg2-eqacu reports — an auto-approving `git -C $WT push` was denied for "advancing
+// primary" when the push was really headed for a nested worktree on a feature branch.
+type findingKind int
+
+const (
+	findingNone       findingKind = iota // not a push, not canonical, or a feature-branch push
+	findingPrimary                       // a push that advances the canonical clone's primary
+	findingUnresolved                    // a push whose target directory is not statically resolvable
+)
+
+// pushFinding carries the finding plus the evidence its reason text cites. The evidence
+// fields are populated per kind: primary/dir/chosen for findingPrimary, token/source for
+// findingUnresolved — the same split primary-commit's commitFinding uses, because the two
+// reasons answer different questions (see unresolvedReason).
+type pushFinding struct {
+	kind    findingKind
+	primary string // the primary branch the push would advance
+	dir     string // the directory that was evaluated
+	chosen  string // how that directory was chosen (primarycommit.DirResolution.Chosen)
+	token   string // the text that defeated static resolution, as written
+	source  string // which input that text came from (primarycommit.DirResolution.Source)
+}
+
+// primaryReason states WHICH directory was evaluated, HOW it was chosen, WHY that made
+// this a primary-advancing push on the canonical clone, and what to do instead — the
+// wording convention pg2-h2npt introduced for primary-commit.
+//
+// The old text named only the primary branch and R-6/R-8. That was all the diagnosis an
+// agent got, so one whose real problem was a mis-resolved directory was told it was
+// advancing a branch it had never targeted, with no way to discover which directory the
+// rule had actually looked at (pg2-eqacu).
+func (f pushFinding) primaryReason() string {
+	return "primary-push: refusing this push. Directory evaluated: " + f.dir +
+		" (chosen from " + f.chosen + "). That directory is the CANONICAL clone — its .git is a real directory, not a linked worktree — and the push would advance \"" +
+		f.primary + "\", its primary branch, on the shared remote. This session auto-accepts prompts, so a hard deny is the only thing that stops it; advancing shared primary requires explicit human direction / PR flow (R-6/R-8). " +
+		"Push a feature branch instead. If you meant to push from inside a worktree, name it with a LITERAL absolute path: `git -C /abs/worktree push …` or `cd /abs/worktree && git push …`."
+}
+
+// unresolvedReason states that the rule COULD NOT DETERMINE the target, names the text
+// that defeated it, and explicitly DENIES the conclusion the old text implied — an agent
+// that reads "advances the primary branch" here goes hunting for a branch problem it does
+// not have, which is the round trip pg2-eqacu was filed for. `deny` picks the wording for
+// the auto-approving Reject over the interactive Ask.
+//
+// It deliberately does NOT name a directory. DirResolution.Dir is populated even when the
+// resolution failed, but it is the best-effort value — for `git -C $WT push` from the
+// canonical clone it is `<canonical>/$WT`, which resolves UP to the canonical clone — so
+// printing it would hand the agent the very fabricated provenance this branch exists to
+// refuse. The TOKEN and its SOURCE are what the agent has to fix, so those are what it
+// gets, exactly as primary-commit does it.
+func (f pushFinding) unresolvedReason(deny bool) string {
+	s := "primary-push: cannot determine which repository or branch this push would advance — " + f.source +
+		" is not a literal path (`" + f.token + "` is expanded by the shell, after this hook has already decided). " +
+		"This is NOT a finding that the push targets a primary branch: the target repository is simply unknown, and guessing it would mean either denying a legitimate feature-branch push from a worktree or approving a push that advances shared primary. " +
+		"Re-run naming the directory literally: `git -C /abs/path/to/worktree push …` (a `cd`/`pushd` target must be literal too), or assign it in the SAME command: `WT=/abs/path/to/worktree && git -C \"$WT\" push …`."
+	if deny {
+		return s + " Denied rather than asked because this session auto-accepts prompts."
+	}
+	return s
+}
+
+// inspectPush classifies a single parsed git invocation: findingPrimary for a `git push`
+// that would advance the canonical clone's primary branch on the shared remote,
+// findingUnresolved for one whose target directory does not resolve to a literal path,
+// findingNone otherwise. When expandAliases is true it first expands a git alias hiding
+// the subcommand (tc-2phi8): a normal alias is expanded once and re-checked; a SHELL alias
+// (`!…`) has its body re-parsed and each git command in it checked with expansion OFF
+// (single-pass, which also bounds recursion).
+//
+// THE DIRECTORY COMES FROM primarycommit.ResolveDir AND FROM NOWHERE ELSE (pg2-eqacu).
+// This rule used to carry a private effectiveDir that read `git -C` and the cwd only —
+// it never consulted the in-command variable environment, and nothing told it when the
+// text it was joining could not be a path. That is DELETED, not wrapped: ResolveDir is
+// the seam primarycommit exports for exactly this (see its doc comment), so the three
+// directory sources — the session cwd, a `cd`/`pushd` the ENGINE already advanced the cwd
+// past (EvaluateExpression, pg2-opclh; this rule MUST NOT grow a `cd` model of its own),
+// and the `git -C` options with in-command expansion — are evaluated by ONE
+// implementation that the two rules share and cannot drift apart from.
+//
+// FAIL-OPEN AND FAIL-SAFE, RECONCILED. These are not two postures in tension; they answer
+// two different questions, and which one applies is decided by WHETHER THE RULE HAS AN
+// ANSWER AT ALL:
+//
+//   - A resolver error, a linked worktree, a non-push subcommand, or a feature-branch
+//     push all yield findingNone and stay FAIL-OPEN — unchanged by pg2-eqacu. There the
+//     rule has a real answer about a KNOWN directory ("this is not a push that advances
+//     the canonical primary"), and R-2/R-8 — the worktree discipline — is the primary
+//     control, so declining to gate is correct rather than merely tolerable.
+//   - An UNRESOLVED directory is different in kind, and fail-open is not available to it
+//     for a mechanical reason: the best-effort directory is SYSTEMATICALLY BIASED. The
+//     resolver's gitRoot walks UP from `<cwd>/$WT`, so in the layout this rule protects
+//     (a nested worktree under a canonical clone that is on its primary branch) it lands
+//     on the canonical clone and reads `cur == primary`. Answering from that value is not
+//     a permissive abstention, it is a CONFIDENT WRONG ANSWER — the false Reject of a
+//     legitimate feature-branch push that pg2-eqacu reports. Refusing to answer is
+//     therefore the only honest option, and the refusal MUST NOT be spelled
+//     ErrNotApplicable: the generic git rule behind this one approves a non-force push,
+//     so not-applicable would turn an unknowable target into an APPROVAL. Hence Ask, and
+//     Reject where an Ask is silently accepted — which is also strictly no more permissive
+//     than the Reject those modes already produced for this spelling.
+//
+// The interactive Ask is the one verdict this change ADDS, and it is deliberately narrow:
+// it fires only for a push whose directory cannot be read out of the command text, never
+// for the every-push prompt the package comment rules out. A directory the command itself
+// writes down (`WT=/abs/wt && git -C "$WT" push`) RESOLVES and costs nothing — before this
+// change that spelling was hard-denied in an auto-approving session while the literal
+// `git -C /abs/wt push` beside it was approved.
+//
+// DECLINED: narrowing the unresolved verdict by reading the refspec, so that
+// `git -C $WT push origin feat:feat` could stay fail-open on the grounds that its remote
+// side is not the primary branch. It cannot: "is this the primary branch" is answered by
+// PrimaryBranch of the TARGET repository (`.git/config`'s pgii-integrate-branch.primaryBranch,
+// else "main"), and that repository is precisely what is unknown here. Deciding it from the
+// biased directory, or from a hardcoded "main", would reintroduce the guess this branch
+// exists to refuse.
+func (r *Rule) inspectPush(pc cmdparse.ParsedCommand, cwd string, vars map[string]string, expandAliases bool) pushFinding {
 	chdirs, subcmd, rest := cmdparse.GitInvocation(pc.Args)
-	dir := effectiveDir(cwd, chdirs)
+	res := primarycommit.ResolveDir(cwd, chdirs, vars)
+	dir := res.Dir
 	if expandAliases {
 		effSubcmd, effRest, shellBody := primarycommit.ResolveGitAlias(subcmd, rest, r.mergedAliases(dir, pc.Args))
 		if shellBody != "" {
@@ -130,37 +268,49 @@ func (r *Rule) pushAdvancesPrimary(pc cmdparse.ParsedCommand, cwd string, expand
 				if !isGit(sub.Executable) {
 					continue
 				}
-				if advances, primary := r.pushAdvancesPrimary(sub, dir, false); advances {
-					return true, primary
+				// dir is passed as the recursion's cwd, so an unresolved OUTER `-C` is
+				// still visible to the inner resolution below (its token survives in the
+				// best-effort Dir). The environment is threaded too: an alias body is part
+				// of the SAME command, so a variable the command established is in scope.
+				if f := r.inspectPush(sub, dir, vars, false); f.kind != findingNone {
+					return f
 				}
 			}
-			return false, ""
+			return pushFinding{}
 		}
 		subcmd, rest = effSubcmd, effRest
 	}
 	if subcmd != "push" {
-		return false, ""
+		return pushFinding{}
+	}
+	// The subcommand IS a push, so from here the DIRECTORY decides the verdict — and an
+	// unresolved one decides nothing. Tested HERE, after the subcommand and before the
+	// resolver, for two reasons: `git -C $WT status` must stay untouched (this rule only
+	// ever governs a push), and the resolver's walk-up is precisely what turns an
+	// unresolvable path into a confident wrong answer, so it must not run on one.
+	if res.Unresolved() {
+		return pushFinding{kind: findingUnresolved, token: res.Token, source: res.Source}
 	}
 	canonical, err := r.resolver.IsCanonical(dir)
 	if err != nil || !canonical {
-		return false, ""
+		return pushFinding{}
 	}
 	primary, err := r.resolver.PrimaryBranch(dir)
 	if err != nil || primary == "" {
-		return false, ""
+		return pushFinding{}
 	}
 	cur, err := r.resolver.CurrentBranch(dir)
 	if err != nil {
-		return false, ""
+		return pushFinding{}
 	}
 	// `-c push.default=matching` is consumed by GitInvocation before `rest`, so detect
 	// the injected form from the full arg list; the AMBIENT form (set in ~/.gitconfig,
 	// not injected) is read from the resolver. Either makes a bare push advance primary.
 	matching := hasMatchingPushDefault(pc.Args) || r.pushDefaultIsMatching(dir)
 	if !pushTargetsPrimary(rest, primary, cur, matching) {
-		return false, ""
+		return pushFinding{}
 	}
-	return true, primary
+	return pushFinding{kind: findingPrimary, primary: primary, dir: dir, chosen: res.Chosen}
 }
 
 // mergedAliases returns the aliases visible to this invocation — config-defined
@@ -275,14 +425,6 @@ func hasMatchingPushDefault(args []string) bool {
 
 func isGit(exec string) bool { return exec == "git" || filepath.Base(exec) == "git" }
 
-func effectiveDir(cwd string, chdirs []string) string {
-	dir := cwd
-	for _, c := range chdirs {
-		if filepath.IsAbs(c) {
-			dir = c
-		} else {
-			dir = filepath.Join(dir, c)
-		}
-	}
-	return dir
-}
+// NOTE (pg2-eqacu): the private effectiveDir that used to live here is GONE, and nothing
+// in this package may reintroduce one. It is primarycommit.ResolveDir's job — see
+// inspectPush. A local copy is what let this rule fall behind pg2-h2npt in the first place.
