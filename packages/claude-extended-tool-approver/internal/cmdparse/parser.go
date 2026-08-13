@@ -206,58 +206,20 @@ type SubstitutionScan struct {
 	Reason string
 }
 
-// matchParen returns the index within s of the ')' that closes the '(' assumed
-// to be at s[0], or -1 if unbalanced. Quote- and backslash-aware: it counts
-// every '(' as depth+1 and every ')' as depth-1 outside single/double quotes, so
-// nested $()/<()/>()/subshells all balance and a '(' from '<(' or '>(' does NOT
-// leak (the pg2-1q5i3 truncation gotcha). Parens inside single or double quotes
-// are literal and ignored.
+// DELETED, and the deletion is a coverage claim: `matchParen`.
 //
-// SHIM — owned by pg2-x9452 (ADR 0039 step 5), NOT by this function's own merits.
+// It was the last raw-text paren matcher outside the seam — structure derived from
+// bytes, which ADR 0039's I9 forbids there. ADR 0039 step 2a (pg2-zeqa5) removed
+// three of its four callers and kept it as a SHIM for the fourth,
+// `classifyCmdSubstitution`, on the env-assignment classification path. pg2-hed0a
+// migrated that path to the seam (see shellparse.go's env-assignment VALUE
+// classifier), which left `classifyCmdSubstitution`,
+// `classifyBacktickSubstitution` and this matcher with no callers at all, so all
+// three are gone rather than kept as dead code the fuzz harness could enshrine.
 //
-// This is raw-text structure derivation, which ADR 0039's I9 forbids outside the
-// seam. ADR 0039 step 2a (pg2-zeqa5) removed the substitution-scan family's three
-// callers of it — those now go through the seam — leaving exactly ONE:
-// classifyCmdSubstitution, on the ENV-ASSIGNMENT classification path reached from
-// classifyExpansion. (Its sibling classifyBacktickSubstitution derives its own
-// extent with a `strings.Index`/`LastIndex` pair and never calls this, so it is a
-// SEPARATE raw-text instance step 5 owes a migration for too.) Migrating
-// classifyExpansion is step 5's unit of work, so this is kept verbatim rather than
-// migrated here: collapsing the two steps together would destroy the per-step
-// replay attribution ADR 0039's Enforcement requires.
-//
-// Step 5 asserts this function's REMOVAL. Its live callers are enumerable with:
-//
-//	grep -n 'matchParen(' internal/cmdparse/parser.go
-func matchParen(s string) int {
-	inSingle, inDouble := false, false
-	depth := 0
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		switch {
-		case inSingle:
-			if c == '\'' {
-				inSingle = false
-			}
-		case c == '\\':
-			i++ // skip escaped char
-		case c == '\'' && !inDouble:
-			inSingle = true
-		case c == '"':
-			inDouble = !inDouble
-		case inDouble:
-			// Parens are literal inside double quotes — ignore them.
-		case c == '(':
-			depth++
-		case c == ')':
-			depth--
-			if depth == 0 {
-				return i
-			}
-		}
-	}
-	return -1
-}
+// pg2-x9452 (step 5) asserts this removal; the RULE-side scanners its acceptance
+// criteria also name (docker's `splitOnShellOperators`, gitdir's `scopeLeaves` and
+// `containsVarRef`, envvars' value scan) are untouched and still its.
 
 // StripLeadingEnvAssignments returns raw with any leading NAME=VALUE
 // environment-assignment tokens (and the whitespace separating them) removed,
@@ -747,9 +709,9 @@ func (sc *shellScanner) advance(s string, i int) int {
 	switch {
 	case f.inSingle:
 		// A single-quoted region is literal — ONLY its closing quote is special.
-		// Evaluated first (as matchParen and commandStartOffset already do) so that
-		// quoted parens, pipes, newlines and backslashes cannot desync the scan,
-		// whatever the substitution depth.
+		// Evaluated first (as commandStartOffset already does) so that quoted parens,
+		// pipes, newlines and backslashes cannot desync the scan, whatever the
+		// substitution depth.
 		if c == '\'' {
 			f.inSingle = false
 		}
@@ -773,7 +735,7 @@ func (sc *shellScanner) advance(s string, i int) int {
 		return 1
 	case sc.nested():
 		// Inert byte. Bare parens are counted SYMMETRICALLY (and only outside
-		// quotes, matching matchParen) so an inner group's ')' — jq's `select(...)`,
+		// quotes, matching commandStartOffset) so an inner group's ')' — jq's `select(...)`,
 		// awk's `print (1+2)` — cannot be mistaken for the ')' closing the
 		// substitution.
 		if !f.inDouble && !f.inBacktick {
@@ -1744,108 +1706,49 @@ func extractExecAndArgs(tokens []string) (exec string, args []string, envVars []
 	return "", nil, envVars
 }
 
-func classifyExpansion(value string) ExpansionKind {
-	if !strings.ContainsAny(value, "$`") {
-		return ExpansionNone
-	}
-	if strings.Contains(value, "$((") {
-		return ExpansionArithmetic
-	}
-	if strings.Contains(value, "$(") {
-		return classifyCmdSubstitution(value)
-	}
-	if strings.Contains(value, "`") {
-		return classifyBacktickSubstitution(value)
-	}
-	// Simple $VAR or ${VAR} reference
-	return ExpansionVarRef
-}
-
-func classifyCmdSubstitution(value string) ExpansionKind {
-	start := strings.Index(value, "$(")
-	if start == -1 {
-		return ExpansionUnknown
-	}
-	// Find the matching ')' with the shared quote/paren-aware matcher so a
-	// process sub nested in the body (e.g. `$(cat <(rm -rf ~))`) does NOT
-	// truncate the body at the process sub's own ')' (pg2-1q5i3 gotcha).
-	rel := matchParen(value[start+1:]) // value[start+1] == '('
-	if rel < 0 {
-		return ExpansionUnknown
-	}
-	closeAbs := start + 1 + rel
-	// Check for additional expansions in prefix or remainder (security: multiple substitutions)
-	remainder := value[closeAbs+1:]
-	prefix := value[:start]
-	if strings.Contains(remainder, "$(") || strings.Contains(remainder, "`") || strings.Contains(remainder, "$") ||
-		strings.Contains(prefix, "$(") || strings.Contains(prefix, "`") || strings.Contains(prefix, "$") {
-		return ExpansionUnknown
-	}
-	cmdStr := strings.TrimSpace(value[start+2 : closeAbs])
-	if cmdStr == "" {
-		return ExpansionUnknown
-	}
-	if IsSafeSubstitutionBody(cmdStr) {
-		return ExpansionSafeCmd
-	}
-	return ExpansionUnknown
-}
-
-func classifyBacktickSubstitution(value string) ExpansionKind {
-	first := strings.Index(value, "`")
-	last := strings.LastIndex(value, "`")
-	if first == last {
-		return ExpansionUnknown
-	}
-	// Check for additional expansions (security: multiple substitutions)
-	prefix := value[:first]
-	remainder := value[last+1:]
-	inner := value[first+1 : last]
-	if strings.Contains(remainder, "$(") || strings.Contains(remainder, "`") || strings.Contains(remainder, "$") ||
-		strings.Contains(prefix, "$(") || strings.Contains(prefix, "`") || strings.Contains(prefix, "$") ||
-		strings.Contains(inner, "`") {
-		return ExpansionUnknown
-	}
-	cmdStr := strings.TrimSpace(value[first+1 : last])
-	if cmdStr == "" {
-		return ExpansionUnknown
-	}
-	if IsSafeSubstitutionBody(cmdStr) {
-		return ExpansionSafeCmd
-	}
-	return ExpansionUnknown
-}
-
-// HasUnsafeCommandSubstitution reports whether s contains a $(...) (non-arithmetic)
-// or `...` command substitution whose inner command is not on the safe list
-// (safeCmdSubstitutions). Bare $VAR / ${VAR} references and arithmetic $((...))
-// are NOT substitutions and return false; $(date)/$(mktemp) return false.
+// HasUnsafeCommandSubstitution reports whether s embeds a substitution whose body is
+// not on the static safe list (safeCmdSubstitutions), or text whose substitutions
+// cannot be enumerated at all. Bare $VAR / ${VAR} references and arithmetic
+// $((...)) are NOT substitutions and return false; $(date)/$(mktemp) return false.
 //
-// This lets the engine demote ANY leaf whose executable or args embed an
-// arbitrary inner command (e.g. `echo $(rm -rf ~)`), even when the outer command
-// is otherwise "safe" — the outer rule never sees the inner command.
+// It lets a caller demote ANY leaf whose executable or args embed an arbitrary inner
+// command (e.g. `echo $(rm -rf ~)`), even when the outer command is otherwise "safe"
+// — the outer rule never sees the inner command.
+//
+// NO PRODUCTION CALLER, stated so nobody mistakes it for a live gate: every
+// reference is a test or the fuzz harness. It is kept, and kept CORRECT, because the
+// fuzz harness asserts properties over it and a wrong invariant enshrined there is
+// worse than none. The live env-assignment path is classifyExpansion; the live leaf
+// path is the engine's foldSubstitutionScan.
+//
+// Over the seam (ADR 0039 step 5's residue, pg2-hed0a) it no longer walks the text
+// itself. That matters for two inputs its byte loop got wrong:
+//
+//   - `$(( $(curl|sh) + 1 ))` — the loop SKIPPED the whole `$((` extent on a
+//     two-character lookahead, so a command substitution nested in arithmetic was
+//     never examined. The scan enumerates it (step 2a's replay Cause B).
+//   - text the scan cannot model — `$(oops` — now answers true through the
+//     Unparseable branch rather than by a failed paren match, so absence of
+//     enumerated bodies is never read as evidence of safety (the pg2-wguam rule).
+//
+// A PROCESS substitution body is held to the same allowlist. Its own kind carries no
+// static allowlist on the engine's path, and this predicate has no production caller
+// to widen, so the uniform (stricter) treatment is the safe default. A value that is
+// ONLY a process substitution still returns false: it contains neither `$` nor a
+// backtick, so the shortcut below answers first — the same pre-existing gap
+// classifyExpansion records for pg2-x9452.
 func HasUnsafeCommandSubstitution(s string) bool {
 	if !strings.ContainsAny(s, "$`") {
 		return false
 	}
-	if strings.Contains(s, "`") && classifyBacktickSubstitution(s) == ExpansionUnknown {
+	scan := ScanSubstitutions(s)
+	if scan.Unparseable {
 		return true
 	}
-	idx := 0
-	for {
-		p := strings.Index(s[idx:], "$(")
-		if p < 0 {
-			break
-		}
-		abs := idx + p
-		if strings.HasPrefix(s[abs:], "$((") { // arithmetic, not a command substitution
-			idx = abs + 3
-			continue
-		}
-		if classifyCmdSubstitution(s[abs:]) == ExpansionUnknown {
+	for _, sub := range scan.Substitutions {
+		if !IsSafeSubstitutionBody(sub.Body) {
 			return true
 		}
-		idx = abs + 2
 	}
 	return false
 }

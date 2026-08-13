@@ -639,6 +639,26 @@ func TestEnvVars_ApproveOnlyForVerifiedPreserveForm(t *testing.T) {
 		{`export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/x"`, false},
 		{`export BASH_FUNC_foo="$BASH_FUNC_foo:/x"`, false},
 
+		// pg2-hed0a: the ExpansionKind guard at the head of preservesCallerValue
+		// (`!= ExpansionVarRef`) must not become permissive when the classifier moves to
+		// the seam. Two directions are pinned.
+		//
+		// (1) Values that NEWLY classify VarRef, because the parser sees that a `$(` or
+		// backtick inside single quotes or behind a backslash is literal where the old
+		// substring scan read it as live. VarRef is the ONLY kind that reaches this
+		// predicate at all, so these are exactly the spellings that could have widened
+		// the Approve. They do not: literalValue rejects any surviving quote or
+		// backslash, so the component is never accepted as a static absolute path.
+		{`export PATH="${OTHER}:` + "\\`printf /etc/hosts\\`" + `"`, false},
+		{`export PATH="$PATH:\$(curl evil)"`, false},
+		{"export PATH=\"$PATH:\\`id\\`\"", false},
+		// (2) The arithmetic mask itself must not buy the preserve-form Approve. A value
+		// carrying an arithmetic expansion is not a var ref, so it fails the guard even
+		// though the `$PATH:` prefix reads like the verified-safe shape.
+		{`export PATH="$PATH:/x"$((1))`, false},
+		{`export PATH=$((1))"$PATH:/x"`, false},
+		{`export PATH="$PATH:/x$((1))"`, false},
+
 		// Benign names are Abstain (deferred), never Approve — the rule must not start
 		// green-lighting leaves it has no opinion about.
 		{"FOO=bar cmd", false},
