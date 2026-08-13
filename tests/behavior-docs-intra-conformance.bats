@@ -62,6 +62,77 @@ MD
   echo "$output" | grep -q "none obvious"
 }
 
+@test "realization-register (INV-23): a gap recorded inside an OQ- is FAILed" {
+  # The real-world shape the rule was written against: an open question used as an inline
+  # realization register. An OQ- says the INTENT is unsettled; a gap says the intent is settled and
+  # the build has not caught up, so this puts implementation-status prose inside an element
+  # definition and mints a citable identity for a record that must later be deleted.
+  cat > "$SET/journeys.md" <<'MD'
+# Open questions
+- **`OQ-1` — Realization tracked externally.** A **realization gap** — intended behavior the
+  implementation has not yet built — is tracked against the cited ID: `INV-1`.
+MD
+  run_selfchecks
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q 'FAIL realization gap recorded inside an open question'
+  echo "$output" | grep -q 'OQ-1'
+}
+
+@test "realization-register (INV-23): a missing register section is an ADVISORY, never a FAIL" {
+  # Presence CANNOT be a FAIL here: tests/behavior-docs-real-corpus.sh treats any self-checks FAIL
+  # as a hard failure with no baseline escape, so failing would red the build for every set not yet
+  # retrofitted. This test pins the strength, not just the wording.
+  cat > "$SET/invariants.md" <<'MD'
+# Invariants
+- **`INV-1`** — Every accepted event is delivered at least once.
+MD
+  run_selfchecks
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "ADVISORY: no '## Realization gaps' section"
+  ! echo "$output" | grep -qE '^[[:space:]]*FAIL[[:space:]]'
+}
+
+@test "realization-register (INV-23): a present register with no OQ- misuse is clean" {
+  cat > "$SET/README.md" <<'MD'
+# Set
+
+## Realization gaps
+
+| Element | Intended                     | Where the implementation stands |
+| ------- | ---------------------------- | ------------------------------- |
+| `INV-1` | delivery is at-least-once    | delivery is best-effort         |
+MD
+  cat > "$SET/journeys.md" <<'MD'
+# Open questions
+- **`OQ-1` — Which durability guarantee delivery owes.** The intent is undecided, which is what
+  makes this an open question rather than a register row.
+MD
+  run_selfchecks
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q 'register section present'
+  echo "$output" | grep -q 'no gap recorded inside an OQ-'
+}
+
+@test "realization-register (INV-23): more than one register section is FAILed" {
+  cat > "$SET/README.md" <<'MD'
+# Set
+
+## Realization gaps
+
+Nothing to record.
+MD
+  cat > "$SET/invariants.md" <<'MD'
+# Invariants
+
+## Realization gaps
+
+A second register: a set carries exactly one.
+MD
+  run_selfchecks
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q 'FAIL 2 register sections'
+}
+
 @test "judgment fixtures (substitution/extent/seam-vocab) run cleanly through the mechanical layer" {
   # A well-formed set with a glossary + invariants processes without a mechanical
   # error (these categories are agent-judgment; the corpus/ fixtures carry them).
@@ -221,6 +292,18 @@ corpus_intra_dir() {
   # And it must be the real thing, not an empty directory that happens to exist.
   [ -d "$C/inline-status/fail" ]
   [ -d "$C/floor-leakage/pass" ]
+  [ -d "$C/realization-register/fail" ]
+}
+
+@test "corpus intra (#5): realization-register fail fixture is mechanically flagged; pass fixture is clean" {
+  C=$(corpus_intra_dir); [ -d "$C/realization-register" ] || skip "corpus not found at $C"
+  run self-checks "$C/realization-register/fail"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q 'FAIL realization gap recorded inside an open question'
+  run self-checks "$C/realization-register/pass"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q 'register section present'
+  ! echo "$output" | grep -q 'FAIL realization gap recorded inside an open question'
 }
 
 @test "corpus intra (#5): every fail/pass fixture is genuinely exercised (self-checks runs to completion)" {

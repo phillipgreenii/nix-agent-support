@@ -68,6 +68,31 @@ A set that cites another set SHOULD namespace
 its own names by topic so a cited name never collides with one of its own; this **root** method,
 citing no other set, keeps bare numeric names.
 
+## Realization gaps
+
+A set's **realization-gap register** (`INV-23`): where intended behavior the implementation has not
+yet built is recorded, one row per gap, naming the element id the gap is against. The register is
+**set-level metadata**, never part of an element — which is exactly what lets it name the
+implementation's current position without putting _how_ (`INV-2`) or an implementation-status
+annotation (`INV-4`) into any element definition. A gap is **not** an open question and MUST NOT be
+written as an `OQ-` element (`INV-23`): an open question is unsettled intent, and a gap is settled
+intent the build has not reached.
+
+Each row is `` `| <element id> | <what the docs require> | <where the implementation stands> |` ``. A
+set MAY add a further column pointing at wherever it tracks the work, since which tracker it keeps is
+its own realization decision. The column punctuation, like every other layout choice, is illustrative
+(`GOAL-7`, `INV-10`). The register carries no status header (`INV-4`), and a set with nothing to
+record still carries the section, so an absent section means the register was omitted rather than
+that the set has converged.
+
+| Element  | Intended                                                                      | Where the implementation stands                                                                                   |
+| -------- | ----------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `INV-23` | every set carries a register, and the conformance/drift pass holds it to that | the pass reports a missing register as an advisory rather than a failure, while the sets it reads are retrofitted |
+
+_This method's implementation is its conformance tooling, so the row above is the method set's own gap
+against its own rule; the condition for closing it is recorded in
+`behavior-docs/docs/decisions · DEC-CONFORM-2`._
+
 ## External references
 
 A set declares every external element it cites here, so a cross-set reference resolves by the

@@ -34,9 +34,13 @@
 # `OQ-WORKFLOW` in pr-pool is different and is a real defect: the open question was
 # deleted and two citations were left behind. Owner: the pr-pool set retrofit.
 #
+# These three lines carry `file:line` coordinates, so ANY insertion above them in the
+# named file MOVES them and the baseline line must be re-recorded. That is a location
+# change, not a new or fixed finding — re-run the runner and copy the new coordinates.
+#
 # ---------------------------------------------------------------------------
-intra/trace-extract behavior-docs/docs/behavior|WARN dangling in prose: INTF-SOURCE (README.md:61 invariants.md:75) resolves to no definition here and no declared external reference
-intra/trace-extract behavior-docs/docs/behavior|WARN dangling in prose: INV-DISP-1 (README.md:60 invariants.md:74) resolves to no definition here and no declared external reference
+intra/trace-extract behavior-docs/docs/behavior|WARN dangling in prose: INTF-SOURCE (README.md:61 invariants.md:98) resolves to no definition here and no declared external reference
+intra/trace-extract behavior-docs/docs/behavior|WARN dangling in prose: INV-DISP-1 (README.md:60 invariants.md:97) resolves to no definition here and no declared external reference
 intra/trace-extract packages/pr-pool/docs/behavior|FAIL JOURNEY-CONFIG carries no listing on its definition
 intra/trace-extract packages/pr-pool/docs/behavior|FAIL JOURNEY-CONFORM carries no listing on its definition
 intra/trace-extract packages/pr-pool/docs/behavior|FAIL JOURNEY-FAIL carries no listing on its definition

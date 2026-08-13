@@ -20,7 +20,9 @@ out-of-sequence numbers are legal and a name MAY be changed without breaking ide
   term unless doing so loses essential meaning within the extent.
 - **`INV-13`** <!-- uuid: 94285c70-da89-4402-8ae2-af27925008bd --> — A behavior docs set MUST make its **scope explicit** (extent + floor),
   include its **user stories, use cases and journeys**, and define **all its actors** and
-  **all its interfaces**; known gaps MUST be recorded as open questions. Completeness is
+  **all its interfaces**; known gaps **in the intended behavior itself** MUST be recorded as open
+  questions — a distance between settled intent and what the build has reached is not one of these,
+  it is a realization gap and belongs in the register (`INV-23`). Completeness is
   judged against an implementer being able to _locate_ what it needs; unknown gaps surface as
   holes in this structure.
 - **`INV-22`** <!-- uuid: b2502527-1340-4a1f-858c-aaa80c601317 --> — **Traceability is a
@@ -50,7 +52,28 @@ out-of-sequence numbers are legal and a name MAY be changed without breaking ide
   Change flows **docs-down**: edit the docs first; the implementation re-converges to them,
   never the reverse. A **realization gap** — intended behavior the implementation has not yet
   built — is therefore normal, not a defect in the docs; it is tracked against the cited IDs,
-  never annotated inline (the docs stay living, `INV-4`).
+  never annotated inline (the docs stay living, `INV-4`). The carrier that tracking takes is the
+  **realization-gap register**, whose shape `INV-23` fixes so it is not re-invented per set.
+- **`INV-23`** <!-- uuid: f3bba3e7-440f-4109-a4de-9d37daa34bcf --> — **The realization-gap
+  register is set-level, never an element.** A behavior docs set MUST carry one section named
+  `## Realization gaps` — its **realization-gap register** — and every realization gap (`INV-15`)
+  MUST be recorded as a row in it. The register MUST sit **outside every element definition**: it
+  is the one place a set MAY say where the implementation currently stands, and confining that to
+  one labelled place is what keeps the elements themselves free of _how_ (`INV-2`) and free of an
+  implementation-status annotation (`INV-4`). Every row MUST name the **element id** the gap is
+  against — that is what "tracked against the cited IDs" means — and that id MUST resolve like any
+  other reference (`INV-3`); one element MAY carry more than one row. A row MUST also say **what the
+  intended behavior requires** and **where the implementation stands**, because a row naming only an
+  id records that something diverges without saying what; anything further, such as a pointer to
+  wherever the work is tracked, is the set's own choice. A gap MUST NOT be recorded as
+  an **open question**: an `OQ-` says the _intent_ is unsettled, whereas a gap says the intent is
+  settled and the build has not caught up, so typing one as the other sends the reader to
+  `USECASE-3` (settle it, then delete it) instead of to the implementation — and it mints a citable
+  identity (`INV-3`) whose later deletion strands every reference to it. A set with no gap to
+  record MUST still carry the section, so that its **absence** means the set omitted the register
+  rather than that the set has converged. Which file carries the section is illustrative
+  (`INV-10`); it SHOULD sit with the set's other set-level sections, conventionally the README.
+  (`behavior-docs/docs/decisions · DEC-CONFORM-2`.)
 - **`INV-3`** <!-- uuid: c44b760f-9baf-471a-8424-49984eb94ac7 --> — Every invariant, goal,
   user story, use case, journey, interface, and actor MUST carry a **typed name** (`INV-`,
   `GOAL-`, `STORY-`, `USECASE-`, `JOURNEY-`, `INTF-`, `ACTOR-`; open questions use `OQ-`) **and,

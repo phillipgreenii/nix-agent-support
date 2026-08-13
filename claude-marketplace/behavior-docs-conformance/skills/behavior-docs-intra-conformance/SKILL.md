@@ -1,6 +1,6 @@
 ---
 name: behavior-docs-intra-conformance
-description: The INTRA third of the behavior-docs conformance family — review, or apply mechanical fixes to, ONE behavior-docs set against the behavior-docs method's own invariant rules (the conformance / drift pass). Use when asked to check, review, audit, or "run the conformance pass" on a behavior docs set (a `docs/behavior` directory), to check whether it obeys the behavior-docs method, or to reconcile drift between a set and the method. Checks scope-explicit (extent+floor), all actors and interfaces defined, stories/journeys define the extent with every invariant traced, typed/stable IDs that resolve without collision, per-element traceability listings with no untraced element and no dangling reference, each named concept used at least twice beyond its glossary definition, self-consistency, cross-set citations textual and resolving, intended-behavior-only (nothing below the floor), and no per-doc status headers. Review reports ranked findings citing the method invariant each breaks; apply fixes only the mechanical/format issues and leaves intended-behavior to a human. The other two thirds are `behavior-docs-inter-conformance` (set vs. another system's contract, across a seam) and `behavior-docs-impl-conformance` (an implementation vs. its own set). Do NOT use to author a new set from scratch, for a cross-set seam, or for non-behavior-docs markdown.
+description: The INTRA third of the behavior-docs conformance family — review, or apply mechanical fixes to, ONE behavior-docs set against the behavior-docs method's own invariant rules (the conformance / drift pass). Use when asked to check, review, audit, or "run the conformance pass" on a behavior docs set (a `docs/behavior` directory), to check whether it obeys the behavior-docs method, or to reconcile drift between a set and the method. Checks scope-explicit (extent+floor), all actors and interfaces defined, stories/journeys define the extent with every invariant traced, typed/stable IDs that resolve without collision, per-element traceability listings with no untraced element and no dangling reference, each named concept used at least twice beyond its glossary definition, self-consistency, cross-set citations textual and resolving, intended-behavior-only (nothing below the floor), a present and well-formed realization-gap register (never inline, never an open question), and no per-doc status headers. Review reports ranked findings citing the method invariant each breaks; apply fixes only the mechanical/format issues and leaves intended-behavior to a human. The other two thirds are `behavior-docs-inter-conformance` (set vs. another system's contract, across a seam) and `behavior-docs-impl-conformance` (an implementation vs. its own set). Do NOT use to author a new set from scratch, for a cross-set seam, or for non-behavior-docs markdown.
 ---
 
 # Behavior-docs intra-conformance
@@ -58,6 +58,7 @@ hit into a finding citing the mapped invariant.
 | **Cross-set citations are textual, not relative links**                                | flag `](../…another-set…)`; citations use `<repo> · <set-path> · <ID>`                                                                                                        | cross-set citation (`INV-8`)        |
 | **Cited IDs resolve**                                                                  | every `… · <ID>` and every intra-set ID reference resolves to a definition (in the cited set, which you must read)                                                            | consistency (`INV-8/12/18`)         |
 | **Floor leakage**                                                                      | grep for below-floor tells — `file:line`, function/test names, tuning constants, exact CLI flag strings, tool names below the scope — as _candidates_ for the judgment check  | intended-behavior-only (`INV-2/10`) |
+| **Realization-gap register present, and no gap inside an `OQ-`**                       | count `## Realization gaps` headings (0 ⇒ ADVISORY, >1 ⇒ FAIL); FAIL any line inside an `OQ-` definition block that reads as a gap record                                     | register shape (`INV-23`)           |
 | **Mermaid fences balanced**                                                            | count ` ```mermaid ` opens vs closes                                                                                                                                          | (hygiene)                           |
 
 ## Step 2b — Traceability (deterministic, `INV-22`)
@@ -114,16 +115,28 @@ version number):
 | **inter** | one set ↔ another system's contract | [`behavior-docs-inter-conformance`](../behavior-docs-inter-conformance/SKILL.md) |
 | **impl**  | an implementation ↔ its own set     | [`behavior-docs-impl-conformance`](../behavior-docs-impl-conformance/SKILL.md)   |
 
-Steps 2–3 above cover the general checklist; the five categories the intra evaluator is specifically
+Steps 2–3 above cover the general checklist; the six categories the intra evaluator is specifically
 accountable for — each with a FAIL and a PASS fixture under [`corpus/intra/`](corpus/intra/) — are:
 
 | Category                         | What FAILs                                                                                                    | Layer                                               | Rule       |
 | -------------------------------- | ------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- | ---------- |
 | **inline-status** (#15)          | a rule annotated with its current implementation status in prose (e.g. "unmet by the current implementation") | mechanical (self-checks "Inline status framing")    | `INV-4`    |
 | **floor-leakage**                | a below-floor realization detail (`file:line`, retry counts, backoff ms)                                      | mechanical (self-checks "Floor-leakage candidates") | `INV-2/10` |
+| **realization-register**         | a realization gap recorded as an `OQ-` element (FAIL), or no `## Realization gaps` section at all (ADVISORY)  | mechanical (self-checks "Realization-gap register") | `INV-23`   |
 | **substitution**                 | an extent statement that fails the substitution test (names an artifact, not a behavior)                      | judgment (Step 3)                                   | `INV-2/10` |
 | **extent-traceability**          | an extent-in/out claim (story/journey) no invariant traces                                                    | judgment (Step 3)                                   | `INV-11`   |
 | **seam-vocab inherit-or-rename** | a borrowed (cited) term silently REDEFINED instead of inherited-or-renamed                                    | judgment (Step 3)                                   | `INV-20`   |
+
+**The register: what intra owns, and what it does not.** `INV-23` fixes the register's shape so no set
+re-invents it; `behavior-docs/docs/decisions · DEC-CONFORM-2` records why and splits the checking.
+Intra owns the **form** — the section exists and is named, no gap sits inside an `OQ-`, no gap is
+annotated inline on an element, and each row's element id resolves. Intra does **not** own the
+register's **truth**: whether a row's claimed divergence is real, and whether a divergence the code
+shows is missing a row, needs running code and belongs to
+[`behavior-docs-impl-conformance`](../behavior-docs-impl-conformance/SKILL.md). Presence is an
+ADVISORY rather than a FAIL only because a FAIL from `self-checks.sh` cannot be absorbed by the
+real-corpus baseline (see `DEC-CONFORM-2`); read a missing register as a real `INV-23` finding when
+reporting, and promote the check to FAIL once every real set carries the section.
 
 The mechanical categories are enforced by the bundled `self-checks.sh` (and gated by the
 `test-behavior-docs-intra-conformance` bats check under `nix flake check`); the judgment categories are

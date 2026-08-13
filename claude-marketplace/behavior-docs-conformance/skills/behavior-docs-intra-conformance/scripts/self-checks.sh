@@ -126,6 +126,65 @@ sec "Inline status framing (INV-4 / intra #15) — expect none"
 grep -rniE 'unmet by the current implementation|not[[:space:]]+yet[[:space:]]+implemented|currently[[:space:]]+unimplemented|no[[:space:]]+current[[:space:]]+implementation|does[[:space:]]+not[[:space:]]+yet[[:space:]]+(exist|support|implement)|planned[[:space:]]+but[[:space:]]+not[[:space:]]+(yet[[:space:]]+)?(built|implemented)|(yet|still|remains?)[[:space:]]+to[[:space:]]+be[[:space:]]+implemented' ./*.md ||
   echo "  clean"
 
+sec "Realization-gap register (INV-23) — one '## Realization gaps' section; no gap inside an OQ-"
+# INV-23 fixes the CARRIER a realization gap (INV-15) is tracked in: exactly one set-level section
+# named '## Realization gaps', keyed by element id, sitting OUTSIDE every element definition, and
+# NEVER an open question. The section NAME is normative and the FILE is not — the same calibration
+# INV-3 uses for '## External references' — so the heading is looked for anywhere in the set.
+#
+# TWO FINDINGS AT TWO STRENGTHS, and the split is mechanical rather than editorial:
+#
+#   OQ- MISUSE is a FAIL. An OQ- says the INTENT is unsettled; a gap says the intent is settled and
+#   the build has not caught up. Recording one as the other puts implementation-status prose inside
+#   an element definition AND mints a citable identity (INV-3) whose later deletion strands every
+#   reference to it. It is precise, and no set shipped here trips it, so it costs nothing.
+#
+#   MISSING PRESENCE is an ADVISORY. tests/behavior-docs-real-corpus.sh treats ANY FAIL from this
+#   script as a hard failure with NO baseline escape (it never calls `record` on this output), so a
+#   hard presence check would red the build for every set not yet retrofitted. Promote it to FAIL
+#   once every set the real-corpus runner reads carries the section
+#   (`behavior-docs/docs/decisions · DEC-CONFORM-2`).
+reg_hits=$({ grep -rhoiE '^##[[:space:]]+Realization[[:space:]]+gaps[[:space:]]*$' ./*.md || true; } | wc -l | tr -d ' ')
+if [ "$reg_hits" -eq 0 ]; then
+  echo "  ADVISORY: no '## Realization gaps' section — INV-23 requires one in EVERY set, even with"
+  echo "  nothing to record, so that an absent section means omitted rather than converged"
+elif [ "$reg_hits" -gt 1 ]; then
+  printf '  FAIL %s register sections — a set carries exactly one (INV-23)\n' "$reg_hits"
+else
+  echo "  register section present"
+fi
+# A gap recorded inside an OQ- element. Track the CURRENT definition the same way
+# trace-extract.sh does (a bullet or heading marker is MANDATORY, so a wrapped prose line opening
+# with a code span is not mistaken for a definition), and flag any line in an OQ- block that reads
+# as a gap record.
+oq_gap=$(
+  for f in ./*.md; do
+    awk -v fname="${f#./}" '
+      BEGIN {
+        IDPAT = "(INV|GOAL|STORY|USECASE|JOURNEY|INTF|ACTOR|OQ)-[A-Za-z0-9]+(-[A-Za-z0-9]+)*"
+        DEFPAT = "^[ \t]*(([-*+][ \t]+)|(#+[ \t]+))[*_`]*" IDPAT
+        cur = ""
+      }
+      {
+        if ($0 ~ DEFPAT) {
+          match($0, IDPAT)
+          cur = substr($0, RSTART, RLENGTH)
+        } else if ($0 ~ /^[ \t]*$/) {
+          cur = ""
+        }
+        if (cur ~ /^OQ-/ && tolower($0) ~ /realization gap/) printf "%s:%d %s\n", fname, FNR, cur
+      }
+    ' "$f"
+  done
+)
+if [ -n "$oq_gap" ]; then
+  while IFS= read -r l; do
+    [ -n "$l" ] && printf '  FAIL realization gap recorded inside an open question: %s (INV-23)\n' "$l"
+  done <<<"$oq_gap"
+else
+  echo "  no gap recorded inside an OQ-"
+fi
+
 sec "Cross-set relative links (INV-8) — expect none; use textual '<repo> · <path> · <ID>'"
 grep -rnoE '\]\(\.\.?/[^)]*\)' ./*.md || echo "  none"
 

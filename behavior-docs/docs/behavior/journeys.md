@@ -63,7 +63,7 @@ cited, never reproduced.
 
 - **`STORY-4`** <!-- uuid: 5ae35f53-5599-419c-982e-d893c89fe677 --> — As an **implementer**, I want a source of truth to resolve uncertainty
   against, and to locate and classify a gap rather than guess. _(the method's north-star)_
-  _(→ `USECASE-1`; `INV-15`, `INV-13`, `INV-22`.)_
+  _(→ `USECASE-1`; `INV-15`, `INV-23`, `INV-13`, `INV-22`.)_
 - **`STORY-5`** <!-- uuid: c35a453b-f6b8-4311-8a0a-64e5049bf03d --> — As an **implementer**, I want a stable ID to cite from a test or decision
   doc, so the `intent → check` link outlives the spec that introduced it. _(→ `USECASE-5`;
   `INV-3`, `INV-4`.)_
@@ -109,14 +109,15 @@ flowchart TD
 
 _Primary actor:_ `ACTOR-1` (Author) — a change of intent originates here. _Level:_ **user-goal**.
 _Preconditions:_ the intended behavior differs from what the docs say.
-_Requires:_ `INV-2`, `INV-4`, `INV-15`, `INV-21`, `GOAL-5`, `GOAL-17`.
+_Requires:_ `INV-2`, `INV-4`, `INV-15`, `INV-21`, `INV-23`, `GOAL-5`, `GOAL-17`.
 _Includes:_ `USECASE-5` (where the change sheds a _how_), `USECASE-3` (where it settles an open
 question).
 
 Edit the behavior docs first to state the new intended state. Downstream (spec → design → plan) is
 re-derived from the change and thrown away on re-convergence. Cite a decision-doc entry if the
 change is consequential (`GOAL-5`). Until the implementation catches up, the difference is a
-normal **realization gap** (`INV-15`) tracked against the changed IDs — not a status header on
+normal **realization gap** (`INV-15`), recorded against the changed IDs as a row in the set's
+**realization-gap register** (`INV-23`) — never inline on the element, and never a status header on
 the doc (`INV-4`).
 
 _Extensions._ 1a. The statement being edited turns out to be realization content, not intended
@@ -203,14 +204,15 @@ flowchart TD
 
 _Actors:_ `ACTOR-1` (Author) of the owning set, and the `ACTOR-1` of every consuming set — the arc
 spans them, which is what makes it a journey rather than a use case. _Level:_ **summary**.
-_Requires:_ `INV-3`, `INV-4`, `INV-8`, `INV-15`, `INV-18`, `INV-20`.
+_Requires:_ `INV-3`, `INV-4`, `INV-8`, `INV-15`, `INV-18`, `INV-20`, `INV-23`.
 _Includes:_ `USECASE-2` (the owner's own edit).
 
 An owner edits its contract (`USECASE-2`). It does **not** notify consumers — an owner does not
 know its implementers (`INV-3`). Each consumer instead **re-converges by pull**: it re-runs its
 conformance suite (`INV-18`) against the owner's _current_ contract, matching cited elements by
 UUID (`INV-3`). A reconciliation failure is a **realization gap** (`INV-15`) on the consumer's
-side, tracked against the cited elements — not a status header (`INV-4`). The conformance suite
+side, recorded against the cited elements in the consumer's own **realization-gap register**
+(`INV-23`) — not a status header (`INV-4`). The conformance suite
 versions with the contract, so the pull always checks against the latest owner state. This is the
 same **level-triggered** re-convergence the docs use everywhere: no push, no notification — each
 side pulls the current truth from the reference seam.

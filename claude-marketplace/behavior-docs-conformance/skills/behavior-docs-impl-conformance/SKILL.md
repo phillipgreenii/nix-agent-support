@@ -1,6 +1,6 @@
 ---
 name: behavior-docs-impl-conformance
-description: The IMPL third of the behavior-docs conformance family — reconcile an IMPLEMENTATION against ITS OWN behavior-docs set. Use when asked to check whether the code matches the docs, whether an implementation still honours the invariants and interfaces its own `docs/behavior` set defines, whether its behavior-ID citations are live or stale, or which contract elements the code cites nowhere. Classifies every behavior-ID citation in the implementation as resolving locally, resolving through the imports table, framed as historical, or dangling; reports which contract elements are cited nowhere; and, for the behavior side, presumes the DOCS correct and the implementation at fault. The other two thirds are `behavior-docs-intra-conformance` (one set vs. the method's rules) and `behavior-docs-inter-conformance` (two sets reconciled across a seam). Do NOT use for a set in isolation, for a cross-set seam, or for general code review that is not about doc conformance.
+description: The IMPL third of the behavior-docs conformance family — reconcile an IMPLEMENTATION against ITS OWN behavior-docs set. Use when asked to check whether the code matches the docs, whether an implementation still honours the invariants and interfaces its own `docs/behavior` set defines, whether its behavior-ID citations are live or stale, or which contract elements the code cites nowhere. Classifies every behavior-ID citation in the implementation as resolving locally, resolving through the imports table, framed as historical, or dangling; reports which contract elements are cited nowhere; reconciles the set's realization-gap register against the code in both directions (a stale row, an unrecorded divergence); and, for the behavior side, presumes the DOCS correct and the implementation at fault. The other two thirds are `behavior-docs-intra-conformance` (one set vs. the method's rules) and `behavior-docs-inter-conformance` (two sets reconciled across a seam). Do NOT use for a set in isolation, for a cross-set seam, or for general code review that is not about doc conformance.
 ---
 
 # Behavior-docs impl-conformance
@@ -75,11 +75,29 @@ These need reading, not grep. For each, cite the set element.
 - **A behavior the code has and the set does not describe** is either undocumented intent (a docs gap
   for a human) or unintended behavior (a code finding). Say which you think it is, and why.
 
+## Step 3b — Reconcile the realization-gap register (read and judge)
+
+The set's **realization-gap register** — its `## Realization gaps` section (`INV-23`) — is the
+record of intended behavior the implementation has not yet built. Intra checks its **form**; **this
+evaluator owns its truth**, because only a pass with running code in front of it can say whether the
+record is accurate (`behavior-docs/docs/decisions · DEC-CONFORM-2`). Reconcile it both ways:
+
+- **Each row against the code** — the divergence the row claims either still holds, or the code has
+  caught up and the row is stale. A stale row is the one register finding that indicts the **docs**
+  rather than the code, and it is a mechanical fix: delete the row.
+- **Each divergence against the rows** — a divergence you found in Step 3 that no row records is an
+  unrecorded gap. Report it as a row to add, naming the element id, what the docs require, and where
+  the implementation stands. Do **not** instead soften the element to match the code: that launders a
+  defect into intent, and the register exists precisely so the element never has to move.
+
+A register that is **absent** is an `INV-23` finding intra already reports; note it and move on
+rather than duplicating it.
+
 ## Step 4 — Report
 
 Lead with a one-line verdict (conformant / N divergences / M dangling citations). Then list,
-most-severe first: behavioral divergences, dangling citations, undeclared external citations, then
-the coverage NOTICE. Cite the set element ID and the `file:line` for each. Separate **mechanical**
+most-severe first: behavioral divergences, dangling citations, undeclared external citations,
+realization-gap register rows to add or delete, then the coverage NOTICE. Cite the set element ID and the `file:line` for each. Separate **mechanical**
 findings (fixable — a stale citation, a missing imports row) from **behavioral** ones (a human
 decides).
 
@@ -100,3 +118,6 @@ over the real in-repo implementation so a stale citation in shipped code is visi
   set leaves no tombstone, so the code is the only place the history can live.
 - Claiming conformance from Step 1 alone → a resolving citation proves the code names the rule, not
   that it obeys it. Run the conformance suite and read the citing sites.
+- Recording a divergence by annotating the element, or by opening an `OQ-` for it → both are `INV-23`
+  violations. A gap is settled intent the build has not reached, so it goes in the register as a row
+  and nowhere else.

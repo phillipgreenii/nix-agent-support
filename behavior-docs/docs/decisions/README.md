@@ -52,6 +52,10 @@ copy it.
 - **`DEC-CONFORM-1`** — in [conformance.md](conformance.md) — conformance checking splits three
   ways: **intra** (a set against the method's rules), **inter** (a set against other systems'
   contracts), **impl** (an implementation against its own behavior docs).
+- **`DEC-CONFORM-2`** — in [conformance.md](conformance.md) — the realization-gap register has one
+  method-fixed shape (a `## Realization gaps` section, keyed by element id, never inline, never an
+  `OQ-`); **intra** checks its form and **impl** checks its truth, with presence reported as an
+  advisory until every real set carries one.
 - **`DEC-VOCAB-1`** — in [vocabulary.md](vocabulary.md) — three extent-defining kinds (user story,
   use case, journey), each citing its established source, with **level** as the test between them;
   and the settled re-classification of the elements that predated `USECASE-`.

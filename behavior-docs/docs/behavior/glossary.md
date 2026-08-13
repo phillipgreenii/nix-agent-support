@@ -98,14 +98,25 @@ system's glossary, not here.
 - **Invariant** — a rule that MUST always hold.
 - **Goal** — a desired, non-absolute property.
 - **Concept** — a named idea invariants and goals build on; not itself a rule.
-- **Open question** — an explicitly-recorded gap, in a fixed shape: the gap, its owner, a
-  resolution path, and where it blocks. Preferred over guessing.
+- **Open question** — an explicitly-recorded gap in the **intended behavior itself** — something not
+  yet decided — in a fixed shape: the gap, its owner, a resolution path, and where it blocks.
+  Preferred over guessing. Distinct from a **realization gap**, where the intent _is_ settled and the
+  implementation has not caught up: that goes in the realization-gap register, never here (`INV-23`).
 - **Precedence** — a ranking a set MAY declare for resolving a conflict between two of its own
   invariants. A newly-surfaced precedence conflict is recorded as an open question and settled by a
   decision doc, never chosen ad hoc.
 - **Realization gap** — the distance between intended behavior (the docs) and what an
   implementation has yet built. A realization gap is normal — the docs may lead the build — and is
-  tracked against the cited IDs, never annotated inline (the docs stay living, `INV-4`).
+  tracked against the cited IDs, never annotated inline (the docs stay living, `INV-4`). Its carrier
+  is the realization-gap register (`INV-23`).
+- **Realization-gap register** — the set-level section, named `## Realization gaps`, in which a set
+  records its realization gaps: one row per gap, naming the element id the gap is against
+  (`INV-23`). It sits outside every element definition, which is what makes it the only place a set
+  describes where its implementation stands without putting _how_ (`INV-2`) or an
+  implementation-status annotation (`INV-4`) into an element. A gap is never an open question: an
+  open question is unsettled intent, a gap is settled intent the build has not reached. A set with
+  nothing to record still carries the section, so its absence is an omission rather than a claim of
+  convergence.
 - **UUID** — an element's **stable identity**: a value minted once at the element's definition and
   never changed (`INV-3`), carried in an HTML comment on the definition line. The typed **name** is
   a mutable, intra-consistent label; references are name-based and cross-set matching is by UUID. A
