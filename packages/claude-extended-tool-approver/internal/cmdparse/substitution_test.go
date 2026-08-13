@@ -376,7 +376,11 @@ func TestIsSafeSubstitutionBody_GitReadSubcommandAudit(t *testing.T) {
 		{"diff-tree is declined (textconv/external-diff)", "git diff-tree --no-commit-id -r HEAD", false},
 		{"cat-file is declined (--textconv/--filters, and <rev>:<path> secrets)", "git cat-file -p HEAD:.env", false},
 		{"for-each-ref is declined (%(contents) prints an object)", "git for-each-ref --format='%(refname)'", false},
-		{"ls-files is declined (index refresh reaches core.fsmonitor)", "git ls-files -m", false},
+		// The recorded ground (index refresh reaches core.fsmonitor) is TRUE but does not
+		// disqualify — pg2-a5r9r. It stays refused because re-admitting it is a
+		// LESS-restrictive change owing its own replay. See
+		// TestIsSafeSubstitutionBody_IndexConsultingIncumbentsStay.
+		{"ls-files is still declined (over-cautious; re-admission owes a replay)", "git ls-files -m", false},
 		{"ls-remote is declined (network egress, config-named helpers)", "git ls-remote origin", false},
 
 		// The lookup keys on tokens[1], so a PRE-SUBCOMMAND flag is not the
@@ -385,6 +389,66 @@ func TestIsSafeSubstitutionBody_GitReadSubcommandAudit(t *testing.T) {
 		// subcommand, and it must not be "fixed" by skipping leading git flags.
 		{"a -c config injection before ls-tree is refused", "git -c core.pager=id ls-tree HEAD", false},
 		{"a -C chdir before ls-tree is refused", "git -C /tmp ls-tree HEAD", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsSafeSubstitutionBody(tt.body); got != tt.safe {
+				t.Errorf("IsSafeSubstitutionBody(%q) = %v, want %v", tt.body, got, tt.safe)
+			}
+		})
+	}
+}
+
+// TestIsSafeSubstitutionBody_IndexConsultingIncumbentsStay PINS pg2-a5r9r's ruling:
+// `git status` and `git describe --dirty` are ADMITTED, deliberately, even though both
+// reach `core.fsmonitor` — the very property for which `ls-files` is declined a few rows
+// up in TestIsSafeSubstitutionBody_GitReadSubcommandAudit.
+//
+// WHY THIS IS A TEST AND NOT ONLY A COMMENT. pg2-mgs91 recorded the two as a "known
+// incumbent exception" while stating criterion 3 as absolute, so the list read as
+// declining a candidate for a property two of its own members had. That is an EMERGENT
+// verdict — nothing asserted it, so nothing would notice a later reader "fixing" the
+// inconsistency in the direction of removal. These rows are what make it a decision.
+//
+// WHY REMOVAL WAS REJECTED, in one line each — gitReadSubcommands' pg2-a5r9r RULING has
+// the measurements:
+//
+//  1. This list is the SUBSTITUTION-BODY floor only. A bare `git status` is approved by
+//     the git rule's readOnlySubcommands either way, so removal closes nothing while
+//     costing two prompting shapes.
+//  2. The `core.fsmonitor` sink needs a CONFIG source, and `git clone` does not transfer
+//     `.git/config` — so a repo cannot ship one. Criterion 1's textconv leg has the same
+//     dependency; it survives on DISCLOSURE, which needs no config. Criterion 3 has no
+//     second leg.
+//  3. The sources an agent CAN name are screened elsewhere, and the last two rows here
+//     pin the two screens that sit at THIS seam.
+//
+// Do NOT "fix" this test by deleting the two entries. That reverses a recorded decision
+// and is a MORE-restrictive change owing its own corpus replay; reopen it on a bead
+// first. The same applies in reverse to `ls-files`, whose decline is over-cautious on its
+// recorded ground and which is deliberately still refused below.
+func TestIsSafeSubstitutionBody_IndexConsultingIncumbentsStay(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		safe bool
+	}{
+		// THE RULING. Both reach core.fsmonitor and both are admitted anyway.
+		{"git status is ADMITTED despite reaching core.fsmonitor", "git status", true},
+		{"git status --porcelain likewise", "git status --porcelain", true},
+		{"git describe --dirty is ADMITTED — tokens[1] cannot separate the spelling", "git describe --dirty", true},
+		{"and the spelling that does NOT stat the worktree, for contrast", "git describe --always", true},
+
+		// The counterpart that is NOT re-admitted here. Its decline no longer rests on a
+		// property that disqualifies, but re-admitting it is LESS restrictive and owes
+		// its own replay — so it stays refused, and this row says so on purpose.
+		{"ls-files stays refused — over-cautious, but re-admission owes a replay", "git ls-files -m", false},
+
+		// THE TWO SCREENS AT THIS SEAM that keep an agent from ARMING the sink on an
+		// admitted subcommand. Neither is a config predicate; both are shape facts, and
+		// the ruling depends on them, so they are asserted rather than assumed.
+		{"a -c config injection before status is refused (tokens[1] is not the subcommand)", "git -c core.fsmonitor=/tmp/evil status", false},
+		{"the GIT_CONFIG_* env spelling is refused (a leading assignment is not a simple command)", "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.fsmonitor GIT_CONFIG_VALUE_0=/tmp/evil git status", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

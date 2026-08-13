@@ -51,34 +51,70 @@ var fileReaderSubstitutions = map[string]bool{
 // gitReadSubcommands: git subcommands that only read metadata (no diff/show/log —
 // those honor textconv/external-diff, an RCE surface a hook cannot neutralize).
 //
-// ADMISSION TEST (pg2-mgs91 audit). An entry must satisfy ALL FIVE. They are written
-// out so a later reader RE-DERIVES an entry rather than inheriting it, and so a
-// candidate's rejection does not have to be re-argued from scratch:
+// ADMISSION TEST (pg2-mgs91 audit; criterion 3 restated by pg2-a5r9r). An entry must
+// satisfy 1, 2, 4 and 5. Criterion 3 is RETAINED AS A NUMBERED SLOT but disqualifies
+// nothing on its own — see THE pg2-a5r9r RULING below for the evidence and for why the
+// slot is kept rather than renumbered away. They are written out so a later reader
+// RE-DERIVES an entry rather than inheriting it, and so a candidate's rejection does not
+// have to be re-argued from scratch:
 //
 //  1. It emits no object CONTENT. Content emission is what reaches the
 //     clean/textconv/`diff.external` filter chain, and every link in that chain is a
-//     PROGRAM NAMED BY REPO-LOCAL CONFIG (`.gitattributes` + `.git/config`) — so a
-//     command that merely "reads" executes attacker-controlled code. This is the
-//     original one-line rationale above, unchanged; it is criterion 1 because it
-//     disposes of most candidates.
+//     PROGRAM NAMED BY CONFIG — so a command that merely "reads" executes
+//     attacker-controlled code. This is the original one-line rationale above,
+//     unchanged; it is criterion 1 because it disposes of most candidates.
+//
+//     TWO CORRECTIONS from pg2-a5r9r, both measured on git 2.54.0, 2026-08-13.
+//     (a) The original text named `.gitattributes` + `.git/config` as ONE
+//     attacker-controlled unit, and that overstates it. A `.gitattributes` naming an
+//     UNDEFINED diff driver executes NOTHING — git falls back to the builtin diff — so
+//     `.gitattributes` travels with a clone but is INERT by itself, and the program's
+//     NAME has to come from a config source, which a clone does not carry (see the
+//     RULING). The RCE leg is therefore the SAME reachability class as criterion 3's,
+//     not a stricter one. (b) The criterion survives that anyway, on a SECOND leg that
+//     needs no config at all: DISCLOSURE. `git show HEAD:.env` printed the blob's bytes
+//     with system and global config neutralised, and in a SUBSTITUTION those bytes
+//     become the OUTER command's argv — the audit-unit problem IsSafeSubstitutionBody's
+//     DECLINED PIPELINE note states for stdin. Criterion 3 has no such second leg, and
+//     that asymmetry is the whole of the pg2-a5r9r ruling.
+//
 //  2. No FLAG turns it into a content path or names a program. The lookup below keys
 //     on `tokens[1]` ALONE, so admitting a subcommand admits EVERY spelling of it. A
 //     subcommand with one dangerous flag is inadmissible at this granularity — it
 //     would need a flag-aware predicate this one is not.
-//  3. It consults no INDEX. Index refresh compares the index against the worktree,
-//     which is the path that honors `core.fsmonitor` — again a repo-local config
-//     naming a program git EXECUTES, the same class as criterion 1.
+//
+//  3. Does it consult the INDEX? Index refresh compares the index against the worktree,
+//     which is the path that honors `core.fsmonitor` — a config value naming a program
+//     git EXECUTES, the same class as criterion 1's first leg. THE ANSWER DOES NOT
+//     DISQUALIFY, and the absolute wording this slot used to carry ("It consults no
+//     INDEX") was the defect pg2-a5r9r was filed for: two incumbents fail it. Keep
+//     asking the question — it is worth knowing — but decide on 1, 2, 4 and 5.
+//     THE SLOT IS NOT RENUMBERED, deliberately: the "fails (3)" / "fails (1) and (2)"
+//     citations below and in substitution_test.go's audit rows would all shift by one,
+//     which is churn that makes the history harder to follow for no gain.
+//
 //  4. It contacts no REMOTE. Egress is a different risk class from a local read:
 //     the destination is itself config-controlled (`url.*.insteadOf`, remote
 //     helpers, `core.sshCommand`), so the command both runs a config-named program
 //     and chooses where the bytes go.
-//  5. It writes nothing and moves no ref.
+//
+//  5. It writes nothing and moves no ref. SCOPED TO REPOSITORY CONTENT — objects, refs
+//     and the working tree — and NOT to the index's stat cache. The distinction is
+//     load-bearing, because read literally this criterion would disqualify the same two
+//     incumbents criterion 3 does: an index REFRESH really does rewrite `.git/index`
+//     (measured on git 2.54.0, 2026-08-13 — `git status` and `git describe --dirty` each
+//     REPLACED the file's inode, while `git rev-parse HEAD` and `git ls-tree HEAD` left
+//     it untouched). It does not disqualify them, because the refresh re-records stat
+//     data for entries it does not change: no object, no ref and no tracked file moves.
+//     Apply this one to CONTENT, not to files under `.git/`.
 //
 // REMOVAL IS THE ESCALATION PATH and needs no new mechanism — the same posture the
 // README states for the consumer `approvedCommands` list. Delete the entry and the
-// body falls back to the prompt. Remove one when any of (1)-(5) stops holding for
-// it: a git release adding a content-emitting `--format` atom, a filter-honoring
-// flag, or an index/remote dependency it did not have.
+// body falls back to the prompt. Remove one when (1), (2), (4) or (5) stops holding
+// for it — a git release adding a content-emitting `--format` atom, a filter-honoring
+// flag, or a remote dependency it did not have. NOT on (3) alone: an index dependency
+// a subcommand newly acquires is not a removal trigger, per THE pg2-a5r9r RULING
+// below. Removal is also MORE restrictive, so it owes the replay that ruling ran.
 //
 // DECLINED CANDIDATES, recorded so the audit is not re-run and so nobody reads their
 // absence as an oversight:
@@ -89,9 +125,16 @@ var fileReaderSubstitutions = map[string]bool{
 //     filter programs BY NAME, and `-p HEAD:.env` prints a secret's bytes from a
 //     `<rev>:<path>` spec that the fileReaderSubstitutions secretpath screen below
 //     structurally cannot see (it screens argv PATHS).
-//   - `ls-files` — fails (3). Its stat-comparing spellings (`-m`, `-d`, `-o` with
-//     exclusions) compare the index against the worktree, so `core.fsmonitor` is
-//     reachable, and (2) means admitting the subcommand admits those spellings.
+//   - `ls-files` — DECLINED, BUT ITS RECORDED GROUND DOES NOT HOLD, said plainly rather
+//     than reconciled with an invented distinction (pg2-a5r9r). It was declined for
+//     failing (3): its stat-comparing spellings (`-m`, `-d`, `-o` with exclusions)
+//     compare the index against the worktree, so `core.fsmonitor` is reachable, and (2)
+//     means admitting the subcommand admits those spellings. All of that is TRUE —
+//     `git ls-files -m` was measured executing an fsmonitor marker — and none of it
+//     disqualifies, for exactly the reasons the RULING below gives for `status`. It
+//     stays out because RE-ADMITTING it is a LESS-restrictive change that owes its own
+//     corpus replay, which is the same rule that kept `status` in. Not acted on here;
+//     recorded as a follow-up. It emits only path names, so it fails neither leg of (1).
 //   - `for-each-ref` — fails (2). The `--format` atom set includes the
 //     `%(contents…)` family, which prints an object's own bytes, and a ref MAY point
 //     at a blob; the subcommand-only key cannot separate "print refnames" from
@@ -99,13 +142,67 @@ var fileReaderSubstitutions = map[string]bool{
 //     modes, not interpreters — those are not the objection.)
 //   - `ls-remote` — fails (4).
 //
-// KNOWN INCUMBENT EXCEPTION, recorded rather than silently fixed: `status` — and
-// `describe --dirty` — fail (3) for the same reason `ls-files` does. Both PREDATE
-// this audit. They are LEFT AS THEY ARE: removing them is a MORE-restrictive change
-// with its own corpus replay to run and its own over-blocking risk, which is not a
-// side effect a gate-widening bead may smuggle in.
+// THE pg2-a5r9r RULING: `status` AND `describe --dirty` STAY, AND CRITERION 3 IS THE
+// DEFECT. pg2-mgs91 recorded them as a KNOWN INCUMBENT EXCEPTION — the same property
+// that declined `ls-files`, held by two members of the list — and left the criterion
+// stated as absolute. pg2-a5r9r settled which of the two was wrong, and it is the
+// criterion.
+//
+// THE FACTUAL CLAIM WAS RIGHT. Measured on git 2.54.0, 2026-08-13, with `core.fsmonitor`
+// pointed at a marker script that appends and exits 1: `git status`, `git describe
+// --dirty` and `git ls-files -m` each EXECUTED it, while `git describe` (no `--dirty`),
+// `git rev-parse HEAD` and `git ls-tree HEAD` did not. So the exposure is real, and
+// `--dirty` really does come along free — the lookup below keys on `tokens[1]` alone.
+// What was wrong is treating it as a reason THIS list can act on:
+//
+//   - THIS LIST IS NOT THE CONTROL FOR THAT SINK, and removing an entry does not make it
+//     one. gitReadSubcommands is the SUBSTITUTION-BODY floor only; a BARE `git status`
+//     is approved by the git rule's own readOnlySubcommands
+//     (`internal/rules/git/git.go`), which also holds `describe`, `ls-files`, `show` and
+//     `log`. MEASURED through the real binary, this worktree, 2026-08-13, against a
+//     variant built with `status` and `describe` DELETED from this map: `git status`,
+//     `git status --porcelain`, `git describe --dirty` and `git ls-files -m` each
+//     answered `allow` on BOTH sides. Exactly TWO shapes moved, both substitutions —
+//     `echo "$(git status --porcelain)"` and `echo "$(git describe --dirty)"`, `allow`
+//     -> `abstain`. So removal costs two prompting shapes and closes nothing: the same
+//     subcommand, unwrapped, still runs the fsmonitor program.
+//   - THE CONFIG THAT ARMS THE SINK IS NOT SHIPPABLE BY A REPO. `git clone` does not
+//     transfer `.git/config` — measured: a clone of a repo with both `core.fsmonitor`
+//     and `diff.<driver>.textconv` set carried NEITHER key — so a hostile upstream can
+//     plant neither. That is the same reachability class as criterion 1's RCE leg (see
+//     correction (a) there), which is why criterion 3 cannot be the stricter of the two.
+//   - THE SOURCES AN AGENT CAN NAME ARE SCREENED WHERE THEY BELONG, not here. At THIS
+//     seam the `tokens[1]`-exact key refuses `git -c core.fsmonitor=… status`, and
+//     soleSimpleCommandLeaf's `len(call.Assigns) > 0` refusal covers the env spelling
+//     `GIT_CONFIG_COUNT=… git status`; both measured `abstain` on both sides. At the top
+//     level `hasGitConfigInjection` defers a pre-subcommand `-c` as "a known RCE class",
+//     and `gatedConfigKeys` classes `core.fsmonitor` as a configSink — the SAME class
+//     and the SAME Ask as `diff.external` and `diff.<driver>.textconv`, which is the
+//     repo's own statement that criteria 1 and 3 name one hazard, not two.
+//   - CETA'S THREAT MODEL DOES NOT TREAT THE REPO AS HOSTILE, so nothing else in the
+//     package is relying on this criterion. `patheval` reports the project/CWD
+//     `PathReadWrite`; ADR 0041's Context names that trust as the cause of a
+//     false-allow rather than as a mistake to undo; ADR 0040's Context bounds its own
+//     scope with "this is not a remote-attacker vector". `primarycommit`'s resolver
+//     reads repo-local `.git/config` and TRUSTS it to name the primary branch. This
+//     criterion was the only place in CETA asserting the opposite.
+//
+// ONE GAP FOUND AND DELIBERATELY NOT CLOSED HERE. At the TOP level the env spelling
+// `GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.fsmonitor GIT_CONFIG_VALUE_0=… git status`
+// measured `allow` on BOTH sides — `hasRedirectEnvVar` screens only `GIT_DIR` and
+// `GIT_WORK_TREE`, and git honors the `GIT_CONFIG_*` triple as command-line-equivalent
+// config (measured: it ran the marker). It is the same sink by an unscreened route, it
+// belongs to the git rule rather than to this list, and closing it is a MORE-restrictive
+// change owing its own replay. It makes the ruling above stronger, not weaker: a control
+// this list does not hold and cannot reach. Recorded as a follow-up, not acted on.
 var gitReadSubcommands = map[string]bool{
 	"rev-parse": true, "rev-list": true, "symbolic-ref": true,
+	// `describe` and `status` reach `core.fsmonitor` (`describe` only in its `--dirty`
+	// spelling, which `tokens[1]` cannot separate) and they STAY. That is a ruling, not
+	// an oversight — see THE pg2-a5r9r RULING above, and
+	// substitution_test.go's TestIsSafeSubstitutionBody_IndexConsultingIncumbentsStay,
+	// which pins both verdicts so a later reader finds a decision rather than an
+	// accident.
 	"merge-base": true, "describe": true, "status": true,
 	// ls-tree PASSES ALL FIVE. It reads a TREE object and prints only
 	// mode/type/oid/size/path; its tree-ish operand is mandatory, so it never stats

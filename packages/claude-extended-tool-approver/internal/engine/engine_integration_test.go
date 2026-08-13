@@ -806,6 +806,115 @@ func TestIntegration_F3NextFreeIdProbeStillPrompts(t *testing.T) {
 	}
 }
 
+// TestIntegration_FsmonitorReachingGitReadsApprove PINS pg2-a5r9r's ruling end to end,
+// and — more importantly — it pins THE FACT THE RULING RESTS ON, which no unit test in
+// cmdparse can see.
+//
+// THE RULING. `git status` and `git describe --dirty` stay in cmdparse's
+// gitReadSubcommands even though both reach `core.fsmonitor`, a config value naming a
+// program git executes. pg2-mgs91 had recorded that as an unresolved "incumbent
+// exception" against a criterion stated as absolute.
+//
+// THE FACT IT RESTS ON, and the reason this test lives in the ENGINE suite: that list is
+// the SUBSTITUTION-BODY floor only, so removing an entry from it cannot stop git from
+// running the fsmonitor program — the BARE subcommand is approved by the git rule's own
+// readOnlySubcommands regardless. Measured against a variant built with `status` and
+// `describe` deleted from the map: every bare row below answered `allow` on BOTH sides,
+// and only TWO of the wrapped rows moved (`allow` -> `abstain`) — the `status` and
+// `describe --dirty` ones; the `ls-files` row was already refused on both sides. So
+// removal would buy nothing and cost exactly two prompting shapes.
+//
+// THAT MAKES THE BARE ROWS LOAD-BEARING, not decoration. If a later change removes
+// `status`, `describe` or `ls-files` from the git rule's readOnlySubcommands, the premise
+// of the pg2-a5r9r ruling is gone and cmdparse's admission of the two SHOULD be
+// re-argued. These rows are the tripwire for that: they fail in the git rule's commit,
+// where the person changing it can see why it matters, instead of leaving a stale
+// rationale in a comment two packages away.
+//
+// `git ls-files -m` is here as the CONTROL. It is refused as a substitution body and
+// approved bare — which is precisely the shape that shows the substitution floor is not
+// the control for this hazard. Its decline is over-cautious on its recorded ground
+// (pg2-a5r9r), and it is deliberately NOT re-admitted: that is a less-restrictive change
+// owing its own corpus replay.
+func TestIntegration_FsmonitorReachingGitReadsApprove(t *testing.T) {
+	t.Setenv("WORKSPACE_ROOT", "/Users/testuser/workspace")
+	projectRoot := "/Users/testuser/workspace/my-project"
+	cwd := projectRoot
+	eng := buildFullEngine(projectRoot, cwd)
+
+	for _, tt := range []struct {
+		name    string
+		command string
+		want    hookio.Decision
+		why     string
+	}{
+		// BARE — the premise. Approved by the git rule, so the substitution floor is not
+		// what decides whether the fsmonitor program runs.
+		{
+			name:    "bare git status APPROVES via the git rule",
+			command: "git status",
+			want:    hookio.Approve,
+			why:     "readOnlySubcommands holds status; removing it from cmdparse's list would not change this",
+		},
+		{
+			name:    "bare git describe --dirty APPROVES via the git rule",
+			command: "git describe --dirty",
+			want:    hookio.Approve,
+			why:     "readOnlySubcommands holds describe, and the rule does not inspect --dirty",
+		},
+		{
+			name:    "bare git ls-files -m APPROVES via the git rule too",
+			command: "git ls-files -m",
+			want:    hookio.Approve,
+			why:     "the control: declined in cmdparse, approved here, so cmdparse is not the control",
+		},
+
+		// WRAPPED — the shapes the ruling actually decides: two admissions and one
+		// continued refusal.
+		{
+			name:    "git status in a substitution APPROVES",
+			command: `echo "$(git status --porcelain)"`,
+			want:    hookio.Approve,
+			why:     "gitReadSubcommands admits status; this is the verdict pg2-a5r9r declined to remove",
+		},
+		{
+			name:    "git describe --dirty in a substitution APPROVES",
+			command: `echo "$(git describe --dirty)"`,
+			want:    hookio.Approve,
+			why:     "same ruling; tokens[1] cannot separate --dirty from a bare describe",
+		},
+		{
+			name:    "git ls-files in a substitution still PROMPTS",
+			command: `echo "$(git ls-files -m)"`,
+			want:    hookio.NoOpinion,
+			why:     "still declined — over-cautious on its recorded ground, but re-admission owes its own replay",
+		},
+
+		// The two screens that keep an agent from ARMING the sink on an admitted
+		// subcommand inside a substitution. Both are shape facts, not config predicates.
+		{
+			name:    "a -c config injection on status is refused as a substitution body",
+			command: `echo "$(git -c core.fsmonitor=/tmp/evil status)"`,
+			want:    hookio.NoOpinion,
+			why:     "tokens[1] is -c, not a subcommand, so the static floor never clears it",
+		},
+		{
+			name:    "the GIT_CONFIG_* env spelling is refused as a substitution body",
+			command: `echo "$(GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.fsmonitor GIT_CONFIG_VALUE_0=/tmp/evil git status)"`,
+			want:    hookio.NoOpinion,
+			why:     "soleSimpleCommandLeaf refuses a leading assignment, so the body is not a simple command",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			in := &hookio.HookInput{ToolName: "Bash", CWD: cwd, ToolInput: makeBashJSON(tt.command)}
+			if got := eng.EvaluateHook(in); got.Decision != tt.want {
+				t.Errorf("EvaluateHook(%q) = %s (%s: %s), want %s — %s",
+					tt.command, got.Decision, got.Module, got.Reason, tt.want, tt.why)
+			}
+		})
+	}
+}
+
 // TestIntegration_HashInAMultiLineQuotedSpanNeverHidesASubstitution is the SECURITY
 // half of the multi-line-quoted-`#` defect. The PARSEABILITY half is
 // cmdparse's TestFlip_HashInsideAQuotedArgumentIsNotAComment (owed by pg2-fez3d);
