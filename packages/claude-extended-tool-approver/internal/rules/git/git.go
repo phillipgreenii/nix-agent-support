@@ -100,6 +100,34 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		if err != nil {
 			return hookio.RuleResult{}, err
 		}
+		// THE ENV SPELLING OF THE `-c` INJECTION ABOVE (pg2-a12rl). A
+		// `GIT_CONFIG_*` assignment on this leaf hands git configuration of the
+		// caller's choosing — including every configSink key gatedConfigKeys names
+		// — so an otherwise-approvable command may execute a program named in that
+		// prefix. Withdraw the approval and let the chain continue, which lands the
+		// leaf on the SAME `{}` the `-c` route reaches. See hasGitConfigEnvInjection
+		// for the measured variable-by-variable evidence and for why it is key-blind.
+		//
+		// IT IS A DEMOTION OF AN Approve, NOT A SHORT-CIRCUIT LIKE THE `-c` GUARD,
+		// AND THE DIFFERENCE IS LOAD-BEARING. hasGitConfigInjection answers BEFORE
+		// classify runs, so it replaces every verdict — including the decisive ones.
+		// Measured through the real binary, this worktree, 2026-08-13: `git -c
+		// user.name=x tag v1` and `git -c user.name=x push --force origin main` each
+		// emitted `{}`, while the same commands WITHOUT the `-c` are `deny`. So the
+		// incumbent route lets an irrelevant config pair WEAKEN a hard Reject into an
+		// auto-approvable non-decision. That is its own defect (recorded for a
+		// follow-up bead, not fixed here — fixing it changes verdicts this bead did
+		// not measure), and the env route MUST NOT reproduce it: gating only an
+		// Approve leaves `git tag`, force-push and the redirect-class config Rejects
+		// exactly as they were, which the same measurement confirms.
+		//
+		// Order against the chdir demotion below does not matter — both withdraw the
+		// same Approve and return the same not-applicable.
+		if res.Decision == hookio.Approve && hasGitConfigEnvInjection(pc) {
+			// Not applicable (ADR 0043): the chain must continue. Former Reason,
+			// kept because it is the only record of WHY: "git: a GIT_CONFIG_* env assignment injects config; deferring to prompt"
+			return hookio.NotApplicable()
+		}
 		// A `-C <path>` chdir runs the subcommand against a directory other than
 		// the invocation CWD. When the rule would otherwise Approve, withdraw the
 		// approval if that directory is unsafe for the subcommand's access class:
@@ -1192,6 +1220,12 @@ func isGitExecutable(exec string) bool {
 // flag is present. It scans only the option span before the git subcommand
 // (mirroring cmdparse.GitInvocation's flag-consuming walk) so that a -c appearing
 // AFTER the subcommand (e.g. `git commit -c <commit>`) is not matched.
+//
+// IT SCANS ARGV ONLY. The ENV spelling of the same injection is
+// hasGitConfigEnvInjection — an env assignment never appears in pc.Args, cmdparse
+// lifts it to pc.EnvVars — and the two are wired into Evaluate DIFFERENTLY on
+// purpose: see that call site for the measured Reject-weakening this one's
+// pre-classify short-circuit causes.
 func hasGitConfigInjection(args []string) bool {
 	i := 0
 	for i < len(args) {
@@ -1229,6 +1263,120 @@ func hasFlag(args []string, flag string) bool {
 func hasRedirectEnvVar(pc cmdparse.ParsedCommand) bool {
 	for _, ev := range pc.EnvVars {
 		if ev.Name == "GIT_DIR" || ev.Name == "GIT_WORK_TREE" {
+			return true
+		}
+	}
+	return false
+}
+
+// hasGitConfigEnvInjection reports whether this leaf's own env-assignment prefix
+// carries a variable through which git takes CONFIGURATION from the caller — the
+// ENV spelling of the pre-subcommand `-c` that hasGitConfigInjection screens.
+//
+// THE HOLE IT CLOSES (pg2-a12rl, found while working pg2-a5r9r). `gatedConfigKeys`
+// already classes `core.fsmonitor`, `core.pager`, `diff.external` and their
+// siblings as configSink — "git EXECUTES the value … during an ordinary git
+// operation" — and hasGitConfigInjection defers a pre-subcommand `-c` as "a known
+// RCE class". The env route was unscreened: hasRedirectEnvVar knows only `GIT_DIR`
+// and `GIT_WORK_TREE`, so measured through the real binary in this worktree,
+// 2026-08-13,
+//
+//	GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.fsmonitor GIT_CONFIG_VALUE_0=/tmp/evil git status
+//
+// emitted `permissionDecision: "allow"`, while the argv-equivalent
+// `git -c core.fsmonitor=/tmp/evil status` emitted `{}`. One hazard, two spellings,
+// opposite answers.
+//
+// # WHICH VARIABLES, MEASURED RATHER THAN READ OFF THE DOCS
+//
+// git 2.54.0, 2026-08-13, throwaway repo in the scratchpad, `core.fsmonitor` (and
+// where noted `diff.external` / `core.sshCommand`) pointed at a marker script that
+// appends to a file and exits 1. `scripts/probe-pg2-a12rl.sh` reproduces it:
+//
+//	VARIABLE                                REACHES THE SINK?
+//	GIT_CONFIG_COUNT + KEY_<n>/VALUE_<n>    YES — marker ran on `git status` and on `git diff`
+//	GIT_CONFIG_GLOBAL                       YES — marker ran on `git status`
+//	GIT_CONFIG_SYSTEM                       YES — marker ran on `git ls-remote` via core.sshCommand
+//	GIT_CONFIG_PARAMETERS                   YES — marker ran on `git status` (git's own `-c` propagation channel)
+//	GIT_CONFIG (legacy)                     NOT for a general read — but `git config --get` DOES read it, so it redirects where a config WRITE lands
+//	GIT_CONFIG_NOSYSTEM                     no — it SUPPRESSES a config source; it cannot name a program
+//
+// TWO READINGS THAT WOULD HAVE BEEN WRONG, recorded because each looked decisive:
+//
+//   - `GIT_CONFIG_SYSTEM` first measured NO SINK for both `core.fsmonitor` and
+//     `diff.external`, which reads as "git ignores it". It does not: this machine's
+//     own `~/.gitconfig` sets `core.fsmonitor=false` and `~/.config/git/config` sets
+//     `diff.external=difft`, and GLOBAL outranks SYSTEM, so the variable lost a
+//     PRECEDENCE contest rather than being unread. Re-measured with a key set
+//     nowhere else (`core.sshCommand`) the marker ran, and
+//     `GIT_CONFIG_SYSTEM=<file> git config --get foo.bar` printed the file's value
+//     with `--show-origin` naming the file. A no-sink reading against ONE key is not
+//     evidence about the VARIABLE.
+//   - The `-c` route already being screened does not make this one screened. It is a
+//     different token span: hasGitConfigInjection walks `pc.Args`, and an env
+//     assignment is never in `Args` — cmdparse lifts it to `pc.EnvVars`.
+//
+// # WHY IT IS KEY-BLIND, AND WHY THAT IS THE STRONGER FORM OF THE KEY SCREEN
+//
+// It matches on the variable NAME and never reads the key, exactly as `-c` is
+// key-blind. That is a strict SUPERSET of "names a gatedConfigKeys key", so the
+// key screen is satisfied a fortiori — TestGit_ConfigEnvInjection_EveryGatedKeyIsScreened
+// iterates the real table and asserts it, so a key added there extends this
+// automatically and NO second key table exists to drift. Reading the key would be
+// strictly weaker, because the key is often not there to read:
+//
+//   - `GIT_CONFIG_GLOBAL` / `GIT_CONFIG_SYSTEM` / `GIT_CONFIG` name a FILE. Its keys
+//     are whatever the file says at the moment git opens it, which no argv analysis
+//     can know.
+//   - A value may be dynamic: `GIT_CONFIG_KEY_0=$K` carries no key at all.
+//   - Config keys are CASE-INSENSITIVE to git — measured: `GIT_CONFIG_KEY_0=CORE.FSMonitor`
+//     ran the marker — so a key read would have to route through configKeyID's
+//     lowercasing to be sound, one more place to get wrong for no gain.
+//   - `GIT_CONFIG_PARAMETERS` packs its pairs into one shell-quoted string.
+//
+// A key-blind name match has none of those failure modes, so a PARTIAL or malformed
+// prefix cannot slip through: it is screened for carrying the variable, whatever the
+// rest says. (git itself refuses the partial form outright — measured, `COUNT=2` with
+// one pair answers `error: missing config key GIT_CONFIG_KEY_1` / `fatal: unable to
+// parse command-line config` — but this predicate does not depend on that.)
+//
+// The cost is over-approximation, all toward the prompt and all deliberate:
+// `GIT_CONFIG_GLOBAL=/dev/null git status` (a hygiene idiom that DISARMS config) and
+// `GIT_CONFIG_NOSYSTEM=1` are screened too, as is any future `GIT_CONFIG_*` git
+// grows. That is the same direction gatedConfigKeys' own over-approximations take
+// (it gates `--unset` of a gated key, and `core.fsmonitor true`).
+//
+// THE NAME MATCH IS CASE-SENSITIVE, matching git's own getenv: measured, the
+// lowercase triple `git_config_count=1 git_config_key_0=core.fsmonitor … git status`
+// did NOT run the marker, so gating it would gate a command git treats as ordinary.
+//
+// # WHAT IT DOES NOT REACH — recorded, not silently left
+//
+//   - A PERSISTENT assignment. `export GIT_CONFIG_COUNT=…` on its own line, or a
+//     variable already exported into the shell, is a DIFFERENT leaf (or no leaf at
+//     all), and this predicate reads one leaf's own prefix. hasRedirectEnvVar has the
+//     identical limit for `GIT_DIR`. It is the more common in-corpus spelling — 2026-08-13
+//     the ask log held both — and closing it needs cross-leaf ordering analysis, or
+//     the env-var rule's name screen, which is its own bead.
+//   - The GIT_* variables that ARE the env twin of a gated sink but do NOT spell
+//     "config": measured the same day, `GIT_EXTERNAL_DIFF=<marker> git diff` and
+//     `GIT_SSH_COMMAND=<marker> git ls-remote ssh://…` both RAN the marker, and they
+//     are `diff.external` and `core.sshCommand` — two configSink entries — by another
+//     name. `GIT_PAGER`, `GIT_EDITOR` and `GIT_ASKPASS` are the same shape.
+//     DELIBERATELY out of scope here: pg2-a12rl is scoped to the config-source
+//     variables, and that family is a wider surface with its own prompt-volume cost
+//     to measure.
+//
+// WHY NOT hasRedirectEnvVar. That predicate is consulted per ARM, and only by the
+// arms that modify (`checkout`, `rebase`, `filter-branch`, `reset`, the
+// modifyingSubcommands fall-through, a config write). Adding these names to it would
+// leave `git status` and `git log` — the measured hole, and the shapes that reach
+// `core.fsmonitor` — still approved, and would answer the redirect Ask, a verdict
+// no ruling supports for this route. See the call site in Evaluate for why the
+// verdict is a demotion instead.
+func hasGitConfigEnvInjection(pc cmdparse.ParsedCommand) bool {
+	for _, ev := range pc.EnvVars {
+		if ev.Name == "GIT_CONFIG" || strings.HasPrefix(ev.Name, "GIT_CONFIG_") {
 			return true
 		}
 	}

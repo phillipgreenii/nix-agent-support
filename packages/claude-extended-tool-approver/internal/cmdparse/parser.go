@@ -187,14 +187,19 @@ var fileReaderSubstitutions = map[string]bool{
 //     reads repo-local `.git/config` and TRUSTS it to name the primary branch. This
 //     criterion was the only place in CETA asserting the opposite.
 //
-// ONE GAP FOUND AND DELIBERATELY NOT CLOSED HERE. At the TOP level the env spelling
-// `GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.fsmonitor GIT_CONFIG_VALUE_0=… git status`
-// measured `allow` on BOTH sides — `hasRedirectEnvVar` screens only `GIT_DIR` and
-// `GIT_WORK_TREE`, and git honors the `GIT_CONFIG_*` triple as command-line-equivalent
-// config (measured: it ran the marker). It is the same sink by an unscreened route, it
-// belongs to the git rule rather than to this list, and closing it is a MORE-restrictive
-// change owing its own replay. It makes the ruling above stronger, not weaker: a control
-// this list does not hold and cannot reach. Recorded as a follow-up, not acted on.
+// ONE GAP FOUND HERE AND CLOSED WHERE IT BELONGS (pg2-a12rl). At the TOP level the env
+// spelling `GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.fsmonitor GIT_CONFIG_VALUE_0=… git
+// status` measured `allow` on BOTH sides while this list was ruled on — `hasRedirectEnvVar`
+// screened only `GIT_DIR` and `GIT_WORK_TREE`, and git honors the `GIT_CONFIG_*` triple as
+// command-line-equivalent config (measured: it ran the marker). It was the same sink by an
+// unscreened route, it belonged to the git RULE rather than to this list, and closing it was
+// a MORE-restrictive change owing its own replay — so pg2-a5r9r recorded it rather than
+// acting on it. pg2-a12rl then closed it in `internal/rules/git`'s
+// hasGitConfigEnvInjection, which withdraws the Approve for any `GIT_CONFIG*` assignment on
+// a git leaf. It makes the ruling above stronger, not weaker, either way: the control was
+// never one this list held or could reach. NOTHING HERE CHANGED, and nothing here should —
+// soleSimpleCommandLeaf's `len(call.Assigns) > 0` refusal already floors the env spelling
+// inside a substitution body.
 var gitReadSubcommands = map[string]bool{
 	"rev-parse": true, "rev-list": true, "symbolic-ref": true,
 	// `describe` and `status` reach `core.fsmonitor` (`describe` only in its `--dirty`

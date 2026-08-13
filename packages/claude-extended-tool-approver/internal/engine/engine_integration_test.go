@@ -2951,6 +2951,79 @@ func TestIntegration_CleanEmitsEmptyHookOutput(t *testing.T) {
 	}
 }
 
+// TestIntegration_GitConfigEnvInjection_EmitsEmptyObject is the chain-level twin of the
+// git rule's TestGit_ConfigEnvInjection_EmitsEmptyHookOutput (pg2-a12rl), and it asserts
+// the one property a rule-level test structurally cannot: that no LATER rule in the real
+// chain re-approves a leaf the git rule declined to approve.
+//
+// THE BEFORE STATE, measured through the real binary in this worktree on 2026-08-13:
+// `GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.fsmonitor GIT_CONFIG_VALUE_0=/tmp/evil git
+// status` emitted `permissionDecision: "allow"`, while the argv-equivalent `git -c
+// core.fsmonitor=/tmp/evil status` emitted `{}`. The marker probe
+// (`scripts/probe-pg2-a12rl.sh`) shows the triple really does execute the program it
+// names, so that allow was auto-approving an RCE spelling the `-c` route already
+// deferred.
+//
+// THE CONTROL ROWS MATTER AS MUCH AS THE GATED ONES. A screen that keyed on the command
+// TEXT rather than on a parsed assignment, or that matched too broad a NAME space, would
+// pass every gated row here and break the two `still allow` rows — which is the
+// false-positive class pg2-5b901 records.
+func TestIntegration_GitConfigEnvInjection_EmitsEmptyObject(t *testing.T) {
+	t.Setenv("WORKSPACE_ROOT", "/Users/testuser/workspace")
+	projectRoot := "/Users/testuser/workspace/my-project"
+	eng := buildFullEngine(projectRoot, projectRoot)
+
+	emit := func(command string) string {
+		input := &hookio.HookInput{ToolName: "Bash", CWD: projectRoot, ToolInput: makeBashJSON(command)}
+		return string(hookio.FormatOutput(eng.EvaluateHook(input), nil))
+	}
+
+	for _, tt := range []struct{ name, command string }{
+		{"the measured hole", "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.fsmonitor GIT_CONFIG_VALUE_0=/tmp/evil git status"},
+		{"pager sink on a read", "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.pager GIT_CONFIG_VALUE_0=/tmp/evil git log"},
+		{"external diff sink", "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=diff.external GIT_CONFIG_VALUE_0=/tmp/evil git diff"},
+		{"a config FILE, keys unknowable from argv", "GIT_CONFIG_GLOBAL=/tmp/evil.cfg git status"},
+		{"the system-scope file", "GIT_CONFIG_SYSTEM=/tmp/evil.cfg git status"},
+		{"git's own -c propagation channel", "GIT_CONFIG_PARAMETERS='core.fsmonitor=/tmp/evil' git status"},
+		{"an unrecognised GIT_CONFIG_* name", "GIT_CONFIG_FUTURE_SPELLING=x git status"},
+		{"a partial triple", "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.fsmonitor git status"},
+		{"a modifying subcommand", "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.fsmonitor GIT_CONFIG_VALUE_0=/tmp/evil git commit -m msg"},
+		// The real in-corpus idiom, and the measured prompt-volume cost this bead
+		// accepted: `merge.<driver>.driver` is a configSink in the git rule's own table.
+		{"the in-corpus merge-driver idiom", "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=merge.mergiraf.driver GIT_CONFIG_VALUE_0= git rebase --autostash origin/main"},
+		// Compound: NoOpinion outranks Approve in the MostRestrictive fold (pg2-t4uyx),
+		// so an approving sibling must not lift the expression back to allow.
+		{"compound with an approving sibling", "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.fsmonitor GIT_CONFIG_VALUE_0=/tmp/evil git status && echo done"},
+		{"approving sibling first", "echo start && GIT_CONFIG_GLOBAL=/tmp/evil.cfg git status"},
+		// The argv route, unchanged — the control this bead was measured against.
+		{"the -c route it now matches", "git -c core.fsmonitor=/tmp/evil status"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			out := emit(tt.command)
+			if out != "{}" {
+				t.Errorf("command %q emitted %s, want {} — a GIT_CONFIG* env prefix hands git a program of the caller's choosing, and `permissionDecision: \"allow\"` auto-approves it", tt.command, out)
+			}
+			if strings.Contains(out, `"allow"`) {
+				t.Errorf("command %q emitted %s, which carries an allow decision", tt.command, out)
+			}
+		})
+	}
+
+	// NOT WIDENED. An ordinary assignment prefix, and a lowercase spelling git's own
+	// getenv does not read (measured 2026-08-13: it did NOT run the marker), keep their
+	// approval.
+	for _, tt := range []struct{ name, command string }{
+		{"an unrelated assignment", "FOO=bar git status"},
+		{"lowercase names are not git's variables", "git_config_count=1 git_config_key_0=core.fsmonitor git_config_value_0=/tmp/evil git status"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if out := emit(tt.command); !strings.Contains(out, `"allow"`) {
+				t.Errorf("command %q emitted %s, want an allow — this bead must not cost a prompt on traffic git treats as carrying no caller config", tt.command, out)
+			}
+		})
+	}
+}
+
 // TestIntegration_ArithmeticMaskedEnvValue is pg2-hed0a end to end, through the
 // REAL rule chain: appending `$((1))` to an env-assignment VALUE must not buy an
 // auto-approval for the command substitution beside it.
