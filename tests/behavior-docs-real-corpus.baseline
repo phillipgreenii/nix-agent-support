@@ -51,4 +51,4 @@ intra/trace-extract packages/pr-pool/docs/behavior|FAIL JOURNEY-RUN carries no l
 intra/trace-extract packages/pr-pool/docs/behavior|FAIL JOURNEY-SMOKE carries no listing on its definition
 intra/trace-extract packages/pr-pool/docs/behavior|FAIL JOURNEY-VALIDATE carries no listing on its definition
 intra/trace-extract packages/pr-pool/docs/behavior|FAIL JOURNEY-WORKFLOW carries no listing on its definition
-intra/trace-extract packages/pr-pool/docs/behavior|WARN dangling in prose: OQ-WORKFLOW (interfaces.md:551 invariants.md:186) resolves to no definition here and no declared external reference
+intra/trace-extract packages/pr-pool/docs/behavior|WARN dangling in prose: OQ-WORKFLOW (interfaces.md:594 invariants.md:195) resolves to no definition here and no declared external reference

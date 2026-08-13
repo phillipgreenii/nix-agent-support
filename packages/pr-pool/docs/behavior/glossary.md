@@ -13,12 +13,16 @@ their own terms in a downstream deployment set.
 
 - **Event** — a typed, self-contained fact a source emits and the core routes. Carries an `id`, a
   `type`, an optional `at`, an optional `expiresAt`, and an opaque `payload`.
-- **Event type** — the primary field a binding matches on.
+- **Event type** — the **primary matcher**: a binding MUST match an event's `type` before anything
+  else applies.
 - **Binding** — the rule associating an event handler with the events it handles: a **match** over
-  event fields. `type` is the default field; a binding MAY match on other declared fields. A matched
-  field that is absent on an event simply does not match (it is not an error).
-- **Query trigger** — what fires a pull event source's query: a **periodic** tick. (A tick is a query
-  _trigger_, not a dispatched event.)
+  event fields. `type` MUST match; a binding MAY then narrow on a **payload path it names itself** (a
+  **narrowing predicate**), applied after the type match, and the core reads only that path. Which
+  fields are matchable is the binding's to say, never the source's. A field or path a binding names
+  that is absent on an event simply does not match (it is not an error).
+- **Query trigger** — what fires a pull event source's query: a **periodic** tick. It is the **core's**
+  decision about when to poll, taken from the core's own state — never a source's to dictate.
+  (A tick is a query _trigger_, not a dispatched event.)
 - **`at`** — an event's **optional source stamp**, the instant the source says the fact happened.
   Absent, the core's own **ingest-now** applies (`INV-EVT-1`).
 - **`expiresAt`** — the **optional absolute instant** past which the core stops retrying an event.

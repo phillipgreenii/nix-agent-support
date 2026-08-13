@@ -35,9 +35,10 @@ flowchart LR
 event source **emits** typed events; whether the core pulls them or the source pushes them is a
 **mode** of the one source participant kind, not two kinds. Every event reaches a handler **through
 the queue**, so the queue is a node here rather than a phrase inside a subgraph label — it is the
-universal intermediary, not a realization detail. An event handler **binds** to event types (or other
-declared fields) and responds to any of its bound events; **one run of one handler against one
-event** is a **handler session**, which is why the handler and the session are not the same box.
+universal intermediary, not a realization detail. An event handler **binds** to event types — and MAY
+narrow on a payload path its own binding names — and responds to any of its bound events; **one run of
+one handler against one event** is a **handler session**, which is why the handler and the session are
+not the same box.
 A handler may be agent or non-agent, and a configured handler's operator-facing name is its **role**.
 
 **The operator, storage and the monitoring sink are optional participants**, drawn dotted and

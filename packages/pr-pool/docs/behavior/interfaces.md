@@ -167,6 +167,17 @@ expired event (`INV-INTF-1`).
   (**push**). **Multiplicity:** zero or more.
 - **Purpose:** supply typed **events** for the core to route.
 
+**One opaque invocation, not a menu of source kinds.** There is exactly **one** source contract. To
+pull, the core makes **one invocation** of the source and reads the reply against the **query-reply
+contract** below; it does not know — and **MUST NOT** be told — **what kind** of source it is
+invoking or how that source arrives at its events. Whatever a particular source needs in order to
+answer (a tool it drives, a query language, credentials, paging, a cache) sits **inside** the
+invocation the operator configures, and is **never** a case the core distinguishes: the core would
+otherwise hold one tool's configuration inside its own, which is what `GOAL-MIN-1` forbids and what
+the boundary principle in this set's [README](README.md) rules out. So **adding a source is
+configuration**: name the invocation, the event types it emits, and — for a pull source — its query
+trigger. The core gains nothing.
+
 **Pull mode.** The core invokes `query` on a **query trigger** — a **periodic** tick. The reply
 carries events inline, or defers and delivers them later on the callback (the `ingest-event`
 target).
@@ -174,6 +185,20 @@ target).
 **Push mode.** The core never calls `query`; the source invokes the `ingest-event` callback as
 external facts arrive. A push-only source still **registers** so it appears in the registry and its
 lifecycle is known.
+
+**The query trigger belongs to the core, and stays.** Deciding **when to poll** is pr-pool's own
+scheduling decision, taken from pr-pool's own state; it is not part of the source's configuration and
+a source is never asked when it would like to be queried. That is why the trigger stays in this
+contract while the query's internals do not — the two look alike from outside and are opposite sides
+of the boundary.
+
+**What a source declares — and what it does not.** A source declares the **event types it emits**;
+that declaration, its invocation, and its mode are the whole of its configuration. The declared
+emitted types are a **contract boundary and MUST stay one**: the wiring validation runs on them in
+**both** directions (`INV-WORKFLOW-1`, `JOURNEY-VALIDATE`) — a bound `type` no source emits is an
+orphan error, and an emitted `type` no binding covers is a warned dead end — and neither check has
+anything to compare without them. What a source does **not** declare is which of its fields may be
+matched, or any shape for `payload`: **matchability is the handler's alone** (`INV-DISP-1`).
 
 **Event shape** (illustrative):
 
@@ -185,38 +210,55 @@ lifecycle is known.
   "at": "2026-07-16T12:00:00Z",
   "expiresAt": "2026-07-16T12:15:00Z",
   "payload": {
-    "note": "source-defined; OPAQUE to the core unless a path is declared"
+    "note": "source-defined; OPAQUE to the core except a path a binding names"
   }
 }
 ```
 
 - `id` — unique; the core de-duplicates on it across the retained id set (`INV-EVT-3`).
-- `type` — the primary field a **binding** matches on.
+- `type` — the **primary matcher**: a **binding** MUST match it before anything else applies.
 - `at` — **optional** source stamp. Absent, the core's own "now" at ingest is used (`INV-EVT-1`).
 - `expiresAt` — **optional**, an **absolute instant**. Absent, `at` is used, so an event carrying
   neither field is **born expired**: offered once to every matching handler, then dropped
   (`INV-EVT-4`). Setting it in the future is how a retry window is requested; nothing computes a
   duration.
 - `payload` — MUST be a JSON **object** (a keyed structure, never a bare scalar/array), so a handler
-  always receives a struct. The core neither reads nor validates it.
+  always receives a struct. The core neither reads nor validates it, save for a single path a
+  **binding** names for narrowing (below). Its **shape is not declared anywhere** — see
+  `OQ-EVT-CATALOG`.
 
-**Matching (what a binding may match).** A **binding** matches an event over its **fields**:
+**Matching (what a binding may match).** A **binding** matches an event over its **fields**, and
+**matchability is the handler's alone** — a source declares nothing about which of its fields may be
+matched:
 
-- `type` is matched **by default**;
-- a binding MAY additionally match on **other fields the source declares** as matchable;
-- a matched field that is **absent** on a given event **simply does not match** — that is a
-  non-match, not an error;
-- matching into `payload` is allowed **only if the source declares that path** as matchable; a
-  declared payload path thereby stops being opaque _for matching_ (the core reads only the declared
-  path, nothing else in the payload).
+- `type` is the **primary matcher** and **MUST** match; a binding does not match an event whose `type`
+  it does not name, whatever else that event carries;
+- a binding **MAY** then carry one **narrowing predicate** over a **payload path it names itself**,
+  applied **only after** the type match succeeds. The core reads **only that path** and nothing else
+  in the payload, so `payload` stays opaque everywhere the binding does not point — it is the
+  **binding**, not the source, that makes one path readable _for matching_;
+- a field or payload path a binding names that is **absent** on a given event **simply does not
+  match** — that is a non-match, not an error.
 
 This is the field-matching model `INV-DISP-1` states as a rule.
+
+A named path **cannot be validated when the config is authored**, because no per-`type` payload shape
+is declared anywhere (`OQ-EVT-CATALOG`); **while that open question stands**, a mistyped path narrows
+to nothing and nothing reports it. That is the deferred catalog's consequence, not a property of path
+matching: settling `OQ-EVT-CATALOG` gives config-time validation a shape to check the path against.
 
 **Unknown type.** An event whose `type` no configured binding matches is **accepted into the queue**
 and, with no handler to offer it to, **is dropped unconsumed-expired** — not a rejection of the
 source. The core records it to logs and the unconsumed-expired metric; a `type` with
 **no configured binding at all** is also surfaced as a **config-time warning** (`JOURNEY-VALIDATE`).
 This is the "no event misses" visibility signal, not a runtime error (`INV-DISP-3`).
+
+**The query-reply contract carries events or a deferral, and nothing else — so it stays as it is.**
+A reply says either "here are events" or "later, on the callback"; it carries no view into how the
+source produced them and no per-run stream about the source itself. The source side therefore has
+**no twin** of the handler-side internals the boundary principle puts outside this contract: there is
+nothing here to trim, and a later reader MUST NOT trim it by analogy with the handler side. What the
+core acts on — the events, and whether it must wait — is exactly what crosses.
 
 ```mermaid
 sequenceDiagram
@@ -530,9 +572,10 @@ sequenceDiagram
 
 The **configuration structure** is itself a first-class interface — the operator authors it, and
 the CLI resolves it (`config --show`). It declares: the participants (each with its command, mode,
-and — for a monitoring sink — its selected metrics); the sources and their queries (with query
-trigger); the handlers and their event-type **bindings** (including any declared matchable fields);
-and the workflow wiring the core validates (`INV-WORKFLOW-1`). Expiry is **not** declared here — it
+and — for a monitoring sink — its selected metrics); the sources, each as **one invocation** plus the
+event types it emits and, for a pull source, its query trigger — never a per-tool source kind
+(`GOAL-MIN-1`); the handlers and their event-type **bindings** (including any **payload path a
+binding names** for narrowing); and the workflow wiring the core validates (`INV-WORKFLOW-1`). Expiry is **not** declared here — it
 rides on each event as `at` / `expiresAt` (`INV-EVT-1`, `INV-EVT-4`). The `--only` / `--disable`
 selectors above restrict the _active_ subset of this config per run without editing it.
 
@@ -549,4 +592,6 @@ The **full configuration schema** is not yet pinned; it is tracked as an open qu
   side, and a counterparty with no set leans on the same suite as its sole reconciliation. Each
   interface here **is** the authoritative contract its implementations adhere to.
 - **Open questions** (tracked in [journeys](journeys.md)): `OQ-WORKFLOW` (pre-runtime wiring
-  validation of the bindings) and `OQ-CONFIG` (the full configuration schema).
+  validation of the bindings), `OQ-CONFIG` (the full configuration schema), and `OQ-EVT-CATALOG` (a
+  declared per-`type` payload shape — what a binding's narrowing path would be validated against at
+  config time, and what would make two sources' events on one `type` comparable at all).

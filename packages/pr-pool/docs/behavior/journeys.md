@@ -139,11 +139,13 @@ sequenceDiagram
 
 - **Participants** — for each, the **command** the core invokes and its **mode** where the interface
   offers one (a source's **pull** vs **push**; a monitoring sink's **pull** vs **push**).
-- **Event sources** (`INTF-SOURCE`) — and, for a pull source, its **query trigger**: a **periodic**
-  tick.
+- **Event sources** (`INTF-SOURCE`) — each **one invocation** plus the event types it emits, never a
+  per-tool source kind; and, for a pull source, its **query trigger**: a **periodic** tick, which is
+  the core's own when-to-poll decision rather than anything a source dictates.
 - **Event handlers / roles** (`INTF-HANDLER`) — each with its behavior.
-- **Bindings** — for each handler, the **event-type match** it responds to. `type` is the default
-  field; a binding MAY match other declared fields (`INV-DISP-1`).
+- **Bindings** — for each handler, the **event-type match** it responds to. `type` MUST match; a
+  binding MAY then narrow on a **payload path it names itself**, applied after the type match
+  (`INV-DISP-1`). No matchable field comes from the source — matchability is the handler's alone.
 - **Serialize marks** — any event type **marked to serialize** (`INV-CONC-1`, see `OQ-CONC-MARK`).
 - **Monitoring sink** (`INTF-MON`, optional) — its mode and the **metric subset** it handles.
 - **Storage** (`ACTOR-STO` via `INTF-STORE`, optional; the default is in-memory).
@@ -161,11 +163,11 @@ configuration **schema** is not yet fixed (see `OQ-CONFIG`).
 ```mermaid
 flowchart TD
     start["operator authors the deployment config"] --> parts["declare each participant: command + mode"]
-    parts --> src["event sources INTF-SOURCE: pull (periodic tick) or push"]
+    parts --> src["event sources INTF-SOURCE: one opaque invocation plus emitted types, pull (periodic tick) or push"]
     parts --> hdl["event handlers/roles INTF-HANDLER: behavior only, no concurrency ceiling is declared"]
     parts --> mon["monitoring sink INTF-MON: mode + metric subset"]
     parts --> sto["storage INTF-STORE: optional; in-memory default"]
-    src --> bind["bindings: each handler matches event types (type default; INV-DISP-1)"]
+    src --> bind["bindings: type MUST match, then any narrowing payload path the binding names (INV-DISP-1)"]
     hdl --> bind
     bind --> ser["order-dependent types marked to serialize (INV-CONC-1). expiry is not configured, it rides on each event (INV-EVT-1)"]
     ser --> sel["optional --only / --disable selectors restrict the active set per run"]
@@ -181,10 +183,15 @@ deployment's user-facing workflow.
 
 **Flow.**
 
-1. Pick the **event sources** the deployment needs.
-2. Enumerate the **event types** each source emits.
+1. Pick the **event sources** the deployment needs — each one invocation, whose internals the core
+   never sees.
+2. Enumerate the **event types** each source emits. This declaration is what `JOURNEY-VALIDATE`
+   compares the bindings against in both directions, so it is a contract boundary rather than
+   bookkeeping.
 3. For each event type, declare a **handler binding** so some handler responds to it (`INV-DISP-1`);
-   a handler responds to **any** of its bound types.
+   a handler responds to **any** of its bound types. The binding names the `type` it takes — which
+   **MUST** match — and MAY narrow within it on a **payload path of its own**, applied after the type
+   match; no matchable field comes from the source.
 4. Where a handler produces **new work**, route it back in as events **via a query** (re-entry) — the
    core does not branch outputs itself (see `OQ-BRANCH`); new work re-enters through a source.
 5. Mark **order-dependent** event types to serialize (`INV-CONC-1`) so concurrency never corrupts
@@ -531,3 +538,20 @@ Each states the gap, its owner, a resolution path, and where it blocks.
   _Gap_: no branching primitive exists; this is **deferred**. _Owner_: author. _Path_: let it fall
   out as real usage demands it rather than guess now. _Blocks_: nothing yet; revisit if a
   failure-routing need appears in `JOURNEY-FAIL`.
+- **`OQ-EVT-CATALOG`** <!-- uuid: 7f4ba6ef-bb0e-4bcb-95fb-932a2eba7db5 --> — a **shared event catalog**: a declared shape for an event's `payload`,
+  owned by the event **`type`** rather than by any one source. _Gap_: a `type` is declared, routed and
+  matched on, but nothing anywhere declares what an event of that `type` **carries** — the event
+  contract constrains `payload` to be an object and stops there, so a `type` is a name with no
+  declared content. This is **deferred**, and it is more load-bearing than "deferred" suggests.
+  _Owner_: author, with the implementers of every source that emits a shared `type` (a `type` two
+  sources both emit is shared shape, so it cannot be settled one source at a time). _Path_: decide
+  where a per-`type` payload shape is declared, pin it, and have config-time validation read it.
+  _Blocks_ **two things, neither of which can be enforced until it is settled**: (a) the settled
+  intent that **two sources emitting the same `type` MUST emit compatible events** — with no declared
+  shape there is nothing to compare them against, so the rule can be stated and cannot be checked; and
+  (b) **config-time validation of a binding's narrowing payload path** (`INV-DISP-1`, `INTF-SOURCE`),
+  since a path can only be checked against a declared shape. (b) is the **sole** reason a mistyped
+  path is undetectable, which is why the undetectable typo belongs to this open question and not to
+  path matching. Settling it makes payload-path matching checkable rather than best-effort, and
+  recovers for `payload` the same declared-versus-referenced cross-check the wiring already runs on
+  emitted types (`JOURNEY-VALIDATE`).

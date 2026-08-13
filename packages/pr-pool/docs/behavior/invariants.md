@@ -19,7 +19,7 @@ flowchart TD
     emit["a source emits a typed event"] --> enq["append to the durable queue (INV-EVT-1)"]
     enq --> dedup{"id still retained in the queue? (incl. already-accepted)"}
     dedup -->|yes| drop["de-duplicated (INV-EVT-3)"]
-    dedup -->|no| match{"a binding matches the event's fields? (type + declared fields)"}
+    dedup -->|no| match{"a binding matches the event's fields? (type MUST match, then any narrowing predicate the binding names)"}
     match -->|no binding matches type| noh["no matching handler, so no attempt is owed: dropped unconsumed-expired, logged + metric, config-time warning (INV-DISP-3)"]
     match -->|matched| offer["offer to a bound handler's head — one outstanding offer per handler (INV-CONC-1)"]
     offer --> acc{"handler accepts? (ack or completion)"}
@@ -31,11 +31,20 @@ flowchart TD
 ```
 
 - **`INV-DISP-1`** <!-- uuid: 5ad7c9a4-37ea-4496-8f23-51964a8aae54 --> — Sources **emit typed events**; handlers **bind** to events via a **binding**
-  that **matches over event fields**. `type` is matched **by default**; a binding **MAY** also match
-  on **other fields the source declares** as matchable (including a **declared path into `payload`**,
-  which thereby stops being opaque _for matching_). A matched field that is **absent** on an event
-  **does not match** — a non-match, **not** an error. The core routes a matched event to a bound
-  handler, and a handler responds to **any** of its bound events.
+  that **matches over event fields**. `type` is the **primary matcher** and **MUST** match: a binding
+  never matches an event whose `type` it does not name, whatever else that event carries. A binding
+  **MAY** then carry one **narrowing predicate** over a **payload path the binding itself names**,
+  applied **only after** the type match has succeeded — a narrowing of an already-matched set, never
+  a peer of `type`. **Matchability is the handler's alone**: a source declares nothing about which of
+  its fields may be matched, and the core reads **only the path a binding names** and nothing else in
+  the payload, so `payload` stays opaque everywhere the binding does not point. A named field or path
+  that is **absent** on an event **does not match** — a non-match, **not** an error. The core routes a
+  matched event to a bound handler, and a handler responds to **any** of its bound events. _(A named
+  path cannot be checked when the config is authored, because no per-`type` payload shape is declared
+  anywhere — `OQ-EVT-CATALOG`. So **while that open question stands**, a mistyped path narrows to
+  nothing and nothing can report it; that is a consequence of the deferred catalog, **not** a property
+  of path matching, and settling `OQ-EVT-CATALOG` is what makes a named path checkable at config
+  time.)_
 - **`INV-DISP-2`** <!-- uuid: 06662087-a4de-4732-9417-f7440c9aa471 --> — The core reaches every source and handler **only through a manager interface**
   (`INTF-SOURCE` / `INTF-HANDLER`); their implementations are opaque to it. Nothing specific to a
   source, handler, or deployment lives in the core.
@@ -50,8 +59,8 @@ flowchart TD
   `JOURNEY-VALIDATE` emits a **warning** when a source-emitted `type` has **no configured binding at
   all** (you would queue events nothing can take); and at runtime the **unconsumed-expired** metric
   counts such drops. A binding merely **disabled for this run** (`--only`/`--disable`) is expected and
-  is neither warned nor an error — its events are offered to nobody and expire. (An _absent declared
-  field_ is a non-match, not a no-binding condition.)
+  is neither warned nor an error — its events are offered to nobody and expire. (A field or payload
+  path a binding names that is _absent_ on an event is a non-match, not a no-binding condition.)
 
 ## Delivery
 
@@ -230,4 +239,12 @@ sequenceDiagram
 - **`GOAL-MIN-1`** <!-- uuid: e0be6f1c-8eb9-4d7e-9900-bc14e7a38d4a --> — Keep the core **minimal**:
   anything specific to a source, handler, monitor, or deployment belongs **behind an
   interface** (realized in a downstream deployment set), **never** in the core. Over time, **less**
-  implementation detail should live in the core, not more.
+  implementation detail should live in the core, not more. **Adding a participant is therefore
+  configuration and MUST NOT require changing the core.** For an event source that requirement rests
+  on one thing: the core makes a **single opaque invocation** and never distinguishes source **kinds**
+  (`INV-DISP-2`, `INTF-SOURCE`), so a new source is a new configured invocation and the core gains no
+  new kind, field, or case for it. This is stated as the mechanism, not as an aspiration, because the
+  two are separable: a contract that made the core enumerate the kinds of source it can invoke would
+  make **every** new kind a core change while the goal still read as satisfied. A downstream
+  deployment set states the same requirement from its own side and cites this goal rather than
+  restating it.
