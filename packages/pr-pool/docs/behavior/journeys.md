@@ -75,21 +75,6 @@ someone, so a missing one shows up as an empty cell instead of as silence.
   do."
   _(→ `USECASE-CREATE-SOURCE`, `USECASE-DEBUG-RUN`; `INV-DISP-3`, `INV-OBS-1`.)_
 
-**Coverage (traceability).** Per the method's rule that a set's extent is exactly what its stories,
-use cases and journeys require
-(`phillipgreenii-nix-agent-support · behavior-docs/docs/behavior · INV-11`), every invariant family
-here is exercised by a story, a use case or the journey:
-dispatch (`INV-DISP-*`) by `JOURNEY-FLOW` / `STORY-OP-1,5`; delivery (`INV-EVT-*`) by `JOURNEY-FLOW`
-/ `USECASE-CREATE-HANDLER` / `STORY-OP-8`; interface + conformance (`INV-INTF-1/2`) by
-`USECASE-VERIFY-PARTICIPANT` / `STORY-OP-6`; concurrency (`INV-CONC-1`) by
-`USECASE-CREATE-HANDLER` / `USECASE-CONFIGURE-WIRING` / `STORY-OP-7`; failure (`INV-FAIL-1`) by
-`USECASE-CREATE-HANDLER` / `STORY-OP-11`; precedence (`INV-PREC-1`) by `USECASE-CREATE-HANDLER` /
-`STORY-OP-12`; observability (`INV-OBS-1`) by `USECASE-DEBUG-RUN` / `STORY-OBS-*`; lifecycle
-(`INV-LIFE-1`) by `USECASE-RUN-DAEMON` / `USECASE-RUN-DRAIN` / `JOURNEY-FLOW`; workflow
-(`INV-WORKFLOW-1`) by `USECASE-CONFIGURE-WIRING` / `USECASE-VALIDATE-CONFIG` / `STORY-OP-5,9`; the
-minimality goal (`GOAL-MIN-1`) by `USECASE-CONFIGURE-OPTIONAL` / `USECASE-DEBUG-RUN` /
-`STORY-OP-4`.
-
 ## The lifecycle-action matrix
 
 The use cases below are **enumerated**, not collected: **seven lifecycle actions** crossed with the
@@ -160,6 +145,12 @@ end-to-end **arc** is not an action at all but the composition of every element 
 **Level:** summary.
 **Intent:** tell the whole arc once — how the use cases compose, and what becomes of one event as it
 travels the arc from a source to an accepting handler, where pr-pool's interest ends.
+_Requires:_ `INV-CONC-1`, `INV-DISP-1`, `INV-DISP-3`, `INV-EVT-1`, `INV-EVT-2`, `INV-EVT-3`,
+`INV-EVT-4`, `INV-FAIL-1`, `INV-LIFE-1`.
+_Includes:_ `USECASE-CREATE-SOURCE`, `USECASE-CREATE-HANDLER`, `USECASE-CREATE-MONITOR`,
+`USECASE-CREATE-STORE`, `USECASE-VERIFY-PARTICIPANT`, `USECASE-ADD-ESSENTIAL`,
+`USECASE-CONFIGURE-WIRING`, `USECASE-CONFIGURE-OPTIONAL`, `USECASE-VALIDATE-CONFIG`,
+`USECASE-RUN-DAEMON`, `USECASE-RUN-DRAIN`, `USECASE-DEBUG-RUN`.
 
 **The arc.** An implementer builds a participant against its interface
 (`USECASE-CREATE-SOURCE`, `USECASE-CREATE-HANDLER`, `USECASE-CREATE-MONITOR`,
@@ -287,6 +278,8 @@ implement several interfaces at once, and the core neither knows nor cares. It c
 **Level:** user goal.
 **Intent:** build an event source against `INTF-SOURCE` so a deployment can obtain typed events from
 it, choosing deliberately among the shapes the two independent mode axes allow.
+_Requires:_ `INV-DISP-1`, `INV-DISP-3`, `INV-EVT-1`, `INV-EVT-4`, `INV-INTF-1`, `GOAL-MIN-1`.
+_Includes:_ `USECASE-VERIFY-PARTICIPANT`.
 
 **Flow — the four shapes.** Two axes cross here and they are **independent**: who **initiates** (the
 core **pulls**, or the source **pushes**) and whether the reply is **inline** or **deferred**.
@@ -322,8 +315,6 @@ the error to logs and metrics and does **not** read it as "nothing to do" (`INV-
 discipline, `STORY-OBS-2`). An empty `events` list is the distinct, legitimate **genuinely idle**
 reading, and conflating the two is how a silent outage comes to look like a quiet system.
 
-**Included:** `USECASE-VERIFY-PARTICIPANT`.
-
 ```mermaid
 sequenceDiagram
     participant CORE as core
@@ -351,6 +342,9 @@ sequenceDiagram
 **Level:** user goal.
 **Intent:** build an event handler against `INTF-HANDLER`, and get the **acceptance boundary** right
 — which side owns the work, and which side owns a failure, on each side of the accept.
+_Requires:_ `INV-CONC-1`, `INV-EVT-1`, `INV-EVT-2`, `INV-EVT-4`, `INV-FAIL-1`, `INV-INTF-1`,
+`INV-OBS-1`, `INV-PREC-1`.
+_Includes:_ `USECASE-VERIFY-PARTICIPANT`.
 
 **Flow — the two reply shapes.** The core hands over **one event** under **one tracking id** and the
 handler answers in exactly one of two ways: a **sync** inline **completion** carrying an outcome (it
@@ -393,8 +387,6 @@ does **not** re-offer accepted work and does **not** count post-accept classes (
 own:** a **pre-accept decline** (`busy`, `unavailable`) and a **dispatch failure** where the core
 could not hand the event over at all (`INV-OBS-1`, `USECASE-DEBUG-RUN`).
 
-**Included:** `USECASE-VERIFY-PARTICIPANT`.
-
 ```mermaid
 sequenceDiagram
     participant CORE as core
@@ -429,6 +421,9 @@ flowchart TD
 **Level:** user goal.
 **Intent:** build a monitoring sink against `INTF-MON` that carries some declared subset of the
 core's metric catalog out to wherever an observer reads it.
+_Requires:_ `INV-INTF-1`, `INV-OBS-1`, `GOAL-MIN-1`.
+_Includes:_ `USECASE-VERIFY-PARTICIPANT` — by its conformance suite only, since there is no smoke
+affordance for a sink (matrix reason (ii)).
 
 **Flow.** The implementer **declares two things**: the **mode** — the sink **pulls** current values
 from the core on its own schedule, or receives **pushed** updates as they change — and **which subset
@@ -443,9 +438,6 @@ Both the **emission transport** and the concrete backend behind it remain deploy
 `INTF-MON` (`GOAL-MIN-1`); which transport is the default is a realization decision
 (`phillipgreenii-nix-agent-support · packages/pr-pool/docs/decisions · DEC-OBS-1`). A sink may be
 absent, or there may be several.
-
-**Included:** `USECASE-VERIFY-PARTICIPANT` — by its conformance suite only, since there is no smoke
-affordance for a sink (matrix reason (ii)).
 
 ```mermaid
 sequenceDiagram
@@ -468,6 +460,8 @@ sequenceDiagram
 **Level:** user goal.
 **Intent:** build a key/value scratch for core state against `INTF-STORE`, knowing it never backs
 event delivery.
+_Requires:_ `INV-EVT-1`, `INV-INTF-1`.
+_Includes:_ `USECASE-VERIFY-PARTICIPANT` — by its conformance suite only (matrix reason (ii)).
 
 **Flow.** The implementer provides three operations — `get(key)`, `put(key, value)`, `delete(key)` —
 over **string** keys and **JSON-string** values, with each request and reply carrying its schema
@@ -485,8 +479,6 @@ reader to wonder which shape was meant.
 guarantee (`INV-EVT-1` is the queue's promise, not the store's). When none is configured a **default
 in-memory** store applies, whose contents do not survive a restart — the **Null Object** that keeps
 "no storage configured" from being a special case anywhere in the core.
-
-**Included:** `USECASE-VERIFY-PARTICIPANT` — by its conformance suite only (matrix reason (ii)).
 
 ```mermaid
 sequenceDiagram
@@ -507,6 +499,7 @@ sequenceDiagram
 **Intent:** confirm a participant adheres to its interface before anything is trusted to route
 through it — first its conformance suite in isolation, then a smoke test against the live
 configuration.
+_Requires:_ `INV-EVT-2`, `INV-INTF-1`, `INV-INTF-2`.
 
 **Defined once, included by reference, never inlined.** This is a **subfunction**, and it is the
 reason no element above or below restates how verification works:
@@ -585,6 +578,8 @@ sequenceDiagram
 **Level:** user goal.
 **Intent:** put an implemented **essential** participant — an event source or an event handler — into
 a live configuration and smoke it before trusting it.
+_Requires:_ `INV-DISP-1`, `INV-DISP-3`, `INV-WORKFLOW-1`.
+_Includes:_ `USECASE-CONFIGURE-WIRING`, `USECASE-VALIDATE-CONFIG`, `USECASE-VERIFY-PARTICIPANT`.
 
 **An essential participant is never added alone, and the matrix is what makes that obvious.** One
 element covers both the source and the handler cell of the `add` row because the two cannot be done
@@ -611,8 +606,6 @@ not a smaller version of this use case; it is a configuration that will not star
 4. Run (`USECASE-RUN-DAEMON` or `USECASE-RUN-DRAIN`), and read the first run
    (`USECASE-DEBUG-RUN`).
 
-**Included:** `USECASE-CONFIGURE-WIRING`, `USECASE-VALIDATE-CONFIG`, `USECASE-VERIFY-PARTICIPANT`.
-
 ```mermaid
 flowchart TD
     impl["an implemented, suite-verified participant"] --> pair{"source or handler?"}
@@ -632,6 +625,9 @@ flowchart TD
 **Level:** user goal.
 **Intent:** author, or later edit, the configuration the core resolves — the essential participants,
 their **bindings**, and the **wiring** (a routing graph) those bindings form (`INV-WORKFLOW-1`).
+_Requires:_ `INV-CONC-1`, `INV-DISP-1`, `INV-EVT-1`, `INV-EVT-4`, `INV-WORKFLOW-1`.
+_Includes:_ `USECASE-VERIFY-PARTICIPANT` (an edited binding is re-verified in place by the same role
+or query that verified it when it was added), `USECASE-VALIDATE-CONFIG`.
 
 **Flow.** The operator declares, in one configuration:
 
@@ -673,9 +669,6 @@ disabling part of it for a single run** is the other half — the **run-scoped s
 (`STORY-OP-3`), which live with the run they scope (`USECASE-DEBUG-RUN`), change no declaration, and
 are **not** a config defect (`INV-WORKFLOW-1`, `USECASE-VALIDATE-CONFIG`).
 
-**Included:** `USECASE-VERIFY-PARTICIPANT` (an edited binding is re-verified in place by the same
-role or query that verified it when it was added), `USECASE-VALIDATE-CONFIG`.
-
 ```mermaid
 flowchart TD
     start["operator authors or edits the deployment config"] --> parts["declare each essential participant: command + mode"]
@@ -704,6 +697,8 @@ flowchart TD
 **Level:** user goal.
 **Intent:** declare, change, or remove the **optional** participants — a monitoring sink and storage
 — knowing the system runs untouched without either.
+_Requires:_ `INV-DISP-2`, `INV-OBS-1`, `GOAL-MIN-1`.
+_Includes:_ `USECASE-VERIFY-PARTICIPANT`.
 
 **Adding one and changing one are the same edit, which is why this element covers both rows.** An
 optional participant is not a node in the routing graph, so nothing else has to move with it: there
@@ -729,8 +724,6 @@ declaration and **without touching the core** (`STORY-OP-4`, `INV-DISP-2`, `GOAL
 live reading — metric values arriving at the sink, or core state surviving a `put` and `get`
 (`USECASE-DEBUG-RUN`).
 
-**Included:** `USECASE-VERIFY-PARTICIPANT`.
-
 ```mermaid
 flowchart TD
     edit["operator edits the optional half of the config"] --> which{"sink or store?"}
@@ -748,6 +741,7 @@ flowchart TD
 **Intent:** judge the **whole** configuration valid or invalid **before running**, and report the
 result (`INV-WORKFLOW-1`). This checks the routing graph's flat wiring **only** — never
 workflow-completeness or sequencing.
+_Requires:_ `INV-DISP-3`, `INV-EVT-4`, `INV-WORKFLOW-1`.
 
 **This is one whole-configuration judgement, and deliberately not four per-interface checks.** Every
 finding below is a statement about a **pair** of declarations — a binding against the types some
@@ -822,6 +816,9 @@ flowchart TD
 **Level:** user goal.
 **Intent:** run the validated configuration as a **daemon** (`run`) that routes events until it is
 stopped, and inspect it while it runs (`INV-LIFE-1`).
+_Requires:_ `INV-LIFE-1`.
+_Includes:_ `USECASE-VALIDATE-CONFIG` (the startup path validates the wiring before anything runs),
+`USECASE-DEBUG-RUN` (the run-scoped selectors this invocation applies, and the live inspection).
 
 **Flow — the startup path both modes share.** The core resolves config, validates the wiring
 (`USECASE-VALIDATE-CONFIG`), applies any **run-scoped selectors** for this invocation
@@ -858,6 +855,8 @@ flowchart TD
 **Level:** user goal.
 **Intent:** dispatch from the durable queue and **exit** once there is provably nothing left to
 deliver (`run-until-idle`), emitting a **final observability snapshot** on the way out.
+_Requires:_ `INV-LIFE-1`, `INV-OBS-1`.
+_Includes:_ `USECASE-RUN-DAEMON` (the shared startup path), `USECASE-VALIDATE-CONFIG`.
 
 **Flow.** The startup path is `USECASE-RUN-DAEMON`'s, unchanged and included by reference. What
 differs is the **exit predicate**: this mode exits once the **queue is drained and no offer is
@@ -873,8 +872,6 @@ ways, not one — their exit predicate **and** what they emit at the end — and
 own can state the second. Why the two modes are separate operator commands rather than a flag on one
 is a realization decision
 (`phillipgreenii-nix-agent-support · packages/pr-pool/docs/decisions · DEC-CLI-2`).
-
-**Included:** `USECASE-RUN-DAEMON` (the shared startup path), `USECASE-VALIDATE-CONFIG`.
 
 ```mermaid
 sequenceDiagram
@@ -902,6 +899,8 @@ sequenceDiagram
 **Level:** user goal.
 **Intent:** see what a run is doing, and narrow it until a cause is visible — the metric catalog
 through a sink, an injected test event, and the run-scoped selectors.
+_Requires:_ `INV-DISP-1`, `INV-DISP-3`, `INV-EVT-1`, `INV-EVT-3`, `INV-FAIL-1`, `INV-OBS-1`,
+`GOAL-MIN-1`.
 
 **Flow — the metric catalog (steady-state reading).** The core **owns the metric catalog** — a
 declared set of metrics, each with `name`, `kind` (counter / gauge / histogram), `unit`, and label
