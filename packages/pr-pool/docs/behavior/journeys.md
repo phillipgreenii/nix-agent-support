@@ -87,17 +87,18 @@ contract, then run the **conformance suite** (positive + negative) before trusti
 1. Choose the interface to implement — `INTF-SOURCE`, `INTF-HANDLER`, `INTF-MON`, or `INTF-STORE`
    (one process MAY implement several; the core neither knows nor cares).
 2. Read that interface's **JSON Schemas** — the authoritative contract. Note the shared **common
-   manager contract** (`INV-INTF-1`): schema-versioned JSON on stdin → JSON on stdout, a tracking
-   **`id`** echoed on any deferred result, a single **callback** command the core supplies, coarse
-   exit codes (`0` ok / `1` error / `2` busy), and the `starting → started → stopping → stopped`
-   lifecycle. Messages are accepted **only after `started` and before `stopping`**.
+   manager contract** (`INV-INTF-1`): a **versioned** message schema over a transport contract, a
+   tracking **`id`** echoed on any deferred result, a single ready-to-run **callback** the core
+   supplies, a **coarse** transport-level outcome with the rich outcome in the reply body, and the
+   `starting → started → stopping → stopped` lifecycle. Messages are accepted **only after `started`
+   and before `stopping`**.
 3. Implement the interface's subcommands:
    - **`INTF-SOURCE`** — `query` returning `{ events }` or `{ deferred: true }` (then push via
      callback); or, for a push source, invoke the ingest callback. Each event carries `id`, `type`, an
      optional `at`, an optional `expiresAt`, and a **JSON-object** `payload`.
    - **`INTF-HANDLER`** — accept a `dispatch`, reply with an inline outcome or `{ deferred: true }`; a
      deferred ack **is** the acceptance, so nothing further is pushed back and the run's progress and
-     outcome stay on your own surface (`INV-FAIL-1`). Decline **pre-accept** — `busy` (exit `2`) or an
+     outcome stay on your own surface (`INV-FAIL-1`). Decline **pre-accept** — `busy`, or an
      `unavailable` self-status — when you cannot take the work, and the core re-offers it while the
      event is unexpired. MUST tolerate a **duplicate event** idempotently (`INV-EVT-2`).
    - **`INTF-MON`** — declare push or pull, and the metric subset handled.
@@ -118,7 +119,7 @@ sequenceDiagram
     OP->>P: implement subcommands to the interface JSON Schema
     OP->>Suite: run positive + negative checks
     Suite->>P: starting then started (lifecycle)
-    Suite->>P: positive - well-formed request (JSON stdin, tracking id)
+    Suite->>P: positive - well-formed request carrying a tracking id
     P-->>Suite: schema-valid reply (echoes id), or deferred then callback
     Suite->>P: negative - message before started / after stopping
     P-->>Suite: refused (not accepted)
@@ -258,31 +259,30 @@ flowchart TD
 it while it runs (`INV-LIFE-1`).
 
 **Flow.** The core resolves config, validates the wiring (`JOURNEY-VALIDATE`), applies any
-`--only` / `--disable` selectors for this invocation, and starts the **socket service**. Then:
+**run-scoped selectors** for this invocation, and becomes **reachable to its participants**. Then:
 
-- **`run`** — run continuously as a daemon; sources and managers **push** over the socket.
+- **`run`** — run continuously as a daemon; sources and managers **push** to the core as facts arrive.
 - **`run-until-idle`** — dispatch from the durable queue and exit once the **queue is drained and no
   offer is outstanding** (every enqueued event accepted or expired, and no handler holding an
-  offer, `INV-LIFE-1`); the socket stays open throughout so managers can still push.
+  offer, `INV-LIFE-1`); the core stays reachable throughout so managers can still push.
 
-Both modes keep the socket available. The operator inspects a running core with `status` (resolved
-config + live **deliveries** + queue depths) and `config` (the resolved configuration); every
-subcommand emits text by default and `--json` for machines (`INTF-CLI`). A command that finds **no
-running core** MUST **fail with a "no running core" error** — the CLI never **auto-starts** one, so
-"is a core running?" stays answerable from a caller's exit code (`INTF-CLI` "Locating the core",
-`ADR 0036`).
+**Both modes keep the core reachable** (`INV-LIFE-1`). The operator inspects a running core for its
+resolved config, its live **deliveries** and its queue depths; every command emits text by default and
+a machine-readable form on request (`INTF-CLI`). A command that finds **no running core** MUST **fail
+with a "no running core" error** — the CLI never **auto-starts** one, so "is a core running?" stays
+answerable from a caller's exit code (`INTF-CLI` "Locating the core", `ADR 0036`).
 
 ```mermaid
 flowchart TD
     cfg["resolve config (INTF-CLI)"] --> val["validate wiring (JOURNEY-VALIDATE)"]
-    val --> sel["apply --only / --disable for this run"]
-    sel --> sock["start the socket service"]
-    sock --> mode{"run vs run-until-idle?"}
-    mode -->|run| daemon["daemon: run continuously; sources/managers push over the socket"]
+    val --> sel["apply the run-scoped selectors for this run"]
+    sel --> reach["become reachable to participants"]
+    reach --> mode{"run vs run-until-idle?"}
+    mode -->|run| daemon["daemon: run continuously, sources and managers push to the core"]
     mode -->|run-until-idle| rui["dispatch everything deliverable, await deferred work until it expires, then exit"]
-    daemon --> life["both keep the socket available (INV-LIFE-1)"]
+    daemon --> life["both keep the core reachable (INV-LIFE-1)"]
     rui --> life
-    life --> inspect["inspect live via status / config (INTF-CLI)"]
+    life --> inspect["inspect live via INTF-CLI"]
 ```
 
 ### `JOURNEY-FLOW` — an event's life <!-- uuid: 507d3b05-87b5-43f3-9098-e4e9cdebc9bd -->
@@ -491,19 +491,17 @@ sequenceDiagram
 **Intent:** watch throughput, backlog, failures, and liveness through the metric catalog.
 
 **Flow.** The core **owns the metric catalog** — a declared set of metrics, each with `name`, `kind`
-(counter / gauge / histogram), `unit`, and label shape (`INV-OBS-1`). The catalog MUST declare at
-least **queue depth** (gauge, per `type`), **failure rate** (counter, per failure class), and
-**unconsumed-expired** (counter, per `type` — the "no event misses" signal, `INV-DISP-3`), alongside
-throughput / backlog / liveness / dispatch-latency metrics. The failure-rate classes are
-**delivery-side** and there are exactly two — a **pre-accept decline** (`unavailable`, or `busy` exit
-code `2`) and a **dispatch failure** the core could not hand over; post-accept classes belong to the
+(counter / gauge / histogram), `unit`, and label shape (`INV-OBS-1`), whose members are enumerated by
+`INTF-MON`, the interface that carries it. The failure classes the catalog counts are
+**delivery-side** and there are exactly two — a **pre-accept decline** (`unavailable`, or a `busy`
+decline) and a **dispatch failure** the core could not hand over; post-accept classes belong to the
 accepting handler and are counted on **its** surface, not here (`INV-FAIL-1`). A monitoring sink
 **declares its mode and metric subset** and either **pulls** current values on its own schedule or
 receives **pushed** updates (`INTF-MON`); it serves its own external surface (dashboards, alerts).
-Emission uses **OTel for metrics only**; **logs stay JSONL**, and observability covers **metrics +
-logs** (traces are a later concern). A **daemon** emits continuously, and **`run-until-idle` does emit
-a final snapshot** before it exits. The core stays unaware of the concrete backend, which remains a
-deployment binding via `INTF-MON` (`GOAL-MIN-1`).
+Observability covers **metrics + logs** (traces are a later concern). A **daemon** emits continuously,
+and **`run-until-idle` does emit a final snapshot** before it exits. The core stays unaware of both the
+emission transport and the concrete backend, which remain deployment bindings via `INTF-MON`
+(`GOAL-MIN-1`).
 
 ```mermaid
 sequenceDiagram

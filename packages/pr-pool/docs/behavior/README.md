@@ -55,10 +55,12 @@ handler is added often, and that extension is what the tool exists for; storage 
 configured once or never. Grouping all five interfaces on **kind** alone would flatten exactly that
 difference away, so this set groups them on kind **and** participation.
 
-The interfaces themselves are in [interfaces](interfaces.md), each carrying an illustrative message
-example, because the method asks a set to show intent through examples
-(`phillipgreenii-nix-agent-support · behavior-docs/docs/behavior · GOAL-7`); those examples are what
-the interface conformance suite checks (`INV-INTF-2`).
+The interfaces themselves are in [interfaces](interfaces.md), each carrying a diagram of the
+interaction it intends, because the method asks a set to show intent through examples
+(`phillipgreenii-nix-agent-support · behavior-docs/docs/behavior · GOAL-7`). The concrete message
+shapes those diagrams stand for are realization detail and live in pr-pool's decision docs
+(`phillipgreenii-nix-agent-support · packages/pr-pool/docs/decisions · DEC-WIRE-1`); what an
+implementation is actually checked against is the interface conformance suite (`INV-INTF-2`).
 
 ### The boundary principle
 

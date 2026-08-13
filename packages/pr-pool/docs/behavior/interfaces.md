@@ -13,15 +13,23 @@ store, ccpool, prometheus — is uninteresting to the core; only these contracts
 implementations and any organization-specific workflow live in a downstream deployment set that
 implements these interfaces.)
 
-The five interfaces, each named for its boundary rather than a number, are:
+The five interfaces, each named for its boundary rather than a number, are described on **two axes**
+— the **kind** of party on the far side, and whether that party is an **essential or optional
+participant** in the system's own operation (the split this set's [README](README.md) draws). Kind
+alone would flatten the second axis away, because four of the five counterparties are the same kind:
 
-| Interface      | Boundary                                 | Counterparty (actor)             | Initiator                    |
-| -------------- | ---------------------------------------- | -------------------------------- | ---------------------------- |
-| `INTF-SOURCE`  | typed events into the core               | `ACTOR-SRC` event source         | core (pull) or source (push) |
-| `INTF-HANDLER` | events out to a handler; acceptance back | `ACTOR-HDL` event handler        | core                         |
-| `INTF-MON`     | the metric catalog out                   | `ACTOR-MON` monitoring sink      | either (sink declares)       |
-| `INTF-STORE`   | key/value scratch for core state         | `ACTOR-STO` storage              | core                         |
-| `INTF-CLI`     | operator commands; manager callbacks     | `ACTOR-OP` operator (+ managers) | operator / manager           |
+| Interface      | Boundary                                 | Counterparty (kind)                       | Participation | Initiator                    |
+| -------------- | ---------------------------------------- | ----------------------------------------- | ------------- | ---------------------------- |
+| `INTF-SOURCE`  | typed events into the core               | `ACTOR-SRC` event source (implementer)    | essential     | core (pull) or source (push) |
+| `INTF-HANDLER` | events out to a handler; acceptance back | `ACTOR-HDL` event handler (implementer)   | essential     | core                         |
+| `INTF-MON`     | the metric catalog out                   | `ACTOR-MON` monitoring sink (implementer) | optional      | either (sink declares)       |
+| `INTF-STORE`   | key/value scratch for core state         | `ACTOR-STO` storage (implementer)         | optional      | core                         |
+| `INTF-CLI`     | operator commands; manager callbacks     | `ACTOR-OP` operator (**actor**)           | driving port  | operator / manager           |
+
+The sections below follow that ordering — **essential** participants first, then **optional** ones,
+then the **driving port** last. `INTF-CLI` is last because it is the odd one out on both axes: its
+counterparty is an **actor** rather than an implementer, so there is nobody to run a conformance
+suite on the far side, and it drives the system rather than participating in the event path.
 
 ```mermaid
 flowchart LR
@@ -41,38 +49,39 @@ flowchart LR
 Every participant interface shares one shape. `INV-INTF-1` (in [invariants](invariants.md))
 requires it; the details are here.
 
-- **CLI transport.** The default **transport contract** invokes a participant as
-  `<command> <subcommand>`; the **request payload is JSON on stdin** and the **reply is JSON on
-  stdout**. A subcommand MAY take its own arguments, but arguments are never the payload channel.
-  The _shapes_ are the **message schema**, not the wire format — a participant MAY instead speak a
-  gRPC or in-code **transport contract** over the socket and still conform, so long as it carries the
-  same message schema.
-- **Schema-versioned payloads.** Every request and reply carries a `schemaVersion` string, and
-  every payload is defined by the interface's formal **message schema** (a JSON Schema) that backs
-  the conformance suite. A party that receives a `schemaVersion` it cannot handle MUST report it
-  rather than guess. The shapes shown below are **illustrative examples**, not golden ones — the
-  authoritative **message schemas** are the versioned JSON Schema artifacts each conformance suite
-  checks against (`INV-INTF-2`).
-- **Tracking id.** Every core→participant request carries a unique **tracking id** (`id`). A
-  deferred result or a later callback correlates by **echoing that `id`** — or the participant MAY
-  return its own tracking id in the deferred acknowledgement, which the core stores and maps back.
-  Either way the core can match a later delivery to the original call. The tracking id is per-call.
-- **Deferred replies.** A reply is **either** an inline result **or** `{ "deferred": true }`. Where a
+- **A message schema, carried over a transport contract.** Every request and reply is defined by the
+  interface's formal **message schema** — the shape layer, and what the two sides must agree on — and
+  that schema is carried over a **transport contract**. One message schema MAY be realized over
+  several transport contracts, so a participant speaking a different transport still conforms so long
+  as it carries the same schema. Which transport is the default, and what its payloads look like
+  concretely, is a realization decision
+  (`phillipgreenii-nix-agent-support · packages/pr-pool/docs/decisions · DEC-WIRE-1`).
+- **Schema versioning.** Every request and reply is **versioned**, and a party that receives a
+  version it **cannot handle MUST report it rather than guess**.
+- **Tracking id.** Every core→participant request carries a **tracking id** unique to that call, and
+  a deferred result or a later callback **MUST be correlatable back to the originating call** — by
+  echoing the core's id, or by returning the participant's own id in the deferred acknowledgement,
+  which the core then stores and maps back. Either way the core can match a later delivery to the
+  original call. The tracking id is per-call.
+- **Deferred replies.** A reply is **either** an inline result **or** a **deferral**. Where a
   deferred reply still **owes the core a result**, the participant later reaches the core over its
   **callback** channel, keyed by the tracking id — `INTF-SOURCE`'s deferred `query`, whose events
   arrive later via `ingest-event`. Where the deferred reply **is** the acceptance and the core is owed
   nothing further — `INTF-HANDLER`'s `dispatch` — **no later callback follows**. The core handles
   either form on every call; a participant does not declare a sync/async mode up front. Which calls a
   given interface may defer is shown in that interface's sequence diagram below.
-- **Callback.** When the core needs to be reached back, it hands the participant a single
-  **callback** — one `command` string already carrying the socket and an auth token as arguments.
-  The participant appends its own arguments and runs it; it never assembles the socket or token
-  itself. The one concrete callback target for a deferred or pushed result is the `INTF-CLI`
-  `ingest-event` subcommand — a **source**'s. A handler needs no callback target of its own: its
-  acceptance already arrives in the **dispatch reply**, so nothing is left for it to call back about.
-- **Coarse exit codes.** A subcommand's exit code stays coarse: `0` ok, `1` unexpected error,
-  `2` busy. The **rich outcome is in the JSON reply**; a participant in a degraded state MAY return
-  an exit code only (e.g. busy → `2`, no body).
+- **Callback.** When the core needs to be reached back, it hands the participant a **single
+  ready-to-run callback** already carrying everything needed to reach and authenticate against the
+  core. The participant appends its own arguments and runs it, and **MUST NOT have to assemble the
+  core's address or credential itself** — so no participant carries addressing or credential logic of
+  its own to get wrong. The one concrete callback target for a deferred or pushed result is the
+  `INTF-CLI` `ingest-event` subcommand — a **source**'s. A handler needs no callback target of its
+  own: its acceptance already arrives in the **dispatch reply**, so nothing is left for it to call
+  back about.
+- **Coarse outcome, rich reply.** A call's outcome is signalled **coarsely by the transport** — it
+  worked, it failed unexpectedly, or the participant is busy — with the **rich outcome carried in the
+  reply body**. A participant in a degraded state MAY answer with the coarse signal alone and no body,
+  so declining never depends on being able to compose a reply.
 - **Self-status.** Any participant MAY push its **own** status — `healthy` / `degraded` /
   `unavailable` — over its callback channel, independent of any per-item outcome. This is the
   participant reporting on **itself**, and it is the **only** status channel into the core: an
@@ -200,20 +209,8 @@ orphan error, and an emitted `type` no binding covers is a warned dead end — a
 anything to compare without them. What a source does **not** declare is which of its fields may be
 matched, or any shape for `payload`: **matchability is the handler's alone** (`INV-DISP-1`).
 
-**Event shape** (illustrative):
-
-```json
-{
-  "schemaVersion": "1",
-  "id": "evt-abc123",
-  "type": "review-requested",
-  "at": "2026-07-16T12:00:00Z",
-  "expiresAt": "2026-07-16T12:15:00Z",
-  "payload": {
-    "note": "source-defined; OPAQUE to the core except a path a binding names"
-  }
-}
-```
+**Event shape.** An event carries the following fields, and nothing here constrains how a source
+arrives at their values:
 
 - `id` — unique; the core de-duplicates on it across the retained id set (`INV-EVT-3`).
 - `type` — the **primary matcher**: a **binding** MUST match it before anything else applies.
@@ -285,26 +282,14 @@ sequenceDiagram
 - **Purpose:** run a handler against one event as a **handler session**, tracked by the request's
   tracking id, and report its outcome.
 
-**Dispatch (core → handler)** (illustrative):
+**Dispatch (core → handler).** The core hands over **one event** under **one tracking id**, and the
+handler answers in one of exactly two ways:
 
-```json
-{
-  "schemaVersion": "1",
-  "id": "hs-771e",
-  "event": {
-    "id": "evt-abc123",
-    "type": "review-requested",
-    "expiresAt": "2026-07-16T12:15:00Z",
-    "payload": {}
-  }
-}
-```
-
-- **Reply (sync):** `{ "schemaVersion": "1", "id": "hs-771e", "outcome": { … } }` — an inline
-  completion: the handler took the event and finished it inside the call.
-- **Reply (deferred):** `{ "schemaVersion": "1", "id": "hs-771e", "deferred": true }` — an **ack**:
-  the handler took the event and will run it on its own. The core never holds an open call across
-  long or paused work, and **the ack is the last thing the core is owed** for that dispatch.
+- **Reply (sync)** — an inline **completion** carrying an outcome: the handler took the event and
+  finished it inside the call.
+- **Reply (deferred)** — an **ack**: the handler took the event and will run it on its own. The core
+  never holds an open call across long or paused work, and **the ack is the last thing the core is
+  owed** for that dispatch.
 
 **A handler's run status is not part of this contract.** The core's delivery responsibility ends at
 acceptance (`INV-EVT-1`, `INV-FAIL-1`), so how far a handler has got, what it is doing, and how it
@@ -323,8 +308,8 @@ the two never collide.
 **Failure class** (coarse; response follows the **acceptance boundary**, `INV-FAIL-1`). This
 vocabulary is the **handler-side** contract — a handler reports these and `INV-FAIL-1` routes them —
 and it is deliberately **not** the list of things pr-pool measures. pr-pool **classifies and counts**
-the **delivery-side** cases only: a **pre-accept decline** (`unavailable`, or a **`busy` exit code
-`2`**) and a **dispatch failure** where the core could not hand the event over at all (`INV-OBS-1`).
+the **delivery-side** cases only: a **pre-accept decline** (`unavailable`, or a **`busy`** decline) and
+a **dispatch failure** where the core could not hand the event over at all (`INV-OBS-1`).
 The three **post-accept** classes — `retryable`, `resource-limit`, `critical` — pr-pool merely **hands
 over**; they are the accepting **handler's own observability concern** and live on the handler's own
 surface (for a ccpool-backed handler, ccpool's own metrics and logs), so their absence from pr-pool's
@@ -337,8 +322,8 @@ metric catalog is the boundary working, not an oversight.
 | `unavailable`    | cannot take work now (down, starting, or at capacity)         | pre-accept decline: core re-offers while unexpired  |
 | `critical`       | MUST NOT be retried; a human is needed                        | post-accept: surfaced to a human; never re-offered  |
 
-The core itself re-offers **only on a pre-accept decline** — an `unavailable` report, or a **`busy`
-exit code `2`** when the handler is at capacity (`INV-CONC-1`). Once a handler **accepts** an event,
+The core itself re-offers **only on a pre-accept decline** — an `unavailable` report, or a **`busy`**
+decline when the handler is at capacity (`INV-CONC-1`). Once a handler **accepts** an event,
 retry/resume/persistence is the **handler's** responsibility (`INV-FAIL-1`), not the core's.
 
 **Obligations.** A handler **MUST tolerate a duplicate event** (be idempotent) and **MUST support
@@ -356,7 +341,7 @@ sequenceDiagram
     Core->>H: dispatch { id, event }
     H-->>Core: { id, deferred: true }
     Note over Core,H: nothing further is owed - the run, its progress and its outcome are the handler's own
-    Note over Core,H: a pre-accept decline is busy (exit 2) or an unavailable self-status, and the core re-offers
+    Note over Core,H: a pre-accept decline is a busy decline or an unavailable self-status, and the core re-offers
 ```
 
 ## `INTF-MON` — monitoring sink <!-- uuid: 11c08936-42df-4fd6-a912-70fe88244012 -->
@@ -364,12 +349,29 @@ sequenceDiagram
 - **Counterparty:** `ACTOR-MON`, a pluggable monitoring sink. **Initiator:** either — the sink
   **declares** push or pull. **Multiplicity:** optional; may be absent or several.
 - **Purpose:** expose the core's metrics. The **core owns the metric catalog** — a declared set of
-  metrics, each with `name`, `kind` (`counter | gauge | histogram`), `unit`, and label shape,
-  including **queue depth**, **failure rate**, and **unconsumed-expired** (`INV-OBS-1`). An
-  **observer** (`ACTOR-OBS`) reads the sink's surface, never the core directly.
-- **Emission transport:** the default is **OTel for metrics only** (a neutral standard, not a
-  mandated backend); **logs stay JSONL**. Observability covers metrics + logs (traces later). The
-  concrete backend (a scrape target, a log store) is the sink's own binding.
+  metrics, each with `name`, `kind` (`counter | gauge | histogram`), `unit`, and label shape
+  (`INV-OBS-1`). An **observer** (`ACTOR-OBS`) reads the sink's surface, never the core directly.
+- **The catalog.** Because an enumerated catalog belongs to the interface that carries it, the
+  members are named here and `INV-OBS-1` states only the obligation to declare them. The catalog
+  **MUST** declare at least:
+  - **queue depth** — gauge, per `type`;
+  - **failure rate** — counter, per **delivery-side** failure class, of which there are exactly two: a
+    **pre-accept decline** (an `unavailable` self-report, or a **busy** decline from a handler at
+    capacity, `INV-CONC-1`) and a **dispatch failure** where the core could not hand the event over at
+    all. The post-accept classes are **not** counted here — after acceptance the handler owns the work
+    (`INV-FAIL-1`), so classifying its outcomes is the handler's own concern on the handler's own
+    surface;
+  - **unconsumed-expired** — counter, per `type`: events that expired with no handler accepting them,
+    which under `INV-EVT-4` is a **genuine miss** and is the concrete "no event misses" signal
+    (`INV-DISP-3`);
+
+  and, alongside those three, the **throughput**, **backlog**, **liveness** and **dispatch-latency**
+  metrics an observer watches to tell a busy system from a stalled one (`STORY-OBS-1`).
+
+- **Emission.** Observability covers **metrics and logs** (traces are a later concern). Both the
+  **emission transport** and the concrete backend behind it (a scrape target, a log store) are
+  deployment bindings the core is unaware of; which transport is the default is a realization decision
+  (`phillipgreenii-nix-agent-support · packages/pr-pool/docs/decisions · DEC-OBS-1`).
 - A sink **declares which mode it uses and which subset of the metric catalog it handles**:
   - **pull** — the sink reads current values from the core on its own schedule;
   - **push** — the core sends the named metric updates to the sink as they change.
@@ -413,171 +415,101 @@ sequenceDiagram
 
 ## `INTF-CLI` — operator commands (and the manager callbacks) <!-- uuid: 746dd5a6-34c4-4294-b727-e442c2afa723 -->
 
-- **Counterparty:** `ACTOR-OP`, the operator. **Initiator:** operator. The same binary
-  **also** carries the **manager→core callback** subcommand `ingest-event`; it belongs to
-  `INTF-SOURCE`'s manager-initiated direction and is invoked through the callback the core hands
-  out, not by the operator.
-- **Operator push-inject.** The operator subcommand `push-inject` (below) is the **operator-facing
-  front door to the push-ingest path**: it performs the **same core-side enqueue** as the
-  `ingest-event` manager callback, but is **operator-initiated** (not invoked through a core-issued
-  callback). The injected event is durable via the queue and delivered at-least-once and deduped like
-  any push event (`INV-EVT-*`); no new delivery semantics. It is **distinct from** `ingest-event` (a
-  manager→core callback) and from `run-role` (a one-shot smoke test that tears down).
-- **Locating the core.** The CLI finds the running core via an injected socket path (env/arg) or by
-  discovering the running socket service. When neither locates a **running** core, the CLI **MUST
-  fail with a "no running core" error** and a **non-zero exit code**; it **MUST NOT start one**.
-  Locating means being able to **reach** a core, not merely finding a trace that one once existed — a
-  trace left behind by a core that has died is the same outcome as no trace at all. This holds on
-  every locate path: the manager callbacks and the operator subcommands alike (`ADR 0036`).
-- **Output.** Every operator subcommand emits **human-readable text by default** and **JSON with
-  `--json`** for machine consumption. Coarse exit codes follow the common contract (`0` ok, non-zero
-  on error; a usage error is distinct from a runtime error).
+- **Counterparty:** `ACTOR-OP`, the operator — an **actor**, not an implementer, which is what makes
+  this the set's one **driving port**: nobody on the far side implements a contract, so there is no
+  conformance suite here and every obligation below is the **core's own**. **Initiator:** operator.
+  The same binary **also** carries the **manager→core callback** `ingest-event`; it belongs to
+  `INTF-SOURCE`'s manager-initiated direction and is invoked through the callback the core hands out,
+  not by the operator.
+- **What the operator can do.** The boundary offers exactly these affordances: run the core in its
+  **long-running** mode or its **drain-and-exit** mode (`INV-LIFE-1`); **smoke-test one handler**
+  against one explicitly named event, and **smoke-test one pull source's query** once and
+  **read-only**, both under a **test-mode signal** so the participant knows a test is in flight and
+  neither running any discovery of its own; **inject** an operator-supplied event into the live core;
+  **inspect** a running core for its resolved configuration, its live **deliveries** and its per-`type`
+  queue depths; and **resolve** the configuration, both as authored and as built-in defaults. The
+  concrete command surface that spells these is a realization decision
+  (`phillipgreenii-nix-agent-support · packages/pr-pool/docs/decisions · DEC-CLI-2`). _"role"_ is the
+  operator-facing name for a configured **event handler** (its concrete kind); the core dispatches it
+  as a **handler session**. _"query"_ names one pull **event source**'s query.
+- **Operator push-inject.** The **push-inject** affordance is the **operator-facing front door to the
+  push-ingest path**: it performs the **same core-side enqueue** as the `ingest-event` manager
+  callback, but is **operator-initiated** (not invoked through a core-issued callback). The injected
+  event is durable via the queue and delivered at-least-once and deduped like any push event
+  (`INV-EVT-*`); no new delivery semantics. It is **distinct from** `ingest-event` (a manager→core
+  callback) and from the one-shot handler smoke test, which tears down.
+- **Run-scoped selectors.** The operator MAY restrict the **active** set of sources and handlers for a
+  single run — as an allow-list, a deny-list, or both — **without editing the configuration**
+  (`STORY-OP-3`). The restriction scopes which participants that run activates and which a smoke test
+  may reach, and it **MUST NOT** outlive the run it was given for; the configuration itself is left
+  untouched, which is what makes "isolate or pause part of the system" a reversible act.
+- **Locating the core.** When the CLI cannot reach a **running** core it **MUST fail with a "no
+  running core" error** and a **non-zero exit code**; it **MUST NOT start one**. Locating means being
+  able to **reach** a core, not merely finding a trace that one once existed — a trace left behind by a
+  core that has died is the same outcome as no trace at all. This holds on every locate path: the
+  manager callbacks and the operator commands alike (`ADR 0036`).
+- **Output.** Every operator command emits **human-readable text by default** and a
+  **machine-readable form on request**, so an operator and a script read the same state without a
+  second surface. A **usage** error is distinct from a **runtime** error.
 
-### Global options
+### The manager→core callback
 
-| Option                 | Effect                                                                   |
-| ---------------------- | ------------------------------------------------------------------------ |
-| `--json`               | emit JSON instead of text (any operator subcommand)                      |
-| `--only <selector>`    | allow-list: restrict the **active** set of sources/handlers for this run |
-| `--disable <selector>` | deny-list: exclude sources/handlers for this run                         |
-| `--version`, `-v`      | print the version and exit                                               |
-| `--help`, `-h`         | print help and exit                                                      |
+There is exactly **one** callback target: the core takes **event ingest** back over the callback
+channel and nothing else. In particular a handler pushes back **no run status at all** — the core's
+delivery responsibility ends at acceptance (`INV-EVT-1`, `INV-FAIL-1`), so there is nothing for it to
+report. The callback the core hands out arrives ready to run, already addressed and authenticated; a
+manager appends its own arguments (the common contract above).
 
-`--only` / `--disable` (and their env equivalents) restrict the active set **without editing
-config** — the mechanism behind `STORY-OP-3`. They scope which sources and handlers a `run` /
-`run-until-idle` activates and which a smoke test may reach.
-
-### Operator subcommands
-
-| Subcommand                | Arguments                      | Behavior                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| ------------------------- | ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `run`                     | —                              | Start the core as a long-running **daemon** (socket service); route events as sources emit them until stopped.                                                                                                                                                                                                                                                                                                                                                         |
-| `run-until-idle`          | —                              | Start the socket service and dispatch from the durable queue; **exit once the queue is drained and no offer is outstanding** (every enqueued event accepted or expired, and no handler holding an offer, `INV-LIFE-1`). The default when no subcommand is given.                                                                                                                                                                                                       |
-| `run-role <role> <event>` | role, event                    | **Smoke test**: dispatch **one named event** through **one handler** (its CLI-facing name is its _role_), then tear down. Runs **no discovery** — the event is explicit. Sets a **test-mode** signal (env) so the handler knows a test is in flight.                                                                                                                                                                                                                   |
-| `run-query <query>`       | query                          | **Smoke test**: run **one pull source's query** once, **read-only**, and print the events it would emit. Also sets the test-mode signal.                                                                                                                                                                                                                                                                                                                               |
-| `push-inject <json>`      | event JSON                     | Inject an **arbitrary operator-supplied event** into the **live** core — the same core-side enqueue as the `ingest-event` manager callback, but **operator-initiated**, locating/authenticating the core like the other operator subcommands. Durable via the queue, delivered at-least-once and deduped (`INV-EVT-*`). **Distinct** from `ingest-event` (a manager→core callback) and `run-role` (a smoke test that tears down). Primarily for manual/test injection. |
-| `status`                  | —                              | Resolved-config summary **plus** live **deliveries** and per-`type` **queue depths**.                                                                                                                                                                                                                                                                                                                                                                                  |
-| `config`                  | `--show` \| `--print-defaults` | `--show` prints the **resolved** configuration; `--print-defaults` prints the built-in defaults as a copy-paste starting point.                                                                                                                                                                                                                                                                                                                                        |
-
-_"role"_ is the operator-facing name for a configured **event handler** (its concrete kind); the
-core dispatches it as a **handler session**. _"query"_ names one pull **event source**'s query.
-
-### Manager→core callback subcommand
-
-This is the concrete callback target the core hands out (socket + token already baked in); a manager
-appends its arguments and runs it. It follows the common contract (JSON on stdin → JSON on stdout;
-coarse exit codes). There is **one**: the core takes event ingest back over the callback channel and
-nothing else. In particular a handler pushes back **no run status at all** — the core's delivery
-responsibility ends at acceptance (`INV-EVT-1`, `INV-FAIL-1`), so there is nothing for it to report.
-
-**`ingest-event`** — a **push source**, or a **deferred pull** reply, delivers one or more events.
-
-Request (stdin):
-
-```json
-{
-  "schemaVersion": "1",
-  "id": "trk-9f2c",
-  "events": [
-    {
-      "id": "evt-abc123",
-      "type": "review-requested",
-      "expiresAt": "2026-07-16T12:15:00Z",
-      "payload": {}
-    }
-  ]
-}
-```
-
-Reply (stdout, exit `0`):
-
-```json
-{ "schemaVersion": "1", "id": "trk-9f2c", "accepted": 1, "rejected": [] }
-```
+**`ingest-event`** — a **push source**, or a **deferred pull** reply, delivers **one or more** events
+under one tracking id. The reply reports how many the core **accepted** and lists the ones it
+**rejected**, each with a reason.
 
 `accepted` counts the events the core **took**, which is broader than "freshly appended": a
 still-retained **duplicate** `id` is accepted too, because de-duplication is the core doing its job
 (`INV-EVT-3`). The reply carries **no field** separating a fresh append from an absorbed re-emit, so
 `accepted` is not a fresh-append count and a caller cannot distinguish the two over this interface.
 
-Under the durable queue an event whose `type` matches no binding is **still accepted** (exit `0`,
-counted in `accepted`) — it is enqueued and **expires unconsumed**; visibility comes from
-the **config-time warning** (`JOURNEY-VALIDATE`) and the **unconsumed-expired** metric, not from a
-rejection (`INV-DISP-3`). The `rejected` list therefore carries only **malformed** events (bad schema
-or missing required fields), each with a reason — e.g. exit `1` with:
+Under the durable queue an event whose `type` matches no binding is **still accepted** — counted as
+accepted and enqueued, then left to **expire unconsumed**; visibility comes from the **config-time
+warning** (`JOURNEY-VALIDATE`) and the **unconsumed-expired** metric, not from a rejection
+(`INV-DISP-3`). The rejected list therefore carries only **malformed** events — bad schema, or a
+missing required field — each with a reason.
 
-```json
-{
-  "schemaVersion": "1",
-  "id": "trk-9f2c",
-  "accepted": 0,
-  "rejected": [
-    {
-      "id": "evt-abc123",
-      "reason": "malformed: missing required field \"type\""
-    }
-  ]
-}
-```
-
-**`status --json`** (operator side, for reference):
-
-```json
-{
-  "schemaVersion": "1",
-  "deliveries": [
-    { "id": "hs-771e", "handler": "review", "event": "evt-abc123" }
-  ],
-  "queues": [{ "type": "review-requested", "depth": 3 }],
-  "config": { "sources": 2, "handlers": 3 }
-}
-```
-
-`deliveries` is **delivery provenance** — which event the core handed to which handler, keyed by that
-dispatch's tracking id — and the core legitimately knows it, because it already marks acceptance per
-`(event, handler)` (`INV-EVT-1`). It is **not** a window into a handler session, so it carries no
-per-run state and no progress: those are the accepting handler's own, on the handler's own surface.
-`queues` is the per-`type` depth `INV-OBS-1` obliges, and `config` is pr-pool's own resolved
+**Inspecting a running core** yields three things and nothing else. **Deliveries** are **delivery
+provenance** — which event the core handed to which handler, keyed by that dispatch's tracking id —
+and the core legitimately knows it, because it already marks acceptance per `(event, handler)`
+(`INV-EVT-1`). It is **not** a window into a handler session, so it carries no per-run progress:
+that is the accepting handler's own, on the handler's own surface. The **queue depths** are the
+per-`type` depth `INV-OBS-1` obliges, and the **resolved configuration** is pr-pool's own
 source/handler count.
 
 ```mermaid
 sequenceDiagram
     actor Op as operator
-    participant Core as core (socket service)
+    participant Core as core
     participant Src as event source
     participant H as event handler
-    Op->>Core: run-until-idle
+    Op->>Core: run in drain-and-exit mode
     activate Core
     Core->>Src: query { id, callback }
     Src-->>Core: { id, events: [Event] }
     Core->>H: offer { id, event }
     H-->>Core: { id, deferred: true }  (accept = ack, nothing further owed)
     Note over Core: queue drained and no offer outstanding → exit (INV-LIFE-1)
-    Core-->>Op: exit 0
+    Core-->>Op: success
     deactivate Core
-```
-
-```mermaid
-sequenceDiagram
-    participant Src as push event source
-    participant CLI as pr-pool ingest-event
-    participant Core as core (socket service)
-    Src->>CLI: pr-pool ingest-event  (event JSON on stdin, socket+token from callback)
-    CLI->>Core: forward over socket { id, events }
-    Core-->>CLI: { id, accepted } / error
-    CLI-->>Src: exit 0/1/2 + JSON reply
 ```
 
 ## Configuration (an interface the operator authors)
 
 The **configuration structure** is itself a first-class interface — the operator authors it, and
-the CLI resolves it (`config --show`). It declares: the participants (each with its command, mode,
+the CLI resolves it on request. It declares: the participants (each with its command, mode,
 and — for a monitoring sink — its selected metrics); the sources, each as **one invocation** plus the
 event types it emits and, for a pull source, its query trigger — never a per-tool source kind
 (`GOAL-MIN-1`); the handlers and their event-type **bindings** (including any **payload path a
 binding names** for narrowing); and the workflow wiring the core validates (`INV-WORKFLOW-1`). Expiry is **not** declared here — it
-rides on each event as `at` / `expiresAt` (`INV-EVT-1`, `INV-EVT-4`). The `--only` / `--disable`
-selectors above restrict the _active_ subset of this config per run without editing it.
+rides on each event as `at` / `expiresAt` (`INV-EVT-1`, `INV-EVT-4`). The **run-scoped selectors**
+above restrict the _active_ subset of this config per run without editing it.
 
 The **full configuration schema** is not yet pinned; it is tracked as an open question
 (`OQ-CONFIG`), with pr-pool's existing TOML as prior art.

@@ -57,10 +57,11 @@ flowchart TD
   busy handler can no longer be the reason an event expired unoffered, which makes the "no event
   misses" signal considerably more meaningful. Visibility is surfaced two ways: **config-time**,
   `JOURNEY-VALIDATE` emits a **warning** when a source-emitted `type` has **no configured binding at
-  all** (you would queue events nothing can take); and at runtime the **unconsumed-expired** metric
-  counts such drops. A binding merely **disabled for this run** (`--only`/`--disable`) is expected and
-  is neither warned nor an error — its events are offered to nobody and expire. (A field or payload
-  path a binding names that is _absent_ on an event is a non-match, not a no-binding condition.)
+  all** (you would queue events nothing can take); and at runtime the drop is **counted in the metric
+  catalog** `INTF-MON` carries (`INV-OBS-1`). A binding merely **disabled for this run** by a
+  **run-scoped selector** is expected and is neither warned nor an error — its events are offered to
+  nobody and expire. (A field or payload path a binding names that is _absent_ on an event is a
+  non-match, not a no-binding condition.)
 
 ## Delivery
 
@@ -110,12 +111,12 @@ flowchart TD
 
 - **`INV-INTF-1`** <!-- uuid: ddffe016-17c0-4673-896a-70532c968b72 --> — Every participant
   interaction follows the **common manager contract** ([interfaces](interfaces.md)): it conforms to
-  the interface's **message schema** (the JSON Schema shapes, `INV-INTF-2`) realized over a
-  **transport contract** — the default is the **CLI transport** (schema-versioned JSON on stdin → JSON
-  on stdout, coarse exit codes `0` ok / `1` error / `2` busy, rich outcome in the JSON); a gRPC or
-  in-code transport is equivalent. Each call carries a per-call **tracking id** and a reply that is
-  **inline or deferred** over a single-`command` **callback**. A reply is the participant's
-  **acceptance** signal: an **inline completion**
+  the interface's **message schema** (`INV-INTF-2`) realized over a **transport contract**, and a
+  party that receives a **schema version it cannot handle MUST report it rather than guess**. Each
+  call carries a per-call **tracking id** and a reply that is **inline or deferred**; where a deferral
+  still owes a result, the participant reaches the core over the **callback** the core handed it,
+  which arrives ready to run so the participant assembles neither the core's address nor its
+  credential. A reply is the participant's **acceptance** signal: an **inline completion**
   (synchronous — `accept == complete`) or a **deferred ack** reconciled later over the participant's
   callback, keyed by the tracking id (asynchronous — `accept == ack`, outcome reported later). The
   core's delivery responsibility **ends at acceptance** (`INV-EVT-1`, `INV-FAIL-1`). A callback
@@ -199,31 +200,30 @@ sequenceDiagram
 - **`INV-OBS-1`** <!-- uuid: 1ab39347-6835-40bf-9145-4d5e658780dd --> — The core exposes a declared
   **metric catalog** (each metric's `name`, `kind`, `unit`, labels); a **monitoring sink** pulls or
   pushes a declared subset (`INTF-MON`). Observability covers **metrics and logs** (traces are a later
-  concern). The catalog MUST declare at least: **queue depth** (gauge, per `type`), **failure rate**
-  (counter, per failure class), and **unconsumed-expired** (counter, per `type` — events that expired
-  with no handler accepting them, which under `INV-EVT-4` is a genuine miss and is the concrete "no
-  event misses" signal, `INV-DISP-3`),
-  alongside the existing throughput / backlog / liveness metrics. **The failure-rate classes are
-  DELIVERY-SIDE and there are exactly two**: a **pre-accept decline** (an `unavailable` report, or a
-  `busy` **exit code `2`**, `INV-CONC-1`) and a **dispatch failure** where the core could not hand the
-  event over at all. Post-accept classes (`retryable`, `resource-limit`, `critical`) are **NOT**
-  counted here: after acceptance the handler owns the work (`INV-FAIL-1`), so classifying its outcomes
-  is the handler's own observability concern on the handler's own surface. Queue depth and
-  unconsumed-expired are unaffected by that narrowing — both are already pure delivery. The metric
-  catalog is the neutral **shape**; **OTel** is the default **emission transport for metrics only** (a
-  neutral standard, not a mandated tool — `GOAL-MIN-1` still holds), while logs stay JSONL; the
-  concrete backend **remains** a deployment binding via `INTF-MON`. The core is unaware of any
-  concrete monitoring backend, and an **observer** reads the sink, never the core. A daemon emits
-  continuously, and **`run-until-idle` DOES emit a final snapshot** before it exits.
-- **`INV-LIFE-1`** <!-- uuid: d3d2dbc8-e260-42cc-a6d3-204aaf8dbc59 --> — The core runs as a **socket
-  service** in both modes — a long-running **daemon** (`run`) and a one-off **run-until-idle**, which
-  exits when the **queue is drained and no offer is outstanding** (every enqueued event is accepted
-  or expired, and no handler has an outstanding offer), then stops. Both keep the socket
-  available so push sources can reach it. The core signals each registered participant through the
-  lifecycle `starting → started → stopping → stopped`, plus a **best-effort `crashing`** signal on
-  sudden shutdown; because `crashing` is best-effort (it MAY be lost), **no correctness rule may
-  depend on it** — this signal stays best-effort even though event **data** is now durable
-  (`INV-EVT-1`).
+  concern). The core **MUST** declare that catalog, and it MUST cover **at least** the delivery-side
+  minimum — **what those members are is stated by `INTF-MON`, the interface that carries the
+  catalog**, because an invariant states the obligation over an enumerated catalog and never the
+  enumeration itself. **The failure classes the catalog counts are DELIVERY-SIDE and there are exactly
+  two**: a **pre-accept decline** (an `unavailable` report, or a **`busy`** decline, `INV-CONC-1`) and
+  a **dispatch failure** where the core could not hand the event over at all. Post-accept classes
+  (`retryable`, `resource-limit`, `critical`) are **NOT** counted here: after acceptance the handler
+  owns the work (`INV-FAIL-1`), so classifying its outcomes is the handler's own observability concern
+  on the handler's own surface. The pure-delivery members of the catalog are unaffected by that
+  narrowing. The metric catalog is the neutral **shape**; both the **emission transport** and the
+  concrete backend behind it **remain** a deployment binding via `INTF-MON` (`GOAL-MIN-1` still
+  holds). The core is unaware of any concrete monitoring backend, and an **observer** reads the sink,
+  never the core. A daemon emits continuously, and a **drain-and-exit run DOES emit a final snapshot**
+  before it exits.
+- **`INV-LIFE-1`** <!-- uuid: d3d2dbc8-e260-42cc-a6d3-204aaf8dbc59 --> — The core runs in either of
+  **two modes**: a long-running **daemon** that routes events until it is stopped, and a one-off
+  **drain-and-exit** run, which exits when the **queue is drained and no offer is outstanding** (every
+  enqueued event is accepted or expired, and no handler has an outstanding offer), then stops. In
+  **both** modes the core **MUST stay reachable to push participants**, so a source that pushes rather
+  than being polled is never shut out of a run still in progress. The core signals each registered
+  participant through the lifecycle `starting → started → stopping → stopped`, plus a **best-effort
+  `crashing`** signal on sudden shutdown; because `crashing` is best-effort (it MAY be lost), **no
+  correctness rule may depend on it** — this signal stays best-effort even though event **data** is now
+  durable (`INV-EVT-1`).
 
 ## Precedence
 

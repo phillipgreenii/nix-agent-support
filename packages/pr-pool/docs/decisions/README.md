@@ -45,5 +45,15 @@ docs cite. An entry that overlaps an existing repository ADR MUST **cite** it, n
 
 ## Entries
 
+- [`DEC-CLI-1`](cli.md) — the global option surface, and why the run-scoping selectors are flags
+  rather than config.
+- [`DEC-CLI-2`](cli.md) — the operator subcommand surface, and why the two run modes are separate
+  subcommands.
 - [`DEC-EVENT-1`](event.md) — expiry is an absolute instant (`at` + `expiresAt`), so there is no
   clock origin to pick.
+- [`DEC-OBS-1`](observability.md) — OTel is the default emission transport for metrics only, and
+  logs stay JSONL.
+- [`DEC-WIRE-1`](wire.md) — the default transport is a CLI invocation carrying JSON, with coarse exit
+  codes, plus the illustrative message shapes.
+- [`DEC-WIRE-2`](wire.md) — the core is reached over a socket, and a callback command arrives with
+  its address and token already baked in.

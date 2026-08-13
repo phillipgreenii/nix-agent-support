@@ -5,7 +5,8 @@ their own terms in a downstream deployment set.
 
 ## Core
 
-- **Core** — pr-pool itself: routes events to bound event handlers; runs as a socket service.
+- **Core** — pr-pool itself: routes events to bound event handlers; runs either long-running or
+  drain-and-exit, and stays reachable to its participants while it runs (`INV-LIFE-1`).
 - **Registry** — the core's roster of participants that have registered with it. A participant
   registers to receive lifecycle signals and to make its callback reachable, and deregisters on exit.
 
@@ -69,9 +70,9 @@ their own terms in a downstream deployment set.
   boundary (`INV-INTF-2`); the **shape** layer of the contract. The interaction pattern (inline vs
   deferred reply, a callback keyed by the tracking id) rides on top as invariants over these message
   types, not a separate contract.
-- **Transport contract** — how a message schema is carried over a boundary: the default **CLI
-  transport** (JSON on stdin/stdout, coarse exit codes), or an equivalent gRPC or in-code transport.
-  One message schema MAY be realized over several transport contracts. ("Binding" is reserved for an
+- **Transport contract** — how a message schema is carried over a boundary. One message schema MAY be
+  realized over several transport contracts, and which one is the default is a realization decision —
+  the schema is what the two sides must agree on (`INV-INTF-1`). ("Binding" is reserved for an
   event-matching rule, never a transport.)
 
 ## Outcomes
@@ -97,9 +98,8 @@ their own terms in a downstream deployment set.
   workflow engine (`INV-WORKFLOW-1`). (A deployment's user-facing **workflow** is a separate,
   downstream concept.)
 - **Metric catalog** — the set of metrics the core declares (name, kind, unit, labels) and exposes to
-  monitoring sinks — the neutral **shape**, including queue depth, **delivery-side** failure rate, and
-  unconsumed-expired (`INV-OBS-1`). **OTel** is the default emission transport for **metrics only**;
-  logs stay JSONL.
+  monitoring sinks — the neutral **shape**. `INV-OBS-1` obliges the core to declare it; `INTF-MON`, the
+  interface that carries it, states which metrics are in it.
 
 ## Principals (human or agent)
 
