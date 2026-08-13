@@ -1119,9 +1119,19 @@ func soleSimpleCommandLeaf(text string) (ParsedCommand, bool) {
 		return ParsedCommand{}, false
 	}
 	st := file.Stmts[0]
-	if st.Negated || st.Background || st.Coprocess || st.Disown || len(st.Redirs) > 0 {
+	if st.Negated || st.Background || st.Coprocess || st.Disown {
 		return ParsedCommand{}, false
 	}
+	// REDIRECTIONS are deliberately NOT rejected here. They are judged by the
+	// caller, on the LOWERED leaf's Redirections/HasHeredoc, which is where the
+	// outgoing implementation judged them too — and the distinction is load-bearing:
+	// `attachRedir` drops fd duplication and close (`2>&1`, `>&-`, `<&3`) because
+	// none names a path or creates a file, so a body like `git rev-parse HEAD 2>&1`
+	// records NO redirection and stays eligible. Rejecting on st.Redirs instead
+	// would be stricter than the outgoing behaviour for that very common idiom, and
+	// the corpus replay measured it: 5 rows moved Approve -> Abstain on `2>&1`
+	// alone. A body that redirects to a real PATH still records a Redirection and is
+	// still refused by the caller.
 	call, ok := st.Cmd.(*syntax.CallExpr)
 	if !ok || len(call.Assigns) > 0 || len(call.Args) == 0 {
 		return ParsedCommand{}, false
