@@ -95,6 +95,13 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		// subcommand — a known RCE class. Defer to Claude's prompt. Scoped to the
 		// pre-subcommand span so `git commit -c <commit>` (a different flag) and
 		// `git -C <path>` are NOT falsely abstained.
+		//
+		// SINCE pg2-arfw6 THIS IS NO LONGER EVERY `-c`: a pair in the CLOSED
+		// clearedConfigFlagPairs allowlist is cleared and falls through to classify,
+		// so `git -c core.fsmonitor=false diff` now reaches the same Approve the bare
+		// `git diff` gets. That is a RELAXATION and nothing else — see
+		// hasGitConfigInjection for the pair-not-key finding, the all-or-nothing rule,
+		// and why `--config-env` stays unconditional.
 		if hasGitConfigInjection(pc.Args) {
 			return r.refuse("git: -c/--config-env injects config; deferring to prompt")
 		}
@@ -150,7 +157,8 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		// `git -c diff.external=<prog> diff` was deferred while the env route was
 		// APPROVED: the same inconsistency pg2-a12rl closed, one level down. See
 		// gitProgramEnvVars for the per-variable evidence, for why the match is
-		// value-blind, and for the two variables deliberately declined.
+		// value-blind outside the editor family (pg2-6qh3p's carve-out), and for the
+		// variable that stays deliberately declined.
 		//
 		// IT IS A SEPARATE DEMOTION RATHER THAN A CLAUSE ADDED TO THE ONE ABOVE because
 		// the two screens rest on different measurements and different rulings; fusing
@@ -1255,10 +1263,252 @@ func isGitExecutable(exec string) bool {
 	return exec == "git" || filepath.Base(exec) == "git"
 }
 
-// hasGitConfigInjection reports whether a pre-subcommand -c or --config-env
-// flag is present. It scans only the option span before the git subcommand
-// (mirroring cmdparse.GitInvocation's flag-consuming walk) so that a -c appearing
-// AFTER the subcommand (e.g. `git commit -c <commit>`) is not matched.
+// configFlagValuePredicate answers, for ONE allowlisted `-c` key, whether the
+// VALUE the caller gave it is safe. It is the second half of clearedConfigFlagPairs'
+// (key -> value predicate) entry, and the half a key-only allowlist would omit.
+type configFlagValuePredicate func(value string) bool
+
+// clearedConfigFlagPairs is the CLOSED allowlist of pre-subcommand
+// `-c <key>[=<value>]` pairs hasGitConfigInjection will CLEAR — i.e. let past the
+// injection guard so the command reaches its ordinary verdict. Keys are stored
+// LOWERCASED, because that is the form the lookup normalizes to.
+//
+// THE CLOSEDNESS IS THE SECURITY CONTROL, NOT ANY DENYLIST (pg2-arfw6 spec S-1). A
+// key that is not a member is not cleared, whatever its value, so a git config key
+// that does not exist yet is excluded by construction. The lists of dangerous keys
+// in gatedConfigKeys' survey and in pg2-arfw6's S-8 are DOCUMENTATION of why the
+// membership is this short; they are not what does the excluding.
+//
+// EVERY ENTRY IS A PAIR, AND THAT IS THE FINDING THAT SHAPED THIS TABLE. A key-only
+// allowlist was proposed and REJECTED — see hasGitConfigInjection for the
+// `core.fsmonitor` measurement that killed it.
+//
+// PROVENANCE PER ENTRY, so a later widening is attributable. Each entry has its OWN
+// operator ruling and its OWN predicate; none is a widening of another, and a new key
+// needs a ruling and a row here rather than an appeal to an existing entry:
+//
+//	core.fsmonitor   pg2-arfw6, operator spec S-2 of 2026-07-28. Predicate: the value
+//	                 is a git BOOLEAN LITERAL. That bead's spec says its allowlist has
+//	                 exactly one entry, and this is it.
+//	core.editor      pg2-6qh3p, operator ruling on pg2-agprs of 2026-08-13 — the
+//	sequence.editor  INERT-VALUE EDITOR CARVE-OUT. Predicate: the value is one of two
+//	                 EXACT literal tokens. These two are NOT a widening of the
+//	                 `core.fsmonitor` entry and MUST NOT be read as one — they were
+//	                 added to close the GIT_SEQUENCE_EDITOR env-route bypass of an
+//	                 argv screen while removing the measured prompt cost of the inert
+//	                 `GIT_EDITOR=true` idiom. See isInertEditorValue for the ruling,
+//	                 the measurements, and the three constraints it imposes.
+//
+// THE PREDICATES ARE DELIBERATELY DIFFERENT SHAPES, AND MUST NOT BE SHARED.
+// `core.fsmonitor` accepts a CLASS of values (any git boolean literal, matched
+// case-insensitively) because git's own boolean parse of that key is case-insensitive
+// and no member of the class can name a program. The editor keys accept TWO EXACT
+// TOKENS, case-sensitively, because their ruling requires an exact-token allowance.
+// Reusing one predicate for the other key would silently re-rule one of them —
+// `isGitBooleanLiteral` on `core.editor` would clear `-c core.editor=1`, and
+// `isInertEditorValue` on `core.fsmonitor` would start prompting the boolean traffic
+// pg2-arfw6 exists to relieve. TestGit_ConfigFlagAllowlist_TableShape pins the pairing.
+//
+// VALUE-READING STOPS HERE. Everywhere else the git rule is deliberately value-blind
+// or key-blind (hasGitConfigEnvInjection is key-blind; hasGitProgramEnvVar is
+// value-blind for every variable OUTSIDE gitEditorEnvVars), for measured reasons those
+// functions record. This table plus its env twin is the one bounded exception, and it
+// stays bounded BECAUSE it is a closed enumeration of pairs rather than a policy about
+// values. TestGit_ConfigFlagAllowlist_TableShape pins the membership so that adding an
+// entry is a deliberate, reviewable act.
+var clearedConfigFlagPairs = map[string]configFlagValuePredicate{
+	"core.fsmonitor": isGitBooleanLiteral,
+	// The editor carve-out (pg2-6qh3p). These are the ARGV TWINS of GIT_EDITOR and
+	// GIT_SEQUENCE_EDITOR, and carving out only the env half would break the relation
+	// pg2-6c85x established — "the env spelling is never LESS restrictive than argv" —
+	// which its own tests assert. That is why both halves land in one change.
+	"core.editor":     isInertEditorValue,
+	"sequence.editor": isInertEditorValue,
+}
+
+// inertEditorValues is the EXACT-TOKEN allowance for the editor family: the only two
+// values for which an editor key or variable is not screened. It is a set of literal
+// tokens, never a pattern — see isInertEditorValue.
+var inertEditorValues = map[string]bool{
+	// git's own `true(1)`: succeeds, reads nothing, writes nothing.
+	"true": true,
+	// The shell's null command. git runs the editor THROUGH A SHELL, so `:` is the
+	// idiomatic no-op editor and is what this rule's own configenv_test.go already
+	// pins for the scripted rebase.
+	":": true,
+}
+
+// isInertEditorValue reports whether an editor value is one of the two INERT literals
+// the operator carved out. It is the predicate for `core.editor` / `sequence.editor` in
+// clearedConfigFlagPairs and for GIT_EDITOR / GIT_SEQUENCE_EDITOR in
+// hasGitProgramEnvVar, so the argv and env spellings cannot drift apart.
+//
+// THE RULING (operator, on pg2-agprs, 2026-08-13; implemented by pg2-6qh3p; also stored
+// as bd memory `ceta-editor-carveout-ruling`). Allow the EXACT literal values `true`
+// and `:`; screen every other value; apply it to the WHOLE editor family in BOTH
+// spellings — `GIT_EDITOR`, `GIT_SEQUENCE_EDITOR`, `git -c core.editor=`,
+// `git -c sequence.editor=`.
+//
+// # WHAT IT BUYS, BOTH HALVES MEASURED
+//
+//  1. IT CLOSES A REAL HOLE. `GIT_SEQUENCE_EDITOR` was MEASURED reaching an exec sink
+//     in pg2-6c85x — it ran a marker on `.git/rebase-merge/git-rebase-todo` on git
+//     2.54.0 — and was nevertheless DECLINED there, because this rule's own rebase arm
+//     REQUIRES the variable and a landed pg2-a12rl test pins its Approve. So its argv
+//     twin `git -c sequence.editor=<prog> rebase -i` was screened while the env
+//     spelling was APPROVED: an env-route bypass of an argv screen, the same class the
+//     pg2-a12rl / pg2-6c85x family exists to close. Reading the VALUE is what lets the
+//     variable be screened WITHOUT demoting the idiom the rebase arm mandates.
+//  2. IT REMOVES THE FRICTION pg2-6c85x INTRODUCED. 65 of that bead's 97
+//     newly-prompting rows were `GIT_EDITOR=true git rebase --continue/--skip`
+//     (~0.43/day). `true` is inert, so under the carve-out they stop prompting.
+//
+// # THE THREE CONSTRAINTS THE RULING IMPOSES, AND WHERE EACH IS DISCHARGED
+//
+//	(a) THE CARVE-OUT MUST APPLY TO THE ARGV SPELLINGS TOO. Discharged by the
+//	    `core.editor` / `sequence.editor` entries in clearedConfigFlagPairs. Carving out
+//	    only the env half would make env LESS restrictive than argv for the inert
+//	    values, breaking pg2-6c85x's relation and failing its tests. This is the
+//	    constraint most easily missed, so it is the one the tests state as a relation
+//	    over both spellings rather than as literal verdicts.
+//	(b) THE ALLOWANCE MUST BE EXACT-TOKEN — never a prefix, substring, or regex match.
+//	    Discharged by inertEditorValues being a map keyed on whole values. These sites
+//	    become VALUE-READING, a deliberate departure from the value-blind posture used
+//	    everywhere else in this file (gitProgramEnvVars records why value-blindness was
+//	    chosen there, and pg2-a12rl's key-blindness likewise), so the departure has to
+//	    be tight and auditable. A prefix match would clear `truex`, `true; evil` and
+//	    `:;evil`; a substring match would clear `/bin/true`.
+//	(c) A VALUE THAT IS NOT A LITERAL MUST REACH THE SCREENED VERDICT. Fail-closed.
+//	    Discharged twice over: such a value is not one of the two tokens anyway, and
+//	    hasGitProgramEnvVar additionally requires cmdparse's own
+//	    ExpansionNone classification, so `GIT_EDITOR=$X` and `GIT_EDITOR=$(echo true)`
+//	    cannot reach the carve-out even if a future edit widened the token set.
+//
+// # THE NEAR-MISSES, AND WHY EACH IS SCREENED RATHER THAN CLEARED
+//
+//	truex        a longer token is a different program name
+//	"true "      a trailing space makes it a different token; git splits on the shell's rules, not ours
+//	/bin/true    a PATH is a program the caller chose, even when today's binary is harmless
+//	:;evil       `;` ends the editor and starts a command
+//	TRUE         env VALUES are case-SENSITIVE (measured in pg2-6c85x); `TRUE` is not `true(1)`
+//	"true"       cmdparse keeps the assignment value RAW, quotes included, so the quoted
+//	             spelling is a different token and fails closed. That is the correct
+//	             direction for an exact-token allowance and it costs one prompt on a
+//	             spelling the measured traffic does not use.
+//
+// THE CARVE-OUT IS VALUE-ONLY AND CHANGES NO OTHER AXIS. It does not widen which
+// subcommands are approvable, does not touch the rebase arm's requirement that the
+// variable be PRESENT for an interactive rebase, and — because hasGitProgramEnvVar is a
+// demotion of an Approve, never a pre-classify short-circuit — it cannot weaken a
+// decisive verdict. `GIT_EDITOR=true git tag v1` is the same Reject it always was.
+//
+// ONE RESIDUAL ASYMMETRY IS LEFT VISIBLE RATHER THAN CLOSED. The rebase arm keys on the
+// ENV spelling (hasSequenceEditorEnvVar), so `git -c sequence.editor=: rebase -i main`
+// still abstains with "requires editor" while `GIT_SEQUENCE_EDITOR=: git rebase -i main`
+// approves. The `-c` IS cleared — that is this bead's job and it is done — and what
+// remains is a DIFFERENT gate, erring toward the prompt for the argv spelling. Teaching
+// the rebase arm to accept the argv twin would re-rule the rebase carve-out itself,
+// which is its own ruling and its own bead.
+func isInertEditorValue(value string) bool {
+	return inertEditorValues[value]
+}
+
+// isGitBooleanLiteral reports whether value is one of git's BOOLEAN LITERALS, tested
+// case-insensitively because git's own config boolean parse is.
+//
+// THE EMPTY VALUE IS DELIBERATELY NOT A MEMBER. `git -c core.fsmonitor= status` is
+// accepted by real git and reads as boolean FALSE (measured, git 2.54.0), so an
+// "is git boolean" predicate could arguably include it — pg2-arfw6's S-2 keeps the
+// predicate to EXPLICIT literals instead, so the allowlist never turns on an absence.
+// A value that is empty because a shell expansion produced nothing is
+// indistinguishable from one written empty, and that is exactly the case a value
+// predicate must not clear.
+func isGitBooleanLiteral(value string) bool {
+	switch strings.ToLower(value) {
+	case "true", "false", "1", "0", "yes", "no", "on", "off":
+		return true
+	}
+	return false
+}
+
+// configFlagPairCleared reports whether ONE pre-subcommand `-c` argument — the
+// `<key>[=<value>]` token git's own `-c` consumes — is cleared by
+// clearedConfigFlagPairs.
+//
+// A BARE `-c <key>` WITH NO `=` IS VALUE `true` (pg2-arfw6 S-4). That is git's own
+// reading, verified on git 2.54.0: `git -c core.fsmonitor status` exits 0, executes
+// nothing, and there is no program for the caller to name in it.
+//
+// THE KEY IS LOWERCASED AND MATCHED WHOLE. Git config section and variable names are
+// case-INSENSITIVE — measured on git 2.54.0, `git -c CORE.FSMONITOR=<script> status`
+// EXECUTED the script — so a case variant must resolve to the same entry or
+// `-c core.FSMonitor=false` would prompt for no reason (S-3). It is matched WHOLE
+// rather than through configKeyID, which drops a middle SUBSECTION: `core.x.fsmonitor`
+// is a different key to git (subsections are case-sensitive and `core` has none), and
+// collapsing it onto `core.fsmonitor` would clear a token the allowlist never named.
+// Anything that does not resolve to a member — a malformed token, an empty key, a
+// subsectioned spelling — is simply not cleared.
+func configFlagPairCleared(tok string) bool {
+	key, value := tok, "true"
+	if eq := strings.IndexByte(tok, '='); eq >= 0 {
+		key, value = tok[:eq], tok[eq+1:]
+	}
+	predicate, listed := clearedConfigFlagPairs[strings.ToLower(key)]
+	return listed && predicate(value)
+}
+
+// hasGitConfigInjection reports whether a pre-subcommand `-c` or `--config-env` flag
+// injects config this rule will not clear. It scans only the option span before the
+// git subcommand (mirroring cmdparse.GitInvocation's flag-consuming walk) so that a
+// `-c` appearing AFTER the subcommand (e.g. `git commit -c <commit>`) is not matched.
+//
+// IT IS NO LONGER AN UNCONDITIONAL `-c` ABSTAIN (pg2-arfw6, operator decision of
+// 2026-07-28). A `-c` whose pair is in clearedConfigFlagPairs is cleared and the
+// command goes on to its ordinary verdict; everything else abstains exactly as before.
+//
+// pg2-b3eow'S RULING IS SUPERSEDED, AND SAYING SO HERE IS THE POINT. That bead
+// (CLOSED) ruled `-c` "out of scope per RCE guard", which is why the guard was
+// unconditional for as long as it was. The 2026-07-28 operator decision on pg2-arfw6
+// replaces that ruling with the narrow pair allowlist below. The two are not left in
+// contradiction: pg2-b3eow's reasoning about the RCE class is intact and is why the
+// allowlist is CLOSED — what changed is only that a provably-inert pair may now clear.
+//
+// # WHY A KEY-ONLY ALLOWLIST IS UNSOUND — the finding that reshaped the design
+//
+// The first proposal (2026-07-25) named `core.fsmonitor` as a "provably-inert key".
+// IT IS NOT AN INERT KEY. `git help config`: "If set to true, enable the built-in file
+// system monitor daemon … Otherwise, this variable contains the pathname of the
+// 'fsmonitor' hook command." Confirmed empirically on git 2.54.0 in a throwaway repo:
+// `git -c core.fsmonitor=<script> status` EXECUTED the script, and so did
+// `git -c CORE.FSMONITOR=<script> status`. So for this key the entire safety question
+// lives in the VALUE, and an allowlist keyed on the name alone would have handed back
+// the RCE it was written to close. Hence pairs — see clearedConfigFlagPairs. A future
+// triage MUST NOT propose a key-only allowlist a third time.
+//
+// # THE FOUR PROPERTIES A READER SHOULD NOT HAVE TO RE-DERIVE
+//
+//  1. ALL-OR-NOTHING over repeated `-c` (S-6). `-c` may appear many times; EVERY
+//     occurrence must clear, and one that does not abstains the whole command. So
+//     `git -c core.fsmonitor=false -c core.pager=EVIL log` abstains.
+//  2. THE VERDICT STAYS ABSTAIN, NEVER Reject (S-6) — unchanged from before, via
+//     r.refuse at the call site.
+//  3. RELAXATION ONLY (S-7). Clearing a `-c` removes nothing but the early return in
+//     Evaluate, so the command reaches classify and gets the verdict it would have had
+//     without the flag: a mutating or destructive subcommand keeps its Ask/Abstain/
+//     Reject, and the `-C` chdirSafe demotion still applies afterward. No verdict is
+//     upgraded by this function.
+//  4. `--config-env` STAYS UNCONDITIONAL, in both spellings (S-5). Its value comes
+//     from the ENVIRONMENT (`--config-env=KEY=ENVVAR`), so there is no value in the
+//     command text for any predicate to evaluate. The same opacity reasoning keeps
+//     hasGitConfigEnvInjection key-blind.
+//
+// THE EXACT-TOKEN `-c` TEST IS GIT'S OWN PARSE, which is why no abbreviation or glued
+// spelling needs handling. Pre-subcommand options go through git's `handle_options()`,
+// not parse-options: measured on git 2.54.0, `git -ccore.pager=EVIL log` and
+// `git --config-en=core.pager=X log` each answered `unknown option: …` while the
+// separated `-c core.pager=EVIL` and full `--config-env=` spellings worked. This is
+// the measurement flagmatch_test.go's exactTokenExemptions entry for this function
+// records.
 //
 // IT SCANS ARGV ONLY. The ENV spelling of the same injection is
 // hasGitConfigEnvInjection — an env assignment never appears in pc.Args, cmdparse
@@ -1270,7 +1520,17 @@ func hasGitConfigInjection(args []string) bool {
 	for i < len(args) {
 		a := args[i]
 		if a == "-c" {
-			return true
+			// git's `-c` takes the NEXT token as `<name>=<value>`; there is no glued
+			// spelling (measured above). A trailing `-c` with nothing after it has no
+			// pair to inspect, so it fails closed.
+			if i+1 >= len(args) {
+				return true
+			}
+			if !configFlagPairCleared(args[i+1]) {
+				return true
+			}
+			i += 2
+			continue
 		}
 		if a == "--config-env" || strings.HasPrefix(a, "--config-env=") {
 			return true
@@ -1405,7 +1665,8 @@ func hasRedirectEnvVar(pc cmdparse.ParsedCommand) bool {
 //     out of scope for pg2-a12rl, which is scoped to the config-SOURCE variables, and
 //     are NOW SCREENED BY THEIR OWN SIBLING PREDICATE — see gitProgramEnvVars and
 //     hasGitProgramEnvVar (pg2-6c85x), which carries that family's own measurements,
-//     its value-blind ruling, and the two variables it declines.
+//     its value-blind ruling, the editor-family value carve-out pg2-6qh3p added to it,
+//     and the variable it still declines.
 //
 // WHY NOT hasRedirectEnvVar. That predicate is consulted per ARM, and only by the
 // arms that modify (`checkout`, `rebase`, `filter-branch`, `reset`, the
@@ -1449,7 +1710,7 @@ func hasGitConfigEnvInjection(pc cmdparse.ParsedCommand) bool {
 //	GIT_EDITOR            core.editor        YES — `git commit --amend` ran it on .git/COMMIT_EDITMSG
 //	GIT_ASKPASS           core.askPass       YES — `git credential fill` ran it as the "Username for …" prompt
 //	GIT_PAGER             core.pager         YES, ONLY WITH A TERMINAL ON STDOUT — see the pager note below
-//	GIT_SEQUENCE_EDITOR   sequence.editor    YES — `git rebase -i HEAD~1` ran it on .git/rebase-merge/git-rebase-todo — but DECLINED, see declinedGitProgramEnvVars
+//	GIT_SEQUENCE_EDITOR   sequence.editor    YES — `git rebase -i HEAD~1` ran it on .git/rebase-merge/git-rebase-todo — DECLINED by pg2-6c85x, NOW SCREENED by pg2-6qh3p under the inert-value carve-out
 //	GIT_PROXY_COMMAND     core.gitProxy      YES — `git ls-remote git://…` ran it as `<host> 9418` — but DECLINED, see declinedGitProgramEnvVars
 //
 // THE PAGER READING IS THE ONE THAT NEEDED A SECOND INSTRUMENT, recorded because the
@@ -1481,10 +1742,11 @@ func hasGitConfigEnvInjection(pc cmdparse.ParsedCommand) bool {
 // read is possible here in a way it was not there. It is still refused, for two reasons
 // that both cut the same way:
 //
-//  1. THE `-c` ROUTE IS VALUE-BLIND. `git -c core.pager=cat log` is screened, so sparing
-//     `GIT_PAGER=cat git log` would make the env spelling WEAKER than the argv one for
-//     the same benign value — this bead's own defect, re-created in the opposite
-//     direction, and it would break the relation tests that are its acceptance criteria.
+//  1. THE `-c` ROUTE IS VALUE-BLIND FOR THESE KEYS. `git -c core.pager=cat log` is
+//     screened, so sparing `GIT_PAGER=cat git log` would make the env spelling WEAKER
+//     than the argv one for the same benign value — this bead's own defect, re-created
+//     in the opposite direction, and it would break the relation tests that are its
+//     acceptance criteria.
 //  2. "BENIGN" IS NOT A WORD-LIST QUESTION. git runs the pager, the editor and the ssh
 //     command THROUGH A SHELL, and the diff/ssh values carry arguments in real use
 //     (`GIT_SSH_COMMAND="ssh -i /tmp/k"`, measured `GIT_EXTERNAL_DIFF='difft
@@ -1493,19 +1755,33 @@ func hasGitConfigEnvInjection(pc cmdparse.ParsedCommand) bool {
 //     not anticipate, for a verdict that is `{}` either way.
 //
 // So the screen keys on the NAME, exactly as `-c` keys on nothing at all. The cost is
-// over-approximation, all toward the prompt: `GIT_PAGER=cat`, `GIT_EDITOR=true` and
-// `GIT_EXTERNAL_DIFF=` (the idiom that DISARMS this workspace's configured differ) are
-// screened too. That is the same direction gatedConfigKeys' own over-approximations take.
+// over-approximation, all toward the prompt: `GIT_PAGER=cat` and `GIT_EXTERNAL_DIFF=`
+// (the idiom that DISARMS this workspace's configured differ) are screened too. That is
+// the same direction gatedConfigKeys' own over-approximations take.
 //
-// AND THAT COST IS AVOIDABLE, WHICH IS WHY IT IS ACCEPTABLE AT THIS VOLUME. Every
-// newly-prompting idiom in the 2026-08-13 replay has an ARGV equivalent that git itself
-// provides and that this screen does not touch — measured through the real binary, all
-// four still `allow`:
+// # THE ONE BOUNDED EXCEPTION: THE EDITOR FAMILY (pg2-6qh3p)
+//
+// gitEditorEnvVars — `GIT_EDITOR` and `GIT_SEQUENCE_EDITOR` — is VALUE-READING, by
+// operator ruling of 2026-08-13. It does NOT relax reason 1 above: the ruling carves the
+// same two inert values out of the ARGV spellings in the same change
+// (clearedConfigFlagPairs' `core.editor` / `sequence.editor` entries), so env and argv
+// still answer alike and pg2-6c85x's relation tests still hold. Nor does it relax reason
+// 2: the allowance is two EXACT literal tokens, not a judgement about which programs are
+// benign, so there is no shell-parsing and nothing to fail open on. Every OTHER variable
+// in gitProgramEnvVars stays value-blind, and `GIT_EDITOR=true` was the row that made
+// the exception worth having — see isInertEditorValue for the ruling and its three
+// constraints.
+//
+// AND THE REMAINING COST IS AVOIDABLE, WHICH IS WHY IT IS ACCEPTABLE AT THIS VOLUME.
+// Every newly-prompting idiom in the 2026-08-13 replay has an ARGV equivalent that git
+// itself provides and that this screen does not touch — measured through the real binary,
+// all four still `allow`:
 //
 //	GIT_EXTERNAL_DIFF= git diff        ->  git --no-ext-diff diff  /  git diff --numstat
 //	GIT_PAGER=cat git log              ->  git --no-pager log
-//	GIT_EDITOR=true git commit --amend ->  git commit --amend --no-edit
-//	GIT_EDITOR=true git rebase --cont… ->  git rebase --continue --no-edit
+//	GIT_EDITOR=/tmp/e git commit --am… ->  git commit --amend --no-edit
+//	GIT_SEQUENCE_EDITOR=<prog> rebase  ->  GIT_SEQUENCE_EDITOR=: with the todo edited by
+//	                                       a separate, separately-judged command
 //
 // The flags say the same thing without handing git a program, so they are not a bypass:
 // each SUPPRESSES a sink rather than naming one. A caller who hits a prompt has a
@@ -1543,29 +1819,55 @@ var gitProgramEnvVars = map[string]string{
 	// unlike it, this one is on the everyday https path. Adding `core.askPass` to
 	// gatedConfigKeys is a one-line follow-up under its own ruling.
 	"GIT_ASKPASS": "core.askPass",
+	// SCREENED SINCE pg2-6qh3p, having been DECLINED by pg2-6c85x. It was never declined
+	// for want of evidence — `git rebase -i HEAD~1` ran a marker on
+	// `.git/rebase-merge/git-rebase-todo` — but for a CONFLICT: this rule's own rebase arm
+	// REQUIRES the variable, so a value-BLIND screen would have demoted exactly the
+	// scripted-rebase idiom the rule mandates, and pg2-a12rl's landed configenv_test.go
+	// pins `GIT_SEQUENCE_EDITOR=: git rebase -i main` at Approve. Measured over the 152-day
+	// ask log on 2026-08-13, a blind screen would have started prompting 17 replayable
+	// `allow` rows out of 71 carrying the assignment. The 2026-08-13 operator ruling
+	// resolves the conflict by reading the VALUE instead: the two INERT literals clear, so
+	// the mandated idiom keeps its Approve, while a real program is screened like every
+	// other exec sink. That is why this entry MOVED rather than the rebase arm changing.
+	// See isInertEditorValue and gitEditorEnvVars.
+	"GIT_SEQUENCE_EDITOR": "sequence.editor",
+}
+
+// gitEditorEnvVars is the subset of gitProgramEnvVars whose VALUE is read rather than
+// ignored — the editor family, carved out by the operator ruling of 2026-08-13
+// (pg2-6qh3p). Membership means "screened UNLESS the value is one of the two inert
+// literals"; absence means "screened whatever the value says", which is the posture of
+// every other entry in that table and of pg2-a12rl's sibling screen.
+//
+// IT IS A SEPARATE SET RATHER THAN A SENTINEL IN gitProgramEnvVars because that table's
+// VALUES are load-bearing: each is the `git config` key the variable is the env spelling
+// of, and TestGit_ProgramEnvVar_TwinIsAConfigSinkInTheRealTable resolves every one of
+// them through configKeyID against gatedConfigKeys. Overloading it would break the check
+// that keeps the screen's justification honest.
+//
+// THE ARGV TWINS ARE CARVED OUT IN THE SAME CHANGE, which is constraint (a) of the
+// ruling: `core.editor` and `sequence.editor` in clearedConfigFlagPairs use the SAME
+// predicate. Carving out only this half would make the env spelling LESS restrictive than
+// argv — the relation pg2-6c85x established and its tests assert.
+var gitEditorEnvVars = map[string]bool{
+	"GIT_EDITOR":          true,
+	"GIT_SEQUENCE_EDITOR": true,
 }
 
 // declinedGitProgramEnvVars records the variables MEASURED to reach an exec sink that are
-// nevertheless NOT screened, with the reason for each. Neither is declined for want of
-// evidence — both ran the marker (see gitProgramEnvVars' table) — and in both cases the
+// nevertheless NOT screened, with the reason for each. Nothing here is declined for want
+// of evidence — each ran the marker (see gitProgramEnvVars' table) — and in each case the
 // reason is a ruling that already exists elsewhere and would be CONTRADICTED by screening
 // the env half alone. TestGit_ProgramEnvVar_DeclinedVariablesStayUnscreened pins the
 // consequence, so removing a variable from here is a deliberate act.
+//
+// `GIT_SEQUENCE_EDITOR` WAS THE OTHER MEMBER AND HAS LEFT (pg2-6qh3p, operator ruling of
+// 2026-08-13). Its conflicting ruling could be honoured WITHOUT leaving the sink open once
+// the VALUE was read — see the entry that now carries it in gitProgramEnvVars.
+// `GIT_PROXY_COMMAND`'s cannot: its conflict is about which KEYS a future ruling should
+// cover, not about which values are inert, so no value predicate resolves it.
 var declinedGitProgramEnvVars = map[string]string{
-	// This rule's OWN rebase arm requires the variable: classify returns not-applicable
-	// for an interactive rebase that does NOT carry it, because an interactive rebase
-	// without an automated editor hangs on a prompt no agent can answer. So the variable
-	// is this rule's sanctioned way to make `rebase -i` non-interactive, and screening it
-	// would demote precisely the invocations the rule demands it on. Measured over the
-	// 152-day ask log on 2026-08-13: 71 rows carry a `GIT_SEQUENCE_EDITOR=` assignment, 17
-	// of which replay as `allow` today and would therefore start prompting (a further 32
-	// are stale-cwd and could not be replayed at all). pg2-a12rl's landed
-	// configenv_test.go pins `GIT_SEQUENCE_EDITOR=: git rebase -i main` at Approve, and
-	// this bead may not modify that file. The residual asymmetry is real and is left
-	// visible: `git -c sequence.editor=X rebase -i` IS screened by hasGitConfigInjection
-	// while the env twin is not. Reconciling the two means re-ruling the rebase carve-out
-	// itself, which is a separate ruling and a separate bead.
-	"GIT_SEQUENCE_EDITOR": "the rebase arm REQUIRES it; screening it would demote the scripted-rebase idiom the rule itself mandates",
 	// Its twin `core.gitProxy` sits in gatedConfigKeys' "SURVEYED AND DELIBERATELY LEFT
 	// APPROVED" list — a genuine sink, but on an alternate transport this workflow does
 	// not use — and that entry instructs a later reader to add the family "under one
@@ -1580,13 +1882,32 @@ var declinedGitProgramEnvVars = map[string]string{
 
 // hasGitProgramEnvVar reports whether this leaf's own env-assignment prefix carries a
 // variable through which git takes the PROGRAM IT EXECUTES from the caller. See
-// gitProgramEnvVars for the measured variable-by-variable evidence, for why the match is
-// value-blind, exact and case-sensitive, and for the two variables deliberately declined.
+// gitProgramEnvVars for the measured variable-by-variable evidence, for why the NAME match
+// is exact and case-sensitive, for why it is value-blind everywhere except the editor
+// family, and for the variable deliberately declined.
+//
+// THE EDITOR CARVE-OUT IS THE ONLY VALUE READ (pg2-6qh3p), and it is guarded twice so it
+// FAILS CLOSED, which is constraint (c) of the ruling:
+//
+//  1. cmdparse's own ExpansionNone classification — the value must be STATIC. `$X`,
+//     `$(echo true)`, `${EDITOR:-vi}` and `$((…))` are all excluded before the token is
+//     ever compared, so no future widening of the token set can admit a dynamic value.
+//  2. isInertEditorValue — an EXACT-TOKEN match against two literals, never a prefix or
+//     substring.
+//
+// Neither guard alone is enough on its own terms: check 1 without check 2 would clear any
+// static program name, and check 2 without check 1 would leave the fail-closed property
+// resting on the token set never growing. Together, a value reaches the carve-out only by
+// being statically, exactly one of two inert literals.
 func hasGitProgramEnvVar(pc cmdparse.ParsedCommand) bool {
 	for _, ev := range pc.EnvVars {
-		if _, screened := gitProgramEnvVars[ev.Name]; screened {
-			return true
+		if _, screened := gitProgramEnvVars[ev.Name]; !screened {
+			continue
 		}
+		if gitEditorEnvVars[ev.Name] && ev.Expansion == cmdparse.ExpansionNone && isInertEditorValue(ev.Value) {
+			continue
+		}
+		return true
 	}
 	return false
 }

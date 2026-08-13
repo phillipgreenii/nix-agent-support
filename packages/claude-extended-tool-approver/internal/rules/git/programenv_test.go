@@ -151,12 +151,34 @@ func TestGit_ProgramEnvVar_IsNeverLessRestrictiveThanDashC(t *testing.T) {
 // whichever it did not anticipate. The name-keyed screen answers all of them by
 // construction, and this test is what proves the construction is load-bearing.
 //
-// THE BENIGN-LOOKING ROWS ARE THE POINT OF THE NAME-BLIND RULING. `GIT_PAGER=cat` and
-// `GIT_EDITOR=true` really are harmless, and they are screened anyway — because the `-c`
-// route is value-blind too, so sparing them would make the env spelling WEAKER than
+// THE BENIGN-LOOKING ROWS ARE THE POINT OF THE NAME-BLIND RULING. `GIT_PAGER=cat` really
+// is harmless, and it is screened anyway — because the `-c` route is value-blind for
+// `core.pager` too, so sparing it would make the env spelling WEAKER than
 // `git -c core.pager=cat`, re-creating this bead's own asymmetry in the opposite
-// direction. git also runs the pager and the editor THROUGH A SHELL, so "benign" would
-// have to mean shell-parsing the value, not comparing it to a word list.
+// direction. git also runs the pager THROUGH A SHELL, so "benign" would have to mean
+// shell-parsing the value, not comparing it to a word list.
+//
+// TWO ROWS LEFT THIS TEST, AND THE GUARANTEE THEY PROTECTED IS UNCHANGED (pg2-6qh3p,
+// operator ruling on pg2-agprs of 2026-08-13). `GIT_EDITOR=true git commit --amend` and
+// `GIT_EDITOR=: git commit --amend` are now APPROVED, under the INERT-VALUE CARVE-OUT
+// that same ruling authorized — 65 of this bead's 97 newly-prompting rows were exactly
+// this idiom. They were removed rather than re-pointed because the ruling reverses their
+// expectation, not because the property they asserted was dropped:
+//
+//   - The relation they served — the env spelling is never LESS restrictive than argv —
+//     is intact and is still asserted by TestGit_ProgramEnvVar_MatchesTheDashCRoute and
+//     TestGit_ProgramEnvVar_IsNeverLessRestrictiveThanDashC BELOW, UNMODIFIED. It holds
+//     because the ruling carved out the ARGV spellings in the same change
+//     (clearedConfigFlagPairs' `core.editor` / `sequence.editor` entries), so both
+//     spellings clear for these two values and both screen for every other.
+//   - The fail-closed property for the editor family is asserted, in more detail than
+//     these two rows ever did, in editorcarveout_test.go: near-miss tokens (`truex`,
+//     `true `, `/bin/true`, `:;evil`, `TRUE`, the QUOTED `"true"`) and non-literal values
+//     (`$X`, `$(echo true)`) all still reach the screened verdict.
+//
+// The `${EDITOR:-vi}` row STAYS HERE and is the one that keeps the two tests honest: it
+// is an editor variable whose value is not a literal, so it must be screened by this
+// test's own claim as well as by the carve-out's fail-closed guard.
 func TestGit_ProgramEnvVar_FailsClosed(t *testing.T) {
 	cmds := []string{
 		// The value is empty, dynamic, or not statically visible.
@@ -169,8 +191,6 @@ func TestGit_ProgramEnvVar_FailsClosed(t *testing.T) {
 		// Values that LOOK benign — screened anyway, deliberately.
 		"GIT_PAGER=cat git log",
 		"GIT_PAGER=cat git diff",
-		"GIT_EDITOR=true git commit --amend",
-		"GIT_EDITOR=: git commit --amend",
 		// Position and wrapper forms: the assignment reaches pc.EnvVars either way.
 		"env GIT_EXTERNAL_DIFF=/tmp/evil git diff",
 		"GIT_DIR=/other GIT_PAGER=/tmp/evil git log",
@@ -280,12 +300,21 @@ func TestGit_ProgramEnvVar_DeclinedVariablesStayUnscreened(t *testing.T) {
 			t.Errorf("%s: appears in BOTH gitProgramEnvVars and declinedGitProgramEnvVars", name)
 		}
 	}
-	// The two declinations' own load-bearing consequences, spelled out.
+	// The declinations' own load-bearing consequences, spelled out.
 	//
 	// GIT_SEQUENCE_EDITOR: classify's rebase arm REQUIRES this variable to be present
-	// before it will approve an interactive rebase, so screening it would demote exactly
-	// the invocations the rule demands it on. pg2-a12rl's landed configenv_test.go pins
-	// this Approve, and this bead must not modify that file.
+	// before it will approve an interactive rebase, so a value-BLIND screen would demote
+	// exactly the invocations the rule demands it on. pg2-a12rl's landed configenv_test.go
+	// pins this Approve, and this bead must not modify that file.
+	//
+	// THE VARIABLE IS NO LONGER DECLINED — IT IS SCREENED WITH A VALUE CARVE-OUT
+	// (pg2-6qh3p, operator ruling on pg2-agprs of 2026-08-13), so it has moved out of
+	// declinedGitProgramEnvVars and into gitProgramEnvVars. THIS ASSERTION IS KEPT
+	// UNCHANGED AND IS NOW LOAD-BEARING FOR BOTH RULINGS AT ONCE: `:` is one of the two
+	// INERT literals the carve-out allows, so the rebase arm's mandated idiom keeps the
+	// Approve pg2-a12rl pinned, while `GIT_SEQUENCE_EDITOR=<a real program>` is screened
+	// like every other exec sink. If the carve-out is ever narrowed away, this row is
+	// where it shows up.
 	if got := evalCmd(t, "GIT_SEQUENCE_EDITOR=: git rebase -i main"); got.Decision != hookio.Approve {
 		t.Errorf("`GIT_SEQUENCE_EDITOR=: git rebase -i main`: got %s (%s), want APPROVE — this rule's own rebase carve-out requires the variable, and configenv_test.go pins the verdict", got.Decision, got.Reason)
 	}

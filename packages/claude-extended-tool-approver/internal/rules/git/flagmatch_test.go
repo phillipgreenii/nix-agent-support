@@ -85,15 +85,35 @@ func TestGit_ResetHardAbbrev_NeverApprovedNorCalledSoft(t *testing.T) {
 // spelling is subject to the editor requirement, and that supplying the automated
 // editor still makes each of them approvable — the requirement must not become a
 // blanket refusal.
+//
+// THE `withEditor` VALUE IS AN INERT LITERAL SINCE pg2-6qh3p (operator ruling on
+// pg2-agprs, 2026-08-13). It was `GIT_SEQUENCE_EDITOR="sed -i 's/^pick /fixup /'"`, and
+// that spelling now abstains: GIT_SEQUENCE_EDITOR was MEASURED running its value on
+// `.git/rebase-merge/git-rebase-todo` (pg2-6c85x) and is screened for every value except
+// the two inert literals the ruling carved out. The CLAIM this test makes is untouched —
+// each abbreviation is still subject to the requirement, and each is still approvable
+// once an automated editor is supplied — because `:` satisfies the requirement exactly as
+// the `sed` value did. The third assertion is added so the substitution cannot hide a
+// regression: with a real program the abbreviation must still be RECOGNISED as
+// interactive, and the non-approval must come from the program screen rather than from
+// the editor requirement.
 func TestGit_RebaseInteractiveAbbrev_EditorRequired(t *testing.T) {
 	for _, flag := range longFlagSpellings("interactive") {
 		bare := "git rebase " + flag + " HEAD~1"
 		if got := evalCmd(t, bare); got.Decision != hookio.NoOpinion {
 			t.Errorf("cmd %q: got %s (%s), want abstain (interactive rebase requires an editor)", bare, got.Decision, got.Reason)
 		}
-		withEditor := `GIT_SEQUENCE_EDITOR="sed -i 's/^pick /fixup /'" git rebase ` + flag + " HEAD~1"
+		withEditor := "GIT_SEQUENCE_EDITOR=: git rebase " + flag + " HEAD~1"
 		if got := evalCmd(t, withEditor); got.Decision != hookio.Approve {
 			t.Errorf("cmd %q: got %s (%s), want approve (the editor requirement is satisfied)", withEditor, got.Decision, got.Reason)
+		}
+		withProgramEditor := `GIT_SEQUENCE_EDITOR="sed -i 's/^pick /fixup /'" git rebase ` + flag + " HEAD~1"
+		got := evalCmd(t, withProgramEditor)
+		if got.Decision != hookio.NoOpinion {
+			t.Errorf("cmd %q: got %s (%s), want abstain — only the two INERT editor literals are carved out (pg2-6qh3p)", withProgramEditor, got.Decision, got.Reason)
+		}
+		if strings.Contains(got.Reason, "requires editor") {
+			t.Errorf("cmd %q: reason %q says the editor requirement is unmet, but an editor WAS supplied — the non-approval must come from the program-naming env screen", withProgramEditor, got.Reason)
 		}
 	}
 }

@@ -2178,8 +2178,35 @@ func TestIntegration_UnparseableSubstitutionNeverApproves(t *testing.T) {
 		if got := decide(`echo "the agent's note"`); got.Decision != hookio.Approve {
 			t.Errorf("balanced quotes: %v (%s), want approve — the floor must not fire on parseable text", got.Decision, got.Reason)
 		}
-		if got := decide(`echo "$(jq -r 'select(.a)' f.json)"`); got.Decision == hookio.Approve {
-			t.Errorf("jq filter in a substitution = approve (%s); the static-allowlist floor still applies", got.Reason)
+
+		// STATED AS A RELATION, not a verdict, and that is a deliberate change from the
+		// original row (which asserted this command != Approve).
+		//
+		// This subtest's SUBJECT is quote handling — pg2-wguam's apostrophe desync — and
+		// its contract is "parseable text keeps its pre-fix verdict". The jq row's
+		// `abstain` was never a statement about jq; it was the incidental consequence of
+		// jq's absence from cmdparse's static safe-substitution allowlist. pg2-xl79d added
+		// jq to that allowlist (operator-authorized, ask-relief batch 2026-08-13) on the
+		// measured ground that there is no risk model under which capturing `cat "$f"` is
+		// safe and capturing `jq -r .x "$f"` is not, so the row's verdict moved for a
+		// reason that has nothing to do with quoting.
+		//
+		// Pinning the jq spelling AGAINST the cat spelling keeps the anti-over-blocking
+		// guarantee this subtest exists for while surviving any future retuning of the
+		// allowlist in either direction: whatever a plain captured read of a literal path
+		// is worth, the single-quoted-filter spelling of it must be worth the same. If
+		// they ever diverge, the quote handling regressed — which is exactly what this
+		// test is here to catch.
+		//
+		// The floor itself is NOT weakened by this: all ten unparseable cases above still
+		// assert != Approve, and the adversarial sibling
+		// `echo "$(jq …)" ; rm -rf .git/objects` still denies.
+		jqFilter := decide(`echo "$(jq -r 'select(.a)' f.json)"`)
+		plainRead := decide(`echo "$(cat f.json)"`)
+		if jqFilter.Decision != plainRead.Decision {
+			t.Errorf("quoted jq filter in a substitution = %v (%s: %s), but the plain captured read beside it = %v (%s: %s); the two spellings must agree — a divergence means the quote handling regressed, not that the allowlist changed",
+				jqFilter.Decision, jqFilter.Module, jqFilter.Reason,
+				plainRead.Decision, plainRead.Module, plainRead.Reason)
 		}
 	})
 }
@@ -3059,8 +3086,17 @@ func TestIntegration_GitProgramEnvVar_EmitsEmptyObject(t *testing.T) {
 		{"the askpass sink on a fetch", "GIT_ASKPASS=/tmp/evil git fetch origin"},
 		// Value-blind on purpose: these really are harmless values, and they are screened
 		// because `git -c core.pager=cat log` is screened too. See gitProgramEnvVars.
+		//
+		// THE EDITOR FAMILY IS THE ONE EXCEPTION SINCE pg2-6qh3p (operator ruling on
+		// pg2-agprs, 2026-08-13). `GIT_EDITOR=true git commit --amend` was a row HERE and
+		// has moved to the allow table below: the ruling carves out the two INERT literals
+		// `true` and `:` for GIT_EDITOR / GIT_SEQUENCE_EDITOR and their argv twins, because
+		// 65 of this bead's 97 newly-prompting rows were that idiom. Value-blindness is
+		// unchanged for every other variable, which is what the pager row above still
+		// pins, and the editor family with a REAL program is still screened — see the
+		// GIT_EDITOR=/tmp/evil row above and, for GIT_SEQUENCE_EDITOR, the row that
+		// pg2-6qh3p added to the allow table's counterpart in the git rule's own suite.
 		{"a benign-looking pager value", "GIT_PAGER=cat git log"},
-		{"a benign-looking editor value", "GIT_EDITOR=true git commit --amend"},
 		{"the differ-disarming idiom", "GIT_EXTERNAL_DIFF= git diff"},
 		{"a value carrying arguments", `GIT_SSH_COMMAND="ssh -i /tmp/k" git fetch origin`},
 		{"the env(1) wrapper form", "env GIT_EXTERNAL_DIFF=/tmp/evil git diff"},
@@ -3084,13 +3120,26 @@ func TestIntegration_GitProgramEnvVar_EmitsEmptyObject(t *testing.T) {
 
 	// NOT WIDENED. Lowercase spellings git's own getenv does not read (measured
 	// 2026-08-13: they did NOT run the marker), names that merely extend a screened one,
-	// a variable that names no program, and the two DECLINED variables whose reasons are
-	// recorded in declinedGitProgramEnvVars — all keep their approval.
+	// a variable that names no program, the DECLINED variable whose reason is recorded in
+	// declinedGitProgramEnvVars, and — since pg2-6qh3p — the INERT-VALUE EDITOR CARVE-OUT
+	// — all keep their approval.
+	//
+	// THE CARVE-OUT ROWS ARE CHAIN-LEVEL PROOF THAT IT REALLY REACHES `allow`, which is
+	// the half a rule-level Decision assertion cannot show: the git rule stops DEMOTING
+	// these leaves, so the question becomes whether the chain then approves them, and only
+	// the emitted output answers it. `GIT_EDITOR=true git commit --amend` moved here from
+	// the `{}` table above under the operator ruling of 2026-08-13; `GIT_SEQUENCE_EDITOR=:`
+	// was already here as a DECLINED variable and stays for a different reason — it is now
+	// SCREENED, and clears because `:` is one of the two inert literals.
 	for _, tt := range []struct{ name, command string }{
 		{"lowercase is not git's variable", "git_external_diff=/tmp/evil git diff"},
 		{"a longer name is a different variable", "GIT_PAGERX=/tmp/evil git log"},
 		{"selects an ssh dialect, names no program", "GIT_SSH_VARIANT=ssh git fetch origin"},
-		{"declined: the rule's own rebase idiom", "GIT_SEQUENCE_EDITOR=: git rebase -i main"},
+		{"carved out: the rule's own rebase idiom", "GIT_SEQUENCE_EDITOR=: git rebase -i main"},
+		{"carved out: the inert editor idiom", "GIT_EDITOR=true git commit --amend"},
+		{"carved out: the inert editor idiom, rebase continuation", "GIT_EDITOR=true git rebase --continue"},
+		{"carved out: the null-command editor", "GIT_EDITOR=: git rebase --skip"},
+		{"carved out: the argv twin", "git -c core.editor=true commit --amend"},
 		{"declined: the alternate-transport family", "GIT_PROXY_COMMAND=/tmp/evil git fetch origin"},
 		{"an unrelated assignment", "FOO=bar git status"},
 	} {

@@ -2,6 +2,7 @@ package git
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
@@ -365,20 +366,58 @@ func TestGit_RebaseInteractive_Abstain(t *testing.T) {
 	}
 }
 
+// TestGit_RebaseInteractiveWithSequenceEditor_Approve pins the rebase arm's carve-out:
+// an interactive rebase that supplies an automated sequence editor is approvable, so the
+// editor REQUIREMENT never becomes a blanket refusal of `rebase -i`.
+//
+// THE EDITOR VALUE IS NOW AN INERT LITERAL, AND THE `sed` SPELLINGS MOVED TO THE
+// COMPANION ASSERTION BELOW (pg2-6qh3p, operator ruling on pg2-agprs of 2026-08-13).
+// GIT_SEQUENCE_EDITOR was MEASURED running a marker on
+// `.git/rebase-merge/git-rebase-todo` (pg2-6c85x), and that ruling screens it for any
+// value that is not one of two inert literals — so `GIT_SEQUENCE_EDITOR="sed …"` now
+// abstains via the program-naming env screen.
+//
+// THE GUARANTEE THIS TEST PROTECTED IS UNCHANGED, AND IS NOW ASSERTED IN TWO HALVES,
+// which is why the rows were re-pointed rather than deleted:
+//
+//  1. Supplying an automated editor still lifts the editor requirement — the same claim
+//     as before, now with the value the ruling sanctions.
+//  2. The `sed` spelling's non-approval comes from the PROGRAM SCREEN and not from the
+//     editor requirement. That distinction is the whole content of the guarantee: a
+//     regression in which `rebase -i` refused for want of an editor DESPITE one being
+//     supplied would be invisible if we only asserted "not Approve".
 func TestGit_RebaseInteractiveWithSequenceEditor_Approve(t *testing.T) {
 	r := New(nil)
-	approve := []string{
-		`GIT_SEQUENCE_EDITOR="sed -i.bak 's/^pick /reword /'" git rebase -i HEAD~3`,
-		`GIT_SEQUENCE_EDITOR="sed -i 's/^pick /fixup /'" git rebase --interactive ae21327~1`,
-	}
-	for _, cmd := range approve {
-		input := &hookio.HookInput{
+	verdictOf := func(cmd string) hookio.RuleResult {
+		return hookio.Verdict(r.Evaluate(&hookio.HookInput{
 			ToolName:  "Bash",
 			ToolInput: mustJSON(map[string]string{"command": cmd}),
-		}
-		got := hookio.Verdict(r.Evaluate(input))
+		}))
+	}
+	approve := []string{
+		"GIT_SEQUENCE_EDITOR=: git rebase -i HEAD~3",
+		"GIT_SEQUENCE_EDITOR=true git rebase --interactive ae21327~1",
+	}
+	for _, cmd := range approve {
+		got := verdictOf(cmd)
 		if got.Decision != hookio.Approve {
-			t.Errorf("cmd %q: got %s, want approve (automated interactive rebase)", cmd, got.Decision)
+			t.Errorf("cmd %q: got %s (%s), want approve (automated interactive rebase)", cmd, got.Decision, got.Reason)
+		}
+	}
+	// The sequence editor that names a REAL PROGRAM: not approved, and specifically not
+	// for want of an editor. The bare `git rebase -i` reason names the editor
+	// requirement; these must not, or the requirement has silently stopped being
+	// satisfiable.
+	for _, cmd := range []string{
+		`GIT_SEQUENCE_EDITOR="sed -i.bak 's/^pick /reword /'" git rebase -i HEAD~3`,
+		`GIT_SEQUENCE_EDITOR="sed -i 's/^pick /fixup /'" git rebase --interactive ae21327~1`,
+	} {
+		got := verdictOf(cmd)
+		if got.Decision != hookio.NoOpinion {
+			t.Errorf("cmd %q: got %s (%s), want abstain — GIT_SEQUENCE_EDITOR was MEASURED running the value on .git/rebase-merge/git-rebase-todo, and only the two INERT literals are carved out (pg2-6qh3p)", cmd, got.Decision, got.Reason)
+		}
+		if strings.Contains(got.Reason, "requires editor") {
+			t.Errorf("cmd %q: reason %q says the editor requirement is unmet, but an editor WAS supplied — the non-approval must come from the program-naming env screen, not from the rebase arm", cmd, got.Reason)
 		}
 	}
 }
