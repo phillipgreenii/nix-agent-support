@@ -154,6 +154,15 @@ func RuleChain(eng *engine.Engine, pe *patheval.PathEvaluator, cfg *configrules.
 		killshell.New(shells),
 		pathsafety.New(pe),
 		mcp.New(),
+		// primary-commit MUST precede the generic git rule (first-match-wins): git
+		// approves a plain `git commit`, so primary-commit has to get its verdict in
+		// first. That ordering is also why its UNRESOLVED-DIRECTORY branch is a
+		// fail-closed Ask (Reject in an auto-approving mode) rather than the fail-open
+		// not-applicable the rest of the rule uses — ErrNotApplicable there would let
+		// `git -C $WT commit`, whose target repository and branch are unknowable from
+		// the command text, fall through to git and be APPROVED. This is the same
+		// "identity check the rule could not complete" carve-out ADR 0043's error
+		// policy names for killshell (pg2-h2npt).
 		primarycommit.New(primaryResolver),
 		// primary-push mirrors primary-commit for `git push` advancing the canonical
 		// primary. It MUST precede the generic git rule (first-match-wins): git treats a

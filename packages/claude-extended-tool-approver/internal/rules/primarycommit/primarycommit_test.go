@@ -3,6 +3,7 @@ package primarycommit
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
@@ -87,6 +88,38 @@ func TestPrimaryCommitRule(t *testing.T) {
 		// shell alias (`!…`) body re-parsed and its git commands re-checked.
 		{"bypass: shell alias committing on primary", "git ci", "Bash", "bypassPermissions", &stubResolver{canonical: true, primary: "main", cur: "main", aliases: map[string]string{"ci": "!git commit -am x"}}, hookio.Reject},
 		{"bypass: shell alias not a commit (echo)", "git ci", "Bash", "bypassPermissions", &stubResolver{canonical: true, primary: "main", cur: "main", aliases: map[string]string{"ci": "!echo hi"}}, hookio.NoOpinion},
+
+		// --- pg2-h2npt: an UNRESOLVED target directory is decisive in EVERY mode ---
+		// The stub is canonMain(), i.e. it would answer "canonical, on primary" for any
+		// directory it is asked about — so a case that reached the resolver would look
+		// exactly like the old false deny. These assert the resolver is never consulted.
+		//
+		// Auto-approving modes keep a Reject (an Ask is silently accepted there, and the
+		// old behaviour was already a Reject — this change must not be more permissive).
+		{"bypass: git -C $VAR commit (unresolved)", "git -C $WT commit -m x", "Bash", "bypassPermissions", canonMain(), hookio.Reject},
+		{"auto: git -C $VAR commit (unresolved)", "git -C $WT commit -m x", "Bash", "auto", canonMain(), hookio.Reject},
+		{"dontAsk: git -C ${VAR} commit (unresolved)", "git -C ${WT} commit -m x", "Bash", "dontAsk", canonMain(), hookio.Reject},
+		// Interactive modes get Ask, NOT the fail-open not-applicable: the generic git
+		// rule behind this one approves a plain `git commit`, so not-applicable would
+		// let an unresolvable target reach Approve.
+		{"default: git -C $VAR commit asks (cannot reach approve)", "git -C $WT commit -m x", "Bash", "default", canonMain(), hookio.Ask},
+		{"plan: git -C $VAR commit asks", "git -C $WT commit -m x", "Bash", "plan", canonMain(), hookio.Ask},
+		{"empty mode: git -C $VAR commit asks", "git -C $WT commit -m x", "Bash", "", canonMain(), hookio.Ask},
+		// Every expansion that can reach a path, not just `$`.
+		{"default: git -C $(pwd) commit asks", "git -C $(pwd) commit", "Bash", "default", canonMain(), hookio.Ask},
+		{"default: git -C backtick commit asks", "git -C `pwd` commit", "Bash", "default", canonMain(), hookio.Ask},
+		{"default: git -C glob commit asks", "git -C /repo/.worktrees/* commit", "Bash", "default", canonMain(), hookio.Ask},
+		{"default: git -C tilde commit asks", "git -C ~/repo commit", "Bash", "default", canonMain(), hookio.Ask},
+		// The check is SCOPED to a commit: an unresolved `-C` on any other subcommand is
+		// none of this rule's business and must stay not-applicable.
+		{"bypass: git -C $VAR status untouched", "git -C $WT status", "Bash", "bypassPermissions", canonMain(), hookio.NoOpinion},
+		{"bypass: git -C $VAR commit-tree untouched", "git -C $WT commit-tree abc", "Bash", "bypassPermissions", canonMain(), hookio.NoOpinion},
+		// An unresolved dir reached through an ALIAS is still caught.
+		{"default: alias to commit with unresolved -C asks", "git -C $WT ci", "Bash", "default", &stubResolver{canonical: true, primary: "main", cur: "main", aliases: map[string]string{"ci": "commit -am x"}}, hookio.Ask},
+		{"default: shell alias to commit with unresolved -C asks", "git -C $WT ci", "Bash", "default", &stubResolver{canonical: true, primary: "main", cur: "main", aliases: map[string]string{"ci": "!git commit -am x"}}, hookio.Ask},
+		// A LITERAL relative `-C` is resolved, not unresolved: it joins onto the cwd
+		// deterministically, so it keeps its pre-change verdict.
+		{"bypass: literal relative -C still resolves", "git -C sub commit", "Bash", "bypassPermissions", canonMain(), hookio.Reject},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -116,6 +149,145 @@ func TestPrimaryCommit_DashC_EffectiveDir(t *testing.T) {
 				t.Errorf("effective dir = %q, want %q", s.gotDir, c.wantDir)
 			}
 		})
+	}
+}
+
+// TestPrimaryCommit_UnresolvedDirNeverApproves is the pg2-h2npt FAIL-CLOSED guard. It
+// is deliberately phrased as "never Approve" rather than as an expected decision per
+// mode: the point is not which non-approving verdict comes out but that NO permission
+// mode, and no spelling of an unresolvable directory, can produce one that a later rule
+// (or auto-approve mode on an empty verdict) turns into an approval. A verdict of
+// Approve OR NoOpinion fails it — NoOpinion emits `{}`, which an auto-approving session
+// accepts, so it is an approval by another route.
+func TestPrimaryCommit_UnresolvedDirNeverApproves(t *testing.T) {
+	commands := []string{
+		"git -C $WT commit -m x",
+		"git -C ${WT} commit -m x",
+		"git -C \"$WT\" commit -m x",
+		"git -C $(pwd) commit",
+		"git -C `git rev-parse --show-toplevel` commit",
+		"git -C $WT/nested commit",
+		"git -C /repo/.worktrees/*/ commit",
+		"git -C ~/repo commit",
+		"git -C ~ commit",
+		"git commit -m x", // via an unresolved CWD, below
+	}
+	// Both the -C route and the CWD route (the shape a `cd $WT` leaves behind once the
+	// engine has joined the unexpanded token into the running cwd).
+	cwds := []string{"/repo", "/repo/$WT", "/repo/$(pwd)"}
+	modes := []string{"bypassPermissions", "auto", "dontAsk", "default", "plan", "acceptEdits", ""}
+	for _, cwd := range cwds {
+		for _, cmd := range commands {
+			if cwd == "/repo" && cmd == "git commit -m x" {
+				continue // fully resolved: that is the ordinary primary-commit case
+			}
+			for _, mode := range modes {
+				name := mode + " " + cwd + " " + cmd
+				t.Run(name, func(t *testing.T) {
+					// canonMain() answers "canonical, on primary" for ANY directory, so a
+					// case that leaked through to the resolver would be indistinguishable
+					// from the old false deny — and a case that reached the git rule would
+					// be an approval. Neither is allowed.
+					res := canonMain()
+					in := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(cmd), CWD: cwd, PermissionMode: mode}
+					got := hookio.Verdict(New(res).Evaluate(in))
+					if got.Decision == hookio.Approve || got.Decision == hookio.NoOpinion {
+						t.Fatalf("Decision = %v (reason %q); an unresolvable directory MUST NOT reach Approve or an empty verdict", got.Decision, got.Reason)
+					}
+					if res.gotDir != "" {
+						t.Errorf("resolver was consulted with %q; an unresolvable directory MUST NOT be resolved at all", res.gotDir)
+					}
+				})
+			}
+		}
+	}
+}
+
+// TestPrimaryCommit_ReasonNamesActualCause asserts the DIAGNOSIS half of pg2-h2npt: the
+// reason must let an agent act. The old text said only "commit on the primary branch …
+// (R-6)", which for a mis-resolved directory was actively misleading — it named a branch
+// problem the agent did not have and never named the directory the rule had judged.
+func TestPrimaryCommit_ReasonNamesActualCause(t *testing.T) {
+	t.Run("unresolved names the token, its source, and denies the primary reading", func(t *testing.T) {
+		got := hookio.Verdict(New(canonMain()).Evaluate(&hookio.HookInput{
+			ToolName: "Bash", ToolInput: mustJSON("git -C $WT commit -m x"), CWD: "/repo", PermissionMode: "default",
+		}))
+		for _, want := range []string{
+			"cannot determine which repository or branch",
+			"$WT",
+			"git -C $WT",
+			"NOT a finding that you are on a primary branch",
+			"literally",
+		} {
+			if !strings.Contains(got.Reason, want) {
+				t.Errorf("reason %q does not mention %q", got.Reason, want)
+			}
+		}
+		// It MUST NOT read as the primary-branch finding it is not.
+		if strings.Contains(got.Reason, "refusing this commit") {
+			t.Errorf("unresolved reason reads as the primary-branch finding: %q", got.Reason)
+		}
+	})
+
+	t.Run("primary names the directory evaluated and how it was chosen", func(t *testing.T) {
+		got := hookio.Verdict(New(canonMain()).Evaluate(&hookio.HookInput{
+			ToolName: "Bash", ToolInput: mustJSON("git commit -m x"), CWD: "/repo/canonical", PermissionMode: "bypassPermissions",
+		}))
+		for _, want := range []string{
+			"Directory evaluated: /repo/canonical",
+			"no `git -C` given",
+			"CANONICAL clone",
+			"\"main\"",
+			"R-6",
+		} {
+			if !strings.Contains(got.Reason, want) {
+				t.Errorf("reason %q does not mention %q", got.Reason, want)
+			}
+		}
+	})
+
+	t.Run("primary names the -C option when one chose the directory", func(t *testing.T) {
+		got := hookio.Verdict(New(canonMain()).Evaluate(&hookio.HookInput{
+			ToolName: "Bash", ToolInput: mustJSON("git -C /other/clone commit -m x"), CWD: "/repo", PermissionMode: "bypassPermissions",
+		}))
+		for _, want := range []string{"Directory evaluated: /other/clone", "`git -C /other/clone` option"} {
+			if !strings.Contains(got.Reason, want) {
+				t.Errorf("reason %q does not mention %q", got.Reason, want)
+			}
+		}
+	})
+}
+
+// TestUnresolvableToken pins the resolution TEST itself — which spellings are literal
+// and which are not — independently of the rule that consumes it, so a widening of the
+// marker set has to be stated as a change here.
+func TestUnresolvableToken(t *testing.T) {
+	unresolved := map[string]string{
+		"/repo/$WT":        "$WT",
+		"/repo/${WT}":      "${WT}",
+		"$WT":              "$WT",
+		"/repo/$(pwd)":     "$(pwd)",
+		"/repo/`pwd`":      "`pwd`",
+		"/repo/.wt/*":      "*",
+		"/repo/wt-?":       "wt-?",
+		"~/repo":           "~",
+		"~":                "~",
+		"/repo/$WT/nested": "$WT",
+	}
+	for p, wantToken := range unresolved {
+		if got := unresolvableToken(p); got != wantToken {
+			t.Errorf("unresolvableToken(%q) = %q, want %q", p, got, wantToken)
+		}
+	}
+	// Literal paths — absolute, relative, dotted, spaced, and a name holding the
+	// bracket characters deliberately left OUT of the marker set.
+	for _, p := range []string{
+		"/repo", "/repo/.worktrees/feat", "sub", "./sub", "../sib", "/repo/a b/c",
+		"/repo/name[1]", "/repo/a~b", "", "/",
+	} {
+		if got := unresolvableToken(p); got != "" {
+			t.Errorf("unresolvableToken(%q) = %q, want \"\" (literal)", p, got)
+		}
 	}
 }
 

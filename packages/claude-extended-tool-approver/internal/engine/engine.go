@@ -367,7 +367,24 @@ func (e *Engine) EvaluateExpression(expr string, stack []hookio.StackFrame, orig
 		// resolve relative paths against the cd target (pg2-opclh). Conservative:
 		// `cd` with zero/multiple args, `cd -`, or `cd ~...` leave the running
 		// cwd unchanged (worst case a relative path stays classified as today).
-		if basePE != nil && pc.Executable == "cd" && len(pc.Args) == 1 &&
+		//
+		// `pushd <dir>` changes the working directory exactly as `cd <dir>` does, and
+		// omitting it made primary-commit judge `pushd /abs/worktree && git commit`
+		// against the SESSION cwd and hard-deny a legitimate worktree commit
+		// (pg2-h2npt). It CANNOT widen anything: no rule approves a `pushd` or `popd`
+		// leaf, so any expression containing one is already floored at NoOpinion by
+		// that leaf and the re-root can only correct a false DENY. That floor is also
+		// why `popd` needs no model — a directory stack would only matter if the
+		// expression could reach Approve, and it cannot.
+		//
+		// A target that CANNOT be expanded statically (`cd $WT`) is joined VERBATIM
+		// here rather than skipped, and that is deliberate and load-bearing: the
+		// unexpanded token survives into the leaf's CWD, which is the only thing that
+		// lets a downstream rule DETECT that the directory is unknown instead of
+		// confidently resolving the session cwd. primary-commit depends on it — see
+		// internal/rules/primarycommit/dirresolve.go's DIRECTORY RESOLUTION comment —
+		// so this branch MUST NOT be "fixed" to drop such targets.
+		if basePE != nil && (pc.Executable == "cd" || pc.Executable == "pushd") && len(pc.Args) == 1 &&
 			!strings.HasPrefix(pc.Args[0], "-") && !strings.HasPrefix(pc.Args[0], "~") {
 			dir := pc.Args[0]
 			var newCWD string
