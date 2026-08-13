@@ -273,7 +273,7 @@ var validPermissionModes = map[string]bool{
 
 // Validate runs the PRE-RUNTIME wiring checks and blocks on anything determinable
 // as an invalid configuration. Six conditions are blocking, and they are the ones
-// docs/behavior states (INV-WORKFLOW-1, JOURNEY-VALIDATE):
+// docs/behavior states (INV-WORKFLOW-1, USECASE-VALIDATE-CONFIG):
 //
 //  1. orphan event type          — a binding matches a type no source emits
 //  2. unhandled source output    — a source emits a type no binding declares

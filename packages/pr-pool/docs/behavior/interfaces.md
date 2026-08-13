@@ -204,7 +204,7 @@ of the boundary.
 **What a source declares — and what it does not.** A source declares the **event types it emits**;
 that declaration, its invocation, and its mode are the whole of its configuration. The declared
 emitted types are a **contract boundary and MUST stay one**: the wiring validation runs on them in
-**both** directions (`INV-WORKFLOW-1`, `JOURNEY-VALIDATE`) — a bound `type` no source emits is an
+**both** directions (`INV-WORKFLOW-1`, `USECASE-VALIDATE-CONFIG`) — a bound `type` no source emits is an
 **orphan event type** and an emitted `type` no binding declares is an **unhandled source output**, and
 both are **blocking errors** — and neither check has anything to compare without them. What a source does **not** declare is which of its fields may be
 matched, or any shape for `payload`: **matchability is the handler's alone** (`INV-DISP-1`).
@@ -247,7 +247,7 @@ matching: settling `OQ-EVT-CATALOG` gives config-time validation a shape to chec
 **Unknown type.** An event whose `type` **no configured binding declares at all** is **rejected** to
 the source — it is **not** enqueued, it is named in the reply's `rejected` list (`INTF-CLI`), and the
 core records it to logs and metrics. It is a genuine error rather than a silent drop, and the same
-condition already fails **pre-runtime validation**, which blocks startup (`JOURNEY-VALIDATE`,
+condition already fails **pre-runtime validation**, which blocks startup (`USECASE-VALIDATE-CONFIG`,
 `INV-WORKFLOW-1`). A `type` that **is** declared by a binding but whose binding is merely **disabled
 for this run** is the other case: that event **is** accepted and enqueued, is offered to nobody, and
 is dropped **unconsumed-expired** — counted by the unconsumed-expired metric, because run-scoping is
@@ -436,7 +436,10 @@ sequenceDiagram
   **read-only**, both under a **test-mode signal** so the participant knows a test is in flight and
   neither running any discovery of its own; **inject** an operator-supplied event into the live core;
   **inspect** a running core for its resolved configuration, its live **deliveries** and its per-`type`
-  queue depths; and **resolve** the configuration, both as authored and as built-in defaults. The
+  queue depths — and, as a **MAY** rather than a fourth obligation, for **which configured bindings
+  have matched no event this run**, the one signal available against a mistyped narrowing payload path
+  while `OQ-EVT-CATALOG` stands (`INV-DISP-1`, `USECASE-DEBUG-RUN`); and **resolve** the
+  configuration, both as authored and as built-in defaults. The
   concrete command surface that spells these is a realization decision
   (`phillipgreenii-nix-agent-support · packages/pr-pool/docs/decisions · DEC-CLI-2`). _"role"_ is the
   operator-facing name for a configured **event handler** (its concrete kind); the core dispatches it
@@ -481,20 +484,25 @@ still-retained **duplicate** `id` is accepted too, because de-duplication is the
 An event whose `type` **no configured binding declares** is **rejected**, not accepted: it never
 enters the queue and it is named in `rejected` with a reason, because a `type` unknown to the
 configuration is an error rather than a silent drop (`INV-DISP-3`) — and the same condition already
-blocks startup at **pre-runtime validation** (`JOURNEY-VALIDATE`). An event whose binding **is**
+blocks startup at **pre-runtime validation** (`USECASE-VALIDATE-CONFIG`). An event whose binding **is**
 declared but merely **disabled for this run** by a **run-scoped selector** is the other case: it **is**
 counted as accepted and enqueued, offered to nobody, then left to **expire unconsumed**, and
 visibility there comes from the drop being **counted in the metric catalog** `INTF-MON` carries
 (`INV-OBS-1`). The `rejected` list therefore carries **malformed** events — bad schema, or a missing
 required field — and events whose `type` is **unknown to the configuration**, each with a reason.
 
-**Inspecting a running core** yields three things and nothing else. **Deliveries** are **delivery
+**Inspecting a running core** yields three things it **MUST** offer, and nothing else it must offer.
+**Deliveries** are **delivery
 provenance** — which event the core handed to which handler, keyed by that dispatch's tracking id —
 and the core legitimately knows it, because it already marks acceptance per `(event, handler)`
 (`INV-EVT-1`). It is **not** a window into a handler session, so it carries no per-run progress:
 that is the accepting handler's own, on the handler's own surface. The **queue depths** are the
 per-`type` depth `INV-OBS-1` obliges, and the **resolved configuration** is pr-pool's own
-source/handler count.
+source/handler count. A **fourth** reading is a **MAY** and is deliberately not one of the three: a
+core **MAY** also report **which configured bindings have matched no event this run**, which is a
+debugging convenience against a path no config-time check can validate today — and, like the three
+above, it is core-side routing knowledge rather than a window into any handler (`INV-DISP-1`,
+`OQ-EVT-CATALOG`, `USECASE-DEBUG-RUN`).
 
 ```mermaid
 sequenceDiagram
@@ -540,4 +548,4 @@ The **full configuration schema** is not yet pinned; it is tracked as an open qu
   schema) and `OQ-EVT-CATALOG` (a declared per-`type` payload shape — what a binding's narrowing path
   would be validated against at config time, and what would make two sources' events on one `type`
   comparable at all). Pre-runtime validation of the wiring is **not** among them — it is settled and
-  stated as a rule (`INV-WORKFLOW-1`, `JOURNEY-VALIDATE`).
+  stated as a rule (`INV-WORKFLOW-1`, `USECASE-VALIDATE-CONFIG`).

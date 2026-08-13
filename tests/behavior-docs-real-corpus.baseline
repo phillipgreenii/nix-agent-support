@@ -13,15 +13,26 @@
 # belongs here only when the fix is real work with a real owner, named below.
 #
 # ---------------------------------------------------------------------------
-# 1. pr-pool has PARTIALLY adopted INV-22 (10 lines)
+# 1. pr-pool has PARTIALLY adopted INV-22 (13 lines)
 #
-# All 14 of pr-pool's stories carry a per-element listing; none of its 10 journeys
-# do. INV-22 makes the listing a per-element obligation, so this is a genuine
-# violation of a rule the method set already ships. It is PARTIAL adoption, which
-# is the state the check is sharpest about: a set with zero listings has simply not
-# been retrofitted yet, whereas a set with some listings has adopted the rule and
+# All 13 of pr-pool's stories carry a per-element listing; none of its 1 journey and
+# 12 use cases do. INV-22 makes the listing a per-element obligation, so this is a
+# genuine violation of a rule the method set already ships. It is PARTIAL adoption,
+# which is the state the check is sharpest about: a set with zero listings has simply
+# not been retrofitted yet, whereas a set with some listings has adopted the rule and
 # the gaps are omissions. Owner: the pr-pool set retrofit (WS-2/3/4 of the six-set
 # restructure), not this work stream.
+#
+# The names below are NOT the ten `JOURNEY-*` this section first recorded. The
+# journey rebuild (bead pg2-wr6lm.5.8) re-shaped and retyped the set onto an
+# enumerated lifecycle-action matrix, so seven of those ten lines were UPDATED to the
+# renamed element rather than deleted (the finding is the same omission on the same
+# element under a new name), two were deleted because the element they named was
+# folded away, and five were added for elements the rebuild created. `JOURNEY-FLOW`
+# is the one name that did not change: it is now the set's single summary-level
+# journey. So the ten split 7 renamed + 1 unchanged + 2 folded away, and net
+# 10 -> 13 lines, all of them the same unretrofitted-listing defect with the same
+# owner.
 #
 # 2. Prose references that resolve to nothing (2 lines, both WARN)
 #
@@ -40,13 +51,16 @@
 # ---------------------------------------------------------------------------
 intra/trace-extract behavior-docs/docs/behavior|WARN dangling in prose: INTF-SOURCE (README.md:61 invariants.md:98) resolves to no definition here and no declared external reference
 intra/trace-extract behavior-docs/docs/behavior|WARN dangling in prose: INV-DISP-1 (README.md:60 invariants.md:97) resolves to no definition here and no declared external reference
-intra/trace-extract packages/pr-pool/docs/behavior|FAIL JOURNEY-CONFIG carries no listing on its definition
-intra/trace-extract packages/pr-pool/docs/behavior|FAIL JOURNEY-CONFORM carries no listing on its definition
-intra/trace-extract packages/pr-pool/docs/behavior|FAIL JOURNEY-FAIL carries no listing on its definition
 intra/trace-extract packages/pr-pool/docs/behavior|FAIL JOURNEY-FLOW carries no listing on its definition
-intra/trace-extract packages/pr-pool/docs/behavior|FAIL JOURNEY-OBSERVE carries no listing on its definition
-intra/trace-extract packages/pr-pool/docs/behavior|FAIL JOURNEY-PAUSE carries no listing on its definition
-intra/trace-extract packages/pr-pool/docs/behavior|FAIL JOURNEY-RUN carries no listing on its definition
-intra/trace-extract packages/pr-pool/docs/behavior|FAIL JOURNEY-SMOKE carries no listing on its definition
-intra/trace-extract packages/pr-pool/docs/behavior|FAIL JOURNEY-VALIDATE carries no listing on its definition
-intra/trace-extract packages/pr-pool/docs/behavior|FAIL JOURNEY-WORKFLOW carries no listing on its definition
+intra/trace-extract packages/pr-pool/docs/behavior|FAIL USECASE-ADD-ESSENTIAL carries no listing on its definition
+intra/trace-extract packages/pr-pool/docs/behavior|FAIL USECASE-CONFIGURE-OPTIONAL carries no listing on its definition
+intra/trace-extract packages/pr-pool/docs/behavior|FAIL USECASE-CONFIGURE-WIRING carries no listing on its definition
+intra/trace-extract packages/pr-pool/docs/behavior|FAIL USECASE-CREATE-HANDLER carries no listing on its definition
+intra/trace-extract packages/pr-pool/docs/behavior|FAIL USECASE-CREATE-MONITOR carries no listing on its definition
+intra/trace-extract packages/pr-pool/docs/behavior|FAIL USECASE-CREATE-SOURCE carries no listing on its definition
+intra/trace-extract packages/pr-pool/docs/behavior|FAIL USECASE-CREATE-STORE carries no listing on its definition
+intra/trace-extract packages/pr-pool/docs/behavior|FAIL USECASE-DEBUG-RUN carries no listing on its definition
+intra/trace-extract packages/pr-pool/docs/behavior|FAIL USECASE-RUN-DAEMON carries no listing on its definition
+intra/trace-extract packages/pr-pool/docs/behavior|FAIL USECASE-RUN-DRAIN carries no listing on its definition
+intra/trace-extract packages/pr-pool/docs/behavior|FAIL USECASE-VALIDATE-CONFIG carries no listing on its definition
+intra/trace-extract packages/pr-pool/docs/behavior|FAIL USECASE-VERIFY-PARTICIPANT carries no listing on its definition

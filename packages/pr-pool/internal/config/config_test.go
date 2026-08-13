@@ -44,7 +44,7 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-// --- wiring fixtures (INV-WORKFLOW-1 / JOURNEY-VALIDATE) ---
+// --- wiring fixtures (INV-WORKFLOW-1 / USECASE-VALIDATE-CONFIG) ---
 
 // cmdRole is a handler bound to binds, backed by a command that resolves under
 // prefixLocator.
