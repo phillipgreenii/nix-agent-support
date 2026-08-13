@@ -63,7 +63,7 @@
 
 **CRITICAL**: Before claiming any change is complete:
 
-- If the project has `.pre-commit-config.yaml` (test with `test -f .pre-commit-config.yaml && echo yes || echo no` — an exit-0 probe; do NOT probe by running the tool, and do NOT probe with bare `ls`, which exits nonzero on a missing file and is therefore itself a failed tool call — 19 such failures in the 8 days to 2026-07-30): `pre-commit run --all-files` MUST pass
+- If the project has `.pre-commit-config.yaml` (test with `test -f .pre-commit-config.yaml && echo yes || echo no` — an exit-0 probe; do NOT probe by running the tool, and do NOT probe with bare `ls`, which exits nonzero on a missing file and is therefore itself a failed tool call — 19 such failures in the 8 days to 2026-07-30): the pre-commit hooks MUST pass on the **changed** files. The **commit's own hook run is the gate** — a `git commit` fires `prek`/`pre-commit` on the staged files (so `git add -A` first, or a generated change escapes the run). To validate before committing, run `prek run --files <the changed files>` (scoped, fast). Do **NOT** use `prek`/`pre-commit run --all-files` as the completion gate: it re-runs every hook over the whole repo — duplicating the commit run, forcing the slow always-on hooks (bats, nix, …) even for an unrelated diff, and **false-blocking** a clean change on a pre-existing violation in a file it never touched. Reserve `--all-files` for a deliberate full-repo sweep, not per-change validation.
 - If the project has `flake.nix` (same exit-0 probe: `test -f flake.nix && echo yes || echo no`): `nix flake check && darwin-rebuild check --flake .` MUST pass
 - IF no tests exist for changed code: create them
 - NEVER claim code is complete without passing tests

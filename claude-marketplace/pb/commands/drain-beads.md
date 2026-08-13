@@ -124,8 +124,11 @@ rather than updating it.
    Dispatch ONE subagent with: the bead id, its `bd show` details, and the
    worktree/set path. Instruct it to:
    - implement the bead inside THAT worktree/set only, following repo conventions;
-   - run every gate that CAN run pre-apply: `pre-commit`/`prek run --all-files`
-     (if `.pre-commit-config.yaml`), `nix flake check` / `pn workspace build` (nix
+   - run every gate that CAN run pre-apply: the pre-commit hooks SCOPED to its
+     own diff — `prek run --files <the files it changed>` (or `pre-commit run
+--files …`), NOT `--all-files` (which re-runs every hook over the whole repo
+     and can false-block on a pre-existing violation the subagent never touched) —
+     if `.pre-commit-config.yaml`; `nix flake check` / `pn workspace build` (nix
      repos), and the repo's tests;
    - NOT claim/close the bead, NOT land/merge, NOT touch any other worktree, NOT
      create gates;
