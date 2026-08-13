@@ -33,19 +33,186 @@ import (
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/secretpath"
 )
 
-// safeCmdSubstitutions: commands that never mutate and never read a file, safe
-// inside $(...) regardless of arguments.
+// THE pg2-xl79d WIDENING: THE TWO LISTS BELOW WERE AN ACCIDENT, NOT A RISK MODEL.
+//
+// MEASURED, 2026-08-13: replaying 8,560 logged rows (2026-08-06..13) through the
+// DEPLOYED binary produced 104 asks, 51 of them from the env-var rule, and 37 of those
+// 51 carried ONE reason — envvars' post-recursion fallback (`env var value contains an
+// unevaluated/unsafe expression: <NAME>`) on an ordinary local capture. The names were
+// script locals (`out`, `n`, `st`, `total`, `REV`, `ALL_CSV`, …); nothing phantom, no
+// regression of pg2-8cp08/pg2-hfnrr/pg2-3ggxm. `jq` alone appeared in 27 of the 37.
+//
+// The cause is an INCONSISTENCY between two mechanisms that are each correct alone. A
+// body on THIS static list classifies ExpansionSafeCmd and never reaches the fallback;
+// any other body must be POSITIVELY CLEARED by full-engine recursion, and the recursion
+// correctly refuses a dynamically-expanded path arg (pg2-2ke04) and a dynamic redirect
+// source (pg2-2u5jf). Composed, that produced (deployed binary, cwd
+// `/Users/phillipg/phillipg_mbp`, `permission_mode=auto`):
+//
+//	X=$(cat "$f") echo hi        ->  allow    cat IS on the list
+//	X=$(grep -c x "$f") echo hi  ->  allow    grep IS on the list
+//	X=$(jq -r .x "$f") echo hi   ->  ASK      jq was not
+//	X=$(wc -l < "$f") echo hi    ->  ASK      wc IS on the list; the REDIRECT was refused
+//	X=$(seq 1 3) echo hi         ->  ASK      seq was on neither list
+//	X=$(jq -r .x f.json) echo hi ->  allow    the SAME jq, with a LITERAL path
+//
+// There is no risk model under which capturing `cat "$f"` is safe and capturing
+// `jq -r .x "$f"` is not. Capturing a command's output into a shell variable neither
+// writes nor exfiltrates, and the underlying read is gated (or not) identically whether
+// or not it is captured — the last row is the proof, since it is the same program on the
+// same list-membership question, differing only in a quote. So the entries below are the
+// read shapes whose LITERAL-path forms ALREADY cleared, admitted so the two spellings
+// agree.
+//
+// WHAT THIS DELIBERATELY DOES NOT DO, because each is a different lever with its own
+// bead:
+//
+//   - It does NOT touch the envvars rule, argsHaveDynamicExpansion / the pg2-2ke04
+//     dynamic-path refusal, the pg2-2u5jf dynamic-redirect floor, or any NAME list. In
+//     particular it is NOT "lever (b)" — gating the fallback on the assignment's NAME.
+//     pg2-5huwx verified that reopens the fbbf3ade hole, because engine.go's
+//     StripLeadingEnvAssignments keeps the value body away from this static floor on the
+//     leaf path, leaving envvars as the ONLY guard there.
+//   - It does NOT relax the SOLE-SIMPLE-COMMAND shape test. `curl -s … | sh` is on no
+//     list and is not one command, so it still recurses to a non-Approve and still asks;
+//     so does `rm -rf /etc`, which no list holds. Bodies carrying control flow inside a
+//     pipeline (`c=$(find … | while read … | wc -l | tr …)`) stay refused too — those
+//     need the AST-subtree recursion of pg2-1019a / pg2-x9452, not an allowlist entry,
+//     and they were 1-2 rows.
+//   - It does NOT gate a DYNAMIC operand. The secretpath screens here are LITERAL-text
+//     screens, and `X=$(cat "$f")` has always cleared with `$f` unresolved; that
+//     exposure is the incumbent design (the recursion path is where pg2-2ke04 gates it),
+//     and stating it plainly is better than implying these entries close it.
+//
+// The CLASS fix — that a recursive verdict cannot distinguish "no rule knew this
+// command" from "a rule refused it", which is why this list needs hand-extension at all
+// — is its own bead, filed alongside pg2-xl79d.
+
+// safeCmdSubstitutions: commands that never mutate and never read a file's CONTENT,
+// safe inside $(...) regardless of arguments.
+//
+// "never read a file" is about CONTENT, not about touching the filesystem: `readlink`
+// and `realpath` resolve a name, and `test`/`[` stat one. What unites the list is that
+// no member can emit another file's bytes, so nothing here needs the secretpath screen
+// the reader list below applies.
 var safeCmdSubstitutions = map[string]bool{
 	"mktemp": true, "date": true, "whoami": true, "id": true,
 	"pwd": true, "basename": true, "dirname": true,
 	"readlink": true, "realpath": true, "uname": true,
 	"echo": true, "printf": true,
+	// pg2-xl79d addition. `seq` is admitted UNCONDITIONALLY because it touches no
+	// filesystem path in any spelling: its operands are numbers and its only flags are
+	// formatting (`-f`, `-s`, `-w`), so there is no path for a screen to inspect. It is
+	// also the one member of envvars' measured EXHAUSTION half that a rule genuinely can
+	// model, which is why it is relieved HERE rather than by withdrawing that Ask —
+	// envvars.go records why the exhaustion half as a whole must keep it (it also
+	// contains `bash -c`).
+	//
+	// `test` / `[` are NOT here, and the reason is measured — see
+	// fileReaderSubstitutions.
+	"seq": true,
 }
 
-// fileReaderSubstitutions: read-only readers whose PATH ARGS must be re-checked
+// fileReaderSubstitutions: read-only commands whose PATH ARGS must be re-checked
 // against secretpath so a $(cat .env) still forces a prompt.
+//
+// Membership means "this command can NAME A PATH and does not write", not
+// specifically "it prints file content" — `ls` was always a metadata-only member and
+// `test`/`[` join it below. The screen is what earns membership, so the safe default
+// for a new entry is HERE rather than in safeCmdSubstitutions; see the `test` comment
+// for the deny-consuming movement that settles it.
 var fileReaderSubstitutions = map[string]bool{
 	"cat": true, "grep": true, "head": true, "tail": true, "wc": true, "ls": true,
+	// pg2-xl79d additions: the structured-data readers. Each is on
+	// `internal/rules/safecmds`' safeReadCmds/read path already — i.e. its BARE
+	// invocation is approved by that rule after a zone check — so admitting it here
+	// makes the CAPTURED spelling agree with the bare one, which is the whole of this
+	// widening. Each also carries a per-command write-spelling fact, verified against
+	// the installed binary's own `--help` on 2026-08-13 rather than assumed, because a
+	// blanket rule about `-i` or `-o` would be WRONG for two of the three:
+	//
+	//   - `jq` is stdout-only: it has no in-place flag and no output-file flag, so no
+	//     invocation of it writes. (`--rawfile`/`--slurpfile`/`--argfile` READ a file;
+	//     their path operand is a bare token, so the screen below sees it.)
+	//   - `yq` DOES write, two ways — `-i`/`--inplace` edits in place and
+	//     `-s`/`--split-exp`/`--split-exp-file` writes one file per result — and
+	//     substitutionWriteFlags screens both.
+	//   - `tq` (cryptaliagy/tomlq) has NO write spelling at all. Its `-o`/`--output` is
+	//     an output FORMAT (`toml`/`json`), not a file, and its `-i`/`--input` is an
+	//     input FORMAT, not in-place. So the two flag letters that mean "write" for
+	//     other tools mean "format" here, which is exactly why the write vocabulary is
+	//     per-command (substitutionWriteFlags) and never a shared letter test.
+	//
+	// ACCEPTED RESIDUE, stated because it is the same one pipesink.go's MutatingFlags
+	// records for `awk`/`sed`: the FILTER/EXPRESSION text is not audited. jq cannot open
+	// a file for writing from a filter at all, and yq's writes are the flags above, so
+	// the residue here is narrower than for awk — but it is not zero and is not claimed
+	// to be.
+	//
+	// KNOWN over-refusal, deliberate: this screen is path-shaped, so a jq/yq FILTER that
+	// happens to look like a secret path (`jq -r .env f.json`) is refused by the static
+	// list. That is fail-CLOSED and costs nothing — the body then goes through recursion,
+	// whose safecmds jq/yq branches DO model the program-operand role (programOperand)
+	// and clear it — so the row's verdict is unchanged either way. Do not "fix" it by
+	// teaching this seam the program-operand role: that duplicates a rule's flag grammar
+	// in the parser, which is what ADR 0039's I9 keeps out of here.
+	"jq": true, "yq": true, "tq": true,
+	// `test` / `[` — pg2-xl79d, and THEY ARE ON THE SCREENED LIST FOR A MEASURED REASON.
+	// They belong to the metadata-only class: they stat rather than read, they write
+	// nothing, and they emit NOTHING ON STDOUT (their whole result is an exit status), so
+	// a `$(test -f "$f")` capture yields the empty string whatever the file is. On that
+	// reasoning they were first placed in safeCmdSubstitutions, beside the equally
+	// metadata-only `readlink`/`realpath`/`basename` — and the probe measured a
+	// DENY -> ALLOW movement:
+	//
+	//	X=$(test -f /Users/phillipg/.ssh/id_rsa) echo hi   deny -> ALLOW   (unscreened)
+	//	X=$([ -f /Users/phillipg/.ssh/id_rsa ]) echo hi    deny -> ALLOW   (unscreened)
+	//
+	// `deny` is this repo's strongest verdict and no widening may consume one. The cause
+	// is structural, not specific to `test`: ExpansionSafeCmd means the body is NEVER
+	// recursed, so the deny-listed-credential Reject that fires through recursion is
+	// bypassed, and only the screen on THIS list stands in its place. An unscreened
+	// entry therefore CONVERTS a Reject into an Approve, while a screened one cannot.
+	// So the rule for any future addition is: an entry that can NAME A PATH goes on the
+	// screened list even when its disclosure channel is provably empty. (Ranked against
+	// the alternative — withholding `test`/`[` entirely — the screened admission clears
+	// the cohort rows and moves no deny; that is strictly better.)
+	//
+	// The trailing `]` of the `[` spelling is just another argument to the screen
+	// (`IsSecret("]")` is false), so no bracket-specific handling is needed. `[[ … ]]` is
+	// a *syntax.TestClause rather than a CallExpr, so soleSimpleCommandLeaf refuses it
+	// and no entry here can change that.
+	"test": true, "[": true,
+}
+
+// substitutionWriteFlags SUPPLEMENTS the shared MutatingFlags vocabulary
+// (pipesink.go) for this seam. MutatingFlags is the single source of truth and is
+// consulted FIRST — see hasWriteFlag — so an entry here exists only where a write
+// spelling is missing from it.
+//
+// `yq -s`/`--split-exp`/`--split-exp-file` is that case, verified against yq's own
+// `--help` on 2026-08-13: it "print[s] each result (or doc) into a file named (exp)",
+// i.e. it creates files, and MutatingFlags["yq"] carries only the `-i` family. The gap
+// predates pg2-xl79d and is shared by `internal/rules/safecmds`' isYqInPlace, so it is
+// COVERED here rather than fixed there — the fix belongs in those files, with its own
+// bead and its own replay, because widening a write predicate is a MORE-restrictive
+// change to every other consumer of it.
+var substitutionWriteFlags = map[string]map[string]bool{
+	"yq": {"-s": true, "--split-exp": true, "--split-exp-file": true},
+}
+
+// hasWriteFlag reports whether args carry a flag that turns cmd into a WRITER, under
+// the union of the shared MutatingFlags vocabulary and this seam's supplement. Both
+// halves go through HasAnyFlag, so the glued spellings (`-i=true`, `--split-exp=x`)
+// cannot hide behind an `=`.
+//
+// It is applied to EVERY branch of isSafeSubstitutionCommand rather than only to the
+// reader branch, so that a member added to either list later inherits the screen
+// instead of needing whoever adds it to remember. It is a no-op for every incumbent:
+// of MutatingFlags' four keys (`find`, `sort`, `yq`, `tree`) only `yq` is on a
+// substitution list at all.
+func hasWriteFlag(cmd string, args []string) bool {
+	return HasAnyFlag(args, MutatingFlags[cmd]) || HasAnyFlag(args, substitutionWriteFlags[cmd])
 }
 
 // gitReadSubcommands: git subcommands that only read metadata (no diff/show/log —
@@ -230,6 +397,13 @@ func isSafeSubstitutionCommand(tokens []string) bool {
 		return false
 	}
 	cmd := tokens[0]
+	// A WRITE SPELLING DISQUALIFIES BEFORE ANY LIST IS CONSULTED (pg2-xl79d). Every
+	// entry on both lists is there because it READS, so a flag that turns one into a
+	// writer voids the ground for its membership — and the check sits ahead of the
+	// branches so it cannot be forgotten by a later addition. See hasWriteFlag.
+	if hasWriteFlag(cmd, tokens[1:]) {
+		return false
+	}
 	if safeCmdSubstitutions[cmd] {
 		return true
 	}
@@ -284,8 +458,9 @@ func isGoEnvMutatingFlag(t string) bool {
 // IsSafeSubstitutionBody reports whether cmdStr — the inner body of a
 // $(...) or `...` command substitution — is safe under the STATIC allowlist. A
 // body is safe only when it contains no nested substitution AND it parses to
-// EXACTLY ONE SIMPLE COMMAND with no redirection/heredoc, and that command's
-// command+args pass isSafeSubstitutionCommand.
+// EXACTLY ONE SIMPLE COMMAND with no heredoc and no redirection other than a
+// screened pure read (redirectsOnlyScreenedReads), and that command's command+args
+// pass isSafeSubstitutionCommand.
 //
 // Quote-awareness is now a PARSER FACT rather than a property inherited from a
 // leaf count (ADR 0039 step 2a): the body goes through the seam, so the '|' in
@@ -369,11 +544,86 @@ func IsSafeSubstitutionBody(cmdStr string) bool {
 	if !ok {
 		return false
 	}
-	if leaf.Executable == "" || len(leaf.Redirections) > 0 || leaf.HasHeredoc {
+	if leaf.Executable == "" || leaf.HasHeredoc || !redirectsOnlyScreenedReads(leaf.Redirections) {
 		return false
 	}
 	tokens := append([]string{leaf.Executable}, leaf.Args...)
 	return isSafeSubstitutionCommand(tokens)
+}
+
+// redirectsOnlyScreenedReads reports whether every redirection a substitution body
+// carries is a PURE READ from a path this seam has screened. It replaces the blanket
+// `len(leaf.Redirections) > 0` refusal (pg2-xl79d), whose only measured cost was the
+// idiom `X=$(wc -l < "$f")` — one of the 37 asking rows, and refused for a reason that
+// does not survive being stated: `wc -l < f` and `wc -l f` read the same bytes of the
+// same file, and the argv spelling was already cleared.
+//
+// TWO CONDITIONS, and the FIRST is the security one:
+//
+//  1. NO WRITE DIRECTION. The test is hookio.RedirectionKind.IsWrite, which is `!=
+//     RedirectStdin` — so `>`, `>>`, `>|`, `2>`, `9>`, `&>`, `>& FILE` and bash's `<>`
+//     read-write open are ALL refused, and a kind added to that enum later is refused
+//     until someone deliberately classifies it. This is what keeps
+//     `X=$(jq -r .x "$f" > /etc/passwd)` off the list: a body that WRITES can never be
+//     cleared here, whatever its executable. (`2>&1` and `>&-` are unaffected in the
+//     other direction — attachRedir records nothing for a descriptor duplication or
+//     close, so they never reach this function; that is why the blanket refusal did not
+//     already cost the `git rev-parse HEAD 2>&1` idiom, and it still does not.)
+//  2. THE SOURCE PATH IS SECRETPATH-SCREENED, the same screen the
+//     fileReaderSubstitutions branch applies to an argv path. Without it a `<` would be
+//     a route around that branch — `$(wc -l < .env)` reading what `$(wc -l .env)`
+//     refuses.
+//
+// WHY THIS IS NOT THE DECLINED PIPELINE RELAXATION, since both are arguments about
+// stdin: the audit unit does not change. That decline rests on a pipeline stage's stdin
+// being ANOTHER COMMAND'S OUTPUT — bytes no screen inspected — so the list's claim
+// ("every byte this command reads is a path I inspected") becomes false. A `<` redirect's
+// source IS a path, and it IS inspected, right here in condition 2. The claim holds
+// unchanged; only the syntax by which the path arrives is new.
+//
+// Heredocs and herestrings are NOT covered by this and stay refused by the caller's
+// HasHeredoc test: their bytes are inline text, not a path, so condition 2 has nothing
+// to screen and the I2 heredoc floor owns them.
+//
+// # MEASURED LIMIT, and why it is not closed here (pg2-xl79d)
+//
+// Condition 2's screen is `secretpath.IsSecret`, which is NARROWER than the deny-list
+// the engine's path evaluation applies through recursion — `secretDirs` is `secrets`
+// and `.ssh` and `secretBasenames` is the `.credentials`/`auth.json` family, so
+// `~/.aws/credentials` is not a secretpath at all. Because ExpansionSafeCmd skips the
+// recursion entirely, an entry cleared here never meets that richer deny-list. So one
+// row moves (this worktree, 2026-08-13, `permission_mode=auto`):
+//
+//	X=$(wc -l < /Users/phillipg/.aws/credentials) echo hi   ask -> ALLOW
+//
+// THAT IS THE SEAM'S PRE-EXISTING SCREEN STRENGTH REACHED BY ONE MORE SYNTAX, not a new
+// exposure, and the argv spellings of the identical read were ALREADY `allow` on the
+// same tree — measured, all four:
+//
+//	X=$(cat /Users/phillipg/.aws/credentials) echo hi        allow  (before and after)
+//	X=$(wc -l /Users/phillipg/.aws/credentials) echo hi      allow  (before and after)
+//	X=$(head -1 /Users/phillipg/.aws/credentials) echo hi    allow  (before and after)
+//	X=$(grep -c x /Users/phillipg/.aws/credentials) echo hi  allow  (before and after)
+//
+// So this function makes `wc -l < F` EQUAL to `wc -l F`, which is the whole thesis of
+// the widening above; leaving `<` stricter than argv for the same command reading the
+// same file would be the same accidental split in the other direction. Strengthening
+// the screen is the right fix and it belongs to BOTH spellings at once — which makes it
+// a MORE-restrictive change owing its own corpus replay, i.e. its own bead, exactly as
+// gitReadSubcommands' `ls-files` decline is recorded. Filed as a finding on pg2-xl79d.
+// The narrowing MUST NOT be done by widening `internal/secretpath` in passing: that map
+// is consumed by every rule, so a new entry there is a repo-wide policy change.
+//
+// The RELATION is what is asserted in the tests rather than these verdicts, so retuning
+// either screen cannot silently invert it: the `<` spelling is never LESS restrictive
+// than the argv spelling of the same read.
+func redirectsOnlyScreenedReads(redirs []hookio.Redirection) bool {
+	for _, rd := range redirs {
+		if rd.Kind.IsWrite() || secretpath.IsSecret(rd.Path) {
+			return false
+		}
+	}
+	return true
 }
 
 // SubstitutionKind classifies an extracted shell substitution.

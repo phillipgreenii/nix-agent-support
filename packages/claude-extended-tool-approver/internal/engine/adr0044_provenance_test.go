@@ -141,8 +141,33 @@ func TestADR0044_EnvValueAskCohortIsSplitByProvenance(t *testing.T) {
 		wantReason string
 	}{
 		{
-			name:       "exhaustion half: nobody models seq",
-			command:    "X=$(seq 1 3) echo hi",
+			// THE EXHAUSTION REPRESENTATIVE CHANGED, and the reason is the point of the
+			// row rather than an incidental edit. pg2-d0ja3 measured this half with
+			// `X=$(seq 1 3) echo hi`, and `seq` was a valid exhaustion witness only for
+			// as long as NO rule modelled it. pg2-xl79d then put `seq` on cmdparse's
+			// static safe-substitution allowlist — i.e. it MODELLED it — so that command
+			// now clears and Approves, which is pg2-xl79d's acceptance criterion 1 and
+			// directly contradicts this row's premise. One of the two had to give, and an
+			// operator ruled for pg2-xl79d (2026-08-13, ask-relief batch).
+			//
+			// What survives is what the row is FOR: this test's thesis is that the live
+			// ask cohort is PARTITIONED into an exhaustion half and a refusal half, so it
+			// needs *an* exhaustion witness, not that specific one. `bash -c` is a
+			// stronger witness than `seq` ever was, because it makes the thesis's own
+			// point — that exhaustion is NOT a safety property — impossible to misread:
+			// ceta models no interpreter, so a shell body it cannot evaluate is an
+			// exhaustion exactly like `seq 1 3` was, and this one is obviously dangerous.
+			//
+			// MEASURED on the patched binary (2026-08-13): this and six siblings
+			// (`sh -c "evil"`, `python3 -c …`, `node -e …`, `crontab -r`, `mount`,
+			// `npm install evil`) all still return exactly Ask with this reason, so the
+			// witness is replaceable and the half is not about to empty out.
+			//
+			// STABLE UNDER pg2-whumr: that bead raises the COMMAND-position substitution
+			// floor and explicitly leaves ENV-VALUE position alone as the already-correct
+			// side, and this row is env-value position. Do not "harmonize" it away.
+			name:       "exhaustion half: nobody models a shell interpreter body",
+			command:    `X=$(bash -c "rm -rf /") echo hi`,
 			wantReason: exhaustionReason,
 		},
 		{
