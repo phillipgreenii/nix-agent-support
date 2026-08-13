@@ -217,12 +217,14 @@ type SubstitutionScan struct {
 //
 // This is raw-text structure derivation, which ADR 0039's I9 forbids outside the
 // seam. ADR 0039 step 2a (pg2-zeqa5) removed the substitution-scan family's three
-// callers of it — those now go through the seam — leaving exactly TWO, both on the
-// ENV-ASSIGNMENT classification path: classifyCmdSubstitution and (indirectly, via
-// its own `strings.Index` pair rather than this function) classifyBacktickSubstitution.
-// Migrating classifyExpansion is step 5's unit of work, so this is kept verbatim
-// rather than migrated here: collapsing the two steps together would destroy the
-// per-step replay attribution ADR 0039's Enforcement requires.
+// callers of it — those now go through the seam — leaving exactly ONE:
+// classifyCmdSubstitution, on the ENV-ASSIGNMENT classification path reached from
+// classifyExpansion. (Its sibling classifyBacktickSubstitution derives its own
+// extent with a `strings.Index`/`LastIndex` pair and never calls this, so it is a
+// SEPARATE raw-text instance step 5 owes a migration for too.) Migrating
+// classifyExpansion is step 5's unit of work, so this is kept verbatim rather than
+// migrated here: collapsing the two steps together would destroy the per-step
+// replay attribution ADR 0039's Enforcement requires.
 //
 // Step 5 asserts this function's REMOVAL. Its live callers are enumerable with:
 //
