@@ -1,10 +1,11 @@
-// Package metrics emits the three metrics the core's catalog MUST declare
-// (INV-OBS-1): queue depth (gauge, per type), failure rate (counter, per
-// failure class), and unconsumed-expired (counter, per type — the "no event
-// misses" signal, INV-DISP-3). It adds one member beyond that floor —
-// unknown-type-rejected (counter, per type) — because INV-DISP-3 requires the
-// unknown-type condition to be recorded to metrics as well as logs, and none of
-// the three can carry it. OTel is the default emission transport for
+// Package metrics emits these members of the core's declared metric catalog
+// (INV-OBS-1), each named by INTF-MON, the interface that carries the catalog:
+// queue depth (gauge, per type), failure rate (counter, per delivery-side
+// failure class), unconsumed-expired (counter, per type — the "no event misses"
+// signal, INV-DISP-3's declared-but-inactive-this-run case), and
+// unknown-type-rejected (counter, per type — INV-DISP-3's
+// unknown-to-the-configuration case, which that invariant requires be recorded
+// to logs AND metrics). OTel is the default emission transport for
 // metrics only (a neutral standard, not a mandated backend — GOAL-MIN-1); the
 // concrete sink is a deployment binding via INTF-MON.
 //
@@ -35,9 +36,11 @@ const (
 	MetricUnconsumedExpired = "pr_pool.unconsumed_expired"
 	// MetricUnknownTypeRejected counts the ingest-time condition INV-DISP-3
 	// requires the core to record to logs AND metrics: an event rejected because no
-	// configured binding declares its type. It sits BEYOND the three-member
-	// delivery-side minimum INTF-MON enumerates — that list is a floor ("at least")
-	// and this member is what makes INV-DISP-3's "recorded to ... metrics" true.
+	// configured binding declares its type. It is the catalog member INTF-MON names
+	// for that case — INV-DISP-3's "unknown to the configuration" — so this counter
+	// is what makes its "recorded to ... metrics" true. It stays distinct from
+	// MetricUnconsumedExpired, which carries the OTHER case (a binding declared but
+	// merely inactive this run) plus the ordinary miss.
 	MetricUnknownTypeRejected = "pr_pool.unknown_type_rejected"
 )
 
@@ -54,7 +57,7 @@ type Emitter struct {
 // Ensure the queue can drive it.
 var _ eventqueue.Observer = (*Emitter)(nil)
 
-// New registers the three instruments on a meter from mp and returns an Emitter.
+// New registers the instruments above on a meter from mp and returns an Emitter.
 // depthFn supplies the current per-type queue depth (typically queue.DepthByType)
 // — the observable gauge reads it on each collect, so the gauge tracks
 // enqueue/accept/expire without the queue pushing updates.

@@ -366,9 +366,15 @@ sequenceDiagram
     surface;
   - **unconsumed-expired** — counter, per `type`: events that expired with no handler accepting them,
     which under `INV-EVT-4` is a **genuine miss** and is the concrete "no event misses" signal
-    (`INV-DISP-3`);
+    (`INV-DISP-3`, its **declared but inactive this run** case together with the ordinary miss);
+  - **unknown-type-rejected** — counter, per `type`: events **rejected** at ingest because **no
+    configured binding declares** their `type`, which is the metrics half of "recorded to logs and
+    metrics" (`INV-DISP-3`, its **unknown to the configuration** case). It is a **separate** member
+    from **unconsumed-expired** above and never a relabelling of it: this one counts an event the core
+    **refused** and named as rejected to the caller, that one counts an event the core **accepted** and
+    later dropped, so neither member ever stands for both of `INV-DISP-3`'s cases;
 
-  and, alongside those three, the **throughput**, **backlog**, **liveness** and **dispatch-latency**
+  and, alongside those four, the **throughput**, **backlog**, **liveness** and **dispatch-latency**
   metrics an observer watches to tell a busy system from a stalled one (`STORY-OBS-1`).
 
 - **Emission.** Observability covers **metrics and logs** (traces are a later concern). Both the
