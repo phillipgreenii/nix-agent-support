@@ -27,6 +27,9 @@
     ./programs/pg-pr
     ./programs/integrate-branch-support
     ./programs/pnwf
+    # wsplan: pnwf's sibling command from the same repo-base module (Stage A of
+    # the workforest `land`); its enable default follows ./programs/pnwf's.
+    ./programs/wsplan
     ./programs/wait-for-agents
     ./programs/beads
     ./programs/serena

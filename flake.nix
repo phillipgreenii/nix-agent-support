@@ -100,11 +100,16 @@
             inherit (final) lib;
             inherit (phillipgreenii-nix-base.lib) mkSrcDigest;
           };
-          # `pnwf` is built in repo-base (modules/pnwf), not here. Thread it in from
-          # repo-base's packages, system-guarded: repo-base publishes only x86_64-linux +
-          # aarch64-darwin (this repo builds 4 systems), and a locked repo-base rev may
-          # predate the package. The `? pnwf` guard below makes a missing package a
-          # graceful no-op (attr absent) instead of an eval error (pg2-xs5cj C1).
+          # `pnwf` and its sibling `wsplan` (the read-only land-plan emitter, Stage A of
+          # the workforest `land`) are built in repo-base (modules/pnwf), not here. Thread
+          # them in from repo-base's packages, system-guarded: repo-base publishes only
+          # x86_64-linux + aarch64-darwin (this repo builds 4 systems), and a locked
+          # repo-base rev may predate either package. The `? <name>` guards below make a
+          # missing package a graceful no-op (attr absent) instead of an eval error
+          # (pg2-xs5cj C1; pg2-a3zez for wsplan). They are deliberately SEPARATE guards,
+          # one per package, because the two did not land together — `wsplan` is newer, so
+          # "pnwf present, wsplan absent" is a real state of this flake's own lock and one
+          # combined guard would drop pnwf on every such rev.
           # NB: use `prev` (the input pkgs), never `final`, to derive the system and the
           # attr — deriving the overlay's OUTPUT SHAPE from `final` is a fixpoint cycle.
           basePkgs = phillipgreenii-nix-base.packages.${prev.stdenv.hostPlatform.system} or { };
@@ -209,7 +214,8 @@
           pw-reset-agents = final.callPackage ./packages/pw-reset-agents { };
           pw-agent-activity = final.callPackage ./packages/pw-agent-activity { };
         }
-        // prev.lib.optionalAttrs (basePkgs ? pnwf) { inherit (basePkgs) pnwf; };
+        // prev.lib.optionalAttrs (basePkgs ? pnwf) { inherit (basePkgs) pnwf; }
+        // prev.lib.optionalAttrs (basePkgs ? wsplan) { inherit (basePkgs) wsplan; };
 
     in
     flake-parts.lib.mkFlake { inherit inputs; } {
@@ -1450,6 +1456,146 @@
                 assert claudeOff == false;
                 assert explicitOn == true;
                 pkgs.runCommand "pnwf-enable-default-ok" { } "touch $out";
+
+              # Durable eval test (pg2-a3zez) for the wsplan enable DEFAULT. `wsplan` is
+              # pnwf's sibling command out of the same repo-base module (modules/pnwf) and
+              # is Stage A of the workforest `land`, so it must ship exactly when pnwf
+              # does — expressed by READING pnwf's resolved feature flag instead of
+              # re-deriving the marketplace/plugin condition a third time. Rows 1-4 pin
+              # that inheritance (including the veto direction, which a copied expression
+              # would NOT have); row 5 pins the availability guard that keeps this flake
+              # evaluating on a repo-base rev carrying pnwf but not yet wsplan — the state
+              # of this flake's own lock, hence the guard's real workload, not a
+              # hypothetical; row 6 pins the explicit opt-in. Like the pnwf test it reads
+              # ONLY the resolved `enable`, so cfg.package (pkgs.wsplan) is never forced
+              # and the check needs no repo-base package present.
+              test-wsplan-enable-default =
+                let
+                  mockMarketplace = pkgs.runCommand "mock-wsplan-marketplace" {
+                    passthru = {
+                      marketplaceName = "mock-wsplan-marketplace-local";
+                      plugins = [
+                        {
+                          name = "pn-workspace-rules";
+                          version = "0.1.0+aaaaaaaa";
+                          key = "pn-workspace-rules@mock-wsplan-marketplace-local";
+                          defaultEnabled = true;
+                        }
+                      ];
+                    };
+                  } "mkdir -p $out/.claude-plugin; echo '{}' > $out/.claude-plugin/marketplace.json";
+
+                  # pkgs is a PARAMETER here (unlike the pnwf test, which stubs a fixed
+                  # one) because the availability row must express wsplan's ABSENCE: under
+                  # `pn workspace flake-check` the overlay genuinely provides pkgs.wsplan,
+                  # so only removeAttrs — never `pkgs // { … }` — can model the old-rev
+                  # case. The real pnwf module is imported, not a stub of its flag: the
+                  # behaviour under test IS the inheritance from it.
+                  evalEnableWith =
+                    evalPkgs: cfg:
+                    (lib.evalModules {
+                      specialArgs = {
+                        pkgs = evalPkgs;
+                        inherit lib;
+                      };
+                      modules = [
+                        ./home/programs/pnwf/default.nix
+                        ./home/programs/wsplan/default.nix
+                        (
+                          { lib, ... }:
+                          {
+                            # Stubs for the config surface the modules read/write; the real
+                            # options live in claude-code / claude-marketplaces /
+                            # home-manager, not pulled in here.
+                            options = {
+                              phillipgreenii.programs.claude-code.enable = lib.mkEnableOption "claude (stub)";
+                              phillipgreenii.programs.claude-code.marketplaces = {
+                                nixProvided = lib.mkOption {
+                                  type = lib.types.listOf lib.types.package;
+                                  default = [ ];
+                                };
+                                enabled = lib.mkOption {
+                                  type = lib.types.attrsOf lib.types.bool;
+                                  default = { };
+                                };
+                                overrides = lib.mkOption {
+                                  type = lib.types.attrsOf lib.types.bool;
+                                  default = { };
+                                };
+                              };
+                              home.packages = lib.mkOption {
+                                type = lib.types.listOf lib.types.package;
+                                default = [ ];
+                              };
+                              programs.tldr.enable = lib.mkEnableOption "tldr (stub)";
+                              programs.tldr.customPages = lib.mkOption {
+                                type = lib.types.attrsOf lib.types.anything;
+                                default = { };
+                              };
+                            };
+                          }
+                        )
+                        cfg
+                      ];
+                    }).config.phillipgreenii.programs.wsplan.enable;
+
+                  bothAvailable = pkgs // {
+                    pnwf = pkgs.hello;
+                    wsplan = pkgs.hello;
+                  };
+                  evalEnable = evalEnableWith bothAvailable;
+                  pluginOn = {
+                    phillipgreenii.programs.claude-code = {
+                      enable = true;
+                      marketplaces.nixProvided = [ mockMarketplace ];
+                    };
+                  };
+
+                  # 1. claude on + pn-workspace-rules plugin present (defaultEnabled) => on.
+                  onDefault = evalEnable pluginOn;
+                  # 2. plugin explicitly overridden off => off, even with claude on.
+                  overriddenOff = evalEnable {
+                    phillipgreenii.programs.claude-code = {
+                      enable = true;
+                      marketplaces.nixProvided = [ mockMarketplace ];
+                      marketplaces.overrides."pn-workspace-rules@mock-wsplan-marketplace-local" = false;
+                    };
+                  };
+                  # 3. claude disabled => off, even though plugin metadata is present.
+                  claudeOff = evalEnable {
+                    phillipgreenii.programs.claude-code = {
+                      enable = false;
+                      marketplaces.nixProvided = [ mockMarketplace ];
+                    };
+                  };
+                  # 4. a machine vetoing the sibling pnwf vetoes wsplan with it. Spelled
+                  # out rather than `pluginOn // { … }`: `//` is shallow, so it would
+                  # REPLACE the whole `phillipgreenii` attr and silently turn claude off
+                  # too, making the row pass for the wrong reason.
+                  pnwfVetoed = evalEnable {
+                    phillipgreenii.programs.claude-code = {
+                      enable = true;
+                      marketplaces.nixProvided = [ mockMarketplace ];
+                    };
+                    phillipgreenii.programs.pnwf.enable = false;
+                  };
+                  # 5. repo-base rev carries pnwf but not wsplan => off, no eval error.
+                  wsplanAbsent = evalEnableWith (builtins.removeAttrs (pkgs // { pnwf = pkgs.hello; }) [
+                    "wsplan"
+                  ]) pluginOn;
+                  # 6. explicit opt-in still wins upward.
+                  explicitOn = evalEnable {
+                    phillipgreenii.programs.claude-code.enable = false;
+                    phillipgreenii.programs.wsplan.enable = true;
+                  };
+                in
+                assert onDefault == true;
+                assert overriddenOff == false;
+                assert claudeOff == false;
+                assert pnwfVetoed == false;
+                assert wsplanAbsent == false;
+                assert explicitOn == true;
+                pkgs.runCommand "wsplan-enable-default-ok" { } "touch $out";
 
               # Durable eval test (pg2-t76k8) for the CETA base read-only roots:
               # when claude-code + ceta are enabled, the module must contribute the
