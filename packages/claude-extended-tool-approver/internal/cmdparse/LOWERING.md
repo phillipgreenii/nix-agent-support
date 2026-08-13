@@ -225,15 +225,15 @@ of every migration step.
 
 ## What moved
 
-| Symbol                           | Outcome     | Where it went                                                                                                                             |
-| -------------------------------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `scanSubstitutions`              | **deleted** | The shared `quotesAreSyntax` byte loop. Replaced by two parser ENTRY POINTS, so the two expansion models can no longer drift.              |
+| Symbol                           | Outcome     | Where it went                                                                                                                                             |
+| -------------------------------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `scanSubstitutions`              | **deleted** | The shared `quotesAreSyntax` byte loop. Replaced by two parser ENTRY POINTS, so the two expansion models can no longer drift.                             |
 | `indexUnescapedBacktick`         | **deleted** | An inventory instance in its OWN right: not quote-aware AT ALL by its own comment, and its caller `IsSafeSubstitutionBody` is on the `pg2-wguam` P0 path. |
-| `matchParen`                     | **shimmed** | Kept VERBATIM in `parser.go` for `classifyCmdSubstitution` / `classifyBacktickSubstitution` only. Owned by `pg2-x9452` (step 5).           |
-| `ScanSubstitutions`              | migrated    | `shellparse.go`, `syntax.Parser.Parse` + a top-level AST walk.                                                                             |
-| `ScanSubstitutionsInHeredocBody` | migrated    | `shellparse.go`, `syntax.Parser.Document` — the parser's OWN here-document model.                                                          |
-| `EnumerateSubstitutions`         | migrated    | Unchanged facade over `ScanSubstitutions`.                                                                                                 |
-| `IsSafeSubstitutionBody`         | migrated    | One parse via `soleSimpleCommandLeaf`, replacing `ScanSubstitutions`-then-`Parse`.                                                         |
+| `matchParen`                     | **shimmed** | Kept VERBATIM in `parser.go` for `classifyCmdSubstitution` / `classifyBacktickSubstitution` only. Owned by `pg2-x9452` (step 5).                          |
+| `ScanSubstitutions`              | migrated    | `shellparse.go`, `syntax.Parser.Parse` + a top-level AST walk.                                                                                            |
+| `ScanSubstitutionsInHeredocBody` | migrated    | `shellparse.go`, `syntax.Parser.Document` — the parser's OWN here-document model.                                                                         |
+| `EnumerateSubstitutions`         | migrated    | Unchanged facade over `ScanSubstitutions`.                                                                                                                |
+| `IsSafeSubstitutionBody`         | migrated    | One parse via `soleSimpleCommandLeaf`, replacing `ScanSubstitutions`-then-`Parse`.                                                                        |
 
 Rule-side callers reach the seam unchanged (`gitdir.go` ×2, `envvars.go`, and `ssh.go`, which the
 bead's caller list omitted). Engine-side `IsSafeSubstitutionBody` inside `foldSubstitutionScan` is
@@ -280,15 +280,15 @@ snapshot taken 2026-08-12 read-only via `immutable=1`: 338,424 rows, 218,567 non
 **Skipped and NOT presented as the whole:** 73,789 of 218,567 non-excluded `Bash` rows (**33.76%**,
 915 of 1,138 distinct `cwd` values) name a working directory that no longer exists.
 
-| base -> new         | rows   | direction            |
-| ------------------- | ------ | -------------------- |
-| approve -> approve  | 94,896 | same                 |
-| abstain -> abstain  | 32,722 | same                 |
-| ask -> ask          | 2,455  | same                 |
-| reject -> reject    | 413    | same                 |
-| approve -> abstain  | 23     | more restrictive     |
-| abstain -> ask      | 1      | more restrictive     |
-| reject -> ask       | 1      | **LESS restrictive** |
+| base -> new        | rows   | direction            |
+| ------------------ | ------ | -------------------- |
+| approve -> approve | 94,896 | same                 |
+| abstain -> abstain | 32,722 | same                 |
+| ask -> ask         | 2,455  | same                 |
+| reject -> reject   | 413    | same                 |
+| approve -> abstain | 23     | more restrictive     |
+| abstain -> ask     | 1      | more restrictive     |
+| reject -> ask      | 1      | **LESS restrictive** |
 
 **GATE: PASS.** 25 transitions on 130,511 rows. Exactly ONE moves in the less-restrictive direction
 under `Approve < Abstain < Ask < Reject`, and it is justified individually below. No transition
@@ -318,8 +318,8 @@ approve.
 
 ### The 24 more-restrictive transitions, by mechanical cause
 
-| Cause                                                                            | Rows |
-| -------------------------------------------------------------------------------- | ---- |
+| Cause                                                                                         | Rows |
+| --------------------------------------------------------------------------------------------- | ---- |
 | **A** — the unparseable-substitution floor now fires where the byte loop walked past a desync | 17   |
 | **B** — a command substitution nested in arithmetic `$(( ))` is now enumerated at all         | 6    |
 | **C** — `env-vars` classifies one assignment value as unsafe (`abstain -> ask`)               | 1    |
