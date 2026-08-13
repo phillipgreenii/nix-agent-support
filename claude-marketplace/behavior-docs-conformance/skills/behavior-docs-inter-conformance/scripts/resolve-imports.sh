@@ -9,10 +9,12 @@
 #              current name for that UUID (obligation-alignment).
 #   WARN     — the owner UUID resolves but the cited NAME differs: a stale NAME,
 #              never a broken identity (the UUID model's whole point — 1.1).
-#   FAIL     — either the cited owner UUID resolves to NO owner definition (a
-#              genuine divergence / broken identity — the evaluator's core value),
-#              or the row declares no parseable owner UUID at all and is not marked
-#              external (an UNRESOLVABLE row). A row this script cannot resolve is
+#   FAIL     — any of: the cited owner UUID resolves to NO owner definition (a
+#              genuine divergence / broken identity — the evaluator's core value);
+#              the row declares no parseable owner UUID at all and is not marked
+#              external (an UNRESOLVABLE row); or the owner UUID resolves to a
+#              definition whose id family is UNRECOGNIZED (see `IDRE` and
+#              `owner_name_for_uuid`). A row this script cannot resolve is
 #              a FAILURE, never a warning: warning on it left the failure counter at
 #              0, so a table whose shape this parser did not understand exited 0
 #              having checked nothing.
@@ -40,7 +42,10 @@
 #
 # Usage: resolve-imports.sh <owner-set-dir> <implementer-set-dir>
 # Exit: 0 if no FAIL (warnings allowed), 1 if any row failed to resolve — an
-# unresolved owner UUID, or a row carrying no parseable owner UUID.
+# unresolved owner UUID, a row carrying no parseable owner UUID, or an owner
+# definition whose id family this script does not recognize. EVERY such row is
+# reported on its OWN line before the exit: this script MUST NOT abort mid-loop,
+# because a run that dies on row 3 reports nothing about rows 1, 2 or 4 either.
 set -euo pipefail
 
 # DETERMINISM: every sort, comm, uniq and shell glob below MUST order bytes, not
@@ -56,10 +61,30 @@ export LC_ALL=C
 OWNER="${1:?usage: resolve-imports.sh <owner-set-dir> <implementer-set-dir>}"
 IMPL="${2:?usage: resolve-imports.sh <owner-set-dir> <implementer-set-dir>}"
 UUIDRE='[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}'
-# The typed-name families INV-3 enumerates, including `USECASE` — an imports row MAY cite a
-# use case, and `owner_name_for_uuid` extracts the owner's current name with this same regex,
-# so omitting a family would report a resolvable row as a divergence.
-IDRE='\b(INV|GOAL|STORY|USECASE|JOURNEY|INTF|ACTOR|OQ)-[A-Za-z0-9]+(-[A-Za-z0-9]+)*\b'
+# Every typed-name family an imports row MAY cite: the eight INV-3 enumerates for behavior
+# elements, plus the two the decision-doc areas define (`DEC-<TOPIC>-<n>` settled,
+# `IMPL-<n>` captured-but-not-decided). GOAL-5 makes the second pair citable HERE and not
+# merely in prose — an entry belonging to another scope MUST be declared, with its UUID, in
+# this set's `## External references` table "like any other external element" — and
+# `owner_name_for_uuid` extracts the owner's current name with this same regex, so a family
+# omitted here is a family whose rows cannot resolve.
+#
+# THIS LIST MUST STAY IDENTICAL to the one in the intra evaluator's `self-checks.sh`. The two
+# govern the two halves of the same identity model — orphan-carrier detection WITHIN a set
+# there, owner-name resolution ACROSS a seam here — so widening one alone reinstates the same
+# failure in the other half.
+#
+# A family MUST NOT be added here speculatively. The admitted set is exactly the set some
+# area DEFINES: the eight in `behavior-docs/docs/behavior/invariants.md`'s INV-3 and the two
+# in every `docs/decisions/README.md`'s "Entry ids". An unrecognized family MUST reach the
+# loud per-row FAIL below rather than be quietly admitted by a catch-all prefix pattern.
+IDRE='\b(INV|GOAL|STORY|USECASE|JOURNEY|INTF|ACTOR|OQ|DEC|IMPL)-[A-Za-z0-9]+(-[A-Za-z0-9]+)*\b'
+# The typed-name SHAPE, family-agnostic. It is used for ONE purpose only: NAMING the offending
+# token in the unrecognized-family FAIL below, so the report says which id it choked on. It
+# MUST NOT be substituted for `IDRE` anywhere a name is RESOLVED or COMPARED — admitting an
+# arbitrary uppercase prefix as an identity is precisely the silent widening the paragraph
+# above forbids.
+ANYIDRE='\b[A-Z][A-Z0-9]*-[A-Za-z0-9]+(-[A-Za-z0-9]+)*\b'
 
 trim() { sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//'; }
 
@@ -114,13 +139,50 @@ cell_uuid() {
   printf '%s' "$u"
 }
 
-# owner_name_for_uuid <uuid> — print the owner's current name (first ID token on
-# the carrier line) for a UUID, or empty if the UUID is not present in the owner.
+# owner_name_for_uuid <uuid> — resolve a cited owner UUID to the owner's CURRENT name for it
+# (the first ID token on its carrier line). THREE outcomes, and the caller MUST keep them
+# distinct because each is a different finding:
+#
+#   rc 0, a name on stdout   — RESOLVED: a carrier line was found and it carries a token of a
+#                              family `IDRE` admits.
+#   rc 0, nothing on stdout  — the UUID appears in NO owner carrier line: a genuine divergence,
+#                              reported by the caller's existing `-z` branch.
+#   rc 3, a token on stdout  — a carrier line WAS found, but it carries no token of any admitted
+#                              family: the id family is UNRECOGNIZED.
+#
+# THE rc-3 PATH IS THE POINT, and it MUST NOT be written either of the two shorter ways:
+#
+#   as a bare `grep -oE "$IDRE" | head -1` (this function's pre-fix form) — the grep matches
+#   nothing, exits 1, and `set -o pipefail` propagates that through the caller's command
+#   substitution, so `set -e` kills the run MID-LOOP: exit 1 with NO row output at all. Not one
+#   row is reported, not even the rows already resolved before the offending one.
+#
+#   as that same grep with `|| true` — STRICTLY WORSE, and it MUST NOT be reintroduced. The
+#   function would return empty, which is indistinguishable from "this UUID resolves to no owner
+#   definition", so the caller reports a FALSE `divergence` FAIL against a row whose identity
+#   resolved perfectly. A loud crash at least tells the reader nothing was checked; a false
+#   divergence asserts a conclusion the script never reached.
+#
+# An unrecognized family is a real defect in exactly one of two places — an id whose family no
+# area defines, or a family this evaluator has not been taught — so it MUST surface as a LOUD
+# per-row FAIL that NAMES the token, leaving the reader to decide which of the two it is.
 owner_name_for_uuid() {
-  local u="$1" line
+  local u="$1" line id offender
   line=$({ grep -rhE "uuid:[[:space:]]*${u}[[:space:]]*-->" "$OWNER"/*.md || true; } | head -1)
   [ -n "$line" ] || return 0
-  printf '%s\n' "$line" | grep -oE "$IDRE" | head -1
+  id=$({ printf '%s\n' "$line" | grep -oE "$IDRE" || true; } | head -1)
+  if [ -n "$id" ]; then
+    printf '%s\n' "$id"
+    return 0
+  fi
+  # Name what IS on the carrier line so the report distinguishes an unlearned family
+  # (`POLICY-3`) from a carrier bearing no id at all. The UUID comment is stripped first:
+  # an UPPERCASE-hex UUID matches `ANYIDRE` itself, and reporting the identity back as the
+  # offending name would be worse than reporting nothing.
+  offender=$({ printf '%s\n' "${line%%<!--*}" | grep -oE "$ANYIDRE" || true; } | head -1)
+  [ -n "$offender" ] || offender="<no id token on the carrier line>"
+  printf '%s\n' "$offender"
+  return 3
 }
 
 fail=0
@@ -201,13 +263,25 @@ while IFS= read -r row; do
     esac
   fi
 
-  ownername=$(owner_name_for_uuid "$u")
+  # `|| rc=$?` is REQUIRED, not defensive: the rc-3 outcome is a per-row FINDING, so it MUST
+  # NOT propagate through `set -e` and abort the loop — that is the very crash being fixed.
+  # It is also NOT a blanket `|| true`: the status is CAPTURED and branched on below, so an
+  # unrecognized family stays loud instead of collapsing into the divergence branch.
+  rc=0
+  ownername=$(owner_name_for_uuid "$u") || rc=$?
   # Normalize the cited name to its bare ID token (the cell wraps it in a
   # markdown code span, e.g. `INTF-SOURCE`), so it compares to the owner's
-  # IDRE-extracted name.
-  citedid=$(printf '%s\n' "$name" | grep -oE "$IDRE" | head -1)
+  # IDRE-extracted name. Here `|| true` IS correct where it is forbidden in
+  # `owner_name_for_uuid`, and the difference is the NEXT line: an empty match has an
+  # EXPLICIT fallback (compare the cell verbatim), so nothing is concluded from silence.
+  # Unguarded, this grep is the same pipefail crash — a row whose Name cell carries no
+  # typed id at all would kill the loop.
+  citedid=$({ printf '%s\n' "$name" | grep -oE "$IDRE" || true; } | head -1)
   [ -n "$citedid" ] || citedid="$name"
-  if [ -z "$ownername" ]; then
+  if [ "$rc" -eq 3 ]; then
+    printf '  FAIL      %-22s (owner UUID %s resolves to a definition whose id family is UNRECOGNIZED: %s — teach IDRE the family, or fix the id)\n' "$name" "$u" "$ownername"
+    fail=1
+  elif [ -z "$ownername" ]; then
     printf '  FAIL      %-22s (owner UUID %s resolves to NO owner definition — divergence)\n' "$name" "$u"
     fail=1
   elif [ "$ownername" = "$citedid" ]; then
@@ -233,7 +307,7 @@ elif [ "$found_rows" -eq 0 ]; then
   echo "  (implementer declares no external references)"
 fi
 if [ "$fail" -ne 0 ]; then
-  echo "INTER: FAIL — one or more rows did not resolve (unresolved owner UUID, or an unresolvable row)"
+  echo "INTER: FAIL — one or more rows did not resolve (unresolved owner UUID, an unresolvable row, or an unrecognized id family)"
   exit 1
 fi
 echo "INTER: no divergence (warnings, if any, are stale NAMES — never broken identity)"

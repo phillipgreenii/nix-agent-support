@@ -42,13 +42,26 @@ owner's UUID — in its `## External references` imports table. The **name is a 
 
 Run **`scripts/resolve-imports.sh <owner> <implementer>`**. For every row of the implementer's
 `## External references` table it prints one of `ok` / `WARN` (stale name) / `FAIL` / `external`
-(declared external contract), and exits non-zero iff any row **failed to resolve**. Two conditions
-are a `FAIL`: an owner UUID that resolves to no owner definition (divergence), and a row carrying no
+(declared external contract), and exits non-zero iff any row **failed to resolve**. Three conditions
+are a `FAIL`: an owner UUID that resolves to no owner definition (divergence); a row carrying no
 parseable owner UUID that is not marked external (**unresolvable** — including a
-`[<uuid>](remote-url)` cell whose link text is not a UUID). An unresolvable row is never a warning:
+`[<uuid>](remote-url)` cell whose link text is not a UUID); and an owner UUID that resolves to a
+definition whose **id family is unrecognized**. An unresolvable row is never a warning:
 warning on it left the exit status at 0, so a table whose shape the parser did not understand
 reported success while resolving nothing. Turn each `FAIL` into a reconciliation finding and each
 `WARN` into a rename-the-citation note.
+
+**Which id families a row may cite.** Ten: the eight `INV-3` enumerates for behavior elements
+(`INV-`, `GOAL-`, `STORY-`, `USECASE-`, `JOURNEY-`, `INTF-`, `ACTOR-`, `OQ-`) plus the two every
+`docs/decisions/README.md` defines for decision entries — `DEC-<TOPIC>-<n>` (settled) and
+`IMPL-<n>` (captured, not yet decided). `GOAL-5` makes a decision entry belonging to **another**
+scope declarable in this table like any other external element, so a `DEC-`/`IMPL-` row is
+ordinary, not exceptional. An id outside those ten is reported as a **per-row `FAIL` naming the
+token** — the script neither crashes nor guesses, and the reader decides whether the id is wrong or
+the evaluator has not been taught a new family. The list lives in `resolve-imports.sh`'s `IDRE` and
+MUST stay identical to the intra evaluator's `self-checks.sh` `IDRE`: the two govern the two halves
+of one identity model (owner-name resolution across a seam, orphan-carrier detection within a set),
+so widening one alone reinstates the same failure in the other half.
 
 Two table shapes are accepted, detected **per row**, so a set part-way through migrating is still
 checked: `| Name | Owner set-path | Owner UUID |` and

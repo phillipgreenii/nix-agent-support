@@ -208,6 +208,55 @@ MD
   ! echo "$output" | grep -qiE "dual identity|orphan carrier"
 }
 
+# --- Citable id families (bead pg2-rlu3m) --------------------------------------
+# `IDRE` enumerates the typed-name families this script knows, and a family missing from
+# it is a FALSE FAILURE rather than a blind spot: the definition line matches no ID, so
+# its UUID carrier reads as an ORPHAN (a carrier with no ID on its line) and the UUID
+# section FAILs on a conformant set. That is exactly why `USECASE` was added; `DEC-` and
+# `IMPL-` — the decision-doc entry families every `docs/decisions/README.md` defines —
+# reproduce it on any decisions area run through this script. This list MUST stay
+# identical to the inter evaluator's `resolve-imports.sh` `IDRE`.
+
+@test "id-family: a DEC- decision-entry carrier is a definition, not an orphan" {
+  cat > "$SET/decisions.md" <<'MD'
+# Decisions
+### `DEC-SEAM-1` — the imports link points toward the more public side <!-- uuid: 33333333-3333-4333-8333-333333333333 -->
+MD
+  run_selfchecks
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "DEC-SEAM-1"
+  # Trailing negation, per the suite's convention (SC2314 is an error for an earlier one).
+  ! echo "$output" | grep -qi "orphan carrier"
+}
+
+@test "id-family: an IMPL- captured-entry carrier is a definition, not an orphan" {
+  cat > "$SET/decisions.md" <<'MD'
+# Decisions
+### `IMPL-1` — governance authority, captured but not settled <!-- uuid: 44444444-4444-4444-8444-444444444444 -->
+MD
+  run_selfchecks
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "IMPL-1"
+  # Trailing negation, per the suite's convention (SC2314 is an error for an earlier one).
+  ! echo "$output" | grep -qi "orphan carrier"
+}
+
+@test "id-family: an UNRECOGNIZED family is still FAILed as an orphan carrier, naming the UUID" {
+  # Widening IDRE MUST NOT become a catch-all. A typed id whose family no area defines
+  # stays a loud finding here, so an unlearned family is reported rather than admitted.
+  cat > "$SET/decisions.md" <<'MD'
+# Decisions
+### `DEC-SEAM-1` — a family that IS defined <!-- uuid: 33333333-3333-4333-8333-333333333333 -->
+### `POLICY-3` — a typed id whose family no area defines <!-- uuid: 55555555-5555-4555-8555-555555555555 -->
+MD
+  run_selfchecks
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qi "orphan carrier"
+  echo "$output" | grep -q "55555555-5555-4555-8555-555555555555"
+  # The admitted family in the same set is NOT dragged into the finding.
+  ! echo "$output" | grep -qi "orphan carrier.*33333333-3333-4333-8333-333333333333"
+}
+
 @test "self-checks fails on a MISSING dir AND on an empty set (no .md files)" {
   # #6: both runs are asserted — the missing-dir run (cd fails) and the
   # exists-but-empty run (no *.md) must each exit non-zero.

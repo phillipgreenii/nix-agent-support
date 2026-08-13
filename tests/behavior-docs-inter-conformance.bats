@@ -321,6 +321,77 @@ MD
   ! echo "$output" | grep -qE 'INV-OTHER-1'
 }
 
+# --- Citable id families (bead pg2-rlu3m) --------------------------------------
+# `IDRE` enumerates the families an imports row may cite, and `owner_name_for_uuid`
+# extracts the owner's current name with that same regex. A family missing from it did
+# NOT degrade gracefully: the extracting `grep -oE` matched nothing, exited 1, and
+# `pipefail` + `set -e` killed the script MID-LOOP — exit 1 with NO row output at all,
+# so nothing was reported about ANY row, not even the ones already resolved. `DEC-` and
+# `IMPL-` (the decision-doc entry families, citable per `GOAL-5`) were the live case.
+#
+# The fix MUST NOT be a bare `|| true` on that grep: the function would return empty,
+# which is indistinguishable from "this UUID resolves to no owner definition", so the
+# caller would report a FALSE `divergence` FAIL on a row whose identity resolved. The
+# third test below is the guard against that regression, and it asserts BOTH that the
+# message names the offending id and that the surrounding rows are still reported.
+
+# owner_decisions writes an owner set of decision-doc entries plus one id of a family
+# no area defines, so the admitted and unadmitted cases share one owner.
+owner_decisions() {
+  cat > "$OWNER/decisions.md" <<'MD'
+# Decisions — owner
+### `DEC-SEAM-1` — the imports link points toward the more public side <!-- uuid: 33333333-3333-4333-8333-333333333333 -->
+### `IMPL-1` — governance authority, captured but not settled <!-- uuid: 44444444-4444-4444-8444-444444444444 -->
+### `POLICY-3` — a typed id whose family no area defines <!-- uuid: 55555555-5555-4555-8555-555555555555 -->
+MD
+}
+
+@test "id-family: a DEC- decision entry cited in an imports row resolves (was a mid-loop crash)" {
+  owner_decisions
+  impl_table '`DEC-SEAM-1`' '33333333-3333-4333-8333-333333333333'
+  run resolve-imports "$OWNER" "$IMPL"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qE '^  ok .*DEC-SEAM-1'
+}
+
+@test "id-family: an IMPL- captured entry cited in an imports row resolves" {
+  owner_decisions
+  impl_table '`IMPL-1`' '44444444-4444-4444-8444-444444444444'
+  run resolve-imports "$OWNER" "$IMPL"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qE '^  ok .*IMPL-1'
+}
+
+@test "id-family: an UNRECOGNIZED family is a per-row FAIL naming the id — never a crash, never a false divergence" {
+  owner_decisions
+  # The unrecognized row sits BETWEEN two resolvable ones on purpose: a mid-loop abort
+  # loses the row after it (and, buffered, the one before), so asserting all three are
+  # reported is what distinguishes a per-row finding from the crash.
+  cat > "$IMPL/interfaces.md" <<'MD'
+# Interfaces — implementer
+
+## External references
+
+| Name | Owner set-path | Owner UUID |
+| ---- | -------------- | ---------- |
+| `DEC-SEAM-1` | `owner/docs/decisions` | 33333333-3333-4333-8333-333333333333 |
+| `POLICY-3` | `owner/docs/decisions` | 55555555-5555-4555-8555-555555555555 |
+| `IMPL-1` | `owner/docs/decisions` | 44444444-4444-4444-8444-444444444444 |
+MD
+  run resolve-imports "$OWNER" "$IMPL"
+  [ "$status" -ne 0 ]
+  # A per-row FAIL that NAMES the offending id and says what is wrong with it.
+  echo "$output" | grep -qE '^  FAIL .*UNRECOGNIZED.*POLICY-3'
+  # NOT a mid-loop abort: every other row is still classified.
+  echo "$output" | grep -qE '^  ok .*DEC-SEAM-1'
+  echo "$output" | grep -qE '^  ok .*IMPL-1'
+  # NOT a false divergence: the UUID resolved, so NO row may be reported as resolving
+  # to no owner definition — that is the `|| true` regression this guards against.
+  # One TRAILING negation, per the suite's convention: SC2314 is an ERROR for any
+  # earlier one, and `run !` cannot wrap a pipeline.
+  ! echo "$output" | grep -q 'divergence'
+}
+
 # --- Shipped corpus is genuinely exercised (#5) --------------------------------
 # The durable corpus/inter fixtures ARE the agent-facing artifact; drive the real
 # evaluator over each so the corpus cannot silently rot while the gate stays

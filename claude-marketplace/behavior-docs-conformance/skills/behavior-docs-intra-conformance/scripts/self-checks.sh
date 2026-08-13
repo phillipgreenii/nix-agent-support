@@ -25,10 +25,22 @@ mds=(*.md)
   echo "no .md files in $DIR" >&2
   exit 1
 }
-# The typed-name families INV-3 enumerates. `USECASE` is one of them: without it a
-# `USECASE-<n>` definition line matches no ID, so its UUID carrier reads as an ORPHAN
-# (a carrier with no ID on its line) and the UUID section FAILs on a conformant set.
-IDRE='\b(INV|GOAL|STORY|USECASE|JOURNEY|INTF|ACTOR|OQ)-[A-Za-z0-9]+(-[A-Za-z0-9]+)*\b'
+# Every typed-name family in use: the eight INV-3 enumerates for behavior elements, plus the
+# two the decision-doc areas define (`DEC-<TOPIC>-<n>` settled, `IMPL-<n>` captured-but-not-
+# decided — every `docs/decisions/README.md`'s "Entry ids"). A missing family is not a quiet
+# blind spot here, it is a FALSE FAILURE: a definition line whose family this regex does not
+# know matches no ID, so its UUID carrier reads as an ORPHAN (a carrier with no ID on its
+# line) and the UUID section FAILs on a conformant set. That is what `USECASE` was added to
+# fix, and `DEC`/`IMPL` reproduce it exactly on any decisions area run through this script.
+#
+# THIS LIST MUST STAY IDENTICAL to the one in the inter evaluator's `resolve-imports.sh`. The
+# two govern the two halves of the same identity model — orphan-carrier detection WITHIN a set
+# here, owner-name resolution ACROSS a seam there — so widening one alone reinstates the same
+# failure in the other half.
+#
+# A family MUST NOT be added speculatively; the admitted set is exactly the set some area
+# DEFINES.
+IDRE='\b(INV|GOAL|STORY|USECASE|JOURNEY|INTF|ACTOR|OQ|DEC|IMPL)-[A-Za-z0-9]+(-[A-Za-z0-9]+)*\b'
 sec() { printf '\n=== %s ===\n' "$1"; }
 
 sec "Files"
@@ -161,7 +173,12 @@ oq_gap=$(
   for f in ./*.md; do
     awk -v fname="${f#./}" '
       BEGIN {
-        IDPAT = "(INV|GOAL|STORY|USECASE|JOURNEY|INTF|ACTOR|OQ)-[A-Za-z0-9]+(-[A-Za-z0-9]+)*"
+        # The SAME family list as IDRE above, and it MUST stay in step with it. This one
+        # tracks which element definition the current line sits under, so a family it does
+        # not know is a definition that does not RESET the tracker: a gap line in an
+        # unrecognized element block is then attributed to whichever element preceded it —
+        # a FAIL naming the wrong id, or a spurious OQ- misuse. Same defect, quieter shape.
+        IDPAT = "(INV|GOAL|STORY|USECASE|JOURNEY|INTF|ACTOR|OQ|DEC|IMPL)-[A-Za-z0-9]+(-[A-Za-z0-9]+)*"
         DEFPAT = "^[ \t]*(([-*+][ \t]+)|(#+[ \t]+))[*_`]*" IDPAT
         cur = ""
       }
