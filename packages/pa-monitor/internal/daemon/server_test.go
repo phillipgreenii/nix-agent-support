@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials/insecure"
 
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
@@ -177,8 +178,56 @@ func TestWatchState_ClampsTooFastInterval(t *testing.T) {
 	}
 }
 
+// socketReadyTimeout bounds both daemon-readiness waits below. It is
+// deliberately far above waitForFile's 2s allowance: these waits exist to
+// absorb the CPU starvation that makes the startup race observable at all
+// (bead pg2-kyqpd), so a deadline that is itself tight under load would only
+// relocate the flake instead of removing it.
+const socketReadyTimeout = 15 * time.Second
+
+// waitForSocketAccepting blocks until connect(2) to the Unix socket at
+// sockPath SUCCEEDS — i.e. until the daemon has reached listen(2).
+//
+// Tests MUST establish daemon readiness this way (directly, or via dialUnix,
+// which calls it) and MUST NOT treat waitForFile(paths.Socket) as readiness.
+// The socket INODE is created by bind(2), and net.Listen issues bind(2) and
+// listen(2) as two separate syscalls, so in the window between them the socket
+// file already exists while connect(2) is still refused. Under CPU contention
+// the daemon's thread can be descheduled inside that window for long enough
+// that a client which trusted the inode dials into it and fails with
+// "rpc error: code = Unavailable ... connect: connection refused" — the
+// pg2-kyqpd flake, which made `nix flake check` non-deterministic on a busy
+// machine. A successful probe dial is positive proof that listen(2) has run,
+// which is exactly the precondition the subsequent gRPC dial needs, so this
+// removes the race rather than widening a timeout.
+//
+// A not-yet-created path is retried exactly like a refusal, so the probe
+// subsumes waitForFile for socket paths.
+func waitForSocketAccepting(t *testing.T, sockPath string) {
+	t.Helper()
+	deadline := time.Now().Add(socketReadyTimeout)
+	for {
+		c, err := net.Dial("unix", sockPath)
+		if err == nil {
+			_ = c.Close()
+			return
+		}
+		if !time.Now().Before(deadline) {
+			t.Fatalf("socket %s did not accept a connection within %v: %v", sockPath, socketReadyTimeout, err)
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+}
+
+// dialUnix returns a gRPC client conn to the daemon's unix socket that is
+// already READY: the socket is proven to accept connections, and the lazy
+// grpc.NewClient handshake has completed. A caller's first RPC therefore never
+// has to discover the transport — RPCs are fail-fast by default (no
+// grpc.WaitForReady), so one refused connect would surface as an Unavailable
+// test failure with no retry behind it.
 func dialUnix(t *testing.T, sockPath string) *grpc.ClientConn {
 	t.Helper()
+	waitForSocketAccepting(t, sockPath)
 	conn, err := grpc.NewClient(
 		"unix:"+sockPath,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
@@ -189,11 +238,36 @@ func dialUnix(t *testing.T, sockPath string) *grpc.ClientConn {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Same blocking-handshake idiom as internal/rpcclient.DialPath: grpc.NewClient
+	// connects lazily, so kick the connect off and wait for READY here rather than
+	// leaving it to the caller's first RPC.
+	readyCtx, cancel := context.WithTimeout(context.Background(), socketReadyTimeout)
+	defer cancel()
+	conn.Connect()
+	for state := conn.GetState(); state != connectivity.Ready; state = conn.GetState() {
+		if state == connectivity.Idle {
+			// One addition over DialPath: a ClientConn parks back in IDLE after a
+			// failed attempt and reconnects only on an RPC or an explicit Connect,
+			// so without this nudge the wait would stall to the deadline instead of
+			// retrying against a listener already proven to accept.
+			conn.Connect()
+		}
+		if !conn.WaitForStateChange(readyCtx, state) {
+			_ = conn.Close()
+			t.Fatalf("gRPC conn to %s not READY within %v (last state %v)", sockPath, socketReadyTimeout, state)
+		}
+	}
 	return conn
 }
 
 // dialTCP is dialUnix's TCP counterpart, used by the otelgrpc stats-handler
 // tests below (they need a listener address, not a unix socket path).
+//
+// It needs no readiness wait: those tests own their listener, calling
+// net.Listen("tcp", ...) synchronously and only dialling the address it
+// returned, so there is no bind/listen window for a concurrent dial to land in
+// (contrast waitForSocketAccepting, where the daemon binds on its own
+// goroutine).
 func dialTCP(t *testing.T, addr string) *grpc.ClientConn {
 	t.Helper()
 	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))

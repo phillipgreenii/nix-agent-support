@@ -166,6 +166,13 @@ func TestRun_CleanShutdownRemovesArtifacts(t *testing.T) {
 	}
 }
 
+// waitForFile blocks until an inode exists at path.
+//
+// It proves EXISTENCE only. For the daemon socket it MUST NOT be treated as a
+// readiness signal: net.Listen creates the socket inode at bind(2) and only
+// then issues listen(2), so this returns inside a window where connect(2) is
+// still refused (bead pg2-kyqpd). A test that is about to talk to the daemon
+// MUST use waitForSocketAccepting / dialUnix (see server_test.go) instead.
 func waitForFile(t *testing.T, path string) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
