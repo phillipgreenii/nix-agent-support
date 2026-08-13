@@ -455,6 +455,83 @@ func TestHeredocCommentsInBodiesAreData(t *testing.T) {
 	})
 }
 
+// TestHeredocRawReParsesToTheSameExecutable is the test owed to pg2-i11mh, and it is
+// deliberately written against a DIFFERENT input than that bead's reproducer.
+//
+// pg2-i11mh's reproducer was `0(#"\n<<#\n#\n0`, and the mechanism was the purest
+// instance of ADR 0039's root cause 2: `Raw` was POST-COMMENT-STRIP text, so the `#`
+// line that TERMINATED the `<<#` here-document had been deleted from it. Re-feeding
+// that `Raw` re-derived an UNTERMINATED here-document, and the leaf's executable came
+// back TRUNCATED — a rule would have judged a different command than was folded.
+// ADR 0039 step 2 (pg2-fez3d) closed it by redefining `Raw` as the exact source slice
+// of the owning statement, terminator included (I12).
+//
+// That reproducer is PINNED as a fuzz seed
+// (`testdata/fuzz/FuzzParse/pg2-i11mh-heredoc-terminator-shaped-as-a-comment`), but the
+// pin guards the idempotence invariant only VACUOUSLY, and saying so is the point of
+// this comment. `<<#` has no delimiter word at all — `#` opens a COMMENT — so the real
+// grammar rejects the whole input (`bash -n` agrees, exiting 2 with "syntax error near
+// unexpected token `newline'"). It therefore lands on the I1b floor with ZERO leaves,
+// and a property quantified over leaves passes because there is nothing to quantify
+// over. The seed still earns its place — it pins that this input keeps yielding no
+// leaves rather than becoming parseable with a short `Raw` — but it cannot be the
+// evidence that the invariant holds.
+//
+// This test is that evidence: the same invariant on here-documents that DO produce
+// leaves. The assertion that makes it non-vacuous is the `ParseShell(leaf.Raw)` one —
+// FuzzParse EXEMPTS a leaf whose `Raw` does not re-parse (the terminator-extent residue
+// recorded in LOWERING.md), so proving `Raw` parseable is what proves the executable
+// check below is actually reached rather than skipped.
+func TestHeredocRawReParsesToTheSameExecutable(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		command  string
+		wantExec []string
+	}{
+		// The reproducer's MECHANISM in legal form: a QUOTED `#` delimiter is a real
+		// delimiter word, so the terminator line is a bare `#` — the exact line the
+		// outgoing per-line comment strip deleted. This is the row that would have failed
+		// before I12.
+		{"a terminator line that is a bare `#`", "cat <<'#'\nbody\n#\necho after", []string{"cat", "echo"}},
+		{"a delimiter that merely starts with `#`", "cat <<\"#EOF\"\nbody\n#EOF\necho after", []string{"cat", "echo"}},
+		{"a body line that looks like a comment", "cat <<EOF\n# looks like a comment\nEOF\necho after", []string{"cat", "echo"}},
+		{"the ordinary shape", "cat <<EOF\nx\nEOF\necho after", []string{"cat", "echo"}},
+		{"a tab-stripping `<<-`", "cat <<-EOF\n\tx\n\tEOF\necho after", []string{"cat", "echo"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			leaves := Parse(tt.command)
+			var execs []string
+			for _, leaf := range leaves {
+				execs = append(execs, leaf.Executable)
+			}
+			if !reflect.DeepEqual(execs, tt.wantExec) {
+				t.Fatalf("Parse(%q) executables = %q, want %q — the statement was truncated at the terminator", tt.command, execs, tt.wantExec)
+			}
+			for i, leaf := range leaves {
+				// I12: Raw is an exact slice of the source, so it appears verbatim in it.
+				if !strings.Contains(tt.command, leaf.Raw) {
+					t.Errorf("leaf %d Raw %q is not a slice of %q (I12)", i, leaf.Raw, tt.command)
+				}
+				// The non-vacuity guard: FuzzParse skips the check below for a Raw that does
+				// not re-parse, so this leaf must not qualify for that exemption.
+				if re := ParseShell(leaf.Raw); re.Unparseable {
+					t.Fatalf("leaf %d Raw %q does not re-parse (%s); the idempotence check would be SKIPPED, not passed", i, leaf.Raw, re.Reason)
+				}
+				// Idempotence: the engine re-feeds leaf.Raw as a synthetic command, so
+				// re-parsing it must reproduce the same executable or a rule judges a
+				// different command than was folded. This is what pg2-i11mh reported broken.
+				reparsed := Parse(leaf.Raw)
+				if len(reparsed) == 0 {
+					t.Fatalf("leaf %d Raw %q re-parses to zero leaves; the executable %q is dropped on re-feed", i, leaf.Raw, leaf.Executable)
+				}
+				if reparsed[0].Executable != leaf.Executable {
+					t.Errorf("leaf %d Raw %q re-parses to exec %q, want %q (non-idempotent executable)", i, leaf.Raw, reparsed[0].Executable, leaf.Executable)
+				}
+			}
+		})
+	}
+}
+
 // TestNonHeredocTextRecordsNoExtent REPLACES
 // TestStripHeredocBodiesPreservesNonHeredocText, whose target
 // (`stripHeredocBodies`) is deleted in ADR 0039 step 2.
