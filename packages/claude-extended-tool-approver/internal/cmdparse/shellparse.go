@@ -799,21 +799,29 @@ func (lw *lowering) emitRedirOnly(st *syntax.Stmt, pid, idx int) {
 // `{ …; } > f`, `if …; fi > f`, and `case … esac > f` alike. There is no residue
 // text-prefix match and no leftover net.
 //
-// Raw is the residue: the exact source slice from the first redirection operator to
-// the end of the statement, which is the same text the outgoing doneResidue
-// produced for the loop case.
+// Raw is the residue: the exact source slice from the first redirection to the end of
+// the statement, which is the same text the outgoing doneResidue produced for the loop
+// case.
+//
+// It starts at `Redirs[0].Pos()`, NOT at `Redirs[0].OpPos`. The two differ by the
+// DESCRIPTOR: `Redirect.Pos()` is the fd's position when there is one, so `2>/dev/null`
+// starts one byte before its `>`. Using OpPos put the fd OUTSIDE the leaf's span, and
+// ENFORCEMENT GUARD 4 caught it on 123 corpus commands — every one of them a
+// `done 2>/dev/null` on a loop inside a pipeline. That is a coverage gap rather than a
+// dropped redirection (the leaf existed and recorded the write), but the guard's whole
+// job is to refuse "close enough" about which bytes a leaf answers for.
 func (lw *lowering) emitCompoundRedirs(st *syntax.Stmt, pid, idx int) {
 	if len(st.Redirs) == 0 {
 		return
 	}
 	leaf := ParsedCommand{
-		Raw:           strings.TrimSpace(lw.src[min(int(st.Redirs[0].OpPos.Offset()), len(lw.src)):lw.stmtEndOffset(st)]),
+		Raw:           strings.TrimSpace(lw.src[min(int(st.Redirs[0].Pos().Offset()), len(lw.src)):lw.stmtEndOffset(st)]),
 		PipelineID:    pid,
 		PipelineIndex: idx,
 	}
 	lw.attachRedirs(st, &leaf)
 	if len(leaf.Redirections) > 0 || leaf.HasHeredoc {
-		lw.appendLeaf(leaf, sourceSpan{lo: int(st.Redirs[0].OpPos.Offset()), hi: lw.stmtEndOffset(st)})
+		lw.appendLeaf(leaf, sourceSpan{lo: int(st.Redirs[0].Pos().Offset()), hi: lw.stmtEndOffset(st)})
 	}
 }
 
