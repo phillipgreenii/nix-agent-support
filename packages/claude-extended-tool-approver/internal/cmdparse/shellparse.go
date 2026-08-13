@@ -230,7 +230,7 @@ func LeafCoverageGaps(command string) []CoverageGap {
 			return true
 
 		case *syntax.Redirect:
-			if !redirectIsEvaluable(v) {
+			if !lw.redirectIsEvaluable(v) {
 				// EXEMPT, mirroring attachRedir's documented drop: `N>&M` duplicates a
 				// descriptor, `N>&-` closes one, and a dangling operator has no target.
 				// None names a path and none creates a file, so the lowering records
@@ -257,7 +257,7 @@ func LeafCoverageGaps(command string) []CoverageGap {
 // redirectIsEvaluable reports whether a redirection is one the lowering RECORDS —
 // i.e. one that names a target a rule or the engine could evaluate. It is the single
 // definition guard 4 and `attachRedir` share.
-func redirectIsEvaluable(r *syntax.Redirect) bool {
+func (lw *lowering) redirectIsEvaluable(r *syntax.Redirect) bool {
 	switch r.Op {
 	case syntax.Hdoc, syntax.DashHdoc, syntax.WordHdoc:
 		return true // a heredoc/herestring always owes the I2 floor
@@ -268,10 +268,17 @@ func redirectIsEvaluable(r *syntax.Redirect) bool {
 		if r.Word == nil {
 			return false
 		}
-		t := r.Word.Lit()
-		return t != "-" && !isAllDigits(t)
+		t := unquote(lw.node(r.Word))
+		// An empty target names nothing to path-check, exactly as attachRedir treats it.
+		return t != "" && t != "-" && !isAllDigits(t)
 	}
-	return r.Word != nil && redirCore(r.Op) != ""
+	if r.Word == nil || redirCore(r.Op) == "" {
+		return false
+	}
+	// A target that unquotes to NOTHING (`0<''`) names no path, so attachRedir
+	// records nothing for it. Mirrored here rather than restated, so the guard and the
+	// lowering cannot drift about which redirections matter.
+	return unquote(lw.node(r.Word)) != ""
 }
 
 // unparseable maps a parser error onto the I1b/I10 floor value, attributing the
@@ -407,7 +414,7 @@ func (lw *lowering) stmtRaw(st *syntax.Stmt) string {
 	if lo < 0 || lo > len(lw.src) || hi < lo {
 		return ""
 	}
-	return strings.TrimRight(strings.TrimSpace(lw.src[lo:hi]), "&;| \t\n")
+	return lw.src[lo:hi]
 }
 
 // stmtEnd is a statement's TRUE source end: the maximum of what syntax.Stmt.End()
@@ -430,9 +437,44 @@ func (lw *lowering) stmtRaw(st *syntax.Stmt) string {
 // alternative — cutting the body back out — is the post-strip Raw this migration
 // exists to delete.
 func (lw *lowering) stmtEndOffset(st *syntax.Stmt) int {
-	end := int(stmtEnd(st).Offset())
+	// The end is COMPUTED, not trimmed. `syntax.Stmt.End()` includes the trailing
+	// separator (`;`, `&`, `|&`), and stripping that separator by TrimRight-ing the
+	// slice was a real non-idempotence the fuzzer found on `\ ` — an ESCAPED SPACE is
+	// a one-character word, so trimming trailing whitespace cut the word in half and
+	// the leaf's Raw re-parsed to a DIFFERENT executable (`\` instead of `\ `). Taking
+	// the maximum of the COMMAND's end and every redirection's end excludes the
+	// separator by construction and cannot cut inside a word.
+	end := 0
+	if st.Cmd != nil {
+		end = int(st.Cmd.End().Offset())
+	}
+	// An EMPTY-VALUE assignment's own end is short by one byte for the append form —
+	// `syntax.Assign.End()` stops after the `+` of `A+=` — so a statement that IS just
+	// that assignment would get `Raw` = `A+`, which re-parses to NO assignment at all.
+	// Correct it from the same fact assignRaw uses (see its comment).
+	for _, a := range assignsOf(st.Cmd) {
+		if e := lw.assignEndOffset(a); e > end {
+			end = e
+		}
+	}
+	if p := int(st.Pos().Offset()); p > end {
+		end = p
+	}
+	emptyHdocs := 0
 	for _, r := range st.Redirs {
-		if e := lw.emptyHeredocEnd(r); e > end {
+		if re := r.End(); re.IsValid() && int(re.Offset()) > end {
+			end = int(re.Offset())
+		}
+		if (r.Op == syntax.Hdoc || r.Op == syntax.DashHdoc) && r.Hdoc == nil {
+			emptyHdocs++
+		}
+	}
+	// `end` is now the end of the OPERATOR LINE's last token, which is where an
+	// EMPTY-bodied here-document's terminator search must start — not from the operator
+	// word, because a word on that line can itself span a newline (an extended glob
+	// `!(\n)` does, and the fuzzer found it).
+	if emptyHdocs > 0 {
+		if e := lw.emptyHeredocTerminatorEnd(end, emptyHdocs); e > end {
 			end = e
 		}
 	}
@@ -442,50 +484,86 @@ func (lw *lowering) stmtEndOffset(st *syntax.Stmt) int {
 	return end
 }
 
-// emptyHeredocEnd returns the source offset just past the TERMINATOR LINE of a
-// heredoc whose BODY IS EMPTY, or -1 when r is not that case.
-//
-// `Redirect.End()` is `Hdoc.End()` when there is a body and `Word.End()` otherwise —
-// and an EMPTY body has no Hdoc node at all, so `cat <<EOF\nEOF` reports its end
-// right after the operator word, excluding the terminator line entirely. `Raw` would
-// then be `cat <<EOF`, which re-parses to an UNTERMINATED here-document and therefore
-// to NO LEAF, which is the very failure I12 exists to prevent.
-//
-// The rule is one line of arithmetic over a fact the PARSER established, not a scan
-// for structure: the parser has already decided this heredoc's body is empty, and
-// bash's grammar puts the body after the operator LINE, so the terminator IS the next
-// line. Finding the end is "skip to the next newline, then to the one after it".
-// Nothing here decides where a command begins or ends.
-func (lw *lowering) emptyHeredocEnd(r *syntax.Redirect) int {
-	if r.Op != syntax.Hdoc && r.Op != syntax.DashHdoc {
-		return -1
+// assignsOf returns a command's assignments, for the two command types that carry
+// them.
+func assignsOf(cmd syntax.Command) []*syntax.Assign {
+	switch c := cmd.(type) {
+	case *syntax.CallExpr:
+		return c.Assigns
+	case *syntax.DeclClause:
+		return c.Args
 	}
-	if r.Hdoc != nil || r.Word == nil {
-		return -1
-	}
-	from := int(r.Word.End().Offset())
-	if from < 0 || from > len(lw.src) {
-		return -1
-	}
-	nl := strings.IndexByte(lw.src[from:], '\n')
-	if nl < 0 {
-		return len(lw.src) // no operator-line newline: the heredoc runs to end of input
-	}
-	rest := from + nl + 1
-	if next := strings.IndexByte(lw.src[rest:], '\n'); next >= 0 {
-		return rest + next + 1
-	}
-	return len(lw.src)
+	return nil
 }
 
-func stmtEnd(st *syntax.Stmt) syntax.Pos {
-	end := st.End()
-	for _, r := range st.Redirs {
-		if re := r.End(); re.IsValid() && (!end.IsValid() || re.Offset() > end.Offset()) {
-			end = re
+// assignEndOffset is an assignment's TRUE source end, correcting the upstream
+// off-by-one on an empty-value append (`A+=`).
+func (lw *lowering) assignEndOffset(a *syntax.Assign) int {
+	end := int(a.End().Offset())
+	if a.Name == nil || a.Value != nil || a.Array != nil || a.Naked {
+		return end
+	}
+	// Walk from the NAME to the `=` the parser has already told us is there (a
+	// non-Naked Assign has one), stepping over the optional `+` of the append form and
+	// over line-continuation pairs. This is arithmetic over a parser fact, not a search
+	// for structure: it decides nothing about where a command begins or ends, and the
+	// alternative — adding a fixed 1 or 2 — is wrong the moment a continuation sits
+	// inside the assignment (`A\<newline>=`, found by fuzzing).
+	i := int(a.Name.End().Offset())
+	for i < len(lw.src) {
+		switch {
+		case lw.src[i] == '\\' && i+1 < len(lw.src) && lw.src[i+1] == '\n':
+			i += 2
+		case lw.src[i] == '+':
+			i++
+		case lw.src[i] == '=':
+			return i + 1
+		default:
+			return end
 		}
 	}
 	return end
+}
+
+// emptyHeredocTerminatorEnd returns the source offset just past the TERMINATOR LINES
+// of the here-documents on this statement whose BODY IS EMPTY.
+//
+// It exists because `Redirect.End()` is `Hdoc.End()` when there is a body and
+// `Word.End()` otherwise — and an EMPTY body has no Hdoc node at all, so
+// `cat <<EOF\nEOF` reports its end right after the operator word, excluding the
+// terminator line entirely. `Raw` would then be `cat <<EOF`, which re-parses to an
+// UNTERMINATED here-document and therefore to NO LEAF, which is the very failure I12
+// exists to prevent.
+//
+// The rule is arithmetic over facts the PARSER established, not a scan for structure:
+// the parser has already decided which bodies are empty and where the operator line's
+// last token ends, and bash's grammar puts each body after the operator LINE, one
+// after another. Finding the end is "skip past the operator line, then past one line
+// per empty body". Nothing here decides where a command begins or ends.
+//
+// RESIDUE, stated: with a MIX of empty and non-empty bodies on one statement the count
+// can under-shoot, because a later empty body's terminator sits after an earlier
+// non-empty body rather than after the operator line. The result is the MAX of this and
+// every `Hdoc.End()`, so the under-shoot only ever makes `Raw` shorter — the same
+// direction as the pre-I12 post-strip Raw, on a shape no corpus row carries.
+func (lw *lowering) emptyHeredocTerminatorEnd(operatorLineTokenEnd, emptyBodies int) int {
+	at := operatorLineTokenEnd
+	if at < 0 || at > len(lw.src) {
+		return -1
+	}
+	nl := strings.IndexByte(lw.src[at:], '\n')
+	if nl < 0 {
+		return len(lw.src) // no operator-line newline: the heredoc runs to end of input
+	}
+	at += nl + 1
+	for range emptyBodies {
+		next := strings.IndexByte(lw.src[at:], '\n')
+		if next < 0 {
+			return len(lw.src)
+		}
+		at += next + 1
+	}
+	return at
 }
 
 // lowerStmtsFresh lowers a top-level statement list, giving each statement its own
@@ -712,6 +790,15 @@ func (lw *lowering) lowerDecl(st *syntax.Stmt, cmd *syntax.DeclClause, pid, idx 
 // assignRaw returns an assignment's verbatim source text. A NAKED assignment
 // (`export B`, `declare -x`) has no Name, so its extent is its Value's.
 func (lw *lowering) assignRaw(a *syntax.Assign) string {
+	if a.Name != nil && a.Value == nil && a.Array == nil && !a.Naked {
+		// An assignment with an EMPTY VALUE — `A=` or `A+=`. `syntax.Assign.End()` stops
+		// after the `+` for the append form, so the source slice would be `A+`, which
+		// `isEnvAssign` then rejects for having no `=` — and the assignment would reach
+		// the env-var guard as NOTHING AT ALL. ENFORCEMENT GUARD 4 found it by fuzzing
+		// (`A+= A+=` reached no leaf), and it matters because setting a FLAGGED variable
+		// to empty is exactly what the env-var guard exists to see.
+		return lw.src[min(int(a.Name.Pos().Offset()), len(lw.src)):lw.assignEndOffset(a)]
+	}
 	if a.Name != nil {
 		return lw.slice(a.Name.Pos(), a.End())
 	}
@@ -772,6 +859,21 @@ func (lw *lowering) lowerCall(st *syntax.Stmt, cmd *syntax.CallExpr, pid, idx in
 		// BYPASS (pg2-mtnmb). There is no executable to unwrapCommand.
 		if len(leaf.EnvVars) > 0 || len(leaf.Redirections) > 0 || leaf.HasHeredoc {
 			lw.appendLeaf(leaf, sourceSpan{lo: int(st.Pos().Offset()), hi: lw.stmtEndOffset(st)})
+			return
+		}
+		if len(cmd.Args) > 0 || len(cmd.Assigns) > 0 {
+			// The statement HAS words or assignments but none of them produced anything
+			// the shapes above claim — `""` as a whole
+			// command, or `''`. It carries no executable, no assignment and no
+			// redirection, so none of the shapes above claims it, and DROPPING it is root
+			// cause 4 in the new code: the node would reach no leaf at all. The outgoing
+			// front end dropped it too; ENFORCEMENT GUARD 4 is what makes the drop
+			// visible, and it found this by fuzzing (`ParseShell("\"\"")`).
+			//
+			// It reaches a DATA leaf spanning the WHOLE STATEMENT: there is no command to
+			// judge, but its source text can hold a live substitution and the engine's
+			// command-less branch walks it.
+			lw.emitDataSpan(st.Pos(), syntax.NewPos(uint(lw.stmtEndOffset(st)), 0, 0))
 		}
 		return
 	}
@@ -783,7 +885,12 @@ func (lw *lowering) lowerCall(st *syntax.Stmt, cmd *syntax.CallExpr, pid, idx in
 func (lw *lowering) emitRedirOnly(st *syntax.Stmt, pid, idx int) {
 	leaf := ParsedCommand{Raw: lw.stmtRaw(st), PipelineID: pid, PipelineIndex: idx}
 	lw.attachRedirs(st, &leaf)
-	if len(leaf.Redirections) > 0 || leaf.HasHeredoc {
+	// `len(leaf.Args) > 0` is the fd-prefixed INPUT redirection parity path (see
+	// attachRedir): `0<f` on its own records no Redirection by design, but the operator
+	// and its target become ARGS, and the leaf must still be emitted or the node reaches
+	// nothing at all. ENFORCEMENT GUARD 4 found this by fuzzing (`0<0000`), which is the
+	// point of having a coverage check rather than only a differential replay.
+	if len(leaf.Redirections) > 0 || leaf.HasHeredoc || len(leaf.Args) > 0 {
 		lw.appendLeaf(leaf, sourceSpan{lo: int(st.Pos().Offset()), hi: lw.stmtEndOffset(st)})
 	}
 }
@@ -820,7 +927,11 @@ func (lw *lowering) emitCompoundRedirs(st *syntax.Stmt, pid, idx int) {
 		PipelineIndex: idx,
 	}
 	lw.attachRedirs(st, &leaf)
-	if len(leaf.Redirections) > 0 || leaf.HasHeredoc {
+	// `len(leaf.Args) > 0` is the fd-prefixed INPUT redirection parity path, exactly as
+	// in emitRedirOnly: `(cmd)0<f` records no Redirection by design, but the operator
+	// and its target become ARGS and the leaf must still be emitted or the node reaches
+	// nothing. Found by ENFORCEMENT GUARD 4's fuzzed half on `(0)0<0`.
+	if len(leaf.Redirections) > 0 || leaf.HasHeredoc || len(leaf.Args) > 0 {
 		lw.appendLeaf(leaf, sourceSpan{lo: int(st.Redirs[0].Pos().Offset()), hi: lw.stmtEndOffset(st)})
 	}
 }
@@ -968,7 +1079,15 @@ func (lw *lowering) attachRedir(r *syntax.Redirect, leaf *ParsedCommand) {
 		// Parity therefore keeps it OUT of Redirections and puts the operator and its
 		// target back into Args, so the operand is not lost either. Widening the input
 		// family is pg2-x9452's call to make with its own replay, not this step's.
-		leaf.Args = append(leaf.Args, fd+core, target)
+		// The operator token is the EXACT SOURCE SLICE from the descriptor to the target
+		// word, not `fd+core` re-assembled: re-assembling fabricates a token that never
+		// appeared in the source, which FuzzWordTokens correctly refuses (it found
+		// `0<` synthesised out of a non-contiguous `0` and `<`).
+		op := strings.TrimSpace(lw.slice(r.Pos(), r.Word.Pos()))
+		if op == "" {
+			op = fd + core
+		}
+		leaf.Args = append(leaf.Args, op, target)
 		return
 	}
 	leaf.Redirections = append(leaf.Redirections, hookio.Redirection{
@@ -1397,7 +1516,26 @@ func scanFailureReason(err error) string {
 //
 // The recovered tree is NEVER evidence that the text parsed — the caller has
 // already set Unparseable from the strict parse and keeps it set.
-func substitutionPrefixAfterFailure(text string, heredocBody bool) []Substitution {
+func substitutionPrefixAfterFailure(text string, heredocBody bool) (subs []Substitution) {
+	// THE RECOVERY PARSER CAN PANIC. `syntax.RecoverErrors` is upstream's best-effort
+	// repair path and it is reachable with an index-out-of-range on inputs the strict
+	// parser has ALREADY rejected — measured on `A0=$((0 0`, inside
+	// mvdan.cc/sh/v3/syntax's own parser. CETA runs on EVERY tool call, so a panic is a
+	// denial of service, and the fail-safe contract is Abstain (I1a/I1b) rather than a
+	// crash.
+	//
+	// Recovering here costs nothing that was ever trusted: the caller has already
+	// recorded the STRICT parser's verdict and reason, and this pass exists only to
+	// salvage a prefix. No prefix is the documented conservative answer, identical to
+	// "recovery could not build a tree either" below. The recovered parser is
+	// DELIBERATELY NOT returned to the pool on this path — its internal state is
+	// unknown after a panic, and a poisoned pooled parser would make a later verdict
+	// depend on what the process happened to evaluate earlier.
+	defer func() {
+		if r := recover(); r != nil {
+			subs = nil
+		}
+	}()
 	p, _ := recoverParserPool.Get().(*syntax.Parser)
 	var root syntax.Node
 	if heredocBody {

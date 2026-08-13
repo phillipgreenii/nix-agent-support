@@ -10,6 +10,10 @@ latency gate and the census are `frontend_ab_test.go`.
 
 ## Status of this step
 
+> **SUPERSEDED — read "Step 2 — THE FLIP" below for the CURRENT state.** This section records
+> step 1 (`pg2-jxmk9`) as it shipped. The seam is now AUTHORITATIVE, the shadow comparison is
+> retired, and the outgoing front end described here is DELETED.
+
 The candidate front end runs in **SHADOW**. The **outgoing** front end —
 `StripCommentsPreservingHeredocs` then `Parse`, in that order — remains authoritative for every
 verdict. `LogShadowDisagreement` returns nothing, so nothing in the engine can read the candidate's
@@ -43,14 +47,14 @@ Every construct ADR 0039 and bead `pg2-jxmk9` name, and whether it is covered or
 
 ### Deferred, with reasons
 
-| Item                                                  | Why deferred                                                                                                                                                                                                                                                                           |
-| ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Flipping the engine to the candidate                  | This step is shadow-only by construction. The flip is `pg2-fez3d`.                                                                                                                                                                                                                     |
-| The substitution-scan family (`ScanSubstitutions`)    | **DONE — step 2a, `pg2-zeqa5`. See "Step 2a" below.**                                                                                                                                                                                                                                  |
-| Enforcement guard 3 (parse-count, I7)                 | ADR 0039's Enforcement states it MUST land AFTER the per-rule `gitdir` migration, because `gitdir` re-parses the root expression and recurses to depth 8, so the guard cannot go green before that.                                                                                    |
-| Enforcement guard 2 (raw-text-structure, I9)          | ADR 0039 carries the mechanism as an OPEN question and assigns the decision to the per-rule migration step, which must record which mechanism it chose and why.                                                                                                                        |
-| Enforcement guard 4 (coverage check, I14)             | Partially discharged: the leaf-delta accounting in `frontend_ab_test.go` runs over the whole snapshot and did catch a real dropped-leaf defect. The full span-union assertion against every `*syntax.CallExpr` is a separate check and belongs with the flip, which owns the leaf set. |
-| `ParsedCommand.Raw` becoming the exact slice for real | The candidate already produces it (I12). It cannot be adopted while the outgoing front end is authoritative, because rules re-parse `Raw` and the two spellings differ on heredoc-bearing leaves.                                                                                      |
+| Item                                                  | Why deferred                                                                                                                                                                                                                                                                                                                                                                         |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Flipping the engine to the candidate                  | **DONE — step 2, `pg2-fez3d`. See "Step 2 — THE FLIP" below.**                                                                                                                                                                                                                                                                                                                       |
+| The substitution-scan family (`ScanSubstitutions`)    | **DONE — step 2a, `pg2-zeqa5`. See "Step 2a" below.**                                                                                                                                                                                                                                                                                                                                |
+| Enforcement guard 3 (parse-count, I7)                 | ADR 0039's Enforcement states it MUST land AFTER the per-rule `gitdir` migration, because `gitdir` re-parses the root expression and recurses to depth 8, so the guard cannot go green before that.                                                                                                                                                                                  |
+| Enforcement guard 2 (raw-text-structure, I9)          | ADR 0039 carries the mechanism as an OPEN question and assigns the decision to the per-rule migration step, which must record which mechanism it chose and why.                                                                                                                                                                                                                      |
+| Enforcement guard 4 (coverage check, I14)             | **DONE — step 2, `pg2-fez3d` (`LeafCoverageGaps` + `TestLeafSpansCoverEveryCallExpr`).** Was: partially discharged: the leaf-delta accounting in `frontend_ab_test.go` runs over the whole snapshot and did catch a real dropped-leaf defect. The full span-union assertion against every `*syntax.CallExpr` is a separate check and belongs with the flip, which owns the leaf set. |
+| `ParsedCommand.Raw` becoming the exact slice for real | **DONE — step 2, `pg2-fez3d`.** Was: the candidate already produces it (I12). It cannot be adopted while the outgoing front end is authoritative, because rules re-parse `Raw` and the two spellings differ on heredoc-bearing leaves.                                                                                                                                               |
 
 ### Defects this step found
 
@@ -556,3 +560,376 @@ assignment. Measured as the wall time of the authoritative front end (`StripComm
   `scopeLeaves` and `containsVarRef`, envvars' value scan around `literalValue`. So are guards 2 and 3
   and the I13 structural delegate entry point.
 - Step 5 may now assert `matchParen`'s removal as DONE rather than owing it.
+
+---
+
+# Step 2 — THE FLIP (`pg2-fez3d`)
+
+Authority: ADR 0039's Decision, Invariants (I1b, I2, I3, I4, I6, I8, I10, I12, I14) and
+Enforcement. Base `2b59b9e0`. This section is the record ADR 0039's Enforcement item
+"Differential replay" requires of every migration step.
+
+The seam is now **AUTHORITATIVE**. `Parse` is a facade over `ParseShell`, so every rule and
+the engine read the seam; the SHADOW COMPARISON IS RETIRED and the outgoing front end is
+DELETED. Retiring the comparison is how **I8** is discharged — "there MUST NOT be a fallback
+parser", so there must not be a second front end to compare against either. Step 1
+deliberately ran two; this step ends that.
+
+## `ParsedCommand.Raw` (I12), as implemented
+
+`Raw` is the **EXACT SOURCE SLICE** spanning the owning statement, trimmed of the trailing
+separator (`;`, `&`, `|&`) and surrounding whitespace. It is **NOT** an AST print: printing is
+structure-to-text — root cause 3 reintroduced — and its output would not equal
+`normalizeExpression` (`engine.go`'s whitespace-collapsing normaliser), so every
+cycle-detection key would silently change.
+
+Two consequences, both deliberate and both stated because they are visible:
+
+- **A heredoc-bearing leaf's `Raw` carries its body**, and the statement's extent therefore
+  spans whatever text sits between the operator and the body: in `cat <<EOF | grep x` the
+  `cat` stage's `Raw` includes `| grep x`. That is what makes re-parsing `Raw` reproduce the
+  extents instead of re-deriving an UNTERMINATED one — root cause 2's purest instance. The
+  direction is safe (a rule re-parsing such a `Raw` judges MORE, and verdicts fold through
+  `MostRestrictive`), and `FuzzParse`'s atomicity check exempts exactly these leaves while
+  `FuzzHeredocExtentsAreAccountedFor` holds them to heredoc idempotence instead.
+- **`syntax.Stmt.End()` is not the statement's true end.** It consults only
+  `Redirs[len-1]`, so a heredoc that is not the LAST redirection is excluded, and an
+  EMPTY-bodied heredoc has no `Hdoc` node at all. `cat <<EOF > /etc/passwd` and
+  `cat <<EOF\nEOF` both lost their terminator line, and `Raw` re-parsed to NO LEAF. Fixed by
+  `stmtEndOffset` / `emptyHeredocEnd`.
+
+## Deletion ledger
+
+| Symbol                                                                                                                                                                                                                     | Outcome                        | Why / where it went                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `splitCompound`, `segment`, `assignPipelineIDs`, `tokenize`                                                                                                                                                                | **deleted**                    | Root cause 2 — every pass returned TEXT. The seam returns leaves from one AST.                                                                                                                                                                                                                                                                                                                                                      |
+| `resolveLoops`, `extractLoopBody`, `isLoopKeyword`, `isDoneKeyword`, `parseDoKeyword`, `doneResidue`, `forWordList`                                                                                                        | **deleted**                    | ROOT CAUSE 4 and inventory sites 12/13, ENTIRE family. `doneResidue`/`forWordList` are pg2-qkecz's patches to the two KNOWN drops; patching a text pass closes instances, not the class.                                                                                                                                                                                                                                            |
+| `shellScanner`, `scanFrame`, `newShellScanner`, `advance`, `nested`                                                                                                                                                        | **deleted**                    | Root cause 1 — a byte scanner with no extent API. Word start, quoting and nesting are parser facts now.                                                                                                                                                                                                                                                                                                                             |
+| `commandStartOffset`                                                                                                                                                                                                       | **deleted**                    | `StripLeadingEnvAssignments` moved to the seam and reads `CallExpr.Assigns` / `Args[0]`.                                                                                                                                                                                                                                                                                                                                            |
+| `extractRedirections`, `splitFDPrefix`, `isVarName`, `redirectionCore`, `hasLiveRedirChar`                                                                                                                                 | **deleted**                    | The parser separates `Redirect.N` / `Op` / `Word`, so no operator text is re-derived and the `2<<EOF` phantom operand cannot exist.                                                                                                                                                                                                                                                                                                 |
+| `extractExecAndArgs`                                                                                                                                                                                                       | **deleted**                    | Leading assignments are `CallExpr.Assigns`; the command is `Args[0]`. That distinction IS pg2-gkd5e's position independence.                                                                                                                                                                                                                                                                                                        |
+| `scanHeredocs`, `stripHeredocBodies`, `parseHeredocOperator`, `readHeredocBody`, `heredocSpan`, `countHeredocOperators`                                                                                                    | **deleted**                    | `stripHeredocBodies` is ADR 0039's NAMED instance of root cause 2 (a pass returning a modified string).                                                                                                                                                                                                                                                                                                                             |
+| `atWordStart`                                                                                                                                                                                                              | **deleted**                    | The UNREPRESENTABLE PREDICATE — positional, had to agree with a stateful one, produced the `(<)#<<0` phantom heredoc. There is now one word-start notion.                                                                                                                                                                                                                                                                           |
+| `StripCommentsPreservingHeredocs`, `ExtractComment`, `StripComment`                                                                                                                                                        | **deleted**                    | `KeepComments(true)` makes a comment a parser fact, so the per-line pass is retired BY CONSTRUCTION. The engine's annotation uses the seam's `CommandComment`; `ParsedCommand.Comment` comes from `Stmt.Comments`.                                                                                                                                                                                                                  |
+| `NormalizeCommandShell`                                                                                                                                                                                                    | **deleted**                    | It existed only so step 1 could MEASURE the re-keying before adopting it. `Parse` is the seam, so `NormalizeCommand` IS the new key: the re-keying is now ADOPTED.                                                                                                                                                                                                                                                                  |
+| the whole shadow surface (`ShadowEnvVar`, `ShadowEnabled`, `ShadowDiff`, `OutgoingFrontEnd`, `CompareFrontEnds`, `CompareFrontEndsWith`, `pipelineShape`, `shadowLog`, `LogShadowDisagreement`) plus `frontend_ab_test.go` | **deleted**                    | I8. `LeafKey` survives in `leafkey.go` — the corpus harnesses key on it.                                                                                                                                                                                                                                                                                                                                                            |
+| `unquote`                                                                                                                                                                                                                  | **RETAINED**                   | It DEFINES CETA's token spelling and the parser's literal expansion is STRICTER: `a"b"c` must KEEP its quotes, because `envvars.literalValue` and `isStaticAbsolutePath` reject any surviving quote and that is what fences I4. Applied to each word's exact source slice. Pure `string -> string` over an already-delimited token — not a scanner, so I9 does not reach it. Pinned by `TestShellParse_UnquoteParity_MixedQuoting`. |
+| `redirectionKind`                                                                                                                                                                                                          | **RETAINED**                   | Post-lowering classification of an `(fd, operator)` pair the seam already extracted. No text.                                                                                                                                                                                                                                                                                                                                       |
+| `isAllDigits`                                                                                                                                                                                                              | **RETAINED**                   | Predicate over a redirect target word; the fd-duplication drop turns on it.                                                                                                                                                                                                                                                                                                                                                         |
+| `isEnvAssign`, `isValidEnvName`                                                                                                                                                                                            | **RETAINED**                   | Predicates over an already-delimited assignment token. The seam consults them to decide whether an `*syntax.Assign` can become an `EnvAssignment` at all — the indexed form cannot, and must reach a data leaf rather than vanish.                                                                                                                                                                                                  |
+| `UnquotedMask`                                                                                                                                                                                                             | **REIMPLEMENTED over the AST** | The capability cannot be removed here: its sole caller is rules/ssh's `hasWriteRedirection`, a RULE-side scanner ADR 0039's step 5 (`pg2-x9452`) still owns. Its IMPLEMENTATION is no longer a second structure model — the inert spans are the AST's quoted / substitution / arithmetic extents. Unparseable text reports every byte LIVE, which is conservative for the only caller.                                              |
+
+`rules/ssh` also gained a FAIL-CLOSED guard, and it is a defect the flip would otherwise have
+introduced: `evaluateSSH`'s leaf loop only ever ESCALATES, so an EMPTY leaf set fell through
+to APPROVE. While the front end scanned bytes, malformed text still produced a leaf that
+failed the allowlist; a real grammar returns no leaves, so `ssh host 'cat $(curl'` and
+`ssh host 'ls -la >&'` would have started auto-approving. That is I1b at a rule boundary.
+
+## Guard 1 (I6) — demonstrated failing
+
+`TestSeamIsTheOnlyParserImporter` walks the module's import graph. Demonstrated by
+temporarily adding `_ "mvdan.cc/sh/v3/syntax"` to `internal/rules/dangerouscmds/dangerouscmds.go`:
+
+```text
+=== RUN   TestSeamIsTheOnlyParserImporter
+    shellparse_test.go:71: I6 violated: only shellparse.go may reference mvdan.cc/sh/v3; found it in: [internal/rules/dangerouscmds/dangerouscmds.go]
+--- FAIL: TestSeamIsTheOnlyParserImporter (0.02s)
+```
+
+Reverted; both halves of the guard are green (`TestSeamFileActuallyImportsTheParser` pins
+that the seam still imports it, so a green guard cannot be vacuous).
+
+## Guard 4 (I14) — the coverage check
+
+`LeafCoverageGaps` (shellparse.go) records EVERY leaf's source span during the one lowering
+walk and reports any surrogate node no leaf covers. Drivers:
+`TestLeafSpansCoverEveryCallExpr` (an in-repo shape population plus the corpus) and
+`FuzzLeafSetCoversTheSource`.
+
+**POPULATION, named explicitly.** Guard 4 runs over the **DISTINCT `.command` VALUES** — the
+parse/lowering population of this file's "Corpus population" section, NOT ADR 0039's
+mislabelled 189,678 (which counts distinct input BLOBS, bead `pg2-bc8ol`). Re-measured
+2026-08-12 on a `VACUUM INTO` snapshot read via `immutable=1`:
+
+| Population                                                     | Recorded by step 1 | At the flip |
+| -------------------------------------------------------------- | ------------------ | ----------- |
+| all rows                                                       | 337,781            | 339,360     |
+| non-excluded rows, all tools                                   | 337,236            | 338,815     |
+| non-excluded `Bash` rows                                       | 218,089            | 219,305     |
+| **distinct `.command` VALUES — the parse/lowering population** | **185,185**        | **186,382** |
+| distinct input BLOBS                                           | 198,691            | 199,896     |
+
+**RESULT: PASS. 186,382 distinct commands; 186,319 parsed; 63 unparseable; ZERO coverage
+gaps.** Coverage is AT LEAST ONE leaf, not a partition — overlap cannot make a verdict less
+restrictive under `MostRestrictive`, and requiring uniqueness would contradict I2's
+deliberate imprecision about heredoc attribution.
+
+**Guard 4 caught a real defect before it shipped.** `emitCompoundRedirs` anchored its span on
+`Redirs[0].OpPos`, but `Redirect.Pos()` is the DESCRIPTOR's position — one byte earlier — so
+`done 2>/dev/null` on a loop inside a pipeline left the `2` OUTSIDE the leaf that answers for
+it. 123 corpus commands, 133 nodes. The leaf existed and recorded the write, so no verdict
+moved; the point is that a differential replay could never have seen it. Pinned by three
+rows in `coverageSeeds`.
+
+## The 63 unparseable rows — I1b FORFEITURES, reported individually
+
+I1b abstains with **NO LEAF EXAMINED**, so any `Reject` a leaf would have earned is
+**FORFEITED**. That is a movement in the more permissive direction on
+`Approve < Abstain < Ask < Reject` even though it never reaches Approve, and it is why the
+replay gate is worded as "no transition in the LESS-RESTRICTIVE direction". ADR 0039's
+"63 rows / 0.0332%" is against the mislabelled denominator; against the parse/lowering
+population it is **63 / 186,382 = 0.0338%**.
+
+Written per row by `CETA_FORFEITURE_OUT` (reason, dialect attribution, command), grouped
+here by the parser's own reason:
+
+| Parser reason                                                   | Rows   | Dialect attributed |
+| --------------------------------------------------------------- | ------ | ------------------ |
+| `invalid parameter name`                                        | 11     | —                  |
+| `reached EOF without closing quote "`                           | 8      | —                  |
+| `unclosed here-document EOF`                                    | 7      | —                  |
+| `a command can only contain words and redirects; encountered )` | 7      | —                  |
+| `reached EOF without closing quote '`                           | 5      | —                  |
+| `a command can only contain words and redirects; encountered (` | 5      | —                  |
+| `parameter expansion flags is not valid bash`                   | 3      | **zsh**            |
+| `not a valid arithmetic operator: ~`                            | 3      | —                  |
+| `word list can only contain words`                              | 2      | —                  |
+| `floating point arithmetic is not valid bash`                   | 2      | **zsh**            |
+| `) can only be used to close a subshell`                        | 2      | —                  |
+| `nested parameter expansions is not valid bash`                 | 1      | **zsh**            |
+| ten further one-row grammar failures                            | 10     | —                  |
+| **TOTAL**                                                       | **63** | **6**              |
+
+**I10 holds in both directions**, which is what `TestEngine_UnparseableReasonHonoursI10`
+pins: the 6 rows the parser attributed to a dialect say so, and the other 57 report the
+failure WITHOUT guessing at a cause. CETA receives no shell field in its hook input and can
+never establish which dialect will run, so a guess would be fabricated provenance on a
+user-facing prompt.
+
+## Verdict replay
+
+Population per this file's "Corpus population" section. **Replayed:** 131,222 distinct
+`(command, cwd, permission_mode)` triples of 191,292, offline through
+`setup.NewEngineForCWD` + `EvaluateHook` with a redirected `XDG_DATA_HOME`. `cmd_evaluate`
+was **NOT** used, and neither were `baseline` or `compare` — all three open the shared
+production asklog READ-WRITE (bead `pg2-cbihz`). The harness is
+`internal/setup/replay_test.go`; the base side ran the same harness against a `git archive`
+of `2b59b9e0`.
+
+**Skipped and NOT presented as the whole:** 73,850 of 219,305 non-excluded `Bash` rows
+(**33.68%**) name a working directory that no longer exists — 923 of 1,145 distinct `cwd`
+values. As triples that is 60,070 of 191,292.
+
+| base -> new        | rows   | direction            |
+| ------------------ | ------ | -------------------- |
+| approve -> approve | 95,366 | same                 |
+| abstain -> abstain | 32,304 | same                 |
+| ask -> ask         | 2,376  | same                 |
+| reject -> reject   | 425    | same                 |
+| abstain -> approve | 614    | **LESS restrictive** |
+| ask -> approve     | 55     | **LESS restrictive** |
+| ask -> abstain     | 21     | **LESS restrictive** |
+| reject -> abstain  | 1      | **LESS restrictive** |
+| abstain -> ask     | 53     | more restrictive     |
+| approve -> abstain | 4      | more restrictive     |
+| approve -> ask     | 2      | more restrictive     |
+| ask -> reject      | 1      | more restrictive     |
+
+751 transitions on 131,222 rows (0.57%). **691 move in the less-restrictive direction.**
+
+**GATE: PASS UNDER ADR 0039's ONE PERMITTED EXCEPTION, and only under it.** Every one of the
+691 is attributed by a MECHANICAL PREDICATE over the two trees' leaf sets to an
+OUTGOING-FRONT-END DEFECT — the exception ADR 0039 grants for "a step whose stated purpose is
+to stop the parser breaking benign commands". The unattributed bucket is **EMPTY**, which is
+the only form of "each transition justified individually" that scales to 691 rows without
+becoming the blanket annotation the ADR forbids: the predicate is stated, it is computed per
+row, and anything it does not claim is dumped verbatim rather than absorbed.
+
+### How the attribution is computed
+
+Both trees dump, per row, a feature vector over the leaf set REACHABLE from the command —
+top-level leaves plus, recursively to depth 4, every substitution body, every unquoted
+heredoc body, every assignment value's substitutions, and every `-c` body (the rule chain
+re-evaluates all of them, so a defect one level down moves the verdict as much as one at the
+top). Features: `K` a shell-keyword executable, `C` a token holding a backslash-newline, `P`
+a token holding `<(`/`>(`, `Q` a token with an unbalanced quote, `F` a multi-word executable
+fragment, `A` an executable beginning with a quote. Plus, on the BASE tree only, `S` — the
+engine's per-LINE comment pre-pass MODIFIES the text, which is the pg2-4h7ee mechanism and is
+computable only there because `StripCommentsPreservingHeredocs` is deleted by the flip.
+
+| Cause                                                                                                  | Rows    |
+| ------------------------------------------------------------------------------------------------------ | ------- |
+| **C6** outgoing shell-keyword pseudo-leaf removed                                                      | 336     |
+| **C1** outgoing line-continuation token debris removed                                                 | 283     |
+| **C8** outgoing non-keyword pseudo-leaf removed (`case` pattern / word-list item / prose as a command) | 26      |
+| **C3** outgoing token retained an unbalanced outer quote                                               | 25      |
+| **C9** outgoing SWALLOWED a following command into an unbalanced-quote token                           | 8       |
+| **C5** outgoing bogus multi-word executable fragment removed                                           | 7       |
+| **C10** the engine's per-LINE comment pre-pass MODIFIED the text (the pg2-4h7ee class)                 | 5       |
+| **C4** outgoing multi-line array literal shredded                                                      | 1       |
+| **UNATTRIBUTED**                                                                                       | **0**   |
+| **TOTAL**                                                                                              | **691** |
+
+Reading of the table:
+
+- **C6 dominates (336 of 691).** A leaf whose executable is `if`, `then`, `fi`, `do`, `done`,
+  `[[` or `((` is NOT a command; no argv[0]-keyed rule matched one, so it contributed an
+  Abstain that demoted the whole expression. Removing it and judging the branch CONTENTS
+  instead is the point of the migration. LOWERING.md's step-1 leaf census predicted exactly
+  this: −7,234 of −9,027 leaves (80.1%) on 3,588 rows.
+- **C1 is the second (283).** `splitCompound` consumed `\`+newline as an escaped pair but
+  copied BOTH bytes into the segment, so `tokenize` yielded the bogus executable
+  `"\<newline>curl"` and arguments like `"\<newline>-H"`. Step 1 measured the class at 3,784
+  rows; 283 of them changed VERDICT. `git -C … add \<newline> path…` is the commonest shape.
+- **C3 + C9 (33) are the same defect in both directions.** `unquote` only strips a fully
+  wrapped token, so a heredoc inside a substitution left the leading `"` in place. Sometimes
+  that garbled a token (C3); sometimes it SWALLOWED the following command whole (C9, which is
+  why the flip's leaf count goes UP — step 1 measured +308 leaves on 374 rows).
+- **C10 is the pg2-4h7ee class (5).** The engine's per-LINE comment strip cut inside a
+  MULTI-LINE quoted argument — `bd update … --notes "…(feedback: nit #1)…"` — shredding prose
+  into pseudo-leaves and leaving an unterminated quote that swallowed real commands. The pass
+  is GONE, not fixed: under `KeepComments` a `#` inside a quoted word is part of a
+  `*syntax.Lit`, so the defect is unrepresentable. `TestFlip_HashInsideAQuotedArgumentIsNotAComment`.
+
+### The one `reject -> abstain`, justified on its own evidence
+
+Row 151331, `cd ~/phillipg_mbp` then a `for` loop over six repos whose body contains:
+
+```bash
+rb="no"; { [ -d "$r/.git/rebase-merge" ] || [ -d "$r/.git/rebase-apply" ]; } && rb="YES-IN-PROGRESS"
+```
+
+Base verdict `Reject` from `git-directory`; new verdict `Abstain`.
+
+**The base `Reject` was a MIS-PARSE, not a judgement.** The outgoing front end lowered the
+`{ …; }` group to leaves whose EXECUTABLES were the literal braces — measured on the base
+tree, its 14 leaves include `{`, `[` and `}` — so `git-directory` saw a `.git/` path being
+accessed by a command it does not recognise and rejected it. Over the seam the group lowers
+to the two real `[` test commands, and `git-directory` judges what is actually there: a
+`test -d` of a `.git/` path, which is a READ, matched but non-decisive. That is the same
+verdict the rule's own `test -e a hook` row already pins.
+
+It does not reach `Approve`, and no `Reject` a leaf EARNED was lost — the base's Reject was
+earned by a leaf that does not exist.
+
+### The 60 more-restrictive transitions
+
+| Cause                                                                                              | Rows |
+| -------------------------------------------------------------------------------------------------- | ---- |
+| **C1/C3/C4/C5/C6/C7/C10** — the same outgoing defects, in the safe direction                       | 39   |
+| **I12: a leaf's `Raw` now spans its heredoc BODY**, so a rule scanning leaf text sees body content | 20   |
+| an env-assignment VALUE classification difference (`abstain -> ask`, row 177268)                   | 1    |
+
+The 20 are `-> path-traversal` (Ask) on commands of the shape `cat > "$P" <<'EOF' … EOF`
+whose BODY contains `../`. The outgoing `Raw` was post-strip, so the body was invisible to a
+text-scanning rule; under I12 it is not. More restrictive, and a direct consequence of the
+`Raw` decision rather than a surprise.
+
+## Tests
+
+The whole existing suite passes with the EXPECTATIONS UNEDITED, except where an expectation
+encoded outgoing behaviour that this step deliberately removes. Each such edit is annotated
+AT the test with the reason and the direction; they are:
+
+| Test                                                                     | Change                                                                                                              | Direction        |
+| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------- | ---------------- |
+| `TestParse_Redirections` "partially quoted target"                       | `Path` is now `/tmp/out`, not `'/tmp/out'`                                                                          | MORE restrictive |
+| `TestParse_Redirections` "brace expansion is not a descriptor"           | `cmd {a,b}>x` records a real `> x` write                                                                            | MORE restrictive |
+| `TestParse_ForLoop` "incomplete for loop"                                | a loop with no `done` is a PARSE FAILURE (I1b), not two keyword leaves                                              | MORE restrictive |
+| `TestHeredocBodyIsNeverALeaf` / `TestHeredocDashTerminatorIsTabStripped` | an UNTERMINATED heredoc is a PARSE FAILURE; lifted into `TestHeredocUnterminatedIsAParseFailure`                    | MORE restrictive |
+| `TestHeredocBodyIsNeverAnArg`                                            | `Raw` MUST now carry the body (I12); the Args assertion is unchanged                                                | n/a (I12)        |
+| `TestParse_PipelineRelation` both group rows                             | every statement of a piped compound shares the stage's coordinates — the UNION of two previous under-approximations | MORE informative |
+| `TestUnquotedMask` two rows                                              | `` `>` `` and `$(>)` are not valid bash; kept in parseable form plus a row for the all-live fallback                | conservative     |
+| `TestEffectiveExec` `if [ -e x ]`                                        | replaced by `[ -e x ]`, the shape it was testing, in a form that parses                                             | n/a              |
+| gitdir's two `if` fixtures                                               | closed with `fi`, as the corpus rows they model were                                                                | n/a              |
+
+The `partially quoted target` change **CLOSES A LIVE HOLE**, which is why it is a change and
+not a regression: the outgoing tokenizer glued operator and target into one token, `unquote`
+declined a non-wholly-wrapped token, and the quotes rode into `hookio.Redirection.Path` —
+where `patheval.cleanPath` reads a leading `'` as a RELATIVE path and joins it to the cwd. So
+`echo pwned >'/etc/passwd'` resolved INSIDE the project root and was **APPROVED**, while the
+spaced `> '/etc/passwd'` was correctly Rejected. Same write, two verdicts, decided by a space.
+
+### The tests the three superseded beads owe
+
+Written against their ORIGINAL reproducers (`flip_test.go`):
+
+- **`pg2-s26v5`** — `TestFlip_BareSubshellKeepsEveryCommand`: `(echo ")"; ls)` yields two
+  leaves with `ls` intact, `Raw` is an exact source slice, and FuzzParse's IDEMPOTENCE holds
+  against it — the half that was VACUOUS before I12.
+- **`pg2-4h7ee`** — `TestFlip_HashInsideAQuotedArgumentIsNotAComment`: a `#` inside a
+  multi-line quoted argument is not a comment, in three spellings, with the contrast that an
+  unquoted trailing `#` still IS one.
+- **`pg2-14vjq`** — `TestFlip_LoopFedByAHeredocDropsNoSegment` (the `done <<EOF` extent
+  reaches a leaf and no segment is dropped) and
+  `TestFlip_FdPrefixedHeredocIsNotAPhantomOperand`, which asserts what ADR 0039 demands: that
+  `2<<EOF` does NOT leak into `Args`, **not** merely that the leaf is heredoc-bearing.
+
+### The constructs that change verdict if lowered naively
+
+- **Herestrings** — `HasHeredoc` keys off the OPERATOR. Both pins pass UNEDITED
+  (`heredoc_test.go`'s `{"cat <<<\"word\"", true}` and `parser_test.go`'s
+  `{"herestring", "cmd <<<'input'", true}`), plus `TestFlip_HerestringKeepsTheHeredocFloor`
+  including the empty-word case a body-keyed flag gets wrong twice over.
+- **The fabricated `/dev/fd/63` operand** — KEPT, exactly as `tokenize` produced it. The
+  choice and its reason are recorded at `TestFlip_ProcessSubstitutionOperandChoice`: the
+  source text is not a path, so it fails `IsSafeRedirectTarget` and causes mass new abstains
+  on the benign `diff <(a) <(b)`; emitting nothing changes the ARGUMENT COUNT, which several
+  rules key on. It is the ONE fabricated token in the lowering and the real body travels
+  separately in `ProcessSubstitutions`.
+- **`unquote` parity** — `TestShellParse_UnquoteParity_MixedQuoting` is NEW, as ADR 0039
+  requires. It also pins that the outgoing rule is FIRST-BYTE-AND-LAST-BYTE rather than "is
+  wholly one quoted span", so `'a'b'c'` strips to `a'b'c` and the INNER quote survives — which
+  is what still trips the predicate I4 fences.
+
+### The `$( (list) )` gap the parser does not model
+
+Verified against bash 5.3.9: when the ARITHMETIC parse of `$((` fails, bash falls back to
+`$( (list) )`, so `$((cmd) | cmd)` and `$((cmd) )` REALLY EXECUTE. `$((cmd; cmd))` does not —
+`;` is not a valid arithmetic operator, so bash errors and that spelling is not a bypass. The
+upstream parser implements no fallback, so all three are Unparseable and land on the I1b
+floor. The direction is right, but the body is never ENUMERATED, so a sibling `Reject` inside
+one is FORFEITED — the I1b forfeiture class. Three corpus rows carry the shape.
+`TestFlip_ArithmeticSubshellFallbackIsUnparseable` pins the verdict rather than leaving it
+emergent.
+
+### The three fuzz replacements
+
+ADR 0039's Enforcement item "Fuzz continuity" requires a fuzzer whose target is deleted to be
+REPLACED by a harness over the seam asserting the SAME property, with the replacement
+invariant stated in the step performing the deletion. Stated in full at the top of
+`fuzz_test.go`; in summary:
+
+| Deleted harness          | Property it asserted                                                                                                       | Replacement                         |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------- | ----------------------------------- |
+| `FuzzSplitCompound`      | THE SPLIT IS COMPLETE — re-splitting any segment yields at most one command-bearing segment, so no separator stayed glued  | `FuzzLeafSetCoversTheSource`        |
+| `FuzzTokenize`           | TOKENS AND PROCESS-SUBSTITUTION BODIES ARE REAL SLICES, the raws/tokens arrays never skew, a lifted body can be re-scanned | `FuzzWordTokens`                    |
+| `FuzzStripHeredocBodies` | THE HEREDOC BODY IS ACCOUNTED FOR — the pass only DELETES, every body is a real substring, no body byte survives onward    | `FuzzHeredocExtentsAreAccountedFor` |
+
+The first is a strict generalisation: "the split is complete" and "the leaf set covers the
+source" are the same property at two altitudes, and the second also sees the class the first
+structurally could not — root cause 4, a DELETED segment, which looks identical on both sides
+of a re-split check. The third is the one that changes shape, and the change is I12: there is
+no masking pass, so "no body byte survives into the text handed onward" becomes its stronger
+successor — the body survives EXACTLY ONCE, inside the owning leaf's `Raw`, and re-parsing
+that `Raw` reproduces the extents instead of re-deriving an unterminated one.
+
+### `FuzzParse`'s pre-existing idempotence failure DIED with the flip
+
+The committed `FuzzParse` found a Parse IDEMPOTENCE violation on `(#"\n<<#\n#\n0` within ~30s
+(`pg2-iumd5`): a leaf's `Raw` re-parsed to a different executable, because `atWordStart` and
+`splitCompound` disagreed about a `#` after a flushed subshell and manufactured a phantom
+heredoc. Over the seam that input is a PARSE FAILURE
+(``cmd:2:1: `<<` must be followed by a word``), so it yields no leaf and the invariant is
+satisfied rather than violated. **It did not survive the flip**, which is the outcome ADR
+0039's Consequences predicted for the `Raw` decision.
+
+## What this step does NOT do
+
+- **Guard 2 (raw-text-structure, I9)** and **guard 3 (parse-count, I7)** stay deferred, per
+  ADR 0039's Enforcement: guard 3 MUST land after the per-rule `gitdir` migration, and guard
+  2's mechanism is an OPEN question the per-rule step must decide and record.
+- The two engine TEXT hops `evaluateHeredocBodies` and `evaluateSubstitutionsIn` are still
+  shims owned by step 4 (`pg2-1019a`), and every RULE-side scanner step 5 (`pg2-x9452`) names
+  is untouched — including `rules/ssh`'s `hasWriteRedirection`, which is why `UnquotedMask`
+  survives as a capability.

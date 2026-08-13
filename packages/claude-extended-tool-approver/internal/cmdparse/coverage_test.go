@@ -78,6 +78,16 @@ import (
 // CorpusSnapshotEnvVar names the file the corpus half of guard 4 reads.
 const CorpusSnapshotEnvVar = "CETA_CORPUS_SNAPSHOT"
 
+// ForfeitureOutEnvVar names an optional file the guard writes every UNPARSEABLE
+// corpus command to, one per line, with the parser's reason and any dialect
+// attribution.
+//
+// It exists because ADR 0039's I1b requires every such row to be reported as a
+// FORFEITURE in the migration replay, INDIVIDUALLY — a count is not a report. The
+// guard already parses every row, so this is the cheapest place to produce the list,
+// and producing it from the same pass keeps the count and the list from disagreeing.
+const ForfeitureOutEnvVar = "CETA_FORFEITURE_OUT"
+
 // coverageSeeds is the in-repo population guard 4 always runs over. Every entry is
 // a SHAPE the surrogate is about, not a sample: the compound forms that can carry a
 // redirection, the branch forms whose untaken side must still be judged, the data
@@ -201,6 +211,14 @@ func TestLeafSpansCoverEveryCallExpr(t *testing.T) {
 
 		// Counters, so the result can be REPORTED rather than merely asserted.
 		var rows, parsed, unparseable, withGaps int
+		var forfeitures *os.File
+		if out := os.Getenv(ForfeitureOutEnvVar); out != "" {
+			forfeitures, err = os.Create(out) // #nosec G304 -- an operator-supplied local path
+			if err != nil {
+				t.Fatalf("create %s: %v", out, err)
+			}
+			defer func() { _ = forfeitures.Close() }()
+		}
 		// byKind counts gaps per surrogate kind, and offenders keeps the first few
 		// verbatim. A guard that says only "N failures" cannot be acted on.
 		byKind := map[string]int{}
@@ -223,8 +241,16 @@ func TestLeafSpansCoverEveryCallExpr(t *testing.T) {
 			// to parse every row anyway, and an unparseable row has NO leaf set for
 			// coverage to be a property of (I1b floors it instead, and the replay reports
 			// it as a forfeiture).
-			if ParseShell(rec.Command).Unparseable {
+			if sp := ParseShell(rec.Command); sp.Unparseable {
 				unparseable++
+				if forfeitures != nil {
+					// One line per forfeited row: the reason, the dialect attribution (empty
+					// when the parser made none — I10 forbids guessing), and the command.
+					if _, werr := forfeitures.WriteString(sp.Reason + "\t" + sp.Dialect + "\t" +
+						strconv.Quote(rec.Command) + "\n"); werr != nil {
+						t.Fatalf("write forfeiture: %v", werr)
+					}
+				}
 				continue
 			}
 			parsed++
