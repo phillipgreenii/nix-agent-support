@@ -136,12 +136,19 @@ sequenceDiagram
     Note over Core: not a defect — re-offer E2 while it is unexpired (INV-FAIL-1)
     Core->>A: re-offer E2 once A has capacity (still unexpired)
     A-->>Core: accept (ack) — the core is owed nothing further (INV-FAIL-1)
+    Note over Core,B: B could equally have accepted and buffered E2 internally — an accept is custody, not progress (INV-CONC-1)
 ```
 
 - **`INV-CONC-1`** <!-- uuid: 20c84e0f-8ffb-428c-9acc-dcaabb4fdf1b --> — Capacity is
-  **handler-enforced** via a **pre-accept `busy` decline**, not a core-tracked number: the core
-  offers an event and the handler declines with `busy` when at capacity, and the core then re-offers
-  while the event is unexpired (`INV-FAIL-1`, bounded by `INV-EVT-4`). **"One event → one session"
+  **handler-enforced and declared nowhere**, never a core-tracked number: no configuration states a
+  per-handler ceiling and the core keeps none. A handler offered an event therefore has **two**
+  legitimate responses, and the core MUST treat both as correct. It MAY **decline pre-accept with
+  `busy`**, after which the core re-offers while the event is unexpired (`INV-FAIL-1`, bounded by
+  `INV-EVT-4`); or it MAY **accept and buffer the event internally**, starting it whenever its own
+  limits allow. **Acceptance means the handler took custody, not that work started.** The core MUST
+  NOT infer progress from an accept, and MUST NOT assume an accepting handler is idle or free to
+  take more; all an accept settles is that delivery is complete and the core is owed nothing further
+  (`INV-EVT-1`, `INV-FAIL-1`). **"One event → one session"
   holds _within_ a handler**; **fan-out is
   _across_ handlers** — the core tracks acceptance per `(event, handler)` (`INV-EVT-1`) and keeps
   **one outstanding offer per handler** (per-handler serial FIFO, `ADR 0031`). Concurrency is **not

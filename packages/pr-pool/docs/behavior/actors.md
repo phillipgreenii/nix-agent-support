@@ -23,8 +23,9 @@ which concrete implementation fills the role is a downstream deployment set's co
 
 - **`ACTOR-SRC` — Event source** <!-- uuid: 39e28ce5-ef60-47bb-8aa7-2d93d267447f --> — emits typed events (pull or push). Interface: `INTF-SOURCE`.
 - **`ACTOR-HDL` — Event handler** <!-- uuid: a5997046-d20a-445d-bf10-328855b03810 --> — responds to bound events as handler sessions, replying with its
-  acceptance or a pre-accept decline and keeping the run's own progress on its own surface;
-  capacity-limited. Interface: `INTF-HANDLER`.
+  acceptance or a pre-accept decline and keeping the run's own progress on its own surface.
+  Capacity-limited, but the limit is the handler's own to enforce and is declared to the core nowhere
+  (`INV-CONC-1`). Interface: `INTF-HANDLER`.
 - **`ACTOR-MON` — Monitoring sink** <!-- uuid: bf5b0941-b26b-433d-b991-b84fe3b601c2 --> — pulls or pushes a declared subset of the metric catalog.
   Interface: `INTF-MON`.
 - **`ACTOR-STO` — Storage** <!-- uuid: 26806cd5-694a-4862-9f86-410d8d1ff498 --> — optional; provides a key/value scratch for core state, never delivery.

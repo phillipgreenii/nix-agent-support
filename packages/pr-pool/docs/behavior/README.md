@@ -96,13 +96,30 @@ principle's rule form; the principle is stated here, once, and nowhere else rest
 
 - **Extent (in)** — matching and routing typed events to bound handlers; the participant interfaces
   and their common contract; the **durable, ordered, de-duped, retention-bounded event queue** with
-  at-least-once delivery; concurrency and per-handler capacity; the operator CLI; the metric catalog;
+  at-least-once delivery; concurrency as the offer/accept model and its serialize marks — but **no
+  declared per-handler ceiling**; the operator CLI; the metric catalog;
   the **wiring** (declared routing graph + validation); the daemon / run-until-idle lifecycle.
 - **Extent (out)** — concrete participant **implementations** (ccpool, beads, prometheus, …) and any
   deployment-specific behavior live in a downstream deployment set that implements these interfaces;
   governance authority and tech choices are decision docs; the "how" is downstream.
 - **Floor** — pr-pool speaks in events, bindings, participants, handler sessions, and wiring. It
   names no concrete tool, transport, tuning constant, or file layout.
+
+## Realization gaps
+
+This set's **realization-gap register** (`INV-23`): intended behavior this set's implementation has
+not built yet, one row per gap, each keyed by the **element id** the gap is against. The register is
+**set-level metadata and never part of an element** — which is exactly what lets it say where the
+code currently stands without putting a status annotation or a _how_ into any definition. A gap is
+**not** an open question: the intent below is settled and the build has not caught up, so no gap is
+recorded as an `OQ-`. One element MAY carry more than one row, because merging two divergences into
+one row would lose which of them converged. A row names where the work is tracked because this
+project tracks it in beads; that column is this set's own choice, not the register's shape.
+
+| Element      | Intended                                                                              | Where the implementation stands                                                                                                                                                                         | Tracked by         |
+| ------------ | ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ |
+| `INV-CONC-1` | capacity is handler-enforced and declared nowhere, never a core-tracked number        | the core both stores and enforces a per-role ceiling: `packages/pr-pool/internal/orchestrator/orchestrator.go:155` leases `n := r.Cap - bus.Inflight(r.Name)`, and `:202` stops at `worked >= role.Cap` | bead `pg2-f3mcb.2` |
+| `INV-CONC-1` | a `type` MAY be marked to **serialize**, so events of that type never run in parallel | no per-type serialization exists in the dispatch path — neither the event bus nor the queue's per-listener serial FIFO is a per-type mark, and nothing reads such a mark                                | bead `pg2-cl9jz`   |
 
 ## External references
 
@@ -123,6 +140,7 @@ cites a whole family (`INTF-ZR-*`), the family resolves through the declared mem
 | `INV-11`         | a set's extent is exactly what its stories, use cases and journeys require                                              | `phillipgreenii-nix-agent-support · behavior-docs/docs/behavior` | [f8174e40-806c-4c42-97da-996efd7c6e23](https://github.com/phillipgreenii/nix-agent-support/blob/main/behavior-docs/docs/behavior/invariants.md)       |
 | `INV-18`         | inter-consistency at every interface, reconciled by the counterparty's kind                                             | `phillipgreenii-nix-agent-support · behavior-docs/docs/behavior` | [4c6a764b-02f5-4c85-afae-a082fe6c21cd](https://github.com/phillipgreenii/nix-agent-support/blob/main/behavior-docs/docs/behavior/invariants.md)       |
 | `INV-19`         | a set MAY declare a precedence ordering over its own invariants                                                         | `phillipgreenii-nix-agent-support · behavior-docs/docs/behavior` | [4325bdf4-2458-4606-8b37-2e5e996aa53a](https://github.com/phillipgreenii/nix-agent-support/blob/main/behavior-docs/docs/behavior/invariants.md)       |
+| `INV-23`         | the realization-gap register is set-level, named `## Realization gaps`, and never an element                            | `phillipgreenii-nix-agent-support · behavior-docs/docs/behavior` | [f3bba3e7-440f-4109-a4de-9d37daa34bcf](https://github.com/phillipgreenii/nix-agent-support/blob/main/behavior-docs/docs/behavior/invariants.md)       |
 | `GOAL-7`         | a set SHOULD show intent through examples                                                                               | `phillipgreenii-nix-agent-support · behavior-docs/docs/behavior` | [42ad1aa1-af11-4387-bf02-e0f028f80434](https://github.com/phillipgreenii/nix-agent-support/blob/main/behavior-docs/docs/behavior/invariants.md)       |
 | `USECASE-5`      | the method's procedure for relocating implementation content out of a behavior doc                                      | `phillipgreenii-nix-agent-support · behavior-docs/docs/behavior` | [7d6de948-3ef5-426a-949e-2dd872f06d28](https://github.com/phillipgreenii/nix-agent-support/blob/main/behavior-docs/docs/behavior/journeys.md)         |
 | `INV-CCPOOL-6`   | a handler run held for a human decision is preserved, not reaped, and the accepting handler owns its resume             | `phillipg-nix-ziprecruiter · modules/zm/pr-pool/docs/behavior`   | [a5f2e14b-1a49-4bfd-be44-69acc603d685](https://github.com/phillipgziprecruiter/phillipg_mbp/blob/main/modules/zm/pr-pool/docs/behavior/invariants.md) |

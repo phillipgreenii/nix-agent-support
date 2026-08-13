@@ -46,7 +46,8 @@ their own terms in a downstream deployment set.
   (it calls the core's ingest callback). A push-only source still registers.
 - **Event handler** — responds to an event it is bound to: it **accepts** the event and owns the run
   from there, reporting its progress and outcome on its **own** surface rather than back to the core,
-  and may be capacity-limited. Its concrete kinds (a "role") are named in a downstream deployment set.
+  and may be capacity-limited — a limit it enforces itself, which nothing declares to the core
+  (`INV-CONC-1`). Its concrete kinds (a "role") are named in a downstream deployment set.
 - **Handler session** — one run of an event handler against one event, tracked by its tracking id.
 - **Monitoring sink** — pulls or pushes a declared subset of the metric catalog.
 - **Storage** — an optional key/value scratch a participant provides for core state; never backs

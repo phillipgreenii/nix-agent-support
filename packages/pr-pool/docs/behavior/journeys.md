@@ -141,8 +141,7 @@ sequenceDiagram
   offers one (a source's **pull** vs **push**; a monitoring sink's **pull** vs **push**).
 - **Event sources** (`INTF-SOURCE`) — and, for a pull source, its **query trigger**: a **periodic**
   tick.
-- **Event handlers / roles** (`INTF-HANDLER`) — each with its behavior and its **capacity (cap)**,
-  the per-handler concurrency ceiling.
+- **Event handlers / roles** (`INTF-HANDLER`) — each with its behavior.
 - **Bindings** — for each handler, the **event-type match** it responds to. `type` is the default
   field; a binding MAY match other declared fields (`INV-DISP-1`).
 - **Serialize marks** — any event type **marked to serialize** (`INV-CONC-1`, see `OQ-CONC-MARK`).
@@ -154,14 +153,16 @@ sequenceDiagram
 The resolved config is validated as a routing graph (`JOURNEY-VALIDATE`) and run (`JOURNEY-RUN`).
 **Expiry is not authored here.** Each event carries its own optional `at` and `expiresAt`
 (`INV-EVT-1`), and an event with neither is expired on arrival — so the default needs no config entry,
-and an operator who wants a retry window sets `expiresAt` on the event (`INV-EVT-4`). The full
+and an operator who wants a retry window sets `expiresAt` on the event (`INV-EVT-4`). **A handler's
+concurrency ceiling is not authored here either** — how many events a handler runs at once is the
+handler's own limit to keep, and this configuration declares no such number (`INV-CONC-1`). The full
 configuration **schema** is not yet fixed (see `OQ-CONFIG`).
 
 ```mermaid
 flowchart TD
     start["operator authors the deployment config"] --> parts["declare each participant: command + mode"]
     parts --> src["event sources INTF-SOURCE: pull (periodic tick) or push"]
-    parts --> hdl["event handlers/roles INTF-HANDLER: behavior + per-handler capacity (cap)"]
+    parts --> hdl["event handlers/roles INTF-HANDLER: behavior only, no concurrency ceiling is declared"]
     parts --> mon["monitoring sink INTF-MON: mode + metric subset"]
     parts --> sto["storage INTF-STORE: optional; in-memory default"]
     src --> bind["bindings: each handler matches event types (type default; INV-DISP-1)"]
@@ -289,7 +290,8 @@ ingest callback). The core **de-duplicates by `id` within retention** (`INV-EVT-
 `type`** (`INV-DISP-1`). An event whose `type` no handler binds is an **error** — recorded to logs
 and metrics, and returned to the caller on the push/ingest path (`INV-DISP-3`). Otherwise the core
 **dispatches** the event to a handler as a **handler-session** (tracked by the request `id`),
-delivering each event to **one** session bounded by the handler's capacity (`INV-CONC-1`). The
+delivering each event to **one** session per handler; whether that handler declines `busy` or accepts
+and buffers the event is the handler's own to decide (`INV-CONC-1`). The
 handler replies **sync** (outcome inline) or **deferred** (`{ deferred: true }` — an **ack** that is
 itself the acceptance, after which the core is owed nothing further and the run is the handler's own,
 `INV-FAIL-1`). New work the handler produces re-enters later as fresh events through a query.
@@ -299,7 +301,7 @@ flowchart TD
     emit["a source emits a typed event"] --> dedup["core de-duplicates by id within retention (INV-EVT-3)"]
     dedup --> route{"a handler bound to its type? (INV-DISP-1)"}
     route -->|no| err["error to logs + metrics; error to caller on push (INV-DISP-3)"]
-    route -->|yes| disp["core dispatches to one handler-session, bounded by capacity (INV-CONC-1)"]
+    route -->|yes| disp["core dispatches to one handler-session, which the handler declines busy or accepts (INV-CONC-1)"]
     disp --> reply{"sync or deferred?"}
     reply -->|sync| out["outcome returned inline"]
     reply -->|deferred| cb["deferred ack is the acceptance, so the handler owns the run from here (INV-FAIL-1)"]
@@ -516,7 +518,7 @@ sequenceDiagram
 Each states the gap, its owner, a resolution path, and where it blocks.
 
 - **`OQ-CONFIG`** <!-- uuid: e004fda6-f6e6-41e1-8ec4-0b90c17fd2b2 --> — the full **configuration schema**: participants (command + mode), event sources,
-  handlers/roles + their event-type **bindings**, caps, monitoring/storage selection, and the
+  handlers/roles + their event-type **bindings**, monitoring/storage selection, and the
   `--only` / `--disable` selectors. _Gap_: the authored config shape is not yet fixed. _Owner_:
   operator/author. _Path_: extract from pr-pool's TOML prior art and pin the schema. _Blocks_:
   authoring config (`JOURNEY-CONFIG`); `INTF-CLI`.
