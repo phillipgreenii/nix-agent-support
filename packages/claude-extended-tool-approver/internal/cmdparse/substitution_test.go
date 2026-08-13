@@ -180,6 +180,152 @@ func TestScanSubstitutionsInHeredocBody_QuotesAreData(t *testing.T) {
 	}
 }
 
+// TestScanSubstitutions_UnparseableStillEnumeratesItsPrefix is the ANTI-FORFEITURE
+// guard for ADR 0039 step 2a (pg2-zeqa5).
+//
+// The seam's strict parser yields NO tree for text it rejects, so the naive
+// migration would have returned zero bodies wherever the old byte loop returned the
+// ones it had already found. Any Reject one of those bodies would have earned would
+// then be replaced by the unparseable NoOpinion floor — a transition in the
+// LESS-RESTRICTIVE direction under `Approve < NoOpinion < Ask < Reject`, which ADR
+// 0039's Enforcement gate forbids.
+//
+// The heredoc-stripped leaf Raw is the shape that makes this load-bearing rather
+// than theoretical. On the engine's path a heredoc-bearing leaf's Raw has its BODY
+// removed, so the text reaching ScanSubstitutions ends at an unclosed
+// here-document and cannot parse — while the `$( )` on the command line is a real
+// substitution with an exact extent that MUST still be recursed.
+//
+// Both halves are asserted together on purpose: the flag MUST stay set (that is
+// I1a's floor, and the recovering parser must never be allowed to clear it) AND the
+// body MUST still be enumerated.
+func TestScanSubstitutions_UnparseableStillEnumeratesItsPrefix(t *testing.T) {
+	tests := []struct {
+		name       string
+		in         string
+		wantBodies []string
+	}{
+		{
+			// The engine's actual heredoc-bearing leaf Raw, post-strip.
+			name:       "heredoc-stripped raw keeps its command-line substitution",
+			in:         "cmd $(rm -rf /) <<EOF",
+			wantBodies: []string{"rm -rf /"},
+		},
+		{
+			name:       "heredoc-stripped raw with no substitution",
+			in:         "cat <<EOF",
+			wantBodies: nil,
+		},
+		{
+			name:       "a complete substitution before an unbalanced quote is kept",
+			in:         `echo "$(date)" 'oops`,
+			wantBodies: []string{"date"},
+		},
+		{
+			// The closing delimiter is MISSING, so the extent is unknown and nothing
+			// inside it has been enumerated. Salvaging a body here would be inventing
+			// one — this is the pg2-wguam rule, expressed as a recovered-position check.
+			name:       "an unterminated substitution contributes no body",
+			in:         "echo $(oops",
+			wantBodies: nil,
+		},
+		{
+			name:       "an unterminated backtick contributes no body",
+			in:         "echo `oops $(rm -rf ~)",
+			wantBodies: nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ScanSubstitutions(tt.in)
+			if !got.Unparseable {
+				t.Fatalf("ScanSubstitutions(%q).Unparseable = false, want true: the recovering parser must never clear the I1a floor", tt.in)
+			}
+			if got.Reason == "" {
+				t.Errorf("ScanSubstitutions(%q) is Unparseable with an empty Reason", tt.in)
+			}
+			if gotBodies := bodies(got.Substitutions); len(gotBodies) > 0 || len(tt.wantBodies) > 0 {
+				if !reflect.DeepEqual(gotBodies, tt.wantBodies) {
+					t.Errorf("ScanSubstitutions(%q) bodies = %v, want %v", tt.in, gotBodies, tt.wantBodies)
+				}
+			}
+		})
+	}
+}
+
+// TestScanSubstitutions_DoesNotScanHeredocBodiesAsShellText pins the seam's
+// division of labour between the two expansion models.
+//
+// A heredoc body's quotes are DATA, not syntax, so scanning it as shell text is
+// exactly the pg2-wguam mis-model. The body therefore belongs to
+// ScanSubstitutionsInHeredocBody, and on the engine's path to
+// evaluateHeredocBodies — which is also what keeps the same body from being
+// recursed twice under two different models.
+func TestScanSubstitutions_DoesNotScanHeredocBodiesAsShellText(t *testing.T) {
+	const cmd = "cat <<EOF\n$(rm -rf .git/objects)\nEOF\n"
+	scan := ScanSubstitutions(cmd)
+	if scan.Unparseable {
+		t.Fatalf("ScanSubstitutions(%q).Unparseable = true, want false (the text is valid bash)", cmd)
+	}
+	if len(scan.Substitutions) != 0 {
+		t.Errorf("ScanSubstitutions(%q) = %v, want no substitutions: a heredoc BODY is not shell text", cmd, bodies(scan.Substitutions))
+	}
+	// The body model DOES see it — that is the entry point that owns it.
+	body := ScanSubstitutionsInHeredocBody("$(rm -rf .git/objects)\n")
+	if len(body.Substitutions) != 1 || body.Substitutions[0].Body != "rm -rf .git/objects" {
+		t.Errorf("ScanSubstitutionsInHeredocBody = %v, want one body %q", bodies(body.Substitutions), "rm -rf .git/objects")
+	}
+	// A redirection TARGET, unlike a heredoc body, IS shell text and is still scanned.
+	if got := bodies(EnumerateSubstitutions("cmd > $(mktemp)")); !reflect.DeepEqual(got, []string{"mktemp"}) {
+		t.Errorf("EnumerateSubstitutions(%q) = %v, want [mktemp]", "cmd > $(mktemp)", got)
+	}
+}
+
+// TestIsSafeSubstitutionBody_OnlyASoleSimpleCommand pins the shape TIGHTENING that
+// ADR 0039 step 2a applied to the static allowlist floor.
+//
+// The outgoing test was "Parse yields exactly one leaf", and its quote-awareness was
+// a SIDE EFFECT of splitCompound happening to split top-level compound operators. A
+// real grammar makes the same leaf count admit shapes the floor was never meant to
+// clear: `(cat VERSION)`, `{ cat VERSION; }` and `if true; then cat VERSION; fi` all
+// reduce to ONE command leaf. Clearing those would be a move in the LESS-RESTRICTIVE
+// direction, so the seam requires the sole statement to BE a simple command.
+//
+// Every row here is a body whose EXECUTABLE is on the static allowlist, so the only
+// thing that can reject it is the shape test.
+func TestIsSafeSubstitutionBody_OnlyASoleSimpleCommand(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		safe bool
+	}{
+		{"a bare simple command is safe", "cat VERSION", true},
+		{"a subshell is not a simple command", "(cat VERSION)", false},
+		{"a brace group is not a simple command", "{ cat VERSION; }", false},
+		{"a conditional is not a simple command", "if true; then cat VERSION; fi", false},
+		{"a loop is not a simple command", "for f in a; do cat VERSION; done", false},
+		{"a pipeline is not a simple command", "cat VERSION | cat", false},
+		{"an && list is not a simple command", "cat VERSION && cat VERSION", false},
+		{"two statements are not one command", "cat VERSION; cat VERSION", false},
+		{"a negated command is refused", "! cat VERSION", false},
+		{"a backgrounded command is refused", "cat VERSION &", false},
+		{"a redirected command is refused", "cat VERSION > /tmp/x", false},
+		{"a leading assignment is refused", "LC_ALL=C cat VERSION", false},
+		{"an arithmetic command is not a simple command", "(( 1 + 1 ))", false},
+		{"a test clause is not a simple command", "[[ -f VERSION ]]", false},
+		// The `env`/`command` exec prefix is UNWRAPPED by the shared lowering, so it
+		// stays a simple command and the allowlist judges the real executable.
+		{"an env exec prefix still resolves to the real command", "command cat VERSION", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsSafeSubstitutionBody(tt.body); got != tt.safe {
+				t.Errorf("IsSafeSubstitutionBody(%q) = %v, want %v", tt.body, got, tt.safe)
+			}
+		})
+	}
+}
+
 func TestEnumerateSubstitutions_Kinds(t *testing.T) {
 	got := EnumerateSubstitutions("a $(cmd) `bt` <(pin) >(pout)")
 	want := []Substitution{

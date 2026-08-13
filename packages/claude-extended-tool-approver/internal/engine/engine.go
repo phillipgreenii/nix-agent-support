@@ -436,6 +436,13 @@ func (e *Engine) evaluateHeredocBodies(pc cmdparse.ParsedCommand, normalized str
 		// A heredoc body is scanned under the BODY expansion model, where a quote
 		// character is data: an apostrophe in prose must not open a phantom quoted
 		// region that hides the rest of the body's live substitutions (pg2-wguam).
+		//
+		// THIN SHIM — owned by pg2-1019a (ADR 0039 step 4). Step 2a moved the scan
+		// itself onto the seam, so the body is now modelled by the bash parser's own
+		// here-document entry point. What survives here is the TEXT hop: this passes a
+		// body STRING, which the seam must parse, where ADR 0039's I7 requires
+		// recursion to walk a SUBTREE of the already-parsed file instead. Converting
+		// this call to the structural entry point is step 4's unit of work.
 		result = hookio.MostRestrictive(result,
 			e.foldSubstitutionScan(cmdparse.ScanSubstitutionsInHeredocBody(body), normalized, stack, origin))
 	}
@@ -445,6 +452,15 @@ func (e *Engine) evaluateHeredocBodies(pc cmdparse.ParsedCommand, normalized str
 // evaluateSubstitutionsIn folds the verdict of every top-level substitution body in
 // SHELL TEXT (a leaf's command text), most-restrictive-wins, seeded with the neutral
 // Approve so a text with no substitutions contributes nothing.
+//
+// THIN SHIM — owned by pg2-1019a (ADR 0039 step 4). As above, step 2a moved the scan
+// onto the seam but left the TEXT hop: `text` here is a leaf's Raw, which the seam
+// re-parses, where I7 requires walking the subtree of the file the engine already
+// parsed. That text is also POST-heredoc-strip, so for a heredoc-bearing leaf it ends
+// at an unclosed here-document and does not parse on its own — the seam's recovery
+// prefix is what keeps that from forfeiting a command-line substitution's verdict
+// (see cmdparse.substitutionPrefixAfterFailure). Step 4 removes the hop and with it
+// the need for that salvage.
 func (e *Engine) evaluateSubstitutionsIn(text, normalized string, stack []hookio.StackFrame, origin *hookio.HookInput) hookio.RuleResult {
 	return e.foldSubstitutionScan(cmdparse.ScanSubstitutions(text), normalized, stack, origin)
 }
@@ -465,13 +481,22 @@ func (e *Engine) evaluateSubstitutionsIn(text, normalized string, stack []hookio
 //	EOF
 //	)"                                            ->  allow   (the curl really runs)
 //
-// The apostrophe leaves matchParen unable to find the `$( )`'s closing paren, so the
-// outer substitution is never enumerated; because stripHeredocBodies deliberately
-// leaves a heredoc inside `$( )` glued to its substitution (the substitution recursion
-// is what strips it), losing that one extent also skipped heredocFloor and
-// evaluateHeredocBodies. Neither of those guards is at fault — they were never
-// reached. The carrier is incidental: `echo "$(echo don't)" "$(rm -rf .git/objects)"`
-// auto-approved with no heredoc at all, the second substitution simply discarded.
+// HISTORICAL MECHANISM (the hand-rolled scan it describes was deleted by ADR 0039
+// step 2a, pg2-zeqa5): the apostrophe left `cmdparse.matchParen` unable to find the
+// `$( )`'s closing paren, so the outer substitution was never enumerated; because
+// stripHeredocBodies deliberately leaves a heredoc inside `$( )` glued to its
+// substitution (the substitution recursion is what strips it), losing that one extent
+// also skipped heredocFloor and evaluateHeredocBodies. Neither of those guards was at
+// fault — they were never reached. The carrier is incidental:
+// `echo "$(echo don't)" "$(rm -rf .git/objects)"` auto-approved with no heredoc at
+// all, the second substitution simply discarded.
+//
+// The scan is now the real bash parser behind the cmdparse seam, which models both
+// carriers correctly — but this floor is NOT thereby obsolete and MUST NOT be
+// removed. Its contract is about the class, not the carrier: whenever cmdparse
+// cannot model the text it was given, the empty body list is absence of evidence
+// rather than evidence of absence. A real parser has its own unparseable inputs
+// (I1b/I10), and this is where they land.
 //
 // NoOpinion — defer to Claude Code — is the correct verdict for text ceta cannot parse,
 // and it is folded through MostRestrictive rather than returned, so it can neither be

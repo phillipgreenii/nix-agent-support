@@ -405,11 +405,53 @@ func isSubsequence(a, b string) bool {
 // and ScanSubstitutionsInHeredocBody for an unquoted heredoc body, where quote
 // characters are data (pg2-wguam).
 //
-// It asserts no panic, determinism, that each returned body is a real substring of
-// the input, that Kind and IsCommandSubstitution stay consistent, that an
-// Unparseable scan always carries a Reason and is never certified safe by the
-// static allowlist, and that feeding every body back through the scan and the
-// allowlist floor (the exact re-entrant path the engine takes) never panics.
+// ============================ REPLACEMENT INVARIANT ==========================
+//
+// ADR 0039's Enforcement item "Fuzz continuity" requires that a fuzzer targeting
+// a function the migration DELETES be replaced by a harness over the seam
+// asserting THE SAME PROPERTY, with the replacement invariant stated in the step
+// that performs the deletion. This is that statement, for step 2a (pg2-zeqa5).
+//
+// DELETED by step 2a: `scanSubstitutions` (the shared byte loop), `matchParen`'s
+// use by it, and `indexUnescapedBacktick`. The EXPORTED targets of this harness —
+// ScanSubstitutions, ScanSubstitutionsInHeredocBody, EnumerateSubstitutions and
+// IsSafeSubstitutionBody — SURVIVE as facades over the seam, so the harness
+// transfers to the seam wholesale rather than being rewritten against a new API.
+//
+// THE PROPERTY THE DELETED HARNESS ASSERTED, and which this one still asserts:
+//
+//  1. TOTALITY — no input panics, in either expansion model, including when every
+//     returned body is fed back through both models and the static allowlist (the
+//     exact re-entrant path the engine takes).
+//  2. DETERMINISM — the same input yields the same scan.
+//  3. BODIES ARE REAL SLICES OF THE INPUT — every Body is a substring of the text
+//     scanned. This was structural in the byte loop; over the seam it is genuine
+//     slice math on AST positions and can therefore be WRONG.
+//  4. KIND CONSISTENCY — Kind and IsCommandSubstitution never disagree, because
+//     only IsCommandSubstitution() selects the static-allowlist floor.
+//  5. A DESYNC IS REPORTABLE — Unparseable always carries a Reason.
+//  6. THE FAIL-SAFE RULE (pg2-wguam) — text that does not parse is NEVER certified
+//     by the static allowlist, since a true from IsSafeSubstitutionBody is what
+//     SUPPRESSES the engine's abstain floor for a command substitution.
+//
+// THREE PROPERTIES ARE ADDED, because the seam introduces failure modes the byte
+// loop could not have:
+//
+//  7. RECURSION TERMINATES — every Body is strictly SHORTER than the text it came
+//     from. The byte loop guaranteed this by construction (a body lies strictly
+//     inside its delimiters); AST offset arithmetic could return the whole input
+//     and make the engine's substitution recursion non-terminating.
+//  8. NO PARSER-POOL CONTAMINATION — a shell-text scan taken AFTER a heredoc-body
+//     scan equals the one taken before it. The two models are now two entry points
+//     (Parser.Parse and Parser.Document) sharing one pooled *syntax.Parser, so a
+//     parser left holding state would make a verdict depend on what the process
+//     happened to evaluate earlier. Nothing in the deleted byte loop had state.
+//  9. RECOVERY NEVER CLEARS A DESYNC — a text whose STRICT parse failed still
+//     reports Unparseable even though a recovering parse is consulted to salvage
+//     the body prefix. This is the invariant that keeps `syntax.RecoverErrors`
+//     from becoming a fallback parser, which I8 forbids outright.
+//
+// =============================================================================
 func FuzzEnumerateSubstitutions(f *testing.F) {
 	for _, s := range fuzzSeeds {
 		f.Add(s)
@@ -429,6 +471,11 @@ func FuzzEnumerateSubstitutions(f *testing.F) {
 		if again := ScanSubstitutionsInHeredocBody(s); !reflect.DeepEqual(bodyScan, again) {
 			t.Fatalf("ScanSubstitutionsInHeredocBody(%q) is non-deterministic", s)
 		}
+		// PROPERTY 8: the shell-text scan must be unchanged by having run a
+		// heredoc-body scan in between. Parse and Document share the pooled parser.
+		if afterDoc := ScanSubstitutions(s); !reflect.DeepEqual(scan, afterDoc) {
+			t.Fatalf("ScanSubstitutions(%q) changed after a heredoc-body scan: parser pool state leaked", s)
+		}
 		for _, sc := range []SubstitutionScan{scan, bodyScan} {
 			// A desync must be REPORTABLE: the engine puts Reason into the abstain it
 			// defers with, so an empty one would surface as a blank explanation.
@@ -438,6 +485,11 @@ func FuzzEnumerateSubstitutions(f *testing.F) {
 			for _, sub := range sc.Substitutions {
 				if !strings.Contains(s, sub.Body) {
 					t.Fatalf("scan of %q: body %q is not a substring of the input (slice-math bug)", s, sub.Body)
+				}
+				// PROPERTY 7: a body strictly shorter than its source is what makes the
+				// engine's re-evaluation of that body terminate.
+				if len(sub.Body) >= len(s) {
+					t.Fatalf("scan of %q: body %q is not shorter than the input; the engine's substitution recursion would not terminate", s, sub.Body)
 				}
 				wantCmd := sub.Kind == SubstCommand || sub.Kind == SubstBacktick
 				if sub.IsCommandSubstitution() != wantCmd {
@@ -451,10 +503,12 @@ func FuzzEnumerateSubstitutions(f *testing.F) {
 				HasUnsafeCommandSubstitution(sub.Body)
 			}
 		}
-		// The fail-safe rule, as an invariant: text the scan could not model is never
-		// certified by the static allowlist. IsSafeSubstitutionBody returning true is
-		// what SUPPRESSES the engine's Abstain floor for a command substitution, so a
-		// true here on unparseable text re-opens the pg2-wguam hole one level down.
+		// PROPERTY 6 / PROPERTY 9, together: text the scan could not model is never
+		// certified by the static allowlist, and consulting a RECOVERING parser for
+		// the body prefix must not have cleared the desync flag that guarantees it.
+		// IsSafeSubstitutionBody returning true is what SUPPRESSES the engine's
+		// abstain floor for a command substitution, so a true here on unparseable
+		// text re-opens the pg2-wguam hole one level down.
 		if ScanSubstitutions(s).Unparseable && IsSafeSubstitutionBody(s) {
 			t.Fatalf("IsSafeSubstitutionBody(%q) = true for an UNPARSEABLE body; the static allowlist floor would be suppressed", s)
 		}

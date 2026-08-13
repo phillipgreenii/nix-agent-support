@@ -114,17 +114,27 @@ func isGoEnvMutatingFlag(t string) bool {
 
 // IsSafeSubstitutionBody reports whether cmdStr — the inner body of a
 // $(...) or `...` command substitution — is safe under the STATIC allowlist. A
-// body is safe only when it contains no nested substitution AND it parses (via
-// the quote-aware Parse) to EXACTLY ONE leaf command with no redirection/heredoc,
-// and that leaf's command+args pass isSafeSubstitutionCommand.
+// body is safe only when it contains no nested substitution AND it parses to
+// EXACTLY ONE SIMPLE COMMAND with no redirection/heredoc, and that command's
+// command+args pass isSafeSubstitutionCommand.
 //
-// Requiring exactly one leaf is what makes this quote-aware for free: Parse
-// (via splitCompound/tokenize) already tracks single/double-quote and
-// backtick state while scanning for ';', '&&', '||', '|', and '&', so a
-// top-level (unquoted) compound operator splits the body into 2+ leaves
-// (unsafe), while the SAME byte inside the command's own quotes — e.g. the
-// '|' in `grep -E 'a|b' file` — stays glued into one argument token and the
-// body still parses to a single leaf.
+// Quote-awareness is now a PARSER FACT rather than a property inherited from a
+// leaf count (ADR 0039 step 2a): the body goes through the seam, so the '|' in
+// `grep -E 'a|b' file` is a literal inside one argument word because the bash
+// grammar says so, not because a hand-rolled splitter happened to track quote
+// state. `soleSimpleCommandLeaf` also TIGHTENS the shape test — the sole
+// statement must BE a simple command, not merely reduce to one leaf — which is
+// what keeps a real grammar from newly clearing `(cat VERSION)` or
+// `{ cat VERSION; }`; see its own comment.
+//
+// An UNPARSEABLE body is refused for the same reason a nested substitution is,
+// and then some: if the body does not parse, "no substitution found" is not
+// evidence there is none, so clearing it would clear text nobody enumerated. That
+// was the reachable half of the pg2-wguam P0 — the outgoing backtick extent scan
+// (`indexUnescapedBacktick`, deleted in this step) was not quote-aware at all, so
+// “ `echo don't` “ yielded a quote-unbalanced body that still reduced to one
+// safe-looking `echo` leaf. A body that does not parse now cannot reach the
+// allowlist at all, because the seam returns no leaf for it.
 //
 // This is the STATIC FLOOR consulted by the engine's substitution-body
 // recursion (pg2-1q5i3): a body the allowlist rejects can never be made LESS
@@ -132,24 +142,10 @@ func isGoEnvMutatingFlag(t string) bool {
 // git rule but deliberately excluded here for the textconv/external-diff RCE
 // surface). Recursion may only ADD demotions, never unlock what this blocks.
 func IsSafeSubstitutionBody(cmdStr string) bool {
-	// A body that itself embeds a command/process substitution is opaque to the
-	// static allowlist — the nested command is never inspected here. Reject it;
-	// the engine's full-engine recursion evaluates the inner command instead.
-	//
-	// An UNPARSEABLE body is rejected for the same reason and then some: if the
-	// scan desynced, "no substitution found" is not evidence there is none, so
-	// clearing the body would clear text nobody enumerated. A backtick body is the
-	// reachable case — indexUnescapedBacktick is not quote-aware, so `` `echo don't` ``
-	// yields a quote-unbalanced body that Parse still reduces to one safe-looking
-	// `echo` leaf (pg2-wguam).
-	if scan := ScanSubstitutions(cmdStr); scan.Unparseable || len(scan.Substitutions) > 0 {
+	leaf, ok := soleSimpleCommandLeaf(cmdStr)
+	if !ok {
 		return false
 	}
-	leaves := Parse(cmdStr)
-	if len(leaves) != 1 {
-		return false
-	}
-	leaf := leaves[0]
 	if leaf.Executable == "" || len(leaf.Redirections) > 0 || leaf.HasHeredoc {
 		return false
 	}
@@ -193,164 +189,21 @@ func (s Substitution) IsCommandSubstitution() bool {
 // the scan skipped. A caller making a security decision MUST floor an
 // Unparseable scan at Abstain and MUST NOT treat its Substitutions as complete.
 type SubstitutionScan struct {
-	// Substitutions are the top-level bodies found before the scan stopped. When
-	// Unparseable is set this list is a PREFIX, not an inventory.
+	// Substitutions are the top-level bodies found. When Unparseable is set this
+	// list is a PREFIX, not an inventory: it holds the substitutions whose extents
+	// the seam could still delimit exactly, and omits any whose closing delimiter
+	// was missing — for those the extent is unknown, so nothing inside them has
+	// been enumerated.
 	Substitutions []Substitution
-	// Unparseable reports that the scan could not model the text: an unterminated
-	// `$(`/backtick, a `$( )` whose extent does not balance, or (shell-text mode)
-	// a quote left open at end of input.
+	// Unparseable reports that the text is not valid bash, as judged by the STRICT
+	// parser behind the seam: an unterminated `$(`/backtick, an unbalanced quote, an
+	// unclosed here-document, a zsh-only construct. It is deliberately NOT weakened
+	// by the error-recovering pass the seam consults to salvage the prefix above —
+	// recovery adds bodies to recurse and never clears this flag (I8 forbids a
+	// fallback parser).
 	Unparseable bool
-	// Reason names the specific desync, for the deferring caller's reason string.
+	// Reason names the specific failure, for the deferring caller's reason string.
 	Reason string
-}
-
-// EnumerateSubstitutions scans raw shell text and returns every TOP-LEVEL
-// command/process substitution body: $(...), `...`, <(...) and >(...). It is the
-// single shared substitution enumerator (pg2-1q5i3) used by the engine's
-// substitution-body recursion and reusable by sibling env-value recursion
-// (pg2-gkd5e).
-//
-// It DISCARDS the scan's Unparseable flag, so it is only appropriate where a
-// truncated list is conservative in the caller's own direction (gitdir's
-// direction inference defaults to write when a variable's use is unseen; envvars
-// refuses to clear a value that enumerates to zero substitutions). Any caller
-// whose "no substitutions" branch is an approval MUST use ScanSubstitutions and
-// honor Unparseable instead.
-func EnumerateSubstitutions(s string) []Substitution {
-	return ScanSubstitutions(s).Substitutions
-}
-
-// ScanSubstitutions scans SHELL TEXT — a command line or a substitution body,
-// where quote characters are syntax.
-//
-// Semantics:
-//   - Single-quoted spans are literal — bash performs NO substitution there — so
-//     they are skipped entirely.
-//   - Double-quoted spans still permit $(...) and `...` (bash performs those
-//     inside double quotes); a backslash-escaped $ or ` is literal.
-//   - Arithmetic $((...)) is NOT a command substitution and is skipped.
-//   - Only TOP-LEVEL substitutions are returned; a nested substitution stays
-//     inside the returned outer body and surfaces when the engine re-evaluates
-//     that body (parallel to the existing process-substitution recursion). This
-//     avoids double-processing and lets the engine cycle check apply per level.
-//   - Paren matching counts every '(' (bare, $(, <(, >() so a process sub nested
-//     inside a command sub — the `$(cat <(rm -rf ~))` depth-counter gotcha — is
-//     NOT truncated.
-//   - An unterminated substitution, or a quote still open at end of input, stops
-//     the scan and sets Unparseable.
-func ScanSubstitutions(s string) SubstitutionScan {
-	return scanSubstitutions(s, true)
-}
-
-// ScanSubstitutionsInHeredocBody scans an UNQUOTED heredoc BODY, where quote
-// characters are DATA rather than syntax.
-//
-// bash expands an unquoted heredoc body — parameter expansion, command
-// substitution, arithmetic — but performs no word splitting and no quote
-// removal: a `'` in the body is one literal apostrophe, not the start of a
-// quoted region. Scanning a body with ScanSubstitutions therefore mis-models it
-// twice over (pg2-wguam): an apostrophe in prose opened a phantom single-quoted
-// region that swallowed every following `$( )`, so
-//
-//	cat <<EOF        ->  Reject (the substitution is seen)
-//	$(rm -rf .git/objects)
-//	don't
-//	EOF
-//
-//	cat <<EOF        ->  the substitution is NEVER enumerated
-//	don't
-//	$(rm -rf .git/objects)
-//	EOF
-//
-// reached different verdicts for the same body — the order-dependent-verdict
-// class heredocFloor's fold exists to eliminate. Only the delimiter's quoting
-// decides whether a body expands at all, and that discriminator is upstream:
-// ParsedCommand.UnquotedHeredocBodies never hands a `<<'EOF'` body to this.
-//
-// Backslash pairs are still skipped, matching bash: `\$(x)` in a body is literal
-// text and must not be enumerated.
-func ScanSubstitutionsInHeredocBody(body string) SubstitutionScan {
-	return scanSubstitutions(body, false)
-}
-
-// scanSubstitutions is the shared scan. quotesAreSyntax distinguishes shell text
-// (quotes delimit literal/expanding regions, and an unclosed one is a desync)
-// from an unquoted heredoc body (quotes are ordinary bytes, so no quote state
-// exists to be unbalanced).
-func scanSubstitutions(s string, quotesAreSyntax bool) SubstitutionScan {
-	var out []Substitution
-	inSingle, inDouble := false, false
-	stop := func(reason string) SubstitutionScan {
-		return SubstitutionScan{Substitutions: out, Unparseable: true, Reason: reason}
-	}
-	i, n := 0, len(s)
-	for i < n {
-		c := s[i]
-		switch {
-		case inSingle:
-			if c == '\'' {
-				inSingle = false
-			}
-			i++
-		case c == '\\' && i+1 < n:
-			// Escaped char (bare or double-quote context): the next byte is
-			// literal, so \$ / \` cannot begin a substitution.
-			i += 2
-		case quotesAreSyntax && c == '\'' && !inDouble:
-			inSingle = true
-			i++
-		case quotesAreSyntax && c == '"':
-			inDouble = !inDouble
-			i++
-		case c == '`':
-			end := indexUnescapedBacktick(s, i+1)
-			if end < 0 {
-				return stop("unterminated backtick command substitution")
-			}
-			out = append(out, Substitution{Kind: SubstBacktick, Body: s[i+1 : end]})
-			i = end + 1
-		case c == '$' && i+1 < n && s[i+1] == '(':
-			rel := matchParen(s[i+1:]) // s[i+1] == '('
-			if rel < 0 {
-				// Either genuinely unterminated, or the body holds an unbalanced quote
-				// that makes matchParen's own quote tracking never see the closing ')'.
-				// Both leave the substitution's EXTENT unknown, so nothing inside it has
-				// been enumerated.
-				return stop("unterminated or quote-unbalanced $( ) command substitution")
-			}
-			closeAbs := i + 1 + rel
-			if i+2 < n && s[i+2] == '(' {
-				// Arithmetic $((...)) — not a command substitution; skip it.
-				i = closeAbs + 1
-				continue
-			}
-			out = append(out, Substitution{Kind: SubstCommand, Body: s[i+2 : closeAbs]})
-			i = closeAbs + 1
-		case (c == '<' || c == '>') && !inDouble && i+1 < n && s[i+1] == '(':
-			rel := matchParen(s[i+1:])
-			if rel < 0 {
-				i++ // malformed <( — treat '<' as a redirect operator, keep scanning
-				continue
-			}
-			closeAbs := i + 1 + rel
-			kind := SubstProcessIn
-			if c == '>' {
-				kind = SubstProcessOut
-			}
-			out = append(out, Substitution{Kind: kind, Body: s[i+2 : closeAbs]})
-			i = closeAbs + 1
-		default:
-			i++
-		}
-	}
-	if inSingle || inDouble {
-		// A quote left open at end of input means every byte after it was read as
-		// inert quoted text. bash would reject the command outright, but ceta must
-		// not: the scan's own model is what failed, so it cannot certify that the
-		// skipped tail held no substitution.
-		return stop("unbalanced quote")
-	}
-	return SubstitutionScan{Substitutions: out}
 }
 
 // matchParen returns the index within s of the ')' that closes the '(' assumed
@@ -359,6 +212,21 @@ func scanSubstitutions(s string, quotesAreSyntax bool) SubstitutionScan {
 // nested $()/<()/>()/subshells all balance and a '(' from '<(' or '>(' does NOT
 // leak (the pg2-1q5i3 truncation gotcha). Parens inside single or double quotes
 // are literal and ignored.
+//
+// SHIM — owned by pg2-x9452 (ADR 0039 step 5), NOT by this function's own merits.
+//
+// This is raw-text structure derivation, which ADR 0039's I9 forbids outside the
+// seam. ADR 0039 step 2a (pg2-zeqa5) removed the substitution-scan family's three
+// callers of it — those now go through the seam — leaving exactly TWO, both on the
+// ENV-ASSIGNMENT classification path: classifyCmdSubstitution and (indirectly, via
+// its own `strings.Index` pair rather than this function) classifyBacktickSubstitution.
+// Migrating classifyExpansion is step 5's unit of work, so this is kept verbatim
+// rather than migrated here: collapsing the two steps together would destroy the
+// per-step replay attribution ADR 0039's Enforcement requires.
+//
+// Step 5 asserts this function's REMOVAL. Its live callers are enumerable with:
+//
+//	grep -n 'matchParen(' internal/cmdparse/parser.go
 func matchParen(s string) int {
 	inSingle, inDouble := false, false
 	depth := 0
@@ -384,21 +252,6 @@ func matchParen(s string) int {
 			if depth == 0 {
 				return i
 			}
-		}
-	}
-	return -1
-}
-
-// indexUnescapedBacktick returns the index of the next '`' at or after from
-// that is not backslash-escaped, or -1.
-func indexUnescapedBacktick(s string, from int) int {
-	for i := from; i < len(s); i++ {
-		if s[i] == '\\' {
-			i++
-			continue
-		}
-		if s[i] == '`' {
-			return i
 		}
 	}
 	return -1

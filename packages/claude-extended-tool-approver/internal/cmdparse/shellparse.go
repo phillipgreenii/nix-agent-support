@@ -27,6 +27,7 @@ package cmdparse
 // would newly clear the very predicate I4 exists to fence.
 
 import (
+	"sort"
 	"strings"
 	"sync"
 
@@ -69,6 +70,30 @@ var parserPool = sync.Pool{
 		return syntax.NewParser(syntax.Variant(syntax.LangBash), syntax.KeepComments(true))
 	},
 }
+
+// recoverParserPool holds parsers configured to RECOVER from missing mandatory
+// tokens. It is used on ONE path only: after the strict parse has already
+// FAILED, to recover the best-effort PREFIX of substitutions the failing text
+// still exposes (see substitutionPrefixAfterFailure).
+//
+// It is deliberately a SECOND pool rather than a replacement for parserPool.
+// syntax.RecoverErrors makes the parser return a nil error for input the shell
+// would reject — `echo $(oops` recovers silently — so a recovering parser CANNOT
+// be the oracle for I1a/I1b/I10. The strict parser decides whether the text
+// parsed; this one only ever adds bodies to recurse, and per ADR 0039's
+// Invariants I14 discussion recursing more can only ADD demotions.
+var recoverParserPool = sync.Pool{
+	New: func() any {
+		return syntax.NewParser(syntax.Variant(syntax.LangBash), syntax.KeepComments(true),
+			syntax.RecoverErrors(recoverErrorBudget))
+	},
+}
+
+// recoverErrorBudget bounds the recovery parser's best-effort work. It is a
+// BUDGET, not a semantic threshold: the recovered tree is never trusted as
+// evidence the text parsed, so a text needing more repairs than this simply
+// yields a shorter prefix, which is the conservative direction.
+const recoverErrorBudget = 8
 
 // ParseShell parses command with the real bash parser and lowers the resulting
 // AST to CETA's ParsedCommand leaves.
@@ -739,4 +764,390 @@ func NormalizeCommandShell(command, projectRoot, cwd string) string {
 		return strings.TrimSpace(command)
 	}
 	return strings.Join(parts, " && ")
+}
+
+// ============================================================================
+// The substitution-scan family, over the seam (ADR 0039 step 2a, pg2-zeqa5).
+//
+// These four exported functions REPLACE the hand-rolled text scan that used to
+// live in parser.go as `scanSubstitutions` + `matchParen` +
+// `indexUnescapedBacktick`. That scan was ADR 0039's THIRD front end: a third
+// independent model of shell structure derived from raw text, and the direct
+// cause of the pg2-wguam P0 (451 historical false-allows). Two of its three
+// functions were not quote-aware in the way their callers assumed —
+// `indexUnescapedBacktick` was not quote-aware AT ALL, which is exactly how
+// `` `echo don't` `` reduced to one safe-looking `echo` leaf.
+//
+// WHAT IS PRESERVED, and it is the whole security contract (I1a):
+// `SubstitutionScan.Unparseable` remains a FIRST-CLASS value decided by the
+// STRICT parser, and `Substitutions` remains a PREFIX rather than an inventory.
+// The engine keeps folding the unparseable floor through MostRestrictive
+// (`foldSubstitutionScan`), never returning early, so the result stays
+// order-independent.
+//
+// WHAT CHANGES: which inputs are unparseable. The old scan desynced on inputs
+// bash accepts (an apostrophe inside `$( )`, a `<(` extent it could not track);
+// the real parser models those. Conversely the real parser rejects text the old
+// scan happily walked past. Both directions are enumerated in the step's replay.
+//
+// THE PREFIX, and why it needs a second parse. On failure the strict parser
+// yields no tree at all, so a naive migration would return ZERO bodies where the
+// old scan returned the ones it had already found — and any Reject one of those
+// bodies would have earned would be FORFEITED, a move in the LESS-RESTRICTIVE
+// direction under `Approve < NoOpinion < Ask < Reject`. To avoid forfeiting
+// anything, a failing text is re-parsed with syntax.RecoverErrors purely to
+// enumerate that prefix; `Unparseable` stays true regardless, so the floor still
+// fires. This is the ONLY place a text is parsed twice, it happens only on the
+// failure path, and I7's parse-count guard (ADR 0039's Enforcement item 3) is
+// deferred to after the per-rule gitdir migration, which owns that accounting.
+// ============================================================================
+
+// ScanSubstitutions scans SHELL TEXT — a command line or a substitution body,
+// where quote characters are syntax.
+//
+// Semantics, now decided by the bash grammar rather than by a byte loop:
+//   - Single-quoted spans are literal — bash performs NO substitution there — so
+//     a `$( )` inside them is a *syntax.Lit and is never collected.
+//   - Double-quoted spans still permit `$( )` and “ ` ` “ and are collected.
+//   - Arithmetic `$(( ))` is a *syntax.ArithmExp, a DIFFERENT node type from
+//     *syntax.CmdSubst, so it is skipped by construction rather than by a
+//     lookahead for a second '('.
+//   - Only TOP-LEVEL substitutions are returned: the walk STOPS descending at
+//     each one, so a nested substitution stays inside the returned outer body and
+//     surfaces when the engine re-evaluates that body. This keeps the cycle check
+//     applying per level and avoids double-processing.
+//   - A heredoc BODY is NOT scanned here. It is not shell text — its quotes are
+//     data, not syntax — so it has its own entry point below, and on the engine's
+//     path `evaluateHeredocBodies` owns it. Scanning it here as shell text is
+//     precisely the pg2-wguam mis-model.
+//
+// A text the STRICT parser rejects sets Unparseable with a reason, and
+// Substitutions holds whatever prefix the recovery pass could still attribute an
+// exact extent to.
+func ScanSubstitutions(s string) SubstitutionScan {
+	p, _ := parserPool.Get().(*syntax.Parser)
+	file, err := p.Parse(strings.NewReader(s), "command")
+	parserPool.Put(p)
+	if err == nil {
+		return SubstitutionScan{Substitutions: collectSubstitutions(s, file, true)}
+	}
+	return SubstitutionScan{
+		Substitutions: substitutionPrefixAfterFailure(s, false),
+		Unparseable:   true,
+		Reason:        scanFailureReason(err),
+	}
+}
+
+// ScanSubstitutionsInHeredocBody scans an UNQUOTED heredoc BODY, where quote
+// characters are DATA rather than syntax.
+//
+// bash expands an unquoted heredoc body — parameter expansion, command
+// substitution, arithmetic — but performs no word splitting and no quote removal:
+// a `'` in the body is one literal apostrophe, not the start of a quoted region.
+// Scanning a body as shell text mis-models it twice over (pg2-wguam): an
+// apostrophe in prose opened a phantom single-quoted region that swallowed every
+// following `$( )`, so
+//
+//	cat <<EOF        ->  Reject (the substitution is seen)
+//	$(rm -rf .git/objects)
+//	don't
+//	EOF
+//
+//	cat <<EOF        ->  the substitution is NEVER enumerated
+//	don't
+//	$(rm -rf .git/objects)
+//	EOF
+//
+// reached different verdicts for the same body — the order-dependent-verdict
+// class heredocFloor's fold exists to eliminate.
+//
+// The body model is now the PARSER'S OWN: syntax.Parser.Document parses input
+// "as if they were lines following a <<EOF redirection". So the distinction that
+// used to be a hand-maintained `quotesAreSyntax` flag through a shared byte loop
+// is a different parser ENTRY POINT, and the two models can no longer drift
+// against each other. Backslash pairs are still skipped, matching bash: `\$(x)`
+// in a body is literal text and must not be enumerated.
+//
+// Only the delimiter's quoting decides whether a body expands at all, and that
+// discriminator is upstream: ParsedCommand.UnquotedHeredocBodies never hands a
+// `<<'EOF'` body to this.
+func ScanSubstitutionsInHeredocBody(body string) SubstitutionScan {
+	p, _ := parserPool.Get().(*syntax.Parser)
+	word, err := p.Document(strings.NewReader(body))
+	parserPool.Put(p)
+	if err == nil {
+		if word == nil {
+			return SubstitutionScan{}
+		}
+		return SubstitutionScan{Substitutions: collectSubstitutions(body, word, false)}
+	}
+	return SubstitutionScan{
+		Substitutions: substitutionPrefixAfterFailure(body, true),
+		Unparseable:   true,
+		Reason:        scanFailureReason(err),
+	}
+}
+
+// EnumerateSubstitutions scans raw shell text and returns every TOP-LEVEL
+// command/process substitution body: `$( )`, “ ` ` “, `<( )` and `>( )`.
+//
+// It DISCARDS the scan's Unparseable flag, so it is only appropriate where a
+// truncated list is conservative in the caller's own direction (gitdir's
+// direction inference defaults to write when a variable's use is unseen; envvars
+// refuses to clear a value that enumerates to zero substitutions). Any caller
+// whose "no substitutions" branch is an APPROVAL MUST use ScanSubstitutions and
+// honor Unparseable instead.
+func EnumerateSubstitutions(s string) []Substitution {
+	return ScanSubstitutions(s).Substitutions
+}
+
+// scanFailureReason renders a parse failure as the reason string the deferring
+// caller reports. It names the dialect when the parser itself attributed one
+// (I10: the reason SHOULD name the dialect where the parser attributes it, and
+// MUST NOT guess where it does not).
+func scanFailureReason(err error) string {
+	switch e := err.(type) {
+	case syntax.LangError:
+		var langs []string
+		for _, l := range e.Langs {
+			langs = append(langs, l.String())
+		}
+		return "shell parse failed: " + e.Feature + " is not valid bash (valid in " +
+			strings.Join(langs, ",") + ")"
+	case syntax.ParseError:
+		return "shell parse failed: " + e.Text
+	default:
+		return "shell parse failed: " + err.Error()
+	}
+}
+
+// substitutionPrefixAfterFailure re-parses text that the STRICT parser rejected,
+// with error recovery, purely to collect the substitutions whose extents are
+// still exactly known.
+//
+// It exists so that a desync FORFEITS NOTHING. `cmd $(rm -rf /) <<EOF` is the
+// shape that makes this load-bearing rather than cosmetic: on the engine's path a
+// leaf's Raw has its heredoc BODY already stripped, so the text handed to
+// ScanSubstitutions ends at an unclosed here-document and the strict parse fails
+// — yet the `$(rm -rf /)` on the command line is a real substitution with an
+// exact extent, and dropping it would replace a Reject with the unparseable
+// NoOpinion floor. (Reconstructing that text from the AST subtree instead is
+// step 4's job, pg2-1019a.)
+//
+// The recovered tree is NEVER evidence that the text parsed — the caller has
+// already set Unparseable from the strict parse and keeps it set.
+func substitutionPrefixAfterFailure(text string, heredocBody bool) []Substitution {
+	p, _ := recoverParserPool.Get().(*syntax.Parser)
+	var root syntax.Node
+	if heredocBody {
+		// The recovery parser's own error is deliberately DISCARDED: the caller has
+		// already recorded the strict parser's verdict and reason, and this pass exists
+		// only to salvage bodies. Whatever tree comes back — possibly none — is used
+		// as-is.
+		if word, _ := p.Document(strings.NewReader(text)); word != nil {
+			root = word
+		}
+	} else {
+		if file, _ := p.Parse(strings.NewReader(text), "command"); file != nil {
+			root = file
+		}
+	}
+	recoverParserPool.Put(p)
+	if root == nil {
+		// Recovery could not build a tree either. An empty prefix is the
+		// conservative answer: the caller's Unparseable flag is what the engine
+		// floors on, and claiming bodies nobody delimited would be worse than
+		// claiming none.
+		return nil
+	}
+	return collectSubstitutions(text, root, !heredocBody)
+}
+
+// substFinder collects TOP-LEVEL substitutions from a parsed tree, keyed on exact
+// source slices of the text that produced it (I12: identity keys are derived from
+// exact source slices, never from printing the AST).
+type substFinder struct {
+	src string
+	// skipHeredocBodies keeps a heredoc BODY out of a SHELL-TEXT scan. The body's
+	// quotes are data rather than syntax, so it belongs to
+	// ScanSubstitutionsInHeredocBody and, on the engine's path, to
+	// evaluateHeredocBodies. Collecting it here too would double-process it under
+	// the wrong model.
+	skipHeredocBodies bool
+	found             []placedSubstitution
+}
+
+// placedSubstitution keeps a substitution's source OFFSET so the result can be
+// ordered by position in the source.
+//
+// Ordering matters for reproducibility rather than for security — the engine
+// folds substitution verdicts through MostRestrictive, which is order-independent
+// — but syntax.Walk visits a statement's command before its redirections, so
+// `cmd > $(a) $(b)` would otherwise report `b` before `a`. Sorting by offset
+// restores the source order the outgoing text scan produced by construction.
+type placedSubstitution struct {
+	offset int
+	sub    Substitution
+}
+
+// collectSubstitutions walks root and returns the top-level substitutions of src,
+// in source order.
+func collectSubstitutions(src string, root syntax.Node, skipHeredocBodies bool) []Substitution {
+	if root == nil {
+		return nil
+	}
+	sf := &substFinder{src: src, skipHeredocBodies: skipHeredocBodies}
+	syntax.Walk(root, sf.visit)
+	if len(sf.found) == 0 {
+		return nil
+	}
+	sort.SliceStable(sf.found, func(i, j int) bool { return sf.found[i].offset < sf.found[j].offset })
+	out := make([]Substitution, 0, len(sf.found))
+	for _, p := range sf.found {
+		out = append(out, p.sub)
+	}
+	return out
+}
+
+// visit is the syntax.Walk callback. Returning false stops the descent, which is
+// what makes the result TOP-LEVEL: the outer body is returned verbatim and its
+// nested substitutions surface only when the engine re-evaluates that body.
+func (sf *substFinder) visit(n syntax.Node) bool {
+	switch v := n.(type) {
+	case nil:
+		// syntax.Walk calls the visitor with nil after a node's children.
+		return false
+
+	case *syntax.CmdSubst:
+		sf.recordCmdSubst(v)
+		return false
+
+	case *syntax.ProcSubst:
+		sf.recordProcSubst(v)
+		return false
+
+	case *syntax.Redirect:
+		if sf.skipHeredocBodies {
+			// Descend into the fd and the target word, but NOT into Hdoc.
+			if v.N != nil {
+				syntax.Walk(v.N, sf.visit)
+			}
+			if v.Word != nil {
+				syntax.Walk(v.Word, sf.visit)
+			}
+			return false
+		}
+	}
+	return true
+}
+
+func (sf *substFinder) recordCmdSubst(cs *syntax.CmdSubst) {
+	// `$(` is two bytes, a backquote one. The body is the text BETWEEN the opener
+	// and the closer, VERBATIM and un-unquoted, matching Substitution.Body's
+	// contract and the outgoing scan's `s[i+2:closeAbs]` / `s[i+1:end]`.
+	open, kind := 2, SubstCommand
+	if cs.Backquotes {
+		open, kind = 1, SubstBacktick
+	}
+	sf.record(cs.Left, cs.Right, open, kind)
+}
+
+func (sf *substFinder) recordProcSubst(ps *syntax.ProcSubst) {
+	kind := SubstProcessIn
+	if ps.Op == syntax.CmdOut {
+		kind = SubstProcessOut
+	}
+	// `<(`, `>(` and ksh's `=(` are all two bytes. The last cannot arrive under
+	// Variant(LangBash) — it is a LangError — but classifying it as an input
+	// process substitution rather than dropping it keeps the default safe.
+	sf.record(ps.OpPos, ps.Rparen, 2, kind)
+}
+
+// record appends one substitution, or NOTHING when its extent is not exactly
+// known.
+//
+// The recovered-position check is the pg2-wguam rule expressed in AST terms. When
+// the recovery pass repairs a MISSING closer, that closer's Pos reports
+// IsRecovered: the substitution's EXTENT is unknown, so nothing inside it has
+// been enumerated and claiming a body would be inventing one. `echo $(oops` and
+// “ echo `oops $(rm -rf ~) “ both land here, and both must contribute NO body
+// while the caller reports Unparseable — exactly as the outgoing scan's
+// `return stop(...)` did.
+func (sf *substFinder) record(opener, closer syntax.Pos, openWidth int, kind SubstitutionKind) {
+	if opener.IsRecovered() || closer.IsRecovered() || !opener.IsValid() || !closer.IsValid() {
+		return
+	}
+	lo := int(opener.Offset()) + openWidth
+	hi := int(closer.Offset())
+	if lo < 0 || hi < lo || hi > len(sf.src) {
+		return
+	}
+	sf.found = append(sf.found, placedSubstitution{
+		offset: int(opener.Offset()),
+		sub:    Substitution{Kind: kind, Body: sf.src[lo:hi]},
+	})
+}
+
+// soleSimpleCommandLeaf parses text and returns the single lowered leaf when the
+// text is EXACTLY ONE SIMPLE COMMAND that embeds no substitution — the shape
+// IsSafeSubstitutionBody's static allowlist is allowed to clear.
+//
+// It replaces `ScanSubstitutions(body)` followed by `Parse(body)` with ONE parse
+// of the body, and it TIGHTENS the shape test deliberately. The outgoing test was
+// "Parse yields exactly one leaf", whose quote-awareness came from splitCompound
+// happening to split top-level compound operators. With a real grammar the same
+// count admits shapes it was never meant to: `(cat VERSION)`, `{ cat VERSION; }`
+// and `if true; then cat VERSION; fi` all reduce to ONE command leaf, so a
+// count-only test would newly clear compound bodies — a move in the
+// LESS-RESTRICTIVE direction. Requiring the sole statement to BE a
+// *syntax.CallExpr — no subshell, block, conditional, loop, pipeline, negation,
+// background, coprocess, redirection or leading assignment — keeps the outgoing
+// intent ("exactly one leaf command") and closes that class by construction.
+func soleSimpleCommandLeaf(text string) (ParsedCommand, bool) {
+	p, _ := parserPool.Get().(*syntax.Parser)
+	file, err := p.Parse(strings.NewReader(text), "command")
+	parserPool.Put(p)
+	if err != nil || file == nil || len(file.Stmts) != 1 {
+		return ParsedCommand{}, false
+	}
+	// A body embedding ANY command or process substitution is opaque to the static
+	// allowlist — the nested command is never inspected by it — so it is refused
+	// here and left to the engine's full recursion. Checking the whole subtree
+	// rather than only the top level is equivalent (a nested substitution implies a
+	// top-level one) and needs no second scan.
+	if containsSubstitution(file) {
+		return ParsedCommand{}, false
+	}
+	st := file.Stmts[0]
+	if st.Negated || st.Background || st.Coprocess || st.Disown || len(st.Redirs) > 0 {
+		return ParsedCommand{}, false
+	}
+	call, ok := st.Cmd.(*syntax.CallExpr)
+	if !ok || len(call.Assigns) > 0 || len(call.Args) == 0 {
+		return ParsedCommand{}, false
+	}
+	lw := &lowering{src: text, pipeSeq: -1}
+	lw.lowerCall(st, call, 0, 0)
+	if len(lw.leaves) != 1 || len(lw.dataLeaves) != 0 {
+		return ParsedCommand{}, false
+	}
+	return lw.leaves[0], true
+}
+
+// containsSubstitution reports whether the tree embeds a command or process
+// substitution at any depth.
+func containsSubstitution(root syntax.Node) bool {
+	found := false
+	syntax.Walk(root, func(n syntax.Node) bool {
+		if found {
+			return false
+		}
+		switch n.(type) {
+		case *syntax.CmdSubst, *syntax.ProcSubst:
+			found = true
+			return false
+		}
+		return true
+	})
+	return found
 }
