@@ -577,6 +577,61 @@ MD
   echo "$output" | grep -q 'clean (every cited owner element is declared)'
 }
 
+# --- Citable id families in reconcile-imports (bead pg2-fbxdw) -----------------
+# `reconcile-imports.sh` carried the OLD eight-family list, so a `DEC-`/`IMPL-` owner
+# element was invisible on BOTH sides of the seam: it dropped out of `defined_ids` AND of
+# `imports_rows`, so an owner whose elements are all decision entries reported
+# "owner defines 0 element(s)" and both reconciliation directions were vacuous. That exact
+# string is asserted below, because it is the symptom the bead was filed on.
+
+@test "id-family (reconcile-imports): a DEC- owner element is COUNTED, not 'owner defines 0 element(s)'" {
+  RO="$BATS_TEST_TMPDIR/downer"
+  RI="$BATS_TEST_TMPDIR/dimpl"
+  mkdir -p "$RO" "$RI"
+  cat >"$RO/README.md" <<'MD'
+# Decisions — owner
+
+### `DEC-SEAM-1` — the imports link points toward the more public side <!-- uuid: 33333333-3333-4333-8333-333333333333 -->
+### `IMPL-1` — governance authority, captured but not settled <!-- uuid: 44444444-4444-4444-8444-444444444444 -->
+MD
+  cat >"$RI/interfaces.md" <<'MD'
+# Interfaces — implementer
+
+## External references
+
+| Name          | Owner set-path | Owner UUID                           |
+| ------------- | -------------- | ------------------------------------ |
+| `DEC-SEAM-1`  | `downer`       | 33333333-3333-4333-8333-333333333333 |
+MD
+  run reconcile-imports "$RO" "$RI"
+  echo "$output" | grep -q 'owner defines 2 element(s)'
+  ! echo "$output" | grep -q 'owner defines 0 element(s)'
+}
+
+@test "id-family (reconcile-imports): a DEC- owner element cited with no imports row is cited-but-undeclared" {
+  # The detection the widening bought: the citation direction now works for the family.
+  RO="$BATS_TEST_TMPDIR/downer2"
+  RI="$BATS_TEST_TMPDIR/dimpl2"
+  mkdir -p "$RO" "$RI"
+  cat >"$RO/README.md" <<'MD'
+# Decisions — owner
+
+### `DEC-SEAM-1` — the imports link points toward the more public side <!-- uuid: 33333333-3333-4333-8333-333333333333 -->
+MD
+  cat >"$RI/interfaces.md" <<'MD'
+# Interfaces — implementer
+- **`INTF-ZR-SOURCE`** — follows `DEC-SEAM-1`, declared nowhere.
+
+## External references
+
+| Name | Owner set-path | Owner UUID |
+| ---- | -------------- | ---------- |
+MD
+  run reconcile-imports "$RO" "$RI"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q 'FAIL cited-but-undeclared: DEC-SEAM-1'
+}
+
 @test "reconcile: a usage error exits 2, distinct from a finding" {
   rec_owner
   run reconcile-imports "$RO"
@@ -705,6 +760,34 @@ MD
   run name-collisions --strict "$A" "$Bd"
   [ "$status" -eq 0 ]
   ! echo "$output" | grep -q 'some-long-repo-name'
+}
+
+# --- Citable id families in name-collisions (bead pg2-fbxdw) -------------------
+# `name-collisions.sh` carried the OLD eight-family list, so a `DEC-`/`IMPL-` name never
+# entered `defined_ids` and the class-1 ambiguity this script exists to catch went
+# unreported for those families — two decision areas could both define `DEC-SEAM-1` and the
+# corpus-wide name clash was invisible.
+
+@test "id-family (name-collisions): the same DEC- name defined in two sets is a class-1 FAIL" {
+  A="$BATS_TEST_TMPDIR/dca"
+  Bd="$BATS_TEST_TMPDIR/dcb"
+  mkdir -p "$A" "$Bd"
+  printf '# A\n### `DEC-SEAM-1` — a decision A owns.\n' >"$A/README.md"
+  printf '# B\n### `DEC-SEAM-1` — a DIFFERENT decision B owns.\n' >"$Bd/README.md"
+  run name-collisions "$A" "$Bd"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q 'FAIL ambiguous ID name: DEC-SEAM-1'
+}
+
+@test "id-family (name-collisions): the same IMPL- name defined in two sets is a class-1 FAIL" {
+  A="$BATS_TEST_TMPDIR/ica"
+  Bd="$BATS_TEST_TMPDIR/icb"
+  mkdir -p "$A" "$Bd"
+  printf '# A\n### `IMPL-1` — a captured entry A owns.\n' >"$A/README.md"
+  printf '# B\n### `IMPL-1` — a DIFFERENT captured entry B owns.\n' >"$Bd/README.md"
+  run name-collisions "$A" "$Bd"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q 'FAIL ambiguous ID name: IMPL-1'
 }
 
 @test "collisions: fewer than two sets is a usage error (exit 2)" {

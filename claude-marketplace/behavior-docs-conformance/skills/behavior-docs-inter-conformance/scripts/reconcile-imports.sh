@@ -33,6 +33,13 @@
 # direction precisely. Neither check subsumes the other.
 set -euo pipefail
 
+# The typed-id family list has ONE definition, in this plugin's
+# `lib/behavior-ids.bash`, and MUST NOT be re-inlined here (bead pg2-fbxdw — it was
+# duplicated at eight sites across six scripts and drifted twice, which is why THIS
+# script reported "owner defines 0 element(s)" for a decisions area).
+# shellcheck source=../../../lib/behavior-ids.bash
+. "$(dirname "${BASH_SOURCE[0]}")/../../../lib/behavior-ids.bash"
+
 # DETERMINISM: every sort, comm, uniq and shell glob below MUST order bytes, not
 # locale-collated characters. Without this the SAME finding serializes differently
 # on a UTF-8 workstation (`invariants.md:75 README.md:61`) and in the `C`-locale
@@ -101,7 +108,12 @@ done
   exit 2
 }
 
-IDPAT='(INV|GOAL|STORY|USECASE|JOURNEY|INTF|ACTOR|OQ)-[A-Za-z0-9]+(-[A-Za-z0-9]+)*'
+# A family omitted here is a family this evaluator CANNOT SEE on either side of the
+# seam: it drops out of `defined_ids` AND of `imports_rows`, so an owner set whose
+# elements are all of that family reports "owner defines 0 element(s)" and BOTH
+# reconciliation directions are vacuous. The awk-safe (no `\b`) shape is the one
+# passed into awk with `-v idpat=`.
+IDPAT="$BEHAVIOR_IDPAT"
 
 # defined_ids <set-dir> — the IDs a set DEFINES: an ID in headword position after
 # a mandatory list-bullet or ATX-heading marker. The marker is required because a

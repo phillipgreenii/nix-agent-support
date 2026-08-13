@@ -323,6 +323,31 @@
                   fileset = ./claude-marketplace;
                 };
               };
+
+          # The behavior-docs-conformance evaluator scripts TOGETHER WITH the shared
+          # `lib/behavior-ids.bash` they source, as ONE store path rooted at the plugin dir.
+          #
+          # The three bats checks below MUST exec the scripts from here rather than
+          # interpolating each `.sh` as a bare file path. A bare-file interpolation copies
+          # ONLY that file into the store, so the sibling `lib/` would be absent at runtime
+          # and every evaluator would die on its `source` line — that packaging detail is
+          # the whole reason the typed-id family list could not simply be shared before
+          # (bead pg2-fbxdw). Nothing else forecloses it: the marketplace derivation above
+          # already ships the entire `claude-marketplace` tree, and repo-base's
+          # `mkClaudePlugin` copies a plugin dir wholesale without validating its layout,
+          # so the shared lib reaches both the installed skill and this check.
+          #
+          # Scoped to `lib` + the three `scripts/` dirs, NOT the whole plugin, so editing a
+          # corpus fixture does not rebuild these checks.
+          behaviorDocsConformanceScripts = lib.fileset.toSource {
+            root = ./claude-marketplace/behavior-docs-conformance;
+            fileset = lib.fileset.unions [
+              ./claude-marketplace/behavior-docs-conformance/lib
+              ./claude-marketplace/behavior-docs-conformance/skills/behavior-docs-intra-conformance/scripts
+              ./claude-marketplace/behavior-docs-conformance/skills/behavior-docs-inter-conformance/scripts
+              ./claude-marketplace/behavior-docs-conformance/skills/behavior-docs-impl-conformance/scripts
+            ];
+          };
         in
         {
           # The perSystem pkgs carries the full agent-support overlay stack
@@ -901,13 +926,13 @@
               test-behavior-docs-intra-conformance =
                 let
                   selfChecks = pkgs.writeShellScriptBin "self-checks" ''
-                    exec ${./claude-marketplace/behavior-docs-conformance/skills/behavior-docs-intra-conformance/scripts/self-checks.sh} "$@"
+                    exec ${behaviorDocsConformanceScripts}/skills/behavior-docs-intra-conformance/scripts/self-checks.sh "$@"
                   '';
                   traceExtract = pkgs.writeShellScriptBin "trace-extract" ''
-                    exec ${./claude-marketplace/behavior-docs-conformance/skills/behavior-docs-intra-conformance/scripts/trace-extract.sh} "$@"
+                    exec ${behaviorDocsConformanceScripts}/skills/behavior-docs-intra-conformance/scripts/trace-extract.sh "$@"
                   '';
                   capturePrefix = pkgs.writeShellScriptBin "capture-prefix-snapshots" ''
-                    exec ${./claude-marketplace/behavior-docs-conformance/skills/behavior-docs-intra-conformance/scripts/capture-prefix-snapshots.sh} "$@"
+                    exec ${behaviorDocsConformanceScripts}/skills/behavior-docs-intra-conformance/scripts/capture-prefix-snapshots.sh "$@"
                   '';
                 in
                 pkgs.runCommand "test-behavior-docs-intra-conformance"
@@ -944,13 +969,13 @@
               test-behavior-docs-inter-conformance =
                 let
                   resolveImports = pkgs.writeShellScriptBin "resolve-imports" ''
-                    exec ${./claude-marketplace/behavior-docs-conformance/skills/behavior-docs-inter-conformance/scripts/resolve-imports.sh} "$@"
+                    exec ${behaviorDocsConformanceScripts}/skills/behavior-docs-inter-conformance/scripts/resolve-imports.sh "$@"
                   '';
                   reconcileImports = pkgs.writeShellScriptBin "reconcile-imports" ''
-                    exec ${./claude-marketplace/behavior-docs-conformance/skills/behavior-docs-inter-conformance/scripts/reconcile-imports.sh} "$@"
+                    exec ${behaviorDocsConformanceScripts}/skills/behavior-docs-inter-conformance/scripts/reconcile-imports.sh "$@"
                   '';
                   nameCollisions = pkgs.writeShellScriptBin "name-collisions" ''
-                    exec ${./claude-marketplace/behavior-docs-conformance/skills/behavior-docs-inter-conformance/scripts/name-collisions.sh} "$@"
+                    exec ${behaviorDocsConformanceScripts}/skills/behavior-docs-inter-conformance/scripts/name-collisions.sh "$@"
                   '';
                 in
                 pkgs.runCommand "test-behavior-docs-inter-conformance"
@@ -980,7 +1005,7 @@
               test-behavior-docs-impl-conformance =
                 let
                   implTraces = pkgs.writeShellScriptBin "impl-traces" ''
-                    exec ${./claude-marketplace/behavior-docs-conformance/skills/behavior-docs-impl-conformance/scripts/impl-traces.sh} "$@"
+                    exec ${behaviorDocsConformanceScripts}/skills/behavior-docs-impl-conformance/scripts/impl-traces.sh "$@"
                   '';
                 in
                 pkgs.runCommand "test-behavior-docs-impl-conformance"
@@ -997,6 +1022,75 @@
                     export PATH="${implTraces}/bin:$PATH"
                     export CORPUS_IMPL_DIR="${./claude-marketplace/behavior-docs-conformance/skills/behavior-docs-impl-conformance/corpus/impl}"
                     bats ${./tests/behavior-docs-impl-conformance.bats}
+                    touch $out
+                  '';
+
+              # SINGLE-DEFINITION guard for the typed-id family list (bead pg2-fbxdw).
+              #
+              # The list used to be spelled out at EIGHT sites across SIX scripts with
+              # nothing checking they agreed, and it drifted TWICE: WS-1 widened it for
+              # `USECASE` and touched 2 of the 8; pg2-rlu3m widened it for `DEC`/`IMPL` and
+              # touched the SAME 2. Both times the other 6 silently under-detected the new
+              # family. It now has ONE definition, `lib/behavior-ids.bash`, which every
+              # evaluator sources.
+              #
+              # THIS CHECK is what makes that a constraint rather than a convention: a
+              # shared definition nothing enforces is one copy-paste from being duplicated
+              # again, and the two prior recurrences show the copy-paste is the likely move.
+              # A NINTH site fails the build NAMING the drifted file. An ELEVENTH family
+              # needs no change here at all — that is the point of the shared definition —
+              # but removing or renaming the definition also fails, so the guard cannot be
+              # satisfied by deleting what it guards.
+              #
+              # Scoped to the plugin, which is where every evaluator lives and where both
+              # drifts happened. The literal is the family ALTERNATION, not a whole regex:
+              # the eight sites were never byte-identical (three different shapes — a bash
+              # var with `\b`, one without, and awk program text), so a byte-identity
+              # assertion across them was never possible; the alternation is the part that
+              # actually had to agree.
+              test-behavior-docs-id-family-single-definition =
+                pkgs.runCommand "test-behavior-docs-id-family-single-definition"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.gnugrep
+                      pkgs.gnused
+                      pkgs.coreutils
+                    ];
+                  }
+                  ''
+                    plugin=${./claude-marketplace/behavior-docs-conformance}
+                    expected="lib/behavior-ids.bash"
+
+                    # Fixed-string match on the alternation's leading families, so this
+                    # check needs no update when a family is added to the definition.
+                    hits=$(cd "$plugin" && grep -rlF 'INV|GOAL|STORY' . | sed 's#^\./##' | sort)
+
+                    if [ -z "$hits" ]; then
+                      echo "FAIL: the typed-id family list is absent from the whole plugin." >&2
+                      echo "  It MUST be defined in $expected — if it moved, update this check;" >&2
+                      echo "  if it was inlined back into the scripts, that is the drift this guards." >&2
+                      exit 1
+                    fi
+
+                    if [ "$hits" != "$expected" ]; then
+                      echo "FAIL: the typed-id family list MUST have exactly ONE definition." >&2
+                      echo "  expected only: $expected" >&2
+                      echo "  found in:" >&2
+                      printf '%s\n' "$hits" | sed 's/^/    /' >&2
+                      echo "" >&2
+                      echo "  Any file above other than $expected has RE-INLINED the list." >&2
+                      echo "  This is bead pg2-fbxdw's defect: it drifted twice this way, each time" >&2
+                      echo "  leaving most sites blind to the newly admitted family. Source the shared" >&2
+                      echo "  definition instead:" >&2
+                      echo "" >&2
+                      echo "    # shellcheck source=../../../lib/behavior-ids.bash" >&2
+                      echo "    . \"\$(dirname \"\''${BASH_SOURCE[0]}\")/../../../lib/behavior-ids.bash\"" >&2
+                      echo "" >&2
+                      echo "  then use \$BEHAVIOR_IDPAT (awk-safe) or \$BEHAVIOR_IDRE (grep -E, word-anchored)." >&2
+                      exit 1
+                    fi
+
+                    echo "OK: the typed-id family list has exactly one definition ($expected)"
                     touch $out
                   '';
 

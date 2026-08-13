@@ -35,6 +35,13 @@
 # Exit: 0 when no FAIL, 1 on any FAIL, 2 on a usage error.
 set -euo pipefail
 
+# The typed-id family list has ONE definition, in this plugin's
+# `lib/behavior-ids.bash`, and MUST NOT be re-inlined here (bead pg2-fbxdw — it was
+# duplicated at eight sites across six scripts and drifted twice, leaving THIS
+# script blind to `DEC-`/`IMPL-` names).
+# shellcheck source=../../../lib/behavior-ids.bash
+. "$(dirname "${BASH_SOURCE[0]}")/../../../lib/behavior-ids.bash"
+
 # DETERMINISM: every sort, comm, uniq and shell glob below MUST order bytes, not
 # locale-collated characters. Without this the SAME finding serializes differently
 # on a UTF-8 workstation (`invariants.md:75 README.md:61`) and in the `C`-locale
@@ -94,7 +101,11 @@ for d in "${SETS[@]}"; do
   }
 done
 
-IDPAT='(INV|GOAL|STORY|USECASE|JOURNEY|INTF|ACTOR|OQ)-[A-Za-z0-9]+(-[A-Za-z0-9]+)*'
+# A family omitted here is a family whose cross-set collisions this evaluator CANNOT
+# SEE: the name never enters `defined_ids`, so the same id defined in two sets — the
+# class-1 ambiguity this script exists to catch — goes unreported for that family.
+# The awk-safe (no `\b`) shape is the one passed into awk with `-v idpat=`.
+IDPAT="$BEHAVIOR_IDPAT"
 
 # defined_ids <set-dir> — IDs in headword position after a mandatory bullet or
 # heading marker (same rule, and the same reason, as the sibling scripts).

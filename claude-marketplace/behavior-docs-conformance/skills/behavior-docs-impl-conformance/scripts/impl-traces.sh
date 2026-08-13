@@ -35,6 +35,13 @@
 # report would always be 100%.
 set -euo pipefail
 
+# The typed-id family list has ONE definition, in this plugin's
+# `lib/behavior-ids.bash`, and MUST NOT be re-inlined here (bead pg2-fbxdw — it was
+# duplicated at eight sites across six scripts and drifted twice, leaving THIS
+# script blind to `DEC-`/`IMPL-` citations).
+# shellcheck source=../../../lib/behavior-ids.bash
+. "$(dirname "${BASH_SOURCE[0]}")/../../../lib/behavior-ids.bash"
+
 # DETERMINISM: every sort, comm, uniq and shell glob below MUST order bytes, not
 # locale-collated characters. Without this the SAME finding serializes differently
 # on a UTF-8 workstation (`invariants.md:75 README.md:61`) and in the `C`-locale
@@ -101,7 +108,11 @@ done
   exit 2
 }
 
-IDPAT='(INV|GOAL|STORY|USECASE|JOURNEY|INTF|ACTOR|OQ)-[A-Za-z0-9]+(-[A-Za-z0-9]+)*'
+# A family omitted here is a family whose implementation citations this evaluator
+# CANNOT SEE: the id never enters `defined`/`imported`, so a dangling citation of it
+# is neither resolved nor reported, and the coverage report silently omits it. The
+# awk-safe (no `\b`) shape is the one passed into awk with `-v idpat=`.
+IDPAT="$BEHAVIOR_IDPAT"
 
 defined=$(
   awk -v idpat="$IDPAT" '
@@ -153,7 +164,35 @@ citations=$(
       }'
 )
 
-known=$(printf '%s\n%s\n' "$defined" "$imported" | { grep -v '^$' || true; } | sort -u)
+# Entries the product's OWN sibling decision area defines. `GOAL-5` makes these
+# citable by typed name with NO imports row: "this product's own decision area is the
+# sibling **input** of the two-input model, not an external set, so it needs no row"
+# (the method set's `invariants.md` Goals; its `README.md`'s "Two inputs, one product"
+# fixes the area at `docs/decisions`, the sibling of `docs/behavior`). An implementation
+# citing its own product's decision entry is therefore CONFORMANT, and the decision docs
+# under the impl tree are themselves where those entries are DEFINED.
+#
+# This is NOT a blanket exemption for the `DEC-`/`IMPL-` families: the area's entries are
+# READ, so a citation of an entry it does NOT define still FAILs. That is the detection
+# widening the family list bought (bead pg2-fbxdw). Without this step the widening would
+# instead FAIL every conformant decision citation — a worse defect than the blind spot.
+#
+# A set with no sibling decision area is normal, not an error. The `-e` test on the first
+# element makes the guard correct whether or not `nullglob` is in effect.
+decided=""
+if [ -d "$SET/../decisions" ]; then
+  dec_mds=("$SET"/../decisions/*.md)
+  if [ ${#dec_mds[@]} -gt 0 ] && [ -e "${dec_mds[0]}" ]; then
+    decided=$(
+      awk -v idpat="$IDPAT" '
+        BEGIN { defpat = "^[ \t]*(([-*+][ \t]+)|(#+[ \t]+))[*_`]*" idpat }
+        $0 ~ defpat { if (match($0, idpat) > 0) print substr($0, RSTART, RLENGTH) }
+      ' "${dec_mds[@]}" | sort -u
+    )
+  fi
+fi
+
+known=$(printf '%s\n%s\n%s\n' "$defined" "$imported" "$decided" | { grep -v '^$' || true; } | sort -u)
 
 # resolves <id> — exact, or a FAMILY reference: the token is a proper prefix of a
 # known ID. `INV-EVT-*` tokenizes to the bare family name INV-EVT, which is
@@ -179,6 +218,12 @@ else
     n=$(printf '%s\n' "$citations" | awk -F'\t' -v i="$id" '$1 == i' | grep -c . || true)
     if printf '%s\n' "$defined" | grep -qE -- "^$id(-|$)"; then
       printf '  ok         %-18s (%s citation(s))\n' "$id" "$n"
+    elif printf '%s\n' "$decided" | grep -qE -- "^$id(-|$)"; then
+      # Its OWN class, not `external`: the sibling decision area is an INPUT, so this
+      # citation is conformant with NO imports row (`GOAL-5`). Reporting it as `external`
+      # would say "declared in the imports table" of a row that does not and MUST NOT
+      # exist, sending a reader to add one.
+      printf '  decision   %-18s (%s citation(s); settled in the sibling decision area — GOAL-5 needs no imports row)\n' "$id" "$n"
     elif resolves "$id"; then
       printf '  external   %-18s (%s citation(s); declared in the imports table)\n' "$id" "$n"
     else

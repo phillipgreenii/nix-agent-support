@@ -67,6 +67,80 @@ GO
   echo "$output" | grep -q 'stale.go:1'
 }
 
+# --- Citable id families in impl-traces (bead pg2-fbxdw) -----------------------
+# `impl-traces.sh` carried the OLD eight-family list, so an implementation citing a
+# `DEC-`/`IMPL-` decision entry was invisible: neither resolved nor reported. Widening it
+# alone would have been worse than the blind spot — every conformant decision citation
+# would FAIL — because `GOAL-5` settles that "this product's own decision area is the
+# sibling **input** of the two-input model, not an external set, so it needs no row". The
+# sibling `../decisions` area is therefore read as a resolution source, in its OWN class:
+# calling it `external` would tell a reader to add an imports row that MUST NOT exist.
+#
+# `$SET` is `$BATS_TEST_TMPDIR/set`, so the sibling area is `$BATS_TEST_TMPDIR/decisions`
+# — outside `$IMPL`, so it supplies definitions without being scanned for citations.
+
+@test "id-family (impl-traces): a DEC- citation resolving to the sibling decision area is its own class, not FAIL" {
+  mkdir -p "$SET/../decisions"
+  cat >"$SET/../decisions/wire.md" <<'MD'
+# Decisions
+
+### `DEC-WIRE-1` — the wire format is newline-delimited JSON
+MD
+  cat >"$IMPL/wire.go" <<'GO'
+// encodeEvent follows DEC-WIRE-1: one JSON object per line.
+GO
+  run impl-traces "$SET" "$IMPL"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qE '^  decision +DEC-WIRE-1'
+  # NOT reported as an imports-table row, which the set neither has nor needs.
+  ! echo "$output" | grep -qE '^  external +DEC-WIRE-1'
+}
+
+@test "id-family (impl-traces): an IMPL- citation resolving to the sibling decision area is not a FAIL" {
+  mkdir -p "$SET/../decisions"
+  cat >"$SET/../decisions/governance.md" <<'MD'
+# Decisions
+
+### `IMPL-1` — governance authority, captured but not settled
+MD
+  cat >"$IMPL/authority.go" <<'GO'
+// Ownership is unsettled; see IMPL-1 before changing this.
+GO
+  run impl-traces "$SET" "$IMPL"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qE '^  decision +IMPL-1'
+}
+
+@test "id-family (impl-traces): a DEC- citation the decision area does NOT define FAILs" {
+  # The detection the widening bought: before it, a stale decision citation in the code was
+  # unreportable. Resolving against the decision area MUST NOT become a family exemption.
+  mkdir -p "$SET/../decisions"
+  cat >"$SET/../decisions/wire.md" <<'MD'
+# Decisions
+
+### `DEC-WIRE-1` — the entry that DOES exist
+MD
+  cat >"$IMPL/stale.go" <<'GO'
+// encodeEvent follows DEC-WIRE-9, which no decision entry defines.
+GO
+  run impl-traces "$SET" "$IMPL"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -qE '^  FAIL +DEC-WIRE-9'
+  echo "$output" | grep -q 'stale.go:1'
+}
+
+@test "id-family (impl-traces): a set with NO sibling decision area still FAILs a DEC- citation" {
+  # The area is optional. With none present nothing resolves the citation, so the FAIL is
+  # the correct outcome — the resolution step MUST NOT silently pass on a missing area.
+  cat >"$IMPL/stale.go" <<'GO'
+// encodeEvent follows DEC-WIRE-1, and this product has no decision area at all.
+GO
+  run impl-traces "$SET" "$IMPL"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -qE '^  FAIL +DEC-WIRE-1'
+  [ ! -d "$SET/../decisions" ]
+}
+
 @test "one LIVE citation of a dead ID is a FAIL even when another is historical" {
   # The historical excuse is per-ID, not per-line: a comment explaining that
   # INV-77 was removed does not license a second site that still claims to

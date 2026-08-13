@@ -596,6 +596,114 @@ MD
   [ "$status" -eq 0 ]
 }
 
+# --- Citable id families in trace-extract (bead pg2-fbxdw) ---------------------
+# `trace-extract.sh` carried the OLD eight-family list, so it could not see `DEC-`/`IMPL-`
+# ids at all — it could not flag a dangling `DEC-` reference, which is the under-detection
+# half of pg2-fbxdw. Widening it alone would have been worse than the blind spot: every
+# CONFORMANT decision citation would read as dangling, because `GOAL-5` settles that "this
+# product's own decision area is the sibling **input** of the two-input model, not an
+# external set, so it needs no row". So the sibling `../decisions` area is now read as a
+# third resolution source, and these tests pin BOTH directions — a defined entry resolves,
+# an undefined one still dangles. A blanket family exemption would pass the first pair and
+# fail the second.
+
+@test "id-family (trace-extract): a DEC- reference resolving to the sibling decision area is NOT dangling" {
+  trace_set
+  mkdir -p "$T/../decisions"
+  cat >"$T/../decisions/seams.md" <<'MD'
+# Decisions
+
+### `DEC-SEAM-1` — the imports link points toward the more public side
+MD
+  cat >"$T/journeys.md" <<'MD'
+# Journeys
+
+The seam direction is settled in `docs/decisions · DEC-SEAM-1`.
+
+- **`STORY-1`** — as an operator, I want delivery. _(→ `USECASE-1`; `INV-1`, `INV-2`.)_
+
+### `USECASE-1` — Submit an event
+
+_Requires:_ `INV-1`, `INV-2`.
+MD
+  # --strict makes a prose-dangling reference FATAL, so exit 0 is the assertion that the
+  # citation resolved rather than merely warned.
+  run trace-extract --strict "$T"
+  [ "$status" -eq 0 ]
+  ! echo "$output" | grep -q 'dangling in prose: DEC-SEAM-1'
+}
+
+@test "id-family (trace-extract): an IMPL- reference resolving to the sibling decision area is NOT dangling" {
+  trace_set
+  mkdir -p "$T/../decisions"
+  cat >"$T/../decisions/governance.md" <<'MD'
+# Decisions
+
+### `IMPL-1` — governance authority, captured but not settled
+MD
+  cat >"$T/journeys.md" <<'MD'
+# Journeys
+
+Authority is still open — see `docs/decisions · IMPL-1`.
+
+- **`STORY-1`** — as an operator, I want delivery. _(→ `USECASE-1`; `INV-1`, `INV-2`.)_
+
+### `USECASE-1` — Submit an event
+
+_Requires:_ `INV-1`, `INV-2`.
+MD
+  run trace-extract --strict "$T"
+  [ "$status" -eq 0 ]
+  ! echo "$output" | grep -q 'dangling in prose: IMPL-1'
+}
+
+@test "id-family (trace-extract): a DEC- reference the decision area does NOT define still dangles" {
+  # The detection the widening actually bought: before it this reference was invisible, so a
+  # stale decision citation passed silently. Resolving against the decision area MUST NOT
+  # become a blanket exemption for the family.
+  trace_set
+  mkdir -p "$T/../decisions"
+  cat >"$T/../decisions/seams.md" <<'MD'
+# Decisions
+
+### `DEC-SEAM-1` — the entry that DOES exist
+MD
+  cat >"$T/journeys.md" <<'MD'
+# Journeys
+
+This cites `DEC-SEAM-9`, which no decision entry defines.
+
+- **`STORY-1`** — as an operator, I want delivery. _(→ `USECASE-1`; `INV-1`, `INV-2`.)_
+
+### `USECASE-1` — Submit an event
+
+_Requires:_ `INV-1`, `INV-2`.
+MD
+  run trace-extract "$T"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q 'dangling in prose: DEC-SEAM-9'
+  # The entry that DOES exist is not dragged into the finding.
+  ! echo "$output" | grep -q 'dangling in prose: DEC-SEAM-1'
+}
+
+@test "id-family (trace-extract): a set with NO sibling decision area is unaffected" {
+  # The area is optional (a set may have none). Its absence MUST NOT change the verdict,
+  # which is what keeps the resolution step from becoming a required-layout assumption.
+  trace_set
+  cat >"$T/journeys.md" <<'MD'
+# Journeys
+
+- **`STORY-1`** — as an operator, I want delivery. _(→ `USECASE-1`; `INV-1`, `INV-2`.)_
+
+### `USECASE-1` — Submit an event
+
+_Requires:_ `INV-1`, `INV-2`.
+MD
+  run trace-extract --strict "$T"
+  [ "$status" -eq 0 ]
+  [ ! -d "$T/../decisions" ]
+}
+
 @test "traceability: a usage error exits 2, distinct from a finding" {
   run trace-extract
   [ "$status" -eq 2 ]

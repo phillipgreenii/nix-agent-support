@@ -68,11 +68,16 @@ listing obligation**, so it is mechanically checkable and this script checks it.
 story, use case and journey; reads the listing each one carries; and reports three defect classes,
 exiting non-zero if any is present:
 
-| Section                 | What it means                                                                                                                   | Method rule       |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------- | ----------------- |
-| **Missing listings**    | a story / use case / journey that carries **no** listing on its own definition                                                  | `INV-22`          |
-| **Untraced elements**   | an invariant or goal named in **no** listing — so nothing puts it in extent                                                     | `INV-22`/`INV-11` |
-| **Dangling references** | an ID referenced anywhere in the set that resolves to **neither** a definition here **nor** a declared row of the imports table | `INV-22`/`INV-3`  |
+| Section                 | What it means                                                                                                                                                                                        | Method rule       |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------- |
+| **Missing listings**    | a story / use case / journey that carries **no** listing on its own definition                                                                                                                       | `INV-22`          |
+| **Untraced elements**   | an invariant or goal named in **no** listing — so nothing puts it in extent                                                                                                                          | `INV-22`/`INV-11` |
+| **Dangling references** | an ID referenced anywhere in the set that resolves to **none** of: a definition here, a declared row of the imports table, or an entry of the product's own sibling decision area (`docs/decisions`) | `INV-22`/`INV-3`  |
+
+A `DEC-`/`IMPL-` citation of the product's **own** decision area is therefore **not** dangling and
+needs no imports row — that area is the sibling **input** of the two-input model, not an external set
+(`GOAL-5`). It is still resolved rather than exempted, so a citation of an entry that area does **not**
+define is a genuine dangling reference and is reported.
 
 Two listing forms are recognised, because both are in live use: the `_Requires:_` / `_Includes:_`
 lines a use case or journey carries under its heading, and the inline `_(→ <includes>; <requires>.)_`

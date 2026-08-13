@@ -48,6 +48,12 @@
 # because a run that dies on row 3 reports nothing about rows 1, 2 or 4 either.
 set -euo pipefail
 
+# The typed-id family list has ONE definition, in this plugin's
+# `lib/behavior-ids.bash`, and MUST NOT be re-inlined here (bead pg2-fbxdw — it was
+# duplicated at eight sites across six scripts and drifted twice).
+# shellcheck source=../../../lib/behavior-ids.bash
+. "$(dirname "${BASH_SOURCE[0]}")/../../../lib/behavior-ids.bash"
+
 # DETERMINISM: every sort, comm, uniq and shell glob below MUST order bytes, not
 # locale-collated characters. Without this the SAME finding serializes differently
 # on a UTF-8 workstation (`invariants.md:75 README.md:61`) and in the `C`-locale
@@ -61,24 +67,15 @@ export LC_ALL=C
 OWNER="${1:?usage: resolve-imports.sh <owner-set-dir> <implementer-set-dir>}"
 IMPL="${2:?usage: resolve-imports.sh <owner-set-dir> <implementer-set-dir>}"
 UUIDRE='[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}'
-# Every typed-name family an imports row MAY cite: the eight INV-3 enumerates for behavior
-# elements, plus the two the decision-doc areas define (`DEC-<TOPIC>-<n>` settled,
-# `IMPL-<n>` captured-but-not-decided). GOAL-5 makes the second pair citable HERE and not
-# merely in prose — an entry belonging to another scope MUST be declared, with its UUID, in
-# this set's `## External references` table "like any other external element" — and
-# `owner_name_for_uuid` extracts the owner's current name with this same regex, so a family
-# omitted here is a family whose rows cannot resolve.
-#
-# THIS LIST MUST STAY IDENTICAL to the one in the intra evaluator's `self-checks.sh`. The two
-# govern the two halves of the same identity model — orphan-carrier detection WITHIN a set
-# there, owner-name resolution ACROSS a seam here — so widening one alone reinstates the same
-# failure in the other half.
-#
-# A family MUST NOT be added here speculatively. The admitted set is exactly the set some
-# area DEFINES: the eight in `behavior-docs/docs/behavior/invariants.md`'s INV-3 and the two
-# in every `docs/decisions/README.md`'s "Entry ids". An unrecognized family MUST reach the
-# loud per-row FAIL below rather than be quietly admitted by a catch-all prefix pattern.
-IDRE='\b(INV|GOAL|STORY|USECASE|JOURNEY|INTF|ACTOR|OQ|DEC|IMPL)-[A-Za-z0-9]+(-[A-Za-z0-9]+)*\b'
+# The families an imports row MAY cite. `owner_name_for_uuid` extracts the owner's current
+# name with this same regex, so a family omitted from it is a family whose rows CANNOT
+# RESOLVE. GOAL-5 is why the decision-doc pair belongs here and not merely in prose: an entry
+# belonging to another scope MUST be declared, with its UUID, in this set's
+# `## External references` table "like any other external element". The admitted set and the
+# rule for extending it live with the definition in `lib/behavior-ids.bash`; an unrecognized
+# family MUST reach the loud per-row FAIL below rather than be quietly admitted by a catch-all
+# prefix pattern.
+IDRE="$BEHAVIOR_IDRE"
 # The typed-name SHAPE, family-agnostic. It is used for ONE purpose only: NAMING the offending
 # token in the unrecognized-family FAIL below, so the report says which id it choked on. It
 # MUST NOT be substituted for `IDRE` anywhere a name is RESOLVED or COMPARED — admitting an

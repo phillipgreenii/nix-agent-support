@@ -50,6 +50,15 @@
 # reads as dangling.
 set -euo pipefail
 
+# The typed-id family list has ONE definition, in this plugin's
+# `lib/behavior-ids.bash`, and MUST NOT be re-inlined here (bead pg2-fbxdw — it was
+# duplicated at eight sites across six scripts and drifted twice, which is why THIS
+# script could not flag a dangling `DEC-` reference at all). Sourced HERE, before the
+# `cd "$DIR"` below, because the path is relative to this script and the cwd is still
+# the invocation cwd at this point.
+# shellcheck source=../../../lib/behavior-ids.bash
+. "$(dirname "${BASH_SOURCE[0]}")/../../../lib/behavior-ids.bash"
+
 # DETERMINISM: every sort, comm, uniq and shell glob below MUST order bytes, not
 # locale-collated characters. Without this the SAME finding serializes differently
 # on a UTF-8 workstation (`invariants.md:75 README.md:61`) and in the `C`-locale
@@ -137,9 +146,14 @@ mds=(*.md)
 # heading, or new bullet.
 records=$(
   for f in ./*.md; do
-    awk -v fname="${f#./}" '
+    awk -v fname="${f#./}" -v idpat="$BEHAVIOR_IDPAT" '
       BEGIN {
-        IDPAT = "(INV|GOAL|STORY|USECASE|JOURNEY|INTF|ACTOR|OQ)-[A-Za-z0-9]+(-[A-Za-z0-9]+)*"
+        # Passed in, never re-spelled — see the source line at the top of this script.
+        # A family this pattern does not know is invisible to the whole extractor: it is
+        # neither a definition (D), an element (E), a listing entry (L) nor a reference
+        # (R), so an untraced element of that family and a DANGLING reference to one are
+        # both unreportable.
+        IDPAT = idpat
         # A list bullet or an ATX heading marker, then emphasis/code-span
         # punctuation, then the ID. The marker is MANDATORY, not optional. Every
         # definition in a real set is a bullet or a heading, whereas a WRAPPED
@@ -221,8 +235,11 @@ imported=$(
     /^##[[:space:]]/ && insec { insec=0 }
     insec { print }
   ' ./*.md 2>/dev/null |
-    awk -F'|' '
-      BEGIN { IDPAT = "(INV|GOAL|STORY|USECASE|JOURNEY|INTF|ACTOR|OQ)-[A-Za-z0-9]+(-[A-Za-z0-9]+)*" }
+    awk -F'|' -v idpat="$BEHAVIOR_IDPAT" '
+      # Passed in, never re-spelled. A family omitted here drops out of `imported`, so a
+      # legitimate reference to a DECLARED external element of that family reads as
+      # dangling — a FALSE finding, the opposite failure to the extractor above.
+      BEGIN { IDPAT = idpat }
       /^\|/ {
         cell = $2
         if (match(cell, IDPAT) > 0) print substr(cell, RSTART, RLENGTH)
@@ -233,9 +250,37 @@ defined=$(printf '%s\n' "$records" | { grep '^D ' || true; } | cut -d' ' -f2 | s
 elements=$(printf '%s\n' "$records" | { grep '^E ' || true; } | cut -d' ' -f2 | sort -u)
 listed_pairs=$(printf '%s\n' "$records" | { grep '^L ' || true; } | cut -d' ' -f2,3 | sort -u)
 listed=$(printf '%s\n' "$listed_pairs" | { grep -v '^$' || true; } | cut -d' ' -f2 | sort -u)
-# `known` is everything a reference may legitimately name: defined here, or
-# declared in the imports table.
-known=$(printf '%s\n%s\n' "$defined" "$imported" | { grep -v '^$' || true; } | sort -u)
+# Entries the product's OWN sibling decision area defines. `GOAL-5` makes these
+# citable by typed name with NO imports row: "this product's own decision area is the
+# sibling **input** of the two-input model, not an external set, so it needs no row"
+# (`invariants.md`'s Goals; `README.md`'s "Two inputs, one product" says the same, and
+# fixes the area at `docs/decisions`, the sibling of `docs/behavior`).
+#
+# This is NOT a blanket exemption for the `DEC-`/`IMPL-` families, which would just
+# reinstate the blind spot under a new name: the area's entries are READ, so a citation
+# of an entry it does NOT define still dangles. That is precisely the detection widening
+# the family list bought (bead pg2-fbxdw) — before it, a dangling `DEC-` reference was
+# unreportable here. Without this resolution step the widening would instead report every
+# CONFORMANT decision citation as dangling, which is a worse defect than the blind spot.
+#
+# A set with no sibling decision area is normal, not an error. The `-e` test on the first
+# element makes the guard correct whether or not `nullglob` is in effect.
+decided=""
+if [ -d ../decisions ]; then
+  dec_mds=(../decisions/*.md)
+  if [ ${#dec_mds[@]} -gt 0 ] && [ -e "${dec_mds[0]}" ]; then
+    decided=$(
+      awk -v idpat="$BEHAVIOR_IDPAT" '
+        BEGIN { defpat = "^[ \t]*(([-*+][ \t]+)|(#+[ \t]+))[*_`]*" idpat }
+        $0 ~ defpat { if (match($0, idpat) > 0) print substr($0, RSTART, RLENGTH) }
+      ' "${dec_mds[@]}" | sort -u
+    )
+  fi
+fi
+
+# `known` is everything a reference may legitimately name: defined here, declared in the
+# imports table, or defined in the sibling decision area.
+known=$(printf '%s\n%s\n%s\n' "$defined" "$imported" "$decided" | { grep -v '^$' || true; } | sort -u)
 
 # resolves <id> — exact match against a known name, or a FAMILY reference: the
 # token is a proper prefix of some known ID (`INV-EVT-*` tokenizes to INV-EVT).
