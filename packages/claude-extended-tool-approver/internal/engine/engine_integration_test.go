@@ -3024,6 +3024,84 @@ func TestIntegration_GitConfigEnvInjection_EmitsEmptyObject(t *testing.T) {
 	}
 }
 
+// TestIntegration_GitProgramEnvVar_EmitsEmptyObject is the chain-level twin of the git
+// rule's TestGit_ProgramEnvVar_EmitsEmptyHookOutput (pg2-6c85x), and it asserts the one
+// property a rule-level test structurally cannot: that no LATER rule in the real chain
+// re-approves a leaf the git rule declined to approve. That question is live here rather
+// than theoretical — the env-vars rule runs FIRST in factory order and has its own
+// name-keyed tables (injectorVars, injectorAskVars, askVars), and none of these variables
+// is in any of them, so nothing upstream of the git rule has an opinion on them.
+//
+// THE BEFORE STATE, measured on git 2.54.0 in this worktree on 2026-08-13: each variable
+// below RAN a marker program (`scripts/probe-pg2-6c85x.sh`) while the argv spelling of its
+// twin config key — `git -c diff.external=…`, `-c core.sshCommand=…` — was already
+// deferred to `{}`. The env spelling emitted `permissionDecision: "allow"`.
+//
+// THE CONTROL ROWS MATTER AS MUCH AS THE GATED ONES. The screen keys on an EXACT,
+// case-sensitive assignment NAME, so a text match or any prefix widening would pass every
+// gated row here and break the controls — the false-positive class pg2-5b901 records.
+func TestIntegration_GitProgramEnvVar_EmitsEmptyObject(t *testing.T) {
+	t.Setenv("WORKSPACE_ROOT", "/Users/testuser/workspace")
+	projectRoot := "/Users/testuser/workspace/my-project"
+	eng := buildFullEngine(projectRoot, projectRoot)
+
+	emit := func(command string) string {
+		input := &hookio.HookInput{ToolName: "Bash", CWD: projectRoot, ToolInput: makeBashJSON(command)}
+		return string(hookio.FormatOutput(eng.EvaluateHook(input), nil))
+	}
+
+	for _, tt := range []struct{ name, command string }{
+		{"the measured external-diff hole", "GIT_EXTERNAL_DIFF=/tmp/evil git diff"},
+		{"the measured ssh-command hole", "GIT_SSH_COMMAND=/tmp/evil git fetch origin"},
+		{"the older argv-shaped ssh variant", "GIT_SSH=/tmp/evil git fetch origin"},
+		{"the editor sink on a write", "GIT_EDITOR=/tmp/evil git commit --amend"},
+		{"the pager sink on a read", "GIT_PAGER=/tmp/evil git log"},
+		{"the askpass sink on a fetch", "GIT_ASKPASS=/tmp/evil git fetch origin"},
+		// Value-blind on purpose: these really are harmless values, and they are screened
+		// because `git -c core.pager=cat log` is screened too. See gitProgramEnvVars.
+		{"a benign-looking pager value", "GIT_PAGER=cat git log"},
+		{"a benign-looking editor value", "GIT_EDITOR=true git commit --amend"},
+		{"the differ-disarming idiom", "GIT_EXTERNAL_DIFF= git diff"},
+		{"a value carrying arguments", `GIT_SSH_COMMAND="ssh -i /tmp/k" git fetch origin`},
+		{"the env(1) wrapper form", "env GIT_EXTERNAL_DIFF=/tmp/evil git diff"},
+		// Compound: NoOpinion outranks Approve in the MostRestrictive fold (pg2-t4uyx),
+		// so an approving sibling must not lift the expression back to allow.
+		{"compound with an approving sibling", "GIT_PAGER=/tmp/evil git log && echo done"},
+		{"approving sibling first", "echo start && GIT_EXTERNAL_DIFF=/tmp/evil git diff"},
+		// The argv route, unchanged — the control this bead was measured against.
+		{"the -c route it now matches", "git -c diff.external=/tmp/evil diff"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			out := emit(tt.command)
+			if out != "{}" {
+				t.Errorf("command %q emitted %s, want {} — this env prefix names the program git will execute, and `permissionDecision: \"allow\"` auto-approves running it", tt.command, out)
+			}
+			if strings.Contains(out, `"allow"`) {
+				t.Errorf("command %q emitted %s, which carries an allow decision", tt.command, out)
+			}
+		})
+	}
+
+	// NOT WIDENED. Lowercase spellings git's own getenv does not read (measured
+	// 2026-08-13: they did NOT run the marker), names that merely extend a screened one,
+	// a variable that names no program, and the two DECLINED variables whose reasons are
+	// recorded in declinedGitProgramEnvVars — all keep their approval.
+	for _, tt := range []struct{ name, command string }{
+		{"lowercase is not git's variable", "git_external_diff=/tmp/evil git diff"},
+		{"a longer name is a different variable", "GIT_PAGERX=/tmp/evil git log"},
+		{"selects an ssh dialect, names no program", "GIT_SSH_VARIANT=ssh git fetch origin"},
+		{"declined: the rule's own rebase idiom", "GIT_SEQUENCE_EDITOR=: git rebase -i main"},
+		{"declined: the alternate-transport family", "GIT_PROXY_COMMAND=/tmp/evil git fetch origin"},
+		{"an unrelated assignment", "FOO=bar git status"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if out := emit(tt.command); !strings.Contains(out, `"allow"`) {
+				t.Errorf("command %q emitted %s, want an allow — this bead must not cost a prompt on traffic git treats as naming no caller-supplied program", tt.command, out)
+			}
+		})
+	}
+}
+
 // TestIntegration_ArithmeticMaskedEnvValue is pg2-hed0a end to end, through the
 // REAL rule chain: appending `$((1))` to an env-assignment VALUE must not buy an
 // auto-approval for the command substitution beside it.

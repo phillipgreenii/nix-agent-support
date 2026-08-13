@@ -128,6 +128,32 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 			// kept because it is the only record of WHY: "git: a GIT_CONFIG_* env assignment injects config; deferring to prompt"
 			return hookio.NotApplicable()
 		}
+		// THE ENV SPELLING THAT SKIPS THE CONFIG KEY ENTIRELY (pg2-6c85x). The block
+		// above screens the variables that hand git CONFIGURATION; these hand it the
+		// PROGRAM, with no key in between — `GIT_EXTERNAL_DIFF` and `GIT_SSH_COMMAND` are
+		// `diff.external` and `core.sshCommand` by another name, both MEASURED running a
+		// marker program on git 2.54.0 (scripts/probe-pg2-6c85x.sh). So the argv route
+		// `git -c diff.external=<prog> diff` was deferred while the env route was
+		// APPROVED: the same inconsistency pg2-a12rl closed, one level down. See
+		// gitProgramEnvVars for the per-variable evidence, for why the match is
+		// value-blind, and for the two variables deliberately declined.
+		//
+		// IT IS A SEPARATE DEMOTION RATHER THAN A CLAUSE ADDED TO THE ONE ABOVE because
+		// the two screens rest on different measurements and different rulings; fusing
+		// them would leave one rationale comment covering two independent boundaries. Both
+		// are DEMOTIONS OF AN Approve, never the `-c` route's pre-classify short-circuit,
+		// for the reason that call site records: that shape was measured turning `git tag`
+		// and a force-push from `deny` into an auto-approvable `{}` (filed as pg2-6f4q9,
+		// deliberately not fixed here). Gating only an Approve leaves every decisive
+		// verdict in this file exactly as it was.
+		//
+		// Order against the sibling demotions does not matter — all withdraw the same
+		// Approve and return the same not-applicable.
+		if res.Decision == hookio.Approve && hasGitProgramEnvVar(pc) {
+			// Not applicable (ADR 0043): the chain must continue. Former Reason,
+			// kept because it is the only record of WHY: "git: a GIT_* env assignment names the program git will execute; deferring to prompt"
+			return hookio.NotApplicable()
+		}
 		// A `-C <path>` chdir runs the subcommand against a directory other than
 		// the invocation CWD. When the rule would otherwise Approve, withdraw the
 		// approval if that directory is unsafe for the subcommand's access class:
@@ -1362,10 +1388,11 @@ func hasRedirectEnvVar(pc cmdparse.ParsedCommand) bool {
 //     "config": measured the same day, `GIT_EXTERNAL_DIFF=<marker> git diff` and
 //     `GIT_SSH_COMMAND=<marker> git ls-remote ssh://…` both RAN the marker, and they
 //     are `diff.external` and `core.sshCommand` — two configSink entries — by another
-//     name. `GIT_PAGER`, `GIT_EDITOR` and `GIT_ASKPASS` are the same shape.
-//     DELIBERATELY out of scope here: pg2-a12rl is scoped to the config-source
-//     variables, and that family is a wider surface with its own prompt-volume cost
-//     to measure.
+//     name. `GIT_PAGER`, `GIT_EDITOR` and `GIT_ASKPASS` are the same shape. They were
+//     out of scope for pg2-a12rl, which is scoped to the config-SOURCE variables, and
+//     are NOW SCREENED BY THEIR OWN SIBLING PREDICATE — see gitProgramEnvVars and
+//     hasGitProgramEnvVar (pg2-6c85x), which carries that family's own measurements,
+//     its value-blind ruling, and the two variables it declines.
 //
 // WHY NOT hasRedirectEnvVar. That predicate is consulted per ARM, and only by the
 // arms that modify (`checkout`, `rebase`, `filter-branch`, `reset`, the
@@ -1377,6 +1404,174 @@ func hasRedirectEnvVar(pc cmdparse.ParsedCommand) bool {
 func hasGitConfigEnvInjection(pc cmdparse.ParsedCommand) bool {
 	for _, ev := range pc.EnvVars {
 		if ev.Name == "GIT_CONFIG" || strings.HasPrefix(ev.Name, "GIT_CONFIG_") {
+			return true
+		}
+	}
+	return false
+}
+
+// gitProgramEnvVars maps each `GIT_*` environment variable MEASURED to name a program
+// git EXECUTES to the `git config` key it is the env spelling of. hasGitProgramEnvVar is
+// the screen; the twin is recorded so the justification is CHECKABLE against
+// gatedConfigKeys rather than merely asserted — TestGit_ProgramEnvVar_TwinIsAConfigSinkInTheRealTable
+// resolves each one through configKeyID and requires it to be a configSink there.
+//
+// THE HOLE IT CLOSES (pg2-6c85x, found and measured while working pg2-a12rl).
+// pg2-a12rl screened the config-SOURCE family — `GIT_CONFIG*`, which names a config FILE
+// or key/value PAIRS. These name the PROGRAM directly, with no config key in between, so
+// they were outside that bead's scope and outside its screen: the argv route
+// `git -c diff.external=<prog> diff` was deferred while `GIT_EXTERNAL_DIFF=<prog> git
+// diff` was APPROVED. One exec sink, two spellings, opposite answers — the same
+// inconsistency pg2-a12rl closed, one level down.
+//
+// # WHICH VARIABLES, MEASURED RATHER THAN READ OFF THE DOCS
+//
+// git 2.54.0, 2026-08-13, throwaway repo under a mktemp directory, each variable pointed
+// at a marker script that appends to a file. `scripts/probe-pg2-6c85x.sh` reproduces it:
+//
+//	VARIABLE              TWIN               REACHES THE SINK?
+//	GIT_EXTERNAL_DIFF     diff.external      YES — `git diff` ran the marker with git's 7-argument diff-driver argv
+//	GIT_SSH_COMMAND       core.sshCommand    YES — `git ls-remote ssh://…` ran it as `-G -o SendEnv=GIT_PROTOCOL <host>`
+//	GIT_SSH               core.sshCommand    YES — same argv; the older variant, honoured when GIT_SSH_COMMAND is unset
+//	GIT_EDITOR            core.editor        YES — `git commit --amend` ran it on .git/COMMIT_EDITMSG
+//	GIT_ASKPASS           core.askPass       YES — `git credential fill` ran it as the "Username for …" prompt
+//	GIT_PAGER             core.pager         YES, ONLY WITH A TERMINAL ON STDOUT — see the pager note below
+//	GIT_SEQUENCE_EDITOR   sequence.editor    YES — `git rebase -i HEAD~1` ran it on .git/rebase-merge/git-rebase-todo — but DECLINED, see declinedGitProgramEnvVars
+//	GIT_PROXY_COMMAND     core.gitProxy      YES — `git ls-remote git://…` ran it as `<host> 9418` — but DECLINED, see declinedGitProgramEnvVars
+//
+// THE PAGER READING IS THE ONE THAT NEEDED A SECOND INSTRUMENT, recorded because the
+// first reading looked decisive and was not. `GIT_PAGER=<marker> git log` showed NO SINK,
+// and so did `git --paginate log` — because git resolves the pager as
+// `git_pager(isatty(1))` and returns NULL when stdout is not a terminal, `--paginate`
+// notwithstanding. That is a property of the STDOUT the probe gave it, not of the
+// variable: re-run under a real pty (expect(1)) the marker RAN, and `git var GIT_PAGER`
+// printed the marker path with no tty at all. The `-c core.pager` twin behaves
+// IDENTICALLY on both instruments, which is what makes the relation to it sound.
+// A no-sink reading under one stdout is not evidence about the VARIABLE.
+//
+// TWO OTHER READINGS THAT WOULD HAVE BEEN WRONG, both PRECEDENCE losses of exactly the
+// kind pg2-a12rl hit with `GIT_CONFIG_SYSTEM`:
+//
+//   - `git -c core.editor=<marker> commit --amend` showed no sink. Not because `-c` is
+//     ignored: this shell already exports `GIT_EDITOR=true`, and GIT_EDITOR OUTRANKS
+//     core.editor. With it unset the marker ran. Confirmed by `git var GIT_EDITOR`,
+//     which printed the env value while `-c core.editor` was also present.
+//   - `GIT_EXTERNAL_DIFF` had to be re-measured with `GIT_CONFIG_GLOBAL=/dev/null
+//     GIT_CONFIG_SYSTEM=/dev/null`, because this machine's `~/.config/git/config` sets
+//     `diff.external=difft`. It ran the marker BOTH ways, so the variable wins over the
+//     configured differ — which also means an external differ being configured here does
+//     not mask the route.
+//
+// # WHY IT IS VALUE-BLIND, WHICH IS THE DELIBERATE CHOICE THIS FAMILY INVITES
+//
+// Unlike the config-source family, these variables' values ARE the program, so a value
+// read is possible here in a way it was not there. It is still refused, for two reasons
+// that both cut the same way:
+//
+//  1. THE `-c` ROUTE IS VALUE-BLIND. `git -c core.pager=cat log` is screened, so sparing
+//     `GIT_PAGER=cat git log` would make the env spelling WEAKER than the argv one for
+//     the same benign value — this bead's own defect, re-created in the opposite
+//     direction, and it would break the relation tests that are its acceptance criteria.
+//  2. "BENIGN" IS NOT A WORD-LIST QUESTION. git runs the pager, the editor and the ssh
+//     command THROUGH A SHELL, and the diff/ssh values carry arguments in real use
+//     (`GIT_SSH_COMMAND="ssh -i /tmp/k"`, measured `GIT_EXTERNAL_DIFF='difft
+//     --display=inline'`). Deciding a value is inert therefore means shell-parsing it and
+//     resolving what it would exec — a second analysis, failing open on whatever it does
+//     not anticipate, for a verdict that is `{}` either way.
+//
+// So the screen keys on the NAME, exactly as `-c` keys on nothing at all. The cost is
+// over-approximation, all toward the prompt: `GIT_PAGER=cat`, `GIT_EDITOR=true` and
+// `GIT_EXTERNAL_DIFF=` (the idiom that DISARMS this workspace's configured differ) are
+// screened too. That is the same direction gatedConfigKeys' own over-approximations take.
+//
+// AND THAT COST IS AVOIDABLE, WHICH IS WHY IT IS ACCEPTABLE AT THIS VOLUME. Every
+// newly-prompting idiom in the 2026-08-13 replay has an ARGV equivalent that git itself
+// provides and that this screen does not touch — measured through the real binary, all
+// four still `allow`:
+//
+//	GIT_EXTERNAL_DIFF= git diff        ->  git --no-ext-diff diff  /  git diff --numstat
+//	GIT_PAGER=cat git log              ->  git --no-pager log
+//	GIT_EDITOR=true git commit --amend ->  git commit --amend --no-edit
+//	GIT_EDITOR=true git rebase --cont… ->  git rebase --continue --no-edit
+//
+// The flags say the same thing without handing git a program, so they are not a bypass:
+// each SUPPRESSES a sink rather than naming one. A caller who hits a prompt has a
+// strictly-safer spelling one flag away.
+//
+// THE NAME MATCH IS CASE-SENSITIVE, matching git's own getenv, and it is EXACT rather
+// than prefixed — the opposite of hasGitConfigEnvInjection's `GIT_CONFIG_` prefix, and
+// deliberately so. Measured: the lowercase spellings `git_external_diff`,
+// `git_ssh_command` and `Git_Pager` did NOT run the marker, so gating them would gate
+// commands git treats as ordinary. A prefix match is wrong here because there is no
+// prefix that means "names a program": `GIT_SSH_VARIANT` selects a command-line dialect
+// and `GIT_EXTERNAL_DIFF_OPTS` is not a variable git reads for the driver, yet both sit
+// under any prefix that would catch the real ones. The enumeration is the boundary, and
+// it is only sound BECAUSE it is measured.
+//
+// # WHAT IT DOES NOT REACH — recorded, not silently left
+//
+// A PERSISTENT assignment. `export GIT_PAGER=…` on its own line, or a variable already
+// exported into the shell, is a DIFFERENT leaf (or no leaf at all), and this predicate
+// reads one leaf's own prefix. It is the SAME leaf-local limit hasGitConfigEnvInjection
+// and hasRedirectEnvVar have, it is filed as pg2-xjt1s, and it is INHERITED here rather
+// than closed: closing it needs cross-leaf ordering analysis for all three at once.
+var gitProgramEnvVars = map[string]string{
+	"GIT_EXTERNAL_DIFF": "diff.external",
+	"GIT_SSH_COMMAND":   "core.sshCommand",
+	"GIT_SSH":           "core.sshCommand",
+	"GIT_EDITOR":        "core.editor",
+	"GIT_PAGER":         "core.pager",
+	// `core.askPass` is NOT in gatedConfigKeys — the one twin that is absent, and the
+	// asymmetry is recorded rather than resolved. The variable was MEASURED reaching an
+	// exec sink, so declining it would leave a measured sink open; adding the key to the
+	// table would change the `git config core.askPass …` PORCELAIN verdict from Approve
+	// to Ask, a route this bead did not measure. Unlike `core.gitProxy` below there is no
+	// ruling to contradict — pg2-szadj's survey never weighed this key at all — and
+	// unlike it, this one is on the everyday https path. Adding `core.askPass` to
+	// gatedConfigKeys is a one-line follow-up under its own ruling.
+	"GIT_ASKPASS": "core.askPass",
+}
+
+// declinedGitProgramEnvVars records the variables MEASURED to reach an exec sink that are
+// nevertheless NOT screened, with the reason for each. Neither is declined for want of
+// evidence — both ran the marker (see gitProgramEnvVars' table) — and in both cases the
+// reason is a ruling that already exists elsewhere and would be CONTRADICTED by screening
+// the env half alone. TestGit_ProgramEnvVar_DeclinedVariablesStayUnscreened pins the
+// consequence, so removing a variable from here is a deliberate act.
+var declinedGitProgramEnvVars = map[string]string{
+	// This rule's OWN rebase arm requires the variable: classify returns not-applicable
+	// for an interactive rebase that does NOT carry it, because an interactive rebase
+	// without an automated editor hangs on a prompt no agent can answer. So the variable
+	// is this rule's sanctioned way to make `rebase -i` non-interactive, and screening it
+	// would demote precisely the invocations the rule demands it on. Measured over the
+	// 152-day ask log on 2026-08-13: 71 rows carry a `GIT_SEQUENCE_EDITOR=` assignment, 17
+	// of which replay as `allow` today and would therefore start prompting (a further 32
+	// are stale-cwd and could not be replayed at all). pg2-a12rl's landed
+	// configenv_test.go pins `GIT_SEQUENCE_EDITOR=: git rebase -i main` at Approve, and
+	// this bead may not modify that file. The residual asymmetry is real and is left
+	// visible: `git -c sequence.editor=X rebase -i` IS screened by hasGitConfigInjection
+	// while the env twin is not. Reconciling the two means re-ruling the rebase carve-out
+	// itself, which is a separate ruling and a separate bead.
+	"GIT_SEQUENCE_EDITOR": "the rebase arm REQUIRES it; screening it would demote the scripted-rebase idiom the rule itself mandates",
+	// Its twin `core.gitProxy` sits in gatedConfigKeys' "SURVEYED AND DELIBERATELY LEFT
+	// APPROVED" list — a genuine sink, but on an alternate transport this workflow does
+	// not use — and that entry instructs a later reader to add the family "under one
+	// ruling instead of rediscovering them". Screening the env half now would split one
+	// ruling across two routes, which is the failure mode this bead exists to fix. Measured
+	// over the 152-day ask log on 2026-08-13: NO row carries a `GIT_PROXY_COMMAND`
+	// assignment — its single occurrence anywhere in the corpus is this bead's own
+	// measurement script, written while taking these readings — so nothing is at stake in
+	// waiting for that one ruling.
+	"GIT_PROXY_COMMAND": "its twin core.gitProxy is deliberately ungated pending ONE ruling over the alternate-transport family",
+}
+
+// hasGitProgramEnvVar reports whether this leaf's own env-assignment prefix carries a
+// variable through which git takes the PROGRAM IT EXECUTES from the caller. See
+// gitProgramEnvVars for the measured variable-by-variable evidence, for why the match is
+// value-blind, exact and case-sensitive, and for the two variables deliberately declined.
+func hasGitProgramEnvVar(pc cmdparse.ParsedCommand) bool {
+	for _, ev := range pc.EnvVars {
+		if _, screened := gitProgramEnvVars[ev.Name]; screened {
 			return true
 		}
 	}
