@@ -84,6 +84,14 @@ func TestFlip_BareSubshellKeepsEveryCommand(t *testing.T) {
 // pre-strip pass, and under KeepComments(true) a '#' inside a quoted word is part of
 // a *syntax.Lit. So the test asserts what a mangled parse would destroy — the
 // argument arrives WHOLE, with every line and every '#' still in it.
+//
+// THIS IS THE PARSEABILITY HALF ONLY, and the distinction is load-bearing: an
+// argument can arrive whole and still have a substitution inside it never ENUMERATED
+// (the pg2-wguam shape). The SECURITY half — that a live `$( )` in such a span reaches
+// the text the rules see, and that the quoted spelling's verdict is never more
+// permissive than the unquoted one — is pg2-ekplq's
+// TestIntegration_HashInAMultiLineQuotedSpanNeverHidesASubstitution in
+// internal/engine, where the composed rule chain is reachable.
 func TestFlip_HashInsideAQuotedArgumentIsNotAComment(t *testing.T) {
 	cases := []struct {
 		name string
