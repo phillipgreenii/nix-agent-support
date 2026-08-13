@@ -23,7 +23,7 @@
 # the gaps are omissions. Owner: the pr-pool set retrofit (WS-2/3/4 of the six-set
 # restructure), not this work stream.
 #
-# 2. Prose references that resolve to nothing (3 lines, all WARN)
+# 2. Prose references that resolve to nothing (2 lines, both WARN)
 #
 # `INV-DISP-1` and `INTF-SOURCE` in the METHOD set are ID-shaped literals printed
 # to ILLUSTRATE the namespacing convention, not citations of elements — the root
@@ -31,12 +31,11 @@
 # recorded rather than fixed because no grep distinguishes a style example from a
 # citation, and a reader cannot either, which is itself worth a decision.
 #
-# `OQ-WORKFLOW` in pr-pool is different and is a real defect: the open question was
-# deleted and two citations were left behind. Owner: the pr-pool set retrofit.
-#
-# These three lines carry `file:line` coordinates, so ANY insertion above them in the
-# named file MOVES them and the baseline line must be re-recorded. That is a location
-# change, not a new or fixed finding — re-run the runner and copy the new coordinates.
+# Both of those lines carry `file:line` coordinates — and they are the ONLY finding
+# lines here that do — so ANY insertion above them in the named file MOVES them and
+# the baseline line must be re-recorded. That is a location change, not a new or fixed
+# finding — re-run the runner and copy the new coordinates. If a future finding line
+# carries coordinates too, this count is stale: re-derive it rather than trust it.
 #
 # ---------------------------------------------------------------------------
 intra/trace-extract behavior-docs/docs/behavior|WARN dangling in prose: INTF-SOURCE (README.md:61 invariants.md:98) resolves to no definition here and no declared external reference
@@ -51,4 +50,3 @@ intra/trace-extract packages/pr-pool/docs/behavior|FAIL JOURNEY-RUN carries no l
 intra/trace-extract packages/pr-pool/docs/behavior|FAIL JOURNEY-SMOKE carries no listing on its definition
 intra/trace-extract packages/pr-pool/docs/behavior|FAIL JOURNEY-VALIDATE carries no listing on its definition
 intra/trace-extract packages/pr-pool/docs/behavior|FAIL JOURNEY-WORKFLOW carries no listing on its definition
-intra/trace-extract packages/pr-pool/docs/behavior|WARN dangling in prose: OQ-WORKFLOW (interfaces.md:526 invariants.md:196) resolves to no definition here and no declared external reference

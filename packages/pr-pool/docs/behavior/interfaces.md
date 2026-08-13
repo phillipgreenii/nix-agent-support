@@ -205,8 +205,8 @@ of the boundary.
 that declaration, its invocation, and its mode are the whole of its configuration. The declared
 emitted types are a **contract boundary and MUST stay one**: the wiring validation runs on them in
 **both** directions (`INV-WORKFLOW-1`, `JOURNEY-VALIDATE`) — a bound `type` no source emits is an
-orphan error, and an emitted `type` no binding covers is a warned dead end — and neither check has
-anything to compare without them. What a source does **not** declare is which of its fields may be
+**orphan event type** and an emitted `type` no binding declares is an **unhandled source output**, and
+both are **blocking errors** — and neither check has anything to compare without them. What a source does **not** declare is which of its fields may be
 matched, or any shape for `payload`: **matchability is the handler's alone** (`INV-DISP-1`).
 
 **Event shape.** An event carries the following fields, and nothing here constrains how a source
@@ -244,11 +244,14 @@ is declared anywhere (`OQ-EVT-CATALOG`); **while that open question stands**, a 
 to nothing and nothing reports it. That is the deferred catalog's consequence, not a property of path
 matching: settling `OQ-EVT-CATALOG` gives config-time validation a shape to check the path against.
 
-**Unknown type.** An event whose `type` no configured binding matches is **accepted into the queue**
-and, with no handler to offer it to, **is dropped unconsumed-expired** — not a rejection of the
-source. The core records it to logs and the unconsumed-expired metric; a `type` with
-**no configured binding at all** is also surfaced as a **config-time warning** (`JOURNEY-VALIDATE`).
-This is the "no event misses" visibility signal, not a runtime error (`INV-DISP-3`).
+**Unknown type.** An event whose `type` **no configured binding declares at all** is **rejected** to
+the source — it is **not** enqueued, it is named in the reply's `rejected` list (`INTF-CLI`), and the
+core records it to logs and metrics. It is a genuine error rather than a silent drop, and the same
+condition already fails **pre-runtime validation**, which blocks startup (`JOURNEY-VALIDATE`,
+`INV-WORKFLOW-1`). A `type` that **is** declared by a binding but whose binding is merely **disabled
+for this run** is the other case: that event **is** accepted and enqueued, is offered to nobody, and
+is dropped **unconsumed-expired** — counted by the unconsumed-expired metric, because run-scoping is
+not a config defect (`INV-DISP-3`).
 
 **The query-reply contract carries events or a deferral, and nothing else — so it stays as it is.**
 A reply says either "here are events" or "later, on the callback"; it carries no view into how the
@@ -271,7 +274,7 @@ sequenceDiagram
     Core-->>Src: { id, accepted }
     Note over Core,Src: push — source-initiated
     Src->>Core: ingest-event { id, events: [Event] }
-    Core-->>Src: { id, accepted }  (unknown type still queued → unconsumed-expired, offered to nobody)
+    Core-->>Src: { id, accepted } — a type no binding declares is rejected, never queued (INV-DISP-3)
 ```
 
 ## `INTF-HANDLER` — event handler <!-- uuid: 10939663-7a48-4d44-8c4a-9a2df8ae4654 -->
@@ -469,11 +472,15 @@ still-retained **duplicate** `id` is accepted too, because de-duplication is the
 (`INV-EVT-3`). The reply carries **no field** separating a fresh append from an absorbed re-emit, so
 `accepted` is not a fresh-append count and a caller cannot distinguish the two over this interface.
 
-Under the durable queue an event whose `type` matches no binding is **still accepted** — counted as
-accepted and enqueued, then left to **expire unconsumed**; visibility comes from the **config-time
-warning** (`JOURNEY-VALIDATE`) and the **unconsumed-expired** metric, not from a rejection
-(`INV-DISP-3`). The rejected list therefore carries only **malformed** events — bad schema, or a
-missing required field — each with a reason.
+An event whose `type` **no configured binding declares** is **rejected**, not accepted: it never
+enters the queue and it is named in `rejected` with a reason, because a `type` unknown to the
+configuration is an error rather than a silent drop (`INV-DISP-3`) — and the same condition already
+blocks startup at **pre-runtime validation** (`JOURNEY-VALIDATE`). An event whose binding **is**
+declared but merely **disabled for this run** by a **run-scoped selector** is the other case: it **is**
+counted as accepted and enqueued, offered to nobody, then left to **expire unconsumed**, and
+visibility there comes from the drop being **counted in the metric catalog** `INTF-MON` carries
+(`INV-OBS-1`). The `rejected` list therefore carries **malformed** events — bad schema, or a missing
+required field — and events whose `type` is **unknown to the configuration**, each with a reason.
 
 **Inspecting a running core** yields three things and nothing else. **Deliveries** are **delivery
 provenance** — which event the core handed to which handler, keyed by that dispatch's tracking id —
@@ -523,7 +530,8 @@ The **full configuration schema** is not yet pinned; it is tracked as an open qu
   by a verbatim peer cross-check: an implementer **cites** this contract and states only its own
   side, and a counterparty with no set leans on the same suite as its sole reconciliation. Each
   interface here **is** the authoritative contract its implementations adhere to.
-- **Open questions** (tracked in [journeys](journeys.md)): `OQ-WORKFLOW` (pre-runtime wiring
-  validation of the bindings), `OQ-CONFIG` (the full configuration schema), and `OQ-EVT-CATALOG` (a
-  declared per-`type` payload shape — what a binding's narrowing path would be validated against at
-  config time, and what would make two sources' events on one `type` comparable at all).
+- **Open questions** (tracked in [journeys](journeys.md)): `OQ-CONFIG` (the full configuration
+  schema) and `OQ-EVT-CATALOG` (a declared per-`type` payload shape — what a binding's narrowing path
+  would be validated against at config time, and what would make two sources' events on one `type`
+  comparable at all). Pre-runtime validation of the wiring is **not** among them — it is settled and
+  stated as a rule (`INV-WORKFLOW-1`, `JOURNEY-VALIDATE`).

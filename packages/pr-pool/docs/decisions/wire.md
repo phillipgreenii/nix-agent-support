@@ -103,8 +103,9 @@ Its reply on stdout, exit `0`:
 { "schemaVersion": "1", "id": "trk-9f2c", "accepted": 1, "rejected": [] }
 ```
 
-And with a **malformed** event, exit `1` — `rejected` carries only malformed events, each with a
-reason, because an event whose `type` matches no binding is still accepted (`INV-DISP-3`):
+And with a rejected event, exit `1` — `rejected` carries the **malformed** events and the events
+whose `type` is **unknown to the configuration** (no configured binding declares it, so the core
+rejects rather than enqueues, `INV-DISP-3`), each with a reason:
 
 ```json
 {
@@ -115,6 +116,10 @@ reason, because an event whose `type` matches no binding is still accepted (`INV
     {
       "id": "evt-abc123",
       "reason": "malformed: missing required field \"type\""
+    },
+    {
+      "id": "evt-def456",
+      "reason": "unknown type: no configured binding declares \"review-abandoned\""
     }
   ]
 }

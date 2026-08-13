@@ -27,9 +27,13 @@ load and failure.
 - **`STORY-OP-4`** <!-- uuid: f23554c2-91f5-454a-af95-1c714a4f44f2 --> — swap a manager implementation without touching the core, so which tools back a
   source/handler/monitor/storage is my choice, not the core's concern. _(→ `INV-DISP-2`,
   `GOAL-MIN-1`.)_
-- **`STORY-OP-5`** <!-- uuid: dd96bcfb-509c-4543-b32c-1f77af7330b7 --> — have orphaned bindings and misrouted event types **surfaced**, not silently
-  dropped — ideally **before runtime** — so a broken wiring is visible. _(→ `JOURNEY-VALIDATE`;
-  `INV-WORKFLOW-1`, `INV-DISP-3`.)_
+- **`STORY-OP-5`** <!-- uuid: dd96bcfb-509c-4543-b32c-1f77af7330b7 --> — **validate the wiring before
+  running** and get a **pass/fail report** instead of a runtime surprise, with every broken wiring
+  **surfaced** rather than silently dropped: no **orphan event type**, no **unhandled source output**,
+  no **disconnected handler**, no **handler left with no events to listen for**, no **source or
+  handler whose backing command is absent**, and no **determinably non-terminating re-entry cycle**.
+  All six are determinable from the configuration alone, so all six are checked **pre-runtime** and
+  every one of them **blocks startup**. _(→ `JOURNEY-VALIDATE`; `INV-WORKFLOW-1`, `INV-DISP-3`.)_
 - **`STORY-OP-6`** <!-- uuid: 6e131756-a26d-42ac-a49b-05a8bb875c32 --> — trust a stable interface **contract** plus a **conformance suite**, so I can
   add a manager and verify it adheres before relying on it. _(→ `JOURNEY-CONFORM`; `INV-INTF-1`,
   `INV-INTF-2`.)_
@@ -42,9 +46,6 @@ load and failure.
 - **`STORY-OP-9`** <!-- uuid: 9d593740-745e-42fd-a74c-2a283b57b81c --> — declare the **wiring** tying sources → event types → handlers through their
   bindings, so the wiring is a first-class, inspectable artifact rather than an emergent accident.
   _(→ `JOURNEY-WORKFLOW`; `INV-WORKFLOW-1`.)_
-- **`STORY-OP-10`** <!-- uuid: 738e4c5e-01f9-4c2b-bb11-81ed0a4c6dc9 --> — **validate** that wiring before running — no orphan event types, no unhandled
-  source output, no disconnected handlers, no unbounded loops — so I get a pass/fail report, not a
-  runtime surprise. _(→ `JOURNEY-VALIDATE`; `INV-WORKFLOW-1`.)_
 - **`STORY-OP-11`** <!-- uuid: 49f4499d-019f-47e4-a66c-773c20137f6d --> — have a handler failure handled **at the acceptance boundary** — a **pre-accept
   decline** (`busy`, `unavailable`) re-offered by the core while the event is unexpired, and a
   **post-accept** outcome (`retryable`, `resource-limit`, `critical`) owned by the handler that
@@ -59,8 +60,10 @@ load and failure.
 - **`STORY-OBS-1`** <!-- uuid: ce97e9c6-5719-4b18-9de9-fa1900b951bd --> — see throughput, backlog, failures, and liveness through dashboards fed by the
   **metric catalog**, so I know the system's health. _(→ `JOURNEY-OBSERVE`; `INV-OBS-1`.)_
 - **`STORY-OBS-2`** <!-- uuid: 257f9e86-187b-4ee8-8123-b75b71d976b5 --> — distinguish a **source infrastructure failure** from a genuinely idle "no
-  work" reading, and see **expiry drops** and the **delivery-side** failure classes as metrics, so a
-  silent outage does not read as "nothing to do."
+  work" reading, and see **expiry drops** — which count only **genuine misses**, since a `type` unknown
+  to the configuration is **rejected** to the caller rather than queued to expire (`INV-DISP-3`) — and
+  the **delivery-side** failure classes as metrics, so a silent outage does not read as "nothing to
+  do."
   _(→ `JOURNEY-FAIL`, `JOURNEY-OBSERVE`; `INV-DISP-3`, `INV-OBS-1`.)_
 
 **Coverage (traceability).** Per the method's rule that a set's extent is exactly what its stories
@@ -72,7 +75,7 @@ dispatch (`INV-DISP-*`) by `JOURNEY-FLOW` / `STORY-OP-1,5`; delivery (`INV-EVT-*
 / `JOURNEY-FAIL` / `STORY-OP-11`; precedence (`INV-PREC-1`) by `JOURNEY-FAIL` / `STORY-OP-12`;
 observability (`INV-OBS-1`) by `JOURNEY-OBSERVE` / `STORY-OBS-*`; lifecycle (`INV-LIFE-1`) by
 `JOURNEY-RUN` / `JOURNEY-FAIL`; workflow (`INV-WORKFLOW-1`) by `JOURNEY-WORKFLOW` / `JOURNEY-VALIDATE`
-/ `STORY-OP-9,10`; the minimality goal (`GOAL-MIN-1`) by `JOURNEY-OBSERVE` / `STORY-OP-4`.
+/ `STORY-OP-5,9`; the minimality goal (`GOAL-MIN-1`) by `JOURNEY-OBSERVE` / `STORY-OP-4`.
 
 ## Journeys
 
@@ -193,8 +196,9 @@ deployment's user-facing workflow.
    a handler responds to **any** of its bound types. The binding names the `type` it takes — which
    **MUST** match — and MAY narrow within it on a **payload path of its own**, applied after the type
    match; no matchable field comes from the source.
-4. Where a handler produces **new work**, route it back in as events **via a query** (re-entry) — the
-   core does not branch outputs itself (see `OQ-BRANCH`); new work re-enters through a source.
+4. Where a handler produces **new work**, route it back in as events **via a query** (re-entry). The
+   core does **not** branch outputs itself — **delivery is pr-pool's contract and everything past
+   delivery is the handler's** — so new work re-enters through a source.
 5. Mark **order-dependent** event types to serialize (`INV-CONC-1`) so concurrency never corrupts
    them.
 
@@ -218,37 +222,63 @@ flowchart TD
 **Intent:** validate the **wiring** **before running**, and report the result (`INV-WORKFLOW-1`).
 This checks the routing graph's flat wiring **only** — never workflow-completeness or sequencing.
 
-**Flow.** The core walks the declared routing graph and reports, distinguishing an **error** (a
-malformed graph) from a **warning** (a graph that would queue events nobody can take):
+**Flow.** The core walks the declared routing graph **before anything runs** and reports **pass or
+fail**, naming every finding so the operator can fix config. **Six** findings are **errors**, and each
+one on its own **blocks startup** — anything determinable as an invalid configuration prevents the run
+(`INV-WORKFLOW-1`):
 
 - **Orphan event type** — a binding matches a `type` no configured source emits → error.
-- **Unhandled source output** — a source emits a `type` **no configured binding covers at all** →
-  **warning** (`INV-DISP-3`): under the durable queue such events are enqueued, offered to nobody, and
-  dropped **unconsumed-expired** (`INV-EVT-1`, `INV-EVT-4`), so it is a visibility signal ("no event
-  misses"), not a runtime error. A binding merely **disabled for this run** (`--only`/`--disable`) is
-  expected and does not warn.
+- **Unhandled source output** — a source emits a `type` **no configured binding declares at all** →
+  error. That `type` is unknown to the configuration, so at runtime the core **rejects** it to the
+  caller rather than queueing it (`INV-DISP-3`) — a config that would emit it is invalid, not merely
+  wasteful.
 - **Disconnected handler** — a handler no binding can reach → error.
-- **Loop** — a re-entry cycle (`handler → query → same type`) that would not terminate → flagged.
+- **Handler with no events to listen for** — a handler that _is_ bound yet can never receive anything,
+  because its binding declares no `type` or because every `type` it binds is emitted by no configured
+  source → error. The orphan-event-type finding above names the **type**; this one names the
+  **handler**, so a handler bound only to orphan types is reported both ways.
+- **Absent backing command** — a configured source or handler whose **backing command** the core
+  cannot invoke → error.
+- **Determinably non-terminating re-entry cycle** — a `handler → query → same type` cycle the declared
+  graph shows **cannot** terminate → error.
 
-A run is blocked only on an **error**; a warning is reported and the run proceeds. The report names
-each finding so the operator can fix config. (This resolves the former wiring open question —
-validation is first-class via `INV-WORKFLOW-1`.)
+Exactly **one** finding is a **warning**: a **re-entry cycle whose termination is not determinable** —
+the same shape, where the graph cannot settle whether it stops. A cycle is always **detectable**, but
+its termination usually is not, so this one is "detectable but not determinably invalid": it is
+**reported and the run proceeds**. The warning category is **closed at one member** — nothing else in
+this set warns, and it is not a slot held open for future additions; a check either determines the
+configuration invalid, in which case it blocks, or it determines nothing, in which case only a cycle's
+undecidable termination is worth telling the operator about.
+
+**Run-scoping is not a config defect.** A binding merely **disabled for this run** by a
+**run-scoped selector** (`STORY-OP-3`) is neither an error nor a warning: validity is judged against
+the **configuration** and never against the run's **active subset** (`INV-WORKFLOW-1`). Its events are
+still accepted and enqueued, offered to nobody, and dropped **unconsumed-expired** (`INV-DISP-3`,
+`INV-EVT-4`).
 
 ```mermaid
 flowchart TD
     wf["declared routing graph (INV-WORKFLOW-1)"] --> c1{"every bound type emitted by some source?"}
     c1 -->|no| e1["orphan event type: ERROR"]
-    c1 -->|yes| c2{"every source-emitted type covered by some binding?"}
-    c2 -->|"no binding at all"| w2["unhandled source output: WARNING — events are offered to nobody and expire unconsumed (INV-DISP-3, INV-EVT-4)"]
-    c2 -->|"yes / only disabled this run"| c3{"every handler reachable by some binding?"}
-    w2 --> c3
+    c1 -->|yes| c2{"every source-emitted type declared by some binding?"}
+    c2 -->|"no binding declares it"| e2["unhandled source output: ERROR — that type is unknown to the config and is rejected at runtime (INV-DISP-3)"]
+    c2 -->|"yes, even if only disabled this run"| c3{"every handler reachable by some binding?"}
     c3 -->|no| e3["disconnected handler: ERROR"]
-    c3 -->|yes| c4{"any unbounded re-entry cycle?"}
-    c4 -->|yes| e4["loop detected: flagged"]
-    c4 -->|no| ok["wiring valid: report PASS"]
-    e1 --> rep["errors block the run; warnings are reported, run proceeds"]
+    c3 -->|yes| c4{"can every handler receive some emitted type?"}
+    c4 -->|no| e4["handler with no events to listen for: ERROR"]
+    c4 -->|yes| c5{"is every source and handler backing command present?"}
+    c5 -->|no| e5["absent backing command: ERROR"]
+    c5 -->|yes| c6{"any re-entry cycle?"}
+    c6 -->|"yes, determinably non-terminating"| e6["cycle cannot terminate: ERROR"]
+    c6 -->|"yes, termination not determinable"| w6["cycle may or may not terminate: WARNING — the only warning this set has"]
+    c6 -->|no| ok["wiring valid: report PASS"]
+    e1 --> rep["any one error blocks startup; the report names every finding"]
+    e2 --> rep
     e3 --> rep
     e4 --> rep
+    e5 --> rep
+    e6 --> rep
+    w6 --> run
     ok --> run["clear to run: JOURNEY-RUN"]
 ```
 
@@ -472,7 +502,10 @@ registered participants (`INV-LIFE-1`). That signal stays best-effort and MAY be
 restart** and is redelivered at-least-once, and only the **narrow crash window** (accepted but not
 yet persisted) MAY redeliver — absorbed by idempotent handlers (`INV-EVT-2`). After restart the core
 resumes offering from the durable queue; pull sources also re-derive current truth on their next
-trigger. (Whether the core needs an explicit branch/deadletter path beyond re-entry is `OQ-BRANCH`.)
+trigger. The core carries **no branch or deadletter path** of its own: **delivery is pr-pool's
+contract and everything past delivery is the handler's**, so a handler's failure branches surface on
+the handler's own surface or become **new events** that re-enter through a source
+(`JOURNEY-WORKFLOW`).
 
 ```mermaid
 sequenceDiagram
@@ -531,11 +564,6 @@ Each states the gap, its owner, a resolution path, and where it blocks.
   mechanism for declaring an order-dependent type is undecided. _Owner_: author. _Path_: decide a
   per-type config flag vs. a binding attribute. _Blocks_: safe handling of order-dependent events;
   `JOURNEY-CONFIG`, `JOURNEY-WORKFLOW`.
-- **`OQ-BRANCH`** <!-- uuid: d846f637-19dd-4c12-aa02-3519683884dc --> — whether the core needs **branching on failure** (e.g. a deadletter path), or
-  whether a handler's internal branches producing new events (re-entering via queries) suffice.
-  _Gap_: no branching primitive exists; this is **deferred**. _Owner_: author. _Path_: let it fall
-  out as real usage demands it rather than guess now. _Blocks_: nothing yet; revisit if a
-  failure-routing need appears in `JOURNEY-FAIL`.
 - **`OQ-EVT-CATALOG`** <!-- uuid: 7f4ba6ef-bb0e-4bcb-95fb-932a2eba7db5 --> — a **shared event catalog**: a declared shape for an event's `payload`,
   owned by the event **`type`** rather than by any one source. _Gap_: a `type` is declared, routed and
   matched on, but nothing anywhere declares what an event of that `type` **carries** — the event

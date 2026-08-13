@@ -92,11 +92,13 @@ their own terms in a downstream deployment set.
 ## Wiring and observability
 
 - **Wiring** (a **routing graph**) — the declared flow connecting event sources, event types, and
-  event handlers through their bindings. The core validates **only** the wiring (no orphan event
-  types, no unhandled source output, no disconnected handlers, loop detection) and reports on it; it
-  does **not** validate workflow-completeness or sequencing — it is a flat edge-router, not a
-  workflow engine (`INV-WORKFLOW-1`). (A deployment's user-facing **workflow** is a separate,
-  downstream concept.)
+  event handlers through their bindings. The core validates **only** the wiring, **pre-runtime**, over
+  six blocking checks — no orphan event types, no unhandled source output, no disconnected handlers, no
+  handler left with no events to listen for, no absent backing command, and no determinably
+  non-terminating re-entry cycle — and reports pass or fail on it; a re-entry cycle whose termination
+  is **not determinable** is its one warning. It does **not** validate workflow-completeness or
+  sequencing — it is a flat edge-router, not a workflow engine (`INV-WORKFLOW-1`). (A deployment's
+  user-facing **workflow** is a separate, downstream concept.)
 - **Metric catalog** — the set of metrics the core declares (name, kind, unit, labels) and exposes to
   monitoring sinks — the neutral **shape**. `INV-OBS-1` obliges the core to declare it; `INTF-MON`, the
   interface that carries it, states which metrics are in it.

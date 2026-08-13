@@ -16,11 +16,13 @@ governed by these same delivery invariants, `INV-EVT-*`.)
 
 ```mermaid
 flowchart TD
-    emit["a source emits a typed event"] --> enq["append to the durable queue (INV-EVT-1)"]
+    emit["a source emits a typed event"] --> known{"does any configured binding declare this type? (INV-DISP-3)"}
+    known -->|no| rej["unknown to the config: REJECTED to the caller, logged + metric — and the same condition already blocked startup as a validation error (INV-WORKFLOW-1)"]
+    known -->|yes| enq["append to the durable queue (INV-EVT-1)"]
     enq --> dedup{"id still retained in the queue? (incl. already-accepted)"}
     dedup -->|yes| drop["de-duplicated (INV-EVT-3)"]
-    dedup -->|no| match{"a binding matches the event's fields? (type MUST match, then any narrowing predicate the binding names)"}
-    match -->|no binding matches type| noh["no matching handler, so no attempt is owed: dropped unconsumed-expired, logged + metric, config-time warning (INV-DISP-3)"]
+    dedup -->|no| match{"a binding active this run matches the event's fields? (type MUST match, then any narrowing predicate the binding names)"}
+    match -->|"no active binding matches"| noh["no attempt is owed: dropped unconsumed-expired, logged + metric (INV-DISP-3)"]
     match -->|matched| offer["offer to a bound handler's head — one outstanding offer per handler (INV-CONC-1)"]
     offer --> acc{"handler accepts? (ack or completion)"}
     acc -->|"busy / pre-accept decline"| exp{"was the event already past expiresAt when that attempt was made?"}
@@ -48,20 +50,29 @@ flowchart TD
 - **`INV-DISP-2`** <!-- uuid: 06662087-a4de-4732-9417-f7440c9aa471 --> — The core reaches every source and handler **only through a manager interface**
   (`INTF-SOURCE` / `INTF-HANDLER`); their implementations are opaque to it. Nothing specific to a
   source, handler, or deployment lives in the core.
-- **`INV-DISP-3`** <!-- uuid: 421db242-e1fc-49ba-a1a6-38211abf5569 --> — An event whose `type` **no
-  configured binding matches** is **not** a runtime error under the durable queue: it is enqueued and,
-  with no handler to offer it to, **is dropped unconsumed-expired** (`INV-EVT-1`, `INV-EVT-4`) — a
-  visibility signal ("no event misses"), recorded to logs and metrics, not a rejection of the caller.
-  Under `INV-EVT-4` that count is now a **genuine miss** rather than a scheduling artifact: either
-  every matching handler had at least one opportunity and none took it, or nothing matched at all. A
-  busy handler can no longer be the reason an event expired unoffered, which makes the "no event
-  misses" signal considerably more meaningful. Visibility is surfaced two ways: **config-time**,
-  `JOURNEY-VALIDATE` emits a **warning** when a source-emitted `type` has **no configured binding at
-  all** (you would queue events nothing can take); and at runtime the drop is **counted in the metric
-  catalog** `INTF-MON` carries (`INV-OBS-1`). A binding merely **disabled for this run** by a
-  **run-scoped selector** is expected and is neither warned nor an error — its events are offered to
-  nobody and expire. (A field or payload path a binding names that is _absent_ on an event is a
-  non-match, not a no-binding condition.)
+- **`INV-DISP-3`** <!-- uuid: 421db242-e1fc-49ba-a1a6-38211abf5569 --> — **An unknown event type is
+  rejected; a type whose binding is merely inactive this run waits.** The two cases stay distinct:
+  - **Unknown to the configuration** — **no** configured binding declares this `type` at all. The core
+    **MUST reject** the event to the caller: it is **not** enqueued, the reply names it as rejected
+    (`INTF-CLI`), and the condition is recorded to logs and metrics. The same condition is already a
+    **pre-runtime validation error** that blocks startup (`INV-WORKFLOW-1`), so at runtime it can only
+    mean a source emitted a `type` its own configuration never declared — an error to report, never a
+    silent drop.
+  - **Declared but inactive this run** — a binding for the `type` exists and is merely **disabled for
+    this run** by a **run-scoped selector**. That event **is** accepted and enqueued, waits, is offered
+    to nobody, and **is dropped unconsumed-expired** (`INV-EVT-1`, `INV-EVT-4`). This is **expected and
+    is neither an error nor a warning**: validity is judged against the configuration, never against the
+    run's active subset (`INV-WORKFLOW-1`, `STORY-OP-3`).
+
+  The **unconsumed-expired** drop is **counted in the metric catalog** `INTF-MON` carries
+  (`INV-OBS-1`), covering the second case and the ordinary miss, and under `INV-EVT-4` that count is a
+  **genuine miss** rather than a scheduling artifact: every matching handler had at least one
+  opportunity and none took it. A busy handler can no longer be the reason an event expired unoffered,
+  and — now that an unknown `type` is rejected rather than queued — a misconfiguration can no longer
+  inflate the count either, which makes the "no event misses" signal considerably more meaningful. (A
+  **field or payload path a binding names** that is _absent_ on an event is a **non-match** on an
+  otherwise declared `type`, not a no-binding condition — so it leaves the event in the second case,
+  never the first.)
 
 ## Delivery
 
@@ -184,16 +195,48 @@ sequenceDiagram
 
 - **`INV-WORKFLOW-1`** <!-- uuid: 66dfe98d-a564-4414-a3db-77b518d27f31 --> — The **wiring** (a
   **routing graph**) is the declared flow tying **event sources → event types → event handlers**
-  through their **bindings**. The core is a **flat edge-router, not a workflow engine**: it **MUST**
-  be able to **validate the wiring** — no orphan event types, no unhandled source output, no
-  disconnected handlers, and loop detection — and **report** on it, and it validates **nothing
-  beyond** that — **no workflow-completeness and no sequencing** (source semantics are opaque to the
-  core, and the core sees only single directed edges, never a handler's outcome or how it correlates
-  to a next event). The core defines **delivery** outcomes (accept / decline / delivery-failure
-  class), **not work** outcomes (did the review pass?) — those live in the handler and a downstream
-  tracker. Declaring or altering the wiring is **configuration**: it **MUST NOT** require changing the
-  core (`GOAL-MIN-1`). _(Whether validation runs pre-runtime and exactly how a serialize mark is
-  expressed are open questions, `OQ-WORKFLOW` and `OQ-CONC-MARK`.)_
+  through their **bindings**. The core is a **flat edge-router, not a workflow engine**: it
+  **MUST validate the wiring** and **report** pass or fail on it, and it validates **nothing beyond** that
+  — **no workflow-completeness and no sequencing** (source semantics are opaque to the core, and the
+  core sees only single directed edges, never a handler's outcome or how it correlates to a next
+  event). The core defines **delivery** outcomes (accept / decline / delivery-failure class), **not
+  work** outcomes (did the review pass?) — those live in the handler and a downstream tracker.
+  Declaring or altering the wiring is **configuration**: it **MUST NOT** require changing the core
+  (`GOAL-MIN-1`). _(How a serialize mark is expressed remains an open question, `OQ-CONC-MARK`.)_
+
+  **Validation runs pre-runtime, and anything determinable as an invalid configuration MUST prevent
+  startup.** The rule is stated as that general principle so a later check inherits it rather than
+  re-arguing it. Six conditions are determinable from the resolved configuration alone, so all six
+  **MUST** be checked before anything runs and each one on its own **MUST** block startup:
+  1. an **orphan event type** — a binding matches a `type` no configured source emits;
+  2. an **unhandled source output** — a source emits a `type` **no** configured binding declares at
+     all (at runtime such a `type` is rejected, `INV-DISP-3`);
+  3. a **disconnected handler** — a handler no binding can reach;
+  4. a **handler with no events to listen for** — a bound handler that can never receive anything,
+     because its binding declares no `type` or because every `type` it binds is emitted by no
+     configured source; (1) names the unemitted **type** and (3) names the **unbound** handler,
+     whereas this names a **bound** handler whose reachable event set is empty;
+  5. an **absent backing command** — a configured source or handler whose backing command the core
+     cannot invoke;
+  6. a **determinably non-terminating re-entry cycle** — a `handler → query → same type` cycle the
+     declared graph shows **cannot** terminate.
+
+  **Exactly one** condition is a **warning** instead: a **re-entry cycle whose termination is not
+  determinable**. A cycle is always detectable, but its termination usually is not, so this case is
+  detectable without being determinably invalid — it **MUST** be reported and **MUST NOT** block the
+  run. **The warning category is closed at one member**: nothing else in this set warns, and it is not
+  a slot held open for later additions. Either a check determines the configuration invalid, and then
+  it blocks, or it determines nothing — and a cycle's undecidable termination is the only such case
+  worth telling the operator about.
+
+  **Run-scoping is not a config defect.** Configuration divides in two: **ordinary configuration** —
+  the participants, bindings and wiring above, which is what validity is judged against — and
+  **temporarily enabling or disabling part of it for a single run** (the **run-scoped selectors**,
+  `STORY-OP-3`), which selects an **active subset** and changes no declaration. Validity **MUST** be
+  judged against the configuration and **MUST NOT** be judged against the run's active subset, so a
+  selector-disabled source or handler leaves the configuration **valid** and is neither an error nor
+  the warning. This is the boundary that keeps "anything determinable MUST prevent startup" from
+  turning an ordinary isolation run into a startup failure.
 
 ## Observability & lifecycle
 
