@@ -12,6 +12,7 @@ import (
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 
+	"github.com/phillipgreenii/pr-pool/internal/core"
 	"github.com/phillipgreenii/pr-pool/internal/eventqueue"
 )
 
@@ -178,6 +179,35 @@ func TestFailureRatePerClass(t *testing.T) {
 	}
 	if got := sumFor(m, "class", "critical"); got != 1 {
 		t.Fatalf("failures[critical] = %d, want 1", got)
+	}
+}
+
+// The Emitter is the core's ingest observer too, so the ingest-time condition
+// INV-DISP-3 requires in metrics can actually be wired to it (core.Options.Observer).
+// The assertion lives in the test so the production import DAG keeps pointing one
+// way — core never depends on metrics, and metrics never depends on core.
+var _ core.IngestObserver = (*Emitter)(nil)
+
+// unknown-type-rejected increments per event type: the metric half of INV-DISP-3's
+// "the condition is recorded to logs and metrics".
+func TestUnknownTypeRejectedPerType(t *testing.T) {
+	h := newHarness(t)
+	h.emitter.OnUnknownTypeRejected("review-abandoned")
+	h.emitter.OnUnknownTypeRejected("review-abandoned")
+	h.emitter.OnUnknownTypeRejected("never-declared")
+
+	m := findMetric(t, h.collect(t), MetricUnknownTypeRejected)
+	if _, ok := m.Data.(metricdata.Sum[int64]); !ok {
+		t.Fatalf("unknown_type_rejected is not a counter: %T", m.Data)
+	}
+	if m.Unit != "{event}" {
+		t.Fatalf("unknown_type_rejected unit = %q, want {event}", m.Unit)
+	}
+	if got := sumFor(m, "type", "review-abandoned"); got != 2 {
+		t.Fatalf("unknown_type_rejected[review-abandoned] = %d, want 2", got)
+	}
+	if got := sumFor(m, "type", "never-declared"); got != 1 {
+		t.Fatalf("unknown_type_rejected[never-declared] = %d, want 1", got)
 	}
 }
 

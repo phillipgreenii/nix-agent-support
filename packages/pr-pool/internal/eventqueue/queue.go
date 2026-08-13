@@ -248,8 +248,11 @@ func (q *Queue) dropFromOrder(id string) {
 // was offered it; holding it for the outstanding attempt is what makes
 // "unconsumed-expired" a GENUINE miss rather than a scheduling artifact
 // (INV-DISP-3). An event no bound listener matches satisfies the second half
-// vacuously and is dropped at expiry, which is exactly the no-binding case
-// INV-DISP-3 describes.
+// vacuously and is dropped at expiry, which is INV-DISP-3's SECOND case — a type
+// a configured binding declares whose binding is inactive this run, expected and
+// neither an error nor a warning. It is NOT the no-binding case: an event whose
+// type no configured binding declares at all is rejected at ingest and never
+// reaches this queue (internal/core's handleIngestEvent).
 //
 // Caller holds q.mu.
 func (q *Queue) retainedLocked(e *entry, now time.Time) bool {

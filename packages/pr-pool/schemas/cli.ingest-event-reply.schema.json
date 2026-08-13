@@ -1,6 +1,6 @@
 {
   "$id": "cli.ingest-event-reply",
-  "title": "INTF-CLI ingest-event reply (accepted count + rejected malformed list)",
+  "title": "INTF-CLI ingest-event reply (accepted count + rejected list: malformed, unknown type, enqueue failure)",
   "type": "object",
   "additionalProperties": false,
   "required": ["schemaVersion", "id", "accepted", "rejected"],

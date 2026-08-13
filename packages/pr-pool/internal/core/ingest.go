@@ -65,28 +65,39 @@ type ingestRequest struct {
 // then validates and enqueues each event, and replies with the accepted count and
 // the per-event `rejected` list (interfaces.md).
 //
-// Semantics that are easy to get wrong, all from interfaces.md / INV-EVT-*:
+// Semantics that are easy to get wrong, all from interfaces.md / INV-DISP-3 /
+// INV-EVT-*:
 //
-//   - An event whose `type` matches NO binding is still ACCEPTED (exit 0). It is
-//     enqueued and dropped unconsumed-expired; visibility comes from the
-//     config-time warning and the unconsumed-expired metric, never from a
-//     rejection here (INV-DISP-3).
+//   - An event whose `type` NO CONFIGURED BINDING DECLARES is REJECTED to the
+//     caller (reason `unknown type: …`, exit 1). It is not enqueued, and the
+//     condition is logged and counted. Pre-runtime validation already blocks
+//     startup on it (INV-WORKFLOW-1), so at runtime it can only mean a source
+//     emitted a `type` its own configuration never declared — an error to report,
+//     never a silent drop (INV-DISP-3).
+//   - An event whose type IS declared but whose binding is merely INACTIVE this
+//     run is ACCEPTED and enqueued. It waits, is offered to nobody, and is dropped
+//     unconsumed-expired (INV-EVT-1, INV-EVT-4) — expected, and neither an error
+//     nor a warning. Validity is judged against the CONFIGURATION, never against
+//     the run's active subset, so this case must never be folded into the one
+//     above.
 //   - A still-retained DUPLICATE id is ACCEPTED too — de-duplication is the core
 //     doing its job, so a source never has to track "did I already emit this"
 //     (INV-EVT-3).
-//   - `rejected` therefore carries only events that could not enter the queue:
+//   - `rejected` therefore carries the events that could not enter the queue —
 //     malformed ones (reason `malformed: …`) and, rarely, a durable-write failure
-//     (reason `enqueue: …`).
+//     (reason `enqueue: …`) — plus the events the core REFUSED to queue because
+//     their type is unknown to the configuration (reason `unknown type: …`).
 //   - The tracking id is echoed, never required to be one the core issued. A push
 //     source mints its own id, so requiring a known id would break push ingest
 //     outright. (The "unknown tracking id ⇒ acknowledged and ignored" rule in
 //     INV-INTF-1 governs callbacks that CORRELATE to a core-issued call; ingest
 //     from a push source is not one.)
 //
-// Exit code: 0 when everything was accepted, 1 when anything was rejected
-// (interfaces.md shows exit 1 carrying a populated `rejected` list). Exit 2
-// (busy) is never returned: the durable queue does not decline ingest, so 2 stays
-// reserved for the common contract's pre-accept busy signal.
+// Exit code: 0 when everything was accepted, 1 when anything was rejected — the
+// exit-1 reply carrying a populated `rejected` list is DEC-WIRE-1's own example
+// (docs/decisions/wire.md, which owns the wire examples). Exit 2 (busy) is never
+// returned: the durable queue does not decline ingest, so 2 stays reserved for the
+// common contract's pre-accept busy signal.
 func (s *Service) handleIngestEvent(stdin io.Reader, stdout io.Writer) int {
 	data, err := io.ReadAll(stdin)
 	if err != nil {
@@ -112,6 +123,22 @@ func (s *Service) handleIngestEvent(stdin io.Reader, stdout io.Writer) int {
 			// Past the schema but not convertible — an unparseable `at`/`expiresAt`,
 			// which a structural schema cannot express (both are just strings to it).
 			reply.Rejected = append(reply.Rejected, rejection{ID: rawEventID(raw), Reason: "malformed: " + err.Error()})
+			continue
+		}
+		if !s.bindings.Declares(evt.Type) {
+			// UNKNOWN TO THE CONFIGURATION (INV-DISP-3's first case): refuse to queue
+			// it and name it in the reply. Queueing it instead would inflate the
+			// unconsumed-expired count with a misconfiguration and leave the "no event
+			// misses" signal unable to mean a genuine miss. This is deliberately NOT
+			// the run-scoped question: a declared type whose binding is disabled this
+			// run falls through to Enqueue below.
+			slog.Error("core: ingest-event rejected an event whose type no configured binding declares",
+				"trackingId", req.ID, "eventId", evt.ID, "type", evt.Type)
+			s.observer().OnUnknownTypeRejected(evt.Type)
+			reply.Rejected = append(reply.Rejected, rejection{
+				ID:     evt.ID,
+				Reason: fmt.Sprintf("unknown type: no configured binding declares %q", evt.Type),
+			})
 			continue
 		}
 		res, err := s.q.Enqueue(evt)

@@ -67,6 +67,17 @@ type Options struct {
 	// queue IS the core's delivery guarantee (INV-EVT-1), so a core without one
 	// could accept an event it cannot keep.
 	Queue *eventqueue.Queue
+	// Bindings is the set of event types the CONFIGURATION declares a binding for
+	// (every binding, including the ones disabled for this run). Required for the
+	// same reason Queue is: it is the core's only way to tell an event type UNKNOWN
+	// to the configuration — which INV-DISP-3 requires it to reject — from one
+	// merely inactive this run, which it must accept. Without it the core would
+	// have to treat every event as one or the other, and either answer breaks the
+	// invariant.
+	Bindings Bindings
+	// Observer receives the ingest-time conditions the core records to metrics
+	// (INV-OBS-1 / INTF-MON). Optional: nil means the conditions are logged only.
+	Observer IngestObserver
 	// Command is the program name baked into the callback strings handed to
 	// participants (default DefaultCommand). Injectable so a test — or a
 	// deployment that installs the binary under another name — hands out a command
@@ -82,12 +93,40 @@ type Service struct {
 	state    conformance.Lifecycle
 	closing  bool
 	q        *eventqueue.Queue
+	bindings Bindings
+	obs      IngestObserver
 	reg      *Registry
 	ln       net.Listener
 	ref      Ref
 	logDir   string
 	command  string
 	inflight sync.WaitGroup
+}
+
+// IngestObserver receives the ingest-time conditions the core records to METRICS,
+// alongside the log line each one already writes (INV-DISP-3 requires both). It is
+// the seam that keeps the metric emitter out of the core: the core states WHAT
+// happened and the deployment's sink decides how it is counted, so no concrete
+// monitoring backend is visible here (INV-OBS-1 / INTF-MON).
+type IngestObserver interface {
+	// OnUnknownTypeRejected fires once per event rejected because no configured
+	// binding declares its `type` — INV-DISP-3's first case, which is an error to
+	// report and never a silent drop.
+	OnUnknownTypeRejected(eventType string)
+}
+
+// noopObserver is what a Service without an Observer uses, so the ingest path
+// never branches on nil.
+type noopObserver struct{}
+
+func (noopObserver) OnUnknownTypeRejected(string) {}
+
+// observer returns the Service's IngestObserver, defaulting to the no-op.
+func (s *Service) observer() IngestObserver {
+	if s.obs == nil {
+		return noopObserver{}
+	}
+	return s.obs
 }
 
 // Listen binds the core's socket under opts.LogDir, mints its auth token, and
@@ -104,6 +143,9 @@ func Listen(opts Options) (*Service, error) {
 	}
 	if opts.Queue == nil {
 		return nil, errors.New("core: Listen requires a Queue (the core's delivery guarantee)")
+	}
+	if opts.Bindings == nil {
+		return nil, errors.New("core: Listen requires Bindings (the configured binding set); without it the core cannot tell an event type unknown to the configuration from one merely inactive this run (INV-DISP-3)")
 	}
 	now := opts.Now
 	if now == nil {
@@ -146,13 +188,15 @@ func Listen(opts Options) (*Service, error) {
 		return nil, err
 	}
 	return &Service{
-		state:   conformance.Starting,
-		q:       opts.Queue,
-		reg:     NewRegistry(now),
-		ln:      ln,
-		ref:     ref,
-		logDir:  opts.LogDir,
-		command: command,
+		state:    conformance.Starting,
+		q:        opts.Queue,
+		bindings: opts.Bindings,
+		obs:      opts.Observer,
+		reg:      NewRegistry(now),
+		ln:       ln,
+		ref:      ref,
+		logDir:   opts.LogDir,
+		command:  command,
 	}, nil
 }
 

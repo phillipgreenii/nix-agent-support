@@ -37,7 +37,10 @@ func startCore(t *testing.T, logDir string, store eventqueue.Store) *core.Servic
 	if err != nil {
 		t.Fatalf("queue: %v", err)
 	}
-	svc, err := core.Listen(core.Options{LogDir: logDir, Queue: q})
+	// The CONFIGURED binding set: the types these tests' fixtures emit. An event of
+	// any other type is unknown to the configuration and the core rejects it
+	// (INV-DISP-3), so a core under test must declare what its fixtures send.
+	svc, err := core.Listen(core.Options{LogDir: logDir, Queue: q, Bindings: core.NewBindings("review-requested", "t")})
 	if err != nil {
 		t.Fatalf("Listen: %v", err)
 	}

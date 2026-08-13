@@ -42,7 +42,7 @@ func newQueue(t *testing.T) *eventqueue.Queue {
 // its Ref. The loop is torn down by the test's cleanup.
 func startService(t *testing.T, logDir string) (*Service, Ref) {
 	t.Helper()
-	svc, err := Listen(Options{LogDir: logDir, Queue: newQueue(t), Command: "pr-pool"})
+	svc, err := Listen(Options{LogDir: logDir, Queue: newQueue(t), Bindings: testBindings(), Command: "pr-pool"})
 	if err != nil {
 		t.Fatalf("Listen: %v", err)
 	}
@@ -77,7 +77,7 @@ func waitStarted(t *testing.T, svc *Service) {
 // record carrying the socket + token.
 func TestListen_PublishesDiscoverableCore(t *testing.T) {
 	dir := shortDir(t)
-	svc, err := Listen(Options{LogDir: dir, Queue: newQueue(t)})
+	svc, err := Listen(Options{LogDir: dir, Queue: newQueue(t), Bindings: testBindings()})
 	if err != nil {
 		t.Fatalf("Listen: %v", err)
 	}
@@ -111,7 +111,7 @@ func TestListen_RefusesASecondLiveCore(t *testing.T) {
 	svc, _ := startService(t, dir)
 	_ = svc
 
-	_, err := Listen(Options{LogDir: dir, Queue: newQueue(t)})
+	_, err := Listen(Options{LogDir: dir, Queue: newQueue(t), Bindings: testBindings()})
 	if !errors.Is(err, ErrAlreadyRunning) {
 		t.Fatalf("second Listen err = %v, want ErrAlreadyRunning", err)
 	}
@@ -137,7 +137,7 @@ func TestListen_RebindsOverAStaleSocket(t *testing.T) {
 		t.Fatalf("stale socket should still exist: %v", err)
 	}
 
-	svc, err := Listen(Options{LogDir: dir, Queue: newQueue(t)})
+	svc, err := Listen(Options{LogDir: dir, Queue: newQueue(t), Bindings: testBindings()})
 	if err != nil {
 		t.Fatalf("Listen over a stale socket: %v", err)
 	}
@@ -153,13 +153,24 @@ func TestListen_RejectsMissingRequirements(t *testing.T) {
 	if _, err := Listen(Options{LogDir: shortDir(t)}); err == nil {
 		t.Fatal("Listen with no Queue succeeded, want an error (the queue IS the delivery guarantee)")
 	}
+	// Without the configured binding set the core cannot tell an event type unknown
+	// to the configuration from one merely inactive this run, and INV-DISP-3 requires
+	// opposite outcomes for the two — so a core is refused rather than started with
+	// that question unanswerable.
+	_, err := Listen(Options{LogDir: shortDir(t), Queue: newQueue(t)})
+	if err == nil {
+		t.Fatal("Listen with no Bindings succeeded, want an error (INV-DISP-3 is unanswerable without them)")
+	}
+	if !strings.Contains(err.Error(), "Bindings") {
+		t.Fatalf("err = %v, want it to name the missing Bindings", err)
+	}
 }
 
 // A socket path over the platform limit must fail with an actionable message, not
 // net.Listen's bare "invalid argument".
 func TestListen_RejectsAnOverlongSocketPath(t *testing.T) {
 	dir := filepath.Join(shortDir(t), strings.Repeat("d", maxSocketPathLen))
-	_, err := Listen(Options{LogDir: dir, Queue: newQueue(t)})
+	_, err := Listen(Options{LogDir: dir, Queue: newQueue(t), Bindings: testBindings()})
 	if err == nil {
 		t.Fatal("Listen with an overlong socket path succeeded, want an error")
 	}
@@ -220,7 +231,7 @@ func TestDiscover_NoRunningCore(t *testing.T) {
 	})
 	t.Run("closed core unpublishes itself", func(t *testing.T) {
 		dir := shortDir(t)
-		svc, err := Listen(Options{LogDir: dir, Queue: newQueue(t)})
+		svc, err := Listen(Options{LogDir: dir, Queue: newQueue(t), Bindings: testBindings()})
 		if err != nil {
 			t.Fatalf("Listen: %v", err)
 		}
@@ -331,7 +342,7 @@ func TestServe_UnknownSubcommand(t *testing.T) {
 // the participant boundary refuses with a diagnostic.
 func TestServe_RefusesOutsideStarted(t *testing.T) {
 	dir := shortDir(t)
-	svc, err := Listen(Options{LogDir: dir, Queue: newQueue(t)})
+	svc, err := Listen(Options{LogDir: dir, Queue: newQueue(t), Bindings: testBindings()})
 	if err != nil {
 		t.Fatalf("Listen: %v", err)
 	}
@@ -359,7 +370,7 @@ func TestServe_RefusesOutsideStarted(t *testing.T) {
 // use-of-closed-connection error.
 func TestAcceptAndClose_OrderlyShutdown(t *testing.T) {
 	dir := shortDir(t)
-	svc, err := Listen(Options{LogDir: dir, Queue: newQueue(t)})
+	svc, err := Listen(Options{LogDir: dir, Queue: newQueue(t), Bindings: testBindings()})
 	if err != nil {
 		t.Fatalf("Listen: %v", err)
 	}

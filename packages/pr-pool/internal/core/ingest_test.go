@@ -34,15 +34,46 @@ func serveIngest(t *testing.T, svc *Service, request string) (map[string]any, in
 	return reply, code
 }
 
+// inactiveThisRunType is a type a configured binding DECLARES while no binding
+// active this run serves it — INV-DISP-3's second case. No listener is ever
+// registered for it, which is what "inactive this run" looks like to the queue.
+const inactiveThisRunType = "declared-but-inactive-this-run"
+
+// testBindings is the CONFIGURED binding set every test core in this package is
+// built with: the types this package's fixtures emit. Any OTHER type is unknown to
+// the configuration and must be rejected (INV-DISP-3), which is what the
+// unknown-type tests rely on.
+func testBindings() Bindings {
+	return NewBindings("review-requested", "t", "t1", "t2", inactiveThisRunType)
+}
+
+// recordingObserver captures the ingest conditions the core reports to metrics, so
+// a test can assert the condition was recorded and not merely logged.
+type recordingObserver struct{ unknownTypes []string }
+
+func (o *recordingObserver) OnUnknownTypeRejected(eventType string) {
+	o.unknownTypes = append(o.unknownTypes, eventType)
+}
+
 // startedService returns a service already in `started` WITHOUT a socket, so the
-// participant boundary can be exercised on its own.
+// participant boundary can be exercised on its own, carrying this package's
+// configured binding set.
 func startedService(t *testing.T) *Service {
 	t.Helper()
+	return startedServiceWith(t, testBindings(), nil)
+}
+
+// startedServiceWith is startedService with the CONFIGURED binding set and the
+// metric observer named explicitly — the two inputs INV-DISP-3's cases turn on.
+func startedServiceWith(t *testing.T, bindings Bindings, obs IngestObserver) *Service {
+	t.Helper()
 	return &Service{
-		state:   conformance.Started,
-		q:       newQueue(t),
-		reg:     NewRegistry(nil),
-		command: "pr-pool",
+		state:    conformance.Started,
+		q:        newQueue(t),
+		bindings: bindings,
+		obs:      obs,
+		reg:      NewRegistry(nil),
+		command:  "pr-pool",
 	}
 }
 
@@ -92,19 +123,124 @@ func TestIngestEvent_AcceptsABatch(t *testing.T) {
 	}
 }
 
-// An event whose type binds to NOTHING is still accepted (INV-DISP-3): it is
-// enqueued and dropped unconsumed-expired — never rejected here.
-func TestIngestEvent_UnboundTypeIsStillAccepted(t *testing.T) {
-	svc := startedService(t) // no listeners registered at all
-	reply, code := serveIngest(t, svc, `{"schemaVersion":"1","id":"trk-1","events":[{"id":"e1","type":"nobody-binds-this"}]}`)
+// INV-DISP-3's FIRST case: no configured binding declares this type, so the core
+// REJECTS the event to the caller — it is not enqueued, the reply names it as
+// rejected, and the condition reaches logs and metrics. The reason string is the
+// one DEC-WIRE-1's rejected example shows.
+func TestIngestEvent_RejectsATypeNoConfiguredBindingDeclares(t *testing.T) {
+	obs := &recordingObserver{}
+	svc := startedServiceWith(t, testBindings(), obs)
+	reply, code := serveIngest(t, svc, `{"schemaVersion":"1","id":"trk-1","events":[{"id":"e1","type":"nobody-declares-this"}]}`)
+
+	if code != conformance.ExitError {
+		t.Fatalf("exit = %d, want 1 for a type no configured binding declares (INV-DISP-3); reply=%v", code, reply)
+	}
+	if err := conformance.Check(IngestReplySchema, reply); err != nil {
+		t.Fatalf("reply failed its own schema: %v", err)
+	}
+	if reply["accepted"] != float64(0) {
+		t.Fatalf("accepted = %v, want 0", reply["accepted"])
+	}
+	rejected := reply["rejected"].([]any)
+	if len(rejected) != 1 {
+		t.Fatalf("rejected = %v, want 1 entry", rejected)
+	}
+	entry := rejected[0].(map[string]any)
+	if entry["id"] != "e1" {
+		t.Fatalf("rejection id = %v, want the event id", entry["id"])
+	}
+	// The wording is the contract's own (DEC-WIRE-1's `rejected` example), and the
+	// `unknown type: ` prefix is what keeps this cause distinguishable from
+	// `malformed: ` and `enqueue: `.
+	if got, want := entry["reason"], `unknown type: no configured binding declares "nobody-declares-this"`; got != want {
+		t.Fatalf("reason = %q, want %q", got, want)
+	}
+	if len(svc.Queue().DepthByType()) != 0 {
+		t.Fatalf("depth = %v, want nothing enqueued — a rejected event MUST NOT enter the queue", svc.Queue().DepthByType())
+	}
+	if len(obs.unknownTypes) != 1 || obs.unknownTypes[0] != "nobody-declares-this" {
+		t.Fatalf("observed unknown types = %v, want the condition recorded once for nobody-declares-this", obs.unknownTypes)
+	}
+}
+
+// DEC-WIRE-1's `rejected` example shape, end to end: one malformed event and one
+// event whose type is unknown to the configuration, in ONE reply — `accepted` 0,
+// exit 1, and the two causes distinguishable by their reason prefixes.
+func TestIngestEvent_RejectedListCarriesBothMalformedAndUnknownType(t *testing.T) {
+	svc := startedService(t)
+	req := `{"schemaVersion":"1","id":"trk-9f2c","events":[
+		{"id":"evt-abc123"},
+		{"id":"evt-def456","type":"review-abandoned"}]}`
+	reply, code := serveIngest(t, svc, req)
+
+	if code != conformance.ExitError {
+		t.Fatalf("exit = %d, want 1; reply=%v", code, reply)
+	}
+	if err := conformance.Check(IngestReplySchema, reply); err != nil {
+		t.Fatalf("reply failed its own schema: %v", err)
+	}
+	if reply["accepted"] != float64(0) {
+		t.Fatalf("accepted = %v, want 0", reply["accepted"])
+	}
+	byID := map[string]string{}
+	for _, r := range reply["rejected"].([]any) {
+		e := r.(map[string]any)
+		byID[e["id"].(string)] = e["reason"].(string)
+	}
+	if got := byID["evt-abc123"]; !strings.HasPrefix(got, "malformed: ") {
+		t.Fatalf("evt-abc123 reason = %q, want a malformed: prefix", got)
+	}
+	if got, want := byID["evt-def456"], `unknown type: no configured binding declares "review-abandoned"`; got != want {
+		t.Fatalf("evt-def456 reason = %q, want %q", got, want)
+	}
+	if len(svc.Queue().DepthByType()) != 0 {
+		t.Fatalf("depth = %v, want nothing enqueued", svc.Queue().DepthByType())
+	}
+}
+
+// INV-DISP-3's SECOND case, and the boundary the whole invariant turns on: a type
+// a configured binding DECLARES but that no binding active this run serves is
+// ACCEPTED and enqueued — it waits, is offered to nobody, and is dropped
+// unconsumed-expired (INV-EVT-1, INV-EVT-4). The identical event, with the
+// identical (empty) set of active listeners, is REJECTED once the CONFIGURATION no
+// longer declares its type — which is what "validity is judged against the
+// configuration, never against the run's active subset" means in code.
+func TestIngestEvent_AcceptsADeclaredTypeNoActiveBindingServes(t *testing.T) {
+	req := `{"schemaVersion":"1","id":"trk-1","events":[{"id":"e1","type":"` + inactiveThisRunType + `"}]}`
+
+	// Declared by the configuration; inactive this run (no listener registered).
+	svc := startedServiceWith(t, NewBindings(inactiveThisRunType), nil)
+	reply, code := serveIngest(t, svc, req)
 	if code != conformance.ExitOK {
-		t.Fatalf("exit = %d, want 0 for an unbound type (INV-DISP-3); reply=%v", code, reply)
+		t.Fatalf("exit = %d, want 0 — a declared type merely inactive this run is accepted (INV-DISP-3); reply=%v", code, reply)
 	}
 	if reply["accepted"] != float64(1) {
 		t.Fatalf("accepted = %v, want 1", reply["accepted"])
 	}
-	if depth := svc.Queue().DepthByType()["nobody-binds-this"]; depth != 1 {
-		t.Fatalf("depth = %d, want the unbound event queued to expire unconsumed", depth)
+	if got := reply["rejected"].([]any); len(got) != 0 {
+		t.Fatalf("rejected = %v, want empty — this case is neither an error nor a warning", got)
+	}
+	if depth := svc.Queue().DepthByType()[inactiveThisRunType]; depth != 1 {
+		t.Fatalf("depth = %d, want 1 — the event must be enqueued and wait", depth)
+	}
+	// Offered to nobody, then dropped unconsumed-expired: the event carries no
+	// `expiresAt`, so its expiry is the core's own now at ingest (INV-EVT-1).
+	if accepted := svc.Queue().Dispatch(); accepted != 0 {
+		t.Fatalf("Dispatch accepted %d, want 0 — no binding active this run serves the type", accepted)
+	}
+	if dropped := svc.Queue().Expire(); dropped != 1 {
+		t.Fatalf("Expire dropped %d, want 1 (unconsumed-expired, INV-EVT-4)", dropped)
+	}
+
+	// Same event, same absence of active listeners — but no configured binding
+	// declares the type, so THIS one is rejected and never enqueued.
+	undeclared := startedServiceWith(t, NewBindings(), nil)
+	reply, code = serveIngest(t, undeclared, req)
+	if code != conformance.ExitError {
+		t.Fatalf("exit = %d, want 1 once the configuration declares no binding for the type; reply=%v", code, reply)
+	}
+	if len(undeclared.Queue().DepthByType()) != 0 {
+		t.Fatalf("depth = %v, want nothing enqueued", undeclared.Queue().DepthByType())
 	}
 }
 
@@ -131,7 +267,7 @@ func TestIngestEvent_DuplicateIsAbsorbedNotRejected(t *testing.T) {
 }
 
 // A batch with one bad event still delivers the good ones, and names the bad one
-// in `rejected` with exit 1 (interfaces.md's rejected example).
+// in `rejected` with exit 1 (DEC-WIRE-1's rejected example, docs/decisions/wire.md).
 func TestIngestEvent_PartialBatchRejectsOnlyTheMalformed(t *testing.T) {
 	svc := startedService(t)
 	// The three faults span both rejection layers: `noType` violates the schema
@@ -270,7 +406,7 @@ func TestIngestEvent_EnqueueFailureIsReported(t *testing.T) {
 	if err != nil {
 		t.Fatalf("queue: %v", err)
 	}
-	svc := &Service{state: conformance.Started, q: q, reg: NewRegistry(nil), command: "pr-pool"}
+	svc := &Service{state: conformance.Started, q: q, bindings: testBindings(), reg: NewRegistry(nil), command: "pr-pool"}
 
 	reply, code := serveIngest(t, svc, oneEventRequest)
 	if code != conformance.ExitError {
