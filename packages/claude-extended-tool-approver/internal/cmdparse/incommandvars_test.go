@@ -79,9 +79,45 @@ func TestInCommandVars_EstablishedBindings(t *testing.T) {
 			want: nil,
 		},
 		{
-			name: "declare/local keep their assignment in Args, not EnvVars",
+			// pg2-ft2hl. `declare` and `typeset` are the SAME builtin and the unflagged
+			// form is a plain shell-variable assignment, so it must resolve exactly like
+			// the bare spelling. The lowering keeps the assignment in Args rather than
+			// EnvVars, and declWrites reads it there — see incommandvars.go's SCOPE.
+			// TestInCommandVars_AssignmentBuiltins covers the forms this one MUST NOT read.
+			name: "declare establishes it",
 			cmd:  `declare WT=/abs/worktree && git status`,
+			want: map[string]string{"WT": "/abs/worktree"},
+		},
+		{
+			name: "typeset establishes it",
+			cmd:  `typeset WT=/abs/worktree && git status`,
+			want: map[string]string{"WT": "/abs/worktree"},
+		},
+		{
+			// DECLINED by operator ruling, reason recorded in assignmentBuiltinReads.
+			name: "local establishes nothing",
+			cmd:  `local WT=/abs/worktree && git status`,
 			want: nil,
+		},
+		{
+			name: "readonly establishes nothing",
+			cmd:  `readonly WT=/abs/worktree && git status`,
+			want: nil,
+		},
+		{
+			// bash's ARRAY form binds a LIST and `$arr` is its FIRST ELEMENT, so reading
+			// the parenthesised text would be a WRONG value. Verified against bash 5.3.9:
+			// `arr=(/a /b); echo "$arr"` prints `/a`.
+			name: "array form is not a scalar literal",
+			cmd:  `arr=(/a /b) && git status`,
+			want: nil,
+		},
+		{
+			// …but a QUOTED paren really is the scalar it looks like:
+			// `WT="(/a /b)"; echo "$WT"` prints `(/a /b)`.
+			name: "a quoted paren is a scalar literal",
+			cmd:  `WT="(/a /b)" && git status`,
+			want: map[string]string{"WT": "(/a /b)"},
 		},
 		{
 			name: "command substitution value is not derived",
@@ -143,6 +179,251 @@ func TestInCommandVars_EstablishedBindings(t *testing.T) {
 				t.Errorf("InCommandVars(%q) = %v, want %v", tt.cmd, got, tt.want)
 			}
 		})
+	}
+}
+
+// TestInCommandVars_AssignmentBuiltins is pg2-ft2hl's table: WHICH assignment-builtin
+// spellings this seam reads, and — the half that matters more — which of them REVOKE a
+// binding an earlier leaf established rather than being skipped.
+//
+// Every "revoked" row is a shape where the value bash ends up holding is NOT the text
+// written down, so keeping the earlier literal would be a CONFIDENTLY WRONG answer, not
+// merely a missing one. Before this bead a `declare` leaf was skipped outright, so
+// `WT=/first && declare -i WT=5+5 && …` kept `/first` while bash had made it `10`.
+//
+// The bash behaviours asserted here were measured against bash 5.3.9 on 2026-08-13 and
+// each is quoted beside the row it justifies.
+func TestInCommandVars_AssignmentBuiltins(t *testing.T) {
+	tests := []struct {
+		name string
+		cmd  string
+		want map[string]string
+	}{
+		// ── READ: the unflagged declare/typeset assignment ──────────────────────────
+		{
+			name: "several names on one declare",
+			cmd:  `declare A=/a B=/b && git status`,
+			want: map[string]string{"A": "/a", "B": "/b"},
+		},
+		{
+			// `declare "WT=/a b"` sets WT to `/a b`; the lowering unquotes the argument,
+			// so the value arrives already stripped and is genuinely literal.
+			name: "a fully quoted declare argument",
+			cmd:  `declare "WT=/a b" && git status`,
+			want: map[string]string{"WT": "/a b"},
+		},
+		{
+			// An UNFLAGGED naked name is a NO-OP for the value:
+			// `WT=/first; declare WT; echo "$WT"` prints `/first`.
+			name: "a naked declare keeps an earlier binding",
+			cmd:  `WT=/first && declare WT && git status`,
+			want: map[string]string{"WT": "/first"},
+		},
+		{
+			// A DIFFERENT name's write leaves this one alone.
+			name: "declare of another name keeps this binding",
+			cmd:  `WT=/first && declare OTHER=/other && git status`,
+			want: map[string]string{"WT": "/first", "OTHER": "/other"},
+		},
+		// ── NOT READ, and REVOKING: the flagged forms ───────────────────────────────
+		{
+			// `declare -i N=5+5; echo "$N"` prints `10` — the value is ARITHMETIC.
+			name: "-i makes the value an arithmetic evaluation",
+			cmd:  `WT=/first && declare -i WT=5+5 && git status`,
+			want: nil,
+		},
+		{
+			// `declare -l L=ABC; echo "$L"` prints `abc` — the value is case-folded.
+			name: "-l case-folds the value",
+			cmd:  `WT=/FIRST && declare -l WT=/ABC && git status`,
+			want: nil,
+		},
+		{
+			// `t=/real; declare -n ref=t; echo "$ref"` prints `/real` — the name is an
+			// ALIAS, so the value is another variable's, never the text.
+			name: "-n makes the name an alias",
+			cmd:  `ref=/first && declare -n ref=target && git status`,
+			want: nil,
+		},
+		{
+			// `WT=/first; declare -u WT; echo "$WT"` still prints `/first`, but the NEXT
+			// assignment case-folds — so a flagged naked name must revoke too.
+			name: "a flagged naked name revokes",
+			cmd:  `WT=/first && declare -u WT && git status`,
+			want: nil,
+		},
+		{
+			// `-r` is `readonly` under another spelling, so it gets readonly's refusal.
+			name: "-r is readonly",
+			cmd:  `declare -r WT=/abs/worktree && git status`,
+			want: nil,
+		},
+		{
+			// `declare -a arr=(/a /b); echo "$arr"` prints `/a`.
+			name: "an array declaration is not its text",
+			cmd:  `arr=/first && declare -a arr=(/a /b) && git status`,
+			want: nil,
+		},
+		{
+			// `--` ends the option list and is refused with every other flag: the
+			// allowlist this seam deliberately does not keep would have to include it.
+			name: "-- is refused like any other flag",
+			cmd:  `declare -- WT=/abs/worktree && git status`,
+			want: nil,
+		},
+		{
+			// A flag-only declare (`declare -f`, `declare -p WT`, `declare -A m`) writes
+			// no value, so it revokes only the names it MENTIONS.
+			name: "a flag-only declare of another name keeps this binding",
+			cmd:  `WT=/first && declare -A m && git status`,
+			want: map[string]string{"WT": "/first"},
+		},
+		// ── NOT READ, and REVOKING: the declined builtins ───────────────────────────
+		{
+			// `local` outside a function is a bash ERROR; inside one the binding dies with
+			// the function. Either way an earlier literal must not survive it.
+			name: "local revokes an earlier binding",
+			cmd:  `WT=/first && local WT=/second && git status`,
+			want: nil,
+		},
+		{
+			// `readonly WT=/x; WT=/y` prints "readonly variable" and fails, so the revoke
+			// rule this file states does not hold for it unchanged.
+			name: "readonly revokes an earlier binding",
+			cmd:  `WT=/first && readonly WT=/second && git status`,
+			want: nil,
+		},
+		{
+			name: "nameref revokes an earlier binding",
+			cmd:  `r=/first && nameref r=t && git status`,
+			want: nil,
+		},
+		// ── NOT READ: an array-element write, whose name is not an identifier ───────
+		{
+			name: "an array-element write revokes its own name only",
+			cmd:  `WT=/first && declare m[a]=1 && git status`,
+			want: map[string]string{"WT": "/first"},
+		},
+		// ── NOT READ: a PREFIX assignment makes the builtin's own write ephemeral ───
+		{
+			// `WT=/first; WT=/x declare WT=/y; echo "$WT"` prints `/first` — the whole
+			// assignment is discarded with the temporary environment. With a DIFFERENT
+			// prefix name it persists (`OTHER=/x declare WT=/y` leaves WT as `/y`), and
+			// this seam does not model which, so it reads neither.
+			name: "a prefix assignment on declare is not read",
+			cmd:  `WT=/x declare WT=/y && git status`,
+			want: nil,
+		},
+		{
+			name: "a prefix assignment of another name is still not read",
+			cmd:  `OTHER=/x declare WT=/y && git status`,
+			want: nil,
+		},
+		{
+			// `export` is a POSIX SPECIAL builtin, so an assignment before it PERSISTS:
+			// `WT=/first; WT=/x export WT=/y; echo "$WT"` prints `/y`. Its own argument is
+			// the later write and wins, which is what the pre-existing lift already did.
+			name: "export is unaffected by the prefix case",
+			cmd:  `WT=/x export WT=/y && git status`,
+			want: map[string]string{"WT": "/y"},
+		},
+		// ── SCOPE: a pipeline stage still writes nothing, whatever the builtin ──────
+		{
+			name: "declare in a pipeline stage establishes nothing",
+			cmd:  `declare WT=/abs/worktree | cat && git status`,
+			want: nil,
+		},
+		{
+			// The pipeline stage's write dies with its subshell, so it cannot revoke
+			// either: bash leaves the earlier binding exactly as it was.
+			name: "declare in a pipeline stage revokes nothing",
+			cmd:  `WT=/first && { declare WT=/second | cat; } && git status`,
+			want: map[string]string{"WT": "/first"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			leaves := Parse(tt.cmd)
+			got := InCommandVars(leaves, len(leaves)-1)
+			if len(got) == 0 && len(tt.want) == 0 {
+				return
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("InCommandVars(%q) = %v, want %v", tt.cmd, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestInCommandVars_AssignmentBuiltinSpellingParity states pg2-ft2hl's acceptance as a
+// RELATION over spellings rather than as a table of verdicts, so it survives any later
+// retuning of WHICH values count as literal.
+//
+// For every value shape:
+//
+//   - `declare X=v` and `typeset X=v` resolve IDENTICALLY to the plain `X=v` — that is
+//     the relief this bead authorizes, and identity (not merely "at least as much") is
+//     what makes the two spellings interchangeable at a hook boundary.
+//   - every DECLINED or FLAGGED spelling resolves to a SUBSET of the plain spelling's
+//     bindings — never a binding the plain form does not have, and never a DIFFERENT
+//     value for a name they share. That is the "no spelling becomes more permissive"
+//     acceptance criterion, stated so that a future implementation of `local` or
+//     `readonly` strengthens the relation instead of breaking the test.
+func TestInCommandVars_AssignmentBuiltinSpellingParity(t *testing.T) {
+	values := []string{
+		"/abs/worktree",    // the literal that resolves
+		"sub/dir",          // a relative literal
+		`"/abs/work tree"`, // a quoted literal
+		"$(mktemp -d)",     // a substitution: never derived
+		"$HOME/x",          // a variable reference: never derived
+		"~/repo",           // a tilde: never a literal path
+		"/abs/work*",       // a glob
+		"(/a /b)",          // bash's array form
+		"",                 // the empty value
+	}
+	resolve := func(cmd string) map[string]string {
+		leaves := Parse(cmd)
+		return InCommandVars(leaves, len(leaves)-1)
+	}
+	for _, v := range values {
+		plain := resolve("WT=" + v + " && git status")
+
+		for _, identical := range []string{"declare", "typeset"} {
+			got := resolve(identical + " WT=" + v + " && git status")
+			if len(got) == 0 && len(plain) == 0 {
+				continue
+			}
+			if !reflect.DeepEqual(got, plain) {
+				t.Errorf("%s WT=%q resolved %v; the plain spelling resolved %v — the two MUST be identical",
+					identical, v, got, plain)
+			}
+		}
+
+		for _, weaker := range []string{
+			"local WT=" + v,
+			"readonly WT=" + v,
+			"nameref WT=" + v,
+			"declare -i WT=" + v,
+			"declare -l WT=" + v,
+			"declare -n WT=" + v,
+			"declare -r WT=" + v,
+			"declare -a WT=" + v,
+			"declare -- WT=" + v,
+			"OTHER=/x declare WT=" + v,
+		} {
+			for name, value := range resolve(weaker + " && git status") {
+				plainValue, inPlain := plain[name]
+				if !inPlain {
+					t.Errorf("%q bound %s=%q, which the plain spelling does not bind at all — that spelling became MORE permissive",
+						weaker, name, value)
+					continue
+				}
+				if plainValue != value {
+					t.Errorf("%q bound %s=%q where the plain spelling binds %q — a spelling MUST NOT resolve to a DIFFERENT value",
+						weaker, name, value, plainValue)
+				}
+			}
+		}
 	}
 }
 
