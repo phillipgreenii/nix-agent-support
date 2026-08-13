@@ -294,9 +294,26 @@ func (r *Rule) evaluateSSH(positionals []string) hookio.RuleResult {
 		return hookio.RuleResult{Decision: hookio.Ask, Reason: "remote command references a secret path", Module: r.Name()}
 	}
 	// The remote command is ordinary shell text, so it is split by the ONE
-	// quote-aware splitter (cmdparse.Parse) rather than a local approximation —
+	// quote-aware splitter (the cmdparse seam) rather than a local approximation —
 	// see splitSegments' obituary below.
-	leaves := cmdparse.Parse(remoteCmd)
+	//
+	// FAIL CLOSED ON AN UNPARSEABLE REMOTE COMMAND. This branch's fall-through is an
+	// APPROVAL: the loop below only ever ESCALATES, so a remote command that yields
+	// NO leaves is approved by default. While cmdparse derived structure by byte
+	// scanning, malformed text still produced a leaf and that leaf still failed the
+	// allowlist; ADR 0039 step 2 made the front end a real grammar, which returns an
+	// EMPTY leaf set for text it cannot parse — so `ssh host 'cat $(curl'` and
+	// `ssh host 'ls -la >&'` would have started auto-approving. This is I1b at a rule
+	// boundary: an empty result is absence of evidence, never evidence of absence.
+	sp := cmdparse.ParseShell(remoteCmd)
+	if sp.Unparseable {
+		return hookio.RuleResult{
+			Decision: hookio.Ask,
+			Reason:   "remote command is not parseable shell (" + sp.Reason + "): it cannot be shown read-only",
+			Module:   r.Name(),
+		}
+	}
+	leaves := sp.Leaves
 	for _, pc := range leaves {
 		if !r.segmentIsReadonly(pc) {
 			return hookio.RuleResult{Decision: hookio.Ask, Reason: "remote command is not a recognized read-only command: " + pc.Raw, Module: r.Name()}

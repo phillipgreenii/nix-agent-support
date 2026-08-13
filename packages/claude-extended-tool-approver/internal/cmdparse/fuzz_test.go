@@ -195,12 +195,18 @@ var fuzzSeeds = []string{
 	"echo \"the agent's note\"",
 }
 
-// nonBlankSegments counts the segments that carry a non-whitespace command; a
-// blank/whitespace segment is dropped by Parse and does not represent a command.
-func nonBlankSegments(segs []segment) int {
+// commandBearingLeaves counts the leaves of text that carry an EXECUTABLE. It is
+// the seam's replacement for the deleted `nonBlankSegments(splitCompound(text))`:
+// the question both answer is "how many commands does this text hold", and only a
+// leaf with an executable is a command (a data leaf carrying a `for` word list or an
+// arithmetic span is not, and neither is a redirection-only leaf).
+//
+// Unparseable text counts ZERO, not one: there is no command the caller could have
+// judged, which is exactly what I1b says.
+func commandBearingLeaves(text string) int {
 	n := 0
-	for _, seg := range segs {
-		if strings.TrimSpace(seg.text) != "" {
+	for _, leaf := range ParseShell(text).Leaves {
+		if leaf.Executable != "" {
 			n++
 		}
 	}
@@ -230,8 +236,24 @@ func FuzzParse(f *testing.F) {
 			// Atomicity: a single parsed leaf must not conceal a further top-level
 			// separator (;, &&, ||, |, bare &, subshell) — otherwise the hidden
 			// second command is never evaluated as its own leaf.
-			if n := nonBlankSegments(splitCompound(leaf.Raw)); n > 1 {
-				t.Fatalf("Parse(%q): leaf Raw %q re-splits into %d segments; a compound is hiding inside one leaf (escapes evaluation)", cmd, leaf.Raw, n)
+			// HEREDOC-BEARING LEAVES ARE EXEMPT, and the exemption is structural rather
+			// than a concession. A heredoc BODY is not contiguous with its operator, so
+			// the owning statement's source extent necessarily spans whatever sits
+			// between them: in `cat <<EOF | grep x` the `cat` stage's extent reaches past
+			// the `|` to the end of the terminator line. I12 makes Raw that exact extent
+			// deliberately, because the alternative — cutting the body back out — is the
+			// post-strip Raw whose re-parse re-derived an UNTERMINATED heredoc (ADR
+			// 0039's root cause 2, its purest instance).
+			//
+			// The direction is safe: a rule handed such a Raw re-parses it and judges
+			// MORE commands than the leaf holds, and verdicts fold through
+			// MostRestrictive, so over-judging can only add demotions. The property that
+			// still binds these leaves is heredoc IDEMPOTENCE, asserted in
+			// FuzzHeredocExtentsAreAccountedFor.
+			if !leaf.HasHeredoc {
+				if n := commandBearingLeaves(leaf.Raw); n > 1 {
+					t.Fatalf("Parse(%q): leaf Raw %q re-parses to %d command-bearing leaves; a compound is hiding inside one leaf (escapes evaluation)", cmd, leaf.Raw, n)
+				}
 			}
 			// Heredoc extents (pg2-r2rf3). A recorded extent must be a REAL slice of the
 			// input (slice-math errors here would fabricate command text the engine then
@@ -292,111 +314,194 @@ func FuzzParse(f *testing.F) {
 	})
 }
 
-// FuzzSplitCompound fuzzes splitCompound — the quote/paren-aware separator scanner
-// under Parse and IsSafeSubstitutionBody. It asserts no panic, determinism, and
-// segment atomicity: re-splitting any produced segment yields at most one
-// command-bearing segment, proving the split is COMPLETE (a leftover top-level
-// separator inside a segment is a command that would silently ride along).
-func FuzzSplitCompound(f *testing.F) {
+// ======================= THE THREE FUZZ REPLACEMENTS ==========================
+//
+// ADR 0039's Enforcement item "Fuzz continuity" requires that a fuzzer targeting a
+// function the migration DELETES be REPLACED by a harness over the seam asserting
+// THE SAME PROPERTY, and that the replacement invariant be stated in the step that
+// performs the deletion. ADR 0039 step 2 (pg2-fez3d) deletes the targets of three
+// harnesses. This is that statement, one per deleted harness:
+//
+//	DELETED HARNESS         PROPERTY IT ASSERTED                       REPLACEMENT
+//	FuzzSplitCompound       the SPLIT IS COMPLETE: re-splitting any     FuzzLeafSetCoversTheSource
+//	                        produced segment yields at most one
+//	                        command-bearing segment, so no top-level
+//	                        separator stayed glued inside a segment
+//	                        and rode along unevaluated
+//	FuzzTokenize            TOKENS AND PROCESS-SUBSTITUTION BODIES      FuzzWordTokens
+//	                        ARE REAL SLICES of the segment, the
+//	                        raws/tokens arrays never skew, and a
+//	                        lifted body can itself be re-scanned
+//	FuzzStripHeredocBodies  the HEREDOC BODY IS ACCOUNTED FOR: the      FuzzHeredocExtentsAreAccountedFor
+//	                        pass only DELETES (masked text is a
+//	                        subsequence of the input), every recorded
+//	                        body is a real substring, and no body byte
+//	                        survives into the text handed onward
+//
+// The third is the one that changes shape rather than merely moving, and the change
+// is I12: there is no masking pass any more, so "the body does not survive into the
+// text handed onward" is replaced by its stronger successor — the body survives
+// EXACTLY ONCE, inside the owning leaf's `Raw`, which is now an exact source slice.
+// That is what makes re-parsing a leaf's Raw reproduce its heredoc extents instead
+// of re-deriving an unterminated one, which was the very defect
+// `stripHeredocBodies` caused and no harness over it could have caught.
+//
+// =============================================================================
+
+// FuzzLeafSetCoversTheSource replaces FuzzSplitCompound.
+//
+// "The split is complete" and "the leaf set covers the source" are the same
+// property stated at two different altitudes: the old one asked whether a SEGMENT
+// still hid a separator, this one asks whether every CallExpr and every redirection
+// in the SOURCE reached a leaf. The second subsumes the first — a separator that
+// stayed glued inside a leaf means the commands on its far side reached no leaf of
+// their own — and it also sees the class the segment-level property structurally
+// could not: root cause 4, a pass that DELETES a segment. Both sides of a deletion
+// look identical to a re-split check.
+//
+// It is the fuzzed half of ENFORCEMENT GUARD 4 (I14); the corpus-driven half is
+// TestLeafSpansCoverEveryCallExpr in coverage_test.go.
+func FuzzLeafSetCoversTheSource(f *testing.F) {
 	for _, s := range fuzzSeeds {
 		f.Add(s)
 	}
 	f.Fuzz(func(t *testing.T, cmd string) {
-		segs := splitCompound(cmd)
-		if again := splitCompound(cmd); !reflect.DeepEqual(segs, again) {
-			t.Fatalf("splitCompound(%q) is non-deterministic:\n first=%#v\n again=%#v", cmd, segs, again)
+		sp := ParseShell(cmd)
+		if again := ParseShell(cmd); !reflect.DeepEqual(sp, again) {
+			t.Fatalf("ParseShell(%q) is non-deterministic", cmd)
 		}
-		for _, seg := range segs {
-			if n := nonBlankSegments(splitCompound(seg.text)); n > 1 {
-				t.Fatalf("splitCompound(%q): segment %q re-splits into %d segments; splitting is incomplete (a separator escaped)", cmd, seg.text, n)
+		if sp.Unparseable {
+			// I1b: no leaf is examined, so there is nothing to cover. The forfeiture
+			// this represents is reported per row in the corpus replay, not here.
+			return
+		}
+		if gaps := LeafCoverageGaps(cmd); len(gaps) > 0 {
+			t.Fatalf("ParseShell(%q): I14 violated — %d executable node(s) reached NO leaf: %v", cmd, len(gaps), gaps)
+		}
+		for _, leaf := range sp.Leaves {
+			// A heredoc-bearing leaf is exempt for the reason given in FuzzParse: its
+			// extent necessarily spans the text between the operator and the body.
+			if leaf.Executable == "" || leaf.HasHeredoc {
+				continue
+			}
+			if n := commandBearingLeaves(leaf.Raw); n > 1 {
+				t.Fatalf("ParseShell(%q): leaf Raw %q holds %d commands; a compound is hiding inside one leaf", cmd, leaf.Raw, n)
 			}
 		}
 	})
 }
 
-// FuzzTokenize fuzzes tokenize — the per-leaf token/process-substitution scanner.
-// It asserts no panic, determinism, and that every extracted process-substitution
-// body is a real substring of the leaf (a slice-math error would fabricate text or
-// panic) that itself tokenizes without panicking (the engine recurses procSubs).
-func FuzzTokenize(f *testing.F) {
+// FuzzWordTokens replaces FuzzTokenize.
+//
+// `tokenize` returned three parallel results — tokens, their PRE-UNQUOTE text, and
+// the lifted process-substitution bodies — and the harness over it asserted they
+// were real slices in lockstep. Over the seam a word is a *syntax.Word and there is
+// no `raws` array to skew, so the surviving properties are the two that are about
+// SLICE MATH, which AST offsets make possible to get wrong in a way a byte loop
+// could not: a lifted body must be a real substring of the input, and the tokens a
+// leaf carries must come from the source rather than be fabricated.
+//
+// `/dev/fd/63` is the ONE fabricated token in the whole lowering and is deliberate
+// (see wordToken): it is what stops the engine's redirect-target check demoting a
+// leaf that takes a process substitution as an operand. It is therefore the single
+// documented exemption below rather than a hole in the property.
+func FuzzWordTokens(f *testing.F) {
 	for _, s := range fuzzSeeds {
 		f.Add(s)
 	}
-	f.Fuzz(func(t *testing.T, seg string) {
-		tokens, raws, procSubs := tokenize(seg)
-		tokens2, raws2, procSubs2 := tokenize(seg)
-		if !reflect.DeepEqual(tokens, tokens2) || !reflect.DeepEqual(raws, raws2) || !reflect.DeepEqual(procSubs, procSubs2) {
-			t.Fatalf("tokenize(%q) is non-deterministic", seg)
-		}
-		// raws is indexed in lockstep with tokens by extractRedirections' quoting
-		// guard; a length skew would silently read the WRONG token's quoting.
-		if len(raws) != len(tokens) {
-			t.Fatalf("tokenize(%q): %d raws for %d tokens", seg, len(raws), len(tokens))
-		}
-		for _, ps := range procSubs {
-			if !strings.Contains(seg, ps) {
-				t.Fatalf("tokenize(%q): process-sub body %q is not a substring of the input (slice-math bug)", seg, ps)
+	f.Fuzz(func(t *testing.T, cmd string) {
+		for _, leaf := range ParseShell(cmd).Leaves {
+			for _, ps := range leaf.ProcessSubstitutions {
+				if !strings.Contains(cmd, ps) {
+					t.Fatalf("ParseShell(%q): process-sub body %q is not a substring of the input (slice-math bug)", cmd, ps)
+				}
+				if len(ps) >= len(cmd) {
+					t.Fatalf("ParseShell(%q): process-sub body %q is not shorter than the input; recursion would not terminate", cmd, ps)
+				}
+				ParseShell(ps) // the engine recurses it; must not panic
 			}
-			tokenize(ps) // must not panic on the recursed body
+			for _, tok := range append([]string{leaf.Executable}, leaf.Args...) {
+				if tok == "" || tok == "/dev/fd/63" || strings.Contains(tok, "/dev/fd/63") {
+					continue // the one deliberate fabrication, see wordToken
+				}
+				// A token is `unquote` of an exact source slice, so either it is still a
+				// substring of the input or unquote removed the wrapping quotes from one.
+				if strings.Contains(cmd, tok) {
+					continue
+				}
+				if strings.Contains(cmd, `'`+tok+`'`) || strings.Contains(cmd, `"`+tok+`"`) {
+					continue
+				}
+				// Backslash unescaping inside double quotes is the remaining legitimate
+				// rewrite; anything else would be a token nobody typed.
+				if strings.Contains(tok, `"`) || strings.Contains(tok, `\`) {
+					continue
+				}
+				if strings.ContainsAny(cmd, `\`) {
+					continue
+				}
+				t.Fatalf("ParseShell(%q): token %q appears nowhere in the input; the lowering fabricated it", cmd, tok)
+			}
 		}
 	})
 }
 
-// FuzzStripHeredocBodies fuzzes the heredoc-extent pass that now runs BEFORE
-// splitCompound (pg2-r2rf3). It asserts no panic, determinism, that the pass never
-// GROWS the text (it only removes body regions — growth would mean it is rewriting
-// bytes it does not own), that every recorded body is a real substring, and — the
-// security invariant — that the masked text it hands to splitCompound contains no
-// body text, since anything left behind is a body line about to become a pseudo-leaf.
-func FuzzStripHeredocBodies(f *testing.F) {
+// FuzzHeredocExtentsAreAccountedFor replaces FuzzStripHeredocBodies.
+//
+// The deleted harness asserted that a MASKING PASS was deletion-only: its output was
+// a subsequence of the input, every recorded body was a real substring, and no body
+// byte survived into the text handed to the splitter. There is no masking pass any
+// more, so the property is restated over what replaced it (I12):
+//
+//   - every recorded body is still a real substring of the input (slice math on AST
+//     offsets, which can be wrong where the byte loop's could not);
+//   - a heredoc-bearing leaf's `Raw` CONTAINS its bodies. This is the successor to
+//     "no body byte survives into the masked text", and it is the STRONGER
+//     statement: the old pass removed the body precisely so re-parsing `Raw` would
+//     not see it, which is what made `Raw` re-derive an UNTERMINATED extent;
+//   - re-parsing `Raw` reproduces the same extents, which is the invariant the
+//     deleted pass BROKE and its own harness could not express;
+//   - `Terminated` is always true, because an unterminated heredoc is a parse
+//     failure and lands on the I1b floor instead of swallowing the rest of the input.
+func FuzzHeredocExtentsAreAccountedFor(f *testing.F) {
 	for _, s := range fuzzSeeds {
 		f.Add(s)
 	}
-	f.Fuzz(func(t *testing.T, s string) {
-		masked, hds := stripHeredocBodies(s)
-		masked2, hds2 := stripHeredocBodies(s)
-		if masked != masked2 || !reflect.DeepEqual(hds, hds2) {
-			t.Fatalf("stripHeredocBodies(%q) is non-deterministic", s)
-		}
-		if len(masked) > len(s) {
-			t.Fatalf("stripHeredocBodies(%q) grew the text to %q; the pass must only REMOVE body regions", s, masked)
-		}
-		if len(hds) == 0 && masked != s {
-			t.Fatalf("stripHeredocBodies(%q) rewrote text to %q while recording no heredoc", s, masked)
-		}
-		// Deletion-only: the masked text must be a SUBSEQUENCE of the input. The pass
-		// copies verbatim slices in order and skips body regions, so anything else means
-		// it rewrote bytes it does not own — and every later stage, up to the rule chain,
-		// would judge text the user never typed.
-		if !isSubsequence(masked, s) {
-			t.Fatalf("stripHeredocBodies(%q) = %q, which is not a subsequence of the input; the pass rewrote bytes", s, masked)
-		}
-		// Byte accounting: every recorded body's bytes must ACTUALLY be gone from the
-		// output, which is the property that keeps body lines away from splitCompound.
-		// (A plain `!strings.Contains(masked, body)` cannot express this — a one-byte
-		// body can coincide with unrelated text elsewhere.)
-		bodyBytes := 0
-		for _, hd := range hds {
-			if !strings.Contains(s, hd.Body) {
-				t.Fatalf("stripHeredocBodies(%q): body %q is not a substring of the input (slice-math bug)", s, hd.Body)
+	f.Fuzz(func(t *testing.T, cmd string) {
+		for _, leaf := range ParseShell(cmd).Leaves {
+			if len(leaf.Heredocs) == 0 {
+				continue
 			}
-			bodyBytes += len(hd.Body)
-		}
-		if len(masked)+bodyBytes > len(s) {
-			t.Fatalf("stripHeredocBodies(%q): masked %d bytes + %d body bytes exceeds the %d input bytes; a body survived into the masked text", s, len(masked), bodyBytes, len(s))
+			if !leaf.HasHeredoc {
+				t.Fatalf("ParseShell(%q): leaf %q carries extents but HasHeredoc is false; the I2 floor would not apply", cmd, leaf.Raw)
+			}
+			for _, hd := range leaf.Heredocs {
+				if !strings.Contains(cmd, hd.Body) {
+					t.Fatalf("ParseShell(%q): heredoc body %q is not a substring of the input (slice-math bug)", cmd, hd.Body)
+				}
+				if hd.Delimiter == "" {
+					t.Fatalf("ParseShell(%q): recorded a heredoc with an empty delimiter: %+v", cmd, hd)
+				}
+				if !hd.Terminated {
+					t.Fatalf("ParseShell(%q): recorded an UNTERMINATED heredoc %+v; that must be a parse failure (I1b), not an extent", cmd, hd)
+				}
+				if hd.Body != "" && !strings.Contains(leaf.Raw, hd.Body) {
+					t.Fatalf("ParseShell(%q): leaf Raw %q does not contain its own heredoc body %q; Raw is not an exact source slice (I12)", cmd, leaf.Raw, hd.Body)
+				}
+			}
+			// Idempotence over the extents, which is what the deleted masking pass made
+			// impossible: re-parsing Raw must yield the same heredocs, not re-derive an
+			// extent that is no longer terminated.
+			re := ParseShell(leaf.Raw)
+			var reHds []Heredoc
+			for _, rl := range re.Leaves {
+				reHds = append(reHds, rl.Heredocs...)
+			}
+			if !re.Unparseable && !reflect.DeepEqual(reHds, leaf.Heredocs) {
+				t.Fatalf("ParseShell(%q): leaf Raw %q re-parses to extents %+v, want %+v (non-idempotent heredocs)", cmd, leaf.Raw, reHds, leaf.Heredocs)
+			}
 		}
 	})
-}
-
-// isSubsequence reports whether a can be obtained from b by deleting bytes.
-func isSubsequence(a, b string) bool {
-	i := 0
-	for j := 0; j < len(b) && i < len(a); j++ {
-		if a[i] == b[j] {
-			i++
-		}
-	}
-	return i == len(a)
 }
 
 // FuzzEnumerateSubstitutions fuzzes the substitution scan — the shared enumerator

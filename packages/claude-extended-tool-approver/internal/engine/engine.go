@@ -162,7 +162,7 @@ func (e *Engine) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 			// read on the prompt; a NoOpinion emits {} and shows nobody a reason, so
 			// it is left alone exactly as the pre-ADR-0043 Abstain path was.
 			if cmd, err := input.BashCommand(); err == nil {
-				if comment := cmdparse.ExtractComment(cmd); comment != "" {
+				if comment := cmdparse.CommandComment(cmd); comment != "" {
 					result.Reason = result.Reason + " (note: " + comment + ")"
 				}
 			}
@@ -216,24 +216,33 @@ func (e *Engine) EvaluateExpression(expr string, stack []hookio.StackFrame, orig
 		}
 	}
 
-	// Strip comments line by line — but NOT inside a heredoc body, where a '#' is
-	// data, not a comment. Stripping there deleted body text, and in an expanding
-	// (unquoted) heredoc that text can be a live `$(...)`, so the injection vanished
-	// before the parser saw it and its Reject was dropped (pg2-r2rf3).
-	cleaned := cmdparse.StripCommentsPreservingHeredocs(expr)
+	// ONE PARSE, through the seam (ADR 0039 step 2, pg2-fez3d). The comment
+	// pre-strip that used to sit here is GONE, not replaced: under
+	// KeepComments(true) a comment is a parser FACT and never appears in a
+	// command's words, so `StripCommentsPreservingHeredocs` — a text pass that had
+	// to be taught where heredoc bodies were, and whose whole reason for existing
+	// was that a '#' inside a body is data (pg2-r2rf3) — has nothing left to do.
+	// The parser is handed the ORIGINAL expr.
+	sp := cmdparse.ParseShell(expr)
+	parsed := sp.Leaves
 
-	// Parse into sub-commands
-	parsed := cmdparse.Parse(cleaned)
-
-	// SHADOW MODE (ADR 0039's Decision, migration step 1). The candidate front end
-	// — one real shell parser behind the cmdparse seam — runs alongside the two
-	// lines above and logs disagreements. The OUTGOING verdict stays authoritative:
-	// LogShadowDisagreement returns nothing, so nothing below can read it. Note the
-	// argument is the ORIGINAL expr, not `cleaned`: the candidate handles comments
-	// as parser facts (KeepComments) and MUST NOT be handed pre-stripped text.
-	cmdparse.LogShadowDisagreement(expr, parsed)
-
-	if len(parsed) == 0 {
+	// I1b — the fail-safe PARSE floor. A whole-command parse failure MUST yield a
+	// non-approving verdict, applied as a MostRestrictive FOLD and never as an early
+	// return: the fold is what keeps the result order-independent, and it is why the
+	// floor is seeded into `mostRestrictive` below instead of returned from here.
+	// This is STRONGER than I1a: no leaf is examined, so any Reject a leaf would
+	// have earned is FORFEITED. Every such row is reported as a forfeiture in the
+	// migration replay (ADR 0039's Consequences, and LOWERING.md's step 2 replay).
+	//
+	// It is also I10: CETA MUST NOT Approve a command the bash parser could not
+	// parse, and where the parser ATTRIBUTED the failure to a dialect the reason
+	// names it — where it did not, the reason reports the failure WITHOUT guessing
+	// at a cause.
+	if !sp.Unparseable && len(parsed) == 0 {
+		// Parsed cleanly and contains no command at all: whitespace, or nothing but
+		// comments. Unchanged behaviour, and deliberately NOT merged with the
+		// unparseable branch — "there is nothing here" and "I could not read this"
+		// are different answers and only the second is a floor.
 		return hookio.RuleResult{Decision: hookio.NoOpinion, Module: "engine"}
 	}
 
@@ -241,6 +250,9 @@ func (e *Engine) EvaluateExpression(expr string, stack []hookio.StackFrame, orig
 	// Seed with Approve — the least-restrictive identity for the fold: an
 	// expression is Approve iff EVERY leaf independently approves.
 	mostRestrictive := hookio.RuleResult{Decision: hookio.Approve, Reason: "all sub-commands approved", Module: "engine"}
+	if sp.Unparseable {
+		mostRestrictive = hookio.MostRestrictive(mostRestrictive, unparseableExpressionFloor(sp))
+	}
 
 	// Running cwd/path-evaluator threaded across leaves so a relative path after
 	// a `cd` resolves against the cd target, not the original cwd (pg2-opclh).
@@ -279,7 +291,7 @@ func (e *Engine) EvaluateExpression(expr string, stack []hookio.StackFrame, orig
 				leafResult = hookio.MostRestrictive(leafResult, e.evaluateHeredocBodies(pc, normalized, stack, origin))
 				judgedLeaf = true
 			}
-			if assignResult, judged := e.evaluateAssignmentOnlyLeaf(pc, currentCWD, cleaned, origin); judged {
+			if assignResult, judged := e.evaluateAssignmentOnlyLeaf(pc, currentCWD, expr, origin); judged {
 				leafResult = hookio.MostRestrictive(leafResult, assignResult)
 				judgedLeaf = true
 			}
@@ -314,7 +326,7 @@ func (e *Engine) EvaluateExpression(expr string, stack []hookio.StackFrame, orig
 			PermissionMode: origin.PermissionMode,
 			HookEventName:  origin.HookEventName,
 			PathEval:       currentPathEval,
-			RootExpression: cleaned,
+			RootExpression: expr,
 		}
 
 		// Evaluate through rule chain
@@ -389,6 +401,36 @@ func (e *Engine) EvaluateExpression(expr string, stack []hookio.StackFrame, orig
 	}
 
 	return mostRestrictive
+}
+
+// unparseableExpressionFloor is the verdict contributed by a WHOLE-COMMAND parse
+// failure — ADR 0039's I1b, which first becomes LIVE in this step (step 1 kept the
+// outgoing verdict, so nothing could reach this).
+//
+// It is STRONGER than I1a's scan floor and the difference is a real cost, stated
+// here rather than buried: I1a fires with the sibling leaves still evaluated, so a
+// Reject one of them earned survives the fold. I1b fires with NO LEAF EXAMINED, so
+// any Reject a leaf would have earned is FORFEITED. That is a movement in the more
+// permissive direction on `Approve < NoOpinion < Ask < Reject` even though it can
+// never reach Approve, which is exactly why ADR 0039's replay gate is worded as "no
+// transition in the LESS-RESTRICTIVE direction" instead of "toward approve", and why
+// every unparseable row is reported INDIVIDUALLY as a forfeiture.
+//
+// I10: the reason names the DIALECT only when the parser itself attributed the
+// failure to one (a syntax.LangError). Where it did not, the reason reports the
+// failure WITHOUT guessing at a cause — CETA receives no shell field in its hook
+// input and can never establish which dialect will run, so a guess would be
+// fabricated provenance on a user-facing prompt.
+//
+// It is FOLDED by the caller through MostRestrictive, never returned early, so the
+// verdict stays order-independent.
+func unparseableExpressionFloor(sp cmdparse.ShellParse) hookio.RuleResult {
+	reason := "unparseable command (" + sp.Reason + "): no leaf could be evaluated (deferred to claude-code)"
+	if sp.Dialect != "" {
+		reason = "unparseable command (" + sp.Reason + "; the construct is valid in " + sp.Dialect +
+			"): no leaf could be evaluated (deferred to claude-code)"
+	}
+	return hookio.RuleResult{Decision: hookio.NoOpinion, Reason: reason, Module: "engine"}
 }
 
 // heredocFloor is the verdict contributed by ANY heredoc- or herestring-bearing leaf.

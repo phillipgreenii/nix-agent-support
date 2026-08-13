@@ -111,7 +111,12 @@ func TestGitDir_Bash(t *testing.T) {
 		{"stat a ref", "stat .git/refs/heads/main", hookio.NoOpinion, true},
 		{"readlink a hook", "readlink .git/hooks/pre-commit", hookio.NoOpinion, true},
 		{"test -e a hook", "[ -e .git/hooks/pre-commit ]", hookio.NoOpinion, true},
-		{"if test -e a hook", "if [ -e .git/hooks/pre-commit ]", hookio.NoOpinion, true},
+		// The fixture carries a COMPLETE `if … fi`. It used to be truncated after the
+		// condition, which the outgoing byte-scanning front end happily split into
+		// keyword pseudo-leaves; a real grammar rejects a loop or conditional with no
+		// terminator, so the truncated form is an I1b parse failure and exercises the
+		// engine's floor rather than this rule's path inference.
+		{"if test -e a hook", "if [ -e .git/hooks/pre-commit ]; then :; fi", hookio.NoOpinion, true},
 		{"wc a ref", "wc -l .git/info/exclude", hookio.NoOpinion, true},
 		{"head a ref", "head -5 .git/HEAD", hookio.NoOpinion, true},
 		{"diff two refs", "diff .git/HEAD /tmp/head", hookio.NoOpinion, true},
@@ -549,8 +554,12 @@ func TestGitDir_BoundPathDirectionFollowsItsUse(t *testing.T) {
 			want: hookio.NoOpinion,
 		},
 		{
+			// The `if` is CLOSED with `fi`, which the corpus row it models of course was.
+			// The truncated fixture was only viable while the front end split keyword
+			// pseudo-leaves out of invalid bash; a real grammar makes it a parse failure,
+			// so leaving it truncated would test the I1b floor instead of this rule.
 			name: "row 184010 shape: bound hook path tested and readlink'd → read (Abstain)",
-			expr: "h=\"$r/.git/hooks/pre-commit\"\nif [ -e \"$h\" ]\nthen echo \"present ($(readlink \"$h\"))\"",
+			expr: "h=\"$r/.git/hooks/pre-commit\"\nif [ -e \"$h\" ]\nthen echo \"present ($(readlink \"$h\"))\"\nfi",
 			want: hookio.NoOpinion,
 		},
 		{

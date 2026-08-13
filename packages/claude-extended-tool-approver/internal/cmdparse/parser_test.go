@@ -210,7 +210,14 @@ func TestHasUnsafeCommandSubstitution(t *testing.T) {
 	}
 }
 
-func TestSplitCompound_BareAmpersand(t *testing.T) {
+// TestParse_BareAmpersandSeparatesCommands replaces TestSplitCompound_BareAmpersand,
+// whose target is deleted in ADR 0039 step 2. The expectations are UNCHANGED and are
+// now asserted on the LEAF SET rather than on segment count — which is the level the
+// verdict is folded at, and which the deleted segment count only stood in for.
+//
+// The `2>&1` / `&>log` / `>&2` rows are the ones that matter: each has to stay ONE
+// command, because a bare `&` really is a separator and these are not it.
+func TestParse_BareAmpersandSeparatesCommands(t *testing.T) {
 	tests := []struct {
 		in   string
 		want int
@@ -224,8 +231,8 @@ func TestSplitCompound_BareAmpersand(t *testing.T) {
 		{"echo done &", 1}, // trailing background & — one command
 	}
 	for _, tt := range tests {
-		if got := len(splitCompound(tt.in)); got != tt.want {
-			t.Errorf("splitCompound(%q) = %d segments, want %d: %#v", tt.in, got, tt.want, splitCompound(tt.in))
+		if got := len(Parse(tt.in)); got != tt.want {
+			t.Errorf("Parse(%q) = %d leaves, want %d: %#v", tt.in, got, tt.want, Parse(tt.in))
 		}
 	}
 }
@@ -643,16 +650,18 @@ func TestParse_Row167529_NoPhantomEnvVars(t *testing.T) {
 // cannot be a dropped one.
 func reachableExecutables(cmd string) []string {
 	var out []string
-	for _, seg := range splitCompound(cmd) {
-		for _, sub := range EnumerateSubstitutions(seg.text) {
+	// Over the seam (ADR 0039 step 2) the per-segment loop is gone with
+	// `splitCompound`: Parse itself yields the leaves, and each leaf's Raw is the
+	// exact source slice the engine hands to the substitution recursion. This walks
+	// exactly what the engine walks.
+	for _, pc := range Parse(cmd) {
+		for _, sub := range EnumerateSubstitutions(pc.Raw) {
 			out = append(out, reachableExecutables(sub.Body)...)
 		}
-		for _, pc := range Parse(seg.text) {
-			if pc.Executable == "" {
-				continue
-			}
-			out = append(out, pc.Executable)
+		if pc.Executable == "" {
+			continue
 		}
+		out = append(out, pc.Executable)
 	}
 	return out
 }
@@ -664,10 +673,11 @@ func reachableExecutables(cmd string) []string {
 // Assert the compound splits into exactly one segment per line and that every
 // executable in the script — including the two `bd` calls inside the substituted
 // jq pipelines — is reachable.
-func TestSplitCompound_Row167529_NoCommandDropped(t *testing.T) {
-	segs := splitCompound(row167529Command)
-	if len(segs) != 3 {
-		t.Errorf("splitCompound(row167529): got %d segments, want 3 (one per line):\n%#v", len(segs), segs)
+func TestParse_Row167529_NoCommandDropped(t *testing.T) {
+	// One leaf per line, asserted on the leaf set rather than on the deleted
+	// splitCompound's segment count. The three lines are two assignments and an echo.
+	if leaves := Parse(row167529Command); len(leaves) != 3 {
+		t.Errorf("Parse(row167529): got %d leaves, want 3 (one per line):\n%s", len(leaves), dumpLeaves(leaves))
 	}
 	want := []string{"bd", "jq", "bd", "jq", "echo"}
 	if got := reachableExecutables(row167529Command); !reflect.DeepEqual(got, want) {
@@ -724,36 +734,38 @@ func TestSplitCompound_QuotedParensInSubstitution(t *testing.T) {
 	}
 }
 
-// TestTokenize_QuotedParensInSubstitution asserts tokenize keeps a $(...) whose
-// single-quoted body contains parens glued into ONE token. The same desync lived
-// in tokenize, where it split the token stream MID-substitution, so
-// extractExecAndArgs picked a command fragment as the executable (or as a
-// NAME=VALUE) instead of the real one.
-func TestTokenize_QuotedParensInSubstitution(t *testing.T) {
-	tests := []struct {
-		name  string
-		input string
-		want  []string
-	}{
-		{
-			name:  "substitution with quoted parens stays one token",
-			input: "x=$(jq -r 'select(.a)' f)",
-			want:  []string{"x=$(jq -r 'select(.a)' f)"},
-		},
-		{
-			name:  "trailing arg after a substitution with quoted parens",
-			input: "echo $(awk 'BEGIN { print (1+2) }') tail",
-			want:  []string{"echo", "$(awk 'BEGIN { print (1+2) }')", "tail"},
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			tokens, _, _ := tokenize(tt.input)
-			if !reflect.DeepEqual(tokens, tt.want) {
-				t.Errorf("tokenize(%q) = %#v, want %#v", tt.input, tokens, tt.want)
-			}
-		})
-	}
+// TestParse_QuotedParensInSubstitutionStayOneToken replaces
+// TestTokenize_QuotedParensInSubstitution, whose target is deleted in ADR 0039
+// step 2. The expectations are UNCHANGED; they are now read off the LEAF, which is
+// where the tokens actually reach a rule.
+//
+// The pg2-3ggxm desync lived in `tokenize`: a single-quoted region inside `$( )`
+// whose body carries parens split the token stream MID-substitution, so
+// `extractExecAndArgs` picked a command FRAGMENT as the executable or as a
+// NAME=VALUE. Over the seam a word is one *syntax.Word because the bash grammar says
+// so, and the assignment lands in `CallExpr.Assigns` rather than being recognised by
+// an '=' in a token.
+func TestParse_QuotedParensInSubstitutionStayOneToken(t *testing.T) {
+	t.Run("substitution with quoted parens stays one assignment value", func(t *testing.T) {
+		leaves := Parse("x=$(jq -r 'select(.a)' f)")
+		if len(leaves) != 1 || len(leaves[0].EnvVars) != 1 {
+			t.Fatalf("Parse = %s, want one leaf with one assignment", dumpLeaves(leaves))
+		}
+		if got, want := leaves[0].EnvVars[0].Raw, "x=$(jq -r 'select(.a)' f)"; got != want {
+			t.Errorf("assignment Raw = %q, want %q", got, want)
+		}
+	})
+	t.Run("trailing arg after a substitution with quoted parens", func(t *testing.T) {
+		leaves := Parse("echo $(awk 'BEGIN { print (1+2) }') tail")
+		if len(leaves) != 1 {
+			t.Fatalf("Parse = %s, want one leaf", dumpLeaves(leaves))
+		}
+		got := append([]string{leaves[0].Executable}, leaves[0].Args...)
+		want := []string{"echo", "$(awk 'BEGIN { print (1+2) }')", "tail"}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("tokens = %#v, want %#v", got, want)
+		}
+	})
 }
 
 // TestIsEnvAssign_NameValidity pins the name-validity guard (pg2-3ggxm layer 1):
@@ -989,7 +1001,11 @@ func TestParse_CloudflaredAccessNoInnerCmd(t *testing.T) {
 	}
 }
 
-func TestExtractComment(t *testing.T) {
+// TestCommandComment replaces TestExtractComment: `ExtractComment`'s byte scan is
+// deleted in ADR 0039 step 2 and `CommandComment` is its seam-side successor. Every
+// expectation is UNCHANGED — a comment is now a parser fact rather than a scan
+// result, and the two must agree on exactly these inputs.
+func TestCommandComment(t *testing.T) {
 	tests := []struct {
 		input string
 		want  string
@@ -1001,33 +1017,26 @@ func TestExtractComment(t *testing.T) {
 		{"cmd", ""},
 	}
 	for _, tt := range tests {
-		got := ExtractComment(tt.input)
+		got := CommandComment(tt.input)
 		if got != tt.want {
-			t.Errorf("ExtractComment(%q) = %q, want %q", tt.input, got, tt.want)
+			t.Errorf("CommandComment(%q) = %q, want %q", tt.input, got, tt.want)
 		}
 	}
 }
 
-func TestStripComment(t *testing.T) {
-	got := StripComment(`curl https://api.example.internal # health check`)
-	want := "curl https://api.example.internal"
-	if got != want {
-		t.Errorf("StripComment(%q) = %q, want %q", "curl https://api.example.internal # health check", got, want)
+// TestCommandComment_NixFlakeRef replaces both TestStripComment_NixFlakeRef and
+// TestExtractComment_NixFlakeRef. `StripComment` is deleted with the per-line comment
+// pass — under KeepComments(true) nothing needs to remove a comment from text,
+// because a comment never reaches a command's words. The surviving assertion is the
+// one that could regress: a '#' glued to a non-separator is NOT a comment, so a nix
+// flake ref keeps its whole argument.
+func TestCommandComment_NixFlakeRef(t *testing.T) {
+	if got := CommandComment("nix build .#myPackage"); got != "" {
+		t.Errorf("CommandComment(%q) = %q, want empty (not a comment)", "nix build .#myPackage", got)
 	}
-}
-
-func TestStripComment_NixFlakeRef(t *testing.T) {
-	got := StripComment("nix build .#myPackage")
-	want := "nix build .#myPackage"
-	if got != want {
-		t.Errorf("StripComment(%q) = %q, want %q", "nix build .#myPackage", got, want)
-	}
-}
-
-func TestExtractComment_NixFlakeRef(t *testing.T) {
-	got := ExtractComment("nix build .#myPackage")
-	if got != "" {
-		t.Errorf("ExtractComment(%q) = %q, want empty (not a comment)", "nix build .#myPackage", got)
+	leaves := Parse("nix build .#myPackage")
+	if len(leaves) != 1 || !reflect.DeepEqual(leaves[0].Args, []string{"build", ".#myPackage"}) {
+		t.Errorf("Parse lost the flake ref: %s", dumpLeaves(leaves))
 	}
 }
 
@@ -1205,9 +1214,23 @@ func TestParse_Redirections(t *testing.T) {
 		{
 			// Liveness is per BYTE, not "the raw token starts with a quote": the
 			// operator here is genuinely unquoted even though the token is not.
+			// The recorded Path CHANGED at ADR 0039 step 2, from `'/tmp/out'` to
+			// `/tmp/out`, and the change CLOSES A LIVE HOLE rather than relaxing
+			// anything. The outgoing tokenizer glued the operator and the target into
+			// ONE token (`>'/tmp/out'`), which `unquote` then declined to touch because
+			// the token was not WHOLLY wrapped, so the quotes rode into
+			// hookio.Redirection.Path. patheval.cleanPath sees a leading `'` as a
+			// RELATIVE path and joins it to the cwd — so `echo pwned >'/etc/passwd'`
+			// resolved INSIDE the project root and was classified PathReadWrite, i.e.
+			// APPROVED, while the spaced spelling `> '/etc/passwd'` was correctly
+			// Rejected. Same write, two verdicts, decided by a space.
+			//
+			// Over the seam the target is a *syntax.Word in its own right, so both
+			// spellings unquote identically and both reach the path check. The
+			// form-dependence is gone and the direction is MORE restrictive.
 			name: "partially quoted target still redirects", command: "echo x >'/tmp/out'",
 			wantExec: "echo", wantArgs: []string{"x"},
-			wantRedirs: []hookio.Redirection{{Operator: ">", Path: "'/tmp/out'", Kind: hookio.RedirectStdout}},
+			wantRedirs: []hookio.Redirection{{Operator: ">", Path: "/tmp/out", Kind: hookio.RedirectStdout}},
 		},
 
 		// tc-xs8x: the operator table modelled only `>`, `>>`, `2>`, `2>>`, `&>`
@@ -1337,8 +1360,17 @@ func TestParse_Redirections(t *testing.T) {
 		{
 			// Brace EXPANSION is unsupported syntax and must not be mistaken for the
 			// `{varname}` descriptor form — a comma is not a variable name.
+			// The expectation CHANGED at ADR 0039 step 2, and bash agrees with the new
+			// one: `>` is a metacharacter, so `cmd {a,b}>x` is the word `{a,b}` plus a
+			// real `>x` redirection (`echo {a,b}>x` writes "a b" into x). The outgoing
+			// grammar could not see that — `isVarName` rejected `{a,b}` as a descriptor
+			// prefix and the whole thing fell through to "ordinary argument", so the
+			// write was NEVER path-checked. Recording it is the MORE restrictive
+			// direction: a redirection to a read-only path now Rejects where it used to
+			// be an unexamined operand.
 			name: "brace expansion is not a descriptor", command: "cmd {a,b}>x",
-			wantExec: "cmd", wantArgs: []string{"{a,b}>x"}, wantRedirs: nil,
+			wantExec: "cmd", wantArgs: []string{"{a,b}"},
+			wantRedirs: []hookio.Redirection{{Operator: ">", Path: "x", Kind: hookio.RedirectStdout}},
 		},
 	}
 	for _, tt := range tests {
@@ -1410,6 +1442,19 @@ func TestParse_ClobberOperatorIsNotAPipe(t *testing.T) {
 // force. The expectation is written as a marker string so a length or offset
 // skew fails visibly — a mask read one byte off would silently mis-classify the
 // operator next to a quote.
+// TestUnquotedMask pins the mask over the seam (ADR 0039 step 2): the inert spans are
+// the AST's quoted / substitution / arithmetic extents, where they used to be the
+// shared byte scanner's state.
+//
+// TWO ROWS CHANGED, and both changed because the OLD rows were not valid bash. “ a
+// `>` b “ and `a $(>) b` have a substitution whose body is a bare `>` — the parser
+// rejects it ("`>` must be followed by a word"), where the byte loop happily marked
+// the region inert without ever reading it. Text that does not parse now reports
+// EVERY byte LIVE, which is the conservative answer for the only caller (rules/ssh's
+// `hasWriteRedirection` uses a false byte solely to DEMOTE a `<`/`>` from operator to
+// literal, so over-reporting live can only keep the stricter verdict). Both rows are
+// kept below in their PARSEABLE form, which is what they were reaching for, plus an
+// explicit row for the fallback.
 func TestUnquotedMask(t *testing.T) {
 	tests := []struct {
 		in   string
@@ -1419,8 +1464,11 @@ func TestUnquotedMask(t *testing.T) {
 		{"a '>' b", "..___.."},
 		{`a ">" b`, "..___.."},
 		{"a >'b'", "...___"},
-		{"a `>` b", "..___.."},
-		{"a $(>) b", "..____.."},
+		{"a `x>y` b", ".._____.."},
+		{"a $(x>y) b", "..______.."},
+		{"a $((1>2)) b", "..________.."},
+		// Unparseable: every byte reports LIVE, which is the conservative fallback.
+		{"a `>` b", "......."},
 	}
 	for _, tt := range tests {
 		t.Run(tt.in, func(t *testing.T) {
@@ -1503,7 +1551,11 @@ func TestParse_BackslashEscapes(t *testing.T) {
 	}
 }
 
-func TestExtractComment_BackslashEscapes(t *testing.T) {
+// TestCommandComment_BackslashEscapes replaces TestExtractComment_BackslashEscapes.
+// Expectations unchanged: an escaped quote inside a double-quoted argument must not
+// desync the comment decision, which the deleted byte scan had to model by hand and
+// the parser models by construction.
+func TestCommandComment_BackslashEscapes(t *testing.T) {
 	tests := []struct {
 		input string
 		want  string
@@ -1512,9 +1564,9 @@ func TestExtractComment_BackslashEscapes(t *testing.T) {
 		{`echo "no comment # inside quotes \""`, ""},
 	}
 	for _, tt := range tests {
-		got := ExtractComment(tt.input)
+		got := CommandComment(tt.input)
 		if got != tt.want {
-			t.Errorf("ExtractComment(%q) = %q, want %q", tt.input, got, tt.want)
+			t.Errorf("CommandComment(%q) = %q, want %q", tt.input, got, tt.want)
 		}
 	}
 }
@@ -1781,10 +1833,17 @@ func TestParse_ForLoop(t *testing.T) {
 			wantExecs: []string{"echo"},
 		},
 		{
-			name:      "incomplete for loop falls through",
+			// CHANGED at ADR 0039 step 2, in the MORE restrictive direction. The
+			// outgoing `resolveLoops` found no `done`, kept the header segments
+			// verbatim, and handed the rule chain two leaves whose executables were the
+			// shell KEYWORDS `for` and `do` — neither of which is a command, so no
+			// argv[0]-keyed rule matched and the expression was judged on nothing. A
+			// loop with no `done` is not valid bash, so it is now a PARSE FAILURE and
+			// the whole expression floors at Abstain (I1b).
+			name:      "incomplete for loop is a parse failure (I1b)",
 			input:     `for f in *.md; do echo "$f"`,
-			wantCount: 2, // "for" and "do" as separate commands (no done found)
-			wantExecs: []string{"for", "do"},
+			wantCount: 0,
+			wantExecs: nil,
 		},
 	}
 	for _, tt := range tests {
@@ -1961,11 +2020,22 @@ func TestParse_PipelineRelation(t *testing.T) {
 		{"a pipe continued over a newline", "a |\nb", []stage{{"a", 0, 0}, {"b", 0, 1}}},
 		// Subshell groups. The whitespace between `)` and `|` must not become a
 		// phantom segment that separates the group from its sink.
+		// BOTH group rows CHANGED at ADR 0039 step 2, and the change REPLACES an
+		// under-approximation with the union of two. A group occupies ONE pipeline
+		// stage and every statement in it shares that stage's stdin and stdout, so all
+		// of them carry the stage's coordinates.
+		//
+		// `(a; b) | c`: the outgoing numbering related only `b` to `c` (its segment
+		// order fell out of splitCompound), so `(cat .git/config; x) | tee f` did not
+		// report `tee` as `cat`'s sink. Now BOTH a and b have c downstream.
+		// `a | (b; c)`: the outgoing related only `b` to `a`, though `a` feeds `c` too.
+		// Now both do. DownstreamStages is only ever used to DEMOTE a leaf whose output
+		// reaches a writer, so more relations can only add demotions.
 		{"pipe out of a group", "(a; b) | c", []stage{
-			{"a", 0, 0}, {"b", 1, 0}, {"c", 1, 1},
+			{"a", 0, 0}, {"b", 0, 0}, {"c", 0, 1},
 		}},
 		{"pipe into a group", "a | (b; c)", []stage{
-			{"a", 0, 0}, {"b", 0, 1}, {"c", 1, 0},
+			{"a", 0, 0}, {"b", 0, 1}, {"c", 0, 1},
 		}},
 		// A loop body reads the pipeline's payload through its condition, so the
 		// `read` must stay the stage downstream of the producer.

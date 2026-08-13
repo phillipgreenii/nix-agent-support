@@ -11,10 +11,12 @@ package cmdparse
 // the parser's *syntax.File to CETA's own ParsedCommand (ADR 0039's Decision,
 // item "Lower to the existing type").
 //
-// STATUS: this file is the CANDIDATE front end running in SHADOW. The outgoing
-// front end — `StripCommentsPreservingHeredocs` then `Parse`, in that order — is
-// still authoritative for every verdict. See shadow.go for the comparison and
-// LOWERING.md in this directory for the per-construct coverage record.
+// STATUS: this file is the AUTHORITATIVE front end (ADR 0039 step 2, pg2-fez3d).
+// `Parse` is a facade over `ParseShell`, the shadow comparison is RETIRED, and the
+// hand-rolled scanners it used to be compared against are DELETED — which is how
+// I8 ("there MUST NOT be a fallback parser") is discharged: there is no second
+// front end left to fall back to. See LOWERING.md in this directory for the
+// per-construct coverage record and the step-by-step replay.
 //
 // The lowering deliberately REUSES the outgoing post-processing that already
 // operates on ParsedCommand rather than on text: `unwrapCommand` (and through it
@@ -28,6 +30,7 @@ package cmdparse
 
 import (
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -118,6 +121,159 @@ func ParseShell(command string) ShellParse {
 	return ShellParse{Leaves: append(lw.leaves, lw.dataLeaves...)}
 }
 
+// ============================================================================
+// ENFORCEMENT GUARD 4 — the I14 leaf-coverage check (ADR 0039's Enforcement item 4).
+//
+// I14: every executed subexpression MUST reach AT LEAST ONE leaf. Executedness is a
+// RUNTIME property (`if false; then rm -rf /; fi`), so the binding form is a STATIC
+// SURROGATE: every `*syntax.CallExpr` in the parsed file, plus every statement
+// carrying redirections or a heredoc, MUST be covered by at least one leaf source
+// span — INCLUDING nodes in UNTAKEN BRANCHES, because CETA cannot know which branch
+// runs and MUST judge every branch that could.
+//
+// COVERAGE, NOT PARTITION. A node is covered when SOME leaf's span contains it;
+// overlap is harmless and deliberately permitted. Leaf verdicts fold through
+// MostRestrictive over the total order `Approve < Abstain < Ask < Reject`, so
+// judging one subexpression under two leaves can only hold the verdict at or above
+// where one leaf alone would put it — it can never make the result less restrictive.
+// Requiring exactly one leaf would also contradict I2, which deliberately permits
+// imprecise per-leaf heredoc attribution.
+//
+// WHY THIS GUARD EXISTS AT ALL. It is the ONLY mechanism that can see ADR 0039's
+// root cause 4 — a pass that DELETES a segment. A differential corpus replay
+// structurally cannot: a segment dropped on BOTH sides of the comparison shows as
+// zero change while the hole persists. The two live auto-approve holes of that class
+// (inventory sites 12 and 13, the loop terminator's redirection and the `for` word
+// list) were found by inspection and adversarial review, not by measurement, which
+// is exactly the gap this closes.
+//
+// It runs against a corpus in TestLeafSpansCoverEveryCallExpr (coverage_test.go) and
+// against fuzzed input in FuzzLeafSetCoversTheSource.
+// ============================================================================
+
+// CoverageGap is one node of I14's static surrogate that reached NO leaf.
+type CoverageGap struct {
+	// Kind is "call", "redirection" or "heredoc-not-floored".
+	Kind string
+	// Text is the node's exact source slice, for the failure message.
+	Text string
+	// Offset is the node's byte offset in the command.
+	Offset int
+}
+
+func (g CoverageGap) String() string {
+	return g.Kind + "@" + strconv.Itoa(g.Offset) + " " + strconv.Quote(g.Text)
+}
+
+// LeafCoverageGaps reports every surrogate node of command that no leaf covers. An
+// empty result is I14 holding for that command.
+//
+// An UNPARSEABLE command returns NO gaps rather than one per node: I1b already
+// floors it with no leaf examined, so there is no leaf set for coverage to be a
+// property of. That forfeiture is reported per row by the migration replay, which is
+// the mechanism ADR 0039 assigns to it — conflating the two would let a parse
+// failure read as a coverage bug.
+func LeafCoverageGaps(command string) []CoverageGap {
+	p, _ := parserPool.Get().(*syntax.Parser)
+	file, err := p.Parse(strings.NewReader(command), "coverage")
+	parserPool.Put(p)
+	if err != nil || file == nil {
+		return nil
+	}
+	lw := &lowering{src: command, pipeSeq: -1}
+	lw.lowerStmtsFresh(file.Stmts)
+
+	spans := append(append([]sourceSpan{}, lw.spans...), lw.dataSpans...)
+	covered := func(from, to syntax.Pos) bool {
+		s := lw.spanOf(from, to)
+		for _, have := range spans {
+			if have.covers(s.lo, s.hi) {
+				return true
+			}
+		}
+		return false
+	}
+	// heredocFloored reports whether SOME leaf covering the node also carries
+	// HasHeredoc. A heredoc extent that reaches a leaf which does not floor is a
+	// SILENT loss of the I2 Abstain floor, which is the same class of defect as the
+	// extent not reaching a leaf at all.
+	heredocFloored := func(from, to syntax.Pos) bool {
+		s := lw.spanOf(from, to)
+		for i, have := range lw.spans {
+			if have.covers(s.lo, s.hi) && lw.leaves[i].HasHeredoc {
+				return true
+			}
+		}
+		return false
+	}
+
+	var gaps []CoverageGap
+	syntax.Walk(file, func(n syntax.Node) bool {
+		switch v := n.(type) {
+		case nil:
+			return false
+
+		case *syntax.CmdSubst, *syntax.ProcSubst:
+			// STOP. A substitution BODY is a separate evaluation: the engine recurses it
+			// through its own ParseShell with a pushed StackFrame, so its CallExprs are
+			// covered by THAT parse's leaves, not by this one's. Descending here would
+			// report every substitution body as an uncovered gap.
+			return false
+
+		case *syntax.CallExpr:
+			if len(v.Args) == 0 && len(v.Assigns) == 0 {
+				return true // an empty call node commands nothing
+			}
+			if !covered(v.Pos(), v.End()) {
+				gaps = append(gaps, CoverageGap{Kind: "call", Text: lw.node(v), Offset: int(v.Pos().Offset())})
+			}
+			return true
+
+		case *syntax.Redirect:
+			if !redirectIsEvaluable(v) {
+				// EXEMPT, mirroring attachRedir's documented drop: `N>&M` duplicates a
+				// descriptor, `N>&-` closes one, and a dangling operator has no target.
+				// None names a path and none creates a file, so the lowering records
+				// nothing for them and there is nothing for a leaf to evaluate. The
+				// exemption is stated in ONE place so the guard and the lowering cannot
+				// drift about which redirections matter.
+				return true
+			}
+			if !covered(v.Pos(), v.End()) {
+				gaps = append(gaps, CoverageGap{Kind: "redirection", Text: lw.node(v), Offset: int(v.OpPos.Offset())})
+				return true
+			}
+			if (v.Op == syntax.Hdoc || v.Op == syntax.DashHdoc || v.Op == syntax.WordHdoc) &&
+				!heredocFloored(v.Pos(), v.End()) {
+				gaps = append(gaps, CoverageGap{Kind: "heredoc-not-floored", Text: lw.node(v), Offset: int(v.OpPos.Offset())})
+			}
+			return true
+		}
+		return true
+	})
+	return gaps
+}
+
+// redirectIsEvaluable reports whether a redirection is one the lowering RECORDS —
+// i.e. one that names a target a rule or the engine could evaluate. It is the single
+// definition guard 4 and `attachRedir` share.
+func redirectIsEvaluable(r *syntax.Redirect) bool {
+	switch r.Op {
+	case syntax.Hdoc, syntax.DashHdoc, syntax.WordHdoc:
+		return true // a heredoc/herestring always owes the I2 floor
+	case syntax.DplIn:
+		return false // `<&M` duplicates for input; no path, no file
+	case syntax.DplOut:
+		// `N>&M` / `N>&-` duplicate or close; `>& FILE` is bash's both-streams write.
+		if r.Word == nil {
+			return false
+		}
+		t := r.Word.Lit()
+		return t != "-" && !isAllDigits(t)
+	}
+	return r.Word != nil && redirCore(r.Op) != ""
+}
+
 // unparseable maps a parser error onto the I1b/I10 floor value, attributing the
 // dialect only when the parser itself did.
 func unparseable(err error) ShellParse {
@@ -151,7 +307,44 @@ type lowering struct {
 	// or test expression. They are DATA — never judged as a command — and carry
 	// PipelineID -1 because they stand in no pipeline.
 	dataLeaves []ParsedCommand
-	pipeSeq    int
+	// spans is the SOURCE EXTENT of every leaf emitted, command and data alike, in
+	// emission order. It is what ENFORCEMENT GUARD 4 (I14) needs and what
+	// `ParsedCommand.Raw` cannot supply: Raw is a TRIMMED slice, so it cannot answer
+	// "does this leaf cover that node's offsets". The spans are recorded here, during
+	// the one walk that produces the leaves, so a leaf can never exist without one.
+	spans []sourceSpan
+	// dataSpans is spans for dataLeaves, in the same order. They are kept separate
+	// because ParseShell appends the data leaves AFTER the command leaves.
+	dataSpans []sourceSpan
+	pipeSeq   int
+}
+
+// sourceSpan is a half-open byte range [lo, hi) into the lowering's source.
+type sourceSpan struct{ lo, hi int }
+
+// covers reports whether s contains the whole of [lo, hi).
+func (s sourceSpan) covers(lo, hi int) bool { return s.lo <= lo && hi <= s.hi }
+
+// spanOf converts a node's positions to a source span, clamped to the source.
+func (lw *lowering) spanOf(from, to syntax.Pos) sourceSpan {
+	lo, hi := int(from.Offset()), int(to.Offset())
+	if lo < 0 {
+		lo = 0
+	}
+	if hi > len(lw.src) {
+		hi = len(lw.src)
+	}
+	if hi < lo {
+		hi = lo
+	}
+	return sourceSpan{lo: lo, hi: hi}
+}
+
+// appendLeaf records a COMMAND leaf together with the source extent it was lowered
+// from. Every append to lw.leaves goes through here so the two stay in lockstep.
+func (lw *lowering) appendLeaf(leaf ParsedCommand, span sourceSpan) {
+	lw.leaves = append(lw.leaves, leaf)
+	lw.spans = append(lw.spans, span)
 }
 
 func (lw *lowering) nextPipelineID() int {
@@ -174,6 +367,30 @@ func (lw *lowering) slice(from, to syntax.Pos) string {
 
 func (lw *lowering) node(n syntax.Node) string { return lw.slice(n.Pos(), n.End()) }
 
+// stmtComment is a leaf's trailing inline comment, with its leading '#' already
+// consumed by the parser and the text trimmed.
+//
+// Comments are PARSER FACTS under KeepComments(true) — that is the entire basis
+// for retiring the per-line comment pass rather than replacing it (ADR 0039's
+// Decision, item "Parser"). syntax attaches BOTH the comments that precede a
+// statement and the one that trails it to the same Stmt.Comments slice, so the
+// TRAILING one is selected by POSITION: its '#' sits after the statement starts.
+//
+// That reproduces the outgoing `ExtractComment(segment)` exactly for the shape it
+// was reached with. A comment on its OWN line before a command was a separate
+// splitCompound segment there, whose StripComment left nothing, so the following
+// leaf carried no comment — and here it is a LEADING comment and is likewise
+// skipped.
+func (lw *lowering) stmtComment(st *syntax.Stmt) string {
+	start := st.Pos()
+	for _, c := range st.Comments {
+		if c.Hash.IsValid() && start.IsValid() && c.Hash.Offset() > start.Offset() {
+			return strings.TrimSpace(c.Text)
+		}
+	}
+	return ""
+}
+
 // stmtRaw is a leaf's Raw: the exact source slice spanning the owning statement,
 // with the trailing separator the statement's extent includes (`;`, `&`, `|&`)
 // and surrounding whitespace removed.
@@ -185,7 +402,90 @@ func (lw *lowering) node(n syntax.Node) string { return lw.slice(n.Pos(), n.End(
 // Raw EQUALITY against a re-parse of the root expression, so a separator present
 // in one and absent in the other would silently break the pipeline relation.
 func (lw *lowering) stmtRaw(st *syntax.Stmt) string {
-	return strings.TrimRight(strings.TrimSpace(lw.node(st)), "&;| \t\n")
+	lo := int(st.Pos().Offset())
+	hi := lw.stmtEndOffset(st)
+	if lo < 0 || lo > len(lw.src) || hi < lo {
+		return ""
+	}
+	return strings.TrimRight(strings.TrimSpace(lw.src[lo:hi]), "&;| \t\n")
+}
+
+// stmtEnd is a statement's TRUE source end: the maximum of what syntax.Stmt.End()
+// reports and EVERY redirection's end.
+//
+// syntax.Stmt.End() consults only `Redirs[len-1]` (and short-circuits on a trailing
+// `;`/`&`), so a HEREDOC that is not the last redirection is excluded from it — and a
+// heredoc's extent runs to the end of its terminator LINE, far past the operator. On
+// `cat <<EOF > /etc/passwd` the last redirection is `> /etc/passwd`, so Stmt.End()
+// stops before the body: `Raw` would be `cat <<EOF > /etc/passwd`, which RE-PARSES to
+// an UNTERMINATED here-document and therefore to NO LEAF AT ALL. That is exactly the
+// defect I12 exists to remove, reintroduced through an off-by-a-redirection.
+//
+// Consequence, stated because it is visible and deliberate: a heredoc body is NOT
+// contiguous with its operator, so a heredoc-bearing statement's source extent
+// necessarily swallows whatever text sits between them — in `cat <<EOF | grep x` the
+// `cat` stage's extent includes `| grep x`. `Raw` is therefore not an atomic
+// single-command slice for such a leaf. That direction is safe (the rule chain
+// re-parses Raw and judges MORE, and verdicts fold through MostRestrictive), and the
+// alternative — cutting the body back out — is the post-strip Raw this migration
+// exists to delete.
+func (lw *lowering) stmtEndOffset(st *syntax.Stmt) int {
+	end := int(stmtEnd(st).Offset())
+	for _, r := range st.Redirs {
+		if e := lw.emptyHeredocEnd(r); e > end {
+			end = e
+		}
+	}
+	if end > len(lw.src) {
+		end = len(lw.src)
+	}
+	return end
+}
+
+// emptyHeredocEnd returns the source offset just past the TERMINATOR LINE of a
+// heredoc whose BODY IS EMPTY, or -1 when r is not that case.
+//
+// `Redirect.End()` is `Hdoc.End()` when there is a body and `Word.End()` otherwise —
+// and an EMPTY body has no Hdoc node at all, so `cat <<EOF\nEOF` reports its end
+// right after the operator word, excluding the terminator line entirely. `Raw` would
+// then be `cat <<EOF`, which re-parses to an UNTERMINATED here-document and therefore
+// to NO LEAF, which is the very failure I12 exists to prevent.
+//
+// The rule is one line of arithmetic over a fact the PARSER established, not a scan
+// for structure: the parser has already decided this heredoc's body is empty, and
+// bash's grammar puts the body after the operator LINE, so the terminator IS the next
+// line. Finding the end is "skip to the next newline, then to the one after it".
+// Nothing here decides where a command begins or ends.
+func (lw *lowering) emptyHeredocEnd(r *syntax.Redirect) int {
+	if r.Op != syntax.Hdoc && r.Op != syntax.DashHdoc {
+		return -1
+	}
+	if r.Hdoc != nil || r.Word == nil {
+		return -1
+	}
+	from := int(r.Word.End().Offset())
+	if from < 0 || from > len(lw.src) {
+		return -1
+	}
+	nl := strings.IndexByte(lw.src[from:], '\n')
+	if nl < 0 {
+		return len(lw.src) // no operator-line newline: the heredoc runs to end of input
+	}
+	rest := from + nl + 1
+	if next := strings.IndexByte(lw.src[rest:], '\n'); next >= 0 {
+		return rest + next + 1
+	}
+	return len(lw.src)
+}
+
+func stmtEnd(st *syntax.Stmt) syntax.Pos {
+	end := st.End()
+	for _, r := range st.Redirs {
+		if re := r.End(); re.IsValid() && (!end.IsValid() || re.Offset() > end.Offset()) {
+			end = re
+		}
+	}
+	return end
 }
 
 // lowerStmtsFresh lowers a top-level statement list, giving each statement its own
@@ -196,21 +496,28 @@ func (lw *lowering) lowerStmtsFresh(stmts []*syntax.Stmt) {
 	}
 }
 
-// lowerStmtList lowers a COMPOUND BODY's statement list. The FIRST statement
-// inherits (pid, idx) so a pipe INTO the compound relates to the stage that
-// actually reads it; the rest get fresh pipelines.
+// lowerStmtList lowers a COMPOUND BODY's statement list, giving EVERY statement the
+// compound's own (pid, idx).
 //
-// RESIDUE, carried over from the outgoing front end unchanged: a compound's LATER
-// stages also read that stdin (`a | (b; c)` feeds c too) and are not related here,
-// so a pipe into a multi-stage compound is an under-approximation. It is the
-// outgoing answer for those stages, never a new one.
+// The compound occupies ONE stage of the surrounding pipeline and every statement in
+// it shares that stage's stdin and stdout, so they all carry the stage's coordinates.
+// `a | (b; c)` feeds BOTH b and c, and `(a; b) | c` means both a and b write to c.
+//
+// This REPLACES the under-approximation both front ends previously carried, and the
+// replacement is in the safe direction. The outgoing front end related only the
+// group's LAST statement to a downstream sink (its segment numbering fell out of
+// splitCompound's order), so `(cat .git/config; x) | tee f` did not report `tee` as
+// `cat`'s sink; step 1's lowering related only the FIRST, which loses the mirror
+// case. Relating all of them is the UNION of the two, and DownstreamStages is only
+// ever used to DEMOTE a leaf whose output reaches a writer — more relations can only
+// add demotions, never remove one.
+//
+// Statements at the SAME index are not stages of each other, which is correct:
+// DownstreamStages requires a strictly greater index, so `b` is not reported as
+// downstream of `a` inside the group.
 func (lw *lowering) lowerStmtList(stmts []*syntax.Stmt, pid, idx int) {
-	for i, st := range stmts {
-		if i == 0 {
-			lw.lowerStmt(st, pid, idx)
-			continue
-		}
-		lw.lowerStmt(st, lw.nextPipelineID(), 0)
+	for _, st := range stmts {
+		lw.lowerStmt(st, pid, idx)
 	}
 }
 
@@ -348,14 +655,14 @@ func (lw *lowering) lowerStmt(st *syntax.Stmt, pid, idx int) {
 		// engine's substitution recursion walks. Judging them as commands (which the
 		// outgoing front end did, yielding executables `[[` and `((`) is what this
 		// deliberately stops.
-		lw.emitDataSpan(lw.node(st.Cmd))
+		lw.emitDataNode(st.Cmd)
 		lw.emitCompoundRedirs(st, pid, idx)
 
 	default:
 		// An unmodelled command type MUST NOT vanish (root cause 4: a pass may
 		// DELETE a segment, so the leaf set stops being a cover). Emitting its source
 		// span as a data leaf keeps I14's coverage while judging nothing.
-		lw.emitDataSpan(lw.node(st.Cmd))
+		lw.emitDataNode(st.Cmd)
 		lw.emitCompoundRedirs(st, pid, idx)
 	}
 }
@@ -375,7 +682,7 @@ func (lw *lowering) lowerLoop(loop syntax.Loop) {
 	// The word list reaches a leaf of its own (pg2-qkecz hole B). It carries ONLY
 	// Raw: it is data, so it has no executable and must never be judged as a
 	// command, but its text can hold a live `$( )` that genuinely executes.
-	lw.emitDataSpan(lw.slice(wi.Items[0].Pos(), wi.Items[len(wi.Items)-1].End()))
+	lw.emitDataSpan(wi.Items[0].Pos(), wi.Items[len(wi.Items)-1].End())
 }
 
 // lowerDecl lowers an assignment builtin — `export`, `declare`, `local`,
@@ -391,6 +698,7 @@ func (lw *lowering) lowerDecl(st *syntax.Stmt, cmd *syntax.DeclClause, pid, idx 
 	leaf := ParsedCommand{
 		Executable:    cmd.Variant.Value,
 		Raw:           lw.stmtRaw(st),
+		Comment:       lw.stmtComment(st),
 		PipelineID:    pid,
 		PipelineIndex: idx,
 	}
@@ -398,7 +706,7 @@ func (lw *lowering) lowerDecl(st *syntax.Stmt, cmd *syntax.DeclClause, pid, idx 
 		leaf.Args = append(leaf.Args, unquote(lw.assignRaw(a)))
 	}
 	lw.attachRedirs(st, &leaf)
-	lw.leaves = append(lw.leaves, unwrapCommand(leaf))
+	lw.appendLeaf(unwrapCommand(leaf), sourceSpan{lo: int(st.Pos().Offset()), hi: lw.stmtEndOffset(st)})
 }
 
 // assignRaw returns an assignment's verbatim source text. A NAKED assignment
@@ -417,6 +725,7 @@ func (lw *lowering) assignRaw(a *syntax.Assign) string {
 func (lw *lowering) lowerCall(st *syntax.Stmt, cmd *syntax.CallExpr, pid, idx int) {
 	leaf := ParsedCommand{
 		Raw:           lw.stmtRaw(st),
+		Comment:       lw.stmtComment(st),
 		PipelineID:    pid,
 		PipelineIndex: idx,
 	}
@@ -443,7 +752,7 @@ func (lw *lowering) lowerCall(st *syntax.Stmt, cmd *syntax.CallExpr, pid, idx in
 		//
 		// It reaches a DATA leaf, the same shape a `for` word list gets: no executable,
 		// so it is never judged as a command, but its Raw is walked for substitutions.
-		lw.emitDataSpan(raw)
+		lw.emitDataSpan(a.Pos(), a.End())
 	}
 	for i, w := range cmd.Args {
 		tok, procSubs := lw.wordToken(w)
@@ -462,11 +771,11 @@ func (lw *lowering) lowerCall(st *syntax.Stmt, cmd *syntax.CallExpr, pid, idx in
 		// command-less-leaf branch evaluates. Dropping it was a live auto-approve
 		// BYPASS (pg2-mtnmb). There is no executable to unwrapCommand.
 		if len(leaf.EnvVars) > 0 || len(leaf.Redirections) > 0 || leaf.HasHeredoc {
-			lw.leaves = append(lw.leaves, leaf)
+			lw.appendLeaf(leaf, sourceSpan{lo: int(st.Pos().Offset()), hi: lw.stmtEndOffset(st)})
 		}
 		return
 	}
-	lw.leaves = append(lw.leaves, unwrapCommand(leaf))
+	lw.appendLeaf(unwrapCommand(leaf), sourceSpan{lo: int(st.Pos().Offset()), hi: lw.stmtEndOffset(st)})
 }
 
 // emitRedirOnly emits a command-less leaf for a statement that is nothing but
@@ -475,7 +784,7 @@ func (lw *lowering) emitRedirOnly(st *syntax.Stmt, pid, idx int) {
 	leaf := ParsedCommand{Raw: lw.stmtRaw(st), PipelineID: pid, PipelineIndex: idx}
 	lw.attachRedirs(st, &leaf)
 	if len(leaf.Redirections) > 0 || leaf.HasHeredoc {
-		lw.leaves = append(lw.leaves, leaf)
+		lw.appendLeaf(leaf, sourceSpan{lo: int(st.Pos().Offset()), hi: lw.stmtEndOffset(st)})
 	}
 }
 
@@ -498,13 +807,13 @@ func (lw *lowering) emitCompoundRedirs(st *syntax.Stmt, pid, idx int) {
 		return
 	}
 	leaf := ParsedCommand{
-		Raw:           strings.TrimSpace(lw.slice(st.Redirs[0].OpPos, st.End())),
+		Raw:           strings.TrimSpace(lw.src[min(int(st.Redirs[0].OpPos.Offset()), len(lw.src)):lw.stmtEndOffset(st)]),
 		PipelineID:    pid,
 		PipelineIndex: idx,
 	}
 	lw.attachRedirs(st, &leaf)
 	if len(leaf.Redirections) > 0 || leaf.HasHeredoc {
-		lw.leaves = append(lw.leaves, leaf)
+		lw.appendLeaf(leaf, sourceSpan{lo: int(st.Redirs[0].OpPos.Offset()), hi: lw.stmtEndOffset(st)})
 	}
 }
 
@@ -514,16 +823,30 @@ func (lw *lowering) emitData(w *syntax.Word) {
 	if w == nil {
 		return
 	}
-	lw.emitDataSpan(lw.node(w))
+	lw.emitDataNode(w)
 }
 
-func (lw *lowering) emitDataSpan(raw string) {
+// emitDataNode is emitDataSpan for a whole node.
+func (lw *lowering) emitDataNode(n syntax.Node) {
+	lw.emitDataSpan(n.Pos(), n.End())
+}
+
+// emitDataSpan records a DATA leaf spanning [from, to) of the source.
+//
+// It takes POSITIONS rather than the sliced text because the leaf's source extent is
+// itself load-bearing: ENFORCEMENT GUARD 4 (I14) asks whether a node's offsets fall
+// inside some leaf's extent, and a data leaf is the only thing covering a `for` word
+// list, a `case` subject or an arithmetic command.
+func (lw *lowering) emitDataSpan(from, to syntax.Pos) {
+	span := lw.spanOf(from, to)
+	raw := lw.slice(from, to)
 	if strings.TrimSpace(raw) == "" {
 		return
 	}
 	// PipelineID -1: a data leaf stands in no pipeline, so it must never be
 	// reported as a stage (tc-vul7).
 	lw.dataLeaves = append(lw.dataLeaves, ParsedCommand{Raw: raw, PipelineID: -1, PipelineIndex: -1})
+	lw.dataSpans = append(lw.dataSpans, span)
 }
 
 // wordToken lowers one *syntax.Word to the token text the outgoing tokenize
@@ -623,6 +946,21 @@ func (lw *lowering) attachRedir(r *syntax.Redirect, leaf *ParsedCommand) {
 	}
 	core := redirCore(r.Op)
 	if core == "" {
+		return
+	}
+	if r.Op == syntax.RdrIn && fd != "" {
+		// `3< f` — an INPUT redirection on an explicit descriptor. The outgoing
+		// `redirectionCore` deliberately restricted a bare `<` to fd == "" and left
+		// `3< f` as two ORDINARY ARGUMENTS, and the reason it gave is a direction
+		// argument this step must not quietly reverse: recording it would convert an
+		// argument into a READ check, and a read check that passes CLEARS the leaf,
+		// so it can flip an abstain into an approve. An input redirection cannot
+		// write, so there is nothing to gain in exchange.
+		//
+		// Parity therefore keeps it OUT of Redirections and puts the operator and its
+		// target back into Args, so the operand is not lost either. Widening the input
+		// family is pg2-x9452's call to make with its own replay, not this step's.
+		leaf.Args = append(leaf.Args, fd+core, target)
 		return
 	}
 	leaf.Redirections = append(leaf.Redirections, hookio.Redirection{
@@ -735,35 +1073,150 @@ func (lw *lowering) heredocBody(r *syntax.Redirect) string {
 	return span[:nl+1]
 }
 
-// NormalizeCommandShell is NormalizeCommand computed through the seam.
+// DELETED, and the deletion is a coverage claim: `NormalizeCommandShell`.
 //
-// It exists because NormalizeCommand is the persisted grouping key for the
-// hook-miss taxonomy, so ANY leaf-set change re-keys historical analysis buckets
-// (ADR 0039's Consequences). Keeping both spellings lets that re-keying be
-// measured before it is adopted rather than discovered afterwards. An unparseable
-// command falls back to the trimmed source, which is what NormalizeCommand
-// already does for a command that yields no executable leaf.
-func NormalizeCommandShell(command, projectRoot, cwd string) string {
-	sp := ParseShell(command)
-	if sp.Unparseable {
-		return strings.TrimSpace(command)
+// It existed only to let step 1 MEASURE the re-keying before adopting it: any
+// leaf-set change re-keys the hook-miss taxonomy's persisted grouping buckets (ADR
+// 0039's Consequences), so both spellings were kept side by side. This step makes
+// `Parse` the seam, so `NormalizeCommand` IS the seam-computed key and the second
+// spelling is a duplicate. The re-keying is now ADOPTED, which
+// TestNormalizeCommand_ReKeyingIsAdopted states as a property rather than as a
+// comparison against a front end that no longer exists.
+
+// CommandComment returns the text of the FIRST bash comment in command, trimmed,
+// or "" when it carries none.
+//
+// It replaces the deleted raw-text `ExtractComment` byte scan (ADR 0039 step 2,
+// pg2-fez3d). Its only caller is the engine's trailing-comment annotation on a
+// GATING verdict — the note a human reads on the prompt — which is handed the whole
+// hook command rather than a lowered leaf, so it needs a TEXT entry point (I7's
+// permanent one).
+//
+// "First anywhere" rather than "first trailing" is the outgoing semantics: the byte
+// scan returned the first unquoted `#` at a word start in the whole command, so a
+// leading comment line won. `File.Last` is consulted too, because a command that is
+// NOTHING but a comment produces no statement to hang it on.
+//
+// An UNPARSEABLE command yields "": a comment is a parser fact and there is no
+// parse, and the annotation is cosmetic — inventing one from a byte scan is exactly
+// the second structure model this migration removes.
+func CommandComment(command string) string {
+	p, _ := parserPool.Get().(*syntax.Parser)
+	file, err := p.Parse(strings.NewReader(command), "command")
+	parserPool.Put(p)
+	if err != nil || file == nil {
+		return ""
 	}
-	parts := make([]string, 0, len(sp.Leaves))
-	for _, lc := range sp.Leaves {
-		if lc.Executable == "" {
-			continue
+	best := -1
+	text := ""
+	consider := func(cs []syntax.Comment) {
+		for _, c := range cs {
+			if !c.Hash.IsValid() {
+				continue
+			}
+			if off := int(c.Hash.Offset()); best < 0 || off < best {
+				best, text = off, c.Text
+			}
 		}
-		exec := NormalizeExecutable(lc.Executable, projectRoot, cwd)
-		if len(lc.Args) > 0 {
-			parts = append(parts, exec+" "+strings.Join(lc.Args, " "))
-		} else {
-			parts = append(parts, exec)
+	}
+	for _, st := range file.Stmts {
+		consider(st.Comments)
+	}
+	consider(file.Last)
+	return strings.TrimSpace(text)
+}
+
+// StripLeadingEnvAssignments returns raw with any leading NAME=VALUE
+// environment-assignment tokens removed, yielding the raw text of the command
+// itself (executable + args + redirections + process/command substitutions).
+//
+// The engine feeds THIS — not the whole leaf — to the substitution recursion, so a
+// substitution inside an env VALUE (the `$(curl evil)` of `FOO=$(curl evil) echo
+// hi`) is NOT recursed there: env-value handling is the classifyExpansion path
+// below, and recursing it here too would double-judge it under a different model.
+//
+// It replaces the deleted `commandStartOffset` byte scan (ADR 0039 step 2,
+// pg2-fez3d), whose whole job was to find the token boundary a real grammar already
+// knows: the assignments are `CallExpr.Assigns` and the command starts at
+// `Args[0]`. The bash array form `FOO=(a b) cmd`, which that scan hand-rolled a
+// paren counter for, is a PARSE ERROR under Variant(LangBash) ("inline variables
+// cannot be arrays") and lands on the fail-closed branch below.
+//
+// FAIL-CLOSED: any shape this cannot resolve — an unparseable text, more than one
+// statement, a non-simple command — returns raw UNCHANGED, so the caller scans MORE
+// text rather than less. Over-scanning can only add a demotion (the engine folds
+// substitution verdicts through MostRestrictive); under-scanning would drop one.
+func StripLeadingEnvAssignments(raw string) string {
+	p, _ := parserPool.Get().(*syntax.Parser)
+	file, err := p.Parse(strings.NewReader(raw), "leaf")
+	parserPool.Put(p)
+	if err != nil || file == nil || len(file.Stmts) != 1 {
+		return raw
+	}
+	call, ok := file.Stmts[0].Cmd.(*syntax.CallExpr)
+	if !ok {
+		return raw
+	}
+	if len(call.Assigns) == 0 {
+		return raw
+	}
+	if len(call.Args) == 0 {
+		return "" // the whole text is env assignments: there is no command portion
+	}
+	off := int(call.Args[0].Pos().Offset())
+	if off < 0 || off > len(raw) {
+		return raw
+	}
+	return raw[off:]
+}
+
+// UnquotedMask returns a byte-parallel mask over s: mask[i] is true exactly when
+// s[i] is a LIVE top-level shell byte — one whose OPERATOR meaning is in force —
+// and false when it is inert because it sits inside a quoted region, a `$( )` or
+// backtick substitution, a process substitution, or an arithmetic expansion.
+//
+// It used to be the shared `shellScanner`'s state exposed as data. Over the seam it
+// is a PARSER FACT: the inert spans are exactly the source extents of
+// *syntax.SglQuoted, *syntax.DblQuoted, *syntax.CmdSubst, *syntax.ProcSubst and
+// *syntax.ArithmExp nodes, which is what the byte loop was approximating. A
+// *syntax.ParamExp is deliberately NOT masked — the byte loop left `${x>y}` live,
+// and keeping a byte live is the conservative direction for every caller.
+//
+// CONSERVATISM, and why the fallback is all-live: the sole remaining caller is
+// rules/ssh's `hasWriteRedirection`, a RULE-side raw-text scanner that ADR 0039's
+// step 5 (pg2-x9452) still owns. It only ever uses a false byte to DEMOTE a `<`/`>`
+// from operator to literal, so over-reporting live bytes can only keep the stricter
+// verdict. Text that does not parse therefore reports EVERY byte live rather than
+// silently reporting none.
+func UnquotedMask(s string) []bool {
+	mask := make([]bool, len(s))
+	for i := range mask {
+		mask[i] = true
+	}
+	p, _ := parserPool.Get().(*syntax.Parser)
+	file, err := p.Parse(strings.NewReader(s), "mask")
+	parserPool.Put(p)
+	if err != nil || file == nil {
+		return mask
+	}
+	syntax.Walk(file, func(n syntax.Node) bool {
+		switch n.(type) {
+		case nil:
+			return false
+		case *syntax.SglQuoted, *syntax.DblQuoted, *syntax.CmdSubst,
+			*syntax.ProcSubst, *syntax.ArithmExp:
+			lo, hi := int(n.Pos().Offset()), int(n.End().Offset())
+			if lo < 0 || hi > len(mask) || hi < lo {
+				return false
+			}
+			for i := lo; i < hi; i++ {
+				mask[i] = false
+			}
+			return false
 		}
-	}
-	if len(parts) == 0 {
-		return strings.TrimSpace(command)
-	}
-	return strings.Join(parts, " && ")
+		return true
+	})
+	return mask
 }
 
 // ============================================================================

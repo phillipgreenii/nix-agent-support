@@ -1,7 +1,6 @@
 package cmdparse
 
 import (
-	"bytes"
 	"go/build"
 	"os"
 	"path/filepath"
@@ -344,17 +343,11 @@ func TestShellParse_UnquoteParity(t *testing.T) {
 					t.Errorf("arg[%d] = %q, want %q", i, got[i], tc.want[i])
 				}
 			}
-			// And the outgoing front end must agree, which is what makes this PARITY
-			// rather than merely a pinned choice.
-			oldLeaves := OutgoingFrontEnd(tc.src)
-			if len(oldLeaves) == 1 {
-				for i := range got {
-					if i < len(oldLeaves[0].Args) && oldLeaves[0].Args[i] != got[i] {
-						t.Errorf("arg[%d] diverges from the outgoing front end: new=%q old=%q",
-							i, got[i], oldLeaves[0].Args[i])
-					}
-				}
-			}
+			// The outgoing front end is DELETED as of ADR 0039 step 2, so parity can no
+			// longer be asserted by running it — it is asserted by REUSE instead: the seam
+			// applies the retained `unquote` to each word's exact source slice (see
+			// wordToken), so there is no second unquoting to diverge from. The mixed case
+			// this migration could have silently changed gets its own test below.
 		})
 	}
 
@@ -510,24 +503,31 @@ func TestShellParse_HeredocDiscriminator(t *testing.T) {
 		}
 	})
 
-	t.Run("body text matches the outgoing front end byte for byte", func(t *testing.T) {
-		for _, src := range []string{
-			"cat <<EOF\nbody line\nEOF",
-			"cat <<-EOF\n\ttabbed\n\tEOF",
-			"cat <<EOF\na\nb\nEOF",
-			"cat <<EOF\nEOF",
-		} {
-			newHD := ParseShell(src).Leaves[0].Heredocs
-			oldLeaves := OutgoingFrontEnd(src)
-			if len(oldLeaves) == 0 || len(oldLeaves[0].Heredocs) != 1 || len(newHD) != 1 {
-				t.Fatalf("%q: extent count differs: old=%v new=%v", src, oldLeaves, newHD)
+	// The outgoing `readHeredocBody` is DELETED as of ADR 0039 step 2, so its bytes
+	// are PINNED here as literals instead of compared against a running copy. These
+	// are the exact values step 1 measured it produce (LOWERING.md's "Heredoc
+	// extents" row: body matches byte for byte, `<<-` included), so the parity claim
+	// survives the deletion as data rather than as a second implementation.
+	t.Run("body text is the outgoing bytes, pinned", func(t *testing.T) {
+		cases := []struct {
+			src, body, delim string
+			stripTabs        bool
+		}{
+			{"cat <<EOF\nbody line\nEOF", "body line\n", "EOF", false},
+			{"cat <<-EOF\n\ttabbed\n\tEOF", "\ttabbed\n", "EOF", true},
+			{"cat <<EOF\na\nb\nEOF", "a\nb\n", "EOF", false},
+			{"cat <<EOF\nEOF", "", "EOF", false},
+		}
+		for _, tc := range cases {
+			hds := ParseShell(tc.src).Leaves[0].Heredocs
+			if len(hds) != 1 {
+				t.Fatalf("%q: want 1 extent, got %d", tc.src, len(hds))
 			}
-			old := oldLeaves[0].Heredocs[0]
-			if old.Body != newHD[0].Body {
-				t.Errorf("%q: body differs: old=%q new=%q", src, old.Body, newHD[0].Body)
+			if hds[0].Body != tc.body {
+				t.Errorf("%q: body = %q, want %q", tc.src, hds[0].Body, tc.body)
 			}
-			if old.Delimiter != newHD[0].Delimiter || old.Quoted != newHD[0].Quoted || old.StripTabs != newHD[0].StripTabs {
-				t.Errorf("%q: extent metadata differs: old=%+v new=%+v", src, old, newHD[0])
+			if hds[0].Delimiter != tc.delim || hds[0].Quoted || hds[0].StripTabs != tc.stripTabs {
+				t.Errorf("%q: extent metadata = %+v", tc.src, hds[0])
 			}
 		}
 	})
@@ -857,78 +857,13 @@ func TestShellParse_UnwrapReuse(t *testing.T) {
 			if sp.Leaves[0].Executable != tc.exec {
 				t.Errorf("executable = %q, want %q", sp.Leaves[0].Executable, tc.exec)
 			}
-			// The outgoing front end must agree — this is parity, not a new choice.
-			old := OutgoingFrontEnd(tc.src)
-			if len(old) == 1 && old[0].Executable != sp.Leaves[0].Executable {
-				t.Errorf("unwrap diverges: new=%q old=%q", sp.Leaves[0].Executable, old[0].Executable)
-			}
+			// Parity with the outgoing front end is asserted by REUSE, not by running it:
+			// `unwrapCommand` (and through it unwrapExecPrefix / unwrapCommandRunner /
+			// liftAssignmentArgs) is the SAME function the outgoing Parse called, applied
+			// to a leaf the seam built. There is no second unwrap to diverge from, which
+			// is why the outgoing comparison could be deleted with the front end.
 		})
 	}
-}
-
-// TestShadowKeepsTheOldVerdict pins that shadow mode cannot influence a decision:
-// the comparison entry point returns nothing, and the outgoing front end's output
-// is not mutated by it.
-func TestShadowKeepsTheOldVerdict(t *testing.T) {
-	expr := "if false; then rm -rf /; fi"
-	old := OutgoingFrontEnd(expr)
-	before := make([]string, len(old))
-	for i, pc := range old {
-		before[i] = LeafKey(pc)
-	}
-	LogShadowDisagreement(expr, old)
-	if len(old) != len(before) {
-		t.Fatalf("shadow mode changed the leaf count")
-	}
-	for i, pc := range old {
-		if LeafKey(pc) != before[i] {
-			t.Errorf("shadow mode mutated leaf %d", i)
-		}
-	}
-}
-
-// TestShadowDisagreementIsLogged pins the other half of the shadow-mode acceptance
-// criterion: disagreements are LOGGED. Without this the comparison could silently
-// no-op and the step would look done while producing no evidence at all.
-//
-// It captures shadowLog rather than the process's stderr, so the assertion is on the
-// message actually emitted and the test does not depend on test-runner plumbing.
-func TestShadowDisagreementIsLogged(t *testing.T) {
-	var buf bytes.Buffer
-	prev := shadowLog
-	shadowLog = &buf
-	defer func() { shadowLog = prev }()
-
-	expr := "if false; then rm -rf /; fi"
-	LogShadowDisagreement(expr, OutgoingFrontEnd(expr))
-	if got := buf.String(); !strings.Contains(got, "shadow-parse disagreement") {
-		t.Fatalf("a known leaf-set change logged nothing; got %q", got)
-	}
-
-	// Agreement must be SILENT, or the log is noise nobody reads and a real
-	// disagreement is invisible in it.
-	buf.Reset()
-	LogShadowDisagreement("echo hi", OutgoingFrontEnd("echo hi"))
-	if buf.Len() != 0 {
-		t.Errorf("agreement must log nothing; got %q", buf.String())
-	}
-}
-
-func TestShadowDiff_DetectsAndCancels(t *testing.T) {
-	t.Run("identical front ends produce no content diff", func(t *testing.T) {
-		for _, src := range []string{"echo hi", "ls -la /tmp", "a && b", "cat f | grep x"} {
-			d := CompareFrontEnds(src)
-			if d.ContentDiffers() {
-				t.Errorf("%q: unexpected disagreement: %s", src, d)
-			}
-		}
-	})
-	t.Run("a known leaf-set change is reported", func(t *testing.T) {
-		d := CompareFrontEnds("if false; then rm -rf /; fi")
-		if !d.ContentDiffers() {
-			t.Error("the if/then leaf-set change must be reported, not silently absorbed")
-		}
-	})
 }
 
 func dumpLeaves(leaves []ParsedCommand) string {
@@ -953,61 +888,57 @@ func contains(hay []string, needle string) bool {
 	return false
 }
 
-// TestNormalizeCommandShell_ReKeying exercises the seam's NormalizeCommand and
-// pins the CONSEQUENCE ADR 0039 records: command-class normalisation is not a rule
-// input, but it IS the persisted grouping key for the hook-miss taxonomy, so any
-// leaf-set change re-keys existing history.
+// TestNormalizeCommand_ReKeyingIsAdopted replaces TestNormalizeCommandShell_ReKeying.
 //
-// The test asserts the two halves that matter. Where the leaf sets agree the key is
-// UNCHANGED, so the bulk of history keeps its bucket; where they differ the key
-// changes in the direction that makes the bucket more accurate — a compound's
-// keyword pseudo-leaves stop appearing in the key and the real commands appear
-// instead. Adopting the new key is a deliberate migration, which is why both
-// spellings exist rather than one being replaced here.
-func TestNormalizeCommandShell_ReKeying(t *testing.T) {
-	t.Run("unchanged where the leaf sets agree", func(t *testing.T) {
-		for _, src := range []string{
-			"ls -la",
-			"git status --porcelain",
-			"cd foo && work",
-			"cd foo\nwork",
-			"cat f | grep x",
-		} {
-			old := NormalizeCommand(src, "", "")
-			neu := NormalizeCommandShell(src, "", "")
-			if old != neu {
-				t.Errorf("%q: key changed unnecessarily: old=%q new=%q", src, old, neu)
+// Step 1 kept TWO spellings of the normaliser — `NormalizeCommand` over the outgoing
+// front end and `NormalizeCommandShell` over the seam — so the re-keying ADR 0039's
+// Consequences records ("any leaf-set change re-keys historical analysis buckets")
+// could be MEASURED before it was adopted rather than discovered afterwards. This
+// step ADOPTS it: `Parse` is the seam, so `NormalizeCommand` computes the new key and
+// `NormalizeCommandShell` was a duplicate of it and is deleted.
+//
+// The consequence is real and is recorded here rather than in a comment: the
+// hook-miss taxonomy's persisted grouping key changes for any command whose leaf set
+// changed. Both halves are pinned — the bulk of history keeps its bucket, and a
+// compound is re-keyed in the direction that makes the bucket ACCURATE.
+func TestNormalizeCommand_ReKeyingIsAdopted(t *testing.T) {
+	t.Run("keys that never involved a compound are unchanged", func(t *testing.T) {
+		cases := map[string]string{
+			"ls -la":                 "ls -la",
+			"git status --porcelain": "git status --porcelain",
+			"cd foo && work":         "cd foo && work",
+			"cd foo\nwork":           "cd foo && work",
+			"cat f | grep x":         "cat f && grep x",
+		}
+		for src, want := range cases {
+			if got := NormalizeCommand(src, "", ""); got != want {
+				t.Errorf("NormalizeCommand(%q) = %q, want %q", src, got, want)
 			}
 		}
 	})
 
 	t.Run("newline and && forms still collapse to one key", func(t *testing.T) {
-		if a, b := NormalizeCommandShell("cd foo && work", "", ""), NormalizeCommandShell("cd foo\nwork", "", ""); a != b {
+		if a, b := NormalizeCommand("cd foo && work", "", ""), NormalizeCommand("cd foo\nwork", "", ""); a != b {
 			t.Errorf("the newline and && spellings must share a key: %q vs %q", a, b)
 		}
 	})
 
-	t.Run("re-keys a compound away from keyword pseudo-leaves", func(t *testing.T) {
-		src := "if false; then rm -rf /; fi"
-		old := NormalizeCommand(src, "", "")
-		neu := NormalizeCommandShell(src, "", "")
-		if old == neu {
-			t.Fatalf("expected the key to change for %q; both = %q", src, old)
+	t.Run("a compound is re-keyed away from keyword pseudo-leaves", func(t *testing.T) {
+		// The outgoing front end keyed this as `if false && then rm -rf / && fi` —
+		// three of whose four "commands" are shell keywords. The new key holds the one
+		// command the compound actually contains.
+		got := NormalizeCommand("if false; then rm -rf /; fi", "", "")
+		if strings.Contains(got, "if ") || strings.Contains(got, "then ") || strings.Contains(got, "fi") {
+			t.Errorf("key %q still carries a keyword pseudo-leaf", got)
 		}
-		if !strings.Contains(old, "if ") {
-			t.Errorf("the outgoing key was expected to carry the `if` pseudo-leaf: %q", old)
-		}
-		if strings.Contains(neu, "if ") || strings.Contains(neu, "then ") {
-			t.Errorf("the new key still carries a keyword pseudo-leaf: %q", neu)
-		}
-		if !strings.Contains(neu, "rm -rf /") {
-			t.Errorf("the new key lost the real command: %q", neu)
+		if !strings.Contains(got, "rm -rf /") || !strings.Contains(got, "false") {
+			t.Errorf("key %q lost a real command", got)
 		}
 	})
 
 	t.Run("an unparseable command falls back to the trimmed source", func(t *testing.T) {
 		src := `  echo "unclosed  `
-		if got, want := NormalizeCommandShell(src, "", ""), strings.TrimSpace(src); got != want {
+		if got, want := NormalizeCommand(src, "", ""), strings.TrimSpace(src); got != want {
 			t.Errorf("got %q, want %q", got, want)
 		}
 	})

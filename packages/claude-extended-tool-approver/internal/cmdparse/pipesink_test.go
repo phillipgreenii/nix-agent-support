@@ -113,7 +113,12 @@ func TestEffectiveExec(t *testing.T) {
 	}{
 		{"ls -la", "ls", 1},
 		{"/usr/bin/ls -la", "ls", 1},
-		{"if [ -e x ]", "[", 3},
+		// `if [ -e x ]` was in this table because the outgoing front end produced a
+		// leaf whose executable was the KEYWORD `if` wrapping a `[` — it is not valid
+		// bash (no `then`, no `fi`) and over the seam it is a parse failure. Replaced
+		// by the SHAPE this row was actually testing, a `[` test command, in a form
+		// that parses.
+		{"[ -e x ]", "[", 3},
 		{"time tee /tmp/x", "tee", 1},
 	}
 	for _, tt := range tests {

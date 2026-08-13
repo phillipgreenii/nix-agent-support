@@ -60,11 +60,12 @@ func TestHeredocBodyIsNeverALeaf(t *testing.T) {
 			command:  "(cat <<EOF\nbody\nEOF\n) && echo hi",
 			wantExec: []string{"cat", "echo"},
 		},
-		{
-			name:     "an UNTERMINATED body swallows the remainder (never re-shredded)",
-			command:  "cat <<EOF\nrm -rf /etc\ngit push --force",
-			wantExec: []string{"cat"},
-		},
+		// An UNTERMINATED heredoc is NOT in this table any more: over the seam it is a
+		// PARSE FAILURE, so it yields no leaf at all rather than a `cat` leaf whose
+		// extent swallowed the remainder. That is I1b and it is the MORE restrictive
+		// answer (the whole expression floors at Abstain instead of being judged on one
+		// leaf), so the case moved to its own assertion below rather than being edited
+		// into a weaker expectation here.
 		{
 			name:     "a `<<` inside a COMMENT opens no heredoc, so the next line survives",
 			command:  "echo hi # cat <<EOF\nrm -rf /etc",
@@ -97,8 +98,46 @@ func TestHeredocBodyIsNeverAnArg(t *testing.T) {
 	if got := leaves[0].Args; len(got) != 0 {
 		t.Errorf("Args = %q, want none (body words must not become operands)", got)
 	}
-	if strings.Contains(leaves[0].Raw, ".git/index") {
-		t.Errorf("Raw = %q still carries body text; rules re-parse Raw and would judge the prose", leaves[0].Raw)
+	// Raw DOES carry the body now, and that is I12 rather than a regression. The
+	// outgoing Raw was POST-STRIP text, so re-parsing it re-derived a heredoc extent
+	// that was no longer terminated (ADR 0039's root cause 2, its purest instance);
+	// ADR 0039's Decision item 4 replaces it with the exact source slice of the owning
+	// statement, body included, which is what makes the re-parse idempotent.
+	//
+	// The assertion this test exists for is the one above — body words must not become
+	// OPERANDS — and it is unchanged. Judging the prose is prevented by the body not
+	// being in Args and by the I2 heredoc floor, not by hiding the text from Raw.
+	if !strings.Contains(leaves[0].Raw, ".git/index") {
+		t.Errorf("Raw = %q dropped the body; I12 requires the exact source slice", leaves[0].Raw)
+	}
+	if !leaves[0].HasHeredoc {
+		t.Error("the leaf must still be heredoc-bearing, or the I2 Abstain floor stops applying")
+	}
+}
+
+// TestHeredocUnterminatedIsAParseFailure is the case lifted out of
+// TestHeredocBodyIsNeverALeaf's table. The outgoing extent pass let an unterminated
+// body swallow the rest of the input and still produced a `cat` leaf; the real
+// grammar rejects the command, so I1b floors the whole expression with NO leaf
+// examined. That is a FORFEITURE — any Reject a leaf would have earned is given up —
+// and it is reported as such in the migration replay rather than presented as a win.
+func TestHeredocUnterminatedIsAParseFailure(t *testing.T) {
+	for _, src := range []string{
+		"cat <<EOF\nrm -rf /etc\ngit push --force",
+		// WITHOUT `<<-` a tab-indented terminator does not terminate, so this is
+		// unterminated too — the contrast case for the `<<-` test below.
+		"cat <<EOF\n\tindented body\n\tEOF\nrm -rf /etc",
+	} {
+		sp := ParseShell(src)
+		if !sp.Unparseable {
+			t.Errorf("ParseShell(%q): want unparseable, got %s", src, dumpLeaves(sp.Leaves))
+		}
+		if len(sp.Leaves) != 0 {
+			t.Errorf("ParseShell(%q): I1b requires NO leaf, got %d", src, len(sp.Leaves))
+		}
+		if sp.Reason == "" {
+			t.Errorf("ParseShell(%q): I10 requires a reason", src)
+		}
 	}
 }
 
@@ -175,15 +214,13 @@ func TestHeredocDashTerminatorIsTabStripped(t *testing.T) {
 		t.Errorf("heredoc = %+v, want terminated with body %q", hd, "\tindented body\n")
 	}
 
-	// The contrast: WITHOUT `<<-` an indented terminator does NOT terminate, so the
-	// body legitimately runs on. Body text still never becomes a leaf.
-	plain := Parse("cat <<EOF\n\tindented body\n\tEOF\nrm -rf /etc")
-	if len(plain) != 1 || plain[0].Executable != "cat" {
-		t.Fatalf("Parse(plain <<EOF with indented terminator) = %#v, want the single `cat` leaf", plain)
-	}
-	if plain[0].Heredocs[0].Terminated {
-		t.Errorf("plain <<EOF must NOT accept a tab-indented terminator")
-	}
+	// The contrast: WITHOUT `<<-` an indented terminator does NOT terminate. The
+	// outgoing pass let the body run on to end of input and still emitted a `cat` leaf
+	// with `Terminated: false`; the real grammar makes it a PARSE FAILURE, so there is
+	// no extent to inspect and no `Terminated` field to be false — an unterminated
+	// heredoc lands on the I1b floor instead. Asserted in
+	// TestHeredocUnterminatedIsAParseFailure, which is why the `<<-` half is what
+	// remains here.
 }
 
 // TestHeredocUnquotedBodiesAreExposedForEvaluation pins the parser's half of the
@@ -333,85 +370,148 @@ func TestHeredocInsideCommandSubstitutionStaysGlued(t *testing.T) {
 	}
 }
 
-// TestStripCommentsPreservingHeredocs pins the second place a heredoc extent has to be
-// respected: the engine's per-LINE comment strip. A '#' inside a body is DATA, and in an
-// expanding heredoc the text after it can be a live `$(...)` — stripping it deleted the
-// injection before the parser could see it, dropping the Reject that should have been
-// raised. Lines OUTSIDE any body must still be stripped exactly as before.
-func TestStripCommentsPreservingHeredocs(t *testing.T) {
+// TestHeredocCommentsInBodiesAreData REPLACES TestStripCommentsPreservingHeredocs,
+// whose target (`StripCommentsPreservingHeredocs`) is deleted in ADR 0039 step 2.
+//
+// The property is unchanged and it is the one that mattered: a '#' inside a heredoc
+// BODY is DATA, and in an EXPANDING (unquoted) heredoc the text after it can be a
+// live `$( )`. Deleting it silently removed the injection before the parser saw it,
+// dropping the Reject that should have been raised (pg2-r2rf3).
+//
+// What changes is that no pass has to be TAUGHT where the bodies are. Under
+// KeepComments(true) a comment is a parser fact and a body is a `Redirect.Hdoc` node,
+// so the property is asserted where it now lives: on the recorded extent the engine
+// recurses, and on the leaf set for lines OUTSIDE any body.
+func TestHeredocCommentsInBodiesAreData(t *testing.T) {
 	tests := []struct {
-		name string
-		in   string
-		want string
+		name     string
+		command  string
+		wantBody string   // the extent handed to the engine's body recursion
+		wantExec []string // and the leaves, so an outside-the-body comment is still not one
 	}{
 		{
-			name: "a '#' inside a body is data, not a comment",
-			in:   "cat <<EOF\n# $(rm -rf /etc)\nEOF",
-			want: "cat <<EOF\n# $(rm -rf /etc)\nEOF",
+			name:     "a '#' inside a body is data, not a comment",
+			command:  "cat <<EOF\n# $(rm -rf /etc)\nEOF",
+			wantBody: "# $(rm -rf /etc)\n",
+			wantExec: []string{"cat"},
 		},
 		{
-			name: "a trailing '#' inside a body is data too",
-			in:   "cat <<EOF\nnote # $(rm -rf /etc)\nEOF",
-			want: "cat <<EOF\nnote # $(rm -rf /etc)\nEOF",
+			name:     "a trailing '#' inside a body is data too",
+			command:  "cat <<EOF\nnote # $(rm -rf /etc)\nEOF",
+			wantBody: "note # $(rm -rf /etc)\n",
+			wantExec: []string{"cat"},
 		},
 		{
-			name: "a shebang body line survives intact",
-			in:   "cat <<'EOF' > script.sh\n#!/bin/sh\necho hi\nEOF",
-			want: "cat <<'EOF' > script.sh\n#!/bin/sh\necho hi\nEOF",
+			name:     "comments OUTSIDE the body are not commands",
+			command:  "echo a # note\ncat <<EOF\n# body\nEOF\necho b # note2",
+			wantBody: "# body\n",
+			wantExec: []string{"echo", "cat", "echo"},
 		},
 		{
-			name: "comments OUTSIDE the body are still stripped",
-			in:   "echo a # note\ncat <<EOF\n# body\nEOF\necho b # note2",
-			want: "echo a\ncat <<EOF\n# body\nEOF\necho b",
+			name:     "a comment on the OPERATOR line is still a comment",
+			command:  "cat <<EOF # note\nbody\nEOF",
+			wantBody: "body\n",
+			wantExec: []string{"cat"},
 		},
 		{
-			name: "a comment on the OPERATOR line is still a comment",
-			in:   "cat <<EOF # note\nbody\nEOF",
-			want: "cat <<EOF\nbody\nEOF",
-		},
-		{
-			name: "no heredoc: identical to the plain per-line strip",
-			in:   "echo a # one\necho b # two",
-			want: "echo a\necho b",
-		},
-		{
-			name: "<<- body and indented terminator both survive",
-			in:   "cat <<-EOF\n\t# body\n\tEOF\necho b # note",
-			want: "cat <<-EOF\n\t# body\n\tEOF\necho b",
+			name:     "<<- body and indented terminator both survive",
+			command:  "cat <<-EOF\n\t# body\n\tEOF\necho b # note",
+			wantBody: "\t# body\n",
+			wantExec: []string{"cat", "echo"},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := StripCommentsPreservingHeredocs(tt.in); got != tt.want {
-				t.Errorf("StripCommentsPreservingHeredocs(%q)\n got %q\nwant %q", tt.in, got, tt.want)
+			leaves := Parse(tt.command)
+			var execs []string
+			var bodies []string
+			for _, pc := range leaves {
+				execs = append(execs, pc.Executable)
+				bodies = append(bodies, pc.UnquotedHeredocBodies()...)
+			}
+			if !reflect.DeepEqual(execs, tt.wantExec) {
+				t.Fatalf("Parse(%q) executables = %q, want %q", tt.command, execs, tt.wantExec)
+			}
+			if len(bodies) != 1 || bodies[0] != tt.wantBody {
+				t.Fatalf("exposed bodies = %q, want exactly [%q] — the '#' must survive into the body the engine recurses", bodies, tt.wantBody)
 			}
 		})
 	}
+
+	// A SHEBANG body line under a QUOTED delimiter is literal, so it is exposed to
+	// nothing at all — and it must still not be mistaken for a comment-stripped
+	// fragment or a command.
+	t.Run("a shebang body line under a quoted delimiter survives and executes nothing", func(t *testing.T) {
+		leaves := Parse("cat <<'EOF' > script.sh\n#!/bin/sh\necho hi\nEOF")
+		if len(leaves) != 1 || leaves[0].Executable != "cat" {
+			t.Fatalf("Parse = %#v, want the single `cat` leaf", leaves)
+		}
+		if got := leaves[0].UnquotedHeredocBodies(); got != nil {
+			t.Errorf("a <<'EOF' body must be exposed to nothing; got %q", got)
+		}
+		if body := leaves[0].Heredocs[0].Body; body != "#!/bin/sh\necho hi\n" {
+			t.Errorf("Body = %q, want the shebang and the echo verbatim", body)
+		}
+	})
 }
 
-// TestStripHeredocBodiesPreservesNonHeredocText guards the extent pass against
-// rewriting text it does not own: anything without a heredoc must come through byte
-// for byte, or every other parser stage is fed a mutated command.
-func TestStripHeredocBodiesPreservesNonHeredocText(t *testing.T) {
+// TestNonHeredocTextRecordsNoExtent REPLACES
+// TestStripHeredocBodiesPreservesNonHeredocText, whose target
+// (`stripHeredocBodies`) is deleted in ADR 0039 step 2.
+//
+// The old property was "the masking pass must not rewrite text it does not own",
+// which only had meaning while a pass rewrote text. Its SURVIVING half is the one
+// that was ever security-relevant: a `<<` that is NOT a heredoc operator — inside
+// quotes, inside a comment, inside arithmetic, part of a herestring — must record no
+// extent, because a phantom extent swallows the commands that follow it.
+//
+// The successor to "the text came through byte for byte" is I12: every leaf's Raw is
+// an exact SLICE of the source, which is asserted here directly.
+func TestNonHeredocTextRecordsNoExtent(t *testing.T) {
 	for _, s := range []string{
 		"git status",
 		"cat file | grep foo",
 		`find /tmp -type f \( -name "*.nix" \) 2>/dev/null`,
 		"echo $((1<<2))",
-		"cat <<<\"word\"",
 		"echo '<<EOF'",
 		"echo \"a<<b\"",
 		"x=$(jq -r 'select(.a)' f) ; rm -rf /etc",
 		"echo hi # <<EOF",
 		"cat < /tmp/in",
-		"a << ; echo hi",
 	} {
-		got, hds := stripHeredocBodies(s)
-		if got != s {
-			t.Errorf("stripHeredocBodies(%q) rewrote text to %q", s, got)
-		}
-		if len(hds) != 0 {
-			t.Errorf("stripHeredocBodies(%q) found %d heredocs, want 0: %+v", s, len(hds), hds)
-		}
+		t.Run(s, func(t *testing.T) {
+			for _, pc := range Parse(s) {
+				if len(pc.Heredocs) != 0 || pc.HasHeredoc {
+					t.Errorf("Parse(%q): leaf %q recorded a phantom heredoc %+v", s, pc.Raw, pc.Heredocs)
+				}
+				if pc.Raw != "" && !strings.Contains(s, pc.Raw) {
+					t.Errorf("Parse(%q): leaf Raw %q is not a slice of the source (I12)", s, pc.Raw)
+				}
+			}
+		})
 	}
+
+	// The herestring is separated out because it is the one spelling that DOES mark
+	// its leaf while recording NO extent — I2 requires the floor for a herestring, and
+	// keying HasHeredoc off a non-empty body would silently drop it.
+	t.Run("a herestring marks its leaf but records no extent", func(t *testing.T) {
+		leaves := Parse("cat <<<\"word\"")
+		if len(leaves) != 1 || !leaves[0].HasHeredoc || len(leaves[0].Heredocs) != 0 {
+			t.Fatalf("Parse = %#v, want one leaf with HasHeredoc and no extent", leaves)
+		}
+	})
+
+	// `a << ; echo hi` has a `<<` with no delimiter word. The outgoing pass copied it
+	// through untouched and let `echo hi` be a leaf; the real grammar rejects it, so
+	// it lands on the I1b floor instead. That is the more restrictive direction and it
+	// is recorded here rather than left to be discovered.
+	t.Run("a `<<` with no delimiter word is a parse failure, not a copied-through token", func(t *testing.T) {
+		sp := ParseShell("a << ; echo hi")
+		if !sp.Unparseable {
+			t.Fatalf("want unparseable, got leaves %#v", sp.Leaves)
+		}
+		if len(sp.Leaves) != 0 {
+			t.Errorf("I1b: unparseable must carry no leaves, got %d", len(sp.Leaves))
+		}
+	})
 }
