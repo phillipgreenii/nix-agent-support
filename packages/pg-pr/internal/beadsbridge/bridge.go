@@ -50,7 +50,53 @@ type Handler struct {
 	// other production (merge-request, attention, process-feedback) is
 	// unaffected.
 	suppressDraftReviews bool
+	// locks serializes the projection per PR identity (see Handle). Every Handler
+	// points at the one process-wide projectionLocks — the field exists so the
+	// dependency is visible at the call site, not so it can vary per Handler; a
+	// per-Handler registry would defeat the whole mechanism (see projectionLocks).
+	locks *keyedLock
 }
+
+// projectionLocks is the process-wide per-PR projection lock. It is
+// PACKAGE-LEVEL, not a field New allocates, and that is REQUIRED rather than
+// stylistic: the daemon's outbox dispatcher constructs a FRESH Handler (and a
+// fresh per-repo bead client) on EVERY event — see newBeadsBridgeHandler in
+// cmd/pg-pr/sync.go — so two concurrent dispatches never share a Handler
+// instance. A per-Handler registry would hand each dispatch its own private lock
+// and serialize nothing at all, while looking correct in a test that reuses one
+// Handler. Keys carry the repo (`owner/name#123`), which is 1:1 with a bd
+// workspace, so distinct repos cannot collide on one slot.
+//
+// SCOPE — IN-PROCESS ONLY, DELIBERATELY (bead pg2-35rl6). This closes the
+// mechanism that produced the observed duplicates (one daemon, several goroutines
+// on one shared outbox; Engine.Daemon holds an exclusive flock on daemon.lock, so
+// two daemons cannot coexist). It does NOT stop a SECOND pg-pr process racing a
+// daemon tick: the one-shot `pg-pr sync` path takes no lock at all, and
+// `pg-pr pr create` reaches EnsureMergeRequest without passing through this
+// bridge. Two mutual-exclusion mechanisms were considered and NOT taken:
+//
+//   - A post-create re-resolve that closes the loser cannot be made airtight. The
+//     later creator always observes the earlier bead, but "who loses" must be
+//     decided from stored state both processes read identically, and the pairs
+//     this bug produces are created in the SAME SECOND (the production evidence:
+//     two process-feedback beads at 12:35:25Z with an identical fbsum digest). On
+//     a created_at tie the tiebreak can elect the LATER creator, whose peer may
+//     have already re-resolved and seen only itself — so neither closes and the
+//     duplicate survives. It would trade a total prevention for a partial cure
+//     plus a new close-what-we-just-wrote path, in a package whose
+//     FindDuplicateMergeRequests doc explicitly forbids a mutating collapse
+//     counterpart.
+//   - Making the gate a per-key FILE lock (flock, as the daemon already does for
+//     its single-instance lock) WOULD cover both, but it moves this package from
+//     pure logic over a bead client to something owning a runtime directory, with
+//     its own failure modes and a cancellable LOCK_NB retry loop. That is a
+//     design decision with a wider blast radius than this fix, and belongs in its
+//     own bead alongside the alternative of enforcing the identity at the bd
+//     layer.
+//
+// So a cross-process race can still produce a duplicate pair; it is reported by
+// the read-only `pg-pr sync duplicates` audit, not silently absorbed.
+var projectionLocks = newKeyedLock()
 
 // Option customizes a Handler.
 type Option func(*Handler)
@@ -64,7 +110,7 @@ func WithoutDraftReviews() Option {
 
 // New constructs the handler, applying any options.
 func New(client BeadClient, opts ...Option) *Handler {
-	h := &Handler{client: client}
+	h := &Handler{client: client, locks: projectionLocks}
 	for _, opt := range opts {
 		opt(h)
 	}
@@ -78,7 +124,68 @@ type FeedbackPayload = store.FeedbackPayload
 
 // Handle implements event.Handler. Idempotent: re-dispatch under the
 // at-least-once outbox must not duplicate beads.
+//
+// It is also SERIALIZED PER PR IDENTITY, because idempotence alone is not enough
+// under concurrency (bead pg2-35rl6). Every projection below is a check-then-create
+// — EnsureMergeRequest reads findByRepoPR then creates, ensureProcessFeedbackBead
+// reads ResolveProcessingCycle then creates, EnsureDraftReviewBead and
+// EnsureAttentionBead read their child list then create — and nothing at the bd
+// layer rejects a second create for an identity that already has one
+// (ProcessingCycleKey's doc calls two beads with the same key duplicates by
+// definition, but only DECLARES the invariant). Two goroutines interleaved inside
+// that read→decide→write window therefore both observe "none yet" and both write.
+//
+// The daemon reaches that state routinely: it runs two projecting workers (the
+// mine and team queues, Daemon in internal/sync/daemon.go) plus a maintenance
+// flusher, each calling flushOutbox on the SHARED outbox, and RunOutbox neither
+// claims rows nor partitions them — so a PR that the user authored in a repo whose
+// team query also covers it lands in both rosters, and one tick can drive two
+// concurrent projections of the same key (in the limit, of the same outbox row).
+//
+// The lock is taken ONCE for the whole event, spanning the entire read→decide→write
+// section of every branch rather than the writes alone: locking only the create
+// would let the second goroutine finish its READ before the first's write and
+// still decide to create. Different PRs take different keys and stay fully
+// concurrent, which is what keeps the two workers parallel on the 1m poll.
+//
+// An event whose payload carries no (repo, number) identity is projected WITHOUT
+// the lock: there is nothing to serialize on, and the per-branch decoders below
+// still report the malformed payload with their own error text.
 func (h *Handler) Handle(ctx context.Context, e store.Event) error {
+	key, ok := prIdentityKey(e.Payload)
+	if !ok {
+		return h.project(ctx, e)
+	}
+	release, err := h.locks.acquire(ctx, key)
+	if err != nil {
+		return fmt.Errorf("beadsbridge: await projection lock for %s: %w", key, err)
+	}
+	defer release()
+	return h.project(ctx, e)
+}
+
+// prIdentityKey extracts the (repo, pr_number) identity every event payload
+// carries at the top level — PRPayload, FeedbackPayload and AttentionPayload all
+// spell it `repo` + `number` — and renders the lock key. It mirrors the
+// repo-routing header decode in cmd/pg-pr/sync.go's dispatcher: a partial decode
+// of the two fields needed, so one shape change cannot silently mis-key.
+//
+// A decode failure or a missing field returns ok=false rather than an error: the
+// branch that owns the payload reports it, and a lock is not the place to
+// re-litigate payload validity.
+func prIdentityKey(payload []byte) (string, bool) {
+	var head struct {
+		Repo   string `json:"repo"`
+		Number int    `json:"number"`
+	}
+	if err := json.Unmarshal(payload, &head); err != nil || head.Repo == "" || head.Number == 0 {
+		return "", false
+	}
+	return head.Repo + "#" + strconv.Itoa(head.Number), true
+}
+
+// project is Handle's body, run with the per-PR projection lock already held.
+func (h *Handler) project(ctx context.Context, e store.Event) error {
 	switch e.Type {
 	case store.EventPROpened, store.EventPRUpdated:
 		var p store.PRPayload
