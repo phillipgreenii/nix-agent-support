@@ -51,6 +51,13 @@ type Query interface {
 	// Trigger is the query's firing strategy (Q1) — Strategy pattern. A nil
 	// return is treated as PeriodTrigger by the driver.
 	Trigger() Trigger
+	// BackingCommand returns the executable this source needs in order to run,
+	// or "" when it needs none (a pure in-process producer). It is a STATIC
+	// declaration, resolved pre-runtime by config.Validate's absent-backing-command
+	// check, so every concrete query states it explicitly rather than inheriting a
+	// silent default — a new query type that shells out and forgets it would
+	// otherwise escape that check.
+	BackingCommand() string
 	// Run produces zero or more events for the bus to publish.
 	Run(ctx context.Context, env Env) ([]event.Event, error)
 }

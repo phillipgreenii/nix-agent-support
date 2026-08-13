@@ -15,6 +15,12 @@ import (
 	"strings"
 )
 
+// Command is the bd binary this package invokes. It is exported so the pieces
+// that must NAME the backing command without running it — the pre-runtime
+// absent-backing-command validation of a bead-backed event source — share this
+// one literal instead of duplicating it.
+const Command = "bd"
+
 // Runner shells out to `bd`. Production uses CLIRunner; tests inject a fake.
 type Runner interface {
 	Run(ctx context.Context, args ...string) (stdout string, err error)
@@ -44,7 +50,7 @@ func scrubEnv(env []string) []string {
 }
 
 func (r *CLIRunner) Run(ctx context.Context, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, "bd", args...)
+	cmd := exec.CommandContext(ctx, Command, args...)
 	if r.Dir != "" {
 		cmd.Dir = r.Dir
 	}

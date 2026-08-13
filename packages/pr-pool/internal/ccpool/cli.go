@@ -55,7 +55,7 @@ type CLIRunner struct {
 }
 
 func NewCLIRunner(cfg config.Config) *CLIRunner {
-	c := &CLIRunner{Effort: cfg.Effort, Model: cfg.Model, PermissionMode: cfg.PermissionMode, AllowedTools: cfg.AllowedTools, ConfirmIngest: cfg.ConfirmIngest, Autonomous: cfg.Autonomous, bin: "ccpool"}
+	c := &CLIRunner{Effort: cfg.Effort, Model: cfg.Model, PermissionMode: cfg.PermissionMode, AllowedTools: cfg.AllowedTools, ConfirmIngest: cfg.ConfirmIngest, Autonomous: cfg.Autonomous, bin: config.CCPoolCommand}
 	c.run = func(ctx context.Context, args []string) ([]byte, []byte, error) {
 		return execCmd(ctx, c.bin, args)
 	}

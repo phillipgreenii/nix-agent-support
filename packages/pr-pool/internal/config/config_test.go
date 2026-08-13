@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -8,7 +9,371 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/pr-pool/internal/query"
+	"github.com/phillipgreenii/pr-pool/internal/roles"
 )
+
+// prefixLocator is the package-wide test CommandLocator: every command resolves
+// EXCEPT one whose (base) name is prefixed "absent-". Unit tests MUST be isolated,
+// and the built-in / example role and query sets declare real backing commands
+// (bd, ccpool), so resolving them against the host's PATH would make this
+// package's tests pass or fail on what happens to be installed. Pinning this stub
+// keeps every existing Load() test hermetic while still letting a test say "this
+// command is missing" by naming it absent-*.
+type prefixLocator struct{}
+
+func (prefixLocator) Locate(name string) error {
+	if strings.HasPrefix(filepath.Base(name), "absent-") {
+		return fmt.Errorf("stub locator: %q not found", name)
+	}
+	return nil
+}
+
+// stubLocator resolves exactly the commands it was given, so a test states its
+// own command environment explicitly.
+type stubLocator struct{ present map[string]bool }
+
+func (s stubLocator) Locate(name string) error {
+	if s.present[name] {
+		return nil
+	}
+	return fmt.Errorf("stub locator: %q not found", name)
+}
+
+func TestMain(m *testing.M) {
+	defaultLocator = prefixLocator{}
+	os.Exit(m.Run())
+}
+
+// --- wiring fixtures (INV-WORKFLOW-1 / JOURNEY-VALIDATE) ---
+
+// cmdRole is a handler bound to binds, backed by a command that resolves under
+// prefixLocator.
+func cmdRole(name string, binds ...string) roles.Role {
+	return roles.Role{
+		Name: name, Type: "command", Cap: 1, Enabled: true, Binds: binds,
+		Command: &roles.CommandConfig{Argv: []string{"present-tool"}},
+	}
+}
+
+// eventSource is a period-triggered source emitting emits. EventQuery declares no
+// backing command, so a wiring fixture built from it probes no command at all.
+func eventSource(name string, emits ...string) query.Source {
+	return query.Source{Name: name, Query: query.EventQuery{
+		Meta:   query.Meta{EmitTypes: emits},
+		ItemID: "i",
+	}}
+}
+
+// thresholdSource is a source whose trigger binds trigBinds with the given count
+// — the only config-visible re-entry edge (type -> source).
+func thresholdSource(name string, count int, trigBinds []string, emits ...string) query.Source {
+	return query.Source{Name: name, Query: query.EventQuery{
+		Meta:   query.Meta{EmitTypes: emits, Trig: query.ThresholdTrigger{Binds: trigBinds, Count: count}},
+		ItemID: "i",
+	}}
+}
+
+func wiring(qs query.SourceSet, rs roles.RoleSet) Config {
+	c := Default()
+	c.Queries = qs
+	c.Roles = rs
+	return c
+}
+
+// findingsContain reports whether some finding contains want.
+func findingsContain(errs []error, want string) bool {
+	for _, e := range errs {
+		if strings.Contains(e.Error(), want) {
+			return true
+		}
+	}
+	return false
+}
+
+func warningsContain(warns []string, want string) bool {
+	for _, w := range warns {
+		if strings.Contains(w, want) {
+			return true
+		}
+	}
+	return false
+}
+
+// A fully wired config has no findings at all — no error and no warning.
+func TestValidate_wiredConfigHasNoFindings(t *testing.T) {
+	c := wiring(
+		query.SourceSet{eventSource("s", "a.ready")},
+		roles.RoleSet{cmdRole("r", "a.ready")},
+	)
+	errs, warns := c.diagnose()
+	if len(errs) != 0 || len(warns) != 0 {
+		t.Fatalf("wired config must produce no findings; errs=%v warns=%v", errs, warns)
+	}
+	if err := c.Validate(); err != nil {
+		t.Fatalf("Validate() = %v, want nil", err)
+	}
+}
+
+// Check 3 — a handler no binding can reach. In the config model a binding is the
+// handler's own Binds list, so "no binding reaches it" is an empty Binds.
+func TestValidate_disconnectedHandler(t *testing.T) {
+	c := wiring(nil, roles.RoleSet{cmdRole("lonely")})
+	errs, warns := c.diagnose()
+	if !findingsContain(errs, "disconnected handler") {
+		t.Fatalf("a role with no binds must be a disconnected-handler error; got %v", errs)
+	}
+	// It must NOT also be reported as check 4: that names a BOUND handler.
+	if findingsContain(errs, "no events to listen for") {
+		t.Fatalf("an unbound handler must not also be reported as check 4; got %v", errs)
+	}
+	if len(warns) != 0 {
+		t.Fatalf("a disconnected handler is an error, never a warning; warns=%v", warns)
+	}
+}
+
+// Check 4 — a BOUND handler whose reachable event set is empty. The docs require
+// it reported BOTH ways: check 1 names the type, check 4 names the handler.
+func TestValidate_handlerWithNoEventsToListenFor(t *testing.T) {
+	c := wiring(
+		query.SourceSet{eventSource("s", "b.ready")},
+		roles.RoleSet{cmdRole("deaf", "a.ready"), cmdRole("hears", "b.ready")},
+	)
+	errs, _ := c.diagnose()
+	if !findingsContain(errs, "no events to listen for") {
+		t.Fatalf("a handler bound only to unemitted types must be a check-4 error; got %v", errs)
+	}
+	if !findingsContain(errs, "orphan consumer") {
+		t.Fatalf("the same config must also report the orphan event TYPE (check 1); got %v", errs)
+	}
+	if findingsContain(errs, "disconnected handler") {
+		t.Fatalf("a bound handler must not be reported as disconnected; got %v", errs)
+	}
+}
+
+// Check 4 must NOT fire when at least one bound type is emitted.
+func TestValidate_boundHandlerWithSomeEmittedTypeIsValid(t *testing.T) {
+	c := wiring(
+		query.SourceSet{eventSource("s1", "a.ready"), eventSource("s2", "b.ready")},
+		roles.RoleSet{cmdRole("r", "a.ready", "b.ready")},
+	)
+	errs, warns := c.diagnose()
+	if len(errs) != 0 || len(warns) != 0 {
+		t.Fatalf("a handler with reachable events must be valid; errs=%v warns=%v", errs, warns)
+	}
+}
+
+// Check 5 — a configured source or handler whose backing command is absent.
+func TestValidate_absentBackingCommand(t *testing.T) {
+	c := wiring(
+		query.SourceSet{{Name: "cmd-source", Query: query.CommandQuery{
+			Meta: query.Meta{EmitTypes: []string{"a.ready"}}, Argv: []string{"absent-lister"}, Format: query.FormatJSONL,
+		}}},
+		roles.RoleSet{{
+			Name: "cmd-role", Type: "command", Cap: 1, Enabled: true, Binds: []string{"a.ready"},
+			Command: &roles.CommandConfig{Argv: []string{"absent-handler"}},
+		}},
+	)
+	errs, warns := c.diagnose()
+	if !findingsContain(errs, `handler "cmd-role" backing command "absent-handler"`) {
+		t.Fatalf("an absent handler backing command must error; got %v", errs)
+	}
+	if !findingsContain(errs, `source "cmd-source" backing command "absent-lister"`) {
+		t.Fatalf("an absent source backing command must error; got %v", errs)
+	}
+	if len(warns) != 0 {
+		t.Fatalf("an absent backing command is an error, never a warning; warns=%v", warns)
+	}
+	// Present commands: the same wiring with a locator that resolves both is valid.
+	c.Locator = stubLocator{present: map[string]bool{"absent-lister": true, "absent-handler": true}}
+	if errs, warns := c.diagnose(); len(errs) != 0 || len(warns) != 0 {
+		t.Fatalf("present backing commands must be valid; errs=%v warns=%v", errs, warns)
+	}
+}
+
+// Every participant kind's backing command is probed, including the fixed
+// integration binaries (bd for a beads-backed source, ccpool for a ccpool handler).
+func TestValidate_backingCommandCoversFixedIntegrationBinaries(t *testing.T) {
+	c := wiring(
+		query.SourceSet{{Name: "beads-source", Query: query.BeadsReady{
+			Meta: query.Meta{EmitTypes: []string{"a.ready"}},
+		}}},
+		roles.RoleSet{{
+			Name: "ccpool-role", Type: "ccpool", Cap: 1, Enabled: true, Binds: []string{"a.ready"},
+			CCPool: &roles.CCPoolConfig{Actor: "a"},
+		}},
+	)
+	c.Locator = stubLocator{present: map[string]bool{}} // nothing installed
+	errs, _ := c.diagnose()
+	if !findingsContain(errs, `backing command "bd"`) {
+		t.Fatalf("a beads-backed source's backing command is bd; got %v", errs)
+	}
+	if !findingsContain(errs, `backing command "ccpool"`) {
+		t.Fatalf("a ccpool handler's backing command is ccpool; got %v", errs)
+	}
+}
+
+// Check 6 — a re-entry cycle the declared graph shows CANNOT terminate: a
+// threshold gate satisfied by zero events (count <= 0) re-fires unconditionally.
+func TestValidate_determinablyNonTerminatingCycleIsError(t *testing.T) {
+	c := wiring(
+		query.SourceSet{thresholdSource("loop", 0, []string{"loop.ready"}, "loop.ready")},
+		roles.RoleSet{cmdRole("r", "loop.ready")},
+	)
+	errs, warns := c.diagnose()
+	if !findingsContain(errs, "cannot terminate") {
+		t.Fatalf("a cycle whose gate needs no events must be a blocking error; got %v", errs)
+	}
+	if len(warns) != 0 {
+		t.Fatalf("a determinably non-terminating cycle must NOT warn as well; warns=%v", warns)
+	}
+	if err := c.Validate(); err == nil {
+		t.Fatal("Validate() must block a determinably non-terminating re-entry cycle")
+	}
+}
+
+// The set's ONE warning — a re-entry cycle whose termination is not determinable.
+// It MUST be reported and MUST NOT block the run.
+func TestValidate_undeterminableCycleIsWarningNotError(t *testing.T) {
+	c := wiring(
+		query.SourceSet{thresholdSource("loop", 1, []string{"loop.ready"}, "loop.ready")},
+		roles.RoleSet{cmdRole("r", "loop.ready")},
+	)
+	errs, warns := c.diagnose()
+	if len(errs) != 0 {
+		t.Fatalf("a cycle whose termination is not determinable must not block; errs=%v", errs)
+	}
+	if !warningsContain(warns, "cannot determine whether it terminates") {
+		t.Fatalf("the cycle must be reported as the one warning; warns=%v", warns)
+	}
+	if err := c.Validate(); err != nil {
+		t.Fatalf("Validate() = %v, want nil (the warning must not become an error)", err)
+	}
+}
+
+// A multi-hop cycle (source -> type -> source -> type -> source) is detected too.
+func TestValidate_multiHopCycleWarns(t *testing.T) {
+	c := wiring(
+		query.SourceSet{
+			thresholdSource("up", 2, []string{"down.ready"}, "up.ready"),
+			thresholdSource("down", 2, []string{"up.ready"}, "down.ready"),
+		},
+		roles.RoleSet{cmdRole("ur", "up.ready"), cmdRole("dr", "down.ready")},
+	)
+	errs, warns := c.diagnose()
+	if len(errs) != 0 {
+		t.Fatalf("a multi-hop undeterminable cycle must not block; errs=%v", errs)
+	}
+	if len(warns) != 1 {
+		t.Fatalf("one cycle must yield exactly one warning; warns=%v", warns)
+	}
+}
+
+// Run-scoping is NOT a config defect: a handler disabled for the run leaves the
+// configuration valid — validity is judged against the CONFIG, never the run's
+// active subset. Neither an error nor the warning.
+func TestValidate_runScopedDisabledBindingStaysValid(t *testing.T) {
+	disabled := cmdRole("paused", "a.ready")
+	disabled.Enabled = false
+	c := wiring(
+		query.SourceSet{eventSource("s", "a.ready")},
+		roles.RoleSet{disabled},
+	)
+	errs, warns := c.diagnose()
+	if len(errs) != 0 || len(warns) != 0 {
+		t.Fatalf("a disabled binding must leave the config valid; errs=%v warns=%v", errs, warns)
+	}
+}
+
+// Findings AGGREGATE: a config breaking several checks reports all of them.
+func TestValidate_aggregatesEveryFinding(t *testing.T) {
+	c := wiring(
+		query.SourceSet{
+			eventSource("unheard", "nobody.binds.this"),
+			thresholdSource("loop", 1, []string{"loop.ready"}, "loop.ready"),
+		},
+		roles.RoleSet{
+			cmdRole("unbound"),
+			cmdRole("deaf", "nobody.emits.this"),
+			{
+				Name: "no-tool", Type: "command", Cap: 1, Enabled: true, Binds: []string{"loop.ready"},
+				Command: &roles.CommandConfig{Argv: []string{"absent-tool"}},
+			},
+		},
+	)
+	c.PermissionMode = "nonsense"
+	errs, warns := c.diagnose()
+	for _, want := range []string{
+		"invalid PR_POOL_PERMISSION_MODE",
+		"orphan consumer",
+		"orphan producer",
+		"disconnected handler",
+		"no events to listen for",
+		"backing command",
+	} {
+		if !findingsContain(errs, want) {
+			t.Errorf("aggregated findings missing %q; got %v", want, errs)
+		}
+	}
+	if !warningsContain(warns, "cannot determine whether it terminates") {
+		t.Errorf("aggregated run must still report the cycle warning; warns=%v", warns)
+	}
+	joined := c.Validate()
+	if joined == nil {
+		t.Fatal("Validate() must return the aggregated error")
+	}
+	for _, want := range []string{"orphan consumer", "disconnected handler", "backing command"} {
+		if !strings.Contains(joined.Error(), want) {
+			t.Errorf("errors.Join output missing %q: %v", want, joined)
+		}
+	}
+}
+
+// The Load() path applies check 5 (the seam's default is the package locator).
+func TestLoad_absentBackingCommandIsError(t *testing.T) {
+	writeCfg(t, `
+[[query]]
+name = "s"
+emits = ["a.ready"]
+type = "beads-ready"
+[query.beads-ready]
+labels = ["x"]
+
+[[role]]
+name = "r"
+type = "command"
+cap = 1
+binds = ["a.ready"]
+[role.command]
+argv = ["absent-handler"]
+`)
+	_, err := Load()
+	if err == nil {
+		t.Fatal("a role whose backing command is absent must fail Load (absent backing command)")
+	}
+	if !strings.Contains(err.Error(), "backing command") {
+		t.Fatalf("Load error must name the absent backing command; got %v", err)
+	}
+}
+
+// PathLocator is the production strategy: it resolves a real executable and
+// rejects a name that is not installed. The executable is created in a temp dir
+// the test owns, so the assertion never depends on the host's PATH.
+func TestPathLocator_resolvesExecutableAndRejectsAbsent(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "pr-pool-test-cmd")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := (PathLocator{}).Locate(bin); err != nil {
+		t.Errorf("PathLocator must resolve an executable path: %v", err)
+	}
+	if err := (PathLocator{}).Locate(filepath.Join(dir, "pr-pool-test-missing")); err == nil {
+		t.Error("PathLocator must reject a path that does not exist")
+	}
+	if err := (PathLocator{}).Locate("pr-pool-no-such-command-4f2a9c"); err == nil {
+		t.Error("PathLocator must reject a command that is not on PATH")
+	}
+}
 
 // absentConfig points PR_POOL_CONFIG at a non-existent path so Load() resolves to
 // the built-in role set deterministically (independent of the test's cwd).

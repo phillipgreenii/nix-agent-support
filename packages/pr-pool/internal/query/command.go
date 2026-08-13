@@ -29,6 +29,14 @@ func (q CommandQuery) Validate() error {
 	return nil
 }
 
+// BackingCommand is argv[0]: the executable this source shells out to.
+func (q CommandQuery) BackingCommand() string {
+	if len(q.Argv) == 0 {
+		return ""
+	}
+	return q.Argv[0]
+}
+
 type rawItem struct {
 	ID       string         `json:"id"`
 	Type     string         `json:"type"`

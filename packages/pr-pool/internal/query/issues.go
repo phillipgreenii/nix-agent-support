@@ -30,6 +30,14 @@ const issueListLimit = 200
 // truncation past it is reported via the envelope's flag, not a count.
 const jiraListLimit = 100
 
+// ghCommand / jiraCommand are the CLIs these sources shell out to. They are named
+// once so the argv built in Run and the BackingCommand the pre-runtime
+// absent-backing-command validation resolves can never drift apart.
+const (
+	ghCommand   = "gh"
+	jiraCommand = "pg-pr-issues-jira-zr"
+)
+
 // --- github-issues ---
 
 // GitHubIssues lists OPEN issues in Repo via `gh issue list`, optionally narrowed to
@@ -47,6 +55,9 @@ func (q GitHubIssues) Validate() error {
 	return nil
 }
 
+// BackingCommand is the gh CLI this source lists issues through.
+func (q GitHubIssues) BackingCommand() string { return ghCommand }
+
 // ghIssue is the subset of `gh issue list --json` fields mapped to an Item.
 type ghIssue struct {
 	Number int    `json:"number"`
@@ -59,7 +70,7 @@ type ghIssue struct {
 
 func (q GitHubIssues) Run(ctx context.Context, env Env) ([]event.Event, error) {
 	argv := []string{
-		"gh", "issue", "list",
+		ghCommand, "issue", "list",
 		"--repo", q.Repo,
 		"--state", "open",
 		"--limit", strconv.Itoa(issueListLimit),
@@ -121,6 +132,9 @@ func (q JiraIssues) Validate() error {
 	return nil
 }
 
+// BackingCommand is the jira issue CLI this source searches through.
+func (q JiraIssues) BackingCommand() string { return jiraCommand }
+
 // jql returns the explicit JQL when set, else a default that selects unresolved
 // issues in Project narrowed to ALL of Labels. Values are passed as a single argv
 // element (no shell), so quoting only needs to be valid JQL, not shell-safe.
@@ -157,7 +171,7 @@ type jiraSearchEnvelope struct {
 
 func (q JiraIssues) Run(ctx context.Context, env Env) ([]event.Event, error) {
 	argv := []string{
-		"pg-pr-issues-jira-zr", "search",
+		jiraCommand, "search",
 		"--jql", q.jql(),
 		"--limit", strconv.Itoa(jiraListLimit),
 	}

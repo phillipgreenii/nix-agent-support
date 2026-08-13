@@ -22,6 +22,10 @@ type BeadsReady struct {
 
 func (q BeadsReady) Validate() error { return nil }
 
+// BackingCommand: a bead-backed source runs through beads.Runner, which invokes
+// the bd CLI.
+func (q BeadsReady) BackingCommand() string { return beads.Command }
+
 func (q BeadsReady) Run(ctx context.Context, env Env) ([]event.Event, error) {
 	issues, err := beads.Ready(ctx, env.BD, labelArgs(q.Labels, q.ExcludeLabels)...)
 	if err != nil {
@@ -40,6 +44,9 @@ type BeadsList struct {
 }
 
 func (q BeadsList) Validate() error { return nil }
+
+// BackingCommand: as BeadsReady — the bd CLI behind beads.Runner.
+func (q BeadsList) BackingCommand() string { return beads.Command }
 
 func (q BeadsList) Run(ctx context.Context, env Env) ([]event.Event, error) {
 	issues, err := beads.List(ctx, env.BD, labelArgs(q.Labels, q.ExcludeLabels)...)

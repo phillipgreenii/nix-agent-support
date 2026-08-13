@@ -23,6 +23,11 @@ type fakeQuery struct {
 }
 
 func (f fakeQuery) Validate() error { return nil }
+
+// BackingCommand: the fake produces canned events in-process, so it shells out to
+// nothing (config.Validate's absent-backing-command check skips it).
+func (f fakeQuery) BackingCommand() string { return "" }
+
 func (f fakeQuery) Run(context.Context, query.Env) ([]event.Event, error) {
 	return f.events, f.err
 }

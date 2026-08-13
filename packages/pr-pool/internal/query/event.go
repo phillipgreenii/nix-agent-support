@@ -39,6 +39,10 @@ func (q EventQuery) Validate() error {
 	return nil
 }
 
+// BackingCommand is "": an event source produces its event in-process and shells
+// out to nothing.
+func (q EventQuery) BackingCommand() string { return "" }
+
 // Run emits a single correlated event of the query's primary emit type.
 func (q EventQuery) Run(_ context.Context, _ Env) ([]event.Event, error) {
 	e := event.NewItemEvent(firstEmit(q), "", item.Item{ID: q.ItemID, Type: q.ItemType, Title: q.Title})
