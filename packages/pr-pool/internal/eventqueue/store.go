@@ -24,15 +24,25 @@ const (
 // confirms acceptance (ADR 0031 req 4) — a crash between the in-memory accept
 // and this write re-offers the event on restart (at-most-one redelivery,
 // absorbed by idempotent handlers, INV-EVT-2).
+//
+// There are exactly THREE record kinds and none of them is an attempt log: the
+// core keeps no attempt history (INV-EVT-4, DEC-EVENT-1), so a pre-accept decline
+// — even the final one past `expiresAt` — writes nothing. An event LEAVING the
+// queue is recorded (opEvict) rather than re-derived on replay, because a
+// past-expiry event is not necessarily finished: it is retained until every
+// matching handler has had the one attempt INV-EVT-1 owes it, and only the
+// process that made those attempts knows they happened.
 type Record struct {
 	Op opKind `json:"op"`
 	// EventID is set on every record.
 	EventID string `json:"eventId"`
-	// Enqueue fields.
+	// Enqueue fields. At and ExpiresAt are the RESOLVED instants (Event.Resolve),
+	// so a replay reconstructs the same expiry bound rather than re-defaulting it
+	// against a clock that has since moved.
 	Type          string         `json:"type,omitempty"`
 	SchemaVersion string         `json:"schemaVersion,omitempty"`
-	TTLNanos      int64          `json:"ttlNanos,omitempty"`
 	At            time.Time      `json:"at,omitzero"`
+	ExpiresAt     time.Time      `json:"expiresAt,omitzero"`
 	EnqueuedAt    time.Time      `json:"enqueuedAt,omitzero"`
 	Payload       map[string]any `json:"payload,omitempty"`
 	// Accept fields.
@@ -53,29 +63,32 @@ type Store interface {
 	Close() error
 }
 
-// recordFromEvent builds an enqueue Record capturing the event and its ingest
-// (enqueue) time — the TTL clock origin this implementation uses.
+// recordFromEvent builds an enqueue Record for an ALREADY-RESOLVED event
+// (Event.Resolve), also capturing the ingest (enqueue) instant. EnqueuedAt is
+// kept alongside the resolved At even though the two coincide for an event that
+// carried no source stamp: when a source DID stamp `at`, the pair records both
+// what the source claimed and when the core actually took it.
 func recordFromEvent(e Event, enqueuedAt time.Time) Record {
 	return Record{
 		Op:            opEnqueue,
 		EventID:       e.ID,
 		Type:          e.Type,
 		SchemaVersion: e.SchemaVersion,
-		TTLNanos:      int64(e.TTL),
 		At:            e.At,
+		ExpiresAt:     e.ExpiresAt,
 		EnqueuedAt:    enqueuedAt,
 		Payload:       e.Payload,
 	}
 }
 
-// event reconstructs the Event carried by an enqueue Record.
+// event reconstructs the (resolved) Event carried by an enqueue Record.
 func (r Record) event() Event {
 	return Event{
 		SchemaVersion: r.SchemaVersion,
 		ID:            r.EventID,
 		Type:          r.Type,
-		TTL:           time.Duration(r.TTLNanos),
 		At:            r.At,
+		ExpiresAt:     r.ExpiresAt,
 		Payload:       r.Payload,
 	}
 }

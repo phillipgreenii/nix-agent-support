@@ -65,13 +65,13 @@ func TestDispatchReentrantEnqueueNoDeadlock(t *testing.T) {
 			// The acceptance path injects a follow-on event back into the queue —
 			// the classic re-entry (push-inject / ingest-event on accept). Old code:
 			// self-deadlock on q.mu here.
-			if _, err := q.Enqueue(evt("followon", "T", time.Hour)); err != nil {
+			if _, err := q.Enqueue(evtUntil("followon", "T", clk.in(time.Hour))); err != nil {
 				t.Errorf("re-entrant Enqueue from inside Offer: %v", err)
 			}
 		}
 	}
 	q.Register(l)
-	mustEnqueue(t, q, evt("trigger", "T", time.Hour))
+	mustEnqueue(t, q, evtUntil("trigger", "T", clk.in(time.Hour)))
 
 	done := make(chan struct{})
 	go func() {
@@ -95,7 +95,7 @@ func TestDispatchReentrantEnqueueNoDeadlock(t *testing.T) {
 // dispatch are tolerated (idempotent-listener contract, INV-EVT-2); the queue
 // records each acceptance at most once. Guarded by a timeout.
 func TestConcurrentEnqueueDuringDispatchNoRace(t *testing.T) {
-	q, err := New(NewMemStore()) // real clock; long ttl so nothing expires mid-test
+	q, err := New(NewMemStore()) // real clock; a far-future expiresAt so nothing expires mid-test
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +112,7 @@ func TestConcurrentEnqueueDuringDispatchNoRace(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for i := 0; i < n; i++ {
-				if _, err := q.Enqueue(evt(fmt.Sprintf("e%d", i), "T", time.Hour)); err != nil {
+				if _, err := q.Enqueue(evtUntil(fmt.Sprintf("e%d", i), "T", time.Now().Add(time.Hour))); err != nil {
 					t.Errorf("Enqueue: %v", err)
 				}
 			}
@@ -152,32 +152,43 @@ func TestConcurrentEnqueueDuringDispatchNoRace(t *testing.T) {
 	}
 }
 
-// An entry that leaves the queue DURING the (now unlocked) Offer — here it
-// expires past its ttl and is swept by a re-entrant Expire before Dispatch
-// re-acquires to record — has its acceptance SKIPPED (the documented mid-dispatch
-// eviction/expiry decision): no durable opAccept, no observer accept, nothing to
-// redeliver. The listener already took responsibility when Offer returned true.
-func TestDispatchEntryExpiredMidOfferSkipsRecord(t *testing.T) {
+// An entry that leaves the queue DURING the (now unlocked) Offer — here a
+// re-entrant Dispatch accepts it and, with early eviction on, EVICTS it before the
+// outer pass re-acquires to record — has the OUTER acceptance SKIPPED (the
+// documented mid-dispatch eviction decision): no second durable opAccept, no
+// second observer accept, nothing to redeliver. The listener already took
+// responsibility when Offer returned true.
+//
+// Eviction (not expiry) is what removes it, and that is forced by the contract
+// rather than chosen for convenience: under INV-EVT-4 a merely EXPIRED entry is
+// still RETAINED while the listener being offered it is owed that very attempt, so
+// a re-entrant Expire mid-offer cannot remove it — only completing every owed
+// attempt, or early eviction, can.
+func TestDispatchEntryEvictedMidOfferSkipsRecord(t *testing.T) {
 	clk := newClock()
 	obs := &recordingObserver{}
-	q := newQueue(t, clk, WithObserver(obs))
+	q := newQueue(t, clk, WithObserver(obs), WithEarlyEviction())
 	l := &callbackListener{id: "h", binds: map[string]bool{"T": true}}
+	reentered := false
 	l.onOffer = func(e Event) {
-		// The entry expires and is swept mid-offer, before the record phase.
-		clk.advance(2 * time.Hour)
-		q.Expire()
+		if !reentered {
+			reentered = true
+			// The nested pass accepts the same head; it is the only bound listener,
+			// so maybeEvict removes the entry before the outer record phase runs.
+			q.Dispatch()
+		}
 	}
 	q.Register(l)
-	mustEnqueue(t, q, evt("e1", "T", time.Hour))
+	mustEnqueue(t, q, evtUntil("e1", "T", clk.in(time.Hour)))
 
 	if n := q.Dispatch(); n != 0 {
-		t.Fatalf("accepted count = %d, want 0 (entry expired mid-dispatch; acceptance skipped)", n)
+		t.Fatalf("outer accepted count = %d, want 0 (entry evicted mid-dispatch; acceptance skipped)", n)
 	}
-	if len(obs.accepted) != 0 {
-		t.Fatalf("observer saw an accept for an entry that left the queue mid-dispatch: %v", obs.accepted)
+	if len(obs.accepted) != 1 {
+		t.Fatalf("recorded acceptances = %v, want exactly one (the nested pass's)", obs.accepted)
 	}
 	if q.DepthByType()["T"] != 0 {
-		t.Fatalf("expired entry still retained: %v", q.DepthByType())
+		t.Fatalf("evicted entry still retained: %v", q.DepthByType())
 	}
 }
 
@@ -198,7 +209,7 @@ func TestDispatchReentrantDispatchAtMostOnceAccept(t *testing.T) {
 		}
 	}
 	q.Register(l)
-	mustEnqueue(t, q, evt("e1", "T", time.Hour))
+	mustEnqueue(t, q, evtUntil("e1", "T", clk.in(time.Hour)))
 
 	q.Dispatch()
 

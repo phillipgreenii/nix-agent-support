@@ -95,7 +95,7 @@ func TestRegistry_LifecycleAndAvailability(t *testing.T) {
 	if !r.Available("h1") {
 		t.Fatal("Available = false for a degraded participant; degraded is still routable")
 	}
-	// `unavailable` is a PRE-ACCEPT decline: the core re-offers within ttl.
+	// `unavailable` is a PRE-ACCEPT decline: the core re-offers while unexpired.
 	if err := r.SetSelfStatus("h1", SelfUnavailable); err != nil {
 		t.Fatalf("SetSelfStatus: %v", err)
 	}

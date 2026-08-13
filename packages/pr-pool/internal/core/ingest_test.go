@@ -14,7 +14,11 @@ import (
 // oneEventRequest is a minimal, schema-valid ingest-event request.
 const oneEventRequest = `{"schemaVersion":"1","id":"trk-9f2c","events":[` + oneEvent + `]}`
 
-const oneEvent = `{"schemaVersion":"1","id":"evt-abc123","type":"review-requested","ttl":"15m","payload":{}}`
+// oneEvent is a minimal, schema-valid event. Its `expiresAt` sits FAR in the
+// future on purpose: the de-duplication window IS the retention window
+// (INV-EVT-3), so a test that needs a duplicate to be ABSORBED has to ask for a
+// window — under the born-expired default there is barely one.
+const oneEvent = `{"schemaVersion":"1","id":"evt-abc123","type":"review-requested","expiresAt":"2099-01-01T00:00:00Z","payload":{}}`
 
 // serveIngest runs the ingest-event subcommand IN PROCESS through the participant
 // boundary (the same entry point the socket transport funnels into) and returns
@@ -72,9 +76,9 @@ func TestIngestEvent_AcceptsAndEnqueues(t *testing.T) {
 func TestIngestEvent_AcceptsABatch(t *testing.T) {
 	svc := startedService(t)
 	req := `{"schemaVersion":"1","id":"trk-1","events":[
-		{"id":"e1","type":"t1","ttl":"5m"},
-		{"id":"e2","type":"t1","ttl":"5m"},
-		{"id":"e3","type":"t2","ttl":"5m"}]}`
+		{"id":"e1","type":"t1"},
+		{"id":"e2","type":"t1"},
+		{"id":"e3","type":"t2"}]}`
 	reply, code := serveIngest(t, svc, req)
 	if code != conformance.ExitOK {
 		t.Fatalf("exit = %d, want 0; reply=%v", code, reply)
@@ -89,10 +93,10 @@ func TestIngestEvent_AcceptsABatch(t *testing.T) {
 }
 
 // An event whose type binds to NOTHING is still accepted (INV-DISP-3): it is
-// enqueued and expires unconsumed at its ttl — never rejected here.
+// enqueued and dropped unconsumed-expired — never rejected here.
 func TestIngestEvent_UnboundTypeIsStillAccepted(t *testing.T) {
 	svc := startedService(t) // no listeners registered at all
-	reply, code := serveIngest(t, svc, `{"schemaVersion":"1","id":"trk-1","events":[{"id":"e1","type":"nobody-binds-this","ttl":"5m"}]}`)
+	reply, code := serveIngest(t, svc, `{"schemaVersion":"1","id":"trk-1","events":[{"id":"e1","type":"nobody-binds-this"}]}`)
 	if code != conformance.ExitOK {
 		t.Fatalf("exit = %d, want 0 for an unbound type (INV-DISP-3); reply=%v", code, reply)
 	}
@@ -104,8 +108,8 @@ func TestIngestEvent_UnboundTypeIsStillAccepted(t *testing.T) {
 	}
 }
 
-// A duplicate id within ttl is ABSORBED and counted as accepted (INV-EVT-3) — a
-// source must never have to track what it already emitted.
+// A duplicate id still within its retention is ABSORBED and counted as accepted
+// (INV-EVT-3) — a source must never have to track what it already emitted.
 func TestIngestEvent_DuplicateIsAbsorbedNotRejected(t *testing.T) {
 	svc := startedService(t)
 	if _, code := serveIngest(t, svc, oneEventRequest); code != conformance.ExitOK {
@@ -130,11 +134,16 @@ func TestIngestEvent_DuplicateIsAbsorbedNotRejected(t *testing.T) {
 // in `rejected` with exit 1 (interfaces.md's rejected example).
 func TestIngestEvent_PartialBatchRejectsOnlyTheMalformed(t *testing.T) {
 	svc := startedService(t)
+	// The three faults span both rejection layers: `noType` violates the schema
+	// structurally, while `badAt` / `badExpiry` are conversions a structural schema
+	// cannot express (both instants are just strings to it) — including a
+	// DURATION-shaped expiresAt, the shape a caller written against the old
+	// duration-valued contract would send.
 	req := `{"schemaVersion":"1","id":"trk-1","events":[
-		{"id":"good","type":"t","ttl":"5m"},
-		{"id":"noTTL","type":"t"},
-		{"id":"badTTL","type":"t","ttl":"not-a-duration"},
-		{"id":"badAt","type":"t","ttl":"5m","at":"yesterday"}]}`
+		{"id":"good","type":"t"},
+		{"id":"noType"},
+		{"id":"badAt","type":"t","at":"yesterday"},
+		{"id":"badExpiry","type":"t","expiresAt":"15m"}]}`
 	reply, code := serveIngest(t, svc, req)
 
 	if code != conformance.ExitError {
@@ -155,7 +164,7 @@ func TestIngestEvent_PartialBatchRejectsOnlyTheMalformed(t *testing.T) {
 		e := r.(map[string]any)
 		byID[e["id"].(string)] = e["reason"].(string)
 	}
-	for _, id := range []string{"noTTL", "badTTL", "badAt"} {
+	for _, id := range []string{"noType", "badAt", "badExpiry"} {
 		reason, ok := byID[id]
 		if !ok {
 			t.Fatalf("event %s missing from rejected: %v", id, byID)

@@ -225,11 +225,24 @@ func TestCheckSchemaVersion(t *testing.T) {
 // The push-inject schema is a bare $ref to event — validating an event-shaped
 // value through it must resolve and pass.
 func TestPushInjectRefResolves(t *testing.T) {
-	ev := map[string]any{"schemaVersion": "1", "id": "e", "type": "t", "ttl": "5m"}
+	// The DEFAULT event carries neither instant — both are optional (INV-EVT-1) —
+	// so this minimal shape MUST validate through the $ref.
+	ev := map[string]any{"schemaVersion": "1", "id": "e", "type": "t"}
 	if err := Validate("cli.push-inject", ev); err != nil {
-		t.Fatalf("push-inject (ref to event) rejected valid event: %v", err)
+		t.Fatalf("push-inject (ref to event) rejected the default event: %v", err)
 	}
-	if err := Validate("cli.push-inject", map[string]any{"id": "e", "type": "t"}); err == nil || !strings.Contains(err.Error(), "ttl") {
-		t.Fatalf("push-inject should require event field ttl, got %v", err)
+	withExpiry := map[string]any{"schemaVersion": "1", "id": "e", "type": "t", "expiresAt": "2026-07-16T12:15:00Z"}
+	if err := Validate("cli.push-inject", withExpiry); err != nil {
+		t.Fatalf("push-inject (ref to event) rejected an event with expiresAt: %v", err)
+	}
+	if err := Validate("cli.push-inject", map[string]any{"id": "e"}); err == nil || !strings.Contains(err.Error(), "type") {
+		t.Fatalf("push-inject should require event field type, got %v", err)
+	}
+	// The duration-valued field is gone, and the closed object REJECTS it — so a
+	// caller still sending the old shape is told, not silently mis-served
+	// (DEC-EVENT-1, bead pg2-85dv2).
+	legacy := map[string]any{"schemaVersion": "1", "id": "e", "type": "t", "ttl": "5m"}
+	if err := Validate("cli.push-inject", legacy); err == nil {
+		t.Fatal("push-inject accepted the legacy duration-valued ttl field")
 	}
 }

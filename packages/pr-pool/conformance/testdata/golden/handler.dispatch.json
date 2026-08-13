@@ -4,7 +4,7 @@
   "event": {
     "id": "evt-abc123",
     "type": "review-requested",
-    "ttl": "15m",
+    "expiresAt": "2026-07-16T12:15:00Z",
     "payload": {}
   },
   "callback": "pr-pool session-status --socket s --token t"

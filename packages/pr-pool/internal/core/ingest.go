@@ -68,7 +68,7 @@ type ingestRequest struct {
 // Semantics that are easy to get wrong, all from interfaces.md / INV-EVT-*:
 //
 //   - An event whose `type` matches NO binding is still ACCEPTED (exit 0). It is
-//     enqueued and expires unconsumed at its ttl; visibility comes from the
+//     enqueued and dropped unconsumed-expired; visibility comes from the
 //     config-time warning and the unconsumed-expired metric, never from a
 //     rejection here (INV-DISP-3).
 //   - A still-retained DUPLICATE id is ACCEPTED too — de-duplication is the core
@@ -109,8 +109,8 @@ func (s *Service) handleIngestEvent(stdin io.Reader, stdout io.Writer) int {
 		}
 		evt, err := eventqueue.DecodeEvent(raw)
 		if err != nil {
-			// Past the schema but not convertible — an unparseable ttl/at, which a
-			// structural schema cannot express (both are just strings to it).
+			// Past the schema but not convertible — an unparseable `at`/`expiresAt`,
+			// which a structural schema cannot express (both are just strings to it).
 			reply.Rejected = append(reply.Rejected, rejection{ID: rawEventID(raw), Reason: "malformed: " + err.Error()})
 			continue
 		}

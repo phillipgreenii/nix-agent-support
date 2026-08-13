@@ -7,10 +7,10 @@ import (
 	"time"
 )
 
-// DecodeEvent converts the wire shape (ttl duration string, RFC3339 at) into the
+// DecodeEvent converts the wire shape (RFC3339 `at` / `expiresAt`) into the
 // in-core Event.
 func TestDecodeEvent_FullEvent(t *testing.T) {
-	raw := `{"schemaVersion":"1","id":"evt-1","type":"review-requested","ttl":"15m","at":"2026-07-16T12:00:00Z","payload":{"pr":42}}`
+	raw := `{"schemaVersion":"1","id":"evt-1","type":"review-requested","at":"2026-07-16T12:00:00Z","expiresAt":"2026-07-16T12:15:00Z","payload":{"pr":42}}`
 	got, err := DecodeEvent([]byte(raw))
 	if err != nil {
 		t.Fatalf("DecodeEvent: %v", err)
@@ -18,39 +18,57 @@ func TestDecodeEvent_FullEvent(t *testing.T) {
 	if got.SchemaVersion != "1" || got.ID != "evt-1" || got.Type != "review-requested" {
 		t.Fatalf("envelope fields = %+v", got)
 	}
-	if got.TTL != 15*time.Minute {
-		t.Fatalf("ttl = %s, want 15m", got.TTL)
+	wantAt := time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC)
+	if !got.At.Equal(wantAt) {
+		t.Fatalf("at = %s, want %s", got.At, wantAt)
 	}
-	want := time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC)
-	if !got.At.Equal(want) {
-		t.Fatalf("at = %s, want %s", got.At, want)
+	wantExpiry := time.Date(2026, 7, 16, 12, 15, 0, 0, time.UTC)
+	if !got.ExpiresAt.Equal(wantExpiry) {
+		t.Fatalf("expiresAt = %s, want %s", got.ExpiresAt, wantExpiry)
 	}
 	if got.Payload["pr"] != float64(42) {
 		t.Fatalf("payload = %v, want the opaque payload carried through", got.Payload)
 	}
 }
 
-// `at` is OPTIONAL: absent leaves the zero time, and the core's own now at
-// ingest applies (INV-EVT-1).
-func TestDecodeEvent_AtIsOptional(t *testing.T) {
-	got, err := DecodeEvent([]byte(`{"id":"e","type":"t","ttl":"5m"}`))
+// Both instants are OPTIONAL, and DecodeEvent does NOT apply their defaults: it
+// leaves them ZERO for Event.Resolve to fill in at INGEST, against the CORE's
+// clock. Resolving at decode time would bind the defaults to whichever process
+// parsed the bytes — for a forwarded push-inject, the operator's CLI.
+func TestDecodeEvent_InstantsAreOptionalAndUnresolved(t *testing.T) {
+	got, err := DecodeEvent([]byte(`{"id":"e","type":"t"}`))
 	if err != nil {
 		t.Fatalf("DecodeEvent: %v", err)
 	}
 	if !got.At.IsZero() {
-		t.Fatalf("at = %s, want the zero time when absent", got.At)
+		t.Fatalf("at = %s, want the zero time when absent (the core resolves it)", got.At)
+	}
+	if !got.ExpiresAt.IsZero() {
+		t.Fatalf("expiresAt = %s, want the zero time when absent (the core resolves it)", got.ExpiresAt)
+	}
+}
+
+// An `at` with no `expiresAt` decodes as-is; the "expiresAt defaults to at" rule
+// belongs to Resolve, not the decoder.
+func TestDecodeEvent_AtWithoutExpiresAt(t *testing.T) {
+	got, err := DecodeEvent([]byte(`{"id":"e","type":"t","at":"2026-07-16T12:00:00Z"}`))
+	if err != nil {
+		t.Fatalf("DecodeEvent: %v", err)
+	}
+	if got.At.IsZero() || !got.ExpiresAt.IsZero() {
+		t.Fatalf("at=%s expiresAt=%s, want a decoded at and an untouched zero expiresAt", got.At, got.ExpiresAt)
 	}
 }
 
 // Conversions a structural schema cannot express are reported as ErrInvalidEvent,
-// so a caller can classify them as a malformed event.
+// so a caller can classify them as a malformed event. To the schema both fields
+// are just strings.
 func TestDecodeEvent_Rejections(t *testing.T) {
 	cases := map[string]string{
-		"missing ttl":     `{"id":"e","type":"t"}`,
-		"unparseable ttl": `{"id":"e","type":"t","ttl":"soon"}`,
-		"zero ttl":        `{"id":"e","type":"t","ttl":"0s"}`,
-		"negative ttl":    `{"id":"e","type":"t","ttl":"-5m"}`,
-		"unparseable at":  `{"id":"e","type":"t","ttl":"5m","at":"yesterday"}`,
+		"unparseable at":            `{"id":"e","type":"t","at":"yesterday"}`,
+		"unparseable expiresAt":     `{"id":"e","type":"t","expiresAt":"soon"}`,
+		"duration-shaped expiresAt": `{"id":"e","type":"t","expiresAt":"15m"}`,
+		"non-RFC3339 at":            `{"id":"e","type":"t","at":"2026-07-16 12:00:00"}`,
 	}
 	for desc, raw := range cases {
 		t.Run(desc, func(t *testing.T) {
@@ -58,6 +76,15 @@ func TestDecodeEvent_Rejections(t *testing.T) {
 				t.Fatalf("err = %v, want ErrInvalidEvent", err)
 			}
 		})
+	}
+}
+
+// The rejection names WHICH instant was unparseable, so an operator who typed one
+// of two similar fields wrong is told which.
+func TestDecodeEvent_RejectionNamesTheField(t *testing.T) {
+	_, err := DecodeEvent([]byte(`{"id":"e","type":"t","expiresAt":"soon"}`))
+	if err == nil || !strings.Contains(err.Error(), "expiresAt") {
+		t.Fatalf("err = %v, want the offending field named", err)
 	}
 }
 
@@ -75,7 +102,7 @@ func TestDecodeEvent_MalformedJSON(t *testing.T) {
 // forward an already-decoded event to a core in another process without the
 // forwarded bytes drifting from what that core's decoder accepts.
 func TestEncodeEvent_RoundTripsThroughDecode(t *testing.T) {
-	raw := `{"schemaVersion":"1","id":"evt-1","type":"review-requested","ttl":"15m","at":"2026-07-16T12:00:00Z","payload":{"pr":42}}`
+	raw := `{"schemaVersion":"1","id":"evt-1","type":"review-requested","at":"2026-07-16T12:00:00Z","expiresAt":"2026-07-16T12:15:00Z","payload":{"pr":42}}`
 	first, err := DecodeEvent([]byte(raw))
 	if err != nil {
 		t.Fatalf("DecodeEvent: %v", err)
@@ -91,44 +118,77 @@ func TestEncodeEvent_RoundTripsThroughDecode(t *testing.T) {
 	if second.SchemaVersion != first.SchemaVersion || second.ID != first.ID || second.Type != first.Type {
 		t.Fatalf("envelope drifted: %+v -> %+v", first, second)
 	}
-	if second.TTL != first.TTL {
-		t.Fatalf("ttl drifted: %s -> %s", first.TTL, second.TTL)
-	}
 	if !second.At.Equal(first.At) {
 		t.Fatalf("at drifted: %s -> %s", first.At, second.At)
+	}
+	if !second.ExpiresAt.Equal(first.ExpiresAt) {
+		t.Fatalf("expiresAt drifted: %s -> %s", first.ExpiresAt, second.ExpiresAt)
 	}
 	if second.Payload["pr"] != first.Payload["pr"] {
 		t.Fatalf("payload drifted: %v -> %v", first.Payload, second.Payload)
 	}
 }
 
-// The OPTIONAL fields are OMITTED, not emitted empty: event.schema.json closes the
-// object and types `at` as a string and `payload` as an object, so `"at":""` or
-// `"payload":null` would be a malformed event at the receiving core.
-func TestEncodeEvent_OmitsAbsentOptionalFields(t *testing.T) {
-	wire, err := EncodeEvent(Event{ID: "e", Type: "t", TTL: 5 * time.Minute})
+// A RESOLVED instant comes off a real clock and carries sub-second precision, so
+// the round trip MUST NOT truncate it: a forwarded event whose expiry moved by up
+// to a second would change the receiving core's INV-EVT-4 verdict.
+func TestEncodeEvent_RoundTripPreservesSubSecondPrecision(t *testing.T) {
+	at := time.Date(2026, 7, 16, 12, 0, 0, 123456789, time.UTC)
+	wire, err := EncodeEvent(Event{ID: "e", Type: "t", At: at, ExpiresAt: at.Add(time.Millisecond)})
 	if err != nil {
 		t.Fatalf("EncodeEvent: %v", err)
 	}
-	for _, field := range []string{"at", "payload", "schemaVersion"} {
+	got, err := DecodeEvent(wire)
+	if err != nil {
+		t.Fatalf("DecodeEvent: %v", err)
+	}
+	if !got.At.Equal(at) || !got.ExpiresAt.Equal(at.Add(time.Millisecond)) {
+		t.Fatalf("sub-second precision lost: %s / %s (encoded %s)", got.At, got.ExpiresAt, wire)
+	}
+}
+
+// The OPTIONAL fields are OMITTED, not emitted empty: event.schema.json closes the
+// object and types `at`/`expiresAt` as strings and `payload` as an object, so
+// `"expiresAt":""` or `"payload":null` would be a malformed event at the receiving
+// core. Omitting an unset instant is also what lets the RECEIVING core apply the
+// defaults against its own clock.
+func TestEncodeEvent_OmitsAbsentOptionalFields(t *testing.T) {
+	wire, err := EncodeEvent(Event{ID: "e", Type: "t"})
+	if err != nil {
+		t.Fatalf("EncodeEvent: %v", err)
+	}
+	for _, field := range []string{"at", "expiresAt", "payload", "schemaVersion"} {
 		if strings.Contains(string(wire), `"`+field+`"`) {
 			t.Fatalf("encoded %s carries an absent optional field %q", wire, field)
 		}
 	}
-	for _, field := range []string{"id", "type", "ttl"} {
+	for _, field := range []string{"id", "type"} {
 		if !strings.Contains(string(wire), `"`+field+`"`) {
 			t.Fatalf("encoded %s is missing the required field %q", wire, field)
 		}
 	}
 }
 
+// The duration-valued field is GONE from the wire (DEC-EVENT-1): nothing this
+// encoder emits computes or carries a duration.
+func TestEncodeEvent_EmitsNoDurationField(t *testing.T) {
+	at := time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC)
+	wire, err := EncodeEvent(Event{ID: "e", Type: "t", At: at, ExpiresAt: at.Add(15 * time.Minute)})
+	if err != nil {
+		t.Fatalf("EncodeEvent: %v", err)
+	}
+	if strings.Contains(string(wire), `"ttl"`) {
+		t.Fatalf("encoded %s still carries a duration-valued field", wire)
+	}
+}
+
 // An Event with no valid wire form is reported at the encoder, not shipped to a
-// core to come back as an opaque "malformed" rejection.
+// core to come back as an opaque "malformed" rejection. An UNSET instant is not a
+// fault — it is the default — so it is NOT in this list.
 func TestEncodeEvent_RejectsInvalidEvent(t *testing.T) {
 	cases := map[string]Event{
-		"missing id":       {Type: "t", TTL: time.Minute},
-		"missing type":     {ID: "e", TTL: time.Minute},
-		"non-positive ttl": {ID: "e", Type: "t"},
+		"missing id":   {Type: "t"},
+		"missing type": {ID: "e"},
 	}
 	for desc, evt := range cases {
 		t.Run(desc, func(t *testing.T) {
@@ -139,6 +199,14 @@ func TestEncodeEvent_RejectsInvalidEvent(t *testing.T) {
 	}
 }
 
+// An event carrying NEITHER instant has a perfectly valid wire form — it is the
+// DEFAULT event, and the receiving core resolves it to born-expired.
+func TestEncodeEvent_AcceptsTheDefaultEvent(t *testing.T) {
+	if _, err := EncodeEvent(Event{ID: "e", Type: "t"}); err != nil {
+		t.Fatalf("the default event has no wire form: %v", err)
+	}
+}
+
 // A decoded event must be Enqueue-able: the decoder and Validate agree on what a
 // usable event is.
 func TestDecodeEvent_FeedsEnqueue(t *testing.T) {
@@ -146,7 +214,7 @@ func TestDecodeEvent_FeedsEnqueue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	evt, err := DecodeEvent([]byte(`{"id":"e","type":"t","ttl":"5m"}`))
+	evt, err := DecodeEvent([]byte(`{"id":"e","type":"t"}`))
 	if err != nil {
 		t.Fatalf("DecodeEvent: %v", err)
 	}

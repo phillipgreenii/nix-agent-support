@@ -10,7 +10,14 @@ import (
 	"github.com/phillipgreenii/pr-pool/internal/emit"
 )
 
-const testPushEvent = `{"schemaVersion":"1","id":"op-1","type":"review-requested","ttl":"15m","payload":{"pr":42}}`
+// testPushEvent carries an explicit far-future `expiresAt` so the injected event
+// is still RETAINED when the assertions look at the core's queue depth. The
+// DEFAULT (no instants at all) is born expired — offered once, then dropped
+// (INV-EVT-4) — which is exactly what testPushEventDefault below exercises.
+const testPushEvent = `{"schemaVersion":"1","id":"op-1","type":"review-requested","expiresAt":"2099-01-01T00:00:00Z","payload":{"pr":42}}`
+
+// testPushEventDefault is the DEFAULT event shape: no `at`, no `expiresAt`.
+const testPushEventDefault = `{"schemaVersion":"1","id":"op-2","type":"review-requested","payload":{"pr":42}}`
 
 // injectedLocator names a core by socket/token, as `--socket`/`--token` would.
 func injectedLocator(socket, token string) emit.Locator {
@@ -69,31 +76,76 @@ func TestPushInject_JSONOutput(t *testing.T) {
 	if code != exitOK {
 		t.Fatalf("exit = %d, want 0; stderr=%s", code, stderr.String())
 	}
-	var got struct {
-		SchemaVersion string `json:"schemaVersion"`
-		Accepted      bool   `json:"accepted"`
-		Event         struct {
-			ID, Type, TTL string
-		} `json:"event"`
-		Core struct {
-			Socket     string `json:"socket"`
-			Discovered bool   `json:"discovered"`
-		} `json:"core"`
-	}
+	var got pushInjectJSON
 	if err := json.Unmarshal([]byte(stdout.String()), &got); err != nil {
 		t.Fatalf("stdout %q is not one JSON object: %v", stdout.String(), err)
 	}
 	if got.SchemaVersion != "1" || !got.Accepted {
 		t.Fatalf("report = %+v, want schemaVersion 1 and accepted", got)
 	}
-	if got.Event.ID != "op-1" || got.Event.Type != "review-requested" || got.Event.TTL != "15m0s" {
+	if got.Event.ID != "op-1" || got.Event.Type != "review-requested" {
 		t.Fatalf("event = %+v, want the injected event echoed", got.Event)
+	}
+	if got.Event.ExpiresAt != "2099-01-01T00:00:00Z" {
+		t.Fatalf("event expiresAt = %q, want the injected instant echoed verbatim", got.Event.ExpiresAt)
+	}
+	// `at` was not supplied, so it is OMITTED rather than filled in: the default
+	// belongs to the core's clock at ingest (INV-EVT-1), not to this CLI.
+	if got.Event.At != "" {
+		t.Fatalf("event at = %q, want it omitted — the CLI must not invent the core's default", got.Event.At)
 	}
 	if got.Core.Socket != svc.Ref().Socket || got.Core.Discovered {
 		t.Fatalf("core = %+v, want the injected socket marked not-discovered", got.Core)
 	}
 	if strings.Contains(stdout.String(), svc.Ref().Token) {
 		t.Fatal("the auth token leaked into --json output")
+	}
+}
+
+// pushInjectJSON is the report shape as a CONSUMER of `--json` sees it.
+type pushInjectJSON struct {
+	SchemaVersion string `json:"schemaVersion"`
+	Accepted      bool   `json:"accepted"`
+	Event         struct {
+		ID        string `json:"id"`
+		Type      string `json:"type"`
+		At        string `json:"at"`
+		ExpiresAt string `json:"expiresAt"`
+	} `json:"event"`
+	Core struct {
+		Socket     string `json:"socket"`
+		Discovered bool   `json:"discovered"`
+	} `json:"core"`
+}
+
+// The DEFAULT event (neither instant) is a first-class injection, and both fields
+// are OMITTED from the report — nothing is invented on the operator's behalf. The
+// human output says so out loud, because "I set no expiry" reads as "it never
+// expires" while the contract means the opposite (INV-EVT-4, DEC-EVENT-1).
+func TestPushInject_DefaultEventIsBornExpiredAndSaysSo(t *testing.T) {
+	dir := shortDir(t)
+	svc := startCore(t, dir)
+
+	var stdout, stderr strings.Builder
+	code := pushInject(&stdout, &stderr, false, injectedLocator(svc.Ref().Socket, svc.Ref().Token), emit.SocketEnqueuer{}, testPushEventDefault)
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0; stderr=%s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "born expired") {
+		t.Fatalf("stdout = %q, want it to name the born-expired default", stdout.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	if code := pushInject(&stdout, &stderr, true, injectedLocator(svc.Ref().Socket, svc.Ref().Token), emit.SocketEnqueuer{}, testPushEventDefault); code != exitOK {
+		t.Fatalf("exit = %d, want 0; stderr=%s", code, stderr.String())
+	}
+	var got pushInjectJSON
+	if err := json.Unmarshal([]byte(stdout.String()), &got); err != nil {
+		t.Fatalf("stdout %q is not one JSON object: %v", stdout.String(), err)
+	}
+	if got.Event.At != "" || got.Event.ExpiresAt != "" {
+		t.Fatalf("event = %+v, want both instants omitted for a default event", got.Event)
 	}
 }
 
@@ -168,9 +220,11 @@ func TestPushInject_JSONFailureIsStillJSON(t *testing.T) {
 // typo never depends on a core being up to be reported.
 func TestPushInject_RejectsMalformedEvent(t *testing.T) {
 	cases := map[string]string{
-		"not json":    `{not json`,
-		"missing ttl": `{"schemaVersion":"1","id":"x","type":"t"}`,
-		"bad at":      `{"schemaVersion":"1","id":"x","type":"t","ttl":"5m","at":"yesterday"}`,
+		"not json":              `{not json`,
+		"missing type":          `{"schemaVersion":"1","id":"x"}`,
+		"bad at":                `{"schemaVersion":"1","id":"x","type":"t","at":"yesterday"}`,
+		"bad expiresAt":         `{"schemaVersion":"1","id":"x","type":"t","expiresAt":"soon"}`,
+		"legacy duration field": `{"schemaVersion":"1","id":"x","type":"t","ttl":"5m"}`,
 	}
 	for desc, arg := range cases {
 		t.Run(desc, func(t *testing.T) {

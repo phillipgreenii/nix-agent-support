@@ -14,7 +14,7 @@ import (
 	"github.com/phillipgreenii/pr-pool/internal/eventqueue"
 )
 
-const testIngestRequest = `{"schemaVersion":"1","id":"trk-1","events":[{"id":"e1","type":"t","ttl":"5m"}]}`
+const testIngestRequest = `{"schemaVersion":"1","id":"trk-1","events":[{"id":"e1","type":"t"}]}`
 
 // shortDir returns a SHORT temp dir; a unix socket path is capped at ~104 bytes by
 // the platform and t.TempDir() embeds the (long) test name.
@@ -93,7 +93,9 @@ func TestCallCore_RelaysRejection(t *testing.T) {
 
 	var stdout, stderr strings.Builder
 	code := callCore(&stdout, &stderr, svc.Ref(), core.SubcommandIngestEvent,
-		[]byte(`{"schemaVersion":"1","id":"trk-1","events":[{"id":"bad","type":"t"}]}`))
+		// An unparseable `expiresAt`: schema-valid (it is just a string there) but not
+		// convertible, so the core rejects the event rather than the envelope.
+		[]byte(`{"schemaVersion":"1","id":"trk-1","events":[{"id":"bad","type":"t","expiresAt":"soon"}]}`))
 	if code != conformance.ExitError {
 		t.Fatalf("exit = %d, want 1 for a rejected event", code)
 	}

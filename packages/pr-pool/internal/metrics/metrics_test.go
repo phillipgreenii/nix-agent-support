@@ -116,7 +116,7 @@ func TestInstrumentsRegistered(t *testing.T) {
 	h := newHarness(t)
 	// Drive one of each so the instruments appear in the collected set.
 	h.emitter.RecordFailure("critical")
-	mustEnqueue(t, h.q, "e1", "review-requested", 10*time.Minute)
+	h.enqueue(t, "e1", "review-requested", 10*time.Minute)
 
 	rm := h.collect(t)
 	depth := findMetric(t, rm, MetricQueueDepth)
@@ -137,13 +137,13 @@ func TestInstrumentsRegistered(t *testing.T) {
 // queue depth tracks enqueue/accept: it reflects the live retained set per type.
 func TestQueueDepthTracksEnqueue(t *testing.T) {
 	h := newHarness(t)
-	mustEnqueue(t, h.q, "e1", "review-requested", 10*time.Minute)
-	mustEnqueue(t, h.q, "e2", "review-requested", 10*time.Minute)
+	h.enqueue(t, "e1", "review-requested", 10*time.Minute)
+	h.enqueue(t, "e2", "review-requested", 10*time.Minute)
 	rm := h.collect(t)
 	if got := gaugeVal(rm, MetricQueueDepth, "type", "review-requested"); got != 2 {
 		t.Fatalf("queue_depth[review-requested] = %d, want 2", got)
 	}
-	// After ttl expiry the depth returns to zero (gauge emits no datapoint -> -1).
+	// Once expired AND unowed the depth returns to zero (gauge emits no datapoint -> -1).
 	h.clk.advance(11 * time.Minute)
 	h.q.Expire()
 	rm = h.collect(t)
@@ -152,11 +152,11 @@ func TestQueueDepthTracksEnqueue(t *testing.T) {
 	}
 }
 
-// Integration through the queue: unconsumed-expired fires when an event reaches
-// ttl with no accepting consumer (per-type label).
+// Integration through the queue: unconsumed-expired fires when an event expires
+// with no accepting consumer (per-type label).
 func TestUnconsumedExpiredThroughQueue(t *testing.T) {
 	h := newHarness(t)
-	mustEnqueue(t, h.q, "orphan1", "review-requested", 5*time.Minute)
+	h.enqueue(t, "orphan1", "review-requested", 5*time.Minute)
 	h.clk.advance(6 * time.Minute)
 	h.q.Expire()
 	rm := h.collect(t)
@@ -210,9 +210,14 @@ func (failMeter) Int64Counter(string, ...metric.Int64CounterOption) (metric.Int6
 
 // --- helpers --------------------------------------------------------------
 
-func mustEnqueue(t *testing.T, q *eventqueue.Queue, id, typ string, ttl time.Duration) {
+// enqueue appends an event with an explicit absolute `expiresAt`, computed off the
+// harness's mock clock. Expiry is an INSTANT and never a duration (DEC-EVENT-1),
+// so `expiresIn` is a test-side convenience for picking that instant, not a field
+// the event carries.
+func (h *harness) enqueue(t *testing.T, id, typ string, expiresIn time.Duration) {
 	t.Helper()
-	if _, err := q.Enqueue(eventqueue.Event{ID: id, Type: typ, TTL: ttl}); err != nil {
+	evt := eventqueue.Event{ID: id, Type: typ, ExpiresAt: h.clk.now().Add(expiresIn)}
+	if _, err := h.q.Enqueue(evt); err != nil {
 		t.Fatalf("enqueue %s: %v", id, err)
 	}
 }

@@ -1,16 +1,28 @@
 {
   "$id": "event",
   "title": "INTF-SOURCE event",
-  "description": "A typed event flowing from a source through the core's durable queue to a handler (interfaces.md, INV-EVT-1).",
+  "description": "A typed event flowing from a source through the core's durable queue to a handler (interfaces.md, INV-EVT-1). Expiry is an ABSOLUTE INSTANT (RFC3339) and both instants are OPTIONAL: an absent expiresAt defaults to at, and an absent at to the core's own now at ingest, so an event carrying neither is born expired and is offered once to every matching handler before it is dropped (INV-EVT-4, DEC-EVENT-1). No duration-valued field exists here, and additionalProperties:false therefore REJECTS the ttl field this shape replaced. Both are typed only as strings: whether a present value PARSES is a conversion the core reports (eventqueue.DecodeEvent), not something a structural schema can express.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["id", "type", "ttl"],
+  "required": ["id", "type"],
   "properties": {
-    "schemaVersion": { "type": "string" },
-    "id": { "type": "string" },
-    "type": { "type": "string" },
-    "ttl": { "type": "string" },
-    "at": { "type": "string" },
-    "payload": { "type": "object" }
+    "schemaVersion": {
+      "type": "string"
+    },
+    "id": {
+      "type": "string"
+    },
+    "type": {
+      "type": "string"
+    },
+    "at": {
+      "type": "string"
+    },
+    "expiresAt": {
+      "type": "string"
+    },
+    "payload": {
+      "type": "object"
+    }
   }
 }

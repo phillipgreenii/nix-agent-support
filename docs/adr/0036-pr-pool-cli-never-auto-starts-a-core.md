@@ -54,7 +54,12 @@ requirement.
 - A push source's events are **not** delivered while no core is running. This is not a new loss:
   under the durable queue, delivery is guaranteed only once an event is **enqueued**, and a source
   that cannot reach the core has not enqueued anything. The source sees a non-zero exit code and can
-  re-emit; the core de-duplicates by event `id` within `ttl` (`INV-EVT-3`), so re-emitting is safe.
+  re-emit; the core de-duplicates by event `id` across its **retained id set** (`INV-EVT-3`), so
+  re-emitting is safe. _(This bullet originally named the event's duration-valued `ttl` as the window.
+  That field is gone —
+  `phillipgreenii-nix-agent-support · packages/pr-pool/docs/decisions · DEC-EVENT-1` replaced it with
+  an absolute `expiresAt` — and retention is now the window. The decision above is unaffected: the
+  point is that a re-emit is safe, not how wide the window is.)_
 - Operators must run the core explicitly. That is the intended posture for a daemon — the same
   posture as the machine-wide "no rogue auto-start" stance taken for beads/dolt in
   [ADR 0032](0032-beads-dolt-no-autostart.md), for the same underlying reason: a process that

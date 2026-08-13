@@ -6,7 +6,7 @@
 // concrete sink is a deployment binding via INTF-MON.
 //
 // The Emitter implements eventqueue.Observer, so the queue drives the metrics
-// end to end: unconsumed-expired fires from the queue's ttl-expiry path, and
+// end to end: unconsumed-expired fires from the queue's expiry-sweep path, and
 // the depth gauge reads the queue's live per-type depth on collect. Failure
 // rate is fed from handler session-status failures via RecordFailure.
 //
@@ -58,7 +58,7 @@ func New(mp metric.MeterProvider, depthFn func() map[string]int) (*Emitter, erro
 	unconsumed, err := m.Int64Counter(
 		MetricUnconsumedExpired,
 		metric.WithUnit("{event}"),
-		metric.WithDescription("events that reached ttl with no handler accepting them, per type (INV-DISP-3)"),
+		metric.WithDescription("events that expired with no handler accepting them, per type — under INV-EVT-4 a genuine miss (INV-DISP-3)"),
 	)
 	if err != nil {
 		return nil, err
@@ -87,7 +87,7 @@ func (e *Emitter) OnAccept(_, _ string)       {}
 
 // OnUnconsumedExpired increments the unconsumed-expired counter for the event's
 // type — the concrete "no event misses" signal (INV-DISP-3), fired from the
-// queue's ttl-expiry path.
+// queue's expiry-sweep path.
 func (e *Emitter) OnUnconsumedExpired(evtType string) {
 	e.unconsumed.Add(context.Background(), 1, metric.WithAttributes(attribute.String("type", evtType)))
 }

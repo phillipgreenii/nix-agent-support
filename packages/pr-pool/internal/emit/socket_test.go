@@ -122,13 +122,13 @@ func TestEmit_SocketEnqueuer_DeliversToInjectedCore(t *testing.T) {
 	}
 }
 
-// A re-emit within the ttl is absorbed by the core's de-duplication (INV-EVT-3) and
-// is still reported as ACCEPTED — the wire reply folds dedupe into `accepted`, so
+// A re-emit while the event is still RETAINED is absorbed by the core's
+// de-duplication (INV-EVT-3) and is still reported as ACCEPTED — the wire reply folds dedupe into `accepted`, so
 // this must not surface as a failure.
 //
 // It also pins the STATUS side of that fold: every emit over the socket reports
 // Enqueued, INCLUDING the absorbed re-emit that the in-process path reports as
-// Deduped (TestEmit_DedupesReEmitWithinTTL). This is the counterpart to that test
+// Deduped (TestEmit_DedupesReEmitWhileRetained). This is the counterpart to that test
 // and to Result.Status's doc: Deduped is unobservable over the wire, so a future
 // SocketEnqueuer must not start GUESSING it from an unchanged reply schema — the
 // reply has no field to derive it from.
@@ -161,7 +161,7 @@ func TestSocketEnqueuer_BadTokenIsRefused(t *testing.T) {
 
 	_, err := SocketEnqueuer{}.Enqueue(
 		CoreRef{Socket: svc.Ref().Socket, Token: "wrong"},
-		eventqueue.Event{ID: "e1", Type: "t", TTL: time.Minute},
+		eventqueue.Event{ID: "e1", Type: "t"},
 	)
 	if err == nil {
 		t.Fatal("a bad token was reported as a successful injection")
@@ -203,7 +203,7 @@ func TestSocketEnqueuer_CoreRejectionIsAnError(t *testing.T) {
 func TestSocketEnqueuer_NoRunningCore(t *testing.T) {
 	_, err := SocketEnqueuer{}.Enqueue(
 		CoreRef{Socket: filepath.Join(shortDir(t), "gone.sock")},
-		eventqueue.Event{ID: "e1", Type: "t", TTL: time.Minute},
+		eventqueue.Event{ID: "e1", Type: "t"},
 	)
 	if !errors.Is(err, core.ErrNoRunningCore) {
 		t.Fatalf("err = %v, want core.ErrNoRunningCore", err)
@@ -212,7 +212,7 @@ func TestSocketEnqueuer_NoRunningCore(t *testing.T) {
 
 // A ref that names neither a socket nor the local core locates nothing.
 func TestSocketEnqueuer_RefWithNoSocket(t *testing.T) {
-	_, err := SocketEnqueuer{}.Enqueue(CoreRef{}, eventqueue.Event{ID: "e1", Type: "t", TTL: time.Minute})
+	_, err := SocketEnqueuer{}.Enqueue(CoreRef{}, eventqueue.Event{ID: "e1", Type: "t"})
 	if !errors.Is(err, core.ErrNoRunningCore) {
 		t.Fatalf("err = %v, want core.ErrNoRunningCore", err)
 	}
@@ -220,7 +220,7 @@ func TestSocketEnqueuer_RefWithNoSocket(t *testing.T) {
 
 // The symmetric refusal: SocketEnqueuer cannot serve the IN-PROCESS core.
 func TestSocketEnqueuer_RefusesLocalCore(t *testing.T) {
-	_, err := SocketEnqueuer{}.Enqueue(CoreRef{Local: true}, eventqueue.Event{ID: "e1", Type: "t", TTL: time.Minute})
+	_, err := SocketEnqueuer{}.Enqueue(CoreRef{Local: true}, eventqueue.Event{ID: "e1", Type: "t"})
 	if !errors.Is(err, ErrWrongEnqueuer) {
 		t.Fatalf("err = %v, want ErrWrongEnqueuer", err)
 	}
@@ -229,7 +229,7 @@ func TestSocketEnqueuer_RefusesLocalCore(t *testing.T) {
 // An Event with no valid wire form is reported HERE, not pushed onto the core as an
 // opaque "malformed" rejection.
 func TestSocketEnqueuer_RejectsUnencodableEvent(t *testing.T) {
-	_, err := SocketEnqueuer{}.Enqueue(CoreRef{Socket: "/nope.sock"}, eventqueue.Event{ID: "", Type: "t", TTL: time.Minute})
+	_, err := SocketEnqueuer{}.Enqueue(CoreRef{Socket: "/nope.sock"}, eventqueue.Event{ID: "", Type: "t"})
 	if !errors.Is(err, eventqueue.ErrInvalidEvent) {
 		t.Fatalf("err = %v, want eventqueue.ErrInvalidEvent", err)
 	}
@@ -299,7 +299,7 @@ func enqueueVia(t *testing.T, sock string) error {
 	t.Helper()
 	_, err := SocketEnqueuer{}.Enqueue(
 		CoreRef{Socket: sock, Token: "tok"},
-		eventqueue.Event{ID: "e1", Type: "t", TTL: time.Minute},
+		eventqueue.Event{ID: "e1", Type: "t"},
 	)
 	return err
 }
@@ -353,7 +353,7 @@ func TestFakeCore_FramesMatchTheRealTransport(t *testing.T) {
 	req := map[string]any{
 		"token":      svc.Ref().Token,
 		"subcommand": core.SubcommandIngestEvent,
-		"payload":    json.RawMessage(`{"schemaVersion":"1","id":"trk","events":[{"id":"e1","type":"t","ttl":"5m"}]}`),
+		"payload":    json.RawMessage(`{"schemaVersion":"1","id":"trk","events":[{"id":"e1","type":"t"}]}`),
 	}
 	if err := json.NewEncoder(conn).Encode(req); err != nil {
 		t.Fatalf("encode request frame: %v", err)

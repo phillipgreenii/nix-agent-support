@@ -163,7 +163,7 @@ func Emit(jsonArg []byte, loc Locator, enq Enqueuer) (Result, error) {
 	if err := conformance.CheckBytes(pushInjectSchema, jsonArg); err != nil {
 		return Result{}, fmt.Errorf("emit: rejected: %w", err)
 	}
-	// 2. Parse into the core event (ttl is a duration string on the wire).
+	// 2. Parse into the core event (the wire instants are RFC3339 strings).
 	evt, err := parseEvent(jsonArg)
 	if err != nil {
 		return Result{}, err
@@ -182,7 +182,7 @@ func Emit(jsonArg []byte, loc Locator, enq Enqueuer) (Result, error) {
 }
 
 // parseEvent decodes the validated JSON into a core event. The wire→core
-// conversion (ttl duration string, optional RFC3339 at) is delegated to the
+// conversion (the optional RFC3339 `at` / `expiresAt`) is delegated to the
 // SHARED decoder eventqueue.DecodeEvent, which the `ingest-event` manager
 // callback (internal/core) uses too — the operator front door and the callback
 // front door MUST agree on how a wire event becomes an Event.

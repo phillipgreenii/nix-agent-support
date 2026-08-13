@@ -59,7 +59,7 @@ func TestDispatchSurfacesAcceptAppendError(t *testing.T) {
 	}
 	l := newListener("h", "T")
 	q.Register(l)
-	mustEnqueue(t, q, evt("e1", "T", time.Hour))
+	mustEnqueue(t, q, evtUntil("e1", "T", time.Now().Add(time.Hour)))
 
 	if n := q.Dispatch(); n != 1 {
 		t.Fatalf("accepted = %d, want 1 (delivery unchanged despite the append failure)", n)
@@ -90,7 +90,7 @@ func TestCrashWindowRedeliversAcceptedEventAtLeastOnce(t *testing.T) {
 	}
 	l1 := newListener("h", "T")
 	q1.Register(l1)
-	mustEnqueue(t, q1, evt("e1", "T", time.Hour))
+	mustEnqueue(t, q1, evtUntil("e1", "T", time.Now().Add(time.Hour)))
 	q1.Dispatch()
 	if !equal(l1.accepted, []string{"e1"}) {
 		t.Fatalf("pre-crash accept failed: %v", l1.accepted)
@@ -126,7 +126,7 @@ func TestRestartWithPersistedAcceptDoesNotRedeliver(t *testing.T) {
 	}
 	l1 := newListener("h", "T")
 	q1.Register(l1)
-	mustEnqueue(t, q1, evt("e1", "T", time.Hour))
+	mustEnqueue(t, q1, evtUntil("e1", "T", time.Now().Add(time.Hour)))
 	q1.Dispatch()
 
 	q2, err := New(mem)
@@ -155,7 +155,7 @@ func TestFileStoreRestartRecoversEvent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mustEnqueue(t, q1, evt("e1", "T", time.Hour))
+	mustEnqueue(t, q1, evtUntil("e1", "T", time.Now().Add(time.Hour)))
 	if err := s1.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -192,7 +192,7 @@ func TestFileStoreTornTailTolerated(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mustEnqueue(t, q1, evt("e1", "T", time.Hour))
+	mustEnqueue(t, q1, evtUntil("e1", "T", time.Now().Add(time.Hour)))
 	_ = s1.Close()
 
 	// Append a half-written (torn) JSON line, as a crash mid-write would leave.

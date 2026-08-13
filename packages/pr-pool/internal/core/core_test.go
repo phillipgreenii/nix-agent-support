@@ -119,7 +119,7 @@ func TestSocket_ConcurrentCallers(t *testing.T) {
 				return
 			}
 			defer func() { _ = client.Close() }()
-			req := `{"schemaVersion":"1","id":"trk-` + string(rune('a'+i)) + `","events":[{"id":"e` + string(rune('a'+i)) + `","type":"t","ttl":"5m"}]}`
+			req := `{"schemaVersion":"1","id":"trk-` + string(rune('a'+i)) + `","events":[{"id":"e` + string(rune('a'+i)) + `","type":"t"}]}`
 			_, code, err := client.Call(SubcommandIngestEvent, []byte(req))
 			if err != nil {
 				t.Errorf("Call: %v", err)

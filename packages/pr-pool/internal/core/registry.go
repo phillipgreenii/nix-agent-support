@@ -217,7 +217,8 @@ func (r *Registry) Len() int {
 // self-reporting `unavailable`.
 //
 // A false here is a PRE-ACCEPT decline, not a delivery failure: the core keeps the
-// event and re-offers it within its ttl (INV-CONC-1 / INV-FAIL-1), exactly as it
+// event and re-offers it while it is unexpired (INV-CONC-1 / INV-FAIL-1, bounded by
+// INV-EVT-4), exactly as it
 // does for a `busy` exit code. `degraded` stays routable — it is a warning about
 // quality, not a refusal of work.
 func (r *Registry) Available(id string) bool {

@@ -7,10 +7,12 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	"github.com/phillipgreenii/pr-pool/conformance"
 	"github.com/phillipgreenii/pr-pool/internal/config"
 	"github.com/phillipgreenii/pr-pool/internal/emit"
+	"github.com/phillipgreenii/pr-pool/internal/eventqueue"
 	"github.com/phillipgreenii/pr-pool/schemas"
 )
 
@@ -94,17 +96,48 @@ func pushInject(stdout, stderr io.Writer, asJSON bool, loc emit.Locator, enq emi
 			SchemaVersion: schemas.SchemaVersion,
 			Accepted:      true,
 			Event: &pushInjectEvent{
-				ID:   res.Event.ID,
-				Type: res.Event.Type,
-				TTL:  res.Event.TTL.String(),
+				ID:        res.Event.ID,
+				Type:      res.Event.Type,
+				At:        instantOrEmpty(res.Event.At),
+				ExpiresAt: instantOrEmpty(res.Event.ExpiresAt),
 			},
 			Core: &pushInjectCore{Socket: res.Core.Socket, Discovered: res.Core.Discovered},
 		})
 	} else {
-		fmt.Fprintf(stdout, "push-inject: accepted event %q (type %q, ttl %s) by the core at %s%s\n",
-			res.Event.ID, res.Event.Type, res.Event.TTL, res.Core.Socket, discoveredSuffix(res.Core.Discovered))
+		fmt.Fprintf(stdout, "push-inject: accepted event %q (type %q%s) by the core at %s%s\n",
+			res.Event.ID, res.Event.Type, expiryNote(res.Event), res.Core.Socket, discoveredSuffix(res.Core.Discovered))
 	}
 	return exitOK
+}
+
+// instantOrEmpty renders an OPTIONAL event instant for the `--json` report, or ""
+// so `omitempty` drops it. It echoes what the OPERATOR supplied and does not
+// substitute a default: the defaults belong to the core's clock at ingest
+// (INV-EVT-1), and this CLI is not that clock.
+func instantOrEmpty(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.UTC().Format(time.RFC3339Nano)
+}
+
+// expiryNote spells out, in the human output, WHEN the injected event expires.
+// Both `at` and `expiresAt` are optional and both DEFAULT — absent `expiresAt`
+// falls back to `at`, and absent `at` to the core's own now at ingest — so an
+// event carrying NEITHER is BORN EXPIRED: offered once to every matching handler,
+// then dropped (INV-EVT-4). That is the intended best-effort default, but it is
+// also the opposite of what "I set no expiry" usually means, so the note says
+// which of the three cases this injection actually is rather than leaving the
+// operator to infer it.
+func expiryNote(e eventqueue.Event) string {
+	switch {
+	case !e.ExpiresAt.IsZero():
+		return ", expires " + e.ExpiresAt.UTC().Format(time.RFC3339Nano)
+	case !e.At.IsZero():
+		return ", expires at its own `at` stamp " + e.At.UTC().Format(time.RFC3339Nano) + " (no expiresAt given)"
+	default:
+		return ", born expired: offered once to every matching handler, then dropped"
+	}
 }
 
 // pushInjectReport is the `--json` output shape. It is NOT one of the INTF
@@ -127,10 +160,15 @@ type pushInjectReport struct {
 	Error    string           `json:"error,omitempty"`
 }
 
+// pushInjectEvent echoes the injected event's identity and its OPTIONAL expiry
+// instants (RFC3339). Both are `omitempty`: absent means the operator supplied
+// nothing there, and the core applied the INV-EVT-1 default against its own clock
+// — reporting a value this CLI invented would misattribute it.
 type pushInjectEvent struct {
-	ID   string `json:"id"`
-	Type string `json:"type"`
-	TTL  string `json:"ttl"`
+	ID        string `json:"id"`
+	Type      string `json:"type"`
+	At        string `json:"at,omitempty"`
+	ExpiresAt string `json:"expiresAt,omitempty"`
 }
 
 type pushInjectCore struct {

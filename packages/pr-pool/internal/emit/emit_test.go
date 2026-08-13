@@ -9,10 +9,14 @@ import (
 	"github.com/phillipgreenii/pr-pool/internal/eventqueue"
 )
 
-const validEvent = `{"schemaVersion":"1","id":"op-1","type":"review-requested","ttl":"15m","payload":{"pr":42}}`
+// validEvent carries an explicit far-future `expiresAt`. That is deliberate:
+// `expiresAt` is the retry AND de-duplication window (INV-EVT-3 / INV-EVT-4), so
+// the tests below that need a re-emit to be ABSORBED must ask for a window — under
+// the born-expired default there is barely one.
+const validEvent = `{"schemaVersion":"1","id":"op-1","type":"review-requested","expiresAt":"2099-01-01T00:00:00Z","payload":{"pr":42}}`
 
 // validEventWithAt carries an optional RFC3339 `at` source-stamp.
-const validEventWithAt = `{"schemaVersion":"1","id":"op-at","type":"review-requested","ttl":"15m","at":"2026-07-16T12:00:00Z","payload":{"pr":42}}`
+const validEventWithAt = `{"schemaVersion":"1","id":"op-at","type":"review-requested","at":"2026-07-16T12:00:00Z","expiresAt":"2099-01-01T00:00:00Z","payload":{"pr":42}}`
 
 // acceptListener accepts everything it is offered (for the integration path).
 type acceptListener struct{ got []string }
@@ -68,9 +72,16 @@ func TestEmit_RejectsMalformedJSON(t *testing.T) {
 }
 
 func TestEmit_RejectsNonSchemaValid(t *testing.T) {
-	// Missing the required ttl -> rejected by the push-inject schema.
-	if _, err := Emit([]byte(`{"schemaVersion":"1","id":"x","type":"t"}`), injected(), QueueEnqueuer{Q: newQueue(t)}); err == nil {
-		t.Fatal("event missing ttl was accepted")
+	// Missing the required type -> rejected by the push-inject schema.
+	if _, err := Emit([]byte(`{"schemaVersion":"1","id":"x"}`), injected(), QueueEnqueuer{Q: newQueue(t)}); err == nil {
+		t.Fatal("event missing type was accepted")
+	}
+	// And the duration-valued field the absolute-instant shape replaced is now an
+	// UNDECLARED property on a closed object, so an operator still typing the old
+	// shape is told rather than silently served (DEC-EVENT-1).
+	legacy := `{"schemaVersion":"1","id":"x","type":"t","ttl":"15m"}`
+	if _, err := Emit([]byte(legacy), injected(), QueueEnqueuer{Q: newQueue(t)}); err == nil {
+		t.Fatal("event carrying the legacy duration-valued ttl was accepted")
 	}
 }
 
@@ -90,12 +101,22 @@ func TestEmit_ValidatesBeforeLocating(t *testing.T) {
 	}
 }
 
-// Fix 4: a present-but-unparseable `at` (a valid string per the schema) is a
-// malformed event, rejected during parse — before the core is located.
-func TestEmit_RejectsMalformedAt(t *testing.T) {
-	bad := `{"schemaVersion":"1","id":"x","type":"t","ttl":"15m","at":"not-a-time"}`
-	if _, err := Emit([]byte(bad), injected(), QueueEnqueuer{Q: newQueue(t)}); err == nil {
-		t.Fatal("event with a malformed at was accepted")
+// Fix 4: a present-but-unparseable instant (a valid string per the schema) is a
+// malformed event, rejected during parse — before the core is located. Both
+// instants take that path, including a DURATION-shaped `expiresAt`, which is what
+// a caller written against the replaced contract would send.
+func TestEmit_RejectsMalformedInstants(t *testing.T) {
+	cases := map[string]string{
+		"bad at":                    `{"schemaVersion":"1","id":"x","type":"t","at":"not-a-time"}`,
+		"bad expiresAt":             `{"schemaVersion":"1","id":"x","type":"t","expiresAt":"not-a-time"}`,
+		"duration-shaped expiresAt": `{"schemaVersion":"1","id":"x","type":"t","expiresAt":"15m"}`,
+	}
+	for desc, bad := range cases {
+		t.Run(desc, func(t *testing.T) {
+			if _, err := Emit([]byte(bad), injected(), QueueEnqueuer{Q: newQueue(t)}); err == nil {
+				t.Fatalf("event with a malformed instant was accepted")
+			}
+		})
 	}
 }
 
@@ -148,18 +169,37 @@ func TestEmit_CarriesAtIntoEnqueuedEvent(t *testing.T) {
 	}
 }
 
-// An event with no `at` enqueues with the zero time (at is optional).
-func TestEmit_AbsentAtIsZeroTime(t *testing.T) {
+// An event with no `at` enqueues with the ZERO time. The front door deliberately
+// does NOT default it: absent `at` means "the CORE's own now at ingest"
+// (INV-EVT-1), and this CLI is not the core's clock — the queue resolves it.
+func TestEmit_AbsentAtIsLeftUnresolved(t *testing.T) {
 	cap := &captureEnqueuer{}
 	if _, err := Emit([]byte(validEvent), injected(), cap); err != nil {
 		t.Fatalf("emit: %v", err)
 	}
 	if !cap.got.At.IsZero() {
-		t.Fatalf("absent at should be zero time, got %v", cap.got.At)
+		t.Fatalf("absent at should stay the zero time for the core to resolve, got %v", cap.got.At)
 	}
 }
 
-func TestEmit_DedupesReEmitWithinTTL(t *testing.T) {
+// The `expiresAt` an operator supplies reaches the core-side enqueue verbatim: it
+// is the one knob that widens the retry and de-dup windows, so a front door that
+// dropped or rewrote it would silently change delivery behavior.
+func TestEmit_CarriesExpiresAtIntoEnqueuedEvent(t *testing.T) {
+	cap := &captureEnqueuer{}
+	if _, err := Emit([]byte(validEvent), injected(), cap); err != nil {
+		t.Fatalf("emit: %v", err)
+	}
+	want, err := time.Parse(time.RFC3339, "2099-01-01T00:00:00Z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cap.got.ExpiresAt.Equal(want) {
+		t.Fatalf("enqueued event ExpiresAt = %v, want %v", cap.got.ExpiresAt, want)
+	}
+}
+
+func TestEmit_DedupesReEmitWhileRetained(t *testing.T) {
 	q := newQueue(t)
 	if _, err := Emit([]byte(validEvent), LocalLocator(), QueueEnqueuer{Q: q}); err != nil {
 		t.Fatal(err)
@@ -183,7 +223,7 @@ func TestEmit_DedupesReEmitWithinTTL(t *testing.T) {
 func TestQueueEnqueuer_RefusesDiscoveredCore(t *testing.T) {
 	q := newQueue(t)
 	ref := CoreRef{Socket: "/tmp/core.sock", Token: "tok", Discovered: true}
-	if _, err := (QueueEnqueuer{Q: q}).Enqueue(ref, eventqueue.Event{ID: "e", Type: "t", TTL: time.Minute}); !errors.Is(err, ErrWrongEnqueuer) {
+	if _, err := (QueueEnqueuer{Q: q}).Enqueue(ref, eventqueue.Event{ID: "e", Type: "t"}); !errors.Is(err, ErrWrongEnqueuer) {
 		t.Fatalf("enqueue against a discovered core = %v, want ErrWrongEnqueuer", err)
 	}
 	if d := q.DepthByType()["t"]; d != 0 {
@@ -194,7 +234,7 @@ func TestQueueEnqueuer_RefusesDiscoveredCore(t *testing.T) {
 func TestQueueEnqueuer_RefusesInjectedCore(t *testing.T) {
 	if _, err := (QueueEnqueuer{Q: newQueue(t)}).Enqueue(
 		CoreRef{Socket: "/tmp/core.sock", Token: "tok"},
-		eventqueue.Event{ID: "e", Type: "t", TTL: time.Minute},
+		eventqueue.Event{ID: "e", Type: "t"},
 	); !errors.Is(err, ErrWrongEnqueuer) {
 		t.Fatalf("enqueue against an injected core = %v, want ErrWrongEnqueuer", err)
 	}
@@ -203,7 +243,7 @@ func TestQueueEnqueuer_RefusesInjectedCore(t *testing.T) {
 // A ZERO-VALUE ref names no core at all (the thing a half-written locate path
 // returns). It must be refused too, rather than default to a local enqueue.
 func TestQueueEnqueuer_RefusesZeroValueRef(t *testing.T) {
-	if _, err := (QueueEnqueuer{Q: newQueue(t)}).Enqueue(CoreRef{}, eventqueue.Event{ID: "e", Type: "t", TTL: time.Minute}); !errors.Is(err, ErrWrongEnqueuer) {
+	if _, err := (QueueEnqueuer{Q: newQueue(t)}).Enqueue(CoreRef{}, eventqueue.Event{ID: "e", Type: "t"}); !errors.Is(err, ErrWrongEnqueuer) {
 		t.Fatalf("enqueue against a zero-value ref = %v, want ErrWrongEnqueuer", err)
 	}
 }

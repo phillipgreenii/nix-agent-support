@@ -64,10 +64,15 @@ func TestNegative_Matrix(t *testing.T) {
 	}
 	matrix := map[string][]nc{
 		"event": {
-			{"missing id", `{"schemaVersion":"1","type":"t","ttl":"5m"}`},
-			{"missing type", `{"schemaVersion":"1","id":"e","ttl":"5m"}`},
-			{"missing ttl", `{"schemaVersion":"1","id":"e","type":"t"}`},
-			{"wrong-type payload", `{"id":"e","type":"t","ttl":"5m","payload":"notobj"}`},
+			{"missing id", `{"schemaVersion":"1","type":"t"}`},
+			{"missing type", `{"schemaVersion":"1","id":"e"}`},
+			{"wrong-type payload", `{"id":"e","type":"t","payload":"notobj"}`},
+			{"wrong-type expiresAt", `{"id":"e","type":"t","expiresAt":900}`},
+			// The duration-valued field is GONE from the event (DEC-EVENT-1), and
+			// additionalProperties:false is what makes that a REJECTION rather than a
+			// silently-ignored leftover — the one check that would have caught the
+			// doc-side deletion never reaching the code (bead pg2-85dv2).
+			{"legacy duration field", `{"id":"e","type":"t","ttl":"5m"}`},
 		},
 		"source.query": {
 			{"missing callback", `{"schemaVersion":"1","id":"q"}`},
@@ -80,7 +85,8 @@ func TestNegative_Matrix(t *testing.T) {
 		},
 		"handler.dispatch": {
 			{"missing event", `{"schemaVersion":"1","id":"h","callback":"c"}`},
-			{"event missing ttl", `{"schemaVersion":"1","id":"h","event":{"id":"e","type":"t"},"callback":"c"}`},
+			{"event missing type", `{"schemaVersion":"1","id":"h","event":{"id":"e"},"callback":"c"}`},
+			{"event carries the legacy duration field", `{"schemaVersion":"1","id":"h","event":{"id":"e","type":"t","ttl":"5m"},"callback":"c"}`},
 		},
 		"handler.dispatch-reply": {
 			{"neither branch", `{"schemaVersion":"1","id":"h"}`},
@@ -118,14 +124,15 @@ func TestNegative_Matrix(t *testing.T) {
 		"cli.ingest-event": {
 			{"missing events", `{"schemaVersion":"1","id":"t"}`},
 			{"empty events (minItems)", `{"schemaVersion":"1","id":"t","events":[]}`},
-			{"event missing id", `{"schemaVersion":"1","id":"t","events":[{"type":"t","ttl":"5m"}]}`},
+			{"event missing id", `{"schemaVersion":"1","id":"t","events":[{"type":"t"}]}`},
 		},
 		"cli.ingest-event-reply": {
 			{"accepted wrong type", `{"schemaVersion":"1","id":"t","accepted":"1","rejected":[]}`},
 			{"rejected item missing reason", `{"schemaVersion":"1","id":"t","accepted":0,"rejected":[{"id":"e"}]}`},
 		},
 		"cli.push-inject": {
-			{"missing ttl (event ref)", `{"schemaVersion":"1","id":"e","type":"t"}`},
+			{"missing type (event ref)", `{"schemaVersion":"1","id":"e"}`},
+			{"legacy duration field (event ref)", `{"schemaVersion":"1","id":"e","type":"t","ttl":"5m"}`},
 		},
 		"cli.status-reply": {
 			{"session bad state", `{"schemaVersion":"1","sessions":[{"id":"h","handler":"r","event":"e","state":"weird"}],"queues":[],"config":{"sources":0,"handlers":0}}`},

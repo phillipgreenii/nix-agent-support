@@ -10,9 +10,10 @@ import (
 // Listener is a bound event handler as the queue sees it (INTF-HANDLER, core
 // side). It declares which events it binds (Matches, INV-DISP-1) and accepts or
 // declines an offer (Offer). A return of accepted=false is a PRE-ACCEPT decline
-// (busy / unavailable, INV-CONC-1 / INV-FAIL-1): the core re-offers within the
-// ttl. Once Offer returns true the event is ACCEPTED and the core's delivery
-// responsibility ends (INV-EVT-1); post-accept retry/resume is the handler's.
+// (busy / unavailable, INV-CONC-1 / INV-FAIL-1): the core re-offers the event
+// while it is unexpired. Once Offer returns true the event is ACCEPTED and the
+// core's delivery responsibility ends (INV-EVT-1); post-accept retry/resume is
+// the handler's.
 type Listener interface {
 	ID() string
 	Matches(evt Event) bool
@@ -40,62 +41,74 @@ type EnqueueResult int
 const (
 	// Enqueued means the event was newly appended to the durable queue.
 	Enqueued EnqueueResult = iota
-	// Deduped means an event with the same id is still retained within ttl, so
-	// this re-emit was dropped (INV-EVT-3).
+	// Deduped means an event with the same id is still RETAINED, so this re-emit
+	// was dropped (INV-EVT-3). Because the retained-id set lives exactly as long
+	// as the event does, the de-dup window narrows with `expiresAt`: under the
+	// born-expired default it is roughly one dispatch cycle, so a pull source's
+	// next-trigger re-emit is NOT absorbed — "re-emission, not resurrection"
+	// (DEC-EVENT-1).
 	Deduped
 )
 
 type entry struct {
-	evt        Event
-	enqueuedAt time.Time
-	// accepted tracks acceptance per (event, listener) (INV-EVT-1). An entry is
-	// retained until its ttl even after acceptance so a listener binding within
-	// the ttl can still receive it.
+	evt Event // RESOLVED (Event.Resolve): both instants are concrete
+	// accepted tracks ACCEPTANCE per (event, listener) (INV-EVT-1) and is the
+	// durable half of the pair (opAccept records).
 	accepted map[string]bool
+	// settled tracks which listeners are owed NO FURTHER ATTEMPT for this event:
+	// they accepted it, or they made an attempt while it was already expired,
+	// which INV-EVT-4 makes the last one. It is a TERMINAL MARKER, not an attempt
+	// log — there is no count here and none is persisted (DEC-EVENT-1): a decline
+	// before `expiresAt` records nothing at all, so it is simply re-offered
+	// (INV-FAIL-1). settled is a superset of accepted.
+	settled map[string]bool
 }
 
-func (e *entry) deadline() time.Time { return e.enqueuedAt.Add(e.evt.TTL) }
+func newEntry(evt Event) *entry {
+	return &entry{evt: evt, accepted: map[string]bool{}, settled: map[string]bool{}}
+}
 
 type listenerState struct {
 	l Listener
 }
 
-// Queue is the durable, ordered, de-duped, TTL-bounded event queue (ADR 0031).
-// It is safe for concurrent use.
+// Queue is the durable, ordered, de-duped, retention-bounded event queue
+// (ADR 0031, expiry bound amended by DEC-EVENT-1). It is safe for concurrent use.
 type Queue struct {
 	mu  sync.Mutex
 	now func() time.Time
 	// after is the wait seam RunUntilIdle blocks on between passes (default
 	// time.After). It is paired with the `now` clock seam so a mock clock can
 	// drive BOTH coherently: a mock `after` advances virtual time by the tick and
-	// fires immediately, so RunUntilIdle terminates on ttl deterministically
+	// fires immediately, so RunUntilIdle terminates on expiry deterministically
 	// without real sleeping (see WithSleeper). The real default genuinely waits.
 	after func(time.Duration) <-chan time.Time
 	store Store
 	obs   Observer
 
-	entries map[string]*entry // by event id; the retained-until-ttl set
+	entries map[string]*entry // by event id; the retained set (and so the dedup id set)
 	order   []string          // enqueue order (event ids) — the FIFO spine
 
 	listeners []*listenerState // registration order; stable per-listener cursors
 
 	// evictWhenAllAccept is the opt-in early-eviction switch (ADR 0031). Default
-	// off: keep every event until ttl. On: evict once all currently-bound
-	// listeners have accepted (disk savings; shortens the dedup window — safe
-	// only when the consumer set is fixed).
+	// off: keep every event until its retention ends. On: evict once all
+	// currently-bound listeners have accepted (disk savings; shortens the dedup
+	// window — safe only when the consumer set is fixed).
 	evictWhenAllAccept bool
 }
 
 // Option configures a Queue.
 type Option func(*Queue)
 
-// WithClock injects a clock seam (default time.Now) for deterministic ttl tests.
+// WithClock injects a clock seam (default time.Now) for deterministic expiry
+// tests.
 func WithClock(now func() time.Time) Option { return func(q *Queue) { q.now = now } }
 
 // WithSleeper injects the wait seam RunUntilIdle blocks on between passes
 // (default time.After). It is the companion to WithClock: a mock clock supplies
 // an `after` that ADVANCES its virtual time by the requested tick and fires
-// immediately, so RunUntilIdle drains and terminates on ttl deterministically
+// immediately, so RunUntilIdle drains and terminates on expiry deterministically
 // without sleeping real time (and without the frozen-clock busy-loop the real
 // time.After caused under a mock clock).
 func WithSleeper(after func(time.Duration) <-chan time.Time) Option {
@@ -110,8 +123,7 @@ func WithObserver(o Observer) Option { return func(q *Queue) { q.obs = o } }
 func WithEarlyEviction() Option { return func(q *Queue) { q.evictWhenAllAccept = true } }
 
 // New constructs a Queue over store, replaying any prior durable state so
-// delivery survives a restart (INV-EVT-1). Records for events already past
-// their ttl are dropped on replay; evicted ids are not resurrected.
+// delivery survives a restart (INV-EVT-1). Evicted ids are not resurrected.
 func New(store Store, opts ...Option) (*Queue, error) {
 	q := &Queue{
 		now:     time.Now,
@@ -133,25 +145,32 @@ func New(store Store, opts ...Option) (*Queue, error) {
 // after acceptance is confirmed (ADR 0031 req 4), so an event whose accept
 // record was lost to a crash window replays as un-accepted and is re-offered
 // (at-least-once, at-most-one redelivery).
+//
+// Every enqueued-and-not-evicted event is restored, INCLUDING one already past
+// its `expiresAt`. Skipping those would break the delivery-opportunity guarantee
+// outright (INV-EVT-1, "nothing is ever dropped un-offered"): under the
+// born-expired default EVERY event is past expiry the instant it lands, so a
+// past-expiry filter here would mean the durable queue survived no restart at
+// all. The log is authoritative instead — a retired event carries an explicit
+// opEvict record (see retireLocked), so replay drops exactly what actually left
+// the queue and nothing else.
 func (q *Queue) replay() error {
 	recs, err := q.store.Replay()
 	if err != nil {
 		return err
 	}
-	now := q.now()
 	for _, r := range recs {
 		switch r.Op {
 		case opEnqueue:
-			e := &entry{evt: r.event(), enqueuedAt: r.EnqueuedAt, accepted: map[string]bool{}}
-			if now.Before(e.deadline()) { // still within ttl
-				if _, seen := q.entries[e.evt.ID]; !seen {
-					q.order = append(q.order, e.evt.ID)
-				}
-				q.entries[e.evt.ID] = e
+			e := newEntry(r.event())
+			if _, seen := q.entries[e.evt.ID]; !seen {
+				q.order = append(q.order, e.evt.ID)
 			}
+			q.entries[e.evt.ID] = e
 		case opAccept:
 			if e, ok := q.entries[r.EventID]; ok {
 				e.accepted[r.ListenerID] = true
+				e.settled[r.ListenerID] = true
 			}
 		case opEvict:
 			delete(q.entries, r.EventID)
@@ -171,9 +190,11 @@ func (q *Queue) Register(l Listener) {
 }
 
 // Enqueue durably appends an event (INV-EVT-1). A malformed event is rejected
-// (Validate). A re-emit of an id still retained within ttl is dropped as a
-// duplicate (INV-EVT-3). The enqueue record is persisted BEFORE the in-memory
-// add, so an accepted-then-crashed event is never lost.
+// (Validate). Its optional instants are RESOLVED here, against the core's own
+// clock, because ingest is where INV-EVT-1 says the defaults come from. A re-emit
+// of an id still RETAINED is dropped as a duplicate (INV-EVT-3). The enqueue
+// record is persisted BEFORE the in-memory add, so an accepted-then-crashed event
+// is never lost.
 func (q *Queue) Enqueue(evt Event) (EnqueueResult, error) {
 	if err := evt.Validate(); err != nil {
 		return Enqueued, err
@@ -181,20 +202,23 @@ func (q *Queue) Enqueue(evt Event) (EnqueueResult, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	now := q.now()
+	evt = evt.Resolve(now)
 	if e, ok := q.entries[evt.ID]; ok {
-		if now.Before(e.deadline()) {
+		if q.retainedLocked(e, now) {
 			return Deduped, nil // still-retained duplicate id (INV-EVT-3)
 		}
-		// The id exists but has expired and not yet been swept. A re-emit is a
-		// FRESH event and MUST go to the tail (FIFO), not reuse the stale
-		// position — so evict the stale entry first.
-		delete(q.entries, evt.ID)
+		// The id exists but its retention is over and the sweep has not run yet. A
+		// re-emit is a FRESH event and MUST go to the tail (FIFO), not reuse the
+		// stale position — so retire the stale entry first, on exactly the terms
+		// Expire would have retired it on (same miss accounting, same durable
+		// record), so which of the two removes it cannot change what is observed.
+		q.retireLocked(e)
 		q.dropFromOrder(evt.ID)
 	}
 	if err := q.store.Append(recordFromEvent(evt, now)); err != nil {
 		return Enqueued, err
 	}
-	q.entries[evt.ID] = &entry{evt: evt, enqueuedAt: now, accepted: map[string]bool{}}
+	q.entries[evt.ID] = newEntry(evt)
 	q.order = append(q.order, evt.ID)
 	q.obs.OnEnqueue(evt)
 	return Enqueued, nil
@@ -213,22 +237,54 @@ func (q *Queue) dropFromOrder(id string) {
 	q.order = kept
 }
 
+// retainedLocked reports whether an entry must stay in the queue. Retention ends
+// only when BOTH halves of INV-EVT-1's retention rule are satisfied — the event
+// is past `expiresAt` (so its id no longer bounds a de-dup window, INV-EVT-3) AND
+// no currently-bound matching listener is still owed the one attempt INV-EVT-1
+// guarantees it.
+//
+// The second half is what keeps the born-expired default honest. Such an event is
+// past expiry the moment it lands, so expiry alone would drop it before anything
+// was offered it; holding it for the outstanding attempt is what makes
+// "unconsumed-expired" a GENUINE miss rather than a scheduling artifact
+// (INV-DISP-3). An event no bound listener matches satisfies the second half
+// vacuously and is dropped at expiry, which is exactly the no-binding case
+// INV-DISP-3 describes.
+//
+// Caller holds q.mu.
+func (q *Queue) retainedLocked(e *entry, now time.Time) bool {
+	if !e.evt.Expired(now) {
+		return true
+	}
+	for _, ls := range q.listeners {
+		if ls.l.Matches(e.evt) && !e.settled[ls.l.ID()] {
+			return true // a bound listener is still owed its final attempt
+		}
+	}
+	return false
+}
+
 // headFor returns the head deliverable event for a listener: the earliest (by
-// enqueue order) event that matches the listener's binding, is not yet accepted
-// by it, and has not expired. Per-listener serial FIFO with head-of-line
+// enqueue order) event that matches the listener's binding and that the listener
+// is still owed an attempt on. Per-listener serial FIFO with head-of-line
 // blocking (ADR 0031): only the head is offered; a declined head is re-offered
-// until accepted or expired. Caller holds q.mu.
-func (q *Queue) headFor(l Listener, now time.Time) *entry {
+// until accepted, or until an attempt made past `expiresAt` settles it.
+//
+// Head selection is deliberately EXPIRY-BLIND. Under INV-EVT-4 the expiry check
+// happens AT ATTEMPT TIME and decides whether that attempt is the last one — it
+// is not a filter on whether to attempt at all. Skipping expired events here (as
+// a duration-bounded queue could) would drop the born-expired default's only
+// opportunity un-offered, violating INV-EVT-1.
+//
+// Caller holds q.mu.
+func (q *Queue) headFor(l Listener) *entry {
 	for _, id := range q.order {
 		e, ok := q.entries[id]
 		if !ok {
 			continue // evicted
 		}
-		if !now.Before(e.deadline()) {
-			continue // expired; Expire will drop it
-		}
-		if e.accepted[l.ID()] {
-			continue // already accepted by this listener
+		if e.settled[l.ID()] {
+			continue // accepted, or its final attempt is already made
 		}
 		if !l.Matches(e.evt) {
 			continue // not bound
@@ -238,38 +294,50 @@ func (q *Queue) headFor(l Listener, now time.Time) *entry {
 	return nil
 }
 
-// pendingOffer is one (listener, event) pair to offer this pass — a snapshot
-// taken under q.mu so the listener callback (Listener.Offer) runs UNLOCKED.
+// pendingOffer is one (listener, event) attempt for this pass — a snapshot taken
+// under q.mu so the listener callback (Listener.Offer) runs UNLOCKED.
 type pendingOffer struct {
 	ls  *listenerState
 	evt Event // value copy: Offer never sees queue-internal state
+	// lastAttempt is the INV-EVT-4 decision for THIS attempt: the event was
+	// already expired when the attempt was made, so accept or decline, the core
+	// never offers it to this listener again. It is evaluated once, from the
+	// snapshot's clock reading — the last reading before the offer — and carried
+	// forward rather than recomputed, so one attempt cannot be judged against two
+	// different "now"s.
+	lastAttempt bool
+	// accepted is what Offer returned (filled in by the offer phase).
+	accepted bool
 }
 
 // Dispatch offers each listener its head deliverable event once, in
 // registration order, and returns how many events were accepted this pass. A
-// busy pre-accept decline leaves the head for a later pass (re-offer within
-// ttl, INV-FAIL-1 / INV-CONC-1).
+// pre-accept decline on an UNEXPIRED event leaves the head in place for a later
+// pass (re-offer, INV-FAIL-1 / INV-CONC-1); a decline on an ALREADY-EXPIRED one
+// was that listener's last attempt (INV-EVT-4), so the pair is settled and the
+// head advances.
 //
 // Locking discipline (bead pg2-56186). The pass is three phases and the queue
 // lock is held only in phases 1 and 3, NEVER across the listener callback:
 //
-//  1. SNAPSHOT (locked): compute each listener's head deliverable event and
-//     capture the (listener, event) pairs. No Offer, no store write here.
+//  1. SNAPSHOT (locked): compute each listener's head deliverable event, capture
+//     the (listener, event) pairs and the INV-EVT-4 expiry verdict for each. No
+//     Offer, no store write here.
 //  2. OFFER (UNLOCKED): call Listener.Offer for each pair. Releasing the lock is
 //     what makes a synchronous listener's accept path free to re-enter the queue
 //     (Enqueue / push-inject a follow-on event) without self-deadlocking on the
 //     non-reentrant q.mu, and stops all ingest from serializing behind an
 //     in-flight (possibly long) handler offer.
-//  3. RECORD (locked): for each acceptance, re-validate against CURRENT state
-//     then mark accepted, append the durable opAccept record, notify the
-//     observer, and maybe-evict — reproducing the original per-acceptance
-//     ordering (maybeEvict after each mark, in registration order).
+//  3. RECORD (locked): for each outcome, re-validate against CURRENT state then
+//     settle the pair — marking acceptance, appending the durable opAccept
+//     record, notifying the observer and maybe-evicting, or (for a final decline)
+//     recording nothing but the terminal marker.
 //
 // Between phases 2 and 3 the queue can change (concurrent Enqueue / Expire /
 // Dispatch, or a re-entrant call from inside Offer), so RECORD looks the entry
 // up FRESH by id and skips two ways rather than mutating a stale snapshot:
-//   - entry no longer present (expired past ttl and swept, or early-evicted): the
-//     event has legitimately left the queue, so there is nothing to record and
+//   - entry no longer present (retired and swept, or early-evicted): the event
+//     has legitimately left the queue, so there is nothing to record and
 //     nothing to redeliver; drop the acceptance record (a stray opAccept for a
 //     gone id is a no-op on replay anyway). Delivery is unaffected — the listener
 //     already took responsibility when Offer returned true (INV-EVT-1).
@@ -289,33 +357,43 @@ func (q *Queue) Dispatch() (accepted int) {
 	now := q.now()
 	pending := make([]pendingOffer, 0, len(q.listeners))
 	for _, ls := range q.listeners {
-		if e := q.headFor(ls.l, now); e != nil {
-			pending = append(pending, pendingOffer{ls: ls, evt: e.evt})
+		if e := q.headFor(ls.l); e != nil {
+			pending = append(pending, pendingOffer{ls: ls, evt: e.evt, lastAttempt: e.evt.Expired(now)})
 		}
 	}
 	q.mu.Unlock()
-
-	// Phase 2 — OFFER (UNLOCKED). ls.l is set once at Register and never mutated,
-	// so reading it here without the lock is safe.
-	toRecord := make([]pendingOffer, 0, len(pending))
-	for _, p := range pending {
-		if p.ls.l.Offer(p.evt) {
-			toRecord = append(toRecord, p)
-		}
-	}
-	if len(toRecord) == 0 {
+	if len(pending) == 0 {
 		return 0
 	}
 
-	// Phase 3 — RECORD (locked), re-validating each acceptance against current
-	// state (see the locking-discipline note above).
+	// Phase 2 — OFFER (UNLOCKED). ls.l is set once at Register and never mutated,
+	// so reading it here without the lock is safe.
+	for i := range pending {
+		pending[i].accepted = pending[i].ls.l.Offer(pending[i].evt)
+	}
+
+	// Phase 3 — RECORD (locked), re-validating each outcome against current state
+	// (see the locking-discipline note above).
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	for _, p := range toRecord {
+	for _, p := range pending {
 		lid := p.ls.l.ID()
 		e, ok := q.entries[p.evt.ID]
 		if !ok {
-			continue // entry left the queue mid-dispatch (expired/evicted): skip
+			continue // entry left the queue mid-dispatch (retired/evicted): skip
+		}
+		if !p.accepted {
+			// A PRE-ACCEPT decline. Nothing about the attempt is recorded — no
+			// counter, nothing durable (DEC-EVENT-1: the core keeps no attempt
+			// history). The single expiry comparison already made in phase 1 is the
+			// whole decision: past `expiresAt` that attempt was the last one this
+			// listener is owed (INV-EVT-4), so settle the pair and let its head
+			// advance; before it, the decline is simply a re-offer condition
+			// (INV-FAIL-1) and the head stays put.
+			if p.lastAttempt {
+				e.settled[lid] = true
+			}
+			continue
 		}
 		if e.accepted[lid] {
 			continue // already recorded by a concurrent/re-entrant pass: at-most-once
@@ -324,6 +402,7 @@ func (q *Queue) Dispatch() (accepted int) {
 		// (ADR 0031 req 4) — the crash window that yields the at-least-once
 		// redelivery (one extra re-offer per crash window).
 		e.accepted[lid] = true
+		e.settled[lid] = true
 		if err := q.store.Append(Record{Op: opAccept, EventID: p.evt.ID, ListenerID: lid}); err != nil {
 			// The in-memory accept already happened and the listener has taken
 			// delivery responsibility (INV-EVT-1); we do NOT roll back or change
@@ -355,7 +434,7 @@ func (q *Queue) maybeEvict(e *entry) {
 			return // a bound listener has not accepted yet
 		}
 	}
-	_ = q.store.Append(Record{Op: opEvict, EventID: e.evt.ID})
+	q.recordEvictLocked(e.evt.ID)
 	delete(q.entries, e.evt.ID)
 	// Drop the evicted id from the FIFO spine too. Leaving it as a tombstone lets
 	// a re-emit BEFORE the next Expire() append a SECOND spine entry (the stale-
@@ -365,11 +444,41 @@ func (q *Queue) maybeEvict(e *entry) {
 	q.dropFromOrder(e.evt.ID)
 }
 
-// Expire drops every event past its ttl and returns how many were dropped. An
-// event that expires with NO listener having accepted it is unconsumed-expired
-// (INV-DISP-3 / INV-OBS-1) and is reported to the Observer. Retention is
-// independent of consumer state: an event is dropped only at its ttl, never
-// because a consumer is down or disabled.
+// retireLocked removes an entry whose RETENTION IS OVER from q.entries: it counts
+// the miss when no listener ever accepted it (unconsumed-expired, INV-DISP-3 /
+// INV-OBS-1) and records the removal durably so a replay does not resurrect it.
+// The caller fixes up the FIFO spine — Expire rebuilds the whole spine in one
+// pass, Enqueue drops the single stale id — so this does not touch q.order.
+//
+// Caller holds q.mu.
+func (q *Queue) retireLocked(e *entry) {
+	if len(e.accepted) == 0 {
+		q.obs.OnUnconsumedExpired(e.evt.Type)
+	}
+	q.recordEvictLocked(e.evt.ID)
+	delete(q.entries, e.evt.ID)
+}
+
+// recordEvictLocked appends the durable opEvict record marking an id as gone from
+// the queue. A failure here is not recoverable in line — the event has already
+// left in memory — but it IS a durability degradation (the id resurrects on the
+// next replay and is offered again), so it is surfaced the same way Dispatch
+// surfaces a failed accept-append rather than discarded. Caller holds q.mu.
+func (q *Queue) recordEvictLocked(id string) {
+	if err := q.store.Append(Record{Op: opEvict, EventID: id}); err != nil {
+		slog.Error("eventqueue: evict-append failed; the event will replay as retained and be re-offered after a restart",
+			"eventId", id, "err", err)
+	}
+}
+
+// Expire drops every event whose retention is over and returns how many were
+// dropped. Retention is NOT the expiry instant alone: an event stays until every
+// matching handler has had the one attempt it is owed (retainedLocked), which is
+// why an event that expires with NO listener having accepted it is a genuine
+// unconsumed-expired miss (INV-DISP-3 / INV-OBS-1) rather than a scheduling
+// artifact. Retention is independent of consumer HEALTH: an event is never
+// dropped merely because a consumer is down or disabled — such a consumer just
+// leaves its events to expire unconsumed.
 func (q *Queue) Expire() (dropped int) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -380,14 +489,11 @@ func (q *Queue) Expire() (dropped int) {
 		if !ok {
 			continue // already evicted
 		}
-		if now.Before(e.deadline()) {
+		if q.retainedLocked(e, now) {
 			kept = append(kept, id)
 			continue
 		}
-		if len(e.accepted) == 0 {
-			q.obs.OnUnconsumedExpired(e.evt.Type)
-		}
-		delete(q.entries, id)
+		q.retireLocked(e)
 		dropped++
 	}
 	q.order = kept
@@ -395,37 +501,42 @@ func (q *Queue) Expire() (dropped int) {
 }
 
 // Idle reports whether no (event, listener) pair is still deliverable — every
-// enqueued event is accepted by each bound listener or has expired — the
-// condition run-until-idle exits on (INV-LIFE-1). Caller must NOT hold q.mu.
+// enqueued event is settled for each bound listener or is past its expiry with
+// nothing owed — the condition run-until-idle exits on (INV-LIFE-1). Caller must
+// NOT hold q.mu.
 func (q *Queue) Idle() bool {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	now := q.now()
 	for _, ls := range q.listeners {
-		if q.headFor(ls.l, now) != nil {
+		if q.headFor(ls.l) != nil {
 			return false // a deliverable head is still outstanding (incl. fan-out)
 		}
 	}
-	// A non-expired event that no one has accepted is still pending — an orphan
-	// (no binding) or a disabled/absent consumer's event waiting to reach ttl. It
-	// is neither accepted nor expired, so the queue is NOT drained (INV-LIFE-1).
+	// An UNEXPIRED event that no one has accepted is still pending — an orphan
+	// (no binding) or a disabled/absent consumer's event waiting to reach its
+	// expiry. It is neither accepted nor expired, so the queue is NOT drained
+	// (INV-LIFE-1).
 	for _, id := range q.order {
-		if e, ok := q.entries[id]; ok && now.Before(e.deadline()) && len(e.accepted) == 0 {
+		if e, ok := q.entries[id]; ok && !e.evt.Expired(now) && len(e.accepted) == 0 {
 			return false
 		}
 	}
 	return true
 }
 
-// DepthByType returns the per-type count of retained, non-expired events — the
-// "queue depth" gauge source (INV-OBS-1). Caller must NOT hold q.mu.
+// DepthByType returns the per-type count of RETAINED events — the "queue depth"
+// gauge source (INV-OBS-1). It counts what is in the queue, expired or not,
+// because under INV-EVT-4 "expired" no longer means "gone": a past-expiry event
+// is still held, and still owed an attempt, until every matching handler has had
+// one. Excluding those would hide real backlog — including, under the
+// born-expired default, essentially all of it. Caller must NOT hold q.mu.
 func (q *Queue) DepthByType() map[string]int {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	now := q.now()
 	depth := map[string]int{}
 	for _, id := range q.order {
-		if e, ok := q.entries[id]; ok && now.Before(e.deadline()) {
+		if e, ok := q.entries[id]; ok {
 			depth[e.evt.Type]++
 		}
 	}
@@ -435,18 +546,27 @@ func (q *Queue) DepthByType() map[string]int {
 // RunUntilIdle dispatches and expires on a fixed tick until the queue is idle
 // (INV-LIFE-1) or ctx is cancelled. It is the drive loop behind the
 // `run-until-idle` operator subcommand; a busy handler simply keeps its head
-// re-offered until the head is accepted or its ttl expires.
+// re-offered until the head is accepted or the re-offer window `expiresAt` bounds
+// closes.
+//
+// DISPATCH RUNS BEFORE EXPIRE, and the order is load-bearing under INV-EVT-4.
+// Every event is owed an attempt before it may be dropped (INV-EVT-1), and the
+// default event is born expired — so sweeping first would just retain it
+// (retainedLocked holds it for the outstanding attempt) and cost a whole extra
+// tick. Dispatching first makes the attempt, and the sweep that follows in the
+// SAME pass retires the event the attempt settled, so `run-until-idle` drains a
+// default workload in one pass instead of two.
 //
 // The between-pass wait blocks on the `after` seam (WithSleeper), NOT directly
-// on time.After, so it advances on the SAME clock the ttl math uses. Under the
+// on time.After, so it advances on the SAME clock the expiry math uses. Under the
 // real default this genuinely waits `tick`; under a mock clock whose `after`
-// advances virtual time, the loop makes deadline progress and terminates on ttl
-// deterministically without real sleeping (and without the frozen-clock
-// busy-loop a real time.After caused when q.now never advanced).
+// advances virtual time, the loop makes progress toward `expiresAt` and
+// terminates deterministically without real sleeping (and without the
+// frozen-clock busy-loop a real time.After caused when q.now never advanced).
 func (q *Queue) RunUntilIdle(ctx context.Context, tick time.Duration) error {
 	for {
-		q.Expire()
 		q.Dispatch()
+		q.Expire()
 		if q.Idle() {
 			return nil
 		}
