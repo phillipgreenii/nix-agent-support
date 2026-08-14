@@ -42,9 +42,20 @@ var newDuplicateAuditors = func(cfg *config.Config) []duplicateWorkspace {
 	return out
 }
 
+// duplicatePopulation names the bead population BOTH arms of the audit scan. It
+// is emitted in the human and --json output because the total is otherwise
+// misreadable: an open-only count decays as beads close (pg2-0z8fw) and would be
+// mistaken for duplicates having been resolved. Both arms are status-agnostic,
+// so the total is a census of duplicated identities that is comparable across
+// time.
+const duplicatePopulation = "all statuses (open and closed)"
+
 // duplicateReport is the machine-readable shape of one workspace's audit.
 type duplicateReport struct {
-	Workspace        string                            `json:"workspace"`
+	Workspace string `json:"workspace"`
+	// Population states which beads the counts below cover, so a consumer
+	// diffing totals over time can tell the population did not change.
+	Population       string                            `json:"population"`
 	MergeRequests    []beads.DuplicateMergeRequests    `json:"duplicate_merge_requests,omitempty"`
 	ProcessingCycles []beads.DuplicateProcessingCycles `json:"duplicate_process_feedback,omitempty"`
 	Error            string                            `json:"error,omitempty"`
@@ -65,7 +76,16 @@ var syncDuplicatesCmd = &cobra.Command{
 supposed to keep unique:
 
   - merge-request beads sharing one (repo, pr_number)
-  - OPEN process-feedback beads sharing one (repo, pr_number)
+  - process-feedback beads sharing one (repo, pr_number)
+
+Both arms cover beads in ALL statuses, open and closed. Closing both members of
+a duplicate pair does not resolve it — both beads still exist — so a closed pair
+stays in the report and the total stays comparable across runs.
+
+Because the process-feedback arm counts closed beads, a CLOSED PREDECESSOR and
+the successor that supersedes it also share one key and are listed here. That is
+a legitimate lifecycle, not a duplicate, so read each group before acting: the
+successor's description names the predecessor it supersedes.
 
 It is READ-ONLY: it runs bd list and never writes. Nothing is closed, updated,
 or merged — the excess beads are printed with the bd commands a person may run
@@ -79,7 +99,7 @@ after reviewing them.`,
 		}
 		var reports []duplicateReport
 		for _, ws := range newDuplicateAuditors(cfg) {
-			rep := duplicateReport{Workspace: ws.Path}
+			rep := duplicateReport{Workspace: ws.Path, Population: duplicatePopulation}
 			if rep.Workspace == "" {
 				rep.Workspace = "(cwd)"
 			}
@@ -109,9 +129,12 @@ after reviewing them.`,
 // renderDuplicateReports prints the human-readable audit. Write errors are
 // non-fatal — the caller may have closed the writer.
 func renderDuplicateReports(w io.Writer, reports []duplicateReport) {
-	excess := 0
+	mrExcess, pfExcess := 0, 0
 	for _, rep := range reports {
 		_, _ = fmt.Fprintf(w, "workspace %s\n", rep.Workspace)
+		if rep.Population != "" {
+			_, _ = fmt.Fprintf(w, "  scanned %s\n", rep.Population)
+		}
 		if rep.Error != "" {
 			_, _ = fmt.Fprintf(w, "  ! %s\n", rep.Error)
 			continue
@@ -123,18 +146,24 @@ func renderDuplicateReports(w io.Writer, reports []duplicateReport) {
 		for _, d := range rep.MergeRequests {
 			_, _ = fmt.Fprintf(w, "  merge-request %s#%d: keep %s, excess %s\n",
 				d.Repo, d.PRNumber, d.Canonical.ID, joinMergeRequestIDs(d.Excess))
-			excess += len(d.Excess)
+			mrExcess += len(d.Excess)
 		}
 		for _, d := range rep.ProcessingCycles {
 			_, _ = fmt.Fprintf(w, "  process-feedback %s: keep %s, excess %s\n",
 				d.Key, d.Canonical.ID, joinCycleIDs(d.Excess))
-			excess += len(d.Excess)
+			pfExcess += len(d.Excess)
 		}
 	}
+	excess := mrExcess + pfExcess
 	if excess == 0 {
 		return
 	}
-	_, _ = fmt.Fprintf(w, "\n%d excess bead(s). This command does NOT change them.\n", excess)
+	// The population is restated on the total line: this number is the operator's
+	// reconcile baseline and the input to "MUST NOT increase" checks, so it must
+	// not be readable as an open-only count (pg2-0z8fw).
+	_, _ = fmt.Fprintf(w, "\n%d excess bead(s) in %s: %d merge-request + %d process-feedback.\n",
+		excess, duplicatePopulation, mrExcess, pfExcess)
+	_, _ = fmt.Fprintln(w, "This command does NOT change them.")
 	_, _ = fmt.Fprintln(w, "Review each one first; a person may then close it, e.g.:")
 	_, _ = fmt.Fprintln(w, "  bd close <excess-id> --reason \"duplicate of <keep-id> (same repo#pr)\"")
 }

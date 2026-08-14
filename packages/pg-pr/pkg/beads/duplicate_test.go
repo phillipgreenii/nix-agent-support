@@ -12,6 +12,7 @@ type listRunner struct {
 	mergeRequests string // for `list --type=merge-request …`
 	openTasks     string // for `list --type=task --status=open …`
 	closedTasks   string // for `list --type=task --status=closed …`
+	allTasks      string // for `list --type=task --all …` (every status)
 	byID          string // for `list --all --id=<id> …`
 	depList       string // for `dep list …`
 	calls         [][]string
@@ -31,6 +32,11 @@ func (r *listRunner) Run(_ context.Context, args ...string) (string, error) {
 		return orEmptyList(r.byID), nil
 	case strings.Contains(joined, "--type=merge-request"):
 		return orEmptyList(r.mergeRequests), nil
+	case strings.Contains(joined, "--type=task") && strings.Contains(joined, "--all"):
+		// `bd list --all` takes EVERY status, so this fixture must hold the
+		// closed rows too — a status-agnostic caller that got only the open ones
+		// back would silently look correct.
+		return orEmptyList(r.allTasks), nil
 	case strings.Contains(joined, "--status=open"):
 		return orEmptyList(r.openTasks), nil
 	case strings.Contains(joined, "--status=closed"):
@@ -257,9 +263,9 @@ func TestResolveProcessingCyclePrefersOpenOverClosed(t *testing.T) {
 }
 
 // TestFindDuplicateProcessingCycles verifies the read-only audit that measures
-// the defect: open process-feedback beads sharing one (repo, pr_number) key.
+// the defect: process-feedback beads sharing one (repo, pr_number) key.
 func TestFindDuplicateProcessingCycles(t *testing.T) {
-	r := &listRunner{openTasks: `{"data":[
+	r := &listRunner{allTasks: `{"data":[
       {"id":"cyc-b","title":"process-feedback: o/r#7","status":"open","issue_type":"task"},
       {"id":"cyc-a","title":"process-feedback: o/r#7","status":"open","issue_type":"task"},
       {"id":"cyc-c","title":"process-feedback: o/r#8","status":"open","issue_type":"task"},
@@ -287,6 +293,156 @@ func TestFindDuplicateProcessingCycles(t *testing.T) {
 		if r.wrote(verb) {
 			t.Errorf("the audit must be read-only, but issued `bd %s`: %v", verb, r.calls)
 		}
+	}
+}
+
+// closedPairFixture is the real shape of the pair that exposed the open-only
+// defect: PR #104236's process-feedback beads zr-4jpnl / zr-agwaj, same key,
+// created_at identical to the second (the duplication signature), and now BOTH
+// CLOSED. Neither bead was removed, so the pair is still a duplicate.
+// statuses lets one fixture be rendered open or closed.
+func closedPairFixture(statusA, statusB string) string {
+	return `{"data":[
+      {"id":"zr-agwaj","title":"process-feedback: o/r#104236","status":"` + statusB + `","issue_type":"task","created_at":"2026-07-28T15:23:22Z"},
+      {"id":"zr-4jpnl","title":"process-feedback: o/r#104236","status":"` + statusA + `","issue_type":"task","created_at":"2026-07-28T15:23:22Z"}
+    ]}`
+}
+
+// excessTotal sums the excess beads across an audit result — the "total excess"
+// number the operator's reconcile baseline and the "MUST NOT increase"
+// regression check are both built on.
+func excessTotal(dups []DuplicateProcessingCycles) int {
+	n := 0
+	for _, d := range dups {
+		n += len(d.Excess)
+	}
+	return n
+}
+
+// TestFindDuplicateProcessingCyclesCountsAClosedPair is the regression test for
+// pg2-0z8fw: a duplicate pair whose BOTH members are closed must still be
+// reported. Closing a duplicate does not resolve it — both beads still exist —
+// and the open-only scan let such a pair silently leave the report, so the
+// reported total decayed (63 → 59 → 58) with nothing collapsed.
+func TestFindDuplicateProcessingCyclesCountsAClosedPair(t *testing.T) {
+	r := &listRunner{
+		allTasks: closedPairFixture("closed", "closed"),
+		// The open-only view of the same db is EMPTY — pre-fix this pair was
+		// invisible, which is exactly the vanishing the fix undoes.
+		openTasks: `{"data":[]}`,
+	}
+	c := NewClientWithRunner(r)
+
+	dups, err := c.FindDuplicateProcessingCycles(context.Background())
+	if err != nil {
+		t.Fatalf("FindDuplicateProcessingCycles: %v", err)
+	}
+	if len(dups) != 1 {
+		t.Fatalf("a CLOSED duplicate pair must still be reported, got %d groups: %+v", len(dups), dups)
+	}
+	if dups[0].Key != "o/r#104236" {
+		t.Errorf("key = %q, want o/r#104236", dups[0].Key)
+	}
+	if dups[0].Canonical.ID != "zr-4jpnl" {
+		t.Errorf("canonical = %q, want zr-4jpnl (smallest id; both closed)", dups[0].Canonical.ID)
+	}
+	if len(dups[0].Excess) != 1 || dups[0].Excess[0].ID != "zr-agwaj" {
+		t.Errorf("excess = %+v, want [zr-agwaj]", dups[0].Excess)
+	}
+	for _, verb := range []string{"create", "update", "close"} {
+		if r.wrote(verb) {
+			t.Errorf("the audit must be read-only, but issued `bd %s`: %v", verb, r.calls)
+		}
+	}
+}
+
+// TestFindDuplicateProcessingCyclesTotalIsStableUnderClose pins the property the
+// two consumers need: closing both members of a duplicate pair MUST NOT change
+// the total. A total that moves on an unrelated close is unusable as a baseline
+// and can mask a real new duplicate in a "MUST NOT increase" check.
+func TestFindDuplicateProcessingCyclesTotalIsStableUnderClose(t *testing.T) {
+	totals := map[string]int{}
+	for _, tc := range []struct {
+		name             string
+		statusA, statusB string
+	}{
+		{name: "both open", statusA: "open", statusB: "open"},
+		{name: "one closed", statusA: "closed", statusB: "open"},
+		{name: "both closed", statusA: "closed", statusB: "closed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := NewClientWithRunner(&listRunner{allTasks: closedPairFixture(tc.statusA, tc.statusB)})
+			dups, err := c.FindDuplicateProcessingCycles(context.Background())
+			if err != nil {
+				t.Fatalf("FindDuplicateProcessingCycles: %v", err)
+			}
+			totals[tc.name] = excessTotal(dups)
+		})
+	}
+	if totals["both open"] != 1 {
+		t.Fatalf("baseline total = %d, want 1", totals["both open"])
+	}
+	for _, name := range []string{"one closed", "both closed"} {
+		if totals[name] != totals["both open"] {
+			t.Errorf("total with %s = %d, want %d — the report must not decay as beads close",
+				name, totals[name], totals["both open"])
+		}
+	}
+}
+
+// TestFindDuplicateProcessingCyclesScanIsStatusAgnostic pins the SELECTOR, not
+// just the result: `bd list` excludes closed beads by DEFAULT, so dropping the
+// flag would silently restore the open-only bug (and pass an empty argv element,
+// corrupting the error message). The scan must ask for `--all` explicitly.
+func TestFindDuplicateProcessingCyclesScanIsStatusAgnostic(t *testing.T) {
+	r := &listRunner{allTasks: closedPairFixture("closed", "closed")}
+	if _, err := NewClientWithRunner(r).FindDuplicateProcessingCycles(context.Background()); err != nil {
+		t.Fatalf("FindDuplicateProcessingCycles: %v", err)
+	}
+	var scan []string
+	for _, call := range r.calls {
+		if len(call) > 0 && call[0] == "list" && containsStr(call, "--type=task") {
+			scan = call
+		}
+	}
+	if scan == nil {
+		t.Fatalf("no `bd list --type=task` call recorded: %v", r.calls)
+	}
+	if !containsStr(scan, "--all") {
+		t.Errorf("scan argv = %v, want --all (status-agnostic)", scan)
+	}
+	for _, arg := range scan {
+		if arg == "" {
+			t.Errorf("scan argv contains an EMPTY element, which corrupts the error message: %v", scan)
+		}
+		if strings.HasPrefix(arg, "--status") {
+			t.Errorf("scan argv = %v, must not narrow by status", scan)
+		}
+	}
+}
+
+// TestFindDuplicateProcessingCyclesCanonicalPrefersOpen guards a hazard the
+// status-agnostic scan introduces: the report prints `bd close <excess-id>` next
+// to its "keep" pick, so a mixed open/closed group must name the LIVE cycle as
+// canonical. Here the closed bead has the smaller id, so a pure smallest-id pick
+// would advise closing the open one.
+func TestFindDuplicateProcessingCyclesCanonicalPrefersOpen(t *testing.T) {
+	r := &listRunner{allTasks: `{"data":[
+      {"id":"cyc-aaa","title":"process-feedback: o/r#7","status":"closed","issue_type":"task"},
+      {"id":"cyc-zzz","title":"process-feedback: o/r#7","status":"open","issue_type":"task"}
+    ]}`}
+	dups, err := NewClientWithRunner(r).FindDuplicateProcessingCycles(context.Background())
+	if err != nil {
+		t.Fatalf("FindDuplicateProcessingCycles: %v", err)
+	}
+	if len(dups) != 1 {
+		t.Fatalf("expected one duplicated key, got %d: %+v", len(dups), dups)
+	}
+	if dups[0].Canonical.ID != "cyc-zzz" {
+		t.Errorf("canonical = %q, want cyc-zzz (the OPEN cycle, despite the larger id)", dups[0].Canonical.ID)
+	}
+	if len(dups[0].Excess) != 1 || dups[0].Excess[0].ID != "cyc-aaa" {
+		t.Errorf("excess = %+v, want [cyc-aaa]", dups[0].Excess)
 	}
 }
 

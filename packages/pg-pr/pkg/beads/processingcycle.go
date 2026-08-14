@@ -232,7 +232,14 @@ func (c *Client) ResolveProcessingCycle(ctx context.Context, key, prBeadID strin
 }
 
 // listProcessingCycles lists every `task` bead carrying the process-feedback
-// title prefix in the given status selector (e.g. `--status=open`).
+// title prefix in the given selector. The selector is a bd row filter, not
+// necessarily a status one: `--status=open` / `--status=closed` narrow to one
+// status, and `--all` takes EVERY status including closed.
+//
+// A selector is mandatory and MUST NOT be dropped to mean "everything": `bd
+// list` excludes closed beads by DEFAULT, so an omitted selector reads as
+// open-only (silently), and an empty string would also pass an empty argv
+// element and corrupt the error message below.
 func (c *Client) listProcessingCycles(ctx context.Context, statusFlag string) ([]ProcessingCycle, error) {
 	out, err := c.Runner.Run(
 		ctx,
@@ -430,7 +437,7 @@ func extractIDs(s string) []string {
 }
 
 // DuplicateProcessingCycles reports one process-feedback key that resolves to
-// more than one OPEN bead. Key is the (repo, pr_number) identity from
+// more than one bead, in ANY status. Key is the (repo, pr_number) identity from
 // ProcessingCycleKey.
 type DuplicateProcessingCycles struct {
 	Key       string            `json:"key"`
@@ -438,12 +445,37 @@ type DuplicateProcessingCycles struct {
 	Excess    []ProcessingCycle `json:"excess"`
 }
 
-// FindDuplicateProcessingCycles scans every OPEN process-feedback bead and
-// reports each (repo, pr_number) key that resolves to more than one — the open
-// count vs. distinct-PR count gap the operator measures with `bd list`. Like
-// FindDuplicateMergeRequests it is READ-ONLY and has no mutating counterpart.
+// FindDuplicateProcessingCycles scans every process-feedback bead in EVERY
+// status — open and closed alike — and reports each (repo, pr_number) key that
+// resolves to more than one: the bead count vs. distinct-PR count gap the
+// operator measures with `bd list`. Like FindDuplicateMergeRequests it is
+// READ-ONLY and has no mutating counterpart.
+//
+// The selector is STATUS-AGNOSTIC on purpose, matching
+// FindDuplicateMergeRequests' `includeClosed=true`. Closing both members of a
+// duplicate pair does not RESOLVE it — both beads still exist and are still
+// duplicates — so an open-only scan let a pair silently leave the report and
+// made the reported total decay over time (measured 63 → 59 → 58 on one db with
+// nothing collapsed). A decaying total is unusable as either an operator
+// reconcile baseline or a "MUST NOT increase" regression signal, so the
+// population is every bead the key resolves to and the total is comparable
+// across time.
+//
+// `--all` is REQUIRED and dropping the selector would NOT be equivalent: `bd
+// list` excludes closed beads by default, so an omitted selector silently
+// reproduces the very open-only bug this scan exists to avoid.
+//
+// KNOWN OVER-COUNT: unlike a merge-request bead, a process-feedback key may
+// legitimately resolve to several beads OVER TIME — ResolveProcessingCycle lets
+// a successor open once a predecessor has closed, and the successor's
+// description names it ("Supersedes closed process-feedback bead <id>"). Such a
+// pair is a lifecycle, not a duplicate, and a status-agnostic scan cannot tell
+// the two apart, so it is reported too. That is why the audit stays READ-ONLY
+// and prints ids for a person to review rather than a collapse plan. Measured
+// 2026-08-13 on the zr workspace: 0 of 742 process-feedback beads carried a
+// supersedes reference, so no group in that report was a succession.
 func (c *Client) FindDuplicateProcessingCycles(ctx context.Context) ([]DuplicateProcessingCycles, error) {
-	cycles, err := c.listProcessingCycles(ctx, "--status=open")
+	cycles, err := c.listProcessingCycles(ctx, "--all")
 	if err != nil {
 		return nil, err
 	}
@@ -463,7 +495,7 @@ func (c *Client) FindDuplicateProcessingCycles(ctx context.Context) ([]Duplicate
 		if len(g) < 2 {
 			continue
 		}
-		canonical := pickCycleByTitle(g, processingCycleTitle(k))
+		canonical := pickAuditCanonicalCycle(g)
 		dup := DuplicateProcessingCycles{Key: k, Canonical: *canonical}
 		for i := range g {
 			if g[i].ID != canonical.ID {
@@ -474,6 +506,40 @@ func (c *Client) FindDuplicateProcessingCycles(ctx context.Context) ([]Duplicate
 		out = append(out, dup)
 	}
 	return out, nil
+}
+
+// pickAuditCanonicalCycle chooses the bead FindDuplicateProcessingCycles names
+// as "keep" for one key. Precedence mirrors pickCanonicalMergeRequest:
+//
+//  1. OPEN over closed — the audit prints `bd close <excess-id>` next to its
+//     pick, so naming a CLOSED bead as canonical while a live cycle sits in the
+//     excess list would advise an operator to close the live one. That hazard
+//     only exists because the scan is status-agnostic; pickCycleByTitle's
+//     smallest-ID rule alone would hit it half the time in a mixed group.
+//  2. Lexicographically smallest ID — a total order, so the pick never depends
+//     on bd's row order. (There is no last_synced_at on a cycle to rank by.)
+//
+// Callers pass one title-group, so every member already shares the exact title;
+// returns nil only for an empty slice.
+func pickAuditCanonicalCycle(g []ProcessingCycle) *ProcessingCycle {
+	var best *ProcessingCycle
+	for i := range g {
+		cand := &g[i]
+		if best == nil || cycleMoreCanonical(cand, best) {
+			best = cand
+		}
+	}
+	return best
+}
+
+// cycleMoreCanonical reports whether a outranks b under
+// pickAuditCanonicalCycle's precedence.
+func cycleMoreCanonical(a, b *ProcessingCycle) bool {
+	aOpen, bOpen := a.Status != "closed", b.Status != "closed"
+	if aOpen != bOpen {
+		return aOpen
+	}
+	return a.ID < b.ID
 }
 
 // Package-level convenience wrappers using the default Client.

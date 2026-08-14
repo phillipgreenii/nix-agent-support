@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -71,7 +72,11 @@ func TestSyncDuplicatesReportsExcessBeads(t *testing.T) {
 	for _, want := range []string{
 		"merge-request o/r#102096: keep zr-cvr5v, excess zr-orr0a",
 		"process-feedback o/r#102096: keep zr-2rmnv, excess zr-sl2y9",
-		"2 excess bead(s). This command does NOT change them.",
+		// The population is stated next to the total: an unlabeled number reads as
+		// a census and an open-only one decays as beads close (pg2-0z8fw).
+		"scanned all statuses (open and closed)",
+		"2 excess bead(s) in all statuses (open and closed): 1 merge-request + 1 process-feedback.",
+		"This command does NOT change them.",
 		"bd close <excess-id>",
 	} {
 		if !strings.Contains(got, want) {
@@ -88,6 +93,48 @@ func TestSyncDuplicatesCleanWorkspace(t *testing.T) {
 	}
 	if strings.Contains(got, "bd close") {
 		t.Errorf("must not suggest a cleanup when there is nothing to clean: %q", got)
+	}
+}
+
+// TestSyncDuplicatesJSONStatesItsPopulation pins the machine-readable half of the
+// same guarantee: a consumer diffing totals across runs can see which beads the
+// counts cover, so a total is never mistaken for an open-only figure.
+func TestSyncDuplicatesJSONStatesItsPopulation(t *testing.T) {
+	withDuplicateAuditor(t, &fakeAuditor{
+		cycles: []beads.DuplicateProcessingCycles{{
+			Key:       "o/r#104236",
+			Canonical: beads.ProcessingCycle{ID: "zr-4jpnl", Status: "closed"},
+			Excess:    []beads.ProcessingCycle{{ID: "zr-agwaj", Status: "closed"}},
+		}},
+	})
+	var out bytes.Buffer
+	rootCmd.SetOut(&out)
+	rootCmd.SetErr(&out)
+	rootCmd.SetArgs([]string{"sync", "duplicates", "--json"})
+	t.Cleanup(func() {
+		rootCmd.SetOut(nil)
+		rootCmd.SetErr(nil)
+		rootCmd.SetArgs(nil)
+		// The flag is a package-level var; leaving it set would silently switch
+		// every later human-output test to JSON.
+		syncDuplicatesJSON = false
+		_ = syncDuplicatesCmd.Flags().Set("json", "false")
+	})
+	if err := rootCmd.ExecuteContext(context.Background()); err != nil {
+		t.Fatalf("sync duplicates --json: %v", err)
+	}
+	var got []duplicateReport
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal %q: %v", out.String(), err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("want one workspace report, got %d: %+v", len(got), got)
+	}
+	if got[0].Population != duplicatePopulation {
+		t.Errorf("population = %q, want %q", got[0].Population, duplicatePopulation)
+	}
+	if len(got[0].ProcessingCycles) != 1 || len(got[0].ProcessingCycles[0].Excess) != 1 {
+		t.Errorf("closed duplicate pair missing from the JSON report: %+v", got[0])
 	}
 }
 
