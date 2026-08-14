@@ -583,16 +583,57 @@ func DetectProjectRoot(cwd string) string {
 		}
 	}
 	// Walk up looking for .git
-	dir := cwd
+	if root, ok := gitRoot(cwd); ok {
+		return root
+	}
+	return cwd
+}
+
+// InGitRepo reports whether path lies inside a git working tree — i.e. whether
+// path itself or any ancestor of it holds a `.git` entry.
+//
+// It is DetectProjectRoot's `.git` walk exposed as a PREDICATE, and the two are
+// not interchangeable: DetectProjectRoot FALLS BACK to its argument when no
+// `.git` is found, so its return value cannot distinguish "this is a repo root"
+// from "nothing was found, here is your cwd back". A caller that needs the
+// yes/no answer — the `secrets` rule's in-repo relaxation (pg2-pmk9q) — must have
+// it as a predicate or it will read the fallback as a repo.
+//
+// It deliberately does NOT honour MONOREPO_ROOT. That env var overrides which
+// root a project is attributed to; it says nothing about whether a path is
+// version-controlled, and honouring it would report `true` for a path outside
+// any repo whenever the var happened to be set.
+//
+// `.git` is matched by os.Stat, so a WORKTREE — where `.git` is a FILE holding a
+// `gitdir:` pointer rather than a directory — counts, which it must: agents in
+// this workspace work almost exclusively in `.worktrees/<name>` checkouts, and a
+// dir-only test would report every one of them as unversioned.
+//
+// The walk is unbounded upward and stops at the filesystem root, matching
+// DetectProjectRoot. path SHOULD already be absolute and lexically cleaned (see
+// PathEvaluator.CleanPath); a relative path is cleaned but is walked relative to
+// the PROCESS cwd, which is rarely what a rule means.
+func InGitRepo(path string) bool {
+	if path == "" {
+		return false
+	}
+	_, ok := gitRoot(filepath.Clean(path))
+	return ok
+}
+
+// gitRoot walks up from dir — dir itself included — and returns the first
+// ancestor holding a `.git` entry. The second result is false when the walk
+// reaches the filesystem root without finding one; callers MUST branch on it
+// rather than on the returned string, which is "" in that case.
+func gitRoot(dir string) (string, bool) {
 	for {
 		if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
-			return dir
+			return dir, true
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			break
+			return "", false
 		}
 		dir = parent
 	}
-	return cwd
 }

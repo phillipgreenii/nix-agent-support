@@ -8,6 +8,64 @@
 // in two normalizations — as NAMED and symlink-RESOLVED — so a link into a
 // credential directory cannot be used to slip the access past it (pg2-cdmb1).
 // pathRef holds that contract and the reasoning behind it.
+//
+// # What is screened, and why it is scoped this way
+//
+// Settled by the OPERATOR RULING of 2026-08-13 on beads pg2-fhb9q (credential
+// coverage was only `secrets` + `.ssh`, so ~/.aws, ~/.gnupg, ~/.kube, ~/.docker
+// and ~/.netrc were screened by NOTHING) and pg2-pmk9q (the `secrets` component
+// fires on this repo's OWN internal/rules/secrets/ source, so working the CETA
+// queue prompts on reading this file). One mechanism settles both.
+//
+// THE MEASURED ROOT CAUSE, on main @93846155, isolated XDG_DATA_HOME,
+// permission_mode=default:
+//
+//	cat ~/.ssh/id_rsa          -> deny      (.ssh IS in secretpath's dir list)
+//	cat ~/.aws/credentials     -> abstain
+//	cat ~/.gnupg/secring.gpg   -> abstain
+//	cat ~/.kube/config         -> abstain
+//	cat ~/.netrc               -> abstain
+//
+// All five parent directories were ALREADY in the nix-managed
+// sandbox.filesystem.denyRead that patheval.LoadSandboxFilesystemConfig loads and
+// that this rule already held an evaluator for. They abstained because
+// secretpath.IsSecret GATED whether the deny-list was consulted at all: decide()
+// only ran on a reference the lexical list had already matched, so a path the Go
+// list did not recognize never reached patheval.IsDenyRead. The two lists were not
+// redundant — the LEXICAL one sat UPSTREAM of the CONFIGURED one, and that
+// inversion was the defect.
+//
+// The four scoping decisions, each ruled explicitly:
+//
+//  1. CREDENTIAL DIRECTORIES ARE CONFIG-DRIVEN. The deny-list is consulted for ANY
+//     path, independent of secretpath (see configRef). Covering a new credential
+//     store is therefore a CONFIG edit, not a code edit — the alternative, a
+//     second hardcoded Go list, was rejected because it drifts from the machine
+//     config that already names the same directories.
+//  2. THE `.env` / `.env.*` ARM STAYS LEXICAL AND REPO-BLIND. Explicitly NOT
+//     repo-scoped: a `.env` inside a repo is the most common real credential file
+//     an agent reads, so making it config-only would silently retire a live
+//     control.
+//  3. THE BARE `secrets` COMPONENT STAYS LEXICAL BUT IS SKIPPED INSIDE A GIT
+//     REPOSITORY, FOR READS ONLY. Operator rationale, verbatim: "anything that is
+//     in a git repo is not secret. if someone does have secrets in a repo, then
+//     they can explicitly set those paths in the config" — and the escape hatch is
+//     real, because LoadSandboxFilesystemConfig already merges the PROJECT-level
+//     .claude/settings.json. See lexicalHit.
+//  4. EXTENSION ARMS ARE OUT — no `*.pem`, `*.p12`, `*.pfx`, `*.keystore`,
+//     `service-account*.json` — on false-positive grounds: a repo full of test
+//     fixtures named `*.pem` is common. pg2-ia640.1 owns the unconditional
+//     `*.pem`/`*.key` question separately.
+//
+// Decision 3 fixes pg2-pmk9q BY CONSTRUCTION and more broadly than that bead's own
+// sanctioned option: any project with an `internal/…/secrets/` package is covered,
+// not just this one. It carries ONE deliberate coverage reduction, made by the
+// operator with the guard's text in front of them: `deploy/secrets/token` inside a
+// repo no longer Asks on a read, and covering such a tree becomes a project-level
+// denyRead entry. READS AND WRITES STAY DISTINGUISHED — a write under a `secrets/`
+// component is NOT relaxed, in or out of a repo — because the read relaxation is
+// broader than the alternatives that were rejected, and a write is the act that
+// cannot be undone by prompting later.
 package secrets
 
 import (
@@ -78,15 +136,16 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		if err != nil {
 			return hookio.RuleResult{}, fmt.Errorf("secrets: read file_path: %w", err)
 		}
-		if ref, ok := r.pathRef(path); ok {
-			return r.decide(ref, writeTools[input.ToolName]), nil
+		isWrite := writeTools[input.ToolName]
+		if ref, ok := r.pathRef(path, isWrite); ok {
+			return r.decide(ref, isWrite), nil
 		}
 	case "Glob", "Grep":
 		path, err := input.SearchPath()
 		if err != nil {
 			return hookio.RuleResult{}, fmt.Errorf("secrets: read search path: %w", err)
 		}
-		if ref, ok := r.pathRef(path); ok {
+		if ref, ok := r.pathRef(path, false); ok {
 			return r.decide(ref, false), nil
 		}
 	case "Bash":
@@ -133,11 +192,16 @@ func (ref secretRef) describe() string {
 }
 
 // candidateMatch tests one candidate path string for secret-ness. The rule runs
-// two of them over the same candidates — namedRef, then resolvedRef — so the
-// traversal is written once (see firstSecretRef).
+// THREE of them over the same candidates — lexicalRef, then resolvedRef, then
+// configRef — so the traversal is written once (see firstSecretRef).
+//
+// Each is built for one Evaluate and closes over that call's ACCESS DIRECTION,
+// because two of the three answers depend on it: the in-repo relaxation of the
+// generic `secrets` arm applies to reads only, and the deny-list has separate
+// read and write halves.
 type candidateMatch func(string) (secretRef, bool)
 
-// pathRef tests a path a tool call NAMES against secretpath.IsSecret in BOTH
+// pathRef tests a path a tool call NAMES against the lexical classifier in BOTH
 // normalizations, mirroring pathsafety's isAgentConfigWrite (pathsafety.go): the
 // path as NAMED, and the symlink-RESOLVED path. Either matching is a hit — the
 // named form so a credential file that is ITSELF a symlink still matches (its
@@ -151,6 +215,11 @@ type candidateMatch func(string) (secretRef, bool)
 // purely lexical and matches the `~/`, `$VAR/` and cwd-relative spellings
 // directly. Keeping the named form raw also keeps it working with a nil
 // evaluator, which is a supported configuration here (see resolve).
+//
+// The in-repo relaxation does need an absolutized form, so it asks CleanPath for
+// one INSIDE inGitRepo rather than absolutizing the candidate everyone else sees.
+// That keeps this property: with a nil evaluator the lexical arms still match on
+// the raw string, and the relaxation simply never fires (inGitRepo fails closed).
 //
 // A RESOLVED PATH IS CLASSIFIED WHEREVER IT LANDS — there is no check that it
 // stays inside the project root, the workspace, or any other known zone. That is
@@ -167,23 +236,34 @@ type candidateMatch func(string) (secretRef, bool)
 // file tool's `file_path` and a search tool's `path` ARE paths by the tool's own
 // contract, and there is exactly one of them per call, so neither the
 // path-shapedness question nor the resolution budget arises.
-func (r *Rule) pathRef(path string) (secretRef, bool) {
+//
+// The CONFIG arm runs last, for the same reason bashRef orders its passes that
+// way: it can only fire where both lexical forms declined, so it only ever
+// converts an Abstain into a Reject.
+func (r *Rule) pathRef(path string, isWrite bool) (secretRef, bool) {
 	if path == "" {
 		return secretRef{}, false
 	}
-	if ref, ok := namedRef(path); ok {
+	if r.lexicalHit(path, isWrite) {
+		return secretRef{named: path}, true
+	}
+	if ref, ok := r.resolvedForm(path, isWrite); ok {
 		return ref, true
 	}
-	return r.resolvedForm(path)
+	if r.denyListed(path, isWrite) {
+		return secretRef{named: path}, true
+	}
+	return secretRef{}, false
 }
 
 // bashRef returns the first secret path referenced by a Bash command, testing the
-// same two normalizations as pathRef but in TWO SEPARATE PASSES over the command:
-// every candidate as NAMED first, and only if that finds nothing, the candidates
-// worth resolving.
+// same normalizations as pathRef but in THREE SEPARATE PASSES over the command:
+// every candidate as NAMED first; only if that finds nothing, the candidates worth
+// RESOLVING; and only if that finds nothing either, the candidates the user has
+// DENY-LISTED.
 //
 // The pass split is load-bearing in two ways, so it must not be collapsed into a
-// per-candidate `named || resolved`:
+// per-candidate `named || resolved || denied`:
 //
 //   - It makes the change strictly additive. A command whose lexical pass hits
 //     selects the SAME first reference it always did, so its decision — including
@@ -191,26 +271,99 @@ func (r *Rule) pathRef(path string) (secretRef, bool) {
 //     that used to Abstain can move, and they can only move to Ask or Reject.
 //     Interleaved, a resolved hit on an early argument could outrank a deny-listed
 //     named hit on a later one and downgrade that Reject to an Ask.
-//   - It keeps the filesystem out of the hit path entirely: the resolving pass
-//     never runs for a command the cheap pass already answered.
+//   - It keeps the filesystem out of the hit path as far as possible: neither the
+//     resolving pass nor the deny-list pass runs for a command the cheap pass
+//     already answered. The cheap pass is no longer filesystem-FREE in every case
+//     (see lexicalHit), but it touches the filesystem only where the generic
+//     `secrets` arm matched — never on the majority path.
+//
+// EACH RESOLVING PASS GETS ITS OWN maxResolutions BUDGET rather than sharing one.
+// They resolve the SAME candidate strings, so the second pass's walks are
+// cache-warm repeats of the first's and the real cost is far below 2x; sharing one
+// budget would instead let a long argument list spend the whole allowance on pass
+// 2 and silently disable the deny-list pass, which is the fail-OPEN direction for
+// a control the user configured explicitly.
 func (r *Rule) bashRef(cmd string) (secretRef, bool) {
-	if ref, ok := firstSecretRef(cmd, maxShellUnwrap, namedRef); ok {
+	// Bash read/write intent is ambiguous per-argument, so every candidate is
+	// judged as a READ — the direction the beads are about, and the one that
+	// governs the in-repo relaxation.
+	const isWrite = false
+	if ref, ok := firstSecretRef(cmd, maxShellUnwrap, r.lexicalRef(isWrite)); ok {
 		return ref, true
 	}
 	if r.pe == nil {
 		return secretRef{}, false
 	}
-	budget := maxResolutions
-	return firstSecretRef(cmd, maxShellUnwrap, r.resolvedRef(&budget))
+	resolveBudget := maxResolutions
+	if ref, ok := firstSecretRef(cmd, maxShellUnwrap, r.resolvedRef(&resolveBudget, isWrite)); ok {
+		return ref, true
+	}
+	denyBudget := maxResolutions
+	return firstSecretRef(cmd, maxShellUnwrap, r.configRef(&denyBudget, isWrite))
 }
 
-// namedRef is the lexical, filesystem-free candidate test: the candidate exactly
-// as the call named it.
-func namedRef(path string) (secretRef, bool) {
-	if secretpath.IsSecret(path) {
+// lexicalRef is the lexical candidate test: the candidate exactly as the call
+// named it, run through lexicalHit.
+func (r *Rule) lexicalRef(isWrite bool) candidateMatch {
+	return func(path string) (secretRef, bool) {
+		if !r.lexicalHit(path, isWrite) {
+			return secretRef{}, false
+		}
 		return secretRef{named: path}, true
 	}
-	return secretRef{}, false
+}
+
+// lexicalHit applies secretpath's classification and then the ONE relaxation the
+// operator ruled for it: a match on the bare, role-describing `secrets` component
+// and nothing else is DROPPED for a READ of a path inside a git repository (see
+// the package comment's decision 3).
+//
+// TWO CONDITIONS, both necessary:
+//
+//   - READ ONLY. A write under a `secrets/` component is never relaxed. This is
+//     the guard pg2-pmk9q pinned and the ruling explicitly kept: the read
+//     relaxation is the broad one, so keeping the directions distinguished is what
+//     bounds it. A write that turns out to have been to a real credential store
+//     cannot be taken back by prompting afterwards.
+//   - GenericSecretsDir ONLY. secretpath.Classify reports the STRONGEST arm that
+//     matched, so `<repo>/secrets/.ssh/id_rsa` and `<repo>/secrets/.env` come back
+//     WellKnownSecret and keep asking. The relaxation can only ever discard the
+//     weakest evidence there is.
+//
+// It is the only place this rule consults the filesystem outside a resolution, and
+// it does so only when the generic arm matched — never on the majority path where
+// nothing matched at all.
+func (r *Rule) lexicalHit(path string, isWrite bool) bool {
+	switch secretpath.Classify(path) {
+	case secretpath.WellKnownSecret:
+		return true
+	case secretpath.GenericSecretsDir:
+		return isWrite || !r.inGitRepo(path)
+	default:
+		return false
+	}
+}
+
+// inGitRepo reports whether path lies inside a git working tree, asked of the
+// path's NAMED form (env/`~`/cwd-relative expansion, no symlink resolution) — the
+// same normalization every other named-form question in this rule uses. The
+// resolved form gets its own separate lexicalHit call from resolvedForm, so a link
+// out of a repo into a real `secrets/` store is still classified on where it LANDS.
+//
+// IT FAILS CLOSED in both of its failure modes. A nil evaluator (a supported
+// configuration — see resolve) and a path CleanPath cannot expand both report
+// false, i.e. "not in a repo", which leaves the `secrets` arm FIRING. The
+// relaxation only ever removes a prompt, so an unanswerable question must cost an
+// Ask, never silence.
+func (r *Rule) inGitRepo(path string) bool {
+	if r.pe == nil {
+		return false
+	}
+	cleaned := r.pe.CleanPath(path)
+	if cleaned == "" {
+		return false
+	}
+	return patheval.InGitRepo(cleaned)
 }
 
 // resolvedRef builds the resolving candidate test for one Evaluate, spending from
@@ -228,23 +381,72 @@ func namedRef(path string) (secretRef, bool) {
 // detected. Closing it means resolving every bare word of every command, which
 // buys back that false-positive class and the stat storm together. A path-shaped
 // spelling of the same link IS caught, including `./mykey`.
-func (r *Rule) resolvedRef(budget *int) candidateMatch {
+func (r *Rule) resolvedRef(budget *int, isWrite bool) candidateMatch {
 	return func(path string) (secretRef, bool) {
 		if *budget <= 0 || !isPathShaped(path) {
 			return secretRef{}, false
 		}
 		*budget--
-		return r.resolvedForm(path)
+		return r.resolvedForm(path, isWrite)
 	}
 }
 
 // resolvedForm tests the symlink-resolved form of path.
-func (r *Rule) resolvedForm(path string) (secretRef, bool) {
+func (r *Rule) resolvedForm(path string, isWrite bool) (secretRef, bool) {
 	resolved := r.resolve(path)
-	if resolved == "" || !secretpath.IsSecret(resolved) {
+	if resolved == "" || !r.lexicalHit(resolved, isWrite) {
 		return secretRef{}, false
 	}
 	return secretRef{named: path, resolved: resolved}, true
+}
+
+// configRef is the CONFIG-DRIVEN candidate test: a path the user has deny-listed
+// for THIS direction of access, whether or not any lexical arm recognizes it.
+//
+// This is the arm that makes credential-directory coverage a CONFIG edit rather
+// than a code edit (the package comment's decision 1). It is also the arm that
+// closes the measured hole: before it existed, secretpath.IsSecret gated whether
+// the deny-list was consulted at all, so `cat ~/.aws/credentials` abstained even
+// though `.aws` was deny-listed. path-safety consults the deny-list too, but only
+// for the FILE and SEARCH tools — a Bash argument path never reaches it, so for
+// Bash this rule is the only place the deny-list can be applied.
+//
+// IT IS GATED ON isPathShaped, for exactly the reason resolvedRef is and with more
+// force: IsDenyRead ABSOLUTIZES against the cwd, so a bare word would be
+// reclassified as a file in the current directory. With a cwd anywhere under a
+// deny-listed tree, `kubectl get secrets` would resolve `secrets` to
+// `<cwd>/secrets`, land inside that tree and hard-REJECT — a false positive worse
+// than the pg2-ia640.2 class, since a Reject cannot be waved through.
+func (r *Rule) configRef(budget *int, isWrite bool) candidateMatch {
+	return func(path string) (secretRef, bool) {
+		if *budget <= 0 || !isPathShaped(path) {
+			return secretRef{}, false
+		}
+		*budget--
+		if !r.denyListed(path, isWrite) {
+			return secretRef{}, false
+		}
+		return secretRef{named: path}, true
+	}
+}
+
+// denyListed reports whether the user's sandbox.filesystem deny-list blocks this
+// direction of access to path. It is the single place the read/write halves of the
+// deny-list are selected between, so configRef's screen and decide's verdict
+// cannot disagree about which half applies.
+//
+// READS AND WRITES ARE DELIBERATELY NOT UNIONED. A path in denyRead only is not
+// blocked for writing here, matching path-safety's own split — denyWrite is the
+// key that governs writes, and answering a write with the read list would make the
+// two rules disagree about the same config.
+func (r *Rule) denyListed(path string, isWrite bool) bool {
+	if r.pe == nil {
+		return false
+	}
+	if isWrite {
+		return r.pe.IsDenyWrite(path)
+	}
+	return r.pe.IsDenyRead(path)
 }
 
 // resolve returns the symlink-resolved absolute form of path, or "" when no
@@ -284,18 +486,17 @@ func isPathShaped(path string) bool {
 // The deny-list is consulted with the NAMED form: patheval's IsDenyRead /
 // IsDenyWrite resolve symlinks themselves, so a symlink into a deny-listed
 // directory is already covered and pre-resolving here would gain nothing.
+//
+// A reference the CONFIG arm found (configRef) necessarily takes the Reject
+// branch, since that arm's whole screen is this same predicate. The re-check is
+// kept rather than short-circuited so there is ONE place the verdict is decided:
+// every arm hands decide a reference and decide alone chooses Reject vs Ask.
 func (r *Rule) decide(ref secretRef, isWrite bool) hookio.RuleResult {
-	if r.pe != nil {
-		denied := r.pe.IsDenyRead(ref.named)
-		if isWrite {
-			denied = r.pe.IsDenyWrite(ref.named)
-		}
-		if denied {
-			return hookio.RuleResult{
-				Decision: hookio.Reject,
-				Reason:   "credential/secret path is deny-listed: " + ref.describe(),
-				Module:   r.Name(),
-			}
+	if r.denyListed(ref.named, isWrite) {
+		return hookio.RuleResult{
+			Decision: hookio.Reject,
+			Reason:   "credential/secret path is deny-listed: " + ref.describe(),
+			Module:   r.Name(),
 		}
 	}
 	return hookio.RuleResult{
@@ -311,8 +512,8 @@ func (r *Rule) decide(ref secretRef, isWrite bool) hookio.RuleResult {
 // so the check cannot be trivially bypassed by wrapping the read in a shell
 // string.
 //
-// match is the candidate test — namedRef or resolvedRef. The traversal is
-// identical for both, and bashRef runs it once per pass.
+// match is the candidate test — lexicalRef, resolvedRef or configRef. The
+// traversal is identical for all three, and bashRef runs it once per pass.
 func firstSecretRef(cmd string, depth int, match candidateMatch) (secretRef, bool) {
 	for _, pc := range cmdparse.Parse(cmd) {
 		if depth > 0 {

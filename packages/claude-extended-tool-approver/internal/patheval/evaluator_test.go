@@ -680,3 +680,77 @@ func TestPathEvaluator_AllowWrite_IsReadWrite(t *testing.T) {
 		t.Errorf("Evaluate(%s) for allowWrite path = %v, want PathReadWrite", filepath.Join(home, ".local", "share", "contained-claude", "foo"), got)
 	}
 }
+
+// InGitRepo is the PREDICATE half of DetectProjectRoot's `.git` walk, added for
+// the `secrets` rule's in-repo relaxation (pg2-pmk9q). The two are not
+// interchangeable and this table pins why: DetectProjectRoot FALLS BACK to its
+// argument, so its return value cannot distinguish "this is a repo root" from
+// "nothing found, here is your cwd back", while a caller that relaxes a security
+// control on the answer needs the distinction to be exact.
+func TestInGitRepo(t *testing.T) {
+	root := t.TempDir()
+	// Repo whose marker is a DIRECTORY (an ordinary clone).
+	clone := filepath.Join(root, "clone")
+	deep := filepath.Join(clone, "a", "b", "c")
+	if err := os.MkdirAll(filepath.Join(clone, ".git", "objects"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(deep, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Repo whose marker is a FILE (a git worktree). This must count: agents in
+	// this workspace work almost exclusively in `.worktrees/<name>` checkouts, so
+	// a dir-only test would report every one of them as unversioned.
+	wt := filepath.Join(root, "wt")
+	if err := os.MkdirAll(filepath.Join(wt, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wt, ".git"), []byte("gitdir: "+clone+"/.git/worktrees/wt\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Not a repo at all.
+	plain := filepath.Join(root, "plain", "sub")
+	if err := os.MkdirAll(plain, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name string
+		path string
+		want bool
+	}{
+		{"repo root itself", clone, true},
+		{"nested dir in a clone", deep, true},
+		{"nonexistent path under a clone", filepath.Join(deep, "no", "such", "file.go"), true},
+		{"the .git dir itself", filepath.Join(clone, ".git", "objects"), true},
+		{"worktree root (.git is a FILE)", wt, true},
+		{"nested dir in a worktree", filepath.Join(wt, "sub"), true},
+		{"sibling dir that is not a repo", plain, false},
+		{"the temp root above both repos", root, false},
+		{"empty path", "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := InGitRepo(tt.path); got != tt.want {
+				t.Errorf("InGitRepo(%q) = %v, want %v", tt.path, got, tt.want)
+			}
+		})
+	}
+}
+
+// InGitRepo deliberately does NOT honour MONOREPO_ROOT, which DetectProjectRoot
+// does. That var overrides which root a project is ATTRIBUTED to; it says nothing
+// about whether a path is version-controlled, so honouring it would answer "yes,
+// in a repo" for a path under no repo at all — and the `secrets` rule relaxes a
+// control on that answer.
+func TestInGitRepo_IgnoresMONOREPO_ROOT(t *testing.T) {
+	plain := t.TempDir()
+	t.Setenv("MONOREPO_ROOT", plain)
+	if InGitRepo(filepath.Join(plain, "sub", "file.go")) {
+		t.Errorf("InGitRepo honoured MONOREPO_ROOT for %s, which holds no .git", plain)
+	}
+	// DetectProjectRoot DOES honour it — the contrast is the point.
+	if got := DetectProjectRoot(filepath.Join(plain, "sub")); got != plain {
+		t.Errorf("DetectProjectRoot = %q, want %q (MONOREPO_ROOT still applies there)", got, plain)
+	}
+}

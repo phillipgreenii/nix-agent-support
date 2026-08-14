@@ -584,6 +584,378 @@ func TestRule_ResolutionBudgetBounded(t *testing.T) {
 	}
 }
 
+// ===========================================================================
+// pg2-pmk9q — the IN-REPO relaxation of the bare `secrets` component.
+// ===========================================================================
+
+// repoScopeFixture builds one tree holding every shape the pg2-pmk9q ruling
+// distinguishes, so the matching and non-matching cases are adjacent in one place
+// and cannot drift apart:
+//
+//	<root>/secrets/prod.env             a credential store OUTSIDE any repo
+//	<root>/repo/.git/                   repo marker (directory form)
+//	<root>/repo/internal/rules/secrets/secrets.go   the reported false positive
+//	<root>/repo/deploy/secrets/token    the operator-OVERRIDDEN guard
+//	<root>/repo/.env                    repo-blind `.env` arm
+//	<root>/repo/secrets/.ssh/id_rsa     both arms match; the stronger must win
+//	<root>/repo/config/api-token.json   repo-blind basename arm
+//	<root>/wt/.git                      repo marker (FILE form — a git worktree)
+//	<root>/wt/secrets/token             same relaxation, reached via a worktree
+func repoScopeFixture(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	for _, f := range []string{
+		filepath.Join("secrets", "prod.env"),
+		filepath.Join("deploy", "secrets", "token"),
+		filepath.Join("repo", "internal", "rules", "secrets", "secrets.go"),
+		filepath.Join("repo", "deploy", "secrets", "token"),
+		filepath.Join("repo", ".env"),
+		filepath.Join("repo", "secrets", ".ssh", "id_rsa"),
+		filepath.Join("repo", "config", "api-token.json"),
+		filepath.Join("repo", "README.md"),
+		filepath.Join("wt", "secrets", "token"),
+	} {
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(root, f)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, f), []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.MkdirAll(filepath.Join(root, "repo", ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A WORKTREE's `.git` is a FILE holding a `gitdir:` pointer, not a directory.
+	// Agents in this workspace work almost exclusively in `.worktrees/<name>`
+	// checkouts, so a dir-only repo test would report every one of them as
+	// unversioned and the relaxation would never fire where it is needed most.
+	if err := os.WriteFile(filepath.Join(root, "wt", ".git"), []byte("gitdir: "+filepath.Join(root, "repo", ".git")+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// PRECONDITIONS. Without these the table below could pass for the wrong
+	// reason — e.g. a temp root that happens to sit inside some git repo would
+	// make the "outside a repo" rows relax too, and they would then be asserting
+	// nothing.
+	if patheval.InGitRepo(filepath.Join(root, "secrets", "prod.env")) {
+		t.Fatalf("precondition: %s is inside a git repository, so the outside-a-repo rows cannot be tested here", filepath.Join(root, "secrets"))
+	}
+	for _, p := range []string{
+		filepath.Join(root, "repo", "internal", "rules", "secrets", "secrets.go"),
+		filepath.Join(root, "repo", "deploy", "secrets", "token"),
+		filepath.Join(root, "wt", "secrets", "token"),
+	} {
+		if !patheval.InGitRepo(p) {
+			t.Fatalf("precondition: %s is NOT inside a git repository, so the in-repo rows cannot be tested here", p)
+		}
+		if secretpath.Classify(p) != secretpath.GenericSecretsDir {
+			t.Fatalf("precondition: Classify(%s) = %v, want GenericSecretsDir — only that arm is relaxed, so another Kind means the row tests something else",
+				p, secretpath.Classify(p))
+		}
+	}
+	return root
+}
+
+// The pg2-pmk9q ruling, pinned in both directions. A READ under a bare `secrets/`
+// component INSIDE a git repository stops prompting; every other shape keeps the
+// verdict it had.
+//
+// GUARD 2 IS DELIBERATELY OVERRIDDEN HERE. pg2-pmk9q pinned
+// `deploy/secrets/token` as a NON-NEGOTIABLE regression guard that must keep
+// Asking. The operator OVERRODE it on 2026-08-13, with the guard's text in front of
+// them: a `deploy/` tree is inside a repo, so under the new model the read abstains
+// and covering such a tree becomes a project-level `.claude/settings.json` denyRead
+// entry (which patheval.LoadSandboxFilesystemConfig already merges). This is the
+// ONE coverage reduction in the ruling. The row below asserts the OVERRIDDEN
+// behaviour on purpose — it is not a stale expectation, and re-tightening it needs
+// a new ruling, not a test edit.
+func TestRule_GenericSecretsComponentSkippedInsideAGitRepo(t *testing.T) {
+	root := repoScopeFixture(t)
+	project := t.TempDir()
+	r := New(patheval.NewWithCWD(project, project))
+	tests := []struct {
+		name string
+		path string
+		read hookio.Decision
+		// write is the SAME path via a write tool. Reads and writes MUST stay
+		// distinguished (pg2-pmk9q guard 3), and the relaxation is read-only.
+		write hookio.Decision
+	}{
+		// RELAXED — the reported false positive, and the general case it subsumes.
+		{"this rule's own source tree", filepath.Join(root, "repo", "internal", "rules", "secrets", "secrets.go"), hookio.NoOpinion, hookio.Ask},
+		{"deploy/secrets/token (guard 2, operator-OVERRIDDEN)", filepath.Join(root, "deploy", "secrets", "token"), hookio.Ask, hookio.Ask},
+		{"in-repo deploy/secrets/token", filepath.Join(root, "repo", "deploy", "secrets", "token"), hookio.NoOpinion, hookio.Ask},
+		{"in-WORKTREE secrets/token (.git is a FILE)", filepath.Join(root, "wt", "secrets", "token"), hookio.NoOpinion, hookio.Ask},
+
+		// NOT RELAXED, adjacent — GUARD 1: outside any repo the arm still fires.
+		{"guard 1: ~/secrets/prod.env outside a repo", filepath.Join(root, "secrets", "prod.env"), hookio.Ask, hookio.Ask},
+
+		// NOT RELAXED — the repo-BLIND arms (ruling decisions 2 and 3's bound). A
+		// `.env` in a repo is the most common real credential file an agent reads,
+		// and `.ssh` / `*token*.json` name a specific credential store or file, so
+		// none of them is scoped by the repo test.
+		{"repo .env stays lexical and repo-blind", filepath.Join(root, "repo", ".env"), hookio.Ask, hookio.Ask},
+		{"in-repo secrets/.ssh/id_rsa — stronger arm wins", filepath.Join(root, "repo", "secrets", ".ssh", "id_rsa"), hookio.Ask, hookio.Ask},
+		{"in-repo api-token.json basename arm", filepath.Join(root, "repo", "config", "api-token.json"), hookio.Ask, hookio.Ask},
+
+		// Ordinary in-repo source is untouched in either direction.
+		{"ordinary in-repo file", filepath.Join(root, "repo", "README.md"), hookio.NoOpinion, hookio.NoOpinion},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for label, input := range map[string]*hookio.HookInput{
+				"Bash cat": bashInput("cat " + tt.path),
+				"Read":     fileInput("Read", tt.path),
+			} {
+				if got := hookio.Verdict(r.Evaluate(input)); got.Decision != tt.read {
+					t.Errorf("%s %s = %v, want %v (reason %q)", label, tt.path, got.Decision, tt.read, got.Reason)
+				}
+			}
+			if got := hookio.Verdict(r.Evaluate(fileInput("Write", tt.path))); got.Decision != tt.write {
+				t.Errorf("Write %s = %v, want %v (reason %q)", tt.path, got.Decision, tt.write, got.Reason)
+			}
+		})
+	}
+}
+
+// GUARD 3, stated as a RELATION rather than as the table's hardcoded pair: a WRITE
+// to a path is never LESS restrictive than a READ of the same path. That is the
+// property the ruling requires ("reads and writes MUST stay distinguished"), and it
+// is what a table of verdicts cannot keep — a later retuning that relaxed writes to
+// match reads would leave every row of the table passing.
+//
+// hookio.Decision is ordered by restrictiveness, so the relation is
+// `write >= read`, one-directional on purpose: equal is fine (most paths), weaker
+// is the failure.
+func TestRule_WriteNeverLessRestrictiveThanRead(t *testing.T) {
+	root := repoScopeFixture(t)
+	project := t.TempDir()
+	r := New(patheval.NewWithCWD(project, project))
+	for _, p := range []string{
+		filepath.Join(root, "repo", "internal", "rules", "secrets", "secrets.go"),
+		filepath.Join(root, "repo", "deploy", "secrets", "token"),
+		filepath.Join(root, "wt", "secrets", "token"),
+		filepath.Join(root, "secrets", "prod.env"),
+		filepath.Join(root, "repo", ".env"),
+		filepath.Join(root, "repo", "secrets", ".ssh", "id_rsa"),
+		filepath.Join(root, "repo", "README.md"),
+	} {
+		t.Run(p, func(t *testing.T) {
+			read := hookio.Verdict(r.Evaluate(fileInput("Read", p)))
+			write := hookio.Verdict(r.Evaluate(fileInput("Write", p)))
+			if write.Decision < read.Decision {
+				t.Errorf("%s: Write = %v is LESS restrictive than Read = %v", p, write.Decision, read.Decision)
+			}
+		})
+	}
+}
+
+// The relaxation FAILS CLOSED when the repo question cannot be answered. A nil
+// evaluator is a supported configuration (it makes the rule cwd-independent — see
+// resolve), and with it there is no cwd to expand a path against, so the `secrets`
+// arm must keep FIRING rather than silently relaxing. The relaxation only ever
+// removes a prompt, so an unanswerable question must cost an Ask, never silence.
+func TestRule_InRepoRelaxationFailsClosedWithoutAnEvaluator(t *testing.T) {
+	root := repoScopeFixture(t)
+	r := New(nil)
+	for _, p := range []string{
+		filepath.Join(root, "repo", "internal", "rules", "secrets", "secrets.go"),
+		filepath.Join(root, "repo", "deploy", "secrets", "token"),
+	} {
+		if got := hookio.Verdict(r.Evaluate(fileInput("Read", p))); got.Decision != hookio.Ask {
+			t.Errorf("nil evaluator, Read %s = %v, want ask — the relaxation must fail closed (reason %q)", p, got.Decision, got.Reason)
+		}
+	}
+}
+
+// The ACCEPTANCE CRITERION of pg2-pmk9q against the REAL path it was reported
+// for — this very file — rather than a fixture that merely resembles it. The four
+// observed asklog rows (327201, 327344, 327371, 327471) were all read-only
+// inspection of this directory.
+//
+// It SKIPS rather than fails when the checkout is not a git working tree, and that
+// is not a hedge: the nix build sandbox copies the source WITHOUT `.git`, so in
+// that environment the premise of the test genuinely does not hold and the
+// unconditional guarantee is carried by repoScopeFixture instead.
+func TestRule_ReadingThisRulesOwnSourceNoLongerPrompts(t *testing.T) {
+	self, err := filepath.Abs("secrets.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := secretpath.Classify(self); got != secretpath.GenericSecretsDir {
+		t.Fatalf("precondition: Classify(%s) = %v, want GenericSecretsDir — this path is the reported false positive and must still match the arm being relaxed", self, got)
+	}
+	if !patheval.InGitRepo(self) {
+		t.Skipf("checkout at %s is not a git working tree (nix build sandbox); repoScopeFixture carries this guarantee unconditionally", self)
+	}
+	dir := filepath.Dir(self)
+	r := New(patheval.NewWithCWD(dir, dir))
+	for label, input := range map[string]*hookio.HookInput{
+		"Read absolute":    fileInput("Read", self),
+		"Read relative":    fileInput("Read", "secrets.go"),
+		"Bash cat":         bashInput("cat " + self),
+		"Bash git show":    bashInput("git show HEAD:internal/rules/secrets/secrets.go"),
+		"Grep in this dir": searchInput("Grep", "func Evaluate", dir),
+	} {
+		if got := hookio.Verdict(r.Evaluate(input)); got.Decision != hookio.NoOpinion {
+			t.Errorf("%s = %v, want abstain — reading the secrets rule's own source must not prompt (reason %q)", label, got.Decision, got.Reason)
+		}
+	}
+	// A WRITE to the same file is NOT relaxed (guard 3).
+	if got := hookio.Verdict(r.Evaluate(fileInput("Write", self))); got.Decision != hookio.Ask {
+		t.Errorf("Write %s = %v, want ask — the relaxation is read-only (reason %q)", self, got.Decision, got.Reason)
+	}
+}
+
+// ===========================================================================
+// pg2-fhb9q — the CONFIG-DRIVEN arm.
+// ===========================================================================
+
+// denyListFixture builds a credential-store fixture and points HOME at it, so the
+// `~/` spellings the bead measured expand into it. It returns the fixture root and
+// a rule whose evaluator deny-lists the four credential directories the bead names
+// but which secretpath does NOT recognize.
+//
+// HOME is set BEFORE the evaluator is constructed because patheval resolves home
+// once, at construction (patheval.NewWithCWD).
+func denyListFixture(t *testing.T) (string, *Rule) {
+	t.Helper()
+	home := t.TempDir()
+	for _, f := range []string{
+		filepath.Join(".kube", "config"),
+		filepath.Join(".docker", "config.json"),
+		filepath.Join(".aws", "credentials"),
+		".netrc",
+		filepath.Join("notes", "README.md"),
+	} {
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(home, f)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(home, f), []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("HOME", home)
+	project := t.TempDir()
+	pe := patheval.NewWithCWD(project, project)
+	denied := []string{
+		filepath.Join(home, ".kube"),
+		filepath.Join(home, ".docker"),
+		filepath.Join(home, ".aws"),
+		filepath.Join(home, ".netrc"),
+	}
+	pe.SetSandboxConfig(&patheval.SandboxFilesystemConfig{DenyRead: denied, DenyWrite: denied})
+	return home, New(pe)
+}
+
+// THE MEASURED DEFECT, and the acceptance criterion of pg2-fhb9q: a path under a
+// configured denyRead prefix must be screened WITHOUT needing a secretpath entry.
+//
+// Before the config arm, secretpath.IsSecret GATED whether the deny-list was
+// consulted at all — decide() ran only on a reference a lexical arm had already
+// matched — so `cat ~/.aws/credentials` returned {} on main despite `.aws` sitting
+// in the machine's sandbox.filesystem.denyRead. The lexical list was UPSTREAM of
+// the configured one, and that inversion is what this test pins closed.
+//
+// EVERY POSITIVE ROW HAS ITS secretpath.IsSecret == false ASSERTED as a
+// precondition. Without that the rows could pass for the wrong reason — a lexical
+// hit — and the test would keep passing while testing nothing.
+func TestRule_ConfigDenyListScreensWithoutASecretpathEntry(t *testing.T) {
+	home, r := denyListFixture(t)
+	tests := []struct {
+		name string
+		path string
+		want hookio.Decision
+	}{
+		// MATCHING — deny-listed, and NOT recognized by any lexical arm.
+		{"kube config", filepath.Join(home, ".kube", "config"), hookio.Reject},
+		{"docker registry auth", filepath.Join(home, ".docker", "config.json"), hookio.Reject},
+		{"aws credentials", filepath.Join(home, ".aws", "credentials"), hookio.Reject},
+		{"netrc (a deny-listed FILE, not a directory)", filepath.Join(home, ".netrc"), hookio.Reject},
+		// NON-MATCHING, adjacent — under HOME but under no deny prefix, so the
+		// config arm must not sweep the whole home directory in.
+		{"unrelated file under home", filepath.Join(home, "notes", "README.md"), hookio.NoOpinion},
+		{"sibling of a deny prefix", filepath.Join(home, ".kubeconfig-backup"), hookio.NoOpinion},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if secretpath.IsSecret(tt.path) {
+				t.Fatalf("precondition: %s is lexically secret, so this row does not test the CONFIG arm", tt.path)
+			}
+			for label, input := range map[string]*hookio.HookInput{
+				"Bash cat": bashInput("cat " + tt.path),
+				"Read":     fileInput("Read", tt.path),
+				"Grep":     searchInput("Grep", "x", tt.path),
+			} {
+				got := hookio.Verdict(r.Evaluate(input))
+				if got.Decision != tt.want {
+					t.Errorf("%s %s = %v, want %v (reason %q)", label, tt.path, got.Decision, tt.want, got.Reason)
+				}
+			}
+		})
+	}
+	// The `~/` spelling the bead measured reaches the same verdict — the arm keys on
+	// the path patheval expands, not on the literal the caller typed.
+	if got := hookio.Verdict(r.Evaluate(bashInput("cat ~/.kube/config"))); got.Decision != hookio.Reject {
+		t.Errorf("cat ~/.kube/config = %v, want reject (reason %q)", got.Decision, got.Reason)
+	}
+}
+
+// Stated as a RELATION rather than as hardcoded verdicts, because the safety
+// property is not "these paths Reject" — it is "CONFIGURING a deny-list can never
+// make ceta LESS restrictive about a path". The inversion this bead fixed was
+// exactly a case where the configured list had no effect at all, and a relation
+// keeps that pinned through any later retuning of what either side decides.
+//
+// hookio.Decision is ordered by restrictiveness (Approve < NoOpinion < Ask <
+// Reject), so "not less restrictive" is `configured >= unconfigured`.
+func TestRule_ConfigDenyListIsNeverLessRestrictiveThanNoConfig(t *testing.T) {
+	home, configured := denyListFixture(t)
+	// Same cwd/home, no sandbox config at all.
+	unconfigured := New(patheval.NewWithCWD(t.TempDir(), t.TempDir()))
+	for _, p := range []string{
+		filepath.Join(home, ".kube", "config"),
+		filepath.Join(home, ".docker", "config.json"),
+		filepath.Join(home, ".aws", "credentials"),
+		filepath.Join(home, ".netrc"),
+		filepath.Join(home, "notes", "README.md"),
+		filepath.Join(home, ".ssh", "id_rsa"), // lexical too — must not regress either
+	} {
+		t.Run(p, func(t *testing.T) {
+			with := hookio.Verdict(configured.Evaluate(bashInput("cat " + p)))
+			without := hookio.Verdict(unconfigured.Evaluate(bashInput("cat " + p)))
+			if with.Decision < without.Decision {
+				t.Errorf("cat %s: configured = %v is LESS restrictive than unconfigured = %v", p, with.Decision, without.Decision)
+			}
+		})
+	}
+}
+
+// BLAST-RADIUS BOUND on the config arm, and the reason it is gated on
+// isPathShaped: IsDenyRead ABSOLUTIZES against the cwd, so testing a bare word
+// would reclassify it as a file in the current directory. With the cwd inside a
+// deny-listed tree, `kubectl get secrets` would resolve `secrets` to
+// `<cwd>/secrets`, land inside that tree, and hard-REJECT — worse than the
+// pg2-ia640.2 false-positive class it revives, because a Reject cannot be waved
+// through at the prompt.
+func TestRule_ConfigDenyListDoesNotResolveBareWords(t *testing.T) {
+	denied := t.TempDir()
+	cwd := filepath.Join(denied, "proj")
+	if err := os.MkdirAll(filepath.Join(cwd, "secrets"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	pe := patheval.NewWithCWD(cwd, cwd)
+	pe.SetSandboxConfig(&patheval.SandboxFilesystemConfig{DenyRead: []string{denied}})
+	r := New(pe)
+	if got := hookio.Verdict(r.Evaluate(bashInput("kubectl get secrets"))); got.Decision != hookio.NoOpinion {
+		t.Errorf("kubectl get secrets with a deny-listed cwd = %v, want abstain (reason %q)", got.Decision, got.Reason)
+	}
+	// The path-shaped spelling of a file in that same deny-listed tree IS screened,
+	// so the bound costs no coverage for anything that names a path.
+	if got := hookio.Verdict(r.Evaluate(bashInput("cat " + filepath.Join(cwd, "notes.txt")))); got.Decision != hookio.Reject {
+		t.Errorf("cat <deny-listed>/notes.txt = %v, want reject (reason %q)", got.Decision, got.Reason)
+	}
+}
+
 // A deny-listed secret reached VIA a symlink is still Reject, not Ask: patheval's
 // IsDenyRead resolves symlinks itself, so the escalation survives the indirection.
 func TestRule_DenyListedSecretViaSymlink_Rejects(t *testing.T) {

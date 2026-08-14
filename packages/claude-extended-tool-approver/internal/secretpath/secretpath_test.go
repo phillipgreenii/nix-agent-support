@@ -232,11 +232,26 @@ func TestIsSecret_FoldsNotMerelyLowercases(t *testing.T) {
 //
 // This test pins that separation from both sides so a future "fix" to either
 // bead cannot silently absorb the other.
+//
+// UPDATE — pg2-pmk9q IS NOW FIXED, and this assertion is what pins the LAYERING of
+// that fix. The operator ruled on 2026-08-13 that the bare `secrets` component
+// stays LEXICAL but is skipped for a READ of a path inside a git repository. That
+// is a FILESYSTEM question, so it is answered in internal/rules/secrets (which
+// holds a *patheval.PathEvaluator) and NOT here — this package must stay
+// filesystem-free. So the row below is still correct and still required: this
+// SPELLING must keep matching the lexical arm, because the relaxation is the
+// caller's to apply. See Classify, and internal/rules/secrets' package comment.
 func TestIsSecret_DirectoryArmFoldBlastRadius(t *testing.T) {
-	// The pg2-pmk9q false positive is PRE-EXISTING, not introduced here.
+	// The pg2-pmk9q false positive is PRE-EXISTING, not introduced here — and it
+	// must STILL match lexically after pg2-pmk9q's fix, which lives one layer up.
 	preexisting := "packages/claude-extended-tool-approver/internal/rules/secrets/secrets.go"
 	if !IsSecret(preexisting) {
-		t.Errorf("IsSecret(%q) = false; this repo's own secrets-rule source is pg2-pmk9q's pre-existing false positive and must still match — if it stopped matching, pg2-pmk9q was fixed here by accident", preexisting)
+		t.Errorf("IsSecret(%q) = false; this repo's own secrets-rule source must still match the LEXICAL arm — pg2-pmk9q's in-repo relaxation belongs to internal/rules/secrets, so a fix applied HERE would also relax every path outside a repo", preexisting)
+	}
+	// And it is the GENERIC arm that matches it, which is the arm the caller
+	// relaxes. If this became WellKnownSecret the pg2-pmk9q fix would stop firing.
+	if got := Classify(preexisting); got != GenericSecretsDir {
+		t.Errorf("Classify(%q) = %v, want GenericSecretsDir — that is the only arm internal/rules/secrets relaxes", preexisting, got)
 	}
 
 	// What folding ADDS is exactly the case-varied component spellings.
@@ -266,5 +281,75 @@ func TestIsSecret_DirectoryArmFoldBlastRadius(t *testing.T) {
 		if IsSecret(p) {
 			t.Errorf("IsSecret(%q) = true, want false; folding must not relax the whole-component or separator bounds", p)
 		}
+	}
+}
+
+// Classify reports WHICH arm matched, and the split is load-bearing rather than
+// informational: internal/rules/secrets relaxes GenericSecretsDir for reads inside
+// a git repository and NOTHING else (the operator ruling of 2026-08-13 on
+// pg2-fhb9q/pg2-pmk9q). A row that drifted from GenericSecretsDir to
+// WellKnownSecret would silently un-relax that path; a row that drifted the other
+// way would silently relax a real credential store. Matching and non-matching
+// shapes are adjacent per arm for the same reason the fold table is.
+func TestClassify(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+		want Kind
+	}{
+		// GENERIC: the bare, role-describing `secrets` component and nothing else.
+		{"secrets component", "repo/secrets/prod.yaml", GenericSecretsDir},
+		{"secrets component, case-varied", "repo/SECRETS/prod.yaml", GenericSecretsDir},
+		{"deploy tree", "deploy/secrets/token", GenericSecretsDir},
+		{"this repo's own secrets-rule source", "packages/claude-extended-tool-approver/internal/rules/secrets/secrets.go", GenericSecretsDir},
+
+		// WELL-KNOWN: names a specific credential store or credential file. These
+		// are repo-BLIND — the rule never relaxes them.
+		{"ssh component", "~/.ssh/id_rsa", WellKnownSecret},
+		{"ssh component, case-varied", "~/.SSH/id_rsa", WellKnownSecret},
+		{"claude credentials basename", "~/.claude/.credentials", WellKnownSecret},
+		{"auth.json basename", "~/.claude/auth.json", WellKnownSecret},
+		{"bare dotenv", ".env", WellKnownSecret},
+		{"dotenv in a repo", "repo/.env", WellKnownSecret},
+		{"dotenv variant", ".env.production", WellKnownSecret},
+		{"token json", "config/api-token.json", WellKnownSecret},
+
+		// THE STRONGEST ARM WINS when two match. Classify scans the whole path
+		// rather than returning at the first component precisely for these: a
+		// caller relaxing the generic arm must not be handed `secrets/.ssh/id_rsa`
+		// as merely generic.
+		{"secrets component AND ssh component", "repo/secrets/.ssh/id_rsa", WellKnownSecret},
+		{"secrets component AND dotenv basename", "repo/secrets/.env", WellKnownSecret},
+		{"secrets component AND token json", "repo/secrets/api-token.json", WellKnownSecret},
+
+		// NOT SECRET.
+		{"empty", "", NotSecret},
+		{"go source", "internal/main.go", NotSecret},
+		{"bare secrets word (kubectl get secrets)", "secrets", NotSecret},
+		{"secrets as a substring", "secretsauce/config.yaml", NotSecret},
+		{"committed dotenv example", ".env.example", NotSecret},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := Classify(tt.path); got != tt.want {
+				t.Errorf("Classify(%q) = %v, want %v", tt.path, got, tt.want)
+			}
+			// IsSecret must stay exactly "some arm matched", so no caller that only
+			// needs the boolean can drift from the classifier.
+			if got, want := IsSecret(tt.path), tt.want != NotSecret; got != want {
+				t.Errorf("IsSecret(%q) = %v, want %v — IsSecret must be Classify != NotSecret", tt.path, got, want)
+			}
+		})
+	}
+}
+
+// The Kind ORDER is what "the strongest arm wins" is implemented with (Classify
+// keeps the highest-valued match), so it is asserted rather than left to the iota
+// declaration order. Reordering the constants would silently invert the
+// strongest-wins rows above.
+func TestKindOrderIsAscendingSpecificity(t *testing.T) {
+	if !(NotSecret < GenericSecretsDir && GenericSecretsDir < WellKnownSecret) {
+		t.Errorf("Kind order broken: NotSecret=%d GenericSecretsDir=%d WellKnownSecret=%d; Classify keeps the HIGHEST match, so specificity must ascend",
+			NotSecret, GenericSecretsDir, WellKnownSecret)
 	}
 }

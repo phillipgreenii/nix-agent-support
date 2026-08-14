@@ -45,6 +45,19 @@
 // survives it unchanged: secretDirs still matches a WHOLE path component (not a
 // substring), the directory arm still requires a real separator, and the
 // credential basenames still match the WHOLE basename.
+//
+// # This package stays filesystem-free; SCOPING lives in the caller
+//
+// Classify reports WHICH arm matched, not merely whether one did, because the
+// arms do not all deserve the same treatment: `secrets` is a ROLE-DESCRIBING
+// component that a source tree can hold innocently (pg2-pmk9q — this repo's own
+// internal/rules/secrets/ matches it), whereas `.ssh` and the credential
+// basenames NAME a specific credential store. The operator's 2026-08-13 ruling on
+// pg2-fhb9q/pg2-pmk9q relaxes only the first, and only for paths inside a git
+// repository — a FILESYSTEM question. Answering it here would break this
+// package's defining property, so the split is exported and the decision is made
+// by internal/rules/secrets, which holds a *patheval.PathEvaluator. Read that
+// package's doc comment for the full ruling.
 package secretpath
 
 import (
@@ -54,17 +67,40 @@ import (
 	"unicode/utf8"
 )
 
-// secretDirs are path components whose presence anywhere in a path marks the
-// whole path as secret (e.g. "secrets/prod.yaml", "~/.ssh/id_rsa").
+// Kind identifies WHICH arm of the lexical classifier matched a path. A caller
+// that only needs the yes/no answer uses IsSecret.
 //
-// Membership is tested by an EqualFold SCAN (anyEqualFold), not by a hash
-// lookup: the match must fold case, and no single normalization of the
+// THE ORDER IS LOAD-BEARING: the values ascend in how SPECIFIC the evidence is,
+// and Classify keeps the highest-valued match it finds, so a path that matches
+// both arms (`secrets/.ssh/id_rsa`) reports the stronger one. Nothing else may be
+// inserted between them without re-reading Classify.
+type Kind int
+
+const (
+	// NotSecret: no arm matched.
+	NotSecret Kind = iota
+	// GenericSecretsDir: the only match is the bare, ROLE-DESCRIBING path
+	// component `secrets`. It says a directory was NAMED "secrets" — which a
+	// deployment tree means literally and a source tree does not (pg2-pmk9q).
+	GenericSecretsDir
+	// WellKnownSecret: an arm that names a SPECIFIC credential store or
+	// credential file — the `.ssh` component, the credential basenames, `.env*`,
+	// `*token*.json`. Repo-blind: these mean the same thing wherever they appear.
+	WellKnownSecret
+)
+
+// secretDirs are path components whose presence anywhere in a path marks the
+// whole path as secret (e.g. "secrets/prod.yaml", "~/.ssh/id_rsa"), each mapped
+// to the Kind of evidence it constitutes.
+//
+// Membership is tested by an EqualFold SCAN (anyEqualFold / lookupFold), not by a
+// hash lookup: the match must fold case, and no single normalization of the
 // candidate reproduces EqualFold's folding. Keys are written in their canonical
 // lowercase spelling for readability; folding makes that a convention, not a
 // matching constraint.
-var secretDirs = map[string]bool{
-	"secrets": true,
-	".ssh":    true,
+var secretDirs = map[string]Kind{
+	"secrets": GenericSecretsDir,
+	".ssh":    WellKnownSecret,
 }
 
 // secretBasenames are whole basenames that are credential files by name alone:
@@ -106,21 +142,39 @@ var nonSecretDotEnv = map[string]bool{
 // looks like a path (contains a "/"), so a bare word like the `secrets`
 // argument of `kubectl get secrets` is not misread as a secret path.
 func IsSecret(path string) bool {
+	return Classify(path) != NotSecret
+}
+
+// Classify reports which arm of IsSecret matched path — see Kind, and the package
+// comment for why the distinction is exported rather than resolved here.
+//
+// It scans the WHOLE path rather than returning at the first matching component,
+// because a path can match two arms and the STRONGER one must win: a caller that
+// relaxes GenericSecretsDir must not have `secrets/.ssh/id_rsa` handed to it as
+// merely generic. The scan is over a handful of components of one string, so the
+// lost short-circuit costs nothing measurable.
+func Classify(path string) Kind {
 	if path == "" {
-		return false
+		return NotSecret
 	}
 	hasSeparator := strings.Contains(path, "/")
 	base := ""
+	kind := NotSecret
 	for _, part := range strings.Split(path, "/") {
 		if part == "" || part == "." || part == ".." {
 			continue
 		}
-		if hasSeparator && anyEqualFold(secretDirs, part) {
-			return true
+		if hasSeparator {
+			if k, ok := lookupFold(secretDirs, part); ok && k > kind {
+				kind = k
+			}
 		}
 		base = part
 	}
-	return isSecretBasename(base)
+	if isSecretBasename(base) {
+		return WellKnownSecret
+	}
+	return kind
 }
 
 func isSecretBasename(base string) bool {
@@ -174,17 +228,30 @@ func isSecretDotEnv(base string) bool {
 	return !anyEqualFold(nonSecretDotEnv, base)
 }
 
-// anyEqualFold reports whether s case-folds equal to any key of set. A SCAN is
-// required rather than a hash lookup because no single normalization of s
-// reproduces EqualFold's folding (see the package comment); the sets here have
-// a handful of entries each and are consulted once per candidate, so it is free.
-func anyEqualFold(set map[string]bool, s string) bool {
-	for key := range set {
+// lookupFold returns the value stored under the key of set that case-folds equal
+// to s. A SCAN is required rather than a hash lookup because no single
+// normalization of s reproduces EqualFold's folding (see the package comment);
+// the sets here have a handful of entries each and are consulted once per
+// candidate, so it is free.
+//
+// It is generic over the value type only so the same scan serves both the
+// membership sets (map[string]bool) and secretDirs (map[string]Kind) — writing it
+// twice is how the two drift apart on the fold primitive, which is the exact
+// defect pg2-faaq2 fixed.
+func lookupFold[V any](set map[string]V, s string) (V, bool) {
+	for key, v := range set {
 		if strings.EqualFold(s, key) {
-			return true
+			return v, true
 		}
 	}
-	return false
+	var zero V
+	return zero, false
+}
+
+// anyEqualFold reports whether s case-folds equal to any key of set.
+func anyEqualFold[V any](set map[string]V, s string) bool {
+	_, ok := lookupFold(set, s)
+	return ok
 }
 
 // containsFold reports whether substr occurs in s under Unicode simple case
