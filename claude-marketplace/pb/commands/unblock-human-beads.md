@@ -105,14 +105,16 @@ exit on an error.
    time and its body reads as though it were current. Re-verify its PREMISE against CURRENT
    reality with the named probes before you classify it. This is the step that stops the
    operator being handed a non-question. See "Freshness check" below. A premise the probes
-   prove MOOT skips the rubric entirely and goes to CLOSE-AS-MOOT — with ONE exception: a
-   class-1 substrate-mutating bead is still ENGAGEd, because that guard is unconditional.
+   prove MOOT skips the rubric entirely and goes to CLOSE-AS-MOOT — with TWO exceptions: a
+   class-1 substrate-mutating bead is still ENGAGEd, because that guard is unconditional, and a
+   class-2 HANDOFF POINTER is still CLOSED-WITH-ABSORPTION-TRACE, because its evidence is a
+   TRACE of where each item now lives, not a probe reading.
 
 4. **TRIAGE + UNBLOCK** — classify the bead with the rubric below (evaluate in order; first
    match wins) and do ONLY enough to lift the human blocker. **To ENGAGE means: pause the
    loop, present the specific decision/question to the operator in this session, and WAIT
    for their answer before acting** — this is the one point where autonomy yields to
-   interaction. Not every class engages: classes 2, 4 and 5 are resolved mechanically and MUST
+   interaction. Not every class engages: classes 2, 3, 5 and 6 are resolved mechanically and MUST
    NOT prompt. Any change that produces committed code/docs happens in the REUSED parked
    isolation (see "Isolation"). Obey the stop predicate.
 
@@ -153,12 +155,13 @@ output verbatim:
   (or, when the bead names no external referent, `… ⇒ nothing to re-verify` — F-5).
 - **Premise PROVABLY MOOT** → **CLOSE-AS-MOOT** (see "Terminal actions"). The bead is
   answered, not blocked: it MUST NOT be RELEASEd (drain would just re-park it) and MUST NOT be
-  DEFERred (it returns unchanged next window).
-- The `sibling-open?` reading is ALSO the recognition test for class 2
+  DEFERred (it returns unchanged next window). A class-1 substrate bead and a class-2 HANDOFF
+  POINTER are the two carve-outs (step 3).
+- The `sibling-open?` reading is ALSO the recognition test for class 3
   (`label-to-dependency conversion`): a `stuck:` comment naming another bead as the thing it
   waits on is a DEPENDENCY, not a human question, and this probe already tells you whether
   that bead is still live. Do not re-run a parallel check in triage.
-- This check is also what class 3 (`stale-precondition`) means by "re-derive from
+- This check is also what class 4 (`stale-precondition`) means by "re-derive from
   `DERIVED-FROM`", aimed at one citation: run the probe matching what the citation names —
   `path-exists?` / `symbol-shape?` for a path, `landed?` for a commit.
 - It does NOT extend to applied-ness. There is no reliable applied-vs-not signal, which is why
@@ -167,25 +170,80 @@ output verbatim:
 
 ## Triage rubric (evaluate in order; first match wins)
 
-| #   | Class                              | How to recognize                                                                                                                                                                                                                                 | Action                                                                                                                                                         |
-| --- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | **substrate-mutating**             | carries the `worktree-review` label, OR its work would remove/prune worktrees or workforest sets, delete `.worktrees/*`, or otherwise mutate the shared isolation substrate other sessions depend on                                             | **ENGAGE the operator; NEVER RELEASE to drain** (drain auto-claims and prunes unattended). See below.                                                          |
-| 2   | **label-to-dependency conversion** | every live blocker named by the bead or its `stuck:` comment is ANOTHER BEAD — each resolves to an existing id whose `sibling-open?` probe reads `open` / `in_progress` / `blocked` — and nothing needs a person's decision, input, or authority | **CONVERT, then RELEASE. NO operator prompt.** `bd dep add` per blocker FIRST, then drop `human` in the single atomic release. See below.                      |
-| 3   | **suspected stale precondition**   | carries the `stale-precondition` label — `/drain-beads` parked it TWICE on the same `PRECONDITION-KEY`                                                                                                                                           | **MUST NOT RELEASE as-is.** Re-derive from the park comment's `DERIVED-FROM` → CLOSE if the outcome already holds, else ENGAGE → rewrite → RELEASE. See below. |
-| 4   | **apply-waiting**                  | "verify/act after apply", deploy-gated content                                                                                                                                                                                                   | **RELEASE.** Trust that `pn workspace apply` ran before this command — see "apply-waiting = trust" below.                                                      |
-| 5   | **mislabeled / normal work**       | the label's reason is provably moot (referenced worktree already gone, decision already recorded in a later comment, transient infra passed, every named blocker bead now probes `closed`) and no human input is needed                          | **RELEASE** — no operator prompt.                                                                                                                              |
-| 6   | **genuine decision / input**       | needs a design/architectural decision, is underspecified, or otherwise needs a person to move it forward                                                                                                                                         | **ENGAGE** (only enough) → RELEASE if now drain-doable / CLOSE / DEFER per outcome.                                                                            |
-| 7   | **uncertain**                      | you cannot confidently place the bead in a class above                                                                                                                                                                                           | treat as genuine → **ENGAGE** (conservative; never silently auto-resolve).                                                                                     |
+| #   | Class                              | How to recognize                                                                                                                                                                                                                                 | Action                                                                                                                                                                                 |
+| --- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | **substrate-mutating**             | carries the `worktree-review` label, OR its work would remove/prune worktrees or workforest sets, delete `.worktrees/*`, or otherwise mutate the shared isolation substrate other sessions depend on                                             | **ENGAGE the operator; NEVER RELEASE to drain** (drain auto-claims and prunes unattended). See below.                                                                                  |
+| 2   | **absorbed handoff pointer**       | a `session-wrapup` `Resume: …` / next-session bead — born P0, holding no executable work of its own, only pointers — whose every item traces to a durable bead id or an indexing label                                                           | **CLOSE-WITH-ABSORPTION-TRACE. NO operator prompt.** Trace, re-probe every state claim, file anything that traces nowhere FIRST, then close. Never RELEASEd, never demoted. See below. |
+| 3   | **label-to-dependency conversion** | every live blocker named by the bead or its `stuck:` comment is ANOTHER BEAD — each resolves to an existing id whose `sibling-open?` probe reads `open` / `in_progress` / `blocked` — and nothing needs a person's decision, input, or authority | **CONVERT, then RELEASE. NO operator prompt.** `bd dep add` per blocker FIRST, then drop `human` in the single atomic release. See below.                                              |
+| 4   | **suspected stale precondition**   | carries the `stale-precondition` label — `/drain-beads` parked it TWICE on the same `PRECONDITION-KEY`                                                                                                                                           | **MUST NOT RELEASE as-is.** Re-derive from the park comment's `DERIVED-FROM` → CLOSE if the outcome already holds, else ENGAGE → rewrite → RELEASE. See below.                         |
+| 5   | **apply-waiting**                  | "verify/act after apply", deploy-gated content                                                                                                                                                                                                   | **RELEASE.** Trust that `pn workspace apply` ran before this command — see "apply-waiting = trust" below.                                                                              |
+| 6   | **mislabeled / normal work**       | the label's reason is provably moot (referenced worktree already gone, decision already recorded in a later comment, transient infra passed, every named blocker bead now probes `closed`) and no human input is needed                          | **RELEASE** — no operator prompt.                                                                                                                                                      |
+| 7   | **genuine decision / input**       | needs a design/architectural decision, is underspecified, or otherwise needs a person to move it forward                                                                                                                                         | **ENGAGE** (only enough) → RELEASE if now drain-doable / CLOSE / DEFER per outcome.                                                                                                    |
+| 8   | **uncertain**                      | you cannot confidently place the bead in a class above                                                                                                                                                                                           | treat as genuine → **ENGAGE** (conservative; never silently auto-resolve).                                                                                                             |
 
 **The FRESHNESS CHECK runs BEFORE this rubric, not as a row in it.** A bead whose premise the
 probes proved moot needs no class — it is already resolved, so it goes straight to
-CLOSE-AS-MOOT. The single exception is class 1: a substrate-mutating bead is ENGAGEd even when
+CLOSE-AS-MOOT. Two classes are exempt. Class 1: a substrate-mutating bead is ENGAGEd even when
 moot (hand the operator the probe output instead of a question), because that guard is
-unconditional. Do not confuse a moot PREMISE with class 5's moot LABEL REASON: class 5 means
-the reason for the `human` label died but the work is still real, so it RELEASEs to drain;
-CLOSE-AS-MOOT means the WORK ITSELF is answered, so there is nothing to release.
+unconditional. Class 2: a HANDOFF POINTER is CLOSED-WITH-ABSORPTION-TRACE even when its probes
+read moot, because the evidence it needs is a TRACE of where each item now lives, and it may
+still be the SOLE record of something. Do not confuse a moot PREMISE with class 6's moot LABEL
+REASON: class 6 means the reason for the `human` label died but the work is still real, so it
+RELEASEs to drain; CLOSE-AS-MOOT means the WORK ITSELF is answered, so there is nothing to
+release; a pointer is neither, because it never held work of its own and its items may be STILL
+LIVE where they now live.
 
-## Class 2 — label-to-dependency conversion (mechanical, and it MUST NOT prompt)
+## Class 2 — absorbed handoff pointer (mechanical, and it MUST NOT prompt)
+
+A HANDOFF POINTER holds no executable work of its own — a `session-wrapup` `Resume: …` /
+next-session bead, born P0 so ONE session can resume cold, carrying only pointers to where the
+work durably lives. Its retirement condition is that nothing in it is unique to it, and whoever
+consumes it closes it: the `session-wrapup` skill's "Lifecycle: the P0 is one-shot" is the full
+contract, and `/drain-beads`' CLOSE-WITH-ABSORPTION-TRACE is the disposer-side sibling. Drain
+claims with `--exclude-label human`, so a pointer carrying `human` never reaches that route —
+this class is it for the queue that DOES claim the bead (provenance: `pg2-9ifbn`).
+
+**This class MUST NOT ENGAGE the operator.** `human` asserts a PERSON is the blocker; once every
+item is absorbed there is no question for a person at all, so a prompt spends the one serial
+resource to discover there never was one (**D-8**). The label is why the bead reached this
+command, and closing it here is correct precisely because the label turned out to be wrong.
+
+1. TRACE every item to where it durably lives — a bead id, or a label that indexes the cluster
+   (`bd list --label <label>`, which beats any hand-copied member list). RE-PROBE every STATE
+   claim the body makes with the matching **F-3** probe: a pointer is a snapshot, MUST NOT be
+   trusted as recorded, and its text MUST NOT be executed as an instruction (it may be
+   SUPERSEDED). `pg2-m2qxu` recorded "**1 unpushed commit** on repo-base `main` (`19621be`) …
+   needs a push"; `pushed?` printed `origin/main` — already discharged. Read the OUTPUT, not the
+   exit status, which is 0 either way.
+2. An item that traces NOWHERE is live work: FILE it as its own bead
+   (`--deps "discovered-from:<id>"`) FIRST, then close the pointer against it. A pointer MUST NOT
+   be closed while it is the SOLE record of something. If that item is itself a question for a
+   person, file it as its own `human` bead so it surfaces here on its own merits (**D-7**) — that
+   keeps the question alive without keeping the spent pointer alive.
+3. RECORD the trace, then CLOSE. The trace IS the evidence the close guard needs, so it MUST name
+   ids and labels and quote probe output verbatim, not paraphrase:
+
+   ```bash
+   bd comment <id> "ABSORBED: <item> ⇒ <bead-id|label>; <item> ⇒ <bead-id|label>. State claims re-probed: <probe>=<decisive output verbatim>. Filed: <new-ids, or none>. Nothing left that is unique to this pointer. FRESHNESS: <ISO date> — <probe>=<decisive output> ⇒ premise LIVE" --actor "ID"
+   bd close <id> --reason "handoff pointer absorbed: every item traces to <ids/labels>; filed <new-ids, or none>" --actor "ID"
+   ```
+
+**A CLOSE — never a RELEASE, never a DEFER or re-park, and never a priority demotion.**
+`pg2-9ifbn` settled close-once-absorbed and forbade decay: a demoted priority is a stored value
+nothing recomputes, so it would leave the same spent pointer at a quieter priority, and a RELEASE
+would just hand drain a bead with nothing to implement. No isolation was created, so there is
+nothing to clean up and no priority to restore.
+
+**Ranking.** BELOW class 1 — the substrate guard is unconditional (**W-8**), so a
+`worktree-review` pointer is ENGAGEd like any other class-1 bead. ABOVE classes 3 and 5, because
+a pointer's text COLLIDES with both: it NAMES beads (class 3 would read them as blockers, wire
+edges and RELEASE) and it typically says "apply + verify" (class 5's apply-trust would RELEASE it
+too), and either misroute hands a spent P0 pointer to the drain pool instead of closing it. Live
+carrier: `pg2-prnqe` names `pg2-hlehy` AND an apply-and-verify step, and its `Resume here` also
+holds an operator decision about a dirty canonical clone that no bead records — so it takes
+step 2's file-FIRST path, not a bare close.
+
+## Class 3 — label-to-dependency conversion (mechanical, and it MUST NOT prompt)
 
 `human` means A PERSON IS THE BLOCKER — not "blocked". A bead waiting on ANOTHER BEAD was
 mislabeled at park time: the label hid it from `/drain-beads` (`--exclude-label human`) AND
@@ -203,9 +261,9 @@ Recognition is mechanical and reuses work you have already done: the FRESHNESS C
 judgement "does anything here need a PERSON?".
 
 - A blocker that probes `closed` is NOT a blocker and MUST NOT be given an edge. If EVERY
-  named blocker reads `closed`, the label's reason has simply died — that is class 5, RELEASE.
+  named blocker reads `closed`, the label's reason has simply died — that is class 6, RELEASE.
 - A blocker with no bead is NOT a dependency. If the blocking work is not tracked, the bead is
-  underspecified — that is class 6, ENGAGE. MUST NOT invent a placeholder bead to depend on.
+  underspecified — that is class 7, ENGAGE. MUST NOT invent a placeholder bead to depend on.
 - Both a bead AND a person in the way → this class does NOT match. Wire the bead half as
   dependencies anyway (step 1 below), then continue down the rubric for the human half; the
   `human` label stays, and see the mixed-blocker note at the end of this section (**D-7**).
@@ -270,19 +328,21 @@ which shape you have decides where that is:
 - **The question is answerable NOW and independent of the blocker** → do NOT bury it behind
   the edge. ENGAGE on it now if it is genuinely yours to ask; otherwise file it as its own
   `human` bead with no blockers and depend on THAT, so it surfaces here immediately. THIS bead
-  then takes the pure class-2 path and carries no label of its own — the `pg2-l3vdz` shape,
+  then takes the pure class-3 path and carries no label of its own — the `pg2-l3vdz` shape,
   where the driver held the deps and the sub-beads held the questions.
 
-**Class 2 outranks `stale-precondition` (class 3).** Both are recognised mechanically, but
-class 2 is decided from the bead's own text plus one `sibling-open?` reading per named bead,
-while class 3 requires re-deriving a precondition from a `DERIVED-FROM` citation against
-CURRENT source — strictly more expensive, and it can end in an ENGAGE. Class 2 also SUBSUMES
-class 3 whenever the "precondition" turns out to have been a bead all along: replacing the
+**Class 3 outranks `stale-precondition` (class 4).** Both are recognised mechanically, but
+class 3 is decided from the bead's own text plus one `sibling-open?` reading per named bead,
+while class 4 requires re-deriving a precondition from a `DERIVED-FROM` citation against
+CURRENT source — strictly more expensive, and it can end in an ENGAGE. Class 3 also SUBSUMES
+class 4 whenever the "precondition" turns out to have been a bead all along: replacing the
 prose with a graph edge IS the resolution, and it needs no operator, so ranking it lower would
-route a non-question to the operator through exactly the churn class 3 was added to stop. It
-ranks BELOW class 1 because the substrate guard is unconditional (**W-8**) — a substrate-mutating
-bead is ENGAGEd even when its blockers are all beads, and a `worktree-review` bead never reaches
-class 2.
+route a non-question to the operator through exactly the churn class 4 was added to stop. It
+ranks BELOW classes 1 and 2: the substrate guard is unconditional (**W-8**), so a
+substrate-mutating bead is ENGAGEd even when its blockers are all beads and a `worktree-review`
+bead never reaches class 3; and a spent HANDOFF POINTER is CLOSED rather than remodelled — a
+pointer that merely NAMES a bead is not BLOCKED by it, so wiring an edge here would release a
+bead with nothing to implement.
 
 **`stale-precondition` outranks apply-waiting.** A stale precondition presents EXACTLY as
 apply-waiting ("verify after apply"), so the apply-trust rule below would RELEASE it, drain
@@ -363,13 +423,13 @@ longer reflects urgency. Follow the always-on `Worktree-Review Label Lifecycle` 
   One call — so there is no crash window leaving a label-less `in_progress` orphan that
   neither resume query recovers. If the bead carries `stale-precondition`, drop BOTH labels
   in that same single call — `--remove-label human,stale-precondition` — and only after the
-  precondition has been rewritten as an observable outcome (class 3). A lingering
+  precondition has been rewritten as an observable outcome (class 4). A lingering
   `stale-precondition` label makes drain treat the NEXT, legitimately-fresh park as an
   already-escalated one. RELEASE only when drain can actually make progress; if the
   only remaining work is a human-only action drain cannot perform, DEFER instead
   (apply-waiting is exempt — it is released on the pre-apply premise).
 
-  A class-2 **label-to-dependency conversion** is also exempt, and its release has one extra
+  A class-3 **label-to-dependency conversion** is also exempt, and its release has one extra
   requirement: EVERY `bd dep add` edge MUST already be in place before this update runs
   (**D-5**). While the bead is `in_progress` it is invisible to every queue; release it first
   and there is a window in which it is `open`, label-less AND unblocked, long enough for a
@@ -393,9 +453,9 @@ longer reflects urgency. Follow the always-on `Worktree-Review Label Lifecycle` 
   OMIT `--priority` and append `NO promotion record; priority left at P<n> — unverified.`
   instead (W-7).
 
-- **CLOSE** — the bead is already satisfied/obsolete (confirm WITH the operator first, unless
-  it is the CLOSE-AS-MOOT variant below), or a substrate-mutating bead was resolved
-  in-session. Nothing left for drain:
+- **CLOSE** — the bead is already satisfied/obsolete (confirm WITH the operator first, unless it
+  is one of the CLOSE-AS-MOOT / CLOSE-WITH-ABSORPTION-TRACE variants below), or a
+  substrate-mutating bead was resolved in-session. Nothing left for drain:
 
   ```bash
   bd close <id> --reason "<why obsolete / what was resolved>" --actor "ID"
@@ -457,6 +517,14 @@ longer reflects urgency. Follow the always-on `Worktree-Review Label Lifecycle` 
     substrate-mutating bead is exempt from this variant — ENGAGE the operator as class 1
     requires, and hand them the probe output rather than a question.
 
+  - **CLOSE-WITH-ABSORPTION-TRACE** — the variant class 2 produces, for a spent HANDOFF POINTER.
+    The close guard's operator confirmation is satisfied by the RECORDED TRACE — each item named
+    against the bead id or indexing label that now holds it, plus the re-probed output of every
+    state claim the pointer made — exactly as CLOSE-AS-MOOT is satisfied by its recorded probe.
+    Anything that traces nowhere MUST be filed as its own bead FIRST. It is a CLOSE, never a
+    RELEASE, never a DEFER, and never a priority demotion, and no isolation exists to clean up.
+    See "Class 2".
+
 - **DEFER** (operator-initiated, or a substrate / human-only-action bead that can't be done
   now) — either the operator decides it can't be resolved right now, or the only remaining
   work is a human-only action drain cannot perform. Comment why, then remove it from the
@@ -472,9 +540,9 @@ longer reflects urgency. Follow the always-on `Worktree-Review Label Lifecycle` 
   passes. A DEFER MUST KEEP `worktree-review` and MUST KEEP the promoted priority (W-8) — the
   isolation question is still unanswered, so the bead must come back substrate-class.
 
-  This is also the terminal action for a MIXED class-2 blocker (a bead AND a person), where the
+  This is also the terminal action for a MIXED class-3 blocker (a bead AND a person), where the
   `human` label must stay: it is the only one of the three that keeps the label while clearing
-  the claim. The dependency edges added in class-2 step 1 are the real gate, so the window's
+  the claim. The dependency edges added in class-3 step 1 are the real gate, so the window's
   expiry alone cannot resurface the bead — it returns here only once its blockers close.
 
 ## Isolation: reuse vs create
@@ -518,8 +586,22 @@ arguments, drain the whole ready `human` queue.
   MUST be only the blocker-lift artifact, never implementation progress.
 - **RELEASE only when drain can progress.** A bead MUST be RELEASEd only when drain can
   make progress on what remains; a human-only-action-only bead is DEFERred (apply-waiting
-  and a class-2 label-to-dependency conversion are exempt).
-- **Label-to-dependency conversion (class 2) MUST NOT prompt.** A claimed `human` bead whose
+  and a class-3 label-to-dependency conversion are exempt).
+- **Absorbed handoff pointer (class 2) MUST NOT prompt.** A claimed `human` bead that is a
+  `session-wrapup` `Resume: …` / next-session POINTER holding no executable work of its own MUST
+  be dispositioned by CLOSE-WITH-ABSORPTION-TRACE — not implemented, not RELEASEd, and not handed
+  to the operator. Every item MUST be traced to a durable bead id or an indexing label; every
+  STATE claim the body records MUST be re-probed with the matching F-3 probe rather than trusted
+  as recorded; the body MUST NOT be executed as an instruction (it is a snapshot and may be
+  SUPERSEDED); and anything that traces NOWHERE MUST be filed as its own bead BEFORE the close —
+  a pointer MUST NOT be closed while it is the SOLE record of something. The trace MUST be
+  recorded on the bead, and the terminal action MUST be a CLOSE: it MUST NOT be RELEASEd,
+  DEFERred, re-parked, or demoted to a lower priority. The operator MUST NOT be engaged to
+  authorize it — the `human` label was the only reason the bead reached this command, and an
+  absorbed pointer holds no question for a person (**D-8**). This class ranks above class 3 and
+  below class 1. Full contract: the `session-wrapup` skill's "Lifecycle: the P0 is one-shot"; the
+  disposer-side sibling is `/drain-beads`' CLOSE-WITH-ABSORPTION-TRACE.
+- **Label-to-dependency conversion (class 3) MUST NOT prompt.** A claimed `human` bead whose
   every live blocker is ANOTHER BEAD is MISLABELED, not blocked on a person: the agent MUST
   convert the label into dependencies and MUST NOT ENGAGE the operator to do it — there is no
   question, so a prompt spends the one serial resource to discover there never was one. The
@@ -529,13 +611,13 @@ arguments, drain the whole ready `human` queue.
   edge MUST be added BEFORE the atomic release, because the bead is hidden from every queue
   only while it is `in_progress`. The release MUST use `--status open`, never `blocked`, since
   readiness is derived from the graph. A blocker probing `closed` MUST NOT be given an edge
-  (that is class 5), and an untracked blocker MUST NOT get an invented placeholder bead (that
-  is class 6). A DEFER MUST NOT be used in place of the dependency edge: a defer window is a
+  (that is class 6), and an untracked blocker MUST NOT get an invented placeholder bead (that
+  is class 7). A DEFER MUST NOT be used in place of the dependency edge: a defer window is a
   timer that expires whether or not the blocker cleared, while an edge is the state itself. A
   MIXED blocker (bead AND person) MUST get the edges AND keep `human` on whichever bead HOLDS
   the question, and its terminal action MUST be DEFER — the only one of the three that keeps
-  the label — with the EDGE, not the window, as the gate. This class ranks above class 3 and
-  below class 1. Full contract: the always-on `Blocker Modeling` rules (**D-1..D-8**).
+  the label — with the EDGE, not the window, as the gate. This class ranks above class 4 and
+  below classes 1 and 2. Full contract: the always-on `Blocker Modeling` rules (**D-1..D-8**).
 - **Substrate guard.** A substrate-mutating bead MUST NOT be RELEASEd to drain and MUST NOT
   be auto-actioned; ENGAGE the operator (serial, in-session) → CLOSE, or DEFER. This guard is
   unconditional: it holds even when the freshness check proves the bead's premise moot. The
@@ -584,8 +666,9 @@ arguments, drain the whole ready `human` queue.
 - **Distinct actor.** The actor id MUST be distinct from any concurrent `/drain-beads`
   actor (the `-unblock` suffix).
 - **Close guard.** MUST NOT close a bead without explicit operator confirmation — except an
-  in-session-resolved substrate bead, or a CLOSE-AS-MOOT whose decisive probe output is
-  recorded verbatim on the bead (the recorded evidence IS the confirmation). If a worktree is
+  in-session-resolved substrate bead, a CLOSE-AS-MOOT whose decisive probe output is
+  recorded verbatim on the bead, or a CLOSE-WITH-ABSORPTION-TRACE whose absorption trace is
+  recorded on the bead (in each case the recorded evidence IS the confirmation). If a worktree is
   left, MUST file a `worktree-review` follow-up
   (`bd create … --labels human,worktree-review --defer +7d --deps "discovered-from:<id>"`,
   carrying the W-2 entry marker) rather than orphan it.
@@ -606,16 +689,18 @@ flowchart TD
     C -->|transient bd/dolt error| C
     C -->|got bead| U["UNDERSTAND: bd show,<br/>read stuck: comment + parked isolation"]
     U --> FC{"FRESHNESS CHECK (F-3 probes):<br/>is the bead's PREMISE still live?"}
-    FC -- "provably moot (non-substrate)" --> CLOM["CLOSE-AS-MOOT: read the stale work →<br/>bd create extracted prediction --deps discovered-from →<br/>bd comment FRESHNESS: probe output verbatim →<br/>bd close --reason 'moot on re-verification'"]
+    FC -- "provably moot (not substrate, not a handoff pointer)" --> CLOM["CLOSE-AS-MOOT: read the stale work →<br/>bd create extracted prediction --deps discovered-from →<br/>bd comment FRESHNESS: probe output verbatim →<br/>bd close --reason 'moot on re-verification'"]
     FC -- "live, or any probe unresolvable" --> T{"TRIAGE rubric<br/>first match wins"}
     CLOM --> C
-    T -->|1 substrate-mutating| SUB["ENGAGE operator, NEVER release to drain.<br/>Read Promoted P-prior to P0 from notes,<br/>record the isolation VERDICT"]
-    T -->|2 label-to-dependency conversion| CDEP["CONVERT, NO operator prompt:<br/>bd dep add id --blocked-by blocker, ALL edges FIRST →<br/>bd dep list id to confirm direction →<br/>bd comment BLOCKED-BY-BEADS + FRESHNESS"]
-    T -->|3 stale-precondition label| STL["Re-derive from DERIVED-FROM<br/>against CURRENT source"]
-    T -->|4 apply-waiting| REL
-    T -->|5 mislabeled / normal work| REL
-    T -->|6 genuine decision/input| ENG[ENGAGE operator<br/>pause loop, ask, wait]
-    T -->|7 uncertain| ENG
+    T -->|"1 substrate-mutating"| SUB["ENGAGE operator, NEVER release to drain.<br/>Read Promoted P-prior to P0 from notes,<br/>record the isolation VERDICT"]
+    T -->|"2 absorbed handoff pointer"| ABS["CLOSE-WITH-ABSORPTION-TRACE, NO operator prompt:<br/>trace each item to a bead id or indexing label →<br/>re-probe every state claim, never trust it as recorded →<br/>file anything that traces nowhere FIRST →<br/>bd comment ABSORBED: trace → bd close, never demote"]
+    T -->|"3 label-to-dependency conversion"| CDEP["CONVERT, NO operator prompt:<br/>bd dep add id --blocked-by blocker, ALL edges FIRST →<br/>bd dep list id to confirm direction →<br/>bd comment BLOCKED-BY-BEADS + FRESHNESS"]
+    T -->|"4 stale-precondition label"| STL["Re-derive from DERIVED-FROM<br/>against CURRENT source"]
+    T -->|"5 apply-waiting"| REL
+    T -->|"6 mislabeled / normal work"| REL
+    T -->|"7 genuine decision/input"| ENG[ENGAGE operator<br/>pause loop, ask, wait]
+    T -->|"8 uncertain"| ENG
+    ABS --> C
     CDEP -- "only beads blocked it" --> REL
     CDEP -- "mixed, a person holds part of it too" --> ENG
     SUB -->|resolved in-session| CLO
@@ -635,9 +720,9 @@ flowchart TD
 Open N Claude Code sessions inside this pn-workspace and run `/unblock-human-beads` in
 each; every session self-assigns a distinct `-unblock` actor id and the atomic
 `bd ready --claim --label human` guarantees no two ever get the same bead. Honest caveat:
-parallelism helps throughput on the **auto-resolvable** beads (apply-waiting / mislabeled);
-**genuine-human** beads serialize on the one operator, so many interactive sessions at once
-buy little for those. Safe to run alongside `/drain-beads` — each RELEASE hands a bead to
+parallelism helps throughput on the **auto-resolvable** beads (absorbed pointers /
+apply-waiting / mislabeled); **genuine-human** beads serialize on the one operator, so many
+interactive sessions at once buy little for those. Safe to run alongside `/drain-beads` — each RELEASE hands a bead to
 the drain pool; the two operate on disjoint claim sets (`--label human` vs
 `--exclude-label human`).
 
