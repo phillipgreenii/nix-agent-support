@@ -396,8 +396,8 @@ func (s *Service) respond(w io.Writer, code int, reply []byte) {
 
 // Serve is the participant boundary (conformance.Participant): it runs one
 // subcommand over the JSON-in / JSON-out contract and returns a coarse exit code
-// (0 ok / 1 error / 2 busy). Every transport funnels through here, so the message
-// schema is enforced exactly once.
+// (0 ok / 1 error / 2 usage / 9 busy). Every transport funnels through here, so
+// the message schema is enforced exactly once.
 //
 // Messages are accepted ONLY while the core is `started` (INV-INTF-1); before or
 // after that the request is refused with the protocol error envelope rather than

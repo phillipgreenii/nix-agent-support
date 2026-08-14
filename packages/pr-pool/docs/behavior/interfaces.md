@@ -79,9 +79,15 @@ requires it; the details are here.
   own: its acceptance already arrives in the **dispatch reply**, so nothing is left for it to call
   back about.
 - **Coarse outcome, rich reply.** A call's outcome is signalled **coarsely by the transport** — it
-  worked, it failed unexpectedly, or the participant is busy — with the **rich outcome carried in the
-  reply body**. A participant in a degraded state MAY answer with the coarse signal alone and no body,
-  so declining never depends on being able to compose a reply.
+  worked, it failed unexpectedly, it was invoked wrongly, or the participant is busy — with the **rich
+  outcome carried in the reply body**. A participant in a degraded state MAY answer with the coarse
+  signal alone and no body, so declining never depends on being able to compose a reply. On the
+  default CLI transport those four signals are the exit codes `0` ok, `1` unexpected error, `2`
+  **usage** error, and `9` **`busy`** — a **pre-accept decline** (`INV-CONC-1`). The **low** codes
+  carry meanings general to any app, which is why `2` is **reserved** for usage and `busy` sits
+  outside that band rather than on `2`; a caller reading one as the other would treat a decline as a
+  typo, and a typo as "re-offer later" (`ADR 0042`). Codes at or above `3` other than `9` are a
+  participant's own (`phillipgreenii-nix-agent-support · packages/pr-pool/docs/decisions · DEC-WIRE-1`).
 - **Self-status.** Any participant MAY push its **own** status — `healthy` / `degraded` /
   `unavailable` — over its callback channel, independent of any per-item outcome. This is the
   participant reporting on **itself**, and it is the **only** status channel into the core: an
@@ -462,7 +468,10 @@ sequenceDiagram
   manager callbacks and the operator commands alike (`ADR 0036`).
 - **Output.** Every operator command emits **human-readable text by default** and a
   **machine-readable form on request**, so an operator and a script read the same state without a
-  second surface. A **usage** error is distinct from a **runtime** error.
+  second surface. A **usage** error is distinct from a **runtime** error: on the default CLI transport
+  a usage error exits `2` and an unexpected one exits `1`, under the **one** convention every
+  subcommand follows — the callback subcommands included, because `busy` no longer occupies `2`
+  (the common contract above, `ADR 0042`).
 
 ### The manager→core callback
 

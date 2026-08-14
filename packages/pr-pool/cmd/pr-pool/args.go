@@ -37,9 +37,10 @@ Manager -> core callback subcommand (NOT for operators; the core hands a
 participant this command with --socket/--token already baked in, and the
 participant runs it):
   ingest-event            deliver events to the RUNNING core. Request JSON on stdin, reply JSON on
-                          stdout; exit 0 ok / 1 error / 2 busy. Locates the core via --socket/--token,
-                          else PR_POOL_SOCKET/PR_POOL_TOKEN, else discovery under the log dir. It NEVER
-                          starts a core: with none running it fails with "no running core" (exit 1).
+                          stdout; exit 0 ok / 1 error / 2 usage / 9 busy. Locates the core via
+                          --socket/--token, else PR_POOL_SOCKET/PR_POOL_TOKEN, else discovery under
+                          the log dir. It NEVER starts a core: with none running it fails with
+                          "no running core" (exit 1).
 
 Roles are configured in <RepoRoot>/.pr-pool/config.toml (override the path with
 PR_POOL_CONFIG). With no config file, pr-pool uses the built-in feedback + worker
@@ -128,13 +129,14 @@ func route(argv []string) routeResult {
 		return parseReconcileArgs(args[1:])
 	case "ingest-event":
 		// The callback subcommand parses its OWN flags in its handler rather than
-		// here: its exit codes follow the callback contract (2 == busy), so it must
-		// not be routed through routeUsageErr, which exits 2 for a usage error.
+		// here, because it renders its own subcommand-prefixed diagnostic alongside
+		// the --socket/--token it alone accepts. It reaches the SAME usage exit code
+		// routeUsageErr would produce (ADR 0042's Decision made 2 usage everywhere),
+		// so this is a diagnostic split, not an exit-code one.
 		return routeResult{kind: routeIngestEvent, rest: args[1:]}
 	case "push-inject":
-		// Same reason as ingest-event: push-inject reaches the core over that same
-		// ingest-event transport, where 2 means BUSY, so its usage errors must exit 1
-		// rather than go through routeUsageErr. It parses its own flags in its handler.
+		// Same reason as ingest-event: its own flags, its own diagnostic (including
+		// the "quote the event JSON" hint), and the same usage exit code.
 		return routeResult{kind: routePushInject, rest: args[1:]}
 	}
 	if strings.HasPrefix(args[0], "-") {

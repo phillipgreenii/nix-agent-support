@@ -150,8 +150,9 @@ type ingestReplyBody struct {
 func interpretIngestReply(eventID string, reply []byte, code int) (eventqueue.EnqueueResult, error) {
 	if code == conformance.ExitBusy {
 		// The core's ingest-event never declines: the durable queue does not turn
-		// events away, so 2 stays reserved for the common contract's pre-accept busy.
-		// If one ever arrives, it is NOT a delivery — say so rather than shrug.
+		// events away, so the common contract's pre-accept busy code should never
+		// come back from it. If one ever arrives, it is NOT a delivery — say so
+		// rather than shrug.
 		return eventqueue.Enqueued, fmt.Errorf("emit: core declined the injection as busy (exit %d); the event was not enqueued", code)
 	}
 	if len(reply) == 0 {

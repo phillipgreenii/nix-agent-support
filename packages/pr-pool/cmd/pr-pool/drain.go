@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/phillipgreenii/pr-pool/conformance"
 	"github.com/phillipgreenii/pr-pool/internal/beads"
 	"github.com/phillipgreenii/pr-pool/internal/ccpool"
 	"github.com/phillipgreenii/pr-pool/internal/config"
@@ -19,12 +20,15 @@ import (
 	"github.com/phillipgreenii/pr-pool/internal/reconcile"
 )
 
-// Exit codes (ccpool convention: 1 generic, 2 usage, ≥3 specific).
+// Exit codes. The general codes (ok / unexpected / usage) are global across these
+// apps and have exactly ONE declaration — package conformance — so this file
+// cannot restate the convention and drift from it again (ADR 0042's
+// Consequences). Only the app-specific code is local, per "≥3 app-specific".
 const (
-	exitOK       = 0
-	exitGeneric  = 1
-	exitUsage    = 2
-	exitPrecheck = 3
+	exitOK       = conformance.ExitOK
+	exitGeneric  = conformance.ExitError
+	exitUsage    = conformance.ExitUsage
+	exitPrecheck = 3 // app-specific: a config or precheck failure, before any work
 )
 
 func runDrain(args []string) int {

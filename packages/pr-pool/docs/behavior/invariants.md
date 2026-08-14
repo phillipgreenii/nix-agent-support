@@ -166,7 +166,12 @@ sequenceDiagram
   legitimate responses, and the core MUST treat both as correct. It MAY **decline pre-accept with
   `busy`**, after which the core re-offers while the event is unexpired (`INV-FAIL-1`, bounded by
   `INV-EVT-4`); or it MAY **accept and buffer the event internally**, starting it whenever its own
-  limits allow. **Acceptance means the handler took custody, not that work started.** The core MUST
+  limits allow. The `busy` decline is what the **caller of a participant observes**, so its coarse
+  signal is part of the contract and not an implementation detail: on the default CLI transport it is
+  **exit `9`**, deliberately clear of the reserved low codes where `2` means a **usage** error
+  (`INTF-CLI`, `ADR 0042`). Both sides MUST move together — a caller still reading a decline off the
+  usage code would invert both readings, taking a decline for a typo and a typo for "re-offer later".
+  **Acceptance means the handler took custody, not that work started.** The core MUST
   NOT infer progress from an accept, and MUST NOT assume an accepting handler is idle or free to
   take more; all an accept settles is that delivery is complete and the core is owed nothing further
   (`INV-EVT-1`, `INV-FAIL-1`). **"One event → one session"

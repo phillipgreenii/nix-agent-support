@@ -261,9 +261,11 @@ func TestPushInject_QueueEnqueuerIsRefused(t *testing.T) {
 	}
 }
 
-// Usage errors exit 1, never 2: push-inject reaches the core over the same
-// ingest-event transport, where 2 is the common contract's pre-accept BUSY.
-func TestRunPushInject_UsageErrorsAreExit1NotBusy(t *testing.T) {
+// Usage errors exit 2 like every other operator subcommand, and never the BUSY
+// code: 2 is reserved for usage across these apps and BUSY sits at 9, so a caller
+// can no longer read a declined injection as a typo or a typo as "re-offer later"
+// (ADR 0042's Decision).
+func TestRunPushInject_UsageErrorsExitUsageNotBusy(t *testing.T) {
 	cases := map[string][]string{
 		"unknown flag":        {"--nope", testPushEvent},
 		"missing event json":  {},
@@ -272,8 +274,9 @@ func TestRunPushInject_UsageErrorsAreExit1NotBusy(t *testing.T) {
 	}
 	for desc, args := range cases {
 		t.Run(desc, func(t *testing.T) {
-			if code := runPushInject(args); code != conformance.ExitError {
-				t.Fatalf("exit = %d, want %d (never %d/busy)", code, conformance.ExitError, conformance.ExitBusy)
+			if code := runPushInject(args); code != conformance.ExitUsage {
+				t.Fatalf("exit = %d, want %d/usage (never %d/busy or %d/unexpected)",
+					code, conformance.ExitUsage, conformance.ExitBusy, conformance.ExitError)
 			}
 		})
 	}

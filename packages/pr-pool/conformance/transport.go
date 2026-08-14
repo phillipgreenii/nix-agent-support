@@ -42,10 +42,19 @@ func (l Lifecycle) String() string {
 }
 
 // Coarse exit codes for the CLI transport (interfaces.md common contract).
+//
+// The LOW codes carry meanings that are general across every app, not tuned to
+// one app's domain, so 2 is USAGE everywhere and app-specific codes start at 3.
+// BUSY means something only to a participant on a capacity-bounded transport, so
+// it sits out in the app-specific range rather than squatting on 2 (ADR 0042's
+// Decision). This is the ONE declaration of these codes: a second const block
+// stating the same convention in parallel is how the two previously drifted
+// apart (ADR 0042's Consequences).
 const (
 	ExitOK    = 0 // ok; rich outcome in the JSON reply
-	ExitError = 1 // unexpected / usage / malformed error
-	ExitBusy  = 2 // at capacity — pre-accept busy decline (no body required)
+	ExitError = 1 // unexpected error — NOT a usage error, which is ExitUsage
+	ExitUsage = 2 // usage error: a bad flag, or a missing/unexpected argument
+	ExitBusy  = 9 // at capacity — pre-accept busy decline (no body required)
 )
 
 // Participant speaks the default CLI transport: it reads a JSON request from

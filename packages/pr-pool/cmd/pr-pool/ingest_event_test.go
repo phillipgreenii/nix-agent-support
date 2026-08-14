@@ -176,15 +176,16 @@ func TestLocateCore(t *testing.T) {
 	})
 }
 
-// A usage error on the callback subcommand exits 1, NOT 2: 2 is the common
-// contract's pre-accept busy signal, and a source that read a bad flag as "busy"
-// would silently drop events.
-func TestRunIngestEvent_UsageErrorIsExit1NotBusy(t *testing.T) {
-	if code := runIngestEvent([]string{"--nope"}); code != conformance.ExitError {
-		t.Fatalf("unknown flag exit = %d, want %d (never %d/busy)", code, conformance.ExitError, conformance.ExitBusy)
+// A usage error on the callback subcommand exits 2 — the same code its operator
+// siblings use — and never the BUSY code, which now sits at 9 (ADR 0042's
+// Decision). The collision this replaces is the hazard: a source that read a bad
+// flag as "busy, re-offer later" would silently drop events.
+func TestRunIngestEvent_UsageErrorExitsUsageNotBusy(t *testing.T) {
+	if code := runIngestEvent([]string{"--nope"}); code != conformance.ExitUsage {
+		t.Fatalf("unknown flag exit = %d, want %d/usage (never %d/busy)", code, conformance.ExitUsage, conformance.ExitBusy)
 	}
-	if code := runIngestEvent([]string{"extra-positional"}); code != conformance.ExitError {
-		t.Fatalf("positional exit = %d, want %d", code, conformance.ExitError)
+	if code := runIngestEvent([]string{"extra-positional"}); code != conformance.ExitUsage {
+		t.Fatalf("positional exit = %d, want %d/usage", code, conformance.ExitUsage)
 	}
 }
 

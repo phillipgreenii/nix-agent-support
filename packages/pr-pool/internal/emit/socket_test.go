@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/pr-pool/conformance"
 	"github.com/phillipgreenii/pr-pool/internal/core"
 	"github.com/phillipgreenii/pr-pool/internal/eventqueue"
 )
@@ -314,7 +315,11 @@ func TestInterpretReply_Faults(t *testing.T) {
 		reply    string
 		want     string
 	}{
-		{"busy is never a delivery", 2, "", "busy"},
+		// The busy code is read from conformance, never spelled as a literal: this
+		// case is the one that has to move whenever the wire code does, and a
+		// literal here would silently start exercising the usage code instead
+		// (ADR 0042's Consequences).
+		{"busy is never a delivery", conformance.ExitBusy, "", "busy"},
 		{"no reply body", 1, "", "no reply body"},
 		{"protocol error envelope", 1, `{"schemaVersion":"1","error":"not accepting: core is stopping"}`, "not accepting"},
 		{"reply violates the reply schema", 0, `{"schemaVersion":"1","id":"x","accepted":"one","rejected":[]}`, "not a valid cli.ingest-event-reply"},

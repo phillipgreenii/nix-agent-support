@@ -95,9 +95,9 @@ type ingestRequest struct {
 //
 // Exit code: 0 when everything was accepted, 1 when anything was rejected — the
 // exit-1 reply carrying a populated `rejected` list is DEC-WIRE-1's own example
-// (docs/decisions/wire.md, which owns the wire examples). Exit 2 (busy) is never
-// returned: the durable queue does not decline ingest, so 2 stays reserved for the
-// common contract's pre-accept busy signal.
+// (docs/decisions/wire.md, which owns the wire examples). The busy code (9) is
+// never returned: the durable queue does not decline ingest, so this handler has
+// no pre-accept decline to signal at all.
 func (s *Service) handleIngestEvent(stdin io.Reader, stdout io.Writer) int {
 	data, err := io.ReadAll(stdin)
 	if err != nil {

@@ -24,8 +24,11 @@ its own arguments, but arguments are never the payload channel. Concretely:
   still owes the core a result, or is itself the acceptance, is per-interface behavior
   (`INTF-SOURCE`'s `query` owes events later; `INTF-HANDLER`'s `dispatch` owes nothing).
 - **Coarse exit codes.** A subcommand's exit code stays coarse: `0` ok, `1` unexpected error, `2`
-  busy. The **rich outcome is in the JSON reply**, so a participant in a degraded state MAY return an
-  exit code only (busy → `2`, no body).
+  **usage** error, `9` busy, and `≥3` otherwise app-specific. The **rich outcome is in the JSON
+  reply**, so a participant in a degraded state MAY return an exit code only (busy → `9`, no body).
+  The **low** codes are held for meanings general to every app — any app can be invoked wrongly, so
+  `2` is reserved for that — while busy means something only to a participant on a capacity-bounded
+  transport and therefore lives out in the app-specific range (`ADR 0042`).
 - **The callback is one `command` string.** When the core needs to be reached back it hands the
   participant a single ready-to-run command; how that command is addressed and authenticated is
   `DEC-WIRE-2`.
@@ -35,9 +38,9 @@ behavior side names only "a transport contract" and this entry names the default
 
 **Why the exit codes stay coarse rather than enumerating outcomes.** An exit code is a single small
 integer with no room for a reason, so any richer scheme would encode a taxonomy in it — and that
-taxonomy would then have two homes, the exit code and the JSON reply, which drift. Three codes cover
-the only distinctions a caller can act on without reading the body: it worked, it broke, it is busy
-right now. Everything else is a field.
+taxonomy would then have two homes, the exit code and the JSON reply, which drift. Four codes cover
+the only distinctions a caller can act on without reading the body: it worked, it broke, it was
+invoked wrongly, it is busy right now. Everything else is a field.
 
 **The illustrative message shapes.** These are **illustrative examples**, not golden ones: the
 authoritative artifacts are the versioned JSON Schemas each interface's conformance suite checks
@@ -167,7 +170,7 @@ sequenceDiagram
     Src->>CLI: pr-pool ingest-event  (event JSON on stdin, socket+token from callback)
     CLI->>Core: forward over socket { id, events }
     Core-->>CLI: { id, accepted } / error
-    CLI-->>Src: exit 0/1/2 + JSON reply
+    CLI-->>Src: exit 0/1/2/9 + JSON reply
 ```
 
 **What the behavior side keeps, and why the split falls here.** The socket is a transport choice: a

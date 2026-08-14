@@ -30,12 +30,11 @@ import (
 // (`push-inject <json>`). Output is human-readable text by default and JSON with
 // `--json`.
 //
-// EXIT CODES: 0 on an accepted injection, 1 on anything else — INCLUDING a usage
-// error. 1-for-usage is deliberate and matches `ingest-event`: push-inject reaches
-// the core through the very same `ingest-event` transport, whose coarse exit space
-// reserves 2 for the common contract's pre-accept BUSY. Minting a second meaning
-// for 2 at this boundary would make an operator's 2 ambiguous between "you typed
-// it wrong" and "the core declined".
+// EXIT CODES: 0 on an accepted injection, 2 on a usage error, 1 on any other
+// failure — the one convention every operator subcommand follows, because 2 is
+// reserved for usage across these apps and BUSY lives out at 9 (ADR 0042's
+// Decision). A malformed or non-schema-valid EVENT is NOT a usage error: it fails
+// on the same path as an unreachable core, so it exits 1.
 //
 // When no core can be located it FAILS with a "no running core" diagnostic and the
 // remedy. It NEVER starts one (ADR 0036 / core.ErrNoRunningCore).
@@ -51,16 +50,16 @@ func runPushInject(args []string) int {
 		return exitOK
 	case err != nil:
 		fmt.Fprintln(os.Stderr, "push-inject:", err)
-		return conformance.ExitError
+		return conformance.ExitUsage
 	}
 	switch {
 	case fs.NArg() == 0:
 		fmt.Fprintln(os.Stderr, "push-inject: missing event JSON (usage: push-inject [--json] [--socket <path>] [--token <tok>] <json>)")
-		return conformance.ExitError
+		return conformance.ExitUsage
 	case fs.NArg() > 1:
 		fmt.Fprintln(os.Stderr, "push-inject: unexpected argument:", fs.Arg(1))
 		fmt.Fprintln(os.Stderr, "push-inject takes ONE event JSON argument; quote it so the shell keeps it as one word")
-		return conformance.ExitError
+		return conformance.ExitUsage
 	}
 
 	sock, tok := injectedRef(*socket, *token)
@@ -82,6 +81,13 @@ func runPushInject(args []string) int {
 // pushInject runs the injection against an already-resolved locator and enqueuer,
 // so the outcome rendering and the exit code are testable without the process's
 // real stdout/stderr, flags or environment.
+//
+// Every failure here is ExitError, never ExitUsage: emit.Emit reports a
+// schema-invalid event, an unreachable core and a refused enqueue as one error
+// value, so this site cannot tell "you typed the event wrong" from "the core is
+// not there". Claiming usage for the whole set would mislabel the runtime cases —
+// and "no running core exits non-zero" is the contract an operator scripts
+// against (interfaces.md "Locating the core", ADR 0036), not a usage signal.
 func pushInject(stdout, stderr io.Writer, asJSON bool, loc emit.Locator, enq emit.Enqueuer, eventJSON string) int {
 	res, err := emit.Emit([]byte(eventJSON), loc, enq)
 	if err != nil {

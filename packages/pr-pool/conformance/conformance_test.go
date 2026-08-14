@@ -255,6 +255,30 @@ func TestCLIRoundTrip_DeferredAck(t *testing.T) {
 	}
 }
 
+// The coarse exit codes are a WIRE contract, so their NUMBERS are part of the
+// declared interface (INV-INTF-1) and not an implementation detail: a caller
+// outside this module compares against integers, not against these identifiers.
+// Every other assertion here goes through the names, which is exactly why a
+// silent renumbering would pass them all — this is the one check that would catch
+// BUSY moving back onto the usage code and inverting both readings
+// (ADR 0042's Consequences).
+func TestCoarseExitCodeValues(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		got  int
+		want int
+	}{
+		{"ok", ExitOK, 0},
+		{"unexpected error", ExitError, 1},
+		{"usage error", ExitUsage, 2},
+		{"busy (pre-accept decline)", ExitBusy, 9},
+	} {
+		if c.got != c.want {
+			t.Errorf("%s exit code = %d, want %d", c.name, c.got, c.want)
+		}
+	}
+}
+
 func TestCLIRoundTrip_Busy(t *testing.T) {
 	h := &ReferenceHandler{State: Started, Busy: true}
 	_, code, _ := RoundTrip(h, "dispatch", loadGolden(t, "handler.dispatch"))

@@ -179,7 +179,7 @@ type wireRequest struct {
 
 // wireResponse carries the coarse exit code plus the reply body the subcommand
 // wrote (interfaces.md: "the rich outcome is in the JSON reply"). Reply is null
-// when the subcommand wrote no body (the legal busy case, exit 2).
+// when the subcommand wrote no body (the legal busy case, exit 9).
 type wireResponse struct {
 	ExitCode int             `json:"exitCode"`
 	Reply    json.RawMessage `json:"reply"`
@@ -214,8 +214,8 @@ func Dial(ref Ref) (*Client, error) {
 func (c *Client) Close() error { return c.conn.Close() }
 
 // Call sends one subcommand request and returns the reply body and the coarse
-// exit code (0 ok / 1 error / 2 busy). The payload is the subcommand's JSON
-// request — the same bytes the stdin/stdout transport would carry.
+// exit code (0 ok / 1 error / 2 usage / 9 busy). The payload is the subcommand's
+// JSON request — the same bytes the stdin/stdout transport would carry.
 func (c *Client) Call(subcommand string, payload []byte) (reply []byte, exitCode int, err error) {
 	if err := c.conn.SetDeadline(time.Now().Add(callTimeout)); err != nil {
 		return nil, 0, fmt.Errorf("core: set deadline: %w", err)

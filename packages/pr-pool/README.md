@@ -47,9 +47,12 @@ the durable queue in another process, so nothing is enqueued locally. With **no 
 fails** with a "no running core" error and **exit 1**; it never starts one
 ([ADR 0036](../../docs/adr/0036-pr-pool-cli-never-auto-starts-a-core.md)).
 
-Exit codes are `0` accepted and `1` for everything else, **including a usage error**: push-inject
-reaches the core over the `ingest-event` transport, whose coarse exit space reserves `2` for the
-common contract's pre-accept **busy**.
+Exit codes are `0` accepted, `2` a **usage** error, and `1` for everything else — the same
+convention every other subcommand follows, because the common contract's pre-accept **busy** sits at
+`9` and no longer occupies `2`
+([ADR 0042](../../docs/adr/0042-coarse-exit-code-convention-busy-is-not-2.md)). A malformed or
+non-schema-valid **event** is not a usage error: it fails on the same path as an unreachable core, so
+it exits `1`.
 
 The success report says the core **accepted** the event, never "enqueued": a still-retained
 duplicate id is also accepted (`INV-EVT-3`) and the reply has no field that separates a fresh
@@ -62,9 +65,9 @@ commands: the core hands a registered participant one command string with `--soc
 already baked in, and the participant appends its arguments and runs it (see the behavior docs'
 `INTF-CLI`).
 
-| Command        | Description                                                                                                                        |
-| -------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `ingest-event` | deliver one or more events to the **running** core: request JSON on stdin, reply JSON on stdout, coarse exit code (0 ok / 1 error) |
+| Command        | Description                                                                                                                                           |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ingest-event` | deliver one or more events to the **running** core: request JSON on stdin, reply JSON on stdout, coarse exit code (0 ok / 1 error / 2 usage / 9 busy) |
 
 `ingest-event` locates the core via `--socket`/`--token`, else `PR_POOL_SOCKET`/`PR_POOL_TOKEN`,
 else the discovery record under the log dir. With **no core running it fails** with a

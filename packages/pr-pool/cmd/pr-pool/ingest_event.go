@@ -31,11 +31,11 @@ const (
 // runs it (interfaces.md "Callback"). `push-inject` is the operator-facing front
 // door to the same core-side enqueue.
 //
-// EXIT CODES follow the CALLBACK contract (0 ok / 1 error / 2 busy), not the
-// operator convention where 2 means a usage error. A usage error here therefore
-// exits 1, deliberately: 2 is the common contract's pre-accept BUSY signal, and a
-// source that read 2 as "busy, re-offer later" when the real fault was a bad flag
-// would silently drop events.
+// EXIT CODES are the common contract's, and they are the SAME here as on every
+// operator subcommand: 0 ok, 2 usage, 9 the pre-accept BUSY decline the core may
+// relay, 1 anything else (ADR 0042's Decision). Usage no longer collides with
+// BUSY, so a source can distinguish "your invocation was wrong" from "re-offer
+// later" — reading one as the other is what would silently drop events.
 //
 // When no core can be located it FAILS with a "no running core" diagnostic and
 // exits 1. It never starts one (ADR 0036 / core.ErrNoRunningCore).
@@ -50,12 +50,12 @@ func runIngestEvent(args []string) int {
 		return exitOK
 	case err != nil:
 		fmt.Fprintln(os.Stderr, "ingest-event:", err)
-		return conformance.ExitError
+		return conformance.ExitUsage
 	}
 	if fs.NArg() > 0 {
 		fmt.Fprintln(os.Stderr, "ingest-event: unexpected argument:", fs.Arg(0))
 		fmt.Fprintln(os.Stderr, "ingest-event takes its request as JSON on stdin, never as arguments")
-		return conformance.ExitError
+		return conformance.ExitUsage
 	}
 
 	ref, err := locateCore(*socket, *token)

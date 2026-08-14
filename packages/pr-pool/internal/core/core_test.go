@@ -136,7 +136,7 @@ func TestSocket_ConcurrentCallers(t *testing.T) {
 	}
 }
 
-// A body-less reply — the legal busy shape (exit 2, no body) — must cross the
+// A body-less reply — the legal busy shape (exit 9, no body) — must cross the
 // transport as an explicit null, since an empty json.RawMessage is not valid JSON
 // and would corrupt the frame.
 func TestRespond_BodylessReplyIsNull(t *testing.T) {
