@@ -68,6 +68,11 @@
       "name": "pg-ccaudit",
       "source": "./pg-ccaudit",
       "description": "Claude skill + command: tool-error waste review driven by the pg-ccaudit SQLite transcript index (query the pre-built index; never scan the raw JSONL)"
+    },
+    {
+      "name": "pg-go-mutate",
+      "source": "./pg-go-mutate",
+      "description": "Claude skill: find missing test assertions in a Go package with pg-go-mutate (mutation testing, surfaced as a test-writing workflow)"
     }
   ]
 }

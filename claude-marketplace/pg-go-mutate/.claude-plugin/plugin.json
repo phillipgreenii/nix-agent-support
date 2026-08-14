@@ -1,0 +1,6 @@
+{
+  "name": "pg-go-mutate",
+  "description": "Find missing test assertions in Go packages with pg-go-mutate",
+  "version": "0.1.0",
+  "defaultEnabled": true
+}
