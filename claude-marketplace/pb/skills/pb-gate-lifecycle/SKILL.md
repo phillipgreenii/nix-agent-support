@@ -33,8 +33,25 @@ concurrent agent draining `bd ready` can grab it in the gap.
 2. **Create the follow-up bead DEFERRED** (born non-workable):
 
    ```bash
-   bd create "verify <thing> works after apply" --defer +100y --json
+   bd create "verify <thing> works after apply" --defer 2126-01-01 --json
    # capture the new bead id, e.g. <BEAD>
+   # far-future ABSOLUTE date: --defer takes --due's formats, which have NO y unit
+   ```
+
+   Then CONFIRM the bead is NOT WORKABLE — by READINESS, never by reading `status`.
+   `bd create --defer` applies the defer but leaves the new bead at `status: open`
+   (confirmed 2026-08-13), and `deferred_until` reads `null` in the `bd show --json`
+   projection even after an update that DID set the status — so a field read reports a
+   FALSE failure. Assert the OUTCOME the ordering exists to produce (**P-1**):
+
+   ```bash
+   # -n 0: bd ready caps at 100 rows by default, so a capped query proves nothing.
+   # NO --exclude-label human: absence would then prove the LABEL, not the defer.
+   # The --include-deferred half is the positive control -- without it, an erroring
+   # or empty bd ready satisfies "absent" vacuously.
+   bd ready --json -n 0 --include-deferred | jq -e --arg id "<BEAD>" 'any(.data[]?; .id == $id)' >/dev/null &&
+     bd ready --json -n 0 | jq -e --arg id "<BEAD>" 'all(.data[]?; .id != $id)' >/dev/null &&
+     echo "OK: <BEAD> is not workable" || echo "FAIL: <BEAD> is workable -- do NOT gate"
    ```
 
 3. **Attach the gate** on the most recent commit (the default, recommended,
@@ -52,6 +69,10 @@ concurrent agent draining `bd ready` can grab it in the gap.
    bd update <BEAD> --defer ""
    ```
 
+   Re-run ONLY step 2's second (absence) command: the bead MUST still be absent from
+   `bd ready`. Skip the `--include-deferred` positive control here — the gate, not a
+   defer, is now what holds the bead, and that flag does not re-admit it.
+
 The bead stays out of `bd ready` until someone runs `pn workspace apply`; the
 apply's post-hook runs `pb gate check`, which resolves the gate once the change's
 patch-id is in the applied history. Then the bead surfaces as ordinary work.
@@ -63,7 +84,10 @@ patch-id is in the applied history. Then the bead surfaces as ordinary work.
    `--commits <range>` (one gate per commit; the bead unblocks only when **all**
    are applied) only when a change's commits may land/apply separately — it is an
    advanced, rarely-needed option.
-3. **Deferred-first ordering is mandatory** (the fleet-race requirement above).
+3. **Deferred-first ordering is mandatory** (the fleet-race requirement above), and
+   it MUST be verified by READINESS, not by reading `status` (step 2). A `status`
+   read reports a false failure, and the "repair" for a false failure is to drop or
+   re-order the deferred-first step — which OPENS the race this rule closes.
 4. **Squash-merges lose the gate.** A squash fuses the diff into a new patch-id,
    so the gate never auto-resolves and falls to stale-handling
    (`pb gate check` converts it to a `human` bead by default). If you expect the

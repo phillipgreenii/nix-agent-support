@@ -308,11 +308,36 @@ fleet-claim race, so the child is never both workable and ungated.
 
    ```bash
    bd create "verify <thing> works after apply (<impl-id>): <concrete checks>" \
-     --defer +100y --deps "discovered-from:<impl-id>" --actor "ID" --json
+     --defer 2126-01-01 --deps "discovered-from:<impl-id>" --actor "ID" --json
    # capture the new id as <child>
+   # far-future ABSOLUTE date: --defer takes --due's formats, which have NO y unit
    ```
 
-2. Attach a gate on the landed commit — one per changed repo — and CONFIRM each
+2. CONFIRM the child is NOT WORKABLE — by READINESS, never by reading `status`.
+   `bd create --defer` applies the defer but leaves the child at `status: open`
+   (confirmed 2026-08-13), and `deferred_until` reads `null` in the `bd show --json`
+   projection even after an update that DID set the status — so NEITHER field is a
+   usable check, and a field read reports a FALSE failure. That false reading is
+   dangerous: the "repair" for it is to drop or re-order the mandatory deferred-first
+   step, which OPENS the fleet-claim race. Assert the OUTCOME the ordering exists to
+   produce (**P-1**):
+
+   ```bash
+   # -n 0: bd ready caps at 100 rows by default, so a capped query proves nothing.
+   # NO --exclude-label human: absence would then prove the LABEL, not the defer.
+   # The --include-deferred half is the positive control -- without it, an erroring
+   # or empty bd ready satisfies "absent" vacuously.
+   bd ready --json -n 0 --include-deferred | jq -e --arg id "<child>" 'any(.data[]?; .id == $id)' >/dev/null &&
+     bd ready --json -n 0 | jq -e --arg id "<child>" 'all(.data[]?; .id != $id)' >/dev/null &&
+     echo "OK: <child> is not workable" || echo "FAIL: <child> is workable -- do NOT gate"
+   ```
+
+   On FAIL the child is born workable and a peer draining `bd ready` can claim it: do
+   NOT attach gates. Re-apply the defer with
+   `bd update <child> --defer 2126-01-01 --actor "ID"` and re-check; if it stays
+   workable, do NOT close the impl bead — route the impl bead to STUCK.
+
+3. Attach a gate on the landed commit — one per changed repo — and CONFIRM each
    succeeds:
 
    ```bash
@@ -323,19 +348,23 @@ fleet-claim race, so the child is never both workable and ungated.
    One gate for a single-repo bead; for a cross-repo/workforest bead, create one
    gate per changed repo — the child unblocks only when ALL are applied.
 
-3. ONLY IF every gate above was created successfully, make the child workable (the
+4. ONLY IF every gate above was created successfully, make the child workable (the
    gates now hold it out of `bd ready`):
 
    ```bash
    bd update <child> --defer "" --actor "ID"
    ```
 
+   Then re-run ONLY step 2's second (absence) command: the child MUST still be absent
+   from `bd ready`. Skip the `--include-deferred` positive control here — the gates,
+   not a defer, are now what hold the child, and that flag does not re-admit it.
+
    If ANY `pb gate create` failed: leave the child DEFERRED (do NOT un-defer), do
    NOT close the impl bead, and route the impl bead to STUCK so a human resolves
    it. NEVER un-defer a child that is not fully gated — a peer draining `bd ready`
    would claim it and "verify" against not-yet-applied code.
 
-4. Record the link on the implementation bead:
+5. Record the link on the implementation bead:
 
    ```bash
    bd comment <impl-id> "post-deploy verification gated as <child> (pn:applied)." --actor "ID"
@@ -719,11 +748,18 @@ unchanged.
   makes both beads permanently unready). A MIXED blocker gets BOTH treatments and the label
   MUST sit on the bead that HOLDS the question. Full contract: the always-on
   `Blocker Modeling` rules (**D-1..D-8**).
-- Ordering is load-bearing: for a gate, create the child DEFERRED → attach ALL
-  gates (confirm success) → only then un-defer; when STUCK, apply the `human`
+- Ordering is load-bearing: for a gate, create the child DEFERRED → CONFIRM it is
+  absent from `bd ready` → attach ALL gates (confirm success) → only then un-defer;
+  when STUCK, apply the `human`
   label BEFORE unclaiming; and when converting to a dependency, add ALL `bd dep add` edges
   BEFORE releasing the claim — `bd ready` hides the bead only while it is `in_progress`, so
   releasing first opens a window in which a peer claims genuinely blocked work.
+- A deferred-born gate child MUST be confirmed by READINESS — absent from
+  `bd ready --json -n 0` — and MUST NOT be confirmed by reading `status` or
+  `deferred_until`. `bd create --defer` applies the defer but leaves `status: open` and
+  `deferred_until` null, so a field read reports a FALSE failure; "fixing" that
+  non-failure by dropping or re-ordering the deferred-first step reopens the
+  fleet-claim race (**P-1** — assert the outcome, not the mechanism).
 - Park preconditions MUST be OUTCOME-shaped: a park comment's `PRECONDITION` MUST
   state an observable outcome, MUST carry a stable `PRECONDITION-KEY` naming that
   outcome (not the attempt), and MUST cite `DERIVED-FROM: <repo>@<sha> — <path>`. A
@@ -816,7 +852,7 @@ flowchart TD
     L -->|genuine stopped:reason| S
     L -- "landed / pr-opened / pr-updated: capture SHA and PR number" --> G{Post-deploy<br/>verification needed?}
     G -- "no (done)" --> CL["CLEANUP worktree/set ONLY after an ff-merge-to-main land<br/>(a set only AFTER every member landed, never force)<br/>pull-request: KEEP the worktree and branch (PR-4)"]
-    G -- "yes, pn-workspace member landed via ff-merge-to-main" --> PB["pb:pb-gate-lifecycle<br/>bd create verify-child --defer +100y →<br/>pb gate create --blocks child --repo --commit SHA →<br/>(all gates OK?) bd update child --defer ''"]
+    G -- "yes, pn-workspace member landed via ff-merge-to-main" --> PB["pb:pb-gate-lifecycle<br/>bd create verify-child --defer 2126-01-01 →<br/>CONFIRM child absent from bd ready, NEVER read status →<br/>pb gate create --blocks child --repo --commit SHA →<br/>(all gates OK?) bd update child --defer '' → re-confirm absent"]
     G -- "yes, but outside a pn-workspace or landed via pull-request" --> HB["FALLBACK, no gate is possible:<br/>bd create verify-child --labels human<br/>--deps discovered-from impl-id, born ready"]
     PB -->|gate-create failed| S
     PB -->|gated + un-deferred| CL

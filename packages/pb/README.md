@@ -49,8 +49,8 @@ sequenceDiagram
     participant Caller
     participant bd
     participant pb
-    Caller->>bd: bd create "verify ..." --defer +100y
-    Note over bd: bead hidden from `bd ready`
+    Caller->>bd: bd create "verify ..." --defer 2126-01-01
+    Note over bd: bead hidden from `bd ready` -- verify by READINESS, since `status` stays `open`
     Caller->>pb: pb gate create --blocks <bead> --repo <r>
     pb->>bd: bd gate create (pn:applied) + set baseline
     Caller->>bd: bd update <bead> --defer ""  (un-defer)
