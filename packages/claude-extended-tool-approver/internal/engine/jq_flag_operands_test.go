@@ -1,4 +1,4 @@
-// wrxg6_jqflagoperand_relation_test.go — pg2-wrxg6 asserted END TO END, through the
+// jq_flag_operands_test.go — pg2-wrxg6 asserted END TO END, through the
 // production rule chain, as a RELATION between two spellings of one jq read.
 //
 // THE RELATION: for any path, naming it through a jq FLAG OPERAND is never LESS gated than
@@ -34,10 +34,10 @@ import (
 	"testing"
 )
 
-// TestWrxg6_JqFlagOperandIsNeverLooserThanAPositional asserts the relation over a matrix of
+// TestJq_FlagOperandIsNeverLooserThanAPositional asserts the relation over a matrix of
 // jq flags x paths rather than over hand-picked rows, because the defect's shape is "some
 // flag nobody wrote down".
-func TestWrxg6_JqFlagOperandIsNeverLooserThanAPositional(t *testing.T) {
+func TestJq_FlagOperandIsNeverLooserThanAPositional(t *testing.T) {
 	t.Setenv("WORKSPACE_ROOT", "/Users/testuser/workspace")
 	projectRoot := "/Users/testuser/workspace/my-project"
 	eng := buildFullEngine(projectRoot, projectRoot)
@@ -111,7 +111,7 @@ func TestWrxg6_JqFlagOperandIsNeverLooserThanAPositional(t *testing.T) {
 	}
 }
 
-// TestWrxg6_LiteralOperandFlagsStillSkipTheirValue is the OPPOSITE-DIRECTION half, and it is
+// TestJq_LiteralOperandFlagsStillSkipTheirValue is the OPPOSITE-DIRECTION half, and it is
 // a different claim from the relation above.
 //
 // The relation says a file operand is never under-gated. This says the LITERAL operands are
@@ -121,7 +121,7 @@ func TestWrxg6_JqFlagOperandIsNeverLooserThanAPositional(t *testing.T) {
 //
 // `--arg` / `--argjson` / `--indent` are the ONLY jq flags in jq 1.8.2 whose operands are
 // literals jq never opens, so this table is complete rather than a sample.
-func TestWrxg6_LiteralOperandFlagsStillSkipTheirValue(t *testing.T) {
+func TestJq_LiteralOperandFlagsStillSkipTheirValue(t *testing.T) {
 	t.Setenv("WORKSPACE_ROOT", "/Users/testuser/workspace")
 	projectRoot := "/Users/testuser/workspace/my-project"
 	eng := buildFullEngine(projectRoot, projectRoot)
@@ -142,7 +142,7 @@ func TestWrxg6_LiteralOperandFlagsStillSkipTheirValue(t *testing.T) {
 	}
 }
 
-// TestWrxg6_SkipTablesHoldNoFileTakingFlag is the STRUCTURAL guard, and it is the one that
+// TestJq_SkipTablesHoldNoFileTakingFlag is the STRUCTURAL guard, and it is the one that
 // makes a future edit safe rather than merely making today's tables correct.
 //
 // The rule it enforces is the one messageFlags' doc already states for its own table: A FLAG
@@ -153,7 +153,7 @@ func TestWrxg6_LiteralOperandFlagsStillSkipTheirValue(t *testing.T) {
 // It reads the tables through the behaviour rather than reaching into cmdparse's unexported
 // maps: for every flag jq documents as taking a file or directory operand, the operand must
 // survive into the args path screening sees.
-func TestWrxg6_SkipTablesHoldNoFileTakingFlag(t *testing.T) {
+func TestJq_SkipTablesHoldNoFileTakingFlag(t *testing.T) {
 	t.Setenv("WORKSPACE_ROOT", "/Users/testuser/workspace")
 	projectRoot := "/Users/testuser/workspace/my-project"
 	eng := buildFullEngine(projectRoot, projectRoot)

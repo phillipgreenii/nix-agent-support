@@ -1,4 +1,4 @@
-// cu3ro_flagspelling_relation_test.go — pg2-cu3ro asserted END TO END, through the
+// flag_value_spelling_test.go — pg2-cu3ro asserted END TO END, through the
 // production rule chain, as a RELATION across the THREE SPELLINGS of one flag.
 //
 // THE RELATION: for any path P and any file-taking flag F, `cmd F=P`, `cmd F P` and the
@@ -23,10 +23,10 @@ import (
 	"testing"
 )
 
-// TestCu3ro_GluedFlagValueMatchesTheSpaceSpelling asserts the relation over a matrix of
+// TestFlagSpelling_GluedValueMatchesTheSpaceSpelling asserts the relation over a matrix of
 // commands x file-taking flags x paths. The matrix rather than hand-picked rows is the point:
 // the defect is generic to the token shape, so any command with any file-taking flag has it.
-func TestCu3ro_GluedFlagValueMatchesTheSpaceSpelling(t *testing.T) {
+func TestFlagSpelling_GluedValueMatchesTheSpaceSpelling(t *testing.T) {
 	t.Setenv("WORKSPACE_ROOT", "/Users/testuser/workspace")
 	projectRoot := "/Users/testuser/workspace/my-project"
 	eng := buildFullEngine(projectRoot, projectRoot)
@@ -74,7 +74,7 @@ func TestCu3ro_GluedFlagValueMatchesTheSpaceSpelling(t *testing.T) {
 	}
 }
 
-// TestCu3ro_ZoneOnlyPathsStillDisagreeBySpelling records the HALF pg2-cu3ro DID NOT FIX, as a
+// TestFlagSpelling_ZoneOnlyPathsStillDisagreeBySpelling records the HALF pg2-cu3ro DID NOT FIX, as a
 // failing-when-fixed assertion rather than as a comment, so the gap is visible in the suite
 // instead of living only in a bead.
 //
@@ -86,7 +86,7 @@ func TestCu3ro_GluedFlagValueMatchesTheSpaceSpelling(t *testing.T) {
 // WHEN pg2-wxbr9 LANDS THIS TEST MUST FAIL, and deleting it is that bead's acceptance signal.
 // It is written to assert the CURRENT wrong behaviour on purpose; a reader must not "fix" it by
 // relaxing the assertion.
-func TestCu3ro_ZoneOnlyPathsStillDisagreeBySpelling(t *testing.T) {
+func TestFlagSpelling_ZoneOnlyPathsStillDisagreeBySpelling(t *testing.T) {
 	t.Setenv("WORKSPACE_ROOT", "/Users/testuser/workspace")
 	projectRoot := "/Users/testuser/workspace/my-project"
 	eng := buildFullEngine(projectRoot, projectRoot)
@@ -103,7 +103,7 @@ func TestCu3ro_ZoneOnlyPathsStillDisagreeBySpelling(t *testing.T) {
 	}
 }
 
-// TestCu3ro_MessageFlagValuesAreStillSkippedInBothSpellings is the OPPOSITE-DIRECTION half,
+// TestFlagSpelling_MessageValuesStillSkippedInBothSpellings is the OPPOSITE-DIRECTION half,
 // and it is the one that stops the fix from being a regression.
 //
 // pg2-cu3ro and pg2-ia640.5 pull in OPPOSITE directions on the SAME token shape: this bead
@@ -115,7 +115,7 @@ func TestCu3ro_ZoneOnlyPathsStillDisagreeBySpelling(t *testing.T) {
 // The prose values below all NAME credential paths and must still not be gated: a message is
 // STORED AS TEXT, so a path spelled inside one grants no access, while prompting on it costs
 // the human a paragraph-length retype (the ~40-line bead comment of asklog row 325419).
-func TestCu3ro_MessageFlagValuesAreStillSkippedInBothSpellings(t *testing.T) {
+func TestFlagSpelling_MessageValuesStillSkippedInBothSpellings(t *testing.T) {
 	t.Setenv("WORKSPACE_ROOT", "/Users/testuser/workspace")
 	projectRoot := "/Users/testuser/workspace/my-project"
 	eng := buildFullEngine(projectRoot, projectRoot)
@@ -146,13 +146,13 @@ func TestCu3ro_MessageFlagValuesAreStillSkippedInBothSpellings(t *testing.T) {
 	}
 }
 
-// TestCu3ro_GluedValueDoesNotResurrectSkippedOperands guards the third direction: the fix
+// TestFlagSpelling_GluedValueDoesNotResurrectSkippedOperands guards the third direction: the fix
 // must not undo the grep/rg and jq operand skips, which are keyed on the SPACE spelling and
 // whose glued spellings now flow through the same value extraction.
 //
 // A pattern or glob is not a file the command opens, so these must stay ungated in BOTH
 // spellings — the pg2-ia640.2 false positives.
-func TestCu3ro_GluedValueDoesNotResurrectSkippedOperands(t *testing.T) {
+func TestFlagSpelling_GluedValueDoesNotResurrectSkippedOperands(t *testing.T) {
 	t.Setenv("WORKSPACE_ROOT", "/Users/testuser/workspace")
 	projectRoot := "/Users/testuser/workspace/my-project"
 	eng := buildFullEngine(projectRoot, projectRoot)
