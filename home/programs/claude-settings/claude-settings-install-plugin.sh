@@ -31,8 +31,45 @@
 # default activation path never mutates installed_plugins.json. The trailing
 # update is NEVER skipped on account of a cached/enabled plugin — see pg2-cxwj.
 #
+# ENABLEMENT IS RE-ASSERTED LAST, when the optional <settings_path> +
+# <declared_enabled> pair is supplied. `claude plugin install --scope <scope>`
+# writes `.enabledPlugins["<spec>"] = true` into that scope's settings.json on
+# EVERY successful invocation, so the installer is the LAST writer of enablement
+# during activation and it silently overrides the value
+# claude-settings-replace-managed-keys wrote from Nix EARLIER IN THE SAME
+# activation (bead pg2-4q1qk). Measured 2026-08-13 in an isolated
+# CLAUDE_CONFIG_DIR against BOTH claude binaries present (2.1.220, the
+# nix-pinned one, and 2.1.228): starting from a declared `false`, `plugin
+# install` flipped the key to `true` on a FRESH install, on an
+# ALREADY-INSTALLED SAME-VERSION install (the "short-circuit" — so that path is
+# NOT safe either), and on a REAL version bump. `plugin update` never touched
+# enablement in any of those states, including a real 1.0.0 -> 2.0.0 upgrade.
+# There is no install-without-enabling flag to prefer instead: `plugin install`
+# accepts only --config and --scope (claude 2.1.228 `plugin install --help`).
+#
+# So the ONLY way a Nix-declared `false` survives an apply is to restore it
+# after the install/update pair, which is what happens here — in the step that
+# causes the drift rather than in a later step, so the guarantee does not depend
+# on activation-block ordering that nothing enforces. The restore runs on every
+# outcome (install ok, fallback update ok, both failed): the Nix declaration is
+# authoritative regardless of how the CLI fared. It writes ONLY
+# `.enabledPlugins["<spec>"]` — no other key, and never
+# `extraKnownMarketplaces`, so it cannot fight
+# claude-settings-register-marketplace (whose `marketplace add` writes
+# `extraKnownMarketplaces` into the same file). It is idempotent, and stays
+# silent unless it actually changed the value.
+#
 # Usage:
 #   claude-settings-install-plugin.sh <claude_bin> <plugin@marketplace> <cache_root>
+#   claude-settings-install-plugin.sh <claude_bin> <plugin@marketplace> <cache_root> \
+#     <settings_path> <declared_enabled>
+#
+# The pair is optional because a plugin MAY be listed for install with no
+# `enabledPlugins` declaration at all, in which case there is no declared value
+# to assert and Claude Code's own default stands. 4 arguments is rejected rather
+# than treated as "settings path, unspecified value": a half-supplied pair is a
+# caller bug, and silently skipping the restore is the defect this exists to
+# prevent.
 #
 # Cache layout assumed:
 #   <cache_root>/<marketplace>/<plugin>/<version>/.claude-plugin/plugin.json
@@ -40,8 +77,31 @@
 # installed_plugins.json is assumed to live beside the cache dir:
 #   <cache_root>/../installed_plugins.json
 
-if [ "$#" -ne 3 ]; then
-  echo "usage: $0 <claude_bin> <plugin@marketplace> <cache_root>" >&2
+_usage() {
+  echo "usage: $0 <claude_bin> <plugin@marketplace> <cache_root> [<settings_path> <declared_enabled>]" >&2
+}
+
+case "$#" in
+3)
+  settings_path=""
+  declared_enabled=""
+  ;;
+5)
+  settings_path="$4"
+  declared_enabled="$5"
+  ;;
+*)
+  _usage
+  exit 64
+  ;;
+esac
+
+# Keyed on settings_path, not on declared_enabled: an EMPTY declared value must
+# also be rejected, or the restore below would hand jq invalid JSON and degrade
+# into a warning instead of naming the caller bug.
+if [ -n "$settings_path" ] && [ "$declared_enabled" != "true" ] && [ "$declared_enabled" != "false" ]; then
+  echo "$0: <declared_enabled> must be 'true' or 'false', got '$declared_enabled'" >&2
+  _usage
   exit 64
 fi
 
@@ -181,4 +241,36 @@ else
   echo "--- update output ---" >&2
   cat "$update_out" >&2
   _emit_failure_context
+fi
+
+# Re-assert the Nix-declared enablement for THIS spec, after both CLI commands.
+# See the "ENABLEMENT IS RE-ASSERTED LAST" note in the header for the measured
+# `plugin install` behavior this undoes (pg2-4q1qk). Non-fatal throughout: a
+# failure here must not fail activation, and it is reported so a silent no-op is
+# impossible to mistake for success.
+if [ -n "$settings_path" ]; then
+  if [ -f "$settings_path" ]; then
+    # "unset" distinguishes an absent key from a present `false`; both differ
+    # from a declared "true", so both are corrected.
+    current=$(jq -r \
+      --arg s "$spec" \
+      '.enabledPlugins[$s] | if . == null then "unset" else tostring end' \
+      "$settings_path" 2>/dev/null || echo "unreadable")
+
+    if [ "$current" = "$declared_enabled" ]; then
+      : # Already the declared value — nothing to write, nothing to report.
+    elif jq \
+      --arg s "$spec" \
+      --argjson v "$declared_enabled" \
+      '.enabledPlugins[$s] = $v' \
+      "$settings_path" >"$settings_path.tmp" 2>/dev/null; then
+      mv -f "$settings_path.tmp" "$settings_path"
+      act_ok "$spec enablement restored to $declared_enabled at $scope scope (was $current)"
+    else
+      rm -f "$settings_path.tmp"
+      act_warn "WARNING $spec enablement could not be restored to $declared_enabled in $settings_path (non-fatal)" >&2
+    fi
+  else
+    act_warn "WARNING $spec enablement not restored: no settings file at $settings_path (non-fatal)" >&2
+  fi
 fi

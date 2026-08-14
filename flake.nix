@@ -1888,6 +1888,169 @@
                 assert hasSub "plugin marketplace update" activationNoDir;
                 pkgs.runCommand "claude-settings-activation-marketplace-add-ok" { } "touch $out";
 
+              # Regression guard for pg2-4q1qk: the activation must hand each
+              # install-plugin invocation the settings path AND that plugin's
+              # Nix-declared `enabledPlugins` value, so the installer's own
+              # user-scope enable is undone in the same step that caused it.
+              # `claude plugin install --scope user` sets
+              # `.enabledPlugins["<spec>"] = true` on EVERY successful
+              # invocation (measured against claude 2.1.220 and 2.1.228 — fresh
+              # install, already-installed same-version install, and a real
+              # version bump), so without these arguments a plugin declared
+              # `false` is re-enabled user-wide on every apply, silently, and a
+              # no-op apply looks correct.
+              #
+              # This is the half the bats suite structurally cannot see: the bats
+              # tests prove the SCRIPT restores what it is told to restore, and
+              # this proves the module TELLS it. Pure module eval inspecting the
+              # generated activation string — no HM harness.
+              test-claude-settings-activation-enablement-restore =
+                let
+                  hmLib = lib // {
+                    hm = (lib.hm or { }) // {
+                      dag = (lib.hm.dag or { }) // {
+                        entryAfter = _deps: text: text;
+                      };
+                    };
+                  };
+                  evalActivation =
+                    cfg:
+                    (lib.evalModules {
+                      specialArgs = {
+                        inherit pkgs inputs;
+                        lib = hmLib;
+                        mkBashBuildersFor =
+                          p:
+                          inputs.phillipgreenii-nix-base.lib.mkBashBuilders {
+                            pkgs = p;
+                            inherit self;
+                            inherit (p) lib;
+                          };
+                      };
+                      modules = [
+                        ./home/programs/claude-settings/default.nix
+                        (
+                          { lib, ... }:
+                          {
+                            options = {
+                              phillipgreenii.programs.claude-code.enable = lib.mkEnableOption "claude (stub)";
+                              home.activation = lib.mkOption {
+                                type = lib.types.attrsOf lib.types.anything;
+                                default = { };
+                              };
+                            };
+                          }
+                        )
+                        cfg
+                      ];
+                    }).config;
+
+                  activationFor =
+                    { plugins, enabledPlugins }:
+                    (evalActivation {
+                      phillipgreenii.programs.claude-code = {
+                        enable = true;
+                        settings = {
+                          claudeCodePackage = pkgs.writeShellScriptBin "claude" "exit 0";
+                          inherit plugins enabledPlugins;
+                        };
+                      };
+                    }).home.activation.claude-settings;
+
+                  hasSub = needle: haystack: lib.hasInfix needle haystack;
+
+                  # The argument text of the Nth install-plugin invocation. Split
+                  # on the "/bin/" form specifically: the store path itself ends
+                  # in `-claude-settings-install-plugin`, so splitting on the bare
+                  # name would also cut inside every path. Chunk 0 is everything
+                  # before the first invocation; chunk N is invocation N's
+                  # arguments (followed, if another invocation follows, by that
+                  # one's store-path prefix — which carries no boolean or spec
+                  # text, so the assertions below stay unambiguous).
+                  argsOf =
+                    n: activation: lib.elemAt (lib.splitString "/bin/claude-settings-install-plugin" activation) n;
+
+                  declaredFalse = activationFor {
+                    plugins = [ "solo@m" ];
+                    enabledPlugins."solo@m" = false;
+                  };
+                  declaredTrue = activationFor {
+                    plugins = [ "solo@m" ];
+                    enabledPlugins."solo@m" = true;
+                  };
+                  # A plugin listed for install with NO enabledPlugins entry: no
+                  # declared value exists, so no pair may be passed (a `false`
+                  # invented here would disable a plugin nobody asked to disable).
+                  undeclared = activationFor {
+                    plugins = [ "solo@m" ];
+                    enabledPlugins = { };
+                  };
+                  # The realistic shape: declared and undeclared plugins side by
+                  # side, so a per-plugin value cannot be cross-wired.
+                  mixed = activationFor {
+                    plugins = [
+                      "aa@m"
+                      "bb@m"
+                      "cc@m"
+                    ];
+                    enabledPlugins = {
+                      "aa@m" = false;
+                      "bb@m" = true;
+                    };
+                  };
+
+                  falseArgs = argsOf 1 declaredFalse;
+                  trueArgs = argsOf 1 declaredTrue;
+                  undeclaredArgs = argsOf 1 undeclared;
+                  aaArgs = argsOf 1 mixed;
+                  bbArgs = argsOf 2 mixed;
+                  ccArgs = argsOf 3 mixed;
+                in
+                # A declared `false` reaches the installer as the settings path
+                # plus the literal `false` — this is the assertion that keeps the
+                # ZR plugins installed-but-user-disabled across a version bump.
+                assert hasSub ''"solo@m"'' falseArgs;
+                assert hasSub ''"$SETTINGS"'' falseArgs;
+                assert hasSub ''"false"'' falseArgs;
+                assert !(hasSub ''"true"'' falseArgs);
+                # A declared `true` is asserted just as explicitly (the restore
+                # enforces the declaration, it is not a blanket disable).
+                assert hasSub ''"$SETTINGS"'' trueArgs;
+                assert hasSub ''"true"'' trueArgs;
+                assert !(hasSub ''"false"'' trueArgs);
+                # No declaration ⇒ the 3-argument form, which the script treats
+                # as "leave enablement to Claude Code".
+                assert !(hasSub ''"$SETTINGS"'' undeclaredArgs);
+                assert !(hasSub ''"true"'' undeclaredArgs);
+                assert !(hasSub ''"false"'' undeclaredArgs);
+                # Per-plugin values are not cross-wired across the loop.
+                assert hasSub ''"aa@m"'' aaArgs && hasSub ''"false"'' aaArgs && !(hasSub ''"true"'' aaArgs);
+                assert hasSub ''"bb@m"'' bbArgs && hasSub ''"true"'' bbArgs && !(hasSub ''"false"'' bbArgs);
+                assert hasSub ''"cc@m"'' ccArgs && !(hasSub ''"$SETTINGS"'' ccArgs);
+                # The fix must NOT have been implemented by reordering activation
+                # steps: replace-managed-keys still runs BEFORE any install, so
+                # nothing here depends on an ordering invariant that a later edit
+                # could quietly invert.
+                assert
+                  !(hasSub "/bin/claude-settings-install-plugin" (
+                    lib.head (lib.splitString "/bin/claude-settings-replace-managed-keys" declaredFalse)
+                  ));
+                # The invocation is assembled by string surgery (an argument list
+                # joined with escaped line continuations), and a malformed
+                # continuation would not fail evaluation — it would fail at
+                # someone's next apply. Parse the generated activation to rule
+                # that out. `bash -n` parses without executing, so the act_*
+                # helpers it calls need not be defined.
+                pkgs.runCommand "claude-settings-activation-enablement-restore-ok"
+                  {
+                    passAsFile = [ "activation" ];
+                    activation = mixed;
+                  }
+                  ''
+                    ${pkgs.bash}/bin/bash -n "$activationPath"
+                    touch $out
+                  '';
+
               # Regression guard for pg2-64uu and pg2-e46e: promptCacheTtl writes
               # the correct mutually-exclusive prompt-cache env var into
               # settings.json's `.env` (docs: code.claude.com/docs/en/prompt-caching).

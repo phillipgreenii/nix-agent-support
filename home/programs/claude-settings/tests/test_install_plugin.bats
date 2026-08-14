@@ -17,6 +17,11 @@
 #     path) that shadows the user-scope enable; pruning is gated behind
 #     CLAUDE_SETTINGS_PRUNE_STALE_SCOPE and NEVER skips the trailing update
 #     (pg2-oklb / pg2-cxwj)
+#   - re-asserts the Nix-declared `enabledPlugins` value for the spec AFTER the
+#     install/update pair, when the optional <settings_path> <declared_enabled>
+#     arguments are supplied — `plugin install` enables at its target scope on
+#     every successful invocation, overriding what replace-managed-keys wrote
+#     earlier in the same activation (pg2-4q1qk)
 #   - exits 0 (non-fatal) regardless of install/update outcome
 
 bats_require_minimum_version 1.5.0
@@ -34,9 +39,10 @@ setup() {
   CACHE_ROOT="$TMP/cache"
   CLAUDE_BIN="$TMP/bin/claude"
   CALLS="$TMP/calls.log"
+  SETTINGS="$TMP/settings.json"
   mkdir -p "$TMP/bin" "$CACHE_ROOT"
   : > "$CALLS"
-  export CACHE_ROOT CLAUDE_BIN CALLS
+  export CACHE_ROOT CLAUDE_BIN CALLS SETTINGS
 }
 
 teardown() {
@@ -64,6 +70,48 @@ _write_manifest() {
   local dir="$CACHE_ROOT/$1/$2/$3/.claude-plugin"
   mkdir -p "$dir"
   printf '%s' "$4" > "$dir/plugin.json"
+}
+
+# Write a mock claude that reproduces the MEASURED enablement side effect of
+# the real CLI: `plugin install` sets .enabledPlugins["<spec>"] = true in the
+# target scope's settings.json on every successful invocation, while `plugin
+# update` never touches enablement (verified 2026-08-13 in an isolated
+# CLAUDE_CONFIG_DIR against claude 2.1.220 and 2.1.228 — fresh install,
+# already-installed same-version install, and a real version bump all enabled;
+# no update state did). This mock is what makes the pg2-4q1qk regression tests
+# exercise the real failure rather than a hypothetical one.
+#   $1 = settings.json the mock writes (the "user scope" file)
+#   $2 = cache version dir to CREATE on install, or "" for none. A new dir is
+#        what distinguishes a GENUINE install (marketplace moved, content
+#        actually pulled) from the already-installed short-circuit; both enable,
+#        so both are covered.
+_mock_claude_enabling() {
+  local settings="$1" newver="${2:-}"
+  cat > "$CLAUDE_BIN" <<EOF
+#!/usr/bin/env bash
+echo "\$@" >> "$CALLS"
+case "\$2" in
+  install)
+    spec="\$3"
+    newver="$newver"
+    if [ -n "\$newver" ]; then
+      mkdir -p "\$newver/.claude-plugin"
+      printf '{"name":"%s"}' "\${spec%%@*}" > "\$newver/.claude-plugin/plugin.json"
+    fi
+    jq --arg s "\$spec" '.enabledPlugins[\$s] = true' "$settings" > "$settings.mocktmp" \\
+      && mv -f "$settings.mocktmp" "$settings"
+    exit 0
+    ;;
+  update) exit 0 ;;
+esac
+exit 0
+EOF
+  chmod +x "$CLAUDE_BIN"
+}
+
+# Read the enablement of $1 out of the settings file under test.
+_enabled_of() {
+  jq -r --arg s "$1" '.enabledPlugins[$s] | if . == null then "unset" else tostring end' "$SETTINGS"
 }
 
 # Helper: write an installed_plugins.json beside the cache dir (where the
@@ -355,4 +403,181 @@ _installed_plugins_path() {
   # The update MUST have been attempted despite the cached + enabled state.
   grep -Fxq "plugin install superpowers@superpowers-marketplace --scope user" "$CALLS"
   grep -Fxq "plugin update superpowers@superpowers-marketplace --scope user" "$CALLS"
+}
+
+# ----------------------------------------------------------------------------
+# pg2-4q1qk: the installer must not leave a Nix-declared-`false` plugin enabled
+# ----------------------------------------------------------------------------
+
+@test "regression: a REAL install that enables a declared-FALSE plugin is restored to false" {
+  # THE regression that matters. The install is genuine, not a short-circuit:
+  # the cache holds the pre-bump version and the mock creates a NEW version dir,
+  # exactly as a marketplace HEAD advance does. This is the case an apply whose
+  # installs all short-circuit can never verify.
+  echo '{"enabledPlugins":{"jvm@ziprecruiter":false}}' > "$SETTINGS"
+  _write_manifest "ziprecruiter" "jvm" "19b5ada4caa6" '{"name":"jvm"}'
+  _mock_claude_enabling "$SETTINGS" "$CACHE_ROOT/ziprecruiter/jvm/c29658bd3aca"
+
+  run "$SCRIPT" "$CLAUDE_BIN" "jvm@ziprecruiter" "$CACHE_ROOT" "$SETTINGS" "false"
+
+  [ "$status" -eq 0 ]
+  # The install ran, and it really was a NON-short-circuiting one.
+  grep -Fxq "plugin install jvm@ziprecruiter --scope user" "$CALLS"
+  [ -f "$CACHE_ROOT/ziprecruiter/jvm/c29658bd3aca/.claude-plugin/plugin.json" ]
+  # The plugin stays INSTALLED but the Nix-declared `false` is what survives.
+  [ "$(_enabled_of "jvm@ziprecruiter")" = "false" ]
+  [[ "$output" == *"jvm@ziprecruiter enablement restored to false at user scope (was true)"* ]]
+}
+
+@test "regression: the SHORT-CIRCUIT install path also enables, and is also restored" {
+  # The already-installed same-version install is NOT a safe path: it enables
+  # too (measured). A witness plugin whose version never moved therefore proves
+  # nothing about staying disabled, which is why the earlier pg-pr witness was
+  # invalid. No new cache dir here — nothing is pulled — yet the key still flips.
+  echo '{"enabledPlugins":{"slack@ziprecruiter":false}}' > "$SETTINGS"
+  _write_manifest "ziprecruiter" "slack" "19b5ada4caa6" '{"name":"slack"}'
+  _mock_claude_enabling "$SETTINGS" ""
+
+  run "$SCRIPT" "$CLAUDE_BIN" "slack@ziprecruiter" "$CACHE_ROOT" "$SETTINGS" "false"
+
+  [ "$status" -eq 0 ]
+  # Only the pre-existing cached version — no new content was pulled.
+  run bash -c 'ls "$CACHE_ROOT/ziprecruiter/slack" | tr "\n" " "'
+  [ "$output" = "19b5ada4caa6 " ]
+  [ "$(_enabled_of "slack@ziprecruiter")" = "false" ]
+}
+
+@test "declared TRUE is asserted too: a disabled key is restored to true" {
+  # The restore asserts the DECLARED value, in both directions — it is not a
+  # blanket disable. install fails / update succeeds here, so nothing in the CLI
+  # path enables, and only the restore can produce `true`.
+  echo '{"enabledPlugins":{"beads@beads-marketplace":false}}' > "$SETTINGS"
+  _mock_claude 1 0 "already installed" ""
+
+  run "$SCRIPT" "$CLAUDE_BIN" "beads@beads-marketplace" "$CACHE_ROOT" "$SETTINGS" "true"
+
+  [ "$status" -eq 0 ]
+  [ "$(_enabled_of "beads@beads-marketplace")" = "true" ]
+  [[ "$output" == *"beads@beads-marketplace enablement restored to true at user scope (was false)"* ]]
+}
+
+@test "declared value is asserted even when install AND update both fail" {
+  # The Nix declaration is authoritative regardless of how the CLI fared: a
+  # partially-applied install must not leave the plugin enabled.
+  echo '{"enabledPlugins":{"jvm@ziprecruiter":true}}' > "$SETTINGS"
+  _mock_claude 1 1 "install boom" "update boom"
+
+  run --separate-stderr "$SCRIPT" "$CLAUDE_BIN" "jvm@ziprecruiter" "$CACHE_ROOT" "$SETTINGS" "false"
+
+  [ "$status" -eq 0 ]
+  [[ "$stderr" == *"WARNING jvm@ziprecruiter install/update failed"* ]]
+  [ "$(_enabled_of "jvm@ziprecruiter")" = "false" ]
+}
+
+@test "restore creates an absent key and touches nothing else; second run is a silent no-op" {
+  # Idempotence plus blast radius: only .enabledPlugins[<spec>] may change.
+  # extraKnownMarketplaces matters specifically — `marketplace add` writes it
+  # into this same file, so the restore must not fight register-marketplace.
+  cat > "$SETTINGS" <<'JSON'
+{
+  "model": "opus[1m]",
+  "enabledPlugins": { "other@m": true },
+  "extraKnownMarketplaces": {
+    "ziprecruiter": { "source": { "source": "directory", "path": "/Volumes/ziprecruiter/pristine" } }
+  }
+}
+JSON
+  _mock_claude_enabling "$SETTINGS" ""
+
+  run "$SCRIPT" "$CLAUDE_BIN" "findev@ziprecruiter" "$CACHE_ROOT" "$SETTINGS" "false"
+  [ "$status" -eq 0 ]
+  [ "$(_enabled_of "findev@ziprecruiter")" = "false" ]
+  [[ "$output" == *"restored to false at user scope (was true)"* ]]
+
+  # Untouched neighbours.
+  [ "$(jq -r '.model' "$SETTINGS")" = "opus[1m]" ]
+  [ "$(_enabled_of "other@m")" = "true" ]
+  [ "$(jq -r '.extraKnownMarketplaces.ziprecruiter.source.path' "$SETTINGS")" = "/Volumes/ziprecruiter/pristine" ]
+
+  # Second run: the install enables again, the restore corrects again, and the
+  # file converges on the same content.
+  local before after
+  before="$(jq -S . "$SETTINGS")"
+  run "$SCRIPT" "$CLAUDE_BIN" "findev@ziprecruiter" "$CACHE_ROOT" "$SETTINGS" "false"
+  [ "$status" -eq 0 ]
+  after="$(jq -S . "$SETTINGS")"
+  [ "$before" = "$after" ]
+  [ ! -f "$SETTINGS.tmp" ]
+}
+
+@test "already-declared value: restore stays silent (no spurious activation line)" {
+  # A plugin whose install did not move enablement must produce no output — the
+  # restore line is a signal that drift was corrected, so it must not cry wolf.
+  echo '{"enabledPlugins":{"beads@beads-marketplace":true}}' > "$SETTINGS"
+  _mock_claude_enabling "$SETTINGS" ""
+
+  run "$SCRIPT" "$CLAUDE_BIN" "beads@beads-marketplace" "$CACHE_ROOT" "$SETTINGS" "true"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"enablement restored"* ]]
+  [ "$(_enabled_of "beads@beads-marketplace")" = "true" ]
+}
+
+@test "3-arg form is unchanged: no settings file is written or required" {
+  # Back-compat for a plugin with no enabledPlugins declaration: the script must
+  # leave enablement entirely to Claude Code.
+  echo '{"enabledPlugins":{"beads@beads-marketplace":false}}' > "$SETTINGS"
+  _mock_claude_enabling "$SETTINGS" ""
+
+  run "$SCRIPT" "$CLAUDE_BIN" "beads@beads-marketplace" "$CACHE_ROOT"
+
+  [ "$status" -eq 0 ]
+  # Only the mock (i.e. Claude Code itself) wrote enablement.
+  [ "$(_enabled_of "beads@beads-marketplace")" = "true" ]
+  [[ "$output" != *"enablement restored"* ]]
+}
+
+@test "missing settings file: non-fatal WARNING, no crash" {
+  _mock_claude 0 0 "" ""
+
+  run --separate-stderr "$SCRIPT" "$CLAUDE_BIN" "beads@beads-marketplace" "$CACHE_ROOT" \
+    "$TMP/absent/settings.json" "false"
+
+  [ "$status" -eq 0 ]
+  [[ "$stderr" == *"enablement not restored: no settings file"* ]]
+}
+
+@test "a half-supplied pair (4 args) is a usage error, not a silent skip" {
+  _mock_claude 0 0 "" ""
+
+  run --separate-stderr "$SCRIPT" "$CLAUDE_BIN" "beads@beads-marketplace" "$CACHE_ROOT" "$SETTINGS"
+
+  [ "$status" -eq 64 ]
+  [[ "$stderr" == *"usage:"* ]]
+  # The CLI was never invoked.
+  [ ! -s "$CALLS" ]
+}
+
+@test "a non-boolean declared value is a usage error" {
+  _mock_claude 0 0 "" ""
+
+  run --separate-stderr "$SCRIPT" "$CLAUDE_BIN" "beads@beads-marketplace" "$CACHE_ROOT" \
+    "$SETTINGS" "yes"
+
+  [ "$status" -eq 64 ]
+  [[ "$stderr" == *"must be 'true' or 'false'"* ]]
+  [ ! -s "$CALLS" ]
+}
+
+@test "an EMPTY declared value is a usage error, not a degraded restore" {
+  # Rejected up front rather than reaching jq as invalid JSON, where it would
+  # surface as a non-fatal warning and hide the caller bug.
+  _mock_claude 0 0 "" ""
+
+  run --separate-stderr "$SCRIPT" "$CLAUDE_BIN" "beads@beads-marketplace" "$CACHE_ROOT" \
+    "$SETTINGS" ""
+
+  [ "$status" -eq 64 ]
+  [[ "$stderr" == *"must be 'true' or 'false'"* ]]
+  [ ! -s "$CALLS" ]
 }

@@ -446,13 +446,40 @@ in
           )}
         ''}
 
+        # Each install is followed, INSIDE the install script, by a re-assert of
+        # this plugin's Nix-declared `enabledPlugins` value — because
+        # `claude plugin install --scope user` sets `.enabledPlugins[spec] =
+        # true` on every successful invocation and so silently overrides the
+        # value replace-managed-keys wrote at the top of this same activation
+        # (pg2-4q1qk; measured behavior and the reasoning are in the install
+        # script's header). The settings path + declared value are passed only
+        # for a plugin that HAS a declaration; a plugin listed for install with
+        # no `enabledPlugins` entry keeps Claude Code's own default. Guarded by
+        # checks.<system>.test-claude-settings-activation-enablement-restore,
+        # which asserts on the generated invocations.
         ${lib.concatStringsSep "\n" (
-          map (plugin: ''
-            ${installPluginScript}/bin/claude-settings-install-plugin \
-              "$CLAUDE" \
-              "${plugin}" \
-              "$HOME/.claude/plugins/cache"
-          '') cfg.plugins
+          map (
+            plugin:
+            let
+              # Assembled as a LIST joined with an explicit escaped line
+              # continuation rather than written as an indented Nix string with
+              # a conditional tail: nixfmt reflows the interior indentation of a
+              # multi-line `''…''`, so the generated shell kept shifting. The
+              # arguments are shell-quoted here, once, at the point they are
+              # built.
+              words = [
+                "${installPluginScript}/bin/claude-settings-install-plugin"
+                ''"$CLAUDE"''
+                ''"${plugin}"''
+                ''"$HOME/.claude/plugins/cache"''
+              ]
+              ++ lib.optionals (builtins.hasAttr plugin cfg.enabledPlugins) [
+                ''"$SETTINGS"''
+                ''"${lib.boolToString cfg.enabledPlugins.${plugin}}"''
+              ];
+            in
+            lib.concatStringsSep " \\\n  " words
+          ) cfg.plugins
         )}
       ''}
     '';

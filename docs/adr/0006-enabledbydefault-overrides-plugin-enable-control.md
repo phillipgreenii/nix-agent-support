@@ -58,6 +58,20 @@ Consumer must know to use `overrides` rather than trying to remove from the list
 The `enabledPlugins` value written to `settings.json` is computed at evaluation time,
 so there is no runtime indirection.
 
+> **Correction 2026-08-13 (bead pg2-4q1qk):** "computed at evaluation time" is true, but
+> it does NOT mean the computed value is what ends up in `settings.json`. Claude Code
+> rewrites the same key at runtime: `claude plugin install --scope <scope>` sets
+> `.enabledPlugins["<spec>"] = true` in that scope's `settings.json` on every successful
+> invocation — measured against claude 2.1.220 and 2.1.228 on a fresh install, on an
+> already-installed same-version install, and on a real version bump (`plugin update`
+> never touches enablement, and there is no install-without-enabling flag). Since the
+> activation writes the declared set BEFORE its per-plugin install loop, a resolved
+> `false` was silently reverted to `true` on every apply that installed the plugin — so
+> a plugin declared installed-but-disabled, the whole point of resolving to `false`, was
+> enabled everywhere instead. `claude-settings-install-plugin` now re-asserts the
+> declared value for the spec after its install/update pair; see that script's header
+> and `checks.<system>.test-claude-settings-activation-enablement-restore`.
+
 ## Related Decisions
 
 Superseded in part by ADR-0017 (Static nix-built marketplace for agent-support local
