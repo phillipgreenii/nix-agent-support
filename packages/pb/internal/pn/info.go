@@ -29,8 +29,11 @@ type Repo struct {
 	AppliedRef string `json:"applied_ref"`
 	Dirty      bool   `json:"dirty"`
 	// AppliedStateSchema is pn's applied-state schema version for this repo's
-	// record. 0 means the record predates locked_revs — so TerminalInput and
-	// LockedRev carry NO information and MUST NOT be read as negative evidence.
+	// record. Each value gates the fields the record can speak to at all: below 2
+	// there is no locked_revs, so TerminalInput and LockedRev carry NO information;
+	// below 3 there is no override set, so Overridden carries none. An absent field
+	// MUST NOT be read as negative evidence — which way each absence leans is
+	// decided in gate.applyBuiltGatedCommit, and the two lean OPPOSITE ways.
 	AppliedStateSchema int `json:"applied_state_schema"`
 	// TerminalInput reports whether the apply consumed this repo as a flake input
 	// of the terminal. Meaningful only when AppliedStateSchema >= 2.
@@ -38,7 +41,19 @@ type Repo struct {
 	// LockedRev is the rev the TERMINAL's flake.lock pinned for this repo at that
 	// apply — recorded WITH the apply, so it is not disturbed by a later relock.
 	// Empty while TerminalInput is true means the apply could not establish it.
+	//
+	// It is the rev the built system carries ONLY when Overridden is false; for an
+	// overridden input the build read the local clone at eval-time HEAD, which
+	// normally LEADS this rev.
 	LockedRev string `json:"locked_rev"`
+	// Overridden reports whether that apply passed `--override-input` for this repo
+	// — i.e. built it from a LOCAL clone rather than resolving it through the
+	// terminal's flake.lock. Meaningful only when AppliedStateSchema >= 3.
+	//
+	// True implies TerminalInput (both derive from the terminal's lock edges; an
+	// override additionally needs the clone present), so it never widens the set of
+	// repos the lock condition considers — it only removes repos from it.
+	Overridden bool `json:"overridden"`
 }
 
 type Info struct {

@@ -72,15 +72,25 @@ pb gate check [--dry-run] [--strict] [--last-n N] [--stale-handler convert-to-hu
 - **Condition 1 — an apply happened:** the gated patch-id appears in the scan range.
   When a gate's `applied_baseline` is an ancestor of the repo's `applied_ref`, scans
   `baseline..applied_ref`; otherwise scans the last `--last-n` commits (default 100).
-- **Condition 2 — that apply's lock contained the commit:** for a repo the terminal pins
-  as a flake input, the gated commit must be an ancestor of `locked_rev` — the rev the
-  terminal's `flake.lock` pinned **at that apply**, published by `pn workspace info`
-  (`phillipg-nix-repo-base` ADR 0025). Condition 1 alone only proves an apply ran over a
-  checkout holding the change; a commit never pushed and relocked is not in the built
-  system. So such a gate needs **push + relock + apply**, and until then it is reported in
-  `blocked` with the remedy. Not applied to the terminal repo (built from its local
-  directory, so no `locked_rev`) nor to an applied-state record written by a `pn`
-  predating `locked_revs` (`applied_state_schema < 2`).
+- **Condition 2 — that apply's lock contained the commit:** for a repo the apply resolved
+  **through the terminal's `flake.lock`**, the gated commit must be an ancestor of
+  `locked_rev` — the rev that lock pinned **at that apply**, published by
+  `pn workspace info` (`phillipg-nix-repo-base` ADR 0025). Condition 1 alone only proves an
+  apply ran over a checkout holding the change; a commit never pushed and relocked is not
+  in such a build. So such a gate needs **push + relock + apply**, and until then it is
+  reported in `blocked` with the remedy.
+
+  It is **SKIPPED** for a repo the apply **OVERRODE** (`overridden` true, requires
+  `applied_state_schema >= 3`): `pn workspace apply` passes
+  `--override-input <alias> git+file://<clone>` for every terminal lock edge whose clone is
+  present, so nix built that repo from the LOCAL CLONE at eval-time HEAD and never consulted
+  the lock — condition 1 is the whole truth for it. Also skipped for the terminal repo
+  (built from its local directory, so no `locked_rev`) and for a record written by a `pn`
+  predating `locked_revs` (`applied_state_schema < 2`). A record from a `pn` that predates
+  the override set (`applied_state_schema == 2`) is read as NOT overridden, so condition 2
+  is **enforced** — fail-closed, and the `blocked` reason says so. See ADR 0046's amendment
+  "condition 2 is CONDITIONAL on whether the apply OVERRODE the repo".
+
 - **Dirty repos:** scanned leniently by default (committed history only); `--strict` skips
   them.
 - **`--dry-run`** mutates nothing (reports `would_resolve` / would-be stale actions).

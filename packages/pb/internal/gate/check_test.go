@@ -41,6 +41,19 @@ func lockInfoJSON(lockedRev string) string {
 		 "applied_state_schema":2,"terminal_input":true,"locked_rev":%q}]}`, lockedRev)
 }
 
+// overrideInfoJSON is lockInfoJSON with the pn applied-state schema and the
+// `overridden` flag under test, so a single fixture can express every state of the
+// override record: schema 3 + overridden (built from the local clone), schema 3 +
+// not overridden (genuinely lock-built), and schema 2 (a pn that recorded no
+// override set at all — pass overridden=false, since such a record cannot carry the
+// field).
+func overrideInfoJSON(schema int, lockedRev string, overridden bool) string {
+	return fmt.Sprintf(`{"wsid":"home","root":"/ws","terminal":"m","repos":[
+		{"name":"repo-a","path":"/ws/repo-a","applied_ref":"tip","dirty":false,
+		 "applied_state_schema":%d,"terminal_input":true,"locked_rev":%q,"overridden":%t}]}`,
+		schema, lockedRev, overridden)
+}
+
 // scriptResolvable scripts the `bd gate resolve g-1` call so it SUCCEEDS. Every
 // must-not-resolve test calls this, and that is load-bearing rather than
 // decorative: leaving it unscripted makes FakeRunner error on the resolve, which
@@ -329,6 +342,158 @@ func TestApplyBuiltGatedCommit_schemaGuardIgnoresLockFields(t *testing.T) {
 	}
 	if len(ancestorProbes(f)) != 0 {
 		t.Fatalf("schema 0 must not probe the lock at all; probes = %v", ancestorProbes(f))
+	}
+}
+
+// TestCheck_overriddenInputResolvesWithoutTheLock is THE regression test for the
+// pg2-14yqh operator ruling (option (c)), and the case the whole change exists for.
+// repo-a IS a terminal flake input, but the apply passed `--override-input` for it,
+// so nix built it from the LOCAL CLONE at eval-time HEAD and never consulted the
+// lock. locked_rev therefore trails what was built and the gated commit is not an
+// ancestor of it — yet the change IS in the running system, so the gate MUST
+// resolve. Condition 1 already proves the apply ran over a checkout holding it.
+//
+// Against the pre-change code (condition 2 unconditional) this BLOCKS, which is the
+// defect: /drain-beads lands locally and deliberately does not push (rule U-5), so
+// every verification bead it gates sat blocked until someone pushed and relocked.
+//
+// The probe assertion is the load-bearing half. Without it the test would still pass
+// if condition 2 ran and happened to succeed; asserting that the lock is never
+// consulted pins the SKIP rather than a lucky verdict.
+func TestCheck_overriddenInputResolvesWithoutTheLock(t *testing.T) {
+	f := run.NewFakeRunner()
+	f.AddResponse("pn", []string{"workspace", "info", "--json"},
+		run.Result{Stdout: overrideInfoJSON(3, "locked1", true)}, nil)
+	scriptGateScan(f, "gatedsha")
+	scriptResolvable(f)
+	// Scripted to FAIL: if condition 2 were still applied, the gate would block.
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "merge-base", "--is-ancestor", "gatedsha", "locked1"},
+		run.Result{ExitCode: 1}, fmt.Errorf("not ancestor"))
+
+	out := runCheck(t, f)
+	if len(out.Resolved) != 1 || out.Resolved[0] != "g-1" {
+		t.Fatalf("resolved=%v blocked=%+v skipped=%+v; an OVERRIDDEN input is built from the local clone, "+
+			"so condition 1 is the whole truth for it and the gate must resolve",
+			out.Resolved, out.Blocked, out.Skipped)
+	}
+	if probed(f, "gatedsha", "locked1") {
+		t.Fatalf("condition 2 must be SKIPPED for an overridden input, not merely satisfied; probes = %v",
+			ancestorProbes(f))
+	}
+}
+
+// TestCheck_lockBuiltInputStillBlocks is the other side of the ruling: it is
+// CONDITIONAL, not deleted. A terminal input the apply did NOT override really was
+// resolved through the lock, so its locked rev really is what the build carries and
+// condition 2 MUST still block a commit that is absent from it. Reached in practice
+// when the repo has no clone for nix to be pointed at.
+//
+// This is the test that fails if the change is implemented as "drop condition 2".
+func TestCheck_lockBuiltInputStillBlocks(t *testing.T) {
+	f := run.NewFakeRunner()
+	f.AddResponse("pn", []string{"workspace", "info", "--json"},
+		run.Result{Stdout: overrideInfoJSON(3, "locked1", false)}, nil)
+	scriptGateScan(f, "gatedsha")
+	scriptResolvable(f)
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "merge-base", "--is-ancestor", "gatedsha", "locked1"},
+		run.Result{ExitCode: 1}, fmt.Errorf("not ancestor"))
+
+	out := runCheck(t, f)
+	if len(out.Resolved) != 0 || len(out.Blocked) != 1 {
+		t.Fatalf("resolved=%v blocked=%+v; a repo the apply did NOT override was built from the lock, so "+
+			"condition 2 still applies", out.Resolved, out.Blocked)
+	}
+	if !probed(f, "gatedsha", "locked1") {
+		t.Fatalf("a lock-built input must still be tested against its recorded locked rev; probes = %v",
+			ancestorProbes(f))
+	}
+	if strings.Contains(out.Blocked[0].Reason, "schema") {
+		t.Fatalf("blocked reason = %q; the schema caveat belongs ONLY on a record that cannot say whether it "+
+			"overrode the input — here the record says so explicitly", out.Blocked[0].Reason)
+	}
+}
+
+// TestCheck_preOverrideRecordFailsClosed is the DOCUMENTED FALLBACK for a record
+// written by an older pn: schema 2 carries locked_revs but no override set, so
+// `overridden` is absent — indistinguishable, on the wire, from "recorded, and
+// genuinely lock-built". The fallback leans FAIL-CLOSED: condition 2 is enforced.
+//
+// This is deliberately the OPPOSITE lean from the schema < 2 fallback, and the
+// asymmetry is the point. At schema < 2 condition 2 is UNEVALUABLE and skipping is
+// the only alternative to blocking every gate in the workspace forever. At schema 2
+// it is fully evaluable and its verdict is determinate, so leaning open would ASSERT
+// an override the record does not evidence — and a false "the change shipped" is the
+// pg2-ft60a harm, while a false "still blocked" costs one stale-handler escalation.
+// The window is bounded to one apply: the next apply rewrites the record at schema 3.
+//
+// The reason string MUST name the assumption, or this conservative verdict is
+// indistinguishable from a wrong one.
+func TestCheck_preOverrideRecordFailsClosed(t *testing.T) {
+	f := run.NewFakeRunner()
+	f.AddResponse("pn", []string{"workspace", "info", "--json"},
+		run.Result{Stdout: overrideInfoJSON(2, "locked1", false)}, nil)
+	scriptGateScan(f, "gatedsha")
+	scriptResolvable(f)
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "merge-base", "--is-ancestor", "gatedsha", "locked1"},
+		run.Result{ExitCode: 1}, fmt.Errorf("not ancestor"))
+
+	out := runCheck(t, f)
+	if len(out.Resolved) != 0 || len(out.Blocked) != 1 {
+		t.Fatalf("resolved=%v blocked=%+v; a record that cannot say whether the apply overrode the input "+
+			"must fail CLOSED", out.Resolved, out.Blocked)
+	}
+	if !strings.Contains(out.Blocked[0].Reason, "does not record whether the apply OVERRODE this input") {
+		t.Fatalf("blocked reason = %q; it must name the fail-closed assumption, or a conservative verdict "+
+			"reads as a wrong one", out.Blocked[0].Reason)
+	}
+}
+
+// TestApplyBuiltGatedCommit_overriddenIgnoredBelowSchema3 exercises the schema guard
+// on the override field alone, which no end-to-end Check test can do: a pn predating
+// the override set emits no `overridden` key, so in practice the guard and the plain
+// `!repo.Overridden` test agree and either would enforce.
+//
+// The guard states the policy the agreement hides, and it is the fail-OPEN direction,
+// so it is the one that must not be reachable by accident: a record reporting schema
+// 2 carries NO override information, so an `overridden` beside it is not evidence and
+// MUST NOT skip condition 2. Without the guard, any producer that emitted the field
+// at an older schema — or a hand-edited record — would silently disable the condition.
+func TestApplyBuiltGatedCommit_overriddenIgnoredBelowSchema3(t *testing.T) {
+	f := run.NewFakeRunner()
+	d := checkDeps(f, stubDiscover("/ws"))
+	// Schema 2 alongside an override claim the record cannot legitimately carry. The
+	// is-ancestor probe is unscripted, so it fails ⇒ condition 2 blocks if enforced.
+	repo := pn.Repo{
+		Name: "repo-a", Path: "/ws/repo-a", AppliedRef: "tip",
+		AppliedStateSchema: 2, TerminalInput: true, LockedRev: "locked1", Overridden: true,
+	}
+	verdict, reason := d.applyBuiltGatedCommit(context.Background(), repo, []string{"gatedsha"})
+	if verdict != lockMissing {
+		t.Fatalf("verdict = %d (%s), want lockMissing — an override claim below schema %d is not evidence",
+			verdict, reason, pnOverrideRecordSchema)
+	}
+	if !probed(f, "gatedsha", "locked1") {
+		t.Fatalf("the lock must still be consulted; probes = %v", ancestorProbes(f))
+	}
+}
+
+// TestApplyBuiltGatedCommit_overriddenSkipsBeforeTheEmptyRevFailClosed pins the
+// BRANCH ORDER, which is not interchangeable. An overridden input whose locked rev
+// could not be established (a follows-only input, an unreadable flake.lock) must
+// SKIP, not fail closed: nothing was built from that rev, so its absence has no
+// bearing on whether the change shipped. Order the empty-rev check first and every
+// such gate becomes permanently unresolvable while the change is demonstrably in the
+// running system.
+func TestApplyBuiltGatedCommit_overriddenSkipsBeforeTheEmptyRevFailClosed(t *testing.T) {
+	f := run.NewFakeRunner()
+	d := checkDeps(f, stubDiscover("/ws"))
+	repo := pn.Repo{
+		Name: "repo-a", Path: "/ws/repo-a", AppliedRef: "tip",
+		AppliedStateSchema: 3, TerminalInput: true, LockedRev: "", Overridden: true,
+	}
+	if verdict, reason := d.applyBuiltGatedCommit(context.Background(), repo, []string{"gatedsha"}); verdict != lockSatisfied {
+		t.Fatalf("verdict = %d (%s), want lockSatisfied — an unresolvable rev the build never used cannot "+
+			"make the change unprovable", verdict, reason)
 	}
 }
 

@@ -42,6 +42,44 @@ func TestInfo_parsesBareAndFields(t *testing.T) {
 	}
 }
 
+// TestInfo_parsesAppliedStateProjection pins the WIRE NAMES of pn's applied-state
+// projection, which is the cross-repo seam this client exists to consume: the JSON
+// keys are produced by phillipg-nix-repo-base (ADR 0025 and its "what the apply
+// overrode" amendment) and a rename or typo on either side is invisible to the
+// compiler. `overridden` matters most, because it is what makes gate condition 2
+// conditional (bead pg2-14yqh) — a key that does not bind reads as false, which
+// silently restores the unconditional behaviour the ruling replaced.
+func TestInfo_parsesAppliedStateProjection(t *testing.T) {
+	f := run.NewFakeRunner()
+	f.AddResponse("pn", []string{"workspace", "info", "--json"}, run.Result{Stdout: `{
+	  "wsid": "home", "root": "/ws", "terminal": "machine",
+	  "repos": [
+	    {"name": "overridden", "path": "/ws/overridden", "applied_ref": "aaa", "dirty": false,
+	     "applied_state_schema": 3, "terminal_input": true, "locked_rev": "lockrev", "overridden": true},
+	    {"name": "lockbuilt", "path": "/ws/lockbuilt", "applied_ref": "bbb", "dirty": false,
+	     "applied_state_schema": 3, "terminal_input": true, "locked_rev": "lockrev", "overridden": false}
+	  ]}`}, nil)
+	info, err := Client{R: f}.Info(context.Background(), "/ws")
+	if err != nil {
+		t.Fatalf("Info: %v", err)
+	}
+	for _, want := range []Repo{
+		{Name: "overridden", AppliedStateSchema: 3, TerminalInput: true, LockedRev: "lockrev", Overridden: true},
+		{Name: "lockbuilt", AppliedStateSchema: 3, TerminalInput: true, LockedRev: "lockrev", Overridden: false},
+	} {
+		got, ok := info.RepoByName(want.Name)
+		if !ok {
+			t.Fatalf("repo %q missing", want.Name)
+		}
+		if got.AppliedStateSchema != want.AppliedStateSchema || got.TerminalInput != want.TerminalInput ||
+			got.LockedRev != want.LockedRev || got.Overridden != want.Overridden {
+			t.Errorf("%s: schema=%d terminal_input=%v locked_rev=%q overridden=%v; want %d/%v/%q/%v",
+				want.Name, got.AppliedStateSchema, got.TerminalInput, got.LockedRev, got.Overridden,
+				want.AppliedStateSchema, want.TerminalInput, want.LockedRev, want.Overridden)
+		}
+	}
+}
+
 func TestInfo_tolerablesEnvelope(t *testing.T) {
 	f := run.NewFakeRunner()
 	f.AddResponse("pn", []string{"workspace", "info", "--json"},

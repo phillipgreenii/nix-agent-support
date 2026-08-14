@@ -75,8 +75,9 @@ concurrent agent draining `bd ready` can grab it in the gap.
 
 The bead stays out of `bd ready` until someone runs `pn workspace apply`; the
 apply's post-hook runs `pb gate check`, which resolves the gate once the change's
-patch-id is in the applied history AND that apply's flake lock contained the commit
-(see rule 5). Then the bead surfaces as ordinary work.
+patch-id is in the applied history AND — only for an input that apply resolved
+through the terminal's flake lock — that lock contained the commit (see rule 5).
+Then the bead surfaces as ordinary work.
 
 ## Rules
 
@@ -94,14 +95,24 @@ patch-id is in the applied history AND that apply's flake lock contained the com
    (`pb gate check` converts it to a `human` bead by default). If you expect the
    change to be squash-merged upstream, prefer a plain `bd dep`/human follow-up
    over a `pn:applied` gate.
-5. **A flake-pinned repo needs push + relock, not just an apply.** Where the
-   workspace terminal pins the repo as a `github:` flake input, an apply builds it
-   from the terminal's `flake.lock`, so a commit that is only on local `main` is NOT
-   in the built system. `pb gate check` requires the gated commit to be in the rev
-   that apply's lock named, so the gate stays blocked (with a reason) until the
-   commit is pushed, the terminal relocked, and an apply run. This is deliberate: the
-   alternative released verification beads against code no build had seen. Only the
-   TERMINAL repo resolves on the apply alone.
+5. **An apply is enough when the apply OVERRODE the repo; only a genuinely
+   lock-built input needs push + relock.** `pn workspace apply` passes
+   `--override-input <alias> git+file://<clone>` for every workspace repo the
+   terminal declares as a flake input whose clone is on disk, so nix builds it from
+   the LOCAL CLONE at eval-time HEAD, not from the terminal's `flake.lock`.
+   `pb gate check` therefore SKIPS its lock condition for such a repo and the gate
+   resolves on the apply alone — as it always has for the TERMINAL repo. So a
+   locally-landed, unpushed commit DOES resolve its gate at the next apply, which
+   matters because `/drain-beads` lands locally and deliberately does not push.
+
+   The lock condition still applies where the build really did resolve through the
+   lock (no clone for nix to be pointed at), and — fail-closed — to an applied-state
+   record written by a `pn` predating the override record
+   (`applied_state_schema == 2`): there the gate stays blocked with a reason naming
+   that assumption until one more apply re-records it. A gate blocked long enough
+   still reaches stale-handling. Operator ruling of 2026-08-14 on bead `pg2-14yqh`;
+   see ADR 0046's amendment "condition 2 is CONDITIONAL on whether the apply
+   OVERRODE the repo".
 
 ## When NOT to gate
 
