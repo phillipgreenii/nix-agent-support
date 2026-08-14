@@ -211,26 +211,72 @@ func Refused(module, reason string) (RuleResult, error) {
 // Any other inner decision (Approve/Ask/Reject) IS an opinion and is forwarded
 // verbatim as a terminal verdict, exactly as before.
 //
-// This is for a rule that adopts the inner verdict WHOLESALE. A rule that FOLDS the
-// inner verdict with its own (envvars) must fold the RuleResult first — inside a
-// MostRestrictive fold NoOpinion is the floor and an error has no representation —
-// and apply this translation only to the folded result.
+// AN INNER REFUSAL IS FORWARDED AS A REFUSAL (pg2-ij9sr, the residual ADR 0044 recorded
+// and deferred). ADR 0044 gave the inner NoOpinion a PROVENANCE, which splits the case
+// the paragraph above treats as one:
 //
-// ADR 0044 DELIBERATELY DOES NOT CHANGE THIS FUNCTION'S DECISION BEHAVIOUR, and the
-// restraint is the point rather than an omission. A NoOpinion inner verdict that is a
-// REFUSAL could now be forwarded as ErrRefused instead of ErrNotApplicable, which
-// would be the coherent end state — the outer leaf would keep the inner refusal as a
-// floor instead of dropping it. But nix, docker and kubectl all route through here, so
-// that conversion moves rows in the MORE-restrictive direction across three rules at
-// once, and ADR 0043's Consequences require each such conversion to land separately
-// with its own before/after measurement. It is recorded as follow-up work, not done
-// here. envvars needs the refusal channel for its own fold and so spells its
-// translation out locally rather than borrowing this one.
+//   - EXHAUSTION — no inner rule owned the expression. The forwarding rule has formed no
+//     opinion of its own, so the outer chain must continue with nothing carried over:
+//     ErrNotApplicable, exactly as before.
+//   - REFUSAL — an inner rule, or an engine floor, examined the expression and would not
+//     clear it. That IS a fact about the outer leaf, and dropping it was the same collapse
+//     ADR 0044 exists to fix, one level out: the outer chain would conclude its own
+//     terminal NoOpinion with nothing recording that anything was refused, so the outer
+//     leaf reported an EXHAUSTION — the half a consumer may act on to clear a body. So the
+//     inner verdict is forwarded as ErrRefused, WHOLE: Module, Reason and Provenance ride
+//     along, which is what makes the refusing rule's identity survive the hop instead of
+//     being re-attributed to the delegating rule.
+//
+// The two MUST NOT collapse into one another in EITHER direction, and the test here is
+// written so only an EXPLICIT exhaustion claim takes the not-applicable branch. That is the
+// fail-safe orientation: ProvenanceRefusal is the zero value, and a genuine inner FAILURE
+// also withdraws the exhaustion claim (engine.Evaluate's sawFailure), so an inner chain
+// that broke is floored rather than reported as "nobody refused".
+//
+// A refusal can only make the outer leaf MORE restrictive: the outer engine folds the
+// floor and keeps going, so a later rule's Ask/Reject still wins and only its Approve is
+// demoted. Nothing is shadowed.
+//
+// THIS IS FOR A RECURSION BOUNDARY ONLY — the verdict of Evaluator.EvaluateExpression,
+// which the engine always stamps with a Provenance. A rule translating its OWN FOLD result
+// must use FromFold instead; see that function for why sharing one translation stopped
+// being possible the moment a refusal became forwardable.
 func FromRecursion(inner RuleResult) (RuleResult, error) {
-	if inner.Decision == NoOpinion {
+	if inner.Decision != NoOpinion {
+		return inner, nil
+	}
+	if inner.Provenance == ProvenanceExhaustion {
 		return NotApplicable()
 	}
-	return inner, nil
+	return Refuse(inner)
+}
+
+// FromFold translates a rule's OWN FOLD RESULT into the (RuleResult, error) pair a
+// RuleModule must return. It is the translation FromRecursion performed before pg2-ij9sr,
+// split out under its own name because the two inputs are DIFFERENT KINDS OF THING and
+// only one of them can carry a refusal.
+//
+// A fold's NoOpinion is the fold's IDENTITY — "nothing in this leaf was mine" — and it
+// carries no engine-assigned Provenance at all. Its zero value is ProvenanceRefusal only
+// because the seed literal declares nothing, which is the correct fail-safe default for a
+// VERDICT but is emphatically not a claim that anything was examined. So the identity MUST
+// become ErrNotApplicable, and routing it through FromRecursion after pg2-ij9sr would read
+// that zero value as a refusal and floor every leaf the rule folds over. For envvars —
+// which reaches its identity for every ordinary `A=1 cmd` AND for every Bash leaf carrying
+// no assignment at all — that is every Bash command in the corpus.
+//
+// A rule that folds its own verdicts already knows, separately, whether anything WAS
+// examined and refused (envvars' `refused` flag) and returns hookio.Refuse itself in that
+// case. That is the ADR 0044 division of labour, and it is why this function never has to
+// guess: by the time it is called, the refusal case has already been taken.
+//
+// An Approve/Ask/Reject fold result IS an opinion and is forwarded verbatim as a terminal
+// verdict, the same as in FromRecursion.
+func FromFold(folded RuleResult) (RuleResult, error) {
+	if folded.Decision == NoOpinion {
+		return NotApplicable()
+	}
+	return folded, nil
 }
 
 type RuleResult struct {

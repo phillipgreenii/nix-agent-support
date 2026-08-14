@@ -248,3 +248,165 @@ func FuzzProvenanceFoldIsConservativeAndOrderIndependent(f *testing.F) {
 		}
 	})
 }
+
+// TestADR0044_FromRecursionForwardsAnInnerRefusal is pg2-ij9sr's core assertion: the
+// recursion boundary no longer flattens an inner refusal into the outer chain's "not my
+// business".
+//
+// WHY IT IS THE SAME DEFECT ADR 0044 FIXES, one level out. Before this, a rule that
+// delegated (nix, docker, kubectl) dropped the inner floor, so the outer chain concluded
+// its own terminal NoOpinion with NOTHING recording that anything had been refused — and
+// the outer leaf therefore reported an EXHAUSTION, which is the half a consumer may act on
+// to clear a body. Measured on this tree: `nix develop -c "git clean -fd"` classified as an
+// exhaustion before and as a refusal after.
+//
+// THE TWO MUST NOT COLLAPSE IN EITHER DIRECTION, so both directions are asserted, and the
+// exhaustion row is not a formality: forwarding an exhaustion as a refusal would floor
+// every delegated leaf whose inner expression nobody models.
+//
+// IDENTITY SURVIVES THE HOP. The forwarded floor keeps the INNER rule's Module and Reason
+// rather than being re-attributed to the delegating rule — that is what makes a trace read
+// "safe-commands refused this" instead of "nix refused this", and it is the acceptance
+// criterion's "preserving the refusing rule's identity".
+func TestADR0044_FromRecursionForwardsAnInnerRefusal(t *testing.T) {
+	inner := RuleResult{
+		Decision: NoOpinion,
+		Reason:   "safe-commands: rm references non-writable path /etc (deferred to claude-code)",
+		Module:   "safe-commands",
+		// Provenance left at its zero value ON PURPOSE: that IS ProvenanceRefusal, and the
+		// fail-safe orientation is the point — only an EXPLICIT exhaustion claim may take
+		// the not-applicable branch.
+	}
+	floor, err := FromRecursion(inner)
+	if !errors.Is(err, ErrRefused) {
+		t.Fatalf("inner refusal forwarded as %v, want ErrRefused — the outer chain would drop the floor and report an EXHAUSTION", err)
+	}
+	if floor.Decision != NoOpinion {
+		t.Errorf("forwarded floor = %s, want abstain", floor.Decision)
+	}
+	if floor.Module != inner.Module || floor.Reason != inner.Reason {
+		t.Errorf("forwarded floor = %+v, want the INNER rule's identity (%q / %q) — re-attributing it to the delegating rule loses the provenance",
+			floor, inner.Module, inner.Reason)
+	}
+	if floor.Provenance != ProvenanceRefusal {
+		t.Errorf("forwarded floor provenance = %s, want refusal", floor.Provenance)
+	}
+	// A refusal must still read as not-applicable to an un-upgraded consumer; that subtype
+	// claim is what keeps every existing errors.Is caller working across this change, and it
+	// is why adr0043_test.go's FromRecursion test passes UNMODIFIED.
+	if !errors.Is(err, ErrNotApplicable) {
+		t.Error("forwarded refusal does not match ErrNotApplicable; the outer engine would file it as a rule FAILURE")
+	}
+
+	// THE OTHER DIRECTION. An inner EXHAUSTION still forwards as an exhaustion: the
+	// delegating rule formed no opinion, so the outer chain continues carrying nothing.
+	exhausted := RuleResult{Decision: NoOpinion, Provenance: ProvenanceExhaustion, Module: "engine"}
+	res, err := FromRecursion(exhausted)
+	if errors.Is(err, ErrRefused) {
+		t.Errorf("inner EXHAUSTION forwarded as a REFUSAL (%+v); every delegated leaf nobody models would be floored", res)
+	}
+	if !errors.Is(err, ErrNotApplicable) {
+		t.Errorf("inner exhaustion forwarded as %v, want ErrNotApplicable", err)
+	}
+	// RuleResult holds a slice, so it is not comparable; the fields that matter are the
+	// ones a consumer could mistake for a verdict.
+	if res.Decision != Approve || res.Reason != "" || res.Module != "" || res.Provenance != ProvenanceRefusal {
+		t.Errorf("inner exhaustion returned %+v, want the zero RuleResult — the engine ignores it and a non-zero value invites a consumer to read it", res)
+	}
+
+	// A genuine inner FAILURE also withdraws the exhaustion claim (engine.Evaluate's
+	// sawFailure), so it arrives here as a refusal-provenance NoOpinion and MUST be floored
+	// rather than dropped. Absence of evidence from a broken rule is not "nobody refused".
+	broken := RuleResult{Decision: NoOpinion, Module: "engine"}
+	if _, err := FromRecursion(broken); !errors.Is(err, ErrRefused) {
+		t.Error("an inner chain in which a rule FAILED was forwarded as not-applicable; a broken resolver could then clear delegated bodies wholesale")
+	}
+
+	// An affirmative inner verdict is still forwarded VERBATIM and TERMINALLY. This is the
+	// half pg2-ij9sr must not disturb: an inner Ask/Reject already stopped the outer chain,
+	// and turning it into a floor would let a later rule's weaker verdict share the outcome.
+	for _, d := range []Decision{Approve, Ask, Reject} {
+		got, err := FromRecursion(RuleResult{Decision: d, Module: "inner", Reason: "r"})
+		if err != nil {
+			t.Errorf("inner %s forwarded with err=%v, want it terminal", d, err)
+		}
+		if got.Decision != d || got.Module != "inner" {
+			t.Errorf("inner %s came back as %+v, want it verbatim", d, got)
+		}
+	}
+}
+
+// TestFromFoldNeverForwardsARefusal guards the ONE way pg2-ij9sr could have broken the
+// whole ruleset, and it is a live regression guard rather than a hypothetical.
+//
+// FromRecursion and FromFold looked interchangeable before a refusal became forwardable,
+// and envvars borrowed FromRecursion for its FOLD result. A fold's NoOpinion is the fold
+// IDENTITY — "nothing in this leaf was mine" — and it carries no engine-assigned
+// provenance: its zero value is ProvenanceRefusal only because the seed literal declares
+// nothing. Read as a refusal, envvars' identity would floor EVERY leaf it folds over, and
+// envvars reaches its identity for every ordinary `A=1 cmd` AND for every Bash leaf with no
+// assignment at all — i.e. every Bash command in the corpus would abstain.
+//
+// So the two translations MUST stay distinguishable, and the property is asserted on the
+// exact input that would have caused it: a NoOpinion with the zero-value provenance.
+func TestFromFoldNeverForwardsARefusal(t *testing.T) {
+	identity := RuleResult{Decision: NoOpinion, Module: "env-vars"}
+	res, err := FromFold(identity)
+	if errors.Is(err, ErrRefused) {
+		t.Fatalf("a fold IDENTITY was forwarded as a refusal (%+v); every leaf the rule folds over would be floored", res)
+	}
+	if !errors.Is(err, ErrNotApplicable) {
+		t.Fatalf("fold identity forwarded as %v, want ErrNotApplicable", err)
+	}
+	if res.Decision != Approve || res.Reason != "" || res.Module != "" {
+		t.Errorf("fold identity returned %+v, want the zero RuleResult", res)
+	}
+
+	// The SAME input through FromRecursion IS a refusal. Asserting the pair together is what
+	// makes the split visible: a future edit that merged the two functions back would fail
+	// here rather than silently at the chain level.
+	if _, err := FromRecursion(identity); !errors.Is(err, ErrRefused) {
+		t.Error("FromRecursion no longer forwards a refusal-provenance NoOpinion; the two translations have been merged the wrong way")
+	}
+
+	// An affirmative fold result is still forwarded verbatim and terminally — the decisive
+	// Ask/Reject envvars produces for an injector variable must not become a floor.
+	for _, d := range []Decision{Approve, Ask, Reject} {
+		got, err := FromFold(RuleResult{Decision: d, Module: "env-vars", Reason: "r"})
+		if err != nil || got.Decision != d {
+			t.Errorf("fold %s = %+v (err=%v), want it forwarded verbatim and terminal", d, got, err)
+		}
+	}
+}
+
+// TestFromRecursionIsNeverLessRestrictiveThanFromFold states pg2-ij9sr's acceptance gate as
+// a RELATION over the two translations, so it survives retuning of either.
+//
+// FromFold is exactly the pre-pg2-ij9sr behaviour, which makes it the BASELINE: for every
+// possible input, the outcome FromRecursion produces must be at least as restrictive as the
+// one the old translation produced. "At least as restrictive" at this boundary means the
+// effective floor contributed to the outer chain, which hookio.Verdict computes — an
+// ErrNotApplicable contributes nothing, a refusal contributes its floor. A row moving the
+// other way would be the approval-widening direction the bead forbids.
+func TestFromRecursionIsNeverLessRestrictiveThanFromFold(t *testing.T) {
+	for _, d := range []Decision{Approve, NoOpinion, Ask, Reject} {
+		for _, p := range []Provenance{ProvenanceRefusal, ProvenanceExhaustion} {
+			in := RuleResult{Decision: d, Provenance: p, Module: "inner", Reason: "r"}
+			// The chain contribution of each translation, read the way the engine reads it:
+			// a bare not-applicable contributes the Approve identity (nothing), anything
+			// else contributes its RuleResult.
+			contribution := func(res RuleResult, err error) Decision {
+				if err != nil && !errors.Is(err, ErrRefused) {
+					return Approve
+				}
+				return res.Decision
+			}
+			recur := contribution(FromRecursion(in))
+			fold := contribution(FromFold(in))
+			if recur < fold {
+				t.Errorf("input %s/%s: FromRecursion contributes %s but the pre-change translation contributed %s — that is the LESS-restrictive direction",
+					d, p, recur, fold)
+			}
+		}
+	}
+}

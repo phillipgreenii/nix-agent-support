@@ -76,6 +76,15 @@ func TestErrNotApplicableIsBareAndUnwrappable(t *testing.T) {
 // chain's exhaustion verdict, so a rule forwarding it has no opinion of its own and
 // the OUTER chain must continue. Getting this backwards makes nix/docker/kubectl/
 // envvars stop the chain where they used to continue it — a decision change.
+//
+// STILL EXACT AFTER pg2-ij9sr, and deliberately UNMODIFIED — but read the NAME as
+// "the outer chain continues", not "the error is literally ErrNotApplicable". That bead
+// made FromRecursion forward an inner REFUSAL as ErrRefused, which matches
+// ErrNotApplicable under errors.Is (the subtype claim in refusalError's doc), so this
+// assertion holds unchanged and its holding is itself the evidence the subtype claim
+// works. The refusal/exhaustion split is asserted in adr0044_test.go's
+// TestADR0044_FromRecursionForwardsAnInnerRefusal; the case here — a NoOpinion with no
+// provenance declared — now takes the refusal branch.
 func TestFromRecursionTranslatesInnerNoOpinionToNotApplicable(t *testing.T) {
 	_, err := FromRecursion(RuleResult{Decision: NoOpinion, Reason: "inner chain exhausted"})
 	if !errors.Is(err, ErrNotApplicable) {

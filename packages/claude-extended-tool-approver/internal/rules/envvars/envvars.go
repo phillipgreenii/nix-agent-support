@@ -365,8 +365,18 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 	//
 	//   - NOTHING HERE WAS MINE (no assignment, or only benign ones): it MUST become
 	//     ErrNotApplicable, or every ordinary `A=1 cmd` would stop the chain and never
-	//     reach safe-commands. hookio.FromRecursion is that translation, and it is the
-	//     same rule the recursing rules (nix/docker/kubectl) apply.
+	//     reach safe-commands. hookio.FromFold is that translation.
+	//
+	//     IT IS *NOT* hookio.FromRecursion, and the distinction became load-bearing in
+	//     pg2-ij9sr. That function now forwards a refusing inner NoOpinion outward as
+	//     ErrRefused, keyed on the Provenance the ENGINE stamps onto a recursion verdict.
+	//     `result` here is this rule's own FOLD IDENTITY, not a recursion verdict: it
+	//     carries no engine-assigned provenance, and its zero value is ProvenanceRefusal
+	//     purely because the seed literal declares nothing. Read as a refusal it would
+	//     floor EVERY leaf that lands on the identity — every ordinary `A=1 cmd`, and every
+	//     Bash leaf with no assignment at all, since those reach this line too. The
+	//     `refused` branch above is this rule's own record of whether anything was actually
+	//     examined, which is why nothing is lost by making this branch unconditional.
 	//   - I EXAMINED A VALUE AND WOULD NOT CLEAR IT: the verdict must survive, but as a
 	//     FLOOR rather than as a terminal verdict. Returning it terminally — which is
 	//     what this rule did until ADR 0044 — SHADOWS every rule after envvars in the
@@ -379,7 +389,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 	if refused {
 		return hookio.Refuse(result)
 	}
-	return hookio.FromRecursion(result)
+	return hookio.FromFold(result)
 }
 
 // evaluateAssignment returns the sub-verdict for a single NAME=VALUE assignment.
