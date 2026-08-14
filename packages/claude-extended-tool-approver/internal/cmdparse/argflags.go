@@ -344,6 +344,41 @@ func equalsFlagName(arg string) (string, bool) {
 	return name, true
 }
 
+// GluedFlagValue returns the VALUE half of an `--flag=value` token, and whether arg
+// is one. It is equalsFlagName's counterpart: that returns the NAME, for deciding
+// whether a table claims the flag; this returns the value, for testing what the
+// command will actually open.
+//
+// IT EXISTS BECAUSE A ONE-TOKEN SPELLING HID A REAL PATH (pg2-cu3ro). A caller that
+// skips any token beginning with `-` — which is the right instinct, since a flag NAME
+// is not a filename — discards the VALUE along with the name when the two are glued
+// by `=`. So the same file, named the same way, was screened in two spellings and
+// auto-approved in a third. Measured on main @6737a0ea:
+//
+//	deny    git commit -F /Users/phillipg/.ssh/id_rsa
+//	deny    git commit --file /Users/phillipg/.ssh/id_rsa
+//	ALLOW   git commit --file=/Users/phillipg/.ssh/id_rsa
+//	ALLOW   cat --file=/Users/phillipg/.ssh/id_rsa
+//
+// The empty value of a bare `--flag=` is reported as NOT present: there is nothing to
+// test, and returning "" would make every such token a candidate path. A bare `-` and
+// a bare `--` contain no `=` and so are not glued forms either.
+//
+// It deliberately accepts SHORT tokens too (`-o=v`), because the cost of testing one
+// extra value is a path that does not match anything, whereas the cost of missing one
+// is this defect. Callers that need the GNU long-option convention specifically can
+// check the `--` prefix themselves.
+func GluedFlagValue(arg string) (string, bool) {
+	if !strings.HasPrefix(arg, "-") {
+		return "", false
+	}
+	_, value, found := strings.Cut(arg, "=")
+	if !found || value == "" {
+		return "", false
+	}
+	return value, true
+}
+
 // bdCommentBodyIndex returns the index of the BODY positional of the
 // `bd comment <id> <body>` PREFIX FORM, or -1 when args are not that form.
 //

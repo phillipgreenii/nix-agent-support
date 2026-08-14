@@ -538,6 +538,26 @@ func firstSecretRef(cmd string, depth int, match candidateMatch) (secretRef, boo
 			}
 		}
 		for _, arg := range secretCandidateArgs(pc) {
+			// AN `--opt=value` TOKEN IS TESTED BY ITS VALUE, NOT SKIPPED WHOLE
+			// (pg2-cu3ro). isFlag below is right that a flag NAME is not a filename,
+			// but `--file=<path>` is ONE argv token, so skipping the token discarded
+			// the path with it and `git commit --file=~/.ssh/id_rsa` measured ALLOW
+			// while both `-F` and the space-separated `--file` measured DENY. The
+			// space form only ever worked because the path was a SEPARATE token that
+			// isFlag does not match, i.e. the coverage was incidental to the spelling.
+			//
+			// This runs AFTER secretCandidateArgs, which is what keeps it from
+			// re-opening the false positives its siblings closed: SkipMessageArgs
+			// already drops a `--reason=<prose>` token whole (its own equalsFlagName
+			// branch), and the grep/rg and jq skippers have already removed their
+			// value-flag operands in both spellings. So a glued token that reaches
+			// here is one no carve-out claims, and its value is a candidate path.
+			if value, glued := cmdparse.GluedFlagValue(arg); glued {
+				if ref, ok := match(value); ok {
+					return ref, true
+				}
+				continue
+			}
 			if isFlag(arg) {
 				continue
 			}
