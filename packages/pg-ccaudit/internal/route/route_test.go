@@ -82,6 +82,33 @@ func TestRoutingPrecedence(t *testing.T) {
 			f:    Finding{Class: classify.ClassSpecificationMiss, Signal: string(candidate.Denial), Occurrences: 2, MainLoop: 2},
 			want: RoutePermissionConfig,
 		},
+		{
+			// pg2-v150u. An UNCLASSIFIED hook refusal must not DEFAULT to RouteHook: the
+			// hook already exists and already fired, which is the only reason there is a
+			// refusal to detect, so "add a hook" is work that is already done and its
+			// preventability of 1.00 would rank a solved problem at the top of the report.
+			// RouteHook stays reachable, but only when Tier 2 explicitly says the class is
+			// a verification miss — see TestHookRefusalFindingsAreAllRouted.
+			name: "an unclassified hook refusal does not default to a hook",
+			f:    Finding{Signal: string(candidate.HookRefusalBody), Occurrences: 41, MainLoop: 41},
+			want: RouteGlobalRule,
+		},
+		{
+			// The false-positive half of the class: the census found the .git guard firing
+			// on a `find … -not -path` command. That is approver-rule tuning, and the
+			// EXISTING taxonomy already carries it — no signal-specific rule needed.
+			name: "a hook refusal the classifier calls friction goes to the approver",
+			f:    Finding{Class: classify.ClassPermissionFriction, Signal: string(candidate.HookRefusalBody), Occurrences: 41, MainLoop: 41},
+			want: RoutePermissionConfig,
+		},
+		{
+			// The correct-refusal half: 100 of the 160 measured refusals are in a subagent,
+			// so the split is what decides where the instruction goes.
+			name:   "a subagent-dominated hook refusal reaches the subagent brief",
+			f:      Finding{Signal: string(candidate.HookRefusalBody), Occurrences: 160, MainLoop: 60, Subagent: 100},
+			want:   RouteSubagentPrompt,
+			inAlso: "does not reliably reach",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -215,6 +242,66 @@ func TestFromClassificationsGroupsAndSplitsBySidechain(t *testing.T) {
 	}
 	if f.Sessions != 1 || f.WorstSession != 3 {
 		t.Errorf("sessions=%d worst=%d, want 1/3 — the runaway discount needs both", f.Sessions, f.WorstSession)
+	}
+}
+
+// TestHookRefusalFindingsAreAllRouted is pg2-v150u's "no unrouted rows" criterion,
+// asserted over EVERY class a hook-refusal candidate can be given — including the
+// empty class a candidate carries when Tier 2 has not run.
+//
+// It matters that this goes through FromClassifications rather than Decide alone: a
+// finding is emitted from there, so an unrouted row could only appear at that seam.
+// An unrouted finding is one nobody owns — it reads as work, belongs to no artifact,
+// survives every review, and is still there next census.
+func TestHookRefusalFindingsAreAllRouted(t *testing.T) {
+	classes := []classify.Class{
+		"", // Tier 2 has not run, or declined to classify
+		classify.ClassNotAMistake,
+		classify.ClassToolingDefect,
+		classify.ClassPermissionFriction,
+		classify.ClassVerificationMiss,
+		classify.ClassGuidanceDefect,
+		classify.ClassSpecificationMiss,
+		classify.ClassSelfCaught,
+		classify.ClassUserCorrection,
+	}
+	valid := map[Route]bool{}
+	for _, r := range Routes {
+		valid[r] = true
+	}
+	seen := map[Route]bool{}
+	for i, cl := range classes {
+		cls := []classify.Classification{{
+			Candidate: mkCand(candidate.HookRefusalBody, int64(i), false, 0),
+			Class:     cl, Confidence: "high", Prevention: "p",
+		}}
+		fs := FromClassifications(cls)
+		if len(fs) != 1 {
+			t.Fatalf("class %q produced %d findings, want 1", cl, len(fs))
+		}
+		f := fs[0]
+		if f.Route == "" {
+			t.Errorf("class %q left a hook-refusal finding UNROUTED", cl)
+			continue
+		}
+		if !valid[f.Route] {
+			t.Errorf("class %q routed to %q, which is not in the Tier 3 taxonomy", cl, f.Route)
+		}
+		// RouteHook is reachable for exactly ONE class, and only because Tier 2 said so.
+		// The hook that produced the refusal already exists and already fired, so a
+		// blanket route there would rank a solved problem at preventability 1.00; the
+		// verification-miss verdict is the one case where extending the mechanical gate
+		// is the honest answer.
+		if (f.Route == RouteHook) != (cl == classify.ClassVerificationMiss) {
+			t.Errorf("class %q routed to %s; RouteHook must be reached only via a verification-miss verdict",
+				cl, f.Route)
+		}
+		seen[f.Route] = true
+	}
+	// The taxonomy must actually DISCRIMINATE: if every class landed on one route the
+	// test above would pass while the routing was useless.
+	if len(seen) < 3 {
+		t.Errorf("every class routed into %d bucket(s) %v; the taxonomy is not discriminating", len(seen), seen)
 	}
 }
 

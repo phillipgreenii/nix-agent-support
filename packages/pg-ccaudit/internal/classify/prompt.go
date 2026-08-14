@@ -15,7 +15,13 @@ import (
 // identified. Two runs at different prompt versions are two different
 // measurements, and a precision figure carried across a silent rubric change is
 // worse than no figure at all.
-const PromptVersion = 1
+// 1 — pg2-oisvb's rubric.
+// 2 — pg2-v150u adds the hook-refusal-body glossary entry. The rubric states that a
+//
+//	reader NEEDS the per-signal glossary to interpret the evidence, so shipping a
+//	detector that contributes 160 candidates without one would leave the model
+//	guessing what it was looking at — a meaning change, hence the bump.
+const PromptVersion = 2
 
 // rubric is the classification instruction.
 //
@@ -58,6 +64,18 @@ to decide.
                     instead of picking an offered option — 51 of 61 such rows in this
                     corpus. kind=permission-denied and kind=classifier-denied are the
                     permission layer refusing, not a person.
+  hook-refusal-body a HOOK or GUARD refused the call BEFORE it ran, and said so in the
+                    result body. detail.kind is the refusal verb bucket (blocked,
+                    refusing, prohibited, deny-listed, must-include, hook-error), NOT a
+                    verdict. THE GUARD ALREADY EXISTS AND ALREADY FIRED, so the question
+                    is never "should there be a hook" — it is whether the refusal was
+                    RIGHT. Both happen in this corpus. A guard firing on the wrong
+                    command is permission-friction (the .git guard has blocked an
+                    ordinary 'find … -not -path', and once blocked the approver's own
+                    CLI). A guard firing correctly on something an instruction should
+                    have prevented is specification-miss (the sleep guard fired 80 times
+                    across 80 distinct sessions — once per session, so the reflex is
+                    re-learned from scratch every time). Read the opening to tell which.
   undo              work taken back although every call SUCCEEDED. kind=edit-reversal
                     means a later Edit restored an earlier Edit's original text;
                     kind=write-then-delete means a file was written and later removed,

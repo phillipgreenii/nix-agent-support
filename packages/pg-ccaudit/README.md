@@ -124,13 +124,13 @@ registry test pins every name to its current version.
 | `error-then-narration`       | The prose written on the line right after a failure                      |
 | `sidechain-split`            | Every signature split by `is_sidechain` — decides where a fix belongs    |
 | `cost-by-signature`          | Measured cost per signature (read its notes)                             |
-| `hook-rejections`            | True totals from recorded `hookErrors`, not an error-text grep           |
+| `hook-rejections`            | True totals from recorded `hookErrors` — **reads zero today**, see below |
 | `first-seen`                 | Earliest/latest occurrence, ranked by first — did this class start when? |
 | `last-seen`                  | Same columns ranked by most recent — did the documented fix work?        |
 | `concentration-by-signature` | The runaway discount for EVERY signature at once                         |
 | `coverage`                   | Indexed coverage: the proof behind every number above                    |
 
-Tier 1 of the mistake census (below) adds eight more. All are SQL over the index with
+Tier 1 of the mistake census (below) adds nine more. All are SQL over the index with
 no model calls:
 
 | Name                    | Answers                                                              |
@@ -139,6 +139,7 @@ no model calls:
 | `typed-turn-candidates` | Each human turn paired with the agent action just before it          |
 | `interruptions`         | Interruption sentinels, with the call the person cut short           |
 | `denied-tool-calls`     | Calls a person or the permission layer refused, split by who refused |
+| `hook-refusals-in-body` | Hook/guard refusals read out of the result BODY, where they land     |
 | `undo-signatures`       | git undo / write-then-delete / an Edit reversing an Edit             |
 | `file-churn`            | One file edited N+ times in one session (N defaults to 5)            |
 | `escaping-retries`      | The same command re-issued with only quoting changed                 |
@@ -159,6 +160,31 @@ failures. `elapsed_ms_sum` is the real measurement: wall time between the
 `tool_use` line's recorded timestamp and its result's. It is still MEASURED, not
 estimated. For a batch of parallel sibling calls the per-call values overlap, so
 treat the sum as an upper bound on serial cost.
+
+**The hook rejections are NOT in the `hookErrors` field, and both readings ship.**
+Measured over 408,651 indexed events: 406,373 carry no `hookErrors` key at all and the
+remaining 2,278 carry a literal `[]`. Not one non-empty payload exists, so
+`hook-rejections` — which is a correct reading of the schema — returns **zero rows**,
+while hook refusals demonstrably happen. They arrive as prose in the `tool_result`
+**body**. `hook-refusals-in-body` (bead `pg2-v150u`) reads them there: 160 rows across
+78 sessions, 100 of them in a subagent. `hook-rejections` was deliberately left
+UNCHANGED beside it — it is the durable detector the day Claude Code starts populating
+the field, and it is still named as an empty detector on every report, so that
+transition stays visible instead of being papered over.
+
+Two things make the body reading a detector rather than a grep. The marker must appear
+in the body's **opening** — the prefix up to the first newline or sentence end — and a
+body beginning `Exit code` is excluded outright, because a hook denies **before** the
+command runs and so a refusal never has an exit code to report. Without both guards the
+worst false positive in the corpus lands: `go test ./internal/rules/primarycommit`
+prints the hook's own refusal text verbatim in its failure output, so a plain
+`LIKE '%refusing%'` counts the hook's unit test as a hook rejection. The vocabulary is
+refusal **verbs** taken from the hook implementations' `Reject` reasons rather than
+phrases, because the phrases drift: the same guard that once said `access to .git
+directory is blocked` now says `refusing to write git metadata under .git/ directly`,
+and both wordings are in the corpus. Recall against the two known-present classes is
+41/41 and 5/5; against the hand-enumerated inventory of guard refusals it is 160/203
+(78.8%), the gap being one guard whose refusal contains no refusal verb at all.
 
 **`retry-chains` uses a window of 6 line ordinals by default.** A retry cycle is at
 minimum `[tool_use] -> [tool_result] -> [tool_use]`, three lines, and Claude writes
@@ -183,7 +209,7 @@ Three tiers, cheapest first.
 
 ### Tier 1 — structural candidates (`pg-ccaudit candidates`)
 
-Eight SQL detectors, no model calls, tuned for **recall**. Measured corpus-wide they
+Nine SQL detectors, no model calls, tuned for **recall**. Measured corpus-wide they
 reduce 405,986 events to ~2,100 candidates, which is what makes a careful semantic
 pass affordable at all. Most of what they return is NOT a mistake; deciding that is
 Tier 2's job and Tier 1 does not attempt it.
@@ -260,7 +286,22 @@ therefore ranked with **no** cost term, on frequency and preventability alone.
 returned nothing, because a silently empty one is indistinguishable from a healthy
 one — and there is a live example: `hook-rejections` is correct and returns zero rows
 corpus-wide, because Claude Code writes `hookErrors: []` and puts the rejection in the
-`tool_result` body instead.
+`tool_result` body instead. Collecting that signal elsewhere did **not** retire the
+report: `hook-refusals-in-body` now finds the refusals, and `hook-rejections` still
+runs, still returns zero, and is still named — because the day that zero changes is the
+day the structured field started arriving, and suppressing it would discard the only
+evidence of the transition.
+
+**A hook refusal is never routed to "add a hook" by default.** The hook already exists
+and already fired; that is the only reason there is a refusal to detect, so routing
+there would rank a solved problem at the highest preventability weight in the table.
+The class is genuinely mixed and only Tier 2 can split it — the `.git` guard has fired
+on a `find … -not -path` command, which is approver-rule tuning, while the `sleep`
+guard fired 80 times across 80 distinct sessions, which is a reflex an instruction
+should have prevented. The existing taxonomy already expresses both, so no
+signal-specific rule was added: `permission-friction` routes the false positives to the
+approver, `guidance-defect` routes the instruction cases back to the instruction, and
+anything unclassified falls through to the main-loop/subagent split.
 
 ### The undercount the report must always state
 
@@ -326,8 +367,22 @@ on, for a smaller result than writing the ~150 lines of decoding this package ne
 ## Tests
 
 `go test ./...`, gated in `nix flake check` as `pg-ccaudit-go-tests`. Every
-filesystem scenario is built in `t.TempDir()` from the committed fixture corpus
-under `internal/ingest/testdata/corpus`; **no test reads the real transcript corpus
-or the real index**. Every canned query is asserted against hand-computed answers
-over that fixture — "returns without error" is not the bar, because a query that
-silently groups the wrong thing returns cleanly and reports a wrong number.
+filesystem scenario is built in `t.TempDir()` from a committed fixture corpus under
+`internal/ingest/testdata/`; **no test reads the real transcript corpus or the real
+index**. Every canned query is asserted against hand-computed answers over that
+fixture — "returns without error" is not the bar, because a query that silently groups
+the wrong thing returns cleanly and reports a wrong number.
+
+There are **three** fixture corpora and the separation is deliberate rather than
+untidy: `corpus` (the failure census), `mistakes` (Tier 1) and `refusals` (the hook
+refusals). Each new scenario set adds user records and error signatures, so folding one
+into another would move every hand-computed answer in the older tests — `human-turns`'
+record tally and `concentration-by-signature`'s signature count both shift — and a fix
+to one query could then only be made by re-deriving assertions it has nothing to do
+with.
+
+The refusal fixture is **half negative cases**, and that half is the point. It carries a
+`go test` failure body that quotes the hook's own refusal verbatim, an Edit payload that
+discusses blocking, a successful `cat` whose output is full of refusal verbs, and the
+permission layer's own denials — every one of which a naive text match counts as a hook
+rejection.

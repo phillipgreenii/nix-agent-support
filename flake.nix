@@ -786,12 +786,13 @@
               #   * ingest builds every scenario in t.TempDir() from the COMMITTED
               #     fixture corpora (packages/pg-ccaudit/internal/ingest/testdata:
               #     `corpus` for the failure census, `mistakes` for the mistake
-              #     census) and never reads the real transcript corpus or the real
-              #     index — a test that pointed at either would be testing whatever
-              #     state the machine happened to be in. The two corpora are kept
-              #     SEPARATE on purpose: folding the mistake scenarios into `corpus`
-              #     would change every hand-computed answer in the failure-census
-              #     assertions, so a mistake-query change could only be made by
+              #     census, `refusals` for the hook refusals) and never reads the
+              #     real transcript corpus or the real index — a test that pointed
+              #     at either would be testing whatever state the machine happened
+              #     to be in. The three corpora are kept SEPARATE on purpose: each
+              #     scenario set adds user records and error signatures, so folding
+              #     one into another would change every hand-computed answer in the
+              #     older assertions, and a query change could then only be made by
               #     re-deriving assertions it has nothing to do with.
               #   * query asserts every canned query against HAND-COMPUTED answers
               #     over those fixtures. "Returns without error" is not the bar: a

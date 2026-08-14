@@ -229,6 +229,24 @@ func Decide(f Finding, hint string) (Route, string) {
 	if f.Signal == string(candidate.Denial) {
 		return RoutePermissionConfig, ""
 	}
+	// candidate.HookRefusalBody gets NO shortcut of its own, and the omission is the
+	// decision (bead pg2-v150u). Two wrong shortcuts are available and both are
+	// tempting. A blanket RouteHook is wrong because the hook ALREADY EXISTS and
+	// already fired — that is why there is a refusal to detect — so "add a hook" would
+	// rank a solved problem at preventability 1.00. (RouteHook stays REACHABLE for
+	// this signal, but only through the ClassVerificationMiss branch above, where Tier
+	// 2 has explicitly judged that a gate which must run can be made to run.)
+	// RoutePermissionConfig is wrong as a blanket default because the
+	// class is mixed: the 2026-07-29 census found the `.git` block firing on a
+	// `find . -maxdepth 4 -not -path` command and even on a CETA invocation, which is
+	// approver-rule tuning, while the `sleep`-block class is a correct refusal of a
+	// reflex an instruction should have prevented — 80 blocks across 80 distinct
+	// sessions, one per session. Only Tier 2 can tell those apart, and the taxonomy
+	// above already expresses both: ClassPermissionFriction routes the false positives
+	// to permission-config, ClassGuidanceDefect routes the instruction cases back to
+	// the instruction. Anything unclassified falls through to the subagent-share test
+	// and then to global-rule, so the row is still routed — 100 of the 160 measured
+	// refusals are in a subagent, which is exactly the split that decides it.
 	if f.SubagentShare() >= SubagentDominant {
 		return RouteSubagentPrompt, fmt.Sprintf("%d of %d occurrences were in a subagent; a rule in the always-on user rules does not reliably reach one",
 			f.Subagent, f.MainLoop+f.Subagent)

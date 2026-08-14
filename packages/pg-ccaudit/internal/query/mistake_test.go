@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/phillipgreenii/pg-ccaudit/internal/ingest"
@@ -52,9 +53,56 @@ import (
 //	5 result ERROR permission denied
 func buildMistakeIndex(t *testing.T) (string, *sql.DB) {
 	t.Helper()
+	return buildIndexFrom(t, "mistakes")
+}
+
+// buildRefusalIndex builds the pg2-v150u fixture, which is a THIRD corpus for the
+// same reason `mistakes` was separated from `corpus`: the hook-refusal scenarios add
+// user records and error signatures, so folding them into `mistakes` would move
+// every hand-computed answer in TestTier1QueriesAgainstFixtureCorpus — human-turns'
+// record tally and concentration-by-signature's signature count both change — and a
+// refusal-query fix could then only be made by re-deriving assertions it has nothing
+// to do with.
+//
+// Layout of internal/ingest/testdata/refusals, by LINE ORDINAL (seq is 0-based, so
+// seq N is line N+1). Every expected value below is derived from this table by hand.
+//
+// projR/sess-r.jsonl — session S-R, main loop, 2026-08-05. Odd seqs are the results.
+// MATCHES (7), one per match arm the query has evidence for:
+//
+//	 1 blocked      access to .git directory is blocked …   <- calibration class 1
+//	 3 must-include Agent-authored PR comments … 🤖 emoji    <- calibration class 2
+//	 5 blocked      <tool_use_error>Blocked: sleep 30 …      <- exercises the wrapper strip
+//	 7 refusing     primary-commit: refusing this commit. …  <- the CURRENT ceta wording
+//	 9 prohibited   git: git tag is prohibited — …
+//	11 deny-listed  credential/secret path is deny-listed: …
+//	13 hook-error   PreToolUse:Bash hook error: […] …        <- carries NO refusal verb
+//
+// NON-MATCHES (6), which are the half of the precision that matters:
+//
+//	15 an `Exit code 1` go-test body that quotes the hook's refusal VERBATIM
+//	17 an Edit `String to replace not found` payload that discusses blocking
+//	19 the user rejection      — owned by denied-tool-calls
+//	21 the classifier denial   — owned by denied-tool-calls, and OPENS with "Blocked by"
+//	23 a SUCCESSFUL cat whose output is full of refusal verbs (is_error false)
+//	25 `This command requires approval` — the permission layer, not a hook
+//	27 `… connect: connection refused` — a NETWORK error, not a hook verdict
+//
+// projR/sess-rs.jsonl — session S-RS, SIDECHAIN, 2026-08-06:
+//
+//	0 user   subagent brief
+//	1 Bash   dd if=/dev/zero …
+//	2 blocked  dangerous command blocked: dd    <- the only sidechain refusal
+func buildRefusalIndex(t *testing.T) (string, *sql.DB) {
+	t.Helper()
+	return buildIndexFrom(t, "refusals")
+}
+
+func buildIndexFrom(t *testing.T, corpus string) (string, *sql.DB) {
+	t.Helper()
 	base := t.TempDir()
 	root := filepath.Join(base, "projects")
-	src := filepath.Join("..", "ingest", "testdata", "mistakes")
+	src := filepath.Join("..", "ingest", "testdata", corpus)
 	err := filepath.Walk(src, func(p string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -74,7 +122,7 @@ func buildMistakeIndex(t *testing.T) (string, *sql.DB) {
 		return os.WriteFile(dst, b, 0o644)
 	})
 	if err != nil {
-		t.Fatalf("copy mistake fixture: %v", err)
+		t.Fatalf("copy %s fixture: %v", corpus, err)
 	}
 
 	dbPath := filepath.Join(base, "transcripts.db")
@@ -360,6 +408,190 @@ func TestTier1QueriesAgainstFixtureCorpus(t *testing.T) {
 			if r[1] != "1" || r[2] != "1" || r[3] != "1" {
 				t.Errorf("row %v: want total/sessions/worst all 1", r)
 			}
+		}
+	})
+}
+
+// TestHookRefusalsInBodyAgainstFixtureCorpus is bead pg2-v150u's detector, asserted
+// against hand-computed answers over the committed refusals fixture.
+//
+// The positive half proves each match arm fires. The negative half is what the
+// query is actually FOR: a body that merely MENTIONS a refusal is not a refusal, and
+// the corpus's worst case is the hook's own unit test printing its refusal text
+// verbatim. Measured on the real corpus the two structural guards keep precision at
+// 77/77 distinct openings; without them the go-test output, an Edit payload
+// discussing blocking, and the permission layer's own denials all arrive as hook
+// rejections.
+func TestHookRefusalsInBodyAgainstFixtureCorpus(t *testing.T) {
+	root, db := buildRefusalIndex(t)
+
+	t.Run("every arm fires and nothing else does", func(t *testing.T) {
+		cols, rows := runNamed(t, db, root, "hook-refusals-in-body", nil, "", "")
+		idx := colIndex(t, cols)
+		// Ordered by (path, seq); 'sess-r.jsonl' sorts before 'sess-rs.jsonl' because
+		// '.' (0x2E) precedes 's' (0x73).
+		want := []struct{ kind, seq, tool, sidechain string }{
+			{"blocked", "1", "Bash", "0"},
+			{"must-include", "3", "Bash", "0"},
+			{"blocked", "5", "Bash", "0"},
+			{"refusing", "7", "Bash", "0"},
+			{"prohibited", "9", "Bash", "0"},
+			{"deny-listed", "11", "Read", "0"},
+			{"hook-error", "13", "Bash", "0"},
+			{"blocked", "2", "Bash", "1"},
+		}
+		if len(rows) != len(want) {
+			t.Fatalf("hook-refusals-in-body returned %d rows, want %d:\n%v", len(rows), len(want), rows)
+		}
+		for i, w := range want {
+			got := rows[i]
+			if got[idx["kind"]] != w.kind || got[idx["seq"]] != w.seq ||
+				got[idx["tool_name"]] != w.tool || got[idx["is_sidechain"]] != w.sidechain {
+				t.Errorf("row %d = kind=%s seq=%s tool=%s sidechain=%s, want %v",
+					i, got[idx["kind"]], got[idx["seq"]], got[idx["tool_name"]],
+					got[idx["is_sidechain"]], w)
+			}
+		}
+	})
+
+	t.Run("the two calibration classes have full recall", func(t *testing.T) {
+		// The classes bead pg2-v150u names as known-present ground truth. On the real
+		// corpus these measure 41/41 and 5/5; the fixture carries one of each, so a
+		// change that stops matching either fails here rather than being discovered by
+		// a later census reading a quiet zero.
+		cols, rows := runNamed(t, db, root, "hook-refusals-in-body", nil, "", "")
+		idx := colIndex(t, cols)
+		gitBlock, emoji := 0, 0
+		for _, r := range rows {
+			switch {
+			case strings.Contains(r[idx["opening"]], "access to .git directory is blocked"):
+				gitBlock++
+			case strings.Contains(r[idx["opening"]], "must include the"):
+				emoji++
+			}
+		}
+		if gitBlock != 1 {
+			t.Errorf(".git-block recall = %d/1", gitBlock)
+		}
+		if emoji != 1 {
+			t.Errorf("missing-emoji recall = %d/1", emoji)
+		}
+	})
+
+	t.Run("a body that only MENTIONS a refusal is not one", func(t *testing.T) {
+		// seq 15 is `go test ./internal/rules/primarycommit/`, whose FAILURE OUTPUT
+		// contains the hook's refusal text word for word. A `content LIKE '%refusing%'`
+		// matcher counts the hook's own test as a hook rejection. seq 17 is an Edit whose
+		// unmatched `old_string` discusses blocking. Both must be absent.
+		cols, rows := runNamed(t, db, root, "hook-refusals-in-body", nil, "", "")
+		idx := colIndex(t, cols)
+		for _, r := range rows {
+			if r[idx["seq"]] == "15" || r[idx["seq"]] == "17" {
+				t.Errorf("seq %s only mentions a refusal; it must not be matched: %v", r[idx["seq"]], r)
+			}
+			// seq 27 is "connect: connection refused" — the most common error string in
+			// computing, and not a verdict about anything. The matcher keys on the ACTIVE
+			// forms the hook implementations emit (refusing / refuses), never the passive
+			// "refused", which is why this stays out even though it opens with the stem.
+			if r[idx["seq"]] == "27" {
+				t.Errorf("a network error is not a hook refusal: %v", r)
+			}
+		}
+	})
+
+	t.Run("the permission layer and the user are left to denied-tool-calls", func(t *testing.T) {
+		// seq 19 (user rejection) and seq 21 (classifier denial) are refusals, but they
+		// belong to denied-tool-calls, whose `kind` routes them differently. Counting them
+		// in both queries would double-count the same row. seq 21 is the important one: its
+		// body OPENS "Permission for this action was denied … Reason: Blocked by
+		// classifier", so the marker matches and only the exclusion keeps it out.
+		rcols, refusals := runNamed(t, db, root, "hook-refusals-in-body", nil, "", "")
+		ridx := colIndex(t, rcols)
+		for _, r := range refusals {
+			if r[ridx["seq"]] == "19" || r[ridx["seq"]] == "21" || r[ridx["seq"]] == "25" {
+				t.Errorf("seq %s belongs to the permission layer, not the hook layer: %v", r[ridx["seq"]], r)
+			}
+		}
+		dcols, denied := runNamed(t, db, root, "denied-tool-calls", nil, "", "")
+		didx := colIndex(t, dcols)
+		if len(denied) != 2 {
+			t.Fatalf("denied-tool-calls returned %d rows, want 2 (seq 19 and 21)", len(denied))
+		}
+		if denied[0][didx["kind"]] != "user-rejected" || denied[1][didx["kind"]] != "classifier-denied" {
+			t.Errorf("denied kinds = %s, %s", denied[0][didx["kind"]], denied[1][didx["kind"]])
+		}
+	})
+
+	t.Run("a successful result is never a refusal", func(t *testing.T) {
+		// seq 23 is a `cat` that SUCCEEDED and whose output says "forbids", "blocked" and
+		// "refused". is_error = 1 excludes it structurally — and T-3a means its body was
+		// never stored in the first place, so this is belt and braces on purpose: a later
+		// change that started storing success bodies must not turn every rules document
+		// the agent reads into a hook rejection.
+		cols, rows := runNamed(t, db, root, "hook-refusals-in-body", nil, "", "")
+		idx := colIndex(t, cols)
+		for _, r := range rows {
+			if r[idx["seq"]] == "23" {
+				t.Errorf("seq 23 succeeded; a success body is not a refusal: %v", r)
+			}
+		}
+	})
+
+	t.Run("the head window is a real threshold", func(t *testing.T) {
+		// head=1 leaves a one-character opening, so no verb can fit and only the
+		// PreToolUse-prefixed row (which is matched on the body's prefix, not the opening)
+		// survives. A silently inert parameter is worse than none.
+		_, tiny := runNamed(t, db, root, "hook-refusals-in-body", []string{"1"}, "", "")
+		if len(tiny) != 1 {
+			t.Errorf("head=1 returned %d rows, want 1 (the PreToolUse prefix arm only):\n%v", len(tiny), tiny)
+		}
+	})
+
+	t.Run("the window is honoured", func(t *testing.T) {
+		// S-R is 2026-08-05 and S-RS is 2026-08-06, so a window ending before the
+		// sidechain day must drop the one sidechain refusal.
+		_, all := runNamed(t, db, root, "hook-refusals-in-body", nil, "", "")
+		_, day1 := runNamed(t, db, root, "hook-refusals-in-body", nil, "2026-08-05", "2026-08-06")
+		if len(all) != 8 || len(day1) != 7 {
+			t.Errorf("refusal rows all=%d day1=%d, want 8 and 7", len(all), len(day1))
+		}
+	})
+
+	t.Run("the signature groups occurrences, the opening stays raw", func(t *testing.T) {
+		// `signature` is the ingest-normalized whole body, so two refusals differing only
+		// in a path are ONE finding. `opening` is the raw prefix, because a reader has to
+		// be able to check the evidence.
+		cols, rows := runNamed(t, db, root, "hook-refusals-in-body", nil, "", "")
+		idx := colIndex(t, cols)
+		for _, r := range rows {
+			if r[idx["signature"]] == "" {
+				t.Errorf("row %v has no signature — findings would not group", r)
+			}
+		}
+		// seq 11's body names /w/.ssh/id_rsa; the signature must collapse it to PATH while
+		// the opening must not.
+		for _, r := range rows {
+			if r[idx["seq"]] != "11" {
+				continue
+			}
+			if !strings.Contains(r[idx["signature"]], "PATH") {
+				t.Errorf("signature %q did not collapse the path", r[idx["signature"]])
+			}
+			if !strings.Contains(r[idx["opening"]], "id_rsa") {
+				t.Errorf("opening %q lost the raw evidence", r[idx["opening"]])
+			}
+		}
+	})
+
+	t.Run("hook-rejections is untouched and still finds nothing here", func(t *testing.T) {
+		// The bead's binding constraint: the structured-payload reading is NOT weakened.
+		// This corpus carries no hookErrors payload at all, so the two detectors are
+		// demonstrably independent — the body reading finds 8 and the field reading finds
+		// 0, and the fixture in internal/ingest/testdata/mistakes proves the field reading
+		// still works when the payload IS present.
+		_, rows := runNamed(t, db, root, "hook-rejections", nil, "", "")
+		if len(rows) != 0 {
+			t.Errorf("hook-rejections returned %d rows over the refusals corpus, want 0", len(rows))
 		}
 	})
 }

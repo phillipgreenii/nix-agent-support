@@ -11,7 +11,7 @@
 // harness caught it: no exit code, no schema, no hook.
 //
 // Detecting that semantically over the whole corpus is not affordable — 405,986
-// events. Detecting it structurally is: the eight signals below reduce the corpus
+// events. Detecting it structurally is: the nine signals below reduce the corpus
 // to ~2,100 candidates, measured, which is a set a semantic pass can afford to be
 // careful about. That ratio IS Tier 1's job. It is deliberately tuned for RECALL,
 // so a large share of what it returns is not a mistake at all; deciding which is
@@ -64,6 +64,12 @@ const (
 	Denial Signal = "denied-tool-call"
 	// HookRejection is a rejection recorded in the structured hookErrors payload.
 	HookRejection Signal = "hook-rejection"
+	// HookRefusalBody is a hook- or guard-authored refusal read out of the
+	// tool_result BODY (bead pg2-v150u). It is a SEPARATE detector from
+	// HookRejection rather than a replacement: that one reads the structured field
+	// and is correct, this one reads the prose the refusals actually arrive as, and
+	// on today's corpus only this one finds anything.
+	HookRefusalBody Signal = "hook-refusal-body"
 	// Undo is work that had to be taken back although every call succeeded.
 	Undo Signal = "undo"
 	// Churn is one file rewritten N+ times in a session.
@@ -172,6 +178,14 @@ type Source struct {
 // `hook-rejections` query is CORRECT and returns zero rows corpus-wide, because
 // Claude Code writes `hookErrors: []` and puts the rejection in the tool_result
 // body instead. Read as "no hook rejected anything" that is simply false.
+//
+// pg2-v150u added HookRefusalBody, which collects that same signal from the body —
+// and it did NOT retire this reporting or special-case the detector it was filed
+// against. HookRejection still runs, still returns zero, and is still NAMED as
+// empty on every report, because the day the structured field starts arriving is
+// the day that zero becomes information; suppressing it would throw away the only
+// evidence of the transition. The rule is general: every detector that finds
+// nothing is named, whether or not a sibling detector covers the same ground.
 func (s Set) EmptySignals() []Signal {
 	var out []Signal
 	for _, src := range s.Sources {
@@ -219,6 +233,7 @@ func Extract(ctx context.Context, db *sql.DB, opt Options) (Set, error) {
 		{Interruption, "interruptions", nil, interruption},
 		{Denial, "denied-tool-calls", nil, denial},
 		{HookRejection, "hook-rejections", nil, hookRejection},
+		{HookRefusalBody, "hook-refusals-in-body", nil, hookRefusalBody},
 		{Undo, "undo-signatures", nil, undo},
 		{Churn, "file-churn", []string{churn}, churnCand},
 		{EscapingRetry, "escaping-retries", []string{retry}, escapingRetry},
@@ -435,6 +450,41 @@ func hookRejection(r row) Candidate {
 			"sessions":         r.str("sessions"),
 			"subagent":         r.str("subagent"),
 			"hook_invocations": r.str("hook_invocations"),
+		},
+	}
+}
+
+// hookRefusalBody is one refusal the hook/guard layer wrote into a result body.
+//
+// StartTS is left EMPTY deliberately, for the same reason it is on Denial: the
+// refusal arrives on the tool_result line, so the only span available is
+// tool_use -> tool_result, and for a call that was refused rather than run that
+// span is decision latency, not agent work. Such a finding ranks on frequency and
+// preventability, which is all the evidence there is.
+//
+// Signature runs the OPENING through the ingest signature normalizer — the same
+// collapsing every error signature gets — so `ls in '/a' was blocked` and
+// `ls in '/b' was blocked` are one finding rather than two. Kind leads the
+// signature so a broad-brush `blocked` never merges with a `deny-listed`.
+func hookRefusalBody(r row) Candidate {
+	kind := r.str("kind")
+	opening := r.str("opening")
+	return Candidate{
+		Kind:        kind,
+		SessionID:   r.str("session_id"),
+		Path:        r.str("path"),
+		Seq:         r.num("seq"),
+		IsSidechain: r.flag("is_sidechain"),
+		TS:          r.str("ts"),
+		Signature:   "hook-refusal/" + kind + ": " + ingest.Signature(opening),
+		Excerpt:     excerpt(opening, 320),
+		Detail: map[string]string{
+			"kind":       kind,
+			"tool_name":  r.str("tool_name"),
+			"lead_cmd":   r.str("lead_cmd"),
+			"opening":    excerpt(opening, 320),
+			"error_sig":  r.str("signature"),
+			"session_id": r.str("session_id"),
 		},
 	}
 }

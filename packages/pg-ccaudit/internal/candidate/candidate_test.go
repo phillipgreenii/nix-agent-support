@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/phillipgreenii/pg-ccaudit/internal/ingest"
@@ -16,9 +17,22 @@ import (
 // index. Both are shared with running sessions.
 func extractFixture(t *testing.T, opt Options) Set {
 	t.Helper()
+	return extractCorpus(t, "mistakes", opt)
+}
+
+// extractRefusalFixture runs the same extraction over pg2-v150u's corpus, which is
+// separate for the reason internal/query/mistake_test.go records: its records would
+// move every hand-computed answer in the mistakes fixture.
+func extractRefusalFixture(t *testing.T, opt Options) Set {
+	t.Helper()
+	return extractCorpus(t, "refusals", opt)
+}
+
+func extractCorpus(t *testing.T, corpus string, opt Options) Set {
+	t.Helper()
 	base := t.TempDir()
 	root := filepath.Join(base, "projects")
-	src := filepath.Join("..", "ingest", "testdata", "mistakes")
+	src := filepath.Join("..", "ingest", "testdata", corpus)
 	if err := filepath.Walk(src, func(p string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -76,10 +90,14 @@ func TestExtractRunsEverySignalAndReportsItsProvenance(t *testing.T) {
 		Interruption:  1, // seq 19
 		Denial:        2, // seq 27 user-rejected; sess-s seq 5 permission-denied
 		HookRejection: 1, // sess-m seq 31 carries a non-empty hookErrors payload
-		Undo:          4, // edit-reversal, git-undo, write-then-delete, sidechain git-undo
-		Churn:         1, // /w/a.txt, 5 edits
-		EscapingRetry: 1, // seq 10 -> 12
-		Ack:           4, // three Correction: stems and one ack phrase
+		// 0 is CORRECT here and is asserted rather than omitted: this corpus contains no
+		// hook-authored refusal body, so the mistakes fixture exercises the EMPTY path for
+		// the new detector while internal/ingest/testdata/refusals exercises the full one.
+		HookRefusalBody: 0,
+		Undo:            4, // edit-reversal, git-undo, write-then-delete, sidechain git-undo
+		Churn:           1, // /w/a.txt, 5 edits
+		EscapingRetry:   1, // seq 10 -> 12
+		Ack:             4, // three Correction: stems and one ack phrase
 	}
 	got := map[Signal]int{}
 	for _, s := range set.Sources {
@@ -153,7 +171,7 @@ func TestSpanIsMeasuredOnlyBetweenAgentActions(t *testing.T) {
 	set := extractFixture(t, Options{})
 	for _, c := range set.Candidates {
 		switch c.Signal {
-		case TypedTurn, Interruption, Ack, Denial, HookRejection:
+		case TypedTurn, Interruption, Ack, Denial, HookRejection, HookRefusalBody:
 			// These intervals END at a human action (or have no interval at all), so a
 			// span would be the person's reading-and-deciding time. Measured on the real
 			// corpus that was 8,390,705,460 ms across 719 typed turns, and feeding it in
@@ -198,6 +216,125 @@ func TestSignaturesGroupOccurrencesNotOccasions(t *testing.T) {
 		if c.Signal == Undo && c.Kind == "git-undo" && c.Signature == "git-undo: " {
 			t.Errorf("git-undo signature is empty for %s", c.Key)
 		}
+	}
+}
+
+// TestHookRefusalBodyCandidates is the pg2-v150u detector at the candidate layer:
+// the query's rows must arrive as typed candidates that GROUP, carry checkable
+// evidence, and never claim a cost that was not measured.
+func TestHookRefusalBodyCandidates(t *testing.T) {
+	set := extractRefusalFixture(t, Options{})
+
+	var got []Candidate
+	for _, c := range set.Candidates {
+		if c.Signal == HookRefusalBody {
+			got = append(got, c)
+		}
+	}
+	// Eight rows, hand-derived from the fixture table in
+	// internal/query/mistake_test.go: seven in sess-r plus the one sidechain refusal.
+	if len(got) != 8 {
+		t.Fatalf("got %d hook-refusal-body candidates, want 8", len(got))
+	}
+
+	kinds := map[string]int{}
+	for _, c := range got {
+		kinds[c.Kind]++
+		if c.Supplementary {
+			t.Errorf("%s must NOT be supplementary: a refusal is a hook's recorded verdict, not the agent's own opinion of itself", c.Key)
+		}
+		if c.Excerpt == "" {
+			t.Errorf("%s carries no excerpt — a refusal finding a reader cannot check is not evidence", c.Key)
+		}
+		if !strings.HasPrefix(c.Signature, "hook-refusal/") {
+			t.Errorf("%s signature %q must be namespaced so it cannot collide with an error signature", c.Key, c.Signature)
+		}
+		if c.SpanMS != 0 || c.StartTS != "" {
+			// The refusal lands on the tool_result line, so the only available span is
+			// tool_use -> tool_result — and for a call that was REFUSED rather than run,
+			// that is decision latency, not agent work. Feeding it in as cost is what put
+			// 14 user rejections carrying 27.6 hours at the top of an earlier report.
+			t.Errorf("%s claims a span (%d ms); a refused call's latency is not agent waste", c.Key, c.SpanMS)
+		}
+	}
+	want := map[string]int{
+		"blocked": 3, "must-include": 1, "refusing": 1,
+		"prohibited": 1, "deny-listed": 1, "hook-error": 1,
+	}
+	for k, n := range want {
+		if kinds[k] != n {
+			t.Errorf("kind %s produced %d candidates, want %d", k, kinds[k], n)
+		}
+	}
+	if len(kinds) != len(want) {
+		t.Errorf("got kinds %v, want exactly %v", kinds, want)
+	}
+
+	// One in a subagent — the split that decides whether the fix belongs in the
+	// always-on rules or in the subagent brief.
+	sub := 0
+	for _, c := range got {
+		if c.IsSidechain {
+			sub++
+		}
+	}
+	if sub != 1 {
+		t.Errorf("%d subagent refusals, want 1", sub)
+	}
+
+	// The three `blocked` rows are three DIFFERENT guards (a .git write, a sleep poll,
+	// a dd), so they must NOT collapse into one finding: the kind is a coarse bucket and
+	// the normalized body is what separates the classes inside it.
+	sigs := map[string]bool{}
+	for _, c := range got {
+		if c.Kind == "blocked" {
+			sigs[c.Signature] = true
+		}
+	}
+	if len(sigs) != 3 {
+		t.Errorf("the three blocked refusals produced %d signatures, want 3 — a kind is not a finding", len(sigs))
+	}
+}
+
+// TestHookRejectionStaysAnIndependentDetector is the bead's binding constraint,
+// asserted at the layer that could quietly break it: pg2-v150u must NOT have turned
+// the structured-payload reading into a fallback of the body reading.
+func TestHookRejectionStaysAnIndependentDetector(t *testing.T) {
+	mistakes := extractFixture(t, Options{})
+	refusals := extractRefusalFixture(t, Options{})
+
+	count := func(s Set, sig Signal) int {
+		n := 0
+		for _, src := range s.Sources {
+			if src.Signal == sig {
+				n = src.Rows
+			}
+		}
+		return n
+	}
+	// The mistakes corpus has a hookErrors payload and no refusal bodies; the refusals
+	// corpus is the exact opposite. Each detector fires on its own evidence and neither
+	// suppresses the other.
+	if count(mistakes, HookRejection) != 1 || count(mistakes, HookRefusalBody) != 0 {
+		t.Errorf("mistakes corpus: hook-rejection=%d hook-refusal-body=%d, want 1 and 0",
+			count(mistakes, HookRejection), count(mistakes, HookRefusalBody))
+	}
+	if count(refusals, HookRejection) != 0 || count(refusals, HookRefusalBody) != 8 {
+		t.Errorf("refusals corpus: hook-rejection=%d hook-refusal-body=%d, want 0 and 8",
+			count(refusals, HookRejection), count(refusals, HookRefusalBody))
+	}
+	// And the zero is REPORTED, not swallowed. That is the pg2-oisvb guarantee this bead
+	// was forbidden from special-casing away: on the real corpus hook-rejection is the
+	// empty one, and the day it stops being empty is the day the field started arriving.
+	empty := map[Signal]bool{}
+	for _, s := range refusals.EmptySignals() {
+		empty[s] = true
+	}
+	if !empty[HookRejection] {
+		t.Errorf("hook-rejection found nothing and EmptySignals()=%v does not say so", refusals.EmptySignals())
+	}
+	if empty[HookRefusalBody] {
+		t.Errorf("hook-refusal-body found 8 rows and must not be reported empty")
 	}
 }
 

@@ -411,6 +411,11 @@ func TestRegistryVersionsArePinned(t *testing.T) {
 		"file-churn":                 1,
 		"escaping-retries":           1,
 		"ack-markers":                1,
+		// pg2-v150u: the refusals hook-rejections cannot see, read out of the result
+		// BODY. It is an ADDITION, not a replacement — hook-rejections stays at v1 with
+		// its SQL untouched, because it is the durable reading if the structured payload
+		// ever arrives.
+		"hook-refusals-in-body": 1,
 	}
 	got := map[string]int{}
 	for _, q := range All() {

@@ -203,7 +203,7 @@ func TestQueriesCommandListsEveryQuery(t *testing.T) {
 	for _, name := range []string{
 		"error-rate-by-tool", "top-signatures", "bash-by-lead-cmd", "session-concentration",
 		"retry-chains", "error-then-narration", "sidechain-split", "cost-by-signature",
-		"hook-rejections", "first-seen", "last-seen",
+		"hook-rejections", "hook-refusals-in-body", "first-seen", "last-seen",
 	} {
 		if !strings.Contains(out, name) {
 			t.Errorf("`queries` omits %q:\n%s", name, out)

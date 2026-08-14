@@ -117,6 +117,7 @@ pg-ccaudit query retry-chains --since … --until …
 pg-ccaudit query error-then-narration --since … --until …
 pg-ccaudit query cost-by-signature --since … --until …
 pg-ccaudit query hook-rejections --since … --until …
+pg-ccaudit query hook-refusals-in-body --since … --until …
 ```
 
 - `retry-chains` pairs a failed call with a later call of the SAME tool within a
@@ -136,7 +137,19 @@ pg-ccaudit query hook-rejections --since … --until …
   makes the sum an upper bound on serial cost.
 - `hook-rejections` counts from the recorded `hookErrors` payloads, not from
   grepping error text — a rejection whose wording changed would vanish from a
-  grep while still being counted here.
+  grep while still being counted here. **It reads ZERO today, and that is not good
+  news.** Measured over 408,651 indexed events, 406,373 carry no `hookErrors` key and
+  the remaining 2,278 carry a literal `[]`; Claude Code puts the refusal in the
+  `tool_result` body instead. Run it anyway — the day it stops returning zero is the
+  day the structured field started arriving.
+- `hook-refusals-in-body` is where the hook refusals actually are: 160 rows across 78
+  sessions, 100 of them in a subagent. Group them by `kind` and by `signature`, not by
+  `opening` (which is the raw evidence and differs per occurrence). **Two cautions.**
+  Its recall over the whole class is a measured 160/203 (78.8%) — a guard whose refusal
+  contains no refusal verb, such as the Jira greenlist guard's 43 rows, is invisible to
+  it — so do not present its count as the total. And these rows are `is_error = 1`
+  results, so they ALSO appear in `top-signatures` and `sidechain-split`; report the
+  class once, not twice.
 
 ### 4. Main loop or subagent? — this decides WHERE the fix goes
 
@@ -176,7 +189,7 @@ Route each finding accordingly:
 pg-ccaudit candidates --since … --until …
 ```
 
-Eight structural detectors, no model calls, tuned for **recall** — so most of what
+Nine structural detectors, no model calls, tuned for **recall** — so most of what
 this returns is NOT a mistake. Read the per-signal header it prints and the
 `EMPTY SIGNALS` warning on stderr.
 
@@ -190,11 +203,20 @@ this returns is NOT a mistake. Read the per-signal header it prints and the
   pg-ccaudit query human-turns --since … --until …
   ```
 
-- **An empty detector is NOT evidence that the thing did not happen.** `hook-rejections`
-  is a correct query that returns **zero rows** corpus-wide, because Claude Code writes
-  `hookErrors: []` and puts the rejection in the `tool_result` body instead — while
-  hook-authored refusals demonstrably do occur and show up in `top-signatures`. If a
-  signal reports 0, read its notes before reporting good news.
+- **An empty detector is NOT evidence that the thing did not happen.** `hook-rejection`
+  is a correct detector that returns **zero rows** corpus-wide, because Claude Code
+  writes `hookErrors: []` and puts the rejection in the `tool_result` body instead.
+  `hook-refusal-body` reads them there, and the empty one was deliberately kept and is
+  still named on every report — so expect to see `hook-rejection` under
+  `EMPTY SIGNALS` and do NOT report it as "no hook rejected anything". If a signal
+  reports 0, read its notes before reporting good news.
+
+- **A hook refusal is NOT fixed by proposing a hook.** The hook already exists and
+  already fired. Split the class before routing it: a refusal that fired on the WRONG
+  command is approver-rule tuning (the `.git` guard has blocked a
+  `find … -not -path`), while a refusal that fired correctly on a reflex is an
+  instruction problem (the `sleep` guard fired 80 times across 80 distinct sessions —
+  once per session, re-learned from scratch every time).
 
 - **The file channel means your correction count is a LOWER BOUND.** The operator
   sometimes writes a correction into a FILE rather than into a session (the

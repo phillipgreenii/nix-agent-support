@@ -285,9 +285,10 @@ ORDER BY elapsed_ms_sum DESC, errors DESC, signature`,
 				"'access to .git directory is blocked' and 23 of the primary-commit refusal, both " +
 				"visible in top-signatures). So a zero here means 'Claude Code is not populating the " +
 				"structured field', NOT 'no hook rejected anything'. Use `denied-tool-calls` for the " +
-				"permission layer and `top-signatures` for hook-authored refusals until the structured " +
-				"payload starts arriving; this query is kept because it is the durable detector the day " +
-				"it does.",
+				"permission layer and `hook-refusals-in-body` (bead pg2-v150u) for the hook-authored " +
+				"refusals that land in the result BODY; this query is kept UNCHANGED because it is the " +
+				"durable detector the day the structured payload starts arriving, and the two coexist " +
+				"deliberately — weakening this one to chase the prose would lose the field reading.",
 			Window: true,
 			SQL: `
 SELECT e.hook_errors                                                        AS hook_errors,
@@ -550,6 +551,161 @@ WHERE r.is_error = 1
     OR r.content LIKE 'Permission for this action was denied%')
   AND ` + win("e") + `
 ORDER BY r.path, r.seq`,
+		},
+		{
+			Name:    "hook-refusals-in-body",
+			Version: 1,
+			Doc:     "Hook- and guard-authored refusals recovered from the tool_result BODY, which is where they actually land.",
+			Params:  []Param{{Name: "head", Doc: "how many characters of the body's opening the marker must appear in", Default: "200", Numeric: true}},
+			Notes: "THE SIBLING OF `hook-rejections`, NOT ITS REPLACEMENT. That query reads the " +
+				"structured `hookErrors` payload and is correct; measured 2026-08-14 over 408,651 " +
+				"indexed events it returns ZERO rows, because 406,373 events carry no hookErrors key " +
+				"at all and the remaining 2,278 carry a literal `[]`. Meanwhile the refusals " +
+				"themselves are right there in the result body. Both queries stay: this one collects " +
+				"the signal today, that one is the durable detector if Claude Code ever populates the " +
+				"field, and a row can legitimately appear in only one of them.\n" +
+				"MEASURED CALIBRATION (whole corpus, 2026-08-14): 160 rows across 78 sessions, 100 of " +
+				"them in a subagent, in 6 kinds — blocked 115, refusing 32, must-include 5, " +
+				"deny-listed 4, prohibited 3, hook-error 1. Against the two ground-truth classes bead " +
+				"pg2-v150u names it is 41/41 on `access to .git directory is blocked` and 5/5 on the " +
+				"missing-🤖-emoji PR-comment refusal, i.e. RECALL 46/46 = 100%. Precision was checked " +
+				"by hand over all 77 distinct openings the query returns: 77/77 are real refusals, so " +
+				"0 false positives. Note the emoji class measures 5 TODAY where the 2026-07-29 census " +
+				"counted 12 — 4 of the 5 predate that census, so 8 of its 12 are no longer in the " +
+				"corpus (ephemeral `/Volumes/ziprecruiter-slot-*` project directories are pruned). The " +
+				"12 is a historical reading and MUST NOT be used as a present-day denominator.\n" +
+				"WHY THE MARKER MUST BE IN THE OPENING, NOT ANYWHERE IN THE BODY. A body that merely " +
+				"MENTIONS a refusal is not one, and the corpus contains the worst possible example: " +
+				"`go test ./internal/rules/primarycommit` prints the hook's own refusal text VERBATIM " +
+				"in its failure output, so a bare `content LIKE '%refusing%'` counts the hook's unit " +
+				"test as a hook rejection. Two structural guards handle it. (1) The marker must fall " +
+				"inside the body's OPENING — the prefix up to the first newline or sentence end, " +
+				"capped at :head — which drops an Edit whose `String to replace not found` payload " +
+				"happens to discuss blocking. (2) A body beginning `Exit code` is excluded outright, " +
+				"and that exclusion is grounded in the MECHANISM rather than tuned: a hook denies " +
+				"BEFORE the command runs, so a refusal never has an exit code to report. 1,267 of the " +
+				"corpus's 2,416 error bodies begin that way and they are where every mention-only " +
+				"false positive lives.\n" +
+				"OVERLAP IS EXCLUDED, NOT DEDUPLICATED. The three refusal templates `denied-tool-calls` " +
+				"owns (user-rejected, permission-denied, classifier-denied) plus the two " +
+				"`requires approval` prompts are filtered out here, so the two queries never count the " +
+				"same row. The classifier denial in particular OPENS with `Blocked by classifier`, so " +
+				"without the exclusion it would arrive in both.\n" +
+				"THE VOCABULARY IS REFUSAL VERBS, and it is derived from the hook implementations " +
+				"rather than guessed: every marker below is either a `Decision: hookio.Reject` reason " +
+				"string in `packages/claude-extended-tool-approver/internal/rules/*` (blocked, " +
+				"refusing, prohibited, forbidden, deny-listed/deny-read/deny-write, requires human, " +
+				"must be run outside, not in the allowed set) or a wording measured in the corpus " +
+				"(`Blocked:`, `was blocked`, `must include`). The refusal verb is matched in its " +
+				"ACTIVE forms only — `refusing`/`refuses`, never a bare `refused` — because " +
+				"`connection refused` is the most common error string in computing and is not a " +
+				"verdict about anything; all 32 matched rows use the active form, so the " +
+				"narrowing costs nothing measured. `forbidden`, `requires human` and " +
+				"`not-allowed` currently match 0 rows — they are grounded in shipped Reject reasons " +
+				"that have not fired yet, which is the point of writing them from the implementation. " +
+				"KEYING ON VERBS RATHER THAN PHRASES IS WHAT SURVIVES REWORDING, and the rewording is " +
+				"not hypothetical: the gitdir rule now says `refusing to write git metadata under " +
+				".git/ directly` where it once said `access to .git directory is blocked`, and " +
+				"primary-commit now says `refusing this commit. Directory evaluated: …` where it once " +
+				"said `refusing a commit on the primary branch (main)`. All four wordings are in the " +
+				"corpus and all four match.\n" +
+				"THE KNOWN MISS, STATED SO THE RECALL IS NOT OVERSTATED: a guard whose refusal " +
+				"contains no refusal verb is invisible here. The measured example is the Jira " +
+				"greenlist guard on `mcp__Atlassian-MCP-Server__searchJiraIssuesUsingJql` — 43 rows " +
+				"reading `JQL has no 'project = …' clause. Add an explicit project filter " +
+				"restricted to the greenlist […]` — which is a refusal in substance and matches " +
+				"nothing. So recall over the hand-enumerated inventory of guard refusals in this " +
+				"corpus is 160/203 = 78.8%, and it is the 100% on the two named calibration classes " +
+				"that is the tuned figure. Adding that class would mean naming a deployment-specific " +
+				"string, which is the `approverRefusals` pattern in internal/route/report.go and is a " +
+				"deliberate later choice, not an oversight.\n" +
+				"`opening` is the RAW prefix (evidence a reader can check); `signature` is the " +
+				"normalized whole-body key, so `ls in '/a' was blocked` and `ls in '/b' was blocked` " +
+				"group as one finding rather than two.",
+			Window: true,
+			SQL: `
+WITH bodies AS (
+  SELECT r.tool_use_id                                                       AS tool_use_id,
+         r.path                                                              AS path,
+         r.seq                                                               AS seq,
+         r.signature                                                         AS signature,
+         -- Claude Code wraps SOME tool errors in <tool_use_error>…</tool_use_error> and
+         -- leaves hook-authored refusals bare, so the wrapper is stripped before the
+         -- opening is cut. '<tool_use_error>' is 16 characters, so the body starts at 17
+         -- — and the off-by-one here is not theoretical: substr(...,18) decapitates the
+         -- marker, which hid the whole "Blocked: sleep …" family (52 of the 160 measured
+         -- rows) behind a leading "locked:" while every other class still matched.
+         CASE WHEN r.content LIKE '<tool_use_error>%'
+              THEN substr(r.content, 17) ELSE r.content END                  AS body
+  FROM tool_results r
+  WHERE r.is_error = 1 AND r.content IS NOT NULL
+),
+openings AS (
+  -- The OPENING is the prefix up to the first newline or sentence end, capped at :head.
+  -- MIN() here is SQLite's scalar min, not the aggregate: there is no GROUP BY.
+  SELECT tool_use_id, path, seq, signature, body,
+         substr(body, 1, MIN(
+           CASE WHEN instr(body, char(10)) > 0 THEN instr(body, char(10)) - 1 ELSE 1000000 END,
+           CASE WHEN instr(body, '. ')      > 0 THEN instr(body, '. ')      - 1 ELSE 1000000 END,
+           :head))                                                           AS opening
+  FROM bodies
+),
+refusals AS (
+  SELECT o.tool_use_id AS tool_use_id, o.path AS path, o.seq AS seq,
+         o.signature AS signature, o.opening AS opening,
+         -- First match wins, most specific first. LIKE is case-insensitive over ASCII
+         -- in SQLite, so 'Blocked' and 'blocked' need no separate patterns.
+         CASE
+           -- The harness's OWN label for a hook-authored failure. Most durable marker
+           -- there is, and it needs no verb: the measured example carries none.
+           WHEN o.body LIKE 'PreToolUse:%' OR o.body LIKE 'PostToolUse:%'   THEN 'hook-error'
+           WHEN o.opening LIKE '%blocked%'                                   THEN 'blocked'
+           -- refusING / refusES, never a bare "refused": "connection refused" is the
+           -- most common error string in computing and is not a hook verdict. The hook
+           -- implementations only ever emit the active form (three Reject sites in
+           -- internal/rules/gitdir, primarycommit and envvars), so narrowing here costs
+           -- nothing measured — all 32 matched rows use "refusing" — and closes a hole
+           -- the day a bare network error arrives without an "Exit code" prefix.
+           WHEN o.opening LIKE '%refusing%' OR o.opening LIKE '%refuses%'     THEN 'refusing'
+           WHEN o.opening LIKE '%prohibited%'                                THEN 'prohibited'
+           WHEN o.opening LIKE '%forbid%'                                    THEN 'forbidden'
+           WHEN o.opening LIKE '%denylist%'   OR o.opening LIKE '%deny-listed%'
+             OR o.opening LIKE '%deny-read%'  OR o.opening LIKE '%deny-write%'
+                                                                            THEN 'deny-listed'
+           WHEN o.opening LIKE '%requires human%'                            THEN 'requires-human'
+           WHEN o.opening LIKE '%must include%'
+             OR o.opening LIKE '%must be run outside%'                       THEN 'must-include'
+           WHEN o.opening LIKE '%not in the allowed set%'
+             OR o.opening LIKE '%is not allowed%'                            THEN 'not-allowed'
+           ELSE ''
+         END                                                                 AS kind
+  FROM openings o
+  -- A hook denies BEFORE the command runs, so a refusal has no exit code to report.
+  -- Every mention-only false positive measured lives behind this one clause.
+  WHERE o.body NOT LIKE 'Exit code%'
+    -- Owned by denied-tool-calls; excluded so the two queries never count one row twice.
+    AND o.body NOT LIKE 'The user doesn''t want to proceed%'
+    AND o.body NOT LIKE 'Permission for this tool use was denied%'
+    AND o.body NOT LIKE 'Permission for this action was denied%'
+    -- The permission layer's approval prompts. Not a hook, and not a refusal either.
+    AND o.body NOT LIKE 'This command requires approval%'
+    AND o.body NOT LIKE 'This Bash command contains multiple operations%'
+)
+SELECT f.kind                        AS kind,
+       e.session_id                  AS session_id,
+       COALESCE(e.is_sidechain, 0)   AS is_sidechain,
+       c.tool_name                   AS tool_name,
+       c.lead_cmd                    AS lead_cmd,
+       f.path                        AS path,
+       f.seq                         AS seq,
+       e.ts                          AS ts,
+       f.opening                     AS opening,
+       f.signature                   AS signature
+FROM refusals f
+JOIN events e ON e.path = f.path AND e.seq = f.seq
+LEFT JOIN tool_calls c ON c.tool_use_id = f.tool_use_id
+WHERE f.kind <> '' AND ` + win("e") + `
+ORDER BY f.path, f.seq`,
 		},
 		{
 			Name:    "undo-signatures",

@@ -220,6 +220,32 @@ func TestPromptCarriesEveryCandidateIDAndTheSignalGuide(t *testing.T) {
 	}
 }
 
+// TestEveryPrimarySignalHasAGlossaryEntry is the guard the pg2-v150u detector needed
+// and did not have: the rubric TELLS the model it needs the per-signal guide to read
+// the evidence, so a detector shipped without an entry hands the classifier 160
+// candidates whose meaning it was never given. That is a silent precision loss —
+// the run still completes and still reports a number.
+//
+// hook-rejection is exempt because it is structurally unreachable: it returns zero
+// rows corpus-wide (Claude Code writes `hookErrors: []`), so no candidate of that
+// signal ever reaches a prompt. If it starts producing rows, the field began arriving
+// and it needs an entry — which is exactly when this list should be revisited.
+func TestEveryPrimarySignalHasAGlossaryEntry(t *testing.T) {
+	exempt := map[candidate.Signal]bool{candidate.HookRejection: true}
+	for _, sig := range []candidate.Signal{
+		candidate.TypedTurn, candidate.Interruption, candidate.Denial,
+		candidate.HookRejection, candidate.HookRefusalBody, candidate.Undo,
+		candidate.Churn, candidate.EscapingRetry, candidate.Ack,
+	} {
+		if exempt[sig] {
+			continue
+		}
+		if !strings.Contains(rubric, string(sig)) {
+			t.Errorf("the rubric's signal guide has no entry for %q; the classifier would be judging evidence it was never told the meaning of", sig)
+		}
+	}
+}
+
 // TestEvaluateAgainstGold is criterion 4's machinery, on a hand-built confusion
 // matrix so the arithmetic is checkable without a model.
 func TestEvaluateAgainstGold(t *testing.T) {

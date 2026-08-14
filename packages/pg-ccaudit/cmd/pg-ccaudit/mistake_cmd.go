@@ -55,7 +55,8 @@ func addCensusFlags(fs *flag.FlagSet) *censusFlags {
 func signalNames() []string {
 	return []string{
 		string(candidate.TypedTurn), string(candidate.Interruption), string(candidate.Denial),
-		string(candidate.HookRejection), string(candidate.Undo), string(candidate.Churn),
+		string(candidate.HookRejection), string(candidate.HookRefusalBody),
+		string(candidate.Undo), string(candidate.Churn),
 		string(candidate.EscapingRetry), string(candidate.Ack),
 	}
 }
