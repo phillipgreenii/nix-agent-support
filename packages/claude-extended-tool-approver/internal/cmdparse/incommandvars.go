@@ -220,7 +220,7 @@ func declWrites(pc ParsedCommand, reads bool) (writes []EnvAssignment, readValue
 	// the whole leaf, because a flag applies to the names that follow it and this seam
 	// does not model which.
 	for _, arg := range pc.Args {
-		if isDeclFlag(arg) || !(isEnvAssign(arg) || isValidEnvName(arg)) {
+		if isDeclFlag(arg) || (!isEnvAssign(arg) && !isValidEnvName(arg)) {
 			readValues = false
 		}
 	}
