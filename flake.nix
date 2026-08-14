@@ -132,6 +132,13 @@
           ccpool = final.callPackage ./packages/ccpool {
             inherit (goBuilders) mkGoApp;
           };
+          # pg-ccaudit: Pattern A (ADR 0008) — a self-contained Go module with no
+          # local `replace`, so no sibling needs to be in the same store tree.
+          # It deliberately does NOT reuse claude-transcript; see the rationale in
+          # packages/pg-ccaudit/default.nix.
+          pg-ccaudit = final.callPackage ./packages/pg-ccaudit {
+            inherit (goBuilders) mkGoApp;
+          };
           pr-pool = final.callPackage ./packages/pr-pool {
             inherit (goBuilders) mkGoApp;
             # No top-level bd/beads overlay attr — resolve it directly here (mirrors pb below).
@@ -447,6 +454,7 @@
                 "claude-extended-tool-approver"
                 "pa-monitor-decorator-scope"
                 "claude-transcript"
+                "pg-ccaudit"
               ];
 
               # Pattern B (local `replace => ../sibling`): root the fileset at
@@ -771,6 +779,83 @@
                 gomod2nixToml = ./packages/pb/gomod2nix.toml;
                 testDeps = [ pkgs.git ];
               };
+
+              # pg-ccaudit — the ingest / query / store / lock suites. None of the
+              # gates below is optional:
+              #   * ingest builds every scenario in t.TempDir() from the COMMITTED
+              #     fixture corpus (packages/pg-ccaudit/internal/ingest/testdata)
+              #     and never reads the real transcript corpus or the real index —
+              #     a test that pointed at either would be testing whatever state
+              #     the machine happened to be in.
+              #   * query asserts every canned query against HAND-COMPUTED answers
+              #     over that fixture. "Returns without error" is not the bar: a
+              #     query that silently groups the wrong thing returns cleanly and
+              #     reports a wrong number.
+              #   * lock covers the single-instance writer (T-12), including a
+              #     concurrent-contender case, which is why -race matters here.
+              # No testDeps: the suite shells out to nothing.
+              pg-ccaudit-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
+                pname = "pg-ccaudit-go-tests";
+                src = lib.cleanSource ./packages/pg-ccaudit; # matches default.nix
+                gomod2nixToml = ./packages/pg-ccaudit/gomod2nix.toml;
+              };
+
+              # T-14 enforcement, mechanical rather than aspirational: the
+              # pg-ccaudit plugin MUST NOT ship a hooks manifest.
+              #
+              # Ingestion is a scheduled launchd sweep precisely BECAUSE a
+              # session-end hook only fires when a session terminates cleanly, and
+              # abnormally-killed sessions are disproportionately the interesting
+              # ones — a stalled or crashed session is itself evidence of the waste
+              # being measured. A well-meaning later edit adding a SessionEnd hook
+              # "so the index stays fresh" would quietly reintroduce exactly that
+              # blind spot while looking like an improvement, so the absence is a
+              # build gate. The sibling ccpool plugin DOES ship hooks; this check
+              # is deliberately scoped to the pg-ccaudit plugin dir alone.
+              test-pg-ccaudit-declares-no-hooks =
+                let
+                  plugin = lib.fileset.toSource {
+                    root = ./claude-marketplace/pg-ccaudit;
+                    fileset = ./claude-marketplace/pg-ccaudit;
+                  };
+                in
+                pkgs.runCommand "test-pg-ccaudit-declares-no-hooks" { } ''
+                  set -eu
+                  if [ -e ${plugin}/hooks ]; then
+                    echo "FAIL: the pg-ccaudit plugin ships a hooks/ directory." >&2
+                    echo "Ingestion is a SCHEDULED launchd sweep on purpose: a session-end hook" >&2
+                    echo "fires only for sessions that end cleanly, and the abnormally-terminated" >&2
+                    echo "ones are disproportionately the interesting cases — a stalled or crashed" >&2
+                    echo "session IS the waste being measured. A hook here would create a coverage" >&2
+                    echo "blind spot that looks like full coverage." >&2
+                    exit 1
+                  fi
+                  if grep -rniq -e 'sessionend' -e 'session_end' ${plugin}/.claude-plugin; then
+                    echo "FAIL: the pg-ccaudit plugin manifest references a session-end event." >&2
+                    exit 1
+                  fi
+                  # The skill's leading instruction is the entire point of the
+                  # plugin; if it is ever edited away, the next agent re-earns the
+                  # stalled raw scan this tooling was built to retire.
+                  skill=${plugin}/skills/tool-error-waste-review/SKILL.md
+                  if [ ! -f "$skill" ]; then
+                    echo "FAIL: the review skill is missing" >&2
+                    exit 1
+                  fi
+                  if ! head -40 "$skill" | grep -q 'DATABASE ALREADY EXISTS'; then
+                    echo "FAIL: the review skill's opening instruction no longer states that the" >&2
+                    echo "database already exists and is to be queried. That line is the whole" >&2
+                    echo "point: without it the next agent scans ~1.7 GiB of raw JSONL and stalls" >&2
+                    echo "its own progress watchdog, which is the failure this plugin retires." >&2
+                    exit 1
+                  fi
+                  if ! grep -q 'MUST NOT read' "$skill"; then
+                    echo "FAIL: the review skill no longer forbids reading the raw JSONL corpus." >&2
+                    exit 1
+                  fi
+                  echo "ok: pg-ccaudit plugin ships no hooks; the review skill leads with query-the-database"
+                  touch $out
+                '';
 
               # pg-pr — 100+ internal/pkg suites incl. sync/store/auth security
               # seams. exec is temp-repo git (git on PATH) + in-process httptest
@@ -2817,6 +2902,7 @@
               pa-monitor
               pa-monitor-decorator-scope
               pg-pr
+              pg-ccaudit
               integrate-branch-support
               ;
             # codeburn is a manual-bump npm package (not Go/nix-update); re-exported so

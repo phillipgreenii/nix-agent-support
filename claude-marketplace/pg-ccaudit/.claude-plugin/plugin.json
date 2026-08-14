@@ -1,0 +1,6 @@
+{
+  "name": "pg-ccaudit",
+  "description": "Tool-error waste review driven by the pg-ccaudit SQLite index of Claude Code transcripts. Query the pre-built index with named, versioned canned queries — never scan the raw JSONL corpus.",
+  "version": "1.0.0",
+  "defaultEnabled": true
+}

@@ -7,6 +7,7 @@
     ./modules/pa-monitor
     ./modules/pr-pool
     ./modules/ccpool
+    ./modules/pg-ccaudit
     ./modules/ollama
     ./modules/codeburn
   ];

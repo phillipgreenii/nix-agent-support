@@ -25,6 +25,7 @@
     ./programs/claude-extended-tool-approver
     ./programs/git-tools
     ./programs/pg-pr
+    ./programs/pg-ccaudit
     ./programs/integrate-branch-support
     ./programs/pnwf
     # wsplan: pnwf's sibling command from the same repo-base module (Stage A of
