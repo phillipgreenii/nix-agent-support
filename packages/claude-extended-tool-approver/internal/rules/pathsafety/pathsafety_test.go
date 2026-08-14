@@ -2,6 +2,7 @@ package pathsafety
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -733,5 +734,83 @@ func TestPathSafety_WriteAgentConfig_DenyWriteStillRejects(t *testing.T) {
 	got := hookio.Verdict(r.Evaluate(writeInput("Write", project+"/.claude/settings.local.json", project)))
 	if got.Decision != hookio.Reject {
 		t.Errorf("deny-write agent config: got %s (%s), want reject (explicit user config wins)", got.Decision, got.Reason)
+	}
+}
+
+// TestADR0044_PathSafety_RefusedSites is the per-rule half of pg2-qxe85's census for
+// path-safety: the three sites pg2-d0ja3 left as ErrNotApplicable now REFUSE.
+//
+// Path-safety is the highest-value rule in the remainder, because it is the one whose
+// not-applicable was most easily mistaken for an exhaustion: it runs EARLY (before mcp and
+// every Bash rule), it is the only rule that classifies a file-tool path at all, and its
+// declines therefore reached the loop exhaustion with nobody having said anything. A
+// consumer reading "no rule modelled this path" where the truth is "the evaluator declined
+// to clear it" is the approval-widening misreading ADR 0044 exists to stop.
+//
+// The assertion is a RELATION, not a hardcoded verdict: refused, with a floor no weaker
+// than NoOpinion, attributed to this rule, and still matching ErrNotApplicable so an
+// un-upgraded consumer keeps working.
+func TestADR0044_PathSafety_RefusedSites(t *testing.T) {
+	pe := patheval.New("/home/user/project")
+	r := New(pe)
+	tests := []struct {
+		site      string
+		tool      string
+		toolInput map[string]string
+	}{
+		{
+			site: "Read of a path the evaluator will not clear", tool: "Read",
+			toolInput: map[string]string{"file_path": "/usr/bin/ls"},
+		},
+		{
+			site: "Write to a path the evaluator will not clear", tool: "Write",
+			toolInput: map[string]string{"file_path": "/etc/hosts", "content": "x"},
+		},
+		{
+			site: "search over a path the evaluator will not clear", tool: "Glob",
+			toolInput: map[string]string{"pattern": "*", "path": "/usr/local/bin"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.site, func(t *testing.T) {
+			input := &hookio.HookInput{ToolName: tt.tool, ToolInput: mustJSON(tt.toolInput), CWD: "/home/user/project"}
+			res, err := r.Evaluate(input)
+			if !errors.Is(err, hookio.ErrRefused) {
+				t.Fatalf("%s: err=%v res=%+v, want ErrRefused — a declined path reported as not-applicable reads as an EXHAUSTION", tt.site, err, res)
+			}
+			if res.Decision < hookio.NoOpinion {
+				t.Errorf("%s: floor is %s, weaker than NoOpinion", tt.site, res.Decision)
+			}
+			if res.Reason == "" || res.Module != r.Name() {
+				t.Errorf("%s: floor = %+v, want a reasoned refusal attributed to %q", tt.site, res, r.Name())
+			}
+			if !errors.Is(err, hookio.ErrNotApplicable) {
+				t.Errorf("%s: refusal does not match ErrNotApplicable; the engine would file it as a FAILURE", tt.site)
+			}
+		})
+	}
+}
+
+// TestADR0044_PathSafety_AgentConfigSiteStaysTerminal is the boundary this conversion must
+// not cross, and it is asserted separately because the two shapes look alike in a diff.
+//
+// ADR 0041 requires the agent-config write branch to STOP the chain: a refusal continues
+// it, so converting that site would let a later rule act on a write ADR 0041 exists to
+// keep un-approved. It stays a terminal NoOpinion with a nil error — the ONE site in the
+// ruleset with that shape.
+func TestADR0044_PathSafety_AgentConfigSiteStaysTerminal(t *testing.T) {
+	pe := patheval.New("/home/user/project")
+	r := New(pe)
+	input := &hookio.HookInput{
+		ToolName:  "Write",
+		ToolInput: mustJSON(map[string]string{"file_path": "/home/user/project/.claude/settings.local.json", "content": "{}"}),
+		CWD:       "/home/user/project",
+	}
+	res, err := r.Evaluate(input)
+	if err != nil {
+		t.Fatalf("agent-config write returned err=%v; ADR 0041 requires a TERMINAL verdict, and any error (refusal included) continues the chain", err)
+	}
+	if res.Decision != hookio.NoOpinion {
+		t.Errorf("agent-config write = %s, want abstain (ADR 0041)", res.Decision)
 	}
 }

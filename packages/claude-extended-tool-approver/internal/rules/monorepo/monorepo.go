@@ -76,9 +76,17 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 			if dangerousEnvs, ok := r.dangerousEnvByWrapper[basename]; ok {
 				for _, ev := range pc.EnvVars {
 					if dangerousEnvs[ev.Name] {
-						// Not applicable (ADR 0043): the chain must continue. Former Reason,
-						// kept because it is the only record of WHY: "monorepo: " + basename + " with dangerous env var: " + ev.Name + " (deferred to claude-code)"
-						return hookio.NotApplicable()
+						// ADR 0044 REFUSAL, not a not-applicable. The basename IS on this
+						// consumer's approved list — the rule was one step from approving it —
+						// and the dangerous env assignment is the reason it does not. Reported
+						// as a not-applicable that judgement is indistinguishable from a
+						// wrapper no rule has ever heard of (an EXHAUSTION), and exhaustion is
+						// the half a consumer may clear, so under-conversion is the
+						// APPROVAL-WIDENING direction. As a floor the chain still continues, so
+						// a later rule's Ask/Reject wins and only an Approve of this same
+						// wrapper (e.g. build-tools reaching the same basename) is demoted —
+						// which is the intended effect, not a side effect.
+						return hookio.Refused(r.Name(), "monorepo: "+basename+" with dangerous env var: "+ev.Name+" (deferred to claude-code)")
 					}
 				}
 			}

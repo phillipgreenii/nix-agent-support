@@ -184,3 +184,52 @@ func TestWebFetch_UnparseableURLIsAGenuineError(t *testing.T) {
 		}
 	})
 }
+
+// TestADR0044_WebFetch_ReleaseDownloadRefuses is the per-rule half of pg2-qxe85's census
+// for webfetch: its single site now REFUSES.
+//
+// The site is a CARVE-OUT of this rule's own approve — github.com is on the allowlist and
+// every other path under it is cleared, so the release-asset branch is the one shape the
+// rule looked at and declined. Reported as not-applicable that decision was
+// indistinguishable from a URL on no allowlist at all (an EXHAUSTION), which is the half a
+// consumer may act on to clear the fetch.
+//
+// The control row is the point of the relation: the allowlisted page must still APPROVE, so
+// the floor is proven to be scoped to the leaf that earned it rather than to the host.
+func TestADR0044_WebFetch_ReleaseDownloadRefuses(t *testing.T) {
+	r := New()
+	in := func(u string) *hookio.HookInput {
+		return &hookio.HookInput{ToolName: "WebFetch", ToolInput: mustJSON(map[string]string{"url": u, "prompt": "x"})}
+	}
+
+	res, err := r.Evaluate(in("https://github.com/o/r/releases/download/v1.0/binary.tar.gz"))
+	if !errors.Is(err, hookio.ErrRefused) {
+		t.Fatalf("release download: err=%v res=%+v, want ErrRefused", err, res)
+	}
+	if res.Decision < hookio.NoOpinion {
+		t.Errorf("release download: floor is %s, weaker than NoOpinion", res.Decision)
+	}
+	if res.Reason == "" || res.Module != r.Name() {
+		t.Errorf("release download: floor = %+v, want a reasoned refusal attributed to %q", res, r.Name())
+	}
+	if !errors.Is(err, hookio.ErrNotApplicable) {
+		t.Error("release download: refusal does not match ErrNotApplicable; the engine would file it as a FAILURE")
+	}
+
+	// An ordinary allowlisted page is UNAFFECTED: the conversion must not turn this rule's
+	// approve into a floor for the whole host.
+	res, err = r.Evaluate(in("https://github.com/o/r"))
+	if err != nil || res.Decision != hookio.Approve {
+		t.Errorf("ordinary GitHub page = %+v (err=%v), want approve — the refusal is scoped to the release path", res, err)
+	}
+
+	// A host on no allowlist stays a genuine not-applicable, NOT a refusal: this rule never
+	// examined it, so claiming a refusal would assert a judgement that was not made.
+	res, err = r.Evaluate(in("https://evil.example/x"))
+	if errors.Is(err, hookio.ErrRefused) {
+		t.Errorf("unallowlisted host reported a REFUSAL (%+v); it was never examined", res)
+	}
+	if !errors.Is(err, hookio.ErrNotApplicable) {
+		t.Errorf("unallowlisted host: err=%v, want ErrNotApplicable", err)
+	}
+}

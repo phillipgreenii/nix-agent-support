@@ -2,6 +2,7 @@ package docker
 
 import (
 	"encoding/json"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -228,5 +229,48 @@ func TestDockerRule_Name(t *testing.T) {
 	r := New(&mockEvaluator{}, nil)
 	if got := r.Name(); got != "docker" {
 		t.Errorf("Name() = %q, want docker", got)
+	}
+}
+
+// TestADR0044_Docker_UnparseableMountRefuses is the per-rule half of pg2-qxe85's census for
+// docker: its single site now REFUSES.
+//
+// The shape is the strongest argument in the whole census. Everything the rule needs in
+// order to delegate is present — `run`, `--rm`, an image, an inner command — and the ONE
+// thing that stops it is a mount spec it could not parse. The unparseable mount is exactly
+// what makes the inner command's paths unjudgeable, so the leaf is un-clearable BECAUSE
+// this rule examined it. Reported as not-applicable it reads as "no rule models docker",
+// which is the approval-widening direction and the worst possible one for a container
+// mounting the host somewhere unknown.
+//
+// It is the same fail-safe reading as the engine's unparseable-expression floor (ADR 0039's
+// I1b): "I could not read this" is a floor, never an absence.
+func TestADR0044_Docker_UnparseableMountRefuses(t *testing.T) {
+	mockEval := &mockEvaluator{defaultResult: hookio.RuleResult{Decision: hookio.Approve, Reason: "ok", Module: "mock"}}
+	r := New(mockEval, patheval.New("/home/user/project"))
+	in := func(cmd string) *hookio.HookInput {
+		return &hookio.HookInput{ToolName: "Bash", CWD: "/home/user/project", ToolInput: mustJSON(map[string]string{"command": cmd})}
+	}
+
+	res, err := r.Evaluate(in(`docker run --rm -v :::: alpine sh -c "ls /"`))
+	if !errors.Is(err, hookio.ErrRefused) {
+		t.Fatalf("unparseable mount spec: err=%v res=%+v, want ErrRefused", err, res)
+	}
+	if res.Decision < hookio.NoOpinion {
+		t.Errorf("floor is %s, weaker than NoOpinion", res.Decision)
+	}
+	if res.Reason == "" || res.Module != r.Name() {
+		t.Errorf("floor = %+v, want a reasoned refusal attributed to %q", res, r.Name())
+	}
+	if !errors.Is(err, hookio.ErrNotApplicable) {
+		t.Error("refusal does not match ErrNotApplicable; the engine would file it as a FAILURE")
+	}
+
+	// A well-formed mount is UNAFFECTED — the mock clears the inner command, so the rule
+	// still forwards an approve. This is what proves the floor is scoped to the parse
+	// failure and not to `docker run` as a family.
+	res, err = r.Evaluate(in(`docker run --rm -v /home/user/project:/w alpine ls`))
+	if err != nil || res.Decision != hookio.Approve {
+		t.Errorf("well-formed mount = %+v (err=%v), want the inner verdict forwarded (approve)", res, err)
 	}
 }

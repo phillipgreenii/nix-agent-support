@@ -113,6 +113,26 @@ func (r *Rule) Name() string {
 	return "kubectl"
 }
 
+// refuse is this rule's ADR 0044 refusal-and-continue return. Every site that uses it
+// has the same shape: the executable IS a kubectl (or a configured alias), the verb HAS
+// been classified, this rule will not clear the invocation — and yet it must not stop
+// the chain, because build-tools and sqlite3 still run after it.
+//
+// ADR 0043 had no outcome for that, so these sites became ErrNotApplicable and their
+// reasons were demoted to comments opening "Former Reason, kept because it is the only
+// record of WHY". This restores each one as a real Reason, and the restoration is not
+// cosmetic: reported as a not-applicable, `kubectl delete pod x` is indistinguishable
+// from a basename no rule has ever heard of — an EXHAUSTION — and exhaustion is the half
+// a consumer may act on to clear a body. Under-conversion is therefore the
+// APPROVAL-WIDENING direction, which is why each of these five sites is a refusal and
+// not a not-applicable.
+//
+// It can only make a leaf MORE restrictive: the engine folds it as a floor and keeps
+// going, so a later rule's Ask or Reject still wins and nothing is shadowed.
+func (r *Rule) refuse(reason string) (hookio.RuleResult, error) {
+	return hookio.Refused(r.Name(), reason)
+}
+
 func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 	if input.ToolName != "Bash" {
 		return hookio.NotApplicable()
@@ -128,31 +148,31 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		}
 		operation := r.extractOperation(pc.Args)
 		if operation == "" {
+			// DELIBERATELY NOT a refusal (ADR 0044). No verb was found, so nothing was
+			// classified and this rule has examined nothing it could withhold — `kubectl`
+			// with no operand, or an argv whose bare tokens are all consumed as flag
+			// values. Reporting it as a refusal would claim an examination that did not
+			// happen, and the fail-safe direction only runs one way: a refusal must be
+			// backed by a judgement.
 			return hookio.NotApplicable()
 		}
 		if r.execOps[operation] {
 			if r.isDevWorkspaceScope(operation, pc.Args, pc.EnvVars) {
 				return r.evaluateExec(pc.Args, input)
 			}
-			// Not applicable (ADR 0043): the chain must continue. Former Reason,
-			// kept because it is the only record of WHY: "non-dev kubectl exec (defer to mode/settings)"
-			return hookio.NotApplicable()
+			return r.refuse("kubectl: non-dev kubectl exec (defer to mode/settings)")
 		}
 		if operation == "rollout" {
 			if rolloutReadOnlySubcommands[r.rolloutSubcommand(pc.Args)] {
 				return hookio.RuleResult{Decision: hookio.Approve, Reason: "read-only kubectl command", Module: r.Name()}, nil
 			}
-			// Not applicable (ADR 0043): the chain must continue. Former Reason,
-			// kept because it is the only record of WHY: "modifying kubectl command (defer)"
-			return hookio.NotApplicable()
+			return r.refuse("kubectl: modifying kubectl command (defer)")
 		}
 		if r.scopedApproveOps[operation] {
 			if r.isDevWorkspaceScope(operation, pc.Args, pc.EnvVars) {
 				return hookio.RuleResult{Decision: hookio.Approve, Reason: "kc dev-workspace command", Module: r.Name()}, nil
 			}
-			// Not applicable (ADR 0043): the chain must continue. Former Reason,
-			// kept because it is the only record of WHY: "non-dev kc command (defer)"
-			return hookio.NotApplicable()
+			return r.refuse("kubectl: non-dev kc command (defer)")
 		}
 		if r.readOnlyOps[operation] {
 			return hookio.RuleResult{
@@ -162,9 +182,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 			}, nil
 		}
 		// Everything else (apply, delete, scale, exec, etc.) -> defer to mode/settings
-		// Not applicable (ADR 0043): the chain must continue. Former Reason,
-		// kept because it is the only record of WHY: "modifying kubectl command (defer)"
-		return hookio.NotApplicable()
+		return r.refuse("kubectl: modifying kubectl command (defer)")
 	}
 	return hookio.NotApplicable()
 }
@@ -174,11 +192,15 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 func (r *Rule) evaluateExec(args []string, input *hookio.HookInput) (hookio.RuleResult, error) {
 	inner := innerAfterDoubleDash(args)
 	if len(inner) == 0 {
-		// Not applicable (ADR 0043): the chain must continue. Former Reason,
-		// kept because it is the only record of WHY: "kc exec without inner command"
-		return hookio.NotApplicable()
+		return r.refuse("kubectl: kc exec without inner command")
 	}
 	if r.exprEval == nil {
+		// DELIBERATELY NOT a refusal (ADR 0044). A nil evaluator is a CONSTRUCTION
+		// state, not a judgement about this command: the rule was built without the
+		// recursion it needs, so it never looked at the inner expression at all. That is
+		// the "could not determine" shape, and ADR 0043's error policy keeps it out of
+		// the refusal channel — claiming a refusal here would attribute a judgement to a
+		// rule that is structurally unable to make one.
 		return hookio.NotApplicable()
 	}
 	innerExpr := extractInnerCommand(inner)

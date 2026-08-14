@@ -78,9 +78,19 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		return hookio.NotApplicable()
 	}
 	if abstainTools[input.ToolName] {
-		// Not applicable (ADR 0043): the chain must continue. Former Reason,
-		// kept because it is the only record of WHY: "claude-tools: " + input.ToolName + " is a user-interaction tool (always abstain)"
-		return hookio.NotApplicable()
+		// ADR 0044 REFUSAL, not a not-applicable. abstainTools is a DELIBERATE EXCLUSION
+		// from the allowlist directly above it, decided in pg2-9cist: these tools gate the
+		// native plan-review transition, so approving their PreToolUse would short-circuit
+		// that gate. That is a judgement about the tool, and reporting it as a
+		// not-applicable makes ExitPlanMode indistinguishable from a tool name ceta has
+		// never heard of (an EXHAUSTION) — the APPROVAL-WIDENING direction, and here it
+		// would erase the very record of why the tool is excluded.
+		//
+		// A refusal is the right shape rather than a terminal NoOpinion: the chain MUST
+		// continue, which is the property TestIntegration_KillShellThroughChain's "does not
+		// shadow the later path-safety rule" pins for this rule's other branches. The
+		// floor only demotes a later Approve.
+		return hookio.Refused(r.Name(), "claude-tools: "+input.ToolName+" is a user-interaction tool (always abstain)")
 	}
 	if fileTools[input.ToolName] {
 		return hookio.NotApplicable()

@@ -60,9 +60,15 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		segments := strings.Split(path, "/")
 		// Block release binary downloads (e.g. /owner/repo/releases/download/v1.0/binary.tar.gz)
 		if len(segments) >= 5 && segments[2] == "releases" && segments[3] == "download" {
-			// Not applicable (ADR 0043): the chain must continue. Former Reason,
-			// kept because it is the only record of WHY: "webfetch: GitHub release binary download (deferred to claude-code)"
-			return hookio.NotApplicable()
+			// ADR 0044 REFUSAL, not a not-applicable. This rule owns the host, matched the
+			// allowlist, parsed the path and DECIDED not to clear it — a release asset is
+			// an executable payload, which is the one github.com shape this rule carves
+			// out of its own approve. Reported as a not-applicable that decision would be
+			// indistinguishable from a URL on no allowlist at all (an EXHAUSTION), and
+			// exhaustion is the half a consumer may clear, so under-conversion here is the
+			// APPROVAL-WIDENING direction. The floor keeps the chain going, so a later
+			// rule's Ask/Reject still wins; only an Approve is demoted.
+			return hookio.Refused(r.Name(), "webfetch: GitHub release binary download (deferred to claude-code)")
 		}
 		return hookio.RuleResult{
 			Decision: hookio.Approve,

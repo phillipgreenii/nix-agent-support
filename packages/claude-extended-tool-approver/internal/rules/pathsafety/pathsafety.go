@@ -127,6 +127,28 @@ func (r *Rule) Name() string {
 	return "path-safety"
 }
 
+// refuse is this rule's ADR 0044 refusal-and-continue return. Every site that uses it
+// has the same shape: the tool IS one this rule governs, the path HAS been classified by
+// the PathEvaluator, the classification does not permit the access — and yet the chain
+// must not stop, because mcp and the Bash-only rules still run after it.
+//
+// ADR 0043 had no outcome for that, so these sites became ErrNotApplicable and their
+// reasons were demoted to comments opening "Former Reason, kept because it is the only
+// record of WHY". This restores each one as a real Reason, and it matters more here than
+// the comment census suggests: a path this rule DECLINED to clear reported as a
+// not-applicable is indistinguishable from a tool call no rule ever examined — an
+// EXHAUSTION — and exhaustion is the half a consumer may act on to clear an input.
+// Under-conversion is the APPROVAL-WIDENING direction.
+//
+// IT IS NOT THE ADR 0041 SITE, and the two must not be conflated. The agent-config write
+// branch below is a TERMINAL NoOpinion because ADR 0041 requires the chain to STOP there;
+// these three sites are floors because the chain must CONTINUE. A refusal can only make a
+// leaf MORE restrictive — the engine folds it and keeps going, so a later rule's Ask or
+// Reject still wins and nothing is shadowed.
+func (r *Rule) refuse(reason string) (hookio.RuleResult, error) {
+	return hookio.Refused(r.Name(), reason)
+}
+
 // isAgentConfigWrite applies isAgentConfigPath to the tool's raw path argument,
 // normalized two ways: the path as NAMED (env/~/cwd-relative expansion only) and the
 // symlink-RESOLVED path. Either shape matching is a hit — the named form so a config
@@ -154,9 +176,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 			if access.CanRead() {
 				return hookio.RuleResult{Decision: hookio.Approve, Reason: "path allows read: " + path, Module: r.Name()}, nil
 			}
-			// Not applicable (ADR 0043): the chain must continue. Former Reason,
-			// kept because it is the only record of WHY: "path is " + access.String() + " " + path + " (deferred to claude-code)"
-			return hookio.NotApplicable()
+			return r.refuse("path-safety: path is " + access.String() + " " + path + " (deferred to claude-code)")
 		case "Write", "Edit", "MultiEdit", "Delete":
 			if r.eval.IsDenyWrite(path) {
 				return hookio.RuleResult{Decision: hookio.Reject, Reason: "path is deny-write: " + path, Module: r.Name()}, nil
@@ -192,10 +212,11 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 			if access.CanWrite() {
 				return hookio.RuleResult{Decision: hookio.Approve, Reason: "path allows write: " + path, Module: r.Name()}, nil
 			}
-			// Not applicable (ADR 0043): the chain must continue. Former Reason,
-			// kept because it is the only record of WHY: "path access unknown: " + path + " (deferred to claude-code)"
-			return hookio.NotApplicable()
+			return r.refuse("path-safety: path access unknown: " + path + " (deferred to claude-code)")
 		default:
+			// Unreachable in practice (fileTools gates the switch), and DELIBERATELY not a
+			// refusal: a tool name this switch does not enumerate has had no path
+			// classified, so there is no judgement to floor.
 			return hookio.NotApplicable()
 		}
 	} else if searchTools[input.ToolName] {
@@ -231,7 +252,5 @@ func (r *Rule) evaluateSearch(input *hookio.HookInput) (hookio.RuleResult, error
 			Module:   r.Name(),
 		}, nil
 	}
-	// Not applicable (ADR 0043): the chain must continue. Former Reason,
-	// kept because it is the only record of WHY: "search path is " + access.String() + " " + path + " (deferred to claude-code)"
-	return hookio.NotApplicable()
+	return r.refuse("path-safety: search path is " + access.String() + " " + path + " (deferred to claude-code)")
 }

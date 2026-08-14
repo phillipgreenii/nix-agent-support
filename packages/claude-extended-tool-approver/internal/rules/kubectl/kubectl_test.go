@@ -2,6 +2,7 @@ package kubectl
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -442,5 +443,84 @@ func TestKubectl_NoZRLiteralsInSource(t *testing.T) {
 		if strings.Contains(text, lit) {
 			t.Errorf("ZR literal %s found in kubectl.go — must live only in config", lit)
 		}
+	}
+}
+
+// TestADR0044_Kubectl_RefusedSites is the per-rule half of pg2-qxe85's census: every one
+// of kubectl's five sites that pg2-d0ja3 left as ErrNotApplicable now REFUSES.
+//
+// It asserts a RELATION rather than a hardcoded verdict, and the relation is the one the
+// bead's gate is worded in: `errors.Is(err, hookio.ErrRefused)` plus a floor no weaker
+// than NoOpinion. A refusal can only ever demote a later rule's Approve, so a site that
+// satisfies this can never widen approval — whereas the ErrNotApplicable it replaced let
+// the leaf be reported as an EXHAUSTION, which is the half a consumer may clear.
+//
+// The two `wantRefused: false` rows are the DECLINED sites, and they are asserted here so
+// the decline is a tested decision rather than an oversight: neither has classified a verb
+// (the first has no verb at all, the second has no evaluator), so neither has examined
+// anything it could withhold, and claiming a refusal would attribute a judgement that was
+// never made.
+func TestADR0044_Kubectl_RefusedSites(t *testing.T) {
+	cfg := zrKubectlConfig(t)
+	tests := []struct {
+		site        string
+		cmd         string
+		rule        *Rule
+		wantRefused bool
+	}{
+		{site: "exec verb outside a dev workspace", cmd: "kubectl exec mypod -- ls /", rule: New(nil, nil, cfg), wantRefused: true},
+		{site: "rollout with a mutating sub-verb", cmd: "kubectl rollout restart deploy/x", rule: New(nil, nil, cfg), wantRefused: true},
+		{site: "everything else (apply/delete/scale)", cmd: "kubectl delete pod x", rule: New(nil, nil, cfg), wantRefused: true},
+		{site: "scoped-approve verb outside a dev workspace", cmd: "kc restart --ws not-a-dev-ws", rule: New(nil, nil, cfg), wantRefused: true},
+		// DECLINED: no verb was classified, so nothing was examined.
+		{site: "declined — no operation token", cmd: "kubectl", rule: New(nil, nil, cfg), wantRefused: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.site, func(t *testing.T) {
+			input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": tt.cmd})}
+			res, err := tt.rule.Evaluate(input)
+			gotRefused := errors.Is(err, hookio.ErrRefused)
+			if gotRefused != tt.wantRefused {
+				t.Fatalf("%q: refused=%v, want %v (err=%v, res=%+v)", tt.cmd, gotRefused, tt.wantRefused, err, res)
+			}
+			if !tt.wantRefused {
+				return
+			}
+			if res.Decision < hookio.NoOpinion {
+				t.Errorf("%q: floor is %s, weaker than NoOpinion — a refusal must never be less restrictive than the abstain it replaced", tt.cmd, res.Decision)
+			}
+			if res.Reason == "" {
+				t.Errorf("%q: refusal carries no Reason; the restored text is the only record of WHY (ADR 0044)", tt.cmd)
+			}
+			if res.Module != tt.rule.Name() {
+				t.Errorf("%q: refusal Module = %q, want %q — provenance needs the refusing rule's identity", tt.cmd, res.Module, tt.rule.Name())
+			}
+			// A refusal MUST still read as not-applicable to an un-upgraded consumer,
+			// which is what makes the conversion test-compatible (ADR 0044's subtype claim).
+			if !errors.Is(err, hookio.ErrNotApplicable) {
+				t.Errorf("%q: refusal does not match ErrNotApplicable; the chain would treat it as a FAILURE", tt.cmd)
+			}
+		})
+	}
+}
+
+// TestADR0044_Kubectl_KcExecWithoutInnerCommandRefuses covers the fifth site, which needs
+// a dev-workspace scope to be reachable at all: the invocation IS a dev-scoped exec, so
+// the rule committed to delegating, and the missing inner command after `--` is what stops
+// it. That is an examined leaf, not an unexamined one.
+func TestADR0044_Kubectl_KcExecWithoutInnerCommandRefuses(t *testing.T) {
+	r := New(nil, nil, configrules.KubectlConfig{
+		ExecutableAliases:  []string{"kc"},
+		ExecVerbs:          []string{"exe"},
+		DevWorkspaceFlags:  []string{"--ws"},
+		DevWorkspacePrefix: "devws-",
+	})
+	input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": "kc exe --ws devws-me"})}
+	res, err := r.Evaluate(input)
+	if !errors.Is(err, hookio.ErrRefused) {
+		t.Fatalf("kc exec with no inner command: err=%v res=%+v, want ErrRefused", err, res)
+	}
+	if res.Decision < hookio.NoOpinion || res.Module != r.Name() {
+		t.Errorf("floor = %+v, want a NoOpinion refusal attributed to %q", res, r.Name())
 	}
 }

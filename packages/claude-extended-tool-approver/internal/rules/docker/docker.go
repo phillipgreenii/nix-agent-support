@@ -145,9 +145,20 @@ func (r *Rule) evaluateRun(args []string, input *hookio.HookInput) (hookio.RuleR
 	// Parse bind mounts from run args. Malformed mount syntax → abstain.
 	mounts, ok := parseMounts(runArgs)
 	if !ok {
-		// Not applicable (ADR 0043): the chain must continue. Former Reason,
-		// kept because it is the only record of WHY: "docker: unparseable mount spec"
-		return hookio.NotApplicable()
+		// ADR 0044 REFUSAL, not a not-applicable. This is a `docker run --rm` with an
+		// image and an inner command — everything this rule needs to delegate — and the
+		// ONE thing that stops it is a mount spec it could not parse. The unparseable
+		// mount is precisely what makes the inner command's paths unjudgeable, so the
+		// leaf is un-clearable BECAUSE this rule examined it, not because nobody did.
+		// Reported as a not-applicable it reads as an EXHAUSTION, which is the half a
+		// consumer may clear — the APPROVAL-WIDENING direction, and the worst possible
+		// one for a container that mounts the host somewhere unknown.
+		//
+		// This is the same fail-safe reading as the engine's unparseable-expression floor
+		// (ADR 0039's I1b): "I could not read this" is a floor, never an absence. The
+		// chain still continues, so a later rule's Ask/Reject wins and only an Approve is
+		// demoted.
+		return hookio.Refused(r.Name(), "docker: unparseable mount spec")
 	}
 
 	// Check for bash -c pattern

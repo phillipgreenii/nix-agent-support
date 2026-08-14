@@ -143,3 +143,49 @@ func TestClaudeTools_Name(t *testing.T) {
 		t.Errorf("Name() = %q, want claude-tools", got)
 	}
 }
+
+// TestADR0044_ClaudeTools_PlanModeToolsRefuse is the per-rule half of pg2-qxe85's census for
+// claude-tools: its single site now REFUSES.
+//
+// abstainTools is a DELIBERATE EXCLUSION from the allowlist directly above it (pg2-9cist):
+// these tools gate the native plan-review transition, so approving their PreToolUse would
+// short-circuit that gate. That is a judgement about the tool, and reporting it as a
+// not-applicable made ExitPlanMode indistinguishable from a tool name ceta has never heard
+// of — erasing the very record of why the tool is excluded.
+//
+// A REFUSAL, not a terminal NoOpinion: the chain must still CONTINUE, which is the property
+// TestIntegration_KillShellThroughChain's "does not shadow the later path-safety rule" pins
+// for this rule's other branches. The floor only demotes a later Approve.
+func TestADR0044_ClaudeTools_PlanModeToolsRefuse(t *testing.T) {
+	r := New()
+	for _, tool := range []string{"ExitPlanMode", "EnterPlanMode"} {
+		t.Run(tool, func(t *testing.T) {
+			input := &hookio.HookInput{ToolName: tool, ToolInput: mustJSON(map[string]string{})}
+			res, err := r.Evaluate(input)
+			if !errors.Is(err, hookio.ErrRefused) {
+				t.Fatalf("%s: err=%v res=%+v, want ErrRefused", tool, err, res)
+			}
+			if res.Decision < hookio.NoOpinion {
+				t.Errorf("%s: floor is %s, weaker than NoOpinion", tool, res.Decision)
+			}
+			if res.Reason == "" || res.Module != r.Name() {
+				t.Errorf("%s: floor = %+v, want a reasoned refusal attributed to %q", tool, res, r.Name())
+			}
+			// The chain MUST continue: a nil error here would make this rule shadow
+			// path-safety and every Bash rule after it.
+			if !errors.Is(err, hookio.ErrNotApplicable) {
+				t.Errorf("%s: refusal does not match ErrNotApplicable; the chain would stop or the engine would file a FAILURE", tool)
+			}
+		})
+	}
+
+	// The three deferral branches (file tools, search tools, Bash) are NOT refusals: this
+	// rule has no model for those inputs at all, and their owning rules run later. Claiming
+	// a refusal would floor every file/search/Bash leaf in the tree.
+	for _, tool := range []string{"Read", "Write", "Glob", "Grep", "Bash", "mcp__x__y", "SomeUnknownTool"} {
+		input := &hookio.HookInput{ToolName: tool, ToolInput: mustJSON(map[string]string{})}
+		if _, err := r.Evaluate(input); errors.Is(err, hookio.ErrRefused) {
+			t.Errorf("%s reported a REFUSAL; this rule never examined it and the floor would reach every such leaf", tool)
+		}
+	}
+}
