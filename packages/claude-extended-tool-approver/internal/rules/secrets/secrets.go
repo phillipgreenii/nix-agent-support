@@ -352,6 +352,25 @@ func firstSecretRef(cmd string, depth int, match candidateMatch) (secretRef, boo
 //     only exempt when it IS a positional — with -f/--from-file the filter comes
 //     from a file and the first positional is instead an INPUT file, so it is
 //     kept (avoids missing a secret input file).
+//   - bd/git/gh: the value of a MESSAGE flag (`bd close --reason <prose>`,
+//     `bd create --title/--description <prose>`, `git commit -m <prose>`,
+//     `gh pr comment --body <prose>`) and the trailing body positional of
+//     `bd comment <id> <body>` are free text, not files (pg2-ia640.5). The
+//     enumerated flag/positional boundary lives in cmdparse.SkipMessageArgs.
+//
+// WHY THE MESSAGE CARVE-OUT IS NOT A BYPASS. A message value is STORED AS TEXT:
+// the command never opens, executes or transmits it as a path, so a credential
+// path spelled inside one grants no access whatsoever — while prompting on it
+// costs the human a paragraph-length retype (the ~40-line bead comment of asklog
+// row 325419). Every way of getting the FILE'S CONTENT into such a message is a
+// DIFFERENT construct in the same command, and each is still checked:
+// `< secrets/x` is a redirection (firstSecretRef tests pc.Redirections),
+// `"$(cat ~/.ssh/id_rsa)"` is a substitution body the ENGINE recurses into as its
+// own evaluation unit, `bash -lc '<inner>'` is unwrapped by shellDashC, and
+// `-F`/`--file`/`--body-file` read the message FROM a path — which is exactly why
+// those flags are absent from the message tables. The skip is also keyed on an
+// ENUMERATED, CLOSED set of executables, so it cannot leak to a command that does
+// open its arguments (`cp ~/.ssh/id_rsa /tmp` is unaffected).
 func secretCandidateArgs(pc cmdparse.ParsedCommand) []string {
 	switch filepath.Base(pc.Executable) {
 	case "grep", "rg":
@@ -362,6 +381,8 @@ func secretCandidateArgs(pc cmdparse.ParsedCommand) []string {
 			args = dropFirstPositional(args)
 		}
 		return args
+	case "bd", "git", "gh":
+		return cmdparse.SkipMessageArgs(filepath.Base(pc.Executable), pc.Args)
 	default:
 		return pc.Args
 	}
