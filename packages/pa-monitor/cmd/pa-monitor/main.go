@@ -61,8 +61,11 @@ func usageText() string {
 //   - No args: the command is "tui" (the default when invoked bare).
 //   - "-h"/"--help": the command is "help" (top-level usage).
 //   - If args[1] is a known subcommand name, that wins; the rest are its args.
-//   - A leading flag other than -h/--help (e.g. --wait-until-idle) routes to
-//     tui, since no current TUI flag collides with a subcommand name.
+//   - A leading flag other than -h/--help (e.g. --version) routes to tui,
+//     since no current TUI flag collides with a subcommand name. Note this
+//     routes UNKNOWN leading flags there too, where runTUI's flag set rejects
+//     them with exit 2 — including the removed `--wait-until-idle` (ADR 0011
+//     replaced it with the `wait-until-agents-finished` subcommand).
 //   - Any other first arg is unrecognized: it is returned as the command
 //     itself so main can emit an "unknown subcommand" error (it MUST NOT fall
 //     through to the TUI).

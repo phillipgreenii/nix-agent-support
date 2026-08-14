@@ -3,7 +3,19 @@
 
 set -euo pipefail
 
-args=(--wait-until-idle)
+# ADR 0011 replaced pa-monitor's `--wait-until-idle` FLAG with the
+# `wait-until-agents-finished` SUBCOMMAND, so the subcommand token MUST be the
+# FIRST argument: pickSubcommand (cmd/pa-monitor/main.go) routes a LEADING flag
+# to `tui`, whose flag set defines only `-version` and would reject the wait
+# options outright.
+args=(wait-until-agents-finished)
+
+# `--caffeinate` has no counterpart on `wait-until-agents-finished`: pa-monitor's
+# caffeinate is daemon-owned global state toggled by `pa-monitor caffeinate
+# on|off|toggle`, which this wait must not mutate on the caller's behalf. Keep
+# the documented UX by running the system `caffeinate` against this pid instead,
+# as agent-activity-api's `wait` does.
+use_caffeinate=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -20,7 +32,11 @@ while [[ $# -gt 0 ]]; do
       echo "Error: --time-between-checks requires a value" >&2
       exit 2
     fi
-    args+=(--time-between-checks "$2")
+    # Still accepted so existing callers do not break, but NOT forwarded:
+    # `wait-until-agents-finished` observes the daemon's WatchState push stream
+    # at a fixed interval, so pa-monitor defines no poll-interval option to map
+    # this onto.
+    echo "Warning: --time-between-checks is ignored; pa-monitor's wait is driven by the daemon's push stream" >&2
     shift 2
     ;;
   --consecutive-idle-checks)
@@ -32,16 +48,16 @@ while [[ $# -gt 0 ]]; do
     shift 2
     ;;
   --caffeinate)
-    args+=(--caffeinate)
+    use_caffeinate=true
     shift
     ;;
   -h | --help)
     cat <<EOF
 Usage: wait-for-agents-to-finish [OPTIONS]
 
-Thin wrapper around pa-monitor --wait-until-idle. Options:
+Thin wrapper around \`pa-monitor wait-until-agents-finished\`. Options:
   --maximum-wait SECONDS
-  --time-between-checks SECS
+  --time-between-checks SECS   (accepted but IGNORED; no pa-monitor counterpart)
   --consecutive-idle-checks N
   --caffeinate
   -h, --help
@@ -70,5 +86,11 @@ EOF
     ;;
   esac
 done
+
+if [[ $use_caffeinate == true ]] && command -v caffeinate >/dev/null 2>&1; then
+  # `-w $$` watches THIS pid; the exec below keeps the same pid, so caffeinate
+  # exits when the wait does.
+  caffeinate -w $$ &
+fi
 
 exec pa-monitor "${args[@]}"

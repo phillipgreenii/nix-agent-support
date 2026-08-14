@@ -2888,6 +2888,16 @@
               inherit pkgs;
               bashBuilders = pkgs._agentSupportBashBuilders;
             }).checks
+            # test-wait-for-agents (bead pg2-3fv9l). The overlay's `wait-for-agents`
+            # attr consumes only `result.packages`, so this package's bats suite --
+            # including the real-binary argument contract that catches a
+            # pa-monitor option drifting away from the wrapper -- ran in NO gate at
+            # all. Same one-line idiom as integrate-branch-support above.
+            // (import ./packages/wait-for-agents {
+              inherit pkgs;
+              bashBuilders = pkgs._agentSupportBashBuilders;
+              inherit (pkgs) pa-monitor;
+            }).checks
             # Nine offline golangci-lint gates, one per Go module (pg2-2cuzv):
             # <module>-golangci for each of the six Pattern-A modules plus the
             # three Pattern-B (local-replace) modules.

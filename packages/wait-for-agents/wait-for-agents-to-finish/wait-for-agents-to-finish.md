@@ -1,7 +1,7 @@
 # wait-for-agents-to-finish
 
-> Wait until no AI agent is actively working.
-> Keeps Mac awake while waiting and provides progress updates.
+> Wait until no AI agent is actively working; delegates to `pa-monitor wait-until-agents-finished`.
+> Optionally keeps the Mac awake while waiting.
 > Exit 0 means "idle reached", not "work finished": a session blocked on a usage limit counts as idle.
 > More information: <https://github.com/phillipgreenii/phillipgreenii-nix-support-apps>.
 
@@ -12,10 +12,6 @@
 - Wait with custom timeout and keep Mac awake:
 
 `wait-for-agents-to-finish --maximum-wait {{3600}} --caffeinate`
-
-- Wait with short timeout and frequent checks:
-
-`wait-for-agents-to-finish --maximum-wait {{60}} --time-between-checks {{2}}`
 
 - Require 5 consecutive idle checks before declaring all agents finished:
 

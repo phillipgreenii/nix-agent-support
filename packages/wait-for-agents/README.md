@@ -13,11 +13,14 @@ This package provides a script that blocks until all AI agents have completed th
 ## Usage
 
 ```bash
-# Wait with defaults (2 hour max, check every 5 seconds)
+# Wait with defaults (2 hour max)
 wait-for-agents-to-finish
 
-# Wait with custom timeout and interval
-wait-for-agents-to-finish --maximum-wait 3600 --time-between-checks 10
+# Wait with a custom timeout
+wait-for-agents-to-finish --maximum-wait 3600
+
+# Require more consecutive idle observations before declaring idle
+wait-for-agents-to-finish --consecutive-idle-checks 5
 
 # Keep Mac awake while waiting (macOS only)
 wait-for-agents-to-finish --caffeinate
@@ -28,13 +31,21 @@ wait-for-agents-to-finish --help
 
 ## Options
 
-| Option                        | Description                                               | Default        |
-| ----------------------------- | --------------------------------------------------------- | -------------- |
-| `--maximum-wait SECONDS`      | Maximum time to wait before timing out                    | 7200 (2 hours) |
-| `--time-between-checks SECS`  | Interval between activity checks                          | 5 seconds      |
-| `--consecutive-idle-checks N` | Number of consecutive idle checks required before exiting | 3              |
-| `--caffeinate`                | Keep Mac awake while waiting (macOS)                      | disabled       |
-| `-h, --help`                  | Show help message                                         | -              |
+| Option                        | Description                                                     | Default        |
+| ----------------------------- | --------------------------------------------------------------- | -------------- |
+| `--maximum-wait SECONDS`      | Maximum time to wait before timing out                          | 7200 (2 hours) |
+| `--consecutive-idle-checks N` | Number of consecutive idle observations required before exiting | 3              |
+| `--caffeinate`                | Keep Mac awake while waiting (macOS)                            | disabled       |
+| `--time-between-checks SECS`  | **Accepted but ignored** — see "No poll interval" below         | -              |
+| `-h, --help`                  | Show help message                                               | -              |
+| `-v, --version`               | Show version information                                        | -              |
+
+### No poll interval
+
+`--time-between-checks` is still accepted so existing callers keep working, but it is **ignored**
+(the wrapper prints a warning to stderr). `pa-monitor wait-until-agents-finished` observes the
+daemon's `WatchState` push stream rather than polling, so there is no check-interval option to
+forward. Tune the idle gate with `--consecutive-idle-checks` instead.
 
 ## Exit Codes
 
@@ -59,7 +70,8 @@ window resets. This is declared intent (ADR 0024 R3), not a defect in this wrapp
 
 ## Dependencies
 
-Requires `claude-activity` package to query agent status.
+Requires the `pa-monitor` package, and a running `pa-monitor` daemon to answer the wait. With no
+daemon reachable the wrapper exits 2 (`daemon unreachable`).
 
 ## Integration Examples
 
@@ -87,9 +99,12 @@ fi
 
 ## How It Works
 
-1. Calls `claude-activity-api is-agent-active` in a loop
-2. Exits when agents are idle or timeout is reached
-3. Optionally uses `caffeinate -w $$` to prevent Mac sleep
-4. Shows progress updates with active session count
+1. Translates its options into `pa-monitor wait-until-agents-finished` arguments and `exec`s it
+2. `pa-monitor` streams `WatchState` from the daemon and exits 0 once no session has been `working`
+   for `--consecutive-idle-checks` consecutive pushes, or 1 at `--maximum-wait`
+3. With `--caffeinate`, also runs `caffeinate -w $$` so the Mac stays awake for the duration of the
+   wait (the `exec` preserves the pid, so `caffeinate` exits with the wait)
 
-The script relies on `claude-activity` to track agent sessions via Claude Code hooks.
+The subcommand form is required, not cosmetic: `--wait-until-idle` was **removed** by
+`docs/adr/0011-pa-monitor-daemon-otel-split.md`, and `pa-monitor` routes a leading flag to its TUI,
+whose flag set would reject it with exit 2.
