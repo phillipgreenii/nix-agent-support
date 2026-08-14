@@ -105,6 +105,13 @@ func setupSmokeWorkspace(t *testing.T) string {
 	runTool(t, ws, "pn", "workspace", "init")
 	runTool(t, ws, "pn", "workspace", "clone")
 	runTool(t, ws, "pn", "workspace", "lock")
+	// `workspace allow` is REQUIRED before apply: apply_command is config-sourced
+	// argv, so pn's Apply is TOFU trust-gated (repo-base ADR 0019, beads pg2-oymai /
+	// pg2-x2q6o) and aborts with "workspace hooks not trusted" without it. Missing
+	// this, no applied-state is ever recorded and TestSmoke_GateLifecycle_HappyPath
+	// fails at the apply step — repo-base's own s36 smoke scenario carries the same
+	// step for the same reason.
+	runTool(t, ws, "pn", "workspace", "allow")
 
 	// isolated embedded-Dolt beads workspace at the root.
 	runTool(t, ws, "bd", "init", "--prefix", "pbsm")
