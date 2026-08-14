@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"time"
 
@@ -45,35 +46,81 @@ func runWaitUntilAgentsFinished(args []string) {
 		os.Exit(3)
 	}
 
-	deadline := time.Now().Add(time.Duration(*maxWaitS) * time.Second)
-	graceDur := time.Duration(*graceS) * time.Second
+	os.Exit(waitUntilAgentsFinished(waitParams{
+		maxWait:     time.Duration(*maxWaitS) * time.Second,
+		consecutive: *consecutive,
+		grace:       time.Duration(*graceS) * time.Second,
+	}, os.Stderr))
+}
+
+// waitParams is the parsed flag set of `wait-until-agents-finished`.
+type waitParams struct {
+	maxWait     time.Duration // --maximum-wait
+	consecutive int           // --consecutive-idle-checks
+	grace       time.Duration // --reconnect-grace
+}
+
+// waitTimeout emits the documented timeout line and returns its exit code.
+func waitTimeout(stderr io.Writer) int {
+	fmt.Fprintln(stderr, "wait-until-agents-finished: timeout")
+	return 1
+}
+
+// waitUntilAgentsFinished is the wait loop proper, split out of the os.Exit
+// wrapper above so tests can drive it against a fake daemon and observe both
+// the exit code and the stderr contract (mirroring runBridgeChannel vs.
+// runCmuxBridge). Returns the process exit code.
+func waitUntilAgentsFinished(p waitParams, stderr io.Writer) int {
+	// --maximum-wait is carried on the CONTEXT, not merely re-checked between
+	// reconnects (bead pg2-yzw29). streamLoop below blocks in a select for as
+	// long as the daemon keeps pushing, so a deadline consulted only in this
+	// outer loop is never re-tested while the daemon is healthy AND some
+	// session is `working` — the exact case a caller sets --maximum-wait for,
+	// which made the documented exit 1 unreachable. A deadline-carrying parent
+	// makes `<-ctx.Done()` fire inside streamLoop, landing on the timeout exit.
+	waitCtx, waitCancel := context.WithDeadline(context.Background(), time.Now().Add(p.maxWait))
+	defer waitCancel()
 
 	streak := 0
 
 	for {
-		if time.Now().After(deadline) {
-			fmt.Fprintln(os.Stderr, "wait-until-agents-finished: timeout")
-			os.Exit(1)
+		if waitCtx.Err() != nil {
+			return waitTimeout(stderr)
 		}
 
-		ctx, cancel := context.WithCancel(context.Background())
-		client, err := rpcclient.Dial(ctx)
+		// The DIAL deliberately keeps its own fixed handshake budget
+		// (rpcclient.DialPath bounds it at 2s) instead of inheriting waitCtx.
+		// With a --maximum-wait shorter than that budget, a deadline-derived
+		// dial ctx would make a MISSING daemon look like a timeout and lose the
+		// specific `daemon unreachable` diagnosis the exit-2 contract promises —
+		// which is what test-wait-for-agents-real-pa-monitor.bats reads to tell
+		// "args accepted" from "args rejected". Only the STREAM below needs the
+		// deadline; the conn's own lifetime is owned by Close, not by this ctx.
+		client, err := rpcclient.Dial(context.Background())
 		if err != nil {
-			cancel()
 			// Daemon unavailable. Apply reconnect grace if we already
 			// observed at least one tick; otherwise fail immediately.
 			if streak == 0 {
-				fmt.Fprintln(os.Stderr, "daemon unreachable")
-				os.Exit(2)
+				fmt.Fprintln(stderr, "daemon unreachable")
+				return 2
 			}
-			if err := waitForDaemon(graceDur); err != nil {
-				fmt.Fprintf(os.Stderr, "wait-until-agents-finished: %v\n", err)
-				os.Exit(2)
+			if err := waitForDaemon(waitCtx, p.grace); err != nil {
+				// waitForDaemon honours waitCtx, so a grace window that would
+				// outlast --maximum-wait ends AT the deadline: report that as
+				// the timeout it is rather than as a daemon failure.
+				if waitCtx.Err() != nil {
+					return waitTimeout(stderr)
+				}
+				fmt.Fprintf(stderr, "wait-until-agents-finished: %v\n", err)
+				return 2
 			}
 			streak = 0 // reset; daemon may have restarted
 			continue
 		}
 
+		// This is where the wait actually blocks, so THIS is the ctx that must
+		// carry the deadline (see the waitCtx comment above).
+		ctx, cancel := context.WithCancel(waitCtx)
 		stream, err := client.C.WatchState(ctx, &pb.WatchStateRequest{PushIntervalMs: 1000})
 		if err != nil {
 			cancel()
@@ -102,9 +149,12 @@ func runWaitUntilAgentsFinished(args []string) {
 		for {
 			select {
 			case <-ctx.Done():
+				// The only cancel reaching here is waitCtx's --maximum-wait
+				// deadline (the success path below returns without re-entering
+				// this select), which the post-loop check turns into exit 1.
 				break streamLoop
 			case <-time.After(pushBudget):
-				fmt.Fprintln(os.Stderr, "wait: push missed, reconnecting")
+				fmt.Fprintln(stderr, "wait: push missed, reconnecting")
 				break streamLoop
 			case r := <-recvCh:
 				if r.err != nil {
@@ -129,11 +179,13 @@ func runWaitUntilAgentsFinished(args []string) {
 					streak = 0
 				} else {
 					streak++
-					if streak >= *consecutive {
+					if streak >= p.consecutive {
+						// Success exits at once; the deadline on waitCtx never
+						// delays it.
 						cancel()
 						_ = client.Close()
-						fmt.Fprintln(os.Stderr, "all idle")
-						os.Exit(0)
+						fmt.Fprintln(stderr, "all idle")
+						return 0
 					}
 				}
 			}
@@ -142,27 +194,37 @@ func runWaitUntilAgentsFinished(args []string) {
 		cancel()
 		_ = client.Close()
 
-		if time.Now().After(deadline) {
-			fmt.Fprintln(os.Stderr, "wait-until-agents-finished: timeout")
-			os.Exit(1)
+		if waitCtx.Err() != nil {
+			return waitTimeout(stderr)
 		}
-		// Brief pause before reconnect.
-		time.Sleep(500 * time.Millisecond)
+		// Brief pause before reconnect, itself bounded by the deadline.
+		select {
+		case <-waitCtx.Done():
+		case <-time.After(500 * time.Millisecond):
+		}
 	}
 }
 
-// waitForDaemon polls Dial until it succeeds or grace expires.
-func waitForDaemon(grace time.Duration) error {
+// waitForDaemon polls Dial until it succeeds, grace expires, or ctx does. ctx
+// carries the caller's --maximum-wait deadline: a reconnect-grace window MUST
+// NOT outlast it, or a mid-wait daemon disappearance would restore the very
+// unbounded wait bead pg2-yzw29 fixed. The caller distinguishes the two failure
+// causes by re-reading ctx.Err().
+func waitForDaemon(ctx context.Context, grace time.Duration) error {
 	deadline := time.Now().Add(grace)
 	for time.Now().Before(deadline) {
-		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
-		client, err := rpcclient.Dial(ctx)
+		dialCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+		client, err := rpcclient.Dial(dialCtx)
 		cancel()
 		if err == nil {
 			_ = client.Close()
 			return nil
 		}
-		time.Sleep(500 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(500 * time.Millisecond):
+		}
 	}
 	return fmt.Errorf("daemon did not return within grace %s", grace)
 }
