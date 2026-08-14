@@ -287,6 +287,19 @@ func (r *Rule) bashRef(cmd string) (secretRef, bool) {
 	// Bash read/write intent is ambiguous per-argument, so every candidate is
 	// judged as a READ — the direction the beads are about, and the one that
 	// governs the in-repo relaxation.
+	//
+	// SO THE "READ ONLY" HALF OF THE IN-REPO RELAXATION IS VACUOUS ON THIS ROUTE, and
+	// that is worth stating here because the opposite is recorded elsewhere (pg2-ifbfa).
+	// `isWrite` is never true for a Bash command, so `write >= read` is trivially
+	// satisfied and the relaxation reaches WRITE-SHAPED commands exactly as it reaches
+	// reads. TestRule_WriteNeverLessRestrictiveThanRead cannot see this: it supplies
+	// `isWrite` directly, so it proves the rule HONOURS the parameter, not that any Bash
+	// caller ever sets it. MEASURED through internal/setup's replay harness on
+	// `<repo>/internal/rules/secrets/secrets.go` with cwd inside a git worktree —
+	// `rm`, `> `, and `| tee` all moved ask -> approve alongside `cat`.
+	//
+	// The GUARD THAT DOES HOLD on this route is the repo test itself: outside any git
+	// working tree the arm still fires, so `~/secrets/prod.env` keeps its Ask either way.
 	const isWrite = false
 	if ref, ok := firstSecretRef(cmd, maxShellUnwrap, r.lexicalRef(isWrite)); ok {
 		return ref, true
