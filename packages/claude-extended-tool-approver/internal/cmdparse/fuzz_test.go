@@ -721,3 +721,66 @@ func FuzzEnumerateSubstitutions(f *testing.F) {
 		}
 	})
 }
+
+// FuzzClearedSubstitutionHoldsNoUnruledPath is the pg2-zpct4 reconciliation as a fuzz
+// invariant, and it is the fail-closed half of the design rather than a coverage exercise.
+//
+// THE INVARIANT: if this seam CLEARS a body, then no content reader in that body holds an
+// operand — argv or `<` source — that this repo calls a path.
+//
+// It is worth pinning at fuzz strength because the property is about a HOLE that opens
+// silently. Clearance means ExpansionSafeCmd, which SKIPS the substitution recursion
+// entirely, so a cleared body's paths meet NO zone model: `patheval` never sees them, the
+// secrets rule never sees them, and the only screen standing in their place is the one in
+// this file. That is precisely how `X=$(cat /etc/shadow) echo hi` came to `allow` while
+// `cat /etc/shadow` abstained. A future list entry, or a new branch of
+// classifySubstitutionCommand that clears a path-bearing read, re-opens it in exactly the
+// same way — and the failure is invisible in a verdict table, because the row it breaks is
+// whatever path nobody thought to write down.
+//
+// It asserts the MECHANISM, not verdicts, so retuning either path model cannot invalidate
+// it: `patheval`'s zones, `secretpath`'s deny-list and the reader list may all change
+// freely, and the invariant still says the same thing.
+//
+// SCOPED TO CONTENT READERS on purpose. safeCmdSubstitutions members are cleared holding
+// a path and must be — `readlink /etc/shadow`, `realpath /etc/shadow` and
+// `basename /etc/shadow` all measure `allow` in the BARE spelling too, because they
+// resolve a name rather than emitting bytes, so there is no relation for a capture to
+// break. The scope is read off fileReaderSubstitutions rather than restated, so moving a
+// command between the two lists moves it in this invariant as well.
+func FuzzClearedSubstitutionHoldsNoUnruledPath(f *testing.F) {
+	for _, seed := range []string{
+		"cat /etc/shadow", "cat VERSION", `cat "$f"`, "wc -l < /etc/shadow",
+		"grep --file=.env x", "jq -r .x f.json", "readlink /etc/shadow",
+		"git rev-parse HEAD", "seq 1 3", "cat ~someuser/x", "echo don't",
+		"cat ./go.mod", "yq -i .a=1 f.yaml", "[ -f /etc/shadow ]",
+	} {
+		f.Add(seed)
+	}
+	f.Fuzz(func(t *testing.T, body string) {
+		if len(body) > 512 || ClassifySubstitutionBody(body) != SubstitutionCleared {
+			return
+		}
+		// A CLEARED body parses to exactly one simple command by construction, so this
+		// re-parse cannot fail; if it ever does, that is itself the defect.
+		leaf, ok := soleSimpleCommandLeaf(body)
+		if !ok {
+			t.Fatalf("ClassifySubstitutionBody(%q) = Cleared but the body has no sole simple command leaf", body)
+		}
+		if !fileReaderSubstitutions[leaf.Executable] {
+			return
+		}
+		for _, arg := range leaf.Args {
+			if LooksLikePath(arg) {
+				t.Fatalf("CLEARED body %q holds an unruled path: content reader %q has operand %q, which LooksLikePath — it must DELEGATE to patheval, not clear",
+					body, leaf.Executable, arg)
+			}
+		}
+		for _, rd := range leaf.Redirections {
+			if LooksLikePath(rd.Path) {
+				t.Fatalf("CLEARED body %q holds an unruled path: content reader %q reads from %q, which LooksLikePath — it must DELEGATE to patheval, not clear",
+					body, leaf.Executable, rd.Path)
+			}
+		}
+	})
+}

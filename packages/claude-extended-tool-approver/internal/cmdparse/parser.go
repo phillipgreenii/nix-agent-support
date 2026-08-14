@@ -88,6 +88,147 @@ import (
 // command" from "a rule refused it", which is why this list needs hand-extension at all
 // — is its own bead, filed alongside pg2-xl79d.
 
+// THE pg2-zpct4 RECONCILIATION: THIS SEAM NO LONGER RULES ON PATH READABILITY.
+//
+// MEASURED on the base commit a064a73e (cwd = this package, `permission_mode=auto`, one
+// probe per row through the built binary). Every pair is the SAME read written two ways:
+//
+//	cat /etc/shadow                                  abstain    X=$(cat /etc/shadow) echo hi                   ALLOW
+//	cat /etc/passwd                                  abstain    X=$(cat /etc/passwd) echo hi                   ALLOW
+//	tail -1 /etc/passwd                              abstain    X=$(tail -1 /etc/passwd) echo hi               ALLOW
+//	grep -c x /etc/shadow                            abstain    X=$(grep -c x /etc/shadow) echo hi             ALLOW
+//	head -1 /etc/shadow                              abstain    X=$(head -1 /etc/shadow) echo hi               ALLOW
+//	jq -r .x /etc/shadow                             abstain    X=$(jq -r .x /etc/shadow) echo hi              ALLOW
+//	wc -l < /etc/shadow                              abstain    X=$(wc -l < /etc/shadow) echo hi               ALLOW
+//	cat /Users/phillipg/.aws/credentials             abstain    X=$(cat …/.aws/credentials) echo hi            ALLOW
+//
+// TWO PATH MODELS DISAGREED, and the WEAKER one was the one a captured read reached. The
+// screen here was `secretpath.IsSecret`, which classifies a small deny-list of secret
+// DIRS and BASENAMES and knows nothing of `/etc/shadow`; the bare spelling goes through
+// `internal/rules/safecmds`' readPathIssue, which asks `patheval` whether the path is in a
+// ZONE this session may read at all. `/etc/shadow` is in no readable zone, so the bare
+// read abstains — and capturing it into an env-var value cleared it, because
+// ExpansionSafeCmd means the body is never recursed and this screen therefore STANDS IN
+// PLACE OF the whole path model (the same structural trap the `test` / `[` note below
+// records for a deny-listed credential).
+//
+// THE FIX IS A RECONCILIATION, NOT A SECOND DENY-LIST. Adding `/etc/shadow` here would
+// leave the disagreement in place for the next path, so the two questions are separated
+// and each is given ONE owner:
+//
+//   - PATH IDENTIFICATION — "is this token a filesystem path at all?" — is now ONE
+//     predicate, LooksLikePath, which lives here and which safecmds' looksLikePath
+//     delegates to. It is a purely LEXICAL question, so a static parser can own it, and a
+//     single definition is what keeps the two seams from drifting apart again.
+//   - PATH READABILITY — "may this session read that path?" — has ONE AUTHORITY,
+//     `patheval.PathEvaluator`, reached through safecmds' readPathIssue. It is
+//     CONFIG-DEPENDENT (project root, cwd, extra roots, sandbox settings, container
+//     mounts), and this package is a pure static seam with no config, so it CANNOT answer
+//     that question and MUST NOT pretend to.
+//
+// So this seam DECLINES. A body whose read names a path returns SubstitutionDelegated
+// rather than a clearance, and the authoritative model rules on it through the engine's
+// substitution recursion. Delegation is not approval: SubstitutionRefused is the ZERO
+// value, `patheval.PathUnknown.CanRead()` is false, and readPathIssue refuses anything it
+// cannot place — so a path NEITHER model can classify cannot reach Approve by this route.
+//
+// WHY `secretpath.IsSecret` STAYS, rather than being replaced by the delegation: it
+// classifies tokens LooksLikePath does not. A bare basename (`.env`, `id_rsa`) has no `/`,
+// `./`, `../` or `~` prefix, so it is not path-SHAPED — which also means readPathIssue's
+// zone check never runs on it either. The two screens are a UNION here, never a
+// substitution of one for the other; `X=$(cat .env) echo hi` asks today because of this
+// screen and must keep asking.
+//
+// WHAT DELEGATION COSTS, stated because it is a real movement and not zero:
+//
+//   - env-value position is unchanged for an in-zone read. `X=$(cat /tmp/x.json) echo hi`
+//     stops classifying ExpansionSafeCmd and instead goes through envvars' recursion,
+//     which approves the read and clears the value — same `allow`, one more hop.
+//   - COMMAND position loses a DECISIVE allow for a path-bearing read unless the
+//     recursion approves it, which is exactly the authority moving. The engine's
+//     substitution floor is therefore keyed on SubstitutionRefused rather than on "not
+//     cleared", so a DELEGATED body is governed by the model that owns the question
+//     instead of being floored for asking it — see engine.foldSubstitutionScan.
+//   - A jq/yq FILTER that happens to look like a secret path (`jq -r .env f.json`) is
+//     REFUSED here rather than delegated, because IsSecret is a classification this seam
+//     owns. That is fail-CLOSED over-refusal on a filter, and the note on
+//     fileReaderSubstitutions' KNOWN over-refusal still applies to it.
+//
+// NOT CLOSED BY THIS, and reported rather than implied: `jq -f`, `--rawfile`,
+// `--slurpfile` and `--argfile` name a PATH as the flag's operand, and safecmds' jq branch
+// drops that operand — so `jq -f /Users/phillipg/.ssh/id_rsa .` auto-approves in the BARE
+// spelling too (measured `allow` on a064a73e). Delegation makes the captured spelling
+// AGREE with the bare one, which is the relation this bead asserts, and both remain wrong
+// until the bare spelling is fixed. That is bead pg2-wrxg6, in safecmds, not here.
+
+// SubstitutionClearance is the THREE-VALUED answer this seam gives about a command
+// substitution's body. Two values were not enough (pg2-zpct4): a `false` that meant "I
+// statically refuse this" and a `false` that meant "another model owns this question"
+// were indistinguishable, so the engine's floor had to treat a DELEGATION as a REFUSAL.
+//
+// The order is LEAST-CLEARED FIRST and it is load-bearing twice over: SubstitutionRefused
+// is the ZERO value, so a code path that forgets to set one fails CLOSED, and
+// minClearance can fold two answers by taking the minimum.
+type SubstitutionClearance int
+
+const (
+	// SubstitutionRefused: this seam withholds clearance on its own authority — a write
+	// spelling, a body on no list, a shape it does not model, an unparseable body, a
+	// deny-listed secret path. The engine's floor keeps such a body at or above
+	// NoOpinion EVEN IF full-engine recursion would approve it, which is what stops
+	// `$(git show HEAD)`'s textconv/external-diff RCE surface from being unlocked by a
+	// rule that only sees "git, read-only".
+	SubstitutionRefused SubstitutionClearance = iota
+	// SubstitutionDelegated: the body is a modelled READ, and the only outstanding
+	// question is whether its PATH may be read — which `patheval` owns and this package
+	// cannot answer. Recursion's verdict is authoritative for such a body, in both
+	// directions.
+	SubstitutionDelegated
+	// SubstitutionCleared: statically safe with NO outstanding question. This is the
+	// only value IsSafeSubstitutionBody reports as true, so ExpansionSafeCmd — which
+	// skips recursion entirely — is reachable only from here.
+	SubstitutionCleared
+)
+
+// minClearance folds two clearances by taking the LEAST cleared of the two.
+func minClearance(a, b SubstitutionClearance) SubstitutionClearance {
+	if b < a {
+		return b
+	}
+	return a
+}
+
+// LooksLikePath reports whether an argument is SHAPED like a filesystem path.
+//
+// It is the SINGLE definition of that question for the whole repo (pg2-zpct4).
+// `internal/rules/safecmds`' looksLikePath delegates to it, so the static substitution
+// seam and the rule that owns path readability can no longer disagree about WHICH tokens
+// are paths — a disagreement that let a captured read clear a path the bare read refused.
+// It lives here because the question is purely LEXICAL: no config, no filesystem, no zone
+// model, which is precisely what makes it safe for a static parser to own.
+//
+// It is deliberately NOT a readability judgement. A token this returns true for is a
+// token whose readability `patheval` must rule on; see THE pg2-zpct4 RECONCILIATION above.
+//
+// The two tilde clauses are measured bypasses, not defensiveness:
+//
+//   - A bare "~" is the home directory just as much as "~/": the path evaluator's
+//     cleanPath expands both to $HOME. Without matching it, a bare "~" arg (e.g.
+//     `rm -rf ~`) was never classified and slipped through as safe (tc-sfpto).
+//   - A "~user" argument (tilde + username, no slash — "~someuser", "~someuser/x") is
+//     ALSO a home path: cleanPath resolves it via an os/user lookup to that user's home.
+//     Without matching it, `rm -rf ~someuser` slipped through as safe — the tc-fielf
+//     gap, the same shape as the bare-"~" tc-sfpto miss. Any "~" prefix except bare "~"
+//     is path-shaped; the len check keeps bare "~" going through the clause above.
+func LooksLikePath(arg string) bool {
+	return arg == "~" ||
+		strings.HasPrefix(arg, "/") ||
+		strings.HasPrefix(arg, "./") ||
+		strings.HasPrefix(arg, "../") ||
+		strings.HasPrefix(arg, "~/") ||
+		(strings.HasPrefix(arg, "~") && len(arg) > 1) // ~user / ~user/... (tc-fielf)
+}
+
 // safeCmdSubstitutions: commands that never mutate and never read a file's CONTENT,
 // safe inside $(...) regardless of arguments.
 //
@@ -113,12 +254,14 @@ var safeCmdSubstitutions = map[string]bool{
 	"seq": true,
 }
 
-// fileReaderSubstitutions: read-only commands whose PATH ARGS must be re-checked
-// against secretpath so a $(cat .env) still forces a prompt.
+// fileReaderSubstitutions: read-only commands whose PATH ARGS are DISPOSITIONED rather
+// than cleared — a deny-listed secretpath REFUSES (so `$(cat .env)` still forces a
+// prompt), and a path-shaped operand DELEGATES to the model that owns readability
+// (pg2-zpct4). See readerArgsClearance and THE pg2-zpct4 RECONCILIATION.
 //
 // Membership means "this command can NAME A PATH and does not write", not
 // specifically "it prints file content" — `ls` was always a metadata-only member and
-// `test`/`[` join it below. The screen is what earns membership, so the safe default
+// `test`/`[` join it below. The DISPOSITION is what earns membership, so the safe default
 // for a new entry is HERE rather than in safeCmdSubstitutions; see the `test` comment
 // for the deny-consuming movement that settles it.
 var fileReaderSubstitutions = map[string]bool{
@@ -151,11 +294,20 @@ var fileReaderSubstitutions = map[string]bool{
 	//
 	// KNOWN over-refusal, deliberate: this screen is path-shaped, so a jq/yq FILTER that
 	// happens to look like a secret path (`jq -r .env f.json`) is refused by the static
-	// list. That is fail-CLOSED and costs nothing — the body then goes through recursion,
-	// whose safecmds jq/yq branches DO model the program-operand role (programOperand)
-	// and clear it — so the row's verdict is unchanged either way. Do not "fix" it by
-	// teaching this seam the program-operand role: that duplicates a rule's flag grammar
-	// in the parser, which is what ADR 0039's I9 keeps out of here.
+	// list. That is fail-CLOSED. Do not "fix" it by teaching this seam the program-operand
+	// role: that duplicates a rule's flag grammar in the parser, which is what ADR 0039's
+	// I9 keeps out of here.
+	//
+	// pg2-zpct4 MEASURED WHY THE IsSecret HALF MUST STAY A REFUSAL rather than joining the
+	// path DELEGATION, which would have removed this over-refusal. A delegation makes
+	// recursion authoritative in BOTH directions, and recursion is measurably WRONG for
+	// one deny-listed spelling: safecmds' jq branch drops the PATH operand of `-f` /
+	// `--rawfile` / `--slurpfile`, so `jq -f /Users/phillipg/.ssh/id_rsa .` recurses to
+	// `allow` (bead pg2-wrxg6). With IsSecret refusing, `echo $(jq -f …/.ssh/id_rsa .)` is
+	// `ask`; delegating it would have made that row `allow` — a widening on a deny-listed
+	// key. So the price of this over-refusal is one fail-closed prompt on a filter, and
+	// what it buys is that a deny-listed operand cannot be cleared by a rule that failed to
+	// see it.
 	"jq": true, "yq": true, "tq": true,
 	// `test` / `[` — pg2-xl79d, and THEY ARE ON THE SCREENED LIST FOR A MEASURED REASON.
 	// They belong to the metadata-only class: they stat rather than read, they write
@@ -177,6 +329,14 @@ var fileReaderSubstitutions = map[string]bool{
 	// screened list even when its disclosure channel is provably empty. (Ranked against
 	// the alternative — withholding `test`/`[` entirely — the screened admission clears
 	// the cohort rows and moves no deny; that is strictly better.)
+	//
+	// pg2-zpct4 GENERALISED that structural argument and it is the reason this list's
+	// screen became a DISPOSITION. `secretpath.IsSecret` was never the whole path model,
+	// only the part this package can evaluate; the deny-listed credential above is the
+	// case where the two models happened to AGREE, and `/etc/shadow` is the case where
+	// they did not. A screened entry can no longer clear a path at all — it delegates —
+	// so the addition rule now reads: an entry that can name a path goes HERE, and its
+	// paths are ruled on by `patheval`, never by this file.
 	//
 	// The trailing `]` of the `[` spelling is just another argument to the screen
 	// (`IsSecret("]")` is false), so no bracket-specific handling is needed. `[[ … ]]` is
@@ -206,7 +366,7 @@ var substitutionWriteFlags = map[string]map[string]bool{
 // halves go through HasAnyFlag, so the glued spellings (`-i=true`, `--split-exp=x`)
 // cannot hide behind an `=`.
 //
-// It is applied to EVERY branch of isSafeSubstitutionCommand rather than only to the
+// It is applied to EVERY branch of classifySubstitutionCommand rather than only to the
 // reader branch, so that a member added to either list later inherits the screen
 // instead of needing whoever adds it to remember. It is a no-op for every incumbent:
 // of MutatingFlags' four keys (`find`, `sort`, `yq`, `tree`) only `yq` is on a
@@ -392,9 +552,9 @@ var gitReadSubcommands = map[string]bool{
 	"ls-tree": true,
 }
 
-func isSafeSubstitutionCommand(tokens []string) bool {
+func classifySubstitutionCommand(tokens []string) SubstitutionClearance {
 	if len(tokens) == 0 {
-		return false
+		return SubstitutionRefused
 	}
 	cmd := tokens[0]
 	// A WRITE SPELLING DISQUALIFIES BEFORE ANY LIST IS CONSULTED (pg2-xl79d). Every
@@ -402,43 +562,73 @@ func isSafeSubstitutionCommand(tokens []string) bool {
 	// writer voids the ground for its membership — and the check sits ahead of the
 	// branches so it cannot be forgotten by a later addition. See hasWriteFlag.
 	if hasWriteFlag(cmd, tokens[1:]) {
-		return false
+		return SubstitutionRefused
 	}
 	if safeCmdSubstitutions[cmd] {
-		return true
+		// No delegation: a member of this list cannot emit another file's bytes in ANY
+		// spelling, so it names no path whose READABILITY decides anything. The bare
+		// spellings agree — `readlink /etc/shadow`, `realpath /etc/shadow` and
+		// `basename /etc/shadow` all measured `allow` on a064a73e, because safecmds
+		// classifies them as name-resolution rather than content reads.
+		return SubstitutionCleared
 	}
 	if cmd == "hostname" && len(tokens) == 1 { // bare hostname reads; `hostname X` sets it
-		return true
+		return SubstitutionCleared
 	}
 	if cmd == "go" && len(tokens) >= 2 && tokens[1] == "env" {
 		for _, t := range tokens[2:] { // go env -w/-u mutate persistent config
 			if isGoEnvMutatingFlag(t) {
-				return false
+				return SubstitutionRefused
 			}
 		}
-		return true
+		return SubstitutionCleared
 	}
 	if cmd == "git" && len(tokens) >= 2 && gitReadSubcommands[tokens[1]] {
-		return true
+		return SubstitutionCleared
 	}
 	if fileReaderSubstitutions[cmd] {
-		for _, t := range tokens[1:] {
-			if strings.HasPrefix(t, "-") {
-				// A glued value (--flag=value) still names a real path to
-				// read (e.g. `grep --file=.env`); recheck the value half.
-				// Bare short flags (-c, -v, ...) carry no value — skip them.
-				if eq := strings.IndexByte(t, '='); eq >= 0 && secretpath.IsSecret(t[eq+1:]) {
-					return false
-				}
+		return readerArgsClearance(tokens[1:])
+	}
+	return SubstitutionRefused
+}
+
+// readerArgsClearance classifies the ARGUMENTS of a fileReaderSubstitutions member —
+// the only branch whose members can emit another file's bytes, and therefore the only
+// branch where path readability decides anything (pg2-zpct4).
+//
+// TWO SCREENS, and they are a UNION with different owners. IsSecret is a static
+// classification this seam OWNS, so it REFUSES; a path-shaped token is a question
+// `patheval` owns, so it DELEGATES. A refusal anywhere in the argv wins over a
+// delegation, which is why the loop keeps scanning after the first delegation instead
+// of returning early.
+func readerArgsClearance(args []string) SubstitutionClearance {
+	clearance := SubstitutionCleared
+	for _, t := range args {
+		operand := t
+		if strings.HasPrefix(t, "-") {
+			// A glued value (--flag=value) still names a real path to read (e.g.
+			// `grep --file=.env`); recheck the value half. Bare short flags
+			// (-c, -v, ...) carry no value — skip them.
+			//
+			// A SEPARATE-TOKEN flag operand (`jq -f PATH`) is NOT attributed to its
+			// flag here: it arrives as the next loop iteration and is screened as an
+			// ordinary token, which is stricter, not looser. What this cannot do is
+			// make safecmds attribute it — see the pg2-wrxg6 note in THE pg2-zpct4
+			// RECONCILIATION.
+			eq := strings.IndexByte(t, '=')
+			if eq < 0 {
 				continue
 			}
-			if secretpath.IsSecret(t) {
-				return false // reading a secret → force a prompt
-			}
+			operand = t[eq+1:]
 		}
-		return true
+		if secretpath.IsSecret(operand) {
+			return SubstitutionRefused // reading a deny-listed secret → force a prompt
+		}
+		if LooksLikePath(operand) {
+			clearance = SubstitutionDelegated
+		}
 	}
-	return false
+	return clearance
 }
 
 // isGoEnvMutatingFlag reports whether t is any spelling of go env's -w/-u
@@ -459,8 +649,8 @@ func isGoEnvMutatingFlag(t string) bool {
 // $(...) or `...` command substitution — is safe under the STATIC allowlist. A
 // body is safe only when it contains no nested substitution AND it parses to
 // EXACTLY ONE SIMPLE COMMAND with no heredoc and no redirection other than a
-// screened pure read (redirectsOnlyScreenedReads), and that command's command+args
-// pass isSafeSubstitutionCommand.
+// screened pure read (redirectClearance), and that command's command+args
+// pass classifySubstitutionCommand.
 //
 // Quote-awareness is now a PARSER FACT rather than a property inherited from a
 // leaf count (ADR 0039 step 2a): the body goes through the seam, so the '|' in
@@ -489,7 +679,7 @@ func isGoEnvMutatingFlag(t string) bool {
 // # DECLINED: admitting a pipeline whose every stage is allowlisted
 //
 // The SOLE-SIMPLE-COMMAND shape is deliberate, and the proposal to widen it to "a
-// PIPELINE all of whose stages individually pass isSafeSubstitutionCommand" is
+// PIPELINE all of whose stages individually pass classifySubstitutionCommand" is
 // DECLINED. pg2-mgs91 asked the question and accepted this answer; do not re-open it
 // without new evidence, and note that "the probe still prompts" is not new evidence —
 // it is the accepted consequence, recorded below.
@@ -500,7 +690,7 @@ func isGoEnvMutatingFlag(t string) bool {
 // stages, each of which the allowlist would clear on its own. Three grounds:
 //
 //  1. THE ALLOWLIST'S SAFETY CLAIM IS ARGV-ONLY; A PIPELINE ADDS STDIN.
-//     isSafeSubstitutionCommand decides on the command name plus the ARGUMENT tokens
+//     classifySubstitutionCommand decides on the command name plus the ARGUMENT tokens
 //     — that IS the whole of the fileReaderSubstitutions branch, which clears `grep`
 //     only after screening each argv path through secretpath. Its claim is therefore
 //     "every byte this command reads is a path I inspected", and in a pipeline that
@@ -540,19 +730,29 @@ func isGoEnvMutatingFlag(t string) bool {
 // TestIntegration_F3NextFreeIdProbeStillPrompts and by
 // TestIsSafeSubstitutionBody_GitReadSubcommandAudit here in cmdparse.
 func IsSafeSubstitutionBody(cmdStr string) bool {
-	leaf, ok := soleSimpleCommandLeaf(cmdStr)
-	if !ok {
-		return false
-	}
-	if leaf.Executable == "" || leaf.HasHeredoc || !redirectsOnlyScreenedReads(leaf.Redirections) {
-		return false
-	}
-	tokens := append([]string{leaf.Executable}, leaf.Args...)
-	return isSafeSubstitutionCommand(tokens)
+	return ClassifySubstitutionBody(cmdStr) == SubstitutionCleared
 }
 
-// redirectsOnlyScreenedReads reports whether every redirection a substitution body
-// carries is a PURE READ from a path this seam has screened. It replaces the blanket
+// ClassifySubstitutionBody is IsSafeSubstitutionBody's three-valued form, and the entry
+// point a CONSUMER of the floor should use (pg2-zpct4). The bool form answers "may this
+// body skip the authoritative path model entirely?", which is the right question for
+// ExpansionSafeCmd and the wrong one for a floor: it cannot distinguish a body this seam
+// REFUSES from one whose only open question belongs to another model. See
+// SubstitutionClearance and THE pg2-zpct4 RECONCILIATION.
+func ClassifySubstitutionBody(cmdStr string) SubstitutionClearance {
+	leaf, ok := soleSimpleCommandLeaf(cmdStr)
+	if !ok {
+		return SubstitutionRefused
+	}
+	if leaf.Executable == "" || leaf.HasHeredoc {
+		return SubstitutionRefused
+	}
+	tokens := append([]string{leaf.Executable}, leaf.Args...)
+	return minClearance(classifySubstitutionCommand(tokens), redirectClearance(leaf.Redirections))
+}
+
+// redirectClearance classifies the redirections a substitution body carries: a PURE READ
+// from a path this seam can dispose of. It replaces the blanket
 // `len(leaf.Redirections) > 0` refusal (pg2-xl79d), whose only measured cost was the
 // idiom `X=$(wc -l < "$f")` — one of the 37 asking rows, and refused for a reason that
 // does not survive being stated: `wc -l < f` and `wc -l f` read the same bytes of the
@@ -569,61 +769,63 @@ func IsSafeSubstitutionBody(cmdStr string) bool {
 //     other direction — attachRedir records nothing for a descriptor duplication or
 //     close, so they never reach this function; that is why the blanket refusal did not
 //     already cost the `git rev-parse HEAD 2>&1` idiom, and it still does not.)
-//  2. THE SOURCE PATH IS SECRETPATH-SCREENED, the same screen the
-//     fileReaderSubstitutions branch applies to an argv path. Without it a `<` would be
-//     a route around that branch — `$(wc -l < .env)` reading what `$(wc -l .env)`
-//     refuses.
+//  2. THE SOURCE PATH GETS THE SAME DISPOSITION THE fileReaderSubstitutions BRANCH
+//     GIVES AN ARGV PATH — a deny-listed secret REFUSES, a path-shaped token DELEGATES
+//     (pg2-zpct4, readerArgsClearance). Without it a `<` would be a route around that
+//     branch: `$(wc -l < .env)` reading what `$(wc -l .env)` refuses, and
+//     `$(wc -l < /etc/shadow)` clearing what `wc -l /etc/shadow` now delegates.
 //
 // WHY THIS IS NOT THE DECLINED PIPELINE RELAXATION, since both are arguments about
 // stdin: the audit unit does not change. That decline rests on a pipeline stage's stdin
 // being ANOTHER COMMAND'S OUTPUT — bytes no screen inspected — so the list's claim
 // ("every byte this command reads is a path I inspected") becomes false. A `<` redirect's
-// source IS a path, and it IS inspected, right here in condition 2. The claim holds
+// source IS a path, and it IS dispositioned, right here in condition 2. The claim holds
 // unchanged; only the syntax by which the path arrives is new.
 //
 // Heredocs and herestrings are NOT covered by this and stay refused by the caller's
 // HasHeredoc test: their bytes are inline text, not a path, so condition 2 has nothing
 // to screen and the I2 heredoc floor owns them.
 //
-// # MEASURED LIMIT, and why it is not closed here (pg2-xl79d)
+// # THE MEASURED LIMIT pg2-xl79d RECORDED HERE IS NOW CLOSED (pg2-zpct4)
 //
-// Condition 2's screen is `secretpath.IsSecret`, which is NARROWER than the deny-list
-// the engine's path evaluation applies through recursion — `secretDirs` is `secrets`
-// and `.ssh` and `secretBasenames` is the `.credentials`/`auth.json` family, so
-// `~/.aws/credentials` is not a secretpath at all. Because ExpansionSafeCmd skips the
-// recursion entirely, an entry cleared here never meets that richer deny-list. So one
-// row moves (this worktree, 2026-08-13, `permission_mode=auto`):
+// pg2-xl79d recorded that condition 2's screen was `secretpath.IsSecret`, NARROWER than
+// the model the engine's path evaluation applies through recursion — `secretDirs` is
+// `secrets` and `.ssh`, `secretBasenames` is the `.credentials`/`auth.json` family, so
+// `~/.aws/credentials` is not a secretpath at all — and that because ExpansionSafeCmd
+// skips the recursion entirely, an entry cleared here never met the richer model. It
+// recorded the one row that moved, and the four argv spellings of the same read that were
+// ALREADY `allow` beside it:
 //
-//	X=$(wc -l < /Users/phillipg/.aws/credentials) echo hi   ask -> ALLOW
+//	X=$(wc -l < /Users/phillipg/.aws/credentials) echo hi    ask -> ALLOW   (pg2-xl79d)
+//	X=$(cat /Users/phillipg/.aws/credentials) echo hi         allow         (already)
+//	X=$(wc -l /Users/phillipg/.aws/credentials) echo hi       allow         (already)
+//	X=$(head -1 /Users/phillipg/.aws/credentials) echo hi     allow         (already)
+//	X=$(grep -c x /Users/phillipg/.aws/credentials) echo hi   allow         (already)
 //
-// THAT IS THE SEAM'S PRE-EXISTING SCREEN STRENGTH REACHED BY ONE MORE SYNTAX, not a new
-// exposure, and the argv spellings of the identical read were ALREADY `allow` on the
-// same tree — measured, all four:
-//
-//	X=$(cat /Users/phillipg/.aws/credentials) echo hi        allow  (before and after)
-//	X=$(wc -l /Users/phillipg/.aws/credentials) echo hi      allow  (before and after)
-//	X=$(head -1 /Users/phillipg/.aws/credentials) echo hi    allow  (before and after)
-//	X=$(grep -c x /Users/phillipg/.aws/credentials) echo hi  allow  (before and after)
-//
-// So this function makes `wc -l < F` EQUAL to `wc -l F`, which is the whole thesis of
-// the widening above; leaving `<` stricter than argv for the same command reading the
-// same file would be the same accidental split in the other direction. Strengthening
-// the screen is the right fix and it belongs to BOTH spellings at once — which makes it
-// a MORE-restrictive change owing its own corpus replay, i.e. its own bead, exactly as
-// gitReadSubcommands' `ls-files` decline is recorded. Filed as a finding on pg2-xl79d.
-// The narrowing MUST NOT be done by widening `internal/secretpath` in passing: that map
-// is consumed by every rule, so a new entry there is a repo-wide policy change.
+// Its own prescription was that strengthening the screen "belongs to BOTH spellings at
+// once", and that it MUST NOT be done by widening `internal/secretpath` in passing —
+// that map is consumed by every rule, so a new entry there is a repo-wide policy change.
+// pg2-zpct4 does exactly that and by neither of the wrong routes: BOTH spellings now
+// DELEGATE a path-shaped operand to the model that owns readability, so all five rows
+// above are decided by `patheval` rather than by this screen, and `internal/secretpath` is
+// untouched. `wc -l < F` and `wc -l F` remain EQUAL, which was the whole thesis of the
+// widening; what changed is that the shared answer is now the authoritative one.
 //
 // The RELATION is what is asserted in the tests rather than these verdicts, so retuning
-// either screen cannot silently invert it: the `<` spelling is never LESS restrictive
-// than the argv spelling of the same read.
-func redirectsOnlyScreenedReads(redirs []hookio.Redirection) bool {
+// either model cannot silently invert it: the `<` spelling is never LESS restrictive than
+// the argv spelling of the same read, and neither is ever less restrictive than the BARE
+// command spelling.
+func redirectClearance(redirs []hookio.Redirection) SubstitutionClearance {
+	clearance := SubstitutionCleared
 	for _, rd := range redirs {
 		if rd.Kind.IsWrite() || secretpath.IsSecret(rd.Path) {
-			return false
+			return SubstitutionRefused
+		}
+		if LooksLikePath(rd.Path) {
+			clearance = SubstitutionDelegated
 		}
 	}
-	return true
+	return clearance
 }
 
 // SubstitutionKind classifies an extracted shell substitution.

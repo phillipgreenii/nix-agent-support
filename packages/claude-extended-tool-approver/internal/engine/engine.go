@@ -707,11 +707,22 @@ func (e *Engine) foldSubstitutionScan(scan cmdparse.SubstitutionScan, normalized
 		subResult := e.EvaluateExpression(sub.Body, subStack, origin)
 
 		// Static allowlist FLOOR for command substitutions ($()/backtick): a body
-		// the static allowlist rejects (e.g. `git show HEAD` — textconv/external-diff
+		// the static allowlist REFUSES (e.g. `git show HEAD` — textconv/external-diff
 		// RCE) can be no LESS restrictive than NoOpinion even if full-engine recursion
 		// would approve the inner command. Recursion only ADDS demotions. Process
 		// substitutions have no static allowlist and are governed by recursion alone.
-		if sub.IsCommandSubstitution() && !cmdparse.IsSafeSubstitutionBody(sub.Body) &&
+		//
+		// KEYED ON SubstitutionRefused, NOT ON "not cleared" (pg2-zpct4). The seam now
+		// answers with three values, and a DELEGATED body — a modelled read whose only
+		// open question is whether `patheval` allows its PATH — must be governed by the
+		// model that OWNS that question, in both directions. Flooring a delegation would
+		// punish the seam for correctly declining: `$(cat /tmp/x.json)` would lose its
+		// decisive allow even though the authoritative model approves the read, while
+		// `$(cat /etc/shadow)` is refused by that same model anyway. Only a REFUSAL is a
+		// verdict this seam holds on its own authority, and only a refusal outranks
+		// recursion.
+		if sub.IsCommandSubstitution() &&
+			cmdparse.ClassifySubstitutionBody(sub.Body) == cmdparse.SubstitutionRefused &&
 			subResult.Decision < hookio.NoOpinion {
 			subResult = hookio.RuleResult{
 				Decision: hookio.NoOpinion,

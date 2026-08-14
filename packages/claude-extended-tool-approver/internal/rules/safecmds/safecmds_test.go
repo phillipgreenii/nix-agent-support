@@ -2,8 +2,10 @@ package safecmds
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmdparse"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/patheval"
 )
@@ -1181,6 +1183,59 @@ func TestSafecmds_BrowsingCmdsKeepDynamicPaths(t *testing.T) {
 		got := hookio.Verdict(r.Evaluate(input))
 		if got.Decision != hookio.Approve {
 			t.Errorf("cmd %q: got %s (%s), want approve (browsing commands are exempt)", cmd, got.Decision, got.Reason)
+		}
+	}
+}
+
+// TestReadPathIssue_IsNeverLooserThanTheStaticSubstitutionSeam is the pg2-zpct4
+// reconciliation asserted as a RELATION, from the side that OWNS path readability.
+//
+// THE RELATION: whenever this rule's readPathIssue refuses a path for reading, cmdparse's
+// static safe-substitution seam must NOT clear the same read. Clearance there means
+// ExpansionSafeCmd, which skips the substitution recursion entirely — so a cleared body's
+// paths never reach this function at all, and the seam's own screen stands in place of the
+// whole zone model. That is exactly how `X=$(cat /etc/shadow) echo hi` reached `allow`
+// while `cat /etc/shadow` abstained: two path models, and the capture reached the weaker.
+//
+// Stated as a relation rather than as rows, it survives retuning EITHER model: add a zone
+// to `patheval`, add an entry to `secretpath`, or move a command between cmdparse's two
+// substitution lists, and the relation still says the one thing that must stay true. A
+// verdict table would have to be rewritten by whoever retuned it, which is how the two
+// models drifted apart in the first place.
+//
+// It deliberately does NOT assert the converse. The seam is allowed to be STRICTER than
+// this rule — it refuses a `jq` FILTER shaped like a secret path, and it refuses whole
+// shapes (pipelines, heredocs, `git show`) this rule would clear — and an equality
+// assertion would forbid that safe direction of drift.
+func TestReadPathIssue_IsNeverLooserThanTheStaticSubstitutionSeam(t *testing.T) {
+	pe := patheval.New("/home/user/project")
+	// Content readers only: these are the commands that can emit another file's bytes,
+	// and therefore the ones for which "may this path be read" decides anything. The
+	// list is the intersection this bead reconciles — every entry is on cmdparse's
+	// fileReaderSubstitutions AND on this rule's read path.
+	readers := []string{"cat", "head -1", "tail -1", "wc -l", "grep -c x", "jq -r .x", "yq .a"}
+	paths := []string{
+		// Out of every readable zone: the class the two models disagreed about.
+		"/etc/shadow", "/etc/passwd", "/", "/var/log/system.log",
+		"/home/other/.aws/credentials", "~someuser/notes.txt",
+		// Deny-listed, where they already agreed.
+		".env", "/home/user/.ssh/id_rsa", "~/.ssh/config", "secrets/db.yaml",
+		// In zone: the relation must hold here too, and it does so by the seam
+		// DELEGATING rather than by it guessing "readable".
+		"/home/user/project/go.mod", "./go.mod", "../go.mod", "go.mod",
+	}
+	for _, r := range readers {
+		for _, p := range paths {
+			args := append(strings.Fields(r)[1:], p)
+			if readPathIssue(args, pe, "") == "" {
+				continue // this rule clears the read; the seam may do as it likes
+			}
+			for _, body := range []string{r + " " + p, r + " < " + p} {
+				if cmdparse.IsSafeSubstitutionBody(body) {
+					t.Errorf("PATH MODELS DISAGREE: readPathIssue refuses %q for %q, but cmdparse.IsSafeSubstitutionBody(%q) = true — the captured spelling would skip this rule entirely",
+						p, r, body)
+				}
+			}
 		}
 	}
 }

@@ -405,23 +405,25 @@ func startsWithLetter(s string) bool {
 	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
 }
 
+// looksLikePath DELEGATES to cmdparse.LooksLikePath, which is now the single definition
+// of "is this token shaped like a filesystem path" for the whole repo (pg2-zpct4).
+//
+// It stays as a named function rather than being inlined at its ~20 call sites so this
+// rule reads unchanged and so the delegation has ONE place to be read. The delegation is
+// the reconciliation's other half: cmdparse's static substitution seam DELEGATES path
+// READABILITY to this rule's readPathIssue, and in exchange both seams answer "which
+// tokens are paths" from the same predicate. Two definitions of that question is how a
+// captured read came to clear `/etc/shadow` while the bare read refused it — the two
+// screens disagreed about the answer, and nothing made them meet. Do not re-inline a
+// local copy here; see THE pg2-zpct4 RECONCILIATION in cmdparse/parser.go for why the
+// lexical half lives there (no config, no filesystem) and the readability half lives here
+// (both, plus the zone model).
+//
+// The tc-sfpto bare-"~" and tc-fielf "~user" bypasses this predicate closes are recorded
+// on the cmdparse definition; safecmds_test.go's TestLooksLikePath still pins them from
+// this side, which is what proves the delegation preserved the behaviour.
 func looksLikePath(arg string) bool {
-	// A bare "~" is the home directory just as much as "~/": the path Evaluator's
-	// cleanPath expands both to $HOME. Without matching it here, a bare "~" arg
-	// (e.g. `rm -rf ~`) is never classified and slips through as safe (tc-sfpto).
-	//
-	// A "~user" argument (tilde + username, no slash — e.g. "~someuser",
-	// "~someuser/x") is ALSO a home path: cleanPath resolves it via an os/user
-	// lookup to that user's home. Without matching it here it was never classified
-	// and `rm -rf ~someuser` slipped through as safe — the tc-fielf gap, the same
-	// shape as the bare-"~" tc-sfpto miss. Any "~" prefix except bare "~" is
-	// path-shaped; the len check keeps bare "~" going through the clause above.
-	return arg == "~" ||
-		strings.HasPrefix(arg, "/") ||
-		strings.HasPrefix(arg, "./") ||
-		strings.HasPrefix(arg, "../") ||
-		strings.HasPrefix(arg, "~/") ||
-		(strings.HasPrefix(arg, "~") && len(arg) > 1) // ~user / ~user/... (tc-fielf)
+	return cmdparse.LooksLikePath(arg)
 }
 
 // argHasDynamicExpansion reports whether ONE argument contains a shell expansion

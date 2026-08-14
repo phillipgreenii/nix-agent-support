@@ -729,7 +729,7 @@ func TestIsSafeSubstitutionBody_RedirectSpellingIsNeverLooserThanArgv(t *testing
 		".env", "secrets/db.yaml", "/Users/phillipg/.ssh/id_rsa", "~/.ssh/config",
 		// NOT secretpath-covered — the seam's screen is narrower than the engine's
 		// deny-list, which is a recorded pre-existing limit (see
-		// redirectsOnlyScreenedReads). The RELATION still has to hold for it.
+		// redirectClearance). The RELATION still has to hold for it.
 		"/Users/phillipg/.aws/credentials",
 	}
 	for _, r := range readers {
@@ -778,7 +778,7 @@ func TestIsSafeSubstitutionBody_AddingAWriteAlwaysRemovesSafety(t *testing.T) {
 // added to either map later is covered without anyone remembering to extend a test.
 //
 // It is the guard on hasWriteFlag's placement: that check sits ahead of every branch of
-// isSafeSubstitutionCommand precisely so no member can be admitted with its write
+// classifySubstitutionCommand precisely so no member can be admitted with its write
 // spelling unscreened, and this is what proves it for the members that have one.
 func TestIsSafeSubstitutionBody_EveryKnownWriteFlagDisqualifies(t *testing.T) {
 	for _, vocab := range []map[string]map[string]bool{MutatingFlags, substitutionWriteFlags} {
@@ -955,5 +955,123 @@ func TestClassifyExpansion_QuotedDollarIsNotAnExpansion(t *testing.T) {
 				t.Errorf("classifyExpansion(%q) = %d, want %d", tt.value, got, tt.want)
 			}
 		})
+	}
+}
+
+// TestClassifySubstitutionBody_PathReadabilityIsDelegated pins the pg2-zpct4
+// reconciliation ROW BY MECHANISM: which disposition each shape gets, and why.
+//
+// The three values are not degrees of the same thing, so a table of booleans could not
+// state this. REFUSED is a verdict this seam holds on its own authority and which
+// recursion may not override; DELEGATED says another model owns the only open question;
+// CLEARED says there is no open question at all.
+func TestClassifySubstitutionBody_PathReadabilityIsDelegated(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want SubstitutionClearance
+	}{
+		// The hole: a content reader naming a path whose readability only patheval knows.
+		{"cat of an out-of-zone absolute path", "cat /etc/shadow", SubstitutionDelegated},
+		{"grep of an out-of-zone absolute path", "grep -c x /etc/shadow", SubstitutionDelegated},
+		{"jq of an out-of-zone absolute path", "jq -r .x /etc/shadow", SubstitutionDelegated},
+		{"redirect source is dispositioned like argv", "wc -l < /etc/shadow", SubstitutionDelegated},
+		{"bracket test of an absolute path", "[ -f /etc/shadow ]", SubstitutionDelegated},
+		// An IN-zone path is delegated too: this seam cannot tell the two apart, which
+		// is the entire reason it declines rather than guessing.
+		{"in-project relative path is delegated, not cleared", "cat ./go.mod", SubstitutionDelegated},
+		{"tilde path is delegated", "cat ~/notes.txt", SubstitutionDelegated},
+		// A bare basename is not path-SHAPED, so neither model zone-checks it and there
+		// is nothing to delegate.
+		{"bare basename stays cleared", "cat VERSION", SubstitutionCleared},
+		{"jq filter plus bare basename stays cleared", "jq -r .x f.json", SubstitutionCleared},
+		// A DYNAMIC operand is NOT a path this seam resolved; pg2-xl79d's incumbent
+		// design deliberately clears it and pg2-zpct4 does not change that.
+		{"dynamic operand keeps pg2-xl79d's clearance", `cat "$f"`, SubstitutionCleared},
+		{"dynamic redirect keeps pg2-xl79d's clearance", `wc -l < "$f"`, SubstitutionCleared},
+		// secretpath is a classification this seam OWNS, so it REFUSES — recursion must
+		// not be able to override it (see the pg2-wrxg6 measurement in parser.go).
+		{"deny-listed basename refuses", "cat .env", SubstitutionRefused},
+		{"deny-listed secret dir refuses", "cat /Users/me/.ssh/id_rsa", SubstitutionRefused},
+		{"deny-listed redirect source refuses", "wc -l < .env", SubstitutionRefused},
+		{"deny-listed glued flag value refuses", "grep --file=.env x", SubstitutionRefused},
+		// Members that cannot emit another file's bytes need no delegation: the bare
+		// spellings clear them too, so there is no relation to preserve.
+		{"name resolution is cleared whatever the path", "readlink /etc/shadow", SubstitutionCleared},
+		{"basename is cleared whatever the path", "basename /etc/shadow", SubstitutionCleared},
+		// Unchanged refusals, so the delegation is not read as a general softening.
+		{"write flag still refuses", "yq -i .a=1 f.yaml", SubstitutionRefused},
+		{"write redirection still refuses", "cat VERSION > out.txt", SubstitutionRefused},
+		{"off-list command still refuses", "rm -rf /etc", SubstitutionRefused},
+		{"pipeline still refuses", "cat VERSION | tr a b", SubstitutionRefused},
+		{"unparseable body still refuses", "echo don't", SubstitutionRefused},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ClassifySubstitutionBody(tt.body); got != tt.want {
+				t.Errorf("ClassifySubstitutionBody(%q) = %v, want %v", tt.body, got, tt.want)
+			}
+			// The bool form must stay exactly "Cleared", because it is what gates
+			// ExpansionSafeCmd — the classification that SKIPS the authoritative model.
+			if got, want := IsSafeSubstitutionBody(tt.body), tt.want == SubstitutionCleared; got != want {
+				t.Errorf("IsSafeSubstitutionBody(%q) = %v, want %v", tt.body, got, want)
+			}
+		})
+	}
+}
+
+// TestClassifySubstitutionBody_NoContentReaderIsClearedHoldingAPath is the pg2-zpct4
+// reconciliation stated as an INVARIANT over the lists rather than as rows, so a member
+// added later inherits it instead of needing whoever adds it to remember.
+//
+// THE INVARIANT: a body whose executable can emit another file's bytes is never CLEARED
+// while holding an operand this repo calls a path. Clearance means ExpansionSafeCmd, which
+// SKIPS the recursion, so a cleared body's paths meet no zone model at all — and that is
+// exactly how a captured `cat /etc/shadow` came to clear what the bare read refused.
+func TestClassifySubstitutionBody_NoContentReaderIsClearedHoldingAPath(t *testing.T) {
+	operands := []string{
+		"/etc/shadow", "/", "/tmp/x.json", "./f.txt", "../f.txt", "~", "~/f.txt",
+		"~someuser/f.txt", ".env", "secrets/db.yaml", "/Users/me/.ssh/id_rsa",
+		"/Users/me/.aws/credentials",
+	}
+	for cmd := range fileReaderSubstitutions {
+		for _, op := range operands {
+			for _, body := range []string{cmd + " " + op, cmd + " < " + op} {
+				if ClassifySubstitutionBody(body) == SubstitutionCleared {
+					t.Errorf("a content reader was CLEARED holding a path: ClassifySubstitutionBody(%q) = Cleared; it must delegate or refuse", body)
+				}
+			}
+		}
+	}
+}
+
+// TestLooksLikePath_IsSharedWithTheRuleThatOwnsReadability documents from THIS side that
+// the predicate is a repo-level definition rather than a cmdparse detail (pg2-zpct4).
+// `internal/rules/safecmds`' looksLikePath delegates to it, and safecmds_test.go's
+// TestLooksLikePath pins the same rows from there — the pair is what proves the two seams
+// cannot drift apart again.
+func TestLooksLikePath_IsSharedWithTheRuleThatOwnsReadability(t *testing.T) {
+	tests := []struct {
+		arg  string
+		want bool
+	}{
+		{"/etc/shadow", true},
+		{"./f", true},
+		{"../f", true},
+		{"~", true},
+		{"~/f", true},
+		{"~someuser", true},
+		{"~someuser/f", true},
+		{"f.txt", false},
+		{".env", false},
+		{"-r", false},
+		{"", false},
+		{"$HOME/f", false},
+		{"docs/adr", false},
+	}
+	for _, tt := range tests {
+		if got := LooksLikePath(tt.arg); got != tt.want {
+			t.Errorf("LooksLikePath(%q) = %v, want %v", tt.arg, got, tt.want)
+		}
 	}
 }
