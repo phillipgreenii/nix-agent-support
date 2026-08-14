@@ -47,13 +47,23 @@ func TestRule(t *testing.T) {
 		{"grep into ssh config", bashInput("grep Host ~/.ssh/config"), hookio.Ask},
 
 		// False-positive avoidance (pg2-ia640.2): the grep/rg positional PATTERN,
-		// grep -e/-f pattern-source values, rg value-flag values, and the jq value
+		// grep -e pattern values, rg value-flag values, and the jq value
 		// flags + bare filter are NOT secret file paths — must Abstain, not Ask.
 		{"grep pattern .env is not a file", bashInput("grep .env file.log"), hookio.NoOpinion},
 		{"rg pattern .env is not a file", bashInput("rg .env somefile.log"), hookio.NoOpinion},
 		{"grep -e .env pattern value is not a file", bashInput("grep -e .env file.log"), hookio.NoOpinion},
-		{"grep -f .env pattern-file value is not a file", bashInput("grep -f .env file.log"), hookio.NoOpinion},
 		{"rg -g glob value is not a file", bashInput("rg -g '*.env' pattern file.log"), hookio.NoOpinion},
+
+		// `-f`/`--file` IS A READ, and this row asserted the opposite until pg2-ygjs5.
+		// It is the one pg2-ia640.2 row that changed verdict, deliberately: `-f FILE` is
+		// grep's PATTERN FILE, so grep OPENS it and its contents become the patterns.
+		// Grouping it with `-e` was the mistake — `-e`'s operand is the pattern ITSELF
+		// and is never opened, while `-f`'s operand is a file — and treating the two
+		// alike is what made `grep -f ~/.ssh/id_rsa x.log` auto-approve while the
+		// positional control `grep pat ~/.ssh/id_rsa` rejected. Unlike its siblings
+		// above, this row was synthetic table coverage rather than an observed asklog
+		// invocation, so no measured false positive is reintroduced by flipping it.
+		{"grep -f .env READS .env as the pattern file", bashInput("grep -f .env file.log"), hookio.Ask},
 		{"jq --arg value .env is not a file", bashInput("jq --arg x .env '.'"), hookio.NoOpinion},
 		{"jq bare filter .credentials is not a file", bashInput("jq '.credentials' data.json"), hookio.NoOpinion},
 

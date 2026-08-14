@@ -182,6 +182,13 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 			}
 			// grep/rg: skip pattern arg before path checking
 			if innerBase == "grep" || innerBase == "rg" {
+				// The read-only disqualification applies through xargs too (pg2-ygjs5).
+				// `xargs rg --pre CMD` runs CMD exactly as the direct spelling does, and
+				// a guard on only the direct route is the one-spelling coverage this
+				// whole family of defects is made of.
+				if flag, executes := cmdparse.GrepExecFlag(innerBase, innerArgs); executes {
+					return r.refuse("safe-commands: xargs " + innerBase + " " + flag + " runs a program, so this is not a read-only invocation (deferred to claude-code)")
+				}
 				fileArgs := cmdparse.SkipGrepPattern(innerBase, innerArgs)
 				if issue := readPathIssue(fileArgs, pe, ""); issue != "" {
 					return r.refuse("safe-commands: xargs " + innerBase + " " + issue + " (deferred to claude-code)")
@@ -293,6 +300,17 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		}
 		// grep/rg: first non-flag arg is a pattern, not a file — skip it in path checks
 		if basename == "grep" || basename == "rg" {
+			// A flag that makes grep/rg RUN A PROGRAM disqualifies the whole
+			// invocation (pg2-ygjs5). These commands are approvable because they only
+			// READ; `rg --pre CMD` searches the output of CMD per file and ugrep's
+			// `--filter`/`--pager`/`--view` likewise name programs, so the invocation
+			// is an execution primitive and no amount of screening its ARGUMENTS makes
+			// it read-only. Screening the operand as a path is not the fix either: it
+			// catches `--pre /tmp/evil` only because that is spelled as a path, and
+			// misses `--pre evilcmd` entirely.
+			if flag, executes := cmdparse.GrepExecFlag(basename, pc.Args); executes {
+				return r.refuse("safe-commands: " + basename + " " + flag + " runs a program, so this is not a read-only invocation (deferred to claude-code)")
+			}
 			fileArgs := cmdparse.SkipGrepPattern(basename, pc.Args)
 			if issue := readPathIssue(fileArgs, pe, ""); issue != "" {
 				return r.refuse("safe-commands: " + basename + " " + issue + " (deferred to claude-code)")
