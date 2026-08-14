@@ -63,6 +63,44 @@ func TestComputeAndScan_findsCommitPatchID(t *testing.T) {
 	}
 }
 
+// TestScanPatchIDCommits_mapsPatchIDToItsCommit pins the fact the gate's lock
+// condition rests on: `git patch-id` prints the COMMIT sha beside each patch-id
+// when fed from `git log -p`, so the gated commit is recoverable from the scan the
+// gate check already runs — no extra git call and no new gate metadata. Asserted
+// against real git, because it is git's output shape being relied upon.
+func TestScanPatchIDCommits_mapsPatchIDToItsCommit(t *testing.T) {
+	dir := initRepo(t)
+	commit(t, dir, "a.txt", "hello\n", "add a")
+	base := strings.TrimSpace(mustGit(t, dir, "rev-parse", "HEAD"))
+	commit(t, dir, "b.txt", "world\n", "add b")
+	head := strings.TrimSpace(mustGit(t, dir, "rev-parse", "HEAD"))
+
+	c := Client{R: run.CLIRunner{}}
+	id, err := c.Compute(context.Background(), dir, "HEAD")
+	if err != nil {
+		t.Fatalf("Compute: %v", err)
+	}
+	byID, err := c.ScanPatchIDCommits(context.Background(), dir, base+"..HEAD")
+	if err != nil {
+		t.Fatalf("ScanPatchIDCommits: %v", err)
+	}
+	shas, ok := byID[id]
+	if !ok {
+		t.Fatalf("scan did not find HEAD patch-id %q in %v", id, byID)
+	}
+	if len(shas) != 1 || shas[0] != head {
+		t.Errorf("patch-id %q maps to %v, want exactly [%s]", id, shas, head)
+	}
+	// The key set must remain exactly what ScanPatchIDs reports.
+	set, err := c.ScanPatchIDs(context.Background(), dir, base+"..HEAD")
+	if err != nil {
+		t.Fatalf("ScanPatchIDs: %v", err)
+	}
+	if len(set) != len(byID) || !set[id] {
+		t.Errorf("ScanPatchIDs set %v must be the key set of %v", set, byID)
+	}
+}
+
 func TestScan_emptyRangeYieldsEmptySet(t *testing.T) {
 	dir := initRepo(t)
 	commit(t, dir, "a.txt", "hello\n", "c1")

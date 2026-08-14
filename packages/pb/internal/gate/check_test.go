@@ -32,6 +32,306 @@ func checkDeps(f run.Runner, disc func([]string, string) ([]discover.DB, error))
 	return CheckDeps{PN: pn.Client{R: f}, BD: bd.Client{R: f}, PatchID: patchid.Client{R: f}, Discover: disc}
 }
 
+// lockInfoJSON is checkInfoJSON with repo-a described as a repo the terminal pins
+// as a flake input: pn schema 2 (so terminal_input/locked_rev carry information),
+// applied at local HEAD "tip", built from locked rev lockedRev.
+func lockInfoJSON(lockedRev string) string {
+	return fmt.Sprintf(`{"wsid":"home","root":"/ws","terminal":"m","repos":[
+		{"name":"repo-a","path":"/ws/repo-a","applied_ref":"tip","dirty":false,
+		 "applied_state_schema":2,"terminal_input":true,"locked_rev":%q}]}`, lockedRev)
+}
+
+// scriptResolvable scripts the `bd gate resolve g-1` call so it SUCCEEDS. Every
+// must-not-resolve test calls this, and that is load-bearing rather than
+// decorative: leaving it unscripted makes FakeRunner error on the resolve, which
+// lands in Skipped and leaves Resolved empty anyway — so the test would pass even
+// with the lock condition deleted. Scripted, an empty Resolved can only mean the
+// condition actually held the gate back.
+func scriptResolvable(f *run.FakeRunner) {
+	f.AddResponse("bd", []string{"-C", "/ws", "gate", "resolve", "g-1"}, run.Result{}, nil)
+}
+
+// scriptGateScan scripts the gate list plus the condition-1 scan of
+// base1..tip, whose patch-id output maps patch-id "abc123" to commit sha.
+func scriptGateScan(f *run.FakeRunner, sha string) {
+	f.AddResponse("bd", []string{"-C", "/ws", "gate", "list", "--limit", "0", "--json"},
+		run.Result{Stdout: `{"data":[{"id":"g-1","issue_type":"gate","await_type":"pn:applied",
+			"await_id":"home:repo-a:abc123","created_at":"2026-06-26T00:00:00Z","metadata":{"applied_baseline":"base1"}}]}`}, nil)
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "merge-base", "--is-ancestor", "base1", "tip"}, run.Result{}, nil)
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "log", "-p", "--no-merges", "base1..tip"}, run.Result{Stdout: "diff"}, nil)
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "patch-id", "--stable"},
+		run.Result{Stdout: "abc123 " + sha + "\n"}, nil)
+}
+
+func runCheck(t *testing.T, f *run.FakeRunner) CheckResult {
+	t.Helper()
+	out, err := Check(context.Background(), checkDeps(f, stubDiscover("/ws")), CheckParams{
+		WorkspaceDir: "/ws", LastN: 100, StaleAfter: 72 * time.Hour, StaleHandler: "convert-to-human",
+		Now: time.Date(2026, 6, 26, 1, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	return out
+}
+
+// ancestorProbes returns the (ancestor, descendant) pairs Check asked git about.
+func ancestorProbes(f *run.FakeRunner) [][2]string {
+	var got [][2]string
+	for _, c := range f.Calls() {
+		if c.Name == "git" && len(c.Args) == 6 && c.Args[2] == "merge-base" && c.Args[3] == "--is-ancestor" {
+			got = append(got, [2]string{c.Args[4], c.Args[5]})
+		}
+	}
+	return got
+}
+
+func probed(f *run.FakeRunner, ancestor, descendant string) bool {
+	for _, p := range ancestorProbes(f) {
+		if p[0] == ancestor && p[1] == descendant {
+			return true
+		}
+	}
+	return false
+}
+
+// TestCheck_unpushedCommitInPinnedRepoDoesNotResolve is THE regression test for
+// bead pg2-ft60a. repo-a is pinned by the terminal as a flake input; the gated
+// commit is on the local checkout the apply ran over (condition 1 passes) but the
+// rev that apply built the input from ("locked1") does not contain it, because the
+// commit was never pushed and relocked. The gate MUST stay blocked: resolving it
+// releases a verification bead against code no build has ever seen.
+//
+// Against the pre-change logic (condition 1 alone) this resolves — that is the bug.
+func TestCheck_unpushedCommitInPinnedRepoDoesNotResolve(t *testing.T) {
+	f := run.NewFakeRunner()
+	f.AddResponse("pn", []string{"workspace", "info", "--json"}, run.Result{Stdout: lockInfoJSON("locked1")}, nil)
+	scriptGateScan(f, "gatedsha")
+	scriptResolvable(f)
+	// The gated commit is NOT in the rev the apply built from.
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "merge-base", "--is-ancestor", "gatedsha", "locked1"},
+		run.Result{ExitCode: 1}, fmt.Errorf("not ancestor"))
+
+	out := runCheck(t, f)
+	if len(out.Resolved) != 0 || len(out.WouldResolve) != 0 {
+		t.Fatalf("resolved=%v would=%v; an unpushed commit in a flake-pinned repo is NOT in the applied system",
+			out.Resolved, out.WouldResolve)
+	}
+	if len(out.Blocked) != 1 || !strings.Contains(out.Blocked[0].Reason, "push it, relock the terminal") {
+		t.Fatalf("blocked = %+v; the reason must say why, or the operator sees only a silently stuck gate", out.Blocked)
+	}
+	if len(out.Skipped) != 0 {
+		t.Fatalf("skipped = %+v; a DETERMINED 'not in the build' is not an undeterminable gate — routing it "+
+			"to Skipped makes the apply post-hook exit non-zero on every normal pending gate", out.Skipped)
+	}
+	if !probed(f, "gatedsha", "locked1") {
+		t.Fatalf("must test the gated commit against the RECORDED locked rev; probes = %v", ancestorProbes(f))
+	}
+}
+
+// TestCheck_terminalRepoStillResolves pins the clause that keeps the sound class
+// working with no special case. The terminal is built from its LOCAL directory, so
+// it has no locked_revs entry (terminal_input=false) and condition 1 is the whole
+// truth for it. It MUST resolve, and no lock probe should be attempted.
+func TestCheck_terminalRepoStillResolves(t *testing.T) {
+	f := run.NewFakeRunner()
+	// schema 2 (a current pn wrote this) but NOT a flake input of the terminal.
+	f.AddResponse("pn", []string{"workspace", "info", "--json"}, run.Result{Stdout: `{"wsid":"home","root":"/ws","terminal":"repo-a","repos":[
+		{"name":"repo-a","path":"/ws/repo-a","applied_ref":"tip","dirty":false,
+		 "applied_state_schema":2,"terminal_input":false,"locked_rev":""}]}`}, nil)
+	scriptGateScan(f, "gatedsha")
+	scriptResolvable(f)
+
+	out := runCheck(t, f)
+	if len(out.Resolved) != 1 || out.Resolved[0] != "g-1" {
+		t.Fatalf("resolved = %v skipped = %+v; a terminal-repo gate must keep resolving on condition 1 alone",
+			out.Resolved, out.Skipped)
+	}
+	for _, p := range ancestorProbes(f) {
+		if p[0] == "gatedsha" {
+			t.Fatalf("no lock probe should be made for a repo with no locked_revs entry; probes = %v", ancestorProbes(f))
+		}
+	}
+}
+
+// TestCheck_pushedButLockNotAdvancedFailsClosed is the ANCESTOR case the operator
+// explicitly accepted as fail-closed. The gated commit is pushed — it is now an
+// ancestor of the repo's remote tip "remotetip" — but the terminal has not been
+// relocked, so the rev the apply built from ("locked1") predates it. The gate MUST
+// NOT resolve: being on the remote is not being in the build.
+func TestCheck_pushedButLockNotAdvancedFailsClosed(t *testing.T) {
+	f := run.NewFakeRunner()
+	f.AddResponse("pn", []string{"workspace", "info", "--json"}, run.Result{Stdout: lockInfoJSON("locked1")}, nil)
+	scriptGateScan(f, "gatedsha")
+	scriptResolvable(f)
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "merge-base", "--is-ancestor", "gatedsha", "locked1"},
+		run.Result{ExitCode: 1}, fmt.Errorf("not ancestor"))
+	// Deliberately scripted to SUCCEED: if the check ever consulted the remote tip
+	// (or anything other than the recorded locked rev) the gate would resolve.
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "merge-base", "--is-ancestor", "gatedsha", "remotetip"},
+		run.Result{}, nil)
+
+	out := runCheck(t, f)
+	if len(out.Resolved) != 0 || len(out.Blocked) != 1 {
+		t.Fatalf("resolved=%v blocked=%+v; pushed-but-not-relocked must fail closed", out.Resolved, out.Blocked)
+	}
+	if probed(f, "gatedsha", "remotetip") {
+		t.Fatalf("the check must consult ONLY the rev recorded with the apply; probes = %v", ancestorProbes(f))
+	}
+}
+
+// TestCheck_relockAfterApplyDoesNotResolve covers the ORDERING HOLE the ruling's
+// refinement exists for, and it is what distinguishes "the lock recorded at apply
+// time" from "the lock as it stands now". Apply at T1 built from "locked1"; a
+// relock at T2 > T1 moved the lock to "locked2", which DOES contain the gated
+// commit. No apply has run since. The T1 apply is the one resolving the gate, so
+// the gate MUST NOT resolve — the running system was built before the relock.
+//
+// Against a plain "is the lock now past the commit?" check this resolves.
+func TestCheck_relockAfterApplyDoesNotResolve(t *testing.T) {
+	f := run.NewFakeRunner()
+	// info reports the rev recorded WITH the T1 apply.
+	f.AddResponse("pn", []string{"workspace", "info", "--json"}, run.Result{Stdout: lockInfoJSON("locked1")}, nil)
+	scriptGateScan(f, "gatedsha")
+	scriptResolvable(f)
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "merge-base", "--is-ancestor", "gatedsha", "locked1"},
+		run.Result{ExitCode: 1}, fmt.Errorf("not ancestor"))
+	// The post-relock rev DOES contain the commit; consulting it would resolve.
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "merge-base", "--is-ancestor", "gatedsha", "locked2"},
+		run.Result{}, nil)
+
+	out := runCheck(t, f)
+	if len(out.Resolved) != 0 || len(out.Blocked) != 1 {
+		t.Fatalf("resolved=%v blocked=%+v; a relock AFTER the apply must not retroactively resolve that "+
+			"apply's gate", out.Resolved, out.Blocked)
+	}
+	if probed(f, "gatedsha", "locked2") {
+		t.Fatalf("the post-relock rev must never be consulted; probes = %v", ancestorProbes(f))
+	}
+}
+
+// TestCheck_resolvesWhenLockContainsGatedCommit is the happy path for a pinned
+// repo: the apply built from a rev that contains the gated commit (pushed and
+// relocked before the apply), so BOTH conditions hold.
+func TestCheck_resolvesWhenLockContainsGatedCommit(t *testing.T) {
+	f := run.NewFakeRunner()
+	f.AddResponse("pn", []string{"workspace", "info", "--json"}, run.Result{Stdout: lockInfoJSON("locked2")}, nil)
+	scriptGateScan(f, "gatedsha")
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "merge-base", "--is-ancestor", "gatedsha", "locked2"},
+		run.Result{}, nil)
+	scriptResolvable(f)
+
+	out := runCheck(t, f)
+	if len(out.Resolved) != 1 {
+		t.Fatalf("resolved = %v skipped = %+v; both conditions hold, the gate must resolve", out.Resolved, out.Skipped)
+	}
+}
+
+// TestCheck_cherryPickedCopyInLockResolves covers the slice half of the scan
+// result. One diff can appear twice in the range (a cherry-pick); the copies are
+// diff-identical but differ in ancestry, so the check must accept ANY copy being in
+// the lock. Testing only the first would fail closed on a shipped change.
+func TestCheck_cherryPickedCopyInLockResolves(t *testing.T) {
+	f := run.NewFakeRunner()
+	f.AddResponse("pn", []string{"workspace", "info", "--json"}, run.Result{Stdout: lockInfoJSON("locked2")}, nil)
+	f.AddResponse("bd", []string{"-C", "/ws", "gate", "list", "--limit", "0", "--json"},
+		run.Result{Stdout: `{"data":[{"id":"g-1","issue_type":"gate","await_type":"pn:applied",
+			"await_id":"home:repo-a:abc123","created_at":"2026-06-26T00:00:00Z","metadata":{"applied_baseline":"base1"}}]}`}, nil)
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "merge-base", "--is-ancestor", "base1", "tip"}, run.Result{}, nil)
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "log", "-p", "--no-merges", "base1..tip"}, run.Result{Stdout: "diff"}, nil)
+	// The same patch-id twice, from two different commits.
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "patch-id", "--stable"},
+		run.Result{Stdout: "abc123 shipped\nabc123 localonly\n"}, nil)
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "merge-base", "--is-ancestor", "shipped", "locked2"},
+		run.Result{}, nil)
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "merge-base", "--is-ancestor", "localonly", "locked2"},
+		run.Result{ExitCode: 1}, fmt.Errorf("not ancestor"))
+	scriptResolvable(f)
+
+	out := runCheck(t, f)
+	if len(out.Resolved) != 1 {
+		t.Fatalf("resolved = %v skipped = %+v; one copy of the patch IS in the lock, so the change shipped",
+			out.Resolved, out.Skipped)
+	}
+}
+
+// TestCheck_unresolvedLockedRevFailsClosed covers the state where the apply knows
+// the repo IS a terminal flake input but could not establish the rev it built from
+// (unreadable flake.lock, a follows-only input). Falling back to condition 1 there
+// is precisely the unsound case, so it MUST fail closed — and say so.
+func TestCheck_unresolvedLockedRevFailsClosed(t *testing.T) {
+	f := run.NewFakeRunner()
+	f.AddResponse("pn", []string{"workspace", "info", "--json"}, run.Result{Stdout: lockInfoJSON("")}, nil)
+	scriptGateScan(f, "gatedsha")
+	scriptResolvable(f)
+
+	out := runCheck(t, f)
+	if len(out.Resolved) != 0 {
+		t.Fatalf("resolved = %v; an apply that cannot say what it built the input from must fail closed",
+			out.Resolved)
+	}
+	if len(out.Skipped) != 1 || !strings.Contains(out.Skipped[0].Reason, "recorded no locked rev") {
+		t.Fatalf("skipped = %+v; the unprovable case must be reported, not silent", out.Skipped)
+	}
+	if len(out.Blocked) != 0 {
+		t.Fatalf("blocked = %+v; an UNDETERMINABLE gate belongs in Skipped (which drives the non-zero "+
+			"exit), not in Blocked", out.Blocked)
+	}
+	if len(ancestorProbes(f)) > 1 { // only the baseline probe
+		t.Fatalf("no lock probe is possible without a rev; probes = %v", ancestorProbes(f))
+	}
+}
+
+// TestCheck_preLockedRevsRecordStillResolves is the backwards-compatibility case,
+// and it is why the branch keys on the SCHEMA VERSION rather than on "the map is
+// empty". A record written by a pn predating locked_revs carries no lock
+// information at all, so terminal_input=false there is not evidence — treating it
+// as evidence would be harmless, but treating the MISSING map as "unprovable" would
+// make every gate unresolvable until a new pn is built, pushed, relocked and
+// applied. The fix itself ships through that path, so that would be a bootstrap
+// stall. Skip the condition for old records.
+func TestCheck_preLockedRevsRecordStillResolves(t *testing.T) {
+	f := run.NewFakeRunner()
+	// checkInfoJSON has no applied_state_schema at all → 0.
+	f.AddResponse("pn", []string{"workspace", "info", "--json"}, run.Result{Stdout: checkInfoJSON}, nil)
+	scriptGateScan(f, "gatedsha")
+	scriptResolvable(f)
+
+	out := runCheck(t, f)
+	if len(out.Resolved) != 1 {
+		t.Fatalf("resolved = %v skipped = %+v; a pre-locked_revs record must not block every gate",
+			out.Resolved, out.Skipped)
+	}
+}
+
+// TestApplyBuiltGatedCommit_schemaGuardIgnoresLockFields exercises the schema guard
+// on its own, which no end-to-end Check test can do: a pn predating locked_revs
+// emits neither terminal_input nor locked_rev, so in practice the schema-0 branch
+// and the not-a-terminal-input branch agree and either one alone would skip.
+//
+// The guard states the policy the agreement hides — a record reporting schema 0
+// carries NO lock information, so the lock fields beside it are not evidence and
+// MUST NOT be enforced. Without the guard this state fails closed, and every gate
+// in a workspace whose applied-state predates the upgrade becomes unresolvable
+// until pn is rebuilt, pushed, relocked and applied: a bootstrap stall, and this
+// very fix ships through that path.
+func TestApplyBuiltGatedCommit_schemaGuardIgnoresLockFields(t *testing.T) {
+	f := run.NewFakeRunner()
+	d := checkDeps(f, stubDiscover("/ws"))
+	// Schema 0 alongside lock fields that, if enforced, would block: the commit is
+	// not in locked1 (no is-ancestor response is scripted, so the probe fails).
+	repo := pn.Repo{
+		Name: "repo-a", Path: "/ws/repo-a", AppliedRef: "tip",
+		AppliedStateSchema: 0, TerminalInput: true, LockedRev: "locked1",
+	}
+	if verdict, reason := d.applyBuiltGatedCommit(context.Background(), repo, []string{"gatedsha"}); verdict != lockSatisfied {
+		t.Fatalf("schema 0 must skip the lock condition outright, got verdict %d: %s", verdict, reason)
+	}
+	if len(ancestorProbes(f)) != 0 {
+		t.Fatalf("schema 0 must not probe the lock at all; probes = %v", ancestorProbes(f))
+	}
+}
+
 func TestCheck_resolvesWhenPatchIDInHistory(t *testing.T) {
 	f := run.NewFakeRunner()
 	f.AddResponse("pn", []string{"workspace", "info", "--json"}, run.Result{Stdout: checkInfoJSON}, nil)

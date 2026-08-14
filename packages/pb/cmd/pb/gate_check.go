@@ -53,8 +53,15 @@ func newGateCheckCmd() *cobra.Command {
 					return err
 				}
 			} else {
-				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "resolved=%d would_resolve=%d skipped=%d stale=%d\n",
-					len(out.Resolved), len(out.WouldResolve), len(out.Skipped), len(out.StaleActions))
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "resolved=%d would_resolve=%d blocked=%d skipped=%d stale=%d\n",
+					len(out.Resolved), len(out.WouldResolve), len(out.Blocked), len(out.Skipped), len(out.StaleActions))
+				// Blocked gates are correctly still closed, so they do NOT affect the
+				// exit code — but their reason is the actionable one ("push, relock,
+				// re-apply"), and a bare count leaves the operator with no way to tell
+				// a stuck gate from a waiting one. Print it.
+				for _, b := range out.Blocked {
+					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  blocked %s (%s): %s\n", b.GateID, b.Repo, b.Reason)
+				}
 			}
 			if len(out.Skipped) > 0 {
 				os.Exit(1) // best-effort: non-zero iff something was undeterminable

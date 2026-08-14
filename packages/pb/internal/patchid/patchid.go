@@ -58,7 +58,37 @@ func (c Client) IsAncestor(ctx context.Context, repoPath, ancestor, descendant s
 //	git -C repoPath log -p --no-merges <revRange...> | git patch-id --stable
 //
 // revRange is split on spaces into git args (e.g. "base..tip" or "-n 100 tip").
+// It is the key set of ScanPatchIDCommits; use that when the COMMIT carrying a
+// patch is needed as well.
 func (c Client) ScanPatchIDs(ctx context.Context, repoPath, revRange string) (map[string]bool, error) {
+	byID, err := c.ScanPatchIDCommits(ctx, repoPath, revRange)
+	if err != nil {
+		return nil, err
+	}
+	set := make(map[string]bool, len(byID))
+	for id := range byID {
+		set[id] = true
+	}
+	return set, nil
+}
+
+// ScanPatchIDCommits scans the same range as ScanPatchIDs and additionally reports
+// which COMMIT each patch-id came from:
+//
+//	git -C repoPath log -p --no-merges <revRange...> | git patch-id --stable
+//
+// `git patch-id` prints "<patch-id> <commit-sha>" per patch, the sha taken from the
+// `commit <sha>` header `git log -p` emits — so the commit mapping is a free
+// by-product of the scan, and no extra git invocation (nor any extra gate metadata)
+// is needed to recover it.
+//
+// A patch-id maps to a SLICE because one diff can appear more than once in a range
+// (a cherry-pick), and the copies differ in ancestry even though they are
+// diff-identical; callers that test ancestry MUST consider every entry. The slice
+// may be EMPTY while the key is present: the key set is exactly ScanPatchIDs'
+// answer and is preserved verbatim, so a patch whose sha could not be read still
+// registers as found rather than silently vanishing from the scan.
+func (c Client) ScanPatchIDCommits(ctx context.Context, repoPath, revRange string) (map[string][]string, error) {
 	args := []string{"-C", repoPath, "log", "-p", "--no-merges"}
 	args = append(args, strings.Fields(revRange)...)
 	logRes, err := c.R.Run(ctx, "git", args, run.Options{})
@@ -66,18 +96,26 @@ func (c Client) ScanPatchIDs(ctx context.Context, repoPath, revRange string) (ma
 		return nil, fmt.Errorf("git log -p %s: %w", revRange, err)
 	}
 	if strings.TrimSpace(logRes.Stdout) == "" {
-		return map[string]bool{}, nil
+		return map[string][]string{}, nil
 	}
 	idRes, err := c.R.Run(ctx, "git", []string{"-C", repoPath, "patch-id", "--stable"},
 		run.Options{Stdin: logRes.Stdout})
 	if err != nil {
 		return nil, fmt.Errorf("git patch-id (scan): %w", err)
 	}
-	set := map[string]bool{}
+	byID := map[string][]string{}
 	for line := range strings.SplitSeq(idRes.Stdout, "\n") {
-		if id := firstField(line); id != "" {
-			set[id] = true
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		id := fields[0]
+		if _, seen := byID[id]; !seen {
+			byID[id] = nil
+		}
+		if len(fields) > 1 {
+			byID[id] = append(byID[id], fields[1])
 		}
 	}
-	return set, nil
+	return byID, nil
 }

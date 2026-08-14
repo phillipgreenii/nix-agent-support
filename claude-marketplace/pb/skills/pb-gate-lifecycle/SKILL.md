@@ -75,7 +75,8 @@ concurrent agent draining `bd ready` can grab it in the gap.
 
 The bead stays out of `bd ready` until someone runs `pn workspace apply`; the
 apply's post-hook runs `pb gate check`, which resolves the gate once the change's
-patch-id is in the applied history. Then the bead surfaces as ordinary work.
+patch-id is in the applied history AND that apply's flake lock contained the commit
+(see rule 5). Then the bead surfaces as ordinary work.
 
 ## Rules
 
@@ -93,6 +94,14 @@ patch-id is in the applied history. Then the bead surfaces as ordinary work.
    (`pb gate check` converts it to a `human` bead by default). If you expect the
    change to be squash-merged upstream, prefer a plain `bd dep`/human follow-up
    over a `pn:applied` gate.
+5. **A flake-pinned repo needs push + relock, not just an apply.** Where the
+   workspace terminal pins the repo as a `github:` flake input, an apply builds it
+   from the terminal's `flake.lock`, so a commit that is only on local `main` is NOT
+   in the built system. `pb gate check` requires the gated commit to be in the rev
+   that apply's lock named, so the gate stays blocked (with a reason) until the
+   commit is pushed, the terminal relocked, and an apply run. This is deliberate: the
+   alternative released verification beads against code no build had seen. Only the
+   TERMINAL repo resolves on the apply alone.
 
 ## When NOT to gate
 

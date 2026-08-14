@@ -61,7 +61,7 @@ sequenceDiagram
 
 Run **inside a `pn` workspace** (e.g. as the apply post-hook). Discovers every distinct
 beads DB reachable from the workspace, lists open `pn:applied` gates, and resolves each
-whose patch-id now appears in the corresponding repo's applied history.
+one for which BOTH of the following hold (ADR 0046).
 
 ```
 pb gate check [--dry-run] [--strict] [--last-n N] [--stale-handler convert-to-human|close] [--stale-after 3d] [--json]
@@ -69,9 +69,18 @@ pb gate check [--dry-run] [--strict] [--last-n N] [--stale-handler convert-to-hu
 
 - **Discovery + dedupe:** walks up each repo (and the root) for `.beads`, bounded at the
   workspace root, and dedupes by Dolt identity (`host:port|database|project_id`).
-- **Scan range:** when a gate's `applied_baseline` is an ancestor of the repo's
-  `applied_ref`, scans `baseline..applied_ref`; otherwise scans the last `--last-n`
-  commits (default 100).
+- **Condition 1 — an apply happened:** the gated patch-id appears in the scan range.
+  When a gate's `applied_baseline` is an ancestor of the repo's `applied_ref`, scans
+  `baseline..applied_ref`; otherwise scans the last `--last-n` commits (default 100).
+- **Condition 2 — that apply's lock contained the commit:** for a repo the terminal pins
+  as a flake input, the gated commit must be an ancestor of `locked_rev` — the rev the
+  terminal's `flake.lock` pinned **at that apply**, published by `pn workspace info`
+  (`phillipg-nix-repo-base` ADR 0025). Condition 1 alone only proves an apply ran over a
+  checkout holding the change; a commit never pushed and relocked is not in the built
+  system. So such a gate needs **push + relock + apply**, and until then it is reported in
+  `blocked` with the remedy. Not applied to the terminal repo (built from its local
+  directory, so no `locked_rev`) nor to an applied-state record written by a `pn`
+  predating `locked_revs` (`applied_state_schema < 2`).
 - **Dirty repos:** scanned leniently by default (committed history only); `--strict` skips
   them.
 - **`--dry-run`** mutates nothing (reports `would_resolve` / would-be stale actions).
@@ -79,6 +88,11 @@ pb gate check [--dry-run] [--strict] [--last-n N] [--stale-handler convert-to-hu
   rejects `<1ms`) that still cannot be resolved get the `--stale-handler` action:
   `convert-to-human` (adds the `human` label → surfaces in `bd human list`) or `close`
   (resolves the gate, unblocking the bead).
+- **`blocked` vs `skipped`:** `blocked` gates were DETERMINED to be correctly still
+  closed (condition 2 said no) and do NOT affect the exit code — otherwise the apply
+  post-hook would exit non-zero, and `pn` warn, on every normal pending gate. `skipped`
+  gates are UNDETERMINABLE (unknown repo, scan failure, dirty under `--strict`, an apply
+  that recorded no locked rev for an input it consumes).
 - **Best-effort:** undeterminable gates are skipped and reported; the command exits
   non-zero if anything was skipped.
 

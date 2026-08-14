@@ -19,10 +19,26 @@ import (
 )
 
 type Repo struct {
-	Name       string `json:"name"`
-	Path       string `json:"path"`
+	Name string `json:"name"`
+	Path string `json:"path"`
+	// AppliedRef is the repo's local HEAD at apply time — evidence that an apply
+	// RAN over that checkout. It is NOT evidence that the applied system CONTAINS
+	// the commit: for a repo the terminal pins as a `github:` flake input the code
+	// reaches the build only through the terminal's flake.lock, so LockedRev below
+	// is the second, independent fact a gate needs (repo-base ADR 0025).
 	AppliedRef string `json:"applied_ref"`
 	Dirty      bool   `json:"dirty"`
+	// AppliedStateSchema is pn's applied-state schema version for this repo's
+	// record. 0 means the record predates locked_revs — so TerminalInput and
+	// LockedRev carry NO information and MUST NOT be read as negative evidence.
+	AppliedStateSchema int `json:"applied_state_schema"`
+	// TerminalInput reports whether the apply consumed this repo as a flake input
+	// of the terminal. Meaningful only when AppliedStateSchema >= 2.
+	TerminalInput bool `json:"terminal_input"`
+	// LockedRev is the rev the TERMINAL's flake.lock pinned for this repo at that
+	// apply — recorded WITH the apply, so it is not disturbed by a later relock.
+	// Empty while TerminalInput is true means the apply could not establish it.
+	LockedRev string `json:"locked_rev"`
 }
 
 type Info struct {
