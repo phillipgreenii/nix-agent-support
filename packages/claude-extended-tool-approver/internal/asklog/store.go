@@ -60,34 +60,61 @@ func DefaultDBPath() string {
 // immediately after open — before the WAL conversion and before migrate, so it
 // governs every fsync those steps would otherwise perform.
 //
-// Production leaves it EMPTY, so SQLite keeps its default (FULL) and every commit
-// to the ask log is durably flushed. Do not set it from non-test code.
-//
-// The package's own tests set it to "OFF" (see TestMain in store_test.go). Why
-// that seam exists — this is a real, reproducible environment interaction, not a
+// Tests across the MODULE set it to "OFF" via SetSynchronousForTests. Why that
+// seam exists — this is a real, reproducible environment interaction, not a
 // micro-optimisation:
 //
-//   - Creating a store costs ~17 fsyncs: the journal_mode=WAL conversion, plus one
-//     commit per schema migration (migrate runs each migration in its own
-//     transaction), plus the checkpoint on Close.
+//   - Creating a store costs 11 fsyncs (17 before migrate was made atomic): the
+//     journal_mode=WAL conversion, the schema_version create, the migration
+//     commit, the first insert, and the checkpoint on Close. Counted, not
+//     estimated: `strace -c -e trace=fsync` on one hook invocation.
 //   - Every test builds a throwaway DB under t.TempDir(), so it pays that in full.
 //   - fsync latency is a property of the HOST FILESYSTEM, and it varies by orders
 //     of magnitude. Measured on the Linux dev host for this repo: ~50ms per fsync
 //     on the ext4 root (which backs /tmp, and therefore t.TempDir()), versus
-//     ~0.8us on tmpfs — a ~60,000x spread.
+//     ~0.8us on tmpfs — a ~60,000x spread. Re-measured 2026-08-12 on the loaded
+//     QEMU VM that builds monorepod, with `fsync()` on a 23-byte write: 1.1s to
+//     3.6s. A SINGLE asklog.NewStore there costs 5-16 SECONDS of pure I/O wait.
 //   - Result on such a host: the 73-test asklog suite took 2m10s wall for 0.9s of
-//     CPU. It was not hung and not deadlocked; it was ~100% fsync wait. That fits
-//     under `go test`'s 10m default timeout (so the nix check
-//     `claude-extended-tool-approver-go-tests` passed, since mkGoTest passes no
-//     -timeout), but it blows any tighter budget — a `go test -timeout 90s` run
-//     panicked mid-suite with a stack inside modernc sqlite's pager open, which
-//     reads like a hang but is only the timeout landing on whichever test was
-//     current.
+//     CPU, and the 47-test cmd suite took 572s and tripped `go test`'s 10m default
+//     timeout, failing the whole nixosConfigurations.monorepod build (tc-fqu7).
+//     It was not hung and not deadlocked; it was ~100% fsync wait.
+//
+// THE POINT OF THE SEAM is not that the suite is slow, it is that without it the
+// suite's wall clock is a MULTIPLE OF AN UNBOUNDED HOST PROPERTY. No -timeout can
+// be chosen that a slower disk cannot blow through, so the fix has to remove the
+// fsyncs from the tests rather than budget for them.
 //
 // Durability is meaningless for a database deleted when the test exits, so tests
 // opt out of it. Anything asserting on-disk crash behaviour must set this back to
 // "" for the duration of that test.
+//
+// Production leaves it EMPTY, so SQLite keeps its default (FULL) and every commit
+// to the ask log is durably flushed. Nothing outside a _test.go file may set it;
+// TestNoProductionCodeDisablesDurability enforces that mechanically.
 var synchronousPragma string
+
+// SetSynchronousForTests points every store opened AFTERWARDS at
+// `PRAGMA synchronous=<value>`, and returns the previous value so a caller can
+// restore it. Passing "" restores SQLite's shipped default (FULL).
+//
+// This exists because the seam it fronts has to reach further than the package
+// that owns it: the throwaway databases that dominate the suite's wall clock are
+// created in package main's test helpers (cmd_show_test.go, cmd_evaluate_test.go),
+// which cannot touch an unexported var. asklog is under internal/, so exporting it
+// widens the seam to THIS MODULE and no further.
+//
+// It is deliberately NOT an environment variable or a flag. A knob readable at
+// runtime by the binary that decides whether a command may run is exactly what
+// was rejected for the input-processor deadline (16e1fd4d, pg2-iay90), and the
+// reasoning carries: at runtime a test-only env var is indistinguishable from a
+// production one, only undocumented. A Go function in an internal package has no
+// runtime surface at all — the shipped binary cannot be talked into calling it.
+func SetSynchronousForTests(value string) string {
+	previous := synchronousPragma
+	synchronousPragma = value
+	return previous
+}
 
 func NewStore(dbPath string) (*Store, error) {
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
@@ -585,14 +612,36 @@ func migrate(db *sql.DB) error {
 		return fmt.Errorf("read schema version: %w", err)
 	}
 
+	pending := make([]migration, 0, len(migrations))
 	for _, m := range migrations {
-		if m.version <= currentVersion {
-			continue
+		if m.version > currentVersion {
+			pending = append(pending, m)
 		}
-		tx, err := db.Begin()
-		if err != nil {
-			return fmt.Errorf("begin migration %d: %w", m.version, err)
-		}
+	}
+	if len(pending) == 0 {
+		return nil
+	}
+
+	// All pending migrations run in ONE transaction, not one each.
+	//
+	// Correctness first: SQLite DDL is transactional, so a single transaction
+	// makes migration ATOMIC — an interrupted upgrade leaves the database at
+	// its old version, never stranded halfway with schema_version disagreeing
+	// with the actual schema. Per-migration transactions made that half-migrated
+	// state reachable and unrecoverable-in-place.
+	//
+	// It is also what makes creating a database cheap. Each commit is a durable
+	// flush, and flush latency is a HOST property spanning orders of magnitude
+	// (see synchronousPragma above), so the fsync COUNT is the only part this
+	// code controls. Collapsing N commits into one takes a fresh-database open
+	// from 17 fsyncs to 11 (measured with `strace -c -e trace=fsync`), and keeps
+	// that number flat as migrations accumulate instead of growing one flush per
+	// migration forever.
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin migrations: %w", err)
+	}
+	for _, m := range pending {
 		if err := m.up(tx); err != nil {
 			_ = tx.Rollback()
 			return fmt.Errorf("migration %d: %w", m.version, err)
@@ -601,9 +650,9 @@ func migrate(db *sql.DB) error {
 			_ = tx.Rollback()
 			return fmt.Errorf("record version %d: %w", m.version, err)
 		}
-		if err := tx.Commit(); err != nil {
-			return fmt.Errorf("commit migration %d: %w", m.version, err)
-		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit migrations: %w", err)
 	}
 	return nil
 }

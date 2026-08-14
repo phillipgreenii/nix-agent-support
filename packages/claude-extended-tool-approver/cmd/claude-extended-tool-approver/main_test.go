@@ -40,6 +40,29 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 
+	// Make every store THIS PROCESS opens non-durable. The helpers in
+	// cmd_show_test.go and cmd_evaluate_test.go each build a throwaway SQLite
+	// database under t.TempDir() via asklog.NewStore, and creating one costs 11
+	// durable flushes. fsync latency is a host-filesystem property spanning
+	// orders of magnitude — measured at 1.1-3.6s per fsync on the loaded QEMU VM
+	// that builds monorepod — so a single setupShowTestDB there cost 16.07s
+	// against 12ms for the exec'd binary it then drives (tc-fqu7). The suite's
+	// wall clock was a multiple of an unbounded host property; this removes the
+	// flushes rather than budgeting for them. See synchronousPragma in
+	// internal/asklog/store.go for the full write-up.
+	//
+	// This reaches ONLY this process, and that is deliberate: the exec'd binary
+	// is the SHIPPED one and keeps the SHIPPED durability, because no env var or
+	// flag may change how the real binary behaves (16e1fd4d, pg2-iay90). The
+	// residual cost is therefore the child's, and it is bounded by how many
+	// databases the child has to CREATE: a test that inherits the XDG_DATA_HOME
+	// set below opens an already-migrated database (5 flushes), while one that
+	// overrides it with its own t.TempDir() makes the child build a schema from
+	// scratch (11). Measured over the whole package with
+	// `strace -f -c -e trace=fsync`: 445 flushes before this line, 188 after.
+	// Prefer inheriting unless a test actually asserts on ask-log CONTENT.
+	asklog.SetSynchronousForTests("OFF")
+
 	// Isolate the ask-log for the WHOLE package. The hook-mode tests below run
 	// the real binary, which opens asklog.DefaultDBPath() and INSERTS a row per
 	// invocation. Without this, every `go test` run wrote synthetic rows into the
@@ -687,20 +710,61 @@ func TestIntegration_InputProcessor_RewritesBashApprove(t *testing.T) {
 // install their deadline through a package var that cannot cross a process
 // boundary.
 //
-// wallClockBound is therefore an assertion, not a comment: it is what the fix buys
-// end to end. Measured 3.02-3.06s over five runs, against a ceiling of the 3s
-// deadline plus a 250ms grace plus a spawn; the defect returned at the mock's full
-// 30s. 15s sits ~4x above the former and 2x below the latter, so neither sandbox
-// load nor a fast machine decides the verdict.
+// processorOverheadBound is therefore an assertion, not a comment: it is what the
+// fix buys end to end. Measured 3.02-3.06s over five runs, against a ceiling of
+// the 3s deadline plus a 250ms grace plus a spawn; the defect returned at the
+// mock's full 30s. 15s sits ~4x above the former and 2x below the latter, so
+// neither sandbox load nor a fast machine decides the verdict.
+//
+// WHAT IS MEASURED IS A DIFFERENCE, NOT THE HOOK'S TOTAL WALL CLOCK — and that
+// distinction is the whole reason this test stopped being trustworthy (tc-fqu7).
+// The bound was previously applied to the raw elapsed time of one hook run, which
+// also contains the ask log's durable writes. fsync latency is a HOST property
+// spanning orders of magnitude (1.1-3.6s per fsync on the loaded QEMU VM that
+// builds monorepod, ~0.8us on tmpfs; see synchronousPragma in
+// internal/asklog/store.go), and a hook run performs several. On 2026-08-12 that
+// put a perfectly healthy run at 16.21s and failed the build: the 3s deadline had
+// worked exactly as designed and ~13s of disk had been charged to its account.
+//
+// So the run is measured against a CONTROL run of the same binary, same input and
+// same ask-log work with NO processor configured. Everything host-dependent is
+// present in both and cancels; what remains is the processor's marginal cost,
+// which is precisely what the 3s deadline governs. The bound itself is UNCHANGED
+// at 15s — this is not a third widening of a bound that has been widened twice
+// (pg2-tl0ry, pg2-iay90). The number is the same; it is finally applied to the
+// quantity it was always describing.
+//
+// The warm-up run before the control exists so both measured runs open an
+// ALREADY-CREATED database. Without it the control would pay schema creation that
+// the subject does not, understating the difference and biasing the test toward
+// passing — a false negative is worse here than a false positive, because the
+// defect this guards degrades every gated Bash tool call.
 //
 // It also pins the consequence that makes the 3s budget worth caring about: a
 // killed processor degrades to no rewrite, so the ORIGINAL command is what
 // Claude Code is told to run.
 func TestIntegration_InputProcessor_DeadlineKillIsVisibleOnStderr(t *testing.T) {
-	const wallClockBound = 15 * time.Second
+	const processorOverheadBound = 15 * time.Second
 
 	dir := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", dir)
+
+	// Pinned empty rather than assumed absent: an ambient CETA_INPUT_PROCESSOR
+	// inherited from the developer's shell would run a REAL processor during the
+	// control, inflating it and shrinking the difference — i.e. biasing the test
+	// toward passing, the one direction that must not happen silently. Empty is
+	// how "not configured" is spelled here (TestIntegration_InputProcessor_NotConfigured).
+	t.Setenv("CETA_INPUT_PROCESSOR", "")
+
+	input := `{"tool_name":"Bash","tool_input":{"command":"git status"},"cwd":"/tmp"}`
+
+	// Warm-up: creates the ask-log schema so neither measured run pays for it.
+	runHookOnce(t, input)
+
+	// Control: identical work MINUS the input processor.
+	controlStart := time.Now()
+	runHookOnce(t, input)
+	control := time.Since(controlStart)
 
 	procScript := filepath.Join(dir, "mock-processor")
 	if err := os.WriteFile(procScript, []byte("#!/bin/sh\nsleep 30\n"), 0o755); err != nil {
@@ -708,13 +772,12 @@ func TestIntegration_InputProcessor_DeadlineKillIsVisibleOnStderr(t *testing.T) 
 	}
 	t.Setenv("CETA_INPUT_PROCESSOR", procScript)
 
-	input := `{"tool_name":"Bash","tool_input":{"command":"git status"},"cwd":"/tmp"}`
 	start := time.Now()
 	result, stderr := runHookOnce(t, input)
 	elapsed := time.Since(start)
 
-	if elapsed > wallClockBound {
-		t.Errorf("hook returned after %v, want under %v: the shipped deadline killed the input processor but a process it forked kept the output pipe open, so every gated Bash tool call can outlast the budget\nstderr: %s", elapsed, wallClockBound, stderr)
+	if overhead := elapsed - control; overhead > processorOverheadBound {
+		t.Errorf("the input processor added %v to the hook (run %v, control %v), want under %v: the shipped deadline killed the input processor but a process it forked kept the output pipe open, so every gated Bash tool call can outlast the budget\nstderr: %s", overhead, elapsed, control, processorOverheadBound, stderr)
 	}
 	if !inputProcDeadlineKilled(stderr) {
 		t.Fatalf("stderr does not report a deadline kill, so runHook's retry can no longer recognise one: reconcile inputProcDeadlineKilled with internal/inputproc's diagnostic\nstderr: %s", stderr)

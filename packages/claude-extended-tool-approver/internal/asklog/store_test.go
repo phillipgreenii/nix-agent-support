@@ -3,8 +3,10 @@ package asklog
 import (
 	"database/sql"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	_ "modernc.org/sqlite"
@@ -12,20 +14,77 @@ import (
 
 // TestMain makes every store this package opens non-durable.
 //
-// Each test creates a fresh DB under t.TempDir(), and each creation costs ~17
-// fsyncs (WAL conversion + one commit per migration + the close checkpoint).
-// fsync latency is a host-filesystem property that spans orders of magnitude:
-// ~50ms per fsync on this repo's ext4 Linux dev host versus ~0.8us on tmpfs.
-// At the slow end that made this 73-test suite take 2m10s of wall clock for
-// 0.9s of CPU — pure I/O wait, which presents as an apparent hang whenever the
-// caller sets a -timeout below the 10m Go default. See synchronousPragma in
+// Each test creates a fresh DB under t.TempDir(), and each creation costs 11
+// fsyncs (WAL conversion + the schema_version create + the single migration
+// commit + the close checkpoint). fsync latency is a host-filesystem property
+// that spans orders of magnitude: ~50ms per fsync on this repo's ext4 Linux dev
+// host, 1.1-3.6s on the loaded QEMU VM that builds monorepod, versus ~0.8us on
+// tmpfs. At the slow end that made this 73-test suite take 2m10s of wall clock
+// for 0.9s of CPU — pure I/O wait, which presents as an apparent hang whenever
+// the caller sets a -timeout below the 10m Go default. See synchronousPragma in
 // store.go for the full write-up.
 //
-// A test that needs real durability semantics must restore synchronousPragma to
-// "" for its own duration.
+// A test that needs real durability semantics must restore the pragma to "" for
+// its own duration, e.g.
+//
+//	defer asklog.SetSynchronousForTests(asklog.SetSynchronousForTests(""))
 func TestMain(m *testing.M) {
-	synchronousPragma = "OFF"
+	SetSynchronousForTests("OFF")
 	os.Exit(m.Run())
+}
+
+// TestNoProductionCodeDisablesDurability is the tripwire on SetSynchronousForTests.
+//
+// The seam is exported so package main's test helpers can reach it (they create
+// the throwaway databases that dominate the cmd suite's wall clock), and export
+// is the only mechanism Go offers for that — a _test.go file is not importable
+// and asklog has no sub-package that could see an unexported var. Export is
+// therefore load-bearing, and this test is what keeps it from becoming a way to
+// silently ship a non-durable ask log: if a non-test file ever calls it, the
+// build turns red naming the file.
+//
+// Scope is the whole module, walked from the module root, because the risk is
+// not local to this package — any production file in any package could call it.
+func TestNoProductionCodeDisablesDurability(t *testing.T) {
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const needle = "SetSynchronousForTests"
+
+	var offenders []string
+	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		name := d.Name()
+		if !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			return nil
+		}
+		body, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		// store.go DEFINES it and its doc comment names it; every other
+		// non-test mention is a call site and therefore a defect.
+		if path == filepath.Join(root, "internal", "asklog", "store.go") {
+			return nil
+		}
+		if strings.Contains(string(body), needle) {
+			rel, _ := filepath.Rel(root, path)
+			offenders = append(offenders, rel)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(offenders) > 0 {
+		t.Errorf("%s is a TEST seam but is referenced from non-test file(s) %v: production must leave synchronousPragma empty so every ask-log commit is durably flushed", needle, offenders)
+	}
 }
 
 func TestNewStore_CreatesDB(t *testing.T) {
