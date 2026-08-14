@@ -731,7 +731,17 @@ the drain pool; the two operate on disjoint claim sets (`--label human` vs
 - **Stranded orphans.** A mid-work crash leaves the bead `in_progress` owned by a dead
   `-unblock` id; only that same id resumes it. A human should periodically re-open stale
   in-progress human beads (`bd update <id> --status open --assignee ""`). The atomic-release
-  rule removes the release-window orphan specifically.
+  rule removes the release-window orphan specifically. Two constraints on the release note
+  (`pg2-xx1y5`; identical to `/drain-beads`' "Stranded orphans"): (a) it MUST state the SCOPE
+  actually checked — "no un-landed work in any workspace repo" — and MUST NOT make a blanket
+  safety claim such as "the release is lossless". A worktree/branch sweep cannot see an operator
+  ruling held only in the released session's context, and a bead body carrying a superseded
+  instruction is exactly the loss it misses (S-1, F-9); widen the claim only by also running
+  F-9's `decided-against?` probe over the artifacts the bead names. (b) An IDLE session is not a
+  DEAD one — neither a frozen-transcript sample nor an argv scan distinguishes
+  DORMANT-AND-RESUMABLE from gone (one such session produced 11 typed operator turns six minutes
+  after being declared GONE), so the note MUST say "dormant since <t>, may resume" unless the
+  exit is positively proven.
 - **apply-waiting trust.** An apply-waiting bead whose change wasn't actually in the
   operator's apply round-trips harmlessly (self-correcting churn) — see above.
 - **in_progress human beads untouched.** `bd ready` excludes `in_progress`, so a human bead

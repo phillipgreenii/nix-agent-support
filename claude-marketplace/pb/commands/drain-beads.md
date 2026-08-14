@@ -889,7 +889,17 @@ re-enters this queue by itself as soon as its last blocker closes.
   `in_progress` owned by a now-dead id; no peer recovers it (resume only recovers
   YOUR own id). Before/after an unattended run, a human should check
   `bd list --status in_progress --json` for stale beads and re-open them:
-  `bd update <id> --status open --assignee ""`.
+  `bd update <id> --status open --assignee ""`. Two constraints on the release note
+  (`pg2-xx1y5`): (a) it MUST state the SCOPE actually checked — "no un-landed work in
+  any workspace repo" — and MUST NOT make a blanket safety claim such as "the release
+  is lossless". A worktree/branch sweep cannot see an operator ruling held only in the
+  released session's context, and a bead body carrying a superseded instruction is
+  exactly the loss it misses (S-1, F-9); widen the claim only by also running F-9's
+  `decided-against?` probe over the artifacts the bead names. (b) An IDLE session is
+  not a DEAD one — neither a frozen-transcript sample nor an argv scan distinguishes
+  DORMANT-AND-RESUMABLE from gone (one such session produced 11 typed operator turns
+  six minutes after being declared GONE), so the note MUST say "dormant since <t>, may
+  resume" unless the exit is positively proven.
 - **Unscoped claims.** The drain claims any ready non-`human` bead — including
   housekeeping/meta beads (e.g. `worktree-review` beads that run
   `pn workspace workforest prune` or delete `.worktrees/*`) that can mutate the
