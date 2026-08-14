@@ -348,7 +348,7 @@ func TestClassify(t *testing.T) {
 // declaration order. Reordering the constants would silently invert the
 // strongest-wins rows above.
 func TestKindOrderIsAscendingSpecificity(t *testing.T) {
-	if !(NotSecret < GenericSecretsDir && GenericSecretsDir < WellKnownSecret) {
+	if NotSecret >= GenericSecretsDir || GenericSecretsDir >= WellKnownSecret {
 		t.Errorf("Kind order broken: NotSecret=%d GenericSecretsDir=%d WellKnownSecret=%d; Classify keeps the HIGHEST match, so specificity must ascend",
 			NotSecret, GenericSecretsDir, WellKnownSecret)
 	}
