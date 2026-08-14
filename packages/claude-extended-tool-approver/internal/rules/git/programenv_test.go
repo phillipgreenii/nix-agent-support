@@ -47,21 +47,19 @@ func envProg(name, prog, gitArgs string) string {
 // package's own table as a configSink — so the screen cannot claim a twin the table does
 // not class as "git EXECUTES the value".
 //
-// THE ONE RECORDED EXCEPTION IS `core.askPass`, which is absent from `gatedConfigKeys`
-// altogether. It is not an oversight in this test: `GIT_ASKPASS` was MEASURED reaching an
-// exec sink (`git credential fill` ran the marker as the username prompt), so declining
-// it would leave a measured sink unscreened, while ADDING `core.askPass` to the table
-// would change the `git config core.askPass …` porcelain verdict — a route this bead did
-// not measure. The asymmetry is recorded here and in gitProgramEnvVars rather than
-// silently resolved either way.
+// IT NOW HAS NO EXCEPTIONS, AND THE ABSENCE OF THE EXCEPTION MAP IS THE ASSERTION
+// (pg2-h1ori). pg2-6c85x carried an `absentTwins` allowance for `core.askPass`, which was
+// absent from `gatedConfigKeys` altogether: `GIT_ASKPASS` was MEASURED reaching an exec
+// sink (`git credential fill` ran the marker as the username prompt) so declining it would
+// have left a measured sink unscreened, while ADDING the key changes the `git config
+// core.askPass …` porcelain verdict — a route that bead did not measure. pg2-h1ori made
+// that ruling and added the key, so the allowance is REMOVED rather than left standing over
+// a resolved asymmetry. Every screened variable's twin must now resolve in the real table,
+// with no per-key escape hatch: a NEW absent twin is a hard failure here and needs its own
+// ruling, exactly as `core.askPass` got one.
 func TestGit_ProgramEnvVar_TwinIsAConfigSinkInTheRealTable(t *testing.T) {
 	if len(gitProgramEnvVars) == 0 {
 		t.Fatal("gitProgramEnvVars is empty — the program-naming env screen was deleted")
-	}
-	// Keys knowingly absent from gatedConfigKeys, each with the reason it is absent.
-	// A key that leaves the table must be added here deliberately or this test fails.
-	absentTwins := map[string]string{
-		"core.askpass": "never surveyed by pg2-szadj; adding it would change the `git config` porcelain verdict, which this bead did not measure",
 	}
 	for name, twin := range gitProgramEnvVars {
 		_, id, ok := configKeyID(twin)
@@ -71,10 +69,7 @@ func TestGit_ProgramEnvVar_TwinIsAConfigSinkInTheRealTable(t *testing.T) {
 		}
 		class, gated := gatedConfigKeys[id]
 		if !gated {
-			if _, known := absentTwins[id]; known {
-				continue
-			}
-			t.Errorf("%s: twin %q (id %q) is NOT in gatedConfigKeys — either the table entry was removed (then this variable's justification is gone) or a new absent twin needs its reason recorded in absentTwins (pg2-6c85x)", name, twin, id)
+			t.Errorf("%s: twin %q (id %q) is NOT in gatedConfigKeys — either the table entry was removed (then this variable's justification is gone) or a NEW twin is missing, which needs its own ruling and its own `git config` replay the way `core.askPass` got one (pg2-h1ori); an exception map here is what pg2-h1ori deleted and MUST NOT be reintroduced", name, twin, id)
 			continue
 		}
 		if class != configSink {
@@ -283,15 +278,21 @@ func TestGit_ProgramEnvVar_DoesNotOverreach(t *testing.T) {
 // TestGit_ProgramEnvVar_DeclinedVariablesStayUnscreened makes each DECLINED variable's
 // declination visible and intentional rather than an omission.
 //
-// Both members were MEASURED reaching an exec sink, so neither is declined for want of
+// Every member was MEASURED reaching an exec sink, so none is declined for want of
 // evidence — the reasons are recorded in declinedGitProgramEnvVars and are about a
-// CONFLICTING ruling that already exists elsewhere in this file. This test pins the
+// CONFLICTING ruling or a MISSING MECHANISM elsewhere in this file. This test pins the
 // consequence: a later edit that screens one of them fails here and has to remove the
 // recorded reason deliberately.
+//
+// AN EMPTY MAP IS LEGITIMATE, AND THAT CHANGED WITH pg2-qi1jo. The map used to be required
+// non-empty, which reads as "there will always be an outstanding declination" — but it is a
+// register of OUTSTANDING declinations, and both of pg2-6c85x's original members have since
+// left because the rulings they deferred to were MADE (`GIT_SEQUENCE_EDITOR` by pg2-6qh3p,
+// `GIT_PROXY_COMMAND` by pg2-qi1jo). A `Fatal` on emptiness would make settling the last
+// declination fail the suite, which is backwards: an empty register is the GOAL state. What
+// this test actually guards is that no member is silently screened and no member carries an
+// empty reason, and both hold at any size.
 func TestGit_ProgramEnvVar_DeclinedVariablesStayUnscreened(t *testing.T) {
-	if len(declinedGitProgramEnvVars) == 0 {
-		t.Fatal("declinedGitProgramEnvVars is empty — the recorded declinations were deleted")
-	}
 	for name, reason := range declinedGitProgramEnvVars {
 		if reason == "" {
 			t.Errorf("%s: declined with an EMPTY reason — the acceptance criterion is that every declination records why (pg2-6c85x)", name)
@@ -318,12 +319,25 @@ func TestGit_ProgramEnvVar_DeclinedVariablesStayUnscreened(t *testing.T) {
 	if got := evalCmd(t, "GIT_SEQUENCE_EDITOR=: git rebase -i main"); got.Decision != hookio.Approve {
 		t.Errorf("`GIT_SEQUENCE_EDITOR=: git rebase -i main`: got %s (%s), want APPROVE — this rule's own rebase carve-out requires the variable, and configenv_test.go pins the verdict", got.Decision, got.Reason)
 	}
-	// GIT_PROXY_COMMAND: its twin `core.gitProxy` is in gatedConfigKeys' "SURVEYED AND
-	// DELIBERATELY LEFT APPROVED" list, which instructs a later reader to add that
-	// family "under one ruling instead of rediscovering them". Screening the env half
-	// alone would split that ruling across two routes.
-	if got := evalCmd(t, "GIT_PROXY_COMMAND=/tmp/evil git fetch origin"); got.Decision != hookio.Approve {
-		t.Errorf("`GIT_PROXY_COMMAND=/tmp/evil git fetch origin`: got %s (%s), want APPROVE — the alternate-transport family is deliberately ungated until one ruling covers `core.gitProxy` too", got.Decision, got.Reason)
+	// GIT_PROXY_COMMAND: NO LONGER DECLINED (pg2-qi1jo, 2026-08-14). Its declination was
+	// never about evidence — `git ls-remote git://…` ran the marker as `<host> 9418` — but
+	// about `core.gitProxy` sitting in gatedConfigKeys' left-approved list under an explicit
+	// instruction to settle the alternate-transport family "under one ruling". That ruling
+	// was MADE and covers both routes, so the variable moved into gitProgramEnvVars and the
+	// assertion here INVERTS: it must now be screened like every other measured sink, and
+	// its `-c core.gitProxy` twin must agree with it (the relation the two
+	// IsNeverLessRestrictive tests above enforce across the whole table).
+	if got := evalCmd(t, "GIT_PROXY_COMMAND=/tmp/evil git fetch origin"); got.Decision == hookio.Approve {
+		t.Errorf("`GIT_PROXY_COMMAND=/tmp/evil git fetch origin`: got APPROVE (%s) — pg2-qi1jo settled the alternate-transport family by SCREENING it; git executes this value as the transport proxy (marker evidence in scripts/probe-pg2-qi1jo.sh)", got.Reason)
+	}
+	// GIT_ALLOW_PROTOCOL: the one member that IS still declined, and its declination is a
+	// table-shape consequence rather than a policy one. It is the env twin of
+	// `protocol.<n>.allow`, which is a configINTERLOCK — it names no program, it removes a
+	// refusal — so it has no home in the program-naming table, and this file has no
+	// interlock env screen for it to join. The row is pinned so the day one appears, this
+	// assertion is where the declination has to be revisited.
+	if got := evalCmd(t, "GIT_ALLOW_PROTOCOL=ext git ls-remote origin"); got.Decision != hookio.Approve {
+		t.Errorf("`GIT_ALLOW_PROTOCOL=ext git ls-remote origin`: got %s (%s), want APPROVE — screening it needs an INTERLOCK env screen this file does not have, and covering it while leaving `GIT_SSL_NO_VERIFY` open is the split pg2-qi1jo's family instruction existed to prevent", got.Decision, got.Reason)
 	}
 }
 

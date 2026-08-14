@@ -3106,6 +3106,13 @@ func TestIntegration_GitProgramEnvVar_EmitsEmptyObject(t *testing.T) {
 		{"approving sibling first", "echo start && GIT_EXTERNAL_DIFF=/tmp/evil git diff"},
 		// The argv route, unchanged — the control this bead was measured against.
 		{"the -c route it now matches", "git -c diff.external=/tmp/evil diff"},
+		// THE ALTERNATE-TRANSPORT FAMILY, moved up from the allow table by pg2-qi1jo's
+		// ruling. pg2-6c85x had DECLINED `GIT_PROXY_COMMAND` pending a family-wide
+		// decision on which keys `core.gitProxy` belongs with; that decision is now made
+		// and screens the whole family, so the env spelling joins the argv spelling here
+		// instead of keeping an approval that existed only while the question was open.
+		{"declined: the alternate-transport family", "GIT_PROXY_COMMAND=/tmp/evil git fetch origin"},
+		{"its argv twin, which it now agrees with", "git -c core.gitProxy=/tmp/evil fetch origin"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			out := emit(tt.command)
@@ -3140,7 +3147,15 @@ func TestIntegration_GitProgramEnvVar_EmitsEmptyObject(t *testing.T) {
 		{"carved out: the inert editor idiom, rebase continuation", "GIT_EDITOR=true git rebase --continue"},
 		{"carved out: the null-command editor", "GIT_EDITOR=: git rebase --skip"},
 		{"carved out: the argv twin", "git -c core.editor=true commit --amend"},
-		{"declined: the alternate-transport family", "GIT_PROXY_COMMAND=/tmp/evil git fetch origin"},
+		// THE DECLINED ROW IS NOW A DIFFERENT VARIABLE. pg2-qi1jo screened
+		// `GIT_PROXY_COMMAND` (it moved to the `{}` table above) and left
+		// `GIT_ALLOW_PROTOCOL` declined in its place, for a TABLE-SHAPE reason rather than
+		// a policy one: it is the env twin of the configINTERLOCK half of the family, so it
+		// names no program and has no interlock env screen to join. Keeping a row here
+		// preserves what that approval is actually pinning — that the family ruling did NOT
+		// widen the screen to the interlock twins — and the hole it leaves open is
+		// pg2-nd6i3, which this row will move when that bead lands.
+		{"declined: the interlock env twin has no screen to join", "GIT_ALLOW_PROTOCOL=ext git ls-remote origin"},
 		{"an unrelated assignment", "FOO=bar git status"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {

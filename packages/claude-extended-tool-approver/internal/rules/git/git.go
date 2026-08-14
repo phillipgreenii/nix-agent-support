@@ -1,6 +1,7 @@
 package git
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -86,10 +87,16 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		return hookio.RuleResult{}, fmt.Errorf("git: read bash command: %w", err)
 	}
 	parsed := cmdparse.Parse(cmdStr)
-	for _, pc := range parsed {
+	for i, pc := range parsed {
 		if !isGitExecutable(pc.Executable) {
 			continue
 		}
+		// THE ENVIRONMENT GIT WILL ACTUALLY SEE, not just this leaf's own prefix
+		// (pg2-xjt1s). Computed once and handed to every screen and to classify, so the
+		// leaf-local and cross-leaf spellings of one hazard cannot answer differently.
+		// See visibleEnvVars for the approach ruling, the measured bash semantics, and
+		// the over-approximations.
+		envs := visibleEnvVars(input, parsed, i)
 		// A pre-subcommand -c / --config-env injects arbitrary git config (e.g.
 		// -c core.pager="touch /tmp/pwned") that runs on an otherwise read-only
 		// subcommand — a known RCE class. Defer to Claude's prompt. Scoped to the
@@ -102,11 +109,63 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		// `git diff` gets. That is a RELAXATION and nothing else — see
 		// hasGitConfigInjection for the pair-not-key finding, the all-or-nothing rule,
 		// and why `--config-env` stays unconditional.
-		if hasGitConfigInjection(pc.Args) {
-			return r.refuse("git: -c/--config-env injects config; deferring to prompt")
-		}
+		//
+		// IT IS A FLOOR, NOT A REPLACEMENT, SINCE pg2-6f4q9 — AND THAT IS THE WHOLE
+		// POINT OF READING IT HERE RATHER THAN ANSWERING HERE. Until this bead the
+		// screen was a PRE-CLASSIFY SHORT-CIRCUIT: it returned before the subcommand
+		// was classified, so it replaced EVERY verdict with the refusal, decisive ones
+		// included. Measured through the real binary on main @ a064a73e, 2026-08-14
+		// (scripts/probe-pg2-6f4q9.sh) — each of these is `deny` WITHOUT the `-c`:
+		//
+		//	git -c user.name=x push --force origin main                 -> {}
+		//	git -c user.name=x tag v1                                   -> {}
+		//	git -c x=y remote add upstream https://example.invalid/x.git -> {}
+		//	git -c x=y config remote.origin.url https://evil.invalid/…   -> {}
+		//
+		// So prefixing ANY `-c <k>=<v>` — a key with no bearing on the hazard, `user.name`
+		// being the extreme case — LAUNDERED a hard Reject into an auto-approvable
+		// non-decision. pg2-arfw6 repaired the sliver where the pair CLEARS (the command
+		// then reaches classify by construction); every uncleared pair, which is every key
+		// outside clearedConfigFlagPairs, still laundered.
+		//
+		// WHY A FLOOR AND NOT THE SIBLING SCREENS' "DEMOTE AN Approve" SHAPE, WHICH IS
+		// WHAT THE BEAD ASKED FOR. Demoting only an Approve is the right answer for a
+		// screen whose subject is the ENV PREFIX (hasGitConfigEnvInjection,
+		// hasGitProgramEnvVar): those run after classify, and a subcommand classify does
+		// not own was already NOT screened by them, so nothing moves. This screen is not
+		// in that position — it is the INCUMBENT for every `-c`, including on the
+		// subcommands classify answers NotApplicable for. `git -c core.pager=EVIL bisect
+		// start` and `git -c core.pager=EVIL clean --help` both measure `{}` today, and
+		// `clean --help` is the leaf safecmds APPROVES as a man-page read (see the `clean`
+		// arm), so a bare Approve-only demotion would have turned that one into `allow`
+		// while git spawns the caller's pager to page the help. A FLOOR is the formulation
+		// that is more-restrictive-only in BOTH directions at once:
+		//
+		//	classify Approve            -> the refusal wins   (unchanged: `{}`)
+		//	classify Ask / Reject       -> classify wins      (THE FIX: the decisive verdict survives)
+		//	classify NotApplicable      -> the refusal wins   (unchanged: `{}`, and no new `allow`)
+		//	classify's own REFUSAL      -> classify wins      (same NoOpinion level, more specific reason)
+		//
+		// It is hookio.MostRestrictive's rule applied locally, and it has to be local: a
+		// rule returns ONE result, and the engine's fold cannot see a verdict this rule
+		// discarded. Nothing here upgrades anything — the refusal is a NoOpinion floor, so
+		// the screen can only ever leave a verdict alone or lower it.
+		//
+		// THE VERDICT LEVEL FOR THE Approve CASE IS UNCHANGED (still the ADR 0044 refusal,
+		// hence `{}`), so this bead moves NO row that was already non-approving except the
+		// decisive ones it restores. pg2-a12rl's and pg2-6c85x's
+		// `IsNeverLessRestrictiveThanDashC` relations stay green: they assert env >= argv,
+		// and this change RAISES argv on exactly the subcommands where the env route was
+		// already the stricter of the two, so the pair converges to equality.
+		configFlagInjection := hasGitConfigInjection(pc.Args)
 		chdirs, subcmd, rest := cmdparse.GitInvocation(pc.Args)
 		if subcmd == "" {
+			// No subcommand to classify, so there is no verdict for the floor to sit
+			// under: a bare `git -c k=v` keeps the refusal it has always had rather than
+			// becoming a leaf no rule examined.
+			if configFlagInjection {
+				return r.refuse(configFlagInjectionReason)
+			}
 			return hookio.NotApplicable()
 		}
 		// classify's own not-applicable (and any genuine failure) propagates
@@ -114,14 +173,34 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		// to answer Abstain and Evaluate returned it, so the chain continued. It also
 		// SKIPS the chdir demotion below, correctly — that demotion only ever
 		// demotes an Approve, and there is no Approve to demote here.
-		res, err := r.classify(pc, subcmd, rest)
+		res, err := r.classify(pc, envs, subcmd, rest)
 		if err != nil {
 			// `res` is forwarded WITH the error since ADR 0044: classify's error may be
 			// a REFUSAL whose RuleResult is the floor, and dropping it would report
 			// `git clean -fd` / `git reset --hard` as a leaf NO rule examined. For a
 			// not-applicable or a genuine failure `res` is the zero value, so the
 			// pre-ADR-0044 `return RuleResult{}, err` is unchanged for both.
+			//
+			// THE `-c` FLOOR APPLIES HERE TOO, and only in the not-applicable case
+			// (pg2-6f4q9). classify's own REFUSAL is already a NoOpinion floor — the same
+			// level this screen contributes — so it keeps its more specific reason (`git
+			// clean` says why it is a clean). A NOT-APPLICABLE contributes nothing, so
+			// without this branch a `-c` would go UNSCREENED on every subcommand this rule
+			// does not classify, and `git -c core.pager=EVIL clean --help` would reach the
+			// safecmds man-page Approve. errors.Is distinguishes the two despite ErrRefused
+			// deliberately matching ErrNotApplicable in the other direction (hookio's
+			// refusalError.Is), so the test must be against ErrRefused, never against
+			// ErrNotApplicable.
+			if configFlagInjection && !errors.Is(err, hookio.ErrRefused) {
+				return r.refuse(configFlagInjectionReason)
+			}
 			return res, err
+		}
+		// The `-c` floor's Approve arm. Written as a sibling of the env demotions below
+		// rather than fused with them because it rests on its own ruling and its own
+		// measurement — see the call-site comment above hasGitConfigInjection's read.
+		if res.Decision == hookio.Approve && configFlagInjection {
+			return r.refuse(configFlagInjectionReason)
 		}
 		// THE ENV SPELLING OF THE `-c` INJECTION ABOVE (pg2-a12rl). A
 		// `GIT_CONFIG_*` assignment on this leaf hands git configuration of the
@@ -131,22 +210,25 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		// leaf on the SAME `{}` the `-c` route reaches. See hasGitConfigEnvInjection
 		// for the measured variable-by-variable evidence and for why it is key-blind.
 		//
-		// IT IS A DEMOTION OF AN Approve, NOT A SHORT-CIRCUIT LIKE THE `-c` GUARD,
-		// AND THE DIFFERENCE IS LOAD-BEARING. hasGitConfigInjection answers BEFORE
-		// classify runs, so it replaces every verdict — including the decisive ones.
-		// Measured through the real binary, this worktree, 2026-08-13: `git -c
-		// user.name=x tag v1` and `git -c user.name=x push --force origin main` each
-		// emitted `{}`, while the same commands WITHOUT the `-c` are `deny`. So the
-		// incumbent route lets an irrelevant config pair WEAKEN a hard Reject into an
-		// auto-approvable non-decision. That is its own defect (recorded for a
-		// follow-up bead, not fixed here — fixing it changes verdicts this bead did
-		// not measure), and the env route MUST NOT reproduce it: gating only an
-		// Approve leaves `git tag`, force-push and the redirect-class config Rejects
-		// exactly as they were, which the same measurement confirms.
+		// IT IS A DEMOTION OF AN Approve, AND SO — SINCE pg2-6f4q9 — IS THE `-c` GUARD's
+		// OWN Approve ARM. When pg2-a12rl wrote this screen the `-c` route answered BEFORE
+		// classify and replaced every verdict, including the decisive ones: measured
+		// through the real binary, this worktree, 2026-08-13, `git -c user.name=x tag v1`
+		// and `git -c user.name=x push --force origin main` each emitted `{}` while the
+		// same commands WITHOUT the `-c` are `deny`. This screen deliberately did NOT copy
+		// that shape, and pg2-6f4q9 has since removed it from the `-c` route as well — see
+		// the `configFlagInjection` floor above for the ruling and why that route needed a
+		// FLOOR rather than this Approve-only demotion.
+		//
+		// THE DEMOTION SHAPE IS STILL THE POINT HERE, NOT AN ARTEFACT OF THAT HISTORY.
+		// This screen's subject is the leaf's ENV PREFIX, so gating only an Approve leaves
+		// `git tag`, force-push and the redirect-class config Rejects exactly as they were,
+		// which the same measurement confirms. A future edit MUST NOT widen it to answer
+		// before classify.
 		//
 		// Order against the chdir demotion below does not matter — both withdraw the
 		// same Approve and return the same not-applicable.
-		if res.Decision == hookio.Approve && hasGitConfigEnvInjection(pc) {
+		if res.Decision == hookio.Approve && hasGitConfigEnvInjection(envs) {
 			return r.refuse("git: a GIT_CONFIG_* env assignment injects config; deferring to prompt")
 		}
 		// THE ENV SPELLING THAT SKIPS THE CONFIG KEY ENTIRELY (pg2-6c85x). The block
@@ -163,15 +245,15 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		// IT IS A SEPARATE DEMOTION RATHER THAN A CLAUSE ADDED TO THE ONE ABOVE because
 		// the two screens rest on different measurements and different rulings; fusing
 		// them would leave one rationale comment covering two independent boundaries. Both
-		// are DEMOTIONS OF AN Approve, never the `-c` route's pre-classify short-circuit,
-		// for the reason that call site records: that shape was measured turning `git tag`
-		// and a force-push from `deny` into an auto-approvable `{}` (filed as pg2-6f4q9,
-		// deliberately not fixed here). Gating only an Approve leaves every decisive
+		// are DEMOTIONS OF AN Approve, never a pre-classify short-circuit: that shape was
+		// measured turning `git tag` and a force-push from `deny` into an auto-approvable
+		// `{}`, which is why pg2-6c85x declined to copy it and why pg2-6f4q9 has since
+		// taken it off the `-c` route too. Gating only an Approve leaves every decisive
 		// verdict in this file exactly as it was.
 		//
 		// Order against the sibling demotions does not matter — all withdraw the same
 		// Approve and return the same not-applicable.
-		if res.Decision == hookio.Approve && hasGitProgramEnvVar(pc) {
+		if res.Decision == hookio.Approve && hasGitProgramEnvVar(envs) {
 			return r.refuse("git: a GIT_* env assignment names the program git will execute; deferring to prompt")
 		}
 		// A `-C <path>` chdir runs the subcommand against a directory other than
@@ -252,7 +334,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 //     and `git --config-en=X=Y log` each answered `unknown option: …`, while every
 //     full spelling worked. So the exact-token test IS git's own parse there, and
 //     prefix-matching them would over-match with no bypass to close.
-func (r *Rule) classify(pc cmdparse.ParsedCommand, subcmd string, rest []string) (hookio.RuleResult, error) {
+func (r *Rule) classify(pc cmdparse.ParsedCommand, envs []cmdparse.EnvAssignment, subcmd string, rest []string) (hookio.RuleResult, error) {
 	// push: the force / remote-ref-destroying spellings (pg2-bohpm) and a NETWORK
 	// destination given in place of a remote name (pg2-abb65) are REJECTED — see
 	// pushVerdict for both rulings and their rationale. Every other push falls
@@ -281,7 +363,7 @@ func (r *Rule) classify(pc cmdparse.ParsedCommand, subcmd string, rest []string)
 		}, nil
 	}
 	if subcmd == "checkout" {
-		if hasRedirectEnvVar(pc) {
+		if hasRedirectEnvVar(envs) {
 			return hookio.RuleResult{Decision: hookio.Ask, Reason: "git command with redirected context", Module: r.Name()}, nil
 		}
 		return hookio.RuleResult{Decision: hookio.Approve, Reason: "git checkout", Module: r.Name()}, nil
@@ -307,14 +389,14 @@ func (r *Rule) classify(pc cmdparse.ParsedCommand, subcmd string, rest []string)
 				return r.refuse("git rebase -i requires editor")
 			}
 		}
-		if hasRedirectEnvVar(pc) {
+		if hasRedirectEnvVar(envs) {
 			return hookio.RuleResult{Decision: hookio.Ask, Reason: "git command with redirected context", Module: r.Name()}, nil
 		}
 		return hookio.RuleResult{Decision: hookio.Approve, Reason: "modifying git command", Module: r.Name()}, nil
 	}
 	// filter-branch: approve (history rewriting used by agents for commit cleanup)
 	if subcmd == "filter-branch" {
-		if hasRedirectEnvVar(pc) {
+		if hasRedirectEnvVar(envs) {
 			return hookio.RuleResult{Decision: hookio.Ask, Reason: "git command with redirected context", Module: r.Name()}, nil
 		}
 		return hookio.RuleResult{Decision: hookio.Approve, Reason: "modifying git command", Module: r.Name()}, nil
@@ -333,11 +415,11 @@ func (r *Rule) classify(pc cmdparse.ParsedCommand, subcmd string, rest []string)
 	// every ordinary write keep their Approve — see configVerdict for the key-by-key
 	// ruling and the invariant each verdict rests on.
 	if subcmd == "config" {
-		return r.configVerdict(pc, rest), nil
+		return r.configVerdict(envs, rest), nil
 	}
 	// modifying: approve (includes tag, mv, rm, worktree, etc.)
 	if modifyingSubcommands[subcmd] {
-		if hasRedirectEnvVar(pc) {
+		if hasRedirectEnvVar(envs) {
 			return hookio.RuleResult{Decision: hookio.Ask, Reason: "git command with redirected context", Module: r.Name()}, nil
 		}
 		return hookio.RuleResult{Decision: hookio.Approve, Reason: "modifying git command", Module: r.Name()}, nil
@@ -425,7 +507,7 @@ func (r *Rule) classify(pc cmdparse.ParsedCommand, subcmd string, rest []string)
 		//	redirected context, any reset spelling  -> Ask      (unchanged)
 		//	--hard, any abbreviation, no redirect   -> Abstain  (the ruling)
 		//	soft / mixed / keep / merge, no redirect -> Approve (unchanged)
-		if hasRedirectEnvVar(pc) {
+		if hasRedirectEnvVar(envs) {
 			return hookio.RuleResult{Decision: hookio.Ask, Reason: "git command with redirected context", Module: r.Name()}, nil
 		}
 		if cmdparse.HasLongFlagPrefix(rest, "hard") {
@@ -690,6 +772,74 @@ const (
 //   - `remote.<name>.url`, `remote.<name>.pushurl` — the config spelling of `git
 //     remote set-url`, which remoteVerdict already Rejects.
 //
+// ADDED AFTER THE SURVEY, EACH UNDER ITS OWN RULING. pg2-szadj's table above is a
+// SNAPSHOT of what one bead enumerated in July 2026, not a closed set, so a key added
+// later belongs here rather than edited into it — the survey's authority is over the keys
+// it actually weighed:
+//
+//   - `core.askPass` (pg2-h1ori). MECHANISM sink, VERDICT Ask, same as every other
+//     configSink. RATIONALE: git EXECUTES the value to obtain a credential — MEASURED on
+//     git 2.54.0, 2026-08-13, `git credential fill` ran a marker script as the "Username
+//     for …" prompt (scripts/probe-pg2-6c85x.sh). pg2-szadj never weighed it, so this is
+//     an omission being closed rather than a ruling being reversed.
+//
+//     WHAT MADE IT WORTH ITS OWN BEAD: the asymmetry ran the wrong way round. Its ENV twin
+//     `GIT_ASKPASS` has been screened since pg2-6c85x and the `-c` route screens it because
+//     that route is key-blind, so the ONE unscreened spelling was the PERSISTENT one — the
+//     porcelain write that outlives the command and applies to every later git operation
+//     in the repo. Measured on main @ a064a73e, 2026-08-14: `git config core.askPass
+//     /tmp/evil` and its `--global` and `--unset` forms each emitted `allow`.
+//     TestGit_AskPass_ThreeSpellingsAreConsistent pins the three spellings as a relation,
+//     and it is a relation rather than three literals because the porcelain gate is an Ask
+//     while both injection routes are the weaker refusal — see "WHY THE INTERLOCK AND SINK
+//     CLASSES ARE ASK" above for why that ordering is the correct one and not a drift.
+//
+//   - THE ALTERNATE-TRANSPORT FAMILY (pg2-qi1jo, 2026-08-14) — `core.gitProxy`,
+//     `remote.<n>.uploadpack`, `remote.<n>.receivepack`, `uploadpack.packObjectsHook` as
+//     SINKS, and `protocol.<n>.allow` as an INTERLOCK. This is the ONE RULING the
+//     left-approved list below asked a later reader for, and it covers the whole bullet
+//     rather than the one key that prompted it: settling half a family is what the
+//     instruction existed to prevent.
+//
+//     THE RULING IS TO SCREEN, AND THE EVIDENCE IS MEASURED, NOT INFERRED. git 2.54.0,
+//     2026-08-14, throwaway repos with `GIT_CONFIG_GLOBAL`/`GIT_CONFIG_SYSTEM` neutralised,
+//     each key pointed at a marker script (scripts/probe-pg2-qi1jo.sh reproduces it):
+//
+//     KEY                          REACHES THE SINK?
+//     core.gitProxy                YES — `ls-remote git://invalid.invalid/x.git` ran the marker as `invalid.invalid 9418`
+//     remote.<n>.uploadpack        YES — `ls-remote <remote>` AND `fetch <remote>` ran it, argv `<repo path>`
+//     remote.<n>.receivepack       YES — `push <remote> HEAD:refs/heads/x` ran it, argv `<bare repo path>`
+//     uploadpack.packObjectsHook   YES, ONLY FROM GLOBAL/SYSTEM CONFIG — see the note below
+//     protocol.<n>.allow           YES, AS THE UNLOCK — `ls-remote 'ext::<marker> %S'` ran the marker as `git-upload-pack` WITH `protocol.ext.allow=always`, and did NOT run it without
+//
+//     THE SURVEY'S "SERVER-SIDE" READING IS REFUTED FOR TWO OF THEM, which is why this
+//     ruling screens rather than confirms the approval. `remote.<n>.uploadpack` and
+//     `remote.<n>.receivepack` are run by the side that FETCHES and the side that PUSHES —
+//     this machine — whenever the remote is a local path or file transport, which is the
+//     everyday shape in this workspace (a `pn` workforest is a set of local clones with
+//     local remotes). Neither needs a server to be an exec sink.
+//
+//     THE packObjectsHook READING IS THE ONE THAT NEEDED A SECOND INSTRUMENT, and the first
+//     reading looked decisive and was not. Set in the SERVED REPO's own config the marker
+//     did NOT run — git documents ignoring it at repository level "as a safety measure
+//     against fetching from untrusted repositories" — so a first pass reads as "not a
+//     sink". Re-measured with the key in GLOBAL config the marker RAN, argv `git
+//     pack-objects --revs --thin --stdout --delta-base-offset`. GLOBAL is exactly what
+//     `git config --global uploadpack.packObjectsHook …` writes, so the reachable spelling
+//     IS the porcelain write this table gates, and gating the write is the control that
+//     matters. A no-sink reading at one config LEVEL is not evidence about the KEY.
+//
+//     WHY NOT DECLINE THE FAMILY INSTEAD, which the bead left open as the other option.
+//     Declining would have to decline `GIT_PROXY_COMMAND` too (pg2-6c85x measured it
+//     reaching the same sink and declined it only pending this ruling), leaving a measured
+//     exec sink open on both routes. Against that, the `git://` transport is
+//     UNAUTHENTICATED AND UNENCRYPTED, so a repo reached over it is already untrusted and a
+//     caller-named proxy program on that path carries no compensating trust to weigh — and
+//     the prompt-volume cost of screening is ~ZERO, confirmed rather than assumed by
+//     read-only replay over the 154-day ask log on 2026-08-14: NO row writes any of these
+//     five keys, and every corpus occurrence of the spellings is a probe script or a bead
+//     body. There is nothing on the other side of the scale.
+//
 // SURVEYED AND DELIBERATELY LEFT APPROVED:
 //
 //   - Ordinary configuration — `user.*`, `commit.gpgsign`, `branch.<n>.remote`,
@@ -703,10 +853,18 @@ const (
 //     rule sees a git subcommand in no set and Abstains, deferring to the prompt.
 //     So the sink is already prompted at use time; gating the definition as well
 //     needs a ruling, not an inference.
-//   - `remote.<n>.uploadpack`/`receivepack`, `uploadpack.packObjectsHook`,
-//     `core.gitProxy`, `protocol.*.allow` — genuine sinks and loosenings, but on a
-//     server-side or alternate-transport path this workflow does not use. Named here
-//     so a later reader adds them under one ruling instead of rediscovering them.
+//   - SETTLED, AND NO LONGER LEFT APPROVED — the alternate-transport family
+//     (`remote.<n>.uploadpack`/`receivepack`, `uploadpack.packObjectsHook`,
+//     `core.gitProxy`, `protocol.*.allow`). pg2-szadj left these approved as "genuine
+//     sinks and loosenings, but on a server-side or alternate-transport path this
+//     workflow does not use", and asked a later reader to add them UNDER ONE RULING
+//     instead of rediscovering them. THAT RULING WAS MADE — pg2-qi1jo, 2026-08-14 — and
+//     all five are now in the table above: four as configSink, `protocol.*.allow` as
+//     configInterlock. The row is kept here, marked settled, rather than deleted, so a
+//     reader who arrives via the old wording sees the outcome instead of re-opening the
+//     question. THE "SERVER-SIDE" HALF OF THE ORIGINAL READING WAS WRONG for two of them
+//     — see the family's entry under "ADDED AFTER THE SURVEY" for the measurements. MUST
+//     NOT be re-listed as left-approved.
 //   - `safe.directory`, `core.fileMode`, `core.symlinks` — they relax a check, but
 //     execute nothing and redirect nothing.
 //
@@ -734,6 +892,7 @@ var gatedConfigKeys = map[string]configGateClass{
 	"core.editor":       configSink,
 	"sequence.editor":   configSink,
 	"core.sshcommand":   configSink,
+	"core.askpass":      configSink, // pg2-h1ori; the env twin GIT_ASKPASS was already screened
 	"core.fsmonitor":    configSink,
 	"diff.external":     configSink,
 	"diff.textconv":     configSink, // diff.<driver>.textconv
@@ -747,10 +906,23 @@ var gatedConfigKeys = map[string]configGateClass{
 	"include.path":      configSink,
 	"includeif.path":    configSink, // includeIf.<condition>.path
 
+	// The alternate-transport family's SINK half (pg2-qi1jo). Each MEASURED running a
+	// marker on git 2.54.0 — see the family's entry in this table's doc for the argv each
+	// was invoked with, and for why "server-side" was the wrong reading of the middle two.
+	"core.gitproxy":              configSink, // `ls-remote git://…` ran it as `<host> 9418`
+	"remote.uploadpack":          configSink, // remote.<n>.uploadpack — the FETCHING side runs it
+	"remote.receivepack":         configSink, // remote.<n>.receivepack — the PUSHING side runs it
+	"uploadpack.packobjectshook": configSink, // reachable from GLOBAL/SYSTEM config, which is what `--global` writes
+
 	// Disabled safety interlocks — a refusal git makes by default.
 	"clean.requireforce":        configInterlock,
 	"http.sslverify":            configInterlock, // also http.<url>.sslVerify
 	"receive.denycurrentbranch": configInterlock,
+	// protocol.<n>.allow (pg2-qi1jo) — git REFUSES the `ext::` transport by default, and
+	// `always` removes that refusal. MEASURED: `ls-remote 'ext::<marker> %S'` ran the
+	// marker as `git-upload-pack` WITH the loosening and not without it, so this one key
+	// is the difference between an inert URL and arbitrary command execution.
+	"protocol.allow": configInterlock,
 
 	// Silent redirects — where fetches and pushes actually go.
 	"url.insteadof":     configRedirect, // url.<base>.insteadOf
@@ -1145,7 +1317,7 @@ func gatedConfigKey(args []string) (string, configGateClass, bool) {
 // isGitExecutable(pc.Executable), so `git config clean.requireForce false` quoted
 // in a commit message or a `bd comment` body is TEXT and never matches. That is the
 // pg2-5b901 failure mode; do not reintroduce a strings.Contains over command text.
-func (r *Rule) configVerdict(pc cmdparse.ParsedCommand, rest []string) hookio.RuleResult {
+func (r *Rule) configVerdict(envs []cmdparse.EnvAssignment, rest []string) hookio.RuleResult {
 	// Elide separated flag ARGUMENTS once, here, so the read/write bound and the key
 	// scan agree about what is an operand. Both consumers below take elided args.
 	args := configElideFlagValues(rest)
@@ -1155,7 +1327,7 @@ func (r *Rule) configVerdict(pc cmdparse.ParsedCommand, rest []string) hookio.Ru
 	if key, class, ok := gatedConfigKey(args); ok {
 		return r.configGateResult(key, class)
 	}
-	if hasRedirectEnvVar(pc) {
+	if hasRedirectEnvVar(envs) {
 		return hookio.RuleResult{Decision: hookio.Ask, Reason: "git command with redirected context", Module: r.Name()}
 	}
 	return hookio.RuleResult{Decision: hookio.Approve, Reason: "modifying git command", Module: r.Name()}
@@ -1457,6 +1629,13 @@ func configFlagPairCleared(tok string) bool {
 	return listed && predicate(value)
 }
 
+// configFlagInjectionReason is the ONE reason string the `-c` / `--config-env` floor
+// reports, named rather than repeated because pg2-6f4q9 gave the screen three arms (the
+// no-subcommand case, the not-applicable case, and the Approve demotion) and three
+// literals would drift. The text is UNCHANGED from the pre-pg2-6f4q9 short-circuit, so
+// the reason a reader sees for an already-`{}` row is exactly the one they saw before.
+const configFlagInjectionReason = "git: -c/--config-env injects config; deferring to prompt"
+
 // hasGitConfigInjection reports whether a pre-subcommand `-c` or `--config-env` flag
 // injects config this rule will not clear. It scans only the option span before the
 // git subcommand (mirroring cmdparse.GitInvocation's flag-consuming walk) so that a
@@ -1512,9 +1691,17 @@ func configFlagPairCleared(tok string) bool {
 //
 // IT SCANS ARGV ONLY. The ENV spelling of the same injection is
 // hasGitConfigEnvInjection — an env assignment never appears in pc.Args, cmdparse
-// lifts it to pc.EnvVars — and the two are wired into Evaluate DIFFERENTLY on
-// purpose: see that call site for the measured Reject-weakening this one's
-// pre-classify short-circuit causes.
+// lifts it to pc.EnvVars.
+//
+// IT NO LONGER SHORT-CIRCUITS (pg2-6f4q9). This function still answers a pure
+// PREDICATE about the argv, exactly as before; what changed is what Evaluate DOES with
+// the answer. Until pg2-6f4q9 a `true` here returned before classify ran and REPLACED
+// every verdict, so an irrelevant pair laundered a decisive Reject into `{}`. It is now
+// a FLOOR: the refusal wins over an Approve or a not-applicable and LOSES to a decisive
+// Ask/Reject. Every property in the list above is unaffected — all-or-nothing,
+// abstain-never-Reject, relaxation-only and the unconditional `--config-env` are
+// statements about THIS predicate, not about where its answer is consumed. See the read
+// of `configFlagInjection` in Evaluate for the ruling and the four measured shapes.
 func hasGitConfigInjection(args []string) bool {
 	i := 0
 	for i < len(args) {
@@ -1559,9 +1746,276 @@ func hasFlag(args []string, flag string) bool {
 	return false
 }
 
-func hasRedirectEnvVar(pc cmdparse.ParsedCommand) bool {
-	for _, ev := range pc.EnvVars {
+// hasRedirectEnvVar reports whether git will run against a redirected repository —
+// `GIT_DIR` or `GIT_WORK_TREE` pointing somewhere other than the invocation's own repo.
+//
+// IT TAKES THE VISIBLE ENVIRONMENT, NOT THE LEAF (pg2-xjt1s), so an `export GIT_DIR=…` on
+// an EARLIER leaf of the same expression is seen. It read `pc.EnvVars` until then, which
+// made the leaf-local prefix `GIT_DIR=/other git commit -m x` an Ask while the persistent
+// `export GIT_DIR=/other; git commit -m x` measured `allow` — one redirection, two
+// spellings, opposite answers. See visibleEnvVars for the seam and its limits.
+func hasRedirectEnvVar(envs []cmdparse.EnvAssignment) bool {
+	for _, ev := range envs {
 		if ev.Name == "GIT_DIR" || ev.Name == "GIT_WORK_TREE" {
+			return true
+		}
+	}
+	return false
+}
+
+// visibleEnvVars returns the env assignments GIT WILL SEE on leaf `before` of this
+// expression: that leaf's own prefix, plus every name an EARLIER leaf EXPORTS.
+//
+// # THE GAP IT CLOSES (pg2-xjt1s)
+//
+// All three of this file's env screens read ONE LEAF's own prefix, so the inline spelling
+// was screened and the PERSISTENT spelling — the one that outlives the command — was not.
+// Measured through the real binary on main @ a064a73e, 2026-08-14
+// (scripts/probe-pg2-xjt1s.sh):
+//
+//	GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.fsmonitor GIT_CONFIG_VALUE_0=/tmp/evil git status  -> {}
+//	export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.fsmonitor GIT_CONFIG_VALUE_0=/tmp/evil; git status -> allow
+//	GIT_PAGER=/tmp/evil git log     -> {}        export GIT_PAGER=/tmp/evil; git log     -> allow
+//	GIT_DIR=/other git commit -m x  -> ask       export GIT_DIR=/other; git commit -m x  -> allow
+//
+// The export form is not the rare one: 111 of the 183 GIT_CONFIG-ASSIGNMENT-bearing Bash
+// rows in the 154-day ask log spell it with `export` (read-only replay over an APFS clone,
+// 2026-08-14). The bead recorded 97 of 179 on a narrower filter; the ratio is the finding
+// and it held.
+//
+// # THE APPROACH RULING, WHICH THE BEAD REQUIRES BE RECORDED
+//
+// The two candidates were CROSS-LEAF ORDERING ANALYSIS IN THIS RULE and A NAME SCREEN IN
+// THE ENV-VAR RULE. This is the first, for three reasons:
+//
+//  1. THE ASSIGNMENT LEAF IS NOT THE HAZARD; THE CONJUNCTION IS. `export GIT_PAGER=less`
+//     on its own is ordinary, and so is `git log`. A rule that judges the assignment leaf
+//     alone must either refuse a harmless export or approve it and lose the fact by the
+//     time the git leaf is judged. Only the rule that judges the GIT invocation can see
+//     both halves, so this is where the fact has to be read.
+//  2. ONE TABLE PER HAZARD. gitProgramEnvVars, the `GIT_CONFIG_` prefix and the redirect
+//     pair are the single sources of truth for what is screened, and several landed tests
+//     ITERATE them (TestGit_ConfigEnvInjection_EveryGatedKeyIsScreened,
+//     TestGit_ProgramEnvVar_TwinIsAConfigSinkInTheRealTable). A second name list in the
+//     env-var rule would be a copy that drifts — the exact defect pg2-a12rl, pg2-6c85x
+//     and pg2-h1ori each closed one instance of.
+//  3. THE VERDICT WOULD BE WRONG THERE. These screens are DEMOTIONS OF AN Approve on the
+//     git leaf; the env-var rule's vocabulary for a dangerous name is a decisive Ask or
+//     Reject on the assignment. Moving the screen would move the verdict LEVEL too,
+//     which no ruling supports.
+//
+// It does NOT use hookio.HookInput.InCommandVars, and that is deliberate rather than an
+// oversight: that map holds only values cmdparse could read LITERALLY and DELETES a name
+// whose value it cannot (see cmdparse.InCommandVars' revocation). `export
+// GIT_CONFIG_KEY_0=$K` would therefore be ABSENT from it, and absent reads as "no
+// assignment" — failing OPEN on exactly the shape a value-blind screen must catch. This
+// seam wants NAMES, so it reads the leaves.
+//
+// # WHICH SPELLINGS REACH GIT'S ENVIRONMENT, MEASURED RATHER THAN ASSUMED
+//
+// The screens are about the environment git INHERITS, so a spelling that never leaves the
+// shell is not a hazard and screening it would be a false prompt. bash 5.3.9, 2026-08-14,
+// reading the variable in a real child process:
+//
+//	SPELLING                                REACHES THE CHILD?
+//	NAME=v; child                           no   — a shell variable is not an env variable
+//	NAME=v && child                         no   — same
+//	export NAME=v; child                    YES
+//	NAME=v; export NAME; child              YES  — the bare form exports an EXISTING value
+//	declare NAME=v; child                   no   — declare does not export
+//	declare -x / typeset -x / -gx NAME=v    YES
+//	set -a; NAME=v; child                   YES  — allexport turns every later assignment into an export
+//	export NAME=v | cat; child              no   — a pipeline stage is a subshell
+//	(export NAME=v); child                  no   — a subshell scopes it
+//	export NAME=v; unset NAME; child        no   — and export -n likewise un-exports
+//
+// So the plain `NAME=v;` spelling is NOT screened — that would be a false prompt on
+// ordinary traffic — UNLESS an earlier leaf turned on `allexport`, which is a visible
+// `set -a` leaf and is modelled. That keeps the fail-closed property without paying for it
+// on the common shape.
+//
+// # THE OVER-APPROXIMATIONS, ALL TOWARD THE PROMPT AND ALL DELIBERATE
+//
+//  1. A `declare`/`typeset` leaf is read WHATEVER ITS FLAGS SAY, so the unexported
+//     `declare NAME=v` is screened too. Deciding the net export state per name means
+//     modelling clustered `-gx`, the un-exporting `+x`, and function scope — the same
+//     modelling cmdparse.InCommandVars' own SCOPE comment declines for `declare` — and
+//     getting it wrong fails OPEN. One prompt on a spelling nobody writes at a hook
+//     boundary is the cheaper error.
+//  2. VALUES FROM A `declare`-FAMILY LEAF ARE TREATED AS UNKNOWN, never read, because
+//     bash's attributes change what the value IS (`declare -i N=5+5` binds `10`). An
+//     unknown value can never reach the editor carve-out, which is the fail-closed
+//     direction — see hasGitProgramEnvVar's guard 1.
+//  3. `unset` AND `export -n` ARE NOT MODELLED, so `export GIT_DIR=/x; unset GIT_DIR; git
+//     status` is screened although git sees nothing. Modelling revocation would mean
+//     tracking it per name for a verdict that moves one way only.
+//  4. A SUBSHELL'S EXPORT IS TREATED AS PERSISTING. The lowering emits a subshell's
+//     statements into the same flat leaf list, so `(export GIT_PAGER=/tmp/evil); git log`
+//     reads here as though the export survived. This is the RESIDUAL
+//     cmdparse.InCommandVars records for the same reason and pg2-4ak2k tracks; closing it
+//     needs a subshell SCOPE PATH on the leaf, which is that bead's change, not this one's.
+//  5. A DUPLICATE LEAF TEXT RESOLVES TO ITS LAST OCCURRENCE. `git log; export
+//     GIT_PAGER=/tmp/evil; git log` has two byte-identical `git log` leaves, so matching
+//     by Raw is ambiguous; taking the LAST match means the FIRST `git log` is judged as if
+//     the export had already happened. Over-restrictive for that leaf, and the only
+//     direction that does not let the real one slip through.
+//
+// # SCOPE FALLBACK
+//
+// Under the engine a rule receives ONE leaf and the whole expression as
+// hookio.HookInput.RootExpression, so the sibling leaves are recovered by re-parsing that
+// and locating this leaf by its Raw text — the same seam internal/rules/gitdir uses, and
+// the relation cmdparse.DownstreamStages documents as exact ("the engine builds a leaf's
+// synthetic HookInput from that same Raw"). A DIRECT caller (a unit test, any non-engine
+// caller) is handed the whole expression already, so its own leaves ARE the expression and
+// `before` is already the right index. When RootExpression is empty or nothing matches,
+// this degrades to exactly the leaf-local behaviour every screen had before, which is why
+// no verdict can regress through this path.
+func visibleEnvVars(input *hookio.HookInput, leaves []cmdparse.ParsedCommand, before int) []cmdparse.EnvAssignment {
+	if before < 0 || before >= len(leaves) {
+		return nil
+	}
+	scope, at := expressionScope(input, leaves, before)
+	own := leaves[before].EnvVars
+	prior := exportedEnvVarsBefore(scope, at)
+	if len(prior) == 0 {
+		return own
+	}
+	// The leaf's OWN prefix goes last so it wins any duplicate-name comparison a future
+	// consumer makes: a prefix assignment is what the child really receives.
+	return append(prior, own...)
+}
+
+// expressionScope returns the leaves of the EXPRESSION `leaves[before]` belongs to, and
+// that leaf's index within them. See visibleEnvVars' SCOPE FALLBACK for the two cases and
+// why the fallback cannot regress a verdict.
+func expressionScope(input *hookio.HookInput, leaves []cmdparse.ParsedCommand, before int) ([]cmdparse.ParsedCommand, int) {
+	if input == nil || input.RootExpression == "" {
+		return leaves, before
+	}
+	root := cmdparse.Parse(input.RootExpression)
+	// The LAST match, not the first — over-approximation 5 in visibleEnvVars' list.
+	at := -1
+	for j := range root {
+		if root[j].Raw == leaves[before].Raw {
+			at = j
+		}
+	}
+	if at < 0 {
+		return leaves, before
+	}
+	return root, at
+}
+
+// exportedEnvVarsBefore collects the assignments the leaves BEFORE index `before` put into
+// the environment a later child process inherits. See visibleEnvVars for the measured
+// spelling-by-spelling table this implements and for the over-approximations.
+func exportedEnvVarsBefore(leaves []cmdparse.ParsedCommand, before int) []cmdparse.EnvAssignment {
+	var out []cmdparse.EnvAssignment
+	allExport := false
+	for k := 0; k < before && k < len(leaves); k++ {
+		pc := leaves[k]
+		// A PIPELINE STAGE runs in a subshell, so nothing it exports reaches a later leaf
+		// — measured: `export NAME=v | cat` leaves NAME unset in a later child. Same
+		// exclusion, and the same reason, as cmdparse's own shellVarWrites.
+		if inMultiStagePipelineStage(leaves, k) {
+			continue
+		}
+		switch pc.Executable {
+		case "set":
+			// `set -a` / `set -o allexport` makes every LATER plain assignment an export.
+			// `set +a` is deliberately not modelled: once allexport has been seen this
+			// stays on, which over-approximates toward the prompt.
+			if setsAllExport(pc.Args) {
+				allExport = true
+			}
+		case "export":
+			// cmdparse lifts `export NAME=VALUE` arguments into EnvVars and leaves a BARE
+			// `export NAME` in Args, so both halves have to be read — the bare form
+			// exports a value set by an earlier Bash call, which is a value nothing here
+			// can see and therefore the one that most needs to fail closed.
+			out = append(out, pc.EnvVars...)
+			out = append(out, namesWithUnknownValues(pc.Args)...)
+		case "declare", "typeset":
+			// The lowering keeps a declare-family leaf's assignments in Args. Values are
+			// never read from here — over-approximation 2 — so every name it mentions
+			// arrives with an unknown value.
+			out = append(out, namesWithUnknownValues(pc.Args)...)
+		case "":
+			// A command-less leaf carrying its own assignments. These are SHELL variables
+			// and reach no child (measured) unless allexport is on.
+			if allExport {
+				out = append(out, pc.EnvVars...)
+			}
+		}
+	}
+	return out
+}
+
+// setsAllExport reports whether a `set` invocation turns on allexport, in either spelling
+// bash accepts — the clustered short (`-a`, and `a` inside a cluster such as `-ax`) or the
+// long `-o allexport`.
+func setsAllExport(args []string) bool {
+	for i, a := range args {
+		if a == "-o" && i+1 < len(args) && args[i+1] == "allexport" {
+			return true
+		}
+		if strings.HasPrefix(a, "-o") && strings.TrimPrefix(a, "-o") == "allexport" {
+			return true
+		}
+		if strings.HasPrefix(a, "-") && !strings.HasPrefix(a, "--") && strings.ContainsRune(a, 'a') {
+			return true
+		}
+	}
+	return false
+}
+
+// namesWithUnknownValues turns an assignment-builtin's ARGUMENTS into assignments whose
+// VALUE is explicitly unknown. Flags are skipped; every other argument contributes its
+// identifier prefix, which covers the bare `NAME`, the `NAME=VALUE` form and bash's
+// array-element `m[k]=v` (whose `m` is the name that changes).
+//
+// cmdparse.ExpansionUnknown is the load-bearing part, not a placeholder: it is what makes
+// these assignments unable to reach the editor carve-out, whose first guard requires
+// ExpansionNone (hasGitProgramEnvVar). So a name arriving through here is screened
+// value-blind even when the text beside it happens to spell an inert literal.
+func namesWithUnknownValues(args []string) []cmdparse.EnvAssignment {
+	var out []cmdparse.EnvAssignment
+	for _, a := range args {
+		if strings.HasPrefix(a, "-") || strings.HasPrefix(a, "+") {
+			continue
+		}
+		end := strings.IndexAny(a, "[=")
+		if end < 0 {
+			end = len(a)
+		}
+		name := strings.TrimSuffix(a[:end], "+")
+		if name == "" {
+			continue
+		}
+		out = append(out, cmdparse.EnvAssignment{Name: name, Raw: a, Expansion: cmdparse.ExpansionUnknown})
+	}
+	return out
+}
+
+// inMultiStagePipelineStage reports whether leaf i is one stage of a MULTI-STAGE pipeline.
+// A lone command is a one-stage pipeline and is not one of these.
+//
+// It is a local reimplementation of cmdparse's unexported `inMultiStagePipeline` rather
+// than a shared helper, because exporting one would widen that package's API for a single
+// consumer; the pipeline coordinates it reads (PipelineID / PipelineIndex) are already
+// exported and are documented as per-Parse-call, which is satisfied here — `leaves` is one
+// Parse's output throughout.
+func inMultiStagePipelineStage(leaves []cmdparse.ParsedCommand, i int) bool {
+	pc := leaves[i]
+	if pc.PipelineID < 0 { // a synthesized leaf stands in no pipeline
+		return false
+	}
+	if pc.PipelineIndex > 0 {
+		return true
+	}
+	for j, other := range leaves {
+		if j != i && other.PipelineID == pc.PipelineID && other.PipelineIndex > pc.PipelineIndex {
 			return true
 		}
 	}
@@ -1651,12 +2105,19 @@ func hasRedirectEnvVar(pc cmdparse.ParsedCommand) bool {
 //
 // # WHAT IT DOES NOT REACH — recorded, not silently left
 //
-//   - A PERSISTENT assignment. `export GIT_CONFIG_COUNT=…` on its own line, or a
-//     variable already exported into the shell, is a DIFFERENT leaf (or no leaf at
-//     all), and this predicate reads one leaf's own prefix. hasRedirectEnvVar has the
-//     identical limit for `GIT_DIR`. It is the more common in-corpus spelling — 2026-08-13
-//     the ask log held both — and closing it needs cross-leaf ordering analysis, or
-//     the env-var rule's name screen, which is its own bead.
+//   - A variable ALREADY EXPORTED BY AN EARLIER BASH CALL. CETA receives no environment,
+//     so a variable a previous tool call exported is invisible here and to every other
+//     rule; nothing in one hook payload can recover it.
+//
+//     A PERSISTENT assignment IN THE SAME EXPRESSION IS NOW REACHED (pg2-xjt1s). `export
+//     GIT_CONFIG_COUNT=…; git status` was the more common in-corpus spelling — 111 of the
+//     183 GIT_CONFIG-assignment-bearing rows — and it used to be unscreened because this
+//     predicate read one leaf's own prefix. It now takes the VISIBLE environment instead:
+//     see visibleEnvVars for the approach ruling, the measured bash export semantics, and
+//     the over-approximations. hasRedirectEnvVar and hasGitProgramEnvVar moved in the same
+//     change, because fixing one of three leaf-local screens would have left the other two
+//     as the cheaper route to the same hazard.
+//
 //   - The GIT_* variables that ARE the env twin of a gated sink but do NOT spell
 //     "config": measured the same day, `GIT_EXTERNAL_DIFF=<marker> git diff` and
 //     `GIT_SSH_COMMAND=<marker> git ls-remote ssh://…` both RAN the marker, and they
@@ -1675,8 +2136,8 @@ func hasRedirectEnvVar(pc cmdparse.ParsedCommand) bool {
 // `core.fsmonitor` — still approved, and would answer the redirect Ask, a verdict
 // no ruling supports for this route. See the call site in Evaluate for why the
 // verdict is a demotion instead.
-func hasGitConfigEnvInjection(pc cmdparse.ParsedCommand) bool {
-	for _, ev := range pc.EnvVars {
+func hasGitConfigEnvInjection(envs []cmdparse.EnvAssignment) bool {
+	for _, ev := range envs {
 		if ev.Name == "GIT_CONFIG" || strings.HasPrefix(ev.Name, "GIT_CONFIG_") {
 			return true
 		}
@@ -1711,7 +2172,7 @@ func hasGitConfigEnvInjection(pc cmdparse.ParsedCommand) bool {
 //	GIT_ASKPASS           core.askPass       YES — `git credential fill` ran it as the "Username for …" prompt
 //	GIT_PAGER             core.pager         YES, ONLY WITH A TERMINAL ON STDOUT — see the pager note below
 //	GIT_SEQUENCE_EDITOR   sequence.editor    YES — `git rebase -i HEAD~1` ran it on .git/rebase-merge/git-rebase-todo — DECLINED by pg2-6c85x, NOW SCREENED by pg2-6qh3p under the inert-value carve-out
-//	GIT_PROXY_COMMAND     core.gitProxy      YES — `git ls-remote git://…` ran it as `<host> 9418` — but DECLINED, see declinedGitProgramEnvVars
+//	GIT_PROXY_COMMAND     core.gitProxy      YES — `git ls-remote git://…` ran it as `<host> 9418` — DECLINED by pg2-6c85x, NOW SCREENED by pg2-qi1jo's family ruling
 //
 // THE PAGER READING IS THE ONE THAT NEEDED A SECOND INSTRUMENT, recorded because the
 // first reading looked decisive and was not. `GIT_PAGER=<marker> git log` showed NO SINK,
@@ -1799,25 +2260,31 @@ func hasGitConfigEnvInjection(pc cmdparse.ParsedCommand) bool {
 //
 // # WHAT IT DOES NOT REACH — recorded, not silently left
 //
-// A PERSISTENT assignment. `export GIT_PAGER=…` on its own line, or a variable already
-// exported into the shell, is a DIFFERENT leaf (or no leaf at all), and this predicate
-// reads one leaf's own prefix. It is the SAME leaf-local limit hasGitConfigEnvInjection
-// and hasRedirectEnvVar have, it is filed as pg2-xjt1s, and it is INHERITED here rather
-// than closed: closing it needs cross-leaf ordering analysis for all three at once.
+// A variable ALREADY EXPORTED BY AN EARLIER BASH CALL. CETA receives no environment, so
+// that value is invisible to every rule and no seam in one hook payload can recover it.
+//
+// A PERSISTENT assignment IN THE SAME EXPRESSION IS NOW REACHED (pg2-xjt1s). `export
+// GIT_PAGER=…; git log` used to be unscreened because this predicate read one leaf's own
+// prefix — the SAME leaf-local limit hasGitConfigEnvInjection and hasRedirectEnvVar had.
+// All three now take the VISIBLE environment, in one change, because closing one of them
+// would have left the other two as the cheaper route to the same hazard. See visibleEnvVars
+// for the approach ruling and the over-approximations, and note ONE deliberate exception:
+// hasSequenceEditorEnvVar stays LEAF-LOCAL, because widening a REQUIREMENT is a
+// RELAXATION — `export GIT_SEQUENCE_EDITOR=:; git rebase -i main` would gain an Approve it
+// does not have today, which needs its own ruling and its own replay.
 var gitProgramEnvVars = map[string]string{
 	"GIT_EXTERNAL_DIFF": "diff.external",
 	"GIT_SSH_COMMAND":   "core.sshCommand",
 	"GIT_SSH":           "core.sshCommand",
 	"GIT_EDITOR":        "core.editor",
 	"GIT_PAGER":         "core.pager",
-	// `core.askPass` is NOT in gatedConfigKeys — the one twin that is absent, and the
-	// asymmetry is recorded rather than resolved. The variable was MEASURED reaching an
-	// exec sink, so declining it would leave a measured sink open; adding the key to the
-	// table would change the `git config core.askPass …` PORCELAIN verdict from Approve
-	// to Ask, a route this bead did not measure. Unlike `core.gitProxy` below there is no
-	// ruling to contradict — pg2-szadj's survey never weighed this key at all — and
-	// unlike it, this one is on the everyday https path. Adding `core.askPass` to
-	// gatedConfigKeys is a one-line follow-up under its own ruling.
+	// `core.askPass` WAS the one twin absent from gatedConfigKeys, recorded here by
+	// pg2-6c85x rather than resolved because adding it changes a `git config` PORCELAIN
+	// verdict — a route that bead did not measure. RESOLVED by pg2-h1ori (2026-08-14): the
+	// key is now in gatedConfigKeys as a configSink, so all three spellings of this sink
+	// are screened and the `absentTwins` exception in programenv_test.go is GONE with it.
+	// The asymmetry mattered because it ran the wrong way round — the PERSISTENT spelling
+	// was the unscreened one. See gatedConfigKeys' "ADDED AFTER THE SURVEY" entry.
 	"GIT_ASKPASS": "core.askPass",
 	// SCREENED SINCE pg2-6qh3p, having been DECLINED by pg2-6c85x. It was never declined
 	// for want of evidence — `git rebase -i HEAD~1` ran a marker on
@@ -1832,6 +2299,16 @@ var gitProgramEnvVars = map[string]string{
 	// other exec sink. That is why this entry MOVED rather than the rebase arm changing.
 	// See isInertEditorValue and gitEditorEnvVars.
 	"GIT_SEQUENCE_EDITOR": "sequence.editor",
+	// SCREENED SINCE pg2-qi1jo, having been DECLINED by pg2-6c85x. It was never declined
+	// for want of evidence — `git ls-remote git://invalid.invalid/x.git` ran a marker as
+	// `invalid.invalid 9418` — but because its twin `core.gitProxy` sat in gatedConfigKeys'
+	// left-approved list under an EXPLICIT instruction to settle the alternate-transport
+	// family "under one ruling", and screening the env half alone would have split that
+	// ruling across two routes. pg2-qi1jo made the ruling for the WHOLE family, so this
+	// entry MOVED rather than the instruction being worked around. See gatedConfigKeys'
+	// "ADDED AFTER THE SURVEY" entry for the family's measurements and for why the
+	// unauthenticated `git://` transport is what settles the trust question.
+	"GIT_PROXY_COMMAND": "core.gitProxy",
 }
 
 // gitEditorEnvVars is the subset of gitProgramEnvVars whose VALUE is read rather than
@@ -1862,22 +2339,45 @@ var gitEditorEnvVars = map[string]bool{
 // the env half alone. TestGit_ProgramEnvVar_DeclinedVariablesStayUnscreened pins the
 // consequence, so removing a variable from here is a deliberate act.
 //
-// `GIT_SEQUENCE_EDITOR` WAS THE OTHER MEMBER AND HAS LEFT (pg2-6qh3p, operator ruling of
-// 2026-08-13). Its conflicting ruling could be honoured WITHOUT leaving the sink open once
-// the VALUE was read — see the entry that now carries it in gitProgramEnvVars.
-// `GIT_PROXY_COMMAND`'s cannot: its conflict is about which KEYS a future ruling should
-// cover, not about which values are inert, so no value predicate resolves it.
+// BOTH ORIGINAL MEMBERS HAVE LEFT, EACH BECAUSE ITS CONFLICTING RULING WAS RESOLVED
+// RATHER THAN WORKED AROUND, and that is the pattern a later reader should expect of this
+// table — a member leaves when the ruling it deferred to is MADE:
+//
+//   - `GIT_SEQUENCE_EDITOR` (pg2-6qh3p, operator ruling of 2026-08-13). Its conflicting
+//     ruling could be honoured WITHOUT leaving the sink open once the VALUE was read — see
+//     the entry that now carries it in gitProgramEnvVars.
+//   - `GIT_PROXY_COMMAND` (pg2-qi1jo, 2026-08-14). Its conflict was about which KEYS a
+//     future ruling should cover, so no value predicate could resolve it — the RULING had
+//     to be made, and pg2-qi1jo made it for the whole alternate-transport family. Both
+//     halves moved in the same change, which is what the deferred instruction asked for.
+//
+// THE MAP MAY LEGITIMATELY BE EMPTY. It is a register of OUTSTANDING declinations, not a
+// permanent list, so an empty map means every measured sink is screened —
+// TestGit_ProgramEnvVar_DeclinedVariablesStayUnscreened is written to accept that rather
+// than to require a member.
 var declinedGitProgramEnvVars = map[string]string{
-	// Its twin `core.gitProxy` sits in gatedConfigKeys' "SURVEYED AND DELIBERATELY LEFT
-	// APPROVED" list — a genuine sink, but on an alternate transport this workflow does
-	// not use — and that entry instructs a later reader to add the family "under one
-	// ruling instead of rediscovering them". Screening the env half now would split one
-	// ruling across two routes, which is the failure mode this bead exists to fix. Measured
-	// over the 152-day ask log on 2026-08-13: NO row carries a `GIT_PROXY_COMMAND`
-	// assignment — its single occurrence anywhere in the corpus is this bead's own
-	// measurement script, written while taking these readings — so nothing is at stake in
-	// waiting for that one ruling.
-	"GIT_PROXY_COMMAND": "its twin core.gitProxy is deliberately ungated pending ONE ruling over the alternate-transport family",
+	// MEASURED (git 2.54.0, 2026-08-14, scripts/probe-pg2-qi1jo.sh): `GIT_ALLOW_PROTOCOL=ext
+	// git ls-remote 'ext::<marker> %S'` RAN the marker as `git-upload-pack`, and the same
+	// command without the variable did not — so this variable is the difference between an
+	// inert `ext::` URL and arbitrary command execution, which is a live auto-approving hole
+	// (measured `allow` on main @ a064a73e).
+	//
+	// IT IS DECLINED FOR A TABLE-SHAPE REASON, NOT A POLICY ONE, and the distinction is
+	// what bounds it. `GIT_ALLOW_PROTOCOL` is the env twin of `protocol.<n>.allow`, which
+	// pg2-qi1jo classed configINTERLOCK: it NAMES NO PROGRAM, it removes a refusal git
+	// makes by default. gitProgramEnvVars is the program-NAMING table and its own check
+	// (TestGit_ProgramEnvVar_TwinIsAConfigSinkInTheRealTable) requires every twin to resolve
+	// as a configSink, so putting this variable there would either fail that check or force
+	// an exception map back into it — the exact escape hatch pg2-h1ori deleted.
+	//
+	// WHAT CLOSING IT NEEDS, so the next reader does not have to re-derive it: an INTERLOCK
+	// env screen, which does not exist in this file at all. The class's other env twin is
+	// `GIT_SSL_NO_VERIFY` (for `http.sslVerify`), unscreened for exactly the same reason, so
+	// this is an INHERITED structural gap rather than one pg2-qi1jo's ruling opened — and a
+	// screen covering one of the two while leaving the other is the split this family's
+	// instruction existed to prevent. It is a third table, its own measurements and its own
+	// prompt-volume replay, hence its own bead.
+	"GIT_ALLOW_PROTOCOL": "it is the env twin of the configINTERLOCK half of the alternate-transport family, and this file has no interlock env screen for it to join — `GIT_SSL_NO_VERIFY` is unscreened for the same reason",
 }
 
 // hasGitProgramEnvVar reports whether this leaf's own env-assignment prefix carries a
@@ -1899,8 +2399,8 @@ var declinedGitProgramEnvVars = map[string]string{
 // static program name, and check 2 without check 1 would leave the fail-closed property
 // resting on the token set never growing. Together, a value reaches the carve-out only by
 // being statically, exactly one of two inert literals.
-func hasGitProgramEnvVar(pc cmdparse.ParsedCommand) bool {
-	for _, ev := range pc.EnvVars {
+func hasGitProgramEnvVar(envs []cmdparse.EnvAssignment) bool {
+	for _, ev := range envs {
 		if _, screened := gitProgramEnvVars[ev.Name]; !screened {
 			continue
 		}
@@ -1912,6 +2412,15 @@ func hasGitProgramEnvVar(pc cmdparse.ParsedCommand) bool {
 	return false
 }
 
+// hasSequenceEditorEnvVar reports whether the rebase arm's editor REQUIREMENT is satisfied.
+//
+// IT IS THE ONE ENV PREDICATE IN THIS FILE THAT STAYS LEAF-LOCAL, and pg2-xjt1s left it
+// that way on purpose. The other three are SCREENS: widening them to the visible
+// environment can only make a verdict more restrictive. This one is a REQUIREMENT, so
+// widening it would APPROVE something that abstains today — `export GIT_SEQUENCE_EDITOR=:;
+// git rebase -i main` measures `{}` on main @ a064a73e and would become `allow`. That is a
+// relaxation, it needs its own ruling and its own replay, and it is the same residual
+// asymmetry isInertEditorValue already records for the argv twin.
 func hasSequenceEditorEnvVar(pc cmdparse.ParsedCommand) bool {
 	for _, ev := range pc.EnvVars {
 		if ev.Name == "GIT_SEQUENCE_EDITOR" {
