@@ -244,6 +244,8 @@ When there's something to pick up:
   "Next-session handoff bead" below.
 - If a prior wrapup already left a P0 "continue here" bead for this thread, update it instead of
   filing a second (see "Safety and idempotency").
+- The P0 is a **one-shot pointer, not a standing record**: it MUST carry a retirement condition, and
+  whoever consumes it closes it. Write it so that is possible — see "Lifecycle: the P0 is one-shot".
 
 **Truly done** — and only then skip the P0 — means all in-scope work is committed, gated green,
 integrated (merged locally or PR opened with nothing else pending), branches/worktrees retired,
@@ -307,6 +309,39 @@ work carries over (interrupted, deferred, or discovered). The other follow-ups f
 their own (non-P0) beads; this P0 doesn't replace them — it points at the one place to start and
 links them, so the next session sees a single front door instead of a scattered backlog.
 
+### Lifecycle: the P0 is one-shot
+
+A birth rule with no retirement condition turns this pointer into a permanent P0 occupant of the
+queue head holding no executable work of its own, which every autonomous drain session then pays a
+claim → probe → dispose cycle to rediscover (`pg2-9ifbn`, extracted from `pg2-m2qxu` and
+`pg2-8wy25`). So the pointer is written with an exit:
+
+- **Retirement condition — nothing in it is unique to it.** The bead is closeable as soon as every
+  item traces to a durable bead or an indexing label; at the latest that holds once a session has
+  RESUMED from it, because the cold-start brief is then spent and the work lives on in the beads it
+  linked. **Who may close it:** whoever consumes it — the resuming session, a later wrapup, or a
+  drain session that claims it — with no operator approval, because it is a pointer, not work. **On
+  what evidence:** an absorption trace RECORDED on the bead, one line per item naming the bead id or
+  label that now holds it, plus the re-probed output of any state claim the bead made.
+- **Once absorbed it MUST be CLOSED, and its priority MUST NOT be decayed instead.** P0 is justified
+  for "resume cold _next_ session", never for "this pointer still exists three sessions later" — and
+  a demoted priority is a stored value nothing recomputes, so decay would leave the same spent
+  pointer sitting at a quieter priority. While it still names carry-over it stays P0 and is
+  refreshed in place ("Safety and idempotency"); once absorbed it is closed, not demoted.
+- **It MUST NOT be the sole record of a cluster's membership.** Where a label already indexes the
+  cluster, cite the label (`bd list --label <label>`) instead of hand-copying member ids — a copied
+  list is a snapshot of a cluster that keeps growing. `pg2-m2qxu`'s hand-written map omitted
+  `pg2-ipmwi` while the `fsmonitor` label indexing the same cluster was complete, so the pointer
+  decayed into a _misleading_ index while still sitting at P0.
+- **It MUST NOT record a push obligation** — no "N unpushed commits on `<repo>` `main`, needs a
+  push". Push debt is DERIVED state, re-derived read-only from `pn workspace doctor` and never
+  stored in a bead (**U-1**/**U-2**); `pg2-m2qxu` recorded one that the `pushed?` probe showed was
+  already discharged, so a reader who trusted it would have re-pushed a satisfied obligation.
+
+A drain session that claims an already-absorbed pointer has a documented disposition —
+**close-with-absorption-trace**, in the `pb` plugin's `/drain-beads` command, where a disposer
+actually reads — rather than deriving one ad hoc as `pg2-m2qxu` forced.
+
 ## Markdown handoff doc (no-beads repos)
 
 When a repo doesn't use beads, the same recording happens in a markdown file committed to the
@@ -356,6 +391,12 @@ When a re-run finds an existing handoff doc for still-open work, **update its to
 than appending a duplicate — the next session needs one front door, same as the "update the P0
 rather than file a second" rule for beads.
 
+"Lifecycle: the P0 is one-shot" applies here too: the session that RESUMES from a "Resume here"
+brief MUST replace it with the current state (or delete it, when nothing carries over) in the same
+commit, recording the same absorption trace in the doc's history rather than leaving a spent brief
+at the top. The doc MUST likewise cite an indexing label instead of hand-copying cluster membership,
+and MUST NOT record a push obligation (**U-1**/**U-2**).
+
 ## Safety and idempotency
 
 - **Re-running is safe.** A second wrapup with nothing new to do should find a clean tree,
@@ -366,6 +407,10 @@ rather than file a second" rule for beads.
   discovered work you mean to resume next — means there's a next session; capture it as the
   single P0 pointer (linking the rest). Skip the P0 only when nothing carries over at all. When
   unsure, write it.
+- **Retire the P0 you consumed.** A pointer whose every item traces to a durable bead or label is
+  spent: close it with the recorded absorption trace instead of leaving it at P0, and never demote it
+  in place of closing it. It MUST NOT cite cluster membership by hand-copied list where a label
+  indexes it, and MUST NOT record a push obligation. See "Lifecycle: the P0 is one-shot".
 - **No-beads repos use the markdown handoff doc.** Everywhere these rules say "file/close/update a
   bead" or "leave a P0," a no-beads repo does the markdown-handoff-doc equivalent (see "Markdown
   handoff doc (no-beads repos)"). The intent — one durable, committed front door, updated in place
@@ -436,5 +481,6 @@ If nothing was in scope, say so plainly rather than inventing work.
 | remove pn workforest set        | `pn workspace workforest remove <branch>` (only when every repo reported `landed`)               |
 | prune stale worktree admin      | `pn workspace workforest prune`                                                                  |
 | next-session handoff            | one P0 `bd create` (see "Next-session handoff bead")                                             |
+| retire a spent P0 pointer       | `bd close <id> --reason "absorbed: <item> ⇒ <bead-id\|label>, …"` (see "Lifecycle")              |
 | record work (no-beads repo)     | append to the repo's handoff doc (see "Markdown handoff doc (no-beads repos)")                   |
 | next-session handoff (no-beads) | update the handoff doc's top "Resume here" section                                               |

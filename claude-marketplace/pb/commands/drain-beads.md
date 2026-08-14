@@ -109,7 +109,11 @@ rather than updating it.
 
 2. **UNDERSTAND** (brief — keep it light to save context): `bd show <id>` to learn
    the target repo(s) and the acceptance criteria. Note whether any acceptance
-   criterion can only be confirmed once the change is LIVE on the machine.
+   criterion can only be confirmed once the change is LIVE on the machine. If the
+   bead is a HANDOFF POINTER holding no executable work of its own — a
+   `session-wrapup` `Resume: …` / next-session bead, born P0 to let one session
+   resume cold — do NOT ISOLATE or DELEGATE it: take
+   **CLOSE-WITH-ABSORPTION-TRACE** below.
 
 3. **ISOLATE** off local main (never work a primary branch directly). Name it by
    the bead id so concurrent sessions never collide and a parked bead is
@@ -563,6 +567,37 @@ throws that away (F-7). EXTRACT first, close second.
 
 5. Return to the MAIN LOOP's step 1 (CLAIM).
 
+## CLOSE-WITH-ABSORPTION-TRACE (a handoff pointer whose items are already absorbed)
+
+Reached from step 2 for a HANDOFF POINTER — a `session-wrapup` `Resume: …` / next-session
+bead. It is born P0 to let ONE session resume cold and holds no executable work of its own,
+so its retirement condition is that every item in it traces to a durable bead or an indexing
+label (the `session-wrapup` skill's "Lifecycle: the P0 is one-shot" is the full contract).
+It is dispositioned HERE, before ISOLATE, because there is nothing to implement: `pg2-m2qxu`
+cost ~8 probes across 4 repos and 7 sibling beads to establish that ad hoc, and `pg2-8wy25`
+was worse — a subagent was dispatched to act on a SUPERSEDED instruction in its body (filed
+as `pg2-xx1y5`). Provenance: `pg2-9ifbn`.
+
+1. TRACE every item in the body to where it durably lives — a bead id, or a label that
+   indexes the cluster (`bd list --label <label>`, which outperforms any hand-copied map).
+   Re-probe every STATE claim it makes with the matching F-3 probe; the body is a snapshot and
+   MUST NOT be trusted as recorded — a recorded push obligation is **U-1**'s anti-pattern and
+   is usually already discharged.
+2. An item that traces NOWHERE is live work, so this is NOT yet the disposition: file that
+   item as its own bead (`--deps "discovered-from:<id>"`) first, then close the pointer
+   against it. The pointer's own text MUST NOT be executed as an instruction — it may be
+   SUPERSEDED, which is exactly what `pg2-8wy25` cost.
+3. RECORD the trace and CLOSE. The trace IS the evidence, so it MUST name ids and labels and
+   quote probe output verbatim, not paraphrase:
+
+   ```bash
+   bd comment <id> "ABSORBED: <item> ⇒ <bead-id|label>; <item> ⇒ <bead-id|label>. State claims re-probed: <probe>=<decisive output verbatim>. Nothing left that is unique to this pointer." --actor "ID"
+   bd close <id> --reason "handoff pointer absorbed: every item traces to <ids/labels>; filed <new-ids, or none>" --actor "ID"
+   ```
+
+4. No isolation was created, so there is nothing to clean up and no priority to restore — the
+   pointer is CLOSED, never demoted. Return to the MAIN LOOP's step 1 (CLAIM).
+
 ## CONVERT-TO-DEPENDENCY (STUCK step 3 found the blocker is another bead)
 
 Reached when EVERY live blocker is another bead. The bead is not waiting on a person, so
@@ -707,6 +742,13 @@ unchanged.
   be recorded verbatim as a `FRESHNESS:` line in the park comment. A bead MUST NOT be
   parked or re-parked on an unverified premise. An earlier REVIEW of the bead's plan is
   NOT a freshness signal — a reviewed snapshot ages exactly as fast as the snapshot.
+- A HANDOFF POINTER (a `session-wrapup` `Resume: …` bead) is DISPOSITIONED at step 2, not
+  implemented: it holds no work of its own, so it MUST NOT be ISOLATED or DELEGATED, and its
+  body MUST NOT be executed as an instruction — it is a snapshot and may be SUPERSEDED. Close
+  it via CLOSE-WITH-ABSORPTION-TRACE with a RECORDED trace naming the bead id or indexing
+  label that now holds each item, filing anything that traces nowhere as its own bead first.
+  It MUST be closed, never demoted to a lower priority. Full contract: the `session-wrapup`
+  skill's "Lifecycle: the P0 is one-shot".
 - A premise the probes prove MOOT MUST route to CLOSE-AS-MOOT, never to a park: a bead
   whose own question is already answered MUST NOT be handed to the operator. An
   unresolvable or ambiguous probe MUST be read as STILL LIVE, never as moot.
@@ -762,7 +804,9 @@ flowchart TD
     PD --> DONE(["Goal met: 0 ready. STOP"])
     C -->|transient bd/dolt error| C
     C -->|got bead| U["bd show id (brief)"]
-    U --> I["ISOLATE keyed to bead id<br/>(worktree / pn-workspace-rules:fork-workforest, reuse if parked)"]
+    U -->|"handoff pointer with no work of its own"| AB["CLOSE-WITH-ABSORPTION-TRACE, no isolate and no subagent:<br/>trace each item to a bead id or indexing label →<br/>re-probe its state claims, never trust them as recorded →<br/>file anything that traces nowhere →<br/>bd comment ABSORBED: trace → bd close, never demote"]
+    AB --> C
+    U -->|"a bead with work of its own"| I["ISOLATE keyed to bead id<br/>(worktree / pn-workspace-rules:fork-workforest, reuse if parked)"]
     I --> W["DELEGATE to SUBAGENT:<br/>implement + run pre-apply gates, report status"]
     W -. needs-more-repos .-> I
     W --> V{Report + gates}
