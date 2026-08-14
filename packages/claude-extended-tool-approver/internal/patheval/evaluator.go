@@ -47,15 +47,19 @@ func (pa PathAccess) CanWrite() bool {
 type PathEvaluator struct {
 	projectRoot    string // symlink-resolved
 	rawProjectRoot string // cleaned but not symlink-resolved (for escape detection)
-	cwd            string
-	home           string
-	xdgDataHome    string
-	workspaceRoot  string
-	gradleHome     string
-	tmpRoot        string
-	sandboxConfig  *SandboxFilesystemConfig
-	mounts         []Mount // non-nil with inContainer=true enables container mode
-	inContainer    bool
+	// projectRootGrantsZone is false when projectRoot is too BROAD to be treated as
+	// a project — a FABRICATED root (DetectProjectRoot found no `.git` and handed
+	// back its argument) that is $HOME or an ancestor of it. See rootGrantsZone.
+	projectRootGrantsZone bool
+	cwd                   string
+	home                  string
+	xdgDataHome           string
+	workspaceRoot         string
+	gradleHome            string
+	tmpRoot               string
+	sandboxConfig         *SandboxFilesystemConfig
+	mounts                []Mount // non-nil with inContainer=true enables container mode
+	inContainer           bool
 	// extraReadWrite / extraReadOnly are symlink-resolved roots configured via
 	// the CETA_EXTRA_READWRITE_ROOTS / CETA_EXTRA_READONLY_ROOTS env vars
 	// (":"-separated absolute paths). They are checked LAST, after every
@@ -156,16 +160,17 @@ func New(projectRoot string) *PathEvaluator {
 		tmpRoot = "/tmp"
 	}
 	return &PathEvaluator{
-		projectRoot:    projectRoot,
-		rawProjectRoot: rawProjectRoot,
-		cwd:            projectRoot,
-		home:           home,
-		xdgDataHome:    xdgData,
-		workspaceRoot:  workspaceRoot,
-		gradleHome:     gradleHome,
-		tmpRoot:        tmpRoot,
-		extraReadWrite: resolveExtraRoots("CETA_EXTRA_READWRITE_ROOTS"),
-		extraReadOnly:  resolveExtraRoots("CETA_EXTRA_READONLY_ROOTS"),
+		projectRoot:           projectRoot,
+		projectRootGrantsZone: rootGrantsZone(projectRoot, home),
+		rawProjectRoot:        rawProjectRoot,
+		cwd:                   projectRoot,
+		home:                  home,
+		xdgDataHome:           xdgData,
+		workspaceRoot:         workspaceRoot,
+		gradleHome:            gradleHome,
+		tmpRoot:               tmpRoot,
+		extraReadWrite:        resolveExtraRoots("CETA_EXTRA_READWRITE_ROOTS"),
+		extraReadOnly:         resolveExtraRoots("CETA_EXTRA_READONLY_ROOTS"),
 	}
 }
 
@@ -196,16 +201,17 @@ func NewWithCWD(projectRoot, cwd string) *PathEvaluator {
 		tmpRoot = "/tmp"
 	}
 	return &PathEvaluator{
-		projectRoot:    projectRoot,
-		rawProjectRoot: rawProjectRoot,
-		cwd:            cwd,
-		home:           home,
-		xdgDataHome:    xdgData,
-		workspaceRoot:  workspaceRoot,
-		gradleHome:     gradleHome,
-		tmpRoot:        tmpRoot,
-		extraReadWrite: resolveExtraRoots("CETA_EXTRA_READWRITE_ROOTS"),
-		extraReadOnly:  resolveExtraRoots("CETA_EXTRA_READONLY_ROOTS"),
+		projectRoot:           projectRoot,
+		projectRootGrantsZone: rootGrantsZone(projectRoot, home),
+		rawProjectRoot:        rawProjectRoot,
+		cwd:                   cwd,
+		home:                  home,
+		xdgDataHome:           xdgData,
+		workspaceRoot:         workspaceRoot,
+		gradleHome:            gradleHome,
+		tmpRoot:               tmpRoot,
+		extraReadWrite:        resolveExtraRoots("CETA_EXTRA_READWRITE_ROOTS"),
+		extraReadOnly:         resolveExtraRoots("CETA_EXTRA_READONLY_ROOTS"),
 	}
 }
 
@@ -234,19 +240,20 @@ func (pe *PathEvaluator) SetSandboxConfig(cfg *SandboxFilesystemConfig) {
 func (pe *PathEvaluator) WithCWD(cwd string) *PathEvaluator {
 	cwd = resolveRefPath(cwd)
 	return &PathEvaluator{
-		projectRoot:    pe.projectRoot,
-		rawProjectRoot: pe.rawProjectRoot,
-		cwd:            cwd,
-		home:           pe.home,
-		xdgDataHome:    pe.xdgDataHome,
-		workspaceRoot:  pe.workspaceRoot,
-		gradleHome:     pe.gradleHome,
-		tmpRoot:        pe.tmpRoot,
-		sandboxConfig:  pe.sandboxConfig,
-		mounts:         pe.mounts,
-		inContainer:    pe.inContainer,
-		extraReadWrite: pe.extraReadWrite,
-		extraReadOnly:  pe.extraReadOnly,
+		projectRoot:           pe.projectRoot,
+		projectRootGrantsZone: pe.projectRootGrantsZone,
+		rawProjectRoot:        pe.rawProjectRoot,
+		cwd:                   cwd,
+		home:                  pe.home,
+		xdgDataHome:           pe.xdgDataHome,
+		workspaceRoot:         pe.workspaceRoot,
+		gradleHome:            pe.gradleHome,
+		tmpRoot:               pe.tmpRoot,
+		sandboxConfig:         pe.sandboxConfig,
+		mounts:                pe.mounts,
+		inContainer:           pe.inContainer,
+		extraReadWrite:        pe.extraReadWrite,
+		extraReadOnly:         pe.extraReadOnly,
 	}
 }
 
@@ -276,8 +283,13 @@ func (pe *PathEvaluator) Evaluate(path string) PathAccess {
 		// Target is read-only or reject — safe to use that classification
 		return resolvedZone
 	}
-	// <projectRoot>/**
-	if strings.HasPrefix(path+"/", pe.projectRoot+"/") {
+	// <projectRoot>/** — skipped when the root is too BROAD to be a project
+	// (pg2-byh62, see rootGrantsZone). THIS SITE AND classifyWithoutEscapeCheck'S MUST
+	// BE KEPT IN STEP: the two functions carry independent copies of the same zone
+	// ladder, and guarding only the other one left this hole fully open (measured — the
+	// escape-check copy is reached only for a symlink that appears to be in the project
+	// and resolves outside it, so it is not on the path an ordinary read takes).
+	if pe.projectRootGrantsZone && strings.HasPrefix(path+"/", pe.projectRoot+"/") {
 		return PathReadWrite
 	}
 	// WORKSPACE_ROOT/** (broader than project root, for multi-repo workspaces)
@@ -379,7 +391,11 @@ func (pe *PathEvaluator) extraRootAccess(path string) PathAccess {
 // skipping the symlink escape check. Used by the escape check itself to determine
 // what zone the symlink target lands in.
 func (pe *PathEvaluator) classifyWithoutEscapeCheck(path string) PathAccess {
-	if strings.HasPrefix(path+"/", pe.projectRoot+"/") {
+	// The project-root zone is skipped when the root is too BROAD to be a project —
+	// a fabricated root at or above $HOME (pg2-byh62, see rootGrantsZone). Skipping it
+	// does not by itself deny path: every zone below still applies, so a path that is
+	// genuinely in the workspace, /tmp or an allowWrite root is unaffected.
+	if pe.projectRootGrantsZone && strings.HasPrefix(path+"/", pe.projectRoot+"/") {
 		return PathReadWrite
 	}
 	if pe.workspaceRoot != "" {
@@ -572,6 +588,26 @@ func (pe *PathEvaluator) IsDenyWrite(path string) bool {
 	return false
 }
 
+// DetectProjectRoot returns the project root to attribute cwd to: MONOREPO_ROOT when
+// cwd lies under it, else the nearest ancestor holding a `.git`, else CWD ITSELF.
+//
+// ITS RETURN VALUE IS AMBIGUOUS AND CALLERS MUST NOT READ IT AS "THIS IS A REPO ROOT"
+// (pg2-byh62). The final fallback hands back the argument, so "cwd IS a project root"
+// and "nothing was found, here is your cwd back" are the same string and cannot be told
+// apart afterwards. Use `InGitRepo(path)` for the yes/no question — that is this
+// function's `.git` walk exposed as a predicate, and it exists precisely because a
+// security control MUST NOT be relaxed on an answer that might be a fallback
+// (pg2-pmk9q).
+//
+// THE AMBIGUITY BEING UNDOCUMENTED IS WHAT MADE pg2-byh62 INVISIBLE. A fabricated root
+// is still granted a PathReadWrite zone over its whole subtree, so from a non-repo cwd
+// that whole subtree became readable — and with cwd=$HOME that is every dotfile the
+// user owns. Measured on main @71a6abba with the deny-list applied,
+// `cwd=$HOME cat ~/.npmrc` returned `approve` while the same command from any repo cwd
+// returned `abstain`.
+//
+// THE ZONE IS STILL GRANTED FOR MOST FABRICATED ROOTS, deliberately — see
+// rootGrantsZone for which are refused and why the answer is not "all of them".
 func DetectProjectRoot(cwd string) string {
 	cwd = filepath.Clean(cwd)
 
@@ -587,6 +623,76 @@ func DetectProjectRoot(cwd string) string {
 		return root
 	}
 	return cwd
+}
+
+// rootGrantsZone reports whether root may grant a PathReadWrite zone over its whole
+// subtree. THIS IS THE RECORDED DECISION FOR pg2-byh62, and the decision is NOT
+// "a fabricated root grants nothing".
+//
+// THE HAZARD IS BREADTH, NOT FABRICATION. Two facts settled it, both measured:
+//
+//   - THE FABRICATED ROOT IS THE NORMAL CASE HERE, not an edge case. This machine's
+//     pn-workspace root `/Users/phillipg/phillipg_mbp` holds no `.git` of its own — it
+//     is a directory OF sibling repos — and it is the single most common cwd in the
+//     asklog corpus: 36,408 of 139,842 replayable rows, with 47,829 (34%) from
+//     non-repo cwds in total. Refusing every fabricated root would strip the zone from
+//     the directory agents work in most, which is the prompt flood this bead's own
+//     text warned to measure before choosing.
+//   - THE DANGEROUS FABRICATED ROOTS ARE THE ONES THAT SWALLOW $HOME. `$HOME` as a
+//     root covers `.npmrc`, `.config/gcloud/`, `.terraform.d/` and every other
+//     credential file not named in `sandbox.filesystem.denyRead`; `/` is worse. The
+//     workspace root covers repos and scratch notes. Those are different kinds of
+//     answer, and only the second is a project.
+//
+// So a fabricated root is refused iff it IS $HOME or an ANCESTOR of $HOME. Everything
+// else keeps today's behaviour.
+//
+// A REAL `.git` AT $HOME IS DELIBERATELY STILL HONOURED. Some people version-control
+// their home directory, and that is an explicit declaration by the user that it is a
+// project — unlike a fabricated root, which is this package inventing one. Keying on
+// InGitRepo rather than on the path alone is what preserves that distinction.
+//
+// THE COMPENSATING CONTROL FOR EVERY FABRICATED ROOT THAT IS STILL HONOURED is the
+// secrets rule: `secretpath.IsSecret` plus `sandbox.filesystem.denyRead`, both of which
+// run BEFORE the zone model and are cwd-independent (measured: `cat ~/.kube/config`
+// returns `reject` from the workspace root, from $HOME and from a non-repo temp dir
+// alike). That control is a NAMED LIST, so it protects the paths someone remembered —
+// which is exactly why the breadth guard above is worth having on top of it.
+func rootGrantsZone(root, home string) bool {
+	if root == "" {
+		return false
+	}
+	if InGitRepo(root) {
+		return true // a real repo root, or a path inside one: the user declared it
+	}
+	if home == "" {
+		return true // breadth is undecidable; denying would strip every zone at once
+	}
+	// A fabricated root at or above $HOME covers every dotfile the user owns.
+	return !coversPath(root, home)
+}
+
+// coversPath reports whether root is target or an ancestor of it.
+//
+// IT DOES NOT USE pathContains, DELIBERATELY, and this is not a style choice:
+// pathContains compares `target+"/"` against `dir+"/"`, which for dir=="/" builds the
+// prefix `"//"` and therefore reports FALSE for every path on the filesystem. That blind
+// spot is harmless in pathContains' own callers (an allow/deny entry of `/` is not a real
+// config) but fatal here — `/` is the BROADEST fabricated root there is, reachable from
+// cwd=`/` via DetectProjectRoot's fallback, and treating it as covering nothing would
+// have granted a read-write zone over the entire filesystem. Caught by
+// TestRootGrantsZoneTable's `/` row.
+func coversPath(root, target string) bool {
+	if root == "" || target == "" {
+		return false
+	}
+	if root == target {
+		return true
+	}
+	if root == "/" {
+		return strings.HasPrefix(target, "/")
+	}
+	return strings.HasPrefix(target, root+"/")
 }
 
 // InGitRepo reports whether path lies inside a git working tree — i.e. whether

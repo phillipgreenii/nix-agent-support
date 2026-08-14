@@ -630,9 +630,21 @@ func TestPathSafety_WriteUserGlobalAgentConfig_Abstain(t *testing.T) {
 // Edge case: $HOME is itself the project root, so `<projectRoot>/**` classifies all
 // of ~/.claude as read-write and is evaluated BEFORE the ~/.claude zone block. This
 // is the user-global case where the evaluator alone would approve.
+//
+// THE `.git` IS LOAD-BEARING (pg2-byh62). A project root only grants its read-write
+// zone when it is a REAL repo root or is narrower than $HOME: a FABRICATED root at or
+// above $HOME grants nothing, because it would otherwise make every dotfile the user
+// owns readable. So without a `.git` here the precondition below can no longer hold and
+// this case would silently stop testing the carve-out. Making the temp home a real repo
+// keeps the device intact AND states the distinction the guard draws — a user who
+// version-controls their home directory has declared it a project; this package
+// inventing one has not.
 func TestPathSafety_WriteUserGlobalAgentConfig_HomeIsProjectRoot_Abstain(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	if err := os.Mkdir(filepath.Join(home, ".git"), 0o755); err != nil {
+		t.Fatalf("make temp home a real repo: %v", err)
+	}
 	pe := patheval.New(home)
 	r := New(pe)
 	p := filepath.Join(home, ".claude", "settings.local.json")
@@ -658,9 +670,18 @@ func TestPathSafety_WriteUserGlobalAgentConfig_HomeIsProjectRoot_Abstain(t *test
 // path would abstain for a reason that has nothing to do with the carve-out and the
 // assertion would be masked. Pinning writability up front means an Approve here can
 // only mean the carve-out let the path through.
+//
+// THE `.git` IS LOAD-BEARING for the same reason as the test above (pg2-byh62): a
+// FABRICATED project root at or above $HOME no longer grants a read-write zone, so the
+// device needs the temp home to be a REAL repo. Note `skills/` is the entry that
+// actually depends on it — `plans/` and `projects/` are read-write through the
+// ~/.claude zone on their own.
 func TestPathSafety_WriteUserGlobalClaudeData_Approve(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	if err := os.Mkdir(filepath.Join(home, ".git"), 0o755); err != nil {
+		t.Fatalf("make temp home a real repo: %v", err)
+	}
 	for _, p := range []string{
 		filepath.Join(home, ".claude", "projects", "-some-proj", "memory", "MEMORY.md"),
 		filepath.Join(home, ".claude", "plans", "some-plan.md"),
