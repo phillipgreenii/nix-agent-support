@@ -101,7 +101,11 @@ fi
 
 1. Translates its options into `pa-monitor wait-until-agents-finished` arguments and `exec`s it
 2. `pa-monitor` streams `WatchState` from the daemon and exits 0 once no session has been `working`
-   for `--consecutive-idle-checks` consecutive pushes, or 1 at `--maximum-wait`
+   for `--consecutive-idle-checks` consecutive pushes, or 1 at `--maximum-wait`. Consecutive means
+   consecutive **in time**: a gap of more than 2s between two pushes restarts the count (it prints
+   `wait: <gap> unobserved, idle streak restarted`), because a session may have been `working` for
+   the whole gap. See `packages/pa-monitor/README.md`'s "`--consecutive-idle-checks` counts
+   observations that are consecutive in time".
 3. With `--caffeinate`, also runs `caffeinate -w $$` so the Mac stays awake for the duration of the
    wait (the `exec` preserves the pid, so `caffeinate` exits with the wait)
 

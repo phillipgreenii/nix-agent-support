@@ -27,11 +27,27 @@ type fakeWaitDaemon struct {
 	push     time.Duration
 	workingN uint32
 	pushes   atomic.Int64
+
+	// pushesPerStream, when > 0, ends each WatchState stream after that many
+	// pushes instead of pushing for as long as the client listens. That is how the
+	// idle-streak tests break the STREAM while leaving the daemon up and dialable
+	// — a daemon that goes away lands on the separate unavailable path, which
+	// resets the streak for its own reasons. thenStall picks WHICH break: false
+	// returns nil, a clean EOF the client sees on Recv() at once (the real daemon's
+	// graceful-shutdown behaviour), true blocks instead so the client's own
+	// pushBudget watchdog fires and the unobserved gap exceeds that budget by
+	// construction. streams counts handler entries, i.e. how many streams the
+	// client actually opened.
+	pushesPerStream int
+	thenStall       bool
+	streams         atomic.Int64
 }
 
 func (f *fakeWaitDaemon) WatchState(_ *pb.WatchStateRequest, stream pb.PaMonitor_WatchStateServer) error {
+	f.streams.Add(1)
 	t := time.NewTicker(f.push)
 	defer t.Stop()
+	sent := 0
 	for {
 		// A new message per push: proto messages are not safe to share across
 		// concurrent sends and reads.
@@ -41,6 +57,14 @@ func (f *fakeWaitDaemon) WatchState(_ *pb.WatchStateRequest, stream pb.PaMonitor
 			return err
 		}
 		f.pushes.Add(1)
+		sent++
+		if f.pushesPerStream > 0 && sent >= f.pushesPerStream {
+			if !f.thenStall {
+				return nil
+			}
+			<-stream.Context().Done()
+			return nil
+		}
 		select {
 		case <-stream.Context().Done():
 			return nil
@@ -322,6 +346,99 @@ func TestWaitUntilAgentsFinishedPacesRefusedStreamOpens(t *testing.T) {
 	// is why the spin presented only as a late exit.
 	if n := strings.Count(stderr.String(), "wait: stream refused, reconnecting"); n == 0 {
 		t.Errorf("stderr = %q, want a refused-open diagnostic per retry", stderr.String())
+	}
+}
+
+// TestWaitUntilAgentsFinishedIdleStreakRestartsAfterAStalledStream is the
+// pg2-klyz7 regression. `streak` lived outside the reconnect loop with no notion
+// of WHEN each observation happened, so idle observations either side of a stream
+// break counted as consecutive and --consecutive-idle-checks N could be satisfied
+// by observations that were not consecutive in time.
+//
+// This daemon serves two idle pushes per stream and then goes silent while
+// staying dialable, so the client's pushBudget watchdog fires and the gap between
+// the second observation of one stream and the first of the next always exceeds
+// that budget. With --consecutive-idle-checks 3 the streak must therefore never
+// complete and the wait must end at --maximum-wait; pre-decision it exited 0 on
+// the first push after the first reconnect.
+func TestWaitUntilAgentsFinishedIdleStreakRestartsAfterAStalledStream(t *testing.T) {
+	sock := waitTestSocket(t)
+	d := &fakeWaitDaemon{push: 50 * time.Millisecond, workingN: 0, pushesPerStream: 2, thenStall: true}
+	serveFakeDaemon(t, sock, d)
+
+	// One cycle is ~2.6s (two prompt pushes, the 2s watchdog, the 500ms redial
+	// pause, the dial), so this window admits two full cycles with room to spare —
+	// enough that the streak provably had the chance to reach 3 across breaks.
+	const maxWait = 6 * time.Second
+	var stderr bytes.Buffer
+	code := waitUntilAgentsFinished(waitParams{
+		maxWait:     maxWait,
+		consecutive: 3,
+		grace:       30 * time.Second,
+	}, &stderr)
+
+	if code != 1 {
+		t.Fatalf("exit code = %d, want 1 (timeout): three idle observations separated by stream breaks are not consecutive; stderr: %q", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "wait-until-agents-finished: timeout") {
+		t.Errorf("stderr = %q, want the documented timeout line", stderr.String())
+	}
+	if n := d.streams.Load(); n < 2 {
+		t.Fatalf("daemon served %d streams: the fake never broke and re-opened one, so nothing was tested", n)
+	}
+	// The restart must be REPORTED, not silent: without this line a wait making no
+	// progress is indistinguishable from a wait still gathering it.
+	if !strings.Contains(stderr.String(), "idle streak restarted") {
+		t.Errorf("stderr = %q, want the discarded streak reported", stderr.String())
+	}
+}
+
+// TestWaitUntilAgentsFinishedIdleStreakSurvivesAPromptStreamDrop guards the
+// OVERCORRECTION that the sibling test above invites. Resetting the streak on
+// every pass through the reconnect loop would discard it on the reconnects a
+// HEALTHY long wait makes too, so a daemon that ends its stream more often than
+// every --consecutive-idle-checks pushes could never satisfy the gate at all and
+// a satisfiable wait would become a guaranteed timeout.
+//
+// This daemon serves two idle pushes per stream and then returns — the clean EOF
+// the real daemon's WatchState sends on graceful shutdown — which the client
+// redials after reconnectPause. Both the real daemon and this fake Send
+// immediately on stream open, so the third observation lands well inside
+// pushBudget of the second and the streak completes ACROSS the break: exit 0, not
+// the --maximum-wait timeout.
+func TestWaitUntilAgentsFinishedIdleStreakSurvivesAPromptStreamDrop(t *testing.T) {
+	sock := waitTestSocket(t)
+	d := &fakeWaitDaemon{push: 50 * time.Millisecond, workingN: 0, pushesPerStream: 2}
+	serveFakeDaemon(t, sock, d)
+
+	var stderr bytes.Buffer
+	start := time.Now()
+	code := waitUntilAgentsFinished(waitParams{
+		maxWait:     30 * time.Second, // must not be the reason this ends
+		consecutive: 3,
+		grace:       30 * time.Second,
+	}, &stderr)
+	elapsed := time.Since(start)
+
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0: a stream drop redialed inside pushBudget must not discard the streak; stderr: %q", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "all idle") {
+		t.Errorf("stderr = %q, want %q", stderr.String(), "all idle")
+	}
+	// Without a second stream the streak completed without ever crossing a break,
+	// which would make the exit-0 above prove nothing.
+	if n := d.streams.Load(); n < 2 {
+		t.Fatalf("daemon served %d streams: the streak never crossed a stream break", n)
+	}
+	if strings.Contains(stderr.String(), "idle streak restarted") {
+		t.Errorf("stderr = %q: a %s redial is well inside pushBudget (%s) and must not restart the streak", stderr.String(), reconnectPause, pushBudget)
+	}
+	// Generous, but far below the 30s --maximum-wait: the expected path is ~0.6s
+	// (two prompt pushes, the redial pause, the dial), so anything in this range
+	// means the streak survived rather than the deadline having ended the wait.
+	if elapsed > 20*time.Second {
+		t.Errorf("idle exit took %s: the streak did not survive the stream drop", elapsed)
 	}
 }
 

@@ -103,6 +103,22 @@ only, because a `blocked` session is not "actively progressing". It stands until
 decision; whether a `usage_limit`-blocked session SHOULD hold these gates open is an open question
 for pa-monitor's behavior docs, not something to change here.
 
+### `--consecutive-idle-checks` counts observations that are consecutive in time
+
+The flag debounces a **transient** idle reading, so the N observations MUST be consecutive in time,
+not merely in sequence. `wait-until-agents-finished` therefore requires each observation to land
+within **2s** (the same budget its watchdog uses to call a silent stream hung) of the previous one; a
+longer gap restarts the count at 1 and prints `wait: <gap> unobserved, idle streak restarted`. Losing
+the stream and regaining it does not by itself discard progress — the redial is paced at 500ms and
+the daemon pushes immediately on stream open, so a prompt reconnect stays inside the budget — but a
+missed push, a sustained refusal, or a daemon that went away does, because a session may have been
+`working` for the whole unobserved gap.
+
+Consequence for callers: under a daemon whose stream breaks for longer than 2s more often than every
+N pushes, the gate cannot be satisfied and the wait ends at `--maximum-wait` (exit 1). That is the
+truthful answer — there was never N ticks' worth of continuous observation — and the restart lines on
+stderr are how to tell it from a wait that is simply still gathering observations.
+
 ## Nudge delivery
 
 The daemon never invokes `cmux`: cmux's control socket is only usable from a process

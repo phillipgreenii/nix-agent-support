@@ -40,7 +40,7 @@ import (
 func runWaitUntilAgentsFinished(args []string) {
 	fs := flag.NewFlagSet("wait-until-agents-finished", flag.ExitOnError)
 	maxWaitS := fs.Int("maximum-wait", 7200, "Maximum total wait in seconds")
-	consecutive := fs.Int("consecutive-idle-checks", 3, "Consecutive idle observations required")
+	consecutive := fs.Int("consecutive-idle-checks", 3, "Consecutive idle observations required (a gap in observation restarts the count)")
 	graceS := fs.Int("reconnect-grace", 30, "Seconds to wait for daemon return mid-wait")
 	if err := fs.Parse(args); err != nil {
 		os.Exit(3)
@@ -76,6 +76,23 @@ func waitTimeout(stderr io.Writer) int {
 // deadline (bead pg2-yzw29).
 const reconnectPause = 500 * time.Millisecond
 
+// pushBudget is the longest gap between two state observations this wait treats
+// as normal, and it answers two questions with one number:
+//
+//   - WATCHDOG, within one stream: no push from the daemon inside this window is
+//     treated as a hung daemon, so break and reconnect. It is 2× the
+//     PushIntervalMs = 1000 requested below, so a healthy stream has a full
+//     interval of slack.
+//   - CONSECUTIVENESS, across a reconnect as well: two observations further apart
+//     than this are not consecutive, so the later one starts a fresh idle streak
+//     (see the DECISION in waitUntilAgentsFinished).
+//
+// One number for both is deliberate. The watchdog is already this loop's own
+// declaration of the longest silence a healthy stream may have, so a gap that
+// exceeds it is one the loop has itself judged abnormal — which leaves the two
+// rules unable to disagree about whether the loop was observing.
+const pushBudget = 2 * time.Second
+
 // waitUntilAgentsFinished is the wait loop proper, split out of the os.Exit
 // wrapper above so tests can drive it against a fake daemon and observe both
 // the exit code and the stderr contract (mirroring runBridgeChannel vs.
@@ -91,7 +108,42 @@ func waitUntilAgentsFinished(p waitParams, stderr io.Writer) int {
 	waitCtx, waitCancel := context.WithDeadline(context.Background(), time.Now().Add(p.maxWait))
 	defer waitCancel()
 
+	// DECISION (bead pg2-klyz7): --consecutive-idle-checks N requires N idle
+	// observations that are consecutive IN TIME. An observation therefore extends
+	// the streak only if it lands within pushBudget of the previous one; further
+	// out it STARTS a fresh streak of 1. lastObs carries that timestamp across
+	// reconnects alongside the streak it qualifies.
+	//
+	// The flag exists to debounce a transient idle reading, and an unobserved gap
+	// is precisely the window in which the thing being debounced is invisible:
+	// observe idle twice, lose the stream, observe idle once more, and an
+	// unqualified streak of 3 attests to a period a session may have spent
+	// `working` throughout.
+	//
+	// DURATION is the axis, not break KIND. The three ways the stream can go
+	// (refused open, missed push, Recv error) differ only in what the loop learns
+	// about WHY it stopped observing, never in whether it stopped — so keying on
+	// the kind would re-open exactly the drift the reconnect paths already suffered
+	// (reconnectPause, bead pg2-2snsq). The gap also grades these correctly with no
+	// per-path code: a missed push cannot cost less than its own budget, so that
+	// path always restarts the streak, while a clean stream drop the loop redials
+	// promptly costs nothing.
+	//
+	// NOT a reset per pass through this loop, which is the tempting one-liner: a
+	// HEALTHY long wait also re-enters here on every reconnect (a graceful daemon
+	// shutdown ends the stream with a clean EOF by design — internal/daemon
+	// server.go's WatchState), so discarding the streak there would make N
+	// unreachable under any daemon that drops its stream more often than every N
+	// pushes, turning a satisfiable wait into a guaranteed exit 1. The real daemon
+	// Sends immediately on stream open and the redial is paced at reconnectPause,
+	// so a prompt drop resumes ~0.5s later — inside the budget by construction.
+	//
+	// Reachability is bounded rather than hoped for: N observations must now fall
+	// within (N-1) × pushBudget of continuous observation. N ≤ 1 is unaffected —
+	// the check only ever resets to 0 and the increment that follows still reaches
+	// 1 — so no wait satisfiable by a single observation becomes unsatisfiable.
 	streak := 0
+	var lastObs time.Time
 
 	for {
 		if waitCtx.Err() != nil {
@@ -124,6 +176,14 @@ func waitUntilAgentsFinished(p waitParams, stderr io.Writer) int {
 				fmt.Fprintf(stderr, "wait-until-agents-finished: %v\n", err)
 				return 2
 			}
+			// STRICTER than the pushBudget consecutiveness rule above, and
+			// deliberately so (the difference the DECISION there requires be
+			// justified): this is the one path where the state SOURCE may have been
+			// replaced rather than merely gone unwatched. A restarted daemon builds
+			// its first push from a freshly derived registry, so that push attests
+			// to nothing about the interval before it — however short the gap
+			// happened to be. lastObs needs no clearing: the rule above is gated on
+			// streak > 0, so a zeroed streak already ignores it.
 			streak = 0 // reset; daemon may have restarted
 			continue
 		}
@@ -164,10 +224,9 @@ func waitUntilAgentsFinished(p waitParams, stderr io.Writer) int {
 			continue
 		}
 
-		// Watchdog: no push from the daemon within 2× the requested push
-		// interval is treated as a hung daemon; reconnect. Default
-		// PushIntervalMs = 1000ms here → 2s budget.
-		const pushBudget = 2 * time.Second
+		// The watchdog budget below is pushBudget, which is also the
+		// consecutiveness tolerance the streak is qualified against — see its
+		// declaration for why the two are one number.
 		type recvResult struct {
 			msg *pb.DaemonState
 			err error
@@ -201,6 +260,24 @@ func waitUntilAgentsFinished(p waitParams, stderr io.Writer) int {
 				if st == nil {
 					continue
 				}
+				// Qualify this observation against the previous one BEFORE folding
+				// it in (see the DECISION above). Doing it here, at the single point
+				// where observations are counted, rather than on each break path, is
+				// what makes the rule impossible for a future break path to forget:
+				// the streak is only ever incremented and TESTED here, so qualifying
+				// it lazily at the point of use is exactly equivalent to resetting it
+				// eagerly at every break — and it can additionally tell a 0.5s
+				// reconnect from a 30s one, which an eager reset cannot.
+				now := time.Now()
+				if gap := now.Sub(lastObs); streak > 0 && gap > pushBudget {
+					// Say so. A streak discarded silently would present as nothing
+					// but a late exit, the same way the unpaced reconnect presented
+					// as nothing but a late exit (bead pg2-2snsq); this line is what
+					// distinguishes "still waiting" from "making no progress".
+					fmt.Fprintf(stderr, "wait: %s unobserved, idle streak restarted\n", gap.Round(time.Millisecond))
+					streak = 0
+				}
+				lastObs = now
 				// WorkingN only, per ADR 0024 R3 — a `blocked` session
 				// (e.g. blocker = usage_limit) does not hold this gate
 				// open. See the exit-code contract above.
