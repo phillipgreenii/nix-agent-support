@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"net"
 	"os"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/stats"
 
 	pb "github.com/phillipgreenii/pa-monitor/internal/proto"
 )
@@ -47,6 +49,26 @@ func (f *fakeWaitDaemon) WatchState(_ *pb.WatchStateRequest, stream pb.PaMonitor
 	}
 }
 
+// connCounter counts accepted client connections at the DAEMON side, which for
+// this wait loop is its retry count: every pass through the reconnect loop dials
+// a fresh grpc.ClientConn and Closes it again. It rides in as a
+// grpc.StatsHandler server option so measuring the rate needs no change to
+// serveFakeDaemon's existing callers, and it is independent of anything the loop
+// chooses to print.
+type connCounter struct{ n atomic.Int64 }
+
+func (c *connCounter) TagRPC(ctx context.Context, _ *stats.RPCTagInfo) context.Context { return ctx }
+func (c *connCounter) HandleRPC(context.Context, stats.RPCStats)                       {}
+func (c *connCounter) TagConn(ctx context.Context, _ *stats.ConnTagInfo) context.Context {
+	return ctx
+}
+
+func (c *connCounter) HandleConn(_ context.Context, s stats.ConnStats) {
+	if _, ok := s.(*stats.ConnBegin); ok {
+		c.n.Add(1)
+	}
+}
+
 // waitTestSocket points every path rpcclient.Dial consults at a fresh temp dir
 // and returns the socket path it will resolve to. /tmp rather than t.TempDir()
 // because macOS caps unix socket paths at 104 bytes and the Go temp root is well
@@ -74,15 +96,17 @@ func waitTestSocket(t *testing.T) string {
 
 // serveFakeDaemon serves srv on sock until the returned stop func runs (also
 // registered as cleanup). Stopping and re-serving the same socket is how the
-// reconnect-grace tests simulate a mid-wait daemon disappearance.
-func serveFakeDaemon(t *testing.T, sock string, srv pb.PaMonitorServer) (stop func()) {
+// reconnect-grace tests simulate a mid-wait daemon disappearance. opts are
+// passed to grpc.NewServer, which is how the refused-stream-open test makes a
+// daemon that answers the dial but rejects every stream.
+func serveFakeDaemon(t *testing.T, sock string, srv pb.PaMonitorServer, opts ...grpc.ServerOption) (stop func()) {
 	t.Helper()
 	_ = os.Remove(sock)
 	ln, err := net.Listen("unix", sock)
 	if err != nil {
 		t.Fatal(err)
 	}
-	gs := grpc.NewServer()
+	gs := grpc.NewServer(opts...)
 	pb.RegisterPaMonitorServer(gs, srv)
 	served := make(chan struct{})
 	go func() { defer close(served); _ = gs.Serve(ln) }()
@@ -246,6 +270,58 @@ func TestWaitUntilAgentsFinishedReconnectGracePreserved(t *testing.T) {
 		}
 	case <-time.After(60 * time.Second):
 		t.Fatal("wait did not finish after the daemon returned inside --reconnect-grace")
+	}
+}
+
+// TestWaitUntilAgentsFinishedPacesRefusedStreamOpens is the pg2-2snsq
+// regression. A daemon that ANSWERS the dial but REFUSES the WatchState stream
+// open sent the loop straight back into a fresh dial with no pause and no
+// backoff, and silently: pre-fix, THIS harness counts 6,448 dial/WatchState/Close
+// cycles in its 2s window (15,925 without the stats handler below, whose
+// bookkeeping is what accounts for the difference). Post-fix the same window
+// admits 4 — one per 500ms reconnectPause.
+//
+// grpc.MaxHeaderListSize(1) is how the fake daemon refuses the OPEN rather than
+// the RPC, and the distinction is the whole point: a server-streaming open
+// completes CLIENT-side, so a handler that merely returns an error surfaces on
+// Recv() instead and lands on the already-paced post-streamLoop path. Advertising
+// SETTINGS_MAX_HEADER_LIST_SIZE=1 instead makes the client transport reject its
+// own outbound HEADERS, so client.C.WatchState returns an error while the socket
+// stays dialable — the exact combination this branch handles, held indefinitely.
+func TestWaitUntilAgentsFinishedPacesRefusedStreamOpens(t *testing.T) {
+	sock := waitTestSocket(t)
+	conns := &connCounter{}
+	serveFakeDaemon(t, sock, &fakeWaitDaemon{push: 200 * time.Millisecond, workingN: 0},
+		grpc.MaxHeaderListSize(1), grpc.StatsHandler(conns))
+
+	const maxWait = 2 * time.Second
+	var stderr bytes.Buffer
+	code := waitUntilAgentsFinished(waitParams{
+		maxWait:     maxWait,
+		consecutive: 3,
+		grace:       30 * time.Second,
+	}, &stderr)
+
+	// Exit 1 (not 2): every dial SUCCEEDS here, so the daemon-unavailable branch
+	// is never reached and the deadline is what ends the wait.
+	if code != 1 {
+		t.Fatalf("exit code = %d, want 1 (timeout); stderr: %q", code, stderr.String())
+	}
+	retries := conns.n.Load()
+	if retries == 0 {
+		t.Fatalf("the daemon accepted no connection: the fake never exercised the branch; stderr: %q", stderr.String())
+	}
+	// THE RATE ASSERTION. At one retry per reconnectPause a 2s wait admits ~4;
+	// this bound sits an order of magnitude above that so a loaded machine cannot
+	// flake it, and more than two orders below the 6,448 this harness counts
+	// pre-fix.
+	if retries > 40 {
+		t.Errorf("%d refused-open retries within %s: the reconnect is not paced", retries, maxWait)
+	}
+	// Separately: the branch must SAY something. It retried silently before, which
+	// is why the spin presented only as a late exit.
+	if n := strings.Count(stderr.String(), "wait: stream refused, reconnecting"); n == 0 {
+		t.Errorf("stderr = %q, want a refused-open diagnostic per retry", stderr.String())
 	}
 }
 

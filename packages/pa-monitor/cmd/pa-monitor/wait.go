@@ -66,6 +66,16 @@ func waitTimeout(stderr io.Writer) int {
 	return 1
 }
 
+// reconnectPause is the single pace shared by EVERY way this wait can lose its
+// stream and go round again: a refused stream open, a stream that broke or went
+// quiet, and a daemon that went away (waitForDaemon's poll). Naming it once is
+// deliberate — a caller cannot tell those three apart, so they MUST NOT differ
+// in how hard they retry, and three separate literals is how they drifted apart
+// in the first place (bead pg2-2snsq). Every use is inside a select on the
+// --maximum-wait context, never a bare Sleep, so pacing can never outlast the
+// deadline (bead pg2-yzw29).
+const reconnectPause = 500 * time.Millisecond
+
 // waitUntilAgentsFinished is the wait loop proper, split out of the os.Exit
 // wrapper above so tests can drive it against a fake daemon and observe both
 // the exit code and the stderr contract (mirroring runBridgeChannel vs.
@@ -125,6 +135,32 @@ func waitUntilAgentsFinished(p waitParams, stderr io.Writer) int {
 		if err != nil {
 			cancel()
 			_ = client.Close()
+			// A REFUSED OPEN leaves the socket perfectly dialable, so this branch
+			// is the one that loops straight back into a fresh dial. Unpaced that
+			// was ~8k dial/WatchState/Close cycles a second — 15,925 measured over
+			// a 2s window, ~57M over the 7200s default — for the whole remaining
+			// wait (bead pg2-2snsq). The two sibling reconnects below and
+			// waitForDaemon were already paced; only this one was not.
+			//
+			// It was also the only one that retried SILENTLY, so the spin showed up
+			// as nothing but a late exit. Report it in the sibling paths' idiom
+			// (cf. "push missed, reconnecting"), carrying the error, which is the
+			// only thing here that says WHY the daemon refused.
+			fmt.Fprintf(stderr, "wait: stream refused, reconnecting: %v\n", err)
+			// DECISION (pg2-2snsq): a FLAT pause, not escalating backoff, and no
+			// separate give-up-early diagnostic. RATE was the whole defect and one
+			// flat pause fixes it; --maximum-wait already bounds the TOTAL, so a
+			// growing delay has no unbounded cost left to contain — it would only
+			// trade a bounded number of cheap retries for slower recovery from a
+			// transient refusal. Escalating here ALONE would also re-open exactly
+			// the gap this bead closed, with the three reconnect paths pacing
+			// differently again. If a sustained refusal is ever measured in the
+			// field, the escalation belongs on all three paths at once, driven by
+			// that measurement — not on this one pre-emptively.
+			select {
+			case <-waitCtx.Done():
+			case <-time.After(reconnectPause):
+			}
 			continue
 		}
 
@@ -200,7 +236,7 @@ func waitUntilAgentsFinished(p waitParams, stderr io.Writer) int {
 		// Brief pause before reconnect, itself bounded by the deadline.
 		select {
 		case <-waitCtx.Done():
-		case <-time.After(500 * time.Millisecond):
+		case <-time.After(reconnectPause):
 		}
 	}
 }
@@ -213,6 +249,8 @@ func waitUntilAgentsFinished(p waitParams, stderr io.Writer) int {
 func waitForDaemon(ctx context.Context, grace time.Duration) error {
 	deadline := time.Now().Add(grace)
 	for time.Now().Before(deadline) {
+		// The 500ms here is this poll's own dial BUDGET, not its pace, so it stays
+		// a literal; the pace below is the shared reconnectPause.
 		dialCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
 		client, err := rpcclient.Dial(dialCtx)
 		cancel()
@@ -223,7 +261,7 @@ func waitForDaemon(ctx context.Context, grace time.Duration) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(500 * time.Millisecond):
+		case <-time.After(reconnectPause):
 		}
 	}
 	return fmt.Errorf("daemon did not return within grace %s", grace)
