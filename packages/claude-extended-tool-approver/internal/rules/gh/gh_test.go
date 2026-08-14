@@ -712,15 +712,22 @@ func TestGH_ApiPullRequestMerge_Reject(t *testing.T) {
 	}
 }
 
-// TestGH_ApiOtherMutation_Ask pins the PATH-BLIND floor: every mutation that is not
-// the pull-request merge gets the conservative Ask, matching the verdict the
-// equivalent porcelain already carries (`gh issue create` is Ask; `gh pr create` was
-// too until pg2-25oru made it draft-aware — see apiVerdict's PR-CREATION paragraph for
-// why the api path deliberately stays at Ask rather than following it to Reject).
-// The `pulls` row is the one the blanket approval measurably bypassed.
+// TestGH_ApiOtherMutation_Ask pins the PATH-BLIND floor: every mutation that is not one
+// of the two operations with a control of its own gets the conservative Ask, matching
+// the verdict the equivalent porcelain already carries (`gh issue create` is Ask).
+//
+// `POST .../pulls` LEFT THIS TABLE IN pg2-h8h3f and is now Rejected without
+// `draft=true`, so it lives in TestGH_ApiCreate_MirrorsPrCreateVerdict and
+// TestGH_ApiPullRequestCreate_DraftAware. It was here because pg2-cl0v2 could not read
+// the draft VALUE and so could not follow the porcelain; that was a capability gap, never
+// a ruling, and the row moved the moment the gap closed. `PATCH .../pulls/5 -f draft=false`
+// STAYS: GitHub's REST PATCH cannot convert a PR to draft, so it is not the create
+// operation and has no draft-first control to mirror.
+//
+// `gh api -X POST repos/o/r/merges` also stays, deliberately — see IsPullRequestMerge for
+// why the merge Reject is not widened to it without an operator ruling.
 func TestGH_ApiOtherMutation_Ask(t *testing.T) {
 	cmds := []string{
-		"gh api -X POST repos/o/r/pulls -f title=x", // probed VERBATIM; bypassed the Ask `gh pr create` carried then
 		"gh api -X PATCH repos/o/r/pulls/5 -f draft=false",
 		"gh api repos/o/r/issues -f title=x",
 		"gh api graphql -f query=mutation{}",
@@ -769,33 +776,414 @@ func TestGH_ApiMerge_MirrorsPrMergeVerdict(t *testing.T) {
 	}
 }
 
-// TestGH_ApiCreate_NotWeakerThanDraftCreate is the same consistency guard for the OTHER
-// control the blanket approval bypassed, RESTATED where pg2-25oru moved the porcelain.
+// TestGH_ApiCreate_MirrorsPrCreateVerdict is the same consistency guard for the OTHER
+// control the blanket approval bypassed, and it is an EXACT MIRROR again (pg2-h8h3f).
 //
-// It used to compare against `gh pr create` directly, when that was an Ask. Since
-// pg2-25oru the porcelain has TWO verdicts — Approve with --draft, Reject without — and
-// `gh api -X POST repos/o/r/pulls` cannot be sorted between them: GitHub's `draft` is a
-// BODY PARAMETER, and parseGhAPICall reads body parameters only as a presence boolean,
-// never their values (`--input file.json` hides them entirely). So the guard is stated as
-// what still holds: the api path must be STRICTLY MORE restrictive than the blessed draft
-// create, and at least the Ask floor pg2-cl0v2 established.
+// ITS HISTORY IS THE POINT, so it is recorded rather than lost to a rename. pg2-cl0v2
+// landed it as an exact mirror of `gh pr create`, which was then one undifferentiated Ask.
+// pg2-25oru gave the porcelain TWO verdicts (Approve with --draft, Reject without) but
+// could not follow it here, because parseGhAPICall read GitHub's `draft` only as a PRESENCE
+// boolean; so the test was WEAKENED to TestGH_ApiCreate_NotWeakerThanDraftCreate, which
+// asserted only "strictly more restrictive than the blessed draft create, and at least the
+// Ask floor". pg2-h8h3f added the body-parameter VALUE reader, which is the capability the
+// weakening was waiting on, so the exact mirror — and the name — are restored.
 //
-// THE RESIDUAL GAP IS DELIBERATE AND NAMED: Ask is auto-accepted in an auto-approving
-// session, so `gh api -X POST repos/o/r/pulls` can still create a NON-DRAFT PR that
-// `gh pr create` would Reject. Following the porcelain to Reject was not done here
-// because it would also reject `-f draft=true`, the blessed create, with no in-session
-// override. Closing it needs a draft-body-parameter reader (`-f`/`-F`/`--field`/
-// `--raw-field` values, plus a fail-closed reading of `--input`) and the matching
-// `graphql` mutation case — its own change, not a tidy-up.
-func TestGH_ApiCreate_NotWeakerThanDraftCreate(t *testing.T) {
-	draftPorcelain := evalGH(t, "gh pr create --draft")
-	viaAPI := evalGH(t, "gh api -X POST repos/o/r/pulls -f title=x")
-	if viaAPI.Decision <= draftPorcelain.Decision {
-		t.Errorf("gh api PR create is not MORE restrictive than the blessed draft create: api=%s (%s) vs porcelain=%s (%s)",
-			viaAPI.Decision, viaAPI.Reason, draftPorcelain.Decision, draftPorcelain.Reason)
+// EVERY ROW IS A RELATION, NOT A HARDCODED VERDICT: each asserts that the api spelling and
+// the porcelain spelling of ONE operation reach the SAME decision. Written that way,
+// retuning the draft-first ruling moves both together and this test keeps passing, while
+// relaxing EITHER path alone fails here — which is the property a `want` column cannot
+// express. The absolute levels are pinned by prCreateVerdict's own fixtures and by
+// TestGH_ApiPullRequestCreate_DraftAware.
+func TestGH_ApiCreate_MirrorsPrCreateVerdict(t *testing.T) {
+	mirrors := []struct {
+		what      string
+		porcelain string
+		viaAPI    string
+	}{
+		{
+			what:      "the blessed DRAFT create",
+			porcelain: "gh pr create --draft",
+			viaAPI:    "gh api -X POST repos/o/r/pulls -f draft=true -f title=x",
+		},
+		{
+			what:      "draft ABSENT",
+			porcelain: "gh pr create --title x",
+			viaAPI:    "gh api -X POST repos/o/r/pulls -f title=x",
+		},
+		{
+			what:      "draft explicitly FALSE",
+			porcelain: "gh pr create --draft=false --title x",
+			viaAPI:    "gh api -X POST repos/o/r/pulls -f draft=false -f title=x",
+		},
 	}
-	if viaAPI.Decision < hookio.Ask {
-		t.Errorf("gh api PR create is below the pg2-cl0v2 Ask floor: got %s (%s)", viaAPI.Decision, viaAPI.Reason)
+	for _, m := range mirrors {
+		gotAPI, gotPorcelain := evalGH(t, m.viaAPI), evalGH(t, m.porcelain)
+		if gotAPI.Decision != gotPorcelain.Decision {
+			t.Errorf("%s: the two spellings of one operation DISAGREE — api %q got %s (%s), porcelain %q got %s (%s)",
+				m.what, m.viaAPI, gotAPI.Decision, gotAPI.Reason, m.porcelain, gotPorcelain.Decision, gotPorcelain.Reason)
+		}
+	}
+}
+
+// TestGH_ApiCreate_UnreadableBodyHoldsTheAskFloor pins the ONE case pg2-h8h3f leaves short
+// of the mirror above, so the residual is asserted rather than merely described.
+//
+// `--input payload.json` and `-F draft=@file` put the draft value OUTSIDE argv — measured,
+// and for `--input` measured twice over, since it also DEMOTES an argv `-f draft=true` to a
+// query-string parameter while the body still comes wholly from the file. With no readable
+// value the choice is between Reject (which would refuse a legitimate draft create with no
+// in-session override — the objection that created this gap) and the pg2-cl0v2 Ask floor.
+// It is the floor.
+//
+// So the assertion is a RANGE, not equality: at least Ask, and never Approve. That
+// deliberately admits a future Reject if `--input` bodies ever become readable, without
+// admitting the Approve that would be the hole.
+func TestGH_ApiCreate_UnreadableBodyHoldsTheAskFloor(t *testing.T) {
+	cmds := []string{
+		"gh api -X POST repos/o/r/pulls --input payload.json",
+		"gh api -X POST repos/o/r/pulls --input=payload.json",
+		"gh api -X POST repos/o/r/pulls --input -",
+		// MEASURED: with --input present the -f is a QUERY-STRING parameter, so this is NOT
+		// a readable draft=true and must not reach the Approve.
+		"gh api -X POST repos/o/r/pulls --input payload.json -f draft=true",
+		"gh api -X POST repos/o/r/pulls -F draft=@draft.txt -f title=x",
+	}
+	for _, cmd := range cmds {
+		got := evalGH(t, cmd)
+		if got.Decision < hookio.Ask {
+			t.Errorf("cmd %q: got %s (%s) — an unreadable draft value must hold at least the pg2-cl0v2 Ask floor",
+				cmd, got.Decision, got.Reason)
+		}
+	}
+}
+
+// TestGH_ApiPullRequestCreate_DraftAware pins the raw-API draft gate's own three verdicts
+// across every spelling gh accepts for a body parameter, and INDEPENDENTLY OF FLAG POSITION
+// — the acceptance criterion that the verdict not depend on where in argv the parameter
+// sits. Every spelling below was MEASURED on gh 2.97.0, 2026-08-14; see api.go's BODY
+// PARAMETERS block for the dumped request bodies.
+func TestGH_ApiPullRequestCreate_DraftAware(t *testing.T) {
+	tests := []struct {
+		cmd  string
+		want hookio.Decision
+	}{
+		// draft=true, in each spelling that carries a value.
+		{"gh api -X POST repos/o/r/pulls -f draft=true", hookio.Approve},
+		{"gh api -X POST repos/o/r/pulls -F draft=true", hookio.Approve},
+		{"gh api -X POST repos/o/r/pulls --field draft=true", hookio.Approve},
+		{"gh api -X POST repos/o/r/pulls --raw-field draft=true", hookio.Approve},
+		{"gh api -X POST repos/o/r/pulls --field=draft=true", hookio.Approve}, // =-glued long
+		{"gh api -X POST repos/o/r/pulls -fdraft=true", hookio.Approve},       // glued to the short
+		{"gh api -X POST repos/o/r/pulls -f draft=1", hookio.Approve},         // ParseBool truthy
+		{"gh api -X POST repos/o/r/pulls -f draft='true'", hookio.Approve},    // glued quotes (unwrapGluedQuotes)
+		{`gh api -X POST repos/o/r/pulls -f draft="true"`, hookio.Approve},    //
+		// POSITION INDEPENDENCE: before the endpoint, after it, and with other flags between.
+		{"gh api -X POST -f draft=true repos/o/r/pulls", hookio.Approve},
+		{"gh api -f draft=true -X POST repos/o/r/pulls", hookio.Approve},
+		{"gh api repos/o/r/pulls -f title=x -X POST -f draft=true", hookio.Approve},
+		{"gh api -X POST repos/o/r/pulls -H 'Accept: application/json' -f draft=true", hookio.Approve},
+		// The POST default: -f alone makes it a POST, so no -X is needed to reach the gate.
+		{"gh api repos/o/r/pulls -f draft=true", hookio.Approve},
+		{"gh api repos/o/r/pulls -f title=x", hookio.Reject},
+		// draft present but FALSE, in each spelling.
+		{"gh api -X POST repos/o/r/pulls -f draft=false", hookio.Reject},
+		{"gh api -X POST repos/o/r/pulls -F draft=false", hookio.Reject},
+		{"gh api -X POST repos/o/r/pulls --raw-field draft=0", hookio.Reject},
+		{"gh api -X POST repos/o/r/pulls -f draft=", hookio.Reject},        // an empty STRING, not the bare flag
+		{"gh api -X POST repos/o/r/pulls -f draft=garbage", hookio.Reject}, // unparseable -> not true
+		// draft absent entirely.
+		{"gh api -X POST repos/o/r/pulls", hookio.Reject},
+		{"gh api -X POST repos/o/r/pulls -f title=x -f body=y", hookio.Reject},
+		{"gh api -X post repos/o/r/pulls -f title=x", hookio.Reject}, // gh upper-cases the method
+		{"gh api -X POST /repos/o/r/pulls -f title=x", hookio.Reject},
+		{"gh api -X POST repos/{owner}/{repo}/pulls -f title=x", hookio.Reject},
+		// A `draft` on the WRONG endpoint is not this gate: these keep the generic Ask.
+		{"gh api -X PATCH repos/o/r/pulls/5 -f draft=false", hookio.Ask},
+		{"gh api -X POST repos/o/r/pulls/5/reviews -f body=x", hookio.Ask},
+		// ... and a GET of the collection is still just a read.
+		{"gh api repos/o/r/pulls", hookio.Approve},
+	}
+	for _, tt := range tests {
+		got := evalGH(t, tt.cmd)
+		if got.Decision != tt.want {
+			t.Errorf("cmd %q: got %s (%s), want %s", tt.cmd, got.Decision, got.Reason, tt.want)
+		}
+	}
+}
+
+// TestGH_ApiGraphQLRead_Approve is the pg2-44dsd win, and every row is a shape MEASURED in
+// the asklog corpus (see graphql.go's doc block for the query and the counts).
+//
+// THE FIRST TWO GROUPS ARE THE MEASUREMENT. 236 of the 576 logged `gh api graphql`
+// invocations use the bare `{ … }` shorthand with NO operation keyword, and 142 use the
+// explicit `query` keyword; together they are the 66% that were paying an Ask.
+//
+// THE LAST GROUP IS THE pg2-5b901 TRAP, and it is why this is a scanner: in each row the
+// word `mutation` appears in the document TEXT without being an operation. Measured
+// accepted by gh 2.97.0 on 2026-08-14.
+func TestGH_ApiGraphQLRead_Approve(t *testing.T) {
+	cmds := []string{
+		// THE GLUED-QUOTE SPELLING FIRST, because it is 567 of the 576 measured rows: the
+		// quoted segment starts AFTER the `=`, which cmdparse does not unquote — see
+		// unwrapGluedQuotes. If these regress, the fix wins nothing on real traffic.
+		"gh api graphql -f query='{ viewer { login } }'",
+		"gh api graphql -f query='{ rateLimit { cost remaining resetAt } }'",
+		`gh api graphql -f query='{ repository(owner:"cli",name:"cli"){ pullRequests(first:1){ nodes{ number } } } }'`, // inner " inside outer '
+		`gh api graphql -f query="{ viewer { login } }"`,
+		// The bare shorthand — the operation keyword is OPTIONAL.
+		"gh api graphql -f query={viewer{login}}",
+		"gh api graphql -f 'query={ viewer { login } }'",
+		"gh api graphql -f 'query={ rateLimit { cost remaining resetAt } }'",
+		// The explicit keyword, named operations, variables and directives.
+		"gh api graphql -f 'query=query { viewer { login } }'",
+		"gh api graphql -f 'query=query Me { viewer { login } }'",
+		`gh api graphql -f 'query=query($search: String!) { search(query: $search, type: ISSUE, first: 50) { issueCount } }' -f search=foo`,
+		`gh api graphql -F query='query Q($n: Int = 5) { repository(owner:"o") { pullRequests(first: $n) { nodes { number } } } }'`,
+		"gh api graphql -f 'query=query { a } fragment F on T { b }'", // a fragment alongside a query
+		"gh api graphql -f 'query=query @skip(if: false) { viewer { login } }'",
+		// Variables supplied from a FILE are irrelevant: a query cannot be turned into a
+		// mutation by its variable values, and the DOCUMENT is still argv-visible.
+		"gh api graphql -f 'query={ viewer { login } }' -F variables=@vars.json",
+		// The pg2-5b901 trap: `mutation` as TEXT, never as an operation.
+		`gh api graphql -f 'query={ repository(owner:"o",name:"r") { mutation } }'`,                                   // a FIELD named mutation
+		`gh api graphql -f 'query=query($mutation: String) { search(query: $mutation, type: ISSUE) { issueCount } }'`, // a VARIABLE named mutation
+		"gh api graphql -f 'query=# mutation\n{ viewer { login } }'",                                                  // in a COMMENT
+		`gh api graphql -f 'query={ search(query: "mutation { x }", type: ISSUE) { issueCount } }'`,                   // in a STRING
+		"gh api graphql -f 'query=query mutation { viewer { login } }'",                                               // an OPERATION NAMED mutation
+	}
+	for _, cmd := range cmds {
+		got := evalGH(t, cmd)
+		if got.Decision != hookio.Approve {
+			t.Errorf("cmd %q: got %s (%s), want approve — a read-only GraphQL document is not a write (pg2-44dsd)",
+				cmd, got.Decision, got.Reason)
+		}
+	}
+}
+
+// TestGH_ApiGraphQL_NotApproved is the fail-safe half of pg2-44dsd: everything that is a
+// GraphQL WRITE, or that cannot be SHOWN to be a read, must not be auto-approved.
+//
+// The `@file` and `--input` rows are the bead's explicit requirement. MEASURED, gh 2.97.0,
+// 2026-08-14: `-F query=@q.graphql` really does read the file (body
+// `{"query":"{ viewer { login } }"}`), so the document is genuinely not in argv and no
+// scanner can see it. `-f query=@q.graphql` sends the literal string `@q.graphql` instead,
+// which is not a GraphQL document either — the same Ask, by a different route.
+func TestGH_ApiGraphQL_NotApproved(t *testing.T) {
+	cmds := []string{
+		// Genuine mutations.
+		"gh api graphql -f query=mutation{}",
+		"gh api graphql -f 'query=mutation { addStar(input: {starrableId: \"x\"}) { clientMutationId } }'",
+		"gh api graphql -f 'query=mutation M($id: ID!) { convertPullRequestToDraft(input: {pullRequestId: $id}) { clientMutationId } }'",
+		"gh api graphql -f 'query=query A { a } mutation B { b }'", // multi-operation: any mutation wins
+		"gh api graphql -f 'query=subscription { x }'",             // grouped with writes deliberately
+		// The document is NOT argv-visible.
+		"gh api graphql -F query=@q.graphql",
+		"gh api graphql --field query=@q.graphql",
+		"gh api graphql --input payload.json",
+		"gh api graphql --input -",
+		"gh api graphql --input payload.json -f query={viewer{login}}", // --input wins; measured
+		"gh api graphql -f query=@q.graphql",                           // a literal `@…`, not a document
+		// No document at all, or one that does not scan. A BARE `gh api graphql` is absent
+		// deliberately: with no body parameter it is an effective GET (measured), so the
+		// incumbent method reading approves it as a read and this bead does not change that
+		// — it sends no document, and GitHub's GraphQL endpoint refuses GET, so it is inert.
+		"gh api graphql -f foo=bar",
+		"gh api graphql -f 'query={ viewer { login }'",    // unbalanced
+		"gh api graphql -f 'query=type Query { a: Int }'", // SDL, not an executable document
+		"gh api graphql -f 'query=fragment F on T { a }'", // fragments only: no operation
+		`gh api graphql -f 'query={ a(x: "unterminated) { b } }'`,
+	}
+	for _, cmd := range cmds {
+		got := evalGH(t, cmd)
+		if got.Decision == hookio.Approve {
+			t.Errorf("cmd %q: got APPROVE (%s) — only a document PROVEN read-only may be approved (pg2-44dsd fail-safe)",
+				cmd, got.Reason)
+		}
+		if got.Decision < hookio.Ask {
+			t.Errorf("cmd %q: got %s (%s) — must hold at least the pg2-cl0v2 Ask floor, never the Abstain that an auto-approving session accepts",
+				cmd, got.Decision, got.Reason)
+		}
+	}
+}
+
+// TestGH_ApiGraphQLCreatePullRequest_Pinned holds the level pg2-h8h3f chose for the GraphQL
+// half of PR creation. `gh api graphql` carrying a `createPullRequest` mutation creates a PR
+// exactly as `POST .../pulls` does, but its draft argument lives in the document — often
+// behind a variable whose value is a separate `-f variables=<json>` blob — so there is no
+// argv-visible VALUE to sort Approve from Reject on. It is therefore PINNED at Ask: never
+// Approve (which the pg2-44dsd read branch must never reach for it), and never the Abstain
+// an auto-approving session accepts. See apiGraphQLVerdict for what would justify Reject.
+//
+// The assertion is EXACT on Ask, not a range, because that is what "pinned" means here: a
+// future Reject is a ruling, and a ruling should have to update this test.
+func TestGH_ApiGraphQLCreatePullRequest_Pinned(t *testing.T) {
+	cmds := []string{
+		`gh api graphql -f 'query=mutation { createPullRequest(input: {repositoryId: "x", title: "t", headRefName: "h", baseRefName: "main"}) { pullRequest { number } } }'`,
+		`gh api graphql -f 'query=mutation { createPullRequest(input: {repositoryId: "x", draft: true}) { pullRequest { number } } }'`,
+		`gh api graphql -f 'query=mutation New($in: CreatePullRequestInput!) { createPullRequest(input: $in) { pullRequest { number } } }' -f in={}`,
+		// The pin is checked BEFORE the read classification, so even a document that would
+		// otherwise scan as a query cannot carry the name into an Approve.
+		`gh api graphql -f 'query={ createPullRequest { number } }'`,
+	}
+	for _, cmd := range cmds {
+		got := evalGH(t, cmd)
+		if got.Decision != hookio.Ask {
+			t.Errorf("cmd %q: got %s (%s), want ask — the GraphQL PR create is pinned at the Ask floor (pg2-h8h3f)",
+				cmd, got.Decision, got.Reason)
+		}
+	}
+}
+
+// TestGH_ApiGraphQLCreate_NotWeakerThanApiCreate is the CONSISTENCY guard between the two
+// raw-API routes to one operation, written as a comparison so relaxing either alone fails
+// here. A `createPullRequest` GraphQL mutation must never be less restrictive than a
+// `POST .../pulls` whose draft value is equally unreadable — both are "this creates a PR and
+// we cannot see whether it is a draft", so both must land on the same floor.
+func TestGH_ApiGraphQLCreate_NotWeakerThanApiCreate(t *testing.T) {
+	unreadableREST := evalGH(t, "gh api -X POST repos/o/r/pulls --input payload.json")
+	viaGraphQL := evalGH(t, `gh api graphql -f 'query=mutation { createPullRequest(input: {repositoryId: "x"}) { pullRequest { number } } }'`)
+	if viaGraphQL.Decision < unreadableREST.Decision {
+		t.Errorf("the GraphQL PR create is WEAKER than the equally-unreadable REST create: graphql=%s (%s) vs rest=%s (%s)",
+			viaGraphQL.Decision, viaGraphQL.Reason, unreadableREST.Decision, unreadableREST.Reason)
+	}
+}
+
+// TestGH_ClassifyGraphQLDocument pins the scanner directly, so a regression is reported as a
+// classification fact and not only as a changed verdict — the same reason
+// TestGH_ParseGhAPICall exists for the arity walk.
+//
+// The `wantNames` column is only asserted for the rows where it matters (the
+// `createPullRequest` pin), because Names is a full token set and pinning it everywhere
+// would fail on any harmless scanning change.
+func TestGH_ClassifyGraphQLDocument(t *testing.T) {
+	tests := []struct {
+		name     string
+		doc      string
+		wantKind graphqlDocKind
+		wantPR   bool
+	}{
+		{"bare shorthand", "{ viewer { login } }", graphqlRead, false},
+		{"shorthand, no spaces", "{viewer{login}}", graphqlRead, false},
+		{"query keyword", "query { viewer { login } }", graphqlRead, false},
+		{"named query", "query Me { viewer { login } }", graphqlRead, false},
+		{"variables", "query Q($n: Int!) { x(n: $n) { y } }", graphqlRead, false},
+		{"variable default is an object literal", "query Q($f: F = {a: 1}) { x }", graphqlRead, false},
+		{"directive on the operation", "query @skip(if: false) { x }", graphqlRead, false},
+		{"leading comment", "# mutation\n{ viewer { login } }", graphqlRead, false},
+		{"trailing comment", "{ viewer { login } } # mutation", graphqlRead, false},
+		{"field named mutation", `{ repository(owner:"o") { mutation } }`, graphqlRead, false},
+		{"variable named mutation", "query($mutation: String) { x(q: $mutation) }", graphqlRead, false},
+		{"operation named mutation", "query mutation { x }", graphqlRead, false},
+		{"mutation inside a string", `{ search(query: "mutation { x }") { n } }`, graphqlRead, false},
+		{"mutation inside a block string", `{ search(query: """mutation { x }""") { n } }`, graphqlRead, false},
+		{"query plus fragment", "query { ...F } fragment F on T { a }", graphqlRead, false},
+		{"inline fragment", "{ node { ... on PullRequest { number } } }", graphqlRead, false},
+		{"list argument", "{ x(ids: [1, 2, 3]) { y } }", graphqlRead, false},
+		{"commas as whitespace", "{ a, b, c }", graphqlRead, false},
+
+		{"mutation keyword", "mutation { addStar(input: {starrableId: \"x\"}) { id } }", graphqlWrite, false},
+		{"mutation, empty selection", "mutation{}", graphqlWrite, false},
+		{"named mutation", "mutation M { x }", graphqlWrite, false},
+		{"subscription counts as a write", "subscription { x }", graphqlWrite, false},
+		{"query then mutation", "query A { a } mutation B { b }", graphqlWrite, false},
+		{"mutation then query", "mutation B { b } query A { a }", graphqlWrite, false},
+
+		{"empty", "", graphqlOpaque, false},
+		{"whitespace only", "   \n\t ", graphqlOpaque, false},
+		{"comment only", "# nothing here", graphqlOpaque, false},
+		{"fragments only: no operation", "fragment F on T { a }", graphqlOpaque, false},
+		{"SDL is not executable", "type Query { a: Int }", graphqlOpaque, false},
+		{"unbalanced braces", "{ viewer { login }", graphqlOpaque, false},
+		{"stray closer", "} { a }", graphqlOpaque, false},
+		{"mismatched closer", "{ a ) }", graphqlOpaque, false},
+		{"unterminated string", `{ a(x: "oops) { b } }`, graphqlOpaque, false},
+		{"unterminated block string", `{ a(x: """oops) { b } }`, graphqlOpaque, false},
+		{"a literal @file reference, not a document", "@q.graphql", graphqlOpaque, false},
+		{"header never opens a selection set", "query Q($n: Int!)", graphqlOpaque, false},
+
+		{"createPullRequest mutation", `mutation { createPullRequest(input: {repositoryId: "x", draft: true}) { pullRequest { number } } }`, graphqlWrite, true},
+		{"createPullRequest through a variable", "mutation M($in: CreatePullRequestInput!) { createPullRequest(input: $in) { pullRequest { number } } }", graphqlWrite, true},
+		// The name in a STRING is not a token, so the pin does NOT fire — the same
+		// discipline as the Kind classification.
+		{"createPullRequest inside a string", `{ search(query: "createPullRequest") { n } }`, graphqlRead, false},
+		{"createPullRequest inside a comment", "# createPullRequest\n{ viewer { login } }", graphqlRead, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := classifyGraphQLDocument(tt.doc)
+			if got.Kind != tt.wantKind {
+				t.Errorf("classifyGraphQLDocument(%q).Kind = %d, want %d", tt.doc, got.Kind, tt.wantKind)
+			}
+			if got.CreatesPullRequest() != tt.wantPR {
+				t.Errorf("classifyGraphQLDocument(%q).CreatesPullRequest() = %v, want %v", tt.doc, got.CreatesPullRequest(), tt.wantPR)
+			}
+		})
+	}
+}
+
+// TestGH_ParseGhAPICallBodyParams pins the body-parameter VALUE reader (pg2-h8h3f) directly,
+// including which of its three states each spelling produces. Every expectation is MEASURED
+// against gh 2.97.0, 2026-08-14 — see api.go's BODY PARAMETERS block for the dumped bodies.
+//
+// THE THREE STATES ARE THE WHOLE POINT: a presence boolean cannot express the middle one,
+// and it is the middle one that made a Reject unsafe before this existed.
+func TestGH_ParseGhAPICallBodyParams(t *testing.T) {
+	tests := []struct {
+		args      []string
+		param     string
+		wantValue string
+		wantState bodyParamState
+	}{
+		{[]string{"-f", "draft=true", "repos/o/r/pulls"}, "draft", "true", bodyParamValue},
+		{[]string{"-f", "draft=false", "repos/o/r/pulls"}, "draft", "false", bodyParamValue},
+		{[]string{"-F", "draft=false", "repos/o/r/pulls"}, "draft", "false", bodyParamValue},
+		{[]string{"--field", "draft=true", "repos/o/r/pulls"}, "draft", "true", bodyParamValue},
+		{[]string{"--raw-field", "draft=true", "repos/o/r/pulls"}, "draft", "true", bodyParamValue},
+		{[]string{"--field=draft=true", "repos/o/r/pulls"}, "draft", "true", bodyParamValue},
+		{[]string{"-fdraft=true", "repos/o/r/pulls"}, "draft", "true", bodyParamValue},
+		{[]string{"-f", "draft=", "repos/o/r/pulls"}, "draft", "", bodyParamValue},
+		// A value containing '=' keeps everything after the FIRST one — a GraphQL document
+		// routinely holds one.
+		{[]string{"-f", "query={ a(x: 1) }"}, "query", "{ a(x: 1) }", bodyParamValue},
+		// Absent, and KNOWN absent: the whole body is argv-visible.
+		{[]string{"-f", "title=x", "repos/o/r/pulls"}, "draft", "", bodyParamAbsent},
+		{[]string{"repos/o/r/pulls"}, "draft", "", bodyParamAbsent},
+		// `@` is a FILE reference for -F/--field ONLY.
+		{[]string{"-F", "draft=@d.txt", "repos/o/r/pulls"}, "draft", "", bodyParamUnreadable},
+		{[]string{"--field", "query=@q.graphql", "graphql"}, "query", "", bodyParamUnreadable},
+		// ... and a LITERAL for -f/--raw-field, so its value really is visible.
+		{[]string{"-f", "query=@q.graphql", "graphql"}, "query", "@q.graphql", bodyParamValue},
+		// --input hides the body wholly, and DEMOTES an argv -f to a query-string parameter,
+		// so it wins over one.
+		{[]string{"--input", "body.json", "repos/o/r/pulls"}, "draft", "", bodyParamUnreadable},
+		{[]string{"--input=body.json", "repos/o/r/pulls"}, "draft", "", bodyParamUnreadable},
+		{[]string{"--input", "-", "repos/o/r/pulls"}, "draft", "", bodyParamUnreadable},
+		{[]string{"--input", "body.json", "-f", "draft=true", "repos/o/r/pulls"}, "draft", "", bodyParamUnreadable},
+		// A parameter with no '=' is not a parameter; gh refuses the spelling.
+		{[]string{"-f", "draft", "repos/o/r/pulls"}, "draft", "", bodyParamAbsent},
+		// THE GLUED-QUOTE REPAIR (unwrapGluedQuotes). cmdparse strips quotes only when the
+		// WHOLE token is quoted, and `key='value'` is 98% of real `gh api graphql` traffic —
+		// so these rows are the ones the measured win depends on.
+		{[]string{"-f", "query='{ viewer { login } }'"}, "query", "{ viewer { login } }", bodyParamValue},
+		{[]string{"-f", `query="{ viewer { login } }"`}, "query", "{ viewer { login } }", bodyParamValue},
+		{[]string{"-f", `query='{ repository(owner:"o") { x } }'`}, "query", `{ repository(owner:"o") { x } }`, bodyParamValue},
+		{[]string{"-f", "draft='true'", "repos/o/r/pulls"}, "draft", "true", bodyParamValue},
+		{[]string{"-F", "query='@q.graphql'", "graphql"}, "query", "", bodyParamUnreadable}, // still a file reference
+		// DECLINED, and each declining leaves the caller on its restrictive branch: a value
+		// whose interior holds the wrapper character is a multi-segment concatenation this
+		// deliberately does not reconstruct, and a value genuinely wrapped in the OTHER
+		// quote keeps its inner quotes so it fails ParseBool / does not scan as GraphQL.
+		{[]string{"-f", "title='a'x'b'", "repos/o/r/pulls"}, "title", "'a'x'b'", bodyParamValue},
+		{[]string{"-f", `draft="'true'"`, "repos/o/r/pulls"}, "draft", "'true'", bodyParamValue},
+		{[]string{"-f", "draft='true", "repos/o/r/pulls"}, "draft", "'true", bodyParamValue}, // unbalanced
+	}
+	for _, tt := range tests {
+		call := parseGhAPICall(tt.args)
+		gotValue, gotState := call.bodyParam(tt.param)
+		if gotValue != tt.wantValue || gotState != tt.wantState {
+			t.Errorf("parseGhAPICall(%q).bodyParam(%q) = (%q, %d), want (%q, %d)",
+				tt.args, tt.param, gotValue, gotState, tt.wantValue, tt.wantState)
+		}
 	}
 }
 
@@ -898,8 +1286,14 @@ func TestGH_GlobalFlagBeforeCommandPath(t *testing.T) {
 		// is handed the argv WITH those flags and not the branches' `rest`.
 		{"gh api -X PUT repos/o/r/pulls/5/merge", "gh -X PUT api repos/o/r/pulls/5/merge", hookio.Reject},
 		{"gh api -XPUT repos/o/r/pulls/5/merge", "gh -XPUT api repos/o/r/pulls/5/merge", hookio.Reject},
-		{"gh api -X POST repos/o/r/pulls -f title=x", "gh -X POST api repos/o/r/pulls -f title=x", hookio.Ask},
+		// Reject since pg2-h8h3f: a raw-API create with no `draft=true` is the same
+		// operation `gh pr create` is Rejected for. It was Ask here only while the draft
+		// body parameter was unreadable.
+		{"gh api -X POST repos/o/r/pulls -f title=x", "gh -X POST api repos/o/r/pulls -f title=x", hookio.Reject},
+		{"gh api -X POST repos/o/r/pulls -f draft=true", "gh -X POST api repos/o/r/pulls -f draft=true", hookio.Approve},
 		{"gh api repos/o/r", "gh --hostname github.com api repos/o/r", hookio.Approve},
+		// The pg2-44dsd GraphQL read, which must survive the same pre-path flag skipping.
+		{"gh api graphql -f query={viewer{login}}", "gh --hostname github.com api graphql -f query={viewer{login}}", hookio.Approve},
 		// The read-only branches.
 		{"gh issue create", "gh --repo o/r issue create", hookio.Ask},
 		{"gh pr view", "gh --repo o/r pr view", hookio.Approve},

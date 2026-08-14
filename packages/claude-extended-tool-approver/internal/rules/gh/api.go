@@ -1,6 +1,7 @@
 package gh
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
@@ -104,27 +105,30 @@ import (
 // (`gh issue create`) carries — which is the property that makes the two consistent
 // rather than one being the other's bypass.
 //
-// PR CREATION IS NOW THE ONE PLACE THE TWO DIVERGE, DELIBERATELY (pg2-25oru). The
-// porcelain `gh pr create` is Reject without `--draft`, while `POST .../pulls` stays
-// at this Ask, because GitHub's `draft` is a BODY PARAMETER and parseGhAPICall reads
-// body parameters only as a presence boolean, never their values — `--input
-// payload.json` hides them entirely. Following the porcelain to Reject would
-// therefore also reject `-f draft=true`, the BLESSED create, with no in-session
-// override. The residual gap is real and named rather than papered over: Ask is
-// auto-accepted in an auto-approving session, so this path can still create a
-// non-draft PR the porcelain would refuse. TestGH_ApiCreate_NotWeakerThanDraftCreate
-// pins the half that still holds.
+// PR CREATION NOW MIRRORS THE PORCELAIN (pg2-h8h3f), which closes the divergence
+// pg2-25oru recorded here. That divergence was NOT a ruling: `POST .../pulls` sat at
+// this Ask purely because parseGhAPICall read GitHub's `draft` as a PRESENCE boolean
+// and could not tell `-f draft=true` from `-f draft=false`, so following the porcelain
+// to Reject would also have refused the BLESSED create with no in-session override.
+// The body-parameter reader below supplies the VALUE, so apiPullRequestCreateVerdict
+// now answers Approve / Reject exactly as prCreateVerdict does — with ONE residual,
+// stated there and not papered over: an `--input` body (or `-F draft=@file`) keeps the
+// value outside argv, and that case holds the Ask floor.
 //
-// WHAT WOULD JUSTIFY CHANGING IT: for the merge Reject, only a new operator ruling
-// on immediate merges — the same ruling that governs the `gh pr merge` branch it
+// GRAPHQL READS ARE NOW APPROVED (pg2-44dsd). Every GraphQL call is a POST — measured
+// below — so the method reading alone Asked on a read-only query; graphql.go's corpus
+// measurement sized that at 378 of 576 logged `gh api graphql` invocations. A document
+// that is argv-visible AND scans as query-only Approves; anything else, including a
+// `createPullRequest` mutation, holds an Ask. See apiGraphQLVerdict.
+//
+// WHAT WOULD JUSTIFY CHANGING WHAT IS LEFT: for the merge Reject, only a new operator
+// ruling on immediate merges — the same ruling that governs the `gh pr merge` branch it
 // mirrors, so the two MUST move together. For the generic Ask, evidence that a
 // specific endpoint class is read-only in practice (then narrow it by MEASURING the
 // method, not by re-widening the branch), or an operator ruling extending the merge
 // Reject to a broader endpoint set (`/merges`, `merge-upstream`, a `graphql`
-// mutation) — see IsPullRequestMerge for why those are Ask today. For the PR-create
-// divergence, a draft-body-parameter reader (the `-f`/`-F`/`--field`/`--raw-field`
-// values, a fail-closed reading of `--input`, and the `graphql`
-// createPullRequest mutation) is the prerequisite, not a ruling.
+// mergePullRequest mutation) — see IsPullRequestMerge and
+// graphqlPullRequestCreateFields for why those are Ask today.
 func (r *Rule) apiVerdict(args []string) hookio.RuleResult {
 	call := parseGhAPICall(args)
 	if !call.IsMutating() {
@@ -145,11 +149,161 @@ func (r *Rule) apiVerdict(args []string) hookio.RuleResult {
 			Module: r.Name(),
 		}
 	}
+	if call.Endpoint == "graphql" {
+		return r.apiGraphQLVerdict(call)
+	}
+	if call.IsPullRequestCreate() {
+		return r.apiPullRequestCreateVerdict(call)
+	}
+	return r.apiMutationAsk(call)
+}
+
+// apiMutationAsk is the pg2-cl0v2 conservative floor — the verdict every mutation this rule
+// has nothing more specific to say about receives. It is a function rather than an inline
+// literal because THREE sites now return it (the generic fall-through, the GraphQL branch
+// and the unreadable-draft case), and a floor that is copied is a floor that drifts: the
+// point of the pg2-cl0v2 design is that these all land on the SAME level.
+func (r *Rule) apiMutationAsk(call ghAPICall) hookio.RuleResult {
 	return hookio.RuleResult{
 		Decision: hookio.Ask,
 		Reason: "gh: gh api with a mutating HTTP method (" + call.methodLabel() +
 			") — `gh api` is a general-purpose REST/GraphQL client, so this writes to GitHub" +
 			" (pg2-cl0v2). Only a read-only gh api is auto-approved.",
+		Module: r.Name(),
+	}
+}
+
+// apiGraphQLVerdict returns the verdict for `gh api graphql` (pg2-44dsd, pg2-h8h3f).
+//
+// A READ-ONLY DOCUMENT IS APPROVE. Every GraphQL call is an HTTP POST — measured — so
+// pg2-cl0v2's method reading alone put a read-only query at the mutation Ask. The corpus
+// measurement in graphql.go's doc block sized that at 378 of 576 logged `gh api graphql`
+// invocations, 66%, and it is the whole reason this branch exists. The document must be
+// ARGV-VISIBLE and must SCAN: a `-F query=@file` or an `--input` body is not in argv at all
+// and cannot be shown to read, so it keeps the Ask (fail-safe, and the bead's own
+// requirement).
+//
+// A PULL-REQUEST-CREATING MUTATION IS A PINNED ASK, AND THE PIN IS CHECKED FIRST.
+// `createPullRequest` creates a PR exactly as `POST /repos/o/r/pulls` does, so it belongs to
+// the draft-first design and must never be swept into the read Approve above by a
+// classifier bug — testing it BEFORE the Kind is what makes that structural rather than
+// hopeful. TestGH_ApiGraphQLCreatePullRequest_Pinned holds the level.
+//
+// WHY ASK AND NOT REJECT, which is the level the porcelain would suggest. The GraphQL draft
+// argument lives INSIDE the document (`createPullRequest(input: {draft: true})`) and
+// routinely arrives through a variable (`draft: $isDraft`) whose value is a separate
+// `-f variables=<json>` blob. So unlike the REST path below there is no argv-visible VALUE
+// to sort Approve from Reject on, and a blanket Reject would refuse the legitimate
+// draft-creating mutation with no in-session override — the same objection that stopped
+// pg2-25oru from following the porcelain here. Ask keeps the capability and still puts a
+// person in front of it.
+//
+// WHY ASK AND NOT ABSTAIN. Abstain returns the verdict to Claude Code, which auto-approves
+// it in exactly the auto-approving sessions the draft-first gate exists for. Ask is also
+// what this shape already received (as a generic mutation), so pinning it changes no
+// verdict today — it makes the level DELIBERATE and un-droppable instead of incidental.
+//
+// WHAT WOULD JUSTIFY REJECT: a draft-argument reader for the GraphQL document AND its
+// variables blob, so `draft: true` could be told from `draft: false` — plus the same
+// operator ruling that governs prCreateVerdict, since the two would then have to move
+// together. Measured in graphql.go's corpus block: zero `createPullRequest` rows, so there
+// is no friction evidence to build it on today.
+func (r *Rule) apiGraphQLVerdict(call ghAPICall) hookio.RuleResult {
+	// A doc nobody could classify stays the zero value, graphqlOpaque — see graphql.go.
+	var doc graphqlDoc
+	if raw, state := call.bodyParam("query"); state == bodyParamValue {
+		doc = classifyGraphQLDocument(raw)
+	}
+
+	if doc.CreatesPullRequest() {
+		return hookio.RuleResult{
+			Decision: hookio.Ask,
+			Reason: "gh: gh api graphql carries a `createPullRequest` mutation, which CREATES a" +
+				" pull request just as `gh api -X POST .../pulls` does (pg2-h8h3f). Its draft" +
+				" argument lives in the GraphQL document, often behind a variable, so it cannot be" +
+				" read from argv and this call cannot be shown to be the blessed DRAFT create." +
+				" Prefer `gh pr create --draft`, which is auto-approved.",
+			Module: r.Name(),
+		}
+	}
+	if doc.Kind == graphqlRead {
+		return hookio.RuleResult{
+			Decision: hookio.Approve,
+			Reason: "read-only gh api graphql: every operation in the argv-visible document is a" +
+				" query, so the POST reads (pg2-44dsd)",
+			Module: r.Name(),
+		}
+	}
+	if doc.Kind == graphqlWrite {
+		return hookio.RuleResult{
+			Decision: hookio.Ask,
+			Reason: "gh: gh api graphql carries a GraphQL mutation, so it writes to GitHub" +
+				" (pg2-cl0v2). Only a read-only GraphQL document is auto-approved.",
+			Module: r.Name(),
+		}
+	}
+	return hookio.RuleResult{
+		Decision: hookio.Ask,
+		Reason: "gh: gh api graphql whose document is not readable from the command line — it came" +
+			" from a file or stdin (`-F query=@file`, `--input`) or did not scan as GraphQL — so it" +
+			" cannot be shown to be a read (pg2-44dsd fail-safe). Pass the document as" +
+			" `-f query=…` to have a read-only query auto-approved.",
+		Module: r.Name(),
+	}
+}
+
+// apiPullRequestCreateVerdict returns the verdict for `POST /repos/{owner}/{repo}/pulls`,
+// the raw-API pull-request create (pg2-h8h3f).
+//
+// IT MIRRORS prCreateVerdict, WHICH IS THE POINT. pg2-25oru made the porcelain
+// `gh pr create` draft-aware — Approve with `--draft`, Reject without — but deliberately
+// left this path at the pg2-cl0v2 Ask, because parseGhAPICall then read GitHub's `draft`
+// only as a PRESENCE boolean and so could not tell `-f draft=true` from `-f draft=false`.
+// A Reject on that reading would have refused the BLESSED create with no in-session
+// override. The body-parameter reader above supplies the missing VALUE, so the two
+// spellings of one operation now carry one verdict and neither is the other's bypass.
+//
+// THE THREE-WAY SPLIT IS THE READER'S THREE STATES, and the middle one is the residual
+// pg2-25oru named:
+//
+//   - draft KNOWN TRUE   -> Approve. Bit-for-bit `gh pr create --draft`.
+//   - draft UNREADABLE   -> Ask, the pg2-cl0v2 floor. `--input payload.json` and
+//     `-F draft=@file` put the value outside argv (measured), and a Reject there would
+//     refuse a legitimate draft create for no reason but our inability to read it — the
+//     objection that produced this gap in the first place. Ask preserves the capability and
+//     keeps a person in the loop, so the gap narrows to "Ask is auto-accepted in an
+//     auto-approving session" instead of covering every raw-API create.
+//   - draft ABSENT or KNOWN FALSE -> Reject. Bit-for-bit the non-draft create the porcelain
+//     Rejects, and the whole hole this bead is about: `gh api -X POST repos/o/r/pulls
+//     -f draft=false` was an Ask, hence auto-accepted, hence a non-draft PR the porcelain
+//     would have refused.
+//
+// WHAT WOULD JUSTIFY CHANGING IT: only the operator ruling that governs prCreateVerdict —
+// the two MUST move together now, which is exactly the property that was missing. Narrowing
+// the UNREADABLE case to a Reject would need `--input` bodies to be readable, which means
+// reading a file at hook time; that is a different kind of change (I/O in a verdict) and
+// needs its own bead.
+func (r *Rule) apiPullRequestCreateVerdict(call ghAPICall) hookio.RuleResult {
+	value, state := call.bodyParam("draft")
+	switch {
+	case state == bodyParamValue && bodyParamIsTrue(value):
+		return hookio.RuleResult{
+			Decision: hookio.Approve,
+			Reason: "gh api POST " + call.Endpoint + " with draft=true: the blessed draft-first" +
+				" landing step (creates nothing mergeable), mirroring `gh pr create --draft`",
+			Module: r.Name(),
+		}
+	case state == bodyParamUnreadable:
+		return r.apiMutationAsk(call)
+	}
+	return hookio.RuleResult{
+		Decision: hookio.Reject,
+		Reason: "gh: gh api POST " + call.Endpoint + " without draft=true creates an immediately" +
+			" mergeable pull request, which is prohibited: this workspace lands DRAFT FIRST, so" +
+			" creating one skips the single point at which a person rules on that (operator ruling" +
+			" pg2-4yy4r item 2, extended to the raw API by pg2-h8h3f). It is the same operation" +
+			" `gh pr create` is Rejected for. Use the two-step `gh pr create --draft` and then" +
+			" `gh pr ready`, which prompts; `-f draft=true` here is auto-approved too.",
 		Module: r.Name(),
 	}
 }
@@ -215,6 +369,185 @@ type ghAPICall struct {
 	Method string
 	// Endpoint is the first operand — the API path, or "graphql". "" when absent.
 	Endpoint string
+	// bodyParams holds the ARGV-VISIBLE value of each `key=value` body parameter, keyed
+	// by parameter name. See bodyParam for how to read it — never read it directly,
+	// because a hit here is only half the answer.
+	bodyParams map[string]string
+	// bodyOpaqueParams names the parameters that ARE in the body but whose value gh read
+	// from a file or from stdin, so it is not in argv.
+	bodyOpaqueParams map[string]bool
+	// bodyFromInput records that --input was given.
+	bodyFromInput bool
+}
+
+// BODY PARAMETERS READ AS VALUES, NOT AS PRESENCE (pg2-h8h3f)
+//
+// Until pg2-h8h3f parseGhAPICall recorded only THAT a body parameter existed, because that
+// is all the POST default needs. Two verdicts need the VALUE: the draft-first PR gate below
+// (`-f draft=true` is the blessed create, `-f draft=false` is the one the porcelain
+// Rejects) and the GraphQL classification in graphql.go (the document arrives as
+// `-f query=…`). pg2-25oru named this reader as the prerequisite it was missing and left
+// the raw-API path at its Ask floor rather than Reject a legitimate draft create.
+//
+// MEASURED, gh 2.97.0 (nixpkgs), 2026-08-14, via
+// `gh api --hostname no-such-host.invalid --verbose <spelling>` and reading the dumped
+// request line AND BODY (the dump precedes the DNS failure, so nothing was ever sent):
+//
+//	-f draft=true  -f title=x    -> body {"draft":"true","title":"x"}   (-f is a STRING)
+//	-F draft=false -f title=x    -> body {"draft":false,"title":"x"}    (-F is TYPED)
+//	--raw-field draft=true       -> body {"draft":"true"}
+//	-F draft=@d.txt              -> body {"draft":"true"} — the FILE WAS READ
+//	-f query=@q.graphql          -> body {"query":"@q.graphql"} — NOT read, a literal
+//	graphql -F query=@q.graphql  -> body {"query":"{ viewer { login } }"} — READ
+//	--input body.json            -> body IS the file
+//	--input body.json -f draft=true
+//	                             -> `POST …/pulls?draft=true` with body {"draft":false,…}
+//	                                — the -f became a QUERY-STRING parameter and the BODY
+//	                                still came wholly from the file
+//	-f draft=false -f draft=true -> gh REFUSES: `unexpected override existing field
+//	                                under "draft"`
+//	-f draft=false -F draft=true -> the SAME refusal, across the two spellings
+//
+// THREE OF THOSE ROWS ARE THE WHOLE DESIGN:
+//
+//  1. `@` IS A FILE REFERENCE FOR -F/--field ONLY. `-f`/`--raw-field` sends it literally,
+//     so its value really is argv-visible even when it starts with `@`. Modelling the two
+//     the same way would either hide a value that is visible or trust one that is not.
+//  2. `--input` DEMOTES -f/-F TO QUERY STRING. So with --input present NO body parameter is
+//     argv-visible, whatever `-f draft=true` says — which is why bodyParam short-circuits
+//     on bodyFromInput before it ever consults bodyParams. Reading the `-f` there would be
+//     a false Approve on a call whose body says the opposite.
+//  3. gh REFUSES A DUPLICATE KEY. So there is no last-one-wins precedence question to get
+//     wrong (the one pr.go's lastLongFlag exists for on the FLAG side). The walk below
+//     simply overwrites, and either policy is INERT because gh runs neither spelling.
+
+// bodyParamState is how much is known about one body parameter.
+type bodyParamState int
+
+const (
+	// bodyParamAbsent means the parameter is not in the body, and that is KNOWN: the whole
+	// body is argv-visible and this name is not in it.
+	bodyParamAbsent bodyParamState = iota
+	// bodyParamValue means the parameter is in the body and its value is argv-visible.
+	bodyParamValue
+	// bodyParamUnreadable means the parameter may or may not be in the body and its value
+	// cannot be read from argv — `--input` supplied the body, or `-F name=@file` supplied
+	// this value. A verdict MUST NOT read this as either present-and-true or absent.
+	bodyParamUnreadable
+)
+
+// bodyParam returns the argv-visible value of body parameter name and how much is known
+// about it.
+//
+// The bodyFromInput short-circuit comes FIRST by measurement, not by caution: with
+// `--input` present gh puts `-f`/`-F` in the QUERY STRING and takes the body wholly from
+// the file, so an argv `-f draft=true` describes something other than the body.
+func (c ghAPICall) bodyParam(name string) (string, bodyParamState) {
+	if c.bodyFromInput || c.bodyOpaqueParams[name] {
+		return "", bodyParamUnreadable
+	}
+	if v, ok := c.bodyParams[name]; ok {
+		return v, bodyParamValue
+	}
+	return "", bodyParamAbsent
+}
+
+// bodyParamIsTrue reads a body parameter's value as a boolean the way GitHub does, through
+// strconv.ParseBool, so `true`/`1`/`t` are true and `false`/`0`/`f` are not.
+//
+// IT IS NOT pr.go's boolFlagIsTrue AND MUST NOT BE REPLACED BY IT. That function reads a
+// pflag BOOLEAN FLAG, where the BARE form is legitimately true (`gh pr create --draft`
+// carries no value and means draft). A body parameter is always written `key=value`, so an
+// empty value is an empty STRING gh sends verbatim — `{"draft":""}` — which GitHub does not
+// read as true. Here empty is FALSE, and an unparseable value is false too, both of which
+// move the draft gate toward its Reject.
+func bodyParamIsTrue(value string) bool {
+	b, err := strconv.ParseBool(value)
+	return err == nil && b
+}
+
+// unwrapGluedQuotes removes ONE matched pair of surrounding shell quotes from a body
+// parameter's value, and is a NARROW REPAIR OF A MEASURED cmdparse BOUNDARY — not general
+// unquoting, which belongs in cmdparse and not here.
+//
+// THE BOUNDARY, MEASURED 2026-08-14 by running cmdparse.Parse over each spelling. cmdparse
+// strips quotes when the WHOLE token is quoted, and leaves them in place when a quoted
+// segment is GLUED to an unquoted prefix:
+//
+//	-f 'query={ viewer { login } }'   -> arg `query={ viewer { login } }`   (stripped)
+//	-f "query={ viewer { login } }"   -> arg `query={ viewer { login } }`   (stripped)
+//	-f query='{ viewer { login } }'   -> arg `query='{ viewer { login } }'` (KEPT)
+//	-f query="{ viewer { login } }"   -> arg `query="{ viewer { login } }"` (KEPT)
+//	-f title='my title'              -> arg `title='my title'`             (KEPT)
+//
+// AND WHY IT HAD TO BE HANDLED HERE. Of the 576 measured `gh api graphql` rows (graphql.go's
+// corpus block), the spelling of the `query=` value breaks down as 567 `query='…'`, 10
+// `query=@…`, 2 `query="…"` and 2 `'query=…'`. So the GLUED form is 98% of real traffic:
+// without this the pg2-44dsd fix would classify 2 rows and leave 567 at the Ask it exists to
+// remove. cmdparse's parser is not this bead's to change; the boundary is reported
+// separately, because it is not gh-specific.
+//
+// THE ERROR DIRECTION IS SAFE OR INERT IN EVERY CASE, which is what makes a local repair
+// acceptable rather than a layering violation:
+//
+//   - It only ever makes a value MORE readable, so it can turn an Ask into an Approve — for
+//     `query` only when the unwrapped text scans as a query-only document, and for `draft`
+//     only when it reads as boolean true. Both are the value the shell really sent.
+//   - A value that GENUINELY begins and ends with a quote character must be written with the
+//     OTHER quote outside (`draft="'true'"`, `query="'X'"`), so the pair this strips is the
+//     outer one and what remains still carries the inner quotes — `'true'` fails
+//     strconv.ParseBool (Reject) and `'X'` does not scan as GraphQL (Ask). Neither reaches
+//     an Approve.
+//   - A MULTI-SEGMENT concatenation (`title='a'x'b'`) is NOT reconstructed: the interior
+//     holds the wrapper character, so the value is left exactly as cmdparse produced it and
+//     every consumer falls back to its restrictive branch.
+func unwrapGluedQuotes(value string) string {
+	if len(value) < 2 {
+		return value
+	}
+	q := value[0]
+	if q != '\'' && q != '"' {
+		return value
+	}
+	if value[len(value)-1] != q {
+		return value
+	}
+	inner := value[1 : len(value)-1]
+	if strings.IndexByte(inner, q) >= 0 {
+		// More than one quoted segment, or an escaped wrapper. Reconstructing that is
+		// cmdparse's job; declining leaves every caller on its restrictive branch.
+		return value
+	}
+	return inner
+}
+
+// recordBodyParam records one `key=value` body parameter. fileMagic says whether the
+// spelling that carried it honours gh's `@path` / `@-` file reference — MEASURED true for
+// -F/--field and false for -f/--raw-field.
+//
+// A parameter with no `=` at all is dropped: gh itself refuses that spelling
+// (`field: key=value expected`), so there is no value to record and nothing can run.
+//
+// The glued-quote unwrap runs BEFORE the `@` test on purpose: `-F query='@q.graphql'` is the
+// same file reference as `-F query=@q.graphql`, and reading it as a literal value would be
+// the one direction that turns an unreadable document into a readable one.
+func (c *ghAPICall) recordBodyParam(kv string, fileMagic bool) {
+	name, value, ok := strings.Cut(kv, "=")
+	if !ok || name == "" {
+		return
+	}
+	value = unwrapGluedQuotes(value)
+	if fileMagic && strings.HasPrefix(value, "@") {
+		if c.bodyOpaqueParams == nil {
+			c.bodyOpaqueParams = map[string]bool{}
+		}
+		c.bodyOpaqueParams[name] = true
+		return
+	}
+	if c.bodyParams == nil {
+		c.bodyParams = map[string]string{}
+	}
+	c.bodyParams[name] = value
 }
 
 // IsMutating reports whether the call's effective method writes. It is the
@@ -248,16 +581,39 @@ func (c ghAPICall) methodLabel() string {
 // weaker than. They stay at the generic mutation Ask, which still puts a person in
 // the loop. Widening this to them is a separate ruling, not a tidy-up.
 func (c ghAPICall) IsPullRequestMerge() bool {
+	return c.endpointIs("merge", "pulls")
+}
+
+// IsPullRequestCreate reports whether the call is a pull-request CREATION —
+// `POST /repos/{owner}/{repo}/pulls`, bit-for-bit the operation `gh pr create` performs.
+// Matched on the same structural reading as IsPullRequestMerge (last segment `pulls`, with
+// a `repos` segment before it), so a leading slash, gh's `{owner}`/`{repo}` placeholders
+// and a trailing query string all still match.
+//
+// THE METHOD TEST IS PART OF THE IDENTITY, not a guard bolted on. POST is the verb that
+// creates; `PATCH /repos/o/r/pulls/5` updates an existing PR and does not match anyway
+// (different last segment), and no other verb on the collection path creates one. A method
+// this does not recognise therefore keeps the generic mutation Ask rather than acquiring a
+// draft-first verdict that would be about a different operation.
+func (c ghAPICall) IsPullRequestCreate() bool {
+	return strings.EqualFold(c.Method, "POST") && c.endpointIs("pulls", "repos")
+}
+
+// endpointIs reports whether the endpoint's path ends in segment last and carries segment
+// contains somewhere before it. It is the ONE structural path reading behind both
+// pull-request endpoint tests, so a leading slash, a gh placeholder or a query string
+// cannot be handled one way in one of them and another way in the other.
+func (c ghAPICall) endpointIs(last, contains string) bool {
 	path := c.Endpoint
 	if i := strings.IndexAny(path, "?#"); i >= 0 {
 		path = path[:i]
 	}
 	segs := strings.Split(strings.Trim(path, "/"), "/")
-	if len(segs) < 2 || segs[len(segs)-1] != "merge" {
+	if len(segs) < 2 || segs[len(segs)-1] != last {
 		return false
 	}
 	for _, s := range segs[:len(segs)-1] {
-		if s == "pulls" {
+		if s == contains {
 			return true
 		}
 	}
@@ -319,6 +675,14 @@ func parseGhAPICall(args []string) ghAPICall {
 			if ghAPIBodyParamLongs[name] {
 				bodyParam = true
 			}
+			switch name {
+			case "field":
+				call.recordBodyParam(value, true) // -F/--field honours gh's `@path`
+			case "raw-field":
+				call.recordBodyParam(value, false) // -f/--raw-field sends `@path` literally
+			case "input":
+				call.bodyFromInput = true
+			}
 			continue
 		}
 
@@ -345,6 +709,9 @@ func parseGhAPICall(args []string) ghAPICall {
 					setMethod(value)
 				case 'f', 'F':
 					bodyParam = true
+					// MEASURED: `@path` is a file reference for -F only; -f sends it
+					// literally. See the BODY PARAMETERS block above.
+					call.recordBodyParam(value, c == 'F')
 				}
 				break
 			}
