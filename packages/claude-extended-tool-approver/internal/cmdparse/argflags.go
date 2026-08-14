@@ -12,6 +12,17 @@ import "strings"
 
 // grepFlagsWithValue lists grep flags that consume the next argument as a value
 // (so that value is NOT a searched file path). These forms are valid for rg too.
+//
+// TWO ENTRIES HERE ARE A KNOWN LIVE HOLE, tracked as pg2-ygjs5 and NOT fixed here.
+// `-f FILE` / `--file FILE` is the PATTERN FILE, which grep OPENS and whose contents
+// become the patterns — so it is a genuine file read, and stripping its operand
+// deletes a real path from screening. Measured on main @6737a0ea:
+// `grep -f ~/.ssh/id_rsa x.log` returns ALLOW while the positional control
+// `grep pat ~/.ssh/id_rsa` returns REJECT. That is the SAME defect pg2-wrxg6 fixed in
+// the jq tables below, and the same rule applies: A FLAG WHOSE OPERAND THE COMMAND
+// OPENS NEVER BELONGS IN A SKIP TABLE. Removing them is not quite a one-line change —
+// SkipGrepPattern's separate `patternSkipped` detection also keys on `-f`/`--file` and
+// must be kept — which is why it is its own bead rather than folded in here.
 var grepFlagsWithValue = map[string]bool{
 	"-e": true, "--regexp": true,
 	"-f": true, "--file": true,
@@ -28,6 +39,11 @@ var grepFlagsWithValue = map[string]bool{
 // (-r=recursive, -E=extended-regexp, -T=initial-tab), so they are honored only
 // for rg — folding them into grepFlagsWithValue would make grep mis-skip a real
 // file path (e.g. `grep -r pat /secrets/x` would drop /secrets/x). (pg2-ia640.2)
+//
+// TWO ENTRIES HERE ARE ALSO PART OF pg2-ygjs5. `--ignore-file FILE` is read by rg, and
+// `--pre CMD` names a PREPROCESSOR COMMAND rg EXECUTES per file — the second is a worse
+// class than a read, and screening its operand as a PATH would catch
+// `--pre ~/.ssh/id_rsa` but not `--pre evilcmd`. Both measured ALLOW on main @6737a0ea.
 var rgFlagsWithValue = map[string]bool{
 	"-g": true, "--glob": true, "--iglob": true,
 	"-t": true, "--type": true,
@@ -100,22 +116,61 @@ func SkipGrepPattern(cmd string, args []string) []string {
 	return result
 }
 
-// jqValueFlags lists jq flags that consume two value arguments (name value).
-// These arguments may look like paths (e.g. --arg dir "/app/src") but are jq
-// variables, not file references.
+// jqValueFlags lists jq flags that consume TWO operands, BOTH of which are
+// LITERALS jq never opens: `--arg name value` and `--argjson name value`. The
+// value may LOOK like a path (`--arg dir "/app/src"`) but it is a jq variable
+// binding, which is why it must not be tested as a filename (pg2-ia640.2).
+//
+// A FLAG WHOSE OPERAND THE COMMAND OPENS MUST NEVER APPEAR IN THIS TABLE — the
+// same rule messageFlags' doc states. Removing such an operand deletes a REAL
+// path from the candidate set before secretpath.IsSecret and the deny-list ever
+// see it, which converts a `deny` into an `allow`. That is the pg2-wrxg6 defect,
+// and it is the dangerous direction for a false-positive fix to fail in.
+//
+// SO `--slurpfile name file` AND `--rawfile name file` ARE NOT HERE (pg2-wrxg6).
+// Their SECOND operand is a file jq reads. Their NAME operand still goes
+// unscreened, but not by this table: with the flag left intact the NAME becomes
+// jq's apparent first positional and is judged as the PROGRAM operand, exactly as
+// `--argfile name file` already was. `--argfile` is the proof this is the right
+// shape rather than a guess — it was in NEITHER table and measured `deny` on
+// main @6737a0ea while its two siblings measured `allow`.
 var jqValueFlags = map[string]bool{
 	"--arg": true, "--argjson": true,
-	"--slurpfile": true, "--rawfile": true, "--jsonargs": true,
 }
 
-// jqOneArgFlags lists jq flags that consume one value argument.
+// jqOneArgFlags lists jq flags that consume ONE operand which is a LITERAL jq
+// never opens. `--indent n` is the only one in jq 1.8.2.
+//
+// FOUR FLAGS WERE REMOVED FROM THIS TABLE (pg2-wrxg6), in two classes:
+//
+//   - `-f` and `--from-file` take THE FILTER FILE, which jq OPENS. They are
+//     already known to safecmds' programOperandFromFlag, whose contract is that
+//     when one is present there is no positional program and every positional is
+//     a path — but that never fired, because this function had already deleted
+//     both the flag and its path.
+//   - `--tab`, `--join-output` and `--jsonargs` take NO OPERAND AT ALL. Listing a
+//     boolean flag here makes it SWALLOW THE FOLLOWING TOKEN, so the token after
+//     it escapes screening. `--join-output` is the clean proof: measured on
+//     main @6737a0ea, `jq --join-output . <deny-listed>` returned `abstain` while
+//     its own short form `jq -j . <deny-listed>` returned `reject` — the same flag,
+//     two spellings, two verdicts, differing only by table membership. `--jsonargs`
+//     was in BOTH tables and measured `approve`, against `--args`, which is in
+//     neither and measured `reject`.
+//
+// Every other jq flag takes no operand and belongs in neither table. Note `-L` /
+// `--library-path dir` DOES take an operand — a directory jq loads MODULES from —
+// and it is deliberately absent here for the same reason as `-f`. Its operand
+// escapes screening by a DIFFERENT route (it becomes jq's apparent first
+// positional, which safecmds claims as the PROGRAM), so adding it here would be
+// the wrong fix; it belongs in safecmds' programOperandValueFlags. Measured
+// abstain rather than approve, and tracked as pg2-mu8zg.
 var jqOneArgFlags = map[string]bool{
-	"--indent": true, "--tab": true, "--from-file": true, "--jsonargs": true,
-	"-f": true, "--join-output": true,
+	"--indent": true,
 }
 
-// SkipJqValueFlags returns the args with jq value-flag arguments removed, so path
-// checking only sees actual file arguments.
+// SkipJqValueFlags returns the args with the operands of jq's LITERAL-valued flags
+// removed, so path checking is not handed a jq variable binding and told it is a
+// filename. It MUST NOT remove an operand jq opens — see jqValueFlags.
 func SkipJqValueFlags(args []string) []string {
 	var result []string
 	i := 0
