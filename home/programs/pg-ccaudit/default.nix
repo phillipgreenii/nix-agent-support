@@ -37,6 +37,26 @@ in
       description = "Root of the Claude Code transcript tree to index.";
     };
 
+    goldSetPath = lib.mkOption {
+      type = lib.types.str;
+      default = "${builtins.dirOf cfg.databasePath}/goldset.jsonl";
+      defaultText = lib.literalExpression ''"''${dirOf databasePath}/goldset.jsonl"'';
+      description = ''
+        The mistake census's hand-labelled evaluation set (bead `pg2-oisvb`,
+        acceptance criterion 4).
+
+        It is DERIVED from `databasePath` rather than defaulted independently, so
+        that overriding where the index lives moves the gold set with it. The two
+        are a matched pair: a gold set that silently stayed behind would be scored
+        against candidate keys drawn from a different index, and every precision
+        and recall figure computed from it would be quietly meaningless.
+
+        It lives OUTSIDE any repository on purpose — every entry quotes a real
+        transcript or the operator's own critique of real work. Only a small
+        synthetic fixture is committed, for the tests.
+      '';
+    };
+
     sweep = {
       enable = lib.mkEnableOption ''
         the scheduled pg-ccaudit ingest sweep (a launchd user agent on darwin).
@@ -84,6 +104,7 @@ in
     home.sessionVariables = {
       PG_CCAUDIT_DB = cfg.databasePath;
       PG_CCAUDIT_ROOT = cfg.transcriptRoot;
+      PG_CCAUDIT_GOLD = cfg.goldSetPath;
     };
   };
 }

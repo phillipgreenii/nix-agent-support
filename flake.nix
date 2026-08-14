@@ -780,17 +780,31 @@
                 testDeps = [ pkgs.git ];
               };
 
-              # pg-ccaudit — the ingest / query / store / lock suites. None of the
-              # gates below is optional:
+              # pg-ccaudit — the ingest / query / store / lock suites plus the
+              # mistake-census tiers (candidate / classify / route / gold). None of
+              # the gates below is optional:
               #   * ingest builds every scenario in t.TempDir() from the COMMITTED
-              #     fixture corpus (packages/pg-ccaudit/internal/ingest/testdata)
-              #     and never reads the real transcript corpus or the real index —
-              #     a test that pointed at either would be testing whatever state
-              #     the machine happened to be in.
+              #     fixture corpora (packages/pg-ccaudit/internal/ingest/testdata:
+              #     `corpus` for the failure census, `mistakes` for the mistake
+              #     census) and never reads the real transcript corpus or the real
+              #     index — a test that pointed at either would be testing whatever
+              #     state the machine happened to be in. The two corpora are kept
+              #     SEPARATE on purpose: folding the mistake scenarios into `corpus`
+              #     would change every hand-computed answer in the failure-census
+              #     assertions, so a mistake-query change could only be made by
+              #     re-deriving assertions it has nothing to do with.
               #   * query asserts every canned query against HAND-COMPUTED answers
-              #     over that fixture. "Returns without error" is not the bar: a
+              #     over those fixtures. "Returns without error" is not the bar: a
               #     query that silently groups the wrong thing returns cleanly and
-              #     reports a wrong number.
+              #     reports a wrong number — and for the Tier 1 candidate queries it
+              #     also hands the semantic pass a set that cannot be right, which
+              #     costs money per candidate.
+              #   * classify injects a fake Runner, so the suite never reaches a
+              #     model, a network or a credential. A test that called the real
+              #     classifier would cost money per run, answer differently on
+              #     different days, and fail in this sandbox — so it would be
+              #     skipped within a week, exactly where the reply-parsing path is
+              #     most fragile.
               #   * lock covers the single-instance writer (T-12), including a
               #     concurrent-contender case, which is why -race matters here.
               # No testDeps: the suite shells out to nothing.

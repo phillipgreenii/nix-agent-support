@@ -400,6 +400,17 @@ func TestRegistryVersionsArePinned(t *testing.T) {
 		"first-seen":            1,
 		"last-seen":             1,
 		"coverage":              1,
+		// pg2-oisvb: the mistake census. Tier 1's eight structural detectors plus the
+		// per-signature runaway discount the ranked report applies to every finding.
+		"concentration-by-signature": 1,
+		"human-turns":                1,
+		"typed-turn-candidates":      1,
+		"interruptions":              1,
+		"denied-tool-calls":          1,
+		"undo-signatures":            1,
+		"file-churn":                 1,
+		"escaping-retries":           1,
+		"ack-markers":                1,
 	}
 	got := map[string]int{}
 	for _, q := range All() {

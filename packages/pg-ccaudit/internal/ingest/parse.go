@@ -133,6 +133,71 @@ func assistantText(bs []block) string {
 	return sb.String()
 }
 
+// HumanPromptSources are the promptSource values that mark a user record as a
+// turn a PERSON actually typed. Measured corpus-wide, `type=="user"` splits
+// 1,183 typed / 26 queued / 776 system / 329 sdk / 87,110 with no promptSource
+// (of which 84,417 are tool results and not turns at all) — so reading every
+// `type=="user"` record as a human turn inflates the count 76x. That inflation is
+// the mistake pg2-oisvb's criterion 1 exists to make impossible.
+//
+// `queued` is included and `system`/`sdk` are not: a queued turn is prose the
+// person typed while the agent was busy, whereas system and sdk records are
+// injected by the harness. An ABSENT promptSource is not human either — those are
+// slash-command expansions, skill bodies and subagent briefs.
+var HumanPromptSources = map[string]bool{"typed": true, "queued": true}
+
+// InterruptionPrefix is the start of the sentinel Claude Code writes as a user
+// record when a person interrupts. Both observed forms — `[Request interrupted by
+// user]` (18 corpus-wide) and `[Request interrupted by user for tool use]` (14) —
+// share it, so the prefix is matched rather than either literal.
+//
+// This is the one place the ingester matches on wording rather than structure,
+// and it is deliberate: the sentinel carries NO promptSource, no distinguishing
+// type, and no field of its own, so nothing structural separates it from a
+// slash-command expansion. Recognising it here (as the error-signature normaliser
+// already recognises error wording) keeps the pattern in ONE place and makes the
+// result a queryable column instead of a text grep re-invented per query. The
+// cost is that a wording change silently zeroes the signal — which is why
+// `interrupted` is one Tier 1 signal among eight, and why criterion 4's
+// evaluation is re-runnable.
+const InterruptionPrefix = "[Request interrupted by user"
+
+// userProse renders the PROSE of a user record: the string content verbatim, or
+// the text blocks of an array content joined by a space.
+//
+// tool_result blocks are deliberately not consulted. A user record carrying one is
+// a tool result being handed back, not a turn — 84,417 of them corpus-wide, and
+// their bodies are `tool_results`' business under T-3a.
+func userProse(raw json.RawMessage) string {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 {
+		return ""
+	}
+	var s string
+	if err := json.Unmarshal(trimmed, &s); err == nil {
+		return s
+	}
+	bs := blocks(raw)
+	parts := make([]string, 0, len(bs))
+	for _, b := range bs {
+		if b.Type == "text" && b.Text != "" {
+			parts = append(parts, b.Text)
+		}
+	}
+	return strings.Join(parts, " ")
+}
+
+// carriesToolResult reports whether the record is a tool result being returned
+// rather than a turn.
+func carriesToolResult(bs []block) bool {
+	for _, b := range bs {
+		if b.Type == "tool_result" {
+			return true
+		}
+	}
+	return false
+}
+
 func thinkingText(bs []block) string {
 	var sb strings.Builder
 	for _, b := range bs {

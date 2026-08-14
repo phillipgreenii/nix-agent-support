@@ -93,8 +93,14 @@ type Stats struct {
 	ToolResults int64
 	Errors      int64
 	Narration   int64
-	Thinking    int64
-	Elapsed     time.Duration
+	// UserProse counts user records carrying prose (a turn, not a tool result).
+	UserProse int64
+	// HumanTurns counts the subset whose text was stored in full — the typed and
+	// queued turns. The gap between the two is the T-3a economy made observable.
+	HumanTurns    int64
+	Interruptions int64
+	Thinking      int64
+	Elapsed       time.Duration
 }
 
 // Changed is the number of files this sweep actually parsed bytes from.
@@ -105,10 +111,12 @@ func (s Stats) Changed() int { return s.Fresh + s.Resumed + s.Reingested }
 func (s Stats) Summary() string {
 	return fmt.Sprintf(
 		"ingest complete: scanned=%d changed=%d unchanged=%d fresh=%d resumed=%d reingested=%d failed=%d "+
-			"bytes=%d lines_ok=%d lines_bad=%d events=%d tool_calls=%d tool_results=%d errors=%d narration=%d thinking=%d elapsed=%s",
+			"bytes=%d lines_ok=%d lines_bad=%d events=%d tool_calls=%d tool_results=%d errors=%d narration=%d "+
+			"user_prose=%d human_turns=%d interruptions=%d thinking=%d elapsed=%s",
 		s.Scanned, s.Changed(), s.Unchanged, s.Fresh, s.Resumed, s.Reingested, s.Failed,
 		s.BytesParsed, s.LinesOK, s.LinesBad, s.Events, s.ToolCalls, s.ToolResults, s.Errors,
-		s.Narration, s.Thinking, s.Elapsed.Round(time.Millisecond),
+		s.Narration, s.UserProse, s.HumanTurns, s.Interruptions, s.Thinking,
+		s.Elapsed.Round(time.Millisecond),
 	)
 }
 
@@ -320,7 +328,16 @@ func ingestFile(
 	stats.ToolCalls += int64(len(parsed.calls))
 	stats.ToolResults += int64(len(parsed.results))
 	stats.Narration += int64(len(parsed.narration))
+	stats.UserProse += int64(len(parsed.userText))
 	stats.Thinking += int64(len(parsed.thinking))
+	for _, u := range parsed.userText {
+		if u.interrupted {
+			stats.Interruptions++
+		}
+		if u.text != nil && !u.interrupted {
+			stats.HumanTurns++
+		}
+	}
 	for _, r := range parsed.results {
 		if r.isError {
 			stats.Errors++
@@ -414,6 +431,17 @@ type textRow struct {
 	text string
 }
 
+// userRow is one user PROSE record. text is nil for everything that is not a
+// human turn, mirroring tool_results' content/content_len split (T-3a): the
+// length is always recorded so the record stays countable, the body only when a
+// census reads it.
+type userRow struct {
+	seq         int64
+	textLen     int64
+	text        *string
+	interrupted bool
+}
+
 type parsedFile struct {
 	consumed  int64
 	linesOK   int64
@@ -422,6 +450,7 @@ type parsedFile struct {
 	calls     []callRow
 	results   []resultRow
 	narration []textRow
+	userText  []userRow
 	thinking  []textRow
 }
 
@@ -506,6 +535,15 @@ func (p *parsedFile) appendLine(seq int64, raw []byte, withThinking bool) {
 		return
 	}
 	bs := blocks(l.Message.Content)
+
+	// The user branch runs BEFORE the len(bs) == 0 guard on purpose: a typed human
+	// turn's content is a plain STRING, so it decodes to no blocks at all, and
+	// returning early on an empty block list would discard every human turn in the
+	// corpus — the exact records the mistake census is built on.
+	if l.Type == "user" {
+		p.appendUserProse(seq, l, bs)
+	}
+
 	if len(bs) == 0 {
 		return
 	}
@@ -570,6 +608,31 @@ func (p *parsedFile) appendLine(seq int64, raw []byte, withThinking bool) {
 	}
 }
 
+// appendUserProse records one user PROSE record, applying T-3a's rule to the
+// human side of the conversation.
+func (p *parsedFile) appendUserProse(seq int64, l line, bs []block) {
+	if carriesToolResult(bs) {
+		return
+	}
+	prose := userProse(l.Message.Content)
+	if prose == "" {
+		return
+	}
+	row := userRow{
+		seq:         seq,
+		textLen:     contentLen(prose),
+		interrupted: strings.HasPrefix(strings.TrimSpace(prose), InterruptionPrefix),
+	}
+	// Stored in full for a human turn, and for the interruption sentinel (a fixed
+	// ~35-rune string, so keeping it costs nothing and lets a candidate carry its
+	// own excerpt instead of forcing a reader back to the transcript).
+	if row.interrupted || (l.PromptSource != nil && HumanPromptSources[*l.PromptSource]) {
+		t := prose
+		row.text = &t
+	}
+	p.userText = append(p.userText, row)
+}
+
 func loadFileState(ctx context.Context, db *sql.DB, path string) (fileState, bool, error) {
 	var fsx fileState
 	err := db.QueryRowContext(
@@ -621,6 +684,7 @@ func commitFile(
 		// alone — tool_calls, tool_results and assistant_text carry a bare path
 		// column with no foreign key.
 		for _, stmt := range []string{
+			`DELETE FROM user_text WHERE path = ?`,
 			`DELETE FROM assistant_text WHERE path = ?`,
 			`DELETE FROM tool_results WHERE path = ?`,
 			`DELETE FROM tool_calls WHERE path = ?`,
@@ -736,6 +800,24 @@ func commitFile(
 	for _, t := range parsed.narration {
 		if _, err := textStmt.ExecContext(ctx, path, t.seq, t.text); err != nil {
 			return fmt.Errorf("insert assistant_text %s#%d: %w", path, t.seq, err)
+		}
+	}
+
+	userStmt, err := tx.PrepareContext(ctx, `
+		INSERT INTO user_text (path, seq, text_len, text, interrupted) VALUES (?,?,?,?,?)
+		ON CONFLICT(path, seq) DO UPDATE SET
+			text_len=excluded.text_len, text=excluded.text, interrupted=excluded.interrupted`)
+	if err != nil {
+		return fmt.Errorf("prepare user_text insert: %w", err)
+	}
+	defer func() { _ = userStmt.Close() }()
+	for _, u := range parsed.userText {
+		interrupted := 0
+		if u.interrupted {
+			interrupted = 1
+		}
+		if _, err := userStmt.ExecContext(ctx, path, u.seq, u.textLen, u.text, interrupted); err != nil {
+			return fmt.Errorf("insert user_text %s#%d: %w", path, u.seq, err)
 		}
 	}
 

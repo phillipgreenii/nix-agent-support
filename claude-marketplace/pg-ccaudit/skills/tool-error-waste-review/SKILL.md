@@ -1,9 +1,21 @@
 ---
 name: tool-error-waste-review
-description: Run a tool-error waste review over the Claude Code transcript corpus — which tool calls fail, how often, with what error signatures, at what measured cost, whether an agent retries blindly, and whether each class is a main-loop or a subagent problem. Use when asked to audit or census tool errors/failures across sessions, to find where agent time is being wasted, to check whether a documented rule or instruction fix actually stopped a class of error, to route a fix to the right place (always-on user rules vs. subagent brief vs. permission-approver tuning), or to re-run a previous transcript audit for comparison. Also use for questions about retry loops, error-then-narration adjacency, hook rejections, per-tool or per-Bash-command error rates, and how concentrated a failure class is in one runaway session. Do NOT use for debugging one specific failing command right now (that is ordinary debugging), for reading a single named transcript, or for token/cost usage accounting.
+description: Run an agent-waste review over the Claude Code transcript corpus — both halves of it. Which tool calls fail, how often, with what error signatures, at what measured cost, whether an agent retries blindly; AND the mistakes that were never failed commands at all: work that succeeded and had to be undone, corrections a person had to type, interruptions, rejected tool calls, files rewritten five times, commands re-issued with only the quoting changed. Use when asked to audit or census agent errors, mistakes, corrections or wasted time across sessions, to find where agent time is going, to check whether a documented rule or instruction fix actually stopped a class of error, to route a fix to the right artifact (always-on user rules vs. workspace rules vs. a skill vs. a slash command vs. a subagent brief vs. a hook vs. permission-approver tuning), to measure how often the user corrects the agent, or to re-run a previous transcript audit for comparison. Also use for questions about retry loops, error-then-narration adjacency, hook rejections, per-tool or per-Bash-command error rates, how concentrated a failure class is in one runaway session, and how many human turns the corpus actually contains. Do NOT use for debugging one specific failing command right now (that is ordinary debugging), for reading a single named transcript, or for token/cost usage accounting.
 ---
 
-# Tool-error waste review
+# Agent-waste review
+
+## THE SHAPE OF THIS REVIEW: TWO HALVES, ONE RANKED LIST
+
+Failed commands are the **cheap** half of the waste. A failed command announces
+itself, is usually self-correcting inside one round trip, and the agent notices
+unaided. The expensive half is invisible to an `is_error` census: work that
+**succeeded** technically and was wrong, and corrections a **person** had to type —
+which mean nothing in the harness caught the mistake at all.
+
+`pg-ccaudit report` emits **both halves in ONE ranked list**. You MUST NOT present
+them as two lists: two lists let the cheap half dominate attention purely by being
+easier to find, which is exactly what the census that motivated this tool did.
 
 ## THE FIRST INSTRUCTION: THE DATABASE ALREADY EXISTS. QUERY IT.
 
@@ -158,7 +170,111 @@ Route each finding accordingly:
 - **Permission/approver rejections** → the `claude-extended-tool-approver` rule
   set rather than an instruction anywhere.
 
-### 5. Did a previous fix actually work?
+### 5. The mistakes that were never failed commands
+
+```bash
+pg-ccaudit candidates --since … --until …
+```
+
+Eight structural detectors, no model calls, tuned for **recall** — so most of what
+this returns is NOT a mistake. Read the per-signal header it prints and the
+`EMPTY SIGNALS` warning on stderr.
+
+- **`human-turns` is the denominator, and the trap.** `type == "user"` is NOT a human
+  turn. Measured corpus-wide: 90,579 user records, 1,183 `typed` and 26 `queued`; the
+  rest are harness injections, slash-command and skill expansions, and 84,556 tool
+  results. Reading every user record as a turn inflates the count **74.9x**. When you
+  quote a correction rate, quote `inflation_factor` beside it.
+
+  ```bash
+  pg-ccaudit query human-turns --since … --until …
+  ```
+
+- **An empty detector is NOT evidence that the thing did not happen.** `hook-rejections`
+  is a correct query that returns **zero rows** corpus-wide, because Claude Code writes
+  `hookErrors: []` and puts the rejection in the `tool_result` body instead — while
+  hook-authored refusals demonstrably do occur and show up in `top-signatures`. If a
+  signal reports 0, read its notes before reporting good news.
+
+- **The file channel means your correction count is a LOWER BOUND.** The operator
+  sometimes writes a correction into a FILE rather than into a session (the
+  `feedback_*.md` memories, a workspace `FEEDBACK.md`). Those are structurally
+  invisible here. `pg-ccaudit gold seed` counts them; the report states the undercount.
+  You MUST state it too, and MUST NOT present a transcript-only figure as "the
+  correction rate".
+
+- **Acknowledgment text is SUPPLEMENTARY, never a rate.** `ack-markers` fires only when
+  the agent NOTICED and said so, so it measures an ACKNOWLEDGED mistake rate; reported
+  as a mistake rate it makes agents getting quieter look like agents getting better.
+  The `Correction:` stem is forward-only from 2026-07-30 and rule M-2 forbids it
+  changing acknowledgment FREQUENCY, so a rise across that boundary is a **marking
+  artifact** and MUST NOT be read as a rise in mistakes.
+
+Then classify. The default classifier is the **naive baseline**, which exists to be
+beaten, not used for findings:
+
+```bash
+pg-ccaudit classify --classifier cli --since … --until … --max 100
+```
+
+`--classifier cli` makes model calls and **reports what the run cost**. Bound it with
+`--since`/`--until` or `--max`, and if the run was truncated say so — every rate
+downstream is over the truncated set.
+
+### 6. The one ranked, routed report
+
+```bash
+pg-ccaudit report --classifier cli --since … --until … --max 100
+```
+
+Every finding carries **exactly one** route: `global-rule`, `workspace-rule`, `skill`,
+`slash-command`, `subagent-prompt-template`, `hook`, `permission-config`, or an
+explicit `not-actionable` close. Nothing is unrouted. Where a finding needs a second
+artifact the report says so in its `also:` line — quote that rather than inventing a
+second route.
+
+Ranking is
+
+```text
+score = occurrences x (1 + cost_ms/1000) x preventability(route)
+```
+
+Two things you MUST NOT do with those numbers:
+
+- Do **not** treat `cost_ms = 0` as "free". It means no span was measurable. It is
+  deliberately zero for anything whose interval ends at a HUMAN action — a typed turn,
+  an interruption, a rejection — because that interval is the person's reading and
+  deciding time, not agent waste. Measured, including it summed to 2,330 hours across
+  719 typed turns and put the noisiest signal at the top of the report.
+- Do **not** propose a standing rule for a finding carrying `RUNAWAY DISCOUNT`. That is
+  one agent stuck in a loop, not a systemic problem.
+
+If you propose a fix for a class the semantic pass called `guidance-defect`, route it
+**back** to the instruction that induced it, not forward to a new rule. The worked
+example is real: a stored memory recommended `--no-ext-diff` without stating flag
+position, agents wrote the invalid `git --no-ext-diff diff`, and that class still
+carries 25 occurrences — 0 main-loop, 25 subagent.
+
+### 7. Is the classifier trustworthy on this corpus?
+
+```bash
+pg-ccaudit evaluate --classifier cli --since … --until …
+```
+
+It scores the semantic classifier AND the naive baseline over the same gold set and
+**exits non-zero** if the semantic one does not win on correction F1. Report:
+
+- the per-class precision and recall, and the `scored` count — under 50 the figures are
+  arithmetic, not evidence, and the tool says so;
+- **who labelled the gold set**. An agent-labelled set measures agreement between two
+  models; only an operator-labelled one measures agreement with the person whose
+  attention the corrections cost;
+- the **marker recall** figure, which is MARKER COMPLIANCE and not a mistake rate.
+
+If the gold set is missing or under-sized, say that instead of quoting per-class
+numbers. `pg-ccaudit gold status` reports it; `gold seed` and `gold sample` grow it.
+
+### 8. Did a previous fix actually work?
 
 ```bash
 pg-ccaudit query first-seen '<signature>' --since … --until …
@@ -180,12 +296,18 @@ Your report MUST contain:
    indexed, `lines_bad`), and the query names with their versions. Without this
    the numbers cannot be compared with the next audit, which is the whole reason
    the queries are versioned.
-2. **Findings ranked by measured cost and breadth**, each with its denominator,
-   its session concentration, and its main-loop/subagent split.
-3. **A routing decision per finding**, justified by that split.
+2. **ONE ranked list holding both halves** — mistakes and command failures together —
+   each finding with its denominator, its session concentration, and its
+   main-loop/subagent split. Never two lists.
+3. **A routing decision per finding**, justified by that split, and exactly one route
+   per finding.
 4. **A verification claim per proposed fix** — the `first-seen` / `last-seen`
    evidence that the class is live and not already dead.
-5. **Anything you could not answer**, and the query you wish existed.
+5. **The classifier and its evaluation** — which classifier ran, its reported run cost,
+   whether it beat the baseline, and who labelled the gold set.
+6. **The file-channel undercount**, stated explicitly wherever you quote a correction
+   count.
+7. **Anything you could not answer**, and the query you wish existed.
 
 Rules you propose MUST use RFC 2119 language (MUST / SHOULD / MAY), and MUST NOT
 contain time estimates. Where you give a number, give the query that produced it.
@@ -195,8 +317,17 @@ contain time estimates. Where you give a number, give the query that produced it
 - Do NOT scan raw transcripts. (Repeated because it is the failure this exists to
   prevent.)
 - Do NOT report a raw error count as a rate.
+- Do NOT read `type == "user"` as a human turn — it inflates the count 74.9x. Use
+  `human-turns`.
+- Do NOT present mistakes and command failures as two separate lists.
 - Do NOT propose a standing rule for a class that is one runaway session.
 - Do NOT report an aggregate sidechain ratio in place of the per-class split.
 - Do NOT quote `duration_ms_sum` as the cost of failures.
+- Do NOT read a detector's zero as evidence that the thing it detects did not happen.
+- Do NOT report an ACKNOWLEDGED mistake rate as a mistake rate, and do NOT read the
+  `Correction:` marker's 2026-07-30 boundary as a behavioural change.
+- Do NOT present a transcript-only correction count as "the correction rate".
+- Do NOT run the `cli` classifier unbounded over the whole corpus without saying what
+  it cost.
 - Do NOT run `pg-ccaudit ingest` on your own initiative to "fix" a stale index —
   report the staleness and let the operator decide.

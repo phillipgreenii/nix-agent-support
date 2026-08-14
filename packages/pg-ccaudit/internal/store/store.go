@@ -16,6 +16,29 @@
 // ~322 MB while error bodies scale to ~1.8 MB — 180x the volume for no
 // analytical value, because a census of FAILURES never reads a SUCCESS body.
 // So a successful result contributes its length and nothing else.
+//
+// # Schema 2 — user_text (bead pg2-oisvb)
+//
+// The mistake census needs the HUMAN side of the conversation, which schema 1
+// did not capture at all: assistant prose was stored, user prose was not. The
+// added table applies T-3a's rule rather than reopening it — measured over the
+// whole corpus (2,428 transcripts, 90,424 type=="user" records):
+//
+//	prompt_source=='typed'    1,183 records      414,876 runes   ← stored in full
+//	prompt_source=='queued'      26 records        2,205 runes   ← stored in full
+//	prompt_source=='system'     776 records    4,464,317 runes   ← length only
+//	prompt_source=='sdk'        329 records    6,355,070 runes   ← length only
+//	no prompt_source, prose   3,693 records   24,354,130 runes   ← length only
+//	no prompt_source, tool
+//	  results               84,417 records          534 runes   ← not a turn at all
+//
+// So the human turns — the only records a correction census reads — cost 0.4 MB,
+// while capturing every prose record in full would cost ~35 MB, most of it the
+// same skill and slash-command boilerplate re-injected thousands of times (the
+// unlabelled prose bucket averages 6.6 KB/record and its largest members are
+// verbatim skill bodies). Every record still contributes text_len, so the
+// unstored buckets remain COUNTABLE and the criterion-1 denominator is provable
+// rather than asserted.
 package store
 
 import (
@@ -34,10 +57,14 @@ const DriverName = "sqlite"
 // SchemaVersion is written to PRAGMA user_version. It is deliberately tracked
 // in the pragma rather than in a metadata TABLE so the table list stays
 // exactly the DDL the bead specifies.
-const SchemaVersion = 1
+//
+// 1 — pg2-xnnab's DDL.
+// 2 — pg2-oisvb adds user_text.
+const SchemaVersion = 2
 
-// Schema is the CORRECTED DDL from bead pg2-xnnab. `IF NOT EXISTS` is the only
-// addition: it makes Open idempotent without changing a single column.
+// Schema is the CORRECTED DDL from bead pg2-xnnab, plus pg2-oisvb's user_text.
+// `IF NOT EXISTS` is the only addition to the specified columns: it makes Open
+// idempotent without changing a single one.
 const Schema = `
 CREATE TABLE IF NOT EXISTS files (
   path          TEXT PRIMARY KEY,
@@ -98,9 +125,26 @@ CREATE TABLE IF NOT EXISTS assistant_text (  -- error -> narration adjacency
   PRIMARY KEY (path, seq)
 );
 
+CREATE TABLE IF NOT EXISTS user_text (       -- pg2-oisvb: the HUMAN side
+  path        TEXT NOT NULL,
+  seq         INTEGER NOT NULL,
+  text_len    INTEGER NOT NULL,              -- always populated (runes)
+  text        TEXT,                          -- NULL unless a human turn (T-3a rule)
+  interrupted INTEGER NOT NULL DEFAULT 0,    -- 1 = Claude Code's interruption sentinel
+  PRIMARY KEY (path, seq)
+);
+
 CREATE INDEX IF NOT EXISTS idx_calls_name  ON tool_calls(tool_name);
+-- (path, seq) is tool_calls' ORDER, not its identity, so it needs an index of its
+-- own: pg2-oisvb's Tier 1 queries ask "the nearest tool call BEFORE line N of this
+-- transcript" once per human turn, and without this index that is a full scan of
+-- the 84k-row table per turn. Measured: the query does not finish in 10 minutes
+-- without it and returns in well under a second with it.
+CREATE INDEX IF NOT EXISTS idx_calls_pathseq ON tool_calls(path, seq);
 CREATE INDEX IF NOT EXISTS idx_res_err     ON tool_results(is_error, signature);
 CREATE INDEX IF NOT EXISTS idx_events_side ON events(is_sidechain, type);
+CREATE INDEX IF NOT EXISTS idx_events_src  ON events(prompt_source);
+CREATE INDEX IF NOT EXISTS idx_user_int    ON user_text(interrupted);
 `
 
 // ThinkingSchema is created ONLY when ingest runs with thinking capture enabled
@@ -119,16 +163,19 @@ CREATE TABLE IF NOT EXISTS thinking (
 );
 `
 
-// CanonicalTables is the exact table set the bead's DDL declares. The schema
-// test asserts equality against a freshly opened database, so an accidental
-// extra table (or a dropped one) fails the build rather than silently shipping
-// a schema that a later migration would have to unpick.
+// CanonicalTables is the exact table set the DDL declares — pg2-xnnab's five
+// plus pg2-oisvb's user_text. The schema test asserts equality against a freshly
+// opened database, so an accidental extra table (or a dropped one) fails the
+// build rather than silently shipping a schema that a later migration would have
+// to unpick. Adding a table here is deliberate and MUST come with a
+// SchemaVersion bump, because Open re-ingests from zero on an upgrade.
 var CanonicalTables = []string{
 	"assistant_text",
 	"events",
 	"files",
 	"tool_calls",
 	"tool_results",
+	"user_text",
 }
 
 // DefaultDBPath resolves the global database location. The database is global
@@ -186,9 +233,21 @@ func Open(path string, withThinking bool) (*sql.DB, error) {
 	// the whole run), so a single connection keeps every statement on one
 	// SQLite handle and removes any chance of a self-inflicted write conflict.
 	db.SetMaxOpenConns(1)
+	// The stored version must be read BEFORE the DDL runs: applying the schema is
+	// what makes an older database structurally indistinguishable from a current
+	// one, and the pragma is the only surviving evidence of which it was.
+	prior, err := userVersion(db)
+	if err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	if _, err := db.Exec(Schema); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)
+	}
+	if err := migrate(db, prior, withThinking); err != nil {
+		_ = db.Close()
+		return nil, err
 	}
 	if withThinking {
 		if _, err := db.Exec(ThinkingSchema); err != nil {
@@ -201,6 +260,59 @@ func Open(path string, withThinking bool) (*sql.DB, error) {
 		return nil, fmt.Errorf("set user_version: %w", err)
 	}
 	return db, nil
+}
+
+func userVersion(db *sql.DB) (int, error) {
+	var v int
+	if err := db.QueryRow("PRAGMA user_version").Scan(&v); err != nil {
+		return 0, fmt.Errorf("read user_version: %w", err)
+	}
+	return v, nil
+}
+
+// migrate brings a database written by an EARLIER schema version up to this one
+// by clearing it, so the next sweep re-ingests every file from zero.
+//
+// Re-ingest — not a column backfill — is the only correct migration for this
+// index, and the reason is structural: every schema bump so far ADDS captured
+// data, and the data being added was never written to the database in the first
+// place. It lives only in the transcripts. So there is nothing to backfill FROM;
+// a `SELECT` over the existing rows cannot manufacture user prose that ingest
+// never stored. Leaving the rows in place would instead produce the worst
+// outcome available — a database that answers the new queries with structurally
+// valid, silently incomplete numbers, which is exactly the class of miscount
+// this index exists to eliminate.
+//
+// Clearing `files` is what makes the re-ingest happen: `decide` classifies a file
+// with no recorded state as `fresh` and parses it whole, whereas resetting the
+// resume offsets in place would leave (size, mtime) matching and every file
+// would be skipped as `unchanged`. A full corpus re-ingest is affordable —
+// measured 2,430 files / 1.3 GB in 35 s — so this is a cheap correctness
+// guarantee, not a painful one.
+//
+// A version of 0 is a database this package never finished writing (Open sets the
+// pragma last), so it is left alone: there is nothing to clear.
+func migrate(db *sql.DB, prior int, withThinking bool) error {
+	if prior == 0 || prior >= SchemaVersion {
+		return nil
+	}
+	stmts := []string{
+		`DELETE FROM user_text`,
+		`DELETE FROM assistant_text`,
+		`DELETE FROM tool_results`,
+		`DELETE FROM tool_calls`,
+		`DELETE FROM events`,
+		`DELETE FROM files`,
+	}
+	if withThinking {
+		stmts = append([]string{`DELETE FROM thinking`}, stmts...)
+	}
+	for _, s := range stmts {
+		if _, err := db.Exec(s); err != nil {
+			return fmt.Errorf("migrate schema %d -> %d (%s): %w", prior, SchemaVersion, s, err)
+		}
+	}
+	return nil
 }
 
 // OpenReadOnly opens an EXISTING database for the query path (T-13). Every

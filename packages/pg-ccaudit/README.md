@@ -12,13 +12,18 @@ resumable, and schedulable.
 
 ## Commands
 
-| Command                           | What it does                                                   |
-| --------------------------------- | -------------------------------------------------------------- |
-| `pg-ccaudit ingest`               | Index new and appended transcripts. Writes. Single-instance.   |
-| `pg-ccaudit status`               | Coverage and staleness. Read-only.                             |
-| `pg-ccaudit query <name> [args…]` | Run a named, versioned canned query. Read-only.                |
-| `pg-ccaudit queries [--verbose]`  | List the canned queries, with notes and SQL under `--verbose`. |
-| `pg-ccaudit schema [--thinking]`  | Print the DDL.                                                 |
+| Command                                  | What it does                                                    |
+| ---------------------------------------- | --------------------------------------------------------------- |
+| `pg-ccaudit ingest`                      | Index new and appended transcripts. Writes. Single-instance.    |
+| `pg-ccaudit status`                      | Coverage and staleness. Read-only.                              |
+| `pg-ccaudit query <name> [args…]`        | Run a named, versioned canned query. Read-only.                 |
+| `pg-ccaudit queries [--verbose]`         | List the canned queries, with notes and SQL under `--verbose`.  |
+| `pg-ccaudit schema [--thinking]`         | Print the DDL.                                                  |
+| `pg-ccaudit candidates`                  | Tier 1 of the mistake census: structural candidates, SQL only.  |
+| `pg-ccaudit classify`                    | Tier 2: which candidates are real, with a reported run cost.    |
+| `pg-ccaudit report`                      | Tier 3: ONE ranked report, mistakes and failures, each routed.  |
+| `pg-ccaudit evaluate`                    | Score a classifier against the gold set AND the naive baseline. |
+| `pg-ccaudit gold <seed\|sample\|status>` | Maintain the evaluation set and count the file channel.         |
 
 Paths resolve from `--db` / `--root`, else `PG_CCAUDIT_DB` / `PG_CCAUDIT_ROOT`
 (the home-manager module exports both), else
@@ -109,20 +114,35 @@ Named **and versioned**, so two audits produce comparable numbers and an agent r
 reasons nobody can reconstruct. A version bump means the SQL's meaning changed; the
 registry test pins every name to its current version.
 
-| Name                    | Answers                                                                  |
-| ----------------------- | ------------------------------------------------------------------------ |
-| `error-rate-by-tool`    | Per-tool error counts **with denominators**                              |
-| `top-signatures`        | Ranked normalized error signatures                                       |
-| `bash-by-lead-cmd`      | Per-leading-command Bash rates                                           |
-| `session-concentration` | The runaway discount: total / distinct sessions / worst session          |
-| `retry-chains`          | Same tool re-called after a failure within N line ordinals               |
-| `error-then-narration`  | The prose written on the line right after a failure                      |
-| `sidechain-split`       | Every signature split by `is_sidechain` — decides where a fix belongs    |
-| `cost-by-signature`     | Measured cost per signature (read its notes)                             |
-| `hook-rejections`       | True totals from recorded `hookErrors`, not an error-text grep           |
-| `first-seen`            | Earliest/latest occurrence, ranked by first — did this class start when? |
-| `last-seen`             | Same columns ranked by most recent — did the documented fix work?        |
-| `coverage`              | Indexed coverage: the proof behind every number above                    |
+| Name                         | Answers                                                                  |
+| ---------------------------- | ------------------------------------------------------------------------ |
+| `error-rate-by-tool`         | Per-tool error counts **with denominators**                              |
+| `top-signatures`             | Ranked normalized error signatures                                       |
+| `bash-by-lead-cmd`           | Per-leading-command Bash rates                                           |
+| `session-concentration`      | The runaway discount: total / distinct sessions / worst session          |
+| `retry-chains`               | Same tool re-called after a failure within N line ordinals               |
+| `error-then-narration`       | The prose written on the line right after a failure                      |
+| `sidechain-split`            | Every signature split by `is_sidechain` — decides where a fix belongs    |
+| `cost-by-signature`          | Measured cost per signature (read its notes)                             |
+| `hook-rejections`            | True totals from recorded `hookErrors`, not an error-text grep           |
+| `first-seen`                 | Earliest/latest occurrence, ranked by first — did this class start when? |
+| `last-seen`                  | Same columns ranked by most recent — did the documented fix work?        |
+| `concentration-by-signature` | The runaway discount for EVERY signature at once                         |
+| `coverage`                   | Indexed coverage: the proof behind every number above                    |
+
+Tier 1 of the mistake census (below) adds eight more. All are SQL over the index with
+no model calls:
+
+| Name                    | Answers                                                              |
+| ----------------------- | -------------------------------------------------------------------- |
+| `human-turns`           | Turns a person TYPED, and the inflation a naive count would report   |
+| `typed-turn-candidates` | Each human turn paired with the agent action just before it          |
+| `interruptions`         | Interruption sentinels, with the call the person cut short           |
+| `denied-tool-calls`     | Calls a person or the permission layer refused, split by who refused |
+| `undo-signatures`       | git undo / write-then-delete / an Edit reversing an Edit             |
+| `file-churn`            | One file edited N+ times in one session (N defaults to 5)            |
+| `escaping-retries`      | The same command re-issued with only quoting changed                 |
+| `ack-markers`           | The `Correction:` stem and older ack phrases — SUPPLEMENTARY only    |
 
 Every query takes `--since` / `--until` (ISO-8601 prefixes, `--until` exclusive) and
 `--format table|tsv|json`. Every rendering is stamped with the query name, its
@@ -150,13 +170,139 @@ same file, because `seq` is a per-file line ordinal — a gap computed across tw
 files is meaningless. `identical_input = 1` is the strongest signal in the set: the
 same input re-sent after a failure.
 
+## The mistake census
+
+The failure census above can only find what announces itself — `is_error == true`.
+That is the **cheap** half of the waste: a failed command is usually self-correcting
+inside one round trip and the agent notices unaided. Two expensive classes are
+invisible to it. Work that SUCCEEDED technically and was **wrong** emits no error at
+all. And a correction a **person** had to type means nothing in the harness caught
+it: no exit code, no schema, no hook.
+
+Three tiers, cheapest first.
+
+### Tier 1 — structural candidates (`pg-ccaudit candidates`)
+
+Eight SQL detectors, no model calls, tuned for **recall**. Measured corpus-wide they
+reduce 405,986 events to ~2,100 candidates, which is what makes a careful semantic
+pass affordable at all. Most of what they return is NOT a mistake; deciding that is
+Tier 2's job and Tier 1 does not attempt it.
+
+Keyword matching is deliberately **not** among them, because it was measured and
+does not work. Over **every** stored human turn — 1,209 of them, not a sample — the
+four candidate patterns match a combined **3** turns (`i said` 0, `why did you` 0,
+`you should have` 1, `not what i` 2), or 0.25%. A keyword detector's ceiling on this
+corpus is therefore 3 detections. People correct in unboundedly varied phrasing and
+the vocabulary cannot be enumerated. Every detector is therefore structural — a `promptSource`, a sentinel the harness writes, a JSON
+field, a repeated key, a reversed string — with one exception, `ack-markers`, which
+is lexical and marked SUPPLEMENTARY in the type system so it cannot quietly become
+primary.
+
+**`type == "user"` is not a human turn**, and this is the single most important number
+in the census. Measured over 2,428 transcripts: 90,579 user records, of which 1,183
+are `typed` and 26 `queued`. The rest are harness injections (`system`, `sdk`),
+slash-command and skill expansions, and 84,556 tool results, which are not turns at
+all. Reading every user record as a turn inflates the count **74.9x**, so
+`human-turns` reports that factor alongside the count.
+
+### Tier 2 — semantic classification (`pg-ccaudit classify`)
+
+Two classifiers ship, and the naive one is the **bar**, not a fallback:
+
+- `--classifier baseline` — "every typed turn following a tool call is a correction".
+  Zero model calls, deterministic.
+- `--classifier cli` — the semantic pass, via `claude -p --output-format json`. In-house
+  rather than an external framework; see `docs/adr/0045-mistake-census-tiers-built-in-house.md`.
+
+The run cost is reported on stderr whether or not the pass succeeded, because an
+unbounded classification pass over a growing corpus is how this stops being run.
+Calls are **batched** (10 candidates by default) because the per-CALL overhead of
+priming the harness system prompt is measured at 21,882 cache-creation tokens — far
+more than the candidate content.
+
+`pg-ccaudit evaluate` scores both over the same gold set and **exits non-zero** if
+the semantic classifier does not beat the baseline on correction F1. That comparison
+is on the correction binary rather than multi-class accuracy, because a classifier
+answering `not-a-mistake` to everything scores well on accuracy while finding
+nothing. It also reports the measured **recall of the `Correction:` marker**
+(rules M-1..M-3), so marker compliance is known rather than assumed.
+
+### Tier 3 — routing and one ranked report (`pg-ccaudit report`)
+
+Every finding carries **exactly one** route — global rule, workspace rule, skill,
+slash command, subagent prompt template, hook, permission config, or an explicit
+not-actionable close. Nothing is emitted unrouted, because an unrouted finding is a
+finding nobody owns: it reads as work, belongs to no artifact, survives every review,
+and is still there next census.
+
+`is_sidechain` is what decides the subagent row, and its absence is what forced an
+entire set of adopted instruction fixes to be re-routed by hand. A rule in the
+always-on user rules does **not** reliably reach a subagent.
+
+Mistakes and command failures are ranked in **one** list, not two, ordered by
+
+```text
+score = occurrences x (1 + cost_ms/1000) x preventability(route)
+```
+
+with the weights printed in the report so any row's position is re-derivable.
+
+### Two things the ranking gets right that are easy to get wrong
+
+**A span is only a cost when BOTH endpoints are agent actions.** The gap between the
+agent's last action and a human turn, an interruption or a rejection is however long
+the _person_ took to read, think and act. Measured, that was 8,390,705,460 ms
+(2,330 hours) across 719 typed turns, and feeding it in as "cost" put the noisiest
+signal at the top of the report by three orders of magnitude. Such findings are
+therefore ranked with **no** cost term, on frequency and preventability alone.
+
+**A zero from a detector is not evidence.** The report names every detector that
+returned nothing, because a silently empty one is indistinguishable from a healthy
+one — and there is a live example: `hook-rejections` is correct and returns zero rows
+corpus-wide, because Claude Code writes `hookErrors: []` and puts the rejection in the
+`tool_result` body instead.
+
+### The undercount the report must always state
+
+The operator sometimes writes a correction into a **file** rather than into a session:
+the `feedback_*.md` memories under `~/.claude/projects/*/memory/`, and a workspace
+`FEEDBACK.md` (18 such files found on this machine). Those corrections are
+structurally invisible to a transcript census — there is no turn to detect — so a
+transcript-derived correction count is a **lower bound**, short by an unknown margin.
+`pg-ccaudit gold seed` counts the channel and `report` states it. Presenting the
+transcript-only figure as "the correction rate" is wrong.
+
+### The gold set is not in this repository
+
+Every entry quotes a real transcript or the operator's own critique, so the default
+location is beside the index (`$PG_CCAUDIT_GOLD`, else
+`$XDG_DATA_HOME/pg-ccaudit/goldset.jsonl`). The only gold data in git is the small
+synthetic fixture the tests use. Each entry records its **labeller**, because that
+bounds what the evaluation proves: an agent-labelled set measures agreement between
+two models, and only an operator-labelled one measures agreement with the person whose
+attention the corrections cost.
+
 ## Schema
 
 `pg-ccaudit schema` prints it. `files`, `events`, `tool_calls`, `tool_results`,
-`assistant_text` — exactly those five tables by default, asserted by a test, so
-anyone comparing against the specification finds no surprises. `thinking` is
+`assistant_text`, `user_text` — exactly those six tables by default, asserted by a
+test, so anyone comparing against the specification finds no surprises. `thinking` is
 created **only** under `ingest --thinking`, which is off by default: thinking blocks
 are ~94 MB corpus-wide and no shipped query reads them yet.
+
+`user_text` is schema 2 (bead `pg2-oisvb`) and it applies the same rule as
+`tool_results`, rather than reopening it. `text_len` is **always** populated so every
+prose record stays countable; `text` is stored only for a real human turn or the
+interruption sentinel. Measured, that is 0.4 MB — against ~35 MB to store every prose
+record in full, most of it the same skill and slash-command boilerplate re-injected
+thousands of times.
+
+A schema bump **clears the database** so the next sweep re-ingests from zero. That is
+the only correct migration here: every bump so far adds captured data that was never
+written to the database in the first place, so there is nothing to backfill from, and
+leaving the old rows in place would answer the new queries with structurally valid,
+silently incomplete numbers. A full corpus re-ingest is measured at 2,430 files /
+1.3 GB in 35 s.
 
 ## Nix
 

@@ -34,10 +34,10 @@ QUERIES
 		fmt.Fprintf(stderr, "\nFLAGS\n")
 		fs.PrintDefaults()
 	}
-	if err := fs.Parse(args); err != nil {
-		return errUsage
+	rest, perr := parseInterspersed(fs, args)
+	if perr != nil {
+		return perr
 	}
-	rest := fs.Args()
 	if len(rest) == 0 {
 		fs.Usage()
 		return errUsage
