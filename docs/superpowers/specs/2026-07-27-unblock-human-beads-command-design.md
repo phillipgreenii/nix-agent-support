@@ -54,10 +54,11 @@ needed for them:
   `cd` into it and continue". Either way an already-parked isolation is reused, so once
   this command releases a parked bead, drain picks it up and continues there.
 
-**The one change to `/drain-beads`:** it gains the same **query-restricting arguments**
-this command needs (see "Shared feature" below). Both commands accept optional
-`$ARGUMENTS` that only ever _narrow_ the claim query. That is the sole edit to
-`drain-beads.md`.
+**The one BEHAVIORAL change to `/drain-beads`:** it gains the same **query-restricting
+arguments** this command needs (see "Shared feature" below). Both commands accept optional
+`$ARGUMENTS` that only ever _narrow_ the claim query. The only other edit to `drain-beads.md`
+is non-behavioral: a statement that drain deliberately does NOT get this command's
+provably-lossless teardown carve-out (see "The provably-lossless carve-out" below).
 
 ---
 
@@ -83,14 +84,16 @@ in-session, because drain cannot safely take it — see the rubric.)
 
 - **drive the bead to completion** (except the substrate-mutating carve-out), land,
   merge, or push anything;
-- change any command other than the additive `$ARGUMENTS` support on `drain-beads.md`.
+- change the BEHAVIOR of any command other than the additive `$ARGUMENTS` support on
+  `drain-beads.md` (the carve-out asymmetry note added there changes nothing drain does).
 
 **Terminal actions (exactly one per claimed bead) — there is no automatic "re-park".**
 
 - **RELEASE** (default) — the human blocker is lifted; hand the bead to the drain pool.
   Applied only when drain can actually make progress on what remains.
 - **CLOSE** — the bead is already satisfied/obsolete (operator-confirmed), or a
-  substrate-mutating bead was resolved in-session; nothing left for drain to do.
+  substrate-mutating bead was resolved in-session; nothing left for drain to do. A rubric-1a
+  teardown closes here **without** an operator prompt, on its recorded three-leg proof.
 - **DEFER** (operator-initiated, or a substrate/human-only-action bead that cannot be
   done now) — the operator decides it cannot be resolved right now. No re-park machinery:
   a defer removes the bead from the ready queue so the loop continues and terminates; the
@@ -110,7 +113,9 @@ flowchart TD
     C -->|transient bd/dolt error| C
     C -->|got bead| U["UNDERSTAND: bd show; read stuck: comment;<br/>note parked worktree/set location"]
     U --> T{"Triage rubric<br/>(evaluate in order; first match wins)"}
-    T -->|1 substrate-mutating| SUB["ENGAGE operator; NEVER release to drain"]
+    T -->|"1a substrate-mutating, PROVABLY lossless"| S1A["TEAR DOWN and CLOSE, no operator prompt:<br/>clean git status --porcelain, and every commit landed<br/>or patch-identical, corroborated by range-diff,<br/>all legs run THIS session in EVERY repo →<br/>record the proof verbatim. NEVER released to drain"]
+    T -->|"1b substrate-mutating, any leg fails or unrun — a DIRTY tree is always 1b"| SUB["ENGAGE operator; NEVER release to drain"]
+    S1A --> CLO
     T -->|2 apply-waiting| REL
     T -->|3 mislabeled / normal work| REL
     T -->|4 genuine decision/input| ENG["ENGAGE operator (only enough)"]
@@ -169,13 +174,56 @@ resolves something that genuinely needed a person. **Order matters** — a bead 
 matches more than one class is handled by the first it matches (so substrate-mutating
 dominates).
 
-| #   | Class                        | How to recognize                                                                                                                                                                                                                         | Action                                                                                                                                              |
-| --- | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | **substrate-mutating**       | carries the `worktree-review` label, OR its work would remove/prune worktrees or workforest sets, delete `.worktrees/*`, or otherwise mutate the shared isolation substrate other sessions depend on (drain's "unscoped claims" warning) | **ENGAGE; NEVER RELEASE to drain** (drain auto-claims and prunes unattended). Resolve in-session **with** the operator, serially → CLOSE; or DEFER. |
-| 2   | **apply-waiting**            | "verify/act after apply", deploy-gated content                                                                                                                                                                                           | **RELEASE.** The command assumes `pn workspace apply` was run before it — see below.                                                                |
-| 3   | **mislabeled / normal work** | the label's reason is provably moot (referenced worktree already gone, decision already recorded later, transient infra passed) and no human input is needed                                                                             | **RELEASE** — no operator prompt.                                                                                                                   |
-| 4   | **genuine decision/input**   | needs a design/architectural decision, is underspecified, or otherwise needs a person to move it forward                                                                                                                                 | **ENGAGE** (only enough) → RELEASE if now drain-doable / CLOSE / DEFER.                                                                             |
-| 5   | **uncertain**                | cannot confidently place the bead above                                                                                                                                                                                                  | treat as genuine → **ENGAGE** (conservative; never silently auto-resolve).                                                                          |
+| #   | Class                                     | How to recognize                                                                                                                                                                                                                                                                                                                                                                                 | Action                                                                                                                                                                           |
+| --- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1a  | **substrate-mutating, PROVABLY LOSSLESS** | the class-1 shape below **AND** all three legs of the losslessness proof hold, run in **this** session, in every member repo: a CLEAN `git status --porcelain`, and every commit on the branch either an ancestor of the primary branch (`git merge-base --is-ancestor`) or patch-identical to one that is (`git patch-id --stable`, read via `git cherry -v`), corroborated by `git range-diff` | **TEAR DOWN and CLOSE — no operator prompt**, recording every probe output verbatim on the bead. **Still NEVER RELEASEd to drain.** See "The provably-lossless carve-out" below. |
+| 1b  | **substrate-mutating, NOT proven**        | carries the `worktree-review` label, OR its work would remove/prune worktrees or workforest sets, delete `.worktrees/*`, or otherwise mutate the shared isolation substrate other sessions depend on (drain's "unscoped claims" warning) — and any leg of 1a's proof fails, is unrunnable, or was not run (notably a DIRTY worktree)                                                             | **ENGAGE; NEVER RELEASE to drain** (drain auto-claims and prunes unattended). Resolve in-session **with** the operator, serially → CLOSE; or DEFER.                              |
+| 2   | **apply-waiting**                         | "verify/act after apply", deploy-gated content                                                                                                                                                                                                                                                                                                                                                   | **RELEASE.** The command assumes `pn workspace apply` was run before it — see below.                                                                                             |
+| 3   | **mislabeled / normal work**              | the label's reason is provably moot (referenced worktree already gone, decision already recorded later, transient infra passed) and no human input is needed                                                                                                                                                                                                                                     | **RELEASE** — no operator prompt.                                                                                                                                                |
+| 4   | **genuine decision/input**                | needs a design/architectural decision, is underspecified, or otherwise needs a person to move it forward                                                                                                                                                                                                                                                                                         | **ENGAGE** (only enough) → RELEASE if now drain-doable / CLOSE / DEFER.                                                                                                          |
+| 5   | **uncertain**                             | cannot confidently place the bead above                                                                                                                                                                                                                                                                                                                                                          | treat as genuine → **ENGAGE** (conservative; never silently auto-resolve).                                                                                                       |
+
+### The provably-lossless carve-out (rubric 1a)
+
+The class-1 guard exists because a teardown can destroy work no other copy holds. Where it
+mechanically **cannot**, the prompt buys nothing. Observed on `pg2-kl0o4`: the operator was asked
+to approve a teardown whose safety was already proven — the branch's only commit `6810ff9` was
+patch-id identical to main's landed `92b5c1e`, `git range-diff` printed `1: 6810ff9 = 1: 6810ff9`,
+and main carried a follow-up on top. The operator's ruling, recorded on that bead: _"if the bead is
+complete and provably been landed, then you do not need to ask me. just clean up."_ Matching the
+guard to the **label** rather than to the **evidence** makes the operator a rubber stamp on exactly
+the cases where the evidence is strongest.
+
+So a substrate-mutating action **MAY** be taken autonomously when losslessness is **MECHANICALLY
+PROVEN** and the proof is **recorded on the bead**. The admissible proofs are: (a) every commit on
+the branch is an ancestor of the primary branch (`git merge-base --is-ancestor`); or (b) every
+commit's `git patch-id --stable` matches a commit already on the primary branch
+(superseded/rebased-equivalent), corroborated by `git range-diff`; **AND** (c) the worktree is
+clean (`git status --porcelain` empty). If **any** of these fails — a dirty tree, an unmatched
+commit, an inconclusive `range-diff`, an unrunnable probe — the operator **MUST** be engaged as
+before (1b). Every leg **MUST** be run in the acting session, in every member repo of a set, and
+**MUST NOT** be inherited from a bead comment or an earlier run.
+
+**A dirty worktree is always 1b.** Uncommitted content — untracked files included — is unreviewed
+by definition and exists in exactly one place, so there is nothing to compare it against and
+losslessness is not merely unproven but **unprovable**. Only the operator may rule on a dirty tree.
+
+**Which teardown command is safe depends on which leg carried the proof.** Under leg (a) the tools
+re-check the property themselves (`git branch -d` refuses an unmerged branch; `cleanup-workforest`
+KEEPS a member that is not an ancestor of its primary), so a refusal or a KEEP contradicts the proof
+and routes to 1b. Under leg (b) `-d` refuses **by design** — a rebased/superseded branch is not
+merged — so that refusal is expected, and `git branch -D` is permitted for a **single** repo on the
+strength of the recorded patch-id proof, which is the stricter check. A SET member resting on leg (b)
+alone is 1b: forcing `cleanup-workforest` past it needs an operator-authorized force flag whose
+blast radius spans repos.
+
+**Two things the carve-out deliberately does NOT change.** (1) The never-RELEASE-to-drain half of
+the guard stays **unconditional**: a recorded proof is not licence to release, because drain is
+unattended and whoever acts must re-establish the proof rather than inherit this session's finding.
+(2) **`/drain-beads` gets no such carve-out, and the asymmetry is deliberate** — its posture stays
+stricter because it runs unattended, where a peer session may commit into the worktree between the
+probe and the teardown and no operator is present when a leg reads ambiguously. That statement is
+written into `drain-beads.md` itself so it reads as a decision rather than an omission.
 
 **apply-waiting = trust, always.** This command **expects `pn workspace apply` to have
 been run before it is invoked.** Every apply-waiting bead is RELEASEd on that premise; the
@@ -240,9 +288,21 @@ additional context). This is the sole change to `drain-beads.md`.
   can actually make progress on what remains. A bead whose only remaining work is a
   human-only action drain cannot perform is DEFERred or left `human`, not released
   (apply-waiting is exempt: it is RELEASEd on the pre-apply premise above).
-- **Substrate guard.** A substrate-mutating bead (rubric #1) **MUST NOT** be RELEASEd to
-  drain and **MUST NOT** be auto-actioned; it is engaged with the operator (serial,
-  in-session) or DEFERred/left `human`.
+- **Substrate guard.** A substrate-mutating bead (rubric 1a/1b) **MUST NOT** be RELEASEd to
+  drain — that half is **unconditional**, and a recorded losslessness proof **MUST NOT** be treated
+  as licence to release one, because drain is unattended and the proof **MUST** be re-established by
+  whoever acts. It **MUST NOT** be auto-actioned **except** under rubric 1a, whose three legs
+  (clean `git status --porcelain`; every commit an ancestor of the primary branch or patch-identical
+  to one that is, corroborated by `git range-diff`) **MUST** all be run in the acting session, in
+  every member repo, and recorded verbatim on the bead. If any leg fails, is unrunnable, or was not
+  run — notably a DIRTY worktree, where losslessness is unprovable — the operator **MUST** be
+  engaged (serial, in-session) or the bead DEFERred/left `human`. A workforest force flag
+  (`--force-unlanded-branch-removal`, `--force-dirty-worktree-removal`,
+  `pn workspace workforest remove --force`) **MUST NOT** be used under 1a — those are
+  operator-authorized and span repos, so a SET member resting on the patch-identical leg alone is
+  1b. `git branch -D` **MAY** be used under 1a for a SINGLE repo where the recorded proof is the
+  patch-identical leg: a rebased/superseded branch is not merged, so `-d` refuses it by design, and
+  the recorded proof is the stricter check. `/drain-beads` **MUST NOT** be given this carve-out.
 - **Atomic release ordering.** On RELEASE the `human`-label removal, `status=open`, and
   `assignee=""` **MUST** be a **single** `bd update` call, after the explanatory
   `bd comment` (and any commit) has landed — no crash window leaving a label-less
@@ -258,7 +318,11 @@ additional context). This is the sole change to `drain-beads.md`.
   `/drain-beads` actor (the `${CLAUDE_SESSION_ID}-unblock` suffix), so drain's
   label-unfiltered resume cannot recover this command's in-progress `human` beads.
 - **Close guard.** The command **MUST NOT** close a bead without explicit operator
-  confirmation (or an in-session-resolved substrate bead); if a worktree is left, it
+  confirmation — with an EXPLICIT exception for an in-session-resolved substrate bead, including a
+  rubric-1a teardown whose three-leg proof is recorded verbatim on the bead: there the recorded
+  proof **IS** the confirmation and the command **MUST** close without prompting (the operator's
+  standing ruling on `pg2-kl0o4`). A proof recorded by an EARLIER session is not such evidence. If a
+  worktree is left, it
   **MUST** file a `worktree-review` follow-up bead
   (`bd create … --labels human --defer +window --deps "discovered-from:<id>"`) rather than
   orphan it or feed drain a substrate task.
@@ -315,6 +379,11 @@ specific bead id, honored via the same safe confirm-then-claim path) and **MUST 
 remove `--exclude-label human` or the deferred exclusion, nor broaden scope. No other
 behavioral change.
 
+Plus one **non-behavioral** addition: `drain-beads.md` states, in its own words, that it does **not**
+get `/unblock-human-beads`' rubric-1a provably-lossless teardown carve-out and **MUST NOT** be given
+one, and why (it runs unattended). The statement changes no drain behavior — it records the
+asymmetry as a decision so a later editor does not "fix" it by mirroring the carve-out across.
+
 ---
 
 ## Validation
@@ -331,7 +400,11 @@ standard gate set, which **MUST** pass before the change is claimed complete:
 Manual acceptance: run against the live `bd ready --label human` queue and confirm it (a)
 claims one bead at a time within any `$ARGUMENTS` scope, (b) RELEASEs apply-waiting and
 mislabeled beads without prompting, ENGAGEs genuine-human beads, and NEVER releases a
-substrate-mutating bead to drain, (c) never proceeds to completion (except a substrate bead
+substrate-mutating bead to drain, (b2) tears down and CLOSEs a `worktree-review` bead whose branch
+is provably landed-or-superseded with a clean tree **without** an operator prompt, with the
+patch-id / ancestor / `range-diff` output recorded in the bead comment, while a bead failing ANY
+leg — notably a dirty worktree — still ENGAGEs the operator, (c) never proceeds to completion
+(except a substrate bead
 resolved in-session) and releases via the single atomic `bd update`, (d) reuses (never
 cleans up) parked isolation, (e) DEFERs with a ≥`+1d` window and does not re-nag within the
 run, and (f) uses a distinct `-unblock` actor id. Also confirm `/drain-beads` still drains

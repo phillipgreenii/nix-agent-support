@@ -594,6 +594,17 @@ throws that away (F-7). EXTRACT first, close second.
    `/unblock-human-beads`' RELEASE / CLOSE steps are where it is carried out. Drain itself
    never adjudicates isolation: such a bead is substrate-class and never enters drain's queue.
 
+   **The asymmetry with `/unblock-human-beads` is DELIBERATE, not an oversight.** That command has
+   a class-1a carve-out: it MAY tear down an isolation autonomously, with no operator prompt, when
+   losslessness is MECHANICALLY PROVEN in that same session (clean `git status --porcelain`, and
+   every commit on the branch landed or patch-identical to one that is). **This command gets NO
+   such carve-out and MUST NOT be given one.** Drain runs UNATTENDED, so a proof cannot be
+   inherited — a reading is valid only for the instant it was taken (**F-1**), a peer session may
+   commit into that worktree between the probe and the teardown, and there is no operator to fall
+   back to when a leg reads ambiguously; `/unblock-human-beads` runs with a person in the session.
+   The only isolation drain ever retires is the one IT created for the bead it currently holds,
+   after that bead's own work LANDED (FINISH step 7) — never an adjudication of someone else's.
+
 5. Return to the MAIN LOOP's step 1 (CLAIM).
 
 ## CLOSE-WITH-ABSORPTION-TRACE (a handoff pointer whose items are already absorbed)
@@ -797,6 +808,11 @@ unchanged.
   label-only bead is drain-claimable and bypasses the substrate guard. The label is a MARKER
   with an exit condition, not a permanent property — a recorded verdict on the isolation
   retires it, and the retiring update MUST also restore the priority the entry marker recorded.
+  This command MUST NOT adjudicate such a bead, and MUST NOT be given `/unblock-human-beads`'
+  class-1a provably-lossless teardown carve-out. That asymmetry is DELIBERATE: the carve-out
+  belongs to the ATTENDED command, because an unattended session cannot notice a peer committing
+  into the worktree between the proof and the teardown and has no operator to fall back to on an
+  ambiguous leg, and because a losslessness proof MUST NOT be inherited across sessions (**F-1**).
   Full contract: the always-on `Worktree-Review Label Lifecycle` rules (W-1..W-8).
 - If a skill reports the canonical clone is off its primary branch or dirty, HALT and
   report — EXCEPT under a strategy that never touches the canonical clone, where the
