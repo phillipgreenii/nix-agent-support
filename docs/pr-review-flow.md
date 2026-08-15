@@ -520,6 +520,14 @@ flowchart TD
   - Collapsing beads that are ALREADY duplicated is an operator-scheduled data
     migration. The audit surface **MUST** stay read-only — `pg-pr sync duplicates`
     reports the excess ids and **MUST NOT** grow an apply/fix mode.
+  - A duplicate that has been **ADJUDICATED** — resolved against a NAMED canonical
+    bead sharing its identity — **MUST NOT** be counted, so a completed reconcile
+    moves the total and the total can serve as a "MUST NOT increase" regression
+    baseline. The discriminator **MUST** be structural — a `supersedes` dependency
+    edge between two beads of the same identity — and **MUST NOT** be a match on the
+    close reason. A duplicate that is merely CLOSED is **NOT** adjudicated and
+    **MUST** still be counted. The edge **MUST** name another member of the same
+    identity; an adjudication pointing outside the group **MUST** be ignored.
 - **Code paths:** `packages/pg-pr/internal/store/feedback.go`
   (`UnaddressedFeedback`, `processableFeedbackKinds`,
   `unaddressedFeedbackStatuses`);
@@ -533,7 +541,10 @@ flowchart TD
   `AppendProcessingCycleNote`, `FindDuplicateProcessingCycles`);
   `packages/pg-pr/pkg/beads/mergerequest.go` (`pickCanonicalMergeRequest`,
   `FindDuplicateMergeRequests`);
-  `packages/pg-pr/cmd/pg-pr/sync_duplicates.go` (`syncDuplicatesCmd`).
+  `packages/pg-pr/pkg/beads/adjudication.go` (`adjudicationEdgeType`,
+  `adjudicatedIdentities`, `dropAdjudicated`);
+  `packages/pg-pr/cmd/pg-pr/sync_duplicates.go` (`syncDuplicatesCmd`,
+  `duplicatePopulation`, `duplicateExclusion`).
 - **Coverage:** `unaddressed_feedback_test.go`
   (`TestUnaddressedFeedbackExcludesPRAuthor`, `_ExcludesOursExceptSelfReview`,
   `_ExcludesProcessedAndInactive`, `_DigestTracksTheSet`);
@@ -551,12 +562,19 @@ flowchart TD
   `TestCanonicalMergeRequestPickIsDeterministic`,
   `TestResolveProcessingCycleFindsOpenCycleAcrossParents`, `…TitleMatchIsExact`,
   `…ReportsNewestClosedPredecessor`, `TestFindDuplicate*`);
-  `sync_duplicates_test.go` (`TestSyncDuplicatesHasNoMutatingFlag`).
+  `adjudication_test.go` (`TestAdjudicatedIdentitiesRequiresBothEndpointsInTheGroup`,
+  `TestAdjudicatedIdentitiesIsTransitive`,
+  `TestDropAdjudicatedKeepsTheCanonicalNotTheEdgeSource`);
+  `sync_duplicates_test.go` (`TestSyncDuplicatesHasNoMutatingFlag`,
+  `TestSyncDuplicatesStatesTheAdjudicationExclusion`).
 - **Known gap:** the acceptance measurement — open process-feedback count equal to
   the distinct-PR count in a live workspace — can only be confirmed after the fixed
-  daemon is deployed and has re-synced, and after the already-duplicated beads are
-  reconciled by an operator. `pg-pr sync duplicates` is the read-only measurement;
-  the reconcile itself is deliberately not automated.
+  daemon is deployed and has re-synced. The already-duplicated beads WERE reconciled
+  by the operator on 2026-08-14 (201 excess beads closed against named canonicals),
+  and their adjudications were back-filled as `supersedes` edges, so the audit now
+  reports 0 excess in that workspace and the number is usable as a baseline.
+  `pg-pr sync duplicates` remains the read-only measurement; the reconcile itself is
+  deliberately not automated.
 
 ---
 

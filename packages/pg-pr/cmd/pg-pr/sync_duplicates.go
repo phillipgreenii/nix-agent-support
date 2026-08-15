@@ -50,12 +50,25 @@ var newDuplicateAuditors = func(cfg *config.Config) []duplicateWorkspace {
 // time.
 const duplicatePopulation = "all statuses (open and closed)"
 
+// duplicateExclusion names what the audit scans but does NOT count: a duplicate
+// ADJUDICATED against a canonical bead sharing its identity, recorded as a
+// `supersedes` dependency edge (pg2-peyf0). It is reported separately from
+// duplicatePopulation because the two answer different questions — the population
+// is what was scanned, and closing a duplicate never removes it from that
+// (pg2-0z8fw); this is what a completed reconcile removes from the COUNT, which
+// is what makes the total usable as a regression baseline.
+const duplicateExclusion = "adjudicated duplicates (a supersedes edge to another bead with the same identity)"
+
 // duplicateReport is the machine-readable shape of one workspace's audit.
 type duplicateReport struct {
 	Workspace string `json:"workspace"`
 	// Population states which beads the counts below cover, so a consumer
 	// diffing totals over time can tell the population did not change.
-	Population       string                            `json:"population"`
+	Population string `json:"population"`
+	// Exclusion states which of that population is deliberately NOT counted, so
+	// a consumer can tell a total that dropped because duplicates were resolved
+	// from one that dropped because the audit narrowed.
+	Exclusion        string                            `json:"exclusion,omitempty"`
 	MergeRequests    []beads.DuplicateMergeRequests    `json:"duplicate_merge_requests,omitempty"`
 	ProcessingCycles []beads.DuplicateProcessingCycles `json:"duplicate_process_feedback,omitempty"`
 	Error            string                            `json:"error,omitempty"`
@@ -82,10 +95,21 @@ Both arms cover beads in ALL statuses, open and closed. Closing both members of
 a duplicate pair does not resolve it — both beads still exist — so a closed pair
 stays in the report and the total stays comparable across runs.
 
+ADJUDICATED duplicates are excluded. A duplicate is adjudicated when a
+"supersedes" dependency edge records that it resolves into a named canonical bead
+with the SAME identity:
+
+  bd dep add <excess-id> <keep-id> -t supersedes
+
+The discriminator is that EDGE, never the wording of a close reason, so a
+reconcile that only closes the excess beads does not move the total — record the
+edge as well. The edge does not gate readiness, so it is a pure annotation.
+
 Because the process-feedback arm counts closed beads, a CLOSED PREDECESSOR and
-the successor that supersedes it also share one key and are listed here. That is
-a legitimate lifecycle, not a duplicate, so read each group before acting: the
-successor's description names the predecessor it supersedes.
+the successor that supersedes it also share one key. Such a pair is a legitimate
+lifecycle, not a duplicate: it is excluded once the succession is recorded as a
+supersedes edge, but a succession recorded only in the successor's description
+prose is still listed. Read each group before acting.
 
 It is READ-ONLY: it runs bd list and never writes. Nothing is closed, updated,
 or merged — the excess beads are printed with the bd commands a person may run
@@ -99,7 +123,11 @@ after reviewing them.`,
 		}
 		var reports []duplicateReport
 		for _, ws := range newDuplicateAuditors(cfg) {
-			rep := duplicateReport{Workspace: ws.Path, Population: duplicatePopulation}
+			rep := duplicateReport{
+				Workspace:  ws.Path,
+				Population: duplicatePopulation,
+				Exclusion:  duplicateExclusion,
+			}
 			if rep.Workspace == "" {
 				rep.Workspace = "(cwd)"
 			}
@@ -135,6 +163,9 @@ func renderDuplicateReports(w io.Writer, reports []duplicateReport) {
 		if rep.Population != "" {
 			_, _ = fmt.Fprintf(w, "  scanned %s\n", rep.Population)
 		}
+		if rep.Exclusion != "" {
+			_, _ = fmt.Fprintf(w, "  not counted: %s\n", rep.Exclusion)
+		}
 		if rep.Error != "" {
 			_, _ = fmt.Fprintf(w, "  ! %s\n", rep.Error)
 			continue
@@ -166,6 +197,12 @@ func renderDuplicateReports(w io.Writer, reports []duplicateReport) {
 	_, _ = fmt.Fprintln(w, "This command does NOT change them.")
 	_, _ = fmt.Fprintln(w, "Review each one first; a person may then close it, e.g.:")
 	_, _ = fmt.Fprintln(w, "  bd close <excess-id> --reason \"duplicate of <keep-id> (same repo#pr)\"")
+	// The close reason is PROSE and is deliberately not this audit's
+	// discriminator, so closing alone leaves the bead in the count. Print the
+	// structural half of the adjudication beside it, or a reconcile that looks
+	// complete cannot move the number (pg2-peyf0).
+	_, _ = fmt.Fprintln(w, "and record the adjudication structurally, or the count will not drop:")
+	_, _ = fmt.Fprintln(w, "  bd dep add <excess-id> <keep-id> -t supersedes")
 }
 
 func joinMergeRequestIDs(mrs []beads.MergeRequest) string {

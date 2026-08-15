@@ -505,6 +505,168 @@ func TestAppendProcessingCycleNoteIsOneUpdate(t *testing.T) {
 	}
 }
 
+// adjudicatedPairFixture is closedPairFixture's shape with the ADJUDICATION
+// recorded: zr-agwaj (the excess) carries a `supersedes` edge naming zr-4jpnl
+// (the canonical the pg2-xqwy6 reconcile picked). edgeFrom/edgeTo/edgeType are
+// parameters so one fixture can also spell the edge the other way round, or with
+// a type that is NOT an adjudication.
+func adjudicatedPairFixture(edgeFrom, edgeTo, edgeType string) string {
+	return `{"data":[
+      {"id":"zr-agwaj","title":"process-feedback: o/r#104236","status":"closed","issue_type":"task","created_at":"2026-07-28T15:23:22Z",
+       "dependencies":[{"issue_id":"` + edgeFrom + `","depends_on_id":"` + edgeTo + `","type":"` + edgeType + `"}]},
+      {"id":"zr-4jpnl","title":"process-feedback: o/r#104236","status":"closed","issue_type":"task","created_at":"2026-07-28T15:23:22Z"}
+    ]}`
+}
+
+// TestFindDuplicateProcessingCyclesExcludesAnAdjudicatedDuplicate is the
+// regression test for pg2-peyf0: the pg2-xqwy6 reconcile closed all 201 excess
+// beads against named canonicals and the audit reported the SAME counts, because
+// the population is every status. A duplicate that has been ADJUDICATED — a
+// `supersedes` edge to another bead with the same key — must leave the count, so
+// a completed reconcile can move the number and the total can serve as
+// pg2-0waxt's regression baseline.
+func TestFindDuplicateProcessingCyclesExcludesAnAdjudicatedDuplicate(t *testing.T) {
+	r := &listRunner{allTasks: adjudicatedPairFixture("zr-agwaj", "zr-4jpnl", "supersedes")}
+	dups, err := NewClientWithRunner(r).FindDuplicateProcessingCycles(context.Background())
+	if err != nil {
+		t.Fatalf("FindDuplicateProcessingCycles: %v", err)
+	}
+	if len(dups) != 0 {
+		t.Fatalf("an adjudicated duplicate must not be counted, got %d group(s): %+v", len(dups), dups)
+	}
+	assertOnlyBDList(t, r)
+}
+
+// assertOnlyBDList pins that an audit call issued NOTHING but `bd list`. It is
+// stronger than "no writes": the adjudication marker is read out of the rows
+// `bd list` already returns, so the exclusion must not have added a `bd dep list`
+// per group either.
+func assertOnlyBDList(t *testing.T, r *listRunner) {
+	t.Helper()
+	for _, call := range r.calls {
+		if len(call) == 0 || call[0] != "list" {
+			t.Errorf("the audit must issue only `bd list`, but ran `bd %v` (all calls: %v)", call, r.calls)
+		}
+	}
+}
+
+// TestFindDuplicateProcessingCyclesExclusionNeedsTheEdgeNotJustAClose is the
+// other half of the same guarantee and the one that protects pg2-0z8fw: the
+// discriminator is the EDGE. A closed pair with no edge, or with an edge of any
+// other type, is still a duplicate nobody has resolved and is still reported.
+func TestFindDuplicateProcessingCyclesExclusionNeedsTheEdgeNotJustAClose(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		fixture string
+	}{
+		{name: "closed with no edge at all", fixture: closedPairFixture("closed", "closed")},
+		{name: "closed with a related edge", fixture: adjudicatedPairFixture("zr-agwaj", "zr-4jpnl", "related")},
+		{name: "closed with a parent-child edge", fixture: adjudicatedPairFixture("zr-agwaj", "zr-4jpnl", "parent-child")},
+		// An adjudication naming a bead OUTSIDE this identity proves nothing about
+		// this duplicate, so it must not silently remove it from the report.
+		{name: "supersedes edge leaving the group", fixture: adjudicatedPairFixture("zr-agwaj", "zr-unrelated", "supersedes")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dups, err := NewClientWithRunner(&listRunner{allTasks: tc.fixture}).FindDuplicateProcessingCycles(context.Background())
+			if err != nil {
+				t.Fatalf("FindDuplicateProcessingCycles: %v", err)
+			}
+			if excessTotal(dups) != 1 {
+				t.Fatalf("total = %d, want 1 — only an adjudication may remove a duplicate from the count: %+v",
+					excessTotal(dups), dups)
+			}
+		})
+	}
+}
+
+// TestFindDuplicateProcessingCyclesAdjudicationIsPerBeadNotPerGroup pins the
+// MIXED case: a group of three where only one excess bead has been adjudicated
+// must still report the OTHER one. Dropping the whole group on sight of an edge
+// would hide a duplicate nobody has resolved — the same class of silent
+// under-count pg2-0z8fw removed.
+func TestFindDuplicateProcessingCyclesAdjudicationIsPerBeadNotPerGroup(t *testing.T) {
+	r := &listRunner{allTasks: `{"data":[
+      {"id":"cyc-aaa","title":"process-feedback: o/r#7","status":"open","issue_type":"task"},
+      {"id":"cyc-bbb","title":"process-feedback: o/r#7","status":"closed","issue_type":"task",
+       "dependencies":[{"issue_id":"cyc-bbb","depends_on_id":"cyc-aaa","type":"supersedes"}]},
+      {"id":"cyc-ccc","title":"process-feedback: o/r#7","status":"closed","issue_type":"task"}
+    ]}`}
+	dups, err := NewClientWithRunner(r).FindDuplicateProcessingCycles(context.Background())
+	if err != nil {
+		t.Fatalf("FindDuplicateProcessingCycles: %v", err)
+	}
+	if len(dups) != 1 {
+		t.Fatalf("expected the unresolved duplicate to still be reported, got %d group(s): %+v", len(dups), dups)
+	}
+	if dups[0].Canonical.ID != "cyc-aaa" {
+		t.Errorf("canonical = %q, want cyc-aaa", dups[0].Canonical.ID)
+	}
+	if len(dups[0].Excess) != 1 || dups[0].Excess[0].ID != "cyc-ccc" {
+		t.Errorf("excess = %+v, want [cyc-ccc] (cyc-bbb is adjudicated)", dups[0].Excess)
+	}
+}
+
+// TestFindDuplicateProcessingCyclesExclusionIsDirectionAgnostic pins that the
+// audit reads an adjudication whichever way the edge was written. bd's own type
+// names do not read consistently in one direction (`blocks` names the blocker as
+// the TARGET; `discovered-from` names the origin as the target), and the
+// `supersedes` edges already in these workspaces disagree about it, so keying on
+// one orientation would let a real adjudication go unread. The survivor is still
+// the arm's canonical pick, not the edge's source.
+func TestFindDuplicateProcessingCyclesExclusionIsDirectionAgnostic(t *testing.T) {
+	r := &listRunner{allTasks: adjudicatedPairFixture("zr-4jpnl", "zr-agwaj", "supersedes")}
+	dups, err := NewClientWithRunner(r).FindDuplicateProcessingCycles(context.Background())
+	if err != nil {
+		t.Fatalf("FindDuplicateProcessingCycles: %v", err)
+	}
+	if len(dups) != 0 {
+		t.Fatalf("a reversed adjudication edge must still be read, got %d group(s): %+v", len(dups), dups)
+	}
+}
+
+// TestFindDuplicateMergeRequestsExcludesAnAdjudicatedDuplicate is pg2-peyf0 for
+// the OTHER arm: the merge-request half of the 201 (54 beads) was reconciled the
+// same way and must drop out of the count the same way. mr-a is the excess bead
+// the audit itself picked (mr-b is more recently synced), so the fixture is the
+// real reconcile shape.
+func TestFindDuplicateMergeRequestsExcludesAnAdjudicatedDuplicate(t *testing.T) {
+	r := &listRunner{mergeRequests: `{"data":[
+      {"id":"mr-a","status":"closed","issue_type":"merge-request","metadata":{"repo":"o/r","pr_number":7,"last_synced_at":"2026-07-01T00:00:00Z"},
+       "dependencies":[{"issue_id":"mr-a","depends_on_id":"mr-b","type":"supersedes"}]},
+      {"id":"mr-b","status":"open","issue_type":"merge-request","metadata":{"repo":"o/r","pr_number":7,"last_synced_at":"2026-07-29T00:00:00Z"}}
+    ]}`}
+	dups, err := NewClientWithRunner(r).FindDuplicateMergeRequests(context.Background())
+	if err != nil {
+		t.Fatalf("FindDuplicateMergeRequests: %v", err)
+	}
+	if len(dups) != 0 {
+		t.Fatalf("an adjudicated merge-request duplicate must not be counted, got %+v", dups)
+	}
+	assertOnlyBDList(t, r)
+}
+
+// TestFindDuplicateMergeRequestsExclusionNeedsTheEdge is the merge-request
+// counterpart of the close-is-not-adjudication guard: a CLOSED duplicate pair
+// with no adjudication is still reported, so this arm's long-standing
+// status-agnostic count is not narrowed by pg2-peyf0.
+func TestFindDuplicateMergeRequestsExclusionNeedsTheEdge(t *testing.T) {
+	r := &listRunner{mergeRequests: `{"data":[
+      {"id":"mr-a","status":"closed","issue_type":"merge-request","metadata":{"repo":"o/r","pr_number":7,"last_synced_at":"2026-07-01T00:00:00Z"}},
+      {"id":"mr-b","status":"closed","issue_type":"merge-request","metadata":{"repo":"o/r","pr_number":7,"last_synced_at":"2026-07-29T00:00:00Z"},
+       "dependencies":[{"issue_id":"mr-b","depends_on_id":"mr-a","type":"related"}]}
+    ]}`}
+	dups, err := NewClientWithRunner(r).FindDuplicateMergeRequests(context.Background())
+	if err != nil {
+		t.Fatalf("FindDuplicateMergeRequests: %v", err)
+	}
+	if len(dups) != 1 || len(dups[0].Excess) != 1 {
+		t.Fatalf("a closed, unadjudicated pair must still be reported, got %+v", dups)
+	}
+	if dups[0].Canonical.ID != "mr-b" || dups[0].Excess[0].ID != "mr-a" {
+		t.Errorf("keep/excess = %s/%s, want mr-b/mr-a", dups[0].Canonical.ID, dups[0].Excess[0].ID)
+	}
+}
+
 func containsStr(hay []string, want string) bool {
 	for _, s := range hay {
 		if s == want {

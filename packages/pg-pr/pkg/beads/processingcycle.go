@@ -43,6 +43,12 @@ type ProcessingCycle struct {
 	// CreatedAt is the bead's creation timestamp, used to pick the NEWEST closed
 	// predecessor deterministically.
 	CreatedAt string `json:"created_at,omitempty"`
+	// Dependencies are the bead's OUTGOING dependency edges, carried so the
+	// duplicate audit can read the `supersedes` adjudication marker out of the
+	// same `bd list` it already issues (adjudication.go). Not serialized: the
+	// audit's --json shape is a consumed contract and adjudicated beads never
+	// appear in it.
+	Dependencies []Dependency `json:"-"`
 }
 
 // ProcessingCycleState is the resolved process-feedback bead situation for one
@@ -262,12 +268,13 @@ func (c *Client) listProcessingCycles(ctx context.Context, statusFlag string) ([
 			continue
 		}
 		cycles = append(cycles, ProcessingCycle{
-			ID:          iss.ID,
-			Title:       iss.Title,
-			Status:      iss.Status,
-			Description: iss.Description,
-			Labels:      iss.Labels,
-			CreatedAt:   iss.CreatedAt,
+			ID:           iss.ID,
+			Title:        iss.Title,
+			Status:       iss.Status,
+			Description:  iss.Description,
+			Labels:       iss.Labels,
+			CreatedAt:    iss.CreatedAt,
+			Dependencies: dependenciesFromBD(iss.Dependencies),
 		})
 	}
 	return cycles, nil
@@ -465,15 +472,27 @@ type DuplicateProcessingCycles struct {
 // list` excludes closed beads by default, so an omitted selector silently
 // reproduces the very open-only bug this scan exists to avoid.
 //
-// KNOWN OVER-COUNT: unlike a merge-request bead, a process-feedback key may
+// ADJUDICATED duplicates are excluded (pg2-peyf0): a cycle recorded as resolving
+// into a canonical cycle for the SAME key, via a `supersedes` dependency edge, is
+// retired from its group before the count, so a completed reconcile actually
+// moves the number. A cycle that is merely CLOSED is not adjudicated and is still
+// counted — that is the status-agnostic guarantee above, and it is unchanged. The
+// edges arrive in the same `bd list`, so the exclusion costs no extra bd call.
+//
+// RESIDUAL OVER-COUNT: unlike a merge-request bead, a process-feedback key may
 // legitimately resolve to several beads OVER TIME — ResolveProcessingCycle lets
 // a successor open once a predecessor has closed, and the successor's
 // description names it ("Supersedes closed process-feedback bead <id>"). Such a
-// pair is a lifecycle, not a duplicate, and a status-agnostic scan cannot tell
-// the two apart, so it is reported too. That is why the audit stays READ-ONLY
-// and prints ids for a person to review rather than a collapse plan. Measured
-// 2026-08-13 on the zr workspace: 0 of 742 process-feedback beads carried a
-// supersedes reference, so no group in that report was a succession.
+// pair is a lifecycle, not a duplicate. A succession that is RECORDED as a
+// `supersedes` edge is now excluded by the same mechanism as an adjudication —
+// but a succession recorded only in the description prose is NOT, because the
+// discriminator is deliberately the edge and never the text (the operator's
+// ruling on pg2-0waxt, 2026-08-14). Writing that edge in the succession path is
+// pg2-0waxt's remaining half. Until it lands, such a pair is still reported,
+// which is why the audit stays READ-ONLY and prints ids for a person to review
+// rather than a collapse plan. Measured 2026-08-14 on the zr workspace: 0 of 690
+// process-feedback beads carried a supersedes reference, so no group in that
+// report was a succession.
 func (c *Client) FindDuplicateProcessingCycles(ctx context.Context) ([]DuplicateProcessingCycles, error) {
 	cycles, err := c.listProcessingCycles(ctx, "--all")
 	if err != nil {
@@ -494,6 +513,13 @@ func (c *Client) FindDuplicateProcessingCycles(ctx context.Context) ([]Duplicate
 		g := groups[k]
 		if len(g) < 2 {
 			continue
+		}
+		g = dropAdjudicated(g,
+			func(pc ProcessingCycle) string { return pc.ID },
+			func(pc ProcessingCycle) []Dependency { return pc.Dependencies },
+			pickAuditCanonicalCycle)
+		if len(g) < 2 {
+			continue // every duplicate for this key has been adjudicated away
 		}
 		canonical := pickAuditCanonicalCycle(g)
 		dup := DuplicateProcessingCycles{Key: k, Canonical: *canonical}

@@ -138,6 +138,66 @@ func TestSyncDuplicatesJSONStatesItsPopulation(t *testing.T) {
 	}
 }
 
+// TestSyncDuplicatesStatesTheAdjudicationExclusion pins pg2-peyf0's operator-facing
+// half. Two things have to be visible or the number is unusable: that the count
+// EXCLUDES adjudicated duplicates (so a total that fell is not read as the audit
+// having narrowed), and that closing an excess bead is not by itself an
+// adjudication — the structural edge is, and without it the count cannot drop,
+// which is exactly how the pg2-xqwy6 reconcile closed 201 beads and moved nothing.
+func TestSyncDuplicatesStatesTheAdjudicationExclusion(t *testing.T) {
+	withDuplicateAuditor(t, &fakeAuditor{
+		mrs: []beads.DuplicateMergeRequests{{
+			Repo: "o/r", PRNumber: 102096,
+			Canonical: beads.MergeRequest{ID: "zr-cvr5v"},
+			Excess:    []beads.MergeRequest{{ID: "zr-orr0a"}},
+		}},
+	})
+	got := runDuplicates(t)
+	for _, want := range []string{
+		"not counted: " + duplicateExclusion,
+		"bd dep add <excess-id> <keep-id> -t supersedes",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("output missing %q; got:\n%s", want, got)
+		}
+	}
+}
+
+// TestSyncDuplicatesJSONStatesTheAdjudicationExclusion is the machine-readable
+// half: a consumer diffing totals across runs must be able to tell a drop caused
+// by resolved duplicates from a drop caused by a changed audit.
+func TestSyncDuplicatesJSONStatesTheAdjudicationExclusion(t *testing.T) {
+	withDuplicateAuditor(t, &fakeAuditor{})
+	var out bytes.Buffer
+	rootCmd.SetOut(&out)
+	rootCmd.SetErr(&out)
+	rootCmd.SetArgs([]string{"sync", "duplicates", "--json"})
+	t.Cleanup(func() {
+		rootCmd.SetOut(nil)
+		rootCmd.SetErr(nil)
+		rootCmd.SetArgs(nil)
+		syncDuplicatesJSON = false
+		_ = syncDuplicatesCmd.Flags().Set("json", "false")
+	})
+	if err := rootCmd.ExecuteContext(context.Background()); err != nil {
+		t.Fatalf("sync duplicates --json: %v", err)
+	}
+	var got []duplicateReport
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal %q: %v", out.String(), err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("want one workspace report, got %d: %+v", len(got), got)
+	}
+	if got[0].Exclusion != duplicateExclusion {
+		t.Errorf("exclusion = %q, want %q", got[0].Exclusion, duplicateExclusion)
+	}
+	if got[0].Population != duplicatePopulation {
+		t.Errorf("population = %q, want %q — the SCANNED population is unchanged by the exclusion",
+			got[0].Population, duplicatePopulation)
+	}
+}
+
 // TestSyncDuplicatesHasNoMutatingFlag pins the read-only contract: the audit must
 // not grow an --apply/--fix mode. Collapsing existing beads is an
 // operator-scheduled migration against a live workspace, not a CLI side effect.

@@ -24,7 +24,7 @@
 
 `pg-pr branch detect`
 
-- Report beads duplicated per PR, in all statuses (read-only audit; changes nothing):
+- Report beads duplicated per PR, in all statuses, excluding those already adjudicated against a canonical bead via a `supersedes` edge (read-only audit; changes nothing):
 
 `pg-pr sync duplicates`
 

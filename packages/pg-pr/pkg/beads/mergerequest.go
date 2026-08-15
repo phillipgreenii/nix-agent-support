@@ -49,6 +49,12 @@ type MergeRequest struct {
 	Fields   MergeRequestFields `json:"-"`
 	Priority int                `json:"-"`
 	Labels   []string           `json:"-"`
+	// Dependencies are the bead's OUTGOING dependency edges, carried so the
+	// duplicate audit can read the `supersedes` adjudication marker out of the
+	// same `bd list` it already issues (adjudication.go). Not serialized: the
+	// audit's --json shape is a consumed contract and adjudicated beads never
+	// appear in it.
+	Dependencies []Dependency `json:"-"`
 }
 
 // bdIssue is the bd CLI's JSON shape (subset we care about). Metadata
@@ -542,6 +548,14 @@ type DuplicateMergeRequests struct {
 // a mutating counterpart in this package: collapsing existing beads is an
 // operator-scheduled data migration, not something a sync tick may do.
 //
+// ADJUDICATED duplicates are excluded (pg2-peyf0): a bead recorded as resolving
+// into a canonical bead for the SAME pair, via a `supersedes` dependency edge, is
+// retired from its group before the count, so a completed reconcile actually
+// moves the number. A bead that is merely CLOSED is not adjudicated and is still
+// counted — closing a duplicate does not resolve it (pg2-0z8fw). The edges come
+// out of the same `bd list` this already issues, so the exclusion costs no extra
+// bd call and the audit stays one read.
+//
 // Pairs are returned sorted by repo then PR number so the report is stable.
 func (c *Client) FindDuplicateMergeRequests(ctx context.Context) ([]DuplicateMergeRequests, error) {
 	all, err := c.ListMergeRequests(ctx, true)
@@ -576,6 +590,13 @@ func (c *Client) FindDuplicateMergeRequests(ctx context.Context) ([]DuplicateMer
 		g := groups[k]
 		if len(g) < 2 {
 			continue
+		}
+		g = dropAdjudicated(g,
+			func(m MergeRequest) string { return m.ID },
+			func(m MergeRequest) []Dependency { return m.Dependencies },
+			pickCanonicalMergeRequest)
+		if len(g) < 2 {
+			continue // every duplicate for this pair has been adjudicated away
 		}
 		canonical := pickCanonicalMergeRequest(g)
 		dup := DuplicateMergeRequests{Repo: k.repo, PRNumber: k.pr, Canonical: *canonical}
@@ -771,13 +792,14 @@ func bdIssueToMergeRequest(iss bdIssue) MergeRequest {
 		}
 	}
 	return MergeRequest{
-		ID:       iss.ID,
-		Title:    iss.Title,
-		Status:   iss.Status,
-		Type:     iss.Type,
-		Fields:   f,
-		Priority: iss.Priority,
-		Labels:   iss.Labels,
+		ID:           iss.ID,
+		Title:        iss.Title,
+		Status:       iss.Status,
+		Type:         iss.Type,
+		Fields:       f,
+		Priority:     iss.Priority,
+		Labels:       iss.Labels,
+		Dependencies: dependenciesFromBD(iss.Dependencies),
 	}
 }
 
