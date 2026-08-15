@@ -49,8 +49,9 @@ test-suite runtime`, so never point it at a whole large module:
   commit message. This is a diagnostic, not a tracked metric.
 - **MUST NOT** add it to CI, a pre-commit hook, or a `checks.*` derivation. It is
   too slow and its result is not reproducible enough to gate on.
-- **MUST NOT** point it at `./...`; that pattern is rejected. Pass a directory
-  (walked recursively) or a single `.go` file.
+- **MUST NOT** point it at `./...`; that pattern is rejected. Pass a directory —
+  it is walked recursively, so a single package works. Single-file targets are
+  rejected too.
 
 ## Where the highest-value gaps usually are
 
