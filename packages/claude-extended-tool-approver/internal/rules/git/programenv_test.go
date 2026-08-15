@@ -330,14 +330,32 @@ func TestGit_ProgramEnvVar_DeclinedVariablesStayUnscreened(t *testing.T) {
 	if got := evalCmd(t, "GIT_PROXY_COMMAND=/tmp/evil git fetch origin"); got.Decision == hookio.Approve {
 		t.Errorf("`GIT_PROXY_COMMAND=/tmp/evil git fetch origin`: got APPROVE (%s) — pg2-qi1jo settled the alternate-transport family by SCREENING it; git executes this value as the transport proxy (marker evidence in scripts/probe-pg2-qi1jo.sh)", got.Reason)
 	}
-	// GIT_ALLOW_PROTOCOL: the one member that IS still declined, and its declination is a
-	// table-shape consequence rather than a policy one. It is the env twin of
-	// `protocol.<n>.allow`, which is a configINTERLOCK — it names no program, it removes a
-	// refusal — so it has no home in the program-naming table, and this file has no
-	// interlock env screen for it to join. The row is pinned so the day one appears, this
-	// assertion is where the declination has to be revisited.
-	if got := evalCmd(t, "GIT_ALLOW_PROTOCOL=ext git ls-remote origin"); got.Decision != hookio.Approve {
-		t.Errorf("`GIT_ALLOW_PROTOCOL=ext git ls-remote origin`: got %s (%s), want APPROVE — screening it needs an INTERLOCK env screen this file does not have, and covering it while leaving `GIT_SSL_NO_VERIFY` open is the split pg2-qi1jo's family instruction existed to prevent", got.Decision, got.Reason)
+	// GIT_ALLOW_PROTOCOL: NO LONGER DECLINED (pg2-nd6i3, 2026-08-14), and this assertion
+	// INVERTS for the same reason GIT_PROXY_COMMAND's did — the declination was a
+	// TABLE-SHAPE consequence, and the missing table now exists. Its previous text said
+	// "the day one appears, this assertion is where the declination has to be revisited";
+	// gitInterlockEnvVars is that table, so this is that revision. The variable is the env
+	// twin of `protocol.<n>.allow`, a configINTERLOCK — it names no program, it removes a
+	// refusal — and it MEASURED running a marker as `git-upload-pack` through the `ext::`
+	// transport, which is arbitrary command execution rather than a merely weakened check.
+	//
+	// The family did NOT split: `GIT_SSL_NO_VERIFY` and `GIT_PROTOCOL_FROM_USER` moved in
+	// the SAME change, which is what pg2-qi1jo's "under one ruling" instruction required.
+	// Both are asserted below.
+	if got := evalCmd(t, "GIT_ALLOW_PROTOCOL=ext git ls-remote origin"); got.Decision == hookio.Approve {
+		t.Errorf("`GIT_ALLOW_PROTOCOL=ext git ls-remote origin`: got APPROVE (%s) — pg2-nd6i3 added the interlock env screen and this variable is the difference between an inert `ext::` URL and arbitrary command execution (marker ran as `git-upload-pack`)", got.Reason)
+	}
+	// THE REST OF THE INTERLOCK FAMILY, asserted here so a later change cannot screen one
+	// member and leave another — the split this family's instruction exists to prevent.
+	// declinedGitProgramEnvVars is EMPTY as of this change; the loop at the top of this
+	// test accepts that, so these rows are what actually hold the family together.
+	for _, cmd := range []string{
+		"GIT_SSL_NO_VERIFY=1 git fetch origin",
+		"GIT_PROTOCOL_FROM_USER=1 git ls-remote origin",
+	} {
+		if got := evalCmd(t, cmd); got.Decision == hookio.Approve {
+			t.Errorf("`%s`: got APPROVE (%s) — it removes a refusal git makes by default and belongs to the same interlock family as GIT_ALLOW_PROTOCOL; screening one member and not another is the family split pg2-qi1jo's instruction forbids", cmd, got.Reason)
+		}
 	}
 }
 

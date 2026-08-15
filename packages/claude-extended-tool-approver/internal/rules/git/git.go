@@ -256,6 +256,21 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		if res.Decision == hookio.Approve && hasGitProgramEnvVar(envs) {
 			return r.refuse("git: a GIT_* env assignment names the program git will execute; deferring to prompt")
 		}
+		// THE INTERLOCK SIBLING (pg2-nd6i3). Same shape and same reasoning as the demotion
+		// above, one hazard class over: the variable names no program, it REMOVES A REFUSAL
+		// GIT MAKES BY DEFAULT. `GIT_ALLOW_PROTOCOL` and `GIT_PROTOCOL_FROM_USER` both
+		// MEASURED running a marker as `git-upload-pack` through the `ext::` transport,
+		// which is arbitrary command execution, while the `-c` and `git config` spellings of
+		// the same interlock were already screened — so the env spelling was the loosest of
+		// the three. See gitInterlockEnvVars for the per-variable evidence and the
+		// enumeration.
+		//
+		// A SEPARATE DEMOTION, for the reason the comment above gives for its own
+		// separateness: the two rest on different measurements and different tables, and
+		// fusing them would leave one rationale covering two independent boundaries.
+		if res.Decision == hookio.Approve && hasGitInterlockEnvVar(envs) {
+			return r.refuse("git: a GIT_* env assignment removes a refusal git makes by default; deferring to prompt")
+		}
 		// A `-C <path>` chdir runs the subcommand against a directory other than
 		// the invocation CWD. When the rule would otherwise Approve, withdraw the
 		// approval if that directory is unsafe for the subcommand's access class:
@@ -2355,30 +2370,22 @@ var gitEditorEnvVars = map[string]bool{
 // permanent list, so an empty map means every measured sink is screened —
 // TestGit_ProgramEnvVar_DeclinedVariablesStayUnscreened is written to accept that rather
 // than to require a member.
-var declinedGitProgramEnvVars = map[string]string{
-	// MEASURED (git 2.54.0, 2026-08-14, scripts/probe-pg2-qi1jo.sh): `GIT_ALLOW_PROTOCOL=ext
-	// git ls-remote 'ext::<marker> %S'` RAN the marker as `git-upload-pack`, and the same
-	// command without the variable did not — so this variable is the difference between an
-	// inert `ext::` URL and arbitrary command execution, which is a live auto-approving hole
-	// (measured `allow` on main @ a064a73e).
-	//
-	// IT IS DECLINED FOR A TABLE-SHAPE REASON, NOT A POLICY ONE, and the distinction is
-	// what bounds it. `GIT_ALLOW_PROTOCOL` is the env twin of `protocol.<n>.allow`, which
-	// pg2-qi1jo classed configINTERLOCK: it NAMES NO PROGRAM, it removes a refusal git
-	// makes by default. gitProgramEnvVars is the program-NAMING table and its own check
-	// (TestGit_ProgramEnvVar_TwinIsAConfigSinkInTheRealTable) requires every twin to resolve
-	// as a configSink, so putting this variable there would either fail that check or force
-	// an exception map back into it — the exact escape hatch pg2-h1ori deleted.
-	//
-	// WHAT CLOSING IT NEEDS, so the next reader does not have to re-derive it: an INTERLOCK
-	// env screen, which does not exist in this file at all. The class's other env twin is
-	// `GIT_SSL_NO_VERIFY` (for `http.sslVerify`), unscreened for exactly the same reason, so
-	// this is an INHERITED structural gap rather than one pg2-qi1jo's ruling opened — and a
-	// screen covering one of the two while leaving the other is the split this family's
-	// instruction existed to prevent. It is a third table, its own measurements and its own
-	// prompt-volume replay, hence its own bead.
-	"GIT_ALLOW_PROTOCOL": "it is the env twin of the configINTERLOCK half of the alternate-transport family, and this file has no interlock env screen for it to join — `GIT_SSL_NO_VERIFY` is unscreened for the same reason",
-}
+// THE REGISTER IS NOW EMPTY, and its last member left the way the two before it did — the
+// ruling it deferred to was MADE rather than worked around:
+//
+//   - `GIT_ALLOW_PROTOCOL` (pg2-nd6i3, 2026-08-14). It was declined for a TABLE-SHAPE
+//     reason, not a policy one: it is the env twin of `protocol.<n>.allow`, which is
+//     configINTERLOCK, and this file had no interlock env screen for it to join. That
+//     screen now exists — see gitInterlockEnvVars — so the variable MOVED there, together
+//     with `GIT_SSL_NO_VERIFY` (unscreened for exactly the same reason) and with
+//     `GIT_PROTOCOL_FROM_USER`, which the enumeration that bead required turned up and
+//     which no earlier bead had named. All three in one change, which is what the
+//     alternate-transport family's "under one ruling" instruction asked for.
+//
+// An empty map means every measured sink and every measured interlock is screened. Do NOT
+// add a placeholder to keep it non-empty —
+// TestGit_ProgramEnvVar_DeclinedVariablesStayUnscreened is written to accept empty.
+var declinedGitProgramEnvVars = map[string]string{}
 
 // hasGitProgramEnvVar reports whether this leaf's own env-assignment prefix carries a
 // variable through which git takes the PROGRAM IT EXECUTES from the caller. See
@@ -2408,6 +2415,94 @@ func hasGitProgramEnvVar(envs []cmdparse.EnvAssignment) bool {
 			continue
 		}
 		return true
+	}
+	return false
+}
+
+// gitInterlockEnvVars maps each `GIT_*` environment variable MEASURED to REMOVE A REFUSAL
+// GIT MAKES BY DEFAULT to the `git config` key it is the env spelling of. It is the THIRD
+// env table in this file, and it had to be created rather than extended into (pg2-nd6i3):
+// the interlock class NAMES NO PROGRAM, so `gitProgramEnvVars` — whose defining property
+// is program-naming, enforced by TestGit_ProgramEnvVar_TwinIsAConfigSinkInTheRealTable —
+// could not hold these without either failing that check or taking back the exception map
+// pg2-h1ori deleted.
+//
+// THE HOLE IT CLOSES. Measured on git 2.54.0 at the hook-output boundary,
+// cwd=/Users/phillipg/phillipg_mbp, mode=auto, against main @004f370c:
+//
+//	approve   GIT_ALLOW_PROTOCOL=ext git ls-remote 'ext::<cmd> %S'
+//	approve   GIT_SSL_NO_VERIFY=1 git fetch origin
+//	approve   GIT_PROTOCOL_FROM_USER=1 git ls-remote 'ext::<cmd> %S'
+//	abstain   git -c protocol.ext.allow=always ls-remote 'ext::<cmd> %S'   <- the `-c` twin
+//	abstain   git -c http.sslVerify=false fetch origin                     <- the `-c` twin
+//	ask       git config --global protocol.ext.allow always                 <- the persistent twin
+//	ask       git config --global http.sslVerify false                      <- the persistent twin
+//
+// So for BOTH gated interlock keys the ENV spelling was the LOOSEST of the three, which is
+// the relation pg2-6c85x established for the program-naming family inverted — and
+// TestGit_InterlockEnvVar_IsNeverLooserThanTheConfigSpelling now pins it.
+//
+// `ext::` IS GIT'S ARBITRARY-COMMAND TRANSPORT, so the first and third rows are execution,
+// not merely a weakened check. Both RAN A MARKER, which is the evidence that distinguishes
+// them from a plausible-looking guess:
+//
+//	GIT_ALLOW_PROTOCOL=ext …                                 -> marker ran as `git-upload-pack`
+//	GIT_PROTOCOL_FROM_USER=1 -c protocol.ext.allow=user …    -> marker ran as `git-upload-pack`
+//	(no variable)                                            -> `fatal: transport 'ext' not allowed`
+//	GIT_PROTOCOL_FROM_USER=0 -c protocol.ext.allow=user …    -> `fatal: transport 'ext' not allowed`
+//
+// GIT_PROTOCOL_FROM_USER WAS NOT IN THE BEAD, and finding it is why the bead required the
+// family be ENUMERATED rather than taken as the pair already known. It does not unlock
+// anything on its own — the first probe pair above shows `=1` alone still refused — but
+// under the `user` policy, which is git's default for several protocols, `=1` is exactly
+// the difference between a refusal and running the command. A screen covering the two
+// named variables and missing this one would have been the same family split the bead's
+// governing instruction exists to prevent.
+//
+// THE ENUMERATION IS FROM THE BINARY'S OWN STRING TABLE, not from the man pages (this
+// machine's are incomplete) — 203 `GIT_*` names in git 2.54.0, of which 14 are
+// interlock-shaped. The other 11 are deliberately absent:
+//
+//   - `clean.requireForce` and `receive.denyCurrentBranch`, the two remaining
+//     configInterlock keys, HAVE NO ENV TWIN AT ALL — confirmed against that same string
+//     table. So this table covers every gated interlock key that has an env spelling.
+//   - MORE RESTRICTIVE, so screening them would be a pure false positive:
+//     `GIT_TERMINAL_PROMPT=0` (suppresses prompting), `GIT_NO_REPLACE_OBJECTS`
+//     (DISABLES replace refs, which are the hazard), `GIT_NO_LAZY_FETCH`.
+//   - NOT A REFUSAL AT ALL: `GIT_FORCE_THREADS`, `GIT_FORCE_UNTRACKED_CACHE`,
+//     `GIT_SHALLOW_FILE`, `GIT_TRACE_SHALLOW`, `GIT_TEST_DISALLOW_ABBREVIATED_OPTIONS`.
+//   - `GIT_CONFIG_NOSYSTEM` is already screened by the `GIT_CONFIG_` prefix
+//     (hasGitConfigEnvInjection) and measured `abstain`, so it needs no entry here.
+//   - `GIT_ALLOW_NULL_SHA1` and `GIT_ATTR_NOSYSTEM` ARE interlock-shaped and are
+//     deliberately NOT screened: their config twins (`fsck.<msg-id>` and the
+//     gitattributes search path) are NOT IN gatedConfigKeys, so screening the env half
+//     alone would split a family across two routes — the exact thing this bead exists to
+//     avoid. Gating those keys is its own survey, its own ruling and its own replay.
+//     Recorded here rather than omitted so the next reader inherits the enumeration.
+//
+// IT IS VALUE-BLIND, matching every entry of gitProgramEnvVars outside the editor
+// carve-out, and the cost is stated rather than hidden: a STRICTLY MORE RESTRICTIVE
+// assignment is screened too — `GIT_SSL_NO_VERIFY=0`, an empty `GIT_ALLOW_PROTOCOL=`
+// (which allows NOTHING), `GIT_PROTOCOL_FROM_USER=0`. That is a knowingly accepted false
+// positive in the safe direction. Reading the value would mean re-deriving git's own
+// boolean and colon-list parsing for three variables whose entire corpus presence is 21
+// rows, every one of which is a probe script or a bead body rather than a real
+// invocation (verified, not assumed — see the bead's replay note).
+var gitInterlockEnvVars = map[string]string{
+	"GIT_ALLOW_PROTOCOL":     "protocol.allow",
+	"GIT_PROTOCOL_FROM_USER": "protocol.allow",
+	"GIT_SSL_NO_VERIFY":      "http.sslVerify",
+}
+
+// hasGitInterlockEnvVar reports whether this leaf's own env-assignment prefix carries a
+// variable through which a refusal git makes by default is REMOVED. See
+// gitInterlockEnvVars for the measured variable-by-variable evidence, for the complete
+// enumeration behind it, and for why it is value-blind.
+func hasGitInterlockEnvVar(envs []cmdparse.EnvAssignment) bool {
+	for _, ev := range envs {
+		if _, screened := gitInterlockEnvVars[ev.Name]; screened {
+			return true
+		}
 	}
 	return false
 }

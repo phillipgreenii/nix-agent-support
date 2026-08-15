@@ -3113,11 +3113,26 @@ func TestIntegration_GitProgramEnvVar_EmitsEmptyObject(t *testing.T) {
 		// instead of keeping an approval that existed only while the question was open.
 		{"declined: the alternate-transport family", "GIT_PROXY_COMMAND=/tmp/evil git fetch origin"},
 		{"its argv twin, which it now agrees with", "git -c core.gitProxy=/tmp/evil fetch origin"},
+		// THE INTERLOCK ENV FAMILY, moved up from the allow table by pg2-nd6i3. The row
+		// below used to sit there as DECLINED, and its comment said it would move "when
+		// that bead lands" — this is that move. These variables name no program; they
+		// REMOVE A REFUSAL git makes by default, which is why they needed a third table
+		// (gitInterlockEnvVars) rather than a seat in the program-naming one.
+		//
+		// The first two MEASURED running a marker as `git-upload-pack` through the `ext::`
+		// transport, so this is arbitrary command execution, not a weakened check.
+		// GIT_PROTOCOL_FROM_USER was in NO earlier bead — it turned up in the enumeration
+		// pg2-nd6i3 required — and all three move together because screening part of a
+		// family is the split pg2-qi1jo's instruction forbids.
+		{"interlock: the ext transport unlocked", "GIT_ALLOW_PROTOCOL=ext git ls-remote origin"},
+		{"interlock: the user-protocol flag", "GIT_PROTOCOL_FROM_USER=1 git ls-remote origin"},
+		{"interlock: TLS verification disabled", "GIT_SSL_NO_VERIFY=1 git fetch origin"},
+		{"interlock: its argv twin, which it agrees with", "git -c http.sslVerify=false fetch origin"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			out := emit(tt.command)
 			if out != "{}" {
-				t.Errorf("command %q emitted %s, want {} — this env prefix names the program git will execute, and `permissionDecision: \"allow\"` auto-approves running it", tt.command, out)
+				t.Errorf("command %q emitted %s, want {} — this env prefix either names the program git will execute or removes a refusal git makes by default, and `permissionDecision: \"allow\"` auto-approves it", tt.command, out)
 			}
 			if strings.Contains(out, `"allow"`) {
 				t.Errorf("command %q emitted %s, which carries an allow decision", tt.command, out)
@@ -3147,15 +3162,19 @@ func TestIntegration_GitProgramEnvVar_EmitsEmptyObject(t *testing.T) {
 		{"carved out: the inert editor idiom, rebase continuation", "GIT_EDITOR=true git rebase --continue"},
 		{"carved out: the null-command editor", "GIT_EDITOR=: git rebase --skip"},
 		{"carved out: the argv twin", "git -c core.editor=true commit --amend"},
-		// THE DECLINED ROW IS NOW A DIFFERENT VARIABLE. pg2-qi1jo screened
-		// `GIT_PROXY_COMMAND` (it moved to the `{}` table above) and left
-		// `GIT_ALLOW_PROTOCOL` declined in its place, for a TABLE-SHAPE reason rather than
-		// a policy one: it is the env twin of the configINTERLOCK half of the family, so it
-		// names no program and has no interlock env screen to join. Keeping a row here
-		// preserves what that approval is actually pinning — that the family ruling did NOT
-		// widen the screen to the interlock twins — and the hole it leaves open is
-		// pg2-nd6i3, which this row will move when that bead lands.
-		{"declined: the interlock env twin has no screen to join", "GIT_ALLOW_PROTOCOL=ext git ls-remote origin"},
+		// NO DECLINED ROW REMAINS. `GIT_ALLOW_PROTOCOL` sat here until pg2-nd6i3 built the
+		// interlock env screen its declination was waiting on; it is now in the `{}` table
+		// above with the rest of its family, and declinedGitProgramEnvVars is EMPTY. The
+		// rows that stay here are CARVE-OUTS and NON-MATCHES, which is a different claim
+		// from a declination: nothing below is a measured hazard left open.
+		//
+		// These three remain the useful negative controls for the interlock screen, because
+		// each is interlock-SHAPED and deliberately unscreened: GIT_TERMINAL_PROMPT=0 and
+		// GIT_NO_REPLACE_OBJECTS are strictly MORE restrictive, and GIT_SSH_VARIANT selects
+		// a dialect rather than naming a program. See gitInterlockEnvVars for the full
+		// enumeration of the 14 interlock-shaped variables and why 11 are absent.
+		{"interlock-shaped but more restrictive", "GIT_TERMINAL_PROMPT=0 git fetch origin"},
+		{"interlock-shaped but disables the hazard", "GIT_NO_REPLACE_OBJECTS=1 git log"},
 		{"an unrelated assignment", "FOO=bar git status"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
