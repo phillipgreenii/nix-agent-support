@@ -129,9 +129,20 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 				// intact: toggling --auto refreshes the merge-commit message from the current
 				// PR title/body. Do not change to Reject; do not weaken the `gh pr ready` Ask
 				// without moving this branch with it, because the two together ARE the gate.
-				// Not applicable (ADR 0043): the chain must continue. Former Reason,
-				// kept because it is the only record of WHY: "gh pr merge --auto: allowed (cannot merge until `gh pr ready`, which Asks; --auto refreshes merge message from PR title/body)"
-				return hookio.NotApplicable()
+				// REFUSAL, not a not-applicable (pg2-qxe85), and this site is the one the
+				// census left for last because the reading is not obvious: the branch reads
+				// as "allowed", so a not-applicable looks harmless. It is not. The paragraph
+				// above states the invariant this branch rests on — "the two together ARE the
+				// gate" — and an ErrNotApplicable makes the leaf indistinguishable from one NO
+				// rule ever examined, which is the half a LATER rule may still APPROVE. An
+				// approve here would remove the gh-side half of that gate while the comment
+				// went on asserting it.
+				//
+				// A refusal is the floor that cannot happen to: it records that gh EXAMINED
+				// this invocation and declined to clear it, the chain still continues, and a
+				// later Ask or Reject still wins. So the reasoning below is enforced rather
+				// than merely documented, and the recorded Former Reason becomes the live one.
+				return hookio.Refused(r.Name(), "gh pr merge --auto: not cleared here — the merge cannot proceed until `gh pr ready`, which Asks, and the two together are the draft-first gate; --auto also refreshes the merge message from the PR title/body")
 			}
 			return hookio.RuleResult{
 				Decision: hookio.Reject,
@@ -180,14 +191,19 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		if resource == "run" && subcmd == "rerun" {
 			runID := extractRunID(pc.Args)
 			if runID == "" {
-				// Not applicable (ADR 0043): the chain must continue. Former Reason,
-				// kept because it is the only record of WHY: "gh run rerun: no run ID found"
-				return hookio.NotApplicable()
+				// REFUSAL (pg2-qxe85): gh KNOWS `gh run rerun`, examined this invocation, and
+				// could not find the run ID it needs to decide. That is a judgement about a
+				// command this rule owns, not the absence of one — and as an exhaustion it
+				// read as "no rule ever looked", which is the class a consumer may clear.
+				return hookio.Refused(r.Name(), "gh run rerun: no run ID found, so the branch it targets cannot be resolved (deferred to claude-code)")
 			}
 			if r.resolver == nil {
-				// Not applicable (ADR 0043): the chain must continue. Former Reason,
-				// kept because it is the only record of WHY: "gh run rerun: no resolver configured"
-				return hookio.NotApplicable()
+				// REFUSAL (pg2-qxe85). The reason is a MISSING DEPENDENCY of this rule rather
+				// than anything about the command, and that is exactly why it must not be an
+				// exhaustion: an unconfigured resolver would otherwise present as "nobody
+				// examined this", so a deployment that forgot to wire the resolver would look
+				// identical to one where the rule does not apply — and would be clearable.
+				return hookio.Refused(r.Name(), "gh run rerun: no branch resolver configured, so the run's branch cannot be compared to the current one (deferred to claude-code)")
 			}
 			// THE ADR 0043 CANONICAL ERROR SITE. This resolver shells out
 			// (`git rev-parse` under a timeout), and the pre-ADR code folded the
@@ -210,9 +226,11 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 					Module:   r.Name(),
 				}, nil
 			}
-			// Not applicable (ADR 0043): the chain must continue. Former Reason,
-			// kept because it is the only record of WHY: "gh run rerun for different branch"
-			return hookio.NotApplicable()
+			// REFUSAL (pg2-qxe85), and the clearest of the four: this branch is reached only
+			// AFTER both resolvers succeeded, so the rule did real work — two subprocess
+			// resolutions — to establish that the run belongs to a DIFFERENT branch than the
+			// one checked out. Reporting that as "not applicable" discards the finding.
+			return hookio.Refused(r.Name(), "gh run rerun targets a run on branch "+runBranch+", not the current branch "+currentBranch+" (deferred to claude-code)")
 		}
 		if readOnlyRun[subcmd] && resource == "run" {
 			return hookio.RuleResult{
