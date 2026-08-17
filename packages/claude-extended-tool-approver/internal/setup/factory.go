@@ -23,7 +23,6 @@ import (
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/monorepo"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/nix"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pathsafety"
-	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pathtraversal"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/primarycommit"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/primarypush"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/safecmds"
@@ -127,12 +126,33 @@ func RuleChain(eng *engine.Engine, pe *patheval.PathEvaluator, cfg *configrules.
 		configrules.NewFromConfig(cfg),
 		// Generic security validators run in an early band — after the consumer
 		// configrules (so an explicit consumer decision still wins) but before the
-		// generic path/command approvers, so a `.git`/dangerous/traversal command
-		// is never silently approved by pathsafety or safe-commands (hook-support
-		// parity). first-match-wins makes ordering the override.
+		// generic path/command approvers, so a `.git`/dangerous command is never
+		// silently approved by pathsafety or safe-commands (hook-support parity).
+		// first-match-wins makes ordering the override.
 		gitdir.New(),
 		dangerouscmds.New(),
-		pathtraversal.New(),
+		// There is deliberately NO lexical traversal rule here. `pathtraversal`
+		// (a `strings.Contains(cmd, "../..")` test over the raw command text ->
+		// Ask) was DELETED per the operator ruling recorded in pg2-4yy4r item 6
+		// and implemented in pg2-bn7sx: `../..` and variables MUST be accounted
+		// for during PATH DETERMINATION, not by a substring test.
+		//
+		// It was actively HARMFUL, not merely redundant. Running here it preempted
+		// `secrets`/`patheval` — which resolve a relative path against the cwd —
+		// and substituted its weaker Ask for their `deny`. Measured on the commit
+		// before its removal, cwd = this repo, permission_mode=auto:
+		//
+		//	cat ../.ssh/id_rsa      ask/secrets          (single `../`: rule silent)
+		//	cat ../../.ssh/id_rsa   ask/PATH-TRAVERSAL   (masked deny/secrets)
+		//
+		// And its coverage was an artifact of the literal substring rather than a
+		// policy: of five spellings of one `.git/config` read, only the `../..`
+		// one was gated (`.git/config`, `./.git/config`, `../.git/config` and the
+		// absolute form all reached allow/safe-commands), so an agent one
+		// directory shallower got no gate at all. Removal makes the spellings
+		// AGREE. Do not reintroduce a lexical traversal rule; if a path needs
+		// gating, gate it in the path model (see pg2-dswtg for the `.git` case).
+		//
 		// secrets runs early (after consumer configrules, before the generic
 		// path/command approvers) so a credential/secret-path reference is
 		// prompted (Ask) instead of being silently approved by pathsafety or

@@ -36,20 +36,37 @@
 // # WHY A PLAIN READ ABSTAINS RATHER THAN APPROVING (tc-403c)
 //
 // engine.Evaluate is FIRST-MATCH-WINS and this rule sits at position 2 of
-// setup.RuleChain — after the consumer `config-rules`, but BEFORE
-// `path-traversal`, `secrets`, `path-safety` and `safe-commands`. A DECISIVE
-// verdict of any kind ends the chain for that leaf. That was harmless while the
-// read verdict was Ask, because Ask outranks anything those later rules could
-// have contributed anyway. It was NOT harmless once the verdict became Approve,
-// the least restrictive verdict there is: this rule then answered `allow` for
-// every `.git/` read in ceta's name, and three whole rules never ran.
+// setup.RuleChain — after the consumer `config-rules`, but BEFORE `secrets`,
+// `path-safety` and `safe-commands`. A DECISIVE verdict of any kind ends the
+// chain for that leaf. That was harmless while the read verdict was Ask, because
+// Ask outranks anything those later rules could have contributed anyway. It was
+// NOT harmless once the verdict became Approve, the least restrictive verdict
+// there is: this rule then answered `allow` for every `.git/` read in ceta's
+// name, and whole rules below it never ran.
 //
-//   - PATH TRAVERSAL. `cat ../../../../etc/passwd/../.git/config` asked via
-//     `path-traversal` while this rule said Ask, and auto-approved while it said
-//     Approve.
+//   - PATH TRAVERSAL. `cat ../../../../etc/passwd/../.git/config` reached a
+//     decisive Ask from the `path-traversal` rule while this rule said Ask, and
+//     auto-approved while it said Approve. That rule was DELETED by pg2-bn7sx
+//     (operator ruling pg2-4yy4r item 6) because its coverage was an artifact of
+//     a literal `../..` substring test rather than a policy — of five spellings
+//     of this same read only the `../..` one was gated. The shape now reaches
+//     NoOpinion via the zone check, pinned by TestIntegration_GitDirDirectionAndRole's
+//     "traversal into gitmeta still declines to approve". So the traversal
+//     SPELLING is no longer special, and this bullet is retained only to record
+//     why the read verdict must stay non-decisive.
+//
 //   - OUT-OF-PROJECT READS. `cat /elsewhere/.git/config` lands outside the
 //     project root, where the zone check yields no read permission and the
 //     verdict should defer to Claude Code; it auto-approved instead.
+//
+//     CAVEAT, measured 2026-08-17 and NOT fixed here: this holds only where the
+//     zone model actually withholds read permission. A `.git/config` inside a
+//     READABLE zone — a sibling repo under the workspace root, or `/tmp/x/.git/config`
+//     — still reaches allow/safe-commands, because secretpath classifies NO
+//     `.git/` path as a secret (pinned by TestGitDir_SecretsDoesNotCoverGitPaths).
+//     Six of eight measured spellings auto-approve. Tracked as pg2-dswtg; do not
+//     read this bullet as asserting that out-of-project `.git` reads all defer.
+//
 //   - CREDENTIALS IN `.git/config`. A remote URL can carry an embedded token
 //     (`https://x-access-token:ghp_…@github.com/…`), and `secrets` is the rule
 //     that would prompt before handing a credential to a reader. Reaching

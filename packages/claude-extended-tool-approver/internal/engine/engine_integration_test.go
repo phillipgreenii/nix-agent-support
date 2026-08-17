@@ -1712,12 +1712,24 @@ func TestIntegration_GitDirDirectionAndRole(t *testing.T) {
 		// --- The two shapes the short-circuit hid from later rules (tc-403c) ---
 		//
 		// Both are chain-composition facts, not gitdir facts: gitdir must be silent for
-		// either rule below it to be reached at all. They are the reason the read
-		// verdict is Abstain rather than Approve, and they can only be pinned here.
+		// any rule below it to be reached at all. They are the reason the read verdict
+		// is Abstain rather than Approve, and they can only be pinned here.
 		//
-		// `path-traversal` Asks on a `../..` escape. It sits AFTER gitdir, so while the
-		// read verdict was decisive this auto-approved.
-		{"traversal into gitmeta reaches path-traversal", "cat ../../../../etc/passwd/../.git/config", hookio.Ask},
+		// A traversal-spelled gitmeta read. This row asserted `Ask` attributed to
+		// `path-traversal` until pg2-bn7sx DELETED that rule; the successor verdict is
+		// NoOpinion, which still discharges this row's purpose — gitdir did not
+		// short-circuit with Approve, so the chain ran on and declined to green-light
+		// the read. What changed is only WHICH later rule answers, never that one does.
+		//
+		// Note what this row does NOT prove, so a later reader does not over-read it:
+		// the `../..` spelling is no longer special. `cat .git/config`,
+		// `cat ./.git/config` and `cat ../.git/config` all reach allow/safe-commands
+		// in a project whose zone permits the read, and pg2-bn7sx established that the
+		// old Ask here was an artifact of a literal substring test rather than a policy
+		// (one gated spelling out of five). The remaining gap — that `.git` metadata is
+		// absent from the PATH MODEL entirely, so most spellings auto-approve — is
+		// tracked as pg2-dswtg and is NOT closed by this row.
+		{"traversal into gitmeta still declines to approve", "cat ../../../../etc/passwd/../.git/config", hookio.NoOpinion},
 		// An out-of-project read has no readable zone, so `safe-commands` defers to
 		// Claude Code. While the read verdict was decisive this auto-approved — for
 		// ANY `.git` path anywhere on the filesystem, not merely this one.
@@ -2277,7 +2289,9 @@ func (f fakeShellStore) ShellOwner(string) (string, bool) { return f.owner, f.kn
 // exercised a rule that issues non-overridable hard Rejects, and three
 // false-positive classes survived to production and hard-blocked real work
 // (pg2-3hk7t). The same hole hid five more rules: config-rules, dangerous-commands,
-// path-traversal, killshell, ssh and vault (pg2-v94d7).
+// path-traversal, killshell, ssh and vault (pg2-v94d7). `path-traversal` has since
+// been DELETED (pg2-bn7sx); it is named here because this is a historical record of
+// what the hole hid, not a statement about the current chain.
 //
 // The primary fix is DERIVATION, not this test: buildFullEngine calls
 // setup.RuleChain, the same function setup.newEngineForCWD calls, so a rule added
@@ -2316,7 +2330,7 @@ func TestIntegration_HarnessChainMatchesProduction(t *testing.T) {
 //
 // The ordering assertions are the point. config-rules' whole-leaf Approve
 // short-circuits first-match-wins, so it is consulted before git-directory,
-// dangerous-commands, path-traversal, secrets and env-vars. factory.go states that
+// dangerous-commands, secrets and env-vars. factory.go states that
 // precedence as deliberate ("after the consumer configrules, so an explicit
 // consumer decision still wins"). The A/B pairs below make its ARGUMENT-level reach
 // observable rather than implicit: `frobnicate .git/config` is a hard Reject while
@@ -2352,9 +2366,13 @@ func TestIntegration_ConfigRulesPrecedence(t *testing.T) {
 		// git-directory is ever consulted.
 		{"unknown executable touching git metadata is denied", "frobnicate .git/config", hookio.Reject, "git-directory"},
 		{"consumer-approved executable outranks git-directory", "grazr .git/config", hookio.Approve, "config-rules"},
-		// Likewise ahead of path-traversal (`../..` is a decisive Ask for any other
-		// executable — see TestIntegration_PathTraversalPrecedence).
-		{"consumer-approved executable outranks path-traversal", "grazr ../../x", hookio.Approve, "config-rules"},
+		// A traversal-spelled operand. This row asserted precedence over the
+		// `path-traversal` rule until pg2-bn7sx deleted it; the operand spelling is no
+		// longer special to any rule, so what it now pins is that an `approvedCommands`
+		// Approve is ARGUMENT-BLIND — it does not start inspecting operands just because
+		// one looks like an escape. See TestIntegration_TraversalHandledByPathModel for
+		// what governs traversal now.
+		{"consumer-approved executable is argument-blind to a traversal operand", "grazr ../../x", hookio.Approve, "config-rules"},
 		// …and ahead of secrets, which would otherwise Ask on this path.
 		{"consumer-approved executable outranks secrets", "grazr /Users/testuser/.ssh/id_rsa", hookio.Approve, "config-rules"},
 
@@ -2382,7 +2400,7 @@ func TestIntegration_ConfigRulesPrecedence(t *testing.T) {
 // a blanket hard-Reject denylist with unit coverage only.
 //
 // Its band position is load-bearing in both directions. It runs BEFORE
-// path-traversal / secrets / path-safety / safe-commands, so a denylisted
+// secrets / path-safety / safe-commands, so a denylisted
 // executable can never be re-approved as an ordinary command; and it runs AFTER
 // git-directory, so a git-metadata write keeps its more specific attribution. It
 // also deliberately does NOT list `curl`, `ssh` or `scp`, which have dedicated
@@ -2408,8 +2426,10 @@ func TestIntegration_DangerousCommandsPrecedence(t *testing.T) {
 		// this pair would report the same module twice.
 		{"dd into git metadata is git-directory's", "dd of=.git/HEAD if=/dev/zero", hookio.Reject, "git-directory"},
 
-		// --- ORDERING: path-traversal is LATER, so the hard Reject wins over its Ask. ---
-		{"denylisted executable outranks path-traversal", "sudo cat ../../x", hookio.Reject, "dangerous-commands"},
+		// --- ORDERING: a traversal-spelled operand does not change the owner. This row
+		// asserted precedence over the deleted `path-traversal` rule (pg2-bn7sx); it now
+		// pins that the denylist decides on the EXECUTABLE regardless of operand shape. ---
+		{"denylisted executable owns the leaf despite a traversal operand", "sudo cat ../../x", hookio.Reject, "dangerous-commands"},
 
 		// --- ORDERING: the dedicated-rule carve-out. `wget` is denylisted, `curl` is
 		// not (it has its own allowlist rule), so the same read of the same URL splits.
@@ -2465,49 +2485,87 @@ func TestIntegration_MountOperandGate(t *testing.T) {
 	})
 }
 
-// TestIntegration_PathTraversalPrecedence exercises `path-traversal` through the
-// full chain. The rule was absent from this harness until pg2-v94d7.
+// TestIntegration_TraversalHandledByPathModel is the SUCCESSOR to
+// TestIntegration_PathTraversalPrecedence, which pinned the `path-traversal` rule
+// DELETED by pg2-bn7sx (operator ruling pg2-4yy4r item 6: `../..` and variables MUST
+// be accounted for during PATH DETERMINATION, not by a literal substring test).
 //
-// It is a purely LEXICAL guard — a literal `../..` anywhere in the command text is
-// a decisive Ask — and it sits in the early band, ahead of secrets / path-safety /
-// safe-commands. That ordering is the entire reason it works: safe-commands would
-// otherwise Approve a read that resolves inside an allowed zone, and the Ask would
-// never be reached. The A/B pairs below assert exactly that, by holding the command
-// fixed and changing only the traversal depth or the spelling of the same path.
+// It is deliberately a REWRITE and not a deletion. Every row below is one the old
+// test asserted; dropping them would retire the only regression guards on these
+// commands at the moment their verdicts change, which is exactly when they are worth
+// having. Each row now asserts the SUCCESSOR verdict and the module that genuinely
+// owns it.
 //
-// Ask (never Reject) is deliberate: an agent in a git worktree reaches the
-// workspace root through exactly `../..`, so a hard deny would break routine
-// navigation. Ask cannot be a silent auto-approval, which is the property that
-// matters.
-func TestIntegration_PathTraversalPrecedence(t *testing.T) {
+// # WHY THE RULE WENT, IN THE FORM A TEST CAN CHECK
+//
+// The lexical guard was not merely redundant with the path model — it PREEMPTED it.
+// Running in the early band it answered before `secrets`/`patheval`, which resolve a
+// relative path against the cwd, and substituted its weaker Ask for their verdict.
+// Measured on the commit before its removal, cwd = the ceta repo,
+// permission_mode=auto:
+//
+//	cat ../.ssh/id_rsa      ask/secrets          single `../`: the rule was silent
+//	cat ../../.ssh/id_rsa   ask/PATH-TRAVERSAL   masked deny/secrets
+//
+// And its coverage was an ARTIFACT of the substring rather than a policy: of five
+// spellings of one `.git/config` read only the `../..` one was gated, so an agent one
+// directory shallower got no gate at all. The `traversal now reaches secrets` row
+// below is the regression guard for the masking; the depth-pair rows are the guard for
+// the artifact.
+//
+// # DO NOT REINTRODUCE A LEXICAL TRAVERSAL RULE
+//
+// If a path needs gating, gate it in the path model so every spelling agrees. The
+// known remaining gap is `.git` metadata, which the path model does not cover at all
+// (pg2-dswtg) — that is a PATH-MODEL bead, and re-adding a `strings.Contains` rule
+// would re-create the inconsistency this deletion removed.
+func TestIntegration_TraversalHandledByPathModel(t *testing.T) {
 	t.Setenv("WORKSPACE_ROOT", "/Users/testuser/workspace")
 	projectRoot := "/Users/testuser/workspace/my-project"
 	eng := buildFullEngine(projectRoot, projectRoot)
 
 	runChainCases(t, eng, projectRoot, []chainCase{
-		// --- ORDERING vs safe-commands (LATER in the chain). One `../` is Abstain for
-		// this rule and safe-commands approves the read; two make it decisive. The only
-		// difference between these two rows is the traversal depth.
+		// --- DEPTH NO LONGER CHANGES THE OWNER. These two rows were the old test's
+		// A/B pair proving the guard was lexical: one `../` was approved, two Asked.
+		// Now both are owned by safe-commands and differ only in what the ZONE MODEL
+		// says about the resolved path — which is the point of the ruling.
 		{"single level stays with safe-commands", "cat ../README.md", hookio.Approve, "safe-commands"},
-		{"double level is a decisive ask", "cat ../../README.md", hookio.Ask, "path-traversal"},
+		// THE RELIEF. This was a decisive operator prompt; it is now a non-decisive
+		// defer, because the resolved path is outside the project root and the zone
+		// model has no explicit read permission for it. NOT an approval.
+		{"double level defers instead of prompting", "cat ../../README.md", hookio.NoOpinion, "safe-commands"},
 		// The same sibling repo the suite already approves by ABSOLUTE path (see
-		// TestIntegration_RegressionSuite "ls sibling repo") is an Ask when spelled as a
-		// traversal. Same resolved target, different verdict — the guard is lexical by
-		// design, and this is the row that would break if it were ever silently
-		// converted to a resolve-and-check.
-		{"sibling repo via traversal asks", "ls ../../other-repo", hookio.Ask, "path-traversal"},
-		{"deeper escape asks", "cat ../../../etc/passwd", hookio.Ask, "path-traversal"},
-		// A cd-compound: the traversal is caught on the leaf that carries it, so a
-		// following approvable tail cannot green-light it.
-		{"cd traversal then approvable tail", "cd ../../other-repo && git status", hookio.Ask, "path-traversal"},
+		// TestIntegration_RegressionSuite "ls sibling repo") now AGREES when spelled as
+		// a traversal. Same resolved target, same verdict — that agreement is the whole
+		// object of the ruling, and this row is the one that breaks if a lexical guard
+		// is ever reintroduced.
+		{"sibling repo via traversal now agrees with the absolute spelling", "ls ../../other-repo", hookio.Approve, "safe-commands"},
+		// Still NOT approved: escaping to /etc resolves outside every readable zone.
+		// `/etc/passwd` is not on the credential deny-list, so this is a defer rather
+		// than a deny — pre-existing, and unchanged by the deletion.
+		{"deeper escape still declines to approve", "cat ../../../etc/passwd", hookio.NoOpinion, "safe-commands"},
+		// A cd-compound whose tail is independently approvable. The traversal target is
+		// inside WORKSPACE_ROOT, so the zone model permits it and the read-only git tail
+		// is approved on its own merits.
+		{"cd traversal then approvable tail", "cd ../../other-repo && git status", hookio.Approve, "git"},
 
-		// --- ORDERING vs secrets (LATER). Both would Ask, so only the deciding module
-		// distinguishes them — which is the assertion.
-		{"traversal outranks secrets", "cat ../../.ssh/id_rsa", hookio.Ask, "path-traversal"},
+		// --- THE MASKING IS GONE. Verdict unchanged; the OWNER is the assertion, and it
+		// is now the rule that actually models credentials.
+		//
+		// Ask rather than Reject here is an artifact of the SYNTHETIC test root: the
+		// deny-list matches real credential directories, and `/Users/testuser/workspace/
+		// .ssh/id_rsa` is not one. On a real machine the same command measures
+		// deny/secrets — that is the STRONGER verdict the lexical rule was masking, and
+		// it is recorded on pg2-bn7sx rather than asserted here, because asserting it
+		// would require a fixture that plants a credential in the real deny-listed
+		// location.
+		{"traversal now reaches secrets", "cat ../../.ssh/id_rsa", hookio.Ask, "secrets"},
 
-		// --- ORDERING vs the EARLIER bands, which outrank this Ask. ---
-		{"git-directory outranks traversal", "rm -rf ../../repo/.git/objects", hookio.Reject, "git-directory"},
-		{"dangerous-commands outranks traversal", "sudo cat ../../x", hookio.Reject, "dangerous-commands"},
+		// --- THE EARLIER BANDS ARE UNTOUCHED. These two rows outranked the deleted
+		// Ask before and still own their commands, which is what proves the deletion
+		// did not disturb the early band's ordering.
+		{"git-directory still owns a gitmeta write via traversal", "rm -rf ../../repo/.git/objects", hookio.Reject, "git-directory"},
+		{"dangerous-commands still owns sudo via traversal", "sudo cat ../../x", hookio.Reject, "dangerous-commands"},
 	})
 }
 
@@ -2810,7 +2868,8 @@ func TestIntegration_DynamicReadPathNeverApproves(t *testing.T) {
 
 	// TEXT-vs-PARSED (the pg2-5b901 failure mode). The guard keys on PARSED
 	// ARGUMENTS, never on a strings.Contains over raw command text — the very shape
-	// this bead's report criticises in the `pathtraversal` rule. A commit message or
+	// this bead's report criticises in the `pathtraversal` rule (DELETED by pg2-bn7sx
+	// for that reason). A commit message or
 	// an `echo` argument that merely QUOTES the bypass carries the same bytes in a
 	// non-operand position and MUST still approve.
 	controls := []struct {

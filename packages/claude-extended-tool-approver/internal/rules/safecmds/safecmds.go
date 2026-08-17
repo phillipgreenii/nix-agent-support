@@ -452,7 +452,8 @@ func looksLikePath(arg string) bool {
 // string: the argument's syntactic ROLE is what makes the expansion a path, so a
 // commit message or a `bd comment` body that merely QUOTES `cat $F` carries the same
 // bytes in a non-operand position and must not be gated (the pg2-5b901 failure mode,
-// and the shape this bead's own report criticises in the `pathtraversal` rule).
+// and the shape this bead's own report criticises in the `pathtraversal` rule,
+// which pg2-bn7sx has since DELETED for exactly that reason).
 //
 // KNOWN LIMIT — resolving the variable is out of scope. This makes the read
 // NON-APPROVING, not denied: a true `deny` would need the binding

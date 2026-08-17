@@ -355,8 +355,8 @@ func TestGitDir_ReadWriteAsymmetry(t *testing.T) {
 
 	// …and the exact verdicts, so "increasing" cannot drift to some other triple.
 	//
-	// Abstain, not Approve: a plain read is NON-DECISIVE, so `path-traversal`,
-	// `secrets` and the zone checks below this rule still run (tc-403c). An Approve
+	// Abstain, not Approve: a plain read is NON-DECISIVE, so `secrets` and the
+	// zone checks below this rule still run (tc-403c). An Approve
 	// here would end the chain for the leaf and is exactly the defect.
 	if read.Decision != hookio.NoOpinion {
 		t.Errorf("read Decision = %v, want Abstain", read.Decision)
@@ -372,7 +372,7 @@ func TestGitDir_ReadWriteAsymmetry(t *testing.T) {
 			"not merely fail to gate it", path, dir, matched)
 	}
 	// And the not-applicable channel itself, so a future silent switch to a terminal
-	// NoOpinion verdict (which would shadow path-traversal/secrets/the zone checks
+	// NoOpinion verdict (which would shadow secrets/the zone checks
 	// for a plain `.git` read) fails here.
 	if _, err := r.Evaluate(bashInput("ls -la " + path)); !errors.Is(err, hookio.ErrNotApplicable) {
 		t.Errorf("read err = %v, want ErrNotApplicable — the chain MUST continue past a plain .git read", err)

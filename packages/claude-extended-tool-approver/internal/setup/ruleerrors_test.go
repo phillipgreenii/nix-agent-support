@@ -108,7 +108,6 @@ func TestBashErrorSitesReportGenuineFailure(t *testing.T) {
 		"config-rules":       true,
 		"git-directory":      true,
 		"dangerous-commands": true,
-		"path-traversal":     true,
 		"secrets":            true,
 		"env-vars":           true,
 		"assume":             true,

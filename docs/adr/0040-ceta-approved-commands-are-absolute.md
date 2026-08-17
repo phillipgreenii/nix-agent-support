@@ -4,6 +4,15 @@
 **Date**: 2026-07-29
 **Deciders**: Phillip Green II
 
+> **Later note (2026-08-17, `pg2-bn7sx`).** The `path-traversal` rule named in this ADR's Context
+> and measurement table **no longer exists** — it was deleted per the operator ruling in
+> `pg2-4yy4r` item 6, because `../..` belongs in path determination rather than in a literal
+> substring test. This ADR's DECISION is unaffected: `approvedCommands` is still absolute for its
+> leaf and still skips the whole early validator band. Only the inventory of rules in that band
+> changed. The Context and the `grazr ../../x` table row are left as written because they record
+> what was measured on 2026-07-29; the Consequences bullet, which is a live normative statement,
+> has been updated.
+
 ## Context
 
 CETA's `config-rules` rule sits at **slot 1** of the rule chain
@@ -64,8 +73,8 @@ now resolved in favor of the behavior.
 ## Consequences
 
 - **Adding a tool to `approvedCommands` is a security decision with a wider blast radius than
-  its name suggests.** It exempts that command from secret-path detection, from path-traversal
-  screening, and from `git-directory`'s hard deny — the last of which is otherwise **not**
+  its name suggests.** It exempts that command from secret-path detection and from
+  `git-directory`'s hard deny — the latter of which is otherwise **not**
   user-overridable anywhere else in the chain. This must be documented wherever
   `approvedCommands` is described, because it is genuinely surprising: nothing about the option
   name hints that it disables a non-overridable deny.

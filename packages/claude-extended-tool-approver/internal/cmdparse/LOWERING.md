@@ -825,6 +825,12 @@ whose BODY contains `../`. The outgoing `Raw` was post-strip, so the body was in
 text-scanning rule; under I12 it is not. More restrictive, and a direct consequence of the
 `Raw` decision rather than a surprise.
 
+> **Later note (2026-08-17, `pg2-bn7sx`).** The `path-traversal` rule has since been **deleted**
+> (operator ruling `pg2-4yy4r` item 6), so these 20 rows no longer land anywhere — they were the
+> clearest illustration of why a text-scanning rule was the wrong shape, since what they scanned
+> was heredoc BODY text rather than any path the command operates on. The measurement is left as
+> recorded.
+
 ## Tests
 
 The whole existing suite passes with the EXPECTATIONS UNEDITED, except where an expectation

@@ -4,6 +4,13 @@
 **Date**: 2026-07-30
 **Deciders**: Phillip Green II
 
+> **Later note (2026-08-17, `pg2-bn7sx`).** This ADR names `pathtraversal` twice — once in the
+> replay-count table (17 asks) and once as a member of the early band in "Shape A". That rule has
+> since been **deleted** per the operator ruling in `pg2-4yy4r` item 6. Both mentions are left as
+> written: the table records a replay measured on 2026-07-30, and Shape A's PRINCIPLE (an earlier
+> rule must be able to stop `safecmds` from approving a leaf) is unchanged — only one example of it
+> is gone. The vocabulary this ADR decides is unaffected.
+
 ## Context
 
 A rule module's entire vocabulary is one enum. `internal/hookio/types.go` declares:
