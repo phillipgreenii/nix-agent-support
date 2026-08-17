@@ -1864,11 +1864,15 @@ func hasRedirectEnvVar(envs []cmdparse.EnvAssignment) bool {
 //  3. `unset` AND `export -n` ARE NOT MODELLED, so `export GIT_DIR=/x; unset GIT_DIR; git
 //     status` is screened although git sees nothing. Modelling revocation would mean
 //     tracking it per name for a verdict that moves one way only.
-//  4. A SUBSHELL'S EXPORT IS TREATED AS PERSISTING. The lowering emits a subshell's
-//     statements into the same flat leaf list, so `(export GIT_PAGER=/tmp/evil); git log`
-//     reads here as though the export survived. This is the RESIDUAL
-//     cmdparse.InCommandVars records for the same reason and pg2-4ak2k tracks; closing it
-//     needs a subshell SCOPE PATH on the leaf, which is that bead's change, not this one's.
+//  4. A SUBSHELL'S EXPORT IS TREATED AS PERSISTING, IN THIS FUNCTION SPECIFICALLY. A
+//     leaf now carries a subshell SCOPE PATH (cmdparse.ParsedCommand.SubshellScope,
+//     pg2-4ak2k), and cmdparse.InCommandVars consults it to close the identical
+//     residual for shell-variable resolution — but exportedEnvVarsBefore below is a
+//     SEPARATE, hand-rolled scan that does not consult SubshellScope at all, so
+//     `(export GIT_PAGER=/tmp/evil); git log` still reads here as though the export
+//     survived the subshell closing. Closing THIS copy is a matter of exchanging the
+//     unconditional scan for the same prefix-of/equal-to test InCommandVars applies,
+//     not a new scope-path change — the leaf already carries what it needs.
 //  5. A DUPLICATE LEAF TEXT RESOLVES TO ITS LAST OCCURRENCE. `git log; export
 //     GIT_PAGER=/tmp/evil; git log` has two byte-identical `git log` leaves, so matching
 //     by Raw is ambiguous; taking the LAST match means the FIRST `git log` is judged as if

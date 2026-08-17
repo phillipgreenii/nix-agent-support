@@ -52,34 +52,80 @@ import "strings"
 //     does not reach the shell at all — a prefix assignment, a pipeline stage — must
 //     leave every earlier binding exactly as it was.
 //
-// RESIDUAL, recorded rather than modelled: a SUBSHELL scopes its assignments, and a
-// leaf carries no subshell identity (the lowering emits a subshell's statements into
-// the same flat leaf list — see shellparse.go's `case *syntax.Subshell`), so an
-// assignment made inside `( … )` and consumed OUTSIDE it reads here as though it
-// persisted. Both halves of the common shape are unaffected: `(WT=/x && cd "$WT" && git
-// commit)` assigns and consumes inside the SAME subshell, which is what bash does too.
-// The residual needs a command that is already broken — it consumes a variable its own
-// subshell scoped away — and closing it needs a subshell SCOPE PATH on the leaf (a
-// depth flag is not enough: it cannot tell "the same subshell" from "a sibling one"),
-// which is its own change to the lowering and its own replay. A PIPELINE stage is the
-// same class and IS excluded here, because the leaf already carries the pipeline
-// coordinates that identify one (inMultiStagePipeline).
+// SUBSHELL SCOPING (pg2-4ak2k, closing the residual pg2-wq3ki recorded here). A
+// SUBSHELL scopes its assignments — bash forks a child for `( … )`, and a child can
+// never write its parent's variables — so `( WT=/x ); git -C "$WT" …` leaves `$WT`
+// EMPTY once the subshell closes, even though an assignment with that exact text ran.
+// A leaf now carries that scoping as SubshellScope (parser.go), the chain of subshell
+// IDs — outermost to innermost — enclosing it; shellparse.go's `case *syntax.Subshell`
+// pushes a fresh ID onto the walk's scope path before lowering the body and pops it
+// back off after, so every leaf lowered from inside the subshell carries one extra
+// path segment that leaves lowered before or after it do not.
+//
+// The VISIBILITY RULE this file applies (scopeVisible): leaf i's write is visible to
+// leaf `before` iff leaf i's SubshellScope is a PREFIX of (or equal to) leaf
+// `before`'s — i.e. leaf i's subshell, if any, is STILL OPEN at leaf `before`'s
+// position. That covers all three shapes:
+//
+//   - `(WT=/x && cd "$WT" && git commit)` — assignment and consumption share the SAME
+//     scope path (equal, the trivial "prefix"), so the write is visible, exactly as
+//     before this bead.
+//   - `WT=/x; (git -C "$WT" commit)` — the assignment's EMPTY (top-level) path is a
+//     prefix of the consuming leaf's one-element path: an enclosing scope that is
+//     still open, so the write is visible, exactly as before this bead.
+//   - `( WT=/x ) ; git -C "$WT" commit` — the assignment's one-element path is NOT a
+//     prefix of the consuming leaf's EMPTY path (it is longer): the subshell already
+//     CLOSED by the time the consuming leaf runs, so the write is invisible —
+//     COMPLETELY invisible, not merely un-bound: it must not even revoke an outer
+//     binding of the same name that `before` should still see (see InCommandVars'
+//     loop, which `continue`s past such a write before shellVarWrites is even
+//     called). The same non-prefix test also catches SIBLING subshells at the same
+//     nesting depth, which a bare depth counter could not distinguish from "the same
+//     subshell" — the reason a counter was rejected as the fix.
+//
+// A PIPELINE stage remains its own, already-solved case and is untouched by any of
+// this: the leaf already carries the pipeline coordinates that identify one
+// (inMultiStagePipeline), a pipeline stage's subshell never writes the parent shell
+// AT ALL (a no-write, not a revoke — shellVarWrites' own comment), and that check runs
+// before the scope-visibility test ever sees such a leaf.
 
 // InCommandVars returns the shell variables that the leaves BEFORE index `before`
 // establish for the rest of the expression, mapped to their LITERAL values. nil when
 // nothing qualifies, which is the ordinary case — and the case that leaves every
 // caller's verdict exactly as it was.
 //
-// `leaves` MUST be a single Parse call's output, in source order (the pipeline
-// coordinates it consults are per-call). `before` is the index of the leaf about to be
-// judged: it is EXCLUSIVE, which is what keeps a leaf's own prefix assignments out of
-// its own expansions.
+// `leaves` MUST be a single Parse call's output, in source order (the pipeline and
+// subshell-scope coordinates it consults are per-call). `before` is the index of the
+// leaf about to be judged: it is EXCLUSIVE, which is what keeps a leaf's own prefix
+// assignments out of its own expansions.
 func InCommandVars(leaves []ParsedCommand, before int) map[string]string {
 	if before > len(leaves) {
 		before = len(leaves)
 	}
+	// targetScope is leaf `before`'s own subshell scope path, against which every
+	// earlier write is tested (see this file's SUBSHELL SCOPING comment). `before`
+	// is a valid index at every real call site (InCommandVars' own doc comment), but
+	// the defensive clamp above can still leave it equal to len(leaves) for an
+	// out-of-range caller — there is no leaf to read a path from then, so
+	// knownScope is false and every write is treated as visible, exactly the
+	// pre-pg2-4ak2k behaviour for that degenerate, unexercised case (a
+	// prefix-of-everything fallback, the conservative direction).
+	var targetScope []int
+	knownScope := before >= 0 && before < len(leaves)
+	if knownScope {
+		targetScope = leaves[before].SubshellScope
+	}
 	var vars map[string]string
 	for i := 0; i < before; i++ {
+		if knownScope && !scopeVisible(leaves[i].SubshellScope, targetScope) {
+			// The writer's subshell has already CLOSED by the time leaf `before` runs
+			// (its scope path is longer than, and not a prefix of, `before`'s), or the
+			// two are SIBLING subshells (the paths diverge). Either way bash never
+			// applied this write to the scope leaf `before` runs in, so it is
+			// COMPLETELY INVISIBLE here — not even a revoke: it must leave an outer
+			// binding of the same name exactly as an earlier, visible leaf left it.
+			continue
+		}
 		writes, readValues := shellVarWrites(leaves, i)
 		for _, ev := range writes {
 			if ev.Name == "" {
@@ -105,6 +151,35 @@ func InCommandVars(leaves []ParsedCommand, before int) map[string]string {
 	return vars
 }
 
+// scopeVisible reports whether a write from subshell scope `writer` is visible to a
+// leaf whose own scope is `at` — i.e. whether writer is a PREFIX of, or equal to, at.
+// That is exactly "writer's subshell (if any) is still open at at's position": every
+// element writer names is an enclosing `( … )` that has not yet closed by the time a
+// leaf at `at` runs.
+//
+//   - len(writer) > len(at): writer nests MORE subshells than at does, so at least
+//     the innermost of writer's has already closed (control returned to an
+//     enclosing scope) before at runs — invisible.
+//   - the two share every index up to len(writer): writer names the same chain of
+//     subshells as (a prefix of) at's — visible.
+//   - they diverge at some index < len(writer): SIBLING subshells — same or
+//     different depth, but different identities — never share scope — invisible.
+//
+// A bare depth comparison (len(writer) <= len(at)) cannot make this distinction: two
+// subshells at the same depth can still be siblings, which is exactly the case a
+// counter was rejected for (this bead's own acceptance criteria).
+func scopeVisible(writer, at []int) bool {
+	if len(writer) > len(at) {
+		return false
+	}
+	for i, id := range writer {
+		if at[i] != id {
+			return false
+		}
+	}
+	return true
+}
+
 // assignmentBuiltinReads lists every ASSIGNMENT BUILTIN the lowering can put in a
 // leaf's Executable (shellparse.go's lowerDecl: the `*syntax.DeclClause` variants),
 // mapped to whether this seam may READ the values it assigns.
@@ -117,10 +192,13 @@ func InCommandVars(leaves []ParsedCommand, before int) map[string]string {
 //   - `local` (OPERATOR RULING, pg2-ft2hl, 2026-08-13): outside a function `local` is a
 //     bash ERROR, so reading it as a plain assignment models a command that cannot run —
 //     and inside one it binds a value that dies at the function's end, a scope this seam
-//     cannot see (it has no more function identity than the subshell identity the file
-//     comment's RESIDUAL paragraph records it lacking).
-//     To implement it later, a leaf would first have to carry the FUNCTION BODY it was
-//     lowered from, which is the same scope-path change pg2-4ak2k needs for subshells.
+//     still cannot see: pg2-4ak2k gave a leaf SUBSHELL scope (SubshellScope, this
+//     file's SUBSHELL SCOPING comment), but that is a DIFFERENT scope from a
+//     function body's, and `local`'s still has no representation on a leaf at all.
+//     To implement it later, a leaf would first have to carry the FUNCTION BODY it
+//     was lowered from — the same KIND of scope-path change pg2-4ak2k made for
+//     subshells, but for function bodies instead, and still its own separate,
+//     still-open bead.
 //   - `readonly` (OPERATOR RULING, pg2-ft2hl, 2026-08-13): a readonly name CANNOT be
 //     reassigned, so the SCOPE comment's revoke rule does not hold for it unchanged — a
 //     later assignment to the name FAILS and leaves the ORIGINAL value in place, and the

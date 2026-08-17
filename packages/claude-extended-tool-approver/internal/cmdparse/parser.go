@@ -1230,6 +1230,23 @@ type ParsedCommand struct {
 	// pipeline (a `for` word list, a leftover heredoc extent) carry -1.
 	PipelineID    int
 	PipelineIndex int
+	// SubshellScope is the CHAIN OF SUBSHELL IDS enclosing this leaf, OUTERMOST to
+	// INNERMOST — empty for a leaf lowered at the top level, inside no `( … )` at
+	// all. Like PipelineID, IDs are per-Parse-call: a scope path from one leaf set
+	// MUST NOT be compared against another Parse call's.
+	//
+	// This is what lets InCommandVars (pg2-4ak2k) tell "the same subshell" from "a
+	// sibling subshell at the same nesting depth", which a bare depth counter
+	// cannot: two leaves at depth 1 can sit in DIFFERENT, mutually invisible
+	// subshells. One leaf's scope path is a PREFIX of (or equal to) another leaf's
+	// exactly when the first leaf's subshell is STILL OPEN at the second leaf's
+	// position — i.e. the first is an enclosing scope of the second, or they are
+	// the very same scope. A path that is longer than, or diverges from, the
+	// other's is a CLOSED or SIBLING subshell and carries no visibility either way.
+	//
+	// The zero value (nil) is top-level, matching PipelineID's zero-value
+	// convention of meaning "no special scoping applies".
+	SubshellScope []int
 }
 
 // DownstreamStages returns the leaves of `leaves` that receive the STDOUT of a

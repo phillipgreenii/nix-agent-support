@@ -455,6 +455,72 @@ func TestInCommandVars_BeforeIsExclusive(t *testing.T) {
 	}
 }
 
+// TestInCommandVars_SubshellScoping is pg2-4ak2k's table: a SUBSHELL scopes its
+// assignments (bash forks a child for `( … )`, and a child can never write its parent's
+// variables), so a leaf's write must be visible only to leaves whose own subshell scope
+// is the SAME as, or an ENCLOSING scope still open at, the consuming leaf's — never to a
+// leaf in a scope that has already closed, or a sibling scope, however shallow. The
+// closed/sibling rows are the ones a bare nesting-DEPTH counter could not get right (two
+// subshells at the same depth can still be different, mutually invisible scopes).
+func TestInCommandVars_SubshellScoping(t *testing.T) {
+	tests := []struct {
+		name string
+		cmd  string
+		want map[string]string
+	}{
+		{
+			name: "same subshell: assignment and consumption share one scope",
+			cmd:  `(WT=/abs/worktree && git status)`,
+			want: map[string]string{"WT": "/abs/worktree"},
+		},
+		{
+			name: "enclosing scope: a top-level assignment is visible inside a nested subshell",
+			cmd:  `WT=/abs/worktree; (git status)`,
+			want: map[string]string{"WT": "/abs/worktree"},
+		},
+		{
+			name: "enclosing scope survives two levels of nesting",
+			cmd:  `WT=/abs/worktree; ( ( git status ) )`,
+			want: map[string]string{"WT": "/abs/worktree"},
+		},
+		{
+			// `( WT=/x ); git status` — bash: $WT is EMPTY here, the subshell already
+			// closed. Before this bead this resolved WT anyway (the residual pg2-wq3ki
+			// recorded and this bead closes).
+			name: "closed subshell: an assignment does not survive its own subshell closing",
+			cmd:  `(WT=/abs/worktree); git status`,
+			want: nil,
+		},
+		{
+			// Two subshells at the SAME depth are still DIFFERENT scopes — the case a
+			// bare depth counter cannot distinguish from the "same subshell" row above.
+			name: "sibling subshells never share scope",
+			cmd:  `(WT=/abs/worktree); (git status)`,
+			want: nil,
+		},
+		{
+			// The critical asymmetry: a closed subshell's write must be COMPLETELY
+			// invisible, not merely un-bound — it must not even REVOKE an outer binding
+			// of the same name. `WT=/first; (WT=/second); echo "$WT"` prints `/first`.
+			name: "a closed subshell's reassignment does not revoke the outer binding it shadowed",
+			cmd:  `WT=/first; (WT=/second); git status`,
+			want: map[string]string{"WT": "/first"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			leaves := Parse(tt.cmd)
+			got := InCommandVars(leaves, len(leaves)-1)
+			if len(got) == 0 && len(tt.want) == 0 {
+				return
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("InCommandVars(%q) = %v, want %v", tt.cmd, got, tt.want)
+			}
+		})
+	}
+}
+
 // TestExpandInCommand covers the ALL-OR-NOTHING contract: anything that does not resolve
 // to fully literal text reports ok=false, because a partially expanded path is exactly
 // the confident wrong answer the unresolved verdict exists to prevent.

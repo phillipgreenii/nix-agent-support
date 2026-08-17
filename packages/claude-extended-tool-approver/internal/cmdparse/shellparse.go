@@ -324,6 +324,23 @@ type lowering struct {
 	// because ParseShell appends the data leaves AFTER the command leaves.
 	dataSpans []sourceSpan
 	pipeSeq   int
+	// subshellSeq is the source of fresh SUBSHELL IDs (pg2-4ak2k), mirroring
+	// pipeSeq/nextPipelineID: each `( … )` the walk enters gets its own id from
+	// nextSubshellID, so two subshells at the SAME nesting depth still get
+	// DIFFERENT ids and are never confused for one another.
+	subshellSeq int
+	// scopePath is the walk's CURRENT subshell nesting path, outermost to
+	// innermost — the subshell ids (in nextSubshellID order) of every `( … )` the
+	// walk is presently inside. It is pushed on entering a Subshell's body and
+	// popped on leaving it (see the `case *syntax.Subshell` branch), so it is only
+	// ever the LIVE path during the walk.
+	//
+	// appendLeaf stamps every leaf with an IMMUTABLE COPY of this slice at the
+	// moment the leaf is emitted — never this field itself — because scopePath's
+	// backing array is reused (grown and shrunk) across the whole walk and a leaf
+	// holding onto it directly would see LATER pushes/pops alias into its own
+	// value.
+	scopePath []int
 }
 
 // sourceSpan is a half-open byte range [lo, hi) into the lowering's source.
@@ -348,8 +365,18 @@ func (lw *lowering) spanOf(from, to syntax.Pos) sourceSpan {
 }
 
 // appendLeaf records a COMMAND leaf together with the source extent it was lowered
-// from. Every append to lw.leaves goes through here so the two stay in lockstep.
+// from. Every append to lw.leaves goes through here so the two stay in lockstep —
+// and, per pg2-4ak2k, it is likewise the ONE place that stamps SubshellScope, rather
+// than editing the several scattered call sites that build a ParsedCommand and set
+// PipelineID/PipelineIndex by hand.
+//
+// The stamp is a COPY of lw.scopePath, taken at this exact moment: scopePath's
+// backing array is mutated (grown on push, shrunk on pop) throughout the rest of the
+// walk, so storing the live slice would let a later push/pop silently rewrite a leaf
+// emitted earlier. `append(([]int)(nil), lw.scopePath...)` is nil when scopePath is
+// empty (a top-level leaf), matching SubshellScope's documented zero value.
 func (lw *lowering) appendLeaf(leaf ParsedCommand, span sourceSpan) {
+	leaf.SubshellScope = append([]int(nil), lw.scopePath...)
 	lw.leaves = append(lw.leaves, leaf)
 	lw.spans = append(lw.spans, span)
 }
@@ -357,6 +384,14 @@ func (lw *lowering) appendLeaf(leaf ParsedCommand, span sourceSpan) {
 func (lw *lowering) nextPipelineID() int {
 	lw.pipeSeq++
 	return lw.pipeSeq
+}
+
+// nextSubshellID mints a fresh SUBSHELL id (pg2-4ak2k), mirroring nextPipelineID.
+// Every `( … )` the walk enters gets its own id, so two subshells at the same
+// nesting depth are never confused for one another by scopePath's prefix test.
+func (lw *lowering) nextSubshellID() int {
+	lw.subshellSeq++
+	return lw.subshellSeq
 }
 
 // slice returns the exact source slice a node spans, clamped to the source. Every
@@ -658,7 +693,17 @@ func (lw *lowering) lowerStmt(st *syntax.Stmt, pid, idx int) {
 		}
 
 	case *syntax.Subshell:
+		// A SUBSHELL SCOPES ITS ASSIGNMENTS (pg2-4ak2k): `( WT=/x ); git -C "$WT" …`
+		// leaves WT unset in the parent shell, because a subshell is a forked child
+		// that can never write its parent's variables — not merely a nesting level.
+		// Pushing a fresh id here and popping it back off after lowering the body is
+		// what gives every leaf lowered from cmd.Stmts one extra scopePath segment
+		// that leaves lowered before/after this Subshell (in the ENCLOSING scope)
+		// do not carry, so InCommandVars can tell "this leaf's write is still open
+		// here" from "that subshell already closed" or "that's a sibling subshell".
+		lw.scopePath = append(lw.scopePath, lw.nextSubshellID())
 		lw.lowerStmtList(cmd.Stmts, pid, idx)
+		lw.scopePath = lw.scopePath[:len(lw.scopePath)-1]
 		lw.emitCompoundRedirs(st, pid, idx)
 
 	case *syntax.Block:
@@ -963,8 +1008,14 @@ func (lw *lowering) emitDataSpan(from, to syntax.Pos) {
 		return
 	}
 	// PipelineID -1: a data leaf stands in no pipeline, so it must never be
-	// reported as a stage (tc-vul7).
-	lw.dataLeaves = append(lw.dataLeaves, ParsedCommand{Raw: raw, PipelineID: -1, PipelineIndex: -1})
+	// reported as a stage (tc-vul7). SubshellScope is stamped for consistency with
+	// appendLeaf's command leaves, though nothing currently reads it here: a data
+	// leaf carries no Executable/EnvVars, so it never contributes a write
+	// InCommandVars would need to scope (pg2-4ak2k).
+	lw.dataLeaves = append(lw.dataLeaves, ParsedCommand{
+		Raw: raw, PipelineID: -1, PipelineIndex: -1,
+		SubshellScope: append([]int(nil), lw.scopePath...),
+	})
 	lw.dataSpans = append(lw.dataSpans, span)
 }
 
