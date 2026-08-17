@@ -3244,6 +3244,79 @@ func TestIntegration_GitProgramEnvVar_EmitsEmptyObject(t *testing.T) {
 	}
 }
 
+// TestIntegration_GitProgramEnvVar_CommandSubstitutionAssignment is pg2-5bph1's RULED
+// residual. `out=$(GIT_EDITOR=true git rebase --continue)` reaches the git rule as a
+// command-less leaf whose whole value is the substitution — the git rule never sees a
+// git leaf there at all — so the substitution route runs through cmdparse's substitution
+// extraction and the env-vars rule instead of the git rule's own DEMOTE-then-APPROVE
+// path. That path can only DECLINE to object ({}), never affirmatively APPROVE, so this
+// shape lands one step short of the bare spelling's `allow` (see the carve-out table
+// above, "carved out: the inert editor idiom, rebase continuation").
+//
+// pg2-6qh3p already fixed the WORSE half of this (main once emitted a decisive `ask`
+// here; it is `{}` now, in the demoted direction the carve-out intends). What is left is
+// `{}` vs `allow` — NOT `{}` vs `ask` — and this test is the fixture pg2-5bph1's own
+// acceptance criteria asked for, pinning the RULING made there:
+//
+// RULED (pg2-5bph1, re-derived against phillipgreenii-nix-agent-support@372de295 —
+// packages/claude-extended-tool-approver/internal/rules/git/git.go's hasGitProgramEnvVar
+// and this file's carve-out table): `{}` is ACCEPTED for the command-substitution
+// shape, and no new capability is built to chase it to `allow`. Reasoning:
+//   - Direction is safe either way: `{}` never approves anything `allow` would refuse,
+//     so there is no security regression in EITHER the current state or a future fix.
+//   - Volume is 1 corpus row in a 152-day window (pg2-6c85x's replay, row id 85815) —
+//     disproportionate to building a new affirmative-approve path for one rare shape.
+//   - Giving the substitution-extraction route an affirmative Approve (routing a
+//     command-less leaf's inner command through the SAME approving logic a real git
+//     leaf gets) is a bigger, genuinely architectural question — the identical shape
+//     pg2-c2non already tracks for `declare` ("resolution relief caps at abstain
+//     instead of allow"). Solving it once for both, in that bead, beats a second,
+//     narrower attempt here.
+//
+// The next reader: this is a DELIBERATE, recorded acceptance, not an oversight — do not
+// "fix" it in isolation; see pg2-c2non first.
+func TestIntegration_GitProgramEnvVar_CommandSubstitutionAssignment(t *testing.T) {
+	t.Setenv("WORKSPACE_ROOT", "/Users/testuser/workspace")
+	projectRoot := "/Users/testuser/workspace/my-project"
+	eng := buildFullEngine(projectRoot, projectRoot)
+
+	emit := func(command string) string {
+		input := &hookio.HookInput{ToolName: "Bash", CWD: projectRoot, ToolInput: makeBashJSON(command)}
+		return string(hookio.FormatOutput(eng.EvaluateHook(input), nil))
+	}
+
+	for _, tt := range []struct{ name, command, want string }{
+		{
+			name:    "the ruled shape: inert editor, wrapped in a command substitution",
+			command: `out=$(GIT_EDITOR=true git rebase --continue)`,
+			want:    "{}",
+		},
+		{
+			// The control: unaffected by the carve-out, and must stay unaffected by
+			// anything this bead does.
+			name:    "control: no env prefix at all, same substitution shape",
+			command: `out=$(git rebase --continue)`,
+			want:    "{}",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if out := emit(tt.command); out != tt.want {
+				t.Errorf("command %q emitted %s, want %s", tt.command, out, tt.want)
+			}
+		})
+	}
+
+	// NOT WIDENED: a non-inert value inside the same substitution shape must still
+	// escalate to a decisive ask — the carve-out is INERT-VALUE-only, and accepting
+	// `{}` for the inert row above must not be mistaken for value-blindness here.
+	t.Run("not widened: a non-inert value in the same shape still escalates", func(t *testing.T) {
+		out := emit(`out=$(GIT_EDITOR=/tmp/evil git rebase --continue)`)
+		if !strings.Contains(out, `"permissionDecision":"ask"`) {
+			t.Errorf("command emitted %s, want a decisive ask — a real program in this position must not be waved through", out)
+		}
+	})
+}
+
 // TestIntegration_ArithmeticMaskedEnvValue is pg2-hed0a end to end, through the
 // REAL rule chain: appending `$((1))` to an env-assignment VALUE must not buy an
 // auto-approval for the command substitution beside it.
