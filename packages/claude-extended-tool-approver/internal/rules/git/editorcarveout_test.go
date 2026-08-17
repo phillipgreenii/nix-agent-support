@@ -159,9 +159,18 @@ func TestGit_EditorCarveOut_NearMissesDoNotClear(t *testing.T) {
 		`"true; evil"`,
 		`"true && evil"`,
 		`"true|evil"`,
-		`"true"`, // cmdparse keeps the assignment value RAW, quotes included, so even the
-		`'true'`, // quoted spelling of an allowed token fails CLOSED. Deliberate.
-		"",       // an empty value names nothing statically
+		// NOT HERE: `"true"` / `'true'` (a value wholly wrapped in ONE quote
+		// character glued to the argv key, e.g. `-c core.editor='true'`). Before
+		// pg2-9zgso those failed closed on THIS shared list too — cmdparse kept
+		// the value RAW, quotes included, on BOTH the env and argv routes, and
+		// this file's own history called that "Deliberate". It no longer is: the
+		// two routes now DIVERGE, because pg2-9zgso's fix is in
+		// configFlagPairCleared (the argv `-c` reader) only, not in the
+		// env-assignment value path. See TestGit_EditorCarveOut_GluedQuoteParity
+		// for the two spellings pinned to their (now different) verdicts, and
+		// isInertEditorValue's own near-miss assertion below for why the
+		// PREDICATE itself is unaffected either way.
+		"", // an empty value names nothing statically
 	}
 	for name, twin := range editorSpellingPairs(t) {
 		for _, value := range values {
@@ -176,13 +185,18 @@ func TestGit_EditorCarveOut_NearMissesDoNotClear(t *testing.T) {
 		}
 	}
 	// The predicate itself, so a failure localises to the token set rather than to a
-	// verdict several layers away.
+	// verdict several layers away. isInertEditorValue is called with the ALREADY-UNWRAPPED
+	// value on the argv route (configFlagPairCleared unwraps before calling it) and with the
+	// RAW env value on the env route, so testing it directly with a STILL-QUOTED string
+	// (`"true"`, `'true'`) must keep failing — that is the predicate's own exactness, not the
+	// glued-quote bug, and pg2-9zgso's fix is a caller-side unwrap, never a change to this
+	// predicate's token set.
 	for _, value := range []string{"true", ":"} {
 		if !isInertEditorValue(value) {
 			t.Errorf("isInertEditorValue(%q) = false — these are exactly the two values the operator ruling allows", value)
 		}
 	}
-	for _, value := range values {
+	for _, value := range append(append([]string{}, values...), `"true"`, `'true'`) {
 		if isInertEditorValue(value) {
 			t.Errorf("isInertEditorValue(%q) = true — only the two EXACT tokens `true` and `:` may clear (pg2-6qh3p constraint (b))", value)
 		}
@@ -191,6 +205,43 @@ func TestGit_EditorCarveOut_NearMissesDoNotClear(t *testing.T) {
 	// uses the predicate — both env variables and both argv keys at once.
 	if len(inertEditorValues) != 2 {
 		t.Errorf("inertEditorValues has %d members, want 2 (`true` and `:`) — this set is read by GIT_EDITOR, GIT_SEQUENCE_EDITOR, `-c core.editor=` and `-c sequence.editor=` at once, so any addition needs its own operator ruling", len(inertEditorValues))
+	}
+}
+
+// TestGit_EditorCarveOut_GluedQuoteParity pins the pg2-9zgso fix on the ONE call site in
+// this package it touched — configFlagPairCleared, the `-c key=value` reader — and pins,
+// separately, that the SIBLING env-value route it deliberately left alone still fails
+// closed on the same spelling.
+//
+// `git -c core.editor='true' commit` and `git -c core.editor="true" commit` are BOTH the
+// glued-quote shape this bead is about: `-c` always takes its `<key>=<value>` pair as one
+// SEPARATE token (measured in configFlagPairCleared's own doc), so the token is
+// `core.editor='true'` — an unquoted key glued to a value cmdparse's lowering leaves
+// quoted, because only the value HALF of the token is wrapped, not the whole token. Before
+// this bead that quoted spelling FAILED CLOSED — see the "NOT HERE" note in
+// TestGit_EditorCarveOut_NearMissesDoNotClear for where it used to live in this same file —
+// which was the SAFE direction but not the CORRECT one, because it disagreed with the
+// unquoted spelling of the identical shell value.
+//
+// GIT_EDITOR='true' git commit is NOT the same shape: cmdparse's env-assignment lowering
+// keeps a value verbatim regardless of quoting (unquote's own doc explains why — see
+// cmdparse.UnwrapGluedQuotes), so this bead made no change there, and this test pins that
+// too, so a future change to the env route cannot silently narrow this relation to
+// "sometimes holds" without failing here first.
+func TestGit_EditorCarveOut_GluedQuoteParity(t *testing.T) {
+	for name, twin := range editorSpellingPairs(t) {
+		for _, quoted := range []string{`"true"`, `'true'`} {
+			argvCmd := argvEditor(twin, quoted, "log")
+			if got := evalCmd(t, argvCmd); got.Decision != hookio.Approve {
+				t.Errorf("cmd %q: got %s (%s), want approve — %s='true' (unquoted) already clears; the glued-quote spelling of the SAME value must reach the SAME verdict (pg2-9zgso)", argvCmd, got.Decision, got.Reason, twin)
+			}
+			// The env spelling of the identical VALUE is deliberately UNCHANGED: this bead's
+			// fix is scoped to configFlagPairCleared, not to env-assignment value reading.
+			envCmd := envEditor(name, quoted, "commit --amend")
+			if got := evalCmd(t, envCmd); got.Decision == hookio.Approve {
+				t.Errorf("cmd %q: got APPROVE (%s) — the env-assignment value route was NOT touched by pg2-9zgso and must keep failing closed on a still-quoted value; if this now clears, cmdparse's env-assignment lowering changed and this relation needs re-deriving", envCmd, got.Reason)
+			}
+		}
 	}
 }
 

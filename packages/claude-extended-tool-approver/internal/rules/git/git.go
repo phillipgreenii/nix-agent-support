@@ -1635,10 +1635,23 @@ func isGitBooleanLiteral(value string) bool {
 // collapsing it onto `core.fsmonitor` would clear a token the allowlist never named.
 // Anything that does not resolve to a member — a malformed token, an empty key, a
 // subsectioned spelling — is simply not cleared.
+//
+// THE VALUE HALF IS UNWRAPPED (cmdparse.UnwrapGluedQuotes, pg2-9zgso) before either
+// predicate sees it. `-c` always takes its pair as ONE SEPARATE token (measured above,
+// "there is no glued spelling"), so `git -c core.fsmonitor='false' status` arrives here as
+// the single token `core.fsmonitor='false'` — key `core.fsmonitor` glued to a QUOTED value,
+// which cmdparse's lowering leaves quoted (it only strips quoting when the WHOLE token is
+// wrapped, and here only the value half is). Before this fix that quoted spelling FAILED
+// CLOSED, which is the safe direction but not the CORRECT one: `isGitBooleanLiteral("'false'")`
+// and isInertEditorValue's exact-token match both missed a value they should have cleared,
+// so `-c core.fsmonitor='false'` abstained ("requires editor"/injects config) while the
+// unquoted `-c 'core.fsmonitor=false'` (whole token quoted, stripped cleanly) cleared. Both
+// spellings are IDENTICAL to the shell and must reach the SAME verdict —
+// TestConfigFlagPairCleared_GluedQuoteParity pins it.
 func configFlagPairCleared(tok string) bool {
 	key, value := tok, "true"
 	if eq := strings.IndexByte(tok, '='); eq >= 0 {
-		key, value = tok[:eq], tok[eq+1:]
+		key, value = tok[:eq], cmdparse.UnwrapGluedQuotes(tok[eq+1:])
 	}
 	predicate, listed := clearedConfigFlagPairs[strings.ToLower(key)]
 	return listed && predicate(value)

@@ -1465,6 +1465,92 @@ func unquote(s string) string {
 	return s
 }
 
+// UnwrapGluedQuotes removes ONE matched pair of surrounding shell quotes from a
+// VALUE that arrived GLUED to an unquoted prefix in the same word — the extremely
+// common `key='value'` shape (`-f query='{ viewer { login } }'`,
+// `git -c core.fsmonitor='false'`, `--method='PUT'`). It is a SHARED, EXPLICITLY
+// CALLED helper (pg2-9zgso), generalised from the identical private
+// `unwrapGluedQuotes` that `internal/rules/gh/api.go` carried alone since
+// pg2-44dsd — that instance is now DELETED in favour of this one.
+//
+// # THE DECISION: A HELPER EACH READER CALLS, NOT A LOWERING CHANGE
+//
+// pg2-9zgso's acceptance criteria required recording, at this decision point,
+// why the fix is a shared helper rather than a change to `unquote`/`wordToken`
+// above. `unquote` strips quoting only when the WHOLE token is wrapped in ONE
+// quote character, and that restriction is DELIBERATE, not an oversight it would
+// be tidy to lift: its own comment records that a true PER-PART literal expansion
+// would turn a mixed-quoting token like `a"b"c` into `abc`, and that
+// `envvars.literalValue` and `isStaticAbsolutePath` both rely on a quote
+// character SURVIVING in a mixed token as their signal that the value is not
+// fully static and must be fenced conservatively (I4). `key=value` glued to an
+// unquoted key is exactly this mixed-quoting shape, so teaching the LOWERING
+// itself to resolve it generically would silently widen every other consumer of
+// that signal too — a change whose blast radius is the WHOLE token population and
+// which would owe its own full-corpus replay (ADR 0039's Enforcement), not the
+// scoped one this bead ran. A shared helper that each `key=value` READER calls
+// EXPLICITLY on the specific substring it already knows is a value (the text
+// after `=`) confines the change to an enumerable, individually-reviewed set of
+// call sites — see pg2-9zgso's audit of internal/rules for that set — instead of
+// every token cmdparse ever produces.
+//
+// # BEHAVIOUR
+//
+// THE BOUNDARY THIS REPAIRS, MEASURED (originally pg2-44dsd, 2026-08-14, `gh api`;
+// the same lowering behaviour applies to every caller). cmdparse strips quotes
+// when the WHOLE token is quoted, and leaves them in place when a quoted segment
+// is GLUED to an unquoted prefix:
+//
+//	-f 'query={ viewer { login } }'   -> arg `query={ viewer { login } }`   (stripped)
+//	-f "query={ viewer { login } }"   -> arg `query={ viewer { login } }`   (stripped)
+//	-f query='{ viewer { login } }'   -> arg `query='{ viewer { login } }'` (KEPT)
+//	-f query="{ viewer { login } }"   -> arg `query="{ viewer { login } }"` (KEPT)
+//	-f title='my title'              -> arg `title='my title'`             (KEPT)
+//
+// THE ERROR DIRECTION IS SAFE OR INERT IN EVERY CASE, which is what makes this
+// helper acceptable rather than a layering violation — it can only ever make a
+// value MORE readable to whatever ALLOWLIST or STRICT PARSE the caller applies
+// next, never less:
+//
+//   - A value that GENUINELY begins and ends with a quote character must be
+//     written with the OTHER quote outside (`draft="'true'"`, `query="'X'"`), so
+//     the pair this strips is the outer one and what remains still carries the
+//     inner quotes — `'true'` fails strconv.ParseBool and `'X'` does not scan as
+//     GraphQL. Neither reaches an allowlisted clearance.
+//   - A MULTI-SEGMENT concatenation (`title='a'x'b'`) is NOT reconstructed: the
+//     interior holds the wrapper character, so the value is left EXACTLY as
+//     cmdparse produced it and every caller falls back to its restrictive branch.
+//   - AN UNTERMINATED quote (`'true`, one quote only) is left EXACTLY as produced:
+//     the last byte does not match the first, so nothing is stripped.
+//
+// THIS IS NOT UNIVERSAL SAFETY. A caller comparing the unwrapped value against a
+// DENYLIST or doing a SUBSTRING/PREFIX test can still be evaded by the quoted
+// spelling if it does NOT route the value through this helper — the direction
+// this fixes is "allowlist/strict-parse readers currently over-refuse the quoted
+// spelling", not "every reader of a key=value argument is safe". pg2-9zgso's
+// audit found call sites of exactly that failing-open shape (e.g.
+// internal/rules/ssh's password-auth substring check) that this helper does NOT
+// reach, because they were not routed through it — see that bead's report.
+func UnwrapGluedQuotes(value string) string {
+	if len(value) < 2 {
+		return value
+	}
+	q := value[0]
+	if q != '\'' && q != '"' {
+		return value
+	}
+	if value[len(value)-1] != q {
+		return value
+	}
+	inner := value[1 : len(value)-1]
+	if strings.IndexByte(inner, q) >= 0 {
+		// More than one quoted segment, or an escaped wrapper. Reconstructing that
+		// is out of scope: declining leaves every caller on its restrictive branch.
+		return value
+	}
+	return inner
+}
+
 // DELETED, and the deletion is a coverage claim: `splitFDPrefix`, `isVarName` and
 // `redirectionCore` — the token-level `[FD]OP[TARGET]` grammar tc-xs8x built to
 // replace a fixed six-spelling table.

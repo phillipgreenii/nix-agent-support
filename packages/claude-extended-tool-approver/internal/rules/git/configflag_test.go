@@ -92,6 +92,39 @@ func TestGit_ConfigFlagAllowlist_ClearsBooleanFsmonitor(t *testing.T) {
 	}
 }
 
+// TestGit_ConfigFlagAllowlist_GluedQuoteParity pins the pg2-9zgso fix directly on this
+// bead's OWN allowlisted pair. `-c` always takes its `<key>=<value>` pair as ONE
+// SEPARATE token (configFlagPairCleared's own doc), so `git -c core.fsmonitor='false'
+// status` arrives as the single token `core.fsmonitor='false'` — an UNQUOTED key glued
+// to a QUOTED value, which cmdparse's lowering leaves quoted (it strips quoting only
+// when the WHOLE token is wrapped, and here only the value half is). That is
+// IDENTICAL to the shell's `core.fsmonitor=false`, and must reach the SAME verdict as
+// both the plain unquoted spelling and the WHOLE-token-quoted spelling
+// (`'core.fsmonitor=false'`, which cmdparse already stripped correctly before this
+// bead — the acceptance-criteria pair pg2-9zgso names explicitly).
+func TestGit_ConfigFlagAllowlist_GluedQuoteParity(t *testing.T) {
+	for _, sub := range readOnlySubcommandsUnderTest {
+		unquoted := evalCmd(t, dashC("core.fsmonitor", "false", sub))
+		if unquoted.Decision != hookio.Approve {
+			t.Fatalf("dashC(core.fsmonitor, false, %q): got %s (%s), want approve — the premise this parity test is built on", sub, unquoted.Decision, unquoted.Reason)
+		}
+		for _, cmd := range []string{
+			dashC("core.fsmonitor", `'false'`, sub), // glued single quotes: KEY='value', one token
+			dashC("core.fsmonitor", `"false"`, sub), // glued double quotes
+			"git -c 'core.fsmonitor=false' " + sub,  // WHOLE token quoted (already worked pre-fix)
+			dashC("core.fsmonitor", `'true'`, sub),  // the OTHER cleared boolean literal, glued
+		} {
+			got := evalCmd(t, cmd)
+			if got.Decision != unquoted.Decision {
+				t.Errorf("cmd %q: got %s (%s), want %s (matching the unquoted spelling `-c core.fsmonitor=false`) — both spellings are identical to the shell (pg2-9zgso)", cmd, got.Decision, got.Reason, unquoted.Decision)
+			}
+			if got.Decision != hookio.Approve {
+				t.Errorf("cmd %q: got %s (%s), want approve", cmd, got.Decision, got.Reason)
+			}
+		}
+	}
+}
+
 // TestGit_ConfigFlagAllowlist_NonBooleanValueAbstains is the security half: for the
 // allowlisted KEY, a value that is not a boolean literal is a PATHNAME GIT EXECUTES,
 // and it must still abstain. These rows are what a key-only allowlist would have

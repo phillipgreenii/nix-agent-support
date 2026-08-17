@@ -4,6 +4,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmdparse"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
 )
 
@@ -466,61 +467,6 @@ func bodyParamIsTrue(value string) bool {
 	return err == nil && b
 }
 
-// unwrapGluedQuotes removes ONE matched pair of surrounding shell quotes from a body
-// parameter's value, and is a NARROW REPAIR OF A MEASURED cmdparse BOUNDARY — not general
-// unquoting, which belongs in cmdparse and not here.
-//
-// THE BOUNDARY, MEASURED 2026-08-14 by running cmdparse.Parse over each spelling. cmdparse
-// strips quotes when the WHOLE token is quoted, and leaves them in place when a quoted
-// segment is GLUED to an unquoted prefix:
-//
-//	-f 'query={ viewer { login } }'   -> arg `query={ viewer { login } }`   (stripped)
-//	-f "query={ viewer { login } }"   -> arg `query={ viewer { login } }`   (stripped)
-//	-f query='{ viewer { login } }'   -> arg `query='{ viewer { login } }'` (KEPT)
-//	-f query="{ viewer { login } }"   -> arg `query="{ viewer { login } }"` (KEPT)
-//	-f title='my title'              -> arg `title='my title'`             (KEPT)
-//
-// AND WHY IT HAD TO BE HANDLED HERE. Of the 576 measured `gh api graphql` rows (graphql.go's
-// corpus block), the spelling of the `query=` value breaks down as 567 `query='…'`, 10
-// `query=@…`, 2 `query="…"` and 2 `'query=…'`. So the GLUED form is 98% of real traffic:
-// without this the pg2-44dsd fix would classify 2 rows and leave 567 at the Ask it exists to
-// remove. cmdparse's parser is not this bead's to change; the boundary is reported
-// separately, because it is not gh-specific.
-//
-// THE ERROR DIRECTION IS SAFE OR INERT IN EVERY CASE, which is what makes a local repair
-// acceptable rather than a layering violation:
-//
-//   - It only ever makes a value MORE readable, so it can turn an Ask into an Approve — for
-//     `query` only when the unwrapped text scans as a query-only document, and for `draft`
-//     only when it reads as boolean true. Both are the value the shell really sent.
-//   - A value that GENUINELY begins and ends with a quote character must be written with the
-//     OTHER quote outside (`draft="'true'"`, `query="'X'"`), so the pair this strips is the
-//     outer one and what remains still carries the inner quotes — `'true'` fails
-//     strconv.ParseBool (Reject) and `'X'` does not scan as GraphQL (Ask). Neither reaches
-//     an Approve.
-//   - A MULTI-SEGMENT concatenation (`title='a'x'b'`) is NOT reconstructed: the interior
-//     holds the wrapper character, so the value is left exactly as cmdparse produced it and
-//     every consumer falls back to its restrictive branch.
-func unwrapGluedQuotes(value string) string {
-	if len(value) < 2 {
-		return value
-	}
-	q := value[0]
-	if q != '\'' && q != '"' {
-		return value
-	}
-	if value[len(value)-1] != q {
-		return value
-	}
-	inner := value[1 : len(value)-1]
-	if strings.IndexByte(inner, q) >= 0 {
-		// More than one quoted segment, or an escaped wrapper. Reconstructing that is
-		// cmdparse's job; declining leaves every caller on its restrictive branch.
-		return value
-	}
-	return inner
-}
-
 // recordBodyParam records one `key=value` body parameter. fileMagic says whether the
 // spelling that carried it honours gh's `@path` / `@-` file reference — MEASURED true for
 // -F/--field and false for -f/--raw-field.
@@ -528,15 +474,17 @@ func unwrapGluedQuotes(value string) string {
 // A parameter with no `=` at all is dropped: gh itself refuses that spelling
 // (`field: key=value expected`), so there is no value to record and nothing can run.
 //
-// The glued-quote unwrap runs BEFORE the `@` test on purpose: `-F query='@q.graphql'` is the
-// same file reference as `-F query=@q.graphql`, and reading it as a literal value would be
-// the one direction that turns an unreadable document into a readable one.
+// The glued-quote unwrap (cmdparse.UnwrapGluedQuotes, pg2-9zgso — this call used to be the
+// package-local `unwrapGluedQuotes`, deleted in favour of the shared helper) runs BEFORE the
+// `@` test on purpose: `-F query='@q.graphql'` is the same file reference as
+// `-F query=@q.graphql`, and reading it as a literal value would be the one direction that
+// turns an unreadable document into a readable one.
 func (c *ghAPICall) recordBodyParam(kv string, fileMagic bool) {
 	name, value, ok := strings.Cut(kv, "=")
 	if !ok || name == "" {
 		return
 	}
-	value = unwrapGluedQuotes(value)
+	value = cmdparse.UnwrapGluedQuotes(value)
 	if fileMagic && strings.HasPrefix(value, "@") {
 		if c.bodyOpaqueParams == nil {
 			c.bodyOpaqueParams = map[string]bool{}
@@ -640,9 +588,20 @@ func parseGhAPICall(args []string) ghAPICall {
 	var call ghAPICall
 	methodSeen, bodyParam := false, false
 
+	// setMethod unwraps the SAME glued-quote boundary recordBodyParam does
+	// (cmdparse.UnwrapGluedQuotes, pg2-9zgso) — a gap this bead FOUND rather than
+	// widened: `--method='PUT'` / `-X='PUT'` never routed through the pre-existing
+	// package-local unwrapGluedQuotes at all, only the body-parameter path did. So
+	// `IsMutating` (which upper-cases Method and checks it against the safeMethods
+	// ALLOWLIST) fails CLOSED on a quoted safe method today — `--method='GET'`
+	// reads as the unsafe method `"'GET'"` and is asked/rejected as if mutating,
+	// even though the real invocation is a plain GET. Unwrapping here can only
+	// ever make Method match a value the caller ALREADY compares against an
+	// allowlist, never weaken IsPullRequestMerge/IsPullRequestCreate's own
+	// structural checks, which read Endpoint and the now-clean Method.
 	setMethod := func(v string) {
 		methodSeen = true
-		call.Method = v
+		call.Method = cmdparse.UnwrapGluedQuotes(v)
 	}
 	// operand records the first non-flag token as the endpoint.
 	operand := func(v string) {

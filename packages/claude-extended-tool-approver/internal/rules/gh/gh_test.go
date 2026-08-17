@@ -875,7 +875,7 @@ func TestGH_ApiPullRequestCreate_DraftAware(t *testing.T) {
 		{"gh api -X POST repos/o/r/pulls --field=draft=true", hookio.Approve}, // =-glued long
 		{"gh api -X POST repos/o/r/pulls -fdraft=true", hookio.Approve},       // glued to the short
 		{"gh api -X POST repos/o/r/pulls -f draft=1", hookio.Approve},         // ParseBool truthy
-		{"gh api -X POST repos/o/r/pulls -f draft='true'", hookio.Approve},    // glued quotes (unwrapGluedQuotes)
+		{"gh api -X POST repos/o/r/pulls -f draft='true'", hookio.Approve},    // glued quotes (cmdparse.UnwrapGluedQuotes)
 		{`gh api -X POST repos/o/r/pulls -f draft="true"`, hookio.Approve},    //
 		// POSITION INDEPENDENCE: before the endpoint, after it, and with other flags between.
 		{"gh api -X POST -f draft=true repos/o/r/pulls", hookio.Approve},
@@ -911,6 +911,64 @@ func TestGH_ApiPullRequestCreate_DraftAware(t *testing.T) {
 	}
 }
 
+// TestGH_Api_GluedQuoteParity is pg2-9zgso's relation-fixture requirement: BOTH
+// spellings of the same operation — a value GLUED to an unquoted key
+// (`-f draft='true'`) and the SAME value with the WHOLE token quoted
+// (`-f 'draft=true'`) — must reach the SAME verdict, because they are identical to
+// the shell. Also covers the `--method` case explicitly, which is a SEPARATE call
+// site in parseGhAPICall (setMethod) from the body-parameter reader
+// (recordBodyParam) that pg2-44dsd already unwrapped — before this bead the method
+// value was never unwrapped at all.
+func TestGH_Api_GluedQuoteParity(t *testing.T) {
+	pairs := []struct {
+		glued, wholeQuoted string
+	}{
+		// The bead's own named example: -f draft='true' vs -f 'draft=true'.
+		{"gh api -X POST repos/o/r/pulls -f draft='true'", "gh api -X POST repos/o/r/pulls -f 'draft=true'"},
+		{"gh api -X POST repos/o/r/pulls -f draft='false'", "gh api -X POST repos/o/r/pulls -f 'draft=false'"},
+		{"gh api graphql -f query='{ viewer { login } }'", "gh api graphql -f 'query={ viewer { login } }'"},
+		{"gh api graphql -f query='mutation{addComment(input:{})}'", "gh api graphql -f 'query=mutation{addComment(input:{})}'"},
+		// The --method case: a mutating method (PUT, on the merge endpoint) and a
+		// safe method (GET) — the direction this bead's audit called out as the
+		// dangerous one to get backwards, since IsMutating compares Method against
+		// an ALLOWLIST (safeMethods) and a value that fails to unwrap fails CLOSED
+		// (over-refuses a safe GET), not open.
+		{"gh api --method='PUT' repos/o/r/pulls/5/merge", "gh api --method=PUT repos/o/r/pulls/5/merge"},
+		{"gh api -X='PUT' repos/o/r/pulls/5/merge", "gh api -X PUT repos/o/r/pulls/5/merge"},
+		{"gh api --method='GET' repos/o/r/pulls", "gh api --method=GET repos/o/r/pulls"},
+		{"gh api -X='GET' repos/o/r/pulls", "gh api -X GET repos/o/r/pulls"},
+	}
+	for _, p := range pairs {
+		wholeQuoted := evalGH(t, p.wholeQuoted)
+		glued := evalGH(t, p.glued)
+		if glued.Decision != wholeQuoted.Decision {
+			t.Errorf("glued %q got %s (%s); whole-token-quoted %q got %s (%s) — both spellings are identical to the shell and MUST reach the same verdict (pg2-9zgso)",
+				p.glued, glued.Decision, glued.Reason, p.wholeQuoted, wholeQuoted.Decision, wholeQuoted.Reason)
+		}
+	}
+	// Pin the DIRECTION too, not just the relation: the glued spelling must resolve to
+	// what the shell actually sends, not merely agree with its unquoted twin by both
+	// having regressed to the same wrong answer.
+	directed := []struct {
+		cmd  string
+		want hookio.Decision
+	}{
+		{"gh api -X POST repos/o/r/pulls -f draft='true'", hookio.Approve},
+		{"gh api -X POST repos/o/r/pulls -f draft='false'", hookio.Reject},
+		{"gh api graphql -f query='{ viewer { login } }'", hookio.Approve},
+		{"gh api graphql -f query='mutation{addComment(input:{})}'", hookio.Ask},
+		{"gh api --method='PUT' repos/o/r/pulls/5/merge", hookio.Reject},
+		{"gh api -X='PUT' repos/o/r/pulls/5/merge", hookio.Reject},
+		{"gh api --method='GET' repos/o/r/pulls", hookio.Approve},
+		{"gh api -X='GET' repos/o/r/pulls", hookio.Approve},
+	}
+	for _, tt := range directed {
+		if got := evalGH(t, tt.cmd); got.Decision != tt.want {
+			t.Errorf("cmd %q: got %s (%s), want %s", tt.cmd, got.Decision, got.Reason, tt.want)
+		}
+	}
+}
+
 // TestGH_ApiGraphQLRead_Approve is the pg2-44dsd win, and every row is a shape MEASURED in
 // the asklog corpus (see graphql.go's doc block for the query and the counts).
 //
@@ -925,7 +983,8 @@ func TestGH_ApiGraphQLRead_Approve(t *testing.T) {
 	cmds := []string{
 		// THE GLUED-QUOTE SPELLING FIRST, because it is 567 of the 576 measured rows: the
 		// quoted segment starts AFTER the `=`, which cmdparse does not unquote — see
-		// unwrapGluedQuotes. If these regress, the fix wins nothing on real traffic.
+		// cmdparse.UnwrapGluedQuotes (pg2-9zgso). If these regress, the fix wins nothing on
+		// real traffic.
 		"gh api graphql -f query='{ viewer { login } }'",
 		"gh api graphql -f query='{ rateLimit { cost remaining resetAt } }'",
 		`gh api graphql -f query='{ repository(owner:"cli",name:"cli"){ pullRequests(first:1){ nodes{ number } } } }'`, // inner " inside outer '
@@ -1161,7 +1220,7 @@ func TestGH_ParseGhAPICallBodyParams(t *testing.T) {
 		{[]string{"--input", "body.json", "-f", "draft=true", "repos/o/r/pulls"}, "draft", "", bodyParamUnreadable},
 		// A parameter with no '=' is not a parameter; gh refuses the spelling.
 		{[]string{"-f", "draft", "repos/o/r/pulls"}, "draft", "", bodyParamAbsent},
-		// THE GLUED-QUOTE REPAIR (unwrapGluedQuotes). cmdparse strips quotes only when the
+		// THE GLUED-QUOTE REPAIR (cmdparse.UnwrapGluedQuotes, pg2-9zgso). cmdparse strips quotes only when the
 		// WHOLE token is quoted, and `key='value'` is 98% of real `gh api graphql` traffic —
 		// so these rows are the ones the measured win depends on.
 		{[]string{"-f", "query='{ viewer { login } }'"}, "query", "{ viewer { login } }", bodyParamValue},

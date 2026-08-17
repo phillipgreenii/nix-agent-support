@@ -2171,3 +2171,82 @@ func TestDownstreamStages(t *testing.T) {
 		})
 	}
 }
+
+// TestUnwrapGluedQuotes pins UnwrapGluedQuotes' behaviour directly (pg2-9zgso),
+// independent of any one rule's call site: the boundary it repairs (cmdparse strips
+// quotes only when the WHOLE token is wrapped, not when a quoted segment is glued to an
+// unquoted key) and the residual cases it deliberately declines to handle, which every
+// caller inherits.
+func TestUnwrapGluedQuotes(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		want  string
+	}{
+		// THE REPAIR: a value wholly wrapped in ONE matched quote pair unwraps.
+		{"single-quoted", `'true'`, "true"},
+		{"double-quoted", `"true"`, "true"},
+		{"single-quoted graphql document", `'{ viewer { login } }'`, "{ viewer { login } }"},
+		{"double-quoted graphql document", `"{ viewer { login } }"`, "{ viewer { login } }"},
+		{"single-quoted, inner double quotes are fine (different char)", `'{ repository(owner:"o") { x } }'`, `{ repository(owner:"o") { x } }`},
+
+		// NOT QUOTED AT ALL: returned unchanged.
+		{"plain value", "true", "true"},
+		{"empty", "", ""},
+		{"one byte", "x", "x"},
+		{"one quote byte alone", "'", "'"},
+
+		// FAIL-CLOSED RESIDUE — acceptance criterion 5 of pg2-9zgso. None of these may be
+		// treated as a clean unwrap; the value must come back EXACTLY as given so every
+		// caller falls through to its own restrictive branch.
+		{
+			"interior contains the wrapper character (multi-segment concatenation)",
+			`a'x'b`, `a'x'b`,
+		},
+		{
+			"interior contains the wrapper character, title example (the VALUE half of `title='a'x'b'`)",
+			`'a'x'b'`, `'a'x'b'`,
+		},
+		{
+			"unterminated: only one quote, at the start",
+			`'true`, `'true`,
+		},
+		{
+			"unterminated: only one quote, at the end",
+			`true'`, `true'`,
+		},
+		{
+			"double-wrapped: outer pair around an already-quoted inner value",
+			`''true''`, `''true''`,
+		},
+		{
+			"double-wrapped with the OTHER quote outside — the documented escape",
+			`"'true'"`, `'true'`, // strips the outer (different-character) pair only
+		},
+		{
+			"mismatched quote characters at the two ends",
+			`'true"`, `'true"`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := UnwrapGluedQuotes(tt.value); got != tt.want {
+				t.Errorf("UnwrapGluedQuotes(%q) = %q, want %q", tt.value, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestUnwrapGluedQuotes_StripsAtMostOneLayer is a property check, stated positively:
+// a recursive strip would turn a double-wrapped value into a CLEAN one, which is
+// exactly the "double-wrapped value must not be treated as a clean unwrap" requirement
+// pg2-9zgso's acceptance criteria name. This restates that one row of the table above as
+// its own named test so a future change to the interior-quote check cannot silently
+// pass by weakening only the table row.
+func TestUnwrapGluedQuotes_StripsAtMostOneLayer(t *testing.T) {
+	nested := `''true''`
+	got := UnwrapGluedQuotes(nested)
+	if got != nested {
+		t.Fatalf("UnwrapGluedQuotes(%q) = %q, want unchanged (declined: interior holds the wrapper character)", nested, got)
+	}
+}
