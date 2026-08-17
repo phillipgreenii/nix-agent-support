@@ -3,6 +3,25 @@
 Read-only diagnosis first; destructive steps only after data safety is
 confirmed. None of these steps start a server.
 
+## 0. Probe caution: `bd dolt status` false-negatives
+
+`bd dolt status` can falsely report "Dolt server: not running / Expected port
+25252" while the nix-managed shared server is actually UP — it appears to
+probe for a local embedded dolt instead of the LaunchAgent. Verify the real
+server with `bd dolt test` ("Connection successful") or `bd dolt show`
+("Server connection OK"), or lsof/ps on `:25252` — never `bd dolt status`
+alone. Note: no git remote is configured for the served DBs; bd writes go
+directly into the served working dir, so there is no local-vs-shared gap and
+`bd dolt pull`/`push` are no-ops ("No remote configured").
+
+To query the served databases directly, use a MySQL-protocol client
+(`dolt sql-client` was removed in dolt 2.1.1; `dolt sql --host` prompts for a
+password):
+
+```bash
+mysql -h 127.0.0.1 -P 25252 -u root --skip-password    # or mariadb
+```
+
 ## 1. Enumerate the dolt processes
 
 ```bash
@@ -80,7 +99,26 @@ Only after confirming the shared data is intact and the rogue points at a tiny
 empty DB should you kill the rogue PID and let `org.nixos.beads-dolt-server`
 rebind 25252.
 
-## 7. Fix and prevent
+## 7. Recover the shared agent after killing the rogue
+
+If the shared agent is crash-looping (or was booted out) after the rogue is
+gone, reset it cleanly — bootout first so launchd forgets the failed state,
+then bootstrap fresh (UID from `id -u`):
+
+```bash
+launchctl bootout gui/$(id -u)/org.nixos.beads-dolt-server
+pkill -f 'dolt sql-server'                 # any remaining stray
+lsof -nP -iTCP:25252 | grep LISTEN         # MUST be empty before bootstrap
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/org.nixos.beads-dolt-server.plist
+```
+
+The agent loads to state=running instantly once the port is free. Corollary:
+do NOT stop the shared server while agents or bd-polling daemons (e.g. a
+PR-sync timer) are active — a stray `bd` call during the gap can spawn a
+config-less rogue on 25252 that serves an EMPTY DB and re-creates this whole
+incident; prefer online operations that keep the server bound.
+
+## 8. Fix and prevent
 
 - Remove/guard the caller (declaratively remove the auto-starting extension).
 - Ensure the machine-wide `bd` exports `BEADS_DOLT_AUTO_START=0` (overlay

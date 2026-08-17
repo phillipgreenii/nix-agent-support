@@ -1,7 +1,7 @@
 # Rules
 
 > The section `## Rules for Interactive Sessions Only` applies only when working with the user directly.
-> Autonomous agents invoked via `claude -p` (e.g. background workers, polecats, dogs)
+> Autonomous agents invoked via `claude -p` (e.g. background workers)
 > MUST ignore that section and apply only the rules under `## Always-Apply Rules`.
 
 ## Always-Apply Rules
@@ -64,7 +64,7 @@
 **CRITICAL**: Before claiming any change is complete:
 
 - If the project has `.pre-commit-config.yaml` (test with `test -f .pre-commit-config.yaml && echo yes || echo no` — an exit-0 probe; do NOT probe by running the tool, and do NOT probe with bare `ls`, which exits nonzero on a missing file and is therefore itself a failed tool call — 19 such failures in the 8 days to 2026-07-30): the pre-commit hooks MUST pass on the **changed** files. The **commit's own hook run is the gate** — a `git commit` fires `prek`/`pre-commit` on the staged files (so `git add -A` first, or a generated change escapes the run). To validate before committing, run `prek run --files <the changed files>` (scoped, fast). Do **NOT** use `prek`/`pre-commit run --all-files` as the completion gate: it re-runs every hook over the whole repo — duplicating the commit run, forcing the slow always-on hooks (bats, nix, …) even for an unrelated diff, and **false-blocking** a clean change on a pre-existing violation in a file it never touched. Reserve `--all-files` for a deliberate full-repo sweep, not per-change validation.
-- If the project has `flake.nix` (same exit-0 probe: `test -f flake.nix && echo yes || echo no`): `nix flake check && darwin-rebuild check --flake .` MUST pass
+- If the project has `flake.nix` (same exit-0 probe: `test -f flake.nix && echo yes || echo no`): `nix flake check` MUST pass. For machine-config validation use the build-only `nix build .#darwinConfigurations.<host>.system` (or `zn-self-build`) — `darwin-rebuild check` MUST NOT be used: on current nix-darwin it bails immediately with "system activation must now be run as root" and does NO build/eval (observed 2026, nix-darwin 26.05)
 - IF no tests exist for changed code: create them
 - NEVER claim code is complete without passing tests
 
@@ -99,6 +99,12 @@ MUST use `jq`/`yq`/`tq` for JSON/YAML/TOML manipulation over text-based editing 
   session, immediately before the Write. A ranged Read suffices — verified 2026-07-30, a `limit: 1`
   Read of a 4-line file satisfied the precondition — so the cost is one cheap call, not reading a
   large file in full.
+
+#### Exit Codes
+
+In ANY language, exit code 1 is the conventional general/catch-all error and MUST NOT be given a
+specific branchable meaning. If an exit code must carry a specific meaning (so callers/scripts can
+branch on it), it MUST be a distinct value >= 2, with 1 reserved for generic/unexpected errors.
 
 #### Unit Tests
 
@@ -492,6 +498,9 @@ MUST be isolated; if they modify files directly, the test MUST generate the scen
 ### General Guidelines
 
 - Before recommending paid/licensed software, confirm the cost with the user.
+- When telling the user which file to view/open (design docs, specs, code), ALWAYS give the full
+  absolute path, never a repo-relative one — many concurrent worktrees/workforests run across
+  sessions, so a relative path is ambiguous about which checkout is meant.
 
 ### Git Workflow
 
@@ -524,7 +533,7 @@ MUST be isolated; if they modify files directly, the test MUST generate the scen
 
 #### Version Control
 
-- Include the Jira issue as `Refs: TICKET-ID` on the line immediately after the subject (before the body). Extract the ticket ID from the branch name (format: `username.TICKET-ID.description`). A valid ticket ID matches `[A-Z]+-\d+` (e.g., `FINDEV-9208`, `CI-1494`). If the branch contains `NO-JIRA`, `NOJIRA`, or any variation instead of a real ticket ID, omit the `Refs:` line entirely.
+- **ZR monorepo ONLY** (ZR-Private/ziprecruiter): include the Jira issue as `Refs: TICKET-ID` on the line immediately after the subject (before the body). Extract the ticket ID from the branch name (format: `username.TICKET-ID.description`). A valid ticket ID matches `[A-Z]+-\d+` (e.g., `FINDEV-9208`, `CI-1494`). If the branch contains `NO-JIRA`, `NOJIRA`, or any variation instead of a real ticket ID, omit the `Refs:` line entirely. In personal/nix repos (the phillipg_mbp workspace and similar), the ticket-branch format does NOT apply: use simple branch names (e.g. `fix-foo`) and never add a `Refs:` line.
 - **CRITICAL**: NEVER use `--no-verify` (or `-n`) on git commands without explicit user approval
 - IF git hooks report violations: MUST fix the violations rather than bypassing hooks
 - Agent-authored GitHub PR comments/reviews (ZR repos) MUST include 🤖 in the body — a hook rejects them otherwise (12 rejected-and-retried comment bodies in the 3-month census; 1 in the 8 days to 2026-07-30)

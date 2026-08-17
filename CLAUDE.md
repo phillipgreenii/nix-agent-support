@@ -14,6 +14,15 @@ modules designed to be imported by organization or machine-specific flakes.
 - **Modular**: One program per module with options colocated with functionality
 - **Declarative**: Programs declare their own dock presence and dependencies
 
+## Public Repository — No ZipRecruiter Disclosure
+
+This repo (including the pg-pr Go module) is a standalone PUBLIC nix flake. NEVER hardcode or
+disclose ZipRecruiter-specific details — repo names, project/service identifiers, CI workflow
+names, Jira base URL/project keys, Slack workspace/channel IDs, incident semantics, bot
+identities — in code, tests, or docs. All ZR-specific configuration lives in
+`phillipg-nix-ziprecruiter` and is supplied at runtime via config; keep the tools here
+generic and config-driven. (User constraint, 2026-06-24.)
+
 ## Configuration Structure
 
 - **Darwin Modules**: `darwin/` contains system-level macOS configuration
@@ -120,6 +129,13 @@ resolved natively — use the rooted-fileset + `modRoot` form (Pattern B). Autho
 A/B pattern: `phillipg-nix-repo-base` ADR 0008 and its `CLAUDE.md` "Go packages" section. Do not
 reintroduce `vendorHash`/`buildGoModule`/`localReplaceModules` for these packages.
 
+**Go test gate**: a Go package with `subPackages` set means `nix build .#<pkg>` compiles only
+`cmd/` — packages outside `cmd/` are never compiled and their tests never run, so a green package
+build is NOT a whole-module test gate (proven 2026-08-12, bead `pg2-3nb2t`: `nix build .#pg-pr`
+exited 0 while `checks.pg-pr-go-tests` had been red for a week). The whole-module gate is
+`nix build .#checks.<system>.<pkg>-go-tests`, or the full `nix flake check` — which builds
+`checks.*` but NOT `packages.*`.
+
 ## Key Principles
 
 - **Self-Contained**: No external flake dependencies beyond declared inputs
@@ -175,6 +191,54 @@ When adding any AI agent, LLM tool, or coding assistant, use this lookup order:
 
 ---
 
+## pg-pr / pr-pool Development Rules
+
+- **Behavior docs are the source of truth** (working principle, user 2026-07-09): changes to the
+  pg-pr ↔ pr-pool system MUST flow through the living docs at `docs/behavior/` first, then derive
+  throwaway spec → design → plan → code. The docs are product-level and timeless (stories,
+  journeys, invariants in RFC 2119 language); code paths and tool internals stay out of the
+  narrative. When review/workflow behavior changes, the relevant `docs/behavior/` doc MUST be
+  edited in the SAME change. The old `docs/pr-review-flow.md` is a downstream implementation
+  reference — the behavior doc wins on disagreement.
+- **Enrichment is compute-only** (user directive, 2026-06-24): pg-pr PR enrichment
+  (kind/languages/size/urgency) MUST be computed deterministically with NO LLMs; libraries are
+  fine, perfection is not required. Any sub-signal genuinely requiring an LLM MUST be deferred to
+  a separate LLM-gated bead, never implemented with an LLM. The same rule applies to diff-review's
+  reviewer-picking inputs.
+- **pr-pool config testing trap**: a config.toml declaring `[[query]]` but NO `[[role]]` makes
+  pr-pool log "config present but defines no [[role]]; using built-in roles" and fall back to the
+  BUILT-IN query set — your queries are silently discarded, so a smoke test can exit 0 having
+  never evaluated the source type under test (hit 2026-08-13, `pg2-lmyts`). A test config MUST
+  declare at least one role. Reliable recipe: `pr-pool config --print-defaults > cfg.toml`, then
+  retype ONE existing query to the type under test. A hand-rolled ccpool role needs `actor` AND
+  (`prompt` XOR `prompt_file`) AND `completion` AND `on_failure` AND `on_dispatch_fail`
+  (enums: `completion` = close-only|close-or-handback; the failure fields = unclaim|add-human).
+  To prove the backing-command check actually RAN, run the same config against the unwrapped
+  binary `bin/.pr-pool-wrapped` under `env -i PATH=/usr/bin:/bin` — it must exit 1 with
+  `backing command "<cmd>" cannot be invoked`; without that negative control, an exit 0 through
+  the nix wrapper is vacuous (the wrapper injects the tools onto PATH).
+
+## Claude Code Rule / Skill / Plugin Delivery
+
+Verified against Claude Code 2.1.186:
+
+- A plugin-root CLAUDE.md is NOT loaded (inert). A skill's BODY loads on-invoke; only its
+  name+description are always-on.
+- User/project CLAUDE.md (memory) IS loaded in `claude -p` headless mode (verified empirically).
+  There is NO reliable interactive-vs-headless signal for hooks — do not assume a hook can scope
+  rules to interactive-only.
+- CONVENTION: always-on rules live in `home/programs/agent-rules/pgii-agent-rules.md` (delivered
+  to `~/.claude/CLAUDE.md` via home.file); skills/plugins ship via the nix-managed marketplace.
+  Rules CANNOT ride in a plugin, so "plugin owns its rules" is impossible.
+- Plugin `bin/` dirs put executables on the Bash-tool PATH only (not login shells),
+  auto-discovered with no manifest entry — BUT the marketplace directory-source cache copy SKIPS
+  symlinks pointing outside the plugin dir, so a `/nix/store` symlink would be silently dropped.
+  The established pattern instead (bead `pg2-sikj3`): the plugin's skill/hook invokes a BARE
+  command, and the binary rides `home.packages` co-gated on `claude.enable` (precedents: pg-pr,
+  claude-extended-tool-approver). No workspace plugin uses `bin/`.
+
+---
+
 ## Architecture Decision Records
 
 ADRs live in `docs/adr/` (`index.md` lists them). Read relevant ADRs before changing the area they
@@ -194,8 +258,9 @@ Rules for writing a citation into code, comments, or docs in this repo (RFC 2119
    | `0047` | phillipgreenii option namespace and platform conventions | Preserve-by-default merge policy for `settings.local.json` |
    | `0049` | launchd stable-path indirection                          | `nix`: enforce `pn-workspace.toml` keys                    |
 
-   This repo's own series currently runs `0000`-`0043`, so today every `ADR 0044`+ reference in
-   this repo is necessarily cross-repo. Write `` `phillipgreenii-nix-personal` ADR 0047 `` (the
+   This repo's own series grows over time (check `docs/adr/index.md` for the current tail), so
+   whether a bare number resolves locally or collides cross-repo can FLIP as ADRs land — never
+   reason from a remembered tail. Write `` `phillipgreenii-nix-personal` ADR 0047 `` (the
    style already used for `` `phillipg-nix-repo-base` ADR 0008 `` above), never a bare `ADR-0047`.
 
 2. **A citation MUST name the target section by its PROSE heading, never by a section number or a
