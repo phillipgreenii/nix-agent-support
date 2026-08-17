@@ -276,19 +276,42 @@ func (pe *PathEvaluator) Evaluate(path string) PathAccess {
 		// Check if the resolved path lands in a known read-only or reject zone.
 		// If so, allow it (the symlink target is less permissive than read-write project).
 		// If the target is read-write (e.g., /tmp) or unknown, block the escape.
-		resolvedZone := pe.classifyWithoutEscapeCheck(path)
+		resolvedZone := pe.classify(path)
 		if resolvedZone == PathReadWrite || resolvedZone == PathUnknown {
 			return PathUnknown
 		}
 		// Target is read-only or reject — safe to use that classification
 		return resolvedZone
 	}
+	return pe.classify(path)
+}
+
+// classify runs the zone-classification ladder on an already-resolved (symlinks
+// followed) path. It is the SINGLE implementation shared by both of Evaluate's call
+// sites — its normal fall-through and its symlink-escape branch above.
+//
+// PRIOR TO pg2-l8esk these were two INDEPENDENT COPIES of the same ladder (one inline
+// in Evaluate, one in a since-removed classifyWithoutEscapeCheck), and that duplication
+// is exactly what let pg2-byh62's first attempt leave a guard applied to only one copy
+// while the full unit test suite stayed green — the escape-check copy is reached only
+// for a symlink that appears to be in the project and resolves outside it, so it is not
+// on the path an ordinary read takes and a normal test run never exercises it.
+// Collapsing to one function makes that class of drift impossible: there is nowhere
+// left for the two answers to diverge. (The collapse also surfaced a real, pre-existing
+// instance of exactly this drift: the two copies disagreed on the
+// <xdgDataHome>/claude-extended-tool-approver zone — ReadWrite in Evaluate's copy,
+// ReadOnly in classifyWithoutEscapeCheck's — which meant a symlink escape into that
+// zone was wrongly ALLOWED instead of blocked. This single ladder uses the ReadWrite
+// answer, matching the zone's actual write use (the tool's own asks.db) and its
+// existing direct-write test coverage.)
+//
+// classify does NOT itself run the escape check: that check decides WHETHER to call
+// classify on the resolved target (escape branch) or the resolved path (normal
+// fall-through), so it must stay in Evaluate and must not become part of the ladder
+// shared here.
+func (pe *PathEvaluator) classify(path string) PathAccess {
 	// <projectRoot>/** — skipped when the root is too BROAD to be a project
-	// (pg2-byh62, see rootGrantsZone). THIS SITE AND classifyWithoutEscapeCheck'S MUST
-	// BE KEPT IN STEP: the two functions carry independent copies of the same zone
-	// ladder, and guarding only the other one left this hole fully open (measured — the
-	// escape-check copy is reached only for a symlink that appears to be in the project
-	// and resolves outside it, so it is not on the path an ordinary read takes).
+	// (pg2-byh62, see rootGrantsZone).
 	if pe.projectRootGrantsZone && strings.HasPrefix(path+"/", pe.projectRoot+"/") {
 		return PathReadWrite
 	}
@@ -385,81 +408,6 @@ func (pe *PathEvaluator) extraRootAccess(path string) PathAccess {
 		}
 	}
 	return PathUnknown
-}
-
-// classifyWithoutEscapeCheck runs zone classification on an already-resolved path,
-// skipping the symlink escape check. Used by the escape check itself to determine
-// what zone the symlink target lands in.
-func (pe *PathEvaluator) classifyWithoutEscapeCheck(path string) PathAccess {
-	// The project-root zone is skipped when the root is too BROAD to be a project —
-	// a fabricated root at or above $HOME (pg2-byh62, see rootGrantsZone). Skipping it
-	// does not by itself deny path: every zone below still applies, so a path that is
-	// genuinely in the workspace, /tmp or an allowWrite root is unaffected.
-	if pe.projectRootGrantsZone && strings.HasPrefix(path+"/", pe.projectRoot+"/") {
-		return PathReadWrite
-	}
-	if pe.workspaceRoot != "" {
-		if strings.HasPrefix(path+"/", pe.workspaceRoot+"/") || path == pe.workspaceRoot {
-			return PathReadWrite
-		}
-	}
-	if strings.HasPrefix(path+"/", pe.tmpRoot+"/") || path == pe.tmpRoot {
-		return PathReadWrite
-	}
-	if pe.sandboxConfig != nil {
-		for _, rwp := range pe.sandboxConfig.AllowWrite {
-			if pathContains(rwp, path) {
-				return PathReadWrite
-			}
-		}
-	}
-	if strings.HasPrefix(path, "/nix/") || path == "/nix" {
-		return PathReadOnly
-	}
-	if pe.home != "" {
-		claudeDir := filepath.Join(pe.home, ".claude")
-		if pathContains(claudeDir, path) {
-			claudePlans := filepath.Join(claudeDir, "plans")
-			claudeProjects := filepath.Join(claudeDir, "projects")
-			if pathContains(claudePlans, path) || pathContains(claudeProjects, path) {
-				return PathReadWrite
-			}
-			return PathReadOnly
-		}
-		claudeJSON := filepath.Join(pe.home, ".claude.json")
-		if path == claudeJSON {
-			return PathReadOnly
-		}
-		goPkg := filepath.Join(pe.home, "go", "pkg")
-		if strings.HasPrefix(path+"/", goPkg+"/") || path == goPkg {
-			return PathReadOnly
-		}
-	}
-	if pe.gradleHome != "" {
-		if strings.HasPrefix(path+"/", pe.gradleHome+"/") || path == pe.gradleHome {
-			return PathReadOnly
-		}
-	}
-	if pe.xdgDataHome != "" {
-		nixPlugins := filepath.Join(pe.xdgDataHome, "nix-support-local-plugins")
-		if strings.HasPrefix(path+"/", nixPlugins+"/") || path == nixPlugins {
-			return PathReadOnly
-		}
-		containedClaude := filepath.Join(pe.xdgDataHome, "contained-claude")
-		if pathContains(containedClaude, path) {
-			return PathReadOnly
-		}
-		extToolApprover := filepath.Join(pe.xdgDataHome, "claude-extended-tool-approver")
-		if pathContains(extToolApprover, path) {
-			return PathReadOnly
-		}
-		pretoolHook := filepath.Join(pe.xdgDataHome, "claude-pretool-hook")
-		if pathContains(pretoolHook, path) {
-			return PathReadOnly
-		}
-	}
-	// Extra roots configured via env are checked LAST — built-in zones win.
-	return pe.extraRootAccess(path)
 }
 
 // resolveConfigPaths resolves symlinks in a list of paths, dropping any that

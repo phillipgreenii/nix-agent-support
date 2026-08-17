@@ -157,11 +157,18 @@ func TestNarrowerFabricatedRootKeepsItsZone(t *testing.T) {
 // TestBothZoneLaddersHonourTheGuard is the one that would have caught the incomplete
 // first attempt at this fix.
 //
-// Evaluate and classifyWithoutEscapeCheck carry INDEPENDENT COPIES of the same zone
-// ladder — classifyWithoutEscapeCheck is reached only for a symlink that appears to be
-// inside the project and resolves outside it. Guarding only that copy left the hole
-// fully open while every unit test still passed, because an ordinary read never reaches
-// it. Asserting both is what makes the two copies stay in step.
+// UPDATED BY pg2-l8esk: Evaluate and the escape-check branch used to carry INDEPENDENT
+// COPIES of the same zone ladder (the second lived in a since-removed
+// classifyWithoutEscapeCheck) — that copy was reached only for a symlink that appears
+// to be inside the project and resolves outside it. Guarding only one copy left the
+// hole fully open while every unit test still passed, because an ordinary read never
+// reached the other. pg2-l8esk collapsed both call sites onto the single shared
+// classify method, which makes that specific class of drift structurally impossible —
+// there is no second implementation left to fall out of step. This test still calls
+// classify directly (rather than deleting the second assertion): it is the ladder's
+// own regression guard for this fabricated-root rule, independent of which call site
+// reaches it, and the general escape-vs-zone corpus in escape_zone_ladder_test.go
+// covers the escape branch's use of classify across every recognized zone.
 func TestBothZoneLaddersHonourTheGuard(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -173,10 +180,10 @@ func TestBothZoneLaddersHonourTheGuard(t *testing.T) {
 	baseline := narrowRootBaseline(t, home, unconfigured)
 	pe := New(home)
 	if got := pe.Evaluate(unconfigured); got > baseline || got.CanWrite() {
-		t.Errorf("Evaluate's copy of the ladder grants a zone for a fabricated $HOME root: %s, want no more permissive than %s", got, baseline)
+		t.Errorf("Evaluate grants a zone for a fabricated $HOME root: %s, want no more permissive than %s", got, baseline)
 	}
-	if got := pe.classifyWithoutEscapeCheck(unconfigured); got > baseline || got.CanWrite() {
-		t.Errorf("classifyWithoutEscapeCheck's copy of the ladder grants a zone for a fabricated $HOME root: %s, want no more permissive than %s", got, baseline)
+	if got := pe.classify(unconfigured); got > baseline || got.CanWrite() {
+		t.Errorf("classify grants a zone for a fabricated $HOME root: %s, want no more permissive than %s", got, baseline)
 	}
 }
 
