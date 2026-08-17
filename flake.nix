@@ -769,6 +769,39 @@
                 testDeps = [ pkgs.git ];
               };
 
+              # ceta integration suite — the `//go:build integration` tests in
+              # cmd/claude-extended-tool-approver, which EXEC the compiled binary
+              # and drive a real SQLite ask log through it. They are tagged OFF
+              # the default `go test ./...` so they cannot reach a package build:
+              # mkGoApp scopes gomod2nix's check hook to `subPackages`, so before
+              # the tag those ~46 tests, and NOT the ~1,020 internal/* unit tests,
+              # were what a monorepod nixosConfiguration build ran. On 2026-08-16
+              # they took 559.33s with ZERO failures and tripped `go test`'s 10m
+              # alarm, failing the whole deploy — the wall clock was (fsync count)
+              # x (an unbounded HOST property), so no -timeout can be chosen that a
+              # slower disk cannot blow through (tc-fqu7, and its recurrence).
+              #
+              # Reinstating them HERE keeps the coverage while moving it off the
+              # deploy path: this check is reached by `nix flake check`, never by a
+              # package or nixosConfiguration build, so a degraded disk can delay
+              # CI but can no longer block an activation.
+              #
+              # It is a SUPERSET of claude-extended-tool-approver-go-tests, not a
+              # replacement: mkGoTest deliberately takes no `subPackages`, so
+              # `-tags integration` re-runs every untagged suite alongside the
+              # tagged ones. Both are kept — the plain one is the fast gate that
+              # must stay green on its own.
+              claude-extended-tool-approver-integration-tests = pkgs._agentSupportGoBuilders.mkGoTest {
+                pname = "claude-extended-tool-approver-integration-tests";
+                src = lib.cleanSource ./packages/claude-extended-tool-approver; # matches default.nix
+                gomod2nixToml = ./packages/claude-extended-tool-approver/gomod2nix.toml;
+                testDeps = [ pkgs.git ];
+                testFlags = [
+                  "-tags"
+                  "integration"
+                ];
+              };
+
               # pb — 10 internal suites (gate ×4, bd, pn, patchid, discover,
               # duration, run). git on PATH for the real-git unit tests; bd/pn
               # tests t.Skip when their tool is absent (matches pb/default.nix

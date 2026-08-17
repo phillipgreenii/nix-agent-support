@@ -303,13 +303,45 @@ Background-shell tracking: on **PostToolUse** of a `run_in_background` Bash call
 ## Testing
 
 ```bash
-go test ./...
+go test ./...                     # unit tests — what a package BUILD runs
+go test -tags integration ./...   # the above PLUS the binary-exec integration suite
 ```
+
+### Two suites, and why the split exists
+
+The tests in `cmd/claude-extended-tool-approver` that **exec the compiled binary** —
+every `runHook` / `runCLI` caller, and everything that drives a real ask log through it —
+live in `*_integration_test.go` files behind the `integration` build tag, so a default
+`go test ./...` never sees them. This mirrors the repo's existing tag idiom
+(`pa-monitor`'s `hostile`, `pb`'s `contract` / `smoke`), sanctioned by ADR 0021.
+
+The split is not cosmetic. `mkGoApp` scopes gomod2nix's check hook to `subPackages`, so
+the **only** tests a package or `nixosConfiguration` build runs are this one package's —
+not the ~1,020 `internal/*` unit tests. Before the tag, that meant ~46 binary-exec tests
+were on the deploy path. On 2026-08-16 they took **559.33s with zero failures** and the
+51st was still running when Go's 10m alarm fired, taking the whole monorepod build down
+with it. The wall clock was `(fsync count) x (an unbounded host property)`, so no
+`-timeout` can be chosen that a slower disk cannot blow through — the fix is to take them
+off the build path, not to budget for them.
+
+Where each kind belongs:
+
+| Adding a test that…                          | Goes in                            | Runs during a build? |
+| -------------------------------------------- | ---------------------------------- | -------------------- |
+| calls production functions in-process        | `cmd_evaluate_test.go` (untagged)  | yes                  |
+| execs the binary, or calls `asklog.NewStore` | a `*_integration_test.go` (tagged) | **no**               |
+
+CI still runs the tagged suite, as the `claude-extended-tool-approver-integration-tests`
+flake check (`mkGoTest` with `testFlags = ["-tags" "integration"]`). That check is reached
+by `nix flake check` and never by a package build, so a degraded disk can slow CI but can
+no longer block an activation.
+
+### Why it is I/O-bound
 
 The suite is **I/O-bound, not CPU-bound**, because most of it exercises the SQLite ask
 log. Every test builds a throwaway database under `t.TempDir()`, and creating one costs
-roughly 17 `fsync` calls (the `journal_mode=WAL` conversion, one commit per schema
-migration, and the close checkpoint).
+roughly 11 `fsync` calls — 17 before `migrate` was made atomic — (the `journal_mode=WAL`
+conversion, the schema-migration commit, and the close checkpoint).
 
 `fsync` latency is a property of the **host filesystem** and varies by orders of
 magnitude — measured on the Linux dev host for this repo, ~50ms per `fsync` on the ext4
@@ -323,16 +355,24 @@ Two consequences worth knowing before you tune a timeout:
   a database deleted at test exit, and without this the 73-test package took **2m10s of
   wall clock for 0.9s of CPU** on a slow-`fsync` host; with it, **1.2s**. Production is
   unaffected and still runs at SQLite's default `synchronous=FULL`.
-- `cmd/claude-extended-tool-approver` tests exec the **real binary** as a subprocess, so
-  they deliberately run production code with full durability. That package is therefore
-  the slowest one (~1 minute on a slow-`fsync` host) and cannot use the pragma seam.
+- `cmd/claude-extended-tool-approver`'s **integration** tests exec the **real binary** as
+  a subprocess, so they deliberately run production code with full durability and cannot
+  use the pragma seam. Its `TestMain` sets the pragma for the in-process helpers only;
+  the exec'd binary keeps shipped durability, because no env var or flag may change how
+  the real binary behaves (`16e1fd4d`, `pg2-iay90`).
+- `TestMain` also points `TMPDIR` at `/dev/shm` when one is present and writable, so the
+  scratch tree — both the in-process stores and the child's `XDG_DATA_HOME`, since
+  `t.TempDir()` and `os.MkdirTemp("")` both resolve through it — lands in RAM. That makes
+  the residual flushes cheap **without changing a single shipped semantic**. It is a
+  preference, never a requirement: absent on macOS, and nix build sandboxes mount their
+  own (`sandbox-dev-shm-size`, 50% of RAM by default). When it is missing the suite is
+  merely slower, never broken.
 
 If this suite ever looks like it is hanging, check wall-clock against CPU time first. A
 `go test` timeout panic whose stack sits inside `modernc.org/sqlite`'s pager open is the
 signature of slow `fsync`, **not** a deadlock — the timeout simply lands on whichever
-test happened to be running. The nix check
-(`checks.<system>.claude-extended-tool-approver-go-tests`) passes no `-timeout`, so it
-gets Go's 10m default and has headroom; a tighter budget may not.
+test happened to be running. The give-away is the shape of the run: pure-CPU tests still
+report `0.00s` while anything touching disk reports tens of seconds.
 
 ## Dependencies
 

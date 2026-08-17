@@ -1,3 +1,14 @@
+//go:build integration
+
+// Integration tests for the `show`, `evaluate` and `report` subcommands. Every
+// test here seeds a real SQLite ask log and drives the COMPILED binary over it
+// (runSubcommand -> exec.Command(testBinary(t))), so all of them carry the
+// `integration` tag. Measured 2026-08-16, they ranged 17.57s-52.06s apiece on a
+// host whose array had lost its write cache. See main_integration_test.go for
+// the full rationale and for how to run them:
+//
+//	go test -tags integration ./...
+
 package main
 
 import (
@@ -36,7 +47,7 @@ func setupShowTestDB(t *testing.T) string {
 
 func runSubcommand(t *testing.T, dataDir string, args ...string) ([]byte, error) {
 	t.Helper()
-	cmd := exec.Command(cliBinary, args...)
+	cmd := exec.Command(testBinary(t), args...)
 	cmd.Env = append(os.Environ(), "XDG_DATA_HOME="+dataDir)
 	return cmd.CombinedOutput()
 }
