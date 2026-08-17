@@ -1,7 +1,6 @@
 package claudetranscript
 
 import (
-	"bufio"
 	"encoding/json"
 	"os"
 	"time"
@@ -52,8 +51,7 @@ func PendingScheduledResume(path string) (resumeAt time.Time, ok bool) {
 	}
 
 	var lines [][]byte
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 1024*1024), 16*1024*1024)
+	sc := newTranscriptScanner(f)
 	for sc.Scan() {
 		b := make([]byte, len(sc.Bytes()))
 		copy(b, sc.Bytes())

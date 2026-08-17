@@ -1,7 +1,6 @@
 package claudetranscript
 
 import (
-	"bufio"
 	"encoding/json"
 	"os"
 	"strings"
@@ -19,8 +18,7 @@ func LastAssistantText(path string) (string, error) {
 	defer func() { _ = f.Close() }()
 
 	var last string
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 1024*1024), 16*1024*1024)
+	scanner := newTranscriptScanner(f)
 	for scanner.Scan() {
 		var ev Event
 		if err := json.Unmarshal(scanner.Bytes(), &ev); err != nil {
