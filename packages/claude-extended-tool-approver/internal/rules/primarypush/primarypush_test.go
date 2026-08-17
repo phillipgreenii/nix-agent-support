@@ -65,7 +65,16 @@ func TestPrimaryPushRule(t *testing.T) {
 		{"bypass: refs/heads/main refspec", "git push origin HEAD:refs/heads/main", "Bash", "bypassPermissions", canonMain(), hookio.Reject},
 		{"bypass: delete main refspec", "git push origin :main", "Bash", "bypassPermissions", canonMain(), hookio.Reject},
 		{"bypass: set-upstream flag skipped, origin main -> primary", "git push --set-upstream origin main", "Bash", "bypassPermissions", canonMain(), hookio.Reject},
-		{"auto: bare push on primary", "git push", "Bash", "auto", canonMain(), hookio.Reject},
+		// auto PROMPTS on an Ask rather than silently accepting it (operator-confirmed
+		// 2026-08-14/2026-08-15), so it moved out of primarycommit.AutoApprovingModes
+		// and no longer gets the hard Reject — but it is still in
+		// primarycommit.GatedModes (nobody is necessarily watching an unattended auto
+		// session), so it gets Ask, NOT the R-6 trust interactive/default sessions get.
+		// A NotApplicable/NoOpinion here would let this reach Approve via the generic
+		// git rule with NO prompt at all, which is NOT the intended correction
+		// (measured and rejected during pg2-68w11: a naive "just remove auto from the
+		// map" moved corpus rows reject->approve).
+		{"auto: bare push on primary now asks (not hard-denied, not trusted either)", "git push", "Bash", "auto", canonMain(), hookio.Ask},
 		{"dontAsk: HEAD:main", "git push origin HEAD:main", "Bash", "dontAsk", canonMain(), hookio.Reject},
 		{"bypass: compound commit && push on primary", "git commit -m x && git push", "Bash", "bypassPermissions", canonMain(), hookio.Reject},
 		{"bypass: custom primary branch (trunk)", "git push origin HEAD:trunk", "Bash", "bypassPermissions", &stubResolver{canonical: true, primary: "trunk", cur: "trunk"}, hookio.Reject},

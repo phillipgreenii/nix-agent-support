@@ -261,9 +261,12 @@ func isGhExecutable(exec string) bool {
 // legally precede — or sit inside — the command words. Until pg2-by1ij this rule read the
 // path POSITIONALLY (`resource = pc.Args[0]`, `subcmd = pc.Args[1]`), so `gh --repo o/r pr
 // create` resolved resource to "--repo", matched NO branch, and reached the final Abstain,
-// which a bypassPermissions/auto session auto-approves. That escaped the whole rule at
-// once, not one branch: the pg2-25oru draft-first Reject, the landed `gh pr merge` Reject
-// and the pg2-cl0v2 `gh api` merge Reject all sat behind the same extraction.
+// which a bypassPermissions session silently accepts (auto and acceptEdits instead PROMPT
+// on it — operator-confirmed 2026-08-14/2026-08-15; only bypassPermissions is measured to
+// auto-approve here, see primarycommit's package doc comment for the full per-mode basis).
+// That escaped the whole rule at once, not one branch, in the modes that do auto-approve:
+// the pg2-25oru draft-first Reject, the landed `gh pr merge` Reject and the pg2-cl0v2
+// `gh api` merge Reject all sat behind the same extraction.
 //
 // MEASURED, gh 2.97.0 (nixpkgs), 2026-08-12, each spelling run from a directory that is
 // NOT a git repository and pointed at an unresolvable host, reading whether it reached

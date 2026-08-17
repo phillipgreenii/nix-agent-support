@@ -52,7 +52,15 @@ func TestPrimaryCommitRule(t *testing.T) {
 	}{
 		{"bypass: commit on primary", "git commit -m x", "Bash", "bypassPermissions", canonMain(), hookio.Reject},
 		{"bypass: commit --amend on primary", "git commit --amend", "Bash", "bypassPermissions", canonMain(), hookio.Reject},
-		{"auto: commit on primary", "git commit -m x", "Bash", "auto", canonMain(), hookio.Reject},
+		// auto PROMPTS on an Ask rather than silently accepting it (operator-confirmed
+		// 2026-08-14/2026-08-15), so it moved out of AutoApprovingModes and no longer
+		// gets the hard Reject — but it is still in GatedModes (nobody is necessarily
+		// watching an unattended auto session), so it gets Ask, NOT the R-6 trust
+		// interactive/default sessions get. A NotApplicable/NoOpinion here would let
+		// this reach Approve via the generic git rule with NO prompt at all, which is
+		// NOT the intended correction (measured and rejected during pg2-68w11: a naive
+		// "just remove auto from the map" moved 153 corpus rows reject->approve).
+		{"auto: commit on primary now asks (not hard-denied, not trusted either)", "git commit -m x", "Bash", "auto", canonMain(), hookio.Ask},
 		{"dontAsk: commit on primary", "git commit -m x", "Bash", "dontAsk", canonMain(), hookio.Reject},
 		{"default: commit on primary (no friction)", "git commit -m x", "Bash", "default", canonMain(), hookio.NoOpinion},
 		{"acceptEdits: commit on primary (does not auto-approve Bash)", "git commit -m x", "Bash", "acceptEdits", canonMain(), hookio.NoOpinion},
@@ -94,10 +102,15 @@ func TestPrimaryCommitRule(t *testing.T) {
 		// directory it is asked about — so a case that reached the resolver would look
 		// exactly like the old false deny. These assert the resolver is never consulted.
 		//
-		// Auto-approving modes keep a Reject (an Ask is silently accepted there, and the
-		// old behaviour was already a Reject — this change must not be more permissive).
+		// Modes that silently accept an Ask (AutoApprovingModes) keep a Reject here — an
+		// Ask would never be seen there, and the old behaviour was already a Reject, so
+		// this must not be more permissive. `auto` is NOT one of them (it prompts on an
+		// Ask, operator-confirmed 2026-08-14/2026-08-15), so it now gets the same Ask an
+		// interactive session gets — LESS restrictive than before, which is the intended
+		// correction, not a regression: the old Reject there rested on the same wrong
+		// "auto silently accepts" premise this bead fixes.
 		{"bypass: git -C $VAR commit (unresolved)", "git -C $WT commit -m x", "Bash", "bypassPermissions", canonMain(), hookio.Reject},
-		{"auto: git -C $VAR commit (unresolved)", "git -C $WT commit -m x", "Bash", "auto", canonMain(), hookio.Reject},
+		{"auto: git -C $VAR commit (unresolved) now asks", "git -C $WT commit -m x", "Bash", "auto", canonMain(), hookio.Ask},
 		{"dontAsk: git -C ${VAR} commit (unresolved)", "git -C ${WT} commit -m x", "Bash", "dontAsk", canonMain(), hookio.Reject},
 		// Interactive modes get Ask, NOT the fail-open not-applicable: the generic git
 		// rule behind this one approves a plain `git commit`, so not-applicable would

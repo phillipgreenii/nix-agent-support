@@ -1,15 +1,41 @@
 // Package primarycommit gates a `git commit` on the PRIMARY branch of the CANONICAL
 // clone (the main working tree — the real .git directory, never a linked worktree).
-// It returns Reject only when the session is in an AUTO-ACCEPTING permission mode —
-// the set {bypassPermissions, auto, dontAsk} — because such a session would silently
-// accept an Ask, so a hard deny is the only thing that stops it. The deny-honoring
-// mechanism is validated empirically for bypassPermissions (pg2-2t9wz); auto/dontAsk
-// are covered by inference (bypass ⊃ auto) plus a unit case here. Interactive modes
-// (default/plan/acceptEdits/empty) get Abstain — no every-commit prompt; a human
-// directing a primary commit is permitted (R-6) and left to the normal flow.
-// acceptEdits is moot: it auto-accepts edits, not Bash. Worktrees, feature branches,
-// non-commit git, and any resolver error all Abstain (fail-open; the worktree
-// discipline is the primary control).
+//
+// A commit on primary gets a DECISIVE verdict (Reject or Ask, never a deferring
+// NotApplicable) in GatedModes — sessions where nobody is necessarily watching each
+// command as it runs, so R-6's "a human is directing this" trust does not apply.
+// WITHIN that set, which verdict is a MEASURED, per-mode property, not an inference
+// from the mode's name:
+//
+//   - bypassPermissions silently accepts an Ask — measured empirically (pg2-2t9wz) —
+//     so it MUST be hard-denied (Reject); an Ask there is never actually seen.
+//   - auto PROMPTS on an Ask instead of silently accepting it — operator-confirmed
+//     2026-08-14 and 2026-08-15 ("auto, acceptEdits both will ask if ceta returns
+//     ASK") — so it gets Ask, not Reject: hard-denying there would only add friction a
+//     human is already going to see. `auto` was WRONGLY hard-denied before this
+//     package's correction, from an incorrect inference that bypass's behavior
+//     generalizes to every auto-accepting-sounding mode name; it does not. It is
+//     still in GatedModes, though — an unattended `auto` session gets no more trust
+//     than one is measured to deserve, so a primary commit there must still surface a
+//     decisive verdict rather than being silently approved by the git rule behind
+//     this one, or silently accepted as the empty NoOpinion an auto-accepting session
+//     also treats as approval.
+//   - dontAsk is UNMEASURED — it is not observed as a real Claude Code permission mode
+//     in this machine's asklog (~352k rows) or in any settings.json here, and looks
+//     like a guessed name rather than a live one. It stays hard-denied fail-closed
+//     pending real evidence: removing it on the ABSENCE of a measurement would be
+//     relaxing a security rule on a guess, which is the opposite of what the auto
+//     correction above did (that correction rests on a measurement, not an absence).
+//
+// Interactive modes (default/plan/acceptEdits/empty) — i.e. everything NOT in
+// GatedModes — get Abstain instead: no every-commit prompt, because a human directing
+// a primary commit is permitted (R-6) and left to the normal flow. acceptEdits reaches
+// this bucket for a second, independent reason too: it auto-accepts Edits, not Bash, so
+// a Bash primary commit there still goes through Claude Code's ordinary per-command
+// prompt exactly as default does — unlike auto, whose own unattended nature is what
+// keeps it in GatedModes. Worktrees, feature branches, non-commit git, and any resolver
+// error all Abstain regardless of mode (fail-open; the worktree discipline is the
+// primary control).
 //
 // A `git commit` hidden behind an alias — command-line `git -c alias.ci='commit …' ci`
 // or a config `[alias] ci = commit …` (global or local) — IS recognized: the rule
@@ -45,11 +71,31 @@ import (
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
 )
 
-// autoApprovingModes is the set of permission modes that silently accept an Ask,
-// so a commit on the canonical primary under one of these MUST be hard-denied.
-var autoApprovingModes = map[string]bool{
+// GatedModes is the set of permission modes in which a commit on the canonical primary
+// MUST get a decisive verdict (Reject or Ask) rather than the R-6 trust that lets it
+// defer (NotApplicable) to the generic git rule — deferring there can reach Approve,
+// and for an unresolved target it can reach the empty NoOpinion verdict, which these
+// modes' own auto-accepting behavior treats just like an Approve. See the package doc
+// comment for why interactive modes (default/plan/acceptEdits/empty) are NOT in this
+// set.
+//
+// AutoApprovingModes (below) is the STRICT SUBSET of GatedModes whose sessions
+// additionally silently accept an Ask — the measured, per-mode basis is in the package
+// doc comment. A GatedModes member outside that subset (currently just "auto") gets
+// Ask instead of Reject: still decisive, but not hard-denied, because an Ask actually
+// reaches a human there.
+//
+// Both are exported so primarypush can share one pair of definitions instead of a
+// second, independently-maintained copy (the two rules encode the same R-6/R-8 posture
+// and must not drift apart on WHICH modes are in either set).
+var GatedModes = map[string]bool{
 	"bypassPermissions": true,
 	"auto":              true,
+	"dontAsk":           true,
+}
+
+var AutoApprovingModes = map[string]bool{
+	"bypassPermissions": true,
 	"dontAsk":           true,
 }
 
@@ -108,7 +154,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		// empty environment resolves nothing — every verdict is then the one this rule
 		// reached before the environment existed.
 		f := r.inspectCommit(pc, input.CWD, LeafVars(input.InCommandVars, leaves, i), true)
-		auto := autoApprovingModes[input.PermissionMode]
+		silentlyAccepts := AutoApprovingModes[input.PermissionMode]
 		switch f.kind {
 		case findingUnresolved:
 			// FAIL-SAFE, and the ONLY branch of this rule that is decisive in an
@@ -117,23 +163,33 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 			// the fail-open Abstain cannot express: behind this rule the generic git
 			// rule approves a plain `git commit`, so returning ErrNotApplicable here
 			// would let an unresolvable target reach Approve. Ask keeps the verdict
-			// non-approving and puts the diagnosis in front of the agent; the
-			// auto-approving modes get Reject instead, because they silently accept an
-			// Ask and the old behaviour there was already a (wrongly-reasoned) Reject —
-			// no spelling may come out of this change more permissive than it went in.
-			if auto {
+			// non-approving and puts the diagnosis in front of the agent; the modes that
+			// silently accept an Ask get Reject instead — the old behaviour there was
+			// already a (wrongly-reasoned) Reject for "auto" too, but no spelling may
+			// come out of this change more permissive than it went in, so `auto` moving
+			// from that Reject to this branch's Ask (below) is the intended correction,
+			// not a regression.
+			if silentlyAccepts {
 				return hookio.RuleResult{Decision: hookio.Reject, Reason: f.unresolvedReason(true), Module: r.Name()}, nil
 			}
 			return hookio.RuleResult{Decision: hookio.Ask, Reason: f.unresolvedReason(false), Module: r.Name()}, nil
 		case findingPrimary:
-			// Commit on canonical primary. Block only an auto-approving session (which
-			// would otherwise silently accept); trust interactive/default sessions (R-6).
-			if auto {
-				return hookio.RuleResult{Decision: hookio.Reject, Reason: f.primaryReason(), Module: r.Name()}, nil
+			// Commit on canonical primary. Interactive/default sessions are trusted
+			// (R-6) and get NotApplicable, letting the git rule behind this one judge
+			// the command on its own merits — that MAY reach Approve, which is fine
+			// there because a human is directing it. A GatedModes session gets a
+			// decisive verdict instead, because NEITHER Approve NOR the empty NoOpinion
+			// a deferral could produce is safe when nobody is necessarily watching: a
+			// silently-accepting mode gets the hard Reject; the rest of GatedModes
+			// (currently just "auto") gets Ask, which is enough because an Ask actually
+			// reaches a human there.
+			if !GatedModes[input.PermissionMode] {
+				return hookio.NotApplicable()
 			}
-			// Commit on primary in an interactive/default session: trusted (R-6), and the
-			// git rule after us still gets to judge the command on its own merits.
-			return hookio.NotApplicable()
+			if silentlyAccepts {
+				return hookio.RuleResult{Decision: hookio.Reject, Reason: f.primaryReason(true), Module: r.Name()}, nil
+			}
+			return hookio.RuleResult{Decision: hookio.Ask, Reason: f.primaryReason(false), Module: r.Name()}, nil
 		}
 	}
 	// No git leaf, or none that targets primary.
@@ -166,17 +222,24 @@ type commitFinding struct {
 }
 
 // primaryReason states WHICH directory was evaluated, HOW it was chosen, WHY that made
-// this a primary commit on the canonical clone, and what to do instead.
+// this a primary commit on the canonical clone, and what to do instead. `deny` picks
+// the wording for the hard-denying Reject (a silently-accepting mode) over the Ask a
+// GatedModes member that still prompts gets instead (currently just "auto") — see
+// AutoApprovingModes' doc comment for which is which.
 //
 // The R-6 citation is kept but DEMOTED to the last clause. Naming the rule was all the
 // old text did, so an agent whose real problem was a mis-resolved directory was told it
 // was on a primary branch — and had no way to discover which directory the rule had
 // actually looked at (pg2-h2npt).
-func (f commitFinding) primaryReason() string {
-	return "primary-commit: refusing this commit. Directory evaluated: " + f.dir +
+func (f commitFinding) primaryReason(deny bool) string {
+	s := "primary-commit: refusing this commit. Directory evaluated: " + f.dir +
 		" (chosen from " + f.chosen + "). That directory is the CANONICAL clone — its .git is a real directory, not a linked worktree — and its HEAD is on \"" +
-		f.primary + "\", the primary branch. This session auto-accepts prompts, so a hard deny is the only thing that stops it; advancing shared primary needs explicit human direction (R-6). " +
+		f.primary + "\", the primary branch. Advancing shared primary needs explicit human direction (R-6), and this session is not one where a human is necessarily watching each command. " +
 		"If you meant to commit inside a worktree, name it with a LITERAL absolute path: `git -C /abs/worktree commit …` or `cd /abs/worktree && git commit …`."
+	if deny {
+		return s + " Denied rather than asked because this session auto-accepts prompts."
+	}
+	return s
 }
 
 // unresolvedReason states that the rule COULD NOT DETERMINE the target, names the text

@@ -97,7 +97,10 @@ func TestPrimaryPush_DirectoryResolution(t *testing.T) {
 
 		// --- UNRESOLVED: decisive in EVERY mode, and the resolver is never consulted. ---
 		{"bypass: git -C $VAR push (unresolved)", canonical, "git -C $WT push", "bypassPermissions", hookio.Reject},
-		{"auto: git -C $VAR push (unresolved)", canonical, "git -C $WT push", "auto", hookio.Reject},
+		// auto is not in primarycommit.AutoApprovingModes (it prompts on an Ask rather
+		// than silently accepting one — operator-confirmed 2026-08-14/2026-08-15), so an
+		// unresolved target now asks there exactly as an interactive session does.
+		{"auto: git -C $VAR push (unresolved) now asks", canonical, "git -C $WT push", "auto", hookio.Ask},
 		{"dontAsk: git -C ${VAR} push (unresolved)", canonical, "git -C ${WT} push", "dontAsk", hookio.Reject},
 		{"default: git -C $VAR push asks (cannot reach approve)", canonical, "git -C $WT push", "default", hookio.Ask},
 		{"plan: git -C $VAR push asks", canonical, "git -C $WT push", "plan", hookio.Ask},

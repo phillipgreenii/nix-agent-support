@@ -4,13 +4,22 @@
 // primary-commit rule and reuses primary-commit's PrimaryResolver so the two rules
 // share canonical/primary/current-branch detection.
 //
-// It returns Reject only when the session is in an AUTO-ACCEPTING permission mode —
-// the set {bypassPermissions, auto, dontAsk} — because such a session would silently
-// accept an Ask, so a hard deny is the only thing that stops it. Interactive modes
-// (default/plan/acceptEdits/empty) get Abstain — no every-push prompt; a human
-// directing a push to primary is permitted (R-6) and left to the normal flow. The ONE
-// exception, and the only verdict this rule ever puts in front of a human, is the
-// unresolved-directory branch described below.
+// A push that advances primary gets a DECISIVE verdict (Reject or Ask, never a
+// deferring NotApplicable) in primarycommit.GatedModes — sessions where nobody is
+// necessarily watching each command, so R-6's "a human is directing this" trust does
+// not apply. WITHIN that set, WHICH verdict is a MEASURED, per-mode property (see
+// primarycommit's package doc comment for the full basis): bypassPermissions silently
+// accepts an Ask (pg2-2t9wz) and so is hard-denied (primarycommit.AutoApprovingModes);
+// auto PROMPTS on one instead (operator-confirmed 2026-08-14/2026-08-15) and so gets
+// Ask, not Reject — hard-denying there would only add friction a human is already
+// going to see, but it stays in GatedModes because an unattended `auto` session earns
+// no more trust than that; dontAsk is unmeasured and kept hard-denied fail-closed
+// pending evidence. Interactive modes (default/plan/acceptEdits/empty) — everything NOT
+// in GatedModes — get Abstain instead: no every-push prompt, a human directing a push
+// to primary is permitted (R-6) and left to the normal flow. The ONE exception, and the
+// only verdict this rule ever puts in front of a human from OUTSIDE GatedModes, is the
+// unresolved-directory branch described below (decisive in every mode, GatedModes or
+// not).
 //
 // A push is judged to advance primary when any of:
 //   - a refspec's REMOTE side names the primary branch — `origin HEAD:main`,
@@ -63,15 +72,6 @@ import (
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/primarycommit"
 )
 
-// autoApprovingModes is the set of permission modes that silently accept an Ask, so a
-// push advancing the canonical primary under one of these MUST be hard-denied. Kept in
-// lockstep with primarycommit's identical set (both encode the same R-6/R-8 posture).
-var autoApprovingModes = map[string]bool{
-	"bypassPermissions": true,
-	"auto":              true,
-	"dontAsk":           true,
-}
-
 // pushValueFlags are `git push` options that CONSUME the following token as their
 // value, so that token must not be mistaken for a refspec (e.g. `--push-option main`).
 var pushValueFlags = map[string]bool{
@@ -113,25 +113,31 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		// ordinary case, and an empty environment resolves nothing — so every verdict is
 		// then the one this rule reached before the environment existed.
 		f := r.inspectPush(pc, input.CWD, primarycommit.LeafVars(input.InCommandVars, leaves, i), true)
-		auto := autoApprovingModes[input.PermissionMode]
+		silentlyAccepts := primarycommit.AutoApprovingModes[input.PermissionMode]
 		switch f.kind {
 		case findingUnresolved:
 			// FAIL-SAFE, and the ONLY branch of this rule that is decisive in an
 			// interactive session. See inspectPush for why this does not contradict the
 			// fail-open posture the rest of the rule keeps.
-			if auto {
+			if silentlyAccepts {
 				return hookio.RuleResult{Decision: hookio.Reject, Reason: f.unresolvedReason(true), Module: r.Name()}, nil
 			}
 			return hookio.RuleResult{Decision: hookio.Ask, Reason: f.unresolvedReason(false), Module: r.Name()}, nil
 		case findingPrimary:
-			// Push advances the canonical primary. Block only an auto-approving session
-			// (which would otherwise silently accept); trust interactive/default
-			// sessions (R-6), where the git rule after us still judges the command on
-			// its own merits.
-			if auto {
-				return hookio.RuleResult{Decision: hookio.Reject, Reason: f.primaryReason(), Module: r.Name()}, nil
+			// Push advances the canonical primary. Interactive/default sessions are
+			// trusted (R-6) and get NotApplicable, letting the git rule after us judge
+			// the command on its own merits — that MAY reach Approve, which is fine
+			// there because a human is directing it. A GatedModes session (nobody is
+			// necessarily watching) gets a decisive verdict instead: a silently-accepting
+			// mode gets the hard Reject; the rest of GatedModes (currently just "auto")
+			// gets Ask, which is enough because an Ask actually reaches a human there.
+			if !primarycommit.GatedModes[input.PermissionMode] {
+				return hookio.NotApplicable()
 			}
-			return hookio.NotApplicable()
+			if silentlyAccepts {
+				return hookio.RuleResult{Decision: hookio.Reject, Reason: f.primaryReason(true), Module: r.Name()}, nil
+			}
+			return hookio.RuleResult{Decision: hookio.Ask, Reason: f.primaryReason(false), Module: r.Name()}, nil
 		}
 	}
 	// No git leaf, or none that advances primary.
@@ -167,17 +173,24 @@ type pushFinding struct {
 
 // primaryReason states WHICH directory was evaluated, HOW it was chosen, WHY that made
 // this a primary-advancing push on the canonical clone, and what to do instead — the
-// wording convention pg2-h2npt introduced for primary-commit.
+// wording convention pg2-h2npt introduced for primary-commit. `deny` picks the wording
+// for the hard-denying Reject (a silently-accepting mode) over the Ask a GatedModes
+// member that still prompts gets instead (currently just "auto") — see
+// primarycommit.AutoApprovingModes' doc comment for which is which.
 //
 // The old text named only the primary branch and R-6/R-8. That was all the diagnosis an
 // agent got, so one whose real problem was a mis-resolved directory was told it was
 // advancing a branch it had never targeted, with no way to discover which directory the
 // rule had actually looked at (pg2-eqacu).
-func (f pushFinding) primaryReason() string {
-	return "primary-push: refusing this push. Directory evaluated: " + f.dir +
+func (f pushFinding) primaryReason(deny bool) string {
+	s := "primary-push: refusing this push. Directory evaluated: " + f.dir +
 		" (chosen from " + f.chosen + "). That directory is the CANONICAL clone — its .git is a real directory, not a linked worktree — and the push would advance \"" +
-		f.primary + "\", its primary branch, on the shared remote. This session auto-accepts prompts, so a hard deny is the only thing that stops it; advancing shared primary requires explicit human direction / PR flow (R-6/R-8). " +
+		f.primary + "\", its primary branch, on the shared remote. Advancing shared primary requires explicit human direction / PR flow (R-6/R-8), and this session is not one where a human is necessarily watching each command. " +
 		"Push a feature branch instead. If you meant to push from inside a worktree, name it with a LITERAL absolute path: `git -C /abs/worktree push …` or `cd /abs/worktree && git push …`."
+	if deny {
+		return s + " Denied rather than asked because this session auto-accepts prompts."
+	}
+	return s
 }
 
 // unresolvedReason states that the rule COULD NOT DETERMINE the target, names the text
