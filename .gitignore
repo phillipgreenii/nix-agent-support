@@ -3,9 +3,79 @@ result
 .superpowers/
 .worktrees/
 
-# compiled Go binary checked in by accident during package migration; rebuilds
-# dirty the working tree on every `go build` in the package dir
-/packages/pa-monitor/pa-monitor
+# --- Go build outputs (bead pg2-aq3cy) --------------------------------------
+#
+# WHY THIS IS NOT COSMETIC. A stray build output leaves the canonical clone
+# DIRTY, and the ff-merge landing handler halts unless `git status --porcelain`
+# there is empty -- so a single hand-run `go build` blocks ALL landing into this
+# repo until the artifact is removed.
+#
+# THE LAYOUT RULE, not a list of paths. `go build` with no `-o` writes the
+# executable into the CURRENT directory, named after the last element of the
+# main package's import path -- which in every layout here equals the main
+# package's own directory name. Re-derive the package set with
+# `fd -t f main.go packages/`; it has exactly two shapes, so a build lands in
+# exactly two positions:
+#
+#   packages/<pkg>/cmd/<bin>/<bin>   built from inside the main-package dir
+#                                    (7 of 8 packages use this nested layout)
+#   packages/<pkg>/<bin>             built from the module root -- either
+#                                    `go build ./cmd/<bin>`, or a FLAT main
+#                                    package such as pa-monitor-decorator-scope
+#                                    (its module holds a single main package,
+#                                    so even `go build ./...` emits a binary;
+#                                    every other module has several packages,
+#                                    for which `./...` discards the results)
+#
+# Git has no "only if executable" predicate and no backreference for "basename
+# equals parent directory name", so the rules below ignore EVERY entry at those
+# two positions and then re-include (a) every subdirectory and (b) every name
+# carrying a file extension. Verified 2026-08-17: no tracked file sits
+# extensionless at either position -- `git ls-files packages/ | rg '/[^/.]+$'`
+# matches only `completions/` and `testdata/` entries, which are deeper and so
+# unaffected.
+#
+# DO NOT reintroduce a case-class anchor such as `/packages/*/[a-z]*` to spare
+# capitalised names. `core.ignorecase` is true on macOS (APFS), so `[a-z]` there
+# matches `Makefile` and `LICENSE` too -- it would ignore them on darwin and
+# keep them on NixOS, i.e. platform-divergent ignore behaviour in a repo that
+# targets both. The explicit `!` allowlist below is deterministic instead.
+#
+# POLICY (RFC 2119):
+#  - A newly added Go package MUST NOT require a new line here. Appending a
+#    literal binary path is the defect this block replaces; it superseded the
+#    single `/packages/pa-monitor/pa-monitor` line, which covered one package
+#    and only the module-root position.
+#  - A tracked file placed DIRECTLY at either position MUST carry a file
+#    extension, or MUST be added to the conventional-name allowlist below.
+#    Otherwise it is ignored silently and `git add -A` will skip it.
+#  - Tooling that builds Go code SHOULD pass `go build -o <tmpdir>/...` so
+#    nothing is produced in the source tree at all. Every in-repo call site
+#    already does: `claude-extended-tool-approver/scripts/probe-*.sh`,
+#    `packages/pb/internal/gate/lifecycle_smoke_test.go`, pa-monitor's
+#    reexec/rpcclient tests, and all nix gomod2nix builds. These rules exist
+#    for the bare hand-run `go build`, which no script can intercept.
+/packages/*/*
+!/packages/*/*/
+!/packages/*/*.*
+/packages/*/cmd/*/*
+!/packages/*/cmd/*/*/
+!/packages/*/cmd/*/*.*
+
+# Conventional extensionless files that are NOT build output. Bracket classes
+# spell both cases so the result is identical on case-sensitive filesystems.
+!/packages/*/[Mm]akefile
+!/packages/*/[Jj]ustfile
+!/packages/*/Dockerfile
+!/packages/*/LICENSE
+!/packages/*/COPYING
+!/packages/*/CODEOWNERS
+!/packages/*/cmd/*/[Mm]akefile
+
+# `go test -c` output. Placed after the re-includes above, which would
+# otherwise put it back (it carries an extension). Generalises the same line in
+# packages/ccpool/.gitignore, which stays for its `*.db` / `*.out` entries.
+*.test
 
 # Beads / Dolt files (added by bd init)
 .dolt/
