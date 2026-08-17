@@ -552,6 +552,59 @@ var gitReadSubcommands = map[string]bool{
 	"ls-tree": true,
 }
 
+// stripGitDashC (pg2-jq8tn) consumes zero or more leading `-C <path>` pairs from
+// tokens — the slice AFTER "git" — so the git branch below can look up the REAL
+// subcommand instead of missing it because `-C` is occupying tokens[1].
+//
+// SCOPED TO `-C` AND ONLY `-C`, DELIBERATELY. THE pg2-a5r9r RULING (see
+// gitReadSubcommands' criterion 3 discussion above) keeps this whole seam's git
+// admission keyed on `tokens[1]` EXACTLY, because that exactness is what makes
+// `git -c core.fsmonitor=… status` fail the `gitReadSubcommands[tokens[1]]` lookup
+// (`tokens[1]` is `-c`, not `status`) — a config-injection route the RULING relies
+// on staying closed. A general "skip any leading global option" loop would
+// resolve PAST `-c` (and `--git-dir=`, `--work-tree=`, `--namespace=`,
+// `--exec-path[=]`, `-p`/`--paginate`/`-P`/`--no-pager`, …) to the same `status`,
+// re-opening exactly that route. So this helper recognizes the ONE spelling
+// `-C <path>` and nothing else; every other leading option must keep landing in
+// tokens[1] and keep missing the lookup, unchanged.
+//
+// `-C`'S SYNTAX, MEASURED on git 2.54.0, 2026-08-17 (a plain `git -C … rev-parse`
+// probe from a scratch repo; re-derivable by anyone with that git, this is not
+// assumed from the man page):
+//
+//   - the operand is a MANDATORY SEPARATE argv token. `git -Crepo1 …` fails with
+//     `unknown option: -Crepo1` (glued form invalid) and `git -C=repo1 …` fails
+//     with `unknown option: -C=repo1` (`=` form invalid too) — only the two-token
+//     spelling `-C`, then the path as the NEXT token, is valid.
+//   - `-C` MAY REPEAT, each resolved relative to the previous: `git -C repo1 -C
+//     ../repo2 rev-parse --show-toplevel` reports repo2's path. This helper does
+//     NOT resolve that chain — it collects every operand and screens each
+//     independently through readerArgsClearance, which is a conservative
+//     simplification (screening more paths than the single one git would
+//     actually chdir through can only make the verdict MORE restrictive, never
+//     less) sufficient for this bead's scope.
+//   - a trailing bare `-C` with no following token at all is invalid git syntax
+//     (`no directory given for '-C' option`) — ok=false, fail closed.
+//   - `git -C <path>` with NOTHING after the path (no subcommand token survives)
+//     is a distinct, valid outcome: git itself falls back to top-level help.
+//     stripGitDashC reports it as rest == nil, ok == true — NOT a failure to
+//     detect — and classifySubstitutionCommand's existing "no subcommand token"
+//     handling (len(rest) == 0) takes it from there.
+//
+// ok is false ONLY for the malformed trailing-bare-`-C` case above; the caller
+// MUST NOT proceed to a subcommand lookup when ok is false.
+func stripGitDashC(tokens []string) (rest []string, paths []string, ok bool) {
+	i := 0
+	for i < len(tokens) && tokens[i] == "-C" {
+		if i+1 >= len(tokens) {
+			return nil, nil, false // trailing bare -C, no operand: fail closed
+		}
+		paths = append(paths, tokens[i+1])
+		i += 2
+	}
+	return tokens[i:], paths, true
+}
+
 func classifySubstitutionCommand(tokens []string) SubstitutionClearance {
 	if len(tokens) == 0 {
 		return SubstitutionRefused
@@ -583,8 +636,22 @@ func classifySubstitutionCommand(tokens []string) SubstitutionClearance {
 		}
 		return SubstitutionCleared
 	}
-	if cmd == "git" && len(tokens) >= 2 && gitReadSubcommands[tokens[1]] {
-		return SubstitutionCleared
+	if cmd == "git" && len(tokens) >= 2 {
+		// pg2-jq8tn: strip any leading `-C <path>` pairs so the real subcommand — not
+		// `-C` itself — is what gets looked up. When there is no leading `-C` at all,
+		// stripGitDashC returns tokens[1:] unchanged with an empty paths slice, so this
+		// reduces to the original tokens[1]-exact lookup below (readerArgsClearance(nil)
+		// is SubstitutionCleared, so minClearance is a no-op in that case).
+		if rest, paths, ok := stripGitDashC(tokens[1:]); ok && len(rest) > 0 && gitReadSubcommands[rest[0]] {
+			// UNION, folded MOST-RESTRICTIVE-WINS (minClearance, same combinator
+			// SubstitutionClearance already defines): the subcommand admission is
+			// SubstitutionCleared on its own, but each `-C` operand is a path this seam
+			// did not screen before, so it goes through readerArgsClearance exactly like
+			// a fileReaderSubstitutions argv path (pg2-zpct4) — a deny-listed secret
+			// refuses, a path-shaped operand delegates to patheval, and a refusal
+			// anywhere wins.
+			return minClearance(SubstitutionCleared, readerArgsClearance(paths))
+		}
 	}
 	if fileReaderSubstitutions[cmd] {
 		return readerArgsClearance(tokens[1:])

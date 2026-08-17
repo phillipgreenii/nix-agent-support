@@ -1020,6 +1020,113 @@ func TestClassifySubstitutionBody_PathReadabilityIsDelegated(t *testing.T) {
 	}
 }
 
+// TestStripGitDashC pins stripGitDashC's contract directly (pg2-jq8tn): which leading
+// `-C <path>` pairs it consumes, what it collects, and the one fail-closed case.
+func TestStripGitDashC(t *testing.T) {
+	tests := []struct {
+		name     string
+		tokens   []string
+		wantRest []string
+		wantPath []string
+		wantOK   bool
+	}{
+		{"no leading -C: passthrough unchanged", []string{"rev-parse", "HEAD"}, []string{"rev-parse", "HEAD"}, nil, true},
+		{"single -C then subcommand", []string{"-C", "/x", "rev-parse", "HEAD"}, []string{"rev-parse", "HEAD"}, []string{"/x"}, true},
+		{"chained -C resolved relative to the previous (not by this helper)", []string{"-C", "/a", "-C", "/b", "status"}, []string{"status"}, []string{"/a", "/b"}, true},
+		{"-C consumes its operand even when that operand IS a subcommand name", []string{"-C", "rev-parse"}, []string{}, []string{"rev-parse"}, true},
+		{"trailing bare -C with nothing after: fail closed", []string{"-C"}, nil, nil, false},
+		{"a leading -c (lowercase) is not -C and is left alone", []string{"-c", "core.pager=id", "status"}, []string{"-c", "core.pager=id", "status"}, nil, true},
+		{"empty input", []string{}, []string{}, nil, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rest, paths, ok := stripGitDashC(tt.tokens)
+			if ok != tt.wantOK {
+				t.Fatalf("stripGitDashC(%v) ok = %v, want %v", tt.tokens, ok, tt.wantOK)
+			}
+			if !ok {
+				return
+			}
+			if !reflect.DeepEqual(rest, tt.wantRest) {
+				t.Errorf("stripGitDashC(%v) rest = %#v, want %#v", tt.tokens, rest, tt.wantRest)
+			}
+			if !reflect.DeepEqual(paths, tt.wantPath) {
+				t.Errorf("stripGitDashC(%v) paths = %#v, want %#v", tt.tokens, paths, tt.wantPath)
+			}
+		})
+	}
+}
+
+// TestClassifySubstitutionBody_GitDashCTokenPosition pins pg2-jq8tn: `git -C <path>
+// rev-parse HEAD` puts `-C` where classifySubstitutionCommand's `tokens[1]` lookup
+// expects the SUBCOMMAND, so the admitted subcommand behind it was missed and the
+// whole body refused even though `rev-parse`/`status`/etc. are already in
+// gitReadSubcommands. stripGitDashC fixes the TOKEN POSITION only; it must not widen
+// WHICH subcommands are admitted, and every other pre-subcommand option must keep
+// landing in tokens[1] exactly as before (THE pg2-a5r9r RULING).
+func TestClassifySubstitutionBody_GitDashCTokenPosition(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want SubstitutionClearance
+	}{
+		// --- the bead's own measured examples: now DELEGATED, not refused ---
+		{"the bead's rev-parse example", "git -C /x rev-parse HEAD", SubstitutionDelegated},
+		{"the bead's status example", "git -C /Users/phillipg/repo status --porcelain", SubstitutionDelegated},
+		// --- repeated -C: each operand screened independently, still delegated ---
+		{"repeated -C resolves to the union-screened path, not refused", "git -C /a -C /b rev-parse HEAD", SubstitutionDelegated},
+
+		// --- every OTHER leading global option must still refuse: tokens[1] is not
+		//     the subcommand for any of these, and none is "-C" so stripGitDashC must
+		//     not touch them. Pinned individually so a future "generalize the skip"
+		//     change breaks a visible test here instead of silently reopening
+		//     THE pg2-a5r9r RULING's closed config-injection route. ---
+		{"-c k=v stays refused", "git -c core.pager=id rev-parse HEAD", SubstitutionRefused},
+		{"--git-dir=<path> stays refused", "git --git-dir=/x rev-parse HEAD", SubstitutionRefused},
+		{"--work-tree=<path> stays refused", "git --work-tree=/x rev-parse HEAD", SubstitutionRefused},
+		{"--namespace=<name> stays refused", "git --namespace=foo rev-parse HEAD", SubstitutionRefused},
+		{"--exec-path=<path> stays refused", "git --exec-path=/x rev-parse HEAD", SubstitutionRefused},
+		{"-p (paginate) stays refused", "git -p rev-parse HEAD", SubstitutionRefused},
+		{"--paginate stays refused", "git --paginate rev-parse HEAD", SubstitutionRefused},
+
+		// --- malformed / edge spellings of -C itself ---
+		{"git -C rev-parse: rev-parse consumed AS -C's operand, no subcommand at all", "git -C rev-parse", SubstitutionRefused},
+		{"trailing bare -C with nothing after it at all", "git -C", SubstitutionRefused},
+		{"-C with a path but no subcommand after it", "git -C /x", SubstitutionRefused},
+
+		// --- -C stripped correctly, but the subcommand behind it is NOT admitted:
+		//     confirms this is a token-POSITION fix, not a widening of the admitted
+		//     subcommand set. ---
+		{"branch is not admitted even with -C stripped", "git -C /x branch", SubstitutionRefused},
+		{"log is not admitted even with -C stripped", "git -C /x log", SubstitutionRefused},
+		{"diff is not admitted even with -C stripped", "git -C /x diff", SubstitutionRefused},
+		{"config is not admitted even with -C stripped", "git -C /x config", SubstitutionRefused},
+		{"show is not admitted even with -C stripped", "git -C /x show HEAD", SubstitutionRefused},
+
+		// --- write-flag screening still fires through a -C prefix (point 3: hasWriteFlag's
+		//     call site is untouched — it scans the FULL tokens[1:] unconditionally, ahead
+		//     of the git branch). `commit` is not on gitReadSubcommands at all, so this
+		//     stays refused on that ground alone, which is itself the proof that -C
+		//     stripping cannot smuggle a write subcommand past the admission list. ---
+		{"a write subcommand behind -C stays refused", "git -C /x commit -am msg", SubstitutionRefused},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ClassifySubstitutionBody(tt.body); got != tt.want {
+				t.Errorf("ClassifySubstitutionBody(%q) = %v, want %v", tt.body, got, tt.want)
+			}
+			// The bool form (IsSafeSubstitutionBody, ExpansionSafeCmd's gate) must be
+			// true ONLY for SubstitutionCleared — a Delegated body is NOT statically
+			// safe to skip recursion for, it is a modelled read whose path readability
+			// the authoritative model (patheval, via the engine's substitution
+			// recursion) must still rule on.
+			if got, want := IsSafeSubstitutionBody(tt.body), tt.want == SubstitutionCleared; got != want {
+				t.Errorf("IsSafeSubstitutionBody(%q) = %v, want %v", tt.body, got, want)
+			}
+		})
+	}
+}
+
 // TestClassifySubstitutionBody_NoContentReaderIsClearedHoldingAPath is the pg2-zpct4
 // reconciliation stated as an INVARIANT over the lists rather than as rows, so a member
 // added later inherits it instead of needing whoever adds it to remember.
