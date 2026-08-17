@@ -247,6 +247,11 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		// collect mutate — approve only the read verbs, defer the rest.
 		if basename == "log" {
 			sub := ""
+			// pg2-wxbr9: NOT routed through pathCandidate. This loop hunts for the
+			// log SUBCOMMAND KEYWORD (show/stream/stats/erase/config/collect), not a
+			// path — a glued flag's value carries no subcommand-name signal, so
+			// extracting it would only risk misidentifying a flag's value as the
+			// subcommand.
 			for _, a := range pc.Args {
 				if !strings.HasPrefix(a, "-") {
 					sub = a
@@ -423,6 +428,42 @@ func startsWithLetter(s string) bool {
 	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
 }
 
+// pathCandidate returns the token a per-argument zone scan should test in place
+// of arg, and whether there is a candidate at all. It is this file's zone-model
+// counterpart to internal/rules/secrets.firstSecretRef's use of
+// cmdparse.GluedFlagValue (pg2-cu3ro): a bare positional is tested as itself, a
+// flag glued to a value via "=" is tested by that VALUE — the flag NAME is not a
+// filename, but the value is exactly what the command opens — and a value-free
+// flag contributes no candidate at all.
+//
+// pg2-wxbr9: every scanner below used to skip ANY `-`-prefixed token whole,
+// which is right for a bare flag name but wrong for `--flag=value`: the value
+// was discarded along with the name, so `cat --file=/etc/shadow` never reached
+// the zone check that `cat --file /etc/shadow` correctly ran. That is the same
+// one-token-hides-two-halves shape pg2-cu3ro fixed for the secrets deny-list,
+// reconciled here for the zone model (project root / workspace root / sandbox
+// zones). Measured on this tree before the fix: `cat --file=/etc/shadow`
+// approved while `cat --file /etc/shadow` correctly abstained.
+//
+// AN UNRECOGNIZED GLUED FLAG'S VALUE IS EMITTED, not dropped, matching
+// cmdparse.SkipGrepPattern's own documented direction: the cost of testing one
+// extra candidate that fails looksLikePath is nothing, the cost of missing a
+// real one is this defect.
+//
+// Not every skip site in this file is a zone scan — see the inline comments at
+// the sites that are NOT routed through this helper (the `log`/xargs/unzip
+// subcommand-or-executable-name scans and programOperand's role classifier) for
+// why a glued value carries no path signal there.
+func pathCandidate(arg string) (string, bool) {
+	if value, glued := cmdparse.GluedFlagValue(arg); glued {
+		return value, true
+	}
+	if strings.HasPrefix(arg, "-") {
+		return "", false
+	}
+	return arg, true
+}
+
 // looksLikePath DELEGATES to cmdparse.LooksLikePath, which is now the single definition
 // of "is this token shaped like a filesystem path" for the whole repo (pg2-zpct4).
 //
@@ -507,6 +548,17 @@ func programOperand(basename string, args []string) string {
 		return ""
 	}
 	fromFlag := programOperandFromFlag[basename]
+	// pg2-wxbr9: NOT routed through pathCandidate. This loop classifies which
+	// single ARGUMENT plays the PROGRAM role (awk's script, jq's filter, sed's
+	// expression) so readPathIssue can judge it by the narrower
+	// isDynamicPathOperand instead of the ordinary path check — it does not
+	// itself zone-check anything. Every argument, including a glued flag's
+	// value, still reaches readPathIssue's own per-argument scan over this
+	// same args slice, which is where the pg2-wxbr9 parity fix lives (see
+	// pathCandidate). A glued spelling of one of THIS table's own flags
+	// (`--field-separator=x`) is harmlessly treated as "just a flag" here: its
+	// value is not a separate args[] token to mis-skip, so nothing is lost by
+	// not extracting it in this classifier.
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		if fromFlag[a] {
@@ -585,10 +637,13 @@ func isVarNameByte(c byte) bool {
 // applies the same per-argument predicate through readPathIssue.
 func argsHaveDynamicExpansion(args []string) bool {
 	for _, a := range args {
-		if strings.HasPrefix(a, "-") {
+		// pg2-wxbr9: route through pathCandidate so a glued `--flag=$VAR` is
+		// tested by its VALUE rather than discarded whole with its flag name.
+		cand, ok := pathCandidate(a)
+		if !ok {
 			continue
 		}
-		if argHasDynamicExpansion(a) {
+		if argHasDynamicExpansion(cand) {
 			return true
 		}
 	}
@@ -598,11 +653,13 @@ func argsHaveDynamicExpansion(args []string) bool {
 // hasRejectPath returns true if any path-like arg is in a rejected zone.
 func hasRejectPath(args []string, pe *patheval.PathEvaluator) bool {
 	for _, a := range args {
-		if strings.HasPrefix(a, "-") {
+		// pg2-wxbr9: see pathCandidate's doc.
+		cand, ok := pathCandidate(a)
+		if !ok {
 			continue
 		}
-		if looksLikePath(a) {
-			if pe.Evaluate(a) == patheval.PathReject {
+		if looksLikePath(cand) {
+			if pe.Evaluate(cand) == patheval.PathReject {
 				return true
 			}
 		}
@@ -685,21 +742,28 @@ func hasRejectPath(args []string, pe *patheval.PathEvaluator) bool {
 // text instead of parsed args — reopens the bypass.
 func readPathIssue(args []string, pe *patheval.PathEvaluator, program string) string {
 	for _, a := range args {
-		if strings.HasPrefix(a, "-") {
+		// pg2-wxbr9: route through pathCandidate so a glued flag's VALUE (not
+		// just a bare positional) is tested — see pathCandidate's doc. `program`
+		// is always a bare positional token (programOperand's own scan never
+		// returns a `-`-prefixed value), so comparing the extracted candidate
+		// against it is safe: a glued flag's value can only equal `program` in
+		// the harmless coincidental case where the literal strings match.
+		cand, ok := pathCandidate(a)
+		if !ok {
 			continue
 		}
-		dynamic := argHasDynamicExpansion(a)
-		if program != "" && a == program {
+		dynamic := argHasDynamicExpansion(cand)
+		if program != "" && cand == program {
 			// The PROGRAM operand is code, not a path, so it is judged by the
 			// narrower predicate — see programOperand for why.
-			dynamic = isDynamicPathOperand(a)
+			dynamic = isDynamicPathOperand(cand)
 		}
 		if dynamic {
-			return "has a dynamically-expanded path arg " + a
+			return "has a dynamically-expanded path arg " + cand
 		}
-		if looksLikePath(a) {
-			if !pe.Evaluate(a).CanRead() {
-				return "references unknown path " + a
+		if looksLikePath(cand) {
+			if !pe.Evaluate(cand).CanRead() {
+				return "references unknown path " + cand
 			}
 		}
 	}
@@ -710,12 +774,14 @@ func readPathIssue(args []string, pe *patheval.PathEvaluator, program string) st
 // Only ReadWrite paths are acceptable for write operations.
 func hasUnsafeWritePath(args []string, pe *patheval.PathEvaluator) (bool, string) {
 	for _, a := range args {
-		if strings.HasPrefix(a, "-") {
+		// pg2-wxbr9: see pathCandidate's doc.
+		cand, ok := pathCandidate(a)
+		if !ok {
 			continue
 		}
-		if looksLikePath(a) {
-			if !pe.Evaluate(a).CanWrite() {
-				return true, a
+		if looksLikePath(cand) {
+			if !pe.Evaluate(cand).CanWrite() {
+				return true, cand
 			}
 		}
 	}
@@ -742,14 +808,16 @@ func evaluateCp(args []string, pe *patheval.PathEvaluator, module string) (hooki
 			return hookio.Refused(module, "safe-commands: cp target directory is not writable "+targetDir+" (deferred to claude-code)")
 		}
 		for _, a := range args {
-			if strings.HasPrefix(a, "-") {
+			// pg2-wxbr9: see pathCandidate's doc.
+			cand, ok := pathCandidate(a)
+			if !ok {
 				continue
 			}
-			if a == targetDir {
+			if cand == targetDir {
 				continue
 			}
-			if looksLikePath(a) && !pe.Evaluate(a).CanRead() {
-				return hookio.Refused(module, "safe-commands: cp source references non-readable path "+a+" (deferred to claude-code)")
+			if looksLikePath(cand) && !pe.Evaluate(cand).CanRead() {
+				return hookio.Refused(module, "safe-commands: cp source references non-readable path "+cand+" (deferred to claude-code)")
 			}
 		}
 		return hookio.RuleResult{Decision: hookio.Approve, Reason: "safe-commands: cp with known paths", Module: module}, nil
@@ -758,11 +826,13 @@ func evaluateCp(args []string, pe *patheval.PathEvaluator, module string) (hooki
 	// Standard mode: last path-like arg is destination (write), rest are sources (read)
 	var pathArgs []string
 	for _, a := range args {
-		if strings.HasPrefix(a, "-") {
+		// pg2-wxbr9: see pathCandidate's doc.
+		cand, ok := pathCandidate(a)
+		if !ok {
 			continue
 		}
-		if looksLikePath(a) {
-			pathArgs = append(pathArgs, a)
+		if looksLikePath(cand) {
+			pathArgs = append(pathArgs, cand)
 		}
 	}
 
@@ -808,6 +878,13 @@ func extractXargsCommand(args []string) (string, []string) {
 	i := 0
 	for i < len(args) {
 		a := args[i]
+		// pg2-wxbr9: NOT routed through pathCandidate. This loop finds where
+		// xargs' OWN flags stop so it can return the INNER COMMAND NAME —
+		// which, by definition, is whatever token does not start with "-". A
+		// glued xargs flag's value carries no signal about that boundary, so
+		// extracting one here would answer a question this loop never asks.
+		// The inner command's own args (returned below) go through this
+		// file's ordinary zone checks once Evaluate recurses into them.
 		if !strings.HasPrefix(a, "-") {
 			// Found the command executable
 			return a, args[i+1:]
@@ -901,6 +978,13 @@ func evaluateUnzip(args []string, pe *patheval.PathEvaluator, cwd string, module
 			i += 2
 			continue
 		}
+		// pg2-wxbr9: NOT routed through pathCandidate. unzip is an
+		// Info-Zip-style tool: every flag is single-dash (-d, -x, -P, -l, -t,
+		// plus the unenumerated -o/-q/-n/... that fall through to here) and
+		// NONE support the GNU `--flag=value` glued convention, so there is no
+		// glued value for cmdparse.GluedFlagValue to ever find on this
+		// command — this skip is a genuine "not a candidate at all", not an
+		// instance of the glued-value-discarding defect.
 		if strings.HasPrefix(a, "-") {
 			i++
 			continue
@@ -950,10 +1034,12 @@ func hasBashSyntaxCheckFlag(args []string) bool {
 func extractBashSyntaxCheckFiles(args []string) []string {
 	var files []string
 	for _, a := range args {
-		if strings.HasPrefix(a, "-") {
+		// pg2-wxbr9: see pathCandidate's doc.
+		cand, ok := pathCandidate(a)
+		if !ok {
 			continue
 		}
-		files = append(files, a)
+		files = append(files, cand)
 	}
 	return files
 }

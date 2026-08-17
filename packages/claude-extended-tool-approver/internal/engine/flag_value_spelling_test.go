@@ -74,35 +74,6 @@ func TestFlagSpelling_GluedValueMatchesTheSpaceSpelling(t *testing.T) {
 	}
 }
 
-// TestFlagSpelling_ZoneOnlyPathsStillDisagreeBySpelling records the HALF pg2-cu3ro DID NOT FIX, as a
-// failing-when-fixed assertion rather than as a comment, so the gap is visible in the suite
-// instead of living only in a bead.
-//
-// pg2-cu3ro routed the glued value into the SECRETS rule (the deny-list). safecmds' ZONE model
-// has ELEVEN separate `strings.HasPrefix(a, "-")` skips of its own, so a path that is merely
-// OUT OF ZONE — not deny-listed — is still invisible in the glued spelling. That is pg2-wxbr9,
-// and it is the pg2-zpct4 shape once more: two path models disagreeing about one command.
-//
-// WHEN pg2-wxbr9 LANDS THIS TEST MUST FAIL, and deleting it is that bead's acceptance signal.
-// It is written to assert the CURRENT wrong behaviour on purpose; a reader must not "fix" it by
-// relaxing the assertion.
-func TestFlagSpelling_ZoneOnlyPathsStillDisagreeBySpelling(t *testing.T) {
-	t.Setenv("WORKSPACE_ROOT", "/Users/testuser/workspace")
-	projectRoot := "/Users/testuser/workspace/my-project"
-	eng := buildFullEngine(projectRoot, projectRoot)
-
-	// Out-of-zone but NOT deny-listed, so the secrets rule has no opinion and only the zone
-	// model would gate them.
-	for _, p := range []string{"/etc/shadow", "/Users/testuser/.aws/credentials"} {
-		glued := eng.EvaluateHook(provenanceInput(projectRoot, "cat --file="+p))
-		spaced := eng.EvaluateHook(provenanceInput(projectRoot, "cat --file "+p))
-		if glued.Decision == spaced.Decision {
-			t.Errorf("pg2-wxbr9 APPEARS FIXED for %q (glued %s == spaced %s) — if that is intended, DELETE this test; it exists only to keep the known gap visible",
-				p, glued.Decision, spaced.Decision)
-		}
-	}
-}
-
 // TestFlagSpelling_MessageValuesStillSkippedInBothSpellings is the OPPOSITE-DIRECTION half,
 // and it is the one that stops the fix from being a regression.
 //
