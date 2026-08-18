@@ -261,33 +261,132 @@
       # The runner resolves everything under `$PWD` — the working tree — so the
       # hook checks what is about to be committed, while the flake check resolves
       # the same runner against the store copy of the flake source.
-      phillipgreenii.pre-commit.extraHooks = pkgs: {
-        behavior-docs-real-corpus = {
-          enable = true;
-          name = "behavior-docs-real-corpus";
-          description = "run the intra/inter/impl conformance evaluators over the real in-repo behavior-docs sets";
-          entry = "${
-            pkgs.writeShellApplication {
-              name = "behavior-docs-real-corpus-hook";
-              runtimeInputs = [
-                pkgs.bash
-                pkgs.gawk
-                pkgs.gnugrep
-                pkgs.gnused
-                pkgs.coreutils
-                pkgs.findutils
-              ];
-              text = ''
-                exec bash "$PWD/tests/behavior-docs-real-corpus.sh" "$PWD"
-              '';
-            }
-          }/bin/behavior-docs-real-corpus-hook";
-          language = "system";
-          pass_filenames = false;
-          always_run = false;
-          files = "^(behavior-docs/docs/behavior/|packages/pr-pool/docs/behavior/|packages/pr-pool/.*\\.go$|claude-marketplace/behavior-docs-conformance/|tests/behavior-docs-real-corpus)";
-        };
-      };
+      #
+      # Push-time golangci relint per Go module (bead pg2-767br). Absent this,
+      # a golangci-lint finding can currently surface only at `nix flake check`
+      # time — the network-dependent golangci-lint pre-commit hooks were
+      # deliberately removed (pg2-6wly, pg2-2cuzv; see the `checks` comment
+      # below) in favour of the offline `checks.<system>.<module>-golangci`
+      # (mkGoLint, gomod2nix vendor env, no network). That leaves a fresh
+      # finding undetected for days/weeks until someone happens to run
+      # `nix flake check`. Reusing that SAME check at push time closes the gap
+      # without reintroducing the network dependency pg2-6wly/pg2-2cuzv
+      # rejected — no new lint logic, no excludes, just an earlier trigger.
+      #
+      # WHY PRE-PUSH, NOT PRE-COMMIT (the opposite call from
+      # behavior-docs-real-corpus above, deliberately — that hook is 7.3s and
+      # self-contained; this one is not). Measured on this repo, 2026-08-18:
+      # a cached `nix build .#checks.<system>.<module>-golangci` (nothing
+      # changed) costs ~0.4s, but a real relint (module actually touched)
+      # costs ~35s for even the smallest module (pg-ccaudit) — fine once per
+      # push, too slow on every commit. Base's own
+      # `flake-modules/pre-commit.nix` already anticipates exactly this:
+      # "Repos wanting local commit/push-time Go lint feedback can add their
+      # own hook via `extraHooks` (e.g. at stages = [ "pre-push" ] to keep it
+      # out of the sandboxed check)". That "out of the sandboxed check"
+      # property is load-bearing, not cosmetic: `checks.pre-commit`'s
+      # sandboxed buildPhase runs `prek run --all-files` with NO `--stage`,
+      # and a nested `nix build` inside that no-network sandbox would fail
+      # outright. Verified empirically (prek 0.3.11, scratch repo, 2026-08-18):
+      # `prek run --all-files` with no `--stage` skips a
+      # `stages = [ "pre-push" ]`-only hook entirely, so this hook never runs
+      # inside `checks.pre-commit`. A pre-commit-staged version would NOT have
+      # that property — `checks.pre-commit` commits the WHOLE tree, so a
+      # Go-file-scoped `files` filter would match unconditionally on every
+      # `nix flake check` and hit the nested-build failure every time.
+      #
+      # `goLintPushTouchDirs`: module -> its own dir plus any sibling module it
+      # locally `replace`s onto, so a change to a dependency also relints its
+      # dependents. Mirrors the `patternBGoLints` filesets in `checks` below —
+      # kept as a flat table here rather than derived from those
+      # `lib.fileset` values (a fileset does not walk back into path
+      # strings); the sibling repetition already exists in `patternBGoLints`
+      # itself, e.g. "claude-transcript" appears there 3 times for the same
+      # reason. A change to the root `.golangci.yml` reruns every module,
+      # since it can add or remove findings anywhere.
+      phillipgreenii.pre-commit.extraHooks =
+        pkgs:
+        let
+          inherit (pkgs) lib;
+          system = pkgs.stdenv.hostPlatform.system;
+          goLintPushTouchDirs = {
+            pg-pr = [ "pg-pr" ];
+            pb = [ "pb" ];
+            claude-extended-tool-approver = [ "claude-extended-tool-approver" ];
+            pa-monitor-decorator-scope = [ "pa-monitor-decorator-scope" ];
+            claude-transcript = [ "claude-transcript" ];
+            pg-ccaudit = [ "pg-ccaudit" ];
+            ccpool = [
+              "ccpool"
+              "claude-transcript"
+            ];
+            pa-monitor = [
+              "pa-monitor"
+              "claude-transcript"
+            ];
+            pr-pool = [
+              "pr-pool"
+              "ccpool"
+              "claude-transcript"
+            ];
+          };
+          # One reusable script (module name as $1); the per-system `system`
+          # is baked in at eval time, not passed at runtime, since this
+          # function is itself resolved once per system.
+          goLintPushHookApp = pkgs.writeShellApplication {
+            name = "go-lint-push-hook";
+            runtimeInputs = [ pkgs.nix ];
+            text = ''
+              module="$1"
+              echo "==> pre-push golangci relint: $module (bead pg2-767br)" >&2
+              if ! nix build ".#checks.${system}.$module-golangci" --no-link; then
+                echo "pre-push golangci relint FAILED for module '$module' -- fix the finding(s) reported above (do NOT bypass with --no-verify)." >&2
+                exit 1
+              fi
+            '';
+          };
+          mkGoLintPushHook =
+            module: dirs:
+            lib.nameValuePair "${module}-push-golangci" {
+              enable = true;
+              name = "${module}-push-golangci";
+              description = "pre-push offline golangci relint for the ${module} Go module (reuses checks.${module}-golangci)";
+              entry = "${goLintPushHookApp}/bin/go-lint-push-hook ${module}";
+              language = "system";
+              pass_filenames = false;
+              always_run = false;
+              stages = [ "pre-push" ];
+              files = "^(packages/(${lib.concatStringsSep "|" dirs})/|\\.golangci\\.yml$)";
+            };
+        in
+        {
+          behavior-docs-real-corpus = {
+            enable = true;
+            name = "behavior-docs-real-corpus";
+            description = "run the intra/inter/impl conformance evaluators over the real in-repo behavior-docs sets";
+            entry = "${
+              pkgs.writeShellApplication {
+                name = "behavior-docs-real-corpus-hook";
+                runtimeInputs = [
+                  pkgs.bash
+                  pkgs.gawk
+                  pkgs.gnugrep
+                  pkgs.gnused
+                  pkgs.coreutils
+                  pkgs.findutils
+                ];
+                text = ''
+                  exec bash "$PWD/tests/behavior-docs-real-corpus.sh" "$PWD"
+                '';
+              }
+            }/bin/behavior-docs-real-corpus-hook";
+            language = "system";
+            pass_filenames = false;
+            always_run = false;
+            files = "^(behavior-docs/docs/behavior/|packages/pr-pool/docs/behavior/|packages/pr-pool/.*\\.go$|claude-marketplace/behavior-docs-conformance/|tests/behavior-docs-real-corpus)";
+          };
+        }
+        // lib.mapAttrs' mkGoLintPushHook goLintPushTouchDirs;
 
       perSystem =
         {
