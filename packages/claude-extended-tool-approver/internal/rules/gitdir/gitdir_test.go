@@ -853,3 +853,40 @@ func TestGitDir_PipeSinkWithoutRootExpression(t *testing.T) {
 		})
 	}
 }
+
+// TestGitDir_SkipGrepPatternGluedQuoteParity pins pg2-52eod's fix for pathOperands'
+// use of cmdparse.SkipGrepPattern — a FOURTH caller of cmdparse.GluedFlagValue this
+// bead's audit found (pg2-6f2gu's own decision record named only three: this
+// package's grep/rg/sed/awk file-flag operand extraction was not among them). A
+// glued file-flag value naming a `.git` path must be recognised the same way
+// whether quoted or not, and malformed quoting this rule cannot resolve must fail
+// SAFE to its own documented default — dirWrite — rather than silently going
+// unrecognised.
+func TestGitDir_SkipGrepPatternGluedQuoteParity(t *testing.T) {
+	r := New()
+
+	tests := []struct {
+		name    string
+		command string
+		want    hookio.Decision
+		matched bool
+	}{
+		{"grep --file, unquoted glued, names .git", "grep --file=.git/config x.log", hookio.NoOpinion, true},
+		{"grep --file, quoted glued — must match the unquoted spelling", "grep --file='.git/config' x.log", hookio.NoOpinion, true},
+		{
+			"grep --file, malformed glued quoting fails SAFE to dirWrite (Reject)",
+			"grep --file=''.git/config'' x.log", hookio.Reject, true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := hookio.Verdict(r.Evaluate(bashInput(tt.command)))
+			if got.Decision != tt.want {
+				t.Errorf("Decision = %v, want %v (reason %q)", got.Decision, tt.want, got.Reason)
+			}
+			if matched := matchedBash(tt.command); matched != tt.matched {
+				t.Errorf("matched = %v, want matched = %v", matched, tt.matched)
+			}
+		})
+	}
+}
