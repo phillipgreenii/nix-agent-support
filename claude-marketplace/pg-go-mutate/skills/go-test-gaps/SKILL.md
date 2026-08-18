@@ -15,11 +15,13 @@ in production code, and you MUST NOT "fix" production code to make a mutant die.
 
 ## The loop
 
-1. Run it scoped to one package. Cost is roughly `mutants x the package's
-test-suite runtime`, so never point it at a whole large module:
+1. Run it scoped to one package, with `--workers 1` (the default is 2, which makes
+   per-mutant verdicts non-reproducible — see the MUST below). Cost is roughly
+   `mutants x the package's test-suite runtime`, so never point it at a whole large
+   module:
 
    ```bash
-   pg-go-mutate ./internal/collect
+   pg-go-mutate ./internal/collect --workers 1
    ```
 
 2. Read the worklist. Each entry is `file`, line, the mutation, and the operator.
@@ -35,12 +37,21 @@ wrapper deletes the engine report when it exits, so there is no positive `KILLED
 to read for a named mutant. **Killed is established by ABSENCE from the survivor
 worklist**, and absence is the same observable as a mutant that
 
-- was never **generated** — gomu is type-aware and silently emits nothing where a
-  mutation would not typecheck,
+- was never **generated** — gomu type-checks candidate mutations, but a mutation that
+  would not typecheck may EITHER never be emitted at all OR be emitted and reported
+  `NOT_VIABLE`; both behaviours are measured, so neither one can be predicted,
 - lives in a file that **errored** or **timed out** during the run,
 - was judged `NOT_VIABLE` (did not compile), or
 - is a **no-op** (`original == mutated`), which the worklist drops before any count and
   which no assertion can ever kill.
+
+Because a non-typechecking mutation lands in the first case OR the third, **`go build` on
+the mutated line is the cheap way to settle which** — and the only thing that settles it.
+Both were measured: the ordering variants in precondition 1 below were never generated at
+all (`notViable` **0**), while 20 orphaned-binding and `%`-on-float mutations in a single
+file WERE generated and reported `NOT_VIABLE`, each independently confirmed non-compiling
+by `go build` with its own compiler error. So a `NOT_VIABLE` row MUST NOT be read as a
+tool defect — nor, per the MUST NOT below, as proof of non-compilation.
 
 So absence on its own is suggestive, not decisive. All three preconditions below MUST
 hold before absence is read as killed.
@@ -52,9 +63,14 @@ hold before absence is read as killed.
    `>=`) were never generated, and `notViable` was **0** at both lines. A predicted
    mutant that no worklist ever listed is absent from every later one too, and MUST NOT
    be called killed.
-2. **The run MUST report `errors` 0, `timedOut` 0, and `notViable` 0.** Any of them
-   nonzero leaves absence ambiguous between killed and never-compiled/never-run. When
-   they are nonzero, narrow the target to the single package holding the mutant and
+2. **The run MUST have used `--workers 1`, and MUST report `errors` 0, `timedOut` 0, and
+   `notViable` 0.** Any of the three counts nonzero leaves absence ambiguous between
+   killed and never-compiled/never-run. Above one worker the counts are themselves
+   unreliable in BOTH directions — measured, a non-compiling mutant reported `KILLED`
+   and a viable one reported `NOT_VIABLE` — so the gate can pass on a run whose buckets
+   are wrong and can also fail spuriously. The `--workers` value is not in the `--json`
+   payload, so the check below cannot verify it for you; passing it is on you. When the
+   counts are nonzero, narrow the target to the single package holding the mutant and
    re-run; if they are still nonzero there, the outcome is **undecided** and MUST be
    reported as undecided, never as killed.
 3. **The mutation type MUST appear in `statistics.mutationTypes`.** If the type is
@@ -65,7 +81,7 @@ Read all three from one `--json` payload — `$file`, `$line` and `$type` are th
 worklist row you are chasing:
 
 ```bash
-pg-go-mutate ./internal/collect --json >pgm.json
+pg-go-mutate ./internal/collect --workers 1 --json >pgm.json
 
 jq --arg file collect.go --argjson line 95 --arg type branch_condition '
   { runDecisive: (.statistics.errors == 0 and .statistics.timedOut == 0
@@ -85,6 +101,9 @@ jq --arg file collect.go --argjson line 95 --arg type branch_condition '
 | empty            | —             | false               | **never generated** — report that, do not report killed |
 | empty            | false         | true                | **undecided** — narrow the target and re-run, per 2     |
 
+`runDecisive` covers only the three counters; `--workers 1` is the fourth precondition and
+is not observable in the payload, so a `true` reading from a parallel run proves nothing.
+
 `buildTagsNotRun` does not weaken a killed verdict: tag-gated tests that did not run
 can only ADD survivors, never hide one. Read these bucket counts as run-health
 preconditions and discard them — they are not a score, and the MUST NOT below still
@@ -102,14 +121,23 @@ short-`$TMPDIR` requirement in the MUST below still applies.
 
 ## MUST
 
+- **MUST** pass `--workers 1` on any run whose rows will be acted on — which is every run
+  you read. The default is 2 (the engine's own default is 4), and above 1 the per-mutant
+  verdicts are not reproducible: measured on one package, two mutants that `go build`
+  PROVES non-compiling were reported `KILLED`, a viable mutant was reported `NOT_VIABLE`,
+  and — the dangerous direction — a non-compiling mutant printed as a **SURVIVOR**, so
+  parallelism manufactures phantom gaps for a verifier to chase. The same tree at
+  `--workers 1` was bit-identical across repeats (the full 62-row table, twice), and
+  `notViable` settled to exactly the mutations `go build` proves non-compiling.
 - **MUST** verify per-mutant, never by comparing survivor counts. Two module-wide runs
   over an identical tree disagreed on **13 of 451** mutants (4 survived only in the
   first run, 9 only in the second), so a count that moves by a few is indistinguishable
-  from noise. The disagreement concentrated in timing-sensitive, `httptest`-driven code;
-  the pure-logic sites were stable — their survivor sets were identical across both
-  runs. So a verdict on a mutant reached only through a test that stands up a server or
-  races a timeout SHOULD be re-run before it is trusted, while a pure-logic verdict
-  rarely needs a second run.
+  from noise. Instability MUST NOT be predicted from code shape: a package with no
+  `httptest` anywhere still disagreed run to run at the default worker count — including
+  on pure-logic arithmetic and branch mutants — with whole-package buckets moving from
+  `killed 39 / survived 18 / notViable 20` to `36 / 19 / 22`, and one `ERROR` row
+  carrying `null` output. The lever is `--workers 1`, per the MUST above, not a
+  judgement about whether a test stands up a server or races a timeout.
 - **MUST** check for the build-tag note in the output before writing assertions.
   If a package gates tests behind custom tags (`contract`, `smoke`, `hostile`),
   mutants covered only by those tests appear as survivors. Re-run with
@@ -138,7 +166,7 @@ short-`$TMPDIR` requirement in the MUST below still applies.
 - **MUST NOT** record the score anywhere — not in a file, not in a bead, not in a
   commit message. This is a diagnostic, not a tracked metric.
 - **MUST NOT** add it to CI, a pre-commit hook, or a `checks.*` derivation. It is
-  too slow and its result is not reproducible enough to gate on.
+  too slow, and outside a `--workers 1` run its result is not even reproducible.
 - **MUST NOT** point it at `./...`; that pattern is rejected. Pass a directory —
   it is walked recursively, so a single package works. Single-file targets are
   rejected too.
@@ -146,7 +174,8 @@ short-`$TMPDIR` requirement in the MUST below still applies.
   reported `config.go:55` `"!=" -> "=="` and `secret.go:92` `"==" -> "!="` as
   `NOT_VIABLE`; both were `KILLED` in another run, and a string `==` cannot fail to
   compile, so the verdict was simply wrong. Re-run before treating any row as
-  non-compiling, and suspect the `$TMPDIR` overflow above.
+  non-compiling, suspect the `$TMPDIR` overflow above or a `--workers` above 1, and
+  settle it with `go build` on the mutated line.
 
 ## Where the highest-value gaps usually are
 
