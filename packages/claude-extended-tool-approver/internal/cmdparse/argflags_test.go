@@ -243,6 +243,29 @@ func TestGluedFlagValue(t *testing.T) {
 			"mismatched quote characters at the two ends",
 			`--file='.env"`, `'.env"`, true, true,
 		},
+
+		// pg2-su2eh: NOT a `--flag=value` token AT ALL, even though it contains an
+		// "=". These are short flags glued to a QUOTED value with no "="
+		// convention of their own (awk's `-F`, git log's `-S`); the value simply
+		// happens to contain a literal "=" inside its quoting. strings.Cut finds
+		// the FIRST "=" in the whole token, which lands INSIDE that quoted region
+		// — the byte immediately before it (the opening quote) shows up in the
+		// NAME half, which is the tell that the split is spurious. Before this
+		// fix these fell into the MALFORMED branch above (the fragment after the
+		// spurious "=" starts with a stray, unresolvable quote), producing an
+		// incorrect "cannot classify" signal on a token that was never a glued
+		// flag value to begin with — measured on main @07b9600b via a 360,523-row
+		// corpus replay: `awk -F"=" ...` (no `.git` reference) wrongly Rejected
+		// in internal/rules/gitdir, and `git log -S'plan_count{query_name="x"}'`
+		// wrongly Asked in internal/rules/secrets.
+		{
+			`awk field separator, double-quoted, value is "="`,
+			`-F"="`, "", false, false,
+		},
+		{
+			`git log pickaxe search string containing a literal "=" inside single quotes`,
+			`-S'plan_count{query_name="x"}'`, "", false, false,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -679,8 +679,22 @@ func GluedFlagValue(arg string) (value string, ok bool, malformed bool) {
 	if !strings.HasPrefix(arg, "-") {
 		return "", false, false
 	}
-	_, raw, found := strings.Cut(arg, "=")
+	name, raw, found := strings.Cut(arg, "=")
 	if !found || raw == "" {
+		return "", false, false
+	}
+	// pg2-su2eh: a quote character in the NAME half means this "=" was matched
+	// INSIDE quoted content that opened before the real flag/value boundary, not
+	// at a genuine separator — e.g. `awk -F"="` (name half `-F"`) or
+	// `git log -S'plan_count{query_name="x"}'` (name half
+	// `-S'plan_count{query_name`). Neither `-F` nor `-S` uses the `=` convention
+	// at all; the token is a short flag with a GLUED value that happens to
+	// contain a literal `=`, and strings.Cut's first-match is blind to that. The
+	// clean glued-flag NAME (`--output`, `--file`, `-o`, …) never itself contains
+	// a quote character, so this guard cannot affect any of those; it only
+	// disqualifies tokens where the split was already spurious, falling through
+	// to ok=false exactly as they behaved before pg2-52eod's centralization.
+	if strings.ContainsAny(name, "'\"") {
 		return "", false, false
 	}
 	unwrapped := UnwrapGluedQuotes(raw)

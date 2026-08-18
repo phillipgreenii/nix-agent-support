@@ -323,6 +323,64 @@ func TestRule_MalformedGluedQuotingAsks(t *testing.T) {
 	}
 }
 
+// TestRule_SpuriousEqualsInsideQuotedGluedValueDoesNotAsk is pg2-su2eh's
+// regression guard, and the deliberate MIRROR of TestRule_MalformedGluedQuotingAsks
+// above: that test pins genuinely unresolvable quoting (an interior wrapper
+// character, a double-wrapped value) correctly asking; this one pins that a
+// token which was NEVER a `--flag=value` pair in the first place must not be
+// dragged into the same "cannot classify" bucket just because it happens to
+// contain a literal "=" inside its quoting.
+//
+// pg2-52eod centralized cmdparse.GluedFlagValue to split on the FIRST "=" in a
+// token via a quote-blind strings.Cut. For a short flag with no "="-flag
+// convention of its own (awk's `-F`, git log's `-S`) whose glued, quoted value
+// happens to contain a literal "=", that first "=" lands INSIDE the quoted
+// region rather than at any real flag/value boundary — the fragment after it
+// opens with a stray quote UnwrapGluedQuotes cannot resolve, so the (fixed)
+// primitive used to report malformed on a token that was never a candidate at
+// all. Measured on main @07b9600b (360,523-row corpus replay): ~21 rows here,
+// mostly `bd ... --acceptance="<prose containing an example like this>"`
+// shapes, got an unnecessary Ask ("shell quoting this rule cannot resolve").
+//
+// The `bd --acceptance=` fixture below is this bead-CHAIN's own bd usage,
+// literally: an acceptance-criteria value that mentions the git-log pickaxe
+// example as unquoted prose splits, at the shell level, into separate argv
+// tokens — one of which is `-S'plan_count{query_name="x"}'` on its own,
+// reproducing the identical mechanism inside a `bd update` command. Each
+// fixture is confirmed, by temporarily reverting internal/cmdparse/argflags.go
+// and re-running this exact table, to Ask before this bead's fix and to
+// Abstain after it.
+func TestRule_SpuriousEqualsInsideQuotedGluedValueDoesNotAsk(t *testing.T) {
+	pe := patheval.NewWithCWD("/project", "/project")
+	r := New(pe)
+
+	tests := []struct {
+		name string
+		cmd  string
+	}{
+		{
+			"awk field separator, double-quoted, value is \"=\"",
+			`awk -F"=" '{print $1}' file.txt`,
+		},
+		{
+			"git log pickaxe search string containing a literal = inside single quotes",
+			`git log -S'plan_count{query_name="x"}'`,
+		},
+		{
+			"bd acceptance value, unquoted, embeds the pickaxe example verbatim",
+			`bd update pg2-x --acceptance=Add tests for awk -F"=" and git log -S'plan_count{query_name="x"}' shapes`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := hookio.Verdict(r.Evaluate(bashInput(tt.cmd)))
+			if got.Decision == hookio.Ask {
+				t.Errorf("cmd %q: got ask (%s), want NOT ask — this token was never a `--flag=value` pair; the \"=\" it contains is inside quoting, not a real flag/value boundary (pg2-su2eh)", tt.cmd, got.Reason)
+			}
+		})
+	}
+}
+
 // TestRule_UnterminatedGluedQuoteStillAbstains is the ONE case
 // TestRule_MalformedGluedQuotingAsks does not cover: a quote that never
 // closes ANYWHERE in the rest of the command text is not a "declined unwrap"

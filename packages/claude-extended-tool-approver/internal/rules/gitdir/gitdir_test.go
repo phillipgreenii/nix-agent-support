@@ -890,3 +890,45 @@ func TestGitDir_SkipGrepPatternGluedQuoteParity(t *testing.T) {
 		})
 	}
 }
+
+// TestGitDir_GluedFlagValueSpuriousEqualsBoundary is pg2-su2eh's regression guard:
+// pg2-52eod's centralization of cmdparse.GluedFlagValue made it detect and report
+// "malformed" (shell quoting it cannot resolve) for ANY glued-looking token whose
+// FIRST "=" — found by a quote-blind strings.Cut — happens to land inside quoted
+// content. `awk` is a patternFirstCmds member, so its args route through
+// cmdparse.SkipGrepPattern, which folds that malformed signal into pathOperands'
+// own return; this rule's bashAccess treats an unresolvable glued value as an
+// unclassifiable operand and fails safe to dirWrite (Reject) — its own documented
+// default, "anything not positively known to be read-only is a write" — EVEN
+// THOUGH THE COMMAND NEVER MENTIONS `.git` AT ALL. Measured on main @07b9600b (a
+// 360,523-row corpus replay): `awk -F"=" ...` pipelines with no `.git` reference
+// wrongly Rejected with "refusing to write git metadata under .git/ directly".
+//
+// `-F"="` is an ordinary awk field-separator flag — a short option glued to a
+// double-quoted value that happens to contain a literal "=", with no `=`-flag
+// convention of its own. Confirmed to Reject (matched=true) before this bead's
+// fix to cmdparse.GluedFlagValue and to correctly Abstain (matched=false) after
+// it, by temporarily reverting internal/cmdparse/argflags.go and re-running this
+// exact fixture.
+func TestGitDir_GluedFlagValueSpuriousEqualsBoundary(t *testing.T) {
+	r := New()
+
+	tests := []struct {
+		name    string
+		command string
+	}{
+		{"awk -F with a double-quoted field separator, no .git reference", `awk -F"=" '{print $1}' file.txt`},
+		{"awk -F with a double-quoted field separator and other args", `awk -F"=" '{print $2}' /tmp/data.csv`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := hookio.Verdict(r.Evaluate(bashInput(tt.command)))
+			if got.Decision != hookio.NoOpinion {
+				t.Errorf("Decision = %v (reason %q), want Abstain — a spurious \"=\" inside a quoted, non-.git flag value must not fail safe to a write", got.Decision, got.Reason)
+			}
+			if matched := matchedBash(tt.command); matched {
+				t.Errorf("matched = %v, want matched = false — this command never references .git at all", matched)
+			}
+		})
+	}
+}
