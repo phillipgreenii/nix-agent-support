@@ -47,11 +47,13 @@
 //     an agent reads, so making it config-only would silently retire a live
 //     control.
 //  3. THE BARE `secrets` COMPONENT STAYS LEXICAL BUT IS SKIPPED INSIDE A GIT
-//     REPOSITORY, FOR READS ONLY. Operator rationale, verbatim: "anything that is
-//     in a git repo is not secret. if someone does have secrets in a repo, then
-//     they can explicitly set those paths in the config" — and the escape hatch is
-//     real, because LoadSandboxFilesystemConfig already merges the PROJECT-level
-//     .claude/settings.json. See lexicalHit.
+//     REPOSITORY, FOR READS ONLY ON THE DIRECT-TOOL ROUTE (see lexicalHit and,
+//     for why the Bash route cannot honor this direction split, bashRef).
+//     Operator rationale, verbatim: "anything that is in a git repo is not
+//     secret. if someone does have secrets in a repo, then they can explicitly
+//     set those paths in the config" — and the escape hatch is real, because
+//     LoadSandboxFilesystemConfig already merges the PROJECT-level
+//     .claude/settings.json.
 //  4. EXTENSION ARMS ARE OUT — no `*.pem`, `*.p12`, `*.pfx`, `*.keystore`,
 //     `service-account*.json` — on false-positive grounds: a repo full of test
 //     fixtures named `*.pem` is common. pg2-ia640.1 owns the unconditional
@@ -62,10 +64,21 @@
 // not just this one. It carries ONE deliberate coverage reduction, made by the
 // operator with the guard's text in front of them: `deploy/secrets/token` inside a
 // repo no longer Asks on a read, and covering such a tree becomes a project-level
-// denyRead entry. READS AND WRITES STAY DISTINGUISHED — a write under a `secrets/`
-// component is NOT relaxed, in or out of a repo — because the read relaxation is
-// broader than the alternatives that were rejected, and a write is the act that
-// cannot be undone by prompting later.
+// denyRead entry.
+//
+// READS AND WRITES STAY DISTINGUISHED ONLY ON THE DIRECT-TOOL ROUTE (Write / Edit
+// / MultiEdit / Delete, where Check computes a real per-call isWrite) — there a
+// write under a `secrets/` component is NOT relaxed, in or out of a repo, because
+// the read relaxation is broader than the alternatives that were rejected, and a
+// write is the act that cannot be undone by prompting later. ON THE BASH ROUTE
+// THAT DISTINCTION DOES NOT EXIST: bashRef always evaluates the relaxation with
+// isWrite hardcoded to false (Bash read/write intent is ambiguous per-argument),
+// so a Bash write-shaped command (`rm`, `> file`, `| tee`) gets the identical
+// relaxation a Bash read gets. That is INTENTIONAL, confirmed by the operator's
+// 2026-08-17 ruling on pg2-ifbfa: the in-repo "not secret" judgment was meant to
+// cover Bash writes too, not just Bash reads — it is not a gap this rule needs to
+// close. See bashRef's comment for the mechanism and lexicalHit's for the
+// resulting condition.
 package secrets
 
 import (
@@ -306,15 +319,19 @@ func (r *Rule) bashRef(cmd string) (ref secretRef, found bool, malformed bool) {
 	// judged as a READ — the direction the beads are about, and the one that
 	// governs the in-repo relaxation.
 	//
-	// SO THE "READ ONLY" HALF OF THE IN-REPO RELAXATION IS VACUOUS ON THIS ROUTE, and
-	// that is worth stating here because the opposite is recorded elsewhere (pg2-ifbfa).
+	// SO THE "READ ONLY" HALF OF THE IN-REPO RELAXATION IS VACUOUS ON THIS ROUTE.
 	// `isWrite` is never true for a Bash command, so `write >= read` is trivially
 	// satisfied and the relaxation reaches WRITE-SHAPED commands exactly as it reaches
 	// reads. TestRule_WriteNeverLessRestrictiveThanRead cannot see this: it supplies
 	// `isWrite` directly, so it proves the rule HONOURS the parameter, not that any Bash
 	// caller ever sets it. MEASURED through internal/setup's replay harness on
 	// `<repo>/internal/rules/secrets/secrets.go` with cwd inside a git worktree —
-	// `rm`, `> `, and `| tee` all moved ask -> approve alongside `cat`.
+	// `rm`, `> `, and `| tee` all moved ask -> approve alongside `cat`. THIS IS
+	// INTENTIONAL, not a gap: the operator's 2026-08-17 ruling on pg2-ifbfa
+	// confirmed the in-repo "not secret" judgment covers Bash writes too (the
+	// package comment's decision 3 and lexicalHit's doc now say so directly —
+	// they used to claim READ ONLY unconditionally, which was wrong for this
+	// route; pg2-ifbfa corrected them).
 	//
 	// The GUARD THAT DOES HOLD on this route is the repo test itself: outside any git
 	// working tree the arm still fires, so `~/secrets/prod.env` keeps its Ask either way.
@@ -353,13 +370,20 @@ func (r *Rule) lexicalRef(isWrite bool) candidateMatch {
 // and nothing else is DROPPED for a READ of a path inside a git repository (see
 // the package comment's decision 3).
 //
-// TWO CONDITIONS, both necessary:
+// TWO CONDITIONS, both necessary — but the first only BINDS where its caller
+// passes a real, per-call `isWrite`:
 //
-//   - READ ONLY. A write under a `secrets/` component is never relaxed. This is
-//     the guard pg2-pmk9q pinned and the ruling explicitly kept: the read
+//   - READ ONLY ON THE DIRECT-TOOL ROUTE (Write/Edit/MultiEdit/Delete, via
+//     Check). A write under a `secrets/` component is never relaxed there. This
+//     is the guard pg2-pmk9q pinned and the ruling explicitly kept: the read
 //     relaxation is the broad one, so keeping the directions distinguished is what
 //     bounds it. A write that turns out to have been to a real credential store
-//     cannot be taken back by prompting afterwards.
+//     cannot be taken back by prompting afterwards. ON THE BASH ROUTE THIS
+//     CONDITION IS VACUOUS: bashRef always calls lexicalHit with isWrite=false,
+//     so a Bash write-shaped command is relaxed exactly like a Bash read. That is
+//     INTENTIONAL — the operator's 2026-08-17 ruling on pg2-ifbfa confirmed the
+//     in-repo relaxation was meant to cover Bash writes too — not a gap in this
+//     function.
 //   - GenericSecretsDir ONLY. secretpath.Classify reports the STRONGEST arm that
 //     matched, so `<repo>/secrets/.ssh/id_rsa` and `<repo>/secrets/.env` come back
 //     WellKnownSecret and keep asking. The relaxation can only ever discard the
