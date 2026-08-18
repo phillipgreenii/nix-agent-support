@@ -13,7 +13,12 @@
 //
 // Mechanism (when configured):
 //   - password-auth block: sshpass wrapper, or an -o option matching a
-//     PasswordFlagPatterns substring -> Reject.
+//     PasswordFlagPatterns substring -> Reject. The option value is routed
+//     through cmdparse.GluedFlagValue/UnwrapGluedQuotes first, so a glued
+//     quote (`-o PasswordAuthentication='yes'`) matches identically to the
+//     unquoted spelling (see checkPasswordAuth); quoting cmdparse cannot
+//     confidently resolve also -> Reject (fail closed on a denylist, never
+//     fail open).
 //   - user allowlist: an explicit user (-l, -o User=, or user@host) not in
 //     AllowedUsers, or conflicting users -> Reject.
 //   - read-only classification: ssh with no remote command -> Ask (interactive);
@@ -240,9 +245,28 @@ func userFromHost(host string) (string, bool) {
 	return "", false
 }
 
+// checkPasswordAuth is a DENYLIST: an -o value is Rejected only when it
+// matches a configured PasswordFlagPatterns substring, so retained quote
+// characters make the match FAIL rather than refuse — the opposite failure
+// direction from an allowlist. tokenize/recordOption store the value exactly
+// as cmdparse's tokenizer produced it, which strips quotes only from a WHOLLY
+// quoted token; a value GLUED to its unquoted key
+// (`-o PasswordAuthentication='yes'`) keeps its quote pair, and
+// `passwordauthentication='yes'` never contains the configured substring
+// `passwordauthentication=yes`. Measured: that spelling reached only Ask, the
+// engine's next-weakest verdict, never Approve — but Ask is still a WEAKER
+// verdict than the Reject the unquoted spelling gets for an identical shell
+// command, which is this bug.
 func (r *Rule) checkPasswordAuth(opts map[string]string) (hookio.RuleResult, bool) {
 	for k, v := range opts {
-		joined := k + "=" + v
+		// Route the value half through the same GluedFlagValue/UnwrapGluedQuotes
+		// seam every other `key=value` reader in this repo calls (pg2-9zgso) —
+		// exactly what that helper was built to strip — rather than matching a
+		// denylist substring against text that still carries its quote
+		// characters. The synthetic "-"+k+"="+v arg reuses GluedFlagValue's
+		// existing glued-value + malformed detection instead of re-deriving it.
+		unwrapped, _, malformed := cmdparse.GluedFlagValue("-" + k + "=" + v)
+		joined := k + "=" + unwrapped
 		for _, pat := range r.passwordFlagPatterns {
 			if strings.Contains(joined, pat) {
 				return hookio.RuleResult{
@@ -252,8 +276,41 @@ func (r *Rule) checkPasswordAuth(opts map[string]string) (hookio.RuleResult, boo
 				}, true
 			}
 		}
+		// FAIL CLOSED, not fail open, when the quoting could not be resolved
+		// (cmdparse.UnwrapGluedQuotes declined: a double-wrapped value, an
+		// interior wrapper character, or a mismatched/unterminated quote pair —
+		// see its doc comment for the exact residual subset it will not touch).
+		// Falling through to the substring test above with the STILL-QUOTED
+		// value can only ever UNDER-match, silently reopening this same bug for
+		// the one subset the unwrap cannot cleanly resolve. Scoped to keys a
+		// configured pattern actually names (passwordKeyIsPoliced), so an
+		// unrelated option's odd quoting (e.g. `ServerAliveInterval=''5''`) is
+		// not penalized.
+		if malformed && r.passwordKeyIsPoliced(k) {
+			return hookio.RuleResult{
+				Decision: hookio.Reject,
+				Reason:   "password-based ssh auth cannot be verified safe: -o " + k + "=" + v + " has glued quoting that cannot be resolved",
+				Module:   r.Name(),
+			}, true
+		}
 	}
 	return hookio.RuleResult{}, false
+}
+
+// passwordKeyIsPoliced reports whether k is the option-key half of any
+// configured PasswordFlagPatterns entry (documented as lowercased
+// "key=value" substrings, e.g. "passwordauthentication=yes"). It scopes
+// checkPasswordAuth's fail-closed malformed-quoting branch to keys this rule
+// actually polices, rather than rejecting every -o option whose value happens
+// to carry odd quoting.
+func (r *Rule) passwordKeyIsPoliced(k string) bool {
+	prefix := k + "="
+	for _, pat := range r.passwordFlagPatterns {
+		if strings.HasPrefix(pat, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *Rule) checkUsers(users map[string]bool) (hookio.RuleResult, bool) {

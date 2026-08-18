@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmdparse"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/configrules"
 )
@@ -143,6 +144,85 @@ func TestSSH_RedirectionClassification(t *testing.T) {
 			input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(tt.command)}
 			if got := hookio.Verdict(r.Evaluate(input)).Decision; got != tt.want {
 				t.Errorf("%q => %v, want %v", tt.command, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestSSH_PasswordAuthGluedQuoteParity is a RELATION test: the glued-quote
+// spelling of an -o PasswordAuthentication value (`PasswordAuthentication='yes'`)
+// must reach the SAME verdict as the plain spelling (`PasswordAuthentication=yes`)
+// — both are identical to the shell. Before this fix the quoted spelling reached
+// only Ask: cmdparse's tokenizer strips quotes only from a WHOLLY quoted token,
+// so the value glued to its unquoted key kept its quote pair, and
+// checkPasswordAuth's substring match against PasswordFlagPatterns never routed
+// it through cmdparse.UnwrapGluedQuotes — `passwordauthentication='yes'` never
+// contains the configured substring `passwordauthentication=yes`, so the
+// denylist silently failed OPEN to the engine's next-weakest verdict instead of
+// Reject.
+func TestSSH_PasswordAuthGluedQuoteParity(t *testing.T) {
+	cfg := configrules.SshConfig{
+		PasswordFlagPatterns: []string{"passwordauthentication=yes"},
+	}
+	r := New(cfg)
+	pairs := []struct {
+		name     string
+		unquoted string
+		quoted   string
+	}{
+		{"spaced -o, single-quoted value", "ssh -o PasswordAuthentication=yes host ls", "ssh -o PasswordAuthentication='yes' host ls"},
+		{"spaced -o, double-quoted value", "ssh -o PasswordAuthentication=yes host ls", `ssh -o PasswordAuthentication="yes" host ls`},
+		{"glued -o, single-quoted value", "ssh -oPasswordAuthentication=yes host ls", "ssh -oPasswordAuthentication='yes' host ls"},
+	}
+	for _, p := range pairs {
+		t.Run(p.name, func(t *testing.T) {
+			unquotedGot := hookio.Verdict(r.Evaluate(&hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(p.unquoted)})).Decision
+			quotedGot := hookio.Verdict(r.Evaluate(&hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(p.quoted)})).Decision
+			if unquotedGot != hookio.Reject {
+				t.Fatalf("sanity check failed: %q => %v, want Reject", p.unquoted, unquotedGot)
+			}
+			if quotedGot != unquotedGot {
+				t.Errorf("%q => %v, but %q => %v; the glued-quote spelling must reach the same verdict as the unquoted spelling", p.quoted, quotedGot, p.unquoted, unquotedGot)
+			}
+		})
+	}
+}
+
+// TestSSH_PasswordAuthMalformedQuotingFailsClosed exercises checkPasswordAuth
+// directly (white-box: this file is `package ssh`) against every residual
+// quoting shape cmdparse.UnwrapGluedQuotes' own doc comment says it declines to
+// touch — a double-wrapped value, an interior wrapper character, an unterminated
+// quote, and a mismatched quote-character pair. Each sub-test first confirms,
+// against UnwrapGluedQuotes itself, that the value IS one of those documented
+// decline cases (so this test cannot silently start exercising a different code
+// path if the helper's semantics ever change), then confirms checkPasswordAuth
+// still Rejects rather than falling through to a weaker verdict: a value this
+// rule cannot confidently read must fail CLOSED on a denylist, exactly the
+// direction TestSSH_PasswordAuthGluedQuoteParity fixes for the clean-quote case
+// — never reopen the same bug for the one subset the unwrap cannot resolve.
+func TestSSH_PasswordAuthMalformedQuotingFailsClosed(t *testing.T) {
+	cfg := configrules.SshConfig{
+		PasswordFlagPatterns: []string{"passwordauthentication=yes"},
+	}
+	r := New(cfg)
+	cases := []struct {
+		name string
+		v    string
+	}{
+		{"double-wrapped", "''yes''"},
+		{"interior wrapper char", "'ye's'"},
+		{"unterminated", "'yes"},
+		{"mismatched quote-character pair", "'yes\""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := cmdparse.UnwrapGluedQuotes(tc.v); got != tc.v {
+				t.Fatalf("sanity check failed: UnwrapGluedQuotes(%q) = %q, want it returned UNCHANGED (this case is documented to decline)", tc.v, got)
+			}
+			opts := map[string]string{"passwordauthentication": tc.v}
+			res, blocked := r.checkPasswordAuth(opts)
+			if !blocked || res.Decision != hookio.Reject {
+				t.Errorf("checkPasswordAuth(%q) => blocked=%v decision=%v, want Reject (fail closed on unresolved glued quoting)", tc.v, blocked, res.Decision)
 			}
 		})
 	}
