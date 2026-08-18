@@ -215,6 +215,45 @@ func TestLoad_claudeBinDefaultsToClaude(t *testing.T) {
 	}
 }
 
+// TestLoad_canonicalMCPSettingsPathDefaultsEmpty pins the feature-off default:
+// no config → the canonical-decisions consultation mechanism stays disabled
+// (docs/adr/0052-ccpool-mcp-consent-canonical-decisions-consultation.md).
+func TestLoad_canonicalMCPSettingsPathDefaultsEmpty(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "cfg"))
+	t.Setenv("XDG_DATA_HOME", filepath.Join(dir, "data"))
+	c, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if c.Claude.CanonicalMCPSettingsPath != "" {
+		t.Errorf("Claude.CanonicalMCPSettingsPath = %q, want empty (feature off by default)", c.Claude.CanonicalMCPSettingsPath)
+	}
+}
+
+// TestLoad_canonicalMCPSettingsPathTOMLOverride confirms the field decodes from
+// config.toml, since production wiring reads it as cfg.Claude.CanonicalMCPSettingsPath.
+func TestLoad_canonicalMCPSettingsPathTOMLOverride(t *testing.T) {
+	dir := t.TempDir()
+	cfgDir := filepath.Join(dir, "cfg", "ccpool")
+	if err := os.MkdirAll(cfgDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	body := "[claude]\ncanonical_mcp_settings_path = \"/some/canonical/settings.local.json\"\n"
+	if err := os.WriteFile(filepath.Join(cfgDir, "config.toml"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "cfg"))
+	t.Setenv("XDG_DATA_HOME", filepath.Join(dir, "data"))
+	c, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if c.Claude.CanonicalMCPSettingsPath != "/some/canonical/settings.local.json" {
+		t.Errorf("Claude.CanonicalMCPSettingsPath = %q, want /some/canonical/settings.local.json", c.Claude.CanonicalMCPSettingsPath)
+	}
+}
+
 func TestLoad_notifyDefaults(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "cfg"))

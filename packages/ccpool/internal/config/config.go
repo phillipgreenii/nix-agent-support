@@ -51,6 +51,15 @@ type Claude struct {
 	DefaultCwd   string `toml:"default_cwd"`
 	DefaultModel string `toml:"default_model"`
 	Bin          string `toml:"bin"`
+	// CanonicalMCPSettingsPath, when non-empty, names a settings.local.json-shaped
+	// file consulted READ-ONLY before a fresh worktree's MCP servers are
+	// default-denied: a server already classified there is copied into the
+	// worktree's own settings.local.json instead. Empty (the default) is feature
+	// off — pure default-deny, unchanged (docs/adr/0052-ccpool-mcp-consent-canonical-decisions-consultation.md).
+	// This repo supplies only the mechanism; a deployment supplies the concrete
+	// path at runtime (this repo is a public flake — see its own CLAUDE.md
+	// "Public Repository — No ZipRecruiter Disclosure").
+	CanonicalMCPSettingsPath string `toml:"canonical_mcp_settings_path"`
 }
 type List struct {
 	DoneTTL   Duration `toml:"done_ttl"`

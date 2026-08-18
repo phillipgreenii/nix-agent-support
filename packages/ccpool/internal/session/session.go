@@ -136,6 +136,14 @@ type Deps struct {
 	Sleep     func(time.Duration) // injected delay for the cancel Escape burst (nil = no-op, for tests)
 	// PruneGrace guards the fresh-session race; zero falls back to defaultPruneGrace.
 	PruneGrace time.Duration
+	// CanonicalMCPSettingsPath, when non-empty, names a settings.local.json-shaped
+	// file consulted READ-ONLY before mcpconsent.PreDisableUnclassified's
+	// default-deny step: a server already classified there (but not yet in the
+	// worktree's own settings.local.json) has that classification copied in
+	// instead of being default-denied. Empty (the default) disables consultation
+	// entirely — pure default-deny, unchanged from before this field existed
+	// (docs/adr/0052-ccpool-mcp-consent-canonical-decisions-consultation.md).
+	CanonicalMCPSettingsPath string
 }
 
 type Service struct{ d Deps }
@@ -278,7 +286,10 @@ func (s *Service) ensureLocked(ctx context.Context, externalID, cwd, model strin
 	// interactive "New MCP server found" prompt for any unclassified server in
 	// the worktree's .mcp.json (pg2-80ji). No-op when the worktree has no
 	// .mcp.json. Same pre-launch window as trust, so no concurrent Claude writer.
-	if err := mcpconsent.PreDisableUnclassified(cwd); err != nil {
+	// CanonicalMCPSettingsPath, when configured, is consulted read-only first so
+	// a server a human already classified elsewhere is copied in rather than
+	// default-denied (docs/adr/0052-ccpool-mcp-consent-canonical-decisions-consultation.md).
+	if err := mcpconsent.PreDisableUnclassified(cwd, s.d.CanonicalMCPSettingsPath); err != nil {
 		return Handle{}, fmt.Errorf("pre-disable unclassified MCP servers for %q: %w", cwd, err)
 	}
 
