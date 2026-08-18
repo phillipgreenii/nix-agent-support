@@ -288,7 +288,16 @@ func bashAccess(leafText, scopeText string) (direction, bool) {
 			gitPorcelain = true
 		}
 		if !gitPorcelain {
-			for _, tok := range pathOperands(pc) {
+			tokens, opMalformed := pathOperands(pc)
+			if opMalformed {
+				// pg2-52eod: a patternFirstCmds glued flag value's shell quoting could
+				// not be resolved (cmdparse.SkipGrepPattern), so this rule cannot tell
+				// whether it names a path inside .git at all. Fail safe with this
+				// file's own documented default for an unclassifiable operand:
+				// "Anything not positively known to be read-only is a write."
+				note(dirWrite)
+			}
+			for _, tok := range tokens {
 				if isGitMetadataPath(tok) {
 					note(commandDirection(pc, func(s string) bool { return s == tok }, pipes))
 				}
@@ -725,8 +734,14 @@ func lastOperand(args []string) (string, bool) {
 }
 
 // pathOperands returns the args of pc that are candidate PATHS — the operands the
-// command actually acts on — with flags and every EXCLUSION role removed.
-func pathOperands(pc cmdparse.ParsedCommand) []string {
+// command actually acts on — with flags and every EXCLUSION role removed — and
+// whether cmdparse.SkipGrepPattern found a glued flag value whose shell quoting it
+// could not resolve (pg2-52eod: SkipGrepPattern is a FOURTH caller of
+// cmdparse.GluedFlagValue this bead's audit found, by way of gitdir being a fourth
+// consumer of SkipGrepPattern itself — not one of the three pg2-6f2gu's own decision
+// record enumerated). malformed is always false outside patternFirstCmds, since only
+// that branch routes through SkipGrepPattern.
+func pathOperands(pc cmdparse.ParsedCommand) (tokens []string, malformed bool) {
 	base, args := cmdparse.EffectiveExec(pc)
 	out := make([]string, 0, len(args)+1)
 	if pc.Executable != "" {
@@ -743,7 +758,8 @@ func pathOperands(pc cmdparse.ParsedCommand) []string {
 		if base == "rg" {
 			vocab = "rg"
 		}
-		return append(out, cmdparse.SkipGrepPattern(vocab, args)...)
+		files, isMalformed := cmdparse.SkipGrepPattern(vocab, args)
+		return append(out, files...), isMalformed
 	}
 	isFind := base == "find"
 	isDD := base == "dd"
@@ -771,5 +787,5 @@ func pathOperands(pc cmdparse.ParsedCommand) []string {
 		}
 		out = append(out, a)
 	}
-	return out
+	return out, false
 }

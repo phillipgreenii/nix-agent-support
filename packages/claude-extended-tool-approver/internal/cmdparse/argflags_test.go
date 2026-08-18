@@ -195,3 +195,135 @@ func TestSkipMessageArgs_FileFlagValuesAlwaysSurvive(t *testing.T) {
 		}
 	}
 }
+
+// TestGluedFlagValue pins the pg2-52eod centralization: GluedFlagValue returns the
+// value half of a `--flag=value` token with ONE matched pair of surrounding shell
+// quotes already removed, and reports malformed whenever UnwrapGluedQuotes DECLINES
+// on a value that opened with a quote character (see UnwrapGluedQuotes' own
+// TestUnwrapGluedQuotes for the exact fixture-construction technique this table
+// follows).
+func TestGluedFlagValue(t *testing.T) {
+	tests := []struct {
+		name          string
+		arg           string
+		wantValue     string
+		wantOK        bool
+		wantMalformed bool
+	}{
+		// NOT a glued form at all.
+		{"bare positional, no flag prefix", "value", "", false, false},
+		{"bare flag, no value", "--flag", "", false, false},
+		{"empty glued value", "--flag=", "", false, false},
+		{"bare dash", "-", "", false, false},
+		{"bare double-dash", "--", "", false, false},
+
+		// CLEAN, UNQUOTED value: unchanged, matching the pre-existing contract.
+		{"long flag, unquoted value", "--output=/etc/shadow", "/etc/shadow", true, false},
+		{"short flag, unquoted value", "-o=/etc/shadow", "/etc/shadow", true, false},
+		{"value itself contains an =", "--output=a=b", "a=b", true, false},
+
+		// CLEAN, QUOTED value: this bead's fix. UnwrapGluedQuotes strips the ONE
+		// matched pair, matching the unquoted spelling exactly.
+		{"long flag, single-quoted value", "--output='/etc/shadow'", "/etc/shadow", true, false},
+		{"long flag, double-quoted value", `--output="/etc/shadow"`, "/etc/shadow", true, false},
+		{"basename secret, single-quoted", "--file='.env'", ".env", true, false},
+
+		// MALFORMED: UnwrapGluedQuotes declines (see its own doc/tests for why),
+		// and this primitive now reports that explicitly rather than silently
+		// handing back a still quote-wrapped value with no signal attached.
+		{
+			"interior contains the wrapper character (multi-segment concatenation)",
+			"--file='.env'x'.env'", "'.env'x'.env'", true, true,
+		},
+		{
+			"double-wrapped: outer pair around an already-quoted inner value",
+			"--file=''.env''", "''.env''", true, true,
+		},
+		{
+			"mismatched quote characters at the two ends",
+			`--file='.env"`, `'.env"`, true, true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			value, ok, malformed := GluedFlagValue(tt.arg)
+			if value != tt.wantValue || ok != tt.wantOK || malformed != tt.wantMalformed {
+				t.Errorf("GluedFlagValue(%q) = (%q, %v, %v), want (%q, %v, %v)",
+					tt.arg, value, ok, malformed, tt.wantValue, tt.wantOK, tt.wantMalformed)
+			}
+		})
+	}
+}
+
+// TestSkipGrepPattern_GluedQuoteParity is pg2-52eod's fix for the audited THIRD (in
+// this repo, actually fourth — see internal/rules/gitdir) caller of GluedFlagValue:
+// a grep/rg file-flag's value glued AND quoted (`--file='X'`) must produce the SAME
+// emitted candidate as the unquoted glued spelling (`--file=X`), and malformed
+// quoting must be reported rather than silently emitted as an inert, still-quoted
+// candidate.
+func TestSkipGrepPattern_GluedQuoteParity(t *testing.T) {
+	tests := []struct {
+		name          string
+		cmd           string
+		args          []string // args AFTER "grep"/"rg"
+		wantFiles     []string
+		wantMalformed bool
+	}{
+		{
+			"grep --file, unquoted glued",
+			"grep",
+			[]string{"--file=/etc/shadow", "x.log"},
+			[]string{"/etc/shadow", "x.log"},
+			false,
+		},
+		{
+			"grep --file, quoted glued — must match the unquoted spelling",
+			"grep",
+			[]string{"--file='/etc/shadow'", "x.log"},
+			[]string{"/etc/shadow", "x.log"},
+			false,
+		},
+		{
+			"grep --file, malformed glued quoting: double-wrapped",
+			"grep",
+			[]string{"--file=''.env''", "x.log"},
+			nil, true,
+		},
+		{
+			"grep --file, malformed glued quoting: interior wrapper character",
+			"grep",
+			[]string{"--file='.env'x'.env'", "x.log"},
+			nil, true,
+		},
+		{
+			"rg --pre is a program flag, not this test's concern, but its value is still glued-quote-parity checked",
+			"rg",
+			[]string{"--hostname-bin='/etc/shadow'"},
+			[]string{"/etc/shadow"},
+			false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			files, malformed := SkipGrepPattern(tt.cmd, tt.args)
+			if malformed != tt.wantMalformed {
+				t.Errorf("SkipGrepPattern(%q, %v) malformed = %v, want %v", tt.cmd, tt.args, malformed, tt.wantMalformed)
+			}
+			if !tt.wantMalformed && !stringSlicesEqual(files, tt.wantFiles) {
+				t.Errorf("SkipGrepPattern(%q, %v) files = %v, want %v", tt.cmd, tt.args, files, tt.wantFiles)
+			}
+		})
+	}
+}
+
+func stringSlicesEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}

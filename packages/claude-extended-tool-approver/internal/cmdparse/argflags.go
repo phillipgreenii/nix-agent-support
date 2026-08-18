@@ -272,7 +272,19 @@ var patternSourceFlags = map[string]bool{
 // cmd selects the flag vocabulary: "rg" additionally honors rgFlagsWithValue and
 // rgFileFlags (see rgFlagsWithValue' doc for why the conflicting short flags are
 // rg-only).
-func SkipGrepPattern(cmd string, args []string) []string {
+//
+// malformed reports GluedFlagValue's pg2-52eod decline signal for any EMITTED
+// candidate (a grepFileFlags/rgFileFlags/grepProgramFlags/rgProgramFlags value, or an
+// unrecognized glued flag's value) — never for a recognized non-path value flag's
+// value, which is dropped regardless of its quoting because it was never a path
+// candidate to begin with. THE CALLER MUST TREAT malformed AS AN IMMEDIATE, WHOLE-
+// COMMAND "CANNOT CLASSIFY" AND FAIL CLOSED, exactly like GluedFlagValue's own
+// contract: this function used to hand its two callers (internal/rules/safecmds and
+// internal/rules/secrets) a plain candidate list with no way to tell a clean value
+// from a still-quoted, undecidable one, which is what let
+// `grep --file='.env' x.log` auto-approve while `grep --file=.env x.log` correctly
+// asked (see GluedFlagValue's doc for the measured row). Both callers now check it.
+func SkipGrepPattern(cmd string, args []string) (files []string, malformed bool) {
 	isValueFlag := func(a string) bool {
 		if grepFlagsWithValue[a] {
 			return true
@@ -315,8 +327,14 @@ func SkipGrepPattern(cmd string, args []string) []string {
 		}
 		if name, glued := equalsFlagName(a); glued {
 			// One token, judged by its flag name. A non-path value flag's value is
-			// dropped as in the space form; anything else is a candidate path.
-			if value, ok := GluedFlagValue(a); ok && (isFileFlag(name) || !isValueFlag(name)) {
+			// dropped as in the space form; anything else is a candidate path — now
+			// UNWRAPPED (pg2-52eod), and its malformed-decline signal folded into
+			// this call's own return so the caller cannot mistake a still-quoted,
+			// undecidable value for an ordinary miss.
+			if value, ok, isMalformed := GluedFlagValue(a); ok && (isFileFlag(name) || !isValueFlag(name)) {
+				if isMalformed {
+					malformed = true
+				}
 				result = append(result, value)
 			}
 			i++
@@ -345,7 +363,7 @@ func SkipGrepPattern(cmd string, args []string) []string {
 		result = append(result, a)
 		i++
 	}
-	return result
+	return result, malformed
 }
 
 // jqValueFlags lists jq flags that consume TWO operands, BOTH of which are
@@ -576,10 +594,11 @@ func equalsFlagName(arg string) (string, bool) {
 	return name, true
 }
 
-// GluedFlagValue returns the VALUE half of an `--flag=value` token, and whether arg
-// is one. It is equalsFlagName's counterpart: that returns the NAME, for deciding
-// whether a table claims the flag; this returns the value, for testing what the
-// command will actually open.
+// GluedFlagValue returns the VALUE half of an `--flag=value` token — with ONE matched
+// pair of surrounding shell quotes removed (cmdparse.UnwrapGluedQuotes) — and whether
+// arg is a glued form at all. It is equalsFlagName's counterpart: that returns the
+// NAME, for deciding whether a table claims the flag; this returns the value, for
+// testing what the command will actually open.
 //
 // IT EXISTS BECAUSE A ONE-TOKEN SPELLING HID A REAL PATH (pg2-cu3ro). A caller that
 // skips any token beginning with `-` — which is the right instinct, since a flag NAME
@@ -600,15 +619,75 @@ func equalsFlagName(arg string) (string, bool) {
 // extra value is a path that does not match anything, whereas the cost of missing one
 // is this defect. Callers that need the GNU long-option convention specifically can
 // check the `--` prefix themselves.
-func GluedFlagValue(arg string) (string, bool) {
+//
+// # THE UNWRAP IS CENTRALIZED HERE (pg2-52eod)
+//
+// pg2-cu3ro built this primitive to expose the glued value at all; pg2-9zgso then
+// added cmdparse.UnwrapGluedQuotes for the QUOTED half of that value
+// (`--flag='value'`) but deliberately did NOT call it from here — its own decision
+// record named THREE callers (internal/rules/secrets.firstSecretRef,
+// internal/rules/safecmds.pathCandidate, and cmdparse.SkipGrepPattern) and explained
+// that teaching THIS primitive to unwrap would change all three "on faith rather than
+// evidence," because SkipGrepPattern's own consequences had never been audited. pg2-
+// 6f2gu then fixed secrets.firstSecretRef PER-CALL-SITE for exactly that reason,
+// leaving pathCandidate and SkipGrepPattern unfixed and reaffirming the same
+// SkipGrepPattern gap explicitly.
+//
+// pg2-52eod IS THAT AUDIT, and it resolves in favour of centralizing. MEASURED on
+// this tree (a064a73e's successor, cwd this package, permission_mode=auto) before
+// this fix — every row below is the SAME read, spelled with a clean glued quote, and
+// every one auto-approved or auto-cleared what its unquoted glued twin correctly
+// refused/asked:
+//
+//	cat --output='/etc/shadow'      safe-commands: ALLOW   (unquoted: abstain)
+//	mkdir --mode='/etc/shadow'      safe-commands: ALLOW   (unquoted: abstain)
+//	grep --file='.env' x.log        secrets:       ALLOW   (unquoted: ask)
+//
+// The THIRD caller's own consequence is therefore not a new, unaudited risk being
+// taken on faith — it is the SAME defect, reached through cmdparse.SkipGrepPattern's
+// grepFileFlags/rgFileFlags/grepProgramFlags/rgProgramFlags emission (see its doc)
+// rather than through pathCandidate or firstSecretRef directly. SkipGrepPattern is
+// fixed in this same change (see its doc for the malformed-propagation half), so
+// centralizing here fixes it as ONE MORE INSTANCE of a shared bug, not a fourth,
+// independently-reasoned-about call site — which is exactly the DRY outcome pg2-9zgso
+// and pg2-6f2gu each declined only because the audit was still open. Both of THEIR
+// per-call-site unwraps are now redundant (idempotent, since UnwrapGluedQuotes is a
+// no-op on an already-unwrapped value) rather than wrong; secrets.firstSecretRef's is
+// removed in this change, and safecmds' bespoke `--target-directory=` CutPrefix
+// extraction (pg2-6f2gu/pg2-mp9oq) is INTENTIONALLY left alone — it predates
+// pathCandidate, does not call GluedFlagValue at all, and is out of this bead's scope.
+//
+// malformed reports pg2-mp9oq's DECLINE case, generalized to every caller of this
+// primitive rather than re-derived at each one: the value half OPENED with a shell
+// quote character and UnwrapGluedQuotes made NO CHANGE to it (a double-wrapped value,
+// an interior wrapper character from multi-segment concatenation, or a mismatched
+// quote-character pair — see UnwrapGluedQuotes' own doc for the exact subset; a
+// genuinely UNTERMINATED top-level quote instead fails cmdparse.Parse before any of
+// this runs, so it is a different case entirely and never reaches here). value in
+// that case is the ORIGINAL, still quote-wrapped text, UNCHANGED — exactly what
+// UnwrapGluedQuotes itself returns on decline.
+//
+// EVERY CALLER MUST CHECK malformed AND TREAT IT AS "CANNOT CLASSIFY — FAIL CLOSED",
+// never as an ordinary candidate to test and, if it fails, silently skip. A caller
+// that ignores the bit inherits a value that still carries its quote characters,
+// which defeats cmdparse.LooksLikePath / secretpath.IsSecret exactly as the pre-fix
+// bug did — quietly reopening this same hole for the malformed subset alone. See
+// internal/rules/safecmds.pathCandidate and this file's SkipGrepPattern for the
+// established pattern (pg2-mp9oq): detect the decline, return a NoOpinion/Ask-style
+// abstain, never fall through to approve.
+func GluedFlagValue(arg string) (value string, ok bool, malformed bool) {
 	if !strings.HasPrefix(arg, "-") {
-		return "", false
+		return "", false, false
 	}
-	_, value, found := strings.Cut(arg, "=")
-	if !found || value == "" {
-		return "", false
+	_, raw, found := strings.Cut(arg, "=")
+	if !found || raw == "" {
+		return "", false, false
 	}
-	return value, true
+	unwrapped := UnwrapGluedQuotes(raw)
+	if unwrapped == raw && (raw[0] == '\'' || raw[0] == '"') {
+		return raw, true, true
+	}
+	return unwrapped, true, false
 }
 
 // bdCommentBodyIndex returns the index of the BODY positional of the

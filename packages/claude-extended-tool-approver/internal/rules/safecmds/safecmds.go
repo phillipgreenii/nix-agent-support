@@ -189,7 +189,10 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 				if flag, executes := cmdparse.GrepExecFlag(innerBase, innerArgs); executes {
 					return r.refuse("safe-commands: xargs " + innerBase + " " + flag + " runs a program, so this is not a read-only invocation (deferred to claude-code)")
 				}
-				fileArgs := cmdparse.SkipGrepPattern(innerBase, innerArgs)
+				fileArgs, malformed := cmdparse.SkipGrepPattern(innerBase, innerArgs)
+				if malformed {
+					return r.refuse("safe-commands: xargs " + innerBase + " has malformed glued quoting (deferred to claude-code)")
+				}
 				if issue := readPathIssue(fileArgs, pe, ""); issue != "" {
 					return r.refuse("safe-commands: xargs " + innerBase + " " + issue + " (deferred to claude-code)")
 				}
@@ -215,8 +218,16 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		}
 		// bash/sh -n: syntax check only, no execution — safe read command
 		if (basename == "bash" || basename == "sh") && hasBashSyntaxCheckFlag(pc.Args) {
-			fileArgs := extractBashSyntaxCheckFiles(pc.Args)
-			if issue := readPathIssue(fileArgs, pe, ""); issue != "" {
+			// pg2-52eod: this used to pre-filter through extractBashSyntaxCheckFiles,
+			// which did nothing readPathIssue does not already do ITSELF — both called
+			// pathCandidate per argument and dropped the ones it rejected — so the
+			// pre-filter was a redundant pass that additionally LOST the malformed bit
+			// pathCandidate now reports (it collected only the candidate string into a
+			// []string, with no room for a second return value). Passing pc.Args
+			// straight through is behaviour-preserving for the clean case (readPathIssue
+			// applies the identical pathCandidate-based filter inline) and closes that
+			// loss for the malformed case. extractBashSyntaxCheckFiles is deleted below.
+			if issue := readPathIssue(pc.Args, pe, ""); issue != "" {
 				return r.refuse("safe-commands: " + basename + " -n " + issue + " (deferred to claude-code)")
 			}
 			continue
@@ -316,7 +327,10 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 			if flag, executes := cmdparse.GrepExecFlag(basename, pc.Args); executes {
 				return r.refuse("safe-commands: " + basename + " " + flag + " runs a program, so this is not a read-only invocation (deferred to claude-code)")
 			}
-			fileArgs := cmdparse.SkipGrepPattern(basename, pc.Args)
+			fileArgs, malformed := cmdparse.SkipGrepPattern(basename, pc.Args)
+			if malformed {
+				return r.refuse("safe-commands: " + basename + " has malformed glued quoting (deferred to claude-code)")
+			}
 			if issue := readPathIssue(fileArgs, pe, ""); issue != "" {
 				return r.refuse("safe-commands: " + basename + " " + issue + " (deferred to claude-code)")
 			}
@@ -429,8 +443,9 @@ func startsWithLetter(s string) bool {
 }
 
 // pathCandidate returns the token a per-argument zone scan should test in place
-// of arg, and whether there is a candidate at all. It is this file's zone-model
-// counterpart to internal/rules/secrets.firstSecretRef's use of
+// of arg, whether there is a candidate at all, and whether that candidate's
+// quoting is MALFORMED beyond what cmdparse can resolve. It is this file's
+// zone-model counterpart to internal/rules/secrets.firstSecretRef's use of
 // cmdparse.GluedFlagValue (pg2-cu3ro): a bare positional is tested as itself, a
 // flag glued to a value via "=" is tested by that VALUE — the flag NAME is not a
 // filename, but the value is exactly what the command opens — and a value-free
@@ -450,18 +465,43 @@ func startsWithLetter(s string) bool {
 // extra candidate that fails looksLikePath is nothing, the cost of missing a
 // real one is this defect.
 //
+// # THE QUOTED GLUED SPELLING WAS STILL A HOLE (pg2-52eod)
+//
+// cmdparse.GluedFlagValue used to hand back the value HALF verbatim, quote
+// characters and all: `--output='/etc/shadow'` reached this function as the
+// 17-byte literal `'/etc/shadow'`, which looksLikePath rejects outright (no
+// unquoted `/`/`./`/`../`/`~` prefix) — so the zone check below never ran at
+// all, and the caller fell through to the unconditional Approve exactly as if
+// the argument had never been supplied. MEASURED on this tree before this fix:
+//
+//	cat --output='/etc/shadow'   safe-commands: ALLOW   (--output=/etc/shadow: abstain)
+//	mkdir --mode='/etc/shadow'   safe-commands: ALLOW   (--mode=/etc/shadow:   abstain)
+//
+// GluedFlagValue now unwraps that quoting itself (see its doc for the
+// centralization decision, which this bead's SkipGrepPattern audit settled), so
+// cand below is already the CLEAN value for the common case. malformed is
+// GluedFlagValue's decline signal for the residual case an unwrap cannot
+// resolve (double-wrapped, an interior wrapper character, a mismatched quote
+// pair) — cand is then STILL quote-wrapped, exactly as before this fix, and
+// EVERY CALLER BELOW MUST CHECK malformed AND FAIL CLOSED rather than let it
+// fall through the same looksLikePath gap unremarked. This is pg2-mp9oq's
+// established pattern (detect the decline, return NoOpinion/Refused, never
+// approve), generalized from its one call site (evaluateCp's bespoke
+// `--target-directory=` CutPrefix, which does not route through this function
+// and is intentionally untouched) to every consumer of pathCandidate.
+//
 // Not every skip site in this file is a zone scan — see the inline comments at
 // the sites that are NOT routed through this helper (the `log`/xargs/unzip
 // subcommand-or-executable-name scans and programOperand's role classifier) for
 // why a glued value carries no path signal there.
-func pathCandidate(arg string) (string, bool) {
-	if value, glued := cmdparse.GluedFlagValue(arg); glued {
-		return value, true
+func pathCandidate(arg string) (cand string, ok bool, malformed bool) {
+	if value, glued, isMalformed := cmdparse.GluedFlagValue(arg); glued {
+		return value, true, isMalformed
 	}
 	if strings.HasPrefix(arg, "-") {
-		return "", false
+		return "", false, false
 	}
-	return arg, true
+	return arg, true, false
 }
 
 // looksLikePath DELEGATES to cmdparse.LooksLikePath, which is now the single definition
@@ -639,24 +679,36 @@ func argsHaveDynamicExpansion(args []string) bool {
 	for _, a := range args {
 		// pg2-wxbr9: route through pathCandidate so a glued `--flag=$VAR` is
 		// tested by its VALUE rather than discarded whole with its flag name.
-		cand, ok := pathCandidate(a)
+		cand, ok, malformed := pathCandidate(a)
 		if !ok {
 			continue
 		}
-		if argHasDynamicExpansion(cand) {
+		// pg2-52eod: malformed glued quoting is a SEPARATE "cannot classify"
+		// signal from dynamic expansion, but this predicate's caller has only
+		// one refusal message and treating malformed as if it were dynamic
+		// gets the SAME fail-closed refusal, never approve — see
+		// pathCandidate's doc.
+		if malformed || argHasDynamicExpansion(cand) {
 			return true
 		}
 	}
 	return false
 }
 
-// hasRejectPath returns true if any path-like arg is in a rejected zone.
+// hasRejectPath returns true if any path-like arg is in a rejected zone, OR
+// carries malformed glued quoting pathCandidate could not resolve (pg2-52eod):
+// a browsingCmds invocation (ls/find/du/stat/file/lsof) is deferred exactly as
+// if the value HAD evaluated to a rejected zone, because there is no way to
+// clear it either.
 func hasRejectPath(args []string, pe *patheval.PathEvaluator) bool {
 	for _, a := range args {
 		// pg2-wxbr9: see pathCandidate's doc.
-		cand, ok := pathCandidate(a)
+		cand, ok, malformed := pathCandidate(a)
 		if !ok {
 			continue
+		}
+		if malformed {
+			return true
 		}
 		if looksLikePath(cand) {
 			if pe.Evaluate(cand) == patheval.PathReject {
@@ -748,9 +800,15 @@ func readPathIssue(args []string, pe *patheval.PathEvaluator, program string) st
 		// returns a `-`-prefixed value), so comparing the extracted candidate
 		// against it is safe: a glued flag's value can only equal `program` in
 		// the harmless coincidental case where the literal strings match.
-		cand, ok := pathCandidate(a)
+		cand, ok, malformed := pathCandidate(a)
 		if !ok {
 			continue
+		}
+		// pg2-52eod: malformed glued quoting cannot be classified at all, so it
+		// is reported through the SAME choke point as an unknown/dynamic path —
+		// see pathCandidate's doc for the measured pre-fix bypass this closes.
+		if malformed {
+			return "has malformed glued quoting " + cand
 		}
 		dynamic := argHasDynamicExpansion(cand)
 		if program != "" && cand == program {
@@ -775,9 +833,16 @@ func readPathIssue(args []string, pe *patheval.PathEvaluator, program string) st
 func hasUnsafeWritePath(args []string, pe *patheval.PathEvaluator) (bool, string) {
 	for _, a := range args {
 		// pg2-wxbr9: see pathCandidate's doc.
-		cand, ok := pathCandidate(a)
+		cand, ok, malformed := pathCandidate(a)
 		if !ok {
 			continue
+		}
+		// pg2-52eod: malformed glued quoting cannot be classified, so it is
+		// treated as unsafe to write exactly like an unwritable zone — see
+		// pathCandidate's doc for the measured pre-fix bypass this closes
+		// (`mkdir --mode='/etc/shadow'`).
+		if malformed {
+			return true, cand
 		}
 		if looksLikePath(cand) {
 			if !pe.Evaluate(cand).CanWrite() {
@@ -875,9 +940,15 @@ func evaluateCp(args []string, pe *patheval.PathEvaluator, module string) (hooki
 		}
 		for _, a := range args {
 			// pg2-wxbr9: see pathCandidate's doc.
-			cand, ok := pathCandidate(a)
+			cand, ok, malformed := pathCandidate(a)
 			if !ok {
 				continue
+			}
+			// pg2-52eod: same decline detection as the --target-directory= arm
+			// above, generalized through pathCandidate to this loop's OTHER
+			// positional (source) arguments — see pathCandidate's doc.
+			if malformed {
+				return hookio.Refused(module, "safe-commands: cp source has malformed glued quoting "+cand+" (deferred to claude-code)")
 			}
 			if cand == targetDir {
 				continue
@@ -893,9 +964,20 @@ func evaluateCp(args []string, pe *patheval.PathEvaluator, module string) (hooki
 	var pathArgs []string
 	for _, a := range args {
 		// pg2-wxbr9: see pathCandidate's doc.
-		cand, ok := pathCandidate(a)
+		cand, ok, malformed := pathCandidate(a)
 		if !ok {
 			continue
+		}
+		// pg2-52eod: a malformed candidate fails looksLikePath below (still
+		// quote-wrapped) exactly as an ordinary non-path argument does, so
+		// without this check it was silently DROPPED from pathArgs instead of
+		// being judged as a source or destination — the standard-mode analog
+		// of the -t/--target-directory= bypass pg2-mp9oq closed. It must
+		// refuse immediately rather than let the loop continue, since a
+		// dropped destination candidate can leave pathArgs empty and reach
+		// the unconditional "cp with no explicit paths" Approve below.
+		if malformed {
+			return hookio.Refused(module, "safe-commands: cp has malformed glued quoting "+cand+" (deferred to claude-code)")
 		}
 		if looksLikePath(cand) {
 			pathArgs = append(pathArgs, cand)
@@ -1095,17 +1177,12 @@ func hasBashSyntaxCheckFlag(args []string) bool {
 	return false
 }
 
-// extractBashSyntaxCheckFiles extracts file path arguments from bash -n args,
-// skipping flags. Returns only path-like arguments for validation.
-func extractBashSyntaxCheckFiles(args []string) []string {
-	var files []string
-	for _, a := range args {
-		// pg2-wxbr9: see pathCandidate's doc.
-		cand, ok := pathCandidate(a)
-		if !ok {
-			continue
-		}
-		files = append(files, cand)
-	}
-	return files
-}
+// DELETED, and the deletion is a coverage claim (pg2-52eod): extractBashSyntaxCheckFiles.
+//
+// It pre-filtered bash -n's args through pathCandidate before handing the survivors to
+// readPathIssue, which promptly filters through pathCandidate AGAIN — the same helper,
+// called twice, doing nothing the second call did not already do on its own. Worse, the
+// pre-filter collected only the candidate STRING into a []string, with no room for
+// pathCandidate's malformed return value, so a malformed glued value's fail-closed signal
+// was lost between the two calls. The bash -n call site now hands pc.Args to readPathIssue
+// directly — see the comment there.

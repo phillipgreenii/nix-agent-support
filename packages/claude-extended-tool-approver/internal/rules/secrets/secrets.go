@@ -153,7 +153,25 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		if err != nil {
 			return hookio.RuleResult{}, fmt.Errorf("secrets: read bash command: %w", err)
 		}
-		if ref, ok := r.bashRef(cmd); ok {
+		ref, found, malformed := r.bashRef(cmd)
+		if malformed {
+			// pg2-52eod: a glued flag value's shell quoting could not be
+			// resolved (cmdparse.GluedFlagValue's decline, generalized from
+			// pg2-mp9oq's one call site), so this rule cannot rule out that it
+			// names a credential path. NotApplicable would let a later rule
+			// (safe-commands, path-safety) fill the gap with an unqualified
+			// Approve exactly as the pre-fix bug did for a bare secret name
+			// like `.env`, which safe-commands' zone check never even
+			// considers (it is not path-shaped) — so this returns Ask
+			// directly, the same "cannot classify — fail closed" verdict
+			// decide() gives a classified-but-not-deny-listed reference.
+			return hookio.RuleResult{
+				Decision: hookio.Ask,
+				Reason:   "a glued flag value has shell quoting this rule cannot resolve, so it cannot rule out a credential/secret reference — prompting instead of auto-approving",
+				Module:   r.Name(),
+			}, nil
+		}
+		if found {
 			// Bash read/write intent is ambiguous per-argument; treat as a
 			// read for deny-list purposes (the bead is about reads).
 			return r.decide(ref, false), nil
@@ -283,7 +301,7 @@ func (r *Rule) pathRef(path string, isWrite bool) (secretRef, bool) {
 // budget would instead let a long argument list spend the whole allowance on pass
 // 2 and silently disable the deny-list pass, which is the fail-OPEN direction for
 // a control the user configured explicitly.
-func (r *Rule) bashRef(cmd string) (secretRef, bool) {
+func (r *Rule) bashRef(cmd string) (ref secretRef, found bool, malformed bool) {
 	// Bash read/write intent is ambiguous per-argument, so every candidate is
 	// judged as a READ — the direction the beads are about, and the one that
 	// governs the in-repo relaxation.
@@ -301,15 +319,19 @@ func (r *Rule) bashRef(cmd string) (secretRef, bool) {
 	// The GUARD THAT DOES HOLD on this route is the repo test itself: outside any git
 	// working tree the arm still fires, so `~/secrets/prod.env` keeps its Ask either way.
 	const isWrite = false
-	if ref, ok := firstSecretRef(cmd, maxShellUnwrap, r.lexicalRef(isWrite)); ok {
-		return ref, true
+	// pg2-52eod: malformed is checked BEFORE match ever runs inside firstSecretRef,
+	// so it is deterministic per COMMAND, not per candidateMatch — every pass would
+	// report the same malformed verdict for the same cmd. The first pass that finds
+	// EITHER a match OR a malformed value short-circuits the remaining passes.
+	if ref, found, malformed := firstSecretRef(cmd, maxShellUnwrap, r.lexicalRef(isWrite)); found || malformed {
+		return ref, found, malformed
 	}
 	if r.pe == nil {
-		return secretRef{}, false
+		return secretRef{}, false, false
 	}
 	resolveBudget := maxResolutions
-	if ref, ok := firstSecretRef(cmd, maxShellUnwrap, r.resolvedRef(&resolveBudget, isWrite)); ok {
-		return ref, true
+	if ref, found, malformed := firstSecretRef(cmd, maxShellUnwrap, r.resolvedRef(&resolveBudget, isWrite)); found || malformed {
+		return ref, found, malformed
 	}
 	denyBudget := maxResolutions
 	return firstSecretRef(cmd, maxShellUnwrap, r.configRef(&denyBudget, isWrite))
@@ -520,72 +542,80 @@ func (r *Rule) decide(ref secretRef, isWrite bool) hookio.RuleResult {
 }
 
 // firstSecretRef returns the first reference in the command that match accepts —
-// whether an argument or an I/O redirection target (e.g. `cat < secrets/x`).
-// It also descends one `sh`/`bash -c '<inner>'` level at a time (up to depth)
-// so the check cannot be trivially bypassed by wrapping the read in a shell
-// string.
+// whether an argument or an I/O redirection target (e.g. `cat < secrets/x`) — and
+// separately reports malformed: whether ANY glued flag value along the way carried
+// shell quoting that could not be resolved (pg2-52eod). It also descends one
+// `sh`/`bash -c '<inner>'` level at a time (up to depth) so the check cannot be
+// trivially bypassed by wrapping the read in a shell string.
 //
 // match is the candidate test — lexicalRef, resolvedRef or configRef. The
 // traversal is identical for all three, and bashRef runs it once per pass.
-func firstSecretRef(cmd string, depth int, match candidateMatch) (secretRef, bool) {
+//
+// malformed IS CHECKED BEFORE match EVER RUNS, so it is the SAME verdict on every
+// one of bashRef's three passes for the same command — it does not depend on which
+// candidateMatch was supplied. found and malformed are therefore mutually exclusive
+// in practice (a malformed value returns immediately, before any match call), but
+// both are reported explicitly rather than folding "cannot classify" into "not
+// found": a caller that dropped the distinction would let the malformed subset fall
+// through to secrets.Rule's NotApplicable exactly like an ordinary non-match — the
+// P0 bypass this bead exists to close. See GluedFlagValue's doc for why this
+// primitive is now the single source of the unwrap, and for the measured
+// `grep --file='.env' x.log` row this centralization fixes.
+func firstSecretRef(cmd string, depth int, match candidateMatch) (ref secretRef, found bool, malformed bool) {
 	for _, pc := range cmdparse.Parse(cmd) {
 		if depth > 0 {
 			if inner, ok := shellDashC(pc); ok {
-				if ref, found := firstSecretRef(inner, depth-1, match); found {
-					return ref, true
+				if ref, found, malformed := firstSecretRef(inner, depth-1, match); found || malformed {
+					return ref, found, malformed
 				}
 				continue
 			}
 		}
-		for _, arg := range secretCandidateArgs(pc) {
-			// AN `--opt=value` TOKEN IS TESTED BY ITS VALUE, NOT SKIPPED WHOLE
-			// (pg2-cu3ro). isFlag below is right that a flag NAME is not a filename,
-			// but `--file=<path>` is ONE argv token, so skipping the token discarded
-			// the path with it and `git commit --file=~/.ssh/id_rsa` measured ALLOW
-			// while both `-F` and the space-separated `--file` measured DENY. The
-			// space form only ever worked because the path was a SEPARATE token that
-			// isFlag does not match, i.e. the coverage was incidental to the spelling.
+		// AN `--opt=value` TOKEN IS TESTED BY ITS VALUE, NOT SKIPPED WHOLE
+		// (pg2-cu3ro). isFlag below is right that a flag NAME is not a filename,
+		// but `--file=<path>` is ONE argv token, so skipping the token discarded
+		// the path with it and `git commit --file=~/.ssh/id_rsa` measured ALLOW
+		// while both `-F` and the space-separated `--file` measured DENY. The
+		// space form only ever worked because the path was a SEPARATE token that
+		// isFlag does not match, i.e. the coverage was incidental to the spelling.
+		//
+		// secretCandidateArgs runs FIRST, which is what keeps this loop from
+		// re-opening the false positives its siblings closed: SkipMessageArgs
+		// already drops a `--reason=<prose>` token whole (its own equalsFlagName
+		// branch), and the grep/rg and jq skippers have already removed their
+		// value-flag operands in both spellings. So a glued token that reaches
+		// here is one no carve-out claims, and its value is a candidate path.
+		// argsMalformed reports the grep/rg branch's OWN glued-flag decline
+		// (cmdparse.SkipGrepPattern, e.g. `grep --file='.env'x'.env' x.log`) —
+		// a value this loop never even sees as a `--flag=value` token, because
+		// SkipGrepPattern already reduced it to a bare candidate.
+		args, argsMalformed := secretCandidateArgs(pc)
+		if argsMalformed {
+			return secretRef{}, false, true
+		}
+		for _, arg := range args {
+			// THE VALUE HALF IS UNWRAPPED by cmdparse.GluedFlagValue ITSELF
+			// (pg2-52eod centralizes what used to be a per-call-site
+			// cmdparse.UnwrapGluedQuotes call here, pg2-6f2gu). GluedFlagValue's
+			// own doc records the measured rows this fixed and the audit that
+			// resolved the DRY-vs-blast-radius tradeoff pg2-9zgso and pg2-6f2gu
+			// each declined to close, because cmdparse.SkipGrepPattern's own
+			// consequences (see argsMalformed above) had never been reviewed.
 			//
-			// This runs AFTER secretCandidateArgs, which is what keeps it from
-			// re-opening the false positives its siblings closed: SkipMessageArgs
-			// already drops a `--reason=<prose>` token whole (its own equalsFlagName
-			// branch), and the grep/rg and jq skippers have already removed their
-			// value-flag operands in both spellings. So a glued token that reaches
-			// here is one no carve-out claims, and its value is a candidate path.
-			//
-			// THE VALUE HALF IS UNWRAPPED (cmdparse.UnwrapGluedQuotes, pg2-6f2gu)
-			// before match ever sees it. GluedFlagValue only cuts on `=`; it does
-			// not strip a quote wrapper around the value half, so
-			// `--file='.env'`/`--file='secrets/x'`/`--file='/Users/x/.ssh/id_rsa'`
-			// (with a sandbox deny-list configured) arrived here still wearing
-			// their quotes. secretpath.Classify and patheval.IsDenyRead both
-			// compare basenames/prefixes on the LITERAL string, and a quote glued
-			// to the first or last path segment breaks exactly that comparison —
-			// MEASURED on this tree before this fix: with DenyRead containing
-			// "/Users/testuser/.ssh", `cat --file=/Users/testuser/.ssh/id_rsa`
-			// correctly Rejected while `cat --file='/Users/testuser/.ssh/id_rsa'`
-			// degraded to Ask; unconfigured, `cat --file=secrets/notes.txt` /
-			// `--file=.env` / `--file=auth.json` Ask while their quoted glued
-			// twins Abstain outright. (A path whose classification hinges on a
-			// MIDDLE component, e.g. `~/.ssh/id_rsa`'s ".ssh" segment, happens to
-			// survive unquoted because the quote characters sit only on the
-			// string's own two ends — that is a coincidence of this one example,
-			// not evidence the primitive is safe; the basename- and
-			// prefix-anchored arms above are not so lucky.)
-			//
-			// PER-CALL-SITE, NOT CENTRALIZED IN GluedFlagValue ITSELF — the same
-			// DRY-vs-blast-radius tradeoff UnwrapGluedQuotes' own doc records for
-			// pg2-9zgso, resolved the same way for the same reason. GluedFlagValue
-			// has a THIRD caller (cmdparse.SkipGrepPattern, extracting grep/rg glob
-			// and value-flag operands to SKIP as non-files) that this bead's audit
-			// never reviewed; teaching the primitive itself to unwrap would change
-			// that caller's output too, on faith rather than evidence. Confining the
-			// unwrap to the read call that already knows its extracted substring is
-			// a VALUE keeps the change to the one call site pg2-cu3ro built and this
-			// bead reviewed.
-			if value, glued := cmdparse.GluedFlagValue(arg); glued {
-				if ref, ok := match(cmdparse.UnwrapGluedQuotes(value)); ok {
-					return ref, true
+			// malformed is GluedFlagValue's decline signal for a value an unwrap
+			// could not resolve (double-wrapped, an interior wrapper character,
+			// a mismatched quote pair). It MUST be treated as "cannot classify —
+			// fail closed", never as an ordinary non-match: falling through to
+			// `match(value)` on a still quote-wrapped value would silently miss
+			// a real secret reference the same way the pre-fix bug did, and
+			// falling through to `continue` would report it as "no secret path
+			// in this call" when the true answer is "unknown."
+			if value, glued, isMalformed := cmdparse.GluedFlagValue(arg); glued {
+				if isMalformed {
+					return secretRef{}, false, true
+				}
+				if ref, ok := match(value); ok {
+					return ref, true, false
 				}
 				continue
 			}
@@ -593,16 +623,16 @@ func firstSecretRef(cmd string, depth int, match candidateMatch) (secretRef, boo
 				continue
 			}
 			if ref, ok := match(arg); ok {
-				return ref, true
+				return ref, true, false
 			}
 		}
 		for _, redir := range pc.Redirections {
 			if ref, ok := match(redir.Path); ok {
-				return ref, true
+				return ref, true, false
 			}
 		}
 	}
-	return secretRef{}, false
+	return secretRef{}, false, false
 }
 
 // secretCandidateArgs returns the subset of a command's arguments that could be
@@ -636,7 +666,13 @@ func firstSecretRef(cmd string, depth int, match candidateMatch) (secretRef, boo
 // those flags are absent from the message tables. The skip is also keyed on an
 // ENUMERATED, CLOSED set of executables, so it cannot leak to a command that does
 // open its arguments (`cp ~/.ssh/id_rsa /tmp` is unaffected).
-func secretCandidateArgs(pc cmdparse.ParsedCommand) []string {
+// secretCandidateArgs' second return, malformed, reports cmdparse.SkipGrepPattern's
+// pg2-52eod decline signal for the grep/rg branch — a glued file-flag value whose
+// shell quoting it could not resolve. It is always false for every other branch,
+// since none of them route through SkipGrepPattern's own GluedFlagValue call; the
+// plain default/bd/git/gh/jq branches hand their args to firstSecretRef's OWN
+// GluedFlagValue call unchanged, which carries its own malformed detection already.
+func secretCandidateArgs(pc cmdparse.ParsedCommand) (args []string, malformed bool) {
 	switch filepath.Base(pc.Executable) {
 	case "grep", "rg":
 		return cmdparse.SkipGrepPattern(filepath.Base(pc.Executable), pc.Args)
@@ -645,11 +681,11 @@ func secretCandidateArgs(pc cmdparse.ParsedCommand) []string {
 		if !jqFilterFromFile(pc.Args) {
 			args = dropFirstPositional(args)
 		}
-		return args
+		return args, false
 	case "bd", "git", "gh":
-		return cmdparse.SkipMessageArgs(filepath.Base(pc.Executable), pc.Args)
+		return cmdparse.SkipMessageArgs(filepath.Base(pc.Executable), pc.Args), false
 	default:
-		return pc.Args
+		return pc.Args, false
 	}
 }
 

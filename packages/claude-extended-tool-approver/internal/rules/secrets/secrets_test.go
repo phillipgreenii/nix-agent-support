@@ -273,20 +273,30 @@ func TestRule_GluedQuoteParity(t *testing.T) {
 	}
 }
 
-// TestRule_MalformedGluedQuotingDoesNotRegress pins pg2-6f2gu's fail-closed
-// requirement: a glued value whose quoting is malformed — an interior wrapper
-// character (multi-segment concatenation), an unterminated quote, or a
+// TestRule_MalformedGluedQuotingAsks supersedes pg2-6f2gu's
+// TestRule_MalformedGluedQuotingDoesNotRegress: a glued value whose quoting is
+// malformed — an interior wrapper character (multi-segment concatenation) or a
 // double-wrapped value — is NOT a clean unwrap, so cmdparse.UnwrapGluedQuotes
-// declines and hands firstSecretRef back the value EXACTLY as cmdparse produced
-// it (its own documented residual-case behavior, pg2-9zgso). Each fixture below
-// uses ".env" — a basename-only secret with no "/" at all — specifically so
-// there is no directory-component coincidence to muddy the read (contrast the
-// GluedQuoteParity fixtures above, whose ssh-key row is a "/"-separated path):
-// every one of these malformed spellings is Abstain, identical to before this
-// fix, because a value that fails to unwrap cleanly is never a clean match
-// either — declining is a no-op on these exact bytes, so the verdict cannot
-// change whether or not the unwrap call is present.
-func TestRule_MalformedGluedQuotingDoesNotRegress(t *testing.T) {
+// declines (its own documented residual-case behavior, pg2-9zgso). pg2-6f2gu's
+// version of this test pinned Abstain for that case, reasoning that "a value
+// that fails to unwrap cleanly is never a clean match either" for its two
+// fixtures — TRUE of secretpath.IsSecret's literal-string match, but NOT a
+// security argument: it only showed the OLD unwrap call was a no-op on THESE
+// bytes, never that leaving the malformed subset unclassified was safe in
+// general. pg2-52eod treats it as the SAME "cannot classify" signal
+// GluedFlagValue reports for every other caller (see its doc) and asks rather
+// than silently falling through — closing exactly the gap a path-shaped
+// secret would otherwise still have: this rule is the ONLY one that can catch
+// a BARENAME secret like ".env" at all (safe-commands' zone check never
+// considers it, since it carries no "/"/"./"/"../"/"~" prefix — see
+// pathCandidate's doc in internal/rules/safecmds), so falling through here
+// would leave `cat --file=”.env”`-shaped commands with NO rule flagging them.
+//
+// Each fixture uses ".env" — a basename-only secret with no "/" at all —
+// specifically so there is no directory-component coincidence to muddy the
+// read (contrast the GluedQuoteParity fixtures above, whose ssh-key row is a
+// "/"-separated path).
+func TestRule_MalformedGluedQuotingAsks(t *testing.T) {
 	pe := patheval.NewWithCWD("/project", "/project")
 	r := New(pe)
 
@@ -299,10 +309,6 @@ func TestRule_MalformedGluedQuotingDoesNotRegress(t *testing.T) {
 			"cat --file='.env'x'.env'",
 		},
 		{
-			"unterminated: only one quote, at the start",
-			"cat --file='.env",
-		},
-		{
 			"double-wrapped: outer pair around an already-quoted inner value",
 			"cat --file=''.env''",
 		},
@@ -310,10 +316,27 @@ func TestRule_MalformedGluedQuotingDoesNotRegress(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := hookio.Verdict(r.Evaluate(bashInput(tt.cmd)))
-			if got.Decision != hookio.NoOpinion {
-				t.Errorf("cmd %q: got %s (%s), want abstain — a malformed glued quote must not be treated as a clean unwrap", tt.cmd, got.Decision, got.Reason)
+			if got.Decision != hookio.Ask {
+				t.Errorf("cmd %q: got %s (%s), want ask — malformed glued quoting cannot be classified and must fail closed (pg2-52eod)", tt.cmd, got.Decision, got.Reason)
 			}
 		})
+	}
+}
+
+// TestRule_UnterminatedGluedQuoteStillAbstains is the ONE case
+// TestRule_MalformedGluedQuotingAsks does not cover: a quote that never
+// closes ANYWHERE in the rest of the command text is not a "declined unwrap"
+// at all — it makes the WHOLE command unparseable, so cmdparse.Parse returns
+// zero leaves and this rule's own loop body never runs (there is no argument
+// to test, malformed or otherwise). That is a DIFFERENT floor entirely (an
+// unparseable command is Abstain from every rule, not a decision this rule
+// makes), so it is pinned separately rather than folded into the ask-case
+// fixtures above.
+func TestRule_UnterminatedGluedQuoteStillAbstains(t *testing.T) {
+	r := New(patheval.NewWithCWD("/project", "/project"))
+	got := hookio.Verdict(r.Evaluate(bashInput("cat --file='.env")))
+	if got.Decision != hookio.NoOpinion {
+		t.Errorf("cmd %q: got %s (%s), want abstain — an unterminated top-level quote fails cmdparse.Parse, so this rule never even sees an argument to classify", "cat --file='.env", got.Decision, got.Reason)
 	}
 }
 

@@ -1374,3 +1374,173 @@ func TestReadPathIssue_IsNeverLooserThanTheStaticSubstitutionSeam(t *testing.T) 
 		}
 	}
 }
+
+// TestSafecmds_GluedQuoteParity_PathCandidate is pg2-52eod's relation-fixture
+// requirement, generalizing pg2-6f2gu's TestEvaluateCp_TargetDirectoryGluedQuoteParity
+// past cp's bespoke `--target-directory=` extraction to pathCandidate itself — the
+// seam every OTHER read/write/reject check in this file shares (readPathIssue,
+// hasRejectPath, hasUnsafeWritePath, evaluateCp's other positional loops,
+// argsHaveDynamicExpansion). A value glued to an unquoted flag name AND wrapped in a
+// shell quote (`--flag='X'`) must reach the SAME verdict as the unquoted glued
+// spelling (`--flag=X`) and the space-separated spelling (`--flag X`) — all three are
+// identical to the shell.
+//
+// CONFIRMED LIVE, pre-fix (this bead's brief, reproduced against this tree before the
+// change): cat/mkdir/ls each auto-approved the quoted glued spelling of a path
+// cmdparse.GluedFlagValue never unwrapped, while their unquoted twins correctly
+// abstained/refused. grep is the fourth family here, and it is DELIBERATELY not
+// pathCandidate's own caller — it goes through cmdparse.SkipGrepPattern, this bead's
+// audited THIRD (in fact fourth, see internal/rules/gitdir) caller of
+// cmdparse.GluedFlagValue, so this fixture also proves that seam was fixed.
+func TestSafecmds_GluedQuoteParity_PathCandidate(t *testing.T) {
+	pe := patheval.New("/home/user/project")
+	pe.SetSandboxConfig(&patheval.SandboxFilesystemConfig{
+		// A DenyRead zone NOT covered by internal/secretpath's own lexical list, so
+		// this exercises hasRejectPath's patheval.PathReject branch specifically
+		// rather than re-proving secrets.Rule's independent (and already-fixed)
+		// ".ssh"/".env" coverage.
+		DenyRead: []string{"/etc/company-secrets"},
+	})
+	r := New(pe)
+
+	verdictFor := func(cmd string) hookio.RuleResult {
+		input := &hookio.HookInput{
+			ToolName:  "Bash",
+			CWD:       "/home/user/project",
+			ToolInput: mustJSON(map[string]string{"command": cmd}),
+		}
+		return hookio.Verdict(r.Evaluate(input))
+	}
+
+	// Each template has exactly one "%s" — the flag's value slot — filled with the
+	// space-separated arg, the glued-unquoted value, and the glued-quoted value in
+	// turn, so a case defines its command shape ONCE rather than three times.
+	cases := []struct {
+		name     string
+		template string // e.g. "cat --output %s" — %s is replaced by the value spelling
+		space    string // the SPACE form's value token (flag and value as two args)
+		glued    string // the flag=value PREFIX for the glued forms, e.g. "--output="
+		path     string
+		want     hookio.Decision
+	}{
+		// The three CONFIRMED examples from the bead brief, each a different
+		// pathCandidate consumer: readPathIssue (cat, safeReadCmds), hasUnsafeWritePath
+		// (mkdir, safeWriteCmds), hasRejectPath (ls, browsingCmds).
+		{"cat --output (readPathIssue: unknown path)", "cat %s", "--output /etc/shadow", "--output=", "/etc/shadow", hookio.NoOpinion},
+		{"mkdir --mode (hasUnsafeWritePath)", "mkdir %s", "--mode /etc/shadow", "--mode=", "/etc/shadow", hookio.NoOpinion},
+		// NOTE: patheval.PathReject is currently unreachable via a plain (non-container)
+		// Evaluate() call in this codebase — grep confirms it — so hasRejectPath never
+		// actually fires here regardless of quoting, and Approve is the CORRECT,
+		// unchanged verdict for all three spellings. It is kept in this table anyway
+		// because it is a pathCandidate consumer this bead's brief names explicitly,
+		// and the relation (all three spellings agree) is exactly what the fix
+		// guarantees even though there is no live discrepancy to observe today.
+		{"ls --sort (hasRejectPath consumer; PathReject unreachable here, so all agree on approve)", "ls %s", "--sort /etc/company-secrets/config", "--sort=", "/etc/company-secrets/config", hookio.Approve},
+		// A FOURTH command family, deliberately NOT a pathCandidate caller directly:
+		// grep's file-flag operand is emitted by cmdparse.SkipGrepPattern, this bead's
+		// audited third/fourth caller of cmdparse.GluedFlagValue.
+		{"grep --file (SkipGrepPattern file-flag operand)", "grep %s x.log", "--file /etc/shadow", "--file=", "/etc/shadow", hookio.NoOpinion},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			spaced := strings.Replace(c.template, "%s", c.space, 1)
+			gluedPlain := strings.Replace(c.template, "%s", c.glued+c.path, 1)
+			gluedQuoted := strings.Replace(c.template, "%s", c.glued+"'"+c.path+"'", 1)
+
+			sv, gv, qv := verdictFor(spaced), verdictFor(gluedPlain), verdictFor(gluedQuoted)
+
+			if gv.Decision != sv.Decision {
+				t.Errorf("GLUED-SPELLING DISAGREEMENT: %q is %s but %q is %s",
+					gluedPlain, gv.Decision, spaced, sv.Decision)
+			}
+			if qv.Decision != sv.Decision {
+				t.Errorf("GLUED-QUOTE DISAGREEMENT: %q is %s (%s) but %q is %s (%s) — both are identical to the shell and MUST reach the same verdict (pg2-52eod)",
+					gluedQuoted, qv.Decision, qv.Reason, spaced, sv.Decision, sv.Reason)
+			}
+			for _, got := range []hookio.RuleResult{sv, gv, qv} {
+				if got.Decision != c.want {
+					t.Errorf("got %s (%s), want %s", got.Decision, got.Reason, c.want)
+				}
+			}
+		})
+	}
+}
+
+// TestSafecmds_MalformedGluedQuotingAbstains pins pg2-52eod's fail-closed
+// requirement, generalizing pg2-mp9oq's evaluateCp-specific
+// TestEvaluateCp_TargetDirectoryMalformedGluedQuotingAbstains to every OTHER
+// pathCandidate consumer in this file. A glued value whose quoting is MALFORMED
+// (cmdparse.UnwrapGluedQuotes declines — returns it unchanged) must not fall through
+// to the unconditional Approve at the end of each branch: BEFORE this fix a declined
+// value stayed quote-wrapped, so it never started with an unquoted
+// `/`/`./`/`../`/`~`, looksLikePath was false, and the corresponding zone/write/reject
+// check was skipped entirely.
+func TestSafecmds_MalformedGluedQuotingAbstains(t *testing.T) {
+	pe := patheval.New("/home/user/project")
+	r := New(pe)
+
+	tests := []struct {
+		name string
+		cmd  string
+	}{
+		{"cat: double-wrapped", "cat --output=''/etc/shadow''"},
+		{"cat: interior wrapper character", "cat --output='/etc/shadow'x'/etc/shadow'"},
+		{"mkdir: double-wrapped", "mkdir --mode=''/etc/shadow''"},
+		{"mkdir: interior wrapper character", "mkdir --mode='/etc/shadow'x'/etc/shadow'"},
+		{"ls: double-wrapped", "ls --sort=''/etc/shadow''"},
+		{"grep --file: double-wrapped", "grep --file=''/etc/shadow'' x.log"},
+		{"grep --file: interior wrapper character", "grep --file='/etc/shadow'x'/etc/shadow' x.log"},
+		// cp's OTHER positional loop (not --target-directory=, which pg2-mp9oq
+		// already covers) — the standard-mode source/destination scan, exercised via
+		// a GLUED flag this bead's audit found nowhere else in this rule (mkdir/cat
+		// above already cover a bare command's glued flag; cp's positional loop is
+		// the site, not a new shape of malformed value).
+		{"cp standard mode: glued malformed destination", "cp ./a.txt --unknown-flag=''/etc/shadow''"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := &hookio.HookInput{
+				ToolName:  "Bash",
+				CWD:       "/home/user/project",
+				ToolInput: mustJSON(map[string]string{"command": tt.cmd}),
+			}
+			got := hookio.Verdict(r.Evaluate(input))
+			if got.Decision != hookio.NoOpinion {
+				t.Errorf("cmd %q: got %s (%s), want abstain — malformed glued quoting must fail closed, never approve", tt.cmd, got.Decision, got.Reason)
+			}
+		})
+	}
+}
+
+// TestSafecmds_ArgsHaveDynamicExpansion_IndependentOfMalformedQuoting pins
+// argsHaveDynamicExpansion's independence (this bead's acceptance criterion 5): it
+// must keep Abstaining on a `$`-expansion regardless of this change, AND it must
+// ALSO abstain on malformed glued quoting via the SAME pathCandidate seam — the two
+// are separate signals folded by the SAME predicate (see argsHaveDynamicExpansion's
+// doc), so this test pins both without confusing one for the other.
+func TestSafecmds_ArgsHaveDynamicExpansion_IndependentOfMalformedQuoting(t *testing.T) {
+	pe := patheval.New("/home/user/project")
+	r := New(pe)
+
+	tests := []struct {
+		name string
+		cmd  string
+	}{
+		{"dynamic expansion, unrelated to quoting", "rm -rf $HOME/.ssh"},
+		{"dynamic expansion via glued flag", "touch --reference=$HOME/.bashrc"},
+		{"malformed glued quoting, no expansion at all", "mkdir --mode=''/etc/shadow''"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := &hookio.HookInput{
+				ToolName:  "Bash",
+				CWD:       "/home/user/project",
+				ToolInput: mustJSON(map[string]string{"command": tt.cmd}),
+			}
+			got := hookio.Verdict(r.Evaluate(input))
+			if got.Decision != hookio.NoOpinion {
+				t.Errorf("cmd %q: got %s (%s), want abstain", tt.cmd, got.Decision, got.Reason)
+			}
+		})
+	}
+}
