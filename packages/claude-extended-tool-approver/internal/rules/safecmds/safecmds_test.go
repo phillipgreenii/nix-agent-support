@@ -743,6 +743,124 @@ func TestEvaluateCp_Comprehensive(t *testing.T) {
 	}
 }
 
+// TestEvaluateCp_TargetDirectoryGluedQuoteParity is pg2-6f2gu's relation-fixture
+// requirement for the cp side: `--target-directory='X'` (glued AND quoted) must
+// reach the SAME verdict as `--target-directory=X` (glued, unquoted) and
+// `-t X` (space-separated) — all three are identical to the shell.
+//
+// /etc/ is the existing out-of-zone fixture this file already uses ("-t to
+// non-writable dest" above; also internal/patheval's own zone model treats it
+// as outside every writable zone for this evaluator). /home/user/project/dest/
+// is the in-zone control, so the relation is checked in BOTH directions: a
+// quoted glued destination must not gain a bypass it shouldn't have, and must
+// not lose an approval it should keep.
+func TestEvaluateCp_TargetDirectoryGluedQuoteParity(t *testing.T) {
+	pe := patheval.New("/home/user/project")
+	r := New(pe)
+
+	cases := []struct {
+		dest string
+		want hookio.Decision
+	}{
+		{"/etc/", hookio.NoOpinion},
+		{"/home/user/project/dest/", hookio.Approve},
+	}
+	for _, c := range cases {
+		spaced := "cp ./a.txt -t " + c.dest
+		gluedPlain := "cp ./a.txt --target-directory=" + c.dest
+		gluedQuoted := "cp ./a.txt --target-directory='" + c.dest + "'"
+
+		verdictFor := func(cmd string) hookio.RuleResult {
+			input := &hookio.HookInput{
+				ToolName:  "Bash",
+				CWD:       "/home/user/project",
+				ToolInput: mustJSON(map[string]string{"command": cmd}),
+			}
+			return hookio.Verdict(r.Evaluate(input))
+		}
+		sv, gv, qv := verdictFor(spaced), verdictFor(gluedPlain), verdictFor(gluedQuoted)
+
+		if gv.Decision != sv.Decision {
+			t.Errorf("GLUED-SPELLING DISAGREEMENT: %q is %s but %q is %s (pg2-wxbr9)",
+				gluedPlain, gv.Decision, spaced, sv.Decision)
+		}
+		if qv.Decision != sv.Decision {
+			t.Errorf("GLUED-QUOTE DISAGREEMENT: %q is %s (%s) but %q is %s (%s) — both are identical to the shell and MUST reach the same verdict (pg2-6f2gu)",
+				gluedQuoted, qv.Decision, qv.Reason, spaced, sv.Decision, sv.Reason)
+		}
+		for _, got := range []hookio.RuleResult{sv, gv, qv} {
+			if got.Decision != c.want {
+				t.Errorf("dest %q: got %s (%s), want %s", c.dest, got.Decision, got.Reason, c.want)
+			}
+		}
+	}
+}
+
+// TestEvaluateCp_TargetDirectoryMalformedGluedQuotingDoesNotRegress pins
+// pg2-6f2gu's fail-closed requirement on the cp side: a `--target-directory=`
+// value whose quoting is malformed is NOT a clean unwrap, so
+// cmdparse.UnwrapGluedQuotes declines and evaluateCp sees the value EXACTLY as
+// cmdparse produced it — a no-op, so the verdict is identical with or without
+// this fix's unwrap call.
+//
+// MOST of these are NOT pinned as Abstain/NoOpinion: the multi-segment and
+// double-wrapped forms below don't start with an unquoted `/`, so
+// looksLikePath is false on them for the SAME reason the clean quoted form
+// used to slip through — the destination zone check never runs, and
+// evaluateCp falls through to the unconditional Approve at the end of the
+// -t/--target-directory branch. This is a PRE-EXISTING gap this bead's audit
+// did not scope in: it existed identically before this fix (declining to
+// unwrap is a no-op, so nothing here changed), and it is NOT the "glued AND
+// cleanly quoted" shape pg2-6f2gu's acceptance criteria named. Those two
+// assertions exist to PROVE that claim — i.e. that this fix neither
+// introduces nor removes this latent behavior — not to endorse it.
+//
+// The genuinely UNTERMINATED case is different in kind: a single quote with no
+// closing pair ANYWHERE in the command is not a value-shaping quirk, it is
+// invalid shell syntax (real bash would keep reading for the missing close),
+// so cmdparse cannot even tokenize a `cp` invocation out of it — the whole
+// command abstains via NotApplicable before evaluateCp ever runs, which is
+// also unchanged by this fix.
+func TestEvaluateCp_TargetDirectoryMalformedGluedQuotingDoesNotRegress(t *testing.T) {
+	pe := patheval.New("/home/user/project")
+	r := New(pe)
+
+	tests := []struct {
+		name string
+		cmd  string
+		want hookio.Decision
+	}{
+		{
+			"interior contains the wrapper character (multi-segment concatenation)",
+			"cp ./a.txt --target-directory='/etc/'x'/etc/'",
+			hookio.Approve,
+		},
+		{
+			"unterminated single quote makes the whole command unparseable",
+			"cp ./a.txt --target-directory='/etc/",
+			hookio.NoOpinion,
+		},
+		{
+			"double-wrapped: outer pair around an already-quoted inner value",
+			"cp ./a.txt --target-directory=''/etc/''",
+			hookio.Approve,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := &hookio.HookInput{
+				ToolName:  "Bash",
+				CWD:       "/home/user/project",
+				ToolInput: mustJSON(map[string]string{"command": tt.cmd}),
+			}
+			got := hookio.Verdict(r.Evaluate(input))
+			if got.Decision != tt.want {
+				t.Errorf("cmd %q: got %s (%s), want %s (pre-existing, unchanged by this fix — see test doc)", tt.cmd, got.Decision, got.Reason, tt.want)
+			}
+		})
+	}
+}
+
 func TestSafecmds_Sqlite3Removed(t *testing.T) {
 	pe := patheval.New("/tmp/project")
 	r := New(pe)

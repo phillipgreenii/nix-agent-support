@@ -552,8 +552,39 @@ func firstSecretRef(cmd string, depth int, match candidateMatch) (secretRef, boo
 			// branch), and the grep/rg and jq skippers have already removed their
 			// value-flag operands in both spellings. So a glued token that reaches
 			// here is one no carve-out claims, and its value is a candidate path.
+			//
+			// THE VALUE HALF IS UNWRAPPED (cmdparse.UnwrapGluedQuotes, pg2-6f2gu)
+			// before match ever sees it. GluedFlagValue only cuts on `=`; it does
+			// not strip a quote wrapper around the value half, so
+			// `--file='.env'`/`--file='secrets/x'`/`--file='/Users/x/.ssh/id_rsa'`
+			// (with a sandbox deny-list configured) arrived here still wearing
+			// their quotes. secretpath.Classify and patheval.IsDenyRead both
+			// compare basenames/prefixes on the LITERAL string, and a quote glued
+			// to the first or last path segment breaks exactly that comparison —
+			// MEASURED on this tree before this fix: with DenyRead containing
+			// "/Users/testuser/.ssh", `cat --file=/Users/testuser/.ssh/id_rsa`
+			// correctly Rejected while `cat --file='/Users/testuser/.ssh/id_rsa'`
+			// degraded to Ask; unconfigured, `cat --file=secrets/notes.txt` /
+			// `--file=.env` / `--file=auth.json` Ask while their quoted glued
+			// twins Abstain outright. (A path whose classification hinges on a
+			// MIDDLE component, e.g. `~/.ssh/id_rsa`'s ".ssh" segment, happens to
+			// survive unquoted because the quote characters sit only on the
+			// string's own two ends — that is a coincidence of this one example,
+			// not evidence the primitive is safe; the basename- and
+			// prefix-anchored arms above are not so lucky.)
+			//
+			// PER-CALL-SITE, NOT CENTRALIZED IN GluedFlagValue ITSELF — the same
+			// DRY-vs-blast-radius tradeoff UnwrapGluedQuotes' own doc records for
+			// pg2-9zgso, resolved the same way for the same reason. GluedFlagValue
+			// has a THIRD caller (cmdparse.SkipGrepPattern, extracting grep/rg glob
+			// and value-flag operands to SKIP as non-files) that this bead's audit
+			// never reviewed; teaching the primitive itself to unwrap would change
+			// that caller's output too, on faith rather than evidence. Confining the
+			// unwrap to the read call that already knows its extracted substring is
+			// a VALUE keeps the change to the one call site pg2-cu3ro built and this
+			// bead reviewed.
 			if value, glued := cmdparse.GluedFlagValue(arg); glued {
-				if ref, ok := match(value); ok {
+				if ref, ok := match(cmdparse.UnwrapGluedQuotes(value)); ok {
 					return ref, true
 				}
 				continue

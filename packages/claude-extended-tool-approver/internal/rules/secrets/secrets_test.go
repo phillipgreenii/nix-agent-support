@@ -204,6 +204,119 @@ func TestRule_DenyListedSecretRejects(t *testing.T) {
 	}
 }
 
+// TestRule_GluedQuoteParity is pg2-6f2gu's relation-fixture requirement, the
+// secrets-rule analog of gh's TestGH_Api_GluedQuoteParity (pg2-9zgso): a value
+// GLUED to an unquoted flag name AND quoted (`--file='X'`) must reach the SAME
+// verdict as the unquoted glued spelling (`--file=X`) and the space-separated
+// spelling (`--file X`) — all three are identical to the shell, and pg2-cu3ro's
+// own acceptance criteria already pinned the first two as a relation; this adds
+// the third spelling cmdparse.GluedFlagValue never stripped quotes from.
+//
+// It runs with a DenyRead sandbox config so the ssh-key row exercises the Reject
+// branch (configRef/denyListed), not just Ask — the branch the audit's own
+// example (`cat --file='~/.ssh/id_rsa'`) singled out, and MEASURED to regress to
+// Ask pre-fix once the path is actually deny-listed (an unconfigured `~/.ssh/…`
+// happens to still classify correctly even quoted, because its secret-directory
+// match lands on a MIDDLE path segment the quotes never touch — see the decision
+// comment at firstSecretRef's GluedFlagValue call for why that one example is not
+// a reliable witness on its own).
+func TestRule_GluedQuoteParity(t *testing.T) {
+	pe := patheval.NewWithCWD("/project", "/project")
+	pe.SetSandboxConfig(&patheval.SandboxFilesystemConfig{
+		DenyRead: []string{"/Users/testuser/.ssh"},
+	})
+	r := New(pe)
+
+	cases := []struct {
+		prefix, flag, path string
+		want               hookio.Decision
+	}{
+		// Deny-listed: the basename/prefix comparison this fix repairs.
+		{"cat", "--file", "/Users/testuser/.ssh/id_rsa", hookio.Reject},
+		{"git commit", "--file", "/Users/testuser/.ssh/id_rsa", hookio.Reject},
+		// Secret-shaped but not deny-listed: classification hinges on the LAST
+		// segment (basename) or the WHOLE string (no "/" at all) — exactly the
+		// arms a boundary quote corrupts.
+		{"cat", "--file", "secrets/notes.txt", hookio.Ask},
+		{"cat", "--file", ".env", hookio.Ask},
+		{"cat", "--file", "auth.json", hookio.Ask},
+	}
+	for _, c := range cases {
+		spaced := c.prefix + " " + c.flag + " " + c.path
+		gluedPlain := c.prefix + " " + c.flag + "=" + c.path
+		gluedQuoted := c.prefix + " " + c.flag + "='" + c.path + "'"
+
+		sv := hookio.Verdict(r.Evaluate(bashInput(spaced)))
+		gv := hookio.Verdict(r.Evaluate(bashInput(gluedPlain)))
+		qv := hookio.Verdict(r.Evaluate(bashInput(gluedQuoted)))
+
+		if gv.Decision != sv.Decision {
+			t.Errorf("GLUED-SPELLING DISAGREEMENT: %q is %s but %q is %s (pg2-cu3ro)",
+				gluedPlain, gv.Decision, spaced, sv.Decision)
+		}
+		if qv.Decision != sv.Decision {
+			t.Errorf("GLUED-QUOTE DISAGREEMENT: %q is %s (%s) but %q is %s (%s) — both are identical to the shell and MUST reach the same verdict (pg2-6f2gu)",
+				gluedQuoted, qv.Decision, qv.Reason, spaced, sv.Decision, sv.Reason)
+		}
+		// Pin the DIRECTION too, not just the relation — all three spellings must
+		// agree by both reaching the CORRECT verdict, not by all three regressing.
+		for _, tt := range []struct {
+			cmd string
+			got hookio.Decision
+		}{
+			{spaced, sv.Decision}, {gluedPlain, gv.Decision}, {gluedQuoted, qv.Decision},
+		} {
+			if tt.got != c.want {
+				t.Errorf("cmd %q: got %s, want %s", tt.cmd, tt.got, c.want)
+			}
+		}
+	}
+}
+
+// TestRule_MalformedGluedQuotingDoesNotRegress pins pg2-6f2gu's fail-closed
+// requirement: a glued value whose quoting is malformed — an interior wrapper
+// character (multi-segment concatenation), an unterminated quote, or a
+// double-wrapped value — is NOT a clean unwrap, so cmdparse.UnwrapGluedQuotes
+// declines and hands firstSecretRef back the value EXACTLY as cmdparse produced
+// it (its own documented residual-case behavior, pg2-9zgso). Each fixture below
+// uses ".env" — a basename-only secret with no "/" at all — specifically so
+// there is no directory-component coincidence to muddy the read (contrast the
+// GluedQuoteParity fixtures above, whose ssh-key row is a "/"-separated path):
+// every one of these malformed spellings is Abstain, identical to before this
+// fix, because a value that fails to unwrap cleanly is never a clean match
+// either — declining is a no-op on these exact bytes, so the verdict cannot
+// change whether or not the unwrap call is present.
+func TestRule_MalformedGluedQuotingDoesNotRegress(t *testing.T) {
+	pe := patheval.NewWithCWD("/project", "/project")
+	r := New(pe)
+
+	tests := []struct {
+		name string
+		cmd  string
+	}{
+		{
+			"interior contains the wrapper character (multi-segment concatenation)",
+			"cat --file='.env'x'.env'",
+		},
+		{
+			"unterminated: only one quote, at the start",
+			"cat --file='.env",
+		},
+		{
+			"double-wrapped: outer pair around an already-quoted inner value",
+			"cat --file=''.env''",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := hookio.Verdict(r.Evaluate(bashInput(tt.cmd)))
+			if got.Decision != hookio.NoOpinion {
+				t.Errorf("cmd %q: got %s (%s), want abstain — a malformed glued quote must not be treated as a clean unwrap", tt.cmd, got.Decision, got.Reason)
+			}
+		})
+	}
+}
+
 // asklogRow returns the VERBATIM command text of an observed asklog row, held in
 // testdata so the fixture is byte-exact rather than a Go-escaped paraphrase (the
 // bodies are multi-line and contain quotes, backticks and the `'"'"'` shell

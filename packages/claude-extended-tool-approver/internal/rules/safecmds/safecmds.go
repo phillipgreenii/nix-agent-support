@@ -798,7 +798,34 @@ func evaluateCp(args []string, pe *patheval.PathEvaluator, module string) (hooki
 			break
 		}
 		if v, ok := strings.CutPrefix(a, "--target-directory="); ok {
-			targetDir = v
+			// THE VALUE HALF IS UNWRAPPED (cmdparse.UnwrapGluedQuotes, pg2-6f2gu)
+			// before targetDir is used below. This is a bespoke CutPrefix, not
+			// cmdparse.GluedFlagValue/pathCandidate, but it has the identical gap:
+			// `--target-directory='/etc/'` arrives as the literal 8-byte value
+			// `'/etc/'`, quote characters and all. looksLikePath requires an
+			// UNquoted `/`/`./`/`../`/`~` prefix, so that leading quote made
+			// looksLikePath(targetDir) false below — not merely "path looks
+			// unfamiliar", but the entire writability/zone check for the
+			// destination SKIPPED, and evaluateCp fell through to the unconditional
+			// Approve at the end of this branch. MEASURED on this tree before this
+			// fix: with cwd /home/user/project, `cp ./a.txt --target-directory=/etc/`
+			// correctly abstained (destination not writable) while
+			// `cp ./a.txt --target-directory='/etc/'` (and the "-form) APPROVED.
+			// The separate-token spellings (`-t /etc/`, `-t '/etc/'`) are unaffected
+			// — cmdparse's ordinary lowering already strips a quote wrapping a WHOLE
+			// token, so only THIS glued form needs the explicit unwrap.
+			//
+			// PER-CALL-SITE, NOT ROUTED THROUGH pathCandidate/GluedFlagValue: this
+			// extraction is a one-flag special case that has never gone through
+			// either (it predates pg2-wxbr9's pathCandidate seam), and folding it in
+			// now would mean re-deriving this same targetDir value from a candidate
+			// that could ALSO match a non-flag positional — pathCandidate's whole
+			// point. A direct, explicit unwrap on the substring this loop already
+			// knows is the flag's value keeps the change to the one shape that
+			// regressed, matching secrets.firstSecretRef's identical call and
+			// UnwrapGluedQuotes' own pg2-9zgso decision record for why a shared
+			// helper is called explicitly rather than pushed into a lower layer.
+			targetDir = cmdparse.UnwrapGluedQuotes(v)
 			break
 		}
 	}
