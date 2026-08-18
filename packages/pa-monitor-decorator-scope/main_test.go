@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -185,5 +186,148 @@ func TestLoadRules_IgnoresMalformed(t *testing.T) {
 	}
 	if got := decorate(session{CWD: "/ok/here"}, rules); got["workspace.scope"] != "good" {
 		t.Fatalf("valid rule not applied: %v", got)
+	}
+}
+
+// --- runWith error paths -------------------------------------------------
+
+// errReader fails on the first Read, so tests can drive runWith's stdin
+// read-failure path without a real file descriptor.
+type errReader struct{}
+
+func (errReader) Read([]byte) (int, error) { return 0, errors.New("simulated stdin failure") }
+
+// TestRunWith_ReadErrorPropagates: a stdin read failure MUST surface as an
+// error (the daemon then swallows our output) rather than being silently
+// downgraded to an empty session with empty labels.
+func TestRunWith_ReadErrorPropagates(t *testing.T) {
+	var out bytes.Buffer
+	err := runWith(errReader{}, &out, []rule{{prefix: "/a", scope: "a"}})
+	if err == nil {
+		t.Fatalf("runWith must return an error when stdin cannot be read; output was %q", out.String())
+	}
+	if !strings.Contains(err.Error(), "read stdin") {
+		t.Fatalf("error should name the read stage, got %v", err)
+	}
+	if out.Len() != 0 {
+		t.Fatalf("nothing may be written when the read fails, got %q", out.String())
+	}
+}
+
+// TestRunWith_MalformedJSONPropagates: undecodable stdin MUST surface as an
+// error rather than being treated as a zero-value session.
+func TestRunWith_MalformedJSONPropagates(t *testing.T) {
+	var out bytes.Buffer
+	err := runWith(strings.NewReader(`{"CWD":`), &out, []rule{{prefix: "/a", scope: "a"}})
+	if err == nil {
+		t.Fatalf("runWith must return an error on malformed session JSON; output was %q", out.String())
+	}
+	if !strings.Contains(err.Error(), "parse session JSON") {
+		t.Fatalf("error should name the parse stage, got %v", err)
+	}
+	if out.Len() != 0 {
+		t.Fatalf("nothing may be written when the decode fails, got %q", out.String())
+	}
+}
+
+// TestRunWith_NoMatchEmitsEmptyLabelsObject pins the WIRE contract the
+// pa-monitor daemon parses: a session that matches no rule emits an empty
+// labels OBJECT, never a null. A nil map would render as {"labels":null}.
+func TestRunWith_NoMatchEmitsEmptyLabelsObject(t *testing.T) {
+	sample := `{"ID":"s1","CWD":"/Users/phillipg/personal/repo"}`
+	rules := []rule{{prefix: "/Volumes/ziprecruiter", scope: "ziprecruiter"}}
+
+	var out bytes.Buffer
+	if err := runWith(strings.NewReader(sample), &out, rules); err != nil {
+		t.Fatalf("runWith returned error: %v", err)
+	}
+	if got := strings.TrimSpace(out.String()); got != `{"labels":{}}` {
+		t.Fatalf("no-match session must emit an empty labels object, got %q", got)
+	}
+}
+
+// --- rule-selection edges ------------------------------------------------
+
+// TestDecorate_EmptyPrefixRuleSkipped: a rule whose prefix normalises to the
+// empty string is skipped REGARDLESS of its scope. Without that guard an empty
+// prefix matches every absolute CWD (HasPrefix(cwd, "/")), blanketing every
+// session with a scope nobody configured.
+func TestDecorate_EmptyPrefixRuleSkipped(t *testing.T) {
+	for _, prefix := range []string{"", "/", "//"} {
+		rules := []rule{{prefix: prefix, scope: "bogus"}}
+		if got := decorate(session{CWD: "/Users/phillipg/personal/repo"}, rules); len(got) != 0 {
+			t.Fatalf("rule with prefix %q must be skipped, got %v", prefix, got)
+		}
+	}
+}
+
+// TestDecorate_EmptyScopeRuleSkipped: a rule with an empty scope is skipped
+// REGARDLESS of its prefix. The empty-scope rule here has the longer prefix,
+// so if it participated in matching it would win the longest-prefix contest
+// and blank out the label the shorter valid rule produced.
+func TestDecorate_EmptyScopeRuleSkipped(t *testing.T) {
+	rules := []rule{
+		{prefix: "/Volumes/ziprecruiter", scope: "ziprecruiter"},
+		{prefix: "/Volumes/ziprecruiter/blank", scope: ""},
+	}
+	got := decorate(session{CWD: "/Volumes/ziprecruiter/blank/deep"}, rules)
+	if got["workspace.scope"] != "ziprecruiter" {
+		t.Fatalf("empty-scope rule must be skipped, not win the prefix contest: got %v, want ziprecruiter", got)
+	}
+}
+
+// TestDecorate_EqualLengthPrefixTieBreak pins the longest-prefix TIE-BREAK:
+// when two rules normalise to prefixes of equal length that both match, the
+// EARLIER rule wins (the comparison is strictly-greater, not
+// greater-or-equal). Asserted in both input orders so it pins the ORDER rule
+// and not one particular scope value.
+func TestDecorate_EqualLengthPrefixTieBreak(t *testing.T) {
+	// "/a/b" and "/a/b/" normalise to the same prefix via TrimRight.
+	rules := []rule{
+		{prefix: "/a/b", scope: "first"},
+		{prefix: "/a/b/", scope: "second"},
+	}
+	if got := decorate(session{CWD: "/a/b/c"}, rules); got["workspace.scope"] != "first" {
+		t.Fatalf("equal-length prefix tie must go to the earlier rule: got %v, want first", got)
+	}
+	rules[0], rules[1] = rules[1], rules[0]
+	if got := decorate(session{CWD: "/a/b/c"}, rules); got["workspace.scope"] != "second" {
+		t.Fatalf("equal-length prefix tie must go to the earlier rule: got %v, want second", got)
+	}
+}
+
+// --- parseRuleEntry edges ------------------------------------------------
+
+// TestParseRuleEntry_RejectsEntryWithoutPrefix: an entry whose '=' is at index
+// 0 has no prefix at all ("=personal") and MUST be rejected — the guard is
+// `i <= 0`, not `i < 0`.
+func TestParseRuleEntry_RejectsEntryWithoutPrefix(t *testing.T) {
+	for _, entry := range []string{"=personal", "=", " =personal"} {
+		if prefix, scope, ok := parseRuleEntry(entry); ok {
+			t.Fatalf("parseRuleEntry(%q) = (%q, %q, true), want rejected", entry, prefix, scope)
+		}
+	}
+}
+
+// TestParseRuleEntry_RejectsWhitespaceOnlySides: the rejection happens AFTER
+// trimming, so a side that is only whitespace counts as empty.
+func TestParseRuleEntry_RejectsWhitespaceOnlySides(t *testing.T) {
+	for _, entry := range []string{"   =personal", "/x=   ", "\t=\t", "/x="} {
+		if prefix, scope, ok := parseRuleEntry(entry); ok {
+			t.Fatalf("parseRuleEntry(%q) = (%q, %q, true), want rejected", entry, prefix, scope)
+		}
+	}
+}
+
+// TestParseRuleEntry_TrimsBothSides: the positive counterpart — surrounding
+// whitespace is trimmed off an otherwise valid entry rather than becoming part
+// of the prefix or scope.
+func TestParseRuleEntry_TrimsBothSides(t *testing.T) {
+	prefix, scope, ok := parseRuleEntry("  /Volumes/zr  =  ziprecruiter  ")
+	if !ok {
+		t.Fatalf("padded but valid entry was rejected")
+	}
+	if prefix != "/Volumes/zr" || scope != "ziprecruiter" {
+		t.Fatalf("got (%q, %q), want (\"/Volumes/zr\", \"ziprecruiter\")", prefix, scope)
 	}
 }
