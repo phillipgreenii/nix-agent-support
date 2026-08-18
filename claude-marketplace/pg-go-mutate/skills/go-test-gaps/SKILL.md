@@ -25,7 +25,80 @@ test-suite runtime`, so never point it at a whole large module:
 2. Read the worklist. Each entry is `file`, line, the mutation, and the operator.
 3. Write an assertion that would fail under that mutation.
 4. Re-run and confirm **that specific mutant**, matched on `file:line:type`, is
-   now killed.
+   now killed — the worklist reports survivors only, so establish that by the
+   procedure in "Establishing that a named mutant was killed" below.
+
+## Establishing that a named mutant was killed
+
+The worklist — human output and `--json` alike — reports **survivors only**, and the
+wrapper deletes the engine report when it exits, so there is no positive `KILLED` row
+to read for a named mutant. **Killed is established by ABSENCE from the survivor
+worklist**, and absence is the same observable as a mutant that
+
+- was never **generated** — gomu is type-aware and silently emits nothing where a
+  mutation would not typecheck,
+- lives in a file that **errored** or **timed out** during the run,
+- was judged `NOT_VIABLE` (did not compile), or
+- is a **no-op** (`original == mutated`), which the worklist drops before any count and
+  which no assertion can ever kill.
+
+So absence on its own is suggestive, not decisive. All three preconditions below MUST
+hold before absence is read as killed.
+
+1. **The mutant's identity MUST come from a worklist row, not from a prediction.** Only
+   a row some run actually printed proves the mutation exists. Measured on one module,
+   `u == nil` at `client.go:50` was given only `"==" -> "!="` and `runner == nil` at
+   `secret.go:95` only 3 mutants in total: the 8 ordering variants (`<`, `<=`, `>`,
+   `>=`) were never generated, and `notViable` was **0** at both lines. A predicted
+   mutant that no worklist ever listed is absent from every later one too, and MUST NOT
+   be called killed.
+2. **The run MUST report `errors` 0, `timedOut` 0, and `notViable` 0.** Any of them
+   nonzero leaves absence ambiguous between killed and never-compiled/never-run. When
+   they are nonzero, narrow the target to the single package holding the mutant and
+   re-run; if they are still nonzero there, the outcome is **undecided** and MUST be
+   reported as undecided, never as killed.
+3. **The mutation type MUST appear in `statistics.mutationTypes`.** If the type is
+   missing, gomu generated none of that type anywhere in the target, so the absence of
+   your row says nothing about your line.
+
+Read all three from one `--json` payload — `$file`, `$line` and `$type` are the
+worklist row you are chasing:
+
+```bash
+pg-go-mutate ./internal/collect --json >pgm.json
+
+jq --arg file collect.go --argjson line 95 --arg type branch_condition '
+  { runDecisive: (.statistics.errors == 0 and .statistics.timedOut == 0
+                  and .statistics.notViable == 0),
+    errors: .statistics.errors, timedOut: .statistics.timedOut,
+    notViable: .statistics.notViable,
+    typeEverGenerated: ((.statistics.mutationTypes // {}) | has($type)),
+    stillSurviving: [ .survivors[]
+                      | select(.file == $file and .line == $line and .type == $type) ] }
+' pgm.json
+```
+
+| `stillSurviving` | `runDecisive` | `typeEverGenerated` | Verdict                                                 |
+| ---------------- | ------------- | ------------------- | ------------------------------------------------------- |
+| non-empty        | —             | —                   | still a gap — the assertion is still missing            |
+| empty            | true          | true                | **killed**, given precondition 1                        |
+| empty            | —             | false               | **never generated** — report that, do not report killed |
+| empty            | false         | true                | **undecided** — narrow the target and re-run, per 2     |
+
+`buildTagsNotRun` does not weaken a killed verdict: tag-gated tests that did not run
+can only ADD survivors, never hide one. Read these bucket counts as run-health
+preconditions and discard them — they are not a score, and the MUST NOT below still
+forbids recording one.
+
+**Phrase acceptance criteria accordingly.** "The mutants at `file:line` are reported
+killed" is not satisfiable from this tool, because nothing reports a positive verdict.
+Write "absent from the survivor worklist of a decisive run" instead, and treat "never
+generated" as a legitimate outcome rather than a failure to verify.
+
+Reaching for the pinned engine directly to read positive `KILLED` / `NOT_VIABLE` rows
+SHOULD be a last resort: it roughly doubles the cost of an already expensive run, its
+`NOT_VIABLE` verdicts are measurably unreliable (see the MUST NOT below), and the
+short-`$TMPDIR` requirement in the MUST below still applies.
 
 ## MUST
 
