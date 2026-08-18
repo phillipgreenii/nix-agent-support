@@ -1157,6 +1157,28 @@ func newEnvAssignment(raw string) EnvAssignment {
 	}
 }
 
+// argLiveSuffix recovers the tail of live that stays aligned with a SUFFIX
+// slice of Args after trimming leadingCount elements off the front — the
+// pattern every branch below uses (args[i+1:], pc.Args[2:], …) to strip a
+// wrapper's own name/flags and keep only the inner command's args. It is a
+// suffix-of-the-same-length recovery rather than a re-derived index, which is
+// what lets unwrapExecPrefix/unwrapCommandRunner keep their existing
+// signatures (returning only the trimmed slice, not the cut index) while
+// still keeping ArgLiveExpansion in lockstep with the Args reslice — Args and
+// ArgLiveExpansion are always the SAME LENGTH by construction (appendArg), so
+// the same trim recovers the same tail on both.
+//
+// A live shorter than leadingCount answers nil — the safe default when no
+// provenance was ever recorded (a hand-built ParsedCommand in a test, or a
+// leaf lowered before this field existed): ArgIsLiveExpansion then answers
+// "assume live" for every index, exactly as if the field were absent.
+func argLiveSuffix(live []bool, leadingCount int) []bool {
+	if leadingCount > len(live) {
+		return nil
+	}
+	return live[leadingCount:]
+}
+
 func unwrapCommand(pc ParsedCommand) ParsedCommand {
 	base := filepath.Base(pc.Executable)
 	// `export VAR=VALUE ...` is an assignment builtin: lift each NAME=VALUE arg
@@ -1182,6 +1204,7 @@ func unwrapCommand(pc ParsedCommand) ParsedCommand {
 			next := pc
 			next.Executable = inner
 			next.Args = innerArgs
+			next.ArgLiveExpansion = argLiveSuffix(pc.ArgLiveExpansion, len(pc.Args)-len(innerArgs))
 			next.EnvVars = appendEnvAssignments(pc.EnvVars, envAssigns)
 			return unwrapCommand(next)
 		} else if len(envAssigns) > 0 {
@@ -1206,6 +1229,7 @@ func unwrapCommand(pc ParsedCommand) ParsedCommand {
 			next := pc
 			next.Executable = inner
 			next.Args = innerArgs
+			next.ArgLiveExpansion = argLiveSuffix(pc.ArgLiveExpansion, len(pc.Args)-len(innerArgs))
 			return unwrapCommand(next)
 		}
 		return pc
@@ -1221,6 +1245,7 @@ func unwrapCommand(pc ParsedCommand) ParsedCommand {
 		next := pc
 		next.Executable = pc.Args[1]
 		next.Args = pc.Args[2:]
+		next.ArgLiveExpansion = argLiveSuffix(pc.ArgLiveExpansion, 2)
 		return next
 	}
 	return pc
@@ -1233,16 +1258,23 @@ func unwrapCommand(pc ParsedCommand) ParsedCommand {
 // form (pg2-gkd5e).
 func liftAssignmentArgs(pc ParsedCommand) ParsedCommand {
 	var remaining []string
+	var remainingLive []bool
 	envVars := pc.EnvVars
-	for _, a := range pc.Args {
+	for i, a := range pc.Args {
 		if isEnvAssign(a) {
 			envVars = append(envVars, newEnvAssignment(a))
 			continue
 		}
 		remaining = append(remaining, a)
+		// pc.ArgIsLiveExpansion, not a direct index into pc.ArgLiveExpansion: this
+		// is a FILTER (not a suffix trim like unwrapCommand's other branches), so
+		// there is no fixed offset to recover the tail from, and the safe
+		// accessor already does the right thing when ArgLiveExpansion is absent.
+		remainingLive = append(remainingLive, pc.ArgIsLiveExpansion(i))
 	}
 	pc.EnvVars = envVars
 	pc.Args = remaining
+	pc.ArgLiveExpansion = remainingLive
 	return pc
 }
 
@@ -1273,8 +1305,43 @@ type EnvAssignment struct {
 }
 
 type ParsedCommand struct {
-	Executable           string
-	Args                 []string
+	Executable string
+	Args       []string
+	// ArgLiveExpansion is per-argument QUOTE/EXPANSION PROVENANCE, aligned
+	// index-for-index with Args (ArgLiveExpansion[i] describes Args[i]). It
+	// rides BESIDE Args rather than changing it — I4 unquote-parity holds
+	// unchanged, and Args remains exactly what wordToken's unquote(lw.node(w))
+	// always produced (see unquote's own doc for why that stays true-whole-
+	// token-only rather than a true literal expansion).
+	//
+	// ArgLiveExpansion[i] is true when Args[i]'s SOURCE word contains a
+	// parameter expansion ($VAR/${VAR}), a command/process substitution
+	// ($(...), `...`, <(...), >(...)), or an arithmetic expansion ($((...)))
+	// that the shell would actually evaluate at runtime, and false when every
+	// '$'/backtick byte that survives into Args[i] got there from INSIDE
+	// single quotes or a backslash escape — bytes `unquote` cannot tell apart
+	// once the quoting is stripped, because a single-quoted `$(rm -rf /)` and
+	// a live one are byte-identical in the post-unquote string.
+	//
+	// This is the ONE mechanism consolidating pg2-9zgso (a quoted segment
+	// GLUED to an unquoted prefix keeps its quotes: `internal/rules/gh/api.go`
+	// already has its own shared string-level fix, `UnwrapGluedQuotes`, for
+	// that face — this field does not replace it) and pg2-rz9ds (a
+	// source-quoted `$` is indistinguishable from a live expansion once
+	// flattened to Args, which is exactly the gap
+	// `internal/rules/safecmds` readPathIssue's doc names as needing "cmdparse
+	// to retain each argument's RAW (pre-unquote) text so a quote-aware scan
+	// can run" — this field is that retained signal, computed once here
+	// rather than re-derived by a second scan). wordToken already walks each
+	// word's AST parts to build Args; this rides the SAME walk rather than
+	// discarding what it already knows.
+	//
+	// Empty (nil) for a leaf lowered by a path that does not populate it
+	// (a hand-built ParsedCommand in a test, or a leaf shape this migration's
+	// callers never route through it) — ArgIsLiveExpansion is the safe
+	// accessor for exactly that case: FAIL-CLOSED, "unknown" reads as "assume
+	// live", never as "assume static".
+	ArgLiveExpansion     []bool
 	EnvVars              []EnvAssignment
 	Redirections         []hookio.Redirection
 	ProcessSubstitutions []string // inner commands from <(cmd) and >(cmd)
@@ -1321,6 +1388,22 @@ type ParsedCommand struct {
 	// The zero value (nil) is top-level, matching PipelineID's zero-value
 	// convention of meaning "no special scoping applies".
 	SubshellScope []int
+}
+
+// ArgIsLiveExpansion is the SAFE accessor for ArgLiveExpansion: it reports
+// whether Args[i] carries a live shell expansion, defaulting to true (assume
+// live) for an index ArgLiveExpansion does not cover — out of range, or the
+// slice absent entirely. That is the FAIL-CLOSED direction: a caller that
+// treats "unknown" as "assume live" never becomes newly permissive just
+// because a leaf came from a path (a hand-built test fixture, a future leaf
+// shape) that has not been taught to populate ArgLiveExpansion yet, whereas
+// defaulting to false would silently clear something the provenance walk
+// never actually examined.
+func (pc ParsedCommand) ArgIsLiveExpansion(i int) bool {
+	if i < 0 || i >= len(pc.ArgLiveExpansion) {
+		return true
+	}
+	return pc.ArgLiveExpansion[i]
 }
 
 // DownstreamStages returns the leaves of `leaves` that receive the STDOUT of a

@@ -264,7 +264,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 				if malformed {
 					return r.refuse("safe-commands: xargs " + innerBase + " has malformed glued quoting (deferred to claude-code)")
 				}
-				if issue := readPathIssue(fileArgs, pe, ""); issue != "" {
+				if issue := readPathIssue(fileArgs, pe, "", true); issue != "" {
 					return r.refuse("safe-commands: xargs " + innerBase + " " + issue + " (deferred to claude-code)")
 				}
 				continue
@@ -273,7 +273,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 			// real shape, and the conservative direction (a needless Abstain) is the
 			// safe one to take for it.
 			if safeReadCmds[innerBase] {
-				if issue := readPathIssue(innerArgs, pe, ""); issue != "" {
+				if issue := readPathIssue(innerArgs, pe, "", true); issue != "" {
 					return r.refuse("safe-commands: xargs " + innerBase + " " + issue + " (deferred to claude-code)")
 				}
 				continue
@@ -298,7 +298,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 			// straight through is behaviour-preserving for the clean case (readPathIssue
 			// applies the identical pathCandidate-based filter inline) and closes that
 			// loss for the malformed case. extractBashSyntaxCheckFiles is deleted below.
-			if issue := readPathIssue(pc.Args, pe, ""); issue != "" {
+			if issue := readPathIssue(pc.Args, pe, "", true); issue != "" {
 				return r.refuse("safe-commands: " + basename + " -n " + issue + " (deferred to claude-code)")
 			}
 			continue
@@ -318,7 +318,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		// jar: tf/xf are safe read operations
 		if basename == "jar" {
 			if len(pc.Args) >= 1 && (pc.Args[0] == "tf" || pc.Args[0] == "xf") {
-				if issue := readPathIssue(pc.Args[1:], pe, ""); issue != "" {
+				if issue := readPathIssue(pc.Args[1:], pe, "", true); issue != "" {
 					return r.refuse("safe-commands: jar " + pc.Args[0] + " " + issue + " (deferred to claude-code)")
 				}
 				continue
@@ -361,7 +361,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		// of early-`continue`-ing is what lets yq inherit that guard rather than
 		// needing its own copy of it.
 		if basename == "yq" && !isYqInPlace(pc.Args) {
-			if issue := readPathIssue(pc.Args, pe, ""); issue != "" {
+			if issue := readPathIssue(pc.Args, pe, "", true); issue != "" {
 				return r.refuse("safe-commands: yq " + issue + " (deferred to claude-code)")
 			}
 			continue
@@ -374,7 +374,8 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 				}
 				continue
 			}
-			if issue := readPathIssue(pc.Args, pe, programOperand("sed", pc.Args)); issue != "" {
+			sedOp, sedOpLive := programOperand("sed", pc.Args, pc.ArgLiveExpansion)
+			if issue := readPathIssue(pc.Args, pe, sedOp, sedOpLive); issue != "" {
 				return r.refuse("safe-commands: sed " + issue + " (deferred to claude-code)")
 			}
 			continue
@@ -388,7 +389,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 			if isGofmtWrite(pc.Args) {
 				return hookio.NotApplicable()
 			}
-			if issue := readPathIssue(pc.Args, pe, ""); issue != "" {
+			if issue := readPathIssue(pc.Args, pe, "", true); issue != "" {
 				return r.refuse("safe-commands: gofmt " + issue + " (deferred to claude-code)")
 			}
 			continue
@@ -410,7 +411,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 			if malformed {
 				return r.refuse("safe-commands: " + basename + " has malformed glued quoting (deferred to claude-code)")
 			}
-			if issue := readPathIssue(fileArgs, pe, ""); issue != "" {
+			if issue := readPathIssue(fileArgs, pe, "", true); issue != "" {
 				return r.refuse("safe-commands: " + basename + " " + issue + " (deferred to claude-code)")
 			}
 			continue
@@ -419,13 +420,19 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		// which take two args (name value) that may look like paths but aren't.
 		if basename == "jq" {
 			fileArgs := cmdparse.SkipJqValueFlags(pc.Args)
-			if issue := readPathIssue(fileArgs, pe, programOperand("jq", fileArgs)); issue != "" {
+			// live is nil here: fileArgs is SkipJqValueFlags-filtered and not
+			// index-aligned with pc.ArgLiveExpansion, so this stays the fully
+			// conservative (operandLive always true) reading — see
+			// programOperand's and readPathIssue's docs.
+			jqOp, jqOpLive := programOperand("jq", fileArgs, nil)
+			if issue := readPathIssue(fileArgs, pe, jqOp, jqOpLive); issue != "" {
 				return r.refuse("safe-commands: jq " + issue + " (deferred to claude-code)")
 			}
 			continue
 		}
 		if safeReadCmds[basename] {
-			if issue := readPathIssue(pc.Args, pe, programOperand(basename, pc.Args)); issue != "" {
+			op, opLive := programOperand(basename, pc.Args, pc.ArgLiveExpansion)
+			if issue := readPathIssue(pc.Args, pe, op, opLive); issue != "" {
 				return r.refuse("safe-commands: " + basename + " " + issue + " (deferred to claude-code)")
 			}
 			continue
@@ -673,10 +680,22 @@ var programOperandFromFlag = map[string]map[string]bool{
 // isDynamicPathOperand — a program that is ITSELF a bare expansion (`awk $F`) is
 // indistinguishable from a path and is refused. Its ZONE check is unchanged, so
 // nothing this rule used to defer becomes approvable.
-func programOperand(basename string, args []string) string {
+//
+// operandLive is pg2-pui5w's provenance answer for the returned operand: false
+// only when live (aligned index-for-index with args, i.e. cmdparse's
+// ParsedCommand.ArgLiveExpansion for the SAME args slice) proves that operand's
+// `$`/backtick bytes are not a live shell expansion — see readPathIssue's use of
+// it for what changes. Passing live as nil (the jq call site, whose args is a
+// SkipJqValueFlags-filtered slice with no aligned provenance available) or an
+// args slice this scan never finds an operand in both answer operandLive=true,
+// the historical, fully-conservative reading: "treat it as if it might be
+// live", which is exactly the READING isDynamicPathOperand always got before
+// this bead — so a caller with no provenance to offer changes nothing by
+// omitting it.
+func programOperand(basename string, args []string, live []bool) (operand string, operandLive bool) {
 	valueFlags, known := programOperandValueFlags[basename]
 	if !known {
-		return ""
+		return "", true
 	}
 	fromFlag := programOperandFromFlag[basename]
 	// pg2-wxbr9: NOT routed through pathCandidate. This loop classifies which
@@ -693,7 +712,7 @@ func programOperand(basename string, args []string) string {
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		if fromFlag[a] {
-			return ""
+			return "", true
 		}
 		if strings.HasPrefix(a, "-") && a != "-" {
 			if valueFlags[a] {
@@ -701,9 +720,10 @@ func programOperand(basename string, args []string) string {
 			}
 			continue
 		}
-		return a
+		operandLive := i >= len(live) || live[i]
+		return a, operandLive
 	}
-	return ""
+	return "", true
 }
 
 // isDynamicPathOperand reports whether an argument in the PROGRAM role is
@@ -889,18 +909,27 @@ func browsingPathIssue(args []string, pe *patheval.PathEvaluator) string {
 // WHAT WOULD JUSTIFY CHANGING IT. Two things, and neither is "the prompt count
 // feels high":
 //
-//   - QUOTE AWARENESS. The predicate runs on POST-UNQUOTE args, so it cannot tell a
-//     live `$F` from a single-quoted literal `$` the shell never expands. The
-//     programOperand split below handles the three commands where that distinction
-//     is load-bearing; a general fix needs cmdparse to retain each argument's RAW
-//     (pre-unquote) text so a quote-aware scan can run, which is a cmdparse
-//     front-end change, not a safecmds one.
+//   - QUOTE AWARENESS. The predicate runs on POST-UNQUOTE args, so on its own it
+//     cannot tell a live `$F` from a single-quoted literal `$` the shell never
+//     expands. pg2-pui5w closed this for the PROGRAM OPERAND specifically:
+//     cmdparse now retains, per argument, whether the AST word behind it carries
+//     a live expansion (ParsedCommand.ArgLiveExpansion) — programLive below is
+//     that bit for the operand programOperand identified, and the general
+//     answer readPathIssue's own doc used to say this needed. It is USED only
+//     to make the isDynamicPathOperand narrowing conditional (a single-quoted
+//     `'{print $1}'` no longer needs the shape check at all — provenance alone
+//     says it is static); it is NOT used to widen the ORDINARY per-argument
+//     `argHasDynamicExpansion` check below, which stays the byte-scan it always
+//     was. Widening that one too is future work, gated on its own corpus
+//     replay: `argHasDynamicExpansion` runs over candidate strings recovered
+//     from filtered/derived args slices (SkipJqValueFlags, SkipGrepPattern,
+//     GluedFlagValue) that do not all carry an aligned live slice today.
 //   - RESOLVING THE VARIABLE (option 2 of pg2-2ke04): a single-leaf dataflow pass
 //     would turn these Abstains back into a precise allow/deny instead of a prompt.
 //
 // Narrowing it any other way — exempting a command, or keying on the raw command
 // text instead of parsed args — reopens the bypass.
-func readPathIssue(args []string, pe *patheval.PathEvaluator, program string) string {
+func readPathIssue(args []string, pe *patheval.PathEvaluator, program string, programLive bool) string {
 	for _, a := range args {
 		// pg2-wxbr9: route through pathCandidate so a glued flag's VALUE (not
 		// just a bare positional) is tested — see pathCandidate's doc. `program`
@@ -921,8 +950,14 @@ func readPathIssue(args []string, pe *patheval.PathEvaluator, program string) st
 		dynamic := argHasDynamicExpansion(cand)
 		if program != "" && cand == program {
 			// The PROGRAM operand is code, not a path, so it is judged by the
-			// narrower predicate — see programOperand for why.
-			dynamic = isDynamicPathOperand(cand)
+			// narrower predicate — see programOperand for why — and ONLY when
+			// programLive says this operand's `$`/backtick bytes could genuinely
+			// be a live expansion. When provenance instead proves every one of
+			// them survived from single-quoting or a backslash escape, the
+			// operand is fully static code (an awk field ref, a sed anchor) and
+			// dynamic is forced false without even consulting the shape check —
+			// pg2-pui5w's reduction of this role split.
+			dynamic = programLive && isDynamicPathOperand(cand)
 		}
 		if dynamic {
 			return "has a dynamically-expanded path arg " + cand

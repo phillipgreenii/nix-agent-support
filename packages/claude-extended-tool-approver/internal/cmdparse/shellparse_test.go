@@ -366,6 +366,120 @@ func TestShellParse_UnquoteParity(t *testing.T) {
 	})
 }
 
+// TestShellParse_ArgLiveExpansion pins pg2-pui5w's per-arg quote/expansion
+// PROVENANCE: ArgLiveExpansion rides beside Args (I4 unquote-parity holds —
+// Args is asserted unchanged in every case) and distinguishes a genuinely
+// live shell expansion from a `$`/backtick byte that survives into Args only
+// because it was single-quoted or backslash-escaped. Every AST shape here was
+// verified against the real parser (mvdan.cc/sh/v3), not assumed.
+func TestShellParse_ArgLiveExpansion(t *testing.T) {
+	cases := []struct {
+		src      string
+		wantArgs []string
+		wantLive []bool
+	}{
+		// Single-quoted `$`/backtick: NOT live, byte-identical to a live one once
+		// flattened — the exact gap pg2-rz9ds named.
+		{`awk '{print $1}'`, []string{"{print $1}"}, []bool{false}},
+		{`sed 's/x$//'`, []string{"s/x$//"}, []bool{false}},
+		{"echo 'a$(cmd)b'", []string{"a$(cmd)b"}, []bool{false}},
+		// Backslash-escaped `$`, bare and inside double quotes: also NOT live —
+		// the parser folds it into a *syntax.Lit rather than a *syntax.ParamExp.
+		{`echo \$X`, []string{`\$X`}, []bool{false}},
+		{`echo "\$X"`, []string{`\$X`}, []bool{false}},
+		// Live expansions: parameter, command substitution (both spellings),
+		// arithmetic, process substitution.
+		{`echo "$X"`, []string{"$X"}, []bool{true}},
+		{`echo "a$(cmd)b"`, []string{"a$(cmd)b"}, []bool{true}},
+		{"echo \"a`cmd`b\"", []string{"a`cmd`b"}, []bool{true}},
+		{`echo $((1+2))`, []string{"$((1+2))"}, []bool{true}},
+		// Multiple args each carry their OWN provenance, independent of neighbors.
+		{`awk '{print $1}' $F`, []string{"{print $1}", "$F"}, []bool{false, true}},
+		// The pg2-9zgso glued-quote shape: no live expansion either way, and Args
+		// keeps the glued quoting verbatim (unwrapping THAT is UnwrapGluedQuotes'
+		// job, unaffected by this field).
+		{`echo key='value'`, []string{"key='value'"}, []bool{false}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.src, func(t *testing.T) {
+			sp := ParseShell(tc.src)
+			if len(sp.Leaves) != 1 {
+				t.Fatalf("want 1 leaf, got %d", len(sp.Leaves))
+			}
+			leaf := sp.Leaves[0]
+			if len(leaf.Args) != len(tc.wantArgs) {
+				t.Fatalf("Args = %v, want %v", leaf.Args, tc.wantArgs)
+			}
+			for i := range leaf.Args {
+				if leaf.Args[i] != tc.wantArgs[i] {
+					t.Errorf("Args[%d] = %q, want %q", i, leaf.Args[i], tc.wantArgs[i])
+				}
+			}
+			if len(leaf.ArgLiveExpansion) != len(tc.wantLive) {
+				t.Fatalf("ArgLiveExpansion = %v, want %v", leaf.ArgLiveExpansion, tc.wantLive)
+			}
+			for i := range leaf.ArgLiveExpansion {
+				if leaf.ArgLiveExpansion[i] != tc.wantLive[i] {
+					t.Errorf("ArgLiveExpansion[%d] = %v, want %v", i, leaf.ArgLiveExpansion[i], tc.wantLive[i])
+				}
+				if got := leaf.ArgIsLiveExpansion(i); got != tc.wantLive[i] {
+					t.Errorf("ArgIsLiveExpansion(%d) = %v, want %v", i, got, tc.wantLive[i])
+				}
+			}
+		})
+	}
+
+	// ArgIsLiveExpansion is the FAIL-CLOSED accessor: an out-of-range index (and
+	// a leaf with no provenance recorded at all) reads as "assume live", never
+	// as "assume static".
+	t.Run("ArgIsLiveExpansion defaults to live when out of range", func(t *testing.T) {
+		var pc ParsedCommand
+		if !pc.ArgIsLiveExpansion(0) {
+			t.Error("zero-value ParsedCommand: ArgIsLiveExpansion(0) = false, want true (fail-closed default)")
+		}
+		sp := ParseShell(`awk '{print $1}'`)
+		leaf := sp.Leaves[0]
+		if leaf.ArgIsLiveExpansion(-1) != true || leaf.ArgIsLiveExpansion(len(leaf.Args)) != true {
+			t.Error("out-of-range index did not default to live")
+		}
+	})
+
+	// unwrapCommand's several reslices of Args (env/command prefixes, the
+	// nice/timeout/nohup/stdbuf runners, and export's assignment lift) MUST keep
+	// ArgLiveExpansion in lockstep — this is the case those helpers' own reslice
+	// arithmetic (argLiveSuffix, liftAssignmentArgs) exists for.
+	t.Run("unwrapCommand keeps ArgLiveExpansion aligned through a reslice", func(t *testing.T) {
+		sp := ParseShell(`env FOO=1 awk '{print $1}' $F`)
+		leaf := sp.Leaves[0]
+		if leaf.Executable != "awk" {
+			t.Fatalf("Executable = %q, want awk (env prefix should have unwrapped)", leaf.Executable)
+		}
+		if len(leaf.Args) != 2 || leaf.Args[0] != "{print $1}" || leaf.Args[1] != "$F" {
+			t.Fatalf("Args = %v, want [{print $1} $F]", leaf.Args)
+		}
+		if len(leaf.ArgLiveExpansion) != 2 {
+			t.Fatalf("ArgLiveExpansion = %v, want length 2", leaf.ArgLiveExpansion)
+		}
+		if leaf.ArgLiveExpansion[0] != false || leaf.ArgLiveExpansion[1] != true {
+			t.Errorf("ArgLiveExpansion = %v, want [false true]", leaf.ArgLiveExpansion)
+		}
+	})
+
+	t.Run("export lifts assignments and keeps the remaining arg's provenance", func(t *testing.T) {
+		sp := ParseShell(`export FOO=bar '{print $1}'`)
+		leaf := sp.Leaves[0]
+		if leaf.Executable != "export" {
+			t.Fatalf("Executable = %q, want export", leaf.Executable)
+		}
+		if len(leaf.Args) != 1 || leaf.Args[0] != "{print $1}" {
+			t.Fatalf("Args = %v, want [{print $1}] (FOO=bar lifted to EnvVars)", leaf.Args)
+		}
+		if len(leaf.ArgLiveExpansion) != 1 || leaf.ArgLiveExpansion[0] != false {
+			t.Errorf("ArgLiveExpansion = %v, want [false]", leaf.ArgLiveExpansion)
+		}
+	})
+}
+
 // TestShellParse_ResolveLoopsReplacementSemantics pins the EXACT post-pg2-qkecz
 // loop semantics, which is what the lowering had to replicate — not the
 // pre-fix behaviour.

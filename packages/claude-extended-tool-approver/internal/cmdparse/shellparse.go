@@ -832,7 +832,18 @@ func (lw *lowering) lowerDecl(st *syntax.Stmt, cmd *syntax.DeclClause, pid, idx 
 		PipelineIndex: idx,
 	}
 	for _, a := range cmd.Args {
-		leaf.Args = append(leaf.Args, unquote(lw.assignRaw(a)))
+		// live mirrors wordToken's rule: a value carries a live expansion when its
+		// own *syntax.Word does (a.Array is a rarer *syntax.ArrayExpr shape this
+		// does not decompose, so it defaults to the conservative "assume live";
+		// Naked/empty-value carries no `$` at all, so it is not live).
+		live := true
+		switch {
+		case a.Value != nil:
+			live = wordHasLiveExpansion(a.Value)
+		case a.Array == nil:
+			live = false
+		}
+		appendArg(&leaf, unquote(lw.assignRaw(a)), live)
 	}
 	lw.attachRedirs(st, &leaf)
 	lw.appendLeaf(unwrapCommand(leaf), sourceSpan{lo: int(st.Pos().Offset()), hi: lw.stmtEndOffset(st)})
@@ -893,13 +904,13 @@ func (lw *lowering) lowerCall(st *syntax.Stmt, cmd *syntax.CallExpr, pid, idx in
 		lw.emitDataSpan(a.Pos(), a.End())
 	}
 	for i, w := range cmd.Args {
-		tok, procSubs := lw.wordToken(w)
+		tok, procSubs, live := lw.wordToken(w)
 		leaf.ProcessSubstitutions = append(leaf.ProcessSubstitutions, procSubs...)
 		if i == 0 {
 			leaf.Executable = tok
 			continue
 		}
-		leaf.Args = append(leaf.Args, tok)
+		appendArg(&leaf, tok, live)
 	}
 	lw.attachRedirs(st, &leaf)
 	if leaf.Executable == "" {
@@ -1039,9 +1050,16 @@ func (lw *lowering) emitDataSpan(from, to syntax.Pos) {
 // its body is lifted, matching tokenize exactly. Both halves are load-bearing:
 // emitting the substitution's source text instead causes mass new abstains from
 // the redirect-target check, while emitting nothing loses the operand.
-func (lw *lowering) wordToken(w *syntax.Word) (string, []string) {
+//
+// The third return, live, is pg2-pui5w's provenance bit: whether w carries a
+// LIVE shell expansion, computed by wordHasLiveExpansion over the SAME w this
+// function already has in hand — no second parse, no second walk of the
+// source text, just a fact this call was already positioned to know and used
+// to throw away.
+func (lw *lowering) wordToken(w *syntax.Word) (string, []string, bool) {
+	live := wordHasLiveExpansion(w)
 	if !hasProcSubst(w) {
-		return unquote(lw.node(w)), nil
+		return unquote(lw.node(w)), nil, live
 	}
 	var b strings.Builder
 	var procSubs []string
@@ -1056,7 +1074,7 @@ func (lw *lowering) wordToken(w *syntax.Word) (string, []string) {
 		procSubs = append(procSubs, lw.slice(bodyStart(ps), ps.Rparen))
 		b.WriteString("/dev/fd/63")
 	}
-	return unquote(b.String()), procSubs
+	return unquote(b.String()), procSubs, live
 }
 
 // bodyStart is the position just past a process substitution's two-byte opening
@@ -1072,6 +1090,66 @@ func hasProcSubst(w *syntax.Word) bool {
 		}
 	}
 	return false
+}
+
+// wordHasLiveExpansion reports whether w contains a parameter expansion
+// ($VAR/${VAR}), a command/process substitution ($(...), `...`, <(...),
+// >(...)), or an arithmetic expansion ($((...))) that the shell would
+// actually evaluate at runtime — this is the AST fact ParsedCommand's
+// ArgLiveExpansion (parser.go) rides on; see that field's doc for what it
+// consolidates (pg2-9zgso, pg2-rz9ds) and why.
+//
+// It walks w.Parts, and into a *syntax.DblQuoted's own Parts, for exactly the
+// four node types that mean "the shell substitutes something here" —
+// *syntax.ParamExp, *syntax.CmdSubst, *syntax.ArithmExp, *syntax.ProcSubst —
+// treating each as a TERMINAL "yes" rather than descending further into it
+// (what a command substitution's BODY contains is that body's own question,
+// judged when the engine recurses into it, not this word's).
+//
+// A *syntax.SglQuoted carries no further Parts to walk into — the parser
+// itself represents `'$(x)'` as one flat literal Value string, never as a
+// nested CmdSubst, because bash performs NO substitution inside single
+// quotes — so the recursion needs no special case to stop at one; there is
+// nothing under it to find. The same is true of a backslash-escaped `\$`,
+// whether bare or inside double quotes (`"\$X"`): the parser folds it into a
+// *syntax.Lit's Value rather than a *syntax.ParamExp. Both were verified
+// against the actual parser (mvdan.cc/sh/v3), not assumed — see this
+// function's test for the AST shapes pinned.
+//
+// *syntax.ExtGlob is treated as live too, conservatively: its Pattern is a
+// flat *syntax.Lit — the parser does not decompose an extended-glob pattern's
+// own text any further — so this function cannot see whether it embeds
+// `$`/backtick bytes that are themselves live, and the safe reading is
+// "maybe" (matching classifyExpansion's expansionCensus, which counts an
+// ExtGlob as its own "opaque" bucket for the identical reason).
+func wordHasLiveExpansion(w *syntax.Word) bool {
+	return partsHaveLiveExpansion(w.Parts)
+}
+
+func partsHaveLiveExpansion(parts []syntax.WordPart) bool {
+	for _, part := range parts {
+		switch p := part.(type) {
+		case *syntax.ParamExp, *syntax.CmdSubst, *syntax.ArithmExp, *syntax.ProcSubst, *syntax.ExtGlob:
+			return true
+		case *syntax.DblQuoted:
+			if partsHaveLiveExpansion(p.Parts) {
+				return true
+			}
+		}
+		// *syntax.Lit and *syntax.SglQuoted carry no further Parts to examine.
+	}
+	return false
+}
+
+// appendArg appends value to leaf.Args and live to leaf.ArgLiveExpansion in
+// LOCKSTEP, so the two slices can never drift apart no matter which of this
+// file's Args-populating sites appends to a leaf: lowerCall's cmd.Args words,
+// lowerDecl's assignment values, and attachRedir's fd-prefixed
+// redirection-parity pair (`3< f` recorded as two ordinary Args). Every one of
+// them MUST go through here rather than appending to leaf.Args directly.
+func appendArg(leaf *ParsedCommand, value string, live bool) {
+	leaf.Args = append(leaf.Args, value)
+	leaf.ArgLiveExpansion = append(leaf.ArgLiveExpansion, live)
 }
 
 // attachRedirs lowers a statement's redirections onto a leaf.
@@ -1144,7 +1222,12 @@ func (lw *lowering) attachRedir(r *syntax.Redirect, leaf *ParsedCommand) {
 		if op == "" {
 			op = fd + core
 		}
-		leaf.Args = append(leaf.Args, op, target)
+		// op is a descriptor+operator slice (`3<`); it can never itself carry a
+		// `$`/backtick, so it is never live. target's liveness follows r.Word,
+		// exactly like any other argument word (appendArg keeps ArgLiveExpansion
+		// in lockstep with this pair, per pg2-pui5w).
+		appendArg(leaf, op, false)
+		appendArg(leaf, target, wordHasLiveExpansion(r.Word))
 		return
 	}
 	leaf.Redirections = append(leaf.Redirections, hookio.Redirection{

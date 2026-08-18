@@ -1540,6 +1540,18 @@ func TestSafecmds_EverySafeReadCmdGatesDynamicPath(t *testing.T) {
 //
 // The program operand is NOT exempt — a program that is ITSELF a bare expansion is
 // indistinguishable from a path and still refused.
+//
+// pg2-pui5w added the "quoted bare var program" / "sed quoted delete-last-line"
+// cases: `'$1'` and `'$d'` are SHAPED exactly like isDynamicPathOperand's own
+// bare-var-reference test (isBareVarReference would say yes to either), so
+// BEFORE this bead they were refused even though they are single-quoted —
+// cmdparse had no way to tell that quoting apart from a live `$1`/`$d` once
+// both are flattened to the identical POST-UNQUOTE string. Now that
+// programOperand/readPathIssue consult ArgLiveExpansion, a single-quoted
+// operand never even reaches the shape check: provenance alone says static.
+// The unquoted contrast cases pin that a GENUINE live `$1` (a real positional
+// parameter reference) is still refused — the shape check still applies
+// whenever provenance cannot rule the expansion out.
 func TestSafecmds_ProgramOperandRole(t *testing.T) {
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
@@ -1555,11 +1567,21 @@ func TestSafecmds_ProgramOperandRole(t *testing.T) {
 		{"sed eol anchor", "sed 's/x$//' /home/user/project/x", hookio.Approve},
 		{"jq filter var", "jq '.count = $c' /home/user/project/x.json", hookio.Approve},
 		{"jq arg then filter", "jq --arg a b '{a:$a}' /home/user/project/x.json", hookio.Approve},
+		// pg2-pui5w: a single-quoted operand SHAPED like a bare var reference
+		// (isBareVarReference would say yes) is still fully static — provenance
+		// proves it, so the shape check never fires.
+		{"awk quoted bare field ref", "awk '$1' /home/user/project/x", hookio.Approve},
+		{"sed quoted delete-last-line", "sed '$d' /home/user/project/x", hookio.Approve},
 		// A program operand that IS a bare expansion is still refused.
 		{"awk bare var program", "awk $F", hookio.NoOpinion},
 		{"sed bare var script", "sed $S /home/user/project/x", hookio.NoOpinion},
 		{"jq bare var filter", "jq $Q /home/user/project/x.json", hookio.NoOpinion},
 		{"awk subst program", "awk $(cat /home/user/project/prog.awk)", hookio.NoOpinion},
+		// pg2-pui5w contrast: the IDENTICAL shape as the two quoted cases above,
+		// but genuinely unquoted, is a REAL live expansion and stays refused —
+		// provenance did not create a blanket exemption for the bare-var shape.
+		{"awk unquoted bare field ref", "awk $1", hookio.NoOpinion},
+		{"sed unquoted delete-last-line", "sed $d /home/user/project/x", hookio.NoOpinion},
 		// A path BUILT from an expansion is refused even in program position.
 		{"awk var-rooted path program", "awk $D/prog.awk", hookio.NoOpinion},
 		// Program supplied by -f: every positional is a path, so the coarse
@@ -1717,7 +1739,7 @@ func TestReadPathIssue_IsNeverLooserThanTheStaticSubstitutionSeam(t *testing.T) 
 	for _, r := range readers {
 		for _, p := range paths {
 			args := append(strings.Fields(r)[1:], p)
-			if readPathIssue(args, pe, "") == "" {
+			if readPathIssue(args, pe, "", true) == "" {
 				continue // this rule clears the read; the seam may do as it likes
 			}
 			for _, body := range []string{r + " " + p, r + " < " + p} {
