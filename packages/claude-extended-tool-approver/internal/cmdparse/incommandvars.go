@@ -217,6 +217,21 @@ var assignmentBuiltinReads = map[string]bool{
 	"export": true,
 	// `declare` / `typeset` are the same builtin under two names, and the unflagged form
 	// is a plain shell-variable assignment. This is the relief pg2-ft2hl authorizes.
+	//
+	// TRUE HERE ONLY MEANS "this narrow in-command-resolution seam may read the
+	// value" — it MUST NOT be read as "declare/typeset are safe commands", and it
+	// is deliberately NOT enough to add them to internal/rules/safecmds' alwaysSafe
+	// allowlist (pg2-c2non, decision: DECLINE, permanently for now, doc comment at
+	// that allowlist's `export` entry has the full reasoning and the measurement).
+	// The short version: this seam reads a decl leaf's assignments out of its Args
+	// (declWrites, below), because the lowering that would LIFT them into the
+	// leaf's EnvVars field was deliberately not widened — so
+	// internal/rules/envvars' guard, which only ever inspects EnvVars, cannot see
+	// a `declare -x LD_PRELOAD=/tmp/evil` leaf's assignment at all (MEASURED:
+	// abstain, not reject, on this tree). Safe-listing declare/typeset in
+	// safecmds before that lowering lands would turn that abstain into an
+	// auto-approve — a live env-var-guard bypass, the same class pg2-a12rl and
+	// pg2-6c85x closed for git.
 	"declare":  true,
 	"typeset":  true,
 	"local":    false,

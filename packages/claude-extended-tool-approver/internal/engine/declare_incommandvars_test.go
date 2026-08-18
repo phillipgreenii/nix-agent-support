@@ -219,3 +219,84 @@ func TestIntegration_DeclareSpellingNeverApprovesTheUnestablished(t *testing.T) 
 		}
 	}
 }
+
+// TestIntegration_DeclareNeverBypassesEnvVarGuard pins pg2-c2non's DECLINE decision:
+// safe-commands MUST keep `declare`/`typeset` out of its allowlist (see that map's
+// doc comment for the full reasoning) precisely BECAUSE the env-var guard cannot see
+// a decl leaf's assignment today — cmdparse's lowering keeps it in Args, not EnvVars,
+// so internal/rules/envvars' Evaluate (which only ever inspects pc.EnvVars) never
+// examines it.
+//
+// MEASURED (this test, pinning the pg2-c2non probe): the plain and `export` spellings
+// of an injector-var assignment REJECT; the `declare`/`typeset` spellings of the exact
+// same assignment ABSTAIN (no rule claims the leaf) rather than reject, because
+// safe-commands does not know the builtin and defers. That gap is the reason
+// `declare`/`typeset` MUST stay off safecmds' allowlist: adding them would flip this
+// abstain straight to safe-commands' unconditional Approve, turning an inert gap into
+// a live LD_PRELOAD-style injection bypass. If this test ever needs its "abstain"
+// expectation changed to "reject", that is the signal the EnvVars-lowering
+// prerequisite pg2-c2non names has landed — read this file's and safecmds.go's doc
+// comments before touching the allowlist.
+func TestIntegration_DeclareNeverBypassesEnvVarGuard(t *testing.T) {
+	canonical, _ := nestedWorktreeFixture(t)
+
+	injectorCmds := []struct {
+		plain, exported, declared, typeset string
+	}{
+		{
+			plain:    "LD_PRELOAD=/tmp/evil.so echo hi",
+			exported: "export LD_PRELOAD=/tmp/evil.so && echo hi",
+			declared: "declare -x LD_PRELOAD=/tmp/evil.so && echo hi",
+			typeset:  "typeset -x LD_PRELOAD=/tmp/evil.so && echo hi",
+		},
+		{
+			plain:    "DYLD_INSERT_LIBRARIES=/tmp/evil.dylib echo hi",
+			exported: "export DYLD_INSERT_LIBRARIES=/tmp/evil.dylib && echo hi",
+			declared: "declare DYLD_INSERT_LIBRARIES=/tmp/evil.dylib && echo hi",
+			typeset:  "typeset DYLD_INSERT_LIBRARIES=/tmp/evil.dylib && echo hi",
+		},
+	}
+
+	for _, group := range injectorCmds {
+		for _, mode := range []string{"bypassPermissions", "default"} {
+			t.Run(mode+" "+group.plain, func(t *testing.T) {
+				eng := buildFullEngine(canonical, canonical)
+				evaluate := func(cmd string) hookio.RuleResult {
+					return eng.EvaluateHook(&hookio.HookInput{
+						ToolName: "Bash", CWD: canonical,
+						ToolInput: makeBashJSON(cmd), PermissionMode: mode,
+					})
+				}
+
+				plainGot := evaluate(group.plain)
+				if plainGot.Decision != hookio.Reject {
+					t.Fatalf("plain %q: got %s (%s: %s), want Reject — envvars' injector guard must fire on the plain spelling",
+						group.plain, plainGot.Decision, plainGot.Module, plainGot.Reason)
+				}
+				exportedGot := evaluate(group.exported)
+				if exportedGot.Decision != hookio.Reject {
+					t.Fatalf("export %q: got %s (%s: %s), want Reject — export lifts into EnvVars, so the guard must fire identically",
+						group.exported, exportedGot.Decision, exportedGot.Module, exportedGot.Reason)
+				}
+
+				// The decl spellings: TODAY the guard cannot see the assignment at all
+				// (it stays in Args, per assignmentBuiltinReads' doc), so the leaf is
+				// UNCLAIMED — NoOpinion — rather than rejected. That is the gap this
+				// bead measured. The one invariant that matters is the second half of
+				// this check: it must NEVER reach Approve, because Approve is exactly
+				// what safe-listing `declare` without the lowering would turn this into.
+				for _, cmd := range []string{group.declared, group.typeset} {
+					got := evaluate(cmd)
+					if got.Decision != hookio.NoOpinion {
+						t.Errorf("%q: got %s (%s: %s), want NoOpinion (today's measured gap) — if this now rejects, the lowering prerequisite may have landed; if it approves, the env-var-guard bypass is LIVE",
+							cmd, got.Decision, got.Module, got.Reason)
+					}
+					if got.Decision == hookio.Approve {
+						t.Fatalf("%q: got Approve (%s: %s) — LIVE env-var-guard bypass; declare/typeset MUST NOT be in safecmds' allowlist without the EnvVars-lowering prerequisite",
+							cmd, got.Module, got.Reason)
+					}
+				}
+			})
+		}
+	}
+}

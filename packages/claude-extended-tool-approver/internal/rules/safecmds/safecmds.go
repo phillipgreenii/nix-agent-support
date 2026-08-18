@@ -19,6 +19,34 @@ var alwaysSafe = map[string]bool{
 	// browsingPathIssue. It stats a path operand (a filesystem access every
 	// other member of this map does not perform) and gets its own zone-checked
 	// branch in Evaluate instead of this unconditional continue.
+	// `declare` / `typeset` are DELIBERATELY ABSENT — pg2-c2non, decision: DECLINE,
+	// permanently for now. They are the same builtin family as `export` immediately
+	// below and an unflagged `declare NAME=VALUE`/`typeset NAME=VALUE` is just as
+	// much a plain shell-variable assignment (internal/cmdparse/incommandvars.go's
+	// assignmentBuiltinReads already reads it that way for in-command resolution,
+	// pg2-ft2hl) — but `export` earns its place here because cmdparse's lowering
+	// LIFTS its assignments into the leaf's EnvVars field, which is what makes them
+	// visible to internal/rules/envvars' guard. A `declare`/`typeset` leaf's
+	// assignments stay in the leaf's Args (declWrites reads them from there; the
+	// lowering that would lift them into EnvVars was deliberately NOT widened,
+	// per pg2-ft2hl's close reason), so the env-var guard's Evaluate — which only
+	// ever inspects pc.EnvVars — never sees them at all.
+	//
+	// MEASURED on this tree (pg2-c2non, engine-level probe against the real
+	// production rule chain, bypassPermissions): `LD_PRELOAD=/tmp/evil.so echo hi`
+	// and `export LD_PRELOAD=/tmp/evil.so && echo hi` both correctly REJECT via
+	// envvars' injector-name guard; `declare -x LD_PRELOAD=/tmp/evil.so && echo hi`,
+	// `declare LD_PRELOAD=/tmp/evil.so && echo hi` and
+	// `typeset LD_PRELOAD=/tmp/evil.so && echo hi` all measured ABSTAIN (no rule
+	// claims the leaf) — the injector screen is completely bypassed. That stays
+	// SAFE only because `declare`/`typeset` are also absent from THIS map: adding
+	// them here would flip that abstain straight to safe-commands' unconditional
+	// Approve, turning the abstain into a live env-var-guard bypass — the same
+	// class of hole pg2-a12rl and pg2-6c85x closed for git. Safe-listing `declare`/
+	// `typeset` requires FIRST lifting decl assignments into EnvVars (the
+	// prerequisite pg2-c2non's bead names), which changes what EVERY rule sees for
+	// a `declare` leaf and needs its own corpus replay — do not add them here
+	// without that landing first.
 	// Shell builtins and environment queries (no filesystem access)
 	"basename": true, "dirname": true, "realpath": true, "readlink": true,
 	"which": true, "type": true, "command": true, "unset": true, "export": true,
