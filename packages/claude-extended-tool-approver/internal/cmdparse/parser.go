@@ -220,13 +220,56 @@ func minClearance(a, b SubstitutionClearance) SubstitutionClearance {
 //     Without matching it, `rm -rf ~someuser` slipped through as safe — the tc-fielf
 //     gap, the same shape as the bare-"~" tc-sfpto miss. Any "~" prefix except bare "~"
 //     is path-shaped; the len check keeps bare "~" going through the clause above.
+//
+// pg2-ujuda WIDENING — a BARE RELATIVE token with NONE of the prefixes above
+// ("f.yaml", ".env", "docs/adr", "s/foo/bar/") is path-shaped too: cleanPath
+// resolves any non-absolute, non-"~" argument by joining it onto CWD, exactly
+// as every shell does for `rm f.yaml` (identical to `rm ./f.yaml`). Before this
+// widening such a token matched NONE of the clauses above, so it was reported
+// as "not a path at all" rather than "a path this predicate cannot place" —
+// which meant every consumer of this predicate (safecmds' zone/writability
+// screen, cmdparse's own substitution-clearance seam) skipped the readability
+// question entirely instead of asking `patheval` and getting a real answer.
+// MEASURED: `X=$(rm f.yaml) echo hi`, `X=$(sed -i 's/x/y/' f.yaml) echo hi` and
+// `X=$(yq -i .a=1 f.yaml) echo hi` all cleared through this gap identically,
+// for every safeWriteCmds member, not just yq (pg2-1wt3b's three named sites).
+//
+// TWO EXCLUSIONS remain, and neither is defensiveness either:
+//
+//   - A token starting with "-" is an option/flag spelling, not a path,
+//     whatever follows the dash. Every caller of this predicate already strips
+//     flags before reaching it (safecmds' pathCandidate, cmdparse's own
+//     readerArgsClearance), so this exclusion is a belt-and-braces guarantee
+//     that a future caller which forgets to strip one does not misclassify it,
+//     not a live behavior change for any call site today.
+//   - A token carrying a shell/command expansion ($VAR, ${VAR}, $(...), or a
+//     backtick) is EXCLUDED from this new bare-token clause (the four original
+//     prefix clauses above still apply to it unchanged: "~/$F" and "/tmp/$F"
+//     stay path-shaped exactly as before). This is load-bearing, not
+//     incidental: `isDynamicPathOperand` calls this predicate on arguments IT
+//     HAS ALREADY CONFIRMED contain such an expansion, to decide whether an
+//     awk/sed/jq PROGRAM operand's literal `$` is a live expansion or ordinary
+//     code (a field reference, an EOL anchor, a bound `--arg` variable) — see
+//     its doc and TestSafecmds_ProgramOperandRole (`awk '{print $1}' file`,
+//     `sed 's/x$//' file`, `jq '.count = $c' file` must all still Approve). A
+//     bare "any non-flag token" match here would make EVERY such program
+//     operand look like a dynamically-expanded path and misclassify it as one,
+//     which is a correctness regression, not a conservative tightening — the
+//     $/backtick exclusion is what keeps this widening scoped to genuinely
+//     static relative filenames.
 func LooksLikePath(arg string) bool {
-	return arg == "~" ||
+	if arg == "~" ||
 		strings.HasPrefix(arg, "/") ||
 		strings.HasPrefix(arg, "./") ||
 		strings.HasPrefix(arg, "../") ||
 		strings.HasPrefix(arg, "~/") ||
-		(strings.HasPrefix(arg, "~") && len(arg) > 1) // ~user / ~user/... (tc-fielf)
+		(strings.HasPrefix(arg, "~") && len(arg) > 1) { // ~user / ~user/... (tc-fielf)
+		return true
+	}
+	if arg == "" || strings.HasPrefix(arg, "-") || strings.ContainsAny(arg, "$`") {
+		return false
+	}
+	return true // bare relative token (pg2-ujuda): resolved against CWD, same as ./<arg>
 }
 
 // safeCmdSubstitutions: commands that never mutate and never read a file's CONTENT,

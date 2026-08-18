@@ -1433,19 +1433,28 @@ func TestIntegration_EnvVarGuard(t *testing.T) {
 // body had been run directly.
 //
 // THE BEAD'S OWN TWO EXAMPLE ROWS (both against the bare relative path `f.yaml`)
-// ARE DELIBERATELY NOT PINNED HERE AS "no longer allow". MEASURED, this tree: they
-// still answer Approve after all three sites are fixed, and correctly so — a bare
-// relative filename is not `looksLikePath`-shaped (no `/`, `./`, `../`, `~/`
-// prefix), so hasUnsafeWritePath's zone check never runs on it AT ALL, defaulting
-// to "no issue found". That is not specific to yq: `X=$(rm f.yaml) echo hi` and
-// `X=$(sed -i 's/x/y/' f.yaml) echo hi` measure the identical Approve on this same
-// tree, through the identical mechanism, for every safeWriteCmds member — it is a
-// pre-existing, orthogonal gap in `looksLikePath` (or a deliberate "bare filename
-// implicitly trusted as CWD-relative" design choice) affecting rm/cp/mv/mkdir/
-// touch/chmod/tee too, not one of pg2-1wt3b's three named sites, and fixing it
-// here would be exactly the kind of out-of-scope, unreplayed widening pg2-xl79d's
-// own comments warn against. It is reported as a discovered follow-up rather than
-// silently fixed or silently left unpinned.
+// STAY PINNED AT APPROVE BELOW, BUT THE REASON HAS CHANGED (pg2-ujuda). At the time
+// this doc was written, `f.yaml` measured Approve because it was NOT
+// `looksLikePath`-shaped at all (no `/`, `./`, `../`, `~/` prefix), so
+// hasUnsafeWritePath's zone check never ran on it — "no issue found" by omission,
+// identically for every safeWriteCmds member (`X=$(rm f.yaml) echo hi`,
+// `X=$(sed -i 's/x/y/' f.yaml) echo hi`, …), which was reported as an orthogonal,
+// unfixed follow-up rather than silently absorbed here.
+//
+// pg2-ujuda fixed exactly that primitive: `f.yaml` (and any bare relative token
+// with none of those prefixes) is now `looksLikePath`-shaped too, so
+// hasUnsafeWritePath's zone check GENUINELY RUNS on it. The verdict below is
+// UNCHANGED — still Approve — but for the CORRECT reason this time: `cwd` here is
+// `projectRoot` itself, a fully read-write zone, so `f.yaml` resolves to a
+// genuinely writable path and the check confirms rather than skips. This is not a
+// coincidence of this one test's CWD; it is the expected behavior for the
+// overwhelmingly common case (an agent writing into its own project). The gap
+// closing shows up as a real behavior change only when CWD (or the resolved
+// target) is OUTSIDE a writable/readable zone — see safecmds_test.go's
+// TestSafecmds_LooksLikePath_TildeUser and TestSafecmds_Pg2_4k7yd_BrowsingAndTest
+// for the primitive-level and zone-level pins, and this bead's corpus replay
+// (~2,200 of ~366,000 rows moved, all module "safe-commands", reason "references
+// unknown path <name>") for the measured real-world size of the closed gap.
 //
 // What IS pinned below are the two shapes that DO change, because they are the two
 // concrete gaps sites 1 and 2 close:
@@ -1485,18 +1494,18 @@ func TestIntegration_YqWriteFlagsNeverApproveThroughSubstitution(t *testing.T) {
 	}
 
 	// The bead's own literal reproduction, pinned at Approve for the reason stated
-	// in this function's doc: a bare relative filename bypasses the zone check
-	// entirely, for every safeWriteCmds member, not just yq — an orthogonal,
-	// pre-existing gap this bead does not fix.
+	// in this function's doc: pg2-ujuda made `f.yaml`'s zone check genuinely RUN,
+	// and it correctly finds `f.yaml` writable because cwd here is the project
+	// root itself — a real, checked Approve, not a skipped one.
 	for _, command := range []string{
 		`X=$(yq -i .a=1 f.yaml) echo hi`,
 		`X=$(yq -s ".a" f.yaml) echo hi`,
 	} {
-		t.Run("bare relative filename stays approve (orthogonal gap, not fixed here): "+command, func(t *testing.T) {
+		t.Run("bare relative filename in-project stays approve, now checked not skipped: "+command, func(t *testing.T) {
 			in := &hookio.HookInput{ToolName: "Bash", CWD: cwd, ToolInput: makeBashJSON(command)}
 			got := eng.EvaluateHook(in)
 			if got.Decision != hookio.Approve {
-				t.Errorf("%q got %s (%s: %s), want Approve — if this now fails, the bare-relative-filename gap this doc describes has changed and the comment above needs re-deriving, not just this want", command, got.Decision, got.Module, got.Reason)
+				t.Errorf("%q got %s (%s: %s), want Approve — if this now fails, the bare-relative-filename zone check has changed and the comment above needs re-deriving, not just this want", command, got.Decision, got.Module, got.Reason)
 			}
 		})
 	}

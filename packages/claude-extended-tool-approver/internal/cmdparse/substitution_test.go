@@ -287,35 +287,38 @@ func TestScanSubstitutions_DoesNotScanHeredocBodiesAsShellText(t *testing.T) {
 // The outgoing test was "Parse yields exactly one leaf", and its quote-awareness was
 // a SIDE EFFECT of splitCompound happening to split top-level compound operators. A
 // real grammar makes the same leaf count admit shapes the floor was never meant to
-// clear: `(cat VERSION)`, `{ cat VERSION; }` and `if true; then cat VERSION; fi` all
+// clear: `(cat)`, `{ cat; }` and `if true; then cat; fi` all
 // reduce to ONE command leaf. Clearing those would be a move in the LESS-RESTRICTIVE
 // direction, so the seam requires the sole statement to BE a simple command.
 //
 // Every row here is a body whose EXECUTABLE is on the static allowlist, so the only
-// thing that can reject it is the shape test.
+// thing that can reject it is the shape test — which is why every row is a BARE `cat`
+// with NO operand: pg2-ujuda widened LooksLikePath to cover a bare relative filename
+// (e.g. "VERSION"), so an operand would make `cat` DELEGATE rather than clear and
+// muddy this test's one variable (the SHAPE), not the path content.
 func TestIsSafeSubstitutionBody_OnlyASoleSimpleCommand(t *testing.T) {
 	tests := []struct {
 		name string
 		body string
 		safe bool
 	}{
-		{"a bare simple command is safe", "cat VERSION", true},
-		{"a subshell is not a simple command", "(cat VERSION)", false},
-		{"a brace group is not a simple command", "{ cat VERSION; }", false},
-		{"a conditional is not a simple command", "if true; then cat VERSION; fi", false},
-		{"a loop is not a simple command", "for f in a; do cat VERSION; done", false},
-		{"a pipeline is not a simple command", "cat VERSION | cat", false},
-		{"an && list is not a simple command", "cat VERSION && cat VERSION", false},
-		{"two statements are not one command", "cat VERSION; cat VERSION", false},
-		{"a negated command is refused", "! cat VERSION", false},
-		{"a backgrounded command is refused", "cat VERSION &", false},
-		{"a redirected command is refused", "cat VERSION > /tmp/x", false},
-		{"a leading assignment is refused", "LC_ALL=C cat VERSION", false},
+		{"a bare simple command is safe", "cat", true},
+		{"a subshell is not a simple command", "(cat)", false},
+		{"a brace group is not a simple command", "{ cat; }", false},
+		{"a conditional is not a simple command", "if true; then cat; fi", false},
+		{"a loop is not a simple command", "for f in a; do cat; done", false},
+		{"a pipeline is not a simple command", "cat | cat", false},
+		{"an && list is not a simple command", "cat && cat", false},
+		{"two statements are not one command", "cat; cat", false},
+		{"a negated command is refused", "! cat", false},
+		{"a backgrounded command is refused", "cat &", false},
+		{"a redirected command is refused", "cat > /tmp/x", false},
+		{"a leading assignment is refused", "LC_ALL=C cat", false},
 		{"an arithmetic command is not a simple command", "(( 1 + 1 ))", false},
 		{"a test clause is not a simple command", "[[ -f VERSION ]]", false},
 		// The `env`/`command` exec prefix is UNWRAPPED by the shared lowering, so it
 		// stays a simple command and the allowlist judges the real executable.
-		{"an env exec prefix still resolves to the real command", "command cat VERSION", true},
+		{"an env exec prefix still resolves to the real command", "command cat", true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -571,11 +574,15 @@ func TestIsSafeSubstitutionBody_NestedRejected(t *testing.T) {
 		body string
 		safe bool
 	}{
-		{"cat VERSION", true},
+		// "cat" and "grep" are bare (no operand): pg2-ujuda widened LooksLikePath
+		// to cover a bare relative filename/pattern, so an operand here would
+		// DELEGATE rather than clear and test the path primitive instead of the
+		// nested-substitution property this function is named for.
+		{"cat", true},
 		{"git rev-parse HEAD", true},
 		{"mktemp", true},
 		{"date +%F", true},
-		{"grep -E 'a|b' file", true},
+		{"grep", true},
 		// Bodies containing a nested substitution are never statically safe.
 		{"cat $(malicious)", false},
 		{"cat `malicious`", false},
@@ -614,6 +621,28 @@ func TestIsSafeSubstitutionBody_NestedRejected(t *testing.T) {
 // VERDICTS ARE NOT THE PRIMARY ASSERTION HERE. The RELATIONS that must survive retuning
 // are pinned separately, in the three tests that follow this one; these rows are the
 // concrete admissions so a reader sees WHAT was admitted.
+//
+// pg2-ujuda PARTIALLY WITHDRAWS SOME OF THESE ADMISSIONS, and it is a NECESSARY
+// consequence of fixing the shared primitive, not an out-of-scope side effect chosen
+// here: FuzzClearedSubstitutionHoldsNoUnruledPath (fuzz_test.go) fuzzes the exact
+// invariant that a body ClassifySubstitutionBody reports Cleared must hold NO argument
+// LooksLikePath is true for — its own seed corpus includes "cat VERSION" verbatim — so
+// widening the shared, exported LooksLikePath (this bead's mandate: a bare relative
+// filename like "VERSION"/"f.json" is resolved by the shell relative to CWD exactly
+// like every prefixed path, and readerArgsClearance's Cleared/Delegated split is
+// SUPPOSED to track that predicate, per THE pg2-zpct4 RECONCILIATION in parser.go)
+// without ALSO moving readerArgsClearance's answer for the SAME tokens would leave the
+// two seams disagreeing again — the exact defect pg2-zpct4 exists to prevent, just
+// relocated to a bare filename instead of an absolute one. So a body that only cleared
+// because ITS OWN operand (a jq/yq/tq filter, a grep pattern, a bare read target) was
+// invisible to the old prefix-only test now DELEGATES to patheval/recursion instead —
+// still ultimately Approved when the path genuinely resolves inside a readable/writable
+// zone (which the engine-level integration tests confirm it does, for a normal project
+// CWD), just no longer bypassing that check outright. Only bodies whose ONLY
+// newly-caught token is a genuinely-dynamic ("$f") argument on ANOTHER, orthogonal
+// argument (independent of this bead) surface as a real Ask, because recursion's
+// pre-existing pg2-2ke04 dynamic-path-arg refusal then finally gets to run on them —
+// see the WHAT NOW ASKS block below for exactly which rows that is.
 func TestIsSafeSubstitutionBody_Pg2Xl79dWidening(t *testing.T) {
 	tests := []struct {
 		name string
@@ -621,17 +650,29 @@ func TestIsSafeSubstitutionBody_Pg2Xl79dWidening(t *testing.T) {
 		safe bool
 	}{
 		// THE ADMISSIONS — the shapes measured asking, in their cohort spellings.
-		{"jq read with a dynamic path", `jq -r .x "$f"`, true},
-		{"jq read with a literal path (the additive control)", "jq -r .x f.json", true},
-		{"jq filter carrying a pipe inside one quoted word", `jq -r ".data | length" "$f"`, true},
-		{"yq read", `yq .a "$f"`, true},
-		{"tq read", `tq .a "$f"`, true},
+		//
+		// WHAT NOW ASKS (pg2-ujuda): every row here carries a filter/pattern/read
+		// operand ("−r .x", "−E 'a|b'", the bracket spelling's trailing "]") that
+		// is now itself a bare-relative-filename-shaped token, so the body
+		// DELEGATES instead of clearing outright — see this function's doc.
+		// That flips `IsSafeSubstitutionBody` to false for these SPECIFIC
+		// spellings; it does not mean jq/yq/tq/test are removed from
+		// fileReaderSubstitutions, and a genuinely-safe invocation of any of
+		// them still Approves once recursed (TestSafecmds_JqWithProjectPath_Approve
+		// and friends).
+		{"jq read with a dynamic path", `jq -r .x "$f"`, false},
+		{"jq read with a literal path (the additive control)", "jq -r .x f.json", false},
+		{"jq filter carrying a pipe inside one quoted word", `jq -r ".data | length" "$f"`, false},
+		{"yq read", `yq .a "$f"`, false},
+		{"tq read", `tq .a "$f"`, false},
 		{"wc -l from a dynamic redirect source", `wc -l < "$f"`, true},
-		{"wc -l from a literal redirect source", "wc -l < f.txt", true},
+		// "wc -l from a literal redirect source" and "the bracket spelling of test"
+		// moved to the INCUMBENTS block below — pg2-ujuda flips both, so they read
+		// more naturally beside cat/grep's identical flip than in this ADMISSIONS
+		// block, which is about the ORIGINAL pg2-xl79d cohort shapes.
 		{"seq", "seq 1 3", true},
 		{"seq with a step", "seq 0 2 10", true},
 		{"test", `test -f "$f"`, true},
-		{"the bracket spelling of test", `[ -f "$f" ]`, true},
 		{"test with a string predicate", `test -n "$a"`, true},
 
 		// THE REGRESSION GUARDS. Neither body is on any list and neither is one simple
@@ -684,12 +725,24 @@ func TestIsSafeSubstitutionBody_Pg2Xl79dWidening(t *testing.T) {
 		{"[[ ]] is a test clause, not a simple command", "[[ -f VERSION ]]", false},
 		{"a leading assignment is still refused", `LC_ALL=C jq -r .x "$f"`, false},
 
-		// INCUMBENTS. Every one was safe before the widening and must still be, since the
-		// change is additive.
-		{"incumbent cat", "cat VERSION", true},
+		// INCUMBENTS. Every one was safe before pg2-xl79d's widening and most still are,
+		// since THAT change is additive. pg2-ujuda's OWN widening (a bare relative
+		// filename is now itself path-shaped — this function's doc explains why that
+		// necessarily moves readerArgsClearance too) flips exactly the incumbents whose
+		// bare operand had no `$`/backtick to hide behind: a literal filename argv
+		// operand ("VERSION"), a literal pattern/filter text with no expansion
+		// ("a|b"), a literal redirect source ("f.txt"), or test's own syntactic
+		// trailing "]" token. Every incumbent that instead carries a genuinely dynamic
+		// ("$f"/"$d") operand is UNCHANGED, because pg2-ujuda's fix deliberately excludes
+		// any token containing `$`/backtick from the new bare-token clause (see
+		// LooksLikePath's doc) — that half of the cohort keeps clearing exactly as
+		// pg2-xl79d intended.
+		{"incumbent cat now delegates on a literal path", "cat VERSION", false},
 		{"incumbent cat with a dynamic path", `cat "$f"`, true},
-		{"incumbent grep", "grep -E 'a|b' file", true},
+		{"incumbent grep now delegates on its own pattern text", "grep -E 'a|b' file", false},
 		{"incumbent wc by argv", `wc -l "$f"`, true},
+		{"incumbent wc -l from a literal redirect source now delegates", "wc -l < f.txt", false},
+		{"incumbent the bracket spelling of test now delegates on its trailing ]", `[ -f "$f" ]`, false},
 		{"incumbent mktemp", "mktemp -d", true},
 		{"incumbent git rev-parse", "git rev-parse HEAD", true},
 		{"incumbent git status", "git status --porcelain", true},
@@ -752,10 +805,18 @@ func TestIsSafeSubstitutionBody_RedirectSpellingIsNeverLooserThanArgv(t *testing
 // whose body performs a WRITE"). Stated this way it also covers members nobody has
 // added yet, which a table of verdicts cannot.
 func TestIsSafeSubstitutionBody_AddingAWriteAlwaysRemovesSafety(t *testing.T) {
+	// pg2-ujuda: every body here is either bare (no operand) or carries ONLY a
+	// dynamic ("$f"/"$a") operand — never a literal filter/pattern/file text.
+	// A literal operand ("VERSION", "x", ".x", "f.json", the bracket spelling's
+	// trailing "]") is now ITSELF bare-relative-filename path-shaped (this
+	// bead's fix), so it would delegate rather than clear and fail this
+	// function's own PRECONDITION before ever reaching the write relation this
+	// test exists to check — see TestIsSafeSubstitutionBody_Pg2Xl79dWidening's
+	// doc for why that delegation is required, not a regression.
 	safeBodies := []string{
-		"cat VERSION", `cat "$f"`, "grep -c x f.txt", `wc -l "$f"`, `wc -l < "$f"`,
-		"jq -r .x f.json", `jq -r .x "$f"`, `yq .a "$f"`, `tq .a "$f"`,
-		"seq 1 3", `test -f "$f"`, `[ -f "$f" ]`, "mktemp -d", "git rev-parse HEAD",
+		"cat", `cat "$f"`, "grep", `wc -l "$f"`, `wc -l < "$f"`,
+		"jq", `jq "$f"`, `yq "$f"`, `tq "$f"`,
+		"seq 1 3", `test -f "$f"`, `test -n "$a"`, "mktemp -d", "git rev-parse HEAD",
 		"date +%F", "echo hi", "printf x",
 	}
 	// One spelling per RedirectionKind that IsWrite covers, plus the fd-prefixed forms.
@@ -836,10 +897,14 @@ func TestClassifyExpansion_NestedUnknown(t *testing.T) {
 		{"$(cat <(rm -rf ~))", ExpansionUnknown},
 		{"$(cat `malicious`)", ExpansionUnknown},
 		{"$(cat $(mktemp))", ExpansionUnknown},
-		// Non-nested safe forms still classify SafeCmd.
+		// Non-nested safe forms still classify SafeCmd. "cat" is bare (no operand):
+		// pg2-ujuda widened LooksLikePath to cover a bare relative filename, so
+		// "$(cat VERSION)" now correctly classifies ExpansionUnknown instead (it
+		// DELEGATES rather than clears) — see
+		// TestIsSafeSubstitutionBody_Pg2Xl79dWidening's doc.
 		{"$(mktemp)", ExpansionSafeCmd},
 		{"$(git rev-parse HEAD)", ExpansionSafeCmd},
-		{"$(cat VERSION)", ExpansionSafeCmd},
+		{"$(cat)", ExpansionSafeCmd},
 	}
 	for _, tt := range tests {
 		if got := classifyExpansion(tt.value); got != tt.want {
@@ -981,10 +1046,23 @@ func TestClassifySubstitutionBody_PathReadabilityIsDelegated(t *testing.T) {
 		// is the entire reason it declines rather than guessing.
 		{"in-project relative path is delegated, not cleared", "cat ./go.mod", SubstitutionDelegated},
 		{"tilde path is delegated", "cat ~/notes.txt", SubstitutionDelegated},
-		// A bare basename is not path-SHAPED, so neither model zone-checks it and there
-		// is nothing to delegate.
-		{"bare basename stays cleared", "cat VERSION", SubstitutionCleared},
-		{"jq filter plus bare basename stays cleared", "jq -r .x f.json", SubstitutionCleared},
+		// pg2-ujuda: a BARE basename (no `/`, `./`, `../`, `~/` prefix) is NOW
+		// path-SHAPED too — cleanPath resolves it relative to CWD exactly like a
+		// prefixed path, and FuzzClearedSubstitutionHoldsNoUnruledPath's own
+		// invariant (its seed corpus literally includes "cat VERSION") requires
+		// this seam's Cleared/Delegated split to track LooksLikePath exactly, so
+		// it moved from "stays cleared" to "now delegated" alongside the
+		// prefixed rows above, not beside the true no-delegation-needed rows
+		// below.
+		{"bare basename now delegates instead of clearing", "cat VERSION", SubstitutionDelegated},
+		{"jq filter plus bare basename now delegates instead of clearing", "jq -r .x f.json", SubstitutionDelegated},
+		// A grep PATTERN carrying a quoted `|`/`;` is CODE, not a shell operator — this
+		// pins that it still delegates (a modelled read, readability the open
+		// question) rather than REFUSES (which is what a real compound-operator
+		// misparse, e.g. an unquoted `;`, would produce via the sole-simple-command
+		// shape check) — see the parser_test.go TestHasUnsafeCommandSubstitution
+		// cross-reference to this row.
+		{"grep pattern with quoted operator delegates, not refused", "grep -E 'a|b' file", SubstitutionDelegated},
 		// A DYNAMIC operand is NOT a path this seam resolved; pg2-xl79d's incumbent
 		// design deliberately clears it and pg2-zpct4 does not change that.
 		{"dynamic operand keeps pg2-xl79d's clearance", `cat "$f"`, SubstitutionCleared},
@@ -1169,12 +1247,19 @@ func TestLooksLikePath_IsSharedWithTheRuleThatOwnsReadability(t *testing.T) {
 		{"~/f", true},
 		{"~someuser", true},
 		{"~someuser/f", true},
-		{"f.txt", false},
-		{".env", false},
+		// pg2-ujuda: a bare relative token with none of the prefixes above is now
+		// path-shaped too — cleanPath resolves it against CWD exactly like a
+		// prefixed path (see LooksLikePath's doc).
+		{"f.txt", true},
+		{".env", true},
+		{"docs/adr", true},
+		// EXCLUDED even by the widening: a flag spelling, an empty token, and a
+		// token carrying a shell/command expansion (isDynamicPathOperand relies
+		// on this predicate answering false for a "$"/backtick-bearing token —
+		// see LooksLikePath's doc for why).
 		{"-r", false},
 		{"", false},
 		{"$HOME/f", false},
-		{"docs/adr", false},
 	}
 	for _, tt := range tests {
 		if got := LooksLikePath(tt.arg); got != tt.want {

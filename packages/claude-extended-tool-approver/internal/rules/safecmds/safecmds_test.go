@@ -84,9 +84,12 @@ func TestSafecmds_AlwaysSafe_Approve(t *testing.T) {
 		"echo hello",
 		// "test -f foo" still Approves post-pg2-4k7yd, but via test's OWN
 		// dedicated zone-checked branch, not the alwaysSafe map ("test" was
-		// removed from it) — "foo" is a bare relative arg, not path-shaped, so
-		// no zone check ever runs. See TestSafecmds_Pg2_4k7yd_BrowsingAndTest
-		// for the cases that actually exercise the zone check.
+		// removed from it) — "foo" IS now path-shaped (pg2-ujuda) and the zone
+		// check genuinely runs on it, resolving relative to CWD into this
+		// project's own ReadWrite zone, so it stays Approve for the CORRECT
+		// reason instead of skipping the check outright. See
+		// TestSafecmds_Pg2_4k7yd_BrowsingAndTest for the cases that exercise the
+		// zone check against an out-of-zone path instead.
 		"test -f foo",
 		"true",
 		"false",
@@ -206,7 +209,11 @@ func TestSafecmds_LooksLikePath_TildeUser(t *testing.T) {
 		{"~", true},           // bare ~ (tc-sfpto) still path-shaped
 		{"~/x", true},         // ~/... still path-shaped
 		{"/etc/passwd", true}, // sanity: absolute path
-		{"README.md", false},  // bare relative filename is not path-shaped
+		// pg2-ujuda: a bare relative filename IS now path-shaped too — cleanPath
+		// resolves it against CWD exactly like a prefixed path, so the
+		// zone/writability check now actually runs on it (see looksLikePath's
+		// delegate, cmdparse.LooksLikePath, for the full rationale).
+		{"README.md", true},
 	}
 	for _, tt := range tests {
 		if got := looksLikePath(tt.arg); got != tt.want {
@@ -1659,8 +1666,10 @@ func TestSafecmds_Pg2_4k7yd_BrowsingAndTest(t *testing.T) {
 	// Criterion 2: an ordinary, non-sensitive path is UNAFFECTED — the blast
 	// radius of the new zone check is bounded to genuinely out-of-zone paths.
 	// /tmp/** is PathReadWrite and the project root is PathReadWrite, so both
-	// CanRead(); "README.md" (bare, no /, ./, ../, ~/ prefix) is not path-shaped
-	// at all and so is never handed to the zone check in the first place.
+	// CanRead(); "README.md" (bare, no /, ./, ../, ~/ prefix) IS path-shaped
+	// since pg2-ujuda, and the zone check now genuinely runs on it — it stays
+	// Approve because it resolves relative to CWD into this project's own
+	// ReadWrite zone, not because it was skipped.
 	ordinary := []string{
 		"ls /tmp", "find /tmp", "stat /tmp",
 		"test -f README.md",
