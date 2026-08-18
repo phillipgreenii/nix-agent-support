@@ -480,3 +480,262 @@ func TestRateLimitPauseOutOfHorizonDoesNotSupersedeGoodReset(t *testing.T) {
 		t.Errorf("resetsAt = %v, want %v (earlier in-range reset must survive)", got, want)
 	}
 }
+
+// --- bead pg2-8ef5c: 12-hour conversion, range guards, discriminator ---------
+//
+// Every event time below is an explicit instant in an explicit location and
+// every reset clause names an explicit IANA zone, so none of these assertions
+// depends on the machine's local zone or on the current date.
+
+// TestParseLimitResetTextTwelveHourQuadrants pins all four quadrants of the
+// 12-hour clock conversion in ONE table, with the resolved ABSOLUTE hour spelled
+// out per case. The two conversion lines exist only for the irregular ends of a
+// 12-hour clock — 12am is hour 0 and 12pm stays hour 12 — and a regression in
+// either is a silent 12-HOUR error in the one number this function produces.
+//
+// The quadrants were previously asserted only incidentally, spread across
+// TestParseLimitResetTextStandard, …DayRollover, …TwelveHour and …HourOnly, each
+// of which mixes the conversion with roll-forward arithmetic. Here every case
+// shares one event time — 2026-05-04 23:00 UTC — which every quadrant's clock
+// time precedes on the event's own day, so all four roll forward by the same 24h
+// and the only thing the expected value varies by is the converted hour.
+func TestParseLimitResetTextTwelveHourQuadrants(t *testing.T) {
+	ev := time.Date(2026, 5, 4, 23, 0, 0, 0, time.UTC)
+	cases := []struct {
+		in       string
+		wantHour int
+		wantMin  int
+	}{
+		{"resets 12am (UTC)", 0, 0},  // 12am is hour 0, NOT hour 12
+		{"resets 1am (UTC)", 1, 0},   // a regular am hour passes through unchanged
+		{"resets 12pm (UTC)", 12, 0}, // 12pm STAYS hour 12, NOT hour 24
+		{"resets 1pm (UTC)", 13, 0},  // a regular pm hour gains 12
+		{"resets 12:15am (UTC)", 0, 15},
+		{"resets 1:15am (UTC)", 1, 15},
+		{"resets 12:15pm (UTC)", 12, 15},
+		{"resets 1:15pm (UTC)", 13, 15},
+	}
+	for _, c := range cases {
+		got, ok := parseLimitResetText(c.in, ev)
+		if !ok {
+			t.Errorf("%q: ok=false, want true", c.in)
+			continue
+		}
+		want := time.Date(2026, 5, 5, c.wantHour, c.wantMin, 0, 0, time.UTC)
+		if !got.Equal(want) {
+			t.Errorf("%q: got %v, want %v", c.in, got.UTC(), want)
+		}
+	}
+}
+
+// TestParseLimitResetTextComponentBoundaries pins the INCLUSIVE accept edges of
+// the three range guards (hour 1..12, minute 0..59, day 1..31) and, on the
+// reject side, OBSERVES THE RETURNED (zero, false) rather than merely checking
+// that nothing panicked.
+//
+// Every input here is chosen to MATCH limitResetRe, so each one reaches the
+// guard it targets instead of falling out at the regex-miss path — the hour and
+// day groups are `\d{1,2}` (so 0, 13, 32 all match) and the minute group is
+// `\d{2}` (so 60 matches). An out-of-range component that the regex rejected
+// first would exercise the `m == nil` path and prove nothing about the guard.
+func TestParseLimitResetTextComponentBoundaries(t *testing.T) {
+	cases := []struct {
+		name   string
+		in     string
+		ev     time.Time
+		wantOK bool
+		want   time.Time
+	}{
+		// hour: 1..12 inclusive.
+		{
+			name: "hour 1 accepted", in: "resets 1am (UTC)",
+			ev: time.Date(2026, 5, 5, 0, 0, 0, 0, time.UTC), wantOK: true,
+			want: time.Date(2026, 5, 5, 1, 0, 0, 0, time.UTC),
+		},
+		{
+			name: "hour 12 accepted", in: "resets 12pm (UTC)",
+			ev: time.Date(2026, 5, 5, 0, 0, 0, 0, time.UTC), wantOK: true,
+			want: time.Date(2026, 5, 5, 12, 0, 0, 0, time.UTC),
+		},
+		{
+			name: "hour 0 rejected", in: "resets 0:30am (UTC)",
+			ev: time.Date(2026, 5, 5, 0, 0, 0, 0, time.UTC),
+		},
+		{
+			name: "hour 13 rejected", in: "resets 13:00pm (UTC)",
+			ev: time.Date(2026, 5, 5, 0, 0, 0, 0, time.UTC),
+		},
+		// minute: 0..59 inclusive.
+		{
+			name: "minute 0 accepted", in: "resets 3:00pm (UTC)",
+			ev: time.Date(2026, 5, 5, 12, 0, 0, 0, time.UTC), wantOK: true,
+			want: time.Date(2026, 5, 5, 15, 0, 0, 0, time.UTC),
+		},
+		{
+			name: "minute 59 accepted", in: "resets 3:59pm (UTC)",
+			ev: time.Date(2026, 5, 5, 12, 0, 0, 0, time.UTC), wantOK: true,
+			want: time.Date(2026, 5, 5, 15, 59, 0, 0, time.UTC),
+		},
+		{
+			name: "minute 60 rejected", in: "resets 3:60pm (UTC)",
+			ev: time.Date(2026, 5, 5, 12, 0, 0, 0, time.UTC),
+		},
+		// day: 1..31 inclusive (the weekly month+day shape).
+		{
+			name: "day 1 accepted", in: "resets Apr 1, 9am (UTC)",
+			ev: time.Date(2026, 3, 30, 12, 0, 0, 0, time.UTC), wantOK: true,
+			want: time.Date(2026, 4, 1, 9, 0, 0, 0, time.UTC),
+		},
+		{
+			name: "day 31 accepted", in: "resets Mar 31, 9am (UTC)",
+			ev: time.Date(2026, 3, 30, 12, 0, 0, 0, time.UTC), wantOK: true,
+			want: time.Date(2026, 3, 31, 9, 0, 0, 0, time.UTC),
+		},
+		{
+			// Unguarded, time.Date would NORMALIZE day 0 to the last day of the
+			// preceding month (Feb 28) — a plausible-looking instant no message
+			// stated. The event sits under a day before it, so the normalized
+			// value would be in range and accepted but for the guard.
+			name: "day 0 rejected", in: "resets Mar 0, 9am (UTC)",
+			ev: time.Date(2026, 2, 27, 12, 0, 0, 0, time.UTC),
+		},
+		{
+			// Likewise day 32 would normalize forward to Apr 1.
+			name: "day 32 rejected", in: "resets Mar 32, 9am (UTC)",
+			ev: time.Date(2026, 3, 30, 12, 0, 0, 0, time.UTC),
+		},
+		{
+			// The month-abbreviation lookup's own reject path: the regex accepts
+			// any `[A-Z][a-z]{2}`, so an abbreviation outside monthAbbrev reaches
+			// the lookup and must be discarded there.
+			name: "unknown month abbreviation rejected", in: "resets Xyz 15, 9am (UTC)",
+			ev: time.Date(2026, 3, 14, 12, 0, 0, 0, time.UTC),
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, ok := parseLimitResetText(c.in, c.ev)
+			if ok != c.wantOK {
+				t.Fatalf("%q: ok = %v, want %v (got %v)", c.in, ok, c.wantOK, got.UTC())
+			}
+			if !c.wantOK {
+				if !got.IsZero() {
+					t.Errorf("%q: got %v, want the zero time on rejection", c.in, got.UTC())
+				}
+				return
+			}
+			if !got.Equal(c.want) {
+				t.Errorf("%q: got %v, want %v", c.in, got.UTC(), c.want)
+			}
+		})
+	}
+}
+
+// TestResetWithinHorizonRejectsZeroReset observes the RETURN VALUE of the
+// zero-reset reject path, which no other test reaches: parseLimitResetText never
+// hands ResetWithinHorizon a zero candidate, so only a direct call can pin it. A
+// zero resetsAt is the unknown sentinel rather than an instant, and without the
+// guard it would compare as long before any horizon and be ACCEPTED.
+func TestResetWithinHorizonRejectsZeroReset(t *testing.T) {
+	ev := time.Date(2026, 5, 5, 12, 0, 0, 0, time.UTC)
+	if ResetWithinHorizon(time.Time{}, ev) {
+		t.Error("ResetWithinHorizon(zero, ev) = true, want false (zero is the unknown sentinel, never an instant)")
+	}
+	// A zero eventTime must not rescue a zero resetsAt either: zero is not
+	// "0 past the horizon", it is "no instant at all".
+	if ResetWithinHorizon(time.Time{}, time.Time{}) {
+		t.Error("ResetWithinHorizon(zero, zero) = true, want false")
+	}
+	// Positive control, so the assertions above cannot pass vacuously.
+	if !ResetWithinHorizon(ev.Add(time.Hour), ev) {
+		t.Error("ResetWithinHorizon(ev+1h, ev) = false, want true")
+	}
+}
+
+// legacyRateEventShaped renders a legacy system/api_error rate-limit line with
+// every field the discriminator tests under caller control, so one fixture can
+// fail exactly ONE of its conjuncts and leave the rest satisfied.
+func legacyRateEventShaped(evType, subtype, errType string, ts time.Time, retryInMs int64) string {
+	return `{"type":"` + evType + `","subtype":"` + subtype +
+		`","timestamp":"` + ts.UTC().Format(time.RFC3339Nano) +
+		`","retryInMs":` + fmt.Sprintf("%d", retryInMs) +
+		`,"error":{"status":429,"error":{"type":"error","error":{"type":"` + errType +
+		`","message":"limit exceeded"}}}}`
+}
+
+// TestRateLimitPauseDiscriminatorRequiresEveryConjunct pins the legacy
+// rate-limit discriminator as a CONJUNCTION. Each fixture is a well-formed line
+// that unmarshals cleanly into the scan struct and satisfies every conjunct but
+// one, so relaxing any single one to a disjunction admits an unrelated event as
+// a rate-limit event and gives it a reset time.
+func TestRateLimitPauseDiscriminatorRequiresEveryConjunct(t *testing.T) {
+	ts := time.Date(2026, 4, 10, 17, 0, 0, 0, time.UTC)
+	const inRange = 3600000 // one hour, comfortably inside MaxResetHorizon
+
+	rejected := []struct {
+		name string
+		line string
+	}{
+		{
+			// Fails only `type == "system"`. "summary" is deliberately neither
+			// user nor assistant, so it cannot double as a session resume.
+			name: "not a system event",
+			line: legacyRateEventShaped("summary", "api_error", "rate_limit_error", ts, inRange),
+		},
+		{
+			// Fails only `subtype == "api_error"`.
+			name: "system event of another subtype",
+			line: legacyRateEventShaped("system", "info", "rate_limit_error", ts, inRange),
+		},
+		{
+			// Fails only `error.error.error.type == "rate_limit_error"`: a real
+			// api_error, but an overload rather than a rate limit.
+			name: "api_error that is not a rate limit",
+			line: legacyRateEventShaped("system", "api_error", "overloaded_error", ts, inRange),
+		},
+		{
+			// Fails only `retryInMs > 0`.
+			name: "zero retryInMs",
+			line: legacyRateEventShaped("system", "api_error", "rate_limit_error", ts, 0),
+		},
+		{
+			// Fails only `retryInMs > 0`, on the other side of the boundary.
+			name: "negative retryInMs",
+			line: legacyRateEventShaped("system", "api_error", "rate_limit_error", ts, -1),
+		},
+	}
+	for _, c := range rejected {
+		t.Run(c.name, func(t *testing.T) {
+			path := t.TempDir() + "/t.jsonl"
+			if err := writeTestFile(path, c.line+"\n"); err != nil {
+				t.Fatal(err)
+			}
+			got, err := RateLimitPause(path)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !got.IsZero() {
+				t.Errorf("resetsAt = %v, want zero — this event fails a discriminator conjunct and must not become a rate-limit event", got.UTC())
+			}
+		})
+	}
+
+	// Positive control: the SAME renderer with every conjunct satisfied does
+	// produce a reset. Without it, a fixture bug that made every line
+	// unparseable would let all of the above pass for the wrong reason.
+	t.Run("every conjunct satisfied", func(t *testing.T) {
+		path := t.TempDir() + "/t.jsonl"
+		line := legacyRateEventShaped("system", "api_error", "rate_limit_error", ts, inRange)
+		if err := writeTestFile(path, line+"\n"); err != nil {
+			t.Fatal(err)
+		}
+		got, err := RateLimitPause(path)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		want := ts.Add(inRange * time.Millisecond)
+		if !got.Equal(want) {
+			t.Errorf("resetsAt = %v, want %v", got.UTC(), want)
+		}
+	})
+}
