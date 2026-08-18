@@ -29,9 +29,14 @@ test-suite runtime`, so never point it at a whole large module:
 
 ## MUST
 
-- **MUST** verify per-mutant, never by comparing survivor counts. The run-to-run
-  variance is about one mutant, so a count that drops by one is indistinguishable
-  from noise.
+- **MUST** verify per-mutant, never by comparing survivor counts. Two module-wide runs
+  over an identical tree disagreed on **13 of 451** mutants (4 survived only in the
+  first run, 9 only in the second), so a count that moves by a few is indistinguishable
+  from noise. The disagreement concentrated in timing-sensitive, `httptest`-driven code;
+  the pure-logic sites were stable — their survivor sets were identical across both
+  runs. So a verdict on a mutant reached only through a test that stands up a server or
+  races a timeout SHOULD be re-run before it is trusted, while a pure-logic verdict
+  rarely needs a second run.
 - **MUST** check for the build-tag note in the output before writing assertions.
   If a package gates tests behind custom tags (`contract`, `smoke`, `hostile`),
   mutants covered only by those tests appear as survivors. Re-run with
@@ -42,6 +47,18 @@ test-suite runtime`, so never point it at a whole large module:
 - **MUST** stop and write a test first if it reports that the package has no test
   files. Mutation testing reports missing assertions; with no tests, every mutant
   trivially survives and the worklist is meaningless.
+- **MUST** run it through `pg-go-mutate` rather than invoking the pinned `gomu` engine
+  directly. The engine writes its overlay to
+  `$TMPDIR/gomu_overlay_<pid>_<ns>/mutant_<absolute-source-path>_<n>/overlay.json` — the
+  target's ABSOLUTE path is embedded in a directory name, so a long `$TMPDIR` plus a
+  deep worktree path (`.worktrees/<bead-id>` under a repo under the workspace root is
+  routine here) overflows the filesystem path limit, and the failed write surfaces as
+  `ERROR` or as spurious `NOT_VIABLE`. Measured: with `$TMPDIR` set to a deep scratchpad
+  path, 23 not-viable plus one `ERROR` naming the overflow, against 14 and 13 not-viable
+  from `pg-go-mutate` over the identical tree. `pg-go-mutate` is immune because it makes
+  its own `mktemp -d`, keeping `$TMPDIR` short. If you do reach for the engine
+  directly — wanting the non-survivor verdicts the wrapper's worklist omits is the
+  usual reason — export a short `$TMPDIR` first.
 
 ## MUST NOT
 
@@ -52,6 +69,11 @@ test-suite runtime`, so never point it at a whole large module:
 - **MUST NOT** point it at `./...`; that pattern is rejected. Pass a directory —
   it is walked recursively, so a single package works. Single-file targets are
   rejected too.
+- **MUST NOT** accept `NOT_VIABLE` as proof that a mutation cannot compile. One run
+  reported `config.go:55` `"!=" -> "=="` and `secret.go:92` `"==" -> "!="` as
+  `NOT_VIABLE`; both were `KILLED` in another run, and a string `==` cannot fail to
+  compile, so the verdict was simply wrong. Re-run before treating any row as
+  non-compiling, and suspect the `$TMPDIR` overflow above.
 
 ## Where the highest-value gaps usually are
 
