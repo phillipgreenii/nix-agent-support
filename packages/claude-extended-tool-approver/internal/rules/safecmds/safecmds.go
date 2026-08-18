@@ -809,9 +809,10 @@ func evaluateCp(args []string, pe *patheval.PathEvaluator, module string) (hooki
 			// destination SKIPPED, and evaluateCp fell through to the unconditional
 			// Approve at the end of this branch. MEASURED on this tree before this
 			// fix: with cwd /home/user/project, `cp ./a.txt --target-directory=/etc/`
-			// correctly abstained (destination not writable) while
-			// `cp ./a.txt --target-directory='/etc/'` (and the "-form) APPROVED.
-			// The separate-token spellings (`-t /etc/`, `-t '/etc/'`) are unaffected
+			// correctly abstained (destination not writable) while both
+			// `cp ./a.txt --target-directory='/etc/'` and the double-quoted
+			// spelling APPROVED. The separate-token spellings (`-t /etc/`,
+			// `-t '/etc/'`) are unaffected
 			// — cmdparse's ordinary lowering already strips a quote wrapping a WHOLE
 			// token, so only THIS glued form needs the explicit unwrap.
 			//
