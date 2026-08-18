@@ -189,7 +189,7 @@ func TestEvaluateExpression_EngineAttributionWhenNoRuleHasAnOpinion(t *testing.T
 
 // erroringRule always returns a genuine (non-ErrNotApplicable, non-ErrRefused)
 // error, the way a resolver whose subprocess failed does. Modeled on
-// adr0044_provenance_test.go's failingRule but kept local (and unconditional
+// verdict_provenance_test.go's failingRule but kept local (and unconditional
 // rather than scoped to one input) so its role in the compound below is
 // explicit at the call site.
 type erroringRule struct{}

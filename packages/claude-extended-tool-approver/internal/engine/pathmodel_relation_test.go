@@ -1,5 +1,6 @@
-// zpct4_pathmodel_relation_test.go — the pg2-zpct4 reconciliation asserted END TO END,
-// through the production rule chain, as a RELATION between two spellings of one read.
+// PATH-MODEL RELATION SUITE (pg2-zpct4): the two path models' reconciliation asserted
+// END TO END, through the production rule chain, as a RELATION between two spellings of
+// one read.
 //
 // THE RELATION: for any path, capturing a read into an env-var value is never LESS gated
 // than writing the same read as a bare command.

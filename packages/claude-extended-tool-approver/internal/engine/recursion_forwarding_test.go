@@ -1,5 +1,5 @@
-// pg2-ij9sr's CHAIN-LEVEL suite: an inner refusal is forwarded outward through
-// hookio.FromRecursion, and an inner exhaustion is not.
+// RECURSION-FORWARDING CHAIN-LEVEL SUITE (pg2-ij9sr): an inner refusal is forwarded
+// outward through hookio.FromRecursion, and an inner exhaustion is not.
 //
 // It lives in `package engine_test` and drives the REAL composed chain (setup.RuleChain) for
 // the reason engine_integration_test.go's header gives: the claim under test is about what
@@ -16,6 +16,8 @@
 package engine_test
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
@@ -163,5 +165,55 @@ func TestIJ9SR_EnvVarsFoldIdentityIsNotAForwardedRefusal(t *testing.T) {
 			t.Errorf("%q = %s (%s), want approve — envvars' fold identity is being read as a REFUSAL and flooring every leaf it folds over",
 				expr, got.Decision, got.Reason)
 		}
+	}
+}
+
+// TestIJ9SR_RefusalFloorDemotesALaterApprovingRule is pg2-ij9sr's section-4 claim: the
+// forwarded refusal is not merely a provenance relabeling — it is a FLOOR that a later,
+// otherwise-approving rule cannot clear.
+//
+// build-tools runs AFTER nix and docker in setup.RuleChain, so a REAL consumer config
+// that approves the outer tool ("nix"/"docker" as approvedTools) is exactly the case the
+// floor exists for: before ADR 0044 forwarded the inner refusal correctly, a delegating
+// rule that misread it as an EXHAUSTION would defer (ErrNotApplicable), and build-tools
+// would then approve the outer leaf with no idea the inner expression was refused. The
+// two REFUSAL rows below must NOT reach Approve even though build-tools approves the
+// bare tool; the EXHAUSTION and plain-APPROVE controls are UNCHANGED by this mechanism
+// (nothing refused them, so there is nothing for the floor to hold), which is what proves
+// the movement is caused by the refusal specifically and not by the config.
+func TestIJ9SR_RefusalFloorDemotesALaterApprovingRule(t *testing.T) {
+	t.Setenv("WORKSPACE_ROOT", "/Users/testuser/workspace")
+	projectRoot := "/Users/testuser/workspace/my-project"
+
+	fixture := filepath.Join(t.TempDir(), "rules.json")
+	if err := os.WriteFile(fixture, []byte(`{"buildtools":{"approvedTools":["nix","docker"]}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	eng := buildFullEngineWithConfig(projectRoot, projectRoot, fixture)
+
+	tests := []struct {
+		name        string
+		expr        string
+		wantApprove bool
+	}{
+		{"nix: inner git refusal is not cleared by build-tools' later approve", `nix develop -c "git clean -fd"`, false},
+		{"docker: inner git refusal is not cleared by build-tools' later approve", `docker run --rm alpine sh -c "git clean -fd"`, false},
+		{"CONTROL: inner exhaustion still lets build-tools approve the bare tool", `nix develop -c "seq 1 3"`, true},
+		{"CONTROL: inner approve is unaffected", `nix develop -c "git status"`, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			in := &hookio.HookInput{ToolName: "Bash", CWD: projectRoot, ToolInput: makeBashJSON(tt.expr)}
+			got := eng.EvaluateHook(in)
+			gotApprove := got.Decision == hookio.Approve
+			if gotApprove != tt.wantApprove {
+				want := "!= approve"
+				if tt.wantApprove {
+					want = "approve"
+				}
+				t.Errorf("%q = %s (%s: %s), want %s", tt.expr, got.Decision, got.Module, got.Reason, want)
+			}
+		})
 	}
 }

@@ -1,4 +1,6 @@
-// ADR 0044's CLASSIFICATION SUITE, driven through the REAL composed rule chain.
+// VERDICT PROVENANCE CLASSIFICATION SUITE (ADR 0044, pg2-d0ja3): distinguishes a rule's
+// declared REFUSAL from a chain that merely EXHAUSTED with no rule claiming the leaf,
+// driven through the REAL composed rule chain.
 //
 // It lives in `package engine_test` for the reason engine_integration_test.go's header
 // gives: the chain must BE production's (setup.RuleChain), because the whole claim under
