@@ -285,12 +285,16 @@ func TestIsSecret_DirectoryArmFoldBlastRadius(t *testing.T) {
 }
 
 // Classify reports WHICH arm matched, and the split is load-bearing rather than
-// informational: internal/rules/secrets relaxes GenericSecretsDir for reads inside
-// a git repository and NOTHING else (the operator ruling of 2026-08-13 on
-// pg2-fhb9q/pg2-pmk9q). A row that drifted from GenericSecretsDir to
-// WellKnownSecret would silently un-relax that path; a row that drifted the other
-// way would silently relax a real credential store. Matching and non-matching
-// shapes are adjacent per arm for the same reason the fold table is.
+// informational: internal/rules/secrets relaxes GenericSecretsDir inside a git
+// repository for reads on every route, and — because the Bash route cannot
+// distinguish read from write — for Bash-shaped writes there too. That is
+// intentional per the operator's 2026-08-17 ruling on pg2-ifbfa, extending the
+// 2026-08-13 ruling on pg2-fhb9q/pg2-pmk9q; on the direct-tool route
+// (Write/Edit/MultiEdit/Delete) a write still stays unrelaxed. A row that
+// drifted from GenericSecretsDir to WellKnownSecret would silently un-relax
+// that path; a row that drifted the other way would silently relax a real
+// credential store. Matching and non-matching shapes are adjacent per arm for
+// the same reason the fold table is.
 func TestClassify(t *testing.T) {
 	tests := []struct {
 		name string
