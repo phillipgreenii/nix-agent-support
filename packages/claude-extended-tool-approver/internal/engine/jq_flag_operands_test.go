@@ -15,7 +15,7 @@
 // in `internal/rules/secrets` and `internal/rules/safecmds`. Each component was
 // self-consistent; the COMPOSITION lost the path. Only an assembled chain evaluates that.
 //
-// TWO CLASSES OF DEFECT ARE PINNED HERE, and they failed differently:
+// THREE CLASSES OF DEFECT ARE PINNED HERE, and they failed differently:
 //
 //   - AN OPERAND JQ OPENS, deleted by a skip table: `-f`, `--from-file`, `--rawfile`,
 //     `--slurpfile`. Measured `approve` on main @6737a0ea against `reject` for the same
@@ -24,9 +24,20 @@
 //     `--tab`, `--join-output`, `--jsonargs`. `--join-output` is the cleanest evidence —
 //     it measured `abstain` while its OWN SHORT FORM `-j` measured `reject`, the same flag
 //     in two spellings differing only by table membership.
+//   - A PROGRAM-OPERAND MISCLASSIFICATION (pg2-mu8zg): `-L` / `--library-path <dir>` is
+//     correctly ABSENT from cmdparse's skip tables (its directory operand is a path jq
+//     opens to load modules from, same rule as the first class above), but TWO components
+//     downstream independently decide "which argument plays jq's PROGRAM/filter role" —
+//     `internal/rules/safecmds`' `programOperand` and `internal/rules/secrets`'
+//     `dropFirstPositional` — and BOTH had their own copy of the bug: neither knew `-L`
+//     takes an operand, so each mistook `-L`'s directory VALUE for the filter positional
+//     and exempted it from screening instead of the actual filter. Measured `abstain` on
+//     main @fafee02e against `ask` for the same directory as a positional. Fixing only one
+//     of the two components left the other's abstention in place — the composition lesson
+//     pg2-wrxg6 already drew, recurring a second time in a THIRD component.
 //
-// The short/long-form pairs below are load-bearing for the second class: a table is keyed
-// on the exact spelling, so the pair is what detects a one-spelling entry.
+// The short/long-form pairs below are load-bearing for the second and third classes: a
+// table is keyed on the exact spelling, so the pair is what detects a one-spelling entry.
 package engine_test
 
 import (
@@ -87,6 +98,16 @@ func TestJq_FlagOperandIsNeverLooserThanAPositional(t *testing.T) {
 		func(p string) string { return "jq -M . " + p },
 	}
 
+	// `-L` / `--library-path <dir>`'s operand is a DIRECTORY jq loads modules from — a
+	// different open than `-f`'s filter FILE, but the relation is the same claim: naming a
+	// path through this flag must never be less gated than naming it positionally
+	// (pg2-mu8zg). Unlike fileFlagForms above, the path here is `-L`'s OWN operand, not a
+	// trailing positional, because `-L` takes exactly one operand and nothing after it.
+	libraryPathFlagForms := []func(p string) string{
+		func(p string) string { return "jq -L " + p + " ." },
+		func(p string) string { return "jq --library-path " + p + " ." },
+	}
+
 	// Flags whose operand is a LITERAL jq never opens. They must keep skipping it — that is
 	// pg2-ia640.2's false-positive fix — so they are checked in the OPPOSITE direction only
 	// (see the literal-operand test below), never as part of this relation.
@@ -100,7 +121,9 @@ func TestJq_FlagOperandIsNeverLooserThanAPositional(t *testing.T) {
 	for _, p := range paths {
 		positional := "jq . " + p
 		want := eng.EvaluateHook(provenanceInput(projectRoot, positional))
-		for _, form := range append(append([]func(string) string{}, fileFlagForms...), booleanFlagForms...) {
+		allForms := append(append([]func(string) string{}, fileFlagForms...), booleanFlagForms...)
+		allForms = append(allForms, libraryPathFlagForms...)
+		for _, form := range allForms {
 			cmd := form(p)
 			got := eng.EvaluateHook(provenanceInput(projectRoot, cmd))
 			if got.Decision < want.Decision {
@@ -161,10 +184,12 @@ func TestJq_SkipTablesHoldNoFileTakingFlag(t *testing.T) {
 	const denyListed = "/Users/testuser/.ssh/id_rsa"
 
 	// Every jq flag documented (jq 1.8.2 --help) as taking a FILE or DIRECTORY operand.
-	// `-L`/`--library-path` is listed and EXPECTED TO FAIL THIS today — it escapes by a
-	// different route (its operand becomes jq's apparent filter) and is tracked as
-	// pg2-mu8zg — so it is asserted only NOT to reach `approve`, the weaker claim that
-	// holds now, with the stronger one left to that bead.
+	// `-L`/`--library-path` used to escape this weaker claim too (it measured `approve` by
+	// a different route — its operand became jq's apparent filter — before pg2-mu8zg's fix
+	// to both `safecmds.programOperandValueFlags` and `secrets.dropFirstPositional`); the
+	// STRONGER relation claim (never less gated than the positional spelling) is asserted
+	// directly by TestJq_FlagOperandIsNeverLooserThanAPositional's libraryPathFlagForms, so
+	// it is not duplicated here.
 	for _, tc := range []struct {
 		cmd       string
 		mustNotBe string
@@ -188,9 +213,11 @@ func TestJq_SkipTablesHoldNoFileTakingFlag(t *testing.T) {
 	// The captured-substitution spelling, which is how pg2-wrxg6 was originally reported.
 	// It reaches the approval through the RECURSION rather than the static seam, so a fix
 	// confined to one of the two path models would leave it open (the pg2-zpct4 shape).
+	// The `-L` row is pg2-mu8zg's own instance of the same check.
 	for _, cmd := range []string{
 		"X=$(jq -f " + denyListed + " .) echo hi",
 		"X=$(jq --rawfile n " + denyListed + " .) echo hi",
+		"X=$(jq -L " + denyListed + " .) echo hi",
 	} {
 		got := eng.EvaluateHook(provenanceInput(projectRoot, cmd))
 		if got.Decision.String() == "approve" {

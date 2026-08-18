@@ -724,12 +724,49 @@ func jqFilterFromFile(args []string) bool {
 	return false
 }
 
+// jqPreFilterValueFlags lists jq flags — beyond the LITERAL-operand ones
+// cmdparse.SkipJqValueFlags already strips — that consume the NEXT token as a
+// value which is NOT the filter, so dropFirstPositional's scan must step past
+// it rather than mistake it for the exempt filter positional.
+//
+// `-L` / `--library-path <dir>` (pg2-mu8zg) is the only one: its directory
+// operand is deliberately absent from cmdparse's jqOneArgFlags/jqValueFlags
+// (see argflags.go's doc — that operand is a path jq OPENS, same rule as
+// pg2-wrxg6), so it survives unchanged into args here. Before this table
+// existed, dropFirstPositional treated `-L`'s own directory value as "the
+// first non-flag token" and dropped IT instead of the real filter, exempting
+// a deny-listed directory from secret-path screening entirely — a hole
+// independent of, and not fixed by, safecmds' programOperandValueFlags fix
+// for the SAME command shape, because this rule computes the jq
+// filter/program role with its own copy of the logic rather than sharing it.
+//
+// `--rawfile`/`--slurpfile`/`--argfile name file` are NOT here: they take TWO
+// operands (NAME then FILE) and are already correct by coincidence — the
+// token dropFirstPositional drops is the harmless NAME, leaving the real FILE
+// operand in the result untouched. `-L` has only ONE operand, so there is no
+// harmless token to drop instead; it must be skipped explicitly.
+var jqPreFilterValueFlags = map[string]bool{
+	"-L": true, "--library-path": true,
+}
+
 // dropFirstPositional returns args with the first non-flag argument removed,
-// preserving order of the rest.
+// preserving order of the rest. A flag in jqPreFilterValueFlags is skipped
+// PAST — its own value is kept, not misclassified as the positional to drop.
 func dropFirstPositional(args []string) []string {
 	result := make([]string, 0, len(args))
 	dropped := false
+	skipNextValue := false
 	for _, a := range args {
+		if skipNextValue {
+			result = append(result, a)
+			skipNextValue = false
+			continue
+		}
+		if !dropped && jqPreFilterValueFlags[a] {
+			result = append(result, a)
+			skipNextValue = true
+			continue
+		}
 		if !dropped && !isFlag(a) {
 			dropped = true
 			continue

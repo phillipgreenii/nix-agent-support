@@ -550,9 +550,21 @@ func argHasDynamicExpansion(arg string) bool {
 // argument as a value, so the scan for the program operand does not stop on it.
 // Only the glue-free spellings matter: a glued `-F'\t'` / `-v x=1` is one token
 // starting with `-`, which the scan already skips.
+//
+// jq's `-L` / `--library-path directory` belongs here, not in cmdparse's
+// SkipJqValueFlags (pg2-mu8zg, following pg2-wrxg6's sibling fix). `-L` takes a
+// directory operand, but it is not itself the program — jq's FILTER still
+// follows as the next positional. Without this entry, programOperand's scan
+// stopped on the first non-flag token it saw, which was `-L`'s directory value,
+// and claimed IT as the program — judged by the narrower isDynamicPathOperand
+// instead of full path screening, so a deny-listed directory named through `-L`
+// measured `abstain` while the same directory named positionally measured
+// `reject`. Listing `-L`/`--library-path` here makes the scan skip past the
+// directory value to the real filter, so the directory falls through to the
+// ordinary path-operand screening every other positional gets.
 var programOperandValueFlags = map[string]map[string]bool{
 	"awk": {"-v": true, "--assign": true, "-F": true, "--field-separator": true},
-	"jq":  {},
+	"jq":  {"-L": true, "--library-path": true},
 	"sed": {},
 }
 
