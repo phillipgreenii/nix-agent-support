@@ -145,6 +145,24 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 // method (-X/--request, spaced `-X POST`, glued `-XPOST`, or `--request=POST`)
 // wins; otherwise a request-body/upload flag (in any spelling) implies POST;
 // otherwise GET.
+//
+// EXACT-TOKEN "--request" IS NOT THE pg2-os1kq/pg2-1xq3m BUG CLASS HERE —
+// MEASURED NOT AFFECTED. That class needs a long-flag parser that accepts
+// unambiguous PREFIX abbreviations (GNU getopt_long / GNU coreutils'
+// parse-options); curl's own option parser (lib/tool_getparam.c's findlongopt)
+// does not. MEASURED on this tree, 2026-08-18, curl 8.7.1 (`curl 8.7.1
+// (x86_64-apple-darwin25.0) libcurl/8.7.1 …`, this machine's `curl`):
+// `curl --requ POST -o /dev/null -s http://127.0.0.1:1/` answered `curl: option
+// --requ: is unknown` (exit 2) — the IDENTICAL error and exit code as a
+// deliberately bogus `curl --zzzzznotaflag`, and identical again for `--req`
+// and `--dat` (a would-be abbreviation of `--data`). The full spelling, by
+// contrast, is accepted and proceeds to actually try the connection: `curl
+// --request POST … http://127.0.0.1:1/` exits 7 ("couldn't connect"), not 2. So
+// curl requires an EXACT long-flag spelling with no abbreviation of any length,
+// and widening this test to a prefix matcher would be dead code for spellings
+// curl itself rejects — effectiveMethod's method-detection risk (an
+// unrecognised explicit method silently defaulting to GET/POST-by-body) is not
+// reachable through this flag on the curl binary this rule gates on.
 func effectiveMethod(args []string) string {
 	hasBody := false
 	for i, a := range args {

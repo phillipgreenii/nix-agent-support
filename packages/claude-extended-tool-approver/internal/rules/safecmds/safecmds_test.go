@@ -878,6 +878,200 @@ func TestEvaluateCp_TargetDirectoryMalformedGluedQuotingAbstains(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// pg2-1xq3m: LONG-FLAG ABBREVIATION AWARENESS, WIDENED BEYOND `git` (pg2-os1kq).
+// ---------------------------------------------------------------------------
+//
+// pg2-os1kq's bug class: an exact-token long-flag test is bypassable whenever
+// the underlying program accepts unambiguous PREFIX abbreviations, and the
+// bypass direction is toward Approve. This bead MEASURED which of that class's
+// two suspected sites in THIS package are actually reachable on a real binary
+// — see the doc comments on isSedInPlace, isYqInPlace,
+// minAbbrevTargetDirectory, and (in the curl package) effectiveMethod for the
+// verbatim measurements. The upshot: cp's `--target-directory` (fixed below,
+// GNU coreutils 9.11) and sed's `--in-place` (fixed, GNU sed 4.9) are real;
+// yq's `--inplace` and curl's `--request` are NOT (both parsers reject every
+// abbreviation outright).
+//
+// DECISION: NOT GENERALIZING git's THREE-LAYER AST-GUARD HERE (pg2-1xq3m). git's
+// TestGit_LongFlagTests_AreAbbreviationAware walks git.go's OWN AST for every
+// exact-token long-flag test, because git.go gates DOZENS of long flags across
+// an actively-edited ~3000-line file — the guard's value is catching a FUTURE
+// exact-token regression among many. safecmds.go and curl.go, by contrast, gate
+// exactly ONE long-flag test whose value is load-bearing
+// (`--target-directory`) and two boolean ones (`--in-place`, `--inplace`) —
+// there is no comparable population of existing gates for a mechanical AST
+// walk to protect, and building the three-layer machinery (an exemptions list,
+// a "which matcher for which flag" pinning test, and a package-scoped AST
+// parser) for a single call site is disproportionate to what it would catch
+// beyond what the behavioral tests below already pin. If a THIRD long-flag
+// gate is added to safecmds.go or curl.go — or if either file's flag-testing
+// surface grows toward git.go's scale — this decision should be revisited: at
+// that point the AST guard's cost (one parser, one exemptions list) is repaid
+// by the same "can't silently regress" property it gives git.go today.
+// ---------------------------------------------------------------------------
+
+// TestEvaluateCp_TargetDirectoryAbbrev_NeverApproved pins pg2-1xq3m's fix: every
+// abbreviated spelling of `--target-directory` GNU coreutils accepts (measured
+// on cp (GNU coreutils) 9.11 — see minAbbrevTargetDirectory) must be recognised
+// and its VALUE checked for writability, exactly like the full spelling.
+//
+// /etc/ is not writable under this evaluator's zone model. BEFORE this fix, the
+// abbreviated rows below fell through to "standard mode" (the last path-like
+// arg is destination): `/etc/` was scanned as an ordinary positional, still
+// caught the write check by accident in this single-destination shape, so the
+// live bug this test actually forecloses is the standard-mode MISATTRIBUTION
+// case pinned separately below
+// (TestEvaluateCp_TargetDirectoryAbbrev_MisattributionWithoutFix) — this test's
+// job is to pin that the intended CODE PATH (the -t/--target-directory arm,
+// not the standard-mode fallback) is what fires for every spelling, which the
+// reason string demonstrates.
+func TestEvaluateCp_TargetDirectoryAbbrev_NeverApproved(t *testing.T) {
+	pe := patheval.New("/home/user/project")
+	r := New(pe)
+
+	spellings := []string{"--t", "--ta", "--tar", "--target-d", "--target-director", "--target-directory"}
+	for _, flag := range spellings {
+		for _, form := range []string{
+			flag + " /etc/",   // separate-token
+			flag + "=/etc/",   // glued
+			flag + "='/etc/'", // glued and quoted
+		} {
+			cmd := "cp ./a.txt " + form
+			input := &hookio.HookInput{
+				ToolName:  "Bash",
+				CWD:       "/home/user/project",
+				ToolInput: mustJSON(map[string]string{"command": cmd}),
+			}
+			got := hookio.Verdict(r.Evaluate(input))
+			if got.Decision != hookio.NoOpinion {
+				t.Errorf("cmd %q: got %s (%s), want abstain — /etc/ is not writable, and this spelling is a real GNU coreutils abbreviation of --target-directory", cmd, got.Decision, got.Reason)
+			}
+			if !strings.Contains(got.Reason, "target directory") {
+				t.Errorf("cmd %q: reason %q does not mention the target directory — the abbreviation may not have been recognised as --target-directory at all (fell through to a different code path)", cmd, got.Reason)
+			}
+		}
+	}
+}
+
+// TestEvaluateCp_TargetDirectoryAbbrev_MisattributionWithoutFix pins the
+// SPECIFIC live bypass pg2-1xq3m measured: with the pre-fix exact-token test,
+// an abbreviated `--target-directory` whose value is NOT the last path-like
+// token gets treated as an ordinary positional by "standard mode"'s
+// last-path-arg-is-destination heuristic — attributing the WRITE check to the
+// wrong argument and approving a write to an unwritable zone.
+//
+// `cp --t /etc/cron.d /home/user/project/payload` really means (GNU coreutils,
+// abbreviation accepted): copy `payload` INTO `/etc/cron.d`. Pre-fix, the
+// exact-token test never recognised `--t`, so evaluateCp's fallback treated
+// `/home/user/project/payload` (the LAST path-like arg, and NOT a real
+// destination at all) as the destination — writable, so it approved — while
+// `/etc/cron.d` (the REAL destination, and unwritable under this zone model)
+// was checked only for READABILITY, which /etc/ typically passes. That is an
+// APPROVE for a write GNU coreutils actually sends to an unwritable path — the
+// same "exact-token miss defaults toward Approve" shape as pg2-os1kq's `git
+// reset --har`.
+func TestEvaluateCp_TargetDirectoryAbbrev_MisattributionWithoutFix(t *testing.T) {
+	pe := patheval.New("/home/user/project")
+	r := New(pe)
+
+	cmd := "cp --t /etc/cron.d /home/user/project/payload"
+	input := &hookio.HookInput{
+		ToolName:  "Bash",
+		CWD:       "/home/user/project",
+		ToolInput: mustJSON(map[string]string{"command": cmd}),
+	}
+	got := hookio.Verdict(r.Evaluate(input))
+	if got.Decision == hookio.Approve {
+		t.Errorf("cmd %q: got APPROVE (%s) — GNU coreutils reads --t as --target-directory and would write payload into /etc/cron.d, which this zone model must not approve", cmd, got.Reason)
+	}
+	if got.Decision != hookio.NoOpinion {
+		t.Errorf("cmd %q: got %s (%s), want abstain (destination not writable)", cmd, got.Decision, got.Reason)
+	}
+}
+
+// TestSafecmds_SedInPlaceAbbrev_ReadOnlyPath_Abstain is the sed twin of the cp
+// abbreviation fix (pg2-1xq3m). BEFORE the fix, an abbreviated --in-place spelling
+// was invisible to isSedInPlace, so the command fell through to the READ-ONLY
+// branch (readPathIssue, which checks READABILITY, not writability) — and
+// /nix/store/abc123/file.txt IS readable under this evaluator's zone model, so
+// this would have APPROVED a command GNU sed actually executes as an in-place
+// EDIT of a file this zone model correctly refuses to let anything WRITE to
+// (see TestSafecmds_SedInPlace_ReadOnlyPath_Abstain for the exact-spelling
+// twin this mirrors).
+func TestSafecmds_SedInPlaceAbbrev_ReadOnlyPath_Abstain(t *testing.T) {
+	pe := patheval.New("/home/user/project")
+	r := New(pe)
+
+	for _, flag := range []string{"--i", "--in", "--in-plac", "--in-place"} {
+		cmd := "sed " + flag + " 's/foo/bar/' /nix/store/abc123/file.txt"
+		input := &hookio.HookInput{
+			ToolName:  "Bash",
+			CWD:       "/home/user/project",
+			ToolInput: mustJSON(map[string]string{"command": cmd}),
+		}
+		got := hookio.Verdict(r.Evaluate(input))
+		if got.Decision == hookio.Approve {
+			t.Errorf("cmd %q: got APPROVE (%s) — GNU sed 4.9 performs the in-place edit for this spelling (measured down to --i), so it must not be treated as a read", cmd, got.Reason)
+		}
+		if got.Decision != hookio.NoOpinion {
+			t.Errorf("cmd %q: got %s (%s), want abstain (write path not writable)", cmd, got.Decision, got.Reason)
+		}
+	}
+}
+
+// TestSafecmds_SedInPlaceAbbrev_WritePath_Approve is the positive control: an
+// abbreviated --in-place spelling targeting a genuinely writable path must
+// still Approve, exactly like the full spelling does
+// (TestSafecmds_SedInPlace_WritePath_Approve) — the fix must not turn every
+// abbreviation into a blanket refusal.
+func TestSafecmds_SedInPlaceAbbrev_WritePath_Approve(t *testing.T) {
+	pe := patheval.New("/home/user/project")
+	r := New(pe)
+
+	for _, flag := range []string{"--i", "--in", "--in-plac", "--in-place"} {
+		cmd := "sed " + flag + " 's/foo/bar/' /home/user/project/file.txt"
+		input := &hookio.HookInput{
+			ToolName:  "Bash",
+			CWD:       "/home/user/project",
+			ToolInput: mustJSON(map[string]string{"command": cmd}),
+		}
+		got := hookio.Verdict(r.Evaluate(input))
+		if got.Decision != hookio.Approve {
+			t.Errorf("cmd %q: got %s (%s), want approve (writable path)", cmd, got.Decision, got.Reason)
+		}
+	}
+}
+
+// TestSafecmds_YqInplaceAbbrev_NotRecognised pins the NOT-AFFECTED measurement
+// for yq (see isYqInPlace's doc): mikefarah/yq's pflag-based parser rejects every
+// abbreviation of --inplace outright, so an abbreviated spelling here is not a
+// live bypass — it is simply an argument yq itself would refuse, and this rule
+// correctly does not treat it as in-place (it falls to the ordinary read path,
+// which is where it belongs since yq would error out and touch nothing).
+func TestSafecmds_YqInplaceAbbrev_NotRecognised(t *testing.T) {
+	pe := patheval.New("/home/user/project")
+	r := New(pe)
+
+	// The distinguishing case is a READ-ONLY path. If an abbreviation were
+	// wrongly recognised as --inplace, this would Abstain (write check) instead
+	// of Approve (read check) — but yq itself rejects every abbreviation of
+	// --inplace, so there is nothing to recognise, and this remains a plain
+	// read regardless of spelling.
+	for _, flag := range []string{"--i", "--in", "--inplac"} {
+		cmd := "yq " + flag + " '.a = 2' /nix/store/abc123/file.yaml"
+		input := &hookio.HookInput{
+			ToolName:  "Bash",
+			CWD:       "/home/user/project",
+			ToolInput: mustJSON(map[string]string{"command": cmd}),
+		}
+		got := hookio.Verdict(r.Evaluate(input))
+		if got.Decision != hookio.Approve {
+			t.Errorf("cmd %q: got %s (%s), want approve — a read-only path is fine for a plain READ; if this abstained, the abbreviation was wrongly recognised as --inplace", cmd, got.Decision, got.Reason)
+		}
+	}
+}
+
 func TestSafecmds_Sqlite3Removed(t *testing.T) {
 	pe := patheval.New("/tmp/project")
 	r := New(pe)

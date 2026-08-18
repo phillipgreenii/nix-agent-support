@@ -865,44 +865,89 @@ func hasUnsafeWritePath(args []string, pe *patheval.PathEvaluator) (bool, string
 	return false, ""
 }
 
+// minAbbrevTargetDirectory is the Long-flag ABBREVIATION MINIMUM for cp's
+// `--target-directory`, whose VALUE evaluateCp reads and rules on (pg2-1xq3m,
+// widening pg2-os1kq's class beyond `git`). GNU coreutils' parse-options-style
+// long-option matching accepts any UNAMBIGUOUS PREFIX, exactly like git's, so an
+// exact-token test for `--target-directory` is bypassable the same way `--hard`
+// was.
+//
+// MEASURED on this tree, 2026-08-18, GNU coreutils 9.11 (`cp (GNU coreutils)
+// 9.11`, resolved via this machine's `cp` — /etc/profiles/per-user/*/bin/cp on
+// this nix-darwin machine, and coreutils' own `cp` on a NixOS one): with a fresh
+// `src/a.txt` and an empty `dst/`, `cp --t dst src/a.txt`, `cp --ta dst
+// src/a.txt`, `cp --target-d dst src/a.txt` and `cp --target-director dst
+// src/a.txt` ALL copied `a.txt` into `dst/` — i.e. all four spellings PERFORMED
+// the same directory-target copy as the full `--target-directory`, and an
+// exact-token test sees none of them. `cp --help` lists exactly one long option
+// beginning with `t` (`-t, --target-directory=DIRECTORY`), so `--t` is git-style
+// unambiguous and is the shortest measured minimum: len("t") = 1.
+//
+// THIS IS THE MEASURED-MINIMUM SIDE OF THE CHOICE cmdparse.HasAbbrevLongFlag's
+// doc and internal/rules/git/git.go's hasAbbrevLongFlag doc both record: the
+// glued VALUE below becomes the write DESTINATION hasUnsafeWritePath-equivalent
+// logic rules on, so an over-match (the open cmdparse.HasLongFlagPrefix) has no
+// safe direction here — it could attribute a stray flag's value to
+// target-directory and skip the real destination check entirely. A measured
+// bound is required instead.
+const minAbbrevTargetDirectory = len("t")
+
 // evaluateCp handles cp with source (read) and destination (write) semantics.
 func evaluateCp(args []string, pe *patheval.PathEvaluator, module string) (hookio.RuleResult, error) {
-	// Check for -t/--target-directory
+	// Check for -t/--target-directory, in any abbreviated spelling GNU coreutils
+	// would accept (see minAbbrevTargetDirectory for the measurement).
 	targetDir := ""
 	for i, a := range args {
-		if (a == "-t" || a == "--target-directory") && i+1 < len(args) {
+		if a == "-t" && i+1 < len(args) {
 			targetDir = args[i+1]
 			break
 		}
-		if v, ok := strings.CutPrefix(a, "--target-directory="); ok {
+		v, ok := cmdparse.HasAbbrevLongFlag(args[i:i+1], "target-directory", minAbbrevTargetDirectory)
+		if ok && v == "" {
+			// Separate-token spelling (`--t DIR` / `--target-director DIR` /
+			// `--target-directory DIR`): the value is the NEXT token, exactly as
+			// the pre-abbreviation exact-token arm read it.
+			if i+1 < len(args) {
+				targetDir = args[i+1]
+			}
+			break
+		}
+		if ok {
+			// Glued spelling (`--t=DIR` / `--target-director=DIR` /
+			// `--target-directory=DIR`).
 			// THE VALUE HALF IS UNWRAPPED (cmdparse.UnwrapGluedQuotes, pg2-6f2gu)
-			// before targetDir is used below. This is a bespoke CutPrefix, not
-			// cmdparse.GluedFlagValue/pathCandidate, but it has the identical gap:
-			// `--target-directory='/etc/'` arrives as the literal 8-byte value
-			// `'/etc/'`, quote characters and all. looksLikePath requires an
-			// UNquoted `/`/`./`/`../`/`~` prefix, so that leading quote made
+			// before targetDir is used below. v now comes from
+			// cmdparse.HasAbbrevLongFlag (pg2-1xq3m widened this arm from a bespoke
+			// `strings.CutPrefix(a, "--target-directory=")` to cover every
+			// abbreviated spelling too — see minAbbrevTargetDirectory), but the
+			// UNWRAP GAP pg2-6f2gu closed is unchanged and applies identically to
+			// every spelling: `--target-directory='/etc/'` (and equally
+			// `--t='/etc/'`) arrives as the literal 8-byte value `'/etc/'`, quote
+			// characters and all. looksLikePath requires an UNquoted
+			// `/`/`./`/`../`/`~` prefix, so that leading quote made
 			// looksLikePath(targetDir) false below — not merely "path looks
 			// unfamiliar", but the entire writability/zone check for the
 			// destination SKIPPED, and evaluateCp fell through to the unconditional
-			// Approve at the end of this branch. MEASURED on this tree before this
-			// fix: with cwd /home/user/project, `cp ./a.txt --target-directory=/etc/`
-			// correctly abstained (destination not writable) while both
-			// `cp ./a.txt --target-directory='/etc/'` and the double-quoted
-			// spelling APPROVED. The separate-token spellings (`-t /etc/`,
-			// `-t '/etc/'`) are unaffected
-			// — cmdparse's ordinary lowering already strips a quote wrapping a WHOLE
-			// token, so only THIS glued form needs the explicit unwrap.
+			// Approve at the end of this branch. MEASURED on this tree before the
+			// pg2-6f2gu fix: with cwd /home/user/project, `cp ./a.txt
+			// --target-directory=/etc/` correctly abstained (destination not
+			// writable) while both `cp ./a.txt --target-directory='/etc/'` and the
+			// double-quoted spelling APPROVED. The separate-token spellings (`-t
+			// /etc/`, `-t '/etc/'`, and now `--t /etc/` / `--target-director
+			// '/etc/'`) are unaffected — cmdparse's ordinary lowering already
+			// strips a quote wrapping a WHOLE token, so only THIS glued form needs
+			// the explicit unwrap.
 			//
-			// PER-CALL-SITE, NOT ROUTED THROUGH pathCandidate/GluedFlagValue: this
-			// extraction is a one-flag special case that has never gone through
-			// either (it predates pg2-wxbr9's pathCandidate seam), and folding it in
-			// now would mean re-deriving this same targetDir value from a candidate
-			// that could ALSO match a non-flag positional — pathCandidate's whole
-			// point. A direct, explicit unwrap on the substring this loop already
-			// knows is the flag's value keeps the change to the one shape that
-			// regressed, matching secrets.firstSecretRef's identical call and
-			// UnwrapGluedQuotes' own pg2-9zgso decision record for why a shared
-			// helper is called explicitly rather than pushed into a lower layer.
+			// NOT ROUTED THROUGH pathCandidate/GluedFlagValue: this extraction is a
+			// one-flag special case that has never gone through either (it
+			// predates pg2-wxbr9's pathCandidate seam), and folding it in now would
+			// mean re-deriving this same targetDir value from a candidate that
+			// could ALSO match a non-flag positional — pathCandidate's whole
+			// point. A direct, explicit unwrap on the value this loop already
+			// extracted keeps the change to the one shape that regressed, matching
+			// secrets.firstSecretRef's identical call and UnwrapGluedQuotes' own
+			// pg2-9zgso decision record for why a shared helper is called
+			// explicitly rather than pushed into a lower layer.
 			unwrapped := cmdparse.UnwrapGluedQuotes(v)
 
 			// pg2-mp9oq: UnwrapGluedQuotes DECLINES — returns v UNCHANGED — on
@@ -1075,6 +1120,19 @@ func extractXargsCommand(args []string) (string, []string) {
 }
 
 // isYqInPlace returns true if args contain -i or --inplace.
+//
+// EXACT-TOKEN "--inplace" IS NOT THE pg2-os1kq/pg2-1xq3m BUG CLASS HERE — MEASURED
+// NOT AFFECTED. That class needs a long-flag parser that accepts unambiguous
+// PREFIX abbreviations (GNU getopt_long / GNU coreutils' parse-options); mikefarah/
+// yq's flag parser (spf13/pflag, via cobra) does not. MEASURED on this tree,
+// 2026-08-18, yq v4.53.2 (`yq (https://github.com/mikefarah/yq/) version v4.53.2`,
+// this machine's `yq`) and separately yq v4.34.2: `yq --inplac '.a = 2' f.yaml`,
+// `yq --in '.a = 2' f.yaml` and `yq --i '.a = 2' f.yaml` all answered `Error:
+// unknown flag: --inplac` (etc.) and left the file UNCHANGED, exit 1 — every
+// abbreviation pflag refuses outright, identically to a random unknown flag; only
+// the full `--inplace` spelling (and the short `-i`) is ever recognised. So there
+// is no shorter spelling to widen this test for, and adding one would be dead code
+// for a spelling yq itself rejects.
 func isYqInPlace(args []string) bool {
 	for _, a := range args {
 		if a == "-i" || a == "--inplace" {
@@ -1084,10 +1142,37 @@ func isYqInPlace(args []string) bool {
 	return false
 }
 
-// isSedInPlace returns true if args contain -i, -i<suffix>, or --in-place.
+// isSedInPlace returns true if args contain -i, -i<suffix>, or any abbreviated
+// spelling of --in-place.
+//
+// MEASURED AFFECTED FOR GNU sed, NOT REACHABLE VIA THIS SESSION'S RESOLVED `sed`
+// (pg2-1xq3m, widening pg2-os1kq's class beyond `git`). This machine's `sed` on
+// PATH resolves ONLY to /usr/bin/sed (BSD sed): `sed --version` answers `sed:
+// illegal option -- -`, and even the FULL spelling is refused the same way —
+// `sed --in-place 's/hi/bye/' f` errors identically before ever reaching the
+// abbreviation question, so BSD sed itself is not this bug's shape. But this repo
+// explicitly ships for NixOS too (see this repo's CLAUDE.md), where `sed` is
+// ordinarily GNU sed, and GNU sed genuinely has the getopt_long abbreviation
+// behavior the git class is about. MEASURED on this tree, 2026-08-18, GNU sed 4.9
+// (`sed (GNU sed) 4.9`, built from this workspace's own nix store — no `gsed` is
+// on THIS session's PATH, so it was invoked by its store path directly): with a
+// fresh one-line file, `sed --in-place`, `--in-plac`, `--in` and even `--i` (the
+// single character after `--`) ALL edited the file in place — i.e. every prefix
+// down to the minimum possible length PERFORMED the write, and the prior
+// exact-token test saw none but the first. `--i` is a BOOLEAN dangerous-flag test
+// (only whether in-place mode is on, never the optional `=SUFFIX` value), so
+// per cmdparse.HasLongFlagPrefix's doc an OPEN, unbounded prefix match is the
+// correct — and fail-safe — matcher: over-matching only routes MORE invocations
+// through hasUnsafeWritePath's write-path check below instead of the read-only
+// readPathIssue path, never the other way. Using it also incidentally starts
+// recognising the `--in-place=SUFFIX` glued form, which the old exact-token test
+// never matched at all.
 func isSedInPlace(args []string) bool {
+	if cmdparse.HasLongFlagPrefix(args, "in-place") {
+		return true
+	}
 	for _, a := range args {
-		if a == "-i" || a == "--in-place" || (strings.HasPrefix(a, "-i") && !strings.HasPrefix(a, "-in")) {
+		if a == "-i" || (strings.HasPrefix(a, "-i") && !strings.HasPrefix(a, "-in")) {
 			return true
 		}
 	}

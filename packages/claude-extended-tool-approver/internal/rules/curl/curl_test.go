@@ -119,6 +119,30 @@ func TestCurl_NoCurl_Abstain(t *testing.T) {
 	}
 }
 
+// TestCurl_RequestAbbrev_NotRecognised_Approve pins the NOT-AFFECTED
+// measurement recorded on effectiveMethod's doc (pg2-1xq3m): curl's own option
+// parser rejects every abbreviation of --request outright (measured curl
+// 8.7.1: `--requ`/`--req`/`--dat` each answer `is unknown`, identically to a
+// bogus flag), so an abbreviated spelling here is not a live method-detection
+// bypass — curl itself would refuse the command before ever making the
+// request. This rule correctly does NOT read `--requ POST` as an explicit
+// method: it is inert (falls through to the GET-by-default computation),
+// which is what keeps this test's read-only-host case at Approve.
+func TestCurl_RequestAbbrev_NotRecognised_Approve(t *testing.T) {
+	r := New(configrules.CurlConfig{})
+	cmds := []string{
+		"curl --requ POST https://api.github.com/repos/foo/bar",
+		"curl --req DELETE https://api.github.com/repos/foo/bar",
+		"curl --reques PUT https://api.github.com/repos/foo/bar",
+	}
+	for _, cmd := range cmds {
+		got := hookio.Verdict(r.Evaluate(makeInput(cmd)))
+		if got.Decision != hookio.Approve {
+			t.Errorf("cmd %q: got %s (%s), want approve — curl rejects this abbreviation outright (measured curl 8.7.1: exit 2 'is unknown'), so it is not read as an explicit method", cmd, got.Decision, got.Reason)
+		}
+	}
+}
+
 func TestCurl_NonBashTool_Abstain(t *testing.T) {
 	r := New(configrules.CurlConfig{})
 	input := &hookio.HookInput{

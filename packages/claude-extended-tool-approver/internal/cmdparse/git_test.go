@@ -152,6 +152,46 @@ func TestHasLongFlagPrefix_MatchesEveryPrefixOfCanonical(t *testing.T) {
 	}
 }
 
+// TestHasAbbrevLongFlag pins the measured-minimum matcher promoted for
+// pg2-1xq3m (safecmds' `cp --target-directory`, whose glued value is
+// load-bearing and so needs the BOUNDED matcher rather than HasLongFlagPrefix's
+// open one).
+func TestHasAbbrevLongFlag(t *testing.T) {
+	tests := []struct {
+		name      string
+		args      []string
+		flag      string
+		minLen    int
+		wantValue string
+		wantOK    bool
+	}{
+		{"full name", []string{"--target-directory", "/tmp"}, "target-directory", 1, "", true},
+		{"one char short", []string{"--target-director", "/tmp"}, "target-directory", 1, "", true},
+		{"down to minLen", []string{"--t", "/tmp"}, "target-directory", 1, "", true},
+		{"glued value on abbreviation", []string{"--target-d=/tmp"}, "target-directory", 1, "/tmp", true},
+		{"glued value on minimal spelling", []string{"--t=/tmp"}, "target-directory", 1, "/tmp", true},
+		{"bare terminator is not a flag at any n", []string{"--"}, "target-directory", 1, "", false},
+		// "--tar" IS a genuine prefix of "target-directory" (3 chars), but
+		// minLen=4 means n never drops below 4, so this 3-char spelling is
+		// correctly never tried and must not match.
+		{"below minLen never matches even though it is a real prefix", []string{"--tar"}, "target-directory", 4, "", false},
+		{"absent", []string{"push", "origin"}, "target-directory", 1, "", false},
+		{"longer token vs shorter canonical", []string{"--target-directoryx"}, "target-directory", 1, "", false},
+		// LONGEST FIRST: when two candidate prefixes are both technically present
+		// as literal args, the longer (more specific) spelling's value wins.
+		{"longest spelling wins", []string{"--t=short", "--target-directory=long"}, "target-directory", 1, "long", true},
+		{"empty args", nil, "target-directory", 1, "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			value, ok := HasAbbrevLongFlag(tt.args, tt.flag, tt.minLen)
+			if value != tt.wantValue || ok != tt.wantOK {
+				t.Errorf("HasAbbrevLongFlag(%v, %q, %d) = (%q, %v), want (%q, %v)", tt.args, tt.flag, tt.minLen, value, ok, tt.wantValue, tt.wantOK)
+			}
+		})
+	}
+}
+
 func TestFirstOperand(t *testing.T) {
 	tests := []struct {
 		name      string

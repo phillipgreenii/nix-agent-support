@@ -134,8 +134,9 @@ func HasLongFlag(args []string, name string) (value string, ok bool) {
 // operand, eliding a separated flag argument, or reading an `=`-glued value —
 // because there an over-match shifts an operand count or attributes a value to a
 // flag git never parsed, and neither error has a safe direction. Such a caller
-// needs a MEASURED per-subcommand minimum instead (see internal/rules/git's
-// hasAbbrevLongFlag, which records the rule for choosing between the two).
+// needs a MEASURED per-subcommand minimum instead: HasAbbrevLongFlag below, or
+// internal/rules/git's package-private hasAbbrevLongFlag (which predates it and
+// records, in its own doc, the rule for choosing between the two).
 //
 // COVERS: the bare form `--name`; every non-empty `--`-prefixed prefix of it; and
 // the `=`-glued form of any of those (`--force-with-lea=main`), whose value is
@@ -172,6 +173,42 @@ func HasLongFlagPrefix(args []string, canonical string) bool {
 		}
 	}
 	return false
+}
+
+// HasAbbrevLongFlag reports whether args carries long flag name in any spelling
+// a GNU-getopt_long-style parser would accept — the full name, or `--` followed
+// by an unambiguous prefix down to minLen characters — and returns the value of
+// the `=`-glued form of whichever spelling matched (see HasLongFlag for what an
+// empty value means). It asks HasLongFlag once per candidate spelling, LONGEST
+// FIRST, so the glued value is read from the longest spelling actually present.
+//
+// This is the exported twin of internal/rules/git's package-private
+// hasAbbrevLongFlag (pg2-os1kq): same body, promoted here so a caller OUTSIDE
+// the git rule — internal/rules/safecmds' `cp --target-directory`, whose
+// `=`-glued VALUE becomes the write destination the gate rules on (pg2-1xq3m) —
+// can share the primitive instead of re-deriving it. git.go's own
+// hasAbbrevLongFlag is left as its own declaration rather than rewritten to call
+// this one, so the git package's pinned AST-guard tests (flagmatch_test.go),
+// which walk git.go's OWN source for the call shape, are undisturbed.
+//
+// minLen is per CALLER, not a property of this function: what a prefix is
+// ambiguous with depends on which option table the target program parsed
+// against, so it must be MEASURED against the real binary — see
+// internal/rules/git/git.go's hasAbbrevLongFlag doc for the worked examples
+// (`git push --repo`, `git config`) and its "WHICH MATCHER TO USE" section for
+// the rule that decides between this and the open, unbounded HasLongFlagPrefix:
+// use THIS where the match's LENGTH or the flag's VALUE is load-bearing: a
+// caller reading the glued value needs to know it came from an unambiguous
+// spelling of THIS flag, not an over-matched prefix that could, in principle,
+// also be the start of some other option's name. Use HasLongFlagPrefix instead
+// for a plain BOOLEAN dangerous-flag test, where over-matching is fail-safe.
+func HasAbbrevLongFlag(args []string, name string, minLen int) (string, bool) {
+	for n := len(name); n >= minLen; n-- {
+		if v, ok := HasLongFlag(args, name[:n]); ok {
+			return v, true
+		}
+	}
+	return "", false
 }
 
 // FirstOperand returns the first non-flag token in args and its index, or
