@@ -64,6 +64,15 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 	for _, pc := range parsed {
 		base := filepath.Base(pc.Executable)
 		if isDangerous(base, pc.Args) {
+			// Reject, not Ask: this package's Decision policy (top of file) is a
+			// hard block matching hook-support's DENY, the same non-overridable
+			// treatment ceta gives `assume`'s assume-role and config-rules' blocked
+			// basenames — every member of `dangerous` is destructive enough (sudo,
+			// dd, mkfs, reboot, …) that a user-overridable prompt is the wrong
+			// floor. Would soften to Ask only for a SPECIFIC entry shown to have a
+			// legitimate query form this rule over-blocks — exactly the shape
+			// `mount` already got via operandGated (pg2-2nm54); a denylist member
+			// found to fit that shape belongs there, not here.
 			return hookio.RuleResult{
 				Decision: hookio.Reject,
 				Reason:   "dangerous command blocked: " + base,
