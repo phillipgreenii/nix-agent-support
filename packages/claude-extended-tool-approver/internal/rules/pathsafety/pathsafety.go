@@ -43,6 +43,56 @@ var agentConfigBasenames = map[string]bool{
 	".mcp.json":           true,
 }
 
+// agentHooksDirName is the CLOSED, single directory name that, sitting directly
+// inside a `.claude` directory, this rule must not approve a write to AT ANY DEPTH
+// beneath it (the hooks carve-out ADR — see docs/adr/index.md for its current
+// number — "the agent-config carve-out covers .claude/hooks/, not agents/ or
+// commands/", which extends ADR 0041). A hook is arbitrary code executed on every
+// tool call, the same privilege-escalation shape ADR 0041 already covers for
+// settings.json/settings.local.json, so the reasoning transfers even though a hook
+// script itself is not "config" in the ADR-0041 sense.
+//
+// UNLIKE agentConfigBasenames (a depth-1, exact-basename match), this carve-out
+// matches at ANY DEPTH beneath `hooks/`, because hook scripts nest
+// (`.claude/hooks/lib/foo.sh` is as executable as `.claude/hooks/foo.sh`). The
+// `hooks` directory itself MUST still sit DIRECTLY inside `.claude` — a look-alike
+// such as `packages/ccpool/ccpool-plugin/hooks/` is untouched, since its parent is
+// not `.claude`.
+//
+// `.claude/agents/` and `.claude/commands/` sit in the same structural position
+// (one level deeper than the depth-1 config predicate) but are deliberately NOT
+// covered: they shape agent behavior without executing on every call, and the
+// operator ruling this carve-out records priced that distinction explicitly.
+const agentHooksDirName = "hooks"
+
+// isAgentHooksPath reports whether an already-normalized absolute path names a
+// file at or beneath a `.claude/hooks/` directory, for the purposes of the hooks
+// carve-out ADR. Folding is unconditionally case-insensitive for both path
+// components tested here, for the identical APFS-bypass reason documented on
+// isAgentConfigPath (pg2-2ng80): this machine's home volume folds case, so an
+// exact-match predicate would leave `.CLAUDE/hooks/x.sh` approved.
+func isAgentHooksPath(path string) bool {
+	if path == "" {
+		return false
+	}
+	parts := splitPath(path)
+	for i := 0; i+1 < len(parts); i++ {
+		if strings.EqualFold(parts[i], agentConfigDir) && strings.EqualFold(parts[i+1], agentHooksDirName) {
+			return true
+		}
+	}
+	return false
+}
+
+// splitPath cleans path and splits it into its directory components, shared by
+// every predicate in this package that needs to test path components at more than
+// one fixed depth (isAgentHooksPath here; pluginHooksDir in plugin_hooks.go).
+// filepath.Clean("") returns ".", so the empty-path case is handled by callers
+// before reaching here (both current callers already guard it).
+func splitPath(path string) []string {
+	return strings.Split(filepath.Clean(path), string(filepath.Separator))
+}
+
 // isAgentConfigPath reports whether an already-normalized absolute path names an
 // agent-config or agent-instruction file for the purposes of ADR 0041.
 //
@@ -161,6 +211,17 @@ func (r *Rule) isAgentConfigWrite(path string) bool {
 	return isAgentConfigPath(r.eval.ResolvePath(path))
 }
 
+// isAgentHooksWrite applies isAgentHooksPath the same double-normalized way
+// isAgentConfigWrite applies isAgentConfigPath: the path as NAMED and the
+// symlink-RESOLVED path, so a symlink elsewhere pointing INTO `.claude/hooks`
+// cannot be used to slip the write past this check.
+func (r *Rule) isAgentHooksWrite(path string) bool {
+	if isAgentHooksPath(r.eval.CleanPath(path)) {
+		return true
+	}
+	return isAgentHooksPath(r.eval.ResolvePath(path))
+}
+
 func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 	if fileTools[input.ToolName] {
 		path, err := input.FilePath()
@@ -205,6 +266,37 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 				return hookio.RuleResult{
 					Decision: hookio.NoOpinion,
 					Reason:   "agent-config write under " + agentConfigDir + "/: " + path + " (deferred to claude-code)",
+					Module:   r.Name(),
+				}, nil
+			}
+			// Hooks carve-out: a hook under `.claude/hooks/**` is arbitrary code run on
+			// every tool call — the same escalation shape as the agent-config check
+			// above, extended to a directory ADR 0041 did not weigh (see
+			// agentHooksDirName's doc comment for the ADR and the operator ruling it
+			// records). It MUST sit here, ahead of the CanWrite() approve and inside this
+			// same terminal branch, for the identical reason ADR 0041's Implementation
+			// constraint gives for the agent-config check: Abstain means "continue", so a
+			// rule ahead of path-safety returning it would be a silent no-op.
+			if r.isAgentHooksWrite(path) {
+				return hookio.RuleResult{
+					Decision: hookio.NoOpinion,
+					Reason:   "agent-hooks write under " + agentConfigDir + "/" + agentHooksDirName + "/: " + path + " (deferred to claude-code)",
+					Module:   r.Name(),
+				}, nil
+			}
+			// Plugin hooks execution-path carve-out (ADR 0049): the carve-out above
+			// covers `.claude/hooks/`, which is empty on this machine — hooks arrive
+			// entirely via plugins, under `.claude/plugins/**`, which ADR 0041 leaves
+			// approved as a whole (a plugin checkout is a large tree of
+			// legitimately-written files; the hooks/-style enumerated-directory carve-out
+			// does not transfer to it). ADR 0049 narrows this to exactly the paths within
+			// a plugin that can cause execution: the plugin's own `hooks/hooks.json`
+			// manifest, and the scripts it names via `${CLAUDE_PLUGIN_ROOT}`. See
+			// plugin_hooks.go for the resolution logic.
+			if r.isPluginHooksExecutionWrite(path) {
+				return hookio.RuleResult{
+					Decision: hookio.NoOpinion,
+					Reason:   "plugin hooks execution-path write: " + path + " (deferred to claude-code)",
 					Module:   r.Name(),
 				}, nil
 			}

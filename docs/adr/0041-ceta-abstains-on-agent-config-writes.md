@@ -1,8 +1,18 @@
 # CETA abstains on agent-config writes; the verdict belongs to Claude Code
 
-**Status**: Accepted (resolves `pg2-pggza`)
+**Status**: Accepted (resolves `pg2-pggza`), extended by
+[0051](0051-ceta-agent-config-carve-out-covers-hooks.md) and
+[0049](0049-ceta-plugin-hooks-execution-path-carveout.md)
 **Date**: 2026-07-29
 **Deciders**: Phillip Green II
+
+> **Extended 2026-08-12 by ADR 0051** (`pg2-k1nxo`, landed via `pg2-7mors`). Nothing below is
+> superseded — the carve-out still abstains and Claude Code still owns the verdict. ADR 0051
+> settles a case this ADR did not weigh: `.claude/hooks/` is a level deeper than the depth-1
+> predicate reaches, yet a hook is arbitrary code run on every tool call, so it is covered.
+> `.claude/agents/` and `.claude/commands/` are deliberately **not** covered, and remain approved.
+> ADR 0049 (`pg2-nueik`, landed via `pg2-7mors`) extends the same reasoning to plugin-supplied
+> hooks via a narrower execution-path rule.
 
 ## Context
 

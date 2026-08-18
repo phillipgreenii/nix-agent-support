@@ -429,6 +429,232 @@ func TestPathSafety_WriteProjectClaudeNonConfig_Approve(t *testing.T) {
 	}
 }
 
+// --- hooks carve-out: CETA abstains on writes under `.claude/hooks/` -----------
+//
+// Extends ADR 0041 (see docs/adr/index.md for the current ADR number): a hook is
+// arbitrary code executed on every tool call, the same privilege-escalation shape
+// ADR 0041 already covers for settings.json/settings.local.json. UNLIKE the
+// depth-1 agent-config predicate, this one matches at ANY DEPTH beneath
+// `.claude/hooks/`, because hook scripts nest. `.claude/agents/` and
+// `.claude/commands/` are DELIBERATELY NOT covered — the operator ruling this
+// extends priced that distinction explicitly (0 corpus writes to hooks/ vs. 73/49
+// to agents/commands/), and TestPathSafety_WriteProjectClaudeNonConfig_Approve
+// above already pins that they stay approved.
+
+func TestPathSafety_WriteAgentHooks_Abstain(t *testing.T) {
+	const project = "/home/user/project"
+	cases := []struct {
+		name string
+		tool string
+		path string
+	}{
+		{"hooks dir direct child", "Write", project + "/.claude/hooks/pre-tool-use.sh"},
+		{"hooks dir direct child via Edit", "Edit", project + "/.claude/hooks/pre-tool-use.sh"},
+		{"hooks dir direct child via MultiEdit", "MultiEdit", project + "/.claude/hooks/pre-tool-use.sh"},
+		{"hooks dir direct child via Delete", "Delete", project + "/.claude/hooks/pre-tool-use.sh"},
+		{"nested beneath hooks dir", "Write", project + "/.claude/hooks/lib/common.sh"},
+		{"deeply nested beneath hooks dir", "Write", project + "/.claude/hooks/lib/vendor/pkg/util.sh"},
+		{"hooks.json manifest directly under .claude/hooks", "Write", project + "/.claude/hooks/hooks.json"},
+		{"the hooks directory itself", "Write", project + "/.claude/hooks"},
+		{"nested worktree project", "Write", project + "/.workforests/set/repo/.claude/hooks/foo.sh"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			pe := patheval.New(project)
+			r := New(pe)
+			if !pe.Evaluate(tc.path).CanWrite() {
+				t.Fatalf("precondition: %s is not in a writable zone, so this case cannot show the carve-out is load-bearing", tc.path)
+			}
+			got := hookio.Verdict(r.Evaluate(writeInput(tc.tool, tc.path, project)))
+			if got.Decision != hookio.NoOpinion {
+				t.Errorf("%s %s: got %s (%s), want abstain (hooks carve-out)", tc.tool, tc.path, got.Decision, got.Reason)
+			}
+		})
+	}
+}
+
+// A directory that merely resembles `.claude/hooks/` — not a direct child of a
+// real `.claude` — is untouched. This is the ccpool-plugin shape the hooks carve-out
+// ADR names explicitly as a non-match.
+func TestPathSafety_WriteHooksLookalike_Approve(t *testing.T) {
+	const project = "/home/user/project"
+	cases := []struct {
+		name string
+		path string
+	}{
+		{"hooks dir not under .claude at all", project + "/packages/ccpool/ccpool-plugin/hooks/hooks.json"},
+		{"hooks dir under a directory that merely resembles .claude", project + "/.claudex/hooks/foo.sh"},
+		{"component merely resembles hooks, not an exact match", project + "/.claude/my-hooks/foo.sh"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			pe := patheval.New(project)
+			r := New(pe)
+			got := hookio.Verdict(r.Evaluate(writeInput("Write", tc.path, project)))
+			if got.Decision != hookio.Approve {
+				t.Errorf("Write %s: got %s (%s), want approve", tc.path, got.Decision, got.Reason)
+			}
+		})
+	}
+}
+
+// The verdict is Abstain specifically, mirroring ADR 0041's stance.
+func TestPathSafety_WriteAgentHooks_EncodesNoVerdict(t *testing.T) {
+	const project = "/home/user/project"
+	pe := patheval.New(project)
+	r := New(pe)
+	got := hookio.Verdict(r.Evaluate(writeInput("Write", project+"/.claude/hooks/foo.sh", project)))
+	if got.Decision == hookio.Ask || got.Decision == hookio.Reject {
+		t.Errorf("agent-hooks write: got %s, want abstain", got.Decision)
+	}
+	if got.Decision != hookio.NoOpinion {
+		t.Errorf("agent-hooks write: got %s, want abstain", got.Decision)
+	}
+}
+
+// CASE FOLDING, the same APFS-bypass reasoning as isAgentConfigPath (pg2-2ng80),
+// applied to both components this predicate tests.
+func TestPathSafety_WriteAgentHooks_CaseFolding(t *testing.T) {
+	const project = "/home/user/project"
+	cases := []struct {
+		name string
+		path string
+		want hookio.Decision
+	}{
+		{"dir .CLAUDE + hooks", project + "/.CLAUDE/hooks/foo.sh", hookio.NoOpinion},
+		{"dir .Claude + HOOKS", project + "/.Claude/HOOKS/foo.sh", hookio.NoOpinion},
+		{"basename varied, dirs lowercase", project + "/.claude/hooks/FOO.SH", hookio.NoOpinion},
+		{"all-caps dir and hooks, nested", project + "/.CLAUDE/HOOKS/lib/FOO.SH", hookio.NoOpinion},
+		// folding must not become fuzzy matching
+		{"dir claude without the dot", project + "/claude/hooks/foo.sh", hookio.Approve},
+		{"dir .claudex", project + "/.claudex/hooks/foo.sh", hookio.Approve},
+		{"hooks lookalike one level too deep to be the hooks dir itself", project + "/.claude/skills/hooks/foo.sh", hookio.Approve},
+	}
+	for _, tc := range cases {
+		for _, tool := range []string{"Write", "Edit", "MultiEdit", "Delete"} {
+			t.Run(tc.name+"/"+tool, func(t *testing.T) {
+				pe := patheval.New(project)
+				r := New(pe)
+				if !pe.Evaluate(tc.path).CanWrite() {
+					t.Fatalf("precondition: %s is not in a writable zone", tc.path)
+				}
+				got := hookio.Verdict(r.Evaluate(writeInput(tool, tc.path, project)))
+				if got.Decision != tc.want {
+					t.Errorf("%s %s: got %s (%s), want %s", tool, tc.path, got.Decision, got.Reason, tc.want)
+				}
+			})
+		}
+	}
+}
+
+func TestIsAgentHooksPath(t *testing.T) {
+	cases := []struct {
+		name string
+		path string
+		want bool
+	}{
+		{"baseline, direct child", "/p/.claude/hooks/foo.sh", true},
+		{"nested", "/p/.claude/hooks/lib/foo.sh", true},
+		{"the hooks dir itself", "/p/.claude/hooks", true},
+		{"case varied", "/p/.CLAUDE/HOOKS/foo.sh", true},
+		{"not under .claude at all", "/p/hooks/foo.sh", false},
+		{"hooks one level too deep", "/p/.claude/skills/hooks/foo.sh", false},
+		{"dir merely resembles .claude", "/p/.claudex/hooks/foo.sh", false},
+		{"empty path", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isAgentHooksPath(tc.path); got != tc.want {
+				t.Errorf("isAgentHooksPath(%q) = %v, want %v", tc.path, got, tc.want)
+			}
+		})
+	}
+}
+
+// Reads are unaffected, mirroring ADR 0041's Decision.
+func TestPathSafety_ReadAgentHooks_StillApprove(t *testing.T) {
+	const project = "/home/user/project"
+	for _, p := range []string{
+		project + "/.claude/hooks/foo.sh",
+		project + "/.CLAUDE/HOOKS/foo.sh",
+	} {
+		pe := patheval.New(project)
+		r := New(pe)
+		input := &hookio.HookInput{
+			ToolName:  "Read",
+			ToolInput: mustJSON(map[string]string{"file_path": p}),
+			CWD:       project,
+		}
+		got := hookio.Verdict(r.Evaluate(input))
+		if got.Decision != hookio.Approve {
+			t.Errorf("Read %s: got %s (%s), want approve (reads are unaffected)", p, got.Decision, got.Reason)
+		}
+	}
+}
+
+// User-global `~/.claude/hooks/` — the ADR's scope covers both project-local and
+// user-global `.claude/`, identically to ADR 0041.
+func TestPathSafety_WriteUserGlobalAgentHooks_Abstain(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := os.Mkdir(filepath.Join(home, ".git"), 0o755); err != nil {
+		t.Fatalf("make temp home a real repo: %v", err)
+	}
+	pe := patheval.New(home)
+	r := New(pe)
+	p := filepath.Join(home, ".claude", "hooks", "foo.sh")
+	if !pe.Evaluate(p).CanWrite() {
+		t.Fatalf("precondition: %s is not writable with $HOME as project root", p)
+	}
+	got := hookio.Verdict(r.Evaluate(writeInput("Write", p, home)))
+	if got.Decision != hookio.NoOpinion {
+		t.Errorf("Write %s with $HOME as project root: got %s (%s), want abstain", p, got.Decision, got.Reason)
+	}
+}
+
+// A symlink pointing INTO `.claude/hooks` must not slip the write past this check.
+func TestPathSafety_WriteAgentHooksViaSymlink_Abstain(t *testing.T) {
+	project := t.TempDir()
+	hooksDir := filepath.Join(project, ".claude", "hooks")
+	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(hooksDir, "pre-tool-use.sh")
+	if err := os.WriteFile(target, []byte("#!/bin/sh\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(project, "my-hook.sh")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	pe := patheval.New(project)
+	r := New(pe)
+	got := hookio.Verdict(r.Evaluate(writeInput("Write", link, project)))
+	if got.Decision != hookio.NoOpinion {
+		t.Errorf("Write via symlink to .claude/hooks/pre-tool-use.sh: got %s (%s), want abstain", got.Decision, got.Reason)
+	}
+}
+
+// TestADR_PathSafety_AgentHooksSiteStaysTerminal pins the same boundary
+// TestADR0044_PathSafety_AgentConfigSiteStaysTerminal pins for the ADR 0041 site:
+// a TERMINAL NoOpinion with a nil error, not a refusal that continues the chain.
+func TestADR_PathSafety_AgentHooksSiteStaysTerminal(t *testing.T) {
+	pe := patheval.New("/home/user/project")
+	r := New(pe)
+	input := &hookio.HookInput{
+		ToolName:  "Write",
+		ToolInput: mustJSON(map[string]string{"file_path": "/home/user/project/.claude/hooks/foo.sh", "content": "x"}),
+		CWD:       "/home/user/project",
+	}
+	res, err := r.Evaluate(input)
+	if err != nil {
+		t.Fatalf("agent-hooks write returned err=%v; want a TERMINAL verdict (nil error)", err)
+	}
+	if res.Decision != hookio.NoOpinion {
+		t.Errorf("agent-hooks write = %s, want abstain", res.Decision)
+	}
+}
+
 // CASE FOLDING (pg2-2ng80). isAgentConfigPath originally folded case in ONE of its
 // three parts — the `.md` extension — and compared the directory name and the config
 // basenames exactly. On this machine that made the control bypassable rather than
