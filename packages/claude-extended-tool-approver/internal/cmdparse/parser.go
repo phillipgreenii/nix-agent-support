@@ -516,12 +516,10 @@ func hasWriteFlag(cmd string, args []string) bool {
 //     and the SAME Ask as `diff.external` and `diff.<driver>.textconv`, which is the
 //     repo's own statement that criteria 1 and 3 name one hazard, not two.
 //   - CETA'S THREAT MODEL DOES NOT TREAT THE REPO AS HOSTILE, so nothing else in the
-//     package is relying on this criterion. `patheval` reports the project/CWD
-//     `PathReadWrite`; ADR 0041's Context names that trust as the cause of a
-//     false-allow rather than as a mistake to undo; ADR 0040's Context bounds its own
-//     scope with "this is not a remote-attacker vector". `primarycommit`'s resolver
-//     reads repo-local `.git/config` and TRUSTS it to name the primary branch. This
-//     criterion was the only place in CETA asserting the opposite.
+//     package is relying on this criterion — see ADR 0053 ("What is trusted vs. what
+//     is screened") for the full statement of what is trusted, what is screened, and
+//     why. This criterion was the only place in CETA asserting the opposite; it no
+//     longer carries that claim itself.
 //
 // ONE GAP FOUND HERE AND CLOSED WHERE IT BELONGS (pg2-a12rl). At the TOP level the env
 // spelling `GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.fsmonitor GIT_CONFIG_VALUE_0=… git
