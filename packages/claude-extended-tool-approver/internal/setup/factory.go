@@ -50,6 +50,32 @@ func NewEngineForCWDWithShellStore(cwd string, shells killshell.ShellStore) *eng
 }
 
 func newEngineForCWD(cwd string, shells killshell.ShellStore) *engine.Engine {
+	// Load the consumer config ONCE PER CALL and inject its structured
+	// sub-configs into the kubectl, build-tools, ssh, vault, curl, and monorepo
+	// rules (DI, ADR 0033), so the base binary stays generic and all consumer
+	// specifics live in rules.json.
+	//
+	// This function (and therefore NewEngineForCWD / NewEngineForCWDWithShellStore,
+	// and the live PreToolUse hook handler in cmd/claude-extended-tool-approver's
+	// main.go) is UNCHANGED by pg2-rszk3's replay-path engine cache: it still
+	// re-reads rules.json from disk on every call, exactly as before. The hook
+	// handler is one process per invocation (main() parses one hookio.HookInput
+	// and exits), so it already pays this cost exactly once; the replay cache
+	// (EngineCache, in enginecache.go, this package) exists ONLY for the
+	// evaluate/baseline/compare CLI subcommands, which replay hundreds of
+	// thousands of rows against a small set of distinct CWDs in one process.
+	cfg := configrules.Load(configrules.DefaultPath())
+	return newEngineForCWDWithConfig(cwd, shells, cfg)
+}
+
+// newEngineForCWDWithConfig is newEngineForCWD with the consumer config
+// factored out as a parameter, so EngineCache (enginecache.go, replay-only)
+// can supply an already-loaded *configrules.Config once and skip re-parsing
+// rules.json for every distinct CWD. Everything else here is still rebuilt
+// per CWD: the project-root walk, the path evaluator, the sandbox config read,
+// and the ~17 rule modules RuleChain constructs — only the config PARSE is
+// shared.
+func newEngineForCWDWithConfig(cwd string, shells killshell.ShellStore, cfg *configrules.Config) *engine.Engine {
 	projectRoot := patheval.DetectProjectRoot(cwd)
 	pe := patheval.NewWithCWD(projectRoot, cwd)
 
@@ -61,12 +87,6 @@ func newEngineForCWD(cwd string, shells killshell.ShellStore) *engine.Engine {
 	if os.Getenv("CLAUDE_TOOL_APPROVER_TRACE") == "1" {
 		eng.SetTrace(true)
 	}
-
-	// Load the consumer config ONCE and inject its structured sub-configs into
-	// the kubectl, build-tools, ssh, vault, curl, and monorepo rules (DI, ADR
-	// 0033), so the base binary stays generic and all consumer specifics live in
-	// rules.json.
-	cfg := configrules.Load(configrules.DefaultPath())
 
 	eng.RegisterRules(RuleChain(eng, pe, cfg, shells)...)
 

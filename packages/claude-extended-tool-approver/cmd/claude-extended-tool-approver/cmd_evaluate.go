@@ -171,6 +171,11 @@ func runEvaluate(daysVal int, sinceVal, settingsPathVal, formatVal, approvalSour
 
 	var results []evalResult
 
+	// Engines are memoized by CWD (and rules.json parsed at most once) for the
+	// duration of this replay — see setup.EngineCache. Measured: 351,719 rows
+	// against 1,240 distinct CWDs (pg2-rszk3).
+	engines := setup.NewEngineCache()
+
 	for _, row := range rows {
 		// approval_source classifies CONTEXT, not outcome, so it is derived and
 		// filtered before anything else (including the stale-cwd short-circuit).
@@ -199,8 +204,10 @@ func runEvaluate(daysVal int, sinceVal, settingsPathVal, formatVal, approvalSour
 			r.HookDecision = *row.HookDecision
 		}
 
-		// Check if CWD exists
-		if _, err := os.Stat(row.CWD); os.IsNotExist(err) {
+		// Replay through the CWD-cached engine; stale mirrors the previous
+		// per-row os.Stat(row.CWD) check, now amortized per distinct CWD too.
+		eng, stale := engines.EngineForCWD(row.CWD)
+		if stale {
 			r.Category = "stale-cwd"
 			counts["stale-cwd"]++
 			if !*missesOnly {
@@ -209,8 +216,6 @@ func runEvaluate(daysVal int, sinceVal, settingsPathVal, formatVal, approvalSour
 			continue
 		}
 
-		// Replay through engine
-		eng := setup.NewEngineForCWD(row.CWD)
 		input := &hookio.HookInput{
 			ToolName:  row.ToolName,
 			ToolInput: json.RawMessage(row.ToolInputJSON),

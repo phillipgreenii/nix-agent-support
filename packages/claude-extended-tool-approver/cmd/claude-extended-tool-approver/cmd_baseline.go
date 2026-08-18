@@ -76,14 +76,22 @@ func runBaseline(settingsPathVal, outputVal string) {
 	sandboxCounts := map[string]int{"on": 0, "off": 0, "unknown": 0}
 	var correctIDs []int
 
+	// Engines are memoized by CWD (and rules.json parsed at most once) for the
+	// duration of this replay — see setup.EngineCache. Measured: 351,719 rows
+	// against 1,240 distinct CWDs (pg2-rszk3).
+	engines := setup.NewEngineCache()
+
 	for _, row := range rows {
 		sandboxCounts[sandboxEnabledKey(row.SandboxEnabled)]++
-		if _, err := os.Stat(row.CWD); os.IsNotExist(err) {
+
+		// Replay through the CWD-cached engine; stale mirrors the previous
+		// per-row os.Stat(row.CWD) check, now amortized per distinct CWD too.
+		eng, stale := engines.EngineForCWD(row.CWD)
+		if stale {
 			counts["stale-cwd"]++
 			continue
 		}
 
-		eng := setup.NewEngineForCWD(row.CWD)
 		input := &hookio.HookInput{
 			ToolName:  row.ToolName,
 			ToolInput: json.RawMessage(row.ToolInputJSON),
