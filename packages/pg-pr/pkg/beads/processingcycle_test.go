@@ -120,6 +120,74 @@ func TestCreateProcessingCycle_CreatesAndLinks(t *testing.T) {
 	}
 }
 
+// TestCreateProcessingCycle_WritesSupersedesEdgeForPredecessor is pg2-0waxt's
+// remaining half: when the caller names a closed PredecessorID (the succession
+// path in beadsbridge, after ResolveProcessingCycle reports a Closed
+// predecessor), CreateProcessingCycle must record a `supersedes` edge from the
+// new successor to it — the SAME discriminator the duplicate-audit's
+// adjudication exclusion already reads (adjudication.go), so a genuine
+// succession stops being counted as a duplicate. Direction is
+// <successor> <predecessor>, matching `bd dep add`'s own documented semantics
+// ("successor supersedes predecessor"), even though the audit's exclusion
+// itself is direction-agnostic (adjudicatedIdentities' own doc comment).
+func TestCreateProcessingCycle_WritesSupersedesEdgeForPredecessor(t *testing.T) {
+	ctx := context.Background()
+	r := &listRunner{}
+	c := NewClientWithRunner(r)
+
+	id, err := c.CreateProcessingCycle(ctx, CreateProcessingCycleInput{
+		PRBeadID: "pr-1", Key: "foo/bar#7", PredecessorID: "cyc-old",
+	})
+	if err != nil {
+		t.Fatalf("CreateProcessingCycle: %v", err)
+	}
+
+	var depAdds [][]string
+	for _, call := range r.calls {
+		if len(call) > 1 && call[0] == "dep" && call[1] == "add" {
+			depAdds = append(depAdds, call)
+		}
+	}
+	if len(depAdds) != 2 {
+		t.Fatalf("expected 2 `dep add` calls (parent-child + supersedes), got %d: %v", len(depAdds), r.calls)
+	}
+	var supersedes []string
+	for _, call := range depAdds {
+		if containsStr(call, "--type=supersedes") {
+			supersedes = call
+		}
+	}
+	if supersedes == nil {
+		t.Fatalf("no supersedes `dep add` call recorded: %v", r.calls)
+	}
+	joined := strings.Join(supersedes, " ")
+	for _, want := range []string{"dep add " + id + " cyc-old", "--type=supersedes", "--no-cycle-check"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("supersedes dep-add args missing %q; got %q", want, joined)
+		}
+	}
+}
+
+// TestCreateProcessingCycle_NoPredecessorWritesNoSupersedesEdge guards the
+// other side: an ordinary (non-succession) create — PredecessorID empty — must
+// write only the parent-child edge, never a supersedes one.
+func TestCreateProcessingCycle_NoPredecessorWritesNoSupersedesEdge(t *testing.T) {
+	ctx := context.Background()
+	r := &listRunner{}
+	c := NewClientWithRunner(r)
+
+	if _, err := c.CreateProcessingCycle(ctx, CreateProcessingCycleInput{
+		PRBeadID: "pr-1", Key: "foo/bar#7",
+	}); err != nil {
+		t.Fatalf("CreateProcessingCycle: %v", err)
+	}
+	for _, call := range r.calls {
+		if len(call) > 1 && call[0] == "dep" && call[1] == "add" && containsStr(call, "--type=supersedes") {
+			t.Fatalf("no PredecessorID was given, but a supersedes edge was written: %v", r.calls)
+		}
+	}
+}
+
 func TestFindOpenProcessingCycle_NoneOpen(t *testing.T) {
 	ctx := context.Background()
 	c, _ := newBDWorkspace(t)

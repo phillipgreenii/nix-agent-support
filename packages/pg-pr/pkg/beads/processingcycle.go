@@ -97,6 +97,19 @@ type CreateProcessingCycleInput struct {
 	Mine bool
 	// Labels are extra labels (e.g. the feedback-set marker).
 	Labels []string
+	// PredecessorID is the closed processing-cycle bead this new cycle
+	// succeeds, when the caller is opening a successor (ResolveProcessingCycle
+	// returned a Closed predecessor). Empty means this is not a succession —
+	// no `supersedes` edge is written.
+	//
+	// Recording the succession as a `supersedes` edge (pg2-0waxt) is what lets
+	// FindDuplicateProcessingCycles' adjudication exclusion (adjudication.go)
+	// recognize a legitimate succession and not count it as a duplicate — the
+	// SAME mechanism pg2-peyf0 built for a resolved duplicate, reused here
+	// rather than re-implemented, per that file's own doc comment. A
+	// succession recorded only in the description prose does NOT get this
+	// treatment: the discriminator is deliberately the edge, never the text.
+	PredecessorID string
 }
 
 // CreateProcessingCycle creates a new processing-cycle bead and wires a
@@ -148,6 +161,23 @@ func (c *Client) CreateProcessingCycle(ctx context.Context, in CreateProcessingC
 		// Best-effort: log via the error chain. The bead itself was
 		// created successfully so we still return the ID.
 		return id, fmt.Errorf("link processing-cycle %s to pr %s: %w", id, in.PRBeadID, err)
+	}
+	if in.PredecessorID != "" {
+		// Wire the succession: this cycle supersedes the closed predecessor
+		// it was opened to follow. Direction is <successor> <predecessor> so
+		// `bd dep add` reads naturally as "successor supersedes predecessor"
+		// (pg2-0waxt); the audit's exclusion is direction-agnostic regardless
+		// (adjudication.go).
+		if _, err := c.Runner.Run(
+			ctx,
+			"dep", "add", id, in.PredecessorID,
+			"--type=supersedes",
+			"--no-cycle-check",
+		); err != nil {
+			// Best-effort: log via the error chain. The bead itself was
+			// created successfully so we still return the ID.
+			return id, fmt.Errorf("link processing-cycle %s to predecessor %s: %w", id, in.PredecessorID, err)
+		}
 	}
 	return id, nil
 }
@@ -484,15 +514,21 @@ type DuplicateProcessingCycles struct {
 // a successor open once a predecessor has closed, and the successor's
 // description names it ("Supersedes closed process-feedback bead <id>"). Such a
 // pair is a lifecycle, not a duplicate. A succession that is RECORDED as a
-// `supersedes` edge is now excluded by the same mechanism as an adjudication —
-// but a succession recorded only in the description prose is NOT, because the
+// `supersedes` edge is excluded by the same mechanism as an adjudication — but a
+// succession recorded only in the description prose is NOT, because the
 // discriminator is deliberately the edge and never the text (the operator's
-// ruling on pg2-0waxt, 2026-08-14). Writing that edge in the succession path is
-// pg2-0waxt's remaining half. Until it lands, such a pair is still reported,
-// which is why the audit stays READ-ONLY and prints ids for a person to review
-// rather than a collapse plan. Measured 2026-08-14 on the zr workspace: 0 of 690
+// ruling on pg2-0waxt, 2026-08-14). CreateProcessingCycle now WRITES that edge
+// whenever it is called with a PredecessorID (pg2-0waxt's remaining half,
+// landed): the bridge's succession path (ensureProcessFeedbackBead in
+// internal/beadsbridge) threads the resolved closed predecessor's ID through, so
+// every FUTURE succession is excluded from this count from the moment it is
+// created. It does not retroactively re-classify pairs created before this
+// landed — those still have no edge and are still reported, which is why the
+// audit stays READ-ONLY and prints ids for a person to review rather than a
+// collapse plan. Measured 2026-08-14 on the zr workspace: 0 of 690
 // process-feedback beads carried a supersedes reference, so no group in that
-// report was a succession.
+// report was a succession; that population is unaffected until new successions
+// accumulate under the new edge-writing behavior.
 func (c *Client) FindDuplicateProcessingCycles(ctx context.Context) ([]DuplicateProcessingCycles, error) {
 	cycles, err := c.listProcessingCycles(ctx, "--all")
 	if err != nil {

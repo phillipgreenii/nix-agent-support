@@ -360,10 +360,11 @@ func (h *Handler) ensureProcessFeedbackBead(ctx context.Context, p FeedbackPaylo
 		predecessor = state.Closed.ID
 	}
 	in := beads.CreateProcessingCycleInput{
-		PRBeadID:    mr.ID,
-		Key:         key,
-		Description: renderCycleDescription(key, p.Summary, predecessor),
-		Mine:        p.Mine,
+		PRBeadID:      mr.ID,
+		Key:           key,
+		Description:   renderCycleDescription(key, p.Summary, predecessor),
+		Mine:          p.Mine,
+		PredecessorID: predecessor,
 	}
 	if digest != "" {
 		in.Labels = []string{fbsumLabelPrefix + digest}

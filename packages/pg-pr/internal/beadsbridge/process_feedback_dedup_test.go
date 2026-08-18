@@ -233,6 +233,13 @@ func TestClosedPredecessorWithNewFeedbackCreatesReferencingSuccessor(t *testing.
 	if len(in.Labels) != 1 || in.Labels[0] != "fbsum:cover2" {
 		t.Errorf("successor must record the set it covers, got %v", in.Labels)
 	}
+	// pg2-0waxt: the predecessor must also be threaded as a typed field, not
+	// only named in the description prose — PredecessorID is what
+	// CreateProcessingCycle uses to write the `supersedes` edge the
+	// duplicate-processing-cycle audit's adjudication exclusion reads.
+	if in.PredecessorID != "cyc-closed" {
+		t.Errorf("PredecessorID = %q, want cyc-closed — required to write the supersedes edge", in.PredecessorID)
+	}
 }
 
 // TestCycleDescriptionCarriesSubstance pins criterion 5: the description must
@@ -253,6 +260,9 @@ func TestCycleDescriptionCarriesSubstance(t *testing.T) {
 	desc := c.creates[0].Description
 	if desc == "" || desc == "process-feedback: o/r#7" || desc == "o/r#7" {
 		t.Fatalf("description must not be the title verbatim, got %q", desc)
+	}
+	if c.creates[0].PredecessorID != "" {
+		t.Errorf("no closed predecessor existed, so PredecessorID must be empty, got %q", c.creates[0].PredecessorID)
 	}
 	for _, want := range []string{
 		"o/r#7",

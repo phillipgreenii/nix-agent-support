@@ -606,6 +606,43 @@ func TestFindDuplicateProcessingCyclesAdjudicationIsPerBeadNotPerGroup(t *testin
 	}
 }
 
+// successionPairFixture is the pg2-0waxt SUCCESSION shape, distinct from
+// adjudicatedPairFixture's same-instant reconcile shape: the predecessor closed
+// FAR EARLIER than the successor was created (a real re-sync days later, not a
+// bulk reconcile touching two beads in the same tick), linked by the
+// `supersedes` edge CreateProcessingCycle now writes when
+// ensureProcessFeedbackBead (internal/beadsbridge) opens a successor for a
+// closed predecessor.
+func successionPairFixture() string {
+	return `{"data":[
+      {"id":"cyc-successor","title":"process-feedback: o/r#7","status":"open","issue_type":"task","created_at":"2026-08-14T09:00:00Z",
+       "dependencies":[{"issue_id":"cyc-successor","depends_on_id":"cyc-predecessor","type":"supersedes"}]},
+      {"id":"cyc-predecessor","title":"process-feedback: o/r#7","status":"closed","issue_type":"task","created_at":"2026-07-01T00:00:00Z"}
+    ]}`
+}
+
+// TestFindDuplicateProcessingCyclesExcludesAGenuineSuccession is pg2-0waxt's
+// remaining half proven end to end: a predecessor/successor pair created FAR
+// APART in time (the actual succession path's shape) and linked by the
+// supersedes edge the succession path now writes must be excluded from the
+// audit — the same mechanism as an adjudication, per adjudication.go's own doc
+// comment that detection keys only on the edge, never on timing or the
+// description prose. Contrast with
+// TestFindDuplicateProcessingCyclesExclusionNeedsTheEdgeNotJustAClose's "closed
+// with no edge at all" case (using closedPairFixture, both created at the SAME
+// instant, no edge): that pair is still counted, unmodified by this bead.
+func TestFindDuplicateProcessingCyclesExcludesAGenuineSuccession(t *testing.T) {
+	r := &listRunner{allTasks: successionPairFixture()}
+	dups, err := NewClientWithRunner(r).FindDuplicateProcessingCycles(context.Background())
+	if err != nil {
+		t.Fatalf("FindDuplicateProcessingCycles: %v", err)
+	}
+	if len(dups) != 0 {
+		t.Fatalf("a genuine succession recorded via supersedes must not be counted, got %d group(s): %+v", len(dups), dups)
+	}
+	assertOnlyBDList(t, r)
+}
+
 // TestFindDuplicateProcessingCyclesExclusionIsDirectionAgnostic pins that the
 // audit reads an adjudication whichever way the edge was written. bd's own type
 // names do not read consistently in one direction (`blocks` names the blocker as
