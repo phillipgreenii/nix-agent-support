@@ -796,32 +796,44 @@ func TestEvaluateCp_TargetDirectoryGluedQuoteParity(t *testing.T) {
 	}
 }
 
-// TestEvaluateCp_TargetDirectoryMalformedGluedQuotingDoesNotRegress pins
-// pg2-6f2gu's fail-closed requirement on the cp side: a `--target-directory=`
-// value whose quoting is malformed is NOT a clean unwrap, so
-// cmdparse.UnwrapGluedQuotes declines and evaluateCp sees the value EXACTLY as
-// cmdparse produced it — a no-op, so the verdict is identical with or without
-// this fix's unwrap call.
+// TestEvaluateCp_TargetDirectoryMalformedGluedQuotingAbstains pins pg2-mp9oq's
+// fail-closed fix on top of pg2-6f2gu: a `--target-directory=` value whose
+// quoting is MALFORMED (UnwrapGluedQuotes declines it — returns it unchanged)
+// must no longer fall through to the unconditional Approve at the end of the
+// -t/--target-directory branch.
 //
-// MOST of these are NOT pinned as Abstain/NoOpinion: the multi-segment and
-// double-wrapped forms below don't start with an unquoted `/`, so
-// looksLikePath is false on them for the SAME reason the clean quoted form
-// used to slip through — the destination zone check never runs, and
-// evaluateCp falls through to the unconditional Approve at the end of the
-// -t/--target-directory branch. This is a PRE-EXISTING gap this bead's audit
-// did not scope in: it existed identically before this fix (declining to
-// unwrap is a no-op, so nothing here changed), and it is NOT the "glued AND
-// cleanly quoted" shape pg2-6f2gu's acceptance criteria named. Those two
-// assertions exist to PROVE that claim — i.e. that this fix neither
-// introduces nor removes this latent behavior — not to endorse it.
+// BEFORE this fix (still on this tree immediately after pg2-6f2gu), the
+// multi-segment, adjacent-glued-quote, and double-wrapped forms below all
+// APPROVED regardless of destination: a declined value stays quote-wrapped,
+// so it never starts with an unquoted `/`/`./`/`../`/`~`, looksLikePath is
+// false, and the destination zone/writability check was skipped entirely —
+// the same "unclassifiable value defaults to the wrong thing" shape as
+// pg2-9zgso/pg2-6f2gu, just for the malformed subset UnwrapGluedQuotes itself
+// declines to touch. MEASURED on this tree before this fix: with cwd
+// /home/user/project, the multi-segment form
+// (`cp ./a.txt --target-directory='/etc/'x'/etc/'`), the double-single-quote
+// wrapped form (the "double-wrapped" case below), and the adjacent-glued-quote
+// form (`cp ./a.txt --target-directory='/etc'"'"'/passwd'`) all APPROVED.
 //
-// The genuinely UNTERMINATED case is different in kind: a single quote with no
-// closing pair ANYWHERE in the command is not a value-shaping quirk, it is
-// invalid shell syntax (real bash would keep reading for the missing close),
-// so cmdparse cannot even tokenize a `cp` invocation out of it — the whole
-// command abstains via NotApplicable before evaluateCp ever runs, which is
-// also unchanged by this fix.
-func TestEvaluateCp_TargetDirectoryMalformedGluedQuotingDoesNotRegress(t *testing.T) {
+// NOTE ON THIS COMMENT: gofumpt's doc-comment reformatter rewrites a literal
+// pair of adjacent single-quote characters in DOC COMMENT prose into a curly
+// Unicode quote (even inside a backtick code span), silently corrupting the
+// exact byte sequence a "double-wrapped" example needs to show — which is why
+// that one case is described in prose above instead of spelled out with
+// backticks. The test table below is a Go STRING LITERAL, not a comment, so
+// gofumpt leaves it untouched and it is authoritative.
+//
+// AFTER this fix they Abstain (NoOpinion) — the same "can't tell, won't clear
+// it" verdict this file already uses for "destination is not writable" one
+// line below and throughout readPathIssue.
+//
+// The genuinely UNTERMINATED case is different in kind and is UNCHANGED by
+// this fix: a single quote with no closing pair ANYWHERE in the command is
+// not a value-shaping quirk, it is invalid shell syntax (real bash would keep
+// reading for the missing close), so cmdparse cannot even tokenize a `cp`
+// invocation out of it — the whole command abstains via NotApplicable before
+// evaluateCp (and this fix's check) ever runs.
+func TestEvaluateCp_TargetDirectoryMalformedGluedQuotingAbstains(t *testing.T) {
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 
@@ -833,7 +845,12 @@ func TestEvaluateCp_TargetDirectoryMalformedGluedQuotingDoesNotRegress(t *testin
 		{
 			"interior contains the wrapper character (multi-segment concatenation)",
 			"cp ./a.txt --target-directory='/etc/'x'/etc/'",
-			hookio.Approve,
+			hookio.NoOpinion,
+		},
+		{
+			"interior contains the wrapper character (adjacent glued quotes, no literal middle)",
+			`cp ./a.txt --target-directory='/etc'"'"'/passwd'`,
+			hookio.NoOpinion,
 		},
 		{
 			"unterminated single quote makes the whole command unparseable",
@@ -843,7 +860,7 @@ func TestEvaluateCp_TargetDirectoryMalformedGluedQuotingDoesNotRegress(t *testin
 		{
 			"double-wrapped: outer pair around an already-quoted inner value",
 			"cp ./a.txt --target-directory=''/etc/''",
-			hookio.Approve,
+			hookio.NoOpinion,
 		},
 	}
 	for _, tt := range tests {
@@ -855,7 +872,7 @@ func TestEvaluateCp_TargetDirectoryMalformedGluedQuotingDoesNotRegress(t *testin
 			}
 			got := hookio.Verdict(r.Evaluate(input))
 			if got.Decision != tt.want {
-				t.Errorf("cmd %q: got %s (%s), want %s (pre-existing, unchanged by this fix — see test doc)", tt.cmd, got.Decision, got.Reason, tt.want)
+				t.Errorf("cmd %q: got %s (%s), want %s", tt.cmd, got.Decision, got.Reason, tt.want)
 			}
 		})
 	}

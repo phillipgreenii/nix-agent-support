@@ -826,7 +826,45 @@ func evaluateCp(args []string, pe *patheval.PathEvaluator, module string) (hooki
 			// regressed, matching secrets.firstSecretRef's identical call and
 			// UnwrapGluedQuotes' own pg2-9zgso decision record for why a shared
 			// helper is called explicitly rather than pushed into a lower layer.
-			targetDir = cmdparse.UnwrapGluedQuotes(v)
+			unwrapped := cmdparse.UnwrapGluedQuotes(v)
+
+			// pg2-mp9oq: UnwrapGluedQuotes DECLINES — returns v UNCHANGED — on
+			// malformed quoting: a double-wrapped value (`''/etc/''`), one whose
+			// interior holds the wrapper character (multi-segment concatenation
+			// `'/etc/'x'/etc/'`, or adjacent glued quotes `'/etc'"'"'/passwd'`),
+			// or a mismatched-quote-character pair. (A truly UNTERMINATED quote,
+			// by contrast, makes the whole command unparseable — cmdparse.Parse
+			// returns zero commands and evaluateCp is never reached for it; that
+			// path is not this bug and is unaffected by this change — see
+			// TestEvaluateCp_TargetDirectoryMalformedGluedQuotingAbstains.)
+			//
+			// A declined value stays quote-wrapped, so it still fails
+			// looksLikePath below (no unquoted `/`/`./`/`../`/`~` prefix) EXACTLY
+			// as the pre-pg2-6f2gu bug did for the CLEAN case: the destination
+			// zone/writability check is skipped entirely and this branch falls
+			// through to the unconditional Approve. MEASURED on this tree before
+			// this fix (post pg2-6f2gu): with cwd /home/user/project,
+			// `cp ./a.txt --target-directory='/etc/'x'/etc/'` and
+			// `cp ./a.txt --target-directory=''/etc/''` both APPROVED regardless
+			// of destination — the exact "unclassifiable value defaults to the
+			// wrong thing" shape as pg2-9zgso/pg2-6f2gu, just for the malformed
+			// subset UnwrapGluedQuotes itself declines to touch.
+			//
+			// FIX: detect the decline directly (unwrapped == v, and v opened
+			// with a quote character — so UnwrapGluedQuotes actually attempted
+			// and declined, rather than trivially passing through a value that
+			// was never quoted at all) and refuse via hookio.Refused, the SAME
+			// "can't tell, won't clear it" verdict (NoOpinion/Abstain) this file
+			// already uses one line below for "destination is not writable" and
+			// throughout readPathIssue for "references unknown path" / "has a
+			// dynamically-expanded path arg". This is fail-closed and consistent
+			// with the rest of the file's vocabulary: an unclassifiable
+			// destination must defer to Claude Code's own prompt, never
+			// silently clear.
+			if unwrapped == v && len(v) > 0 && (v[0] == '\'' || v[0] == '"') {
+				return hookio.Refused(module, "safe-commands: cp target directory has malformed quoting "+v+" (deferred to claude-code)")
+			}
+			targetDir = unwrapped
 			break
 		}
 	}
