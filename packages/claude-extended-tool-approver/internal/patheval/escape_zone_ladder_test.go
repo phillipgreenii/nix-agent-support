@@ -127,7 +127,7 @@ func TestEscapeRuleAgreesAcrossEveryZone(t *testing.T) {
 		if err != nil {
 			t.Skipf("cannot create marker dir under /tmp: %v", err)
 		}
-		defer os.RemoveAll(target)
+		defer func() { _ = os.RemoveAll(target) }()
 		pe := New(projectDir)
 		// tmpRoot resolution is environment-dependent (e.g. inside a nix build
 		// sandbox TMPDIR may not track literal /tmp — see the analogous caveat in
