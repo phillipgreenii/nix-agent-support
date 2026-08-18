@@ -12,6 +12,33 @@ import (
 	"github.com/phillipgreenii/pb/internal/run"
 )
 
+// Equivalent mutants in this package, and why nothing below kills them.
+//
+// pg-go-mutate reports five surviving mutants in patchid.go. Every one is
+// EQUIVALENT to the original — behaviourally indistinguishable over every
+// REACHABLE input — so it is unkillable by construction rather than a missing
+// assertion. Recorded so a later reader does not contrive an assertion for it:
+//
+//   - L23  len(fields) == 0                          -> <= 0   (firstField)
+//   - L109 len(fields) == 0                          -> <= 0   (the line loop)
+//     len is never negative, so == 0 and <= 0 agree on every value it can take.
+//
+//   - L43  id == ""                                  -> <= ""  (Compute)
+//   - L98  strings.TrimSpace(logRes.Stdout) == ""    -> <= ""  (the scan)
+//     Go orders strings lexicographically by byte and "" is the least element, so
+//     s <= "" holds exactly when s == "".
+//
+//   - L116 len(fields) > 1                           -> != 1   (the line loop)
+//     L109 continues when len(fields) == 0, so L116 is reached only with
+//     len(fields) >= 1; over {1,2,3,...} the two agree. The neighbouring
+//     > 1 -> >= 1 mutant is NOT equivalent and IS killed: it appends fields[1]
+//     on a one-field line, which panics.
+//
+// Related run-health note: the two branch_condition mutants at L113 are reported
+// NOT VIABLE, not survived. Replacing the condition of
+// `if _, seen := byID[id]; !seen` with a constant leaves seen unused, which does
+// not compile — so a nonzero notViable count on this package is expected.
+
 func initRepo(t *testing.T) string {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {

@@ -179,6 +179,14 @@ func leftAlone(t *testing.T, f *run.FakeRunner, out CheckResult) {
 // Each row exercises ONE rejection in isolation, because the rules are independent
 // and a single fixture that trips several proves none of them: a gate can be
 // foreign in await type, in workspace id, or malformed, and each has its own guard.
+//
+// Both guards are INEQUALITIES on strings, so the rows must straddle the reference
+// value in BOTH ORDER DIRECTIONS. With only foreign values that sort AFTER the
+// reference, `!=` and `>` accept exactly the same fixtures, and a guard weakened to
+// `>` would still pass this table while silently PROCESSING every foreign gate whose
+// value sorts BEFORE the reference — the cross-workspace harm above. The two
+// "sorting before" rows are what separate `!=` from `>`; they are not duplicates of
+// the rows above them. ("bd:merged" < "pn:applied" and "away" < "home".)
 func TestCheck_leavesGatesItDoesNotOwnAlone(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -187,7 +195,9 @@ func TestCheck_leavesGatesItDoesNotOwnAlone(t *testing.T) {
 	}{
 		{"a foreign await type belongs to another tool", "pn:pushed", "home:repo-a:abc123"},
 		{"an await type that merely contains ours is not ours", "pn:applied-maybe", "home:repo-a:abc123"},
+		{"an await type sorting before ours is still not ours", "bd:merged", "home:repo-a:abc123"},
 		{"a gate carrying another workspace's wsid is not ours", "pn:applied", "other:repo-a:abc123"},
+		{"a wsid sorting before ours is still not ours", "pn:applied", "away:repo-a:abc123"},
 		{"a two-part await id is malformed", "pn:applied", "home:repo-a"},
 		{"a one-part await id is malformed", "pn:applied", "home"},
 		{"an empty await id is malformed", "pn:applied", ""},
@@ -330,6 +340,44 @@ func TestCheck_explicitScanWindowIsHonoured(t *testing.T) {
 	}
 }
 
+// TestCheck_negativeScanWindowIsForwardedNotDefaulted pins the EXACT shape of the
+// defaulting guard: it means "UNSET → 100", so only a LastN of exactly zero is
+// replaced. A caller-supplied negative window is forwarded to git verbatim.
+//
+// `--last-n` is a plain IntVar with no validation (cmd/pb/gate_check.go), so a
+// negative value genuinely reaches Check and this is a reachable state, not a
+// hypothetical. Without this row, "== 0" and "<= 0" accept the same fixtures and the
+// guard could silently absorb a negative window into the default — which would make
+// a typo'd `--last-n -5` scan 100 commits while reporting nothing unusual.
+//
+// This test pins the OBSERVABLE behaviour; whether the CLI ought to REJECT a
+// negative window instead is a separate question it deliberately does not settle.
+func TestCheck_negativeScanWindowIsForwardedNotDefaulted(t *testing.T) {
+	f := run.NewFakeRunner()
+	f.AddResponse("pn", []string{"workspace", "info", "--json"}, run.Result{Stdout: checkInfoJSON}, nil)
+	f.AddResponse("bd", []string{"-C", "/ws", "gate", "list", "--limit", "0", "--json"},
+		run.Result{Stdout: `{"data":[{"id":"g-1","issue_type":"gate","await_type":"pn:applied",
+			"await_id":"home:repo-a:abc123","created_at":"2026-06-26T00:00:00Z"}]}`}, nil)
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "log", "-p", "--no-merges", "-n", "-5", "tip"},
+		run.Result{Stdout: "diff"}, nil)
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "patch-id", "--stable"},
+		run.Result{Stdout: "abc123 gatedsha\n"}, nil)
+	f.AddResponse("bd", []string{"-C", "/ws", "gate", "resolve", "g-1"}, run.Result{}, nil)
+
+	out, err := Check(context.Background(), checkDeps(f, stubDiscover("/ws")), CheckParams{
+		WorkspaceDir: "/ws", LastN: -5, StaleAfter: 72 * time.Hour,
+		Now: time.Date(2026, 6, 26, 1, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if len(out.Resolved) != 1 || !scanned(f, "-n", "-5", "tip") {
+		t.Fatalf("resolved = %v scans = %v; only an UNSET (zero) LastN may be replaced by the "+
+			"default, so a negative window must reach git unchanged",
+			out.Resolved, logScans(f))
+	}
+}
+
 // logScans returns the trailing rev-range args of every `git log -p` pb ran.
 func logScans(f *run.FakeRunner) [][]string {
 	var got [][]string
@@ -394,6 +442,12 @@ func runStale(t *testing.T, f *run.FakeRunner, p CheckParams) CheckResult {
 // A regression flipping the default is silent: both actions "work", and only the
 // bead's later fate tells them apart. Hence the assertion is on the recorded action
 // string AND on which bd call was issued — the label, never a resolve.
+//
+// NOTE on what is provable here: the guard is `action == ""`, and mutating it to
+// `action <= ""` is an EQUIVALENT mutant that no test can kill. Go orders strings
+// lexicographically by byte and "" is the least element, so `s <= ""` holds exactly
+// when `s == ""`. The rows here do pin the observable pair either way: an empty
+// handler defaults, and a non-empty one is honoured verbatim.
 func TestCheck_staleHandlerDefaultsToConvertToHuman(t *testing.T) {
 	f := run.NewFakeRunner()
 	f.AddResponse("pn", []string{"workspace", "info", "--json"},
