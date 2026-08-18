@@ -152,6 +152,17 @@ func projectDirForDetect(input *hookio.HookInput) string {
 	return input.CWD
 }
 
+// The five handlePreToolUse/handlePermissionRequest/handlePostToolUse/
+// handlePermissionDenied/handleSessionEnd hook handlers below are THE
+// RECORDER (pg2-cbihz's audit of every asklog.NewStore call site in this
+// package): each one inserts or updates rows (RecordPreToolDecision,
+// RecordRuleErrors, RecordPermissionRequest, ResolveApproved,
+// RegisterBackgroundShellFromPost, RecordPermissionDenied,
+// ResolveUnresolvedAll), and handlePreToolUse additionally needs a
+// read-write store to double as the killshell rule's shell-ownership store.
+// All five therefore genuinely need, and keep, the read-write
+// asklog.NewStore — unlike the read-only CLI subcommands (evaluate, show,
+// report, baseline, compare), which now use asklog.NewReadOnlyStore.
 func handlePreToolUse(input *hookio.HookInput) {
 	// Open the ask-log store first so it can double as the killshell rule's
 	// shell-ownership store. If it fails to open, fall back to a storeless engine

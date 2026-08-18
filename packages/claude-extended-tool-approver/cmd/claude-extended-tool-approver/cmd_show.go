@@ -65,7 +65,9 @@ func runShow(formatVal string, args []string) {
 		os.Exit(1)
 	}
 
-	store, err := asklog.NewStore(asklog.DefaultDBPath())
+	// show only ever reads rows/trace entries — it never writes to the ask
+	// log, so it opens read-only (pg2-cbihz).
+	store, err := asklog.NewReadOnlyStore(asklog.DefaultDBPath())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)

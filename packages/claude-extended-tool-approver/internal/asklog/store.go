@@ -153,6 +153,69 @@ func NewStore(dbPath string) (*Store, error) {
 	return &Store{db: db}, nil
 }
 
+// NewReadOnlyStore opens the asklog database for READ-ONLY access: it is for
+// callers that only ever SELECT out of a database some other writer already
+// created and migrated — today that's `evaluate`, `show`, `report`,
+// `baseline`, and `compare`. It performs no write of any kind at open time:
+// no os.MkdirAll (the directory must already exist — something else had to
+// have created it in order to have written the rows being read), no
+// PRAGMA journal_mode=WAL conversion, and no migrate(). Skipping migrate is
+// deliberate, not an oversight: forcing a schema upgrade is a WRITE, and a
+// read path silently DDL-ing the shared corpus just because it was built
+// from a newer commit than the one that last wrote it is exactly the kind of
+// accidental mutation this constructor exists to rule out. If the corpus's
+// schema is behind what this binary's queries expect, the query fails
+// loudly ("no such column") instead of silently upgrading the file.
+//
+// DSN: "file:<path>?immutable=1". The immutable query parameter tells SQLite
+// the file will not change for the lifetime of this connection, which skips
+// the usual WAL/SHM locking dance entirely — no probing for a -shm file, no
+// attempt to create one if it is missing. That is load-bearing: plain
+// mode=ro (equivalently, the sqlite3 CLI's -readonly) still touches
+// -wal/-shm to check for and roll forward any committed-but-uncheckpointed
+// WAL frames, and against this project's real corpus that probe fails
+// outright with SQLITE_CANTOPEN (14) — see
+// docs/engine-ab-replay-runbook.md's "Asklog read access" section, and
+// pg2-cbihz, which reconfirmed it directly against the live corpus: a bare
+// "mode=ro" (or "mode=ro" combined with "immutable=1") momentarily CREATED
+// empty -wal/-shm sidecars that "immutable=1" alone never touched. So
+// "mode=ro" is deliberately NOT added alongside "immutable=1" here, even
+// though it would be redundant for blocking writes — it is not redundant
+// for the sidecar-untouched property, which is the property this
+// constructor is required to guarantee.
+//
+// Tradeoff, also documented in the runbook: an immutable connection cannot
+// see rows still sitting in an unmerged WAL file, and racing a full-table
+// scan against a live checkpoint can (rarely) surface SQLite's generic
+// "database disk image is malformed" (11) — a torn-read artifact, not real
+// corruption (`PRAGMA quick_check` on the same file reports ok). That is an
+// acceptable batch-analysis tradeoff for what these subcommands are (manual,
+// occasional replay/report runs, never a live path), and the runbook names
+// the mitigation (read a snapshot copy) for anyone hitting it.
+//
+// os.Stat is checked first so a missing database produces a clear error
+// instead of SQLite's less legible CANTOPEN.
+func NewReadOnlyStore(dbPath string) (*Store, error) {
+	if _, err := os.Stat(dbPath); err != nil {
+		return nil, fmt.Errorf("open db read-only: %w", err)
+	}
+
+	dsn := "file:" + dbPath + "?immutable=1"
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		return nil, fmt.Errorf("open db read-only: %w", err)
+	}
+
+	// Ping forces the connection open now, so a bad DSN or an unopenable file
+	// fails here — at construction — rather than silently on the first query.
+	if err := db.Ping(); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("open db read-only: %w", err)
+	}
+
+	return &Store{db: db}, nil
+}
+
 func (s *Store) Close() error {
 	return s.db.Close()
 }

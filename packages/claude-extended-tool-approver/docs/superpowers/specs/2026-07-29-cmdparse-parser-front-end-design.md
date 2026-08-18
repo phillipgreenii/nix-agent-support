@@ -615,7 +615,10 @@ Each step is independently landable and independently measurable. Sizes are t-sh
   reported; the replayable subset MUST NOT be presented as the whole.
 - **Hook mode writes the shared production asklog.** Replay offline via
   `setup.NewEngineForCWD` + `EvaluateHook`, or with `XDG_DATA_HOME` redirected, or against a
-  `.backup` copy. `cmd_evaluate` opens the store read-write and MUST be avoided.
+  `.backup` copy. At the time this spec was written, `cmd_evaluate` opened the store
+  read-write and had to be avoided for exactly that reason; bead `pg2-cbihz` closed that gap
+  — `evaluate` now opens the asklog read-only, so this specific avoidance no longer applies
+  to it (the offline-replay options above remain valid alternatives regardless).
 - **`git diff | grep '^-'` finds nothing in these repos** — an external diff driver is
   configured. Use `--numstat` or `--no-ext-diff`.
 - **`FOO=(a b) cmd` regresses to Abstain.** Safe direction, real loss, MUST appear in the replay.

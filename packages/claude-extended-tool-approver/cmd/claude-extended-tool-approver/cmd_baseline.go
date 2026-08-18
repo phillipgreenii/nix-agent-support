@@ -50,7 +50,10 @@ func runBaseline(settingsPathVal, outputVal string) {
 	settingsPath := &settingsPathVal
 	output := &outputVal
 
-	store, err := asklog.NewStore(asklog.DefaultDBPath())
+	// baseline only ever reads rows to replay them; the resulting snapshot is
+	// written to --output, a separate file — it never writes to the ask log
+	// itself, so it opens read-only (pg2-cbihz).
+	store, err := asklog.NewReadOnlyStore(asklog.DefaultDBPath())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)

@@ -62,7 +62,9 @@ func runReport(groupByVal string, missesOnlyVal bool, formatVal string, daysVal 
 		sinceDate = time.Now().AddDate(0, 0, -*days).UTC().Format(time.RFC3339)
 	}
 
-	store, err := asklog.NewStore(asklog.DefaultDBPath())
+	// report only ever reads rows to summarize them — it never writes to the
+	// ask log, so it opens read-only (pg2-cbihz).
+	store, err := asklog.NewReadOnlyStore(asklog.DefaultDBPath())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)

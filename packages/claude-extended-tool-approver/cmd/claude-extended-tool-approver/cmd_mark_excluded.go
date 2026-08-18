@@ -41,6 +41,9 @@ func runMarkExcluded(reasonVal string, args []string) {
 		os.Exit(1)
 	}
 
+	// mark-excluded genuinely WRITES (UPDATE ... SET excluded = 1) — it MUST
+	// keep the read-write store (pg2-cbihz audited this subcommand and
+	// confirmed it belongs on the write side of the split).
 	store, err := asklog.NewStore(asklog.DefaultDBPath())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)

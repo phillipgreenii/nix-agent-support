@@ -50,6 +50,10 @@ func runSetCorrectDecision(decisionVal, explanationVal string, args []string) {
 		os.Exit(1)
 	}
 
+	// set-correct-decision genuinely WRITES (UPDATE ... SET
+	// correct_hook_decision = ...) — it MUST keep the read-write store
+	// (pg2-cbihz audited this subcommand and confirmed it belongs on the
+	// write side of the split).
 	store, err := asklog.NewStore(asklog.DefaultDBPath())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)

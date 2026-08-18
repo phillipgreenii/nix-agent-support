@@ -111,9 +111,14 @@ non-excluded `Bash` rows then present, **73,776 (33.81%) name a `cwd` that no lo
 of 1,129 distinct `cwd` values — and cannot be replayed. The replayable subset is 144,402 rows
 across 220 `cwd` values and MUST NOT be presented as the whole.
 
-**Offline discipline.** A replay MUST use `setup.NewEngineForCWD` plus `EvaluateHook`, or redirect
-`XDG_DATA_HOME`. `cmd_evaluate` MUST NOT be used: it opens the shared production asklog
-READ-WRITE.
+**Offline discipline.** The measurements below were taken before bead `pg2-cbihz`, when
+`cmd_evaluate` opened the shared production asklog READ-WRITE — so they replay offline via
+`setup.NewEngineForCWD` plus `EvaluateHook` with `XDG_DATA_HOME` redirected, and deliberately avoid
+`cmd_evaluate`. As of `pg2-cbihz`, `evaluate` (and `show`/`report`/`baseline`/`compare`) open the
+asklog through `asklog.NewReadOnlyStore`, so driving them directly against the live corpus is no
+longer a write hazard; redirecting `XDG_DATA_HOME` to a frozen snapshot remains good practice for a
+replay that needs a REPRODUCIBLE, unchanging dataset (as this one does), not because of a write
+risk.
 
 ## Latency gate result
 
@@ -711,8 +716,9 @@ user-facing prompt.
 Population per this file's "Corpus population" section. **Replayed:** 131,222 distinct
 `(command, cwd, permission_mode)` triples of 191,292, offline through
 `setup.NewEngineForCWD` + `EvaluateHook` with a redirected `XDG_DATA_HOME`. `cmd_evaluate`
-was **NOT** used, and neither were `baseline` or `compare` — all three open the shared
-production asklog READ-WRITE (bead `pg2-cbihz`). The harness is
+was **NOT** used, and neither were `baseline` or `compare` — at the time of this measurement
+all three opened the shared production asklog READ-WRITE (bead `pg2-cbihz`, now fixed: they
+open read-only via `asklog.NewReadOnlyStore`). The harness is
 `internal/setup/replay_test.go`; the base side ran the same harness against a `git archive`
 of `2b59b9e0`.
 

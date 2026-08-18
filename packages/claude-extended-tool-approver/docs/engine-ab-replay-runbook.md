@@ -46,6 +46,19 @@ it, but the full deployed pipeline is only covered by probes driven through the 
 
 ## Asklog read access — three distinct failures
 
+**As of pg2-cbihz, this is no longer something a caller of the binary's own subcommands has to
+manage**: `evaluate`, `show`, `report`, `baseline`, and `compare` all open the asklog through
+`asklog.NewReadOnlyStore` internally, which already applies the `immutable=1` DSN below (see that
+function's doc comment in `internal/asklog/store.go` for the full write-up, including why
+`mode=ro` is deliberately NOT added alongside it — combining them momentarily touched the
+-wal/-shm sidecars against the live corpus, which a true read-only open must not do). Before that
+bead, `cmd_evaluate` (and its four siblings) opened the store READ-WRITE, which is what made a
+manual `XDG_DATA_HOME` redirect a required mitigation for driving them against a live corpus; that
+requirement is now closed for THESE FIVE subcommands specifically. The three failures below remain
+live for anyone doing ad-hoc, raw `sqlite3` (or hand-rolled scripting) access to the corpus outside
+those subcommands — e.g. the pre/post binary comparison in "Correct method" above, run against a
+frozen snapshot for A/B reproducibility rather than for write-safety:
+
 ```text
 sqlite3 -readonly <db>          -> SQLite error 14
 sqlite3 'file:<db>?mode=ro'     -> SQLite error 14
