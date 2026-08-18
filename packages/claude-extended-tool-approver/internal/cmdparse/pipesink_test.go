@@ -43,6 +43,21 @@ func TestStageWritesInput(t *testing.T) {
 		{"sort -o /tmp/x", true},
 		{"sort --output=/tmp/x", true},
 		{"yq -i .a", true},
+		{"yq --inplace .a", true},
+		// pg2-1wt3b: -s/--split-exp/--split-exp-file write one new file per
+		// result (verified against yq's own --help, 2026-08-18, yq v4.34.2:
+		// "print each result (or doc) into a file named (exp)") and were
+		// missing from MutatingFlags["yq"] — WIDEST-REACHING of the bead's
+		// three sites, since every StageWritesInput/PipedToWriter caller
+		// inherits it, not just the substitution path.
+		{"yq -s .a", true},
+		{"yq --split-exp .a", true},
+		{"yq --split-exp-file e.txt", true},
+		{"yq --split-exp=.a", true}, // glued spelling must not hide it
+		// pg2-1wt3b acceptance criterion 3: the widening must not wrongly
+		// restrict a benign yq READ (no write flag at all) — it stays a filter.
+		{"yq -o=json .", false},
+		{"yq '.a'", false},
 		{"sort -u", false},
 		// A capturing stdout redirection persists the payload whatever the stage is.
 		{"grep url > /tmp/x", true},

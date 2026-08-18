@@ -280,6 +280,15 @@ func TestGitDir_DestructiveOnSourceOperand(t *testing.T) {
 		{"find -exec", "find .git -type f -exec rm {} ;", hookio.Reject},
 		{"sort -o writes its output file", "sort -o .git/config /tmp/in", hookio.Reject},
 		{"yq -i edits in place", "yq -i '.a=1' .git/config", hookio.Reject},
+		// pg2-1wt3b widened the SHARED cmdparse.MutatingFlags["yq"] map (not a
+		// gitdir-local list) to also carry -s/--split-exp/--split-exp-file, so
+		// this rule inherits the fix automatically: yq's -s/--split-exp write ONE
+		// NEW FILE PER RESULT, named from the expression, and MEASURABLY used to
+		// fall through to readOrCapture here (misclassified as a read of
+		// .git/config, since only -i was in the map) rather than dirWrite.
+		{"yq -s writes one file per result", "yq -s '.a' .git/config", hookio.Reject},
+		{"yq --split-exp long form", "yq --split-exp '.a' .git/config", hookio.Reject},
+		{"yq --split-exp-file", "yq --split-exp-file e.txt .git/config", hookio.Reject},
 		{"find WITHOUT a mutating flag still reads", "find .git/objects -type f", hookio.NoOpinion},
 		{"sort WITHOUT -o still reads", "sort .git/config", hookio.NoOpinion},
 

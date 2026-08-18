@@ -279,12 +279,15 @@ var fileReaderSubstitutions = map[string]bool{
 	//     their path operand is a bare token, so the screen below sees it.)
 	//   - `yq` DOES write, two ways — `-i`/`--inplace` edits in place and
 	//     `-s`/`--split-exp`/`--split-exp-file` writes one file per result — and
-	//     substitutionWriteFlags screens both.
+	//     hasWriteFlag's MutatingFlags["yq"] half screens both (pg2-1wt3b widened
+	//     that shared map directly; substitutionWriteFlags carries no yq entry
+	//     anymore — see its own doc).
 	//   - `tq` (cryptaliagy/tomlq) has NO write spelling at all. Its `-o`/`--output` is
 	//     an output FORMAT (`toml`/`json`), not a file, and its `-i`/`--input` is an
 	//     input FORMAT, not in-place. So the two flag letters that mean "write" for
 	//     other tools mean "format" here, which is exactly why the write vocabulary is
-	//     per-command (substitutionWriteFlags) and never a shared letter test.
+	//     per-command (hasWriteFlag's MutatingFlags/substitutionWriteFlags union) and
+	//     never a shared letter test.
 	//
 	// ACCEPTED RESIDUE, stated because it is the same one pipesink.go's MutatingFlags
 	// records for `awk`/`sed`: the FILTER/EXPRESSION text is not audited. jq cannot open
@@ -350,16 +353,22 @@ var fileReaderSubstitutions = map[string]bool{
 // consulted FIRST — see hasWriteFlag — so an entry here exists only where a write
 // spelling is missing from it.
 //
-// `yq -s`/`--split-exp`/`--split-exp-file` is that case, verified against yq's own
-// `--help` on 2026-08-13: it "print[s] each result (or doc) into a file named (exp)",
-// i.e. it creates files, and MutatingFlags["yq"] carries only the `-i` family. The gap
-// predates pg2-xl79d and is shared by `internal/rules/safecmds`' isYqInPlace, so it is
-// COVERED here rather than fixed there — the fix belongs in those files, with its own
-// bead and its own replay, because widening a write predicate is a MORE-restrictive
-// change to every other consumer of it.
-var substitutionWriteFlags = map[string]map[string]bool{
-	"yq": {"-s": true, "--split-exp": true, "--split-exp-file": true},
-}
+// `yq -s`/`--split-exp`/`--split-exp-file` USED TO be that case (pg2-xl79d,
+// 2026-08-13): MutatingFlags["yq"] carried only the `-i` family, the gap was
+// shared by `internal/rules/safecmds`' isYqInPlace, and pg2-xl79d deliberately
+// screened it HERE rather than widening the shared map, because widening
+// MutatingFlags is a MORE-restrictive change for every OTHER consumer of it
+// (cmdparse.StageWritesInput and its callers) and owes its own replay
+// consideration — not something to fold in as a side effect of fixing this seam.
+//
+// pg2-1wt3b did that replay and widened MutatingFlags["yq"] directly (both
+// isYqInPlace and this seam now consume it), so the supplement below is EMPTY:
+// there is currently no yq write spelling MutatingFlags misses. The map and
+// hasWriteFlag stay in place as the extension point this seam's contract
+// promises — a FUTURE write spelling need only be added here if it must clear
+// this substitution seam before its own MutatingFlags widening has had its
+// separate replay.
+var substitutionWriteFlags = map[string]map[string]bool{}
 
 // hasWriteFlag reports whether args carry a flag that turns cmd into a WRITER, under
 // the union of the shared MutatingFlags vocabulary and this seam's supplement. Both

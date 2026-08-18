@@ -1159,6 +1159,35 @@ func TestSafecmds_YqSpecialHandling(t *testing.T) {
 		{"yq -i write read-only path", "yq -i '.key = \"value\"' /nix/store/abc123/file.yaml", hookio.NoOpinion},
 		{"yq --inplace write project file", "yq --inplace '.key = \"value\"' /home/user/project/file.yaml", hookio.Approve},
 		{"yq no paths", "yq '.key'", hookio.Approve},
+
+		// --- pg2-1wt3b site 1: isYqInPlace now recognises the -s/--split-exp/
+		// --split-exp-file family, so these route through the WRITE branch
+		// (hasUnsafeWritePath) rather than the READ branch (readPathIssue).
+		//
+		// MEASURED PRE-FIX BUG, this exact row: `yq -s '.key' /nix/store/abc123/
+		// file.yaml` answered Approve — `-s` fell through to readPathIssue, which
+		// only checks whether the SOURCE is READABLE, and /nix/store is a readable
+		// zone. The split's real output (a NEW file, named from the expression,
+		// typically written into the cwd) was never evaluated as a write target at
+		// all. Post-fix this is NoOpinion, matching the -i twin two rows above.
+		{"yq -s write project file", "yq -s '.key' /home/user/project/file.yaml", hookio.Approve},
+		{"yq -s write read-only path", "yq -s '.key' /nix/store/abc123/file.yaml", hookio.NoOpinion},
+		{"yq --split-exp write read-only path", "yq --split-exp '.key' /nix/store/abc123/file.yaml", hookio.NoOpinion},
+		{"yq --split-exp-file write read-only path", "yq --split-exp-file e.txt /nix/store/abc123/file.yaml", hookio.NoOpinion},
+
+		// --- pg2-1wt3b site 2: yq is now a safeWriteCmds member and its branch
+		// falls through to the generic write-path handling instead of calling
+		// hasUnsafeWritePath directly, so it inherits the
+		// `safeWriteCmds[basename] && argsHaveDynamicExpansion` guard.
+		//
+		// MEASURED PRE-FIX BUG, this exact row: `yq -i '.key = "value"' "$f"`
+		// answered Approve — hasUnsafeWritePath only inspects PATH-SHAPED args
+		// (looksLikePath), so a bare `$f` token was invisible to it and the
+		// dynamically-resolved write target was never evaluated at all (the same
+		// "one variable hop" shape pg2-2ke04 closed for reads). Post-fix this is
+		// NoOpinion.
+		{"yq -i write dynamic path", `yq -i '.key = "value"' "$f"`, hookio.NoOpinion},
+		{"yq -s write dynamic path", `yq -s '.key' "$f"`, hookio.NoOpinion},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1172,6 +1201,52 @@ func TestSafecmds_YqSpecialHandling(t *testing.T) {
 				t.Errorf("Decision = %v, want %v (reason: %s)", got.Decision, tt.want, got.Reason)
 			}
 		})
+	}
+}
+
+// TestSafecmds_YqWriteFlagFamily_Interchangeable is the RELATION pg2-1wt3b's
+// isYqInPlace fix promises, in the style of pg2-1xq3m's "abbreviation
+// spellings must agree" tests: isYqInPlace now recognises -i/--inplace AND
+// -s/--split-exp/--split-exp-file as ONE vocabulary
+// (cmdparse.MutatingFlags["yq"], consumed via HasAnyFlag), so EVERY member of
+// that family is routed through the identical fall-through into the shared
+// safeWriteCmds machinery. Swapping one spelling for another against the SAME
+// path must never change the verdict — there is no per-flag branch left for
+// them to disagree in.
+//
+// This is a weaker but longer-lived companion to the fixed-value rows in
+// TestSafecmds_YqSpecialHandling (which will need retuning the day a zone or a
+// write flag is added/moved): this one names no verdict at all, only that the
+// family agrees with itself, so it survives that kind of retune untouched.
+func TestSafecmds_YqWriteFlagFamily_Interchangeable(t *testing.T) {
+	pe := patheval.New("/home/user/project")
+	r := New(pe)
+
+	writeFlags := []string{"-i", "--inplace", "-s", "--split-exp", "--split-exp-file"}
+	paths := []string{
+		"/home/user/project/file.yaml", // writable
+		"/nix/store/abc123/file.yaml",  // readable, not writable
+		"/etc/secret.yaml",             // neither
+		`"$f"`,                         // dynamically expanded, statically unknowable
+	}
+	evalYq := func(flag, path string) hookio.RuleResult {
+		cmd := "yq " + flag + " x " + path
+		input := &hookio.HookInput{
+			ToolName:  "Bash",
+			CWD:       "/home/user/project",
+			ToolInput: mustJSON(map[string]string{"command": cmd}),
+		}
+		return hookio.Verdict(r.Evaluate(input))
+	}
+	for _, path := range paths {
+		first := evalYq(writeFlags[0], path)
+		for _, flag := range writeFlags[1:] {
+			got := evalYq(flag, path)
+			if got.Decision != first.Decision {
+				t.Errorf("yq %s x %s: got %s (%s), but yq %s x %s got %s (%s) — the write-flag family must be interchangeable for the same path",
+					flag, path, got.Decision, got.Reason, writeFlags[0], path, first.Decision, first.Reason)
+			}
+		}
 	}
 }
 

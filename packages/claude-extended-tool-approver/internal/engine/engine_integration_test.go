@@ -1418,6 +1418,84 @@ func TestIntegration_EnvVarGuard(t *testing.T) {
 	}
 }
 
+// TestIntegration_YqWriteFlagsNeverApproveThroughSubstitution pins pg2-1wt3b's
+// three-site fix at the FULL-ENGINE level, through the SAME captured-substitution
+// shape the bead's own report used (`X=$(yq …) echo hi`): a generic local variable
+// name (not PATH/HOME/an injector — those have their own decisive rules) captures
+// a yq write, so its verdict comes from envvars' recursion into
+// EvaluateExpression, which lands back on safecmds' yq branch exactly as if the
+// body had been run directly.
+//
+// THE BEAD'S OWN TWO EXAMPLE ROWS (both against the bare relative path `f.yaml`)
+// ARE DELIBERATELY NOT PINNED HERE AS "no longer allow". MEASURED, this tree: they
+// still answer Approve after all three sites are fixed, and correctly so — a bare
+// relative filename is not `looksLikePath`-shaped (no `/`, `./`, `../`, `~/`
+// prefix), so hasUnsafeWritePath's zone check never runs on it AT ALL, defaulting
+// to "no issue found". That is not specific to yq: `X=$(rm f.yaml) echo hi` and
+// `X=$(sed -i 's/x/y/' f.yaml) echo hi` measure the identical Approve on this same
+// tree, through the identical mechanism, for every safeWriteCmds member — it is a
+// pre-existing, orthogonal gap in `looksLikePath` (or a deliberate "bare filename
+// implicitly trusted as CWD-relative" design choice) affecting rm/cp/mv/mkdir/
+// touch/chmod/tee too, not one of pg2-1wt3b's three named sites, and fixing it
+// here would be exactly the kind of out-of-scope, unreplayed widening pg2-xl79d's
+// own comments warn against. It is reported as a discovered follow-up rather than
+// silently fixed or silently left unpinned.
+//
+// What IS pinned below are the two shapes that DO change, because they are the two
+// concrete gaps sites 1 and 2 close:
+//
+//   - site 1 (isYqInPlace missing the split family): a `-s`/`--split-exp` write
+//     against a READ-ONLY zone (/nix/store) used to be misclassified as a READ
+//     and Approve (the source is readable; the split's real output — a new file
+//     named from the expression — was never evaluated as a write target at all).
+//   - site 2 (yq absent from safeWriteCmds): a `-i` write against a DYNAMICALLY
+//     EXPANDED path used to Approve outright — hasUnsafeWritePath only inspects
+//     path-SHAPED args, so a bare `$f` token was invisible to it, and yq's branch
+//     never reached the shared `argsHaveDynamicExpansion` guard other
+//     safeWriteCmds members get for free.
+func TestIntegration_YqWriteFlagsNeverApproveThroughSubstitution(t *testing.T) {
+	t.Setenv("WORKSPACE_ROOT", "/Users/testuser/workspace")
+	projectRoot := "/Users/testuser/workspace/my-project"
+	cwd := projectRoot
+	eng := buildFullEngine(projectRoot, cwd)
+
+	cases := []struct {
+		name    string
+		command string
+	}{
+		{"site 1: -s against a read-only zone", `X=$(yq -s '.a' /nix/store/abc123/file.yaml) echo hi`},
+		{"site 1: --split-exp against a read-only zone", `X=$(yq --split-exp '.a' /nix/store/abc123/file.yaml) echo hi`},
+		{"site 2: -i against a dynamically-expanded path", `X=$(yq -i '.a=1' "$f") echo hi`},
+		{"site 2: -s against a dynamically-expanded path", `X=$(yq -s '.a' "$f") echo hi`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			in := &hookio.HookInput{ToolName: "Bash", CWD: cwd, ToolInput: makeBashJSON(tc.command)}
+			got := eng.EvaluateHook(in)
+			if got.Decision == hookio.Approve {
+				t.Errorf("%s: %q got APPROVE (%s: %s) — pg2-1wt3b closed exactly this gap and it must not silently reopen", tc.name, tc.command, got.Module, got.Reason)
+			}
+		})
+	}
+
+	// The bead's own literal reproduction, pinned at Approve for the reason stated
+	// in this function's doc: a bare relative filename bypasses the zone check
+	// entirely, for every safeWriteCmds member, not just yq — an orthogonal,
+	// pre-existing gap this bead does not fix.
+	for _, command := range []string{
+		`X=$(yq -i .a=1 f.yaml) echo hi`,
+		`X=$(yq -s ".a" f.yaml) echo hi`,
+	} {
+		t.Run("bare relative filename stays approve (orthogonal gap, not fixed here): "+command, func(t *testing.T) {
+			in := &hookio.HookInput{ToolName: "Bash", CWD: cwd, ToolInput: makeBashJSON(command)}
+			got := eng.EvaluateHook(in)
+			if got.Decision != hookio.Approve {
+				t.Errorf("%q got %s (%s: %s), want Approve — if this now fails, the bare-relative-filename gap this doc describes has changed and the comment above needs re-deriving, not just this want", command, got.Decision, got.Module, got.Reason)
+			}
+		})
+	}
+}
+
 // TestIntegration_EnvVarGuard_PositionIndependence pins the pg2-gkd5e invariant
 // across the FOUR assignment forms for the same NAME=VALUE: an assignment reaches
 // the same verdict whether it is written leading (`X=v cmd`), via the `export`

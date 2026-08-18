@@ -87,8 +87,16 @@ var PipeFilterCmds = map[string]bool{
 //     arbitrary command over it (`find .git -exec rm {} \;`); the `-f*print*`
 //     family writes its listing to a named file.
 //   - `sort -o FILE` writes to FILE, which may be the guarded path itself.
-//   - `yq -i` edits in place. (`jq` has NO in-place flag — it is stdout-only, so it
-//     is deliberately absent here.)
+//   - `yq -i` edits in place; `yq -s`/`--split-exp`/`--split-exp-file` writes ONE
+//     NEW FILE PER RESULT, named from the expression (pg2-1wt3b — verified against
+//     yq's own `--help`, 2026-08-18, yq v4.34.2: "print each result (or doc) into
+//     a file named (exp)"). This entry is the single source of truth for yq's
+//     write vocabulary: `internal/rules/safecmds`' isYqInPlace consumes it
+//     directly (via HasAnyFlag) rather than re-listing the flags, and
+//     `internal/cmdparse`'s own substitution seam (parser.go's
+//     substitutionWriteFlags) OR's in a supplement only for whatever gap remains
+//     here — which, as of this widening, is none for yq. (`jq` has NO in-place
+//     flag — it is stdout-only, so it is deliberately absent here.)
 //   - `tree -o FILE` redirects its listing into FILE.
 //
 // A flag match flips the WHOLE command to write rather than just the flag's own
@@ -108,7 +116,10 @@ var MutatingFlags = map[string]map[string]bool{
 		"-fprint": true, "-fprint0": true, "-fls": true, "-fprintf": true,
 	},
 	"sort": {"-o": true, "--output": true},
-	"yq":   {"-i": true, "--inplace": true, "--in-place": true},
+	"yq": {
+		"-i": true, "--inplace": true, "--in-place": true,
+		"-s": true, "--split-exp": true, "--split-exp-file": true,
+	},
 	"tree": {"-o": true},
 }
 

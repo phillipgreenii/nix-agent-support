@@ -98,10 +98,17 @@ var logReadSubcommands = map[string]bool{
 	"show": true, "stream": true, "stats": true,
 }
 
+// yq is a member (pg2-1wt3b) even though it also has its own dedicated branch
+// above (the `basename == "yq"` check), exactly like `cp` does: membership is
+// what makes the shared dynamic-expansion guard (`argsHaveDynamicExpansion`,
+// just below) and the generic hasUnsafeWritePath check reachable for yq's
+// in-place/split writes once that branch falls through instead of handling the
+// write case itself. See the `basename == "yq"` branch's doc for why the
+// fall-through is load-bearing and not just a stylistic dedup.
 var safeWriteCmds = map[string]bool{
 	"rm": true, "cp": true, "mv": true,
 	"mkdir": true, "touch": true, "chmod": true,
-	"tee": true,
+	"tee": true, "yq": true,
 }
 
 var lspServices = map[string]bool{
@@ -338,14 +345,22 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 			}
 			return hookio.NotApplicable()
 		}
-		// yq: read command unless -i/--inplace is present
-		if basename == "yq" {
-			if isYqInPlace(pc.Args) {
-				if unsafe, path := hasUnsafeWritePath(pc.Args, pe); unsafe {
-					return r.refuse("safe-commands: yq -i references non-writable path " + path + " (deferred to claude-code)")
-				}
-				continue
-			}
+		// yq: a read command UNLESS isYqInPlace's flags are present, in which case
+		// it is deliberately NOT handled here — it falls through to the generic
+		// safeWriteCmds machinery below (yq is a member, pg2-1wt3b), exactly like
+		// `cp`'s own special-case branch does. That is not incidental: pre-pg2-1wt3b,
+		// yq was ABSENT from safeWriteCmds and this branch handled the write case
+		// itself with a direct hasUnsafeWritePath call — which skipped the dynamic-
+		// expansion guard (`safeWriteCmds[basename] && argsHaveDynamicExpansion`
+		// below) that every OTHER safeWriteCmds member gets for free. MEASURED, this
+		// tree, pre-fix: `yq -i '.a=1' "$f"` (a DYNAMICALLY-EXPANDED write target)
+		// answered `allow` — hasUnsafeWritePath only inspects PATH-SHAPED args
+		// (looksLikePath), so a bare `$f` token was invisible to it and the write
+		// went through unexamined, the same "one variable hop" bypass shape
+		// readPathIssue's doc records for reads (pg2-2ke04). Falling through instead
+		// of early-`continue`-ing is what lets yq inherit that guard rather than
+		// needing its own copy of it.
+		if basename == "yq" && !isYqInPlace(pc.Args) {
 			if issue := readPathIssue(pc.Args, pe, ""); issue != "" {
 				return r.refuse("safe-commands: yq " + issue + " (deferred to claude-code)")
 			}
@@ -749,8 +764,8 @@ func isVarNameByte(c byte) bool {
 // argsHaveDynamicExpansion reports whether any non-flag arg contains a shell
 // expansion ($VAR, ${VAR}, $(...), backtick) that would resolve a path at
 // runtime, hiding it from static path evaluation. Used by the WRITE path, whose
-// commands (rm/cp/mv/mkdir/touch/chmod/tee) take path operands only; the READ path
-// applies the same per-argument predicate through readPathIssue.
+// commands (rm/cp/mv/mkdir/touch/chmod/tee/yq) take path operands only; the READ
+// path applies the same per-argument predicate through readPathIssue.
 func argsHaveDynamicExpansion(args []string) bool {
 	for _, a := range args {
 		// pg2-wxbr9: route through pathCandidate so a glued `--flag=$VAR` is
@@ -1200,7 +1215,25 @@ func extractXargsCommand(args []string) (string, []string) {
 	return "", nil
 }
 
-// isYqInPlace returns true if args contain -i or --inplace.
+// isYqInPlace returns true if args carry a flag that turns yq into a WRITER:
+// `-i`/`--inplace` (edits the given file in place) or `-s`/`--split-exp`/
+// `--split-exp-file` (pg2-1wt3b — writes ONE NEW FILE PER RESULT, named from the
+// expression; verified against yq's own `--help`, 2026-08-18, yq v4.34.2: "print
+// each result (or doc) into a file named (exp)").
+//
+// PRE-pg2-1wt3b THIS TESTED ONLY `-i`/`--inplace`, so the split family fell
+// through to the READ branch below (readPathIssue) instead of the write branch
+// (hasUnsafeWritePath). For a path that is READABLE but NOT WRITABLE — the
+// canonical case being `patheval`'s ReadOnly zone, e.g. `/nix/store/…` — that
+// misclassification MEASURABLY auto-approved a write: on this tree, pre-fix,
+// `yq -s '.a' /nix/store/abc123/file.yaml` answered `allow` (the read check sees
+// only that the SOURCE is readable; the write branch's writability check never
+// ran, and the split's real output file — typically written into the CWD, named
+// from the expression — was never evaluated as a write target AT ALL). Folding
+// this into the single MutatingFlags["yq"] vocabulary (cmdparse.HasAnyFlag) —
+// rather than hand-duplicating the flag list a second time — is what keeps this
+// function and pipesink.MutatingFlags["yq"] (its other consumer, for
+// cmdparse.StageWritesInput) from drifting apart the way `-i` and `-s` just did.
 //
 // EXACT-TOKEN "--inplace" IS NOT THE pg2-os1kq/pg2-1xq3m BUG CLASS HERE — MEASURED
 // NOT AFFECTED. That class needs a long-flag parser that accepts unambiguous
@@ -1213,14 +1246,11 @@ func extractXargsCommand(args []string) (string, []string) {
 // abbreviation pflag refuses outright, identically to a random unknown flag; only
 // the full `--inplace` spelling (and the short `-i`) is ever recognised. So there
 // is no shorter spelling to widen this test for, and adding one would be dead code
-// for a spelling yq itself rejects.
+// for a spelling yq itself rejects. cmdparse.HasAnyFlag's exact-token-or-glued-`=`
+// matching does not change that: an unrecognised abbreviation matches no key in
+// MutatingFlags["yq"] either way.
 func isYqInPlace(args []string) bool {
-	for _, a := range args {
-		if a == "-i" || a == "--inplace" {
-			return true
-		}
-	}
-	return false
+	return cmdparse.HasAnyFlag(args, cmdparse.MutatingFlags["yq"])
 }
 
 // isSedInPlace returns true if args contain -i, -i<suffix>, or any abbreviated
