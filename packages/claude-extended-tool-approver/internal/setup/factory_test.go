@@ -97,14 +97,17 @@ func TestFactory_CommandAwareBlocks_Configured(t *testing.T) {
 	cwd := t.TempDir()
 	eng := NewEngineForCWD(cwd)
 
-	// NOTE on module attribution: EvaluateHook folds a Bash command's leaves. On
-	// the APPROVE path it wraps the result as module "engine" ("all sub-commands
-	// approved"), so the deciding rule's name is only observable on the decisive
-	// Reject/Ask leaves. The Reject/Ask cases below therefore carry wantModule to
-	// prove the SSH/VAULT rule (not safe-commands) is the decider — the
-	// safe-commands ordering guarantee. The Approve cases assert the decision only
-	// (the reordering is what lets the dedicated rule reach the leaf first;
-	// safe-commands Abstains on these executables).
+	// NOTE on module attribution: EvaluateHook folds a Bash command's leaves
+	// most-restrictive-wins. Before pg2-he22o, an Approve verdict always wrapped
+	// as module "engine" ("all sub-commands approved") regardless of which rule
+	// actually approved, because the fold's Approve-seed occupied the tie-break's
+	// "current" slot on every leaf; since that fix, an Approve now attributes to
+	// the deciding rule, but that is not exercised HERE — the Reject/Ask cases
+	// below carry wantModule to prove the SSH/VAULT rule (not safe-commands) is
+	// the decider — the safe-commands ordering guarantee. The Approve cases assert
+	// the decision only (the reordering is what lets the dedicated rule reach the
+	// leaf first; safe-commands Abstains on these executables); module attribution
+	// for the Approve path is exercised in internal/engine's own tests instead.
 	cases := []struct {
 		name       string
 		command    string

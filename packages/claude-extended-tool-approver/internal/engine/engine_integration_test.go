@@ -595,8 +595,14 @@ func (f fakePrimaryResolver) Aliases(string) (map[string]string, error) { return
 // generic git rule (registration order). On the REAL hook path (EvaluateHook) a
 // bypass-mode commit on the canonical primary branch is Rejected by primary-commit;
 // otherwise the commit is not rejected. The deciding-rule identity for the non-reject
-// cases is asserted via Evaluate (first-match-wins), because EvaluateHook's
-// most-restrictive fold reports Module=="engine" on an all-approve expression.
+// cases is asserted via Evaluate (first-match-wins) rather than EvaluateHook: Evaluate
+// directly answers "which rule in THIS chain, in registration order, claims this
+// command" without going through EvaluateExpression's per-leaf compound fold at all,
+// which is the more precise probe for a registration-order guarantee. (Before
+// pg2-he22o, EvaluateHook's fold additionally always reported Module=="engine" on an
+// all-approve expression regardless of which rule decided it, which was itself a
+// reason to prefer Evaluate here; that attribution bug is fixed, but Evaluate remains
+// the right tool for this specific assertion.)
 func TestPrecedence_PrimaryCommitBeatsGit(t *testing.T) {
 	mk := func(cur string) *engine.Engine {
 		e := engine.New()
@@ -2342,10 +2348,15 @@ func buildFullEngineWithShells(projectRoot, cwd string, shells killshell.ShellSt
 // of registration order. Asserting it is what makes these cases test the
 // COMPOSITION rather than just "the rule fires somewhere".
 //
-// wantModule must be read off Evaluate, not EvaluateHook, because EvaluateHook
-// folds a Bash expression's leaves most-restrictive-wins and reports
-// Module=="engine" on an all-approve fold (same convention as
-// setup/factory_test.go).
+// wantModule must be read off Evaluate, not EvaluateHook: Evaluate answers "which
+// registered rule, in chain order, claims this exact command" directly, while
+// EvaluateHook goes through EvaluateExpression's per-leaf most-restrictive-wins
+// fold first — a different question, and for a genuine multi-leaf compound the
+// fold's attributed rule need not equal the first-match chain's (same convention
+// as setup/factory_test.go). (Before pg2-he22o the fold additionally collapsed
+// every Approve verdict to Module=="engine" regardless of the deciding rule; that
+// attribution bug is fixed, but Evaluate is still the precise tool for this
+// registration-order assertion.)
 type chainCase struct {
 	name       string
 	command    string

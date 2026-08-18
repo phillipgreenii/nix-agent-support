@@ -264,6 +264,44 @@ func (e *Engine) EvaluateHook(input *hookio.HookInput) hookio.RuleResult {
 	return e.Evaluate(input)
 }
 
+// mostRestrictiveAttributed folds candidate into acc with EXACTLY the same
+// Decision-ordering rule as hookio.MostRestrictive — so no VERDICT can ever
+// differ from calling hookio.MostRestrictive directly — but breaks an
+// Approve/Approve TIE in favor of whichever side carries a RULE's own
+// attribution over the engine's generic "nothing to judge" identity (pg2-he22o).
+//
+// Every accumulator this file folds into — EvaluateExpression's
+// mostRestrictive, foldSubstitutionScan's result, evaluateHeredocBodies'
+// result — is SEEDED at {Approve, Module: "engine"}: the least-restrictive
+// identity for a "the whole is Approve iff every part independently approves"
+// fold, so that zero parts contributes nothing. hookio.MostRestrictive's tie-
+// break keeps `current`, and with the seed always occupying that slot across
+// every subsequent fold, the FIRST rule that ever decisively approved a part
+// had its Module silently replaced by the seed's "engine" — even though the
+// seed itself never formed an opinion. That is the attribution bug this
+// function exists to fix. It is reached ONLY when both sides already agree
+// the Decision is Approve, so it can never move a verdict — only relabel who
+// gets credit for one that was already there.
+//
+// candidate.Module == "engine" is true of every neutral "nothing to judge"
+// contribution this engine emits on the Approve path (evaluateRedirections'
+// no-op branches, evaluateAssignmentOnlyLeaf's neutral branch, and the sibling
+// seeds in foldSubstitutionScan / evaluateHeredocBodies) — no registered rule
+// module is named "engine" (audited: internal/rules/*/*.go). A candidate that
+// is Approve and NOT "engine" can therefore only be a rule's own decisive
+// verdict: e.Evaluate returns Approve only from a rule (its manufactured
+// exhaustion is always NoOpinion, never Approve — see Evaluate's loop-
+// exhaustion comment), and EvaluateExpression's own return is post-processed
+// by withExpressionProvenance but never re-attributed. Preferring it over an
+// "engine" accumulator is attribution-only, never verdict-changing.
+func mostRestrictiveAttributed(acc, candidate hookio.RuleResult) hookio.RuleResult {
+	if acc.Decision == hookio.Approve && candidate.Decision == hookio.Approve &&
+		acc.Module == "engine" && candidate.Module != "engine" {
+		return candidate
+	}
+	return hookio.MostRestrictive(acc, candidate)
+}
+
 func (e *Engine) EvaluateExpression(expr string, stack []hookio.StackFrame, origin *hookio.HookInput) hookio.RuleResult {
 	normalized := normalizeExpression(expr)
 	// Check for cycle: has this exact expression been evaluated before?
@@ -362,7 +400,11 @@ func (e *Engine) EvaluateExpression(expr string, stack []hookio.StackFrame, orig
 				judgedLeaf = true
 			}
 			if assignResult, judged := e.evaluateAssignmentOnlyLeaf(pc, currentCWD, expr, inCommandVars, origin); judged {
-				leafResult = hookio.MostRestrictive(leafResult, assignResult)
+				// mostRestrictiveAttributed, not hookio.MostRestrictive directly: assignResult
+				// can be a rule's own decisive Approve (e.g. envvars' preserves-caller-value
+				// case), and leafResult is still the engine-attributed redirection seed at
+				// this point — a plain tie-break would discard the rule's Module (pg2-he22o).
+				leafResult = mostRestrictiveAttributed(leafResult, assignResult)
 				judgedLeaf = true
 			}
 			// A command-less leaf's Raw can still hold a live substitution, and this
@@ -377,11 +419,21 @@ func (e *Engine) EvaluateExpression(expr string, stack []hookio.StackFrame, orig
 			// double-judge them under a different model. The fold is seeded with the
 			// neutral Approve, so a leaf whose Raw holds no substitution contributes
 			// nothing and cannot demote an otherwise-approved expression.
-			leafResult = hookio.MostRestrictive(leafResult,
+			//
+			// mostRestrictiveAttributed (not a plain fold): a substitution body here
+			// recurses through EvaluateExpression, so its Approve can already carry a
+			// rule's own attribution rather than the neutral "no substitutions" seed —
+			// same pg2-he22o concern as the assignment fold above.
+			leafResult = mostRestrictiveAttributed(leafResult,
 				e.evaluateSubstitutionsIn(cmdparse.StripLeadingEnvAssignments(pc.Raw), normalized, stack, origin))
-			if leafResult.Decision > mostRestrictive.Decision {
-				mostRestrictive = leafResult
-			}
+			// mostRestrictiveAttributed here too: this is the fold that used to be a
+			// raw `leafResult.Decision > mostRestrictive.Decision` strict compare, which
+			// never revisits an exact tie — silently keeping mostRestrictive's engine
+			// attribution even when leafResult carries a rule's own Approve. Decision-wise
+			// it is unchanged: the strict-greater branch behaves identically, and the added
+			// tie branch only fires when both sides already agree the Decision is Approve
+			// (pg2-he22o).
+			mostRestrictive = mostRestrictiveAttributed(mostRestrictive, leafResult)
 			continue
 		}
 		judgedLeaf = true
@@ -430,8 +482,18 @@ func (e *Engine) EvaluateExpression(expr string, stack []hookio.StackFrame, orig
 			cmdResult = hookio.MostRestrictive(cmdResult, e.evaluateHeredocBodies(pc, normalized, stack, origin))
 		}
 
-		// Track most restrictive
-		mostRestrictive = hookio.MostRestrictive(mostRestrictive, cmdResult)
+		// Track most restrictive. mostRestrictiveAttributed, not a plain fold: this is
+		// THE site pg2-he22o fixes. mostRestrictive starts at the Approve+"engine" seed
+		// (line ~340) and stays "current" across every leaf, so on an ordinary
+		// Approve/Approve tie a plain hookio.MostRestrictive fold keeps the seed's
+		// engine attribution and discards cmdResult's rule attribution — meaning an
+		// Approve on a Bash compound was ALWAYS credited to "engine", never to the rule
+		// that actually approved it. mostRestrictiveAttributed breaks that tie in favor
+		// of cmdResult's rule Module when it has one, and defers to
+		// hookio.MostRestrictive unchanged for every other case (including any tie NOT
+		// at Approve), so no verdict can move — only who gets credited for an Approve
+		// that was already there.
+		mostRestrictive = mostRestrictiveAttributed(mostRestrictive, cmdResult)
 
 		// After processing the leaf, advance the running cwd if it is a simple
 		// `cd <dir>` with exactly one non-flag argument, so subsequent leaves
@@ -625,7 +687,12 @@ func (e *Engine) evaluateHeredocBodies(pc cmdparse.ParsedCommand, normalized str
 		// body STRING, which the seam must parse, where ADR 0039's I7 requires
 		// recursion to walk a SUBTREE of the already-parsed file instead. Converting
 		// this call to the structural entry point is step 4's unit of work.
-		result = hookio.MostRestrictive(result,
+		//
+		// mostRestrictiveAttributed: `result` starts at the same Approve+"engine" seed
+		// pattern as EvaluateExpression's own fold, and foldSubstitutionScan's own
+		// result can carry a rule's decisive Approve recursed in from a nested
+		// EvaluateExpression call — same pg2-he22o attribution concern, one level down.
+		result = mostRestrictiveAttributed(result,
 			e.foldSubstitutionScan(cmdparse.ScanSubstitutionsInHeredocBody(body), normalized, stack, origin))
 	}
 	return result
@@ -731,7 +798,11 @@ func (e *Engine) foldSubstitutionScan(scan cmdparse.SubstitutionScan, normalized
 			}
 		}
 
-		result = hookio.MostRestrictive(result, subResult)
+		// mostRestrictiveAttributed: subResult is a recursive EvaluateExpression
+		// verdict, so its Approve can already carry the deciding rule's own
+		// attribution rather than the neutral "no substitutions" seed `result` starts
+		// at — same pg2-he22o concern as EvaluateExpression's own leaf fold.
+		result = mostRestrictiveAttributed(result, subResult)
 	}
 	return result
 }
