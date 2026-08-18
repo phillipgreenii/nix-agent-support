@@ -106,6 +106,61 @@ echo "=== KNOWN REMAINING HOLE (out of scope: needs dataflow, option 2) ==="
 # for a regression.
 probe 'F=/Users/phillipg/.ssh/id_rsa; echo $F | xargs cat'
 
+# RESOLUTION (pg2-qmtsn, 2026-08-18): CLOSED WITHOUT A FIX. The bead gave an
+# explicit off-ramp — measure how often a credential path reaches a reader
+# only via a pipe, and close with no code change if that is ~never. It is.
+#
+# MEASUREMENT. A parsed-structure detector (cmdparse.Parse leaves grouped by
+# PipelineID/PipelineIndex; cmdparse.InCommandVars to resolve a bare `$F`
+# reference to the literal value an earlier leaf assigned; secretpath.IsSecret
+# for the deny-list check, GATED by cmdparse.LooksLikePath so it never runs on
+# a raw prose/heredoc argument — the pg2-5b901 / pg2-ia640.5 failure mode this
+# bead's own description warns against; cmdparse.SkipMessageArgs /
+# SkipGrepPattern to exclude bd/git/gh message text and grep/rg search
+# patterns from candidacy) was run once, read-only, against a full snapshot
+# COPY of the live asklog corpus (the live db cannot be safely full-table-
+# scanned under immutable=1 — see docs/engine-ab-replay-runbook.md's "Asklog
+# read access" section; `PRAGMA quick_check` on the snapshot reported `ok`).
+# The reader side was restricted to the xargs-wrapped shape specifically
+# (`producer | xargs <reader>` with the reader's own args containing no path
+# operand): a bare `producer | cat` with no xargs never opens a file at all —
+# cat with zero args just streams stdin bytes back out, so it leaks nothing
+# beyond what the producer already would. xargs (or an equivalent explicit
+# construct, e.g. `find -exec`) is what actually turns piped TEXT into a
+# file-open ARGUMENT.
+#
+#   Corpus: 364,823 non-excluded rows (all tools), 238,473 Bash rows,
+#           2026-03-13T20:47:33Z .. 2026-08-18T19:05:04Z (~5 months).
+#   MATCHED rows (secret-mentioning producer -> arg-less xargs-reader
+#     across a pipe): 0 / 238,473.
+#   Mechanism sanity check (detector is not silently dead): the underlying
+#     xargs-reader shape itself, WITHOUT the secrecy filter, fires 1,686
+#     times across 1,573 unique commands (mostly `find ... | xargs grep -l
+#     ...` / `find ... | head -1 | xargs cat` idioms) — so the zero above is
+#     a real absence of the secret-mentioning subset, not a detector that
+#     never matches real commands. Detector correctness was also unit-checked
+#     directly against this file's own canonical example
+#     (`F=/Users/phillipg/.ssh/id_rsa; echo $F | xargs cat`), which it flags.
+#   Supplementary reconnaissance (a broad `LIKE` text scan, NOT the primary
+#     measurement — used only to sanity-check no adjacent idiom was missed):
+#     rows containing both a credential-looking substring (id_rsa,
+#     id_ed25519, .aws/credentials, .credentials) AND a pipe AND one of
+#     xargs/-exec/"while read": 4 total in the whole corpus, and all 4 are
+#     meta — `bd comment`/`bd create` bodies discussing THIS bead or an
+#     unrelated grep-flag bead — not attempted exploit commands.
+#
+# DECISION: leave the hole. Real dataflow (following a value across a pipe
+# into the next command's stdin) is strictly more machinery than pg2-2ke04's
+# already-deferred intra-command dataflow (option 2), and the corpus gives
+# zero evidence it would ever fire. Building it now would be unjustified
+# complexity for a shape that has not occurred once in ~5 months of this
+# operator's real usage. pg2-2ke04 option 2 and pg2-553z3 (KEEP STRICT,
+# operator ruling 2026-07-30 — see that bead) remain separately deferred for
+# the same reason: no measured volume justifies the shared intra-command
+# dataflow primitive they and this bead would need. If a future corpus
+# measurement finds this shape starting to appear, re-open with the specific
+# rows as evidence rather than reopening on principle.
+
 echo
 echo '=== SPELLINGS: $(...) and backtick, not only $VAR ==='
 probe 'cat $(echo /Users/phillipg/.ssh/id_rsa)'
