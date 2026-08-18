@@ -1,8 +1,10 @@
 package session
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -108,6 +110,62 @@ func TestResolveTranscriptHandlesUnderscoreCwd(t *testing.T) {
 	s := &Session{Cwd: "/a/b_c"}
 	if _, _, ok := ResolveTranscript(home, s); !ok {
 		t.Errorf("ok=false, want true (slug should dash underscore)")
+	}
+}
+
+// TestTranscriptHasTitleSurvivesOversizedEarlyLine is a regression test for a
+// bug where transcriptHasTitle used a scanner ceiling of only 1 MiB
+// (scanner.Buffer(make([]byte, 1<<16), 1<<20) -- bufio.Scanner.Buffer's
+// effective max is the LARGER of its two args) while every other transcript
+// reader in this repo uses a 1 MiB initial / 16 MiB ceiling. A single early
+// JSONL line over 1 MiB (e.g. a large tool_result or a pasted file on one
+// line) made bufio.Scanner.Scan stop and set scanner.Err() to
+// bufio.ErrTooLong, which transcriptHasTitle never checked -- so a genuine
+// custom-title record later in the scan window was silently never seen,
+// indistinguishable from "no matching custom-title record".
+//
+// This test builds a transcript whose FIRST line is ~2 MiB (over the OLD 1
+// MiB ceiling, under the NEW 16 MiB one) followed by a genuine custom-title
+// record within the titleScanLines window, and asserts transcriptHasTitle
+// still finds it. Reverting the buffer ceiling to the old
+// scanner.Buffer(make([]byte, 1<<16), 1<<20) makes this test fail: Scan stops
+// at the oversized first line, never reaches the custom-title record, and
+// transcriptHasTitle returns false.
+func TestTranscriptHasTitleSurvivesOversizedEarlyLine(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "big.jsonl")
+
+	// An early line whose JSON-encoded size is over the OLD 1 MiB ceiling but
+	// comfortably under the NEW 16 MiB one -- e.g. a large tool_result pasted
+	// into the transcript.
+	oversized := struct {
+		Type    string `json:"type"`
+		Content string `json:"content"`
+	}{
+		Type:    "user",
+		Content: strings.Repeat("a", 2<<20), // 2 MiB payload
+	}
+	oversizedLine, err := json.Marshal(oversized)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(oversizedLine) <= 1<<20 {
+		t.Fatalf("oversized line is only %d bytes, want > 1<<20 (the old ceiling)", len(oversizedLine))
+	}
+	if len(oversizedLine) >= 16<<20 {
+		t.Fatalf("oversized line is %d bytes, want < 16<<20 (the new ceiling)", len(oversizedLine))
+	}
+
+	const wantTitle = "big-early-line-session"
+	body := string(oversizedLine) + "\n" +
+		`{"type":"custom-title","customTitle":"` + wantTitle + `","sessionId":"x"}` + "\n"
+
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if !transcriptHasTitle(path, wantTitle) {
+		t.Errorf("transcriptHasTitle(%q, %q) = false, want true (a custom-title record follows an oversized early line -- past the old 1 MiB ceiling but within the new 16 MiB one)", path, wantTitle)
 	}
 }
 

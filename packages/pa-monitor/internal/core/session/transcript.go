@@ -135,7 +135,7 @@ func transcriptHasTitle(path, wantTitle string) bool {
 	defer func() { _ = f.Close() }()
 
 	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 1<<16), 1<<20)
+	scanner.Buffer(make([]byte, titleScanInitialBufSize), titleScanMaxLineSize)
 	lines := 0
 	for scanner.Scan() && lines < titleScanLines {
 		lines++
@@ -154,3 +154,18 @@ func transcriptHasTitle(path, wantTitle string) bool {
 }
 
 const titleScanLines = 200
+
+// titleScanInitialBufSize and titleScanMaxLineSize match the 1 MiB initial /
+// 16 MiB ceiling pattern used by every other transcript reader in this repo
+// (context.go, subagents.go, first_prompt.go, corpus/resolve.go,
+// pr-pool/internal/usage/transcript.go, claude-transcript/scanner.go). A
+// single JSONL line here routinely runs to megabytes (a large tool_result or
+// pasted file on one line), and bufio.Scanner.Buffer's effective ceiling is
+// the LARGER of its two arguments — the previous (1<<16, 1<<20) pair capped
+// at 1 MiB, silently dropping the scan (Scan returns false, scanner.Err()
+// becomes bufio.ErrTooLong, which this function never checks) whenever an
+// early line exceeded that, indistinguishable from "no custom-title record".
+const (
+	titleScanInitialBufSize = 1 << 20  // 1 MiB
+	titleScanMaxLineSize    = 16 << 20 // 16 MiB
+)
