@@ -53,7 +53,7 @@ type evalResult struct {
 
 func newEvaluateCmd() *cobra.Command {
 	var days int
-	var since, settingsPath, format, approvalSource string
+	var since, settingsPath, format, approvalSource, baseline string
 	var missesOnly bool
 	cmd := &cobra.Command{
 		Use:   "evaluate",
@@ -87,10 +87,25 @@ it, so module plus a fixed-width prefix of the reason's first LINE is the site
 key. Both trims are load-bearing: the detail can be a path, a whole heredoc or a
 multi-line bd comment, and without them one site fragments across dozens of
 lines. The width is a knob — widen it if two sites collapse together, narrow it
-if one site splits.`,
+if one site splits.
+
+--baseline <file> folds a decision-delta report into this same command instead
+of a separate diff step. The FIRST invocation captures (the file does not
+exist yet); a LATER invocation against the same path compares and reports
+every row whose replay verdict moved, classified more-restrictive vs
+less-restrictive and attributed to the deciding rule:
+
+  claude-extended-tool-approver evaluate --format json --baseline base.json   # capture
+  # ... edit rules, rebuild, run unit tests ...
+  claude-extended-tool-approver evaluate --format json --baseline base.json   # compare
+
+A baseline captured under different filters (--days/--since/--approval-source/
+--misses-only/--settings) is refused rather than silently diffed. The default
+bare-array --format json shape (and the jq recipe above) is unchanged when
+--baseline is not given.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			runEvaluate(days, since, settingsPath, format, approvalSource, missesOnly)
+			runEvaluate(days, since, settingsPath, format, approvalSource, baseline, missesOnly)
 			return nil
 		},
 	}
@@ -99,11 +114,12 @@ if one site splits.`,
 	cmd.Flags().StringVar(&settingsPath, "settings", "", "Path to settings file for settings evaluation")
 	cmd.Flags().StringVar(&format, "format", "summary", "Output format: json|summary")
 	cmd.Flags().StringVar(&approvalSource, "approval-source", "", "Only evaluate rows with this approval_source (unknown|bypass|auto|settings|hook|user)")
+	cmd.Flags().StringVar(&baseline, "baseline", "", "Path to a baseline report: captures it if absent, compares against it and reports the decision delta if present")
 	cmd.Flags().BoolVar(&missesOnly, "misses-only", false, "Only show rows where hook is wrong")
 	return cmd
 }
 
-func runEvaluate(daysVal int, sinceVal, settingsPathVal, formatVal, approvalSourceVal string, missesOnlyVal bool) {
+func runEvaluate(daysVal int, sinceVal, settingsPathVal, formatVal, approvalSourceVal, baselineVal string, missesOnlyVal bool) {
 	days := &daysVal
 	since := &sinceVal
 	settingsPath := &settingsPathVal
@@ -228,6 +244,17 @@ func runEvaluate(daysVal int, sinceVal, settingsPathVal, formatVal, approvalSour
 			continue
 		}
 		results = append(results, r)
+	}
+
+	if baselineVal != "" {
+		runEvaluateBaseline(baselineVal, *format, evaluateFilters{
+			Days:           *days,
+			Since:          *since,
+			ApprovalSource: *approvalSourceFilter,
+			MissesOnly:     *missesOnly,
+			Settings:       *settingsPath,
+		}, counts, results)
+		return
 	}
 
 	switch *format {

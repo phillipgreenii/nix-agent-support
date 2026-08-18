@@ -58,6 +58,11 @@ jq 'length' /tmp/ceta-misses.json
 
 If zero misses, skip Steps 2-3 and go straight to the calibration steps (4-6) — they run over the full dataset regardless of the miss count.
 
+**Keep `/tmp/ceta-all.json`.** Once the implementation ticket (Phase 2) lands a rule-module
+change for one of these patterns, re-run `evaluate --format=json --baseline=/tmp/ceta-all.json`
+to get the decision delta in one command instead of a second manual replay — see that ticket's
+Reproduce section below.
+
 ### Step 2: Group by pattern and rank
 
 Group on the `command_class` field, NOT `tool_summary`. `command_class` is the
@@ -281,6 +286,19 @@ claude-extended-tool-approver evaluate --misses-only --format=json | \
  jq '[.[] | select(.command_class | test("<pattern-regex>"))]'
 
 claude-extended-tool-approver show <id1> <id2> <id3> --format=json
+
+## Verifying the fix (implementation ticket)
+
+After the rule-module change lands, confirm the decision delta in one command rather than a
+second manual replay:
+
+claude-extended-tool-approver evaluate --format=json \
+ --baseline=/tmp/ceta-all.json # the file captured in this ticket's Step 1, before the change
+
+This reports every row whose replay verdict moved, classified more-restrictive vs
+less-restrictive and attributed to the deciding rule; confirm this pattern's rows moved in the
+intended direction (less-restrictive for an APPROVE fix, more-restrictive for an ASK/DENY fix)
+and that nothing else regressed.
 
 ## Debugging
 

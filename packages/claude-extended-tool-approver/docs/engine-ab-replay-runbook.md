@@ -5,6 +5,15 @@ engines — and the measurement traps that make the naive approach report a cata
 there. (Extracted 2026-08-17 from a bd memory; methodology proven on `pg2-899h3` and its sibling
 verify beads `pg2-gsi4z`, `pg2-xzc30`, `pg2-lotbo`, `pg2-3gbxm`.)
 
+**Not what you want if you are actively editing a rule module right now.** This runbook is for
+RETROACTIVELY comparing two already-existing commits (typically post-hoc, verifying a change that
+already landed), which is why it builds two out-of-repo binaries. While iterating on a rule change
+in place, `evaluate --baseline <file>` (pg2-f1vss) is a single command: run it once before editing
+(it captures), edit/rebuild/test as normal, run the identical command again (it compares) — no
+second binary, no git ref. See `cmd/claude-extended-tool-approver/cmd_evaluate.go`'s `--baseline`
+help. Reach for THIS runbook when the two revisions already exist as commits and you were not the
+one who captured a "before" snapshot.
+
 ## The two replays — do not confuse them
 
 The transition tables in "verify X after apply" beads are a PRE-FIX vs POST-FIX **engine A/B**

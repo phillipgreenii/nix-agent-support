@@ -43,6 +43,11 @@ claude-extended-tool-approver evaluate \
   --format=json > /tmp/ceta-settings-eval.json
 ```
 
+**Keep this file.** Once a rule module absorbs one of these patterns (Phase 2's
+implementation work), re-run the SAME command with `--baseline /tmp/ceta-settings-eval.json`
+added to see the decision delta in one command, instead of re-running `evaluate` twice and
+diffing by hand — see the Acceptance Criteria below.
+
 ### Step 3: Filter for settings-caught misses
 
 ```bash
@@ -207,7 +212,8 @@ This shows which rules evaluated and why each abstained, helping identify the ta
 
 - [ ] Go rule module handles this pattern correctly
 - [ ] settings.local.json rule removed
-- [ ] evaluate passes (no regressions)
+- [ ] `evaluate --settings=<path> --format=json --baseline=<file>` (the file from Step 2, or a
+      fresh capture before the change) reports no less-restrictive moves
 - [ ] go test ./... passes
 ```
 
