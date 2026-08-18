@@ -323,6 +323,50 @@ bounds what the evaluation proves: an agent-labelled set measures agreement betw
 two models, and only an operator-labelled one measures agreement with the person whose
 attention the corrections cost.
 
+An unlabelled entry from `gold sample` carries no `labeller` at all — there is no
+sentinel constant for "awaiting a verdict" in the `gold` package (checked: `Entry`'s
+only enum-like field is `Source`, not `Labeller`). Bead `pg2-uth8o`'s rebuild used the
+plain string `pending-operator-review` for this state (applied to the JSONL data only,
+not a code change) so a `grep` over the file distinguishes "still needs a person" from
+"labelled" without decoding JSON. This is a **convention**, not something the tool
+enforces — a future `gold sample` run still writes an empty `labeller`, and that is
+fine (`Entry.Labelled()` keys on `class`, never on `labeller`).
+
+#### Persistence: the set must not evaporate a second time
+
+The set that existed before bead `pg2-uth8o` (63 entries: 45 agent-labelled +
+18 file-channel) was deleted from `$XDG_DATA_HOME/pg-ccaudit/goldset.jsonl` with no
+copy anywhere else, and was **unrecoverable** — it is genuinely gone, not merely
+misplaced, because a hand-labelled verdict exists nowhere but that one file.
+
+The **file-channel** portion is cheaply regenerable at any time — it is a
+deterministic read of files that live independently of the gold set
+(`feedback_*.md` under `~/.claude/projects/*/memory/`, plus a workspace `FEEDBACK.md`):
+
+```bash
+pg-ccaudit gold seed -feedback /Users/phillipg/phillipg_mbp/FEEDBACK.md
+```
+
+The **hand-labelled** portion is not: once a person spends attention labelling a
+sampled candidate's `class`, that verdict has no other source. Losing the file again
+loses that work permanently, exactly as it did before this rebuild.
+
+Chosen persistence strategy (do the OTHER option instead only with a documented reason
+here): a plain backup copy, kept OUTSIDE `$XDG_DATA_HOME` so an `~/.local/share` wipe
+cannot take out both copies at once, and outside git for the same reason the primary
+file is outside git (every entry quotes real transcript text or the operator's own
+critique):
+
+```bash
+cp "$PG_CCAUDIT_GOLD" /Users/phillipg/phillipg_mbp/.local-backups/pg-ccaudit/goldset.jsonl
+```
+
+`/Users/phillipg/phillipg_mbp` is not itself a git repository, so nothing under
+`.local-backups/` can be accidentally committed. This is a **manual** step — nothing
+in `pg-ccaudit` runs it automatically — so re-run it after any session that adds
+labels, most importantly after an operator labelling pass, since that is the
+irreplaceable half of the set.
+
 ## Schema
 
 `pg-ccaudit schema` prints it. `files`, `events`, `tool_calls`, `tool_results`,
