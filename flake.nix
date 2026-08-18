@@ -769,6 +769,22 @@
                 testDeps = [ pkgs.git ];
               };
 
+              # claude-transcript — bead pg2-yyhan: this Pattern-A module had a
+              # `-golangci` check (it typechecks the test package, which is how a
+              # missing-file bug surfaced while landing pg2-j54i7) but no
+              # `-go-tests` check, so it was the one Go module in this flake where
+              # a broken or no-op test could never fail `nix flake check`. It is a
+              # pure library (no `default.nix`, no standalone binary; consumed via
+              # local `replace` by pa-monitor/pr-pool/ccpool), so `src` matches
+              # goLint's default for this same module's `-golangci` check above
+              # (plain path, no `lib.cleanSource`) rather than a `default.nix` that
+              # doesn't exist. No `testDeps`: none of its tests shell out.
+              claude-transcript-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
+                pname = "claude-transcript-go-tests";
+                src = ./packages/claude-transcript;
+                gomod2nixToml = ./packages/claude-transcript/gomod2nix.toml;
+              };
+
               # ceta integration suite — the `//go:build integration` tests in
               # cmd/claude-extended-tool-approver, which EXEC the compiled binary
               # and drive a real SQLite ask log through it. They are tagged OFF
