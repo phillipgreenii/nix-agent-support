@@ -673,11 +673,11 @@ rules (**D-1..D-8**).
    ```
 
 3. RELEASE in ONE call — no `human` label, `status=open`, assignee cleared (**B-2**,
-   **B-3**, **D-6**). Add `--remove-label human` in this same call if an earlier park had
-   already applied it:
+   **B-3**, **D-6**). `--remove-label human` belongs in this same call whenever the bead
+   already carries it (from an earlier park) — a safe no-op otherwise:
 
    ```bash
-   bd update <id> --status open --assignee "" --actor "ID"
+   bd update <id> --remove-label human --status open --assignee "" --actor "ID"
    ```
 
    `open`, NOT `blocked`: readiness is DERIVED from the graph, so the bead is already
