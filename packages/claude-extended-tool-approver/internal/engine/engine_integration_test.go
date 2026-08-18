@@ -1703,9 +1703,21 @@ func TestIntegration_GitDirDirectionAndRole(t *testing.T) {
 		{"pipe to a filtering sink is not", "cat .git/config | grep url", hookio.Approve},
 		{"a filter that captures IS a copy-out", "cat .git/config | grep url | tee /tmp/x", hookio.Ask},
 		{"an unrecognised sink fails closed", "cat .git/config | frobnicate", hookio.Ask},
-		// Corpus shapes: genuine `.git` reads piped to a filter, which MUST stay allow.
-		{"corpus row 3203: hooks listing to head", "ls -la /home/tcadmin/homelab/.git/hooks/ | head -20", hookio.Approve},
-		{"corpus row 3202: hooks listing to grep", "ls -la /home/tcadmin/homelab/.git/hooks/ | grep -v sample", hookio.Approve},
+		// Corpus shapes: genuine `.git` reads piped to a filter. These asserted
+		// `Approve` until pg2-4k7yd: `/home/tcadmin/homelab` is a DIFFERENT
+		// machine's home directory, so under THIS harness's zone model (project
+		// root/workspace root `/Users/testuser/workspace`) it is genuinely
+		// out-of-zone — `ls` only ever measured Approve here because
+		// browsingCmds approved any path unconditionally (the exact dead-code
+		// gap pg2-4k7yd closed: `ls`'s only guard tested for patheval.PathReject,
+		// a value Evaluate() never returns outside a container evaluator). Now
+		// `ls` on an out-of-zone path Abstains, matching how `cat` already
+		// treats an out-of-zone `.git` read two rows above ("out-of-project
+		// gitmeta read defers", hookio.NoOpinion) — gitdir is still silent
+		// (this row's own purpose) and the rest of the chain simply no longer
+		// gives that silence a free Approve.
+		{"corpus row 3203: hooks listing to head", "ls -la /home/tcadmin/homelab/.git/hooks/ | head -20", hookio.NoOpinion},
+		{"corpus row 3202: hooks listing to grep", "ls -la /home/tcadmin/homelab/.git/hooks/ | grep -v sample", hookio.NoOpinion},
 		// `&&` carries no data, so a sink on its right is not this read's sink.
 		{"&& is not a pipe", "cat .git/config && tee /tmp/x", hookio.Approve},
 
@@ -1831,10 +1843,19 @@ func TestIntegration_GitDirDirectionAndRole(t *testing.T) {
 //
 // The paths of rows 1 and 7 are kept EXACTLY as the census recorded them — row 1's
 // real-machine absolute root, row 7's workspace-relative one — rather than
-// rewritten onto the synthetic projectRoot. `find` and `ls` approve independently
-// of which root they walk (verified: both rows also approve when rewritten under
-// projectRoot), so preserving the recorded text costs nothing and keeps each row
-// greppable back to its census entry.
+// rewritten onto the synthetic projectRoot, to keep each row greppable back to its
+// census entry.
+//
+// UPDATED by pg2-4k7yd. Row 1's want dropped from Approve to NoOpinion. It used to
+// read "`find` and `ls` approve independently of which root they walk (verified:
+// both rows also approve when rewritten under projectRoot)" — true only because
+// browsingCmds approved ANY path unconditionally (the dead-code PathReject check
+// pg2-4k7yd replaced with a real CanRead() zone check). Row 1's real-machine root
+// (/Users/phillipg/phillipg_mbp) is not a configured zone in THIS harness, so
+// `find` now Abstains on it exactly as `cat` already abstains on any other
+// out-of-zone path — gitdir is still silent (this suite's own purpose) and the
+// verdict this row can now assert is "not Rejected", the same strength row 5's
+// bare prefix below already uses for an unrelated reason.
 func TestIntegration_GitDirCensusFalsePositives(t *testing.T) {
 	t.Setenv("WORKSPACE_ROOT", "/Users/testuser/workspace")
 	// Both are read at PathEvaluator construction, so set BEFORE buildFullEngine.
@@ -1851,7 +1872,7 @@ func TestIntegration_GitDirCensusFalsePositives(t *testing.T) {
 		want    hookio.Decision
 	}{
 		// --- Rows 1-3: printed in full, and each really carries the exclusion ---
-		{"row 1: named-glob walk excluding .git", "find /Users/phillipg/phillipg_mbp -name '*pr-pool-event-model*' -not -path '*/.git/*'", hookio.Approve},
+		{"row 1: named-glob walk excluding .git", "find /Users/phillipg/phillipg_mbp -name '*pr-pool-event-model*' -not -path '*/.git/*'", hookio.NoOpinion},
 		// Row 2 is byte-identical to a case TestIntegration_GitDirDirectionAndRole
 		// already pins for pg2-3hk7t. It is restated here deliberately: this block is
 		// the acceptance evidence for pg2-24sc9's census, and a reader auditing "all
@@ -2534,12 +2555,21 @@ func TestIntegration_TraversalHandledByPathModel(t *testing.T) {
 		// defer, because the resolved path is outside the project root and the zone
 		// model has no explicit read permission for it. NOT an approval.
 		{"double level defers instead of prompting", "cat ../../README.md", hookio.NoOpinion, "safe-commands"},
-		// The same sibling repo the suite already approves by ABSOLUTE path (see
-		// TestIntegration_RegressionSuite "ls sibling repo") now AGREES when spelled as
-		// a traversal. Same resolved target, same verdict — that agreement is the whole
-		// object of the ruling, and this row is the one that breaks if a lexical guard
-		// is ever reintroduced.
-		{"sibling repo via traversal now agrees with the absolute spelling", "ls ../../other-repo", hookio.Approve, "safe-commands"},
+		// UPDATED by pg2-4k7yd. `../../other-repo` from projectRoot
+		// (/Users/testuser/workspace/my-project) resolves to
+		// /Users/testuser/other-repo — a SIBLING of WORKSPACE_ROOT
+		// (/Users/testuser/workspace), not a path under it, so this was never
+		// actually the same resolved target as TestIntegration_RegressionSuite's
+		// "ls sibling repo" (/Users/testuser/workspace/other-repo/src). Both rows
+		// measured Approve, but independently: the absolute spelling because it
+		// is genuinely in-zone, this traversal spelling only because browsingCmds
+		// approved `ls` on ANY path unconditionally — the same dead-code gap
+		// pg2-4k7yd closed for `ls`/`test` generally. `ls` on a resolved
+		// out-of-zone path now Abstains, exactly like this same test's own "double
+		// level defers instead of prompting" row two above it (`cat
+		// ../../README.md`, hookio.NoOpinion) — `ls` now agrees with `cat`,
+		// which is the pg2-4k7yd consistency this row now pins instead.
+		{"sibling repo via traversal is genuinely out of zone (pg2-4k7yd)", "ls ../../other-repo", hookio.NoOpinion, "safe-commands"},
 		// Still NOT approved: escaping to /etc resolves outside every readable zone.
 		// `/etc/passwd` is not on the credential deny-list, so this is a defer rather
 		// than a deny — pre-existing, and unchanged by the deletion.

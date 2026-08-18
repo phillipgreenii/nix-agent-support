@@ -82,6 +82,11 @@ func TestSafecmds_AlwaysSafe_Approve(t *testing.T) {
 	r := New(pe)
 	commands := []string{
 		"echo hello",
+		// "test -f foo" still Approves post-pg2-4k7yd, but via test's OWN
+		// dedicated zone-checked branch, not the alwaysSafe map ("test" was
+		// removed from it) — "foo" is a bare relative arg, not path-shaped, so
+		// no zone check ever runs. See TestSafecmds_Pg2_4k7yd_BrowsingAndTest
+		// for the cases that actually exercise the zone check.
 		"test -f foo",
 		"true",
 		"false",
@@ -1516,6 +1521,87 @@ func TestSafecmds_BrowsingCmdsKeepDynamicPaths(t *testing.T) {
 	}
 }
 
+// TestSafecmds_Pg2_4k7yd_BrowsingAndTest pins the pg2-4k7yd fix: browsingCmds
+// (ls/find/du/stat/file/lsof) and "test" now run their path operand through the
+// same readability authority (patheval, via browsingPathIssue) that safeReadCmds
+// already uses, instead of approving unconditionally.
+//
+// MEASURED ON MAIN, before this fix: `ls /etc/shadow` and `test -f /etc/shadow`
+// both measured `allow`, bare, no substitution.
+func TestSafecmds_Pg2_4k7yd_BrowsingAndTest(t *testing.T) {
+	pe := patheval.New("/home/user/project")
+	r := New(pe)
+	verdict := func(cmd string) hookio.RuleResult {
+		input := &hookio.HookInput{ToolName: "Bash", CWD: "/home/user/project", ToolInput: mustJSON(map[string]string{"command": cmd})}
+		return hookio.Verdict(r.Evaluate(input))
+	}
+
+	// Criterion 1: a sensitive/out-of-zone path now reaches a zone-checked
+	// verdict, consistent with how `cat` on the identical path already behaves
+	// (TestSafecmds_CatEtcPasswd_Abstain, and this file's own /etc/shadow cases
+	// for cat/mkdir/grep in TestSafecmds_GluedQuoteParity_PathCandidate).
+	sensitive := []string{
+		"ls /etc/shadow", "find /etc/shadow", "du /etc/shadow", "stat /etc/shadow",
+		"file /etc/shadow", "lsof /etc/shadow",
+		"test -f /etc/shadow", "test -e /etc/shadow",
+		// The xargs-routed forms mirror the direct ones (pg2-ygjs5's precedent:
+		// a guard applied only to the direct spelling is one-spelling coverage).
+		// The sensitive path is a STATIC arg to the inner command here (xargs's
+		// own runtime-supplied stdin args are never visible to static analysis,
+		// so that is not what this pins) — "true" is the innocuous left side of
+		// the pipe, itself trivially alwaysSafe.
+		"true | xargs ls /etc/shadow", "true | xargs test -f /etc/shadow",
+	}
+	for _, cmd := range sensitive {
+		got := verdict(cmd)
+		if got.Decision != hookio.NoOpinion {
+			t.Errorf("cmd %q: got %s (%s), want abstain (zone-checked, matching cat)", cmd, got.Decision, got.Reason)
+		}
+	}
+
+	// Criterion 2: an ordinary, non-sensitive path is UNAFFECTED — the blast
+	// radius of the new zone check is bounded to genuinely out-of-zone paths.
+	// /tmp/** is PathReadWrite and the project root is PathReadWrite, so both
+	// CanRead(); "README.md" (bare, no /, ./, ../, ~/ prefix) is not path-shaped
+	// at all and so is never handed to the zone check in the first place.
+	ordinary := []string{
+		"ls /tmp", "find /tmp", "stat /tmp",
+		"test -f README.md",
+		"test -f /home/user/project/README.md",
+		"find /home/user/project | xargs ls -la",
+		"true | xargs ls /tmp",
+		"true | xargs test -f /home/user/project/README.md",
+	}
+	for _, cmd := range ordinary {
+		got := verdict(cmd)
+		if got.Decision != hookio.Approve {
+			t.Errorf("cmd %q: got %s (%s), want approve (ordinary path, unaffected)", cmd, got.Decision, got.Reason)
+		}
+	}
+}
+
+// TestSafecmds_Pg2_4k7yd_SafeCmdSubstitutionsUnaffected pins the bead's scope
+// guard: safeCmdSubstitutions members (readlink/realpath/basename, all still in
+// the alwaysSafe map here) get NO zone check from this bead and measure exactly
+// as before — Approve regardless of path — because pg2-zpct4 deliberately left
+// no relation to preserve for them, and pg2-4k7yd's brief named them explicitly
+// out of scope.
+func TestSafecmds_Pg2_4k7yd_SafeCmdSubstitutionsUnaffected(t *testing.T) {
+	pe := patheval.New("/home/user/project")
+	r := New(pe)
+	commands := []string{
+		"readlink /etc/shadow", "realpath /etc/shadow", "basename /etc/shadow",
+		"dirname /etc/shadow",
+	}
+	for _, cmd := range commands {
+		input := &hookio.HookInput{ToolName: "Bash", CWD: "/home/user/project", ToolInput: mustJSON(map[string]string{"command": cmd})}
+		got := hookio.Verdict(r.Evaluate(input))
+		if got.Decision != hookio.Approve {
+			t.Errorf("cmd %q: got %s (%s), want approve (safeCmdSubstitutions member, out of scope, unchanged)", cmd, got.Decision, got.Reason)
+		}
+	}
+}
+
 // TestReadPathIssue_IsNeverLooserThanTheStaticSubstitutionSeam is the pg2-zpct4
 // reconciliation asserted as a RELATION, from the side that OWNS path readability.
 //
@@ -1619,17 +1705,17 @@ func TestSafecmds_GluedQuoteParity_PathCandidate(t *testing.T) {
 	}{
 		// The three CONFIRMED examples from the bead brief, each a different
 		// pathCandidate consumer: readPathIssue (cat, safeReadCmds), hasUnsafeWritePath
-		// (mkdir, safeWriteCmds), hasRejectPath (ls, browsingCmds).
+		// (mkdir, safeWriteCmds), browsingPathIssue (ls, browsingCmds).
 		{"cat --output (readPathIssue: unknown path)", "cat %s", "--output /etc/shadow", "--output=", "/etc/shadow", hookio.NoOpinion},
 		{"mkdir --mode (hasUnsafeWritePath)", "mkdir %s", "--mode /etc/shadow", "--mode=", "/etc/shadow", hookio.NoOpinion},
-		// NOTE: patheval.PathReject is currently unreachable via a plain (non-container)
-		// Evaluate() call in this codebase — grep confirms it — so hasRejectPath never
-		// actually fires here regardless of quoting, and Approve is the CORRECT,
-		// unchanged verdict for all three spellings. It is kept in this table anyway
-		// because it is a pathCandidate consumer this bead's brief names explicitly,
-		// and the relation (all three spellings agree) is exactly what the fix
-		// guarantees even though there is no live discrepancy to observe today.
-		{"ls --sort (hasRejectPath consumer; PathReject unreachable here, so all agree on approve)", "ls %s", "--sort /etc/company-secrets/config", "--sort=", "/etc/company-secrets/config", hookio.Approve},
+		// UPDATED by pg2-4k7yd: this case used to pin `Approve` here with a note that
+		// patheval.PathReject was unreachable via a plain Evaluate() call, so the OLD
+		// guard (hasRejectPath, tested only for that literal value) could never fire.
+		// pg2-4k7yd replaced it with browsingPathIssue, which requires
+		// pe.Evaluate(cand).CanRead() — the SAME predicate readPathIssue already applies
+		// to cat/mkdir above — so an out-of-zone path now abstains here too, and all
+		// three spellings still agree (the parity this test exists to prove).
+		{"ls --sort (browsingPathIssue: unknown path, pg2-4k7yd)", "ls %s", "--sort /etc/company-secrets/config", "--sort=", "/etc/company-secrets/config", hookio.NoOpinion},
 		// A FOURTH command family, deliberately NOT a pathCandidate caller directly:
 		// grep's file-flag operand is emitted by cmdparse.SkipGrepPattern, this bead's
 		// audited third/fourth caller of cmdparse.GluedFlagValue.

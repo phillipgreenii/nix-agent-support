@@ -12,9 +12,13 @@ import (
 )
 
 var alwaysSafe = map[string]bool{
-	"echo": true, "test": true, "true": true, "false": true, "printf": true,
+	"echo": true, "true": true, "false": true, "printf": true,
 	"cut": true, "df": true, "ps": true, "tr": true, "where": true, "pgrep": true,
 	"sleep": true, "tree": true,
+	// "test" ("[") is deliberately NOT here — see the pg2-4k7yd doc on
+	// browsingPathIssue. It stats a path operand (a filesystem access every
+	// other member of this map does not perform) and gets its own zone-checked
+	// branch in Evaluate instead of this unconditional continue.
 	// Shell builtins and environment queries (no filesystem access)
 	"basename": true, "dirname": true, "realpath": true, "readlink": true,
 	"which": true, "type": true, "command": true, "unset": true, "export": true,
@@ -29,7 +33,48 @@ var alwaysSafe = map[string]bool{
 }
 
 // browsingCmds list/stat filesystem entries but don't read file contents.
-// Safe to run on any path since they only expose names, sizes, timestamps.
+//
+// pg2-4k7yd DECISION — browsingCmds' and "test"'s path operand now gets a zone
+// check (browsingPathIssue), landing at the SAME readPathIssue/patheval
+// authority every content reader already uses, rather than approving
+// unconditionally.
+//
+// MEASURED ON MAIN: `ls /etc/shadow` and `test -f /etc/shadow` both measured
+// `allow`, bare, no substitution — because this arm's only guard
+// (hasRejectPath) tested for patheval.PathReject, a value Evaluate() never
+// actually returns outside a container evaluator (confirmed by grep; see
+// TestSafecmds_GluedQuoteParity_PathCandidate's now-updated case), so the check
+// never fired. `cat` on the identical path already abstains, via readPathIssue.
+//
+// THE CALL: under a pure content-confidentiality model neither `ls` nor `test`
+// leaks the secret — `ls` reads directory metadata, `test -f` reads an inode,
+// neither reads file bytes. But both leak EXISTENCE and, for `ls`, ownership/
+// size/mtime — a real signal for a credential store — and it is inconsistent
+// for `cat /etc/shadow` to abstain while `test -f /etc/shadow`/`ls /etc/shadow`
+// on the SAME path auto-approve. The asymmetry that makes tightening cheap:
+// over-matching costs one unnecessary Abstain/prompt on a browsing command
+// whose target happens to be unreadable; under-matching costs the entire
+// readability authority for every zone it does not special-case. So this
+// reuses pe.Evaluate(...).CanRead() — the exact predicate readPathIssue already
+// applies to reads — rather than inventing a new verdict category.
+//
+// browsingPathIssue deliberately does NOT reuse readPathIssue wholesale and
+// does NOT apply argHasDynamicExpansion: TestSafecmds_BrowsingCmdsKeepDynamicPaths
+// is a pg2-2ke04 DELIBERATE exclusion (`ls $d` stays Approve) because a dynamic
+// path fed to a metadata-only, no-stdout-content command is not an
+// exfiltration primitive, and that decision is untouched here.
+//
+// SCOPE: only browsingCmds (below) and "test" get this check. The rest of
+// alwaysSafe (echo/printf/true/false/cut/df/ps/tr/where/pgrep/sleep/tree/…)
+// either performs no filesystem access on its operands at all (echo just
+// prints its argument text) or was not the measured defect, so widening the
+// check to them is out of scope. safeCmdSubstitutions' readlink/realpath/
+// basename/dirname are explicitly OUT OF SCOPE per pg2-zpct4 (which deliberately
+// left no relation to preserve there) and this bead's own scope guard — they
+// are UNCHANGED and pinned by TestSafecmds_SafeCmdSubstitutions_Unaffected.
+//
+// Safe to run on any in-zone path since browsingCmds only expose names, sizes,
+// timestamps — never content.
 var browsingCmds = map[string]bool{
 	"ls": true, "find": true, "fd": true, "du": true, "stat": true, "file": true,
 	"lsof": true,
@@ -123,8 +168,19 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 			continue
 		}
 		if browsingCmds[basename] {
-			if hasRejectPath(pc.Args, pe) {
-				return r.refuse("safe-commands: " + basename + " references rejected path (deferred to claude-code)")
+			if issue := browsingPathIssue(pc.Args, pe); issue != "" {
+				return r.refuse("safe-commands: " + basename + " " + issue + " (deferred to claude-code)")
+			}
+			continue
+		}
+		// test / [ : stats a path operand (pg2-4k7yd) — see browsingCmds' doc
+		// for the decision. Uses the SAME zone check as browsingCmds, not
+		// readPathIssue's stricter one: `test`, like `ls`/`find`, emits no file
+		// CONTENT (its whole result is an exit status), so the pg2-2ke04
+		// dynamic-path exclusion applies here too.
+		if basename == "test" {
+			if issue := browsingPathIssue(pc.Args, pe); issue != "" {
+				return r.refuse("safe-commands: " + basename + " " + issue + " (deferred to claude-code)")
 			}
 			continue
 		}
@@ -175,8 +231,16 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 				continue
 			}
 			if browsingCmds[innerBase] {
-				if hasRejectPath(innerArgs, pe) {
-					return r.refuse("safe-commands: xargs " + innerBase + " references rejected path (deferred to claude-code)")
+				if issue := browsingPathIssue(innerArgs, pe); issue != "" {
+					return r.refuse("safe-commands: xargs " + innerBase + " " + issue + " (deferred to claude-code)")
+				}
+				continue
+			}
+			// test / [ : mirrors the main loop's dedicated "test" branch above
+			// (pg2-4k7yd) — same zone check, no dynamic-expansion refusal.
+			if innerBase == "test" {
+				if issue := browsingPathIssue(innerArgs, pe); issue != "" {
+					return r.refuse("safe-commands: xargs " + innerBase + " " + issue + " (deferred to claude-code)")
 				}
 				continue
 			}
@@ -707,28 +771,45 @@ func argsHaveDynamicExpansion(args []string) bool {
 	return false
 }
 
-// hasRejectPath returns true if any path-like arg is in a rejected zone, OR
-// carries malformed glued quoting pathCandidate could not resolve (pg2-52eod):
-// a browsingCmds invocation (ls/find/du/stat/file/lsof) is deferred exactly as
-// if the value HAD evaluated to a rejected zone, because there is no way to
-// clear it either.
-func hasRejectPath(args []string, pe *patheval.PathEvaluator) bool {
+// browsingPathIssue returns a REASON FRAGMENT describing the first argument a
+// browsingCmds (or "test") invocation cannot statically clear, or "" when
+// every argument is clear. See browsingCmds' doc comment for the pg2-4k7yd
+// decision this implements.
+//
+// FORMERLY hasRejectPath, which only refused an argument whose zone evaluated
+// to the literal patheval.PathReject — a value Evaluate() never actually
+// returns outside a container evaluator (grep-confirmed; see
+// TestSafecmds_GluedQuoteParity_PathCandidate), so that check could never fire
+// and `ls /etc/shadow` auto-approved exactly like an in-zone path. This now
+// requires pe.Evaluate(cand).CanRead() — the SAME predicate readPathIssue
+// already applies to every content reader — so an unknown or rejected zone is
+// refused alike, matching how `cat` already treats the identical path.
+//
+// Deliberately narrower than readPathIssue in one respect: it does NOT call
+// argHasDynamicExpansion. TestSafecmds_BrowsingCmdsKeepDynamicPaths pins a
+// pg2-2ke04 DELIBERATE exclusion (`ls $d` stays Approve) because a dynamic path
+// fed to a command that emits no file content is not an exfiltration
+// primitive, and this bead does not reopen that decision.
+func browsingPathIssue(args []string, pe *patheval.PathEvaluator) string {
 	for _, a := range args {
 		// pg2-wxbr9: see pathCandidate's doc.
 		cand, ok, malformed := pathCandidate(a)
 		if !ok {
 			continue
 		}
+		// pg2-52eod: malformed glued quoting cannot be classified at all, so it
+		// is reported through the SAME choke point as an unclearable zone —
+		// mirrors readPathIssue's identical handling.
 		if malformed {
-			return true
+			return "has malformed glued quoting " + cand
 		}
 		if looksLikePath(cand) {
-			if pe.Evaluate(cand) == patheval.PathReject {
-				return true
+			if !pe.Evaluate(cand).CanRead() {
+				return "references unknown path " + cand
 			}
 		}
 	}
-	return false
+	return ""
 }
 
 // readPathIssue returns a REASON FRAGMENT describing the first argument this rule
