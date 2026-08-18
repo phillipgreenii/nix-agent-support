@@ -118,6 +118,56 @@ var injectorAskVars = map[string]bool{
 // fallback demoted to Abstain, `export PATH=/replaced`, `PATH=/replaced echo hi`,
 // `export HOME=/tmp/fakehome`, `PATH=$(mktemp -d) echo hi` and
 // `PATH=$(bd create x) echo hi` all silently return `allow`.
+//
+// # OPERATOR RULING 2026-07-30 (pg2-553z3): KEEP STRICT
+//
+// Widening preservesCallerValue's component predicate to accept arbitrary
+// `$VAR`-derived components (so `$JAVA_HOME/bin:$PATH`, `$bindir:$PATH`, etc.
+// would also Approve) was CONSIDERED AND REJECTED. Do not re-litigate the
+// blanket widen from prompt volume alone — the objection below holds at any
+// volume.
+//
+// COHERENCE REASON (the load-bearing one): isStaticAbsolutePath deliberately
+// REJECTS an empty `:`-separated component, because an empty PATH entry means
+// "the current directory" to the shell — so `PATH=":$PATH"` must keep asking.
+// Accepting any `$VAR/...` component on the strength of "it looks like a
+// directory" would auto-approve `$PWD/bin:$PATH`, which is that identical
+// CWD-on-PATH hazard wearing a variable. Blessing one spelling of the hazard
+// while the other keeps asking is incoherent, independent of how many prompts
+// widening would clear.
+//
+// MEASURED BASIS (pg2-3arc2, 2026-07-30): post-apply asklog rows whose command
+// contains `PATH=` and were decided by this predicate: ZERO. The 41 pre-apply
+// PATH asks that originally motivated the question were already resolved by
+// commit 202c2f80 ("value-aware split for the envvars PATH/HOME name-only
+// Ask", pg2-0q99a) — cited here as 202c2f80, and deliberately NOT as
+// `c280e018`, the pre-rebase sha this bead's own earlier history cites: that
+// sha is not an ancestor of main (the local ff-merge rewrote it), while
+// 202c2f80 is, with an identical patch-id. The single most common ask shape
+// (73 of 99 rows in that window) was a fully STATIC absolute prepend with no
+// `$VAR` component at all, so widening would not have relieved the traffic
+// that raised the question in the first place.
+//
+// The knowingly-accepted trade documented in preservesCallerValue below — a
+// hostile static prepend (`export PATH="/tmp/evil/bin:$PATH"`) is Approved
+// today because isStaticAbsolutePath asks only for a leading `/` — is a
+// PRE-EXISTING documented trade, untouched by this ruling; it is not something
+// this ruling newly discovers or changes.
+//
+// NOT KILLED by this ruling — two narrower questions in the same predicate
+// area remain open and are tracked separately, deliberately NOT folded into
+// this decision:
+//
+//   - pg2-qhhil: the surviving NARROW middle option — accept a `$VAR`
+//     component only when that variable was assigned earlier IN THE SAME
+//     COMMAND to a static absolute path (e.g. `bindir=/tmp/x/bin;
+//     PATH="$bindir:$PATH"`). Such a component is exactly as inspectable as a
+//     literal path, so it is not subject to the coherence objection above.
+//   - pg2-kzqw2 and pg2-d71my: later-filed, separately-scoped decisions on a
+//     `$(...)`-derived component and on REPLACEMENT-form values (`env -i`,
+//     hermetic-HOME test idioms) respectively — the middle option this
+//     ruling's trade analysis fanned out to once the blanket widen was
+//     rejected. Neither is decided by KEEP STRICT.
 var askVars = map[string]bool{
 	"PATH": true,
 	"HOME": true,
@@ -216,9 +266,10 @@ func assignmentIsWholeLeaf(pc cmdparse.ParsedCommand) bool {
 // The predicate is deliberately STRICT — a component must be literal and absolute,
 // so nothing behind an expansion can smuggle a lookup directory in. It therefore
 // still asks on `$PWD/bin:$PATH`, `$JAVA_HOME/bin:$PATH` and
-// `$(nix build …)/bin:$PATH`. Widening it to accept $VAR-derived components is a
-// separate, weaker guarantee (`PATH="$EVIL:$PATH"` would approve) and needs its own
-// decision; do not widen it here.
+// `$(nix build …)/bin:$PATH`. Widening it to accept $VAR-derived components was
+// considered and RULED AGAINST (2026-07-30) — see the "OPERATOR RULING" note on
+// the `askVars` doc comment above for the coherence reason and the measured
+// basis; do not re-litigate it here.
 //
 // What it can NOT distinguish, knowingly: a hostile static prepend
 // (`PATH="/tmp/evil/bin:$PATH"`) from a legitimate one (`/nix/store/…/bin`). That
