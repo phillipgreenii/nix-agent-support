@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -581,6 +582,152 @@ func TestPathEvaluator_IsDenyWrite_OverridesAllowWrite(t *testing.T) {
 	})
 	if !pe.IsDenyWrite("/project/secrets/key.pem") {
 		t.Error("IsDenyWrite = false, want true: denyWrite must take precedence over allowWrite")
+	}
+}
+
+// CASE FOLDING (pg2-8st32). IsDenyWrite/IsDenyRead used to compare against
+// denyWrite/denyRead entries with pathContains' exact byte match. On a
+// case-INSENSITIVE volume (this machine's home APFS volume, verified via
+// filepath.EvalSymlinks not case-normalizing — see IsDenyRead's doc comment)
+// a case-varied request names the SAME real file as a configured deny entry,
+// so the exact match missed it and the request fell through to Abstain
+// (after pg2-2ng80's ADR 0041 carve-out) instead of the decisive Reject the
+// user's EXPLICIT denyWrite/denyRead entry should produce.
+//
+// MATCHING (acceptance criterion 1/2) AND NON-MATCHING (acceptance criterion
+// 4, the blast-radius bound) SHAPES SHARE ONE TABLE ON PURPOSE, mirroring
+// pathsafety's TestPathSafety_WriteAgentConfig_CaseFolding: the fix has two
+// halves pulling in opposite directions — fold case, but do not let the fold
+// cross a real path-component boundary — and splitting them into separate
+// tests would let a later reader satisfy one half while silently regressing
+// the other.
+func TestPathEvaluator_IsDenyWrite_CaseFolding(t *testing.T) {
+	pe := NewWithCWD("/project", "/project")
+	pe.SetSandboxConfig(&SandboxFilesystemConfig{
+		DenyWrite: []string{"/project/.claude"},
+	})
+	cases := []struct {
+		name string
+		path string
+		want bool
+	}{
+		// --- case-varied spellings of the SAME real denied file/dir: MUST reject ---
+		{"denied dir, case-varied: .CLAUDE", "/project/.CLAUDE/settings.local.json", true},
+		{"denied dir, case-varied: .Claude", "/project/.Claude/settings.json", true},
+		{"denied dir itself, case-varied", "/project/.CLAUDE", true},
+		{"denied dir, mixed-case ancestor segment", "/PROJECT/.claude/settings.json", true},
+		{"denied dir, every segment varied", "/PrOjEcT/.ClAuDe/SeTtInGs.JsOn", true},
+		{"baseline: exact case still rejects", "/project/.claude/settings.local.json", true},
+
+		// --- blast radius: paths that merely RESEMBLE the denied path but are a
+		// DIFFERENT real path MUST NOT start rejecting (acceptance criterion 4) ---
+		{"sibling dir with extra suffix", "/project/.claudex/settings.json", false},
+		{"sibling dir with different suffix", "/project/.claude.bak/settings.json", false},
+		{"unrelated dir, no dot", "/project/claude/settings.json", false},
+		{"unrelated sibling project file", "/project/other/settings.json", false},
+		{"case-varied but wrong component entirely", "/project/.CLAUDEX/settings.json", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := pe.IsDenyWrite(tc.path); got != tc.want {
+				t.Errorf("IsDenyWrite(%q) = %v, want %v", tc.path, got, tc.want)
+			}
+		})
+	}
+}
+
+// Consistency with IsDenyWrite (acceptance criterion 2), including the
+// AllowRead override — which must fold case too, or a user's override would
+// have the same asymmetric hole pg2-2ng80 fixed one level up (see
+// IsDenyRead's doc comment).
+func TestPathEvaluator_IsDenyRead_CaseFolding(t *testing.T) {
+	pe := NewWithCWD("/project", "/project")
+	pe.SetSandboxConfig(&SandboxFilesystemConfig{
+		DenyRead:  []string{"/home/user/.ssh"},
+		AllowRead: []string{"/home/user/.ssh/authorized_keys"},
+	})
+	cases := []struct {
+		name string
+		path string
+		want bool
+	}{
+		{"denied dir, case-varied", "/home/user/.SSH/id_rsa", true},
+		{"denied dir, case-varied deeper", "/home/user/.Ssh/config", true},
+		{"blast radius: sibling dir", "/home/user/.sshx/id_rsa", false},
+		{"blast radius: unrelated dir", "/home/user/ssh-agent/id_rsa", false},
+		// allowRead override must fold too: the case-varied override path names
+		// the same real file as the canonical allowRead entry, so it must still
+		// win over the (also case-varied) denyRead match.
+		{"allowRead override, case-varied request", "/home/user/.SSH/AUTHORIZED_KEYS", false},
+		{"allowRead override, canonical request", "/home/user/.ssh/authorized_keys", false},
+		{"outside allowRead override, still denied", "/home/user/.ssh/id_rsa", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := pe.IsDenyRead(tc.path); got != tc.want {
+				t.Errorf("IsDenyRead(%q) = %v, want %v", tc.path, got, tc.want)
+			}
+		})
+	}
+}
+
+// pathContainsFold is asserted directly (not just through IsDenyWrite/
+// IsDenyRead) so the per-component fold and its blast-radius bound are
+// visible as one property, matching pathsafety's
+// TestIsAgentConfigPath_AllThreePartsFoldCase.
+func TestPathContainsFold(t *testing.T) {
+	cases := []struct {
+		name string
+		dir  string
+		path string
+		want bool
+	}{
+		{"exact match", "/p/.claude", "/p/.claude", true},
+		{"case-varied dir", "/p/.claude", "/p/.CLAUDE", true},
+		{"case-varied deeper path", "/p/.claude", "/p/.CLAUDE/settings.json", true},
+		{"both varied, multi-segment", "/P/.Claude", "/p/.CLAUDE/skills/x.md", true},
+		{"boundary: resembling sibling", "/p/.claude", "/p/.claudex", false},
+		{"boundary: resembling sibling, case-varied", "/p/.claude", "/p/.CLAUDEX", false},
+		{"boundary: shorter path than dir", "/p/.claude/deep", "/p/.claude", false},
+		{"unrelated path", "/p/.claude", "/q/.claude", false},
+		{"empty dir", "", "/p/.claude", false},
+		{"empty path", "/p/.claude", "", false},
+		{"root dir matches only root path (documented blind spot, shared with pathContains)", "/", "/", true},
+		{"root dir does not match a real path (documented blind spot, shared with pathContains)", "/", "/p", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := pathContainsFold(tc.dir, tc.path); got != tc.want {
+				t.Errorf("pathContainsFold(%q, %q) = %v, want %v", tc.dir, tc.path, got, tc.want)
+			}
+		})
+	}
+}
+
+// THE FOLD PRIMITIVE IS strings.EqualFold, NOT strings.ToLower — a
+// correctness requirement, not a style choice (see pathsafety's identically-
+// named test and IsDenyRead's doc comment for the full argument). Verified on
+// this machine's APFS volume: after writing `.claude/settings.local.json`,
+// reading `.claude/ſettings.local.json` (U+017F LATIN SMALL LETTER LONG S)
+// returns the same bytes — the filesystem folds `ſ` to `s`. EqualFold matches
+// that spelling; ToLower leaves the `ſ` untouched and MISSES it, which is the
+// pg2-2ng80 bypass one codepoint over, applied to an explicit denyWrite/
+// denyRead entry instead of the ADR 0041 carve-out.
+func TestPathContainsFold_FoldsNotMerelyLowercases(t *testing.T) {
+	const canonical = "/home/user/.claude/settings.local.json"
+	const witness = "/home/user/.claude/ſettings.local.json" // ſettings.local.json
+
+	// Pin what makes this witness decisive, so a Go stdlib change cannot turn
+	// the test into a silent tautology.
+	if !strings.EqualFold(witness, canonical) {
+		t.Fatalf("premise: EqualFold(%q, %q) must be true for this witness to exercise the fold", witness, canonical)
+	}
+	if strings.ToLower(witness) == canonical {
+		t.Fatalf("premise: ToLower(%q) must NOT equal %q, or the witness cannot distinguish folding from lowercasing", witness, canonical)
+	}
+
+	if !pathContainsFold("/home/user/.claude", witness) {
+		t.Error("pathContainsFold did not match the ſ witness against its canonical form — folding was downgraded to lowercasing")
 	}
 }
 

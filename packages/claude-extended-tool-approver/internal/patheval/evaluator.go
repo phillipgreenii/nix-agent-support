@@ -428,6 +428,47 @@ func pathContains(dir, path string) bool {
 	return strings.HasPrefix(path+"/", dir+"/") || path == dir
 }
 
+// pathContainsFold is the case-INSENSITIVE analogue of pathContains: it
+// reports whether path is equal to or under dir, matching each path
+// COMPONENT with Unicode simple case FOLDING (strings.EqualFold) rather than
+// pathContains' exact byte comparison. See IsDenyRead's doc comment for why
+// this exists as a second, deny/allow-list-only primitive instead of a change
+// to pathContains itself, and for the unconditional-vs-per-volume decision it
+// embodies.
+//
+// Folding is done PER COMPONENT (split on "/"), never on the raw joined
+// string, so a fold can never cross a component boundary: dir "/x/.claude"
+// is never reported as containing "/x/.claudex" — EqualFold(".claude",
+// ".claudex") is false, same as an exact-byte comparison would say. This is
+// the same blast-radius bound pg2-2ng80's isAgentConfigPath required of its
+// own fold (internal/rules/pathsafety/pathsafety.go) and secretpath.Classify
+// required of its arms (internal/secretpath/secretpath.go) — folding case
+// must never widen a match past a real path boundary.
+//
+// Like pathContains (see coversPath's doc comment above), this has the same
+// documented blind spot for dir=="/": splitting "/" on "/" yields two empty
+// components, and an empty component only EqualFold-matches another empty
+// component, so dir=="/" matches only path=="/" itself, not everything under
+// it. That mirrors pathContains' own "/" blind spot exactly (deliberately —
+// an allow/deny entry of "/" is not a real config either way) rather than
+// introducing a new inconsistency between the two primitives.
+func pathContainsFold(dir, path string) bool {
+	if dir == "" || path == "" {
+		return false
+	}
+	dirParts := strings.Split(dir, "/")
+	pathParts := strings.Split(path, "/")
+	if len(pathParts) < len(dirParts) {
+		return false
+	}
+	for i, d := range dirParts {
+		if !strings.EqualFold(d, pathParts[i]) {
+			return false
+		}
+	}
+	return true
+}
+
 // cleanPath expands variables, ~, resolves relative paths, and cleans.
 // Does NOT resolve symlinks.
 func (pe *PathEvaluator) cleanPath(path string) string {
@@ -497,6 +538,104 @@ func (pe *PathEvaluator) ResolvePath(path string) string {
 
 // IsDenyRead returns true if path is blocked for reading by sandbox.filesystem.denyRead,
 // accounting for allowRead overrides (allowRead takes precedence over denyRead).
+//
+// # Case folding (pg2-8st32)
+//
+// This comparison, IsDenyWrite's, and the AllowRead override below all use
+// pathContainsFold (strings.EqualFold per path component), not pathContains'
+// exact byte match. Without folding, a denyWrite/denyRead entry of
+// "<project>/.claude" missed a request for
+// "<project>/.CLAUDE/settings.local.json" even though the two name the SAME
+// real file on a case-INSENSITIVE volume (verified on this machine's home
+// APFS volume: `filepath.EvalSymlinks` does NOT case-normalize non-symlink
+// path components — it returns whatever case the caller typed, so
+// resolvePath's output for a case-varied request keeps that case rather than
+// correcting it to the on-disk spelling). The miss fell through to
+// access.CanWrite()/CanRead()'s zone classification, which — after
+// pg2-2ng80's ADR 0041 carve-out — abstains on `.claude/` config writes
+// rather than approving them, so in that one narrow case the miss was
+// "merely" a deferral to Claude Code. But the user configured an EXPLICIT
+// denyWrite/denyRead: they are owed a decisive Reject, not an Abstain (and
+// outside the ADR 0041 carve-out's narrow shape, an outright approve), so
+// folding here closes that gap directly rather than relying on a
+// downstream carve-out to catch it.
+//
+// The AllowRead override (checked first, below) folds too, and for the SAME
+// reason pg2-2ng80 required ALL parts of a predicate to agree on case
+// handling: folding only the deny side while leaving the allow side
+// exact-match would recreate an asymmetric hole one level down — a user
+// whose allowRead override was meant to carve an exception out of a folded
+// deny region could have that override silently miss a case-variant of its
+// own path and get an unwanted Reject instead. (IsDenyWrite has no analogous
+// AllowWrite loop at all — see its own doc comment for why.)
+//
+// EqualFold, not ToLower — same reason as pg2-2ng80's isAgentConfigPath and
+// secretpath.Classify (see those doc comments for the U+017F LATIN SMALL
+// LETTER LONG S witness, reproduced there against this same machine's
+// volume): ToLower is Unicode case MAPPING and leaves some codepoints APFS
+// folds together unequal, so a ToLower-based comparison would reopen an
+// identical bypass one codepoint over. pathContainsFold uses EqualFold
+// exclusively — see its doc comment for the per-component structure that
+// keeps folding from widening a match past a real path boundary.
+//
+// # Unconditional folding, not per-volume — the decision and why
+//
+// pg2-2ng80's isAgentConfigPath and secretpath.Classify both fold
+// UNCONDITIONALLY and both say, explicitly, not to turn this into a runtime
+// probe of the volume's case-sensitivity. Their reasoning rests on an
+// asymmetry: over-matching there costs one unnecessary Abstain/Ask (a later
+// decision-maker — Claude Code, or a human — still gets to say no), while
+// under-matching costs the whole control. That asymmetry is WEAKER here:
+// IsDenyRead/IsDenyWrite feed pathsafety's Reject branches directly (see
+// pathsafety.go's Read and Write/Edit/MultiEdit/Delete cases) with no later
+// rule positioned to soften an over-match — folding here can hard-refuse a
+// path the user never actually listed, on a case-sensitive volume where that
+// path's case-variant happens to be a genuinely different file.
+//
+// The call is still UNCONDITIONAL folding, for three reasons:
+//
+//  1. NO PER-VOLUME INFORMATION IS REACHABLE FROM HERE TODAY. Nothing in this
+//     package — or, checked, anywhere else in this module — determines a
+//     path's filesystem case-sensitivity; every resolve in this file
+//     (resolveRefPath / evalSymlinksWithFallback / resolveConfigPaths) only
+//     follows symlinks. Answering "is dir's volume case-sensitive" would mean
+//     adding a NEW mechanism just for this comparison — a getattrlist/statfs-
+//     class syscall (platform-specific; this tool targets both darwin and
+//     linux), or a stat-and-os.SameFile probe against a case-toggled sibling
+//     — with its own failure modes: a denyWrite/denyRead entry that does not
+//     exist yet has nothing to probe, the probe and the real access are two
+//     separate syscalls (TOCTOU), and it adds a filesystem round trip to
+//     every Read/Write/Edit/Delete evaluation. That is materially more
+//     moving parts than the two-line fold this package has already trusted
+//     twice.
+//  2. THE BLAST RADIUS IS STRUCTURALLY BOUNDED, not just probabilistically
+//     small. pathContainsFold matches PER COMPONENT and requires every
+//     component of dir to match — it cannot become a substring/prefix match
+//     past a component boundary (see its doc comment) — so the only paths it
+//     newly catches are case-VARIANTS of an EXISTING denyWrite/denyRead
+//     entry, never an arbitrarily wider set. The residual exposure is
+//     therefore exactly: a denyWrite/denyRead entry that sits on a
+//     case-SENSITIVE volume where a DIFFERENT real file happens to share that
+//     entry's path spelled in another case.
+//  3. THAT INTERSECTION IS EMPTY IN THE CONFIGURATION THIS WAS MEASURED
+//     AGAINST. This machine has exactly one known case-sensitive volume,
+//     /Volumes/ziprecruiter (`diskutil info` reports "Case-sensitive APFS";
+//     the home volume reports plain "APFS", i.e. case-insensitive) — and the
+//     live ~/.claude/settings.json denyWrite/denyRead lists are entirely
+//     $HOME-rooted (.ssh, .gnupg, .aws, .kube, .docker, .netrc,
+//     Library/Keychains, Documents, …); none names anything under /Volumes.
+//     So on the one machine where the asymmetry's premise — a
+//     case-sensitive volume actually holding a deny entry — could bite, it
+//     currently does not.
+//
+// If a denyWrite/denyRead entry is ever configured on a case-sensitive volume
+// and a real, distinct, differently-cased sibling shows up there, the cost is
+// one unwanted Reject on that sibling: surprising, but strictly safer than
+// today's bug (an explicit deny silently downgraded to Abstain or, outside
+// the ADR 0041 shape, approved outright). Re-open this decision only if that
+// scenario is OBSERVED, not hypothesized — and if it is, prefer probing
+// case-sensitivity per CONFIGURED denyWrite/denyRead root once, at
+// SetSandboxConfig time, over probing per Evaluate call.
 func (pe *PathEvaluator) IsDenyRead(path string) bool {
 	if pe.sandboxConfig == nil {
 		return false
@@ -506,12 +645,12 @@ func (pe *PathEvaluator) IsDenyRead(path string) bool {
 		return false
 	}
 	for _, p := range pe.sandboxConfig.AllowRead {
-		if pathContains(p, resolved) {
+		if pathContainsFold(p, resolved) {
 			return false // allowRead takes precedence over denyRead
 		}
 	}
 	for _, p := range pe.sandboxConfig.DenyRead {
-		if pathContains(p, resolved) {
+		if pathContainsFold(p, resolved) {
 			return true
 		}
 	}
@@ -520,6 +659,18 @@ func (pe *PathEvaluator) IsDenyRead(path string) bool {
 
 // IsDenyWrite returns true if path is blocked for writing by sandbox.filesystem.denyWrite.
 // denyWrite has highest priority — it blocks even CWD and allowWrite paths.
+//
+// Case folding and the unconditional-vs-per-volume decision: see IsDenyRead's
+// doc comment immediately above — this function follows the identical
+// reasoning and the identical pathContainsFold primitive, deliberately kept
+// in sync so the two can never drift onto different case-handling rules the
+// way isAgentConfigPath's three arms once did (pg2-2ng80).
+//
+// Unlike IsDenyRead, there is no AllowWrite override loop here — by design.
+// denyWrite has the HIGHEST priority of any write classification (see this
+// function's summary line above and TestPathEvaluator_IsDenyWrite_
+// OverridesAllowWrite): an allowWrite entry MUST NOT let a path escape a
+// matching denyWrite entry, so allowWrite is never even consulted here.
 func (pe *PathEvaluator) IsDenyWrite(path string) bool {
 	if pe.sandboxConfig == nil {
 		return false
@@ -529,7 +680,7 @@ func (pe *PathEvaluator) IsDenyWrite(path string) bool {
 		return false
 	}
 	for _, p := range pe.sandboxConfig.DenyWrite {
-		if pathContains(p, resolved) {
+		if pathContainsFold(p, resolved) {
 			return true
 		}
 	}
