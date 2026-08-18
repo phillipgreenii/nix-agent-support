@@ -763,6 +763,12 @@ fragment, `A` an executable beginning with a quote. Plus, on the BASE tree only,
 engine's per-LINE comment pre-pass MODIFIES the text, which is the pg2-4h7ee mechanism and is
 computable only there because `StripCommentsPreservingHeredocs` is deleted by the flip.
 
+**Each row below is a bucket under PRIORITY-ORDERED attribution: it counts only the
+transitions not already claimed by an earlier-listed cause.** That is required to avoid
+double-counting a transition against more than one feature, but it means a bucket's row count
+is NOT a census of how many rows the named mechanism touches — see C10's reading note, where
+this bit exactly.
+
 | Cause                                                                                                  | Rows    |
 | ------------------------------------------------------------------------------------------------------ | ------- |
 | **C6** outgoing shell-keyword pseudo-leaf removed                                                      | 336     |
@@ -791,11 +797,22 @@ Reading of the table:
   wrapped token, so a heredoc inside a substitution left the leading `"` in place. Sometimes
   that garbled a token (C3); sometimes it SWALLOWED the following command whole (C9, which is
   why the flip's leaf count goes UP — step 1 measured +308 leaves on 374 rows).
-- **C10 is the pg2-4h7ee class (5).** The engine's per-LINE comment strip cut inside a
-  MULTI-LINE quoted argument — `bd update … --notes "…(feedback: nit #1)…"` — shredding prose
-  into pseudo-leaves and leaving an unterminated quote that swallowed real commands. The pass
-  is GONE, not fixed: under `KeepComments` a `#` inside a quoted word is part of a
-  `*syntax.Lit`, so the defect is unrepresentable. `TestFlip_HashInsideAQuotedArgumentIsNotAComment`.
+- **C10 = 5 is a POST-PRIORITY BUCKET COUNT, NOT the pg2-4h7ee class's size (pg2-43cv2,
+  2026-08-17).** It counts only the transitions this predicate credited to the comment-strip
+  feature AFTER earlier-listed features — notably C3, "outgoing token retained an unbalanced
+  outer quote" — had already claimed them. The comment-strip mangling is ITSELF what CREATES
+  that unbalanced-quote condition, so the priority order systematically routes most of the
+  class's rows away from C10 and into C3 (and, for the same reason, into C9) instead. Measured
+  on the SAME tree pair this replay used (`2b59b9e0` -> `main`): **32 of the 41 withheld
+  corpus rows move verdict** (abstain -> approve) for this class, across 31 distinct
+  (command, cwd) pairs — roughly 6x the "5" this bucket alone reports. C10 is the only bucket
+  in this table with this failure mode: no other row here is independently cross-referenced
+  against a bead-tracked class size, which is what made this one specifically misreadable as a
+  census. The engine's per-LINE comment strip cut inside a MULTI-LINE quoted argument —
+  `bd update … --notes "…(feedback: nit #1)…"` — shredding prose into pseudo-leaves and leaving
+  an unterminated quote that swallowed real commands. The pass is GONE, not fixed: under
+  `KeepComments` a `#` inside a quoted word is part of a `*syntax.Lit`, so the defect is
+  unrepresentable. `TestFlip_HashInsideAQuotedArgumentIsNotAComment`.
 
 ### The one `reject -> abstain`, justified on its own evidence
 

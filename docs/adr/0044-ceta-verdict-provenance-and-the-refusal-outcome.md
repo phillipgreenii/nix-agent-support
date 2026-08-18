@@ -5,6 +5,34 @@ escalated — see "What this ADR does NOT do")
 **Date**: 2026-08-13
 **Deciders**: Phillip Green II
 
+> **Later note (2026-08-18, `pg2-zdm1z`).** Three statements below have drifted since
+> acceptance (found by `pg2-hqkhk`, 2026-08-14/17; re-verified against current source here):
+>
+> 1. The census count was **already** internally inconsistent at acceptance — the prose below
+>    said "15 sites remain" and "46 ... comments survive"; the table it summarizes always
+>    summed to **16** remaining sites and **47** total (`kubectl` 5 + `gh` 4 + `pathsafety` 3 +
+>    `webfetch`/`monorepo`/`docker`/`claudetools` 1 each = 16, plus the 31 already-converted
+>    `safe-commands`/`git` sites = 47). Both numbers below are corrected to match the table,
+>    which was right all along.
+> 2. "The remaining 15 [16] sites ... are NOT converted here" is now moot **in full**, not just
+>    for 12 of them: `pg2-qxe85` (`917b8e7f`, 2026-08-15) finished the last 4 (`gh`) as well, so
+>    all 16 are converted. Verified 2026-08-18: the census's own completion marker —
+>    a comment reading `Former Reason, kept because it is the only record of WHY` — now appears
+>    **zero** times as a live site outside its own two meta-references (`hookio/types.go`'s doc
+>    comment and `gh/refusedsites_test.go`'s description of the marker itself). The follow-up
+>    bead this ADR recorded as owed is done; nothing further is outstanding.
+> 3. "`FromRecursion` is deliberately unchanged" (Consequences) is no longer true: `pg2-ij9sr`
+>    (`370c7cc5`) split it into `FromRecursion` (the recursion-boundary translation this ADR
+>    describes) and `FromFold` (a rule's own fold-result translation), because forwarding a
+>    refusal through `FromRecursion` at a FOLD site would floor `envvars`' fold IDENTITY —
+>    reached on every ordinary `A=1 cmd` and on every Bash leaf carrying no assignment at all —
+>    at `abstain`. `internal/rules/envvars/envvars.go` now calls `FromFold`; `docker`, `nix` and
+>    `kubectl` still call `FromRecursion` at their genuine recursion boundaries, unaffected.
+>
+> None of this reverses the Decision: (1) is a same-day transcription slip now fixed in place,
+> and (2)/(3) are exactly the two follow-ups the Decision itself flagged as owed, now landed.
+> The measurements below are left as recorded for 2026-08-13.
+
 ## Context
 
 ADR 0043 narrowed `NoOpinion` to exactly one meaning — "I handled this and my answer is no gate" —
@@ -41,7 +69,7 @@ knows `rm`, has evaluated `rm -rf /etc`, will not clear it — and must not stop
 kubectl, build-tools and sqlite3 still run after it.
 
 With only three outcomes those sites became `ErrNotApplicable`, and their REASONS were demoted to
-comments. **46 of those comments survive in the tree**, each opening "Former Reason, kept because it
+comments. **47 of those comments survive in the tree**, each opening "Former Reason, kept because it
 is the only record of WHY":
 
 | File                                            | Sites  |
@@ -139,11 +167,11 @@ Both are converted in full, with their former reasons restored, with ONE carve-o
 leaf a later rule approves (safe-commands' help-request branch) and measures `allow`. Flooring it
 would take a measured allow off a leaf that deletes nothing.
 
-The remaining 15 sites (kubectl, gh, pathsafety, webfetch, monorepo, docker, claudetools) are NOT
+The remaining 16 sites (kubectl, gh, pathsafety, webfetch, monorepo, docker, claudetools) are NOT
 converted here. Each conversion can only be MORE restrictive, so under-conversion is the
 approval-widening direction and finishing the census is owed work — but the rules at issue sit
 EARLIER in the chain than safe-commands, so their floors reach more later-rule Approves and each owes
-its own replay. Recorded as a follow-up bead.
+its own replay. Recorded as a follow-up bead (now landed in full — see the Later note above).
 
 ### What this ADR does NOT do, and why
 
@@ -199,10 +227,14 @@ out.
   `return hookio.RuleResult{}, err` silently drops a floor. Four call sites needed this
   (safe-commands' cp/unzip/xargs-self-recursion, git's classify), and the pattern is invisible to the
   compiler.
-- **`FromRecursion` is deliberately unchanged.** An inner refusal could now be forwarded as
+- **`FromRecursion` is deliberately unchanged AT ACCEPTANCE — since superseded by `pg2-ij9sr`
+  (`370c7cc5`); see the Later note above.** An inner refusal could now be forwarded as
   `ErrRefused` instead of `ErrNotApplicable`, which is the coherent end state, but nix, docker and
   kubectl all route through it, so that conversion moves rows across three rules at once and owes its
-  own measurement per ADR 0043's Consequences.
+  own measurement per ADR 0043's Consequences. That conversion has since landed at the recursion
+  boundary itself (`FromRecursion` now forwards a refusal), split from a rule's own FOLD
+  translation (`FromFold`) so that `envvars`' fold identity — reached on every ordinary `A=1 cmd`
+  and ZERO-VALUE for every Bash leaf with no assignment — is never misread as a refusal.
 - **The classification needs its fuzz invariant BEFORE anyone acts on it.** A refusal misreported as
   an exhaustion can only move a leaf toward approve.
   `FuzzADR0044_EnvValueIsNeverLessRestrictiveThanItsBody` asserts that

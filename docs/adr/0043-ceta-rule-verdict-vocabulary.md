@@ -10,6 +10,38 @@
 > written: the table records a replay measured on 2026-07-30, and Shape A's PRINCIPLE (an earlier
 > rule must be able to stop `safecmds` from approving a leaf) is unchanged — only one example of it
 > is gone. The vocabulary this ADR decides is unaffected.
+>
+> **Later note (2026-08-18, `pg2-zdm1z`, extending `pg2-frd27`'s finding).** The Context's
+> ask-volume table ("Why the missing verdict costs prompts", 268 asks over 8 sites) is a
+> **replay measured 2026-07-30** and is **not reproducible today**, for two compounding reasons.
+> First, `evaluate` has no `--until`, so even the original window (`--days 3`, relative to
+> whenever it is run) cannot be re-struck at the same instant — the ADR's own "This is a replay
+> count" caveat already warns about this, but not that the window itself is unrecoverable.
+> Second, and separately, the SITES have moved: as of `pg2-frd27`'s 2026-08-12 measurement, 4 of
+> the 8 (`gitdir: read`, `git: reset --hard`, `gh: pr create`, `git: destructive`) had already
+> been converted away from `Ask` and 2 new ones existed (`gh: api mutating method`,
+> `git: config interlock/sink/redirect key gate`). Re-verified 2026-08-18 against current
+> source: a **5th** of the original 8, `pathtraversal` (17 asks), is also gone — the deletion
+> `pg2-bn7sx` recorded above, landing 2026-08-17, after `pg2-frd27`'s measurement. So of the
+> original 8 sites, 3 remain (`envvars: unevaluated-substitution`, `secrets`,
+> `envvars: sensitive-var`) and the true current count would need its own fresh replay, not a
+> patch to the recorded 268. `--until` was considered here and DECLINED for this ADR: it is
+> `pg2-f1vss`'s `--baseline` work, in progress concurrently, and adding it here would conflict
+> with that bead rather than help it. Reproducing this table exactly therefore requires
+> point-in-time corpus access this tool does not yet have; what IS expected to reproduce is the
+> per-site MECHANISM (`evaluate --format json`, grouped by module+reason).
+>
+> **Same note.** The Consequences claim that `*engine.Engine` "structurally satisfies
+> `RuleModule` today" is **wrong**, not merely stale — `internal/engine/conformance_test.go`'s
+> `TestEngineIsNotItselfARuleModule` measures the opposite and always did:
+> `hookio.RuleModule` requires `Name() string`, and `*Engine` has only `RuleNames() []string`, a
+> different signature, so it never satisfied the interface and no compile error could have been
+> silently lost the way this bullet worried. That test's own doc comment names the REAL hazard
+> the bullet was reaching for: a **signature collision** between `Engine.Evaluate` (the bare
+> `RuleResult` chain-runner shape) and `hookio.RuleModule.Evaluate` (the `(RuleResult, error)`
+> shape), pinned by that file's `engineEvaluateSignature` compile-time assertion instead. The
+> Decision's requirement to "verify the engine's own conformance explicitly" is satisfied by
+> that pair of checks, just not by the mechanism this bullet described.
 
 ## Context
 
@@ -288,9 +320,13 @@ value.
 ## Consequences
 
 - The interface change breaks every implementation, so the compiler enumerates the 25 rules that
-  MUST be visited. **`*engine.Engine` is an exception**: it structurally satisfies `RuleModule`
-  today, so changing the interface silently un-satisfies it with no compile error. The implementer
-  MUST verify the engine's own conformance explicitly.
+  MUST be visited. **`*engine.Engine` was believed to be an exception that structurally satisfies
+  `RuleModule` today — WRONG, see the Later note above.** `RuleModule` requires `Name() string`,
+  and `*Engine` has only `RuleNames() []string`, so it never satisfied the interface; the real
+  risk this bullet was reaching for is a **signature collision** between the two `Evaluate`
+  methods. The implementer MUST verify the engine's own conformance explicitly — as
+  `internal/engine/conformance_test.go`'s `TestEngineIsNotItselfARuleModule` and
+  `engineEvaluateSignature` assertion now do.
 - **A literal scan is NOT a sufficient audit.** There are 143 `Decision: hookio.Abstain` literals
   under `internal/rules/` and 11 in `internal/engine/`, but 17 further returns are aliased behind
   helpers (`return r.abstain()` in `ssh` and `vault`, `return abstain` in `primarycommit`) and are

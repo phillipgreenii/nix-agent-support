@@ -26,6 +26,13 @@ func TestDangerousCommands(t *testing.T) {
 		{"dd", "dd if=/dev/zero of=/dev/sda", "Bash", hookio.Reject},
 		{"mkfs bare", "mkfs /dev/sdb", "Bash", hookio.Reject},
 		{"mkfs.ext4 variant", "mkfs.ext4 /dev/sdb1", "Bash", hookio.Reject},
+		// fdisk is NOT operand-gated like mount, even though `fdisk -l` really is a
+		// read-only partition-table listing on util-linux: the flag is
+		// platform-divergent (BSD/darwin `fdisk` has no listing `-l`, and bare
+		// `fdisk <device>` there is an INTERACTIVE partition editor), so misreading
+		// an operand as a listing flag there would be the worst outcome on this
+		// list. Operator ruling, pg2-km9ng, 2026-07-30: no change, documented --
+		// pinned as an unconditional Reject.
 		{"fdisk", "fdisk -l", "Bash", hookio.Reject},
 		{"mount", "mount /dev/sdb /mnt", "Bash", hookio.Reject},
 		{"umount", "umount /mnt", "Bash", hookio.Reject},

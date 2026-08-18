@@ -433,16 +433,22 @@ func (lw *lowering) stmtComment(st *syntax.Stmt) string {
 	return ""
 }
 
-// stmtRaw is a leaf's Raw: the exact source slice spanning the owning statement,
-// with the trailing separator the statement's extent includes (`;`, `&`, `|&`)
-// and surrounding whitespace removed.
+// stmtRaw is a leaf's Raw: `lw.src[lo:hi]` returned VERBATIM, with lo/hi running
+// from the statement's start to stmtEndOffset's computed end. That end excludes
+// the trailing separator (`;`, `&`, `|&`) and any trailing whitespace BY
+// CONSTRUCTION — see stmtEndOffset, which takes the max of the command's,
+// assignments' and redirections' own ends rather than the separator-inclusive
+// `st.End()` — not by trimming the slice afterward. There is no trim here.
 //
-// The trim is why this is "derived from" an exact slice rather than one verbatim.
-// It is deliberate: the outgoing front end's Raw never carried the separator, the
-// atomicity contract the engine relies on (re-parsing a leaf's Raw must not reveal
-// further commands) is unaffected by it, and DownstreamStages matches leaves by
-// Raw EQUALITY against a re-parse of the root expression, so a separator present
-// in one and absent in the other would silently break the pipeline relation.
+// The separator's exclusion is deliberate, for the same reason it once needed a
+// (since-removed) TrimRight: the outgoing front end's Raw never carried the
+// separator, the atomicity contract the engine relies on (re-parsing a leaf's Raw
+// must not reveal further commands) is unaffected by it, and DownstreamStages
+// (parser.go) matches leaves by Raw EQUALITY against a re-parse of the root
+// expression, so a separator present in one and absent in the other would
+// silently break the pipeline relation. See stmtEndOffset's own comment for why a
+// structurally-computed end replaced the TrimRight: trimming cut inside an
+// escaped-space word (`\ `) and broke idempotence, where a computed end cannot.
 func (lw *lowering) stmtRaw(st *syntax.Stmt) string {
 	lo := int(st.Pos().Offset())
 	hi := lw.stmtEndOffset(st)

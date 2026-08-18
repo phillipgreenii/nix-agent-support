@@ -4,6 +4,19 @@
 **Date**: 2026-07-29
 **Deciders**: Phillip Green II
 
+> **Later note (2026-08-18, `pg2-zdm1z`, from `pg2-bc8ol`'s finding).** The Context below
+> mislabels its corpus unit: **189,678 is distinct input BLOBS (`tool_input_json` values), not
+> distinct `command` strings** — the extraction was `select distinct tool_input_json` followed
+> by `.command` extraction, so two rows differing only in a sibling field (e.g. `description`)
+> contribute the same command twice. Measured on the ADR's own snapshot: 177,370 distinct
+> `.command` values, all zero rows with a null/invalid/empty `.command`, so nothing is silently
+> dropped — the percentages below are internally consistent RATIOS over the blob population and
+> remain correct as such; only the unit name was wrong. Corrected in place below. The asklog is
+> **live and grows continuously**: re-derived 2026-08-18 with the same method, the corpus is now
+> 238,007 non-excluded `Bash` rows, 218,242 distinct input blobs, 204,458 distinct commands —
+> confirming this is a snapshot, not a fixed corpus, and any later re-measurement MUST re-extract
+> its own snapshot rather than reuse either recorded denominator.
+
 ## Context
 
 CETA (`packages/claude-extended-tool-approver`) decides whether to approve, ask about, or reject a
@@ -89,9 +102,10 @@ A single boolean "quote-aware" flag is insufficient. Quote handling has at least
 `DblQuoted`, `CmdSubst`, `ProcSubst`, `Redirect.Hdoc`, and a parse error for the last axis — rather
 than as predicates each caller re-derives.
 
-Measured against a corpus of **189,678 distinct** `command` strings (drawn from the 208,986
-non-excluded `Bash` rows of `tool_decisions`; 49,576 of the distinct commands, or
-49576/189678 = 26.1%, are multi-line):
+Measured against a corpus of **189,678 distinct input blobs** (`tool_input_json` values, drawn
+from the 208,986 non-excluded `Bash` rows of `tool_decisions`; see the Later note above for why
+this is blobs and not distinct `command` strings — 177,370 of those, on the same snapshot).
+49,576 of the 189,678 distinct blobs, or 49576/189678 = 26.1%, are multi-line:
 
 | Outcome                           | Rows    | Share                    |
 | --------------------------------- | ------- | ------------------------ |
@@ -328,14 +342,16 @@ upheld by review.
 4. **Coverage check** (I14). For every corpus row, a check MUST assert that the union of leaf source
    spans covers the static surrogate named in I14 — every `*syntax.CallExpr`, plus every statement
    carrying redirections or a heredoc, including untaken branches. This needs **no working
-   directory**, so it MUST run on all 189,678 rows. It does not depend on
+   directory**, so it MUST run on all 189,678 rows (the distinct **input-blob** population — see
+   the Later note above; this population, not the smaller distinct-command one, is what "all N
+   rows" means throughout this ADR). It does not depend on
    differential comparison and is the only mechanism that can see root cause 4.
 
 5. **Differential replay.** The obligation splits by what each check needs, because about 34% of
    rows have a non-existent working directory and no verdict can be produced for them: the parse,
-   lowering and coverage checks MUST run on **all 189,678 rows**, while the **verdict** replay MUST
-   run on the **working-directory-resolvable subset** with skips reported as a count and never
-   presented as the whole. Every migration step MUST publish a
+   lowering and coverage checks MUST run on **all 189,678 rows** (input blobs), while the
+   **verdict** replay MUST run on the **working-directory-resolvable subset** with skips reported
+   as a count and never presented as the whole. Every migration step MUST publish a
    transition table. The gate is **no transition in the less-restrictive direction** under
    `Approve < Abstain < Ask < Reject`. It MUST be worded that way rather than as "toward approve", so
    that I1b's `Reject → Abstain` forfeiture is caught rather than passing silently. The one permitted
