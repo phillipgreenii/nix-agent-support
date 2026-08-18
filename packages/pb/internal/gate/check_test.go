@@ -108,6 +108,496 @@ func probed(f *run.FakeRunner, ancestor, descendant string) bool {
 	return false
 }
 
+// gateJSON renders one `bd gate list` entry with an arbitrary await type and await
+// id. Everything else matches scriptGateScan's fixture — created_at inside the
+// stale window, applied_baseline=base1 — so in a leave-alone test the ONLY reason
+// the gate is untouched is the rule under test.
+func gateJSON(id, awaitType, awaitID string) string {
+	return fmt.Sprintf(`{"id":%q,"issue_type":"gate","await_type":%q,"await_id":%q,
+		"created_at":"2026-06-26T00:00:00Z","metadata":{"applied_baseline":"base1"}}`, id, awaitType, awaitID)
+}
+
+// scriptProcessableGate scripts a one-gate list PLUS every call a processed gate
+// would make and succeed at: the baseline probe, a scan whose patch-id matches the
+// await id's, the resolve, and the stale add-label. So a gate that reaches the
+// decision path RESOLVES, and an empty CheckResult can only mean pb left it alone.
+//
+// That is load-bearing rather than decorative, for the same reason as
+// scriptResolvable: with the resolve unscripted, FakeRunner errors on it, the gate
+// lands in Skipped and Resolved stays empty anyway — so a leave-alone test would
+// pass even with the rule deleted.
+func scriptProcessableGate(f *run.FakeRunner, id, awaitType, awaitID string) {
+	f.AddResponse("bd", []string{"-C", "/ws", "gate", "list", "--limit", "0", "--json"},
+		run.Result{Stdout: `{"data":[` + gateJSON(id, awaitType, awaitID) + `]}`}, nil)
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "merge-base", "--is-ancestor", "base1", "tip"},
+		run.Result{}, nil)
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "log", "-p", "--no-merges", "base1..tip"},
+		run.Result{Stdout: "diff"}, nil)
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "patch-id", "--stable"},
+		run.Result{Stdout: "abc123 gatedsha\n"}, nil)
+	f.AddResponse("bd", []string{"-C", "/ws", "gate", "resolve", id}, run.Result{}, nil)
+	f.AddResponse("bd", []string{"-C", "/ws", "update", id, "--add-label", "human"}, run.Result{}, nil)
+}
+
+// mutatingBDCalls returns the bd calls that would CHANGE a bead: gate resolve and
+// `bd update`. Reads are excluded — listing gates is how pb looks at all.
+func mutatingBDCalls(f *run.FakeRunner) [][]string {
+	var got [][]string
+	for _, c := range f.Calls() {
+		if c.Name != "bd" || len(c.Args) < 4 {
+			continue
+		}
+		if c.Args[2] == "update" || (c.Args[2] == "gate" && c.Args[3] == "resolve") {
+			got = append(got, c.Args)
+		}
+	}
+	return got
+}
+
+// leftAlone asserts pb did NOTHING to a gate: no verdict in any result list and no
+// mutating bd call. Both halves matter — the result lists prove the decision, the
+// call list proves no side effect escaped ahead of it.
+func leftAlone(t *testing.T, f *run.FakeRunner, out CheckResult) {
+	t.Helper()
+	if len(out.Resolved) != 0 || len(out.WouldResolve) != 0 || len(out.Skipped) != 0 ||
+		len(out.Blocked) != 0 || len(out.StaleActions) != 0 {
+		t.Fatalf("the gate was acted on: resolved=%v would=%v skipped=%+v blocked=%+v stale=%+v",
+			out.Resolved, out.WouldResolve, out.Skipped, out.Blocked, out.StaleActions)
+	}
+	if calls := mutatingBDCalls(f); len(calls) != 0 {
+		t.Fatalf("mutating bd calls issued for a gate pb does not own: %v", calls)
+	}
+}
+
+// TestCheck_leavesGatesItDoesNotOwnAlone pins the "not ours → leave it alone"
+// safety rule, whose blast radius is CROSS-WORKSPACE: one beads DB can be shared by
+// several pn workspaces and by other tools' gates, so a gate pb does not own is
+// somebody else's promise. Resolving one releases a bead whose change this
+// workspace never applied — the pg2-ft60a harm, in another workspace, where nobody
+// is even looking for it.
+//
+// Each row exercises ONE rejection in isolation, because the rules are independent
+// and a single fixture that trips several proves none of them: a gate can be
+// foreign in await type, in workspace id, or malformed, and each has its own guard.
+func TestCheck_leavesGatesItDoesNotOwnAlone(t *testing.T) {
+	tests := []struct {
+		name      string
+		awaitType string
+		awaitID   string
+	}{
+		{"a foreign await type belongs to another tool", "pn:pushed", "home:repo-a:abc123"},
+		{"an await type that merely contains ours is not ours", "pn:applied-maybe", "home:repo-a:abc123"},
+		{"a gate carrying another workspace's wsid is not ours", "pn:applied", "other:repo-a:abc123"},
+		{"a two-part await id is malformed", "pn:applied", "home:repo-a"},
+		{"a one-part await id is malformed", "pn:applied", "home"},
+		{"an empty await id is malformed", "pn:applied", ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			f := run.NewFakeRunner()
+			f.AddResponse("pn", []string{"workspace", "info", "--json"},
+				run.Result{Stdout: checkInfoJSON}, nil)
+			scriptProcessableGate(f, "g-foreign", tc.awaitType, tc.awaitID)
+
+			leftAlone(t, f, runCheck(t, f))
+		})
+	}
+}
+
+// TestCheck_malformedAwaitIDIsNotProcessedAsOurs is the malformed-id rule stated as
+// the property that actually matters: a malformed await id must never be COERCED
+// into a workspace/repo/patch-id triple that pb then acts on. The two-part rows in
+// the table above cover the parse rejection; this test pins the SEPARATE fact that
+// parseAwaitID does not read past the end of a short id — with the length guard
+// removed, `parts[2]` panics, and a panic in the apply post-hook takes out every
+// other gate in the run, not just this one.
+func TestCheck_malformedAwaitIDIsNotProcessedAsOurs(t *testing.T) {
+	f := run.NewFakeRunner()
+	f.AddResponse("pn", []string{"workspace", "info", "--json"}, run.Result{Stdout: checkInfoJSON}, nil)
+	// A well-formed gate that MUST still resolve, listed after a malformed one: the
+	// malformed entry must be stepped over, not abort the loop.
+	f.AddResponse("bd", []string{"-C", "/ws", "gate", "list", "--limit", "0", "--json"},
+		run.Result{Stdout: `{"data":[` +
+			gateJSON("g-bad", "pn:applied", "home:repo-a") + `,` +
+			gateJSON("g-good", "pn:applied", "home:repo-a:abc123") + `]}`}, nil)
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "merge-base", "--is-ancestor", "base1", "tip"},
+		run.Result{}, nil)
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "log", "-p", "--no-merges", "base1..tip"},
+		run.Result{Stdout: "diff"}, nil)
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "patch-id", "--stable"},
+		run.Result{Stdout: "abc123 gatedsha\n"}, nil)
+	f.AddResponse("bd", []string{"-C", "/ws", "gate", "resolve", "g-good"}, run.Result{}, nil)
+
+	out := runCheck(t, f)
+	if len(out.Resolved) != 1 || out.Resolved[0] != "g-good" {
+		t.Fatalf("resolved = %v skipped = %+v; the malformed gate must be stepped over and the "+
+			"well-formed one still resolved", out.Resolved, out.Skipped)
+	}
+	for _, c := range mutatingBDCalls(f) {
+		for _, a := range c {
+			if a == "g-bad" {
+				t.Fatalf("the malformed gate was acted on: %v", c)
+			}
+		}
+	}
+}
+
+// TestCheck_awaitIDWithFourPartsDoesNotResolve records what an over-long await id
+// actually does, which is NOT a parse rejection: parseAwaitID splits on ":" with
+// SplitN(…, 3), so "home:repo-a:abc:123" yields THREE parts and is ACCEPTED, with
+// the whole tail "abc:123" taken as the patch-id. The safety therefore comes from
+// the patch-id not matching anything in the scan (git patch-ids are hex and never
+// contain a colon), not from the length guard.
+//
+// The assertion is on the observable outcome — such a gate does not resolve —
+// because that is the property pb's soundness rests on; asserting a rejection here
+// would assert behaviour the parser does not have.
+func TestCheck_awaitIDWithFourPartsDoesNotResolve(t *testing.T) {
+	f := run.NewFakeRunner()
+	f.AddResponse("pn", []string{"workspace", "info", "--json"}, run.Result{Stdout: checkInfoJSON}, nil)
+	scriptProcessableGate(f, "g-4part", "pn:applied", "home:repo-a:abc:123")
+
+	out := runCheck(t, f)
+	if len(out.Resolved) != 0 || len(out.WouldResolve) != 0 {
+		t.Fatalf("resolved=%v would=%v; the scan holds patch-id \"abc123\", not \"abc:123\", so nothing "+
+			"proves this change shipped", out.Resolved, out.WouldResolve)
+	}
+}
+
+// TestCheck_defaultScanWindowIsLast100 pins Check's default scan window. The window
+// bounds whether a landed patch is FOUND at all, so its default is a correctness
+// parameter, not a tuning knob: shrink it to zero and `git log -p -n 0` reports no
+// commits, every gate misses, and every follow-up bead sits blocked behind a change
+// that did ship.
+//
+// The gate carries no applied_baseline, so the last-N form is the range used, and
+// the scan args are asserted verbatim — a test that only checked "it resolved"
+// would pass on any non-zero N.
+func TestCheck_defaultScanWindowIsLast100(t *testing.T) {
+	f := run.NewFakeRunner()
+	f.AddResponse("pn", []string{"workspace", "info", "--json"}, run.Result{Stdout: checkInfoJSON}, nil)
+	f.AddResponse("bd", []string{"-C", "/ws", "gate", "list", "--limit", "0", "--json"},
+		run.Result{Stdout: `{"data":[{"id":"g-1","issue_type":"gate","await_type":"pn:applied",
+			"await_id":"home:repo-a:abc123","created_at":"2026-06-26T00:00:00Z"}]}`}, nil)
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "log", "-p", "--no-merges", "-n", "100", "tip"},
+		run.Result{Stdout: "diff"}, nil)
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "patch-id", "--stable"},
+		run.Result{Stdout: "abc123 gatedsha\n"}, nil)
+	f.AddResponse("bd", []string{"-C", "/ws", "gate", "resolve", "g-1"}, run.Result{}, nil)
+
+	// LastN deliberately UNSET.
+	out, err := Check(context.Background(), checkDeps(f, stubDiscover("/ws")), CheckParams{
+		WorkspaceDir: "/ws", StaleAfter: 72 * time.Hour,
+		Now: time.Date(2026, 6, 26, 1, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if len(out.Resolved) != 1 {
+		t.Fatalf("resolved = %v skipped = %+v; an unset LastN must fall back to a usable window",
+			out.Resolved, out.Skipped)
+	}
+	if !scanned(f, "-n", "100", "tip") {
+		t.Fatalf("scan args = %v; the default window must be the last 100 commits", logScans(f))
+	}
+}
+
+// TestCheck_explicitScanWindowIsHonoured is the other side of the default: a caller
+// that ASKS for a window gets it. Without this, "unset → 100" and "always 100" are
+// indistinguishable, and `--last-n` would be silently inert.
+func TestCheck_explicitScanWindowIsHonoured(t *testing.T) {
+	f := run.NewFakeRunner()
+	f.AddResponse("pn", []string{"workspace", "info", "--json"}, run.Result{Stdout: checkInfoJSON}, nil)
+	f.AddResponse("bd", []string{"-C", "/ws", "gate", "list", "--limit", "0", "--json"},
+		run.Result{Stdout: `{"data":[{"id":"g-1","issue_type":"gate","await_type":"pn:applied",
+			"await_id":"home:repo-a:abc123","created_at":"2026-06-26T00:00:00Z"}]}`}, nil)
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "log", "-p", "--no-merges", "-n", "7", "tip"},
+		run.Result{Stdout: "diff"}, nil)
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "patch-id", "--stable"},
+		run.Result{Stdout: "abc123 gatedsha\n"}, nil)
+	f.AddResponse("bd", []string{"-C", "/ws", "gate", "resolve", "g-1"}, run.Result{}, nil)
+
+	out, err := Check(context.Background(), checkDeps(f, stubDiscover("/ws")), CheckParams{
+		WorkspaceDir: "/ws", LastN: 7, StaleAfter: 72 * time.Hour,
+		Now: time.Date(2026, 6, 26, 1, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if len(out.Resolved) != 1 || !scanned(f, "-n", "7", "tip") {
+		t.Fatalf("resolved = %v scans = %v; an explicit LastN must not be overwritten by the default",
+			out.Resolved, logScans(f))
+	}
+}
+
+// logScans returns the trailing rev-range args of every `git log -p` pb ran.
+func logScans(f *run.FakeRunner) [][]string {
+	var got [][]string
+	for _, c := range f.Calls() {
+		if c.Name == "git" && len(c.Args) > 5 && c.Args[2] == "log" && c.Args[3] == "-p" {
+			got = append(got, c.Args[5:])
+		}
+	}
+	return got
+}
+
+func scanned(f *run.FakeRunner, rangeArgs ...string) bool {
+	for _, got := range logScans(f) {
+		if len(got) != len(rangeArgs) {
+			continue
+		}
+		match := true
+		for i := range got {
+			if got[i] != rangeArgs[i] {
+				match = false
+			}
+		}
+		if match {
+			return true
+		}
+	}
+	return false
+}
+
+// neverAppliedInfoJSON describes a repo with no applied-state record, so no gate can
+// resolve and every gate is stale-evaluated. It is the fixture for the stale
+// handler, which is otherwise shadowed by the resolve path (resolve takes
+// precedence).
+const neverAppliedInfoJSON = `{"wsid":"home","root":"/ws","terminal":"m",
+	"repos":[{"name":"repo-a","path":"/ws/repo-a","applied_ref":"","dirty":false}]}`
+
+// staleGateListJSON is a one-gate list old enough to be stale against
+// runStale's clock.
+const staleGateListJSON = `{"data":[{"id":"g-old","issue_type":"gate","await_type":"pn:applied",
+	"await_id":"home:repo-a:abc123","created_at":"2026-06-24T00:00:00Z"}]}`
+
+// runStale runs Check over neverAppliedInfoJSON with a 24h stale threshold and a
+// clock 2 days past the gate's created_at, so the single gate is stale.
+func runStale(t *testing.T, f *run.FakeRunner, p CheckParams) CheckResult {
+	t.Helper()
+	p.WorkspaceDir = "/ws"
+	p.StaleAfter = 24 * time.Hour
+	p.Now = time.Date(2026, 6, 26, 0, 0, 0, 0, time.UTC)
+	out, err := Check(context.Background(), checkDeps(f, stubDiscover("/ws")), p)
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	return out
+}
+
+// TestCheck_staleHandlerDefaultsToConvertToHuman pins the DEFAULT stale action, and
+// the default is the safe direction of a one-way door. The switch below it accepts
+// "close", which RESOLVES the gate — releasing a follow-up bead whose change was
+// never applied, and destroying the only record that anyone still owed the check.
+// "convert-to-human" instead puts the undecidable case in front of a person.
+//
+// A regression flipping the default is silent: both actions "work", and only the
+// bead's later fate tells them apart. Hence the assertion is on the recorded action
+// string AND on which bd call was issued — the label, never a resolve.
+func TestCheck_staleHandlerDefaultsToConvertToHuman(t *testing.T) {
+	f := run.NewFakeRunner()
+	f.AddResponse("pn", []string{"workspace", "info", "--json"},
+		run.Result{Stdout: neverAppliedInfoJSON}, nil)
+	f.AddResponse("bd", []string{"-C", "/ws", "gate", "list", "--limit", "0", "--json"},
+		run.Result{Stdout: staleGateListJSON}, nil)
+	f.AddResponse("bd", []string{"-C", "/ws", "update", "g-old", "--add-label", "human"}, run.Result{}, nil)
+	// Scripted so a wrongly-defaulted "close" would SUCCEED and be visible, rather
+	// than failing on an unscripted call and looking like the default held.
+	f.AddResponse("bd", []string{
+		"-C", "/ws", "gate", "resolve", "g-old",
+		"--reason", "stale: closed by pb gate check",
+	}, run.Result{}, nil)
+
+	// StaleHandler deliberately UNSET.
+	out := runStale(t, f, CheckParams{})
+
+	if len(out.StaleActions) != 1 || out.StaleActions[0].Action != "convert-to-human" {
+		t.Fatalf("stale actions = %+v; an unset StaleHandler MUST default to convert-to-human — "+
+			"defaulting to close silently resolves gates that should have become a human decision",
+			out.StaleActions)
+	}
+	calls := mutatingBDCalls(f)
+	if len(calls) != 1 || calls[0][2] != "update" || calls[0][4] != "--add-label" || calls[0][5] != "human" {
+		t.Fatalf("mutating bd calls = %v; the default action must label the gate for a human, and "+
+			"must not resolve it", calls)
+	}
+}
+
+// TestCheck_staleHandlerCloseResolvesTheGate is the other side of the default: the
+// handler is honoured when the operator does ask for it, so "default is
+// convert-to-human" cannot be satisfied by ignoring StaleHandler altogether.
+func TestCheck_staleHandlerCloseResolvesTheGate(t *testing.T) {
+	f := run.NewFakeRunner()
+	f.AddResponse("pn", []string{"workspace", "info", "--json"},
+		run.Result{Stdout: neverAppliedInfoJSON}, nil)
+	f.AddResponse("bd", []string{"-C", "/ws", "gate", "list", "--limit", "0", "--json"},
+		run.Result{Stdout: staleGateListJSON}, nil)
+	f.AddResponse("bd", []string{
+		"-C", "/ws", "gate", "resolve", "g-old",
+		"--reason", "stale: closed by pb gate check",
+	}, run.Result{}, nil)
+	f.AddResponse("bd", []string{"-C", "/ws", "update", "g-old", "--add-label", "human"}, run.Result{}, nil)
+
+	out := runStale(t, f, CheckParams{StaleHandler: "close"})
+
+	if len(out.StaleActions) != 1 || out.StaleActions[0].Action != "close" {
+		t.Fatalf("stale actions = %+v; an explicit handler must be recorded verbatim", out.StaleActions)
+	}
+	calls := mutatingBDCalls(f)
+	if len(calls) != 1 || calls[0][2] != "gate" || calls[0][3] != "resolve" {
+		t.Fatalf("mutating bd calls = %v; --stale-handler=close must resolve the gate, not label it", calls)
+	}
+	// A stale close is NOT a resolution: the change was never proven applied, so it
+	// must not be reported as one.
+	if len(out.Resolved) != 0 || len(out.WouldResolve) != 0 {
+		t.Fatalf("resolved=%v would=%v; a stale close is an escalation, not evidence the change shipped",
+			out.Resolved, out.WouldResolve)
+	}
+}
+
+// TestCheck_staleDryRunRecordsWithoutActing pins the dry-run arm of the stale
+// handler. `pb gate check --dry-run` is what an operator runs to SEE what a stale
+// sweep would do; if it performed the action, the preview would itself be the
+// irreversible step — and for the "close" handler that means a bead released with
+// no record of the question.
+//
+// Neither the label nor the resolve is scripted here, so the FakeRunner would
+// return an error if either were attempted — but applyStale discards those errors
+// (`_ =`), so the error alone is invisible. The recorded CALL is the only evidence,
+// which is why the assertion is on the call list rather than on the result.
+func TestCheck_staleDryRunRecordsWithoutActing(t *testing.T) {
+	f := run.NewFakeRunner()
+	f.AddResponse("pn", []string{"workspace", "info", "--json"},
+		run.Result{Stdout: neverAppliedInfoJSON}, nil)
+	f.AddResponse("bd", []string{"-C", "/ws", "gate", "list", "--limit", "0", "--json"},
+		run.Result{Stdout: staleGateListJSON}, nil)
+
+	out := runStale(t, f, CheckParams{DryRun: true})
+
+	if len(out.StaleActions) != 1 || out.StaleActions[0].GateID != "g-old" ||
+		out.StaleActions[0].Action != "convert-to-human" {
+		t.Fatalf("stale actions = %+v; a dry run must still REPORT what it would do, or the preview "+
+			"is empty and the operator learns nothing", out.StaleActions)
+	}
+	if calls := mutatingBDCalls(f); len(calls) != 0 {
+		t.Fatalf("dry run mutated beads: %v", calls)
+	}
+}
+
+// TestCheck_staleDryRunCloseIsAlsoInert covers the dry-run arm for the DESTRUCTIVE
+// handler specifically. The arm is shared, but "close" is the one where performing
+// the previewed action cannot be undone, so it gets its own assertion rather than
+// relying on the default handler's coverage.
+func TestCheck_staleDryRunCloseIsAlsoInert(t *testing.T) {
+	f := run.NewFakeRunner()
+	f.AddResponse("pn", []string{"workspace", "info", "--json"},
+		run.Result{Stdout: neverAppliedInfoJSON}, nil)
+	f.AddResponse("bd", []string{"-C", "/ws", "gate", "list", "--limit", "0", "--json"},
+		run.Result{Stdout: staleGateListJSON}, nil)
+	// Scripted to SUCCEED: if the dry-run arm were skipped, the close would land.
+	f.AddResponse("bd", []string{
+		"-C", "/ws", "gate", "resolve", "g-old",
+		"--reason", "stale: closed by pb gate check",
+	}, run.Result{}, nil)
+
+	out := runStale(t, f, CheckParams{DryRun: true, StaleHandler: "close"})
+
+	if len(out.StaleActions) != 1 || out.StaleActions[0].Action != "close" {
+		t.Fatalf("stale actions = %+v", out.StaleActions)
+	}
+	if calls := mutatingBDCalls(f); len(calls) != 0 {
+		t.Fatalf("dry run closed a stale gate for real: %v", calls)
+	}
+}
+
+// TestShortRev pins the truncation boundary of the rev shown in a human-facing skip
+// reason, in both directions. The operator's next action is read off that string —
+// "gated commit X is not in Y; push it, relock" — so a rev mangled by an off-by-one
+// sends them to the wrong commit.
+//
+// NOTE on what is provable here: for a rev of exactly 12 characters, rev[:12] IS
+// rev, so `len(rev) > 12` and `len(rev) >= 12` are behaviourally
+// INDISTINGUISHABLE and no test can separate them. What the boundary rows below do
+// pin is the observable pair: 12 characters survive intact, 13 are cut to 12.
+func TestShortRev(t *testing.T) {
+	tests := []struct {
+		name, rev, want string
+	}{
+		{"a short rev is untouched", "abc", "abc"},
+		{"an empty rev is untouched", "", ""},
+		{"11 characters are untouched", "0123456789a", "0123456789a"},
+		{"12 characters are untouched", "0123456789ab", "0123456789ab"},
+		{"13 characters truncate to 12", "0123456789abc", "0123456789ab"},
+		{"a full sha truncates to 12", "0123456789abcdef0123456789abcdef01234567", "0123456789ab"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := shortRev(tc.rev); got != tc.want {
+				t.Errorf("shortRev(%q) = %q, want %q", tc.rev, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestCheck_propagatesDependencyFailures pins the error paths OUT of Check. Each
+// one is a case where pb cannot see the world at all — it cannot ask pn what was
+// applied, cannot find the beads DBs, or cannot list the gates in one. Swallowing
+// any of them turns a blind run into a clean report of "nothing to do": `pb gate
+// check` exits 0, the apply post-hook stays quiet, and a gate that should have
+// resolved (or been escalated) is silently passed over on every subsequent apply.
+func TestCheck_propagatesDependencyFailures(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func() (*run.FakeRunner, func([]string, string) ([]discover.DB, error))
+	}{
+		{
+			// `pn workspace info` unscripted → the FakeRunner errors.
+			name: "pn workspace info fails",
+			setup: func() (*run.FakeRunner, func([]string, string) ([]discover.DB, error)) {
+				return run.NewFakeRunner(), stubDiscover("/ws")
+			},
+		},
+		{
+			name: "beads DB discovery fails",
+			setup: func() (*run.FakeRunner, func([]string, string) ([]discover.DB, error)) {
+				f := run.NewFakeRunner()
+				f.AddResponse("pn", []string{"workspace", "info", "--json"},
+					run.Result{Stdout: checkInfoJSON}, nil)
+				return f, func([]string, string) ([]discover.DB, error) {
+					return nil, fmt.Errorf("walk failed")
+				}
+			},
+		},
+		{
+			// `bd gate list` unscripted → the FakeRunner errors.
+			name: "bd gate list fails",
+			setup: func() (*run.FakeRunner, func([]string, string) ([]discover.DB, error)) {
+				f := run.NewFakeRunner()
+				f.AddResponse("pn", []string{"workspace", "info", "--json"},
+					run.Result{Stdout: checkInfoJSON}, nil)
+				return f, stubDiscover("/ws")
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			f, disc := tc.setup()
+			out, err := Check(context.Background(), checkDeps(f, disc), CheckParams{
+				WorkspaceDir: "/ws", LastN: 100, StaleAfter: 72 * time.Hour,
+				Now: time.Date(2026, 6, 26, 1, 0, 0, 0, time.UTC),
+			})
+			if err == nil {
+				t.Fatalf("Check returned nil error and result %+v; a blind run must not read as a "+
+					"clean one", out)
+			}
+			if len(out.Resolved) != 0 || len(out.WouldResolve) != 0 {
+				t.Fatalf("resolved=%v would=%v; nothing may be reported resolved on a failed run",
+					out.Resolved, out.WouldResolve)
+			}
+		})
+	}
+}
+
 // TestCheck_unpushedCommitInPinnedRepoDoesNotResolve is THE regression test for
 // bead pg2-ft60a. repo-a is pinned by the terminal as a flake input; the gated
 // commit is on the local checkout the apply ran over (condition 1 passes) but the
