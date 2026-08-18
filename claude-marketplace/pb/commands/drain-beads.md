@@ -845,49 +845,6 @@ unchanged.
   DERIVED STATE and a bead describes one instant while it regenerates on every land. Full
   contract: the always-on `Unpushed Landing Debt` rules (U-1..U-6).
 
-## Loop overview
-
-```mermaid
-flowchart TD
-    A[Start: set actor ID, bd prime] --> R{Own an unfinished<br/>in_progress bead?}
-    R -- yes --> I
-    R -- no --> C["CLAIM: bd ready --claim<br/>--exclude-label human --actor ID --json"]
-    C -->|successful + empty| PD["Unpushed commits: derived state, so NO bead and<br/>NO report unless being unpublished BLOCKS the work<br/>-- then ONE line (U-1..U-6)"]
-    PD --> DONE(["Goal met: 0 ready. STOP"])
-    C -->|transient bd/dolt error| C
-    C -->|got bead| U["bd show id (brief)"]
-    U -->|"handoff pointer with no work of its own"| AB["CLOSE-WITH-ABSORPTION-TRACE, no isolate and no subagent:<br/>trace each item to a bead id or indexing label →<br/>re-probe its state claims, never trust them as recorded →<br/>file anything that traces nowhere →<br/>bd comment ABSORBED: trace → bd close, never demote"]
-    AB --> C
-    U -->|"a bead with work of its own"| I["ISOLATE keyed to bead id<br/>(worktree / pn-workspace-rules:fork-workforest, reuse if parked)"]
-    I --> W["DELEGATE to SUBAGENT:<br/>implement + run pre-apply gates, report status"]
-    W -. needs-more-repos .-> I
-    W --> V{Report + gates}
-    V -- "stuck / gates fail" --> S["STUCK (last resort): park the WIP, re-verify the<br/>PREMISE, then decide WHO or WHAT is the blocker"]
-    V -- "done / done-pending-apply-verification" --> L["LAND via integrate-branch:integrate-branch, NO handler named<br/>ff-merge-to-main lands locally, pull-request pushes<br/>drain/id and opens or updates a DRAFT PR"]
-    L -->|transient ff-race or rejected non-ff push| L
-    L -->|genuine stopped:reason| S
-    L -- "landed / pr-opened / pr-updated: capture SHA and PR number" --> G{Post-deploy<br/>verification needed?}
-    G -- "no (done)" --> CL["CLEANUP worktree/set ONLY after an ff-merge-to-main land<br/>(a set only AFTER every member landed, never force)<br/>pull-request: KEEP the worktree and branch (PR-4)"]
-    G -- "yes, pn-workspace member landed via ff-merge-to-main" --> PB["pb:pb-gate-lifecycle<br/>bd create verify-child --defer 2126-01-01 →<br/>CONFIRM child absent from bd ready, NEVER read status →<br/>pb gate create --blocks child --repo --commit SHA →<br/>(all gates OK?) bd update child --defer '' → re-confirm absent"]
-    G -- "yes, but outside a pn-workspace or landed via pull-request" --> HB["FALLBACK, no gate is possible:<br/>bd create verify-child --labels human<br/>--deps discovered-from impl-id, born ready"]
-    PB -->|gate-create failed| S
-    PB -->|gated + un-deferred| CL
-    HB --> CL
-    CL --> X["bd close impl id --reason ... --actor ID"]
-    X --> C
-    S --> FC{"FRESHNESS CHECK (F-3 probes):<br/>is the bead's PREMISE still live?"}
-    FC -- "provably moot" --> CM["CLOSE-AS-MOOT (no park, no human label):<br/>read the stale work → bd create extracted prediction<br/>--deps discovered-from → bd comment FRESHNESS: probe output →<br/>bd close --reason 'moot on re-verification'"]
-    FC -- "live, or any probe unresolvable" --> BK{"CLASSIFY THE BLOCKER (D-1):<br/>a PERSON, or ANOTHER BEAD?<br/>reuse step 2's sibling-open? readings"}
-    BK -- "every live blocker is a BEAD" --> CD["CONVERT-TO-DEPENDENCY (no human label):<br/>bd dep add id --blocked-by blocker, ALL edges FIRST →<br/>bd dep list id to confirm direction →<br/>bd comment FRESHNESS + BLOCKED-BY-BEADS →<br/>bd update --status open --assignee '' (release LAST)"]
-    BK -- "a PERSON must clear it, wire any bead half as deps too" --> RK{"Same PRECONDITION-KEY<br/>already parked on this bead?"}
-    RK -- no --> PK["bd comment stuck: + FRESHNESS + PRECONDITION block →<br/>bd update --add-label human →<br/>unclaim LAST"]
-    RK -- "yes (2nd time)" --> SP["SUSPECTED STALE, no 3rd park:<br/>bd comment 'do NOT re-park on this key' →<br/>bd update --add-label human,stale-precondition →<br/>unclaim LAST"]
-    CM --> C
-    CD --> C
-    PK --> C
-    SP --> C
-```
-
 ## Running several at once
 
 Open N Claude Code sessions, each with its working directory inside this
@@ -942,7 +899,3 @@ re-enters this queue by itself as soon as its last blocker closes.
   worktree and branch by design (PR-4), so a drain over such a repo accumulates one
   `.worktrees/<id>` per closed bead until someone merges the PRs. Retiring them is the
   merger's job, not this command's.
-
-```
-
-```
