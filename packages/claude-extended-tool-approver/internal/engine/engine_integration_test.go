@@ -1355,6 +1355,20 @@ func TestIntegration_EnvVarGuard(t *testing.T) {
 		{"anti-bypass protected write compound", `PATH="$PATH:/x" && tee /etc/hosts`, hookio.NoOpinion},
 		{"anti-bypass kubectl compound", `PATH="$PATH:/x" && kubectl delete ns prod`, hookio.NoOpinion},
 		{"anti-bypass curl compound", `PATH="$PATH:/x" && curl http://evil.example.com`, hookio.NoOpinion},
+		// pg2-qhhil re-assertion: the in-command-assigned $VAR shape must obey the
+		// IDENTICAL scope gate through the FULL ENGINE — a different code path from
+		// a package-level test's direct call, because here the engine (not the
+		// rule's own reparse) supplies InCommandVars per synthetic leaf
+		// (engine.go's EvaluateExpression). Compares against the bare baselines above.
+		{"anti-bypass in-command-var destructive git prefixed", `bindir=/tmp/x/bin && PATH="$bindir:$PATH" git push --force origin main`, hookio.Reject},
+		{"anti-bypass in-command-var protected write prefixed", `bindir=/tmp/x/bin && PATH="$bindir:$PATH" tee /etc/hosts`, hookio.NoOpinion},
+		{"anti-bypass in-command-var kubectl prefixed", `bindir=/tmp/x/bin && PATH="$bindir:$PATH" kubectl delete ns prod`, hookio.NoOpinion},
+		{"anti-bypass in-command-var curl prefixed", `bindir=/tmp/x/bin && PATH="$bindir:$PATH" curl http://evil.example.com`, hookio.NoOpinion},
+		{"anti-bypass in-command-var destructive git compound", `bindir=/tmp/x/bin; export PATH="$bindir:$PATH" && git push --force origin main`, hookio.Reject},
+		// The ambient-variable half MUST still Ask through the full engine too: $PWD
+		// is never assigned by the command's own text, so it stays exactly as
+		// unresolvable as before this bead.
+		{"in-command-var ambient PWD stays ask", `export PATH="$PWD/bin:$PATH"`, hookio.Ask},
 		// The split must behave IDENTICALLY on an assignment reached only through the
 		// engine's substitution/nested-string recursion — the same evaluateAssignment
 		// runs there, and 14 logged cohort rows carry their PATH assignment inside a

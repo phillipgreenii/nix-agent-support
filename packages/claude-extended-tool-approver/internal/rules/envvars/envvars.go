@@ -8,6 +8,7 @@ import (
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmdparse"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/primarycommit"
 )
 
 // maxReasonNameLen bounds the rendered length of a variable NAME echoed into a
@@ -155,19 +156,26 @@ var injectorAskVars = map[string]bool{
 // this ruling newly discovers or changes.
 //
 // NOT KILLED by this ruling — two narrower questions in the same predicate
-// area remain open and are tracked separately, deliberately NOT folded into
-// this decision:
+// area were tracked separately, deliberately NOT folded into this decision:
 //
-//   - pg2-qhhil: the surviving NARROW middle option — accept a `$VAR`
-//     component only when that variable was assigned earlier IN THE SAME
-//     COMMAND to a static absolute path (e.g. `bindir=/tmp/x/bin;
-//     PATH="$bindir:$PATH"`). Such a component is exactly as inspectable as a
-//     literal path, so it is not subject to the coherence objection above.
+//   - pg2-qhhil: the NARROW middle option — accept a `$VAR` component only
+//     when that variable was assigned earlier IN THE SAME COMMAND to a static
+//     absolute path (e.g. `bindir=/tmp/x/bin; PATH="$bindir:$PATH"`). Such a
+//     component is exactly as inspectable as a literal path, so it is not
+//     subject to the coherence objection above. OPERATOR RULING 2026-08-17
+//     (via `/unblock-human-beads`, gated on measured volume — pg2-3arc2: 23 of
+//     74 post-apply PATH/HOME asks, 0 denials, all this shape): BUILD. Now
+//     IMPLEMENTED — see preservesCallerValue's in-command-assigned branch,
+//     which wires the pg2-wq3ki InCommandVars/ExpandInCommand seam in. The
+//     ambient-variable shapes above ($PWD, $JAVA_HOME, $TMP, ...) are
+//     unaffected: they are never assigned by the command's own text, so the
+//     seam never resolves them and they keep asking.
 //   - pg2-kzqw2 and pg2-d71my: later-filed, separately-scoped decisions on a
 //     `$(...)`-derived component and on REPLACEMENT-form values (`env -i`,
 //     hermetic-HOME test idioms) respectively — the middle option this
 //     ruling's trade analysis fanned out to once the blanket widen was
-//     rejected. Neither is decided by KEEP STRICT.
+//     rejected. Neither is decided by KEEP STRICT, and neither is
+//     implemented by pg2-qhhil's wiring above.
 var askVars = map[string]bool{
 	"PATH": true,
 	"HOME": true,
@@ -259,24 +267,37 @@ func assignmentIsWholeLeaf(pc cmdparse.ParsedCommand) bool {
 
 // preservesCallerValue reports whether an askVar assignment's VALUE is the
 // verified-safe EXTEND shape: it keeps the caller's own value ($NAME / ${NAME}) as
-// one whole `:`-separated component, and every other component is a static absolute
-// path. That is the shape 954 of the 1,118 logged PATH/HOME assignments use, with
-// zero adversarial values among them (pg2-qfuto).
+// one whole `:`-separated component, and every other component is EITHER a static
+// absolute path OR a reference to a variable THIS SAME COMMAND assigned, earlier,
+// to one (vars — see below). That is the shape 954 of the 1,118 logged PATH/HOME
+// assignments use, with zero adversarial values among them (pg2-qfuto).
 //
-// The predicate is deliberately STRICT — a component must be literal and absolute,
-// so nothing behind an expansion can smuggle a lookup directory in. It therefore
-// still asks on `$PWD/bin:$PATH`, `$JAVA_HOME/bin:$PATH` and
-// `$(nix build …)/bin:$PATH`. Widening it to accept $VAR-derived components was
-// considered and RULED AGAINST (2026-07-30) — see the "OPERATOR RULING" note on
-// the `askVars` doc comment above for the coherence reason and the measured
-// basis; do not re-litigate it here.
+// The predicate is deliberately STRICT — a component must be literal-and-absolute,
+// or resolve to exactly that through vars — so nothing behind an AMBIENT expansion
+// can smuggle a lookup directory in. It therefore still asks on `$PWD/bin:$PATH`,
+// `$JAVA_HOME/bin:$PATH` and `$(nix build …)/bin:$PATH`: none of those names is
+// something the command text itself establishes, so vars never carries them.
+// Widening it to accept ARBITRARY $VAR-derived components was considered and RULED
+// AGAINST (2026-07-30) — see the "OPERATOR RULING" note on the `askVars` doc
+// comment above for the coherence reason and the measured basis; do not
+// re-litigate the blanket widen here. The narrow in-command-assigned case below is
+// the surviving middle option that ruling explicitly did NOT kill (pg2-qhhil,
+// operator ruling 2026-08-17: BUILD).
+//
+// vars is the in-command variable environment for the leaf this assignment
+// belongs to (primarycommit.LeafVars over the caller's own parse, wrapping
+// cmdparse.InCommandVars) — nil is the ordinary case (no qualifying in-command
+// assignment exists) and reproduces the pre-pg2-qhhil predicate exactly.
 //
 // What it can NOT distinguish, knowingly: a hostile static prepend
 // (`PATH="/tmp/evil/bin:$PATH"`) from a legitimate one (`/nix/store/…/bin`). That
 // is inherent to any value-aware split — the caller's PATH is still intact and the
 // directory is one the user already controls — and it is the same guarantee a
-// settings.json `Bash(export PATH:*)` entry already grants.
-func preservesCallerValue(ev cmdparse.EnvAssignment) bool {
+// settings.json `Bash(export PATH:*)` entry already grants. An in-command-assigned
+// component (`bindir=/tmp/x/bin; PATH="$bindir:$PATH"`) carries the identical
+// trade: it is exactly as inspectable as writing the path literally, no more and
+// no less.
+func preservesCallerValue(ev cmdparse.EnvAssignment, vars map[string]string) bool {
 	// The bash append form NAME+=VALUE (normalized to NAME by cmdparse) IS
 	// semantically a preserve, but it deliberately does NOT approve: no logged row
 	// uses it, and excluding it keeps the Approve as narrow as possible.
@@ -301,9 +322,21 @@ func preservesCallerValue(ev cmdparse.EnvAssignment) bool {
 			preserved = true
 			continue
 		}
-		if !isStaticAbsolutePath(component) {
-			return false
+		if isStaticAbsolutePath(component) {
+			continue
 		}
+		// NARROW MIDDLE OPTION (pg2-qhhil): the component is not itself a literal
+		// static absolute path, but it may be a variable THIS SAME COMMAND
+		// assigned, earlier, to one — e.g. `bindir=/tmp/x/bin;
+		// PATH="$bindir:$PATH"`. cmdparse.ExpandInCommand resolves it against
+		// vars ALL-OR-NOTHING: an AMBIENT variable (never assigned in this
+		// command's own text — $PWD, $JAVA_HOME, $TMP, …) is simply absent from
+		// vars, so ok is false and this component falls through to the decisive
+		// Ask below, unchanged from before this bead.
+		if expanded, ok := cmdparse.ExpandInCommand(component, vars); ok && isStaticAbsolutePath(expanded) {
+			continue
+		}
+		return false
 	}
 	return preserved
 }
@@ -386,10 +419,21 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 	result := hookio.RuleResult{Decision: hookio.NoOpinion, Module: r.Name()}
 	var held *hookio.RuleResult
 	refused := false
-	for _, pc := range parsed {
+	for i, pc := range parsed {
 		wholeLeaf := assignmentIsWholeLeaf(pc)
+		// The variables THIS SAME command establishes for leaf i (pg2-qhhil, wiring
+		// the pg2-wq3ki InCommandVars/ExpandInCommand seam) — a component of a
+		// PATH/HOME value that merely references one of them is exactly as
+		// inspectable as a literal path (see preservesCallerValue). Under the
+		// engine `input.InCommandVars` already carries this, computed once per
+		// synthetic leaf against the WHOLE expression; a direct/test caller handing
+		// this rule a multi-leaf compound is covered by primarycommit.LeafVars
+		// reading the leaves THIS reparse produced off `parsed` — the identical
+		// overlay internal/rules/primarypush already shares with primarycommit for
+		// the same base/local reason (pg2-eqacu).
+		vars := primarycommit.LeafVars(input.InCommandVars, parsed, i)
 		for _, ev := range pc.EnvVars {
-			sub, subRefused := r.evaluateAssignment(ev, input)
+			sub, subRefused := r.evaluateAssignment(ev, input, vars)
 			refused = refused || subRefused
 			if sub.Decision == hookio.Approve {
 				if wholeLeaf && held == nil {
@@ -454,7 +498,12 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 // sub-verdict stayed at NoOpinion — the ADR 0044 case the caller must forward as a
 // FLOOR rather than as "nothing here was mine". It is FALSE for the decisive paths (an
 // Ask/Reject needs no floor) and false for a cleared value.
-func (r *Rule) evaluateAssignment(ev cmdparse.EnvAssignment, input *hookio.HookInput) (result hookio.RuleResult, refused bool) {
+//
+// vars is the in-command variable environment the caller computed for THIS leaf
+// (primarycommit.LeafVars over the caller's own parse) — nil is the ordinary case
+// and reproduces the pre-pg2-qhhil behaviour exactly, so every existing call site
+// (including the two direct test calls that pass no vars at all) is unaffected.
+func (r *Rule) evaluateAssignment(ev cmdparse.EnvAssignment, input *hookio.HookInput, vars map[string]string) (result hookio.RuleResult, refused bool) {
 	name := r.Name()
 
 	// Base verdict from the variable NAME.
@@ -482,13 +531,17 @@ func (r *Rule) evaluateAssignment(ev cmdparse.EnvAssignment, input *hookio.HookI
 	case askVars[ev.Name]:
 		// Value-aware split (pg2-0q99a): the NAME alone is not a verdict. A value
 		// that provably preserves the caller's own value and only adds static
-		// absolute components is affirmatively safe; everything else — every
-		// REPLACEMENT, and every value with a component we cannot classify — keeps
-		// the decisive Ask. This is a pure NAME/VALUE decision and must stay
-		// independent of r.exprEval, so the verdict is identical with New() and
-		// NewWithEvaluator(). Whether the Approve is actually surfaced is scoped by
+		// absolute components — or a component THIS SAME COMMAND assigned,
+		// earlier, to one (pg2-qhhil's narrow middle option) — is affirmatively
+		// safe; everything else — every REPLACEMENT, and every value with a
+		// component we cannot classify — keeps the decisive Ask. This is a pure
+		// NAME/VALUE/in-command-text decision and must stay independent of
+		// r.exprEval, so the verdict is identical with New() and
+		// NewWithEvaluator(): `vars` is derived from the command's own parse
+		// (cmdparse.InCommandVars/primarycommit.LeafVars), never from evaluator
+		// recursion. Whether the Approve is actually surfaced is scoped by
 		// the caller (see Evaluate / the Rule contract).
-		if preservesCallerValue(ev) {
+		if preservesCallerValue(ev, vars) {
 			result = hookio.RuleResult{
 				Decision: hookio.Approve,
 				Reason:   "sensitive env var preserves the caller's value and adds only static absolute paths: " + sanitizeReasonName(ev.Name),

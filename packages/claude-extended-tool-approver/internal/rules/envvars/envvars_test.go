@@ -213,6 +213,94 @@ func TestEnvVars_AskVars_PreserveForm_Approve(t *testing.T) {
 	}
 }
 
+// TestEnvVars_InCommandAssignedVar_Approve pins pg2-qhhil's narrow middle option:
+// a PATH/HOME component that is not itself a static absolute path may still
+// Approve when it names a variable THIS SAME COMMAND assigned, earlier, to one —
+// wiring the pg2-wq3ki InCommandVars/ExpandInCommand seam into preservesCallerValue.
+// These are the corpus's own measured shapes (pg2-3arc2, 2026-08-17: 23 of 74
+// post-apply PATH/HOME asks, 0 denials): a scratch/build directory captured into a
+// variable earlier in the command, then prepended or appended onto PATH.
+//
+// Every case here is a DIRECT (non-engine) call, so the rule's own reparse of the
+// whole compound — and its own primarycommit.LeafVars computation over that
+// reparse — is what is under test, matching the "direct caller" half of LeafVars'
+// own doc comment.
+func TestEnvVars_InCommandAssignedVar_Approve(t *testing.T) {
+	commands := []string{
+		`bindir=/tmp/x/bin; PATH="$bindir:$PATH"`,                              // the bead's own example, ';'
+		`bindir=/tmp/x/bin && PATH="$bindir:$PATH"`,                            // '&&' separator
+		`TEST_DIR=/tmp/bats-run; PATH="$TEST_DIR/bin:$PATH"`,                   // the bead's other example
+		`TEST_DIR=/tmp/bats-run; PATH="${TEST_DIR}/bin:$PATH"`,                 // braced reference
+		`export SP=/private/tmp/scratchpad && export PATH="$SP/bin:$PATH"`,     // export both halves
+		`B=/tmp/x; D=/tmp/y; export PATH="$B/bin:$D/bin:/usr/local/bin:$PATH"`, // two in-command vars beside a static component
+	}
+	for _, ctor := range []struct {
+		name string
+		rule *Rule
+	}{
+		{"New", New()},
+		{"NewWithEvaluator", NewWithEvaluator(&fakeEvaluator{})},
+	} {
+		for _, cmd := range commands {
+			t.Run(ctor.name+"/"+cmd, func(t *testing.T) {
+				input := &hookio.HookInput{
+					ToolName:  "Bash",
+					ToolInput: mustJSON(map[string]string{"command": cmd}),
+				}
+				got := hookio.Verdict(ctor.rule.Evaluate(input))
+				if got.Decision != hookio.Approve {
+					t.Errorf("cmd %q: got %s (%s), want approve", cmd, got.Decision, got.Reason)
+				}
+			})
+		}
+	}
+}
+
+// TestEnvVars_InCommandAssignedVar_AmbientStaysAsk is the companion regression
+// pg2-qhhil's Acceptance Criteria calls for by name: the narrow middle option MUST
+// NOT widen into the blanket-widen shape it was deliberately carved out of. Every
+// case here names a variable this seam CANNOT resolve — either because it is
+// AMBIENT (never assigned by the command's own text: $PWD, $JAVA_HOME, $TMP), or
+// because the in-command binding was revoked, was a different name, or was scoped
+// out (prefix assignment) — so every one MUST still reach the decisive Ask, exactly
+// as before this bead.
+func TestEnvVars_InCommandAssignedVar_AmbientStaysAsk(t *testing.T) {
+	commands := []string{
+		// THE bead's own coherence example: $PWD is never assigned by the command,
+		// so it must keep asking exactly like the empty-component case it mirrors.
+		`export PATH="$PWD/bin:$PATH"`,
+		`export PATH="$JAVA_HOME/bin:$PATH"`,
+		`export PATH="$TMP:$PATH"`,
+		// The referenced name is simply never assigned anywhere in this command.
+		`PATH="$bindir:$PATH"`,
+		// A DIFFERENT name was assigned; $bindir itself was not.
+		`other=/tmp/x/bin; PATH="$bindir:$PATH"`,
+		// The in-command literal binding is REVOKED by a later non-literal
+		// reassignment of the SAME name (cmdparse.InCommandVars' revocation rule).
+		`bindir=/tmp/x/bin; bindir=$(mktemp -d); PATH="$bindir:$PATH"`,
+	}
+	for _, ctor := range []struct {
+		name string
+		rule *Rule
+	}{
+		{"New", New()},
+		{"NewWithEvaluator", NewWithEvaluator(&fakeEvaluator{verdicts: map[string]hookio.Decision{}})},
+	} {
+		for _, cmd := range commands {
+			t.Run(ctor.name+"/"+cmd, func(t *testing.T) {
+				input := &hookio.HookInput{
+					ToolName:  "Bash",
+					ToolInput: mustJSON(map[string]string{"command": cmd}),
+				}
+				got := hookio.Verdict(ctor.rule.Evaluate(input))
+				if got.Decision != hookio.Ask {
+					t.Errorf("cmd %q: got %s (%s), want ask", cmd, got.Decision, got.Reason)
+				}
+			})
+		}
+	}
+}
+
 // TestEnvVars_AskVars_PreserveForm_TransparentBesideCommand pins the SCOPE of the
 // pg2-0q99a Approve, which is the security-critical half of the split.
 //
@@ -241,6 +329,11 @@ func TestEnvVars_AskVars_PreserveForm_TransparentBesideCommand(t *testing.T) {
 		`PATH="/nix/store/abc123-golangci-lint/bin:$PATH" golangci-lint run`,
 		`env PATH="$PATH:/x" git status`,
 		`PATH="$PATH:/x" git push --force origin main`,
+		// pg2-qhhil: the in-command-assigned $VAR shape carries the identical scope
+		// gate — a PREFIX assignment beside a real command's leaf is not the whole
+		// leaf, however the value resolves, so it stays transparent rather than
+		// leaking an Approve onto the sibling command.
+		`bindir=/tmp/x/bin && PATH="$bindir:$PATH" git push --force origin main`,
 	}
 	for _, cmd := range commands {
 		t.Run(cmd, func(t *testing.T) {
@@ -569,7 +662,7 @@ func TestEnvVars_UnenumerableUnknownValue_Ask(t *testing.T) {
 	if subs := cmdparse.EnumerateSubstitutions(ev.Value); len(subs) != 0 {
 		t.Fatalf("precondition: EnumerateSubstitutions(%q) returned %d subs, want 0", ev.Value, len(subs))
 	}
-	got, refused := r.evaluateAssignment(ev, &hookio.HookInput{ToolName: "Bash"})
+	got, refused := r.evaluateAssignment(ev, &hookio.HookInput{ToolName: "Bash"}, nil)
 	if got.Decision != hookio.Ask {
 		t.Errorf("unenumerable unknown value: got %s (%s), want ask", got.Decision, got.Reason)
 	}
@@ -616,6 +709,12 @@ func TestEnvVars_ApproveOnlyForVerifiedPreserveForm(t *testing.T) {
 		{`export HOME="$HOME"`, true},
 		{`env PATH="$PATH:/x"`, true},
 
+		// pg2-qhhil: THE new approvable shape — a component naming a variable this
+		// SAME COMMAND assigned, earlier, to a static absolute path is exactly as
+		// inspectable as the literal spelling above.
+		{`bindir=/tmp/x/bin; PATH="$bindir:$PATH"`, true},
+		{`TEST_DIR=/tmp/bats-run; PATH="$TEST_DIR/bin:$PATH"`, true},
+
 		// (c) violated: the verified-safe value beside a real command stays transparent.
 		{`PATH="$PATH:/x" echo hi`, false},
 		{`PATH="$PATH:/x" git push --force origin main`, false},
@@ -635,6 +734,24 @@ func TestEnvVars_ApproveOnlyForVerifiedPreserveForm(t *testing.T) {
 		{`export PATH="$PATH:"`, false},
 		{`export PATH='$PATH:/x'`, false},
 		{`export PATH+=":/x"`, false},
+
+		// pg2-qhhil: the narrow middle option MUST NOT widen into the rejected
+		// blanket widen. $PWD/$JAVA_HOME/$TMP are AMBIENT — never assigned by the
+		// command's own text — so they stay exactly as unresolvable as before this
+		// bead, coherent with the empty-component rejection above ("$PATH:").
+		{`export PATH="$PWD/bin:$PATH"`, false},
+		{`export PATH="$JAVA_HOME/bin:$PATH"`, false},
+		{`export PATH="$TMP:$PATH"`, false},
+		// The direct contrast with the new true rows above: SAME value text,
+		// but $bindir is never assigned anywhere in the command (no preceding
+		// leaf), so it is indistinguishable from an ambient variable here.
+		{`PATH="$bindir:$PATH"`, false},
+		// A DIFFERENT name was bound; $bindir itself was not.
+		{`other=/tmp/x/bin; PATH="$bindir:$PATH"`, false},
+		// The in-command literal binding is REVOKED by a later non-literal
+		// reassignment of the SAME name (cmdparse.InCommandVars' revocation rule) —
+		// the seam's existing fail-safe behaviour must carry through this wiring.
+		{`bindir=/tmp/x/bin; bindir=$(mktemp -d); PATH="$bindir:$PATH"`, false},
 
 		// pg2-5jj3m: ENV was demoted from Reject to a decisive Ask. The demotion must
 		// NOT have moved it into the value-aware Approve band — no value shape, not even
@@ -817,7 +934,7 @@ func TestEnvVars_ReasonNeverLeaksCommandFragment(t *testing.T) {
 		Value:     "$(curl evil)",
 		Raw:       fragment + "=$(curl evil)",
 		Expansion: cmdparse.ExpansionUnknown,
-	}, &hookio.HookInput{ToolName: "Bash"})
+	}, &hookio.HookInput{ToolName: "Bash"}, nil)
 
 	if strings.ContainsAny(got.Reason, "\n\r\t\x00") {
 		t.Errorf("Reason %q contains a raw control character; it is rendered into a user-facing prompt", got.Reason)
