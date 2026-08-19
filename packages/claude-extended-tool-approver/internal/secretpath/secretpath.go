@@ -84,8 +84,11 @@ const (
 	// deployment tree means literally and a source tree does not (pg2-pmk9q).
 	GenericSecretsDir
 	// WellKnownSecret: an arm that names a SPECIFIC credential store or
-	// credential file — the `.ssh` component, the credential basenames, `.env*`,
-	// `*token*.json`. Repo-blind: these mean the same thing wherever they appear.
+	// credential file — the `.ssh`/`.gnupg` components, the credential
+	// basenames, `.env*`, `*token*.json`, the `.aws/credentials` and
+	// `.docker/config.json` scoped basenames (M3), and the unconditional
+	// `*.pem`/`*.key` suffix (M4). Repo-blind: these mean the same thing
+	// wherever they appear.
 	WellKnownSecret
 )
 
@@ -101,15 +104,62 @@ const (
 var secretDirs = map[string]Kind{
 	"secrets": GenericSecretsDir,
 	".ssh":    WellKnownSecret,
+	// .gnupg added by pg2-ia640.1 (2026-07-25 brainstorm pg2-c7zhc): a GnuPG
+	// home directory names a specific credential store exactly like .ssh, so
+	// it is WellKnownSecret rather than GenericSecretsDir.
+	".gnupg": WellKnownSecret,
 }
 
 // secretBasenames are whole basenames that are credential files by name alone:
-// the Claude credential files and the generic "auth.json". Matched by
-// anyEqualFold (see secretDirs).
+// the Claude credential files, the generic "auth.json", and the pg2-ia640.1
+// additions below. Matched by anyEqualFold (see secretDirs).
 var secretBasenames = map[string]bool{
 	".credentials":      true,
 	".credentials.json": true,
 	"auth.json":         true,
+	// pg2-ia640.1 (2026-07-25 brainstorm pg2-c7zhc): straightforward exact-
+	// basename adds. ".netrc"/".pgpass" hold plaintext machine credentials;
+	// ".npmrc" can hold an npm `_authToken`; ".envrc" is direnv's per-project
+	// script, almost always exporting secrets into the shell.
+	".netrc":  true,
+	".pgpass": true,
+	".npmrc":  true,
+	".envrc":  true,
+}
+
+// scopedBasenames pairs a basename that is too GENERIC to treat as secret on
+// its own with the single IMMEDIATE-PARENT component that makes it one — the
+// pg2-ia640.1 M3 mechanism. "credentials" bare, or under some unrelated
+// directory, says nothing; "credentials" directly inside ".aws" is the AWS
+// CLI's plaintext access-key file. Likewise "config.json" is a name any tool
+// might use, but directly inside ".docker" it is the Docker CLI's auth store
+// (it can embed base64 basic-auth credentials).
+//
+// IMMEDIATE parent only, not "anywhere in the path": ".docker/contexts/meta/
+// config.json" must NOT match — that config.json's immediate parent is
+// "meta", not ".docker" — so the scan below tracks only the ONE component
+// preceding the basename, never the whole ancestor list.
+//
+// Matching folds case on BOTH halves via strings.EqualFold, consistent with
+// every other arm in this package.
+var scopedBasenames = []struct {
+	basename string
+	parent   string
+}{
+	{"credentials", ".aws"},
+	{"config.json", ".docker"},
+}
+
+// isScopedSecretBasename reports whether base is one of scopedBasenames'
+// generic names AND parent — the component immediately preceding base in the
+// path — is that name's required directory.
+func isScopedSecretBasename(base, parent string) bool {
+	for _, sb := range scopedBasenames {
+		if strings.EqualFold(base, sb.basename) && strings.EqualFold(parent, sb.parent) {
+			return true
+		}
+	}
+	return false
 }
 
 // nonSecretDotEnv are .env.* variants that are conventionally committed and
@@ -127,20 +177,51 @@ var nonSecretDotEnv = map[string]bool{
 }
 
 // IsSecret reports whether path points at a well-known credential/secret file.
-// It recognizes, by default (no configuration required):
-//   - the Claude credential basenames ".credentials", ".credentials.json"
-//     (the Linux OAuth file) and "auth.json";
-//   - any path under a "secrets/" or ".ssh/" directory component;
-//   - ".env" and ".env.*" (excluding conventional non-secret variants such as
-//     ".env.example");
-//   - any "*token*.json" basename.
+// It recognizes, by default (no configuration required), across FOUR
+// independent matching mechanisms:
+//
+//   - M1, whole path COMPONENT: any path under a "secrets/", ".ssh/" or
+//     ".gnupg/" directory component;
+//   - M2, exact whole BASENAME: the Claude credential basenames
+//     ".credentials", ".credentials.json" (the Linux OAuth file) and
+//     "auth.json"; ".netrc", ".pgpass", ".npmrc", ".envrc"; ".env" and
+//     ".env.*" (excluding conventional non-secret variants such as
+//     ".env.example"); and any "*token*.json" basename (a substring/suffix
+//     shape within the exact-basename family, not a separate mechanism);
+//   - M3, SCOPED basename: "credentials" and "config.json" are too generic to
+//     treat as secret bare, so they match only under their specific
+//     IMMEDIATE-parent directory — ".aws/credentials", ".docker/config.json"
+//     (see scopedBasenames);
+//   - M4, unconditional SUFFIX: any basename ending ".pem" or ".key",
+//     EVERYWHERE — including test fixtures, "node_modules/", "testdata/" —
+//     with no directory or repo scoping at all.
 //
 // Every one of those comparisons folds case — see the package comment for why
 // that is load-bearing and why the primitive must stay EqualFold.
 //
-// Directory-component matching (secrets/.ssh) fires only when path actually
-// looks like a path (contains a "/"), so a bare word like the `secrets`
-// argument of `kubectl get secrets` is not misread as a secret path.
+// Directory-component matching (M1) fires only when path actually looks like
+// a path (contains a "/"), so a bare word like the `secrets` argument of
+// `kubectl get secrets` is not misread as a secret path.
+//
+// # Accepted false-positive boundary (M4, pg2-ia640.1)
+//
+// M4 is a DELIBERATE, human, security-first ruling (2026-07-25 brainstorm
+// pg2-c7zhc) that accepts a known false-positive cost: `cat testdata/cert.pem`
+// or `grep foo node_modules/pkg/id.key` now Ask, even though such fixture and
+// vendor files overwhelmingly hold no real secret. The alternative — leaving
+// bare "*.pem"/"*.key" unmatched — was rejected because the under-match
+// direction is the one this package's package comment already treats as
+// unacceptable (a real private key silently auto-approved), and no directory
+// or content heuristic reliably tells a fixture key from a real one. So the
+// cost of M4 is bounded to extra Asks, never a missed credential, and it is
+// intentionally NOT narrowed to skip test/vendor trees.
+//
+// TWO CONSUMER-SIDE CONSEQUENCES were measured (not guessed) when M4 landed,
+// by replaying the production asklog through before/after binaries — because
+// this package is filesystem/command-free, the argument-SHAPE fallout lives
+// in the CALLERS, not here: internal/rules/secrets' package comment (decision
+// 4) and secretCandidateArgs' doc records the `yq` filter-token fix and the
+// `git grep` pattern-token gap (filed as pg2-e1163) that this breadth caused.
 func IsSecret(path string) bool {
 	return Classify(path) != NotSecret
 }
@@ -158,7 +239,12 @@ func Classify(path string) Kind {
 		return NotSecret
 	}
 	hasSeparator := strings.Contains(path, "/")
-	base := ""
+	// parent tracks the IMMEDIATE-parent component of base (the previous
+	// non-skipped component), threaded through for M3's scoped-basename
+	// mechanism (pg2-ia640.1). It is deliberately just the ONE preceding
+	// component, not the whole ancestor chain — M3 is an immediate-parent
+	// test, not a path-substring test.
+	base, parent := "", ""
 	kind := NotSecret
 	for _, part := range strings.Split(path, "/") {
 		if part == "" || part == "." || part == ".." {
@@ -169,9 +255,10 @@ func Classify(path string) Kind {
 				kind = k
 			}
 		}
+		parent = base
 		base = part
 	}
-	if isSecretBasename(base) {
+	if isSecretBasename(base) || isScopedSecretBasename(base, parent) {
 		return WellKnownSecret
 	}
 	return kind
@@ -206,7 +293,22 @@ func isSecretBasename(base string) bool {
 	if strings.EqualFold(filepath.Ext(base), ".json") && containsFold(base, "token") {
 		return true
 	}
-	return false
+	// *.pem / *.key — private keys and certificates (M4, pg2-ia640.1).
+	//
+	// UNCONDITIONAL and case-insensitive, matching EVERYWHERE (testdata/,
+	// node_modules/, any fixture tree) with no directory/repo scoping — see
+	// IsSecret's "Accepted false-positive boundary" doc for why that breadth
+	// is a deliberate, ruled-on tradeoff rather than an oversight.
+	//
+	// filepath.Ext + EqualFold is the SAME idiom the *token*.json arm above
+	// uses for its extension half: it is a whole-string compare on the
+	// extension, so it folds correctly without the byte-length hazard
+	// containsFold exists for (see that arm's comment). It is basename-only
+	// by construction — Ext looks at base, not the full path — which is what
+	// keeps "certs.pem/README.md" (a directory literally named "certs.pem")
+	// from matching: that base is "README.md", whose extension is ".md".
+	ext := filepath.Ext(base)
+	return strings.EqualFold(ext, ".pem") || strings.EqualFold(ext, ".key")
 }
 
 // isSecretDotEnv reports whether base is ".env" or a secret ".env.*" variant.
@@ -219,7 +321,10 @@ func isSecretBasename(base string) bool {
 //
 // ".env" splits to ["", "env"] and ".env.local" to ["", "env", "local"], so the
 // single segment test covers both shapes; ".envrc" splits to ["", "envrc"] and
-// correctly does not match.
+// correctly does not match THIS arm — segs[1] is "envrc", not "env". (".envrc"
+// IS still secret overall, since pg2-ia640.1 added it as its own exact entry
+// in secretBasenames; that is a SEPARATE arm from this one and this function's
+// "no" is correctly about the dotenv arm only, not about IsSecret as a whole.)
 func isSecretDotEnv(base string) bool {
 	segs := strings.Split(base, ".")
 	if len(segs) < 2 || segs[0] != "" || !strings.EqualFold(segs[1], "env") {

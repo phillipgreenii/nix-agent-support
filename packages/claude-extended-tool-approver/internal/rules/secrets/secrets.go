@@ -54,10 +54,25 @@
 //     set those paths in the config" — and the escape hatch is real, because
 //     LoadSandboxFilesystemConfig already merges the PROJECT-level
 //     .claude/settings.json.
-//  4. EXTENSION ARMS ARE OUT — no `*.pem`, `*.p12`, `*.pfx`, `*.keystore`,
+//  4. EXTENSION ARMS ARE OUT OF THIS RULE — no `*.p12`, `*.pfx`, `*.keystore`,
 //     `service-account*.json` — on false-positive grounds: a repo full of test
-//     fixtures named `*.pem` is common. pg2-ia640.1 owns the unconditional
-//     `*.pem`/`*.key` question separately.
+//     fixtures named `*.pem` is common. `*.pem`/`*.key` themselves WERE this
+//     open question, and pg2-ia640.1 resolved it — UNCONDITIONALLY INCLUDE,
+//     accepting the fixture false positives — but the arm lives in
+//     secretpath.IsSecret itself (M4 in its doc comment), not here; this rule
+//     only screens for it indirectly by calling IsSecret. One measured
+//     consequence of that arm landing: `yq`'s `.key` filter token would have
+//     newly matched unless carved out below (secretCandidateArgs' "jq", "yq"
+//     case) exactly as jq's own filter positional already is. A SECOND,
+//     related consequence was measured by pg2-ia640.1's own required runtime
+//     audit (replaying the production asklog through before/after binaries)
+//     but deliberately left UNFIXED here and filed instead as pg2-e1163: a
+//     `git grep -E '\.pem|\.key' ...` PATTERN argument now newly matches too,
+//     because secretCandidateArgs' grep/rg pattern carve-out below is keyed on
+//     `filepath.Base(pc.Executable)`, which is "git" for `git grep`, not
+//     "grep" — so it falls into the "bd"/"git"/"gh" branch instead, which has
+//     no concept of a search pattern. See pg2-e1163 for the measured asklog
+//     rows and the reason it was filed rather than fixed inline.
 //
 // Decision 3 fixes pg2-pmk9q BY CONSTRUCTION and more broadly than that bead's own
 // sanctioned option: any project with an `internal/…/secrets/` package is covered,
@@ -662,15 +677,32 @@ func firstSecretRef(cmd string, depth int, match candidateMatch) (ref secretRef,
 // secretCandidateArgs returns the subset of a command's arguments that could be
 // FILE-path references worth testing against secretpath.IsSecret — filtering out
 // arguments that merely LOOK path-like but are not files, which is what produced
-// the grep/rg/jq false positives (pg2-ia640.2):
+// the grep/rg/jq false positives (pg2-ia640.2), and — for yq — the pg2-ia640.1
+// false positive described below:
 //
 //   - grep/rg: the positional search PATTERN and value-flag values (a bare .env
 //     pattern, `-e .env`, `-f .env`, `rg -g '*.env'`) are not searched files.
-//   - jq: the value-flag arguments (`--arg x .env`) and the bare FILTER program
-//     (the first positional, e.g. `.credentials`) are not files. The filter is
-//     only exempt when it IS a positional — with -f/--from-file the filter comes
+//   - jq/yq: the value-flag arguments (`--arg x .env`) and the bare FILTER
+//     program (the first positional, e.g. `.credentials`, or `.key` once
+//     pg2-ia640.1's M4 suffix arm existed) are not files. The filter is only
+//     exempt when it IS a positional — with -f/--from-file the filter comes
 //     from a file and the first positional is instead an INPUT file, so it is
-//     kept (avoids missing a secret input file).
+//     kept (avoids missing a secret input file). yq REUSES jq's helpers
+//     wholesale (SkipJqValueFlags, jqFilterFromFile, dropFirstPositional)
+//     rather than getting its own table: yq (mikefarah/yq, this rule's target
+//     — see safecmds' isYqInPlace doc for the version this repo verified
+//     against) shares jq's `[flags] EXPRESSION [FILES...]` positional shape,
+//     so the SAME first-positional-is-the-filter carve-out applies. jq's
+//     `--arg`/`--argjson`/`--indent`/`-f`/`--from-file` value-flag tables are
+//     harmless no-ops for yq, which does not define those flags, so reuse
+//     costs nothing beyond the (already-accepted) risk that a future yq
+//     version defines a same-named flag with different arity — the identical
+//     risk profile jq's own tables already carry release-to-release.
+//     MOTIVATING CASE: `yq '.key' file.yaml` — without this carve-out, M4's
+//     unconditional `*.key` suffix match makes the bare filter token `.key`
+//     itself look like a secret basename, and the whole invocation would
+//     newly Ask on every yq call shaped like this, independent of whether
+//     `file.yaml` is itself secret.
 //   - bd/git/gh: the value of a MESSAGE flag (`bd close --reason <prose>`,
 //     `bd create --title/--description <prose>`, `git commit -m <prose>`,
 //     `gh pr comment --body <prose>`) and the trailing body positional of
@@ -694,13 +726,17 @@ func firstSecretRef(cmd string, depth int, match candidateMatch) (ref secretRef,
 // pg2-52eod decline signal for the grep/rg branch — a glued file-flag value whose
 // shell quoting it could not resolve. It is always false for every other branch,
 // since none of them route through SkipGrepPattern's own GluedFlagValue call; the
-// plain default/bd/git/gh/jq branches hand their args to firstSecretRef's OWN
+// plain default/bd/git/gh/jq/yq branches hand their args to firstSecretRef's OWN
 // GluedFlagValue call unchanged, which carries its own malformed detection already.
 func secretCandidateArgs(pc cmdparse.ParsedCommand) (args []string, malformed bool) {
 	switch filepath.Base(pc.Executable) {
 	case "grep", "rg":
 		return cmdparse.SkipGrepPattern(filepath.Base(pc.Executable), pc.Args)
-	case "jq":
+	case "jq", "yq":
+		// yq (mikefarah/yq) shares jq's `[flags] EXPRESSION [FILES...]` shape,
+		// so its FILTER positional needs the identical carve-out jq gets — see
+		// secretCandidateArgs' doc for why this reuse was added (pg2-ia640.1)
+		// and jqFilterFromFile's doc for the one place the reuse is imprecise.
 		args := cmdparse.SkipJqValueFlags(pc.Args)
 		if !jqFilterFromFile(pc.Args) {
 			args = dropFirstPositional(args)
@@ -715,6 +751,15 @@ func secretCandidateArgs(pc cmdparse.ParsedCommand) (args []string, malformed bo
 
 // jqFilterFromFile reports whether the jq filter is supplied via -f/--from-file
 // (in which case there is no positional FILTER program to exempt).
+//
+// SHARED WITH yq (pg2-ia640.1), and this is the one place that reuse is
+// imprecise rather than exact: mikefarah/yq does not define a `-f`/
+// `--from-file` flag at all, so for a yq command this always returns false
+// and dropFirstPositional always runs — which is the CORRECT behavior for yq
+// (its filter/expression is always a positional, never file-supplied), just
+// arrived at by a check that is really testing jq's vocabulary. If a future
+// yq version adds a same-spelled flag with different semantics, this would
+// need its own yq-specific check; nothing observed today requires one.
 func jqFilterFromFile(args []string) bool {
 	for _, a := range args {
 		if a == "-f" || a == "--from-file" {

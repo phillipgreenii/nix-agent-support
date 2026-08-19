@@ -1797,7 +1797,14 @@ func TestIntegration_ExtraReadOnlyRoots(t *testing.T) {
 		{"strings under extra root", "strings " + roRoot + "/bin/tool", hookio.Approve},
 		// Adversarial secret regressions — must NOT be swept in by the extra roots.
 		{"cat ssh private key asks", "cat ~/.ssh/id_rsa", hookio.Ask},
-		{"strings aws credentials stays protected", "strings ~/.aws/credentials", hookio.NoOpinion},
+		// Ask, not Abstain, as of pg2-ia640.1: "credentials" scoped to an
+		// immediate ".aws" parent (M3) is now a lexical WellKnownSecret match in
+		// its own right, closing exactly this gap — previously nothing but the
+		// (here unconfigured) deny-list config arm covered it. The property this
+		// row exists to pin — extra read-only roots must not sweep a credential
+		// path into APPROVAL — still holds; Ask is stricter than the old
+		// Abstain, not looser.
+		{"strings aws credentials stays protected", "strings ~/.aws/credentials", hookio.Ask},
 		{"cat dotenv asks", "cat .env", hookio.Ask},
 		// System path guard: extra roots must not broaden /etc.
 		{"cat /etc/passwd abstains", "cat /etc/passwd", hookio.NoOpinion},

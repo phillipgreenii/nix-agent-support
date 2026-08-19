@@ -67,10 +67,20 @@ func TestRule(t *testing.T) {
 		{"jq --arg value .env is not a file", bashInput("jq --arg x .env '.'"), hookio.NoOpinion},
 		{"jq bare filter .credentials is not a file", bashInput("jq '.credentials' data.json"), hookio.NoOpinion},
 
+		// pg2-ia640.1: M4's unconditional "*.pem"/"*.key" suffix arm makes the
+		// yq FILTER SYNTAX token ".key" itself look like a secret basename
+		// unless yq gets jq's carve-out too — this is that gap, closed by
+		// adding "yq" to secretCandidateArgs' "jq" case. Without the fix this
+		// row Asks; the file it operates on is an ordinary, non-secret path.
+		{"yq bare filter .key is not a file (pg2-ia640.1 M4 gap)", bashInput("yq '.key' file.yaml"), hookio.NoOpinion},
+
 		// Regression — a real secret FILE arg still Asks (pattern/filter exemption
 		// must not suppress the actual secret file reference).
 		{"grep password into dotenv FILE", bashInput("grep password .env"), hookio.Ask},
 		{"jq token filter over auth.json FILE", bashInput("jq '.token' auth.json"), hookio.Ask},
+		// The yq carve-out drops the FILTER positional only — a real secret FILE
+		// argument (here a pg2-ia640.1 M4 "*.pem" match) must still Ask.
+		{"yq filter over a real secret FILE (M4 pem) still Asks", bashInput("yq '.key' server.pem"), hookio.Ask},
 		// stdin redirect read of a secret must not bypass the check
 		{"cat stdin-redirect from secrets", bashInput("cat < secrets/prod.json"), hookio.Ask},
 		// sh/bash -c '<inner>' must not bypass the check
@@ -646,7 +656,10 @@ func TestRule_CredentialFileIsItselfASymlink_Ask(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(root, ".ssh"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	target := filepath.Join(root, "backup-key.pem")
+	// backup-key.dat — deliberately NOT ".pem"/".key" (pg2-ia640.1's M4 would
+	// otherwise make the resolved form ALSO lexically secret, defeating the
+	// precondition below and this test's whole point).
+	target := filepath.Join(root, "backup-key.dat")
 	if err := os.WriteFile(target, []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -1060,30 +1073,47 @@ func denyListFixture(t *testing.T) (string, *Rule) {
 // in the machine's sandbox.filesystem.denyRead. The lexical list was UPSTREAM of
 // the configured one, and that inversion is what this test pins closed.
 //
-// EVERY POSITIVE ROW HAS ITS secretpath.IsSecret == false ASSERTED as a
-// precondition. Without that the rows could pass for the wrong reason — a lexical
-// hit — and the test would keep passing while testing nothing.
+// EVERY row NOT marked lexicalNow HAS ITS secretpath.IsSecret == false ASSERTED
+// as a precondition. Without that the rows could pass for the wrong reason — a
+// lexical hit — and the test would keep passing while testing nothing.
+//
+// THREE ROWS ARE NOW lexicalNow (pg2-ia640.1): "docker registry auth" and "aws
+// credentials" are exactly M3's scoped-basename targets (`.docker/config.json`,
+// `.aws/credentials`), and "netrc" is exactly one of M2's new exact-basename
+// adds. That is the INTENDED outcome of pg2-ia640.1 — it closes precisely the
+// coverage gaps this test was written against — so their precondition no longer
+// holds and asserting it would be testing the wrong thing. They stay in this
+// table because decide()'s Reject verdict is still produced (lexicalHit now
+// short-circuits pathRef before configRef ever runs, and decide() still checks
+// denyListed and still returns Reject), so the ROW still exercises a real
+// regression guard — it has just moved from "the config arm alone" to "either
+// arm, and they agree". Only "kube config" remains a genuine non-lexical
+// CONFIG-arm-only example (`.kube` is not a secretDirs component and bare
+// "config" matches no basename arm, scoped or exact).
 func TestRule_ConfigDenyListScreensWithoutASecretpathEntry(t *testing.T) {
 	home, r := denyListFixture(t)
 	tests := []struct {
-		name string
-		path string
-		want hookio.Decision
+		name       string
+		path       string
+		want       hookio.Decision
+		lexicalNow bool
 	}{
-		// MATCHING — deny-listed, and NOT recognized by any lexical arm.
-		{"kube config", filepath.Join(home, ".kube", "config"), hookio.Reject},
-		{"docker registry auth", filepath.Join(home, ".docker", "config.json"), hookio.Reject},
-		{"aws credentials", filepath.Join(home, ".aws", "credentials"), hookio.Reject},
-		{"netrc (a deny-listed FILE, not a directory)", filepath.Join(home, ".netrc"), hookio.Reject},
+		// MATCHING — deny-listed. "kube config" is the sole row NOT recognized by
+		// any lexical arm; the other three are ALSO lexically secret as of
+		// pg2-ia640.1 (see the doc comment above).
+		{name: "kube config", path: filepath.Join(home, ".kube", "config"), want: hookio.Reject},
+		{name: "docker registry auth", path: filepath.Join(home, ".docker", "config.json"), want: hookio.Reject, lexicalNow: true},
+		{name: "aws credentials", path: filepath.Join(home, ".aws", "credentials"), want: hookio.Reject, lexicalNow: true},
+		{name: "netrc (a deny-listed FILE, not a directory)", path: filepath.Join(home, ".netrc"), want: hookio.Reject, lexicalNow: true},
 		// NON-MATCHING, adjacent — under HOME but under no deny prefix, so the
 		// config arm must not sweep the whole home directory in.
-		{"unrelated file under home", filepath.Join(home, "notes", "README.md"), hookio.NoOpinion},
-		{"sibling of a deny prefix", filepath.Join(home, ".kubeconfig-backup"), hookio.NoOpinion},
+		{name: "unrelated file under home", path: filepath.Join(home, "notes", "README.md"), want: hookio.NoOpinion},
+		{name: "sibling of a deny prefix", path: filepath.Join(home, ".kubeconfig-backup"), want: hookio.NoOpinion},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if secretpath.IsSecret(tt.path) {
-				t.Fatalf("precondition: %s is lexically secret, so this row does not test the CONFIG arm", tt.path)
+			if got := secretpath.IsSecret(tt.path); got != tt.lexicalNow {
+				t.Fatalf("precondition: secretpath.IsSecret(%s) = %v, want %v", tt.path, got, tt.lexicalNow)
 			}
 			for label, input := range map[string]*hookio.HookInput{
 				"Bash cat": bashInput("cat " + tt.path),

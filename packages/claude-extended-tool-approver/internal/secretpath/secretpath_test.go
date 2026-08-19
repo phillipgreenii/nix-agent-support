@@ -130,7 +130,13 @@ func TestIsSecret_AllArmsFoldCase(t *testing.T) {
 		{"bound: .Env.Dist varied is not secret", ".Env.Dist", false},
 		{"bound: .ENV.EXAMPLE nested is not secret", "proj/config/.ENV.EXAMPLE", false},
 		// bounds: folding must not widen ".env" into a prefix/substring match.
-		{"bound: .ENVRC is not a dotenv", ".ENVRC", false},
+		// ".ENVRC" is no longer a NotSecret bound: pg2-ia640.1 added ".envrc" as
+		// its OWN exact secretBasenames entry (M2), because it holds
+		// direnv-exported secrets. The DOTENV arm itself (isSecretDotEnv) still
+		// correctly rejects it — segs[1] is "envrc", not "env" — so this row
+		// still pins that the widening did not happen there; it is the OVERALL
+		// IsSecret answer, via the separate M2 arm, that flipped to true.
+		{"dotenv-look-alike .ENVRC is secret via the separate M2 basename entry, not the dotenv arm", ".ENVRC", true},
 		{"bound: ENV is not a dotenv (no leading dot)", "ENV", false},
 		{"bound: MY.ENV is not a dotenv", "MY.ENV", false},
 		{"bound: ..ENV is not a dotenv", "..ENV", false},
@@ -355,5 +361,179 @@ func TestKindOrderIsAscendingSpecificity(t *testing.T) {
 	if NotSecret >= GenericSecretsDir || GenericSecretsDir >= WellKnownSecret {
 		t.Errorf("Kind order broken: NotSecret=%d GenericSecretsDir=%d WellKnownSecret=%d; Classify keeps the HIGHEST match, so specificity must ascend",
 			NotSecret, GenericSecretsDir, WellKnownSecret)
+	}
+}
+
+// pg2-ia640.1: M1 (secretDirs) gains ".gnupg"; M2 (secretBasenames) gains
+// ".netrc", ".pgpass", ".npmrc", ".envrc" as exact whole basenames — every
+// existing member of both maps (asserted elsewhere in this file) must keep
+// matching unchanged.
+func TestIsSecret_M1M2Extensions(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+		want bool
+	}{
+		// M1: .gnupg is a whole-component directory match, same shape as .ssh.
+		{"gnupg secring", "~/.gnupg/secring.gpg", true},
+		{"gnupg trustdb, a second .gnupg/** path", "~/.gnupg/trustdb.gpg", true},
+		{"gnupg dir itself", "~/.gnupg", true},
+		{"gnupg substring is not a component", "mygnupg/notes.txt", false},
+		{"bare .gnupg word without separator", ".gnupg", false},
+
+		// M2: new exact basenames.
+		{"bare netrc", ".netrc", true},
+		{"tilde netrc", "~/.netrc", true},
+		{"nested netrc", "project/.netrc", true},
+		{"bare pgpass", ".pgpass", true},
+		{"tilde pgpass", "~/.pgpass", true},
+		{"bare npmrc", ".npmrc", true},
+		{"tilde npmrc", "~/.npmrc", true},
+		{"bare envrc", ".envrc", true},
+		{"tilde envrc", "~/.envrc", true},
+
+		// bounds: still exact whole-basename, not a prefix/substring.
+		{"netrc-backup is a different basename", ".netrc-backup", false},
+		{"npmrc.bak is a different basename", ".npmrc.bak", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsSecret(tt.path); got != tt.want {
+				t.Errorf("IsSecret(%q) = %v, want %v", tt.path, got, tt.want)
+			}
+		})
+	}
+}
+
+// pg2-ia640.1 M3: scoped-basename, IMMEDIATE-PARENT semantics. "credentials"
+// matches ONLY when its immediate parent component is ".aws"; "config.json"
+// matches ONLY when its immediate parent is ".docker". Matching and
+// non-matching shapes are adjacent, per the convention the rest of this file
+// uses, because a positives-only table would pass equally well for a
+// predicate that tested "anywhere in the path" instead of "immediate parent".
+func TestIsSecret_ScopedBasename(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+		want bool
+	}{
+		// positives
+		{"aws credentials, tilde", "~/.aws/credentials", true},
+		{"aws credentials, absolute", "/Users/u/.aws/credentials", true},
+		{"docker config.json, tilde", "~/.docker/config.json", true},
+		{"docker config.json, absolute", "/Users/u/.docker/config.json", true},
+		{"aws credentials, case-varied parent", "~/.AWS/credentials", true},
+		{"aws credentials, case-varied basename", "~/.aws/CREDENTIALS", true},
+
+		// negatives: bare or wrong parent — M3 is SCOPED, not a bare-basename match.
+		{"credentials under an unrelated dir", "foo/credentials", false},
+		{"bare credentials, no separator", "credentials", false},
+		{"bare credentials, with separator but no parent", "./credentials", false},
+		{"generic config.json not under .docker", "src/config.json", false},
+		{"bare config.json, no separator", "config.json", false},
+		// IMMEDIATE-parent only, not "anywhere in the path": the ".docker"
+		// component is present but is NOT the immediate parent of config.json —
+		// its immediate parent is "meta".
+		{"config.json two levels under .docker", ".docker/contexts/meta/config.json", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsSecret(tt.path); got != tt.want {
+				t.Errorf("IsSecret(%q) = %v, want %v", tt.path, got, tt.want)
+			}
+		})
+	}
+}
+
+// pg2-ia640.1 M4: unconditional, case-insensitive "*.pem"/"*.key" SUFFIX
+// match. UNCONDITIONAL means everywhere — testdata/, node_modules/, any
+// fixture tree — with no directory or repo scoping; see IsSecret's "Accepted
+// false-positive boundary" doc comment for why that breadth is a deliberate
+// human ruling, not an oversight. This is the one arm the in-repo test audit
+// (pg2-ia640.1's bead NOTES, measured against `git grep -n -E '\.pem|\.key'`
+// across the whole package) confirmed adds ZERO flips to existing tests,
+// because it is a BASENAME-suffix test, not a path-substring test — which is
+// exactly the property "certs.pem/README.md" below pins.
+func TestIsSecret_UnconditionalSuffix(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+		want bool
+	}{
+		// positives — everywhere, unconditionally, including test/vendor trees.
+		{"testdata cert.pem", "testdata/cert.pem", true},
+		{"node_modules foo.key", "node_modules/pkg/foo.key", true},
+		{"bare cert.pem", "cert.pem", true},
+		{"bare id.key", "id.key", true},
+		{"nested fixture pem", "internal/rules/foo/fixtures/server.pem", true},
+
+		// case-insensitivity, following the *token*.json precedent.
+		{"uppercase PEM extension", "cert.PEM", true},
+		{"uppercase KEY extension", "id.KEY", true},
+		{"mixed-case Pem extension", "cert.Pem", true},
+
+		// bounds: BASENAME-suffix only, never a path-substring test. A
+		// directory literally NAMED "certs.pem" must not make an unrelated
+		// file underneath it match — the match is on the FINAL component's
+		// extension alone.
+		{"certs.pem as a directory name, not a file", "certs.pem/README.md", false},
+		{"pem as a mid-path component, not an extension", "pem/notes.txt", false},
+		{"key as a mid-path component, not an extension", "key/notes.txt", false},
+		// bounds: a different extension entirely, even one containing "pem"/"key".
+		{"pemphigus.txt is not .pem", "pemphigus.txt", false},
+		{"keyboard.txt is not .key", "keyboard.txt", false},
+		{"openkey is not .key (no dot)", "openkey", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsSecret(tt.path); got != tt.want {
+				t.Errorf("IsSecret(%q) = %v, want %v", tt.path, got, tt.want)
+			}
+		})
+	}
+}
+
+// The new pg2-ia640.1 mechanisms all report WellKnownSecret, same as the
+// pre-existing credential-basename arms: every one of them names a SPECIFIC
+// credential store or file, never the bare role-describing "secrets" word, so
+// none should be relaxable the way GenericSecretsDir is (see
+// TestIsSecret_DirectoryArmFoldBlastRadius and internal/rules/secrets'
+// in-repo relaxation).
+func TestClassify_Pg2Ia640_1Mechanisms(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+		want Kind
+	}{
+		{"M1: .gnupg component", "~/.gnupg/secring.gpg", WellKnownSecret},
+		{"M2: .netrc basename", "~/.netrc", WellKnownSecret},
+		{"M2: .envrc basename", ".envrc", WellKnownSecret},
+		{"M3: scoped aws credentials", "~/.aws/credentials", WellKnownSecret},
+		{"M3: scoped docker config.json", "~/.docker/config.json", WellKnownSecret},
+		{"M4: unconditional .pem suffix", "testdata/cert.pem", WellKnownSecret},
+		{"M4: unconditional .key suffix", "node_modules/pkg/foo.key", WellKnownSecret},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := Classify(tt.path); got != tt.want {
+				t.Errorf("Classify(%q) = %v, want %v", tt.path, got, tt.want)
+			}
+		})
+	}
+}
+
+// GUARD, restated at the top level with the full pg2-ia640.1 pattern set in
+// scope: none of the widened matching may weaken the hasSeparator gate on M1.
+// `kubectl get secrets` (a bare word with no path separator) must stay
+// NotSecret regardless of how many mechanisms exist.
+func TestIsSecret_HasSeparatorGateUnweakenedByPg2Ia640_1(t *testing.T) {
+	if IsSecret("secrets") {
+		t.Error(`IsSecret("secrets") = true, want false (bare word, no separator)`)
+	}
+	if IsSecret("kubectl get secrets") {
+		// The whole string has no "/" and matches no basename arm, so it must
+		// stay NotSecret — Classify's per-component loop never runs the
+		// directory arm on it and no basename arm claims a multi-word string.
+		t.Error(`IsSecret("kubectl get secrets") = true, want false`)
 	}
 }
