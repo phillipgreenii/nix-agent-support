@@ -1,6 +1,7 @@
 package primarycommit
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,8 +13,32 @@ type FileResolver struct{}
 
 func NewFileResolver() *FileResolver { return &FileResolver{} }
 
+// ErrDirNotExist is the ONE sentinel a PrimaryResolver.IsCanonical implementation MAY
+// return to mean "I checked, and the directory does not exist" — distinct from every
+// other resolver error, which primarycommit.go's inspectCommit still treats fail-OPEN
+// (findingNone, unchanged since before pg2-5adzj). FileResolver is the implementation
+// that returns it, because gitRoot below walks UP to the nearest ENCLOSING ".git"
+// regardless of whether the STARTING directory exists — so, unguarded, a resolved
+// literal path that is merely a typo, not-yet-created, or already cleaned up after
+// landing (production asks.db row 326758: a worktree removed after its bead merged)
+// walks past the missing directory and lands on whichever repository encloses it,
+// typically the canonical clone, and confidently misreports "yes, primary". See
+// IsCanonical below and primarycommit.go's pg2-5adzj package-doc paragraph for why the
+// check lives HERE rather than in the resolver-agnostic rule logic.
+var ErrDirNotExist = errors.New("primary-commit: directory does not exist")
+
+// dirExists reports whether dir is a real, existing directory on disk.
+func dirExists(dir string) bool {
+	info, err := os.Stat(dir)
+	return err == nil && info.IsDir()
+}
+
 // gitRoot walks up from dir to the first ".git" entry. gitIsDir==true ⇒ main working
-// tree (canonical); false ⇒ a linked worktree (.git is a gitdir: file).
+// tree (canonical); false ⇒ a linked worktree (.git is a gitdir: file). Callers that
+// need to distinguish "dir does not exist" from "dir exists but is not (in) a git
+// repo" MUST check dirExists(dir) themselves BEFORE calling this — gitRoot walks up
+// regardless, by design, so that an EXISTING nested subdirectory with no ".git" of its
+// own still resolves to its enclosing repo (TestFileResolver_WalkUpAndDetached).
 func gitRoot(dir string) (root string, gitIsDir bool, found bool) {
 	d := dir
 	for {
@@ -28,7 +53,15 @@ func gitRoot(dir string) (root string, gitIsDir bool, found bool) {
 	}
 }
 
+// IsCanonical reports whether dir is the canonical clone's main working tree.
+// Returns ErrDirNotExist (see above) when dir itself does not exist, BEFORE gitRoot
+// ever walks up from it — checked here, and only here, rather than in gitRoot, because
+// every OTHER gitRoot caller (CurrentBranch, PrimaryBranch, PushDefault, Aliases) only
+// ever runs after IsCanonical has already confirmed dir is real.
 func (r *FileResolver) IsCanonical(dir string) (bool, error) {
+	if !dirExists(dir) {
+		return false, ErrDirNotExist
+	}
 	_, gitIsDir, found := gitRoot(dir)
 	return found && gitIsDir, nil
 }

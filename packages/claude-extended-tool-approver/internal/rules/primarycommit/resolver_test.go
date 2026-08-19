@@ -1,6 +1,7 @@
 package primarycommit
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -94,6 +95,60 @@ func TestFileResolver_WalkUpAndDetached(t *testing.T) {
 	git(dir, "checkout", "-q", "--detach")
 	if b, err := r.CurrentBranch(dir); err != nil || b != "" {
 		t.Fatalf("CurrentBranch(detached) = %q, %v; want \"\"", b, err)
+	}
+}
+
+// TestFileResolver_MissingDir pins pg2-5adzj: IsCanonical must refuse to walk UP from a
+// directory that does not exist, and must signal that distinctly (ErrDirNotExist)
+// rather than silently answering false the way "genuinely off primary" or "genuinely
+// not canonical" would. Without the dirExists guard, a MISSING nested path used to
+// walk past itself and land on whichever real ancestor DOES have a ".git" — here, the
+// canonical repo itself — and report canonical=true, exactly the false "primary"
+// finding pg2-5adzj reports (measured against production asks.db row 326758, whose
+// referenced worktree had already been removed by the time of replay).
+func TestFileResolver_MissingDir(t *testing.T) {
+	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
+	dir := t.TempDir()
+	git := func(d string, args ...string) {
+		t.Helper()
+		if out, err := exec.Command("git", append([]string{"-C", d}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git -C %s %v: %v\n%s", d, args, err, out)
+		}
+	}
+	git(dir, "init", "-q", "-b", "main")
+	git(dir, "config", "user.email", "t@example.com")
+	git(dir, "config", "user.name", "t")
+	git(dir, "commit", "--allow-empty", "-q", "-m", "init")
+
+	r := NewFileResolver()
+
+	// A nested path that was NEVER created: gitRoot would otherwise walk up from it
+	// straight to `dir`'s own ".git" and (wrongly) report canonical=true.
+	ghost := filepath.Join(dir, ".worktrees", "ghost-never-created")
+	if c, err := r.IsCanonical(ghost); c || !errors.Is(err, ErrDirNotExist) {
+		t.Fatalf("IsCanonical(never-created) = %v, %v; want false, ErrDirNotExist", c, err)
+	}
+
+	// The SAME path, but as a genuinely nested EXISTING subdirectory with no ".git" of
+	// its own — the case TestFileResolver_WalkUpAndDetached exercises separately — MUST
+	// keep resolving to canonical=true. This is the regression guard: the dirExists
+	// check must gate on the STARTING directory's existence only, never on whether it
+	// has its own ".git".
+	if err := os.MkdirAll(ghost, 0o755); err != nil {
+		t.Fatalf("MkdirAll(%s): %v", ghost, err)
+	}
+	if c, err := r.IsCanonical(ghost); err != nil || !c {
+		t.Fatalf("IsCanonical(existing nested subdir) = %v, %v; want true, nil", c, err)
+	}
+
+	// A REMOVED worktree — created, then torn down, mirroring the exact production
+	// shape (a `.worktrees/<bead>` cleaned up after landing).
+	wt := filepath.Join(dir, ".worktrees", "landed-and-removed")
+	git(dir, "worktree", "add", "-q", "-b", "landed", wt)
+	git(dir, "worktree", "remove", wt)
+	if c, err := r.IsCanonical(wt); c || !errors.Is(err, ErrDirNotExist) {
+		t.Fatalf("IsCanonical(removed worktree) = %v, %v; want false, ErrDirNotExist", c, err)
 	}
 }
 

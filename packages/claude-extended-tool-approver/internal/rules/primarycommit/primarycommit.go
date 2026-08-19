@@ -61,9 +61,45 @@
 // text, so the rule resolves it and judges the real directory (pg2-wq3ki). The
 // rationale, the resolution model, the DECLINED `$(…)` derivation and the coupling to
 // the engine's `cd` handling are all in dirresolve.go's DIRECTORY RESOLUTION comment.
+//
+// A SECOND, DISTINCT decisive-in-every-mode case (pg2-5adzj) sits beside the unresolved
+// one above: a target that DOES resolve to a literal path, correctly reflecting a
+// preceding `cd`/`pushd`/`-C`, but that path DOES NOT EXIST ON DISK right now. This is
+// NOT a chdir-tracking gap — dirresolve.go already reports the right `Dir` for it (the
+// bug pg2-5adzj was filed against does not reproduce: engine.go's cd re-root and
+// dirresolve.go's ResolveDir both already expand a same-command `cd "$W"` via
+// cmdparse.InCommandVars/ExpandInCommand, pinned by
+// TestIntegration_PrimaryCommitDirectoryResolution's "cd into the nested worktree"
+// case). The actual, currently-reproducing defect is one layer further in:
+// resolver.go's gitRoot walks UP from whatever directory it is given until it finds a
+// ".git", and it does that walk EVEN WHEN THE STARTING DIRECTORY DOES NOT EXIST — so a
+// worktree path that is merely a typo, not-yet-created, or (the measured case,
+// production asks.db row 326758) ALREADY CLEANED UP after landing, walks up past the
+// missing directory and lands on whichever repository ENCLOSES it — typically the
+// canonical clone. IsCanonical then confidently (and wrongly) reports "yes, primary",
+// for exactly the same reason pg2-h2npt's original bug did: a guess dressed up as a
+// resolution. The fix is FileResolver's alone (resolver.go checks existence itself and
+// signals it via the ErrDirNotExist sentinel) rather than a check inspectCommit runs on
+// every resolver: this package's Rule is written against the abstract PrimaryResolver
+// interface, and "does this path exist on disk" is meaningful only for a resolver that
+// actually reads a real filesystem — baking an os.Stat into inspectCommit itself would
+// silently apply real-disk semantics to every PrimaryResolver, including the
+// fakePrimaryResolver test doubles used throughout this rule's and the engine's test
+// suites, which answer from in-memory fields and correspond to no real directory
+// (confirmed the hard way: an inspectCommit-level check broke
+// TestPrecedence_PrimaryCommitBeatsGit and its siblings, all of which pass a fake
+// resolver against CWD "/repo"). ErrDirNotExist keeps the check inside the ONE
+// implementation for which it is meaningful; a resolver that never returns it is
+// completely unaffected, so its existing `err != nil` fail-open path is unchanged. The
+// verdict is fail-SAFE (Ask/Reject, never Approve) rather than fail-open (defer,
+// possibly Approve), decisive in every mode exactly like the Unresolved case — an
+// "identity check I could not complete", not a finding of primary — but reported with
+// its OWN wording, since the existing unresolvedReason text talks about shell
+// expansion, which would be a false claim about a path that is already fully literal.
 package primarycommit
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 
@@ -137,6 +173,16 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		return hookio.RuleResult{}, fmt.Errorf("primary-commit: read bash command: %w", err)
 	}
 	leaves := cmdparse.Parse(cmdStr)
+	// scope is the FULL expression this Bash input came from, falling back to the
+	// leaf's own text for a direct (non-engine) caller — the same convention gitdir.go
+	// already uses for RootExpression. Threaded into inspectCommit so it can tell
+	// "the command text established this directory" (an explicit `-C`, or a
+	// `cd`/`pushd` leaf anywhere in the compound) from "this is simply the passed-in
+	// CWD, untouched" — see dirNamedByCommand.
+	scope := input.RootExpression
+	if scope == "" {
+		scope = cmdStr
+	}
 	for i, pc := range leaves {
 		if !isGit(pc.Executable) {
 			continue
@@ -153,7 +199,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		// reads them off the leaves before this one. Empty in the ordinary case, and an
 		// empty environment resolves nothing — every verdict is then the one this rule
 		// reached before the environment existed.
-		f := r.inspectCommit(pc, input.CWD, LeafVars(input.InCommandVars, leaves, i), true)
+		f := r.inspectCommit(pc, input.CWD, LeafVars(input.InCommandVars, leaves, i), true, scope)
 		silentlyAccepts := AutoApprovingModes[input.PermissionMode]
 		switch f.kind {
 		case findingUnresolved:
@@ -173,6 +219,18 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 				return hookio.RuleResult{Decision: hookio.Reject, Reason: f.unresolvedReason(true), Module: r.Name()}, nil
 			}
 			return hookio.RuleResult{Decision: hookio.Ask, Reason: f.unresolvedReason(false), Module: r.Name()}, nil
+		case findingDirMissing:
+			// FAIL-SAFE for the SAME reason as findingUnresolved above (decisive in every
+			// mode, never Approve) but a DIFFERENT cause: the text resolved to a literal
+			// path, yet that path is not there, so resolver.IsCanonical's walk-up would
+			// otherwise land on whichever repo encloses the missing directory and
+			// misreport "primary" (pg2-5adzj). Reusing findingUnresolved's wording here
+			// would be a false claim ("expanded by the shell") about a path that already
+			// is fully literal, hence the separate reason text.
+			if silentlyAccepts {
+				return hookio.RuleResult{Decision: hookio.Reject, Reason: f.missingDirReason(true), Module: r.Name()}, nil
+			}
+			return hookio.RuleResult{Decision: hookio.Ask, Reason: f.missingDirReason(false), Module: r.Name()}, nil
 		case findingPrimary:
 			// Commit on canonical primary. Interactive/default sessions are trusted
 			// (R-6) and get NotApplicable, letting the git rule behind this one judge
@@ -207,11 +265,12 @@ const (
 	findingNone       findingKind = iota // not a commit, not canonical, or off primary
 	findingPrimary                       // a commit on the canonical clone's primary branch
 	findingUnresolved                    // a commit whose target directory is not statically resolvable
+	findingDirMissing                    // a commit whose (literal) target directory does not exist on disk
 )
 
 // commitFinding carries the finding plus the evidence its reason text cites. The
 // evidence fields are populated per kind: primary/dir/chosen for findingPrimary,
-// token/source for findingUnresolved.
+// token/source for findingUnresolved, dir/chosen for findingDirMissing.
 type commitFinding struct {
 	kind    findingKind
 	primary string // the primary branch the commit would advance
@@ -258,6 +317,28 @@ func (f commitFinding) unresolvedReason(deny bool) string {
 	return s
 }
 
+// missingDirReason states that the evaluated directory does NOT EXIST right now, so
+// this rule cannot verify what it actually is — the resolver's walk-up would otherwise
+// find whichever repository ENCLOSES the missing path and misreport it as the
+// canonical primary (pg2-5adzj), the same class of guess-dressed-as-resolution
+// pg2-h2npt's unresolvedReason above exists for, but with a DIFFERENT cause: the text
+// IS a literal path (no shell expansion left to blame), it simply is not there. `deny`
+// picks the wording for the auto-approving Reject over the interactive Ask.
+func (f commitFinding) missingDirReason(deny bool) string {
+	s := "primary-commit: cannot verify this commit's target — the directory " + f.dir +
+		" (chosen from " + f.chosen + ") does not exist. " +
+		"If a preceding `cd`/`pushd` names it, that command would FAIL and the rest of an `&&` chain " +
+		"would never reach this commit; if the directory is created earlier in this SAME command " +
+		"(e.g. `git worktree add`), re-run once that step has actually completed. " +
+		"This is NOT a finding that you are on the primary branch: the target is simply not there, and " +
+		"guessing by walking up to whichever repository encloses it would mean either denying a " +
+		"legitimate not-yet-created worktree or approving a commit on shared primary."
+	if deny {
+		return s + " Denied rather than asked because this session auto-accepts prompts."
+	}
+	return s
+}
+
 // inspectCommit classifies a single parsed git invocation: findingPrimary for a
 // `git commit` on the canonical clone's primary branch, findingUnresolved for one whose
 // target directory does not resolve to a literal path, findingNone otherwise. When
@@ -266,7 +347,7 @@ func (f commitFinding) unresolvedReason(deny bool) string {
 // re-parsed and each git command in it checked with expansion OFF (single-pass, which
 // also bounds recursion). A resolver error, a linked worktree, or being off primary all
 // yield findingNone — the fail-open posture the worktree discipline relies on.
-func (r *Rule) inspectCommit(pc cmdparse.ParsedCommand, cwd string, vars map[string]string, expandAliases bool) commitFinding {
+func (r *Rule) inspectCommit(pc cmdparse.ParsedCommand, cwd string, vars map[string]string, expandAliases bool, scope string) commitFinding {
 	chdirs, subcmd, rest := cmdparse.GitInvocation(pc.Args)
 	res := ResolveDir(cwd, chdirs, vars)
 	dir := res.Dir
@@ -280,8 +361,10 @@ func (r *Rule) inspectCommit(pc cmdparse.ParsedCommand, cwd string, vars map[str
 				// dir is passed as the recursion's cwd, so an unresolved OUTER `-C` is
 				// still visible to the inner resolution below. The environment is
 				// threaded too: an alias body is part of the SAME command, so a
-				// variable the command established is in scope inside it.
-				if f := r.inspectCommit(sub, dir, vars, false); f.kind != findingNone {
+				// variable the command established is in scope inside it. scope stays
+				// the OUTER expression: the alias body is not itself part of the root
+				// expression's text, so there is nothing more specific to hand down.
+				if f := r.inspectCommit(sub, dir, vars, false, scope); f.kind != findingNone {
 					return f
 				}
 			}
@@ -301,6 +384,30 @@ func (r *Rule) inspectCommit(pc cmdparse.ParsedCommand, cwd string, vars map[str
 		return commitFinding{kind: findingUnresolved, token: res.Token, source: res.Source}
 	}
 	canonical, err := r.resolver.IsCanonical(dir)
+	// The directory resolved to a literal path, but that path is not on disk right now
+	// (pg2-5adzj) — signalled by ErrDirNotExist, the ONE sentinel error a
+	// PrimaryResolver may return from IsCanonical to distinguish "this concrete
+	// implementation checked and the directory plain does not exist" from every other
+	// resolver error, which stays fail-OPEN (findingNone) exactly as before. FileResolver
+	// is the implementation that returns it: its gitRoot walks UP to the nearest
+	// ENCLOSING ".git" regardless of whether the starting directory exists, so without
+	// this check a missing target silently resolves to whatever canonical repo happens
+	// to enclose it on disk — the false "primary" finding pg2-5adzj reports. A resolver
+	// that never returns ErrDirNotExist (every test's fakePrimaryResolver, which answers
+	// from fields rather than disk) is completely unaffected: this branch can never fire
+	// for it, so its existing fail-open behaviour for `err != nil` is unchanged.
+	//
+	// dirNamedByCommand is the SECOND gate: the fail-safe verdict fires only when the
+	// COMMAND TEXT itself named this directory (an explicit `-C` here, or a
+	// `cd`/`pushd` leaf anywhere in the compound). A bare, un-redirected CWD is the
+	// SESSION's own reported directory — Claude Code's problem to keep real, not this
+	// rule's to second-guess — and treating its non-existence as fail-safe broke
+	// TestPrecedence_PrimaryCommitBeatsGit and four sibling engine-suite tests that use
+	// a synthetic, nonexistent CWD as shorthand for "not inside any repo at all"; those
+	// must keep the ordinary fail-open verdict below.
+	if errors.Is(err, ErrDirNotExist) && dirNamedByCommand(chdirs, scope) {
+		return commitFinding{kind: findingDirMissing, dir: dir, chosen: res.Chosen}
+	}
 	if err != nil || !canonical {
 		return commitFinding{}
 	}
@@ -313,6 +420,37 @@ func (r *Rule) inspectCommit(pc cmdparse.ParsedCommand, cwd string, vars map[str
 		return commitFinding{}
 	}
 	return commitFinding{kind: findingPrimary, primary: primary, dir: dir, chosen: res.Chosen}
+}
+
+// dirNamedByCommand reports whether the COMMAND TEXT itself established the target
+// directory, which is what makes its non-existence worth a fail-safe verdict rather
+// than the ordinary fail-open one: an explicit `-C` on THIS git invocation (chdirs
+// non-empty), or a `cd`/`pushd` leaf ANYWHERE in the same root expression (scope) —
+// which, if it runs before this leaf, is what the engine's cd re-root (pg2-opclh)
+// advanced the running cwd past. Deliberately coarse on the second half: it does not
+// confirm that a specific cd's OWN target is the missing directory, only that SOME
+// chdir happened in the compound, because primarycommit.go — handed one leaf's
+// synthetic input under the engine — cannot see the leaf-by-leaf cwd assembly
+// (dirresolve.go's DIRECTORY RESOLUTION comment names the identical one-leaf limit for
+// InCommandVars; scope, falling back to the leaf's own text for a direct caller, is
+// the same convention gitdir.go already uses for RootExpression).
+//
+// A bare, un-redirected CWD (no `-C` anywhere, no `cd`/`pushd` in scope) is the
+// SESSION's own reported directory — Claude Code's problem to keep real, not this
+// rule's to second-guess. Skipping the fail-safe verdict for that case is what keeps
+// TestPrecedence_PrimaryCommitBeatsGit and the engine integration suite's many tests
+// that pass a synthetic, nonexistent CWD as shorthand for "not inside any repo at all"
+// on their existing, fail-open verdict.
+func dirNamedByCommand(chdirs []string, scope string) bool {
+	if len(chdirs) > 0 {
+		return true
+	}
+	for _, leaf := range cmdparse.Parse(scope) {
+		if leaf.Executable == "cd" || leaf.Executable == "pushd" {
+			return true
+		}
+	}
+	return false
 }
 
 // mergedAliases returns the aliases visible to this invocation — config-defined

@@ -304,6 +304,111 @@ func TestUnresolvableToken(t *testing.T) {
 	}
 }
 
+// TestPrimaryCommit_MissingDir covers pg2-5adzj: a directory the command text itself
+// established (an explicit `-C`, or a preceding `cd`/`pushd` leaf anywhere in the same
+// compound) that does not exist on disk. Signalled here by a stubResolver returning
+// ErrDirNotExist from IsCanonical — exactly what FileResolver returns for real — this
+// asserts the RULE's handling of that signal without touching a real filesystem.
+func TestPrimaryCommit_MissingDir(t *testing.T) {
+	missing := func() *stubResolver { return &stubResolver{canonicalErr: ErrDirNotExist} }
+
+	tests := []struct {
+		name    string
+		command string
+		mode    string
+		root    string // RootExpression; "" leaves it unset (falls back to command)
+		want    hookio.Decision
+	}{
+		// An explicit `-C` on THIS invocation names the directory, so ErrDirNotExist is
+		// decisive even with no cd/pushd anywhere.
+		{"bypass: -C to a missing dir is denied", "git -C /gone commit -m x", "bypassPermissions", "", hookio.Reject},
+		{"default: -C to a missing dir asks", "git -C /gone commit -m x", "default", "", hookio.Ask},
+		{"auto: -C to a missing dir asks", "git -C /gone commit -m x", "auto", "", hookio.Ask},
+
+		// A `cd` earlier in the SAME root expression also names the directory, even
+		// though THIS leaf (the only text primarycommit.go sees under the engine) is
+		// just the bare commit with no `-C` of its own.
+		{
+			"default: cd earlier in the compound + missing dir asks", "git commit -m x", "default",
+			`cd /gone && git commit -m x`, hookio.Ask,
+		},
+		{
+			"bypass: pushd earlier in the compound + missing dir is denied", "git commit -m x", "bypassPermissions",
+			`pushd /gone && git commit -m x`, hookio.Reject,
+		},
+
+		// No `-C` and no `cd`/`pushd` anywhere in scope: a bare, un-redirected CWD.
+		// This is the SESSION's own reported directory (or, in these tests, a stand-in
+		// for it) — not something the command text established — so a stubResolver
+		// reporting it missing must NOT be decisive: fail-open, matching every other
+		// resolver-error case (TestPrimaryCommitRule's "resolver error (fail-open)").
+		{"bypass: bare CWD reported missing stays fail-open", "git commit -m x", "bypassPermissions", "", hookio.NoOpinion},
+		{"default: bare CWD reported missing stays fail-open", "git commit -m x", "default", "", hookio.NoOpinion},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			in := &hookio.HookInput{
+				ToolName: "Bash", ToolInput: mustJSON(tt.command), CWD: "/repo",
+				PermissionMode: tt.mode, RootExpression: tt.root,
+			}
+			if got := hookio.Verdict(New(missing()).Evaluate(in)).Decision; got != tt.want {
+				t.Errorf("Decision = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestPrimaryCommit_MissingDirReason pins the DIAGNOSIS half: the missing-directory
+// reason must be distinct from BOTH the primary-branch finding (it is not one) and the
+// unresolved-token finding (the path is fully literal, not "expanded by the shell").
+func TestPrimaryCommit_MissingDirReason(t *testing.T) {
+	got := hookio.Verdict(New(&stubResolver{canonicalErr: ErrDirNotExist}).Evaluate(&hookio.HookInput{
+		ToolName: "Bash", ToolInput: mustJSON("git -C /gone commit -m x"), CWD: "/repo", PermissionMode: "default",
+	}))
+	for _, want := range []string{
+		"cannot verify this commit's target",
+		"/gone",
+		"does not exist",
+		"NOT a finding that you are on the primary branch",
+	} {
+		if !strings.Contains(got.Reason, want) {
+			t.Errorf("reason %q does not mention %q", got.Reason, want)
+		}
+	}
+	for _, mustNot := range []string{"refusing this commit", "CANONICAL clone", "expanded by the shell"} {
+		if strings.Contains(got.Reason, mustNot) {
+			t.Errorf("missing-dir reason %q wrongly reads as a different finding (%q)", got.Reason, mustNot)
+		}
+	}
+}
+
+// TestDirNamedByCommand pins the gate directly: which shapes count as the command TEXT
+// having established a directory (worth a fail-safe verdict on ErrDirNotExist) versus a
+// bare, un-redirected CWD (must stay fail-open).
+func TestDirNamedByCommand(t *testing.T) {
+	tests := []struct {
+		name   string
+		chdirs []string
+		scope  string
+		want   bool
+	}{
+		{"explicit -C, no scope text", []string{"/abs/worktree"}, "", true},
+		{"cd leaf in scope, no -C", nil, "cd /abs/worktree && git commit -m x", true},
+		{"pushd leaf in scope, no -C", nil, "pushd /abs/worktree && git commit -m x", true},
+		{"cd earlier, semicolon-separated", nil, "W=/abs/worktree; cd \"$W\" && git commit -m x", true},
+		{"bare commit, no -C, no cd anywhere", nil, "git commit -m x", false},
+		{"unrelated cd elsewhere is still enough (coarse by design)", nil, "cd /a; git status; git commit -m x", true},
+		{"empty scope, no -C", nil, "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := dirNamedByCommand(tt.chdirs, tt.scope); got != tt.want {
+				t.Errorf("dirNamedByCommand(%v, %q) = %v, want %v", tt.chdirs, tt.scope, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestPrimaryCommit_NilResolver(t *testing.T) {
 	got := hookio.Verdict(New(nil).Evaluate(&hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON("git commit"), CWD: "/repo", PermissionMode: "bypassPermissions"})).Decision
 	if got != hookio.NoOpinion {

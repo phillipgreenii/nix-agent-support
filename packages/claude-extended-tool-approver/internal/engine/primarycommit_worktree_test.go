@@ -183,3 +183,53 @@ func TestIntegration_PrimaryCommitUnresolvedNeverApproves(t *testing.T) {
 		}
 	}
 }
+
+// TestIntegration_PrimaryCommitMissingDirNeverApproves is pg2-5adzj's whole-chain guard,
+// mirroring TestIntegration_PrimaryCommitUnresolvedNeverApproves for a DIFFERENT cause:
+// the directory resolves to a literal path — correctly reflecting a preceding
+// `cd`/`pushd`/`-C`, exactly as pg2-wq3ki intends — but that literal path does not exist
+// on disk. Reproduced against the REAL production shape (asks.db row 326758, 2026-07-30):
+// a worktree named by an earlier `W=<path>` assignment in the SAME command, `cd`ed into,
+// then committed to with NO `-C` on the commit itself — except that by replay time the
+// worktree had already been removed (landed and cleaned up), which is exactly what
+// worktree.remove below reproduces. Before pg2-5adzj's fix this fell through to
+// FileResolver's gitRoot walking UP past the missing directory, landing on the
+// ENCLOSING canonical clone, and misreporting "primary" — the false positive this test
+// pins shut.
+func TestIntegration_PrimaryCommitMissingDirNeverApproves(t *testing.T) {
+	canonical, worktree := nestedWorktreeFixture(t)
+	git := func(args ...string) {
+		t.Helper()
+		if out, err := exec.Command("git", append([]string{"-C", canonical}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git -C %s %v: %v\n%s", canonical, args, err, out)
+		}
+	}
+	// Mirror production exactly: the worktree existed, and has since been cleaned up.
+	git("worktree", "remove", "--force", worktree)
+
+	commands := []string{
+		"cd " + worktree + " && git commit -m x",
+		"pushd " + worktree + " && git commit -m x",
+		"W=" + worktree + "; cd \"$W\" && git commit -q --amend -F - <<'EOF'\nmsg\nEOF",
+		"git -C " + worktree + " commit -m x",
+	}
+	for _, mode := range []string{"bypassPermissions", "auto", "dontAsk", "default", "plan", "acceptEdits", ""} {
+		for _, cmd := range commands {
+			t.Run(mode+" "+cmd, func(t *testing.T) {
+				eng := buildFullEngine(canonical, canonical)
+				got := eng.EvaluateHook(&hookio.HookInput{
+					ToolName: "Bash", CWD: canonical,
+					ToolInput: makeBashJSON(cmd), PermissionMode: mode,
+				})
+				if got.Decision == hookio.Approve || got.Decision == hookio.NoOpinion {
+					t.Fatalf("%q in %q mode: got %s (%s: %s); a target directory that does not exist MUST NOT reach Approve or an empty verdict", cmd, mode, got.Decision, got.Module, got.Reason)
+				}
+				// The MISDIAGNOSIS pg2-5adzj is about: the agent must not be told it is on
+				// primary/canonical when the real problem is the missing directory.
+				if strings.Contains(got.Reason, "CANONICAL clone") || strings.Contains(got.Reason, "refusing this commit") {
+					t.Errorf("%q in %q mode: reason %q wrongly reads as the primary-branch finding", cmd, mode, got.Reason)
+				}
+			})
+		}
+	}
+}
