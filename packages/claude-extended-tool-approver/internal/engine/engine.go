@@ -400,7 +400,7 @@ func (e *Engine) EvaluateExpression(expr string, stack []hookio.StackFrame, orig
 				judgedLeaf = true
 			}
 			if pc.HasHeredoc {
-				leafResult = hookio.MostRestrictive(leafResult, heredocFloor())
+				leafResult = hookio.MostRestrictive(leafResult, heredocFloor(expr, stack))
 				leafResult = hookio.MostRestrictive(leafResult, e.evaluateHeredocBodies(pc, normalized, stack, origin))
 				judgedLeaf = true
 			}
@@ -484,7 +484,7 @@ func (e *Engine) EvaluateExpression(expr string, stack []hookio.StackFrame, orig
 		// FLOORED at NoOpinion — but the body's own substitutions are still recursed when
 		// the delimiter was unquoted, because those genuinely execute (pg2-r2rf3).
 		if pc.HasHeredoc {
-			cmdResult = hookio.MostRestrictive(cmdResult, heredocFloor())
+			cmdResult = hookio.MostRestrictive(cmdResult, heredocFloor(expr, stack))
 			cmdResult = hookio.MostRestrictive(cmdResult, e.evaluateHeredocBodies(pc, normalized, stack, origin))
 		}
 
@@ -641,7 +641,7 @@ func unparseableExpressionFloor(sp cmdparse.ShellParse) hookio.RuleResult {
 	return hookio.RuleResult{Decision: hookio.NoOpinion, Reason: reason, Module: "engine"}
 }
 
-// heredocFloor is the verdict contributed by ANY heredoc- or herestring-bearing leaf.
+// heredocFloor is the verdict contributed by a heredoc- or herestring-bearing leaf.
 //
 // A heredoc body is DATA whose meaning depends on the reader: `cat <<EOF` merely
 // echoes it, but `sh <<EOF` / `python <<EOF` EXECUTES it as a program in a language
@@ -661,14 +661,109 @@ func unparseableExpressionFloor(sp cmdparse.ShellParse) hookio.RuleResult {
 // applying" class. Folding it through hookio.MostRestrictive instead makes the result
 // ORDER-INDEPENDENT (max over a total order) and keeps every sibling leaf's decision:
 // both spellings above now Ask. Because NoOpinion outranks Approve, the floor still
-// guarantees a heredoc-bearing expression can never be green-lit, so this cannot move
-// anything toward `allow`.
-func heredocFloor() hookio.RuleResult {
+// guarantees a heredoc-bearing expression can never be green-lit BY ITSELF — see the
+// one narrow exception below, which moves a body to Approve only by DEFERRING to a
+// clearance and a recursive verdict that already exist elsewhere, never by widening
+// what the floor itself admits.
+//
+// # pg2-u65fu — THE NARROWING
+//
+// heredocFloor takes expr/stack now, and is UNCONDITIONAL for every caller except one:
+// a leaf that is itself the WHOLE of a command-substitution BODY currently being
+// recursed by foldSubstitutionScan (identified by recursedSubstitutionHeredocCleared,
+// which checks the TOP of stack for the {RuleName:"engine", Command:"substitution"}
+// frame only foldSubstitutionScan pushes) AND whose text cmdparse.ClassifySubstitutionBody
+// already admits (pg2-phtl3's static clearance: quoted delimiter, an allowlisted
+// non-interpreter reader, no write flag, no unresolved argv/redirect path —
+// cmdparse.heredocClearedForSubstitution).
+//
+// WHY THAT PAIR AND NOTHING LESS. The identical body used as an env-assignment VALUE
+// (`PAYLOAD=$(cat <<'EOF' ... EOF)`) already reaches Approve today — classifyExpansion
+// classifies it ExpansionSafeCmd and envvars' fast path skips recursion entirely once
+// cmdparse clears it (internal/rules/envvars). The SAME body used as a command
+// ARGUMENT (`echo "$(cat <<'EOF' ... EOF)"`) goes through full-engine recursion
+// instead (pg2-whumr's "both gates" design for command position), and this floor —
+// applied to the recursed leaf exactly as it is applied to a top-level one — was the
+// one thing stopping that recursion from ever reaching the SAME Approve, even though
+// cmdparse's static gate had already cleared the body and a rule (safe-commands, for
+// a bare `cat`) independently approves the leaf too. Skipping the floor for exactly
+// this pairing lets the leaf's own rule-chain verdict stand instead of being
+// overridden, which is the ONLY thing that changes: the floor contributes the neutral
+// "nothing to add" Approve identity (the same pattern every other neutral seed in this
+// file uses) rather than replacing a real verdict with one of its own.
+//
+// WHAT DOES NOT CHANGE, and why the two conditions are each load-bearing:
+//
+//   - A TOP-LEVEL heredoc (`cat <<'EOF' ... EOF` typed directly — `stack` is empty,
+//     there is no enclosing substitution to recurse from) never satisfies the stack
+//     check, whatever cmdparse.ClassifySubstitutionBody says about the identical text.
+//     TestIntegration_HeredocExtents' "cat with a heredoc is not approved" and
+//     TestIntegration_GitdirMetadataAccess's "top-level heredoc body naming a path"
+//     pin exactly this pairing (same reader, same quoting) at NoOpinion, unmodified.
+//   - A recursed body that is NOT statically cleared — an unquoted delimiter, a
+//     non-allowlisted or interpreter reader (`sh`, `python`), a write flag, or an
+//     unresolved argv/redirect path — still classifies SubstitutionRefused or
+//     SubstitutionDelegated, never SubstitutionCleared, so this floor still applies to
+//     it exactly as before, in BOTH positions. That is pg2-wguam's RCE floor and it is
+//     untouched: quoting a heredoc into `sh`/`python` still executes the body as a
+//     program this parser does not model, and cmdparse's own admission test says so
+//     (heredocClearedForSubstitution's doc), so those bodies never reach the one
+//     condition this function relaxes.
+//   - A Cleared-but-UNMODELLED reader (none exist on heredocReaderAllowlist today,
+//     but the mechanism is future-proof against one being added later) still cannot
+//     slip through to Approve: skipping this floor only removes ITS OWN NoOpinion
+//     contribution, so the leaf's own chain verdict — an unmodelled reader's terminal
+//     loop-exhaustion NoOpinion+ProvenanceExhaustion — flows through unobstructed to
+//     foldSubstitutionScan's existing SubstitutionCleared/ProvenanceExhaustion branch,
+//     which floors it to a decisive Ask via commandSubstitutionFloor exactly as it
+//     already does for `seq`/`mktemp`. This function does not need its own copy of
+//     that guard; it only has to stop MASKING the verdict that guard is built to see.
+func heredocFloor(expr string, stack []hookio.StackFrame) hookio.RuleResult {
+	if recursedSubstitutionHeredocCleared(expr, stack) {
+		return hookio.RuleResult{
+			Decision: hookio.Approve,
+			Reason:   "heredoc body is a recursed command-substitution body already cleared by the static substitution allowlist (pg2-u65fu)",
+			Module:   "engine",
+		}
+	}
 	return hookio.RuleResult{
 		Decision: hookio.NoOpinion,
 		Reason:   "heredoc body is not evaluable as a command (deferred to claude-code)",
 		Module:   "engine",
 	}
+}
+
+// recursedSubstitutionHeredocCleared reports whether THIS EvaluateExpression call is
+// itself evaluating a command-substitution BODY — pushed by foldSubstitutionScan,
+// the ONLY caller anywhere in this tree that appends a
+// {RuleName:"engine", Command:"substitution"} frame — whose entire text
+// cmdparse.ClassifySubstitutionBody already admits.
+//
+// CHECKING ONLY THE TOP OF stack IS DELIBERATE AND SUFFICIENT. Every other recursion
+// boundary (docker/nix/kubectl's own inner-command recursion, envvars' env-value
+// recursion) starts or appends its OWN frame under its OWN RuleName/Command pair, never
+// "engine"/"substitution" — so a substitution nested inside any of them still gets a
+// correctly-labelled frame pushed on top by foldSubstitutionScan at the moment IT
+// recurses, at any nesting depth. There is no path by which a stale or unrelated frame
+// can occupy that position and be misread as this one.
+//
+// expr is the WHOLE text passed to this EvaluateExpression call, which — exactly when
+// this call IS a substitution-body recursion — is byte-for-byte the same sub.Body
+// foldSubstitutionScan will separately classify at its own call site (see
+// foldSubstitutionScan's ClassifySubstitutionBody switch). Reusing it here rather than
+// a per-leaf slice is what makes a MULTI-leaf recursed body correctly refuse: cmdparse's
+// soleSimpleCommandLeaf requires the WHOLE body to be one simple command, so a body
+// like "cat <<'EOF' ... EOF; rm -rf /" already classifies SubstitutionRefused and this
+// function reports false for every leaf inside it, not just the offending one.
+func recursedSubstitutionHeredocCleared(expr string, stack []hookio.StackFrame) bool {
+	if len(stack) == 0 {
+		return false
+	}
+	top := stack[len(stack)-1]
+	if top.RuleName != "engine" || top.Command != "substitution" {
+		return false
+	}
+	return cmdparse.ClassifySubstitutionBody(expr) == cmdparse.SubstitutionCleared
 }
 
 // evaluateHeredocBodies recurses the command substitutions inside each of pc's
@@ -795,11 +890,13 @@ func unparseableSubstitutionFloor(reason string) hookio.RuleResult {
 // dangerous one — the ruling this floor implements explicitly forbids trying,
 // and instead raises the floor for the WHOLE exhaustion class uniformly,
 // whichever gate it slips through, in COMMAND position only. A Cleared body a
-// rule DOES independently approve (`date`, `hostname`) never reaches this
-// floor at all, and neither does a Cleared body some OTHER mechanism already
-// examined and declined for its own recorded reason (a quoted-heredoc-into-
-// `cat` body still floored by heredocFloor(), a substitution-cycle guard) —
-// see the call site's own ProvenanceExhaustion gate for the case split.
+// rule DOES independently approve (`date`, `hostname`, and — since pg2-u65fu —
+// a quoted-heredoc-into-`cat` body, which safe-commands approves as a bare
+// argument-less read once heredocFloor stops masking that verdict for exactly
+// this recursed-and-cleared case) never reaches this floor at all, and neither
+// does a Cleared body some OTHER mechanism already examined and declined for
+// its own recorded reason (a substitution-cycle guard's own NoOpinion) — see
+// the call site's own ProvenanceExhaustion gate for the case split.
 //
 // Env-value position is UNCHANGED: it clears on EITHER gate
 // (internal/rules/envvars.go's positively-cleared predicate), so this floor
@@ -867,15 +964,24 @@ func (e *Engine) foldSubstitutionScan(scan cmdparse.SubstitutionScan, normalized
 		//
 		// GATED ON ProvenanceExhaustion SPECIFICALLY (ADR 0044), not on any
 		// NoOpinion: a Cleared body can also land on NoOpinion because some
-		// OTHER floor already examined and declined it — e.g. a quoted
-		// heredoc admitted onto this list (pg2-phtl3) still recurses through
-		// heredocFloor()'s own UNCONDITIONAL NoOpinion (pg2-u65fu's own,
-		// separately-scoped gap; ProvenanceRefusal, not Exhaustion), and the
-		// substitution-cycle guard's NoOpinion is the same shape. Those are
-		// considered refusals with their own recorded reason, not "nobody
-		// modelled this" — flooring them here would reach past this bead's
-		// authorized scope and duplicate a decision that belongs to whichever
-		// mechanism made it.
+		// OTHER floor already examined and declined it — e.g. the
+		// substitution-cycle guard's own NoOpinion (ProvenanceRefusal, not
+		// Exhaustion) when a Cleared body happens to repeat an expression
+		// already on the evaluation stack. Those are considered refusals with
+		// their own recorded reason, not "nobody modelled this" — flooring
+		// them here would reach past this bead's authorized scope and
+		// duplicate a decision that belongs to whichever mechanism made it.
+		//
+		// A quoted heredoc admitted onto cmdparse's static list (pg2-phtl3) USED
+		// to be exactly this shape too — recursing through heredocFloor()'s own
+		// then-unconditional NoOpinion regardless of the Cleared verdict — but
+		// that was a gap, not a design choice, and pg2-u65fu closed it:
+		// heredocFloor() now steps aside for precisely this recursion boundary
+		// (a leaf that is itself the WHOLE of the recursed body, and Cleared for
+		// exactly this reason), so the leaf's own chain verdict reaches this
+		// switch instead of being pre-floored to NoOpinion. See heredocFloor's
+		// own doc for the full narrowing and why it cannot reach the top-level
+		// heredoc case or any body cmdparse does not clear.
 		//
 		// DELEGATED NEVER FLOORS HERE (pg2-zpct4). A modelled read's only open
 		// question is whether `patheval` allows its PATH, which recursion alone

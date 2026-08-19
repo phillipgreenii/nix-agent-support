@@ -728,11 +728,14 @@ func TestIntegration_SubstitutionBodyRecursion(t *testing.T) {
 		// classifyExpansion/ExpansionSafeCmd path (pg2-gkd5e), which SKIPS full-engine
 		// recursion when cmdparse.ClassifySubstitutionBody clears the body — so this
 		// shape (the corpus's row 126856, pinned end-to-end in gitdir's own suite too)
-		// genuinely clears. See the KNOWN RESIDUAL LIMIT note below the mustNotApprove
-		// table: the exact same body used as a COMMAND ARGUMENT rather than an
-		// assignment value does NOT clear, for a reason this bead's scope does not
-		// reach.
+		// genuinely clears.
 		{"quoted heredoc into cat clears as an assignment value", "PAYLOAD=$(cat <<'EOF'\nhello\nEOF\n)\necho \"$PAYLOAD\""},
+		// pg2-u65fu: the SAME body used as a COMMAND ARGUMENT now reaches the SAME
+		// Approve — see the "exact" table below's "heredoc into cat as a command
+		// ARGUMENT now approves" row for the mechanism (heredocFloor steps aside for
+		// exactly this recursed-and-cleared shape) and its own doc comment on
+		// heredocFloor for the full narrowing.
+		{"quoted heredoc into cat clears as a command argument too", "echo \"$(cat <<'EOF'\nhello\nEOF\n)\""},
 	}
 	for _, tt := range mustApprove {
 		t.Run("approve/"+tt.name, func(t *testing.T) {
@@ -758,26 +761,42 @@ func TestIntegration_SubstitutionBodyRecursion(t *testing.T) {
 		// rejected OR silently allowed.
 		{"mktemp nested asks (exhaustion floor)", "$(cat $(mktemp))", hookio.Ask},
 		{"nix run asks (exhaustion floor)", `echo "$(nix run .#x -- --version)"`, hookio.Ask},
-		// KNOWN RESIDUAL LIMIT of pg2-phtl3's HEREDOC BODIES admission, recorded here
-		// rather than left to be rediscovered as a "regression": the SAME body that
-		// clears as an assignment VALUE above ("quoted heredoc into cat clears as an
-		// assignment value") stays floored at NoOpinion when the substitution is a
-		// COMMAND ARGUMENT instead. The two shapes take DIFFERENT engine paths — an
-		// assignment value goes through the static classifyExpansion/ExpansionSafeCmd
-		// gate (pg2-gkd5e), which skips recursion entirely when
-		// cmdparse.ClassifySubstitutionBody clears the body; an argument's
-		// substitution goes through evaluateSubstitutionsIn -> foldSubstitutionScan ->
-		// a full recursive EvaluateExpression call on the body, and THAT call's own
-		// heredocFloor() (engine.go) floors ANY heredoc-bearing leaf at NoOpinion
-		// UNCONDITIONALLY — it does not consult ClassifySubstitutionBody at all, and
-		// is applied identically to a genuine top-level heredoc and to a recursed
-		// substitution body. cmdparse's static allowlist is therefore necessary but
-		// not sufficient for this cohort's argument-position rows; closing that gap
-		// would mean making heredocFloor conditional on the static allowlist for a
-		// RECURSED body specifically (leaving the top-level case — pg2-3hk7t —
-		// untouched), which is an internal/engine change this bead did not scope or
-		// obtain a ruling on.
-		{"heredoc into cat as a command ARGUMENT still abstains (see comment)", "echo \"$(cat <<'EOF'\nhello\nEOF\n)\"", hookio.NoOpinion},
+		// pg2-u65fu CLOSES the residual limit pg2-phtl3's HEREDOC BODIES admission left
+		// open: the SAME body that clears as an assignment VALUE above ("quoted heredoc
+		// into cat clears as an assignment value") now ALSO clears when the
+		// substitution is a COMMAND ARGUMENT instead (also pinned as an unconditional
+		// Approve in mustApprove above, "quoted heredoc into cat clears as a command
+		// argument too" — kept here too so the two shapes sit side by side as an exact
+		// pair). The two shapes still take DIFFERENT engine paths — an assignment value
+		// goes through the static classifyExpansion/ExpansionSafeCmd gate (pg2-gkd5e),
+		// which skips recursion entirely once cmdparse.ClassifySubstitutionBody clears
+		// the body; an argument's substitution goes through evaluateSubstitutionsIn ->
+		// foldSubstitutionScan -> a full recursive EvaluateExpression call on the body
+		// — but that recursive call's own heredocFloor() (engine.go) now steps aside
+		// for exactly this pairing (a leaf that is the WHOLE of a recursed
+		// command-substitution body, AND Cleared by cmdparse's static allowlist),
+		// letting the leaf's own rule-chain verdict (safe-commands' Approve for a bare,
+		// argument-less `cat`) reach the top instead of being overridden. See
+		// heredocFloor's own doc comment (engine.go) for the exact narrowing and why it
+		// cannot reach a genuine top-level heredoc or any body cmdparse does not clear.
+		{"heredoc into cat as a command ARGUMENT now approves (pg2-u65fu)", "echo \"$(cat <<'EOF'\nhello\nEOF\n)\"", hookio.Approve},
+		// THE TOP-LEVEL COUNTERPART, pinned right beside it so the contrast is visible
+		// in one place: the IDENTICAL reader and IDENTICAL quoted delimiter, typed
+		// directly rather than inside a substitution, is completely UNTOUCHED by
+		// pg2-u65fu — there is no enclosing substitution to recurse from, so
+		// heredocFloor's narrowing (which is keyed on the substitution-recursion stack
+		// frame, not on the text) never applies. Same invariant TestIntegration_
+		// HeredocExtents' "cat with a heredoc is not approved" already pins; restated
+		// here as the direct A/B pair with the row above.
+		{"the SAME reader+quoting typed at the TOP LEVEL is unaffected", "cat <<'EOF'\nhello\nEOF", hookio.NoOpinion},
+		// A NEGATIVE control for the same pairing: swap the allowlisted `cat` for a
+		// reader cmdparse does NOT admit (`grep`), keeping the quoted delimiter
+		// unchanged. cmdparse.ClassifySubstitutionBody still reports SubstitutionRefused
+		// for this body (see TestClassifySubstitutionBody_HeredocReaderAdmission's
+		// "quoted heredoc into an unlisted reader stays refused"), so pg2-u65fu's
+		// narrowing never applies and pg2-whumr's commandSubstitutionFloor floors the
+		// REFUSED body to a decisive Ask, exactly as it did before this bead.
+		{"quoted heredoc into a NON-allowlisted reader still floors as an argument", "echo \"$(grep foo <<'EOF'\nhello\nEOF\n)\"", hookio.Ask},
 	}
 	for _, tt := range exact {
 		t.Run("exact/"+tt.name, func(t *testing.T) {
@@ -2435,12 +2454,23 @@ func TestIntegration_UnparseableSubstitutionNeverApproves(t *testing.T) {
 
 	// The floor, stated as its own invariant across every shape that desyncs the
 	// scan — with and without a heredoc, with and without a quoted delimiter.
+	//
+	// "quoted heredoc delimiter in a substitution" USED to live in this table
+	// (quoting held, so it never desynced in the first place — see the unquoted
+	// row immediately below for the case that actually exercises the floor this
+	// table is about) and asserted only "must never approve". pg2-u65fu makes it
+	// approve, correctly: cmdparse.ClassifySubstitutionBody clears exactly this
+	// body (quoted delimiter, allowlisted `cat` reader) and the argument-position
+	// shape now reaches that clearance exactly as the identical body already did
+	// as an assignment value (row 126856, elsewhere in this file). Leaving it here
+	// would make this table assert the opposite of the invariant pg2-u65fu is
+	// FOR, so it moved to its own assertion right after this loop instead of being
+	// silently deleted.
 	cases := []struct {
 		name    string
 		command string
 	}{
 		{"unquoted heredoc delimiter in a substitution", "bd update x --description \"$(cat <<EOF\nthe agent's note\nEOF\n)\""},
-		{"quoted heredoc delimiter in a substitution", "bd update x --description \"$(cat <<'EOF'\nthe agent's note\nEOF\n)\""},
 		{"git commit -m with an apostrophe in the body", "git commit -m \"$(cat <<EOF\nfix: don't break\n$(rm -rf .git/objects)\nEOF\n)\""},
 		{"apostrophe in a substitution, no heredoc", "echo \"$(echo the agent's note; rm -rf /tmp/zzz)\""},
 		{"desync discards a later dangerous substitution", "echo \"$(echo don't)\" \"$(rm -rf .git/objects)\""},
@@ -2459,6 +2489,21 @@ func TestIntegration_UnparseableSubstitutionNeverApproves(t *testing.T) {
 			}
 		})
 	}
+
+	// pg2-u65fu: the quoted-delimiter counterpart of the first row above now
+	// APPROVES end to end — a prose apostrophe inside a QUOTED heredoc's body was
+	// never the desync trigger (quoting is what stops it from ever reaching the
+	// scan as anything but opaque data), and separately from that,
+	// cmdparse.ClassifySubstitutionBody has cleared "cat <<'EOF' ... EOF" since
+	// pg2-phtl3. Both facts predate this bead; what pg2-u65fu adds is that the
+	// engine's own recursion no longer masks the second one for a command
+	// ARGUMENT the way it already didn't for an assignment VALUE.
+	t.Run("quoted heredoc delimiter in a substitution now approves (pg2-u65fu)", func(t *testing.T) {
+		got := decide("bd update x --description \"$(cat <<'EOF'\nthe agent's note\nEOF\n)\"")
+		if got.Decision != hookio.Approve {
+			t.Errorf("EvaluateHook(...) = %v (%s: %s), want Approve", got.Decision, got.Module, got.Reason)
+		}
+	})
 
 	// No over-blocking: text ceta CAN parse is unaffected. An apostrophe properly
 	// inside double quotes, and a single-quoted jq filter carrying parens inside a
