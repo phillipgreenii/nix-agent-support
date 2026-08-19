@@ -51,6 +51,13 @@ type Heredoc struct {
 	// swallows the rest of the input as body — the safe direction, since the
 	// alternative is shredding those lines back into commands.
 	Terminated bool
+	// Substitutions are this body's OWN top-level substitutions, pre-lowered
+	// during the SAME parse that produced this heredoc (ADR 0039 step 4,
+	// pg2-1019a) by walking the already-parsed Redirect.Hdoc word directly —
+	// never by re-parsing Body via cmdparse.ScanSubstitutionsInHeredocBody.
+	// Always empty when Quoted: a quoted delimiter's body never expands, so
+	// bash never evaluates a `$( )` inside it (pg2-wguam).
+	Substitutions []Substitution
 }
 
 // DELETED, and the deletion is a coverage claim: `isHeredocWordEnd`, `atWordStart`,
@@ -93,6 +100,22 @@ func (pc ParsedCommand) UnquotedHeredocBodies() []string {
 			continue
 		}
 		out = append(out, hd.Body)
+	}
+	return out
+}
+
+// UnquotedHeredocSubstitutions returns the pre-lowered top-level substitutions
+// of every UNQUOTED heredoc body on this leaf (ADR 0039 step 4, pg2-1019a) —
+// the structural counterpart to UnquotedHeredocBodies, feeding the engine's
+// heredoc-body recursion so it never needs cmdparse.ScanSubstitutionsInHeredocBody
+// to re-parse a body this leaf's own parse already walked.
+func (pc ParsedCommand) UnquotedHeredocSubstitutions() []Substitution {
+	var out []Substitution
+	for _, hd := range pc.Heredocs {
+		if hd.Quoted {
+			continue
+		}
+		out = append(out, hd.Substitutions...)
 	}
 	return out
 }

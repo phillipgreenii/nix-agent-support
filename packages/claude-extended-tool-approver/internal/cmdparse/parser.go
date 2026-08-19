@@ -1092,6 +1092,15 @@ const (
 type Substitution struct {
 	Kind SubstitutionKind
 	Body string // inner command text, verbatim (NOT unquoted)
+	// Leaves are Body's OWN pre-lowered leaves, computed during the SAME parse
+	// that discovered this substitution (ADR 0039 step 4, pg2-1019a) — never by
+	// re-parsing Body. Populated ONLY along the subtree-walking path
+	// ParsedCommand.Substitutions / Heredoc.Substitutions use; the remaining
+	// TEXT entry points — ScanSubstitutions, ScanSubstitutionsInHeredocBody and
+	// the EnumerateSubstitutions facade (I7's permanent text entry, still used
+	// by rules/ssh and by the fuzz-invariant HasUnsafeCommandSubstitution) —
+	// have no already-parsed source to walk and leave this nil.
+	Leaves []ParsedCommand
 }
 
 // IsCommandSubstitution reports whether the substitution captures a command's
@@ -1594,6 +1603,26 @@ type ParsedCommand struct {
 	// The zero value (nil) is top-level, matching PipelineID's zero-value
 	// convention of meaning "no special scoping applies".
 	SubshellScope []int
+	// Substitutions are this leaf's OWN top-level command/process substitutions
+	// — found in its args and redirection targets, but NEVER in a leading
+	// assignment's value (that is the static classifyExpansion path, pg2-gkd5e;
+	// recursing it here too would double-judge it under a different model) and
+	// NEVER in a heredoc body (a different expansion model entirely — see
+	// Heredocs[].Substitutions instead).
+	//
+	// ADR 0039 step 4 (pg2-1019a): this is PRE-LOWERED during the SAME parse
+	// that produced this leaf, by walking the already-parsed subtree directly
+	// (I7/I12) — never by re-parsing Raw. Each Substitution's own Leaves are
+	// likewise pre-lowered, recursively, so the engine's substitution recursion
+	// (internal/engine's foldSubstitutionScan) never calls
+	// cmdparse.ScanSubstitutions on text this parse has already seen.
+	//
+	// nil for a hand-built ParsedCommand in a test, or for a leaf reached
+	// through a path that does not populate it — a caller needing THIS leaf's
+	// substitutions from scratch (there is no such production caller left
+	// after step 4) would fall back to cmdparse.ScanSubstitutions(Raw), the
+	// permanent text entry point I7 describes.
+	Substitutions []Substitution
 }
 
 // ArgIsLiveExpansion is the SAFE accessor for ArgLiveExpansion: it reports

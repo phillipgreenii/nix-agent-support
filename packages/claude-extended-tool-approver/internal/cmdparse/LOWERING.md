@@ -962,3 +962,121 @@ satisfied rather than violated. **It did not survive the flip**, which is the ou
   shims owned by step 4 (`pg2-1019a`), and every RULE-side scanner step 5 (`pg2-x9452`) names
   is untouched — including `rules/ssh`'s `hasWriteRedirection`, which is why `UnquotedMask`
   survives as a capability.
+
+---
+
+# Step 4 — substitution and heredoc-body recursion, walking subtrees (`pg2-1019a`)
+
+Authority: ADR 0039's Decision item 5, Invariants I1a, I7 and I12, and Enforcement. Base
+`8a825da1`. This section is the record ADR 0039's Enforcement item "Differential replay"
+requires of every migration step.
+
+## What moved
+
+| Symbol                                                      | Outcome     | Where it went                                                                                                                                                                                         |
+| ----------------------------------------------------------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `engine.evaluateSubstitutionsIn`                            | **deleted** | The TEXT hop. Its two call sites now read `pc.Substitutions` directly and fold it through `foldSubstitutionScan`.                                                                                     |
+| `engine.evaluateHeredocBodies`                              | **deleted** | The TEXT hop. Its call sites now read `pc.UnquotedHeredocSubstitutions()` and fold it through `foldSubstitutionScan`.                                                                                 |
+| `engine.unparseableSubstitutionFloor`                       | **deleted** | Its only caller was the `scan.Unparseable` branch inside the old `foldSubstitutionScan`, which no longer exists: a leaf reached by this recursion already belongs to a successfully-parsed subtree.   |
+| `engine.foldSubstitutionScan`                               | rewritten   | Takes `[]cmdparse.Substitution` (pre-lowered), not a `cmdparse.SubstitutionScan`; recurses via a new `engine.evaluateParsed` instead of the public `EvaluateExpression`.                              |
+| `engine.EvaluateExpression`                                 | narrowed    | Now only the cycle check plus `ParseShell(expr)`, delegating to `evaluateParsed`. Its PUBLIC signature (the `hookio.Evaluator` interface, and every rule package that calls it) is UNCHANGED.         |
+| `engine.evaluateParsed` (new)                               | added       | The shared core over an already-lowered `cmdparse.ShellParse` — never parses. Called by `EvaluateExpression` (with a fresh parse) and by `foldSubstitutionScan` (with `sub.Leaves`, no parse at all). |
+| `engine.detectCycle` (new)                                  | added       | `EvaluateExpression`'s cycle check, factored out so `foldSubstitutionScan` can run it against a substitution's own body text without going through the text entry point.                              |
+| `cmdparse.ParsedCommand.Substitutions` (new field)          | added       | A leaf's own top-level command/process substitutions, pre-lowered during `ParseShell`'s one walk — computed by `lowering.callSubstitutions` / the redirect-only and DeclClause emitters.              |
+| `cmdparse.Heredoc.Substitutions` (new field)                | added       | An unquoted heredoc body's own top-level substitutions, pre-lowered by walking `Redirect.Hdoc` directly inside `lowering.heredoc`.                                                                    |
+| `cmdparse.Substitution.Leaves` (new field)                  | added       | A substitution's own body, pre-lowered recursively via the new `lowerSubtree`. Populated only along the subtree-walking path; `ScanSubstitutions`/`ScanSubstitutionsInHeredocBody` leave it nil.      |
+| `cmdparse.ParsedCommand.UnquotedHeredocSubstitutions` (new) | added       | The structural counterpart to `UnquotedHeredocBodies`, flattening every unquoted heredoc's `Substitutions`.                                                                                           |
+| `cmdparse.substitutionsOf` / `lowerSubtree` (new)           | added       | The subtree walk: `substitutionsOf` runs `substFinder` over already-parsed nodes (no `Parser.Parse` call) and recursively pre-lowers each found substitution's body via `lowerSubtree`.               |
+
+`cmdparse.ScanSubstitutions` and `cmdparse.ScanSubstitutionsInHeredocBody` — the two symbols
+the bead's own text named — are **NOT deleted**. Both still have live callers with no
+corresponding pre-parsed subtree to walk: `rules/ssh`'s `carriesSubstitution` scans a REMOTE
+host's command text (data inside a local quoted argument, never parsed as CETA's own AST),
+and `cmdparse.HasUnsafeCommandSubstitution` (no production caller, kept correct for the fuzz
+harness per its own doc) uses `ScanSubstitutions` too — both are I7's PERMANENT text entry
+point, and rule-side scanners are step 5's (`pg2-x9452`) territory, not this one's. What is
+actually gone, matching this file's OWN framing of the two remaining shims ("the two engine
+TEXT hops `evaluateHeredocBodies` and `evaluateSubstitutionsIn`"), is every CALL to either
+function from `internal/engine` — confirmed by `git grep`, which finds them only in doc
+comments explaining the history above.
+
+## Why the cycle key needed no change (I12)
+
+Walking subtrees removes the re-parse, not the cycle-detection key: `foldSubstitutionScan`
+still computes `subNormalized := normalizeExpression(sub.Body)` and checks it against `stack`
+exactly as before. `sub.Body` was already an exact source slice (`sf.src[lo:hi]`, sliced by
+`substFinder.record` from the retained source) before this step and remains one now — nothing
+here changes what string is fed into the normaliser, only how the ENGINE gets from that string
+to the leaves it recurses into.
+
+## Termination
+
+Subtree recursion terminates by construction: `lowerSubtree` walks `stmts`, a finite subtree of
+one already-successful parse, and each further substitution/heredoc body it discovers is
+strictly smaller (its own extent is properly contained in its parent's, per `substFinder.record`'s
+`lo/hi` bounds). There is no path back to a `Parser.Parse`/`Document` call anywhere in this
+recursion, so there is nothing left that could loop. The cycle check (`detectCycle`) is
+UNCHANGED and still required for the surviving TEXT re-entry paths I7 describes — rules that
+construct new command text (`envvars`, `docker`, `nix`, `kubectl`) still call the public
+`EvaluateExpression`, which still parses and still needs the guard against genuine recursion in
+constructed text.
+
+## Verdict replay
+
+Corpus: `file:$HOME/.local/share/claude-extended-tool-approver/asks.db?immutable=1`, `VACUUM
+INTO` snapshot taken 2026-08-19. 214,313 distinct `(command, cwd, permission_mode)` triples
+(`excluded=0 AND tool_name='Bash'`, one row per distinct `(command, cwd)` pair per
+`internal/setup/replay_test.go`'s own query). **Skipped and NOT presented as the whole:** 64,338
+of 214,313 (30.03%) name a `cwd` that no longer exists.
+
+Replayed offline through `setup.NewEngineForCWD` + `EvaluateHook`, `XDG_DATA_HOME` redirected to
+a temp dir, against a base tree (`git archive` of `8a825da1`) and this step's tree, both compiled
+with `go test -c ./internal/setup/` and run against the identical snapshot. `cmd_evaluate` was
+NOT used, and neither were `baseline`/`compare`.
+
+| base -> new | rows    | direction |
+| ----------- | ------- | --------- |
+| approve     | 110,292 | same      |
+| abstain     | 32,071  | same      |
+| ask         | 7,171   | same      |
+| reject      | 441     | same      |
+
+**GATE: PASS. ZERO transitions** on all 149,975 replayed rows (0 of 214,313 total) — not merely
+none in the less-restrictive direction, none at all, in EITHER direction, and the attributing
+`Module` matched on every row too. This is the expected result for a step whose entire scope is
+removing a redundant re-parse with no change to any verdict-affecting logic: `pc.Substitutions`
+/ `pc.UnquotedHeredocSubstitutions()` and `sub.Leaves` are, by construction (I12: an exact
+source slice, never a print), the identical bytes and the identical lowered leaves that
+`ScanSubstitutions(text)` / `ScanSubstitutionsInHeredocBody(body)` / a fresh
+`EvaluateExpression(sub.Body, …)` call used to independently re-derive.
+
+## FuzzParse / pg2-iumd5
+
+`pg2-iumd5`'s reproducer (`(#"\n<<#\n#\n0`) was checked directly: `Parse` now yields zero
+leaves for it (a parse failure), so `FuzzParse`'s idempotence invariant is vacuously satisfied
+rather than violated. It did **not** survive this step — it did not survive THE FLIP (step 2,
+`pg2-fez3d`), per that section's own note above. `pg2-iumd5` is closed and this step found
+nothing further owed to it. A fresh 6.5M-execution `FuzzParse` run (45s) and 20s runs each of
+`FuzzLeafSetCoversTheSource`, `FuzzWordTokens`, `FuzzHeredocExtentsAreAccountedFor` and
+`FuzzEnumerateSubstitutions` all report clean — no new failing corpus entry was added by this
+step's changes to the lowering.
+
+## Tests
+
+The whole existing suite passes UNCHANGED (`go test ./...`, all packages green), including
+every regression test this bead's acceptance criteria named by hand: `pg2-wguam`'s
+`TestScanSubstitutions_Unparseable` / `TestScanSubstitutionsInHeredocBody_QuotesAreData` /
+`TestIsSafeSubstitutionBody_NestedRejected`; `pg2-r2rf3`'s I2/I3 heredoc floor and quoting
+discriminator tests (`TestIntegration_HeredocExtents`, `TestHeredocQuotedDelimiterDetection`,
+`TestHeredocDashTerminatorIsTabStripped`), the herestring floor rows (`heredoc_test.go`'s
+`{"cat <<<\"word\"", true}`, `parser_test.go`'s `{"herestring", "cmd <<<'input'", true}`, and
+`cat 2<<EOF` in `coverage_test.go`/`flip_test.go`/`fuzz_test.go`/`heredoc_test.go`/
+`shellparse_test.go`), and `TestHeredocFeedingALoopIsLossless`.
+
+## Gates
+
+`prek run --files` on the four changed files: Passed (treefmt, end-of-file-fixer,
+trailing-whitespace, check-merge-conflicts, check-case-conflicts; shellcheck/statix/deadnix/
+behavior-docs-real-corpus report "no files to check"). `nix flake check`: **all checks passed**
+(including `checks.*-go-tests`, `checks.*-integration-tests`, `check-formatting`,
+`check-linting`, `consumer-input-alignment`, `pre-commit-run`).

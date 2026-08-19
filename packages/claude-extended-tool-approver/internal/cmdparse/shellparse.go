@@ -811,7 +811,11 @@ func (lw *lowering) lowerLoop(loop syntax.Loop) {
 	// The word list reaches a leaf of its own (pg2-qkecz hole B). It carries ONLY
 	// Raw: it is data, so it has no executable and must never be judged as a
 	// command, but its text can hold a live `$( )` that genuinely executes.
-	lw.emitDataSpan(wi.Items[0].Pos(), wi.Items[len(wi.Items)-1].End())
+	nodes := make([]syntax.Node, len(wi.Items))
+	for i, it := range wi.Items {
+		nodes[i] = it
+	}
+	lw.emitDataSpan(wi.Items[0].Pos(), wi.Items[len(wi.Items)-1].End(), nodes)
 }
 
 // lowerDecl lowers an assignment builtin — `export`, `declare`, `local`,
@@ -846,6 +850,17 @@ func (lw *lowering) lowerDecl(st *syntax.Stmt, cmd *syntax.DeclClause, pid, idx 
 		appendArg(&leaf, unquote(lw.assignRaw(a)), live)
 	}
 	lw.attachRedirs(st, &leaf)
+	// A DeclClause leaf has no CallExpr for StripLeadingEnvAssignments to find a
+	// leading-assignment boundary in, so the outgoing text scan fell through to
+	// its fail-closed "return raw unchanged" branch and scanned the WHOLE
+	// statement. Matching that: every assignment argument plus every
+	// redirection, none excluded.
+	nodes := make([]syntax.Node, 0, len(cmd.Args)+len(st.Redirs))
+	for _, a := range cmd.Args {
+		nodes = append(nodes, a)
+	}
+	nodes = append(nodes, redirNodes(st.Redirs)...)
+	leaf.Substitutions = lw.substitutionsOf(nodes, true)
 	lw.appendLeaf(unwrapCommand(leaf), sourceSpan{lo: int(st.Pos().Offset()), hi: lw.stmtEndOffset(st)})
 }
 
@@ -901,7 +916,7 @@ func (lw *lowering) lowerCall(st *syntax.Stmt, cmd *syntax.CallExpr, pid, idx in
 		//
 		// It reaches a DATA leaf, the same shape a `for` word list gets: no executable,
 		// so it is never judged as a command, but its Raw is walked for substitutions.
-		lw.emitDataSpan(a.Pos(), a.End())
+		lw.emitDataSpan(a.Pos(), a.End(), []syntax.Node{a})
 	}
 	for i, w := range cmd.Args {
 		tok, procSubs, live := lw.wordToken(w)
@@ -913,6 +928,7 @@ func (lw *lowering) lowerCall(st *syntax.Stmt, cmd *syntax.CallExpr, pid, idx in
 		appendArg(&leaf, tok, live)
 	}
 	lw.attachRedirs(st, &leaf)
+	leaf.Substitutions = lw.callSubstitutions(cmd, st.Redirs)
 	if leaf.Executable == "" {
 		// Assignment-only statement (`LD_PRELOAD=/evil.so && cmd`, or a whole command
 		// that is nothing but assignments), or a redirection-only one. Keep it as a
@@ -935,11 +951,44 @@ func (lw *lowering) lowerCall(st *syntax.Stmt, cmd *syntax.CallExpr, pid, idx in
 			// It reaches a DATA leaf spanning the WHOLE STATEMENT: there is no command to
 			// judge, but its source text can hold a live substitution and the engine's
 			// command-less branch walks it.
-			lw.emitDataSpan(st.Pos(), syntax.NewPos(uint(lw.stmtEndOffset(st)), 0, 0))
+			nodes := make([]syntax.Node, 0, len(cmd.Args)+len(cmd.Assigns))
+			for _, w := range cmd.Args {
+				nodes = append(nodes, w)
+			}
+			for _, a := range cmd.Assigns {
+				nodes = append(nodes, a)
+			}
+			lw.emitDataSpan(st.Pos(), syntax.NewPos(uint(lw.stmtEndOffset(st)), 0, 0), nodes)
 		}
 		return
 	}
 	lw.appendLeaf(unwrapCommand(leaf), sourceSpan{lo: int(st.Pos().Offset()), hi: lw.stmtEndOffset(st)})
+}
+
+// callSubstitutions computes a CallExpr leaf's own top-level substitutions —
+// its args and redirection targets — by walking the already-parsed nodes
+// directly (ADR 0039 step 4, I7/I12): no re-parse of the leaf's Raw.
+//
+// It reproduces cmdparse.StripLeadingEnvAssignments' EXCLUSION of leading
+// assignments, computed from the fact rather than re-derived from text: when
+// the whole statement is nothing but assignments (len(cmd.Args) == 0), that
+// function returns "" and this returns nil to match — those assignments'
+// substitutions belong to the static classifyExpansion path (pg2-gkd5e) and
+// recursing them here too would double-judge them under a different model.
+// Otherwise every arg — INCLUDING Args[0], the executable word itself, which
+// can embed a substitution too — and every redirection are in scope, exactly
+// as StripLeadingEnvAssignments' `raw[off:]` (from Args[0]'s position to the
+// statement's end) was.
+func (lw *lowering) callSubstitutions(cmd *syntax.CallExpr, redirs []*syntax.Redirect) []Substitution {
+	if len(cmd.Assigns) > 0 && len(cmd.Args) == 0 {
+		return nil
+	}
+	nodes := make([]syntax.Node, 0, len(cmd.Args)+len(redirs))
+	for _, w := range cmd.Args {
+		nodes = append(nodes, w)
+	}
+	nodes = append(nodes, redirNodes(redirs)...)
+	return lw.substitutionsOf(nodes, true)
 }
 
 // emitRedirOnly emits a command-less leaf for a statement that is nothing but
@@ -947,6 +996,7 @@ func (lw *lowering) lowerCall(st *syntax.Stmt, cmd *syntax.CallExpr, pid, idx in
 func (lw *lowering) emitRedirOnly(st *syntax.Stmt, pid, idx int) {
 	leaf := ParsedCommand{Raw: lw.stmtRaw(st), PipelineID: pid, PipelineIndex: idx}
 	lw.attachRedirs(st, &leaf)
+	leaf.Substitutions = lw.substitutionsOf(redirNodes(st.Redirs), true)
 	// `len(leaf.Args) > 0` is the fd-prefixed INPUT redirection parity path (see
 	// attachRedir): `0<f` on its own records no Redirection by design, but the operator
 	// and its target become ARGS, and the leaf must still be emitted or the node reaches
@@ -989,6 +1039,7 @@ func (lw *lowering) emitCompoundRedirs(st *syntax.Stmt, pid, idx int) {
 		PipelineIndex: idx,
 	}
 	lw.attachRedirs(st, &leaf)
+	leaf.Substitutions = lw.substitutionsOf(redirNodes(st.Redirs), true)
 	// `len(leaf.Args) > 0` is the fd-prefixed INPUT redirection parity path, exactly as
 	// in emitRedirOnly: `(cmd)0<f` records no Redirection by design, but the operator
 	// and its target become ARGS and the leaf must still be emitted or the node reaches
@@ -996,6 +1047,15 @@ func (lw *lowering) emitCompoundRedirs(st *syntax.Stmt, pid, idx int) {
 	if len(leaf.Redirections) > 0 || leaf.HasHeredoc || len(leaf.Args) > 0 {
 		lw.appendLeaf(leaf, sourceSpan{lo: int(st.Redirs[0].Pos().Offset()), hi: lw.stmtEndOffset(st)})
 	}
+}
+
+// redirNodes widens a redirection list to []syntax.Node for substitutionsOf.
+func redirNodes(redirs []*syntax.Redirect) []syntax.Node {
+	nodes := make([]syntax.Node, len(redirs))
+	for i, r := range redirs {
+		nodes[i] = r
+	}
+	return nodes
 }
 
 // emitData records a command-less DATA leaf for a word whose text may hold a live
@@ -1007,9 +1067,10 @@ func (lw *lowering) emitData(w *syntax.Word) {
 	lw.emitDataNode(w)
 }
 
-// emitDataNode is emitDataSpan for a whole node.
+// emitDataNode is emitDataSpan for a whole node, which also supplies itself as
+// the sole substitution-source node (see emitDataSpan's subNodes parameter).
 func (lw *lowering) emitDataNode(n syntax.Node) {
-	lw.emitDataSpan(n.Pos(), n.End())
+	lw.emitDataSpan(n.Pos(), n.End(), []syntax.Node{n})
 }
 
 // emitDataSpan records a DATA leaf spanning [from, to) of the source.
@@ -1018,7 +1079,14 @@ func (lw *lowering) emitDataNode(n syntax.Node) {
 // itself load-bearing: ENFORCEMENT GUARD 4 (I14) asks whether a node's offsets fall
 // inside some leaf's extent, and a data leaf is the only thing covering a `for` word
 // list, a `case` subject or an arithmetic command.
-func (lw *lowering) emitDataSpan(from, to syntax.Pos) {
+//
+// subNodes are the already-parsed node(s) [from, to) was sliced from — a single
+// word, an assignment, or (lowerLoop's word list) several sibling words — walked
+// directly for this leaf's own Substitutions (ADR 0039 step 4, I7/I12): no
+// re-parse of the sliced Raw. A data node can never itself carry a heredoc, so
+// substitutionsOf's skipHeredocBodies argument is passed true uniformly; it is
+// immaterial here.
+func (lw *lowering) emitDataSpan(from, to syntax.Pos, subNodes []syntax.Node) {
 	span := lw.spanOf(from, to)
 	raw := lw.slice(from, to)
 	if strings.TrimSpace(raw) == "" {
@@ -1032,6 +1100,7 @@ func (lw *lowering) emitDataSpan(from, to syntax.Pos) {
 	lw.dataLeaves = append(lw.dataLeaves, ParsedCommand{
 		Raw: raw, PipelineID: -1, PipelineIndex: -1,
 		SubshellScope: append([]int(nil), lw.scopePath...),
+		Substitutions: lw.substitutionsOf(subNodes, true),
 	})
 	lw.dataSpans = append(lw.dataSpans, span)
 }
@@ -1271,6 +1340,16 @@ func (lw *lowering) heredoc(r *syntax.Redirect) Heredoc {
 	hd := Heredoc{StripTabs: r.Op == syntax.DashHdoc, Terminated: true}
 	hd.Delimiter, hd.Quoted = lw.delimiter(r.Word)
 	hd.Body = lw.heredocBody(r)
+	if !hd.Quoted && r.Hdoc != nil {
+		// The body's own top-level substitutions, walked directly off the
+		// already-parsed Redirect.Hdoc word (ADR 0039 step 4, I7/I12) — never
+		// via cmdparse.ScanSubstitutionsInHeredocBody, which would re-parse
+		// hd.Body. skipHeredocBodies is false: a heredoc body cannot itself
+		// contain another heredoc, so there is nothing to skip, and this
+		// matches ScanSubstitutionsInHeredocBody's BODY expansion model
+		// (quotes are data) rather than the command-position one.
+		hd.Substitutions = lw.substitutionsOf([]syntax.Node{r.Hdoc}, false)
+	}
 	return hd
 }
 
@@ -1727,6 +1806,13 @@ type substFinder struct {
 type placedSubstitution struct {
 	offset int
 	sub    Substitution
+	// stmts are the substitution's OWN already-parsed body statements —
+	// *syntax.CmdSubst.Stmts / *syntax.ProcSubst.Stmts — retained ONLY so
+	// substitutionsOf (ADR 0039 step 4) can recursively pre-lower them into
+	// sub.Leaves without a second parse. collectSubstitutions (the TEXT entry
+	// points' finisher) never reads this field, so ScanSubstitutions'
+	// observable output is unaffected by its presence.
+	stmts []*syntax.Stmt
 }
 
 // collectSubstitutions walks root and returns the top-level substitutions of src,
@@ -1788,7 +1874,7 @@ func (sf *substFinder) recordCmdSubst(cs *syntax.CmdSubst) {
 	if cs.Backquotes {
 		open, kind = 1, SubstBacktick
 	}
-	sf.record(cs.Left, cs.Right, open, kind)
+	sf.record(cs.Left, cs.Right, open, kind, cs.Stmts)
 }
 
 func (sf *substFinder) recordProcSubst(ps *syntax.ProcSubst) {
@@ -1799,7 +1885,7 @@ func (sf *substFinder) recordProcSubst(ps *syntax.ProcSubst) {
 	// `<(`, `>(` and ksh's `=(` are all two bytes. The last cannot arrive under
 	// Variant(LangBash) — it is a LangError — but classifying it as an input
 	// process substitution rather than dropping it keeps the default safe.
-	sf.record(ps.OpPos, ps.Rparen, 2, kind)
+	sf.record(ps.OpPos, ps.Rparen, 2, kind, ps.Stmts)
 }
 
 // record appends one substitution, or NOTHING when its extent is not exactly
@@ -1812,7 +1898,12 @@ func (sf *substFinder) recordProcSubst(ps *syntax.ProcSubst) {
 // “ echo `oops $(rm -rf ~) “ both land here, and both must contribute NO body
 // while the caller reports Unparseable — exactly as the outgoing scan's
 // `return stop(...)` did.
-func (sf *substFinder) record(opener, closer syntax.Pos, openWidth int, kind SubstitutionKind) {
+//
+// stmts is the substitution's own already-parsed body — recorded alongside the
+// Kind/Body pair purely as a passenger for substitutionsOf (ADR 0039 step 4) to
+// recurse into without a second parse; collectSubstitutions, the TEXT entry
+// points' finisher, never reads it back off placedSubstitution.
+func (sf *substFinder) record(opener, closer syntax.Pos, openWidth int, kind SubstitutionKind, stmts []*syntax.Stmt) {
 	if opener.IsRecovered() || closer.IsRecovered() || !opener.IsValid() || !closer.IsValid() {
 		return
 	}
@@ -1824,7 +1915,72 @@ func (sf *substFinder) record(opener, closer syntax.Pos, openWidth int, kind Sub
 	sf.found = append(sf.found, placedSubstitution{
 		offset: int(opener.Offset()),
 		sub:    Substitution{Kind: kind, Body: sf.src[lo:hi]},
+		stmts:  stmts,
 	})
+}
+
+// substitutionsOf finds the top-level substitutions reachable from nodes —
+// each walked directly, no re-parse — and recursively pre-lowers each one's
+// body into leaves (ADR 0039 step 4, I7/I12). It is the subtree-walking
+// counterpart to collectSubstitutions: same substFinder, same ordering, but
+// anchored on nodes the caller's OWN lowering pass already has in hand rather
+// than on a freshly p.Parse'd root, and it populates Substitution.Leaves,
+// which collectSubstitutions' TEXT-entry-point callers never need and never
+// get.
+//
+// skipHeredocBodies matches collectSubstitutions' meaning: true excludes a
+// sibling redirection's Hdoc (that heredoc's own substitutions belong to a
+// DIFFERENT expansion model, collected separately via Heredoc.Substitutions).
+// A data node (a word, an assignment, an arithmetic/test/let expression) can
+// never itself contain a heredoc — heredocs attach only to a *syntax.Stmt's
+// own redirections — so the flag is immaterial there; callers pass true
+// uniformly for clarity.
+func (lw *lowering) substitutionsOf(nodes []syntax.Node, skipHeredocBodies bool) []Substitution {
+	sf := &substFinder{src: lw.src, skipHeredocBodies: skipHeredocBodies}
+	for _, n := range nodes {
+		if n == nil {
+			continue
+		}
+		syntax.Walk(n, sf.visit)
+	}
+	if len(sf.found) == 0 {
+		return nil
+	}
+	sort.SliceStable(sf.found, func(i, j int) bool { return sf.found[i].offset < sf.found[j].offset })
+	out := make([]Substitution, 0, len(sf.found))
+	for _, p := range sf.found {
+		out = append(out, Substitution{
+			Kind:   p.sub.Kind,
+			Body:   p.sub.Body,
+			Leaves: lowerSubtree(lw.src, p.stmts),
+		})
+	}
+	return out
+}
+
+// lowerSubtree lowers stmts — an already-parsed statement list found at
+// whatever depth (a substitution body, a heredoc body) — into leaves, with
+// their own Substitutions / Heredoc.Substitutions populated the SAME
+// recursive way ParseShell populates them, and with NO further
+// Parser.Parse/Document call (ADR 0039 I7): stmts is already a subtree of the
+// one successful parse that found it.
+//
+// src is the OUTER retained source (never a re-based substring): every
+// *syntax.Stmt position is absolute within the text ONE Parser.Parse call
+// consumed, so slicing against the outer src reproduces the exact bytes a
+// separate ParseShell(bodyText) call over the identical substring would have
+// sliced — the leaves are byte-for-byte the same, computed once instead of
+// twice. A fresh pipeline/subshell sequence (pipeSeq -1, as ParseShell's own
+// top-level call uses) matches what that independent call would have minted,
+// since IDs are only ever compared within one Parse call's own leaf set
+// (ParsedCommand.PipelineID's doc).
+func lowerSubtree(src string, stmts []*syntax.Stmt) []ParsedCommand {
+	if len(stmts) == 0 {
+		return nil
+	}
+	lw := &lowering{src: src, pipeSeq: -1}
+	lw.lowerStmtsFresh(stmts)
+	return append(lw.leaves, lw.dataLeaves...)
 }
 
 // soleSimpleCommandLeaf parses text and returns the single lowered leaf when the
