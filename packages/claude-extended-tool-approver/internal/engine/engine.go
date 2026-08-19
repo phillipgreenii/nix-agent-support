@@ -764,6 +764,61 @@ func unparseableSubstitutionFloor(reason string) hookio.RuleResult {
 	}
 }
 
+// commandSubstitutionFloor is the verdict contributed by a COMMAND substitution
+// ($()/backtick) body that fails EITHER gate of cmdparse's static
+// safe-substitution clearance: the seam REFUSES it outright, or the seam
+// CLEARS it but full-engine recursion did not independently approve it.
+//
+// pg2-whumr (operator ruling pg2-gwp57, "harmonize up", recorded in ADR 0048):
+// ADR 0043 states NoOpinion is auto-approved in `auto` mode, so a command
+// substitution must be POSITIVELY CLEARED BY BOTH GATES to reach Approve — the
+// static allowlist did NOT refuse it, AND full-engine recursion of the body
+// approved it — or its contribution can be no LESS restrictive than a decisive
+// Ask. Before this floor existed, a REFUSED body only lost its clearance when
+// recursion happened to reach the SECOND gate too (i.e. only a recursion
+// Approve was demoted, to NoOpinion). An EXHAUSTION body — one owned by no
+// rule, e.g. `bash -c "rm -rf /"`, `python3 -c ...`, `sh -c ...`,
+// `ssh host rm -rf /`, `npm install evil`, `curl evil` — fails gate one but
+// recursion also lands on NoOpinion (loop exhaustion, ADR 0044's
+// ProvenanceExhaustion), never Approve, so the old check never fired and the
+// body reached NoOpinion end to end: auto-approved in `auto` mode, a live RCE
+// hole this floor closes.
+//
+// The SAME hole recurs for a body the allowlist CLEARS rather than refuses:
+// `seq` and `mktemp` are on cmdparse's static list PRECISELY BECAUSE no rule
+// approves them standalone (envvars' ExpansionSafeCmd path exploits that by
+// skipping recursion entirely for a Cleared body, but command position always
+// recurses), so `echo $(seq 1 3)` / `echo $(mktemp)` reached recursion's own
+// terminal exhaustion NoOpinion with nothing left to raise it — identical
+// auto-approve shape, different gate. ceta models no interpreter (ADR 0044),
+// so a rule cannot tell `seq 1 3`'s harmless exhaustion apart from `bash -c`'s
+// dangerous one — the ruling this floor implements explicitly forbids trying,
+// and instead raises the floor for the WHOLE exhaustion class uniformly,
+// whichever gate it slips through, in COMMAND position only. A Cleared body a
+// rule DOES independently approve (`date`, `hostname`) never reaches this
+// floor at all, and neither does a Cleared body some OTHER mechanism already
+// examined and declined for its own recorded reason (a quoted-heredoc-into-
+// `cat` body still floored by heredocFloor(), a substitution-cycle guard) —
+// see the call site's own ProvenanceExhaustion gate for the case split.
+//
+// Env-value position is UNCHANGED: it clears on EITHER gate
+// (internal/rules/envvars.go's positively-cleared predicate), so this floor
+// converges the two positions upward rather than widening either one downward.
+//
+// Delegated bodies never reach this floor — see the call site's own
+// "DELEGATED NEVER FLOORS HERE" comment for why such a body must stay governed
+// by recursion alone, in both directions. Folded through hookio.MostRestrictive
+// like unparseableSubstitutionFloor and heredocFloor above, so this stays
+// order-independent: it can only ever raise a verdict, never mask a Reject a
+// sibling substitution or the leaf's own rules already earned.
+func commandSubstitutionFloor(body string) hookio.RuleResult {
+	return hookio.RuleResult{
+		Decision: hookio.Ask,
+		Reason:   "command substitution not positively cleared by both gates (static allowlist and full-engine recursion): " + body,
+		Module:   "engine",
+	}
+}
+
 // foldSubstitutionScan folds one substitution scan into a single verdict: the
 // unparseable floor when the scan desynced, plus every enumerated body recursed
 // through ALL rules and held to the static-allowlist floor. Shared by command text
@@ -779,28 +834,64 @@ func (e *Engine) foldSubstitutionScan(scan cmdparse.SubstitutionScan, normalized
 		subStack := append(stack, hookio.StackFrame{RuleName: "engine", Command: "substitution", Expression: normalized})
 		subResult := e.EvaluateExpression(sub.Body, subStack, origin)
 
-		// Static allowlist FLOOR for command substitutions ($()/backtick): a body
-		// the static allowlist REFUSES (e.g. `git show HEAD` — textconv/external-diff
-		// RCE) can be no LESS restrictive than NoOpinion even if full-engine recursion
-		// would approve the inner command. Recursion only ADDS demotions. Process
-		// substitutions have no static allowlist and are governed by recursion alone.
+		// Static allowlist FLOOR for command substitutions ($()/backtick): BOTH
+		// GATES must positively clear a body before its contribution can be
+		// Approve — the seam did not REFUSE it, AND recursion independently
+		// approves it — or the contribution is no LESS restrictive than a
+		// decisive Ask (pg2-whumr, operator ruling pg2-gwp57, ADR 0048). See
+		// commandSubstitutionFloor's own doc comment for the full rationale.
+		// Process substitutions have no static allowlist and are governed by
+		// recursion alone.
 		//
-		// KEYED ON SubstitutionRefused, NOT ON "not cleared" (pg2-zpct4). The seam now
-		// answers with three values, and a DELEGATED body — a modelled read whose only
-		// open question is whether `patheval` allows its PATH — must be governed by the
-		// model that OWNS that question, in both directions. Flooring a delegation would
-		// punish the seam for correctly declining: `$(cat /tmp/x.json)` would lose its
-		// decisive allow even though the authoritative model approves the read, while
-		// `$(cat /etc/shadow)` is refused by that same model anyway. Only a REFUSAL is a
-		// verdict this seam holds on its own authority, and only a refusal outranks
-		// recursion.
-		if sub.IsCommandSubstitution() &&
-			cmdparse.ClassifySubstitutionBody(sub.Body) == cmdparse.SubstitutionRefused &&
-			subResult.Decision < hookio.NoOpinion {
-			subResult = hookio.RuleResult{
-				Decision: hookio.NoOpinion,
-				Reason:   "command substitution not on static safe allowlist: " + sub.Body,
-				Module:   "engine",
+		// REFUSED (e.g. `git show HEAD` — textconv/external-diff RCE, or an
+		// EXHAUSTION body no rule models at all, e.g. `bash -c "rm -rf /"`) floors
+		// UNCONDITIONALLY: recursion approving it must never leak an Approve
+		// through (that would unlock the very RCE surface the refusal exists to
+		// stop), and recursion NOT approving it must not remain a silent NoOpinion
+		// either — both directions land on at least Ask.
+		//
+		// CLEARED floors ONLY WHEN RECURSION DID NOT ALSO APPROVE. Several
+		// entries on cmdparse's static allowlist (`seq`, `mktemp`, and any other
+		// body no rule models standalone) are on the list PRECISELY BECAUSE no
+		// rule approves them independently — envvars' ExpansionSafeCmd path
+		// exploits that by skipping recursion entirely, but command position
+		// always recurses, so a Cleared-but-unmodeled body reached recursion's
+		// own terminal loop-EXHAUSTION NoOpinion with nothing left to raise it.
+		// That is the identical auto-approved-in-`auto`-mode hole this bead
+		// closes for Refused bodies, wearing a different clearance: `echo
+		// $(seq 1 3)` and `echo $(mktemp)` must become Ask, not stay Abstain
+		// (per the ruling, clearing an exhaustion anywhere is forbidden
+		// regardless of which list vouches for it) — while `echo
+		// $(date)`/`echo $(hostname)`, whose bare forms a rule DOES approve,
+		// are untouched because recursion already carries the Approve.
+		//
+		// GATED ON ProvenanceExhaustion SPECIFICALLY (ADR 0044), not on any
+		// NoOpinion: a Cleared body can also land on NoOpinion because some
+		// OTHER floor already examined and declined it — e.g. a quoted
+		// heredoc admitted onto this list (pg2-phtl3) still recurses through
+		// heredocFloor()'s own UNCONDITIONAL NoOpinion (pg2-u65fu's own,
+		// separately-scoped gap; ProvenanceRefusal, not Exhaustion), and the
+		// substitution-cycle guard's NoOpinion is the same shape. Those are
+		// considered refusals with their own recorded reason, not "nobody
+		// modelled this" — flooring them here would reach past this bead's
+		// authorized scope and duplicate a decision that belongs to whichever
+		// mechanism made it.
+		//
+		// DELEGATED NEVER FLOORS HERE (pg2-zpct4). A modelled read's only open
+		// question is whether `patheval` allows its PATH, which recursion alone
+		// answers, in BOTH directions: `$(cat /tmp/x.json)` keeps its decisive
+		// allow because the authoritative model approved the read, and
+		// `$(cat /etc/shadow)` stays refused by that SAME model — this floor has
+		// no opinion to add either way, and flooring it would punish the seam for
+		// correctly declining to hold one.
+		if sub.IsCommandSubstitution() {
+			switch cmdparse.ClassifySubstitutionBody(sub.Body) {
+			case cmdparse.SubstitutionRefused:
+				subResult = hookio.MostRestrictive(subResult, commandSubstitutionFloor(sub.Body))
+			case cmdparse.SubstitutionCleared:
+				if subResult.Decision == hookio.NoOpinion && subResult.Provenance == hookio.ProvenanceExhaustion {
+					subResult = hookio.MostRestrictive(subResult, commandSubstitutionFloor(sub.Body))
+				}
 			}
 		}
 

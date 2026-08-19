@@ -527,8 +527,11 @@ func TestEngine_EvaluateExpression_SubstitutionRecursion(t *testing.T) {
 		{"rejecting inner cmd sub", "echo $(rm -rf /)", hookio.Reject},
 		{"rejecting inner backtick", "echo `rm -rf /`", hookio.Reject},
 		{"rejecting inner process sub", "echo <(rm -rf /)", hookio.Reject},
-		// An unowned (abstaining) inner command demotes the outer approve.
-		{"abstaining inner demotes", "echo $(unowned thing)", hookio.NoOpinion},
+		// An unowned command substitution is exactly the EXHAUSTION shape pg2-whumr's
+		// commandSubstitutionFloor raises (operator ruling pg2-gwp57, ADR 0048):
+		// "unowned" is on no static allowlist, so the floor demotes the outer approve
+		// to a decisive Ask rather than the pre-pg2-whumr NoOpinion.
+		{"unowned inner demotes to a decisive ask", "echo $(unowned thing)", hookio.Ask},
 		// Nested: the inner rm surfaces on re-evaluation of the outer body.
 		{"nested rm surfaces", "echo $(cat $(rm -rf /))", hookio.Reject},
 		{"process sub nested in cmd sub", "echo $(cat <(rm -rf /))", hookio.Reject},
