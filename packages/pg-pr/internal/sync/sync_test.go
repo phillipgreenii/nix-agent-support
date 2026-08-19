@@ -4,11 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync/atomic"
+	"sync"
 	"testing"
 	"time"
 
@@ -242,9 +243,82 @@ func successRun() api.CIRun {
 
 // ----------------------------------------------------------------------
 // Test bd workspace
+//
+// tc-8myb: this package has 11 call sites that each used to boot a FRESH real
+// bd workspace via `bd init` (an embedded-dolt bootstrap measured at ~19s
+// standalone on this host, and 3+ minutes under load), which alone could blow
+// the package's 10-minute `go test` budget. `bd init`'s output has no
+// per-test-varying content (the .beads/embeddeddolt tree and config are
+// identical regardless of which test asked for it), so instead of paying that
+// cost 11 times, we pay it ONCE into a package-scoped template directory
+// (bdWorkspaceTemplate, guarded by sync.Once) and give each test its own
+// workspace via a cheap recursive filesystem copy (copyDir). Every test still
+// gets a fully independent, isolated directory exactly as before — the fix
+// eliminates the repeated `bd init` cost, not the isolation.
+//
+// A true SHARED live workspace (one `bd` database used concurrently/serially
+// by all 11 call sites) was considered and rejected: most of these tests hard
+// -code the same repo ("foo/bar") and small PR numbers (1, 2, 3, 42, 55, ...),
+// and EnsureMergeRequest/ListMergeRequests key off workspace-wide "repo#PR"
+// identities — e.g. TestSyncSummaryCounts asserts BeadsCreated/BeadsUpdated
+// counts that depend on exactly which merge-request beads already exist in
+// the workspace before Sync runs. Sharing would make one test's leftover
+// beads silently change another test's "pre-existing vs. new" classification.
+// TestSync_PerRepoWorkspaceIsolation additionally requires TWO genuinely
+// separate workspaces by design (it proves per-repo isolation), so it keeps
+// calling newRealBDWorkspaceDir twice.
 // ----------------------------------------------------------------------
 
-var bdCounter int64
+var (
+	bdTemplateOnce sync.Once
+	bdTemplateDir  string
+	bdTemplateErr  error
+)
+
+// bdWorkspaceTemplate lazily builds ONE real bd workspace (bd init + bd
+// config set) under a package-scoped temp directory and returns its path.
+// The build is guarded by sync.Once so it runs at most once per `go test`
+// process regardless of how many tests call it. Each `bd` subprocess is
+// bounded by a generous timeout (see realBDSetupTimeout) so a stuck `bd init`
+// fails fast with a clear error instead of silently eating the whole package
+// budget.
+func bdWorkspaceTemplate(t *testing.T) string {
+	t.Helper()
+	bdTemplateOnce.Do(func() {
+		dir, err := os.MkdirTemp("", "pg-pr-sync-bd-template-*")
+		if err != nil {
+			bdTemplateErr = fmt.Errorf("create bd template dir: %w", err)
+			return
+		}
+		env := cleanEnv()
+
+		ctx, cancel := context.WithTimeout(context.Background(), realBDSetupTimeout)
+		defer cancel()
+		init := exec.CommandContext(ctx, "bd", "init", "--prefix", "synctest")
+		init.Dir = dir
+		init.Env = env
+		if out, err := init.CombinedOutput(); err != nil {
+			bdTemplateErr = fmt.Errorf("bd init (template): %w\n%s", err, out)
+			return
+		}
+
+		cfgCtx, cfgCancel := context.WithTimeout(context.Background(), realBDSetupTimeout)
+		defer cfgCancel()
+		cfgSet := exec.CommandContext(cfgCtx, "bd", "config", "set", "types.custom", "merge-request,feedback")
+		cfgSet.Dir = dir
+		cfgSet.Env = env
+		if out, err := cfgSet.CombinedOutput(); err != nil {
+			bdTemplateErr = fmt.Errorf("bd config set (template): %w\n%s", err, out)
+			return
+		}
+
+		bdTemplateDir = dir
+	})
+	if bdTemplateErr != nil {
+		t.Fatalf("bd workspace template: %v", bdTemplateErr)
+	}
+	return bdTemplateDir
+}
 
 func newRealBDClient(t *testing.T) *beads.Client {
 	t.Helper()
@@ -253,35 +327,53 @@ func newRealBDClient(t *testing.T) *beads.Client {
 	return beads.NewClientWithRunner(runner)
 }
 
-// newRealBDWorkspaceDir boots a fresh bd workspace under t.TempDir() and
-// returns (dir, cleanEnv). Used by tests that need to construct per-repo
-// bd clients via beads.NewClientForRepo against a real workspace.
+// newRealBDWorkspaceDir returns a fresh, independent bd workspace under
+// t.TempDir() by copying the package-level template (see bdWorkspaceTemplate)
+// rather than re-running `bd init`, and returns (dir, cleanEnv). Used by
+// tests that need to construct per-repo bd clients via beads.NewClientForRepo
+// against a real workspace.
 func newRealBDWorkspaceDir(t *testing.T) (string, []string) {
 	t.Helper()
 	if _, err := exec.LookPath("bd"); err != nil {
 		t.Skip("bd not on PATH")
 	}
+	template := bdWorkspaceTemplate(t)
 	dir := t.TempDir()
-	n := atomic.AddInt64(&bdCounter, 1)
-	prefix := strings.ToLower(strings.ReplaceAll(t.Name(), "/", "_"))
-	if len(prefix) > 8 {
-		prefix = prefix[:8]
+	if err := copyDir(template, dir); err != nil {
+		t.Fatalf("copy bd workspace template: %v", err)
 	}
-	prefix = alnum(prefix) + intToBase36(n)
-	env := cleanEnv()
-	init := exec.Command("bd", "init", "--prefix", prefix)
-	init.Dir = dir
-	init.Env = env
-	if out, err := init.CombinedOutput(); err != nil {
-		t.Fatalf("bd init: %v\n%s", err, out)
-	}
-	cfgSet := exec.Command("bd", "config", "set", "types.custom", "merge-request,feedback")
-	cfgSet.Dir = dir
-	cfgSet.Env = env
-	if out, err := cfgSet.CombinedOutput(); err != nil {
-		t.Fatalf("bd config set: %v\n%s", err, out)
-	}
-	return dir, env
+	return dir, cleanEnv()
+}
+
+// copyDir recursively copies the contents of src into dst. dst must already
+// exist. Used to clone the bd workspace template (see bdWorkspaceTemplate)
+// cheaply instead of re-running `bd init` per test.
+func copyDir(src, dst string) error {
+	return filepath.WalkDir(src, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(dst, rel)
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			if rel == "." {
+				return nil // dst already exists (t.TempDir())
+			}
+			return os.MkdirAll(target, info.Mode())
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(target, data, info.Mode())
+	})
 }
 
 func cleanEnv() []string {
@@ -299,28 +391,35 @@ func cleanEnv() []string {
 	return out
 }
 
-func alnum(s string) string {
-	var b strings.Builder
-	for _, r := range s {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
+// realBDSetupTimeout bounds the one-time bd init/config set subprocesses that
+// build the package's shared bd workspace template (see bdWorkspaceTemplate).
+// bd init measured ~19s standalone on this host, and 3+ minutes under heavy
+// load in the tc-8myb incident; 5 minutes is generous enough to tolerate that
+// load case while still failing fast (and diagnosably) well short of the
+// package's 10-minute go test default if `bd` genuinely wedges.
+const realBDSetupTimeout = 5 * time.Minute
+
+// realBDCtx returns a context bounded by realBDOpTimeout for a test that
+// drives a real (non-fake) bd-backed Engine. Production code (CLIRunner.Run)
+// has no built-in timeout of its own — it relies entirely on the caller's
+// context (see pkg/beads/runner.go) — which is correct for production
+// callers but means a genuinely stuck `bd` subprocess during a test would
+// otherwise silently consume the whole package's 10-minute test budget (the
+// tc-8myb incident: a `ListChildrenOfPR` call stuck 3+ minutes under load).
+// Using this context instead of context.Background() only affects these
+// tests; it does not change CLIRunner.Run's default (timeout-less) behavior
+// for real production callers.
+func realBDCtx(t *testing.T) context.Context {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), realBDOpTimeout)
+	t.Cleanup(cancel)
+	return ctx
 }
 
-func intToBase36(n int64) string {
-	if n == 0 {
-		return "0"
-	}
-	const al = "0123456789abcdefghijklmnopqrstuvwxyz"
-	out := ""
-	for n > 0 {
-		out = string(al[n%36]) + out
-		n /= 36
-	}
-	return out
-}
+// realBDOpTimeout bounds a single test's real-bd-backed Sync/SyncPR call.
+// Chosen generously (see realBDSetupTimeout) so a legitimately slow-but-
+// working `bd` subprocess under load does not make CI flakier.
+const realBDOpTimeout = 5 * time.Minute
 
 // ----------------------------------------------------------------------
 // Tests
@@ -440,7 +539,7 @@ func cfgWithCICD() *config.Config {
 }
 
 func TestSync_CreatesBeadsForObservedPRs(t *testing.T) {
-	ctx := context.Background()
+	ctx := realBDCtx(t)
 	vcs := newFakeVCS()
 	vcs.my["foo/bar"] = []api.PR{samplePR(1, "foo/bar", "feat/x")}
 	vcs.team["foo/bar"] = []api.PR{samplePR(2, "foo/bar", "feat/y")}
@@ -465,7 +564,7 @@ func TestSync_CreatesBeadsForObservedPRs(t *testing.T) {
 }
 
 func TestSync_IdempotentOnReRun(t *testing.T) {
-	ctx := context.Background()
+	ctx := realBDCtx(t)
 	vcs := newFakeVCS()
 	vcs.my["foo/bar"] = []api.PR{samplePR(1, "foo/bar", "feat/x")}
 	e := makeEngine(t, vcs)
@@ -486,7 +585,7 @@ func TestSync_IdempotentOnReRun(t *testing.T) {
 }
 
 func TestSync_ClosesBeadsWhenPRDisappears(t *testing.T) {
-	ctx := context.Background()
+	ctx := realBDCtx(t)
 	vcs := newFakeVCS()
 	vcs.my["foo/bar"] = []api.PR{
 		samplePR(1, "foo/bar", "feat/x"),
@@ -523,7 +622,7 @@ func TestSync_ClosesBeadsWhenPRDisappears(t *testing.T) {
 // It uses the makeEngine harness (real bd client via Deps.Beads + real store
 // + routing bridge) so the pre-existing-bead index reflects the workspace.
 func TestSyncSummaryCounts(t *testing.T) {
-	ctx := context.Background()
+	ctx := realBDCtx(t)
 	vcs := newFakeVCS()
 	// PR #1 (new) and PR #2 (pre-existing) are both observed this tick.
 	// PR #3 is intentionally NOT observed (it disappeared upstream).
@@ -579,7 +678,7 @@ func TestSyncSummaryCounts(t *testing.T) {
 // counted), so a single newly-observed self-authored draft PR yields exactly
 // one create and zero updates.
 func TestSyncSummaryCountsDraftPromoteNoDoubleCount(t *testing.T) {
-	ctx := context.Background()
+	ctx := realBDCtx(t)
 	vcs := newFakeVCS()
 	ci := newFakeCICD()
 
@@ -630,7 +729,7 @@ func TestSyncSummaryCountsDraftPromoteNoDoubleCount(t *testing.T) {
 // rows so it can prove the close event was enqueued (the bridge would consume
 // them and we'd only see the bead side-effect).
 func TestSyncEmitsCloseForDisappearedPR(t *testing.T) {
-	ctx := context.Background()
+	ctx := realBDCtx(t)
 	db := store.OpenForTest(t)
 
 	// VCS returns NO PRs for foo/bar — enumeration succeeds (so foo/bar is
@@ -720,7 +819,7 @@ func TestSyncEmitsCloseForDisappearedPR(t *testing.T) {
 }
 
 func TestSync_DoesNotCloseBeadsForFailedRepo(t *testing.T) {
-	ctx := context.Background()
+	ctx := realBDCtx(t)
 	vcs := newFakeVCS()
 	vcs.my["foo/bar"] = []api.PR{samplePR(1, "foo/bar", "feat/x")}
 	e := makeEngine(t, vcs)
@@ -743,7 +842,7 @@ func TestSync_DoesNotCloseBeadsForFailedRepo(t *testing.T) {
 }
 
 func TestSync_WritesStateFile(t *testing.T) {
-	ctx := context.Background()
+	ctx := realBDCtx(t)
 	vcs := newFakeVCS()
 	vcs.my["foo/bar"] = []api.PR{samplePR(1, "foo/bar", "feat/x")}
 	e := makeEngine(t, vcs)
@@ -766,7 +865,7 @@ func TestSync_WritesStateFile(t *testing.T) {
 }
 
 func TestSyncPR_SingleRefresh(t *testing.T) {
-	ctx := context.Background()
+	ctx := realBDCtx(t)
 	vcs := newFakeVCS()
 	vcs.views[keyOf("foo/bar", 42)] = samplePR(42, "foo/bar", "feat/z")
 	e := makeEngine(t, vcs)
@@ -790,7 +889,7 @@ func TestSyncPR_SingleRefresh(t *testing.T) {
 }
 
 func TestSyncPR_ClosesWhenUpstreamMerged(t *testing.T) {
-	ctx := context.Background()
+	ctx := realBDCtx(t)
 	vcs := newFakeVCS()
 	open := samplePR(42, "foo/bar", "feat/z")
 	vcs.views[keyOf("foo/bar", 42)] = open
@@ -895,7 +994,7 @@ func TestSyncPRClosedEmitsClose(t *testing.T) {
 // workspaces; after Sync, each workspace must hold only the beads for its
 // own PRs.
 func TestSync_PerRepoWorkspaceIsolation(t *testing.T) {
-	ctx := context.Background()
+	ctx := realBDCtx(t)
 
 	// Strip BEADS_DIR/WORKSPACE_ROOT for the test process so the bd
 	// invocations the engine spawns inherit a clean env. beads.NewClientForRepo
@@ -978,7 +1077,7 @@ func TestSync_PerRepoWorkspaceIsolation(t *testing.T) {
 }
 
 func TestSyncPR_RejectsUnknownRepo(t *testing.T) {
-	ctx := context.Background()
+	ctx := realBDCtx(t)
 	e := makeEngine(t, newFakeVCS())
 	_, err := e.SyncPR(ctx, "no/such-repo", 1)
 	if err == nil {
@@ -1021,7 +1120,7 @@ func (noopBeads) ListMergeRequests(context.Context, bool) ([]beads.MergeRequest,
 func TestSync_ProgressesEvenIfStateSaveFails(t *testing.T) {
 	// Exercise the state-save error path by pointing StateDir at a file
 	// where MkdirAll will fail (a regular file with .ext acting as parent).
-	ctx := context.Background()
+	ctx := realBDCtx(t)
 	vcs := newFakeVCS()
 	vcs.my["foo/bar"] = []api.PR{samplePR(1, "foo/bar", "feat/x")}
 
@@ -1115,7 +1214,7 @@ func TestSync_PopulatesSnapshot(t *testing.T) {
 }
 
 func TestSyncPR_SkipsDraftPromoteForTeammate(t *testing.T) {
-	ctx := context.Background()
+	ctx := realBDCtx(t)
 	vcs := newFakeVCS()
 	ci := newFakeCICD()
 
@@ -1181,7 +1280,7 @@ func TestIsSelfAuthored(t *testing.T) {
 }
 
 func TestSync_OnlyPromotesDraftForSelfAuthoredPRs(t *testing.T) {
-	ctx := context.Background()
+	ctx := realBDCtx(t)
 	vcs := newFakeVCS()
 	ci := newFakeCICD()
 
@@ -1261,7 +1360,7 @@ func TestSummary_WarningsJSONRoundTrip(t *testing.T) {
 }
 
 func TestSync_TreatsEmptySelfLoginAsTeammate(t *testing.T) {
-	ctx := context.Background()
+	ctx := realBDCtx(t)
 	vcs := newFakeVCS()
 	ci := newFakeCICD()
 
@@ -1392,7 +1491,7 @@ func TestSyncCreatesBeadViaOutbox(t *testing.T) {
 // This is the Task 7 contract: bead-state projection for draft-promote arrives
 // via the bridge (event-driven), not via an inline bead write.
 func TestMaybePromoteDraftEmitsUpdate(t *testing.T) {
-	ctx := context.Background()
+	ctx := realBDCtx(t)
 
 	vcs := newFakeVCS()
 	ci := newFakeCICD()
@@ -1473,7 +1572,7 @@ func TestMaybePromoteDraftEmitsUpdate(t *testing.T) {
 // drops the excluded check from the rollup entirely, so it no longer blocks
 // promotion. (pg2-qs46b)
 func TestMaybePromoteDraftIgnoresExcludedCICheck(t *testing.T) {
-	ctx := context.Background()
+	ctx := realBDCtx(t)
 
 	vcs := newFakeVCS()
 	ci := newFakeCICD()

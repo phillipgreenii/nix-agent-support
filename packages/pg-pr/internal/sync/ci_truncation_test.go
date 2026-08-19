@@ -65,7 +65,7 @@ func fullCIRuns(headSHA string) []api.CIRun {
 // After the fix (re-source CI from the CICD provider when ciContexts truncates)
 // the failing 31st check produces a ci-failure feedback row.
 func TestBulkCIFailureBeyondContext30_Ingested(t *testing.T) {
-	ctx := context.Background()
+	ctx := realBDCtx(t)
 
 	const headSHA = "head-sha-abc"
 	// A team-authored open PR (ingestion runs for mine + team alike).
@@ -134,7 +134,7 @@ func TestBulkCIFailureBeyondContext30_Ingested(t *testing.T) {
 // CICD provider when ciContexts truncates) the failing 31st check blocks the
 // promotion.
 func TestBulkDraftPromoteWithFailingCheckBeyond30_DoesNotPromote(t *testing.T) {
-	ctx := context.Background()
+	ctx := realBDCtx(t)
 
 	const headSHA = "head-sha-draft"
 	pr := selfDraftPR(88, "foo/bar", "feat/draft-big-ci")
