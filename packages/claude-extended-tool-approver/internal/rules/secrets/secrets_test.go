@@ -121,6 +121,48 @@ func TestRule(t *testing.T) {
 		{"gh pr comment --body prose", bashInput(`gh pr comment 1 --body "cert probe via ~/.ssh/agent glob"`), hookio.NoOpinion},
 		{"gh issue create -t/-b prose", bashInput(`gh issue create -t "fix ~/.ssh/agent glob" -b "body a/secrets/x"`), hookio.NoOpinion},
 
+		// pg2-e1163: `git grep`'s positional search PATTERN is not itself a
+		// file any more than bare grep/rg's is (pg2-ia640.2's carve-out above),
+		// but before this fix `secretCandidateArgs` keyed the carve-out on
+		// filepath.Base(pc.Executable) == "grep"/"rg", which is "git" for
+		// `git grep`, so it fell into the message-arg branch instead — one
+		// with no concept of a search pattern — and the regex reached
+		// secretpath.IsSecret unfiltered. These three are the EXACT reproducers
+		// measured in the production asklog (rows 327331/327334/368333/359192)
+		// that pg2-ia640.1's own runtime audit surfaced when it added M4's
+		// unconditional "*.pem"/"*.key" suffix rule: the pattern's alternation
+		// ends in ".pem"/".key", which is precisely what M4 now matches.
+		{"git grep -n pattern ending .pem|.key is not a file", bashInput(`git grep -n -E '\.pem|\.key' main -- some/path`), hookio.NoOpinion},
+		{"git grep -l pattern ending .pem|.key is not a file", bashInput(`git grep -l -E '\.pem|\.key' main -- some/path`), hookio.NoOpinion},
+		{"git grep -c pattern ending .pem|.key is not a file", bashInput(`git grep -c -E '\.pem|\.key' main -- some/path`), hookio.NoOpinion},
+		// The bare grep/rg carve-out is keyed on the literal "grep" token
+		// appearing right after any leading `git -C <dir>` pairs (gitGrepArgs)
+		// — the same "-C is the one global flag recognized" imprecision
+		// gitTakesMessage's own doc accepts for the message-flag case.
+		{"git -C dir grep pattern ending .pem is not a file", bashInput(`git -C /repo grep -E '\.pem|\.key' main -- some/path`), hookio.NoOpinion},
+		// A plain, non-M4-shaped pattern must abstain too — mirrors the bare
+		// "grep pattern .env is not a file" control above.
+		{"git grep pattern .env is not a file", bashInput("git grep .env file.log"), hookio.NoOpinion},
+		// `git grep -f FILE` reads FILE as the pattern SOURCE (grep's own -f
+		// semantics, unaffected by which binary is invoked) — mirrors the bare
+		// "grep -f .env READS .env as the pattern file" control above.
+		{"git grep -f .env READS .env as the pattern file", bashInput("git grep -f .env file.log"), hookio.Ask},
+		// REGRESSION GUARDS: the pattern-exemption must not suppress a REAL
+		// secret FILE argument to `git grep` — mirrors the bare-grep regression
+		// controls above (M1 `secrets/` component and M4 `.pem` suffix).
+		{"git grep into a secrets/ FILE still Asks", bashInput("git grep TODO secrets/prod.env"), hookio.Ask},
+		{"git grep into a .pem FILE (M4) still Asks", bashInput("git grep foo server.pem"), hookio.Ask},
+		{"git -C dir grep into a secrets/ FILE still Asks", bashInput("git -C /repo grep TODO secrets/prod.env"), hookio.Ask},
+		// SCOPE BOUNDARY: a git subcommand other than "grep" must be completely
+		// unaffected by gitGrepArgs — the carve-out is scoped to the literal
+		// "grep" token, deliberately NOT generalized to git's OTHER
+		// pattern-taking flags (the bead's own caution against widening
+		// gitTakesMessage-style recognition beyond grep itself). `git log
+		// --grep=<pattern>` is a DIFFERENT subcommand than `git grep`, so its
+		// value is not exempted and reaches secretpath.IsSecret exactly as it
+		// did before this fix — this pins that pg2-e1163 does not leak into it.
+		{"git log --grep is a different subcommand, unaffected by the fix", bashInput(`git log --grep='\.pem|\.key'`), hookio.Ask},
+
 		// ANTI-BYPASS GUARDS for the same carve-out. Each of these Asks TODAY and
 		// must keep Asking; between them they pin every boundary the carve-out
 		// claims (see cmdparse.SkipMessageArgs and secretCandidateArgs).
@@ -321,6 +363,15 @@ func TestRule_MalformedGluedQuotingAsks(t *testing.T) {
 		{
 			"double-wrapped: outer pair around an already-quoted inner value",
 			"cat --file=''.env''",
+		},
+		// pg2-e1163: git grep now routes through the SAME SkipGrepPattern call
+		// as bare grep/rg, so it must fail closed on the same malformed glued
+		// file-flag value bare `grep` does — proving the malformed signal
+		// actually propagates out of the new gitGrepArgs branch rather than
+		// being silently dropped (secretCandidateArgs' malformed return).
+		{
+			"git grep --file glued value has interior wrapper character",
+			"git grep --file='.env'x'.env' file.log",
 		},
 	}
 	for _, tt := range tests {

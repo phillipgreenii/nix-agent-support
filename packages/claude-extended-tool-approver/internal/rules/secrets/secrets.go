@@ -66,13 +66,17 @@
 //     case) exactly as jq's own filter positional already is. A SECOND,
 //     related consequence was measured by pg2-ia640.1's own required runtime
 //     audit (replaying the production asklog through before/after binaries)
-//     but deliberately left UNFIXED here and filed instead as pg2-e1163: a
-//     `git grep -E '\.pem|\.key' ...` PATTERN argument now newly matches too,
-//     because secretCandidateArgs' grep/rg pattern carve-out below is keyed on
+//     and deliberately left UNFIXED there, filed instead as pg2-e1163: a
+//     `git grep -E '\.pem|\.key' ...` PATTERN argument newly matched, because
+//     secretCandidateArgs' grep/rg pattern carve-out below was keyed on
 //     `filepath.Base(pc.Executable)`, which is "git" for `git grep`, not
-//     "grep" — so it falls into the "bd"/"git"/"gh" branch instead, which has
-//     no concept of a search pattern. See pg2-e1163 for the measured asklog
-//     rows and the reason it was filed rather than fixed inline.
+//     "grep" — so it fell into the "bd"/"git"/"gh" branch instead, which had
+//     no concept of a search pattern. pg2-e1163 (this fix) closes that gap:
+//     gitGrepArgs recognizes a `git grep` / `git -C <dir> grep` invocation and
+//     routes its args through the SAME cmdparse.SkipGrepPattern carve-out the
+//     bare `grep`/`rg` case gets — see gitGrepArgs and secretCandidateArgs
+//     below. Nothing else about the "bd"/"git"/"gh" message-arg handling
+//     changes.
 //
 // Decision 3 fixes pg2-pmk9q BY CONSTRUCTION and more broadly than that bead's own
 // sanctioned option: any project with an `internal/…/secrets/` package is covered,
@@ -708,6 +712,12 @@ func firstSecretRef(cmd string, depth int, match candidateMatch) (ref secretRef,
 //     `gh pr comment --body <prose>`) and the trailing body positional of
 //     `bd comment <id> <body>` are free text, not files (pg2-ia640.5). The
 //     enumerated flag/positional boundary lives in cmdparse.SkipMessageArgs.
+//   - git grep (pg2-e1163): `git grep ...` / `git -C <dir> grep ...` is
+//     recognized by gitGrepArgs and its args are routed through the SAME
+//     cmdparse.SkipGrepPattern carve-out the bare grep/rg case above gets —
+//     the positional search PATTERN is not a file for `git grep` any more
+//     than it is for bare `grep`. This is narrowly scoped to the literal
+//     "grep" subcommand; no other git subcommand's argument handling changes.
 //
 // WHY THE MESSAGE CARVE-OUT IS NOT A BYPASS. A message value is STORED AS TEXT:
 // the command never opens, executes or transmits it as a path, so a credential
@@ -724,10 +734,14 @@ func firstSecretRef(cmd string, depth int, match candidateMatch) (ref secretRef,
 // open its arguments (`cp ~/.ssh/id_rsa /tmp` is unaffected).
 // secretCandidateArgs' second return, malformed, reports cmdparse.SkipGrepPattern's
 // pg2-52eod decline signal for the grep/rg branch — a glued file-flag value whose
-// shell quoting it could not resolve. It is always false for every other branch,
-// since none of them route through SkipGrepPattern's own GluedFlagValue call; the
-// plain default/bd/git/gh/jq/yq branches hand their args to firstSecretRef's OWN
-// GluedFlagValue call unchanged, which carries its own malformed detection already.
+// shell quoting it could not resolve — and, since pg2-e1163, for a "git" command
+// that gitGrepArgs recognizes as `git grep ...`, which routes through the exact
+// same SkipGrepPattern call. It is false for every other branch (including a
+// "git" command gitGrepArgs does NOT recognize as `git grep`), since none of them
+// route through SkipGrepPattern's own GluedFlagValue call; the plain
+// default/bd/git(non-grep)/gh/jq/yq branches hand their args to firstSecretRef's
+// OWN GluedFlagValue call unchanged, which carries its own malformed detection
+// already.
 func secretCandidateArgs(pc cmdparse.ParsedCommand) (args []string, malformed bool) {
 	switch filepath.Base(pc.Executable) {
 	case "grep", "rg":
@@ -743,10 +757,61 @@ func secretCandidateArgs(pc cmdparse.ParsedCommand) (args []string, malformed bo
 		}
 		return args, false
 	case "bd", "git", "gh":
-		return cmdparse.SkipMessageArgs(filepath.Base(pc.Executable), pc.Args), false
+		exe := filepath.Base(pc.Executable)
+		if exe == "git" {
+			// pg2-e1163: `git grep ...` shares grep's own positional-PATTERN
+			// shape, which SkipMessageArgs below has no concept of at all — it
+			// only strips MESSAGE flag values, so the regex pattern of
+			// `git grep -E '\.pem|\.key' ...` reached secretpath.IsSecret
+			// unfiltered and tripped M4's unconditional suffix rule. Recognize
+			// ONLY the literal `git grep` / `git -C <dir> grep` shape (see
+			// gitGrepArgs) and route it through the SAME carve-out the bare
+			// grep/rg case gets above — every other git subcommand keeps going
+			// through SkipMessageArgs, unchanged.
+			if grepArgs, ok := gitGrepArgs(pc.Args); ok {
+				return cmdparse.SkipGrepPattern("grep", grepArgs)
+			}
+		}
+		return cmdparse.SkipMessageArgs(exe, pc.Args), false
 	default:
 		return pc.Args, false
 	}
+}
+
+// gitGrepArgs reports whether pc.Args — a "git" command's arguments — spell a
+// `git grep ...` invocation, optionally preceded by one or more leading
+// `-C <dir>` pairs. It consumes each `-C <dir>` pair positionally (mirroring
+// cmdparse's own stripGitDashC in parser.go, which keeps that seam's
+// git-subcommand detection scoped to "-C" alone rather than a general "skip
+// any leading global option" scan — see its doc for why a broader scan is
+// the wrong tradeoff there) and then checks whether the NEXT token is
+// literally "grep". Nothing in the reproducers this fixes (pg2-e1163) needs
+// any other global flag recognized, so a git invocation using some other
+// global flag before "grep" (e.g. `git -c foo grep …`) is NOT recognized here
+// and falls back to the ordinary SkipMessageArgs handling — a false-negative
+// (a missed carve-out, costing one extra Ask) rather than a false-positive,
+// which is the safe direction for this table to be incomplete in. This is the
+// SAME "-C is the one global flag this file bothers to recognize" tradeoff
+// gitTakesMessage's own doc comment already makes for the message-flag case.
+//
+// When it IS a `git grep` shape, it returns the args that FOLLOW the "grep"
+// token — exactly the slice a bare `grep` invocation's own pc.Args would
+// carry — so the caller can hand them to cmdparse.SkipGrepPattern("grep", …)
+// unchanged. When it is not (a trailing bare `-C` with no operand, or a
+// subcommand other than "grep"), ok is false and the caller must fall back to
+// its normal git handling (SkipMessageArgs).
+func gitGrepArgs(args []string) (grepArgs []string, ok bool) {
+	i := 0
+	for i < len(args) && args[i] == "-C" {
+		if i+1 >= len(args) {
+			return nil, false // trailing bare -C, no operand: not a recognizable git-grep call
+		}
+		i += 2
+	}
+	if i < len(args) && args[i] == "grep" {
+		return args[i+1:], true
+	}
+	return nil, false
 }
 
 // jqFilterFromFile reports whether the jq filter is supplied via -f/--from-file
