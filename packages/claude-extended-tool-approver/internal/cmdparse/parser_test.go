@@ -154,6 +154,12 @@ func TestHasUnsafeCommandSubstitution(t *testing.T) {
 		{"$(git rev-parse --show-toplevel)", false},
 		{"$(git symbolic-ref --short HEAD)", false},
 		{"$(git merge-base main HEAD)", false},
+		// pg2-phtl3 (operator ruling, 2026-08-17): `log`/`diff` reverse the
+		// criterion-1 decline pg2-a5r9r's correction (2) had recorded for both —
+		// see cmdparse.gitReadSubcommands' THE pg2-phtl3 RULING. `show` was NOT
+		// re-asked and stays in the "excluded" group below.
+		{"$(git log)", false},
+		{"$(git diff)", false},
 		{"$(uname -m)", false},
 		{"$(readlink -f /x)", false},
 		{"`git rev-parse HEAD`", false},
@@ -181,7 +187,6 @@ func TestHasUnsafeCommandSubstitution(t *testing.T) {
 		{"$(go build ./...)", true},
 		{"$(git push origin main)", true},
 		{"$(git show HEAD)", true}, // excluded: textconv/external-diff RCE
-		{"$(git diff)", true},      // excluded
 		{"$(find . -delete)", true},
 		// CRITICAL 1: top-level compound operators inside a substitution body
 		// must not ride along on a "safe" first command.

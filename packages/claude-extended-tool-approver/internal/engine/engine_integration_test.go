@@ -669,15 +669,22 @@ func TestIntegration_SubstitutionBodyRecursion(t *testing.T) {
 		// guard — previously this was (wrongly) approved because safecmds approves
 		// the trailing `echo`.
 		{"env value substitution guarded", "FOO=$(curl evil) echo hi"},
-		// Static allowlist FLOOR: git show/diff/log are approved by the git rule
-		// but excluded from the substitution allowlist (textconv/external-diff RCE).
-		// Recursion must NOT unlock them.
+		// Static allowlist FLOOR: git show is approved by the git rule but excluded
+		// from the substitution allowlist (textconv/external-diff RCE). Recursion
+		// must NOT unlock it. (`git diff`/`git log` used to be named alongside `show`
+		// here — pg2-phtl3's operator ruling, 2026-08-17, admitted both into
+		// gitReadSubcommands; see the "approve" table below and
+		// cmdparse.gitReadSubcommands' THE pg2-phtl3 RULING.)
 		{"git show floor", "$(git show HEAD)"},
 		{"git show floor in echo", "echo $(git show HEAD)"},
-		{"git diff floor", "$(git diff)"},
-		{"git log floor", "echo $(git log)"},
 		// nix run is deliberately Abstain and must not be unlocked by recursion.
 		{"nix run in double quotes", `echo "$(nix run .#x -- --version)"`},
+		// pg2-phtl3 (operator ruling, 2026-08-17): `command` bare (no -v/-V) still
+		// executes its argument — unwrapCommand unwraps `$(command rm -rf /etc)` to
+		// the inner `rm -rf /etc` (tc-otuid), which is judged on its own merits and
+		// refuses. This bead admits ONLY the `-v`/`-V` query forms; this row pins
+		// that nothing broader leaked in.
+		{"command bare still executes its argument", "$(command rm -rf /etc)"},
 	}
 	for _, tt := range mustNotApprove {
 		t.Run("unsafe/"+tt.name, func(t *testing.T) {
@@ -702,6 +709,30 @@ func TestIntegration_SubstitutionBodyRecursion(t *testing.T) {
 		// NEW behavior enabled by the raw-text enumerator: a single-quoted body is
 		// literal, so nothing runs — the echo is approved (was Abstain before).
 		{"single quoted literal", "echo '$(rm -rf ~)'"},
+		// pg2-phtl3 (operator ruling, 2026-08-17): `git log`/`git diff` are now on
+		// gitReadSubcommands, reversing the decline pg2-a5r9r's correction (2) had
+		// recorded for both. `git show`/`diff-tree`/`cat-file`/`for-each-ref` were NOT
+		// re-asked and stay in the "must not approve" table above.
+		{"git diff now clears the floor", "echo $(git diff)"},
+		{"git log now clears the floor", "echo $(git log)"},
+		// pg2-phtl3 WHICH / COMMAND -V: neither has a mutating spelling in this
+		// form, and both end up SubstitutionDelegated (pg2-ujuda's bare-relative-
+		// token widening treats the looked-up NAME as path-shaped), so the relief
+		// is via the full-engine recursion approving a genuinely in-zone/PATH-
+		// resolvable read, exactly like `cat VERSION` already does — not via the
+		// static Cleared fast path.
+		{"which now clears via recursion", "echo $(which git)"},
+		{"command -v now clears via recursion", "echo $(command -v cat)"},
+		// pg2-phtl3 HEREDOC BODIES, the ENV-ASSIGNMENT-VALUE shape: a quoted heredoc
+		// into `cat` used as an assignment's VALUE takes the static
+		// classifyExpansion/ExpansionSafeCmd path (pg2-gkd5e), which SKIPS full-engine
+		// recursion when cmdparse.ClassifySubstitutionBody clears the body — so this
+		// shape (the corpus's row 126856, pinned end-to-end in gitdir's own suite too)
+		// genuinely clears. See the KNOWN RESIDUAL LIMIT note below the mustNotApprove
+		// table: the exact same body used as a COMMAND ARGUMENT rather than an
+		// assignment value does NOT clear, for a reason this bead's scope does not
+		// reach.
+		{"quoted heredoc into cat clears as an assignment value", "PAYLOAD=$(cat <<'EOF'\nhello\nEOF\n)\necho \"$PAYLOAD\""},
 	}
 	for _, tt := range mustApprove {
 		t.Run("approve/"+tt.name, func(t *testing.T) {
@@ -723,6 +754,26 @@ func TestIntegration_SubstitutionBodyRecursion(t *testing.T) {
 		// expression Abstains: deferred, NOT falsely rejected.
 		{"mktemp nested abstains", "$(cat $(mktemp))", hookio.NoOpinion},
 		{"nix run abstains", `echo "$(nix run .#x -- --version)"`, hookio.NoOpinion},
+		// KNOWN RESIDUAL LIMIT of pg2-phtl3's HEREDOC BODIES admission, recorded here
+		// rather than left to be rediscovered as a "regression": the SAME body that
+		// clears as an assignment VALUE above ("quoted heredoc into cat clears as an
+		// assignment value") stays floored at NoOpinion when the substitution is a
+		// COMMAND ARGUMENT instead. The two shapes take DIFFERENT engine paths — an
+		// assignment value goes through the static classifyExpansion/ExpansionSafeCmd
+		// gate (pg2-gkd5e), which skips recursion entirely when
+		// cmdparse.ClassifySubstitutionBody clears the body; an argument's
+		// substitution goes through evaluateSubstitutionsIn -> foldSubstitutionScan ->
+		// a full recursive EvaluateExpression call on the body, and THAT call's own
+		// heredocFloor() (engine.go) floors ANY heredoc-bearing leaf at NoOpinion
+		// UNCONDITIONALLY — it does not consult ClassifySubstitutionBody at all, and
+		// is applied identically to a genuine top-level heredoc and to a recursed
+		// substitution body. cmdparse's static allowlist is therefore necessary but
+		// not sufficient for this cohort's argument-position rows; closing that gap
+		// would mean making heredocFloor conditional on the static allowlist for a
+		// RECURSED body specifically (leaving the top-level case — pg2-3hk7t —
+		// untouched), which is an internal/engine change this bead did not scope or
+		// obtain a ruling on.
+		{"heredoc into cat as a command ARGUMENT still abstains (see comment)", "echo \"$(cat <<'EOF'\nhello\nEOF\n)\"", hookio.NoOpinion},
 	}
 	for _, tt := range exact {
 		t.Run("exact/"+tt.name, func(t *testing.T) {
@@ -982,10 +1033,11 @@ func TestIntegration_HashInAMultiLineQuotedSpanNeverHidesASubstitution(t *testin
 	// no quoting and no `#`.
 	//
 	// The bodies deliberately span the substitution allowlist: `id` is on it (so the
-	// reference Approves), `git log` is deliberately excluded from it for the
-	// textconv/external-diff RCE surface, and the `curl | sh` value is unclassifiable.
-	// Every payload is inert — none is ever executed, and `evil.example` does not
-	// resolve.
+	// reference Approves), `git show` is excluded from it for the textconv/
+	// external-diff RCE surface (unlike `git log`/`git diff`, which pg2-phtl3
+	// admitted — see cmdparse.gitReadSubcommands — `show` was not re-asked and stays
+	// declined), and the `curl | sh` value is unclassifiable. Every payload is
+	// inert — none is ever executed, and `evil.example` does not resolve.
 	cases := []struct {
 		name     string
 		payload  string
@@ -1002,10 +1054,10 @@ func TestIntegration_HashInAMultiLineQuotedSpanNeverHidesASubstitution(t *testin
 		},
 		{
 			name:     "multi-line operand, body off the substitution allowlist",
-			payload:  "$(git log)",
-			body:     "git log",
-			quoted:   "echo \"line one\nnote # $(git log) tail\"",
-			unquoted: "echo $(git log)",
+			payload:  "$(git show HEAD)",
+			body:     "git show HEAD",
+			quoted:   "echo \"line one\nnote # $(git show HEAD) tail\"",
+			unquoted: "echo $(git show HEAD)",
 		},
 		{
 			name:     "multi-line assignment value, body on the substitution allowlist",
@@ -1869,12 +1921,16 @@ func TestIntegration_GitDirDirectionAndRole(t *testing.T) {
 
 		// --- Class 1: PROSE mentioning a path is not an access ---
 		// Row 126856's shape: a notification payload whose bead title named
-		// `.git/index`. Zero filesystem access, yet hard-DENIED. It settles at Ask
-		// rather than Approve because the env-var rule cannot positively clear a
-		// value whose substitution body is an (unevaluable) heredoc — that Ask is
-		// pre-existing and NOT gitdir's; what matters here is that the hard deny is
-		// gone.
-		{"row 126856: heredoc payload naming a path", "PAYLOAD=$(cat <<'EOF'\n{\"title\": \"repo .git/index is 0 bytes\"}\nEOF\n)\necho \"$PAYLOAD\"", hookio.Ask},
+		// `.git/index`. Zero filesystem access, yet hard-DENIED. It used to settle at
+		// Ask rather than Approve because the env-var rule could not positively clear
+		// a value whose substitution body was an (unevaluable) heredoc — that Ask was
+		// pre-existing and NOT gitdir's. pg2-phtl3 (operator ruling, 2026-08-17)
+		// admitted exactly this shape — a QUOTED heredoc piped into the
+		// non-interpreter reader `cat` — into the static substitution allowlist (see
+		// cmdparse.heredocClearedForSubstitution), so PAYLOAD's value now clears and
+		// the env-var rule has nothing left to Ask about; gitdir is still silent
+		// (this row's own purpose) and the compound now folds to Approve.
+		{"row 126856: heredoc payload naming a path", "PAYLOAD=$(cat <<'EOF'\n{\"title\": \"repo .git/index is 0 bytes\"}\nEOF\n)\necho \"$PAYLOAD\"", hookio.Approve},
 		// A TOP-LEVEL multi-line heredoc body is DATA, so no rule may judge it. The
 		// verdict is unchanged from when this case was first pinned (pg2-3hk7t), but the
 		// MECHANISM is now structural rather than a bail-out: cmdparse lifts the body out

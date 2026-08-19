@@ -368,14 +368,24 @@ func TestIsSafeSubstitutionBody_GitReadSubcommandAudit(t *testing.T) {
 		{"git ls-tree with a quoted --format of metadata atoms", "git ls-tree --format='%(path)' HEAD", true},
 		{"an UNQUOTED --format atom is not valid bash and is refused", "git ls-tree --format=%(path) HEAD", false},
 		{"incumbent control: git rev-parse", "git rev-parse HEAD", true},
+		// pg2-phtl3 (operator ruling, 2026-08-17): `log`/`diff` reverse the
+		// criterion-1 decline pg2-a5r9r's correction (2) recorded for both — see
+		// gitReadSubcommands' THE pg2-phtl3 RULING. `show`/`diff-tree` below were
+		// NOT re-asked and stay declined.
+		{"log is now admitted (pg2-phtl3 ruling)", "git log --oneline -1", true},
+		{"diff is now admitted (pg2-phtl3 ruling)", "git diff", true},
 
 		// The DECLINE. Every stage of both pipelines is individually allowlisted.
 		{"the F-3 next-free-id probe body is a pipeline and is REFUSED", f3NextFreeIdProbeBody, false},
 		{"even a 2-stage all-allowlisted pipeline is REFUSED", "git ls-tree -r --name-only main -- docs/adr | tail -1", false},
+		// PIPELINE DECLINE holds even for a NEWLY-admitted subcommand (pg2-phtl3
+		// item 4, "confirm declining further relaxation" — pg2-mgs91's shape test is
+		// unchanged): admitting `log` into gitReadSubcommands must not leak into a
+		// pipeline stage.
+		{"a pipeline built from the newly-admitted log is still REFUSED", "git log --oneline -1 | head -1", false},
 
 		// Declined candidates from the pg2-mgs91 audit.
 		{"show is declined (textconv/external-diff)", "git show HEAD", false},
-		{"log is declined (textconv/external-diff)", "git log --oneline -1", false},
 		{"diff-tree is declined (textconv/external-diff)", "git diff-tree --no-commit-id -r HEAD", false},
 		{"cat-file is declined (--textconv/--filters, and <rev>:<path> secrets)", "git cat-file -p HEAD:.env", false},
 		{"for-each-ref is declined (%(contents) prints an object)", "git for-each-ref --format='%(refname)'", false},
@@ -588,10 +598,13 @@ func TestIsSafeSubstitutionBody_NestedRejected(t *testing.T) {
 		{"cat `malicious`", false},
 		{"cat <(rm -rf ~)", false},
 		{"grep x <(dangerous)", false},
-		// git show/diff/log excluded from the static allowlist (RCE floor).
+		// git show still excluded from the static allowlist (RCE floor). `diff`/`log`
+		// used to be listed alongside it here — pg2-phtl3's operator ruling
+		// (2026-08-17) admitted both into gitReadSubcommands; see
+		// TestIsSafeSubstitutionBody_GitReadSubcommandAudit for the pinned rows.
 		{"git show HEAD", false},
-		{"git diff", false},
-		{"git log", false},
+		{"git diff", true},
+		{"git log", true},
 		// rm is not a safe substitution command.
 		{"rm -rf ~/x", false},
 		// An UNPARSEABLE body is never statically safe (pg2-wguam). Reachable via a
@@ -1153,6 +1166,13 @@ func TestClassifySubstitutionBody_GitDashCTokenPosition(t *testing.T) {
 		{"the bead's status example", "git -C /Users/phillipg/repo status --porcelain", SubstitutionDelegated},
 		// --- repeated -C: each operand screened independently, still delegated ---
 		{"repeated -C resolves to the union-screened path, not refused", "git -C /a -C /b rev-parse HEAD", SubstitutionDelegated},
+		// pg2-phtl3 (operator ruling, 2026-08-17): `log`/`diff` are now on
+		// gitReadSubcommands (THE pg2-phtl3 RULING), so a -C prefix in front of
+		// either resolves the same way it already does for rev-parse/status above —
+		// the subcommand admission is Cleared but the -C operand is an unscreened
+		// path, so the union is Delegated, not Refused.
+		{"log admitted via -C, delegated on the -C path", "git -C /x log", SubstitutionDelegated},
+		{"diff admitted via -C, delegated on the -C path", "git -C /x diff", SubstitutionDelegated},
 
 		// --- every OTHER leading global option must still refuse: tokens[1] is not
 		//     the subcommand for any of these, and none is "-C" so stripGitDashC must
@@ -1176,8 +1196,6 @@ func TestClassifySubstitutionBody_GitDashCTokenPosition(t *testing.T) {
 		//     confirms this is a token-POSITION fix, not a widening of the admitted
 		//     subcommand set. ---
 		{"branch is not admitted even with -C stripped", "git -C /x branch", SubstitutionRefused},
-		{"log is not admitted even with -C stripped", "git -C /x log", SubstitutionRefused},
-		{"diff is not admitted even with -C stripped", "git -C /x diff", SubstitutionRefused},
 		{"config is not admitted even with -C stripped", "git -C /x config", SubstitutionRefused},
 		{"show is not admitted even with -C stripped", "git -C /x show HEAD", SubstitutionRefused},
 
@@ -1265,5 +1283,118 @@ func TestLooksLikePath_IsSharedWithTheRuleThatOwnsReadability(t *testing.T) {
 		if got := LooksLikePath(tt.arg); got != tt.want {
 			t.Errorf("LooksLikePath(%q) = %v, want %v", tt.arg, got, tt.want)
 		}
+	}
+}
+
+// TestClassifySubstitutionBody_PathLookupAdmission pins pg2-phtl3's WHICH / COMMAND -V
+// operator ruling (2026-08-17, via `/unblock-human-beads`): `which` unconditionally, and
+// `command` gated to exactly its `-v`/`-V` query forms — both screened through
+// readerArgsClearance exactly like every fileReaderSubstitutions member, per pg2-xl79d's
+// recorded trap that an unscreened entry converts a deny-listed Reject into an Approve.
+//
+// Most rows below want SubstitutionDelegated, not Cleared: pg2-ujuda's bare-relative-token
+// widening of LooksLikePath means an ordinary bare NAME operand ("git", "cat") is
+// path-shaped too, so `which git`/`command -v cat` DELEGATE to patheval exactly like
+// `cat VERSION` does above — the relief is real (full-engine recursion still approves it
+// in a readable zone) but it does not take the SubstitutionCleared fast path. Only a
+// bare invocation (no operand at all) or a flag-only operand clears outright.
+func TestClassifySubstitutionBody_PathLookupAdmission(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want SubstitutionClearance
+	}{
+		// --- which: unconditional admission, screened on its operand ---
+		{"which with no operand clears outright", "which", SubstitutionCleared},
+		{"which of an ordinary name delegates (bare relative token)", "which git", SubstitutionDelegated},
+		{"which of an absolute path delegates", "which /usr/bin/git", SubstitutionDelegated},
+		{"which of a dynamic operand clears (nothing to screen)", `which "$cmd"`, SubstitutionCleared},
+		{"which of a deny-listed secret path refuses", "which /Users/me/.ssh/id_rsa", SubstitutionRefused},
+		{"which with only a flag operand (no name) clears", "which -a", SubstitutionCleared},
+
+		// --- command: gated to -v/-V only ---
+		{"command -v of an ordinary name delegates", "command -v cat", SubstitutionDelegated},
+		{"command -V (uppercase) is admitted the same way", "command -V cat", SubstitutionDelegated},
+		{"command -v with no name clears outright", "command -v", SubstitutionCleared},
+		{"command -v of a deny-listed secret path refuses", "command -v /Users/me/.ssh/id_rsa", SubstitutionRefused},
+		{"command -v of a dynamic operand clears", `command -v "$cmd"`, SubstitutionCleared},
+
+		// --- command: every OTHER spelling is UNWRAPPED to its inner command by the
+		//     pre-existing unwrapCommand/unwrapExecPrefix mechanism (tc-otuid) before
+		//     classifySubstitutionCommand ever sees "command" as cmd[0] — this
+		//     bead adds no admission for those spellings; the inner command is
+		//     judged entirely on its own merits, exactly as at the top level. ---
+		{"bare command NAME unwraps to the inner command and is judged on it: rm refuses", "command rm -rf /", SubstitutionRefused},
+		{"command -p unwraps to the inner command too: rm refuses the same way", "command -p rm -rf /", SubstitutionRefused},
+		{"command with no args at all is refused (not -v/-V, no inner command either)", "command", SubstitutionRefused},
+		{"a glued -v spelling is not the exact token and is refused", "command -vX", SubstitutionRefused},
+		{"lowercase v is not a substring match for -V", "command -Vx", SubstitutionRefused},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ClassifySubstitutionBody(tt.body); got != tt.want {
+				t.Errorf("ClassifySubstitutionBody(%q) = %v, want %v", tt.body, got, tt.want)
+			}
+			if got, want := IsSafeSubstitutionBody(tt.body), tt.want == SubstitutionCleared; got != want {
+				t.Errorf("IsSafeSubstitutionBody(%q) = %v, want %v", tt.body, got, want)
+			}
+		})
+	}
+}
+
+// TestClassifySubstitutionBody_HeredocReaderAdmission pins pg2-phtl3's HEREDOC BODIES
+// operator ruling (2026-08-17): a QUOTED heredoc clears when its leaf executable is on
+// heredocReaderAllowlist, but quoting ALONE is not the discriminator — the READER is,
+// because quoting suppresses EXPANSION, not EXECUTION (measured: `$(sh <<'EOF'
+// ...EOF)` runs its body despite the quoted delimiter). Every row that keeps the old
+// refusal is here for the same reason pg2-wguam's carrier must survive this change
+// untouched.
+func TestClassifySubstitutionBody_HeredocReaderAdmission(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want SubstitutionClearance
+	}{
+		// --- THE ADMISSION: quoted delimiter + allowlisted non-interpreter reader ---
+		{"quoted heredoc into cat clears", "cat <<'EOF'\nhello\nEOF", SubstitutionCleared},
+		{"double-quoted delimiter is quoted too", "cat <<\"EOF\"\nhello\nEOF", SubstitutionCleared},
+		{"backslash-escaped delimiter is quoted too", "cat <<\\EOF\nhello\nEOF", SubstitutionCleared},
+		{"the corpus's one non-cat spelling: /bin/cat", "/bin/cat <<'EOF'\nhello\nEOF", SubstitutionCleared},
+		{"a quoted heredoc body that itself LOOKS like a substitution is still inert data", "cat <<'EOF'\n$(rm -rf ~)\nEOF", SubstitutionCleared},
+		{"the <<- strip-tabs form is quoted the same way", "cat <<-'EOF'\n\thello\n\tEOF", SubstitutionCleared},
+
+		// --- STILL REFUSED: an UNQUOTED delimiter, whatever the reader ---
+		{"unquoted heredoc into cat stays refused (bash would expand the body)", "cat <<EOF\nhello\nEOF", SubstitutionRefused},
+
+		// --- STILL REFUSED: quoted, but the reader is not on the allowlist ---
+		{"quoted heredoc into an unlisted reader stays refused", "grep foo <<'EOF'\nhello\nEOF", SubstitutionRefused},
+		// --- THE MOTIVATING CORRECTION: quoting a heredoc into an INTERPRETER does
+		//     NOT make it safe — the interpreter still EXECUTES the body as a program,
+		//     which is exactly heredocFloor's own reason for refusing at the top level
+		//     (internal/engine/engine.go), unchanged by quoting.
+		{"quoted heredoc into sh still refuses (RCE, not merely unsafe expansion)", "sh <<'EOF'\nrm -rf /\nEOF", SubstitutionRefused},
+		{"quoted heredoc into python still refuses", "python <<'EOF'\nimport os\nEOF", SubstitutionRefused},
+
+		// --- A HERESTRING (<<<) is not a heredoc EXTENT at all — heredoc.go records
+		//     none in leaf.Heredocs, so there is nothing for the allowlist to admit. ---
+		{"a herestring into cat stays refused", "cat <<< 'hello'", SubstitutionRefused},
+
+		// --- Multiple heredocs on one leaf: EVERY one must be quoted+allowlisted, or
+		//     the whole leaf refuses — not just the offending redirection. ---
+		{"two quoted heredocs into cat both clear", "cat <<'A' <<'B'\nbody a\nA\nbody b\nB", SubstitutionCleared},
+		{"one unquoted heredoc among two refuses the whole leaf", "cat <<'A' <<B\nbody a\nA\nbody b\nB", SubstitutionRefused},
+
+		// --- write flags disqualify before the heredoc admission is even consulted ---
+		{"a write flag still refuses despite the quoted heredoc", "yq -i <<'EOF'\nhello\nEOF", SubstitutionRefused},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ClassifySubstitutionBody(tt.body); got != tt.want {
+				t.Errorf("ClassifySubstitutionBody(%q) = %v, want %v", tt.body, got, tt.want)
+			}
+			if got, want := IsSafeSubstitutionBody(tt.body), tt.want == SubstitutionCleared; got != want {
+				t.Errorf("IsSafeSubstitutionBody(%q) = %v, want %v", tt.body, got, want)
+			}
+		})
 	}
 }

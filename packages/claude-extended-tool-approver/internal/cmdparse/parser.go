@@ -498,8 +498,11 @@ func hasWriteFlag(cmd string, args []string) bool {
 // DECLINED CANDIDATES, recorded so the audit is not re-run and so nobody reads their
 // absence as an oversight:
 //
-//   - `show`, `log`, `diff-tree` — fail (1) and (2). All three emit diffs or content
-//     and honor textconv and `diff.external`. This is the incumbent rationale.
+//   - `show`, `diff-tree` — fail (1) and (2). Both emit diffs or content and honor
+//     textconv and `diff.external`. This is the incumbent rationale. (`log` and
+//     `diff` used to be named alongside these two; see THE pg2-phtl3 RULING below —
+//     they are ADMITTED now, on the same recorded facts, by an explicit operator
+//     decision rather than a re-audit.)
 //   - `cat-file` — fails (1) and (2) hardest. `--textconv` and `--filters` run the
 //     filter programs BY NAME, and `-p HEAD:.env` prints a secret's bytes from a
 //     `<rev>:<path>` spec that the fileReaderSubstitutions secretpath screen below
@@ -520,6 +523,20 @@ func hasWriteFlag(cmd string, args []string) bool {
 //     "print an object". (`--shell`/`--python`/`--perl`/`--tcl` are output QUOTING
 //     modes, not interpreters — those are not the objection.)
 //   - `ls-remote` — fails (4).
+//
+// THE pg2-phtl3 RULING: `log` AND `diff` ARE ADMITTED, ON AN OPERATOR DECISION, NOT A
+// REVISED AUDIT. pg2-a5r9r's correction (2) (see criterion 1 above) found that `log`
+// and `diff` still fail criterion 1's DISCLOSURE leg — `git log -p` and `git diff`
+// emit file CONTENT with no config required, the same reasoning that keeps `show`,
+// `cat-file` and `for-each-ref` declined — so admitting them REVERSES a recorded
+// decline rather than closing a gap in it. pg2-phtl3 put exactly that question to the
+// operator (2026-08-17, via `/unblock-human-beads`: "admit git log / git diff bodies
+// … their output becomes the outer command's argv — the same DISCLOSURE-leg
+// reasoning that declined show/cat-file/for-each-ref") and the answer was ADMIT. The
+// ruling is scoped to these two subcommands ONLY — `show`, `cat-file`,
+// `for-each-ref` and `ls-remote` were not re-asked and stay declined on the
+// unchanged reasoning above; `diff-tree` likewise. See
+// TestIsSafeSubstitutionBody_GitReadSubcommandAudit's pinned rows for both halves.
 //
 // THE pg2-a5r9r RULING: `status` AND `describe --dirty` STAY, AND CRITERION 3 IS THE
 // DEFECT. pg2-mgs91 recorded them as a KNOWN INCUMBENT EXCEPTION — the same property
@@ -586,6 +603,11 @@ var gitReadSubcommands = map[string]bool{
 	// which pins both verdicts so a later reader finds a decision rather than an
 	// accident.
 	"merge-base": true, "describe": true, "status": true,
+	// `log` and `diff` — ADMITTED by explicit operator ruling (pg2-phtl3,
+	// 2026-08-17), which REVERSES the criterion-1 decline pg2-a5r9r's correction (2)
+	// recorded for both. See THE pg2-phtl3 RULING above; `show`, `diff-tree`,
+	// `cat-file` and `for-each-ref` were NOT re-asked and stay declined.
+	"log": true, "diff": true,
 	// ls-tree PASSES ALL FIVE. It reads a TREE object and prints only
 	// mode/type/oid/size/path; its tree-ish operand is mandatory, so it never stats
 	// the worktree (no index refresh, no fsmonitor); no flag emits blob content —
@@ -685,6 +707,35 @@ func classifySubstitutionCommand(tokens []string) SubstitutionClearance {
 			}
 		}
 		return SubstitutionCleared
+	}
+	// pg2-phtl3 (operator ruling, 2026-08-17 via `/unblock-human-beads`): `which` and
+	// `command -v`/`command -V` are PATH LOOKUPS — they resolve a name against PATH
+	// (or, for `command`, against builtins/functions/aliases too) and print a name
+	// or a path. Neither emits another file's CONTENT, which is the same ground that
+	// admits `hostname`/`go env` above rather than the fileReaderSubstitutions branch
+	// below.
+	//
+	// `which` HAS NO MUTATING SPELLING AT ALL, so it is admitted UNCONDITIONALLY on
+	// its command name — but its OPERAND can still name a path (`which ./script`), so
+	// it is screened through readerArgsClearance exactly like every
+	// fileReaderSubstitutions member, per pg2-xl79d's recorded trap: an unscreened
+	// entry converts a deny-listed Reject into an Approve.
+	//
+	// `command` is NOT SAFE BARE — `command rm -rf /` runs `rm -rf /` (bypassing any
+	// function/alias override is the whole point of the builtin) — so admission is
+	// GATED to exactly its `-v`/`-V` query forms, which do the same PATH-lookup-and-
+	// print as `which` and execute nothing. This mirrors `unwrapCommand`'s existing
+	// `command -v`/`-V` special case at the top level (unwrapExecPrefix, above),
+	// which already leaves those two forms un-unwrapped for the same reason. Every
+	// other `command` spelling — bare `command NAME`, `command -p NAME` (runs NAME
+	// with the default PATH) — falls through to the default refusal. All 41 distinct
+	// `command` bodies in pg2-phtl3's corpus census are `command -v`; no other flag
+	// form is admitted.
+	if cmd == "which" {
+		return readerArgsClearance(tokens[1:])
+	}
+	if cmd == "command" && len(tokens) >= 2 && (tokens[1] == "-v" || tokens[1] == "-V") {
+		return readerArgsClearance(tokens[2:])
 	}
 	if cmd == "git" && len(tokens) >= 2 {
 		// pg2-jq8tn: strip any leading `-C <path>` pairs so the real subcommand — not
@@ -861,11 +912,92 @@ func ClassifySubstitutionBody(cmdStr string) SubstitutionClearance {
 	if !ok {
 		return SubstitutionRefused
 	}
-	if leaf.Executable == "" || leaf.HasHeredoc {
+	if leaf.Executable == "" {
 		return SubstitutionRefused
+	}
+	if leaf.HasHeredoc {
+		// A heredoc-admitted leaf takes ITS OWN admission path rather than falling
+		// through to classifySubstitutionCommand's cmd-name lookup: the whole point
+		// of heredocReaderAllowlist is that it, not fileReaderSubstitutions, is what
+		// vouches for the reader identity here — and `/bin/cat` (one of the two
+		// corpus spellings the ruling admits) is deliberately NOT a
+		// fileReaderSubstitutions key, so routing back through that lookup would
+		// refuse it right back out. What remains, exactly as for any other reader,
+		// is the write-flag screen (hasWriteFlag) and readerArgsClearance/
+		// redirectClearance over this leaf's OWN argv/redirections — the same union
+		// every fileReaderSubstitutions member goes through.
+		if !heredocClearedForSubstitution(leaf) {
+			return SubstitutionRefused
+		}
+		if hasWriteFlag(leaf.Executable, leaf.Args) {
+			return SubstitutionRefused
+		}
+		return minClearance(readerArgsClearance(leaf.Args), redirectClearance(leaf.Redirections))
 	}
 	tokens := append([]string{leaf.Executable}, leaf.Args...)
 	return minClearance(classifySubstitutionCommand(tokens), redirectClearance(leaf.Redirections))
+}
+
+// heredocReaderAllowlist: the NON-INTERPRETER programs a QUOTED heredoc body may be
+// piped into and still clear the static substitution floor (pg2-phtl3, operator
+// ruling 2026-08-17 via `/unblock-human-beads`).
+//
+// "non-interpreter" is the whole of the admission test: the program must not treat
+// its stdin as a PROGRAM to run in a language this parser does not model — which is
+// exactly heredocClearedForSubstitution's own reason, restated below. `cat` merely
+// copies its stdin to stdout; it can no more execute the heredoc body than `echo`
+// can execute its argv.
+//
+// SCOPED TO THE TWO SPELLINGS THE CORPUS ACTUALLY CARRIES, deliberately, rather than
+// generalised to every fileReaderSubstitutions member: pg2-phtl3's census found the
+// leaf executable is `cat` in 2,746 of 2,747 distinct quoted-heredoc bodies and
+// `/bin/cat` in the one remainder — NOTHING ELSE. Widening this to `grep`/`head`/
+// `wc`/`jq`/… would be additive in principle (none of them is an interpreter
+// either), but it is UNMEASURED, so it owes its own corpus replay before it is added
+// — the same rule every other list in this file follows for a widening.
+var heredocReaderAllowlist = map[string]bool{
+	"cat": true, "/bin/cat": true,
+}
+
+// heredocClearedForSubstitution reports whether EVERY heredoc extent on leaf is
+// admissible inside a command substitution.
+//
+// TWO CONDITIONS, both required:
+//
+//  1. QUOTED delimiter (`<<'EOF'`/`<<"EOF"`/`<<\EOF`), so bash performs NO expansion
+//     on the body — pg2-r2rf3's discriminator, unchanged.
+//  2. The leaf's own executable is on heredocReaderAllowlist.
+//
+// Condition 2 is the one pg2-phtl3 corrects: quoting alone was the bead's original,
+// WRONG discriminator. Quoting suppresses EXPANSION, not EXECUTION — measured,
+// `$(sh <<'EOF'\necho ran\nEOF\n)` prints "ran" despite the quoted delimiter, because
+// `sh` EXECUTES its stdin as a program regardless of whether that text underwent
+// shell expansion first. heredocFloor's own reason for refusing a heredoc-bearing
+// leaf at the top level ("`sh <<EOF` / `python <<EOF` EXECUTES it as a program in a
+// language this parser does not model", internal/engine/engine.go) applies to the
+// quoted form UNCHANGED, and the READER — not the quoting — is what this function
+// must check.
+//
+// A HERESTRING (`<<<`) sets leaf.HasHeredoc but records no entry in leaf.Heredocs
+// (heredoc.go's UnquotedHeredocBodies doc) — there is no heredoc EXTENT to admit, so
+// an empty Heredocs slice refuses rather than vacuously approving via a no-op loop.
+//
+// Multiple heredocs on one leaf (`cmd <<A <<B`) all require BOTH conditions — one
+// unquoted or unmodelled reader anywhere refuses the whole leaf, never just that one
+// redirection.
+func heredocClearedForSubstitution(leaf ParsedCommand) bool {
+	if len(leaf.Heredocs) == 0 {
+		return false
+	}
+	if !heredocReaderAllowlist[leaf.Executable] {
+		return false
+	}
+	for _, hd := range leaf.Heredocs {
+		if !hd.Quoted {
+			return false
+		}
+	}
+	return true
 }
 
 // redirectClearance classifies the redirections a substitution body carries: a PURE READ
