@@ -295,11 +295,10 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 	if input.ToolName != "Bash" {
 		return hookio.NotApplicable()
 	}
-	cmdStr, err := input.BashCommand()
+	parsed, err := cmdparse.LeavesOf(input)
 	if err != nil {
 		return hookio.RuleResult{}, fmt.Errorf("config-rules: read bash command: %w", err)
 	}
-	parsed := cmdparse.Parse(cmdStr)
 	// First pass: a blocked leaf ANYWHERE in the compound is the most-restrictive
 	// outcome and MUST win, so scan every leaf for a block BEFORE considering an
 	// Approve. Returning Approve on an earlier approved leaf without this pass would

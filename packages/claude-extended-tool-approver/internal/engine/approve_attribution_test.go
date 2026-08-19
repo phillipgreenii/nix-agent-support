@@ -35,11 +35,16 @@ type attrApproveRule struct {
 func (r *attrApproveRule) Name() string { return r.name }
 
 func (r *attrApproveRule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
-	cmd, err := input.BashCommand()
+	// cmdparse.LeavesOf, not a bare input.BashCommand()+cmdparse.Parse round
+	// trip: ADR 0039 step 3 deleted mustBashJSON, so a synthetic per-leaf
+	// HookInput no longer carries a ToolInput JSON string to read a command
+	// out of — this mock mirrors the same migration every production rule
+	// module went through.
+	parsed, err := cmdparse.LeavesOf(input)
 	if err != nil {
 		return hookio.NotApplicable()
 	}
-	for _, pc := range cmdparse.Parse(cmd) {
+	for _, pc := range parsed {
 		if r.prefix != "" && strings.HasPrefix(pc.Executable, r.prefix) {
 			return hookio.RuleResult{Decision: hookio.Approve, Reason: "approved by " + r.name, Module: r.Name()}, nil
 		}

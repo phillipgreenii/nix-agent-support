@@ -162,11 +162,10 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 	if input.ToolName != "Bash" {
 		return hookio.NotApplicable()
 	}
-	cmdStr, err := input.BashCommand()
+	parsed, err := cmdparse.LeavesOf(input)
 	if err != nil {
 		return hookio.RuleResult{}, fmt.Errorf("build-tools: read bash command: %w", err)
 	}
-	parsed := cmdparse.Parse(cmdStr)
 	for _, pc := range parsed {
 		basename := filepath.Base(pc.Executable)
 		if r.approvedTools[basename] {

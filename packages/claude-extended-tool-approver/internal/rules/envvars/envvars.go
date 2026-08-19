@@ -483,11 +483,10 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 	if input.ToolName != "Bash" {
 		return hookio.NotApplicable()
 	}
-	cmdStr, err := input.BashCommand()
+	parsed, err := cmdparse.LeavesOf(input)
 	if err != nil {
 		return hookio.RuleResult{}, fmt.Errorf("env-vars: read bash command: %w", err)
 	}
-	parsed := cmdparse.Parse(cmdStr)
 
 	// THIS IS A FOLD, NOT A CHAIN, so ADR 0043's "continue" has no representation
 	// inside it and NoOpinion — not an error — is the seed and the floor. Routing

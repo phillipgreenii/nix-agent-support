@@ -68,13 +68,13 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 	if !r.configured {
 		return r.notApplicable()
 	}
-	cmdStr, err := input.BashCommand()
+	parsed, err := cmdparse.LeavesOf(input)
 	if err != nil {
 		// Genuine failure: the tool is Bash and the rule IS configured, so it
 		// governs this input and merely could not read it.
 		return hookio.RuleResult{}, fmt.Errorf("vault: read bash command: %w", err)
 	}
-	for _, pc := range cmdparse.Parse(cmdStr) {
+	for _, pc := range parsed {
 		if filepath.Base(pc.Executable) != "vault" {
 			continue
 		}

@@ -49,11 +49,10 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 	if input.ToolName != "Bash" {
 		return hookio.NotApplicable()
 	}
-	cmdStr, err := input.BashCommand()
+	parsed, err := cmdparse.LeavesOf(input)
 	if err != nil {
 		return hookio.RuleResult{}, fmt.Errorf("sqlite3: read bash command: %w", err)
 	}
-	parsed := cmdparse.Parse(cmdStr)
 	for _, pc := range parsed {
 		basename := filepath.Base(pc.Executable)
 		if basename != "sqlite3" {

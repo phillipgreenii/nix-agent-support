@@ -181,11 +181,10 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 	if input.ToolName != "Bash" {
 		return hookio.NotApplicable()
 	}
-	cmdStr, err := input.BashCommand()
+	parsed, err := cmdparse.LeavesOf(input)
 	if err != nil {
 		return hookio.RuleResult{}, fmt.Errorf("safe-commands: read bash command: %w", err)
 	}
-	parsed := cmdparse.Parse(cmdStr)
 	if len(parsed) == 0 {
 		return hookio.NotApplicable()
 	}

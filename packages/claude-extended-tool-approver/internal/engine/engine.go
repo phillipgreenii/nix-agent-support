@@ -1,7 +1,6 @@
 package engine
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -205,7 +204,23 @@ func (e *Engine) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 			// The trailing-comment annotation is for a GATING verdict a human will
 			// read on the prompt; a NoOpinion emits {} and shows nobody a reason, so
 			// it is left alone exactly as the pre-ADR-0043 Abstain path was.
-			if cmd, err := input.BashCommand(); err == nil {
+			//
+			// Reads the leaf's OWN Comment when the engine threaded ParsedLeaf (ADR
+			// 0039 step 3): ParsedCommand.Comment is the identical fact
+			// cmdparse.CommandComment(cmd) used to re-derive by re-parsing this same
+			// leaf's round-tripped Raw, so this is not a behaviour change, only the
+			// removal of a redundant parse. Falls back to the pre-existing
+			// BashCommand()+CommandComment path for a caller that invoked Evaluate
+			// directly (a unit test, or any future non-engine caller) without
+			// threading ParsedLeaf at all.
+			if leaves, ok := input.ParsedLeaf.([]cmdparse.ParsedCommand); ok {
+				for _, leaf := range leaves {
+					if leaf.Comment != "" {
+						result.Reason = result.Reason + " (note: " + leaf.Comment + ")"
+						break
+					}
+				}
+			} else if cmd, err := input.BashCommand(); err == nil {
 				if comment := cmdparse.CommandComment(cmd); comment != "" {
 					result.Reason = result.Reason + " (note: " + comment + ")"
 				}
@@ -404,7 +419,7 @@ func (e *Engine) EvaluateExpression(expr string, stack []hookio.StackFrame, orig
 				leafResult = hookio.MostRestrictive(leafResult, e.evaluateHeredocBodies(pc, normalized, stack, origin))
 				judgedLeaf = true
 			}
-			if assignResult, judged := e.evaluateAssignmentOnlyLeaf(pc, currentCWD, expr, inCommandVars, inCommandTempDirVars, origin); judged {
+			if assignResult, judged := e.evaluateAssignmentOnlyLeaf(pc, currentCWD, expr, parsed, inCommandVars, inCommandTempDirVars, origin); judged {
 				// mostRestrictiveAttributed, not hookio.MostRestrictive directly: assignResult
 				// can be a rule's own decisive Approve (e.g. envvars' preserves-caller-value
 				// case), and leafResult is still the engine-attributed redirection seed at
@@ -445,15 +460,29 @@ func (e *Engine) EvaluateExpression(expr string, stack []hookio.StackFrame, orig
 
 		// Build synthetic HookInput (using the running cwd/path-evaluator so a
 		// leaf after a `cd` resolves relative paths against the cd target).
+		//
+		// ParsedLeaf/ParsedRoot replace the deleted mustBashJSON(pc.Raw) round trip
+		// (ADR 0039 step 3, root cause 3): rather than re-serialising pc.Raw into a
+		// synthetic ToolInput JSON string for every rule to independently
+		// unmarshal and re-parse, the ALREADY-COMPUTED structure is threaded
+		// directly. ParsedLeaf is `cmdparse.Parse(pc.Raw)` — the EXACT computation
+		// every rule used to perform for itself, just made once and shared, so a
+		// leaf's rule-side leaf set is byte-for-byte what it always was (including
+		// the documented heredoc-bleed case where re-parsing Raw can yield more
+		// than one leaf). ParsedRoot is `parsed` itself — the SAME slice this
+		// function derived from `expr` at its own top, so a rule reaching for the
+		// expression's sibling leaves (git's expressionScope, gitdir's pipeScope)
+		// needs no re-parse of RootExpression at all.
 		syntheticInput := &hookio.HookInput{
 			SessionID:            origin.SessionID,
 			CWD:                  currentCWD,
 			ToolName:             "Bash",
-			ToolInput:            mustBashJSON(pc.Raw),
+			ParsedLeaf:           cmdparse.Parse(pc.Raw),
 			PermissionMode:       origin.PermissionMode,
 			HookEventName:        origin.HookEventName,
 			PathEval:             currentPathEval,
 			RootExpression:       expr,
+			ParsedRoot:           parsed,
 			InCommandVars:        inCommandVars,
 			InCommandTempDirVars: inCommandTempDirVars,
 		}
@@ -1046,20 +1075,28 @@ func (e *Engine) foldSubstitutionScan(scan cmdparse.SubstitutionScan, normalized
 // sibling fresh-temp-dir marker scan (cmdparse.InCommandTempDirVars). The synthetic
 // input must otherwise stay field-for-field the same as the executable-bearing one: a
 // field present on one path and absent on the other is a difference no test asserts and
-// no author expects.
-func (e *Engine) evaluateAssignmentOnlyLeaf(pc cmdparse.ParsedCommand, cwd, rootExpr string, inCommandVars, inCommandTempDirVars map[string]string, origin *hookio.HookInput) (result hookio.RuleResult, judged bool) {
+// no author expects — which is why rootLeaves (ADR 0039 step 3's ParsedRoot) is threaded
+// here too, even though envvars itself never reads RootExpression: gitdir's
+// EnvVars-binding branch (`f=…/.git/config`) DOES reach this leaf shape, through the
+// SAME rule chain evaluateAssignmentOnlyLeaf runs below.
+func (e *Engine) evaluateAssignmentOnlyLeaf(pc cmdparse.ParsedCommand, cwd, rootExpr string, rootLeaves []cmdparse.ParsedCommand, inCommandVars, inCommandTempDirVars map[string]string, origin *hookio.HookInput) (result hookio.RuleResult, judged bool) {
 	if len(pc.EnvVars) == 0 {
 		return hookio.RuleResult{Decision: hookio.Approve, Reason: "no env assignments to evaluate", Module: "engine"}, false
 	}
+	// ParsedLeaf/ParsedRoot replace mustBashJSON(pc.Raw) exactly as the
+	// executable-bearing leaf's synthetic input above does — see that
+	// construction's comment for why each is safe to thread rather than
+	// re-derive.
 	syntheticInput := &hookio.HookInput{
 		SessionID:            origin.SessionID,
 		CWD:                  cwd,
 		ToolName:             "Bash",
-		ToolInput:            mustBashJSON(pc.Raw),
+		ParsedLeaf:           cmdparse.Parse(pc.Raw),
 		PermissionMode:       origin.PermissionMode,
 		HookEventName:        origin.HookEventName,
 		PathEval:             origin.PathEval,
 		RootExpression:       rootExpr,
+		ParsedRoot:           rootLeaves,
 		InCommandVars:        inCommandVars,
 		InCommandTempDirVars: inCommandTempDirVars,
 	}
@@ -1113,10 +1150,14 @@ func normalizeExpression(expr string) string {
 	return strings.Join(strings.Fields(strings.TrimSpace(expr)), " ")
 }
 
-func mustBashJSON(cmd string) json.RawMessage {
-	b, _ := json.Marshal(hookio.BashToolInput{Command: cmd})
-	return b
-}
+// mustBashJSON and BOTH its call sites are DELETED (ADR 0039 step 3, root
+// cause 3). It re-serialised a leaf's already-parsed Raw text into a synthetic
+// ToolInput JSON string purely so every rule could unmarshal it back out and
+// re-parse it themselves — the engine-to-rule boundary re-serialising
+// structure back to text. hookio.HookInput.ParsedLeaf/ParsedRoot now carry the
+// already-computed cmdparse.ParsedCommand structure directly; see those
+// fields' doc and cmdparse.LeavesOf/RootLeavesOf, the rule-side accessors that
+// replace `cmdStr, _ := input.BashCommand(); cmdparse.Parse(cmdStr)`.
 
 func (e *Engine) evaluateRedirections(redirs []hookio.Redirection, override *patheval.PathEvaluator) hookio.RuleResult {
 	// No redirections = no opinion (neutral)

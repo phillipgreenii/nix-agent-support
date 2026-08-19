@@ -175,11 +175,13 @@ func (m *conditionalMockRule) Name() string { return "conditional" }
 // sentinel "not mine, keep going", so under ADR 0043 they are ErrNotApplicable. The
 // assertions in this file are unchanged by that mapping.
 func (m *conditionalMockRule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
-	cmd, err := input.BashCommand()
+	// cmdparse.LeavesOf, not a bare input.BashCommand()+cmdparse.Parse round
+	// trip — see attrApproveRule's identical comment in
+	// approve_attribution_test.go.
+	parsed, err := cmdparse.LeavesOf(input)
 	if err != nil {
 		return hookio.NotApplicable()
 	}
-	parsed := cmdparse.Parse(cmd)
 	for _, pc := range parsed {
 		if m.rejectPrefix != "" && strings.HasPrefix(pc.Executable, m.rejectPrefix) {
 			return hookio.RuleResult{Decision: hookio.Reject, Reason: "rejected", Module: m.Name()}, nil
@@ -290,12 +292,18 @@ func (m *envAssignmentMockRule) Name() string { return "env-assignment-mock" }
 
 // Evaluate: same NoOpinion-means-not-applicable mapping as conditionalMockRule.
 func (m *envAssignmentMockRule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
-	cmd, err := input.BashCommand()
+	// cmdparse.LeavesOf, not a bare input.BashCommand()+cmdparse.Parse round
+	// trip — see attrApproveRule's identical comment in
+	// approve_attribution_test.go. `seen` now records each governing leaf's
+	// own Raw rather than the whole synthetic command string BashCommand()
+	// used to hand back; for every case this test exercises there is exactly
+	// one leaf per Evaluate call, so the recorded value is unchanged.
+	leaves, err := cmdparse.LeavesOf(input)
 	if err != nil {
 		return hookio.NotApplicable()
 	}
-	m.seen = append(m.seen, cmd)
-	for _, pc := range cmdparse.Parse(cmd) {
+	for _, pc := range leaves {
+		m.seen = append(m.seen, pc.Raw)
 		for _, ev := range pc.EnvVars {
 			if m.rejectVar != "" && ev.Name == m.rejectVar {
 				return hookio.RuleResult{Decision: hookio.Reject, Reason: "injector", Module: m.Name()}, nil

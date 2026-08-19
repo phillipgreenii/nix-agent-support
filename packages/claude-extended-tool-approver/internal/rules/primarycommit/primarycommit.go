@@ -167,21 +167,25 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 	if input.ToolName != "Bash" {
 		return hookio.NotApplicable()
 	}
-	cmdStr, err := input.BashCommand()
+	leaves, err := cmdparse.LeavesOf(input)
 	if err != nil {
 		// Genuine failure: the tool IS Bash, so this rule governs the input.
 		return hookio.RuleResult{}, fmt.Errorf("primary-commit: read bash command: %w", err)
 	}
-	leaves := cmdparse.Parse(cmdStr)
-	// scope is the FULL expression this Bash input came from, falling back to the
-	// leaf's own text for a direct (non-engine) caller — the same convention gitdir.go
-	// already uses for RootExpression. Threaded into inspectCommit so it can tell
-	// "the command text established this directory" (an explicit `-C`, or a
-	// `cd`/`pushd` leaf anywhere in the compound) from "this is simply the passed-in
-	// CWD, untouched" — see dirNamedByCommand.
+	// scope is the FULL expression this Bash input came from, falling back to a
+	// lazy input.BashCommand() read for a direct (non-engine) caller — the same
+	// convention gitdir.go already uses for RootExpression (ADR 0039 step 3).
+	// Threaded into inspectCommit so it can tell "the command text established
+	// this directory" (an explicit `-C`, or a `cd`/`pushd` leaf anywhere in the
+	// compound) from "this is simply the passed-in CWD, untouched" — see
+	// dirNamedByCommand.
 	scope := input.RootExpression
 	if scope == "" {
-		scope = cmdStr
+		cmd, err := input.BashCommand()
+		if err != nil {
+			return hookio.RuleResult{}, fmt.Errorf("primary-commit: read bash command: %w", err)
+		}
+		scope = cmd
 	}
 	for i, pc := range leaves {
 		if !isGit(pc.Executable) {

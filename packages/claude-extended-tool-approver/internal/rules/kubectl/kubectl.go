@@ -137,11 +137,10 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 	if input.ToolName != "Bash" {
 		return hookio.NotApplicable()
 	}
-	cmdStr, err := input.BashCommand()
+	parsed, err := cmdparse.LeavesOf(input)
 	if err != nil {
 		return hookio.RuleResult{}, fmt.Errorf("kubectl: read bash command: %w", err)
 	}
-	parsed := cmdparse.Parse(cmdStr)
 	for _, pc := range parsed {
 		if !r.isKubectlExecutable(pc.Executable) {
 			continue

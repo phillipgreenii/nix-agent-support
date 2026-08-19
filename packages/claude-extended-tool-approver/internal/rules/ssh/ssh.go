@@ -124,13 +124,13 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 	if !r.configured {
 		return r.notApplicable()
 	}
-	cmdStr, err := input.BashCommand()
+	parsed, err := cmdparse.LeavesOf(input)
 	if err != nil {
 		// Genuine failure, not "not mine": the tool is Bash and this rule IS
 		// configured, so it does govern the input and merely could not read it.
 		return hookio.RuleResult{}, fmt.Errorf("ssh: read bash command: %w", err)
 	}
-	for _, pc := range cmdparse.Parse(cmdStr) {
+	for _, pc := range parsed {
 		base := filepath.Base(pc.Executable)
 		switch base {
 		case "sshpass":

@@ -190,7 +190,17 @@ func (r *Rule) Name() string { return "git-directory" }
 func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 	switch input.ToolName {
 	case "Bash":
-		cmd, err := input.BashCommand()
+		// ADR 0039 step 3: leaves is the SAME structure
+		// `cmdparse.Parse(cmdStr)` used to derive from a fresh
+		// `input.BashCommand()` read, obtained here through cmdparse.LeavesOf so
+		// the engine's already-parsed leaf (threaded onto input.ParsedLeaf) is
+		// reused instead of re-parsed. This is also now the ONE place that reads
+		// the Bash command at all: the old unconditional `input.BashCommand()`
+		// call further down is gone, because a synthetic per-leaf input no
+		// longer carries a ToolInput JSON string to read it FROM (mustBashJSON
+		// is deleted) — BashCommand() is called lazily, below, only on the path
+		// that genuinely still needs the raw text.
+		leaves, err := cmdparse.LeavesOf(input)
 		if err != nil {
 			// THE SPLIT ADR 0043's Consequences require. This used to `break` into
 			// the shared final return below, so ONE Abstain literal carried two
@@ -205,12 +215,25 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		// the sibling consuming `"$f"` reads or writes it. RootExpression is the
 		// expression the leaf came from and is the only place that fact exists; it
 		// is empty for a direct (non-engine) call, where the leaf IS the whole
-		// command.
+		// command — the engine ALWAYS sets it (to the real top-level command text)
+		// for every synthetic per-leaf input, so this branch is unreached in
+		// production and exists only for a hand-built test/direct call.
 		scope := input.RootExpression
+		var rootLeaves []cmdparse.ParsedCommand
 		if scope == "" {
+			cmd, err := input.BashCommand()
+			if err != nil {
+				return hookio.RuleResult{}, fmt.Errorf("git-directory: read bash command: %w", err)
+			}
 			scope = cmd
+			// The leaf IS the whole command here, so its own already-parsed
+			// leaves already ARE the scope's leaf set — reusing them avoids a
+			// second parse of the identical text.
+			rootLeaves = leaves
+		} else {
+			rootLeaves = cmdparse.RootLeavesOf(input)
 		}
-		if dir, matched := bashAccess(cmd, scope); matched {
+		if dir, matched := bashAccessLeaves(leaves, scope, rootLeaves); matched {
 			return r.verdict(dir)
 		}
 	case "Read":
@@ -270,14 +293,31 @@ func (r *Rule) verdict(d direction) (hookio.RuleResult, error) {
 // directory, and in which direction. scopeText is the whole expression leafText
 // was split out of, used to resolve the direction of a path bound to a variable
 // and to resolve where a stage's output is PIPED (see pipeScope).
+//
+// It is a TEXT-taking wrapper over bashAccessLeaves for a direct caller (a unit
+// test, or any future non-engine caller) that has not threaded already-parsed
+// structure: it parses leafText fresh and passes no root leaves, which makes
+// pipeScope fall back to lazily parsing scopeText on first use — exactly this
+// function's behaviour before ADR 0039 step 3.
 func bashAccess(leafText, scopeText string) (direction, bool) {
+	return bashAccessLeaves(cmdparse.Parse(leafText), scopeText, nil)
+}
+
+// bashAccessLeaves is bashAccess's core, over an ALREADY-PARSED leaf set —
+// ADR 0039 step 3's entry point for Evaluate, which has already parsed both
+// the leaf (via cmdparse.LeavesOf) and, when available, the root expression's
+// leaves (rootLeaves, via cmdparse.RootLeavesOf) once each. rootLeaves is
+// forwarded to newPipeScope so pipeScope.sinkDirection need not re-parse
+// scopeText either; nil is a legitimate value (a direct caller with no
+// pre-parsed root) and simply falls back to pipeScope's own lazy parse.
+func bashAccessLeaves(leaves []cmdparse.ParsedCommand, scopeText string, rootLeaves []cmdparse.ParsedCommand) (direction, bool) {
 	dir, matched := dirRead, false
 	note := func(d direction) {
 		dir = worse(dir, d)
 		matched = true
 	}
-	pipes := newPipeScope(scopeText)
-	for _, pc := range cmdparse.Parse(leafText) {
+	pipes := newPipeScope(scopeText, rootLeaves)
+	for _, pc := range leaves {
 		// `git` is the sanctioned porcelain this rule funnels access through, so its
 		// own ARGUMENTS are never a violation and the dedicated `git` rule judges
 		// them. Scoped to the operands only: a redirection or an assignment on the
@@ -666,18 +706,29 @@ func readOrCapture(pc cmdparse.ParsedCommand, pipes *pipeScope) direction {
 // its OWN RootExpression (the engine recurses it through EvaluateExpression), so
 // nothing is lost by leaving it out.
 //
-// The scope parse is LAZY and cached. This rule sits at position 2 of the chain, so
-// it runs on EVERY Bash leaf, and the overwhelming majority name no git metadata at
-// all; parsing the whole expression eagerly once per leaf would make the cost
-// quadratic in a compound's leaf count for an answer almost nobody asks for.
+// The scope parse is LAZY and cached, UNLESS the caller already has it: this
+// rule sits at position 2 of the chain, so it runs on EVERY Bash leaf, and the
+// overwhelming majority name no git metadata at all — parsing the whole
+// expression eagerly for an answer almost nobody asks for would make the cost
+// quadratic in a compound's leaf count. ADR 0039 step 3 removes even that cost
+// for the common case: Evaluate has ALREADY parsed the root expression once
+// (through cmdparse.RootLeavesOf, which reads the engine's threaded
+// ParsedRoot), so newPipeScope accepts those leaves directly and this type
+// merely CACHES what its caller supplies rather than deferring a parse call
+// that would otherwise never happen.
 type pipeScope struct {
 	scope  string
 	parsed bool
 	leaves []cmdparse.ParsedCommand
 }
 
-func newPipeScope(scope string) *pipeScope {
-	return &pipeScope{scope: scope}
+// newPipeScope builds a pipeScope for scope, optionally pre-seeded with
+// scope's already-parsed leaves. A non-nil leaves marks the scope as already
+// parsed, so sinkDirection never re-parses scope itself; nil (a direct caller
+// with no pre-parsed root, e.g. bashAccess's text-taking wrapper) preserves
+// the original lazy-parse-on-first-use behaviour.
+func newPipeScope(scope string, leaves []cmdparse.ParsedCommand) *pipeScope {
+	return &pipeScope{scope: scope, leaves: leaves, parsed: leaves != nil}
 }
 
 // sinkDirection classifies where the stage whose raw text is leafRaw sends its

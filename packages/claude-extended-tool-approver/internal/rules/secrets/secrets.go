@@ -181,11 +181,11 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 			return r.decide(ref, false), nil
 		}
 	case "Bash":
-		cmd, err := input.BashCommand()
+		leaves, err := cmdparse.LeavesOf(input)
 		if err != nil {
 			return hookio.RuleResult{}, fmt.Errorf("secrets: read bash command: %w", err)
 		}
-		ref, found, malformed := r.bashRef(cmd)
+		ref, found, malformed := r.bashRef(leaves)
 		if malformed {
 			// pg2-52eod: a glued flag value's shell quoting could not be
 			// resolved (cmdparse.GluedFlagValue's decline, generalized from
@@ -333,7 +333,7 @@ func (r *Rule) pathRef(path string, isWrite bool) (secretRef, bool) {
 // budget would instead let a long argument list spend the whole allowance on pass
 // 2 and silently disable the deny-list pass, which is the fail-OPEN direction for
 // a control the user configured explicitly.
-func (r *Rule) bashRef(cmd string) (ref secretRef, found bool, malformed bool) {
+func (r *Rule) bashRef(leaves []cmdparse.ParsedCommand) (ref secretRef, found bool, malformed bool) {
 	// Bash read/write intent is ambiguous per-argument, so every candidate is
 	// judged as a READ — the direction the beads are about, and the one that
 	// governs the in-repo relaxation.
@@ -359,18 +359,18 @@ func (r *Rule) bashRef(cmd string) (ref secretRef, found bool, malformed bool) {
 	// so it is deterministic per COMMAND, not per candidateMatch — every pass would
 	// report the same malformed verdict for the same cmd. The first pass that finds
 	// EITHER a match OR a malformed value short-circuits the remaining passes.
-	if ref, found, malformed := firstSecretRef(cmd, maxShellUnwrap, r.lexicalRef(isWrite)); found || malformed {
+	if ref, found, malformed := firstSecretRefIn(leaves, maxShellUnwrap, r.lexicalRef(isWrite)); found || malformed {
 		return ref, found, malformed
 	}
 	if r.pe == nil {
 		return secretRef{}, false, false
 	}
 	resolveBudget := maxResolutions
-	if ref, found, malformed := firstSecretRef(cmd, maxShellUnwrap, r.resolvedRef(&resolveBudget, isWrite)); found || malformed {
+	if ref, found, malformed := firstSecretRefIn(leaves, maxShellUnwrap, r.resolvedRef(&resolveBudget, isWrite)); found || malformed {
 		return ref, found, malformed
 	}
 	denyBudget := maxResolutions
-	return firstSecretRef(cmd, maxShellUnwrap, r.configRef(&denyBudget, isWrite))
+	return firstSecretRefIn(leaves, maxShellUnwrap, r.configRef(&denyBudget, isWrite))
 }
 
 // lexicalRef is the lexical candidate test: the candidate exactly as the call
@@ -605,7 +605,24 @@ func (r *Rule) decide(ref secretRef, isWrite bool) hookio.RuleResult {
 // primitive is now the single source of the unwrap, and for the measured
 // `grep --file='.env' x.log` row this centralization fixes.
 func firstSecretRef(cmd string, depth int, match candidateMatch) (ref secretRef, found bool, malformed bool) {
-	for _, pc := range cmdparse.Parse(cmd) {
+	return firstSecretRefIn(cmdparse.Parse(cmd), depth, match)
+}
+
+// firstSecretRefIn is firstSecretRef's core, over an ALREADY-PARSED leaf set
+// rather than a text `cmd` to re-parse — ADR 0039 step 3's fix for the
+// OUTERMOST call: bashRef used to hand this function the same round-tripped
+// command text three times (once per candidateMatch pass), each re-parsing
+// identically. bashRef now parses once (through cmdparse.LeavesOf, which
+// reads the engine's already-threaded structure when available) and calls
+// this directly.
+//
+// The RECURSIVE `sh`/`bash -c` descent below is UNCHANGED and still goes
+// through firstSecretRef, not this function: `inner` is a shell string
+// extracted from an ARGUMENT value, genuinely new text the engine's own parse
+// never saw, so it legitimately needs its own fresh parse rather than
+// threaded structure.
+func firstSecretRefIn(leaves []cmdparse.ParsedCommand, depth int, match candidateMatch) (ref secretRef, found bool, malformed bool) {
+	for _, pc := range leaves {
 		if depth > 0 {
 			if inner, ok := shellDashC(pc); ok {
 				if ref, found, malformed := firstSecretRef(inner, depth-1, match); found || malformed {

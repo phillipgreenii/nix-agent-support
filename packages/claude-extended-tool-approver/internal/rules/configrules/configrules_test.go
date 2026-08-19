@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmdparse"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
 )
 
@@ -58,6 +59,37 @@ func TestConfigRules_ApprovedCommandWithEnvVars_Abstains(t *testing.T) {
 	}))
 	if got.Decision != hookio.NoOpinion {
 		t.Errorf("pytool with env var: got %s, want abstain", got.Decision)
+	}
+}
+
+// TestConfigRules_ApprovedCommandWithEnvVars_AbstainsViaParsedLeaf pins I5 (ADR
+// 0039's config-rules bypass bound) against the NEW code path step 3
+// introduces: the engine no longer hands a rule a synthetic `ToolInput` JSON
+// string to read a command out of (mustBashJSON is deleted) — it threads the
+// already-parsed leaf directly through hookio.HookInput.ParsedLeaf, and this
+// rule now reads it via cmdparse.LeavesOf.
+//
+// TestConfigRules_ApprovedCommandWithEnvVars_Abstains above still exercises
+// the OTHER path — a hand-built HookInput with only ToolInput set, which
+// LeavesOf's BashCommand()+Parse fallback serves — so without this test the
+// ParsedLeaf branch of LeavesOf would be untested by this package: ToolInput
+// is left UNSET here (nil), so if Evaluate ever regressed to reading
+// BashCommand() directly instead of going through LeavesOf, this would fail
+// with a decode error rather than silently falling back.
+func TestConfigRules_ApprovedCommandWithEnvVars_AbstainsViaParsedLeaf(t *testing.T) {
+	dir := t.TempDir()
+	writeConfig(t, dir, Config{ApprovedCommands: []string{"mytool", "pytool"}})
+	r := NewFromFile(filepath.Join(dir, "rules.json"))
+	leaves := cmdparse.Parse("PYTHONSTARTUP=/evil.py bin/pytool run")
+	if len(leaves) == 0 || len(leaves[0].EnvVars) == 0 {
+		t.Fatalf("test setup: expected a leaf with EnvVars, got %#v", leaves)
+	}
+	got := hookio.Verdict(r.Evaluate(&hookio.HookInput{
+		ToolName:   "Bash",
+		ParsedLeaf: leaves,
+	}))
+	if got.Decision != hookio.NoOpinion {
+		t.Errorf("pytool with env var via ParsedLeaf: got %s, want abstain", got.Decision)
 	}
 }
 

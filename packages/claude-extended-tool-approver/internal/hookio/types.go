@@ -428,6 +428,53 @@ type HookInput struct {
 	// this field's absence. `json:"-"` for the identical reason — a hook payload
 	// must never assert which directory HOME will end up naming.
 	InCommandTempDirVars map[string]string `json:"-"`
+
+	// ParsedLeaf carries THIS LEAF's already-parsed command structure — ADR
+	// 0039 step 3's fix for root cause 3 (the engine-to-rule boundary that used
+	// to re-serialise structure back into a synthetic `ToolInput` JSON string
+	// via the deleted `mustBashJSON`, so every rule in the chain independently
+	// re-parsed the identical text). engine.EvaluateExpression sets it, once
+	// per leaf, to the exact `cmdparse.Parse` result for that leaf's `Raw` —
+	// the SAME computation every rule used to perform for itself after
+	// unmarshalling ToolInput, just made ONCE and shared.
+	//
+	// It is `any` rather than `[]cmdparse.ParsedCommand` because `cmdparse`
+	// imports this package (for the Redirection type used by
+	// ParsedCommand.Redirections), so this package importing `cmdparse` back
+	// would cycle. `cmdparse.LeavesOf` is the ONE place that performs the type
+	// assertion, so a rule never asserts the type itself — mirroring how
+	// `RuleErrorSink` and `Evaluator` above decouple the engine from a
+	// concrete type without an import cycle.
+	//
+	// nil for a rule invoked outside EvaluateExpression (a direct unit-test
+	// call, or the real top-level Bash input at EvaluateHook's entry point
+	// before it is split into leaves) — cmdparse.LeavesOf falls back to
+	// parsing BashCommand() in that case, unchanged from every caller's
+	// behaviour before this field existed.
+	//
+	// `json:"-"`: engine-derived provenance, never something a hook payload
+	// may assert, matching RootExpression/InCommandVars.
+	ParsedLeaf any `json:"-"`
+
+	// ParsedRoot is ParsedLeaf's sibling for RootExpression: the FULL
+	// expression's already-parsed leaf set — the very `sp.Leaves` slice
+	// engine.EvaluateExpression parsed once at the top of the function —
+	// threaded alongside RootExpression rather than left for a rule to
+	// re-derive by re-parsing that same string (git's `expressionScope` and
+	// gitdir's `pipeScope` both did exactly that before this field existed).
+	//
+	// Same `any`-for-no-import-cycle reasoning as ParsedLeaf; read it through
+	// `cmdparse.RootLeavesOf`, never by asserting the type directly. Same
+	// nil-is-safe fallback too: nil here (a direct call, or RootExpression
+	// itself empty) makes RootLeavesOf re-parse RootExpression exactly as
+	// every existing caller did.
+	//
+	// Kept FIELD-FOR-FIELD alongside ParsedLeaf on both synthetic HookInputs
+	// the engine builds (the executable-bearing leaf and the
+	// assignment-only leaf) for the same reason RootExpression/InCommandVars
+	// already are: a field present on one path and absent on the other is a
+	// difference no test asserts and no author expects.
+	ParsedRoot any `json:"-"`
 }
 
 type BashToolInput struct {

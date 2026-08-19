@@ -59,11 +59,10 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 	if input.ToolName != "Bash" {
 		return hookio.NotApplicable()
 	}
-	cmdStr, err := input.BashCommand()
+	parsed, err := cmdparse.LeavesOf(input)
 	if err != nil {
 		return hookio.RuleResult{}, fmt.Errorf("monorepo: read bash command: %w", err)
 	}
-	parsed := cmdparse.Parse(cmdStr)
 	projectRoot := r.eval.ProjectRoot()
 	cwd := input.CWD
 	if cwd == "" {
