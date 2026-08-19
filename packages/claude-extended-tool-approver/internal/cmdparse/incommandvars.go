@@ -1,6 +1,9 @@
 package cmdparse
 
-import "strings"
+import (
+	"path/filepath"
+	"strings"
+)
 
 // IN-COMMAND VARIABLE RESOLUTION (pg2-wq3ki)
 //
@@ -553,4 +556,141 @@ func isVarNameByte(c byte, first bool) bool {
 		return true
 	}
 	return !first && c >= '0' && c <= '9'
+}
+
+// FRESH TEMP DIR RESOLUTION (pg2-d71my)
+//
+// A HOME REPLACEMENT is ordinarily indistinguishable from a PATH-hijack-shaped
+// hazard (envvars' askVars doc comment) — dropping the caller's HOME for a
+// value nobody vouches for is exactly what an attacker's replacement would also
+// look like. `mktemp -d`'s output is the one replacement value that IS
+// distinguishable: it names a freshly created, session-unique directory that
+// did not exist before this command ran, so nothing — attacker or otherwise —
+// could have pre-staged content there in advance. OPERATOR RULING 2026-08-17
+// (via `/unblock-human-beads`, decided together with pg2-qhhil): this is
+// authorized relief, narrower than preservesCallerValue's EXTEND shape and
+// gated on recognizing the SAME shape this file's InCommandVars already reads
+// for — a value established by THIS command's own earlier text, not by
+// anything ambient.
+//
+// InCommandTempDirVars is InCommandVars' sibling for this marker rather than
+// for a literal value, and deliberately reuses shellVarWrites/scopeVisible
+// rather than re-deriving the leaf-order / assignment-builtin /
+// subshell-scoping rules those encode (InCommandVars' own doc comment records
+// why each rule exists). `T=$(mktemp -d)` is exactly the shape
+// literalAssignedValue refuses — a command substitution is never literal — so
+// InCommandVars itself never binds T; a caller wanting "is this name grounded
+// in a directory nothing could have pre-staged" needs this scan instead.
+
+// isMktempDirSubstitution reports whether body — a substitution BODY as
+// EnumerateSubstitutions returns it, e.g. "mktemp -d" — is a `mktemp`
+// invocation carrying a directory-creating flag. Plain `mktemp` (no flag)
+// creates a FILE, not a directory, and is deliberately excluded: a file path
+// is not a hermetic HOME. The executable is matched by filepath.Base, the same
+// convention assignmentIsWholeLeaf and this package's other executable
+// switches use, so a path-spelled `/usr/bin/mktemp` still matches.
+func isMktempDirSubstitution(body string) bool {
+	leaves := Parse(body)
+	if len(leaves) != 1 {
+		return false
+	}
+	leaf := leaves[0]
+	if filepath.Base(leaf.Executable) != "mktemp" {
+		return false
+	}
+	for _, a := range leaf.Args {
+		if a == "-d" || a == "--directory" {
+			return true
+		}
+	}
+	return false
+}
+
+// IsFreshTempDirAssignment reports whether ev's VALUE is DIRECTLY, and ONLY,
+// the output of a `mktemp -d` / `mktemp --directory` command substitution —
+// `$(mktemp -d)` or “ `mktemp -d` “ — with no literal prefix or suffix
+// alongside it. That is the narrow shape a variable InCommandTempDirVars marks
+// must itself satisfy, and it is also the shape an assignment's OWN value may
+// satisfy directly (`HOME=$(mktemp -d)`), so it is exported for both call
+// sites — internal/rules/envvars uses it for the latter.
+//
+// A trailing literal suffix (`HOME="$T/h"`) is a DIFFERENT, one-level-removed
+// shape — a variable REFERENCES a tempdir and the suffix is inert literal text
+// — and is composed by the caller via ExpandInCommand against
+// InCommandTempDirVars' result, not by widening this predicate to parse a
+// prefix/suffix split itself.
+func IsFreshTempDirAssignment(ev EnvAssignment) bool {
+	if ev.Expansion != ExpansionSafeCmd {
+		return false
+	}
+	value := ev.Value
+	if len(value) >= 2 && (value[0] == '"' || value[0] == '\'') && value[len(value)-1] == value[0] {
+		value = value[1 : len(value)-1]
+	}
+	if strings.ContainsAny(value, "\"'\\") {
+		return false
+	}
+	subs := EnumerateSubstitutions(value)
+	if len(subs) != 1 || !subs[0].IsCommandSubstitution() {
+		return false
+	}
+	var wrapped string
+	switch subs[0].Kind {
+	case SubstCommand:
+		wrapped = "$(" + subs[0].Body + ")"
+	case SubstBacktick:
+		wrapped = "`" + subs[0].Body + "`"
+	default:
+		return false
+	}
+	if value != wrapped {
+		// A literal prefix/suffix survived alongside the substitution — not the
+		// narrow "value is nothing but the mktemp call" shape this predicate
+		// covers.
+		return false
+	}
+	return isMktempDirSubstitution(subs[0].Body)
+}
+
+// InCommandTempDirVars returns the shell variables that leaves before index
+// `before` bind, in THIS SAME expression, to IsFreshTempDirAssignment's shape
+// — mapped to the empty-string SENTINEL value ExpandInCommand needs to treat
+// the name as literal-and-known without asserting any particular literal text
+// (the whole point of `mktemp -d` is that nothing here can know what path it
+// produced). `leaves`/`before` follow InCommandVars' own contract exactly: a
+// single Parse call's leaves, in source order, `before` exclusive. nil when
+// nothing qualifies.
+func InCommandTempDirVars(leaves []ParsedCommand, before int) map[string]string {
+	if before > len(leaves) {
+		before = len(leaves)
+	}
+	var targetScope []int
+	knownScope := before >= 0 && before < len(leaves)
+	if knownScope {
+		targetScope = leaves[before].SubshellScope
+	}
+	var vars map[string]string
+	for i := 0; i < before; i++ {
+		if knownScope && !scopeVisible(leaves[i].SubshellScope, targetScope) {
+			continue
+		}
+		writes, readValues := shellVarWrites(leaves, i)
+		for _, ev := range writes {
+			if ev.Name == "" {
+				continue
+			}
+			if readValues && IsFreshTempDirAssignment(ev) {
+				if vars == nil {
+					vars = map[string]string{}
+				}
+				vars[ev.Name] = ""
+				continue
+			}
+			// REVOCATION, mirroring InCommandVars: a name this loop already marked
+			// must not keep that marker after the command reassigns it to something
+			// that is not itself a fresh temp dir. `delete` on a nil map is a no-op.
+			delete(vars, ev.Name)
+		}
+	}
+	return vars
 }

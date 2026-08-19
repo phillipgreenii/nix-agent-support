@@ -1176,7 +1176,12 @@ var execPrefixes = map[string]bool{"env": true, "command": true}
 // false when no inner command follows (bare `env`, or only flags/assignments) —
 // the caller then leaves the command as-is (a read-only env query) but still
 // records the captured assignments.
-func unwrapExecPrefix(base string, args []string) (inner string, innerArgs []string, envAssigns []EnvAssignment, ok bool) {
+//
+// hermetic reports whether `env -i` / `env --ignore-environment` was seen
+// (pg2-d71my) — the flag that makes env discard the WHOLE caller environment
+// before applying envAssigns, rather than merely prefixing it. It is always
+// false for `command`, which has no such flag.
+func unwrapExecPrefix(base string, args []string) (inner string, innerArgs []string, envAssigns []EnvAssignment, hermetic, ok bool) {
 	i := 0
 	for i < len(args) {
 		a := args[i]
@@ -1188,7 +1193,7 @@ func unwrapExecPrefix(base string, args []string) (inner string, innerArgs []str
 		// execute NAME. Do not unwrap: leave the bare `command` for the safe-commands
 		// rule to approve as a read-only lookup. (`command -p` DOES execute → unwrap.)
 		if base == "command" && (a == "-v" || a == "-V") {
-			return "", nil, nil, false
+			return "", nil, nil, false, false
 		}
 		// env NAME=VALUE assignment (command has none) — capture it so the env-var
 		// guard can inspect it, then continue past it to the inner command.
@@ -1198,6 +1203,12 @@ func unwrapExecPrefix(base string, args []string) (inner string, innerArgs []str
 			continue
 		}
 		if strings.HasPrefix(a, "-") {
+			// env -i / --ignore-environment: the hermetic marker itself.
+			if base == "env" && (a == "-i" || a == "--ignore-environment") {
+				hermetic = true
+				i++
+				continue
+			}
 			// env -u NAME and -C DIR take a following argument; consume it too.
 			if base == "env" && (a == "-u" || a == "-C") {
 				i += 2
@@ -1209,9 +1220,9 @@ func unwrapExecPrefix(base string, args []string) (inner string, innerArgs []str
 		break // first bare, non-assignment token is the inner executable
 	}
 	if i >= len(args) {
-		return "", nil, envAssigns, false
+		return "", nil, envAssigns, hermetic, false
 	}
-	return args[i], args[i+1:], envAssigns, true
+	return args[i], args[i+1:], envAssigns, hermetic, true
 }
 
 // commandRunner describes a command-runner wrapper's flag grammar: which options
@@ -1372,7 +1383,7 @@ func unwrapCommand(pc ParsedCommand) ParsedCommand {
 		return liftAssignmentArgs(pc)
 	}
 	if execPrefixes[base] {
-		if inner, innerArgs, envAssigns, ok := unwrapExecPrefix(base, pc.Args); ok {
+		if inner, innerArgs, envAssigns, hermetic, ok := unwrapExecPrefix(base, pc.Args); ok {
 			// COPY-then-override rather than a fresh literal: every field an unwrap does
 			// not deliberately change (Raw, Heredocs, the pipeline coordinates, …) must
 			// survive it, and a literal silently drops any field added later.
@@ -1381,6 +1392,10 @@ func unwrapCommand(pc ParsedCommand) ParsedCommand {
 			next.Args = innerArgs
 			next.ArgLiveExpansion = argLiveSuffix(pc.ArgLiveExpansion, len(pc.Args)-len(innerArgs))
 			next.EnvVars = appendEnvAssignments(pc.EnvVars, envAssigns)
+			// OR, not overwrite: a nested unwrap (`nice env -i cmd` unwraps `nice`
+			// first, then recurses into this same branch for `env`) must not lose an
+			// outer `env -i` that an inner, non-hermetic `env` wrap sits inside of.
+			next.EnvCleared = pc.EnvCleared || hermetic
 			return unwrapCommand(next)
 		} else if len(envAssigns) > 0 {
 			// No inner command (bare `env`/`command`, or flags + NAME=VALUE only) —
@@ -1388,6 +1403,7 @@ func unwrapCommand(pc ParsedCommand) ParsedCommand {
 			// assignments visible to the env-var guard so a standalone
 			// `env DANGEROUS=…` does not slip past it (pg2-gkd5e).
 			pc.EnvVars = appendEnvAssignments(pc.EnvVars, envAssigns)
+			pc.EnvCleared = pc.EnvCleared || hermetic
 			return pc
 		}
 		// No inner command and no assignments (bare `env`/`command` or flags only) —
@@ -1516,8 +1532,23 @@ type ParsedCommand struct {
 	// callers never route through it) — ArgIsLiveExpansion is the safe
 	// accessor for exactly that case: FAIL-CLOSED, "unknown" reads as "assume
 	// live", never as "assume static".
-	ArgLiveExpansion     []bool
-	EnvVars              []EnvAssignment
+	ArgLiveExpansion []bool
+	EnvVars          []EnvAssignment
+	// EnvCleared is true when this leaf's Executable runs under `env -i` /
+	// `env --ignore-environment` — the environment the inner command actually
+	// receives is NOT the caller's, it is EMPTY plus whatever EnvVars this same
+	// `env` invocation went on to set. unwrapExecPrefix sets it when it sees the
+	// flag and unwrapCommand's env branch carries it onto the unwrapped leaf
+	// (pg2-d71my); a leaf never reached through that unwrap (a hand-built
+	// ParsedCommand in a test, any executable other than `env`) is false, which
+	// is the correct "not hermetic" default.
+	//
+	// This is a NAME-level marker about the INVOCATION, not about any one
+	// assignment's value — internal/rules/envvars consults it to decide whether
+	// a PATH/HOME REPLACEMENT value may be judged against "is it static and
+	// reasonable" instead of "does it preserve the caller's value", because
+	// under `env -i` there IS no caller value left to preserve.
+	EnvCleared           bool
 	Redirections         []hookio.Redirection
 	ProcessSubstitutions []string // inner commands from <(cmd) and >(cmd)
 	HasHeredoc           bool

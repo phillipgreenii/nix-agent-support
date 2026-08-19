@@ -192,6 +192,34 @@ func LeafVars(base map[string]string, leaves []cmdparse.ParsedCommand, i int) ma
 	return merged
 }
 
+// LeafTempDirVars is LeafVars' sibling for the fresh-temp-dir MARKER scan
+// (cmdparse.InCommandTempDirVars) rather than the literal-value scan
+// (cmdparse.InCommandVars) — same base/local overlay, same pg2-eqacu reason:
+// under the engine `base` is hookio.HookInput.InCommandTempDirVars, precomputed
+// once per leaf from the WHOLE expression, and `leaves` is the ONE leaf the
+// rule was handed, so the local scan is empty and this returns base unchanged.
+// A direct caller (a unit test, or envvars' own top-level reparse of a whole
+// command) is handed the WHOLE expression instead, and the local scan finds
+// everything itself. internal/rules/envvars (pg2-d71my) is currently its only
+// consumer.
+func LeafTempDirVars(base map[string]string, leaves []cmdparse.ParsedCommand, i int) map[string]string {
+	local := cmdparse.InCommandTempDirVars(leaves, i)
+	if len(local) == 0 {
+		return base
+	}
+	if len(base) == 0 {
+		return local
+	}
+	merged := make(map[string]string, len(base)+len(local))
+	for k, v := range base {
+		merged[k] = v
+	}
+	for k, v := range local { // the nearer assignment wins
+		merged[k] = v
+	}
+	return merged
+}
+
 // unresolvableToken returns the first path COMPONENT of p that the shell would rewrite
 // before git ever saw it, or "" when p is fully literal. A RELATIVE path is literal —
 // it joins onto the cwd deterministically, so `git -C sub commit` stays resolved and

@@ -410,6 +410,24 @@ type HookInput struct {
 	// a hook payload that could assert a variable's value would be asserting the
 	// directory a commit lands in.
 	InCommandVars map[string]string `json:"-"`
+
+	// InCommandTempDirVars is InCommandVars' sibling for a different, narrower
+	// fact: which of those same EARLIER-LEAF variables are bound to a freshly
+	// created `mktemp -d` directory (cmdparse.InCommandTempDirVars), rather than
+	// to a literal value. `T=$(mktemp -d)` is exactly the shape InCommandVars
+	// itself refuses — a command substitution is never literal — so this field
+	// exists precisely because InCommandVars has nothing to say about T at all.
+	// Values are the empty-string SENTINEL cmdparse.ExpandInCommand needs to
+	// treat the name as literal-and-known without asserting what path it
+	// actually names (pg2-d71my; internal/rules/envvars is its only consumer,
+	// for HOME="$T/h" after an earlier `T=$(mktemp -d)`).
+	//
+	// Same provenance and the same fail-safe default as InCommandVars: nil for
+	// no qualifying assignment and nil for a rule invoked outside
+	// EvaluateExpression, so a consumer's no-binding branch is unaffected by
+	// this field's absence. `json:"-"` for the identical reason — a hook payload
+	// must never assert which directory HOME will end up naming.
+	InCommandTempDirVars map[string]string `json:"-"`
 }
 
 type BashToolInput struct {

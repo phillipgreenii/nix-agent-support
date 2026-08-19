@@ -52,6 +52,51 @@ func TestUnwrapCommand_ExecPrefixes(t *testing.T) {
 	}
 }
 
+// TestUnwrapCommand_EnvCleared pins pg2-d71my's hermetic-invocation marker:
+// `env -i` / `env --ignore-environment` sets ParsedCommand.EnvCleared on the
+// UNWRAPPED leaf (the inner command, not the `env` leaf that no longer
+// exists), and every OTHER flag/wrapper leaves it false.
+func TestUnwrapCommand_EnvCleared(t *testing.T) {
+	tests := []struct {
+		in             string
+		wantExec       string
+		wantEnvCleared bool
+	}{
+		{"env -i rm x", "rm", true},
+		{"env --ignore-environment rm x", "rm", true},
+		{"env -i PATH=/usr/bin:/bin HOME=/tmp rm x", "rm", true},
+		{"env -u HOME -i rm x", "rm", true}, // -i after another flag
+		{"env -i -u HOME rm x", "rm", true}, // -i before another flag
+		{"nice env -i dd x", "dd", true},    // nested: nice -> env -i -> dd
+		// No -i at all: EnvCleared must stay false.
+		{"env rm x", "rm", false},
+		{"env FOO=bar rm x", "rm", false},
+		{"env -u HOME rm x", "rm", false},
+		{"command rm x", "rm", false},
+		{"nice dd x", "dd", false},
+	}
+	for _, tt := range tests {
+		got := Parse(tt.in)
+		if len(got) != 1 {
+			t.Fatalf("Parse(%q): got %d cmds, want 1", tt.in, len(got))
+		}
+		if base := filepath.Base(got[0].Executable); base != tt.wantExec {
+			t.Errorf("Parse(%q).Executable basename = %q, want %q", tt.in, base, tt.wantExec)
+		}
+		if got[0].EnvCleared != tt.wantEnvCleared {
+			t.Errorf("Parse(%q).EnvCleared = %v, want %v", tt.in, got[0].EnvCleared, tt.wantEnvCleared)
+		}
+	}
+	// A bare `env -i PATH=...` with NO inner command: the leaf stays a
+	// read-only `env` query (Executable unchanged), but EnvCleared must still
+	// carry the marker — this is exactly the shape a command-less leaf's own
+	// envvars evaluation (evaluateAssignmentOnlyLeaf) inspects.
+	bare := Parse("env -i PATH=/usr/bin:/bin HOME=/tmp")
+	if len(bare) != 1 || bare[0].Executable != "env" || !bare[0].EnvCleared {
+		t.Errorf("Parse(%q) = %#v, want Executable=env EnvCleared=true", "env -i PATH=/usr/bin:/bin HOME=/tmp", bare)
+	}
+}
+
 func TestUnwrapCommand_CommandRunnerPrefixes(t *testing.T) {
 	// nice/timeout/nohup/stdbuf are command-runner wrappers: they must unwrap to
 	// the inner command so argv[0]-keyed rules (dangerouscmds, buildtools, …) see

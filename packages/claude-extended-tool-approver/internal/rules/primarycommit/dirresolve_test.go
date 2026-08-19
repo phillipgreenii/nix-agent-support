@@ -153,3 +153,37 @@ func TestLeafVars(t *testing.T) {
 		t.Errorf("LeafVars(nil, one leaf, 0) = %v, want no bindings", got)
 	}
 }
+
+// TestLeafTempDirVars is LeafVars' test, mirrored for the fresh-temp-dir marker
+// sibling (pg2-d71my): the engine supplies the environment for ONE leaf via
+// base, a direct caller supplies the whole expression and the local scan finds
+// everything itself.
+func TestLeafTempDirVars(t *testing.T) {
+	// Direct-caller scope: the whole expression, no engine-supplied base.
+	leaves := cmdparse.Parse(`T=$(mktemp -d) && git -C "$T" status`)
+	if len(leaves) != 2 {
+		t.Fatalf("expected 2 leaves, got %d", len(leaves))
+	}
+	if got, ok := LeafTempDirVars(nil, leaves, 1)["T"]; !ok {
+		t.Errorf(`LeafTempDirVars(nil, whole expression, 1)["T"] not present, want a marker (got %q)`, got)
+	}
+	// Engine scope: one leaf, so the local scan is empty and the base passes through.
+	base := map[string]string{"T": ""}
+	oneLeaf := cmdparse.Parse(`git -C "$T" status`)
+	if got, ok := LeafTempDirVars(base, oneLeaf, 0)["T"]; !ok {
+		t.Errorf(`LeafTempDirVars(base, one leaf, 0)["T"] not present, want the base marker (got %q)`, got)
+	}
+	// A DIFFERENT name found locally is merged alongside the engine-supplied one.
+	both := cmdparse.Parse(`U=$(mktemp -d) && git -C "$T" status`)
+	merged := LeafTempDirVars(base, both, 1)
+	if _, ok := merged["T"]; !ok {
+		t.Errorf(`LeafTempDirVars(base, both, 1)["T"] not present, want the base marker preserved`)
+	}
+	if _, ok := merged["U"]; !ok {
+		t.Errorf(`LeafTempDirVars(base, both, 1)["U"] not present, want the locally-found marker`)
+	}
+	// Neither source: no bindings, which is the ordinary case.
+	if got := LeafTempDirVars(nil, oneLeaf, 0); len(got) != 0 {
+		t.Errorf("LeafTempDirVars(nil, one leaf, 0) = %v, want no bindings", got)
+	}
+}

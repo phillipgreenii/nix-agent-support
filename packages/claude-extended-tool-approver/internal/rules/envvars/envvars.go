@@ -170,12 +170,18 @@ var injectorAskVars = map[string]bool{
 //     ambient-variable shapes above ($PWD, $JAVA_HOME, $TMP, ...) are
 //     unaffected: they are never assigned by the command's own text, so the
 //     seam never resolves them and they keep asking.
-//   - pg2-kzqw2 and pg2-d71my: later-filed, separately-scoped decisions on a
-//     `$(...)`-derived component and on REPLACEMENT-form values (`env -i`,
-//     hermetic-HOME test idioms) respectively — the middle option this
+//   - pg2-kzqw2: a `$(...)`-derived component — the middle option this
 //     ruling's trade analysis fanned out to once the blanket widen was
-//     rejected. Neither is decided by KEEP STRICT, and neither is
-//     implemented by pg2-qhhil's wiring above.
+//     rejected. Not decided by KEEP STRICT, and not implemented here.
+//   - pg2-d71my: REPLACEMENT-form values (`env -i`, hermetic-HOME test
+//     idioms) — a DIFFERENT question from this ruling's EXTEND-shape
+//     component predicate (see the Rule doc comment's Approve CONTRACT).
+//     OPERATOR RULING 2026-08-17 (via `/unblock-human-beads`, decided
+//     together with pg2-qhhil, same sitting): BUILD both the `env -i`
+//     hermetic-replacement relief and the HOME=temp-dir relief. Now
+//     IMPLEMENTED — see isHermeticEnvReplacement and
+//     isHermeticHomeReplacement, and evaluateAssignment's askVars case,
+//     which tries preservesCallerValue first and these two second.
 var askVars = map[string]bool{
 	"PATH": true,
 	"HOME": true,
@@ -185,14 +191,19 @@ var askVars = map[string]bool{
 // per-(var,value) sub-verdict most-restrictive-wins.
 //
 // Approve CONTRACT (pg2-0q99a — this replaced a former "NEVER returns Approve"
-// invariant). The rule returns Approve for EXACTLY ONE shape, and all three
-// conditions must hold:
+// invariant; pg2-d71my widened condition 2's alternatives, not its shape). The
+// rule returns Approve for EXACTLY ONE shape, and all three conditions must
+// hold:
 //
 //  1. the NAME is an askVar (PATH/HOME) — never an injector, never an
 //     injectorAskVar, never a benign name (a benign assignment stays Abstain: the
 //     rule has no opinion to offer);
-//  2. the VALUE satisfies preservesCallerValue — it demonstrably preserves the
-//     caller's own value and adds only static absolute path components; and
+//  2. the VALUE satisfies ONE of three mutually-independent predicates:
+//     preservesCallerValue (it demonstrably preserves the caller's own value and
+//     adds only static absolute path components — pg2-0q99a/pg2-qhhil), or
+//     isHermeticEnvReplacement (a static, reasonable REPLACEMENT under `env -i` —
+//     pg2-d71my), or, for HOME only, isHermeticHomeReplacement (a REPLACEMENT
+//     grounded in a `mktemp -d` fresh temp dir — pg2-d71my); and
 //  3. the assignment IS the whole leaf (assignmentIsWholeLeaf) — a command-less
 //     leaf or one of the `export`/`env`/`command` assignment builtins.
 //
@@ -388,6 +399,86 @@ func isStaticAbsolutePath(component string) bool {
 	return true
 }
 
+// isHermeticEnvReplacement reports whether an askVar's REPLACEMENT value is safe
+// under `env -i`/`env --ignore-environment` (the leaf's EnvCleared, passed by the
+// caller as envCleared and already checked true before this is called): the
+// invocation discards the WHOLE caller environment before applying this leaf's
+// own EnvVars, so there is no caller PATH/HOME left for preservesCallerValue's
+// EXTEND shape to preserve — the assignment is instead constructing a
+// known-minimal environment from scratch, which is the POINT of `env -i`, not a
+// disguised hijack.
+//
+// # OPERATOR RULING 2026-08-17 (pg2-d71my, decided together with pg2-qhhil)
+//
+// Authorizes relief for exactly this shape, narrower than preservesCallerValue:
+// gated on the value being STATIC and REASONABLE, tested with the identical
+// isStaticAbsolutePath denylist preservesCallerValue's EXTEND shape already
+// uses, applied to EVERY `:`-separated component (for a bare, non-PATH-shaped
+// value like HOME this is just the whole value, since splitting a component-free
+// string by ":" yields itself). It is INDEPENDENT of the in-command $VAR
+// dataflow pg2-qhhil wired in: `env -i` is itself the hermetic marker the ruling
+// relies on, so no earlier assignment need be inspected to grant this relief.
+//
+// What it does NOT do: `injectorVars`/`injectorAskVars` (LD_PRELOAD, BASH_ENV,
+// …) are checked in evaluateAssignment's earlier switch cases, which this
+// function is never reached for — env -i does not make an injector safe, and
+// this predicate has no opinion on names outside askVars at all. And a value
+// that still self-references the caller ($PATH-shaped) is not a REPLACEMENT in
+// the first place and is preservesCallerValue's shape to grant, evaluated first
+// by the caller's switch — this predicate is reached only for the shapes that
+// fell through it.
+func isHermeticEnvReplacement(ev cmdparse.EnvAssignment) bool {
+	value, ok := literalValue(ev.Value)
+	if !ok || value == "" {
+		return false
+	}
+	for _, component := range strings.Split(value, ":") {
+		if !isStaticAbsolutePath(component) {
+			return false
+		}
+	}
+	return true
+}
+
+// isHermeticHomeReplacement reports whether a HOME REPLACEMENT value is grounded
+// in a `mktemp -d` fresh temporary directory this SAME command created — either
+// DIRECTLY (`HOME=$(mktemp -d)`, cmdparse.IsFreshTempDirAssignment) or via a
+// variable the command bound to one EARLIER (`T=$(mktemp -d); … HOME="$T/h"`),
+// composed here with cmdparse.ExpandInCommand exactly the way
+// preservesCallerValue composes it against the in-command-assigned $VAR middle
+// option pg2-qhhil wired in — the identical seam, reused rather than
+// re-derived, gated here on tempDirVars (cmdparse.InCommandTempDirVars via
+// primarycommit.LeafTempDirVars) instead of on vars.
+//
+// # OPERATOR RULING 2026-08-17 (pg2-d71my, decided together with pg2-qhhil)
+//
+// Authorizes this relief: a `mktemp -d` directory is freshly created and
+// session-unique, so nothing — attacker or otherwise — could have pre-staged
+// content there in advance, which is precisely what makes a HOME replacement
+// pointed at one NOT the PATH-hijack shape the decisive Ask otherwise exists to
+// catch. It is scoped to HOME only (the caller checks ev.Name == "HOME" before
+// calling this) — PATH's own replacement relief is isHermeticEnvReplacement's
+// `env -i` shape, a deliberately different and narrower gate, not this one.
+//
+// tempDirVars nil is the ordinary case (no qualifying earlier mktemp -d
+// assignment): the direct-value check still runs (it needs no vars at all), and
+// the var-ref composition below correctly reports false via ExpandInCommand's
+// own `len(vars) == 0` fail-safe.
+func isHermeticHomeReplacement(ev cmdparse.EnvAssignment, tempDirVars map[string]string) bool {
+	if cmdparse.IsFreshTempDirAssignment(ev) {
+		return true
+	}
+	if ev.Expansion != cmdparse.ExpansionVarRef {
+		return false
+	}
+	value, ok := literalValue(ev.Value)
+	if !ok {
+		return false
+	}
+	_, expanded := cmdparse.ExpandInCommand(value, tempDirVars)
+	return expanded
+}
+
 func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 	if input.ToolName != "Bash" {
 		return hookio.NotApplicable()
@@ -432,8 +523,14 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		// overlay internal/rules/primarypush already shares with primarycommit for
 		// the same base/local reason (pg2-eqacu).
 		vars := primarycommit.LeafVars(input.InCommandVars, parsed, i)
+		// The sibling scan for a DIFFERENT fact about the same earlier leaves: which
+		// of their names are bound to a fresh `mktemp -d` directory rather than to a
+		// literal value (pg2-d71my's HOME=temp-dir relief, gated on this identical
+		// seam per the operator ruling). Same base/local fallback reasoning as vars
+		// above.
+		tempDirVars := primarycommit.LeafTempDirVars(input.InCommandTempDirVars, parsed, i)
 		for _, ev := range pc.EnvVars {
-			sub, subRefused := r.evaluateAssignment(ev, input, vars)
+			sub, subRefused := r.evaluateAssignment(ev, input, vars, tempDirVars, pc.EnvCleared)
 			refused = refused || subRefused
 			if sub.Decision == hookio.Approve {
 				if wholeLeaf && held == nil {
@@ -503,7 +600,14 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 // (primarycommit.LeafVars over the caller's own parse) — nil is the ordinary case
 // and reproduces the pre-pg2-qhhil behaviour exactly, so every existing call site
 // (including the two direct test calls that pass no vars at all) is unaffected.
-func (r *Rule) evaluateAssignment(ev cmdparse.EnvAssignment, input *hookio.HookInput, vars map[string]string) (result hookio.RuleResult, refused bool) {
+//
+// tempDirVars is the sibling in-command environment for the fresh-temp-dir marker
+// (primarycommit.LeafTempDirVars) — nil is likewise the ordinary case and
+// reproduces the pre-pg2-d71my behaviour exactly. envCleared is pc.EnvCleared for
+// the leaf this assignment belongs to (true iff the leaf's executable runs under
+// `env -i`/`env --ignore-environment`); both are pg2-d71my's REPLACEMENT-form
+// relief inputs, independent of each other and of vars/preservesCallerValue.
+func (r *Rule) evaluateAssignment(ev cmdparse.EnvAssignment, input *hookio.HookInput, vars, tempDirVars map[string]string, envCleared bool) (result hookio.RuleResult, refused bool) {
 	name := r.Name()
 
 	// Base verdict from the variable NAME.
@@ -533,21 +637,38 @@ func (r *Rule) evaluateAssignment(ev cmdparse.EnvAssignment, input *hookio.HookI
 		// that provably preserves the caller's own value and only adds static
 		// absolute components — or a component THIS SAME COMMAND assigned,
 		// earlier, to one (pg2-qhhil's narrow middle option) — is affirmatively
-		// safe; everything else — every REPLACEMENT, and every value with a
-		// component we cannot classify — keeps the decisive Ask. This is a pure
-		// NAME/VALUE/in-command-text decision and must stay independent of
-		// r.exprEval, so the verdict is identical with New() and
-		// NewWithEvaluator(): `vars` is derived from the command's own parse
-		// (cmdparse.InCommandVars/primarycommit.LeafVars), never from evaluator
+		// safe. pg2-d71my adds TWO further, narrower REPLACEMENT-form reliefs
+		// (isHermeticEnvReplacement, isHermeticHomeReplacement — see their own
+		// docs) per the operator's 2026-08-17 ruling. Everything else — every
+		// other REPLACEMENT, and every value with a component we cannot classify
+		// — keeps the decisive Ask. This is a pure NAME/VALUE/in-command-text
+		// decision and must stay independent of r.exprEval, so the verdict is
+		// identical with New() and NewWithEvaluator(): vars/tempDirVars are
+		// derived from the command's own parse
+		// (cmdparse.InCommandVars|InCommandTempDirVars via
+		// primarycommit.LeafVars|LeafTempDirVars), never from evaluator
 		// recursion. Whether the Approve is actually surfaced is scoped by
 		// the caller (see Evaluate / the Rule contract).
-		if preservesCallerValue(ev, vars) {
+		switch {
+		case preservesCallerValue(ev, vars):
 			result = hookio.RuleResult{
 				Decision: hookio.Approve,
 				Reason:   "sensitive env var preserves the caller's value and adds only static absolute paths: " + sanitizeReasonName(ev.Name),
 				Module:   name,
 			}
-		} else {
+		case envCleared && isHermeticEnvReplacement(ev):
+			result = hookio.RuleResult{
+				Decision: hookio.Approve,
+				Reason:   "sensitive env var is a static replacement under a hermetic env -i invocation: " + sanitizeReasonName(ev.Name),
+				Module:   name,
+			}
+		case ev.Name == "HOME" && isHermeticHomeReplacement(ev, tempDirVars):
+			result = hookio.RuleResult{
+				Decision: hookio.Approve,
+				Reason:   "HOME replacement is grounded in a fresh mktemp -d temporary directory: " + sanitizeReasonName(ev.Name),
+				Module:   name,
+			}
+		default:
 			result = hookio.RuleResult{
 				Decision: hookio.Ask,
 				Reason:   "setting sensitive env var requires confirmation: " + sanitizeReasonName(ev.Name),

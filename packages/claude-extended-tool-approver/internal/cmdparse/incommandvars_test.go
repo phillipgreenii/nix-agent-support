@@ -586,3 +586,129 @@ func TestExpandInCommand_NoEnvironment(t *testing.T) {
 		t.Errorf("ExpandInCommand(literal, nil) = %q, %v; want the word unchanged", got, ok)
 	}
 }
+
+// TestIsFreshTempDirAssignment pins the narrow DIRECT shape (pg2-d71my): the
+// value must be NOTHING BUT a `mktemp -d` / `mktemp --directory` command
+// substitution — no literal prefix or suffix, and mktemp WITHOUT a
+// directory-creating flag (a FILE, not a directory) does not qualify either.
+func TestIsFreshTempDirAssignment(t *testing.T) {
+	tests := []struct {
+		name string
+		ev   EnvAssignment
+		want bool
+	}{
+		{"$(mktemp -d)", EnvAssignment{Name: "T", Value: "$(mktemp -d)", Raw: "T=$(mktemp -d)", Expansion: ExpansionSafeCmd}, true},
+		{"backtick mktemp -d", EnvAssignment{Name: "T", Value: "`mktemp -d`", Raw: "T=`mktemp -d`", Expansion: ExpansionSafeCmd}, true},
+		{"long flag --directory", EnvAssignment{Name: "T", Value: "$(mktemp --directory)", Raw: "T=$(mktemp --directory)", Expansion: ExpansionSafeCmd}, true},
+		{"double-quoted", EnvAssignment{Name: "T", Value: `"$(mktemp -d)"`, Raw: `T="$(mktemp -d)"`, Expansion: ExpansionSafeCmd}, true},
+		{"mktemp with no -d creates a FILE", EnvAssignment{Name: "T", Value: "$(mktemp)", Raw: "T=$(mktemp)", Expansion: ExpansionSafeCmd}, false},
+		{"a different safe-cmd substitution", EnvAssignment{Name: "T", Value: "$(date +%F)", Raw: "T=$(date +%F)", Expansion: ExpansionSafeCmd}, false},
+		{"literal suffix alongside the substitution", EnvAssignment{Name: "T", Value: "$(mktemp -d)/h", Raw: "T=$(mktemp -d)/h", Expansion: ExpansionSafeCmd}, false},
+		{"literal prefix alongside the substitution", EnvAssignment{Name: "T", Value: "pre-$(mktemp -d)", Raw: "T=pre-$(mktemp -d)", Expansion: ExpansionSafeCmd}, false},
+		{"not SafeCmd at all (var ref)", EnvAssignment{Name: "T", Value: "$OTHER", Raw: "T=$OTHER", Expansion: ExpansionVarRef}, false},
+		{"not SafeCmd at all (static)", EnvAssignment{Name: "T", Value: "/tmp/x", Raw: "T=/tmp/x", Expansion: ExpansionNone}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsFreshTempDirAssignment(tt.ev); got != tt.want {
+				t.Errorf("IsFreshTempDirAssignment(%+v) = %v, want %v", tt.ev, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestInCommandTempDirVars_EstablishedBindings covers WHICH leaves establish a
+// fresh-temp-dir MARKER for the rest of the expression, and — the load-bearing
+// half — that a later reassignment to something that is NOT itself a fresh
+// temp dir REVOKES the marker exactly as cmdparse.InCommandVars revokes a
+// literal binding.
+func TestInCommandTempDirVars_EstablishedBindings(t *testing.T) {
+	tests := []struct {
+		name string
+		cmd  string
+		want map[string]string
+	}{
+		{
+			name: "direct mktemp -d before a command",
+			cmd:  `T=$(mktemp -d) && git -C "$T" status`,
+			want: map[string]string{"T": ""},
+		},
+		{
+			name: "';' separator",
+			cmd:  `T=$(mktemp -d); git status`,
+			want: map[string]string{"T": ""},
+		},
+		{
+			name: "export form",
+			cmd:  `export T=$(mktemp -d); git status`,
+			want: map[string]string{"T": ""},
+		},
+		{
+			name: "backtick form",
+			cmd:  "T=`mktemp -d`; git status",
+			want: map[string]string{"T": ""},
+		},
+		{
+			name: "an ordinary literal is NOT a temp-dir marker",
+			cmd:  `T=/tmp/x; git status`,
+			want: nil,
+		},
+		{
+			name: "mktemp WITHOUT -d is NOT a temp-dir marker (a file, not a dir)",
+			cmd:  `T=$(mktemp); git status`,
+			want: nil,
+		},
+		{
+			name: "a DIFFERENT safe-cmd substitution is NOT a temp-dir marker",
+			cmd:  `T=$(date +%F); git status`,
+			want: nil,
+		},
+		{
+			name: "revoked by a later literal reassignment",
+			cmd:  `T=$(mktemp -d); T=/tmp/other; git status`,
+			want: nil,
+		},
+		{
+			name: "revoked by a later non-qualifying substitution",
+			cmd:  `T=$(mktemp -d); T=$(date +%F); git status`,
+			want: nil,
+		},
+		{
+			name: "two independently-marked variables",
+			cmd:  `A=$(mktemp -d); B=$(mktemp -d); git status`,
+			want: map[string]string{"A": "", "B": ""},
+		},
+		{
+			name: "a DIFFERENT name is unaffected by an unrelated literal",
+			cmd:  `T=$(mktemp -d); OTHER=/tmp/x; git status`,
+			want: map[string]string{"T": ""},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			leaves := Parse(tt.cmd)
+			// `before` is the LAST leaf's index: every assignment in the row precedes it.
+			got := InCommandTempDirVars(leaves, len(leaves)-1)
+			if len(got) == 0 && len(tt.want) == 0 {
+				return
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("InCommandTempDirVars(%q) = %v, want %v", tt.cmd, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestInCommandTempDirVars_BeforeIsExclusive mirrors
+// TestInCommandVars_BeforeIsExclusive: a leaf's own assignment must not be
+// visible to itself, so `before` at the assigning leaf's OWN index sees
+// nothing yet.
+func TestInCommandTempDirVars_BeforeIsExclusive(t *testing.T) {
+	leaves := Parse(`T=$(mktemp -d); git status`)
+	if got := InCommandTempDirVars(leaves, 0); len(got) != 0 {
+		t.Errorf("InCommandTempDirVars(leaves, 0) = %v, want empty (leaf 0's own assignment excluded)", got)
+	}
+	if got := InCommandTempDirVars(leaves, 1); got["T"] != "" {
+		t.Errorf(`InCommandTempDirVars(leaves, 1)["T"] = %q, ok=%v; want "", true`, got["T"], got != nil)
+	}
+}

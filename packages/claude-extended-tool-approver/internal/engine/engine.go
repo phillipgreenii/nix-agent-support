@@ -383,6 +383,11 @@ func (e *Engine) EvaluateExpression(expr string, stack []hookio.StackFrame, orig
 		// `before` is the leaf's own index, which is what excludes a leaf's own prefix
 		// assignments from its own expansions — see cmdparse.InCommandVars.
 		inCommandVars := cmdparse.InCommandVars(parsed, i)
+		// The sibling scan for a DIFFERENT fact about those same earlier leaves:
+		// which of their names are bound to a fresh `mktemp -d` directory rather
+		// than to a literal value (cmdparse.InCommandTempDirVars, pg2-d71my). Same
+		// per-leaf recomputation reasoning as inCommandVars above.
+		inCommandTempDirVars := cmdparse.InCommandTempDirVars(parsed, i)
 
 		if pc.Executable == "" {
 			// Command-less leaf: no executable, but it may carry env assignments
@@ -399,7 +404,7 @@ func (e *Engine) EvaluateExpression(expr string, stack []hookio.StackFrame, orig
 				leafResult = hookio.MostRestrictive(leafResult, e.evaluateHeredocBodies(pc, normalized, stack, origin))
 				judgedLeaf = true
 			}
-			if assignResult, judged := e.evaluateAssignmentOnlyLeaf(pc, currentCWD, expr, inCommandVars, origin); judged {
+			if assignResult, judged := e.evaluateAssignmentOnlyLeaf(pc, currentCWD, expr, inCommandVars, inCommandTempDirVars, origin); judged {
 				// mostRestrictiveAttributed, not hookio.MostRestrictive directly: assignResult
 				// can be a rule's own decisive Approve (e.g. envvars' preserves-caller-value
 				// case), and leafResult is still the engine-attributed redirection seed at
@@ -441,15 +446,16 @@ func (e *Engine) EvaluateExpression(expr string, stack []hookio.StackFrame, orig
 		// Build synthetic HookInput (using the running cwd/path-evaluator so a
 		// leaf after a `cd` resolves relative paths against the cd target).
 		syntheticInput := &hookio.HookInput{
-			SessionID:      origin.SessionID,
-			CWD:            currentCWD,
-			ToolName:       "Bash",
-			ToolInput:      mustBashJSON(pc.Raw),
-			PermissionMode: origin.PermissionMode,
-			HookEventName:  origin.HookEventName,
-			PathEval:       currentPathEval,
-			RootExpression: expr,
-			InCommandVars:  inCommandVars,
+			SessionID:            origin.SessionID,
+			CWD:                  currentCWD,
+			ToolName:             "Bash",
+			ToolInput:            mustBashJSON(pc.Raw),
+			PermissionMode:       origin.PermissionMode,
+			HookEventName:        origin.HookEventName,
+			PathEval:             currentPathEval,
+			RootExpression:       expr,
+			InCommandVars:        inCommandVars,
+			InCommandTempDirVars: inCommandTempDirVars,
 		}
 
 		// Evaluate through rule chain
@@ -834,27 +840,31 @@ func (e *Engine) foldSubstitutionScan(scan cmdparse.SubstitutionScan, normalized
 //
 // inCommandVars is the same per-leaf snapshot the executable-bearing path forwards
 // (cmdparse.InCommandVars at THIS leaf's index, so the leaf's own assignments are
-// excluded). Forwarding it changes no verdict TODAY — no rule that consumes the map can
-// apply to a command-less leaf, since every consumer judges a path an executable named —
-// and it is here so that the next consumer inherits it by construction rather than by
-// someone remembering this seam exists (pg2-ft2hl). The synthetic input must otherwise
-// stay field-for-field the same as the executable-bearing one for the same reason: a
+// excluded). Forwarding it changes no verdict for MOST consumers — a rule that judges a
+// PATH an executable named cannot apply to a command-less leaf at all — but envvars IS
+// such a consumer for its OWN in-command dataflow (pg2-qhhil, pg2-d71my): a bare
+// `HOME=$(mktemp -d)` or `HOME="$T/h"` with no trailing command is itself command-less,
+// so its own env-var verdict is decided HERE, through the chainResult below, and it
+// needs exactly this snapshot. inCommandTempDirVars is that same forwarding for the
+// sibling fresh-temp-dir marker scan (cmdparse.InCommandTempDirVars). The synthetic
+// input must otherwise stay field-for-field the same as the executable-bearing one: a
 // field present on one path and absent on the other is a difference no test asserts and
 // no author expects.
-func (e *Engine) evaluateAssignmentOnlyLeaf(pc cmdparse.ParsedCommand, cwd, rootExpr string, inCommandVars map[string]string, origin *hookio.HookInput) (result hookio.RuleResult, judged bool) {
+func (e *Engine) evaluateAssignmentOnlyLeaf(pc cmdparse.ParsedCommand, cwd, rootExpr string, inCommandVars, inCommandTempDirVars map[string]string, origin *hookio.HookInput) (result hookio.RuleResult, judged bool) {
 	if len(pc.EnvVars) == 0 {
 		return hookio.RuleResult{Decision: hookio.Approve, Reason: "no env assignments to evaluate", Module: "engine"}, false
 	}
 	syntheticInput := &hookio.HookInput{
-		SessionID:      origin.SessionID,
-		CWD:            cwd,
-		ToolName:       "Bash",
-		ToolInput:      mustBashJSON(pc.Raw),
-		PermissionMode: origin.PermissionMode,
-		HookEventName:  origin.HookEventName,
-		PathEval:       origin.PathEval,
-		RootExpression: rootExpr,
-		InCommandVars:  inCommandVars,
+		SessionID:            origin.SessionID,
+		CWD:                  cwd,
+		ToolName:             "Bash",
+		ToolInput:            mustBashJSON(pc.Raw),
+		PermissionMode:       origin.PermissionMode,
+		HookEventName:        origin.HookEventName,
+		PathEval:             origin.PathEval,
+		RootExpression:       rootExpr,
+		InCommandVars:        inCommandVars,
+		InCommandTempDirVars: inCommandTempDirVars,
 	}
 	// A DECISIVE verdict is judged, and so — since ADR 0044 — is a NoOpinion the chain
 	// actually FORMED, which this test could not previously distinguish from the
