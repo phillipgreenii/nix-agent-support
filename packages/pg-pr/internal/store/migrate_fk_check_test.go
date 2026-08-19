@@ -15,7 +15,7 @@ import (
 func rawOpenDB(t *testing.T) *DB {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "raw.db")
-	dsn := fmt.Sprintf("file:%s?_pragma=journal_mode(WAL)", dbPath)
+	dsn := fmt.Sprintf("file:%s?_pragma=journal_mode(WAL)&_pragma=synchronous(OFF)", dbPath)
 	sqlDB, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		t.Fatalf("rawOpenDB sql.Open: %v", err)
