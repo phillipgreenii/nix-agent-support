@@ -2171,6 +2171,20 @@ func inMultiStagePipelineStage(leaves []cmdparse.ParsedCommand, i int) bool {
 // `core.fsmonitor` — still approved, and would answer the redirect Ask, a verdict
 // no ruling supports for this route. See the call site in Evaluate for why the
 // verdict is a demotion instead.
+//
+// RULING (operator, 2026-08-19, pg2-py8h2): the `GIT_CONFIG_COUNT` / `KEY_n` /
+// `VALUE_n` triple SHOULD get an allowlist-clearing twin of clearedConfigFlagPairs,
+// so that spelling reaches the SAME verdict as the equivalent `-c` flag for an
+// already-allowlisted pair. This re-rules pg2-a12rl's blanket key/value-blindness
+// for that one triple only — every other GIT_CONFIG_* form named above
+// (GIT_CONFIG_GLOBAL/SYSTEM/PARAMETERS, legacy GIT_CONFIG) stays fully blind, since
+// none of them carries a statically resolvable key/value pair the way the triple can.
+// Not yet implemented — this comment records the decision only. Implementation MUST
+// reuse clearedConfigFlagPairs (no second table) and MUST fail closed: a triple that
+// does not resolve statically (a `$VAR` value, a COUNT that disagrees with the keys
+// present, a KEY_n with no VALUE_n, a key not in the allowlist) must not clear, and a
+// mixed set clears only when EVERY pair clears. See pg2-py8h2 for the full spec and
+// acceptance criteria.
 func hasGitConfigEnvInjection(envs []cmdparse.EnvAssignment) bool {
 	for _, ev := range envs {
 		if ev.Name == "GIT_CONFIG" || strings.HasPrefix(ev.Name, "GIT_CONFIG_") {
