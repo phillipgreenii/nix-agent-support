@@ -3190,6 +3190,102 @@ func TestIntegration_DynamicReadPathNeverApproves(t *testing.T) {
 	}
 }
 
+// TestIntegration_InCommandLiteralReadPathResolves is pg2-yeli3's regression: the
+// pg2-2ke04 read guard exercised end-to-end above
+// (TestIntegration_DynamicReadPathNeverApproves) no longer abstains
+// UNCONDITIONALLY on a $VAR/${VAR}/$D-prefixed read-path argument when the SAME
+// command's own EARLIER text assigns that name a fully-literal value — the
+// "VAR=<literal-path>; <read-cmd> ... $VAR" idiom pg2-a66hc's post-apply
+// measurement found responsible for ~all of the guard's excess real-world prompt
+// volume (4.46% of ALL tool calls vs. the 1.154% pre-land replay estimate; zero of
+// the sampled hits were credential-adjacent). The fix threads the pg2-wq3ki
+// InCommandVars/ExpandInCommand seam into safe-commands' readPathIssue via
+// primarycommit.LeafVars — the identical seam pg2-qhhil wired into envvars and
+// pg2-eqacu wired into primarycommit itself.
+func TestIntegration_InCommandLiteralReadPathResolves(t *testing.T) {
+	t.Setenv("WORKSPACE_ROOT", "/Users/testuser/workspace")
+	projectRoot := "/Users/testuser/workspace/my-project"
+	cwd := projectRoot
+	eng := buildFullEngine(projectRoot, cwd)
+
+	// THE MEASURED IDIOM, across several of the safeReadCmds family — proof the
+	// relief lands at the shared choke point (readPathIssue), not one tool.
+	relieved := []struct {
+		name    string
+		command string
+	}{
+		{"sed, the bead's own D=path example", `D=/Users/testuser/workspace/my-project; sed -n '1,5p' "$D/lib/scripts/foo"`},
+		{"sed, the bead's own scratchpad idiom", `S=/Users/testuser/workspace/my-project; sed -n '1,5p' $S/flakecheck.final.log`},
+		{"cat", `D=/Users/testuser/workspace/my-project; cat $D/README.md`},
+		{"head", `D=/Users/testuser/workspace/my-project; head -5 $D/go.mod`},
+		{"grep", `D=/Users/testuser/workspace/my-project; grep -n module $D/go.mod`},
+	}
+	for _, tt := range relieved {
+		t.Run("relieved/"+tt.name, func(t *testing.T) {
+			input := &hookio.HookInput{ToolName: "Bash", CWD: cwd, ToolInput: makeBashJSON(tt.command)}
+			got := eng.EvaluateHook(input)
+			if got.Decision != hookio.Approve {
+				t.Errorf("command %q got %v (%s: %s); want Approve (in-command literal should resolve)", tt.command, got.Decision, got.Module, got.Reason)
+			}
+		})
+	}
+
+	// AMBIENT variables ($PWD, $HOME, anything NOT assigned in-command) MUST keep
+	// abstaining exactly as before this bead — the relief is narrow, only for a
+	// value textually resolvable from the command's OWN earlier text.
+	ambient := []string{
+		"cat $PWD/foo",
+		"sed -n '1,5p' $PWD/foo",
+		"head $HOME/notes.txt",
+	}
+	for _, cmd := range ambient {
+		t.Run("ambient/"+cmd, func(t *testing.T) {
+			input := &hookio.HookInput{ToolName: "Bash", CWD: cwd, ToolInput: makeBashJSON(cmd)}
+			got := eng.EvaluateHook(input)
+			if got.Decision != hookio.NoOpinion {
+				t.Errorf("command %q got %v (%s: %s); want abstain (ambient var, unresolvable at hook time)", cmd, got.Decision, got.Module, got.Reason)
+			}
+		})
+	}
+
+	// A RESOLVED-BUT-ACTUALLY-DANGEROUS literal MUST reach the SAME verdict, from
+	// the SAME rule, that a literal spelling of the identical path already
+	// reaches — proving the relief widens WHICH values reach the check, never WHAT
+	// the check decides once a value reaches it. /etc/shadow is deliberately used
+	// here (rather than the bead's own ~/.ssh/id_rsa example) because it is judged
+	// by safe-commands' OWN zone check alone — ~/.ssh/id_rsa is ALSO independently
+	// caught by the separate `secrets` rule regardless of this bead, which would
+	// make literal and resolved verdicts diverge in MODULE even though both
+	// non-approve, obscuring the parity this assertion is actually about.
+	literalGot := eng.EvaluateHook(&hookio.HookInput{ToolName: "Bash", CWD: cwd, ToolInput: makeBashJSON("cat /etc/shadow")})
+	if literalGot.Decision != hookio.NoOpinion {
+		t.Fatalf("sanity: cat /etc/shadow got %v, want abstain", literalGot.Decision)
+	}
+	resolvedGot := eng.EvaluateHook(&hookio.HookInput{ToolName: "Bash", CWD: cwd, ToolInput: makeBashJSON("V=/etc/shadow; cat $V")})
+	if resolvedGot.Decision != literalGot.Decision || resolvedGot.Module != literalGot.Module {
+		t.Errorf("V=/etc/shadow; cat $V got %v (%s: %s); want the SAME verdict as literal `cat /etc/shadow` (%v, %s)",
+			resolvedGot.Decision, resolvedGot.Module, resolvedGot.Reason, literalGot.Decision, literalGot.Module)
+	}
+
+	// REVOCATION (mirrors pg2-qhhil's own revocation test for the identical
+	// concept, TestEnvVars_InCommandAssignedVar_AmbientStaysAsk): a LATER
+	// non-literal reassignment of the same name must not let the EARLIER literal
+	// binding leak through as a resolved literal.
+	revokedGot := eng.EvaluateHook(&hookio.HookInput{ToolName: "Bash", CWD: cwd, ToolInput: makeBashJSON(`V=/etc/shadow; V=$(echo /tmp); cat $V`)})
+	if revokedGot.Decision == hookio.Approve {
+		t.Errorf("V=/etc/shadow; V=$(echo /tmp); cat $V got Approve (%s: %s); want the revoked binding NOT to leak through as a resolved literal", revokedGot.Module, revokedGot.Reason)
+	}
+
+	// THE WRITE PATH IS UNCHANGED (out of scope for this bead, per its own "MUST
+	// NOT change" list): argsHaveDynamicExpansion/hasUnsafeWritePath never receive
+	// `vars` at all, so a write's dynamically-expanded path arg must keep
+	// abstaining even when the SAME variable is fully resolvable in-command.
+	writeGot := eng.EvaluateHook(&hookio.HookInput{ToolName: "Bash", CWD: cwd, ToolInput: makeBashJSON(`D=/Users/testuser/workspace/my-project; rm $D/build`)})
+	if writeGot.Decision == hookio.Approve {
+		t.Errorf("D=<project>; rm $D/build got Approve (%s: %s); want the write guard to stay unaffected by this bead", writeGot.Module, writeGot.Reason)
+	}
+}
+
 // TestIntegration_BranchUnguardedEmitsEmptyHookOutput is the CHAIN-LEVEL boundary
 // assertion for pg2-fkmg4's `git branch` ruling (operator ruling pg2-4yy4r item 5,
 // 2026-07-31: Abstain on any unsafe spelling, Approve any safe one).

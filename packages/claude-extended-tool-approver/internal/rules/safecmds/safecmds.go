@@ -9,6 +9,7 @@ import (
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmdparse"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/patheval"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/primarycommit"
 )
 
 var alwaysSafe = map[string]bool{
@@ -197,8 +198,21 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		cwd = baseEval.ProjectRoot()
 	}
 	pe := baseEval.WithCWD(cwd)
-	for _, pc := range parsed {
+	for i, pc := range parsed {
 		basename := filepath.Base(pc.Executable)
+		// The variables THIS SAME command establishes for leaf i (pg2-yeli3, wiring
+		// the pg2-wq3ki InCommandVars/ExpandInCommand seam into the read guard —
+		// the identical primarycommit.LeafVars overlay envvars' preservesCallerValue
+		// (pg2-qhhil) and primarycommit's own inspectCommit (pg2-eqacu) already use).
+		// Under the engine `input.InCommandVars` carries the bindings the OUTER
+		// expression's earlier leaves established, computed once per synthetic leaf;
+		// a direct/test caller handing this rule a multi-leaf compound is covered by
+		// LeafVars reading the leaves THIS reparse produced off `parsed` instead. Read
+		// unconditionally (not lazily inside the read-guard branches below) to match
+		// the sibling rules' own placement and keep the leaf-index bookkeeping in one
+		// place; the cost of an unused overlay on a leaf that never reaches
+		// readPathIssue is one cheap map-shaped no-op.
+		vars := primarycommit.LeafVars(input.InCommandVars, parsed, i)
 		if alwaysSafe[basename] || lspServices[basename] {
 			continue
 		}
@@ -292,7 +306,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 				if malformed {
 					return r.refuse("safe-commands: xargs " + innerBase + " has malformed glued quoting (deferred to claude-code)")
 				}
-				if issue := readPathIssue(fileArgs, pe, "", true); issue != "" {
+				if issue := readPathIssue(fileArgs, pe, "", true, vars); issue != "" {
 					return r.refuse("safe-commands: xargs " + innerBase + " " + issue + " (deferred to claude-code)")
 				}
 				continue
@@ -301,7 +315,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 			// real shape, and the conservative direction (a needless Abstain) is the
 			// safe one to take for it.
 			if safeReadCmds[innerBase] {
-				if issue := readPathIssue(innerArgs, pe, "", true); issue != "" {
+				if issue := readPathIssue(innerArgs, pe, "", true, vars); issue != "" {
 					return r.refuse("safe-commands: xargs " + innerBase + " " + issue + " (deferred to claude-code)")
 				}
 				continue
@@ -326,7 +340,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 			// straight through is behaviour-preserving for the clean case (readPathIssue
 			// applies the identical pathCandidate-based filter inline) and closes that
 			// loss for the malformed case. extractBashSyntaxCheckFiles is deleted below.
-			if issue := readPathIssue(pc.Args, pe, "", true); issue != "" {
+			if issue := readPathIssue(pc.Args, pe, "", true, vars); issue != "" {
 				return r.refuse("safe-commands: " + basename + " -n " + issue + " (deferred to claude-code)")
 			}
 			continue
@@ -346,7 +360,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		// jar: tf/xf are safe read operations
 		if basename == "jar" {
 			if len(pc.Args) >= 1 && (pc.Args[0] == "tf" || pc.Args[0] == "xf") {
-				if issue := readPathIssue(pc.Args[1:], pe, "", true); issue != "" {
+				if issue := readPathIssue(pc.Args[1:], pe, "", true, vars); issue != "" {
 					return r.refuse("safe-commands: jar " + pc.Args[0] + " " + issue + " (deferred to claude-code)")
 				}
 				continue
@@ -389,7 +403,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		// of early-`continue`-ing is what lets yq inherit that guard rather than
 		// needing its own copy of it.
 		if basename == "yq" && !isYqInPlace(pc.Args) {
-			if issue := readPathIssue(pc.Args, pe, "", true); issue != "" {
+			if issue := readPathIssue(pc.Args, pe, "", true, vars); issue != "" {
 				return r.refuse("safe-commands: yq " + issue + " (deferred to claude-code)")
 			}
 			continue
@@ -403,7 +417,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 				continue
 			}
 			sedOp, sedOpLive := programOperand("sed", pc.Args, pc.ArgLiveExpansion)
-			if issue := readPathIssue(pc.Args, pe, sedOp, sedOpLive); issue != "" {
+			if issue := readPathIssue(pc.Args, pe, sedOp, sedOpLive, vars); issue != "" {
 				return r.refuse("safe-commands: sed " + issue + " (deferred to claude-code)")
 			}
 			continue
@@ -417,7 +431,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 			if isGofmtWrite(pc.Args) {
 				return hookio.NotApplicable()
 			}
-			if issue := readPathIssue(pc.Args, pe, "", true); issue != "" {
+			if issue := readPathIssue(pc.Args, pe, "", true, vars); issue != "" {
 				return r.refuse("safe-commands: gofmt " + issue + " (deferred to claude-code)")
 			}
 			continue
@@ -439,7 +453,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 			if malformed {
 				return r.refuse("safe-commands: " + basename + " has malformed glued quoting (deferred to claude-code)")
 			}
-			if issue := readPathIssue(fileArgs, pe, "", true); issue != "" {
+			if issue := readPathIssue(fileArgs, pe, "", true, vars); issue != "" {
 				return r.refuse("safe-commands: " + basename + " " + issue + " (deferred to claude-code)")
 			}
 			continue
@@ -453,14 +467,14 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 			// conservative (operandLive always true) reading — see
 			// programOperand's and readPathIssue's docs.
 			jqOp, jqOpLive := programOperand("jq", fileArgs, nil)
-			if issue := readPathIssue(fileArgs, pe, jqOp, jqOpLive); issue != "" {
+			if issue := readPathIssue(fileArgs, pe, jqOp, jqOpLive, vars); issue != "" {
 				return r.refuse("safe-commands: jq " + issue + " (deferred to claude-code)")
 			}
 			continue
 		}
 		if safeReadCmds[basename] {
 			op, opLive := programOperand(basename, pc.Args, pc.ArgLiveExpansion)
-			if issue := readPathIssue(pc.Args, pe, op, opLive); issue != "" {
+			if issue := readPathIssue(pc.Args, pe, op, opLive, vars); issue != "" {
 				return r.refuse("safe-commands: " + basename + " " + issue + " (deferred to claude-code)")
 			}
 			continue
@@ -954,10 +968,46 @@ func browsingPathIssue(args []string, pe *patheval.PathEvaluator) string {
 //     GluedFlagValue) that do not all carry an aligned live slice today.
 //   - RESOLVING THE VARIABLE (option 2 of pg2-2ke04): a single-leaf dataflow pass
 //     would turn these Abstains back into a precise allow/deny instead of a prompt.
+//     DONE for the narrow in-command-literal case — see the pg2-yeli3 note below.
+//     What remains future work is the WIDER case: a variable whose value is
+//     genuinely unknowable at hook time (ambient, or assigned from something
+//     non-literal) still Abstains exactly as before.
 //
 // Narrowing it any other way — exempting a command, or keying on the raw command
 // text instead of parsed args — reopens the bypass.
-func readPathIssue(args []string, pe *patheval.PathEvaluator, program string, programLive bool) string {
+//
+// # pg2-yeli3 — RESOLVING THE IN-COMMAND-LITERAL CASE
+//
+// Post-apply measurement (pg2-a66hc/pg2-yeli3) found this Abstain firing on ~4.46%
+// of ALL tool calls — 3.9x the pre-land replay's headline figure — and the excess
+// concentrated on ONE textually-provable, benign shape:
+//
+//	D=/some/workspace/path; sed -n '1,5p' "$D/lib/scripts/foo"
+//
+// The variable's value is NOT unknowable here: it is assigned, as a literal, by an
+// EARLIER LEAF of this SAME command string. vars is that in-command environment —
+// primarycommit.LeafVars(input.InCommandVars, parsed, i) at the call site, the
+// identical pg2-wq3ki InCommandVars/ExpandInCommand seam pg2-qhhil wired into
+// envvars' preservesCallerValue and pg2-eqacu wired into primarycommit's own
+// inspectCommit. Before returning the Abstain below, a candidate that trips
+// argHasDynamicExpansion is first offered to cmdparse.ExpandInCommand(cand, vars):
+// on ok=true the RESOLVED literal is routed through the EXACT SAME zone check
+// (looksLikePath + pe.Evaluate(...).CanRead()) a literally-spelled path argument
+// already gets a few lines below — so a resolved-but-dangerous literal (`V=/etc/
+// shadow; cat $V`) is caught exactly as `cat /etc/shadow` would be, and the
+// zero-toward-allow invariant this whole function protects is unweakened.
+//
+// ExpandInCommand's contract is what keeps this narrow and safe: it is
+// ALL-OR-NOTHING (an ambient variable, an unresolvable name, a `$(...)`, a later
+// non-literal reassignment that REVOKES an earlier literal binding — see
+// cmdparse.InCommandVars' own doc for the revocation rule) and returns ok=false for
+// every one of them, falling straight through to the unchanged
+// "has a dynamically-expanded path arg" refusal below. Nothing here widens WHICH
+// values can resolve — only WHETHER a value this seam already proves literal gets
+// tested instead of blindly refused. The PROGRAM-operand narrowing above (the
+// `dynamic = programLive && isDynamicPathOperand(cand)` line) runs UNCHANGED before
+// this resolution attempt, so awk/sed/jq code text is unaffected either way.
+func readPathIssue(args []string, pe *patheval.PathEvaluator, program string, programLive bool, vars map[string]string) string {
 	for _, a := range args {
 		// pg2-wxbr9: route through pathCandidate so a glued flag's VALUE (not
 		// just a bare positional) is tested — see pathCandidate's doc. `program`
@@ -988,6 +1038,23 @@ func readPathIssue(args []string, pe *patheval.PathEvaluator, program string, pr
 			dynamic = programLive && isDynamicPathOperand(cand)
 		}
 		if dynamic {
+			// pg2-yeli3: cand is unresolvable text ($VAR, ${VAR}, $D/sub/path, …).
+			// Before refusing, see whether THIS SAME command's own earlier text
+			// already pins it to a literal (ExpandInCommand's all-or-nothing
+			// contract — see this function's doc). An ambient variable, an
+			// unknown name, or a revoked/non-literal binding all report ok=false
+			// and fall straight through to the unchanged refusal.
+			if resolved, resolvedOK := cmdparse.ExpandInCommand(cand, vars); resolvedOK {
+				// resolved is now judged by the IDENTICAL test a literally-spelled
+				// argument gets below — same predicate, same PathEvaluator, same
+				// verdict a literal `resolved` would have produced.
+				if looksLikePath(resolved) {
+					if !pe.Evaluate(resolved).CanRead() {
+						return "references unknown path " + resolved
+					}
+				}
+				continue
+			}
 			return "has a dynamically-expanded path arg " + cand
 		}
 		if looksLikePath(cand) {

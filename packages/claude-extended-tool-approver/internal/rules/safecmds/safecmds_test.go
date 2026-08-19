@@ -268,6 +268,183 @@ func TestSafecmds_HeadProjectFile_Approve(t *testing.T) {
 	}
 }
 
+// TestSafecmds_WholeCompoundDirectAbstainsAtAssignmentLeaf pins the boundary that
+// makes the in-command-literal tests below set InCommandVars explicitly rather
+// than feed a raw "D=/x; cmd $D/y" compound straight to Evaluate. Unlike
+// envvars'/primarycommit's own loops — which `continue` past a leaf they don't
+// own — this rule's loop treats EVERY leaf as a command it must recognize or defer
+// on, and a bare assignment leaf's Executable is "" (filepath.Base("") == "."),
+// which matches none of this file's command maps and falls through to the
+// unconditional "Unknown command" NotApplicable. So a direct multi-leaf compound
+// abstains on the FIRST (assignment) leaf and never even reaches the read command
+// on the second — proven here so a future reader does not "fix" the tests below to
+// use the more obviously-realistic compound and then wonder why they pass for the
+// wrong reason (the read leaf was never evaluated at all).
+//
+// In production this never matters: the ENGINE splits an expression into leaves
+// itself and only ever calls a rule's Evaluate with ONE leaf's raw text at a time
+// (internal/engine/engine.go's EvaluateExpression), with InCommandVars already
+// computed from the OTHER leaves and attached to that single-leaf synthetic
+// HookInput — exactly what the tests below simulate directly.
+func TestSafecmds_WholeCompoundDirectAbstainsAtAssignmentLeaf(t *testing.T) {
+	pe := patheval.New("/home/user/project")
+	r := New(pe)
+	input := &hookio.HookInput{
+		ToolName:  "Bash",
+		CWD:       "/home/user/project",
+		ToolInput: mustJSON(map[string]string{"command": `D=/home/user/project; cat $D/README.md`}),
+	}
+	got := hookio.Verdict(r.Evaluate(input))
+	if got.Decision != hookio.NoOpinion {
+		t.Errorf("whole compound fed directly: got %s (%s), want abstain (bails at the bare-assignment leaf, never reaches `cat`)", got.Decision, got.Reason)
+	}
+}
+
+// TestSafecmds_InCommandLiteralRelief_Approve is pg2-yeli3's fix: readPathIssue's
+// $VAR/${VAR}/$D-prefixed-path refusal is no longer unconditional when the SAME
+// command's own earlier text assigns that name a fully-literal value (the
+// pg2-wq3ki InCommandVars/ExpandInCommand seam, threaded in via
+// primarycommit.LeafVars exactly as envvars' preservesCallerValue (pg2-qhhil) and
+// primarycommit's own inspectCommit (pg2-eqacu) already do it).
+//
+// Each case sets InCommandVars directly and hands ToolInput ONLY the read leaf —
+// precisely what the real engine synthesizes per leaf (see
+// TestSafecmds_WholeCompoundDirectAbstainsAtAssignmentLeaf for why the whole
+// compound cannot be fed directly here instead).
+func TestSafecmds_InCommandLiteralRelief_Approve(t *testing.T) {
+	pe := patheval.New("/home/user/project")
+	r := New(pe)
+	vars := map[string]string{
+		"D": "/home/user/project",
+		"S": "/home/user/project",
+	}
+	// The measured idiom, across several of the safeReadCmds family — proof this
+	// lands at the shared choke point (readPathIssue), not one tool.
+	cases := []struct {
+		name string
+		cmd  string
+	}{
+		{"sed, embedded path", `sed -n '1,5p' "$D/scripts/foo.sh"`},
+		{"sed, the bead's scratchpad idiom", `sed -n '1,5p' $S/flakecheck.final.log`},
+		{"cat, embedded path", `cat $D/README.md`},
+		{"cat, bare var", `cat $S`},
+		{"head, embedded path", `head -5 $D/go.mod`},
+		{"tail, embedded path", `tail -5 $D/go.mod`},
+		{"grep, embedded path", `grep -n module $D/go.mod`},
+		{"wc, embedded path", `wc -l $D/go.mod`},
+		{"braced form", `cat ${D}/go.mod`},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			input := &hookio.HookInput{
+				ToolName:      "Bash",
+				CWD:           "/home/user/project",
+				ToolInput:     mustJSON(map[string]string{"command": tt.cmd}),
+				InCommandVars: vars,
+			}
+			got := hookio.Verdict(r.Evaluate(input))
+			if got.Decision != hookio.Approve {
+				t.Errorf("cmd %q: got %s (%s), want approve (in-command literal should resolve)", tt.cmd, got.Decision, got.Reason)
+			}
+		})
+	}
+}
+
+// TestSafecmds_InCommandLiteralRelief_AmbientStaysAbstain is the required
+// companion: a variable NOT assigned anywhere in this command's own text (the
+// ordinary case, InCommandVars absent or simply missing that name) MUST keep
+// abstaining exactly as pg2-2ke04 left it — this relief must not widen into a
+// blanket "trust any $VAR" shape.
+func TestSafecmds_InCommandLiteralRelief_AmbientStaysAbstain(t *testing.T) {
+	pe := patheval.New("/home/user/project")
+	r := New(pe)
+	cases := []struct {
+		name string
+		cmd  string
+		vars map[string]string
+	}{
+		{"no InCommandVars at all", "cat $PWD/foo", nil},
+		{"sed, ambient var", "sed -n '1,5p' $PWD/foo", nil},
+		{"name simply never assigned", "cat $F", map[string]string{"OTHER": "/home/user/project"}},
+		// pg2-wq3ki's seam is deliberately ONE-HOP: S=$D (D itself a literal) is
+		// NOT a literal scalar assignment (its own RHS is an expansion), so
+		// cmdparse.InCommandVars never binds S at all — this is the documented,
+		// fail-safe scope boundary, not a bug, and it must stay unresolved.
+		{"chained var-to-var is out of scope", "cat $S/README.md", map[string]string{"D": "/home/user/project"}},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			input := &hookio.HookInput{
+				ToolName:      "Bash",
+				CWD:           "/home/user/project",
+				ToolInput:     mustJSON(map[string]string{"command": tt.cmd}),
+				InCommandVars: tt.vars,
+			}
+			got := hookio.Verdict(r.Evaluate(input))
+			if got.Decision != hookio.NoOpinion {
+				t.Errorf("cmd %q: got %s (%s), want abstain (unresolvable in-command)", tt.cmd, got.Decision, got.Reason)
+			}
+			if !strings.Contains(got.Reason, "dynamically-expanded path arg") {
+				t.Errorf("cmd %q: reason %q does not name the dynamic-expansion refusal", tt.cmd, got.Reason)
+			}
+		})
+	}
+}
+
+// TestSafecmds_InCommandLiteralRelief_ResolvedDangerousLiteralStillAbstains
+// proves the relief cannot become a bypass: a $VAR that DOES resolve, to a path
+// this rule would refuse if it had been spelled literally, MUST reach the exact
+// same verdict — same Decision, same reason — as the literal spelling. The
+// resolved value is routed through readPathIssue's ordinary
+// looksLikePath+CanRead() check, not a weaker one.
+func TestSafecmds_InCommandLiteralRelief_ResolvedDangerousLiteralStillAbstains(t *testing.T) {
+	pe := patheval.New("/home/user/project")
+	r := New(pe)
+
+	literalInput := &hookio.HookInput{ToolName: "Bash", CWD: "/home/user/project", ToolInput: mustJSON(map[string]string{"command": "cat /etc/shadow"})}
+	literalGot := hookio.Verdict(r.Evaluate(literalInput))
+	if literalGot.Decision != hookio.NoOpinion {
+		t.Fatalf("sanity: cat /etc/shadow got %s, want abstain", literalGot.Decision)
+	}
+
+	resolvedInput := &hookio.HookInput{
+		ToolName:      "Bash",
+		CWD:           "/home/user/project",
+		ToolInput:     mustJSON(map[string]string{"command": "cat $V"}),
+		InCommandVars: map[string]string{"V": "/etc/shadow"},
+	}
+	resolvedGot := hookio.Verdict(r.Evaluate(resolvedInput))
+	if resolvedGot.Decision != literalGot.Decision {
+		t.Errorf("V=/etc/shadow; cat $V got %s (%s), want the SAME verdict as literal `cat /etc/shadow` (%s)",
+			resolvedGot.Decision, resolvedGot.Reason, literalGot.Decision)
+	}
+	if resolvedGot.Reason != literalGot.Reason {
+		t.Errorf("V=/etc/shadow; cat $V reason %q, want the IDENTICAL reason text literal `cat /etc/shadow` gets (%q) — the relief must judge the resolved literal through the same check, not a bespoke one",
+			resolvedGot.Reason, literalGot.Reason)
+	}
+}
+
+// TestSafecmds_InCommandLiteralRelief_WritePathUnaffected pins the bead's other
+// explicit "MUST NOT change": the relief is scoped to the READ guard
+// (readPathIssue) only. The WRITE guard (argsHaveDynamicExpansion /
+// hasUnsafeWritePath) never receives `vars` and stays exactly as it was — a
+// write's dynamically-expanded path arg must keep abstaining even when the SAME
+// variable is fully resolvable in-command.
+func TestSafecmds_InCommandLiteralRelief_WritePathUnaffected(t *testing.T) {
+	pe := patheval.New("/home/user/project")
+	r := New(pe)
+	input := &hookio.HookInput{
+		ToolName:      "Bash",
+		CWD:           "/home/user/project",
+		ToolInput:     mustJSON(map[string]string{"command": "rm $D/build"}),
+		InCommandVars: map[string]string{"D": "/home/user/project"},
+	}
+	got := hookio.Verdict(r.Evaluate(input))
+	if got.Decision != hookio.NoOpinion {
+		t.Errorf("rm $D/build (D resolvable in-command): got %s (%s), want abstain — the write guard must stay unaffected by this bead", got.Decision, got.Reason)
+	}
+}
+
 func TestSafecmds_Name(t *testing.T) {
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
@@ -1748,7 +1925,7 @@ func TestReadPathIssue_IsNeverLooserThanTheStaticSubstitutionSeam(t *testing.T) 
 	for _, r := range readers {
 		for _, p := range paths {
 			args := append(strings.Fields(r)[1:], p)
-			if readPathIssue(args, pe, "", true) == "" {
+			if readPathIssue(args, pe, "", true, nil) == "" {
 				continue // this rule clears the read; the seam may do as it likes
 			}
 			for _, body := range []string{r + " " + p, r + " < " + p} {
