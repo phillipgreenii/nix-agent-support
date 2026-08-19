@@ -107,6 +107,25 @@ env vars, runs each part, and width-wraps the non-empty outputs across rows (see
 - **Test**: Use `nix flake check` to validate configuration
 - **Build**: Flake provides reusable modules, not direct machine configs
 
+## Beads Labels
+
+Every bead filed against this repo MUST carry the repo label `agent-support`.
+
+If the bead concerns one specific project, it MUST also carry that project's label. The project
+label is the basename of the top-level directory — under `packages/` or `claude-marketplace/` —
+that the bead's subject matter lives in (e.g. `packages/pa-monitor` → `pa-monitor`,
+`claude-marketplace/pg-ccaudit` → `pg-ccaudit`). Run `ls packages claude-marketplace` for the
+current valid set: that directory listing IS the source of truth, not an enumerated table here,
+so it cannot go stale as projects are added, removed, or renamed.
+
+A bead about repo-wide or cross-cutting concerns (flake-level, CI, docs shared across projects)
+MUST carry only the repo label, no project label.
+
+**Known exception**: `packages/integrate-branch-support` and `claude-marketplace/integrate-branch`
+are the same project under two different basenames, so the path rule cannot resolve a single
+label for it by name alone — use `integrate-branch-support` (the package name) until this is
+reconciled (tracked: `pg2-vuqaf`).
+
 ## Versioning of Custom Packages
 
 Custom artifacts (Bash, Python, Go) version from a **per-source content digest**, never the repo
