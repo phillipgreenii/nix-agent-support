@@ -124,7 +124,10 @@ MUST carry only the repo label, no project label.
 **Known exception**: `packages/integrate-branch-support` and `claude-marketplace/integrate-branch`
 are the same project under two different basenames, so the path rule cannot resolve a single
 label for it by name alone — use `integrate-branch-support` (the package name) until this is
-reconciled (tracked: `pg2-vuqaf`).
+reconciled (tracked: `pg2-vuqaf`). Audited 2026-08-19 (`pg2-vuqaf`): every other pair of
+`packages/`/`claude-marketplace/` entries with matching basenames lines up exactly, and no other
+tool/project is spelled or organized differently across the two roots — this is the only
+cross-root split in this repo.
 
 ## Versioning of Custom Packages
 
