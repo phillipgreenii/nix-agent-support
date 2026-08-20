@@ -1273,9 +1273,18 @@ func TestLiteralAssignmentValueText(t *testing.T) {
 		{"backslash-escaped dollar, unquoted", `\$PATH:/x`, ``, false},
 		{"backslash-escaped dollar, double-quoted", `"\$PATH:/x"`, ``, false},
 
-		// Substitutions and arithmetic are never literal.
-		{"backtick command substitution", "`date`:/x", ``, false},
-		{"dollar-paren command substitution", `$(mktemp -d)`, ``, false},
+		// A command/process substitution is re-emitted as its own EXACT source
+		// slice (I12) rather than refused: literalValue's byte scan only ever
+		// rejected a surviving `"`/`'`/`\`, none of which these contain, so it
+		// passed them through untouched, and a downstream caller composing this
+		// with cmdparse.EnumerateSubstitutions (pg2-kzqw2's PATH/HOME
+		// substitution-safety relief) needs to SEE the substitution in the
+		// returned text to recognise it. Arithmetic expansion has no such
+		// downstream consumer and stays refused.
+		{"backtick command substitution", "`date`:/x", "`date`:/x", true},
+		{"dollar-paren command substitution", `$(mktemp -d)`, `$(mktemp -d)`, true},
+		{"dollar-paren command substitution, double-quoted whole value", `"$(mktemp -d)/x"`, `$(mktemp -d)/x`, true},
+		{"process substitution", `<(cat /etc/hosts)`, `<(cat /etc/hosts)`, true},
 		{"arithmetic expansion", `$((1))`, ``, false},
 
 		// A ParamExp that is not a PLAIN $NAME/${NAME} reference must not be

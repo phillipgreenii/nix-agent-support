@@ -2199,15 +2199,31 @@ func assignmentValue(value string) (string, syntax.Node, bool) {
 // surviving quote/backslash by scanning the value string byte by byte (pg2-30wro,
 // ADR 0039 step 5's "envvars' value scan" item).
 //
-// It accepts EXACTLY the two shapes the outgoing `literalValue` accepted, and no
-// more: a value with NO surviving quoting at all, or a value wrapped in ONE
-// double-quoted span covering its ENTIRE extent. Everything else is refused — a
-// lone or embedded single-quoted span, a double-quoted span that does not cover
-// the whole value (mixed quoting, e.g. `"$PATH":/x`), a backslash that survives
-// in a literal part, and any node this walk does not model (command/process/
-// arithmetic substitution, an extended glob, a zsh-only nested/flagged parameter
-// form). A plain parameter reference ($NAME or ${NAME}) is re-serialised in its
-// own canonical spelling — `"$"+name` for the Short form, `"${"+name+"}"`
+// It accepts the shapes the outgoing `literalValue` accepted: a value with NO
+// surviving quoting at all, or a value wrapped in ONE double-quoted span
+// covering its ENTIRE extent — PLUS a `*syntax.CmdSubst`/`*syntax.ProcSubst`
+// part, re-emitted as its own EXACT source slice (I12: never reconstructed
+// text). `literalValue` was a byte scan that only rejected a surviving
+// `"`/`'`/`\` — a command or process substitution's own text (`$(...)`,
+// backtick, `<(...)`, `>(...)`) contains none of those, so it passed through
+// untouched; this function must therefore do the same, or every caller that
+// composes it with `cmdparse.EnumerateSubstitutions` downstream (pg2-kzqw2's
+// PATH/HOME substitution-safety relief in `internal/rules/envvars`, which
+// needs to SEE a substitution in the returned text to recognise it) silently
+// loses that substitution to an outright refusal instead — proven by
+// pg2-30wro's own rebase onto pg2-kzqw2's landed code: eleven
+// `$(dirname ...)`-shaped cases regressed from Approve to Ask before this
+// case was added. Refused: a lone or embedded single-quoted span, a
+// double-quoted span that does not cover the whole value (mixed quoting,
+// e.g. `"$PATH":/x`), a backslash that survives in a literal part, and any
+// OTHER node this walk does not model (arithmetic expansion, an extended
+// glob, a zsh-only nested/flagged parameter form) — each of THOSE is a
+// substitution `EnumerateSubstitutions` never recognises either, so a
+// downstream caller has no channel to see it whichever way this function
+// answers, and `isStaticAbsolutePath`'s own denylist independently refuses
+// it if it somehow survived component-splitting regardless. A plain
+// parameter reference ($NAME or ${NAME}) is re-serialised in its own
+// canonical spelling — `"$"+name` for the Short form, `"${"+name+"}"`
 // otherwise — so a caller can still recognise a self-reference component by
 // exact string match; every other survivor must be a bare `*syntax.Lit`.
 //
@@ -2217,16 +2233,9 @@ func assignmentValue(value string) (string, syntax.Node, bool) {
 // SINGLE-quoted wrap, a shape the outgoing `literalValue` never accepted either.
 // Widening to accept that shape is out of scope for this migration — the
 // `askVars` doc comment's OPERATOR RULING records that this predicate's quoting
-// semantics may be TIGHTENED, never WIDENED, without a fresh ruling — so this
-// function reproduces `literalValue`'s exact acceptance set, or a strict subset:
-// a parse failure or an unmodelled node now refuses where the raw scan would have
-// blindly accepted innocuous-looking text (e.g. a backtick substitution, which
-// the outgoing `ContainsAny` check never even listed). Every such narrowing still
-// lands on the identical final verdict, because `isStaticAbsolutePath`'s own
-// denylist independently refuses the same components downstream — see
-// pg2-30wro's report for the case-by-case check.
+// semantics may be TIGHTENED, never WIDENED, without a fresh ruling.
 func LiteralAssignmentValueText(value string) (string, bool) {
-	_, root, ok := assignmentValue(value)
+	src, root, ok := assignmentValue(value)
 	if !ok || root == nil {
 		return "", false
 	}
@@ -2263,13 +2272,23 @@ func LiteralAssignmentValueText(value string) (string, bool) {
 			} else {
 				b.WriteString("${" + v.Param.Value + "}")
 			}
+		case *syntax.CmdSubst, *syntax.ProcSubst:
+			// Re-emit the EXACT source slice (I12) -- never a reconstructed
+			// "$(" + body + ")", which could drift from the original spelling
+			// (backtick vs `$(`, internal whitespace). `src` is
+			// assignmentValue's own probe string (`<name>=<value>`), and every
+			// node offset it produced indexes into THAT string, not `value`.
+			lo, hi := int(p.Pos().Offset()), int(p.End().Offset())
+			if lo < 0 || hi < lo || hi > len(src) {
+				return "", false
+			}
+			b.WriteString(src[lo:hi])
 		default:
 			// *syntax.SglQuoted (bare, or beside other parts), a *syntax.DblQuoted
-			// that does not span the WHOLE value (mixed quoting), *syntax.CmdSubst,
-			// *syntax.ArithmExp, *syntax.ProcSubst, *syntax.ExtGlob -- every one of
-			// these is a surviving quote or an expansion this function does not
-			// resolve, so it is refused exactly as a surviving quote character
-			// refused it before.
+			// that does not span the WHOLE value (mixed quoting), *syntax.ArithmExp,
+			// *syntax.ExtGlob -- every one of these is a surviving quote or an
+			// expansion this function does not resolve, so it is refused exactly as
+			// a surviving quote character refused it before.
 			return "", false
 		}
 	}
