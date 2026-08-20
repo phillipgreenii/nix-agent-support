@@ -2191,6 +2191,103 @@ func assignmentValue(value string) (string, syntax.Node, bool) {
 	return src, nil, true
 }
 
+// LiteralAssignmentValueText derives an env-assignment VALUE's literal,
+// quote-and-expansion-resolved text from the seam's own parse — the SAME probe
+// `assignmentValue` provides `classifyExpansion` — instead of a hand-rolled
+// character scan over raw text. It replaces `internal/rules/envvars`' former
+// `literalValue`, which stripped one wrapping double-quote pair and rejected any
+// surviving quote/backslash by scanning the value string byte by byte (pg2-30wro,
+// ADR 0039 step 5's "envvars' value scan" item).
+//
+// It accepts EXACTLY the two shapes the outgoing `literalValue` accepted, and no
+// more: a value with NO surviving quoting at all, or a value wrapped in ONE
+// double-quoted span covering its ENTIRE extent. Everything else is refused — a
+// lone or embedded single-quoted span, a double-quoted span that does not cover
+// the whole value (mixed quoting, e.g. `"$PATH":/x`), a backslash that survives
+// in a literal part, and any node this walk does not model (command/process/
+// arithmetic substitution, an extended glob, a zsh-only nested/flagged parameter
+// form). A plain parameter reference ($NAME or ${NAME}) is re-serialised in its
+// own canonical spelling — `"$"+name` for the Short form, `"${"+name+"}"`
+// otherwise — so a caller can still recognise a self-reference component by
+// exact string match; every other survivor must be a bare `*syntax.Lit`.
+//
+// This is DELIBERATELY NOT the same acceptance set `unquote` (this package's
+// other retained quote primitive — see its own doc, and the "THE DECISION" note
+// on `UnwrapGluedQuotes`) would compute: `unquote` also strips a whole-value
+// SINGLE-quoted wrap, a shape the outgoing `literalValue` never accepted either.
+// Widening to accept that shape is out of scope for this migration — the
+// `askVars` doc comment's OPERATOR RULING records that this predicate's quoting
+// semantics may be TIGHTENED, never WIDENED, without a fresh ruling — so this
+// function reproduces `literalValue`'s exact acceptance set, or a strict subset:
+// a parse failure or an unmodelled node now refuses where the raw scan would have
+// blindly accepted innocuous-looking text (e.g. a backtick substitution, which
+// the outgoing `ContainsAny` check never even listed). Every such narrowing still
+// lands on the identical final verdict, because `isStaticAbsolutePath`'s own
+// denylist independently refuses the same components downstream — see
+// pg2-30wro's report for the case-by-case check.
+func LiteralAssignmentValueText(value string) (string, bool) {
+	_, root, ok := assignmentValue(value)
+	if !ok || root == nil {
+		return "", false
+	}
+	word, ok := root.(*syntax.Word)
+	if !ok {
+		return "", false // the bash ARRAY form, `(a b)` -- not a scalar value
+	}
+	parts := word.Parts
+	if len(parts) == 1 {
+		if dq, isDbl := parts[0].(*syntax.DblQuoted); isDbl {
+			// The WHOLE value is one double-quoted span -- literalValue's other
+			// accepted shape. Unwrap to the span's own parts and continue as if
+			// they were unquoted; this is the ONLY quote structurally survivable.
+			parts = dq.Parts
+		}
+	}
+	var b strings.Builder
+	for _, p := range parts {
+		switch v := p.(type) {
+		case *syntax.Lit:
+			// A backslash that reached a Lit node (bare, or one bash's own
+			// double-quote escape rules did not strip) is a surviving escape --
+			// the outgoing ContainsAny check refused it too.
+			if strings.Contains(v.Value, `\`) {
+				return "", false
+			}
+			b.WriteString(v.Value)
+		case *syntax.ParamExp:
+			if !isPlainParamRef(v) {
+				return "", false
+			}
+			if v.Short {
+				b.WriteString("$" + v.Param.Value)
+			} else {
+				b.WriteString("${" + v.Param.Value + "}")
+			}
+		default:
+			// *syntax.SglQuoted (bare, or beside other parts), a *syntax.DblQuoted
+			// that does not span the WHOLE value (mixed quoting), *syntax.CmdSubst,
+			// *syntax.ArithmExp, *syntax.ProcSubst, *syntax.ExtGlob -- every one of
+			// these is a surviving quote or an expansion this function does not
+			// resolve, so it is refused exactly as a surviving quote character
+			// refused it before.
+			return "", false
+		}
+	}
+	return b.String(), true
+}
+
+// isPlainParamRef reports whether v is the shape "$NAME" / "${NAME}" and nothing
+// else -- no indirection, length, slice, replacement, name-listing, flags, or a
+// default/alternate expansion, and no zsh nested form. Any of those changes what
+// the reference actually yields, so LiteralAssignmentValueText must not treat it
+// as a literal self-reference candidate.
+func isPlainParamRef(v *syntax.ParamExp) bool {
+	return v.Param != nil && v.NestedParam == nil && v.Flags == nil &&
+		!v.Excl && !v.Length && !v.Width && !v.IsSet &&
+		v.Index == nil && len(v.Modifiers) == 0 &&
+		v.Slice == nil && v.Repl == nil && v.Names == 0 && v.Exp == nil
+}
+
 // expansionCensus counts the expansion nodes a value's word tree carries. It is a
 // CENSUS rather than a first-match search precisely because a value can carry more
 // than one kind at once — the defect this replaces read only the first thing it

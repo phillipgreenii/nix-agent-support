@@ -358,7 +358,15 @@ func preservesCallerValue(ev cmdparse.EnvAssignment, vars map[string]string) boo
 	if ev.Expansion != cmdparse.ExpansionVarRef && ev.Expansion != cmdparse.ExpansionUnknown {
 		return false
 	}
-	value, ok := literalValue(ev.Value)
+	// The value's quote/expansion structure is derived from the seam's own parse
+	// (cmdparse.LiteralAssignmentValueText, pg2-30wro), not a hand-rolled scan: it
+	// accepts an unquoted value or one wrapped in a SINGLE double-quoted span
+	// covering the whole value, and refuses everything else — a single-quoted
+	// value (`PATH='$PATH:/x'` REPLACES, since `$PATH` never expands inside single
+	// quotes, so it must not read as an extend) and mixed quoting
+	// (`PATH="$PATH":/x`, whose component boundaries are not derivable from a
+	// literal split) both refuse.
+	value, ok := cmdparse.LiteralAssignmentValueText(ev.Value)
 	if !ok {
 		return false
 	}
@@ -583,28 +591,6 @@ func componentSafeSubstitution(atoms []pathValueAtom) bool {
 	return isStaticAbsolutePath(literal.String())
 }
 
-// literalValue strips ONE pair of wrapping double quotes from a raw assignment
-// value (cmdparse keeps an assignment token's quoting verbatim, so the value of
-// `PATH="$PATH:/x"` is `"$PATH:/x"` including the quotes) and reports false if any
-// quote or backslash survives — only a value that is entirely unquoted or wrapped
-// in a single double-quoted span can be split into components whose literal text is
-// what the shell will actually use.
-//
-// A SINGLE-quoted value is rejected outright, and that distinction is load-bearing:
-// in `PATH='$PATH:/x'` the `$PATH` is NOT expanded, so despite reading like an
-// extend it REPLACES PATH with the literal string `$PATH:/x`. Mixed quoting
-// (`PATH="$PATH":/x`) is rejected for the same reason — the component boundaries
-// are no longer derivable from the text by splitting alone.
-func literalValue(value string) (string, bool) {
-	if len(value) >= 2 && value[0] == '"' && value[len(value)-1] == '"' {
-		value = value[1 : len(value)-1]
-	}
-	if strings.ContainsAny(value, "\"'\\") {
-		return "", false
-	}
-	return value, true
-}
-
 // isStaticAbsolutePath reports whether one `:`-separated component of a PATH-like
 // value is a literal absolute path: it starts with '/' and contains nothing that
 // could introduce an expansion, re-quote the value, or corrupt the user-facing
@@ -659,7 +645,7 @@ func isStaticAbsolutePath(component string) bool {
 // by the caller's switch — this predicate is reached only for the shapes that
 // fell through it.
 func isHermeticEnvReplacement(ev cmdparse.EnvAssignment) bool {
-	value, ok := literalValue(ev.Value)
+	value, ok := cmdparse.LiteralAssignmentValueText(ev.Value)
 	if !ok || value == "" {
 		return false
 	}
@@ -702,7 +688,7 @@ func isHermeticHomeReplacement(ev cmdparse.EnvAssignment, tempDirVars map[string
 	if ev.Expansion != cmdparse.ExpansionVarRef {
 		return false
 	}
-	value, ok := literalValue(ev.Value)
+	value, ok := cmdparse.LiteralAssignmentValueText(ev.Value)
 	if !ok {
 		return false
 	}
@@ -1025,6 +1011,25 @@ func (r *Rule) evaluateAssignment(ev cmdparse.EnvAssignment, input *hookio.HookI
 			exhaustionOnly = len(subs) > 0
 			for _, sub := range subs {
 				stack := []hookio.StackFrame{{RuleName: name, Command: "env-value", Expression: ev.Raw}}
+				// TEXT RE-ENTRY DECISION (pg2-30wro's adjacent audit item, ADR 0039 I13).
+				// sub.Body is a VERBATIM SOURCE SLICE straight out of
+				// cmdparse.EnumerateSubstitutions(ev.Value) — nothing here builds,
+				// rewrites, or joins text before handing it to the evaluator, so this is
+				// NOT an instance of the "no rule constructs command text" violation I13
+				// forbids. It is the permanent I7 text entry point's SANCTIONED use: a
+				// rule that needs to delegate on an exact, already-existing slice of the
+				// source it was given, not a synthesized one.
+				//
+				// DECISION: LEAVE AS-IS. `pg2-m1i6r` (closed 2026-08-20, ff-merged to main
+				// at `9189ab72`, landing `hookio.Evaluator`'s new structural delegate entry
+				// point `EvaluateStructure`) names this exact call site in its own Scope
+				// section as one of `EvaluateExpression`'s two legitimate PERMANENT callers
+				// post-migration — "the hook boundary and verbatim-source-slice re-entries
+				// (e.g. envvars.go:779, which constructs nothing)" — so no migration onto
+				// `EvaluateStructure` is owed here. `9189ab72` is not yet an ancestor of
+				// this branch's base (`4fdca75c`), so `EvaluateStructure` does not exist on
+				// this tree; migrating onto it now is not an option regardless of the
+				// policy question, and is left as a future no-op once that lands.
 				subResult := r.exprEval.EvaluateExpression(sub.Body, stack, input)
 				if subResult.Decision != hookio.Approve {
 					clearedByRecursion = false

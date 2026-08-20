@@ -408,8 +408,12 @@ func inMultiStagePipeline(leaves []ParsedCommand, i int) bool {
 // cmdparse keeps an assignment token's quoting verbatim (the value of `WT="/a b"` is
 // `"/a b"`, quotes included), so ONE wrapping quote pair is stripped and any surviving
 // quote or backslash disqualifies the value: mixed quoting (`WT="/a"/b`) is not
-// derivable by stripping alone, which is the same reasoning
-// internal/rules/envvars/envvars.go's literalValue records.
+// derivable by stripping alone, which is the same reasoning this file's sibling
+// `LiteralAssignmentValueText` (shellparse.go) — the structural replacement for
+// `internal/rules/envvars/envvars.go`'s former `literalValue` (pg2-30wro) — now
+// derives from the parse tree instead of scanning characters. This function is a
+// separate, deliberately unmigrated instance: it resolves a DIFFERENT question (an
+// EARLIER leaf's binding for InCommandVars) and was not in that bead's scope.
 //
 // The expansion markers are then rejected a SECOND time, after Expansion has already
 // been consulted. That is not redundant: a SINGLE-quoted value suppresses expansion, so

@@ -1873,10 +1873,12 @@ func RootLeavesOf(input *hookio.HookInput) []ParsedCommand {
 //
 // Reason: it defines CETA's token spelling, and the parser's own literal expansion
 // is STRICTER. `unquote` strips quoting only when the WHOLE token is wrapped in one
-// quote character, so `a"b"c` KEEPS its quotes, and both `envvars.literalValue` and
-// `isStaticAbsolutePath` reject any value with a surviving quote. A true literal
-// expansion would yield `abc` and make mixed-quoted values newly CLEAR the very
-// predicate I4 exists to fence — ADR 0039's Consequences names this as one of the
+// quote character, so `a"b"c` KEEPS its quotes, and both
+// `LiteralAssignmentValueText` (this file's structural replacement for
+// `envvars`' former hand-rolled `literalValue`, pg2-30wro) and
+// `envvars.isStaticAbsolutePath` reject any value with a surviving quote. A true
+// literal expansion would yield `abc` and make mixed-quoted values newly CLEAR the
+// very predicate I4 exists to fence — ADR 0039's Consequences names this as one of the
 // constructs that changes verdict in the LESS-restrictive direction if lowered
 // naively. The seam therefore applies THIS function to each word's exact source
 // slice (see wordToken), which is what makes the parity provable rather than
@@ -1930,8 +1932,8 @@ func unquote(s string) string {
 // quote character, and that restriction is DELIBERATE, not an oversight it would
 // be tidy to lift: its own comment records that a true PER-PART literal expansion
 // would turn a mixed-quoting token like `a"b"c` into `abc`, and that
-// `envvars.literalValue` and `isStaticAbsolutePath` both rely on a quote
-// character SURVIVING in a mixed token as their signal that the value is not
+// `LiteralAssignmentValueText` and `envvars.isStaticAbsolutePath` both rely on a
+// quote character SURVIVING in a mixed token as their signal that the value is not
 // fully static and must be fenced conservatively (I4). `key=value` glued to an
 // unquoted key is exactly this mixed-quoting shape, so teaching the LOWERING
 // itself to resolve it generically would silently widen every other consumer of

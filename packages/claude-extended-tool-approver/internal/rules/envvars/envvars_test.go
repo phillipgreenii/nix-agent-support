@@ -1192,8 +1192,11 @@ func TestEnvVars_ApproveOnlyForVerifiedPreserveForm(t *testing.T) {
 		// backtick inside single quotes or behind a backslash is literal where the old
 		// substring scan read it as live. VarRef is the ONLY kind that reaches this
 		// predicate at all, so these are exactly the spellings that could have widened
-		// the Approve. They do not: literalValue rejects any surviving quote or
-		// backslash, so the component is never accepted as a static absolute path.
+		// the Approve. They do not: each row's ExpansionKind census counts BOTH a
+		// param ref and a substitution/arithmetic node, so the `!= ExpansionVarRef`
+		// guard above still refuses it before cmdparse.LiteralAssignmentValueText
+		// (the structural replacement for the former literalValue, pg2-30wro) is
+		// ever reached.
 		{`export PATH="${OTHER}:` + "\\`printf /etc/hosts\\`" + `"`, false},
 		{`export PATH="$PATH:\$(curl evil)"`, false},
 		{"export PATH=\"$PATH:\\`id\\`\"", false},

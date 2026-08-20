@@ -260,8 +260,10 @@ func TestFlip_FdPrefixedHeredocIsNotAPhantomOperand(t *testing.T) {
 //
 // THE HAZARD. The outgoing `unquote` strips quoting only when the WHOLE token is
 // wrapped in ONE quote character, so `a"b"c` KEEPS its quotes. Both
-// `envvars.literalValue` and `isStaticAbsolutePath` REJECT any value with a surviving
-// quote, which is what fences the I4 assignment approval gate. The parser's own
+// `LiteralAssignmentValueText` (envvars' structural replacement for its former
+// hand-rolled `literalValue`, pg2-30wro) and `envvars.isStaticAbsolutePath` REJECT
+// any value with a surviving quote, which is what fences the I4 assignment
+// approval gate. The parser's own
 // literal expansion is STRICTER — it would yield `abc` — and a value that newly
 // becomes quote-free newly CLEARS that predicate. That is a move in the
 // LESS-RESTRICTIVE direction, reached by making the lowering more correct, which is
@@ -301,7 +303,9 @@ func TestShellParse_UnquoteParity_MixedQuoting(t *testing.T) {
 	}
 
 	// The same rule in ASSIGNMENT position, which is where I4 actually reads it: a
-	// mixed-quoted VALUE must keep its quotes, so `literalValue` keeps refusing it.
+	// mixed-quoted VALUE must keep its quotes, so `LiteralAssignmentValueText`
+	// keeps refusing it (see TestLiteralAssignmentValueText, parser_test.go, for
+	// the dedicated coverage of that function).
 	t.Run("a mixed-quoted assignment value keeps its quotes", func(t *testing.T) {
 		sp := ParseShell(`PATH=/pre"fix"/bin cmd`)
 		if len(sp.Leaves) != 1 || len(sp.Leaves[0].EnvVars) != 1 {

@@ -1228,6 +1228,78 @@ func TestParse_EnvPrefixProcessSubstitution(t *testing.T) {
 	})
 }
 
+// TestLiteralAssignmentValueText pins LiteralAssignmentValueText's exact
+// acceptance set (pg2-30wro, ADR 0039 step 5's "envvars' value scan" item),
+// which MUST reproduce internal/rules/envvars' former hand-rolled `literalValue`
+// exactly — never a widened one, even though the AST it now derives the answer
+// from CAN resolve some of these shapes more liberally (the "unquote parity" risk
+// ADR 0039's Consequences and this package's `unquote` doc both name).
+func TestLiteralAssignmentValueText(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		want  string
+		ok    bool
+	}{
+		{"bare self-ref plus static component", `$PATH:/x`, `$PATH:/x`, true},
+		{"whole-value double-quoted", `"$PATH:/x"`, `$PATH:/x`, true},
+		{"braced self-ref, unquoted", `${PATH}:/x`, `${PATH}:/x`, true},
+		{"braced self-ref, whole-value double-quoted", `"${PATH}:/x"`, `${PATH}:/x`, true},
+		{"sole self-ref, short form", `$PATH`, `$PATH`, true},
+		{"sole self-ref, braced form", `${PATH}`, `${PATH}`, true},
+		{"pure literal, no quoting at all", `/usr/bin:/bin`, `/usr/bin:/bin`, true},
+		{"pure literal, whole-value double-quoted", `"/usr/bin:/bin"`, `/usr/bin:/bin`, true},
+		{"multiple static components beside the self-ref", `$PATH:/a:/b`, `$PATH:/a:/b`, true},
+
+		// MIXED quoting: the outgoing literalValue rejected this because a quote
+		// character survived a strip of only the first/last byte. Structurally the
+		// value is TWO top-level word parts (a DblQuoted that does not span the
+		// whole value, plus a literal suffix) rather than one, which is the
+		// non-string-scan way to see the identical fact.
+		{"mixed quoting, double-quoted prefix", `"$PATH":/x`, ``, false},
+		{"mixed quoting, glued double+bare", `/pre"fix"/bin`, ``, false},
+
+		// SINGLE-quoted: deliberately NOT accepted, unlike `unquote` (this
+		// package's other quote primitive), because `$PATH` never
+		// expands inside single quotes (`PATH='$PATH:/x'` REPLACES, it does not
+		// extend) and literalValue never accepted this shape either. Widening it
+		// is out of scope for this migration (askVars' OPERATOR RULING: tighten,
+		// never widen, without a fresh ruling).
+		{"whole-value single-quoted", `'$PATH:/x'`, ``, false},
+		{"embedded single-quoted span", `/a'b'c`, ``, false},
+
+		// A backslash that survives outside (or inside double quotes but not
+		// resolved by them) is refused, matching literalValue's ContainsAny check.
+		{"backslash-escaped dollar, unquoted", `\$PATH:/x`, ``, false},
+		{"backslash-escaped dollar, double-quoted", `"\$PATH:/x"`, ``, false},
+
+		// Substitutions and arithmetic are never literal.
+		{"backtick command substitution", "`date`:/x", ``, false},
+		{"dollar-paren command substitution", `$(mktemp -d)`, ``, false},
+		{"arithmetic expansion", `$((1))`, ``, false},
+
+		// A ParamExp that is not a PLAIN $NAME/${NAME} reference must not be
+		// mistaken for one -- its value is not simply the variable's own text.
+		{"default-value expansion", `${PATH:-/x}:/y`, ``, false},
+		{"indirection", `${!PATH}`, ``, false},
+
+		// Not a scalar value at all.
+		{"bash array form", `(a b)`, ``, false},
+
+		// Degenerate/unparseable inputs fail closed.
+		{"empty value", ``, ``, false},
+		{"unterminated substitution", `$(incomplete`, ``, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := LiteralAssignmentValueText(tt.value)
+			if ok != tt.ok || (ok && got != tt.want) {
+				t.Errorf("LiteralAssignmentValueText(%q) = (%q, %v), want (%q, %v)", tt.value, got, ok, tt.want, tt.ok)
+			}
+		})
+	}
+}
+
 func TestParse_CloudflaredAccessCurl(t *testing.T) {
 	got := Parse(`cloudflared access curl "https://example.com"`)
 	if len(got) != 1 {
