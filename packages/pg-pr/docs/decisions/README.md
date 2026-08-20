@@ -1,6 +1,6 @@
 # Decision docs — pg-pr
 
-The **decision docs** for pr-pool: the durable _how_ that combines with its
+The **decision docs** for pg-pr: the durable _how_ that combines with its
 behavior docs (`../behavior`, authored separately) to produce the product
 (`product = f(behavior docs, decision docs)` — the two-input model). These carry the realization
 decisions the behavior docs deliberately exclude: architecture, tooling, testing, tuning, and

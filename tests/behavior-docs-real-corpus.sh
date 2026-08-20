@@ -70,6 +70,7 @@ PRPOOL_SET="packages/pr-pool/docs/behavior"
 PRPOOL_IMPL="packages/pr-pool"
 PAMONITOR_SET="packages/pa-monitor/docs/behavior"
 CCPOOL_SET="packages/ccpool/docs/behavior"
+PGPR_SET="packages/pg-pr/docs/behavior"
 
 for f in "$SELF_CHECKS" "$TRACE_EXTRACT" "$RESOLVE_IMPORTS" "$RECONCILE_IMPORTS" "$NAME_COLLISIONS" "$IMPL_TRACES"; do
   [ -f "$f" ] || {
@@ -78,7 +79,7 @@ for f in "$SELF_CHECKS" "$TRACE_EXTRACT" "$RESOLVE_IMPORTS" "$RECONCILE_IMPORTS"
     exit 2
   }
 done
-for d in "$METHOD_SET" "$PRPOOL_SET" "$PRPOOL_IMPL" "$PAMONITOR_SET" "$CCPOOL_SET"; do
+for d in "$METHOD_SET" "$PRPOOL_SET" "$PRPOOL_IMPL" "$PAMONITOR_SET" "$CCPOOL_SET" "$PGPR_SET"; do
   [ -d "$d" ] || {
     echo "missing real corpus path: $ROOT/$d" >&2
     exit 2
@@ -131,7 +132,7 @@ require_clean() {
 
 echo "=== behavior-docs real corpus: $ROOT ==="
 
-for set in "$METHOD_SET" "$PRPOOL_SET" "$PAMONITOR_SET" "$CCPOOL_SET"; do
+for set in "$METHOD_SET" "$PRPOOL_SET" "$PAMONITOR_SET" "$CCPOOL_SET" "$PGPR_SET"; do
   echo
   echo "--- intra: self-checks.sh $set ---"
   out="$tmp/self-checks.$(printf '%s' "$set" | tr / _)"
@@ -240,9 +241,25 @@ bash "$RECONCILE_IMPORTS" "$PAMONITOR_SET" "$CCPOOL_SET" >"$out" 2>&1 || true
 record "inter/reconcile-imports" "$out"
 grep -E '^[[:space:]]*(FAIL|WARN|clean)' "$out" | sed 's/^/  /' || true
 
-echo "--- inter: name-collisions.sh (method, pr-pool, pa-monitor, ccpool) ---"
+echo "--- inter: resolve-imports.sh (method -> pg-pr) ---"
+out="$tmp/resolve-pgpr"
+bash "$RESOLVE_IMPORTS" "$METHOD_SET" "$PGPR_SET" >"$out" 2>&1 || {
+  echo "REAL-CORPUS FAIL resolve-imports.sh did not resolve the real seam:" >&2
+  cat "$out" >&2
+  hard_fail=1
+}
+record "inter/resolve-imports" "$out"
+grep -E '^[[:space:]]*(ok|WARN|FAIL|external)' "$out" | sed 's/^/  /' || true
+
+echo "--- inter: reconcile-imports.sh (method <-> pg-pr) ---"
+out="$tmp/reconcile-pgpr"
+bash "$RECONCILE_IMPORTS" "$METHOD_SET" "$PGPR_SET" >"$out" 2>&1 || true
+record "inter/reconcile-imports" "$out"
+grep -E '^[[:space:]]*(FAIL|WARN|clean)' "$out" | sed 's/^/  /' || true
+
+echo "--- inter: name-collisions.sh (method, pr-pool, pa-monitor, ccpool, pg-pr) ---"
 out="$tmp/collisions"
-bash "$NAME_COLLISIONS" "$METHOD_SET" "$PRPOOL_SET" "$PAMONITOR_SET" "$CCPOOL_SET" >"$out" 2>&1 || true
+bash "$NAME_COLLISIONS" "$METHOD_SET" "$PRPOOL_SET" "$PAMONITOR_SET" "$CCPOOL_SET" "$PGPR_SET" >"$out" 2>&1 || true
 record "inter/name-collisions" "$out"
 grep -E '^[[:space:]]*(FAIL|CANDIDATE|clean|none)' "$out" | sed 's/^/  /' || true
 

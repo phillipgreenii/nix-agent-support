@@ -247,15 +247,18 @@
       # only on a flake check does not hold the line while a work stream is
       # actively editing the sets it governs, which is exactly when it is needed.
       #
-      # WHY pre-commit AND NOT pre-push/CI. Measured on this repo, 2026-07-31:
-      # the runner takes 7.3s over both real sets (self-checks 1.6s + 2.2s,
-      # trace-extract 0.7s + 0.8s, impl-traces 0.6s, the three inter scripts
-      # ~0.6s together). 7.3s on EVERY commit would not be acceptable, so the
-      # hook carries a `files` filter and fires only when something it actually
-      # governs is staged: a behavior-docs set, an evaluator script, the runner,
-      # or the recorded baseline. On every other commit it does not run at all.
-      # `always_run = false` plus that filter is what makes pre-commit the right
-      # stage rather than pre-push.
+      # WHY PRE-PUSH, NOT PRE-COMMIT (moved here at WS-3 landing, pg2-wr6lm.6.3).
+      # Originally pre-commit: measured 2026-07-31 at 7.3s over the two sets that
+      # existed then. Re-measured 2026-08-20 after WS-3 added three more real sets
+      # (pa-monitor, ccpool, pg-pr): the full runner now takes ~27.6s — materially
+      # past the budget that justified pre-commit, so it moved to pre-push per the
+      # same rule the golangci-relint hook below already follows ("too slow on
+      # every commit" -> pre-push). The `files` filter still applies, so it fires
+      # only when something it actually governs is staged: a behavior-docs set, an
+      # evaluator script, the runner, or the recorded baseline.
+      #
+      # `always_run = false` plus that filter is what keeps it from firing at all
+      # on an unrelated push.
       #
       # `pass_filenames = false`: the evaluators take SET DIRECTORIES, not files.
       # The runner resolves everything under `$PWD` — the working tree — so the
@@ -383,7 +386,8 @@
             language = "system";
             pass_filenames = false;
             always_run = false;
-            files = "^(behavior-docs/docs/behavior/|packages/pr-pool/docs/behavior/|packages/pr-pool/.*\\.go$|packages/pa-monitor/docs/behavior/|packages/ccpool/docs/behavior/|claude-marketplace/behavior-docs-conformance/|tests/behavior-docs-real-corpus)";
+            stages = [ "pre-push" ];
+            files = "^(behavior-docs/docs/behavior/|packages/pr-pool/docs/behavior/|packages/pr-pool/.*\\.go$|packages/pa-monitor/docs/behavior/|packages/ccpool/docs/behavior/|packages/pg-pr/docs/behavior/|claude-marketplace/behavior-docs-conformance/|tests/behavior-docs-real-corpus)";
           };
         }
         // lib.mapAttrs' mkGoLintPushHook goLintPushTouchDirs;
