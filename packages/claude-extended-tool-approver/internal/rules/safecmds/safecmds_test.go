@@ -15,6 +15,51 @@ func mustJSON(v any) json.RawMessage {
 	return b
 }
 
+// mockEvaluator is a minimal hookio.Evaluator for exercising safecmds'
+// `xargs sh|bash -c` I13 structural delegation (pg2-1zrup) without pulling in
+// the real engine — mirrors internal/rules/docker's own mockEvaluator
+// (map-keyed lookup on the exact source text, falling back to defaultResult).
+type mockEvaluator struct {
+	results       map[string]hookio.RuleResult
+	defaultResult hookio.RuleResult
+}
+
+func (m *mockEvaluator) EvaluateExpression(expr string, stack []hookio.StackFrame, origin *hookio.HookInput) hookio.RuleResult {
+	if r, ok := m.results[strings.TrimSpace(expr)]; ok {
+		return r
+	}
+	return m.defaultResult
+}
+
+// EvaluateStructure satisfies hookio.Evaluator's I13 structural delegate
+// method — the one safecmds' xargs sh/bash -c branch actually calls — reusing
+// EvaluateExpression's map lookup keyed on `source` (the exact -c script
+// text), same idiom as internal/rules/docker's mockEvaluator.
+func (m *mockEvaluator) EvaluateStructure(source string, leaves any, stack []hookio.StackFrame, origin *hookio.HookInput) hookio.RuleResult {
+	return m.EvaluateExpression(source, stack, origin)
+}
+
+// capturingEvaluator records exactly what safecmds' xargs sh/bash -c branch
+// hands to EvaluateStructure, so a test can assert on the LEAVES themselves
+// (not just the final decision) — the precise way to pin "no extra top-level
+// leaf was promoted" (pg2-1zrup).
+type capturingEvaluator struct {
+	lastSource string
+	lastLeaves any
+	result     hookio.RuleResult
+}
+
+func (c *capturingEvaluator) EvaluateExpression(expr string, stack []hookio.StackFrame, origin *hookio.HookInput) hookio.RuleResult {
+	c.lastSource = expr
+	return c.result
+}
+
+func (c *capturingEvaluator) EvaluateStructure(source string, leaves any, stack []hookio.StackFrame, origin *hookio.HookInput) hookio.RuleResult {
+	c.lastSource = source
+	c.lastLeaves = leaves
+	return c.result
+}
+
 func TestSafecmds_DynamicWritePath_Abstain(t *testing.T) {
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
@@ -1273,7 +1318,18 @@ func TestSafecmds_Sqlite3Removed(t *testing.T) {
 
 func TestSafecmds_Xargs(t *testing.T) {
 	pe := patheval.New("/home/user/project")
-	r := New(pe)
+	// The "xargs sh -c echo" case now delegates its `-c` script through the
+	// I13 structural entry point (pg2-1zrup), so this rule needs an Evaluator
+	// wired in — the mock approves the exact script text "echo {}" (the sole
+	// -c argument) and abstains on anything else, matching what a real engine
+	// would do for a bare `echo {}` (alwaysSafe) without depending on one.
+	mockEval := &mockEvaluator{
+		results: map[string]hookio.RuleResult{
+			"echo {}": {Decision: hookio.Approve, Reason: "ok", Module: "mock"},
+		},
+		defaultResult: hookio.RuleResult{Decision: hookio.NoOpinion, Module: "mock"},
+	}
+	r := NewWithEvaluator(mockEval, pe)
 	tests := []struct {
 		name    string
 		command string
@@ -1297,6 +1353,63 @@ func TestSafecmds_Xargs(t *testing.T) {
 				t.Errorf("Decision = %v, want %v (reason: %s)", got.Decision, tt.want, got.Reason)
 			}
 		})
+	}
+}
+
+// TestSafecmds_XargsShC_NilEvaluator pins the New() (no evaluator) construction
+// path for the xargs sh/bash -c branch specifically: it MUST fail closed to
+// NotApplicable (abstain), not panic on a nil r.exprEval and not silently
+// approve (pg2-1zrup).
+func TestSafecmds_XargsShC_NilEvaluator(t *testing.T) {
+	pe := patheval.New("/home/user/project")
+	r := New(pe)
+	input := &hookio.HookInput{
+		ToolName:  "Bash",
+		CWD:       "/home/user/project",
+		ToolInput: mustJSON(map[string]string{"command": "xargs sh -c 'echo hi'"}),
+	}
+	got := hookio.Verdict(r.Evaluate(input))
+	if got.Decision != hookio.NoOpinion {
+		t.Errorf("Decision = %v, want abstain (no evaluator wired, construction state, not a judgement)", got.Decision)
+	}
+}
+
+// TestSafecmds_XargsShC_NoQuoteDestroyingJoin is the pg2-1zrup regression test:
+// the `-c` argument's SOLE script text ("echo safe") must be the only thing
+// delegated — a trailing token after it is a POSITIONAL PARAMETER the shell
+// binds to $0/$1/… inside the script and never executes as code. The deleted
+// `strings.Join(innerArgs[1:], " ")` glued that trailing token onto the script
+// text with a space and re-parsed the result, which could promote it into a
+// SECOND top-level leaf the script never contained (here, the ";"-prefixed
+// token would have become its own command). This asserts directly on what
+// gets handed to EvaluateStructure: exactly one leaf, and the exact script
+// source — not on the final decision, which a coincidence elsewhere could
+// make pass for the wrong reason.
+func TestSafecmds_XargsShC_NoQuoteDestroyingJoin(t *testing.T) {
+	pe := patheval.New("/home/user/project")
+	cap := &capturingEvaluator{result: hookio.RuleResult{Decision: hookio.Approve, Reason: "ok", Module: "mock"}}
+	r := NewWithEvaluator(cap, pe)
+
+	command := `xargs sh -c 'echo safe' '; rm -rf /tmp/evil'`
+	input := &hookio.HookInput{
+		ToolName:  "Bash",
+		CWD:       "/home/user/project",
+		ToolInput: mustJSON(map[string]string{"command": command}),
+	}
+	_ = hookio.Verdict(r.Evaluate(input))
+
+	if cap.lastSource != "echo safe" {
+		t.Errorf("source = %q, want %q (the sole -c script text, not the trailing positional arg joined onto it)", cap.lastSource, "echo safe")
+	}
+	leaves, ok := cap.lastLeaves.([]cmdparse.ParsedCommand)
+	if !ok {
+		t.Fatalf("leaves = %T, want []cmdparse.ParsedCommand", cap.lastLeaves)
+	}
+	if len(leaves) != 1 {
+		t.Fatalf("leaves = %d, want exactly 1 (the trailing positional arg must not be promoted into an extra leaf): %+v", len(leaves), leaves)
+	}
+	if leaves[0].Executable != "echo" {
+		t.Errorf("leaves[0].Executable = %q, want %q", leaves[0].Executable, "echo")
 	}
 }
 

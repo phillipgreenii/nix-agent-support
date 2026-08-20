@@ -226,7 +226,12 @@ func RuleChain(eng *engine.Engine, pe *patheval.PathEvaluator, cfg *configrules.
 		curl.New(cfg.Curl),
 		sshrule.New(cfg.Ssh),
 		vaultrule.New(cfg.Vault),
-		safecmds.New(pe),
+		// safecmds takes the engine as its Evaluator (pg2-1zrup) so its
+		// `xargs sh|bash -c '<script>'` inner-command handling can delegate
+		// through the I13 structural entry point (EvaluateStructure) rather than
+		// self-recursing on rule-constructed text — mirroring nixRule/dockerRule
+		// above and kubectl below.
+		safecmds.NewWithEvaluator(eng, pe),
 		kubectl.New(eng, pe, cfg.Kubectl),
 		buildtools.New(cfg.Buildtools),
 		sqlite3rule.New(pe),

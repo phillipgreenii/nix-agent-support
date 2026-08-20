@@ -1,7 +1,6 @@
 package safecmds
 
 import (
-	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -147,10 +146,25 @@ var lspServices = map[string]bool{
 
 type Rule struct {
 	eval *patheval.PathEvaluator
+	// exprEval is this rule's I13 structural delegate for the `xargs sh|bash -c
+	// '<script>'` inner command (pg2-1zrup). nil for New() — every other branch
+	// of Evaluate is unaffected, and the xargs sh/bash -c branch fails closed to
+	// NotApplicable when it is nil (the same construction-state posture
+	// kubectl/nix use for their own exprEval, not a judgement about the inner
+	// script).
+	exprEval hookio.Evaluator
 }
 
 func New(eval *patheval.PathEvaluator) *Rule {
 	return &Rule{eval: eval}
+}
+
+// NewWithEvaluator is New plus the I13 structural delegate used to evaluate an
+// `xargs sh|bash -c '<script>'` inner command through the full rule chain
+// (pg2-1zrup) — mirrors nix.NewWithEvaluator/docker.New/kubectl.New's own
+// production wiring (all take the engine as their Evaluator).
+func NewWithEvaluator(exprEval hookio.Evaluator, eval *patheval.PathEvaluator) *Rule {
+	return &Rule{eval: eval, exprEval: exprEval}
 }
 
 func (r *Rule) Name() string {
@@ -243,30 +257,50 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 				return hookio.NotApplicable()
 			}
 			innerBase := filepath.Base(innerExec)
-			// sh/bash -c '<cmd>': parse the -c argument and evaluate it recursively
+			// sh/bash -c '<script>': delegate the SOLE -c script argument through
+			// the I13 structural entry point (pg2-1zrup).
+			//
+			// innerArgs[1] is that ONE script string — cmdparse already unquoted
+			// it, as an ordinary argument, when it parsed the OUTER
+			// `xargs ... sh -c '<script>' [extra...]` command. Any innerArgs[2:]
+			// are POSITIONAL PARAMETERS the shell binds to $0/$1/… inside the
+			// script and NEVER executes as code. The former
+			// `strings.Join(innerArgs[1:], " ")` glued those onto the script text
+			// with a space and re-parsed the RESULT, so a positional argument's
+			// own content could be promoted into new top-level command syntax the
+			// script never contained (e.g. a trailing arg starting with `;` or
+			// `&&`). Using innerArgs[1] alone is what stops that; it is also what
+			// makes this a STRUCTURAL delegation rather than a rule-constructed
+			// command string re-entered for evaluation (ADR 0039 I13) — the only
+			// text handed onward is the SAME source cmdparse.Parse below lowers.
 			if (innerBase == "sh" || innerBase == "bash") && len(innerArgs) >= 2 && innerArgs[0] == "-c" {
-				shellCmd := strings.Join(innerArgs[1:], " ")
-				innerParsed := cmdparse.Parse(shellCmd)
+				scriptText := innerArgs[1]
+				innerParsed := cmdparse.Parse(scriptText)
 				if len(innerParsed) == 0 {
 					return hookio.NotApplicable()
 				}
-				// Re-evaluate by constructing a synthetic hook input with the shell command
-				syntheticInput := &hookio.HookInput{
-					ToolName:  "Bash",
-					CWD:       cwd,
-					ToolInput: mustMarshalCommand(shellCmd),
+				if r.exprEval == nil {
+					// DELIBERATELY NOT a refusal (ADR 0044) — the same construction-
+					// state posture kubectl.evaluateExec and nix use for their own nil
+					// exprEval guard: this Rule was built via New, not
+					// NewWithEvaluator, so it never looked at the inner script at all.
+					return hookio.NotApplicable()
 				}
-				// SELF-RECURSION. An inner error propagates UNCHANGED, which is what
-				// preserves the pre-ADR-0043 outcome: the inner Evaluate used to answer
-				// Abstain and the outer returned it, so the chain continued. Forwarding
-				// the error keeps that, and never converts a genuine failure into a
-				// not-applicable (or the reverse).
-				result, err := r.Evaluate(syntheticInput)
-				// Forwarded WITH the RuleResult since ADR 0044: an inner REFUSAL's floor
-				// is the only record of why the inner command was not clearable, and
-				// dropping it would report `xargs sh -c '<refused>'` as a leaf nobody
-				// examined. A genuine failure still carries the zero RuleResult, so the
-				// pre-ADR-0044 behaviour is unchanged for that case.
+				stack := []hookio.StackFrame{{RuleName: r.Name(), Command: "xargs sh -c", Expression: normalizeExpr(pc.Raw)}}
+				scoped := *input
+				scoped.CWD = cwd
+				scoped.PathEval = pe
+				// ADR 0043 RECURSION BOUNDARY. NOT `..., nil`: an inner NoOpinion is
+				// the inner chain's loop-exhaustion verdict, and returning it as this
+				// rule's own verdict would STOP the outer chain where the pre-ADR
+				// forwarded Abstain continued it. hookio.FromRecursion states the
+				// translation in one place: an inner ERROR (loop exhaustion) forwards
+				// as ErrNotApplicable UNCHANGED — the pre-ADR-0043 "inner Abstain, so
+				// the outer chain continues" outcome — and since ADR 0044 an inner
+				// REFUSAL's RuleResult is forwarded WITH ErrRefused, so a downstream
+				// consumer still sees WHY the inner command was not clearable instead
+				// of an indistinguishable exhaustion.
+				result, err := hookio.FromRecursion(r.exprEval.EvaluateStructure(scriptText, innerParsed, stack, &scoped))
 				if err != nil {
 					return result, err
 				}
@@ -1284,10 +1318,14 @@ func evaluateCp(args []string, pe *patheval.PathEvaluator, module string) (hooki
 	return hookio.RuleResult{Decision: hookio.Approve, Reason: "safe-commands: cp with known paths", Module: module}, nil
 }
 
-// mustMarshalCommand creates a JSON ToolInput for a Bash command string.
-func mustMarshalCommand(cmd string) json.RawMessage {
-	b, _ := json.Marshal(map[string]string{"command": cmd})
-	return b
+// normalizeExpr collapses whitespace for use as an I13 structural-delegate
+// stack-frame key (pg2-1zrup) — the same whitespace-collapsing normalisation
+// internal/engine's own normalizeExpression and internal/rules/docker's own
+// normalizeExpr apply, reimplemented locally per that package's established
+// convention (each delegating rule owns its own copy; hookio cannot export
+// the engine's unexported one without a new dependency).
+func normalizeExpr(s string) string {
+	return strings.Join(strings.Fields(strings.TrimSpace(s)), " ")
 }
 
 // xargsValueFlags are xargs flags that consume the next argument as a value.
