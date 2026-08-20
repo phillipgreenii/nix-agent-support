@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmdparse"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/patheval"
 )
@@ -30,23 +31,47 @@ func (m *mockEvaluator) EvaluateExpression(expr string, stack []hookio.StackFram
 }
 
 // EvaluateStructure satisfies hookio.Evaluator's I13 structural delegate
-// method (pg2-m1i6r). No docker test exercises structural delegation yet —
-// the docker rule itself is not migrated by that bead — so this simply
-// reuses the same expr-keyed lookup EvaluateExpression already provides.
+// method. The docker rule IS migrated onto it (pg2-lwwwk), so — unlike the
+// stub this method used to be (pg2-m1i6r, before any rule called it) — this
+// now actually exercises `leaves`: it asserts back to
+// []cmdparse.ParsedCommand (exactly as the real engine's EvaluateStructure
+// does) and folds each leaf's OWN looked-up verdict via
+// hookio.MostRestrictive, mirroring evaluateParsed's real fold instead of
+// keying off a single opaque `source` string the way EvaluateExpression's
+// mock does. This is what lets a test assert on the STRUCTURE docker hands
+// over (e.g. that a passthrough-stripped multi-leaf script still resolves
+// leaf-by-leaf) rather than on a reconstructed text label that the real
+// production EvaluateStructure never builds.
 func (m *mockEvaluator) EvaluateStructure(source string, leaves any, stack []hookio.StackFrame, origin *hookio.HookInput) hookio.RuleResult {
-	return m.EvaluateExpression(source, stack, origin)
+	parsed, ok := leaves.([]cmdparse.ParsedCommand)
+	if !ok || len(parsed) == 0 {
+		return m.EvaluateExpression(source, stack, origin)
+	}
+	acc := hookio.RuleResult{Decision: hookio.Approve, Reason: "all leaves approved", Module: "mock"}
+	for _, pc := range parsed {
+		key := strings.TrimSpace(pc.Executable + " " + strings.Join(pc.Args, " "))
+		r, ok := m.results[key]
+		if !ok {
+			r = m.defaultResult
+		}
+		acc = hookio.MostRestrictive(acc, r)
+	}
+	return acc
 }
 
 func TestDockerRule(t *testing.T) {
 	mockEval := &mockEvaluator{
 		results: map[string]hookio.RuleResult{
-			"bats":               {Decision: hookio.Approve, Reason: "ok", Module: "mock"},
-			"rm -rf /":           {Decision: hookio.Reject, Reason: "no", Module: "mock"},
-			"whoami":             {Decision: hookio.Approve, Reason: "ok", Module: "mock"},
-			"ls":                 {Decision: hookio.Approve, Reason: "ok", Module: "mock"},
-			"echo hello":         {Decision: hookio.Approve, Reason: "ok", Module: "mock"},
-			"true && ls":         {Decision: hookio.Approve, Reason: "ok", Module: "mock"},
-			"bash -c echo hello": {Decision: hookio.Approve, Reason: "ok", Module: "mock"},
+			"bats":       {Decision: hookio.Approve, Reason: "ok", Module: "mock"},
+			"rm -rf /":   {Decision: hookio.Reject, Reason: "no", Module: "mock"},
+			"whoami":     {Decision: hookio.Approve, Reason: "ok", Module: "mock"},
+			"ls":         {Decision: hookio.Approve, Reason: "ok", Module: "mock"},
+			"echo hello": {Decision: hookio.Approve, Reason: "ok", Module: "mock"},
+			// "true" is init-firewall.sh's own structural replacement (see
+			// stripPassthroughWrapper) — it is a real, always-safe command in
+			// its own right, independent of what it happens to be standing in
+			// for here.
+			"true": {Decision: hookio.Approve, Reason: "ok", Module: "mock"},
 		},
 		defaultResult: hookio.RuleResult{Decision: hookio.NoOpinion, Module: "mock"},
 	}
@@ -132,6 +157,8 @@ func TestParseRunArgs(t *testing.T) {
 
 type capturingEvaluator struct {
 	lastOrigin *hookio.HookInput
+	lastSource string
+	lastLeaves any
 	result     hookio.RuleResult
 }
 
@@ -141,10 +168,14 @@ func (c *capturingEvaluator) EvaluateExpression(expr string, stack []hookio.Stac
 }
 
 // EvaluateStructure satisfies hookio.Evaluator's I13 structural delegate
-// method (pg2-m1i6r); unused by any test here, so it mirrors
-// EvaluateExpression's own capture behaviour.
+// method. The docker rule now calls this (pg2-lwwwk) instead of
+// EvaluateExpression, so this captures `source`/`leaves` too — used by
+// TestDockerRule_GosuNestedShC_StructuralDelegation to assert on the STRUCTURE
+// handed over, which a text-only capture cannot observe.
 func (c *capturingEvaluator) EvaluateStructure(source string, leaves any, stack []hookio.StackFrame, origin *hookio.HookInput) hookio.RuleResult {
 	c.lastOrigin = origin
+	c.lastSource = source
+	c.lastLeaves = leaves
 	return c.result
 }
 
@@ -238,6 +269,69 @@ func TestDockerRule_MountAwareRegressions(t *testing.T) {
 				t.Errorf("probe %q: got %v, want %v", tt.probePath, access, tt.wantProbeAccess)
 			}
 		})
+	}
+}
+
+// TestDockerRule_GosuNestedShC_StructuralDelegation pins the bead's own
+// behavior-test acceptance criterion (pg2-lwwwk): `gosu u sh -c "a; b"` must
+// not promote `b` out of the `-c` script it belongs to, and quoting inside
+// that script must survive.
+//
+// Before this bead, docker.go's pipeline rejoined cmdArgs into TEXT
+// (extractInnerCommand's plain strings.Join, since "gosu" — not "bash"/"sh" —
+// took the fallback branch) before any quote-aware splitting ran. The
+// original `-c` argument here is DOUBLE-quoted, so the outer shell parse
+// already stripped its quote marks by the time cmdArgs holds it — nothing is
+// left in the token to mark where the script's own `;` should be treated
+// as belonging to `sh -c`'s script rather than to docker's own arg list, so
+// re-serializing cmdArgs as space-joined text was indistinguishable from a
+// GENUINE top-level `;`. `splitOnShellOperators` (deleted by this bead) would
+// then have split on it, handing `sh -c a` (dropping the rest of the script)
+// and `b` to EvaluateExpression as if `b` were docker's own sibling command
+// rather than the second half of the script `sh -c` was told to run.
+//
+// The structural pipeline never rejoins cmdArgs, so it never loses the
+// boundary: `a` and `b` arrive together as leaves of ONE cmdparse.Parse of
+// the untouched script value, and the SECOND clause below checks that a
+// genuinely quoted `;` (this time inside single quotes the `-c` argument's
+// own double quotes left intact) still doesn't get treated as a separator.
+func TestDockerRule_GosuNestedShC_StructuralDelegation(t *testing.T) {
+	cap := &capturingEvaluator{result: hookio.RuleResult{Decision: hookio.Approve, Module: "mock"}}
+	r := New(cap, nil)
+	input := &hookio.HookInput{
+		ToolName:  "Bash",
+		ToolInput: mustJSON(map[string]string{"command": `docker run --rm img gosu u sh -c "echo 'x; y'; b"`}),
+		CWD:       "/tmp/project",
+	}
+
+	got := hookio.Verdict(r.Evaluate(input))
+	if got.Decision != hookio.Approve {
+		t.Fatalf("Decision = %v, want Approve (reason: %s)", got.Decision, got.Reason)
+	}
+
+	leaves, ok := cap.lastLeaves.([]cmdparse.ParsedCommand)
+	if !ok {
+		t.Fatalf("lastLeaves = %#v (%T), want []cmdparse.ParsedCommand", cap.lastLeaves, cap.lastLeaves)
+	}
+	// `b` must arrive as its OWN leaf ALONGSIDE `echo 'x; y'` in the SAME
+	// EvaluateStructure call — not lost, and not folded into the first leaf —
+	// which is what "not promoted to a top-level leaf" means here: it never
+	// escapes to a separate, independent evaluation outside the `-c` script's
+	// own leaf set.
+	if len(leaves) != 2 {
+		t.Fatalf("leaves = %+v, want exactly 2 (echo ... and b) — a wrong count means the script was mis-split", leaves)
+	}
+	if leaves[0].Executable != "echo" || !reflect.DeepEqual(leaves[0].Args, []string{"x; y"}) {
+		t.Errorf("leaves[0] = %+v, want Executable %q Args %v (the quoted %q must survive as ONE argument)",
+			leaves[0], "echo", []string{"x; y"}, "x; y")
+	}
+	if leaves[1].Executable != "b" {
+		t.Errorf("leaves[1] = %+v, want Executable %q", leaves[1], "b")
+	}
+
+	if cap.lastSource != "echo 'x; y'; b" {
+		t.Errorf("lastSource = %q, want the untouched -c script value %q (I12: never a rejoin)",
+			cap.lastSource, "echo 'x; y'; b")
 	}
 }
 
