@@ -152,11 +152,6 @@ import (
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
 )
 
-// maxScopeDepth bounds the substitution recursion of scopeLeaves. Deeply nested
-// substitutions are not a real shape, and the bound makes a self-similar body
-// (whose inner text re-parses to the same leaf) terminate.
-const maxScopeDepth = 8
-
 // direction is the access direction of a matched git-metadata path. The zero
 // value is dirRead and each successive value is strictly more restrictive, so
 // `worse` folds by numeric order exactly as hookio.MostRestrictive does for
@@ -357,7 +352,7 @@ func bashAccessLeaves(leaves []cmdparse.ParsedCommand, scopeText string, rootLea
 		// whatever the expression later does with the variable.
 		for _, ev := range pc.EnvVars {
 			if isGitMetadataPath(ev.Value) {
-				note(bindingDirection(ev.Name, scopeText, pipes))
+				note(bindingDirection(ev.Name, pipes))
 			}
 		}
 	}
@@ -379,14 +374,19 @@ func bashAccessLeaves(leaves []cmdparse.ParsedCommand, scopeText string, rootLea
 // the right one to err on here: corpus row 237336 binds `.git/config` and then
 // `git config --unset-all`s it, which is a genuine write no read/write table for
 // bare `git` would catch without modelling every subcommand — the `git` rule's job.
-func bindingDirection(name, scope string, pipes *pipeScope) direction {
+//
+// pipes.rootLeaves() supplies the scope's root-level leaves — the SAME leaves
+// pipeScope already holds (threaded from the engine via ADR 0039 step 3, or
+// lazily parsed once and cached for a direct caller) — so this no longer takes
+// a scope STRING or re-parses one; see scopeLeaves.
+func bindingDirection(name string, pipes *pipeScope) direction {
 	dir, used := dirRead, false
-	for _, pc := range scopeLeaves(scope, 0) {
+	for _, pc := range scopeLeaves(pipes.rootLeaves()) {
 		if !leafReferencesVar(pc, name) {
 			continue
 		}
 		used = true
-		dir = worse(dir, commandDirection(pc, func(s string) bool { return referencesVar(s, name) }, pipes))
+		dir = worse(dir, commandDirection(pc, func(s string) bool { return referencesVar(s, true, pc.Substitutions, name) }, pipes))
 		if dir == dirWrite {
 			break
 		}
@@ -397,59 +397,152 @@ func bindingDirection(name, scope string, pipes *pipeScope) direction {
 	return dir
 }
 
-// scopeLeaves flattens an expression into every command it can run: the top-level
-// leaves plus, recursively, the leaves of each command/process substitution body.
-// The recursion matters because a variable is most often consumed INSIDE a
-// substitution (`echo "msgnum: $(cat "$RM/msgnum")"`), and cmdparse.Parse stops at
-// the substitution boundary — the substitution's text stays glued into the outer
-// leaf's token.
-func scopeLeaves(expr string, depth int) []cmdparse.ParsedCommand {
-	if depth > maxScopeDepth {
-		return nil
-	}
+// scopeLeaves flattens rootLeaves into every command the scope can run: the
+// top-level leaves plus, recursively, the leaves of each command/process
+// substitution body — a variable is most often consumed INSIDE a substitution
+// (`echo "msgnum: $(cat "$RM/msgnum")"`), and a top-level leaf's own Args never
+// contain such a body's INNER references, only its glued-in source text.
+//
+// ADR 0039 steps 3 and 4 (pg2-1019a/pg2-x9452's step 5 acceptance criteria):
+// rootLeaves already carries pre-lowered Substitutions computed during the SAME
+// parse that produced it, and each Substitution's own Leaves are pre-lowered the
+// same recursive way — so the ARGS/REDIRECTIONS half of this walks EXISTING
+// structure and re-parses nothing, unlike the outgoing version, which called
+// cmdparse.Parse(expr) for the top level and then
+// cmdparse.EnumerateSubstitutions(pc.Raw) plus a fresh cmdparse.Parse(sub.Body)
+// for every nested substitution body.
+//
+// envValueSubstitutionLeaves is the ONE deliberate exception, and its need was
+// found empirically, not assumed: replaying the corpus subset containing
+// `.git` against a base tree still carrying the outgoing scopeLeaves surfaced
+// two ROWS (`GD=…/rebase-merge` then `ORIG=$(cat "$GD/orig-head")`, and the
+// `H=…/hooks/pre-commit` / `BEFORE=$(shasum … "$H" | awk …)` shape) where
+// dropping it made a genuinely read-only bound path fail-safe to Reject
+// instead of the correct read Abstain — a real regression, not a cosmetic
+// one. The cause: cmdparse.ParsedCommand.Substitutions is populated by
+// walking cmd.Args and redirections ONLY (callSubstitutions); an assignment's
+// OWN VALUE — `ORIG=$(...)`, `H=/…/.git/…` — is walked into leaf structure
+// NOWHERE in cmdparse for a plain `NAME=VALUE` leaf (that text belongs to the
+// engine's separate static classifyExpansion path, which classifies the
+// body's SAFETY but never lowers it into `[]ParsedCommand`). So when the
+// variable this rule is tracking is consumed only inside ANOTHER assignment's
+// substitution body — the single most common shape a shell script binds and
+// then reads a path through — there is no pre-lowered structure to walk at
+// all, and a scoped reparse of just that one value is the only way to see it.
+func scopeLeaves(rootLeaves []cmdparse.ParsedCommand) []cmdparse.ParsedCommand {
 	var out []cmdparse.ParsedCommand
-	for _, pc := range cmdparse.Parse(expr) {
+	for _, pc := range rootLeaves {
 		out = append(out, pc)
-		for _, sub := range cmdparse.EnumerateSubstitutions(pc.Raw) {
-			out = append(out, scopeLeaves(sub.Body, depth+1)...)
+		out = append(out, substitutionLeaves(pc.Substitutions)...)
+		out = append(out, envValueSubstitutionLeaves(pc.EnvVars)...)
+	}
+	return out
+}
+
+// substitutionLeaves recurses into each substitution's own pre-lowered leaves —
+// and THEIR substitutions, at whatever depth the parse actually nested them —
+// never re-parsing a Body. The recursion terminates on its own because it is
+// walking a finite tree built by ONE parse call, not re-deriving structure from
+// text, so no depth bound (the outgoing maxScopeDepth) is needed.
+func substitutionLeaves(subs []cmdparse.Substitution) []cmdparse.ParsedCommand {
+	var out []cmdparse.ParsedCommand
+	for _, sub := range subs {
+		for _, pc := range sub.Leaves {
+			out = append(out, pc)
+			out = append(out, substitutionLeaves(pc.Substitutions)...)
+		}
+	}
+	return out
+}
+
+// envValueSubstitutionLeaves finds the substitution bodies embedded in vars'
+// own VALUES and lowers each into leaves — see scopeLeaves' doc for why this
+// is the one place a body still gets parsed rather than walked as existing
+// structure: cmdparse never lowers an assignment's value into leaf structure
+// (only lowerDecl's export/declare-family path does, via cmd.Args, and even
+// then the result lands on the SAME leaf's Substitutions, not on vars). A
+// depth bound is unnecessary for the same reason substitutionLeaves needs
+// none: cmdparse.Parse(sub.Body) on a strictly-smaller extent terminates, and
+// each further nested body found inside is recursed through the already-built
+// (never re-parsed) Substitutions of the leaves that one parse call produced.
+func envValueSubstitutionLeaves(vars []cmdparse.EnvAssignment) []cmdparse.ParsedCommand {
+	var out []cmdparse.ParsedCommand
+	for _, ev := range vars {
+		for _, sub := range cmdparse.EnumerateSubstitutions(ev.Value) {
+			if sub.Body == "" {
+				continue
+			}
+			leaves := cmdparse.Parse(sub.Body)
+			out = append(out, leaves...)
+			for _, pc := range leaves {
+				out = append(out, substitutionLeaves(pc.Substitutions)...)
+				out = append(out, envValueSubstitutionLeaves(pc.EnvVars)...)
+			}
 		}
 	}
 	return out
 }
 
 // leafReferencesVar reports whether the leaf's OWN operands reference $name.
+//
+// Each Args operand is checked against its own live-expansion provenance
+// (cmdparse.ParsedCommand.ArgLiveExpansion, read through ArgIsLiveExpansion) —
+// the parser's own AST fact for whether that operand's source word carries a
+// live expansion at all. That is the quote comparison the deleted
+// containsVarRef never made: unquoting leaves a single-quoted literal `$RM`
+// byte-identical to a live `$RM` (pg2-rz9ds), so a hand-rolled scan over the
+// unquoted text alone cannot tell them apart, while the parser already can.
+// pc.Executable and a redirection's Path carry no such per-operand bit, so
+// they are checked unconditionally (live=true) — the same fail-closed default
+// ArgIsLiveExpansion itself falls back to for an index it does not cover.
 func leafReferencesVar(pc cmdparse.ParsedCommand, name string) bool {
-	if referencesVar(pc.Executable, name) {
+	if referencesVar(pc.Executable, true, pc.Substitutions, name) {
 		return true
 	}
-	for _, a := range pc.Args {
-		if referencesVar(a, name) {
+	for i, a := range pc.Args {
+		if referencesVar(a, pc.ArgIsLiveExpansion(i), pc.Substitutions, name) {
 			return true
 		}
 	}
 	for _, rd := range pc.Redirections {
-		if referencesVar(rd.Path, name) {
+		if referencesVar(rd.Path, true, pc.Substitutions, name) {
 			return true
 		}
 	}
 	return false
 }
 
-// referencesVar reports whether s contains a $NAME / ${NAME…} reference OUTSIDE
-// any nested substitution. Text inside a substitution belongs to the INNER
-// command — which scopeLeaves surfaces as its own leaf — so counting it here
-// would attribute the inner command's direction to the outer one: the `echo` of
-// `echo "$(cat "$RM/x")"` does not itself touch $RM, the `cat` does.
-func referencesVar(s, name string) bool {
-	return containsVarRef(stripSubstitutions(s), name)
+// referencesVar reports whether s contains a live $NAME / ${NAME…} reference
+// OUTSIDE any nested substitution. live=false short-circuits to no-match
+// without inspecting s's bytes at all — see leafReferencesVar for what sets it.
+//
+// subs is pc's own pre-lowered Substitutions (cmdparse.ParsedCommand's field),
+// used by stripSubstitutions to remove a nested substitution's glued-in body
+// text from s WITHOUT re-parsing it. Text inside a nested substitution belongs
+// to the INNER command — which scopeLeaves surfaces as its own leaf — so
+// counting it here would attribute the inner command's direction to the outer
+// one: the `echo` of `echo "$(cat "$RM/x")"` does not itself touch $RM, the
+// `cat` does.
+func referencesVar(s string, live bool, subs []cmdparse.Substitution, name string) bool {
+	if !live {
+		return false
+	}
+	return hasNameRef(stripSubstitutions(s, subs), name)
 }
 
-// stripSubstitutions removes every command/process substitution BODY from s,
-// reusing the shared quote-aware enumerator rather than adding another scanner.
-// EnumerateSubstitutions returns only TOP-LEVEL bodies, so removing those removes
-// any nesting with them.
-func stripSubstitutions(s string) string {
-	for _, sub := range cmdparse.EnumerateSubstitutions(s) {
+// stripSubstitutions removes every command substitution BODY this leaf's own
+// pre-lowered Substitutions already found, from s — without re-parsing s or
+// re-deriving the substitution list via cmdparse.EnumerateSubstitutions. A
+// substitution's Body is looked for as a plain substring of s and removed if
+// present, exactly as the outgoing implementation did once it had the list; the
+// only change is where the list comes from. A process substitution's body
+// never survives into an operand's text at all (cmdparse's lowering replaces
+// it with a fabricated /dev/fd/63 token), so only the two command-substitution
+// kinds can ever actually match here — IsCommandSubstitution is not consulted
+// because a non-matching Body is simply not found in s, which is already a
+// no-op.
+func stripSubstitutions(s string, subs []cmdparse.Substitution) string {
+	for _, sub := range subs {
 		if sub.Body != "" {
 			s = strings.Replace(s, sub.Body, "", 1)
 		}
@@ -457,7 +550,13 @@ func stripSubstitutions(s string) string {
 	return s
 }
 
-func containsVarRef(s, name string) bool {
+// hasNameRef reports whether s contains a $NAME / ${NAME…} reference. It is
+// consulted only through referencesVar, which has already gated s on the
+// parser's own live-expansion fact and stripped nested substitution bodies —
+// so by the time this scans, "quote-aware" and "substitution-boundary-aware"
+// are already established by structure, and this function's job is only the
+// NAME BOUNDARY: $RM matches `$RM` and `${RM:-x}` but not `$RMDIR`.
+func hasNameRef(s, name string) bool {
 	if name == "" {
 		return false
 	}
@@ -470,8 +569,6 @@ func containsVarRef(s, name string) bool {
 		if !strings.HasPrefix(rest, name) {
 			continue
 		}
-		// A reference ends at the name: $RM matches `$RM` and `${RM:-x}` but not
-		// `$RMDIR`.
 		if tail := rest[len(name):]; tail == "" || !isNameByte(tail[0]) {
 			return true
 		}
@@ -709,10 +806,15 @@ func readOrCapture(pc cmdparse.ParsedCommand, pipes *pipeScope) direction {
 }
 
 // pipeScope answers, for a leaf of the expression it was built from, where that
-// leaf's STDOUT goes. It exists because the pipe relation lives at EXPRESSION
-// scope — cmdparse.Parse of the leaf alone shows a single stage with no
-// downstream — and because building it once per Evaluate keeps the scope parsed a
-// bounded number of times.
+// leaf's STDOUT goes, AND (via rootLeaves) supplies the scope's own root-level
+// leaves to bindingDirection's scopeLeaves walk. It exists because the pipe
+// relation lives at EXPRESSION scope — cmdparse.Parse of the leaf alone shows a
+// single stage with no downstream — and because building it once per Evaluate
+// keeps the scope parsed a bounded number of times; sharing ONE lazy-parse-and-
+// cache between both questions (rather than giving bindingDirection its own) is
+// what keeps a leaf that binds a git-metadata path from triggering a second
+// parse of the same scope sinkDirection may already have paid for, or vice
+// versa.
 //
 // It is deliberately built from cmdparse.Parse(scope) and NOT from scopeLeaves:
 // pipeline numbering is per-Parse-call, so folding a substitution body's leaves
@@ -746,6 +848,18 @@ func newPipeScope(scope string, leaves []cmdparse.ParsedCommand) *pipeScope {
 	return &pipeScope{scope: scope, leaves: leaves, parsed: leaves != nil}
 }
 
+// rootLeaves returns the scope's root-level leaves, parsing p.scope lazily and
+// caching the result the first time either this or sinkDirection asks — so a
+// leaf that both binds a git-metadata path AND sits in a pipeline never pays
+// for two parses of the same scope text.
+func (p *pipeScope) rootLeaves() []cmdparse.ParsedCommand {
+	if !p.parsed {
+		p.leaves = cmdparse.Parse(p.scope)
+		p.parsed = true
+	}
+	return p.leaves
+}
+
 // sinkDirection classifies where the stage whose raw text is leafRaw sends its
 // output: dirRead when it goes nowhere it can be kept (no pipe, or only filtering
 // stages downstream), dirCopyOut when any downstream stage might WRITE it.
@@ -753,11 +867,7 @@ func newPipeScope(scope string, leaves []cmdparse.ParsedCommand) *pipeScope {
 // A leafRaw that matches no stage yields dirRead — the same answer as "not in a
 // pipeline", which is the pre-tc-vul7 verdict and so never a new prompt.
 func (p *pipeScope) sinkDirection(leafRaw string) direction {
-	if !p.parsed {
-		p.leaves = cmdparse.Parse(p.scope)
-		p.parsed = true
-	}
-	if cmdparse.PipedToWriter(p.leaves, leafRaw) {
+	if cmdparse.PipedToWriter(p.rootLeaves(), leafRaw) {
 		return dirCopyOut
 	}
 	return dirRead

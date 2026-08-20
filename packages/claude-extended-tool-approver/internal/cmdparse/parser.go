@@ -1150,9 +1150,18 @@ type SubstitutionScan struct {
 // `classifyBacktickSubstitution` and this matcher with no callers at all, so all
 // three are gone rather than kept as dead code the fuzz harness could enshrine.
 //
-// pg2-x9452 (step 5) asserts this removal; the RULE-side scanners its acceptance
-// criteria also name (docker's `splitOnShellOperators`, gitdir's `scopeLeaves` and
-// `containsVarRef`, envvars' value scan) are untouched and still its.
+// pg2-x9452 (step 5) asserts this removal; most of the RULE-side scanners its
+// acceptance criteria also name (docker's `splitOnShellOperators`, envvars' value
+// scan) are untouched and still its. gitdir's own two — `scopeLeaves` and
+// `containsVarRef` — are done: pg2-0gsy5 deleted both, walking already-lowered
+// `ParsedCommand.Substitutions` / `Substitution.Leaves` instead of re-parsing for
+// a leaf's own args/redirections, and gating the boundary-name scan on
+// `ArgIsLiveExpansion` instead of the unquoted bytes alone. ONE exception
+// remains, found by corpus replay: an assignment's own VALUE is not lowered into
+// `Substitutions` anywhere in cmdparse for a plain `NAME=VALUE` leaf, so gitdir
+// still parses such a value's substitution body when one is present, scoped to
+// that value only. See internal/rules/gitdir/gitdir.go and this package's
+// LOWERING.md.
 
 // DELETED, and the deletion is a coverage claim: `commandStartOffset`, the
 // quote/paren-aware byte scan that found where a command's executable begins.
