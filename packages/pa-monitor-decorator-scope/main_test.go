@@ -230,6 +230,26 @@ func TestRunWith_MalformedJSONPropagates(t *testing.T) {
 	}
 }
 
+// errWriter fails on every Write, so tests can drive runWith's stdout
+// write-failure path without a real file descriptor.
+type errWriter struct{}
+
+func (errWriter) Write([]byte) (int, error) { return 0, errors.New("simulated stdout failure") }
+
+// TestRunWith_WriteErrorPropagates: a stdout encode failure MUST surface as
+// an error (the daemon then swallows our output) rather than being silently
+// ignored.
+func TestRunWith_WriteErrorPropagates(t *testing.T) {
+	sample := `{"ID":"s1","CWD":"/a/here"}`
+	err := runWith(strings.NewReader(sample), errWriter{}, []rule{{prefix: "/a", scope: "a"}})
+	if err == nil {
+		t.Fatalf("runWith must return an error when stdout cannot be written")
+	}
+	if !strings.Contains(err.Error(), "encode output") {
+		t.Fatalf("error should name the encode stage, got %v", err)
+	}
+}
+
 // TestRunWith_NoMatchEmitsEmptyLabelsObject pins the WIRE contract the
 // pa-monitor daemon parses: a session that matches no rule emits an empty
 // labels OBJECT, never a null. A nil map would render as {"labels":null}.
