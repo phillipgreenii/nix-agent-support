@@ -29,8 +29,30 @@ var standaloneFlags = map[string]bool{
 }
 
 // valueFlags lists sqlite3 flags that consume the next argument.
+//
+// pg2-33mai (ADR 0055 mode 4): this table used to list only 4 of sqlite3's ~14
+// value-taking flags (confirmed against `sqlite3 --help`, sqlite3 3.51.0). Any
+// flag missing here falls to the generic `strings.HasPrefix(a, "-")` branch
+// below, which assumes NO operand — so its value was mistaken for dbPath (or
+// dbPath was already set, for query), shifting both positionals and generally
+// classifying the query as queryUnknown, which this rule's Approve-only design
+// (see evaluateSqlite3) can only turn into a missed Approve, never a wrongly
+// Approved write — but it is still the same "absence from the table lets an
+// untabled flag's value fall into the wrong positional slot" shape the other
+// four rules were audited for. Completed from the real flag list rather than
+// left as a narrower point fix, matching pg2-ygjs5's completion of ugrep's
+// file-flag table.
 var valueFlags = map[string]bool{
 	"-separator": true, "-newline": true, "-cmd": true, "-init": true,
+	"-escape": true, "-hexkey": true, "-key": true, "-maxsize": true,
+	"-nonce": true, "-nullvalue": true, "-textkey": true, "-vfs": true,
+}
+
+// twoValueFlags lists sqlite3 flags that consume the NEXT TWO arguments
+// (`-lookaside SIZE N`, `-pagecache SIZE N`) — a distinct arity from valueFlags,
+// so parseArgs must skip 3 tokens (the flag plus both values), not 2.
+var twoValueFlags = map[string]bool{
+	"-lookaside": true, "-pagecache": true,
 }
 
 type Rule struct {
@@ -103,6 +125,10 @@ func parseArgs(args []string) (string, string) {
 		}
 		if valueFlags[a] {
 			i += 2
+			continue
+		}
+		if twoValueFlags[a] {
+			i += 3
 			continue
 		}
 		if strings.HasPrefix(a, "-") {

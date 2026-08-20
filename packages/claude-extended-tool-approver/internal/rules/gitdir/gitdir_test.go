@@ -941,3 +941,71 @@ func TestGitDir_GluedFlagValueSpuriousEqualsBoundary(t *testing.T) {
 		})
 	}
 }
+
+// TestGitDir_ExcludeFromNamesAFileNotAPattern pins pg2-33mai's ADR 0055 mode-1
+// fix: `-X`/`--exclude-from` (tar) and `--ignore-file` (fd, ripgrep) name a FILE
+// the command OPENS to read patterns from, unlike `--exclude`/`--exclude-dir`/`-I`,
+// whose value is an inline glob PATTERN the command never opens. Before this fix
+// all of these lived in the same excludeValueFlags table and the file-opening
+// three were skipped exactly like the pattern ones — so `tar --exclude-from
+// .git/info/exclude …` never reached isGitMetadataPath at all (NoOpinion,
+// unmatched) even though tar is not on readCmds/copyLikeCmds/moveCmds and would
+// have failed safe to dirWrite (Reject) had the candidate been surfaced.
+func TestGitDir_ExcludeFromNamesAFileNotAPattern(t *testing.T) {
+	r := New()
+
+	tests := []struct {
+		name    string
+		command string
+		want    hookio.Decision
+	}{
+		{"tar --exclude-from reads a file, tar is not a read-allowlisted command", "tar --exclude-from .git/info/exclude -czf /tmp/out.tar.gz .", hookio.Reject},
+		{"tar -X (short form) reads a file", "tar -X .git/info/exclude -czf /tmp/out.tar.gz .", hookio.Reject},
+		{"fd --ignore-file reads a file", "fd --ignore-file .git/info/exclude --type f .", hookio.NoOpinion},
+		// Contrast: --exclude/--exclude-dir/-I still name an inline PATTERN, not a
+		// file, and must stay exempt.
+		{"tar --exclude is still a pattern, not a path", "tar --exclude .git -czf /tmp/out.tar.gz /repo", hookio.NoOpinion},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := hookio.Verdict(r.Evaluate(bashInput(tt.command)))
+			if got.Decision != tt.want {
+				t.Errorf("Decision = %v (reason %q), want %v", got.Decision, got.Reason, tt.want)
+			}
+		})
+	}
+}
+
+// TestGitDir_CopyLikeTrailingValueFlagIsNotTheDestination pins pg2-33mai's ADR
+// 0055 mode-4 fix in lastOperand: install/cp/ln's own value-taking flags
+// (-g/-m/-o/-S) can be GNU-permuted to appear AFTER the source/destination
+// operands, which is legal getopt ordering. Before this fix, lastOperand's pure
+// backward scan had no notion of these flags and read the trailing VALUE
+// ("root") as if it were the destination, so `install /tmp/evil
+// .git/hooks/pre-commit -o root` measured a mere copy-out (Ask) instead of the
+// Reject a write into a git hook must get.
+func TestGitDir_CopyLikeTrailingValueFlagIsNotTheDestination(t *testing.T) {
+	r := New()
+
+	tests := []struct {
+		name    string
+		command string
+		want    hookio.Decision
+	}{
+		{"install writes a hook, -o trails the real destination", "install /tmp/evil .git/hooks/pre-commit -o root", hookio.Reject},
+		{"install writes a hook, -m trails the real destination", "install /tmp/evil .git/hooks/pre-commit -m 755", hookio.Reject},
+		{"cp writes gitconfig, -S trails the real destination", "cp /tmp/evil .git/config -S .bak", hookio.Reject},
+		{"ln writes a hook, -S trails the real destination", "ln -sf /tmp/evil .git/hooks/pre-commit -S .bak", hookio.Reject},
+		// Contrast: the SOURCE is gitmeta and the trailing flag value is not it —
+		// still a copy-out (Ask), unchanged from before this fix.
+		{"install FROM gitmeta, -o trails a harmless owner value", "install .git/config /tmp/out -o root", hookio.Ask},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := hookio.Verdict(r.Evaluate(bashInput(tt.command)))
+			if got.Decision != tt.want {
+				t.Errorf("Decision = %v (reason %q), want %v", got.Decision, got.Reason, tt.want)
+			}
+		})
+	}
+}

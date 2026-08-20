@@ -613,10 +613,25 @@ var findPathPredicates = map[string]bool{
 // `rm -rf .git`, so it is not available. These entries are consulted only for
 // commands OUTSIDE patternFirstCmds, whose own value-flag vocabulary
 // cmdparse.SkipGrepPattern already owns (grep's `-E` is boolean, rg's is not).
+//
+// pg2-33mai (ADR 0055 mode 1): `-X`/`--exclude-from` (tar) and `--ignore-file`
+// (fd, ripgrep) are DELIBERATELY ABSENT even though they share the "exclude"
+// family name. Unlike `--exclude`/`--exclude-dir`, whose value is a glob
+// PATTERN the command never opens, these three name a FILE the command reads
+// its patterns FROM — the value IS a path the command opens, exactly the
+// shape ADR 0055's mode 1 warns against ("a flag whose value the command
+// opens never belongs in a skip table"). Listing them here used to silently
+// drop `tar --exclude-from .git/info/exclude …` from screening entirely: tar
+// is not in readCmds/copyLikeCmds/moveCmds, so a correctly surfaced candidate
+// fails safe to dirWrite (Reject), but the skipped value never reached
+// isGitMetadataPath at all, so the leaf fell through to NotApplicable
+// instead. Leaving them out of this table lets their value fall through to
+// the ordinary candidate-operand path below (the switch's default
+// `out = append(out, a)`) like any other operand this rule has no specific
+// reason to exempt.
 var excludeValueFlags = map[string]bool{
 	"-I": true, "--ignore": true, "-E": true,
-	"--exclude": true, "--exclude-dir": true, "--exclude-from": true,
-	"-X": true, "--ignore-file": true,
+	"--exclude": true, "--exclude-dir": true,
 }
 
 // commandDirection classifies how pc accesses the operand(s) selected by target.
@@ -648,7 +663,7 @@ func commandDirection(pc cmdparse.ParsedCommand, target func(string) bool, pipes
 		if cmdparse.HasAnyFlag(args, destFlagCmds) {
 			return dirWrite
 		}
-		if dest, ok := lastOperand(args); ok && target(dest) {
+		if dest, ok := lastOperand(base, args); ok && target(dest) {
 			return dirWrite
 		}
 		// The git-metadata path is a SOURCE. These commands do not modify it — that
@@ -774,14 +789,56 @@ func hasInPlaceFlag(args []string) bool {
 	return false
 }
 
-// lastOperand returns the final non-flag arg — the destination for copyLikeCmds.
-func lastOperand(args []string) (string, bool) {
-	for i := len(args) - 1; i >= 0; i-- {
-		if !strings.HasPrefix(args[i], "-") {
-			return args[i], true
+// copyLikeValueFlags name, per copyLikeCmds member, the flags whose space-separated
+// spelling consumes the NEXT token as a value — install's -g/--group, -m/--mode,
+// -o/--owner; all three commands' -S/--suffix. `-t`/`--target-directory` and
+// `-d`/`--directory` are deliberately absent: those are destFlagCmds, checked by
+// presence alone BEFORE lastOperand ever runs (commandDirection's HasAnyFlag guard),
+// not by skipping their value here.
+//
+// pg2-33mai (ADR 0055 mode 4): without this table, lastOperand's backward scan
+// cannot tell a value-taking flag's VALUE from a genuine trailing operand, so a
+// GNU-permuted invocation with the flag AFTER the source/dest — a legal getopt
+// ordering, not a contrived one — makes the flag's value look like "the last
+// non-flag token" and steals the destination role from the real one:
+// `install /tmp/evil .git/hooks/pre-commit -o root` measured dirCopyOut (Ask) before
+// this fix, because lastOperand returned "root" (the -o value) instead of
+// ".git/hooks/pre-commit" (the actual write target) — the write into a git hook
+// downgraded from Reject to an overridable Ask. Glued spellings (`-oroot`,
+// `--owner=root`) are already single tokens and need no entry here.
+var copyLikeValueFlags = map[string]map[string]bool{
+	"install": {
+		"-g": true, "--group": true,
+		"-m": true, "--mode": true,
+		"-o": true, "--owner": true,
+		"-S": true, "--suffix": true,
+	},
+	"cp": {"-S": true, "--suffix": true},
+	"ln": {"-S": true, "--suffix": true},
+}
+
+// lastOperand returns the final non-flag arg — the destination for copyLikeCmds —
+// for base's own argv. Unlike a pure backward scan, it walks FORWARD so a
+// copyLikeValueFlags entry's value can be skipped along with its flag: a flag and
+// its value are one unit regardless of which end of args they land on.
+func lastOperand(base string, args []string) (string, bool) {
+	valueFlags := copyLikeValueFlags[base]
+	last, found := "", false
+	i := 0
+	for i < len(args) {
+		a := args[i]
+		if valueFlags[a] {
+			i += 2
+			continue
 		}
+		if strings.HasPrefix(a, "-") {
+			i++
+			continue
+		}
+		last, found = a, true
+		i++
 	}
-	return "", false
+	return last, found
 }
 
 // pathOperands returns the args of pc that are candidate PATHS — the operands the
