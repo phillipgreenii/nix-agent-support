@@ -346,6 +346,45 @@ func (r *Rule) evaluateSSH(positionals []string) hookio.RuleResult {
 	if len(remote) == 0 {
 		return hookio.RuleResult{Decision: hookio.Ask, Reason: "interactive ssh session requires approval", Module: r.Name()}
 	}
+	// AUDITED AND EXEMPT (pg2-7hqei) from I13 ("No rule MAY construct or mutate
+	// command text for re-evaluation.", ADR 0039 `:291-294`) and, independently,
+	// from the quoting-loss concern I13 is a mechanism for. Two separate reasons:
+	//
+	//  1. This join is not "for re-evaluation" in I13's sense. Unlike
+	//     docker/safecmds/nix/kubectl (which reconstruct text and feed it back
+	//     into THIS SAME engine via EvaluateExpression — re-running rule dispatch
+	//     a second time on an artifact this process invented), remoteCmd below
+	//     feeds only LOCAL, ONE-SHOT scans: matchesSecretPath, cmdparse.ParseShell
+	//     (fail-closed on Unparseable, immediately below), and carriesSubstitution's
+	//     cmdparse.ScanSubstitutions. None of them loop back into
+	//     Evaluate/EvaluateExpression — there is no `EvaluateExpression` call
+	//     anywhere in this file. This is exactly the PERMANENT I7 text entry point
+	//     ADR 0039 reserves for a caller with "no already-parsed source to walk"
+	//     (cmdparse's `Substitution.Leaves` doc names rules/ssh as one of its two
+	//     remaining users), not the I13 hole docker's rejoin was.
+	//
+	//  2. Even judged purely on quoting loss — does `ssh host 'a "b c"'` collapsing
+	//     toward `ssh host a "b c"` lose security-relevant structure? — it does
+	//     not, because the REAL ssh binary performs this identical join. ssh(1)'s
+	//     DESCRIPTION states it verbatim (verified against the installed
+	//     OpenSSH_10.3p1 client, 2026-08-20): "If [a command line has additional
+	//     arguments], the arguments will be appended to the command, separated by
+	//     spaces, before it is sent to the server to be executed." That is
+	//     `strings.Join(remote, " ")` over ssh's OWN argv — already reduced to
+	//     words by the LOCAL shell the same way cmdparse.LeavesOf unquotes it —
+	//     which ssh then hands to the remote login shell (`$SHELL -c <string>`)
+	//     for an INDEPENDENT re-parse. The quoting distinction this join appears
+	//     to erase is the SAME distinction the real ssh protocol erases before the
+	//     remote ever sees it, so remoteCmd models what the remote shell will
+	//     actually receive rather than degrading it further. The fail-closed
+	//     Unparseable branches below exist because that model is necessarily
+	//     best-effort against an independent remote parser — not because this join
+	//     is the weak link.
+	//
+	// CORRECTION OWED ELSEWHERE: pg2-x9452's guard-2 (I9/I13 enforcement)
+	// required-case list currently names this join as a must-fire violation shape.
+	// Per this audit it is not one; that list needs correcting before guard 2
+	// lands (a comment recording this is owed on pg2-x9452).
 	remoteCmd := strings.Join(remote, " ")
 	if r.matchesSecretPath(remoteCmd) {
 		return hookio.RuleResult{Decision: hookio.Ask, Reason: "remote command references a secret path", Module: r.Name()}
