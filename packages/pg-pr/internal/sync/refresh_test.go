@@ -309,7 +309,7 @@ func TestRefreshPR_ActiveTeam_FlushesOutboxOnce(t *testing.T) {
 // outboxFakeBeads is the bead client shared between the engine (Deps.Beads,
 // used by buildPRInput's dep path via FindByRepoAndNumber) and the beadsbridge
 // (which projects the PR bead at outbox flush). It records every
-// EnsureMergeRequest call so the test can prove the bead is created by the
+// ReconcileMergeRequest call so the test can prove the bead is created by the
 // OUTBOX (the bridge) and NOT inline by applyFetchedPR.
 //
 // It satisfies both sync.BeadClient (via embedded noopBeads, which provides
@@ -320,23 +320,25 @@ func TestRefreshPR_ActiveTeam_FlushesOutboxOnce(t *testing.T) {
 // path engages and the bead lookup runs.
 type outboxFakeBeads struct {
 	noopBeads
-	ensureFields []beads.MergeRequestFields // every EnsureMergeRequest call's fields
-	created      bool                       // set once EnsureMergeRequest has run
+	ensureFields []beads.MergeRequestFields // every ReconcileMergeRequest call's fields
+	created      bool                       // set once ReconcileMergeRequest has run
 }
 
-func (f *outboxFakeBeads) EnsureMergeRequest(_ context.Context, _ string, fields beads.MergeRequestFields) (string, bool, error) {
+// FindByRepoAndNumberUncached is the read-once (pg2-pz7y8) fetch the bridge
+// issues before ReconcileMergeRequest. It shares FindByRepoAndNumber's
+// created-gated result, so the pre-create read observes nil exactly like the
+// real uncached lookup would for a not-yet-projected bead.
+func (f *outboxFakeBeads) FindByRepoAndNumberUncached(ctx context.Context, repo string, number int) (*beads.MergeRequest, error) {
+	return f.FindByRepoAndNumber(ctx, repo, number)
+}
+
+func (f *outboxFakeBeads) ReconcileMergeRequest(_ context.Context, _ *beads.MergeRequest, _ string, fields beads.MergeRequestFields, _, _, _ bool) (string, bool, error) {
 	f.ensureFields = append(f.ensureFields, fields)
 	f.created = true
 	return "mr-1", false, nil
 }
 
-func (f *outboxFakeBeads) SetMergeRequestCoOwned(context.Context, string, bool) error { return nil }
-
-func (f *outboxFakeBeads) SetMergeRequestCoOwnedWith(context.Context, string, bool, *beads.MergeRequest) error {
-	return nil
-}
-
-// FindByRepoAndNumber returns the projected bead only AFTER EnsureMergeRequest
+// FindByRepoAndNumber returns the projected bead only AFTER ReconcileMergeRequest
 // has run — modelling that the bead exists once the bridge projected it from
 // the outbox event. This proves buildPRInput finds the bead only because the
 // outbox was flushed BEFORE buildPRInput ran.
@@ -384,17 +386,6 @@ func (f *outboxFakeBeads) EnsureAttentionBead(context.Context, string, string) (
 func (f *outboxFakeBeads) CloseAttentionBead(context.Context, string, string) error { return nil }
 
 func (f *outboxFakeBeads) EnsureDraftReviewMineLabel(context.Context, string) error { return nil }
-
-func (f *outboxFakeBeads) GetMergeRequest(context.Context, string) (*beads.MergeRequest, error) {
-	return nil, nil
-}
-
-func (f *outboxFakeBeads) GetMergeRequestUncached(context.Context, string) (*beads.MergeRequest, error) {
-	return nil, nil
-}
-func (f *outboxFakeBeads) SetPriority(context.Context, string, int) error    { return nil }
-func (f *outboxFakeBeads) AddLabel(context.Context, string, string) error    { return nil }
-func (f *outboxFakeBeads) RemoveLabel(context.Context, string, string) error { return nil }
 
 // compile-time check: the same fake serves the bridge interface too.
 var _ beadsbridge.BeadClient = (*outboxFakeBeads)(nil)

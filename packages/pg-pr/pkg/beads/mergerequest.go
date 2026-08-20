@@ -429,13 +429,259 @@ func (c *Client) SetPriority(ctx context.Context, id string, p int) error {
 	if id == "" {
 		return errors.New("merge-request: id required")
 	}
+	_, err := c.Runner.Run(ctx, "update", id, "-p", strconv.Itoa(clampMergeRequestPriority(p)))
+	return err
+}
+
+// clampMergeRequestPriority clamps p into bd's valid [0,4] priority range.
+func clampMergeRequestPriority(p int) int {
 	if p < 0 {
-		p = 0
+		return 0
 	}
 	if p > 4 {
-		p = 4
+		return 4
 	}
-	_, err := c.Runner.Run(ctx, "update", id, "-p", strconv.Itoa(p))
+	return p
+}
+
+// bdDefaultPriority is bd's own documented default priority for a bead
+// created with no explicit `-p` (`bd create --help`: "-p, --priority string
+// ... (default \"2\")"). ReconcileMergeRequest uses it to seed the
+// priority/pbase baseline when no bead exists yet, reproducing exactly what a
+// follow-up read of a freshly created bead would show — without spending
+// that extra read.
+const bdDefaultPriority = 2
+
+// pbaseLabelPrefix stashes the pre-conflict-adjustment priority on a
+// merge-request bead so a repeated conflicting tick is a no-op and a clear
+// restores the exact baseline (pg2-tsgkj). Relocated here from
+// internal/beadsbridge/bridge.go (pg2-pz7y8): the conflict-priority decision
+// now runs inside the read-once/write-once ReconcileMergeRequest below, so it
+// lives in the same package as the diff it feeds.
+const pbaseLabelPrefix = "pbase:"
+
+// mergeRequestPriorityDelta is the pure decision half of the former
+// internal/beadsbridge/bridge.go reconcilePriority: given the bead's CURRENT
+// priority/labels, whether it actsAsMine (mine or co-owned; team otherwise),
+// and whether the PR currently has a conflict, it returns the label/priority
+// mutations needed — without issuing any bd call. mine/co-owned raise (toward
+// 0, clamp 0); team lowers (toward 4, clamp 4). Semantics are copied verbatim
+// from the original reconcilePriority so this is a pure relocation, not a
+// behavior change.
+func mergeRequestPriorityDelta(curPriority int, curLabels []string, actsAsMine, hasConflict bool) (addLabels, removeLabels []string, priority int, setPriority bool) {
+	baseline, hasBaseline := parsePbase(curLabels)
+	switch {
+	case hasConflict && !hasBaseline:
+		// First conflicting tick: stash current priority, then nudge.
+		// Stash unconditionally — even when priority is already clamped at the
+		// boundary (desired == curPriority) — so a later clear is a
+		// no-op-safe restore.
+		addLabels = []string{pbaseLabelPrefix + strconv.Itoa(curPriority)}
+		desired := nudgedPriority(curPriority, actsAsMine)
+		if desired != curPriority {
+			return addLabels, nil, desired, true
+		}
+		return addLabels, nil, 0, false
+	case hasConflict && hasBaseline:
+		return nil, nil, 0, false // already adjusted this conflict episode — idempotent no-op
+	case !hasConflict && hasBaseline:
+		// Conflict cleared: restore baseline, drop the marker.
+		removeLabels = []string{pbaseLabelPrefix + strconv.Itoa(baseline)}
+		if curPriority != baseline {
+			return nil, removeLabels, baseline, true
+		}
+		return nil, removeLabels, 0, false
+	default:
+		return nil, nil, 0, false // no conflict, no baseline — nothing to do
+	}
+}
+
+// nudgedPriority returns the conflict-adjusted priority: mine/co-owned raise
+// (toward 0), team lowers (toward 4). Clamped to [0,4].
+func nudgedPriority(p int, actsAsMine bool) int {
+	if actsAsMine {
+		if p > 0 {
+			return p - 1
+		}
+		return 0
+	}
+	if p < 4 {
+		return p + 1
+	}
+	return 4
+}
+
+// parsePbase extracts the stashed baseline priority from a `pbase:<n>` label.
+func parsePbase(labels []string) (int, bool) {
+	for _, l := range labels {
+		if strings.HasPrefix(l, pbaseLabelPrefix) {
+			if n, err := strconv.Atoi(strings.TrimPrefix(l, pbaseLabelPrefix)); err == nil {
+				return n, true
+			}
+		}
+	}
+	return 0, false
+}
+
+// FindByRepoAndNumberUncached is the exported, always-fresh state read for a
+// merge-request bead by (repo, pr_number), bypassing any attached per-tick
+// cache. Unlike FindByRepoAndNumber (an IDENTITY/EXISTENCE lookup that MAY be
+// served from a per-tick cache when one is attached), this is for
+// correctness-critical callers that need fresh field/label/priority values —
+// principally ReconcileMergeRequest's caller, which reads exactly once per
+// flush before deciding any diff. Mirrors GetMergeRequestUncached's rationale
+// for the by-id case (pg2-pz7y8).
+func (c *Client) FindByRepoAndNumberUncached(ctx context.Context, repo string, prNumber int) (*MergeRequest, error) {
+	if repo == "" || prNumber <= 0 {
+		return nil, errors.New("merge-request: repo and pr_number required")
+	}
+	return c.findByRepoPR(ctx, repo, prNumber)
+}
+
+// ReconcileMergeRequest is the read-once + single-write projection for one
+// PR's merge-request bead (pg2-pz7y8's target shape: "read once to get the
+// current state, do all the work, then one create/update"). existing MUST
+// come from ONE fresh (uncached) read taken by the caller immediately before
+// this call — FindByRepoAndNumberUncached — so every diff below compares
+// against fresh state, preserving the FB-1/2/4 diff-before-write invariant;
+// ReconcileMergeRequest itself performs NO read.
+//
+// It replaces the former EnsureMergeRequest → GetMergeRequestUncached →
+// SetMergeRequestCoOwnedWith → (AddLabel/RemoveLabel/SetPriority via
+// reconcilePriority) chain — up to 2 reads and up to 4 separate bd calls on a
+// single tick — with the one read the caller already did plus AT MOST ONE
+// combined bd create-or-update call carrying every desired mutation (metadata
+// fields, the co-owned label, and the conflict-priority/pbase label). When
+// nothing needs to change, it issues ZERO bd calls.
+//
+// existing == nil creates a new bead. An existing CLOSED bead is returned
+// as-is (alreadyClosed=true) with NO writes at all — never reopened, never
+// diffed — exactly like EnsureMergeRequest's contract.
+//
+// coOwned is the desired co-owned label state; hasConflict and actsAsMine
+// drive the conflict-priority nudge exactly as the former reconcilePriority
+// did (see mergeRequestPriorityDelta).
+func (c *Client) ReconcileMergeRequest(
+	ctx context.Context,
+	existing *MergeRequest,
+	userTitle string,
+	fields MergeRequestFields,
+	coOwned bool,
+	hasConflict bool,
+	actsAsMine bool,
+) (id string, alreadyClosed bool, err error) {
+	if fields.Repo == "" || fields.PRNumber == 0 {
+		return "", false, errors.New("merge-request: repo and pr_number required")
+	}
+	if existing != nil && existing.Status == "closed" {
+		return existing.ID, true, nil
+	}
+
+	// curPriority/curLabels model the bead's CURRENT state for the co-owned
+	// and priority/pbase diffs — either the just-read existing bead, or bd's
+	// own documented creation defaults (priority 2, no labels) when none
+	// exists yet. Using bd's default here is not a new assumption: it is
+	// exactly what a follow-up read of a freshly created bead would show, so
+	// this reproduces the pre-refactor observable behavior without spending
+	// that read.
+	curPriority := bdDefaultPriority
+	var curLabels []string
+	if existing != nil {
+		curPriority = existing.Priority
+		curLabels = existing.Labels
+	}
+
+	addLabels, removeLabels, priority, setPriority := mergeRequestPriorityDelta(curPriority, curLabels, actsAsMine, hasConflict)
+	if hasLabel(curLabels, coOwnedLabel) != coOwned {
+		if coOwned {
+			addLabels = append(addLabels, coOwnedLabel)
+		} else {
+			removeLabels = append(removeLabels, coOwnedLabel)
+		}
+	}
+
+	if existing == nil {
+		newID, cerr := c.createMergeRequestCombined(ctx, userTitle, fields, addLabels, priority, setPriority)
+		return newID, false, cerr
+	}
+
+	needsFieldWrite := !metadataUnchanged(existing.Fields, fields)
+	if !needsFieldWrite && len(addLabels) == 0 && len(removeLabels) == 0 && !setPriority {
+		return existing.ID, false, nil // nothing changed: zero bd calls
+	}
+	if err := c.updateMergeRequestCombined(ctx, existing.ID, fields, needsFieldWrite, addLabels, removeLabels, priority, setPriority); err != nil {
+		return existing.ID, false, err
+	}
+	return existing.ID, false, nil
+}
+
+// createMergeRequestCombined issues the single `bd create` call for a new
+// merge-request bead, carrying metadata fields plus any labels/priority
+// ReconcileMergeRequest decided are needed on day one (e.g. a PR that already
+// has a conflict, or is already co-owned, on its very first sync tick).
+func (c *Client) createMergeRequestCombined(ctx context.Context, userTitle string, fields MergeRequestFields, addLabels []string, priority int, setPriority bool) (string, error) {
+	if fields.LastSyncedAt == "" {
+		fields.LastSyncedAt = time.Now().UTC().Format(time.RFC3339)
+	}
+	title := userTitle
+	if title == "" {
+		title = fmt.Sprintf("%s#%d", fields.Repo, fields.PRNumber)
+	} else {
+		title = fmt.Sprintf("%s#%d: %s", fields.Repo, fields.PRNumber, title)
+	}
+	metaJSON, err := encodeMetadata(fields)
+	if err != nil {
+		return "", err
+	}
+	args := []string{
+		"create",
+		"--type=merge-request",
+		"--title", title,
+		"-d", title,
+		"--metadata", metaJSON,
+		"--silent",
+	}
+	if len(addLabels) > 0 {
+		args = append(args, "-l", strings.Join(addLabels, ","))
+	}
+	if setPriority {
+		args = append(args, "-p", strconv.Itoa(clampMergeRequestPriority(priority)))
+	}
+	out, err := c.Runner.Run(ctx, args...)
+	if err != nil {
+		return "", err
+	}
+	id := strings.TrimSpace(out)
+	if id == "" {
+		return "", fmt.Errorf("bd create returned empty ID")
+	}
+	return id, nil
+}
+
+// updateMergeRequestCombined issues the single `bd update` call carrying
+// every mutation ReconcileMergeRequest decided is needed: the metadata patch
+// (when fields differ), label adds/removes (co-owned, pbase), and a priority
+// change — combined so an update-worthy tick spends exactly one bd call
+// regardless of how many of the three changed.
+func (c *Client) updateMergeRequestCombined(ctx context.Context, id string, fields MergeRequestFields, needsFieldWrite bool, addLabels, removeLabels []string, priority int, setPriority bool) error {
+	args := []string{"update", id}
+	if needsFieldWrite {
+		metaJSON, err := encodeMetadata(fields)
+		if err != nil {
+			return err
+		}
+		args = append(args, "--metadata", metaJSON)
+	}
+	for _, l := range addLabels {
+		args = append(args, "--add-label", l)
+	}
+	for _, l := range removeLabels {
+		args = append(args, "--remove-label", l)
+	}
+	if setPriority {
+		args = append(args, "-p", strconv.Itoa(clampMergeRequestPriority(priority)))
+	}
+	_, err := c.Runner.Run(ctx, args...)
 	return err
 }
 

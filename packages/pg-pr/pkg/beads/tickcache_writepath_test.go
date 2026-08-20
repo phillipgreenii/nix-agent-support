@@ -201,3 +201,33 @@ func TestEnsureMergeRequest_DiffReadsFreshNotStaleCache(t *testing.T) {
 		t.Fatalf("desired == fresh stored state: no `bd update` must be issued (a write here means the stale cache corrupted the diff); calls: %v", r.calls)
 	}
 }
+
+// TestFindByRepoAndNumberUncached_BypassesCache is FindByRepoAndNumber_
+// DiffReadsFreshNotStaleCache's sibling for the pg2-pz7y8 read-once path:
+// FindByRepoAndNumberUncached feeds ReconcileMergeRequest's field/co-owned/
+// priority diffs, so it MUST NEVER be answered from a per-tick cache — a
+// stale snapshot here would corrupt every one of those diffs, not just the
+// metadata one. Setup mirrors the sibling test: the cache holds a STALE
+// branch ("old"); the fresh scan reports the CURRENT branch ("new").
+func TestFindByRepoAndNumberUncached_BypassesCache(t *testing.T) {
+	ctx := context.Background()
+	r := &writePathRunner{
+		listMR: `[{"id":"mr-7","status":"open","issue_type":"merge-request","metadata":{"repo":"foo/bar","pr_number":7,"branch":"new","state":"open"}}]`,
+	}
+	c := NewClientWithRunner(r).UseTickCache(&TickCache{
+		MergeRequestsByID: map[string]MergeRequest{
+			"mr-7": {ID: "mr-7", Status: "open", Fields: MergeRequestFields{Repo: "foo/bar", PRNumber: 7, Branch: "old", State: "open"}},
+		},
+	})
+
+	got, err := c.FindByRepoAndNumberUncached(ctx, "foo/bar", 7)
+	if err != nil {
+		t.Fatalf("FindByRepoAndNumberUncached: %v", err)
+	}
+	if got == nil || got.Fields.Branch != "new" {
+		t.Fatalf("expected the FRESH branch %q, got %+v (cache would have said %q)", "new", got, "old")
+	}
+	if !r.sawArg("--type=merge-request") {
+		t.Fatalf("FindByRepoAndNumberUncached must always scan fresh, never consult the cache; calls: %v", r.calls)
+	}
+}

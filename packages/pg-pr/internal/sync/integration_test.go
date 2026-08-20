@@ -28,10 +28,10 @@ import (
 // fullChainBeadClient is a minimal local fake satisfying beadsbridge.BeadClient.
 // It records calls so the test can assert the bridge ran the expected path.
 //
-// Critically, EnsureMergeRequest populates findResult so that a subsequent
+// Critically, ReconcileMergeRequest populates findResult so that a subsequent
 // FindByRepoAndNumber returns the bead — mirroring what the real beads backend
 // does. Starting with findResult == nil means the feedback handler will fail
-// ("no merge-request bead") unless EnsureMergeRequest ran first, which only
+// ("no merge-request bead") unless ReconcileMergeRequest ran first, which only
 // happens when the pr.opened event is processed before feedback.created.
 type fullChainBeadClient struct {
 	ensureCalls     []beads.MergeRequestFields
@@ -41,18 +41,17 @@ type fullChainBeadClient struct {
 	findOpenResults map[string]bool // prBeadID → open
 }
 
-func (f *fullChainBeadClient) EnsureMergeRequest(_ context.Context, _ string, fields beads.MergeRequestFields) (string, bool, error) {
+// FindByRepoAndNumberUncached is the read-once (pg2-pz7y8) fetch the bridge
+// issues before ReconcileMergeRequest; this fake has no cache to bypass, so it
+// is the same lookup as FindByRepoAndNumber.
+func (f *fullChainBeadClient) FindByRepoAndNumberUncached(_ context.Context, _ string, _ int) (*beads.MergeRequest, error) {
+	return f.findResult, nil
+}
+
+func (f *fullChainBeadClient) ReconcileMergeRequest(_ context.Context, _ *beads.MergeRequest, _ string, fields beads.MergeRequestFields, _, _, _ bool) (string, bool, error) {
 	f.ensureCalls = append(f.ensureCalls, fields)
 	f.findResult = &beads.MergeRequest{ID: "mr-chain-1", Status: "open"} // bridge created it
 	return "mr-chain-1", false, nil
-}
-
-func (f *fullChainBeadClient) SetMergeRequestCoOwned(_ context.Context, _ string, _ bool) error {
-	return nil
-}
-
-func (f *fullChainBeadClient) SetMergeRequestCoOwnedWith(_ context.Context, _ string, _ bool, _ *beads.MergeRequest) error {
-	return nil
 }
 
 func (f *fullChainBeadClient) FindByRepoAndNumber(_ context.Context, repo string, _ int) (*beads.MergeRequest, error) {
@@ -97,17 +96,6 @@ func (f *fullChainBeadClient) EnsureAttentionBead(context.Context, string, strin
 func (f *fullChainBeadClient) CloseAttentionBead(context.Context, string, string) error { return nil }
 
 func (f *fullChainBeadClient) EnsureDraftReviewMineLabel(context.Context, string) error { return nil }
-
-func (f *fullChainBeadClient) GetMergeRequest(context.Context, string) (*beads.MergeRequest, error) {
-	return nil, nil
-}
-
-func (f *fullChainBeadClient) GetMergeRequestUncached(context.Context, string) (*beads.MergeRequest, error) {
-	return nil, nil
-}
-func (f *fullChainBeadClient) SetPriority(context.Context, string, int) error    { return nil }
-func (f *fullChainBeadClient) AddLabel(context.Context, string, string) error    { return nil }
-func (f *fullChainBeadClient) RemoveLabel(context.Context, string, string) error { return nil }
 
 // compile-time check: fullChainBeadClient satisfies the bridge interface.
 var _ beadsbridge.BeadClient = (*fullChainBeadClient)(nil)

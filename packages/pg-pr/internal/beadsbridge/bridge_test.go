@@ -49,14 +49,15 @@ func TestPROpenedCreatesPRBead(t *testing.T) {
 // exercises, instead of re-declaring the whole ~8-method interface.
 type noopBeadClient struct{}
 
-func (noopBeadClient) EnsureMergeRequest(context.Context, string, beads.MergeRequestFields) (string, bool, error) {
-	return "", false, nil
+// FindByRepoAndNumberUncached and ReconcileMergeRequest are the read-once +
+// single-write projection (pg2-pz7y8); the no-op defaults model "bead does
+// not exist yet, and the combined create/update is itself a no-op".
+func (noopBeadClient) FindByRepoAndNumberUncached(context.Context, string, int) (*beads.MergeRequest, error) {
+	return nil, nil
 }
 
-func (noopBeadClient) SetMergeRequestCoOwned(context.Context, string, bool) error { return nil }
-
-func (noopBeadClient) SetMergeRequestCoOwnedWith(context.Context, string, bool, *beads.MergeRequest) error {
-	return nil
+func (noopBeadClient) ReconcileMergeRequest(context.Context, *beads.MergeRequest, string, beads.MergeRequestFields, bool, bool, bool) (string, bool, error) {
+	return "", false, nil
 }
 
 func (noopBeadClient) FindByRepoAndNumber(context.Context, string, int) (*beads.MergeRequest, error) {
@@ -88,17 +89,6 @@ func (noopBeadClient) EnsureAttentionBead(context.Context, string, string) (stri
 func (noopBeadClient) CloseAttentionBead(context.Context, string, string) error { return nil }
 
 func (noopBeadClient) EnsureDraftReviewMineLabel(context.Context, string) error { return nil }
-
-func (noopBeadClient) GetMergeRequest(context.Context, string) (*beads.MergeRequest, error) {
-	return nil, nil
-}
-
-func (noopBeadClient) GetMergeRequestUncached(context.Context, string) (*beads.MergeRequest, error) {
-	return nil, nil
-}
-func (noopBeadClient) SetPriority(context.Context, string, int) error    { return nil }
-func (noopBeadClient) AddLabel(context.Context, string, string) error    { return nil }
-func (noopBeadClient) RemoveLabel(context.Context, string, string) error { return nil }
 
 // errFindClient returns an error from ResolveProcessingCycle; FindByRepoAndNumber
 // returns a stub (open) MR. Used to prove the find-error propagates (NOT swallowed
@@ -146,13 +136,13 @@ func TestPROpenedWritesFullFields(t *testing.T) {
 	}
 }
 
-// capturingClient captures the fields passed to EnsureMergeRequest.
+// capturingClient captures the fields passed to ReconcileMergeRequest.
 type capturingClient struct {
 	noopBeadClient
 	onEnsure func(beads.MergeRequestFields)
 }
 
-func (c *capturingClient) EnsureMergeRequest(_ context.Context, _ string, f beads.MergeRequestFields) (string, bool, error) {
+func (c *capturingClient) ReconcileMergeRequest(_ context.Context, _ *beads.MergeRequest, _ string, f beads.MergeRequestFields, _, _, _ bool) (string, bool, error) {
 	if c.onEnsure != nil {
 		c.onEnsure(f)
 	}
@@ -262,10 +252,10 @@ func (c *cascadeClient) CloseProcessingCycle(context.Context, string, string) er
 // Scenario tests: idempotency + no-resurrection guarantees
 // ---------------------------------------------------------------------------
 
-// upsertClient is an in-memory BeadClient whose EnsureMergeRequest upserts by
-// (repo, prNumber) key. Re-dispatching the same event must not create a second
-// logical bead entry. ensureCalls counts all invocations (including re-delivers);
-// beads maps key → ID and grows only on first creation.
+// upsertClient is an in-memory BeadClient whose ReconcileMergeRequest upserts
+// by (repo, prNumber) key. Re-dispatching the same event must not create a
+// second logical bead entry. ensureCalls counts all invocations (including
+// re-delivers); beads maps key → ID and grows only on first creation.
 type upsertClient struct {
 	noopBeadClient
 	ensureCalls int
@@ -276,7 +266,7 @@ func newUpsertClient() *upsertClient {
 	return &upsertClient{beads: make(map[string]string)}
 }
 
-func (c *upsertClient) EnsureMergeRequest(_ context.Context, _ string, f beads.MergeRequestFields) (string, bool, error) {
+func (c *upsertClient) ReconcileMergeRequest(_ context.Context, _ *beads.MergeRequest, _ string, f beads.MergeRequestFields, _, _, _ bool) (string, bool, error) {
 	c.ensureCalls++
 	key := fmt.Sprintf("%s#%d", f.Repo, f.PRNumber)
 	if id, ok := c.beads[key]; ok {
@@ -290,8 +280,8 @@ func (c *upsertClient) EnsureMergeRequest(_ context.Context, _ string, f beads.M
 // TestPROpenedIdempotentSingleBead asserts that dispatching the same pr.opened
 // event twice (simulating at-least-once redelivery) results in exactly ONE
 // logical bead entry. The upsertClient's beads map grows only on first
-// creation; on the second delivery EnsureMergeRequest finds the key and returns
-// without inserting, leaving the map with one entry.
+// creation; on the second delivery ReconcileMergeRequest finds the key and
+// returns without inserting, leaving the map with one entry.
 func TestPROpenedIdempotentSingleBead(t *testing.T) {
 	client := newUpsertClient()
 	h := New(client)
@@ -312,13 +302,13 @@ func TestPROpenedIdempotentSingleBead(t *testing.T) {
 		t.Fatalf("expected exactly 1 bead entry after two deliveries, got %d (beads: %v)", got, client.beads)
 	}
 	if client.ensureCalls != 2 {
-		t.Fatalf("expected EnsureMergeRequest called twice (once per delivery), got %d", client.ensureCalls)
+		t.Fatalf("expected ReconcileMergeRequest called twice (once per delivery), got %d", client.ensureCalls)
 	}
 }
 
 // scenarioClosedClient is an in-memory BeadClient for the closed-bead scenario.
-// EnsureMergeRequest returns alreadyClosed=true (bead exists but is closed) and
-// FindByRepoAndNumber returns Status "closed" — simulating a PR that was
+// ReconcileMergeRequest returns alreadyClosed=true (bead exists but is closed)
+// and FindByRepoAndNumber returns Status "closed" — simulating a PR that was
 // previously merged/closed in the bead store.
 type scenarioClosedClient struct {
 	noopBeadClient
@@ -326,7 +316,7 @@ type scenarioClosedClient struct {
 	createCycles int
 }
 
-func (c *scenarioClosedClient) EnsureMergeRequest(context.Context, string, beads.MergeRequestFields) (string, bool, error) {
+func (c *scenarioClosedClient) ReconcileMergeRequest(context.Context, *beads.MergeRequest, string, beads.MergeRequestFields, bool, bool, bool) (string, bool, error) {
 	c.ensureCalls++
 	return "mr-closed-1", true, nil // alreadyClosed = true
 }
@@ -344,12 +334,12 @@ func (c *scenarioClosedClient) CreateProcessingCycle(context.Context, beads.Crea
 // whose bead is already closed receives both pr.opened (reappearance) and
 // feedback.created. It asserts:
 //
-//	(a) EnsureMergeRequest returns alreadyClosed — the bead is NOT reopened.
+//	(a) ReconcileMergeRequest returns alreadyClosed — the bead is NOT reopened.
 //	(b) No processing-cycle bead is created — the closed-parent guard fires.
 //
 // If the closed-parent guard in ensureProcessFeedbackBead were removed,
 // CreateProcessingCycle would be called and the test would fail on (b).
-// If EnsureMergeRequest were changed to reopen closed beads, it would no
+// If ReconcileMergeRequest were changed to reopen closed beads, it would no
 // longer return alreadyClosed=true and the test would fail on (a).
 func TestClosedBeadNotResurrectedByReappearance(t *testing.T) {
 	client := &scenarioClosedClient{}
@@ -360,11 +350,12 @@ func TestClosedBeadNotResurrectedByReappearance(t *testing.T) {
 	if err := h.Handle(context.Background(), store.Event{Type: store.EventPROpened, Payload: prPayload}); err != nil {
 		t.Fatalf("pr.opened Handle: %v", err)
 	}
-	// EnsureMergeRequest must have returned alreadyClosed — the returned bool
-	// is not threaded back out of Handle, but we can verify the fake's call count
-	// and that no reopening occurred (Status remains "closed" from FindByRepoAndNumber).
+	// ReconcileMergeRequest must have returned alreadyClosed — the returned
+	// bool is not threaded back out of Handle, but we can verify the fake's
+	// call count and that no reopening occurred (Status remains "closed" from
+	// FindByRepoAndNumber).
 	if client.ensureCalls != 1 {
-		t.Fatalf("expected EnsureMergeRequest called once, got %d", client.ensureCalls)
+		t.Fatalf("expected ReconcileMergeRequest called once, got %d", client.ensureCalls)
 	}
 
 	// Step 2: feedback.created for the same (closed) PR.
@@ -421,7 +412,7 @@ func TestOpenBeadGetsProcessingCycle(t *testing.T) {
 }
 
 // draftReviewClient records EnsureDraftReviewBead calls and controls the
-// alreadyClosed result of EnsureMergeRequest.
+// alreadyClosed result of ReconcileMergeRequest.
 type draftReviewClient struct {
 	noopBeadClient
 	alreadyClosed bool
@@ -436,18 +427,15 @@ type draftReviewClient struct {
 	lastCoOwned   bool
 }
 
-func (c *draftReviewClient) EnsureMergeRequest(context.Context, string, beads.MergeRequestFields) (string, bool, error) {
+// ReconcileMergeRequest is the read-once + single-write projection (pg2-pz7y8):
+// one call now carries what used to be split across EnsureMergeRequest and
+// SetMergeRequestCoOwnedWith, so coOwnedCalls/lastCoOwned are recorded
+// directly from its coOwned parameter rather than from a separate call.
+func (c *draftReviewClient) ReconcileMergeRequest(_ context.Context, _ *beads.MergeRequest, _ string, _ beads.MergeRequestFields, coOwned, _, _ bool) (string, bool, error) {
 	c.mrCalls++
-	return "mr-1", c.alreadyClosed, nil
-}
-
-// SetMergeRequestCoOwnedWith is the variant Handle now calls (FB-3: the bead is
-// fetched once by Handle and threaded in). Counting moved here from
-// SetMergeRequestCoOwned so the co-owned assertions still track the real call.
-func (c *draftReviewClient) SetMergeRequestCoOwnedWith(_ context.Context, _ string, coOwned bool, _ *beads.MergeRequest) error {
 	c.coOwnedCalls++
 	c.lastCoOwned = coOwned
-	return nil
+	return "mr-1", c.alreadyClosed, nil
 }
 
 func (c *draftReviewClient) EnsureDraftReviewBead(_ context.Context, prBeadID, title string, mine bool) (string, error) {
@@ -639,6 +627,13 @@ func TestHandle_OutOfBandOwnershipIsTeamStyle(t *testing.T) {
 	}
 }
 
+// TestPROpenedClosedParentSkipsDraftReview proves the bridge honors
+// ReconcileMergeRequest's alreadyClosed result: no draft-review is attached
+// under a closed parent. The companion guarantee — that a closed bead's
+// co-owned/priority mutations are never even ATTEMPTED, not merely no-op'd —
+// is no longer observable at this fake-interface boundary (ReconcileMergeRequest
+// is a single opaque call now), so it is pinned directly against the real
+// pkg/beads.Client instead: see TestReconcileMergeRequest_ClosedBeadNoWrites.
 func TestPROpenedClosedParentSkipsDraftReview(t *testing.T) {
 	c := &draftReviewClient{alreadyClosed: true}
 	h := New(c)
@@ -649,9 +644,6 @@ func TestPROpenedClosedParentSkipsDraftReview(t *testing.T) {
 	}
 	if c.drCalls != 0 {
 		t.Fatalf("closed-parent guard failed: expected 0 draft-review ensures, got %d", c.drCalls)
-	}
-	if c.coOwnedCalls != 0 {
-		t.Fatalf("closed-parent guard failed: SetMergeRequestCoOwned must not be called for a closed parent, got %d calls", c.coOwnedCalls)
 	}
 }
 
@@ -708,166 +700,117 @@ func TestPRMergedCascadeClosesDraftReviewChild(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// reconcilePriority: conflict->priority nudge/revert (pg2-tsgkj)
+// pg2-pz7y8: read-once + single-write MR-bead projection.
+//
+// The conflict-priority nudge/revert decision (formerly reconcilePriority,
+// previously pinned here against a granular SetPriority/AddLabel/RemoveLabel
+// fake) now lives entirely inside pkg/beads.Client.ReconcileMergeRequest as a
+// single opaque call from this package's point of view — see
+// TestMergeRequestPriorityDelta (the decision table: mine raises+stashes,
+// team lowers+stashes, idempotent no-double-nudge, cleared restores baseline)
+// and TestReconcileMergeRequest_CombinedChangeSingleWrite /
+// TestReconcileMergeRequest_ClosedBeadNoWrites (the combined-write and
+// closed-bead short-circuit) in pkg/beads/mergerequest_test.go.
+//
+// What remains observable — and worth pinning — at THIS boundary is the
+// WIRING: that Handle correctly extracts p.HasConflict and derives
+// actsAsMine from p.Ownership before handing them to ReconcileMergeRequest.
 // ---------------------------------------------------------------------------
 
-// setPriorityCall records one SetPriority(id, p) invocation.
-type setPriorityCall struct {
-	id string
-	p  int
-}
-
-// labelCall records one AddLabel/RemoveLabel(id, label) invocation.
-type labelCall struct {
-	id    string
-	label string
-}
-
-// reconcileFakeClient is a functional BeadClient fake for reconcilePriority
-// tests: EnsureMergeRequest always resolves to "mr-1" and GetMergeRequest
-// returns the configurable canned mr; SetPriority/AddLabel/RemoveLabel record
-// their calls instead of no-opping.
-type reconcileFakeClient struct {
+// reconcileArgsCapturingClient records the coOwned/hasConflict/actsAsMine
+// arguments the bridge passes into ReconcileMergeRequest, so tests can pin
+// the payload -> call-argument WIRING without re-testing the priority
+// decision table itself (that lives in pkg/beads now).
+type reconcileArgsCapturingClient struct {
 	noopBeadClient
-	mr *beads.MergeRequest
-
-	setPriorityCalls []setPriorityCall
-	addLabelCalls    []labelCall
-	removeLabelCalls []labelCall
+	calls           int
+	lastCoOwned     bool
+	lastHasConflict bool
+	lastActsAsMine  bool
 }
 
-func (c *reconcileFakeClient) EnsureMergeRequest(context.Context, string, beads.MergeRequestFields) (string, bool, error) {
+func (c *reconcileArgsCapturingClient) ReconcileMergeRequest(_ context.Context, _ *beads.MergeRequest, _ string, _ beads.MergeRequestFields, coOwned, hasConflict, actsAsMine bool) (string, bool, error) {
+	c.calls++
+	c.lastCoOwned = coOwned
+	c.lastHasConflict = hasConflict
+	c.lastActsAsMine = actsAsMine
 	return "mr-1", false, nil
 }
 
-func (c *reconcileFakeClient) GetMergeRequest(context.Context, string) (*beads.MergeRequest, error) {
-	return c.mr, nil
-}
-
-func (c *reconcileFakeClient) GetMergeRequestUncached(context.Context, string) (*beads.MergeRequest, error) {
-	return c.mr, nil
-}
-
-func (c *reconcileFakeClient) SetPriority(_ context.Context, id string, p int) error {
-	c.setPriorityCalls = append(c.setPriorityCalls, setPriorityCall{id, p})
-	return nil
-}
-
-func (c *reconcileFakeClient) AddLabel(_ context.Context, id, label string) error {
-	c.addLabelCalls = append(c.addLabelCalls, labelCall{id, label})
-	return nil
-}
-
-func (c *reconcileFakeClient) RemoveLabel(_ context.Context, id, label string) error {
-	c.removeLabelCalls = append(c.removeLabelCalls, labelCall{id, label})
-	return nil
-}
-
-// TestHandle_ConflictRaisesMinePriorityAndStashesBaseline asserts the first
-// conflicting tick on a "mine" PR raises priority (numerically lower, toward
-// 0) and stashes the pre-adjustment priority in a pbase: label.
-func TestHandle_ConflictRaisesMinePriorityAndStashesBaseline(t *testing.T) {
-	c := &reconcileFakeClient{mr: &beads.MergeRequest{ID: "mr-1", Priority: 2, Labels: nil}}
-	h := New(c)
-	payload, _ := json.Marshal(store.PRPayload{Repo: "o/r", Number: 7, Ownership: "mine", HasConflict: true})
-	if err := h.Handle(context.Background(), store.Event{Type: store.EventPRUpdated, Payload: payload}); err != nil {
-		t.Fatalf("Handle: %v", err)
+// TestHandle_PRUpdatedThreadsConflictAndOwnershipIntoReconcile asserts Handle
+// derives ReconcileMergeRequest's coOwned/hasConflict/actsAsMine arguments
+// correctly from the PR payload's Ownership/HasConflict fields, across the
+// three ownership values and both conflict states.
+func TestHandle_PRUpdatedThreadsConflictAndOwnershipIntoReconcile(t *testing.T) {
+	cases := []struct {
+		name           string
+		ownership      string
+		hasConflict    bool
+		wantCoOwned    bool
+		wantActsAsMine bool
+	}{
+		{"mine conflict", "mine", true, false, true},
+		{"co-owned conflict", "co-owned", true, true, true},
+		{"team conflict", "team", true, false, false},
+		{"team no conflict", "team", false, false, false},
 	}
-	if len(c.setPriorityCalls) != 1 || c.setPriorityCalls[0] != (setPriorityCall{"mr-1", 1}) {
-		t.Fatalf("expected SetPriority(mr-1, 1), got %v", c.setPriorityCalls)
-	}
-	if len(c.addLabelCalls) != 1 || c.addLabelCalls[0] != (labelCall{"mr-1", "pbase:2"}) {
-		t.Fatalf("expected AddLabel(mr-1, pbase:2), got %v", c.addLabelCalls)
-	}
-}
-
-// TestHandle_ConflictClearedRestoresBaseline asserts a clear (HasConflict
-// false) with a stashed baseline restores the exact pre-adjustment priority
-// and removes the pbase: marker.
-func TestHandle_ConflictClearedRestoresBaseline(t *testing.T) {
-	c := &reconcileFakeClient{mr: &beads.MergeRequest{ID: "mr-1", Priority: 1, Labels: []string{"pbase:2"}}}
-	h := New(c)
-	payload, _ := json.Marshal(store.PRPayload{Repo: "o/r", Number: 7, Ownership: "mine", HasConflict: false})
-	if err := h.Handle(context.Background(), store.Event{Type: store.EventPRUpdated, Payload: payload}); err != nil {
-		t.Fatalf("Handle: %v", err)
-	}
-	if len(c.setPriorityCalls) != 1 || c.setPriorityCalls[0] != (setPriorityCall{"mr-1", 2}) {
-		t.Fatalf("expected SetPriority(mr-1, 2), got %v", c.setPriorityCalls)
-	}
-	if len(c.removeLabelCalls) != 1 || c.removeLabelCalls[0] != (labelCall{"mr-1", "pbase:2"}) {
-		t.Fatalf("expected RemoveLabel(mr-1, pbase:2), got %v", c.removeLabelCalls)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := &reconcileArgsCapturingClient{}
+			h := New(c)
+			payload, _ := json.Marshal(store.PRPayload{Repo: "o/r", Number: 7, Ownership: tc.ownership, HasConflict: tc.hasConflict})
+			if err := h.Handle(context.Background(), store.Event{Type: store.EventPRUpdated, Payload: payload}); err != nil {
+				t.Fatalf("Handle: %v", err)
+			}
+			if c.calls != 1 {
+				t.Fatalf("expected ReconcileMergeRequest called once, got %d", c.calls)
+			}
+			if c.lastCoOwned != tc.wantCoOwned {
+				t.Errorf("coOwned: got %v want %v", c.lastCoOwned, tc.wantCoOwned)
+			}
+			if c.lastHasConflict != tc.hasConflict {
+				t.Errorf("hasConflict: got %v want %v", c.lastHasConflict, tc.hasConflict)
+			}
+			if c.lastActsAsMine != tc.wantActsAsMine {
+				t.Errorf("actsAsMine: got %v want %v", c.lastActsAsMine, tc.wantActsAsMine)
+			}
+		})
 	}
 }
-
-// TestHandle_ConflictIdempotentNoDoubleNudge asserts a repeated conflicting
-// tick (baseline already stashed) is a no-op — it must NOT call SetPriority
-// again (that would double-nudge past the intended single-step adjustment),
-// and must NOT re-add or remove the pbase baseline label.
-func TestHandle_ConflictIdempotentNoDoubleNudge(t *testing.T) {
-	c := &reconcileFakeClient{mr: &beads.MergeRequest{ID: "mr-1", Priority: 1, Labels: []string{"pbase:2"}}}
-	h := New(c)
-	payload, _ := json.Marshal(store.PRPayload{Repo: "o/r", Number: 7, Ownership: "mine", HasConflict: true})
-	if err := h.Handle(context.Background(), store.Event{Type: store.EventPRUpdated, Payload: payload}); err != nil {
-		t.Fatalf("Handle: %v", err)
-	}
-	if len(c.setPriorityCalls) != 0 {
-		t.Fatalf("expected no SetPriority call (already adjusted this conflict episode), got %v", c.setPriorityCalls)
-	}
-	if len(c.addLabelCalls) != 0 {
-		t.Fatalf("expected no AddLabel call (baseline already stashed), got %v", c.addLabelCalls)
-	}
-	if len(c.removeLabelCalls) != 0 {
-		t.Fatalf("expected no RemoveLabel call (conflict still present), got %v", c.removeLabelCalls)
-	}
-}
-
-// TestHandle_TeamConflictLowersPriority asserts a team PR's first conflicting
-// tick lowers priority (numerically higher, toward 4) rather than raising it.
-func TestHandle_TeamConflictLowersPriority(t *testing.T) {
-	c := &reconcileFakeClient{mr: &beads.MergeRequest{ID: "mr-1", Priority: 2, Labels: nil}}
-	h := New(c)
-	payload, _ := json.Marshal(store.PRPayload{Repo: "o/r", Number: 7, Ownership: "team", HasConflict: true})
-	if err := h.Handle(context.Background(), store.Event{Type: store.EventPRUpdated, Payload: payload}); err != nil {
-		t.Fatalf("Handle: %v", err)
-	}
-	if len(c.setPriorityCalls) != 1 || c.setPriorityCalls[0] != (setPriorityCall{"mr-1", 3}) {
-		t.Fatalf("expected SetPriority(mr-1, 3), got %v", c.setPriorityCalls)
-	}
-	if len(c.addLabelCalls) != 1 || c.addLabelCalls[0] != (labelCall{"mr-1", "pbase:2"}) {
-		t.Fatalf("expected AddLabel(mr-1, pbase:2), got %v", c.addLabelCalls)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// FB-3: single MR-bead read per pr.updated tick (Dolt connection churn).
-// ---------------------------------------------------------------------------
 
 // idCountingRunner is a beads.Runner backing a REAL beads.Client. It answers
-// every `bd list` with a canned single-MR envelope and counts how many of those
-// list calls target a specific bead id (`--id=mr-1`) — i.e. how many MR-bead
-// reads the pr.updated projection issues per tick. Counting at the RUNNER (not
-// at a fake client method) is what makes this guard robust: it measures actual
-// `bd` invocations, so it holds whichever read method the bridge calls and
-// cannot be satisfied by a cache hit. Non-list verbs (update/create/dep) return
-// empty and are ignored by the count.
+// every `bd list` with a canned single-MR envelope and counts total `bd list`
+// invocations — i.e. how many merge-request-bead reads the pr.updated
+// projection issues per tick — plus every other (mutating) call as a write.
+// Counting at the RUNNER (not at a fake client method) is what makes this
+// guard robust: it measures actual `bd` invocations against the REAL
+// beads.Client, so it holds whichever read/write shape the implementation
+// uses internally and cannot be satisfied by a cache hit.
 type idCountingRunner struct {
-	listJSON string
-	idReads  int
-	calls    [][]string
+	listJSON  string
+	listReads int
+	calls     [][]string
 }
 
 func (r *idCountingRunner) Run(_ context.Context, args ...string) (string, error) {
 	r.calls = append(r.calls, append([]string(nil), args...))
-	isList := len(args) > 0 && args[0] == "list"
-	if isList {
-		for _, a := range args {
-			if a == "--id=mr-1" {
-				r.idReads++
-			}
-		}
+	if len(args) > 0 && args[0] == "list" {
+		r.listReads++
 		return r.listJSON, nil
 	}
 	return "", nil
+}
+
+// writeCalls returns the recorded calls that mutate bd state (every call
+// that is not a `list` read).
+func (r *idCountingRunner) writeCalls() [][]string {
+	var w [][]string
+	for _, c := range r.calls {
+		if len(c) > 0 && c[0] != "list" {
+			w = append(w, c)
+		}
+	}
+	return w
 }
 
 // cannedMRList renders the bd 1.0.4+ list envelope for one open merge-request
@@ -880,17 +823,23 @@ func cannedMRList() string {
 		`"author":"teammate","url":"https://x/7","last_synced_at":"2020-01-01T00:00:00Z"}}]}`
 }
 
-// TestHandle_PRUpdatedReadsMRBeadOnce is the FB-3 red→green guard: a single
-// pr.updated projection must read the MR bead EXACTLY ONCE, not twice. Before
-// FB-3 both SetMergeRequestCoOwned (its FB-4 diff-read) and reconcilePriority
-// issued their own read (`bd list --id=mr-1`), so idReads was 2; after threading
-// one pre-fetched bead into both, it is 1. The prefetch uses the UNCACHED read
-// deliberately — see Handle's comment — so this count is 1 real `bd` call, not a
-// cache hit standing in for one.
+// TestHandle_PRUpdatedReadsMRBeadOnce is the FB-3/pg2-pz7y8 read-once guard,
+// run against the REAL beads.Client (not a hand-rolled fake) so it holds
+// regardless of which internal method issues the read. Before FB-3,
+// SetMergeRequestCoOwned's FB-4 diff-read and reconcilePriority each issued
+// their own `bd list --id=mr-1` (2 reads); FB-3 threaded one prefetch to both
+// (1 read, but EnsureMergeRequest's OWN existence-check read was a separate,
+// uncounted `bd list --type=merge-request` call). pg2-pz7y8 collapses BOTH
+// reads into the SAME single fetch (FindByRepoAndNumberUncached), which
+// ReconcileMergeRequest then reuses for every diff — so the total read count
+// per tick is 1, and the write collapses to at most one combined
+// `bd update`/`bd create` call.
 //
-// A team DRAFT PR is used deliberately: it still runs the co-owned + priority
-// reconcilers (which do the reads) but skips EnsureDraftReviewBead, so the only
-// `--id=mr-1` list calls are the MR-bead reads under test.
+// A team DRAFT PR is used deliberately: it still runs the combined
+// reconciliation (which reads) but skips EnsureDraftReviewBead, so the only
+// `bd list` calls are the MR-bead reads under test. The payload's Draft=true
+// differs from the canned bead's stored draft=false, so exactly one combined
+// write (the field patch) is expected too.
 func TestHandle_PRUpdatedReadsMRBeadOnce(t *testing.T) {
 	r := &idCountingRunner{listJSON: cannedMRList()}
 	client := beads.NewClientWithRunner(r)
@@ -902,7 +851,10 @@ func TestHandle_PRUpdatedReadsMRBeadOnce(t *testing.T) {
 	if err := h.Handle(context.Background(), store.Event{Type: store.EventPRUpdated, Payload: payload}); err != nil {
 		t.Fatalf("Handle: %v", err)
 	}
-	if r.idReads != 1 {
-		t.Fatalf("expected exactly 1 MR-bead read (`bd list --id=mr-1`) per pr.updated tick, got %d; calls=%v", r.idReads, r.calls)
+	if r.listReads != 1 {
+		t.Fatalf("expected exactly 1 merge-request-bead read (`bd list`) per pr.updated tick, got %d; calls=%v", r.listReads, r.calls)
+	}
+	if w := r.writeCalls(); len(w) != 1 {
+		t.Fatalf("expected exactly 1 combined write (Draft flipped true), got %d: %v", len(w), w)
 	}
 }

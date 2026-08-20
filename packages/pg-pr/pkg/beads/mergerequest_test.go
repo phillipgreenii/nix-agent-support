@@ -863,3 +863,268 @@ func TestSetMergeRequestCoOwned_WritesOnChange(t *testing.T) {
 		}
 	})
 }
+
+// ---------------------------------------------------------------------------
+// ReconcileMergeRequest: read-once + single-write projection (pg2-pz7y8).
+// ---------------------------------------------------------------------------
+
+// reconcileHarness runs the exact two-call sequence beadsbridge.Handler.project
+// runs for one pr.opened/updated tick: ONE fresh read (FindByRepoAndNumberUncached),
+// then ONE combined create-or-update (ReconcileMergeRequest). Tests below
+// exercise this pair together, then inspect the recording runner's calls to
+// prove the read/write counts and the combined args.
+func reconcileHarness(ctx context.Context, c *Client, repo string, pr int, userTitle string, fields MergeRequestFields, coOwned, hasConflict, actsAsMine bool) (string, bool, error) {
+	existing, err := c.FindByRepoAndNumberUncached(ctx, repo, pr)
+	if err != nil {
+		return "", false, err
+	}
+	return c.ReconcileMergeRequest(ctx, existing, userTitle, fields, coOwned, hasConflict, actsAsMine)
+}
+
+// splitReadsWrites partitions recorded runner calls into `list` reads and
+// every other (mutating) verb.
+func splitReadsWrites(calls [][]string) (reads, writes int) {
+	for _, c := range calls {
+		if len(c) == 0 {
+			continue
+		}
+		if c[0] == "list" {
+			reads++
+		} else {
+			writes++
+		}
+	}
+	return reads, writes
+}
+
+// mrDiffCreateRunner is mrDiffRunner plus a fixed ID returned for `create`
+// calls, so ReconcileMergeRequest's not-found (create) path can be exercised
+// without a real bd workspace.
+type mrDiffCreateRunner struct {
+	mrDiffRunner
+	createID string
+}
+
+func (r *mrDiffCreateRunner) Run(ctx context.Context, args ...string) (string, error) {
+	out, err := r.mrDiffRunner.Run(ctx, args...)
+	if len(args) > 0 && args[0] == "create" {
+		return r.createID, err
+	}
+	return out, err
+}
+
+// TestReconcileMergeRequest_NoOpDoesNotWrite proves a refresh whose fields,
+// co-owned state, and conflict state ALL already match stored state issues
+// exactly ONE read and ZERO writes — the read-once/write-once no-op case is
+// now cheaper than before the refactor (previously a no-change tick still
+// spent a SECOND read via the old GetMergeRequestUncached).
+func TestReconcileMergeRequest_NoOpDoesNotWrite(t *testing.T) {
+	ctx := context.Background()
+	r := &mrDiffRunner{listJSON: cannedList(t, storedMR())}
+	c := NewClientWithRunner(r)
+
+	id, alreadyClosed, err := reconcileHarness(ctx, c, "foo/bar", 7, "foo/bar#7", MergeRequestFields{
+		Repo: "foo/bar", PRNumber: 7, State: "open", Branch: "feat/x", Base: "main",
+		Author: "alice", URL: "https://github.com/foo/bar/pull/7",
+		LastSyncedAt: "2026-07-25T12:00:00Z", // FB-1: last_synced_at-only is not a change
+	}, false, false, true) // not co-owned, no conflict — matches stored (no labels)
+	if err != nil {
+		t.Fatalf("reconcileHarness: %v", err)
+	}
+	if id != "mr-1" || alreadyClosed {
+		t.Fatalf("id=%q alreadyClosed=%v, want mr-1/false", id, alreadyClosed)
+	}
+	reads, writes := splitReadsWrites(r.calls)
+	if reads != 1 {
+		t.Fatalf("expected exactly 1 read, got %d: %v", reads, r.calls)
+	}
+	if writes != 0 {
+		t.Fatalf("expected ZERO writes for a full no-op tick, got %d: %v", writes, r.calls)
+	}
+}
+
+// TestReconcileMergeRequest_ClosedBeadNoWrites proves an existing CLOSED bead
+// short-circuits BEFORE any field/co-owned/priority diff is even attempted —
+// not merely that the diffs happen to no-op. This is the precise contract
+// TestPROpenedClosedParentSkipsDraftReview (internal/beadsbridge) used to pin
+// at the bridge-fake level; it now lives here, where the short-circuit
+// actually executes.
+func TestReconcileMergeRequest_ClosedBeadNoWrites(t *testing.T) {
+	ctx := context.Background()
+	iss := storedMR()
+	iss.Status = "closed"
+	r := &mrDiffRunner{listJSON: cannedList(t, iss)}
+	c := NewClientWithRunner(r)
+
+	// coOwned=true and hasConflict=true would, on an OPEN bead, both demand a
+	// write. On a closed bead neither may be attempted.
+	id, alreadyClosed, err := reconcileHarness(ctx, c, "foo/bar", 7, "foo/bar#7", MergeRequestFields{
+		Repo: "foo/bar", PRNumber: 7, State: "ready",
+	}, true, true, true)
+	if err != nil {
+		t.Fatalf("reconcileHarness: %v", err)
+	}
+	if !alreadyClosed || id != "mr-1" {
+		t.Fatalf("id=%q alreadyClosed=%v, want mr-1/true", id, alreadyClosed)
+	}
+	_, writes := splitReadsWrites(r.calls)
+	if writes != 0 {
+		t.Fatalf("expected ZERO writes for a closed bead, got %d: %v", writes, r.calls)
+	}
+}
+
+// TestReconcileMergeRequest_CombinedChangeSingleWrite proves a tick that needs
+// ALL THREE mutations at once — a real field change, a co-owned label flip,
+// and a first-conflict priority nudge — still issues exactly ONE combined
+// `bd update` call, not three separate ones.
+func TestReconcileMergeRequest_CombinedChangeSingleWrite(t *testing.T) {
+	ctx := context.Background()
+	iss := storedMR()
+	iss.Priority = 2 // no labels yet: not co-owned, no pbase baseline
+	r := &mrDiffRunner{listJSON: cannedList(t, iss)}
+	c := NewClientWithRunner(r)
+
+	id, alreadyClosed, err := reconcileHarness(ctx, c, "foo/bar", 7, "foo/bar#7", MergeRequestFields{
+		Repo: "foo/bar", PRNumber: 7, State: "ready", // real field change (open -> ready)
+	}, true, true, true) // desired co-owned=true, conflict=true, mine
+	if err != nil {
+		t.Fatalf("reconcileHarness: %v", err)
+	}
+	if alreadyClosed || id != "mr-1" {
+		t.Fatalf("id=%q alreadyClosed=%v, want mr-1/false", id, alreadyClosed)
+	}
+	reads, writes := splitReadsWrites(r.calls)
+	if reads != 1 || writes != 1 {
+		t.Fatalf("expected 1 read + 1 combined write, got reads=%d writes=%d: %v", reads, writes, r.calls)
+	}
+	w := r.writeCalls()
+	joined := strings.Join(w[0], " ")
+	if w[0][0] != "update" || w[0][1] != "mr-1" {
+		t.Fatalf("expected `update mr-1 ...`, got %v", w[0])
+	}
+	if !strings.Contains(joined, "--metadata") {
+		t.Fatalf("expected the field change folded into the combined write, got %v", w[0])
+	}
+	if !strings.Contains(joined, "--add-label pbase:2") {
+		t.Fatalf("expected the pbase baseline stash folded into the combined write, got %v", w[0])
+	}
+	if !strings.Contains(joined, "--add-label co-owned") {
+		t.Fatalf("expected the co-owned label folded into the combined write, got %v", w[0])
+	}
+	if !strings.Contains(joined, "-p 1") {
+		t.Fatalf("expected the nudged priority (2 -> 1, mine conflict) folded into the combined write, got %v", w[0])
+	}
+}
+
+// TestReconcileMergeRequest_CreatesWhenAbsent proves the not-found path issues
+// exactly ONE `bd create` call, with a conflict-nudged priority and a co-owned
+// label already folded in when the very first tick already carries them —
+// reproducing what a subsequent read of the freshly created bead would show,
+// without spending that read (see bdDefaultPriority's doc).
+func TestReconcileMergeRequest_CreatesWhenAbsent(t *testing.T) {
+	ctx := context.Background()
+	r := &mrDiffCreateRunner{mrDiffRunner: mrDiffRunner{listJSON: cannedList(t)}, createID: "mr-new-1"}
+	c := NewClientWithRunner(r)
+
+	id, alreadyClosed, err := reconcileHarness(ctx, c, "foo/bar", 8, "foo/bar#8", MergeRequestFields{
+		Repo: "foo/bar", PRNumber: 8, State: "open",
+	}, true, true, true) // co-owned + conflict already true on the first tick
+	if err != nil {
+		t.Fatalf("reconcileHarness: %v", err)
+	}
+	if alreadyClosed {
+		t.Fatalf("expected alreadyClosed=false on create")
+	}
+	if id != "mr-new-1" {
+		t.Fatalf("id=%q, want mr-new-1", id)
+	}
+	reads, writes := splitReadsWrites(r.calls)
+	if reads != 1 || writes != 1 {
+		t.Fatalf("expected 1 read + 1 create, got reads=%d writes=%d: %v", reads, writes, r.calls)
+	}
+	create := r.calls[len(r.calls)-1]
+	if create[0] != "create" {
+		t.Fatalf("expected a create call, got %v", create)
+	}
+	joined := strings.Join(create, " ")
+	if !strings.Contains(joined, "-l pbase:2,co-owned") {
+		t.Fatalf("expected combined labels (pbase baseline + co-owned) in the create call, got %v", create)
+	}
+	if !strings.Contains(joined, "-p 1") {
+		t.Fatalf("expected the nudged priority (bdDefaultPriority=2 -> 1, mine conflict) in the create call, got %v", create)
+	}
+}
+
+// TestMergeRequestPriorityDelta pins the pure conflict-priority decision
+// (relocated verbatim from internal/beadsbridge/bridge.go's former
+// reconcilePriority — see pg2-pz7y8) across its four cases: mine raises and
+// stashes, team lowers and stashes, a repeated conflicting tick is a no-op,
+// and a clear restores the exact baseline.
+func TestMergeRequestPriorityDelta(t *testing.T) {
+	cases := []struct {
+		name                string
+		curPriority         int
+		curLabels           []string
+		actsAsMine          bool
+		hasConflict         bool
+		wantAdd, wantRemove []string
+		wantPriority        int
+		wantSetPriority     bool
+	}{
+		{
+			name:        "mine first conflict raises and stashes baseline",
+			curPriority: 2, curLabels: nil, actsAsMine: true, hasConflict: true,
+			wantAdd: []string{"pbase:2"}, wantPriority: 1, wantSetPriority: true,
+		},
+		{
+			name:        "team first conflict lowers and stashes baseline",
+			curPriority: 2, curLabels: nil, actsAsMine: false, hasConflict: true,
+			wantAdd: []string{"pbase:2"}, wantPriority: 3, wantSetPriority: true,
+		},
+		{
+			name:        "repeated conflict is idempotent no-op",
+			curPriority: 1, curLabels: []string{"pbase:2"}, actsAsMine: true, hasConflict: true,
+			wantSetPriority: false,
+		},
+		{
+			name:        "conflict cleared restores exact baseline",
+			curPriority: 1, curLabels: []string{"pbase:2"}, actsAsMine: true, hasConflict: false,
+			wantRemove: []string{"pbase:2"}, wantPriority: 2, wantSetPriority: true,
+		},
+		{
+			name:        "no conflict no baseline is a no-op",
+			curPriority: 2, curLabels: nil, actsAsMine: true, hasConflict: false,
+			wantSetPriority: false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			addLabels, removeLabels, priority, setPriority := mergeRequestPriorityDelta(tc.curPriority, tc.curLabels, tc.actsAsMine, tc.hasConflict)
+			if !equalStringSlices(addLabels, tc.wantAdd) {
+				t.Errorf("addLabels: got %v want %v", addLabels, tc.wantAdd)
+			}
+			if !equalStringSlices(removeLabels, tc.wantRemove) {
+				t.Errorf("removeLabels: got %v want %v", removeLabels, tc.wantRemove)
+			}
+			if setPriority != tc.wantSetPriority {
+				t.Errorf("setPriority: got %v want %v", setPriority, tc.wantSetPriority)
+			}
+			if setPriority && priority != tc.wantPriority {
+				t.Errorf("priority: got %d want %d", priority, tc.wantPriority)
+			}
+		})
+	}
+}
+
+// equalStringSlices compares two string slices treating nil and empty as equal.
+func equalStringSlices(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}

@@ -415,10 +415,13 @@ func (e *Engine) Sync(ctx context.Context) (*Summary, error) {
 			// identity/existence lookups (FindByRepoAndNumber / GetMergeRequest
 			// by id) are served from memory instead of a fresh `bd list` scan.
 			// Safe: these engine clients drive only reads (buildPRInput's bead
-			// id + dep-tree lookups). The diff-before-write projections
-			// (EnsureMergeRequest / SetMergeRequestCoOwned / reconcilePriority)
-			// run at outbox flush on the beadsbridge's SEPARATE, cache-less
-			// clients, so they keep comparing against fresh state (FB-1/2/4).
+			// id + dep-tree lookups). The diff-before-write projection
+			// (pkg/beads.Client.ReconcileMergeRequest, fed by
+			// FindByRepoAndNumberUncached — pg2-pz7y8's read-once/write-once
+			// combination of the former EnsureMergeRequest / SetMergeRequestCoOwned
+			// / reconcilePriority) runs at outbox flush on the beadsbridge's
+			// SEPARATE, cache-less clients, so it keeps comparing against fresh
+			// state (FB-1/2/4).
 			c.UseTickCache(cache)
 		}
 	}
@@ -1258,8 +1261,9 @@ func (e *Engine) SyncPR(ctx context.Context, repo string, number int) (*Summary,
 	// refreshPR's pre-apply overlay + attention emit, which it has no need for).
 	// Without this, enriched==nil made overlayMergeState a
 	// no-op — PRPayload.HasConflict was always false, flapping a daemon-stashed
-	// conflict priority in the bridge (reconcilePriority's clear branch) — and
-	// CommitAuthors was nil, degrading a co-owned PR to team. applyFetchedPR
+	// conflict priority in the bridge (the conflict-cleared-restores-baseline
+	// branch of ReconcileMergeRequest's priority delta, pkg/beads/mergerequest.go)
+	// — and CommitAuthors was nil, degrading a co-owned PR to team. applyFetchedPR
 	// re-applies overlayMergeState idempotently, so the overlaid merge-state is
 	// in *pr before emitPREvent. (pg2-ic3nh)
 	enriched := e.enrichOnePR(ctx, rcfg, *pr)

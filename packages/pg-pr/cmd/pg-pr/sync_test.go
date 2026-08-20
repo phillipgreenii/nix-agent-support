@@ -263,19 +263,19 @@ func TestSyncCommand_PropagatesConfigError(t *testing.T) {
 // fakeBridgeBeads is a minimal beadsbridge.BeadClient double for the producer
 // handler test. It records EnsureDraftReviewBead calls so the test can observe
 // whether draft-review PRODUCTION was suppressed by the review kill switch. The
-// pr.updated mine path also touches EnsureMergeRequest, SetMergeRequestCoOwned,
-// and GetMergeRequest (via reconcilePriority); those return benign zero values
-// that let the bridge reach (or skip) the draft-review call.
+// pr.updated mine path also touches FindByRepoAndNumberUncached and
+// ReconcileMergeRequest; those return benign zero values that let the bridge
+// reach (or skip) the draft-review call.
 type fakeBridgeBeads struct {
 	drCalls int // EnsureDraftReviewBead invocations
 }
 
-func (f *fakeBridgeBeads) EnsureMergeRequest(context.Context, string, beads.MergeRequestFields) (string, bool, error) {
-	return "mr-1", false, nil
+func (f *fakeBridgeBeads) FindByRepoAndNumberUncached(context.Context, string, int) (*beads.MergeRequest, error) {
+	return nil, nil
 }
-func (f *fakeBridgeBeads) SetMergeRequestCoOwned(context.Context, string, bool) error { return nil }
-func (f *fakeBridgeBeads) SetMergeRequestCoOwnedWith(context.Context, string, bool, *beads.MergeRequest) error {
-	return nil
+
+func (f *fakeBridgeBeads) ReconcileMergeRequest(context.Context, *beads.MergeRequest, string, beads.MergeRequestFields, bool, bool, bool) (string, bool, error) {
+	return "mr-1", false, nil
 }
 
 func (f *fakeBridgeBeads) FindByRepoAndNumber(context.Context, string, int) (*beads.MergeRequest, error) {
@@ -308,16 +308,6 @@ func (f *fakeBridgeBeads) EnsureAttentionBead(context.Context, string, string) (
 	return "", nil
 }
 func (f *fakeBridgeBeads) CloseAttentionBead(context.Context, string, string) error { return nil }
-func (f *fakeBridgeBeads) GetMergeRequest(context.Context, string) (*beads.MergeRequest, error) {
-	return nil, nil
-}
-
-func (f *fakeBridgeBeads) GetMergeRequestUncached(context.Context, string) (*beads.MergeRequest, error) {
-	return nil, nil
-}
-func (f *fakeBridgeBeads) SetPriority(context.Context, string, int) error    { return nil }
-func (f *fakeBridgeBeads) AddLabel(context.Context, string, string) error    { return nil }
-func (f *fakeBridgeBeads) RemoveLabel(context.Context, string, string) error { return nil }
 
 // cliCfgWithReview builds a CLI config with one repo (Path set so the producer's
 // repo→path index resolves) and review.enabled = enabled.

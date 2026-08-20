@@ -20,9 +20,14 @@ import (
 
 // BeadClient is the subset of *beads.Client the bridge needs (narrow for tests).
 type BeadClient interface {
-	EnsureMergeRequest(ctx context.Context, title string, fields beads.MergeRequestFields) (string, bool, error)
-	SetMergeRequestCoOwned(ctx context.Context, id string, coOwned bool) error
-	SetMergeRequestCoOwnedWith(ctx context.Context, id string, coOwned bool, prefetched *beads.MergeRequest) error
+	// FindByRepoAndNumberUncached and ReconcileMergeRequest together are the
+	// read-once + single-write projection for the merge-request bead
+	// (pg2-pz7y8): ONE fresh read, then AT MOST ONE combined create-or-update
+	// carrying every desired mutation (fields, co-owned label,
+	// conflict-priority/pbase label). See their doc comments in
+	// pkg/beads/mergerequest.go.
+	FindByRepoAndNumberUncached(ctx context.Context, repo string, prNumber int) (*beads.MergeRequest, error)
+	ReconcileMergeRequest(ctx context.Context, existing *beads.MergeRequest, userTitle string, fields beads.MergeRequestFields, coOwned, hasConflict, actsAsMine bool) (id string, alreadyClosed bool, err error)
 	FindByRepoAndNumber(ctx context.Context, repo string, number int) (*beads.MergeRequest, error)
 	CloseMergeRequest(ctx context.Context, id, reason string) error
 	ListChildrenOfPR(ctx context.Context, prBeadID string) ([]string, error)
@@ -35,11 +40,6 @@ type BeadClient interface {
 	EnsureDraftReviewMineLabel(ctx context.Context, prBeadID string) error
 	EnsureAttentionBead(ctx context.Context, prBeadID, title string) (string, error)
 	CloseAttentionBead(ctx context.Context, prBeadID, reason string) error
-	GetMergeRequest(ctx context.Context, id string) (*beads.MergeRequest, error)
-	GetMergeRequestUncached(ctx context.Context, id string) (*beads.MergeRequest, error)
-	SetPriority(ctx context.Context, id string, p int) error
-	AddLabel(ctx context.Context, id, label string) error
-	RemoveLabel(ctx context.Context, id, label string) error
 }
 
 // Handler is the beads event handler.
@@ -127,10 +127,10 @@ type FeedbackPayload = store.FeedbackPayload
 //
 // It is also SERIALIZED PER PR IDENTITY, because idempotence alone is not enough
 // under concurrency (bead pg2-35rl6). Every projection below is a check-then-create
-// — EnsureMergeRequest reads findByRepoPR then creates, ensureProcessFeedbackBead
-// reads ResolveProcessingCycle then creates, EnsureDraftReviewBead and
-// EnsureAttentionBead read their child list then create — and nothing at the bd
-// layer rejects a second create for an identity that already has one
+// — ReconcileMergeRequest is handed a fresh read then creates-or-updates,
+// ensureProcessFeedbackBead reads ResolveProcessingCycle then creates,
+// EnsureDraftReviewBead and EnsureAttentionBead read their child list then
+// create — and nothing at the bd layer rejects a second create for an identity that already has one
 // (ProcessingCycleKey's doc calls two beads with the same key duplicates by
 // definition, but only DECLARES the invariant). Two goroutines interleaved inside
 // that read→decide→write window therefore both observe "none yet" and both write.
@@ -192,64 +192,54 @@ func (h *Handler) project(ctx context.Context, e store.Event) error {
 		if err := json.Unmarshal(e.Payload, &p); err != nil {
 			return fmt.Errorf("beadsbridge: decode pr payload: %w", err)
 		}
-		mrID, alreadyClosed, err := h.client.EnsureMergeRequest(ctx, p.Title, beads.MergeRequestFields{
+		// Read-once + single-write (pg2-pz7y8): ONE fresh read of the
+		// merge-request bead's current state, then ONE combined create-or-update
+		// (ReconcileMergeRequest) carrying every desired mutation — fields, the
+		// co-owned label, and the conflict-priority/pbase label — computed
+		// against that single snapshot. This replaces the former
+		// EnsureMergeRequest → GetMergeRequestUncached → SetMergeRequestCoOwnedWith
+		// → reconcilePriority chain (up to 2 reads and up to 4 separate bd calls
+		// on one tick) with 1 read + at most 1 write.
+		//
+		// The read MUST be the UNCACHED one (FindByRepoAndNumberUncached). Both
+		// the FB-4 co-owned label diff and the priority/`pbase:<n>` baseline are
+		// diff-before-write STATE DECISIONS, and FB-5 excluded exactly those from
+		// the per-tick TickCache because a snapshot taken at tick start can
+		// predate a write issued earlier in the same tick. Calling the cached
+		// FindByRepoAndNumber here would make that freshness depend on whether a
+		// cache happens to be attached to this client (today the bridge attaches
+		// none, so it would be correct by accident and silently wrong the day one
+		// is attached).
+		existing, err := h.client.FindByRepoAndNumberUncached(ctx, p.Repo, p.Number)
+		if err != nil {
+			return err
+		}
+		// The acts-as-mine test goes through the SHARED predicate
+		// ownership.ActsAsMine (mine OR co-owned), the same one replyposter,
+		// snapshot.builder, and sync.ingest use — never a local `!= "team"`. Over
+		// the closed 3-value set the two agree; they diverge on an out-of-band/
+		// empty value, where ActsAsMine degrades to team-style selection (a draft
+		// is skipped, not auto-reviewed, and the priority nudge lowers rather
+		// than raises) — the conservative direction, matching pr-pool's copy of
+		// the predicate. (pg2-q2drf)
+		mine := ownership.Ownership(p.Ownership).ActsAsMine()
+		mrID, alreadyClosed, err := h.client.ReconcileMergeRequest(ctx, existing, p.Title, beads.MergeRequestFields{
 			Repo: p.Repo, PRNumber: p.Number, State: p.State, Branch: p.Branch,
 			Base: p.Base, Author: p.Author, URL: p.URL, Draft: p.Draft,
 			LastSyncedAt: p.LastSyncedAt,
-		})
+		}, p.Ownership == "co-owned", p.HasConflict, mine)
 		if err != nil {
 			return err
 		}
 		if alreadyClosed {
 			return nil // closed PR bead: do not attach a draft-review under it
 		}
-		// FB-3: read the MR bead ONCE per tick and thread it into BOTH the
-		// co-owned label diff AND the priority reconciler, instead of each
-		// re-fetching it (which doubled the per-tick MR-bead reads → Dolt
-		// connection churn).
-		//
-		// The read MUST be the UNCACHED one. Both consumers are
-		// diff-before-write STATE DECISIONS — the FB-4 co-owned label diff and
-		// reconcilePriority's priority/`pbase:<n>` baseline — and FB-5 excluded
-		// exactly those from the per-tick TickCache because a snapshot taken at
-		// tick start can predate a write issued earlier in the same tick. Reading
-		// via GetMergeRequest here would make that freshness depend on whether a
-		// cache happens to be attached to this client (today the bridge attaches
-		// none, so it would be correct by accident and silently wrong the day one
-		// is attached). Threading the read moves WHERE it happens, never WHETHER
-		// it is fresh.
-		mr, mrErr := h.client.GetMergeRequestUncached(ctx, mrID)
-		// Keep the co-owned visibility label in sync with the current ownership
-		// verdict — added when co-owned, removed otherwise. A nil-on-error mr
-		// falls through to the write, exactly as SetMergeRequestCoOwned's own
-		// read-failure path did (it swallowed the read error and wrote anyway).
-		if err := h.client.SetMergeRequestCoOwnedWith(ctx, mrID, p.Ownership == "co-owned", mr); err != nil {
-			return err
-		}
-		// reconcilePriority PROPAGATES a read error (its original behavior), so
-		// surface mrErr here before reconciling — preserving the exact error
-		// semantics of the two former in-function reads.
-		if mrErr != nil {
-			return mrErr
-		}
-		if err := h.reconcilePriority(ctx, mr, mrID, p.Ownership, p.HasConflict); err != nil {
-			return err
-		}
 		// Emit the review work item. My PRs and co-owned PRs are reviewed even
 		// while a GitHub draft; team PRs wait until the draft flag is removed
 		// (which fires on the pr.updated that flips it). EnsureDraftReviewBead
 		// is idempotent. When the review kill switch is on
 		// (suppressDraftReviews), production is skipped entirely — the
-		// merge-request bead above is still ensured.
-		//
-		// The acts-as-mine test goes through the SHARED predicate
-		// ownership.ActsAsMine (mine OR co-owned), the same one replyposter,
-		// snapshot.builder, sync.ingest and nudged below use — never a local
-		// `!= "team"`. Over the closed 3-value set the two agree; they diverge on
-		// an out-of-band/empty value, where ActsAsMine degrades to team-style
-		// selection (a draft is skipped, not auto-reviewed) — the conservative
-		// direction, matching pr-pool's copy of the predicate. (pg2-q2drf)
-		mine := ownership.Ownership(p.Ownership).ActsAsMine()
+		// merge-request bead above is still reconciled.
 		if !h.suppressDraftReviews && (mine || !p.Draft) {
 			drID, err := h.client.EnsureDraftReviewBead(ctx, mrID, fmt.Sprintf("%s#%d", p.Repo, p.Number), mine)
 			if err != nil {
@@ -499,80 +489,6 @@ func (h *Handler) cascadeClose(ctx context.Context, p store.PRPayload) error {
 		_ = h.client.CloseProcessingCycle(ctx, child, reason)
 	}
 	return h.client.CloseMergeRequest(ctx, mr.ID, reason)
-}
-
-const pbaseLabelPrefix = "pbase:"
-
-// reconcilePriority nudges the merge-request bead's priority on conflict and
-// reverts it when the conflict clears, statelessly. The pre-adjustment priority
-// is stashed in a `pbase:<n>` label so a repeated conflicting tick is a no-op
-// and a clear restores the exact baseline. mine/co-owned raise (−1, clamp 0);
-// team lowers (+1, clamp 4). (pg2-tsgkj)
-//
-// mr is the ALREADY-fetched merge-request bead (FB-3): the caller reads it once
-// per tick and threads it here rather than reconcilePriority re-fetching it. A
-// nil mr (not found) is a no-op, matching the prior in-function read that
-// returned nil on a nil bead. mrID is still passed explicitly for the label /
-// priority writes.
-func (h *Handler) reconcilePriority(ctx context.Context, mr *beads.MergeRequest, mrID, ownershipStr string, hasConflict bool) error {
-	if mr == nil {
-		return nil
-	}
-	baseline, hasBaseline := parsePbase(mr.Labels)
-
-	switch {
-	case hasConflict && !hasBaseline:
-		// First conflicting tick: stash current priority, then nudge.
-		desired := nudged(mr.Priority, ownershipStr)
-		// Stash unconditionally — even when the priority is already clamped at the
-		// boundary (desired == mr.Priority) — so a later clear is a no-op-safe restore.
-		if err := h.client.AddLabel(ctx, mrID, pbaseLabelPrefix+strconv.Itoa(mr.Priority)); err != nil {
-			return err
-		}
-		if desired != mr.Priority {
-			return h.client.SetPriority(ctx, mrID, desired)
-		}
-		return nil
-	case hasConflict && hasBaseline:
-		return nil // already adjusted this conflict episode — idempotent no-op
-	case !hasConflict && hasBaseline:
-		// Conflict cleared: restore baseline, drop the marker.
-		if mr.Priority != baseline {
-			if err := h.client.SetPriority(ctx, mrID, baseline); err != nil {
-				return err
-			}
-		}
-		return h.client.RemoveLabel(ctx, mrID, pbaseLabelPrefix+strconv.Itoa(baseline))
-	default:
-		return nil // no conflict, no baseline — nothing to do
-	}
-}
-
-// nudged returns the conflict-adjusted priority: mine/co-owned raise (toward 0),
-// team lower (toward 4). Clamped to [0,4].
-func nudged(p int, ownershipStr string) int {
-	if ownership.Ownership(ownershipStr).ActsAsMine() {
-		if p > 0 {
-			return p - 1
-		}
-		return 0
-	}
-	if p < 4 {
-		return p + 1
-	}
-	return 4
-}
-
-// parsePbase extracts the stashed baseline priority from a `pbase:<n>` label.
-func parsePbase(labels []string) (int, bool) {
-	for _, l := range labels {
-		if strings.HasPrefix(l, pbaseLabelPrefix) {
-			if n, err := strconv.Atoi(strings.TrimPrefix(l, pbaseLabelPrefix)); err == nil {
-				return n, true
-			}
-		}
-	}
-	return 0, false
 }
 
 // compile-time check: *beads.Client must satisfy BeadClient.

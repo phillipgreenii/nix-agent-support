@@ -30,9 +30,10 @@ import (
 
 // concurrentBeadClient is a CONCURRENCY-SAFE beadsbridge.BeadClient. Its bead
 // state is guarded by a mutex so concurrent drainers can hammer it without data
-// races. It mirrors the real backend: EnsureMergeRequest records (idempotently)
-// the open merge-request bead for a PR; FindByRepoAndNumber returns it if
-// present (else nil); the processing-cycle calls track open cycles safely.
+// races. It mirrors the real backend: ReconcileMergeRequest records
+// (idempotently) the open merge-request bead for a PR; FindByRepoAndNumber and
+// FindByRepoAndNumberUncached return it if present (else nil); the
+// processing-cycle calls track open cycles safely.
 type concurrentBeadClient struct {
 	mu sync.Mutex
 	// beads keyed by "repo#number" → the projected merge-request bead.
@@ -51,30 +52,25 @@ func newConcurrentBeadClient() *concurrentBeadClient {
 
 func beadKey(repo string, number int) string { return fmt.Sprintf("%s#%d", repo, number) }
 
-// EnsureMergeRequest records the merge-request bead. Idempotent: concurrent
-// calls for the same PR return the existing bead.
-func (c *concurrentBeadClient) EnsureMergeRequest(_ context.Context, _ string, f beads.MergeRequestFields) (string, bool, error) {
+// ReconcileMergeRequest records the merge-request bead (idempotently) — the
+// read-once + single-write projection (pg2-pz7y8). existing is whatever the
+// caller's own FindByRepoAndNumberUncached read returned; this fake trusts it
+// exactly like the real Client does (no re-read), so a concurrent creator
+// racing another goroutine's read is exactly what this test wants to exercise.
+func (c *concurrentBeadClient) ReconcileMergeRequest(_ context.Context, existing *beads.MergeRequest, _ string, f beads.MergeRequestFields, _, _, _ bool) (string, bool, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	key := beadKey(f.Repo, f.PRNumber)
 	if mr, ok := c.beads[key]; ok {
-		return mr.ID, false, nil
+		return mr.ID, mr.Status == "closed", nil
+	}
+	if existing != nil {
+		return existing.ID, existing.Status == "closed", nil
 	}
 	c.nextID++
 	id := fmt.Sprintf("mr-%d", c.nextID)
 	c.beads[key] = &beads.MergeRequest{ID: id, Status: "open"}
-	return id, true, nil
-}
-
-// SetMergeRequestCoOwned is a no-op: this fake does not track labels.
-func (c *concurrentBeadClient) SetMergeRequestCoOwned(context.Context, string, bool) error {
-	return nil
-}
-
-// SetMergeRequestCoOwnedWith is a no-op (FB-3 pre-fetched-bead variant): this
-// fake does not track labels.
-func (c *concurrentBeadClient) SetMergeRequestCoOwnedWith(context.Context, string, bool, *beads.MergeRequest) error {
-	return nil
+	return id, false, nil
 }
 
 // FindByRepoAndNumber returns the recorded bead, or nil if not yet projected.
@@ -87,6 +83,12 @@ func (c *concurrentBeadClient) FindByRepoAndNumber(_ context.Context, repo strin
 		return &cp, nil
 	}
 	return nil, nil
+}
+
+// FindByRepoAndNumberUncached is the same lookup as FindByRepoAndNumber: this
+// fake has no cache to bypass.
+func (c *concurrentBeadClient) FindByRepoAndNumberUncached(ctx context.Context, repo string, number int) (*beads.MergeRequest, error) {
+	return c.FindByRepoAndNumber(ctx, repo, number)
 }
 
 func (c *concurrentBeadClient) CloseMergeRequest(context.Context, string, string) error { return nil }
@@ -131,17 +133,6 @@ func (c *concurrentBeadClient) EnsureAttentionBead(context.Context, string, stri
 func (c *concurrentBeadClient) CloseAttentionBead(context.Context, string, string) error { return nil }
 
 func (c *concurrentBeadClient) EnsureDraftReviewMineLabel(context.Context, string) error { return nil }
-
-func (c *concurrentBeadClient) GetMergeRequest(context.Context, string) (*beads.MergeRequest, error) {
-	return nil, nil
-}
-
-func (c *concurrentBeadClient) GetMergeRequestUncached(context.Context, string) (*beads.MergeRequest, error) {
-	return nil, nil
-}
-func (c *concurrentBeadClient) SetPriority(context.Context, string, int) error    { return nil }
-func (c *concurrentBeadClient) AddLabel(context.Context, string, string) error    { return nil }
-func (c *concurrentBeadClient) RemoveLabel(context.Context, string, string) error { return nil }
 
 // compile-time check.
 var _ beadsbridge.BeadClient = (*concurrentBeadClient)(nil)
