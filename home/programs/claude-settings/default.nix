@@ -25,18 +25,41 @@ let
   };
 
   filters =
-    # These top-level-key options are tri-state nullOr, but unlike promptCacheTtl
-    # (below) `null` is a deliberate NO-OP: no filter is emitted, so a value a
-    # previous non-null generation wrote is LEFT IN PLACE, not deleted (pg2-a6y3).
-    # A promptCacheTtl-style scrub-on-null is intentionally NOT applied here because
-    # (1) `theme`/`statusLine` are written by Claude Code itself at runtime
-    # (`/theme`, `/statusline`), so del-on-null would fight an interactive choice;
-    # and (2) these are top-level keys with no per-key escape hatch (promptCacheTtl
-    # keys off `cfg.env ? KEY`), so an unconditional del would clobber a hand-set
-    # value with no opt-out — and this list runs on EVERY activation (it is never
-    # empty: noFlicker and the promptCacheTtl null-cleanup always append). A
-    # `sandbox` scrub was considered and deferred for the same no-opt-out reason.
-    lib.optional (cfg.statusLine != null) ".statusLine = ${builtins.toJSON cfg.statusLine}"
+    # extraSettings is the freeform passthrough escape hatch (pg2-hpwww): it is
+    # merged in FIRST, so every enumerated option below emits its own
+    # assignment/del LATER in this same `|` pipe and therefore always WINS over
+    # a same-named extraSettings key — a typo in extraSettings can never
+    # silently override a setting this module deliberately manages. This is
+    # deliberate precedence, not an eval-time error: naming an enumerated key
+    # in extraSettings is not rejected, it is simply superseded.
+    # `enabledPlugins` / `extraKnownMarketplaces` are stripped from the merge
+    # unconditionally: those two keys are wholesale-replaced by
+    # claude-settings-replace-managed-keys.sh in a separate pass that already
+    # ran before this jq invocation ever sees the file, so letting them
+    # through here would let a plain attrset silently fight a script whose
+    # entire job is owning those two keys outright.
+    lib.optional (cfg.extraSettings != { })
+      ". * ${
+        builtins.toJSON (
+          builtins.removeAttrs cfg.extraSettings [
+            "enabledPlugins"
+            "extraKnownMarketplaces"
+          ]
+        )
+      }"
+    ++
+      # These top-level-key options are tri-state nullOr, but unlike promptCacheTtl
+      # (below) `null` is a deliberate NO-OP: no filter is emitted, so a value a
+      # previous non-null generation wrote is LEFT IN PLACE, not deleted (pg2-a6y3).
+      # A promptCacheTtl-style scrub-on-null is intentionally NOT applied here because
+      # (1) `theme`/`statusLine` are written by Claude Code itself at runtime
+      # (`/theme`, `/statusline`), so del-on-null would fight an interactive choice;
+      # and (2) these are top-level keys with no per-key escape hatch (promptCacheTtl
+      # keys off `cfg.env ? KEY`), so an unconditional del would clobber a hand-set
+      # value with no opt-out — and this list runs on EVERY activation (it is never
+      # empty: noFlicker and the promptCacheTtl null-cleanup always append). A
+      # `sandbox` scrub was considered and deferred for the same no-opt-out reason.
+      lib.optional (cfg.statusLine != null) ".statusLine = ${builtins.toJSON cfg.statusLine}"
     ++ lib.optional (
       cfg.showClearContextOnPlanAccept != null
     ) ".showClearContextOnPlanAccept = ${builtins.toJSON cfg.showClearContextOnPlanAccept}"
@@ -385,6 +408,40 @@ in
       type = lib.types.listOf lib.types.str;
       default = [ ];
       description = "Plugin keys (plugin@marketplace) to install or update";
+    };
+
+    extraSettings = lib.mkOption {
+      type = lib.types.attrsOf lib.types.anything;
+      default = { };
+      example = lib.literalExpression ''
+        {
+          skillListingBudgetFraction = 0.05;
+        }
+      '';
+      description = ''
+        Freeform passthrough for any Claude Code `settings.json` key this
+        module does not enumerate as its own option (concrete motivating
+        case: `skillListingBudgetFraction`; see
+        https://code.claude.com/docs/en/settings for the full schema).
+
+        Merged into `~/.claude/settings.json` FIRST, before every enumerated
+        option above emits its own filter. Every enumerated option's filter
+        therefore runs strictly AFTER this merge in the same jq pipe, so an
+        enumerated option's value always WINS over a same-named key here — a
+        typo in `extraSettings` can never silently override a setting this
+        module deliberately manages. This is deliberate precedence, not an
+        eval-time error: naming an enumerated key here is not rejected, it is
+        simply superseded.
+
+        `enabledPlugins` and `extraKnownMarketplaces` are the one exception:
+        both are stripped from this merge unconditionally (they never reach
+        settings.json via this option, regardless of value), because those
+        two keys are wholesale-replaced by
+        `claude-settings-replace-managed-keys.sh` in a separate pass that
+        already ran before this jq invocation ever sees the file. Use the
+        dedicated `enabledPlugins` / `extraKnownMarketplaces` options for
+        those instead.
+      '';
     };
   };
 

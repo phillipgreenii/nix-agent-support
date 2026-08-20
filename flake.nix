@@ -2604,6 +2604,131 @@
                 assert !(hasSub "del(.cleanupPeriodDays)" cleanupNull);
                 pkgs.runCommand "claude-settings-nullor-noop-ok" { } "touch $out";
 
+              # Regression guard for pg2-hpwww: extraSettings is the freeform
+              # passthrough escape hatch for any Claude Code setting this module
+              # does not enumerate (concrete trigger: skillListingBudgetFraction,
+              # otherwise unreachable from nix). The generated jq program is a
+              # straight `|` pipe over the filters list in LIST order, so
+              # "enumerated wins" is provable purely from ORDERING: the
+              # extraSettings merge is emitted FIRST, and jq evaluates left to
+              # right, so a later per-key filter for the SAME key strictly
+              # post-dates — and therefore overrides — whatever the merge set.
+              test-claude-settings-extra-settings =
+                let
+                  hmLib = lib // {
+                    hm = (lib.hm or { }) // {
+                      dag = (lib.hm.dag or { }) // {
+                        entryAfter = _deps: text: text;
+                      };
+                    };
+                  };
+                  evalActivation =
+                    cfg:
+                    (lib.evalModules {
+                      specialArgs = {
+                        inherit pkgs inputs;
+                        lib = hmLib;
+                        mkBashBuildersFor =
+                          p:
+                          inputs.phillipgreenii-nix-base.lib.mkBashBuilders {
+                            pkgs = p;
+                            inherit self;
+                            inherit (p) lib;
+                          };
+                      };
+                      modules = [
+                        ./home/programs/claude-settings/default.nix
+                        (
+                          { lib, ... }:
+                          {
+                            options = {
+                              phillipgreenii.programs.claude-code.enable = lib.mkEnableOption "claude (stub)";
+                              home.activation = lib.mkOption {
+                                type = lib.types.attrsOf lib.types.anything;
+                                default = { };
+                              };
+                            };
+                          }
+                        )
+                        cfg
+                      ];
+                    }).config;
+
+                  activationWith =
+                    settings:
+                    (evalActivation {
+                      phillipgreenii.programs.claude-code = {
+                        enable = true;
+                        inherit settings;
+                      };
+                    }).home.activation.claude-settings;
+
+                  hasSub = needle: haystack: lib.hasInfix needle haystack;
+
+                  # The bead's concrete trigger: an UNENUMERATED key must reach
+                  # the generated jq program at all (it was previously
+                  # unreachable from nix).
+                  onlyExtra = activationWith {
+                    extraSettings = {
+                      skillListingBudgetFraction = 0.05;
+                    };
+                  };
+
+                  # extraSettings names an ENUMERATED key (theme) that collides
+                  # with a set option, alongside the unenumerated trigger key.
+                  collision = activationWith {
+                    theme = "dark";
+                    extraSettings = {
+                      skillListingBudgetFraction = 0.05;
+                      theme = "light";
+                    };
+                  };
+
+                  # extraSettings attempting the two keys owned by the separate
+                  # replace-managed-keys script — those MUST be stripped from
+                  # the merge entirely, never merely out-ordered.
+                  managedKeyAttempt = activationWith {
+                    enabledPlugins = {
+                      "real@mkt" = true;
+                    };
+                    extraSettings = {
+                      enabledPlugins = {
+                        "sneaky@mkt" = true;
+                      };
+                      extraKnownMarketplaces = {
+                        sneaky = {
+                          source = "directory";
+                          path = "/tmp/sneaky";
+                        };
+                      };
+                    };
+                  };
+                in
+                # The unenumerated key reaches the generated jq program at all.
+                assert hasSub ''"skillListingBudgetFraction":0.05'' onlyExtra;
+                # Both the merge (with the trigger key) and the enumerated
+                # theme assignment are present in the colliding case.
+                assert hasSub ''"skillListingBudgetFraction":0.05'' collision;
+                assert hasSub ''.theme = "dark"'' collision;
+                # ORDERING proves precedence: the extraSettings merge text must
+                # appear strictly BEFORE the enumerated theme filter, so jq's
+                # left-to-right pipe evaluation makes the enumerated value win.
+                assert hasSub ''"skillListingBudgetFraction":0.05'' (
+                  lib.head (lib.splitString ''.theme = "dark"'' collision)
+                );
+                # The colliding "light" value from extraSettings must never
+                # appear as a winning `.theme =` assignment — only inside the
+                # merge blob, which is asserted separately above.
+                assert !(hasSub ''.theme = "light"'' collision);
+                # enabledPlugins / extraKnownMarketplaces are stripped from the
+                # extraSettings merge outright: the sneaky entries must not
+                # appear anywhere in the generated script, while the real,
+                # dedicated-option entry still does.
+                assert !(hasSub "sneaky@mkt" managedKeyAttempt);
+                assert !(hasSub "sneaky" managedKeyAttempt);
+                assert hasSub "real@mkt" managedKeyAttempt;
+                pkgs.runCommand "claude-settings-extra-settings-ok" { } "touch $out";
+
               # Plan 5: agent-tooling capability/bundle -> feature-flag wiring
               # (claude-code binary+ceta default-on, ccusage off, perles human-only,
               # bundle enable + child veto). Pure eval; supplies the framework +
