@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmdparse"
@@ -2179,19 +2180,214 @@ func inMultiStagePipelineStage(leaves []cmdparse.ParsedCommand, i int) bool {
 // for that one triple only — every other GIT_CONFIG_* form named above
 // (GIT_CONFIG_GLOBAL/SYSTEM/PARAMETERS, legacy GIT_CONFIG) stays fully blind, since
 // none of them carries a statically resolvable key/value pair the way the triple can.
-// Not yet implemented — this comment records the decision only. Implementation MUST
-// reuse clearedConfigFlagPairs (no second table) and MUST fail closed: a triple that
-// does not resolve statically (a `$VAR` value, a COUNT that disagrees with the keys
-// present, a KEY_n with no VALUE_n, a key not in the allowlist) must not clear, and a
-// mixed set clears only when EVERY pair clears. See pg2-py8h2 for the full spec and
-// acceptance criteria.
+//
+// IMPLEMENTED (pg2-py8h2): isGitConfigEnvTripleVar picks the triple's three name
+// shapes out of the leaf's GIT_CONFIG_* prefix; every OTHER GIT_CONFIG_* name (or
+// legacy `GIT_CONFIG`) is still unconditionally screened below, unchanged. The triple
+// itself is handed to envConfigTripleCleared, which REUSES clearedConfigFlagPairs (no
+// second table, no widened key set) and fails closed on exactly the shapes the bead
+// names: an unresolvable COUNT or VALUE_n, a COUNT that disagrees with which KEY_n/
+// VALUE_n names are actually present, a KEY_n with no matching VALUE_n, a key outside
+// the allowlist, and a mixed set where only SOME pairs would clear (ALL-OR-NOTHING,
+// matching clearedConfigFlagPairs' own repeated-`-c` rule). See envConfigTripleCleared
+// for exactly which branch answers which named case.
 func hasGitConfigEnvInjection(envs []cmdparse.EnvAssignment) bool {
+	triple := map[string]cmdparse.EnvAssignment{}
 	for _, ev := range envs {
-		if ev.Name == "GIT_CONFIG" || strings.HasPrefix(ev.Name, "GIT_CONFIG_") {
+		switch {
+		case ev.Name == "GIT_CONFIG":
+			// The legacy single-file spelling. Its keys are whatever the file says
+			// when git opens it — never statically resolvable — so it stays fully
+			// blind, exactly as before.
+			return true
+		case isGitConfigEnvTripleVar(ev.Name):
+			// Collected rather than answered immediately: a LATER occurrence of the
+			// same name (an earlier leaf's export, overridden by this leaf's own
+			// prefix — see visibleEnvVars) must win, and a plain map keyed on Name
+			// gives exactly that "last one wins" semantics as the loop walks forward.
+			triple[ev.Name] = ev
+		case strings.HasPrefix(ev.Name, "GIT_CONFIG_"):
+			// Every other GIT_CONFIG_* shape (GLOBAL, SYSTEM, PARAMETERS, NOSYSTEM,
+			// any future spelling) — none carries a statically resolvable key/value
+			// pair, so none is eligible for the triple's carve-out.
 			return true
 		}
 	}
-	return false
+	if len(triple) == 0 {
+		return false
+	}
+	return !envConfigTripleCleared(triple)
+}
+
+// gitConfigCountVar, gitConfigKeyEnvPrefix and gitConfigValueEnvPrefix name the three
+// env-var shapes that make up the GIT_CONFIG_COUNT / KEY_n / VALUE_n triple — the ONE
+// GIT_CONFIG_* form hasGitConfigEnvInjection ever attempts to resolve. See its RULING
+// comment above.
+const (
+	gitConfigCountVar       = "GIT_CONFIG_COUNT"
+	gitConfigKeyEnvPrefix   = "GIT_CONFIG_KEY_"
+	gitConfigValueEnvPrefix = "GIT_CONFIG_VALUE_"
+)
+
+// gitConfigEnvTripleVarIndex reports whether name is a `<prefix><n>` variable — either
+// half of a `GIT_CONFIG_KEY_<n>` / `GIT_CONFIG_VALUE_<n>` pair — and if so, its
+// numeric index n. The suffix MUST be one or more ASCII digits (no sign, no leading
+// `+`), matching git's own non-negative index; anything else (non-numeric, empty) is
+// NOT a triple member, and the caller treats it as an "other" GIT_CONFIG_* name that
+// stays unconditionally screened rather than silently ignored.
+func gitConfigEnvTripleVarIndex(name, prefix string) (int, bool) {
+	suffix, ok := strings.CutPrefix(name, prefix)
+	if !ok || suffix == "" {
+		return 0, false
+	}
+	for _, c := range suffix {
+		if c < '0' || c > '9' {
+			return 0, false
+		}
+	}
+	n, err := strconv.Atoi(suffix)
+	if err != nil {
+		return 0, false
+	}
+	return n, true
+}
+
+// isGitConfigEnvTripleVar reports whether name is one of the three shapes the
+// COUNT/KEY_n/VALUE_n triple is made of.
+func isGitConfigEnvTripleVar(name string) bool {
+	if name == gitConfigCountVar {
+		return true
+	}
+	if _, ok := gitConfigEnvTripleVarIndex(name, gitConfigKeyEnvPrefix); ok {
+		return true
+	}
+	_, ok := gitConfigEnvTripleVarIndex(name, gitConfigValueEnvPrefix)
+	return ok
+}
+
+// literalGitConfigEnvValue returns ev's value when it is STATICALLY known — cmdparse's
+// own ExpansionNone classification — and reports false otherwise.
+//
+// IT DOES NOT UNWRAP QUOTES (cmdparse.UnwrapGluedQuotes), deliberately, matching this
+// file's other env-value read: hasGitProgramEnvVar's editor carve-out
+// (isInertEditorValue) already established that an env assignment's value is compared
+// RAW, quotes included, so a quoted spelling (`GIT_CONFIG_KEY_0='core.fsmonitor'`) is a
+// DIFFERENT token from the unquoted one and fails closed rather than being unwrapped.
+// The `-c` route's configFlagPairCleared unwraps because there the KEY and VALUE halves
+// are glued into one argv token by construction; an env assignment's NAME and VALUE are
+// never glued that way, so there is no equivalent token to unwrap.
+func literalGitConfigEnvValue(ev cmdparse.EnvAssignment) (string, bool) {
+	if ev.Expansion != cmdparse.ExpansionNone {
+		return "", false
+	}
+	return ev.Value, true
+}
+
+// literalNonNegativeInt parses ev's value as a literal, non-negative base-10 integer —
+// the shape GIT_CONFIG_COUNT must have for git itself to accept it. Anything else
+// (unresolvable, empty, signed, non-digit) fails closed.
+func literalNonNegativeInt(ev cmdparse.EnvAssignment) (int, bool) {
+	value, ok := literalGitConfigEnvValue(ev)
+	if !ok || value == "" {
+		return 0, false
+	}
+	for _, c := range value {
+		if c < '0' || c > '9' {
+			return 0, false
+		}
+	}
+	n, err := strconv.Atoi(value)
+	if err != nil {
+		return 0, false
+	}
+	return n, true
+}
+
+// envConfigTripleCleared is the ENV twin of configFlagPairCleared: it reports whether
+// EVERY key/value pair the GIT_CONFIG_COUNT / KEY_n / VALUE_n triple in byName spells
+// out is a pair clearedConfigFlagPairs already allows for the `-c` route (RULING,
+// operator, 2026-08-19, pg2-py8h2 — see hasGitConfigEnvInjection above).
+//
+// byName holds only names hasGitConfigEnvInjection has already classified as TRIPLE
+// members (isGitConfigEnvTripleVar) — no GIT_CONFIG_GLOBAL/SYSTEM/PARAMETERS or legacy
+// GIT_CONFIG ever reaches this function; the caller is what enforces that.
+//
+// FAIL-CLOSED BY CONSTRUCTION, and every branch below is one of the acceptance
+// criteria's named cases:
+//
+//   - No GIT_CONFIG_COUNT at all: git itself cannot resolve a KEY_n/VALUE_n pair
+//     without it, so the triple is not statically resolvable — returns false.
+//   - GIT_CONFIG_COUNT present but not a LITERAL non-negative integer (a `$VAR`, a
+//     malformed digit string, a quoted "1", an empty value): returns false. This is
+//     the distinction the bead's fail-closed nuance names explicitly — an
+//     UNRESOLVABLE value must never be treated as an ABSENT one — and it is why
+//     literalGitConfigEnvValue answers "unresolvable" (false) SEPARATELY from
+//     byName's own map-presence test, rather than folding the two together the way
+//     cmdparse.InCommandVars does (it DELETES a name whose value it cannot read
+//     literally, making "value unknown" indistinguishable from "no such variable";
+//     this function is deliberately NOT built on InCommandVars for that reason).
+//   - The set of KEY_*/VALUE_* NAMES actually present in byName does not exactly
+//     enumerate {0, ..., count-1} on BOTH halves — a COUNT that disagrees with the
+//     keys present, whether by naming fewer indices or extra ones outside range:
+//     returns false.
+//   - A pair whose KEY_n or VALUE_n half is present by name but not present for the
+//     SAME index as its partner (a KEY_n with no VALUE_n, or vice versa): returns
+//     false.
+//   - A resolved key that lowercases to a name outside clearedConfigFlagPairs, or
+//     whose value fails that key's own predicate: returns false.
+//   - MIXED SETS: the loop below returns on the FIRST pair that fails to clear, so a
+//     set where only SOME pairs would individually clear never reaches "all
+//     cleared" — matching clearedConfigFlagPairs' own ALL-OR-NOTHING rule for
+//     repeated `-c`.
+//
+// Only when EVERY one of the count's pairs resolves statically AND clears does this
+// return true.
+func envConfigTripleCleared(byName map[string]cmdparse.EnvAssignment) bool {
+	countEv, hasCount := byName[gitConfigCountVar]
+	if !hasCount {
+		return false
+	}
+	count, ok := literalNonNegativeInt(countEv)
+	if !ok {
+		return false
+	}
+	seen := map[int]bool{}
+	for name := range byName {
+		if name == gitConfigCountVar {
+			continue
+		}
+		if idx, ok := gitConfigEnvTripleVarIndex(name, gitConfigKeyEnvPrefix); ok {
+			seen[idx] = true
+			continue
+		}
+		if idx, ok := gitConfigEnvTripleVarIndex(name, gitConfigValueEnvPrefix); ok {
+			seen[idx] = true
+		}
+	}
+	if len(seen) != count {
+		// A COUNT that disagrees with the keys present.
+		return false
+	}
+	for i := 0; i < count; i++ {
+		keyEv, hasKey := byName[gitConfigKeyEnvPrefix+strconv.Itoa(i)]
+		valEv, hasVal := byName[gitConfigValueEnvPrefix+strconv.Itoa(i)]
+		if !hasKey || !hasVal {
+			return false
+		}
+		key, ok := literalGitConfigEnvValue(keyEv)
+		if !ok {
+			return false
+		}
+		value, ok := literalGitConfigEnvValue(valEv)
+		if !ok {
+			return false
+		}
+		predicate, listed := clearedConfigFlagPairs[strings.ToLower(key)]
+		if !listed || !predicate(value) {
+			return false
+		}
+	}
+	return true
 }
 
 // gitProgramEnvVars maps each `GIT_*` environment variable MEASURED to name a program
