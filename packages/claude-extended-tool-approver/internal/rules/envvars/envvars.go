@@ -172,7 +172,32 @@ var injectorAskVars = map[string]bool{
 //     seam never resolves them and they keep asking.
 //   - pg2-kzqw2: a `$(...)`-derived component — the middle option this
 //     ruling's trade analysis fanned out to once the blanket widen was
-//     rejected. Not decided by KEEP STRICT, and not implemented here.
+//     rejected. OPERATOR RULING 2026-08-17 (via `/unblock-human-beads`,
+//     decided together with pg2-qhhil and pg2-d71my, same sitting; measured
+//     pg2-3arc2: 24 of 74 post-apply PATH/HOME asks, 0 denials): BUILD —
+//     "Option 1", admit the component by SUBSTITUTION SAFETY rather than by
+//     evaluating its resolved value: a component whose command substitution
+//     body is already certified safe under the static allowlist
+//     (cmdparse.IsSafeSubstitutionBody, e.g. `$(dirname …)`, `$(readlink -f
+//     …)`) is acceptable WITHOUT knowing what it resolves to — the identical
+//     trade this ruling's own COHERENCE REASON already accepts for a literal
+//     static prepend. Now IMPLEMENTED — see preservesCallerValue's
+//     splitPathValueComponents/componentSafeSubstitution branch. This does
+//     NOT reopen the coherence objection above: unlike `$PWD` or `$JAVA_HOME`,
+//     a command substitution is not an AMBIENT lookup this predicate can never
+//     ground — its body is inspected, statically, by the same allowlist
+//     ExpansionSafeCmd already trusts. What it DOES require, because a
+//     command substitution (unlike a syntactic hazard) can resolve to the
+//     EMPTY STRING on any given invocation: componentSafeSubstitution demands
+//     the component's LITERAL skeleton alone — the substitution zeroed out —
+//     still be a non-empty static absolute path, so a bare `$(safe-cmd)`
+//     component with nothing else keeps asking exactly like `PATH="$PATH:"`
+//     does, while `$(safe-cmd)/bin` does not (see that function's own doc for
+//     the full reasoning). A body carrying a NESTED substitution
+//     (`$(dirname "$(readlink -f x)")`) is never on the static allowlist in
+//     the first place (IsSafeSubstitutionBody refuses nesting), so it is
+//     unaffected by this widening and keeps asking on the SAME pre-existing
+//     ground as before.
 //   - pg2-d71my: REPLACEMENT-form values (`env -i`, hermetic-HOME test
 //     idioms) — a DIFFERENT question from this ruling's EXTEND-shape
 //     component predicate (see the Rule doc comment's Approve CONTRACT).
@@ -279,21 +304,23 @@ func assignmentIsWholeLeaf(pc cmdparse.ParsedCommand) bool {
 // preservesCallerValue reports whether an askVar assignment's VALUE is the
 // verified-safe EXTEND shape: it keeps the caller's own value ($NAME / ${NAME}) as
 // one whole `:`-separated component, and every other component is EITHER a static
-// absolute path OR a reference to a variable THIS SAME COMMAND assigned, earlier,
-// to one (vars — see below). That is the shape 954 of the 1,118 logged PATH/HOME
-// assignments use, with zero adversarial values among them (pg2-qfuto).
+// absolute path, OR a reference to a variable THIS SAME COMMAND assigned, earlier,
+// to one (vars — see below), OR a command substitution already certified safe by
+// the static allowlist (pg2-kzqw2 — see componentSafeSubstitution). The first shape
+// is 954 of the 1,118 logged PATH/HOME assignments, with zero adversarial values
+// among them (pg2-qfuto).
 //
 // The predicate is deliberately STRICT — a component must be literal-and-absolute,
-// or resolve to exactly that through vars — so nothing behind an AMBIENT expansion
-// can smuggle a lookup directory in. It therefore still asks on `$PWD/bin:$PATH`,
-// `$JAVA_HOME/bin:$PATH` and `$(nix build …)/bin:$PATH`: none of those names is
-// something the command text itself establishes, so vars never carries them.
+// resolve to exactly that through vars, or be a certified-safe substitution — so
+// nothing behind an AMBIENT expansion can smuggle a lookup directory in. It
+// therefore still asks on `$PWD/bin:$PATH`, `$JAVA_HOME/bin:$PATH` and
+// `$(nix build …)/bin:$PATH` (`nix` is not on the static safe-cmd allowlist).
 // Widening it to accept ARBITRARY $VAR-derived components was considered and RULED
 // AGAINST (2026-07-30) — see the "OPERATOR RULING" note on the `askVars` doc
 // comment above for the coherence reason and the measured basis; do not
-// re-litigate the blanket widen here. The narrow in-command-assigned case below is
-// the surviving middle option that ruling explicitly did NOT kill (pg2-qhhil,
-// operator ruling 2026-08-17: BUILD).
+// re-litigate the blanket widen here. The in-command-assigned case and the
+// certified-safe-substitution case below are the two surviving middle options that
+// ruling explicitly did NOT kill (pg2-qhhil and pg2-kzqw2 respectively, both BUILD).
 //
 // vars is the in-command variable environment for the leaf this assignment
 // belongs to (primarycommit.LeafVars over the caller's own parse, wrapping
@@ -305,9 +332,11 @@ func assignmentIsWholeLeaf(pc cmdparse.ParsedCommand) bool {
 // is inherent to any value-aware split — the caller's PATH is still intact and the
 // directory is one the user already controls — and it is the same guarantee a
 // settings.json `Bash(export PATH:*)` entry already grants. An in-command-assigned
-// component (`bindir=/tmp/x/bin; PATH="$bindir:$PATH"`) carries the identical
-// trade: it is exactly as inspectable as writing the path literally, no more and
-// no less.
+// component (`bindir=/tmp/x/bin; PATH="$bindir:$PATH"`) and a certified-safe
+// substitution component (`$(dirname /usr/local/bin/go)/bin`) carry the identical
+// trade: each is exactly as inspectable as writing the path literally, no more and
+// no less — except for the substitution's own EMPTY-RESULT hazard, which
+// componentSafeSubstitution handles explicitly (see its doc).
 func preservesCallerValue(ev cmdparse.EnvAssignment, vars map[string]string) bool {
 	// The bash append form NAME+=VALUE (normalized to NAME by cmdparse) IS
 	// semantically a preserve, but it deliberately does NOT approve: no logged row
@@ -315,41 +344,243 @@ func preservesCallerValue(ev cmdparse.EnvAssignment, vars map[string]string) boo
 	if strings.HasPrefix(ev.Raw, ev.Name+"+=") {
 		return false
 	}
-	// Only a plain $VAR/${VAR}-referencing value can be the extend shape. A value
-	// with no expansion at all cannot reference the caller's value (it is a
-	// REPLACEMENT), and a command/process substitution or arithmetic expansion is
-	// not something this predicate is allowed to reason about — those keep asking.
-	if ev.Expansion != cmdparse.ExpansionVarRef {
+	// A plain $VAR/${VAR}-referencing value with NO substitution at all is the
+	// ordinary extend shape (ExpansionVarRef). A value that ALSO embeds a command
+	// substitution alongside the self-reference — `"$(cmd)/bin:$PATH"` — censuses
+	// as ExpansionUnknown instead (classifyExpansion's kind() awards VarRef only
+	// when NO command substitution is present at all), so ExpansionUnknown must
+	// also reach the per-component analysis below for pg2-kzqw2's relief to apply.
+	// This does NOT reopen the door to every other ExpansionUnknown shape: every
+	// component below still needs its OWN independent, structural reason to
+	// clear, and the value with no self-reference at all still fails on
+	// `preserved` staying false (a value like `PATH=$(curl evil)` continues to be
+	// treated purely as a REPLACEMENT and never reaches Approve here).
+	if ev.Expansion != cmdparse.ExpansionVarRef && ev.Expansion != cmdparse.ExpansionUnknown {
 		return false
 	}
 	value, ok := literalValue(ev.Value)
 	if !ok {
 		return false
 	}
+	components, ok := splitPathValueComponents(value)
+	if !ok {
+		return false
+	}
 	selfRef, braceRef := "$"+ev.Name, "${"+ev.Name+"}"
 	preserved := false
-	for _, component := range strings.Split(value, ":") {
-		if component == selfRef || component == braceRef {
-			preserved = true
-			continue
+	for _, atoms := range components {
+		if text, literalOnly := componentLiteral(atoms); literalOnly {
+			if text == selfRef || text == braceRef {
+				preserved = true
+				continue
+			}
+			if isStaticAbsolutePath(text) {
+				continue
+			}
+			// NARROW MIDDLE OPTION (pg2-qhhil): the component is not itself a literal
+			// static absolute path, but it may be a variable THIS SAME COMMAND
+			// assigned, earlier, to one — e.g. `bindir=/tmp/x/bin;
+			// PATH="$bindir:$PATH"`. cmdparse.ExpandInCommand resolves it against
+			// vars ALL-OR-NOTHING: an AMBIENT variable (never assigned in this
+			// command's own text — $PWD, $JAVA_HOME, $TMP, …) is simply absent from
+			// vars, so ok is false and this component falls through to the decisive
+			// Ask below, unchanged from before this bead.
+			if expanded, ok := cmdparse.ExpandInCommand(text, vars); ok && isStaticAbsolutePath(expanded) {
+				continue
+			}
+			return false
 		}
-		if isStaticAbsolutePath(component) {
-			continue
-		}
-		// NARROW MIDDLE OPTION (pg2-qhhil): the component is not itself a literal
-		// static absolute path, but it may be a variable THIS SAME COMMAND
-		// assigned, earlier, to one — e.g. `bindir=/tmp/x/bin;
-		// PATH="$bindir:$PATH"`. cmdparse.ExpandInCommand resolves it against
-		// vars ALL-OR-NOTHING: an AMBIENT variable (never assigned in this
-		// command's own text — $PWD, $JAVA_HOME, $TMP, …) is simply absent from
-		// vars, so ok is false and this component falls through to the decisive
-		// Ask below, unchanged from before this bead.
-		if expanded, ok := cmdparse.ExpandInCommand(component, vars); ok && isStaticAbsolutePath(expanded) {
+		// The component embeds at least one top-level command/process substitution
+		// (componentLiteral only reports literalOnly=false for that case) —
+		// pg2-kzqw2's relief. See componentSafeSubstitution for the shape it
+		// requires and the empty-substitution hazard it guards against.
+		if componentSafeSubstitution(atoms) {
 			continue
 		}
 		return false
 	}
 	return preserved
+}
+
+// pathValueAtom is one piece of a PATH/HOME value's text, inside a single
+// ':'-delimited component: either literal source text, or one top-level
+// command/process substitution the component embeds verbatim. Splitting the
+// whole value into these BEFORE looking for ':' component boundaries is what
+// keeps a literal ':' inside a substitution's OWN body (`$(date +%H:%M)`) from
+// ever being mistaken for a component boundary — a colon is only ever
+// significant inside a literal atom; a substitution atom is opaque to it
+// (pg2-kzqw2).
+type pathValueAtom struct {
+	literal string
+	sub     *cmdparse.Substitution // nil for a literal atom
+}
+
+// splitPathValueComponents splits value — text literalValue already produced,
+// so it carries no surviving quote or backslash — into ':'-delimited PATH/HOME
+// components, each expressed as a sequence of pathValueAtoms rather than a raw
+// substring.
+//
+// cmdparse.EnumerateSubstitutions finds every TOP-LEVEL command/process
+// substitution in value, in source order and never nested (ADR 0039 /
+// pg2-1019a). Each is relocated by an exact, left-to-right, cursor-advancing
+// text search that never restarts from the front — safe specifically BECAUSE
+// substitutions are returned in that order and never overlap, so an earlier
+// one's occurrence is always consumed before a later one's search begins, and
+// a later substitution's wrapped text can never be mistaken for an EARLIER,
+// not-yet-consumed occurrence of the same text.
+//
+// ok is false only when a substitution's reconstructed source text
+// (`$(Body)` / “ `Body` “ / `<(Body)` / `>(Body)`) cannot be relocated at or
+// after the cursor — meaning EnumerateSubstitutions and this reconstruction
+// have desynced — and the caller MUST fail closed (treat the value as
+// unclassifiable) rather than guess a split.
+func splitPathValueComponents(value string) ([][]pathValueAtom, bool) {
+	subs := cmdparse.EnumerateSubstitutions(value)
+	var atoms []pathValueAtom
+	cursor := 0
+	for i := range subs {
+		wrapped, ok := wrappedSubstitutionText(subs[i])
+		if !ok {
+			return nil, false
+		}
+		idx := strings.Index(value[cursor:], wrapped)
+		if idx < 0 {
+			return nil, false
+		}
+		pos := cursor + idx
+		if pos > cursor {
+			atoms = append(atoms, pathValueAtom{literal: value[cursor:pos]})
+		}
+		atoms = append(atoms, pathValueAtom{sub: &subs[i]})
+		cursor = pos + len(wrapped)
+	}
+	if cursor < len(value) {
+		atoms = append(atoms, pathValueAtom{literal: value[cursor:]})
+	}
+
+	// A substitution atom is opaque to ':'; only a literal atom's OWN text is
+	// ever split on it, which is what keeps `$(date +%H:%M)` whole.
+	var components [][]pathValueAtom
+	var current []pathValueAtom
+	for _, a := range atoms {
+		if a.sub != nil {
+			current = append(current, a)
+			continue
+		}
+		pieces := strings.Split(a.literal, ":")
+		for i, piece := range pieces {
+			if i > 0 {
+				components = append(components, current)
+				current = nil
+			}
+			if piece != "" {
+				current = append(current, pathValueAtom{literal: piece})
+			}
+		}
+	}
+	components = append(components, current)
+	return components, true
+}
+
+// wrappedSubstitutionText reconstructs a Substitution's exact original source
+// span — the text EnumerateSubstitutions extracted Body from — so
+// splitPathValueComponents can relocate it inside the value it came from. ok
+// is false only for a SubstitutionKind this package does not know about (a
+// future addition to cmdparse's enum), which must fail the caller closed
+// rather than guess a wrapping.
+func wrappedSubstitutionText(sub cmdparse.Substitution) (string, bool) {
+	switch sub.Kind {
+	case cmdparse.SubstCommand:
+		return "$(" + sub.Body + ")", true
+	case cmdparse.SubstBacktick:
+		return "`" + sub.Body + "`", true
+	case cmdparse.SubstProcessIn:
+		return "<(" + sub.Body + ")", true
+	case cmdparse.SubstProcessOut:
+		return ">(" + sub.Body + ")", true
+	default:
+		return "", false
+	}
+}
+
+// componentLiteral reports the concatenated literal text of atoms when the
+// component carries NO substitution at all, in which case ok is true. By
+// splitPathValueComponents' construction, a no-substitution component holds at
+// most one atom (a second literal atom can only ever appear around an
+// intervening substitution atom), so this never needs to concatenate more than
+// one string.
+func componentLiteral(atoms []pathValueAtom) (text string, ok bool) {
+	switch len(atoms) {
+	case 0:
+		return "", true
+	case 1:
+		if atoms[0].sub != nil {
+			return "", false
+		}
+		return atoms[0].literal, true
+	default:
+		return "", false
+	}
+}
+
+// componentSafeSubstitution reports whether atoms is the pg2-kzqw2 relief
+// shape: an OPTIONAL literal prefix, EXACTLY ONE top-level COMMAND substitution
+// (never a process substitution — IsCommandSubstitution excludes `<(...)` /
+// `>(...)`, which no static allowlist governs) whose body is already certified
+// safe under the static allowlist (cmdparse.IsSafeSubstitutionBody — which also
+// refuses any NESTED substitution, so `$(dirname "$(readlink -f x)")` never
+// reaches an Approve through this path), and an OPTIONAL literal suffix —
+// treated as acceptable WITHOUT knowing the substitution's resolved value, per
+// the operator's 2026-08-17 ruling (see the askVars doc comment's pg2-kzqw2
+// bullet).
+//
+// THE EMPTY-SUBSTITUTION HAZARD is the crux of pg2-kzqw2, and why this is NOT
+// simply "IsSafeSubstitutionBody(sub) implies Approve". Unlike a purely
+// syntactic hazard ($PWD, $JAVA_HOME — never assigned by the command's own
+// text, so they are unresolvable rather than merely unpredictable), a command
+// substitution can resolve to the EMPTY STRING on any given invocation —
+// nothing about being on the static safe-cmd allowlist rules that out.
+// isStaticAbsolutePath already refuses an empty ':' component ON PURPOSE (an
+// empty PATH entry means "current directory" to the shell — the identical CWD
+// hazard `PATH="$PATH:"` triggers, pinned by TestEnvVars_AskVars_NotPreserveForm_Ask).
+// So this predicate demands that the component's LITERAL SKELETON ALONE — with
+// the substitution's own contribution zeroed out — is STILL a safe, non-empty
+// absolute path:
+//
+//   - `$(dirname /usr/local/bin/go)/bin` empties to "/bin" — a real absolute
+//     path whatever the substitution actually returns — so it Approves.
+//   - a BARE `$(safe-cmd)` component with no literal prefix or suffix at all
+//     empties to "" — exactly the CWD hazard — so it keeps asking, even though
+//     the substitution itself is certified safe. `printf` invoked with an
+//     empty-string argument is a concrete, real member of the static
+//     allowlist that genuinely returns empty, which is exactly the case this
+//     guards.
+//
+// A component with MORE than one substitution atom (`$(a)$(b)/bin`, no ':'
+// between them) is unclassifiable by this predicate and returns false — a
+// narrower scope than strictly necessary, matching pg2-qhhil's own narrow
+// scoping of its middle option, and relaxable later if measurement calls for
+// it.
+func componentSafeSubstitution(atoms []pathValueAtom) bool {
+	var sub *cmdparse.Substitution
+	var literal strings.Builder
+	for _, a := range atoms {
+		if a.sub == nil {
+			literal.WriteString(a.literal)
+			continue
+		}
+		if sub != nil {
+			return false // more than one substitution in this component: unclassifiable
+		}
+		sub = a.sub
+	}
+	if sub == nil || !sub.IsCommandSubstitution() {
+		return false
+	}
+	if !cmdparse.IsSafeSubstitutionBody(sub.Body) {
+		return false
+	}
+	return isStaticAbsolutePath(literal.String())
 }
 
 // literalValue strips ONE pair of wrapping double quotes from a raw assignment

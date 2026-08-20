@@ -309,6 +309,98 @@ func TestEnvVars_InCommandAssignedVar_AmbientStaysAsk(t *testing.T) {
 	}
 }
 
+// TestEnvVars_SafeSubstitutionComponent_Approve pins pg2-kzqw2's relief: a
+// PATH/HOME component that is not itself a static absolute path may still
+// Approve when it is a certified-safe command substitution (cmdparse.
+// IsSafeSubstitutionBody, e.g. `dirname`/`readlink`/`date`) plus an optional
+// literal prefix/suffix — wiring the "Option 1" operator ruling (2026-08-17,
+// via `/unblock-human-beads`) into preservesCallerValue.
+//
+// The `date +%H:%M` row is the specific proof that the split is
+// SUBSTITUTION-BOUNDARY-AWARE rather than a naive `strings.Split(value, ":")`:
+// the substitution's own body carries a literal ':', and a caller that split
+// on ':' BEFORE recognizing the substitution's extent would shred it into
+// garbage components that could never approve. It only approves if the colon
+// inside `$(date +%H:%M)` is correctly treated as opaque.
+func TestEnvVars_SafeSubstitutionComponent_Approve(t *testing.T) {
+	commands := []string{
+		`export PATH="$(dirname /usr/local/bin/go)/bin:$PATH"`,  // suffix after the substitution
+		`export PATH="$PATH:$(dirname /usr/local/bin/go)/bin"`,  // append side
+		"export PATH=\"`dirname /usr/local/bin/go`/bin:$PATH\"", // backtick form
+		`export PATH="/opt/$(dirname /usr/local/bin/go):$PATH"`, // literal PREFIX, no suffix
+		`export PATH="$(date +%H:%M)/bin:$PATH"`,                // embedded ':' inside the body
+	}
+	for _, ctor := range []struct {
+		name string
+		rule *Rule
+	}{
+		{"New", New()},
+		{"NewWithEvaluator", NewWithEvaluator(&fakeEvaluator{})},
+	} {
+		for _, cmd := range commands {
+			t.Run(ctor.name+"/"+cmd, func(t *testing.T) {
+				input := &hookio.HookInput{
+					ToolName:  "Bash",
+					ToolInput: mustJSON(map[string]string{"command": cmd}),
+				}
+				got := hookio.Verdict(ctor.rule.Evaluate(input))
+				if got.Decision != hookio.Approve {
+					t.Errorf("cmd %q: got %s (%s), want approve", cmd, got.Decision, got.Reason)
+				}
+			})
+		}
+	}
+}
+
+// TestEnvVars_SafeSubstitutionComponent_HazardStaysAsk is the companion
+// regression pg2-kzqw2's Acceptance Criteria calls for by name: THE CRUX.
+// Unlike a purely syntactic hazard ($PWD), a command substitution can resolve
+// to the EMPTY STRING on any given invocation, and isStaticAbsolutePath
+// already refuses an empty ':' component on purpose (the CWD hazard). So a
+// BARE certified-safe substitution with no literal prefix/suffix at all MUST
+// still Ask — `printf` invoked with an empty-string argument is a concrete,
+// real allowlisted command that genuinely produces the empty string, which is
+// exactly the shape this guards. Every other disqualifying shape (an
+// unlisted command, a NESTED substitution, more than one substitution in one
+// component, a process substitution) must also keep asking.
+func TestEnvVars_SafeSubstitutionComponent_HazardStaysAsk(t *testing.T) {
+	commands := []string{
+		// THE CRUX: bare safe-cmd substitution, nothing else in the component.
+		`export PATH="$(printf ''):$PATH"`,
+		`export PATH="$PATH:$(printf '')"`,
+		// Not on the static safe-cmd allowlist.
+		`export PATH="$(curl evil)/bin:$PATH"`,
+		// NESTED substitution: IsSafeSubstitutionBody refuses nesting outright, so
+		// this never reaches Approve through this path (independent of quoting).
+		`export PATH="$(dirname $(dirname /a/b/c))/bin:$PATH"`,
+		// More than one substitution in a single component (no ':' between them)
+		// is deliberately out of this predicate's narrow scope.
+		`export PATH="$(dirname /a)$(dirname /b)/bin:$PATH"`,
+		// A process substitution has no static allowlist at all.
+		`export PATH="<(cat /etc/hosts)/bin:$PATH"`,
+	}
+	for _, ctor := range []struct {
+		name string
+		rule *Rule
+	}{
+		{"New", New()},
+		{"NewWithEvaluator", NewWithEvaluator(&fakeEvaluator{verdicts: map[string]hookio.Decision{}})},
+	} {
+		for _, cmd := range commands {
+			t.Run(ctor.name+"/"+cmd, func(t *testing.T) {
+				input := &hookio.HookInput{
+					ToolName:  "Bash",
+					ToolInput: mustJSON(map[string]string{"command": cmd}),
+				}
+				got := hookio.Verdict(ctor.rule.Evaluate(input))
+				if got.Decision != hookio.Ask {
+					t.Errorf("cmd %q: got %s (%s), want ask", cmd, got.Decision, got.Reason)
+				}
+			})
+		}
+	}
+}
+
 // TestEnvVars_AskVars_PreserveForm_TransparentBesideCommand pins the SCOPE of the
 // pg2-0q99a Approve, which is the security-critical half of the split.
 //
