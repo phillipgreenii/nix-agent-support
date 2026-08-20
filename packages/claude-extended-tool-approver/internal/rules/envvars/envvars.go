@@ -997,7 +997,25 @@ func (r *Rule) evaluateAssignment(ev cmdparse.EnvAssignment, input *hookio.HookI
 	// invariant). But it can be harmonized UP as well as DOWN, the four guarantees say
 	// which way the repo has chosen so far, and the choice belongs to whoever can also
 	// weigh the command-position half. It is not made here.
-	if ev.Expansion == cmdparse.ExpansionUnknown {
+	//
+	// # pg2-kzqw2: A result ALREADY Approve is POSITIVELY CLEARED and skips this block
+	//
+	// preservesCallerValue's componentSafeSubstitution relief (see its own doc) can
+	// itself set result to Approve above, for a value that carries a `$PATH`/`$HOME`
+	// self-reference ALONGSIDE a certified-safe command substitution — e.g.
+	// `PATH="$(dirname /usr/local/bin/go)/bin:$PATH"`. That value's census has both a
+	// param expansion and a command substitution, so expansionCensus.kind() classifies
+	// it ExpansionUnknown (the "beside ANY other expansion" rule), exactly like an
+	// unmodelled value. Before this guard, THIS block ran unconditionally on every
+	// ExpansionUnknown value and clobbered that Approve back to Ask via
+	// MostRestrictive — with no evaluator wired (New()) there is no recursion to
+	// re-clear it, so the componentSafeSubstitution relief was unreachable in
+	// practice for exactly the case the operator ruling authorized it for. The static
+	// allowlist check componentSafeSubstitution already performed is narrower and more
+	// precise than this block's generic "recurse and see" fallback, so a value it
+	// already cleared must not be re-escalated by a check that has no way to know it
+	// was cleared by a DIFFERENT static mechanism than its own recursion.
+	if ev.Expansion == cmdparse.ExpansionUnknown && result.Decision != hookio.Approve {
 		var subResults []hookio.RuleResult
 		clearedByRecursion := false
 		exhaustionOnly := false

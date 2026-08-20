@@ -352,6 +352,48 @@ func TestEnvVars_SafeSubstitutionComponent_Approve(t *testing.T) {
 	}
 }
 
+// TestEnvVars_SafeSubstitutionComponent_PositionIndependent re-asserts condition 3
+// of the Rule contract (assignmentIsWholeLeaf) for pg2-kzqw2's relief: the SAME
+// value shape must Approve identically across the four leaf forms
+// assignmentIsWholeLeaf recognizes as "no command left to pre-empt" — bare
+// (command-less), `export`, `env`, and the command-less leaf a compound
+// (`;`/`&&`) split produces (pg2-mtnmb rule-visibility, pg2-gkd5e
+// position-independence) — the same invariant TestEnvVars_AssignmentIsWholeLeaf
+// pins structurally and TestEnvVars_LoneAssignment_RuleVisible_Pg2mtnmb pins for
+// the pg2-0q99a shape. TestEnvVars_SafeSubstitutionComponent_Approve above only
+// ever exercised the `export` form, so this closes that gap for the NEW relief
+// specifically: a prefixed compound form's assignment-only leaf must reach the
+// SAME verdict as the bare form standing alone ("prefixed == bare").
+func TestEnvVars_SafeSubstitutionComponent_PositionIndependent(t *testing.T) {
+	commands := []string{
+		`PATH="$(dirname /usr/local/bin/go)/bin:$PATH"`,              // bare / command-less leaf
+		`export PATH="$(dirname /usr/local/bin/go)/bin:$PATH"`,       // export form
+		`env PATH="$(dirname /usr/local/bin/go)/bin:$PATH"`,          // env-prefix, no inner command
+		`PATH="$(dirname /usr/local/bin/go)/bin:$PATH"; true`,        // compound, ';' separator
+		`PATH="$(dirname /usr/local/bin/go)/bin:$PATH" && echo done`, // compound, '&&' separator
+	}
+	for _, ctor := range []struct {
+		name string
+		rule *Rule
+	}{
+		{"New", New()},
+		{"NewWithEvaluator", NewWithEvaluator(&fakeEvaluator{})},
+	} {
+		for _, cmd := range commands {
+			t.Run(ctor.name+"/"+cmd, func(t *testing.T) {
+				input := &hookio.HookInput{
+					ToolName:  "Bash",
+					ToolInput: mustJSON(map[string]string{"command": cmd}),
+				}
+				got := hookio.Verdict(ctor.rule.Evaluate(input))
+				if got.Decision != hookio.Approve {
+					t.Errorf("cmd %q: got %s (%s), want approve", cmd, got.Decision, got.Reason)
+				}
+			})
+		}
+	}
+}
+
 // TestEnvVars_SafeSubstitutionComponent_HazardStaysAsk is the companion
 // regression pg2-kzqw2's Acceptance Criteria calls for by name: THE CRUX.
 // Unlike a purely syntactic hazard ($PWD), a command substitution can resolve
@@ -434,6 +476,13 @@ func TestEnvVars_AskVars_PreserveForm_TransparentBesideCommand(t *testing.T) {
 		// leaf, however the value resolves, so it stays transparent rather than
 		// leaking an Approve onto the sibling command.
 		`bindir=/tmp/x/bin && PATH="$bindir:$PATH" git push --force origin main`,
+		// pg2-kzqw2: the certified-safe-substitution shape carries the IDENTICAL
+		// scope gate (condition 3 of the Rule contract, assignmentIsWholeLeaf) — a
+		// PREFIX assignment beside a real command's leaf is not the whole leaf
+		// regardless of WHICH of the three Approve predicates its value would
+		// satisfy in isolation, so it stays transparent here too rather than
+		// leaking an Approve onto `git push --force`.
+		`PATH="$(dirname /usr/local/bin/go)/bin:$PATH" git push --force origin main`,
 	}
 	for _, cmd := range commands {
 		t.Run(cmd, func(t *testing.T) {
@@ -1044,6 +1093,14 @@ func TestEnvVars_ApproveOnlyForVerifiedPreserveForm(t *testing.T) {
 		{"HOME=$(mktemp -d)", true},
 		{`T=$(mktemp -d); HOME="$T/h"`, true},
 
+		// pg2-kzqw2: THE new approvable shape — a component that is not itself a
+		// static absolute path but is a certified-safe command substitution
+		// (cmdparse.IsSafeSubstitutionBody) plus an optional literal prefix/suffix.
+		// Admitted by SUBSTITUTION SAFETY, without evaluating what it resolves to.
+		{`export PATH="$(dirname /usr/local/bin/go)/bin:$PATH"`, true},
+		{`export PATH="$PATH:$(dirname /usr/local/bin/go)/bin"`, true},
+		{"export PATH=\"`dirname /usr/local/bin/go`/bin:$PATH\"", true},
+
 		// (c) violated: the verified-safe value beside a real command stays transparent.
 		{`PATH="$PATH:/x" echo hi`, false},
 		{`PATH="$PATH:/x" git push --force origin main`, false},
@@ -1083,6 +1140,17 @@ func TestEnvVars_ApproveOnlyForVerifiedPreserveForm(t *testing.T) {
 		{`export PATH="$PATH:"`, false},
 		{`export PATH='$PATH:/x'`, false},
 		{`export PATH+=":/x"`, false},
+
+		// pg2-kzqw2: the certified-safe-substitution relief MUST NOT widen beyond
+		// its own narrow gate — THE CRUX is the bare-substitution row: a safe
+		// command can still resolve empty, and an empty PATH component is the
+		// CWD hazard `export PATH="$PATH:"` above already forbids.
+		{`export PATH="$(printf ''):$PATH"`, false},                   // bare substitution, no literal skeleton
+		{`export PATH="$PATH:$(printf '')"`, false},                   // append side, same hazard
+		{`export PATH="$(curl evil)/bin:$PATH"`, false},               // not on the static safe-cmd allowlist
+		{`export PATH="$(dirname $(dirname /a))/bin:$PATH"`, false},   // nested substitution: refused outright
+		{`export PATH="$(dirname /a)$(dirname /b)/bin:$PATH"`, false}, // two substitutions, one component
+		{`export PATH="<(cat /etc/hosts)/bin:$PATH"`, false},          // process substitution: no static allowlist
 
 		// pg2-qhhil: the narrow middle option MUST NOT widen into the rejected
 		// blanket widen. $PWD/$JAVA_HOME/$TMP are AMBIENT — never assigned by the
