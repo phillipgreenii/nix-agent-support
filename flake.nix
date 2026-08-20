@@ -383,7 +383,7 @@
             language = "system";
             pass_filenames = false;
             always_run = false;
-            files = "^(behavior-docs/docs/behavior/|packages/pr-pool/docs/behavior/|packages/pr-pool/.*\\.go$|claude-marketplace/behavior-docs-conformance/|tests/behavior-docs-real-corpus)";
+            files = "^(behavior-docs/docs/behavior/|packages/pr-pool/docs/behavior/|packages/pr-pool/.*\\.go$|packages/pa-monitor/docs/behavior/|claude-marketplace/behavior-docs-conformance/|tests/behavior-docs-real-corpus)";
           };
         }
         // lib.mapAttrs' mkGoLintPushHook goLintPushTouchDirs;
