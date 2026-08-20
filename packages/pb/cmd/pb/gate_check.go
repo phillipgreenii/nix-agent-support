@@ -15,6 +15,23 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// validateLastN rejects a negative --last-n at the CLI boundary, rather than
+// folding it into internal/gate.Check's "== 0 → default" guard: git itself
+// treats a negative `-n` bound as "no bound" and silently returns the FULL log
+// (verified: `git log -n -5` exits 0 and prints everything), so an unvalidated
+// negative value turns the very flag whose job is to bound the scan into an
+// invisible unbounded one — a performance cliff on a large repo that neither
+// errors nor warns (bead pg2-w70x1). Rejecting it here distinguishes "the user
+// asked for something meaningless" from "the caller left it unset" (LastN == 0,
+// still defaulted downstream in Check).
+func validateLastN(n int) error {
+	if n < 0 {
+		return fmt.Errorf("--last-n must be >= 0, got %d (a negative value would make git "+
+			"silently ignore the bound and scan the entire history)", n)
+	}
+	return nil
+}
+
 func newGateCheckCmd() *cobra.Command {
 	var (
 		dryRun       bool
@@ -34,6 +51,9 @@ func newGateCheckCmd() *cobra.Command {
 			}
 			if staleHandler != "convert-to-human" && staleHandler != "close" {
 				return fmt.Errorf("--stale-handler must be convert-to-human or close")
+			}
+			if err := validateLastN(lastN); err != nil {
+				return err
 			}
 			wd, err := os.Getwd()
 			if err != nil {

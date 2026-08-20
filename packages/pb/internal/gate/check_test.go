@@ -344,14 +344,18 @@ func TestCheck_explicitScanWindowIsHonoured(t *testing.T) {
 // defaulting guard: it means "UNSET → 100", so only a LastN of exactly zero is
 // replaced. A caller-supplied negative window is forwarded to git verbatim.
 //
-// `--last-n` is a plain IntVar with no validation (cmd/pb/gate_check.go), so a
-// negative value genuinely reaches Check and this is a reachable state, not a
-// hypothetical. Without this row, "== 0" and "<= 0" accept the same fixtures and the
-// guard could silently absorb a negative window into the default — which would make
-// a typo'd `--last-n -5` scan 100 commits while reporting nothing unusual.
-//
-// This test pins the OBSERVABLE behaviour; whether the CLI ought to REJECT a
-// negative window instead is a separate question it deliberately does not settle.
+// Historically `--last-n` was a plain IntVar with no validation (cmd/pb/gate_check.go),
+// so a negative value could reach Check via the CLI. That gap is now closed: pb gate
+// check rejects a negative --last-n at the CLI boundary (bead pg2-w70x1), before
+// Check is ever called, because git itself treats a negative `-n` bound as "no
+// bound" and silently scans the ENTIRE history instead of erroring. This test now
+// documents Check's OWN contract as a library function called directly (bypassing
+// the CLI's validation): it still does not defend against a negative LastN itself —
+// validation is deliberately the CLI's job, not Check's — so if some other caller
+// ever passes one in, it is forwarded to git verbatim rather than silently absorbed
+// into the "unset" default. Without this row, "== 0" and "<= 0" would accept the
+// same fixtures and the guard could silently absorb a negative window into the
+// default, masking a validation regression at the CLI layer.
 func TestCheck_negativeScanWindowIsForwardedNotDefaulted(t *testing.T) {
 	f := run.NewFakeRunner()
 	f.AddResponse("pn", []string{"workspace", "info", "--json"}, run.Result{Stdout: checkInfoJSON}, nil)
