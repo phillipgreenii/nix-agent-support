@@ -67,6 +67,9 @@ copy it.
 - **`DEC-SEAM-2`** — in [seams.md](seams.md) — interfaces are classified on **two** axes
   (counterparty kind and essential-vs-optional participation), and an enumerated catalog belongs to
   the interface that carries it.
+- **`DEC-SEAM-3`** — in [seams.md](seams.md) — a `GOAL-5` citation of a decision-doc entry needs an
+  imports-table row only when the entry belongs to **another** scope; this product's own sibling
+  decision area needs no row.
 - **`IMPL-1`** — in [governance.md](governance.md) — who and what may author or change behavior
   docs, and what supervision applies.
 - **`IMPL-2`** — in [authoring.md](authoring.md) — author behavior docs as a cross-linked markdown
