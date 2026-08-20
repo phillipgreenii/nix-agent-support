@@ -202,7 +202,10 @@ func (r *Rule) evaluateExec(args []string, input *hookio.HookInput) (hookio.Rule
 		// rule that is structurally unable to make one.
 		return hookio.NotApplicable()
 	}
-	innerExpr := extractInnerCommand(inner)
+	source, leaves, ok := structuralInnerCommand(inner)
+	if !ok {
+		return r.refuse("kubectl: kc exec inner command could not be parsed as structure (deferred to claude-code)")
+	}
 	outerExpr := strings.Join(strings.Fields(strings.Join(args, " ")), " ")
 	stack := []hookio.StackFrame{{RuleName: r.Name(), Command: "kc exec", Expression: outerExpr}}
 	scoped := *input
@@ -213,7 +216,7 @@ func (r *Rule) evaluateExec(args []string, input *hookio.HookInput) (hookio.Rule
 	// chain's loop-exhaustion verdict, and returning it as this rule's own verdict
 	// would STOP the outer chain where the pre-ADR forwarded Abstain continued it.
 	// hookio.FromRecursion states the translation in one place.
-	return hookio.FromRecursion(r.exprEval.EvaluateExpression(innerExpr, stack, &scoped))
+	return hookio.FromRecursion(r.exprEval.EvaluateStructure(source, leaves, stack, &scoped))
 }
 
 // innerAfterDoubleDash returns the args after the first `--`, or nil if none.
@@ -226,13 +229,65 @@ func innerAfterDoubleDash(args []string) []string {
 	return nil
 }
 
-// extractInnerCommand converts inner command args into an expression string.
-// For "bash -c 'expr'" it extracts the expression; otherwise joins args.
-func extractInnerCommand(cmdArgs []string) string {
+// structuralInnerCommand derives the kc-exec inner command as PARSED
+// STRUCTURE — never rule-constructed text handed back to the engine for
+// re-evaluation (I13; pg2-9aqol closes this rule's instance of the docker/
+// safecmds/nix/kubectl migration). cmdArgs are the already-unquoted argv
+// tokens after `--`. Two shapes:
+//
+//   - "bash|sh -c SCRIPT": SCRIPT is cmdArgs[2] ALONE — already-unquoted text
+//     that IS genuine shell source, the exact string a pod's bash/sh would
+//     itself re-parse and run — so it is parsed AS-IS, with no join at all.
+//     Any further cmdArgs are bash -c's own positional parameters ($0, $1,
+//     ...), never part of the script, and MUST NOT be appended to it: the
+//     former `strings.Join(cmdArgs[2:], " ")` folded them into the script
+//     text, which was itself an instance of the quoting-loss defect this
+//     migration removes — a positional parameter could smuggle in extra
+//     script text the pod's bash never actually runs as script.
+//   - anything else: a literal argv kubectl exec hands directly to the pod's
+//     execve, with NO shell in between — none of these bytes is ever
+//     shell-interpreted there. It is encoded here as single-quoted words,
+//     the one quoting form that suppresses every kind of expansion, so each
+//     token survives as one literal, non-expanding word — matching that
+//     "no shell in the pod" reality exactly: a token spelled "$(rm -rf /)"
+//     or containing ";" is DATA, never a live substitution or operator, and
+//     single-quoting (rather than the former bare-space join) is what keeps
+//     the structural parse from treating it as one.
+//
+// Both shapes end in one real cmdparse.ParseShell call over the returned
+// source, so leaves' Raw fields are genuine parsed-source substrings the
+// engine can independently re-derive from (evaluateParsed's
+// `cmdparse.Parse(pc.Raw)`) — never a hand-built ParsedCommand whose fields
+// could drift from its own Raw. ok is false only when the derived source
+// itself fails to parse (a malformed inline script), in which case the
+// caller MUST fail closed rather than call EvaluateStructure with an empty
+// leaf set.
+func structuralInnerCommand(cmdArgs []string) (source string, leaves []cmdparse.ParsedCommand, ok bool) {
 	if len(cmdArgs) >= 3 && (cmdArgs[0] == "bash" || cmdArgs[0] == "sh") && cmdArgs[1] == "-c" {
-		return strings.Join(cmdArgs[2:], " ")
+		source = cmdArgs[2]
+	} else {
+		source = quoteArgsAsLiteralWords(cmdArgs)
 	}
-	return strings.Join(cmdArgs, " ")
+	sp := cmdparse.ParseShell(source)
+	if sp.Unparseable {
+		return "", nil, false
+	}
+	return source, sp.Leaves, true
+}
+
+// quoteArgsAsLiteralWords single-quote-encodes each arg so cmdparse.ParseShell
+// lowers it back to EXACTLY these tokens, each its own literal (non-expanding)
+// word, whatever bytes it contains — the correct structural stand-in for an
+// argv passed straight to execve with no intervening shell. Single quotes
+// need only their own embedded occurrences escaped (close, escaped quote,
+// reopen); every other byte, including "$", "`", ";", "&&" and whitespace,
+// passes through completely inert.
+func quoteArgsAsLiteralWords(args []string) string {
+	parts := make([]string, len(args))
+	for i, a := range args {
+		parts[i] = "'" + strings.ReplaceAll(a, "'", `'\''`) + "'"
+	}
+	return strings.Join(parts, " ")
 }
 
 // isPersonalDevName reports whether v names a personal dev workspace. With an

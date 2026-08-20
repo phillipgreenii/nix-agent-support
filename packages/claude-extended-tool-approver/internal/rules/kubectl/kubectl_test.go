@@ -219,11 +219,30 @@ func (m *mockEvaluator) EvaluateExpression(expr string, stack []hookio.StackFram
 }
 
 // EvaluateStructure satisfies hookio.Evaluator's I13 structural delegate
-// method (pg2-m1i6r). No kubectl test exercises structural delegation yet —
-// the kubectl rule itself is not migrated by that bead — so this simply
-// reuses the same expr-keyed lookup EvaluateExpression already provides.
+// method (pg2-m1i6r), and IS now exercised: kubectl's evaluateExec (pg2-9aqol)
+// calls this instead of EvaluateExpression. It reconstructs the same
+// space-joined lookup key EvaluateExpression's callers used to build by hand
+// — but from the STRUCTURAL leaves argument itself (each leaf's Executable
+// then its Args, every leaf concatenated in order), never from `source`. That
+// mirrors real callers, which must treat leaves as authoritative and source
+// as only the cycle-detection key (see EvaluateStructure's own doc), and it
+// is what keeps every existing table row below passing unchanged: none of
+// their fixture commands carries an inner argument whose reconstruction
+// would differ from its pre-migration plain-text spelling.
 func (m *mockEvaluator) EvaluateStructure(source string, leaves any, stack []hookio.StackFrame, origin *hookio.HookInput) hookio.RuleResult {
-	return m.EvaluateExpression(source, stack, origin)
+	parsed, ok := leaves.([]cmdparse.ParsedCommand)
+	if !ok {
+		return m.defaultResult
+	}
+	var tokens []string
+	for _, pc := range parsed {
+		if pc.Executable == "" {
+			continue
+		}
+		tokens = append(tokens, pc.Executable)
+		tokens = append(tokens, pc.Args...)
+	}
+	return m.EvaluateExpression(strings.Join(tokens, " "), stack, origin)
 }
 
 func TestKubectl_ExecRecursion(t *testing.T) {
@@ -236,6 +255,16 @@ func TestKubectl_ExecRecursion(t *testing.T) {
 			// and mistakes this inner `-n d-fake` for the outer scope, evaluateExec
 			// recurses here and the mock would let it through — exposing the spoof.
 			"bats -n d-fake": {Decision: hookio.Approve, Reason: "ok", Module: "mock"},
+			// pg2-9aqol: proves the plain-args (non "bash -c") shape's single-quote
+			// structural encoding round-trips through the mock exactly. If the
+			// former `strings.Join(cmdArgs, " ")` text-join were still in effect and
+			// this string were re-PARSED as shell text (which it is not, by design,
+			// here in evaluateExec — the parse now happens once, inside
+			// structuralInnerCommand, over the QUOTED form), the embedded ";" would
+			// split it into two leaves ("echo safe" and "rm -rf /") instead of one
+			// ("echo" with the whole string as its single argument). This key is
+			// reachable only because that split does NOT happen.
+			"echo safe; rm -rf /": {Decision: hookio.Approve, Reason: "ok", Module: "mock"},
 		},
 		defaultResult: hookio.RuleResult{Decision: hookio.NoOpinion, Module: "mock"},
 	}
@@ -251,6 +280,11 @@ func TestKubectl_ExecRecursion(t *testing.T) {
 		{"NON-dev exec no ns stays abstain", "kubectl exec -it pod/foo -- bash", hookio.NoOpinion},
 		{"dev exe no double-dash abstains", "bin/kc exe --ws d-phillipg01 -c test-runner", hookio.NoOpinion},
 		{"prod exec with decoy inner d- flag", "kubectl exec -n prod pod -- bats -n d-fake", hookio.NoOpinion},
+		{
+			"dev exe inner arg with embedded shell metacharacters stays one leaf",
+			`bin/kc exe --ws d-phillipg01 -n test -c test-runner -- echo "safe; rm -rf /"`,
+			hookio.Approve,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -259,6 +293,72 @@ func TestKubectl_ExecRecursion(t *testing.T) {
 				t.Errorf("cmd %q: got %s want %s (reason %q)", tt.command, got.Decision, tt.want, got.Reason)
 			}
 		})
+	}
+}
+
+// TestStructuralInnerCommand_PlainArgsPreserveQuotingAgainstReparse is the
+// pg2-9aqol regression test: an inner command argument that CONTAINS shell
+// metacharacters/operators must survive as one literal argument to one leaf,
+// never be split apart as if it were rejoined shell TEXT. The pre-fix
+// `strings.Join(cmdArgs, " ")` produced this EXACT string, and handing it to
+// a shell parser (as EvaluateExpression's text entry point would) split it on
+// the unquoted ";" into two commands — which is the quoting-loss defect this
+// migration removes. structuralInnerCommand must yield exactly one leaf whose
+// single argument still carries the ";" as data.
+func TestStructuralInnerCommand_PlainArgsPreserveQuotingAgainstReparse(t *testing.T) {
+	source, leaves, ok := structuralInnerCommand([]string{"echo", "safe; rm -rf /"})
+	if !ok {
+		t.Fatalf("structuralInnerCommand returned ok=false for source %q", source)
+	}
+	if len(leaves) != 1 {
+		t.Fatalf("got %d leaves, want exactly 1 (a real re-parse of the naively-joined text "+
+			"would split on the unquoted ';' into an \"echo safe\" leaf and a bare \"rm -rf /\" "+
+			"leaf): %+v", len(leaves), leaves)
+	}
+	leaf := leaves[0]
+	if leaf.Executable != "echo" {
+		t.Errorf("Executable = %q, want %q", leaf.Executable, "echo")
+	}
+	if len(leaf.Args) != 1 || leaf.Args[0] != "safe; rm -rf /" {
+		t.Errorf("Args = %#v, want a single arg %q (quoting loss would instead produce "+
+			"a bare \"-rf\"/\"/\" argv or a second leaf)", leaf.Args, "safe; rm -rf /")
+	}
+}
+
+// TestStructuralInnerCommand_BashDashCUsesScriptAloneAsRealShellSource covers
+// the OTHER shape: "bash -c SCRIPT". The script (cmdArgs[2]) is genuine shell
+// source and must be parsed AS-IS, honoring its own real operators — and any
+// further cmdArgs (bash -c's own positional parameters) must NOT be appended
+// to it, which is what the former `strings.Join(cmdArgs[2:], " ")` did.
+func TestStructuralInnerCommand_BashDashCUsesScriptAloneAsRealShellSource(t *testing.T) {
+	source, leaves, ok := structuralInnerCommand([]string{"bash", "-c", "echo one && echo two", "posarg0", "posarg1"})
+	if !ok {
+		t.Fatalf("structuralInnerCommand returned ok=false for source %q", source)
+	}
+	if source != "echo one && echo two" {
+		t.Errorf("source = %q, want exactly cmdArgs[2] with the trailing positional "+
+			"parameters excluded", source)
+	}
+	if len(leaves) != 2 {
+		t.Fatalf("got %d leaves, want exactly 2 (the script's own \"&&\" is a real "+
+			"operator and must be honored): %+v", len(leaves), leaves)
+	}
+	if leaves[0].Executable != "echo" || len(leaves[0].Args) != 1 || leaves[0].Args[0] != "one" {
+		t.Errorf("leaves[0] = %+v, want echo one", leaves[0])
+	}
+	if leaves[1].Executable != "echo" || len(leaves[1].Args) != 1 || leaves[1].Args[0] != "two" {
+		t.Errorf("leaves[1] = %+v, want echo two", leaves[1])
+	}
+}
+
+// TestStructuralInnerCommand_UnparseableFailsClosed pins the ok=false branch:
+// a script that cannot be parsed at all must not be handed to EvaluateStructure
+// as an empty leaf set (which the engine's EvaluateStructure would otherwise
+// read as "structurally empty" rather than "could not determine").
+func TestStructuralInnerCommand_UnparseableFailsClosed(t *testing.T) {
+	_, _, ok := structuralInnerCommand([]string{"bash", "-c", "echo $(unterminated"})
+	if ok {
+		t.Fatalf("structuralInnerCommand returned ok=true for an unparseable script")
 	}
 }
 
