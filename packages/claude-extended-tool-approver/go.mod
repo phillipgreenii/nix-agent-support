@@ -4,7 +4,7 @@ go 1.25.0
 
 require (
 	github.com/spf13/cobra v1.10.2
-	modernc.org/sqlite v1.56.0
+	modernc.org/sqlite v1.57.0
 	mvdan.cc/sh/v3 v3.13.1
 )
 
@@ -19,5 +19,5 @@ require (
 	golang.org/x/sys v0.47.0 // indirect
 	modernc.org/libc v1.75.3 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
-	modernc.org/memory v1.12.0 // indirect
+	modernc.org/memory v1.12.1 // indirect
 )

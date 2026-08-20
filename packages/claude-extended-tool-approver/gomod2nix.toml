@@ -46,12 +46,12 @@ schema = 3
     hash = 'sha256-COZ5rF2GhQVR1r6a0DanJ8qwQ94JSKdQxTMWrDzE0Cc='
 
   [mod.'modernc.org/memory']
-    version = 'v1.12.0'
-    hash = 'sha256-NWya2V+lWCyzn6zyAg79CCr29+yyHZTLCMeZSMAUnqs='
+    version = 'v1.12.1'
+    hash = 'sha256-Y/kW9/A5uF+Y66kDbxrh4muFgE3CEee6YzSl2FMPcRg='
 
   [mod.'modernc.org/sqlite']
-    version = 'v1.56.0'
-    hash = 'sha256-dm+ehuPSqdZ4k+PNPnhj7YaXk2nVAx2sdQi9/UpVUuA='
+    version = 'v1.57.0'
+    hash = 'sha256-2qJE5zMzeodvjZ37oLfx4J/u/SpBC3/Wi6rb1Ehx0t4='
 
   [mod.'mvdan.cc/sh/v3']
     version = 'v3.13.1'
