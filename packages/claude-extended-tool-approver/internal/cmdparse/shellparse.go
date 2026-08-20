@@ -1105,6 +1105,14 @@ func (lw *lowering) emitDataSpan(from, to syntax.Pos, subNodes []syntax.Node) {
 	lw.dataSpans = append(lw.dataSpans, span)
 }
 
+// procSubFabricatedOperand is the literal placeholder wordToken substitutes for
+// a process substitution occurring inside an ORDINARY ARGUMENT WORD (matching
+// the outgoing tokenizer's own fabrication — see wordToken's doc). It is named
+// so a caller downstream of that lowering — parser.go's
+// reclassifyEnvAssignsAfterProcSubFabrication — can recognise its own fabricated
+// text without hardcoding the string a second time.
+const procSubFabricatedOperand = "/dev/fd/63"
+
 // wordToken lowers one *syntax.Word to the token text the outgoing tokenize
 // produced, plus any process-substitution bodies lifted out of it.
 //
@@ -1115,10 +1123,22 @@ func (lw *lowering) emitDataSpan(from, to syntax.Pos, subNodes []syntax.Node) {
 // Consequences: it is stricter than the outgoing unquoting and would newly clear
 // the predicate I4 exists to fence).
 //
-// A process substitution is replaced by the fabricated `/dev/fd/63` operand and
-// its body is lifted, matching tokenize exactly. Both halves are load-bearing:
-// emitting the substitution's source text instead causes mass new abstains from
-// the redirect-target check, while emitting nothing loses the operand.
+// A process substitution is replaced by the fabricated procSubFabricatedOperand
+// and its body is lifted, matching tokenize exactly. Both halves are
+// load-bearing: emitting the substitution's source text instead causes mass new
+// abstains from the redirect-target check, while emitting nothing loses the
+// operand.
+//
+// PG2-813WW NOTE — this is exactly why an `env`/`command` PREFIX assignment
+// (`env A=<(evil) cmd`) cannot be classified from its Args string alone: by the
+// time unwrapExecPrefix sees "A=/dev/fd/63", the real `<(evil)` text is gone.
+// `env`'s NAME=VALUE tokens are, to the shell's OWN grammar, ordinary argument
+// words — bash has no notion that `env` treats them specially — so they pass
+// through this exact function, unlike a LEADING or `export` assignment, which
+// is a genuine *syntax.Assign the lowering slices verbatim from source
+// (lowerCall's CallExpr.Assigns / lowerDecl's assignRaw) and never reaches
+// wordToken at all. See reclassifyEnvAssignsAfterProcSubFabrication for the fix
+// on the `env`-prefix side.
 //
 // The third return, live, is pg2-pui5w's provenance bit: whether w carries a
 // LIVE shell expansion, computed by wordHasLiveExpansion over the SAME w this
@@ -1141,7 +1161,7 @@ func (lw *lowering) wordToken(w *syntax.Word) (string, []string, bool) {
 		// The body is the text BETWEEN the operator and the closing paren, verbatim,
 		// exactly as tokenize's `s[start:j-1]`.
 		procSubs = append(procSubs, lw.slice(bodyStart(ps), ps.Rparen))
-		b.WriteString("/dev/fd/63")
+		b.WriteString(procSubFabricatedOperand)
 	}
 	return unquote(b.String()), procSubs, live
 }
@@ -2098,16 +2118,24 @@ const expansionProbeName = "__ceta_expansion_probe"
 // `export`, `env`, or an array element).
 func classifyExpansion(value string) ExpansionKind {
 	// PRE-PARSE SHORTCUT, and the one place a substring still decides anything: a
-	// value with neither `$` nor a backtick has no expansion for any parser to find,
-	// so it is static. This is NOT a structure claim and cannot mask a substitution.
+	// value with none of `$`, a backtick, `<(` or `>(` has no expansion for any
+	// parser to find, so it is static. This is NOT a structure claim and cannot mask
+	// a substitution — every spelling it tests for is a byte sequence bash requires
+	// to OPEN an expansion (`$`, a backtick, or a process substitution's two-byte
+	// opener), never one that can appear only INSIDE an already-live one.
 	//
-	// RESIDUE, unchanged and deliberately left to pg2-x9452 (ADR 0039 step 5, whose
-	// acceptance criteria name it): a PROCESS substitution needs neither character, so
-	// `A=<(evil)` still reads as static here. `engine.go`'s
-	// evaluateAssignmentOnlyLeaf records the same gap. It is pre-existing and
-	// form-independent; closing it is that bead's owed test (`A=<(evil) cmd` must
-	// recurse `evil`), and doing it here would mix two replays into one attribution.
-	if !strings.ContainsAny(value, "$`") {
+	// pg2-x9452 (ADR 0039 step 5) widened this from `$`/backtick alone: a PROCESS
+	// substitution needs neither character, so `A=<(evil)` used to read as static
+	// here and never reach the census below, and `engine.go`'s
+	// evaluateAssignmentOnlyLeaf never reached recursion either — a real, form-
+	// independent gap (`A=<(evil) cmd` did not recurse `evil`), closed by widening
+	// this one shortcut. Everything downstream of the shortcut already modelled
+	// process substitutions correctly once it saw them (expansionCensus.visit
+	// records *syntax.ProcSubst and kind() floors on it at ExpansionUnknown,
+	// EnumerateSubstitutions already returns SubstProcessIn/SubstProcessOut, and
+	// envvars' ExpansionUnknown branch already recurses each enumerated body) — the
+	// shortcut was the only thing standing between a proc-sub value and all of that.
+	if !strings.ContainsAny(value, "$`") && !strings.Contains(value, "<(") && !strings.Contains(value, ">(") {
 		return ExpansionNone
 	}
 	src, root, ok := assignmentValue(value)

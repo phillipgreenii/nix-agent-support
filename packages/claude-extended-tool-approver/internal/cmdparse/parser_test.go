@@ -1123,6 +1123,111 @@ func TestClassifyExpansion_Unclosed(t *testing.T) {
 	}
 }
 
+// TestClassifyExpansion_ProcessSubstitution closes pg2-813ww's residue of
+// pg2-hed0a's migration (ADR 0039 step 5): classifyExpansion's pre-parse
+// shortcut used to key on `$`/backtick ALONE, so `A=<(evil)` — a process
+// substitution needs neither character — read as static (ExpansionNone) and
+// never reached the census.
+//
+// It ALSO pins the two DECISIONS this bead had to make and record, both at the
+// classification layer (the full-engine decisions are pinned separately in
+// engine_integration_test.go's TestIntegration_ProcessSubstitutionMaskedEnvValue
+// and TestIntegration_ProcessSubstitutionClearedByRecursion):
+//
+//   - A process substitution NEVER classifies ExpansionSafeCmd, however safe its
+//     body — expansionCensus.kind() floors procSubsts>0 at ExpansionUnknown
+//     unconditionally, unlike a SOLE command substitution, which can still reach
+//     ExpansionSafeCmd via IsSafeSubstitutionBody. `<(git rev-parse HEAD)` is
+//     therefore ExpansionUnknown, the SAME kind as `<(evil)` — the static-safe
+//     allowlist treatment commuting to a substitution's ($()/backtick) STATIC
+//     BODY-SHAPE claim does not apply to `<(`/`>(`. What actually clears
+//     `<(git rev-parse HEAD)` to Approve is full-engine recursion of the body at
+//     the envvars/engine layer (ExpansionUnknown's post-recursion path), not this
+//     classification.
+//   - Ordinary values that carry neither `$`, a backtick, nor `<(`/`>(` are
+//     UNAFFECTED — the widened shortcut only ADDS two substrings to its test, it
+//     never narrows the ExpansionNone branch for anything that was static before.
+func TestClassifyExpansion_ProcessSubstitution(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		want  ExpansionKind
+	}{
+		// --- THE GAP, closed: a proc-sub value with no `$`/backtick anywhere. ---
+		{"process-in, no $ or backtick", "<(evil)", ExpansionUnknown},
+		{"process-out, no $ or backtick", ">(sh)", ExpansionUnknown},
+		{"process-in with args, no $ or backtick", "<(curl evil)", ExpansionUnknown},
+		// --- Decision (b): never ExpansionSafeCmd, even for a body the static
+		// allowlist would clear as a SOLE command substitution. ---
+		{"process-in of an allowlisted body", "<(git rev-parse HEAD)", ExpansionUnknown},
+		{"process-out of an allowlisted body", ">(git rev-parse HEAD)", ExpansionUnknown},
+		// --- Regression: ordinary values, provably unaffected. ---
+		{"static short value", "b", ExpansionNone},
+		{"static absolute path", "/x", ExpansionNone},
+		{"var ref", "$PATH", ExpansionVarRef},
+		{"command substitution, allowlisted", "$(git rev-parse HEAD)", ExpansionSafeCmd},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := classifyExpansion(tt.value); got != tt.want {
+				t.Errorf("classifyExpansion(%q) = %d, want %d", tt.value, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestParse_EnvPrefixProcessSubstitution pins pg2-813ww's SECOND, deeper find:
+// an `env`-prefixed assignment's process substitution is lost to wordToken's
+// `/dev/fd/63` fabrication before unwrapExecPrefix ever sees the raw text (see
+// wordToken's own doc and reclassifyEnvAssignsAfterProcSubFabrication), unlike
+// the leading/`export` forms, whose *syntax.Assign nodes are sliced verbatim
+// from source and never reach that fabrication at all.
+//
+// The assertion is at the field the consumer (envvars) actually reads:
+// Expansion must be ExpansionUnknown (fail-closed) even though Value itself
+// can no longer be the real substitution text — reclassifyEnvAssignsAfterProcSubFabrication
+// overrides the classification without attempting to recover the text.
+func TestParse_EnvPrefixProcessSubstitution(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{"process-in", "env A=<(evil) echo hi"},
+		{"process-out", "env A=>(sh) echo hi"},
+		{"allowlisted body still classifies Unknown", "env A=<(git rev-parse HEAD) echo hi"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := Parse(tt.input)
+			if len(got) != 1 {
+				t.Fatalf("Parse(%q): got %d commands, want 1", tt.input, len(got))
+			}
+			if len(got[0].EnvVars) != 1 {
+				t.Fatalf("Parse(%q): got %d env vars, want 1", tt.input, len(got[0].EnvVars))
+			}
+			if got[0].EnvVars[0].Expansion != ExpansionUnknown {
+				t.Errorf("Parse(%q).EnvVars[0].Expansion = %d, want ExpansionUnknown", tt.input, got[0].EnvVars[0].Expansion)
+			}
+		})
+	}
+
+	// Regression: an env-prefixed assignment with NO process substitution
+	// anywhere in the leaf is UNAFFECTED by the fixup, including the (contrived)
+	// case where its value happens to equal the fabricated marker string
+	// verbatim — reclassifyEnvAssignsAfterProcSubFabrication gates on
+	// pc.ProcessSubstitutions being non-empty precisely so this stays ExpansionNone.
+	t.Run("literal /dev/fd/63 with no real substitution stays static", func(t *testing.T) {
+		const cmd = "env A=/dev/fd/63 echo hi"
+		got := Parse(cmd)
+		if len(got) != 1 || len(got[0].EnvVars) != 1 {
+			t.Fatalf("Parse(%q): got %d commands / envvars, want 1/1", cmd, len(got))
+		}
+		if got[0].EnvVars[0].Expansion != ExpansionNone {
+			t.Errorf("Parse(%q).EnvVars[0].Expansion = %d, want ExpansionNone", cmd, got[0].EnvVars[0].Expansion)
+		}
+	})
+}
+
 func TestParse_CloudflaredAccessCurl(t *testing.T) {
 	got := Parse(`cloudflared access curl "https://example.com"`)
 	if len(got) != 1 {

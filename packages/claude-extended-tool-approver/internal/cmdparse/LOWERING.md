@@ -587,6 +587,96 @@ assignment. Measured as the wall time of the authoritative front end (`StripComm
 
 ---
 
+# Step 5b — the process-substitution residue, closed (`pg2-813ww`)
+
+Authority: ADR 0039's Decision and Invariants (I1a/I1b, I9). Base `4fdca75c`. This section is the
+record of the residue step 5a's own section named above: `classifyExpansion`'s `$`/backtick
+pre-parse shortcut also missed a PROCESS substitution (`<(...)`/`>(...)`), because neither
+character is required to open one.
+
+## The fix
+
+`shellparse.go`'s `classifyExpansion` pre-parse shortcut now also tests for `<(`/`>(` before
+returning `ExpansionNone`. Nothing downstream needed to change: `expansionCensus.visit` already
+recorded a `*syntax.ProcSubst` node and `kind()` already floored `procSubsts > 0` at
+`ExpansionUnknown` unconditionally (no static-allowlist path, unlike a sole command substitution),
+`EnumerateSubstitutions` already returned `SubstProcessIn`/`SubstProcessOut` entries with exact
+bodies, and `envvars.go`'s `ExpansionUnknown` branch already recursed every enumerated substitution
+through the full engine — the shortcut was the ONLY thing standing between a proc-sub value and all
+of that already-correct machinery.
+
+## A second, deeper instance found while proving position-independence
+
+Verifying the acceptance criterion's four assignment forms (leading/`export`/`env`/compound)
+surfaced a SEPARATE gap, structurally unrelated to the shortcut: an `env`/`command`-PREFIX
+`NAME=VALUE` token is an ORDINARY ARGUMENT WORD to the shell's own grammar (bash has no built-in
+notion that `env` treats it specially), so it is lowered through the same generic
+`wordToken` every argument goes through — which deliberately replaces a process substitution with
+the fabricated `/dev/fd/63` operand (matching the outgoing tokenizer), for reasons unrelated to
+assignments (the redirect-target check). `unwrapExecPrefix` then re-interprets the ALREADY-lowered
+string as `NAME=VALUE`, so `env A=<(evil) cmd`'s captured value arrives as `A=/dev/fd/63` — the
+real `<(evil)` text is gone before `newEnvAssignment`/`classifyExpansion` ever runs, and no amount
+of widening that classifier's string test recovers it. The leading/`export`/compound forms are
+immune because they are genuine `*syntax.Assign` nodes the lowering slices verbatim from SOURCE
+(`lowerCall`'s `CallExpr.Assigns` / `lowerDecl`'s `assignRaw`) and never reach `wordToken` at all.
+
+The fix (`parser.go`'s `reclassifyEnvAssignsAfterProcSubFabrication`) is fail-closed rather than a
+raw-text recovery: any `env`-captured assignment whose value carries the fabricated marker is
+force-classified `ExpansionUnknown`, gated on the leaf's aggregate `ProcessSubstitutions` being
+non-empty (so a value that happens to equal `/dev/fd/63` verbatim with NO real substitution anywhere
+in the leaf is untouched). This closes the auto-approve risk (`env A=<(evil) cmd` now asks) but
+cannot positively CLEAR a safe body through this one form (`env A=<(git rev-parse HEAD) cmd` asks
+rather than approves, unlike its leading/export/compound siblings) — an accepted, documented,
+never-widens limitation; a full fix would need a per-argument raw-text or body attribution threaded
+through `wordToken`/`appendArg` into `unwrapExecPrefix`, out of this step's scope.
+
+## Corpus measurement
+
+Read-only snapshot (`VACUUM INTO`, `?immutable=1`) taken 2026-08-20, `373,571` total rows,
+`241,930` non-excluded `Bash` rows, `210,485` distinct `.command` values. Commands containing `<(`
+anywhere: 597 distinct; `>(` anywhere: 104 distinct; union: **678 distinct candidate commands** (the
+superset that bounds this step's ENTIRE behavioral surface, since neither fix can change a verdict
+for a command containing neither substring).
+
+Of those 678, parsing every one and inspecting each leaf's `EnvVars` for a value containing `<(`/`>(`
+found **15 rows / 14 distinct values** carrying a process substitution inside an assignment VALUE.
+**Every one of those 14 values ALSO contains a `$` or a backtick elsewhere in the same value**, so
+all 15 rows were ALREADY reaching the parser before this fix (the shortcut's exact buggy condition —
+neither `$`, backtick, `<(` nor `>(` — never applied to any of them). The precise gap-triggering
+population (a value with `<(`/`>(` and NEITHER `$` NOR a backtick) is **0 rows / 0 distinct values**
+in this corpus. Separately, **0** of the 678 candidates begin with a literal `env ` prefix, so the
+second (env-prefix fabrication) fix's corpus blast radius is also 0.
+
+## Verdict replay
+
+Scope: the same 678 candidate commands (justified above as the complete bound on this step's
+behavioral surface), evaluated end to end through `buildFullEngine` with a fixed synthetic
+project-root CWD (a differential comparison of the SAME command against base vs fixed code, so CWD
+fidelity to the original row is not load-bearing — only the delta between the two runs is). Base =
+this tree before both fixes (via `git stash` on `parser.go`/`shellparse.go`/`engine.go` only, test
+files untouched); fixed = this tree after.
+
+**GATE: PASS. 0 transitions of any kind across all 678 rows** — the two fixes changed 0 verdicts in
+the measured corpus, consistent with the 0-row gap-triggering population above and the 0-row
+`env`-prefix population.
+
+## Fuzz
+
+`FuzzParse`/`FuzzEnumerateSubstitutions`'s shared `fuzzSeeds` corpus gained `<(`/`>(` assignment-value
+seeds across all four forms (`A=>(rm -rf /) ; echo hi`, `export A=<(rm -rf /) && echo hi`,
+`env A=<(rm -rf /) echo hi`, `A=<(rm -rf /)`, beside the pre-existing `A=<(rm -rf /) ; echo hi`). Both
+targets run clean (no new `testdata/fuzz/` crashers) at `-fuzztime 20s` beyond the seed corpus.
+
+## Assertion: prior deletions stay deleted
+
+`matchParen`, `classifyCmdSubstitution` and `classifyBacktickSubstitution` (step 5a, above) remain
+absent from every `.go` file in this package — mechanically asserted by
+`TestDeletedRawTextParenMatchersStayDeleted` (an AST scan, not a substring grep, so it does not trip
+on this file's own historical "DELETED" notes), demonstrated to actually fire by a temporary
+reintroduction during this step's own verification.
+
+---
+
 # Step 2 — THE FLIP (`pg2-fez3d`)
 
 Authority: ADR 0039's Decision, Invariants (I1b, I2, I3, I4, I6, I8, I10, I12, I14) and

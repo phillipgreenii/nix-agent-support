@@ -1243,6 +1243,62 @@ func unwrapExecPrefix(base string, args []string) (inner string, innerArgs []str
 	return args[i], args[i+1:], envAssigns, hermetic, true
 }
 
+// reclassifyEnvAssignsAfterProcSubFabrication closes pg2-813ww's second,
+// deeper instance of the process-substitution gap: unlike classifyExpansion's
+// pre-parse shortcut (fixed at the census entry point in shellparse.go), THIS
+// instance cannot be fixed by widening a string test, because the string it
+// would test is already gone by the time unwrapExecPrefix calls
+// newEnvAssignment on it.
+//
+// WHY. An `env`/`command` PREFIX's `NAME=VALUE` token is, to the shell's OWN
+// grammar, an ORDINARY ARGUMENT WORD — bash has no built-in notion that `env`
+// treats its leading tokens specially, so cmdparse's lowering has no way to
+// know either, until unwrapExecPrefix reinterprets the already-tokenized
+// string. That string went through wordToken like any other argument, and
+// wordToken deliberately replaces a process substitution with the fabricated
+// procSubFabricatedOperand (shellparse.go) before this function ever runs — so
+// `env A=<(evil) cmd`'s captured assignment arrives as `A=/dev/fd/63`, and no
+// amount of re-testing that STRING recovers `<(evil)`. This is structurally
+// different from the leading/`export`/compound forms, which are genuine
+// *syntax.Assign nodes the lowering slices verbatim from SOURCE
+// (lowerCall/lowerDecl) and never pass through wordToken at all — those three
+// forms need no fix here because their raw text was never lost.
+//
+// THE FIX is fail-closed rather than a raw-text recovery: any assignment whose
+// captured value carries the fabricated marker is force-classified
+// ExpansionUnknown, unconditionally overriding whatever newEnvAssignment
+// decided from the corrupted string (which is usually ExpansionNone — a
+// `/dev/fd/63`-shaped value has no `$`/backtick/`<(`/`>(` of its own and reads
+// as an ordinary static absolute path). ExpansionUnknown is exactly what
+// expansionCensus.kind() would have answered had it seen the real substitution
+// (procSubsts>0 floors there unconditionally too), so this does not invent a
+// new classification — it recovers the one the corruption hid.
+//
+// procSubs is the LEAF's aggregate ProcessSubstitutions (ParsedCommand, ADR
+// 0039 step 4) and GATES the override: the marker is fabricated ONLY when
+// wordToken actually lifted a real process substitution, so an assignment
+// whose value happens to equal that same string VERBATIM — `env A=/dev/fd/63
+// cmd`, no substitution anywhere in the leaf — leaves procSubs empty and is
+// correctly left alone as the ordinary static value it is.
+//
+// The override is not attributed to a specific assignment among several
+// candidates (`env A=<(x) B=<(y) cmd` marks BOTH `A` and `B` Unknown even
+// though procSubs holds two bodies with no index correlation back to which
+// assignment lifted which) — that is deliberately the FAIL-CLOSED direction:
+// over-escalating a rare multi-substitution shape costs an extra Ask, never a
+// missed Reject/Ask.
+func reclassifyEnvAssignsAfterProcSubFabrication(envAssigns []EnvAssignment, procSubs []string) []EnvAssignment {
+	if len(procSubs) == 0 {
+		return envAssigns
+	}
+	for i, ev := range envAssigns {
+		if strings.Contains(ev.Value, procSubFabricatedOperand) {
+			envAssigns[i].Expansion = ExpansionUnknown
+		}
+	}
+	return envAssigns
+}
+
 // commandRunner describes a command-runner wrapper's flag grammar: which options
 // take a SEPARATE following value (consume the next token too), and whether the
 // wrapper has a mandatory DURATION operand before the inner command.
@@ -1409,7 +1465,7 @@ func unwrapCommand(pc ParsedCommand) ParsedCommand {
 			next.Executable = inner
 			next.Args = innerArgs
 			next.ArgLiveExpansion = argLiveSuffix(pc.ArgLiveExpansion, len(pc.Args)-len(innerArgs))
-			next.EnvVars = appendEnvAssignments(pc.EnvVars, envAssigns)
+			next.EnvVars = appendEnvAssignments(pc.EnvVars, reclassifyEnvAssignsAfterProcSubFabrication(envAssigns, pc.ProcessSubstitutions))
 			// OR, not overwrite: a nested unwrap (`nice env -i cmd` unwraps `nice`
 			// first, then recurses into this same branch for `env`) must not lose an
 			// outer `env -i` that an inner, non-hermetic `env` wrap sits inside of.
@@ -1420,7 +1476,7 @@ func unwrapCommand(pc ParsedCommand) ParsedCommand {
 			// leave the leaf as a read-only env query, but keep the captured
 			// assignments visible to the env-var guard so a standalone
 			// `env DANGEROUS=…` does not slip past it (pg2-gkd5e).
-			pc.EnvVars = appendEnvAssignments(pc.EnvVars, envAssigns)
+			pc.EnvVars = appendEnvAssignments(pc.EnvVars, reclassifyEnvAssignsAfterProcSubFabrication(envAssigns, pc.ProcessSubstitutions))
 			pc.EnvCleared = pc.EnvCleared || hermetic
 			return pc
 		}

@@ -3795,6 +3795,166 @@ func TestIntegration_ArithmeticMaskedEnvValue(t *testing.T) {
 	}
 }
 
+// TestIntegration_ProcessSubstitutionMaskedEnvValue is pg2-813ww end to end,
+// through the REAL rule chain: the ORIGINAL reproducer this bead closes.
+// `classifyExpansion`'s pre-parse shortcut used to key on `$`/backtick alone, and
+// a process substitution (`<(...)` / `>(...)`) needs neither character, so
+// `A=<(evil) cmd` classified ExpansionNone and `evil` was never recursed — a
+// silent auto-approve of the exact class pg2-hed0a closed for command
+// substitutions one bead earlier.
+//
+// The assertion is `== Ask`, not merely `!= Approve`: `evil`/`curl evil`/`sh` are
+// EXHAUSTION bodies (no rule models a bare `evil`, and `curl`/`sh` are on the same
+// unmodelled-interpreter list envvars.go's own doc enumerates), so once they
+// actually reach recursion the post-recursion fallback fires decisively — a
+// weaker assertion (e.g. NoOpinion) would not distinguish "recursed and not
+// cleared" from "never reached recursion at all", which is the exact silent
+// collapse this bug produced.
+func TestIntegration_ProcessSubstitutionMaskedEnvValue(t *testing.T) {
+	projectRoot := "/Users/testuser/workspace/my-project"
+	eng := buildFullEngine(projectRoot, projectRoot)
+
+	cmds := []string{
+		// The bead's own three reproducers.
+		"A=<(evil) echo hi",
+		"A=<(curl evil) echo hi",
+		"A=>(sh) echo hi",
+		// Every position-independent assignment form (pg2-gkd5e), leading/export/
+		// env/compound, for both the `<(` and `>(` spellings, so the fix cannot be
+		// reopened by moving the assignment.
+		"export A=<(evil) && echo hi",
+		"env A=<(evil) echo hi",
+		"A=<(evil)",
+		"A=<(evil) && echo hi",
+		"export A=>(sh) && echo hi",
+		"env A=>(sh) echo hi",
+		"A=>(sh)",
+		"A=>(sh) && echo hi",
+	}
+	for _, cmd := range cmds {
+		t.Run(cmd, func(t *testing.T) {
+			in := &hookio.HookInput{ToolName: "Bash", CWD: projectRoot, ToolInput: makeBashJSON(cmd)}
+			got := eng.EvaluateHook(in)
+			if got.Decision != hookio.Ask {
+				t.Errorf("EvaluateHook(%q) = %s (%s: %s); want ask", cmd, got.Decision, got.Module, got.Reason)
+			}
+		})
+	}
+}
+
+// TestIntegration_ProcessSubstitutionClearedByRecursion pins this bead's other
+// recorded decision: a process-substitution body that full-engine recursion
+// POSITIVELY CLEARS (every enumerated substitution — here, the sole one —
+// Approves) reaches Approve too, exactly like the ExpansionUnknown command-
+// substitution bodies pg2-5huwx already demonstrated (`T4=$(bd create x
+// --type task) echo hi` above). This is NOT the static allowlist: a process
+// substitution classifies ExpansionUnknown unconditionally
+// (TestClassifyExpansion_ProcessSubstitution pins that at the classifier layer),
+// so the Approve below is proof that FULL RECURSION, not a body-shape allowlist,
+// governs a process substitution in value position — decision (a) this bead
+// recorded, made observable end to end.
+//
+// The leading/`export`/compound forms are genuine *syntax.Assign nodes the
+// lowering slices verbatim from source, so their body text survives intact into
+// EnumerateSubstitutions and gets recursed and cleared for real.
+func TestIntegration_ProcessSubstitutionClearedByRecursion(t *testing.T) {
+	projectRoot := "/Users/testuser/workspace/my-project"
+	eng := buildFullEngine(projectRoot, projectRoot)
+
+	cmds := []string{
+		"A=<(git rev-parse HEAD) echo hi",
+		"export A=<(git rev-parse HEAD) && echo hi",
+		"A=<(git rev-parse HEAD) && echo hi",
+	}
+	for _, cmd := range cmds {
+		t.Run(cmd, func(t *testing.T) {
+			in := &hookio.HookInput{ToolName: "Bash", CWD: projectRoot, ToolInput: makeBashJSON(cmd)}
+			got := eng.EvaluateHook(in)
+			if got.Decision != hookio.Approve {
+				t.Errorf("EvaluateHook(%q) = %s (%s: %s); want approve — the body is positively cleared by full-engine recursion",
+					cmd, got.Decision, got.Module, got.Reason)
+			}
+		})
+	}
+}
+
+// TestIntegration_ProcessSubstitutionStandaloneAssignmentNeverApproves pins a
+// SEPARATE, PRE-EXISTING floor that a naive reading of "positively cleared ->
+// Approve" could be mistaken for a process-substitution regression: a
+// STANDALONE assignment-only leaf (no trailing command AT ALL in the same
+// leaf) never reaches Approve, however cleanly its value is cleared — the
+// pg2-mtnmb floor (engine.go's "env assignments only, no rule has an opinion"
+// branch) demotes ANY unjudged, nothing-executed leaf to Abstain, precisely so
+// a bare `A=1` cannot auto-approve. This is NOT specific to process
+// substitutions: `A=$(git rev-parse HEAD)` alone measures the identical
+// Abstain on this tree, which is the parity check that proves the row below is
+// an assertion of EXISTING, unrelated behaviour rather than a new limitation
+// this bead introduced.
+func TestIntegration_ProcessSubstitutionStandaloneAssignmentNeverApproves(t *testing.T) {
+	projectRoot := "/Users/testuser/workspace/my-project"
+	eng := buildFullEngine(projectRoot, projectRoot)
+
+	cmds := []string{
+		"A=<(git rev-parse HEAD)",
+		"A=$(git rev-parse HEAD)", // parity control: identical pre-existing floor
+	}
+	for _, cmd := range cmds {
+		t.Run(cmd, func(t *testing.T) {
+			in := &hookio.HookInput{ToolName: "Bash", CWD: projectRoot, ToolInput: makeBashJSON(cmd)}
+			got := eng.EvaluateHook(in)
+			if got.Decision == hookio.Approve {
+				t.Errorf("EvaluateHook(%q) = approve (%s: %s); a standalone assignment-only leaf must never approve (pg2-mtnmb)",
+					cmd, got.Module, got.Reason)
+			}
+		})
+	}
+}
+
+// TestIntegration_ProcessSubstitutionEnvPrefixCannotClearEvenASafeBody pins a
+// SECOND, DEEPER instance of the process-substitution gap this bead found
+// while proving position-independence, distinct from the classifyExpansion
+// pre-parse shortcut the bead was filed against.
+//
+// `env`'s NAME=VALUE token is an ORDINARY ARGUMENT WORD to the shell's own
+// grammar (bash has no built-in notion that `env` treats it specially), so it
+// passes through the SAME generic word-lowering as any other argument
+// (shellparse.go's wordToken) — which deliberately replaces a process
+// substitution with the fabricated `/dev/fd/63` operand, matching the outgoing
+// tokenizer, BEFORE unwrapExecPrefix ever reinterprets the string as an
+// assignment. By the time newEnvAssignment sees it, `env A=<(evil) cmd`'s
+// captured value is `A=/dev/fd/63` — the real `<(evil)` text is gone, and no
+// amount of re-testing that string recovers it. This is why the leading/
+// `export`/compound forms above needed no analogous fix: they are genuine
+// *syntax.Assign nodes sliced verbatim from SOURCE, never lowered through
+// wordToken.
+//
+// THE FIX (parser.go's reclassifyEnvAssignsAfterProcSubFabrication) is
+// fail-closed rather than a raw-text recovery: it force-classifies ANY
+// `env`-captured assignment whose value carries the fabricated marker as
+// ExpansionUnknown, which is what closes TestIntegration_ProcessSubstitutionMaskedEnvValue's
+// `env A=<(evil) echo hi` / `env A=>(sh) echo hi` rows above. But it cannot
+// positively CLEAR a safe body through that same form, because the body text
+// needed for recursion was already destroyed — so `env A=<(git rev-parse
+// HEAD) echo hi` decisively ASKS here, unlike its leading/export/compound
+// siblings in TestIntegration_ProcessSubstitutionClearedByRecursion, which
+// reach Approve. This asymmetry is an ACCEPTED, DOCUMENTED LIMITATION: it
+// never widens (no false Approve), it only over-asks one form for a body that
+// happens to be safe, and closing it fully would require threading a raw
+// per-argument text (or a body attribution) through wordToken/appendArg into
+// unwrapExecPrefix — out of this bead's scope.
+func TestIntegration_ProcessSubstitutionEnvPrefixCannotClearEvenASafeBody(t *testing.T) {
+	projectRoot := "/Users/testuser/workspace/my-project"
+	eng := buildFullEngine(projectRoot, projectRoot)
+
+	cmd := "env A=<(git rev-parse HEAD) echo hi"
+	in := &hookio.HookInput{ToolName: "Bash", CWD: projectRoot, ToolInput: makeBashJSON(cmd)}
+	got := eng.EvaluateHook(in)
+	if got.Decision != hookio.Ask {
+		t.Errorf("EvaluateHook(%q) = %s (%s: %s); want ask — the env-prefix form cannot recover the real body text to clear it, "+
+			"but MUST NOT approve it either", cmd, got.Decision, got.Module, got.Reason)
+	}
+}
+
 // TestIntegration_UnclassifiableEnvValueNeverApproves is the FAIL-CLOSED half: a
 // value the parser cannot model, or can model only ambiguously, MUST NOT reach
 // Approve.

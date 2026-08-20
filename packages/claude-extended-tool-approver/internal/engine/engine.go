@@ -1216,11 +1216,16 @@ func (e *Engine) evaluateAssignmentOnlyLeaf(pc cmdparse.ParsedCommand, cwd, root
 	//     positively cleared (pg2-5huwx);
 	//   - redirections and heredocs on the same leaf: handled by the caller.
 	//
-	// KNOWN GAP, form-independent and pre-existing: cmdparse.classifyExpansion keys on
-	// `$`/backtick, so a PROCESS substitution in a value (`A=<(evil)`) classifies as
-	// ExpansionNone and no recursion happens. That value already auto-approves in the
-	// leading, `export` and `env` forms today, so this does not widen it — but it is a
-	// real hole in classifyExpansion and wants its own fix.
+	// RESOLVED (pg2-813ww, ADR 0039 step 5): a PROCESS substitution in a value
+	// (`A=<(evil)`) used to classify as ExpansionNone here too, for the identical
+	// reason — cmdparse.classifyExpansion's pre-parse shortcut keyed on `$`/backtick
+	// alone, so a proc-sub value never reached the census and no recursion happened,
+	// in every form (leading, `export`, `env`, compound). The shortcut now also tests
+	// for `<(`/`>(`, so such a value reaches the census, classifies ExpansionUnknown
+	// (expansionCensus.kind() floors any process substitution there — it has no
+	// static allowlist, unlike a sole command substitution), and this leaf's
+	// chainResult above already runs the full rule chain on it via the synthetic
+	// input, which is what makes `A=<(evil) cmd` recurse `evil` in every form.
 	return hookio.RuleResult{
 		Decision: hookio.Approve,
 		Reason:   "env assignments only, no rule objects (nothing is executed)",

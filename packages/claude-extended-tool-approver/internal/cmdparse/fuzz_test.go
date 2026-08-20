@@ -125,6 +125,15 @@ var fuzzSeeds = []string{
 	"A=1 && A=2 && A=3",
 	"A=$(rm -rf /) ; echo hi",
 	"A=<(rm -rf /) ; echo hi",
+	// pg2-813ww: the classifyExpansion pre-parse shortcut used to key on `$`/backtick
+	// alone, so a process substitution in an ASSIGNMENT VALUE (neither character
+	// required) reached neither this scan's caller nor the census. `>(` alongside
+	// `<(`, and every position-independent assignment form (pg2-gkd5e), so a fuzz
+	// run cannot desync one form without desyncing the shape at all of them.
+	"A=>(rm -rf /) ; echo hi",
+	"export A=<(rm -rf /) && echo hi",
+	"env A=<(rm -rf /) echo hi",
+	"A=<(rm -rf /)",
 	"=novalue && echo hi",
 	"A= && echo hi",
 	"A=1;;B=2",
