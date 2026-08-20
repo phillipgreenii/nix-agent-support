@@ -48,6 +48,14 @@ type GitClient interface {
 	// DeleteBranch runs `git branch -d|-D <branch>`.
 	DeleteBranch(ctx context.Context, dir, branch string, force bool) error
 
+	// BranchAheadOfRef reports whether branch has any commits not reachable
+	// from ref, via `git rev-list --count ref..branch`. Used before a force
+	// delete to tell "unmerged into the primary branch but still identical
+	// to (or behind) the PR's fetched head, so nothing is lost" apart from
+	// "has genuine local-only commits beyond that head, so force-deleting
+	// would destroy them".
+	BranchAheadOfRef(ctx context.Context, dir, branch, ref string) (bool, error)
+
 	// WorktreeInfo returns metadata about the worktree rooted at path.
 	// It returns an error if path is not a git worktree.
 	WorktreeInfo(ctx context.Context, path string) (*Worktree, error)
@@ -128,6 +136,18 @@ func (g *CLIGitClient) DeleteBranch(ctx context.Context, dir, branch string, for
 	}
 	_, err := runGit(ctx, dir, "branch", flag, branch)
 	return err
+}
+
+func (g *CLIGitClient) BranchAheadOfRef(ctx context.Context, dir, branch, ref string) (bool, error) {
+	out, err := runGit(ctx, dir, "rev-list", "--count", ref+".."+branch)
+	if err != nil {
+		return false, err
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(out))
+	if err != nil {
+		return false, fmt.Errorf("parse rev-list --count output %q: %w", out, err)
+	}
+	return n > 0, nil
 }
 
 func (g *CLIGitClient) WorktreeInfo(ctx context.Context, path string) (*Worktree, error) {

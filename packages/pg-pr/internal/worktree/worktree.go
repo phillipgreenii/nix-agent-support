@@ -181,13 +181,16 @@ func Add(ctx context.Context, pr int, opts Options) (*AddResult, error) {
 	}, nil
 }
 
-// Remove removes PR <pr>'s worktree and force-deletes its branch.
+// Remove removes PR <pr>'s worktree and deletes its branch when that is
+// safe.
 //
 // If the worktree path does not exist, Remove returns a result with
 // Skipped=true and a clear reason. Uncommitted changes cause Skipped=true
-// unless opts.Force is set. Branch deletion always force-deletes and is
-// best-effort: on failure Removed is still true, and res.Warning carries a
-// diagnostic instead of the error being discarded.
+// unless opts.Force is set. Branch deletion is best-effort and never
+// destroys commits that exist only locally: on failure, or when the branch
+// carries commits beyond the PR's fetched head, Removed is still true and
+// res.Warning carries a diagnostic instead of the error (or the branch)
+// being silently discarded.
 func Remove(ctx context.Context, pr int, opts Options) (*RemoveResult, error) {
 	if err := opts.resolve(); err != nil {
 		return nil, err
@@ -236,21 +239,50 @@ func Remove(ctx context.Context, pr int, opts Options) (*RemoveResult, error) {
 		return nil, fmt.Errorf("git worktree remove: %w", err)
 	}
 
-	// Delete the branch. This always force-deletes (`-D`), regardless of
-	// opts.Force: review/pr-<n> is a disposable PR-review branch sourced from
-	// the PR's remote head ref (refetchable), so its content isn't at real
-	// risk of loss even when unmerged — but leaving it behind IS a problem,
-	// since a stranded branch makes the next `worktree add` for the same PR
-	// fail with "a branch named ... already exists". Using the safe `-d`
-	// here would routinely refuse on exactly the common case (the branch
-	// isn't merged into the primary branch), silently reintroducing that
-	// failure (pg2-sg2c6). Any error that still occurs (e.g. the branch is
-	// checked out in another worktree) is non-fatal to Remove but is
-	// surfaced via res.Warning rather than discarded, matching this
-	// package's convention for non-fatal diagnostics (see
-	// sync.Summary.Warnings).
-	if err := opts.Git.DeleteBranch(ctx, repoDir, wt.Branch, true); err != nil {
-		res.Warning = fmt.Sprintf("worktree removed, but branch %q could not be deleted: %v", wt.Branch, err)
+	// Delete the branch — force (`-D`), but ONLY once we've confirmed that
+	// can't lose anything. review/pr-<n> being "not fully merged" into the
+	// primary branch is the COMMON, safe case (pg2-sg2c6): it just means the
+	// PR itself hasn't landed yet, and the branch is identical to (or behind)
+	// origin/pr/<pr>, the PR's own fetched head — refetchable, so nothing is
+	// actually at risk. Using the safe `-d` unconditionally routinely refused
+	// on exactly that case, silently stranding the branch and making the next
+	// `worktree add` for the same PR fail with "a branch named ... already
+	// exists".
+	//
+	// But "not fully merged" also covers a second, DIFFERENT case: a
+	// reviewer committed local changes on top of that branch during review
+	// (working tree then clean, so opts.Force above never gates it) and
+	// never pushed them. Those commits exist ONLY on this branch. A blanket
+	// force-delete would destroy them with no working-tree-dirty signal to
+	// stop it — recoverable only via reflog, which is not user-facing and
+	// expires. So force-delete only when the branch has no commits beyond
+	// origin/pr/<pr>; otherwise leave the branch in place and warn rather
+	// than silently discard local-only work. If the ahead-check itself can't
+	// be answered (e.g. origin/pr/<pr> was pruned since Add ran), fail
+	// closed: attempt only the safe `-d`, never force past an unverifiable
+	// state.
+	//
+	// Any resulting failure or skip is non-fatal to Remove but is surfaced
+	// via res.Warning rather than discarded, matching this package's
+	// convention for non-fatal diagnostics (see sync.Summary.Warnings).
+	prHead := fmt.Sprintf("origin/pr/%d", pr)
+	switch ahead, aheadErr := opts.Git.BranchAheadOfRef(ctx, repoDir, wt.Branch, prHead); {
+	case aheadErr != nil:
+		if err := opts.Git.DeleteBranch(ctx, repoDir, wt.Branch, false); err != nil {
+			res.Warning = fmt.Sprintf(
+				"worktree removed, but branch %q could not be deleted (could not verify it is safe to force-delete: %v): %v",
+				wt.Branch, aheadErr, err,
+			)
+		}
+	case ahead:
+		res.Warning = fmt.Sprintf(
+			"worktree removed, but branch %q has commits not present on %s; left in place to avoid losing them (delete manually with 'git branch -D %s' once you've confirmed they're not needed)",
+			wt.Branch, prHead, wt.Branch,
+		)
+	default:
+		if err := opts.Git.DeleteBranch(ctx, repoDir, wt.Branch, true); err != nil {
+			res.Warning = fmt.Sprintf("worktree removed, but branch %q could not be deleted: %v", wt.Branch, err)
+		}
 	}
 
 	// Best-effort: prune stale admin entries.
