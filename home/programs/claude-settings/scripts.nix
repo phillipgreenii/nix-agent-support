@@ -68,11 +68,25 @@ let
     ];
     manPage = false;
   };
+
+  gcPluginCache = mkBashScript {
+    name = "claude-settings-gc-plugin-cache";
+    src = ./.;
+    public = false;
+    description = "Garbage-collect stale plugin cache version directories after the per-plugin install loop (pg2-x3a3t)";
+    libraries = [ activation-lib ];
+    runtimeDeps = [
+      pkgs.jq
+      pkgs.coreutils
+    ];
+    manPage = false;
+  };
 in
 {
   inherit
     replaceManagedKeys
     installPlugin
     registerMarketplace
+    gcPluginCache
     ;
 }

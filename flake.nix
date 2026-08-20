@@ -2955,6 +2955,17 @@
                 ];
               };
 
+              # pg2-x3a3t: GC for the plugin cache's superseded content-hash
+              # version directories, run after the per-plugin install loop.
+              test-claude-settings-gc-plugin-cache = checksHelpers.testBashScripts {
+                package = claudeSettingsScripts.gcPluginCache.script;
+                tests = claudeSettingsTestSrc "test_gc_plugin_cache.bats";
+                extraInputs = [
+                  pkgs.jq
+                  pkgs.coreutils
+                ];
+              };
+
               # Regression guard for pg2-ly6a6: `claude plugin install` / `plugin
               # marketplace update` clone a url/github-source plugin by shelling out
               # to `git` BY NAME, but home-manager REPLACES PATH during activation

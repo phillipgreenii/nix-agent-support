@@ -123,6 +123,7 @@ let
   replaceScript = scripts.replaceManagedKeys.script;
   installPluginScript = scripts.installPlugin.script;
   registerMarketplaceScript = scripts.registerMarketplace.script;
+  gcPluginCacheScript = scripts.gcPluginCache.script;
 
   # DIRECTORY-source marketplaces from extraKnownMarketplaces. `claude plugin
   # marketplace update` only refreshes marketplaces already in the registry, so
@@ -538,6 +539,20 @@ in
             lib.concatStringsSep " \\\n  " words
           ) cfg.plugins
         )}
+
+        # Runs LAST, after every install/update above, so it never collects a
+        # version this same activation just installed (pg2-x3a3t). Keeps, per
+        # <marketplace>/<plugin>: the version reachable from a local nix-built
+        # marketplace under ~/.local/share/pgii-marketplaces (see
+        # home/programs/claude-marketplaces), or — when that cannot be
+        # determined (a non-local marketplace, or an orphaned plugin) — the
+        # newest 2 versions by mtime. Never removes an installed_plugins.json
+        # `installPath` or a directory holding a live `.in_use` lock. Always
+        # non-fatal.
+        act_info "garbage-collecting stale plugin cache versions"
+        ${gcPluginCacheScript}/bin/claude-settings-gc-plugin-cache \
+          "$HOME/.claude/plugins/cache" \
+          "$HOME/.local/share/pgii-marketplaces"
       ''}
     '';
   };
