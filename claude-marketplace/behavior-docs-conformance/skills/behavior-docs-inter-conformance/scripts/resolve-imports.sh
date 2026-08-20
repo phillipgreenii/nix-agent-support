@@ -30,9 +30,10 @@
 #
 # The owner UUID is the LAST visible cell and the owner set-path the one before it
 # in both, so the owner cells are read from the RIGHT rather than by fixed index.
-# This script PARSES D5's link; it never DEREFERENCES the remote-url (verifying that
-# the URL resolves and still carries the UUID is a separate, deliberately deferred
-# item — this script makes no network calls).
+# This script PARSES D5's link; it never DEREFERENCES the remote-url — confirming
+# the URL still resolves and still carries the UUID is `resolve-links.sh` (bead
+# pg2-2oupw), a deliberately separate script (see ITS header for why). This
+# script makes no network calls and never will.
 #
 # This is the executable reconciliation the docs name (INV-INTF-2 / method
 # INV-18, implementer form): the owner's contract vs. the implementer's stated
@@ -66,7 +67,14 @@ export LC_ALL=C
 
 OWNER="${1:?usage: resolve-imports.sh <owner-set-dir> <implementer-set-dir>}"
 IMPL="${2:?usage: resolve-imports.sh <owner-set-dir> <implementer-set-dir>}"
+# shellcheck disable=SC2034  # consumed by cell_uuid in the sourced lib/imports-row.bash
 UUIDRE='[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}'
+# The imports-table row/cell parser (trim/row_cell/cell_uuid/cell_url) has ONE
+# definition, in `lib/imports-row.bash` — shared with `resolve-links.sh` (bead
+# pg2-2oupw) so both scripts read the SAME two live table shapes the same way.
+# `cell_uuid` reads `$UUIDRE`, just set above.
+# shellcheck source=../../../lib/imports-row.bash
+. "$(dirname "${BASH_SOURCE[0]}")/../../../lib/imports-row.bash"
 # The families an imports row MAY cite. `owner_name_for_uuid` extracts the owner's current
 # name with this same regex, so a family omitted from it is a family whose rows CANNOT
 # RESOLVE. GOAL-5 is why the decision-doc pair belongs here and not merely in prose: an entry
@@ -83,58 +91,12 @@ IDRE="$BEHAVIOR_IDRE"
 # above forbids.
 ANYIDRE='\b[A-Z][A-Z0-9]*-[A-Za-z0-9]+(-[A-Za-z0-9]+)*\b'
 
-trim() { sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//'; }
-
 # row_setpath <owner-set-path-cell> — the declared `<set-path>` half of a
-# `<repo> · <set-path>` cell, code-span backticks stripped.
+# `<repo> · <set-path>` cell, code-span backticks stripped. Local to this
+# script (not in the shared `imports-row.bash`): the owner set-path filter
+# below is specific to resolve-imports.sh's single-seam-per-invocation
+# contract, which `resolve-links.sh` has no equivalent of.
 row_setpath() { printf '%s' "$1" | tr -d '`' | sed -E 's/.*·[[:space:]]*//' | trim; }
-
-# row_cell <gfm-row> <index> — print ONE cell of a leading-pipe GFM table row.
-# A POSITIVE index counts visible cells from the LEFT (1 = the first); a NEGATIVE
-# one counts from the RIGHT (-1 = the last, -2 = the one before it). awk's field 1
-# is the empty string before the leading pipe, and when the row also ends with a
-# pipe its LAST field is the empty string after it; both are dropped so the index
-# is over VISIBLE cells. Only an exactly-empty trailing field is dropped, so a
-# genuinely blank last cell (`| … | … |  |`) still counts as a cell.
-#
-# Reading the owner cells from the RIGHT is what makes this parser shape-agnostic.
-# The imports table's owner UUID is the LAST visible cell and the owner set-path
-# the one before it in BOTH live shapes: the current
-# `| Name | Owner set-path | Owner UUID |` and D5's
-# `| Name | What it is | Owner set-path | [<uuid>](remote-url) |`, which inserts a
-# column as the SECOND visible cell and so shifts both owner cells one field right.
-row_cell() {
-  printf '%s\n' "$1" | awk -F'|' -v i="$2" '
-    {
-      n = NF
-      if (n > 1 && $n == "") n--
-      k = (i + 0 < 0) ? n + 1 + i : 1 + i
-      if (k >= 2 && k <= n) print $k
-    }'
-}
-
-# cell_uuid <owner-uuid-cell> — the owner UUID the cell DECLARES, or nothing.
-# Two shapes are accepted, detected on the CELL ITSELF (never on a header or a
-# per-table mode) so a table MID-MIGRATION whose rows mix the shapes still
-# resolves row by row:
-#   bare      `<uuid>`                — the current shape
-#   D5 link   `[<uuid>](remote-url)`  — the shape D5 introduces
-# For the link form the identity is the LINK TEXT and ONLY the link text: a
-# remote-url may itself carry a UUID (a fragment, a permalink path), and "the
-# first UUID anywhere in the cell" would let that masquerade as the declared
-# identity. A cell that IS a link but whose text is not a well-formed UUID
-# therefore yields NOTHING — the caller MUST treat an empty result as a failure,
-# never as a pass (that silent pass is the whole defect this parser change fixes).
-cell_uuid() {
-  local cell u=''
-  cell=$(printf '%s' "$1" | tr -d '`')
-  if printf '%s' "$cell" | grep -q ']('; then
-    u=$(printf '%s' "$cell" | sed -nE "s|.*\[[[:space:]]*($UUIDRE)[[:space:]]*\][[:space:]]*\(.*|\1|p" | head -1) || u=''
-  else
-    u=$(printf '%s' "$cell" | grep -oE "$UUIDRE" | head -1) || u=''
-  fi
-  printf '%s' "$u"
-}
 
 # owner_name_for_uuid <uuid> — resolve a cited owner UUID to the owner's CURRENT name for it
 # (the first ID token on its carrier line). THREE outcomes, and the caller MUST keep them

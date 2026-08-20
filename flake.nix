@@ -389,6 +389,48 @@
             stages = [ "pre-push" ];
             files = "^(behavior-docs/docs/behavior/|packages/pr-pool/docs/behavior/|packages/pr-pool/.*\\.go$|packages/pa-monitor/docs/behavior/|packages/ccpool/docs/behavior/|packages/pg-pr/docs/behavior/|claude-marketplace/behavior-docs-conformance/|tests/behavior-docs-real-corpus)";
           };
+
+          # D5's `[<uuid>](<remote-url>)` link DEREFERENCING (bead pg2-2oupw,
+          # deferred from WS-6/pg2-wr6lm.4) — deliberately its OWN hook, not folded
+          # into behavior-docs-real-corpus above. See resolve-links.sh's header for
+          # the full reasoning; in short: that runner's baseline is shared between
+          # the sandboxed `nix flake check` caller (no sibling repos, no network,
+          # ever) and this pre-push caller (real workspace, siblings present), and
+          # a cross-repo D5 link genuinely resolves differently between the two —
+          # not a bug either caller could fix, so one shared ratchet cannot hold
+          # both correct answers. This check therefore runs ONLY here, unsandboxed,
+          # with real disk + optional real network, and NEVER inside `nix flake
+          # check` — which is also why it needs no network to keep that gate green.
+          # WARN-only by design (Q2 ruling on pg2-ijtui): this hook can never fail
+          # a push on its own account, only on a genuine usage/environment error.
+          behavior-docs-links = {
+            enable = true;
+            name = "behavior-docs-links";
+            description = "dereference D5's [<uuid>](<url>) imports-table links against a local or remote checkout (bead pg2-2oupw) -- advisory (WARN-only), never blocks a push on its own account";
+            entry = "${
+              pkgs.writeShellApplication {
+                name = "behavior-docs-links-hook";
+                runtimeInputs = [
+                  pkgs.bash
+                  pkgs.gawk
+                  pkgs.gnugrep
+                  pkgs.gnused
+                  pkgs.coreutils
+                  pkgs.findutils
+                  pkgs.git
+                  pkgs.curl
+                ];
+                text = ''
+                  exec bash "$PWD/claude-marketplace/behavior-docs-conformance/skills/behavior-docs-inter-conformance/scripts/resolve-links.sh" "$PWD/packages/pr-pool/docs/behavior"
+                '';
+              }
+            }/bin/behavior-docs-links-hook";
+            language = "system";
+            pass_filenames = false;
+            always_run = false;
+            stages = [ "pre-push" ];
+            files = "^(packages/pr-pool/docs/behavior/README\\.md|claude-marketplace/behavior-docs-conformance/(skills/behavior-docs-inter-conformance/scripts/resolve-links\\.sh|lib/imports-row\\.bash))$";
+          };
         }
         // lib.mapAttrs' mkGoLintPushHook goLintPushTouchDirs;
 
@@ -1229,6 +1271,14 @@
                   nameCollisions = pkgs.writeShellScriptBin "name-collisions" ''
                     exec ${behaviorDocsConformanceScripts}/skills/behavior-docs-inter-conformance/scripts/name-collisions.sh "$@"
                   '';
+                  # resolve-links.sh (bead pg2-2oupw) is driven by its OWN bats
+                  # file below, sharing this derivation's PATH wiring rather than
+                  # getting a whole separate check — see that file's header for
+                  # why the check itself is deliberately NOT part of `nix flake
+                  # check`'s real-corpus gate.
+                  resolveLinks = pkgs.writeShellScriptBin "resolve-links" ''
+                    exec ${behaviorDocsConformanceScripts}/skills/behavior-docs-inter-conformance/scripts/resolve-links.sh "$@"
+                  '';
                 in
                 pkgs.runCommand "test-behavior-docs-inter-conformance"
                   {
@@ -1237,15 +1287,18 @@
                       pkgs.git
                       pkgs.which
                       pkgs.gawk
+                      pkgs.curl
                       resolveImports
                       reconcileImports
                       nameCollisions
+                      resolveLinks
                     ];
                   }
                   ''
-                    export PATH="${resolveImports}/bin:${reconcileImports}/bin:${nameCollisions}/bin:$PATH"
+                    export PATH="${resolveImports}/bin:${reconcileImports}/bin:${nameCollisions}/bin:${resolveLinks}/bin:$PATH"
                     export CORPUS_INTER_DIR="${./claude-marketplace/behavior-docs-conformance/skills/behavior-docs-inter-conformance/corpus/inter}"
                     bats ${./tests/behavior-docs-inter-conformance.bats}
+                    bats ${./tests/behavior-docs-resolve-links.bats}
                     touch $out
                   '';
 
