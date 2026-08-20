@@ -123,6 +123,39 @@ func (r *Rule) evaluateStatix(args []string) (hookio.RuleResult, error) {
 	return hookio.NotApplicable()
 }
 
+// pg2-m132k OUTER-EXPR DECISION (I12/I13). evaluateNix's develop/shell
+// branches and evaluateNixShell each push a StackFrame whose Expression is
+// `outerExpr`, still computed as `normalizeExpr("nix[-shell] " +
+// strings.Join(args, " "))` — a rule-constructed string, UNCHANGED by this
+// bead. This is a DELIBERATE decision, not an oversight, recorded here per
+// this bead's acceptance criteria:
+//
+//   - outerExpr is pushed onto `stack` for a DESCENDANT recursion to compare
+//     itself against (hookio.Evaluator's cycle-detection key, engine.go's
+//     detectCycle) — it is never itself compared against anything AT this
+//     call site, so its own fidelity only matters for catching a
+//     self-referential cycle, not for the leaf-dispatch correctness
+//     innerCommandStructure's fix is about.
+//   - That cycle check can only ever fire WITHIN a single
+//     EvaluateStructure -> evaluateParsed -> foldSubstitutionScan recursion
+//     chain (the `stack` parameter's own chaining mechanism). A nix-in-nix
+//     delegation — the inner leaf calling back into THIS rule via
+//     evaluateParsed's per-leaf `e.Evaluate(syntheticInput)` — does NOT
+//     receive the ancestor `stack` at all: Engine.Evaluate takes no stack
+//     parameter, so each nested nix.go invocation starts a brand-new,
+//     single-frame stack. Recursion depth there is bounded by the finite
+//     length of the input command (each "nix develop -c" nesting consumes
+//     real characters), not by cycle detection — exactly as it was before
+//     this bead, so leaving outerExpr untouched changes nothing about that
+//     bound.
+//   - Fixing outerExpr to a genuine source slice would need the same kind of
+//     mechanism innerCommandStructure now has for the INNER command, but for
+//     the OUTER one (which this rule never delegates into a second time at
+//     this call site) — a real improvement, but an independent one from the
+//     defect this bead's acceptance criteria names (the inner-command text
+//     handed to the engine), and not required to fix it. It is left as a
+//     pre-existing, tracked gap for a future, dedicated pass rather than
+//     folded into this change.
 func (r *Rule) evaluateNix(args []string, input *hookio.HookInput) (hookio.RuleResult, error) {
 	subcmd := firstNonFlag(args)
 	if subcmd == "" {
@@ -133,18 +166,29 @@ func (r *Rule) evaluateNix(args []string, input *hookio.HookInput) (hookio.RuleR
 		// inner command; recurse so it is evaluated (mirrors the `nix shell`
 		// branch). Reading only --command let `nix develop -c rm -rf /etc` slip
 		// through as a plain "approve develop".
-		innerCmd := extractAfterFlag(args, "-c")
-		if innerCmd == "" {
-			innerCmd = extractAfterFlag(args, "--command")
+		rest, ok := argsAfterFlag(args, "-c")
+		if !ok {
+			rest, ok = argsAfterFlag(args, "--command")
 		}
-		if innerCmd != "" {
+		if ok {
+			// pg2-m132k: leaves/innerSource are derived STRUCTURALLY (I13) — see
+			// innerCommandStructure's doc for why a plain strings.Join of the
+			// post-unquote args (the pre-fix behaviour) destroys quoting, and
+			// EvaluateStructure (I13's structural delegate entry point) is used
+			// in place of EvaluateExpression so no rule-built text is handed to
+			// the engine's text entry point.
+			leaves, innerSource := innerCommandStructure(rest)
+			// pg2-m132k OUTER-EXPR DECISION (I12/I13): outerExpr below is left as
+			// a rule-constructed string, UNCHANGED from before this bead — see
+			// the package-level "OUTER-EXPR DECISION" comment for why this is
+			// deliberate rather than an oversight.
 			outerExpr := normalizeExpr("nix " + strings.Join(args, " "))
 			stack := []hookio.StackFrame{{RuleName: r.Name(), Command: "nix develop", Expression: outerExpr}}
 			// ADR 0043 RECURSION BOUNDARY. NOT `..., nil`: an inner NoOpinion is the inner
 			// chain's loop-exhaustion verdict, and returning it as this rule's own verdict
 			// would STOP the outer chain where the pre-ADR forwarded Abstain continued it.
 			// hookio.FromRecursion states the translation in one place.
-			return hookio.FromRecursion(r.exprEval.EvaluateExpression(innerCmd, stack, input))
+			return hookio.FromRecursion(r.exprEval.EvaluateStructure(innerSource, leaves, stack, input))
 		}
 		// No inner command: approve develop as usual
 		return hookio.RuleResult{
@@ -154,18 +198,21 @@ func (r *Rule) evaluateNix(args []string, input *hookio.HookInput) (hookio.RuleR
 		}, nil
 	}
 	if subcmd == "shell" && r.exprEval != nil {
-		innerCmd := extractAfterFlag(args, "-c")
-		if innerCmd == "" {
-			innerCmd = extractAfterFlag(args, "--command")
+		rest, ok := argsAfterFlag(args, "-c")
+		if !ok {
+			rest, ok = argsAfterFlag(args, "--command")
 		}
-		if innerCmd != "" {
+		if ok {
+			// pg2-m132k: see innerCommandStructure's doc and the "OUTER-EXPR
+			// DECISION" comment below (nix develop's branch above cites both).
+			leaves, innerSource := innerCommandStructure(rest)
 			outerExpr := normalizeExpr("nix " + strings.Join(args, " "))
 			stack := []hookio.StackFrame{{RuleName: r.Name(), Command: "nix shell", Expression: outerExpr}}
 			// ADR 0043 RECURSION BOUNDARY. NOT `..., nil`: an inner NoOpinion is the inner
 			// chain's loop-exhaustion verdict, and returning it as this rule's own verdict
 			// would STOP the outer chain where the pre-ADR forwarded Abstain continued it.
 			// hookio.FromRecursion states the translation in one place.
-			return hookio.FromRecursion(r.exprEval.EvaluateExpression(innerCmd, stack, input))
+			return hookio.FromRecursion(r.exprEval.EvaluateStructure(innerSource, leaves, stack, input))
 		}
 		// No -c flag: just entering a shell with packages available — approve
 		return hookio.RuleResult{
@@ -261,18 +308,36 @@ func (r *Rule) evaluateNixStore(args []string) (hookio.RuleResult, error) {
 }
 
 func (r *Rule) evaluateNixShell(args []string, input *hookio.HookInput) (hookio.RuleResult, error) {
-	innerCmd := extractAfterFlag(args, "--run")
-	if innerCmd == "" {
-		innerCmd = extractAfterFlag(args, "--command")
+	// Unlike `nix develop`/`nix shell`'s -c/--command (which hand execve the
+	// REST of argv directly, so a genuinely multi-token tail is real ARGV, not
+	// shell text — see innerCommandStructure's doc), nix-shell's --run/--command
+	// each take EXACTLY ONE string value that nix-shell itself hands to
+	// `$SHELL -c` (confirmed against `nix-shell --help`: "--command cmd ...
+	// executed in an interactive shell"; "--run cmd ... Like --command, but ...
+	// non-interactive"). singleArgAfterFlag takes only that one value —
+	// narrower than the pre-fix extractAfterFlag, which joined every remaining
+	// arg (including any UNRELATED trailing nix-shell flag) into the command;
+	// no existing test exercises that trailing-args case, and this is the
+	// behaviour nix-shell itself implements.
+	runStr, ok := singleArgAfterFlag(args, "--run")
+	if !ok {
+		runStr, ok = singleArgAfterFlag(args, "--command")
 	}
-	if innerCmd != "" {
+	if ok {
+		// runStr is the caller's OWN string, unmutated and unjoined (I13); it is
+		// both the structural entry point's `source` (I12: the exact text
+		// `leaves` was lowered from — see cmdparse.Parse's own doc for why this
+		// is the sanctioned "text that exists nowhere in the [outer] source, so
+		// the slice comes from the file produced by parsing that text" case) and
+		// what gets parsed to produce `leaves`.
+		leaves := cmdparse.Parse(runStr)
 		outerExpr := normalizeExpr("nix-shell " + strings.Join(args, " "))
 		stack := []hookio.StackFrame{{RuleName: r.Name(), Command: "nix-shell", Expression: outerExpr}}
 		// ADR 0043 RECURSION BOUNDARY. NOT `..., nil`: an inner NoOpinion is the inner
 		// chain's loop-exhaustion verdict, and returning it as this rule's own verdict
 		// would STOP the outer chain where the pre-ADR forwarded Abstain continued it.
 		// hookio.FromRecursion states the translation in one place.
-		return hookio.FromRecursion(r.exprEval.EvaluateExpression(innerCmd, stack, input))
+		return hookio.FromRecursion(r.exprEval.EvaluateStructure(runStr, leaves, stack, input))
 	}
 	// nix-shell without --run: just entering a shell — approve
 	return hookio.RuleResult{
@@ -296,13 +361,100 @@ func firstNonFlag(args []string) string {
 	return ""
 }
 
-func extractAfterFlag(args []string, flag string) string {
+// argsAfterFlag returns the args following the first occurrence of flag,
+// and whether flag was found with at least one following argument. It
+// returns the SLICE, never a joined string: joining post-unquote args with
+// bare spaces is exactly the pg2-m132k defect (see innerCommandStructure) —
+// callers needing text must go through a function that quotes correctly.
+func argsAfterFlag(args []string, flag string) ([]string, bool) {
 	for i, a := range args {
 		if a == flag && i+1 < len(args) {
-			return strings.Join(args[i+1:], " ")
+			return args[i+1:], true
 		}
 	}
-	return ""
+	return nil, false
+}
+
+// singleArgAfterFlag returns ONLY the single arg immediately following the
+// first occurrence of flag (never the rest of args) — the shape
+// nix-shell's --run/--command need; see evaluateNixShell's doc.
+func singleArgAfterFlag(args []string, flag string) (string, bool) {
+	for i, a := range args {
+		if a == flag && i+1 < len(args) {
+			return args[i+1], true
+		}
+	}
+	return "", false
+}
+
+// innerCommandStructure derives nix develop/shell's -c/--command inner
+// command STRUCTURALLY (I13) from rest — the caller's ALREADY-PARSED,
+// post-unquote args following the flag — instead of the pre-fix
+// `strings.Join(rest, " ")` text-join that was handed to EvaluateExpression.
+//
+// THE DEFECT (pg2-m132k). `strings.Join` rejoins each element of rest with a
+// bare space and hands the result to a FRESH shell parse. When rest has more
+// than one element, that reparse re-tokenizes on whitespace and operators —
+// but nix's own `-c`/`--command` hands the REST OF ARGV to execve directly
+// (confirmed against `nix develop --help`: "-c command args ... start the
+// specified command and arguments"; never through a shell), so rest's
+// element BOUNDARIES are already the correct argv boundaries from THIS
+// command's own outer parse, not shell words to re-split. An operator
+// embedded in one already-tokenized element — e.g. the `;` in
+// `nix develop -c bash -c "echo hi; echo bye"`, where rest is
+// ["bash", "-c", "echo hi; echo bye"] — resurfaces as a LIVE shell operator
+// once the naively-joined text is reparsed, splitting one leaf into two and
+// losing the semicolon's original protection.
+//
+// THE FIX. len(rest) == 1 is handled by parsing rest[0] directly: a single
+// remaining token may itself be a whole command line the caller quoted as
+// one shell word (`-c "git clean -fd"`), and reparsing it lets it split back
+// into its real words — this is UNCHANGED from the pre-fix behaviour for the
+// common one-argument case (nothing was ever joined) and is why the existing
+// pinning tests (TestNixRule_ShellCommand, TestNixRule_DevelopCommand,
+// TestIJ9SR_InnerRefusalIsForwardedByRule's nix rows) still pass unchanged.
+//
+// len(rest) > 1 is where the fix actually changes behaviour: rest's elements
+// are safely re-quoted (quoteJoin — one shell word per element, embedded
+// single quotes escaped) before being parsed, so the reparse reproduces
+// exactly rest's own element boundaries — `cmdparse.Parse("'bash' '-c'
+// 'echo hi; echo bye'")` yields ONE leaf (Executable "bash", Args ["-c",
+// "echo hi; echo bye"]), never two. leaves is genuinely `cmdparse.Parse(source)`
+// (I12: source is the exact text leaves was lowered from — never a smuggled
+// mismatch), so it satisfies EvaluateStructure's contract precisely, even
+// though — as I7 anticipates for the permanent text entry point — that text
+// exists nowhere in the ORIGINAL raw command (it is a safely-requoted
+// reconstruction of already-decoded values, not a substring of it).
+func innerCommandStructure(rest []string) ([]cmdparse.ParsedCommand, string) {
+	source := rest[0]
+	if len(rest) > 1 {
+		source = quoteJoin(rest)
+	}
+	return cmdparse.Parse(source), source
+}
+
+// quoteJoin renders args as a shell command line that reparses back to
+// EXACTLY the same argv: each element is single-quoted as one opaque word,
+// with any embedded single quote escaped per shellQuoteArg's doc, rather
+// than left bare — so no argument's own content — a semicolon, a pipe, a
+// space — can be reinterpreted as a NEW word boundary or operator on
+// reparse. See innerCommandStructure's doc for why this matters only when
+// there is more than one element to join.
+func quoteJoin(args []string) string {
+	quoted := make([]string, len(args))
+	for i, a := range args {
+		quoted[i] = shellQuoteArg(a)
+	}
+	return strings.Join(quoted, " ")
+}
+
+// shellQuoteArg wraps s in single quotes. An embedded single quote is
+// escaped by closing the quoted string, emitting a backslash-escaped
+// literal quote, then reopening the quoted string — the standard technique
+// for round-tripping an arbitrary string through a POSIX-shell reparse
+// unchanged, for ANY byte sequence s may contain.
+func shellQuoteArg(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 func firstNonFlagAfter(args []string, after string) string {
