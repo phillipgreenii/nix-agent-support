@@ -739,3 +739,66 @@ func TestRateLimitPauseDiscriminatorRequiresEveryConjunct(t *testing.T) {
 		}
 	})
 }
+
+// --- bead pg2-gp85s: discriminator conjuncts pin ORDERING, not just presence -
+
+// TestRateLimitPauseDiscriminatorRejectsLexicographicNeighbors extends the
+// conjunct-independence pinning above from EQUALITY to ORDERING: pg-go-mutate
+// also enumerates ==->{<=,>=} mutants on the discriminator's three string
+// conjuncts, and TestRateLimitPauseDiscriminatorRequiresEveryConjunct's
+// fixtures ("summary", "info", "overloaded_error") happen to sort on the side
+// those mutants don't widen into, so they survive unnoticed.
+//
+// Each case below picks a value that a widened conjunct WOULD admit while the
+// real == check must not, and every value is an ordinary value in this
+// package's own domain — none is invented solely for its sort position:
+//   - Type "user" is an everyday event type (see
+//     TestRateLimitPauseFalseAfterUserResumes) and sorts >= "system", so it
+//     would pass a ==->>= mutant on that conjunct.
+//   - Subtype "" is the zero value any event without an explicit subtype key
+//     unmarshals to, and sorts <= "api_error", so it would pass a ==-><=
+//     mutant on that conjunct.
+//   - the nested error type "server_error" is a real Anthropic API error kind
+//     (ErrServerError in apierror.go) and sorts >= "rate_limit_error", so it
+//     would pass a ==->>= mutant on that conjunct.
+func TestRateLimitPauseDiscriminatorRejectsLexicographicNeighbors(t *testing.T) {
+	ts := time.Date(2026, 4, 10, 17, 0, 0, 0, time.UTC)
+	const inRange = 3600000 // one hour, comfortably inside MaxResetHorizon
+
+	cases := []struct {
+		name string
+		line string
+	}{
+		{
+			// Fails only `type == "system"`; "user" >= "system" lexicographically.
+			name: "user event type sorts past system",
+			line: legacyRateEventShaped("user", "api_error", "rate_limit_error", ts, inRange),
+		},
+		{
+			// Fails only `subtype == "api_error"`; "" <= "api_error" lexicographically.
+			name: "empty subtype sorts before api_error",
+			line: legacyRateEventShaped("system", "", "rate_limit_error", ts, inRange),
+		},
+		{
+			// Fails only `error.error.error.type == "rate_limit_error"`;
+			// "server_error" >= "rate_limit_error" lexicographically.
+			name: "server_error sorts past rate_limit_error",
+			line: legacyRateEventShaped("system", "api_error", "server_error", ts, inRange),
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			path := t.TempDir() + "/t.jsonl"
+			if err := writeTestFile(path, c.line+"\n"); err != nil {
+				t.Fatal(err)
+			}
+			got, err := RateLimitPause(path)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !got.IsZero() {
+				t.Errorf("resetsAt = %v, want zero — this event fails a discriminator conjunct on VALUE (not just presence) and must not become a rate-limit event", got.UTC())
+			}
+		})
+	}
+}
