@@ -1228,6 +1228,9 @@
                   capturePrefix = pkgs.writeShellScriptBin "capture-prefix-snapshots" ''
                     exec ${behaviorDocsConformanceScripts}/skills/behavior-docs-intra-conformance/scripts/capture-prefix-snapshots.sh "$@"
                   '';
+                  relocationCheck = pkgs.writeShellScriptBin "relocation-check" ''
+                    exec ${behaviorDocsConformanceScripts}/skills/behavior-docs-intra-conformance/scripts/relocation-check.sh "$@"
+                  '';
                 in
                 pkgs.runCommand "test-behavior-docs-intra-conformance"
                   {
@@ -1240,10 +1243,11 @@
                       selfChecks
                       traceExtract
                       capturePrefix
+                      relocationCheck
                     ];
                   }
                   ''
-                    export PATH="${selfChecks}/bin:${traceExtract}/bin:${capturePrefix}/bin:$PATH"
+                    export PATH="${selfChecks}/bin:${traceExtract}/bin:${capturePrefix}/bin:${relocationCheck}/bin:$PATH"
                     export CORPUS_INTRA_DIR="${./claude-marketplace/behavior-docs-conformance/skills/behavior-docs-intra-conformance/corpus/intra}"
                     bats ${./tests/behavior-docs-intra-conformance.bats}
                     touch $out

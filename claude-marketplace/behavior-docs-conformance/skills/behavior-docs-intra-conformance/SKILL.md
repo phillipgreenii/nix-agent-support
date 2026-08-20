@@ -85,6 +85,25 @@ trailer a story bullet carries. The dangling-reference section is the intra view
 **cited-but-undeclared** external element; the inter evaluator's `reconcile-imports.sh` sees the same
 defect from the imports table's side and additionally catches the reverse (**declared-but-uncited**).
 
+## Step 2c — Relocation (deterministic, the decidable half of `USECASE-5`)
+
+Run the bundled **`scripts/relocation-check.sh <target>`**. `USECASE-5` ("Relocate implementation
+content out of a behavior doc", `D10`) is a five-step procedure; only two of its five steps reduce
+to a decidable predicate over text (bead `pg2-9sslr`, operator ruling 2026-08-14 — **build the
+decidable categories only, and document the rest as excluded rather than drop them**):
+
+| Step                                                                          | Checked here?                                                                                                                                                                                                                                                                                  |
+| ----------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1. The `INV-2` change test (would this change if the implementation changed?) | **NO** — irreducible judgment, left to Step 3 below                                                                                                                                                                                                                                            |
+| 2. The substitution/floor test (`INV-10`)                                     | **NO** — irreducible judgment, left to Step 3 below                                                                                                                                                                                                                                            |
+| 3. Move it to the decision area as an entry with a typed id + UUID            | **YES** — every `DEC-`/`IMPL-` definition heading in the sibling `../decisions` area carries a well-formed, unique UUID on its own definition line                                                                                                                                             |
+| 4. Restate at the floor; cite only where provenance is needed                 | **PARTLY** — restatement quality is judgment (Step 3 below); not checked here                                                                                                                                                                                                                  |
+| 5. Delete with no tombstone (`INV-4`)                                         | **YES, narrowly** — no note-shaped (parenthetical / HTML-comment / bold-label / blockquote) "moved to ..." / "relocated to ..." marker; "status header" is `self-checks.sh`'s own section, not reimplemented; "changelog line" has no detectable convention in this corpus and is out of scope |
+
+The script's own header comment is the authoritative record of what is excluded and why — read it
+before trusting a green run to mean "the relocation was correct" rather than "the relocation's
+mechanical shape is present."
+
 ## Step 3 — Content-level checks (read and judge)
 
 These need reading, not grep. Judge each and cite the rule.
@@ -120,17 +139,20 @@ version number):
 | **inter** | one set ↔ another system's contract | [`behavior-docs-inter-conformance`](../behavior-docs-inter-conformance/SKILL.md) |
 | **impl**  | an implementation ↔ its own set     | [`behavior-docs-impl-conformance`](../behavior-docs-impl-conformance/SKILL.md)   |
 
-Steps 2–3 above cover the general checklist; the six categories the intra evaluator is specifically
-accountable for — each with a FAIL and a PASS fixture under [`corpus/intra/`](corpus/intra/) — are:
+Steps 2–3 above cover the general checklist; the eight categories the intra evaluator is
+specifically accountable for — each with a FAIL and a PASS fixture under
+[`corpus/intra/`](corpus/intra/) — are:
 
-| Category                         | What FAILs                                                                                                    | Layer                                               | Rule       |
-| -------------------------------- | ------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- | ---------- |
-| **inline-status** (#15)          | a rule annotated with its current implementation status in prose (e.g. "unmet by the current implementation") | mechanical (self-checks "Inline status framing")    | `INV-4`    |
-| **floor-leakage**                | a below-floor realization detail (`file:line`, retry counts, backoff ms)                                      | mechanical (self-checks "Floor-leakage candidates") | `INV-2/10` |
-| **realization-register**         | a realization gap recorded as an `OQ-` element (FAIL), or no `## Realization gaps` section at all (ADVISORY)  | mechanical (self-checks "Realization-gap register") | `INV-23`   |
-| **substitution**                 | an extent statement that fails the substitution test (names an artifact, not a behavior)                      | judgment (Step 3)                                   | `INV-2/10` |
-| **extent-traceability**          | an extent-in/out claim (story/journey) no invariant traces                                                    | judgment (Step 3)                                   | `INV-11`   |
-| **seam-vocab inherit-or-rename** | a borrowed (cited) term silently REDEFINED instead of inherited-or-renamed                                    | judgment (Step 3)                                   | `INV-20`   |
+| Category                         | What FAILs                                                                                                         | Layer                                               | Rule                         |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------- | ---------------------------- |
+| **inline-status** (#15)          | a rule annotated with its current implementation status in prose (e.g. "unmet by the current implementation")      | mechanical (self-checks "Inline status framing")    | `INV-4`                      |
+| **floor-leakage**                | a below-floor realization detail (`file:line`, retry counts, backoff ms)                                           | mechanical (self-checks "Floor-leakage candidates") | `INV-2/10`                   |
+| **realization-register**         | a realization gap recorded as an `OQ-` element (FAIL), or no `## Realization gaps` section at all (ADVISORY)       | mechanical (self-checks "Realization-gap register") | `INV-23`                     |
+| **substitution**                 | an extent statement that fails the substitution test (names an artifact, not a behavior)                           | judgment (Step 3)                                   | `INV-2/10`                   |
+| **extent-traceability**          | an extent-in/out claim (story/journey) no invariant traces                                                         | judgment (Step 3)                                   | `INV-11`                     |
+| **seam-vocab inherit-or-rename** | a borrowed (cited) term silently REDEFINED instead of inherited-or-renamed                                         | judgment (Step 3)                                   | `INV-20`                     |
+| **relocation-decision-id**       | a `DEC-`/`IMPL-` entry in the sibling decision area with no (or a malformed/duplicate) UUID on its definition line | mechanical (`relocation-check.sh`, Step 2c)         | `USECASE-5` step 3           |
+| **relocation-tombstone**         | a note-shaped "moved to ..." / "relocated to ..." marker left in the behavior doc                                  | mechanical (`relocation-check.sh`, Step 2c)         | `USECASE-5` step 5 / `INV-4` |
 
 **The register: what intra owns, and what it does not.** `INV-23` fixes the register's shape so no set
 re-invents it; `behavior-docs/docs/decisions · DEC-CONFORM-2` records why and splits the checking.
@@ -143,9 +165,10 @@ ADVISORY rather than a FAIL only because a FAIL from `self-checks.sh` cannot be 
 real-corpus baseline (see `DEC-CONFORM-2`); read a missing register as a real `INV-23` finding when
 reporting, and promote the check to FAIL once every real set carries the section.
 
-The mechanical categories are enforced by the bundled `self-checks.sh` (and gated by the
-`test-behavior-docs-intra-conformance` bats check under `nix flake check`); the judgment categories are
-the agent's, using the corpus fixtures as the reference for what a FLAG vs. CLEAN looks like.
+The mechanical categories are enforced by the bundled `self-checks.sh` and `relocation-check.sh`
+(and gated by the `test-behavior-docs-intra-conformance` bats check under `nix flake check`); the
+judgment categories are the agent's, using the corpus fixtures as the reference for what a FLAG vs.
+CLEAN looks like.
 
 **Real-world corpus via pre-fix snapshots.** `scripts/capture-prefix-snapshots.sh <out>` captures the
 git snapshot of each behavior-docs set as it was immediately BEFORE a review-resolution edit pass —

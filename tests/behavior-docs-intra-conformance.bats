@@ -342,6 +342,8 @@ corpus_intra_dir() {
   [ -d "$C/inline-status/fail" ]
   [ -d "$C/floor-leakage/pass" ]
   [ -d "$C/realization-register/fail" ]
+  [ -d "$C/relocation-decision-id/fail/behavior" ]
+  [ -d "$C/relocation-tombstone/pass" ]
 }
 
 @test "corpus intra (#5): realization-register fail fixture is mechanically flagged; pass fixture is clean" {
@@ -360,6 +362,11 @@ corpus_intra_dir() {
   local found=0
   for d in "$C"/*/fail "$C"/*/pass; do
     [ -d "$d" ] || continue
+    # relocation-decision-id's fixtures nest a behavior/ + decisions/ pair
+    # instead of carrying .md files at the top level (relocation-check.sh
+    # needs a sibling ../decisions area, which fail and pass cannot share) —
+    # not a self-checks target. Skip rather than false-fail on "no .md files".
+    ls "$d"/*.md >/dev/null 2>&1 || continue
     found=$((found + 1))
     run self-checks "$d"
     [ "$status" -eq 0 ] || {
@@ -842,4 +849,211 @@ canon_set() {
   env -u LC_ALL -u LC_COLLATE LANG=en_US.UTF-8 trace-extract "$T" >"$c" 2>&1
   diff "$a" "$b"
   diff "$a" "$c"
+}
+
+# --- Relocation check: the decidable half of USECASE-5 (bead pg2-9sslr) -------
+# relocation-check.sh covers ONLY step 3 (a relocated entry carries a typed id
+# + UUID at its new decision-area location) and step 5 (no tombstone note left
+# in the behavior doc). Steps 1, 2 and step 4's judgment half are explicitly
+# out of scope per the operator ruling recorded on pg2-9sslr — see the
+# script's own header comment.
+
+@test "relocation step 3: a decision entry with no UUID on its definition line is FAILed" {
+  mkdir -p "$SET/../decisions"
+  cat >"$SET/../decisions/wire.md" <<'MD'
+# Wire
+
+### `DEC-WIRE-1` — the default transport is a CLI invocation carrying JSON
+
+**Decided.** ...
+MD
+  cat >"$SET/interfaces.md" <<'MD'
+# Interfaces
+
+Cited via `docs/decisions · DEC-WIRE-1`.
+MD
+  run relocation-check "$SET"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q 'FAIL DEC-WIRE-1 (wire.md:3) carries no UUID'
+}
+
+@test "relocation step 3: a malformed UUID on the definition line is FAILed" {
+  mkdir -p "$SET/../decisions"
+  cat >"$SET/../decisions/wire.md" <<'MD'
+# Wire
+
+### `DEC-WIRE-1` — the default transport <!-- uuid: not-a-real-uuid -->
+MD
+  cat >"$SET/interfaces.md" <<'MD'
+# Interfaces
+MD
+  run relocation-check "$SET"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q 'FAIL DEC-WIRE-1 (wire.md:3) carries a malformed UUID: not-a-real-uuid'
+}
+
+@test "relocation step 3: two entries sharing one UUID are FAILed as a duplicate" {
+  mkdir -p "$SET/../decisions"
+  cat >"$SET/../decisions/wire.md" <<'MD'
+# Wire
+
+### `DEC-WIRE-1` — first entry <!-- uuid: 11111111-1111-4111-8111-111111111111 -->
+
+### `DEC-WIRE-2` — second entry, wrongly reusing the same UUID <!-- uuid: 11111111-1111-4111-8111-111111111111 -->
+MD
+  cat >"$SET/interfaces.md" <<'MD'
+# Interfaces
+MD
+  run relocation-check "$SET"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q 'FAIL duplicate UUID within the decision area: 11111111-1111-4111-8111-111111111111'
+}
+
+@test "relocation step 3: a well-formed, unique decision entry is clean" {
+  mkdir -p "$SET/../decisions"
+  cat >"$SET/../decisions/wire.md" <<'MD'
+# Wire
+
+### `DEC-WIRE-1` — the default transport is a CLI invocation carrying JSON <!-- uuid: 6450eed7-228f-4a99-bfd9-6705a6c552ee -->
+
+**Decided.** ...
+MD
+  cat >"$SET/interfaces.md" <<'MD'
+# Interfaces
+
+Cited via `docs/decisions · DEC-WIRE-1`.
+MD
+  run relocation-check "$SET"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q 'clean (1 entry: well-formed, unique UUID'
+}
+
+@test "relocation step 3: README.md's index BULLET (no heading, no UUID) is not mistaken for a definition" {
+  # docs/decisions/README.md's own "Entries" section restates every id as a
+  # plain bullet with no UUID — that is the INDEX, not the definition (which
+  # lives in the topic file as a heading). A bullet-admitting DEFPAT would
+  # misread the index as an un-UUID'd definition, false-FAILing every real
+  # decisions/README.md in this repo.
+  mkdir -p "$SET/../decisions"
+  cat >"$SET/../decisions/wire.md" <<'MD'
+# Wire
+
+### `DEC-WIRE-1` — the default transport <!-- uuid: 6450eed7-228f-4a99-bfd9-6705a6c552ee -->
+MD
+  cat >"$SET/../decisions/README.md" <<'MD'
+# Decision docs
+
+## Entries
+
+- **`DEC-WIRE-1`** — in [wire.md](wire.md) — the default transport is a CLI invocation.
+MD
+  cat >"$SET/interfaces.md" <<'MD'
+# Interfaces
+MD
+  run relocation-check "$SET"
+  [ "$status" -eq 0 ]
+  ! echo "$output" | grep -qi FAIL
+}
+
+@test "relocation step 3: no sibling decision area is reported, not an error" {
+  cat >"$SET/interfaces.md" <<'MD'
+# Interfaces
+MD
+  run relocation-check "$SET"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q 'no sibling decision area'
+}
+
+@test "relocation step 5: a parenthetical 'moved to' tombstone note is FAILed" {
+  cat >"$SET/interfaces.md" <<'MD'
+# Interfaces
+
+## `INTF-WIRE` — the wire boundary
+
+_(moved to docs/decisions/wire.md)_
+MD
+  run relocation-check "$SET"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "FAIL tombstone note left in behavior doc: interfaces.md:5:_(moved to docs/decisions/wire.md)_"
+}
+
+@test "relocation step 5: an HTML-comment tombstone marker is FAILed" {
+  cat >"$SET/interfaces.md" <<'MD'
+# Interfaces
+
+## `INTF-WIRE` — the wire boundary
+<!-- relocated to DEC-WIRE-1 -->
+MD
+  run relocation-check "$SET"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -qi 'FAIL tombstone note left in behavior doc'
+}
+
+@test "relocation step 5: a restated behavior statement with a proper citation is clean" {
+  cat >"$SET/interfaces.md" <<'MD'
+# Interfaces
+
+## `INTF-WIRE` — the wire boundary
+
+The default transport is a CLI invocation carrying JSON
+(`phillipgreenii-nix-agent-support · packages/pr-pool/docs/decisions · DEC-WIRE-1`).
+MD
+  run relocation-check "$SET"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "clean (no 'moved to"
+}
+
+@test "relocation step 5: USECASE-5's OWN illustrative quote 'no \"moved to ...\" note' is NOT flagged" {
+  # The exact real false positive this corpus contains: a QUOTED example of the
+  # forbidden note, describing the rule rather than violating it.
+  cat >"$SET/journeys.md" <<'MD'
+# Journeys
+
+5. Delete it from the behavior doc, with no tombstone: no "moved to ..." note, no status header.
+MD
+  run relocation-check "$SET"
+  [ "$status" -eq 0 ]
+  ! echo "$output" | grep -qi FAIL
+}
+
+@test "relocation step 5: legitimate prose using 'relocated to' as ACTIVE behavior is NOT flagged" {
+  # The other real false positive: pg-pr's invariants.md states, as a live
+  # behavior rule about UUID provenance, that four invariants were "relocated
+  # to" pg-pr from another set. Plain running prose, no note-shaped marker.
+  cat >"$SET/invariants.md" <<'MD'
+# Invariants
+
+Four invariants below carry a UUID moved from the ZR deployment set rather than freshly minted,
+because they are the same rule relocated to its correct owner.
+MD
+  run relocation-check "$SET"
+  [ "$status" -eq 0 ]
+  ! echo "$output" | grep -qi FAIL
+}
+
+@test "relocation: a usage error exits 2, distinct from a finding" {
+  run relocation-check
+  [ "$status" -eq 2 ]
+  run relocation-check "$BATS_TEST_TMPDIR/nope-reloc"
+  [ "$status" -eq 2 ]
+}
+
+@test "corpus intra: relocation-decision-id fail fixture FAILs and pass fixture passes" {
+  C=$(corpus_intra_dir)
+  [ -d "$C/relocation-decision-id" ] || skip "corpus not found at $C"
+  run relocation-check "$C/relocation-decision-id/fail/behavior"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q 'FAIL DEC-WIRE-1'
+  run relocation-check "$C/relocation-decision-id/pass/behavior"
+  [ "$status" -eq 0 ]
+}
+
+@test "corpus intra: relocation-tombstone fail fixture FAILs and pass fixture passes" {
+  C=$(corpus_intra_dir)
+  [ -d "$C/relocation-tombstone" ] || skip "corpus not found at $C"
+  run relocation-check "$C/relocation-tombstone/fail"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q 'FAIL tombstone note left in behavior doc'
+  run relocation-check "$C/relocation-tombstone/pass"
+  [ "$status" -eq 0 ]
 }

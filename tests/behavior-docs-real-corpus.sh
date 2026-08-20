@@ -60,6 +60,7 @@ BASELINE="${BASELINE:-$ROOT/tests/behavior-docs-real-corpus.baseline}"
 SKILLS="claude-marketplace/behavior-docs-conformance/skills"
 SELF_CHECKS="$SKILLS/behavior-docs-intra-conformance/scripts/self-checks.sh"
 TRACE_EXTRACT="$SKILLS/behavior-docs-intra-conformance/scripts/trace-extract.sh"
+RELOCATION_CHECK="$SKILLS/behavior-docs-intra-conformance/scripts/relocation-check.sh"
 RESOLVE_IMPORTS="$SKILLS/behavior-docs-inter-conformance/scripts/resolve-imports.sh"
 RECONCILE_IMPORTS="$SKILLS/behavior-docs-inter-conformance/scripts/reconcile-imports.sh"
 NAME_COLLISIONS="$SKILLS/behavior-docs-inter-conformance/scripts/name-collisions.sh"
@@ -72,7 +73,7 @@ PAMONITOR_SET="packages/pa-monitor/docs/behavior"
 CCPOOL_SET="packages/ccpool/docs/behavior"
 PGPR_SET="packages/pg-pr/docs/behavior"
 
-for f in "$SELF_CHECKS" "$TRACE_EXTRACT" "$RESOLVE_IMPORTS" "$RECONCILE_IMPORTS" "$NAME_COLLISIONS" "$IMPL_TRACES"; do
+for f in "$SELF_CHECKS" "$TRACE_EXTRACT" "$RELOCATION_CHECK" "$RESOLVE_IMPORTS" "$RECONCILE_IMPORTS" "$NAME_COLLISIONS" "$IMPL_TRACES"; do
   [ -f "$f" ] || {
     echo "missing evaluator script: $ROOT/$f" >&2
     echo "(a rename that did not update this runner? the paths are listed at the top of this file)" >&2
@@ -174,6 +175,12 @@ for set in "$METHOD_SET" "$PRPOOL_SET" "$PAMONITOR_SET" "$CCPOOL_SET" "$PGPR_SET
   bash "$TRACE_EXTRACT" "$set" >"$out" 2>&1 || true
   record "intra/trace-extract $set" "$out"
   sed -n '/^--- /,$p' "$out" | grep -E '^[[:space:]]*(FAIL|WARN|clean|adopted|NOT ADOPTED)' | sed 's/^/  /' || true
+
+  echo "--- intra: relocation-check.sh $set ---"
+  out="$tmp/relocation.$(printf '%s' "$set" | tr / _)"
+  bash "$RELOCATION_CHECK" "$set" >"$out" 2>&1 || true
+  record "intra/relocation-check $set" "$out"
+  sed -n '/^--- /,$p' "$out" | grep -E '^[[:space:]]*(FAIL|clean)' | sed 's/^/  /' || true
 done
 
 echo
