@@ -637,4 +637,41 @@ func IsSafeRedirectTarget(path string) bool {
 // survives its fold.
 type Evaluator interface {
 	EvaluateExpression(expr string, stack []StackFrame, origin *HookInput) RuleResult
+
+	// EvaluateStructure is ADR 0039 I13's STRUCTURAL delegate entry point — the
+	// counterpart to EvaluateExpression for a rule that already HOLDS parsed
+	// structure and must not turn it back into a command string just to
+	// re-enter the seam. I13 (`:291-294`) states the obligation plainly: "No
+	// rule MAY construct or mutate command text for re-evaluation. A rule
+	// needing to delegate MUST do so through a structural entry point that
+	// passes a subtree." This is that entry point. It is ADDITIVE: as of the
+	// bead that introduces it (pg2-m1i6r), no rule package calls it yet — the
+	// four packages that still build text for EvaluateExpression (docker,
+	// safecmds, nix, kubectl) are separate, later beads' work.
+	//
+	// leaves is the caller's already-lowered subtree — the SAME kind of value
+	// HookInput.ParsedLeaf/ParsedRoot carry, and typed `any` here for the
+	// IDENTICAL import-direction reason those two fields are (see ParsedLeaf's
+	// doc): cmdparse.ParsedCommand embeds Redirection from this package, so
+	// cmdparse imports hookio, and hookio importing cmdparse back would cycle.
+	// A caller builds this value from its own cmdparse import — e.g. a
+	// cmdparse.Substitution's own Leaves field, or a []cmdparse.ParsedCommand
+	// slice taken from ParsedRoot — never a re-parse and never text; the
+	// implementation asserts it back to []cmdparse.ParsedCommand.
+	//
+	// source is the EXACT source slice leaves was lowered from (I12) — needed
+	// for the cycle-detection key, exactly as EvaluateExpression's own expr
+	// is, so a delegated subtree whose source text repeats an ancestor
+	// already on stack is caught the same way a textual re-entry is. It MUST
+	// be the real slice, NEVER a string the rule built or mutated to serve as
+	// a key: I13 forbids rule-constructed text for the leaves, and smuggling
+	// one in through this parameter instead would be the same violation
+	// wearing a different argument.
+	//
+	// Returns a bare RuleResult exactly like EvaluateExpression, so
+	// FromRecursion's ADR 0043 recursion-boundary translation applies
+	// identically regardless of which entry point produced the inner
+	// verdict — a rule migrating from EvaluateExpression to this method
+	// changes no downstream handling of the result.
+	EvaluateStructure(source string, leaves any, stack []StackFrame, origin *HookInput) RuleResult
 }

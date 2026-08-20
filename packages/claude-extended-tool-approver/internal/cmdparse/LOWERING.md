@@ -1080,3 +1080,100 @@ trailing-whitespace, check-merge-conflicts, check-case-conflicts; shellcheck/sta
 behavior-docs-real-corpus report "no files to check"). `nix flake check`: **all checks passed**
 (including `checks.*-go-tests`, `checks.*-integration-tests`, `check-formatting`,
 `check-linting`, `consumer-input-alignment`, `pre-commit-run`).
+
+---
+
+# Step 5b — the I13 structural delegate entry point (`pg2-m1i6r`)
+
+Authority: ADR 0039's Decision, Invariant I13 (`:291-294`) and Enforcement item "guard 2"
+(I9/I13, `:327-334`). Base `4fdca75c`. I13 states the obligation plainly: "No rule MAY
+construct or mutate command text for re-evaluation. A rule needing to delegate MUST do so
+through a **structural** entry point that passes a subtree." This step adds that entry
+point. It is a **foundational, purely ADDITIVE** step: no rule is migrated onto it here, and
+none of the four rule packages that still build text for `EvaluateExpression` (docker,
+safecmds, nix, kubectl) are touched — that migration is four separate, later beads, all of
+which were blocked on this one landing.
+
+## What's new
+
+| Symbol                                        | Where                                                               | What                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| --------------------------------------------- | ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `hookio.Evaluator.EvaluateStructure`          | `hookio/types.go`                                                   | New interface method, added beside `EvaluateExpression`. `leaves` is typed `any` for the SAME import-direction reason `HookInput.ParsedLeaf`/`ParsedRoot` are (`cmdparse` imports `hookio`, so `hookio` cannot import `cmdparse` back).                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `(*engine.Engine).EvaluateStructure`          | `engine/engine.go`                                                  | The implementation. Mirrors `EvaluateExpression`'s own shape — `normalizeExpression`, `detectCycle`, then delegate — with the one difference that matters: it never parses. `leaves` is asserted back to `[]cmdparse.ParsedCommand` and handed to the existing `evaluateParsed` (unchanged) via `cmdparse.ShellParse{Leaves: parsed}`, exactly as `foldSubstitutionScan` already does internally for substitution/heredoc-body recursion (step 4, `pg2-1019a`). A failed assertion (or `nil`) fails CLOSED — `NoOpinion`, never `Approve` — the same posture `evaluateRedirections`/`heredocFloor` already take for their own "cannot evaluate this" branches. |
+| `evaluateParsed`'s doc comment                | `engine/engine.go`                                                  | Updated to name THREE callers instead of two (`EvaluateExpression`, `EvaluateStructure`, `foldSubstitutionScan`) — no change to the function itself.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| Five mock `hookio.Evaluator` fixtures         | five `*_test.go` files across `docker`, `nix`, `kubectl`, `envvars` | Given a stub `EvaluateStructure` (delegating to each fixture's own `EvaluateExpression`) purely so the widened interface still compiles. No assertion in any of those files changed.                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `internal/engine/structural_delegate_test.go` | new file                                                            | Engine-level tests: delegation verdict, cycle detection, and fold semantics (see below).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+
+Nothing else changed. `EvaluateExpression`, `evaluateParsed`, `detectCycle`,
+`foldSubstitutionScan`, `Evaluate` and `EvaluateHook` are byte-for-byte unchanged apart from
+the one doc-comment update named above.
+
+## Why guard 2 is NOT this bead's concern
+
+ADR 0039's Enforcement names guard 2 (I9's raw-text-structure guard, which I13 also leans
+on) as a mechanism still to be built, and explicitly assigns the DECISION of what that
+mechanism is to a later step. `LOWERING.md`'s own step 5a residue note already flagged this
+entry point and guard 2 as siblings: "So are guards 2 and 3 and the I13 structural delegate
+entry point." This bead is the entry point half only. The guard — making it a compile error
+for a rule to construct command text instead of reaching this method — is bead `pg2-x9452`
+and is explicitly NOT attempted here: adding an enforcement guard with zero migrated callers
+to enforce it against would be untestable and premature.
+
+## Tests
+
+`internal/engine/structural_delegate_test.go`, four tests, all new (no existing expectation
+edited anywhere in the tree):
+
+- `TestEvaluateStructure_MatchesTextEntryPoint` — the **delegation verdict** criterion:
+  `EvaluateStructure(expr, ParseShell(expr).Leaves, …)` reaches the IDENTICAL verdict
+  `EvaluateExpression(expr, …)` does, over five expressions including a command substitution
+  in both the safe and rejecting direction.
+- `TestEvaluateStructure_CycleDetection` — the **cycle detection** criterion: a delegated
+  subtree whose exact source text repeats an ancestor stack frame is caught exactly as a
+  textual re-entry is (I12), with a non-repeating control case that is unaffected.
+- `TestEvaluateStructure_FoldMatchesFromRecursion` — the **fold semantics** criterion, three
+  subtests covering the three shapes `hookio.FromRecursion` (ADR 0043) discriminates: a
+  loop-exhaustion (`ErrNotApplicable`), a rule's own declared refusal (`ErrRefused`, ADR
+  0044), and a multi-leaf composition no rule audits as a unit (`ErrRefused` via
+  `withExpressionProvenance`'s narrowing). Each subtest asserts `EvaluateStructure` and
+  `EvaluateExpression` translate identically through `FromRecursion` for the same input.
+- `TestEvaluateStructure_WrongLeavesTypeFailsClosed` — the defensive branch this bead's own
+  new code adds: a `leaves` value that is not `[]cmdparse.ParsedCommand` (including a bare
+  `nil`) floors at `NoOpinion` rather than panicking or approving.
+
+`go test ./...`: all 36 packages pass, entire existing suite UNCHANGED (verified — no test
+file's assertions were edited, only five mock fixtures gained a stub method to satisfy the
+widened interface). `go vet ./...`: clean.
+
+## Corpus replay
+
+**Expected result: ZERO transitions**, and this step ships that result by a STRONGER route
+than a measured differential replay: **unreachability**, not sampling.
+
+`EvaluateStructure` has **no production call site**. `git grep -w EvaluateStructure` across
+every non-test, non-doc-comment line in the module finds exactly the interface declaration
+(`hookio/types.go`) and the implementation (`engine/engine.go`) — nothing calls it. Every
+production entry point (`EvaluateHook` → `Evaluate` / `EvaluateExpression` → `evaluateParsed`
+→ `foldSubstitutionScan`) is byte-for-byte unchanged by this step (confirmed by the diff:
+only a new method plus doc-comment edits on `evaluateParsed`'s existing comment). A replay
+compares two trees' verdicts over the same corpus; here the function graph reachable from
+every real caller is IDENTICAL between the base tree and this one, so no input — corpus or
+otherwise — can produce a differing verdict. Running the replay would re-derive a result
+already proven by inspection, at real wall-clock cost (prior steps' replays over the
+150-220k-row corpus ran tens of minutes) for zero additional evidence.
+
+The corpus IS accessible from this environment (`$HOME/.local/share/claude-extended-tool-approver/asks.db`,
+read-only via `?immutable=1` per this file's "Corpus population" section's documented access
+pattern), so this is a deliberate scoping decision, not an inability to reach the data —
+recorded here so a later reader does not mistake the absence of a replay run for an
+unattempted or inaccessible one.
+
+## Gates
+
+`go test ./...`: all packages pass (see "Tests" above). `go vet ./...`: clean. `prek run
+--files` on the seven changed/added files (`internal/hookio/types.go`,
+`internal/engine/engine.go`, `internal/engine/structural_delegate_test.go`,
+`internal/rules/docker/docker_test.go`, `internal/rules/nix/nix_test.go`,
+`internal/rules/kubectl/kubectl_test.go`, `internal/rules/envvars/envvars_test.go`, and this
+file): see the bead's own gate log for the pass/fail evidence. `nix flake check`: see the
+bead's own gate log.

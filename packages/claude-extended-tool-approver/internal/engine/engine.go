@@ -341,6 +341,56 @@ func (e *Engine) EvaluateExpression(expr string, stack []hookio.StackFrame, orig
 	return e.evaluateParsed(expr, cmdparse.ParseShell(expr), normalized, stack, origin)
 }
 
+// EvaluateStructure is ADR 0039 I13's STRUCTURAL delegate entry point
+// (`:291-294`): the counterpart to EvaluateExpression above for a caller that
+// already HOLDS parsed structure and must not turn it back into a command
+// STRING just to re-enter this seam. It satisfies hookio.Evaluator's method
+// of the same name — see that interface's doc for the full contract and for
+// why `leaves` is typed `any` there (and, for the identical import-direction
+// reason, here too: this file is internal/engine, which imports cmdparse
+// freely, but the parameter's static type must match the interface method it
+// implements exactly, so it stays `any` here as well and is asserted back to
+// []cmdparse.ParsedCommand below).
+//
+// It is ADDITIVE and, as of the bead that introduces it (pg2-m1i6r), unused
+// by any rule: no caller is migrated onto it here, and none of the four rule
+// packages that still build text for EvaluateExpression (docker, safecmds,
+// nix, kubectl) are touched. Its own tests (structural_delegate_test.go)
+// exercise it directly against a hand-built stack of leaves.
+//
+// The shape MIRRORS EvaluateExpression deliberately — cycle check first, then
+// evaluateParsed — with the one difference that matters: no parse happens
+// here, because `leaves` is already the lowered subtree (I7: never re-parse
+// what an earlier parse already produced). That mirroring is what makes
+// "verdict folding through this entry point matches the recursion-boundary
+// semantics rules rely on today" true BY CONSTRUCTION rather than by a
+// second implementation that could drift: both entry points terminate in the
+// SAME evaluateParsed call, so hookio.FromRecursion's ADR 0043 translation of
+// the returned bare RuleResult behaves identically regardless of which entry
+// point produced it.
+//
+// A `leaves` value that does not assert to []cmdparse.ParsedCommand — which
+// cannot happen from any caller in this tree today, since nothing calls this
+// method yet, but the interface widens the static type to `any` for every
+// FUTURE caller too — fails CLOSED: NoOpinion, never Approve, exactly as
+// evaluateRedirections and heredocFloor already do for their own "cannot
+// evaluate this" branches.
+func (e *Engine) EvaluateStructure(source string, leaves any, stack []hookio.StackFrame, origin *hookio.HookInput) hookio.RuleResult {
+	normalized := normalizeExpression(source)
+	if cyc, hit := detectCycle(normalized, stack); hit {
+		return cyc
+	}
+	parsed, ok := leaves.([]cmdparse.ParsedCommand)
+	if !ok {
+		return hookio.RuleResult{
+			Decision: hookio.NoOpinion,
+			Reason:   "structural delegate received leaves of an unexpected type (deferred to claude-code)",
+			Module:   "engine",
+		}
+	}
+	return e.evaluateParsed(source, cmdparse.ShellParse{Leaves: parsed}, normalized, stack, origin)
+}
+
 // detectCycle is EvaluateExpression's cycle check, factored out so
 // foldSubstitutionScan's substitution/heredoc-body recursion (ADR 0039 step 4,
 // pg2-1019a) can run it directly against a body's own normalized text without
@@ -361,23 +411,30 @@ func detectCycle(normalized string, stack []hookio.StackFrame) (hookio.RuleResul
 }
 
 // evaluateParsed is EvaluateExpression's shared core, over an ALREADY-LOWERED
-// cmdparse.ShellParse (ADR 0039 I7: never parsed here, only consumed). It is
-// called both by EvaluateExpression's text entry point above (which just
-// parsed expr to produce sp) and by foldSubstitutionScan below, which already
-// holds a substitution's or heredoc body's pre-lowered leaves and must not
-// re-parse them (that re-parse was the two "thin shim" TEXT hops this bead
-// removes — see foldSubstitutionScan's own doc).
+// cmdparse.ShellParse (ADR 0039 I7: never parsed here, only consumed). It has
+// THREE callers, all of which parse (or already hold leaves) BEFORE reaching
+// here and never after: EvaluateExpression's text entry point above (which
+// just parsed expr to produce sp); EvaluateStructure above, ADR 0039 I13's
+// structural delegate entry point (which never parses at all — its caller
+// already holds the lowered subtree); and foldSubstitutionScan below, which
+// already holds a substitution's or heredoc body's pre-lowered leaves and
+// must not re-parse them (that re-parse was the two "thin shim" TEXT hops
+// pg2-1019a removed — see foldSubstitutionScan's own doc). EvaluateStructure
+// is what makes the third caller's shape a PUBLIC, reusable entry point
+// rather than an engine-internal-only pattern foldSubstitutionScan happened
+// to also use.
 //
 // expr is the EXACT source text sp was lowered from — EvaluateExpression's own
-// parameter, or foldSubstitutionScan's sub.Body — needed here (as opposed to
-// merely for the cycle key) for heredocFloor's own text-classification
-// narrowing and for the synthetic HookInput's RootExpression.
+// parameter, EvaluateStructure's `source`, or foldSubstitutionScan's
+// sub.Body — needed here (as opposed to merely for the cycle key) for
+// heredocFloor's own text-classification narrowing and for the synthetic
+// HookInput's RootExpression.
 //
 // normalized is the caller's already-computed cycle-detection key for THIS
-// sp's own source text — EvaluateExpression's `normalized`, or
-// foldSubstitutionScan's per-substitution `subNormalized` — since both callers
-// need it themselves (for stack frames / cycle checks) and computing it twice
-// would be redundant.
+// sp's own source text — EvaluateExpression's/EvaluateStructure's `normalized`,
+// or foldSubstitutionScan's per-substitution `subNormalized` — since every
+// caller needs it themselves (for stack frames / cycle checks) and computing
+// it twice would be redundant.
 func (e *Engine) evaluateParsed(expr string, sp cmdparse.ShellParse, normalized string, stack []hookio.StackFrame, origin *hookio.HookInput) hookio.RuleResult {
 	parsed := sp.Leaves
 

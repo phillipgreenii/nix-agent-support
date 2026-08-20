@@ -29,6 +29,14 @@ func (m *mockEvaluator) EvaluateExpression(expr string, stack []hookio.StackFram
 	return m.defaultResult
 }
 
+// EvaluateStructure satisfies hookio.Evaluator's I13 structural delegate
+// method (pg2-m1i6r). No docker test exercises structural delegation yet —
+// the docker rule itself is not migrated by that bead — so this simply
+// reuses the same expr-keyed lookup EvaluateExpression already provides.
+func (m *mockEvaluator) EvaluateStructure(source string, leaves any, stack []hookio.StackFrame, origin *hookio.HookInput) hookio.RuleResult {
+	return m.EvaluateExpression(source, stack, origin)
+}
+
 func TestDockerRule(t *testing.T) {
 	mockEval := &mockEvaluator{
 		results: map[string]hookio.RuleResult{
@@ -128,6 +136,14 @@ type capturingEvaluator struct {
 }
 
 func (c *capturingEvaluator) EvaluateExpression(expr string, stack []hookio.StackFrame, origin *hookio.HookInput) hookio.RuleResult {
+	c.lastOrigin = origin
+	return c.result
+}
+
+// EvaluateStructure satisfies hookio.Evaluator's I13 structural delegate
+// method (pg2-m1i6r); unused by any test here, so it mirrors
+// EvaluateExpression's own capture behaviour.
+func (c *capturingEvaluator) EvaluateStructure(source string, leaves any, stack []hookio.StackFrame, origin *hookio.HookInput) hookio.RuleResult {
 	c.lastOrigin = origin
 	return c.result
 }

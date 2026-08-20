@@ -29,6 +29,14 @@ func (f *fakeEvaluator) EvaluateExpression(expr string, _ []hookio.StackFrame, _
 	return hookio.RuleResult{Decision: d, Module: "fake"}
 }
 
+// EvaluateStructure satisfies hookio.Evaluator's I13 structural delegate
+// method (pg2-m1i6r). No envvars test exercises structural delegation yet —
+// the envvars rule itself is not migrated by that bead — so this simply
+// reuses the same expr-keyed lookup EvaluateExpression already provides.
+func (f *fakeEvaluator) EvaluateStructure(source string, leaves any, _ []hookio.StackFrame, _ *hookio.HookInput) hookio.RuleResult {
+	return f.EvaluateExpression(source, nil, nil)
+}
+
 // TestEnvVars_Injectors_Reject: setting a guaranteed-unsafe linker/startup
 // injector is DECISIVELY rejected regardless of value or position (pg2-gkd5e).
 // Covers the leading, `export`, and `env`-prefix forms plus a BASH_FUNC_* name.

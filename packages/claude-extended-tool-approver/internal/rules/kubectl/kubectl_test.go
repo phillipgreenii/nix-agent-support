@@ -218,6 +218,14 @@ func (m *mockEvaluator) EvaluateExpression(expr string, stack []hookio.StackFram
 	return m.defaultResult
 }
 
+// EvaluateStructure satisfies hookio.Evaluator's I13 structural delegate
+// method (pg2-m1i6r). No kubectl test exercises structural delegation yet —
+// the kubectl rule itself is not migrated by that bead — so this simply
+// reuses the same expr-keyed lookup EvaluateExpression already provides.
+func (m *mockEvaluator) EvaluateStructure(source string, leaves any, stack []hookio.StackFrame, origin *hookio.HookInput) hookio.RuleResult {
+	return m.EvaluateExpression(source, stack, origin)
+}
+
 func TestKubectl_ExecRecursion(t *testing.T) {
 	mockEval := &mockEvaluator{
 		results: map[string]hookio.RuleResult{
