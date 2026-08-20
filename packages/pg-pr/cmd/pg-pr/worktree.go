@@ -150,6 +150,11 @@ var worktreeRemoveCmd = &cobra.Command{
 			if _, err = fmt.Fprintf(w, "ok Removed worktree for PR #%d (%s)\n", res.PRNumber, res.Path); err != nil {
 				return err
 			}
+			if res.Warning != "" {
+				if _, err = fmt.Fprintf(cmd.ErrOrStderr(), "WARNING: %s\n", res.Warning); err != nil {
+					return err
+				}
+			}
 		case res.Skipped:
 			if _, err = fmt.Fprintf(w, "! Skipped PR #%d: %s\n", res.PRNumber, res.SkipReason); err != nil {
 				return err

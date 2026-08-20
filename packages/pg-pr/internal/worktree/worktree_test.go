@@ -251,6 +251,93 @@ func TestRemoveRefusesDirtyWithoutForce(t *testing.T) {
 	}
 }
 
+// TestRemoveForceDeletesUnmergedBranch covers pg2-sg2c6: a review branch with
+// a genuine local commit on top of its tracked PR-head ref is "not fully
+// merged", so `git branch -d` refuses it. Remove must force-delete (`-D`)
+// rather than silently leaving the branch behind — otherwise a subsequent
+// `Add` for the same PR fails with "a branch named ... already exists"
+// because `git worktree add -b` cannot create a branch that already exists.
+func TestRemoveForceDeletesUnmergedBranch(t *testing.T) {
+	ctx := context.Background()
+	tmp := t.TempDir()
+	repoDir := filepath.Join(tmp, "repo")
+	wtRoot := filepath.Join(tmp, "reviews")
+
+	initRepo(t, repoDir)
+	configureRemote(t, repoDir, "git@github.com:owner/repo.git")
+	createOriginPRRef(t, repoDir, 55)
+
+	opts := Options{
+		WorktreeRoot: wtRoot,
+		RepoDir:      repoDir,
+		Git:          &noFetchGitClient{GitClient: NewCLIGitClient()},
+		GH:           &fakeGH{},
+	}
+
+	addRes, err := Add(ctx, 55, opts)
+	if err != nil {
+		t.Fatalf("add 55: %v", err)
+	}
+
+	// Add a genuine local commit on the review branch, ahead of both the
+	// primary branch and the branch's own tracked PR-head ref — this is
+	// what makes the branch "not fully merged" and what `git branch -d`
+	// refuses to delete.
+	extra := filepath.Join(addRes.Path, "extra.txt")
+	if err := os.WriteFile(extra, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	commit := exec.Command("git", "-C", addRes.Path, "add", "extra.txt")
+	if out, err := commit.CombinedOutput(); err != nil {
+		t.Fatalf("git add: %v\n%s", err, out)
+	}
+	commit = exec.Command("git", "-C", addRes.Path, "commit", "-m", "local review fixup")
+	commit.Env = append(
+		os.Environ(),
+		"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@example.com",
+		"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@example.com",
+	)
+	if out, err := commit.CombinedOutput(); err != nil {
+		t.Fatalf("git commit: %v\n%s", err, out)
+	}
+
+	// Sanity check: plain `git branch -d` (unforced) genuinely refuses this
+	// branch, so the test is actually exercising the "unmerged" case.
+	unforced := exec.Command("git", "-C", repoDir, "branch", "-d", "review/pr-55")
+	if out, err := unforced.CombinedOutput(); err == nil {
+		t.Fatalf("expected `git branch -d` to refuse the unmerged branch, but it succeeded:\n%s", out)
+	}
+
+	// The worktree has no uncommitted changes (we committed above), so Remove
+	// proceeds without needing opts.Force.
+	rmRes, err := Remove(ctx, 55, opts)
+	if err != nil {
+		t.Fatalf("remove 55: %v", err)
+	}
+	if !rmRes.Removed {
+		t.Fatalf("expected Removed=true, got %+v", rmRes)
+	}
+	if rmRes.Warning != "" {
+		t.Fatalf("expected no warning when force-delete succeeds, got %q", rmRes.Warning)
+	}
+
+	// The branch must actually be gone.
+	verify := exec.Command("git", "-C", repoDir, "rev-parse", "--verify", "--quiet", "refs/heads/review/pr-55")
+	if out, err := verify.CombinedOutput(); err == nil {
+		t.Fatalf("expected branch review/pr-55 to be deleted, but it still resolves:\n%s", out)
+	}
+
+	// The real-world symptom: a subsequent Add for the same PR must succeed
+	// rather than failing with "a branch named ... already exists".
+	addRes2, err := Add(ctx, 55, opts)
+	if err != nil {
+		t.Fatalf("add 55 (after remove) should succeed, got: %v", err)
+	}
+	if addRes2.AlreadyExists {
+		t.Fatalf("expected a fresh worktree, not AlreadyExists: %+v", addRes2)
+	}
+}
+
 func TestAddRefusesUnknownPR(t *testing.T) {
 	ctx := context.Background()
 	tmp := t.TempDir()
