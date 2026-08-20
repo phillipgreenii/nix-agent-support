@@ -675,28 +675,28 @@ absent from every `.go` file in this package — mechanically asserted by
 on this file's own historical "DELETED" notes), demonstrated to actually fire by a temporary
 reintroduction during this step's own verification.
 
-  **UPDATE (`pg2-30wro`, step 5's envvars half):** envvars' value scan around
-  `literalValue` is now DONE. `literalValue` is deleted; its three call sites
-  (`preservesCallerValue`, `isHermeticEnvReplacement`, `isHermeticHomeReplacement`) now
-  call the new `cmdparse.LiteralAssignmentValueText` (`shellparse.go`), which derives the
-  accept/reject verdict from `assignmentValue`'s own parse tree — the same probe
-  `classifyExpansion` uses — instead of a hand-rolled quote-stripping scan over raw text.
-  It reproduces `literalValue`'s exact acceptance set (an unquoted value, or one wrapped in
-  a single whole-value double-quoted span) as a strict SUBSET: an unmodelled node
-  (command/process substitution, arithmetic expansion, a lone or embedded single-quoted
-  span, mixed quoting) now refuses STRUCTURALLY where the old byte scan would have
-  accepted the raw text and left `isStaticAbsolutePath`'s character denylist to catch it
-  downstream — every such narrowing lands on the identical final verdict (see
-  `LiteralAssignmentValueText`'s own doc comment for the case-by-case argument). Pinned by
-  `TestLiteralAssignmentValueText` (`parser_test.go`). A before/after corpus replay of this
-  rule — two out-of-repo binaries built from the commit either side of this change, run
-  against a frozen snapshot of the live ask-log corpus (375,784 rows) via
-  `evaluate --baseline` — found **zero** moved verdicts, confirming the narrowing has no
-  observed effect on this rule's real decisions. `isStaticAbsolutePath` itself is
-  UNCHANGED and still belongs to `pg2-x9452`: it is a required must-NOT-fire case for a
-  guard landing there, not a scanner this migration subsumes. Remaining residue for
-  `pg2-x9452` is now docker's `splitOnShellOperators`, gitdir's `scopeLeaves` and
-  `containsVarRef`, plus guards 2 and 3 and the I13 structural delegate entry point.
+**UPDATE (`pg2-30wro`, step 5's envvars half):** envvars' value scan around
+`literalValue` is now DONE. `literalValue` is deleted; its three call sites
+(`preservesCallerValue`, `isHermeticEnvReplacement`, `isHermeticHomeReplacement`) now
+call the new `cmdparse.LiteralAssignmentValueText` (`shellparse.go`), which derives the
+accept/reject verdict from `assignmentValue`'s own parse tree — the same probe
+`classifyExpansion` uses — instead of a hand-rolled quote-stripping scan over raw text.
+It reproduces `literalValue`'s exact acceptance set (an unquoted value, or one wrapped in
+a single whole-value double-quoted span) as a strict SUBSET: an unmodelled node
+(command/process substitution, arithmetic expansion, a lone or embedded single-quoted
+span, mixed quoting) now refuses STRUCTURALLY where the old byte scan would have
+accepted the raw text and left `isStaticAbsolutePath`'s character denylist to catch it
+downstream — every such narrowing lands on the identical final verdict (see
+`LiteralAssignmentValueText`'s own doc comment for the case-by-case argument). Pinned by
+`TestLiteralAssignmentValueText` (`parser_test.go`). A before/after corpus replay of this
+rule — two out-of-repo binaries built from the commit either side of this change, run
+against a frozen snapshot of the live ask-log corpus (375,784 rows) via
+`evaluate --baseline` — found **zero** moved verdicts, confirming the narrowing has no
+observed effect on this rule's real decisions. `isStaticAbsolutePath` itself is
+UNCHANGED and still belongs to `pg2-x9452`: it is a required must-NOT-fire case for a
+guard landing there, not a scanner this migration subsumes. Remaining residue for
+`pg2-x9452` is now docker's `splitOnShellOperators`, gitdir's `scopeLeaves` and
+`containsVarRef`, plus guards 2 and 3 and the I13 structural delegate entry point.
 
 ---
 
