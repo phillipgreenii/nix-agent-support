@@ -567,19 +567,21 @@ func (e *Engine) evaluateParsed(expr string, sp cmdparse.ShellParse, normalized 
 		// (ADR 0039 step 3, root cause 3): rather than re-serialising pc.Raw into a
 		// synthetic ToolInput JSON string for every rule to independently
 		// unmarshal and re-parse, the ALREADY-COMPUTED structure is threaded
-		// directly. ParsedLeaf is `cmdparse.Parse(pc.Raw)` — the EXACT computation
-		// every rule used to perform for itself, just made once and shared, so a
-		// leaf's rule-side leaf set is byte-for-byte what it always was (including
-		// the documented heredoc-bleed case where re-parsing Raw can yield more
-		// than one leaf). ParsedRoot is `parsed` itself — the SAME slice this
-		// function derived from `expr` at its own top, so a rule reaching for the
-		// expression's sibling leaves (git's expressionScope, gitdir's pipeScope)
-		// needs no re-parse of RootExpression at all.
+		// directly. ParsedLeaf is parsedLeafFor(pc) — see that function's doc for
+		// why it is no longer an unconditional `cmdparse.Parse(pc.Raw)` (guard 3,
+		// I7, pg2-x9452): a leaf's rule-side leaf set stays byte-for-byte what it
+		// always was, including the documented heredoc-bleed case where
+		// re-parsing Raw yields more than one leaf, but a leaf that cannot bleed
+		// is threaded directly instead of being re-parsed a second time. ParsedRoot
+		// is `parsed` itself — the SAME slice this function derived from `expr` at
+		// its own top, so a rule reaching for the expression's sibling leaves
+		// (git's expressionScope, gitdir's pipeScope) needs no re-parse of
+		// RootExpression at all.
 		syntheticInput := &hookio.HookInput{
 			SessionID:            origin.SessionID,
 			CWD:                  currentCWD,
 			ToolName:             "Bash",
-			ParsedLeaf:           cmdparse.Parse(pc.Raw),
+			ParsedLeaf:           parsedLeafFor(pc),
 			PermissionMode:       origin.PermissionMode,
 			HookEventName:        origin.HookEventName,
 			PathEval:             currentPathEval,
@@ -1167,13 +1169,13 @@ func (e *Engine) evaluateAssignmentOnlyLeaf(pc cmdparse.ParsedCommand, cwd, root
 	}
 	// ParsedLeaf/ParsedRoot replace mustBashJSON(pc.Raw) exactly as the
 	// executable-bearing leaf's synthetic input above does — see that
-	// construction's comment for why each is safe to thread rather than
-	// re-derive.
+	// construction's comment, and parsedLeafFor's own doc, for why each is
+	// safe to thread rather than unconditionally re-derive.
 	syntheticInput := &hookio.HookInput{
 		SessionID:            origin.SessionID,
 		CWD:                  cwd,
 		ToolName:             "Bash",
-		ParsedLeaf:           cmdparse.Parse(pc.Raw),
+		ParsedLeaf:           parsedLeafFor(pc),
 		PermissionMode:       origin.PermissionMode,
 		HookEventName:        origin.HookEventName,
 		PathEval:             origin.PathEval,
@@ -1235,6 +1237,50 @@ func (e *Engine) evaluateAssignmentOnlyLeaf(pc cmdparse.ParsedCommand, cwd, root
 
 func normalizeExpression(expr string) string {
 	return strings.Join(strings.Fields(strings.TrimSpace(expr)), " ")
+}
+
+// parsedLeafFor computes a synthetic HookInput's ParsedLeaf value for pc.
+//
+// GUARD 3 (I7, pg2-x9452, ADR 0039 step 5's final bead). Before this function
+// existed, both of this file's synthetic-HookInput constructions
+// unconditionally called `cmdparse.Parse(pc.Raw)` — re-parsing, from scratch,
+// text that this SAME evaluation already parsed once to produce pc in the
+// first place. Guard 3's own corpus/fixture harness
+// (internal/setup/guard3_parsecount_test.go) caught this on the SIMPLEST
+// possible input ("echo just a plain command" — one leaf, no heredoc, no
+// pipeline): every ordinary leaf was being parsed exactly twice per hook
+// evaluation, which is I7 violated on nearly every command CETA has ever
+// evaluated, not a rare corner case.
+//
+// The fix preserves the ONE behaviour the original comment names as the
+// reason `cmdparse.Parse(pc.Raw)` was called at all rather than simply
+// wrapping pc: "the documented heredoc-bleed case where re-parsing Raw can
+// yield more than one leaf" (I12: a heredoc-bearing leaf's Raw spans past its
+// own heredoc body to wherever the extent ends, e.g. `cat <<EOF | grep x`'s
+// `cat` stage Raw includes `| grep x`, so re-parsing it independently
+// re-derives BOTH stages as separate leaves — existing rule behaviour some
+// caller may depend on). For that shape ONLY, this still re-parses.
+//
+// For every OTHER leaf — the overwhelming majority, and the ONLY shape a
+// single, self-contained, non-heredoc statement's Raw can produce when
+// re-parsed alone — pc IS already the exact result a fresh parse of pc.Raw
+// would produce for the SAME reason the fuzz harness's Raw-idempotence
+// invariant holds at all (ADR 0039 Decision item 4: "the fuzz harness's
+// idempotence invariant... becomes meaningful rather than vacuous"): pc.Raw
+// is defined as the exact source slice pc was ITSELF lowered from, so
+// wrapping pc directly is not an approximation of what a fresh parse would
+// yield, it is that computation's result, reused instead of redone. The one
+// field a fresh reparse would compute DIFFERENTLY is PipelineID/SubshellScope
+// (ParsedCommand's own doc: "IDs are per-Parse-call... MUST NOT be compared"
+// across calls) — a standalone reparse would renumber pc.Raw's pipeline/
+// subshell position from scratch, which is not pc's TRUE position in the
+// original expression, so threading pc directly is the MORE correct value,
+// not merely an equally-valid one.
+func parsedLeafFor(pc cmdparse.ParsedCommand) []cmdparse.ParsedCommand {
+	if pc.HasHeredoc {
+		return cmdparse.Parse(pc.Raw)
+	}
+	return []cmdparse.ParsedCommand{pc}
 }
 
 // mustBashJSON and BOTH its call sites are DELETED (ADR 0039 step 3, root

@@ -3,6 +3,7 @@ package cmdparse
 import (
 	"path/filepath"
 	"strings"
+	"sync"
 )
 
 // IN-COMMAND VARIABLE RESOLUTION (pg2-wq3ki)
@@ -623,7 +624,45 @@ func isMktempDirSubstitution(body string) bool {
 // — and is composed by the caller via ExpandInCommand against
 // InCommandTempDirVars' result, not by widening this predicate to parse a
 // prefix/suffix split itself.
+//
+// MEMOIZED (I7, pg2-x9452, ADR 0039 step 5's final bead). InCommandTempDirVars
+// calls this once per (leaf, EARLIER leaf) pair — O(n^2) calls for an
+// n-leaf expression, since engine.go's own loop re-derives the "vars visible
+// so far" set from scratch for EVERY leaf rather than threading it forward —
+// and this function is a PURE function of ev.Expansion/ev.Value, so the SAME
+// earlier assignment gets this predicate, and the cmdparse.Parse call inside
+// isMktempDirSubstitution, recomputed once per LATER leaf in the same
+// expression. Measured on a real corpus snapshot (2026-08-21): commands with
+// several leaves after a `$(mktemp -d)`-shaped assignment (or after any
+// OTHER ExpansionSafeCmd value; a plain `TARGET=$(readlink f)` pays the exact
+// same cost to be told no) reparsed the identical substitution body up to
+// 23 times in one hook evaluation. The cache below is keyed on the two
+// fields this function actually reads, is safe for concurrent use (the hook
+// may evaluate substitution bodies from more than one goroutine, same
+// reasoning as shellparse.go's parserPool), and is unbounded only for the
+// lifetime of one process — this binary is a short-lived per-hook-call CLI,
+// never a long-running daemon, so that is not a growth concern; a replay
+// harness driving 150k+ distinct rows through one process still bounds the
+// cache by the number of DISTINCT (Expansion, Value) pairs ever seen, not by
+// row count.
 func IsFreshTempDirAssignment(ev EnvAssignment) bool {
+	key := freshTempDirCacheKey{expansion: ev.Expansion, value: ev.Value}
+	if v, ok := freshTempDirCache.Load(key); ok {
+		return v.(bool)
+	}
+	result := computeIsFreshTempDirAssignment(ev)
+	freshTempDirCache.Store(key, result)
+	return result
+}
+
+type freshTempDirCacheKey struct {
+	expansion ExpansionKind
+	value     string
+}
+
+var freshTempDirCache sync.Map // freshTempDirCacheKey -> bool
+
+func computeIsFreshTempDirAssignment(ev EnvAssignment) bool {
 	if ev.Expansion != ExpansionSafeCmd {
 		return false
 	}

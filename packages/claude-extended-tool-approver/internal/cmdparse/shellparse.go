@@ -33,6 +33,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"mvdan.cc/sh/v3/syntax"
 
@@ -98,6 +99,31 @@ var recoverParserPool = sync.Pool{
 // yields a shorter prefix, which is the conservative direction.
 const recoverErrorBudget = 8
 
+// parseObserver is ENFORCEMENT GUARD 3's (I7) instrumentation point: when
+// non-nil, ParseShell reports every source string it is about to parse
+// through it, BEFORE doing the real work. It is nil in production — the check
+// is a single atomic load plus a nil compare per call, so there is no
+// meaningful cost outside a test that installs one — and is set only by
+// SetParseObserver, which guard 3's harnesses (internal/setup's
+// TestGuard3_ParseCountFixtures / TestGuard3_ParseCountCorpus) use to count
+// parses PER DISTINCT SOURCE STRING PER HOOK EVALUATION and fail on a repeat.
+//
+// This is the ONLY point that needs instrumenting: `Parse` is a facade over
+// ParseShell (`return ParseShell(command).Leaves`), and I7's own text says
+// subtree recursion (substitution/heredoc-body walking) MUST NOT re-parse body
+// text at all — confirmed by step 4's (pg2-1019a) own termination argument, so
+// there is no second call path into the real grammar parser this could miss.
+var parseObserver atomic.Pointer[func(string)]
+
+// SetParseObserver installs f as ParseShell's guard-3 observer and returns a
+// function that restores whatever observer was installed before (nil-safe:
+// restoring to "no observer" is itself a valid prior state). TEST-ONLY —
+// production code never calls this.
+func SetParseObserver(f func(source string)) (restore func()) {
+	prev := parseObserver.Swap(&f)
+	return func() { parseObserver.Store(prev) }
+}
+
 // ParseShell parses command with the real bash parser and lowers the resulting
 // AST to CETA's ParsedCommand leaves.
 //
@@ -106,6 +132,9 @@ const recoverErrorBudget = 8
 // Comments are NOT pre-stripped — under KeepComments they are parser facts and
 // simply never appear in any CallExpr, so no comment pass runs here at all.
 func ParseShell(command string) ShellParse {
+	if obs := parseObserver.Load(); obs != nil {
+		(*obs)(command)
+	}
 	p, _ := parserPool.Get().(*syntax.Parser)
 	file, err := p.Parse(strings.NewReader(command), "command")
 	parserPool.Put(p)
@@ -1837,6 +1866,29 @@ type placedSubstitution struct {
 
 // collectSubstitutions walks root and returns the top-level substitutions of src,
 // in source order.
+//
+// GUARD 3 RESIDUE, CLOSED (I7, pg2-x9452, ADR 0039 step 5's final bead). This
+// used to return p.sub UNCHANGED, leaving Substitution.Leaves nil — "which
+// collectSubstitutions' TEXT-entry-point callers never need and never get"
+// per substitutionsOf's own doc, true when pg2-1019a wrote it (no caller of
+// this text-facing path read Leaves at the time). It stopped being true once
+// gitdir's envValueSubstitutionLeaves (an assignment VALUE's own substitution
+// body — the one shape cmdparse never lowers into a leaf's own Substitutions
+// field, LOWERING.md's own recorded residue) needed a body's leaves and, absent
+// this, called cmdparse.Parse(sub.Body) itself: a SECOND parse of text this
+// SAME walk had already produced an AST for. Measured on a real corpus
+// snapshot (2026-08-21, 218,511-row extraction): 1,767 rows independently
+// re-parsed an assignment-value substitution body that recurred byte-identical
+// elsewhere in the SAME hook evaluation (the common `before_x=$(probe)` /
+// `after_x=$(probe)` idiom), each a literal I7 violation this closes.
+//
+// The fix mirrors substitutionsOf (ADR 0039 step 4) exactly: p.stmts is the
+// SAME already-parsed subtree substitutionsOf already lowers via
+// lowerSubtree with NO further Parser.Parse call, so populating Leaves here
+// costs nothing beyond what this walk already computed. TestEnumerateSubstitutions_Kinds
+// is the one pinned test this changes (it now asserts real Leaves rather than
+// their absence) — no OTHER existing caller reads Leaves off this path's
+// result, so no other expectation moves.
 func collectSubstitutions(src string, root syntax.Node, skipHeredocBodies bool) []Substitution {
 	if root == nil {
 		return nil
@@ -1849,7 +1901,9 @@ func collectSubstitutions(src string, root syntax.Node, skipHeredocBodies bool) 
 	sort.SliceStable(sf.found, func(i, j int) bool { return sf.found[i].offset < sf.found[j].offset })
 	out := make([]Substitution, 0, len(sf.found))
 	for _, p := range sf.found {
-		out = append(out, p.sub)
+		sub := p.sub
+		sub.Leaves = lowerSubtree(src, p.stmts)
+		out = append(out, sub)
 	}
 	return out
 }
@@ -1920,9 +1974,9 @@ func (sf *substFinder) recordProcSubst(ps *syntax.ProcSubst) {
 // `return stop(...)` did.
 //
 // stmts is the substitution's own already-parsed body — recorded alongside the
-// Kind/Body pair purely as a passenger for substitutionsOf (ADR 0039 step 4) to
-// recurse into without a second parse; collectSubstitutions, the TEXT entry
-// points' finisher, never reads it back off placedSubstitution.
+// Kind/Body pair as a passenger BOTH substitutionsOf (ADR 0039 step 4) and
+// collectSubstitutions (ADR 0039 step 5, pg2-x9452's guard-3 residue fix)
+// recurse into via lowerSubtree, without a second parse either way.
 func (sf *substFinder) record(opener, closer syntax.Pos, openWidth int, kind SubstitutionKind, stmts []*syntax.Stmt) {
 	if opener.IsRecovered() || closer.IsRecovered() || !opener.IsValid() || !closer.IsValid() {
 		return
@@ -1942,11 +1996,11 @@ func (sf *substFinder) record(opener, closer syntax.Pos, openWidth int, kind Sub
 // substitutionsOf finds the top-level substitutions reachable from nodes —
 // each walked directly, no re-parse — and recursively pre-lowers each one's
 // body into leaves (ADR 0039 step 4, I7/I12). It is the subtree-walking
-// counterpart to collectSubstitutions: same substFinder, same ordering, but
-// anchored on nodes the caller's OWN lowering pass already has in hand rather
-// than on a freshly p.Parse'd root, and it populates Substitution.Leaves,
-// which collectSubstitutions' TEXT-entry-point callers never need and never
-// get.
+// counterpart to collectSubstitutions: same substFinder, same ordering, and
+// (since ADR 0039 step 5, pg2-x9452) the SAME Substitution.Leaves population
+// too — collectSubstitutions' own doc records why that changed. The one
+// remaining difference is anchoring: this walks nodes the caller's OWN
+// lowering pass already has in hand, never a freshly p.Parse'd root.
 //
 // skipHeredocBodies matches collectSubstitutions' meaning: true excludes a
 // sibling redirection's Hdoc (that heredoc's own substitutions belong to a

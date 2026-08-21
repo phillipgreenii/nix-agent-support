@@ -533,14 +533,34 @@ func TestScanSubstitutions_NestedInArithmeticIsEnumerated(t *testing.T) {
 
 func TestEnumerateSubstitutions_Kinds(t *testing.T) {
 	got := EnumerateSubstitutions("a $(cmd) `bt` <(pin) >(pout)")
-	want := []Substitution{
-		{Kind: SubstCommand, Body: "cmd"},
-		{Kind: SubstBacktick, Body: "bt"},
-		{Kind: SubstProcessIn, Body: "pin"},
-		{Kind: SubstProcessOut, Body: "pout"},
+	want := []struct {
+		kind SubstitutionKind
+		body string
+	}{
+		{SubstCommand, "cmd"},
+		{SubstBacktick, "bt"},
+		{SubstProcessIn, "pin"},
+		{SubstProcessOut, "pout"},
 	}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("EnumerateSubstitutions kinds = %+v, want %+v", got, want)
+	if len(got) != len(want) {
+		t.Fatalf("EnumerateSubstitutions returned %d substitutions, want %d: %+v", len(got), len(want), got)
+	}
+	for i, w := range want {
+		if got[i].Kind != w.kind || got[i].Body != w.body {
+			t.Errorf("substitution %d = {Kind:%v Body:%q}, want {Kind:%v Body:%q}",
+				i, got[i].Kind, got[i].Body, w.kind, w.body)
+		}
+		// GUARD 3 RESIDUE, CLOSED (I7, pg2-x9452): collectSubstitutions now
+		// populates Leaves via lowerSubtree on the SAME already-parsed
+		// subtree substFinder found (see that function's own doc) — no
+		// second Parser.Parse call — so a text-facing EnumerateSubstitutions
+		// caller (gitdir's envValueSubstitutionLeaves) no longer needs to
+		// re-parse Body itself. Each body here is a single bare word, so it
+		// must lower to exactly one leaf naming that word as Executable.
+		if len(got[i].Leaves) != 1 || got[i].Leaves[0].Executable != w.body {
+			t.Errorf("substitution %d (%q) Leaves = %+v, want exactly one leaf with Executable %q",
+				i, w.body, got[i].Leaves, w.body)
+		}
 	}
 	// Command substitutions ($()/backtick) are the ones governed by the static
 	// allowlist floor; process substitutions are not.

@@ -175,10 +175,10 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 	// scope is the FULL expression this Bash input came from, falling back to a
 	// lazy input.BashCommand() read for a direct (non-engine) caller — the same
 	// convention gitdir.go already uses for RootExpression (ADR 0039 step 3).
-	// Threaded into inspectCommit so it can tell "the command text established
-	// this directory" (an explicit `-C`, or a `cd`/`pushd` leaf anywhere in the
-	// compound) from "this is simply the passed-in CWD, untouched" — see
-	// dirNamedByCommand.
+	// Threaded into inspectCommit (as rootLeaves below) so it can tell "the
+	// command text established this directory" (an explicit `-C`, or a
+	// `cd`/`pushd` leaf anywhere in the compound) from "this is simply the
+	// passed-in CWD, untouched" — see dirNamedByCommand.
 	scope := input.RootExpression
 	if scope == "" {
 		cmd, err := input.BashCommand()
@@ -186,6 +186,17 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 			return hookio.RuleResult{}, fmt.Errorf("primary-commit: read bash command: %w", err)
 		}
 		scope = cmd
+	}
+	// rootLeaves is scope's ALREADY-PARSED structure (I7, pg2-x9452, ADR 0039
+	// step 5's final bead): the engine parses the root expression exactly once
+	// and threads it onto input.ParsedRoot, so the common (engine) path reads
+	// that instead of a second cmdparse.Parse(scope) call dirNamedByCommand
+	// used to make on every ErrDirNotExist. A direct (non-engine) caller with
+	// no ParsedRoot falls back to parsing scope itself, preserving this rule's
+	// pre-existing behaviour for that case exactly.
+	rootLeaves, ok := input.ParsedRoot.([]cmdparse.ParsedCommand)
+	if !ok {
+		rootLeaves = cmdparse.Parse(scope)
 	}
 	for i, pc := range leaves {
 		if !isGit(pc.Executable) {
@@ -203,7 +214,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		// reads them off the leaves before this one. Empty in the ordinary case, and an
 		// empty environment resolves nothing — every verdict is then the one this rule
 		// reached before the environment existed.
-		f := r.inspectCommit(pc, input.CWD, LeafVars(input.InCommandVars, leaves, i), true, scope)
+		f := r.inspectCommit(pc, input.CWD, LeafVars(input.InCommandVars, leaves, i), true, rootLeaves)
 		silentlyAccepts := AutoApprovingModes[input.PermissionMode]
 		switch f.kind {
 		case findingUnresolved:
@@ -351,7 +362,7 @@ func (f commitFinding) missingDirReason(deny bool) string {
 // re-parsed and each git command in it checked with expansion OFF (single-pass, which
 // also bounds recursion). A resolver error, a linked worktree, or being off primary all
 // yield findingNone — the fail-open posture the worktree discipline relies on.
-func (r *Rule) inspectCommit(pc cmdparse.ParsedCommand, cwd string, vars map[string]string, expandAliases bool, scope string) commitFinding {
+func (r *Rule) inspectCommit(pc cmdparse.ParsedCommand, cwd string, vars map[string]string, expandAliases bool, rootLeaves []cmdparse.ParsedCommand) commitFinding {
 	chdirs, subcmd, rest := cmdparse.GitInvocation(pc.Args)
 	res := ResolveDir(cwd, chdirs, vars)
 	dir := res.Dir
@@ -368,7 +379,7 @@ func (r *Rule) inspectCommit(pc cmdparse.ParsedCommand, cwd string, vars map[str
 				// variable the command established is in scope inside it. scope stays
 				// the OUTER expression: the alias body is not itself part of the root
 				// expression's text, so there is nothing more specific to hand down.
-				if f := r.inspectCommit(sub, dir, vars, false, scope); f.kind != findingNone {
+				if f := r.inspectCommit(sub, dir, vars, false, rootLeaves); f.kind != findingNone {
 					return f
 				}
 			}
@@ -409,7 +420,7 @@ func (r *Rule) inspectCommit(pc cmdparse.ParsedCommand, cwd string, vars map[str
 	// TestPrecedence_PrimaryCommitBeatsGit and four sibling engine-suite tests that use
 	// a synthetic, nonexistent CWD as shorthand for "not inside any repo at all"; those
 	// must keep the ordinary fail-open verdict below.
-	if errors.Is(err, ErrDirNotExist) && dirNamedByCommand(chdirs, scope) {
+	if errors.Is(err, ErrDirNotExist) && dirNamedByCommand(chdirs, rootLeaves) {
 		return commitFinding{kind: findingDirMissing, dir: dir, chosen: res.Chosen}
 	}
 	if err != nil || !canonical {
@@ -429,27 +440,32 @@ func (r *Rule) inspectCommit(pc cmdparse.ParsedCommand, cwd string, vars map[str
 // dirNamedByCommand reports whether the COMMAND TEXT itself established the target
 // directory, which is what makes its non-existence worth a fail-safe verdict rather
 // than the ordinary fail-open one: an explicit `-C` on THIS git invocation (chdirs
-// non-empty), or a `cd`/`pushd` leaf ANYWHERE in the same root expression (scope) —
-// which, if it runs before this leaf, is what the engine's cd re-root (pg2-opclh)
-// advanced the running cwd past. Deliberately coarse on the second half: it does not
-// confirm that a specific cd's OWN target is the missing directory, only that SOME
-// chdir happened in the compound, because primarycommit.go — handed one leaf's
-// synthetic input under the engine — cannot see the leaf-by-leaf cwd assembly
+// non-empty), or a `cd`/`pushd` leaf ANYWHERE in rootLeaves (the root expression's own
+// already-parsed leaves) — which, if it runs before this leaf, is what the engine's cd
+// re-root (pg2-opclh) advanced the running cwd past. Deliberately coarse on the second
+// half: it does not confirm that a specific cd's OWN target is the missing directory,
+// only that SOME chdir happened in the compound, because primarycommit.go — handed one
+// leaf's synthetic input under the engine — cannot see the leaf-by-leaf cwd assembly
 // (dirresolve.go's DIRECTORY RESOLUTION comment names the identical one-leaf limit for
-// InCommandVars; scope, falling back to the leaf's own text for a direct caller, is
-// the same convention gitdir.go already uses for RootExpression).
+// InCommandVars).
 //
-// A bare, un-redirected CWD (no `-C` anywhere, no `cd`/`pushd` in scope) is the
+// GUARD 3 (I7, pg2-x9452, ADR 0039 step 5's final bead): rootLeaves is the caller's
+// ALREADY-PARSED root expression (input.ParsedRoot on the engine's path, falling back
+// to a fresh cmdparse.Parse(scope) only for a direct, non-engine caller — the same
+// convention gitdir.go already uses for RootExpression) rather than a scope STRING this
+// function re-parsed itself on every ErrDirNotExist call.
+//
+// A bare, un-redirected CWD (no `-C` anywhere, no `cd`/`pushd` in rootLeaves) is the
 // SESSION's own reported directory — Claude Code's problem to keep real, not this
 // rule's to second-guess. Skipping the fail-safe verdict for that case is what keeps
 // TestPrecedence_PrimaryCommitBeatsGit and the engine integration suite's many tests
 // that pass a synthetic, nonexistent CWD as shorthand for "not inside any repo at all"
 // on their existing, fail-open verdict.
-func dirNamedByCommand(chdirs []string, scope string) bool {
+func dirNamedByCommand(chdirs []string, rootLeaves []cmdparse.ParsedCommand) bool {
 	if len(chdirs) > 0 {
 		return true
 	}
-	for _, leaf := range cmdparse.Parse(scope) {
+	for _, leaf := range rootLeaves {
 		if leaf.Executable == "cd" || leaf.Executable == "pushd" {
 			return true
 		}

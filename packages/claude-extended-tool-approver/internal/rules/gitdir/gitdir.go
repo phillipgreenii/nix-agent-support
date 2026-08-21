@@ -457,14 +457,28 @@ func substitutionLeaves(subs []cmdparse.Substitution) []cmdparse.ParsedCommand {
 
 // envValueSubstitutionLeaves finds the substitution bodies embedded in vars'
 // own VALUES and lowers each into leaves — see scopeLeaves' doc for why this
-// is the one place a body still gets parsed rather than walked as existing
-// structure: cmdparse never lowers an assignment's value into leaf structure
-// (only lowerDecl's export/declare-family path does, via cmd.Args, and even
-// then the result lands on the SAME leaf's Substitutions, not on vars). A
-// depth bound is unnecessary for the same reason substitutionLeaves needs
-// none: cmdparse.Parse(sub.Body) on a strictly-smaller extent terminates, and
-// each further nested body found inside is recursed through the already-built
-// (never re-parsed) Substitutions of the leaves that one parse call produced.
+// is the one place a body needs its OWN Substitutions lookup at all: cmdparse
+// never lowers an assignment's value into leaf structure (only lowerDecl's
+// export/declare-family path does, via cmd.Args, and even then the result
+// lands on the SAME leaf's Substitutions, not on vars).
+//
+// GUARD 3 RESIDUE, CLOSED (I7, pg2-x9452, ADR 0039 step 5's final bead). This
+// used to call cmdparse.Parse(sub.Body) here — a SECOND parse of text
+// cmdparse.EnumerateSubstitutions's own walk had already built a real AST
+// for, moments earlier, to find sub's extent in the first place. Measured on
+// a real corpus snapshot: 1,767 rows (of ~153k checked) independently
+// re-parsed a byte-identical substitution body recurring elsewhere in the
+// SAME hook evaluation this way — a literal I7 violation. cmdparse's
+// collectSubstitutions (shellparse.go) now populates Substitution.Leaves via
+// lowerSubtree on the SAME already-parsed subtree substFinder.record already
+// held (no Parser.Parse call), so sub.Leaves is that computation's result,
+// reused instead of redone — byte-for-byte what cmdparse.Parse(sub.Body)
+// produced, by the SAME idempotence guarantee step 4 (pg2-1019a) rests on
+// elsewhere. A depth bound is unnecessary for the same reason
+// substitutionLeaves needs none: sub.Leaves is a strictly-smaller,
+// already-terminated subtree of one successful parse, and each further
+// nested body found inside is recursed through the already-built (never
+// re-parsed) Substitutions of the leaves that parse produced.
 func envValueSubstitutionLeaves(vars []cmdparse.EnvAssignment) []cmdparse.ParsedCommand {
 	var out []cmdparse.ParsedCommand
 	for _, ev := range vars {
@@ -472,7 +486,7 @@ func envValueSubstitutionLeaves(vars []cmdparse.EnvAssignment) []cmdparse.Parsed
 			if sub.Body == "" {
 				continue
 			}
-			leaves := cmdparse.Parse(sub.Body)
+			leaves := sub.Leaves
 			out = append(out, leaves...)
 			for _, pc := range leaves {
 				out = append(out, substitutionLeaves(pc.Substitutions)...)

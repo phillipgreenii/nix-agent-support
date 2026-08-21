@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmdparse"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
 )
 
@@ -402,7 +403,13 @@ func TestDirNamedByCommand(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := dirNamedByCommand(tt.chdirs, tt.scope); got != tt.want {
+			// GUARD 3 (I7, pg2-x9452): dirNamedByCommand now takes the root
+			// expression's ALREADY-PARSED leaves rather than re-parsing scope
+			// text itself — a direct caller (this test) parses scope once,
+			// here, exactly as primarycommit.go's own Evaluate does for a
+			// non-engine caller with no threaded ParsedRoot.
+			rootLeaves := cmdparse.Parse(tt.scope)
+			if got := dirNamedByCommand(tt.chdirs, rootLeaves); got != tt.want {
 				t.Errorf("dirNamedByCommand(%v, %q) = %v, want %v", tt.chdirs, tt.scope, got, tt.want)
 			}
 		})

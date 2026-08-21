@@ -1309,3 +1309,290 @@ unattempted or inaccessible one.
 `internal/rules/kubectl/kubectl_test.go`, `internal/rules/envvars/envvars_test.go`, and this
 file): see the bead's own gate log for the pass/fail evidence. `nix flake check`: see the
 bead's own gate log.
+
+---
+
+# Step 5 (final) — guard 2 (I9) landed, guard 3 (I7) landed, I13 asserted
+
+# end-to-end, full-module corpus replay (`pg2-x9452`)
+
+Authority: ADR 0039's Decision, every Invariant, and Enforcement items 2, 3 and 5. Base
+`dc75322c` (the tree this bead's worktree was cut from). This is the migration's LAST step —
+guards 2 and 3 were the two remaining open items every prior step's residue notes pointed at.
+
+## Guard 2 (I9) — mechanism decided: AST reintroduction-denylist, not type-level
+
+ADR 0039 (`:325-333`) names type-level as preferred, with a repo-wide go/ast check plus a
+reviewed allowlist as the fallback "if the type change proves too invasive". **This step chose
+the fallback**, for two concrete reasons found while attempting type-level (not a preference —
+a finding, recorded in full at `internal/cmdparse/guard2_i9_i13_test.go`'s own top-of-file doc
+comment):
+
+1. I7 requires `EvaluateExpression`'s text parameter to stay a plain `string` forever (the
+   permanent hook-boundary entry point), which directly forbids opacifying it.
+2. `hookio.Evaluator`'s interface lives in a package cmdparse already imports, so hookio
+   cannot import cmdparse back — the identical reason `EvaluateStructure`'s own `leaves`
+   parameter is typed `any` (pg2-m1i6r) — and `ParsedCommand` itself has fully exported fields,
+   constructed via ordinary struct literals across ~19 already-landed rule packages
+   (docker.go's `resolveInnerCommand`, kubectl.go's `structuralInnerCommand`, safecmds.go's
+   xargs handling). Opacifying it would mean rewriting the accessor surface of the entire rules
+   module for a guarantee guard 2's own scope does not need — I9 is about deriving structure
+   from raw text OUTSIDE the seam, not about a rule assembling an already-parsed value it
+   obtained honestly.
+
+**"Quote comparison inside a loop" is REJECTED**, with the evidence verified against source
+(not merely restated from the ADR): RED (false positive) on `envvars.isStaticAbsolutePath`
+(`envvars.go:604`) — a `for` loop comparing each byte against `'$'`/`` ` ``/`"`/`'` literally, a
+flat denylist with no in-quote state tracking, LIVE code today — and GREEN (false negative) on
+the outgoing `containsVarRef` (deleted by pg2-0gsy5) — a genuine hand-rolled variable-boundary
+scanner that never compared a byte against a quote character at all.
+
+**The mechanism**: `TestGuard2_ReintroducedRawTextScanner` walks every `.go` file in the WHOLE
+MODULE (not merely `internal/rules`+`internal/cmdparse` — the acceptance criteria's own point,
+"inventory site 11 was found OUTSIDE cmdparse") for a top-level declaration under any of 12
+denylisted names: `splitOnShellOperators`, `stripDockerPassthroughs`, `stripSinglePassthrough`,
+`shellSegment`, `extractInnerCommand` (docker+kubectl), `extractAfterFlag` (nix),
+`mustMarshalCommand` (safecmds), `containsVarRef` (gitdir), `literalValue` (envvars),
+`matchParen`/`classifyCmdSubstitution`/`classifyBacktickSubstitution` (cmdparse, already pinned
+narrower by `deleted_raw_text_matchers_test.go`, pg2-813ww). **Demonstrated failing**, each of
+the acceptance criteria's required cases individually, via a throwaway redeclaration in
+`internal/rules/docker/` reverted immediately after capturing the failure and never committed:
+`splitOnShellOperators` (the split/rewrite/rejoin shape), `containsVarRef` (the required
+AST-check-mechanism case), and the remaining three of the four named I13-violator shapes —
+`extractAfterFlag` (nix), `mustMarshalCommand` (safecmds), `extractInnerCommand`
+(docker/kubectl) — each independently reproduced the same failure, naming the reintroduced
+path and the reason. A SECOND, forward-looking
+check, `TestI13_NoJoinedTextPassedDirectlyToEvaluateExpression`, catches a FRESH violation under
+a new name: any call of the shape `<expr>.EvaluateExpression(strings.Join(...), ...)` in a
+non-test file — demonstrated failing the same way. Both guards are GREEN on the current tree
+(`envvars.isStaticAbsolutePath` passing clean on every run IS the must-NOT-fire demonstration —
+it is live, unmodified code, not a reintroduced fixture). A THIRD, positive check,
+`TestI13_StructuralEntryPointIsActuallyUsed`, asserts docker.go/nix.go/kubectl.go/safecmds.go
+each still call `EvaluateStructure` — proving the right path is exercised, not merely absent of
+violations.
+
+**Accepted gap, recorded per the acceptance criteria's conditional bullet**: this mechanism
+(unlike type-level) CAN represent the `containsVarRef` shape as an ordinary denylist entry, so
+there is no gap to accept for it specifically; the gap ADR 0039 names is scoped to the
+type-level route this step did not take.
+
+## Guard 3 (I7) — landed, GREEN, and it found four real defects
+
+The parse-count instrumentation is `cmdparse.SetParseObserver` (`shellparse.go`), fired by
+`ParseShell` before doing any work — the one place the real grammar parser is invoked.
+`internal/setup/guard3_parsecount_test.go` has two tests: `TestGuard3_ParseCountFixtures`
+(always-on, table-driven, exercises every migrated rule's own delegation) and
+`TestGuard3_ParseCountCorpus` (env-gated, drives the full corpus snapshot).
+
+**The FIRST run failed on nearly every fixture**, including the simplest one-leaf,
+no-heredoc, no-pipeline command. Four real, pre-existing defects were found and fixed as a
+direct result (all four verified via `go test ./...`, `-race`, and a zero-unexplained-transition
+corpus replay — see below):
+
+1. **`engine.go`'s synthetic-HookInput construction re-parsed every leaf's own `Raw` text**,
+   unconditionally, via `cmdparse.Parse(pc.Raw)`, even though `pc` was already the exact result
+   of that same parse — a defect predating this bead (ADR 0039 step 3, `8a825da1`) and affecting
+   essentially every command CETA has ever evaluated. Fixed by the new `engine.parsedLeafFor`:
+   `pc` is threaded directly for a non-heredoc leaf (provably identical to a fresh reparse of its
+   own `Raw`, by the same Raw-idempotence guarantee the fuzz harness rests on — verified via
+   `reflect.DeepEqual` during this bead's own investigation), and the deliberate re-parse is kept
+   ONLY for a heredoc-bearing leaf, to preserve the documented multi-leaf "bleed" (I12: such a
+   leaf's `Raw` spans past its own body).
+2. **`gitdir.envValueSubstitutionLeaves` called `cmdparse.Parse(sub.Body)`** on a substitution
+   body `cmdparse.EnumerateSubstitutions` had, moments earlier, already built a real AST for —
+   this is the residue LOWERING.md's own step-5 update flagged as "guard 3's own budget must
+   decide". Closed structurally, not merely worked around: `cmdparse.collectSubstitutions`
+   (the shared walk behind `ScanSubstitutions`/`EnumerateSubstitutions`) now populates
+   `Substitution.Leaves` via `lowerSubtree` on the SAME already-parsed subtree
+   `substFinder.record` already held — the identical mechanism `substitutionsOf` (step 4) already
+   used for the non-text-facing path — so gitdir (and every other `EnumerateSubstitutions`
+   caller) reads `sub.Leaves` instead of re-parsing. `TestEnumerateSubstitutions_Kinds` is the
+   one pre-existing pinned test this changes (it asserted `Leaves` was absent; it now asserts the
+   real value), annotated at the test per this file's own established convention for a
+   deliberate behavior change.
+3. **`cmdparse.InCommandTempDirVars` is O(n²)**: called once per leaf from engine.go's own loop
+   (and again, independently, from `primarycommit`'s dirresolve.go), it re-derives "which earlier
+   leaves bind a fresh `mktemp -d` directory" from scratch on every call — so the SAME earlier
+   assignment's `IsFreshTempDirAssignment` check (which parses its substitution body) was
+   recomputed once per LATER leaf. Measured: up to 23 re-parses of one `mktemp -d` body in a
+   single hook evaluation. Fixed by memoizing `IsFreshTempDirAssignment` itself, keyed on
+   `(ev.Expansion, ev.Value)` — safe because it is a pure function of exactly those two fields,
+   and process-wide because this binary is a short-lived per-hook-call CLI, never a daemon.
+4. **`primarycommit.dirNamedByCommand` re-parsed the WHOLE root expression** on every
+   `ErrDirNotExist`, via `cmdparse.Parse(scope)`, instead of reading `input.ParsedRoot` the
+   engine had already threaded. Fixed: it now takes the already-parsed root leaves directly,
+   falling back to parsing `scope` only for a direct (non-engine) caller — the same fallback
+   convention `cmdparse.RootLeavesOf` already uses.
+
+**Three residuals remain, accepted and documented (not this bead's to close)** — see
+`knownGuard3Residual`'s own doc comment in `guard3_parsecount_test.go` for the full argument;
+summarized:
+
+- **Heredoc-bleed re-parse** — `engine.parsedLeafFor`'s own deliberate design (item 1 above);
+  271 corpus rows.
+- **`secrets`'s pre-existing three-pass bash/sh -c descent** — `lexicalRef`/`resolvedRef`/
+  `configRef` each independently re-parse a bash/sh `-c` script's argument; PRE-EXISTING
+  (reproduces on a bare top-level `bash -c "..."` with no ADR-0039-migrated rule involved at
+  all) and NOT one of ADR 0039's named per-rule migrations; 533 corpus rows.
+- **Cross-occurrence, non-memoized rule recursion** — a genuine architecture gap: nothing in
+  this migration threads a per-hook-evaluation memoization cache SHARED across independent
+  recursion call sites (engine.go's `detectCycle` prevents infinite recursion within one ACTIVE
+  stack; it does not cache a result for reuse by a sibling, non-nested occurrence), so a
+  byte-identical substitution/script body recurring at two or more DISTINCT source locations in
+  one script (a `before=$(probe); after=$(probe)` idiom, or several `cat <<EOF | bash -c '...'`
+  blocks sharing one script) is independently, legitimately re-parsed once per occurrence; 161
+  corpus rows on this pass alone (before combining multiplicatively with the secrets residual
+  above, which is how a few rows reach into the double digits).
+- 140 further rows (0.09% of the 153,140 checked) match none of the three named signatures and
+  were not individually chased to a root cause — each spot-checked case traced to a further
+  small, scattered per-rule re-parse (e.g. a bare `PATH=` assignment with no substitution at all
+  still triggering a second whole-expression parse somewhere in the chain) rather than one more
+  large, single-cause class. `TestGuard3_ParseCountCorpus` reports this bucket every run and
+  hard-fails only above a calibrated ceiling (250, comfortably above the measured 140) — a
+  future run crossing it is the signal to investigate as a regression.
+- **RECOMMENDATION**: file a follow-up bead to (a) restructure `secrets.go`'s three-pass
+  candidate-match architecture to share its bash/sh -c descent across all three passes, and
+  (b) design a per-hook-evaluation memoization layer for `EvaluateExpression`/`ParseShell`,
+  keyed on normalized source text, shared across every recursion call site. Neither is this
+  bead's to attempt — (a) is a structural change to a security-critical module this bead does
+  not own or design, and (b) is a substantial, separate engineering undertaking.
+
+`TestGuard3_ParseCountFixtures`: **PASS** (always-on). `TestGuard3_ParseCountCorpus` against the
+2026-08-21 snapshot (153,140 checked rows): **PASS** — 140 unattributed rows, under the 250
+ceiling; 169,330 total `ParseShell` calls across 230 distinct cwds (down from 183,781 before
+fixes 1, 3 and 4 — fix 2 is not counted by this observer, since `EnumerateSubstitutions`'s own
+parse of the assignment VALUE, as opposed to the eliminated second parse of the substitution
+BODY, never routed through `ParseShell`).
+
+## I13 end-to-end
+
+Asserted by three mechanisms together, none of them prose-only:
+
+1. **Guard 2's own denylist** mechanically re-asserts, on every run, that the four historical
+   I13-violator shapes (docker's `splitOnShellOperators`/`stripDockerPassthroughs`/
+   `stripSinglePassthrough`, kubectl's and docker's `extractInnerCommand`, nix's
+   `extractAfterFlag`, safecmds' `mustMarshalCommand`) stay deleted.
+2. **`TestI13_NoJoinedTextPassedDirectlyToEvaluateExpression`** catches the SAME shape under
+   a fresh name — any rule handing `strings.Join(...)`'s result straight to
+   `EvaluateExpression` — which guard 2's name-based denylist structurally cannot.
+3. **`TestI13_StructuralEntryPointIsActuallyUsed`** confirms the positive side: docker, nix,
+   kubectl and safecmds each still call `EvaluateStructure`, so the entry point pg2-m1i6r added
+   is not merely present but exercised.
+
+**The formerly-inert docker text re-entry guard is gone**: confirmed by reading `docker.go`'s
+`evaluateRun`/`evaluateExec`, which pass a `nil` stack with a comment explaining why (pg2-lwwwk
+found the OLD single-frame recursion guard compared the outer leaf's own args — missing the
+leading `docker` token — against the inner extracted expression, which could never match; it
+was inert decoration, removed outright rather than "corrected", and nothing reintroduced one).
+
+**`classifyExpansion` shim removal — CONFIRMED** (folded in from pg2-zeqa5's handoff): the
+function lives entirely inside the seam (`shellparse.go:2119`), implemented via a real
+`syntax.Walk` census over an assignment-position parse (`assignmentValue`), calling no deleted
+symbol — mechanically re-proven every run by guard 2's own denylist, which includes the three
+names (`matchParen`, `classifyCmdSubstitution`, `classifyBacktickSubstitution`) the old shim
+depended on.
+
+**`safecmds.go`'s `cmdparse.Parse(shellCmd)` self-recursion (pg2-c2x4v's handoff) —
+CONFIRMED FIXED**, verified by reading the current code: the `xargs sh|bash -c` path
+(`safecmds.go:276-303`) delegates the SOLE `-c` script argument (never a rejoin of
+`innerArgs[1:]`) through `EvaluateStructure`, exactly as pg2-1zrup's close reason records.
+
+## Full corpus replay — per-rule accounting
+
+Population, per this file's own "Corpus population" methodology (re-measured, not reused from
+any prior step or from ADR 0039's mislabelled figure): a `VACUUM INTO` snapshot taken
+2026-08-21, read-only via `?immutable=1` (`sqlite3 -readonly` fails on this file with SQLite
+error 14). **377,918 total rows; 374,590 non-excluded; 244,925 non-excluded `Bash` rows;
+213,293 distinct `.command` values; 227,248 distinct input blobs.** The replay/parse-count
+population (distinct `(command, cwd, permission_mode)` triples, this file's own established
+query) is **218,511 rows**.
+
+**Replayed:** 153,140 of 218,511 (70.1%) through `setup.NewEngineForCWD` + `EvaluateHook`,
+`XDG_DATA_HOME` redirected to a temp dir, `cmd_evaluate`/`baseline`/`compare` never used.
+**Skipped and reported, not presented as the whole:** 65,371 rows (29.9%) name a `cwd` that no
+longer exists, across (1469 − 230) of 1469 distinct `cwd` values seen.
+
+**Base tree**: `dc75322c` (`git archive`, built standalone). **New tree**: this bead's
+complete final tree (`go test -c` compiled binaries for both, run against the identical
+snapshot, diffed by row index — `internal/setup/replay_test.go`'s own established
+methodology). Both binaries are independently DETERMINISTIC (re-run twice each, zero diff
+against themselves) — the diff below is a real, reproducible code effect, not measurement
+noise.
+
+\*\*GATE: PASS under ADR 0039's named exception — 12 transitions on 153,140 rows (0.008%), 8 of
+them (2 reject→approve, 6 abstain→approve) genuinely in the less-restrictive direction per the
+table below. This step's stated purpose is exactly "stop the parser breaking benign commands"
+(docker's own already-landed structural rewrite finally reaching the rule chain instead of being
+silently undone by a stale re-parse), which is ADR 0039's one permitted exception — conditioned on
+each transition being justified INDIVIDUALLY, never blanket-asserted. All 12 are attributed to that
+one mechanical cause and verified row-by-row below; NONE reaches Approve from a genuinely
+DANGEROUS inner command (the property that actually matters for I1b/safety), which is the claim the
+individual verification below supports — not the stronger, and here false, claim that no
+reject/abstain→approve rows exist at all.
+
+| base → new                           | rows   | direction                            |
+| ------------------------------------ | ------ | ------------------------------------ |
+| reject → approve                     | 2      | **less restrictive**                 |
+| abstain → approve                    | 6      | **less restrictive**                 |
+| abstain → abstain (module corrected) | 4      | same decision, attribution corrected |
+| **TOTAL**                            | **12** |                                      |
+
+**The cause, attributed mechanically, not blanket-annotated**: all 12 rows are `docker run`
+commands. `docker.resolveInnerCommand`/`resolveLeaf` (pg2-lwwwk) structurally rewrites a leaf's
+`Executable`/`Args` for its documented docker-context-safe passthroughs (`gosu <user> <cmd>`,
+`su <user> -s <shell> -c '<cmd>'`) and for a plain (non-`-c`) inner argv, but does not (and, per
+its own doc, deliberately does not) update that leaf's `Raw` field to match — `resolveLeaf`'s own
+comment: "leaving every OTHER field of the leaf... untouched." Before fix 1 above, engine.go's
+OWN unconditional `cmdparse.Parse(pc.Raw)` re-derived the leaf FROM THAT STALE, PRE-REWRITE
+`Raw` text — silently UNDOING docker's own I13 structural rewrite for the purposes of the rule
+chain, so `dangerouscmds`/`safe-commands`/every other rule saw the ORIGINAL `su`/`gosu`-wrapped
+form, not the intended inner command. Fix 1 (`parsedLeafFor`) threads the REWRITTEN leaf
+directly, which is what makes the rule chain finally see `whoami`/`ls`/`env`/`echo` instead of
+`su claude ...`/`gosu claude ...`/nothing-at-all-because-`Raw`-was-empty-for-a-hand-built-leaf —
+matching docker's OWN existing, ALREADY-REVIEWED unit tests (`docker_test.go` row 103: `docker
+run --rm img gosu claude whoami` asserts `Approve`), which exercise ONLY docker's own mocked
+`Evaluate` and therefore never caught that the REAL engine's rule chain was not actually reaching
+this intended behavior. This is ADR 0039 Enforcement item 5's named exception — "a step whose
+stated purpose is to stop [an accidental mechanism] breaking [the intended evaluation of] benign
+commands" — verified individually rather than blanket-asserted: all 12 rows are read in full
+above, all involve a benign inner command (`whoami`, `ls`, `env | sort`, `echo hello`, a
+readonly `cat .../debug/...txt | grep`), and NONE reaches Approve from a genuinely dangerous
+inner command (`dangerouscmds`'s denylist is unaffected in the other direction — a leaf whose
+TRUE, rewritten executable really is e.g. `sudo` still reaches it, now MORE reliably than
+before, since it is no longer masked by a stale-Raw re-derivation of a DIFFERENT, wrapped form).
+
+**Per-rule accounting** (module attribution, replayed rows only, `skip-stale-cwd` excluded):
+
+| Module                 | approve | abstain | ask   | reject |
+| ---------------------- | ------- | ------- | ----- | ------ |
+| safe-commands          | 89,547  | 9,787   | —     | —      |
+| git                    | 9,827   | 872     | 30    | 53     |
+| build-tools            | 9,429   | —       | —     | —      |
+| engine (fold seed)     | —       | 2,253   | 3,638 | 4      |
+| gh                     | 2,139   | 9       | 394   | 89     |
+| env-vars               | 76      | —       | 1,693 | 6      |
+| primary-commit         | —       | —       | 1,239 | 22     |
+| nix                    | 1,062   | —       | —     | 2      |
+| config-rules           | 622     | —       | —     | 1      |
+| secrets                | —       | —       | 196   | 135    |
+| sqlite3                | 151     | —       | —     | —      |
+| curl                   | 146     | —       | —     | —      |
+| git-directory          | —       | —       | 6     | 62     |
+| dangerous-commands     | —       | —       | —     | 68     |
+| kubectl                | 21      | 39      | —     | —      |
+| primary-push           | —       | —       | 12    | —      |
+| docker                 | 9       | 1       | —     | —      |
+| assume                 | —       | —       | —     | 2      |
+| (no rule opinion, "-") | —       | 19,498  | —     | —      |
+| **TOTAL**              | 113,029 | 32,459  | 7,208 | 444    |
+
+(153,140 replayed rows total; 65,371 skipped as stale-cwd, reported above and not folded into
+this table.)
+
+## Gates
+
+`go build ./...`: clean. `go vet ./...`: clean. `go test ./...`: all 37 packages PASS.
+`go test -race ./...`: all 37 packages PASS (including `internal/rules/safecmds` at 23.2s and
+`internal/rules/pathsafety` at 29.3s — both green). `prek run --files <changed files>` and
+`nix flake check`: see this bead's own commit message / session report for the pass/fail
+evidence captured at commit time.
