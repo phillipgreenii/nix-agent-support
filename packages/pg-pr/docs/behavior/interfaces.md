@@ -28,22 +28,23 @@ flowchart LR
 
 ## `INTF-PGPR-READ` — PR facts out, with freshness <!-- uuid: 8906d9c1-cc11-4f4d-90b3-0a589061d2ce -->
 
-- **Out (pg-pr → consumer), machine seam** — a listing of PR facts read with no network call and
-  no store mutation (`INV-READ-1`), each item carrying its own as-of time and stale flag
+- **Out (pg-pr → consumer), machine read seam** — a listing of PR facts read with no network call
+  and no store mutation (`INV-READ-1`), each item carrying its own as-of time and stale flag
   (`INV-ASOF-1`). Fact columns include identity, ownership, size and age, and CI signal and
   review-count facts read from the code host — the **PR-fact** half of any triage surface built
   on this seam; a downstream deployment's own judgement over these facts (urgency, sort,
   cross-domain enrichment) is not pg-pr's to compute.
-- **Out (pg-pr → consumer), dashboard seam** — the same facts, human-facing, with a
-  payload-level as-of time and stale flag.
+- **Out (pg-pr → consumer), dashboard payload** — the same facts, human-facing, carrying a
+  payload-level as-of time and stale flag rather than a per-item one.
 - **Guarantee** — a consumer MUST be able to tell "stale" from "current" for every fact it acts
   on (`INV-ASOF-1`).
 
 ## `INTF-PGPR-WRITE` — reviews and comments posted <!-- uuid: 59ab0dcd-d1e9-4a81-8d91-46b1f9146b6b -->
 
-- **Out (pg-pr → code host)** — a review or comment, head-anchored (`INV-WRITE-1`), attributed
-  (`INV-ATTR-1`), staged as a draft and posted pending (`INV-REVIEW-1`), never against a PR still
-  marked draft (`INV-REVIEW-2`), superseding any existing pending draft rather than stacking
+- **Out (pg-pr → code host)** — a review or comment, head-anchored (`INV-WRITE-1`), carrying its
+  attribution mark (`INV-ATTR-1`), staged as a draft and posted as a pending review
+  (`INV-REVIEW-1`), never against a PR still marked draft (`INV-REVIEW-2`), superseding any
+  existing pending draft — found via a fail-closed pending check — rather than stacking
   (`INV-REVIEW-3`).
 - **Guarantee** — pg-pr is an **implementer** of the code host's own review-posting contract: it
   states only its own obligations above and never restates the code host's contract.

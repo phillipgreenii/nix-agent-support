@@ -8,14 +8,14 @@ correct owner (ADR 0034) — the UUID preserves identity; only the owning set ch
 
 ## Reads (`INV-READ-*`, `INV-ASOF-*`)
 
-- **`INV-READ-1`** <!-- uuid: fcbe3724-6712-428d-a129-eea663f44ff9 --> — The base machine read
-  seam (no augmentation requested) MUST read from the store with **no network call** and **no
-  store mutation**. It carries PR facts only — never pg-pr's own configuration state.
+- **`INV-READ-1`** <!-- uuid: fcbe3724-6712-428d-a129-eea663f44ff9 --> — The base machine read seam
+  (no augmentation requested) MUST read from the store with **no network call** and **no store
+  mutation**. It carries PR facts only — never pg-pr's own configuration state.
 - **`INV-ASOF-1`** <!-- uuid: 39888347-cfb9-45fd-b72e-b465e2337d15 --> — Every acted-on read seam
-  MUST carry its own as-of time (per item on the machine seam; per payload on the dashboard
-  seam). An item or payload with no usable as-of time MUST be reported **stale**. A consumer
-  MUST NOT act on a read flagged stale — the acting decision is the consumer's, but the flag
-  itself is pg-pr's obligation to raise correctly.
+  MUST carry its own as-of time: per item on the machine read seam, or at the payload level on
+  the dashboard payload. An item or payload with no usable as-of time MUST be reported **stale**.
+  A consumer MUST NOT act on a read flagged stale — the acting decision is the consumer's, but
+  the flag itself is pg-pr's obligation to raise correctly.
 
 ## Merge-request records (`INV-MR-*`)
 
@@ -40,19 +40,20 @@ correct owner (ADR 0034) — the UUID preserves identity; only the owning set ch
   review MUST anchor to the exact commit it was produced against, so a commit landing after it
   was written does not invalidate it.
 - **`INV-REVIEW-1`** <!-- uuid: ea7a8bd0-e947-43db-9d98-e76c511cfa6e --> — **Never auto-submit.**
-  pg-pr's write surface MUST create review content in the code host's **pending** state;
-  submitting it with a verdict is a separate, explicit act pg-pr MUST NOT perform on its own. On
-  a code host with no pending-review concept, review content MUST be held for the operator to
-  post rather than published live.
+  pg-pr's write surface MUST create a pending review — review content held in the code host's
+  own **pending** state; submitting it with a verdict is a separate, explicit act pg-pr MUST NOT
+  perform on its own. On a code host with no concept of a pending review, review content MUST be
+  held for the operator to post rather than published live.
 - **`INV-REVIEW-2`** <!-- uuid: c8e0f2dd-e254-4c50-a1d0-a493c14ca57e --> — **No review of
   drafts.** pg-pr MUST NOT post review content against a PR its author still marks draft;
   reviewing begins only once the PR is marked ready.
 - **`INV-REVIEW-3`** <!-- uuid: 1a763847-8b40-4500-ba7d-e982207b3503 --> — **A re-review
   supersedes; at most one pending draft.** A fresh draft on a PR that already carries a pending
   draft MUST **supersede** it rather than stack alongside it. Whether a pending draft already
-  exists MUST be checked **fail-closed**: an undetermined check MUST block the post, never
-  assume none exists.
+  exists MUST be resolved by a fail-closed pending check: an undetermined result MUST block the
+  post, never assume none exists.
 - **`INV-ATTR-1`** <!-- uuid: 50c826f0-4852-4c4e-945e-573c39d51c7b --> — **Bot attribution.**
-  Anything pg-pr posts to the code host under a shared or human account MUST carry a
-  human-visible marker distinguishing it as agent-generated, plus a machine-detectable invisible
-  marker used to recognize pg-pr's own prior posts (dedup and identity).
+  Anything pg-pr posts to the code host under a shared or human account MUST carry an
+  attribution mark: a human-visible marker distinguishing it as agent-generated, plus a
+  machine-detectable invisible marker used to recognize pg-pr's own prior posts (dedup and
+  identity).
