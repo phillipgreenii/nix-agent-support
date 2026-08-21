@@ -1,7 +1,7 @@
 {
   "$id": "event",
   "title": "INTF-SOURCE event",
-  "description": "A typed event flowing from a source through the core's durable queue to a handler (interfaces.md, INV-EVT-1). Expiry is an ABSOLUTE INSTANT (RFC3339) and both instants are OPTIONAL: an absent expiresAt defaults to at, and an absent at to the core's own now at ingest, so an event carrying neither is born expired and is offered once to every matching handler before it is dropped (INV-EVT-4, DEC-EVENT-1). No duration-valued field exists here, and additionalProperties:false therefore REJECTS the ttl field this shape replaced. Both are typed only as strings: whether a present value PARSES is a conversion the core reports (eventqueue.DecodeEvent), not something a structural schema can express.",
+  "description": "A typed event flowing from a source through the core's durable queue to a handler (interfaces.md, INV-EVT-1). Expiry is an ABSOLUTE INSTANT (RFC3339) and both instants are OPTIONAL: an absent expiresAt defaults to at, and an absent at to the core's own now at ingest, so an event carrying neither is born expired and is offered once to every matching handler before it is dropped (INV-EVT-4, DEC-EVENT-1). No duration-valued field exists here, and additionalProperties:false therefore REJECTS the ttl field this shape replaced. Both are constrained to RFC3339 SHAPE by a `pattern` (well-formed date/time syntax, with or without a fractional-second component, and a `Z` or numeric `Z07:00`-style offset); the actual semantic parse — including calendar-range checks a regex cannot do, e.g. a month of 13 — is still eventqueue.DecodeEvent's job, so a value that matches the pattern syntactically but fails time.Parse is still reported as a malformed event, not silently accepted.",
   "type": "object",
   "additionalProperties": false,
   "required": ["id", "type"],
@@ -16,10 +16,12 @@
       "type": "string"
     },
     "at": {
-      "type": "string"
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$"
     },
     "expiresAt": {
-      "type": "string"
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$"
     },
     "payload": {
       "type": "object"

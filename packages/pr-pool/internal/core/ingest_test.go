@@ -270,11 +270,13 @@ func TestIngestEvent_DuplicateIsAbsorbedNotRejected(t *testing.T) {
 // in `rejected` with exit 1 (DEC-WIRE-1's rejected example, docs/decisions/wire.md).
 func TestIngestEvent_PartialBatchRejectsOnlyTheMalformed(t *testing.T) {
 	svc := startedService(t)
-	// The three faults span both rejection layers: `noType` violates the schema
-	// structurally, while `badAt` / `badExpiry` are conversions a structural schema
-	// cannot express (both instants are just strings to it) — including a
-	// DURATION-shaped expiresAt, the shape a caller written against the old
-	// duration-valued contract would send.
+	// All three faults are caught by the schema layer (INV-INTF-2): `noType`
+	// violates it structurally, and `badAt` / `badExpiry` fail the `at` /
+	// `expiresAt` RFC3339 `pattern` — including a DURATION-shaped expiresAt, the
+	// shape a caller written against the old duration-valued contract would
+	// send. (A value that matched the pattern's syntax but failed calendar
+	// semantics, e.g. a month of 13, would instead reach DecodeEvent's
+	// time.Parse and be rejected there — not exercised by this case.)
 	req := `{"schemaVersion":"1","id":"trk-1","events":[
 		{"id":"good","type":"t"},
 		{"id":"noType"},

@@ -60,9 +60,13 @@ func TestDecodeEvent_AtWithoutExpiresAt(t *testing.T) {
 	}
 }
 
-// Conversions a structural schema cannot express are reported as ErrInvalidEvent,
-// so a caller can classify them as a malformed event. To the schema both fields
-// are just strings.
+// DecodeEvent is exercised directly here, bypassing the schema layer — so this
+// proves DecodeEvent itself still rejects an unparseable `at`/`expiresAt` as
+// ErrInvalidEvent even for a caller that skips schema validation. (Through the
+// full pipeline, event.schema.json's `pattern` on these fields would already
+// reject most of these values — a malformed shape, not merely "just strings to
+// the schema" as before pg2-kgydy; only a calendar-invalid-but-shape-valid
+// value, e.g. a month of 13, would reach this same check unaided.)
 func TestDecodeEvent_Rejections(t *testing.T) {
 	cases := map[string]string{
 		"unparseable at":            `{"id":"e","type":"t","at":"yesterday"}`,

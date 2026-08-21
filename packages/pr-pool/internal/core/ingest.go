@@ -120,8 +120,10 @@ func (s *Service) handleIngestEvent(stdin io.Reader, stdout io.Writer) int {
 		}
 		evt, err := eventqueue.DecodeEvent(raw)
 		if err != nil {
-			// Past the schema but not convertible — an unparseable `at`/`expiresAt`,
-			// which a structural schema cannot express (both are just strings to it).
+			// Past the schema (which already rejects a malformed-SHAPE `at`/
+			// `expiresAt` via its `pattern`) but still not convertible — a value
+			// that is well-formed RFC3339 syntax yet calendar-invalid (e.g. month
+			// 13), which a regex cannot catch and only time.Parse can.
 			reply.Rejected = append(reply.Rejected, rejection{ID: rawEventID(raw), Reason: "malformed: " + err.Error()})
 			continue
 		}

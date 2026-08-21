@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -44,6 +45,13 @@ func (s *schema) UnmarshalJSON(b []byte) error {
 			return err
 		}
 		s.Const = c
+	}
+	if s.Pattern != "" {
+		re, err := regexp.Compile(s.Pattern)
+		if err != nil {
+			return fmt.Errorf("invalid pattern %q: %w", s.Pattern, err)
+		}
+		s.pattern = re
 	}
 	return nil
 }

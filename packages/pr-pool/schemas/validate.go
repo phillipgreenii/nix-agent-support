@@ -10,13 +10,22 @@
 // use — deliberately no external dependency, keeping the core minimal
 // (GOAL-MIN-1) and avoiding a gomod2nix/vendoring change. Supported keywords:
 // type, required, properties, additionalProperties(false), enum, const, items,
-// minItems, minimum, maximum, oneOf, and "$ref" resolved BY NAME against the
-// registry (e.g. {"$ref": "event"}).
+// minItems, minimum, maximum, oneOf, pattern, and "$ref" resolved BY NAME
+// against the registry (e.g. {"$ref": "event"}).
+//
+// "pattern" is implemented with the stdlib "regexp" package rather than the
+// JSON Schema "format" keyword (bead pg2-kgydy, plan item 2): "format" is
+// annotation-only by default per the JSON Schema spec, so asserting on it
+// would be non-standard, and "regexp" needs no new dependency (GOAL-MIN-1
+// again). Matching follows JSON Schema semantics — the regex is searched for
+// ANYWHERE in the string, not implicitly anchored — so a schema author
+// wanting a full-string match supplies their own "^...$".
 package schemas
 
 import (
 	"fmt"
 	"math"
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -35,9 +44,15 @@ type schema struct {
 	Minimum              *float64           `json:"minimum"`
 	Maximum              *float64           `json:"maximum"`
 	OneOf                []*schema          `json:"oneOf"`
+	Pattern              string             `json:"pattern"`
 
 	// hasConst records whether "const" was present (nil is a legal const value).
 	hasConst bool
+
+	// pattern is the compiled form of Pattern, built once at load time
+	// (UnmarshalJSON in schemas.go) so a malformed regex in an embedded schema
+	// fails loudly at package init (mustLoad panics) rather than on first use.
+	pattern *regexp.Regexp
 }
 
 // resolver looks a named schema up in the registry so "$ref" can point at a
@@ -140,6 +155,25 @@ func (s *schema) validate(value any, path string, resolve resolver) error {
 		if err := s.validateArrayConstraints(arr, path, resolve); err != nil {
 			return err
 		}
+	}
+	if str, ok := value.(string); ok {
+		if err := s.checkPattern(str, path); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// checkPattern applies the "pattern" keyword, by keyword presence — like the
+// object/array constraints above, it holds whether or not the schema declared
+// type "string". A general-purpose regex match (not RFC3339-specific): any
+// schema author may set "pattern" to constrain a string value.
+func (s *schema) checkPattern(str, path string) error {
+	if s.pattern == nil {
+		return nil
+	}
+	if !s.pattern.MatchString(str) {
+		return fmt.Errorf("%s: value %q does not match pattern %q", path, str, s.Pattern)
 	}
 	return nil
 }

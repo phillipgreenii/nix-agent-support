@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/pr-pool/conformance"
 	"github.com/phillipgreenii/pr-pool/internal/eventqueue"
 )
 
@@ -101,10 +102,14 @@ func TestEmit_ValidatesBeforeLocating(t *testing.T) {
 	}
 }
 
-// Fix 4: a present-but-unparseable instant (a valid string per the schema) is a
-// malformed event, rejected during parse — before the core is located. Both
-// instants take that path, including a DURATION-shaped `expiresAt`, which is what
-// a caller written against the replaced contract would send.
+// Fix 4: a present-but-unparseable instant is a malformed event, rejected
+// before the core is located. Since pg2-kgydy these particular values ("not-a-
+// time", a duration-shaped "15m") are no longer valid strings per the schema
+// either — event.schema.json's `pattern` on `at`/`expiresAt` now rejects the
+// malformed SHAPE at the schema-validation step in Emit, before DecodeEvent
+// ever runs; a value that is well-formed RFC3339 syntax but calendar-invalid
+// (e.g. a month of 13) would instead reach DecodeEvent's time.Parse. Either
+// way the caller sees a rejection before the core is located.
 func TestEmit_RejectsMalformedInstants(t *testing.T) {
 	cases := map[string]string{
 		"bad at":                    `{"schemaVersion":"1","id":"x","type":"t","at":"not-a-time"}`,
@@ -117,6 +122,23 @@ func TestEmit_RejectsMalformedInstants(t *testing.T) {
 				t.Fatalf("event with a malformed instant was accepted")
 			}
 		})
+	}
+}
+
+// A value that is well-formed RFC3339 SYNTAX per event.schema.json's `pattern`
+// but calendar-invalid (a month of 13) clears the schema layer — a regex
+// cannot enforce calendar semantics — and is instead caught by DecodeEvent's
+// time.Parse. Proving the schema step passes on its own is what makes this
+// case distinct from TestEmit_RejectsMalformedInstants above: both layers
+// reject the event, but at different steps, and Emit as a whole still refuses
+// it either way.
+func TestEmit_CalendarInvalidInstantPassesSchemaPatternButFailsDecode(t *testing.T) {
+	bad := []byte(`{"schemaVersion":"1","id":"x","type":"t","at":"2026-13-45T12:00:00Z"}`)
+	if err := conformance.CheckBytes(pushInjectSchema, bad); err != nil {
+		t.Fatalf("calendar-invalid-but-shape-valid instant unexpectedly failed schema validation: %v", err)
+	}
+	if _, err := Emit(bad, injected(), QueueEnqueuer{Q: newQueue(t)}); err == nil {
+		t.Fatal("calendar-invalid instant was accepted by Emit")
 	}
 }
 

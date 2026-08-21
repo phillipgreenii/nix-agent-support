@@ -48,10 +48,20 @@ type wireEvent struct {
 //
 // DecodeEvent deliberately does NOT validate against the JSON Schema (that is
 // package conformance's job, run at the boundary before decoding) nor against
-// Event.Validate (Enqueue does that). It reports only the conversions a
-// structural schema cannot express — an unparseable `at` or `expiresAt`, both
-// just strings to the schema — classified as ErrInvalidEvent so a caller can
-// report them as a malformed event.
+// Event.Validate (Enqueue does that). The schema's own `pattern` on `at` /
+// `expiresAt` (schemas/event.schema.json) already rejects a value that is not
+// well-formed RFC3339 SHAPE, but a regex cannot enforce calendar semantics
+// (e.g. a month of 13, a day of 45) — DecodeEvent's time.Parse call is still
+// the authority that turns a syntactically-valid string into a time.Time and
+// catches the values that slip past the pattern that way. It is ALSO the
+// place that catches an unparseable instant for any caller reachable by
+// DecodeEvent that skips schema validation first (belt-and-suspenders): it is
+// the SINGLE wire→core decoder every ingest entry point shares — the
+// `ingest-event` manager callback (internal/core) and the operator
+// `push-inject` front door (internal/emit) — both of which currently DO run
+// schema validation first, but nothing in this function's own contract
+// depends on that. Either way, an unparseable `at`/`expiresAt` is classified
+// as ErrInvalidEvent so a caller can report it as a malformed event.
 func DecodeEvent(data []byte) (Event, error) {
 	var w wireEvent
 	if err := json.Unmarshal(data, &w); err != nil {

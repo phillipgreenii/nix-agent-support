@@ -115,6 +115,110 @@ func TestValidator_TypelessArrayKeywords(t *testing.T) {
 	}
 }
 
+// TestValidator_Pattern proves the general-purpose "pattern" keyword: a regex
+// match against a string value, applying by keyword presence (independent of
+// a declared "type", like the object/array keywords above) and a no-op on a
+// non-string value (JSON Schema semantics — the keyword only constrains
+// strings).
+func TestValidator_Pattern(t *testing.T) {
+	cases := []struct {
+		name    string
+		doc     string
+		val     string
+		wantErr bool
+	}{
+		{"matches", `{"pattern":"^[a-z]+$"}`, `"abc"`, false},
+		{"does not match", `{"pattern":"^[a-z]+$"}`, `"ABC"`, true},
+		{"typed string, matches", `{"type":"string","pattern":"^\\d+$"}`, `"123"`, false},
+		{"typed string, does not match", `{"type":"string","pattern":"^\\d+$"}`, `"12a"`, true},
+		{"unanchored: substring match is enough", `{"pattern":"abc"}`, `"xxabcxx"`, false},
+		{"unanchored: absent substring fails", `{"pattern":"abc"}`, `"xyz"`, true},
+		{"no-op on non-string value", `{"pattern":"^[a-z]+$"}`, `5`, false},
+		{"no pattern keyword: no constraint", `{}`, `"anything at all"`, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := val(t, tc.doc, tc.val)
+			if tc.wantErr != (err != nil) {
+				t.Fatalf("got err=%v, wantErr=%v", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+// TestValidator_PatternInvalidRegexFailsToLoad proves a malformed regex in a
+// schema document fails fast at decode time (UnmarshalJSON), the same moment
+// the embedded schemas are decoded at package init (mustLoad) — so a broken
+// "pattern" in a real schema file panics loudly there rather than surfacing as
+// a confusing failure on first validate call.
+func TestValidator_PatternInvalidRegexFailsToLoad(t *testing.T) {
+	var s schema
+	err := json.Unmarshal([]byte(`{"pattern":"(unterminated"}`), &s)
+	if err == nil {
+		t.Fatal("invalid regex pattern was accepted at decode time")
+	}
+}
+
+// TestEventSchema_InstantPattern proves event.schema.json's `pattern` on `at`
+// and `expiresAt` (bead pg2-kgydy, plan item 2) rejects malformed-shape values
+// while still accepting every RFC3339 form eventqueue.parseInstant's
+// time.Parse(time.RFC3339, ...) call accepts — including a numeric offset, a
+// bare "Z", and (Go's own parsing quirk: RFC3339's layout omits fractional
+// seconds, but time.Parse accepts them anyway) a fractional-second component.
+func TestEventSchema_InstantPattern(t *testing.T) {
+	valid := []string{
+		"2026-07-16T12:00:00Z",
+		"2026-07-16T12:00:00+00:00",
+		"2026-07-16T12:00:00-05:00",
+		"2026-07-16T12:00:00.123Z",
+		"2026-07-16T12:00:00.123456789Z",
+	}
+	for _, at := range valid {
+		t.Run("accepts "+at, func(t *testing.T) {
+			ev := map[string]any{"id": "e", "type": "t", "at": at, "expiresAt": at}
+			if err := Validate("event", ev); err != nil {
+				t.Fatalf("well-formed RFC3339 instant %q rejected: %v", at, err)
+			}
+		})
+	}
+
+	invalid := []string{
+		"not-a-date",
+		"2026-13-45",               // no time component at all — not RFC3339 shape
+		"2026-07-16 12:00:00",      // space instead of "T"
+		"2026-07-16t12:00:00z",     // lowercase T/Z (Go's parser is case-sensitive here)
+		"15m",                      // the duration shape the ttl field used to carry
+		"2026-07-16T12:00:00+0000", // offset missing the ":"
+	}
+	for _, at := range invalid {
+		t.Run("rejects "+at, func(t *testing.T) {
+			ev := map[string]any{"id": "e", "type": "t", "at": at}
+			if err := Validate("event", ev); err == nil {
+				t.Fatalf("malformed instant %q was accepted", at)
+			}
+		})
+	}
+
+	// A value that is well-formed RFC3339 SYNTAX (matches the pattern) but
+	// calendar-invalid (month 13) is NOT something a regex can catch — that is
+	// left to eventqueue.DecodeEvent's time.Parse, by design (see
+	// event.schema.json's description and DecodeEvent's doc comment).
+	t.Run("pattern accepts calendar-invalid-but-shape-valid month", func(t *testing.T) {
+		ev := map[string]any{"id": "e", "type": "t", "at": "2026-13-45T12:00:00Z"}
+		if err := Validate("event", ev); err != nil {
+			t.Fatalf("shape-valid-but-calendar-invalid instant unexpectedly failed the schema: %v", err)
+		}
+	})
+
+	// The same pattern applies to expiresAt, not just at.
+	t.Run("expiresAt is also constrained", func(t *testing.T) {
+		ev := map[string]any{"id": "e", "type": "t", "expiresAt": "not-a-date"}
+		if err := Validate("event", ev); err == nil {
+			t.Fatal("malformed expiresAt was accepted")
+		}
+	})
+}
+
 func TestValidator_EnumConstOneOfArray(t *testing.T) {
 	if err := val(t, `{"enum":["a","b"]}`, `"c"`); err == nil {
 		t.Fatalf("enum out-of-range not caught")
