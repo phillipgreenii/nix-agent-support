@@ -121,11 +121,41 @@ func NewStore(dbPath string) (*Store, error) {
 		return nil, fmt.Errorf("create db dir: %w", err)
 	}
 
-	db, err := sql.Open("sqlite", dbPath)
+	// _txlock=immediate makes every db.Begin()/db.BeginTx() on connections
+	// opened from this *sql.DB issue `BEGIN IMMEDIATE` instead of SQLite's
+	// lazy default (`BEGIN DEFERRED`), which takes no lock at all until the
+	// transaction's first write statement. migrate() below depends on this:
+	// it reads schema_version's MAX(version) INSIDE its transaction, so the
+	// BEGIN IMMEDIATE acquires SQLite's write lock before that read runs. A
+	// second connection's own BEGIN IMMEDIATE then blocks (bounded by the
+	// busy_timeout pragma set below) until this one commits or rolls back,
+	// so it can only re-read MAX(version) once this transaction's
+	// migrations, if any, are already visible — never the stale
+	// pre-migration value. Without this, two independent connections could
+	// both read the SAME pre-migration version before either takes a lock,
+	// decide to run the same pending migrations, and double-apply them
+	// (pg2-5lkyp: on this machine, every Bash tool call's hook opens a Store
+	// and thus calls migrate(), so concurrent openers are the normal case).
+	db, err := sql.Open("sqlite", dbPath+"?_txlock=immediate")
 	if err != nil {
 		return nil, fmt.Errorf("open db: %w", err)
 	}
 
+	// busy_timeout MUST be set FIRST, before any other pragma or statement
+	// on this connection: it governs how long SQLite retries a lock
+	// acquisition (including the one the journal_mode=WAL conversion and
+	// the synchronous pragma below need) instead of failing immediately
+	// with SQLITE_BUSY. Setting it later left those two statements with
+	// SQLite's default zero-retry budget, which a concurrent opener could
+	// (and, once exercised by
+	// TestMigrate_ConcurrentOpeners_NoDuplicateVersionRows, reliably did)
+	// trip on a brand-new database file — a second bug on the same
+	// concurrent-openers path as the migrate() race this pragma reordering
+	// was found alongside (pg2-5lkyp).
+	if _, err := db.Exec("PRAGMA busy_timeout=3000"); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("set busy_timeout: %w", err)
+	}
 	if synchronousPragma != "" {
 		if _, err := db.Exec("PRAGMA synchronous=" + synchronousPragma); err != nil {
 			_ = db.Close()
@@ -135,10 +165,6 @@ func NewStore(dbPath string) (*Store, error) {
 	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("set WAL mode: %w", err)
-	}
-	if _, err := db.Exec("PRAGMA busy_timeout=3000"); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("set busy_timeout: %w", err)
 	}
 	if _, err := db.Exec("PRAGMA foreign_keys = ON"); err != nil {
 		_ = db.Close()
@@ -669,9 +695,30 @@ func migrate(db *sql.DB) error {
 		return fmt.Errorf("create schema_version: %w", err)
 	}
 
+	// The version READ, the pending-migration DECISION, and every migration
+	// APPLY all happen inside this ONE transaction — and because NewStore
+	// opens the DSN with `_txlock=immediate`, db.Begin() issues `BEGIN
+	// IMMEDIATE`, which takes SQLite's write lock right here, before the
+	// SELECT below ever runs. That is what closes the race: a plain
+	// read-then-Begin sequence lets a second connection read the SAME
+	// pre-migration MAX(version) before either connection takes a lock, so
+	// both independently decide to run (and apply) the same pending
+	// migrations. With the lock taken first, a second connection's own
+	// BEGIN IMMEDIATE blocks (bounded by the busy_timeout pragma) until this
+	// transaction commits or rolls back, and its SELECT then observes
+	// whatever this transaction just committed — so it can only ever see an
+	// up-to-date version and compute an empty (or smaller) pending list.
+	// See pg2-5lkyp; regression coverage in
+	// TestMigrate_ConcurrentOpeners_NoDuplicateVersionRows.
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin migrations: %w", err)
+	}
+
 	var currentVersion int
-	row := db.QueryRow("SELECT COALESCE(MAX(version), 0) FROM schema_version")
+	row := tx.QueryRow("SELECT COALESCE(MAX(version), 0) FROM schema_version")
 	if err := row.Scan(&currentVersion); err != nil {
+		_ = tx.Rollback()
 		return fmt.Errorf("read schema version: %w", err)
 	}
 
@@ -682,10 +729,16 @@ func migrate(db *sql.DB) error {
 		}
 	}
 	if len(pending) == 0 {
+		// Nothing to apply, but the transaction still holds the write lock
+		// it took at BEGIN IMMEDIATE — release it without committing any
+		// change.
+		if err := tx.Rollback(); err != nil {
+			return fmt.Errorf("release migration lock: %w", err)
+		}
 		return nil
 	}
 
-	// All pending migrations run in ONE transaction, not one each.
+	// All pending migrations run in this ONE transaction, not one each.
 	//
 	// Correctness first: SQLite DDL is transactional, so a single transaction
 	// makes migration ATOMIC — an interrupted upgrade leaves the database at
@@ -700,10 +753,6 @@ func migrate(db *sql.DB) error {
 	// from 17 fsyncs to 11 (measured with `strace -c -e trace=fsync`), and keeps
 	// that number flat as migrations accumulate instead of growing one flush per
 	// migration forever.
-	tx, err := db.Begin()
-	if err != nil {
-		return fmt.Errorf("begin migrations: %w", err)
-	}
 	for _, m := range pending {
 		if err := m.up(tx); err != nil {
 			_ = tx.Rollback()

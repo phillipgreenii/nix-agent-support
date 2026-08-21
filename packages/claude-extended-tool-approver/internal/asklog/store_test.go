@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	_ "modernc.org/sqlite"
@@ -532,6 +533,112 @@ func TestNewStore_IdempotentMigration(t *testing.T) {
 	_ = s2.db.QueryRow("SELECT COUNT(*) FROM schema_version").Scan(&count)
 	if count != 8 {
 		t.Errorf("schema_version rows = %d, want 8", count)
+	}
+}
+
+// TestMigrate_ConcurrentOpeners_NoDuplicateVersionRows is the regression test
+// for pg2-5lkyp: migrate()'s read of MAX(version), its decision of which
+// migrations are pending, and its application of them were not atomic across
+// independent *sql.DB connections. On this machine every Bash tool call's
+// PreToolUse/PostToolUse hook opens a Store (and thus calls migrate()), so
+// concurrent openers racing this exact check-then-act window are the NORMAL
+// case, not an edge case.
+//
+// This mirrors the bead's own reproduction: a fully-migrated, already-WAL
+// database gets "rearmed" by deleting its two highest schema_version rows
+// (leaving migrations 7 and 8 pending), and many Store instances then open
+// against that SAME on-disk file concurrently — all released from a single
+// closed channel to line their starts up as tightly as possible, maximizing
+// the chance that more than one reads schema_version before any of them has
+// committed its migrations. Deliberately NOT a from-scratch database file:
+// racing the very first WAL-mode conversion on a brand-new file is a
+// separate, one-time-at-install concern (SQLite can legitimately return
+// SQLITE_BUSY there under heavy concurrent first-open load) and is not the
+// bug this test targets.
+//
+// Before the fix (a plain read-then-Begin, verified by temporarily
+// reverting it) this reliably produced duplicate rows for versions 7 and 8
+// in schema_version; after the fix (the version read moved inside a BEGIN
+// IMMEDIATE transaction, closing the check-then-act window) it must end
+// with EXACTLY ONE row per version.
+func TestMigrate_ConcurrentOpeners_NoDuplicateVersionRows(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+
+	// Create a fully-migrated, already-WAL database, then rearm it to
+	// version 6 by deleting the rows for the two highest migrations —
+	// exactly the scenario pg2-5lkyp observed directly.
+	seed, err := NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("seed NewStore: %v", err)
+	}
+	if _, err := seed.db.Exec(`DELETE FROM schema_version WHERE version > 6`); err != nil {
+		t.Fatalf("rearm schema_version: %v", err)
+	}
+	if err := seed.Close(); err != nil {
+		t.Fatalf("close seed store: %v", err)
+	}
+
+	const openers = 20
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	errs := make([]error, openers)
+	wg.Add(openers)
+	for i := 0; i < openers; i++ {
+		i := i
+		go func() {
+			defer wg.Done()
+			<-start
+			s, err := NewStore(dbPath)
+			if err != nil {
+				errs[i] = fmt.Errorf("NewStore: %w", err)
+				return
+			}
+			errs[i] = s.Close()
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("opener %d: %v", i, err)
+		}
+	}
+
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("open for verification: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	rows, err := db.Query(`SELECT version, COUNT(*) AS n FROM schema_version GROUP BY version HAVING COUNT(*) > 1 ORDER BY version`)
+	if err != nil {
+		t.Fatalf("query duplicates: %v", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var dups []string
+	for rows.Next() {
+		var version, n int
+		if err := rows.Scan(&version, &n); err != nil {
+			t.Fatalf("scan duplicate row: %v", err)
+		}
+		dups = append(dups, fmt.Sprintf("version %d has %d rows", version, n))
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate duplicates: %v", err)
+	}
+	if len(dups) > 0 {
+		t.Errorf("schema_version has duplicate rows after %d concurrent openers: %v", openers, dups)
+	}
+
+	var total int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM schema_version`).Scan(&total); err != nil {
+		t.Fatalf("count schema_version rows: %v", err)
+	}
+	if total != len(migrations) {
+		t.Errorf("schema_version has %d rows, want exactly %d (one per migration)", total, len(migrations))
 	}
 }
 
