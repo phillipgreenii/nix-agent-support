@@ -3328,7 +3328,7 @@
                 cd "''${1:-packages/ccpool}"
                 go test -tags contract -timeout=0 -p 1 -json ./cmd/ccpool/... \
                   | tee /tmp/ccpool-contract.json \
-                  | jq -r -f contract/classify.jq \
+                  | jq -n -r -f contract/classify.jq \
                   | sort | uniq -c
               '';
             };

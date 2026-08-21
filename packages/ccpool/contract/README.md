@@ -24,11 +24,20 @@ To run it directly (e.g. a single scenario) from `packages/ccpool`:
 
 ```bash
 go test -tags contract -timeout=0 -p 1 -json ./cmd/ccpool/... \
-  | jq -r -f contract/classify.jq | sort | uniq -c
+  | jq -n -r -f contract/classify.jq | sort | uniq -c
 ```
 
 `-p 1` is required: the suite shares the real `$HOME` (for OAuth) and must run serially.
 `-timeout=0` disables Go's default 10-minute test timeout, since real turns can be slow.
+
+`contract/testdata/go-test-json-classify-sample.jsonl` is a small real excerpt (not a live re-run)
+from an actual `go test -json` stream, trimmed to one test per bucket plus a bare test FAIL with no
+`OUTCOME=` line. It exists to sanity-check `classify.jq` itself without spending tokens on a live
+run:
+
+```bash
+jq -n -r -f contract/classify.jq contract/testdata/go-test-json-classify-sample.jsonl | sort | uniq -c
+```
 
 ## Requirements (and why this is NOT in CI)
 
@@ -59,8 +68,16 @@ them.
 | `live-fail`      | An objective `live` check **failed** — a real regression in the command under test.                  | **Investigate**: a genuine `ccpool` / Claude Code contract regression.                   |
 | `scaffold`       | The harness's own driving broke (e.g. pane-rendering changed so a phase gate never matched).         | **Investigate**: fix the harness (usually the phase-detection regexes), not the product. |
 
-Any non-zero `baseline-drift`, `live-fail`, or `scaffold` count means **investigate**. A run where
-every bucket is `live` / `baseline` / `pending` is green.
+`unclassified-fail` is not one of the harness's own `OUTCOME=` buckets above — `classify.jq`
+synthesizes it. A test can fail without ever emitting an `OUTCOME=` line (e.g. `ccpTimed`'s
+subprocess-timeout guard in `contract_harness_test.go` fails via a plain hang-timeout message), and
+such a failure would otherwise be invisible to the tally even though the overall `go test` result
+is FAIL. `classify.jq` tracks, per test, whether it ever emitted an `OUTCOME=` line, and emits
+`unclassified-fail` for any test-level failure that didn't. **Investigate** any non-zero count —
+read the raw `go test -json` output (or `/tmp/ccpool-contract.json`) for that test's failure message.
+
+Any non-zero `baseline-drift`, `live-fail`, `scaffold`, or `unclassified-fail` count means
+**investigate**. A run where every bucket is `live` / `baseline` / `pending` is green.
 
 ### About `baseline`s specifically
 
