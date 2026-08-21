@@ -34,6 +34,21 @@
 // distinct from SELF-status, which survives and — as of bead pg2-zaghi — has its
 // own wire mechanism: see SelfStatus in registry.go and SubcommandSelfStatus in
 // selfstatus.go.
+//
+// # Not yet booted in production (pg2-vkivc)
+//
+// Nothing outside this package's own tests calls Listen + Accept. cmd/pr-pool has
+// no `run` / `run-until-idle` subcommand — the operator commands docs/behavior
+// (USECASE-RUN-DAEMON, USECASE-RUN-DRAIN) describes as what boots a core — so no
+// live socket exists for ingest-event or self-status to receive on outside a test
+// binary. Production `drain` runs internal/orchestrator, a separate discover-then-
+// dispatch loop over internal/eventbus that predates this package and does not
+// reference it. This is deliberate: Service is the first landed piece of a
+// multi-bead convergence (epic pg2-f3mcb) onto "the queue is the universal
+// intermediary" (pg2-f3mcb.2), which is what adds run/run-until-idle and retires
+// internal/eventbus. Until pg2-f3mcb.2 lands, treat Service as built-ahead-of-its-
+// boot-path rather than unused — see docs/behavior/README.md's realization-gap
+// register, element INV-LIFE-1.
 package core
 
 import (
