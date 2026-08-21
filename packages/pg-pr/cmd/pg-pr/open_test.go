@@ -183,6 +183,27 @@ func TestProjectRowsMineComposesNeedsAttention(t *testing.T) {
 	}
 }
 
+// TestProjectRowsMineExcludesMergedRows is the pg2-ew4kf regression guard: the
+// dashboard snapshot now retains a merged PR of mine for a 24h grace period
+// (MineRow.Merged), but `pg-pr open --mine` must never treat one as
+// actionable — an already-merged PR has nothing left to open in a browser.
+// The exclusion must hold with --all too, since --all bypasses the
+// NeedsAttention filter entirely and would otherwise readmit it.
+func TestProjectRowsMineExcludesMergedRows(t *testing.T) {
+	snap := &snapshot.Snapshot{Mine: []snapshot.MineRow{
+		{Number: 1, URL: "u1"},                    // active: kept
+		{Number: 2, URL: "u2", Merged: true},      // merged/retained: excluded
+		{Number: 3, URL: "u3", WaitingOnMe: true}, // active: kept
+	}}
+	got := projectRows(snap, true)
+	assertNumbers(t, got, 1, 3)
+
+	// --all must not readmit the merged row (it bypasses NeedsAttention, not
+	// the projection-level exclusion).
+	selected := selectRows(got, openFlags{mine: true, all: true})
+	assertNumbers(t, selected, 1, 3)
+}
+
 // TestProjectRowsSelectsTheRequestedHalf guards against reading the wrong array.
 func TestProjectRowsSelectsTheRequestedHalf(t *testing.T) {
 	snap := &snapshot.Snapshot{

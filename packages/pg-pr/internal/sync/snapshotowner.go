@@ -2,7 +2,9 @@ package sync
 
 import (
 	"sort"
+	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/ownership"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/snapshot"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/telemetry"
 )
@@ -21,6 +23,22 @@ func (m *snapshotModel) upsert(in snapshot.PRInput) {
 	m.prs[prKey{Repo: in.PR.Repo, Number: in.PR.Number}] = in
 }
 func (m *snapshotModel) delete(k prKey) { delete(m.prs, k) }
+
+// pruneExpiredMerged removes entries for a merged PR of MINE (own==Mine, the
+// only case refresh.go retains past merge) whose snapshot.MergedRetentionWindow
+// has elapsed as of now. Without this, such an entry — no longer polled once
+// it drops out of the "is:open" fingerprint roster, so refreshPR never revisits
+// it — would sit in this map indefinitely even after Build has stopped
+// rendering it in the Mine panel; this keeps the retained model bounded to
+// match what is actually still visible (pg2-ew4kf). Safe to call only from the
+// owner goroutine (same single-mutator contract as upsert/delete).
+func (m *snapshotModel) pruneExpiredMerged(now time.Time) {
+	for k, v := range m.prs {
+		if v.PR.Merged && v.Ownership == ownership.Mine && !snapshot.WithinMergedRetention(v.PR.MergedAt, now) {
+			delete(m.prs, k)
+		}
+	}
+}
 
 // sortedInputs returns inputs deterministically ordered by repo then number,
 // so per-PR rebuilds don't reshuffle dashboard rows.
@@ -55,8 +73,10 @@ func (e *Engine) runSnapshotOwner(updates <-chan snapshotUpdate, store *snapshot
 		} else {
 			m.upsert(*u.Input)
 		}
+		now := e.deps.Now()
+		m.pruneExpiredMerged(now)
 		store.Set(snapshot.Build(snapshot.BuilderInput{
-			GeneratedAt:          e.deps.Now(),
+			GeneratedAt:          now,
 			SyncIntervalSeconds:  int(e.deps.SyncInterval.Seconds()),
 			Self:                 e.cfg().SelfLogin,
 			TeamMembers:          e.allTeamMembers(),

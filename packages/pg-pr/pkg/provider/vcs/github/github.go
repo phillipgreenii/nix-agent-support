@@ -161,6 +161,7 @@ func (p ghPR) toAPI(repo string) api.PR {
 		URL:          p.URL,
 		Draft:        p.IsDraft,
 		Merged:       p.MergedAt != "",
+		MergedAt:     p.MergedAt,
 		Additions:    p.Additions,
 		Deletions:    p.Deletions,
 		ChangedFiles: p.ChangedFiles,

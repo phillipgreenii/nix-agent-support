@@ -8,6 +8,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/beadsbridge"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/event"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/ownership"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/beads"
@@ -148,11 +149,13 @@ func newRefreshEngine(t *testing.T, self string, bdc BeadClient, pr api.PR) *Eng
 	return e
 }
 
-// TestRefreshPR_ClosedMerged_ClosesAndRemoves: a merged PR is genuinely
-// detected as merged and removed from the dashboard (nil input). The bead
-// close now happens via an emitted pr.merged event (the bridge cascade-closes),
-// NOT an inline CloseMergeRequest on the engine's bd client.
-func TestRefreshPR_ClosedMerged_ClosesAndRemoves(t *testing.T) {
+// TestRefreshPR_ClosedMergedTeam_ClosesAndRemoves: a merged TEAM-authored PR
+// (own != Mine) is genuinely detected as merged and removed from the
+// dashboard immediately (nil input) — pg2-ew4kf's retention grace period is
+// deliberately scoped to PRs authored by ME; a teammate's merge is unchanged.
+// The bead close still happens via an emitted pr.merged event (the bridge
+// cascade-closes), NOT an inline CloseMergeRequest on the engine's bd client.
+func TestRefreshPR_ClosedMergedTeam_ClosesAndRemoves(t *testing.T) {
 	db := store.OpenForTest(t)
 	bdc := &refreshFakeBeads{
 		existing: &beads.MergeRequest{
@@ -162,7 +165,7 @@ func TestRefreshPR_ClosedMerged_ClosesAndRemoves(t *testing.T) {
 	}
 	pr := api.PR{
 		Repo: "o/r", Number: 1, State: "merged", Merged: true,
-		Author: "me", URL: "https://github.com/o/r/pull/1",
+		Author: "teammate", URL: "https://github.com/o/r/pull/1",
 	}
 	e := newRefreshEngineWithStore(t, "me", bdc, pr, db)
 
@@ -171,7 +174,7 @@ func TestRefreshPR_ClosedMerged_ClosesAndRemoves(t *testing.T) {
 		t.Fatalf("refreshPR: %v", err)
 	}
 	if in != nil {
-		t.Fatalf("merged PR must be removed (nil input); got %+v", in)
+		t.Fatalf("a team-authored merged PR must still be removed immediately (nil input); got %+v", in)
 	}
 	// Structural guarantee: sync.BeadClient = {ListMergeRequests} so
 	// refreshPR cannot call CloseMergeRequest on the engine's bd client.
@@ -591,7 +594,11 @@ func TestRefreshPRClosedEmitsClose(t *testing.T) {
 }
 
 // TestRefreshPRMergedEmitsMerge proves a merged PR causes refreshPR to emit a
-// store.EventPRMerged (Merged=true) instead of closing the bead inline.
+// store.EventPRMerged (Merged=true) instead of closing the bead inline, AND
+// (pg2-ew4kf) that because this PR is authored by ME, refreshPR now hands
+// back a retained snapshot input (Ownership=Mine) instead of signalling
+// dashboard removal — the bead lifecycle (this event) is unchanged; only the
+// dashboard/snapshot outcome differs from the pre-pg2-ew4kf behavior.
 func TestRefreshPRMergedEmitsMerge(t *testing.T) {
 	ctx := context.Background()
 	db := store.OpenForTest(t)
@@ -611,8 +618,14 @@ func TestRefreshPRMergedEmitsMerge(t *testing.T) {
 	if err != nil {
 		t.Fatalf("refreshPR: %v", err)
 	}
-	if in != nil {
-		t.Fatalf("merged PR must be removed (nil input); got %+v", in)
+	if in == nil {
+		t.Fatal("a merged PR of MINE must be retained (non-nil snapshot input), not removed")
+	}
+	if in.Ownership != ownership.Mine {
+		t.Errorf("retained input Ownership: got %q want %q", in.Ownership, ownership.Mine)
+	}
+	if !in.PR.Merged {
+		t.Errorf("retained input PR.Merged must be true, got %+v", in.PR)
 	}
 	// Structural guarantee: sync.BeadClient = {ListMergeRequests} so
 	// refreshPR cannot call CloseMergeRequest on the engine's bd client.

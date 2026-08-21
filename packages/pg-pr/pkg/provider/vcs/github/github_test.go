@@ -168,6 +168,9 @@ func TestGetPR_ParsesView(t *testing.T) {
 	if !pr.Merged {
 		t.Fatalf("expected Merged=true when mergedAt is set")
 	}
+	if pr.MergedAt != "2026-05-19T12:00:00Z" {
+		t.Fatalf("MergedAt: got %q want %q (pg2-ew4kf: the snapshot layer's retention window is measured from this)", pr.MergedAt, "2026-05-19T12:00:00Z")
+	}
 }
 
 func TestGetPR_ParsesReviewRequests(t *testing.T) {

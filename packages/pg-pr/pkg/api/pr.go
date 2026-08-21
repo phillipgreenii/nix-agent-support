@@ -2,16 +2,23 @@ package api
 
 // PR is the JSON shape returned by `pg-pr pr show`.
 type PR struct {
-	Repo         string `json:"repo"`
-	Number       int    `json:"number"`
-	Title        string `json:"title"`
-	State        string `json:"state"`
-	Branch       string `json:"branch"`
-	Base         string `json:"base"`
-	Author       string `json:"author"`
-	URL          string `json:"url"`
-	Draft        bool   `json:"draft"`
-	Merged       bool   `json:"merged"`
+	Repo   string `json:"repo"`
+	Number int    `json:"number"`
+	Title  string `json:"title"`
+	State  string `json:"state"`
+	Branch string `json:"branch"`
+	Base   string `json:"base"`
+	Author string `json:"author"`
+	URL    string `json:"url"`
+	Draft  bool   `json:"draft"`
+	Merged bool   `json:"merged"`
+	// MergedAt is the merge timestamp (RFC3339), populated only when Merged
+	// is true; empty on an open/draft/closed-without-merge PR. Carried
+	// (rather than reduced to the Merged bool alone) so the snapshot layer
+	// can compute how long ago a PR merged — its dashboard-retention window
+	// is measured from this instant, not from when the daemon noticed the
+	// merge (pg2-ew4kf).
+	MergedAt     string `json:"merged_at,omitempty"`
 	Additions    int    `json:"additions,omitempty"`
 	Deletions    int    `json:"deletions,omitempty"`
 	ChangedFiles int    `json:"changed_files,omitempty"`

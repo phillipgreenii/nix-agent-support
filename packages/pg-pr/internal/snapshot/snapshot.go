@@ -88,6 +88,12 @@ type MineRow struct {
 	// On a Mine-panel row (mine/co-owned) this IS the "resolve conflicts" nudge —
 	// the panel is already scoped to PRs I can fix.
 	HasConflicts bool `json:"has_conflicts,omitempty"`
+	// Merged is true for a PR retained past merge under the
+	// MergedRetentionWindow grace period rather than actively open/draft. A
+	// surface renders this as de-emphasised (a greyed row or a "merged" tag —
+	// deliberately NOT ANSI dim). Build sorts every Merged row below the
+	// active ones in Mine (pg2-ew4kf).
+	Merged bool `json:"merged,omitempty"`
 }
 
 // TeamRow is one row in the "PRs to Review" table (the not-mine review set:

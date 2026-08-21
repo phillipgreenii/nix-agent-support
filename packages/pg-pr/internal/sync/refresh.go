@@ -65,14 +65,20 @@ func reviewRequestedOfSelf(self string, requested []string) bool {
 // gate below.
 //
 // Returns (nil, nil) when the PR should be removed from the dashboard:
-//   - the upstream PR is closed or merged (bead closed + cascaded), or
+//   - the upstream PR is closed or merged, and either it wasn't merged or it
+//     wasn't authored by me (bead closed + cascaded either way), or
 //   - it is a hidden TEAM draft (bead marked draft, but not surfaced). A
 //     co-owned draft (a teammate's PR I've pushed commits onto) is NOT
 //     hidden — it falls through and is surfaced like an active PR.
 //
-// Returns (input, nil) to upsert the PR onto the dashboard: an open, active
-// PR (mine, co-owned, or a non-draft team PR) runs the full active pipeline
-// via applyFetchedPR and yields a snapshot input.
+// Returns (input, nil) in two cases: an open, active PR (mine, co-owned, or a
+// non-draft team PR) runs the full active pipeline via applyFetchedPR and
+// yields a snapshot input; OR (pg2-ew4kf) a PR I authored that just merged,
+// whose bead is closed + cascaded exactly like the removal case above, but
+// whose snapshot input is retained rather than dropped — snapshot.Build then
+// keeps it visible (sorted below active PRs, marked Merged) only for
+// snapshot.MergedRetentionWindow measured from the PR's mergedAt, dropping it
+// automatically once that elapses.
 func (e *Engine) refreshPR(ctx context.Context, repo string, number int) (*snapshot.PRInput, error) {
 	rcfg, err := e.repoConfig(repo)
 	if err != nil {
@@ -94,14 +100,15 @@ func (e *Engine) refreshPR(ctx context.Context, repo string, number int) (*snaps
 	summary := &Summary{}
 
 	// Closed/merged: emit pr.closed/pr.merged so the beadsbridge cascade-closes
-	// the existing bead + descendants at outbox flush, then signal removal from
-	// the dashboard. The engine no longer closes the bead inline.
+	// the existing bead + descendants at outbox flush. The engine no longer
+	// closes the bead inline. The bead lifecycle here is UNCHANGED by
+	// pg2-ew4kf — only what happens to the DASHBOARD/snapshot below differs.
 	if pr.State == "closed" || pr.State == "merged" || pr.Merged {
 		merged := pr.Merged || pr.State == "merged"
-		ownershipStr := ownership.Classify(ownership.Engagement{
+		own := ownership.Classify(ownership.Engagement{
 			Self: e.cfg().SelfLogin, PRAuthor: pr.Author,
-		}).String()
-		row := e.prToStoreRow(repo, *pr, ownershipStr) // state resolves to closed/merged via stateForPR
+		})
+		row := e.prToStoreRow(repo, *pr, own.String()) // state resolves to closed/merged via stateForPR
 		// emitPRClosed atomically upserts the closed/merged row AND enqueues the
 		// event in one tx (keeping the store authoritative). The emit is
 		// critical: a dropped pr.closed/pr.merged event also drops the bridge
@@ -111,6 +118,25 @@ func (e *Engine) refreshPR(ctx context.Context, repo string, number int) (*snaps
 			return nil, err
 		}
 		flushOutbox(ctx, e.deps.Store, e.deps.Dispatch)
+
+		// Retention (pg2-ew4kf): a PR *I authored* that just merged is not
+		// signalled for immediate dashboard removal — it is handed to the
+		// snapshot builder instead, which retains it (sorted below active
+		// PRs, marked MineRow.Merged) for snapshot.MergedRetentionWindow
+		// measured from pr.MergedAt, then drops it automatically once that
+		// window elapses (snapshot.Build recomputes this on every rebuild;
+		// no persisted "seen" state here). Deliberately gated on
+		// own==ownership.Mine, not the broader ActsAsMine(): this branch
+		// never enriches (no CommitAuthors fetched), so `own` can only
+		// resolve to Mine or Team here — a teammate-authored merge
+		// (own==Team, including a co-owned PR I never pushed to before it
+		// merged) still disappears immediately below, unchanged, matching
+		// the bead's "team PRs are out of scope" ruling. A closed-without-
+		// merge PR also falls through unchanged.
+		if merged && own == ownership.Mine {
+			in := snapshot.PRInput{PR: *pr, Ownership: own}
+			return &in, nil
+		}
 		return nil, nil
 	}
 

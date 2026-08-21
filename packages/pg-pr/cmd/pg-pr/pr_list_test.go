@@ -176,6 +176,45 @@ func TestPRList_JSONBaseFields(t *testing.T) {
 	}
 }
 
+// TestPRList_MergedPRExcluded_SeamProtection is the pg2-ew4kf seam-protection
+// regression guard: `pg-pr pr list` is the machine-readable read seam the
+// pr-pool ACL consumes, and it MUST stay open/draft-only regardless of the
+// dashboard/snapshot layer's separate 24h merged-PR retention (implemented in
+// internal/snapshot's Build, not here). A merged PR — including one authored
+// by ME, the exact case the dashboard now retains — must NEVER appear in this
+// command's output.
+func TestPRList_MergedPRExcluded_SeamProtection(t *testing.T) {
+	resetPRFlags()
+	setListStateHome(t)
+	wireListFakes(t, &fakeListVCS{}, nil)
+	seedListStore(
+		t,
+		store.PullRequest{
+			Repo: "foo/bar", Number: 10, Ownership: "mine", State: "open",
+			Author: "phillipg", Branch: "feat/a", Base: "main", HeadSHA: "aaa111",
+		},
+		store.PullRequest{
+			// Merged just now, authored by me — the retained-in-the-dashboard
+			// case. The seam must exclude it exactly like any other merged PR.
+			Repo: "foo/bar", Number: 12, Ownership: "mine", State: "merged",
+			Author: "phillipg", Branch: "feat/c", Base: "main", HeadSHA: "ccc333",
+		},
+	)
+
+	got := runPRList(t, "--repo", "foo/bar")
+	if len(got) != 1 {
+		t.Fatalf("expected only the open PR, got %d: %+v", len(got), got)
+	}
+	for _, it := range got {
+		if it.State == "merged" {
+			t.Fatalf("a merged PR must never appear in `pr list` output (pr-pool ACL seam): %+v", it)
+		}
+	}
+	if got[0].Number != 10 {
+		t.Fatalf("expected PR 10 (open) to be the sole result, got %+v", got)
+	}
+}
+
 // TestPRList_RosterAndLabels verifies the --reviewers augmentation: labels come
 // from GetPR, and the roster from ListReviews with each reviewer classified
 // agent vs person via the agent registry (config.Agents).

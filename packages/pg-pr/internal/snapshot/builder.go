@@ -103,11 +103,32 @@ func Build(in BuilderInput) *Snapshot {
 	for repo, pats := range in.ExcludedChecksByRepo {
 		excluders[repo] = cirollup.NewExcluder(pats)
 	}
+	// mergedMine collects retained merged-PR-of-mine rows separately so they
+	// can be appended AFTER every active Mine row below — "sort below every
+	// open/active PR" (pg2-ew4kf). Kept in in.PRs iteration order (repo then
+	// number, per snapshotModel.sortedInputs) among themselves.
+	var mergedMine []MineRow
 	for _, p := range in.PRs {
 		reasons := matchReasons(p, teamSet, in.WatchLabels)
 		excl := excluders[p.PR.Repo]
 		switch {
 		case p.Ownership.ActsAsMine():
+			// Retention (pg2-ew4kf): a merged PR is deliberately gated on
+			// Ownership==Mine, NOT the broader ActsAsMine() (Mine|CoOwned) —
+			// team/co-owned merges stay out of scope and are still dropped
+			// immediately by the caller (internal/sync/refresh.go never
+			// builds a PRInput for them in the first place). Recomputed
+			// against in.GeneratedAt on every Build call — no persisted
+			// "seen" state.
+			if p.PR.Merged && p.Ownership == ownership.Mine {
+				if !WithinMergedRetention(p.PR.MergedAt, in.GeneratedAt) {
+					continue // merged more than MergedRetentionWindow ago: drop
+				}
+				row := buildMineRow(p, in.Registry, excl)
+				row.Merged = true
+				mergedMine = append(mergedMine, row)
+				continue
+			}
 			out.Mine = append(out.Mine, buildMineRow(p, in.Registry, excl))
 		case !p.PR.Draft && len(reasons) > 0:
 			// "PRs to Review": a non-mine, non-draft PR that STILL qualifies — it
@@ -122,6 +143,8 @@ func Build(in BuilderInput) *Snapshot {
 			out.Team = append(out.Team, buildTeamRow(p, in.Registry, reasons, excl))
 		}
 	}
+	// Retained merged rows sort BELOW every active Mine row (pg2-ew4kf).
+	out.Mine = append(out.Mine, mergedMine...)
 	return out
 }
 

@@ -175,6 +175,16 @@ func projectRows(snap *snapshot.Snapshot, mine bool) []openRow {
 	if mine {
 		out := make([]openRow, 0, len(snap.Mine))
 		for _, r := range snap.Mine {
+			if r.Merged {
+				// pg2-ew4kf: the dashboard retains a merged PR of mine for a
+				// 24h grace period so the post-merge follow-up isn't
+				// forgotten, but `pg-pr open` opens ACTIONABLE PRs in a
+				// browser — an already-merged PR is never a candidate for
+				// that, with or without --all/--needs-attention. Exclude it
+				// here rather than relying on the NeedsAttention filter,
+				// which --all bypasses entirely.
+				continue
+			}
 			out = append(out, openRow{
 				Number:         r.Number,
 				Title:          r.Title,
