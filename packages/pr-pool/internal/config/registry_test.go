@@ -61,9 +61,10 @@ func TestLoad_roleRetryBackoffDefaultsToPoolDefault(t *testing.T) {
 [[query]]
 name = "s"
 emits = ["e"]
-type = "beads-ready"
-[query.beads-ready]
-labels = ["a"]
+type = "command"
+[query.command]
+argv = ["x"]
+format = "jsonl"
 
 [[role]]
 name = "r"
@@ -97,9 +98,10 @@ max = "90s"
 [[query]]
 name = "s"
 emits = ["e"]
-type = "beads-ready"
-[query.beads-ready]
-labels = ["a"]
+type = "command"
+[query.command]
+argv = ["x"]
+format = "jsonl"
 
 [[role]]
 name = "r"
@@ -134,9 +136,10 @@ func TestLoad_roleRetryBackoffInvalidFactorIsError(t *testing.T) {
 [[query]]
 name = "s"
 emits = ["e"]
-type = "beads-ready"
-[query.beads-ready]
-labels = ["a"]
+type = "command"
+[query.command]
+argv = ["x"]
+format = "jsonl"
 
 [[role]]
 name = "r"
@@ -161,9 +164,10 @@ func TestLoad_queryFailureBackoffDefaultsToFailFast(t *testing.T) {
 [[query]]
 name = "s"
 emits = ["e"]
-type = "beads-ready"
-[query.beads-ready]
-labels = ["a"]
+type = "command"
+[query.command]
+argv = ["x"]
+format = "jsonl"
 
 [[role]]
 name = "r"
@@ -176,9 +180,9 @@ argv = ["x"]
 	if err != nil {
 		t.Fatal(err)
 	}
-	q, ok := c.Queries[0].Query.(query.BeadsReady)
+	q, ok := c.Queries[0].Query.(query.CommandQuery)
 	if !ok {
-		t.Fatalf("query is %T, want query.BeadsReady", c.Queries[0].Query)
+		t.Fatalf("query is %T, want query.CommandQuery", c.Queries[0].Query)
 	}
 	fb := q.FailureBackoff()
 	if fb.Retries != 0 {
@@ -205,11 +209,12 @@ retries = 2
 [[query]]
 name = "s"
 emits = ["e"]
-type = "beads-ready"
+type = "command"
 [query.failure_backoff]
 retries = 5
-[query.beads-ready]
-labels = ["a"]
+[query.command]
+argv = ["x"]
+format = "jsonl"
 
 [[role]]
 name = "r"
@@ -222,9 +227,9 @@ argv = ["x"]
 	if err != nil {
 		t.Fatal(err)
 	}
-	q, ok := c.Queries[0].Query.(query.BeadsReady)
+	q, ok := c.Queries[0].Query.(query.CommandQuery)
 	if !ok {
-		t.Fatalf("query is %T, want query.BeadsReady", c.Queries[0].Query)
+		t.Fatalf("query is %T, want query.CommandQuery", c.Queries[0].Query)
 	}
 	fb := q.FailureBackoff()
 	want := query.FailureBackoff{Policy: backoff.Policy{Initial: 2 * time.Second, Factor: 4, Max: time.Minute}, Retries: 5}
@@ -244,11 +249,12 @@ func TestLoad_queryFailureBackoffNegativeRetriesIsError(t *testing.T) {
 [[query]]
 name = "s"
 emits = ["e"]
-type = "beads-ready"
+type = "command"
 [query.failure_backoff]
 retries = -1
-[query.beads-ready]
-labels = ["a"]
+[query.command]
+argv = ["x"]
+format = "jsonl"
 
 [[role]]
 name = "r"
