@@ -47,6 +47,9 @@ flowchart LR
   (`INV-REVIEW-3`).
 - **Guarantee** — pg-pr is an **implementer** of the code host's own review-posting contract: it
   states only its own obligations above and never restates the code host's contract.
+- **Open questions** (tracked in [journeys](journeys.md)): `OQ-PGPR-VERDICT-DRIVES-POST` (whether
+  the staged review verdict should eventually drive the posted review state, rather than the
+  posted state always being `PENDING` with no approve/request-changes event).
 
 ## `INTF-PGPR-SYNC` — PR facts pulled in <!-- uuid: b5f0bdcd-365d-49fa-a578-59637afc28bc -->
 

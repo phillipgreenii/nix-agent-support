@@ -142,3 +142,16 @@ flowchart TD
     G -->|"clear"| POST["posted pending, head-anchored, attributed"]
     POST --> SUB["a person submits with a verdict - a separate act"]
 ```
+
+## Open questions
+
+Each states the gap, its owner, a resolution path, and where it blocks.
+
+- **`OQ-PGPR-VERDICT-DRIVES-POST`** <!-- uuid: ce5a8397-f2c3-4856-b94d-18391e6e4dc5 --> — whether
+  the staged review **verdict** (`approve`/`request-changes`/`comment`) should eventually drive the
+  posted review state, or stay advisory permanently. _Gap_: pg-pr computes a staged verdict but
+  posts every review as `PENDING` with no approve/request-changes event; the verdict rides only as
+  advisory provenance on the `Result` sidecar. Whether the staged verdict should ever drive the
+  posted state is undecided. _Owner_: pg-pr. _Path_: decide when review-posting semantics
+  (`INTF-PGPR-WRITE`) are next revisited; either answer changes interface-level behavior.
+  _Blocks_: nothing today — the advisory default is safe.
