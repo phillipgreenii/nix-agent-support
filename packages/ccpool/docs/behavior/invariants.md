@@ -53,15 +53,15 @@ obligations, and ownership of a session's working directory.
 
 - **`INV-SESS-1`** <!-- uuid: 17b28a64-7ee3-4962-ae95-f06c617f6a8a --> — The status surface's
   intended contract includes, alongside `errored`, a **failure classification** (at minimum:
-  transient-infrastructure, rate-limited, terminal) and the failing turn's diagnostic text, so a
-  consumer can tell retry-worthy from fatal. Until that field is realized (`## Realization gaps`),
-  a consumer MUST treat `errored` as unclassified rather than guess a class. The runtime's own
-  retry logic already tells a transient failure apart from the other two classes internally, so
-  this gap is a persistence gap, not a classification one.
+  transient-infrastructure, rate-limited, terminal) and the failing turn's diagnostic text —
+  together, the failure reason a consumer needs to tell retry-worthy from fatal. Until that field
+  is realized (`## Realization gaps`), a consumer MUST treat `errored` as unclassified rather than
+  guess a class. The runtime's own retry logic already tells a transient failure apart from the
+  other two classes internally, so this gap is a persistence gap, not a classification one.
 - **`INV-SESS-2`** <!-- uuid: 86a26bc7-1018-44d0-8ed7-cfb7ccf1d01a --> — **A session's status is a
   surface a caller reads; ccpool MUST NOT push it anywhere.** The caller polls `INTF-CALLER`'s
-  status read whenever it wants an answer. A dispatch aimed at a `working` session MUST be
-  refused, telling the caller busy, rather than queued or silently dropped.
+  status read whenever it wants an answer. A dispatch aimed at a `working` session MUST be met
+  with a busy refusal: the caller is told busy, never queued or silently dropped.
 - **`INV-SESS-3`** <!-- uuid: dc315663-564a-481c-a3e0-a911bb3d8aaf --> — A fire-and-forget dispatch
   MAY demand ingestion confirmation (the prompt was actually taken up), and an unconfirmed
   delivery MUST be reported as its own distinct outcome — never conflated with busy or with a
@@ -97,9 +97,9 @@ obligations, and ownership of a session's working directory.
 ## Budget observation (`INV-METER-*`)
 
 - **`INV-METER-1`** <!-- uuid: 94cd77f1-9ff3-4cda-a65d-53ace679e48d --> — ccpool owns the
-  **meter**: a caller SHOULD be able to read a session's own resource consumption from ccpool.
-  Policy over that reading — ceilings, wind-down, stopping — is the caller's, out of this set's
-  extent. Until the meter is realized as a declared reading (`## Realization gaps`), the
+  **consumption meter**: a caller SHOULD be able to read a session's own resource consumption
+  from ccpool. Policy over that reading — ceilings, wind-down, stopping — is the caller's, out of
+  this set's extent. Until the meter is realized as a declared reading (`## Realization gaps`), the
   transcript anchor is the only carrier, and it is not itself a consumption reading. This
   per-session reading is distinct from the co-resident monitor's own **account-level** usage
   surface (`packages/pa-monitor/docs/behavior · INTF-STATE`, declared, not yet consumable
@@ -117,6 +117,6 @@ obligations, and ownership of a session's working directory.
 
 - **`INV-TRUST-1`** <!-- uuid: 80c7bc5c-0302-4c61-a2d5-31e6d0ba0973 --> — A session MUST NOT hang
   on an interactive trust or tool-consent gate the caller cannot see. ccpool MUST pre-establish
-  folder trust for a session's directory before launch, and MUST pre-deny any external tool
-  server that directory declares but the deployment has not classified — deny-by-default, never
-  left to an interactive prompt.
+  folder trust for a session's directory before launch. Its unclassified-tool pre-denial MUST
+  cover any external tool server that directory declares but the deployment has not classified —
+  deny-by-default, never left to an interactive prompt.

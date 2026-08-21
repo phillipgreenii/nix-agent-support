@@ -138,9 +138,9 @@ _Requires:_ `INV-POOL-1`, `INV-TRUST-1`, `INV-CCPOOL-CWD-1`.
 
 1. If the named session is already live, use it as-is.
 2. Otherwise launch it — a fresh session if the name is new, or a resume if a record exists —
-   pre-establishing isolation and trust before the launch (`INV-POOL-1`, `INV-TRUST-1`), and
-   launching it in its working directory: the caller's explicit value for a brand-new session, or
-   the previously recorded working directory for a resume (`INV-CCPOOL-CWD-1`).
+   pre-establishing isolation and folder trust before the launch (`INV-POOL-1`, `INV-TRUST-1`),
+   and launching it in its working directory: the caller's explicit value for a brand-new
+   session, or the previously recorded working directory for a resume (`INV-CCPOOL-CWD-1`).
 
 ## Journeys
 
