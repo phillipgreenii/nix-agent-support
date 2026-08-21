@@ -355,22 +355,71 @@ func (r *Rule) bashRef(leaves []cmdparse.ParsedCommand) (ref secretRef, found bo
 	// The GUARD THAT DOES HOLD on this route is the repo test itself: outside any git
 	// working tree the arm still fires, so `~/secrets/prod.env` keeps its Ask either way.
 	const isWrite = false
+	// shellCScriptCache is shared by all three passes below (pg2-k1c91). Each
+	// pass independently needs to descend into any `bash`/`sh -c` leaf's
+	// script argument (see firstSecretRefIn), and before this cache existed
+	// each pass called cmdparse.Parse on that SAME script text itself —
+	// three re-parses of one string per Evaluate, measured at 533 corpus rows
+	// (guard3_parsecount_test.go's knownGuard3Residual class 2; LOWERING.md's
+	// Guard 3 (I7) section). The cache makes the first pass to reach a given
+	// script text pay for the parse and the other two reuse the result,
+	// purely an efficiency change: cmdparse.Parse is a pure function of its
+	// argument, so which pass parses it first cannot affect what any pass
+	// sees.
+	cache := newShellCScriptCache()
 	// pg2-52eod: malformed is checked BEFORE match ever runs inside firstSecretRef,
 	// so it is deterministic per COMMAND, not per candidateMatch — every pass would
 	// report the same malformed verdict for the same cmd. The first pass that finds
 	// EITHER a match OR a malformed value short-circuits the remaining passes.
-	if ref, found, malformed := firstSecretRefIn(leaves, maxShellUnwrap, r.lexicalRef(isWrite)); found || malformed {
+	if ref, found, malformed := firstSecretRefIn(cache, leaves, maxShellUnwrap, r.lexicalRef(isWrite)); found || malformed {
 		return ref, found, malformed
 	}
 	if r.pe == nil {
 		return secretRef{}, false, false
 	}
 	resolveBudget := maxResolutions
-	if ref, found, malformed := firstSecretRefIn(leaves, maxShellUnwrap, r.resolvedRef(&resolveBudget, isWrite)); found || malformed {
+	if ref, found, malformed := firstSecretRefIn(cache, leaves, maxShellUnwrap, r.resolvedRef(&resolveBudget, isWrite)); found || malformed {
 		return ref, found, malformed
 	}
 	denyBudget := maxResolutions
-	return firstSecretRefIn(leaves, maxShellUnwrap, r.configRef(&denyBudget, isWrite))
+	return firstSecretRefIn(cache, leaves, maxShellUnwrap, r.configRef(&denyBudget, isWrite))
+}
+
+// shellCScriptCache memoizes cmdparse.Parse for the descent into a nested
+// `bash`/`sh -c '<inner>'` script body (see firstSecretRefIn/shellDashC), so
+// bashRef's three independent candidate-match passes over the same leaves —
+// lexicalRef, resolvedRef, configRef — share ONE parse of any such script
+// they each need to look inside, instead of each calling cmdparse.Parse on
+// the identical text (pg2-k1c91; the fixed half of guard3_parsecount_test.go's
+// knownGuard3Residual class 2 / LOWERING.md's Guard 3 (I7) section).
+//
+// Keying purely on the raw script text is safe REGARDLESS of which pass or
+// recursion depth reaches it first: cmdparse.Parse is a pure function of its
+// argument (the same purity property IsFreshTempDirAssignment's own doc
+// relies on for its memoization), so the cached result is identical to
+// whatever a fresh parse would have produced.
+//
+// One instance is created per bashRef call — i.e. per Bash Evaluate — and
+// never shared beyond it, so there is no cross-call staleness to reason
+// about and no lifetime beyond a single hook decision.
+type shellCScriptCache struct {
+	leaves map[string][]cmdparse.ParsedCommand
+}
+
+func newShellCScriptCache() *shellCScriptCache {
+	return &shellCScriptCache{leaves: map[string][]cmdparse.ParsedCommand{}}
+}
+
+// parse returns cmdparse.Parse(script), computing and caching it on the
+// first call for a given script text and returning the cached slice on every
+// later call for that same text.
+func (c *shellCScriptCache) parse(script string) []cmdparse.ParsedCommand {
+	if leaves, ok := c.leaves[script]; ok {
+		return leaves
+	}
+	leaves := cmdparse.Parse(script)
+	c.leaves[script] = leaves
+	return leaves
 }
 
 // lexicalRef is the lexical candidate test: the candidate exactly as the call
@@ -592,7 +641,10 @@ func (r *Rule) decide(ref secretRef, isWrite bool) hookio.RuleResult {
 // trivially bypassed by wrapping the read in a shell string.
 //
 // match is the candidate test — lexicalRef, resolvedRef or configRef. The
-// traversal is identical for all three, and bashRef runs it once per pass.
+// traversal is identical for all three, and bashRef runs it once per pass —
+// cache is bashRef's single shellCScriptCache, threaded through so all three
+// passes' descents into the SAME `-c` script text share one parse of it
+// (pg2-k1c91) rather than each calling cmdparse.Parse itself.
 //
 // malformed IS CHECKED BEFORE match EVER RUNS, so it is the SAME verdict on every
 // one of bashRef's three passes for the same command — it does not depend on which
@@ -604,8 +656,8 @@ func (r *Rule) decide(ref secretRef, isWrite bool) hookio.RuleResult {
 // P0 bypass this bead exists to close. See GluedFlagValue's doc for why this
 // primitive is now the single source of the unwrap, and for the measured
 // `grep --file='.env' x.log` row this centralization fixes.
-func firstSecretRef(cmd string, depth int, match candidateMatch) (ref secretRef, found bool, malformed bool) {
-	return firstSecretRefIn(cmdparse.Parse(cmd), depth, match)
+func firstSecretRef(cache *shellCScriptCache, cmd string, depth int, match candidateMatch) (ref secretRef, found bool, malformed bool) {
+	return firstSecretRefIn(cache, cache.parse(cmd), depth, match)
 }
 
 // firstSecretRefIn is firstSecretRef's core, over an ALREADY-PARSED leaf set
@@ -616,16 +668,18 @@ func firstSecretRef(cmd string, depth int, match candidateMatch) (ref secretRef,
 // reads the engine's already-threaded structure when available) and calls
 // this directly.
 //
-// The RECURSIVE `sh`/`bash -c` descent below is UNCHANGED and still goes
-// through firstSecretRef, not this function: `inner` is a shell string
-// extracted from an ARGUMENT value, genuinely new text the engine's own parse
-// never saw, so it legitimately needs its own fresh parse rather than
-// threaded structure.
-func firstSecretRefIn(leaves []cmdparse.ParsedCommand, depth int, match candidateMatch) (ref secretRef, found bool, malformed bool) {
+// The RECURSIVE `sh`/`bash -c` descent below still goes through
+// firstSecretRef, not this function directly, because `inner` is a shell
+// string extracted from an ARGUMENT value, genuinely new text the engine's
+// own parse never saw. It is no longer a FRESH parse on every call, though
+// (pg2-k1c91): firstSecretRef now asks cache for it, so the descent is
+// parsed once per distinct script text per bashRef call — shared across
+// bashRef's three passes — rather than once per pass.
+func firstSecretRefIn(cache *shellCScriptCache, leaves []cmdparse.ParsedCommand, depth int, match candidateMatch) (ref secretRef, found bool, malformed bool) {
 	for _, pc := range leaves {
 		if depth > 0 {
 			if inner, ok := shellDashC(pc); ok {
-				if ref, found, malformed := firstSecretRef(inner, depth-1, match); found || malformed {
+				if ref, found, malformed := firstSecretRef(cache, inner, depth-1, match); found || malformed {
 					return ref, found, malformed
 				}
 				continue

@@ -1258,3 +1258,34 @@ func TestRule_DenyListedSecretViaSymlink_Rejects(t *testing.T) {
 		t.Errorf("Read deny-listed secret via symlink = %v, want reject (reason %q)", got.Decision, got.Reason)
 	}
 }
+
+// ===========================================================================
+// pg2-k1c91 — bashRef's three passes share one parse of a nested -c script.
+// ===========================================================================
+
+// TestBashRef_SharesShellDashCParseAcrossPasses is this bead's own local
+// repro of the parse-count drop. Before pg2-k1c91, bashRef's three passes
+// (lexicalRef, resolvedRef, configRef) each independently called
+// cmdparse.Parse on the SAME `bash -c` script body while descending into it
+// (guard3_parsecount_test.go's knownGuard3Residual class 2 named exactly
+// this shape: 3 parses of one string per Evaluate, 533 corpus rows). This
+// test is about how many times cmdparse.Parse is asked to parse the inner
+// script, not about any verdict — `bash -c "echo hello"` has no secret path
+// anywhere and abstains identically before and after this bead.
+func TestBashRef_SharesShellDashCParseAcrossPasses(t *testing.T) {
+	r := New(patheval.NewWithCWD(t.TempDir(), t.TempDir()))
+	const inner = "echo hello"
+	leaves := cmdparse.Parse(`bash -c "` + inner + `"`)
+
+	counts := map[string]int{}
+	restore := cmdparse.SetParseObserver(func(source string) { counts[source]++ })
+	defer restore()
+
+	if _, found, malformed := r.bashRef(leaves); found || malformed {
+		t.Fatalf("bashRef(%q) = found=%v malformed=%v, want neither -- this test measures parse count, not verdict", inner, found, malformed)
+	}
+
+	if got := counts[inner]; got != 1 {
+		t.Errorf("cmdparse.Parse(%q) was called %d time(s) across bashRef's three passes, want exactly 1 (shared via shellCScriptCache)", inner, got)
+	}
+}
