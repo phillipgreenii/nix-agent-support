@@ -9,13 +9,14 @@ journeys require (`phillipgreenii-nix-agent-support · behavior-docs/docs/behavi
 illustrative (`GOAL-MIN-1` keeps the core minimal; concrete tools, transports, and tuning constants
 live in a downstream deployment set and decision docs).
 
-Each element states its **actor(s)**, its **level**, a **one-line intent**, the **flow**, and at least
-one **flow and/or sequence diagram**. Exactly **one** element is a **journey** — `JOURNEY-FLOW`, the
-summary-level arc that references every use case and is the only place the end-to-end story is told.
-Every other element is a **use case**: a user goal the operator sets out to achieve, or — for
-`USECASE-VERIFY-PARTICIPANT` — a **subfunction** other elements include by reference instead of
-restating. The use cases are enumerated on a matrix rather than collected as they occurred to
-someone, so a missing one shows up as an empty cell instead of as silence.
+Each element states its **actor(s)**, its **level**, its **preconditions**, a **one-line intent**, the
+**flow** — with **extensions** named where the flow already implies an alternate or exceptional path
+— and at least one **flow and/or sequence diagram**. Exactly **one** element is a **journey** —
+`JOURNEY-FLOW`, the summary-level arc that references every use case and is the only place the
+end-to-end story is told. Every other element is a **use case**: a **user-goal** the operator sets out
+to achieve, or — for `USECASE-VERIFY-PARTICIPANT` — a **subfunction** other elements include by
+reference instead of restating. The use cases are enumerated on a matrix rather than collected as they
+occurred to someone, so a missing one shows up as an empty cell instead of as silence.
 
 ## User stories
 
@@ -275,7 +276,8 @@ implement several interfaces at once, and the core neither knows nor cares. It c
 ### `USECASE-CREATE-SOURCE` — implement an event source, in one of four shapes <!-- uuid: 05c851fa-9fb8-4501-bafb-928c147e756f -->
 
 **Actors:** `ACTOR-OP` (as the source's implementer), core, `ACTOR-SRC`.
-**Level:** user goal.
+**Level:** user-goal.
+**Preconditions:** none.
 **Intent:** build an event source against `INTF-SOURCE` so a deployment can obtain typed events from
 it, choosing deliberately among the shapes the two independent mode axes allow.
 _Requires:_ `INV-DISP-1`, `INV-DISP-3`, `INV-EVT-1`, `INV-EVT-4`, `INV-FAIL-3`, `INV-INTF-1`,
@@ -342,10 +344,17 @@ sequenceDiagram
     CORE->>OBS: once exhausted, record the error to logs + metrics, distinct from no-work
 ```
 
+Extensions:
+
+- The query fails because the infrastructure behind it is down: the implementer reports an error,
+  never an empty `events` list; the core MAY retry at the `INV-FAIL-3` backoff cadence before
+  recording the exhausted failure to logs and metrics, distinct from a genuinely idle empty result.
+
 ### `USECASE-CREATE-HANDLER` — implement an event handler, and decline at the acceptance boundary <!-- uuid: 8752e12e-7ea2-4edd-8620-839fc5ef3cff -->
 
 **Actors:** `ACTOR-OP` (as the handler's implementer), core, `ACTOR-HDL`.
-**Level:** user goal.
+**Level:** user-goal.
+**Preconditions:** none.
 **Intent:** build an event handler against `INTF-HANDLER`, and get the **acceptance boundary** right
 — which side owns the work, and which side owns a failure, on each side of the accept.
 _Requires:_ `INV-CONC-1`, `INV-EVT-1`, `INV-EVT-2`, `INV-EVT-4`, `INV-FAIL-1`, `INV-FAIL-2`,
@@ -426,10 +435,21 @@ flowchart TD
     out -->|critical| human["never retried: surfaced to a human (safety over continuity, INV-PREC-1)"]
 ```
 
+Extensions:
+
+- The handler declines pre-accept (`busy` at capacity, or `unavailable`): the core re-offers within
+  the event's `expiresAt` window at the `INV-FAIL-2` cadence; once that window passes, the next
+  eligible attempt is this handler's last and the event may be dropped unconsumed-expired
+  (`INV-EVT-4`).
+- The handler accepts, then hits trouble post-accept: it reports `retryable`, `resource-limit`, or
+  `critical` on its own surface; `critical` is never retried and is surfaced to a human
+  (`INV-PREC-1`).
+
 ### `USECASE-CREATE-MONITOR` — implement a monitoring sink <!-- uuid: aa5174b9-df2d-43a7-9439-95b1012e4aa4 -->
 
 **Actors:** `ACTOR-OP` (as the sink's implementer), core, `ACTOR-MON`, and `ACTOR-OBS` beyond it.
-**Level:** user goal.
+**Level:** user-goal.
+**Preconditions:** none.
 **Intent:** build a monitoring sink against `INTF-MON` that carries some declared subset of the
 core's metric catalog out to wherever an observer reads it.
 _Requires:_ `INV-INTF-1`, `INV-OBS-1`, `GOAL-MIN-1`.
@@ -468,7 +488,8 @@ sequenceDiagram
 ### `USECASE-CREATE-STORE` — implement a storage participant <!-- uuid: 32abf356-3ec8-43f0-86cd-1a1756704fcb -->
 
 **Actors:** `ACTOR-OP` (as the store's implementer), core, `ACTOR-STO`.
-**Level:** user goal.
+**Level:** user-goal.
+**Preconditions:** none.
 **Intent:** build a key/value scratch for core state against `INTF-STORE`, knowing it never backs
 event delivery.
 _Requires:_ `INV-EVT-1`, `INV-INTF-1`.
@@ -507,6 +528,8 @@ sequenceDiagram
 
 **Actor:** `ACTOR-OP` (as the participant's implementer/integrator).
 **Level:** subfunction.
+**Preconditions:** the participant has already been implemented against its interface contract (the
+create use case that includes this one).
 **Intent:** confirm a participant adheres to its interface before anything is trusted to route
 through it — first its conformance suite in isolation, then a smoke test against the live
 configuration.
@@ -583,10 +606,18 @@ sequenceDiagram
     Note over OP: confirm the shapes before trusting it in a live run
 ```
 
+Extensions:
+
+- The participant is a monitoring sink or a storage participant: there is no in-place smoke check
+  for it (matrix reason (ii)); verification stops at the conformance suite, followed by a live
+  reading (`USECASE-DEBUG-RUN`).
+
 ### `USECASE-ADD-ESSENTIAL` — add a source or a handler to a live configuration <!-- uuid: 2ea962a3-b598-40a8-8ad9-60bb4e2a4ddb -->
 
 **Actor:** `ACTOR-OP`.
-**Level:** user goal.
+**Level:** user-goal.
+**Preconditions:** the participant is implemented and has passed `USECASE-VERIFY-PARTICIPANT`'s
+conformance-suite check in isolation (the in-place smoke half runs as this use case's own step 3).
 **Intent:** put an implemented **essential** participant — an event source or an event handler — into
 a live configuration and smoke it before trusting it.
 _Requires:_ `INV-DISP-1`, `INV-DISP-3`, `INV-WORKFLOW-1`.
@@ -630,10 +661,18 @@ flowchart TD
     smoke --> run["run, then read the run (USECASE-DEBUG-RUN)"]
 ```
 
+Extensions:
+
+- Validation reports any error (an unhandled source output, a handler with no events to listen for,
+  or any other `USECASE-VALIDATE-CONFIG` finding): config is fixed and re-validated before anything
+  is smoked.
+
 ### `USECASE-CONFIGURE-WIRING` — configure the essential participants and the routing graph they form <!-- uuid: db696e7c-ec86-4980-808d-add7744e0bc1 -->
 
 **Actor:** `ACTOR-OP`.
-**Level:** user goal.
+**Level:** user-goal.
+**Preconditions:** none — this authors or edits the configuration itself, whether empty or already
+populated.
 **Intent:** author, or later edit, the configuration the core resolves — the essential participants,
 their **bindings**, and the **wiring** (a routing graph) those bindings form (`INV-WORKFLOW-1`).
 _Requires:_ `INV-CONC-1`, `INV-DISP-1`, `INV-EVT-1`, `INV-EVT-4`, `INV-WORKFLOW-1`.
@@ -702,10 +741,16 @@ flowchart TD
     decl --> val["validate it: USECASE-VALIDATE-CONFIG"]
 ```
 
+Extensions:
+
+- A binding's narrowing payload path is absent on a given event: that is a non-match at runtime, not
+  an error (`INV-DISP-1`).
+
 ### `USECASE-CONFIGURE-OPTIONAL` — add or change an optional participant <!-- uuid: d8c0162d-cdb1-4e7e-83db-ef72b12542ad -->
 
 **Actor:** `ACTOR-OP`.
-**Level:** user goal.
+**Level:** user-goal.
+**Preconditions:** none.
 **Intent:** declare, change, or remove the **optional** participants — a monitoring sink and storage
 — knowing the system runs untouched without either.
 _Requires:_ `INV-DISP-2`, `INV-OBS-1`, `GOAL-MIN-1`.
@@ -745,10 +790,17 @@ flowchart TD
     same --> ver["verify by conformance suite, then by a live reading (USECASE-DEBUG-RUN) — there is no smoke affordance here"]
 ```
 
+Extensions:
+
+- Storage is left undeclared (or a store declaration is removed): the default in-memory store
+  applies rather than the configuration being treated as broken.
+
 ### `USECASE-VALIDATE-CONFIG` — validate a whole configuration before anything runs <!-- uuid: 1aafdfa5-b3c4-4a41-bde8-4e368e6ec819 -->
 
 **Actor:** `ACTOR-OP`.
-**Level:** user goal.
+**Level:** user-goal.
+**Preconditions:** a configuration has been authored (`USECASE-CONFIGURE-WIRING`, and
+`USECASE-CONFIGURE-OPTIONAL` where an optional participant is declared).
 **Intent:** judge the **whole** configuration valid or invalid **before running**, and report the
 result (`INV-WORKFLOW-1`). This checks the routing graph's flat wiring **only** — never
 workflow-completeness or sequencing.
@@ -821,10 +873,27 @@ flowchart TD
     ok --> run["clear to run: USECASE-RUN-DAEMON or USECASE-RUN-DRAIN"]
 ```
 
+Extensions:
+
+- Orphan event type — a binding matches a `type` no configured source emits: ERROR, blocks startup.
+- Unhandled source output — a source emits a `type` no configured binding declares at all: ERROR,
+  blocks startup (that `type` is unknown to the config and is rejected at runtime, `INV-DISP-3`).
+- Disconnected handler — a handler no binding can reach: ERROR, blocks startup.
+- Handler with no events to listen for — a bound handler that can never receive anything: ERROR,
+  blocks startup.
+- Absent backing command — a configured source or handler the core cannot invoke: ERROR, blocks
+  startup.
+- Determinably non-terminating re-entry cycle — a `handler → query → same type` cycle the graph
+  shows cannot terminate: ERROR, blocks startup.
+- Re-entry cycle whose termination is not determinable: WARNING — reported, and the run proceeds
+  (the only warning category this set has).
+
 ### `USECASE-RUN-DAEMON` — run the core as a long-running daemon <!-- uuid: 0e286925-9bca-4cba-bc37-ed4079e8637c -->
 
 **Actor:** `ACTOR-OP`.
-**Level:** user goal.
+**Level:** user-goal.
+**Preconditions:** an authored configuration exists to resolve — validating its wiring is this use
+case's own first step.
 **Intent:** run the validated configuration as a **daemon** (`run`) that routes events until it is
 stopped, and inspect it while it runs (`INV-LIFE-1`).
 _Requires:_ `INV-LIFE-1`.
@@ -860,10 +929,19 @@ flowchart TD
     daemon --> stop["orderly stop: stopping then stopped. sudden stop: best-effort crashing (JOURNEY-FLOW)"]
 ```
 
+Extensions:
+
+- An inspection command finds no running core: it MUST fail with a "no running core" error rather
+  than auto-starting one (`INTF-CLI` "Locating the core", `ADR 0036`).
+- Shutdown is sudden rather than orderly: the core makes a best-effort `crashing` signal, which MAY
+  be lost without violating any correctness rule (`JOURNEY-FLOW`).
+
 ### `USECASE-RUN-DRAIN` — run the core until the queue is drained, then exit <!-- uuid: 8095a98b-3100-4242-b8b5-b1ad4e3cf1e7 -->
 
 **Actor:** `ACTOR-OP`.
-**Level:** user goal.
+**Level:** user-goal.
+**Preconditions:** an authored configuration exists to resolve; none beyond
+`USECASE-RUN-DAEMON`'s shared startup path.
 **Intent:** dispatch from the durable queue and **exit** once there is provably nothing left to
 deliver (`run-until-idle`), emitting a **final observability snapshot** on the way out.
 _Requires:_ `INV-LIFE-1`, `INV-OBS-1`.
@@ -907,7 +985,9 @@ sequenceDiagram
 ### `USECASE-DEBUG-RUN` — read a run: metrics, injected test events, and run-scoped selectors <!-- uuid: 3c360b41-5a84-4607-88b6-425c02f80474 -->
 
 **Actors:** core, `ACTOR-MON`, `ACTOR-OBS`, `ACTOR-OP`.
-**Level:** user goal.
+**Level:** user-goal.
+**Preconditions:** a core has run or is running, so there is a metric catalog and/or a final
+observability snapshot to read.
 **Intent:** see what a run is doing, and narrow it until a cause is visible — the metric catalog
 through a sink, an injected test event, and the run-scoped selectors.
 _Requires:_ `INV-DISP-1`, `INV-DISP-3`, `INV-EVT-1`, `INV-EVT-3`, `INV-FAIL-1`, `INV-OBS-1`,
@@ -977,6 +1057,14 @@ sequenceDiagram
     CORE-->>OP: the MAY affordance against a mistyped payload path (OQ-EVT-CATALOG)
     Note over CORE: core stays unaware of the concrete backend (GOAL-MIN-1)
 ```
+
+Extensions:
+
+- A binding's narrowing payload path matches nothing this run and no pre-runtime check caught it
+  (`OQ-EVT-CATALOG` is unsettled): the operator MAY read which configured bindings have matched no
+  event this run, the sole available signal against a mistyped path today.
+- A source infrastructure failure occurs: it is recorded as an error rather than a quiet zero,
+  keeping it distinguishable from a genuinely idle reading (`USECASE-CREATE-SOURCE`, `STORY-OBS-2`).
 
 ## Open questions
 
