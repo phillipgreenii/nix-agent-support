@@ -3,11 +3,10 @@
   "title": "INTF-HANDLER dispatch (core -> handler)",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schemaVersion", "id", "event", "callback"],
+  "required": ["schemaVersion", "id", "event"],
   "properties": {
     "schemaVersion": { "const": "1" },
     "id": { "type": "string" },
-    "event": { "$ref": "event" },
-    "callback": { "type": "string" }
+    "event": { "$ref": "event" }
   }
 }

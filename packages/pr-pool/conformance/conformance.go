@@ -58,26 +58,7 @@ func MessageTypes() []string { return schemas.Names() }
 // crossFieldRules holds the per-message rules the JSON Schema subset cannot
 // state (conditional presence, dependent fields).
 var crossFieldRules = map[string]func(any) error{
-	"session-status": sessionStatusRule,
-	"store.request":  storeRequestRule,
-}
-
-// sessionStatusRule enforces "failure present IFF state==failed" (interfaces.md
-// INTF-HANDLER failure table).
-func sessionStatusRule(v any) error {
-	obj, ok := v.(map[string]any)
-	if !ok {
-		return fmt.Errorf("%w: session-status is not an object", schemas.ErrValidation)
-	}
-	state, _ := obj["state"].(string)
-	_, hasFailure := obj["failure"]
-	if state == "failed" && !hasFailure {
-		return fmt.Errorf("%w: state=failed requires a failure object", schemas.ErrValidation)
-	}
-	if state != "failed" && hasFailure {
-		return fmt.Errorf("%w: failure present but state=%q (failure is only for failed)", schemas.ErrValidation, state)
-	}
-	return nil
+	"store.request": storeRequestRule,
 }
 
 // storeRequestRule enforces "value required IFF op==put".

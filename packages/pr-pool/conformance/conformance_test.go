@@ -84,22 +84,12 @@ func TestNegative_Matrix(t *testing.T) {
 			{"deferred wrong const", `{"schemaVersion":"1","id":"q","deferred":false}`},
 		},
 		"handler.dispatch": {
-			{"missing event", `{"schemaVersion":"1","id":"h","callback":"c"}`},
-			{"event missing type", `{"schemaVersion":"1","id":"h","event":{"id":"e"},"callback":"c"}`},
-			{"event carries the legacy duration field", `{"schemaVersion":"1","id":"h","event":{"id":"e","type":"t","ttl":"5m"},"callback":"c"}`},
+			{"missing event", `{"schemaVersion":"1","id":"h"}`},
+			{"event missing type", `{"schemaVersion":"1","id":"h","event":{"id":"e"}}`},
+			{"event carries the legacy duration field", `{"schemaVersion":"1","id":"h","event":{"id":"e","type":"t","ttl":"5m"}}`},
 		},
 		"handler.dispatch-reply": {
 			{"neither branch", `{"schemaVersion":"1","id":"h"}`},
-		},
-		"session-status": {
-			{"missing state", `{"schemaVersion":"1","id":"h"}`},
-			{"enum out of range", `{"schemaVersion":"1","id":"h","state":"weird"}`},
-			{"progress above max", `{"schemaVersion":"1","id":"h","state":"running","progress":2}`},
-			{"failure bad class", `{"schemaVersion":"1","id":"h","state":"failed","failure":{"class":"nope","message":"m"}}`},
-		},
-		"session-status-reply": {
-			{"missing accepted", `{"schemaVersion":"1","id":"h"}`},
-			{"wrong-type accepted", `{"schemaVersion":"1","id":"h","accepted":"yes"}`},
 		},
 		"mon.read": {
 			{"missing metrics", `{"schemaVersion":"1","id":"m"}`},
@@ -178,18 +168,6 @@ func TestMalformedPayload(t *testing.T) {
 
 // Cross-field rules a structural schema cannot express (both directions).
 func TestCrossFieldRules(t *testing.T) {
-	// session-status: failure iff failed.
-	failedNoFailure := map[string]any{"schemaVersion": "1", "id": "h", "state": "failed"}
-	if err := Check("session-status", failedNoFailure); err == nil {
-		t.Fatal("state=failed without failure was accepted")
-	}
-	runningWithFailure := map[string]any{
-		"schemaVersion": "1", "id": "h", "state": "running",
-		"failure": map[string]any{"class": "critical", "message": "m"},
-	}
-	if err := Check("session-status", runningWithFailure); err == nil {
-		t.Fatal("failure present on non-failed state was accepted")
-	}
 	// store.request: value iff put.
 	getWithValue := map[string]any{"schemaVersion": "1", "id": "s", "op": "get", "key": "k", "value": "v"}
 	if err := Check("store.request", getWithValue); err == nil {
@@ -202,11 +180,10 @@ func TestCrossFieldRules(t *testing.T) {
 }
 
 // Acceptance-ack shapes validate (the #2 acceptance handshake): the deferred ack
-// and both callback acks.
+// and the ingest-event ack.
 func TestAcceptanceAckShapes(t *testing.T) {
 	acks := map[string]map[string]any{
 		"handler.dispatch-reply": {"schemaVersion": "1", "id": "h", "deferred": true},
-		"session-status-reply":   {"schemaVersion": "1", "id": "h", "accepted": true},
 		"cli.ingest-event-reply": {"schemaVersion": "1", "id": "t", "accepted": float64(1), "rejected": []any{}},
 	}
 	for mt, ack := range acks {
@@ -290,7 +267,7 @@ func TestCLIRoundTrip_Busy(t *testing.T) {
 func TestCLIRoundTrip_Malformed(t *testing.T) {
 	h := &ReferenceHandler{State: Started}
 	// Send a dispatch missing its required event -> handler rejects with exit 1.
-	_, code, _ := RoundTrip(h, "dispatch", map[string]any{"schemaVersion": "1", "id": "h", "callback": "c"})
+	_, code, _ := RoundTrip(h, "dispatch", map[string]any{"schemaVersion": "1", "id": "h"})
 	if code != ExitError {
 		t.Fatalf("malformed dispatch exit=%d, want %d", code, ExitError)
 	}
@@ -322,29 +299,26 @@ func TestHandlerIdempotentDuplicate(t *testing.T) {
 	}
 }
 
-// CheckBytes: valid bytes pass (incl. the cross-field pass for session-status),
+// CheckBytes: valid bytes pass (incl. the cross-field pass for store.request),
 // and a cross-field violation delivered as raw bytes is rejected.
 func TestCheckBytes(t *testing.T) {
 	good, _ := json.Marshal(loadGolden(t, "event"))
 	if err := CheckBytes("event", good); err != nil {
 		t.Fatalf("valid event bytes rejected: %v", err)
 	}
-	ss, _ := json.Marshal(loadGolden(t, "session-status"))
-	if err := CheckBytes("session-status", ss); err != nil {
-		t.Fatalf("valid session-status bytes rejected: %v", err)
+	sr, _ := json.Marshal(loadGolden(t, "store.request"))
+	if err := CheckBytes("store.request", sr); err != nil {
+		t.Fatalf("valid store.request bytes rejected: %v", err)
 	}
-	// A schema-valid but cross-field-invalid session-status is rejected via bytes.
-	bad := []byte(`{"schemaVersion":"1","id":"h","state":"running","failure":{"class":"critical","message":"m"}}`)
-	if err := CheckBytes("session-status", bad); err == nil {
+	// A schema-valid but cross-field-invalid store.request is rejected via bytes.
+	bad := []byte(`{"schemaVersion":"1","id":"s","op":"get","key":"k","value":"v"}`)
+	if err := CheckBytes("store.request", bad); err == nil {
 		t.Fatal("cross-field violation via CheckBytes was accepted")
 	}
 }
 
 // Defensive: the cross-field rules reject a non-object value directly.
 func TestCrossFieldRules_NonObject(t *testing.T) {
-	if sessionStatusRule("not-an-object") == nil {
-		t.Fatal("sessionStatusRule accepted a non-object")
-	}
 	if storeRequestRule(42) == nil {
 		t.Fatal("storeRequestRule accepted a non-object")
 	}
