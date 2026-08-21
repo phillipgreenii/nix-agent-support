@@ -168,3 +168,17 @@ flowchart LR
   _Gap_: undecided whether pa-monitor is within that convention's scope or a deliberate exception.
   _Owner_: pa-monitor. _Path_: settle by a superseding decision when the convention is next
   revisited pool-wide. _Blocks_: nothing today — the current codes are stable and documented.
+- **`OQ-GATE-BLOCKED`** <!-- uuid: 0c8ecd40-3752-4e5d-acd5-c59239f9386d --> — whether a session
+  **blocked on a usage limit** (`blocker = usage_limit`) SHOULD hold the **busy/idle gates** open.
+  Today it does not: `busy` is `status == working` only (ADR 0024 R3), so `agents-busy-check`
+  reports "all idle" (exit 1) and `wait-until-agents-finished` reports "idle reached" (exit 0)
+  while blocked work is still pending and auto-resume will resume it at the window reset. _Gap_:
+  the gates answer "is anything actively progressing?", but their names — and most callers'
+  intent — is "is all work finished?"; which question they SHOULD answer, and whether callers
+  need a distinct "wait-until-work-drained" gate, is unsettled. _Owner_: author. _Path_: decide
+  between (a) keep R3 and require callers to check the `blocked` count themselves, (b) an opt-in
+  flag that counts `blocked` as busy, or (c) a separate drained-gate; settle by a superseding
+  decision (an ADR), never ad hoc. _Blocks_: the exit-code contract on the busy/idle gates
+  (`INTF-STATE`) and any journey whose "when the agents are finished" step keys off them.
+  Cross-refs: ADR 0024 R3 (the decision) and R5 (the keepAwake consequence of the same model);
+  `packages/pa-monitor/README.md` § "Busy/idle gates".
