@@ -18,6 +18,11 @@ deployment-specific workflow built on top of ccpool, are out of this set's exten
 
 - **Session** — one long-lived run of the agent, addressed by the caller's own chosen name and
   tracked across many prompts.
+- **Working directory** — the directory a session's agent runs in. Caller-owned: the caller may
+  state it explicitly per session, and ccpool falls back to a pool-scoped configured default and
+  then to the invoking process's own directory only when no explicit value is given
+  (`INV-CCPOOL-CWD-1`). Decided once at session creation, recorded on the session, and immutable
+  for its life — a resume relaunches in the recorded working directory rather than re-deriving one.
 - **Store state** — the last **observed turn outcome**, a **fact** recorded when the agent
   signals a transition. It is a cache of history, not a live read.
 - **Reconciled state** — what the session is doing **right now**, derived on read by combining

@@ -27,11 +27,10 @@ Rules this set's implementation MUST hold, following the behavior-docs method
   defect. A session belonging to a run that no longer exists MUST NOT accumulate across restarts;
   the next sweep MUST reclaim it.
 
-## Session lifecycle (`INV-STATE-*`, `INV-SESS-*`)
+## Session lifecycle (`INV-STATE-*`, `INV-SESS-*`, `INV-CCPOOL-CWD-*`)
 
-The two state vocabularies, the six store states, and a session's dispatch/status/ingestion
-obligations. `pg2-33jwg`'s working-directory invariant, once authored, belongs in this section
-too — it is not authored here.
+The two state vocabularies, the six store states, a session's dispatch/status/ingestion
+obligations, and ownership of a session's working directory.
 
 ### The two state vocabularies (`INV-STATE-*`)
 
@@ -71,6 +70,18 @@ too — it is not authored here.
 - **`INV-SESS-4`** <!-- uuid: 7994abf0-a943-479a-856b-99526f13a5f2 --> — Session metadata is an
   **opaque, caller-owned** key/value set. ccpool MUST NOT interpret a key's meaning; it MUST only
   store what a caller sets, return it uninterpreted, and let a caller filter sessions by it.
+
+### Working directory (`INV-CCPOOL-CWD-*`)
+
+- **`INV-CCPOOL-CWD-1`** <!-- uuid: 549deacd-8a8e-430b-b4d8-a29c17dce903 --> — A session's
+  **working directory** is **caller-owned**. The dispatching caller MUST be able to state it
+  explicitly per session, and ccpool MUST honour that value rather than substituting one of its
+  own. Absent an explicit value, ccpool MUST fall back to a **pool-scoped configured default**,
+  and failing that to the **invoking process's** working directory. The working directory is
+  **decided once, when the session is created**, is **recorded on the session**, and is
+  **immutable for the session's life**: resuming a cold session MUST relaunch it in its
+  **recorded** directory and MUST NOT re-derive one from the resuming caller's environment. The
+  pool's own **state location MUST NOT** be used as a session's working directory. (`ADR 0038`)
 
 ## Autonomous mode (`INV-AUTON-*`)
 
