@@ -1,0 +1,13 @@
+{
+  "$id": "cli.self-status",
+  "title": "INTF-CLI self-status push (any participant -> core callback)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "id", "participantId", "self"],
+  "properties": {
+    "schemaVersion": { "const": "1" },
+    "id": { "type": "string" },
+    "participantId": { "type": "string" },
+    "self": { "type": "string", "enum": ["healthy", "degraded", "unavailable"] }
+  }
+}

@@ -8,7 +8,7 @@ import (
 )
 
 // usageLine is the short synopsis printed to stderr on a usage error.
-const usageLine = "usage: pr-pool [--version | --help] [drain | run-query <role> | run-role <role> <bead> | config (--print-defaults | --show) | sessions | reconcile | push-inject [--json] [--socket <path>] [--token <tok>] <json> | ingest-event [--socket <path>] [--token <tok>]]"
+const usageLine = "usage: pr-pool [--version | --help] [drain | run-query <role> | run-role <role> <bead> | config (--print-defaults | --show) | sessions | reconcile | push-inject [--json] [--socket <path>] [--token <tok>] <json> | ingest-event [--socket <path>] [--token <tok>] | self-status [--socket <path>] [--token <tok>]]"
 
 // helpText is the full help printed to stdout for --help/help.
 const helpText = usageLine + `
@@ -33,14 +33,20 @@ Subcommands:
   version                 print the version and exit
   help                    print this help and exit
 
-Manager -> core callback subcommand (NOT for operators; the core hands a
-participant this command with --socket/--token already baked in, and the
-participant runs it):
+Manager -> core callback subcommands (NOT for operators; the core hands a
+participant these commands with --socket/--token already baked in, and the
+participant runs them):
   ingest-event            deliver events to the RUNNING core. Request JSON on stdin, reply JSON on
                           stdout; exit 0 ok / 1 error / 2 usage / 9 busy. Locates the core via
                           --socket/--token, else PR_POOL_SOCKET/PR_POOL_TOKEN, else discovery under
                           the log dir. It NEVER starts a core: with none running it fails with
                           "no running core" (exit 1).
+  self-status             push the caller's OWN status (healthy/degraded/unavailable) to the
+                          RUNNING core, naming the participantId it registered under. Request JSON
+                          on stdin, reply JSON on stdout; exit 0 ok / 1 error / 2 usage / 9 busy.
+                          Every registered participant kind gets this callback, unlike ingest-event
+                          (a source's alone). Locates the core the same way ingest-event does, and
+                          never starts one.
 
 Roles are configured in <RepoRoot>/.pr-pool/config.toml (override the path with
 PR_POOL_CONFIG). With no config file, pr-pool uses the built-in feedback + worker
@@ -83,6 +89,7 @@ const (
 	routeReconcile                    // report stranded self-owned feedback cycles, then run the pg-pr ACL (mutates beads)
 	routeIngestEvent                  // manager->core callback: forward events on stdin to the running core (.rest)
 	routePushInject                   // operator: inject one event into the running core (.rest)
+	routeSelfStatus                   // manager->core callback: push the caller's own self-status to the running core (.rest)
 )
 
 type routeResult struct {
@@ -138,6 +145,10 @@ func route(argv []string) routeResult {
 		// Same reason as ingest-event: its own flags, its own diagnostic (including
 		// the "quote the event JSON" hint), and the same usage exit code.
 		return routeResult{kind: routePushInject, rest: args[1:]}
+	case "self-status":
+		// Same reason as ingest-event: its own --socket/--token flags, parsed in its
+		// own handler, with the same usage exit code (routeUsageErr would produce).
+		return routeResult{kind: routeSelfStatus, rest: args[1:]}
 	}
 	if strings.HasPrefix(args[0], "-") {
 		return routeResult{kind: routeUsageErr, msg: "unknown flag: " + args[0]}

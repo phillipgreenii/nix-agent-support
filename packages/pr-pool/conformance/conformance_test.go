@@ -128,6 +128,15 @@ func TestNegative_Matrix(t *testing.T) {
 			{"session bad state", `{"schemaVersion":"1","sessions":[{"id":"h","handler":"r","event":"e","state":"weird"}],"queues":[],"config":{"sources":0,"handlers":0}}`},
 			{"queue depth wrong type", `{"schemaVersion":"1","sessions":[],"queues":[{"type":"t","depth":"3"}],"config":{"sources":0,"handlers":0}}`},
 		},
+		"cli.self-status": {
+			{"missing participantId", `{"schemaVersion":"1","id":"t","self":"healthy"}`},
+			{"missing self", `{"schemaVersion":"1","id":"t","participantId":"p"}`},
+			{"self out of enum", `{"schemaVersion":"1","id":"t","participantId":"p","self":"mostly-fine"}`},
+		},
+		"cli.self-status-reply": {
+			{"missing accepted", `{"schemaVersion":"1","id":"t"}`},
+			{"accepted wrong type", `{"schemaVersion":"1","id":"t","accepted":"yes"}`},
+		},
 	}
 
 	for mt, cases := range matrix {

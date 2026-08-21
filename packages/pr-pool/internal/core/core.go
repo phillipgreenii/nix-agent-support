@@ -6,8 +6,9 @@
 //   - the SERVICE state — the durable event queue plus the participant registry
 //     (this file, registry.go);
 //   - the CALLBACK targets — the INTF-CLI subcommands the core hands out with the
-//     socket and token already baked in. Exactly one exists today:
-//     `ingest-event` (ingest.go).
+//     socket and token already baked in. Two exist today: `ingest-event`
+//     (ingest.go, a SOURCE's event-delivery callback) and `self-status`
+//     (selfstatus.go, every participant's own health-report callback).
 //
 // # Transport
 //
@@ -30,7 +31,9 @@
 // callback, because nothing in pr-pool consumes a post-accept outcome. Acceptance
 // arrives in the dispatch REPLY — an inline outcome, or `{"deferred": true}`
 // (interfaces.md) — not on a callback. See Serve's default branch. This is
-// distinct from SELF-status, which survives; see SelfStatus in registry.go.
+// distinct from SELF-status, which survives and — as of bead pg2-zaghi — has its
+// own wire mechanism: see SelfStatus in registry.go and SubcommandSelfStatus in
+// selfstatus.go.
 package core
 
 import (
@@ -245,22 +248,26 @@ func (s *Service) CallbackCommand(subcommand string) string {
 		s.command, subcommand, shellQuote(s.ref.Socket), shellQuote(s.ref.Token))
 }
 
-// Register adds a participant to the registry and hands it the callback command
-// for its kind (interfaces.md: registering is what "makes its callback
-// reachable").
+// Register adds a participant to the registry and hands it the callback
+// commands for its kind (interfaces.md: registering is what "makes its callback
+// reachable") — its kind-specific callback (ingestCallbackFor), and the
+// self-status callback every kind gets (interfaces.md "Self-status": "Any
+// participant MAY push its own status").
 func (s *Service) Register(id string, kind Kind) (Registration, error) {
-	return s.reg.Register(id, kind, s.callbackFor(kind))
+	return s.reg.Register(id, kind, s.ingestCallbackFor(kind), s.CallbackCommand(SubcommandSelfStatus))
 }
 
-// callbackFor returns the ONE callback command a participant of this kind gets.
+// ingestCallbackFor returns the ONE event-delivery callback command a
+// participant of this kind gets — distinct from the self-status callback every
+// kind gets (Register above).
 //
-// Only a SOURCE has a callback target: `ingest-event`. A HANDLER has none —
+// Only a SOURCE has this callback target: `ingest-event`. A HANDLER has none —
 // `session-status` was dropped (see the package doc), and a handler's acceptance
 // already arrives in its dispatch reply (an inline outcome, or
 // `{"deferred": true}`), so there is nothing left for a handler to call back
-// about. A monitoring sink pulls or is pushed to over INTF-MON, and storage is
-// core-initiated; neither calls back.
-func (s *Service) callbackFor(kind Kind) string {
+// about for THIS purpose. A monitoring sink pulls or is pushed to over INTF-MON,
+// and storage is core-initiated; neither calls back for event delivery either.
+func (s *Service) ingestCallbackFor(kind Kind) string {
 	if kind == KindSource {
 		return s.CallbackCommand(SubcommandIngestEvent)
 	}
@@ -410,6 +417,8 @@ func (s *Service) Serve(subcommand string, stdin io.Reader, stdout io.Writer) in
 	switch subcommand {
 	case SubcommandIngestEvent:
 		return s.handleIngestEvent(stdin, stdout)
+	case SubcommandSelfStatus:
+		return s.handleSelfStatus(stdin, stdout)
 	default:
 		// `session-status` deliberately lands HERE, as an unknown subcommand. It was
 		// dropped 2026-07-28: pr-pool consumes no post-accept session outcome, so the

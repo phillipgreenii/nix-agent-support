@@ -18,7 +18,7 @@ func TestRegistry_RegisterStartsUnroutable(t *testing.T) {
 	at := time.Date(2026, 7, 28, 12, 0, 0, 0, time.UTC)
 	r := NewRegistry(fixedClock(at))
 
-	reg, err := r.Register("src-beads", KindSource, "pr-pool ingest-event --socket s --token t")
+	reg, err := r.Register("src-beads", KindSource, "pr-pool ingest-event --socket s --token t", "pr-pool self-status --socket s --token t")
 	if err != nil {
 		t.Fatalf("Register: %v", err)
 	}
@@ -41,10 +41,10 @@ func TestRegistry_RegisterStartsUnroutable(t *testing.T) {
 
 func TestRegistry_RejectsInvalidRegistrations(t *testing.T) {
 	r := NewRegistry(nil)
-	if _, err := r.Register("", KindSource, ""); !errors.Is(err, ErrInvalidRegistration) {
+	if _, err := r.Register("", KindSource, "", ""); !errors.Is(err, ErrInvalidRegistration) {
 		t.Fatalf("empty id err = %v, want ErrInvalidRegistration", err)
 	}
-	if _, err := r.Register("x", Kind("wat"), ""); !errors.Is(err, ErrInvalidRegistration) {
+	if _, err := r.Register("x", Kind("wat"), "", ""); !errors.Is(err, ErrInvalidRegistration) {
 		t.Fatalf("unknown kind err = %v, want ErrInvalidRegistration", err)
 	}
 }
@@ -53,13 +53,13 @@ func TestRegistry_RejectsInvalidRegistrations(t *testing.T) {
 // fresh registration must replace the stale one rather than be refused.
 func TestRegistry_ReRegisterReplaces(t *testing.T) {
 	r := NewRegistry(nil)
-	if _, err := r.Register("h1", KindHandler, "cb-old"); err != nil {
+	if _, err := r.Register("h1", KindHandler, "cb-old", "self-old"); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
 	if err := r.SetLifecycle("h1", conformance.Started); err != nil {
 		t.Fatalf("SetLifecycle: %v", err)
 	}
-	if _, err := r.Register("h1", KindHandler, "cb-new"); err != nil {
+	if _, err := r.Register("h1", KindHandler, "cb-new", "self-new"); err != nil {
 		t.Fatalf("re-Register: %v", err)
 	}
 	got, ok := r.Get("h1")
@@ -72,6 +72,9 @@ func TestRegistry_ReRegisterReplaces(t *testing.T) {
 	if got.Callback != "cb-new" {
 		t.Fatalf("callback = %q, want the new one", got.Callback)
 	}
+	if got.SelfStatusCallback != "self-new" {
+		t.Fatalf("self-status callback = %q, want the new one", got.SelfStatusCallback)
+	}
 	if r.Len() != 1 {
 		t.Fatalf("Len = %d, want 1 (replace, not append)", r.Len())
 	}
@@ -79,7 +82,7 @@ func TestRegistry_ReRegisterReplaces(t *testing.T) {
 
 func TestRegistry_LifecycleAndAvailability(t *testing.T) {
 	r := NewRegistry(nil)
-	if _, err := r.Register("h1", KindHandler, ""); err != nil {
+	if _, err := r.Register("h1", KindHandler, "", ""); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
 	if err := r.SetLifecycle("h1", conformance.Started); err != nil {
@@ -132,7 +135,7 @@ func TestRegistry_UnknownParticipant(t *testing.T) {
 
 func TestRegistry_SetSelfStatusRejectsUnknownValue(t *testing.T) {
 	r := NewRegistry(nil)
-	if _, err := r.Register("h1", KindHandler, ""); err != nil {
+	if _, err := r.Register("h1", KindHandler, "", ""); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
 	if err := r.SetSelfStatus("h1", SelfStatus("mostly-fine")); !errors.Is(err, ErrInvalidRegistration) {
@@ -143,7 +146,7 @@ func TestRegistry_SetSelfStatusRejectsUnknownValue(t *testing.T) {
 // Deregistering is idempotent: `stopped` and `crashing` can both reach it.
 func TestRegistry_Deregister(t *testing.T) {
 	r := NewRegistry(nil)
-	if _, err := r.Register("s1", KindSource, ""); err != nil {
+	if _, err := r.Register("s1", KindSource, "", ""); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
 	if !r.Deregister("s1") {
@@ -161,7 +164,7 @@ func TestRegistry_Deregister(t *testing.T) {
 func TestRegistry_ListIsSorted(t *testing.T) {
 	r := NewRegistry(nil)
 	for _, id := range []string{"zeta", "alpha", "mid"} {
-		if _, err := r.Register(id, KindSource, ""); err != nil {
+		if _, err := r.Register(id, KindSource, "", ""); err != nil {
 			t.Fatalf("Register %s: %v", id, err)
 		}
 	}
@@ -185,7 +188,7 @@ func TestRegistry_ConcurrentUse(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			id := string(rune('a' + i%5))
-			if _, err := r.Register(id, KindSource, ""); err != nil {
+			if _, err := r.Register(id, KindSource, "", ""); err != nil {
 				t.Errorf("Register: %v", err)
 				return
 			}
@@ -220,7 +223,9 @@ func TestParseSelfStatusAndKind(t *testing.T) {
 
 // Registering through the SERVICE hands a source its ingest-event callback with
 // the socket and token baked in; a handler gets none, because session-status is
-// dropped and acceptance arrives in the dispatch reply instead.
+// dropped and acceptance arrives in the dispatch reply instead. EVERY kind, the
+// source included, also gets the self-status callback (bead pg2-zaghi:
+// interfaces.md "Self-status" is "any participant", not sources only).
 func TestService_RegisterHandsOutTheCallback(t *testing.T) {
 	svc := &Service{
 		state:   conformance.Started,
@@ -228,6 +233,7 @@ func TestService_RegisterHandsOutTheCallback(t *testing.T) {
 		command: "pr-pool",
 		ref:     Ref{Socket: "/s/core.sock", Token: "tok"},
 	}
+	wantSelfStatus := `pr-pool self-status --socket '/s/core.sock' --token 'tok'`
 	src, err := svc.Register("src-1", KindSource)
 	if err != nil {
 		t.Fatalf("Register source: %v", err)
@@ -236,13 +242,19 @@ func TestService_RegisterHandsOutTheCallback(t *testing.T) {
 	if src.Callback != want {
 		t.Fatalf("source callback = %q, want %q", src.Callback, want)
 	}
+	if src.SelfStatusCallback != wantSelfStatus {
+		t.Fatalf("source self-status callback = %q, want %q", src.SelfStatusCallback, wantSelfStatus)
+	}
 	for _, kind := range []Kind{KindHandler, KindMonitor, KindStorage} {
 		reg, err := svc.Register("p-"+string(kind), kind)
 		if err != nil {
 			t.Fatalf("Register %s: %v", kind, err)
 		}
 		if reg.Callback != "" {
-			t.Fatalf("%s callback = %q, want empty (no callback target)", kind, reg.Callback)
+			t.Fatalf("%s callback = %q, want empty (no event-delivery callback target)", kind, reg.Callback)
+		}
+		if reg.SelfStatusCallback != wantSelfStatus {
+			t.Fatalf("%s self-status callback = %q, want %q (every kind gets one)", kind, reg.SelfStatusCallback, wantSelfStatus)
 		}
 	}
 	if svc.Registry().Len() != 4 {

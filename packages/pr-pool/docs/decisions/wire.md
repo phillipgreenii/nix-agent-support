@@ -128,6 +128,24 @@ rejects rather than enqueues, `INV-DISP-3`), each with a reason:
 }
 ```
 
+The `self-status` callback request — any registered participant pushing a report about itself
+(`INTF-CLI`, the common manager contract's "Self-status", realized by bead `pg2-zaghi`):
+
+```json
+{
+  "schemaVersion": "1",
+  "id": "trk-4b1a",
+  "participantId": "review-handler-1",
+  "self": "degraded"
+}
+```
+
+Its reply on stdout, exit `0`:
+
+```json
+{ "schemaVersion": "1", "id": "trk-4b1a", "accepted": true }
+```
+
 The operator-side `status` reply in its machine-readable form:
 
 ```json

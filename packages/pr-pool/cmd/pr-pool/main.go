@@ -33,6 +33,8 @@ func main() {
 		os.Exit(runIngestEvent(r.rest))
 	case routePushInject:
 		os.Exit(runPushInject(r.rest))
+	case routeSelfStatus:
+		os.Exit(runSelfStatus(r.rest))
 	}
 }
 

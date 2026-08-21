@@ -77,12 +77,19 @@ type Registration struct {
 	Kind  Kind
 	State conformance.Lifecycle
 	Self  SelfStatus
-	// Callback is the ONE command string the core handed this participant, with
-	// the socket and token already baked in (interfaces.md "Callback"). Empty when
-	// the participant's kind has no callback target.
-	Callback     string
-	RegisteredAt time.Time
-	UpdatedAt    time.Time
+	// Callback is the event-delivery command string the core handed this
+	// participant, with the socket and token already baked in (interfaces.md
+	// "Callback"). Empty when the participant's kind has no callback target for
+	// this purpose — today only KindSource's `ingest-event` (core.go's
+	// ingestCallbackFor).
+	Callback string
+	// SelfStatusCallback is the `self-status` push callback the core hands EVERY
+	// participant, regardless of kind — interfaces.md "Self-status": "Any
+	// participant MAY push its own status … over a callback the core hands it."
+	// Unlike Callback it is never empty for a valid registration.
+	SelfStatusCallback string
+	RegisteredAt       time.Time
+	UpdatedAt          time.Time
 }
 
 // Registry is the core's participant registry (interfaces.md "Registry &
@@ -116,7 +123,12 @@ func NewRegistry(now func() time.Time) *Registry {
 // distinguish that from a duplicate, and refusing would lock a restarted
 // participant out of the registry forever. The stale entry carries no resources,
 // so replacing it is lossless.
-func (r *Registry) Register(id string, kind Kind, callback string) (Registration, error) {
+//
+// callback is the participant's kind-specific event-delivery callback (empty for
+// a kind with none). selfStatusCallback is the self-status push callback every
+// kind gets (interfaces.md "Self-status") — the caller (Service.Register)
+// computes both once from the same socket/token and hands them in together.
+func (r *Registry) Register(id string, kind Kind, callback string, selfStatusCallback string) (Registration, error) {
 	if id == "" {
 		return Registration{}, fmt.Errorf("%w: empty participant id", ErrInvalidRegistration)
 	}
@@ -127,13 +139,14 @@ func (r *Registry) Register(id string, kind Kind, callback string) (Registration
 	defer r.mu.Unlock()
 	now := r.now()
 	reg := &Registration{
-		ID:           id,
-		Kind:         kind,
-		State:        conformance.Starting,
-		Self:         SelfHealthy,
-		Callback:     callback,
-		RegisteredAt: now,
-		UpdatedAt:    now,
+		ID:                 id,
+		Kind:               kind,
+		State:              conformance.Starting,
+		Self:               SelfHealthy,
+		Callback:           callback,
+		SelfStatusCallback: selfStatusCallback,
+		RegisteredAt:       now,
+		UpdatedAt:          now,
 	}
 	r.byID[id] = reg
 	return *reg, nil

@@ -74,10 +74,11 @@ requires it; the details are here.
   ready-to-run callback** already carrying everything needed to reach and authenticate against the
   core. The participant appends its own arguments and runs it, and **MUST NOT have to assemble the
   core's address or credential itself** — so no participant carries addressing or credential logic of
-  its own to get wrong. The one concrete callback target for a deferred or pushed result is the
-  `INTF-CLI` `ingest-event` subcommand — a **source**'s. A handler needs no callback target of its
-  own: its acceptance already arrives in the **dispatch reply**, so nothing is left for it to call
-  back about.
+  its own to get wrong. The one concrete callback target for a deferred or pushed **result** is the
+  `INTF-CLI` `ingest-event` subcommand — a **source**'s. A handler needs no callback target for a
+  result: its acceptance already arrives in the **dispatch reply**, so nothing is left for it to call
+  back about there. **Self-status** (below) is a separate need every participant kind carries, and it
+  gets its own callback target, `INTF-CLI`'s `self-status` subcommand, regardless of kind.
 - **Coarse outcome, rich reply.** A call's outcome is signalled **coarsely by the transport** — it
   worked, it failed unexpectedly, it was invoked wrongly, or the participant is busy — with the **rich
   outcome carried in the reply body**. A participant in a degraded state MAY answer with the coarse
@@ -93,10 +94,13 @@ requires it; the details are here.
   **itself**, and it is the **only** status channel into the core: an `unavailable` self-report is a
   **pre-accept decline** the core acts on by re-offering the event while it is unexpired
   (`INV-FAIL-1`, `INV-CONC-1`). It is distinct from the accept-or-decline reply a participant gives to
-  one dispatched item, and pr-pool takes no per-item progress stream at all. **How this push reaches
-  the core is not yet realized**: no participant kind is handed a callback for it today — the one
-  callback target that exists at all (`INTF-SOURCE`'s `ingest-event`) carries events, not self-status
-  — see the realization-gap register (`README.md`'s "Realization gaps", against `INV-INTF-1`).
+  one dispatched item, and pr-pool takes no per-item progress stream at all. **The push reaches the
+  core over its own callback**: every registered participant — regardless of kind — is handed the
+  `INTF-CLI` `self-status` subcommand at registration, naming the tracking id, the participant's own
+  registered id, and the status value; the core records it against that participant's registry entry.
+  This is a **separate** callback from `INTF-SOURCE`'s `ingest-event` (which carries events, not
+  self-status, and only a source gets it) — self-status is common to the whole manager contract, not
+  one interface's own concern.
 - **Registry & lifecycle.** A participant **registers** with the core (joins the **registry**) to
   receive lifecycle signals and to make its callback reachable, and **deregisters** on exit. The
   lifecycle and its state diagram are the next section.
@@ -478,11 +482,13 @@ sequenceDiagram
 
 ### The manager→core callback
 
-There is exactly **one** callback target: the core takes **event ingest** back over the callback
-channel and nothing else. In particular a handler pushes back **no run status at all** — the core's
-delivery responsibility ends at acceptance (`INV-EVT-1`, `INV-FAIL-1`), so there is nothing for it to
-report. The callback the core hands out arrives ready to run, already addressed and authenticated; a
-manager appends its own arguments (the common contract above).
+There are exactly **two** callback targets: the core takes **event ingest** and **self-status** back
+over the callback channel, and nothing else. In particular a handler pushes back **no run status at
+all** — the core's delivery responsibility ends at acceptance (`INV-EVT-1`, `INV-FAIL-1`), so there is
+nothing for it to report about one dispatched item. Self-status is different: it reports on the
+**participant itself**, not on any item, and every kind gets that callback (the common contract
+above, "Self-status"). The callback the core hands out arrives ready to run, already addressed and
+authenticated; a manager appends its own arguments (the common contract above).
 
 **`ingest-event`** — a **push source**, or a **deferred pull** reply, delivers **one or more** events
 under one tracking id. The reply reports how many the core **accepted** and lists the ones it
@@ -502,6 +508,16 @@ counted as accepted and enqueued, offered to nobody, then left to **expire uncon
 visibility there comes from the drop being **counted in the metric catalog** `INTF-MON` carries
 (`INV-OBS-1`). The `rejected` list therefore carries **malformed** events — bad schema, or a missing
 required field — and events whose `type` is **unknown to the configuration**, each with a reason.
+
+**`self-status`** — any registered participant, of any kind, pushes a report about **itself** —
+`healthy` / `degraded` / `unavailable` — under one tracking id, naming its own registered id. The
+reply reports whether the core **accepted** the push. Unlike `ingest-event`'s tracking id (which a
+push source mints itself and the core never needs to have issued), the named participant id **MUST**
+resolve to a registration the core currently holds: self-status describes an existing participant
+rather than minting one, so a push naming an id the core does not recognize (never registered, or
+already deregistered) is an error — not the "unknown tracking id ⇒ acknowledged and ignored" no-op
+"Event delivery" (above) states, which governs a **correlated** reply to an earlier core-issued call
+rather than a self-report's own identity claim.
 
 **Inspecting a running core** yields three things it **MUST** offer, and nothing else it must offer.
 **Deliveries** are **delivery
