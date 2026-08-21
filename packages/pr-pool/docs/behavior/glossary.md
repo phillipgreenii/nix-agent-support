@@ -41,7 +41,9 @@ their own terms in a downstream deployment set.
 - **Tracking id** — the id the core assigns to a call so a deferred reply or later callback can be
   matched back to it. Per-call.
 - **Queue** — the core's **durable, ordered, de-duped, retention-bounded** store of events
-  (`INV-EVT-1`, `ADR 0031`). An event stays in the queue for its **retention even after
+  (`INV-EVT-1`,
+  `phillipgreenii-nix-agent-support · packages/pr-pool/docs/decisions · DEC-EVENT-2`). An event
+  stays in the queue for its **retention even after
   acceptance** — not so a late-binding handler can pick it up, but so **every matching handler still
   owed an attempt gets one** and so **de-duplication by `id`** (`INV-EVT-3`) still covers
   already-delivered ids. A deployment MAY opt in to evicting an event once all bound handlers have

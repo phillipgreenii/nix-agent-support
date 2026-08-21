@@ -51,6 +51,8 @@ docs cite. An entry that overlaps an existing repository ADR MUST **cite** it, n
   subcommands.
 - [`DEC-EVENT-1`](event.md) — expiry is an absolute instant (`at` + `expiresAt`), so there is no
   clock origin to pick.
+- [`DEC-EVENT-2`](event.md) — the queue is durable, ordered, de-duped and retention-bounded, and
+  delivers at-least-once with per-handler serial FIFO.
 - [`DEC-OBS-1`](observability.md) — OTel is the default emission transport for metrics only, and
   logs stay JSONL.
 - [`DEC-RETRY-1`](retry.md) — exponential-backoff-with-a-cap shape, and its default values, for

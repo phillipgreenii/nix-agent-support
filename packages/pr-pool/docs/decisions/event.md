@@ -1,7 +1,7 @@
 # Event — pr-pool decision docs
 
-Realization decisions about the event the core routes: its expiry contract, and the questions that
-contract closed.
+Realization decisions about the event the core routes and the queue that carries it: the event's
+expiry contract, the queue's durability/ordering/delivery shape, and the questions each closed.
 
 ### `DEC-EVENT-1` — expiry is an absolute instant, so there is no clock origin to pick <!-- uuid: f2bbe7cf-726d-4ea1-99f5-9582ef4d16c4 -->
 
@@ -48,3 +48,35 @@ left the clock origin open. This entry closes that residue; the queue decision i
 
 **Not decided here.** The wire encoding of the two fields and the schema artifact that carries them
 are the implementation's own; the conformance suite (`INV-INTF-2`) is where the two sides reconcile.
+
+### `DEC-EVENT-2` — the queue is durable, ordered, de-duped and retention-bounded, delivering at-least-once with per-handler serial FIFO <!-- uuid: 17672d4d-21fd-4bf3-8adb-e61118485f5c -->
+
+**Decided.** The core holds one **durable, ordered, de-duped, retention-bounded** event queue, and
+delivery through it is **at-least-once**: the durable record is written only **after acceptance is
+confirmed**, so a narrow crash window MAY redeliver an accepted event — the reason a handler MUST be
+idempotent (`INV-EVT-2`). The core **attempts delivery until a handler accepts**, and acceptance is
+the **retry boundary**: before it, a pre-accept decline is the core's to retry; after it, the handler
+owns persistence, resume, and retry, and the core neither re-offers nor classifies what happens next
+(`INV-FAIL-1`). Ordering is **per-handler serial FIFO** — the core keeps **one outstanding offer per
+handler** and offers that handler its next matching event only once the current one is accepted or
+expires. Per-handler cursors are independent and order is **never global**: fan-out across handlers
+is supported, and acceptance is tracked per `(event, handler)` (`INV-CONC-1`). Capacity stays
+**handler-enforced** — a pre-accept `busy` decline, never a number the core tracks — exactly as `ADR
+0031` decided it.
+
+**Head-of-line blocking is the accepted cost of per-handler FIFO.** An event a handler cannot yet
+accept stalls only that handler's own stream until the event expires; the mitigation is a short
+`expiresAt`, not reordering around the stuck head.
+
+**Relation to `ADR 0031` and `DEC-EVENT-1`.** `ADR 0031` decided this queue and delivery shape —
+durable, ordered, de-duped, at-least-once, retry-only-until-acceptance, per-listener (now
+per-handler) serial FIFO, handler-enforced capacity — together with the event's now-superseded
+duration-valued bound. `DEC-EVENT-1` is the decisions-doc record for the **expiry** half of that
+decision (a clock origin dissolved by making expiry an absolute instant); this entry is the
+decisions-doc record for the **queue and delivery mechanics** half, which `ADR 0031` left standing
+and which pr-pool's behavior docs cite directly for that reason.
+
+**Not decided here.** The storage mechanism (jsonl / embedded DB / write-ahead log) is an open
+realization choice, not behavior or this entry's — `ADR 0031`'s own "Consequences" leaves it so.
+Whether a deployment opts in to evicting an accepted event before its retention window ends is
+stated directly in the behavior set's glossary and is not repeated here.

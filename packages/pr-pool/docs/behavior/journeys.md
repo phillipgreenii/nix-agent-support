@@ -241,7 +241,9 @@ it is lost only if nothing accepted it before it expired (`INV-EVT-2`).
 
 **When the core dies.** On a fatal condition the core makes a **best-effort** `crashing` signal to
 registered participants (`INV-LIFE-1`). That signal stays best-effort and MAY be lost — but event
-**data** is durable (`INV-EVT-1`, `ADR 0031`): an accepted-and-persisted event **survives the
+**data** is durable
+(`INV-EVT-1`, `phillipgreenii-nix-agent-support · packages/pr-pool/docs/decisions · DEC-EVENT-2`):
+an accepted-and-persisted event **survives the
 restart** and is redelivered at-least-once, and only the **narrow crash window** (accepted but not
 yet persisted) MAY redeliver, absorbed by idempotent handlers (`INV-EVT-2`). After restart the core
 resumes offering from the durable queue; pull sources also re-derive current truth on their next
@@ -916,7 +918,8 @@ sudden one it makes the best-effort `crashing` signal whose loss no correctness 
 **deliveries** and its per-`type` queue depths; every command emits text by default and a
 machine-readable form on request (`INTF-CLI`). A command that finds **no running core** MUST **fail
 with a "no running core" error** — the CLI never **auto-starts** one, so "is a core running?" stays
-answerable from a caller's exit code (`INTF-CLI` "Locating the core", `ADR 0036`).
+answerable from a caller's exit code (`INTF-CLI` "Locating the core",
+`phillipgreenii-nix-agent-support · packages/pr-pool/docs/decisions · DEC-WIRE-2`).
 
 ```mermaid
 flowchart TD
@@ -932,7 +935,8 @@ flowchart TD
 Extensions:
 
 - An inspection command finds no running core: it MUST fail with a "no running core" error rather
-  than auto-starting one (`INTF-CLI` "Locating the core", `ADR 0036`).
+  than auto-starting one (`INTF-CLI` "Locating the core",
+  `phillipgreenii-nix-agent-support · packages/pr-pool/docs/decisions · DEC-WIRE-2`).
 - Shutdown is sudden rather than orderly: the core makes a best-effort `crashing` signal, which MAY
   be lost without violating any correctness rule (`JOURNEY-FLOW`).
 

@@ -87,7 +87,9 @@ requires it; the details are here.
   **usage** error, and `9` **`busy`** — a **pre-accept decline** (`INV-CONC-1`). The **low** codes
   carry meanings general to any app, which is why `2` is **reserved** for usage and `busy` sits
   outside that band rather than on `2`; a caller reading one as the other would treat a decline as a
-  typo, and a typo as "re-offer later" (`ADR 0042`). Codes at or above `3` other than `9` are a
+  typo, and a typo as "re-offer later"
+  (`phillipgreenii-nix-agent-support · packages/pr-pool/docs/decisions · DEC-WIRE-1`). Codes at or
+  above `3` other than `9` are a
   participant's own (`phillipgreenii-nix-agent-support · packages/pr-pool/docs/decisions · DEC-WIRE-1`).
 - **Self-status.** Any participant MAY push its **own** status — `healthy` / `degraded` /
   `unavailable` — independent of any per-item outcome. This is the participant reporting on
@@ -153,7 +155,8 @@ stateDiagram-v2
 ## Event delivery (shared by `INTF-SOURCE` and `INTF-HANDLER`)
 
 Delivery of an **event** from a source to a handler goes through the core's **durable, ordered,
-de-duped, retention-bounded queue** and is **at-least-once** (`INV-EVT-1`, `ADR 0031`). An event is
+de-duped, retention-bounded queue** and is **at-least-once** (`INV-EVT-1`,
+`phillipgreenii-nix-agent-support · packages/pr-pool/docs/decisions · DEC-EVENT-2`). An event is
 enqueued durably and the core **offers it until a handler accepts** (`INV-CONC-1`), and **every
 matching handler gets at least one opportunity** — nothing is dropped un-offered. An event carries an
 optional **`at`** (the source stamp; absent, the core's own ingest-now applies) and an optional
@@ -472,13 +475,15 @@ sequenceDiagram
   running core" error** and a **non-zero exit code**; it **MUST NOT start one**. Locating means being
   able to **reach** a core, not merely finding a trace that one once existed — a trace left behind by a
   core that has died is the same outcome as no trace at all. This holds on every locate path: the
-  manager callbacks and the operator commands alike (`ADR 0036`).
+  manager callbacks and the operator commands alike
+  (`phillipgreenii-nix-agent-support · packages/pr-pool/docs/decisions · DEC-WIRE-2`).
 - **Output.** Every operator command emits **human-readable text by default** and a
   **machine-readable form on request**, so an operator and a script read the same state without a
   second surface. A **usage** error is distinct from a **runtime** error: on the default CLI transport
   a usage error exits `2` and an unexpected one exits `1`, under the **one** convention every
   subcommand follows — the callback subcommands included, because `busy` no longer occupies `2`
-  (the common contract above, `ADR 0042`).
+  (the common contract above,
+  `phillipgreenii-nix-agent-support · packages/pr-pool/docs/decisions · DEC-WIRE-1`).
 
 ### The manager→core callback
 

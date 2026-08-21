@@ -78,7 +78,8 @@ flowchart TD
 
 - **`INV-EVT-1`** <!-- uuid: faf59ce3-6a27-42c8-8bfa-0903f895eed6 --> — **The delivery-opportunity
   guarantee.** The core holds a **durable, ordered, de-duped, retention-bounded event queue**
-  (`ADR 0031`), and **every matching handler WILL get at least one opportunity to accept a matching
+  (`phillipgreenii-nix-agent-support · packages/pr-pool/docs/decisions · DEC-EVENT-2`), and **every
+  matching handler WILL get at least one opportunity to accept a matching
   event**: nothing is ever dropped **un-offered**. Delivery is **at-least-once** — an event is
   enqueued durably and the core **attempts delivery until a handler accepts it**, over the window
   `INV-EVT-4` bounds. An event carries an optional **`at`** (the source stamp; **absent, the core's
@@ -169,7 +170,9 @@ sequenceDiagram
   limits allow. The `busy` decline is what the **caller of a participant observes**, so its coarse
   signal is part of the contract and not an implementation detail: on the default CLI transport it is
   **exit `9`**, deliberately clear of the reserved low codes where `2` means a **usage** error
-  (`INTF-CLI`, `ADR 0042`). Both sides MUST move together — a caller still reading a decline off the
+  (`INTF-CLI`,
+  `phillipgreenii-nix-agent-support · packages/pr-pool/docs/decisions · DEC-WIRE-1`). Both sides
+  MUST move together — a caller still reading a decline off the
   usage code would invert both readings, taking a decline for a typo and a typo for "re-offer later".
   **Acceptance means the handler took custody, not that work started.** The core MUST
   NOT infer progress from an accept, and MUST NOT assume an accepting handler is idle or free to
@@ -177,13 +180,17 @@ sequenceDiagram
   (`INV-EVT-1`, `INV-FAIL-1`). **"One event → one session"
   holds _within_ a handler**; **fan-out is
   _across_ handlers** — the core tracks acceptance per `(event, handler)` (`INV-EVT-1`) and keeps
-  **one outstanding offer per handler** (per-handler serial FIFO, `ADR 0031`). Concurrency is **not
+  **one outstanding offer per handler** (per-handler serial FIFO,
+  `phillipgreenii-nix-agent-support · packages/pr-pool/docs/decisions · DEC-EVENT-2`). Concurrency
+  is **not
   assumed safe for every event type** — a `type` **MAY** be marked to **serialize** (e.g. a shutdown
   or time-of-day event) so its events never run in parallel. _(A source-side, per-source
   claim-exclusion role — e.g. a downstream deployment's durable in-session claim — is an **external
   actor's** concern, complementary to and not duplicating the core's acceptance tracking.)_
 - **`INV-FAIL-1`** <!-- uuid: 2da0d587-f116-42e6-b986-8abf80ed023c --> — Failure classes split at
-  the **acceptance boundary** (`INV-EVT-1`, `ADR 0031`). **Pre-accept declines** — a handler is
+  the **acceptance boundary** (`INV-EVT-1`,
+  `phillipgreenii-nix-agent-support · packages/pr-pool/docs/decisions · DEC-EVENT-2`). **Pre-accept
+  declines** — a handler is
   `busy` (at capacity) or `unavailable` — are the **core's** to handle: it re-offers the event **while
   it is unexpired** (`INV-EVT-4`), **at the cadence `INV-FAIL-2` defines**, to the same handler once
   the ceiling lifts or to another bound handler. **The failure reason does not change the
