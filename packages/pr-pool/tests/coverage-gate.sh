@@ -24,6 +24,14 @@
 # A rule matches a package whose import path equals the suffix or ends with
 # "/<suffix>". A gated package ABSENT from the profile is a FAILURE (guards
 # against a renamed/removed/never-run package silently passing the bar).
+#
+# Exit codes follow ADR 0042 ("coarse exit code convention: busy is not 2"),
+# Decision table: 0 ok, 1 generic/runtime error, 2 usage error (malformed
+# invocation only), >=3 reserved for app-specific codes. A malformed-file-
+# state failure (missing profile/thresholds file) is a RUNTIME error, not a
+# usage error, even though it is detected during argument validation — the
+# invocation itself was well-formed. This script defines no app-specific
+# codes of its own.
 
 set -euo pipefail
 
@@ -37,11 +45,11 @@ thresholds="$2"
 
 [ -f "$profile" ] || {
   echo "coverage-gate: profile not found: $profile" >&2
-  exit 2
+  exit 1
 }
 [ -f "$thresholds" ] || {
   echo "coverage-gate: thresholds file not found: $thresholds" >&2
-  exit 2
+  exit 1
 }
 
 awk -v thresholds="$thresholds" '
