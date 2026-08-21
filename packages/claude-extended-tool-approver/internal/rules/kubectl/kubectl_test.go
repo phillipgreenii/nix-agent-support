@@ -152,6 +152,76 @@ func TestKubectl_FlagValueNotOperation(t *testing.T) {
 	}
 }
 
+// TestKubectl_GlobalValueFlags_OperationNotFlagValue is the pg2-ursuo
+// regression: every kubectl GLOBAL flag that takes a value (per `kubectl
+// options`, client v1.25.16) must have its value token skipped by
+// extractOperation, so the flag's value is never mistaken for the verb and
+// the real (modifying) verb after it is still classified correctly. Generic
+// values only — no ZR-specific config needed, since these are base
+// (baseValueFlags) global flags.
+func TestKubectl_GlobalValueFlags_OperationNotFlagValue(t *testing.T) {
+	r := New(nil, nil, zrKubectlConfig(t))
+	cmds := []string{
+		"kubectl --context get delete pod foo",
+		"kubectl --cluster get delete pod foo",
+		"kubectl --server get delete pod foo",
+		"kubectl -s get delete pod foo",
+		"kubectl --token get delete pod foo",
+		"kubectl --user get delete pod foo",
+		"kubectl --username get delete pod foo",
+		"kubectl --password get delete pod foo",
+		"kubectl --as get delete pod foo",
+		"kubectl --as-group get delete pod foo",
+		"kubectl --as-uid get delete pod foo",
+		"kubectl --certificate-authority get delete pod foo",
+		"kubectl --client-certificate get delete pod foo",
+		"kubectl --client-key get delete pod foo",
+		"kubectl --tls-server-name get delete pod foo",
+		"kubectl --request-timeout get delete pod foo",
+		"kubectl --cache-dir get delete pod foo",
+		"kubectl -v get delete pod foo",
+		"kubectl --v get delete pod foo",
+		"kubectl --vmodule get delete pod foo",
+		"kubectl --log-backtrace-at get delete pod foo",
+		"kubectl --log-dir get delete pod foo",
+		"kubectl --log-file get delete pod foo",
+		"kubectl --log-file-max-size get delete pod foo",
+		"kubectl --log-flush-frequency get delete pod foo",
+		"kubectl --stderrthreshold get delete pod foo",
+		"kubectl --profile get delete pod foo",
+		"kubectl --profile-output get delete pod foo",
+	}
+	for _, cmd := range cmds {
+		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
+		if got := hookio.Verdict(r.Evaluate(input)); got.Decision != hookio.NoOpinion {
+			t.Errorf("cmd %q: got %s, want abstain (real op is delete, a global value-flag's value \"get\" must not be read as the op)", cmd, got.Decision)
+		}
+	}
+}
+
+// TestKubectl_GlobalBooleanFlags_NotValueFlags pins the OTHER direction: a
+// boolean global flag (no value token) must NOT be in baseValueFlags, or its
+// next real token would be wrongly skipped as if it were that flag's value —
+// which here would swallow the actual "delete" verb and leave "pod" (a bare
+// positional) misread as the operation, an approval-widening bug this table
+// must not introduce.
+func TestKubectl_GlobalBooleanFlags_NotValueFlags(t *testing.T) {
+	r := New(nil, nil, zrKubectlConfig(t))
+	cmds := []string{
+		"kubectl --insecure-skip-tls-verify delete pod foo",
+		"kubectl --warnings-as-errors delete pod foo",
+		"kubectl --match-server-version delete pod foo",
+		"kubectl --logtostderr delete pod foo",
+		"kubectl --alsologtostderr delete pod foo",
+	}
+	for _, cmd := range cmds {
+		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
+		if got := hookio.Verdict(r.Evaluate(input)); got.Decision != hookio.NoOpinion {
+			t.Errorf("cmd %q: got %s, want abstain (delete is the op; a boolean flag must not swallow it as a fake value)", cmd, got.Decision)
+		}
+	}
+}
+
 func TestKubectl_ReadOnlyAdditions_Approve(t *testing.T) {
 	r := New(nil, nil, zrKubectlConfig(t))
 	cmds := []string{

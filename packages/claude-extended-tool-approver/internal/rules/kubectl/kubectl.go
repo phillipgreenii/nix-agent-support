@@ -30,11 +30,56 @@ var baseExecOperations = map[string]bool{"exec": true}
 // baseValueFlags consume the following token as their value; that token must not
 // be mistaken for the kubectl operation. Consumer workspace flags (--ws/
 // --workspace) are added from KubectlConfig.DevWorkspaceFlags at construction.
+//
+// pg2-ursuo audit: this table must cover the FULL kubectl global-flag surface,
+// not just the handful discovered ad hoc. Source of truth is the literal
+// output of `kubectl options` (client v1.25.16, kubectl v1.25.16, run
+// 2026-08-21) — the flags kubectl itself documents as common to every
+// subcommand. Rows below the first (pre-existing, non-global per-command
+// flags) are grouped to mirror that output's own groupings.
+//
+// Every value-taking global flag from that output is listed here. The
+// following global flags are DELIBERATELY EXCLUDED because `kubectl options`
+// documents them as booleans (bare `--flag`/`--flag=true|false`, no separate
+// value token): --add-dir-header, --alsologtostderr,
+// --insecure-skip-tls-verify, --logtostderr, --match-server-version,
+// --one-output, --skip-headers, --skip-log-headers, --warnings-as-errors.
+// Adding a boolean flag here would be the OPPOSITE bug from the one this
+// audit closes: for the bare (`--flag`, no `=value`) spelling this table
+// would then skip the NEXT real token as if it were that flag's value —
+// approval-widening, not fail-safe.
 var baseValueFlags = map[string]bool{
+	// Non-global per-command flags (pre-existing; several subcommands, not
+	// literally part of `kubectl options`, but still tokens whose next arg is
+	// a value rather than a verb).
 	"-n": true, "--namespace": true, "-c": true, "--container": true,
-	"-f": true, "--filename": true,
-	"--context": true, "--kubeconfig": true, "-o": true, "--output": true,
+	"-f": true, "--filename": true, "-o": true, "--output": true,
 	"-l": true, "--selector": true,
+
+	// Global: kubeconfig / connection / server selection.
+	"--context": true, "--cluster": true, "--kubeconfig": true,
+	"-s": true, "--server": true,
+
+	// Global: authentication and impersonation.
+	"--token": true, "--user": true, "--username": true, "--password": true,
+	"--as": true, "--as-group": true, "--as-uid": true,
+
+	// Global: TLS/certificates.
+	"--certificate-authority": true, "--client-certificate": true,
+	"--client-key": true, "--tls-server-name": true,
+
+	// Global: request/runtime behavior.
+	"--request-timeout": true, "--cache-dir": true,
+
+	// Global: klog logging flags that take a value (verbosity level, paths,
+	// patterns, sizes, durations, thresholds).
+	"-v": true, "--v": true, "--vmodule": true,
+	"--log-backtrace-at": true, "--log-dir": true, "--log-file": true,
+	"--log-file-max-size": true, "--log-flush-frequency": true,
+	"--stderrthreshold": true,
+
+	// Global: profiling.
+	"--profile": true, "--profile-output": true,
 }
 
 // baseDevScopeFlags name a workspace/namespace we can check for the personal-dev
