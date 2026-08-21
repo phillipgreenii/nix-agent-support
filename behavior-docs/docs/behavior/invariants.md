@@ -94,8 +94,7 @@ out-of-sequence numbers are legal and a name MAY be changed without breaking ide
   a **less** publicly reachable scope to a **more** publicly reachable one and MUST NOT point
   the other way; a set that cannot publish a reachable link declares the bare UUID instead
   (`behavior-docs/docs/decisions · DEC-SEAM-1`). A
-  set that **cites another set** SHOULD namespace its own names by topic (`INV-DISP-1`,
-  `INTF-SOURCE`) so a bare name it cites never collides with one of its own; the **root** set —
+  set that **cites another set** SHOULD namespace its own names by topic (example only, not a citation: `INV-DISP-1`, `INTF-SOURCE`) so a bare name it cites never collides with one of its own; the **root** set —
   this one, which cites no other — keeps bare numeric names. **Interim (before an external
   element's owner-UUID is declared):** cross-set references resolve **by name** as before; UUID
   matching becomes authoritative incrementally as owners mint UUIDs and consumers declare them,

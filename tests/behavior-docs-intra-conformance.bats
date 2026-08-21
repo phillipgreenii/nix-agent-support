@@ -489,15 +489,40 @@ MD
   echo "$output" | grep -q 'FAIL dangling in a listing: INV-99'
 }
 
-@test "traceability: a PROSE reference resolving to nothing WARNs by default and FAILs under --strict" {
-  # INV-22 scopes its resolve obligation to LISTINGS, and a set legitimately
-  # prints an ID-shaped literal to ILLUSTRATE the naming convention rather than to
-  # cite an element. So prose gets reported, not failed, unless asked.
+@test "traceability: a PROSE reference resolving to nothing FAILs unconditionally (operator ruling pg2-p7fnv Q1)" {
+  # The listing-FAIL/prose-WARN severity split is OVERTURNED: a dangling name FAILs
+  # regardless of whether it appears in a listing or in prose, with no --strict
+  # gate on it either way.
   trace_set
   cat >"$T/journeys.md" <<'MD'
 # Journeys
 
-Namespaced names look like `INV-DISP-1`; this line illustrates the convention.
+This line cites `INV-DISP-1`, which no definition here or declared import resolves.
+
+- **`STORY-1`** — as an operator, I want delivery. _(→ `USECASE-1`; `INV-1`, `INV-2`.)_
+
+### `USECASE-1` — Submit an event
+
+_Requires:_ `INV-1`, `INV-2`.
+MD
+  run trace-extract "$T"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q 'FAIL dangling in prose: INV-DISP-1'
+  run trace-extract --strict "$T"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q 'FAIL dangling in prose: INV-DISP-1'
+}
+
+@test "traceability: a style-example marked literal is NOT dangling (operator ruling pg2-p7fnv Q2)" {
+  # A literal printed purely to ILLUSTRATE the naming convention -- not to cite an
+  # element -- carries the "example only, not a citation" marker on the SAME LINE
+  # as the id(s) it covers, and is excluded from reference resolution entirely: it
+  # must not appear as a dangling finding, in either mode.
+  trace_set
+  cat >"$T/journeys.md" <<'MD'
+# Journeys
+
+Namespaced names look like (example only, not a citation: `INV-DISP-1`); this line illustrates the convention.
 
 - **`STORY-1`** — as an operator, I want delivery. _(→ `USECASE-1`; `INV-1`, `INV-2`.)_
 
@@ -507,10 +532,10 @@ _Requires:_ `INV-1`, `INV-2`.
 MD
   run trace-extract "$T"
   [ "$status" -eq 0 ]
-  echo "$output" | grep -q 'WARN dangling in prose: INV-DISP-1'
+  ! echo "$output" | grep -q 'INV-DISP-1'
   run trace-extract --strict "$T"
-  [ "$status" -ne 0 ]
-  echo "$output" | grep -q 'FAIL dangling in prose: INV-DISP-1'
+  [ "$status" -eq 0 ]
+  ! echo "$output" | grep -q 'INV-DISP-1'
 }
 
 @test "traceability: a reference resolving through the imports table is NOT dangling" {
@@ -687,8 +712,8 @@ This cites `DEC-SEAM-9`, which no decision entry defines.
 _Requires:_ `INV-1`, `INV-2`.
 MD
   run trace-extract "$T"
-  [ "$status" -eq 0 ]
-  echo "$output" | grep -q 'dangling in prose: DEC-SEAM-9'
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q 'FAIL dangling in prose: DEC-SEAM-9'
   # The entry that DOES exist is not dragged into the finding.
   ! echo "$output" | grep -q 'dangling in prose: DEC-SEAM-1'
 }
@@ -831,7 +856,10 @@ canon_set() {
 @test "canonical findings: a multi-location finding sorts by path (BYTE order) then line NUMERICALLY" {
   canon_set
   run trace-extract "$T"
-  [ "$status" -eq 0 ]
+  # A prose-dangling reference is a hard FAIL now (operator ruling pg2-p7fnv Q1),
+  # so this fixture's INV-99 citation makes the run exit non-zero; the finding
+  # line itself is what this test actually pins.
+  [ "$status" -ne 0 ]
   echo "$output" | grep -qF 'INV-99 (README.md:3 invariants.md:9 invariants.md:10)' || {
     echo "location list is not canonical; got:"
     echo "$output" | grep 'INV-99'
@@ -844,9 +872,12 @@ canon_set() {
   a="$BATS_TEST_TMPDIR/out.c"
   b="$BATS_TEST_TMPDIR/out.utf8"
   c="$BATS_TEST_TMPDIR/out.unset"
-  env LC_ALL=C trace-extract "$T" >"$a" 2>&1
-  env LC_ALL=en_US.UTF-8 LC_COLLATE=en_US.UTF-8 trace-extract "$T" >"$b" 2>&1
-  env -u LC_ALL -u LC_COLLATE LANG=en_US.UTF-8 trace-extract "$T" >"$c" 2>&1
+  # The fixture's dangling INV-99 now makes trace-extract exit non-zero (Q1), so
+  # each call is allowed to fail here -- this test pins output BYTES across
+  # locales, not the exit code (a status mismatch would itself show up as a diff).
+  env LC_ALL=C trace-extract "$T" >"$a" 2>&1 || true
+  env LC_ALL=en_US.UTF-8 LC_COLLATE=en_US.UTF-8 trace-extract "$T" >"$b" 2>&1 || true
+  env -u LC_ALL -u LC_COLLATE LANG=en_US.UTF-8 trace-extract "$T" >"$c" 2>&1 || true
   diff "$a" "$b"
   diff "$a" "$c"
 }

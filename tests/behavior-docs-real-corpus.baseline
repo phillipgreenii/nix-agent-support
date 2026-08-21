@@ -13,20 +13,19 @@
 # belongs here only when the fix is real work with a real owner, named below.
 #
 # ---------------------------------------------------------------------------
-# 1. Prose references that resolve to nothing (2 lines, both WARN)
+# 1. (removed) Prose references that resolve to nothing
 #
 # `INV-DISP-1` and `INTF-SOURCE` in the METHOD set are ID-shaped literals printed
 # to ILLUSTRATE the namespacing convention, not citations of elements — the root
-# method cites no other set and its imports table is deliberately empty. They are
-# recorded rather than fixed because no grep distinguishes a style example from a
-# citation, and a reader cannot either, which is itself worth a decision.
+# method cites no other set and its imports table is deliberately empty.
 #
-# Both of those lines carry `file:line` coordinates — and they are the ONLY finding
-# lines here that do — so ANY insertion above them in the named file MOVES them and
-# the baseline line must be re-recorded. That is a location change, not a new or fixed
-# finding — re-run the runner and copy the new coordinates. If a future finding line
-# carries coordinates too, this count is stale: re-derive it rather than trust it.
+# They used to be recorded here as WARN because no grep could distinguish a style
+# example from a citation and a reader could not either. Operator ruling (bead
+# pg2-p7fnv, Q1+Q2) settled both halves at once: prose-dangling is now a hard FAIL
+# like listing-dangling (no more location-based severity split), AND a style-example
+# literal now carries the "example only, not a citation" marker (see
+# `trace-extract.sh`'s STYLEPAT) at both sites, which excludes it from reference
+# resolution entirely. So these two findings are gone, not baselined — there is
+# nothing left here to record.
 #
 # ---------------------------------------------------------------------------
-intra/trace-extract behavior-docs/docs/behavior|WARN dangling in prose: INTF-SOURCE (README.md:61 invariants.md:98) resolves to no definition here and no declared external reference
-intra/trace-extract behavior-docs/docs/behavior|WARN dangling in prose: INV-DISP-1 (README.md:60 invariants.md:97) resolves to no definition here and no declared external reference

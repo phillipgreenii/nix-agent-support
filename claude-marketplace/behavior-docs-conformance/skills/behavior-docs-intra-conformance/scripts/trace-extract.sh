@@ -20,21 +20,34 @@
 #
 # Exit: 0 when clean, 1 on any FAIL, 2 on a usage error.
 #
-# WHAT IS A FAIL, AND WHY THE SPLIT
+# WHAT IS A FAIL
 #
-# A dangling reference is reported in two classes, because INV-22's resolve
-# obligation is scoped to LISTINGS ("every name a listing carries MUST
-# resolve"):
+# Every dangling reference is a hard FAIL, full stop — whether the offending name
+# appears in a per-element LISTING (INV-22's resolve obligation verbatim) or in
+# running PROSE elsewhere in the set. There is NO location-based severity split
+# (operator ruling, bead pg2-p7fnv Q1, OVERTURNING the earlier listing-FAIL /
+# prose-WARN split this script used to implement): a dangling name is a defect
+# regardless of where it is written, so `--strict` no longer changes
+# dangling-reference fatality at all. `--strict` still has a job — see ADOPTION
+# below — it is just no longer this one.
 #
-#   listing-dangling — a listing names an ID that resolves to nothing. This is
-#                      INV-22 verbatim, so it FAILs in every mode.
-#   prose-dangling   — running prose names an ID that resolves to nothing. This
-#                      is reported ALWAYS (it is how a cited-but-undeclared
-#                      external element looks from inside one set) but is fatal
-#                      only under --strict, because a set legitimately prints an
-#                      ID-shaped literal to ILLUSTRATE the naming convention
-#                      rather than to cite an element, and no grep can tell a
-#                      style example from a citation.
+#   listing-dangling — a listing names an ID that resolves to nothing.
+#   prose-dangling   — running prose names an ID that resolves to nothing (this
+#                      is how a cited-but-undeclared external element looks from
+#                      inside one set).
+#
+# THE ONE CARVE-OUT: STYLE-EXAMPLE LITERALS (operator ruling, bead pg2-p7fnv Q2).
+# A set may legitimately print an ID-shaped literal to ILLUSTRATE the naming
+# convention rather than to cite a real element (e.g. "a topic-namespaced name
+# looks like `INV-DISP-1`") — hard-failing every dangling name would otherwise
+# make that illustration itself a build-breaking defect. Such a literal MUST
+# carry the literal prose marker "example only, not a citation" on the SAME LINE
+# as the id(s) it covers. The marker is prose, not an HTML comment, so it reads
+# to a human as plainly as it parses to this script (a comment-only marker was
+# explicitly rejected: it would satisfy the machine constraint alone). A line
+# carrying the marker contributes NO reference records at all — every id-shaped
+# token on that line is skipped, not just the intended one — so a genuine
+# citation MUST NOT share a physical line with a style example.
 #
 # ADOPTION IS DERIVED, NEVER ALLOWLISTED. A set that carries NO listing at all
 # has not retrofitted INV-22 yet (a scheduled work stream, not a regression), so
@@ -86,11 +99,14 @@ Usage: trace-extract.sh [OPTIONS] <behavior-docs-set-dir>
 
 Options:
   -h, --help    Show this help message
-      --strict  Also fail on a prose dangling reference and on a set that has
-                not adopted per-element listings at all
+      --strict  Also fail on a set that has not adopted per-element listings
+                at all (adoption status only — every dangling reference,
+                listing or prose, already FAILs unconditionally)
 
 Reports, per set: each element's listing, INV-22 adoption, untraced invariants
-and goals, and dangling references (split into listing vs. prose).
+and goals, and dangling references (listing and prose, both fatal). A line
+marked "example only, not a citation" is a style example, not a citation, and
+contributes no reference at all.
 HELP
 }
 
@@ -167,6 +183,12 @@ records=$(
         # single-quoted shell string, so one apostrophe would end the quote and
         # hand the rest of the program to the shell to parse.
         DEFPAT = "^[ \t]*(([-*+][ \t]+)|(#+[ \t]+))[*_`]*" IDPAT
+        # STYLEPAT — the Q2 style-example marker (bead pg2-p7fnv). A line carrying
+        # this literal prose is illustrating the naming convention, not citing an
+        # element, so every id-shaped token on THAT LINE is excluded from R below.
+        # Case-sensitive on purpose: the marker is a fixed phrase the author types
+        # deliberately, not prose a reader might phrase a dozen equivalent ways.
+        STYLEPAT = "example only, not a citation"
         cur = ""
         inlist = 0
       }
@@ -184,9 +206,13 @@ records=$(
       }
       {
         line = $0
-        # Every occurrence is a reference, wherever it sits.
-        collect(line)
-        for (i = 1; i <= NIDS; i++) printf "R %s:%d %s\n", fname, FNR, IDS[i]
+        # Every occurrence is a reference, wherever it sits -- UNLESS the line
+        # carries the Q2 style-example marker, in which case none of its
+        # id-shaped tokens are references at all (see STYLEPAT above).
+        if (line !~ STYLEPAT) {
+          collect(line)
+          for (i = 1; i <= NIDS; i++) printf "R %s:%d %s\n", fname, FNR, IDS[i]
+        }
 
         isdef = (line ~ DEFPAT)
         if (isdef) {
@@ -372,7 +398,11 @@ while IFS= read -r pair; do
     dangling=1
   }
 done <<<"$listed_pairs"
-# Prose-dangling: reported always, fatal only under --strict (see header).
+# Prose-dangling: reported and fatal unconditionally, same as listing-dangling
+# (operator ruling, bead pg2-p7fnv Q1 — no more location-based severity split;
+# `--strict` no longer has anything to do with this section). A style-example
+# literal never reaches here at all: STYLEPAT in the awk pass above already
+# excluded its line from every R record, so there is no id to resolve.
 # Resolve each DISTINCT referenced ID once, then map the unresolved ones back to
 # their locations. Resolving per OCCURRENCE forks a grep per reference (hundreds
 # on a real set); per distinct ID it is a few dozen.
@@ -385,16 +415,12 @@ prose_bad=$(
 )
 if [ -n "$prose_bad" ]; then
   dangling=1
-  lead="WARN"
-  if [ "$STRICT" -eq 1 ]; then
-    lead="FAIL"
-    fail=1
-  fi
+  fail=1
   while IFS= read -r id; do
     [ -n "$id" ] || continue
     locs=$(printf '%s\n' "$records" | awk -v i="$id" '$1 == "R" && $3 == i { print $2 }' | sort_locs | tr '\n' ' ')
-    printf '  %s dangling in prose: %s (%s) resolves to no definition here and no declared external reference\n' \
-      "$lead" "$id" "${locs% }"
+    printf '  FAIL dangling in prose: %s (%s) resolves to no definition here and no declared external reference\n' \
+      "$id" "${locs% }"
   done <<<"$prose_bad"
 fi
 [ "$dangling" -eq 0 ] && echo "  clean (every referenced ID resolves here or via the imports table)"

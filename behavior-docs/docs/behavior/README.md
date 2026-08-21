@@ -57,8 +57,7 @@ Each citable element carries a **typed name** (`INV-3`): invariants `INV-`, goal
 stories `STORY-`, use cases `USECASE-`, journeys `JOURNEY-`, interfaces `INTF-`, actors `ACTOR-`,
 open questions `OQ-`; concepts are cited by name. **Identity is a stable UUID** minted at the element's definition and
 never changed, carried in an HTML comment on the definition line; the **name is a mutable,
-human-readable label**, consistent only within its own set. Namespacing (`INV-DISP-1`,
-`INTF-SOURCE`) is for readability, not identity — matching is by UUID — so a name MAY be renamed
+human-readable label**, consistent only within its own set. Namespacing (example only, not a citation: `INV-DISP-1`, `INTF-SOURCE`) is for readability, not identity — matching is by UUID — so a name MAY be renamed
 without breaking identity, and gaps and out-of-sequence numbers are legal. Across behavior docs
 sets an element is cited by name as `<repo-name> · <set-path> · <name>`, and a set declares the
 external elements it references — each with **what it is** and the **owner's UUID linked to the
