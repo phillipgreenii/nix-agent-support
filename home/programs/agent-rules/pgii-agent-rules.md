@@ -494,6 +494,30 @@ MUST be isolated; if they modify files directly, the test MUST generate the scen
   (**F-3** `sibling-open?`) is not a blocker at all and MUST NOT be given an edge — that issue's
   label reason simply died. A dependency MUST NOT be substituted by a DEFER window either: a defer
   is a TIMER that expires whether or not the blocker cleared, while an edge IS the state.
+- **D-9** A PARENT MUST NOT BE HELD OUT OF THE QUEUE WHILE ITS CHILDREN ARE STILL TO BE WORKED.
+  `bd` propagates BOTH `blocked` AND `deferred` DOWN parent-child, so a parent in either state
+  hides its ENTIRE subtree from `bd ready` — the children read `status=open`, unassigned,
+  undeferred, with no blocking edge of their own, and are still absent. Two consequences, and
+  neither is discoverable from the children:
+  - An agent MUST NOT wire a parent `--blocked-by` its OWN child. That shape is a DEADLOCK, not a
+    dependency: the parent is blocked because the child is open, and the child is hidden because
+    the parent is blocked, so neither side can ever be worked and nothing external clears it. This
+    is the one place **D-2**'s "model it as a blocking dependency" MUST NOT be applied — a
+    container parent's relationship to its children is ALREADY expressed by parent-child.
+  - An agent MUST NOT `--defer` a parent whose children it still wants worked. A defer looks like
+    bookkeeping on one issue and silently parks the whole subtree.
+    A container parent with no deliverable of its own therefore has exactly two honest states: OPEN
+    (and re-triaged whenever it surfaces), or CLOSED. `bd close` refuses it with "cannot close epic
+    <id>: N open child issue(s)"; `--force` is the documented override and is NON-DESTRUCTIVE —
+    verified 2026-08-19 that after a forced close the children stay `open` and READY and
+    `bd list --parent <id> --status all -n 0` still reconstructs the roll-up.
+    Observed 2026-08-19 (`tc-i1t9`, and the ruling that filed it): applying the
+    convert-to-dependency remedy to three bb container epics removed 4 ready decision beads from
+    every queue, and the SAME shape pre-existed under `tc-gh4j`/`tc-airc`, leaving 18 open bb leaves
+    permanently unworkable — which is why `bd ready --exclude-label human --label bb` read EMPTY
+    while the decomposition had 18 open leaves. Removing the parent→child edges restored them
+    immediately. Diagnosing this MUST be done with the claim RELEASED: `bd ready` excludes
+    `in_progress` on its own, so the test is vacuous while the parent is claimed.
 
 ### General Guidelines
 
