@@ -10,6 +10,7 @@ package roles
 import (
 	"text/template"
 
+	"github.com/phillipgreenii/pr-pool/internal/backoff"
 	"github.com/phillipgreenii/pr-pool/internal/budget"
 	"github.com/phillipgreenii/pr-pool/internal/event"
 )
@@ -32,6 +33,12 @@ type Role struct {
 	Correlation *event.CorrelationSpec
 	CCPool      *CCPoolConfig  // set iff Type == "ccpool"
 	Command     *CommandConfig // set iff Type == "command"
+	// RetryBackoff is this role's HANDLER RETRY CADENCE (INV-FAIL-2, pg2-0c8yz):
+	// how long the core waits before re-offering an event this role's handler
+	// pre-accept declined, before expiresAt bounds it. A zero value is safe —
+	// backoff.Policy.Duration sanitizes it against backoff.Default() — so a role
+	// that never sets it (e.g. every built-in role) still gets a sane cadence.
+	RetryBackoff backoff.Policy
 }
 
 // CCPoolConfig is the ccpool role type's behavior + launch config.

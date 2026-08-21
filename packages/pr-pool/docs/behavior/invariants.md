@@ -26,7 +26,7 @@ flowchart TD
     match -->|matched| offer["offer to a bound handler's head — one outstanding offer per handler (INV-CONC-1)"]
     offer --> acc{"handler accepts? (ack or completion)"}
     acc -->|"busy / pre-accept decline"| exp{"was the event already past expiresAt when that attempt was made?"}
-    exp -->|no| reoffer["re-offer, or offer elsewhere (INV-FAIL-1)"]
+    exp -->|no| reoffer["re-offer, or offer elsewhere, at the INV-FAIL-2 cadence (INV-FAIL-1)"]
     reoffer --> acc
     exp -->|yes| expire["that attempt was this handler's last: dropped undelivered — unconsumed-expired (INV-EVT-4)"]
     acc -->|accepted| mark["mark accepted per (event, handler), then retain while a dedup id or an owed attempt remains (INV-EVT-1)"]
@@ -154,7 +154,7 @@ sequenceDiagram
     A-->>Core: accept (ack)
     Core->>B: offer event E2
     B-->>Core: busy — pre-accept decline (at capacity)
-    Note over Core: not a defect — re-offer E2 while it is unexpired (INV-FAIL-1)
+    Note over Core: not a defect — re-offer E2 while it is unexpired, at the INV-FAIL-2 cadence (INV-FAIL-1)
     Core->>A: re-offer E2 once A has capacity (still unexpired)
     A-->>Core: accept (ack) — the core is owed nothing further (INV-FAIL-1)
     Note over Core,B: B could equally have accepted and buffered E2 internally — an accept is custody, not progress (INV-CONC-1)
@@ -185,8 +185,10 @@ sequenceDiagram
 - **`INV-FAIL-1`** <!-- uuid: 2da0d587-f116-42e6-b986-8abf80ed023c --> — Failure classes split at
   the **acceptance boundary** (`INV-EVT-1`, `ADR 0031`). **Pre-accept declines** — a handler is
   `busy` (at capacity) or `unavailable` — are the **core's** to handle: it re-offers the event **while
-  it is unexpired** (`INV-EVT-4`), to the same handler once the ceiling lifts or to another bound
-  handler. **Post-accept
+  it is unexpired** (`INV-EVT-4`), **at the cadence `INV-FAIL-2` defines**, to the same handler once
+  the ceiling lifts or to another bound handler. **The failure reason does not change the
+  cadence**: `busy` and `unavailable` share exactly one retry cadence — there is no per-reason
+  knob (`INV-FAIL-2`). **Post-accept
   outcomes** — `retryable`, `resource-limit`, or `critical`, reported by a handler that has
   **already accepted** the event — are the **handler's** own (once it accepts, the handler owns
   persistence/resume/retry); the core does **not** re-offer post-accept work, and does **not**
@@ -195,6 +197,51 @@ sequenceDiagram
   needed** — never a silent core retry. The core takes no per-run status stream back from a handler at
   all; the only status a participant pushes to the core is its **own** health (`healthy` / `degraded` /
   `unavailable`), and an `unavailable` report is a pre-accept decline handled above.
+- **`INV-FAIL-2`** <!-- uuid: 50a72935-b5f6-4285-8e12-61a3e5353688 --> — **The handler retry
+  cadence.** A pre-accept decline's re-offer (`INV-FAIL-1`) is not instantaneous: the core waits
+  before trying again, on an **exponential-backoff-with-a-cap** schedule — a short initial wait
+  that grows by a fixed factor on each further **consecutive** decline of the same head, capped at
+  a maximum interval — **per handler**, because handlers differ in how long they typically stay
+  busy. A deployment **MAY** override the cadence per handler. The concrete default values are a
+  realization decision, not restated here (the floor names no tuning constant):
+  `phillipgreenii-nix-agent-support · packages/pr-pool/docs/decisions · DEC-RETRY-1`.
+
+  **This is not a reversal of dropping per-role `cap`.** A per-role concurrency ceiling was removed
+  because it was the core enforcing a limit that is the **handler's** own business (`INV-CONC-1`):
+  the core tracks no such number, and a handler's capacity stays entirely its own to manage. The
+  retry cadence is different in **kind**, not degree: it governs the **core's own act** of
+  re-offering — the core is the one thing doing the re-offering, so scheduling it is the core's own
+  behavior, exactly the same test `INV-CONC-1`'s capacity boundary already applies ("does the core
+  act on the value, or merely hand it over?" — here, the core **acts**: it schedules on the value).
+  Configuring the cadence does **not** reopen per-role concurrency and **MUST NOT** become a back
+  door for it: nothing here lets a handler declare, or the core enforce, **how many** events a
+  handler may hold at once — only **how long the core waits** before its next attempt on the one
+  head it already offers per handler (`INV-CONC-1`).
+
+  **Interaction with `expiresAt` — an accepted consequence, not a defect.** The cadence and the
+  retry window (`INV-EVT-4`) are independent: nothing shortens one to fit the other. A cadence
+  longer than the time remaining before an event's `expiresAt` means the **next** eligible attempt
+  **is** the post-expiry final attempt (`INV-EVT-4`) — a long enough cadence silently converts a
+  retryable event into a one-shot for that handler. This is coherent with `INV-EVT-4` as stated and
+  is **left as is, deliberately**: an operator who wants genuine retries for a handler with a long
+  cadence sets that handler's events a proportionately later `expiresAt`, rather than the core
+  shortening the cadence on its own initiative.
+
+- **`INV-FAIL-3`** <!-- uuid: 30f71d46-b312-4cdf-a7bf-fd4846e759c6 --> — **The pull-source failure
+  backoff.** A pull source's query **trigger** (`USECASE-CREATE-SOURCE`) states the
+  **success-path** polling cadence — how often to ask when things are fine. It says nothing about
+  a **failed** query (a failed query is an error, never an empty result,
+  `USECASE-CREATE-SOURCE`): that is **this** invariant's own, **distinct** configuration surface,
+  because the two answer different questions — one paces healthy polling, the other paces recovery
+  from a source reporting itself unavailable or out of resources. The **shape** is the **same**
+  exponential-backoff-with-a-cap `INV-FAIL-2` uses (one implementation, two independent knobs;
+  `DEC-RETRY-1`), but this surface additionally bounds its **own** attempt count: unlike a
+  handler's retry, which an event's `expiresAt` bounds externally (`INV-EVT-4`), a pull source's
+  failure has no such external bound, so a configured **retry count** caps how many further
+  attempts are made before the failure is reported exactly as `USECASE-CREATE-SOURCE` requires — an
+  error to logs and metrics, **never** a silently idle pass. The retry count defaults to **zero**
+  (fail fast) unless a deployment opts in (`DEC-RETRY-1`), so an unconfigured source's behavior is
+  unchanged.
 
 ## Wiring
 

@@ -53,6 +53,8 @@ docs cite. An entry that overlaps an existing repository ADR MUST **cite** it, n
   clock origin to pick.
 - [`DEC-OBS-1`](observability.md) — OTel is the default emission transport for metrics only, and
   logs stay JSONL.
+- [`DEC-RETRY-1`](retry.md) — exponential-backoff-with-a-cap shape, and its default values, for
+  both the handler retry cadence and the pull-source failure backoff.
 - [`DEC-WIRE-1`](wire.md) — the default transport is a CLI invocation carrying JSON, with coarse exit
   codes, plus the illustrative message shapes.
 - [`DEC-WIRE-2`](wire.md) — the core is reached over a socket, and a callback command arrives with

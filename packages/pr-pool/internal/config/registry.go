@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
+	"github.com/phillipgreenii/pr-pool/internal/backoff"
 	"github.com/phillipgreenii/pr-pool/internal/budget"
 	"github.com/phillipgreenii/pr-pool/internal/event"
 	"github.com/phillipgreenii/pr-pool/internal/prompt"
@@ -41,12 +42,43 @@ type poolTOML struct {
 	SelfLogin   string      `toml:"self_login"`
 	WorktreeDir string      `toml:"worktree_dir"`
 	Budget      *budgetTOML `toml:"budget"`
+	// Retry is the pool-wide DEFAULT handler retry cadence (INV-FAIL-2,
+	// pg2-0c8yz), overlaid by a per-role [role.retry] table. Absent: the Go-level
+	// default (backoff.Default()).
+	Retry *backoffTOML `toml:"retry"`
+	// PullFailureBackoff is the pool-wide DEFAULT pull-source failure backoff
+	// (INV-FAIL-3), overlaid by a per-query [query.failure_backoff] table.
+	// Absent: backoff.Default() shape with Retries: 0 (fail fast, unchanged from
+	// today).
+	PullFailureBackoff *failureBackoffTOML `toml:"pull_failure_backoff"`
 }
 
 type budgetTOML struct {
 	Tokens *int64    `toml:"tokens"`
 	Cost   *int64    `toml:"cost"`
 	Time   *duration `toml:"time"`
+}
+
+// backoffTOML is the shared retry-cadence SHAPE table (pg2-0c8yz): a short
+// initial wait, growing by factor on each consecutive failure, capped at max.
+// Used standalone for the handler retry cadence ([pool].retry / [role.retry])
+// and duplicated (with retries) into failureBackoffTOML for the pull-source
+// failure backoff.
+type backoffTOML struct {
+	Initial *duration `toml:"initial"`
+	Factor  float64   `toml:"factor"`
+	Max     *duration `toml:"max"`
+}
+
+// failureBackoffTOML is the pull-source failure backoff table
+// ([pool].pull_failure_backoff / [query.failure_backoff], INV-FAIL-3): the same
+// shape as backoffTOML plus Retries, the bound on how many further attempts
+// discover.Produce makes within one pass before giving up.
+type failureBackoffTOML struct {
+	Initial *duration `toml:"initial"`
+	Factor  float64   `toml:"factor"`
+	Max     *duration `toml:"max"`
+	Retries *int      `toml:"retries"`
 }
 
 type roleTOML struct {
@@ -58,6 +90,10 @@ type roleTOML struct {
 	Corr    *correlationTOML `toml:"correlation"`
 	CCPool  toml.Primitive   `toml:"ccpool"`  // decoded by buildCCPool iff type==ccpool
 	Command toml.Primitive   `toml:"command"` // decoded by buildCommand iff type==command
+	// Retry is this role's HANDLER RETRY CADENCE override (INV-FAIL-2,
+	// pg2-0c8yz), overlaid onto the pool-wide default ([pool].retry). Absent:
+	// inherits the pool default verbatim.
+	Retry *backoffTOML `toml:"retry"`
 }
 
 // queryTOML is one top-level [[query]]: a named producer. It carries its config
@@ -76,6 +112,11 @@ type queryTOML struct {
 	GitHubIssues toml.Primitive `toml:"github-issues"`
 	JiraIssues   toml.Primitive `toml:"jira-issues"`
 	Event        toml.Primitive `toml:"event"`
+	// FailureBackoff is this query's PULL-SOURCE FAILURE BACKOFF override
+	// (INV-FAIL-3, pg2-0c8yz), overlaid onto the pool-wide default
+	// ([pool].pull_failure_backoff). Absent: inherits the pool default verbatim
+	// (Retries: 0 unless the pool default itself opts in).
+	FailureBackoff *failureBackoffTOML `toml:"failure_backoff"`
 }
 
 // triggerTOML is a query's firing strategy (Q1). kind selects the concrete
@@ -145,6 +186,20 @@ func (r *Registry) decodeRoleSet(path, configDir string, c *Config) (roles.RoleS
 		c.WorktreeDir = shape.Pool.WorktreeDir
 	}
 	overlayConfigBudget(c, shape.Pool.Budget)
+	// Pool-wide retry-cadence defaults (INV-FAIL-2 / INV-FAIL-3, pg2-0c8yz) MUST
+	// resolve before buildRole/buildQueries below, since both read c.RetryBackoff
+	// / c.PullFailureBackoff / c.PullFailureRetries as their BASE to overlay a
+	// per-role / per-query table onto.
+	rb, err := buildBackoffPolicy(c.RetryBackoff, shape.Pool.Retry)
+	if err != nil {
+		return nil, fmt.Errorf("pool.retry: %w", err)
+	}
+	c.RetryBackoff = rb
+	pfb, err := buildFailureBackoff(query.FailureBackoff{Policy: c.PullFailureBackoff, Retries: c.PullFailureRetries}, shape.Pool.PullFailureBackoff)
+	if err != nil {
+		return nil, fmt.Errorf("pool.pull_failure_backoff: %w", err)
+	}
+	c.PullFailureBackoff, c.PullFailureRetries = pfb.Policy, pfb.Retries
 	if len(shape.Roles) == 0 {
 		return nil, nil // pool-only / empty => built-ins
 	}
@@ -235,7 +290,11 @@ func (r *Registry) buildRole(md toml.MetaData, rt roleTOML, configDir string, c 
 	if rt.Enabled != nil {
 		enabled = *rt.Enabled
 	}
-	role := roles.Role{Name: rt.Name, Type: rt.Type, Cap: rt.Cap, Enabled: enabled, Binds: rt.Binds, Correlation: corr}
+	retryBackoff, err := buildBackoffPolicy(c.RetryBackoff, rt.Retry)
+	if err != nil {
+		return roles.Role{}, fmt.Errorf("retry: %w", err)
+	}
+	role := roles.Role{Name: rt.Name, Type: rt.Type, Cap: rt.Cap, Enabled: enabled, Binds: rt.Binds, Correlation: corr, RetryBackoff: retryBackoff}
 	switch rt.Type {
 	case "ccpool":
 		cc, err := buildCCPool(md, rt.CCPool, configDir, c)
@@ -277,7 +336,65 @@ func (r *Registry) buildQuery(md toml.MetaData, qt queryTOML, c Config) (query.Q
 	if err != nil {
 		return nil, err
 	}
-	return r.queries.Decode(qt.Type, query.Meta{EmitTypes: qt.Emits, Trig: trig}, md, prim)
+	fb, err := buildFailureBackoff(query.FailureBackoff{Policy: c.PullFailureBackoff, Retries: c.PullFailureRetries}, qt.FailureBackoff)
+	if err != nil {
+		return nil, fmt.Errorf("failure_backoff: %w", err)
+	}
+	return r.queries.Decode(qt.Type, query.Meta{EmitTypes: qt.Emits, Trig: trig, FB: fb}, md, prim)
+}
+
+// buildBackoffPolicy overlays a [*.retry]-shaped TOML table onto base — the
+// retry-cadence SHAPE (INV-FAIL-2 / INV-FAIL-3, pg2-0c8yz): a short initial
+// wait, growing by factor on each consecutive failure, capped at max. An
+// absent table returns base unchanged (inherit the pool default verbatim).
+func buildBackoffPolicy(base backoff.Policy, t *backoffTOML) (backoff.Policy, error) {
+	if t == nil {
+		return base, nil
+	}
+	if t.Initial != nil {
+		if t.Initial.D <= 0 {
+			return backoff.Policy{}, fmt.Errorf("initial must be > 0")
+		}
+		base.Initial = t.Initial.D
+	}
+	if t.Factor != 0 {
+		if t.Factor <= 1 {
+			return backoff.Policy{}, fmt.Errorf("factor must be > 1 (it must GROW the wait on each consecutive failure)")
+		}
+		base.Factor = t.Factor
+	}
+	if t.Max != nil {
+		if t.Max.D <= 0 {
+			return backoff.Policy{}, fmt.Errorf("max must be > 0")
+		}
+		base.Max = t.Max.D
+	}
+	return base, nil
+}
+
+// buildFailureBackoff overlays a [*.failure_backoff]-shaped TOML table onto
+// base — the pull-source failure backoff (INV-FAIL-3): the same SHAPE as
+// buildBackoffPolicy plus retries, the bound on how many further attempts
+// discover.Produce makes within one pass before giving up. An absent table
+// returns base unchanged (inherit the pool default verbatim, Retries: 0 unless
+// the pool default itself opted in).
+func buildFailureBackoff(base query.FailureBackoff, t *failureBackoffTOML) (query.FailureBackoff, error) {
+	fb := base
+	if t == nil {
+		return fb, nil
+	}
+	policy, err := buildBackoffPolicy(fb.Policy, &backoffTOML{Initial: t.Initial, Factor: t.Factor, Max: t.Max})
+	if err != nil {
+		return query.FailureBackoff{}, err
+	}
+	fb.Policy = policy
+	if t.Retries != nil {
+		if *t.Retries < 0 {
+			return query.FailureBackoff{}, fmt.Errorf("retries must be >= 0")
+		}
+		fb.Retries = *t.Retries
+	}
+	return fb, nil
 }
 
 // buildTrigger maps a [query.trigger] table to the concrete Trigger strategy

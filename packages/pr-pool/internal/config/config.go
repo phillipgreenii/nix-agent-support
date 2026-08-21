@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/phillipgreenii/pr-pool/internal/backoff"
 	"github.com/phillipgreenii/pr-pool/internal/budget"
 	"github.com/phillipgreenii/pr-pool/internal/query"
 	"github.com/phillipgreenii/pr-pool/internal/roles"
@@ -24,20 +25,34 @@ import (
 )
 
 type Config struct {
-	RepoRoot       string
-	BeadsPrefix    string
-	WorktreeDir    string
-	SkillMD        string
-	WorkerSkillMD  string
-	MaxFeedback    int
-	MaxWorker      int
-	MaxWait        time.Duration
-	PollInterval   time.Duration
-	QuotaPaused    string
-	CICDDown       string
-	Effort         string
-	Model          string
-	PermissionMode string
+	RepoRoot      string
+	BeadsPrefix   string
+	WorktreeDir   string
+	SkillMD       string
+	WorkerSkillMD string
+	MaxFeedback   int
+	MaxWorker     int
+	MaxWait       time.Duration
+	PollInterval  time.Duration
+	// RetryBackoff is the pool-wide DEFAULT handler retry cadence (INV-FAIL-2,
+	// pg2-0c8yz): how long the core waits before re-offering a pre-accept
+	// decline, before an event's own expiresAt bounds it. A per-role
+	// [role.retry] table overlays this. Default: backoff.Default().
+	RetryBackoff backoff.Policy
+	// PullFailureBackoff / PullFailureRetries are the pool-wide DEFAULT
+	// pull-source failure backoff (INV-FAIL-3): the cadence and attempt bound
+	// discover.Produce consults when a scheduled query FAILS, distinct from
+	// PollInterval's success-path cadence. A per-query [query.failure_backoff]
+	// table overlays this. Default: backoff.Default() shape, Retries: 0 (fail
+	// fast — unchanged from pg2-qq9v's original behavior unless a deployment
+	// opts in).
+	PullFailureBackoff backoff.Policy
+	PullFailureRetries int
+	QuotaPaused        string
+	CICDDown           string
+	Effort             string
+	Model              string
+	PermissionMode     string
 	// AllowedTools is the claude --allowed-tools allowlist forwarded verbatim to
 	// `ccpool new --allowed-tools`. Combined with PermissionMode=dontAsk it is the
 	// worker's security boundary: any tool NOT matching an entry here is
@@ -134,21 +149,28 @@ func Default() Config {
 	cwd, _ := os.Getwd()
 	state := stateHome()
 	return Config{
-		RepoRoot:       cwd,
-		BeadsPrefix:    "zr",
-		WorktreeDir:    state + "/pr-pool/worktrees",
-		SkillMD:        "",
-		WorkerSkillMD:  "",
-		MaxFeedback:    1,
-		MaxWorker:      1,
-		MaxWait:        1800 * time.Second,
-		PollInterval:   10 * time.Second,
-		QuotaPaused:    "",
-		CICDDown:       "",
-		Effort:         "max",
-		Model:          "",
-		Autonomous:     true,      // workers are human-less; AskUserQuestion is structurally blocked via ccpool --autonomous
-		PermissionMode: "dontAsk", // deny-by-default: auto-DENY any tool outside AllowedTools, non-interactive. PR_POOL_PERMISSION_MODE=bypassPermissions is the opt-in escape for an attended/trusted run.
+		RepoRoot:      cwd,
+		BeadsPrefix:   "zr",
+		WorktreeDir:   state + "/pr-pool/worktrees",
+		SkillMD:       "",
+		WorkerSkillMD: "",
+		MaxFeedback:   1,
+		MaxWorker:     1,
+		MaxWait:       1800 * time.Second,
+		PollInterval:  10 * time.Second,
+		RetryBackoff:  backoff.Default(),
+		// PullFailureBackoff shares the same shape default; Retries stays 0
+		// (fail fast) so an unconfigured deployment is byte-for-byte unchanged
+		// from pg2-qq9v's original "a query failure must NOT masquerade as no
+		// ready work" behavior.
+		PullFailureBackoff: backoff.Default(),
+		PullFailureRetries: 0,
+		QuotaPaused:        "",
+		CICDDown:           "",
+		Effort:             "max",
+		Model:              "",
+		Autonomous:         true,      // workers are human-less; AskUserQuestion is structurally blocked via ccpool --autonomous
+		PermissionMode:     "dontAsk", // deny-by-default: auto-DENY any tool outside AllowedTools, non-interactive. PR_POOL_PERMISSION_MODE=bypassPermissions is the opt-in escape for an attended/trusted run.
 		// SECURITY-SENSITIVE default allowlist (HUMAN SIGN-OFF REQUIRED — see plan).
 		// Minimum verbs an autonomous worker needs; deliberately NOT blanket Bash.
 		// Per-entry rationale is in docs/superpowers/plans/2026-06-23-pr-pool-deny-by-default-allowlist.md.

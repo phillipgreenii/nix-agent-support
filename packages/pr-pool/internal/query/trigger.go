@@ -1,6 +1,10 @@
 package query
 
-import "time"
+import (
+	"time"
+
+	"github.com/phillipgreenii/pr-pool/internal/backoff"
+)
 
 // Trigger is a query's firing strategy (Q1) — the Strategy pattern. A query's
 // firing is decoupled from the drain loop: the driver interprets the concrete
@@ -64,4 +68,21 @@ func Threshold(t Trigger) (ThresholdTrigger, bool) {
 	}
 	tt, ok := t.(ThresholdTrigger)
 	return tt, ok
+}
+
+// FailureBackoff is a pull-source's retry cadence after a FAILED query — a
+// source reporting unavailable or out of resources (INV-FAIL-3, pg2-0c8yz) —
+// distinct from Trigger's SUCCESS-path polling interval: Trigger says how often
+// to ask when things are fine, this says how long to wait before asking again
+// after the source itself reported a failure. The shape (Policy) is the SAME
+// exponential-backoff-with-a-cap discover.Produce's handler-side counterpart
+// uses (backoff.Policy), but this surface additionally bounds its OWN attempt
+// count: unlike a handler's retry, which an event's `expiresAt` bounds
+// externally (INV-EVT-4), a pull source's failure has no such external bound,
+// so Retries caps how many further attempts are made within one scheduling pass
+// before the failure is reported exactly as pg2-qq9v requires — an error to
+// logs and metrics, never a silently idle pass.
+type FailureBackoff struct {
+	Policy  backoff.Policy
+	Retries int // additional attempts after the first failure; 0 = fail fast (default)
 }

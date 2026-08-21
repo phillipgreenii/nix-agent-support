@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/phillipgreenii/pr-pool/internal/backoff"
 )
 
 // --- test doubles ---------------------------------------------------------
@@ -294,22 +296,24 @@ func TestExpiredEventRetainedUntilItsOwedAttemptIsMade(t *testing.T) {
 }
 
 // INV-EVT-4 boundary: `expiresAt` IS the retry window. A decline BEFORE it is
-// re-offered (INV-FAIL-1 unchanged); the first attempt made at or after it is
-// final. One knob, both behaviors.
+// re-offered (INV-FAIL-1 unchanged) once the handler retry cadence (INV-FAIL-2)
+// elapses; the first attempt made at or after it is final. One knob (expiresAt)
+// bounds retrying; a second (the cadence) paces it.
 func TestExpiresAtIsTheRetryWindow(t *testing.T) {
 	clk := newClock()
-	q := newQueue(t, clk)
+	q := newQueue(t, clk, WithRetryBackoff(backoff.Policy{Initial: time.Minute, Factor: 2, Max: 10 * time.Minute}))
 	l := newListener("h", "T")
 	l.neverAccept = true
 	q.Register(l)
 	mustEnqueue(t, q, evtUntil("e1", "T", clk.in(10*time.Minute)))
 
 	q.Dispatch()
+	clk.advance(time.Minute) // past the retry cadence (INV-FAIL-2), still short of expiresAt
 	q.Dispatch()
 	if !equal(l.offered, []string{"e1", "e1"}) {
 		t.Fatalf("offers = %v, want e1 re-offered while unexpired (INV-FAIL-1)", l.offered)
 	}
-	clk.advance(11 * time.Minute) // past expiresAt
+	clk.advance(11 * time.Minute) // past expiresAt (and any further cadence wait)
 	q.Dispatch()                  // this attempt is the last one owed
 	q.Dispatch()                  // ...so nothing more is offered
 	if !equal(l.offered, []string{"e1", "e1", "e1"}) {
@@ -419,19 +423,143 @@ func TestPerListenerCursorIndependence(t *testing.T) {
 }
 
 // INV-FAIL-1: a pre-accept busy decline is re-offered while the event is
-// unexpired (same head).
+// unexpired (same head), once the handler retry cadence (INV-FAIL-2) elapses.
 func TestPreAcceptBusyReoffer(t *testing.T) {
 	clk := newClock()
-	q := newQueue(t, clk)
+	q := newQueue(t, clk, WithRetryBackoff(backoff.Policy{Initial: time.Second, Factor: 2, Max: time.Minute}))
 	l := newListener("h", "T")
 	l.busyRemaining["e1"] = 2 // decline twice, accept on the third offer
 	q.Register(l)
 	mustEnqueue(t, q, evtUntil("e1", "T", clk.in(time.Hour)))
-	for range 3 {
+	// Advance past each successive backoff wait before the next attempt: 1s after
+	// the 1st decline, then 2s after the 2nd (Initial=1s, Factor=2).
+	for _, wait := range []time.Duration{0, time.Second, 2 * time.Second} {
+		clk.advance(wait)
 		q.Dispatch()
 	}
 	if !equal(l.offered, []string{"e1", "e1", "e1"}) {
 		t.Fatalf("offers = %v, want e1 re-offered 3x", l.offered)
+	}
+	if !equal(l.accepted, []string{"e1"}) {
+		t.Fatalf("accepted = %v, want [e1]", l.accepted)
+	}
+}
+
+// The retry cadence actually PACES the re-offer: a Dispatch pass immediately
+// following a pre-accept decline, with no clock advance, must NOT re-offer —
+// the cadence (INV-FAIL-2) is still cooling down. Only once it elapses does the
+// next Dispatch re-offer, exactly once per elapsed cadence window.
+func TestHandlerRetryCadenceHonorsInterval(t *testing.T) {
+	clk := newClock()
+	q := newQueue(t, clk, WithRetryBackoff(backoff.Policy{Initial: 10 * time.Second, Factor: 2, Max: time.Minute}))
+	l := newListener("h", "T")
+	l.neverAccept = true
+	q.Register(l)
+	mustEnqueue(t, q, evtUntil("e1", "T", clk.in(time.Hour)))
+
+	q.Dispatch() // 1st attempt: decline, starts the cadence
+	if !equal(l.offered, []string{"e1"}) {
+		t.Fatalf("offers = %v, want exactly one offer before the cadence has elapsed", l.offered)
+	}
+
+	// Immediately re-dispatching, with NO time passing, must be withheld.
+	q.Dispatch()
+	q.Dispatch()
+	if !equal(l.offered, []string{"e1"}) {
+		t.Fatalf("offers = %v, want NO re-offer before the cadence interval elapses", l.offered)
+	}
+
+	// Short of the interval: still withheld.
+	clk.advance(9 * time.Second)
+	q.Dispatch()
+	if !equal(l.offered, []string{"e1"}) {
+		t.Fatalf("offers = %v, want NO re-offer short of the 10s cadence", l.offered)
+	}
+
+	// At/past the interval: re-offered exactly once.
+	clk.advance(time.Second)
+	q.Dispatch()
+	if !equal(l.offered, []string{"e1", "e1"}) {
+		t.Fatalf("offers = %v, want exactly one re-offer once the cadence elapsed", l.offered)
+	}
+}
+
+// A configured cadence LONGER than the remaining expiresAt window silently
+// converts a retryable event into a one-shot for that handler (the accepted
+// INV-EVT-4 consequence, pg2-0c8yz): the decline's next ELIGIBLE attempt lands
+// after expiresAt, so that attempt is the handler's LAST rather than a further
+// re-offer — even though the handler would otherwise still be owed more retries
+// under a shorter cadence.
+func TestBackoffLongerThanExpiresAtConvertsToOneFinalChance(t *testing.T) {
+	clk := newClock()
+	// Cadence's Initial (5m) far exceeds the event's remaining retry window (2m).
+	q := newQueue(t, clk, WithRetryBackoff(backoff.Policy{Initial: 5 * time.Minute, Factor: 2, Max: time.Hour}))
+	l := newListener("h", "T")
+	l.neverAccept = true // always pre-accept declines
+	q.Register(l)
+	mustEnqueue(t, q, evtUntil("e1", "T", clk.in(2*time.Minute)))
+
+	q.Dispatch() // 1st attempt: unexpired, so a re-offer condition — cadence starts
+	if !equal(l.offered, []string{"e1"}) {
+		t.Fatalf("offers = %v, want exactly one offer", l.offered)
+	}
+
+	// Advance PAST expiresAt but still short of the 5m cadence, proving the
+	// event's own retention (INV-EVT-1) holds it — it is not dropped merely
+	// because it expired while cooling down.
+	clk.advance(3 * time.Minute)
+	if q.DepthByType()["T"] != 1 {
+		t.Fatalf("event dropped while still owed its next attempt: %v", q.DepthByType())
+	}
+	q.Dispatch() // still cooling down: no attempt yet
+	if !equal(l.offered, []string{"e1"}) {
+		t.Fatalf("offers = %v, want no re-offer before the cadence elapses", l.offered)
+	}
+
+	// Advance past the cadence: the NEXT (and, per INV-EVT-4, LAST) attempt fires.
+	clk.advance(3 * time.Minute)
+	q.Dispatch()
+	if !equal(l.offered, []string{"e1", "e1"}) {
+		t.Fatalf("offers = %v, want exactly one more (final) offer", l.offered)
+	}
+	// Settled: a further Dispatch must not offer it again, and Expire drops it.
+	q.Dispatch()
+	if !equal(l.offered, []string{"e1", "e1"}) {
+		t.Fatalf("offers = %v, want no offer beyond the final attempt (INV-EVT-4)", l.offered)
+	}
+	if n := q.Expire(); n != 1 {
+		t.Fatalf("expire dropped %d, want 1 (nothing further owed after the final attempt)", n)
+	}
+}
+
+// A Listener MAY declare its own retry cadence (BackoffListener), overriding
+// the queue's default for just that handler — handlers differ in how long they
+// typically stay busy (INV-FAIL-2).
+type backoffOverrideListener struct {
+	*fakeListener
+	policy backoff.Policy
+}
+
+func (l *backoffOverrideListener) RetryBackoff() backoff.Policy { return l.policy }
+
+func TestPerHandlerBackoffOverride(t *testing.T) {
+	clk := newClock()
+	// Queue default is a long cadence; the override is short, so the override
+	// must be the one actually consulted.
+	q := newQueue(t, clk, WithRetryBackoff(backoff.Policy{Initial: time.Hour, Factor: 2, Max: time.Hour}))
+	l := &backoffOverrideListener{
+		fakeListener: newListener("h", "T"),
+		policy:       backoff.Policy{Initial: time.Second, Factor: 2, Max: time.Minute},
+	}
+	l.busyRemaining["e1"] = 1
+	q.Register(l)
+	mustEnqueue(t, q, evtUntil("e1", "T", clk.in(time.Hour)))
+
+	q.Dispatch() // decline; starts the OVERRIDE cadence (1s), not the queue default (1h)
+	clk.advance(time.Second)
+	q.Dispatch() // re-offered: proves the override, not the 1h queue default, governed this
+	if !equal(l.offered, []string{"e1", "e1"}) {
+		t.Fatalf("offers = %v, want the per-handler override cadence honored, not the queue default", l.offered)
 	}
 	if !equal(l.accepted, []string{"e1"}) {
 		t.Fatalf("accepted = %v, want [e1]", l.accepted)

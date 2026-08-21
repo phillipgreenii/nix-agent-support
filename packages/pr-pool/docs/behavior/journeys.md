@@ -278,7 +278,8 @@ implement several interfaces at once, and the core neither knows nor cares. It c
 **Level:** user goal.
 **Intent:** build an event source against `INTF-SOURCE` so a deployment can obtain typed events from
 it, choosing deliberately among the shapes the two independent mode axes allow.
-_Requires:_ `INV-DISP-1`, `INV-DISP-3`, `INV-EVT-1`, `INV-EVT-4`, `INV-INTF-1`, `GOAL-MIN-1`.
+_Requires:_ `INV-DISP-1`, `INV-DISP-3`, `INV-EVT-1`, `INV-EVT-4`, `INV-FAIL-3`, `INV-INTF-1`,
+`GOAL-MIN-1`.
 _Includes:_ `USECASE-VERIFY-PARTICIPANT`.
 
 **Flow — the four shapes.** Two axes cross here and they are **independent**: who **initiates** (the
@@ -310,10 +311,14 @@ event carries an `id`, a `type`, an optional `at`, an optional `expiresAt`, and 
 
 **A failed query is an error, not an empty result.** A pull source's `query` can fail because the
 infrastructure behind it is down. The implementer **MUST** report that as an **error** — a non-zero
-outcome or an error reply — and **MUST NOT** return an empty `events` list for it. The core records
-the error to logs and metrics and does **not** read it as "nothing to do" (`INV-DISP-3` reporting
-discipline, `STORY-OBS-2`). An empty `events` list is the distinct, legitimate **genuinely idle**
-reading, and conflating the two is how a silent outage comes to look like a quiet system.
+outcome or an error reply — and **MUST NOT** return an empty `events` list for it. The core **MAY**
+retry the query itself before reporting the failure, at the **pull-source failure backoff**
+`INV-FAIL-3` defines — a config surface **distinct** from this source's own query trigger, which
+paces the success path, not recovery from a failure. Once any such retrying is exhausted, the core
+records the error to logs and metrics and does **not** read it as "nothing to do" (`INV-DISP-3`
+reporting discipline, `STORY-OBS-2`). An empty `events` list is the distinct, legitimate
+**genuinely idle** reading, and conflating the two is how a silent outage comes to look like a
+quiet system.
 
 ```mermaid
 sequenceDiagram
@@ -333,7 +338,8 @@ sequenceDiagram
     Note over CORE,SRC: infrastructure failure is an ERROR, never an empty events list
     CORE->>SRC: query
     SRC-->>CORE: error, not events = []
-    CORE->>OBS: record the error to logs + metrics, distinct from no-work
+    Note over CORE: MAY retry at the INV-FAIL-3 pull-source failure backoff cadence, bounded
+    CORE->>OBS: once exhausted, record the error to logs + metrics, distinct from no-work
 ```
 
 ### `USECASE-CREATE-HANDLER` — implement an event handler, and decline at the acceptance boundary <!-- uuid: 8752e12e-7ea2-4edd-8620-839fc5ef3cff -->
@@ -342,8 +348,8 @@ sequenceDiagram
 **Level:** user goal.
 **Intent:** build an event handler against `INTF-HANDLER`, and get the **acceptance boundary** right
 — which side owns the work, and which side owns a failure, on each side of the accept.
-_Requires:_ `INV-CONC-1`, `INV-EVT-1`, `INV-EVT-2`, `INV-EVT-4`, `INV-FAIL-1`, `INV-INTF-1`,
-`INV-OBS-1`, `INV-PREC-1`.
+_Requires:_ `INV-CONC-1`, `INV-EVT-1`, `INV-EVT-2`, `INV-EVT-4`, `INV-FAIL-1`, `INV-FAIL-2`,
+`INV-INTF-1`, `INV-OBS-1`, `INV-PREC-1`.
 _Includes:_ `USECASE-VERIFY-PARTICIPANT`.
 
 **Flow — the two reply shapes.** The core hands over **one event** under **one tracking id** and the
@@ -356,17 +362,22 @@ support the deferred form, so a paused or long-running handler session never pin
 
 **Declining at the acceptance boundary.** A handler that cannot take the work **declines pre-accept**
 — `busy` when it is at its own capacity (`INV-CONC-1`), or an `unavailable` **self-status** when it
-is down or starting. A pre-accept decline is **the core's** to handle, and the core prefers
+is down or starting — and the **cadence is the same for both**: there is no separate knob per
+decline reason (`INV-FAIL-2`). A pre-accept decline is **the core's** to handle, and the core prefers
 **continuity over efficiency** (`INV-PREC-1`): it **re-offers the event within the window the
-event's own `expiresAt` sets** (`INV-EVT-4`) — to the same handler once it frees up, or to another
-bound handler — and the event stays durable in the queue until then (`INV-EVT-1`). Declining is
-**not a defect**, and it is deliberately cheap: the outcome is signalled **coarsely by the
-transport**, so a handler too degraded to compose a reply body can still decline with the coarse
-signal alone (`INV-INTF-1`), and which coarse code carries a `busy` decline is a realization decision
+event's own `expiresAt` sets** (`INV-EVT-4`), **at the retry cadence `INV-FAIL-2` defines** — to the
+same handler once it frees up, or to another bound handler — and the event stays durable in the
+queue until then (`INV-EVT-1`). Declining is **not a defect**, and it is deliberately cheap: the
+outcome is signalled **coarsely by the transport**, so a handler too degraded to compose a reply
+body can still decline with the coarse signal alone (`INV-INTF-1`), and which coarse code carries a
+`busy` decline is a realization decision
 (`phillipgreenii-nix-agent-support · packages/pr-pool/docs/decisions · DEC-WIRE-1`). Once the event
 is past its `expiresAt`, the next attempt on a handler is **that handler's last** (`INV-EVT-4`), and
 with no handler still owed one the event is dropped unconsumed-expired — a pull source re-derives it
-on its next trigger.
+on its next trigger. **A cadence longer than the time left before `expiresAt` is not special-cased**:
+the next eligible attempt simply lands past `expiresAt` and so **is** that final attempt — a long
+enough cadence silently turns a retryable event into a one-shot for that handler, and that is an
+accepted consequence of the two knobs being independent, not a bug (`INV-FAIL-2`).
 
 **Accepting is custody, not progress.** The second legitimate response to an offer is to **accept and
 buffer the event internally**, starting it whenever the handler's own limits allow. The core MUST
@@ -395,7 +406,7 @@ sequenceDiagram
     alt at capacity (pre-accept)
         HDL-->>CORE: busy (INV-CONC-1) — a coarse signal, no body needed
         Note over CORE: continuity over efficiency (INV-PREC-1)
-        CORE->>HDL: re-offer once capacity returns, while the event is unexpired
+        CORE->>HDL: re-offer once capacity returns, while unexpired, at the INV-FAIL-2 cadence
     else accepted, then hits a ceiling (post-accept)
         HDL-->>CORE: accept (ack) — the core is owed nothing further
         Note over HDL: resource-limit is the handler's own — it pauses, then resumes and finishes once the ceiling lifts, reporting on its own surface (INV-FAIL-1)
@@ -405,7 +416,7 @@ sequenceDiagram
 ```mermaid
 flowchart TD
     off["core offers event to a bound handler (INV-CONC-1)"] --> acc{"accepted?"}
-    acc -->|"no — busy / unavailable (pre-accept)"| reoff["core re-offers, or offers to another handler (INV-FAIL-1)"]
+    acc -->|"no — busy / unavailable (pre-accept)"| reoff["core re-offers, or offers to another handler, at the INV-FAIL-2 cadence (INV-FAIL-1)"]
     reoff --> exp{"was the event already past expiresAt when that attempt was made?"}
     exp -->|no| off
     exp -->|yes| drop["that attempt was this handler's last: dropped undelivered — unconsumed-expired (INV-EVT-4)"]

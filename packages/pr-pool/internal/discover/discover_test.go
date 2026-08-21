@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/pr-pool/internal/backoff"
 	"github.com/phillipgreenii/pr-pool/internal/event"
 	"github.com/phillipgreenii/pr-pool/internal/eventbus"
 	"github.com/phillipgreenii/pr-pool/internal/item"
@@ -34,6 +35,36 @@ func (f fakeQuery) Run(context.Context, query.Env) ([]event.Event, error) {
 
 func itemEvt(typ, id string) event.Event {
 	return event.NewItemEvent(typ, "", item.Item{ID: id, Type: "task"})
+}
+
+// flakyQuery fails its first `failTimes` Run calls, then succeeds and returns
+// events — the pull-source failure backoff's (INV-FAIL-3) retry-then-succeed
+// case. calls counts every Run invocation so a test can assert the retry count.
+type flakyQuery struct {
+	query.Meta
+	failTimes int
+	events    []event.Event
+	calls     *int
+}
+
+func (f flakyQuery) Validate() error        { return nil }
+func (f flakyQuery) BackingCommand() string { return "" }
+func (f flakyQuery) Run(context.Context, query.Env) ([]event.Event, error) {
+	*f.calls++
+	if *f.calls <= f.failTimes {
+		return nil, errors.New("source unavailable")
+	}
+	return f.events, nil
+}
+
+// recordingSleep is the sleepFunc test double: it records every wait duration
+// requested and returns immediately (no real sleeping), so a retry-with-backoff
+// test runs instantly while still asserting the CADENCE that was requested.
+func recordingSleep(waits *[]time.Duration) sleepFunc {
+	return func(ctx context.Context, d time.Duration) error {
+		*waits = append(*waits, d)
+		return nil
+	}
 }
 
 var epoch = time.Date(2026, 6, 25, 12, 0, 0, 0, time.UTC)
@@ -79,6 +110,115 @@ func TestProduce_queryErrorPropagates(t *testing.T) {
 	if err == nil || !errors.Is(err, sentinel) {
 		t.Fatalf("a query error must propagate; got %v", err)
 	}
+}
+
+// A query that has NOT opted into a pull-source failure backoff (zero-value
+// Meta.FB, Retries: 0) still fails FAST on the very first error — exactly
+// pg2-qq9v's original behavior, unchanged by pg2-0c8yz's addition. No sleep is
+// ever consulted.
+func TestProduce_queryErrorPropagatesImmediatelyWithoutOptIn(t *testing.T) {
+	calls := 0
+	var waits []time.Duration
+	sources := query.SourceSet{
+		{Name: "boom", Query: flakyQuery{
+			Meta:      query.Meta{EmitTypes: []string{"x"}},
+			failTimes: 100, // would never succeed — proves it did NOT retry
+			calls:     &calls,
+		}},
+	}
+	err := produce(context.Background(), query.Env{}, sources, eventbus.New(), epoch, recordingSleep(&waits))
+	if err == nil {
+		t.Fatal("a query error must still propagate without an opt-in")
+	}
+	if calls != 1 {
+		t.Fatalf("Run was called %d times, want exactly 1 (fail fast, no retry)", calls)
+	}
+	if len(waits) != 0 {
+		t.Fatalf("waits = %v, want none (no backoff configured)", waits)
+	}
+}
+
+// INV-FAIL-3: a pull-source query that fails and then succeeds within its
+// configured Retries is retried at the configured backoff cadence, and its
+// events are still published once it succeeds — the failure never propagates.
+func TestProduce_pullSourceRetriesThenSucceeds(t *testing.T) {
+	calls := 0
+	var waits []time.Duration
+	sources := query.SourceSet{
+		{Name: "flaky", Query: flakyQuery{
+			Meta: query.Meta{
+				EmitTypes: []string{"work.ready"},
+				FB: query.FailureBackoff{
+					Policy:  backoff.Policy{Initial: time.Second, Factor: 2, Max: time.Minute},
+					Retries: 2,
+				},
+			},
+			failTimes: 2, // fails twice, succeeds on the 3rd Run
+			events:    []event.Event{itemEvt("work.ready", "wk-1")},
+			calls:     &calls,
+		}},
+	}
+	bus := eventbus.New()
+	bus.Subscribe("worker", "work.ready")
+
+	err := produce(context.Background(), query.Env{}, sources, bus, epoch, recordingSleep(&waits))
+	if err != nil {
+		t.Fatalf("failure must NOT propagate once a retry succeeds: %v", err)
+	}
+	if calls != 3 {
+		t.Fatalf("Run was called %d times, want 3 (2 failures + 1 success)", calls)
+	}
+	if !equalDurations(waits, []time.Duration{time.Second, 2 * time.Second}) {
+		t.Fatalf("waits = %v, want [1s 2s] (the configured backoff, growing per consecutive failure)", waits)
+	}
+	got, _ := bus.Lease(context.Background(), "worker", 10)
+	if len(got) != 1 || got[0].Item.ID != "wk-1" {
+		t.Fatalf("events not published after the retry succeeded: %+v", got)
+	}
+}
+
+// INV-FAIL-3: once Retries is exhausted the failure STILL propagates — the
+// backoff smooths a transient blip, it does not turn "always down" into
+// "silently idle" (pg2-qq9v).
+func TestProduce_pullSourcePropagatesAfterRetriesExhausted(t *testing.T) {
+	calls := 0
+	var waits []time.Duration
+	sentinel := errors.New("source unavailable")
+	sources := query.SourceSet{
+		{Name: "down", Query: flakyQuery{
+			Meta: query.Meta{
+				EmitTypes: []string{"x"},
+				FB: query.FailureBackoff{
+					Policy:  backoff.Policy{Initial: time.Second, Factor: 2, Max: time.Minute},
+					Retries: 2,
+				},
+			},
+			failTimes: 100, // never recovers within the retry budget
+			calls:     &calls,
+		}},
+	}
+	err := produce(context.Background(), query.Env{}, sources, eventbus.New(), epoch, recordingSleep(&waits))
+	if err == nil || !strings.Contains(err.Error(), sentinel.Error()) {
+		t.Fatalf("error = %v, want it to wrap %q once retries are exhausted", err, sentinel)
+	}
+	if calls != 3 {
+		t.Fatalf("Run was called %d times, want 3 (1 initial + 2 retries)", calls)
+	}
+	if !equalDurations(waits, []time.Duration{time.Second, 2 * time.Second}) {
+		t.Fatalf("waits = %v, want [1s 2s]", waits)
+	}
+}
+
+func equalDurations(a, b []time.Duration) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func TestProduce_thresholdFiresOnlyWhenEnough(t *testing.T) {

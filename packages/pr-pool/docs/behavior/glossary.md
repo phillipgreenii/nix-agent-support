@@ -24,6 +24,12 @@ their own terms in a downstream deployment set.
 - **Query trigger** — what fires a pull event source's query: a **periodic** tick. It is the **core's**
   decision about when to poll, taken from the core's own state — never a source's to dictate.
   (A tick is a query _trigger_, not a dispatched event.)
+- **Retry cadence** — how long the core waits before its next attempt after a failure it itself
+  schedules the retry for: a pre-accept decline (the **handler retry cadence**, `INV-FAIL-2`) or a
+  failed pull-source query (the **pull-source failure backoff**, `INV-FAIL-3`). Both share one
+  exponential-backoff-with-a-cap **shape**; each is a config surface **distinct** from the query
+  trigger's success-path polling interval — the trigger paces asking when things are fine, the
+  cadence paces retrying when they are not.
 - **`at`** — an event's **optional source stamp**, the instant the source says the fact happened.
   Absent, the core's own **ingest-now** applies (`INV-EVT-1`).
 - **`expiresAt`** — the **optional absolute instant** past which the core stops retrying an event.

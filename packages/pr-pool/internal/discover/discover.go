@@ -9,6 +9,7 @@ package discover
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -59,8 +60,37 @@ func DeriveContext(role roles.Role, e event.Event) DispatchContext {
 // settles any ThresholdTrigger queries whose upstream now has "enough events".
 // ManualTrigger queries never fire here (only via the smoke harness). Each
 // emitted event is stamped with its source query name (provenance) before
-// publish. A query error propagates (pg2-qq9v).
+// publish. A query failure retries per its configured pull-source failure
+// backoff (INV-FAIL-3, pg2-0c8yz) before it propagates (pg2-qq9v: a query
+// failure must NOT masquerade as "no ready work").
 func Produce(ctx context.Context, env query.Env, sources query.SourceSet, bus *eventbus.Bus, now time.Time) error {
+	return produce(ctx, env, sources, bus, now, realSleep)
+}
+
+// sleepFunc waits for d, honoring ctx cancellation — the seam produce's
+// pull-source failure backoff sleeps on between retry attempts (INV-FAIL-3),
+// injected so tests never sleep real time.
+type sleepFunc func(ctx context.Context, d time.Duration) error
+
+// realSleep is sleepFunc's production implementation.
+func realSleep(ctx context.Context, d time.Duration) error {
+	if d <= 0 {
+		return nil
+	}
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+// produce is Produce's body, parameterized on the sleep seam so a test can
+// exercise the pull-source failure backoff's retry loop without waiting real
+// time. Produce itself is the production entry point (realSleep).
+func produce(ctx context.Context, env query.Env, sources query.SourceSet, bus *eventbus.Bus, now time.Time, sleep sleepFunc) error {
 	// The tick is itself an event — uniform with the rest of the model and the
 	// observable "a pass happened" signal. No role binds it; it fans out to no
 	// queue.
@@ -76,7 +106,7 @@ func Produce(ctx context.Context, env query.Env, sources query.SourceSet, bus *e
 		if _, isThreshold := query.Threshold(t); isThreshold {
 			continue
 		}
-		if err := runAndPublish(ctx, env, s, bus); err != nil {
+		if err := runAndPublish(ctx, env, s, bus, sleep); err != nil {
 			return err
 		}
 		fired[i] = true
@@ -99,7 +129,7 @@ func Produce(ctx context.Context, env query.Env, sources query.SourceSet, bus *e
 				depth += bus.Depth(b)
 			}
 			if depth >= tt.Count {
-				if err := runAndPublish(ctx, env, s, bus); err != nil {
+				if err := runAndPublish(ctx, env, s, bus, sleep); err != nil {
 					return err
 				}
 				fired[i] = true
@@ -113,14 +143,45 @@ func Produce(ctx context.Context, env query.Env, sources query.SourceSet, bus *e
 	return nil
 }
 
-// runAndPublish runs one source's query and publishes every emitted event,
-// stamping the source query name as provenance when the query left it blank.
-func runAndPublish(ctx context.Context, env query.Env, s query.Source, bus *eventbus.Bus) error {
-	evts, err := s.Query.Run(ctx, env)
-	if err != nil {
-		// Propagate: a query failure must NOT masquerade as "no ready work", or the
-		// pool silently idles on infra failure. (pg2-qq9v)
-		return fmt.Errorf("produce %s: %w", s.Name, err)
+// runAndPublish runs one source's query, RETRYING on failure per its
+// configured pull-source failure backoff (INV-FAIL-3, pg2-0c8yz) before giving
+// up, then publishes every emitted event, stamping the source query name as
+// provenance when the query left it blank.
+//
+// The failure backoff is DISTINCT from Trigger's success-path polling
+// interval: Trigger says how often to ask when things are fine; this says how
+// long to wait before asking again after the source itself reported a failure
+// (unavailable / out of resources). It is bounded by its OWN Retries count —
+// unlike the handler retry cadence (INV-FAIL-2), which an event's expiresAt
+// bounds externally (INV-EVT-4), a pull source has no such external bound, so
+// this loop caps its own attempts or a source that stays down would retry
+// forever inside one drain pass.
+//
+// Retries defaults to 0 (fail fast) for any query that has not opted in via
+// [query.failure_backoff] or the pool-level default — exactly pg2-qq9v's
+// original behavior ("a query failure must NOT masquerade as no ready work"),
+// unchanged for every existing deployment that has not configured this.
+func runAndPublish(ctx context.Context, env query.Env, s query.Source, bus *eventbus.Bus, sleep sleepFunc) error {
+	fb := s.Query.FailureBackoff()
+	var evts []event.Event
+	var err error
+	for attempt := 0; ; attempt++ {
+		evts, err = s.Query.Run(ctx, env)
+		if err == nil {
+			break
+		}
+		if attempt >= fb.Retries {
+			// Propagate: a query failure must NOT masquerade as "no ready work", or
+			// the pool silently idles on infra failure (pg2-qq9v) — unchanged once
+			// any configured retries are exhausted.
+			return fmt.Errorf("produce %s: %w", s.Name, err)
+		}
+		wait := fb.Policy.Duration(attempt + 1)
+		slog.Warn("pull-source query failed; retrying after backoff (INV-FAIL-3)",
+			"source", s.Name, "attempt", attempt+1, "wait", wait, "err", err)
+		if serr := sleep(ctx, wait); serr != nil {
+			return fmt.Errorf("produce %s: %w", s.Name, serr)
+		}
 	}
 	for _, e := range evts {
 		if e.Source == "" {

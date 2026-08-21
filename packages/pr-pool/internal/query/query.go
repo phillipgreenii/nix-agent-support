@@ -51,6 +51,12 @@ type Query interface {
 	// Trigger is the query's firing strategy (Q1) — Strategy pattern. A nil
 	// return is treated as PeriodTrigger by the driver.
 	Trigger() Trigger
+	// FailureBackoff is this query's pull-source failure backoff (INV-FAIL-3,
+	// pg2-0c8yz): the retry cadence discover.Produce consults when Run fails,
+	// distinct from Trigger's success-path interval. The zero value (Retries: 0)
+	// means fail fast — exactly the original pg2-qq9v behavior — so a query that
+	// has not opted in is unaffected.
+	FailureBackoff() FailureBackoff
 	// BackingCommand returns the executable this source needs in order to run,
 	// or "" when it needs none (a pure in-process producer). It is a STATIC
 	// declaration, resolved pre-runtime by config.Validate's absent-backing-command
@@ -70,6 +76,11 @@ type Query interface {
 type Meta struct {
 	EmitTypes []string
 	Trig      Trigger
+	// FB is this query's pull-source failure backoff (INV-FAIL-3). The zero
+	// value (Retries: 0) reproduces today's fail-fast behavior exactly, so an
+	// unconfigured query is unaffected — opting in is [query.failure_backoff] or
+	// the pool-level default (config.Registry.buildQuery).
+	FB FailureBackoff
 }
 
 // Emits returns the configured emit type(s).
@@ -83,6 +94,9 @@ func (m Meta) Trigger() Trigger {
 	}
 	return m.Trig
 }
+
+// FailureBackoff returns the configured pull-source failure backoff (INV-FAIL-3).
+func (m Meta) FailureBackoff() FailureBackoff { return m.FB }
 
 // setMeta lets the factory/config install the [[query]]-level wiring onto a
 // concrete query decoded from its sub-table. A pointer to an embedded Meta

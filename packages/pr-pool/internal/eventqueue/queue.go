@@ -5,19 +5,32 @@ import (
 	"log/slog"
 	"sync"
 	"time"
+
+	"github.com/phillipgreenii/pr-pool/internal/backoff"
 )
 
 // Listener is a bound event handler as the queue sees it (INTF-HANDLER, core
 // side). It declares which events it binds (Matches, INV-DISP-1) and accepts or
 // declines an offer (Offer). A return of accepted=false is a PRE-ACCEPT decline
 // (busy / unavailable, INV-CONC-1 / INV-FAIL-1): the core re-offers the event
-// while it is unexpired. Once Offer returns true the event is ACCEPTED and the
-// core's delivery responsibility ends (INV-EVT-1); post-accept retry/resume is
-// the handler's.
+// while it is unexpired, at the cadence INV-FAIL-2 defines (WithRetryBackoff, or
+// a per-listener override via BackoffListener). Once Offer returns true the
+// event is ACCEPTED and the core's delivery responsibility ends (INV-EVT-1);
+// post-accept retry/resume is the handler's.
 type Listener interface {
 	ID() string
 	Matches(evt Event) bool
 	Offer(evt Event) (accepted bool)
+}
+
+// BackoffListener is a Listener that declares its OWN handler retry cadence
+// (INV-FAIL-2), overriding the queue's default (WithRetryBackoff) for just this
+// handler. Handlers differ in how long they typically stay busy, so the cadence
+// is per-handler, not pool-wide only — a Listener that does not implement this
+// simply uses the queue's default.
+type BackoffListener interface {
+	Listener
+	RetryBackoff() backoff.Policy
 }
 
 // Observer receives queue lifecycle signals for metric emission (INV-OBS-1).
@@ -70,6 +83,52 @@ func newEntry(evt Event) *entry {
 
 type listenerState struct {
 	l Listener
+
+	// Handler retry cadence bookkeeping (INV-FAIL-2). declineEventID/declineStreak
+	// track CONSECUTIVE pre-accept declines against the CURRENT head, so a streak
+	// resets when the head moves on (accepted, or settled by expiry) or when a
+	// decline lands against a DIFFERENT event id than the one currently tracked.
+	// nextEligible is the earliest instant the core will offer this listener its
+	// head again. All three are TRANSIENT (never persisted): a restart simply
+	// re-offers immediately, which is always a legal (if perhaps premature) retry
+	// — the cadence is a courtesy to a busy handler, not a correctness guarantee.
+	declineEventID string
+	declineStreak  int
+	nextEligible   time.Time
+}
+
+// eligibleNow reports whether ls's retry-cadence cool-down (if any) for head
+// event id has elapsed. It is deliberately SEPARATE from headFor: headFor picks
+// WHICH event is owed an attempt (structural, expiry-blind, INV-EVT-4); this
+// decides WHEN the core may next spend an attempt on it (cadence, INV-FAIL-2).
+// Idle() and DepthByType() must keep using headFor alone — a cooling-down head
+// is still owed work, so the queue must not read as idle nor its depth as
+// drained merely because the cadence is withholding the next attempt.
+func (ls *listenerState) eligibleNow(id string, now time.Time) bool {
+	return ls.declineEventID != id || !now.Before(ls.nextEligible)
+}
+
+// recordDecline advances ls's consecutive-decline streak against event id and
+// sets the next instant the core may offer this listener its head again
+// (INV-FAIL-2). A decline against a DIFFERENT event id than the one currently
+// tracked starts a fresh streak — the cadence backs off per (listener, head),
+// not across unrelated heads a listener happens to decline over its lifetime.
+func (ls *listenerState) recordDecline(id string, now time.Time, p backoff.Policy) {
+	if ls.declineEventID != id {
+		ls.declineEventID = id
+		ls.declineStreak = 0
+	}
+	ls.declineStreak++
+	ls.nextEligible = now.Add(p.Duration(ls.declineStreak))
+}
+
+// resetBackoff clears ls's decline streak: the listener accepted its head, or
+// its last owed attempt just settled, so there is nothing left to back off
+// from.
+func (ls *listenerState) resetBackoff() {
+	ls.declineEventID = ""
+	ls.declineStreak = 0
+	ls.nextEligible = time.Time{}
 }
 
 // Queue is the durable, ordered, de-duped, retention-bounded event queue
@@ -85,6 +144,13 @@ type Queue struct {
 	after func(time.Duration) <-chan time.Time
 	store Store
 	obs   Observer
+
+	// retryBackoff is the DEFAULT handler retry cadence (INV-FAIL-2) — how long
+	// the core waits before re-offering a listener its head after a pre-accept
+	// decline, before expiresAt bounds it (INV-EVT-4). A BackoffListener overrides
+	// this per-handler; every other listener uses this default (backoff.Default()
+	// unless overridden by WithRetryBackoff).
+	retryBackoff backoff.Policy
 
 	entries map[string]*entry // by event id; the retained set (and so the dedup id set)
 	order   []string          // enqueue order (event ids) — the FIFO spine
@@ -122,15 +188,34 @@ func WithObserver(o Observer) Option { return func(q *Queue) { q.obs = o } }
 // accepted it (ADR 0031 "opt-in early eviction").
 func WithEarlyEviction() Option { return func(q *Queue) { q.evictWhenAllAccept = true } }
 
+// WithRetryBackoff overrides the queue's DEFAULT handler retry cadence
+// (INV-FAIL-2): how long the core waits before re-offering a listener its head
+// after a pre-accept decline. A Listener MAY override this per-handler by
+// implementing BackoffListener; this Option sets what every OTHER listener
+// uses. Default: backoff.Default().
+func WithRetryBackoff(p backoff.Policy) Option {
+	return func(q *Queue) { q.retryBackoff = p }
+}
+
+// retryBackoffFor returns the policy that governs l's re-offer cadence: l's own
+// override when it implements BackoffListener, else the queue's default.
+func (q *Queue) retryBackoffFor(l Listener) backoff.Policy {
+	if bl, ok := l.(BackoffListener); ok {
+		return bl.RetryBackoff()
+	}
+	return q.retryBackoff
+}
+
 // New constructs a Queue over store, replaying any prior durable state so
 // delivery survives a restart (INV-EVT-1). Evicted ids are not resurrected.
 func New(store Store, opts ...Option) (*Queue, error) {
 	q := &Queue{
-		now:     time.Now,
-		after:   time.After,
-		store:   store,
-		obs:     noopObserver{},
-		entries: map[string]*entry{},
+		now:          time.Now,
+		after:        time.After,
+		store:        store,
+		obs:          noopObserver{},
+		retryBackoff: backoff.Default(),
+		entries:      map[string]*entry{},
 	}
 	for _, opt := range opts {
 		opt(q)
@@ -360,9 +445,14 @@ func (q *Queue) Dispatch() (accepted int) {
 	now := q.now()
 	pending := make([]pendingOffer, 0, len(q.listeners))
 	for _, ls := range q.listeners {
-		if e := q.headFor(ls.l); e != nil {
-			pending = append(pending, pendingOffer{ls: ls, evt: e.evt, lastAttempt: e.evt.Expired(now)})
+		e := q.headFor(ls.l)
+		if e == nil {
+			continue
 		}
+		if !ls.eligibleNow(e.evt.ID, now) {
+			continue // still cooling down from a prior pre-accept decline (INV-FAIL-2)
+		}
+		pending = append(pending, pendingOffer{ls: ls, evt: e.evt, lastAttempt: e.evt.Expired(now)})
 	}
 	q.mu.Unlock()
 	if len(pending) == 0 {
@@ -386,21 +476,29 @@ func (q *Queue) Dispatch() (accepted int) {
 			continue // entry left the queue mid-dispatch (retired/evicted): skip
 		}
 		if !p.accepted {
-			// A PRE-ACCEPT decline. Nothing about the attempt is recorded — no
-			// counter, nothing durable (DEC-EVENT-1: the core keeps no attempt
+			// A PRE-ACCEPT decline. Nothing DURABLE about the attempt is recorded —
+			// no counter, nothing on disk (DEC-EVENT-1: the core keeps no attempt
 			// history). The single expiry comparison already made in phase 1 is the
 			// whole decision: past `expiresAt` that attempt was the last one this
 			// listener is owed (INV-EVT-4), so settle the pair and let its head
 			// advance; before it, the decline is simply a re-offer condition
-			// (INV-FAIL-1) and the head stays put.
+			// (INV-FAIL-1), and the IN-MEMORY (transient, unpersisted) retry-cadence
+			// bookkeeping advances so the next offer waits at least INV-FAIL-2's
+			// cadence rather than the very next Dispatch pass.
 			if p.lastAttempt {
 				e.settled[lid] = true
+				p.ls.resetBackoff() // nothing left to back off from once settled
+			} else {
+				p.ls.recordDecline(p.evt.ID, now, q.retryBackoffFor(p.ls.l))
 			}
 			continue
 		}
 		if e.accepted[lid] {
 			continue // already recorded by a concurrent/re-entrant pass: at-most-once
 		}
+		// Accepted: nothing left to back off from (INV-FAIL-2's cadence is moot
+		// once the pair is settled).
+		p.ls.resetBackoff()
 		// In-memory accept first; the durable accept record is written AFTER
 		// (ADR 0031 req 4) — the crash window that yields the at-least-once
 		// redelivery (one extra re-offer per crash window).
