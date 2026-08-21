@@ -76,8 +76,8 @@ continue to PR-1 regardless.
 ## PR-1 — Push the feature branch to its remote
 
 Resolve which remote to push to the same way `integrate-branch-support` resolves
-remote ambiguity (§4.3 edge cases): prefer the branch's existing upstream; fall back
-to the sole remote if there's exactly one; anything else is ambiguous.
+remote ambiguity: prefer the branch's existing upstream; fall back to the sole
+remote if there's exactly one; anything else is ambiguous.
 
 ```bash
 REMOTE="$(git -C "$WT" rev-parse --abbrev-ref --symbolic-full-name "@{u}" 2>/dev/null | cut -d/ -f1)"

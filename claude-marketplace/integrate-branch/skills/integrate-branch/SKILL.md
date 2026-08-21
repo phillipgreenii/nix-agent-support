@@ -165,7 +165,7 @@ flowchart TD
     DEC -->|nothing to integrate: on primary / detached / 0 ahead| NONE["report: nothing to land"]
     DEC -->|strategy resolved (declared, inferred, or agent-decided) & feasible| H["invoke matching handler skill"]
     DEC -->|declared-but-infeasible, or cannot decide| ASK["ask the user"]
-    H --> H1["ff-merge-to-main (§4.5) — FF-0 halts if canonical off-primary/dirty (R-8/R-3)"]
+    H --> H1["ff-merge-to-main — FF-0 halts if canonical off-primary/dirty (R-8/R-3)"]
     H --> H2["pull-request (push+PR; never auto-merge; surface canonical anomaly)"]
 ```
 
