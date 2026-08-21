@@ -5,9 +5,9 @@
   ccpool,
   bd,
   pg-pr,
-  # gh is pkgs.gh (auto via callPackage) — a plain nixpkgs runtime dep, so unlike
+  # jq is pkgs.jq (auto via callPackage) — a plain nixpkgs runtime dep, so unlike
   # `bd` it needs no explicit pass at the callPackage site in flake.nix.
-  gh,
+  jq,
 }:
 
 mkGoApp {
@@ -48,25 +48,36 @@ mkGoApp {
   # session masks the gap and only a minimal-PATH context (launchd/service) fails.
   # Entries and what each satisfies:
   #   ccpool -> the `ccpool` handler role (`config.CCPoolCommand`)
-  #   bd     -> the `beads-ready` / `beads-list` sources (`beads.Command`)
+  #   bd     -> pr-pool's own first-class beads integration: the in-Go built-in
+  #             default query set (`roles.BuiltinQuerySet` -> `query.BeadsReady`,
+  #             `beads.Command`) plus reconcile/prpoolacl/orchestrator's direct
+  #             `bd` calls. NOT a typed query surface any more (pg2-n75tk removed
+  #             `beads-ready`/`beads-list` from the TOML query factory).
   #   pg-pr  -> `pg-pr config show` self_login resolution and `pg-pr pr list` (reconcile ACL)
-  #   gh     -> the `github-issues` source (`query.ghCommand`)
+  #   jq     -> generic JSON-shaping glue for `command`-type sources, e.g. the
+  #             `sh -c 'bd ready ... | jq ...'` pipelines `config --print-defaults`
+  #             emits as the built-in defaults' `command` equivalent
+  #             (`internal/config/example.go`'s `beadsReadyCommand`). jq carries no
+  #             tool-specific semantics of its own (unlike `gh` or a Jira CLI), so
+  #             bundling it does not reintroduce "Core knows how another tool is
+  #             configured" — it is exactly as generic as `sh`, which every
+  #             `command`-type pipeline already assumes.
   #
-  # The `jira-issues` source's backing command (`query.jiraCommand` =
-  # `pg-pr-issues-jira-zr`) MUST NOT be added here. It is a SEPARATE derivation,
-  # defined only in `phillipg-nix-ziprecruiter` (`modules/pg-pr-zr/`), which is
-  # DOWNSTREAM of this flake — naming it here would invert the dependency direction,
-  # and it is NOT provided by the `pg-pr` package above (that store path's `bin/`
-  # holds only `pg-pr`). A deployment that enables a jira-issues source MUST supply
-  # that command itself, from the downstream flake that defines it. Check 5 MUST NOT
-  # be weakened, special-cased, or exempted to accommodate the gap.
+  # `gh` was removed here (pg2-n75tk): it existed solely to back the typed
+  # `github-issues` source, which is gone — the boundary principle (Core must
+  # not know how another tool is configured) now applies to it exactly as it
+  # already did to `jira-issues`. A deployment that wants a `command` source
+  # invoking `gh`, a Jira CLI, or anything else MUST supply that command
+  # itself, from its own wrapper/PATH — naming any such tool here would put
+  # tool-specific knowledge back into this upstream flake. Check 5 MUST NOT be
+  # weakened, special-cased, or exempted to accommodate a gap.
   postInstall = ''
     wrapProgram $out/bin/pr-pool --prefix PATH : ${
       lib.makeBinPath [
         ccpool
         bd
         pg-pr
-        gh
+        jq
       ]
     }
   '';

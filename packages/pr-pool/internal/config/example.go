@@ -19,10 +19,13 @@ const exampleHeader = `# pr-pool configuration — repo-local at <RepoRoot>/.pr-
 # Under the event model a query is a PRODUCER and a role is a CONSUMER, wired only
 # through a shared event-type string:
 #   [[query]]   a work source. "emits" is the event type(s) it publishes; its own
-#               "type" selects the query (beads-ready | beads-list | command |
-#               github-issues | jira-issues | event), whose fields live in the
-#               same-named [query.<type>] table. An optional [query.trigger] picks
-#               the firing strategy (period [default] | threshold | manual).
+#               "type" selects the query (command | event), whose fields live in
+#               the same-named [query.<type>] table. "command" is an opaque
+#               token — pr-pool just invokes argv and parses its JSON/JSONL
+#               stdout; it never interprets what the command does, so this is
+#               how you wire pr-pool to bd, gh, Jira, or anything else (see
+#               MIGRATION.md for worked examples). An optional [query.trigger]
+#               picks the firing strategy (period [default] | threshold | manual).
 #   [[role]]    a consumer. "binds" is the event type(s) it responds to (ANY of
 #               them). NOTE the DOUBLE brackets — a single [role]/[query] table is
 #               a typo and is rejected. An optional [role.correlation] opts the
@@ -65,7 +68,17 @@ func ExampleTOML() string {
 }
 
 // emitQuery serializes one built-in producer. The built-in queries are all
-// beads-ready; other query types would extend the type switch here.
+// query.BeadsReady (a Go-native type — NOT a TOML-configurable query type since
+// pg2-n75tk removed `beads-ready` from the query factory); other query types
+// would extend the type switch here. Each one is printed as an equivalent
+// `command` block (the one surviving generic source type) that shells the same
+// `bd ready` invocation the Go-native query.BeadsReady.Run would issue, piped
+// through jq to translate bd's issue envelope into the command contract
+// ({id,type,title,metadata}) and reproduce the title_prefix/item_type
+// post-filters — see beadsReadyCommand. This keeps `config --print-defaults`
+// a real, loadable, behaviorally faithful starting point (it is exercised by
+// TestExampleTOML_roundTrips) and doubles as the worked beads-ready ->
+// command example MIGRATION.md points to.
 func emitQuery(b *strings.Builder, s query.Source) {
 	br, ok := s.Query.(query.BeadsReady)
 	if !ok {
@@ -73,17 +86,43 @@ func emitQuery(b *strings.Builder, s query.Source) {
 	}
 	fmt.Fprintf(b, "[[query]]\nname = %q\n", s.Name)
 	fmt.Fprintf(b, "emits = %s\n", tomlStrList(br.Emits()))
-	b.WriteString("type = \"beads-ready\"\n")
-	b.WriteString("[query.beads-ready]\n")
-	fmt.Fprintf(b, "labels = %s\n", tomlStrList(br.Labels))
-	fmt.Fprintf(b, "exclude_labels = %s\n", tomlStrList(br.ExcludeLabels))
+	b.WriteString("type = \"command\"\n")
+	b.WriteString("[query.command]\n")
+	fmt.Fprintf(b, "argv = %s\n", tomlStrList(beadsReadyCommand(br)))
+	b.WriteString("format = \"json\"\n")
+	b.WriteString("\n")
+}
+
+// beadsReadyCommand renders a BeadsReady query as the argv of an equivalent
+// `command` source: `bd ready` with the same --label/--exclude-label filters,
+// piped through jq to (1) translate bd's `{"data":[{"id","issue_type",
+// "title","metadata",...}]}` envelope into the command contract's flat
+// {id,type,title,metadata} array, and (2) reproduce the title_prefix /
+// item_type client-side post-filters BeadsReady.Run applies in Go. `sh -c` is
+// needed because `command` runs a single argv[0] with no shell — the pipeline
+// itself is the payload. bd, sh and jq are all real, already-depended-on
+// tools (bd is pr-pool's own first-class dependency; sh/jq are bundled onto
+// the pr-pool wrapper's PATH — see default.nix — precisely so this generated
+// pipeline keeps working under a minimal launchd-style PATH, the same
+// motivation as INV-WORKFLOW-1 check 5).
+func beadsReadyCommand(br query.BeadsReady) []string {
+	var sb strings.Builder
+	sb.WriteString("bd ready")
+	for _, l := range br.Labels {
+		fmt.Fprintf(&sb, " --label %s", l)
+	}
+	for _, l := range br.ExcludeLabels {
+		fmt.Fprintf(&sb, " --exclude-label %s", l)
+	}
+	sb.WriteString(" --json --limit 0 | jq -c '[(.data // [])[] ")
 	if br.TitlePrefix != "" {
-		fmt.Fprintf(b, "title_prefix = %q\n", br.TitlePrefix)
+		fmt.Fprintf(&sb, "| select(.title | startswith(%q)) ", br.TitlePrefix)
 	}
 	if br.ItemType != "" {
-		fmt.Fprintf(b, "item_type = %q\n", br.ItemType)
+		fmt.Fprintf(&sb, "| select(.issue_type == %q) ", br.ItemType)
 	}
-	b.WriteString("\n")
+	sb.WriteString("| {id, type: .issue_type, title, metadata}]'")
+	return []string{"sh", "-c", sb.String()}
 }
 
 func emitRole(b *strings.Builder, r roles.Role) {

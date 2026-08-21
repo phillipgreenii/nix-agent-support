@@ -8,10 +8,10 @@ import (
 
 func TestQueryFactories_decodeByType(t *testing.T) {
 	body := `
-type = "beads-ready"
-[beads-ready]
-labels = ["worker-ready"]
-exclude_labels = ["human"]
+type = "event"
+[event]
+item_id = "i1"
+item_type = "task"
 `
 	var holder map[string]toml.Primitive
 	md, err := toml.Decode(body, &holder)
@@ -20,23 +20,26 @@ exclude_labels = ["human"]
 	}
 	reg := NewQueryFactories()
 	meta := Meta{EmitTypes: []string{"work.ready"}, Trig: PeriodTrigger{}}
-	q, err := reg.Decode("beads-ready", meta, md, holder["beads-ready"])
+	q, err := reg.Decode("event", meta, md, holder["event"])
 	if err != nil {
 		t.Fatal(err)
 	}
-	br, ok := q.(BeadsReady)
-	if !ok || len(br.Labels) != 1 || br.Labels[0] != "worker-ready" || len(br.ExcludeLabels) != 1 || br.ExcludeLabels[0] != "human" {
+	eq, ok := q.(EventQuery)
+	if !ok || eq.ItemID != "i1" || eq.ItemType != "task" {
 		t.Fatalf("decoded query wrong: %#v", q)
 	}
 	// The [[query]]-level meta (emits/trigger) is installed post-decode.
-	if len(br.Emits()) != 1 || br.Emits()[0] != "work.ready" {
-		t.Fatalf("meta emits not installed: %#v", br.Emits())
+	if len(eq.Emits()) != 1 || eq.Emits()[0] != "work.ready" {
+		t.Fatalf("meta emits not installed: %#v", eq.Emits())
 	}
-	if !IsPeriod(br.Trigger()) {
-		t.Fatalf("meta trigger not installed: %#v", br.Trigger())
+	if !IsPeriod(eq.Trigger()) {
+		t.Fatalf("meta trigger not installed: %#v", eq.Trigger())
 	}
 	if _, err := reg.Decode("nope", meta, md, toml.Primitive{}); err == nil {
 		t.Fatal("unknown query type must error")
+	}
+	if _, err := reg.Decode("beads-ready", meta, md, toml.Primitive{}); err == nil {
+		t.Fatal("beads-ready must no longer be a decodable query type (pg2-n75tk)")
 	}
 }
 

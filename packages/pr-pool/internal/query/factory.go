@@ -19,15 +19,18 @@ type Factories struct{ m map[string]Factory }
 
 func NewQueryFactories() *Factories {
 	f := &Factories{m: map[string]Factory{}}
-	f.m["beads-ready"] = decodeInto(func() Query { return &BeadsReady{} })
-	f.m["beads-list"] = decodeInto(func() Query { return &BeadsList{} })
 	f.m["command"] = decodeInto(func() Query { return &CommandQuery{} })
-	f.m["github-issues"] = decodeInto(func() Query { return &GitHubIssues{} })
-	f.m["jira-issues"] = decodeInto(func() Query { return &JiraIssues{} })
 	// event: the spec-C-deferred type, registered here (design M5). It is an
 	// event SOURCE for the aggregator/saga path — it emits a typed, correlated
 	// event that feeds a role's opt-in Aggregator.
 	f.m["event"] = decodeInto(func() Query { return &EventQuery{} })
+	// beads-ready / beads-list / github-issues / jira-issues were removed here
+	// (pg2-n75tk): each typed "how another tool is configured" into Core, and
+	// jira-issues was structurally unsatisfiable (its backing command exists
+	// only in a downstream flake). command is the one surviving generic
+	// source; see MIGRATION.md. query.BeadsReady itself is NOT deleted — it
+	// still backs the in-Go built-in default query set (roles.BuiltinQuerySet),
+	// which never goes through this factory.
 	return f
 }
 
@@ -71,18 +74,10 @@ func (f *Factories) known() string {
 }
 
 // derefQuery converts the *T used for decoding back to the value form the rest of
-// the package compares against (BeadsReady, not *BeadsReady).
+// the package compares against (CommandQuery, not *CommandQuery).
 func derefQuery(q Query) Query {
 	switch v := q.(type) {
-	case *BeadsReady:
-		return *v
-	case *BeadsList:
-		return *v
 	case *CommandQuery:
-		return *v
-	case *GitHubIssues:
-		return *v
-	case *JiraIssues:
 		return *v
 	case *EventQuery:
 		return *v

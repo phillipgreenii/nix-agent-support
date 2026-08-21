@@ -101,17 +101,25 @@ type roleTOML struct {
 // trigger (default: period), the query type discriminator, and each query type's
 // sub-table as a deferred-decode Primitive (the factory decodes the one matching
 // `type`).
+//
+// Only `command` (an opaque token Core just invokes, never interprets — how the
+// executable behaves is entirely the deploying flake's business) and `event`
+// (the spec-C aggregator/saga source, its own removal tracked separately by
+// pg2-9d0he) are typed in here. `beads-ready` / `beads-list` / `github-issues` /
+// `jira-issues` were removed (pg2-n75tk): each one typed "how another tool is
+// configured" into Core, which is exactly the boundary GOAL-MIN-1 forbids, and
+// `jira-issues` specifically was structurally unsatisfiable — its backing
+// command exists only in a downstream flake agent-support cannot legitimately
+// depend on (INV-WORKFLOW-1 check 5 would refuse to load any config declaring
+// it). See MIGRATION.md for converting an old `beads-ready` / `beads-list` /
+// `github-issues` / `jira-issues` block to an equivalent `command` block.
 type queryTOML struct {
-	Name         string         `toml:"name"`
-	Emits        []string       `toml:"emits"`
-	Trigger      *triggerTOML   `toml:"trigger"`
-	Type         string         `toml:"type"`
-	BeadsReady   toml.Primitive `toml:"beads-ready"`
-	BeadsList    toml.Primitive `toml:"beads-list"`
-	Command      toml.Primitive `toml:"command"`
-	GitHubIssues toml.Primitive `toml:"github-issues"`
-	JiraIssues   toml.Primitive `toml:"jira-issues"`
-	Event        toml.Primitive `toml:"event"`
+	Name    string         `toml:"name"`
+	Emits   []string       `toml:"emits"`
+	Trigger *triggerTOML   `toml:"trigger"`
+	Type    string         `toml:"type"`
+	Command toml.Primitive `toml:"command"`
+	Event   toml.Primitive `toml:"event"`
 	// FailureBackoff is this query's PULL-SOURCE FAILURE BACKOFF override
 	// (INV-FAIL-3, pg2-0c8yz), overlaid onto the pool-wide default
 	// ([pool].pull_failure_backoff). Absent: inherits the pool default verbatim
@@ -321,12 +329,8 @@ func (r *Registry) buildQuery(md toml.MetaData, qt queryTOML, c Config) (query.Q
 		return nil, fmt.Errorf("emits is required (the event type(s) this query produces)")
 	}
 	prims := map[string]toml.Primitive{
-		"beads-ready":   qt.BeadsReady,
-		"beads-list":    qt.BeadsList,
-		"command":       qt.Command,
-		"github-issues": qt.GitHubIssues,
-		"jira-issues":   qt.JiraIssues,
-		"event":         qt.Event,
+		"command": qt.Command,
+		"event":   qt.Event,
 	}
 	prim, ok := prims[qt.Type]
 	if !ok {

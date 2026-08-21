@@ -91,20 +91,20 @@ Roles and queries are typed tagged unions discriminated by a `type` field:
 
 - **role `type`**: `ccpool` (dispatch a Claude session) or `command` (run an
   executable; completion = exit code).
-- **query `type`**: `beads-ready` / `beads-list` (run `bd` with label filters +
-  optional `title_prefix` / `item_type` post-filters), `command` (run an
-  executable that emits items as JSON/JSONL), `github-issues` (open issues via
-  `gh issue list`, optionally narrowed by `labels`), and `jira-issues` (unresolved
-  issues from a Jira search tool that returns a normalized `{items,truncated}` JSON
-  envelope over Atlassian's `/rest/api/3/search/jql` endpoint; `jql` overrides the
-  `project`/`labels` default, and a truncation warning is logged when the backlog
-  exceeds one page). `gh` supplies its own authentication; the Jira tool reads
-  `JIRA_*` env vars from its environment.
-
-> **Known deployment coupling (tool-migration debt):** the `jira-issues` query
-> currently invokes a hardcoded `pg-pr-issues-jira-zr` command, and
-> `PR_POOL_BEADS_PREFIX` defaults to `zr` — both deployment-specific and slated to be
-> decoupled from the generic tool.
+- **query `type`**: `command` (run an executable that emits items as
+  JSON/JSONL — an opaque token pr-pool just invokes and never interprets, so
+  this is how you wire pr-pool to `bd`, `gh`, Jira, or anything else) or
+  `event` (an in-process correlated-event source for the aggregator/saga
+  path). `beads-ready` / `beads-list` / `github-issues` / `jira-issues` were
+  typed query sources here through pg2-n75tk; each one typed "how another
+  tool is configured" into Core, which the config surface is not supposed to
+  know, and `jira-issues` specifically was structurally unsatisfiable (its
+  backing command exists only in a downstream flake this one cannot depend
+  on). See `MIGRATION.md` for converting an old config using one of the four
+  removed types to an equivalent `command` block, worked through for each.
+  The built-in feedback/worker/review defaults (`pr-pool config
+--print-defaults`) are themselves the worked beads-ready -> command example:
+  each is now printed as a `command` block shelling to `bd ready | jq ...`.
 
 A `ccpool` role's behavior is set by code-owned enums: `completion`
 (`close-only` | `close-or-handback`), `on_failure` (`unclaim` | `add-human`),

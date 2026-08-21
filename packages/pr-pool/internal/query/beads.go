@@ -12,6 +12,13 @@ import (
 // BeadsReady runs `bd ready` with label filters, then applies optional client-side
 // title_prefix / item_type post-filters (the former feedback cycle-identity guard).
 // It embeds Meta so it emits typed events (M2) under its configured emit type.
+//
+// BeadsReady is NOT a TOML-configurable query type (pg2-n75tk removed
+// `beads-ready` from queryTOML / the query factory — see registry.go). It
+// survives here only because it still backs the in-Go built-in default query
+// set (roles.BuiltinQuerySet constructs it directly as a Go value), which never
+// goes through TOML decode. sibling type BeadsList (no other purpose once
+// `beads-list` left the TOML surface) was deleted along with it.
 type BeadsReady struct {
 	Meta          `toml:"-"`
 	Labels        []string `toml:"labels"`
@@ -30,28 +37,6 @@ func (q BeadsReady) Run(ctx context.Context, env Env) ([]event.Event, error) {
 	issues, err := beads.Ready(ctx, env.BD, labelArgs(q.Labels, q.ExcludeLabels)...)
 	if err != nil {
 		return nil, fmt.Errorf("beads-ready query: %w", err)
-	}
-	return eventsFromIssues(postFilter(issues, q.TitlePrefix, q.ItemType), firstEmit(q), ""), nil
-}
-
-// BeadsList runs `bd list` with the same filter shape.
-type BeadsList struct {
-	Meta          `toml:"-"`
-	Labels        []string `toml:"labels"`
-	ExcludeLabels []string `toml:"exclude_labels"`
-	TitlePrefix   string   `toml:"title_prefix"`
-	ItemType      string   `toml:"item_type"`
-}
-
-func (q BeadsList) Validate() error { return nil }
-
-// BackingCommand: as BeadsReady — the bd CLI behind beads.Runner.
-func (q BeadsList) BackingCommand() string { return beads.Command }
-
-func (q BeadsList) Run(ctx context.Context, env Env) ([]event.Event, error) {
-	issues, err := beads.List(ctx, env.BD, labelArgs(q.Labels, q.ExcludeLabels)...)
-	if err != nil {
-		return nil, fmt.Errorf("beads-list query: %w", err)
 	}
 	return eventsFromIssues(postFilter(issues, q.TitlePrefix, q.ItemType), firstEmit(q), ""), nil
 }

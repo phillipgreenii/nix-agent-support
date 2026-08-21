@@ -155,3 +155,8 @@ func firstEmit(q Query) string {
 	}
 	return e[0]
 }
+
+// IsStub reports whether a query type is a not-yet-implemented stub. No query
+// types are stubs currently; the seam is retained so the drain pre-flight can
+// keep warning if a future type lands as a decode/validate-only stub.
+func IsStub(Query) bool { return false }

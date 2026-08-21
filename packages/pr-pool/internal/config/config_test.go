@@ -334,9 +334,10 @@ func TestLoad_absentBackingCommandIsError(t *testing.T) {
 [[query]]
 name = "s"
 emits = ["a.ready"]
-type = "beads-ready"
-[query.beads-ready]
-labels = ["x"]
+type = "command"
+[query.command]
+argv = ["present-tool"]
+format = "jsonl"
 
 [[role]]
 name = "r"
@@ -623,9 +624,10 @@ func TestLoad_tomlReplacesBuiltins(t *testing.T) {
 [[query]]
 name = "solo-source"
 emits = ["work.ready"]
-type = "beads-ready"
-[query.beads-ready]
-labels = ["worker-ready"]
+type = "command"
+[query.command]
+argv = ["worker-lister"]
+format = "jsonl"
 
 [[role]]
 name = "solo"
@@ -680,9 +682,10 @@ func TestLoad_orphanEmitIsError(t *testing.T) {
 [[query]]
 name = "shouting-into-void"
 emits = ["heard.by.none"]
-type = "beads-ready"
-[query.beads-ready]
-labels = ["x"]
+type = "command"
+[query.command]
+argv = ["x"]
+format = "jsonl"
 
 [[role]]
 name = "r"
@@ -695,9 +698,10 @@ argv = ["x"]
 [[query]]
 name = "orphan"
 emits = ["orphan.type"]
-type = "beads-ready"
-[query.beads-ready]
-labels = ["y"]
+type = "command"
+[query.command]
+argv = ["y"]
+format = "jsonl"
 `)
 	if _, err := Load(); err == nil {
 		t.Fatal("a query emitting an unbound event type must error (orphan producer)")
@@ -711,20 +715,22 @@ func TestLoad_thresholdTriggerDecodes(t *testing.T) {
 [[query]]
 name = "up"
 emits = ["up.ready"]
-type = "beads-ready"
-[query.beads-ready]
-labels = ["a"]
+type = "command"
+[query.command]
+argv = ["a"]
+format = "jsonl"
 
 [[query]]
 name = "down"
 emits = ["down.ready"]
-type = "beads-ready"
+type = "command"
 [query.trigger]
 kind = "threshold"
 count = 2
 binds = ["up.ready"]
-[query.beads-ready]
-labels = ["b"]
+[query.command]
+argv = ["b"]
+format = "jsonl"
 
 [[role]]
 name = "ur"
