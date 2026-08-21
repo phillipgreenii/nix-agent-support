@@ -50,14 +50,22 @@ PRIMARY="${PRIMARY#origin/}"                    # strip the remote prefix if it 
 - **`<CC>`** = the canonical clone, i.e. the **main working tree** of the common
   git dir (`git rev-parse --git-common-dir` resolved to its parent directory).
   Unlike `ff-merge-to-main`, this handler never writes to `<CC>` — it only reads it
-  to surface an anomaly (PR-0 below).
+  to surface an anomaly (PR-0a below).
 - **primary branch** = the shared resolution (same one `integrate-branch-support`
   and `ff-merge-to-main` use): `git config --get
 pgii-integrate-branch.primaryBranch` → else `git symbolic-ref
 refs/remotes/origin/HEAD` (strip the `refs/remotes/origin/` prefix) → else `main`.
   It is the PR's base branch.
 
-## PR-0 — Surface a canonical anomaly (non-blocking)
+## PR-0 — Precondition: canonical anomaly surfaced, and `<WT>` actually pushable
+
+Like `ff-merge-to-main`'s FF-0, this checks **two** trees — but for a different
+reason than FF-0's. FF-0a/FF-0b split because FF-1 and FF-2 depend on different
+trees (`<WT>` and `<CC>` respectively); here `<CC>` is never written at all, so
+PR-0a stays a **surface-only** report and PR-0b is the one **blocking**
+precondition, guarding the single tree this handler actually acts on.
+
+### PR-0a — Surface a canonical anomaly (non-blocking)
 
 Re-check the canonical clone independently — do not trust the caller's report:
 
@@ -67,11 +75,35 @@ git -C "$CC" status --porcelain            # non-empty means dirty
 ```
 
 If `<CC>` is off `<PRIMARY>` or dirty, this is a Tier R **R-3 anomaly** and MUST be
-surfaced to the user. Unlike `ff-merge-to-main`'s FF-0, this is **not** a halt
+surfaced to the user. Unlike `ff-merge-to-main`'s FF-0a, this is **not** a halt
 condition here: the `pull-request` method never reads from or writes to `<CC>` — it
 only pushes `<WT>`'s branch to a remote and talks to a PR host — so an off-primary
 or dirty canonical clone has nothing this handler could damage. Report the note and
-continue to PR-1 regardless.
+continue to PR-0b regardless.
+
+### PR-0b — the worktree PR-1 will push (`<WT>`)
+
+Unlike PR-0a, this check **blocks** — mirroring `ff-merge-to-main`'s FF-0b
+exactly, because the failure mode is the same one FF-0b exists to prevent: a
+dirty `<WT>` pushed as-is silently **omits** the uncommitted work, so the branch
+that lands in the PR is not the branch the author actually has. The author sees
+a PR that looks finished and is not.
+
+```bash
+git -C "$WT" status --porcelain            # MUST be empty
+```
+
+If `<WT>` is dirty, **halt and report** `stopped:worktree-dirty` with the absolute
+path of `<WT>` and the `status --porcelain` output — reusing FF-0b's exact reason
+vocabulary rather than inventing a parallel one, since the disposition is
+identical: the operator commits or stashes in `<WT>`, then re-invokes
+`integrate-branch`. This is a **caller-state** halt, not a Tier R anomaly (the
+same distinction FF-0b draws) — the handler MUST NOT commit or stash on the
+caller's behalf; that silently decides the fate of work it did not create.
+
+`pull-request` has no rebase step, so FF-0b's second check (a rebase already in
+progress) has no equivalent here — there is nothing in this flow a leftover
+rebase state could corrupt, so only the dirty-worktree half of FF-0b applies.
 
 ## PR-1 — Push the feature branch to its remote
 
@@ -88,7 +120,6 @@ if [ -z "$REMOTE" ]; then
   [ "$n" -gt 1 ] && exit 1
   REMOTE="$(git -C "$WT" remote)"   # the sole remote when n==1 (empty if none)
 fi
-git -C "$WT" push -u "$REMOTE" "$FB"
 ```
 
 If no remote can be resolved unambiguously (no upstream, and more than one
@@ -97,9 +128,61 @@ guess. This should be rare in practice — `integrate-branch`'s feasibility chec
 (Step 4) already confirmed a `remote` exists before invoking this handler — but the
 handler re-verifies rather than trusting that.
 
-If `<FB>` already had commits pushed and an open PR exists, this push is what
-"updates" that PR — most PR hosts pick up new commits on the branch automatically;
-no separate "update" API call is needed for the commits themselves.
+### Pushing, and classifying a push failure
+
+```bash
+git -C "$WT" push -u "$REMOTE" "$FB"
+```
+
+can fail for several **different** reasons that need different dispositions, so
+classify the failure rather than treating every non-zero exit the same way.
+`attempts = 0`.
+
+- **Exit 0 — push succeeded.** If `<FB>` already had commits pushed and an open
+  PR exists, this push is what "updates" that PR — most PR hosts pick up new
+  commits on the branch automatically; no separate "update" API call is needed
+  for the commits themselves. Proceed to PR-2.
+- **Non-fast-forward rejection** — git names it explicitly on the ref line
+  (`[rejected]` with `non-fast-forward` or `fetch first`): a peer has advanced
+  `<REMOTE>/<FB>` since this handler last read it — exactly the case
+  `/drain-beads` calls **TRANSIENT** for a shared `drain/<id>` branch. Handle it
+  as a **bounded retry**, in the same shape as `ff-merge-to-main`'s FF-3:
+  - `attempts++`, then re-fetch and **rebase `<WT>` onto the updated remote
+    branch**, and re-attempt the push:
+    ```bash
+    git -C "$WT" fetch "$REMOTE" "$FB"
+    git -C "$WT" rebase "$REMOTE/$FB"
+    git -C "$WT" push --force-with-lease -u "$REMOTE" "$FB"
+    ```
+    `--force-with-lease` **IS permitted** for this retry — it only overwrites the
+    remote ref if it still matches what this rebase just fetched, so it cannot
+    silently clobber a commit this retry never saw. Bare `--force` is
+    **FORBIDDEN** here and everywhere else in this handler.
+  - If that rebase itself conflicts, apply the same discipline as
+    `ff-merge-to-main`'s FF-1: resolve it confidently and continue (summarizing
+    the resolution), or abort and **halt and report** `stopped:rebase-conflict` —
+    reusing that existing reason rather than inventing a parallel one, since it
+    is the same state. Do not let an unconfident conflict resolution turn into a
+    forced push.
+  - When `attempts` reaches **2** (the second consecutive non-fast-forward
+    rejection), **stop and ask** the user rather than retry indefinitely — a
+    persistent push race warrants attention, matching FF-3's framing (R-7).
+    **Halt and report** `stopped:push-non-fast-forward` with `<REMOTE>/<FB>` and
+    git's rejection message.
+- **Auth failure** — git names it explicitly (`Authentication failed`,
+  `Permission denied`, `could not read Username`, or the transport refusing
+  outright, e.g. `fatal: Could not read from remote repository`). Retrying will
+  not help — the credentials or access, not the ref state, are the problem:
+  **halt and report** `stopped:push-auth-failed` with git's message verbatim. The
+  operator fixes credentials/access, then re-invokes `integrate-branch`.
+- **Anything else (including a pre-receive/policy hook rejection)** — **halt and
+  report** `stopped:push-failed`. This is the catch-all, and it MUST assert **no
+  specific cause**: relay git's message verbatim and stop there — do **not**
+  guess at or name a plausible-sounding cause the handler did not actually
+  observe. A prior bug, `pg2-k3s0x`, was caused by exactly a catch-all that
+  invented one; the fix is that this outcome is reported as an **unspecified
+  push failure**, nothing more. The operator reads git's own message to
+  diagnose it, then re-invokes `integrate-branch`.
 
 ## PR-2 — Open a new PR, or confirm the existing one
 
@@ -173,13 +256,21 @@ eventually lands the merged PR (or manually, once the human has merged it).
 
 ```mermaid
 flowchart TD
-    A["agent in WT on FB"] --> P0["PR-0: check CC vs PRIMARY (surface only, never halts)"]
-    P0 --> D{"FB detached?"}
+    A["agent in WT on FB"] --> P0A["PR-0a: check CC vs PRIMARY (surface only, never halts)"]
+    P0A --> P0B{"PR-0b: WT clean?"}
+    P0B -->|"dirty"| S7["STOP: stopped:worktree-dirty — operator commits or stashes in WT"]
+    P0B -->|Yes| D{"FB detached?"}
     D -->|Yes| S0[STOP: nothing to integrate]
     D -->|No| R{"remote resolvable?"}
     R -->|No / ambiguous| S1[STOP: stopped:ambiguous-remote]
     R -->|Yes| PUSH["PR-1: git push -u REMOTE FB"]
-    PUSH --> HOST{"PR host tool available?"}
+    PUSH --> PRES{"push result?"}
+    PRES -->|"exit 0"| HOST{"PR host tool available?"}
+    PRES -->|"non-fast-forward"| RETRY{"attempts < 2?"}
+    RETRY -->|Yes| REB["fetch + rebase WT onto REMOTE/FB,\npush --force-with-lease"] --> PUSH
+    RETRY -->|No| S8["STOP: stopped:push-non-fast-forward"]
+    PRES -->|"auth failure"| S9["STOP: stopped:push-auth-failed"]
+    PRES -->|"anything else"| S10["STOP: stopped:push-failed — no cause asserted"]
     HOST -->|None| S2[STOP: stopped:no-pr-host]
     HOST -->|gh / pg-pr / forge CLI| PROBE{"open PR for FB exists?"}
     PROBE -->|Yes| UPD["report pr-updated"]
@@ -192,10 +283,13 @@ flowchart TD
 
 Report the result back using the shared handler vocabulary: `pr-opened` (a new PR
 was created), `pr-updated` (an existing open PR already covers `<FB>`, and PR-1's
-push refreshed it), or `stopped:<reason>` (detached HEAD, an unresolvable remote, or
-no PR host tool available). Always include the PR's URL when one exists. This
-handler never returns `landed` — that outcome belongs to `ff-merge-to-main`, and
-this handler never merges anything.
+push refreshed it), or `stopped:<reason>` — detached HEAD, a dirty `<WT>` at PR-0b
+(`worktree-dirty`), an unresolvable remote (`ambiguous-remote`), no PR host tool
+available (`no-pr-host`), or one of PR-1's push-failure outcomes
+(`push-non-fast-forward` after the retry cap, `push-auth-failed`, or the
+no-cause-asserted catch-all `push-failed`). Always include the PR's URL when one
+exists. This handler never returns `landed` — that outcome belongs to
+`ff-merge-to-main`, and this handler never merges anything.
 
 ## Rules this handler enforces (Tier R, RFC 2119)
 
@@ -204,13 +298,32 @@ this handler never merges anything.
   arguments).
 - On a detached `HEAD` in `<WT>`, the handler MUST halt and report "nothing to
   integrate" rather than guess at a feature branch.
-- The handler MUST re-check `<CC>`'s branch and cleanliness itself (PR-0) rather
+- The handler MUST re-check `<CC>`'s branch and cleanliness itself (PR-0a) rather
   than trusting a caller-supplied anomaly report, and MUST surface any anomaly
   found (R-3) — but MUST NOT halt on it, because the `pull-request` method never
   reads from or writes to the canonical clone (R-8's carve-out for non-canonical-
   advancing methods).
+- The handler MUST check `<WT>` itself is clean (PR-0b) **before** PR-1 pushes it,
+  and MUST halt and report `stopped:worktree-dirty` — the same reason
+  `ff-merge-to-main`'s FF-0b uses — if it is not. It MUST NOT commit or stash on
+  the caller's behalf; that disposition belongs to the operator.
 - The handler MUST resolve the push remote itself and MUST halt rather than guess
   when it cannot resolve one unambiguously.
+- The handler MUST classify a push failure rather than treating every non-zero
+  `git push` exit the same way: a non-fast-forward rejection, an auth failure,
+  and any other failure each get a **distinct** `stopped:<reason>`.
+- On a non-fast-forward rejection the handler MAY retry by rebasing `<WT>` onto
+  the updated `<REMOTE>/<FB>` and re-pushing with `--force-with-lease`, but MUST
+  NOT use bare `--force` under any circumstance. It MUST bound this retry and
+  stop-and-ask after the **second** consecutive rejection (matching
+  `ff-merge-to-main`'s FF-3 cap), reporting `stopped:push-non-fast-forward`.
+- On an auth failure the handler MUST halt immediately and report
+  `stopped:push-auth-failed` rather than retry — retrying cannot fix a
+  credentials/access problem.
+- On any push failure that is neither of the above, the handler MUST report the
+  catch-all `stopped:push-failed` and MUST NOT assert a specific cause it did not
+  actually observe — relay git's message verbatim rather than guess (the
+  `pg2-k3s0x` lesson).
 - The handler MUST check for an existing open PR on `<FB>` before creating a new
   one, so re-running this handler updates rather than duplicates a PR.
 - The handler MUST NOT merge the PR, enable PR automerge, or invoke any
