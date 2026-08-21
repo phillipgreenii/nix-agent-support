@@ -196,7 +196,7 @@ func TestContract_NeedsInput_AskUserQuestionViaHook(t *testing.T) {
 		time.Sleep(500 * time.Millisecond)
 	}
 	if !waiting {
-		scaffoldFail(t, "state never reached waiting-for-human via the AskUserQuestion hook (model may not have called the tool, or the turn never started)")
+		scaffoldFail(t, "state never reached waiting-for-human via the AskUserQuestion hook (model may not have called the tool, or the turn never started); %s", sb.diagSnapshot("a"))
 	}
 	liveAssert(t, "reconciled waiting-for-human (hook-driven)", true, true)
 	// The question field is the hook-recorded AskUserQuestion text; assert it carries
@@ -249,7 +249,7 @@ func TestContract_Canary_GoldenMarkerRendersInPane(t *testing.T) {
 	if !markerSeen {
 		// Driving/capture broken (pane never showed the model's output), not a
 		// verdict on ccpool — classify as scaffold, not a live failure.
-		scaffoldFail(t, "golden marker %q never rendered in the pane (pane-capture path may be broken)", marker)
+		scaffoldFail(t, "golden marker %q never rendered in the pane (pane-capture path may be broken); %s", marker, sb.diagSnapshot("g"))
 	}
 	liveAssert(t, "golden marker rendered in pane", markerSeen, true)
 }

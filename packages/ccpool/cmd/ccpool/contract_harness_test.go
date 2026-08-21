@@ -224,7 +224,14 @@ func (sb *sandbox) ccpTimed(budget time.Duration, args ...string) (string, int, 
 		return r.out, r.code, time.Since(start)
 	case <-time.After(budget):
 		_ = cmd.Process.Kill()
-		sb.t.Fatalf("ccp %v did not return within %s (hang)", args, budget)
+		// args conventionally carry the session name as args[1] (e.g. "reply",
+		// "x", ...); a subcommand with no session name (e.g. "reap") leaves this
+		// empty and diagSnapshot degrades gracefully.
+		name := ""
+		if len(args) >= 2 {
+			name = args[1]
+		}
+		sb.t.Fatalf("ccp %v did not return within %s (hang); %s", args, budget, sb.diagSnapshot(name))
 		return "", 0, 0
 	}
 }
@@ -234,6 +241,40 @@ func (sb *sandbox) cap(name string) string {
 	sb.t.Helper()
 	out, _ := exec.Command("tmux", "-L", sb.socket, "capture-pane", "-t", sb.prefix+name, "-p").Output()
 	return string(out)
+}
+
+// ccpBestEffort runs the binary-under-test like ccp, but NEVER fails the test
+// on error. It exists only for diagnostic-gathering inside a scaffold/hang
+// failure message, where a fetch error must be captured as text, not let
+// diagnostic-gathering itself introduce a new failure mode (unlike ccp/ccpTimed,
+// which intentionally Fatalf on an unexpected exec error).
+func (sb *sandbox) ccpBestEffort(args ...string) string {
+	cmd := exec.Command(sb.bin, args...)
+	cmd.Env = sb.env
+	cmd.Dir = sb.cwd
+	cmd.Stdin = strings.NewReader("")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		if ee, ok := err.(*exec.ExitError); ok {
+			return fmt.Sprintf("%s (exit %d)", strings.TrimSpace(string(out)), ee.ExitCode())
+		}
+		return fmt.Sprintf("<state fetch error: %v>", err)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// diagSnapshot best-effort captures the tmux pane content and the reconciled
+// `state --json` output for name, for inclusion in a scaffold/hang failure
+// message — enough for a later reader to distinguish "the model produced
+// nothing" from "the model produced output that just didn't match the
+// expected marker/state". name may be empty (e.g. a subcommand like "reap"
+// with no session argument), in which case both fields report as
+// unavailable rather than attempting a meaningless capture/query.
+func (sb *sandbox) diagSnapshot(name string) string {
+	if name == "" {
+		return "diag: no session name available for this call"
+	}
+	return fmt.Sprintf("diag pane=%q state=%q", sb.cap(name), sb.ccpBestEffort("state", name, "--json"))
 }
 
 // setMaxSessions rewrites the sandbox config's pool cap (default 6) so cap-based
@@ -327,7 +368,7 @@ func (sb *sandbox) waitForThinking(name string, budget time.Duration) {
 		}
 		time.Sleep(400 * time.Millisecond)
 	}
-	scaffoldFail(sb.t, "thinking phase never observed for %q within %s", name, budget)
+	scaffoldFail(sb.t, "thinking phase never observed for %q within %s; %s", name, budget, sb.diagSnapshot(name))
 }
 
 func (sb *sandbox) waitForStreaming(name string, budget time.Duration) {
