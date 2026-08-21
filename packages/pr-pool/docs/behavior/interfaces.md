@@ -89,11 +89,14 @@ requires it; the details are here.
   typo, and a typo as "re-offer later" (`ADR 0042`). Codes at or above `3` other than `9` are a
   participant's own (`phillipgreenii-nix-agent-support · packages/pr-pool/docs/decisions · DEC-WIRE-1`).
 - **Self-status.** Any participant MAY push its **own** status — `healthy` / `degraded` /
-  `unavailable` — over its callback channel, independent of any per-item outcome. This is the
-  participant reporting on **itself**, and it is the **only** status channel into the core: an
-  `unavailable` self-report is a **pre-accept decline** the core acts on by re-offering the event
-  while it is unexpired (`INV-FAIL-1`, `INV-CONC-1`). It is distinct from the accept-or-decline reply
-  a participant gives to one dispatched item, and pr-pool takes no per-item progress stream at all.
+  `unavailable` — independent of any per-item outcome. This is the participant reporting on
+  **itself**, and it is the **only** status channel into the core: an `unavailable` self-report is a
+  **pre-accept decline** the core acts on by re-offering the event while it is unexpired
+  (`INV-FAIL-1`, `INV-CONC-1`). It is distinct from the accept-or-decline reply a participant gives to
+  one dispatched item, and pr-pool takes no per-item progress stream at all. **How this push reaches
+  the core is not yet realized**: no participant kind is handed a callback for it today — the one
+  callback target that exists at all (`INTF-SOURCE`'s `ingest-event`) carries events, not self-status
+  — see the realization-gap register (`README.md`'s "Realization gaps", against `INV-INTF-1`).
 - **Registry & lifecycle.** A participant **registers** with the core (joins the **registry**) to
   receive lifecycle signals and to make its callback reachable, and **deregisters** on exit. The
   lifecycle and its state diagram are the next section.
