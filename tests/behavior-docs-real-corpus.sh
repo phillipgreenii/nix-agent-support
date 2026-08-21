@@ -156,8 +156,9 @@ for set in "$METHOD_SET" "$PRPOOL_SET" "$PAMONITOR_SET" "$CCPOOL_SET" "$PGPR_SET
   # Catch a FAIL in a section not asserted above — but ONLY in the deterministic
   # ones. A bare `grep FAIL` over the whole report is wrong twice over: the >=2x
   # heuristic prints its own advisory FAILs and a reminder to "confirm FAILs by
-  # hand", and real element names contain the word (`INV-FAIL-1`, `JOURNEY-FAIL`),
-  # so the naive form fails every run on both real sets and the gate is useless.
+  # hand", and real element names can contain the word (`INV-FAIL-1`, or an
+  # obsolete/renamed journey or use-case name), so the naive form fails every
+  # run on both real sets and the gate is useless.
   if strip_heuristic_sections "$out" | grep -qE '^[[:space:]]*FAIL[[:space:]]'; then
     echo "REAL-CORPUS FAIL [$set] self-checks.sh reported a FAIL in a deterministic section:" >&2
     strip_heuristic_sections "$out" | grep -E '^[[:space:]]*FAIL[[:space:]]' >&2
