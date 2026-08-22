@@ -26,7 +26,17 @@ type Entry struct {
 	AgentName     string `yaml:"agent_name,omitempty" json:"agent_name,omitempty"`
 	BodyMarker    string `yaml:"body_marker,omitempty" json:"body_marker,omitempty"`
 	ApprovalRegex string `yaml:"approval_regex,omitempty" json:"approval_regex,omitempty"`
-	Policy        Policy `yaml:"policy" json:"policy"`
+	// Approver marks this entry as counting toward PR approval. It is a
+	// SEPARATE notion from agent registration: every Entry here is a
+	// registered/ingested agent (IsAgent reports true for its Login, and
+	// comment ingestion treats it as before), but Approver being false —
+	// the default, and the value for any pre-existing entry that predates
+	// this field — means its verdict NEVER counts toward approval,
+	// regardless of ApprovalRegex. Approver membership is ADDITIVE and is
+	// NEVER implied by a non-empty ApprovalRegex; it must be set to true
+	// explicitly. See Registry.IsApprover.
+	Approver bool   `yaml:"approver,omitempty" json:"approver,omitempty"`
+	Policy   Policy `yaml:"policy" json:"policy"`
 }
 
 // entry is the internal representation after compilation.
@@ -63,6 +73,21 @@ func New(entries []Entry) (*Registry, error) {
 func (r *Registry) IsAgent(login string) bool {
 	_, ok := r.byLogin[login]
 	return ok
+}
+
+// IsApprover reports whether login is a registered agent explicitly marked
+// as counting toward PR approval (Entry.Approver == true). This is
+// structurally distinct from IsAgent: a login can be a registered,
+// ingested agent (IsAgent true) while never counting as an approver.
+// Approver status is never inferred from ApprovalRegex or any other
+// field — it must have been set explicitly on the Entry. Returns false
+// when login is not a registered agent at all.
+func (r *Registry) IsApprover(login string) bool {
+	ent, ok := r.byLogin[login]
+	if !ok {
+		return false
+	}
+	return ent.e.Approver
 }
 
 // MatchApproval reports whether `body` constitutes an approval verdict

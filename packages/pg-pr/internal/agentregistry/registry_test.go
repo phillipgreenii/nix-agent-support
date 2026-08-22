@@ -93,6 +93,75 @@ approval_regex: '(?im)^verdict:\s*approve'
 	if !r.MatchApproval("claude[bot]", "Verdict: Approve\nLGTM") {
 		t.Error("expected legacy approval regex to still match")
 	}
+	// pg2-4dz88.1.3: a legacy entry (login+approval_regex only, no
+	// `approver` key) MUST NOT be implicitly allowlisted just because it
+	// compiled a working ApprovalRegex — Approver defaults to false and
+	// allowlisting is never implied.
+	if e.Approver {
+		t.Error("expected legacy entry to decode with Approver=false (zero value)")
+	}
+	if r.IsApprover("claude[bot]") {
+		t.Error("expected legacy entry to NOT be an approver despite a matching ApprovalRegex")
+	}
+}
+
+// TestEntry_ApproverField verifies the `approver` YAML key round-trips.
+func TestEntry_ApproverField(t *testing.T) {
+	const src = `
+login: approver-one
+approval_regex: '(?im)^GEN2-CLEAN$'
+approver: true
+`
+	var e Entry
+	if err := yaml.Unmarshal([]byte(src), &e); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if !e.Approver {
+		t.Error("expected approver: true to decode as Approver=true")
+	}
+}
+
+// TestIsApprover_SeparateFromIsAgent verifies that approver-allowlist
+// membership is a SEPARATE set from agent registration: a login can be a
+// registered agent (IsAgent true, comment ingestion unaffected) while
+// never counting as an approver (IsApprover false), and the two are
+// structurally distinguishable via the two accessors.
+func TestIsApprover_SeparateFromIsAgent(t *testing.T) {
+	r, err := New([]Entry{
+		{Login: "approver-one", ApprovalRegex: `(?im)^GEN2-CLEAN$`, Approver: true},
+		{Login: "bot-not-an-approver", ApprovalRegex: `(?im)^GEN2-CLEAN$`, Approver: false},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	// Both are registered agents; ingestion/IsAgent sees no difference.
+	if !r.IsAgent("approver-one") {
+		t.Error("expected approver-one to be IsAgent")
+	}
+	if !r.IsAgent("bot-not-an-approver") {
+		t.Error("expected bot-not-an-approver to be IsAgent")
+	}
+
+	// Only the allowlisted entry counts as an approver.
+	if !r.IsApprover("approver-one") {
+		t.Error("expected approver-one to be IsApprover")
+	}
+	if r.IsApprover("bot-not-an-approver") {
+		t.Error("expected bot-not-an-approver to NOT be IsApprover despite being a registered agent")
+	}
+
+	// A non-agent login is neither.
+	if r.IsAgent("alice") || r.IsApprover("alice") {
+		t.Error("expected alice (unregistered) to be neither IsAgent nor IsApprover")
+	}
+
+	// Both entries still match approval bodies via the pre-existing
+	// approval-regex machinery — Approver gates a DIFFERENT axis
+	// (allowlist membership), not comment-body matching.
+	if !r.MatchApproval("bot-not-an-approver", "GEN2-CLEAN") {
+		t.Error("expected bot-not-an-approver's ApprovalRegex matching to be unaffected by Approver=false")
+	}
 }
 
 // TestNew_EmptyApprovalRegex verifies that an entry with no ApprovalRegex is accepted.

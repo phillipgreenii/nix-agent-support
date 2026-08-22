@@ -511,3 +511,153 @@ repos:
 		t.Errorf("ExcludedCIChecks = %v, want [^policy-bot]", got)
 	}
 }
+
+// ----------------------------------------------------------------------
+// ApproverAllowlist / VerdictGenerations (pg2-4dz88.1.3)
+// ----------------------------------------------------------------------
+
+func TestApproverAllowlistParsed(t *testing.T) {
+	dir := t.TempDir()
+	p := writeYAML(t, dir, `
+self_login: me
+worktree_root: /tmp/wt
+repos:
+  - remote: owner/name
+agents:
+  - login: approver-one
+    approval_regex: '(?im)^GEN2-CLEAN$'
+  - login: bot-not-an-approver
+    approval_regex: '(?im)^GEN2-CLEAN$'
+approver_allowlist:
+  - approver-one
+`)
+	cfg, err := LoadFile(p)
+	if err != nil {
+		t.Fatalf("LoadFile: %v", err)
+	}
+	if len(cfg.ApproverAllowlist) != 1 || cfg.ApproverAllowlist[0] != "approver-one" {
+		t.Errorf("ApproverAllowlist = %v, want [approver-one]", cfg.ApproverAllowlist)
+	}
+}
+
+// TestApproverAllowlistAbsentIsZeroValue proves an old deployment config,
+// unmodified, keeps loading without error and without enabling the
+// mechanism: absent approver_allowlist decodes to a nil/empty slice.
+func TestApproverAllowlistAbsentIsZeroValue(t *testing.T) {
+	dir := t.TempDir()
+	p := writeYAML(t, dir, minimalYAML)
+	cfg, err := LoadFile(p)
+	if err != nil {
+		t.Fatalf("LoadFile: %v", err)
+	}
+	if len(cfg.ApproverAllowlist) != 0 {
+		t.Errorf("expected empty ApproverAllowlist for config predating the field, got %v", cfg.ApproverAllowlist)
+	}
+	if len(cfg.VerdictGenerations) != 0 {
+		t.Errorf("expected empty VerdictGenerations for config predating the field, got %v", cfg.VerdictGenerations)
+	}
+}
+
+// TestVerdictGenerationsParsed_PreservesOrder proves a synthetic
+// multi-generation grammar round-trips from YAML in DECLARED ORDER —
+// ordering is load-bearing for a future sibling leaf's "highest declared
+// generation wins" tie-break.
+func TestVerdictGenerationsParsed_PreservesOrder(t *testing.T) {
+	dir := t.TempDir()
+	p := writeYAML(t, dir, `
+self_login: me
+worktree_root: /tmp/wt
+repos:
+  - remote: owner/name
+verdict_generations:
+  - id: gen1
+    body_marker: X-TEST-MARKER-V1
+    findings_patterns:
+      - '(?im)^GEN1-FINDINGS:\s*(\d+)$'
+    authority_patterns:
+      - '(?im)^GEN1-VERDICT:\s*approve$'
+  - id: gen2
+    body_marker: X-TEST-MARKER-V2
+    findings_patterns:
+      - '(?im)^GEN2-FINDINGS:\s*(\d+)$'
+    authority_patterns:
+      - '(?im)^GEN2-CLEAN$'
+`)
+	cfg, err := LoadFile(p)
+	if err != nil {
+		t.Fatalf("LoadFile: %v", err)
+	}
+	if len(cfg.VerdictGenerations) != 2 {
+		t.Fatalf("expected 2 generations, got %d", len(cfg.VerdictGenerations))
+	}
+	if cfg.VerdictGenerations[0].ID != "gen1" || cfg.VerdictGenerations[1].ID != "gen2" {
+		t.Fatalf("expected declared order [gen1 gen2], got [%s %s]",
+			cfg.VerdictGenerations[0].ID, cfg.VerdictGenerations[1].ID)
+	}
+	g1 := cfg.VerdictGenerations[0]
+	if g1.BodyMarker != "X-TEST-MARKER-V1" {
+		t.Errorf("gen1 body_marker: got %q", g1.BodyMarker)
+	}
+	if len(g1.FindingsPatterns) != 1 || g1.FindingsPatterns[0] != `(?im)^GEN1-FINDINGS:\s*(\d+)$` {
+		t.Errorf("gen1 findings_patterns: got %v", g1.FindingsPatterns)
+	}
+	if len(g1.AuthorityPatterns) != 1 || g1.AuthorityPatterns[0] != `(?im)^GEN1-VERDICT:\s*approve$` {
+		t.Errorf("gen1 authority_patterns: got %v", g1.AuthorityPatterns)
+	}
+	g2 := cfg.VerdictGenerations[1]
+	if g2.BodyMarker != "X-TEST-MARKER-V2" {
+		t.Errorf("gen2 body_marker: got %q", g2.BodyMarker)
+	}
+}
+
+func TestValidate_ApproverAllowlistEmptyEntry(t *testing.T) {
+	cfg := &Config{
+		SelfLogin:         "me",
+		WorktreeRoot:      "/tmp",
+		Repos:             []RepoConfig{{Remote: "owner/repo"}},
+		ApproverAllowlist: []string{"approver-one", "  "},
+	}
+	rep, _ := cfg.Validate()
+	paths := issuePaths(rep)
+	if !contains(paths, "approver_allowlist[1]") {
+		t.Errorf("expected error for approver_allowlist[1], got %v", paths)
+	}
+}
+
+func TestValidate_VerdictGenerationRequiredFields(t *testing.T) {
+	cfg := &Config{
+		SelfLogin:    "me",
+		WorktreeRoot: "/tmp",
+		Repos:        []RepoConfig{{Remote: "owner/repo"}},
+		VerdictGenerations: []VerdictGeneration{
+			{ID: "", BodyMarker: ""},
+		},
+	}
+	rep, _ := cfg.Validate()
+	paths := issuePaths(rep)
+	for _, want := range []string{"verdict_generations[0].id", "verdict_generations[0].body_marker"} {
+		if !contains(paths, want) {
+			t.Errorf("expected error for %q, got %v", want, paths)
+		}
+	}
+}
+
+func TestValidate_VerdictGenerationValid(t *testing.T) {
+	tmp := t.TempDir()
+	cfg := &Config{
+		SelfLogin:    "me",
+		WorktreeRoot: tmp,
+		Repos:        []RepoConfig{{Remote: "owner/repo", VCS: "github", CICD: []string{"github-actions"}}},
+		VerdictGenerations: []VerdictGeneration{
+			{ID: "gen1", BodyMarker: "X-TEST-MARKER", AuthorityPatterns: []string{"(?im)^GEN2-CLEAN$"}},
+		},
+		ApproverAllowlist: []string{"approver-one"},
+	}
+	rep, err := cfg.Validate()
+	if err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	if rep.HasErrors() {
+		t.Fatalf("expected no errors for a fully-specified generation, got %+v", rep.Issues)
+	}
+}
