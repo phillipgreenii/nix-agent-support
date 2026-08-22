@@ -56,6 +56,23 @@ func reviewRequestedOfSelf(self string, requested []string) bool {
 	return false
 }
 
+// assignedToSelf reports whether self is among the PR's assignees (exact
+// GitHub-login match). Empty self => false. Mirrors reviewRequestedOfSelf
+// exactly, and is kept in the sync layer for the same reason: the VCS
+// provider is self-agnostic (it returns the raw assignees; only the engine
+// knows the configured self login).
+func assignedToSelf(self string, assignees []string) bool {
+	if self == "" {
+		return false
+	}
+	for _, a := range assignees {
+		if a == self {
+			return true
+		}
+	}
+	return false
+}
+
 // refreshPR fetches one PR and reconciles its bead + snapshot from real
 // state. It is the daemon worker's per-PR entry point and the single place
 // beads are closed or marked dormant.

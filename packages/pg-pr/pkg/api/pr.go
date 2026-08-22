@@ -38,6 +38,12 @@ type PR struct {
 	// Populated from `gh pr view --json reviewRequests`; the sync layer derives
 	// ReviewRequestedOfMe from this against the configured SelfLogin.
 	RequestedReviewers []string `json:"requested_reviewers,omitempty"`
+	// Assignees are the login names of accounts assigned to the PR. Populated
+	// from `gh pr view --json assignees` (REST path) and the GraphQL enrich
+	// path's assignees connection. The sync layer derives an "assigned to me"
+	// signal from this against the configured SelfLogin, mirroring how
+	// ReviewRequestedOfMe is derived from RequestedReviewers.
+	Assignees []string `json:"assignees,omitempty"`
 	// ReviewRequestedOfMe is true when the configured self login is among
 	// RequestedReviewers. Set by the sync layer (which knows self); consumed by the
 	// dashboard's "PRs to Review" match reason (pg2-ynhr.13 B2).

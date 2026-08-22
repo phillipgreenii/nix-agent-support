@@ -198,6 +198,60 @@ func TestGetPR_ParsesReviewRequests(t *testing.T) {
 	}
 }
 
+func TestGetPR_ParsesAssignees(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["pr view"] = []byte(`{
+		"number": 7, "title": "t", "state": "OPEN", "author": {"login": "teammate"},
+		"assignees": [
+			{"login": "me"},
+			{"login": "teammate"}
+		]
+	}`)
+	p := NewWithRunner(gh)
+
+	pr, err := p.GetPR(context.Background(), "o/r", 7)
+	if err != nil {
+		t.Fatalf("GetPR: %v", err)
+	}
+	want := []string{"me", "teammate"}
+	if len(pr.Assignees) != len(want) {
+		t.Fatalf("Assignees = %v, want %v", pr.Assignees, want)
+	}
+	for i, w := range want {
+		if pr.Assignees[i] != w {
+			t.Fatalf("Assignees[%d] = %q, want %q (full: %v)", i, pr.Assignees[i], w, pr.Assignees)
+		}
+	}
+	// The --json field set must request assignees, or gh returns nothing.
+	if len(gh.calls) == 0 || !strings.Contains(strings.Join(gh.calls[0], " "), "assignees") {
+		t.Errorf("gh pr view must request the assignees field; args=%v", gh.calls)
+	}
+}
+
+func TestGetPR_AssigneeWithNoLoginIsFiltered(t *testing.T) {
+	// Defensive: every entry gh's assignees field actually returns carries a
+	// login, but a login-less entry (if the shape ever allowed one) must be
+	// filtered out rather than surfacing an empty string, mirroring how
+	// ReviewRequests filters out teams.
+	gh := newFakeGH()
+	gh.responses["pr view"] = []byte(`{
+		"number": 8, "title": "t", "state": "OPEN", "author": {"login": "teammate"},
+		"assignees": [
+			{"login": "me"},
+			{"login": ""}
+		]
+	}`)
+	p := NewWithRunner(gh)
+
+	pr, err := p.GetPR(context.Background(), "o/r", 8)
+	if err != nil {
+		t.Fatalf("GetPR: %v", err)
+	}
+	if len(pr.Assignees) != 1 || pr.Assignees[0] != "me" {
+		t.Fatalf("Assignees = %v, want [me] (login-less entry filtered out)", pr.Assignees)
+	}
+}
+
 func TestGetPR_ValidatesInput(t *testing.T) {
 	p := NewWithRunner(newFakeGH())
 	if _, err := p.GetPR(context.Background(), "", 1); err == nil {

@@ -26,6 +26,33 @@ func TestReviewRequestedOfSelf(t *testing.T) {
 	}
 }
 
+// TestAssignedToSelf mirrors TestReviewRequestedOfSelf one-for-one: pure data
+// plumbing for assignedToSelf, the assignee analog of reviewRequestedOfSelf.
+// This leaf deliberately does not wire it into any retrieval bucket
+// (internal/sync/detector.go) or snapshot predicate — that is the sibling
+// "assignee-to-me" leaf's job.
+func TestAssignedToSelf(t *testing.T) {
+	if !assignedToSelf("me", []string{"teammate", "me"}) {
+		t.Error("self among assignees should be true")
+	}
+	if assignedToSelf("me", []string{"teammate"}) {
+		t.Error("self not assigned should be false")
+	}
+	if assignedToSelf("", []string{"me"}) {
+		t.Error("empty self should be false")
+	}
+	if assignedToSelf("me", nil) {
+		t.Error("no assignees should be false")
+	}
+	// Exact-login match only: no case-insensitive or substring match.
+	if assignedToSelf("me", []string{"Me"}) {
+		t.Error("case-differing login should not match")
+	}
+	if assignedToSelf("me", []string{"teammate-me"}) {
+		t.Error("substring login should not match")
+	}
+}
+
 // TestBuildPRInput_DerivesReviewRequestedOfMe proves the derivation lives in
 // buildPRInput — the single convergence point BOTH the daemon per-PR refresh AND
 // the one-shot full-sync snapshot paths call. Deriving here (rather than only in

@@ -115,6 +115,7 @@ func prNodeSelection(connFirst int) string {
         }
         body
         labels(first: 20) { totalCount pageInfo { hasNextPage } nodes { name } }
+        assignees(first: 20) { totalCount pageInfo { hasNextPage } nodes { login } }
         files(first: 100) { totalCount pageInfo { hasNextPage } nodes { path } }
         commits(last: 20) {
           totalCount
@@ -266,6 +267,13 @@ type ghPRNode struct {
 			Name string `json:"name"`
 		} `json:"nodes"`
 	} `json:"labels"`
+	Assignees struct {
+		TotalCount int        `json:"totalCount"`
+		PageInfo   ghPageInfo `json:"pageInfo"`
+		Nodes      []struct {
+			Login string `json:"login"`
+		} `json:"nodes"`
+	} `json:"assignees"`
 	Files struct {
 		TotalCount int        `json:"totalCount"`
 		PageInfo   ghPageInfo `json:"pageInfo"`
@@ -525,6 +533,11 @@ func prFromGHNode(n ghPRNode, repo string) api.PR {
 	for _, l := range n.Labels.Nodes {
 		pr.Labels = append(pr.Labels, l.Name)
 	}
+	for _, a := range n.Assignees.Nodes {
+		if a.Login != "" {
+			pr.Assignees = append(pr.Assignees, a.Login)
+		}
+	}
 	return pr
 }
 
@@ -677,6 +690,9 @@ func truncationFlags(n ghPRNode) []string {
 	}
 	if n.Labels.PageInfo.HasNextPage {
 		flags = append(flags, "labels")
+	}
+	if n.Assignees.PageInfo.HasNextPage {
+		flags = append(flags, "assignees")
 	}
 	return flags
 }

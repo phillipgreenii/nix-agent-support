@@ -496,6 +496,61 @@ func TestParseEnrichedPRs_BodyLabelsFilesCommits(t *testing.T) {
 	}
 }
 
+// TestParseEnrichedPRs_Assignees verifies that the GraphQL response's
+// assignees connection is mapped onto api.PR.Assignees, and that a
+// login-less entry (defensively, mirroring reviewRequests -> RequestedReviewers)
+// is filtered out.
+func TestParseEnrichedPRs_Assignees(t *testing.T) {
+	const resp = `{"data":{"search":{"nodes":[
+	  {"number":42,"title":"fix","author":{"__typename":"User","login":"teammate"},
+	   "headRefName":"fix/thing","baseRefName":"main","url":"https://gh/42","isDraft":false,
+	   "state":"OPEN","merged":false,"additions":1,"deletions":0,"changedFiles":2,
+	   "repository":{"nameWithOwner":"o/r"},
+	   "reviews":{"nodes":[]},"comments":{"nodes":[]},"reviewThreads":{"nodes":[]},
+	   "commits":{"nodes":[]},
+	   "body":"","labels":{"nodes":[]},"files":{"nodes":[]},
+	   "assignees":{"nodes":[{"login":"me"},{"login":"teammate"},{"login":""}]}}
+	]}}}`
+
+	got, err := parseEnrichedPRs([]byte(resp), "o/r")
+	if err != nil {
+		t.Fatalf("parseEnrichedPRs: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("want 1 PR, got %d", len(got))
+	}
+	ep := got[0]
+
+	wantAssignees := []string{"me", "teammate"}
+	if !sliceEq(ep.PR.Assignees, wantAssignees) {
+		t.Errorf("PR.Assignees = %v, want %v (login-less entry filtered out)", ep.PR.Assignees, wantAssignees)
+	}
+}
+
+// TestTruncationFlags_Assignees verifies that the assignees connection sets
+// the "assignees" truncation flag when hasNextPage is true, mirroring the
+// labels/files/commits connections.
+func TestTruncationFlags_Assignees(t *testing.T) {
+	const resp = `{"data":{"search":{"nodes":[
+	  {"number":1,
+	   "reviews":{"pageInfo":{"hasNextPage":false},"nodes":[]},
+	   "comments":{"pageInfo":{"hasNextPage":false},"nodes":[]},
+	   "reviewThreads":{"pageInfo":{"hasNextPage":false},"nodes":[]},
+	   "assignees":{"pageInfo":{"hasNextPage":true},"nodes":[]}}
+	]}}}`
+
+	got, err := parseEnrichedPRs([]byte(resp), "o/r")
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("want 1 PR, got %d", len(got))
+	}
+	if !sliceEq(got[0].Truncated, []string{"assignees"}) {
+		t.Errorf("Truncated = %v, want [assignees]", got[0].Truncated)
+	}
+}
+
 // TestParseEnrichedPRs_CommitMessages verifies that commit messages from the
 // commits connection are mapped onto vcs.EnrichedPR.Commits.
 func TestParseEnrichedPRs_CommitMessages(t *testing.T) {

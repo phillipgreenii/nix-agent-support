@@ -116,7 +116,7 @@ func (r *cliGHRunner) RunStdin(ctx context.Context, stdin []byte, args ...string
 var errStub = errors.New("github vcs: not implemented")
 
 // Common JSON field set requested from gh for PR-list endpoints.
-var prListFields = "number,title,headRefName,headRefOid,baseRefName,url,author,isDraft,state,mergedAt,closedAt,additions,deletions,changedFiles,body,labels,reviewRequests"
+var prListFields = "number,title,headRefName,headRefOid,baseRefName,url,author,isDraft,state,mergedAt,closedAt,additions,deletions,changedFiles,body,labels,reviewRequests,assignees"
 
 // ghPR is the JSON shape returned by `gh pr list/view --json prListFields`.
 type ghPR struct {
@@ -147,6 +147,13 @@ type ghPR struct {
 	ReviewRequests []struct {
 		Login string `json:"login"`
 	} `json:"reviewRequests"`
+	// Assignees is gh's assignees array. Every entry gh returns for this field
+	// carries a login (only teams — which cannot be assigned to a PR — would
+	// lack one); entries with no login are filtered out defensively, mirroring
+	// how ReviewRequests filters out teams.
+	Assignees []struct {
+		Login string `json:"login"`
+	} `json:"assignees"`
 }
 
 func (p ghPR) toAPI(repo string) api.PR {
@@ -174,6 +181,11 @@ func (p ghPR) toAPI(repo string) api.PR {
 	for _, rr := range p.ReviewRequests {
 		if rr.Login != "" { // accounts (users/bots/mannequins) have a login; teams do not
 			out.RequestedReviewers = append(out.RequestedReviewers, rr.Login)
+		}
+	}
+	for _, a := range p.Assignees {
+		if a.Login != "" {
+			out.Assignees = append(out.Assignees, a.Login)
 		}
 	}
 	return out
