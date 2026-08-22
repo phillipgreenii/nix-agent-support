@@ -7,7 +7,7 @@ import (
 
 // schemaVersion is the current schema. Bump it and append a migration step
 // whenever the DDL changes. Stored in SQLite's user_version pragma.
-const schemaVersion = 8
+const schemaVersion = 9
 
 // migrations is the ordered list of DDL applied to reach schemaVersion. Index i
 // migrates user_version i -> i+1.
@@ -278,6 +278,59 @@ INSERT INTO pull_request_new
   FROM pull_request;
 DROP TABLE pull_request;
 ALTER TABLE pull_request_new RENAME TO pull_request;
+`,
+	// v8 -> v9: generalize the single self-only review slot
+	// (pr_revision.my_review_state) and the single teammate-approved boolean
+	// (pr_revision.others_approved/others_approved_at) into ONE ROW PER
+	// (pr_id, approver login) in a new pr_approval table (pg2-4dz88.1.5). Two
+	// teammates approving are now two distinct rows, and per-approver
+	// staleness ("Alice approved head N, Bob has not re-approved head N+1") is
+	// representable by comparing head_sha against the PR's current head.
+	// UNIQUE(pr_id, approver) makes a later observation from the SAME approver
+	// an UPDATE, not a new row (see store.SetApproval).
+	//
+	// This is purely ADDITIVE: no ALTER on pr_revision, and the old columns
+	// are left in place and still written by internal/sync's write path — a
+	// later leaf cuts readers over to pr_approval and drops the old columns.
+	//
+	// Backfill: neither old marker stores an approver LOGIN — my_review_state
+	// is implicitly "whichever login is configured as self" (a runtime config
+	// value, never persisted in the DB) and others_approved is a single
+	// boolean with no per-teammate identity. So the backfilled rows use the
+	// sentinel approver logins 'self' and 'teammate' for this HISTORICAL data
+	// only; every new observation the sync write path records after this
+	// migration carries the real GitHub login. Only the LATEST revision (by
+	// seq) carrying each marker is backfilled per PR, matching
+	// UNIQUE(pr_id, approver) and SetApproval's "later head replaces" semantics.
+	`
+CREATE TABLE pr_approval (
+    id          INTEGER PRIMARY KEY,
+    pr_id       INTEGER NOT NULL REFERENCES pull_request(id) ON DELETE CASCADE,
+    approver    TEXT NOT NULL,
+    state       TEXT NOT NULL CHECK (state IN ('approved','changes-requested','commented')),
+    head_sha    TEXT NOT NULL,
+    observed_at TEXT NOT NULL,
+    UNIQUE (pr_id, approver)
+);
+CREATE INDEX idx_pr_approval_pr ON pr_approval(pr_id);
+
+INSERT INTO pr_approval (pr_id, approver, state, head_sha, observed_at)
+SELECT pr_id, 'self', my_review_state, head_sha, COALESCE(reviewed_at, observed_at)
+FROM pr_revision AS r
+WHERE my_review_state IS NOT NULL
+  AND seq = (
+    SELECT MAX(seq) FROM pr_revision AS r2
+    WHERE r2.pr_id = r.pr_id AND r2.my_review_state IS NOT NULL
+  );
+
+INSERT INTO pr_approval (pr_id, approver, state, head_sha, observed_at)
+SELECT pr_id, 'teammate', 'approved', head_sha, COALESCE(others_approved_at, observed_at)
+FROM pr_revision AS r
+WHERE others_approved = 1
+  AND seq = (
+    SELECT MAX(seq) FROM pr_revision AS r2
+    WHERE r2.pr_id = r.pr_id AND r2.others_approved = 1
+  );
 `,
 }
 

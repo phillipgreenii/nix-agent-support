@@ -1,11 +1,15 @@
 package sync
 
 import (
+	"context"
 	"testing"
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/cirollup"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/config"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/provider/vcs"
 )
 
 // fixedClock returns a deterministic clock for tests.
@@ -180,6 +184,9 @@ func TestMySubmittedReviews(t *testing.T) {
 		if len(got) != 1 {
 			t.Fatalf("expected 1 result, got %d: %+v", len(got), got)
 		}
+		if got[0].Approver != self {
+			t.Errorf("Approver: got %q want %q (pg2-4dz88.1.5 per-approver feed)", got[0].Approver, self)
+		}
 		if got[0].State != "approved" {
 			t.Errorf("State: got %q want \"approved\"", got[0].State)
 		}
@@ -230,4 +237,100 @@ func TestMySubmittedReviews(t *testing.T) {
 			t.Errorf("second entry: got CommitSHA=%q State=%q; want sha-2/commented", got[1].CommitSHA, got[1].State)
 		}
 	})
+}
+
+// TestIngestFeedbackToStore_WritesPerApproverRows is the regression-equivalence
+// test for pg2-4dz88.1.5's ported write path: for the SAME inputs
+// mySubmittedReviews/othersApprovedReviews handle today (a self-APPROVED review
+// and a teammate-APPROVED review), ingestFeedbackToStore must land BOTH as rows
+// in the new pr_approval table AND continue to populate the old
+// my_review_state/others_approved(_at) columns exactly as before — this leaf is
+// additive, not a cutover.
+func TestIngestFeedbackToStore_WritesPerApproverRows(t *testing.T) {
+	ctx := context.Background()
+	db := store.OpenForTest(t)
+
+	pr := api.PR{
+		Repo: "o/r", Number: 7, State: "open", Author: "alice", // teammate-authored
+		HeadSHA: "sha-head", BaseSHA: "sha-base",
+		URL: "https://github.com/o/r/pull/7",
+	}
+	enriched := &vcs.EnrichedPR{
+		PR: pr,
+		Reviews: []api.Review{
+			// The viewer's OWN approval.
+			{Author: "phillipg", State: "APPROVED", CommitOID: "sha-head", SubmittedAt: "2026-07-01T00:00:00Z"},
+			// A teammate's approval.
+			{Author: "bob", State: "APPROVED", CommitOID: "sha-head", SubmittedAt: "2026-07-02T00:00:00Z"},
+		},
+	}
+
+	e, err := New(Deps{
+		Cfg: &config.Config{
+			SelfLogin: "phillipg",
+			Repos:     []config.RepoConfig{{Remote: "o/r", VCS: "github"}},
+		},
+		VCS:      map[string]VCSProvider{"github": newFakeVCS()},
+		Beads:    &noopBeads{},
+		StateDir: t.TempDir(),
+		Store:    db,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if err := e.ingestFeedbackToStore(ctx, "o/r", pr, enriched); err != nil {
+		t.Fatalf("ingestFeedbackToStore: %v", err)
+	}
+
+	storedPR, err := db.GetPR(ctx, "o/r", 7)
+	if err != nil || storedPR == nil {
+		t.Fatalf("GetPR: pr=%v err=%v", storedPR, err)
+	}
+
+	// --- New table: both observations land as distinct pr_approval rows. ---
+	approvals, err := db.ListApprovals(ctx, storedPR.ID)
+	if err != nil {
+		t.Fatalf("ListApprovals: %v", err)
+	}
+	if len(approvals) != 2 {
+		t.Fatalf("want 2 pr_approval rows (self + teammate), got %d: %+v", len(approvals), approvals)
+	}
+	byApprover := map[string]store.Approval{}
+	for _, a := range approvals {
+		byApprover[a.Approver] = a
+	}
+	self, ok := byApprover["phillipg"]
+	if !ok {
+		t.Fatalf("no pr_approval row for self (phillipg): %+v", approvals)
+	}
+	if self.State != "approved" || self.HeadSHA != "sha-head" || self.ObservedAt != "2026-07-01T00:00:00Z" {
+		t.Errorf("self pr_approval row = %+v, want state=approved head_sha=sha-head observed_at=2026-07-01T00:00:00Z", self)
+	}
+	teammate, ok := byApprover["bob"]
+	if !ok {
+		t.Fatalf("no pr_approval row for teammate (bob): %+v", approvals)
+	}
+	if teammate.State != "approved" || teammate.HeadSHA != "sha-head" || teammate.ObservedAt != "2026-07-02T00:00:00Z" {
+		t.Errorf("teammate pr_approval row = %+v, want state=approved head_sha=sha-head observed_at=2026-07-02T00:00:00Z", teammate)
+	}
+
+	// --- Old columns: still populate exactly as before (no read-seam consumer
+	// has cut over yet, so this leaf must not let them go stale or wrong). ---
+	revs, err := db.ListRevisions(ctx, storedPR.ID)
+	if err != nil {
+		t.Fatalf("ListRevisions: %v", err)
+	}
+	if len(revs) != 1 {
+		t.Fatalf("want 1 revision, got %d: %+v", len(revs), revs)
+	}
+	if revs[0].MyReviewState != "approved" {
+		t.Errorf("my_review_state = %q, want \"approved\" (self path still records)", revs[0].MyReviewState)
+	}
+	if !revs[0].OthersApproved {
+		t.Errorf("others_approved must still be set by the teammate approval")
+	}
+	if revs[0].OthersApprovedAt != "2026-07-02T00:00:00Z" {
+		t.Errorf("others_approved_at = %q, want bob's timestamp", revs[0].OthersApprovedAt)
+	}
 }

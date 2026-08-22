@@ -34,6 +34,10 @@ func ciRollupFromSync(runs []api.CIRun, now func() time.Time, excl *cirollup.Exc
 
 // submittedReview is a filtered review targeted at a specific commit.
 type submittedReview struct {
+	// Approver is the GitHub login the review is attributed to — self for
+	// mySubmittedReviews, the reviewing teammate for othersApprovedReviews.
+	// Feeds store.SetApproval's per-approver row (pg2-4dz88.1.5).
+	Approver    string
 	CommitSHA   string
 	State       string // store enum: approved/changes-requested/commented
 	SubmittedAt string
@@ -68,6 +72,7 @@ func mySubmittedReviews(reviews []api.Review, self string) []submittedReview {
 			continue
 		}
 		out = append(out, submittedReview{
+			Approver:    r.Author,
 			CommitSHA:   r.CommitOID,
 			State:       storeState,
 			SubmittedAt: r.SubmittedAt,
@@ -93,6 +98,7 @@ func othersApprovedReviews(reviews []api.Review, self string) []submittedReview 
 			continue
 		}
 		out = append(out, submittedReview{
+			Approver:    r.Author,
 			CommitSHA:   r.CommitOID,
 			State:       "approved",
 			SubmittedAt: r.SubmittedAt,

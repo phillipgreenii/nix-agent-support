@@ -77,6 +77,12 @@ func (e *Engine) ingestFeedbackToStore(ctx context.Context, repo string, pr api.
 		if err := e.deps.Store.MarkRevisionReviewed(ctx, prID, rv.CommitSHA, rv.State, rv.SubmittedAt); err != nil {
 			return fmt.Errorf("ingest: mark reviewed %s#%d: %w", repo, pr.Number, err)
 		}
+		// Also record the self observation as a per-approver row (pg2-4dz88.1.5)
+		// alongside the existing my_review_state write above — additive, not a
+		// cutover; my_review_state remains the read path until a later leaf.
+		if err := e.deps.Store.SetApproval(ctx, prID, rv.Approver, rv.CommitSHA, rv.State, rv.SubmittedAt); err != nil {
+			return fmt.Errorf("ingest: set approval (self) %s#%d: %w", repo, pr.Number, err)
+		}
 	}
 	// Record teammate (non-self) approvals per revision so the attention predicate
 	// (pg2-4c5i.13) is store-derived. This runs on the daemon's enriched path per
@@ -85,6 +91,13 @@ func (e *Engine) ingestFeedbackToStore(ctx context.Context, repo string, pr api.
 	for _, rv := range othersApprovedReviews(enriched.Reviews, self) {
 		if err := e.deps.Store.MarkRevisionOthersApproved(ctx, prID, rv.CommitSHA, rv.SubmittedAt); err != nil {
 			return fmt.Errorf("ingest: mark others-approved %s#%d: %w", repo, pr.Number, err)
+		}
+		// Also record this teammate's approval as its OWN per-approver row
+		// (pg2-4dz88.1.5), keyed by their real login — distinct from the single
+		// OR'd others_approved boolean above, so a second teammate's approval is
+		// a second distinguishable row rather than lost in the same flag.
+		if err := e.deps.Store.SetApproval(ctx, prID, rv.Approver, rv.CommitSHA, rv.State, rv.SubmittedAt); err != nil {
+			return fmt.Errorf("ingest: set approval (teammate %s) %s#%d: %w", rv.Approver, repo, pr.Number, err)
 		}
 	}
 

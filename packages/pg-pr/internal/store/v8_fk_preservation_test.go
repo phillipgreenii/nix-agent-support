@@ -11,15 +11,24 @@ import "testing"
 // tested.
 //
 // A literal mirror of TestMigrate_V6PreservesCodeCommentMessages would NOT help:
-// after OpenForTest the DB is already at v8, so a second migrate() is a no-op
-// (the `for current < schemaVersion` loop doesn't run) and the rebuild never
-// re-runs against the seeded rows. So this test rolls the version COUNTER back
-// to 7 (not the schema — the table keeps its v8 CHECK) to force migrate() to
-// re-run ONLY the v8 rebuild DDL against a populated table, which is exactly the
-// data-bearing step of a production v7->v8 upgrade. Setting user_version in a
-// store test has precedent (migrate_test.go sets it to 9999). The rollback is
-// lossless: the only columns ever added to pull_request are the 6 v2 enrichment
-// columns and the v8 INSERT...SELECT copies all of them. (pg2-2ozt3)
+// after OpenForTest the DB is already at the terminal schema version, so a
+// second migrate() is a no-op (the `for current < schemaVersion` loop doesn't
+// run) and the rebuild never re-runs against the seeded rows. So this test
+// rolls the version COUNTER back to 7 (not the schema — the table keeps its
+// v8 CHECK) and applies ONLY the v8 rebuild DDL directly via
+// applyMigration(db, 8, migrations[7]) against a populated table, which is
+// exactly the data-bearing step of a production v7->v8 upgrade. Setting
+// user_version in a store test has precedent (migrate_test.go sets it to
+// 9999). v8 is NOT the terminal migration once schema v9 exists
+// (pg2-4dz88.1.5 added a purely-additive pr_approval table after it), so a
+// full migrate() call here would ALSO re-run the v9 step and fail with
+// "table pr_approval already exists" (v9's CREATE TABLE is not idempotent
+// against a DB already at v9) — applyMigration(db, 8, migrations[7]) runs
+// ONLY the v8 step, mirroring TestMigrate_V6PreservesCodeCommentMessages's
+// technique for the same reason (v6 was not terminal either). The rollback is
+// lossless: the only columns ever added to pull_request are the 6 v2
+// enrichment columns and the v8 INSERT...SELECT copies all of them.
+// (pg2-2ozt3)
 func TestMigrate_V8PreservesFKChildren(t *testing.T) {
 	db := OpenForTest(t) // full v8 schema present
 
@@ -53,12 +62,14 @@ func TestMigrate_V8PreservesFKChildren(t *testing.T) {
 		t.Fatalf("seed pr_revision child: %v", err)
 	}
 
-	// Force the v8 rebuild to re-run against the seeded rows.
+	// Force ONLY the v8 rebuild to re-run against the seeded rows (v8 is no
+	// longer the terminal migration, so a full migrate() would also re-run
+	// the v9 step — see the doc comment above for why that fails).
 	if _, err := db.sql.Exec("PRAGMA user_version = 7"); err != nil {
 		t.Fatalf("roll user_version back to 7: %v", err)
 	}
-	if err := migrate(db); err != nil {
-		t.Fatalf("re-run v8 migrate over seeded data: %v", err)
+	if err := applyMigration(db, 8, migrations[7]); err != nil {
+		t.Fatalf("re-run v8 rebuild over seeded data: %v", err)
 	}
 
 	// Parent survived with the SAME id and the co-owned value intact.

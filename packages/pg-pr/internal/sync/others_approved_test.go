@@ -22,6 +22,9 @@ func TestOthersApprovedReviews(t *testing.T) {
 		if got[0].CommitSHA != "h2" || got[0].SubmittedAt != at {
 			t.Errorf("entry = %+v, want CommitSHA=h2 SubmittedAt=%s", got[0], at)
 		}
+		if got[0].Approver != "alice" {
+			t.Errorf("Approver: got %q want \"alice\" (pg2-4dz88.1.5 per-approver feed)", got[0].Approver)
+		}
 	})
 
 	t.Run("viewer's OWN APPROVED → EXCLUDED (X3)", func(t *testing.T) {
