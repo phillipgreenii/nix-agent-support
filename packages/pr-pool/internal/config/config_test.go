@@ -55,21 +55,24 @@ func cmdRole(name string, binds ...string) roles.Role {
 	}
 }
 
-// eventSource is a period-triggered source emitting emits. EventQuery declares no
-// backing command, so a wiring fixture built from it probes no command at all.
+// eventSource is a period-triggered source emitting emits, backed by a command
+// ("present-tool") that resolves under prefixLocator — matching cmdRole's own
+// backing command — so a wiring fixture built from it never trips check 5.
 func eventSource(name string, emits ...string) query.Source {
-	return query.Source{Name: name, Query: query.EventQuery{
+	return query.Source{Name: name, Query: query.CommandQuery{
 		Meta:   query.Meta{EmitTypes: emits},
-		ItemID: "i",
+		Argv:   []string{"present-tool"},
+		Format: query.FormatJSONL,
 	}}
 }
 
 // thresholdSource is a source whose trigger binds trigBinds with the given count
 // — the only config-visible re-entry edge (type -> source).
 func thresholdSource(name string, count int, trigBinds []string, emits ...string) query.Source {
-	return query.Source{Name: name, Query: query.EventQuery{
+	return query.Source{Name: name, Query: query.CommandQuery{
 		Meta:   query.Meta{EmitTypes: emits, Trig: query.ThresholdTrigger{Binds: trigBinds, Count: count}},
-		ItemID: "i",
+		Argv:   []string{"present-tool"},
+		Format: query.FormatJSONL,
 	}}
 }
 

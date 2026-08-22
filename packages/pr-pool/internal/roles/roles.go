@@ -1,8 +1,8 @@
 // Package roles is pr-pool's role model: an ordered RoleSet of typed roles. Under
 // the event model (design 2026-06-25) a role no longer embeds its query; it BINDS
 // to one-or-more event TYPES (Observer subscription) and responds to ANY of them.
-// A role carries its Binds, an optional opt-in correlation (Aggregator, Q2), and a
-// type-specific config block (ccpool or command). This package does NOT import
+// A role carries its Binds and a type-specific config block (ccpool or
+// command). This package does NOT import
 // config (config imports roles to build the RoleSet), keeping the import DAG
 // acyclic.
 package roles

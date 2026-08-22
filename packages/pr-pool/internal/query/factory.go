@@ -20,10 +20,6 @@ type Factories struct{ m map[string]Factory }
 func NewQueryFactories() *Factories {
 	f := &Factories{m: map[string]Factory{}}
 	f.m["command"] = decodeInto(func() Query { return &CommandQuery{} })
-	// event: the spec-C-deferred type, registered here (design M5). It is an
-	// event SOURCE for the aggregator/saga path — it emits a typed, correlated
-	// event that feeds a role's opt-in Aggregator.
-	f.m["event"] = decodeInto(func() Query { return &EventQuery{} })
 	// beads-ready / beads-list / github-issues / jira-issues were removed here
 	// (pg2-n75tk): each typed "how another tool is configured" into Core, and
 	// jira-issues was structurally unsatisfiable (its backing command exists
@@ -78,8 +74,6 @@ func (f *Factories) known() string {
 func derefQuery(q Query) Query {
 	switch v := q.(type) {
 	case *CommandQuery:
-		return *v
-	case *EventQuery:
 		return *v
 	}
 	return q
