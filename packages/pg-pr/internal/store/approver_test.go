@@ -158,6 +158,287 @@ func TestListApprovals_NoneRecorded(t *testing.T) {
 	}
 }
 
+// The three readings a per-approver record must keep distinguishable —
+// FRESH, STALE and ABSENT — are all distinguishable for the same approver
+// across scenarios. A two-way boolean (the old others_approved) collapses the
+// first two, which is the defect pg2-4dz88.1.7 fixes: an approver who DID
+// approve but whose approval no longer stands must never read as one who never
+// approved (INV-APPROVAL-3).
+//
+// Both routes to STALE are covered, because they are independent: the host
+// DISMISSED the review (head-independent — asserted here AT the current head,
+// where a head comparison alone reports nothing), and the approver simply has
+// not reviewed the current head.
+func TestApproval_FreshStaleAbsentAreDistinguishable(t *testing.T) {
+	ctx := context.Background()
+	db := OpenForTest(t)
+	prID := seedPR(t, db)
+
+	const currentHead = "h2"
+
+	tests := []struct {
+		name      string
+		approver  string
+		seed      func(t *testing.T)
+		wantRow   bool
+		wantStale bool
+	}{
+		{
+			name:     "fresh: approved the current head",
+			approver: "fresh-approver",
+			seed: func(t *testing.T) {
+				t.Helper()
+				if err := db.SetApproval(ctx, prID, "fresh-approver", currentHead, "approved", "2026-01-02T00:00:00Z"); err != nil {
+					t.Fatalf("SetApproval: %v", err)
+				}
+			},
+			wantRow:   true,
+			wantStale: false,
+		},
+		{
+			name:     "stale by dismissal: dismissed AT the current head",
+			approver: "dismissed-approver",
+			seed: func(t *testing.T) {
+				t.Helper()
+				if err := db.SetDismissedApproval(ctx, prID, "dismissed-approver", currentHead, "2026-01-02T01:00:00Z"); err != nil {
+					t.Fatalf("SetDismissedApproval: %v", err)
+				}
+			},
+			wantRow:   true,
+			wantStale: true,
+		},
+		{
+			name:     "stale by head: approved an earlier head only",
+			approver: "behind-approver",
+			seed: func(t *testing.T) {
+				t.Helper()
+				if err := db.SetApproval(ctx, prID, "behind-approver", "h1", "approved", "2026-01-01T00:00:00Z"); err != nil {
+					t.Fatalf("SetApproval: %v", err)
+				}
+			},
+			wantRow:   true,
+			wantStale: true,
+		},
+		{
+			name:     "absent: never recorded on this PR",
+			approver: "never-reviewed",
+			seed:     nil, // nothing observed for this approver
+			wantRow:  false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.seed != nil {
+				tc.seed(t)
+			}
+			got, err := db.GetApproval(ctx, prID, tc.approver)
+			if err != nil {
+				t.Fatalf("GetApproval: %v", err)
+			}
+			if !tc.wantRow {
+				if got != nil {
+					t.Fatalf("absent must stay absent (no fabricated row), got %+v", got)
+				}
+				return
+			}
+			if got == nil {
+				t.Fatalf("want a recorded row for %q, got none — an approval that DID happen must never read as absent", tc.approver)
+			}
+			// Every row here records an approval, stale or not: state must not
+			// be repurposed to encode the staleness.
+			if got.State != "approved" {
+				t.Errorf("State = %q, want approved (staleness is not encoded in state)", got.State)
+			}
+			if got.IsStale(currentHead) != tc.wantStale {
+				t.Errorf("IsStale(%q) = %v, want %v (row=%+v)", currentHead, got.IsStale(currentHead), tc.wantStale, *got)
+			}
+		})
+	}
+
+	// All three recorded approvers are still individually addressable — the
+	// stale ones were not folded into, or dropped in favour of, the fresh one.
+	approvals, err := db.ListApprovals(ctx, prID)
+	if err != nil {
+		t.Fatalf("ListApprovals: %v", err)
+	}
+	if len(approvals) != 3 {
+		t.Fatalf("want 3 rows (fresh + 2 stale), got %d: %+v", len(approvals), approvals)
+	}
+}
+
+// A dismissed approval is head-INDEPENDENTLY stale: the host can dismiss a
+// review without the head moving, so an empty currentHeadSHA — which never
+// reports a non-dismissed approval stale — must still report a dismissed one
+// stale.
+func TestApproval_DismissedIsStaleEvenWithoutAHeadToCompare(t *testing.T) {
+	ctx := context.Background()
+	db := OpenForTest(t)
+	prID := seedPR(t, db)
+
+	if err := db.SetDismissedApproval(ctx, prID, "teammate", "h1", "2026-01-01T00:00:00Z"); err != nil {
+		t.Fatalf("SetDismissedApproval: %v", err)
+	}
+	got, err := db.GetApproval(ctx, prID, "teammate")
+	if err != nil || got == nil {
+		t.Fatalf("GetApproval: err=%v got=%+v", err, got)
+	}
+	if !got.Dismissed {
+		t.Errorf("Dismissed = false, want true (the dismissal fact must round-trip)")
+	}
+	if !got.IsStale("") {
+		t.Errorf("a dismissed approval must report stale even with no head to compare against")
+	}
+	if !got.IsStale("h1") {
+		t.Errorf("a dismissed approval must report stale even AT the head it was observed on")
+	}
+}
+
+// Dismissal is not permanent: the same approver re-approving replaces the row
+// and CLEARS the dismissal, so a dismiss-then-reapprove sequence ends FRESH.
+// The reverse sequence ends STALE. Both are the upsert's last-observation-wins
+// semantics, asserted in both orders because getting one right by accident is
+// easy.
+func TestSetApproval_DismissalRoundTripsBothOrders(t *testing.T) {
+	ctx := context.Background()
+
+	const currentHead = "h2"
+
+	tests := []struct {
+		name          string
+		apply         func(t *testing.T, db *DB, prID int64)
+		wantDismissed bool
+		wantHeadSHA   string
+		wantStale     bool
+	}{
+		{
+			name: "dismiss then reapprove at a newer head → fresh",
+			apply: func(t *testing.T, db *DB, prID int64) {
+				t.Helper()
+				if err := db.SetDismissedApproval(ctx, prID, "alice", "h1", "2026-01-01T00:00:00Z"); err != nil {
+					t.Fatalf("SetDismissedApproval: %v", err)
+				}
+				if err := db.SetApproval(ctx, prID, "alice", currentHead, "approved", "2026-01-02T00:00:00Z"); err != nil {
+					t.Fatalf("SetApproval: %v", err)
+				}
+			},
+			wantDismissed: false,
+			wantHeadSHA:   currentHead,
+			wantStale:     false,
+		},
+		{
+			name: "reapprove then dismiss → stale",
+			apply: func(t *testing.T, db *DB, prID int64) {
+				t.Helper()
+				if err := db.SetApproval(ctx, prID, "alice", currentHead, "approved", "2026-01-01T00:00:00Z"); err != nil {
+					t.Fatalf("SetApproval: %v", err)
+				}
+				if err := db.SetDismissedApproval(ctx, prID, "alice", currentHead, "2026-01-02T00:00:00Z"); err != nil {
+					t.Fatalf("SetDismissedApproval: %v", err)
+				}
+			},
+			wantDismissed: true,
+			wantHeadSHA:   currentHead,
+			wantStale:     true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			db := OpenForTest(t)
+			prID := seedPR(t, db)
+			tc.apply(t, db, prID)
+
+			approvals, err := db.ListApprovals(ctx, prID)
+			if err != nil {
+				t.Fatalf("ListApprovals: %v", err)
+			}
+			if len(approvals) != 1 {
+				t.Fatalf("the same approver must occupy ONE row; got %d: %+v", len(approvals), approvals)
+			}
+			got := approvals[0]
+			if got.Dismissed != tc.wantDismissed {
+				t.Errorf("Dismissed = %v, want %v (row=%+v)", got.Dismissed, tc.wantDismissed, got)
+			}
+			if got.HeadSHA != tc.wantHeadSHA {
+				t.Errorf("HeadSHA = %q, want %q", got.HeadSHA, tc.wantHeadSHA)
+			}
+			if got.State != "approved" {
+				t.Errorf("State = %q, want approved", got.State)
+			}
+			if got.IsStale(currentHead) != tc.wantStale {
+				t.Errorf("IsStale(%q) = %v, want %v (row=%+v)", currentHead, got.IsStale(currentHead), tc.wantStale, got)
+			}
+		})
+	}
+}
+
+// Staleness compares head SHAs for DIFFERENCE, not for order. A head SHA
+// carries no ordering meaning — a force-push can move the head to a SHA that
+// sorts either side of the old one — so an approval recorded at a head that
+// sorts AFTER the current head is exactly as stale as one that sorts before it.
+func TestApproval_StalenessComparesDifferenceNotOrder(t *testing.T) {
+	ctx := context.Background()
+	db := OpenForTest(t)
+	prID := seedPR(t, db)
+
+	if err := db.SetApproval(ctx, prID, "alice", "zzz-reviewed-head", "approved", "2026-01-01T00:00:00Z"); err != nil {
+		t.Fatalf("SetApproval: %v", err)
+	}
+	got, err := db.GetApproval(ctx, prID, "alice")
+	if err != nil || got == nil {
+		t.Fatalf("GetApproval: err=%v got=%+v", err, got)
+	}
+	if !got.IsStale("aaa-current-head") {
+		t.Errorf("an approval whose head sorts AFTER the current head must still read stale (row=%+v)", *got)
+	}
+}
+
+// Every pr_approval accessor REPORTS a store failure rather than returning a
+// silent success: with the store closed underneath them, each entry point must
+// return an error.
+func TestApprovalAccessors_ReportStoreErrors(t *testing.T) {
+	ctx := context.Background()
+	db := OpenForTest(t)
+	prID := seedPR(t, db)
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	if err := db.SetApproval(ctx, prID, "alice", "h1", "approved", "t1"); err == nil {
+		t.Error("SetApproval on a closed store returned nil, want an error")
+	}
+	if err := db.SetDismissedApproval(ctx, prID, "alice", "h1", "t1"); err == nil {
+		t.Error("SetDismissedApproval on a closed store returned nil, want an error")
+	}
+	if _, err := db.GetApproval(ctx, prID, "alice"); err == nil {
+		t.Error("GetApproval on a closed store returned nil, want an error")
+	}
+	if _, err := db.ListApprovals(ctx, prID); err == nil {
+		t.Error("ListApprovals on a closed store returned nil, want an error")
+	}
+}
+
+// SQLite's dynamic typing lets a non-integer value sit in the dismissed
+// column, which cannot be scanned into the Dismissed bool. ListApprovals MUST
+// surface that as an error instead of quietly returning a short list, which a
+// caller would read as "this approver never approved".
+func TestListApprovals_UnscannableRowSurfacesAsError(t *testing.T) {
+	ctx := context.Background()
+	db := OpenForTest(t)
+	prID := seedPR(t, db)
+
+	if _, err := db.sql.Exec(`INSERT INTO pr_approval (pr_id, approver, state, head_sha, observed_at, dismissed)
+		VALUES (?,'alice','approved','h1','t1','not-an-integer')`, prID); err != nil {
+		t.Fatalf("seed unscannable row: %v", err)
+	}
+
+	got, err := db.ListApprovals(ctx, prID)
+	if err == nil {
+		t.Errorf("ListApprovals returned nil error for an unscannable row; got %+v", got)
+	}
+}
+
 // A teammate's non-approved states (changes-requested, commented) are
 // representable too — pr_approval is not limited to "approved" the way
 // others_approved was.

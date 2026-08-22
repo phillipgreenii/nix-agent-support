@@ -75,13 +75,22 @@ func (e *Engine) ingestFeedbackToStore(ctx context.Context, repo string, pr api.
 		return fmt.Errorf("ingest: set revision ci %s#%d: %w", repo, pr.Number, err)
 	}
 	for _, rv := range mySubmittedReviews(enriched.Reviews, self) {
-		if err := e.deps.Store.MarkRevisionReviewed(ctx, prID, rv.CommitSHA, rv.State, rv.SubmittedAt); err != nil {
-			return fmt.Errorf("ingest: mark reviewed %s#%d: %w", repo, pr.Number, err)
+		// A DISMISSED self review is deliberately kept OUT of the legacy
+		// single-slot my_review_state (pg2-4dz88.1.7): that column carries no
+		// staleness, so a dismissed review recorded there would read as a
+		// CURRENT self review. It still lands as a per-approver row below,
+		// marked stale. The legacy column therefore cannot represent
+		// "approved then dismissed" at all — a limitation the read-seam
+		// cutover leaf resolves by reading pr_approval instead.
+		if !rv.Dismissed {
+			if err := e.deps.Store.MarkRevisionReviewed(ctx, prID, rv.CommitSHA, rv.State, rv.SubmittedAt); err != nil {
+				return fmt.Errorf("ingest: mark reviewed %s#%d: %w", repo, pr.Number, err)
+			}
 		}
 		// Also record the self observation as a per-approver row (pg2-4dz88.1.5)
 		// alongside the existing my_review_state write above — additive, not a
 		// cutover; my_review_state remains the read path until a later leaf.
-		if err := e.deps.Store.SetApproval(ctx, prID, rv.Approver, rv.CommitSHA, rv.State, rv.SubmittedAt); err != nil {
+		if err := e.recordApproval(ctx, prID, rv); err != nil {
 			return fmt.Errorf("ingest: set approval (self) %s#%d: %w", repo, pr.Number, err)
 		}
 	}
@@ -90,14 +99,20 @@ func (e *Engine) ingestFeedbackToStore(ctx context.Context, repo string, pr api.
 	// tick, keeping the marker current. The viewer's own approval is excluded by
 	// othersApprovedReviews (X3), so it can never masquerade as a teammate's.
 	for _, rv := range othersApprovedReviews(enriched.Reviews, self) {
-		if err := e.deps.Store.MarkRevisionOthersApproved(ctx, prID, rv.CommitSHA, rv.SubmittedAt); err != nil {
-			return fmt.Errorf("ingest: mark others-approved %s#%d: %w", repo, pr.Number, err)
+		// As for self above: a DISMISSED teammate approval must NOT set the
+		// others_approved boolean, which cannot express staleness and would
+		// claim a CURRENT teammate approval (pg2-4dz88.1.7). It still lands as
+		// a per-approver row below, marked stale.
+		if !rv.Dismissed {
+			if err := e.deps.Store.MarkRevisionOthersApproved(ctx, prID, rv.CommitSHA, rv.SubmittedAt); err != nil {
+				return fmt.Errorf("ingest: mark others-approved %s#%d: %w", repo, pr.Number, err)
+			}
 		}
 		// Also record this teammate's approval as its OWN per-approver row
 		// (pg2-4dz88.1.5), keyed by their real login — distinct from the single
 		// OR'd others_approved boolean above, so a second teammate's approval is
 		// a second distinguishable row rather than lost in the same flag.
-		if err := e.deps.Store.SetApproval(ctx, prID, rv.Approver, rv.CommitSHA, rv.State, rv.SubmittedAt); err != nil {
+		if err := e.recordApproval(ctx, prID, rv); err != nil {
 			return fmt.Errorf("ingest: set approval (teammate %s) %s#%d: %w", rv.Approver, repo, pr.Number, err)
 		}
 	}

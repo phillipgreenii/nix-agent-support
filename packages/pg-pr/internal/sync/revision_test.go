@@ -154,11 +154,35 @@ func TestMySubmittedReviews(t *testing.T) {
 		}
 	})
 
-	t.Run("DISMISSED state → skipped", func(t *testing.T) {
+	// Regression guard for pg2-4dz88.1.7: DISMISSED used to fall through the
+	// mapping's `default: continue` and vanish, so a self review that DID
+	// approve was indistinguishable from one that never happened. It must now
+	// come back as a STALE approval (INV-APPROVAL-3).
+	t.Run("DISMISSED state → stale approval, NOT dropped", func(t *testing.T) {
 		reviews := []api.Review{{Author: self, State: "DISMISSED", CommitOID: commitOID, SubmittedAt: submittedAt}}
 		got := mySubmittedReviews(reviews, self)
-		if len(got) != 0 {
-			t.Errorf("DISMISSED must be skipped, got %+v", got)
+		if len(got) != 1 {
+			t.Fatalf("DISMISSED must survive the mapping as a stale approval, got %d: %+v", len(got), got)
+		}
+		if got[0].State != "approved" {
+			t.Errorf("State: got %q want \"approved\" (a dismissed review is a stale APPROVAL)", got[0].State)
+		}
+		if !got[0].Dismissed {
+			t.Errorf("Dismissed: got false want true — without it the row is indistinguishable from a current approval")
+		}
+		if got[0].Approver != self || got[0].CommitSHA != commitOID || got[0].SubmittedAt != submittedAt {
+			t.Errorf("entry = %+v, want Approver=%s CommitSHA=%s SubmittedAt=%s", got[0], self, commitOID, submittedAt)
+		}
+	})
+
+	t.Run("APPROVED is NOT marked dismissed", func(t *testing.T) {
+		reviews := []api.Review{{Author: self, State: "APPROVED", CommitOID: commitOID, SubmittedAt: submittedAt}}
+		got := mySubmittedReviews(reviews, self)
+		if len(got) != 1 {
+			t.Fatalf("expected 1 result, got %d: %+v", len(got), got)
+		}
+		if got[0].Dismissed {
+			t.Errorf("a current APPROVED review must not be marked dismissed: %+v", got[0])
 		}
 	})
 
@@ -332,5 +356,227 @@ func TestIngestFeedbackToStore_WritesPerApproverRows(t *testing.T) {
 	}
 	if revs[0].OthersApprovedAt != "2026-07-02T00:00:00Z" {
 		t.Errorf("others_approved_at = %q, want bob's timestamp", revs[0].OthersApprovedAt)
+	}
+}
+
+// newApprovalIngestEngine builds an Engine wired to db with selfLogin as the
+// viewer, for the pr_approval ingest tests below.
+func newApprovalIngestEngine(t *testing.T, db *store.DB, selfLogin string) *Engine {
+	t.Helper()
+	e, err := New(Deps{
+		Cfg: &config.Config{
+			SelfLogin: selfLogin,
+			Repos:     []config.RepoConfig{{Remote: "o/r", VCS: "github"}},
+		},
+		VCS:      map[string]VCSProvider{"github": newFakeVCS()},
+		Beads:    &noopBeads{},
+		StateDir: t.TempDir(),
+		Store:    db,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	return e
+}
+
+// A DISMISSED review — self or teammate — lands as a STALE per-approver row
+// rather than vanishing (pg2-4dz88.1.7, INV-APPROVAL-3). The dismissals here
+// sit AT the PR's current head, so nothing but the recorded dismissal can make
+// them read stale.
+//
+// The legacy single-slot markers must stay EMPTY: my_review_state and
+// others_approved carry no staleness, so writing a dismissed review into them
+// would claim a CURRENT approval.
+func TestIngestFeedbackToStore_DismissedReviewsLandAsStaleApprovals(t *testing.T) {
+	ctx := context.Background()
+	db := store.OpenForTest(t)
+
+	const head = "sha-head"
+	pr := api.PR{
+		Repo: "o/r", Number: 9, State: "open", Author: "alice", // teammate-authored
+		HeadSHA: head, BaseSHA: "sha-base",
+		URL: "https://github.com/o/r/pull/9",
+	}
+	enriched := &vcs.EnrichedPR{
+		PR: pr,
+		Reviews: []api.Review{
+			// The viewer's own approval, dismissed by the host.
+			{Author: "me", State: "DISMISSED", CommitOID: head, SubmittedAt: "2026-07-01T00:00:00Z"},
+			// A teammate's approval, dismissed by the host.
+			{Author: "teammate", State: "DISMISSED", CommitOID: head, SubmittedAt: "2026-07-02T00:00:00Z"},
+		},
+	}
+
+	e := newApprovalIngestEngine(t, db, "me")
+	if err := e.ingestFeedbackToStore(ctx, "o/r", pr, enriched); err != nil {
+		t.Fatalf("ingestFeedbackToStore: %v", err)
+	}
+
+	storedPR, err := db.GetPR(ctx, "o/r", 9)
+	if err != nil || storedPR == nil {
+		t.Fatalf("GetPR: pr=%v err=%v", storedPR, err)
+	}
+
+	approvals, err := db.ListApprovals(ctx, storedPR.ID)
+	if err != nil {
+		t.Fatalf("ListApprovals: %v", err)
+	}
+	if len(approvals) != 2 {
+		t.Fatalf("want 2 pr_approval rows (self + teammate dismissals), got %d: %+v", len(approvals), approvals)
+	}
+	byApprover := map[string]store.Approval{}
+	for _, a := range approvals {
+		byApprover[a.Approver] = a
+	}
+	for _, want := range []struct {
+		approver   string
+		observedAt string
+	}{
+		{"me", "2026-07-01T00:00:00Z"},
+		{"teammate", "2026-07-02T00:00:00Z"},
+	} {
+		got, ok := byApprover[want.approver]
+		if !ok {
+			t.Fatalf("no pr_approval row for %q — a dismissed review must never vanish: %+v", want.approver, approvals)
+		}
+		if got.State != "approved" {
+			t.Errorf("%s: State = %q, want approved (a dismissed review is a stale APPROVAL)", want.approver, got.State)
+		}
+		if !got.Dismissed {
+			t.Errorf("%s: Dismissed = false, want true (row=%+v)", want.approver, got)
+		}
+		if got.HeadSHA != head || got.ObservedAt != want.observedAt {
+			t.Errorf("%s: row = %+v, want head_sha=%s observed_at=%s", want.approver, got, head, want.observedAt)
+		}
+		if !got.IsStale(head) {
+			t.Errorf("%s: a dismissed approval AT the current head must still read stale (row=%+v)", want.approver, got)
+		}
+	}
+
+	// --- Legacy markers: untouched by a dismissal. ---
+	revs, err := db.ListRevisions(ctx, storedPR.ID)
+	if err != nil {
+		t.Fatalf("ListRevisions: %v", err)
+	}
+	if len(revs) != 1 {
+		t.Fatalf("want 1 revision, got %d: %+v", len(revs), revs)
+	}
+	if revs[0].MyReviewState != "" {
+		t.Errorf("my_review_state = %q, want empty: a dismissed self review must not read as a current one", revs[0].MyReviewState)
+	}
+	if revs[0].OthersApproved {
+		t.Errorf("others_approved must stay false: a dismissed teammate approval is not a current teammate approval")
+	}
+}
+
+// A DISMISSED review must not clobber a later, still-current approval from the
+// SAME approver at a newer head. Both orderings are asserted, for self and for
+// a teammate: dismiss-then-reapprove ends FRESH, reapprove-then-dismiss ends
+// STALE (pg2-4dz88.1.7).
+func TestIngestFeedbackToStore_DismissAndReapproveOrdering(t *testing.T) {
+	const self = "me"
+	const oldHead = "sha-old"
+	const head = "sha-head"
+
+	tests := []struct {
+		name          string
+		approver      string
+		states        []string // review states in the order the host reports them
+		commits       []string // the commit each review was submitted against
+		wantHeadSHA   string
+		wantDismissed bool
+		wantStale     bool
+	}{
+		{
+			name:          "self: dismiss then reapprove at a newer head → fresh",
+			approver:      self,
+			states:        []string{"DISMISSED", "APPROVED"},
+			commits:       []string{oldHead, head},
+			wantHeadSHA:   head,
+			wantDismissed: false,
+			wantStale:     false,
+		},
+		{
+			name:          "self: reapprove then dismiss → stale",
+			approver:      self,
+			states:        []string{"APPROVED", "DISMISSED"},
+			commits:       []string{head, head},
+			wantHeadSHA:   head,
+			wantDismissed: true,
+			wantStale:     true,
+		},
+		{
+			name:          "teammate: dismiss then reapprove at a newer head → fresh",
+			approver:      "teammate",
+			states:        []string{"DISMISSED", "APPROVED"},
+			commits:       []string{oldHead, head},
+			wantHeadSHA:   head,
+			wantDismissed: false,
+			wantStale:     false,
+		},
+		{
+			name:          "teammate: reapprove then dismiss → stale",
+			approver:      "teammate",
+			states:        []string{"APPROVED", "DISMISSED"},
+			commits:       []string{head, head},
+			wantHeadSHA:   head,
+			wantDismissed: true,
+			wantStale:     true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			db := store.OpenForTest(t)
+
+			pr := api.PR{
+				Repo: "o/r", Number: 11, State: "open", Author: "alice",
+				HeadSHA: head, BaseSHA: "sha-base",
+				URL: "https://github.com/o/r/pull/11",
+			}
+			reviews := make([]api.Review, 0, len(tc.states))
+			for i, st := range tc.states {
+				reviews = append(reviews, api.Review{
+					Author: tc.approver, State: st, CommitOID: tc.commits[i],
+					// Ascending timestamps, matching the host's report order.
+					SubmittedAt: []string{"2026-07-01T00:00:00Z", "2026-07-02T00:00:00Z"}[i],
+				})
+			}
+			enriched := &vcs.EnrichedPR{PR: pr, Reviews: reviews}
+
+			e := newApprovalIngestEngine(t, db, self)
+			if err := e.ingestFeedbackToStore(ctx, "o/r", pr, enriched); err != nil {
+				t.Fatalf("ingestFeedbackToStore: %v", err)
+			}
+
+			storedPR, err := db.GetPR(ctx, "o/r", 11)
+			if err != nil || storedPR == nil {
+				t.Fatalf("GetPR: pr=%v err=%v", storedPR, err)
+			}
+			approvals, err := db.ListApprovals(ctx, storedPR.ID)
+			if err != nil {
+				t.Fatalf("ListApprovals: %v", err)
+			}
+			if len(approvals) != 1 {
+				t.Fatalf("the same approver must occupy ONE row; got %d: %+v", len(approvals), approvals)
+			}
+			got := approvals[0]
+			if got.Approver != tc.approver {
+				t.Fatalf("Approver = %q, want %q", got.Approver, tc.approver)
+			}
+			if got.State != "approved" {
+				t.Errorf("State = %q, want approved", got.State)
+			}
+			if got.HeadSHA != tc.wantHeadSHA {
+				t.Errorf("HeadSHA = %q, want %q (the LAST observation wins)", got.HeadSHA, tc.wantHeadSHA)
+			}
+			if got.Dismissed != tc.wantDismissed {
+				t.Errorf("Dismissed = %v, want %v (row=%+v)", got.Dismissed, tc.wantDismissed, got)
+			}
+			if got.IsStale(head) != tc.wantStale {
+				t.Errorf("IsStale(%q) = %v, want %v (row=%+v)", head, got.IsStale(head), tc.wantStale, got)
+			}
+		})
 	}
 }

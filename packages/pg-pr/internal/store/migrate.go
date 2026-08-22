@@ -7,7 +7,7 @@ import (
 
 // schemaVersion is the current schema. Bump it and append a migration step
 // whenever the DDL changes. Stored in SQLite's user_version pragma.
-const schemaVersion = 9
+const schemaVersion = 10
 
 // migrations is the ordered list of DDL applied to reach schemaVersion. Index i
 // migrates user_version i -> i+1.
@@ -331,6 +331,25 @@ WHERE others_approved = 1
     SELECT MAX(seq) FROM pr_revision AS r2
     WHERE r2.pr_id = r.pr_id AND r2.others_approved = 1
   );
+`,
+	// v9 -> v10: record that the code host DISMISSED an approver's review
+	// (pg2-4dz88.1.7). A dismissed review MUST read as a STALE approval, never
+	// as an absent one (INV-APPROVAL-3) — before this column the sync mapping
+	// had nowhere to put it and dropped it entirely, so an approver who DID
+	// approve was indistinguishable from one who never did.
+	//
+	// Dismissal needs its OWN column rather than being inferred from head_sha:
+	// the host can dismiss a review without the head moving, so head_sha alone
+	// cannot express it (see store.Approval.IsStale). It is also NOT a new
+	// `state` value: state stays 'approved' so that every reader asking "did
+	// this approver approve?" still sees the row, with staleness as the
+	// qualifier — exactly the reading INV-APPROVAL-3 requires.
+	//
+	// Existing rows default to 0. The v9 backfill sources (my_review_state,
+	// others_approved) never recorded a dismissal, so "not dismissed" is the
+	// only truthful value available for historical data.
+	`
+ALTER TABLE pr_approval ADD COLUMN dismissed INTEGER NOT NULL DEFAULT 0;
 `,
 }
 

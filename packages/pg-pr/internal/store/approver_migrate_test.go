@@ -74,12 +74,14 @@ func TestMigrate_V9BackfillDefaultIsNoRows(t *testing.T) {
 // SPECIFIC rows of pr_approval on upgrade, picking the LATEST matching
 // revision per marker.
 //
-// After OpenForTest the DB is already at v9 with pr_approval created (empty).
-// Mirroring TestMigrate_V8PreservesFKChildren's technique (pg2-2ozt3): v9 is
-// the terminal migration, so dropping the (empty) pr_approval table and
-// rolling the version COUNTER back to 8 forces migrate() to re-run ONLY the
-// v9 step against the already-seeded pr_revision rows — exactly the
-// data-bearing step of a production v8->v9 upgrade.
+// After OpenForTest the DB is already at the terminal schema with pr_approval
+// created (empty). Mirroring TestMigrate_V8PreservesFKChildren's technique
+// (pg2-2ozt3): dropping the (empty) pr_approval table and rolling the version
+// COUNTER back to 8 forces migrate() to re-run the v9 step against the
+// already-seeded pr_revision rows — exactly the data-bearing step of a
+// production v8->v9 upgrade. Every migration after v9 re-runs too, which is
+// harmless as long as each is additive against the table v9 just recreated
+// (v10 is: one ADD COLUMN, pg2-4dz88.1.7).
 func TestMigrate_V9BackfillsExistingData(t *testing.T) {
 	db := OpenForTest(t) // full v9 schema present
 	prID := seedPR(t, db)
@@ -162,6 +164,54 @@ func TestMigrate_V9BackfillsExistingData(t *testing.T) {
 	defer func() { _ = rows.Close() }()
 	if rows.Next() {
 		t.Fatal("foreign_key_check reported a violation after the v9 migration")
+	}
+}
+
+// Schema v10 adds pr_approval.dismissed, the marker that lets a DISMISSED
+// review be stored as a STALE approval instead of being dropped
+// (pg2-4dz88.1.7, INV-APPROVAL-3). The column is additive: existing rows —
+// including v9's 'self'/'teammate' backfill, whose sources could never record
+// a dismissal — read as NOT dismissed.
+func TestMigrate_V10DismissedColumn(t *testing.T) {
+	ctx := context.Background()
+	db := OpenForTest(t)
+
+	var v int
+	if err := db.sql.QueryRow("PRAGMA user_version").Scan(&v); err != nil {
+		t.Fatalf("user_version: %v", err)
+	}
+	if v != schemaVersion || schemaVersion < 10 {
+		t.Fatalf("user_version=%d schemaVersion=%d; want both >= 10", v, schemaVersion)
+	}
+
+	var cnt int
+	if err := db.sql.QueryRow(
+		"SELECT COUNT(*) FROM pragma_table_info('pr_approval') WHERE name='dismissed'",
+	).Scan(&cnt); err != nil {
+		t.Fatalf("pragma_table_info dismissed: %v", err)
+	}
+	if cnt != 1 {
+		t.Fatalf("column \"dismissed\" missing from pr_approval")
+	}
+
+	// A row written WITHOUT the column (as the v9 backfill does) defaults to
+	// not-dismissed rather than NULL, so scanning it into a bool is safe.
+	prID := seedPR(t, db)
+	if _, err := db.sql.Exec(`INSERT INTO pr_approval (pr_id, approver, state, head_sha, observed_at)
+		VALUES (?,'teammate','approved','h1','t1')`, prID); err != nil {
+		t.Fatalf("insert row without dismissed: %v", err)
+	}
+	got, err := db.GetApproval(ctx, prID, "teammate")
+	if err != nil || got == nil {
+		t.Fatalf("GetApproval: err=%v got=%+v", err, got)
+	}
+	if got.Dismissed {
+		t.Errorf("a row inserted without the column must default to NOT dismissed, got %+v", *got)
+	}
+
+	// Idempotent re-migrate.
+	if err := migrate(db); err != nil {
+		t.Fatalf("second migrate: %v", err)
 	}
 }
 

@@ -1,6 +1,7 @@
 package sync
 
 import (
+	"context"
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/cirollup"
@@ -41,6 +42,16 @@ type submittedReview struct {
 	CommitSHA   string
 	State       string // store enum: approved/changes-requested/commented
 	SubmittedAt string
+	// Dismissed marks a review the code host reported as DISMISSED. State is
+	// "approved" for such a review (the host does not report what it said
+	// before the dismissal) and it lands in the per-approver table as a STALE
+	// approval — never dropped (INV-APPROVAL-3, pg2-4dz88.1.7).
+	//
+	// It MUST NOT feed the legacy single-slot markers
+	// (pr_revision.my_review_state / others_approved): those carry no
+	// staleness of their own, so a dismissed review written there would read
+	// as a CURRENT approval. ingestFeedbackToStore skips them accordingly.
+	Dismissed bool
 }
 
 // mySubmittedReviews filters enriched.Reviews to reviews authored by self
@@ -50,7 +61,8 @@ type submittedReview struct {
 //	APPROVED → "approved"
 //	CHANGES_REQUESTED → "changes-requested"
 //	COMMENTED → "commented"
-//	DISMISSED/PENDING/other → skipped
+//	DISMISSED → "approved" + Dismissed (a STALE approval, INV-APPROVAL-3)
+//	PENDING/other → skipped
 func mySubmittedReviews(reviews []api.Review, self string) []submittedReview {
 	if self == "" {
 		return nil
@@ -61,6 +73,7 @@ func mySubmittedReviews(reviews []api.Review, self string) []submittedReview {
 			continue
 		}
 		var storeState string
+		var dismissed bool
 		switch r.State {
 		case "APPROVED":
 			storeState = "approved"
@@ -68,6 +81,12 @@ func mySubmittedReviews(reviews []api.Review, self string) []submittedReview {
 			storeState = "changes-requested"
 		case "COMMENTED":
 			storeState = "commented"
+		case "DISMISSED":
+			// A dismissed review is a STALE approval, not an absent one
+			// (INV-APPROVAL-3). It used to fall through the default below and
+			// vanish, so an approver who DID approve was indistinguishable
+			// from one who never did (pg2-4dz88.1.7).
+			storeState, dismissed = "approved", true
 		default:
 			continue
 		}
@@ -76,18 +95,23 @@ func mySubmittedReviews(reviews []api.Review, self string) []submittedReview {
 			CommitSHA:   r.CommitOID,
 			State:       storeState,
 			SubmittedAt: r.SubmittedAt,
+			Dismissed:   dismissed,
 		})
 	}
 	return out
 }
 
-// othersApprovedReviews returns the NON-SELF (teammate) APPROVED reviews — the
-// inverse-self counterpart of mySubmittedReviews, filtered to APPROVED only.
+// othersApprovedReviews returns the NON-SELF (teammate) reviews that are, or
+// once were, approvals — the inverse-self counterpart of mySubmittedReviews.
 // It underpins the store-derived "someone else approved" marker used by the
 // attention predicate (pg2-4c5i.13). The viewer's OWN approval is deliberately
-// EXCLUDED so it can never be mistaken for a teammate's approval (X3). Only
-// APPROVED counts — a teammate's COMMENTED/CHANGES_REQUESTED review does not put
-// the PR "off the hook". State is always "approved" for the entries returned.
+// EXCLUDED so it can never be mistaken for a teammate's approval (X3). A
+// teammate's COMMENTED/CHANGES_REQUESTED review does not put the PR "off the
+// hook" and is not returned. State is always "approved" for the entries
+// returned; a DISMISSED teammate review is returned with Dismissed set — a
+// STALE approval, never an absent one (INV-APPROVAL-3, pg2-4dz88.1.7) — and
+// its caller MUST keep it out of the others_approved marker, which cannot
+// express staleness.
 //
 // See othersChangesRequestedReviews for the CHANGES_REQUESTED counterpart
 // (pg2-4dz88.1.8), which feeds the SAME per-approver pr_approval table but
@@ -98,7 +122,13 @@ func othersApprovedReviews(reviews []api.Review, self string) []submittedReview 
 		if self != "" && r.Author == self {
 			continue // the viewer's own approval is NOT a teammate approval (X3)
 		}
-		if r.State != "APPROVED" {
+		var dismissed bool
+		switch r.State {
+		case "APPROVED":
+			// A currently-standing teammate approval.
+		case "DISMISSED":
+			dismissed = true
+		default:
 			continue
 		}
 		out = append(out, submittedReview{
@@ -106,6 +136,7 @@ func othersApprovedReviews(reviews []api.Review, self string) []submittedReview 
 			CommitSHA:   r.CommitOID,
 			State:       "approved",
 			SubmittedAt: r.SubmittedAt,
+			Dismissed:   dismissed,
 		})
 	}
 	return out
@@ -143,4 +174,15 @@ func othersChangesRequestedReviews(reviews []api.Review, self string) []submitte
 		})
 	}
 	return out
+}
+
+// recordApproval writes one observed review as a per-approver row
+// (pg2-4dz88.1.5): a DISMISSED review lands as a STALE approval
+// (pg2-4dz88.1.7, INV-APPROVAL-3), every other state as the state it was
+// observed in.
+func (e *Engine) recordApproval(ctx context.Context, prID int64, rv submittedReview) error {
+	if rv.Dismissed {
+		return e.deps.Store.SetDismissedApproval(ctx, prID, rv.Approver, rv.CommitSHA, rv.SubmittedAt)
+	}
+	return e.deps.Store.SetApproval(ctx, prID, rv.Approver, rv.CommitSHA, rv.State, rv.SubmittedAt)
 }
