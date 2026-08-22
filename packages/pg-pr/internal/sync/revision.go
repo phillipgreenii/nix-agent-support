@@ -88,6 +88,10 @@ func mySubmittedReviews(reviews []api.Review, self string) []submittedReview {
 // EXCLUDED so it can never be mistaken for a teammate's approval (X3). Only
 // APPROVED counts — a teammate's COMMENTED/CHANGES_REQUESTED review does not put
 // the PR "off the hook". State is always "approved" for the entries returned.
+//
+// See othersChangesRequestedReviews for the CHANGES_REQUESTED counterpart
+// (pg2-4dz88.1.8), which feeds the SAME per-approver pr_approval table but
+// deliberately does NOT feed the others-approved marker this function backs.
 func othersApprovedReviews(reviews []api.Review, self string) []submittedReview {
 	var out []submittedReview
 	for _, r := range reviews {
@@ -101,6 +105,40 @@ func othersApprovedReviews(reviews []api.Review, self string) []submittedReview 
 			Approver:    r.Author,
 			CommitSHA:   r.CommitOID,
 			State:       "approved",
+			SubmittedAt: r.SubmittedAt,
+		})
+	}
+	return out
+}
+
+// othersChangesRequestedReviews returns the NON-SELF (teammate)
+// CHANGES_REQUESTED reviews (pg2-4dz88.1.8) — the changes-requested
+// counterpart of othersApprovedReviews, feeding the SAME per-approver
+// pr_approval table so "a teammate explicitly asked for changes" becomes
+// representable and distinct from both an absent record and that same
+// approver's own APPROVED/STALE state. The viewer's OWN review is excluded
+// for the same reason as othersApprovedReviews (X3): it is never a teammate
+// review. A teammate's COMMENTED review is deliberately dropped here too —
+// it MUST NOT be conflated with CHANGES_REQUESTED, so it is neither returned
+// by this function nor by othersApprovedReviews.
+//
+// Unlike othersApprovedReviews, callers MUST NOT wire this into
+// MarkRevisionOthersApproved: a teammate asking for changes does not put the
+// PR "off the hook", so that marker's semantics are unaffected by this leaf.
+// State is always "changes-requested" for the entries returned.
+func othersChangesRequestedReviews(reviews []api.Review, self string) []submittedReview {
+	var out []submittedReview
+	for _, r := range reviews {
+		if self != "" && r.Author == self {
+			continue // the viewer's own review is NOT a teammate review (X3)
+		}
+		if r.State != "CHANGES_REQUESTED" {
+			continue
+		}
+		out = append(out, submittedReview{
+			Approver:    r.Author,
+			CommitSHA:   r.CommitOID,
+			State:       "changes-requested",
 			SubmittedAt: r.SubmittedAt,
 		})
 	}

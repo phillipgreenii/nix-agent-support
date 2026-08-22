@@ -100,6 +100,17 @@ func (e *Engine) ingestFeedbackToStore(ctx context.Context, repo string, pr api.
 			return fmt.Errorf("ingest: set approval (teammate %s) %s#%d: %w", rv.Approver, repo, pr.Number, err)
 		}
 	}
+	// Record teammate CHANGES_REQUESTED reviews as their OWN per-approver row
+	// too (pg2-4dz88.1.8) — a teammate explicitly asking for changes is now
+	// representable, distinct from both an absent record and that same
+	// approver's own APPROVED/STALE state. Deliberately NOT wired into
+	// MarkRevisionOthersApproved: asking for changes does not put the PR
+	// "off the hook", so that marker's semantics are unchanged by this leaf.
+	for _, rv := range othersChangesRequestedReviews(enriched.Reviews, self) {
+		if err := e.deps.Store.SetApproval(ctx, prID, rv.Approver, rv.CommitSHA, rv.State, rv.SubmittedAt); err != nil {
+			return fmt.Errorf("ingest: set approval (teammate changes-requested %s) %s#%d: %w", rv.Approver, repo, pr.Number, err)
+		}
+	}
 
 	// --- Comments ---
 	//

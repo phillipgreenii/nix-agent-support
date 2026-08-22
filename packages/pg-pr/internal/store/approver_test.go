@@ -177,3 +177,55 @@ func TestSetApproval_NonApprovedStates(t *testing.T) {
 		t.Errorf("State = %q, want changes-requested", got.State)
 	}
 }
+
+// A teammate's CHANGES_REQUESTED record round-trips through SetApproval and
+// is queryable per approver, and is distinguishable both from that SAME
+// approver's own EARLIER APPROVED state (the state changed, not just the
+// head) and from a STALE reading (IsStale is false against the head it was
+// most recently observed at). pg2-4dz88.1.8: sync now writes
+// changes-requested here too, alongside the existing approved writes.
+func TestApproval_ChangesRequestedDistinctFromApprovedAndStale(t *testing.T) {
+	ctx := context.Background()
+	db := OpenForTest(t)
+	prID := seedPR(t, db)
+
+	// The teammate approves head h1...
+	if err := db.SetApproval(ctx, prID, "teammate", "h1", "approved", "2026-01-01T00:00:00Z"); err != nil {
+		t.Fatalf("SetApproval approved: %v", err)
+	}
+	approvedFirst, err := db.GetApproval(ctx, prID, "teammate")
+	if err != nil || approvedFirst == nil || approvedFirst.State != "approved" {
+		t.Fatalf("GetApproval after approved observation: err=%v got=%+v", err, approvedFirst)
+	}
+
+	// ...then requests changes on a later head h2 (UNIQUE(pr_id, approver)
+	// means this UPDATES the same row rather than appending a new one).
+	if err := db.SetApproval(ctx, prID, "teammate", "h2", "changes-requested", "2026-01-02T00:00:00Z"); err != nil {
+		t.Fatalf("SetApproval changes-requested: %v", err)
+	}
+
+	got, err := db.GetApproval(ctx, prID, "teammate")
+	if err != nil || got == nil {
+		t.Fatalf("GetApproval: err=%v got=%+v", err, got)
+	}
+	if got.ID != approvedFirst.ID {
+		t.Errorf("re-observation should reuse the same row id; got %d, want %d", got.ID, approvedFirst.ID)
+	}
+	if got.State != "changes-requested" {
+		t.Errorf("State = %q, want \"changes-requested\" (must not still read as the earlier approved state)", got.State)
+	}
+	if got.HeadSHA != "h2" {
+		t.Errorf("HeadSHA = %q, want h2 (the later observation replaces, not appends)", got.HeadSHA)
+	}
+
+	// Distinguishable from STALE: at the head it was most recently observed
+	// at, it must not be reported stale.
+	if got.IsStale("h2") {
+		t.Errorf("changes-requested at the current head must not be reported stale")
+	}
+	// But relative to a HEAD BEYOND h2, it IS stale — same staleness
+	// semantics as an approved row, just carrying a different state.
+	if !got.IsStale("h3") {
+		t.Errorf("changes-requested observed at h2 must be reported stale once the PR advances to h3")
+	}
+}
