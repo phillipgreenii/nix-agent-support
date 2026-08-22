@@ -17,8 +17,10 @@ func main() {
 	case routeUsageErr:
 		printUsageErr(r.msg)
 		os.Exit(exitUsage)
-	case routeDrain:
-		os.Exit(runDrain(r.rest))
+	case routeRun:
+		os.Exit(runRun())
+	case routeRunUntilIdle:
+		os.Exit(runRunUntilIdle())
 	case routeRunRole:
 		os.Exit(runRunRole(r.role, r.bead))
 	case routeRunQuery:

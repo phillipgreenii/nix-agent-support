@@ -10,7 +10,6 @@ import (
 	"github.com/BurntSushi/toml"
 	"github.com/phillipgreenii/pr-pool/internal/backoff"
 	"github.com/phillipgreenii/pr-pool/internal/budget"
-	"github.com/phillipgreenii/pr-pool/internal/event"
 	"github.com/phillipgreenii/pr-pool/internal/prompt"
 	"github.com/phillipgreenii/pr-pool/internal/query"
 	"github.com/phillipgreenii/pr-pool/internal/roles"
@@ -82,14 +81,12 @@ type failureBackoffTOML struct {
 }
 
 type roleTOML struct {
-	Name    string           `toml:"name"`
-	Type    string           `toml:"type"`
-	Cap     int              `toml:"cap"`
-	Enabled *bool            `toml:"enabled"` // pointer: absent => default true
-	Binds   []string         `toml:"binds"`   // event types this role consumes (Observer)
-	Corr    *correlationTOML `toml:"correlation"`
-	CCPool  toml.Primitive   `toml:"ccpool"`  // decoded by buildCCPool iff type==ccpool
-	Command toml.Primitive   `toml:"command"` // decoded by buildCommand iff type==command
+	Name    string         `toml:"name"`
+	Type    string         `toml:"type"`
+	Enabled *bool          `toml:"enabled"` // pointer: absent => default true
+	Binds   []string       `toml:"binds"`   // event types this role consumes (Observer)
+	CCPool  toml.Primitive `toml:"ccpool"`  // decoded by buildCCPool iff type==ccpool
+	Command toml.Primitive `toml:"command"` // decoded by buildCommand iff type==command
 	// Retry is this role's HANDLER RETRY CADENCE override (INV-FAIL-2,
 	// pg2-0c8yz), overlaid onto the pool-wide default ([pool].retry). Absent:
 	// inherits the pool default verbatim.
@@ -134,15 +131,6 @@ type triggerTOML struct {
 	Every *duration `toml:"every"` // period
 	Count int       `toml:"count"` // threshold
 	Binds []string  `toml:"binds"` // threshold: the upstream types to count
-}
-
-// correlationTOML is a role's opt-in Aggregator declaration (Q2). kind selects
-// the Completeness condition: "all-of" (every type in types present) or
-// "count-of" (>= count events for the correlation id).
-type correlationTOML struct {
-	Kind  string   `toml:"kind"`
-	Types []string `toml:"types"`
-	Count int      `toml:"count"`
 }
 
 // ccpoolTOML is decoded from the [role.ccpool] primitive. The enum fields validate
@@ -299,10 +287,6 @@ func (r *Registry) buildRole(md toml.MetaData, rt roleTOML, configDir string, c 
 	if len(rt.Binds) == 0 {
 		return roles.Role{}, fmt.Errorf("binds is required (the event type(s) this role consumes)")
 	}
-	corr, err := buildCorrelation(rt.Corr)
-	if err != nil {
-		return roles.Role{}, err
-	}
 	enabled := true
 	if rt.Enabled != nil {
 		enabled = *rt.Enabled
@@ -311,7 +295,7 @@ func (r *Registry) buildRole(md toml.MetaData, rt roleTOML, configDir string, c 
 	if err != nil {
 		return roles.Role{}, fmt.Errorf("retry: %w", err)
 	}
-	role := roles.Role{Name: rt.Name, Type: rt.Type, Cap: rt.Cap, Enabled: enabled, Binds: rt.Binds, Correlation: corr, RetryBackoff: retryBackoff}
+	role := roles.Role{Name: rt.Name, Type: rt.Type, Enabled: enabled, Binds: rt.Binds, RetryBackoff: retryBackoff}
 	switch rt.Type {
 	case "ccpool":
 		cc, err := buildCCPool(md, rt.CCPool, configDir, c)
@@ -435,28 +419,6 @@ func buildTrigger(t *triggerTOML, pollInterval time.Duration) (query.Trigger, er
 		return query.ManualTrigger{}, nil
 	default:
 		return nil, fmt.Errorf("unknown trigger kind %q (known: period, threshold, manual)", t.Kind)
-	}
-}
-
-// buildCorrelation maps a [role.correlation] table to the opt-in Aggregator spec
-// (Q2). nil table => nil spec (the simple ANY path).
-func buildCorrelation(t *correlationTOML) (*event.CorrelationSpec, error) {
-	if t == nil {
-		return nil, nil
-	}
-	switch t.Kind {
-	case "all-of":
-		if len(t.Types) == 0 {
-			return nil, fmt.Errorf("all-of correlation: types is required")
-		}
-		return &event.CorrelationSpec{Completeness: event.AllOf{Types: t.Types}}, nil
-	case "count-of":
-		if t.Count <= 0 {
-			return nil, fmt.Errorf("count-of correlation: count must be > 0")
-		}
-		return &event.CorrelationSpec{Completeness: event.CountOf{N: t.Count}}, nil
-	default:
-		return nil, fmt.Errorf("unknown correlation kind %q (known: all-of, count-of)", t.Kind)
 	}
 }
 

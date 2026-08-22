@@ -28,8 +28,9 @@ const exampleHeader = `# pr-pool configuration — repo-local at <RepoRoot>/.pr-
 #               picks the firing strategy (period [default] | threshold | manual).
 #   [[role]]    a consumer. "binds" is the event type(s) it responds to (ANY of
 #               them). NOTE the DOUBLE brackets — a single [role]/[query] table is
-#               a typo and is rejected. An optional [role.correlation] opts the
-#               role into ALL-style aggregation (all-of | count-of).
+#               a typo and is rejected. There is no per-role capacity/concurrency
+#               key: capacity is the handler's own business (INV-CONC-1), never a
+#               number the core holds.
 #   [role.ccpool]  ccpool-role behavior. completion / on_failure / on_dispatch_fail
 #                  are fixed enums. When authorship_guard = true, pr-pool prepends a
 #                  NON-editable safety preamble (assert author is me, branch starts
@@ -126,7 +127,7 @@ func beadsReadyCommand(br query.BeadsReady) []string {
 }
 
 func emitRole(b *strings.Builder, r roles.Role) {
-	fmt.Fprintf(b, "[[role]]\nname = %q\ntype = %q\ncap = %d\nenabled = %t\n", r.Name, r.Type, r.Cap, r.Enabled)
+	fmt.Fprintf(b, "[[role]]\nname = %q\ntype = %q\nenabled = %t\n", r.Name, r.Type, r.Enabled)
 	fmt.Fprintf(b, "binds = %s\n", tomlStrList(r.Binds))
 	if r.CCPool != nil {
 		cc := r.CCPool

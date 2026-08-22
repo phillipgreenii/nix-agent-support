@@ -9,7 +9,7 @@ import (
 
 	"github.com/phillipgreenii/pr-pool/internal/backoff"
 	"github.com/phillipgreenii/pr-pool/internal/event"
-	"github.com/phillipgreenii/pr-pool/internal/eventbus"
+	"github.com/phillipgreenii/pr-pool/internal/eventqueue"
 	"github.com/phillipgreenii/pr-pool/internal/item"
 	"github.com/phillipgreenii/pr-pool/internal/query"
 	"github.com/phillipgreenii/pr-pool/internal/roles"
@@ -67,9 +67,40 @@ func recordingSleep(waits *[]time.Duration) sleepFunc {
 	}
 }
 
-var epoch = time.Date(2026, 6, 25, 12, 0, 0, 0, time.UTC)
+// testListener is a minimal eventqueue.Listener double: it matches on a fixed
+// set of event types and records every event offered to it, always accepting
+// (the queue-side stand-in for "a role bound to these types").
+type testListener struct {
+	id      string
+	binds   map[string]bool
+	offered []eventqueue.Event
+}
 
-func TestProduce_periodQueriesPublishToBoundRoles(t *testing.T) {
+func newTestListener(id string, binds ...string) *testListener {
+	b := make(map[string]bool, len(binds))
+	for _, t := range binds {
+		b[t] = true
+	}
+	return &testListener{id: id, binds: b}
+}
+
+func (l *testListener) ID() string                        { return l.id }
+func (l *testListener) Matches(evt eventqueue.Event) bool { return l.binds[evt.Type] }
+func (l *testListener) Offer(evt eventqueue.Event) bool {
+	l.offered = append(l.offered, evt)
+	return true
+}
+
+func newQueue(t *testing.T) *eventqueue.Queue {
+	t.Helper()
+	q, err := eventqueue.New(eventqueue.NewMemStore())
+	if err != nil {
+		t.Fatalf("eventqueue.New: %v", err)
+	}
+	return q
+}
+
+func TestProduce_periodQueriesEnqueueForBoundRoles(t *testing.T) {
 	sources := query.SourceSet{
 		{Name: "feedback-source", Query: fakeQuery{
 			Meta:   query.Meta{EmitTypes: []string{"feedback.ready"}, Trig: query.PeriodTrigger{}},
@@ -80,24 +111,36 @@ func TestProduce_periodQueriesPublishToBoundRoles(t *testing.T) {
 			events: []event.Event{itemEvt("work.ready", "wk-1"), itemEvt("work.ready", "wk-2")},
 		}},
 	}
-	bus := eventbus.New()
-	bus.Subscribe("feedback", "feedback.ready")
-	bus.Subscribe("worker", "work.ready")
+	q := newQueue(t)
+	fb := newTestListener("feedback", "feedback.ready")
+	wk := newTestListener("worker", "work.ready")
+	q.Register(fb)
+	q.Register(wk)
 
-	if err := Produce(context.Background(), query.Env{}, sources, bus, epoch); err != nil {
+	if err := Produce(context.Background(), query.Env{}, sources, q); err != nil {
 		t.Fatal(err)
 	}
-	fb, _ := bus.Lease(context.Background(), "feedback", 10)
-	wk, _ := bus.Lease(context.Background(), "worker", 10)
-	if len(fb) != 1 || fb[0].Item.ID != "fb-1" {
-		t.Fatalf("feedback queue wrong: %+v", fb)
+	// Both work.ready events are ENQUEUED by this one Produce call...
+	if depth := q.DepthByType()["work.ready"]; depth != 2 {
+		t.Fatalf("both work.ready events must be enqueued, depth = %d", depth)
 	}
-	if len(wk) != 2 {
-		t.Fatalf("worker queue wrong: %+v", wk)
+	// ...but only ONE head per listener is OFFERED per Dispatch() call
+	// (per-handler serial FIFO, INV-CONC-1 / DEC-EVENT-2) — there is no cap
+	// gating this, just the queue's own per-listener cursor.
+	q.Dispatch()
+	if len(fb.offered) != 1 || ItemFromPayload(fb.offered[0].Payload).ID != "fb-1" {
+		t.Fatalf("feedback listener wrong: %+v", fb.offered)
+	}
+	if len(wk.offered) != 1 || ItemFromPayload(wk.offered[0].Payload).ID != "wk-1" {
+		t.Fatalf("worker listener's first head wrong: %+v", wk.offered)
 	}
 	// Provenance stamped from the source name.
-	if fb[0].Source != "feedback-source" {
-		t.Fatalf("event source must be stamped from the query name, got %q", fb[0].Source)
+	if src, _ := fb.offered[0].Payload["source"].(string); src != "feedback-source" {
+		t.Fatalf("event source must be stamped from the query name, got %q", src)
+	}
+	q.Dispatch() // the worker listener's head advances to the second event
+	if len(wk.offered) != 2 || ItemFromPayload(wk.offered[1].Payload).ID != "wk-2" {
+		t.Fatalf("worker listener's second head wrong: %+v", wk.offered)
 	}
 }
 
@@ -106,7 +149,7 @@ func TestProduce_queryErrorPropagates(t *testing.T) {
 	sources := query.SourceSet{
 		{Name: "boom", Query: fakeQuery{Meta: query.Meta{EmitTypes: []string{"x"}}, err: sentinel}},
 	}
-	err := Produce(context.Background(), query.Env{}, sources, eventbus.New(), epoch)
+	err := Produce(context.Background(), query.Env{}, sources, newQueue(t))
 	if err == nil || !errors.Is(err, sentinel) {
 		t.Fatalf("a query error must propagate; got %v", err)
 	}
@@ -126,7 +169,7 @@ func TestProduce_queryErrorPropagatesImmediatelyWithoutOptIn(t *testing.T) {
 			calls:     &calls,
 		}},
 	}
-	err := produce(context.Background(), query.Env{}, sources, eventbus.New(), epoch, recordingSleep(&waits))
+	err := produce(context.Background(), query.Env{}, sources, newQueue(t), recordingSleep(&waits))
 	if err == nil {
 		t.Fatal("a query error must still propagate without an opt-in")
 	}
@@ -140,7 +183,7 @@ func TestProduce_queryErrorPropagatesImmediatelyWithoutOptIn(t *testing.T) {
 
 // INV-FAIL-3: a pull-source query that fails and then succeeds within its
 // configured Retries is retried at the configured backoff cadence, and its
-// events are still published once it succeeds — the failure never propagates.
+// events are still enqueued once it succeeds — the failure never propagates.
 func TestProduce_pullSourceRetriesThenSucceeds(t *testing.T) {
 	calls := 0
 	var waits []time.Duration
@@ -158,10 +201,11 @@ func TestProduce_pullSourceRetriesThenSucceeds(t *testing.T) {
 			calls:     &calls,
 		}},
 	}
-	bus := eventbus.New()
-	bus.Subscribe("worker", "work.ready")
+	q := newQueue(t)
+	wk := newTestListener("worker", "work.ready")
+	q.Register(wk)
 
-	err := produce(context.Background(), query.Env{}, sources, bus, epoch, recordingSleep(&waits))
+	err := produce(context.Background(), query.Env{}, sources, q, recordingSleep(&waits))
 	if err != nil {
 		t.Fatalf("failure must NOT propagate once a retry succeeds: %v", err)
 	}
@@ -171,9 +215,9 @@ func TestProduce_pullSourceRetriesThenSucceeds(t *testing.T) {
 	if !equalDurations(waits, []time.Duration{time.Second, 2 * time.Second}) {
 		t.Fatalf("waits = %v, want [1s 2s] (the configured backoff, growing per consecutive failure)", waits)
 	}
-	got, _ := bus.Lease(context.Background(), "worker", 10)
-	if len(got) != 1 || got[0].Item.ID != "wk-1" {
-		t.Fatalf("events not published after the retry succeeded: %+v", got)
+	q.Dispatch()
+	if len(wk.offered) != 1 || ItemFromPayload(wk.offered[0].Payload).ID != "wk-1" {
+		t.Fatalf("events not enqueued after the retry succeeded: %+v", wk.offered)
 	}
 }
 
@@ -197,7 +241,7 @@ func TestProduce_pullSourcePropagatesAfterRetriesExhausted(t *testing.T) {
 			calls:     &calls,
 		}},
 	}
-	err := produce(context.Background(), query.Env{}, sources, eventbus.New(), epoch, recordingSleep(&waits))
+	err := produce(context.Background(), query.Env{}, sources, newQueue(t), recordingSleep(&waits))
 	if err == nil || !strings.Contains(err.Error(), sentinel.Error()) {
 		t.Fatalf("error = %v, want it to wrap %q once retries are exhausted", err, sentinel)
 	}
@@ -238,25 +282,21 @@ func TestProduce_thresholdFiresOnlyWhenEnough(t *testing.T) {
 	}
 
 	// Count=1: one "up" is enough — the threshold query fires.
-	bus := eventbus.New()
-	bus.Subscribe("upR", "up")
-	bus.Subscribe("downR", "down")
-	if err := Produce(context.Background(), query.Env{}, newSources(1), bus, epoch); err != nil {
+	q1 := newQueue(t)
+	if err := Produce(context.Background(), query.Env{}, newSources(1), q1); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := bus.Lease(context.Background(), "downR", 10); len(got) != 1 {
-		t.Fatalf("threshold(Count=1) must fire on one upstream event, got %d", len(got))
+	if depth := q1.DepthByType()["down"]; depth != 1 {
+		t.Fatalf("threshold(Count=1) must fire on one upstream event, got depth %d", depth)
 	}
 
 	// Count=2: one "up" is NOT enough — the threshold query does not fire.
-	bus2 := eventbus.New()
-	bus2.Subscribe("upR", "up")
-	bus2.Subscribe("downR", "down")
-	if err := Produce(context.Background(), query.Env{}, newSources(2), bus2, epoch); err != nil {
+	q2 := newQueue(t)
+	if err := Produce(context.Background(), query.Env{}, newSources(2), q2); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := bus2.Lease(context.Background(), "downR", 10); len(got) != 0 {
-		t.Fatalf("threshold(Count=2) must NOT fire on one upstream event, got %d", len(got))
+	if depth := q2.DepthByType()["down"]; depth != 0 {
+		t.Fatalf("threshold(Count=2) must NOT fire on one upstream event, got depth %d", depth)
 	}
 }
 
@@ -267,13 +307,12 @@ func TestProduce_manualNeverFiresOnTick(t *testing.T) {
 			events: []event.Event{itemEvt("m", "m1")},
 		}},
 	}
-	bus := eventbus.New()
-	bus.Subscribe("mR", "m")
-	if err := Produce(context.Background(), query.Env{}, sources, bus, epoch); err != nil {
+	q := newQueue(t)
+	if err := Produce(context.Background(), query.Env{}, sources, q); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := bus.Lease(context.Background(), "mR", 10); len(got) != 0 {
-		t.Fatalf("manual trigger must not fire on a tick, got %d", len(got))
+	if depth := q.DepthByType()["m"]; depth != 0 {
+		t.Fatalf("manual trigger must not fire on a tick, got depth %d", depth)
 	}
 }
 
@@ -283,6 +322,24 @@ func TestDeriveContext(t *testing.T) {
 	d := DeriveContext(role, e)
 	if d.Role.Name != "worker" || d.Item.ID != "zr-9" {
 		t.Fatalf("derived context wrong: %+v", d)
+	}
+}
+
+func TestDeriveContextFromQueueEvent(t *testing.T) {
+	role := roles.Role{Name: "worker"}
+	qe := ToQueueEvent(itemEvt("work.ready", "zr-9"))
+	d := DeriveContextFromQueueEvent(role, qe)
+	if d.Role.Name != "worker" || d.Item.ID != "zr-9" {
+		t.Fatalf("derived context wrong: %+v", d)
+	}
+}
+
+func TestItemFromPayload_absentIsZeroValue(t *testing.T) {
+	if got := ItemFromPayload(nil); got.ID != "" {
+		t.Fatalf("ItemFromPayload(nil) = %+v, want zero value", got)
+	}
+	if got := ItemFromPayload(map[string]any{"other": 1}); got.ID != "" {
+		t.Fatalf("ItemFromPayload without an item key = %+v, want zero value", got)
 	}
 }
 

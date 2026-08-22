@@ -7,15 +7,11 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 
 	"github.com/phillipgreenii/pr-pool/conformance"
 	"github.com/phillipgreenii/pr-pool/internal/beads"
-	"github.com/phillipgreenii/pr-pool/internal/ccpool"
 	"github.com/phillipgreenii/pr-pool/internal/config"
-	"github.com/phillipgreenii/pr-pool/internal/eventlog"
-	"github.com/phillipgreenii/pr-pool/internal/orchestrator"
 	"github.com/phillipgreenii/pr-pool/internal/query"
 	"github.com/phillipgreenii/pr-pool/internal/reconcile"
 )
@@ -30,68 +26,6 @@ const (
 	exitUsage    = conformance.ExitUsage
 	exitPrecheck = 3 // app-specific: a config or precheck failure, before any work
 )
-
-func runDrain(args []string) int {
-	// Parse first, with NO side effects: a help request or any parse error must
-	// short-circuit here so we never dispatch Claude sessions or tear down
-	// pr-pool-* tmux sessions on a bad invocation (pg2-52rn).
-	switch p := parseDrainArgs(args); p.kind {
-	case routeHelp:
-		fmt.Println(helpText)
-		return exitOK
-	case routeUsageErr:
-		printUsageErr(p.msg)
-		return exitUsage
-	}
-
-	ctx := context.Background()
-	cfg, err := config.Load()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "config:", err)
-		return exitPrecheck
-	}
-	br := beads.NewCLIRunnerForRepo(cfg.RepoRoot)
-	warnDroppedRoleEnv()
-	warnTrackedConfig(ctx, cfg)
-	warnStubQueries(cfg)
-
-	slog.Info("drain starting", "repo", cfg.RepoRoot, "config", cfg.ConfigPath, "roles", len(cfg.Roles))
-	if err := precheck(ctx, cfg, br); err != nil {
-		fmt.Fprintln(os.Stderr, "precheck:", err)
-		return exitPrecheck
-	}
-	slog.Info("precheck ok", "prefix", cfg.BeadsPrefix)
-	// self_login: prefer the [pool] config value; else resolve via pg-pr (required
-	// when a role's authorship guard needs it).
-	if cfg.SelfLogin == "" {
-		selfLogin, err := resolveSelf(ctx)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "resolve self:", err)
-			return exitPrecheck
-		}
-		cfg.SelfLogin = selfLogin
-	}
-	slog.Info("resolved self", "login", cfg.SelfLogin)
-	warnStrandedFeedback(ctx, br, cfg.SelfLogin)
-
-	o := &orchestrator.Orchestrator{
-		CC:  ccpool.NewCLIRunner(cfg),
-		BD:  br,
-		Reg: cfg.Roles,
-		Cfg: cfg,
-	}
-	if lw, err := eventlog.New(filepath.Join(cfg.LogDir, "events.jsonl")); err != nil {
-		slog.Warn("eventlog unavailable; watchdog events will not be written", "err", err)
-	} else {
-		defer func() { _ = lw.Close() }()
-		o.Log = lw
-	}
-	if err := o.DrainOnce(ctx); err != nil {
-		fmt.Fprintln(os.Stderr, "drain:", err)
-		return exitGeneric
-	}
-	return exitOK
-}
 
 // warnDroppedRoleEnv warns if any removed role env var is set, so a stale
 // deployment relying on it learns the value is now ignored (spec C decision 7:

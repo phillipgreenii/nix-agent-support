@@ -35,20 +35,17 @@
 // own wire mechanism: see SelfStatus in registry.go and SubcommandSelfStatus in
 // selfstatus.go.
 //
-// # Not yet booted in production (pg2-vkivc)
+// # Booted in production by cmd/pr-pool's run / run-until-idle (pg2-f3mcb.2)
 //
-// Nothing outside this package's own tests calls Listen + Accept. cmd/pr-pool has
-// no `run` / `run-until-idle` subcommand — the operator commands docs/behavior
-// (USECASE-RUN-DAEMON, USECASE-RUN-DRAIN) describes as what boots a core — so no
-// live socket exists for ingest-event or self-status to receive on outside a test
-// binary. Production `drain` runs internal/orchestrator, a separate discover-then-
-// dispatch loop over internal/eventbus that predates this package and does not
-// reference it. This is deliberate: Service is the first landed piece of a
+// cmd/pr-pool's `run` (long-running daemon) and `run-until-idle` (discover once,
+// drain to idle, exit) subcommands call Listen + Accept, giving this Service a
+// live socket for ingest-event and self-status outside a test binary — the
 // multi-bead convergence (epic pg2-f3mcb) onto "the queue is the universal
-// intermediary" (pg2-f3mcb.2), which is what adds run/run-until-idle and retires
-// internal/eventbus. Until pg2-f3mcb.2 lands, treat Service as built-ahead-of-its-
-// boot-path rather than unused — see docs/behavior/README.md's realization-gap
-// register, element INV-LIFE-1.
+// intermediary" (pg2-f3mcb.2, ADR 0056) that also retired internal/eventbus and
+// internal/orchestrator's discover-then-dispatch loop over it. See
+// cmd/pr-pool/run.go (bootCore) for the wiring: a queue->executor Listener per
+// enabled role (internal/orchestrator.NewListener) is registered on the SAME
+// *eventqueue.Queue this Service routes through.
 package core
 
 import (

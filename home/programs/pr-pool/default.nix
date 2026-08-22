@@ -10,8 +10,9 @@ in
 {
   options.phillipgreenii.programs.pr-pool = {
     enable = lib.mkEnableOption ''
-      pr-pool (PR-feedback orchestrator: a `pr-pool drain` pass discovers ready
-      beads and dispatches feedback-processor / worker sessions via ccpool).
+      pr-pool (PR-feedback orchestrator: a `pr-pool run-until-idle` pass discovers
+      ready beads and dispatches feedback-processor / worker sessions via ccpool;
+      `drain` is a deprecated alias for the same pass).
       Runtime-depends on `ccpool` and `bd` being on PATH.
     '';
     package = lib.mkPackageOption pkgs "pr-pool" { };

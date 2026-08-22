@@ -34,8 +34,8 @@ import (
 	"github.com/phillipgreenii/pr-pool/internal/config"
 	"github.com/phillipgreenii/pr-pool/internal/discover"
 	"github.com/phillipgreenii/pr-pool/internal/event"
-	"github.com/phillipgreenii/pr-pool/internal/eventbus"
 	"github.com/phillipgreenii/pr-pool/internal/eventlog"
+	"github.com/phillipgreenii/pr-pool/internal/eventqueue"
 	"github.com/phillipgreenii/pr-pool/internal/executor"
 	"github.com/phillipgreenii/pr-pool/internal/query"
 	"github.com/phillipgreenii/pr-pool/internal/report"
@@ -75,94 +75,36 @@ func (o *Orchestrator) commander() query.Commander {
 	return query.OSCommander{}
 }
 
-// DrainOnce runs one pass: gate check, discover, drain each role up to its cap,
-// teardown all pr-pool sessions. Returns nil even when individual beads fail
-// (failures are recorded on the beads via OnFailure), matching the bash.
-func (o *Orchestrator) DrainOnce(ctx context.Context) error {
-	if o.gated() {
-		slog.Info("gated; pausing without dispatch")
-		return nil // NOTE: gated exit does NOT teardown (no sessions were created)
-	}
-	defer o.teardownAll(ctx) // always run teardown after the gated check, even on error
-	dispatches, err := o.discoverViaBus(ctx)
-	if err != nil {
-		return fmt.Errorf("discover: %w", err)
-	}
-	slog.Info("discover", "found", len(dispatches))
-	var complete, flagged int
-	for _, role := range o.Reg {
-		c, f := o.drain(ctx, role, dispatches)
-		complete += c
-		flagged += f
-	}
-	slog.Info("done", "complete", complete, "flagged", flagged)
-	return nil
-}
+// Gated reports whether dispatch is currently paused by an operator-managed
+// gate file (PR_POOL_QUOTA_PAUSED / PR_POOL_CICD_DOWN). A gated caller MUST NOT
+// register listeners or run a producer tick — no sessions are created, so
+// nothing needs tearing down either.
+func (o *Orchestrator) Gated() bool { return o.gated() }
+
+// TeardownAll is teardownAll's exported form for cmd/pr-pool's run /
+// run-until-idle entry points (a different package).
+func (o *Orchestrator) TeardownAll(ctx context.Context) int { return o.teardownAll(ctx) }
 
 // queryEnv builds the capability bag passed to each role's query.
 func (o *Orchestrator) queryEnv() query.Env {
 	return query.Env{BD: o.BD, RepoRoot: o.Cfg.RepoRoot, Cmd: o.commander()}
 }
 
-// nowTime returns the current time via the clock seam (default time.Now). The
-// bus, TTL sweep, and clock.tick all read the SAME clock so tests drive them
-// coherently.
+// ProduceTick fires the configured query set once against q — the
+// discovery->enqueue producer side of the queue-as-universal-intermediary
+// convergence (bead pg2-f3mcb.2): every event, pull or push, goes into the
+// SAME durable queue a Listener bridge (NewListener) is registered on. This
+// replaces the retired per-pass internal/eventbus producer→bus→lease drive.
+func (o *Orchestrator) ProduceTick(ctx context.Context, q *eventqueue.Queue) error {
+	return discover.Produce(ctx, o.queryEnv(), o.Cfg.Queries, q)
+}
+
+// nowTime returns the current time via the clock seam (default time.Now).
 func (o *Orchestrator) nowTime() time.Time {
 	if o.now != nil {
 		return o.now()
 	}
 	return time.Now()
-}
-
-// discoverViaBus is the event-model producer→bus→lease drive (design M4). It
-// builds a per-pass Bus, subscribes each enabled role to its bound event types
-// (Observer; opt-in Aggregator when a correlation is declared), fires the query
-// set against the bus (Producers publish typed events), then leases per role in
-// config order — cap-gated by n = Cap − Inflight (Q5) — deriving one
-// DispatchContext per leased event and Acking it. With only PeriodTrigger + ANY
-// bindings this reproduces today's coupled discover→drain: each role gets up to
-// Cap dispatches from its query, in config order (behavior parity).
-func (o *Orchestrator) discoverViaBus(ctx context.Context) ([]discover.DispatchContext, error) {
-	opts := []eventbus.Option{eventbus.WithClock(o.nowTime), eventbus.WithTTL(o.Cfg.MaxWait)}
-	if o.Log != nil { // guard: a typed-nil *eventlog.Writer must not become a non-nil Logger
-		opts = append(opts, eventbus.WithLogger(o.Log))
-	}
-	bus := eventbus.New(opts...)
-
-	for _, r := range o.Reg {
-		if !r.Enabled {
-			slog.Info("role disabled; skipping subscription", "role", r.Name)
-			continue
-		}
-		if r.Correlation != nil {
-			bus.SubscribeAggregate(r.Name, r.Binds, *r.Correlation)
-			continue
-		}
-		for _, t := range r.Binds {
-			bus.Subscribe(r.Name, t)
-		}
-	}
-
-	if err := discover.Produce(ctx, o.queryEnv(), o.Cfg.Queries, bus, o.nowTime()); err != nil {
-		return nil, err
-	}
-
-	var out []discover.DispatchContext
-	for _, r := range o.Reg {
-		if !r.Enabled {
-			continue
-		}
-		n := r.Cap - bus.Inflight(r.Name)
-		leased, err := bus.Lease(ctx, r.Name, n)
-		if err != nil {
-			return nil, err
-		}
-		for _, e := range leased {
-			out = append(out, discover.DeriveContext(r, e))
-			_ = bus.Ack(ctx, r.Name, e.ID)
-		}
-	}
-	return out, nil
 }
 
 // RunOne dispatches a single self-contained EVENT through one role and then
@@ -191,31 +133,6 @@ func (o *Orchestrator) RunOne(ctx context.Context, role roles.Role, ev event.Eve
 	res, err := o.workOneWithID(ctx, d, externalID)
 	o.emitResult(ctx, d.Role, d.Item.ID, o.buildResult(ctx, d.Role, d, pre, preOK, res, err))
 	return err
-}
-
-func (o *Orchestrator) drain(ctx context.Context, role roles.Role, all []discover.DispatchContext) (complete, flagged int) {
-	worked := 0
-	for _, d := range all {
-		if d.Role.Name != role.Name {
-			continue
-		}
-		if worked >= role.Cap {
-			break
-		}
-		slog.Info("dispatching", "role", role.Name, "item", d.Item.ID)
-		pre, preOK := o.snapshotIDs(ctx) // bracket workOne so creations on BOTH success and failure paths are seen
-		res, err := o.workOne(ctx, d)
-		if err != nil {
-			slog.Warn("bead flagged", "role", role.Name, "item", d.Item.ID, "err", err)
-			flagged++
-		} else {
-			slog.Info("bead complete", "role", role.Name, "item", d.Item.ID)
-			complete++
-		}
-		o.emitResult(ctx, role, d.Item.ID, o.buildResult(ctx, role, d, pre, preOK, res, err))
-		worked++
-	}
-	return complete, flagged
 }
 
 // snapshotIDs returns the set of all bead IDs (any status, incl. closed) and

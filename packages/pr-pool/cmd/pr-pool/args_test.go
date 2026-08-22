@@ -66,8 +66,10 @@ func TestRoute(t *testing.T) {
 		argv []string
 		want routeKind
 	}{
-		{"no-args-drains", []string{"pr-pool"}, routeDrain},
-		{"drain-subcommand", []string{"pr-pool", "drain"}, routeDrain},
+		{"no-args-is-usage-error", []string{"pr-pool"}, routeUsageErr},
+		{"drain-subcommand-is-deprecated-alias", []string{"pr-pool", "drain"}, routeRunUntilIdle},
+		{"run-subcommand", []string{"pr-pool", "run"}, routeRun},
+		{"run-until-idle-subcommand", []string{"pr-pool", "run-until-idle"}, routeRunUntilIdle},
 		{"version-subcommand", []string{"pr-pool", "version"}, routeVersion},
 		{"version-long-flag", []string{"pr-pool", "--version"}, routeVersion},
 		{"version-short-flag", []string{"pr-pool", "-v"}, routeVersion},
@@ -97,12 +99,12 @@ func TestRoute_versionHelpShortCircuitTrailingArgs(t *testing.T) {
 		argv []string
 		want routeKind
 	}{
-		{[]string{"pr-pool", "--version", "drain"}, routeVersion},
+		{[]string{"pr-pool", "--version", "run"}, routeVersion},
 		{[]string{"pr-pool", "-v", "anything", "else"}, routeVersion},
-		{[]string{"pr-pool", "version", "drain"}, routeVersion},
-		{[]string{"pr-pool", "--help", "drain"}, routeHelp},
+		{[]string{"pr-pool", "version", "run"}, routeVersion},
+		{[]string{"pr-pool", "--help", "run"}, routeHelp},
 		{[]string{"pr-pool", "-h", "whatever"}, routeHelp},
-		{[]string{"pr-pool", "help", "drain"}, routeHelp},
+		{[]string{"pr-pool", "help", "run"}, routeHelp},
 	}
 	for _, tc := range cases {
 		if got := route(tc.argv).kind; got != tc.want {
@@ -111,38 +113,30 @@ func TestRoute_versionHelpShortCircuitTrailingArgs(t *testing.T) {
 	}
 }
 
-// pg2-h6i2: --version/--help are GLOBAL, not drain flags. `drain --version` is an
-// unknown flag for the drain subcommand (exit 2), matching cobra/docker; only
-// `drain --help`/`-h` is honoured (help is conventionally available per command).
-func TestParseDrainArgs_versionIsUnknownButHelpWorks(t *testing.T) {
-	if got := parseDrainArgs([]string{"--version"}).kind; got != routeUsageErr {
-		t.Errorf("drain --version should be routeUsageErr (unknown flag), got %v", got)
+// pg2-h6i2: --version/--help are GLOBAL, not run/run-until-idle flags.
+// `run --version` is an unknown flag for the run subcommand (exit 2), matching
+// cobra/docker; only `run --help`/`-h` is honoured (help is conventionally
+// available per command).
+func TestParseRunLikeArgs_versionIsUnknownButHelpWorks(t *testing.T) {
+	if got := parseRunLikeArgs(routeRun, []string{"--version"}).kind; got != routeUsageErr {
+		t.Errorf("run --version should be routeUsageErr (unknown flag), got %v", got)
 	}
-	if got := parseDrainArgs([]string{"-h"}).kind; got != routeHelp {
-		t.Errorf("drain -h should be routeHelp, got %v", got)
-	}
-}
-
-func TestRoute_drainPassesRemainingArgs(t *testing.T) {
-	r := route([]string{"pr-pool", "drain", "--cwd", "/p"})
-	if r.kind != routeDrain {
-		t.Fatalf("kind = %v, want routeDrain", r.kind)
-	}
-	if !reflect.DeepEqual(r.rest, []string{"--cwd", "/p"}) {
-		t.Errorf("rest = %v, want [--cwd /p]", r.rest)
+	if got := parseRunLikeArgs(routeRun, []string{"-h"}).kind; got != routeHelp {
+		t.Errorf("run -h should be routeHelp, got %v", got)
 	}
 }
 
-// parseDrainArgs must short-circuit (proceed=false) on a help request or any
-// parse error, so runDrain never reaches config.Load/precheck/DrainOnce — i.e.
-// no Claude session dispatch and no tmux teardown on a parse error (pg2-52rn).
-func TestParseDrainArgs(t *testing.T) {
+// parseRunLikeArgs must short-circuit (proceed=false) on a help request or any
+// parse error, so runRun/runRunUntilIdle never reach config.Load/precheck/the
+// queue — i.e. no Claude session dispatch and no core boot on a parse error
+// (pg2-52rn, carried over from the retired parseDrainArgs).
+func TestParseRunLikeArgs(t *testing.T) {
 	cases := []struct {
 		name string
 		args []string
 		want routeKind
 	}{
-		{"no-args-proceeds", nil, routeDrain},
+		{"no-args-proceeds", nil, routeRunUntilIdle},
 		{"help-flag", []string{"-h"}, routeHelp},
 		{"help-long-flag", []string{"--help"}, routeHelp},
 		{"unknown-flag", []string{"--bogus"}, routeUsageErr},
@@ -150,8 +144,8 @@ func TestParseDrainArgs(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := parseDrainArgs(tc.args).kind; got != tc.want {
-				t.Errorf("parseDrainArgs(%v).kind = %v, want %v", tc.args, got, tc.want)
+			if got := parseRunLikeArgs(routeRunUntilIdle, tc.args).kind; got != tc.want {
+				t.Errorf("parseRunLikeArgs(routeRunUntilIdle, %v).kind = %v, want %v", tc.args, got, tc.want)
 			}
 		})
 	}

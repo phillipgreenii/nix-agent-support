@@ -1,12 +1,10 @@
 {
   "schemaVersion": "1",
-  "sessions": [
+  "deliveries": [
     {
       "id": "hs-771e",
       "handler": "review",
-      "event": "evt-abc123",
-      "state": "running",
-      "progress": 0.4
+      "event": "evt-abc123"
     }
   ],
   "queues": [{ "type": "review-requested", "depth": 3 }],

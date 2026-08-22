@@ -7,13 +7,12 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
-func TestEventQuery_emitsCorrelatedEvent(t *testing.T) {
+func TestEventQuery_emitsEvent(t *testing.T) {
 	q := EventQuery{
-		Meta:          Meta{EmitTypes: []string{"work.done"}},
-		ItemID:        "zr-1",
-		ItemType:      "task",
-		Title:         "done",
-		CorrelationID: "PR-7",
+		Meta:     Meta{EmitTypes: []string{"work.done"}},
+		ItemID:   "zr-1",
+		ItemType: "task",
+		Title:    "done",
 	}
 	if err := q.Validate(); err != nil {
 		t.Fatalf("valid event query must pass Validate: %v", err)
@@ -26,7 +25,7 @@ func TestEventQuery_emitsCorrelatedEvent(t *testing.T) {
 		t.Fatalf("event query must emit exactly one event, got %d", len(evts))
 	}
 	e := evts[0]
-	if e.Type != "work.done" || e.Item.ID != "zr-1" || e.CorrelationID != "PR-7" {
+	if e.Type != "work.done" || e.Item.ID != "zr-1" {
 		t.Fatalf("emitted event wrong: %+v", e)
 	}
 }
@@ -47,7 +46,6 @@ type = "event"
 [event]
 item_id = "zr-9"
 item_type = "task"
-correlation_id = "grp"
 `
 	var holder map[string]toml.Primitive
 	md, err := toml.Decode(body, &holder)
@@ -59,7 +57,7 @@ correlation_id = "grp"
 		t.Fatalf("event query type must be registered and decode: %v", err)
 	}
 	eq, ok := q.(EventQuery)
-	if !ok || eq.ItemID != "zr-9" || eq.CorrelationID != "grp" {
+	if !ok || eq.ItemID != "zr-9" {
 		t.Fatalf("decoded event query wrong: %#v", q)
 	}
 }

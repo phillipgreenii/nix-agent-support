@@ -24,16 +24,19 @@ const ClockTick = "clock.tick"
 
 // Event is one typed, self-contained fact. Type is the topic roles subscribe to
 // (Observer). Item generalizes the work payload every dispatch-triggering event
-// carries. CorrelationID groups events for ALL-style aggregation (Q2); "" if
-// none. EmittedAt drives TTL (Q4) and ordering.
+// carries. EmittedAt drives TTL (Q4) and ordering.
+//
+// Correlation/aggregation (the former CorrelationID field, event.CorrelationSpec,
+// Completeness/AllOf/CountOf) was DELETED, not ported (bead pg2-f3mcb.2): the
+// queue-as-universal-intermediary convergence has no aggregator, so there is
+// nothing left to correlate events for.
 type Event struct {
-	ID            string         // unique per emission (dedup key, Q3)
-	Type          string         // the topic — roles bind to this (Observer)
-	Item          item.Item      // the work payload (id/type/title/metadata)
-	CorrelationID string         // groups events for ALL-style aggregation (Q2); "" if none
-	Source        string         // emitting query name (provenance / observability)
-	EmittedAt     time.Time      // for TTL (Q4) and ordering
-	Attributes    map[string]any // extra, type-specific fields for correlation/trigger strategies
+	ID         string         // unique per emission (dedup key, Q3)
+	Type       string         // the topic — roles bind to this (Observer)
+	Item       item.Item      // the work payload (id/type/title/metadata)
+	Source     string         // emitting query name (provenance / observability)
+	EmittedAt  time.Time      // for TTL (Q4) and ordering
+	Attributes map[string]any // extra, type-specific fields for trigger strategies
 }
 
 // FingerprintID derives the stable dedup id for an item-carrying event
@@ -67,53 +70,3 @@ func (e Event) Expired(now time.Time, ttl time.Duration) bool {
 	}
 	return now.After(e.EmittedAt.Add(ttl))
 }
-
-// CorrelationSpec is a role's opt-in Aggregator (EIP) declaration (Q2): the set
-// of correlated events it needs before it fires, plus the Completeness condition
-// that decides when the aggregate is done. A role with a nil spec uses the
-// simple ANY path and never allocates aggregate state.
-type CorrelationSpec struct {
-	Completeness Completeness
-}
-
-// Completeness decides when a correlated aggregate (keyed by CorrelationID) is
-// "done" and may be emitted as one aggregated event (Q2). Built-ins default to
-// ANY and never construct one.
-type Completeness interface {
-	// Complete reports whether the collected events for one correlation id
-	// satisfy the condition.
-	Complete(have []Event) bool
-	// Describe is a stable human string for observability / config round-trip.
-	Describe() string
-}
-
-// AllOf is complete when every listed event type is present for the correlation
-// id (the classic all-of aggregation).
-type AllOf struct{ Types []string }
-
-// Complete reports true iff each type in AllOf.Types appears at least once.
-func (a AllOf) Complete(have []Event) bool {
-	seen := make(map[string]bool, len(have))
-	for _, e := range have {
-		seen[e.Type] = true
-	}
-	for _, t := range a.Types {
-		if !seen[t] {
-			return false
-		}
-	}
-	return len(a.Types) > 0
-}
-
-// Describe renders AllOf for observability.
-func (a AllOf) Describe() string { return "all-of" }
-
-// CountOf is complete when at least N events are collected for the correlation
-// id.
-type CountOf struct{ N int }
-
-// Complete reports true iff at least N events are collected.
-func (c CountOf) Complete(have []Event) bool { return c.N > 0 && len(have) >= c.N }
-
-// Describe renders CountOf for observability.
-func (c CountOf) Describe() string { return "count-of" }

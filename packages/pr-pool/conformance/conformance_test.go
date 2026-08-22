@@ -125,8 +125,9 @@ func TestNegative_Matrix(t *testing.T) {
 			{"legacy duration field (event ref)", `{"schemaVersion":"1","id":"e","type":"t","ttl":"5m"}`},
 		},
 		"cli.status-reply": {
-			{"session bad state", `{"schemaVersion":"1","sessions":[{"id":"h","handler":"r","event":"e","state":"weird"}],"queues":[],"config":{"sources":0,"handlers":0}}`},
-			{"queue depth wrong type", `{"schemaVersion":"1","sessions":[],"queues":[{"type":"t","depth":"3"}],"config":{"sources":0,"handlers":0}}`},
+			{"delivery missing handler", `{"schemaVersion":"1","deliveries":[{"id":"h","event":"e"}],"queues":[],"config":{"sources":0,"handlers":0}}`},
+			{"delivery carries the removed state field", `{"schemaVersion":"1","deliveries":[{"id":"h","handler":"r","event":"e","state":"running"}],"queues":[],"config":{"sources":0,"handlers":0}}`},
+			{"queue depth wrong type", `{"schemaVersion":"1","deliveries":[],"queues":[{"type":"t","depth":"3"}],"config":{"sources":0,"handlers":0}}`},
 		},
 		"cli.self-status": {
 			{"missing participantId", `{"schemaVersion":"1","id":"t","self":"healthy"}`},

@@ -13,6 +13,7 @@ import (
 	"github.com/phillipgreenii/pr-pool/internal/discover"
 	"github.com/phillipgreenii/pr-pool/internal/dtest"
 	"github.com/phillipgreenii/pr-pool/internal/event"
+	"github.com/phillipgreenii/pr-pool/internal/eventqueue"
 	"github.com/phillipgreenii/pr-pool/internal/item"
 	"github.com/phillipgreenii/pr-pool/internal/query"
 	"github.com/phillipgreenii/pr-pool/internal/roles"
@@ -113,126 +114,117 @@ func writeTemp(t *testing.T) (string, func()) {
 	return p, func() {}
 }
 
-// TestParity_discoverViaBusMatchesCoupled is the behavior-parity smoke (design
-// acceptance): with only PeriodTrigger + ANY bindings — exactly the built-in
-// configuration — the event-model producer→bus→lease drive yields the SAME
-// dispatches the old coupled discover→drain produced: each enabled role gets up
-// to its Cap items from the query bound to it, in config order (feedback, worker,
-// review). The feedback query returns the process-feedback cycle; the worker
-// query returns worker-ready beads (capped to 1); the review query filters the
-// default ready list to review-pr beads (none here).
-func TestParity_discoverViaBusMatchesCoupled(t *testing.T) {
-	cfg := fastCfg() // MaxFeedback=1, MaxWorker=1
-	bd := &dtest.ScriptBD{Ready: map[string]string{
-		"feedback": `[{"id":"zr-c","issue_type":"task","title":"process-feedback: x"}]`,
-		"worker":   `[{"id":"zr-w1"},{"id":"zr-w2"}]`,
-	}}
-	o := newOrch(&dtest.FakeCC{}, bd, cfg)
-
-	got, err := o.discoverViaBus(context.Background())
+// newTestQueue builds a bare eventqueue.Queue over an in-memory store, for
+// tests exercising the queue->executor Listener bridge (orchestrator.NewListener,
+// bead pg2-f3mcb.2) directly.
+func newTestQueue(t *testing.T) *eventqueue.Queue {
+	t.Helper()
+	q, err := eventqueue.New(eventqueue.NewMemStore())
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("eventqueue.New: %v", err)
 	}
-	type pair struct{ role, item string }
-	var pairs []pair
-	for _, d := range got {
-		pairs = append(pairs, pair{d.Role.Name, d.Item.ID})
-	}
-	want := []pair{{"feedback", "zr-c"}, {"worker", "zr-w1"}}
-	if len(pairs) != len(want) {
-		t.Fatalf("parity: got %d dispatches %+v, want %d %+v", len(pairs), pairs, len(want), want)
-	}
-	for i := range want {
-		if pairs[i] != want[i] {
-			t.Fatalf("parity dispatch[%d] = %+v, want %+v (full: %+v)", i, pairs[i], want[i], pairs)
-		}
-	}
+	return q
 }
 
-// --- DrainOnce scenarios (ports bats: drain_once cases) ---
-
-func TestDrainOnce_gatedNoTeardown(t *testing.T) {
-	f, _ := writeTemp(t) // creates a sentinel file
-	cfg := fastCfg()
-	cfg.QuotaPaused = f
-	bd := &dtest.ScriptBD{Ready: map[string]string{"feedback": "[]", "worker": "[]"}}
-	cc := &dtest.FakeCC{}
-	o := newOrch(cc, bd, cfg)
-	if err := o.DrainOnce(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if len(cc.Ensured) != 0 || len(cc.Closed) != 0 {
-		t.Errorf("gated pass must not dispatch or teardown; ensured=%v closed=%v", cc.Ensured, cc.Closed)
-	}
-}
-
-func TestDrainOnce_workerCapZeroSkips(t *testing.T) {
-	cfg := fastCfg()
-	cfg.MaxWorker = 0
-	bd := &dtest.ScriptBD{Ready: map[string]string{"feedback": "[]", "worker": `[{"id":"zr-w"}]`}}
-	cc := &dtest.FakeCC{}
-	o := newOrch(cc, bd, cfg)
-	if err := o.DrainOnce(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	for _, n := range cc.Ensured {
-		if n == "pr-pool-worker-zr-w" {
-			t.Errorf("cap=0 should skip worker; ensured=%v", cc.Ensured)
-		}
-	}
-}
-
-func TestDrainOnce_capStopsAtOne(t *testing.T) {
-	cfg := fastCfg()
-	bd := &dtest.ScriptBD{
-		Ready:     map[string]string{"feedback": "[]", "worker": `[{"id":"zr-w1"},{"id":"zr-w2"}]`},
-		StatusSeq: map[string][]string{"zr-w1": {"in_progress", "closed"}, "zr-w2": {"in_progress", "closed"}},
-	}
-	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{
-		{ExternalID: "pr-pool-worker-zr-w1", Live: true}, {ExternalID: "pr-pool-worker-zr-w2", Live: true},
-	}}}
-	o := newOrch(cc, bd, cfg)
-	_ = o.DrainOnce(context.Background())
-	if len(cc.Sent) != 1 {
-		t.Errorf("MAX_WORKER=1 should dispatch one worker, sent=%v", cc.Sent)
-	}
-}
-
-func TestDrainOnce_noStarvation(t *testing.T) {
+// TestProduceTick_thenDispatch_matchesBuiltinRoles replaces the retired
+// discoverViaBus parity test: it drives the SAME built-in config through
+// ProduceTick (the discovery->enqueue producer) + a registered NewListener per
+// role + one queue Dispatch pass, and checks the SAME dispatches land — each
+// enabled role's Listener gets ITS OWN head offered in this one pass (no cap,
+// no starvation across roles, INV-CONC-1's "one outstanding offer per
+// handler"). The worker query returns two ready beads; only the FIRST (the
+// per-listener head) is dispatched this pass — the second waits for the next
+// Dispatch call, exactly the per-handler serial FIFO DEC-EVENT-2 describes,
+// with no core-tracked cap involved.
+func TestProduceTick_thenDispatch_matchesBuiltinRoles(t *testing.T) {
 	cfg := fastCfg()
 	bd := &dtest.ScriptBD{
 		Ready: map[string]string{
-			"feedback": `[{"id":"zr-c","issue_type":"task","title":"process-feedback: x","parent":"zr-p"}]`,
-			"worker":   `[{"id":"zr-w"}]`,
+			"feedback": `[{"id":"zr-c","issue_type":"task","title":"process-feedback: x"}]`,
+			"worker":   `[{"id":"zr-w1"},{"id":"zr-w2"}]`,
 		},
-		Show:      map[string]string{"zr-p": `{"id":"zr-p","metadata":{"author":"phillipg"}}`},
-		StatusSeq: map[string][]string{"zr-c": {"in_progress", "closed"}, "zr-w": {"in_progress", "closed"}},
+		StatusSeq: map[string][]string{"zr-c": {"closed"}, "zr-w1": {"closed"}},
 	}
+	feedbackExt := "pr-pool-feedback-zr-c-" + dtest.TestStamp
+	workerExt := "pr-pool-worker-zr-w1-" + dtest.TestStamp
 	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{
-		{ExternalID: "pr-pool-feedback-zr-c", Live: true}, {ExternalID: "pr-pool-worker-zr-w", Live: true},
+		{ExternalID: feedbackExt, Live: true, State: ccpool.StateWorking},
+		{ExternalID: workerExt, Live: true, State: ccpool.StateWorking},
 	}}}
 	o := newOrch(cc, bd, cfg)
-	_ = o.DrainOnce(context.Background())
-	if len(cc.Sent) != 2 {
-		t.Errorf("one of each role should be worked, sent=%v", cc.Sent)
+	ctx := context.Background()
+	q := newTestQueue(t)
+	q.Register(o.NewListener(ctx, feedbackRole(o)))
+	q.Register(o.NewListener(ctx, workerRole(o)))
+
+	if err := o.ProduceTick(ctx, q); err != nil {
+		t.Fatal(err)
+	}
+	q.Dispatch()
+
+	if !dtest.Contains(cc.Sent, feedbackExt) {
+		t.Errorf("feedback bead zr-c should be dispatched this pass; sent=%v", cc.Sent)
+	}
+	if !dtest.Contains(cc.Sent, workerExt) {
+		t.Errorf("worker's head bead zr-w1 should be dispatched this pass; sent=%v", cc.Sent)
+	}
+	if dtest.Contains(cc.Sent, "pr-pool-worker-zr-w2-"+dtest.TestStamp) {
+		t.Errorf("worker's SECOND bead zr-w2 must NOT be dispatched in the same pass; sent=%v", cc.Sent)
 	}
 }
 
-func TestDrainOnce_teardownReapsStrays(t *testing.T) {
+// TestNewListener_perHandlerSerialFIFO_onePerDispatchCall locks in the
+// structural replacement for the retired per-role Cap: a Listener's head
+// advances by exactly one accepted event per Dispatch() call, regardless of how
+// many matching events are queued — there is no core-tracked number gating
+// this, only the queue's own per-listener cursor (INV-CONC-1 / DEC-EVENT-2).
+func TestNewListener_perHandlerSerialFIFO_onePerDispatchCall(t *testing.T) {
 	cfg := fastCfg()
-	bd := &dtest.ScriptBD{Ready: map[string]string{"feedback": "[]", "worker": "[]"}}
-	// a stray session from a prior crashed run remains in the list
+	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-w1": {"closed"}, "zr-w2": {"closed"}}}
+	ext1 := "pr-pool-worker-zr-w1-" + dtest.TestStamp
+	ext2 := "pr-pool-worker-zr-w2-" + dtest.TestStamp
 	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{
-		{ExternalID: "pr-pool-worker-zr-stray", Live: true},
-		{ExternalID: "cc-unrelated", Live: true},
+		{ExternalID: ext1, Live: true, State: ccpool.StateWorking},
+		{ExternalID: ext2, Live: true, State: ccpool.StateWorking},
 	}}}
 	o := newOrch(cc, bd, cfg)
-	_ = o.DrainOnce(context.Background())
-	if !dtest.Contains(cc.Closed, "pr-pool-worker-zr-stray") {
-		t.Errorf("teardown must reap pr-pool- strays; closed=%v", cc.Closed)
+	ctx := context.Background()
+	q := newTestQueue(t)
+	q.Register(o.NewListener(ctx, workerRole(o)))
+	if _, err := q.Enqueue(discover.ToQueueEvent(event.NewItemEvent(roles.EventWorkReady, "t", item.Item{ID: "zr-w1"}))); err != nil {
+		t.Fatal(err)
 	}
-	if dtest.Contains(cc.Closed, "cc-unrelated") {
-		t.Errorf("teardown must NOT close non-pr-pool sessions; closed=%v", cc.Closed)
+	if _, err := q.Enqueue(discover.ToQueueEvent(event.NewItemEvent(roles.EventWorkReady, "t", item.Item{ID: "zr-w2"}))); err != nil {
+		t.Fatal(err)
+	}
+
+	q.Dispatch()
+	if len(cc.Sent) != 1 || cc.Sent[0] != ext1 {
+		t.Fatalf("after ONE Dispatch call, exactly the head (zr-w1) should be worked; sent=%v", cc.Sent)
+	}
+	q.Dispatch()
+	if len(cc.Sent) != 2 || cc.Sent[1] != ext2 {
+		t.Fatalf("after a SECOND Dispatch call, the next head (zr-w2) should be worked; sent=%v", cc.Sent)
+	}
+}
+
+// TestGated_quotaPausedAndCICDDown locks the Gated() predicate `run` /
+// `run-until-idle` consult before registering any Listener or running a
+// producer tick (the exported form of the retired DrainOnce's own gate check).
+func TestGated_quotaPausedAndCICDDown(t *testing.T) {
+	o := newOrch(&dtest.FakeCC{}, &dtest.ScriptBD{}, fastCfg())
+	if o.Gated() {
+		t.Fatal("an ungated config must report Gated() == false")
+	}
+	f, _ := writeTemp(t)
+	o.Cfg.QuotaPaused = f
+	if !o.Gated() {
+		t.Fatal("QuotaPaused sentinel present must report Gated() == true")
+	}
+	o.Cfg.QuotaPaused = ""
+	o.Cfg.CICDDown = f
+	if !o.Gated() {
+		t.Fatal("CICDDown sentinel present must report Gated() == true")
 	}
 }
 
@@ -285,22 +277,14 @@ func TestWorkOne_workerSuccessWithWatchdogArmed(t *testing.T) {
 	}
 }
 
-func TestDrainOnce_teardownRunsOnDiscoverError(t *testing.T) {
-	cfg := fastCfg()
-	// a bd ready failure makes Discover return an error
-	bd := &dtest.ScriptBD{ReadyErr: errors.New("bd ready failed")}
-	// a stray pr-pool session exists from a prior run
-	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{
-		{ExternalID: "pr-pool-worker-zr-stray", Live: true},
-	}}}
-	o := newOrch(cc, bd, cfg)
-	if err := o.DrainOnce(context.Background()); err == nil {
-		t.Fatal("a bd ready failure should return an error from DrainOnce")
-	}
-	if !dtest.Contains(cc.Closed, "pr-pool-worker-zr-stray") {
-		t.Errorf("teardown must run even on discover error; closed=%v", cc.Closed)
-	}
-}
+// A bd ready failure propagating from ProduceTick (formerly asserted via
+// DrainOnce, now retired) is covered directly at the producer level by
+// internal/discover's TestProduce_queryErrorPropagates. "Teardown still runs
+// even when discovery fails" is now a cmd/pr-pool run/run-until-idle
+// composition property (TeardownAll is deferred unconditionally around
+// ProduceTick), guaranteed structurally by Go's defer ordering rather than
+// re-asserted here — the underlying teardownAll behavior itself stays covered
+// by TestTeardownAll_purges / TestTeardownAll_returnsClosedCount below.
 
 // TestWorkOne_workerBudgetHardStopUnclaimsNoHuman verifies that when the budget
 // watchdog fires a hard stop for a worker dispatch: workOne returns a budget
@@ -499,31 +483,45 @@ func TestStuckBead_launchFailDoesNotClearLabel(t *testing.T) {
 
 // --- progress-marker support: computed values behind the new slog.Info markers ---
 
-// TestDrain_returnsCompleteAndFlaggedCounts locks the per-role tally that feeds
-// the "done" progress marker (complete=C flagged=F). One feedback bead closes
-// (complete); the other never completes and times out (flagged).
-func TestDrain_returnsCompleteAndFlaggedCounts(t *testing.T) {
+// TestNewListener_mixedOutcomesAcrossPasses replaces the retired drain()'s
+// complete/flagged TALLY: that was a DrainOnce-level aggregate ("done
+// complete=N flagged=F") this bead's convergence has no equivalent for — each
+// dispatch's own outcome is still logged via emitResult, just no longer summed
+// into one final line. What DOES still need locking is that a queue-driven
+// role reaches the SAME per-item outcomes across repeated Dispatch() calls: a
+// bead that closes promptly succeeds with no unclaim, and one that never
+// completes times out and is handed back (unclaimed).
+func TestNewListener_mixedOutcomesAcrossPasses(t *testing.T) {
 	cfg := fastCfg()
-	cfg.MaxFeedback = 3 // allow all three feedback dispatches through the cap
 	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{
-		"zr-ok":  {"closed"},      // DoneSignal on first poll => complete
-		"zr-ok2": {"closed"},      // a second completion => asymmetric (2,1) catches a complete/flagged field swap
-		"zr-bad": {"in_progress"}, // never completes => timeout => flagged
+		"zr-ok":  {"closed"},
+		"zr-bad": {"in_progress"}, // never completes => timeout => handed back
 	}}
 	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{
-		{ExternalID: "pr-pool-feedback-zr-ok", Live: true, State: ccpool.StateWorking},
-		{ExternalID: "pr-pool-feedback-zr-ok2", Live: true, State: ccpool.StateWorking},
-		{ExternalID: "pr-pool-feedback-zr-bad", Live: true, State: ccpool.StateWorking},
+		{ExternalID: "pr-pool-feedback-zr-ok-" + dtest.TestStamp, Live: true, State: ccpool.StateWorking},
+		{ExternalID: "pr-pool-feedback-zr-bad-" + dtest.TestStamp, Live: true, State: ccpool.StateWorking},
 	}}}
 	o := newOrch(cc, bd, cfg)
-	ds := []discover.DispatchContext{
-		{Role: feedbackRole(o), Item: item.Item{ID: "zr-ok"}},
-		{Role: feedbackRole(o), Item: item.Item{ID: "zr-ok2"}},
-		{Role: feedbackRole(o), Item: item.Item{ID: "zr-bad"}},
+	ctx := context.Background()
+	q := newTestQueue(t)
+	q.Register(o.NewListener(ctx, feedbackRole(o)))
+	if _, err := q.Enqueue(discover.ToQueueEvent(event.NewItemEvent(roles.EventFeedbackReady, "t", item.Item{ID: "zr-ok"}))); err != nil {
+		t.Fatal(err)
 	}
-	complete, flagged := o.drain(context.Background(), feedbackRole(o), ds)
-	if complete != 2 || flagged != 1 {
-		t.Errorf("drain counts = (complete=%d flagged=%d), want (2, 1); updates=%v", complete, flagged, bd.Updates)
+	if _, err := q.Enqueue(discover.ToQueueEvent(event.NewItemEvent(roles.EventFeedbackReady, "t", item.Item{ID: "zr-bad"}))); err != nil {
+		t.Fatal(err)
+	}
+
+	q.Dispatch() // works the head, zr-ok
+	q.Dispatch() // works the next head, zr-bad
+
+	if !dtest.HasUpdate(bd, "update zr-bad --status=open --assignee=") {
+		t.Errorf("the timed-out bead must be unclaimed (handed back); updates=%v", bd.Updates)
+	}
+	for _, u := range bd.Updates {
+		if u == "update zr-ok --status=open --assignee=" {
+			t.Errorf("the completed bead must NOT be unclaimed; updates=%v", bd.Updates)
+		}
 	}
 }
 

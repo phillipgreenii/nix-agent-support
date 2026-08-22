@@ -8,23 +8,19 @@ import (
 	"github.com/phillipgreenii/pr-pool/internal/item"
 )
 
-// EventQuery is the `event` query type spec C deliberately left unregistered and
-// this design (M5) registers. It is an event SOURCE for the Aggregator / saga
-// path: it emits one typed, correlated event carrying a work item, so a
-// downstream role's opt-in Aggregator (Q2) can collect it by CorrelationID and
-// fire when its Completeness condition is met.
+// EventQuery is the `event` query type spec C deliberately left unregistered
+// and this design (M5) registers. It is a plain event source: it emits one
+// typed event carrying a work item.
 //
-// It is deliberately a producer under the current Env (no bus handle in the
-// query Run seam). A bus-CONSUMING variant — a query that reads correlated
-// events off the bus and emits an aggregate — needs an Env-bus seam and is a
-// captured implementation-plan open item, not this first cut. The aggregation
-// MECHANISM itself lives in the eventbus (Aggregator), which this type feeds.
+// Correlation/aggregation support (a CorrelationID field, an Aggregator to feed)
+// was DELETED, not ported (bead pg2-f3mcb.2): the queue-as-universal-
+// intermediary convergence has no aggregator. This query type's own removal is
+// tracked separately (pg2-9d0he).
 type EventQuery struct {
-	Meta          `toml:"-"`
-	ItemID        string `toml:"item_id"`
-	ItemType      string `toml:"item_type"`
-	Title         string `toml:"title"`
-	CorrelationID string `toml:"correlation_id"`
+	Meta     `toml:"-"`
+	ItemID   string `toml:"item_id"`
+	ItemType string `toml:"item_type"`
+	Title    string `toml:"title"`
 }
 
 // Validate requires an item id (the work payload) and at least one emit type
@@ -43,9 +39,8 @@ func (q EventQuery) Validate() error {
 // out to nothing.
 func (q EventQuery) BackingCommand() string { return "" }
 
-// Run emits a single correlated event of the query's primary emit type.
+// Run emits a single event of the query's primary emit type.
 func (q EventQuery) Run(_ context.Context, _ Env) ([]event.Event, error) {
 	e := event.NewItemEvent(firstEmit(q), "", item.Item{ID: q.ItemID, Type: q.ItemType, Title: q.Title})
-	e.CorrelationID = q.CorrelationID
 	return []event.Event{e}, nil
 }

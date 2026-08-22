@@ -3,24 +3,19 @@
   "title": "INTF-CLI status --json reply",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schemaVersion", "sessions", "queues", "config"],
+  "required": ["schemaVersion", "deliveries", "queues", "config"],
   "properties": {
     "schemaVersion": { "const": "1" },
-    "sessions": {
+    "deliveries": {
       "type": "array",
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "handler", "event", "state"],
+        "required": ["id", "handler", "event"],
         "properties": {
           "id": { "type": "string" },
           "handler": { "type": "string" },
-          "event": { "type": "string" },
-          "state": {
-            "type": "string",
-            "enum": ["running", "paused", "completed", "failed"]
-          },
-          "progress": { "type": "number", "minimum": 0, "maximum": 1 }
+          "event": { "type": "string" }
         }
       }
     },

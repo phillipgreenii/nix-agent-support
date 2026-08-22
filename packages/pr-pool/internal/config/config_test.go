@@ -50,7 +50,7 @@ func TestMain(m *testing.M) {
 // prefixLocator.
 func cmdRole(name string, binds ...string) roles.Role {
 	return roles.Role{
-		Name: name, Type: "command", Cap: 1, Enabled: true, Binds: binds,
+		Name: name, Type: "command", Enabled: true, Binds: binds,
 		Command: &roles.CommandConfig{Argv: []string{"present-tool"}},
 	}
 }
@@ -169,7 +169,7 @@ func TestValidate_absentBackingCommand(t *testing.T) {
 			Meta: query.Meta{EmitTypes: []string{"a.ready"}}, Argv: []string{"absent-lister"}, Format: query.FormatJSONL,
 		}}},
 		roles.RoleSet{{
-			Name: "cmd-role", Type: "command", Cap: 1, Enabled: true, Binds: []string{"a.ready"},
+			Name: "cmd-role", Type: "command", Enabled: true, Binds: []string{"a.ready"},
 			Command: &roles.CommandConfig{Argv: []string{"absent-handler"}},
 		}},
 	)
@@ -198,7 +198,7 @@ func TestValidate_backingCommandCoversFixedIntegrationBinaries(t *testing.T) {
 			Meta: query.Meta{EmitTypes: []string{"a.ready"}},
 		}}},
 		roles.RoleSet{{
-			Name: "ccpool-role", Type: "ccpool", Cap: 1, Enabled: true, Binds: []string{"a.ready"},
+			Name: "ccpool-role", Type: "ccpool", Enabled: true, Binds: []string{"a.ready"},
 			CCPool: &roles.CCPoolConfig{Actor: "a"},
 		}},
 	)
@@ -295,7 +295,7 @@ func TestValidate_aggregatesEveryFinding(t *testing.T) {
 			cmdRole("unbound"),
 			cmdRole("deaf", "nobody.emits.this"),
 			{
-				Name: "no-tool", Type: "command", Cap: 1, Enabled: true, Binds: []string{"loop.ready"},
+				Name: "no-tool", Type: "command", Enabled: true, Binds: []string{"loop.ready"},
 				Command: &roles.CommandConfig{Argv: []string{"absent-tool"}},
 			},
 		},
@@ -537,8 +537,10 @@ func TestLoad_worktreeDir_envWhenConfigOmitsKey(t *testing.T) {
 	}
 }
 
-// PR_POOL_MAX_WORKER and the other role env vars are dropped (spec C): setting them
-// must have NO effect (role caps live in config / built-in defaults only).
+// PR_POOL_MAX_WORKER and the other role env vars are dropped (spec C): setting
+// them must have NO effect. Per-role capacity is no longer a declarable concept
+// at all (bead pg2-f3mcb.2, INV-CONC-1) — there is no `cap` left to be a no-op
+// on, so this only locks that the built-in role SET itself is unaffected.
 func TestLoad_roleEnvVarsAreNoOps(t *testing.T) {
 	absentConfig(t)
 	t.Setenv("PR_POOL_MAX_WORKER", "3")
@@ -547,9 +549,8 @@ func TestLoad_roleEnvVarsAreNoOps(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Built-in roles use the Default() caps (1/1); the dropped env vars do nothing.
-	if len(c.Roles) != 3 || c.Roles[1].Cap != 1 {
-		t.Errorf("PR_POOL_MAX_WORKER must be a no-op; worker cap = %d, want 1", c.Roles[1].Cap)
+	if len(c.Roles) != 3 || c.Roles[1].Name != "worker" {
+		t.Errorf("PR_POOL_MAX_WORKER must be a no-op; roles = %+v", c.Roles)
 	}
 }
 
@@ -632,7 +633,6 @@ format = "jsonl"
 [[role]]
 name = "solo"
 type = "ccpool"
-cap = 2
 enabled = true
 binds = ["work.ready"]
 [role.ccpool]
@@ -646,7 +646,7 @@ prompt = "do {{.BeadID}}"
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(c.Roles) != 1 || c.Roles[0].Name != "solo" || c.Roles[0].Cap != 2 {
+	if len(c.Roles) != 1 || c.Roles[0].Name != "solo" {
 		t.Fatalf("toml must replace built-ins: %+v", c.Roles)
 	}
 	if len(c.Roles[0].Binds) != 1 || c.Roles[0].Binds[0] != "work.ready" {

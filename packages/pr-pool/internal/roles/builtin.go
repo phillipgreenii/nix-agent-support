@@ -74,7 +74,7 @@ func mustParse(name, body string) *template.Template {
 func BuiltinRoleSet(p BuiltinParams) RoleSet {
 	return RoleSet{
 		{
-			Name: "feedback", Type: "ccpool", Cap: p.MaxFeedback, Enabled: true,
+			Name: "feedback", Type: "ccpool", Enabled: true,
 			Binds: []string{EventFeedbackReady},
 			CCPool: &CCPoolConfig{
 				Actor: "pgii-pool__process-feedback", SkillMD: p.SkillMD,
@@ -84,7 +84,7 @@ func BuiltinRoleSet(p BuiltinParams) RoleSet {
 			},
 		},
 		{
-			Name: "worker", Type: "ccpool", Cap: p.MaxWorker, Enabled: true,
+			Name: "worker", Type: "ccpool", Enabled: true,
 			Binds: []string{EventWorkReady},
 			CCPool: &CCPoolConfig{
 				Actor: "pgii-pool__worker", SkillMD: p.WorkerSkillMD,
@@ -100,7 +100,7 @@ func BuiltinRoleSet(p BuiltinParams) RoleSet {
 			// pg-pr's own "draft-review:" beads), so no positive label is needed.
 			// AuthorshipGuard is FALSE: reviews cover teammate PRs too, so the
 			// guard's "author is me + my branch" assertion must NOT gate them.
-			Name: "review", Type: "ccpool", Cap: p.MaxWorker, Enabled: true,
+			Name: "review", Type: "ccpool", Enabled: true,
 			Binds: []string{EventReviewReady},
 			CCPool: &CCPoolConfig{
 				Actor: "pgii-pool__review", SkillMD: "",

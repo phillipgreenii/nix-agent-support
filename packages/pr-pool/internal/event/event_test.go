@@ -49,29 +49,3 @@ func TestEvent_Expired(t *testing.T) {
 		t.Fatal("unstamped event must not be considered expired")
 	}
 }
-
-func TestAllOf_Complete(t *testing.T) {
-	c := AllOf{Types: []string{"a", "b"}}
-	if c.Complete([]Event{{Type: "a"}}) {
-		t.Fatal("missing type b must be incomplete")
-	}
-	if !c.Complete([]Event{{Type: "a"}, {Type: "b"}}) {
-		t.Fatal("both types present must be complete")
-	}
-	if (AllOf{}).Complete(nil) {
-		t.Fatal("empty AllOf must never be complete")
-	}
-}
-
-func TestCountOf_Complete(t *testing.T) {
-	c := CountOf{N: 2}
-	if c.Complete([]Event{{Type: "a"}}) {
-		t.Fatal("1 < 2 must be incomplete")
-	}
-	if !c.Complete([]Event{{Type: "a"}, {Type: "b"}}) {
-		t.Fatal("2 >= 2 must be complete")
-	}
-	if (CountOf{N: 0}).Complete([]Event{{Type: "a"}}) {
-		t.Fatal("N=0 must never be complete")
-	}
-}

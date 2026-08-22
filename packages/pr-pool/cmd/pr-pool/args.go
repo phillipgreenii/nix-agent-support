@@ -8,17 +8,23 @@ import (
 )
 
 // usageLine is the short synopsis printed to stderr on a usage error.
-const usageLine = "usage: pr-pool [--version | --help] [drain | run-query <role> | run-role <role> <bead> | config (--print-defaults | --show) | sessions | reconcile | push-inject [--json] [--socket <path>] [--token <tok>] <json> | ingest-event [--socket <path>] [--token <tok>] | self-status [--socket <path>] [--token <tok>]]"
+const usageLine = "usage: pr-pool [--version | --help] [run | run-until-idle | run-query <role> | run-role <role> <bead> | config (--print-defaults | --show) | sessions | reconcile | push-inject [--json] [--socket <path>] [--token <tok>] <json> | ingest-event [--socket <path>] [--token <tok>] | self-status [--socket <path>] [--token <tok>]]"
 
 // helpText is the full help printed to stdout for --help/help.
 const helpText = usageLine + `
 
-pr-pool runs one drain pass: it discovers ready beads, dispatches a session per
-configured role (in config order) up to each role's cap, waits for completion, then
-tears down every pr-pool-* tmux session. Bare "pr-pool" is equivalent to "pr-pool drain".
+pr-pool routes typed events from configured sources through a durable queue to
+configured handler roles (INTF-SOURCE -> queue -> INTF-HANDLER). "run" boots the
+core as a long-running daemon; "run-until-idle" boots it, fires one discovery
+pass, drains the queue to idle, then exits (a one-shot pass equivalent to the
+former "drain"). Bare "pr-pool" (no subcommand) prints usage and exits non-zero
+— an explicit subcommand is REQUIRED.
 
 Subcommands:
-  drain                   run one drain pass (the default when omitted)
+  run                     boot the core and run indefinitely, producing + dispatching on a
+                          fixed poll interval, until SIGINT/SIGTERM requests shutdown
+  run-until-idle          boot the core, discover once, drain the queue to idle, then exit
+                          (also reachable as "drain", kept as a deprecated alias)
   run-query <role>        run a role's discovery query and print matches (read-only)
   run-role <role> <bead>  dispatch one bead through a role, then tear down (smoke test)
   config --print-defaults print the built-in default config.toml (copy-paste starting point)
@@ -78,18 +84,19 @@ prompt in config.toml instead.`
 type routeKind int
 
 const (
-	routeDrain       routeKind = iota // run a drain with .rest as the subcommand args
-	routeVersion                      // print the version and exit 0
-	routeHelp                         // print usage and exit 0
-	routeUsageErr                     // print .msg + usage to stderr and exit 2
-	routeRunRole                      // dispatch one bead through a role (.role, .bead)
-	routeRunQuery                     // run a role's discovery query read-only (.role)
-	routeConfig                       // print/show config (.configMode)
-	routeSessions                     // list this pool's sessions from metadata (read-only)
-	routeReconcile                    // report stranded self-owned feedback cycles, then run the pg-pr ACL (mutates beads)
-	routeIngestEvent                  // manager->core callback: forward events on stdin to the running core (.rest)
-	routePushInject                   // operator: inject one event into the running core (.rest)
-	routeSelfStatus                   // manager->core callback: push the caller's own self-status to the running core (.rest)
+	routeVersion      routeKind = iota // print the version and exit 0
+	routeHelp                          // print usage and exit 0
+	routeUsageErr                      // print .msg + usage to stderr and exit 2
+	routeRun                           // boot the core as a long-running daemon (INV-LIFE-1)
+	routeRunUntilIdle                  // boot the core, discover once, drain to idle, exit (INV-LIFE-1; also "drain")
+	routeRunRole                       // dispatch one bead through a role (.role, .bead)
+	routeRunQuery                      // run a role's discovery query read-only (.role)
+	routeConfig                        // print/show config (.configMode)
+	routeSessions                      // list this pool's sessions from metadata (read-only)
+	routeReconcile                     // report stranded self-owned feedback cycles, then run the pg-pr ACL (mutates beads)
+	routeIngestEvent                   // manager->core callback: forward events on stdin to the running core (.rest)
+	routePushInject                    // operator: inject one event into the running core (.rest)
+	routeSelfStatus                    // manager->core callback: push the caller's own self-status to the running core (.rest)
 )
 
 type routeResult struct {
@@ -115,15 +122,27 @@ type routeResult struct {
 func route(argv []string) routeResult {
 	args := argv[1:] // strip program name
 	if len(args) == 0 {
-		return routeResult{kind: routeDrain}
+		// A subcommand is REQUIRED (bead pg2-f3mcb.2 — a deliberate compatibility
+		// break): bare "pr-pool" used to default to a drain pass (routeDrain);
+		// it now prints usage and exits non-zero like any other missing-arg
+		// usage error, rather than silently dispatching sessions.
+		return routeResult{kind: routeUsageErr, msg: "pr-pool: a subcommand is required"}
 	}
 	switch args[0] {
 	case "version", "--version", "-v":
 		return routeResult{kind: routeVersion}
 	case "help", "--help", "-h":
 		return routeResult{kind: routeHelp}
+	case "run":
+		return parseRunLikeArgs(routeRun, args[1:])
+	case "run-until-idle":
+		return parseRunLikeArgs(routeRunUntilIdle, args[1:])
 	case "drain":
-		return routeResult{kind: routeDrain, rest: args[1:]}
+		// Deprecated alias for run-until-idle (bead pg2-f3mcb.2): the pre-
+		// convergence internal/orchestrator + internal/eventbus "drain" path is
+		// retired; every caller that still says "pr-pool drain" gets the exact
+		// same queue-driven one-shot pass run-until-idle runs.
+		return parseRunLikeArgs(routeRunUntilIdle, args[1:])
 	case "run-role":
 		return parseRunRoleArgs(args[1:])
 	case "run-query":
@@ -156,28 +175,31 @@ func route(argv []string) routeResult {
 	return routeResult{kind: routeUsageErr, msg: "unknown subcommand: " + args[0]}
 }
 
-// parseDrainArgs validates the drain subcommand's own args. It is pure: it
-// reports a routeKind and never runs the drain itself, so the caller can refuse
-// to touch config/precheck/DrainOnce on a parse error or help request. The drain
-// subcommand accepts no positionals; a help flag yields routeHelp and any other
-// parse failure (or an unexpected positional) yields routeUsageErr.
-func parseDrainArgs(args []string) routeResult {
-	fs := flag.NewFlagSet("drain", flag.ContinueOnError)
+// parseRunLikeArgs validates a subcommand that takes no flags/positionals of
+// its own — run, run-until-idle, and the deprecated drain alias for
+// run-until-idle. It is pure: it reports a routeKind and never boots a core
+// itself, so the caller can refuse to touch config/precheck/the queue on a
+// parse error or help request (pg2-52rn's "no fall-through to a real dispatch
+// on bad input" guarantee, carried over from the retired parseDrainArgs). A
+// help flag yields routeHelp; any other parse failure (or an unexpected
+// positional) yields routeUsageErr.
+func parseRunLikeArgs(kind routeKind, args []string) routeResult {
+	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	fs.SetOutput(io.Discard) // we render usage/errors ourselves; suppress flag's defaults
 	pos, err := parseInterspersed(fs, args)
 	switch {
 	case errors.Is(err, flag.ErrHelp):
 		return routeResult{kind: routeHelp}
 	case err != nil:
-		// drain defines no flags, so the first dash-prefixed token is the
-		// offender. Report it in the same "unknown flag: X" phrasing as the
+		// This subcommand defines no flags, so the first dash-prefixed token is
+		// the offender. Report it in the same "unknown flag: X" phrasing as the
 		// top-level route (the stdlib's "flag provided but not defined: -x"
 		// single-dashes the flag and reads differently).
 		return routeResult{kind: routeUsageErr, msg: "unknown flag: " + firstFlag(args)}
 	case len(pos) > 0:
 		return routeResult{kind: routeUsageErr, msg: "unexpected argument: " + pos[0]}
 	}
-	return routeResult{kind: routeDrain}
+	return routeResult{kind: kind}
 }
 
 // parseRunRoleArgs validates `run-role <role> <bead>`. Pure: it checks only that a

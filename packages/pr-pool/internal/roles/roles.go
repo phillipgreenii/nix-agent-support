@@ -12,7 +12,6 @@ import (
 
 	"github.com/phillipgreenii/pr-pool/internal/backoff"
 	"github.com/phillipgreenii/pr-pool/internal/budget"
-	"github.com/phillipgreenii/pr-pool/internal/event"
 )
 
 // RoleSet is the ordered list of roles a drain dispatches (config order).
@@ -21,18 +20,18 @@ type RoleSet []Role
 type Role struct {
 	Name    string
 	Type    string // "ccpool" | "command"
-	Cap     int
 	Enabled bool
 	// Binds is the event TYPES this role consumes (Observer subscription). It
 	// replaces the former embedded Query: a role and a query are wired only
 	// through a shared event-type string. A role responds to ANY of its Binds.
-	Binds []string
-	// Correlation is the OPT-IN Aggregator (EIP, Q2) declaration: when non-nil,
-	// the role collects correlated events by CorrelationID and fires once the
-	// Completeness condition is met. nil => the simple ANY path (built-ins).
-	Correlation *event.CorrelationSpec
-	CCPool      *CCPoolConfig  // set iff Type == "ccpool"
-	Command     *CommandConfig // set iff Type == "command"
+	//
+	// Capacity is deliberately NOT declared here (INV-CONC-1): a per-role `cap`
+	// existed once and was removed (bead pg2-f3mcb.2) because the core keeping a
+	// concurrency ceiling contradicted the invariant outright — capacity is the
+	// handler's own business, expressed only as a pre-accept `busy` decline.
+	Binds   []string
+	CCPool  *CCPoolConfig  // set iff Type == "ccpool"
+	Command *CommandConfig // set iff Type == "command"
 	// RetryBackoff is this role's HANDLER RETRY CADENCE (INV-FAIL-2, pg2-0c8yz):
 	// how long the core waits before re-offering an event this role's handler
 	// pre-accept declined, before expiresAt bounds it. A zero value is safe —
