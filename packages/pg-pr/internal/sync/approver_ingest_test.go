@@ -62,13 +62,6 @@ func problemsBody() string {
 	return testVerdictMarker + "\nGEN2-PROBLEMS\n"
 }
 
-// cleanWithheldBody is a synthetic "findings clean, but explicitly
-// withheld" bot verdict comment body (e.g. an approval-blocked-for-other-
-// reasons signal).
-func cleanWithheldBody() string {
-	return testVerdictMarker + "\nGEN2-CLEAN\nGEN2-AUTHORITY-BLOCKED\n"
-}
-
 // pendingBody carries the marker but matches no configured pattern at
 // all — an unresolved/in-progress-shaped verdict (Authority Pending).
 func pendingBody() string {
