@@ -99,14 +99,6 @@ func (o *Orchestrator) ProduceTick(ctx context.Context, q *eventqueue.Queue) err
 	return discover.Produce(ctx, o.queryEnv(), o.Cfg.Queries, q)
 }
 
-// nowTime returns the current time via the clock seam (default time.Now).
-func (o *Orchestrator) nowTime() time.Time {
-	if o.now != nil {
-		return o.now()
-	}
-	return time.Now()
-}
-
 // RunOne dispatches a single self-contained EVENT through one role and then
 // closes that one session (the drain's pass-level teardownAll is not involved).
 // It is the single-bead entry behind `pr-pool run-role`: smoke-test one role
