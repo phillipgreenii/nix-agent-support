@@ -16,6 +16,21 @@ deployment concern and is not defined here (`## Scope`).
 - **Dashboard payload** — the human-facing read seam; carries its own as-of time at the payload
   level rather than per item.
 
+## Approval
+
+- **Approval** — one approver's current standing on a PR at a given head: a verdict, classified
+  by findings and authority, always attributed to that one approver and never collapsed across
+  approvers into a single yes/no signal (`INV-APPROVAL-1`).
+- **Approver** — an actor, human or bot, whose verdict counts toward approval. Not every account
+  that posts review content is an approver; which accounts count is per-deployment
+  configuration, never a pg-pr behavior (`INV-APPROVAL-4`).
+- **Verdict** — an approver's judgment on a PR's current head, classified on two independent
+  axes: findings and authority (`INV-APPROVAL-2`).
+- **Findings** — the verdict axis answering "did this approver find problems with the PR":
+  `clean`, `problems`, or `unknown`.
+- **Authority** — the verdict axis answering "does this approver's verdict currently stand as an
+  approval": `approved`, `withheld`, `pending`, or `absent`.
+
 ## Sync
 
 - **Fingerprint** — a cheap signature of a PR's observable state, used to detect a change without

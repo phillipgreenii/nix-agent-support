@@ -9,7 +9,8 @@ and what it includes (`INV-22`).
 
 - **`STORY-PGPR-GLANCE`** <!-- uuid: 78f67804-45fe-475c-bc9c-8559a5054a26 --> — As an operator or
   a machine consumer, I want PR facts I can trust the freshness of, so I never act on stale
-  information. _(→ `USECASE-PGPR-LIST`; `INV-READ-1`, `INV-ASOF-1`.)_
+  information. _(→ `USECASE-PGPR-LIST`; `INV-READ-1`, `INV-ASOF-1`, `INV-APPROVAL-1`,
+  `INV-APPROVAL-2`, `INV-APPROVAL-3`, `INV-APPROVAL-4`, `INV-APPROVAL-5`.)_
 - **`STORY-PGPR-REVIEW`** <!-- uuid: 23724212-5d46-416d-ba0e-e43644d1269c --> — As a reviewer
   (human or agent), I want to stage and post a review safely, so my feedback lands attributed and
   never stacks a duplicate. _(→ `USECASE-PGPR-REVIEW`; `INV-REVIEW-1`, `INV-ATTR-1`.)_
@@ -24,10 +25,13 @@ and what it includes (`INV-22`).
 **Primary actor:** `ACTOR-PGPR-CONSUMER` (or `ACTOR-PGPR-OP`).
 **Level:** user-goal.
 **Preconditions:** none.
-_Requires:_ `INV-READ-1`, `INV-ASOF-1`.
+_Requires:_ `INV-READ-1`, `INV-ASOF-1`, `INV-APPROVAL-1`, `INV-APPROVAL-2`, `INV-APPROVAL-3`,
+`INV-APPROVAL-4`, `INV-APPROVAL-5`.
 
 1. The actor asks for the current PR listing, machine or human-facing.
-2. pg-pr returns PR facts read from its store, each carrying its own freshness signal.
+2. pg-pr returns PR facts read from its store, each carrying its own freshness signal —
+   including, per PR, each approver's verdict and its own staleness (`INV-APPROVAL-1`,
+   `INV-APPROVAL-3`).
 
 Extensions:
 

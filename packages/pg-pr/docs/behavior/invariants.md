@@ -17,6 +17,31 @@ correct owner (ADR 0034) — the UUID preserves identity; only the owning set ch
   A consumer MUST NOT act on a read flagged stale — the acting decision is the consumer's, but
   the flag itself is pg-pr's obligation to raise correctly.
 
+## Approval (`INV-APPROVAL-*`)
+
+- **`INV-APPROVAL-1`** <!-- uuid: d214af68-dcb2-4eff-8d26-7f129e64d60b --> — **Per approver,
+  never collapsed.** pg-pr MUST track approval **per approver**. It MUST NOT collapse the
+  approver set into a single approved/not-approved boolean; each approver's own approval MUST
+  stay individually addressable, so two approvers approving is distinguishable from one.
+- **`INV-APPROVAL-2`** <!-- uuid: 13334fae-beac-4b7a-bd0c-0303810c6c7d --> — **Two independent
+  verdict axes.** Every approver's verdict MUST be classified on two independent axes: findings
+  (`clean`, `problems`, or `unknown`) and authority (`approved`, `withheld`, `pending`, or
+  `absent`). Neither axis MUST be inferred from the other axis's value.
+- **`INV-APPROVAL-3`** <!-- uuid: 890a643f-b6dc-4597-93b6-2c0e8a39d03f --> — **Staleness is per
+  approval, relative to head.** An approval MUST carry its own staleness relative to the PR's
+  current head commit, distinct from — and in addition to — the as-of-time staleness of
+  `INV-ASOF-1`. A review the code host reports as dismissed MUST be read as a **stale**
+  approval, never as an absent one.
+- **`INV-APPROVAL-4`** <!-- uuid: f5ca7207-632d-4513-83c7-d8e7c4560ee4 --> — **A bot approver
+  counts.** Once an account is configured as an approver, its verdict MUST count toward
+  approval on equal terms whether that account is a human or a bot; pg-pr MUST NOT discount or
+  withhold a bot approver's authority on account of it being a bot.
+- **`INV-APPROVAL-5`** <!-- uuid: 7fae2413-1287-4811-89ac-a9bcc1789e47 --> — **An unmatched
+  verdict MUST be observable.** A verdict body pg-pr cannot classify under any configured
+  grammar MUST surface as an observable signal. It MUST NOT be silently read as `absent`
+  findings or authority — an unrecognized verdict and a genuine absence of approval MUST remain
+  distinguishable to whoever is watching for it.
+
 ## Merge-request records (`INV-MR-*`)
 
 - **`INV-MR-1`** <!-- uuid: bacb5392-230f-4cf7-a10b-6821ddb0f085 --> — pg-pr MUST be the **sole
