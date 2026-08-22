@@ -29,6 +29,11 @@ type Comment struct {
 	// ingestion into code_comment_message.posted_at for message ordering.
 	CreatedAt string `json:"created_at,omitempty"`
 
+	// UpdatedAt is the comment's last-edit timestamp (GraphQL updatedAt,
+	// RFC3339). Empty when the provider does not supply one (e.g. an
+	// older-shaped cached payload recorded before this field was fetched).
+	UpdatedAt string `json:"updated_at,omitempty"`
+
 	// Review-thread staleness fields (populated for inline thread comments only).
 	//
 	// ThreadIsOutdated mirrors PullRequestReviewThread.isOutdated: true when

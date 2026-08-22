@@ -83,6 +83,7 @@ func prNodeSelection(connFirst int) string {
             authorAssociation
             body
             createdAt
+            updatedAt
           }
         }
         reviewThreads(first: %[1]d) {
@@ -104,6 +105,7 @@ func prNodeSelection(connFirst int) string {
                 originalLine
                 line
                 createdAt
+                updatedAt
                 isMinimized
                 minimizedReason
                 originalCommit { oid }
@@ -338,6 +340,7 @@ type ghCommentsConn struct {
 		AuthorAssociation string  `json:"authorAssociation"`
 		Body              string  `json:"body"`
 		CreatedAt         string  `json:"createdAt"`
+		UpdatedAt         string  `json:"updatedAt"`
 	} `json:"nodes"`
 }
 
@@ -360,6 +363,7 @@ type ghReviewThreadsConn struct {
 				OriginalLine      int     `json:"originalLine"`
 				Line              int     `json:"line"`
 				CreatedAt         string  `json:"createdAt"`
+				UpdatedAt         string  `json:"updatedAt"`
 				IsMinimized       bool    `json:"isMinimized"`
 				MinimizedReason   string  `json:"minimizedReason"`
 				OriginalCommit    *struct {
@@ -559,6 +563,7 @@ func commentsFromGHNode(n ghPRNode) []api.Comment {
 			AuthorRole: strings.ToLower(c.AuthorAssociation),
 			Body:       c.Body,
 			CreatedAt:  c.CreatedAt,
+			UpdatedAt:  c.UpdatedAt,
 		})
 	}
 	for _, t := range n.ReviewThreads.Nodes {
@@ -577,6 +582,7 @@ func commentsFromGHNode(n ghPRNode) []api.Comment {
 				AuthorRole:        strings.ToLower(c.AuthorAssociation),
 				Body:              c.Body,
 				CreatedAt:         c.CreatedAt,
+				UpdatedAt:         c.UpdatedAt,
 				Path:              c.Path,
 				Line:              line,
 				ThreadID:          t.ID,

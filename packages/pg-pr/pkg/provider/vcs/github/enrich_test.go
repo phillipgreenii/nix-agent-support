@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -549,6 +550,134 @@ func TestTruncationFlags_NewConnections(t *testing.T) {
 	want := []string{"files", "commits", "labels"}
 	if !sliceEq(got[0].Truncated, want) {
 		t.Errorf("Truncated = %v, want %v", got[0].Truncated, want)
+	}
+}
+
+// TestPRNodeSelection_CommentsRequestUpdatedAt is a cheap string assertion
+// over the query literal: it's the only test that would have caught the
+// long-standing bug where the top-level comments connection was ordered
+// UPDATED_AT DESC but the node selection never actually requested
+// updatedAt, so nothing verified the ordering was doing anything useful.
+//
+// Both comment node selections in prNodeSelection — the top-level
+// `comments` connection and the nested `reviewThreads.comments` connection
+// — are checked, since both decode into api.Comment.UpdatedAt via
+// commentsFromGHNode.
+func TestPRNodeSelection_CommentsRequestUpdatedAt(t *testing.T) {
+	sel := prNodeSelection(30)
+
+	commentsIdx := strings.Index(sel, "comments(first:")
+	if commentsIdx == -1 {
+		t.Fatal("top-level comments selection not found")
+	}
+	reviewThreadsIdx := strings.Index(sel, "reviewThreads(first:")
+	if reviewThreadsIdx == -1 {
+		t.Fatal("reviewThreads selection not found")
+	}
+	threadCommentsIdx := strings.Index(sel[reviewThreadsIdx:], "comments(first:")
+	if threadCommentsIdx == -1 {
+		t.Fatal("nested reviewThreads.comments selection not found")
+	}
+	threadCommentsIdx += reviewThreadsIdx
+
+	topLevelBlock := sel[commentsIdx:reviewThreadsIdx]
+	if !strings.Contains(topLevelBlock, "updatedAt") {
+		t.Errorf("top-level comments selection does not request updatedAt:\n%s", topLevelBlock)
+	}
+	threadBlock := sel[threadCommentsIdx:]
+	if !strings.Contains(threadBlock, "updatedAt") {
+		t.Errorf("reviewThreads.comments selection does not request updatedAt:\n%s", threadBlock)
+	}
+}
+
+// TestCommentsFromGHNode_UpdatedAt round-trips api.Comment.UpdatedAt for
+// both the top-level comments connection and the nested review-thread
+// comments connection, across the three cases the bead calls out: field
+// present, field absent (an older cached payload), and field present but
+// an empty string.
+func TestCommentsFromGHNode_UpdatedAt(t *testing.T) {
+	cases := []struct {
+		name string
+		resp string
+		want string
+	}{
+		{
+			name: "top-level comment: updatedAt present",
+			resp: `{"data":{"search":{"nodes":[
+				{"number":1,"comments":{"nodes":[
+					{"id":"c1","author":{"__typename":"User","login":"alice"},"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-02T00:00:00Z"}
+				]},"reviewThreads":{"nodes":[]}}
+			]}}}`,
+			want: "2026-01-02T00:00:00Z",
+		},
+		{
+			name: "top-level comment: updatedAt absent (older-shaped payload)",
+			resp: `{"data":{"search":{"nodes":[
+				{"number":1,"comments":{"nodes":[
+					{"id":"c1","author":{"__typename":"User","login":"alice"},"createdAt":"2026-01-01T00:00:00Z"}
+				]},"reviewThreads":{"nodes":[]}}
+			]}}}`,
+			want: "",
+		},
+		{
+			name: "top-level comment: updatedAt present but empty string",
+			resp: `{"data":{"search":{"nodes":[
+				{"number":1,"comments":{"nodes":[
+					{"id":"c1","author":{"__typename":"User","login":"alice"},"createdAt":"2026-01-01T00:00:00Z","updatedAt":""}
+				]},"reviewThreads":{"nodes":[]}}
+			]}}}`,
+			want: "",
+		},
+		{
+			name: "review-thread comment: updatedAt present",
+			resp: `{"data":{"search":{"nodes":[
+				{"number":1,"comments":{"nodes":[]},"reviewThreads":{"nodes":[
+					{"id":"t1","comments":{"nodes":[
+						{"id":"tc1","author":{"__typename":"User","login":"bob"},"path":"x.go","line":1,"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-03T00:00:00Z"}
+					]}}
+				]}}
+			]}}}`,
+			want: "2026-01-03T00:00:00Z",
+		},
+		{
+			name: "review-thread comment: updatedAt absent (older-shaped payload)",
+			resp: `{"data":{"search":{"nodes":[
+				{"number":1,"comments":{"nodes":[]},"reviewThreads":{"nodes":[
+					{"id":"t1","comments":{"nodes":[
+						{"id":"tc1","author":{"__typename":"User","login":"bob"},"path":"x.go","line":1,"createdAt":"2026-01-01T00:00:00Z"}
+					]}}
+				]}}
+			]}}}`,
+			want: "",
+		},
+		{
+			name: "review-thread comment: updatedAt present but empty string",
+			resp: `{"data":{"search":{"nodes":[
+				{"number":1,"comments":{"nodes":[]},"reviewThreads":{"nodes":[
+					{"id":"t1","comments":{"nodes":[
+						{"id":"tc1","author":{"__typename":"User","login":"bob"},"path":"x.go","line":1,"createdAt":"2026-01-01T00:00:00Z","updatedAt":""}
+					]}}
+				]}}
+			]}}}`,
+			want: "",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseEnrichedPRs([]byte(tc.resp), "x/y")
+			if err != nil {
+				t.Fatalf("parseEnrichedPRs: %v", err)
+			}
+			if len(got) != 1 {
+				t.Fatalf("want 1 PR, got %d", len(got))
+			}
+			if len(got[0].Comments) != 1 {
+				t.Fatalf("want 1 comment, got %d", len(got[0].Comments))
+			}
+			if c := got[0].Comments[0]; c.UpdatedAt != tc.want {
+				t.Errorf("Comment.UpdatedAt = %q, want %q", c.UpdatedAt, tc.want)
+			}
+		})
 	}
 }
 
