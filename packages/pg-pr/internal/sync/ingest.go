@@ -111,6 +111,32 @@ func (e *Engine) ingestFeedbackToStore(ctx context.Context, repo string, pr api.
 			return fmt.Errorf("ingest: set approval (teammate changes-requested %s) %s#%d: %w", rv.Approver, repo, pr.Number, err)
 		}
 	}
+	// Bot-COMMENT-derived verdict approvals (pg2-4dz88.1.6) — a FOURTH,
+	// PARALLEL per-approver source into the SAME pr_approval table as the
+	// three GitHub-REVIEW-based sources above, this one resolved from an
+	// allowlisted bot's own comment body via the config-declared verdict
+	// grammar rather than a GitHub review object. See botVerdictApprovals's
+	// doc (internal/sync/approver.go) for the allowlist-gating decision and
+	// the latest-wins/fallback/tiebreak rules, and approverApprovalState's
+	// doc for the (findings, authority) -> store-state mapping.
+	//
+	// A bad verdict-generation regex is defensive-guarded exactly like the
+	// agentregistry.New failure above: log to stderr and skip this source
+	// for the cycle rather than aborting the whole ingest — the broken
+	// generation was already rejected at config-validate time, but we don't
+	// let a config bug here block the other three per-approver sources or
+	// the rest of ingestion.
+	if clf, err := buildVerdictClassifier(e.cfg().VerdictGenerations); err != nil {
+		fmt.Fprintf(os.Stderr, "pg-pr: ingest: building verdict classifier failed, skipping bot verdict approvals: %v\n", err)
+	} else {
+		allowlist := approverAllowlistSet(e.cfg().ApproverAllowlist)
+		for _, bv := range botVerdictApprovals(enriched.Comments, allowlist, clf) {
+			state := approverApprovalState(bv.Result)
+			if err := e.deps.Store.SetApproval(ctx, prID, bv.Approver, pr.HeadSHA, state, bv.ObservedAt); err != nil {
+				return fmt.Errorf("ingest: set approval (bot verdict %s) %s#%d: %w", bv.Approver, repo, pr.Number, err)
+			}
+		}
+	}
 
 	// --- Comments ---
 	//
