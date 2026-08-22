@@ -149,6 +149,17 @@ func emitRole(b *strings.Builder, r roles.Role) {
 		fmt.Fprintf(b, "tokens = %d\n", int64(cc.Budget.Tokens))
 		fmt.Fprintf(b, "cost = %d\n", int64(cc.Budget.Cost))
 		fmt.Fprintf(b, "time = %q\n", cc.Budget.Time.String())
+		// Isolation is OMITTED when zero-valued: an absent table already decodes
+		// back to the same zero value (buildIsolation), and every built-in role
+		// leaves it unset — printing it unconditionally would just be noise on
+		// the copy-paste starting point every operator sees.
+		if cc.Isolation.Type != "" {
+			b.WriteString("[role.ccpool.isolation]\n")
+			fmt.Fprintf(b, "type = %q\n", cc.Isolation.Type)
+			if cc.Isolation.Path != "" {
+				fmt.Fprintf(b, "path = %q\n", cc.Isolation.Path)
+			}
+		}
 	}
 	b.WriteString("\n")
 }

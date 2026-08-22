@@ -52,6 +52,23 @@ type CCPoolConfig struct {
 	PromptBody      string             // the task prompt template source (no rails)
 	Prompt          *template.Template // parsed PromptBody (missingkey=error)
 	Budget          budget.Budget      // finite => watchdog + prompt line; unlimited => neither
+	Isolation       IsolationConfig    // how the dispatched session's WORKSPACE_ROOT is prepared
+}
+
+// IsolationConfig selects how a ccpool role's WORKSPACE_ROOT is prepared before
+// dispatch. The zero value (Type == "") means "worktree", the long-standing
+// behavior (a fresh per-item git worktree off RepoRoot) — so an existing config
+// that never sets this is unaffected.
+type IsolationConfig struct {
+	// Type is one of: "" / "worktree" (create-or-reuse a git worktree at
+	// <WorktreeDir>/<itemID> off RepoRoot — the default), "none" (no isolation;
+	// WORKSPACE_ROOT = RepoRoot, for a role whose own prompt/skill manages its
+	// own isolation), "path" (create-or-reuse one fixed configured directory,
+	// see Path), or "workforest" (create-or-reuse a coordinated multi-repo set
+	// keyed by item id).
+	Type string
+	// Path is the fixed directory to create-or-reuse; set iff Type == "path".
+	Path string
 }
 
 // CommandConfig is the command role type's config.

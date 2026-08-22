@@ -157,6 +157,15 @@ type ccpoolTOML struct {
 	Prompt          string                   `toml:"prompt"`
 	PromptFile      string                   `toml:"prompt_file"`
 	Budget          *budgetTOML              `toml:"budget"`
+	Isolation       *isolationTOML           `toml:"isolation"`
+}
+
+// isolationTOML is decoded from the optional [role.ccpool.isolation] table. An
+// absent table (nil) leaves roles.IsolationConfig at its zero value, which
+// buildCCPool below resolves to "worktree" — today's only behavior.
+type isolationTOML struct {
+	Type string `toml:"type"`
+	Path string `toml:"path"`
 }
 
 type commandTOML struct {
@@ -482,6 +491,10 @@ func buildCCPool(md toml.MetaData, prim toml.Primitive, configDir string, c Conf
 	}
 	b := c.WorkerBudget() // pool default budget; per-role budget overlays it
 	overlayBudget(&b, ct.Budget)
+	isolation, err := buildIsolation(ct.Isolation)
+	if err != nil {
+		return nil, fmt.Errorf("ccpool role: isolation: %w", err)
+	}
 	return &roles.CCPoolConfig{
 		Actor:           ct.Actor,
 		SkillMD:         ct.SkillMD,
@@ -492,7 +505,30 @@ func buildCCPool(md toml.MetaData, prim toml.Primitive, configDir string, c Conf
 		PromptBody:      body,
 		Prompt:          tmpl,
 		Budget:          b,
+		Isolation:       isolation,
 	}, nil
+}
+
+// buildIsolation validates an optional [role.ccpool.isolation] table. A nil
+// table (the key omitted entirely) resolves to the zero IsolationConfig, which
+// the executor treats as "worktree" — so an existing config is unaffected.
+func buildIsolation(t *isolationTOML) (roles.IsolationConfig, error) {
+	if t == nil {
+		return roles.IsolationConfig{}, nil
+	}
+	switch t.Type {
+	case "", "worktree", "none", "workforest":
+		if t.Path != "" {
+			return roles.IsolationConfig{}, fmt.Errorf("path is only valid for type %q, not %q", "path", t.Type)
+		}
+	case "path":
+		if t.Path == "" {
+			return roles.IsolationConfig{}, fmt.Errorf("type %q requires path", "path")
+		}
+	default:
+		return roles.IsolationConfig{}, fmt.Errorf("unknown type %q (known: worktree, none, path, workforest)", t.Type)
+	}
+	return roles.IsolationConfig{Type: t.Type, Path: t.Path}, nil
 }
 
 func buildCommand(md toml.MetaData, prim toml.Primitive) (*roles.CommandConfig, error) {

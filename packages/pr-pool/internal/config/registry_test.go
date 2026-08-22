@@ -267,3 +267,113 @@ argv = ["x"]
 		t.Fatal("negative retries must be a hard error")
 	}
 }
+
+// --- ccpool role isolation strategy (roles.IsolationConfig) ---
+
+// ccpoolRoleCfg returns a minimal-but-complete [[role]] ccpool block, with an
+// optional [role.ccpool.isolation] table spliced in, so each isolation test
+// below only has to state the part it cares about.
+func ccpoolRoleCfg(isolationTable string) string {
+	return `
+[[query]]
+name = "s"
+emits = ["e"]
+type = "command"
+[query.command]
+argv = ["x"]
+format = "jsonl"
+
+[[role]]
+name = "r"
+type = "ccpool"
+binds = ["e"]
+[role.ccpool]
+actor = "test-actor"
+completion = "close-only"
+on_failure = "unclaim"
+on_dispatch_fail = "unclaim"
+prompt = "do the thing"
+` + isolationTable
+}
+
+// Omitting [role.ccpool.isolation] entirely must leave IsolationConfig at its
+// zero value — the executor's newIsolation resolves that to "worktree", the
+// long-standing only behavior, so an existing config is unaffected.
+func TestLoad_ccpoolIsolationOmittedIsZeroValue(t *testing.T) {
+	absentGlobalConfig(t)
+	writeCfg(t, ccpoolRoleCfg(""))
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := c.Roles[0].CCPool.Isolation
+	if got.Type != "" || got.Path != "" {
+		t.Fatalf("Isolation = %+v, want zero value", got)
+	}
+}
+
+// Each recognized type round-trips through decode unchanged.
+func TestLoad_ccpoolIsolationRecognizedTypes(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		table string
+		want  string
+	}{
+		{"worktree explicit", "[role.ccpool.isolation]\ntype = \"worktree\"\n", "worktree"},
+		{"none", "[role.ccpool.isolation]\ntype = \"none\"\n", "none"},
+		{"workforest", "[role.ccpool.isolation]\ntype = \"workforest\"\n", "workforest"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			absentGlobalConfig(t)
+			writeCfg(t, ccpoolRoleCfg(tc.table))
+			c, err := Load()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := c.Roles[0].CCPool.Isolation.Type; got != tc.want {
+				t.Fatalf("Isolation.Type = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// type = "path" requires a non-empty path.
+func TestLoad_ccpoolIsolationPathType(t *testing.T) {
+	absentGlobalConfig(t)
+	writeCfg(t, ccpoolRoleCfg("[role.ccpool.isolation]\ntype = \"path\"\npath = \"/tmp/scratch\"\n"))
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := c.Roles[0].CCPool.Isolation
+	if got.Type != "path" || got.Path != "/tmp/scratch" {
+		t.Fatalf("Isolation = %+v, want {Type: path, Path: /tmp/scratch}", got)
+	}
+}
+
+func TestLoad_ccpoolIsolationPathTypeWithoutPathIsError(t *testing.T) {
+	absentGlobalConfig(t)
+	writeCfg(t, ccpoolRoleCfg("[role.ccpool.isolation]\ntype = \"path\"\n"))
+	if _, err := Load(); err == nil {
+		t.Fatal("type = \"path\" with no path must be a hard error")
+	}
+}
+
+// path is only meaningful for type = "path" — setting it alongside any other
+// type is rejected rather than silently ignored, so a typo'd config fails
+// loudly instead of quietly discarding the operator's intent.
+func TestLoad_ccpoolIsolationPathOnNonPathTypeIsError(t *testing.T) {
+	absentGlobalConfig(t)
+	writeCfg(t, ccpoolRoleCfg("[role.ccpool.isolation]\ntype = \"none\"\npath = \"/tmp/scratch\"\n"))
+	if _, err := Load(); err == nil {
+		t.Fatal("path set alongside type != \"path\" must be a hard error")
+	}
+}
+
+func TestLoad_ccpoolIsolationUnknownTypeIsError(t *testing.T) {
+	absentGlobalConfig(t)
+	writeCfg(t, ccpoolRoleCfg("[role.ccpool.isolation]\ntype = \"bogus\"\n"))
+	if _, err := Load(); err == nil {
+		t.Fatal("unknown isolation type must be a hard error")
+	}
+}

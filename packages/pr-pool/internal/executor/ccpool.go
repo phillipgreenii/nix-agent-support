@@ -18,7 +18,6 @@ import (
 	"github.com/phillipgreenii/pr-pool/internal/report"
 	"github.com/phillipgreenii/pr-pool/internal/roles"
 	"github.com/phillipgreenii/pr-pool/internal/watchdog"
-	"github.com/phillipgreenii/pr-pool/internal/worktree"
 )
 
 type ccpoolExecutor struct{}
@@ -39,17 +38,20 @@ func (r *ccpoolRun) run(ctx context.Context, d discover.DispatchContext) (report
 	cc := d.Role.CCPool
 	display := d.Role.DisplayName(r.deps.Cfg.SessionPrefix, d.Item.ID)
 
-	// Fresh per-bead worktree so the worker never runs on a stale unrelated branch
-	// (pg2-yukh root cause #2). On failure to create one, treat it like a launch
-	// failure (escalate per ADR 0015) — running in the shared monorepo is exactly
-	// the bug we are fixing, so we do NOT silently fall back to RepoRoot.
-	wt, wtErr := worktree.Ensure(ctx, r.deps.git(), r.deps.Cfg.WorktreeDir, r.deps.Cfg.RepoRoot, d.Item.ID)
+	// Prepare WORKSPACE_ROOT per the role's isolation strategy (roles.IsolationConfig;
+	// default "worktree" — a fresh per-bead worktree so the worker never runs on a
+	// stale unrelated branch, pg2-yukh root cause #2). On failure, treat it like a
+	// launch failure (escalate per ADR 0015) — running in the shared monorepo is
+	// exactly the bug the worktree default is fixing, so we do NOT silently fall
+	// back to RepoRoot for that strategy (a role using "none" gets RepoRoot on
+	// purpose, by its own explicit config, not as a fallback).
+	wt, wtErr := newIsolation(cc.Isolation, r.deps).Ensure(ctx, d.Item.ID)
 	if wtErr != nil {
 		var res report.Result
 		if r.escalateLaunchFailure(ctx, d.Item.ID) {
 			res = failureAction(report.Escalated, d.Item.ID)
 		}
-		return res, fmt.Errorf("worktree %s: %w", d.Item.ID, wtErr)
+		return res, fmt.Errorf("isolation %s: %w", d.Item.ID, wtErr)
 	}
 
 	env := map[string]string{
