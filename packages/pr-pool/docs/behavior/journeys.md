@@ -693,7 +693,11 @@ or query that verified it when it was added), `USECASE-VALIDATE-CONFIG`.
   binding MAY then narrow on a **payload path it names itself**, applied after the type match
   (`INV-DISP-1`). No matchable field comes from the source — matchability is the handler's alone. A
   named path that is **absent** on an event is a **non-match**, not an error.
-- **Serialize marks** — any event type **marked to serialize** (`INV-CONC-1`, see `OQ-CONC-MARK`), so
+- **Serialize marks** — any event type **marked to serialize** (`INV-CONC-1`) is declared **in this
+  same configuration**, alongside the routing graph — a per-type mark, never a per-binding attribute,
+  because a type MAY be bound by several handlers and the mark is a property of the type itself. The
+  concrete declaration is a realization detail
+  (`phillipgreenii-nix-agent-support · packages/pr-pool/docs/decisions · DEC-CONC-1`). So marked,
   concurrency never corrupts order-dependent work.
 - **Re-entry** — where a handler produces **new work**, it is routed back in as events **via a
   query**. The core does **not** branch outputs itself: **delivery is pr-pool's contract and
@@ -1079,10 +1083,6 @@ Each states the gap, its owner, a resolution path, and where it blocks.
   `--only` / `--disable` selectors. _Gap_: the authored config shape is not yet fixed. _Owner_:
   operator/author. _Path_: extract from pr-pool's TOML prior art and pin the schema. _Blocks_:
   authoring config (`USECASE-CONFIGURE-WIRING`, `USECASE-CONFIGURE-OPTIONAL`); `INTF-CLI`.
-- **`OQ-CONC-MARK`** <!-- uuid: 427e52f7-223f-428e-b8c7-e8140d557f8e --> — **how an event type is marked to serialize** (`INV-CONC-1`). _Gap_: the
-  mechanism for declaring an order-dependent type is undecided. _Owner_: author. _Path_: decide a
-  per-type config flag vs. a binding attribute. _Blocks_: safe handling of order-dependent events;
-  `USECASE-CONFIGURE-WIRING`.
 - **`OQ-EVT-CATALOG`** <!-- uuid: 7f4ba6ef-bb0e-4bcb-95fb-932a2eba7db5 --> — a **shared event catalog**: a declared shape for an event's `payload`,
   owned by the event **`type`** rather than by any one source. _Gap_: a `type` is declared, routed and
   matched on, but nothing anywhere declares what an event of that `type` **carries** — the event

@@ -48,11 +48,19 @@ type Config struct {
 	// opts in).
 	PullFailureBackoff backoff.Policy
 	PullFailureRetries int
-	QuotaPaused        string
-	CICDDown           string
-	Effort             string
-	Model              string
-	PermissionMode     string
+	// SerializeTypes is the set of event TYPES marked to serialize (INV-CONC-1,
+	// `packages/pr-pool/docs/decisions · DEC-CONC-1`): the core offers at most
+	// one event of a marked type at a time, across every bound handler, until
+	// it is released (settled for every currently-bound handler — accepted, or
+	// given its one attempt past expiresAt). From [pool].serialize_types; empty
+	// (the default) marks nothing, so an existing deployment's dispatch is
+	// unchanged.
+	SerializeTypes []string
+	QuotaPaused    string
+	CICDDown       string
+	Effort         string
+	Model          string
+	PermissionMode string
 	// AllowedTools is the claude --allowed-tools allowlist forwarded verbatim to
 	// `ccpool new --allowed-tools`. Combined with PermissionMode=dontAsk it is the
 	// worker's security boundary: any tool NOT matching an entry here is

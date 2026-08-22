@@ -53,6 +53,12 @@ const idleDrainTick = 500 * time.Millisecond
 // The returned storeClose MUST be deferred by the caller: eventqueue.Queue owns
 // no Close of its own (Store is an injected seam), so the file handle beneath it
 // is this function's caller's to release.
+//
+// cfg.SerializeTypes (INV-CONC-1, `packages/pr-pool/docs/decisions · DEC-CONC-1`)
+// threads through as eventqueue.WithSerializeTypes the same way cfg.RetryBackoff
+// threads through as WithRetryBackoff — this is the ONE production seam that
+// resolves the config-level mark into the queue's dispatch-time occupancy gate;
+// an empty/absent [pool].serialize_types leaves every type unaffected.
 func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrator) (svc *core.Service, q *eventqueue.Queue, mp metric.MeterProvider, storeClose func() error, err error) {
 	store, err := eventqueue.NewFileStore(filepath.Join(cfg.LogDir, "queue.jsonl"))
 	if err != nil {
@@ -64,7 +70,7 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 		_ = store.Close()
 		return nil, nil, nil, nil, fmt.Errorf("construct metrics emitter: %w", err)
 	}
-	q, err = eventqueue.New(store, eventqueue.WithRetryBackoff(cfg.RetryBackoff), eventqueue.WithObserver(emitter))
+	q, err = eventqueue.New(store, eventqueue.WithRetryBackoff(cfg.RetryBackoff), eventqueue.WithObserver(emitter), eventqueue.WithSerializeTypes(cfg.SerializeTypes...))
 	if err != nil {
 		_ = store.Close()
 		return nil, nil, nil, nil, fmt.Errorf("construct event queue: %w", err)

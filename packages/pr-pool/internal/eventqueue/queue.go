@@ -173,6 +173,16 @@ type Queue struct {
 	// currently-bound listeners have accepted (disk savings; shortens the dedup
 	// window — safe only when the consumer set is fixed).
 	evictWhenAllAccept bool
+
+	// serializeTypes is the set of event TYPES marked to serialize (INV-CONC-1,
+	// mechanism resolved by
+	// `phillipgreenii-nix-agent-support · packages/pr-pool/docs/decisions ·
+	// DEC-CONC-1`, closing the former OQ-CONC-MARK): headFor never returns more
+	// than one entry of a marked type at a time as ANY listener's head — across
+	// every bound listener, not merely the same one — until that entry is
+	// RELEASED (releasedLocked). nil/empty (the default) leaves every type's
+	// dispatch completely unaffected.
+	serializeTypes map[string]bool
 }
 
 // Option configures a Queue.
@@ -198,6 +208,28 @@ func WithObserver(o Observer) Option { return func(q *Queue) { q.obs = o } }
 // WithEarlyEviction opts into evicting an event once all bound listeners have
 // accepted it (ADR 0031 "opt-in early eviction").
 func WithEarlyEviction() Option { return func(q *Queue) { q.evictWhenAllAccept = true } }
+
+// WithSerializeTypes marks each named event TYPE to serialize (INV-CONC-1,
+// `phillipgreenii-nix-agent-support · packages/pr-pool/docs/decisions ·
+// DEC-CONC-1`): the queue offers at most one entry of a marked type at a
+// time — across EVERY bound listener, not merely per-listener, which the
+// existing per-listener FIFO already guarantees on its own — until that entry
+// is RELEASED: settled (accepted, or given its one attempt past `expiresAt`,
+// INV-EVT-4) for every CURRENTLY-BOUND listener that matches it. Release is
+// deliberately NOT eviction/retirement — see releasedLocked and headFor for
+// why. A type never named here dispatches exactly as before; this option is
+// additive and opt-in, per type. Passing the same name more than once (in one
+// call or across calls) is harmless.
+func WithSerializeTypes(types ...string) Option {
+	return func(q *Queue) {
+		if q.serializeTypes == nil {
+			q.serializeTypes = map[string]bool{}
+		}
+		for _, t := range types {
+			q.serializeTypes[t] = true
+		}
+	}
+}
 
 // WithRetryBackoff overrides the queue's DEFAULT handler retry cadence
 // (INV-FAIL-2): how long the core waits before re-offering a listener its head
@@ -363,6 +395,38 @@ func (q *Queue) retainedLocked(e *entry, now time.Time) bool {
 	return false
 }
 
+// releasedLocked reports whether e — an event of a SERIALIZE-marked type
+// (INV-CONC-1) — has been released by every currently-bound listener: each
+// listener that Matches it is settled (accepted, or given its one attempt
+// after `expiresAt`, INV-EVT-4). Once released, e no longer occupies its
+// type's serialize slot (headFor), even though it may still be RETAINED in
+// the queue (retainedLocked) — release is a DELIVERY question ("has every
+// bound handler had its one attempt"), retention is a DEDUP-WINDOW question
+// ("how long does the id stay live"), and the two genuinely diverge exactly
+// when an event is fully settled before its own `expiresAt`: absent
+// WithEarlyEviction, ADR 0031 keeps it retained until `expiresAt` regardless,
+// but INV-CONC-1's release condition is worded "completes **or expires**" —
+// completing means HANDLED, not evicted. Gating release on
+// eviction/retirement instead would let a promptly-and-fully-accepted
+// serialized event go on blocking its successor for the rest of its retention
+// window even though every bound handler already took it, which is the
+// reading INV-CONC-1 documents as rejected.
+//
+// An event no currently-bound listener matches is released VACUOUSLY (the
+// loop finds nothing unsettled) — the same vacuous reading retainedLocked's
+// second half uses for retention, so an orphan serialize-marked event never
+// occupies a slot it could never be delivered through anyway.
+//
+// Caller holds q.mu.
+func (q *Queue) releasedLocked(e *entry) bool {
+	for _, ls := range q.listeners {
+		if ls.l.Matches(e.evt) && !e.settled[ls.l.ID()] {
+			return false
+		}
+	}
+	return true
+}
+
 // headFor returns the head deliverable event for a listener: the earliest (by
 // enqueue order) event that matches the listener's binding and that the listener
 // is still owed an attempt on. Per-listener serial FIFO with head-of-line
@@ -375,12 +439,37 @@ func (q *Queue) retainedLocked(e *entry, now time.Time) bool {
 // a duration-bounded queue could) would drop the born-expired default's only
 // opportunity un-offered, violating INV-EVT-1.
 //
+// SERIALIZE OCCUPANCY (INV-CONC-1, active only for a type in q.serializeTypes).
+// The scan additionally tracks, per marked TYPE, whether an earlier entry of
+// that type already occupies the slot for the WHOLE scan — across every
+// listener, not just l. The first not-yet-RELEASED entry of a marked type
+// encountered occupies it; every LATER entry of that same type is skipped
+// outright for the rest of this scan, even one that otherwise matches l and is
+// not settled for l, until the occupant is released (releasedLocked). This is
+// why the occupancy bookkeeping runs unconditionally over every entry of a
+// marked type passed, not only ones that reach l's own settled/Matches checks
+// below — occupancy is a property of the TYPE, not of which listener is asking,
+// so every call to headFor (one per listener, per Dispatch pass) independently
+// re-derives the same answer from the same entries.
+//
 // Caller holds q.mu.
 func (q *Queue) headFor(l Listener) *entry {
+	var occupied map[string]bool // lazily built only when serialize marks exist
+	if len(q.serializeTypes) > 0 {
+		occupied = map[string]bool{}
+	}
 	for _, id := range q.order {
 		e, ok := q.entries[id]
 		if !ok {
 			continue // evicted
+		}
+		if occupied != nil && q.serializeTypes[e.evt.Type] {
+			if occupied[e.evt.Type] {
+				continue // an earlier, still-unreleased same-type entry occupies the slot
+			}
+			if !q.releasedLocked(e) {
+				occupied[e.evt.Type] = true // this entry is now the type's occupant
+			}
 		}
 		if e.settled[l.ID()] {
 			continue // accepted, or its final attempt is already made

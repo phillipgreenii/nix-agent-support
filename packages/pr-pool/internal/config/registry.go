@@ -50,6 +50,11 @@ type poolTOML struct {
 	// Absent: backoff.Default() shape with Retries: 0 (fail fast, unchanged from
 	// today).
 	PullFailureBackoff *failureBackoffTOML `toml:"pull_failure_backoff"`
+	// SerializeTypes marks each named event TYPE to serialize (INV-CONC-1,
+	// `packages/pr-pool/docs/decisions · DEC-CONC-1`): the queue offers at most
+	// one event of a marked type at a time, across every bound handler, until
+	// it is released. Absent/empty: marks nothing (unchanged from today).
+	SerializeTypes []string `toml:"serialize_types"`
 }
 
 type budgetTOML struct {
@@ -192,6 +197,13 @@ func (r *Registry) decodeRoleSet(path, configDir string, c *Config) (roles.RoleS
 		c.WorktreeDir = shape.Pool.WorktreeDir
 	}
 	overlayConfigBudget(c, shape.Pool.Budget)
+	// serialize_types (INV-CONC-1, pg2-cl9jz): a present, non-empty list REPLACES
+	// the default (empty — marks nothing); an absent/empty key leaves c's
+	// existing value (Default()'s nil) untouched. There is no per-role/per-query
+	// overlay for this one — see DEC-CONC-1's "not decided here".
+	if len(shape.Pool.SerializeTypes) > 0 {
+		c.SerializeTypes = shape.Pool.SerializeTypes
+	}
 	// Pool-wide retry-cadence defaults (INV-FAIL-2 / INV-FAIL-3, pg2-0c8yz) MUST
 	// resolve before buildRole/buildQueries below, since both read c.RetryBackoff
 	// / c.PullFailureBackoff / c.PullFailureRetries as their BASE to overlay a

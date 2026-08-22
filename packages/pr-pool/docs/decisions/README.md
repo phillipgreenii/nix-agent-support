@@ -49,6 +49,8 @@ docs cite. An entry that overlaps an existing repository ADR MUST **cite** it, n
   rather than config.
 - [`DEC-CLI-2`](cli.md) — the operator subcommand surface, and why the two run modes are separate
   subcommands.
+- [`DEC-CONC-1`](concurrency.md) — the serialize mark is a type-scoped `[pool]` list, not a
+  per-binding attribute.
 - [`DEC-EVENT-1`](event.md) — expiry is an absolute instant (`at` + `expiresAt`), so there is no
   clock origin to pick.
 - [`DEC-EVENT-2`](event.md) — the queue is durable, ordered, de-duped and retention-bounded, and

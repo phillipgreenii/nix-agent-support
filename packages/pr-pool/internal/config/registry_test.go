@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -265,6 +266,68 @@ argv = ["x"]
 `)
 	if _, err := Load(); err == nil {
 		t.Fatal("negative retries must be a hard error")
+	}
+}
+
+// --- serialize-mark config surface (pg2-cl9jz, INV-CONC-1 / DEC-CONC-1) ---
+
+// [pool].serialize_types decodes into Config.SerializeTypes verbatim.
+func TestLoad_serializeTypesDecodesFromPool(t *testing.T) {
+	absentGlobalConfig(t)
+	writeCfg(t, `
+[pool]
+serialize_types = ["shutdown", "time-of-day"]
+
+[[query]]
+name = "s"
+emits = ["e"]
+type = "command"
+[query.command]
+argv = ["x"]
+format = "jsonl"
+
+[[role]]
+name = "r"
+type = "command"
+binds = ["e"]
+[role.command]
+argv = ["x"]
+`)
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(c.SerializeTypes, []string{"shutdown", "time-of-day"}) {
+		t.Fatalf("SerializeTypes = %v, want [shutdown time-of-day]", c.SerializeTypes)
+	}
+}
+
+// Absent [pool].serialize_types leaves Config.SerializeTypes empty — an
+// existing deployment marks nothing and its dispatch is unchanged.
+func TestLoad_serializeTypesAbsentLeavesItEmpty(t *testing.T) {
+	absentGlobalConfig(t)
+	writeCfg(t, `
+[[query]]
+name = "s"
+emits = ["e"]
+type = "command"
+[query.command]
+argv = ["x"]
+format = "jsonl"
+
+[[role]]
+name = "r"
+type = "command"
+binds = ["e"]
+[role.command]
+argv = ["x"]
+`)
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.SerializeTypes) != 0 {
+		t.Fatalf("SerializeTypes = %v, want empty (key absent)", c.SerializeTypes)
 	}
 }
 

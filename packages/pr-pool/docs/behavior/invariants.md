@@ -184,7 +184,16 @@ sequenceDiagram
   `phillipgreenii-nix-agent-support · packages/pr-pool/docs/decisions · DEC-EVENT-2`). Concurrency
   is **not
   assumed safe for every event type** — a `type` **MAY** be marked to **serialize** (e.g. a shutdown
-  or time-of-day event) so its events never run in parallel. _(A source-side, per-source
+  or time-of-day event) so its events never run in parallel: while a marked type has an unreleased
+  event outstanding, the type's **next** event is offered to **no** handler at all — not merely
+  withheld from whichever handler holds the outstanding one, since the point is order across **every**
+  handler, not just within one. It is offered once the outstanding event **completes or expires**:
+  completing means every **currently-bound** handler has **settled** it (accepted, or given its one
+  attempt past `expiresAt`, `INV-EVT-4`) — **handled**, not evicted, so a promptly-accepted event does
+  not go on withholding its successor merely because it is still retained for its own dedup window
+  (`INV-EVT-1`,
+  `phillipgreenii-nix-agent-support · packages/pr-pool/docs/decisions · DEC-EVENT-2`). _(A
+  source-side, per-source
   claim-exclusion role — e.g. a downstream deployment's durable in-session claim — is an **external
   actor's** concern, complementary to and not duplicating the core's acceptance tracking.)_
 - **`INV-FAIL-1`** <!-- uuid: 2da0d587-f116-42e6-b986-8abf80ed023c --> — Failure classes split at
@@ -261,7 +270,9 @@ sequenceDiagram
   event). The core defines **delivery** outcomes (accept / decline / delivery-failure class), **not
   work** outcomes (did the review pass?) — those live in the handler and a downstream tracker.
   Declaring or altering the wiring is **configuration**: it **MUST NOT** require changing the core
-  (`GOAL-MIN-1`). _(How a serialize mark is expressed remains an open question, `OQ-CONC-MARK`.)_
+  (`GOAL-MIN-1`). _(A serialize mark (`INV-CONC-1`) is expressed as part of this same configuration,
+  per-type; the concrete declaration is
+  `phillipgreenii-nix-agent-support · packages/pr-pool/docs/decisions · DEC-CONC-1`.)_
 
   **Validation runs pre-runtime, and anything determinable as an invalid configuration MUST prevent
   startup.** The rule is stated as that general principle so a later check inherits it rather than
