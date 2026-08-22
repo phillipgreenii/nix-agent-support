@@ -39,13 +39,18 @@ var opFlags openFlags
 // both are projected onto this one shape and every filter, renderer and test
 // downstream sees a single type.
 type openRow struct {
-	Number         int
-	Owner          string
-	Title          string
-	URL            string
-	CIStatus       string
-	HumanApproved  bool
-	AgentApproved  bool
+	Number   int
+	Owner    string
+	Title    string
+	URL      string
+	CIStatus string
+	// HumanApprovers / AgentApprovers count the DISTINCT approvers whose
+	// approval currently stands (snapshot.MineRow / snapshot.TeamRow carry the
+	// same pair). They replaced a `HumanApproved`/`AgentApproved` bool pair
+	// (pg2-4dz88.1.9): a bool cannot tell two approvers from one, and cannot
+	// drop a STALE or DISMISSED approval back out of the count.
+	HumanApprovers int
+	AgentApprovers int
 	FilesChanged   int
 	LinesChanged   int
 	NeedsAttention bool
@@ -190,8 +195,8 @@ func projectRows(snap *snapshot.Snapshot, mine bool) []openRow {
 				Title:          r.Title,
 				URL:            r.URL,
 				CIStatus:       r.CIStatus,
-				HumanApproved:  r.HumanApproved,
-				AgentApproved:  r.AgentApproved,
+				HumanApprovers: r.HumanApprovers,
+				AgentApprovers: r.AgentApprovers,
 				NeedsAttention: r.WaitingOnMe || r.NeedsMergeReminder || r.HasConflicts,
 			})
 		}
@@ -205,8 +210,8 @@ func projectRows(snap *snapshot.Snapshot, mine bool) []openRow {
 			Title:          r.Title,
 			URL:            r.URL,
 			CIStatus:       r.CIStatus,
-			HumanApproved:  r.HumanApproved,
-			AgentApproved:  r.AgentApproved,
+			HumanApprovers: r.HumanApprovers,
+			AgentApprovers: r.AgentApprovers,
 			FilesChanged:   r.FilesChanged,
 			LinesChanged:   r.LinesChanged,
 			NeedsAttention: r.NeedsAttention,
@@ -227,7 +232,7 @@ func selectRows(rows []openRow, f openFlags) []openRow {
 		case f.reason != "" && !hasReason(r.MatchReason, f.reason):
 		case f.owner != "" && r.Owner != f.owner:
 		case f.notOwner != "" && r.Owner == f.notOwner:
-		case f.unapproved && r.HumanApproved:
+		case f.unapproved && r.HumanApprovers > 0:
 		default:
 			out = append(out, r)
 		}
@@ -342,15 +347,36 @@ func renderOpenRows(w io.Writer, rows []openRow, link bool) error {
 
 // approvedCell reports which classes of reviewer have approved, as a stable
 // comma-joined value so the column is both readable and greppable.
+//
+// A class with MORE THAN ONE standing approver carries its count — `human(2)` —
+// because the underlying facts are per-approver (INV-APPROVAL-1) and collapsing
+// two approvers back into one label at the last step would discard exactly what
+// pg2-4dz88.1.9 made representable. The suffix is strictly ADDITIVE: with one
+// approver per class the rendering is byte-identical to the pre-cutover one
+// (`-`, `human`, `agent`, `human,agent`), and the class name still leads, so an
+// existing `grep human` keeps matching.
 func approvedCell(r openRow) string {
 	var got []string
-	if r.HumanApproved {
-		got = append(got, "human")
+	if label := approverLabel("human", r.HumanApprovers); label != "" {
+		got = append(got, label)
 	}
-	if r.AgentApproved {
-		got = append(got, "agent")
+	if label := approverLabel("agent", r.AgentApprovers); label != "" {
+		got = append(got, label)
 	}
 	return orDash(strings.Join(got, ","))
+}
+
+// approverLabel renders one approver class: empty for none, the bare class name
+// for exactly one, and the name plus a parenthesised count beyond that.
+func approverLabel(class string, n int) string {
+	switch {
+	case n <= 0:
+		return ""
+	case n == 1:
+		return class
+	default:
+		return class + "(" + strconv.Itoa(n) + ")"
+	}
 }
 
 // sizeCell renders a PR's size as files/lines. Both are absent on a MineRow, in

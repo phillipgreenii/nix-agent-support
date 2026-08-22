@@ -290,8 +290,9 @@ ALTER TABLE pull_request_new RENAME TO pull_request;
 	// an UPDATE, not a new row (see store.SetApproval).
 	//
 	// This is purely ADDITIVE: no ALTER on pr_revision, and the old columns
-	// are left in place and still written by internal/sync's write path — a
-	// later leaf cuts readers over to pr_approval and drops the old columns.
+	// are left in place and still written by internal/sync's write path.
+	// pg2-4dz88.1.9 cut every READER over to pr_approval, leaving those
+	// columns write-only; dropping them is a separate migration leaf.
 	//
 	// Backfill: neither old marker stores an approver LOGIN — my_review_state
 	// is implicitly "whichever login is configured as self" (a runtime config

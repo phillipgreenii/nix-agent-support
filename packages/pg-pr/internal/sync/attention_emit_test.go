@@ -142,7 +142,9 @@ func TestEmitAttention_FirstReviewFiresWithReviewDisabled(t *testing.T) {
 }
 
 // When the facts flip (a teammate approved), the emitter emits need:false so the
-// bridge closes the attention bead. Re-derived from facts every call (R1).
+// bridge closes the attention bead. Re-derived from facts every call (R1). The
+// approval is written to the PER-APPROVER table, which is the predicate's source
+// since pg2-4dz88.1.9.
 func TestEmitAttention_NeedFalseWhenApproved(t *testing.T) {
 	ctx := context.Background()
 	db := store.OpenForTest(t)
@@ -150,8 +152,8 @@ func TestEmitAttention_NeedFalseWhenApproved(t *testing.T) {
 	if _, _, err := db.RecordRevision(ctx, prID, "h1", "b1"); err != nil {
 		t.Fatalf("RecordRevision: %v", err)
 	}
-	if err := db.MarkRevisionOthersApproved(ctx, prID, "h1", "t"); err != nil {
-		t.Fatalf("MarkRevisionOthersApproved: %v", err)
+	if err := db.SetApproval(ctx, prID, "teammate", "h1", "approved", "t"); err != nil {
+		t.Fatalf("SetApproval: %v", err)
 	}
 
 	bdc := &attnFinderBeads{closed: true, found: true} // irrelevant now; teammate approval wins
@@ -163,6 +165,60 @@ func TestEmitAttention_NeedFalseWhenApproved(t *testing.T) {
 	evs := attentionEvents(t, db)
 	if len(evs) != 1 || evs[0].Need {
 		t.Fatalf("want 1 need:false event, got %+v", evs)
+	}
+}
+
+// The write model honours per-approval staleness too (pg2-4dz88.1.9): the ONLY
+// approval on the PR is one the code host DISMISSED, so it does not stand and
+// the emitter MUST still emit need:true — the attention bead stays open.
+//
+// This is the write-model half of the read-model guard in
+// internal/snapshot/attention_test.go. It could not be written before the
+// cutover: the legacy others_approved boolean carries no staleness, so
+// ingestFeedbackToStore had to withhold a dismissed approval from it entirely,
+// and the projector had no way to distinguish "dismissed" from "never approved".
+func TestEmitAttention_DismissedApprovalKeepsNeedTrue(t *testing.T) {
+	ctx := context.Background()
+	db := store.OpenForTest(t)
+	prID, _ := db.UpsertPR(ctx, store.PullRequest{Repo: "o/r", Number: 12, Ownership: "team", State: "open", HeadSHA: "h1"})
+	if _, _, err := db.RecordRevision(ctx, prID, "h1", "b1"); err != nil {
+		t.Fatalf("RecordRevision: %v", err)
+	}
+	// Dismissed AT the current head — head comparison alone cannot see it.
+	if err := db.SetDismissedApproval(ctx, prID, "teammate", "h1", "t"); err != nil {
+		t.Fatalf("SetDismissedApproval: %v", err)
+	}
+
+	e := newAttnEngine(t, &attnFinderBeads{}, db)
+	if err := e.emitAttention(ctx, "o/r", 12, prID, ownership.Team, false); err != nil {
+		t.Fatalf("emitAttention: %v", err)
+	}
+	evs := attentionEvents(t, db)
+	if len(evs) != 1 {
+		t.Fatalf("want 1 event, got %d: %+v", len(evs), evs)
+	}
+	if !evs[0].Need || evs[0].Reason != snapshot.AttentionReasonUnreviewed {
+		t.Errorf("event = %+v, want need:true reason:%q — a dismissed approval must not close the bead",
+			evs[0], snapshot.AttentionReasonUnreviewed)
+	}
+
+	// A genuine re-approval from the SAME approver clears the dismissal, and the
+	// emitter then closes it — proving the need:true above came from the
+	// dismissal marker and not from some unrelated missing fact.
+	if err := db.SetApproval(ctx, prID, "teammate", "h1", "approved", "t2"); err != nil {
+		t.Fatalf("SetApproval (re-approval): %v", err)
+	}
+	if err := e.emitAttention(ctx, "o/r", 12, prID, ownership.Team, false); err != nil {
+		t.Fatalf("emitAttention (after re-approval): %v", err)
+	}
+	// attentionEvents DRAINS the outbox (RunOutbox), so this reads only the
+	// event the second emit enqueued.
+	evs = attentionEvents(t, db)
+	if len(evs) != 1 {
+		t.Fatalf("want 1 new event after the re-approval, got %d: %+v", len(evs), evs)
+	}
+	if evs[0].Need {
+		t.Errorf("after re-approval: event = %+v, want need:false", evs[0])
 	}
 }
 
@@ -196,9 +252,14 @@ func TestEmitAttention_ConsistentWithDashboard(t *testing.T) {
 	ctx := context.Background()
 
 	type fixture struct {
-		name        string
-		revs        [][2]string // (headSHA, myReviewState)
-		otherApprAt string      // head SHA a teammate approved, "" for none
+		name string
+		revs [][2]string // (headSHA, my own review state at that head)
+		// otherApprAt is the head SHA a teammate approved, "" for none.
+		otherApprAt string
+		// otherDismissedAt is the head SHA a teammate's approval was recorded
+		// at and then DISMISSED, "" for none — a case the legacy collapsed
+		// columns could not represent at all (pg2-4dz88.1.9).
+		otherDismissedAt string
 	}
 	fixtures := []fixture{
 		{name: "unreviewed", revs: [][2]string{{"h1", ""}}},
@@ -206,6 +267,8 @@ func TestEmitAttention_ConsistentWithDashboard(t *testing.T) {
 		{name: "i reviewed head", revs: [][2]string{{"h1", "approved"}}},
 		{name: "re-review", revs: [][2]string{{"h1", "approved"}, {"h2", ""}}},
 		{name: "still unreviewed after a head advance", revs: [][2]string{{"h1", ""}, {"h2", ""}}},
+		{name: "teammate approval dismissed", revs: [][2]string{{"h1", ""}}, otherDismissedAt: "h1"},
+		{name: "teammate approved an earlier head", revs: [][2]string{{"h1", ""}, {"h2", ""}}, otherApprAt: "h1"},
 	}
 
 	for i, fx := range fixtures {
@@ -218,14 +281,24 @@ func TestEmitAttention_ConsistentWithDashboard(t *testing.T) {
 					t.Fatalf("RecordRevision: %v", err)
 				}
 				if rv[1] != "" {
-					if err := db.MarkRevisionReviewed(ctx, prID, rv[0], rv[1], "t"); err != nil {
-						t.Fatalf("MarkRevisionReviewed: %v", err)
+					// The per-approver row for SELF ("me", per newAttnEngine's
+					// config) — the source the predicate reads since
+					// pg2-4dz88.1.9. Upserted per (pr, approver), so a later
+					// head with no review by me leaves this row pointing at the
+					// earlier head, exactly as production ingest does.
+					if err := db.SetApproval(ctx, prID, "me", rv[0], rv[1], "t"); err != nil {
+						t.Fatalf("SetApproval(self): %v", err)
 					}
 				}
 			}
 			if fx.otherApprAt != "" {
-				if err := db.MarkRevisionOthersApproved(ctx, prID, fx.otherApprAt, "t"); err != nil {
-					t.Fatalf("MarkRevisionOthersApproved: %v", err)
+				if err := db.SetApproval(ctx, prID, "teammate", fx.otherApprAt, "approved", "t"); err != nil {
+					t.Fatalf("SetApproval(teammate): %v", err)
+				}
+			}
+			if fx.otherDismissedAt != "" {
+				if err := db.SetDismissedApproval(ctx, prID, "teammate", fx.otherDismissedAt, "t"); err != nil {
+					t.Fatalf("SetDismissedApproval(teammate): %v", err)
 				}
 			}
 			bdc := &attnFinderBeads{}
@@ -246,7 +319,8 @@ func TestEmitAttention_ConsistentWithDashboard(t *testing.T) {
 			// (buildTeamRow calls snapshot.NeedsAttention; emitAttention calls
 			// snapshot.NeedsAttention — one function, one truth.)
 			revs, _ := db.ListRevisions(ctx, prID)
-			dashboardNeed, _ := snapshot.NeedsAttention(revs, false)
+			approvals, _ := db.ListApprovals(ctx, prID)
+			dashboardNeed, _ := snapshot.NeedsAttention(revs, approvals, e.cfg().SelfLogin, false)
 			if dashboardNeed != beadNeed {
 				t.Fatalf("dashboard NeedsAttention=%v but bead need=%v — predicate divergence!", dashboardNeed, beadNeed)
 			}

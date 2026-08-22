@@ -11,7 +11,10 @@ import (
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/browser"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/dashboard"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/ownership"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/snapshot"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/store"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
 	"github.com/spf13/cobra"
 )
 
@@ -23,7 +26,7 @@ func openTestRows() []openRow {
 	return []openRow{
 		{Number: 1, Owner: "alice", URL: "u1", NeedsAttention: true, MatchReason: []string{"review-requested"}},
 		{Number: 2, Owner: "bob", URL: "u2", NeedsAttention: false, MatchReason: []string{"team-authored"}},
-		{Number: 3, Owner: "alice", URL: "u3", NeedsAttention: true, HumanApproved: true, MatchReason: []string{"label:team/findev"}},
+		{Number: 3, Owner: "alice", URL: "u3", NeedsAttention: true, HumanApprovers: 1, MatchReason: []string{"label:team/findev"}},
 		{Number: 4, Owner: "carol", URL: "u4", NeedsAttention: true, MatchReason: []string{"label:team/jvm-guild"}},
 	}
 }
@@ -136,6 +139,7 @@ func TestProjectRowsTeamCarriesEveryFilterableField(t *testing.T) {
 		Number: 98622, Owner: "bradleysmagacz", Title: "safe middleware parsing",
 		URL: "https://example.test/pull/98622", CIStatus: "failure",
 		HumanApproved: true, AgentApproved: false,
+		HumanApprovers: 1, AgentApprovers: 0,
 		FilesChanged: 171, LinesChanged: 556,
 		NeedsAttention: true, MatchReason: []string{"label:team/findev"},
 	}}}
@@ -147,7 +151,7 @@ func TestProjectRowsTeamCarriesEveryFilterableField(t *testing.T) {
 	if r.Number != 98622 || r.Owner != "bradleysmagacz" || r.URL != "https://example.test/pull/98622" {
 		t.Errorf("identity fields lost: %+v", r)
 	}
-	if !r.NeedsAttention || !r.HumanApproved || r.FilesChanged != 171 || r.LinesChanged != 556 {
+	if !r.NeedsAttention || r.HumanApprovers != 1 || r.FilesChanged != 171 || r.LinesChanged != 556 {
 		t.Errorf("filterable fields lost: %+v", r)
 	}
 	if !hasReason(r.MatchReason, "label:") {
@@ -180,6 +184,61 @@ func TestProjectRowsMineComposesNeedsAttention(t *testing.T) {
 				t.Errorf("NeedsAttention = %v, want %v", got[0].NeedsAttention, tt.want)
 			}
 		})
+	}
+}
+
+// Both projection halves MUST carry the per-approver counts through
+// independently (pg2-4dz88.1.9). The two halves map different row types onto
+// openRow with separate literals, so a count dropped from one is invisible in
+// the other's tests — and a dropped count renders as `-`, silently claiming
+// nobody has approved.
+func TestProjectRowsCarryApproverCountsBothHalves(t *testing.T) {
+	mine := projectRows(&snapshot.Snapshot{Mine: []snapshot.MineRow{
+		{Number: 1, URL: "u1", HumanApprovers: 2, AgentApprovers: 1},
+	}}, true)
+	if len(mine) != 1 {
+		t.Fatalf("mine: len = %d, want 1", len(mine))
+	}
+	if mine[0].HumanApprovers != 2 || mine[0].AgentApprovers != 1 {
+		t.Errorf("mine half: human %d / agent %d, want 2/1", mine[0].HumanApprovers, mine[0].AgentApprovers)
+	}
+	if got := approvedCell(mine[0]); got != "human(2),agent" {
+		t.Errorf("mine half rendered %q, want %q", got, "human(2),agent")
+	}
+
+	team := projectRows(&snapshot.Snapshot{Team: []snapshot.TeamRow{
+		{Number: 2, URL: "u2", HumanApprovers: 1, AgentApprovers: 2},
+	}}, false)
+	if len(team) != 1 {
+		t.Fatalf("team: len = %d, want 1", len(team))
+	}
+	if team[0].HumanApprovers != 1 || team[0].AgentApprovers != 2 {
+		t.Errorf("team half: human %d / agent %d, want 1/2", team[0].HumanApprovers, team[0].AgentApprovers)
+	}
+	if got := approvedCell(team[0]); got != "human,agent(2)" {
+		t.Errorf("team half rendered %q, want %q", got, "human,agent(2)")
+	}
+}
+
+// --unapproved drops a PR a HUMAN has already approved, and only that: an
+// agent-only approval is not a human one, and a count of zero is not an
+// approval at all.
+func TestSelectRowsUnapprovedKeysOnHumanApprovers(t *testing.T) {
+	rows := []openRow{
+		{Number: 1, NeedsAttention: true},                    // nobody approved: kept
+		{Number: 2, NeedsAttention: true, HumanApprovers: 1}, // human approved: dropped
+		{Number: 3, NeedsAttention: true, HumanApprovers: 2}, // two humans: dropped
+		{Number: 4, NeedsAttention: true, AgentApprovers: 1}, // agent only: kept
+	}
+	got := numbersOf(selectRows(rows, openFlags{unapproved: true}))
+	want := []int{1, 4}
+	if len(got) != len(want) {
+		t.Fatalf("--unapproved kept %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("--unapproved kept %v, want %v", got, want)
+		}
 	}
 }
 
@@ -345,6 +404,12 @@ func TestRenderOpenRowsURLColumnOnlyWhenNotHyperlinked(t *testing.T) {
 	}
 }
 
+// TestApprovedAndSizeCells pins the rendered approval column. The first four
+// rows are the BACKWARD-COMPATIBILITY contract for the per-approver cutover
+// (pg2-4dz88.1.9): the expected strings are unchanged byte-for-byte from before
+// the openRow booleans became counts, so no approver count of 0 or 1 can shift
+// the column. Only a class with MORE THAN ONE standing approver renders
+// differently, because that case previously had no representation at all.
 func TestApprovedAndSizeCells(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -353,10 +418,16 @@ func TestApprovedAndSizeCells(t *testing.T) {
 		size     string
 	}{
 		{"neither", openRow{}, "-", "-"},
-		{"human only", openRow{HumanApproved: true}, "human", "-"},
-		{"agent only", openRow{AgentApproved: true}, "agent", "-"},
-		{"both", openRow{HumanApproved: true, AgentApproved: true}, "human,agent", "-"},
+		{"human only", openRow{HumanApprovers: 1}, "human", "-"},
+		{"agent only", openRow{AgentApprovers: 1}, "agent", "-"},
+		{"both", openRow{HumanApprovers: 1, AgentApprovers: 1}, "human,agent", "-"},
 		{"sized", openRow{FilesChanged: 171, LinesChanged: 556}, "-", "171f/556L"},
+		// Two humans approved: the column says TWO. The old boolean rendered
+		// this identically to "human only" above, which is the whole defect.
+		{"two humans", openRow{HumanApprovers: 2}, "human(2)", "-"},
+		{"two agents", openRow{AgentApprovers: 2}, "agent(2)", "-"},
+		{"two of each", openRow{HumanApprovers: 2, AgentApprovers: 2}, "human(2),agent(2)", "-"},
+		{"two humans, one agent", openRow{HumanApprovers: 2, AgentApprovers: 1}, "human(2),agent", "-"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -367,6 +438,55 @@ func TestApprovedAndSizeCells(t *testing.T) {
 				t.Errorf("sizeCell() = %q, want %q", got, tt.size)
 			}
 		})
+	}
+}
+
+// TestApprovedCellTwoApproversOneStale is the CLI end of the leaf's headline
+// case, driven from the snapshot rather than a hand-built openRow so the whole
+// seam is under test: two approvers on the PR, one of whose approvals no longer
+// stands.
+//
+//   - Both standing → `human(2)`: two distinct approvers, reported as two.
+//   - One DISMISSED → `human`: the stale approval drops out, leaving the
+//     single-approver rendering exactly as it has always been.
+//
+// The pre-cutover booleans rendered BOTH fixtures as `human`, so the column
+// could not tell "two people approved this" from "one did, and another's
+// approval was thrown away".
+func TestApprovedCellTwoApproversOneStale(t *testing.T) {
+	cell := func(approvals []store.Approval) string {
+		snap := snapshot.Build(snapshot.BuilderInput{
+			Self:        "me",
+			TeamMembers: []string{"author"},
+			PRs: []snapshot.PRInput{{
+				PR:        api.PR{Repo: "o/r", Number: 1, Author: "author", HeadSHA: "h1"},
+				Ownership: ownership.Team,
+				Revisions: []store.Revision{{Seq: 1, HeadSHA: "h1"}},
+				Approvals: approvals,
+			}},
+		})
+		rows := projectRows(snap, false)
+		if len(rows) != 1 {
+			t.Fatalf("want 1 projected row, got %d", len(rows))
+		}
+		return approvedCell(rows[0])
+	}
+
+	bothStanding := cell([]store.Approval{
+		{Approver: "carol", State: "approved", HeadSHA: "h1"},
+		{Approver: "dave", State: "approved", HeadSHA: "h1"},
+	})
+	if bothStanding != "human(2)" {
+		t.Errorf("two standing approvers: approvedCell = %q, want %q", bothStanding, "human(2)")
+	}
+
+	oneStale := cell([]store.Approval{
+		{Approver: "carol", State: "approved", HeadSHA: "h1"},
+		{Approver: "dave", State: "approved", HeadSHA: "h1", Dismissed: true},
+	})
+	if oneStale != "human" {
+		t.Errorf("one stale of two: approvedCell = %q, want %q (byte-identical to the single-approver rendering)",
+			oneStale, "human")
 	}
 }
 

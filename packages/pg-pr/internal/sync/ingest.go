@@ -80,16 +80,17 @@ func (e *Engine) ingestFeedbackToStore(ctx context.Context, repo string, pr api.
 		// staleness, so a dismissed review recorded there would read as a
 		// CURRENT self review. It still lands as a per-approver row below,
 		// marked stale. The legacy column therefore cannot represent
-		// "approved then dismissed" at all — a limitation the read-seam
-		// cutover leaf resolves by reading pr_approval instead.
+		// "approved then dismissed" at all — which is why the read seam was
+		// cut over to pr_approval (pg2-4dz88.1.9).
 		if !rv.Dismissed {
 			if err := e.deps.Store.MarkRevisionReviewed(ctx, prID, rv.CommitSHA, rv.State, rv.SubmittedAt); err != nil {
 				return fmt.Errorf("ingest: mark reviewed %s#%d: %w", repo, pr.Number, err)
 			}
 		}
 		// Also record the self observation as a per-approver row (pg2-4dz88.1.5)
-		// alongside the existing my_review_state write above — additive, not a
-		// cutover; my_review_state remains the read path until a later leaf.
+		// alongside the my_review_state write above. As of pg2-4dz88.1.9 THIS
+		// row is the one every reader consults; the my_review_state write is
+		// retained only until a migration leaf drops the column.
 		if err := e.recordApproval(ctx, prID, rv); err != nil {
 			return fmt.Errorf("ingest: set approval (self) %s#%d: %w", repo, pr.Number, err)
 		}

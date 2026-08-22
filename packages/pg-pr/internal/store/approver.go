@@ -16,9 +16,12 @@ import (
 // Bob has not re-approved head N+1") is representable by comparing HeadSHA
 // against the PR's current head (see IsStale).
 //
-// This table is additive alongside the old pr_revision columns: they are
-// still written by internal/sync's write path and remain the read path until
-// a later leaf cuts readers over to this table.
+// This table is THE read path for approvals as of pg2-4dz88.1.9: both
+// snapshot.classifyApprovals and the shared snapshot.NeedsAttention predicate
+// read it, and neither reads pr_revision.others_approved or
+// pr_revision.my_review_state any more. Those columns are still WRITTEN by
+// internal/sync's write path but no longer read by anything outside this
+// package; dropping them is a separate migration leaf.
 type Approval struct {
 	ID         int64
 	PRID       int64

@@ -8,6 +8,7 @@ import (
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/agentregistry"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/ownership"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/beads"
 )
@@ -139,10 +140,17 @@ func TestBuildExcludesReasonlessReviewPR(t *testing.T) {
 }
 
 // TestBuildDerivesApprovalAndWaiting verifies:
-// - human_approved from a non-agent APPROVED review
-// - agent_approved from an agent's review body matching the approval regex
-// - ci_status=success when all runs pass
-// - waiting_on_me derived from beads dep set
+//   - human_approved from a non-agent approver's PER-APPROVER row (the read path
+//     since pg2-4dz88.1.9 — a live APPROVED review reaches the snapshot through
+//     the row internal/sync/ingest.go writes for it, not through the review
+//     object)
+//   - agent_approved from an agent's review body matching the approval regex —
+//     the legacy fallback, retained for a registry agent the store has NO row
+//     for (see classifyApprovals's doc)
+//   - the ONE human + ONE agent shape that renders as `human,agent`, so this
+//     pair is exactly the fixture cmd/pg-pr's rendering contract rests on
+//   - ci_status=success when all runs pass
+//   - waiting_on_me derived from beads dep set
 func TestBuildDerivesApprovalAndWaiting(t *testing.T) {
 	reg, err := agentregistry.New([]agentregistry.Entry{
 		{Login: "claude[bot]", ApprovalRegex: `(?im)^verdict:\s*approve`},
@@ -163,8 +171,11 @@ func TestBuildDerivesApprovalAndWaiting(t *testing.T) {
 		Registry:            reg,
 		PRs: []PRInput{
 			{
-				PR:        api.PR{Repo: "org/repo", Number: 5, Author: "alice", Title: "feat", URL: "u5"},
+				PR:        api.PR{Repo: "org/repo", Number: 5, Author: "alice", Title: "feat", URL: "u5", HeadSHA: "h1"},
 				Ownership: ownership.Mine,
+				Approvals: []store.Approval{
+					{Approver: "humanreviewer", State: "approved", HeadSHA: "h1"},
+				},
 				Reviews: []api.Review{
 					{ID: "r1", Author: "humanreviewer", State: "APPROVED", Body: "LGTM"},
 					{ID: "r2", Author: "claude[bot]", State: "APPROVED", Body: "Verdict: approve\nDetails here"},
@@ -191,11 +202,273 @@ func TestBuildDerivesApprovalAndWaiting(t *testing.T) {
 	if !row.AgentApproved {
 		t.Error("expected AgentApproved=true")
 	}
+	// The single-approver-per-class shape: one of each, never two. This is the
+	// snapshot half of the `human,agent` backward-compatibility contract
+	// cmd/pg-pr/open_test.go asserts byte-for-byte on the rendered column.
+	if row.HumanApprovers != 1 || row.AgentApprovers != 1 {
+		t.Errorf("approver counts = human %d / agent %d, want 1/1", row.HumanApprovers, row.AgentApprovers)
+	}
 	if row.CIStatus != "success" {
 		t.Errorf("expected CIStatus=success, got %q", row.CIStatus)
 	}
 	if !row.WaitingOnMe {
 		t.Error("expected WaitingOnMe=true (open dep with human label)")
+	}
+}
+
+// TestBuildCountsTwoApproversAsTwo is the core INV-APPROVAL-1 assertion this
+// leaf exists for: TWO distinct approvers approving reports TWO, not one. The
+// retired (human, agent) boolean pair structurally could not express it — both
+// fixtures below set exactly the same two bits.
+func TestBuildCountsTwoApproversAsTwo(t *testing.T) {
+	reg, err := agentregistry.New([]agentregistry.Entry{
+		{Login: "claude[bot]", ApprovalRegex: `(?im)^verdict:\s*approve`},
+	})
+	if err != nil {
+		t.Fatalf("agentregistry.New: %v", err)
+	}
+	mk := func(approvals []store.Approval) MineRow {
+		snap := Build(BuilderInput{
+			Self:     "alice",
+			Registry: reg,
+			PRs: []PRInput{{
+				PR:        api.PR{Repo: "o/r", Number: 1, Author: "alice", HeadSHA: "h1"},
+				Ownership: ownership.Mine,
+				Approvals: approvals,
+			}},
+		})
+		if len(snap.Mine) != 1 {
+			t.Fatalf("want 1 mine row, got %d", len(snap.Mine))
+		}
+		return snap.Mine[0]
+	}
+
+	one := mk([]store.Approval{
+		{Approver: "carol", State: "approved", HeadSHA: "h1"},
+	})
+	if one.HumanApprovers != 1 {
+		t.Errorf("one human approver: HumanApprovers = %d, want 1", one.HumanApprovers)
+	}
+
+	two := mk([]store.Approval{
+		{Approver: "carol", State: "approved", HeadSHA: "h1"},
+		{Approver: "dave", State: "approved", HeadSHA: "h1"},
+	})
+	if two.HumanApprovers != 2 {
+		t.Errorf("two human approvers: HumanApprovers = %d, want 2 — approvals must not collapse", two.HumanApprovers)
+	}
+	// The retired booleans read IDENTICALLY for both fixtures, which is exactly
+	// why the counts had to be added rather than the booleans reinterpreted.
+	if one.HumanApproved != two.HumanApproved {
+		t.Fatalf("fixture invalid: the boolean is supposed to be blind to the difference")
+	}
+
+	// Two agents split the same way, and the two classes are counted separately.
+	agents := mk([]store.Approval{
+		{Approver: "claude[bot]", State: "approved", HeadSHA: "h1"},
+		{Approver: "carol", State: "approved", HeadSHA: "h1"},
+		{Approver: "dave", State: "approved", HeadSHA: "h1"},
+	})
+	if agents.AgentApprovers != 1 || agents.HumanApprovers != 2 {
+		t.Errorf("mixed set: agent %d / human %d, want 1/2", agents.AgentApprovers, agents.HumanApprovers)
+	}
+}
+
+// A per-approver row that is not a STANDING approval MUST NOT be counted: a
+// teammate asking for changes, a neutral comment, an approval of an EARLIER
+// head, and one the code host dismissed. None of the four was expressible in
+// the collapsed booleans (pg2-4dz88.1.9).
+func TestBuildApproverCountsExcludeNonStandingRows(t *testing.T) {
+	reg, _ := agentregistry.New(nil)
+	tests := []struct {
+		name string
+		row  store.Approval
+	}{
+		{"changes-requested is not an approval", store.Approval{Approver: "carol", State: "changes-requested", HeadSHA: "h1"}},
+		{"commented is not an approval", store.Approval{Approver: "carol", State: "commented", HeadSHA: "h1"}},
+		{"approval of an earlier head is stale", store.Approval{Approver: "carol", State: "approved", HeadSHA: "h0"}},
+		{"dismissed approval is stale", store.Approval{Approver: "carol", State: "approved", HeadSHA: "h1", Dismissed: true}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			snap := Build(BuilderInput{
+				Self:     "alice",
+				Registry: reg,
+				PRs: []PRInput{{
+					PR:        api.PR{Repo: "o/r", Number: 1, Author: "alice", HeadSHA: "h1"},
+					Ownership: ownership.Mine,
+					Approvals: []store.Approval{tc.row},
+				}},
+			})
+			row := snap.Mine[0]
+			if row.HumanApprovers != 0 || row.AgentApprovers != 0 || row.HumanApproved || row.AgentApproved {
+				t.Errorf("counted a non-standing row: human=%d agent=%d bools=%v/%v",
+					row.HumanApprovers, row.AgentApprovers, row.HumanApproved, row.AgentApproved)
+			}
+		})
+	}
+}
+
+// One approver observed several ways counts ONCE: the store row and the legacy
+// regex-mined body are the SAME login, so a per-approver count must dedupe them
+// rather than double-count. This also pins the precedence: the store row is
+// authoritative for a login it knows, so a body that still matches the approval
+// regex cannot resurrect that login's DISMISSED approval.
+func TestBuildApproverCountsDedupeAndPreferStore(t *testing.T) {
+	reg, err := agentregistry.New([]agentregistry.Entry{
+		{Login: "claude[bot]", ApprovalRegex: `(?im)^verdict:\s*approve`},
+	})
+	if err != nil {
+		t.Fatalf("agentregistry.New: %v", err)
+	}
+	mkRow := func(approvals []store.Approval) MineRow {
+		snap := Build(BuilderInput{
+			Self:     "alice",
+			Registry: reg,
+			PRs: []PRInput{{
+				PR:        api.PR{Repo: "o/r", Number: 1, Author: "alice", HeadSHA: "h1"},
+				Ownership: ownership.Mine,
+				Approvals: approvals,
+				Comments:  []api.Comment{{Author: "claude[bot]", Body: "Verdict: approve"}},
+			}},
+		})
+		return snap.Mine[0]
+	}
+
+	// Standing store row + matching body, same login → ONE agent approver.
+	if got := mkRow([]store.Approval{
+		{Approver: "claude[bot]", State: "approved", HeadSHA: "h1"},
+	}).AgentApprovers; got != 1 {
+		t.Errorf("AgentApprovers = %d, want 1 — one approver observed twice is still one", got)
+	}
+
+	// DISMISSED store row + still-matching body → ZERO. The store wins.
+	if got := mkRow([]store.Approval{
+		{Approver: "claude[bot]", State: "approved", HeadSHA: "h1", Dismissed: true},
+	}).AgentApprovers; got != 0 {
+		t.Errorf("AgentApprovers = %d, want 0 — a matching body must not resurrect a dismissed approval", got)
+	}
+}
+
+// The legacy approval-regex fallback mines only TOP-LEVEL comment bodies. This
+// pins BOTH halves — that a top-level body DOES count (the positive case the
+// pre-cutover suite never asserted; its agent approval always came through a
+// review body instead) and that each of the three anchored shapes does NOT.
+// "Anchored" means a path OR a line: a file-level comment carries a path with no
+// line, and a body that carries a line anchor is diff feedback whatever its
+// path, so the guard tests both fields independently rather than as a pair.
+func TestBuildRegexFallbackMinesOnlyTopLevelComments(t *testing.T) {
+	reg, err := agentregistry.New([]agentregistry.Entry{
+		{Login: "claude[bot]", ApprovalRegex: `(?im)^verdict:\s*approve`},
+	})
+	if err != nil {
+		t.Fatalf("agentregistry.New: %v", err)
+	}
+	tests := []struct {
+		name    string
+		comment api.Comment
+		want    int
+	}{
+		{"top-level body is mined", api.Comment{Author: "claude[bot]", Body: "Verdict: approve"}, 1},
+		{"inline diff comment is not", api.Comment{Author: "claude[bot]", Body: "Verdict: approve", Path: "foo.go", Line: 42}, 0},
+		{"file-level comment (path, no line) is not", api.Comment{Author: "claude[bot]", Body: "Verdict: approve", Path: "foo.go"}, 0},
+		{"line anchor with no path is not", api.Comment{Author: "claude[bot]", Body: "Verdict: approve", Line: 42}, 0},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			snap := Build(BuilderInput{
+				Self:     "alice",
+				Registry: reg,
+				PRs: []PRInput{{
+					PR:        api.PR{Repo: "o/r", Number: 1, Author: "alice", HeadSHA: "h1"},
+					Ownership: ownership.Mine,
+					Comments:  []api.Comment{tc.comment},
+				}},
+			})
+			if got := snap.Mine[0].AgentApprovers; got != tc.want {
+				t.Errorf("AgentApprovers = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+// Only the EXACT store state "approved" is an approval. The three states the
+// schema allows all sort at or after "approved" lexicographically, so an
+// ordering comparison would be indistinguishable from equality over them —
+// hence the deliberately unrecognized state below, which sorts BEFORE
+// "approved" and pins that the seam matches the literal rather than a range.
+func TestBuildApprovalStateMatchIsExact(t *testing.T) {
+	reg, _ := agentregistry.New(nil)
+	for _, state := range []string{"", "APPROVED", "approve"} {
+		t.Run("state="+state, func(t *testing.T) {
+			snap := Build(BuilderInput{
+				Self:     "alice",
+				Registry: reg,
+				PRs: []PRInput{{
+					PR:        api.PR{Repo: "o/r", Number: 1, Author: "alice", HeadSHA: "h1"},
+					Ownership: ownership.Mine,
+					Approvals: []store.Approval{{Approver: "carol", State: state, HeadSHA: "h1"}},
+				}},
+			})
+			if got := snap.Mine[0].HumanApprovers; got != 0 {
+				t.Errorf("state %q counted as an approval: HumanApprovers = %d, want 0", state, got)
+			}
+		})
+	}
+}
+
+// The TEAM row carries the same per-approver facts as the Mine row. Asserted
+// separately because buildTeamRow and buildMineRow map the facts onto their own
+// row types independently, so a mapping mistake in one is invisible in the
+// other's tests.
+func TestBuildTeamRowApproverCounts(t *testing.T) {
+	// Registered with no ApprovalRegex: enough to make IsAgent true (the
+	// human/agent split), with the regex fallback inert.
+	reg, err := agentregistry.New([]agentregistry.Entry{{Login: "claude[bot]"}})
+	if err != nil {
+		t.Fatalf("agentregistry.New: %v", err)
+	}
+	row := func(approvals []store.Approval) TeamRow {
+		snap := Build(BuilderInput{
+			Self:        "alice",
+			TeamMembers: []string{"bob"},
+			Registry:    reg,
+			PRs: []PRInput{{
+				PR:        api.PR{Repo: "o/r", Number: 2, Author: "bob", HeadSHA: "h1"},
+				Ownership: ownership.Team,
+				Revisions: []store.Revision{{Seq: 1, HeadSHA: "h1"}},
+				Approvals: approvals,
+			}},
+		})
+		if len(snap.Team) != 1 {
+			t.Fatalf("want 1 team row, got %d", len(snap.Team))
+		}
+		return snap.Team[0]
+	}
+
+	mixed := row([]store.Approval{
+		{Approver: "carol", State: "approved", HeadSHA: "h1"},
+		{Approver: "claude[bot]", State: "approved", HeadSHA: "h1"},
+	})
+	if mixed.HumanApprovers != 1 || mixed.AgentApprovers != 1 {
+		t.Errorf("mixed: human %d / agent %d, want 1/1", mixed.HumanApprovers, mixed.AgentApprovers)
+	}
+	if !mixed.HumanApproved || !mixed.AgentApproved {
+		t.Errorf("derived booleans = %v/%v, want true/true", mixed.HumanApproved, mixed.AgentApproved)
+	}
+
+	two := row([]store.Approval{
+		{Approver: "carol", State: "approved", HeadSHA: "h1"},
+		{Approver: "dave", State: "approved", HeadSHA: "h1"},
+	})
+	if two.HumanApprovers != 2 || two.AgentApprovers != 0 {
+		t.Errorf("two humans: human %d / agent %d, want 2/0", two.HumanApprovers, two.AgentApprovers)
+	}
+
+	none := row(nil)
+	if none.HumanApprovers != 0 || none.AgentApprovers != 0 || none.HumanApproved || none.AgentApproved {
+		t.Errorf("no approvers: human %d / agent %d bools %v/%v, want 0/0 false/false",
+			none.HumanApprovers, none.AgentApprovers, none.HumanApproved, none.AgentApproved)
 	}
 }
 
@@ -341,7 +614,10 @@ func TestBuildExcludesAdvisoryCIChecks(t *testing.T) {
 }
 
 // TestBuildNilRegistry verifies that when Registry is nil all approvers count
-// as human and there is no panic.
+// as human and there is no panic. With no registry there is no agent to
+// recognise, so the whole regex-mining fallback is skipped too — a login that
+// WOULD be an agent under a populated registry is simply another human approver
+// here (both approvers below therefore land in HumanApprovers).
 func TestBuildNilRegistry(t *testing.T) {
 	in := BuilderInput{
 		GeneratedAt:         time.Now(),
@@ -351,8 +627,12 @@ func TestBuildNilRegistry(t *testing.T) {
 		Registry:            nil, // explicit nil
 		PRs: []PRInput{
 			{
-				PR:        api.PR{Repo: "org/repo", Number: 30, Author: "alice", Title: "nil-reg", URL: "u30"},
+				PR:        api.PR{Repo: "org/repo", Number: 30, Author: "alice", Title: "nil-reg", URL: "u30", HeadSHA: "h1"},
 				Ownership: ownership.Mine,
+				Approvals: []store.Approval{
+					{Approver: "anyone", State: "approved", HeadSHA: "h1"},
+					{Approver: "claude[bot]", State: "approved", HeadSHA: "h1"},
+				},
 				Reviews: []api.Review{
 					{ID: "r4", Author: "anyone", State: "APPROVED", Body: ""},
 					{ID: "r5", Author: "claude[bot]", State: "APPROVED", Body: "Verdict: approve"},
@@ -375,6 +655,35 @@ func TestBuildNilRegistry(t *testing.T) {
 	// AgentApproved stays false because with nil registry we only set human.
 	if row.AgentApproved {
 		t.Error("expected AgentApproved=false when registry is nil")
+	}
+	if row.HumanApprovers != 2 || row.AgentApprovers != 0 {
+		t.Errorf("nil registry: human %d / agent %d, want 2/0", row.HumanApprovers, row.AgentApprovers)
+	}
+}
+
+// A nil registry MUST short-circuit the regex-mining block outright, not merely
+// happen to skip it. The fixture is the one that distinguishes the two: a review
+// and a comment from a login the store has NO row for, so the mining block would
+// be REACHED and would call a method on the nil *agentregistry.Registry — which
+// panics. TestBuildNilRegistry above cannot catch that, because every login it
+// names has a store row and is therefore skipped inside the block.
+func TestBuildNilRegistrySkipsRegexMiningEntirely(t *testing.T) {
+	snap := Build(BuilderInput{
+		Self:     "alice",
+		Registry: nil,
+		PRs: []PRInput{{
+			PR:        api.PR{Repo: "o/r", Number: 40, Author: "alice", HeadSHA: "h1"},
+			Ownership: ownership.Mine,
+			// No Approvals at all, so nothing is pre-recorded.
+			Comments: []api.Comment{{Author: "claude[bot]", Body: "Verdict: approve"}},
+			Reviews:  []api.Review{{ID: "r1", Author: "claude[bot]", State: "APPROVED", Body: "Verdict: approve"}},
+		}},
+	})
+	row := snap.Mine[0]
+	if row.HumanApprovers != 0 || row.AgentApprovers != 0 {
+		t.Errorf("nil registry with un-recorded logins: human %d / agent %d, want 0/0 — "+
+			"with no registry there is no approval regex to mine, and a live review is not a store row",
+			row.HumanApprovers, row.AgentApprovers)
 	}
 }
 

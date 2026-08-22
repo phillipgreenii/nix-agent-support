@@ -10,8 +10,14 @@ const (
 	// never reviewed at any observed head, that nobody else has approved either.
 	// It is the plain "I have not looked at this yet" signal (pg2-kh1ar).
 	AttentionReasonUnreviewed = "unreviewed-by-me"
-	// AttentionReasonReReview: new commits landed after I approved an earlier
-	// head, so the PR needs a re-review.
+	// AttentionReasonReReview: my review no longer STANDS for the current head,
+	// so the PR needs another look. Two ways in, both per-approval staleness
+	// (store.Approval.IsStale, INV-APPROVAL-3): new commits landed after I
+	// reviewed an earlier head, or the code host DISMISSED my review. The second
+	// was unrepresentable before the per-approver cutover (pg2-4dz88.1.9) — the
+	// legacy single-slot pr_revision.my_review_state carried no staleness, so a
+	// dismissed self review had to be withheld from it entirely and read as
+	// "never reviewed".
 	AttentionReasonReReview = "re-review-after-my-approval"
 )
 
@@ -25,7 +31,15 @@ const (
 // Inputs are ALL persisted store facts plus the live merge-state flag — never
 // live enriched reviews, and (since pg2-kh1ar) never a bead artifact:
 //   - revs: the PR's revisions in ascending seq order (store.ListRevisions),
-//     latest last.
+//     latest last. Since pg2-4dz88.1.9 this is consulted for exactly two things:
+//     "has any revision been observed at all" and "what is the CURRENT head
+//     SHA" (the last element's). Its per-revision review markers are NOT read.
+//   - approvals: the PR's PER-APPROVER rows (store.ListApprovals), one per
+//     approver login — the source that replaced the collapsed
+//     pr_revision.others_approved / my_review_state pair (pg2-4dz88.1.9).
+//   - self: the viewer's own login, matched against Approval.Approver to tell
+//     "I reviewed it" from "a teammate approved it" (X3). An empty self cannot
+//     identify the viewer's own row, so every row reads as a teammate's.
 //   - hasConflict: GitHub's merge-conflict signal (api.PR.HasConflict()). A
 //     conflicting team PR is dampened out of the attention signal entirely —
 //     it isn't worth reviewing until the author rebases (pg2-tsgkj).
@@ -45,16 +59,28 @@ const (
 // admits no draft PR into the team rows — so both consumers agree without a
 // draft input here.
 //
-// The state machine (§2.7), X3-correct (a teammate's approval is the persisted
-// others_approved marker; the viewer's own approval lives in my_review_state and
-// never counts as "someone else approved"):
+// The state machine (§2.7), X3-correct (the viewer's own row is matched by login
+// and never counts as "someone else approved"):
 //   - the PR has a merge conflict            → off the hook (no attention).
 //   - teammate approved the latest head      → off the hook (no attention).
 //   - I reviewed the latest head             → off the hook (no attention).
-//   - I approved an EARLIER head but not the latest (new commits landed) →
-//     needs a re-review.
+//   - my review no longer stands for the latest head (new commits landed after
+//     it, or the host dismissed it) → needs a re-review.
 //   - none of the above (I have never reviewed it) → needs a first review.
-func NeedsAttention(revs []store.Revision, hasConflict bool) (need bool, reason string) {
+//
+// # What the per-approver cutover changed (pg2-4dz88.1.9)
+//
+// Every edge above is unchanged in intent; only their SOURCE moved, from the
+// two collapsed pr_revision columns to the per-approver rows. The cutover ADDS
+// one case those columns could not represent at all: a DISMISSED-only approval.
+// `others_approved` is a head-anchored boolean with no dismissal, so
+// internal/sync/ingest.go had to withhold a dismissed approval from it
+// entirely — which read as "nobody has approved", accidentally the right
+// verdict, but by omission rather than by knowing. Read per-approver, the row
+// EXISTS and reports itself stale (Approval.IsStale is true for a dismissed row
+// REGARDLESS of head), so a dismissed approval provably does not close the
+// edge, and a later re-approval provably does.
+func NeedsAttention(revs []store.Revision, approvals []store.Approval, self string, hasConflict bool) (need bool, reason string) {
 	if len(revs) == 0 {
 		return false, ""
 	}
@@ -64,27 +90,38 @@ func NeedsAttention(revs []store.Revision, hasConflict bool) (need bool, reason 
 	if hasConflict {
 		return false, ""
 	}
-	latest := revs[len(revs)-1]
+	head := revs[len(revs)-1].HeadSHA
 
-	// Closing edges: once a teammate approved or I reviewed the current head, the
-	// PR is off my plate.
-	if latest.OthersApproved {
-		return false, ""
-	}
-	if latest.MyReviewState != "" {
-		return false, ""
-	}
-
-	// Re-review edge: I approved (or otherwise reviewed) some EARLIER revision but
-	// not the latest — new commits landed after my review, so it needs another
-	// look.
-	for _, r := range revs[:len(revs)-1] {
-		if r.MyReviewState != "" {
-			return true, AttentionReasonReReview
+	// One pass over the per-approver rows, splitting self from teammates by
+	// login (X3). There is at most ONE self row: pr_approval is UNIQUE
+	// (pr_id, approver), so the row IS my latest observed review.
+	var myReview *store.Approval
+	for i := range approvals {
+		a := approvals[i]
+		if self != "" && a.Approver == self {
+			myReview = &approvals[i]
+			continue
+		}
+		// Closing edge: a teammate approval that currently STANDS puts the PR
+		// off my plate. A teammate's "changes-requested" or "commented" row does
+		// NOT (asking for changes is not an approval), and neither does a stale
+		// one — an approval of an earlier head, or one the host dismissed.
+		if a.State == "approved" && !a.IsStale(head) {
+			return false, ""
 		}
 	}
 
-	// First-review edge: nobody approved the head and I have never reviewed ANY
-	// observed revision — I simply have not looked at this teammate PR yet.
+	if myReview != nil {
+		// Closing edge: I reviewed the CURRENT head. Any state counts here, as it
+		// always has — having looked at this head at all takes it off my plate.
+		if !myReview.IsStale(head) {
+			return false, ""
+		}
+		// Re-review edge: my review does not stand for the current head.
+		return true, AttentionReasonReReview
+	}
+
+	// First-review edge: no standing teammate approval and no review of my own on
+	// record — I simply have not looked at this teammate PR yet.
 	return true, AttentionReasonUnreviewed
 }

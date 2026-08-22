@@ -25,6 +25,14 @@ type PRInput struct {
 	// dashboard attention signal is store-derived, matching the bead projector
 	// (design §2.7, D4).
 	Revisions []store.Revision
+	// Approvals is the PR's PER-APPROVER approval timeline — one row per
+	// approver login (store.ListApprovals), the source that replaced the
+	// collapsed pr_revision.others_approved / my_review_state pair as the read
+	// path (pg2-4dz88.1.9). It feeds BOTH classifyApprovals and the shared
+	// NeedsAttention predicate, so "two approvers approved" and "this
+	// approver's approval is stale/dismissed" are representable at all
+	// (INV-APPROVAL-1, INV-APPROVAL-3).
+	Approvals []store.Approval
 	// Ownership is the PR's classification (mine/co-owned/team), computed by the
 	// sync layer (buildPRInput) via internal/ownership. Build partitions on it.
 	Ownership ownership.Ownership
@@ -140,7 +148,7 @@ func Build(in BuilderInput) *Snapshot {
 			// (pg2-ynhr.13 B5 review #1). Reasons are still SOURCED from ingest
 			// (detector.go's buckets, B3); the builder only re-checks they hold. Others'
 			// drafts and now-reasonless PRs fall through and are excluded.
-			out.Team = append(out.Team, buildTeamRow(p, in.Registry, reasons, excl))
+			out.Team = append(out.Team, buildTeamRow(p, in.Registry, in.Self, reasons, excl))
 		}
 	}
 	// Retained merged rows sort BELOW every active Mine row (pg2-ew4kf).
@@ -149,7 +157,7 @@ func Build(in BuilderInput) *Snapshot {
 }
 
 func buildMineRow(p PRInput, reg *agentregistry.Registry, excl *cirollup.Excluder) MineRow {
-	hum, agt := classifyApprovals(p, reg)
+	appr := classifyApprovals(p, reg)
 	return MineRow{
 		Repo:               p.PR.Repo,
 		Number:             p.PR.Number,
@@ -157,8 +165,10 @@ func buildMineRow(p PRInput, reg *agentregistry.Registry, excl *cirollup.Exclude
 		URL:                p.PR.URL,
 		Draft:              p.PR.Draft,
 		CIStatus:           cirollup.Compute(p.CIRuns, excl).State,
-		HumanApproved:      hum,
-		AgentApproved:      agt,
+		HumanApproved:      appr.Human > 0,
+		AgentApproved:      appr.Agent > 0,
+		HumanApprovers:     appr.Human,
+		AgentApprovers:     appr.Agent,
 		WaitingOnMe:        beads.AllNonClosedHumanLabeled(p.BeadsDeps),
 		MergeStateStatus:   p.PR.MergeStateStatus,
 		AutoMergeEnabled:   p.PR.AutoMergeEnabled,
@@ -173,12 +183,12 @@ func buildMineRow(p PRInput, reg *agentregistry.Registry, excl *cirollup.Exclude
 // buildTeamRow builds a "PRs to Review" row. reasons is the non-empty match-reason
 // set Build already computed (and gated membership on), so it is threaded in rather
 // than recomputed here.
-func buildTeamRow(p PRInput, reg *agentregistry.Registry, reasons []string, excl *cirollup.Excluder) TeamRow {
-	hum, agt := classifyApprovals(p, reg)
+func buildTeamRow(p PRInput, reg *agentregistry.Registry, self string, reasons []string, excl *cirollup.Excluder) TeamRow {
+	appr := classifyApprovals(p, reg)
 	// Attention is STORE-derived through the shared predicate — the SAME function
 	// and SAME inputs the bead projector uses, so the dashboard signal and the
 	// open-attention-bead set can never diverge (design §2.7, D4 / R4).
-	need, reason := NeedsAttention(p.Revisions, p.PR.HasConflict())
+	need, reason := NeedsAttention(p.Revisions, p.Approvals, self, p.PR.HasConflict())
 	return TeamRow{
 		Repo:            p.PR.Repo,
 		Number:          p.PR.Number,
@@ -186,8 +196,10 @@ func buildTeamRow(p PRInput, reg *agentregistry.Registry, reasons []string, excl
 		Owner:           p.PR.Author,
 		URL:             p.PR.URL,
 		CIStatus:        cirollup.Compute(p.CIRuns, excl).State,
-		HumanApproved:   hum,
-		AgentApproved:   agt,
+		HumanApproved:   appr.Human > 0,
+		AgentApproved:   appr.Agent > 0,
+		HumanApprovers:  appr.Human,
+		AgentApprovers:  appr.Agent,
 		LinesChanged:    p.PR.Additions + p.PR.Deletions,
 		FilesChanged:    p.PR.ChangedFiles,
 		JIRA:            mapJIRA(p.JIRA),
@@ -203,56 +215,103 @@ func isTeam(author string, team map[string]struct{}) bool {
 	return ok
 }
 
-// classifyApprovals walks reviews, comments, and review-summary bodies to
-// derive (human_approved, agent_approved).
+// approvalFacts is one PR's PER-APPROVER approval summary: how many DISTINCT
+// approvers hold an approval that currently STANDS, split by whether the
+// approver is a registered agent.
 //
-// human_approved: any APPROVED review where the author is NOT a registered
-// agent.
-// agent_approved: any APPROVED review where the author IS a registered
-// agent, OR any non-inline comment / review-summary body whose author is a
-// registered agent and whose body matches that agent's approval regex.
-func classifyApprovals(p PRInput, reg *agentregistry.Registry) (human bool, agent bool) {
-	if reg == nil {
-		// Treat all approvers as human when no registry configured.
-		for _, r := range p.Reviews {
-			if r.State == "APPROVED" {
-				human = true
-			}
-		}
-		return
-	}
-	for _, r := range p.Reviews {
-		if r.State != "APPROVED" {
+// It replaced the `(human bool, agent bool)` pair classifyApprovals used to
+// return (pg2-4dz88.1.9). That pair collapsed the whole approver set into two
+// bits, so "two teammates approved" was indistinguishable from "one did" —
+// exactly what INV-APPROVAL-1 ("per approver, never collapsed") forbids. The
+// counts are per-approver, deduplicated by login: one approver contributes 1
+// however many times they were observed.
+type approvalFacts struct {
+	Human int
+	Agent int
+}
+
+// classifyApprovals derives the per-approver approval facts for one PR from
+// the PER-APPROVER source (p.Approvals — store.ListApprovals over
+// `pr_approval`), which is the read path as of pg2-4dz88.1.9.
+//
+// An approver is counted iff their recorded row is BOTH:
+//
+//   - an approval — State "approved". A recorded "changes-requested" or
+//     "commented" row is a review, not an approval, and MUST NOT count (the
+//     three states share one table; see internal/sync/revision.go's four
+//     parallel writers); and
+//   - currently STANDING — !Approval.IsStale(p.PR.HeadSHA). That excludes both
+//     an approval of an EARLIER head and one the code host DISMISSED
+//     (INV-APPROVAL-3). A dismissed approval is stale, never absent, so the row
+//     still records that the approver DID approve — it just no longer counts
+//     toward approval of the current head. Neither exclusion was expressible
+//     before this cutover: `pr_revision.others_approved` was a single
+//     head-anchored boolean with no per-approver identity and no dismissal.
+//
+// The human/agent split is registry-derived (reg.IsAgent). A nil registry means
+// no agent is configured, so every approver counts as human — the documented
+// pre-cutover behavior, preserved.
+//
+// # The legacy approval-regex fallback (deliberately RETAINED)
+//
+// After the store rows, top-level comment and review-summary bodies are still
+// mined for a registered agent's ApprovalRegex, and a match counts that agent
+// as an approver — but ONLY for a login the store has recorded NO row for. The
+// store is authoritative for every login it knows: it carries state AND
+// staleness, which a body match cannot, so letting a stale-but-matching body
+// resurrect a dismissed approval would defeat the exclusion above.
+//
+// The fallback is retained rather than deleted because it has no store
+// representation: the bot-verdict writer that DOES populate `pr_approval` from
+// comment bodies (internal/sync/approver.go) is gated on
+// config.Config.ApproverAllowlist, a set pg2-4dz88.1.3 deliberately kept
+// SEPARATE from the agent registry. A deployment configuring `approval_regex`
+// but no `approver_allowlist` therefore has no rows for its agent, and dropping
+// the fallback here would silently retire its agent-approval signal.
+//
+// Inline diff comments (Path/Line set) are excluded from the mining, as before:
+// only top-level / review-summary bodies are verdict-shaped.
+func classifyApprovals(p PRInput, reg *agentregistry.Registry) approvalFacts {
+	// standing maps an approver login to whether they are a registered agent.
+	// A map is what makes the count PER APPROVER: repeated observations of one
+	// login collapse to one entry, distinct logins never do.
+	standing := make(map[string]bool, len(p.Approvals))
+	recorded := make(map[string]struct{}, len(p.Approvals))
+	for _, a := range p.Approvals {
+		recorded[a.Approver] = struct{}{}
+		if a.State != "approved" || a.IsStale(p.PR.HeadSHA) {
 			continue
 		}
-		if reg.IsAgent(r.Author) {
-			agent = true
-		} else {
-			human = true
-		}
+		standing[a.Approver] = reg != nil && reg.IsAgent(a.Approver)
 	}
-	if !agent {
-		// Comment-mining: only top-level / review-summary bodies. Inline
-		// diff comments (Path/Line non-empty) are excluded.
+	if reg != nil {
+		mine := func(login, body string) {
+			if _, known := recorded[login]; known {
+				return // the store row is authoritative for this login
+			}
+			if reg.MatchApproval(login, body) {
+				standing[login] = true // MatchApproval only matches registered agents
+			}
+		}
 		for _, c := range p.Comments {
 			if c.Path != "" || c.Line != 0 {
 				continue
 			}
-			if reg.MatchApproval(c.Author, c.Body) {
-				agent = true
-				break
-			}
+			mine(c.Author, c.Body)
 		}
-		if !agent {
-			for _, r := range p.Reviews {
-				if reg.MatchApproval(r.Author, r.Body) {
-					agent = true
-					break
-				}
-			}
+		for _, r := range p.Reviews {
+			mine(r.Author, r.Body)
 		}
 	}
-	return
+	var f approvalFacts
+	for _, isAgent := range standing {
+		if isAgent {
+			f.Agent++
+		} else {
+			f.Human++
+		}
+	}
+	return f
 }
 
 func mapJIRA(issues []api.Issue) []JIRAItem {

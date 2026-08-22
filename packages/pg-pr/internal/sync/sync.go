@@ -988,17 +988,22 @@ func (e *Engine) buildPRInput(ctx context.Context, pr api.PR, enriched *vcs.Enri
 		}
 	}
 
-	// --- attention read-model inputs (pg2-4c5i.13) ---
-	// Thread the PR's PERSISTED revision timeline so buildTeamRow's
-	// snapshot.NeedsAttention call is store-derived — the SAME predicate + SAME
-	// inputs the emitAttention write-model path uses, so the dashboard signal can
-	// never diverge from the attention bead (D4/R4). Only meaningful for team PRs
-	// (Build ignores these on Mine rows). No bead artifact feeds the predicate any
-	// more (pg2-kh1ar).
+	// --- attention + approval read-model inputs (pg2-4c5i.13, pg2-4dz88.1.9) ---
+	// Thread the PR's PERSISTED revision timeline AND its PER-APPROVER approval
+	// rows so buildTeamRow's snapshot.NeedsAttention call is store-derived — the
+	// SAME predicate + SAME inputs the emitAttention write-model path uses, so
+	// the dashboard signal can never diverge from the attention bead (D4/R4). No
+	// bead artifact feeds the predicate any more (pg2-kh1ar).
+	//
+	// The approval rows feed classifyApprovals too, so they matter on Mine rows
+	// as well as team ones (unlike the revisions, which Build ignores on Mine).
 	if e.deps.Store != nil {
 		if stored, gerr := e.deps.Store.GetPR(ctx, pr.Repo, pr.Number); gerr == nil && stored != nil {
 			if revs, rerr := e.deps.Store.ListRevisions(ctx, stored.ID); rerr == nil {
 				in.Revisions = revs
+			}
+			if approvals, aerr := e.deps.Store.ListApprovals(ctx, stored.ID); aerr == nil {
+				in.Approvals = approvals
 			}
 		}
 	}

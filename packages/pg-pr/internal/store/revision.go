@@ -28,8 +28,16 @@ type Revision struct {
 	ReviewedByAgentAt string
 	// OthersApproved is true when a NON-SELF (teammate) APPROVED review was
 	// observed at this revision's head SHA (pg2-4c5i.13). Deliberately excludes
-	// the viewer's own approval (that lives in my_review_state) so the attention
-	// predicate can tell "a teammate approved" from "I approved" (X3).
+	// the viewer's own approval (that lives in MyReviewState) so a reader can
+	// tell "a teammate approved" from "I approved" (X3).
+	//
+	// WRITE-ONLY as of pg2-4dz88.1.9: this column and MyReviewState are still
+	// written by internal/sync's ingest, but nothing outside this package reads
+	// them any more — snapshot.NeedsAttention and snapshot.classifyApprovals
+	// both read the per-approver pr_approval rows (store.Approval) instead. A
+	// single OR'd boolean cannot name WHICH teammate approved (INV-APPROVAL-1)
+	// and cannot express a DISMISSED approval (INV-APPROVAL-3), which is why
+	// the readers moved. Dropping the columns is a separate migration leaf.
 	OthersApproved bool
 	// OthersApprovedAt is the timestamp of the recorded teammate approval; ""
 	// when NULL (no teammate approval observed at this head yet).

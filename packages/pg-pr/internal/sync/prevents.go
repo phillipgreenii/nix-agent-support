@@ -64,10 +64,10 @@ func (e *Engine) emitPREvent(ctx context.Context, eventType, repo string, pr api
 }
 
 // emitAttention re-derives the teammate-attention verdict for a PR from
-// PERSISTED store facts (its revision timeline) plus the live hasConflict
-// signal, through the SHARED snapshot.NeedsAttention predicate, and emits a
-// pr.attention event carrying that verdict. Called once per tick from refreshPR
-// for team AND co-owned PRs.
+// PERSISTED store facts — its revision timeline AND its per-approver approval
+// rows (pg2-4dz88.1.9) — plus the live hasConflict signal, through the SHARED
+// snapshot.NeedsAttention predicate, and emits a pr.attention event carrying
+// that verdict. Called once per tick from refreshPR for team AND co-owned PRs.
 //
 // It consults NO bead artifact: the readiness input keyed on the pg-pr
 // draft-review bead is gone (pg2-kh1ar), because that bead is produced only by
@@ -112,7 +112,15 @@ func (e *Engine) emitAttention(ctx context.Context, repo string, number int, prI
 	if err != nil {
 		return err
 	}
-	need, reason := snapshot.NeedsAttention(revs, hasConflict)
+	// The PER-APPROVER rows are the attention predicate's approval source since
+	// pg2-4dz88.1.9 (the collapsed pr_revision.others_approved / my_review_state
+	// pair is no longer read). Fetched HERE, beside the revisions, so the write
+	// model feeds NeedsAttention exactly what buildPRInput feeds the read model.
+	approvals, err := e.deps.Store.ListApprovals(ctx, prID)
+	if err != nil {
+		return err
+	}
+	need, reason := snapshot.NeedsAttention(revs, approvals, e.cfg().SelfLogin, hasConflict)
 	payload, err := json.Marshal(store.AttentionPayload{
 		Repo: repo, Number: number, Need: need, Reason: reason,
 	})

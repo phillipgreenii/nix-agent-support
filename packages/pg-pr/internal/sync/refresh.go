@@ -190,9 +190,11 @@ func (e *Engine) refreshPR(ctx context.Context, repo string, number int) (*snaps
 	// FB-3 (connection churn): the attention event is ENQUEUED here — BEFORE the
 	// single flush below — rather than after its own separate flush. That is safe
 	// because emitAttention is flush-INDEPENDENT: it takes no bead client and
-	// touches only e.deps.Store (ListRevisions + InTx), and the store row it reads
-	// was already upserted by applyFetchedPR, not by the outbox. Nothing it reads
-	// is produced by a flush, so its verdict is identical before or after one.
+	// touches only e.deps.Store (ListRevisions + ListApprovals + InTx), and every
+	// row it reads was already written by applyFetchedPR, not by the outbox — the
+	// per-approver approval rows added by pg2-4dz88.1.9 come from
+	// ingestFeedbackToStore, which applyFetchedPR runs above. Nothing it reads is
+	// produced by a flush, so its verdict is identical before or after one.
 	// (attention_emit_test.go pins this: the attention signal MUST NOT depend on
 	// the draft-review bead.) Collapsing the former two per-refresh flushes
 	// (post-applyFetchedPR + post-emitAttention) into one drain therefore

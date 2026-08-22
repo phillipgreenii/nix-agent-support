@@ -70,7 +70,17 @@ type MineRow struct {
 	CIStatus      string `json:"ci_status"`
 	HumanApproved bool   `json:"human_approved"`
 	AgentApproved bool   `json:"agent_approved"`
-	WaitingOnMe   bool   `json:"waiting_on_me"`
+	// HumanApprovers / AgentApprovers count the DISTINCT approvers whose
+	// approval currently STANDS, split by whether the approver is a registered
+	// agent. They are the per-approver facts (INV-APPROVAL-1): two approvers
+	// approving reads as 2, which the HumanApproved/AgentApproved booleans
+	// above structurally cannot express. Those booleans are RETAINED and
+	// DERIVED (count > 0) because the wire keys are a consumer contract (the
+	// external Grafana panel reads `human_approved`); they are no longer an
+	// independent signal.
+	HumanApprovers int  `json:"human_approvers"`
+	AgentApprovers int  `json:"agent_approvers"`
+	WaitingOnMe    bool `json:"waiting_on_me"`
 	// MergeStateStatus is GitHub's authoritative merge-readiness (CLEAN/BLOCKED/
 	// …); the mine panel shows it separately from CIStatus. (pg2-dwfld)
 	MergeStateStatus string `json:"merge_state_status,omitempty"`
@@ -100,17 +110,21 @@ type MineRow struct {
 // team-authored ∪ review-requested-of-me ∪ watch-labeled). The JSON key stays
 // "team" for consumer compatibility (the external Grafana panel queries .team).
 type TeamRow struct {
-	Repo          string     `json:"repo"`
-	Number        int        `json:"number"`
-	Title         string     `json:"title"`
-	Owner         string     `json:"owner"`
-	URL           string     `json:"url"`
-	CIStatus      string     `json:"ci_status"`
-	HumanApproved bool       `json:"human_approved"`
-	AgentApproved bool       `json:"agent_approved"`
-	LinesChanged  int        `json:"lines_changed"`
-	FilesChanged  int        `json:"files_changed"`
-	JIRA          []JIRAItem `json:"jira"`
+	Repo          string `json:"repo"`
+	Number        int    `json:"number"`
+	Title         string `json:"title"`
+	Owner         string `json:"owner"`
+	URL           string `json:"url"`
+	CIStatus      string `json:"ci_status"`
+	HumanApproved bool   `json:"human_approved"`
+	AgentApproved bool   `json:"agent_approved"`
+	// HumanApprovers / AgentApprovers are the per-approver counts; see the
+	// identically-named MineRow fields for the contract (INV-APPROVAL-1).
+	HumanApprovers int        `json:"human_approvers"`
+	AgentApprovers int        `json:"agent_approvers"`
+	LinesChanged   int        `json:"lines_changed"`
+	FilesChanged   int        `json:"files_changed"`
+	JIRA           []JIRAItem `json:"jira"`
 	// NeedsAttention flags a teammate PR that currently needs my review, derived
 	// from the shared needsAttention predicate over persisted store facts. Stays
 	// consistent with the open-attention-bead set (same predicate, same inputs).
