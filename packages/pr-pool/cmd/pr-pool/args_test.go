@@ -196,3 +196,43 @@ func TestParseRunQueryArgs_carriesRole(t *testing.T) {
 		t.Errorf("parseRunQueryArgs = %+v, want routeRunQuery role=feedback bead empty", r)
 	}
 }
+
+// parseRunLikeArgs collects repeated --only/--disable occurrences into
+// routeResult.only/disable (STORY-OP-3, DEC-CLI-1); it does NOT fold in
+// PR_POOL_ONLY/PR_POOL_DISABLE (that happens later, in resolveSelectors).
+func TestParseRunLikeArgs_collectsRepeatedSelectorFlags(t *testing.T) {
+	r := parseRunLikeArgs(routeRun, []string{"--only", "role:a", "--only", "query:b", "--disable", "role:c"})
+	if r.kind != routeRun {
+		t.Fatalf("kind = %v, want routeRun", r.kind)
+	}
+	if want := []string{"role:a", "query:b"}; !reflect.DeepEqual(r.only, want) {
+		t.Errorf("only = %v, want %v", r.only, want)
+	}
+	if want := []string{"role:c"}; !reflect.DeepEqual(r.disable, want) {
+		t.Errorf("disable = %v, want %v", r.disable, want)
+	}
+}
+
+// route() itself reaches the same selector flags through the full dispatch
+// for both run and run-until-idle.
+func TestRoute_runAndRunUntilIdleAcceptSelectorFlags(t *testing.T) {
+	cases := []struct {
+		name string
+		argv []string
+		want routeKind
+	}{
+		{"run", []string{"pr-pool", "run", "--only", "role:a", "--disable", "query:b"}, routeRun},
+		{"run-until-idle", []string{"pr-pool", "run-until-idle", "--only", "role:a"}, routeRunUntilIdle},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := route(tc.argv)
+			if r.kind != tc.want {
+				t.Fatalf("route(%v).kind = %v, want %v", tc.argv, r.kind, tc.want)
+			}
+			if len(r.only) == 0 {
+				t.Errorf("route(%v).only is empty, want it to carry --only", tc.argv)
+			}
+		})
+	}
+}

@@ -29,9 +29,43 @@ of the system for one run", and a value written into config is not scoped to one
 put back. A flag expires when the process does, which is the scoping the story asks for. The
 environment-variable equivalents exist so a supervisor can set them without rewriting a command line.
 
-**Not decided here.** The selector's own grammar (whether it names participants, globs them, or takes
-a list) is the implementation's, and the configuration schema it selects over is still an open
-question in the behavior set (`OQ-CONFIG`).
+**Selector grammar (realized, bead `pg2-z3qh3`).** A selector is `<kind>:<name>`, where `<kind>` is
+`role` or `query` and `<name>` is that participant's own configured name — `roles.Role.Name` (a
+configured `[[role]]`, the operator-facing **handler**) or `query.Source.Name` (a configured
+`[[query]]`, the operator-facing **source**). `role:`/`query:` are the implementation's own nouns
+rather than the behavior set's narrative "handler"/"source" terms, chosen because `run-role`/
+`run-query` already spell the same two participant kinds that way on this CLI — a selector reuses
+vocabulary an operator already has, rather than introducing a second pair of names for the same two
+things. Both `--only` and `--disable` are **repeatable**: each occurrence adds one selector, so
+`--only role:foo --only query:bar` builds a two-element allow-list. A selector naming a role/query the
+resolved configuration does not declare is a **usage error** (the run exits without starting) rather
+than a silent no-op — an operator who mistypes a name is told immediately, instead of getting an
+allow-list that quietly excludes everything.
+
+**Environment-variable equivalents (realized).** `PR_POOL_ONLY` and `PR_POOL_DISABLE` each hold a
+comma-separated list of selectors, in the same `<kind>:<name>` grammar (e.g.
+`PR_POOL_DISABLE=role:worker,query:feedback-ready`). They are **combined with**, not overridden by,
+any `--only`/`--disable` flags on the same invocation: unlike `--socket`/`--token` (a single scalar
+identifying one target, where the flag wins over the environment), these are repeatable, cumulative
+lists, so the effective allow-list/deny-list is the **union** of whatever the flags and the
+environment each name. This differs from the `--socket`/`--token` precedent deliberately, not by
+oversight.
+
+**Combination semantics (realized).** When both an allow-list and a deny-list are in effect for one
+run: `--only` (its flag occurrences unioned with `PR_POOL_ONLY`), if non-empty, first narrows the
+candidate set to just the named participants of that kind — an **empty** `--only` leaves every
+configured participant of that kind a candidate. `--disable` (unioned with `PR_POOL_DISABLE`) is then
+applied to whatever `--only` left, removing any participant it names. A participant excluded either
+way is the `INV-DISP-3` "declared but inactive this run" case, never a config error.
+
+**Realized scope.** This bead wires `--only`/`--disable` onto `run` and `run-until-idle` only — the
+two subcommands with a "run" spanning multiple sources+handlers to restrict. `run-role`/`run-query`
+already select one participant explicitly by argument, and `push-inject`/`reconcile`/etc. are not
+"runs" in the `STORY-OP-3` sense, so none of them takes these flags (yet).
+
+**Not decided here.** The configuration schema the selectors select over is still an open question in
+the behavior set (`OQ-CONFIG`). Whether a selector may ever glob or pattern-match a name, rather than
+naming exactly one, is likewise left for a future decision.
 
 ### `DEC-CLI-2` — the operator subcommand surface <!-- uuid: 3c480e5c-a705-47a7-906f-3d59ff983117 -->
 

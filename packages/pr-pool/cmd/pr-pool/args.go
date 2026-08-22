@@ -8,7 +8,7 @@ import (
 )
 
 // usageLine is the short synopsis printed to stderr on a usage error.
-const usageLine = "usage: pr-pool [--version | --help] [run | run-until-idle | run-query <role> | run-role <role> <bead> | config (--print-defaults | --show) | sessions | reconcile | push-inject [--json] [--socket <path>] [--token <tok>] <json> | ingest-event [--socket <path>] [--token <tok>] | self-status [--socket <path>] [--token <tok>]]"
+const usageLine = "usage: pr-pool [--version | --help] [run [--only <selector>]... [--disable <selector>]... | run-until-idle [--only <selector>]... [--disable <selector>]... | run-query <role> | run-role <role> <bead> | config (--print-defaults | --show) | sessions | reconcile | push-inject [--json] [--socket <path>] [--token <tok>] <json> | ingest-event [--socket <path>] [--token <tok>] | self-status [--socket <path>] [--token <tok>]]"
 
 // helpText is the full help printed to stdout for --help/help.
 const helpText = usageLine + `
@@ -26,6 +26,16 @@ Subcommands:
   run-until-idle          boot the core, discover once, drain the queue to idle, then exit
                           (also reachable as "drain", kept as a deprecated alias)
   run-query <role>        run a role's discovery query and print matches (read-only)
+  run/run-until-idle --only <selector> / --disable <selector>
+                          run-scoped selectors (STORY-OP-3): restrict which configured
+                          sources/handlers this ONE run activates, without editing
+                          config.toml. Repeatable; a selector is role:<name> or
+                          query:<name>. --only (allow-list), if given, narrows to just the
+                          named participants; --disable (deny-list) then excludes any named
+                          participant from what's left. Env equivalents PR_POOL_ONLY /
+                          PR_POOL_DISABLE (comma-separated) are UNIONED with the flags, not
+                          overridden by them. A selector naming an unconfigured role/query
+                          is a usage error. See docs/decisions/cli.md's DEC-CLI-1.
   run-role <role> <bead>  dispatch one bead through a role, then tear down (smoke test)
   config --print-defaults print the built-in default config.toml (copy-paste starting point)
   config --show           print the resolved config path, role set, and worker dispatch scalars (permission-mode / allowed-tools / autonomous / budget)
@@ -70,6 +80,11 @@ Pool-wide settings come from PR_POOL_* environment variables:
   PR_POOL_PERMISSION_MODE  claude --permission-mode for workers (default dontAsk; bypassPermissions is the opt-in escape)
   PR_POOL_ALLOWED_TOOLS    claude --allowed-tools allowlist for workers (default: conservative deny-by-default set; empty clears the flag)
   PR_POOL_CONFIG           explicit config.toml path (default <RepoRoot>/.pr-pool/config.toml)
+  PR_POOL_ONLY             run/run-until-idle only: comma-separated run-scoped allow-list,
+                           each entry role:<name> or query:<name> (DEC-CLI-1); unioned with
+                           any --only flags on the same invocation
+  PR_POOL_DISABLE          run/run-until-idle only: comma-separated run-scoped deny-list,
+                           same grammar as PR_POOL_ONLY; unioned with any --disable flags
 
 REMOVED (now configured per-role in config.toml, not via env): PR_POOL_MAX_WORKER,
 PR_POOL_MAX_FEEDBACK, PR_POOL_FEEDBACK_ENABLED, PR_POOL_WORKER_ENABLED,
@@ -106,6 +121,13 @@ type routeResult struct {
 	role       string   // run-role / run-query role name
 	bead       string   // run-role bead id
 	configMode string   // "print-defaults" | "show" (routeConfig only)
+	// only / disable carry the raw --only/--disable flag OCCURRENCES for
+	// routeRun/routeRunUntilIdle (STORY-OP-3, DEC-CLI-1) — NOT yet combined
+	// with PR_POOL_ONLY/PR_POOL_DISABLE, since reading the environment is I/O
+	// route() otherwise avoids; runRun/runRunUntilIdle fold the environment in
+	// via resolveSelectors (selectors.go).
+	only    []string
+	disable []string
 }
 
 // route inspects the full argv and decides what to do, without side effects. No
@@ -175,31 +197,35 @@ func route(argv []string) routeResult {
 	return routeResult{kind: routeUsageErr, msg: "unknown subcommand: " + args[0]}
 }
 
-// parseRunLikeArgs validates a subcommand that takes no flags/positionals of
-// its own — run, run-until-idle, and the deprecated drain alias for
-// run-until-idle. It is pure: it reports a routeKind and never boots a core
-// itself, so the caller can refuse to touch config/precheck/the queue on a
-// parse error or help request (pg2-52rn's "no fall-through to a real dispatch
-// on bad input" guarantee, carried over from the retired parseDrainArgs). A
-// help flag yields routeHelp; any other parse failure (or an unexpected
-// positional) yields routeUsageErr.
+// parseRunLikeArgs validates a subcommand that takes only the run-scoped
+// selector flags (--only/--disable, STORY-OP-3) and no positionals — run,
+// run-until-idle, and the deprecated drain alias for run-until-idle. It stays
+// pure aside from collecting those flag occurrences (no environment read, no
+// config I/O): it reports a routeKind and never boots a core itself, so the
+// caller can refuse to touch config/precheck/the queue on a parse error or
+// help request (pg2-52rn's "no fall-through to a real dispatch on bad input"
+// guarantee, carried over from the retired parseDrainArgs). A help flag
+// yields routeHelp; any other parse failure (or an unexpected positional)
+// yields routeUsageErr.
 func parseRunLikeArgs(kind routeKind, args []string) routeResult {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	fs.SetOutput(io.Discard) // we render usage/errors ourselves; suppress flag's defaults
+	only, disable := registerSelectorFlags(fs)
 	pos, err := parseInterspersed(fs, args)
 	switch {
 	case errors.Is(err, flag.ErrHelp):
 		return routeResult{kind: routeHelp}
 	case err != nil:
-		// This subcommand defines no flags, so the first dash-prefixed token is
-		// the offender. Report it in the same "unknown flag: X" phrasing as the
-		// top-level route (the stdlib's "flag provided but not defined: -x"
-		// single-dashes the flag and reads differently).
+		// The only flags this subcommand defines are --only/--disable, so an
+		// unrecognized dash-prefixed token is still the offender. Report it in
+		// the same "unknown flag: X" phrasing as the top-level route (the
+		// stdlib's "flag provided but not defined: -x" single-dashes the flag
+		// and reads differently).
 		return routeResult{kind: routeUsageErr, msg: "unknown flag: " + firstFlag(args)}
 	case len(pos) > 0:
 		return routeResult{kind: routeUsageErr, msg: "unexpected argument: " + pos[0]}
 	}
-	return routeResult{kind: kind}
+	return routeResult{kind: kind, only: only.values, disable: disable.values}
 }
 
 // parseRunRoleArgs validates `run-role <role> <bead>`. Pure: it checks only that a

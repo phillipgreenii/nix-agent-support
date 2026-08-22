@@ -123,12 +123,19 @@ type preparedRun struct {
 }
 
 // prepareRun loads config, warns on stale env / tracked config / stub queries /
-// stranded feedback, prechecks bd reachability, resolves self_login, and wires
-// the orchestrator + its event log — everything `run` / `run-until-idle` need
+// stranded feedback, prechecks bd reachability, applies this run's --only/
+// --disable selectors (STORY-OP-3), resolves self_login, and wires the
+// orchestrator + its event log — everything `run` / `run-until-idle` need
 // before they may touch the queue or the core. On failure it prints the same
 // diagnostic runDrain used to and returns a non-OK exit code; the caller MUST
 // check code before using the returned preparedRun.
-func prepareRun(ctx context.Context) (preparedRun, int) {
+//
+// sel's selectors are applied AFTER precheck (which calls cfg.Validate())
+// deliberately, never before: applySelectors' own doc comment (selectors.go)
+// explains why a re-Validate against the run-scoped subset would produce
+// false findings — precheck must see the FULL, unfiltered cfg, and nothing
+// past this point may call Validate() again.
+func prepareRun(ctx context.Context, sel runSelectors) (preparedRun, int) {
 	cfg, err := config.Load()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "config:", err)
@@ -145,6 +152,21 @@ func prepareRun(ctx context.Context) (preparedRun, int) {
 		return preparedRun{}, exitPrecheck
 	}
 	slog.Info("precheck ok", "prefix", cfg.BeadsPrefix)
+
+	cfg, err = applySelectors(cfg, sel)
+	if err != nil {
+		printUsageErr(fmt.Sprintf("selector: %v", err))
+		return preparedRun{}, exitUsage
+	}
+	activeRoles := 0
+	for _, r := range cfg.Roles {
+		if r.Enabled {
+			activeRoles++
+		}
+	}
+	slog.Info("run-scoped selectors applied", "only", sel.Only, "disable", sel.Disable,
+		"active roles", activeRoles, "total roles", len(cfg.Roles), "active queries", len(cfg.Queries))
+
 	if cfg.SelfLogin == "" {
 		selfLogin, err := resolveSelf(ctx)
 		if err != nil {
@@ -179,11 +201,15 @@ func prepareRun(ctx context.Context) (preparedRun, int) {
 // accepted or expired, no offer outstanding), then close the core and tear
 // down every pr-pool-* session. It never touches internal/eventbus or a
 // per-role Cap — both retired by this bead (pg2-f3mcb.2).
-func runRunUntilIdle() int {
+//
+// only/disable are this invocation's --only/--disable flag occurrences
+// (STORY-OP-3, DEC-CLI-1), as parsed by parseRunLikeArgs; resolveSelectors
+// folds in PR_POOL_ONLY/PR_POOL_DISABLE before prepareRun applies them.
+func runRunUntilIdle(only, disable []string) int {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	pr, code := prepareRun(ctx)
+	pr, code := prepareRun(ctx, resolveSelectors(only, disable))
 	if code != exitOK {
 		return code
 	}
@@ -235,11 +261,14 @@ func runRunUntilIdle() int {
 // participants throughout — the socket Accept loop runs the whole time,
 // sharing the SAME *eventqueue.Queue the produce/dispatch loop drives, so a
 // push arriving mid-tick is picked up on the next dispatch.
-func runRun() int {
+//
+// only/disable are this invocation's --only/--disable flag occurrences
+// (STORY-OP-3, DEC-CLI-1); see runRunUntilIdle's doc comment.
+func runRun(only, disable []string) int {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	pr, code := prepareRun(ctx)
+	pr, code := prepareRun(ctx, resolveSelectors(only, disable))
 	if code != exitOK {
 		return code
 	}
