@@ -314,28 +314,34 @@ fleet-claim race, so the child is never both workable and ungated.
    ```
 
 2. CONFIRM the child is NOT WORKABLE — by READINESS, never by reading `status`.
-   `bd create --defer` applies the defer but leaves the child at `status: open`
-   (confirmed 2026-08-13), and `deferred_until` reads `null` in the `bd show --json`
-   projection even after an update that DID set the status — so NEITHER field is a
-   usable check, and a field read reports a FALSE failure. That false reading is
-   dangerous: the "repair" for it is to drop or re-order the mandatory deferred-first
-   step, which OPENS the fleet-claim race. Assert the OUTCOME the ordering exists to
-   produce (**P-1**):
+   NEITHER field is a usable check: on `bd 1.2.2 (dev)`, `bd create --defer` returns
+   `status: deferred` with the defer in `defer_until` (observed 2026-08-21; an earlier
+   2026-08-13 observation of `status: open` has since drifted), while `deferred_until`
+   reads `null` in the `bd show --json` projection — so which field carries the truth
+   has already changed once underneath this instruction, and a field read reports a
+   FALSE failure. That false reading is dangerous: the "repair" for it is to drop or
+   re-order the mandatory deferred-first step, which OPENS the fleet-claim race. Assert
+   the OUTCOME the ordering exists to produce (**P-1**):
 
    ```bash
    # -n 0: bd ready caps at 100 rows by default, so a capped query proves nothing.
    # NO --exclude-label human: absence would then prove the LABEL, not the defer.
-   # The --include-deferred half is the positive control -- without it, an erroring
-   # or empty bd ready satisfies "absent" vacuously.
-   bd ready --json -n 0 --include-deferred | jq -e --arg id "<child>" 'any(.data[]?; .id == $id)' >/dev/null &&
-     bd ready --json -n 0 | jq -e --arg id "<child>" 'all(.data[]?; .id != $id)' >/dev/null &&
-     echo "OK: <child> is not workable" || echo "FAIL: <child> is workable -- do NOT gate"
+   # Positive control = a NON-EMPTY .data: it proves bd ready ran and is not vacuously
+   # empty, so the absence half carries weight. Both halves read ONE snapshot, so the
+   # control cannot pass against a different query than the absence check.
+   # NOT --include-deferred: that flag re-admits only status:open beads with a future
+   # defer_until, never status:deferred ones -- so it can never see the child you just
+   # created, and as a control it would invert the verdict (bead tc-8x45).
+   READY="$(bd ready --json -n 0)"
+   jq -e '(.data // []) | length > 0' <<<"$READY" >/dev/null &&
+     jq -e --arg id "<child>" 'all(.data[]?; .id != $id)' <<<"$READY" >/dev/null &&
+     echo "OK: <child> is not workable" || echo "FAIL: <child> is workable, or bd ready is broken -- do NOT gate"
    ```
 
-   On FAIL the child is born workable and a peer draining `bd ready` can claim it: do
-   NOT attach gates. Re-apply the defer with
-   `bd update <child> --defer 2126-01-01 --actor "ID"` and re-check; if it stays
-   workable, do NOT close the impl bead — route the impl bead to STUCK.
+   On FAIL — the child is present in `bd ready`, or `bd ready` itself came back empty or
+   erroring, in which case its absence proves nothing — do NOT attach gates. Re-apply
+   the defer with `bd update <child> --defer 2126-01-01 --actor "ID"` and re-check; if
+   it stays workable, do NOT close the impl bead — route the impl bead to STUCK.
 
 3. Attach a gate on the landed commit — one per changed repo — and CONFIRM each
    succeeds:
@@ -355,9 +361,9 @@ fleet-claim race, so the child is never both workable and ungated.
    bd update <child> --defer "" --actor "ID"
    ```
 
-   Then re-run ONLY step 2's second (absence) command: the child MUST still be absent
-   from `bd ready`. Skip the `--include-deferred` positive control here — the gates,
-   not a defer, are now what hold the child, and that flag does not re-admit it.
+   Then re-run step 2's check IN FULL: the child MUST still be absent from `bd ready`.
+   The positive control still applies unchanged — it tests the QUERY, not the defer —
+   and the gates, not a defer, are now what hold the child.
 
    If ANY `pb gate create` failed: leave the child DEFERRED (do NOT un-defer), do
    NOT close the impl bead, and route the impl bead to STUCK so a human resolves

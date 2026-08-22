@@ -39,19 +39,26 @@ concurrent agent draining `bd ready` can grab it in the gap.
    ```
 
    Then CONFIRM the bead is NOT WORKABLE — by READINESS, never by reading `status`.
-   `bd create --defer` applies the defer but leaves the new bead at `status: open`
-   (confirmed 2026-08-13), and `deferred_until` reads `null` in the `bd show --json`
-   projection even after an update that DID set the status — so a field read reports a
+   NEITHER field is a usable check: on `bd 1.2.2 (dev)`, `bd create --defer` returns
+   `status: deferred` with the defer in `defer_until` (observed 2026-08-21; an earlier
+   2026-08-13 observation of `status: open` has since drifted), while `deferred_until`
+   reads `null` in the `bd show --json` projection — so which field carries the truth
+   has already changed once underneath this instruction, and a field read reports a
    FALSE failure. Assert the OUTCOME the ordering exists to produce (**P-1**):
 
    ```bash
    # -n 0: bd ready caps at 100 rows by default, so a capped query proves nothing.
    # NO --exclude-label human: absence would then prove the LABEL, not the defer.
-   # The --include-deferred half is the positive control -- without it, an erroring
-   # or empty bd ready satisfies "absent" vacuously.
-   bd ready --json -n 0 --include-deferred | jq -e --arg id "<BEAD>" 'any(.data[]?; .id == $id)' >/dev/null &&
-     bd ready --json -n 0 | jq -e --arg id "<BEAD>" 'all(.data[]?; .id != $id)' >/dev/null &&
-     echo "OK: <BEAD> is not workable" || echo "FAIL: <BEAD> is workable -- do NOT gate"
+   # Positive control = a NON-EMPTY .data: it proves bd ready ran and is not vacuously
+   # empty, so the absence half carries weight. Both halves read ONE snapshot, so the
+   # control cannot pass against a different query than the absence check.
+   # NOT --include-deferred: that flag re-admits only status:open beads with a future
+   # defer_until, never status:deferred ones -- so it can never see the bead you just
+   # created, and as a control it would invert the verdict (bead tc-8x45).
+   READY="$(bd ready --json -n 0)"
+   jq -e '(.data // []) | length > 0' <<<"$READY" >/dev/null &&
+     jq -e --arg id "<BEAD>" 'all(.data[]?; .id != $id)' <<<"$READY" >/dev/null &&
+     echo "OK: <BEAD> is not workable" || echo "FAIL: <BEAD> is workable, or bd ready is broken -- do NOT gate"
    ```
 
 3. **Attach the gate** on the most recent commit (the default, recommended,
@@ -69,9 +76,9 @@ concurrent agent draining `bd ready` can grab it in the gap.
    bd update <BEAD> --defer ""
    ```
 
-   Re-run ONLY step 2's second (absence) command: the bead MUST still be absent from
-   `bd ready`. Skip the `--include-deferred` positive control here — the gate, not a
-   defer, is now what holds the bead, and that flag does not re-admit it.
+   Re-run step 2's check IN FULL: the bead MUST still be absent from `bd ready`. The
+   positive control still applies unchanged — it tests the QUERY, not the defer — and
+   the gate, not a defer, is now what holds the bead.
 
 The bead stays out of `bd ready` until someone runs `pn workspace apply`; the
 apply's post-hook runs `pb gate check`, which resolves the gate once the change's
