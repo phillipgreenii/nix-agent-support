@@ -39,6 +39,16 @@ type Observer interface {
 	OnEnqueue(evt Event)
 	OnAccept(eventID, listenerID string)
 	OnUnconsumedExpired(evtType string)
+	// OnDeclined fires on a PRE-ACCEPT decline — Listener.Offer returning false
+	// (INV-FAIL-1) — the one delivery-side failure signal pr-pool measures
+	// (operator scope-cut 2026-07-28: everything post-accept is permanently out
+	// of scope). It fires on EVERY declined offer for evtType, not only the
+	// terminal (INV-EVT-4 last-attempt) one: a single Offer()==false is the only
+	// place both a graceful busy decline and an outright dispatch failure funnel
+	// through, and the Observer boundary carries no way to tell them apart, so
+	// under-counting a chronically busy handler's backlog until its final,
+	// expiry-bound attempt would hide the very signal this hook exists for.
+	OnDeclined(evtType string)
 }
 
 type noopObserver struct{}
@@ -46,6 +56,7 @@ type noopObserver struct{}
 func (noopObserver) OnEnqueue(Event)            {}
 func (noopObserver) OnAccept(string, string)    {}
 func (noopObserver) OnUnconsumedExpired(string) {}
+func (noopObserver) OnDeclined(string)          {}
 
 // EnqueueResult reports whether an enqueue added a new event or was dropped as
 // a duplicate of a still-retained id (INV-EVT-3).
@@ -478,13 +489,17 @@ func (q *Queue) Dispatch() (accepted int) {
 		if !p.accepted {
 			// A PRE-ACCEPT decline. Nothing DURABLE about the attempt is recorded —
 			// no counter, nothing on disk (DEC-EVENT-1: the core keeps no attempt
-			// history). The single expiry comparison already made in phase 1 is the
-			// whole decision: past `expiresAt` that attempt was the last one this
-			// listener is owed (INV-EVT-4), so settle the pair and let its head
-			// advance; before it, the decline is simply a re-offer condition
-			// (INV-FAIL-1), and the IN-MEMORY (transient, unpersisted) retry-cadence
-			// bookkeeping advances so the next offer waits at least INV-FAIL-2's
-			// cadence rather than the very next Dispatch pass.
+			// history) — but it IS a delivery-side failure signal (INV-OBS-1 /
+			// INV-FAIL-1), so the observer sees every occurrence regardless of
+			// lastAttempt (see OnDeclined's doc). The single expiry comparison
+			// already made in phase 1 is the whole retention decision: past
+			// `expiresAt` that attempt was the last one this listener is owed
+			// (INV-EVT-4), so settle the pair and let its head advance; before it,
+			// the decline is simply a re-offer condition (INV-FAIL-1), and the
+			// IN-MEMORY (transient, unpersisted) retry-cadence bookkeeping advances
+			// so the next offer waits at least INV-FAIL-2's cadence rather than the
+			// very next Dispatch pass.
+			q.obs.OnDeclined(p.evt.Type)
 			if p.lastAttempt {
 				e.settled[lid] = true
 				p.ls.resetBackoff() // nothing left to back off from once settled

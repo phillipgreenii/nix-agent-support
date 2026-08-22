@@ -21,6 +21,7 @@ import (
 // end-to-end through the queue.
 type harness struct {
 	reader  *sdkmetric.ManualReader
+	mp      metric.MeterProvider
 	emitter *Emitter
 	q       *eventqueue.Queue
 	clk     *mockClock
@@ -47,7 +48,7 @@ func newHarness(t *testing.T) *harness {
 	if err != nil {
 		t.Fatalf("New queue: %v", err)
 	}
-	return &harness{reader: reader, emitter: emitter, q: q, clk: clk}
+	return &harness{reader: reader, mp: mp, emitter: emitter, q: q, clk: clk}
 }
 
 func (h *harness) collect(t *testing.T) metricdata.ResourceMetrics {
@@ -218,6 +219,61 @@ func TestNoopHooks(t *testing.T) {
 	h.emitter.OnAccept("e", "l")
 }
 
+// OnDeclined — the queue's pre-accept-decline / dispatch-failure signal
+// (eventqueue.Observer, INV-FAIL-1) — feeds the SAME pr_pool.failures counter
+// RecordFailure does, labeled with the one class knowable at that call site.
+func TestOnDeclinedFeedsFailuresCounter(t *testing.T) {
+	h := newHarness(t)
+	h.emitter.OnDeclined("review-requested")
+	h.emitter.OnDeclined("review-requested")
+	h.emitter.OnDeclined("push-requested")
+
+	m := findMetric(t, h.collect(t), MetricFailures)
+	if got := sumFor(m, "class", FailureClassDeclined); got != 3 {
+		t.Fatalf("failures[%s] = %d, want 3 (evtType is not part of the label set)", FailureClassDeclined, got)
+	}
+}
+
+// Integration through the queue: a real pre-accept decline in Dispatch reaches
+// the failures counter via OnDeclined — proving the production call site, not
+// just the method in isolation.
+func TestDeclineThroughQueueFeedsFailuresCounter(t *testing.T) {
+	h := newHarness(t)
+	l := &decliningListener{typ: "review-requested"}
+	h.q.Register(l)
+	h.enqueue(t, "e1", "review-requested", 10*time.Minute)
+
+	h.q.Dispatch() // pre-accept decline: l always declines
+
+	m := findMetric(t, h.collect(t), MetricFailures)
+	if got := sumFor(m, "class", FailureClassDeclined); got != 1 {
+		t.Fatalf("failures[%s] = %d, want 1 after one Dispatch-path decline", FailureClassDeclined, got)
+	}
+}
+
+// decliningListener is a minimal eventqueue.Listener that always declines
+// (pre-accept, busy) events of its bound type — enough to drive Dispatch's
+// Offer()==false branch without pulling in eventqueue's own test doubles
+// (unexported to that package).
+type decliningListener struct{ typ string }
+
+func (decliningListener) ID() string { return "declining" }
+func (l decliningListener) Matches(e eventqueue.Event) bool {
+	return e.Type == l.typ
+}
+func (decliningListener) Offer(eventqueue.Event) bool { return false }
+
+// acceptingListener is a minimal eventqueue.Listener that always ACCEPTS
+// events of its bound type — a real accept path (as opposed to
+// decliningListener's decline) for exercising DepthByType/Flush together.
+type acceptingListener struct{ typ string }
+
+func (acceptingListener) ID() string { return "accepting" }
+func (l acceptingListener) Matches(e eventqueue.Event) bool {
+	return e.Type == l.typ
+}
+func (acceptingListener) Offer(eventqueue.Event) bool { return true }
+
 // New surfaces an instrument-registration error rather than panicking.
 func TestNewInstrumentError(t *testing.T) {
 	if _, err := New(failMP{}, func() map[string]int { return nil }); err == nil {
@@ -236,6 +292,38 @@ type failMeter struct{ noop.Meter }
 
 func (failMeter) Int64Counter(string, ...metric.Int64CounterOption) (metric.Int64Counter, error) {
 	return nil, errors.New("instrument boom")
+}
+
+// Flush against the no-op MeterProvider default (INV-OBS-1: core stays
+// unaware of any concrete backend) must be a safe no-op, never an error — the
+// no-op provider implements no ForceFlush at all.
+func TestFlushNoopProviderIsSafe(t *testing.T) {
+	if err := Flush(context.Background(), noop.NewMeterProvider()); err != nil {
+		t.Fatalf("Flush(noop provider) = %v, want nil", err)
+	}
+}
+
+// Flush against a REAL MeterProvider forces its reader to collect immediately
+// rather than waiting for a periodic tick — the acceptance criterion this
+// helper exists for: "scrape after a short run reports non-empty depth."
+// sdkmetric.NewManualReader has no periodic tick of its own, so this proves
+// ForceFlush is actually invoked (a stub Flush that silently did nothing would
+// still pass a bare "Collect works" test, but this drives it through the SAME
+// harness/queue path run-until-idle uses, immediately before the collect that
+// stands in for the scrape).
+func TestFlushRealProviderReportsNonEmptyDepth(t *testing.T) {
+	h := newHarness(t)
+	h.q.Register(acceptingListener{typ: "review-requested"})
+	h.enqueue(t, "e1", "review-requested", 10*time.Minute)
+	h.q.Dispatch() // accepted; still RETAINED (and so still counted) until it expires+sweeps
+
+	if err := Flush(context.Background(), h.mp); err != nil {
+		t.Fatalf("Flush: %v", err)
+	}
+	rm := h.collect(t)
+	if got := gaugeVal(rm, MetricQueueDepth, "type", "review-requested"); got != 1 {
+		t.Fatalf("queue_depth[review-requested] after Flush = %d, want 1 (non-empty depth reported)", got)
+	}
 }
 
 // --- helpers --------------------------------------------------------------

@@ -79,6 +79,7 @@ type recordingObserver struct {
 	enqueued          []string
 	accepted          []string
 	unconsumedExpired []string
+	declined          []string
 }
 
 func (o *recordingObserver) OnEnqueue(e Event)       { o.enqueued = append(o.enqueued, e.ID) }
@@ -86,6 +87,7 @@ func (o *recordingObserver) OnAccept(id, lid string) { o.accepted = append(o.acc
 func (o *recordingObserver) OnUnconsumedExpired(t string) {
 	o.unconsumedExpired = append(o.unconsumedExpired, t)
 }
+func (o *recordingObserver) OnDeclined(t string) { o.declined = append(o.declined, t) }
 
 // evt builds a DEFAULT event: neither `at` nor `expiresAt` set. The core resolves
 // both to its own ingest-now, so the event is BORN EXPIRED (INV-EVT-4) — offered
@@ -207,6 +209,13 @@ func TestBornExpiredDefaultOfferedOnceThenDropped(t *testing.T) {
 	if !equal(l.offered, []string{"e1"}) {
 		t.Fatalf("offers = %v, want exactly one offer of e1 (the one owed attempt)", l.offered)
 	}
+	// The one attempt was a PRE-ACCEPT decline (INV-FAIL-1 / INV-OBS-1): the
+	// observer must see it even though this same decline is also the terminal
+	// (INV-EVT-4) one — OnDeclined fires on every occurrence, not only a
+	// non-terminal re-offer.
+	if !equal(obs.declined, []string{"T"}) {
+		t.Fatalf("declined = %v, want [T] — the one (terminal) decline", obs.declined)
+	}
 	// That attempt was the last one owed, so nothing is re-offered...
 	q.Dispatch()
 	if !equal(l.offered, []string{"e1"}) {
@@ -270,6 +279,11 @@ func TestExpiredEventIsOfferedToEveryMatchingHandler(t *testing.T) {
 	// a accepted, so this is NOT an unconsumed-expired miss even though b declined.
 	if len(obs.unconsumedExpired) != 0 {
 		t.Fatalf("unconsumed-expired = %v, want none (a accepted it)", obs.unconsumedExpired)
+	}
+	// b's decline is still a delivery-side failure signal (INV-OBS-1) even though
+	// the event overall was consumed by a.
+	if !equal(obs.declined, []string{"T"}) {
+		t.Fatalf("declined = %v, want [T] — b's decline, independent of a's accept", obs.declined)
 	}
 }
 
@@ -426,7 +440,8 @@ func TestPerListenerCursorIndependence(t *testing.T) {
 // unexpired (same head), once the handler retry cadence (INV-FAIL-2) elapses.
 func TestPreAcceptBusyReoffer(t *testing.T) {
 	clk := newClock()
-	q := newQueue(t, clk, WithRetryBackoff(backoff.Policy{Initial: time.Second, Factor: 2, Max: time.Minute}))
+	obs := &recordingObserver{}
+	q := newQueue(t, clk, WithObserver(obs), WithRetryBackoff(backoff.Policy{Initial: time.Second, Factor: 2, Max: time.Minute}))
 	l := newListener("h", "T")
 	l.busyRemaining["e1"] = 2 // decline twice, accept on the third offer
 	q.Register(l)
@@ -442,6 +457,11 @@ func TestPreAcceptBusyReoffer(t *testing.T) {
 	}
 	if !equal(l.accepted, []string{"e1"}) {
 		t.Fatalf("accepted = %v, want [e1]", l.accepted)
+	}
+	// OnDeclined (INV-OBS-1) fires on the two NON-terminal declines only — the
+	// third offer is an ACCEPT, so it must not appear here.
+	if !equal(obs.declined, []string{"T", "T"}) {
+		t.Fatalf("declined = %v, want [T T] — one per pre-accept decline, none for the eventual accept", obs.declined)
 	}
 }
 

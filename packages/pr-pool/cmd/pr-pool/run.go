@@ -10,12 +10,16 @@ import (
 	"syscall"
 	"time"
 
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/metric/noop"
+
 	"github.com/phillipgreenii/pr-pool/internal/beads"
 	"github.com/phillipgreenii/pr-pool/internal/ccpool"
 	"github.com/phillipgreenii/pr-pool/internal/config"
 	"github.com/phillipgreenii/pr-pool/internal/core"
 	"github.com/phillipgreenii/pr-pool/internal/eventlog"
 	"github.com/phillipgreenii/pr-pool/internal/eventqueue"
+	"github.com/phillipgreenii/pr-pool/internal/metrics"
 	"github.com/phillipgreenii/pr-pool/internal/orchestrator"
 	"github.com/phillipgreenii/pr-pool/internal/roles"
 )
@@ -36,18 +40,34 @@ const idleDrainTick = 500 * time.Millisecond
 // Listen+Accept; production `drain` ran the retired internal/eventbus +
 // internal/orchestrator.DrainOnce path instead.
 //
+// It also wires ONE metrics.Emitter into both production seams that can drive
+// it — eventqueue.WithObserver at queue construction and core.Options.Observer
+// at Listen — so a single emitter answers both eventqueue.Observer and
+// core.IngestObserver, matching internal/metrics/metrics_test.go's newHarness
+// circular-construction pattern: q is declared (as this function's named
+// return) before New(mp, depthFn) closes over it, then constructed for real
+// with WithObserver(emitter). mp defaults to the OTel no-op provider
+// (INV-OBS-1: core stays unaware of any concrete monitoring backend; binding a
+// real one is a deployment concern this function does not take on).
+//
 // The returned storeClose MUST be deferred by the caller: eventqueue.Queue owns
 // no Close of its own (Store is an injected seam), so the file handle beneath it
 // is this function's caller's to release.
-func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrator) (svc *core.Service, q *eventqueue.Queue, storeClose func() error, err error) {
+func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrator) (svc *core.Service, q *eventqueue.Queue, mp metric.MeterProvider, storeClose func() error, err error) {
 	store, err := eventqueue.NewFileStore(filepath.Join(cfg.LogDir, "queue.jsonl"))
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("open event queue: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("open event queue: %w", err)
 	}
-	q, err = eventqueue.New(store, eventqueue.WithRetryBackoff(cfg.RetryBackoff))
+	mp = noop.NewMeterProvider()
+	emitter, err := metrics.New(mp, func() map[string]int { return q.DepthByType() })
 	if err != nil {
 		_ = store.Close()
-		return nil, nil, nil, fmt.Errorf("construct event queue: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("construct metrics emitter: %w", err)
+	}
+	q, err = eventqueue.New(store, eventqueue.WithRetryBackoff(cfg.RetryBackoff), eventqueue.WithObserver(emitter))
+	if err != nil {
+		_ = store.Close()
+		return nil, nil, nil, nil, fmt.Errorf("construct event queue: %w", err)
 	}
 	for _, r := range cfg.Roles {
 		if !r.Enabled {
@@ -64,12 +84,13 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 		LogDir:   cfg.LogDir,
 		Queue:    q,
 		Bindings: core.NewBindings(declaredBindTypes(cfg.Roles)...),
+		Observer: emitter,
 	})
 	if err != nil {
 		_ = store.Close()
-		return nil, nil, nil, fmt.Errorf("start core: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("start core: %w", err)
 	}
-	return svc, q, store.Close, nil
+	return svc, q, mp, store.Close, nil
 }
 
 // declaredBindTypes collects every event type SOME configured role binds,
@@ -173,7 +194,7 @@ func runRunUntilIdle() int {
 		return exitOK // NOTE: gated exit boots no core and tears nothing down (nothing was created)
 	}
 
-	svc, q, storeClose, err := bootCore(ctx, pr.cfg, pr.o)
+	svc, q, mp, storeClose, err := bootCore(ctx, pr.cfg, pr.o)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "run-until-idle:", err)
 		return exitGeneric
@@ -198,6 +219,12 @@ func runRunUntilIdle() int {
 		fmt.Fprintln(os.Stderr, "run-until-idle:", err)
 		return exitGeneric
 	}
+	// Force a final metrics snapshot before exit: without this, a short run that
+	// starts and finishes between two periodic collections of a REAL backend
+	// would report nothing (the no-op default has nothing to flush regardless).
+	if err := metrics.Flush(ctx, mp); err != nil {
+		slog.Warn("run-until-idle: metrics flush failed", "err", err)
+	}
 	slog.Info("run-until-idle: queue drained")
 	return exitOK
 }
@@ -218,7 +245,7 @@ func runRun() int {
 	}
 	defer pr.cleanup()
 
-	svc, q, storeClose, err := bootCore(ctx, pr.cfg, pr.o)
+	svc, q, _, storeClose, err := bootCore(ctx, pr.cfg, pr.o)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "run:", err)
 		return exitGeneric
