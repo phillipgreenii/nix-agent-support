@@ -100,7 +100,7 @@ func TestBotVerdictApprovals_LatestUpdatedWinsOverEarlierCreated(t *testing.T) {
 	}
 	allowlist := approverAllowlistSet([]string{"approver-one"})
 
-	got := botVerdictApprovals(comments, allowlist, clf)
+	got, _ := botVerdictApprovals(comments, allowlist, clf)
 	if len(got) != 1 {
 		t.Fatalf("want 1 approval, got %d: %+v", len(got), got)
 	}
@@ -134,7 +134,7 @@ func TestBotVerdictApprovals_EqualUpdatedAtTiebreak(t *testing.T) {
 	}
 	allowlist := approverAllowlistSet([]string{"approver-one"})
 
-	got := botVerdictApprovals(comments, allowlist, clf)
+	got, _ := botVerdictApprovals(comments, allowlist, clf)
 	if len(got) != 1 {
 		t.Fatalf("want 1 approval, got %d: %+v", len(got), got)
 	}
@@ -168,7 +168,7 @@ func TestBotVerdictApprovals_EmptyUpdatedAtFallsBackToCreatedAt(t *testing.T) {
 	}
 	allowlist := approverAllowlistSet([]string{"approver-one"})
 
-	got := botVerdictApprovals(comments, allowlist, clf)
+	got, _ := botVerdictApprovals(comments, allowlist, clf)
 	if len(got) != 1 {
 		t.Fatalf("want 1 approval, got %d: %+v", len(got), got)
 	}
@@ -210,7 +210,7 @@ func TestBotVerdictApprovals_MiddleCommentWins(t *testing.T) {
 	}
 	allowlist := approverAllowlistSet([]string{"approver-one"})
 
-	got := botVerdictApprovals(comments, allowlist, clf)
+	got, _ := botVerdictApprovals(comments, allowlist, clf)
 	if len(got) != 1 {
 		t.Fatalf("want 1 approval, got %d: %+v", len(got), got)
 	}
@@ -236,7 +236,7 @@ func TestBotVerdictApprovals_NonAllowlistedLoginNeverApproves(t *testing.T) {
 	}
 	allowlist := approverAllowlistSet([]string{"approver-one"}) // does NOT include "not-an-approver"
 
-	got := botVerdictApprovals(comments, allowlist, clf)
+	got, _ := botVerdictApprovals(comments, allowlist, clf)
 	if len(got) != 0 {
 		t.Errorf("want 0 approvals for a non-allowlisted login, got %+v", got)
 	}
@@ -255,7 +255,7 @@ func TestBotVerdictApprovals_PerLoginIndependentGrouping(t *testing.T) {
 	}
 	allowlist := approverAllowlistSet([]string{"approver-one", "approver-two"})
 
-	got := botVerdictApprovals(comments, allowlist, clf)
+	got, _ := botVerdictApprovals(comments, allowlist, clf)
 	byLogin := map[string]verdict.Result{}
 	for _, bv := range got {
 		byLogin[bv.Approver] = bv.Result
@@ -283,7 +283,7 @@ func TestBotVerdictApprovals_InlineCommentsExcluded(t *testing.T) {
 	}
 	allowlist := approverAllowlistSet([]string{"approver-one"})
 
-	got := botVerdictApprovals(comments, allowlist, clf)
+	got, _ := botVerdictApprovals(comments, allowlist, clf)
 	if len(got) != 1 {
 		t.Fatalf("want 1 approval, got %d: %+v", len(got), got)
 	}
@@ -304,7 +304,7 @@ func TestBotVerdictApprovals_NoMatchSkipsEntirely(t *testing.T) {
 		comments := []api.Comment{
 			{ID: "c1", Author: "approver-one", UpdatedAt: "2026-01-01T00:00:00Z", Body: pendingBody()},
 		}
-		got := botVerdictApprovals(comments, allowlist, clf)
+		got, _ := botVerdictApprovals(comments, allowlist, clf)
 		if len(got) != 0 {
 			t.Errorf("want 0 approvals for a Pending-only comment, got %+v", got)
 		}
@@ -314,7 +314,7 @@ func TestBotVerdictApprovals_NoMatchSkipsEntirely(t *testing.T) {
 		comments := []api.Comment{
 			{ID: "c1", Author: "approver-two", UpdatedAt: "2026-01-01T00:00:00Z", Body: noMarkerBody()},
 		}
-		got := botVerdictApprovals(comments, allowlist, clf)
+		got, _ := botVerdictApprovals(comments, allowlist, clf)
 		if len(got) != 0 {
 			t.Errorf("want 0 approvals for a non-verdict comment, got %+v", got)
 		}

@@ -156,6 +156,22 @@ var (
 			Help: "daemon pre-spawn PR-head fetch failures by reason (credential|step_missing).",
 		}, []string{"reason"},
 	)
+
+	// VerdictPendingTotal counts bot verdict comments carrying a configured
+	// generation's BodyMarker that resolved no generation at all
+	// (verdict.Pending — see internal/verdict/verdict.go's Authority doc),
+	// labeled only by repo (pg2-4dz88.1.11; INV-APPROVAL-5 in
+	// docs/behavior/invariants.md requires this be observable). Deliberately
+	// NOT labeled by pr_number or approver login — see this file's header
+	// comment on cardinality. A body with NO configured marker at all
+	// (Authority Absent) is correctly not a verdict and MUST NOT increment
+	// this counter; see internal/sync/approver.go's botVerdictApprovals.
+	VerdictPendingTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "pg_pr_verdict_pending_total",
+			Help: "Bot verdict comments whose configured BodyMarker matched but no generation's grammar resolved a verdict, labeled by repo.",
+		}, []string{"repo"},
+	)
 )
 
 func init() {
@@ -177,6 +193,7 @@ func init() {
 		SnapshotPresent,
 		GHAuthFailuresTotal,
 		ReviewPreFetchFailuresTotal,
+		VerdictPendingTotal,
 	)
 }
 

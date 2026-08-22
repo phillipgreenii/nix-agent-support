@@ -12,6 +12,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/feedbackclassify"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/ownership"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/store"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/telemetry"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/provider/vcs"
 )
@@ -130,10 +131,39 @@ func (e *Engine) ingestFeedbackToStore(ctx context.Context, repo string, pr api.
 		fmt.Fprintf(os.Stderr, "pg-pr: ingest: building verdict classifier failed, skipping bot verdict approvals: %v\n", err)
 	} else {
 		allowlist := approverAllowlistSet(e.cfg().ApproverAllowlist)
-		for _, bv := range botVerdictApprovals(enriched.Comments, allowlist, clf) {
+		approvals, pending := botVerdictApprovals(enriched.Comments, allowlist, clf)
+		for _, bv := range approvals {
 			state := approverApprovalState(bv.Result)
 			if err := e.deps.Store.SetApproval(ctx, prID, bv.Approver, pr.HeadSHA, state, bv.ObservedAt); err != nil {
 				return fmt.Errorf("ingest: set approval (bot verdict %s) %s#%d: %w", bv.Approver, repo, pr.Number, err)
+			}
+		}
+		// Unmatched verdict marker signal (pg2-4dz88.1.11 / INV-APPROVAL-5):
+		// a Pending result means an allowlisted approver's winning comment
+		// carried a configured generation's BodyMarker but no generation's
+		// grammar resolved it — the same class of silent failure the old
+		// approval_regex mechanism had (a marker matched nothing and nothing
+		// reported it), now one layer down in the new parser. Counter is
+		// repo-labeled only (cardinality rule, internal/telemetry/metrics.go's
+		// header); PR number/login/generation context goes to the log line
+		// instead, following ingest.go's own fmt.Fprintf(os.Stderr, ...)
+		// convention used elsewhere in this function.
+		//
+		// Operator response: when this counter rises, re-derive the verdict
+		// grammar (internal/config.Config.VerdictGenerations) against a fresh
+		// sample of the bot's real comments — the shipped grammar no longer
+		// matches its current output format.
+		if len(pending) > 0 {
+			gens := e.cfg().VerdictGenerations
+			genIDs := make([]string, len(gens))
+			for i, g := range gens {
+				genIDs[i] = g.ID
+			}
+			for _, p := range pending {
+				telemetry.VerdictPendingTotal.WithLabelValues(repo).Inc()
+				fmt.Fprintf(os.Stderr,
+					"pg-pr: ingest: unmatched verdict marker: repo=%s pr=%d approver=%s observed_at=%s configured_generations=%d generation_ids=%v\n",
+					repo, pr.Number, p.Approver, p.ObservedAt, len(gens), genIDs)
 			}
 		}
 	}

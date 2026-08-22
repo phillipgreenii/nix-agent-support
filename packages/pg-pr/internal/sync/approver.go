@@ -18,6 +18,21 @@ type botVerdictApproval struct {
 	ObservedAt string
 }
 
+// botVerdictPending is one allowlisted approver whose current-cycle winning
+// top-level comment carried a configured generation's BodyMarker but
+// resolved no generation's grammar at all — verdict.Result.Authority ==
+// verdict.Pending (see internal/verdict/verdict.go's doc on Pending vs.
+// Absent). This is the "marker present, no generation matched" signal
+// pg2-4dz88.1.11 makes observable (docs/behavior/invariants.md's
+// `INV-APPROVAL-5`); it is DISTINCT from Absent (no marker at all), which
+// produces no botVerdictPending entry and must never be mistaken for this
+// signal — see botVerdictApprovals's doc.
+type botVerdictPending struct {
+	Approver string
+	// ObservedAt is commentEffectiveTime of the winning (unmatched) comment.
+	ObservedAt string
+}
+
 // commentEffectiveTime returns the timestamp used to order a comment for
 // latest-wins resolution: UpdatedAt when present, else CreatedAt.
 //
@@ -155,20 +170,25 @@ func buildVerdictClassifier(gens []config.VerdictGeneration) (*verdict.Classifie
 // The winning comment's body is classified exactly once via clf.Classify.
 //
 //   - Authority Approved or Withheld (a "definite" verdict) → returned as a
-//     botVerdictApproval for that login.
+//     botVerdictApproval for that login in the first return value.
 //   - Authority Pending (a configured BodyMarker matched but no
-//     generation's patterns resolved a Findings value) or Absent (no
-//     configured BodyMarker appeared at all) → NO entry for that login.
-//     This function deliberately does not invent a store state for
-//     either case (see approverApprovalState's doc); the caller simply
+//     generation's patterns resolved a Findings value) → NO
+//     botVerdictApproval for that login, but IS reported as a
+//     botVerdictPending in the second return value (pg2-4dz88.1.11): the
+//     body IS a verdict, just not a resolved one, and that is the exact
+//     "shipped grammar no longer matches" signal an operator needs to see.
+//   - Authority Absent (no configured BodyMarker appeared at all) → NO
+//     entry in EITHER return value. This function deliberately does not
+//     invent a store state or a pending signal for a comment that is not a
+//     verdict at all (see approverApprovalState's doc); the caller simply
 //     never calls SetApproval for that login this cycle, leaving any
 //     previously-recorded approval untouched — which is also why an
 //     ordinary non-verdict comment (Absent) posted by an approver after
 //     their real verdict comment can never silently erase it: it is
 //     evaluated as this cycle's candidate winner only if it is, in fact,
-//     the latest comment, and even then it simply produces no write rather
-//     than a false one.
-func botVerdictApprovals(comments []api.Comment, allowlist map[string]bool, clf *verdict.Classifier) []botVerdictApproval {
+//     the latest comment, and even then it simply produces no write and no
+//     pending signal rather than a false one.
+func botVerdictApprovals(comments []api.Comment, allowlist map[string]bool, clf *verdict.Classifier) (approvals []botVerdictApproval, pending []botVerdictPending) {
 	winners := map[string]api.Comment{}
 	order := make([]string, 0, len(allowlist)) // login first-seen order, for deterministic output
 
@@ -190,20 +210,29 @@ func botVerdictApprovals(comments []api.Comment, allowlist map[string]bool, clf 
 		}
 	}
 
-	out := make([]botVerdictApproval, 0, len(order))
+	approvals = make([]botVerdictApproval, 0, len(order))
 	for _, login := range order {
 		c := winners[login]
 		res := clf.Classify(c.Body)
-		if res.Authority != verdict.Approved && res.Authority != verdict.Withheld {
-			continue // Pending/Absent — no store-representable verdict; see doc above
+		switch res.Authority {
+		case verdict.Approved, verdict.Withheld:
+			approvals = append(approvals, botVerdictApproval{
+				Approver:   login,
+				Result:     res,
+				ObservedAt: commentEffectiveTime(c),
+			})
+		case verdict.Pending:
+			// Marker present, no generation matched — observable per
+			// pg2-4dz88.1.11 / INV-APPROVAL-5, but never store-representable
+			// (see doc above); the caller emits the counter+log for this.
+			pending = append(pending, botVerdictPending{
+				Approver:   login,
+				ObservedAt: commentEffectiveTime(c),
+			})
+		default: // verdict.Absent — not a verdict at all; no signal, no write.
 		}
-		out = append(out, botVerdictApproval{
-			Approver:   login,
-			Result:     res,
-			ObservedAt: commentEffectiveTime(c),
-		})
 	}
-	return out
+	return approvals, pending
 }
 
 // approverApprovalState maps a DEFINITE verdict.Result (Authority Approved
