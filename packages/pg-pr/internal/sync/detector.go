@@ -93,13 +93,14 @@ func buildTeamQuery(rcfg config.RepoConfig) string {
 
 // buildTeamQueries returns the searches whose UNION is the not-mine "to-review"
 // roster for one repo: the team-authors bucket (buildTeamQuery) plus — because
-// GitHub ANDs distinct qualifier types and so cannot OR labels/review-requested
-// into one query — a review-requested:<self> bucket, a reviewed-by:<self>
-// bucket, and one bucket per configured watch label. The broadened buckets
-// exclude my own PRs (-author:<self>) so a PR I own is never surfaced as
-// someone-else's-to-review (it stays in the mine roster and is still
-// self-reviewed). With no self login the broadened buckets are omitted (cannot
-// exclude-mine); only the authors bucket, if any, remains.
+// GitHub ANDs distinct qualifier types and so cannot OR labels/review-requested/
+// reviewed-by/assignee into one query — a review-requested:<self> bucket, a
+// reviewed-by:<self> bucket, an assignee:<self> bucket, and one bucket per
+// configured watch label. The broadened buckets exclude my own PRs
+// (-author:<self>) so a PR I own is never surfaced as someone-else's-to-review
+// (it stays in the mine roster and is still self-reviewed). With no self login
+// the broadened buckets are omitted (cannot exclude-mine); only the authors
+// bucket, if any, remains.
 //
 // The reviewed-by bucket keeps a PR I have ALREADY reviewed in the roster after
 // the review request that first surfaced it is satisfied: GitHub drops a PR from
@@ -125,6 +126,7 @@ func buildTeamQueries(rcfg config.RepoConfig, self string) []string {
 	base := "is:pr is:open repo:" + rcfg.Remote
 	qs = append(qs, base+" review-requested:"+self+" -author:"+self)
 	qs = append(qs, base+" reviewed-by:"+self+" -author:"+self)
+	qs = append(qs, base+" assignee:"+self+" -author:"+self)
 	for _, l := range rcfg.WatchLabels {
 		qs = append(qs, base+` label:"`+l+`" -author:`+self)
 	}
@@ -311,8 +313,8 @@ func (e *Engine) fingerprintTick(ctx context.Context, mineQ, teamQ *refreshQueue
 	newPrevTeam := map[prKey]string{}
 	for _, rcfg := range cfg.Repos {
 		// The "to-review" roster is the UNION of the team-authors, review-requested,
-		// reviewed-by, and per-label buckets (buildTeamQueries) — each a separate
-		// poll, since GitHub cannot OR those qualifier types in one query.
+		// reviewed-by, assignee, and per-label buckets (buildTeamQueries) — each a
+		// separate poll, since GitHub cannot OR those qualifier types in one query.
 		queries := buildTeamQueries(rcfg, cfg.SelfLogin)
 		if len(queries) == 0 {
 			continue

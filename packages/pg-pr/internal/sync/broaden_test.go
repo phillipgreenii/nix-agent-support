@@ -2,21 +2,24 @@ package sync
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/config"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/beads"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/provider/vcs"
 )
 
 // TestBuildTeamQueries: the "to-review" (not-mine) set is a UNION expressed as
 // SEPARATE searches (GitHub ANDs distinct qualifier types, so labels /
-// review-requested / reviewed-by cannot be OR-ed into one query): the
-// team-authors bucket, a review-requested:<self> bucket, a reviewed-by:<self>
-// bucket, and one bucket per configured watch label. The broadened buckets
-// exclude my own PRs (-author:<self>); the authors bucket is unchanged.
+// review-requested / reviewed-by / assignee cannot be OR-ed into one query):
+// the team-authors bucket, a review-requested:<self> bucket, a
+// reviewed-by:<self> bucket, an assignee:<self> bucket, and one bucket per
+// configured watch label. The broadened buckets exclude my own PRs
+// (-author:<self>); the authors bucket is unchanged.
 func TestBuildTeamQueries(t *testing.T) {
 	rcfg := config.RepoConfig{Remote: "o/r", TeamMembers: []string{"a", "b"}, WatchLabels: []string{"lbl-one", "lbl-two"}}
 	got := buildTeamQueries(rcfg, "me")
@@ -24,6 +27,7 @@ func TestBuildTeamQueries(t *testing.T) {
 		"is:pr is:open repo:o/r author:a author:b",
 		"is:pr is:open repo:o/r review-requested:me -author:me",
 		"is:pr is:open repo:o/r reviewed-by:me -author:me",
+		"is:pr is:open repo:o/r assignee:me -author:me",
 		`is:pr is:open repo:o/r label:"lbl-one" -author:me`,
 		`is:pr is:open repo:o/r label:"lbl-two" -author:me`,
 	}
@@ -31,23 +35,39 @@ func TestBuildTeamQueries(t *testing.T) {
 		t.Errorf("buildTeamQueries:\n got=%#v\nwant=%#v", got, want)
 	}
 
-	// No team members, but labels + requested + reviewed-by still broaden the set
-	// (the review set is independent of whether the repo has configured team
-	// authors) — the reviewed-by bucket in particular MUST NOT be gated on
-	// team_members, since a PR I am reviewing is mine to review either way.
+	// No team members, but labels + requested + reviewed-by + assignee still
+	// broaden the set (the review set is independent of whether the repo has
+	// configured team authors) — the reviewed-by and assignee buckets in
+	// particular MUST NOT be gated on team_members, since a PR I am reviewing
+	// or assigned to is mine to review either way.
 	noTeam := config.RepoConfig{Remote: "o/r", WatchLabels: []string{"lbl-one"}}
 	got2 := buildTeamQueries(noTeam, "me")
 	want2 := []string{
 		"is:pr is:open repo:o/r review-requested:me -author:me",
 		"is:pr is:open repo:o/r reviewed-by:me -author:me",
+		"is:pr is:open repo:o/r assignee:me -author:me",
 		`is:pr is:open repo:o/r label:"lbl-one" -author:me`,
 	}
 	if !reflect.DeepEqual(got2, want2) {
 		t.Errorf("buildTeamQueries (no team):\n got=%#v\nwant=%#v", got2, want2)
 	}
 
-	// Empty self => cannot exclude-mine, so NO broadened buckets; only the authors
-	// bucket (if any) survives.
+	// No team members AND no watch labels: the review-requested, reviewed-by,
+	// and assignee buckets are STILL present (acceptance criterion: "present
+	// even with no team members configured").
+	onlySelfBuckets := config.RepoConfig{Remote: "o/r"}
+	got2b := buildTeamQueries(onlySelfBuckets, "me")
+	want2b := []string{
+		"is:pr is:open repo:o/r review-requested:me -author:me",
+		"is:pr is:open repo:o/r reviewed-by:me -author:me",
+		"is:pr is:open repo:o/r assignee:me -author:me",
+	}
+	if !reflect.DeepEqual(got2b, want2b) {
+		t.Errorf("buildTeamQueries (no team, no labels):\n got=%#v\nwant=%#v", got2b, want2b)
+	}
+
+	// Empty self => cannot exclude-mine, so NO broadened buckets (including the
+	// new assignee bucket); only the authors bucket (if any) survives.
 	got3 := buildTeamQueries(config.RepoConfig{Remote: "o/r", TeamMembers: []string{"a"}, WatchLabels: []string{"x"}}, "")
 	if !reflect.DeepEqual(got3, []string{"is:pr is:open repo:o/r author:a"}) {
 		t.Errorf("buildTeamQueries (no self) = %#v", got3)
@@ -128,6 +148,29 @@ func TestMergeRosters_DedupsAndTracksComplete(t *testing.T) {
 	}
 }
 
+// TestMergeRosters_AllBucketsSamePR_OneEntry proves the multi-bucket de-dup at
+// the roster-merge layer: a PR returned by EVERY currently-existing bucket at
+// once (team-authors, review-requested, assignee, and two label buckets — the
+// post-assignee-bucket set) still merges to exactly ONE roster entry, not five
+// — asserted on roster LENGTH, not just presence.
+func TestMergeRosters_AllBucketsSamePR_OneEntry(t *testing.T) {
+	same := fp("o/r", 42, "same-head")
+	results := []vcs.FingerprintResult{
+		{PRs: []vcs.PRFingerprint{same}}, // team-authors
+		{PRs: []vcs.PRFingerprint{same}}, // review-requested
+		{PRs: []vcs.PRFingerprint{same}}, // assignee
+		{PRs: []vcs.PRFingerprint{same}}, // label:team/findev
+		{PRs: []vcs.PRFingerprint{same}}, // label:team/jvm-guild
+	}
+	roster, complete := mergeRosters(results)
+	if len(roster) != 1 {
+		t.Fatalf("PR present in every bucket must merge to exactly ONE roster entry, got %d: %+v", len(roster), roster)
+	}
+	if !complete {
+		t.Errorf("no truncation => complete")
+	}
+}
+
 // queryRosterVCS returns a roster per query substring so a test can prove the
 // team loop UNIONs the authors + review-requested + label buckets.
 type queryRosterVCS struct {
@@ -157,14 +200,17 @@ func drainQueue(q *refreshQueue) map[prKey]bool {
 
 // TestFingerprintTick_TeamLoopUnionsRequestedAndLabels (6b/B3): the daemon
 // detector must enqueue not only team-authored PRs but also PRs where I'm a
-// requested reviewer and PRs carrying a configured watch label — the broadened
-// review set. Without this, the daemon (which uses detector.go, NOT enumerate)
-// never sees them, so pr-pool never reviews them.
+// requested reviewer, PRs assigned to me, and PRs carrying a configured watch
+// label — the broadened review set. Without this, the daemon (which uses
+// detector.go, NOT enumerate) never sees them, so pr-pool never reviews them.
+// PR 13 (assignee-only case) proves the new assignee:<self> bucket alone is
+// enough to enqueue a PR (pg2-4dz88.11.4).
 func TestFingerprintTick_TeamLoopUnionsRequestedAndLabels(t *testing.T) {
 	vp := &queryRosterVCS{byQuery: map[string][]vcs.PRFingerprint{
 		"author:teammate":     {fp("o/r", 10, "a")}, // team-authors bucket
 		"review-requested:me": {fp("o/r", 11, "b")}, // requested bucket
 		"reviewed-by:me":      {fp("o/r", 13, "d")}, // reviewed-by bucket
+		"assignee:me":         {fp("o/r", 14, "e")}, // assignee bucket
 		`label:"lbl-one"`:     {fp("o/r", 12, "c")}, // label bucket
 	}}
 	e, err := New(Deps{
@@ -183,7 +229,7 @@ func TestFingerprintTick_TeamLoopUnionsRequestedAndLabels(t *testing.T) {
 	e.fingerprintTick(context.Background(), mineQ, teamQ, discardLogger())
 
 	enq := drainQueue(teamQ)
-	for _, n := range []int{10, 11, 12, 13} {
+	for _, n := range []int{10, 11, 12, 13, 14} {
 		if !enq[prKey{Repo: "o/r", Number: n}] {
 			t.Errorf("PR %d should be enqueued via the broadened team loop; enqueued=%+v", n, enq)
 		}
@@ -318,5 +364,75 @@ func TestFingerprintTick_CommentedAndTeamAuthoredStillRetrieved(t *testing.T) {
 
 	if enq := drainQueue(teamQ); !enq[prKey{Repo: "o/r", Number: 41}] {
 		t.Errorf("a commented-on PR that is also team-authored must still be retrieved; enqueued=%+v", enq)
+	}
+}
+
+// erroringBucketVCS returns an error for exactly the query containing errSub
+// (simulating one bucket's poll failing/timing out) and otherwise behaves
+// like queryRosterVCS, resolving the other buckets from byQuery.
+type erroringBucketVCS struct {
+	fakeVCS
+	errSub  string
+	byQuery map[string][]vcs.PRFingerprint
+}
+
+func (e *erroringBucketVCS) FingerprintPRs(_ context.Context, query string) (vcs.FingerprintResult, error) {
+	if strings.Contains(query, e.errSub) {
+		return vcs.FingerprintResult{}, errors.New("simulated bucket failure")
+	}
+	for sub, prs := range e.byQuery {
+		if strings.Contains(query, sub) {
+			return vcs.FingerprintResult{PRs: prs}, nil
+		}
+	}
+	return vcs.FingerprintResult{}, nil
+}
+
+// TestFingerprintTick_AssigneeBucketFailure_KeepsMergeIncompleteAndCarriesRoster
+// proves the assignee bucket is subject to the SAME partial-data handling as
+// every other team bucket (detector.go's bucketErr/complete plumbing): when
+// only the assignee:<self> poll fails, the repo's merge is marked incomplete,
+// so (a) the mass-close ("disappeared") guard does NOT fire for a
+// bd-tracked PR the (partial) roster didn't see this tick, and (b) that PR's
+// prior roster entry is carried forward into prevTeam rather than dropped —
+// mirroring TestDiffRoster_TruncatedSkipsDisappeared's guarantee, but driven
+// by a real per-bucket poll failure rather than a synthetic incomplete flag.
+func TestFingerprintTick_AssigneeBucketFailure_KeepsMergeIncompleteAndCarriesRoster(t *testing.T) {
+	vp := &erroringBucketVCS{
+		errSub: "assignee:me",
+		byQuery: map[string][]vcs.PRFingerprint{
+			"author:teammate": {fp("o/r", 20, "a")}, // team-authors bucket still succeeds
+		},
+	}
+	// A bd-tracked (open merge-request bead) PR #99 that the successful
+	// buckets this tick do NOT return — normally a "disappeared" candidate.
+	bdc := &refreshFakeBeads{
+		existing: &beads.MergeRequest{
+			ID:     "mr-99",
+			Fields: beads.MergeRequestFields{Repo: "o/r", PRNumber: 99},
+		},
+	}
+	e, err := New(Deps{
+		Cfg:   &config.Config{SelfLogin: "me", Repos: []config.RepoConfig{{Remote: "o/r", TeamMembers: []string{"teammate"}}}},
+		VCS:   map[string]VCSProvider{"github": vp},
+		Beads: bdc,
+		Now:   func() time.Time { return time.Now().UTC() },
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	e.prevMine = map[prKey]string{}
+	staleKey := prKey{Repo: "o/r", Number: 99}
+	e.prevTeam = map[prKey]string{staleKey: "stale-hash"} // last tick's roster hash for PR 99
+	mineQ, teamQ := newRefreshQueue(), newRefreshQueue()
+
+	e.fingerprintTick(context.Background(), mineQ, teamQ, discardLogger())
+
+	enq := drainQueue(teamQ)
+	if enq[staleKey] {
+		t.Errorf("a failed assignee bucket must disable disappeared-detection (partial data, no mass-close): PR 99 wrongly enqueued as disappeared, enqueued=%+v", enq)
+	}
+	if _, ok := e.prevTeam[staleKey]; !ok {
+		t.Errorf("PR 99's prior roster entry must be carried forward across an incomplete merge, got prevTeam=%+v", e.prevTeam)
 	}
 }

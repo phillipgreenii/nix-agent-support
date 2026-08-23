@@ -48,6 +48,11 @@ type PR struct {
 	// RequestedReviewers. Set by the sync layer (which knows self); consumed by the
 	// dashboard's "PRs to Review" match reason (pg2-ynhr.13 B2).
 	ReviewRequestedOfMe bool `json:"review_requested_of_me,omitempty"`
+	// AssignedToMe is true when the configured self login is among Assignees.
+	// Set by the sync layer (which knows self, via assignedToSelf) mirroring
+	// how ReviewRequestedOfMe is derived; consumed by the dashboard's "PRs to
+	// Review" match reason (pg2-4dz88.11.4).
+	AssignedToMe bool `json:"assigned_to_me,omitempty"`
 	// Mergeable is GitHub's merge-conflict signal: MERGEABLE | CONFLICTING |
 	// UNKNOWN. Populated by the GraphQL enrich path; empty on REST fallback.
 	Mergeable string `json:"mergeable,omitempty"`

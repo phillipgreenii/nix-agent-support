@@ -881,6 +881,9 @@ func (e *Engine) buildPRInput(ctx context.Context, pr api.PR, enriched *vcs.Enri
 	// (buildAndStoreSnapshot) reach — so the dashboard's "PRs to Review" match
 	// reason is consistent across both paths (pg2-ynhr.13 B2/B5 review #2).
 	pr.ReviewRequestedOfMe = reviewRequestedOfSelf(e.cfg().SelfLogin, pr.RequestedReviewers)
+	// Derive "assigned to me" the same way, from the provider's self-agnostic
+	// Assignees (pg2-4dz88.11.4) — same convergence-point rationale as above.
+	pr.AssignedToMe = assignedToSelf(e.cfg().SelfLogin, pr.Assignees)
 	in := snapshot.PRInput{
 		PR: pr,
 		Ownership: ownership.Classify(ownership.Engagement{

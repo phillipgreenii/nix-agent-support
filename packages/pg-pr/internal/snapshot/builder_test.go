@@ -67,8 +67,9 @@ func TestBuildSplitsMineFromReview(t *testing.T) {
 
 // TestBuild_MatchReasons: MatchReason explains why each PR is in the review set —
 // team-authored, review-requested (ReviewRequestedOfMe), reviewed-by-me (a
-// submitted review of mine), one label:<name> per matched watch label — and a PR
-// matching several criteria carries all reasons.
+// submitted review of mine), assigned-to-me (AssignedToMe), one label:<name>
+// per matched watch label — and a PR matching several criteria carries all
+// reasons, in that fixed order.
 func TestBuild_MatchReasons(t *testing.T) {
 	reg, _ := agentregistry.New(nil)
 	in := BuilderInput{
@@ -77,15 +78,16 @@ func TestBuild_MatchReasons(t *testing.T) {
 		WatchLabels: []string{"lbl-one", "lbl-two"},
 		Registry:    reg,
 		PRs: []PRInput{
-			{PR: api.PR{Repo: "o/r", Number: 2, Author: "bob"}, Ownership: ownership.Team},                                                         // team-authored
-			{PR: api.PR{Repo: "o/r", Number: 5, Author: "zara", ReviewRequestedOfMe: true}, Ownership: ownership.Team},                             // requested
-			{PR: api.PR{Repo: "o/r", Number: 6, Author: "yin", Labels: []string{"lbl-one", "unrelated"}}, Ownership: ownership.Team},               // labeled
-			{PR: api.PR{Repo: "o/r", Number: 7, Author: "bob", ReviewRequestedOfMe: true, Labels: []string{"lbl-two"}}, Ownership: ownership.Team}, // authored+requested+labeled
+			{PR: api.PR{Repo: "o/r", Number: 2, Author: "bob"}, Ownership: ownership.Team},                                                                             // team-authored
+			{PR: api.PR{Repo: "o/r", Number: 5, Author: "zara", ReviewRequestedOfMe: true}, Ownership: ownership.Team},                                                 // requested
+			{PR: api.PR{Repo: "o/r", Number: 6, Author: "yin", Labels: []string{"lbl-one", "unrelated"}}, Ownership: ownership.Team},                                   // labeled
+			{PR: api.PR{Repo: "o/r", Number: 7, Author: "bob", ReviewRequestedOfMe: true, AssignedToMe: true, Labels: []string{"lbl-two"}}, Ownership: ownership.Team}, // authored+requested+assigned+labeled
 			{ // reviewed by me only
 				PR:        api.PR{Repo: "o/r", Number: 9, Author: "zara"},
 				Reviews:   []api.Review{{ID: "r1", Author: "alice", State: "COMMENTED"}},
 				Ownership: ownership.Team,
 			},
+			{PR: api.PR{Repo: "o/r", Number: 10, Author: "zara", AssignedToMe: true}, Ownership: ownership.Team}, // assigned only
 		},
 	}
 	snap := Build(in)
@@ -96,8 +98,96 @@ func TestBuild_MatchReasons(t *testing.T) {
 	assertReasons(t, reasons[2], []string{"team-authored"})
 	assertReasons(t, reasons[5], []string{"review-requested"})
 	assertReasons(t, reasons[6], []string{"label:lbl-one"})
-	assertReasons(t, reasons[7], []string{"team-authored", "review-requested", "label:lbl-two"})
+	assertReasons(t, reasons[7], []string{"team-authored", "review-requested", "assigned-to-me", "label:lbl-two"})
 	assertReasons(t, reasons[9], []string{"reviewed-by-me"})
+	assertReasons(t, reasons[10], []string{"assigned-to-me"})
+}
+
+// TestBuildAdmitsAssignedToMeOnly proves a non-draft PRInput whose ONLY
+// qualifying reason is "assigned to me" (not team-authored, not requested,
+// no watch label) is admitted to out.Team carrying exactly the
+// MatchReasonAssignedToMe reason (pg2-4dz88.11.4, acceptance criterion 3).
+func TestBuildAdmitsAssignedToMeOnly(t *testing.T) {
+	snap := Build(BuilderInput{
+		Self: "alice",
+		PRs: []PRInput{{
+			PR:        api.PR{Repo: "o/r", Number: 9, Author: "zara", AssignedToMe: true},
+			Ownership: ownership.Team,
+		}},
+	})
+	if len(snap.Team) != 1 || snap.Team[0].Number != 9 {
+		t.Fatalf("PR assigned to me only must be admitted to Team, got %+v", snap.Team)
+	}
+	assertReasons(t, snap.Team[0].MatchReason, []string{MatchReasonAssignedToMe})
+}
+
+// TestBuild_SelfAssignedOwnPRStaysMine mirrors TestBuild_MinePRStaysMineEvenDraft
+// for the new bucket: a PR I authored AND assigned to myself lands in Mine,
+// never Team. This is the builder-side half of the "-author:<self> exclusion"
+// decided fact — the query layer excludes my own PRs from the broadened
+// buckets, and here the ownership-based dispatch (case
+// p.Ownership.ActsAsMine(), checked BEFORE the reasons switch) independently
+// keeps a self-authored PR out of the Team arm even if AssignedToMe were
+// somehow true.
+func TestBuild_SelfAssignedOwnPRStaysMine(t *testing.T) {
+	snap := Build(BuilderInput{
+		Self: "alice",
+		PRs: []PRInput{{
+			PR:        api.PR{Repo: "o/r", Number: 1, Author: "alice", AssignedToMe: true},
+			Ownership: ownership.Mine,
+		}},
+	})
+	if len(snap.Mine) != 1 || len(snap.Team) != 0 {
+		t.Fatalf("self-assigned own PR must stay Mine, not Team: mine=%+v team=%+v", snap.Mine, snap.Team)
+	}
+}
+
+// TestBuild_AssignmentRemoved_RowDisappears is the pure-builder half of the
+// EXIT rule (pg2-4dz88.11.4, acceptance criterion 4): rebuilding with the SAME
+// PR whose only qualifier (assigned-to-me) is removed drops the Team row on
+// that rebuild. (The companion "merge-request bead is untouched" half is
+// proven at the sync layer, since snapshot.Build never touches beads at all —
+// see internal/sync/refresh_test.go's
+// TestRefreshPR_AssignmentRemoved_RowDisappearsBeadUntouched.)
+func TestBuild_AssignmentRemoved_RowDisappears(t *testing.T) {
+	build := func(assigned bool) *Snapshot {
+		return Build(BuilderInput{
+			Self: "alice",
+			PRs: []PRInput{{
+				PR:        api.PR{Repo: "o/r", Number: 13, Author: "zara", AssignedToMe: assigned},
+				Ownership: ownership.Team,
+			}},
+		})
+	}
+	if snap := build(true); len(snap.Team) != 1 {
+		t.Fatalf("expected the row while assigned, got %+v", snap.Team)
+	}
+	if snap := build(false); len(snap.Team) != 0 {
+		t.Fatalf("expected the row to disappear once the ONLY qualifier (assigned-to-me) is removed, got %+v", snap.Team)
+	}
+}
+
+// TestBuild_LosesAssignmentKeepsOtherReason_ReducedReasonSet is the "mirror
+// case" the testing plan calls out: a PR that loses the assignment but keeps
+// ANOTHER live reason (team-authored here) stays in Team, with a reduced
+// MatchReason set rather than disappearing.
+func TestBuild_LosesAssignmentKeepsOtherReason_ReducedReasonSet(t *testing.T) {
+	reasonsFor := func(assigned bool) []string {
+		snap := Build(BuilderInput{
+			Self:        "alice",
+			TeamMembers: []string{"bob"},
+			PRs: []PRInput{{
+				PR:        api.PR{Repo: "o/r", Number: 12, Author: "bob", AssignedToMe: assigned},
+				Ownership: ownership.Team,
+			}},
+		})
+		if len(snap.Team) != 1 {
+			t.Fatalf("want 1 team row, got %d: %+v", len(snap.Team), snap.Team)
+		}
+		return snap.Team[0].MatchReason
+	}
+	assertReasons(t, reasonsFor(true), []string{"team-authored", "assigned-to-me"})
+	assertReasons(t, reasonsFor(false), []string{"team-authored"})
 }
 
 func assertReasons(t *testing.T, got, want []string) {

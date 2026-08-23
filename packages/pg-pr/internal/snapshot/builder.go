@@ -68,6 +68,10 @@ const (
 	// reason a PR I am actively reviewing loses its last match reason and Build
 	// drops it from the review set while it is still open and still waiting on me.
 	MatchReasonReviewedByMe = "reviewed-by-me"
+	// MatchReasonAssignedToMe fires when the configured self login is among
+	// the PR's assignees (PRInput.PR.AssignedToMe, derived upstream by the sync
+	// layer's assignedToSelf, mirroring ReviewRequestedOfMe) (pg2-4dz88.11.4).
+	MatchReasonAssignedToMe = "assigned-to-me"
 	// MatchReasonLabelPrefix is prepended to each matched watch-label name, e.g.
 	// "label:lbl-one".
 	MatchReasonLabelPrefix = "label:"
@@ -112,8 +116,8 @@ func hasSubmittedReviewBySelf(reviews []api.Review, self string) bool {
 }
 
 // matchReasons returns why PR p is in the review set: team-authored, requested
-// of me, already reviewed by me, and/or carrying configured watch labels (one
-// reason per matched label).
+// of me, already reviewed by me, assigned to me, and/or carrying configured
+// watch labels (one reason per matched label).
 func matchReasons(p PRInput, team map[string]struct{}, watchLabels []string, self string) []string {
 	var reasons []string
 	if isTeam(p.PR.Author, team) {
@@ -124,6 +128,9 @@ func matchReasons(p PRInput, team map[string]struct{}, watchLabels []string, sel
 	}
 	if hasSubmittedReviewBySelf(p.Reviews, self) {
 		reasons = append(reasons, MatchReasonReviewedByMe)
+	}
+	if p.PR.AssignedToMe {
+		reasons = append(reasons, MatchReasonAssignedToMe)
 	}
 	if len(watchLabels) > 0 && len(p.PR.Labels) > 0 {
 		watch := make(map[string]struct{}, len(watchLabels))
@@ -190,14 +197,14 @@ func Build(in BuilderInput) *Snapshot {
 		case !p.PR.Draft && len(reasons) > 0:
 			// "PRs to Review": a non-mine, non-draft PR that STILL qualifies — it
 			// carries at least one live match reason (team-authored ∪ review-requested
-			// ∪ reviewed-by-me ∪ watch label). Requiring a reason here — rather than
-			// admitting every non-draft non-mine PR — makes membership self-correcting:
-			// a PR that ENTERED the set (labeled/requested/reviewed) then lost the
-			// qualifier while still open+non-draft drops out instead of lingering with
-			// an empty MatchReason (pg2-ynhr.13 B5 review #1). That drop-out is a pure
-			// recomputation on the NEXT Build — there is no timer and no persisted
-			// "seen" state, and it does NOT close the PR's merge-request bead: bead
-			// closure is driven solely by the PR itself closing or merging
+			// ∪ reviewed-by-me ∪ assigned-to-me ∪ watch label). Requiring a reason here
+			// — rather than admitting every non-draft non-mine PR — makes membership
+			// self-correcting: a PR that ENTERED the set (labeled/requested/reviewed/
+			// assigned) then lost the qualifier while still open+non-draft drops out
+			// instead of lingering with an empty MatchReason (pg2-ynhr.13 B5 review #1).
+			// That drop-out is a pure recomputation on the NEXT Build — there is no timer
+			// and no persisted "seen" state, and it does NOT close the PR's merge-request
+			// bead: bead closure is driven solely by the PR itself closing or merging
 			// (internal/beadsbridge's EventPRClosed/EventPRMerged), never by a
 			// match-reason change. Reasons are still SOURCED from ingest (detector.go's
 			// buckets, B3); the builder only re-checks they hold. Others' drafts and

@@ -9,6 +9,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/event"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/ownership"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/snapshot"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/beads"
@@ -857,6 +858,86 @@ func TestRefreshPR_ConflictingTeamPR_DampensAttention(t *testing.T) {
 	}
 	if !sawAttention {
 		t.Fatalf("expected a pr.attention event for o/r#%d", pr.Number)
+	}
+}
+
+// TestRefreshPR_AssignmentRemoved_RowDisappearsBeadUntouched is the sync-layer
+// half of the EXIT rule (pg2-4dz88.11.4, decided fact #2 and acceptance
+// criterion 4): a PR open+non-draft whose ONLY qualifying reason is
+// "assigned to me" (author "zara" is on no team, requests no review, carries
+// no watch label) loses that qualifier on a later refresh with no other
+// change. Two things must hold:
+//   - the SNAPSHOT input flips AssignedToMe true->false across the two
+//     refreshes, and feeding each into snapshot.Build shows the dashboard Team
+//     row present, then absent;
+//   - the merge-request BEAD is untouched by that second refresh: bead
+//     closure/cascade fires only on a pr.closed/pr.merged event
+//     (internal/beadsbridge/bridge.go's project(), case
+//     store.EventPRClosed/EventPRMerged -> cascadeClose), and a PR that merely
+//     lost a snapshot match reason while staying open never emits either.
+func TestRefreshPR_AssignmentRemoved_RowDisappearsBeadUntouched(t *testing.T) {
+	db := store.OpenForTest(t)
+	bdc := &refreshFakeBeads{}
+	vp := newFakeVCS()
+	pr := api.PR{
+		Repo: "o/r", Number: 30, State: "open", Draft: false,
+		Author: "zara", URL: "https://github.com/o/r/pull/30",
+		Assignees: []string{"me"},
+	}
+	vp.views[keyOf("o/r", pr.Number)] = pr
+	e, err := New(Deps{
+		Cfg: &config.Config{
+			SelfLogin: "me",
+			Repos: []config.RepoConfig{
+				{Remote: "o/r", VCS: "github", TeamMembers: []string{"teammate"}},
+			},
+		},
+		VCS:      map[string]VCSProvider{"github": vp},
+		Beads:    bdc,
+		StateDir: t.TempDir(),
+		Store:    db,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	// No dispatcher wired: flushOutbox is a no-op, so every emitted event stays
+	// in the raw outbox for direct inspection across BOTH refreshes below.
+
+	in1, err := e.refreshPR(context.Background(), "o/r", pr.Number)
+	if err != nil {
+		t.Fatalf("refreshPR (assigned): %v", err)
+	}
+	if in1 == nil || !in1.PR.AssignedToMe {
+		t.Fatalf("expected an active input with AssignedToMe=true while assigned, got %+v", in1)
+	}
+	snap1 := snapshot.Build(snapshot.BuilderInput{Self: "me", PRs: []snapshot.PRInput{*in1}})
+	if len(snap1.Team) != 1 {
+		t.Fatalf("expected a Team row while assigned, got %+v", snap1.Team)
+	}
+
+	// Remove the assignment; nothing else about the PR changes.
+	pr.Assignees = nil
+	vp.views[keyOf("o/r", pr.Number)] = pr
+
+	in2, err := e.refreshPR(context.Background(), "o/r", pr.Number)
+	if err != nil {
+		t.Fatalf("refreshPR (unassigned): %v", err)
+	}
+	if in2 == nil || in2.PR.AssignedToMe {
+		t.Fatalf("expected AssignedToMe=false after the assignment is removed, got %+v", in2)
+	}
+	snap2 := snapshot.Build(snapshot.BuilderInput{Self: "me", PRs: []snapshot.PRInput{*in2}})
+	if len(snap2.Team) != 0 {
+		t.Fatalf("expected the Team row to disappear once the assignment is removed, got %+v", snap2.Team)
+	}
+
+	// Bead-lifecycle half: across BOTH refreshes, no pr.closed/pr.merged event
+	// was ever emitted — the merge-request bead is untouched by a
+	// match-reason-only change.
+	for _, ev := range collectOutboxEvents(t, db) {
+		if ev.Type == store.EventPRClosed || ev.Type == store.EventPRMerged {
+			t.Fatalf("assignment removal must NOT emit a close/merge event (the merge-request bead must stay untouched); got %v", ev.Type)
+		}
 	}
 }
 

@@ -216,11 +216,11 @@ func (c teamBeadClient) ListMergeRequests(context.Context, bool) ([]beads.MergeR
 }
 
 // TestFingerprintTick_ReviewedByBucketAddsExactlyOnePoll pins the per-tick search
-// COST. The pre-leaf baseline for one repo was 1 (mine) + 1 (team-authors) +
-// 1 (review-requested) + N (watch labels); adding the reviewed-by bucket must
-// raise that by EXACTLY ONE poll — the bucket is one more search per repo per
-// tick, not one per team member or per label. Computed from the config rather
-// than hardcoded so the "+1" is the assertion, not a magic total.
+// COST. The baseline for one repo — mine + team-authors + review-requested +
+// assignee (pg2-4dz88.11.4) + one per watch label — must rise by EXACTLY ONE
+// poll once the reviewed-by bucket is added: the bucket is one more search per
+// repo per tick, not one per team member or per label. Computed from the
+// config rather than hardcoded so the "+1" is the assertion, not a magic total.
 func TestFingerprintTick_ReviewedByBucketAddsExactlyOnePoll(t *testing.T) {
 	rcfg := config.RepoConfig{
 		Remote:      "o/r",
@@ -233,8 +233,8 @@ func TestFingerprintTick_ReviewedByBucketAddsExactlyOnePoll(t *testing.T) {
 
 	e.fingerprintTick(context.Background(), mineQ, teamQ, discardLogger())
 
-	// mine + team-authors + review-requested + one per watch label.
-	baseline := 1 + 1 + 1 + len(rcfg.WatchLabels)
+	// mine + team-authors + review-requested + assignee + one per watch label.
+	baseline := 1 + 1 + 1 + 1 + len(rcfg.WatchLabels)
 	want := baseline + 1 // the reviewed-by bucket
 	if got := len(vp.queries); got != want {
 		t.Errorf("per-tick polls = %d, want %d (pre-leaf baseline %d + 1 for reviewed-by); queries=%#v",
@@ -321,6 +321,49 @@ func TestFingerprintTick_FailedReviewedByPollKeepsPriorRoster(t *testing.T) {
 	// The surviving buckets still did their job.
 	if !enq[prKey{Repo: "o/r", Number: 61}] {
 		t.Errorf("a succeeding bucket's PRs must still be enqueued; enqueued=%+v", enq)
+	}
+}
+
+// TestFingerprintTick_CallCountFormula pins the per-tick GraphQL
+// fingerprint-search call count for a config with 1 repo, 1 team member, and
+// 2 watch labels (self configured) — the exact scenario named in the bead's
+// cost-accounting acceptance criterion, evaluated with BOTH new buckets
+// (reviewed-by, pg2-4dz88.11.2, and assignee, pg2-4dz88.11.4) present.
+//
+// Arithmetic (one FingerprintPRs call per query issued this tick):
+//
+//	mine query (always exactly 1, cross-repo)   = 1
+//	team-authors bucket (TeamMembers non-empty) = 1
+//	review-requested:<self> bucket              = 1
+//	reviewed-by:<self> bucket                   = 1
+//	assignee:<self> bucket                      = 1
+//	one bucket per configured watch label (2)   = 2
+//	                                       total = 7
+func TestFingerprintTick_CallCountFormula(t *testing.T) {
+	vp := &countingFingerprintVCS{res: vcs.FingerprintResult{RateLeft: 5000}}
+	e, err := New(Deps{
+		Cfg: &config.Config{
+			SelfLogin: "me",
+			Repos: []config.RepoConfig{
+				{Remote: "o/r", TeamMembers: []string{"teammate"}, WatchLabels: []string{"lbl-one", "lbl-two"}},
+			},
+		},
+		VCS:   map[string]VCSProvider{"github": vp},
+		Beads: noopBeads{},
+		Now:   func() time.Time { return time.Now().UTC() },
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	e.prevMine = map[prKey]string{}
+	e.prevTeam = map[prKey]string{}
+	mineQ, teamQ := newRefreshQueue(), newRefreshQueue()
+
+	e.fingerprintTick(context.Background(), mineQ, teamQ, discardLogger())
+
+	const want = 1 /* mine */ + 1 /* team-authors */ + 1 /* review-requested */ + 1 /* reviewed-by */ + 1 /* assignee */ + 2 /* watch labels */
+	if vp.calls != want {
+		t.Errorf("per-tick fingerprint-search calls = %d, want %d (1 repo / 1 team member / 2 watch labels, reviewed-by + assignee)", vp.calls, want)
 	}
 }
 
