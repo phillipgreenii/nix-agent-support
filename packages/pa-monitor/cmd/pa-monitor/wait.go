@@ -2,11 +2,15 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
 	"time"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	pb "github.com/phillipgreenii/pa-monitor/internal/proto"
 	"github.com/phillipgreenii/pa-monitor/internal/rpcclient"
@@ -76,13 +80,20 @@ func waitTimeout(stderr io.Writer) int {
 // deadline (bead pg2-yzw29).
 const reconnectPause = 500 * time.Millisecond
 
+// pushIntervalMs is the PushIntervalMs requested from the daemon's WatchState
+// stream below. pushBudget is DERIVED from this constant (not a separate
+// literal) so the 2x relationship it documents cannot drift out of sync if
+// this value ever changes — bumping pushIntervalMs alone moves pushBudget
+// with it, in code, not merely in a comment someone has to remember to
+// update to match.
+const pushIntervalMs = 1000
+
 // pushBudget is the longest gap between two state observations this wait treats
 // as normal, and it answers two questions with one number:
 //
 //   - WATCHDOG, within one stream: no push from the daemon inside this window is
-//     treated as a hung daemon, so break and reconnect. It is 2× the
-//     PushIntervalMs = 1000 requested below, so a healthy stream has a full
-//     interval of slack.
+//     treated as a hung daemon, so break and reconnect. It is 2× pushIntervalMs
+//     above, so a healthy stream has a full interval of slack.
 //   - CONSECUTIVENESS, across a reconnect as well: two observations further apart
 //     than this are not consecutive, so the later one starts a fresh idle streak
 //     (see the DECISION in waitUntilAgentsFinished).
@@ -91,7 +102,7 @@ const reconnectPause = 500 * time.Millisecond
 // declaration of the longest silence a healthy stream may have, so a gap that
 // exceeds it is one the loop has itself judged abnormal — which leaves the two
 // rules unable to disagree about whether the loop was observing.
-const pushBudget = 2 * time.Second
+const pushBudget = 2 * time.Duration(pushIntervalMs) * time.Millisecond
 
 // waitUntilAgentsFinished is the wait loop proper, split out of the os.Exit
 // wrapper above so tests can drive it against a fake daemon and observe both
@@ -191,7 +202,7 @@ func waitUntilAgentsFinished(p waitParams, stderr io.Writer) int {
 		// This is where the wait actually blocks, so THIS is the ctx that must
 		// carry the deadline (see the waitCtx comment above).
 		ctx, cancel := context.WithCancel(waitCtx)
-		stream, err := client.C.WatchState(ctx, &pb.WatchStateRequest{PushIntervalMs: 1000})
+		stream, err := client.C.WatchState(ctx, &pb.WatchStateRequest{PushIntervalMs: pushIntervalMs})
 		if err != nil {
 			cancel()
 			_ = client.Close()
@@ -253,6 +264,22 @@ func waitUntilAgentsFinished(p waitParams, stderr io.Writer) int {
 				break streamLoop
 			case r := <-recvCh:
 				if r.err != nil {
+					// A graceful daemon shutdown ends WatchState with a clean
+					// EOF BY DESIGN (internal/daemon server.go's WatchState
+					// handler returning nil) — a healthy long wait redials
+					// through this every time the daemon cycles, so it MUST
+					// NOT be reported as a failure. A canceled status is this
+					// loop's OWN ctx ending (e.g. the --maximum-wait deadline
+					// racing this goroutine's Recv), already reported via the
+					// timeout path above — reporting it again here would be
+					// the same false alarm under a different name. Anything
+					// else is a genuine transport failure the caller could not
+					// otherwise learn WHY happened, so say so, carrying the
+					// error, in the sibling paths' idiom (cf. "stream
+					// refused, reconnecting").
+					if !isGracefulStreamEnd(r.err) {
+						fmt.Fprintf(stderr, "wait: stream error, reconnecting: %v\n", r.err)
+					}
 					break streamLoop
 				}
 				next()
@@ -316,6 +343,17 @@ func waitUntilAgentsFinished(p waitParams, stderr io.Writer) int {
 		case <-time.After(reconnectPause):
 		}
 	}
+}
+
+// isGracefulStreamEnd reports whether a WatchState Recv error is an EXPECTED
+// end of stream rather than a genuine transport failure: an io.EOF (the
+// daemon's designed graceful-shutdown behaviour) or a codes.Canceled status
+// (this loop's own ctx being canceled). status.Code unwraps a wrapped status
+// error regardless of how deeply it is wrapped, so this is reliable even
+// though grpc-go builds the Canceled status via status.FromContextError
+// rather than returning context.Canceled verbatim.
+func isGracefulStreamEnd(err error) bool {
+	return errors.Is(err, io.EOF) || status.Code(err) == codes.Canceled
 }
 
 // waitForDaemon polls Dial until it succeeds, grace expires, or ctx does. ctx

@@ -12,7 +12,9 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/stats"
+	"google.golang.org/grpc/status"
 
 	pb "github.com/phillipgreenii/pa-monitor/internal/proto"
 )
@@ -36,15 +38,26 @@ type fakeWaitDaemon struct {
 	// returns nil, a clean EOF the client sees on Recv() at once (the real daemon's
 	// graceful-shutdown behaviour), true blocks instead so the client's own
 	// pushBudget watchdog fires and the unobserved gap exceeds that budget by
-	// construction. streams counts handler entries, i.e. how many streams the
-	// client actually opened.
+	// construction. failErr, when set, takes priority over both: the stream ends
+	// with this error instead — a genuine transport failure, as opposed to a clean
+	// EOF or a watchdog stall — which is how the Recv-error reporting test forces
+	// the "reports the latter" half of that contract. streams counts handler
+	// entries, i.e. how many streams the client actually opened.
 	pushesPerStream int
 	thenStall       bool
+	failErr         error
 	streams         atomic.Int64
+
+	// lastPushIntervalMs records the PushIntervalMs field of the most recent
+	// WatchStateRequest, so a test can confirm the client actually requests the
+	// pushIntervalMs constant rather than a bare literal that happens to match it
+	// today.
+	lastPushIntervalMs atomic.Int64
 }
 
-func (f *fakeWaitDaemon) WatchState(_ *pb.WatchStateRequest, stream pb.PaMonitor_WatchStateServer) error {
+func (f *fakeWaitDaemon) WatchState(req *pb.WatchStateRequest, stream pb.PaMonitor_WatchStateServer) error {
 	f.streams.Add(1)
+	f.lastPushIntervalMs.Store(int64(req.GetPushIntervalMs()))
 	t := time.NewTicker(f.push)
 	defer t.Stop()
 	sent := 0
@@ -59,6 +72,9 @@ func (f *fakeWaitDaemon) WatchState(_ *pb.WatchStateRequest, stream pb.PaMonitor
 		f.pushes.Add(1)
 		sent++
 		if f.pushesPerStream > 0 && sent >= f.pushesPerStream {
+			if f.failErr != nil {
+				return f.failErr
+			}
 			if !f.thenStall {
 				return nil
 			}
@@ -475,5 +491,114 @@ func TestWaitUntilAgentsFinishedGraceCannotOutlastDeadline(t *testing.T) {
 	}
 	if elapsed > 60*time.Second {
 		t.Errorf("took %s: the reconnect-grace window outlasted --maximum-wait (%s)", elapsed, maxWait)
+	}
+}
+
+// TestPushBudgetIsTwicePushIntervalMs is bead pg2-lmn5n's compile-time-pin
+// guard: pushBudget MUST be derived from pushIntervalMs, not a separate
+// literal, so raising the interval alone cannot silently change the ratio.
+// Because pushBudget's declaration is already the formula this test checks,
+// only a hand-edit back to a bare literal (the exact regression pg2-lmn5n
+// describes: 1000 -> 2000 leaving pushBudget at a hardcoded 2s, i.e. 1x
+// instead of 2x) can make this fail.
+func TestPushBudgetIsTwicePushIntervalMs(t *testing.T) {
+	want := 2 * time.Duration(pushIntervalMs) * time.Millisecond
+	if pushBudget != want {
+		t.Fatalf("pushBudget = %s, want 2x pushIntervalMs (%dms) = %s", pushBudget, pushIntervalMs, want)
+	}
+}
+
+// TestWaitRequestsPushIntervalMsConstant confirms the client actually sends
+// the pushIntervalMs constant on the wire, not a bare literal that merely
+// happens to match it today — the other half of pinning the pushBudget
+// relationship in code rather than prose.
+func TestWaitRequestsPushIntervalMsConstant(t *testing.T) {
+	sock := waitTestSocket(t)
+	d := &fakeWaitDaemon{push: 20 * time.Millisecond, workingN: 0}
+	serveFakeDaemon(t, sock, d)
+
+	var stderr bytes.Buffer
+	code := waitUntilAgentsFinished(waitParams{
+		maxWait:     10 * time.Second,
+		consecutive: 1,
+		grace:       30 * time.Second,
+	}, &stderr)
+
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stderr: %q", code, stderr.String())
+	}
+	if got := d.lastPushIntervalMs.Load(); got != int64(pushIntervalMs) {
+		t.Errorf("WatchStateRequest.PushIntervalMs = %d, want the pushIntervalMs constant (%d)", got, pushIntervalMs)
+	}
+}
+
+// TestWaitUntilAgentsFinishedReportsGenuineStreamError is bead pg2-lmn5n's
+// other half: a Recv error that is NEITHER a clean EOF NOR this loop's own
+// ctx being canceled is a genuine transport failure and MUST be reported,
+// carrying the error, in the sibling reconnect paths' idiom. The fake daemon
+// ends the stream with a real RPC error after two pushes instead of the
+// clean nil the EOF-path tests use.
+func TestWaitUntilAgentsFinishedReportsGenuineStreamError(t *testing.T) {
+	sock := waitTestSocket(t)
+	d := &fakeWaitDaemon{
+		push:            20 * time.Millisecond,
+		workingN:        0,
+		pushesPerStream: 2,
+		failErr:         status.Error(codes.Internal, "boom"),
+	}
+	serveFakeDaemon(t, sock, d)
+
+	const maxWait = 3 * time.Second
+	var stderr bytes.Buffer
+	code := waitUntilAgentsFinished(waitParams{
+		maxWait: maxWait,
+		// Unreachable: only 2 idle pushes land before every stream fails, so
+		// the streak can never reach this and the wait must run to the
+		// deadline while repeatedly hitting the failure path.
+		consecutive: 100,
+		grace:       30 * time.Second,
+	}, &stderr)
+
+	if code != 1 {
+		t.Fatalf("exit code = %d, want 1 (timeout while redialing past the failure); stderr: %q", code, stderr.String())
+	}
+	if n := d.streams.Load(); n < 2 {
+		t.Fatalf("daemon served %d streams: the fake never failed and reconnected, so nothing was tested", n)
+	}
+	if !strings.Contains(stderr.String(), "wait: stream error, reconnecting") {
+		t.Errorf("stderr = %q, want a genuine transport-failure diagnostic in the sibling paths' idiom", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "boom") {
+		t.Errorf("stderr = %q, want the underlying error text carried along", stderr.String())
+	}
+}
+
+// TestWaitUntilAgentsFinishedCleanEOFStaysQuiet is the flip side: a clean EOF
+// — the daemon's DESIGNED graceful-shutdown behaviour, which a healthy long
+// wait redials through routinely — must NOT be reported as a stream error.
+// workingN stays 1 so the streak can never complete and the wait keeps
+// cycling through clean-EOF redials until --maximum-wait, giving the quiet
+// path many chances to (incorrectly) speak up.
+func TestWaitUntilAgentsFinishedCleanEOFStaysQuiet(t *testing.T) {
+	sock := waitTestSocket(t)
+	d := &fakeWaitDaemon{push: 20 * time.Millisecond, workingN: 1, pushesPerStream: 2}
+	serveFakeDaemon(t, sock, d)
+
+	const maxWait = 1500 * time.Millisecond
+	var stderr bytes.Buffer
+	code := waitUntilAgentsFinished(waitParams{
+		maxWait:     maxWait,
+		consecutive: 3,
+		grace:       30 * time.Second,
+	}, &stderr)
+
+	if code != 1 {
+		t.Fatalf("exit code = %d, want 1 (timeout); stderr: %q", code, stderr.String())
+	}
+	if n := d.streams.Load(); n < 2 {
+		t.Fatalf("daemon served %d streams: the clean-EOF redial path was never exercised", n)
+	}
+	if strings.Contains(stderr.String(), "stream error") {
+		t.Errorf("stderr = %q: a clean EOF (the daemon's designed graceful shutdown) must not be reported as a stream error", stderr.String())
 	}
 }
