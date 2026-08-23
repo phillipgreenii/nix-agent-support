@@ -708,6 +708,157 @@ WHERE f.kind <> '' AND ` + win("e") + `
 ORDER BY f.path, f.seq`,
 		},
 		{
+			Name:    "failed-reads-by-root",
+			Version: 1,
+			Doc: "Failing Read/Edit/Write/Bash calls grouped by the ABSOLUTE ROOT read straight out " +
+				"of the pre-normalization tool_calls.input_json, flagged against the roots that " +
+				"legitimately exist on THIS machine.",
+			Notes: "THE QUERY pg2-xnnab's acceptance criterion 12 had to hand-derive as ad-hoc SQL " +
+				"(pg2-hyn34), now named and versioned (T-10) so the measurement is repeatable. The " +
+				"signature normalizer (T-6) collapses every absolute-ish path to the literal 'PATH' " +
+				"BY DESIGN -- that is what makes signatures comparable across sessions -- so " +
+				"`top-signatures` and friends cannot distinguish a FABRICATED absolute root (e.g. a " +
+				"Read of /home/... on a machine whose real roots are /Users, /Volumes, /nix, " +
+				"/private) from a genuinely missing file at a real root. Weakening the normalizer to " +
+				"chase this was explicitly ruled out; this query instead reads the PRE-normalization " +
+				"value straight from c.input_json (stored untruncated per T-3), never r.content (the " +
+				"error body the normalizer consumes).\n" +
+				"ROOT EXTRACTION. For Read/Edit/Write the root comes straight off the input's " +
+				"file_path field -- an exact, structured read. Bash has no dedicated path field, so " +
+				"the first shell WORD that starts with '/' (a slash preceded by whitespace or the " +
+				"start of the command) is taken as the CANDIDATE, then BOUNDED at the first character " +
+				"that cannot appear inside a shell word adjacent to a path -- whitespace, `;()|&<>\"'`$ -- " +
+				"or end of string, whichever comes first. The bound is NOT cosmetic: measured against " +
+				"the real corpus, an unbounded 'read to the next literal /' reading corrupted the root " +
+				"itself whenever a SECOND slash occurred anywhere later in a multi-line command (a " +
+				"heredoc commit-message body, or an unrelated glob like `find / -path \"*/foo\"`), " +
+				"grabbing the intervening prose as if it were a path segment -- e.g. misreading " +
+				"`find / -path \"*/x\"` as root `/ -path \"*`, when the command's actual argument is the " +
+				"filesystem root `/`. Bounding at the first shell metacharacter fixes both: the second " +
+				"example correctly resolves to root `/`, and the heredoc case is excluded outright. A " +
+				"path argument glued to a flag with no preceding space (e.g. '--file=/etc/passwd') is a " +
+				"remaining KNOWN MISS -- the same class of limitation `hook-refusals-in-body` documents " +
+				"for its own verb matching -- and the cost is a false '(no absolute path)' grouping, " +
+				"never a wrong root. A command referencing several absolute paths is grouped by its " +
+				"FIRST one only.\n" +
+				"known_root IS THE MECHANICAL FABRICATED-ROOT TELL: 0 when the extracted root is not " +
+				"in :valid_roots (fabricated, or at minimum foreign to this machine), 1 when it is a " +
+				"recognised root, and NULL when no absolute path could be extracted at all -- that " +
+				"bucket renders as the literal root value '(no absolute path)', and its known_root is " +
+				"NULL rather than 0 because there is nothing to judge, not because it is fabricated.\n" +
+				"root = '/' (a BARE slash, e.g. a `find / -path ...` sweep of the whole filesystem) " +
+				"ALWAYS reads known_root = 0, because '/' is never itself a member of :valid_roots -- " +
+				"it is the parent of every member. That is a correct application of the mechanical " +
+				"tell as specified, not a bug, but it is NOT evidence of fabrication either: a bare '/' " +
+				"is a deliberate whole-filesystem scope, and this bucket should be read separately from " +
+				"the genuinely fabricated single-segment roots (e.g. /home) beside it.\n" +
+				":valid_roots is a PARAMETER, never a hardcoded constant, because the legitimate set " +
+				"is a property of the MACHINE running the audit, not of the corpus: this machine's " +
+				"set is /Users, /Volumes, /nix, /private (this workspace's own CLAUDE.md A-1 rule), " +
+				"and a Linux box or another user's machine would need a different default. Pass a " +
+				"comma-separated list with no spaces to override it.\n" +
+				"sample_path carries ONE example of the extracted, BOUNDED raw path per group so a " +
+				"reader can eyeball whether the extraction did the right thing without a second query.",
+			Params: []Param{
+				{Name: "valid_roots", Doc: "comma-separated absolute root prefixes legitimate on this machine, no spaces", Default: "/Users,/Volumes,/nix,/private"},
+			},
+			Window: true,
+			SQL: `
+WITH targets AS (
+  SELECT c.tool_use_id                                                        AS tool_use_id,
+         c.path                                                               AS path,
+         c.seq                                                                AS seq,
+         c.tool_name                                                          AS tool_name,
+         CASE
+           WHEN c.tool_name IN ('Read', 'Edit', 'Write')
+             THEN json_extract(c.input_json, '$.file_path')
+           WHEN c.tool_name = 'Bash' THEN (
+             -- The first shell WORD starting with '/': prepend a space so a path at
+             -- position 1 of the command is found the same way as one preceded by
+             -- whitespace, then cut at the first ' /' boundary.
+             CASE WHEN instr(' ' || json_extract(c.input_json, '$.command'), ' /') > 0
+               THEN substr(' ' || json_extract(c.input_json, '$.command'),
+                           instr(' ' || json_extract(c.input_json, '$.command'), ' /') + 1)
+               ELSE NULL
+             END
+           )
+           ELSE NULL
+         END                                                                  AS candidate
+  FROM tool_calls c
+  WHERE c.tool_name IN ('Read', 'Edit', 'Write', 'Bash')
+),
+bounded AS (
+  -- BOUND the candidate at the first character that cannot appear inside a shell
+  -- word adjacent to a path -- whitespace or a shell metacharacter -- or end of
+  -- string, whichever is nearest. Without this a second, UNRELATED '/' anywhere
+  -- later in a multi-line command (a heredoc body, an unrelated glob) gets read as
+  -- if it continued the SAME path, corrupting the extracted root itself, not just
+  -- the cosmetic sample. file_path values are already clean, so this is a no-op
+  -- for Read/Edit/Write and a real guard only for Bash.
+  SELECT tool_use_id, path, seq, tool_name,
+         CASE WHEN candidate IS NULL THEN NULL ELSE
+           substr(candidate, 1,
+             MIN(
+               CASE WHEN instr(candidate, ' ')      > 0 THEN instr(candidate, ' ')      ELSE 1000000000 END,
+               CASE WHEN instr(candidate, char(9))  > 0 THEN instr(candidate, char(9))  ELSE 1000000000 END,
+               CASE WHEN instr(candidate, char(10)) > 0 THEN instr(candidate, char(10)) ELSE 1000000000 END,
+               CASE WHEN instr(candidate, char(13)) > 0 THEN instr(candidate, char(13)) ELSE 1000000000 END,
+               CASE WHEN instr(candidate, ';')       > 0 THEN instr(candidate, ';')       ELSE 1000000000 END,
+               CASE WHEN instr(candidate, '(')       > 0 THEN instr(candidate, '(')       ELSE 1000000000 END,
+               CASE WHEN instr(candidate, ')')       > 0 THEN instr(candidate, ')')       ELSE 1000000000 END,
+               CASE WHEN instr(candidate, '|')       > 0 THEN instr(candidate, '|')       ELSE 1000000000 END,
+               CASE WHEN instr(candidate, '&')       > 0 THEN instr(candidate, '&')       ELSE 1000000000 END,
+               CASE WHEN instr(candidate, '<')       > 0 THEN instr(candidate, '<')       ELSE 1000000000 END,
+               CASE WHEN instr(candidate, '>')       > 0 THEN instr(candidate, '>')       ELSE 1000000000 END,
+               CASE WHEN instr(candidate, char(34))  > 0 THEN instr(candidate, char(34))  ELSE 1000000000 END,
+               CASE WHEN instr(candidate, char(39))  > 0 THEN instr(candidate, char(39))  ELSE 1000000000 END,
+               CASE WHEN instr(candidate, char(96))  > 0 THEN instr(candidate, char(96))  ELSE 1000000000 END,
+               CASE WHEN instr(candidate, '$')       > 0 THEN instr(candidate, '$')       ELSE 1000000000 END,
+               length(candidate) + 1
+             ) - 1)
+         END                                                                  AS raw_path
+  FROM targets
+),
+roots AS (
+  SELECT tool_use_id, path, seq, tool_name, raw_path,
+         CASE WHEN raw_path LIKE '/%' THEN
+           '/' || CASE WHEN instr(substr(raw_path, 2), '/') > 0
+                       THEN substr(substr(raw_path, 2), 1, instr(substr(raw_path, 2), '/') - 1)
+                       ELSE substr(raw_path, 2)
+                  END
+         ELSE NULL END                                                        AS root
+  FROM bounded
+),
+agg AS (
+  SELECT ro.root                                                              AS root,
+         CASE WHEN ro.root IS NULL THEN NULL
+              WHEN instr(',' || :valid_roots || ',', ',' || ro.root || ',') > 0 THEN 1
+              ELSE 0 END                                                      AS known_root,
+         COUNT(*)                                                             AS calls,
+         SUM(CASE WHEN COALESCE(e.is_sidechain, 0) = 0 THEN 1 ELSE 0 END)     AS main_loop,
+         SUM(CASE WHEN COALESCE(e.is_sidechain, 0) = 1 THEN 1 ELSE 0 END)     AS subagent,
+         COUNT(DISTINCT e.session_id)                                        AS sessions,
+         group_concat(DISTINCT ro.tool_name)                                 AS tool_names,
+         MIN(ro.raw_path)                                                    AS sample_path
+  FROM roots ro
+  JOIN tool_results r ON r.tool_use_id = ro.tool_use_id AND r.is_error = 1
+  JOIN events e ON e.path = ro.path AND e.seq = ro.seq
+  WHERE ` + win("e") + `
+  GROUP BY ro.root
+)
+SELECT COALESCE(root, '(no absolute path)')                                  AS root,
+       known_root                                                            AS known_root,
+       calls                                                                 AS calls,
+       main_loop                                                             AS main_loop,
+       subagent                                                              AS subagent,
+       sessions                                                              AS sessions,
+       tool_names                                                            AS tool_names,
+       sample_path                                                           AS sample_path
+FROM agg
+ORDER BY CASE WHEN known_root = 0 THEN 0 WHEN known_root = 1 THEN 1 ELSE 2 END,
+         calls DESC, root`,
+		},
+		{
 			Name:    "undo-signatures",
 			Version: 1,
 			Doc:     "Work that had to be taken back: git undo commands, write-then-delete, Edit reversing an Edit.",

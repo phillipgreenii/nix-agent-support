@@ -416,6 +416,10 @@ func TestRegistryVersionsArePinned(t *testing.T) {
 		// its SQL untouched, because it is the durable reading if the structured payload
 		// ever arrives.
 		"hook-refusals-in-body": 1,
+		// pg2-hyn34: the fabricated-absolute-root class top-signatures cannot isolate
+		// because T-6 collapses every path to 'PATH' by design. Reads input_json
+		// directly, alongside the normalizer, rather than weakening it.
+		"failed-reads-by-root": 1,
 	}
 	got := map[string]int{}
 	for _, q := range All() {

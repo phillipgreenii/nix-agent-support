@@ -97,6 +97,18 @@ pg-ccaudit query bash-by-lead-cmd --since 2026-07-22 --until 2026-07-30
   numbers collapsed), so one recurring problem is one row rather than hundreds.
 - `bash-by-lead-cmd` attributes each Bash call to its real leading command, with
   `sudo`, `nice`, `VAR=` assignments and subshell parens peeled off.
+- `top-signatures` CANNOT separate a FABRICATED absolute root (e.g. a `Read` of
+  `/home/...` on a machine whose real roots are `/Users`, `/Volumes`, `/nix`,
+  `/private`) from a genuinely missing file at a real root — the normalizer
+  collapses both to the same `PATH`-bearing signature, on purpose. Use
+  `failed-reads-by-root` for that split: it reads the raw `file_path`/`command`
+  straight out of the tool call, groups by the extracted root, and flags any root
+  outside `:valid_roots` (default `/Users,/Volumes,/nix,/private`; override for a
+  different machine) as the mechanical fabricated-root tell.
+
+  ```bash
+  pg-ccaudit query failed-reads-by-root --since 2026-07-22 --until 2026-07-30
+  ```
 
 ### 2. Is it concentrated, or is it a real pattern?
 
@@ -172,6 +184,11 @@ per-class split is what routed each fix:
 | Foreground `sleep` blocked |         5 |       21 | subagent-dominated              |
 | pre-commit probe           |         3 |       17 | subagent-dominated              |
 | `.git` directory blocked   |        10 |       31 | permission-approver rule tuning |
+
+The "Fabricated absolute root" row above was originally hand-derived by reading
+`tool_calls.input_json` ad hoc; `failed-reads-by-root` (see step 1) is that
+measurement made repeatable — use it to re-derive the class instead of
+re-deriving the SQL.
 
 Route each finding accordingly:
 

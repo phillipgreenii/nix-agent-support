@@ -114,21 +114,22 @@ Named **and versioned**, so two audits produce comparable numbers and an agent r
 reasons nobody can reconstruct. A version bump means the SQL's meaning changed; the
 registry test pins every name to its current version.
 
-| Name                         | Answers                                                                  |
-| ---------------------------- | ------------------------------------------------------------------------ |
-| `error-rate-by-tool`         | Per-tool error counts **with denominators**                              |
-| `top-signatures`             | Ranked normalized error signatures                                       |
-| `bash-by-lead-cmd`           | Per-leading-command Bash rates                                           |
-| `session-concentration`      | The runaway discount: total / distinct sessions / worst session          |
-| `retry-chains`               | Same tool re-called after a failure within N line ordinals               |
-| `error-then-narration`       | The prose written on the line right after a failure                      |
-| `sidechain-split`            | Every signature split by `is_sidechain` — decides where a fix belongs    |
-| `cost-by-signature`          | Measured cost per signature (read its notes)                             |
-| `hook-rejections`            | True totals from recorded `hookErrors` — **reads zero today**, see below |
-| `first-seen`                 | Earliest/latest occurrence, ranked by first — did this class start when? |
-| `last-seen`                  | Same columns ranked by most recent — did the documented fix work?        |
-| `concentration-by-signature` | The runaway discount for EVERY signature at once                         |
-| `coverage`                   | Indexed coverage: the proof behind every number above                    |
+| Name                         | Answers                                                                                                                  |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `error-rate-by-tool`         | Per-tool error counts **with denominators**                                                                              |
+| `top-signatures`             | Ranked normalized error signatures                                                                                       |
+| `bash-by-lead-cmd`           | Per-leading-command Bash rates                                                                                           |
+| `session-concentration`      | The runaway discount: total / distinct sessions / worst session                                                          |
+| `retry-chains`               | Same tool re-called after a failure within N line ordinals                                                               |
+| `error-then-narration`       | The prose written on the line right after a failure                                                                      |
+| `sidechain-split`            | Every signature split by `is_sidechain` — decides where a fix belongs                                                    |
+| `cost-by-signature`          | Measured cost per signature (read its notes)                                                                             |
+| `hook-rejections`            | True totals from recorded `hookErrors` — **reads zero today**, see below                                                 |
+| `first-seen`                 | Earliest/latest occurrence, ranked by first — did this class start when?                                                 |
+| `last-seen`                  | Same columns ranked by most recent — did the documented fix work?                                                        |
+| `concentration-by-signature` | The runaway discount for EVERY signature at once                                                                         |
+| `failed-reads-by-root`       | Failing Read/Edit/Write/Bash calls grouped by their PRE-normalized root, flagged as fabricated or legitimate (see below) |
+| `coverage`                   | Indexed coverage: the proof behind every number above                                                                    |
 
 Tier 1 of the mistake census (below) adds nine more. All are SQL over the index with
 no model calls:
@@ -195,6 +196,19 @@ phase of the session. Candidates are scoped to the same `session_id` **and** the
 same file, because `seq` is a per-file line ordinal — a gap computed across two
 files is meaningless. `identical_input = 1` is the strongest signal in the set: the
 same input re-sent after a failure.
+
+**`top-signatures` cannot isolate a FABRICATED absolute root, and that is by
+design.** The signature normalizer collapses every absolute-ish path to the
+literal `PATH` — that is what makes signatures comparable across sessions — so a
+`Read` of `/home/...` on a machine whose real roots are `/Users`, `/Volumes`,
+`/nix`, `/private` normalizes to the same key as a genuinely missing file at a
+real root, and the two become indistinguishable. `failed-reads-by-root` (bead
+`pg2-hyn34`) reads `tool_calls.input_json` directly instead of the normalized
+signature — the `file_path` field for `Read`/`Edit`/`Write`, and the first
+`/`-starting shell word for `Bash` — and flags each extracted root against
+`:valid_roots` (default `/Users,/Volumes,/nix,/private`, override it for a
+different machine). A root outside that set is the mechanical fabricated-root
+tell; the normalizer is deliberately left untouched.
 
 ## The mistake census
 
