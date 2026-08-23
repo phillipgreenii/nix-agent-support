@@ -115,6 +115,20 @@ func TestRule(t *testing.T) {
 		{"bd create --description prose", bashInput(`bd create --description "names a/secrets/prod.yaml"`), hookio.NoOpinion},
 		{"bd update --append-notes prose", bashInput(`bd update pg2-x --append-notes "cert probe via ~/.ssh/agent glob"`), hookio.NoOpinion},
 		{"bd comment body positional prose", bashInput(`bd comment pg2-x "cert probe via ~/.ssh/agent glob"`), hookio.NoOpinion},
+
+		// tc-3bmy: bb has the SAME false-positive class as bd, but its prose is
+		// a bare positional or a --set/--set-json VALUE rather than a named
+		// flag's value (bb has no --description/--notes/--reason/--title
+		// flags at all).
+		{"bb note positional prose", bashInput(`bb note task-abc "see ~/.ssh/id_rsa for details"`), hookio.NoOpinion},
+		{"bb comment add positional prose", bashInput(`bb comment add task-abc "cert probe via ~/.ssh/agent glob"`), hookio.NoOpinion},
+		{"bb add positional title prose", bashInput(`bb add "SECURITY note about ~/.ssh/agent"`), hookio.NoOpinion},
+		{"bb task create positional title prose", bashInput(`bb task create "SECURITY note about ~/.ssh/agent"`), hookio.NoOpinion},
+		{"bb put --set body.description prose", bashInput(`bb put --id task-abc --set "body.description=names a/secrets/prod.yaml"`), hookio.NoOpinion},
+		{"bb put --set body.title prose", bashInput(`bb put --id task-abc --set "body.title=SECURITY ~/.ssh/agent"`), hookio.NoOpinion},
+		{"bb task update --set body.title prose", bashInput(`bb task update task-abc --set "body.title=cert probe via ~/.ssh/agent glob"`), hookio.NoOpinion},
+		{"bb --set-json body.description prose", bashInput(`bb put --id task-abc --set-json 'body.description="names a/secrets/prod.yaml"'`), hookio.NoOpinion},
+		{"bb --set equals-glued spelling", bashInput(`bb put --id task-abc --set="body.description=names a/secrets/prod.yaml"`), hookio.NoOpinion},
 		{"git commit -m prose", bashInput(`git commit -m "drop the docs/secrets/prod.yaml example"`), hookio.NoOpinion},
 		{"git commit --message prose", bashInput(`git commit --message "cert probe via ~/.ssh/agent glob"`), hookio.NoOpinion},
 		{"git -C dir commit -m prose", bashInput(`git -C /repo commit -m "cert probe via ~/.ssh/agent glob"`), hookio.NoOpinion},
@@ -191,6 +205,22 @@ func TestRule(t *testing.T) {
 		// Getting the FILE'S CONTENT into a message is a different construct, and
 		// each is still checked: a redirection, and a shell -c wrapper.
 		{"bd comment with stdin redirect still Asks", bashInput("bd comment x body < secrets/x"), hookio.Ask},
+
+		// tc-3bmy: bb ANTI-BYPASS guards. bb genuinely has NO path-taking
+		// argument anywhere in its CLI (verified against bb --help, bb help -a,
+		// bb agent-prime, bb info, bb types -- no attachment/file/body-file/
+		// graph-style flag exists), so there is no "real secret path passed to
+		// a bb path-taking arg" case to pin the way bd's -F/--file/--body-file
+		// rows do. These negative controls instead pin the boundaries
+		// SkipBBProseArgs DOES have: only the enumerated positional/field slot
+		// is dropped, and a path-shaped value in every OTHER position still
+		// Asks.
+		{"bb non-prose subcommand keeps a path argument", bashInput("bb show task-abc secrets/prod.yaml"), hookio.Ask},
+		{"bb note id positional still Asks", bashInput("bb note ~/.ssh/id_rsa body"), hookio.Ask},
+		{"bb comment add with a flag before target-id keeps every positional", bashInput("bb comment add --author a ~/.ssh/id_rsa body"), hookio.Ask},
+		{"bb --set on a non-prose field still Asks", bashInput("bb task update task-abc --set body.owner=~/.ssh/id_rsa"), hookio.Ask},
+		{"bb put -- --set body.title=path still Asks", bashInput("bb put -- --set body.title=~/.ssh/id_rsa"), hookio.Ask},
+		{"bb note with stdin redirect still Asks", bashInput("bb note x body < secrets/x"), hookio.Ask},
 		{"bash -lc inside a bd comment body still Asks", bashInput(`bd comment x "$(echo hi)" && bash -lc 'cat ~/.ssh/id_rsa'`), hookio.Ask},
 
 		// Bash without a secret path → Abstain (defer to rest of chain)

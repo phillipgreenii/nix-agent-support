@@ -789,6 +789,13 @@ func firstSecretRefIn(cache *shellCScriptCache, leaves []cmdparse.ParsedCommand,
 //     the positional search PATTERN is not a file for `git grep` any more
 //     than it is for bare `grep`. This is narrowly scoped to the literal
 //     "grep" subcommand; no other git subcommand's argument handling changes.
+//   - bb (tc-3bmy): the SAME free-text-is-not-a-file principle as the bd/git/gh
+//     arm above, but bb has no message FLAGS at all — its prose is the bare
+//     positional of `bb note <id> <text>` / `bb comment add <target-id>
+//     <text>` / `bb add <title>` / `bb task create <title>`, or the value half
+//     of `--set`/`--set-json <field>=<value>` for a known prose field
+//     (body.title, body.description, body.text). The enumerated shape lives in
+//     cmdparse.SkipBBProseArgs.
 //
 // WHY THE MESSAGE CARVE-OUT IS NOT A BYPASS. A message value is STORED AS TEXT:
 // the command never opens, executes or transmits it as a path, so a credential
@@ -844,6 +851,18 @@ func secretCandidateArgs(pc cmdparse.ParsedCommand) (args []string, malformed bo
 			}
 		}
 		return cmdparse.SkipMessageArgs(exe, pc.Args), false
+	case "bb":
+		// tc-3bmy: bb (the beads-like task tool) has the same underlying
+		// prose-read-as-a-path problem the bd/git/gh case above fixes, but a
+		// different shape — bb has no --description/--notes/--reason/--title
+		// NAMED FLAGS at all, so it cannot share messageFlags/SkipMessageArgs.
+		// Its prose is a bare POSITIONAL (`bb note <id> <text>`, `bb comment
+		// add <target-id> <text>`, `bb add <title>`, `bb task create <title>`)
+		// or the value half of `--set`/`--set-json <field>=<value>` for a
+		// known prose field. See cmdparse.SkipBBProseArgs' doc (next to
+		// bbSetProseFields/bbProseIndex) for the full enumeration and how it
+		// was verified against bb's actual CLI.
+		return cmdparse.SkipBBProseArgs(pc.Args), false
 	default:
 		return pc.Args, false
 	}

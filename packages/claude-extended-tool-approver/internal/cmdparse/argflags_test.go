@@ -196,6 +196,131 @@ func TestSkipMessageArgs_FileFlagValuesAlwaysSurvive(t *testing.T) {
 	}
 }
 
+// TestSkipBBProseArgs pins the bb prose carve-out (tc-3bmy) at the filter level,
+// analogous to TestSkipMessageArgs for bd/git/gh: which subcommand shapes carry a
+// bare positional prose slot, which --set/--set-json fields are known prose, and
+// which tokens must be left alone because bb has no path-taking argument to
+// accidentally over-suppress.
+//
+// The rule-level (Ask vs Abstain) consequences are asserted in
+// internal/rules/secrets/secrets_test.go.
+func TestSkipBBProseArgs(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want []string
+	}{
+		// --- positional prose ---------------------------------------------
+		{
+			name: "bb note positional text dropped, id kept",
+			args: []string{"note", "task-abc", "see ~/.ssh/id_rsa for details"},
+			want: []string{"note", "task-abc"},
+		},
+		{
+			name: "bb comment add positional text dropped, target-id kept",
+			args: []string{"comment", "add", "task-abc", "prose naming a/secrets/x"},
+			want: []string{"comment", "add", "task-abc"},
+		},
+		{
+			name: "bb comment add with trailing flags",
+			args: []string{"comment", "add", "task-abc", "prose ~/.ssh/agent", "--author", "alice"},
+			want: []string{"comment", "add", "task-abc", "--author", "alice"},
+		},
+		{
+			name: "bb add positional title dropped",
+			args: []string{"add", "SECURITY note about ~/.ssh/agent"},
+			want: []string{"add"},
+		},
+		{
+			name: "bb task create positional title dropped",
+			args: []string{"task", "create", "SECURITY note about ~/.ssh/agent"},
+			want: []string{"task", "create"},
+		},
+		{
+			name: "bb note target-id positional is NOT dropped",
+			args: []string{"note", "~/.ssh/id_rsa", "body"},
+			want: []string{"note", "~/.ssh/id_rsa"},
+		},
+		{
+			name: "bb comment add with a flag before target-id keeps every positional",
+			args: []string{"comment", "add", "--author", "a", "~/.ssh/id_rsa", "body"},
+			want: []string{"comment", "add", "--author", "a", "~/.ssh/id_rsa", "body"},
+		},
+		{
+			name: "a non-prose bb subcommand drops no positional",
+			args: []string{"show", "task-abc", "secrets/prod.yaml"},
+			want: []string{"show", "task-abc", "secrets/prod.yaml"},
+		},
+		{
+			name: "bb comment (without add) is not the prose shape",
+			args: []string{"comment", "task-abc", "prose ~/.ssh/agent"},
+			want: []string{"comment", "task-abc", "prose ~/.ssh/agent"},
+		},
+
+		// --- --set / --set-json prose fields -------------------------------
+		{
+			name: "bb put --set body.description value dropped",
+			args: []string{"put", "--id", "task-abc", "--set", "body.description=see ~/.ssh/agent for details"},
+			want: []string{"put", "--id", "task-abc", "--set"},
+		},
+		{
+			name: "bb put --set body.title value dropped",
+			args: []string{"put", "--id", "task-abc", "--set", "body.title=SECURITY ~/.ssh/x"},
+			want: []string{"put", "--id", "task-abc", "--set"},
+		},
+		{
+			name: "bb put --set body.text value dropped (comment object)",
+			args: []string{"put", "--type", "comment", "--set", "body.text=names a/secrets/y"},
+			want: []string{"put", "--type", "comment", "--set"},
+		},
+		{
+			name: "bb task update --set body.title value dropped",
+			args: []string{"task", "update", "task-abc", "--set", "body.title=prose ~/.ssh/agent"},
+			want: []string{"task", "update", "task-abc", "--set"},
+		},
+		{
+			name: "bb --set-json body.description value dropped",
+			args: []string{"put", "--id", "task-abc", "--set-json", "body.description=\"see ~/.ssh/agent\""},
+			want: []string{"put", "--id", "task-abc", "--set-json"},
+		},
+		{
+			name: "bb --set JSON-typed (:=) spelling value dropped",
+			args: []string{"put", "--id", "task-abc", "--set", "body.title:=\"~/.ssh/agent\""},
+			want: []string{"put", "--id", "task-abc", "--set"},
+		},
+		{
+			name: "bb --set equals-glued spelling drops the whole token",
+			args: []string{"put", "--id", "task-abc", "--set=body.description=see ~/.ssh/agent"},
+			want: []string{"put", "--id", "task-abc"},
+		},
+		{
+			name: "bb --set on a non-prose field keeps its value",
+			args: []string{"task", "update", "task-abc", "--set", "body.owner=~/.ssh/agent"},
+			want: []string{"task", "update", "task-abc", "--set", "body.owner=~/.ssh/agent"},
+		},
+		{
+			name: "bb --set as the LAST token consumes nothing",
+			args: []string{"put", "--id", "task-abc", "--set"},
+			want: []string{"put", "--id", "task-abc", "--set"},
+		},
+
+		// --- boundaries ------------------------------------------------------
+		{
+			name: "operands after -- are never read as flags",
+			args: []string{"put", "--", "--set", "body.title=~/.ssh/agent"},
+			want: []string{"put", "--", "--set", "body.title=~/.ssh/agent"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := SkipBBProseArgs(tt.args)
+			if strings.Join(got, "\x00") != strings.Join(tt.want, "\x00") {
+				t.Errorf("SkipBBProseArgs(%q) = %q, want %q", tt.args, got, tt.want)
+			}
+		})
+	}
+}
+
 // TestGluedFlagValue pins the pg2-52eod centralization: GluedFlagValue returns the
 // value half of a `--flag=value` token with ONE matched pair of surrounding shell
 // quotes already removed, and reports malformed whenever UnwrapGluedQuotes DECLINES

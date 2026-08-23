@@ -729,3 +729,173 @@ func bdCommentBodyIndex(args []string) int {
 	}
 	return 2
 }
+
+// bb's prose carve-out (tc-3bmy). bb (the beads-like task tool) has the SAME
+// underlying problem messageFlags/SkipMessageArgs fixes for bd — free-text
+// prose read as a candidate secret path — but a DIFFERENT shape: bb exposes NO
+// --description/--notes/--reason/--title NAMED FLAGS at all (checked against
+// `bb --help`, `bb note --help`, `bb comment add --help`, `bb add --help`,
+// `bb put --help`, `bb task --help` on this machine, 2026-08-23; `bb help -a`
+// / `bb agent-prime` list every subcommand and none defines one). Prose enters
+// two ways instead:
+//
+//   - a bare POSITIONAL, for `bb note <id> <text>`, `bb comment add
+//     <target-id> <text>`, `bb add <title>` and `bb task create <title>` (the
+//     identical create, under its `task`-scoped spelling — bb agent-prime's own
+//     "task create" entry: "IDENTICAL to the top-level `bb add`"). See
+//     bbProseIndex.
+//   - the VALUE half of a `--set <field>=<value>` / `--set-json <field>=<value>`
+//     token, for `bb put --set <field>=<value>` and `bb task update <id> --set
+//     <field>=<value>` (task update's own help: "The grammar is `bb put
+//     --set`'s verbatim"). Unlike a bd message flag, `--set`'s value is NOT a
+//     `-`-prefixed flag's own token — the whole `field=value` (or
+//     `field:=value` for the JSON-typed spelling `--set` also accepts) is ONE
+//     positional the `--set`/`--set-json` flag consumes. See bbSetProseFields
+//     and bbSetKey.
+//
+// NO FILE-TAKING FIELD OR FLAG APPEARS HERE, deliberately — the same rule
+// messageFlags' doc states. bb's schema was checked, not assumed: `bb
+// agent-prime`, `bb info` and `bb types` enumerate every field/flag bb
+// documents anywhere, and none is a path (task body fields are claimant, open,
+// owner, parent, phase, priority, state, status, title — confirmed live via
+// `bb put --set body.description=... && bb show <id>`, which surfaces
+// `description` alongside `title`; a `comment` object's free-text field is
+// `text`, per `bb comment add`'s own {target_id, author, text, created} shape).
+// bb has no attachment/file-path argument anywhere in its CLI to omit from the
+// carve-out the way bd's `--file`/`--body-file`/`--design-file`/`--graph` had
+// to be — there is nothing to accidentally suppress.
+var bbSetProseFields = map[string]bool{
+	"body.title":       true,
+	"body.description": true,
+	"body.text":        true,
+}
+
+// bbSetKey returns the FIELD half of a bb `--set`/`--set-json` VALUE token
+// ("body.title=<value>", or "body.title:=<value>" for `--set`'s JSON-typed
+// spelling — `bb put --help`: "key=value (string); key:=value for JSON") and
+// whether arg has that shape at all. It is deliberately NOT equalsFlagName:
+// that requires a leading "-" (a FLAG's own glued spelling), whereas a --set
+// token is the POSITIONAL VALUE the flag consumes and never starts with "-"
+// for a well-formed field path.
+func bbSetKey(arg string) (key string, ok bool) {
+	if idx := strings.Index(arg, ":="); idx >= 0 {
+		return arg[:idx], true
+	}
+	if idx := strings.Index(arg, "="); idx >= 0 {
+		return arg[:idx], true
+	}
+	return "", false
+}
+
+// bbProseIndex returns the index of the free-text POSITIONAL argument for the
+// bb subcommand shapes that carry one, or -1 when args are not one of those
+// shapes (see the bb-carve-out doc above bbSetProseFields for the shapes and
+// why bb needs its own, non-flag mechanism).
+//
+// Each shape is matched STRICTLY (exact leading subcommand tokens, and no
+// leading "-" on any positional up to and including the prose slot) for the
+// same reason bdCommentBodyIndex is: an unknown value-taking flag ahead of the
+// prose token shifts its position, and counting positionals blindly would drop
+// the WRONG token — e.g. `bb comment add --author X <target-id> <text>` must
+// NOT drop <target-id>.
+//
+//	"note" <id> <text>                    -> index 2
+//	"comment" "add" <target-id> <text>    -> index 3
+//	"add" <title>                         -> index 1
+//	"task" "create" <title>               -> index 2
+func bbProseIndex(args []string) int {
+	switch {
+	case len(args) >= 3 && args[0] == "note":
+		if strings.HasPrefix(args[1], "-") || strings.HasPrefix(args[2], "-") {
+			return -1
+		}
+		return 2
+	case len(args) >= 4 && args[0] == "comment" && args[1] == "add":
+		if strings.HasPrefix(args[2], "-") || strings.HasPrefix(args[3], "-") {
+			return -1
+		}
+		return 3
+	case len(args) >= 2 && args[0] == "add":
+		if strings.HasPrefix(args[1], "-") {
+			return -1
+		}
+		return 1
+	case len(args) >= 3 && args[0] == "task" && args[1] == "create":
+		if strings.HasPrefix(args[2], "-") {
+			return -1
+		}
+		return 2
+	}
+	return -1
+}
+
+// SkipBBProseArgs returns bb's args with its free-text PROSE arguments
+// removed, so path checking sees only arguments that could name a file. It is
+// bb's counterpart to SkipMessageArgs, not a call to it: bb's prose is a bare
+// POSITIONAL (bbProseIndex) or the value half of a --set/--set-json token
+// (bbSetProseFields/bbSetKey) rather than a named flag's value, a shape
+// SkipMessageArgs has no concept of.
+//
+// Removed, and nothing else:
+//   - the ONE positional bbProseIndex names for a recognized subcommand shape;
+//   - a "--set"/"--set-json" VALUE token (space form) whose field half is a
+//     known prose field — the flag token itself is left in place (isFlag
+//     already skips it downstream, and the field name never looks like a
+//     path);
+//   - the equals-glued spelling of the same flag ("--set=body.title=<value>",
+//     "--set-json=body.title=<value>").
+//
+// Scanning STOPS at a bare "--", exactly as SkipMessageArgs does: after it
+// every token is an operand, not a flag, so "--" cannot be used to smuggle a
+// --set-shaped token past this filter.
+func SkipBBProseArgs(args []string) []string {
+	proseIdx := bbProseIndex(args)
+	result := make([]string, 0, len(args))
+	i := 0
+	for i < len(args) {
+		a := args[i]
+		if a == "--" {
+			result = append(result, args[i:]...)
+			break
+		}
+		if i == proseIdx {
+			i++
+			continue
+		}
+		if name, ok := equalsFlagName(a); ok && (name == "--set" || name == "--set-json") {
+			// The glued spelling ("--set=body.title=<value>") keeps a
+			// surrounding shell quote LITERAL when the quoting wraps only part
+			// of the token — the same shape GluedFlagValue exists to unwrap
+			// (pg2-cu3ro/pg2-52eod). A raw strings.Cut here would leave the
+			// opening quote character glued to the key half
+			// (`"body.title`), which never equals a bbSetProseFields entry, so
+			// GluedFlagValue's unwrap is required, not optional. malformed
+			// (an unwrap it could not resolve) is left AS A CANDIDATE — the
+			// token is appended unchanged, so firstSecretRefIn's own
+			// GluedFlagValue call reaches it and fails closed exactly as it
+			// does for any other malformed glued value.
+			if value, glued, malformed := GluedFlagValue(a); glued && !malformed {
+				if key, ok := bbSetKey(value); ok && bbSetProseFields[key] {
+					i++
+					continue
+				}
+			}
+			result = append(result, a)
+			i++
+			continue
+		}
+		if (a == "--set" || a == "--set-json") && i+1 < len(args) {
+			if key, ok := bbSetKey(args[i+1]); ok && bbSetProseFields[key] {
+				result = append(result, a)
+				i += 2
+				continue
+			}
+			result = append(result, a)
+			i++
+			continue
+		}
+		result = append(result, a)
+		i++
+	}
+	return result
+}
