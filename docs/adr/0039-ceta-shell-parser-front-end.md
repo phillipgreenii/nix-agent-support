@@ -564,6 +564,138 @@ future reader will be held to.
   misclassification bypasses the parser entirely — are independent of any measurement, so the
   rejection stands even if re-measurement erases the latency advantage entirely.
 
+## Amendment: fresh-name quote-blind scanner prevention — residual accepted (`pg2-qzdyw`)
+
+**Status**: Accepted
+**Date**: 2026-08-23
+**Tracking**: `pg2-qzdyw`
+**Provenance**: decided by the agent session implementing `pg2-qzdyw`, a P3 "no live defect"
+review-and-decide bead filed to close, or knowingly accept, a prevention-coverage gap in this ADR's
+own Enforcement section. Re-verified against `phillipgreenii-nix-agent-support` at `ef48d8f2`.
+
+### The gap
+
+Enforcement items 1-4 give I6, I7, I9 and I14 a mechanism. Re-verified against `ef48d8f2`, each
+catches a narrower case than "a hand-rolled quote-blind scanner reappears":
+
+| Guard   | Mechanism                                                                                                                                                    | Why a fresh-name hand-rolled scanner escapes it                                                                                            |
+| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1 (I6)  | `TestSeamIsTheOnlyParserImporter` (`internal/cmdparse/shellparse_test.go`) fails if any file but the seam imports `mvdan.cc/sh/v3`                           | a hand-rolled byte scanner imports nothing from the parser module                                                                          |
+| 2 (I9)  | `TestGuard2_ReintroducedRawTextScanner` (`internal/cmdparse/guard2_i9_i13_test.go`) fails on a declaration under one of **twelve fixed, historical names**   | a fresh scanner under a name not on that list is invisible to it by construction                                                           |
+| 3 (I7)  | `TestGuard3_ParseCountFixtures`/`TestGuard3_ParseCountCorpus` (`internal/setup/guard3_parsecount_test.go`) count real parses via `cmdparse.SetParseObserver` | a hand-rolled scanner does not call the parser at all — not parsing IS its signature, so it never trips a parse-count check                |
+| 4 (I14) | `internal/cmdparse/coverage_test.go` asserts every `*syntax.CallExpr` (plus redirection/heredoc-bearing statements) is covered by a leaf span                | it only sees the AST the seam produced; a scanner living inside a rule, downstream of lowering, is invisible to a check keyed on AST nodes |
+
+The one forward-looking, name-independent check is `TestI13_NoJoinedTextPassedDirectlyToEvaluateExpression`
+(same file as guard 2), and it is deliberately narrow to exactly one call shape:
+`<expr>.EvaluateExpression(strings.Join(...), ...)`. A scanner that derives a boolean or extent from
+raw text and feeds it straight into a rule's own decision — without ever joining text and handing it
+to `EvaluateExpression` — sits outside that shape too. This is the same geometry that let inventory
+site 11 (docker's `splitOnShellOperators`) go unnoticed until a person grepped for byte-level quote
+handling — the lesson Enforcement item 2 already names.
+
+### Context: guard 2's actual mechanism, recorded here because this amendment depends on it
+
+Enforcement item 2 above still reads as an open implementation choice ("type-level ... a repo-wide
+static check ... is the fallback if the type change proves too invasive"), and "Open questions
+carried forward" below still lists "The enforcement mechanism for I9 is not finally settled." Both
+are stale — left as historical record rather than rewritten, per this repository's append-only ADR
+convention — because the choice was made and landed in `pg2-x9452` (closed, `b5755cdd`). **This
+amendment treats that choice as settled and resolves the "not finally settled" bullet below.**
+
+Type-level enforcement was attempted and rejected, for three reasons recorded in full at
+`internal/cmdparse/guard2_i9_i13_test.go`'s own top-of-file doc comment and
+`internal/cmdparse/LOWERING.md`'s "Guard 2 (I9)" section:
+
+1. I7 requires `EvaluateExpression`'s text parameter to remain a plain `string` forever — it is the
+   permanent hook-boundary entry point that receives text which has never been parsed, so it cannot
+   already carry an opaque "vouched-for" type.
+2. `hookio.Evaluator`'s interface lives in package `hookio`, which `cmdparse` already imports
+   (`ParsedCommand` embeds `hookio.Redirection`), so `hookio` cannot import `cmdparse` back without a
+   cycle — the same constraint that forced `EvaluateStructure`'s `leaves` parameter to be typed `any`
+   rather than `[]cmdparse.ParsedCommand`.
+3. `ParsedCommand` itself has fully exported fields and is constructed via ordinary struct literals
+   across roughly nineteen already-landed rule packages (`docker.go`'s `resolveInnerCommand`,
+   `safecmds.go`'s xargs `-c` handling, `kubectl.go`'s `structuralInnerCommand`). Opacifying it would
+   mean rewriting the accessor surface of the whole rules module for a guarantee guard 2's own scope
+   does not need.
+
+The mechanism actually shipped is the twelve-name AST reintroduction-denylist in the table above
+(guard row 2), chosen over the "quote comparison inside a loop" property Enforcement item 2 already
+rejects by source-verified example (`envvars.isStaticAbsolutePath`'s false positive; the deleted
+`gitdir.containsVarRef`'s false negative). This amendment does not re-litigate that choice.
+
+### A third mechanism was tried for the fresh-name gap specifically, and it also fails
+
+Neither of this ADR's two named mechanisms for I9 — type-level, rejected above; the syntactic "quote
+comparison inside a loop" property, rejected at Enforcement item 2 — is a fresh option for the
+fresh-name gap; both predate this amendment. A genuinely new candidate was tried: flag, outside
+`cmdparse`, any classic byte-index loop over a string (`for i := 0; i < len(s); i++`-shaped, as
+opposed to `for _, tok := range someSliceOfStrings`) whose body calls a multi-byte pattern-matching
+function (`strings.HasPrefix`/`TrimPrefix`/`Index`/`Contains`/`Cut`/…) on a slice anchored at the
+loop's own index — i.e. dynamic lookahead over raw bytes, which is what both the deleted
+`containsVarRef` (word-boundary matching via `TrimPrefix`/`HasPrefix` inside a byte-indexed loop) and
+a hypothetical fresh-name equivalent would do, and which `envvars.isStaticAbsolutePath` (single-byte
+`switch` comparisons only, no lookahead call) does not.
+
+Run as a throwaway `go/ast` walk over the module at `ef48d8f2` (not committed — the same
+written-run-reverted pattern the four existing guards themselves use for their own demonstration
+fixtures) plus a reconstruction of the deleted `containsVarRef` in an isolated fixture package (also
+not committed), this property:
+
+- **Passes the false-negative direction**: run against the reconstructed `containsVarRef`, it fires
+  — a shape check catches what the name denylist would only catch by name.
+- **Fails the false-positive direction, badly, and for a structural reason rather than a fixable edge
+  case**: without full type information, `go/ast` cannot distinguish "iterate a raw string by byte
+  position" from "iterate a `[]string` of already-tokenized args/lines by index" — both are
+  `for i := 0; i < len(x); i++` syntactically. The property fired 36 times across 14 files outside
+  `cmdparse` (`docker.go`, four `gh` files, `git.go`, `gitdir.go`, `kubectl.go`,
+  `primarycommit/alias.go`, `primarypush.go`, `safecmds.go`, `sqlite3.go`, `ssh.go`,
+  `buildtools.go`), and every sampled hit was ordinary flag/token parsing over an already-split
+  `[]string` — e.g. `docker.go`'s `for i < len(args) { a := args[i]; if strings.HasPrefix(a,
+"--volume=") { … } }`, parsing already-tokenized docker CLI flags, not deriving command structure
+  from raw text. Distinguishing the two cases correctly needs a real type checker (`go/types`, not
+  `go/ast`), which is a materially heavier mechanism than any of the four existing guards uses (none
+  of guards 1-4 loads type information), would need its own false-positive sweep across the whole
+  module to trust, and is not guaranteed to be the last such gap even then (a `[]byte` parameter or a
+  custom string-like type would need the same treatment again).
+
+This is rejected as disproportionate: building and maintaining a type-aware static analyzer is a
+substantially larger commitment than the P3, "no live defect" tier of this bead's own framing
+warrants, for a gap that is prevention-only.
+
+### Decision: the residual is accepted
+
+**No new guard is added.** Coverage against a brand-new, fresh-named, quote-blind scanner rests on
+guard 2 (which catches a reintroduction by name) plus code review — the same posture this ADR already
+accepts for I11 ("not mechanically testable … it MUST be upheld by review").
+
+### Rationale
+
+- **The incentive this ADR names as root cause 1 (Primitive Obsession — passing `string` where
+  structure is required) is gone.** Every rule needing inner-command structure now has a real,
+  reviewed, structural path: `EvaluateStructure` (the I13 entry point, `pg2-m1i6r`), and
+  `TestI13_StructuralEntryPointIsActuallyUsed` proves it is actually exercised by
+  `docker.go`/`nix.go`/`kubectl.go`/`safecmds.go`, not merely available. A rule author no longer has a
+  structural need that only a hand-rolled scanner can satisfy — the residual risk is a choice to
+  bypass an existing, ergonomic structural path, which is the class of defect code review exists to
+  catch, not a gap the architecture leaves open by construction.
+- **Both mechanisms this ADR names for I9 were tried and both fail for recorded, source-verified
+  reasons** (type-level: three reasons above; the syntactic property: the false-positive/false-negative
+  pair above). A third mechanism aimed specifically at the fresh-name residual was tried in this
+  amendment and fails for the same class of reason — an AST-only shape check cannot tell "scanning a
+  string" from "indexing a token list" without type information — at a mechanism cost this bead's own
+  P3 framing does not justify.
+- **The four existing guards, plus the one forward-looking shape check, still narrow the residual
+  meaningfully**: a reintroduction of any of the twelve historical names is caught; a fresh scanner
+  that reaches `EvaluateExpression` via `strings.Join` is caught; a fresh scanner that imports the
+  parser module, or fails to parse where I7 expects a count, is caught. What remains uncaught is
+  specifically a fresh-name scanner that (a) is not one of the twelve known names, (b) never calls
+  `EvaluateExpression` with a joined string, and (c) never imports the parser — a narrower target than
+  "any new scanner."
+- This decision MAY be revisited if a future incident demonstrates the residual is being exploited in
+  practice, or if a cheap type-aware check becomes available for other reasons (e.g. an existing
+  `go vet`-style analysis pass adopted for unrelated reasons that this residual could piggyback on).
+
 ## Related Decisions
 
 - [ADR 0004](0004-ceta-configrules-xdg-config-for-consumer-rules.md) and
@@ -584,3 +716,9 @@ future reader will be held to.
 - Bead `pg2-61tgf` — pointing the agent shell at a nix bash. Defence in depth, separate repository
   surface, and deliberately **no blocking edge** per I11.
 - Bead `pg2-1vme1` — the review and strategy bead this decision closes out.
+- Bead `pg2-x9452` — the migration's final integration step; landed guard 2 (I9) and guard 3 (I7),
+  asserted I13 end-to-end, and ran the full-module corpus replay. Its mechanism choice for guard 2 is
+  recorded above in the "Amendment" section rather than here, because the amendment is what depends on
+  it.
+- Bead `pg2-qzdyw` — the "Amendment" section above: whether the fresh-name quote-blind-scanner
+  prevention gap left by guard 2 warrants a further mechanism. Decided: residual accepted.
