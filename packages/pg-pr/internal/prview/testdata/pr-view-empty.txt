@@ -1,0 +1,62 @@
+PR
+  repo: o/r
+  number: 7
+  title: -
+  state: -
+  draft: no
+  branch: -
+  base: -
+  author: -
+  url: -
+  head_sha: -
+  base_sha: -
+  merged: no
+  merged_at: -
+  additions: 0
+  deletions: 0
+  changed_files: 0
+  labels: (none)
+  as_of: -
+  stale: yes
+
+CI
+  state: none
+  passed: 0
+  failed: 0
+  pending: 0
+
+Merge State
+  mergeable: -
+  merge_state_status: -
+  auto_merge_enabled: no
+  has_conflict: no
+
+Ownership
+  ownership: -
+
+Enrichment
+  kind: -
+  size: -
+  languages: -
+  urgency: -
+
+Feedback
+  (none)
+
+Revisions
+  (none)
+
+Linked Tickets
+  (none)
+
+Bead Links
+  (none)
+
+Approvals
+  status: -
+
+Policy Bot
+  status: -
+
+Hide/WIP State
+  status: -

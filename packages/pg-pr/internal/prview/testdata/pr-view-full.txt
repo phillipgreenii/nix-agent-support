@@ -1,0 +1,62 @@
+PR
+  repo: o/r
+  number: 42
+  title: Add contributor guide
+  state: open
+  draft: no
+  branch: alice/add-guide
+  base: main
+  author: alice
+  url: https://example.invalid/o/r/pull/42
+  head_sha: abc123
+  base_sha: def456
+  merged: no
+  merged_at: -
+  additions: 120
+  deletions: 4
+  changed_files: 5
+  labels: enhancement, needs-review
+  as_of: 2026-08-23T11:59:30Z
+  stale: no
+
+CI
+  state: failure
+  passed: 1
+  failed: 1
+  pending: 0
+
+Merge State
+  mergeable: MERGEABLE
+  merge_state_status: CLEAN
+  auto_merge_enabled: no
+  has_conflict: no
+
+Ownership
+  ownership: mine
+
+Enrichment
+  kind: feature
+  size: M
+  languages: Go, Nix
+  urgency: high (label:p0, incident-linked)
+
+Feedback
+  #1 [code-comment] Handle the error return (author=bob, status=open, severity=warning)
+
+Revisions
+  seq=1 head=abc123 ci=failure(passed=1,failed=1,pending=0) gate=satisfied(2/2)
+
+Linked Tickets
+  ABC-123
+
+Bead Links
+  pg2-abc12 [open] fix thing (bd://pg2-abc12)
+
+Approvals
+  status: -
+
+Policy Bot
+  status: -
+
+Hide/WIP State
+  status: -
