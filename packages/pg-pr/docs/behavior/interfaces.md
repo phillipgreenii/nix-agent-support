@@ -56,9 +56,21 @@ flowchart LR
 ## `INTF-PGPR-SYNC` — PR facts pulled in <!-- uuid: b5f0bdcd-365d-49fa-a578-59637afc28bc -->
 
 - **In (code host → pg-pr)** — PR facts, fetched by fingerprint-driven comparison
-  (`INV-SYNC-1`).
+  (`INV-SYNC-1`). The retrieval set is the union of a cross-repo mine bucket (author-only) with,
+  per repo, a team-authored bucket, a review-requested bucket, a reviewed-by-me bucket, an
+  assigned-to-me bucket, and one bucket per configured watch label. This broadened retrieval
+  applies only to background (daemon) sync; a manually triggered one-shot sync fetches only the
+  author-only (mine) facts and does not pull the broadened not-mine buckets.
 - **Guarantee** — a pass that cannot confirm completeness for some subset MUST NOT be read as
   "those PRs are gone" (`INV-SYNC-2`).
+- **Guarantee** — membership in the pulled-in, not-mine set is self-correcting: a PR admitted
+  because it carried a qualifying reason is re-checked on every rebuild and drops out the moment
+  none of its qualifying reasons still hold, with no timer and no persisted "seen" state
+  (`INV-SYNC-1`). This governs the underlying dashboard/read-side membership only — the PR's own
+  merge-request tracking record (`INTF-PGPR-MR`) follows its own lifecycle, closed solely by the
+  PR's real close or merge, never by a qualifying-reason change.
+- **Open questions** (tracked in [journeys](journeys.md)): `OQ-PGPR-COMMENTER-BUCKET` (whether a
+  PR I have only commented on, with no other qualifying reason, should itself become one).
 
 ## `INTF-PGPR-MR` — merge-request record upsert <!-- uuid: 15a4f89f-420a-4628-aea0-73a0e722c6ef -->
 

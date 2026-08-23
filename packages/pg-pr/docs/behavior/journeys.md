@@ -87,7 +87,9 @@ _Includes:_ `USECASE-PGPR-ENSURE-MR`.
 _Requires:_ `INV-SYNC-1`, `INV-SYNC-2`.
 _Includes:_ `USECASE-PGPR-ENSURE-MR`.
 
-1. The detector compares the code host's current state against the store, mutating nothing.
+1. The detector compares the code host's current state — pg-pr's own PRs plus every not-mine PR
+   currently carrying a qualifying reason (team-authored, review-requested, reviewed-by-me,
+   assigned-to-me, or carrying a configured watch label) — against the store, mutating nothing.
 2. For each detected change, a worker applies it — ensuring the affected PR's merge-request
    record — and is the sole authority that closes or removes a record.
 
@@ -95,6 +97,10 @@ Extensions:
 
 - 1a. Completeness cannot be confirmed for some subset: that subset's prior known state is
   carried forward rather than treated as gone (`INV-SYNC-2`).
+- 1b. A previously admitted not-mine PR no longer carries any qualifying reason: it drops out of
+  the retrieved set on the next comparison — a pure recomputation, with no timer and no
+  persisted "seen" state. This never closes or removes the PR's own merge-request record; that
+  stays the worker's sole authority (step 2), driven only by the PR's real close or merge.
 
 ### `USECASE-PGPR-ENSURE-MR` — ensure a merge-request record exists <!-- uuid: 22bbc8c6-d744-420e-becb-61cb2bb5d568 -->
 
@@ -159,3 +165,15 @@ Each states the gap, its owner, a resolution path, and where it blocks.
   posted state is undecided. _Owner_: pg-pr. _Path_: decide when review-posting semantics
   (`INTF-PGPR-WRITE`) are next revisited; either answer changes interface-level behavior.
   _Blocks_: nothing today — the advisory default is safe.
+- **`OQ-PGPR-COMMENTER-BUCKET`** <!-- uuid: 33f46397-3a7c-4530-8758-cc42a3227ff9 --> — whether a
+  PR I have only commented on (never submitted a review, never requested, assigned, or
+  team-authored) should itself become a qualifying reason for retrieval. _Gap_: no
+  interacted-with bucket exists; the shipped default is the fallback — a comment bumps a PR
+  already in the retrieved set (it already carries some other qualifying reason) but does not
+  admit a PR on its own, so a PR I have solely commented on reaches neither the retrieved set nor
+  the reviewer's dashboard. Whether the code host's commenter-style query would match the
+  intended "interacted with" set, and what the real result-set size and rate cost would be, is
+  undetermined without measuring it live. _Owner_: pg-pr. _Path_: run a live measurement pass
+  against the code host's commenter-style query to determine match quality and result-set
+  size/rate cost, then decide whether to add the bucket. _Blocks_: nothing today — the fallback
+  (bump only already-retrieved PRs) is safe.

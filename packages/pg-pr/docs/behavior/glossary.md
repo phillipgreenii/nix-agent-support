@@ -40,6 +40,10 @@ deployment concern and is not defined here (`## Scope`).
   authority that closes or removes a tracked PR.
 - **Partial data** — a sync pass that could not complete for some subset (a transient error,
   pagination truncation). MUST NOT be treated as "confirmed gone" — see `INV-SYNC-2`.
+- **Qualifying reason** — the fact that puts a not-mine PR into pg-pr's retrieved "to review"
+  set: team-authored, review-requested, reviewed-by-me, assigned-to-me, or carrying a configured
+  watch label. Recomputed from current facts on every rebuild; never a persisted "seen" flag
+  (`INV-SYNC-1`).
 
 ## Merge-request records
 
