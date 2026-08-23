@@ -1678,15 +1678,29 @@ func (e *Engine) reconcileReplies(ctx context.Context) (int, error) {
 	return replyposter.New(e.deps.Store, replier).Reconcile(ctx)
 }
 
+// flushOutboxCalls counts every flushOutbox invocation process-wide, purely so
+// tests can observe how many times a call collapsed (or didn't) — the
+// flush-collapse guard (FB-3) asserts refreshPR flushes the outbox once per
+// active tick rather than after every sub-step. Production code never reads
+// it.
+//
+// This used to be done by making flushOutbox itself a reassignable package
+// var that the test swapped for a counting closure (restored via
+// t.Cleanup). That is a genuine data race waiting to happen: flushOutbox is
+// called from production code on every refresh/daemon tick, so a reassignment
+// racing a concurrent call — e.g. from a future t.Parallel() test in this
+// package, which today happen to park until the sequential tests (this one
+// included) finish — is an unsynchronized write racing an unsynchronized
+// read. An atomic counter makes the seam race-safe BY CONSTRUCTION: flushOutbox
+// stays a plain, non-swappable func, and the test reads a delta across two
+// atomic loads instead of mutating shared state.
+var flushOutboxCalls atomic.Int64
+
 // flushOutbox drains the store's outbox through the dispatcher. Called at the
 // end of each one-shot Sync and each daemon maintenance cycle. No-op until
 // ingestion (a later phase) starts enqueuing events.
-//
-// It is a package var (not a plain func) purely so tests can count invocations
-// — the flush-collapse guard (FB-3) asserts refreshPR flushes the outbox once
-// per active tick rather than after every sub-step. Production behavior is
-// identical to the equivalent func.
-var flushOutbox = func(ctx context.Context, db *store.DB, dispatch store.DispatchFunc) {
+func flushOutbox(ctx context.Context, db *store.DB, dispatch store.DispatchFunc) {
+	flushOutboxCalls.Add(1)
 	if db == nil || dispatch == nil {
 		return
 	}

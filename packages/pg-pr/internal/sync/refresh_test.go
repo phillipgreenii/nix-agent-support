@@ -286,13 +286,12 @@ func TestRefreshPR_ActiveMine_EnrichmentReused(t *testing.T) {
 // their order. A team PR is used because own != Mine engages the attention
 // emit, which is the second (now-removed) flush's trigger.
 func TestRefreshPR_ActiveTeam_FlushesOutboxOnce(t *testing.T) {
-	origFlush := flushOutbox
-	t.Cleanup(func() { flushOutbox = origFlush })
-	var flushes int
-	flushOutbox = func(ctx context.Context, db *store.DB, dispatch store.DispatchFunc) {
-		flushes++
-		origFlush(ctx, db, dispatch)
-	}
+	// Read the process-wide call counter before/after and assert the DELTA,
+	// rather than swapping the package-level flushOutbox func for a counting
+	// closure: flushOutbox is called from production code on every tick, so a
+	// reassignment would race a concurrent call under -race. The atomic
+	// counter is race-safe by construction — see its doc comment in sync.go.
+	before := flushOutboxCalls.Load()
 
 	db := store.OpenForTest(t)
 	bdc := &refreshFakeBeads{}
@@ -305,8 +304,8 @@ func TestRefreshPR_ActiveTeam_FlushesOutboxOnce(t *testing.T) {
 	if _, err := e.refreshPR(context.Background(), "o/r", pr.Number); err != nil {
 		t.Fatalf("refreshPR: %v", err)
 	}
-	if flushes != 1 {
-		t.Fatalf("expected exactly 1 flushOutbox invocation per active team refresh (collapsed), got %d", flushes)
+	if got := flushOutboxCalls.Load() - before; got != 1 {
+		t.Fatalf("expected exactly 1 flushOutbox invocation per active team refresh (collapsed), got %d", got)
 	}
 }
 

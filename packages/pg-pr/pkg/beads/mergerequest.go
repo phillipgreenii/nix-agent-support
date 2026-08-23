@@ -231,6 +231,21 @@ func (c *Client) CloseMergeRequest(ctx context.Context, id, reason string) error
 // diff — MUST call getMergeRequestUncached directly (or, from outside this
 // package, GetMergeRequestUncached), NOT this method, so a stale snapshot can
 // never corrupt their decision.
+//
+// KEEP decision (pg2-dyu43): as of this audit it has zero production callers
+// in pg-pr — `grep -rn "\.GetMergeRequest(" --include=*.go packages/pg-pr | grep -v
+// _test.go` returns nothing. Production identity/existence reads by
+// (repo, pr_number) go through FindByRepoAndNumber instead, since the
+// pg2-pz7y8 read-once/write-once refactor moved the beadsbridge.BeadClient
+// interface off of by-id reads entirely (it no longer declares GetMergeRequest
+// or GetMergeRequestUncached at all — only FindByRepoAndNumberUncached and
+// FindByRepoAndNumber). This method is retained deliberately, not left
+// ambiguous: it lives in pkg/ (this module's intentionally-exported surface,
+// as distinct from internal/), has correct and fully documented cache+fallback
+// semantics, and is exercised directly by this package's own tests
+// (mergerequest_test.go, tickcache_writepath_test.go). Retire it only
+// alongside removing that test coverage, if a future audit decides the
+// exported by-id surface is no longer worth carrying.
 func (c *Client) GetMergeRequest(ctx context.Context, id string) (*MergeRequest, error) {
 	if c.tickCache != nil {
 		if mr, ok := c.tickCache.MergeRequestsByID[id]; ok {
