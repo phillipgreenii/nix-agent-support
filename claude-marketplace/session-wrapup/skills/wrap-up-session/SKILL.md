@@ -145,8 +145,12 @@ Run the repo's tests, linters, and build/check before integrating. Discover the 
 the repo, in this rough order of authority:
 
 - A `justfile` / `Makefile` target (`just check`, `just test`, `make check`).
-- Repo convention from `CLAUDE.md` / `AGENTS.md`. (For the `nix-*` repos here that's
-  `prek run --all-files` or `pre-commit run --all-files`, then `nix flake check`.)
+- Repo convention from `CLAUDE.md` / `AGENTS.md`. (For the `nix-*` repos here that's the
+  pre-commit hooks SCOPED to the session's changed files — `prek run --files <the files this
+session changed>` (or `pre-commit run --files …`), NOT `--all-files` (which re-runs every
+  hook over the whole repo and can false-block on a pre-existing violation this session never
+  touched; the commit's own hook run is the real gate) — then `nix flake check`. Reserve
+  `--all-files` for a deliberate full-repo sweep, never as the per-change gate.)
 - Language defaults (`go test ./...`, `pytest`, `npm test`, `cargo test`).
 
 **If a gate fails, stop before integrating.** Don't merge or push code that doesn't pass.
@@ -467,20 +471,20 @@ If nothing was in scope, say so plainly rather than inventing work.
 
 ## Command quick reference
 
-| need                            | command                                                                                          |
-| ------------------------------- | ------------------------------------------------------------------------------------------------ |
-| in-progress beads               | `bd list --status in_progress`                                                                   |
-| PR-tracker beads                | `bd list --type=merge-request`                                                                   |
-| close finished work             | `bd close <id> [<id>...] --reason="..."`                                                         |
-| file discovered/unfinished      | `bd create --title=... --description=... --type=... -p <0-4>`                                    |
-| dirty state                     | `git status` ; ahead of main: `git log main..`                                                   |
-| unpushed blocks the work?       | `pn workspace doctor` (read-only, never `--fix`) ; standalone: `git rev-list --count @{u}..HEAD` |
-| run gates (nix-\* repos)        | `prek run --all-files` (or `pre-commit run --all-files`); `nix flake check`                      |
-| integrate a repo's work         | invoke the `integrate-branch` skill (detects method, lands, retires branch/worktree)             |
-| set teardown / stash cleanup    | see `references/cleanup.md`                                                                      |
-| remove pn workforest set        | `pn workspace workforest remove <branch>` (only when every repo reported `landed`)               |
-| prune stale worktree admin      | `pn workspace workforest prune`                                                                  |
-| next-session handoff            | one P0 `bd create` (see "Next-session handoff bead")                                             |
-| retire a spent P0 pointer       | `bd close <id> --reason "absorbed: <item> ⇒ <bead-id\|label>, …"` (see "Lifecycle")              |
-| record work (no-beads repo)     | append to the repo's handoff doc (see "Markdown handoff doc (no-beads repos)")                   |
-| next-session handoff (no-beads) | update the handoff doc's top "Resume here" section                                               |
+| need                            | command                                                                                                  |
+| ------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| in-progress beads               | `bd list --status in_progress`                                                                           |
+| PR-tracker beads                | `bd list --type=merge-request`                                                                           |
+| close finished work             | `bd close <id> [<id>...] --reason="..."`                                                                 |
+| file discovered/unfinished      | `bd create --title=... --description=... --type=... -p <0-4>`                                            |
+| dirty state                     | `git status` ; ahead of main: `git log main..`                                                           |
+| unpushed blocks the work?       | `pn workspace doctor` (read-only, never `--fix`) ; standalone: `git rev-list --count @{u}..HEAD`         |
+| run gates (nix-\* repos)        | `prek run --files <changed files>` (or `pre-commit run --files …`), NOT `--all-files`; `nix flake check` |
+| integrate a repo's work         | invoke the `integrate-branch` skill (detects method, lands, retires branch/worktree)                     |
+| set teardown / stash cleanup    | see `references/cleanup.md`                                                                              |
+| remove pn workforest set        | `pn workspace workforest remove <branch>` (only when every repo reported `landed`)                       |
+| prune stale worktree admin      | `pn workspace workforest prune`                                                                          |
+| next-session handoff            | one P0 `bd create` (see "Next-session handoff bead")                                                     |
+| retire a spent P0 pointer       | `bd close <id> --reason "absorbed: <item> ⇒ <bead-id\|label>, …"` (see "Lifecycle")                      |
+| record work (no-beads repo)     | append to the repo's handoff doc (see "Markdown handoff doc (no-beads repos)")                           |
+| next-session handoff (no-beads) | update the handoff doc's top "Resume here" section                                                       |
