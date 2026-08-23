@@ -48,6 +48,29 @@ correct owner (ADR 0034) — the UUID preserves identity; only the owning set ch
   findings or authority — an unrecognized verdict and a genuine absence of approval MUST remain
   distinguishable to whoever is watching for it.
 
+## Approval gate (`INV-GATE-*`)
+
+- **`INV-GATE-1`** <!-- uuid: d93cccf6-de1e-409d-a7c5-88269736cb39 --> — **Its own axis, never
+  folded in.** The approval gate MUST be tracked and reported as an axis distinct from CI health
+  and distinct from any single approver's verdict (`INV-APPROVAL-1`). A PR's CI-health rollup
+  MUST NOT be affected by the gate's state, and the gate's state MUST NOT be inferred from, or
+  collapsed into, either the CI-health rollup or an individual approver's verdict.
+- **`INV-GATE-2`** <!-- uuid: 85f513b4-6eb3-4e5c-a382-fe1085cc1dcc --> — **Unmatched reads
+  unknown, never satisfied.** A gate signal pg-pr cannot classify — absent, unmatched, or
+  unparseable — MUST be reported as gate state `unknown`. It MUST NOT be coerced to `satisfied`,
+  nor to any other gate state; an unrecognized signal and a genuinely satisfied gate MUST remain
+  distinguishable.
+- **`INV-GATE-3`** <!-- uuid: 0d11ca52-7f65-4feb-a079-41c62141ca0d --> — **Uninterpreted still
+  counts in CI health.** A check or status that no configured interpreter claims MUST continue to
+  roll up into CI health exactly as it would with no interpreter configured at all. Generalizing
+  the interpretation mechanism MUST NOT turn "uninterpreted" into "excluded" — this fallback is
+  mandatory, not an implementation detail left to chance.
+- **`INV-GATE-4`** <!-- uuid: c722223b-815f-417d-81e8-9418443b8d63 --> — **The gate state is a
+  fact; freshness applies.** The gate state is a PR fact like any other pg-pr publishes: it MUST
+  carry the same as-of-time and stale treatment as its sibling facts (`INV-ASOF-1`), and pg-pr
+  remains the sole computer of that determination — a consumer MUST NOT re-derive its own
+  staleness policy over the gate state either (`INV-ASOF-2`).
+
 ## Merge-request records (`INV-MR-*`)
 
 - **`INV-MR-1`** <!-- uuid: bacb5392-230f-4cf7-a10b-6821ddb0f085 --> — pg-pr MUST be the **sole

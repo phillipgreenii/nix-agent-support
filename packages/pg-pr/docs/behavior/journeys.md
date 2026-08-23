@@ -10,7 +10,8 @@ and what it includes (`INV-22`).
 - **`STORY-PGPR-GLANCE`** <!-- uuid: 78f67804-45fe-475c-bc9c-8559a5054a26 --> — As an operator or
   a machine consumer, I want PR facts I can trust the freshness of, so I never act on stale
   information. _(→ `USECASE-PGPR-LIST`; `INV-READ-1`, `INV-ASOF-1`, `INV-ASOF-2`,
-  `INV-APPROVAL-1`, `INV-APPROVAL-2`, `INV-APPROVAL-3`, `INV-APPROVAL-4`, `INV-APPROVAL-5`.)_
+  `INV-APPROVAL-1`, `INV-APPROVAL-2`, `INV-APPROVAL-3`, `INV-APPROVAL-4`, `INV-APPROVAL-5`,
+  `INV-GATE-1`, `INV-GATE-4`.)_
 - **`STORY-PGPR-REVIEW`** <!-- uuid: 23724212-5d46-416d-ba0e-e43644d1269c --> — As a reviewer
   (human or agent), I want to stage and post a review safely, so my feedback lands attributed and
   never stacks a duplicate. _(→ `USECASE-PGPR-REVIEW`; `INV-REVIEW-1`, `INV-ATTR-1`.)_
@@ -26,12 +27,13 @@ and what it includes (`INV-22`).
 **Level:** user-goal.
 **Preconditions:** none.
 _Requires:_ `INV-READ-1`, `INV-ASOF-1`, `INV-ASOF-2`, `INV-APPROVAL-1`, `INV-APPROVAL-2`,
-`INV-APPROVAL-3`, `INV-APPROVAL-4`, `INV-APPROVAL-5`.
+`INV-APPROVAL-3`, `INV-APPROVAL-4`, `INV-APPROVAL-5`, `INV-GATE-1`, `INV-GATE-4`.
 
 1. The actor asks for the current PR listing, machine or human-facing.
 2. pg-pr returns PR facts read from its store, each carrying its own freshness signal —
    including, per PR, each approver's verdict and its own staleness (`INV-APPROVAL-1`,
-   `INV-APPROVAL-3`).
+   `INV-APPROVAL-3`), and the approval gate's own state, distinct from CI health and carrying the
+   same freshness treatment as the facts beside it (`INV-GATE-1`, `INV-GATE-4`).
 
 Extensions:
 
@@ -84,12 +86,15 @@ _Includes:_ `USECASE-PGPR-ENSURE-MR`.
 **Primary actor:** none — a scheduled or triggered background actor.
 **Level:** user-goal.
 **Preconditions:** none.
-_Requires:_ `INV-SYNC-1`, `INV-SYNC-2`.
+_Requires:_ `INV-SYNC-1`, `INV-SYNC-2`, `INV-GATE-1`, `INV-GATE-2`, `INV-GATE-3`.
 _Includes:_ `USECASE-PGPR-ENSURE-MR`.
 
 1. The detector compares the code host's current state — pg-pr's own PRs plus every not-mine PR
    currently carrying a qualifying reason (team-authored, review-requested, reviewed-by-me,
    assigned-to-me, or carrying a configured watch label) — against the store, mutating nothing.
+   Among the facts compared is each PR's approval gate, classified into its own gate state and
+   kept out of the CI-health comparison (`INV-GATE-1`); a signal that cannot be classified
+   compares as `unknown`, never `satisfied` (`INV-GATE-2`).
 2. For each detected change, a worker applies it — ensuring the affected PR's merge-request
    record — and is the sole authority that closes or removes a record.
 
@@ -101,6 +106,8 @@ Extensions:
   the retrieved set on the next comparison — a pure recomputation, with no timer and no
   persisted "seen" state. This never closes or removes the PR's own merge-request record; that
   stays the worker's sole authority (step 2), driven only by the PR's real close or merge.
+- 1c. A check or status no configured interpreter claims rolls up into CI health exactly as it
+  would with no interpreter configured (`INV-GATE-3`).
 
 ### `USECASE-PGPR-ENSURE-MR` — ensure a merge-request record exists <!-- uuid: 22bbc8c6-d744-420e-becb-61cb2bb5d568 -->
 
@@ -121,7 +128,8 @@ _Requires:_ `INV-MR-1`.
 **Level:** summary.
 **Intent:** tell the whole arc once — facts flow from the code host through a mutate-nothing
 detector to a mutate-only worker, landing as fresh, actable facts for any consumer.
-_Requires:_ `INV-SYNC-1`, `INV-SYNC-2`, `INV-ASOF-1`, `INV-ASOF-2`, `INV-MR-1`.
+_Requires:_ `INV-SYNC-1`, `INV-SYNC-2`, `INV-ASOF-1`, `INV-ASOF-2`, `INV-MR-1`, `INV-GATE-1`,
+`INV-GATE-4`.
 _Includes:_ `USECASE-PGPR-SYNC`, `USECASE-PGPR-LIST`.
 
 ```mermaid
@@ -133,7 +141,9 @@ flowchart LR
 ```
 
 A pass that cannot confirm completeness for some subset carries that subset's prior state
-forward — it never mass-closes on partial data (`INV-SYNC-2`).
+forward — it never mass-closes on partial data (`INV-SYNC-2`). Among the facts landing fresh at
+the end of the arc is the approval gate, tracked the whole way as its own axis rather than folded
+into CI health (`INV-GATE-1`, `INV-GATE-4`).
 
 ### `JOURNEY-PGPR-WRITE` — the review write arc <!-- uuid: c1a8aef4-585d-44dc-bdf1-286bb213d110 -->
 

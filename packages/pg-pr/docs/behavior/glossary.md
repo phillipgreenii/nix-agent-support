@@ -31,6 +31,16 @@ deployment concern and is not defined here (`## Scope`).
 - **Authority** — the verdict axis answering "does this approver's verdict currently stand as an
   approval": `approved`, `withheld`, `pending`, or `absent`.
 
+## Approval gate
+
+- **Approval gate** — a PR fact: the aggregate readiness signal reported by a configured gate
+  mechanism, tracked as its own axis — distinct from CI health and distinct from any single
+  approver's verdict (`Approval`) — and never folded into either (`INV-GATE-1`).
+- **Gate state** — the approval gate's classification: `satisfied` (every configured requirement
+  currently holds), `partially-satisfied` (some but not all hold), `unsatisfied` (none hold), or
+  `unknown` (the signal could not be classified). An absent, unmatched, or unparseable signal is a
+  gate state of `unknown`, never `satisfied` (`INV-GATE-2`).
+
 ## Sync
 
 - **Fingerprint** — a cheap signature of a PR's observable state, used to detect a change without

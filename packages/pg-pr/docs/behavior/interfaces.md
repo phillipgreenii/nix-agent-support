@@ -30,10 +30,12 @@ flowchart LR
 
 - **Out (pg-pr → consumer), machine read seam** — a listing of PR facts read with no network call
   and no store mutation (`INV-READ-1`), each item carrying its own as-of time and stale flag
-  (`INV-ASOF-1`). Fact columns include identity, ownership, size and age, and CI signal and
-  review-count facts read from the code host — the **PR-fact** half of any triage surface built
-  on this seam; a downstream deployment's own judgement over these facts (urgency, sort,
-  cross-domain enrichment) is not pg-pr's to compute.
+  (`INV-ASOF-1`). Fact columns include identity, ownership, size and age, CI signal and
+  review-count facts read from the code host, and the **approval gate** — its own field,
+  distinct from the CI signal, carrying the same freshness treatment as its sibling facts
+  (`INV-GATE-1`, `INV-GATE-4`) — the **PR-fact** half of any triage surface built on this seam; a
+  downstream deployment's own judgement over these facts (urgency, sort, cross-domain
+  enrichment) is not pg-pr's to compute.
 - **Out (pg-pr → consumer), dashboard payload** — the same facts, human-facing, carrying a
   payload-level as-of time and stale flag rather than a per-item one.
 - **Guarantee** — a consumer MUST be able to tell "stale" from "current" for every fact it acts
@@ -61,6 +63,12 @@ flowchart LR
   assigned-to-me bucket, and one bucket per configured watch label. This broadened retrieval
   applies only to background (daemon) sync; a manually triggered one-shot sync fetches only the
   author-only (mine) facts and does not pull the broadened not-mine buckets.
+- **In (code host → pg-pr), approval gate** — the **approval gate** is one of the PR facts pulled
+  in through this crossing, classified into its gate state and tracked as its own axis — never
+  folded into the CI-health facts pulled in alongside it (`INV-GATE-1`). A signal pg-pr cannot
+  classify is pulled in as `unknown`, never `satisfied` (`INV-GATE-2`); a check or status no
+  configured interpreter claims still counts toward CI health exactly as it does today
+  (`INV-GATE-3`).
 - **Guarantee** — a pass that cannot confirm completeness for some subset MUST NOT be read as
   "those PRs are gone" (`INV-SYNC-2`).
 - **Guarantee** — membership in the pulled-in, not-mine set is self-correcting: a PR admitted

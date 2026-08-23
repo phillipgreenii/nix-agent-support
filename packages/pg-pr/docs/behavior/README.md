@@ -45,7 +45,8 @@ restated here.
   side-effect-free); freshness on every acted-on read; sole-creator, idempotent
   merge-request-record upsert; fingerprint-driven sync where only workers mutate and never mass
   close on partial data; head-anchored, attributed, PENDING-only review and comment posting with
-  a fail-closed supersede check.
+  a fail-closed supersede check; the approval gate tracked as its own axis, distinct from CI
+  health, where a signal pg-pr cannot classify reads unknown rather than satisfied.
 - **Extent (out), named explicitly (ADR 0034)** — the legacy in-daemon review **workflow**:
   draft-review record lifecycle, an automated review consumer and its own agent spawn,
   re-review-on-head-advance and any reviewed-state cursor, retry/dead-letter policy, a credential
