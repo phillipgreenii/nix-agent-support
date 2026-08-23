@@ -160,7 +160,7 @@ func runTool(t *testing.T, dir, name string, args ...string) string {
 
 func createDeferredBead(t *testing.T, ws, title string) string {
 	t.Helper()
-	out := runTool(t, ws, "bd", "create", title, "--defer", "+100y", "--json")
+	out := runTool(t, ws, "bd", "create", title, "--defer", "2126-01-01", "--json")
 	var env struct {
 		Data struct {
 			ID string `json:"id"`
