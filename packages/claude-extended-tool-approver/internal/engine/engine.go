@@ -338,7 +338,17 @@ func (e *Engine) EvaluateExpression(expr string, stack []hookio.StackFrame, orig
 	// constructed or extracted text that has no corresponding subtree in any
 	// prior parse). evaluateParsed below is the shared core: this function's
 	// only extra job, versus evaluateParsed, is producing `sp` by parsing.
-	return e.evaluateParsed(expr, cmdparse.ParseShell(expr), normalized, stack, origin)
+	//
+	// outerVars/outerTempDirVars are nil here, deliberately: every caller of THIS
+	// entry point is evaluating a command in a NEW shell scope, not a substitution
+	// lexically nested inside the caller's own expression — envvars/docker/nix/kubectl
+	// each recurse into an INNER shell (a container's, a subshell `-c` argument's) whose
+	// variables genuinely are not the outer command's, and the top-level Bash-tool call
+	// has no enclosing scope at all. Only foldSubstitutionScan's own recursive
+	// evaluateParsed call (below) threads a non-nil outer scope, because a `$(...)` /
+	// arithmetic-expansion body is evaluated IN the same shell as the leaf that contains
+	// it — see evaluateParsed's outerVars doc for the full reasoning (bead tc-5h6e).
+	return e.evaluateParsed(expr, cmdparse.ParseShell(expr), normalized, stack, origin, nil, nil)
 }
 
 // EvaluateStructure is ADR 0039 I13's STRUCTURAL delegate entry point
@@ -388,7 +398,10 @@ func (e *Engine) EvaluateStructure(source string, leaves any, stack []hookio.Sta
 			Module:   "engine",
 		}
 	}
-	return e.evaluateParsed(source, cmdparse.ShellParse{Leaves: parsed}, normalized, stack, origin)
+	// outerVars/outerTempDirVars nil for the same reason as EvaluateExpression's own
+	// entry point above: no caller of this structural delegate is a substitution
+	// lexically nested inside an enclosing expression either.
+	return e.evaluateParsed(source, cmdparse.ShellParse{Leaves: parsed}, normalized, stack, origin, nil, nil)
 }
 
 // detectCycle is EvaluateExpression's cycle check, factored out so
@@ -435,7 +448,29 @@ func detectCycle(normalized string, stack []hookio.StackFrame) (hookio.RuleResul
 // or foldSubstitutionScan's per-substitution `subNormalized` — since every
 // caller needs it themselves (for stack frames / cycle checks) and computing
 // it twice would be redundant.
-func (e *Engine) evaluateParsed(expr string, sp cmdparse.ShellParse, normalized string, stack []hookio.StackFrame, origin *hookio.HookInput) hookio.RuleResult {
+//
+// outerVars/outerTempDirVars (bead tc-5h6e) are the in-command environment ESTABLISHED
+// OUTSIDE sp — visible to sp's leaves not because anything IN sp assigned it, but
+// because sp is lexically nested inside an enclosing expression that already had. The
+// two top-level entry points (EvaluateExpression/EvaluateStructure) always pass nil,nil:
+// a fresh Bash-tool call or a structural-delegate call has no enclosing scope.
+// foldSubstitutionScan is the one caller that passes a real value — see its own doc for
+// why a command-substitution or arithmetic-expansion BODY is a different case from those
+// two entry points (it runs IN the same shell as its enclosing leaf, so the leaf's own
+// visible bindings genuinely apply inside it too).
+//
+// Per leaf i, the value actually handed to a rule (via syntheticInput.InCommandVars) is
+// cmdparse.OverlayVars(outerVars, cmdparse.InCommandVars(parsed, i)) — outerVars as the
+// FARTHER scope, this sp's own leaves before i as the NEARER one that can shadow or
+// revoke a same-named outer binding (InCommandVars' own revocation rule applies exactly
+// as before; overlaying changes WHICH bindings a leaf can see, never how a binding, once
+// visible, is interpreted). That merged value is ALSO what gets passed down as the NEW
+// outerVars to foldSubstitutionScan for any substitution nested inside leaf i itself —
+// this is the recursive step that makes a THIRD level of nesting (a substitution inside
+// a substitution inside a substitution) see the outermost command's bindings exactly as
+// the first level does, because each level hands the next the union of everything visible
+// to it, not merely its own immediate parent's contribution.
+func (e *Engine) evaluateParsed(expr string, sp cmdparse.ShellParse, normalized string, stack []hookio.StackFrame, origin *hookio.HookInput, outerVars, outerTempDirVars map[string]string) hookio.RuleResult {
 	parsed := sp.Leaves
 
 	// I1b — the fail-safe PARSE floor. A whole-command parse failure MUST yield a
@@ -495,12 +530,20 @@ func (e *Engine) evaluateParsed(expr string, sp cmdparse.ShellParse, normalized 
 		// mutate, and so no `continue` in this loop can skip an accumulation step.
 		// `before` is the leaf's own index, which is what excludes a leaf's own prefix
 		// assignments from its own expansions — see cmdparse.InCommandVars.
-		inCommandVars := cmdparse.InCommandVars(parsed, i)
+		//
+		// Overlaid onto outerVars (tc-5h6e): sp's own leaves are, from the point of view
+		// of a name outerVars already binds, the NEARER scope, so a local write shadows
+		// or (per InCommandVars' revocation rule) removes an outer binding of the same
+		// name, while a name sp never touches keeps whatever outerVars said about it.
+		// For the two top-level entry points outerVars is nil and this is exactly
+		// cmdparse.InCommandVars(parsed, i) as before — no behaviour change there.
+		inCommandVars := cmdparse.OverlayVars(outerVars, cmdparse.InCommandVars(parsed, i))
 		// The sibling scan for a DIFFERENT fact about those same earlier leaves:
 		// which of their names are bound to a fresh `mktemp -d` directory rather
 		// than to a literal value (cmdparse.InCommandTempDirVars, pg2-d71my). Same
-		// per-leaf recomputation reasoning as inCommandVars above.
-		inCommandTempDirVars := cmdparse.InCommandTempDirVars(parsed, i)
+		// per-leaf recomputation reasoning as inCommandVars above, and the same
+		// outerTempDirVars overlay for the same tc-5h6e reason.
+		inCommandTempDirVars := cmdparse.OverlayVars(outerTempDirVars, cmdparse.InCommandTempDirVars(parsed, i))
 
 		if pc.Executable == "" {
 			// Command-less leaf: no executable, but it may carry env assignments
@@ -514,8 +557,13 @@ func (e *Engine) evaluateParsed(expr string, sp cmdparse.ShellParse, normalized 
 			}
 			if pc.HasHeredoc {
 				leafResult = hookio.MostRestrictive(leafResult, heredocFloor(expr, stack))
+				// inCommandVars/inCommandTempDirVars (tc-5h6e), not outerVars/outerTempDirVars:
+				// a substitution inside THIS leaf's heredoc body sees what THIS leaf sees,
+				// which is the already-overlaid value computed above — see evaluateParsed's
+				// outerVars doc for why passing outerVars unmerged here would drop this leaf's
+				// own earlier siblings for a body that is, textually, still part of THIS leaf.
 				leafResult = hookio.MostRestrictive(leafResult,
-					e.foldSubstitutionScan(pc.UnquotedHeredocSubstitutions(), normalized, stack, origin))
+					e.foldSubstitutionScan(pc.UnquotedHeredocSubstitutions(), normalized, stack, origin, inCommandVars, inCommandTempDirVars))
 				judgedLeaf = true
 			}
 			if assignResult, judged := e.evaluateAssignmentOnlyLeaf(pc, currentCWD, expr, parsed, inCommandVars, inCommandTempDirVars, origin); judged {
@@ -546,8 +594,12 @@ func (e *Engine) evaluateParsed(expr string, sp cmdparse.ShellParse, normalized 
 			// recurses through evaluateParsed, so its Approve can already carry a
 			// rule's own attribution rather than the neutral "no substitutions" seed —
 			// same pg2-he22o concern as the assignment fold above.
+			//
+			// inCommandVars/inCommandTempDirVars (tc-5h6e): see the heredoc call above —
+			// this command-less leaf's own substitutions are lexically part of IT, so they
+			// inherit exactly what this leaf's own overlay computed, not the raw outer value.
 			leafResult = mostRestrictiveAttributed(leafResult,
-				e.foldSubstitutionScan(pc.Substitutions, normalized, stack, origin))
+				e.foldSubstitutionScan(pc.Substitutions, normalized, stack, origin, inCommandVars, inCommandTempDirVars))
 			// mostRestrictiveAttributed here too: this is the fold that used to be a
 			// raw `leafResult.Decision > mostRestrictive.Decision` strict compare, which
 			// never revisits an exact tie — silently keeping mostRestrictive's engine
@@ -612,8 +664,17 @@ func (e *Engine) evaluateParsed(expr string, sp cmdparse.ShellParse, normalized 
 		// CmdSubst node for it) and a double-quoted `"$(cmd)"` is still present. This
 		// replaces the former static command-substitution guard AND the
 		// process-substitution loop with one shared enumerator.
+		//
+		// inCommandVars/inCommandTempDirVars (tc-5h6e), the SAME merged value just
+		// threaded into syntheticInput.InCommandVars above: a `$(...)`/`$((...))` in
+		// THIS leaf's own argv runs in the same shell THIS leaf runs in, so it sees
+		// every binding this leaf sees — including one an EARLIER SIBLING leaf
+		// established, which is exactly the propagation this bead restores (before it,
+		// this call passed the recursion nothing but `origin`, so a leaf like
+		// `echo "$(cat $SP/full.start)"` recursed into `cat $SP/full.start` with no
+		// memory that an earlier `SP=<literal>` leaf had ever run).
 		cmdResult = hookio.MostRestrictive(cmdResult,
-			e.foldSubstitutionScan(pc.Substitutions, normalized, stack, origin))
+			e.foldSubstitutionScan(pc.Substitutions, normalized, stack, origin, inCommandVars, inCommandTempDirVars))
 
 		// A heredoc BODY is opaque to the rule chain, so a heredoc-bearing leaf is
 		// FLOORED at NoOpinion — but the body's own substitutions are still recursed when
@@ -621,7 +682,7 @@ func (e *Engine) evaluateParsed(expr string, sp cmdparse.ShellParse, normalized 
 		if pc.HasHeredoc {
 			cmdResult = hookio.MostRestrictive(cmdResult, heredocFloor(expr, stack))
 			cmdResult = hookio.MostRestrictive(cmdResult,
-				e.foldSubstitutionScan(pc.UnquotedHeredocSubstitutions(), normalized, stack, origin))
+				e.foldSubstitutionScan(pc.UnquotedHeredocSubstitutions(), normalized, stack, origin, inCommandVars, inCommandTempDirVars))
 		}
 
 		// Track most restrictive. mostRestrictiveAttributed, not a plain fold: this is
@@ -1017,7 +1078,23 @@ func commandSubstitutionFloor(body string) hookio.RuleResult {
 // no "the scan desynced" case left to floor here. See the deleted
 // unparseableSubstitutionFloor's own comment (just above commandSubstitutionFloor)
 // for why that is structurally true rather than merely unobserved.
-func (e *Engine) foldSubstitutionScan(subs []cmdparse.Substitution, normalized string, stack []hookio.StackFrame, origin *hookio.HookInput) hookio.RuleResult {
+//
+// outerVars/outerTempDirVars (tc-5h6e) are the caller's OWN inCommandVars/
+// inCommandTempDirVars — the fully-overlaid environment visible to the leaf that
+// CONTAINS subs, computed by evaluateParsed's loop just before any of this
+// function's four call sites. Forwarded unchanged into the recursive evaluateParsed
+// call below as ITS outerVars/outerTempDirVars: a command-substitution or
+// arithmetic-expansion body executes in the SAME shell as its enclosing leaf, so
+// every name that leaf can see, sub.Body can see too — an assignment from a SIBLING
+// leaf earlier in the OUTER expression (`SP=/x; echo "$(cat $SP/f)"`) is exactly as
+// visible inside the substitution as it is to a plain argument of the same leaf
+// (`sed -n 1p "$SP/f"`), because bash draws no such distinction: nothing about being
+// inside `$(...)` creates a new variable scope. Before this bead the recursive call
+// passed no outer scope at all, so cmdparse.InCommandVars(sub.Leaves, i) inside the
+// recursion only ever saw sub.Body's OWN internal assignments — losing every binding
+// established outside the substitution, at ANY nesting depth, since each recursive
+// evaluateParsed call started the overlay chain over from nil.
+func (e *Engine) foldSubstitutionScan(subs []cmdparse.Substitution, normalized string, stack []hookio.StackFrame, origin *hookio.HookInput, outerVars, outerTempDirVars map[string]string) hookio.RuleResult {
 	result := hookio.RuleResult{Decision: hookio.Approve, Reason: "no substitutions to evaluate", Module: "engine"}
 	for _, sub := range subs {
 		// subNormalized, not the outer `normalized`: the cycle-detection KEY MUST
@@ -1041,7 +1118,7 @@ func (e *Engine) foldSubstitutionScan(subs []cmdparse.Substitution, normalized s
 			// same way), so calling the text entry point here would re-parse a
 			// body this expression's own ParseShell call already parsed — the
 			// exact re-parse ADR 0039 step 4 removes.
-			subResult = e.evaluateParsed(sub.Body, cmdparse.ShellParse{Leaves: sub.Leaves}, subNormalized, subStack, origin)
+			subResult = e.evaluateParsed(sub.Body, cmdparse.ShellParse{Leaves: sub.Leaves}, subNormalized, subStack, origin, outerVars, outerTempDirVars)
 		}
 
 		// Static allowlist FLOOR for command substitutions ($()/backtick): BOTH

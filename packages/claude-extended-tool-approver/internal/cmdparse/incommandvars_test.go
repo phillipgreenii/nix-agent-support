@@ -712,3 +712,57 @@ func TestInCommandTempDirVars_BeforeIsExclusive(t *testing.T) {
 		t.Errorf(`InCommandTempDirVars(leaves, 1)["T"] = %q, ok=%v; want "", true`, got["T"], got != nil)
 	}
 }
+
+// TestOverlayVars is the unit-level pin for tc-5h6e's shared merge rule: `local`
+// (the nearer scope) shadows `base` (the farther one) name for name, a name only
+// `base` defines survives unchanged, and both fast paths (empty local / empty base)
+// return the OTHER map's identity rather than allocating — asserted via pointer
+// equality, since internal/engine's per-leaf overlay runs on every leaf of every
+// evaluated expression and an unnecessary allocation there is a real cost.
+func TestOverlayVars(t *testing.T) {
+	t.Run("local is empty returns base unchanged (same map, not a copy)", func(t *testing.T) {
+		base := map[string]string{"A": "1"}
+		got := OverlayVars(base, nil)
+		if len(got) != 1 || got["A"] != "1" {
+			t.Fatalf("OverlayVars(base, nil) = %v, want %v", got, base)
+		}
+		// Reflect.DeepEqual isn't a strong enough claim here — the point is identity.
+		got["A"] = "mutated"
+		if base["A"] != "mutated" {
+			t.Error("OverlayVars(base, nil) allocated a copy instead of returning base's own identity")
+		}
+	})
+	t.Run("base is empty returns local unchanged (same map, not a copy)", func(t *testing.T) {
+		local := map[string]string{"B": "2"}
+		got := OverlayVars(nil, local)
+		if len(got) != 1 || got["B"] != "2" {
+			t.Fatalf("OverlayVars(nil, local) = %v, want %v", got, local)
+		}
+		got["B"] = "mutated"
+		if local["B"] != "mutated" {
+			t.Error("OverlayVars(nil, local) allocated a copy instead of returning local's own identity")
+		}
+	})
+	t.Run("both nil returns nil", func(t *testing.T) {
+		if got := OverlayVars(nil, nil); got != nil {
+			t.Errorf("OverlayVars(nil, nil) = %v, want nil", got)
+		}
+	})
+	t.Run("local shadows base on a shared name; a base-only name survives", func(t *testing.T) {
+		base := map[string]string{"A": "outer", "SHARED": "outer-value"}
+		local := map[string]string{"SHARED": "inner-value", "B": "inner"}
+		got := OverlayVars(base, local)
+		want := map[string]string{"A": "outer", "SHARED": "inner-value", "B": "inner"}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("OverlayVars(base, local) = %v, want %v", got, want)
+		}
+		// NEITHER input is mutated by the merge — a caller holding `base` for a
+		// SIBLING leaf still not yet processed must not see this leaf's overlay.
+		if base["SHARED"] != "outer-value" || len(base) != 2 {
+			t.Errorf("OverlayVars mutated its base argument: %v", base)
+		}
+		if local["A"] != "" || len(local) != 2 {
+			t.Errorf("OverlayVars mutated its local argument: %v", local)
+		}
+	})
+}

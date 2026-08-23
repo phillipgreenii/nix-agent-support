@@ -93,6 +93,36 @@ import (
 // AT ALL (a no-write, not a revoke — shellVarWrites' own comment), and that check runs
 // before the scope-visibility test ever sees such a leaf.
 
+// OverlayVars merges `local` (the NEARER scope) onto `base` (the FARTHER one), local
+// winning on a name both define. It is the one merge rule every InCommandVars/
+// InCommandTempDirVars overlay in this tree uses — originally written twice, byte for
+// byte, as primarycommit.LeafVars and primarycommit.LeafTempDirVars (pg2-eqacu,
+// pg2-d71my), and pulled up here (bead tc-5h6e) so the engine's own
+// substitution-recursion overlay (internal/engine/engine.go's evaluateParsed) is a
+// THIRD caller of the identical rule rather than a third hand-rolled copy. Neither map
+// is mutated: a fresh map is allocated for the merge, so a caller holding `base` (an
+// outer scope another leaf may still read) never observes a nearer leaf's write.
+//
+// Returns base unchanged when local is empty (the ordinary case: nothing nearer to
+// overlay), and local unchanged when base is empty — both zero-allocation fast paths a
+// leaf with no enclosing scope or no local assignments takes on every call.
+func OverlayVars(base, local map[string]string) map[string]string {
+	if len(local) == 0 {
+		return base
+	}
+	if len(base) == 0 {
+		return local
+	}
+	merged := make(map[string]string, len(base)+len(local))
+	for k, v := range base {
+		merged[k] = v
+	}
+	for k, v := range local { // the nearer assignment wins
+		merged[k] = v
+	}
+	return merged
+}
+
 // InCommandVars returns the shell variables that the leaves BEFORE index `before`
 // establish for the rest of the expression, mapped to their LITERAL values. nil when
 // nothing qualifies, which is the ordinary case — and the case that leaves every

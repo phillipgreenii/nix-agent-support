@@ -175,21 +175,7 @@ func ResolveDir(cwd string, chdirs []string, vars map[string]string) DirResoluti
 // leaf-scope-vs-expression-scope fallback internal/rules/gitdir applies to
 // RootExpression.
 func LeafVars(base map[string]string, leaves []cmdparse.ParsedCommand, i int) map[string]string {
-	local := cmdparse.InCommandVars(leaves, i)
-	if len(local) == 0 {
-		return base
-	}
-	if len(base) == 0 {
-		return local
-	}
-	merged := make(map[string]string, len(base)+len(local))
-	for k, v := range base {
-		merged[k] = v
-	}
-	for k, v := range local { // the nearer assignment wins
-		merged[k] = v
-	}
-	return merged
+	return cmdparse.OverlayVars(base, cmdparse.InCommandVars(leaves, i))
 }
 
 // LeafTempDirVars is LeafVars' sibling for the fresh-temp-dir MARKER scan
@@ -203,21 +189,7 @@ func LeafVars(base map[string]string, leaves []cmdparse.ParsedCommand, i int) ma
 // everything itself. internal/rules/envvars (pg2-d71my) is currently its only
 // consumer.
 func LeafTempDirVars(base map[string]string, leaves []cmdparse.ParsedCommand, i int) map[string]string {
-	local := cmdparse.InCommandTempDirVars(leaves, i)
-	if len(local) == 0 {
-		return base
-	}
-	if len(base) == 0 {
-		return local
-	}
-	merged := make(map[string]string, len(base)+len(local))
-	for k, v := range base {
-		merged[k] = v
-	}
-	for k, v := range local { // the nearer assignment wins
-		merged[k] = v
-	}
-	return merged
+	return cmdparse.OverlayVars(base, cmdparse.InCommandTempDirVars(leaves, i))
 }
 
 // unresolvableToken returns the first path COMPONENT of p that the shell would rewrite
