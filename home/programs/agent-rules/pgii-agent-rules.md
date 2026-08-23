@@ -525,6 +525,10 @@ MUST be isolated; if they modify files directly, the test MUST generate the scen
 - When telling the user which file to view/open (design docs, specs, code), ALWAYS give the full
   absolute path, never a repo-relative one — many concurrent worktrees/workforests run across
   sessions, so a relative path is ambiguous about which checkout is meant.
+- Prefer NOT publishing work as a Claude Artifact by default. Only publish one when the user
+  explicitly asks for it, or a shareable page is clearly the point of the task. This is a
+  standing preference, not a ban — undecided whether to relax it later — but the default
+  posture MUST be to ask before publishing rather than publish proactively.
 
 ### Git Workflow
 
