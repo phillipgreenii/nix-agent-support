@@ -269,7 +269,12 @@ echo "--- inter: name-collisions.sh (method, pr-pool, pa-monitor, ccpool, pg-pr)
 out="$tmp/collisions"
 bash "$NAME_COLLISIONS" "$METHOD_SET" "$PRPOOL_SET" "$PAMONITOR_SET" "$CCPOOL_SET" "$PGPR_SET" >"$out" 2>&1 || true
 record "inter/name-collisions" "$out"
-grep -E '^[[:space:]]*(FAIL|CANDIDATE|clean|none)' "$out" | sed 's/^/  /' || true
+# `note` is echoed but deliberately NOT recorded (see `record`, which greps only
+# FAIL/WARN/CANDIDATE). Class 1 emits one per ID name reused across two sets with NO
+# reference edge — INV-20 does not require distinct names there, so it is not a
+# finding and must not consume a baseline line. Echoing it keeps the narrowing
+# VISIBLE in the gate log rather than silent (bead pg2-pffnw).
+grep -E '^[[:space:]]*(FAIL|CANDIDATE|note|clean|none)' "$out" | sed 's/^/  /' || true
 
 echo "--- impl: impl-traces.sh (pr-pool code <-> pr-pool set) ---"
 out="$tmp/impl"

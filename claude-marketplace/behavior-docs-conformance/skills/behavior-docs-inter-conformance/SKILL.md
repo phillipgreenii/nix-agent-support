@@ -92,6 +92,31 @@ Lead with a one-line verdict (aligned / N divergences / M stale-name warnings). 
 first: divergences (`FAIL`), undeclared external contracts, then stale-name warnings. Cite the owner
 UUID and the implementer row for each.
 
+## Step 3b — Cross-set name collisions, scoped to the seam
+
+Run **`scripts/name-collisions.sh <set> <set> [<set>…]`**. Two classes:
+
+- **class 1 — ambiguous ID name (`FAIL`)** — the same ID name is DEFINED in two sets **that
+  reference each other**. A bare name cited across that seam then resolves to two elements.
+- **class 2 — asserted affordance (`CANDIDATE`)** — a set names a concrete affordance beside a
+  citation of another set, and the cited set never uses that name. Judgment, not a failure;
+  `--strict` promotes it.
+
+**The reference edge is part of class 1's rule, not an escape from it.** `INV-3` makes a name "a
+mutable, human-readable label that need only be consistent **within its own set**", and conditions
+its namespacing clause on "a set that **cites another set** … so a bare name it cites never collides
+with one of its own". `INV-20` states the limit outright: "Vocabulary consistency across
+**unrelated** sets (no reference edge) is **not** required." Two sets that never mention each other
+cannot make any citation ambiguous — a cross-set citation is qualified
+`<repo> · <set-path> · <name>` and resolves by UUID regardless. So the same name in two unrelated
+sets is reported as a **`note`**, not a finding; do not "fix" it by renaming a published ID. The
+edge is read from each set's own `## External references` table (by owner UUID, or by name under
+`INV-3`'s interim clause) — a set that cites without declaring has a different defect, already
+caught as `reconcile-imports.sh`'s cited-but-undeclared `FAIL`.
+
+A **within-set** duplicate name is not this script's job: that is the intra evaluator's
+`self-checks.sh` DUAL IDENTITY check (one ID token bearing more than one UUID carrier).
+
 ## Corpus
 
 [`corpus/inter/`](corpus/inter/) carries a fixture per seam-check type against a shared `owner/`:
@@ -110,3 +135,6 @@ captured by the intra skill's `capture-prefix-snapshots.sh` (pre-fix vs. post-fi
   and a seam.
 - Reading a cross-set name collision as a rename → a rename keeps the UUID; a collision is two sets
   using DIFFERENT names for one element, or the SAME name for two, and no UUID reconciles it.
+- Renaming a published ID because two **unrelated** sets picked the same name → `INV-20` does not
+  require distinct names with no reference edge; class 1 reports that as a `note`, and a rename
+  there buys nothing and must be repeated at every future topic coincidence.

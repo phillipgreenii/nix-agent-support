@@ -664,13 +664,78 @@ MD
 # --- Cross-set NAME collisions (bead pg2-wr6lm.4) ------------------------------
 # Matching is by UUID precisely so a RENAME cannot break a seam, which also means
 # no other check in this family ever compares names across sets.
+#
+# Class 1 is scoped to a REFERENCE SEAM (bead pg2-pffnw): the same name defined in
+# two sets is a FAIL only when one of them DECLARES a reference to the other, which
+# is what INV-3's namespacing clause is conditioned on ("a set that cites another
+# set ... so a bare name it cites never collides with one of its own") and what
+# INV-20 excludes ("Vocabulary consistency across unrelated sets (no reference
+# edge) is not required"). The three FAIL fixtures below therefore declare the edge;
+# the two after them are the regression guards for the narrowing itself.
 
-@test "collisions: the same ID name DEFINED in two sets is a FAIL (class 1)" {
+# cites_by_uuid <citer-dir> <owner-set-path> <owner-uuid> — append the imports table
+# that makes the citer DECLARE a reference to the owner, resolving BY UUID.
+cites_by_uuid() {
+  cat >>"$1/imports.md" <<MD
+
+## External references
+
+| Name | Owner set-path | Owner UUID |
+| ---- | -------------- | ---------- |
+| \`$2\` | \`some-repo · $3\` | $4 |
+MD
+}
+
+@test "collisions: the same ID name DEFINED in two REFERENCING sets is a FAIL (class 1)" {
   A="$BATS_TEST_TMPDIR/ca"
   Bd="$BATS_TEST_TMPDIR/cb"
   mkdir -p "$A" "$Bd"
+  printf '# A\n- **`INV-1`** <!-- uuid: aaaaaaaa-1111-4111-8111-111111111111 --> — a rule A owns.\n' >"$A/invariants.md"
+  printf '# B\n- **`INV-8`** <!-- uuid: bbbbbbbb-2222-4222-8222-222222222222 --> — a rule B owns.\n- **`INV-1`** <!-- uuid: bbbbbbbb-3333-4333-8333-333333333333 --> — a DIFFERENT rule B owns.\n' >"$Bd/invariants.md"
+  # A cites B's INV-8, so the two sets are at a reference seam; A also defines the
+  # name INV-1 that B defines, so a bare INV-1 in A's prose is ambiguous.
+  cites_by_uuid "$A" 'INV-8' 'b/docs/behavior' 'bbbbbbbb-2222-4222-8222-222222222222'
+  run name-collisions "$A" "$Bd"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q 'FAIL ambiguous ID name: INV-1'
+}
+
+@test "collisions: the same ID name in two UNRELATED sets is a note, not a FAIL (class 1, pg2-pffnw)" {
+  # THE REGRESSION GUARD. Both sets namespace by topic (INV-3 satisfied on both
+  # sides) and neither declares a reference to the other, so INV-20 does not
+  # require the names to differ. This shape failed `nix flake check` on main:
+  # pa-monitor's busy predicate and pg-pr's approval gate both chose `INV-GATE-1`.
+  A="$BATS_TEST_TMPDIR/ua"
+  Bd="$BATS_TEST_TMPDIR/ub"
+  mkdir -p "$A" "$Bd"
+  printf '# A\n- **`INV-GATE-1`** <!-- uuid: aaaaaaaa-4444-4444-8444-444444444444 --> — A gates on busy.\n' >"$A/invariants.md"
+  printf '# B\n- **`INV-GATE-1`** <!-- uuid: bbbbbbbb-5555-4555-8555-555555555555 --> — B gates on approval.\n' >"$Bd/invariants.md"
+  run name-collisions "$A" "$Bd"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q 'note unrelated-set name reuse: INV-GATE-1'
+  echo "$output" | grep -q 'clean (no ID name is defined in two sets that reference each other)'
+  # LAST, deliberately: in bats a `!` whose status is discarded asserts nothing
+  # (SC2314), so the negative assertion has to be the test's final command.
+  ! echo "$output" | grep -q 'FAIL ambiguous ID name'
+}
+
+@test "collisions: a reference edge declared BY NAME (INV-3 interim) still FAILs (class 1)" {
+  # INV-3's interim clause: before an owner UUID is declared, a cross-set reference
+  # resolves BY NAME. A seam mid-retrofit must not read as "no edge", or a genuine
+  # namespacing defect there goes unreported.
+  A="$BATS_TEST_TMPDIR/ia"
+  Bd="$BATS_TEST_TMPDIR/ib"
+  mkdir -p "$A" "$Bd"
   printf '# A\n- **`INV-1`** — a rule A owns.\n' >"$A/invariants.md"
-  printf '# B\n- **`INV-1`** — a DIFFERENT rule B owns.\n' >"$Bd/invariants.md"
+  printf '# B\n- **`INV-8`** — a rule B owns.\n- **`INV-1`** — a DIFFERENT rule B owns.\n' >"$Bd/invariants.md"
+  cat >>"$A/imports.md" <<'MD'
+
+## External references
+
+| Name | Owner set-path | Owner UUID |
+| ---- | -------------- | ---------- |
+| `INV-8` | `some-repo · b/docs/behavior` | (external) |
+MD
   run name-collisions "$A" "$Bd"
   [ "$status" -ne 0 ]
   echo "$output" | grep -q 'FAIL ambiguous ID name: INV-1'
@@ -772,8 +837,9 @@ MD
   A="$BATS_TEST_TMPDIR/dca"
   Bd="$BATS_TEST_TMPDIR/dcb"
   mkdir -p "$A" "$Bd"
-  printf '# A\n### `DEC-SEAM-1` — a decision A owns.\n' >"$A/README.md"
-  printf '# B\n### `DEC-SEAM-1` — a DIFFERENT decision B owns.\n' >"$Bd/README.md"
+  printf '# A\n### `DEC-SEAM-1` <!-- uuid: aaaaaaaa-6666-4666-8666-666666666666 --> — a decision A owns.\n' >"$A/README.md"
+  printf '# B\n### `DEC-OTHER-1` <!-- uuid: bbbbbbbb-6666-4666-8666-666666666666 --> — a decision B owns.\n### `DEC-SEAM-1` <!-- uuid: bbbbbbbb-7777-4777-8777-777777777777 --> — a DIFFERENT decision B owns.\n' >"$Bd/README.md"
+  cites_by_uuid "$A" 'DEC-OTHER-1' 'b/docs/decisions' 'bbbbbbbb-6666-4666-8666-666666666666'
   run name-collisions "$A" "$Bd"
   [ "$status" -ne 0 ]
   echo "$output" | grep -q 'FAIL ambiguous ID name: DEC-SEAM-1'
@@ -783,8 +849,9 @@ MD
   A="$BATS_TEST_TMPDIR/ica"
   Bd="$BATS_TEST_TMPDIR/icb"
   mkdir -p "$A" "$Bd"
-  printf '# A\n### `IMPL-1` — a captured entry A owns.\n' >"$A/README.md"
-  printf '# B\n### `IMPL-1` — a DIFFERENT captured entry B owns.\n' >"$Bd/README.md"
+  printf '# A\n### `IMPL-1` <!-- uuid: aaaaaaaa-8888-4888-8888-888888888888 --> — a captured entry A owns.\n' >"$A/README.md"
+  printf '# B\n### `IMPL-9` <!-- uuid: bbbbbbbb-8888-4888-8888-888888888888 --> — a captured entry B owns.\n### `IMPL-1` <!-- uuid: bbbbbbbb-9999-4999-8999-999999999999 --> — a DIFFERENT captured entry B owns.\n' >"$Bd/README.md"
+  cites_by_uuid "$A" 'IMPL-9' 'b/docs/decisions' 'bbbbbbbb-8888-4888-8888-888888888888'
   run name-collisions "$A" "$Bd"
   [ "$status" -ne 0 ]
   echo "$output" | grep -q 'FAIL ambiguous ID name: IMPL-1'

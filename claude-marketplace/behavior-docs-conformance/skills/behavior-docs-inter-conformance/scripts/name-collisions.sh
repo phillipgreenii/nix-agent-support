@@ -11,10 +11,48 @@
 #
 # Two collision classes, and the second is the one with a shipped example:
 #
-#   1. AMBIGUOUS ID NAME (FAIL) — the same ID NAME is DEFINED in two sets. A bare
-#      name cited across the seam then resolves to two different elements. INV-3
-#      says a set that cites another SHOULD namespace its own names by topic
-#      exactly so this cannot happen; this is that rule, checked.
+#   1. AMBIGUOUS ID NAME (FAIL) — the same ID NAME is DEFINED in two sets THAT
+#      REFERENCE EACH OTHER. A bare name cited across that seam then resolves to
+#      two different elements. INV-3 says a set that cites another SHOULD
+#      namespace its own names by topic exactly so this cannot happen; this is
+#      that rule, checked.
+#
+#      THE REFERENCE EDGE IS PART OF THE RULE, NOT A LOOSENING OF IT (bead
+#      pg2-pffnw). This check used to be corpus-GLOBAL: ANY two of the sets passed
+#      on the command line defining one name was a FAIL. That is stricter than the
+#      method it cites, and the method says so in two places. INV-3: a name is "a
+#      mutable, human-readable label that need only be consistent WITHIN ITS OWN
+#      SET", and its namespacing clause is conditioned on "a set that CITES ANOTHER
+#      SET", for the stated purpose "so a bare name it cites never collides with
+#      one of its own". INV-20 states the exclusion outright: "Vocabulary
+#      consistency across UNRELATED sets (no reference edge) is NOT required."
+#      Two sets that never mention each other cannot make any citation ambiguous:
+#      a cross-set citation is qualified `<repo> · <set-path> · <name>` and
+#      resolves by UUID regardless, so only a BARE name inside a CITING set can be
+#      ambiguous at all.
+#
+#      Corpus-global was not a harmless over-reach — it failed `nix flake check` on
+#      main over a non-defect. pa-monitor and pg-pr each namespace by topic (INV-3
+#      satisfied on BOTH sides) and neither set's docs mention the other anywhere,
+#      yet both legitimately picked the topic `GATE` — pa-monitor for the busy
+#      predicate, pg-pr for the approval gate — so the gate demanded a published ID
+#      be renamed to satisfy a rule the method does not state. Every future topic
+#      coincidence between unrelated sets would have demanded another rename with
+#      nothing to cite for it.
+#
+#      Name reuse across UNRELATED sets is still REPORTED, as a `note`: visible, so
+#      the narrowing is never silent, but not a finding.
+#
+#      WHAT STILL FAILS, so this is a narrowing and not a deletion:
+#        - A set that cites another and fails to namespace — the genuine INV-3
+#          defect — still FAILs, because the edge is exactly what that set's own
+#          imports table declares.
+#        - A WITHIN-set duplicate name was never this script's job and is not
+#          affected: `defined_ids` has always deduped per set. It is
+#          `self-checks.sh`'s DUAL IDENTITY check (one ID token bearing more than
+#          one UUID carrier), which the real-corpus runner asserts clean per set.
+#        - A dangling cross-set reference is `resolve-imports.sh` /
+#          `reconcile-imports.sh` / `trace-extract.sh`. Untouched.
 #
 #   2. ASSERTED AFFORDANCE THE OWNER DOES NOT HAVE (candidate) — a set names a
 #      concrete affordance (a code-span token that is not an ID) on a line that
@@ -42,6 +80,16 @@ set -euo pipefail
 # shellcheck source=../../../lib/behavior-ids.bash
 . "$(dirname "${BASH_SOURCE[0]}")/../../../lib/behavior-ids.bash"
 
+# The imports-table row/cell parser (trim/row_cell/cell_uuid) has ONE definition,
+# in `lib/imports-row.bash` — shared with `resolve-imports.sh` and
+# `resolve-links.sh` so all three read the SAME two live table shapes the same way.
+# Class 1 needs it to derive each set's declared REFERENCE EDGES (see `cites`).
+# `cell_uuid` reads `$UUIDRE`, so that MUST be set before the source.
+# shellcheck disable=SC2034  # consumed by cell_uuid in the sourced lib/imports-row.bash
+UUIDRE='[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}'
+# shellcheck source=../../../lib/imports-row.bash
+. "$(dirname "${BASH_SOURCE[0]}")/../../../lib/imports-row.bash"
+
 # DETERMINISM: every sort, comm, uniq and shell glob below MUST order bytes, not
 # locale-collated characters. Without this the SAME finding serializes differently
 # on a UTF-8 workstation (`invariants.md:75 README.md:61`) and in the `C`-locale
@@ -66,8 +114,10 @@ Options:
       --strict  Also fail on a class-2 candidate (an affordance name asserted
                 against another set that the other set never uses)
 
-Reports: ID names defined in more than one set (a FAIL), and affordance names a
-set asserts beside a citation of another set that the cited set does not use.
+Reports: ID names defined in two sets that REFERENCE each other (a FAIL); the same
+reuse between sets with NO reference edge (a `note` — INV-20 does not require
+distinct names there); and affordance names a set asserts beside a citation of
+another set that the cited set does not use.
 HELP
 }
 
@@ -116,31 +166,132 @@ defined_ids() {
   ' "$1"/*.md 2>/dev/null | sort -u
 }
 
+# minted_uuids <set-dir> — the UUIDs this set MINTS on its OWN definitions. A UUID
+# is minted once, at the definition (INV-3), so a set's carriers are exactly the
+# identities it OWNS — which is what makes "does A's imports table point at B?"
+# answerable without any path arithmetic.
+minted_uuids() {
+  { grep -rhoE '<!--[[:space:]]*uuid:[[:space:]]*[^[:space:]]+[[:space:]]*-->' "$1"/*.md 2>/dev/null || true; } |
+    sed -E 's/<!--[[:space:]]*uuid:[[:space:]]*//; s/[[:space:]]*-->$//' | sort -u
+}
+
+# imports_section <set-dir> — the lines of the set's `## External references`
+# section. Reset `insec` per file so a file ENDING mid-section does not leak into
+# the next (same shape, and the same reason, as resolve-imports.sh's reader).
+imports_section() {
+  {
+    awk '
+      FNR==1 { insec=0 }
+      toupper($0) ~ /^##[[:space:]]+EXTERNAL REFERENCES/ { insec=1; next }
+      /^##[[:space:]]/ && insec { insec=0 }
+      insec { print }
+    ' "$1"/*.md 2>/dev/null || true
+  }
+}
+
+# declared_uuids / declared_names <set-dir> — the owner UUIDs and the cited NAMES
+# the set DECLARES in its imports table. INV-3 requires a set to declare there
+# every external element it references, so that table IS the set's record of its
+# own reference edges; a set that cites without declaring has a DIFFERENT defect,
+# already caught as `reconcile-imports.sh`'s cited-but-undeclared FAIL.
+declared_uuids() {
+  imports_section "$1" | while IFS= read -r row; do
+    case "$row" in '|'*) ;; *) continue ;; esac
+    u=$(cell_uuid "$(row_cell "$row" -1 | trim)")
+    if [ -n "$u" ]; then printf '%s\n' "$u"; fi
+  done | sort -u
+}
+declared_names() {
+  imports_section "$1" | while IFS= read -r row; do
+    case "$row" in '|'*) ;; *) continue ;; esac
+    n=$(row_cell "$row" 1 | trim | tr -d '`')
+    [ -n "$n" ] || continue
+    t=$({ printf '%s\n' "$n" | grep -oE "$BEHAVIOR_IDRE" || true; } | head -1)
+    printf '%s\n' "${t:-$n}"
+  done | sort -u
+}
+
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+
 fail=0
 printf '=== INTER cross-set name collisions: %s set(s) ===\n' "${#SETS[@]}"
 for d in "${SETS[@]}"; do printf '  set: %s\n' "$d"; done
 
-printf '\n--- class 1: ID name defined in more than one set (INV-3) ---\n'
-# Emit "<id> <set>" per definition, then any ID appearing with two DISTINCT sets
-# is ambiguous corpus-wide.
-pairs=$(
-  for d in "${SETS[@]}"; do
-    defined_ids "$d" | while IFS= read -r id; do
-      [ -n "$id" ] && printf '%s\t%s\n' "$id" "$d"
-    done
-  done | sort -u
-)
-dupes=$(printf '%s\n' "$pairs" | cut -f1 | sort | uniq -d)
-if [ -z "$dupes" ]; then
-  echo "  clean (no ID name is defined in two sets)"
-else
-  while IFS= read -r id; do
-    [ -n "$id" ] || continue
-    where=$(printf '%s\n' "$pairs" | awk -F'\t' -v i="$id" '$1 == i { print $2 }' | sort -u | tr '\n' ' ')
-    printf '  FAIL ambiguous ID name: %s is DEFINED in %s — a bare citation resolves to more than one element\n' \
-      "$id" "${where% }"
-    fail=1
-  done <<<"$dupes"
+for i in "${!SETS[@]}"; do
+  defined_ids "${SETS[$i]}" >"$tmp/ids.$i"
+  minted_uuids "${SETS[$i]}" >"$tmp/minted.$i"
+  declared_uuids "${SETS[$i]}" >"$tmp/decluuid.$i"
+  declared_names "${SETS[$i]}" >"$tmp/declname.$i"
+done
+
+# cites <citer-idx> <owner-idx> — does the citer's imports table DECLARE an element
+# the owner set owns? Two signals, because INV-3 defines two regimes and the interim
+# one is still live:
+#   BY UUID    — a declared owner UUID that the owner set MINTS. The authoritative
+#                form, and the same mechanism resolve-imports.sh uses.
+#   BY NAME    — INV-3's interim clause, verbatim: "before an external element's
+#                owner-UUID is declared, cross-set references resolve BY NAME as
+#                before". Without this, a seam mid-retrofit reads as no edge and a
+#                genuine namespacing defect there would go unreported.
+# The name signal deliberately OVER-approximates (a declared name that some third
+# set also happens to define reads as an edge to that set too). Over-approximating
+# the edge can only ADD class-1 FAILs, never hide one, which is the safe direction.
+cites() {
+  local c="$1" o="$2"
+  if [ -s "$tmp/decluuid.$c" ] && [ -s "$tmp/minted.$o" ]; then
+    if comm -12 "$tmp/decluuid.$c" "$tmp/minted.$o" | grep -q .; then return 0; fi
+  fi
+  if [ -s "$tmp/declname.$c" ] && [ -s "$tmp/ids.$o" ]; then
+    if comm -12 "$tmp/declname.$c" "$tmp/ids.$o" | grep -q .; then return 0; fi
+  fi
+  return 1
+}
+
+printf '\n--- class 1: ID name defined in two sets that REFERENCE each other (INV-3, INV-20) ---\n'
+# PAIRWISE, not corpus-wide: the rule is a property of a SEAM, so the finding must
+# name the two sets whose seam it is. Both members are printed in BYTE order (see
+# the LC_ALL note above) so the finding string is canonical wherever it is written.
+reuse=0
+collision=0
+for i in "${!SETS[@]}"; do
+  for j in "${!SETS[@]}"; do
+    [ "$i" -lt "$j" ] || continue
+    a="${SETS[$i]}"
+    b="${SETS[$j]}"
+    if [ "$a" \> "$b" ]; then
+      lo="$b"
+      hi="$a"
+    else
+      lo="$a"
+      hi="$b"
+    fi
+    common=$(comm -12 "$tmp/ids.$i" "$tmp/ids.$j")
+    [ -n "$common" ] || continue
+    reuse=1
+    if cites "$i" "$j" || cites "$j" "$i"; then
+      while IFS= read -r id; do
+        [ -n "$id" ] || continue
+        printf '  FAIL ambiguous ID name: %s is DEFINED in %s %s — the two sets reference each other, so a bare citation resolves to more than one element\n' \
+          "$id" "$lo" "$hi"
+        collision=1
+        fail=1
+      done <<<"$common"
+    else
+      while IFS= read -r id; do
+        [ -n "$id" ] || continue
+        printf '  note unrelated-set name reuse: %s is DEFINED in %s %s — neither set declares a reference to the other, so INV-20 does not require distinct names\n' \
+          "$id" "$lo" "$hi"
+      done <<<"$common"
+    fi
+  done
+done
+if [ "$collision" -eq 0 ]; then
+  if [ "$reuse" -eq 0 ]; then
+    echo "  clean (no ID name is defined in two sets)"
+  else
+    echo "  clean (no ID name is defined in two sets that reference each other)"
+  fi
 fi
 
 printf '\n--- class 2: affordance name asserted against another set (candidates) ---\n'
@@ -158,8 +309,6 @@ printf '\n--- class 2: affordance name asserted against another set (candidates)
 # which is not a pre-commit gate, it is a gate people disable. awk reads the cited
 # set once into memory and then scans the asserting set in a single process.
 candidates=0
-tmp=$(mktemp -d)
-trap 'rm -rf "$tmp"' EXIT
 out="$tmp/candidates"
 : >"$out"
 for a in "${SETS[@]}"; do
