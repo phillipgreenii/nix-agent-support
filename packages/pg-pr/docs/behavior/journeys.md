@@ -9,8 +9,8 @@ and what it includes (`INV-22`).
 
 - **`STORY-PGPR-GLANCE`** <!-- uuid: 78f67804-45fe-475c-bc9c-8559a5054a26 --> — As an operator or
   a machine consumer, I want PR facts I can trust the freshness of, so I never act on stale
-  information. _(→ `USECASE-PGPR-LIST`; `INV-READ-1`, `INV-ASOF-1`, `INV-APPROVAL-1`,
-  `INV-APPROVAL-2`, `INV-APPROVAL-3`, `INV-APPROVAL-4`, `INV-APPROVAL-5`.)_
+  information. _(→ `USECASE-PGPR-LIST`; `INV-READ-1`, `INV-ASOF-1`, `INV-ASOF-2`,
+  `INV-APPROVAL-1`, `INV-APPROVAL-2`, `INV-APPROVAL-3`, `INV-APPROVAL-4`, `INV-APPROVAL-5`.)_
 - **`STORY-PGPR-REVIEW`** <!-- uuid: 23724212-5d46-416d-ba0e-e43644d1269c --> — As a reviewer
   (human or agent), I want to stage and post a review safely, so my feedback lands attributed and
   never stacks a duplicate. _(→ `USECASE-PGPR-REVIEW`; `INV-REVIEW-1`, `INV-ATTR-1`.)_
@@ -25,8 +25,8 @@ and what it includes (`INV-22`).
 **Primary actor:** `ACTOR-PGPR-CONSUMER` (or `ACTOR-PGPR-OP`).
 **Level:** user-goal.
 **Preconditions:** none.
-_Requires:_ `INV-READ-1`, `INV-ASOF-1`, `INV-APPROVAL-1`, `INV-APPROVAL-2`, `INV-APPROVAL-3`,
-`INV-APPROVAL-4`, `INV-APPROVAL-5`.
+_Requires:_ `INV-READ-1`, `INV-ASOF-1`, `INV-ASOF-2`, `INV-APPROVAL-1`, `INV-APPROVAL-2`,
+`INV-APPROVAL-3`, `INV-APPROVAL-4`, `INV-APPROVAL-5`.
 
 1. The actor asks for the current PR listing, machine or human-facing.
 2. pg-pr returns PR facts read from its store, each carrying its own freshness signal —
@@ -115,7 +115,7 @@ _Requires:_ `INV-MR-1`.
 **Level:** summary.
 **Intent:** tell the whole arc once — facts flow from the code host through a mutate-nothing
 detector to a mutate-only worker, landing as fresh, actable facts for any consumer.
-_Requires:_ `INV-SYNC-1`, `INV-SYNC-2`, `INV-ASOF-1`, `INV-MR-1`.
+_Requires:_ `INV-SYNC-1`, `INV-SYNC-2`, `INV-ASOF-1`, `INV-ASOF-2`, `INV-MR-1`.
 _Includes:_ `USECASE-PGPR-SYNC`, `USECASE-PGPR-LIST`.
 
 ```mermaid

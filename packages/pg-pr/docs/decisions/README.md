@@ -45,4 +45,5 @@ docs cite. An entry that overlaps an existing repository ADR MUST **cite** it, n
 
 ## Entries
 
-_None yet._
+- [`DEC-FRESH-1`](freshness.md) — the staleness bound is a multiplier of pg-pr's own sync
+  interval, not a fixed wall-clock number.

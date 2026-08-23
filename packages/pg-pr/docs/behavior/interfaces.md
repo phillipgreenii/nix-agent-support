@@ -37,7 +37,8 @@ flowchart LR
 - **Out (pg-pr → consumer), dashboard payload** — the same facts, human-facing, carrying a
   payload-level as-of time and stale flag rather than a per-item one.
 - **Guarantee** — a consumer MUST be able to tell "stale" from "current" for every fact it acts
-  on (`INV-ASOF-1`).
+  on (`INV-ASOF-1`); pg-pr, not the consumer, makes that determination, so a consumer MUST NOT
+  re-derive its own staleness policy over these facts (`INV-ASOF-2`).
 
 ## `INTF-PGPR-WRITE` — reviews and comments posted <!-- uuid: 59ab0dcd-d1e9-4a81-8d91-46b1f9146b6b -->
 

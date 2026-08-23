@@ -32,10 +32,12 @@ serves reads with freshness attached, and posts write-backs; **who** reviews wha
 under what deployment policy is not pg-pr's concern, and the legacy in-daemon review workflow
 that once lived here is excluded by name (`## Scope`).
 
-**Freshness is pg-pr's own obligation, stated once.** Every acted-on read seam carries an as-of
-time and a stale flag; a consumer MUST NOT act on data flagged stale (`INV-ASOF-1`). The
-freshness bound and the fail-closed rule's exact wiring are decision-doc detail, not restated
-here.
+**Freshness is pg-pr's own obligation, stated once, and computed nowhere else.** Every acted-on
+read seam carries an as-of time and a stale flag; a consumer MUST NOT act on data flagged stale
+(`INV-ASOF-1`), and MUST NOT re-derive its own staleness policy over the same facts — pg-pr is
+the sole computer of that determination (`INV-ASOF-2`). The freshness bound and the fail-closed
+rule's exact wiring are decision-doc detail (`packages/pg-pr/docs/decisions · DEC-FRESH-1`), not
+restated here.
 
 ## Scope (extent + floor, `INV-13`)
 

@@ -15,7 +15,10 @@ may lag, and when it and a behavior doc disagree, **the behavior doc wins**.
 re-anchored from pinned line ranges to symbol names 2026-07-29 (pg2-p1s8q);
 §2.2 gained the explicit `review.enabled` SCOPE + operator-path record
 2026-07-29 (pg2-hsap5); JR6 (process-feedback bead identity) added 2026-07-30
-for the duplicate/empty-bead fix (pg2-onq1e).
+for the duplicate/empty-bead fix (pg2-onq1e); JR3's freshness bullets
+demoted from authority framing to a cross-link on pg-pr's own behavior-doc
+invariants (`INV-ASOF-1`, `INV-ASOF-2`) now that they exist, 2026-08-22
+(pg2-e02d5).
 
 **Citation form:** code is cited by **symbol** — a file path plus the
 function/type/constant name in parentheses, e.g.
@@ -344,6 +347,14 @@ network-free from the store.
 
 - **Owner:** `pg-pr` (sync roster detection + snapshot + `pr list`); `pr-pool`
   consumes the base `pr list --json`.
+- **Behavior-doc contract:** the general freshness obligation this section
+  realizes — per-PR freshness on this seam and payload-level freshness on the
+  dashboard payload, a missing/unusable as-of time treated fail-closed as
+  stale, and pg-pr as the sole computer of that determination — is defined by
+  pg-pr's own behavior docs
+  ([`packages/pg-pr/docs/behavior/invariants.md`](../packages/pg-pr/docs/behavior/invariants.md)
+  — `INV-ASOF-1`, `INV-ASOF-2`). What follows is how the current implementation
+  realizes it, illustrative of that contract rather than the authority for it.
 - **Acceptance criteria:**
   - The review set **MUST** be the union of `team-authored ∪ review-requested-of-me
 ∪ watch-labeled`, **EXCLUDING** PRs I own, de-duplicated.
@@ -351,18 +362,22 @@ network-free from the store.
     (team-author / requested / label).
   - `pg-pr pr list --json` (base, no `--reviewers`) **MUST** read from the store
     with **no** network call and **no** store side-effect.
-  - Because that read is network-free, each item **MUST** carry its own
-    freshness: `last_synced_at` (the store's `pull_request.last_synced_at` column
-    verbatim, RFC3339 UTC) and `stale` (that as-of time has aged past
-    `freshness.BoundSeconds` — two sync intervals). A row with no usable as-of
-    time **MUST** be reported `stale`. The human table carries the same signal in
-    its `SYNCED` column.
-  - The ACL **MUST NOT** act on an item flagged `stale`: it creates no
-    `review-pr` bead for it and **MUST NOT** resolve its `pg-pr:active-pr` gate
-    (that gate asserts "pg-pr reports PR open/active", which past-bound data
-    cannot support). The refusal is **per PR**, is logged (refuse-and-record), and
-    keeps the pass at exit `0`; it self-heals on the next pass once pg-pr's sync
-    catches up.
+  - Because that read is network-free, each item carries its own freshness
+    (`INV-ASOF-1`): `last_synced_at` (the store's `pull_request.last_synced_at`
+    column verbatim, RFC3339 UTC) and `stale` (that as-of time has aged past
+    `freshness.BoundSeconds` — two sync intervals, an implementation-level
+    tuning recorded in
+    [`packages/pg-pr/docs/decisions/freshness.md`](../packages/pg-pr/docs/decisions/freshness.md)
+    (`DEC-FRESH-1`) rather than pinned by the behavior doc). A row with no
+    usable as-of time is reported `stale`, fail-closed. The human table
+    carries the same signal in its `SYNCED` column.
+  - The ACL **MUST NOT** act on an item flagged `stale` (`INV-ASOF-1`), and
+    computes no staleness policy of its own over these facts (`INV-ASOF-2`):
+    it creates no `review-pr` bead for it and **MUST NOT** resolve its
+    `pg-pr:active-pr` gate (that gate asserts "pg-pr reports PR open/active",
+    which past-bound data cannot support). The refusal is **per PR**, is
+    logged (refuse-and-record), and keeps the pass at exit `0`; it self-heals
+    on the next pass once pg-pr's sync catches up.
 - **Code paths:** `packages/pg-pr/internal/sync/detector.go`
   (`buildTeamQueries` union; `FingerprintPRs` per bucket; `mergeRosters`);
   `packages/pg-pr/internal/sync/refresh.go` (`reviewRequestedOfSelf`);

@@ -16,6 +16,12 @@ correct owner (ADR 0034) — the UUID preserves identity; only the owning set ch
   the dashboard payload. An item or payload with no usable as-of time MUST be reported **stale**.
   A consumer MUST NOT act on a read flagged stale — the acting decision is the consumer's, but
   the flag itself is pg-pr's obligation to raise correctly.
+- **`INV-ASOF-2`** <!-- uuid: db0166e2-c744-4401-a055-f2847c2aed13 --> — **The staleness
+  determination is pg-pr's alone.** pg-pr is the sole computer of the as-of/stale determination
+  on every read seam it publishes; a consumer MUST NOT re-derive its own staleness policy over
+  the same facts — it MUST consume the flag pg-pr already computed (`INV-ASOF-1`). The bound
+  past which a fact is judged stale is decision-doc detail, tuned by pg-pr's own sync cadence,
+  never a number this contract pins (`packages/pg-pr/docs/decisions · DEC-FRESH-1`).
 
 ## Approval (`INV-APPROVAL-*`)
 
