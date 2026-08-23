@@ -281,15 +281,32 @@ func TestRunWith_NudgerAnnotatesPendingNudge(t *testing.T) {
 
 	waitForFile(t, paths.Socket)
 
-	// Wait up to 500ms for a tree where the session has PendingNudge set.
-	// Tick 2 adds the intent, annotates, then dispatches. The TreeObserver
-	// sees the annotated tree (PendingNudge is set on the sv struct; dispatch
-	// only clears the store, not the struct field).
-	deadline := time.Now().Add(500 * time.Millisecond)
+	// Wait for a tree where the session has PendingNudge set. Tick 2 adds the
+	// intent, annotates, then dispatches. The TreeObserver sees the annotated
+	// tree (PendingNudge is set on the sv struct; dispatch only clears the
+	// store, not the struct field).
+	//
+	// Gate on the NUMBER of annotated trees observed via treesCh, not on a
+	// fixed wall-clock deadline: the daemon drives its tick loop off a real
+	// time.Ticker(Tick), and under host CPU contention a starved scheduler
+	// delays or coalesces ticks (nix flake check running many concurrent
+	// builds reproduced this — tc-tgnp), so racing real ticks against a
+	// hardcoded real-time budget is flaky under load even though the
+	// annotate-before-dispatch ordering itself is guaranteed deterministic by
+	// lifecycle.go's synchronous per-tick body (annotation always runs before
+	// Dispatch, in the same goroutine, every tick). maxTicksToObserve gives
+	// generous headroom (the intent lands on tick 2); backstop is a long,
+	// non-racy absolute bound that only matters if the daemon is genuinely
+	// hung — it must not be tight enough to fire under normal load.
+	const maxTicksToObserve = 500
+	backstop := time.After(30 * time.Second)
 	var foundPendingNudge bool
-	for time.Now().Before(deadline) && !foundPendingNudge {
+	observed := 0
+waitLoop:
+	for observed < maxTicksToObserve && !foundPendingNudge {
 		select {
 		case published := <-treesCh:
+			observed++
 			for _, d := range published.Dirs {
 				for _, sv := range d.Sessions {
 					if sv.SessionID == "annotate-sid" && sv.PendingNudge != nil {
@@ -301,8 +318,8 @@ func TestRunWith_NudgerAnnotatesPendingNudge(t *testing.T) {
 					}
 				}
 			}
-		case <-time.After(50 * time.Millisecond):
-			// no tree yet — keep polling
+		case <-backstop:
+			break waitLoop
 		}
 	}
 
