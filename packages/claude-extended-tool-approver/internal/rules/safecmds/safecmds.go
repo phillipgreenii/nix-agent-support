@@ -51,7 +51,7 @@ var alwaysSafe = map[string]bool{
 	"basename": true, "dirname": true, "realpath": true, "readlink": true,
 	"which": true, "type": true, "command": true, "unset": true, "export": true,
 	"env": true, "printenv": true, "id": true, "whoami": true,
-	"date": true, "uname": true, "hostname": true, "pwd": true, "cd": true,
+	"date": true, "uname": true, "hostname": true, "uptime": true, "pwd": true, "cd": true,
 	"sw_vers": true,
 	// macOS system tools (read-only inspection)
 	"sfltool": true, "plutil": true, "system_profiler": true, "launchctl": true,

@@ -139,6 +139,9 @@ func TestSafecmds_AlwaysSafe_Approve(t *testing.T) {
 		"true",
 		"false",
 		"printf '%s' foo",
+		// uptime: bare, no args — read-only system info, no filesystem access
+		// (grouped in alwaysSafe alongside date/uname/hostname).
+		"uptime",
 	}
 	for _, cmd := range commands {
 		input := &hookio.HookInput{
