@@ -368,6 +368,14 @@ func TestIsSafeSubstitutionBody_GitReadSubcommandAudit(t *testing.T) {
 		{"git ls-tree with a quoted --format of metadata atoms", "git ls-tree --format='%(path)' HEAD", true},
 		{"an UNQUOTED --format atom is not valid bash and is refused", "git ls-tree --format=%(path) HEAD", false},
 		{"incumbent control: git rev-parse", "git rev-parse HEAD", true},
+		// pg2-1k8sd: `symbolic-ref` is on this list by NAME, but its admission is
+		// shape-gated (gitSymbolicRefIsWrite) rather than blanket — the one-operand
+		// query clears, while the mutating shapes stay refused despite the name
+		// match. See gitReadSubcommands' criterion 2 note for why this is the one
+		// entry needing a flag/operand-aware guard.
+		{"symbolic-ref one-operand query is admitted", "git symbolic-ref --short HEAD", true},
+		{"symbolic-ref two-operand SET is refused despite the name match", "git symbolic-ref HEAD refs/heads/other", false},
+		{"symbolic-ref --delete is refused despite naming only one operand", "git symbolic-ref --delete refs/remotes/origin/HEAD", false},
 		// pg2-phtl3 (operator ruling, 2026-08-17): `log`/`diff` reverse the
 		// criterion-1 decline pg2-a5r9r's correction (2) recorded for both — see
 		// gitReadSubcommands' THE pg2-phtl3 RULING. `show`/`diff-tree` below were

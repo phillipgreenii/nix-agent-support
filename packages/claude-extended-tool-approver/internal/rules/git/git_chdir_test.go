@@ -170,6 +170,32 @@ func TestGit_Chdir_OutsideMapSubcommands(t *testing.T) {
 	}
 }
 
+// TestGit_Chdir_SymbolicRef (pg2-1k8sd) pins symbolic-ref's read-class -C handling
+// alongside remote's, per chdirSafe's doc: symbolicRefVerdict's only Approve path
+// is the one-operand read, so by the time chdirSafe runs for it the read/write
+// question is already settled and only readability need be checked.
+func TestGit_Chdir_SymbolicRef(t *testing.T) {
+	r := newWithProject(t)
+	// read-only zone dir, read form -> Approve (read-class: readable is enough).
+	if got := hookio.Verdict(r.Evaluate(chdirInput("git -C /nix/store/abc123-foo symbolic-ref --short HEAD", projectCWD))); got.Decision != hookio.Approve {
+		t.Errorf("git -C <ro> symbolic-ref --short HEAD: got %s (%s), want approve (read-class)", got.Decision, got.Reason)
+	}
+	// unreadable zone, read form -> Abstain (demoted from the would-be Approve).
+	if got := hookio.Verdict(r.Evaluate(chdirInput("git -C /etc symbolic-ref HEAD", projectCWD))); got.Decision != hookio.NoOpinion {
+		t.Errorf("git -C <unknown> symbolic-ref HEAD: got %s (%s), want abstain", got.Decision, got.Reason)
+	}
+	// writable zone, read form -> still Approve (writable implies readable here).
+	if got := hookio.Verdict(r.Evaluate(chdirInput("git -C /home/user/project symbolic-ref HEAD", projectCWD))); got.Decision != hookio.Approve {
+		t.Errorf("git -C <rw> symbolic-ref HEAD: got %s (%s), want approve", got.Decision, got.Reason)
+	}
+	// the two-operand SET form is already NoOpinion with no -C at all, so chdirSafe
+	// never runs (chdirSafe only demotes a would-be Approve) — an unsafe -C dir
+	// must not turn it into anything ELSE, matching TestGit_Chdir_NonApproveVerdicts_Unaffected.
+	if got := hookio.Verdict(r.Evaluate(chdirInput("git -C /home/user/project symbolic-ref HEAD refs/heads/other", projectCWD))); got.Decision != hookio.NoOpinion {
+		t.Errorf("git -C <rw> symbolic-ref HEAD refs/heads/other: got %s (%s), want abstain (write form, unaffected by -C)", got.Decision, got.Reason)
+	}
+}
+
 // The demotion only touches a would-be Approve. Ask/Reject verdicts are
 // unaffected by an unsafe -C dir (most-restrictive aggregation already covers them).
 func TestGit_Chdir_NonApproveVerdicts_Unaffected(t *testing.T) {

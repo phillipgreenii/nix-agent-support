@@ -462,6 +462,17 @@ func hasWriteFlag(cmd string, args []string) bool {
 //     subcommand with one dangerous flag is inadmissible at this granularity — it
 //     would need a flag-aware predicate this one is not.
 //
+//     `symbolic-ref` IS THE ONE EXCEPTION TO "this one is not" (pg2-1k8sd). Its
+//     one-operand query form reads (criterion 1's disclosure leg is a ref NAME, not
+//     object content); its `--delete`/`-d` form and its two-operand SET form both
+//     MUTATE a ref — often HEAD — with no operand-count-blind admission able to tell
+//     the shapes apart. So the subcommand-name lookup below is followed, for this ONE
+//     entry, by gitSymbolicRefIsWrite — a flag/operand-aware guard mirroring
+//     internal/rules/git's symbolicRefVerdict exactly, so the git RULE and this
+//     substitution-body FLOOR cannot disagree about which spelling of `symbolic-ref`
+//     is safe. No other entry on this list needed one before, and adding a shape
+//     guard for a different subcommand is its own bead, not a precedent this one set.
+//
 //  3. Does it consult the INDEX? Index refresh compares the index against the worktree,
 //     which is the path that honors `core.fsmonitor` — a config value naming a program
 //     git EXECUTES, the same class as criterion 1's first leg. THE ANSWER DOES NOT
@@ -595,7 +606,14 @@ func hasWriteFlag(cmd string, args []string) bool {
 // soleSimpleCommandLeaf's `len(call.Assigns) > 0` refusal already floors the env spelling
 // inside a substitution body.
 var gitReadSubcommands = map[string]bool{
-	"rev-parse": true, "rev-list": true, "symbolic-ref": true,
+	"rev-parse": true, "rev-list": true,
+	// `symbolic-ref` — SHAPE-GATED, not blanket-admitted (pg2-1k8sd). The name alone
+	// being on this list is NOT sufficient: classifySubstitutionCommand's git branch
+	// additionally calls gitSymbolicRefIsWrite on every match, which is what actually
+	// tells the one-operand READ apart from the `--delete`/`-d` and two-operand SET
+	// mutations. See criterion 2's note above for why this is the one entry that
+	// needed it.
+	"symbolic-ref": true,
 	// `describe` and `status` reach `core.fsmonitor` (`describe` only in its `--dirty`
 	// spelling, which `tokens[1]` cannot separate) and they STAY. That is a ruling, not
 	// an oversight — see THE pg2-a5r9r RULING above, and
@@ -677,6 +695,32 @@ func stripGitDashC(tokens []string) (rest []string, paths []string, ok bool) {
 	return tokens[i:], paths, true
 }
 
+// gitSymbolicRefIsWrite reports whether args — the tokens AFTER the
+// `symbolic-ref` subcommand — is a MUTATING spelling: a `--delete`/`-d` flag
+// (in any spelling, including a clustered short or a long-flag abbreviation),
+// or any operand count other than exactly one.
+//
+// THIS MIRRORS internal/rules/git's symbolicRefVerdict EXACTLY (pg2-1k8sd), on
+// purpose: the git RULE and this substitution-body FLOOR are two separate
+// allowlists that must not disagree about which spelling of `symbolic-ref` is
+// safe, the same discipline gitReadSubcommands' own doc states for its
+// `log`/`diff` admission. See that function's doc in internal/rules/git/git.go
+// for the full read/write survey (the one-operand query vs. the two-operand
+// SET vs. the operand-count-blind `--delete`) and for why `HasLongFlagPrefix`/
+// `HasShortFlag`'s documented over-matching (a `-d` byte found inside an
+// unrelated `-m<value>` glued reason string, or a `--del` abbreviation) is
+// fail-safe here: an over-match can only report a write that is actually a
+// read, never the reverse, and this floor's job is only to KEEP a body off the
+// SubstitutionCleared path — a false report here costs one extra hop through
+// full-engine recursion (which the git rule then classifies correctly), never
+// a wrongly-cleared mutation.
+func gitSymbolicRefIsWrite(args []string) bool {
+	if HasLongFlagPrefix(args, "delete") || HasShortFlag(args, 'd') {
+		return true
+	}
+	return len(Operands(args)) != 1
+}
+
 func classifySubstitutionCommand(tokens []string) SubstitutionClearance {
 	if len(tokens) == 0 {
 		return SubstitutionRefused
@@ -744,6 +788,17 @@ func classifySubstitutionCommand(tokens []string) SubstitutionClearance {
 		// reduces to the original tokens[1]-exact lookup below (readerArgsClearance(nil)
 		// is SubstitutionCleared, so minClearance is a no-op in that case).
 		if rest, paths, ok := stripGitDashC(tokens[1:]); ok && len(rest) > 0 && gitReadSubcommands[rest[0]] {
+			// pg2-1k8sd: `symbolic-ref`'s admission above is a NAME match only, and a
+			// name match cannot tell its one-operand READ apart from its
+			// `--delete`/`-d` or two-operand SET, both of which MUTATE a ref (often
+			// HEAD). gitSymbolicRefIsWrite is the shape-aware guard the doc on
+			// gitReadSubcommands' criterion 2 promises; it MUST run before the
+			// blanket SubstitutionCleared below, or a write-shaped
+			// `$(git symbolic-ref HEAD refs/heads/evil)` would clear this floor on
+			// its subcommand name alone.
+			if rest[0] == "symbolic-ref" && gitSymbolicRefIsWrite(rest[1:]) {
+				return SubstitutionRefused
+			}
 			// UNION, folded MOST-RESTRICTIVE-WINS (minClearance, same combinator
 			// SubstitutionClearance already defines): the subcommand admission is
 			// SubstitutionCleared on its own, but each `-C` operand is a path this seam

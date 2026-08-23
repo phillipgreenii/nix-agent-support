@@ -432,6 +432,14 @@ func (r *Rule) classify(pc cmdparse.ParsedCommand, envs []cmdparse.EnvAssignment
 	if subcmd == "config" {
 		return r.configVerdict(envs, rest), nil
 	}
+	// symbolic-ref: a ONE-OPERAND query READS what <name> currently points at and
+	// stays Approve; every other shape MUTATES a ref (often HEAD, or a
+	// remote-tracking HEAD such as refs/remotes/origin/HEAD) and gets a NoOpinion,
+	// never an Approve — see symbolicRefVerdict for the read/write split, the flag
+	// survey, and why the write form is NoOpinion rather than Ask/Reject (pg2-1k8sd).
+	if subcmd == "symbolic-ref" {
+		return r.symbolicRefVerdict(rest)
+	}
 	// modifying: approve (includes tag, mv, rm, worktree, etc.)
 	if modifyingSubcommands[subcmd] {
 		if hasRedirectEnvVar(envs) {
@@ -698,6 +706,92 @@ func (r *Rule) remoteVerdict(rest []string) hookio.RuleResult {
 		}
 	}
 	return hookio.RuleResult{Decision: hookio.Approve, Reason: "read-only git remote", Module: r.Name()}
+}
+
+// symbolicRefVerdict returns the verdict for a `git symbolic-ref` — rest being
+// the args AFTER the `symbolic-ref` subcommand. Unlike remoteVerdict/
+// configVerdict it does NOT always answer with a definitive verdict: the write
+// shape returns r.refuse's NoOpinion (an ADR-0044 REFUSAL, not chain
+// exhaustion), so it returns classify's own (RuleResult, error) shape.
+//
+// THE GAP THIS CLOSES (pg2-1k8sd). `symbolic-ref` was in NO subcommand set in
+// this file, so EVERY spelling fell through to classify's terminal
+// hookio.NotApplicable and reached `{}` only via chain exhaustion — measured,
+// this worktree, 2026-08-23: `git symbolic-ref --short refs/remotes/origin/HEAD`
+// alone answers `{}`, which folds `||`-chain command substitutions
+// (envvars' most-restrictive-wins recursion) to `ask` even when every OTHER leaf
+// of the chain is a decisive Approve — see the FF-0 landing preamble's
+// `PRIMARY="$(git config … || git symbolic-ref … || echo …)"`, this bead's
+// concrete reproduction. Giving the read form its own Approve, attributed to
+// this rule, removes it from that fold with the SAME leaf-level effect a
+// gitReadSubcommands entry has for the substitution-body floor (which already
+// lists "symbolic-ref" — see internal/cmdparse/parser.go — for exactly this
+// leaf, unconditionally on subcommand name alone).
+//
+// READ VS WRITE IS AN OPERAND COUNT, MEASURED against git 2.54.0 (this bead,
+// 2026-08-23, scratch repo): `git symbolic-ref [-q] [--short] [--no-recurse]
+// <name>` — ONE non-flag operand — READS what <name> currently points at and
+// touches nothing; `git symbolic-ref [-m <reason>] <name> <ref>` — TWO — SETS
+// <name> to point at <ref>, with NO working-tree or index update at all
+// (unlike `git checkout <branch>`), so a later, entirely ordinary `git commit`
+// lands on a branch nothing about the visible state announced. `cmdparse.
+// Operands` is the same operand walk gatedConfigKey and remoteVerdict already
+// trust for this: its documented over-count on a SEPARATED flag value (`-m
+// <reason>`) can only ADD a spurious operand, never drop the real ref-name
+// operand, and `-m` is valid ONLY on the write form per git's own usage
+// synopsis, so an over-count there can only push an already-write invocation
+// further away from the one-operand read shape — never the reverse.
+//
+// `--delete`/`-d` IS A THIRD SHAPE THE OPERAND COUNT ALONE CANNOT SEE: `git
+// symbolic-ref --delete <name>` names exactly ONE operand — the same count as
+// a read — yet DELETES the symbolic ref (MEASURED: `git symbolic-ref --delete
+// refs/remotes/origin/HEAD` followed by a re-read answers `fatal: … is not a
+// symbolic ref`). So the delete flag is checked FIRST and unconditionally,
+// before the operand count is trusted at all — mirroring configWriteIndicated's
+// same shape for `git config --unset <key>`, one operand that is a write
+// because of an explicit flag rather than a count.
+//
+// `HasLongFlagPrefix`/`HasShortFlag` ARE THE RIGHT MATCHERS HERE BECAUSE THE
+// TEST IS A PLAIN BOOLEAN ONE (pg2-os1kq's over-matching rule): neither the
+// match's length nor any glued value is read, so a false MATCH on `--del`,
+// `--de`, or a `-d` found inside `-m`'s own glued reason string
+// (`-mdelete-old-alias`, an HasShortFlag documented blind spot) can only push
+// the verdict AWAY from Approve — the fail-safe direction — while a false
+// MISS would let a real delete reach the one-operand Approve arm below. `-m`
+// itself is not screened for the same reason it is not elided before the
+// operand count: it is valid only on the write form, so its presence can never
+// manufacture a false one-operand read.
+//
+// WHY THE WRITE FORM IS A NoOpinion (`r.refuse`), NOT AN Ask OR A Reject — ADR
+// 0043's decision 4 keeps Ask/Reject for a hazard this rule has "a strong
+// understanding" of, backed by an operator ruling (remote mutation's
+// exfiltration Reject, config's sink/interlock/redirect Asks). No such ruling
+// exists for a bare `git symbolic-ref <name> <ref>`: this arm is a NEWLY-CLOSED
+// gap, not a conversion of an existing Ask, so ADR 0043's decision 3 (which
+// governs converting an Ask to NoOpinion) does not even apply — there was never
+// an Ask here to convert. r.refuse keeps the leaf's OUTCOME unchanged from
+// today (still `{}`, same as the chain-exhaustion it used to reach) while
+// making the refusal EXPLICIT and attributed to this rule instead of anonymous
+// — the same ADR-0044 shape isBranchUnsafe and the `clean` arm already use for
+// a mutating spelling this file recognizes but has no specific ruling to
+// escalate. It is NOT the same shape as `git remote set-head` (a REJECT,
+// because remoteVerdict already treats redirecting refs/remotes/<n>/HEAD as
+// the same exfiltration vector `set-url` is): `git symbolic-ref
+// refs/remotes/origin/HEAD <ref>` reaches the identical ref by a different
+// porcelain and today gets only this weaker NoOpinion. That asymmetry is
+// RECORDED HERE, not closed: closing it would need its own operator ruling,
+// the way remoteVerdict's Reject and configVerdict's redirect-class Reject
+// both did.
+func (r *Rule) symbolicRefVerdict(rest []string) (hookio.RuleResult, error) {
+	if cmdparse.HasLongFlagPrefix(rest, "delete") || cmdparse.HasShortFlag(rest, 'd') {
+		return r.refuse("git: `git symbolic-ref --delete` removes a symbolic ref (commonly HEAD, or a " +
+			"remote-tracking HEAD such as refs/remotes/origin/HEAD) — a mutation, not a read; deferring to the prompt")
+	}
+	if len(cmdparse.Operands(rest)) == 1 {
+		return hookio.RuleResult{Decision: hookio.Approve, Reason: "read-only git symbolic-ref", Module: r.Name()}, nil
+	}
+	return r.refuse("git: `git symbolic-ref <name> <ref>` SETS <name> (often HEAD) to point at <ref> with no " +
+		"working-tree or index update — a ref redirection, not a read; deferring to the prompt")
 }
 
 // configGateClass is the MECHANISM by which a gated `git config` key is
@@ -1393,10 +1487,11 @@ func (r *Rule) configGateResult(key string, class configGateClass) hookio.RuleRe
 
 // chdirSafe reports whether the `-C` target directory is in a zone appropriate
 // for the subcommand's access class. Read-only subcommands — and a read-only
-// `git remote` — require the directory be READABLE; every other approvable
-// subcommand (checkout, rebase, filter-branch, soft reset, and the modifying
-// set) writes and requires it be WRITABLE. Returns true (no gate) when no `-C`
-// is present or no evaluator is configured, preserving legacy behavior.
+// `git remote` or `git symbolic-ref` — require the directory be READABLE;
+// every other approvable subcommand (checkout, rebase, filter-branch, soft
+// reset, and the modifying set) writes and requires it be WRITABLE. Returns
+// true (no gate) when no `-C` is present or no evaluator is configured,
+// preserving legacy behavior.
 //
 // `config` is DELIBERATELY not listed beside `remote` even though configVerdict
 // now answers Approve for a read: this function sees only the subcommand, not the
@@ -1404,12 +1499,22 @@ func (r *Rule) configGateResult(key string, class configGateClass) hookio.RuleRe
 // config -C <dir> <key> <value>` too. Leaving it in the writable class keeps a
 // read-only `git config -C <dir> --get <key>` at exactly the demotion it had
 // before this bead — an over-restriction on the safe side, unchanged by pg2-szadj.
+//
+// `symbolic-ref` IS listed beside `remote`, and for the SAME reasoning that
+// justifies `remote` rather than `config`'s: chdirSafe is reached only from an
+// already-produced hookio.Approve (see its Evaluate call site), and
+// symbolicRefVerdict's ONLY Approve path is the one-operand read form — every
+// write/delete shape returns r.refuse's NoOpinion instead, so by the time this
+// function runs for `symbolic-ref` the read/write question is already settled
+// (pg2-1k8sd). Unlike `config`, whose Approve covers BOTH a read AND an
+// ordinary (non-gated-key) write, there is no write-shaped Approve for
+// `symbolic-ref` this listing could wrongly relax.
 func (r *Rule) chdirSafe(cwd string, chdirs []string, subcmd string) bool {
 	if r.eval == nil || len(chdirs) == 0 {
 		return true
 	}
 	access := r.eval.Evaluate(effectiveDir(cwd, chdirs))
-	if readOnlySubcommands[subcmd] || subcmd == "remote" {
+	if readOnlySubcommands[subcmd] || subcmd == "remote" || subcmd == "symbolic-ref" {
 		return access.CanRead()
 	}
 	return access.CanWrite()
