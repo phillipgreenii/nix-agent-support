@@ -60,9 +60,11 @@ flowchart LR
 - **In (code host → pg-pr)** — PR facts, fetched by fingerprint-driven comparison
   (`INV-SYNC-1`). The retrieval set is the union of a cross-repo mine bucket (author-only) with,
   per repo, a team-authored bucket, a review-requested bucket, a reviewed-by-me bucket, an
-  assigned-to-me bucket, and one bucket per configured watch label. This broadened retrieval
-  applies only to background (daemon) sync; a manually triggered one-shot sync fetches only the
-  author-only (mine) facts and does not pull the broadened not-mine buckets.
+  assigned-to-me bucket, and one bucket per configured watch label. Background (daemon) sync
+  always retrieves this full union. A manually triggered one-shot sync defaults to the
+  author-only (mine) facts alone — deliberately narrower, to keep an on-demand run cheap — and
+  MAY, at the invoker's explicit opt-in, retrieve the same full union for that one run, gaining
+  the same not-mine coverage as background sync on demand.
 - **In (code host → pg-pr), approval gate** — the **approval gate** is one of the PR facts pulled
   in through this crossing, classified into its gate state and tracked as its own axis — never
   folded into the CI-health facts pulled in alongside it (`INV-GATE-1`). A signal pg-pr cannot

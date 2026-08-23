@@ -176,6 +176,15 @@ type Deps struct {
 	// Production code leaves this nil; the wiring in enrichAndStore constructs
 	// the default provider from PGPR_JIRA_BINARY.
 	JiraProvider issues.Provider
+
+	// BroadenOneShotSync, when true, makes a one-shot Sync ALSO fan out to
+	// the daemon's broader "to-review" buckets (review-requested,
+	// reviewed-by, assignee, watch-labels — see buildTeamQueries) and merge
+	// them into the enriched PR set, at extra per-repo query cost. Default
+	// false keeps the one-shot path exactly as before: one author-only
+	// search per repo (pg2-qzatr). Ignored by the daemon path, which already
+	// retrieves the full bucket set unconditionally via fingerprintTick.
+	BroadenOneShotSync bool
 }
 
 // Engine carries the configured dependencies for a series of sync calls.
@@ -1436,6 +1445,14 @@ type enumeratedEnrichment struct {
 // provider supports EnrichedPRsProvider AND the repo has at least one
 // configured author. Returns (nil, false) on any failure so the caller
 // falls back to the REST path (ListMyPRs + ListTeamPRs).
+//
+// By default this issues exactly the one author-only search it always has
+// (buildEnrichedSearchQuery) — a one-shot `pg-pr sync` stays as cheap as
+// before. When e.deps.BroadenOneShotSync is set (pg2-qzatr), it ALSO fans
+// out to the daemon's broader "to-review" buckets (buildTeamQueries) and
+// merges every bucket's PRs into the same result, deduped by PR number —
+// giving the one-shot path retrieval parity with the daemon on demand, at
+// the cost of len(buildTeamQueries(...)) extra searches for this repo.
 func (e *Engine) tryEnumerateEnriched(ctx context.Context, provider VCSProvider, rcfg config.RepoConfig) (*enumeratedEnrichment, bool) {
 	enricher, ok := provider.(vcs.EnrichedPRsProvider)
 	if !ok {
@@ -1455,6 +1472,34 @@ func (e *Engine) tryEnumerateEnriched(ctx context.Context, provider VCSProvider,
 	if err != nil {
 		return nil, false
 	}
+
+	// Opt-in broadening: fan out to the same bucket queries the daemon's
+	// fingerprintTick uses (review-requested, reviewed-by, assignee,
+	// watch-labels, team-authors) and merge their PRs into `enriched`.
+	//
+	// Partial-failure posture: a bucket query that errors is SKIPPED, not
+	// fatal to the whole call. This mirrors fingerprintTick/mergeRosters,
+	// which keep whatever buckets succeeded rather than discarding a
+	// tick's results over one failed poll — "partial success is still
+	// useful" is the established precedent for this exact kind of
+	// multi-bucket degradation in this codebase. Failing the whole
+	// one-shot sync (and falling back to the REST path) over one broadened
+	// bucket would throw away the author-only result already in hand for
+	// no benefit, since the REST fallback doesn't retrieve the broadened
+	// buckets either.
+	if e.deps.BroadenOneShotSync {
+		for _, q := range buildTeamQueries(rcfg, self) {
+			bCtx, bSpan := startVCSSpan(ctx, "EnrichedPRs", rcfg.Remote, 0)
+			extra, berr := enricher.EnrichedPRs(bCtx, rcfg.Remote, q)
+			recordSpanErr(bSpan, berr)
+			bSpan.End()
+			if berr != nil {
+				continue // skip just this bucket; keep what already succeeded
+			}
+			enriched = append(enriched, extra...)
+		}
+	}
+
 	prs := make([]api.PR, 0, len(enriched))
 	byNumber := make(map[int]vcs.EnrichedPR, len(enriched))
 	for _, ep := range enriched {
@@ -1462,6 +1507,12 @@ func (e *Engine) tryEnumerateEnriched(ctx context.Context, provider VCSProvider,
 		// remote is the authority.
 		if ep.PR.Repo == "" {
 			ep.PR.Repo = rcfg.Remote
+		}
+		// Dedup by PR number, first-seen wins (mirrors mergeRosters' dedup
+		// idiom in detector.go) — a PR matching both the author-only query
+		// and a broadened bucket must appear once.
+		if _, dup := byNumber[ep.PR.Number]; dup {
+			continue
 		}
 		prs = append(prs, ep.PR)
 		byNumber[ep.PR.Number] = ep

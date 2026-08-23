@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/config"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/beads"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/provider/vcs"
 )
@@ -434,5 +435,190 @@ func TestFingerprintTick_AssigneeBucketFailure_KeepsMergeIncompleteAndCarriesRos
 	}
 	if _, ok := e.prevTeam[staleKey]; !ok {
 		t.Errorf("PR 99's prior roster entry must be carried forward across an incomplete merge, got prevTeam=%+v", e.prevTeam)
+	}
+}
+
+// ----------------------------------------------------------------------
+// One-shot sync broadening (pg2-qzatr): tryEnumerateEnriched (the one-shot
+// `pg-pr sync` path, NOT the daemon's fingerprintTick above) stays
+// author-only by default; Deps.BroadenOneShotSync opts a one-shot sync into
+// ALSO fanning out to the same buildTeamQueries buckets the daemon already
+// uses unconditionally, merging their PRs into the enriched result.
+// ----------------------------------------------------------------------
+
+// perQueryEnrichedVCS answers each EnrichedPRs bulk-fetch call by EXACT query
+// match (not substring, unlike perQueryFingerprintVCS/queryRosterVCS above):
+// the broadened buckets all end in "-author:<self>", which contains the
+// base author-only query's "author:<self>" as a substring, so substring
+// matching here would let the base query's answer leak into a broadened
+// bucket's lookup (or vice versa) depending on map iteration order.
+// errQuery, when non-empty, names the exact query that fails.
+type perQueryEnrichedVCS struct {
+	fakeVCS
+	byQuery  map[string][]vcs.EnrichedPR
+	errQuery string
+	queries  []string
+}
+
+func (v *perQueryEnrichedVCS) EnrichedPRs(_ context.Context, _ string, query string) ([]vcs.EnrichedPR, error) {
+	v.queries = append(v.queries, query)
+	if v.errQuery != "" && query == v.errQuery {
+		return nil, errors.New("simulated bucket failure")
+	}
+	return v.byQuery[query], nil
+}
+
+func enrichedFor(repo string, n int) vcs.EnrichedPR {
+	return vcs.EnrichedPR{PR: api.PR{Repo: repo, Number: n}}
+}
+
+// TestTryEnumerateEnriched_BroadenOff_UnchangedSingleQuery proves the DEFAULT
+// (Deps.BroadenOneShotSync unset) one-shot path is exactly what it was before
+// this bead: exactly one author-only EnrichedPRs call, and a PR retrievable
+// ONLY via a broadened bucket (review-requested) never reaches the result.
+func TestTryEnumerateEnriched_BroadenOff_UnchangedSingleQuery(t *testing.T) {
+	rcfg := config.RepoConfig{Remote: "o/r"}
+	self := "me"
+	baseQuery := buildEnrichedSearchQuery(rcfg.Remote, self, rcfg.TeamMembers)
+	broadened := buildTeamQueries(rcfg, self) // [review-requested, reviewed-by, assignee]
+
+	vp := &perQueryEnrichedVCS{byQuery: map[string][]vcs.EnrichedPR{
+		baseQuery:    {enrichedFor("o/r", 1)},
+		broadened[0]: {enrichedFor("o/r", 2)}, // review-requested-only PR
+	}}
+	e, err := New(Deps{
+		Cfg: &config.Config{SelfLogin: self, Repos: []config.RepoConfig{rcfg}},
+		VCS: map[string]VCSProvider{"github": vp},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	got, ok := e.tryEnumerateEnriched(context.Background(), vp, rcfg)
+	if !ok {
+		t.Fatalf("expected tryEnumerateEnriched to succeed")
+	}
+	if len(vp.queries) != 1 {
+		t.Fatalf("default (flag off) must issue exactly 1 query, got %d: %v", len(vp.queries), vp.queries)
+	}
+	if _, dup := got.byNumber[2]; dup {
+		t.Errorf("broadened-only PR 2 must NOT appear when BroadenOneShotSync is off, got %+v", got.byNumber)
+	}
+	if _, ok := got.byNumber[1]; !ok {
+		t.Errorf("author-only PR 1 must still appear, got %+v", got.byNumber)
+	}
+}
+
+// TestTryEnumerateEnriched_BroadenOn_IncludesBroadenedBucketPR proves the
+// opt-in half: with Deps.BroadenOneShotSync set, a PR retrievable ONLY via a
+// broadened bucket (review-requested, not author-matched) IS now included —
+// the retrieval-parity behavior this bead adds.
+func TestTryEnumerateEnriched_BroadenOn_IncludesBroadenedBucketPR(t *testing.T) {
+	rcfg := config.RepoConfig{Remote: "o/r"}
+	self := "me"
+	baseQuery := buildEnrichedSearchQuery(rcfg.Remote, self, rcfg.TeamMembers)
+	broadened := buildTeamQueries(rcfg, self)
+
+	vp := &perQueryEnrichedVCS{byQuery: map[string][]vcs.EnrichedPR{
+		baseQuery:    {enrichedFor("o/r", 1)},
+		broadened[0]: {enrichedFor("o/r", 2)}, // review-requested-only PR
+	}}
+	e, err := New(Deps{
+		Cfg:                &config.Config{SelfLogin: self, Repos: []config.RepoConfig{rcfg}},
+		VCS:                map[string]VCSProvider{"github": vp},
+		BroadenOneShotSync: true,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	got, ok := e.tryEnumerateEnriched(context.Background(), vp, rcfg)
+	if !ok {
+		t.Fatalf("expected tryEnumerateEnriched to succeed")
+	}
+	if len(vp.queries) != 1+len(broadened) {
+		t.Errorf("flag on must issue the base query plus every broadened bucket, got %d queries: %v", len(vp.queries), vp.queries)
+	}
+	if _, ok := got.byNumber[2]; !ok {
+		t.Errorf("broadened-only PR 2 must appear when BroadenOneShotSync is on, got %+v", got.byNumber)
+	}
+	if _, ok := got.byNumber[1]; !ok {
+		t.Errorf("author-only PR 1 must still appear, got %+v", got.byNumber)
+	}
+}
+
+// TestTryEnumerateEnriched_BroadenOn_DedupsAcrossBuckets proves a PR returned
+// by BOTH the author-only query and a broadened bucket (e.g. I am
+// team-authored AND self-assigned) appears exactly ONCE in the merged
+// result — first-seen wins, mirroring mergeRosters' dedup idiom.
+func TestTryEnumerateEnriched_BroadenOn_DedupsAcrossBuckets(t *testing.T) {
+	rcfg := config.RepoConfig{Remote: "o/r"}
+	self := "me"
+	baseQuery := buildEnrichedSearchQuery(rcfg.Remote, self, rcfg.TeamMembers)
+	broadened := buildTeamQueries(rcfg, self)
+	shared := enrichedFor("o/r", 5)
+
+	vp := &perQueryEnrichedVCS{byQuery: map[string][]vcs.EnrichedPR{
+		baseQuery:    {shared},
+		broadened[2]: {shared}, // assignee bucket returns the SAME PR
+	}}
+	e, err := New(Deps{
+		Cfg:                &config.Config{SelfLogin: self, Repos: []config.RepoConfig{rcfg}},
+		VCS:                map[string]VCSProvider{"github": vp},
+		BroadenOneShotSync: true,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	got, ok := e.tryEnumerateEnriched(context.Background(), vp, rcfg)
+	if !ok {
+		t.Fatalf("expected tryEnumerateEnriched to succeed")
+	}
+	if n := len(got.prs); n != 1 {
+		t.Fatalf("a PR returned by two buckets must merge to exactly ONE entry, got %d: %+v", n, got.prs)
+	}
+	if _, ok := got.byNumber[5]; !ok {
+		t.Errorf("expected PR 5 present, got %+v", got.byNumber)
+	}
+}
+
+// TestTryEnumerateEnriched_BroadenOn_PartialBucketFailure_KeepsOthers proves
+// the partial-failure posture this bead chose (mirroring
+// fingerprintTick/mergeRosters' "partial success is still useful"
+// precedent): when ONE broadened bucket's query errors, the call still
+// succeeds (ok=true) and returns every OTHER bucket's PRs — including the
+// base author-only result — rather than discarding everything.
+func TestTryEnumerateEnriched_BroadenOn_PartialBucketFailure_KeepsOthers(t *testing.T) {
+	rcfg := config.RepoConfig{Remote: "o/r"}
+	self := "me"
+	baseQuery := buildEnrichedSearchQuery(rcfg.Remote, self, rcfg.TeamMembers)
+	broadened := buildTeamQueries(rcfg, self) // [review-requested, reviewed-by, assignee]
+
+	vp := &perQueryEnrichedVCS{
+		errQuery: broadened[2], // assignee bucket fails
+		byQuery: map[string][]vcs.EnrichedPR{
+			baseQuery:    {enrichedFor("o/r", 1)},
+			broadened[0]: {enrichedFor("o/r", 2)}, // review-requested still succeeds
+		},
+	}
+	e, err := New(Deps{
+		Cfg:                &config.Config{SelfLogin: self, Repos: []config.RepoConfig{rcfg}},
+		VCS:                map[string]VCSProvider{"github": vp},
+		BroadenOneShotSync: true,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	got, ok := e.tryEnumerateEnriched(context.Background(), vp, rcfg)
+	if !ok {
+		t.Fatalf("one failed broadened bucket must NOT fail the whole call (partial success posture)")
+	}
+	if _, ok := got.byNumber[1]; !ok {
+		t.Errorf("author-only PR 1 must survive a failed broadened bucket, got %+v", got.byNumber)
+	}
+	if _, ok := got.byNumber[2]; !ok {
+		t.Errorf("the SUCCEEDING review-requested bucket's PR 2 must still be merged in, got %+v", got.byNumber)
 	}
 }

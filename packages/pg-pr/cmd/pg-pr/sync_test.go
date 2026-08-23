@@ -239,6 +239,38 @@ func TestSyncCommand_DaemonInvalidInterval(t *testing.T) {
 	}
 }
 
+// TestSyncCommand_BroadenFlag proves the --broaden flag (pg2-qzatr) is
+// registered with a false default and threads through cobra's flag parsing
+// into syFlags.broaden — the value production code (newSyncEngineForCLI)
+// wires verbatim into sync.Deps.BroadenOneShotSync. The Deps field's actual
+// effect on tryEnumerateEnriched's fan-out/merge is covered at the engine
+// level in internal/sync (TestTryEnumerateEnriched_Broaden*); this test
+// covers only the CLI-flag-to-syFlags wiring, since newSyncEngineForCLI is
+// stubbed out by setStubsForSync for every other test in this file (it
+// would otherwise construct a real github.New() provider).
+func TestSyncCommand_BroadenFlag(t *testing.T) {
+	if f := syncCmd.Flags().Lookup("broaden"); f == nil {
+		t.Fatal("expected a --broaden flag to be registered on sync")
+	} else if f.DefValue != "false" {
+		t.Errorf("expected --broaden to default to false, got %q", f.DefValue)
+	}
+
+	vcs := &stubVCS{prs: map[string][]api.PR{"foo/bar": {samplePR(1)}}}
+	bd := &stubBeads{}
+	defer setStubsForSync(t, vcs, bd, minimalCLICfg())()
+
+	var stdout bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetArgs([]string{"sync", "--broaden"})
+
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("sync --broaden: %v", err)
+	}
+	if !syFlags.broaden {
+		t.Error("expected --broaden to set syFlags.broaden = true")
+	}
+}
+
 func TestSyncCommand_PropagatesConfigError(t *testing.T) {
 	prev := loadConfigForCLI
 	defer func() { loadConfigForCLI = prev }()

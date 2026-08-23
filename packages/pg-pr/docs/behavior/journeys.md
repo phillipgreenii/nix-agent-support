@@ -108,6 +108,10 @@ Extensions:
   stays the worker's sole authority (step 2), driven only by the PR's real close or merge.
 - 1c. A check or status no configured interpreter claims rolls up into CI health exactly as it
   would with no interpreter configured (`INV-GATE-3`).
+- 1d. Triggered manually (on demand) rather than on the background schedule: step 1's comparison
+  defaults to pg-pr's own PRs alone, deliberately narrower to keep an on-demand run cheap. The
+  invoker MAY opt in to the full not-mine comparison for that one run, gaining the same
+  not-mine coverage as a background run.
 
 ### `USECASE-PGPR-ENSURE-MR` — ensure a merge-request record exists <!-- uuid: 22bbc8c6-d744-420e-becb-61cb2bb5d568 -->
 

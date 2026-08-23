@@ -47,6 +47,7 @@ type syncFlags struct {
 	interval    string
 	logJSON     bool
 	metricsAddr string
+	broaden     bool
 }
 
 var syFlags syncFlags
@@ -72,6 +73,11 @@ var newSyncEngineForCLI = func(cfg *config.Config) (*sync.Engine, error) {
 		Cfg:  cfg,
 		VCS:  map[string]sync.VCSProvider{"github": github.New()},
 		CICD: map[string]sync.CICDProvider{ghactions.ProviderName: gha},
+		// BroadenOneShotSync only affects the one-shot (non-daemon) Sync
+		// branch — the daemon already retrieves the full bucket set
+		// unconditionally via fingerprintTick, so wiring this flag through
+		// unconditionally here is safe for both invocation modes.
+		BroadenOneShotSync: syFlags.broaden,
 	})
 }
 
@@ -304,5 +310,9 @@ func init() {
 		"Emit structured JSON logs to stderr (effective only with --daemon)")
 	syncCmd.Flags().StringVar(&syFlags.metricsAddr, "metrics-addr", sync.DefaultMetricsAddr,
 		"Daemon Prometheus scrape address (effective only with --daemon; empty disables)")
+	syncCmd.Flags().BoolVar(&syFlags.broaden, "broaden", false,
+		"Also fan out to the broader to-review buckets (review-requested, reviewed-by, "+
+			"assignee, watch-labels) and merge them in, at extra query cost "+
+			"(ignored with --daemon, which already retrieves the full set)")
 	rootCmd.AddCommand(syncCmd)
 }
