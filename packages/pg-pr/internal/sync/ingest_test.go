@@ -916,8 +916,13 @@ func TestSync_RecordsRevisionWithCIAndReview(t *testing.T) {
 	if rev.CIPassed != 2 {
 		t.Errorf("CIPassed: got %d want 2", rev.CIPassed)
 	}
-	if rev.MyReviewState != "approved" {
-		t.Errorf("MyReviewState: got %q want \"approved\"", rev.MyReviewState)
+
+	approval, err := db.GetApproval(ctx, storedPR.ID, "phillipg")
+	if err != nil {
+		t.Fatalf("GetApproval: %v", err)
+	}
+	if approval == nil || approval.State != "approved" {
+		t.Errorf("self approval = %+v, want state=approved", approval)
 	}
 }
 

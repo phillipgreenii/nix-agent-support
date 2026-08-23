@@ -90,24 +90,4 @@ func TestIngestFeedbackToStore_RecordsTeammateChangesRequested(t *testing.T) {
 	if carolApproval != nil {
 		t.Errorf("carol's COMMENTED-only review must not land in pr_approval, got %+v", carolApproval)
 	}
-
-	// A teammate's CHANGES_REQUESTED/COMMENTED must NOT touch the (unrelated)
-	// others_approved "off the hook" marker: it must reflect ONLY alice's
-	// APPROVED observation. If bob's or carol's later timestamps had leaked
-	// into this marker (a regression this loop must not cause), OthersApprovedAt
-	// would read "2026-07-02..." or "2026-07-03..." instead of alice's
-	// "2026-07-01...".
-	revs, err := db.ListRevisions(ctx, storedPR.ID)
-	if err != nil {
-		t.Fatalf("ListRevisions: %v", err)
-	}
-	if len(revs) != 1 {
-		t.Fatalf("want 1 revision, got %d: %+v", len(revs), revs)
-	}
-	if !revs[0].OthersApproved {
-		t.Errorf("alice's APPROVED review must still set others_approved")
-	}
-	if revs[0].OthersApprovedAt != "2026-07-01T00:00:00Z" {
-		t.Errorf("others_approved_at = %q, want alice's timestamp 2026-07-01T00:00:00Z (bob/carol must not touch this marker)", revs[0].OthersApprovedAt)
-	}
 }

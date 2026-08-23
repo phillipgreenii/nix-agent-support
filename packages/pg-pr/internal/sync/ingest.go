@@ -75,22 +75,13 @@ func (e *Engine) ingestFeedbackToStore(ctx context.Context, repo string, pr api.
 		return fmt.Errorf("ingest: set revision ci %s#%d: %w", repo, pr.Number, err)
 	}
 	for _, rv := range mySubmittedReviews(enriched.Reviews, self) {
-		// A DISMISSED self review is deliberately kept OUT of the legacy
-		// single-slot my_review_state (pg2-4dz88.1.7): that column carries no
-		// staleness, so a dismissed review recorded there would read as a
-		// CURRENT self review. It still lands as a per-approver row below,
-		// marked stale. The legacy column therefore cannot represent
-		// "approved then dismissed" at all — which is why the read seam was
-		// cut over to pr_approval (pg2-4dz88.1.9).
-		if !rv.Dismissed {
-			if err := e.deps.Store.MarkRevisionReviewed(ctx, prID, rv.CommitSHA, rv.State, rv.SubmittedAt); err != nil {
-				return fmt.Errorf("ingest: mark reviewed %s#%d: %w", repo, pr.Number, err)
-			}
-		}
-		// Also record the self observation as a per-approver row (pg2-4dz88.1.5)
-		// alongside the my_review_state write above. As of pg2-4dz88.1.9 THIS
-		// row is the one every reader consults; the my_review_state write is
-		// retained only until a migration leaf drops the column.
+		// Record the self observation as a per-approver row (pg2-4dz88.1.5).
+		// This is THE read path as of pg2-4dz88.1.9; the legacy write-only
+		// my_review_state/reviewed_at columns (and this loop's former write
+		// to them) were dropped in schema v12 (pg2-tgrip) since a DISMISSED
+		// review could never be represented in that single slot anyway
+		// (pg2-4dz88.1.7) — recordApproval handles that case via
+		// SetDismissedApproval regardless of rv.Dismissed.
 		if err := e.recordApproval(ctx, prID, rv); err != nil {
 			return fmt.Errorf("ingest: set approval (self) %s#%d: %w", repo, pr.Number, err)
 		}
@@ -100,19 +91,12 @@ func (e *Engine) ingestFeedbackToStore(ctx context.Context, repo string, pr api.
 	// tick, keeping the marker current. The viewer's own approval is excluded by
 	// othersApprovedReviews (X3), so it can never masquerade as a teammate's.
 	for _, rv := range othersApprovedReviews(enriched.Reviews, self) {
-		// As for self above: a DISMISSED teammate approval must NOT set the
-		// others_approved boolean, which cannot express staleness and would
-		// claim a CURRENT teammate approval (pg2-4dz88.1.7). It still lands as
-		// a per-approver row below, marked stale.
-		if !rv.Dismissed {
-			if err := e.deps.Store.MarkRevisionOthersApproved(ctx, prID, rv.CommitSHA, rv.SubmittedAt); err != nil {
-				return fmt.Errorf("ingest: mark others-approved %s#%d: %w", repo, pr.Number, err)
-			}
-		}
-		// Also record this teammate's approval as its OWN per-approver row
-		// (pg2-4dz88.1.5), keyed by their real login — distinct from the single
-		// OR'd others_approved boolean above, so a second teammate's approval is
-		// a second distinguishable row rather than lost in the same flag.
+		// Record this teammate's approval as its own per-approver row
+		// (pg2-4dz88.1.5), keyed by their real login. The legacy write-only
+		// others_approved/others_approved_at columns (and this loop's former
+		// write to them) were dropped in schema v12 (pg2-tgrip): that single
+		// OR'd boolean could never express staleness or per-approver identity
+		// (pg2-4dz88.1.7).
 		if err := e.recordApproval(ctx, prID, rv); err != nil {
 			return fmt.Errorf("ingest: set approval (teammate %s) %s#%d: %w", rv.Approver, repo, pr.Number, err)
 		}
@@ -120,9 +104,9 @@ func (e *Engine) ingestFeedbackToStore(ctx context.Context, repo string, pr api.
 	// Record teammate CHANGES_REQUESTED reviews as their OWN per-approver row
 	// too (pg2-4dz88.1.8) — a teammate explicitly asking for changes is now
 	// representable, distinct from both an absent record and that same
-	// approver's own APPROVED/STALE state. Deliberately NOT wired into
-	// MarkRevisionOthersApproved: asking for changes does not put the PR
-	// "off the hook", so that marker's semantics are unchanged by this leaf.
+	// approver's own APPROVED/STALE state. Deliberately NOT wired into the
+	// others-approved loop above: asking for changes does not put the PR
+	// "off the hook".
 	for _, rv := range othersChangesRequestedReviews(enriched.Reviews, self) {
 		if err := e.deps.Store.SetApproval(ctx, prID, rv.Approver, rv.CommitSHA, rv.State, rv.SubmittedAt); err != nil {
 			return fmt.Errorf("ingest: set approval (teammate changes-requested %s) %s#%d: %w", rv.Approver, repo, pr.Number, err)

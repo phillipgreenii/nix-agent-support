@@ -291,22 +291,3 @@ func TestNeedsAttention_DismissedApprovalDoesNotClose(t *testing.T) {
 			reason, AttentionReasonUnreviewed)
 	}
 }
-
-// The predicate reads NOTHING from the retired collapsed columns
-// (pr_revision.others_approved / my_review_state). Pin that mechanically: a
-// revision timeline asserting BOTH of them, with no per-approver row to back
-// them, MUST still need attention. Before pg2-4dz88.1.9 either column alone
-// closed the edge, so this fixture is the exact shape a half-done cutover
-// leaves behind.
-func TestNeedsAttention_IgnoresRetiredRevisionColumns(t *testing.T) {
-	revs := []store.Revision{{
-		Seq: 1, HeadSHA: "h1",
-		OthersApproved: true,
-		MyReviewState:  "approved",
-	}}
-	need, reason := NeedsAttention(revs, nil, attnSelf, false)
-	if !need || reason != AttentionReasonUnreviewed {
-		t.Errorf("need=%v reason=%q, want true/%q — the collapsed columns must no longer be read",
-			need, reason, AttentionReasonUnreviewed)
-	}
-}

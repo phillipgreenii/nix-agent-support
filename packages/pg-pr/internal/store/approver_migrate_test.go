@@ -88,9 +88,30 @@ func TestMigrate_V9BackfillDefaultIsNoRows(t *testing.T) {
 // (pr_approval.dismissed) IS safe to replay here, since v9 just
 // dropped/recreated pr_approval without that column — so both v9 and v10 are
 // applied directly, stopping short of v11.
+//
+// v12 (pg2-tgrip) later DROPPED reviewed_at/my_review_state/others_approved/
+// others_approved_at outright, so OpenForTest's terminal schema no longer has
+// them. This test re-materializes all four with the exact DDL migrations[2]
+// (v3) and migrations[6] (v7) originally used — mirroring
+// TestMigrate_V12PreservesSurvivingColumnData's technique — so the seeded
+// rows below are shaped exactly as a real v8 database's would have been.
 func TestMigrate_V9BackfillsExistingData(t *testing.T) {
 	db := OpenForTest(t) // full v9 schema present
 	prID := seedPR(t, db)
+
+	if _, err := db.sql.Exec(`ALTER TABLE pr_revision ADD COLUMN reviewed_at TEXT`); err != nil {
+		t.Fatalf("re-add reviewed_at: %v", err)
+	}
+	if _, err := db.sql.Exec(`ALTER TABLE pr_revision ADD COLUMN my_review_state TEXT CHECK (my_review_state IS NULL OR
+                      my_review_state IN ('approved','changes-requested','commented'))`); err != nil {
+		t.Fatalf("re-add my_review_state: %v", err)
+	}
+	if _, err := db.sql.Exec(`ALTER TABLE pr_revision ADD COLUMN others_approved    INTEGER NOT NULL DEFAULT 0`); err != nil {
+		t.Fatalf("re-add others_approved: %v", err)
+	}
+	if _, err := db.sql.Exec(`ALTER TABLE pr_revision ADD COLUMN others_approved_at TEXT`); err != nil {
+		t.Fatalf("re-add others_approved_at: %v", err)
+	}
 
 	// Seed TWO revisions: h1 (self reviewed only) then h2 (self reviewed AGAIN
 	// + a teammate approval) — so the backfill must pick the LATEST matching

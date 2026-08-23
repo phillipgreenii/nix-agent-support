@@ -265,11 +265,10 @@ func TestMySubmittedReviews(t *testing.T) {
 
 // TestIngestFeedbackToStore_WritesPerApproverRows is the regression-equivalence
 // test for pg2-4dz88.1.5's ported write path: for the SAME inputs
-// mySubmittedReviews/othersApprovedReviews handle today (a self-APPROVED review
-// and a teammate-APPROVED review), ingestFeedbackToStore must land BOTH as rows
-// in the new pr_approval table AND continue to populate the old
-// my_review_state/others_approved(_at) columns exactly as before — this leaf is
-// additive, not a cutover.
+// mySubmittedReviews/othersApprovedReviews handle (a self-APPROVED review and a
+// teammate-APPROVED review), ingestFeedbackToStore must land BOTH as distinct
+// rows in the pr_approval table, correctly attributed to their own approver
+// login (proving self is never conflated with a teammate, X3).
 func TestIngestFeedbackToStore_WritesPerApproverRows(t *testing.T) {
 	ctx := context.Background()
 	db := store.OpenForTest(t)
@@ -338,25 +337,6 @@ func TestIngestFeedbackToStore_WritesPerApproverRows(t *testing.T) {
 	if teammate.State != "approved" || teammate.HeadSHA != "sha-head" || teammate.ObservedAt != "2026-07-02T00:00:00Z" {
 		t.Errorf("teammate pr_approval row = %+v, want state=approved head_sha=sha-head observed_at=2026-07-02T00:00:00Z", teammate)
 	}
-
-	// --- Old columns: still populate exactly as before (no read-seam consumer
-	// has cut over yet, so this leaf must not let them go stale or wrong). ---
-	revs, err := db.ListRevisions(ctx, storedPR.ID)
-	if err != nil {
-		t.Fatalf("ListRevisions: %v", err)
-	}
-	if len(revs) != 1 {
-		t.Fatalf("want 1 revision, got %d: %+v", len(revs), revs)
-	}
-	if revs[0].MyReviewState != "approved" {
-		t.Errorf("my_review_state = %q, want \"approved\" (self path still records)", revs[0].MyReviewState)
-	}
-	if !revs[0].OthersApproved {
-		t.Errorf("others_approved must still be set by the teammate approval")
-	}
-	if revs[0].OthersApprovedAt != "2026-07-02T00:00:00Z" {
-		t.Errorf("others_approved_at = %q, want bob's timestamp", revs[0].OthersApprovedAt)
-	}
 }
 
 // newApprovalIngestEngine builds an Engine wired to db with selfLogin as the
@@ -383,10 +363,6 @@ func newApprovalIngestEngine(t *testing.T, db *store.DB, selfLogin string) *Engi
 // rather than vanishing (pg2-4dz88.1.7, INV-APPROVAL-3). The dismissals here
 // sit AT the PR's current head, so nothing but the recorded dismissal can make
 // them read stale.
-//
-// The legacy single-slot markers must stay EMPTY: my_review_state and
-// others_approved carry no staleness, so writing a dismissed review into them
-// would claim a CURRENT approval.
 func TestIngestFeedbackToStore_DismissedReviewsLandAsStaleApprovals(t *testing.T) {
 	ctx := context.Background()
 	db := store.OpenForTest(t)
@@ -451,21 +427,6 @@ func TestIngestFeedbackToStore_DismissedReviewsLandAsStaleApprovals(t *testing.T
 		if !got.IsStale(head) {
 			t.Errorf("%s: a dismissed approval AT the current head must still read stale (row=%+v)", want.approver, got)
 		}
-	}
-
-	// --- Legacy markers: untouched by a dismissal. ---
-	revs, err := db.ListRevisions(ctx, storedPR.ID)
-	if err != nil {
-		t.Fatalf("ListRevisions: %v", err)
-	}
-	if len(revs) != 1 {
-		t.Fatalf("want 1 revision, got %d: %+v", len(revs), revs)
-	}
-	if revs[0].MyReviewState != "" {
-		t.Errorf("my_review_state = %q, want empty: a dismissed self review must not read as a current one", revs[0].MyReviewState)
-	}
-	if revs[0].OthersApproved {
-		t.Errorf("others_approved must stay false: a dismissed teammate approval is not a current teammate approval")
 	}
 }
 

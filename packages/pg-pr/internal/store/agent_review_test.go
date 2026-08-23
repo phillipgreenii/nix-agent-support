@@ -69,8 +69,7 @@ func TestMarkRevisionAgentReviewed_StampsLatestMatchingHead(t *testing.T) {
 	}
 }
 
-// Marking a head SHA with no matching revision is a no-op (mirrors
-// MarkRevisionReviewed).
+// Marking a head SHA with no matching revision is a no-op.
 func TestMarkRevisionAgentReviewed_NoMatchingHead_IsNoOp(t *testing.T) {
 	ctx := context.Background()
 	db := OpenForTest(t)

@@ -8,40 +8,22 @@ import (
 
 // Revision is one observed (head_sha, base_sha) of a PR in time order.
 type Revision struct {
-	ID            int64
-	PRID          int64
-	Seq           int
-	HeadSHA       string
-	BaseSHA       string // "" when NULL
-	ObservedAt    string
-	LastSeenAt    string
-	CIState       string
-	CIPassed      int
-	CIFailed      int
-	CIPending     int
-	CICapturedAt  string // "" when NULL
-	ReviewedAt    string // "" when NULL
-	MyReviewState string // "" when NULL
+	ID           int64
+	PRID         int64
+	Seq          int
+	HeadSHA      string
+	BaseSHA      string // "" when NULL
+	ObservedAt   string
+	LastSeenAt   string
+	CIState      string
+	CIPassed     int
+	CIFailed     int
+	CIPending    int
+	CICapturedAt string // "" when NULL
 	// ReviewedByAgentAt is the timestamp the daemon's draft-review consumer
 	// (pg2-4c5i.36) recorded an agent review against this revision's head SHA.
 	// "" when NULL (no agent review produced against this head yet).
 	ReviewedByAgentAt string
-	// OthersApproved is true when a NON-SELF (teammate) APPROVED review was
-	// observed at this revision's head SHA (pg2-4c5i.13). Deliberately excludes
-	// the viewer's own approval (that lives in MyReviewState) so a reader can
-	// tell "a teammate approved" from "I approved" (X3).
-	//
-	// WRITE-ONLY as of pg2-4dz88.1.9: this column and MyReviewState are still
-	// written by internal/sync's ingest, but nothing outside this package reads
-	// them any more — snapshot.NeedsAttention and snapshot.classifyApprovals
-	// both read the per-approver pr_approval rows (store.Approval) instead. A
-	// single OR'd boolean cannot name WHICH teammate approved (INV-APPROVAL-1)
-	// and cannot express a DISMISSED approval (INV-APPROVAL-3), which is why
-	// the readers moved. Dropping the columns is a separate migration leaf.
-	OthersApproved bool
-	// OthersApprovedAt is the timestamp of the recorded teammate approval; ""
-	// when NULL (no teammate approval observed at this head yet).
-	OthersApprovedAt string
 	// GateState is the approval-gate's overall verdict for this revision —
 	// "satisfied" | "partially-satisfied" | "unsatisfied" | "unknown"
 	// (schema v11, pg2-4dz88.2.5). Distinct from CIState: a CI suite passing
@@ -63,8 +45,8 @@ type Revision struct {
 
 const revisionColumns = `id, pr_id, seq, head_sha, COALESCE(base_sha,''),
 	observed_at, last_seen_at, ci_state, ci_passed, ci_failed, ci_pending,
-	COALESCE(ci_captured_at,''), COALESCE(reviewed_at,''), COALESCE(my_review_state,''),
-	COALESCE(reviewed_by_agent_at,''), others_approved, COALESCE(others_approved_at,''),
+	COALESCE(ci_captured_at,''),
+	COALESCE(reviewed_by_agent_at,''),
 	gate_state, COALESCE(gate_state_n,0), COALESCE(gate_state_m,0),
 	COALESCE(gate_state_captured_at,'')`
 
@@ -72,8 +54,8 @@ func scanRevision(s rowScanner) (Revision, error) {
 	var r Revision
 	err := s.Scan(&r.ID, &r.PRID, &r.Seq, &r.HeadSHA, &r.BaseSHA,
 		&r.ObservedAt, &r.LastSeenAt, &r.CIState, &r.CIPassed, &r.CIFailed,
-		&r.CIPending, &r.CICapturedAt, &r.ReviewedAt, &r.MyReviewState,
-		&r.ReviewedByAgentAt, &r.OthersApproved, &r.OthersApprovedAt,
+		&r.CIPending, &r.CICapturedAt,
+		&r.ReviewedByAgentAt,
 		&r.GateState, &r.GateStateN, &r.GateStateM, &r.GateStateCapturedAt)
 	return r, err
 }
@@ -247,27 +229,13 @@ func (db *DB) LatestRevision(ctx context.Context, prID int64) (*Revision, error)
 	return &r, nil
 }
 
-// MarkRevisionReviewed records my submitted review at headSHA on the latest
-// revision whose head_sha matches (a head SHA can recur after a force-push; #3
-// cares about the most recent occurrence). No-op if no revision matches.
-func (db *DB) MarkRevisionReviewed(ctx context.Context, prID int64, headSHA, state, reviewedAt string) error {
-	_, err := db.sql.ExecContext(ctx, `UPDATE pr_revision
-		SET reviewed_at=?, my_review_state=?
-		WHERE id = (SELECT id FROM pr_revision
-		            WHERE pr_id=? AND head_sha=? ORDER BY seq DESC LIMIT 1)`,
-		reviewedAt, state, prID, headSHA)
-	if err != nil {
-		return fmt.Errorf("store: mark revision reviewed %d %s: %w", prID, headSHA, err)
-	}
-	return nil
-}
-
 // MarkRevisionAgentReviewed records that the daemon's draft-review consumer
 // produced an agent review against headSHA, on the latest revision whose
 // head_sha matches (a head SHA can recur after a force-push; we care about the
-// most recent occurrence). No-op if no revision matches. Mirrors
-// MarkRevisionReviewed but records the *agent* review marker (semantics differ
-// from my-submitted-GitHub-review's reviewed_at/my_review_state).
+// most recent occurrence). No-op if no revision matches. Semantics differ from
+// my-submitted-GitHub-review markers (the retired reviewed_at/my_review_state
+// columns, dropped in schema v12, pg2-tgrip): this one records the *agent*
+// review marker.
 func (db *DB) MarkRevisionAgentReviewed(ctx context.Context, prID int64, headSHA, at string) error {
 	_, err := db.sql.ExecContext(ctx, `UPDATE pr_revision
 		SET reviewed_by_agent_at=?
@@ -276,25 +244,6 @@ func (db *DB) MarkRevisionAgentReviewed(ctx context.Context, prID int64, headSHA
 		at, prID, headSHA)
 	if err != nil {
 		return fmt.Errorf("store: mark revision agent-reviewed %d %s: %w", prID, headSHA, err)
-	}
-	return nil
-}
-
-// MarkRevisionOthersApproved records that a NON-SELF (teammate) APPROVED review
-// was observed at headSHA, on the latest revision whose head_sha matches (a head
-// SHA can recur after a force-push; we care about the most recent occurrence).
-// No-op if no revision matches. Mirrors MarkRevisionReviewed/AgentReviewed but
-// records the *teammate*-approval marker — deliberately distinct from
-// my_review_state (the viewer's own review) so the attention predicate can tell
-// "a teammate approved" from "I approved" (pg2-4c5i.13, X3).
-func (db *DB) MarkRevisionOthersApproved(ctx context.Context, prID int64, headSHA, at string) error {
-	_, err := db.sql.ExecContext(ctx, `UPDATE pr_revision
-		SET others_approved=1, others_approved_at=?
-		WHERE id = (SELECT id FROM pr_revision
-		            WHERE pr_id=? AND head_sha=? ORDER BY seq DESC LIMIT 1)`,
-		at, prID, headSHA)
-	if err != nil {
-		return fmt.Errorf("store: mark revision others-approved %d %s: %w", prID, headSHA, err)
 	}
 	return nil
 }

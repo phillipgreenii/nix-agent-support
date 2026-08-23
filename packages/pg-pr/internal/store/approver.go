@@ -8,9 +8,9 @@ import (
 )
 
 // Approval is one approver's latest observed review state on a PR
-// (pg2-4dz88.1.5, schema v9). Unlike pr_revision.my_review_state (a single
-// self-only slot) and pr_revision.others_approved (a single boolean OR across
-// every non-self APPROVED review), pr_approval carries one row PER
+// (pg2-4dz88.1.5, schema v9). Unlike the retired pr_revision.my_review_state
+// (a single self-only slot) and pr_revision.others_approved (a single boolean
+// OR across every non-self APPROVED review), pr_approval carries one row PER
 // (pr_id, approver login) — two teammates approving are two distinct,
 // distinguishable rows, and per-approver staleness ("Alice approved head N,
 // Bob has not re-approved head N+1") is representable by comparing HeadSHA
@@ -18,10 +18,10 @@ import (
 //
 // This table is THE read path for approvals as of pg2-4dz88.1.9: both
 // snapshot.classifyApprovals and the shared snapshot.NeedsAttention predicate
-// read it, and neither reads pr_revision.others_approved or
-// pr_revision.my_review_state any more. Those columns are still WRITTEN by
-// internal/sync's write path but no longer read by anything outside this
-// package; dropping them is a separate migration leaf.
+// read it. pr_revision.others_approved/others_approved_at/my_review_state/
+// reviewed_at were write-only from pg2-4dz88.1.9 until schema v12
+// (pg2-tgrip), which dropped the columns and their MarkRevisionReviewed/
+// MarkRevisionOthersApproved writers entirely.
 type Approval struct {
 	ID         int64
 	PRID       int64

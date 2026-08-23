@@ -7,7 +7,7 @@ import (
 
 // schemaVersion is the current schema. Bump it and append a migration step
 // whenever the DDL changes. Stored in SQLite's user_version pragma.
-const schemaVersion = 11
+const schemaVersion = 12
 
 // migrations is the ordered list of DDL applied to reach schemaVersion. Index i
 // migrates user_version i -> i+1.
@@ -382,6 +382,42 @@ ALTER TABLE pr_revision ADD COLUMN gate_state TEXT NOT NULL DEFAULT 'unknown'
 ALTER TABLE pr_revision ADD COLUMN gate_state_n INTEGER;
 ALTER TABLE pr_revision ADD COLUMN gate_state_m INTEGER;
 ALTER TABLE pr_revision ADD COLUMN gate_state_captured_at TEXT;
+`,
+	// v11 -> v12: drop the four pr_revision columns that pg2-4dz88.1.9 left
+	// write-only — others_approved, others_approved_at, my_review_state,
+	// reviewed_at (pg2-tgrip). snapshot.NeedsAttention and
+	// snapshot.classifyApprovals moved to the per-approver pr_approval table
+	// back at that leaf; since then nothing outside this package (and its own
+	// tests) has read these columns, so keeping them around is a correctness
+	// trap: a future reader could resume reading a source that can no longer
+	// express per-approver identity or staleness, exactly the defect
+	// pg2-4dz88.1.7/.1.9 fixed. MarkRevisionReviewed and
+	// MarkRevisionOthersApproved (the two writers) are removed in the same
+	// leaf, along with their internal/sync/ingest.go call sites.
+	//
+	// DROP COLUMN vs rebuild-table: unlike v6 (feedback.kind CHECK) and v8
+	// (pull_request.ownership CHECK), none of these four columns is a PRIMARY
+	// KEY, is UNIQUE, is indexed, or is referenced by another column's
+	// generated expression or a foreign key — the only cases SQLite's native
+	// ALTER TABLE ... DROP COLUMN refuses. my_review_state's own CHECK
+	// constraint refers only to itself, and SQLite drops a self-referencing
+	// CHECK along with its column (verified against the pinned
+	// modernc.org/sqlite v1.57.0 driver, which transpiles SQLite 3.53.3 —
+	// DROP COLUMN has been supported since SQLite 3.35.0). So this migration
+	// uses four plain DROP COLUMN statements rather than the 12-step rebuild:
+	// no INSERT...SELECT, no id renumbering risk, and (per the FK-check
+	// safety net in applyMigration) no cascading DROP TABLE hazard either,
+	// since no table is dropped. One statement per column, mirroring this
+	// file's "one column per ALTER" ADD COLUMN convention (see v2).
+	//
+	// Additive-safe in the other direction too: dropping a column never
+	// disturbs data in the columns that survive (verified locally against
+	// both the pinned driver's SQLite 3.53.3 and a 3.51.0 sqlite3 CLI).
+	`
+ALTER TABLE pr_revision DROP COLUMN others_approved;
+ALTER TABLE pr_revision DROP COLUMN others_approved_at;
+ALTER TABLE pr_revision DROP COLUMN my_review_state;
+ALTER TABLE pr_revision DROP COLUMN reviewed_at;
 `,
 }
 

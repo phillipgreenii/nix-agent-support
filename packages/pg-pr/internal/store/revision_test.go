@@ -315,29 +315,3 @@ func TestRevision_FKCascadeOnPRDelete(t *testing.T) {
 		t.Errorf("FK cascade: expected 0 revisions after PR delete, got %d", len(after))
 	}
 }
-
-func TestMarkRevisionReviewed_LatestMatchingSHA(t *testing.T) {
-	ctx := context.Background()
-	db := OpenForTest(t)
-	prID := seedPR(t, db)
-	_, _, _ = db.RecordRevision(ctx, prID, "h1", "b1") // seq 1
-	_, _, _ = db.RecordRevision(ctx, prID, "h2", "b1") // seq 2
-	_, _, _ = db.RecordRevision(ctx, prID, "h1", "b1") // seq 3 (re-introduced h1)
-
-	if err := db.MarkRevisionReviewed(ctx, prID, "h1", "approved", "t"); err != nil {
-		t.Fatalf("mark: %v", err)
-	}
-	revs, _ := db.ListRevisions(ctx, prID)
-	// seq 3 (latest h1) is marked; seq 1 (older h1) is not.
-	if revs[2].MyReviewState != "approved" || revs[2].ReviewedAt != "t" {
-		t.Fatalf("latest h1 not marked: %+v", revs[2])
-	}
-	if revs[0].MyReviewState != "" {
-		t.Fatalf("older h1 should be untouched: %+v", revs[0])
-	}
-
-	// No matching SHA -> no-op (no error).
-	if err := db.MarkRevisionReviewed(ctx, prID, "nope", "approved", "t"); err != nil {
-		t.Fatalf("no-match should be no-op: %v", err)
-	}
-}

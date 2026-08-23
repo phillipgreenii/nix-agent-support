@@ -45,12 +45,9 @@ type submittedReview struct {
 	// Dismissed marks a review the code host reported as DISMISSED. State is
 	// "approved" for such a review (the host does not report what it said
 	// before the dismissal) and it lands in the per-approver table as a STALE
-	// approval — never dropped (INV-APPROVAL-3, pg2-4dz88.1.7).
-	//
-	// It MUST NOT feed the legacy single-slot markers
-	// (pr_revision.my_review_state / others_approved): those carry no
-	// staleness of their own, so a dismissed review written there would read
-	// as a CURRENT approval. ingestFeedbackToStore skips them accordingly.
+	// approval — never dropped (INV-APPROVAL-3, pg2-4dz88.1.7). recordApproval
+	// routes a Dismissed review to SetDismissedApproval so it lands stale
+	// rather than current.
 	Dismissed bool
 }
 
@@ -110,12 +107,10 @@ func mySubmittedReviews(reviews []api.Review, self string) []submittedReview {
 // hook" and is not returned. State is always "approved" for the entries
 // returned; a DISMISSED teammate review is returned with Dismissed set — a
 // STALE approval, never an absent one (INV-APPROVAL-3, pg2-4dz88.1.7) — and
-// its caller MUST keep it out of the others_approved marker, which cannot
-// express staleness.
+// recordApproval routes it to SetDismissedApproval accordingly.
 //
 // See othersChangesRequestedReviews for the CHANGES_REQUESTED counterpart
-// (pg2-4dz88.1.8), which feeds the SAME per-approver pr_approval table but
-// deliberately does NOT feed the others-approved marker this function backs.
+// (pg2-4dz88.1.8), which feeds the SAME per-approver pr_approval table.
 func othersApprovedReviews(reviews []api.Review, self string) []submittedReview {
 	var out []submittedReview
 	for _, r := range reviews {
@@ -153,9 +148,8 @@ func othersApprovedReviews(reviews []api.Review, self string) []submittedReview 
 // it MUST NOT be conflated with CHANGES_REQUESTED, so it is neither returned
 // by this function nor by othersApprovedReviews.
 //
-// Unlike othersApprovedReviews, callers MUST NOT wire this into
-// MarkRevisionOthersApproved: a teammate asking for changes does not put the
-// PR "off the hook", so that marker's semantics are unaffected by this leaf.
+// A teammate asking for changes does not put the PR "off the hook", so
+// callers MUST NOT feed these entries into the others-approved ingest loop.
 // State is always "changes-requested" for the entries returned.
 func othersChangesRequestedReviews(reviews []api.Review, self string) []submittedReview {
 	var out []submittedReview
