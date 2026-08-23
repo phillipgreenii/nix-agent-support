@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestMain points BinEnvVar at a path that cannot exist before any test in this
@@ -125,7 +126,19 @@ func TestOpenWindowErrorsWhenBinaryMissing(t *testing.T) {
 	}
 }
 
+// TestOpenWindowReportsNonZeroExit exercises the exit-detection path, not the
+// timeout path, so it widens forwardWait well past the production default:
+// the stub exits in low milliseconds under normal scheduling, but under
+// severe CPU contention observing that exit can be delayed past the 5s
+// default, which makes the timeout branch win the select and return nil
+// instead of the stub's real exit-3 error (observed 2026-08-21 under
+// concurrent nix jobs). Widening only the test's own copy of the var doesn't
+// change openWindow's production contract — see forwardWait's doc comment.
 func TestOpenWindowReportsNonZeroExit(t *testing.T) {
+	prev := forwardWait
+	t.Cleanup(func() { forwardWait = prev })
+	forwardWait = 30 * time.Second
+
 	stubChrome(t, 3)
 
 	err := openWindow([]string{"https://example.test/pull/1"})
