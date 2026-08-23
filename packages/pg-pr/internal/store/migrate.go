@@ -7,7 +7,7 @@ import (
 
 // schemaVersion is the current schema. Bump it and append a migration step
 // whenever the DDL changes. Stored in SQLite's user_version pragma.
-const schemaVersion = 10
+const schemaVersion = 11
 
 // migrations is the ordered list of DDL applied to reach schemaVersion. Index i
 // migrates user_version i -> i+1.
@@ -351,6 +351,37 @@ WHERE others_approved = 1
 	// only truthful value available for historical data.
 	`
 ALTER TABLE pr_approval ADD COLUMN dismissed INTEGER NOT NULL DEFAULT 0;
+`,
+	// v10 -> v11: per-revision approval-gate state (pg2-4dz88.2.5). Records the
+	// approval-gate's overall verdict for a revision — satisfied |
+	// partially-satisfied(n,m) | unsatisfied(0,m) | unknown — as its OWN
+	// column, distinct from ci_state: a CI suite passing does not mean an
+	// approval-policy gate is satisfied, and vice versa, so the two must be
+	// independently observable and independently stale-able. This is the
+	// STORE half only (pg2-4dz88.2's acceptance item 4); the sync write path
+	// (pg2-4dz88.2.6) and the read-seam projection (pg2-4dz88.2.8) are
+	// separate leaves.
+	//
+	// Shape mirrors this table's existing per-revision fact columns
+	// (ci_state, others_approved, ...): additive ALTER ADD COLUMN, no table
+	// rebuild needed. The state name gets a CHECK-constrained TEXT column —
+	// same vocabulary-CHECK pattern ci_state already uses — and the (n,m)
+	// pair that ONLY partially-satisfied and unsatisfied carry lives in two
+	// nullable INTEGER columns (NULL for satisfied/unknown, which never carry
+	// a pair; store.SetRevisionGateState enforces this at the write side, not
+	// just this DEFAULT). gate_state_captured_at mirrors ci_captured_at: the
+	// gate can be re-evaluated for an existing revision without a new
+	// revision being appended, so it needs its own timestamp independent of
+	// pr_revision.observed_at.
+	//
+	// Existing rows default to 'unknown' with NULL n/m — never a fabricated
+	// 'satisfied', since no gate observation exists yet for historical rows.
+	`
+ALTER TABLE pr_revision ADD COLUMN gate_state TEXT NOT NULL DEFAULT 'unknown'
+    CHECK (gate_state IN ('satisfied','partially-satisfied','unsatisfied','unknown'));
+ALTER TABLE pr_revision ADD COLUMN gate_state_n INTEGER;
+ALTER TABLE pr_revision ADD COLUMN gate_state_m INTEGER;
+ALTER TABLE pr_revision ADD COLUMN gate_state_captured_at TEXT;
 `,
 }
 

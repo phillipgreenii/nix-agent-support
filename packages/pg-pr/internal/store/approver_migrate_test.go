@@ -77,11 +77,17 @@ func TestMigrate_V9BackfillDefaultIsNoRows(t *testing.T) {
 // After OpenForTest the DB is already at the terminal schema with pr_approval
 // created (empty). Mirroring TestMigrate_V8PreservesFKChildren's technique
 // (pg2-2ozt3): dropping the (empty) pr_approval table and rolling the version
-// COUNTER back to 8 forces migrate() to re-run the v9 step against the
-// already-seeded pr_revision rows — exactly the data-bearing step of a
-// production v8->v9 upgrade. Every migration after v9 re-runs too, which is
-// harmless as long as each is additive against the table v9 just recreated
-// (v10 is: one ADD COLUMN, pg2-4dz88.1.7).
+// COUNTER back to 8 forces a re-run of the v9 step against the already-seeded
+// pr_revision rows — exactly the data-bearing step of a production v8->v9
+// upgrade. Only the v9 step is applied directly (applyMigration(db, 9,
+// migrations[8])), NOT a full migrate(): v10 (pr_approval.dismissed) was
+// harmless to replay since pr_approval was just dropped/recreated by v9, but
+// v11 (pg2-4dz88.2.5) ALTERs pr_revision — a table THIS test never drops — so
+// replaying it here would fail with "duplicate column name" against the
+// column OpenForTest's initial full migration already added. v10
+// (pr_approval.dismissed) IS safe to replay here, since v9 just
+// dropped/recreated pr_approval without that column — so both v9 and v10 are
+// applied directly, stopping short of v11.
 func TestMigrate_V9BackfillsExistingData(t *testing.T) {
 	db := OpenForTest(t) // full v9 schema present
 	prID := seedPR(t, db)
@@ -107,8 +113,11 @@ func TestMigrate_V9BackfillsExistingData(t *testing.T) {
 	if _, err := db.sql.Exec("PRAGMA user_version = 8"); err != nil {
 		t.Fatalf("roll user_version back to 8: %v", err)
 	}
-	if err := migrate(db); err != nil {
+	if err := applyMigration(db, 9, migrations[8]); err != nil {
 		t.Fatalf("re-run v9 migration over seeded data: %v", err)
+	}
+	if err := applyMigration(db, 10, migrations[9]); err != nil {
+		t.Fatalf("re-run v10 migration (pr_approval.dismissed) over the recreated table: %v", err)
 	}
 
 	ctx := context.Background()

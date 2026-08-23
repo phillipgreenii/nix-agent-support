@@ -189,6 +189,101 @@ func TestSetRevisionCI_DefaultsAndOverwrite(t *testing.T) {
 	}
 }
 
+// TestSetRevisionGateStateAndReads round-trips all four approval-gate states
+// — including the (n,m) pair that ONLY partially-satisfied and unsatisfied
+// carry (unsatisfied(0,m) in particular: n=0 is a MEANINGFUL reading for that
+// state, not an absent one, so it must round-trip as 0, not NULL) — through a
+// t.TempDir() store via OpenForTest/SetRevisionGateState/ListRevisions.
+func TestSetRevisionGateStateAndReads(t *testing.T) {
+	ctx := context.Background()
+	db := OpenForTest(t)
+	prID := seedPR(t, db)
+	r1, _, err := db.RecordRevision(ctx, prID, "h1", "b1")
+	if err != nil {
+		t.Fatalf("RecordRevision: %v", err)
+	}
+
+	// A freshly-appended revision defaults to "unknown" with no (n,m) pair,
+	// mirroring the DB-level DEFAULT (see TestMigrate_V11GateStateDefaults).
+	if r1.GateState != "unknown" || r1.GateStateN != 0 || r1.GateStateM != 0 {
+		t.Fatalf("freshly-recorded revision gate state = %+v, want unknown/0/0", r1)
+	}
+
+	cases := []struct {
+		name string
+		in   GateState
+		want GateState
+	}{
+		{
+			name: "satisfied",
+			in:   GateState{State: "satisfied", CapturedAt: "t1"},
+			want: GateState{State: "satisfied", N: 0, M: 0, CapturedAt: "t1"},
+		},
+		{
+			name: "partially-satisfied",
+			in:   GateState{State: "partially-satisfied", N: 2, M: 5, CapturedAt: "t2"},
+			want: GateState{State: "partially-satisfied", N: 2, M: 5, CapturedAt: "t2"},
+		},
+		{
+			// unsatisfied(0,m): n=0 is a real, meaningful count and must
+			// round-trip as 0 (never NULL/absent).
+			name: "unsatisfied",
+			in:   GateState{State: "unsatisfied", N: 0, M: 3, CapturedAt: "t3"},
+			want: GateState{State: "unsatisfied", N: 0, M: 3, CapturedAt: "t3"},
+		},
+		{
+			name: "unknown",
+			in:   GateState{State: "unknown", CapturedAt: "t4"},
+			want: GateState{State: "unknown", N: 0, M: 0, CapturedAt: "t4"},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := db.SetRevisionGateState(ctx, r1.ID, tc.in); err != nil {
+				t.Fatalf("SetRevisionGateState(%+v): %v", tc.in, err)
+			}
+			latest, err := db.LatestRevision(ctx, prID)
+			if err != nil || latest == nil {
+				t.Fatalf("LatestRevision: %+v err=%v", latest, err)
+			}
+			got := GateState{
+				State: latest.GateState, N: latest.GateStateN, M: latest.GateStateM,
+				CapturedAt: latest.GateStateCapturedAt,
+			}
+			if got != tc.want {
+				t.Fatalf("round trip %s: got %+v, want %+v", tc.name, got, tc.want)
+			}
+		})
+	}
+
+	// satisfied/unknown ignore a passed (n,m) pair and persist NULL (read
+	// back as 0), even when the caller mistakenly supplies non-zero values —
+	// those two states never carry the pair.
+	if err := db.SetRevisionGateState(ctx, r1.ID, GateState{State: "satisfied", N: 9, M: 9}); err != nil {
+		t.Fatalf("SetRevisionGateState(satisfied with n/m): %v", err)
+	}
+	latest, err := db.LatestRevision(ctx, prID)
+	if err != nil || latest == nil {
+		t.Fatalf("LatestRevision: %+v err=%v", latest, err)
+	}
+	if latest.GateStateN != 0 || latest.GateStateM != 0 {
+		t.Errorf("satisfied with n/m supplied: got n=%d m=%d, want both 0 (NULL ignored)", latest.GateStateN, latest.GateStateM)
+	}
+
+	// Empty State defaults to "unknown", mirroring CIRollup's "" -> "none".
+	if err := db.SetRevisionGateState(ctx, r1.ID, GateState{}); err != nil {
+		t.Fatalf("SetRevisionGateState(empty): %v", err)
+	}
+	latest, err = db.LatestRevision(ctx, prID)
+	if err != nil || latest == nil {
+		t.Fatalf("LatestRevision: %+v err=%v", latest, err)
+	}
+	if latest.GateState != "unknown" {
+		t.Errorf("empty GateState.State: got %q, want \"unknown\"", latest.GateState)
+	}
+}
+
 func TestRevision_FKCascadeOnPRDelete(t *testing.T) {
 	ctx := context.Background()
 	db := OpenForTest(t)

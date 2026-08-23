@@ -42,19 +42,39 @@ type Revision struct {
 	// OthersApprovedAt is the timestamp of the recorded teammate approval; ""
 	// when NULL (no teammate approval observed at this head yet).
 	OthersApprovedAt string
+	// GateState is the approval-gate's overall verdict for this revision —
+	// "satisfied" | "partially-satisfied" | "unsatisfied" | "unknown"
+	// (schema v11, pg2-4dz88.2.5). Distinct from CIState: a CI suite passing
+	// does not mean an approval-gate policy is satisfied, and vice versa.
+	// "unknown" until SetRevisionGateState has actually recorded an
+	// observation for this revision.
+	GateState string
+	// GateStateN and GateStateM are the gate's satisfied/total counts, e.g.
+	// partially-satisfied(n,m) or unsatisfied(0,m). Meaningful ONLY when
+	// GateState is "partially-satisfied" or "unsatisfied" — SetRevisionGateState
+	// persists them as NULL (read back here as 0) for "satisfied"/"unknown",
+	// which never carry the pair.
+	GateStateN, GateStateM int
+	// GateStateCapturedAt is when the gate state was last observed; "" when
+	// NULL. Mirrors CICapturedAt: the gate can be re-evaluated for an
+	// existing revision without a new revision being appended.
+	GateStateCapturedAt string
 }
 
 const revisionColumns = `id, pr_id, seq, head_sha, COALESCE(base_sha,''),
 	observed_at, last_seen_at, ci_state, ci_passed, ci_failed, ci_pending,
 	COALESCE(ci_captured_at,''), COALESCE(reviewed_at,''), COALESCE(my_review_state,''),
-	COALESCE(reviewed_by_agent_at,''), others_approved, COALESCE(others_approved_at,'')`
+	COALESCE(reviewed_by_agent_at,''), others_approved, COALESCE(others_approved_at,''),
+	gate_state, COALESCE(gate_state_n,0), COALESCE(gate_state_m,0),
+	COALESCE(gate_state_captured_at,'')`
 
 func scanRevision(s rowScanner) (Revision, error) {
 	var r Revision
 	err := s.Scan(&r.ID, &r.PRID, &r.Seq, &r.HeadSHA, &r.BaseSHA,
 		&r.ObservedAt, &r.LastSeenAt, &r.CIState, &r.CIPassed, &r.CIFailed,
 		&r.CIPending, &r.CICapturedAt, &r.ReviewedAt, &r.MyReviewState,
-		&r.ReviewedByAgentAt, &r.OthersApproved, &r.OthersApprovedAt)
+		&r.ReviewedByAgentAt, &r.OthersApproved, &r.OthersApprovedAt,
+		&r.GateState, &r.GateStateN, &r.GateStateM, &r.GateStateCapturedAt)
 	return r, err
 }
 
@@ -109,6 +129,7 @@ func (db *DB) RecordRevision(ctx context.Context, prID int64, headSHA, baseSHA s
 		result = Revision{
 			ID: id, PRID: prID, Seq: seq, HeadSHA: headSHA,
 			BaseSHA: baseSHA, ObservedAt: now, LastSeenAt: now, CIState: "none",
+			GateState: "unknown",
 		}
 		return nil
 	})
@@ -139,6 +160,56 @@ func (db *DB) SetRevisionCI(ctx context.Context, revisionID int64, r CIRollup) e
 		WHERE id=?`, state, r.Passed, r.Failed, r.Pending, capturedAt, revisionID)
 	if err != nil {
 		return fmt.Errorf("store: set revision ci %d: %w", revisionID, err)
+	}
+	return nil
+}
+
+// GateState is the approval-gate's overall verdict for a revision, persisted
+// by SetRevisionGateState and read back via the GateState* fields on Revision
+// (schema v11, pg2-4dz88.2.5). Distinct from CIRollup: a CI suite passing does
+// not mean an approval-gate policy is satisfied, and vice versa — see
+// migrate.go's v10->v11 step for the full rationale.
+type GateState struct {
+	// State is one of "satisfied" | "partially-satisfied" | "unsatisfied" |
+	// "unknown" (CHECK-constrained; see migrate.go). Empty defaults to
+	// "unknown", mirroring CIRollup.State's "" -> "none" default.
+	State string
+	// N and M are the gate's satisfied/total counts, e.g.
+	// partially-satisfied(n,m) or unsatisfied(0,m). SetRevisionGateState
+	// persists them ONLY when State is "partially-satisfied" or
+	// "unsatisfied" — the only two states that carry the pair; for
+	// "satisfied"/"unknown" they are stored as NULL regardless of what is
+	// passed here, since those states never carry a reading.
+	N, M int
+	// CapturedAt is when this verdict was observed; "" leaves the column
+	// NULL. Mirrors CIRollup.CapturedAt: the gate can be re-evaluated for an
+	// existing revision without a new revision being appended.
+	CapturedAt string
+}
+
+// SetRevisionGateState overwrites the approval-gate verdict on a revision
+// (idempotent), mirroring SetRevisionCI. N/M are written only for the two
+// states that carry the pair (see GateState.N); for "satisfied"/"unknown"
+// they are stored as NULL so a state that never observed a count can never be
+// misread as "0 of 0".
+func (db *DB) SetRevisionGateState(ctx context.Context, revisionID int64, g GateState) error {
+	state := g.State
+	if state == "" {
+		state = "unknown"
+	}
+	var n, m any
+	if state == "partially-satisfied" || state == "unsatisfied" {
+		n, m = g.N, g.M
+	}
+	var capturedAt any
+	if g.CapturedAt != "" {
+		capturedAt = g.CapturedAt
+	}
+	_, err := db.sql.ExecContext(ctx, `UPDATE pr_revision
+		SET gate_state=?, gate_state_n=?, gate_state_m=?, gate_state_captured_at=?
+		WHERE id=?`, state, n, m, capturedAt, revisionID)
+	if err != nil {
+		return fmt.Errorf("store: set revision gate state %d: %w", revisionID, err)
 	}
 	return nil
 }
