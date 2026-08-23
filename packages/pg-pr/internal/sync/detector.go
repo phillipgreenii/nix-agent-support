@@ -94,11 +94,26 @@ func buildTeamQuery(rcfg config.RepoConfig) string {
 // buildTeamQueries returns the searches whose UNION is the not-mine "to-review"
 // roster for one repo: the team-authors bucket (buildTeamQuery) plus — because
 // GitHub ANDs distinct qualifier types and so cannot OR labels/review-requested
-// into one query — a review-requested:<self> bucket and one bucket per configured
-// watch label. The broadened buckets exclude my own PRs (-author:<self>) so a PR
-// I own is never surfaced as someone-else's-to-review (it stays in the mine
-// roster and is still self-reviewed). With no self login the broadened buckets
-// are omitted (cannot exclude-mine); only the authors bucket, if any, remains.
+// into one query — a review-requested:<self> bucket, a reviewed-by:<self>
+// bucket, and one bucket per configured watch label. The broadened buckets
+// exclude my own PRs (-author:<self>) so a PR I own is never surfaced as
+// someone-else's-to-review (it stays in the mine roster and is still
+// self-reviewed). With no self login the broadened buckets are omitted (cannot
+// exclude-mine); only the authors bucket, if any, remains.
+//
+// The reviewed-by bucket keeps a PR I have ALREADY reviewed in the roster after
+// the review request that first surfaced it is satisfied: GitHub drops a PR from
+// review-requested:<self> once I submit a review, so a conversation I am part of
+// would otherwise vanish from the to-review set while still open and still
+// waiting on my re-review. Its snapshot counterpart is
+// snapshot.MatchReasonReviewedByMe — without that re-check the PRs this bucket
+// retrieves carry no match reason and Build drops them, so the two halves MUST
+// ship together.
+//
+// Deliberately NOT retrieved: PRs I have only COMMENTED on without submitting a
+// review (`commenter:` / `involves:`). A comment is not a review commitment, and
+// those qualifiers pull in every mention and every issue-comment thread, which
+// is a much larger and noisier set than "PRs I am reviewing".
 func buildTeamQueries(rcfg config.RepoConfig, self string) []string {
 	var qs []string
 	if t := buildTeamQuery(rcfg); t != "" {
@@ -109,6 +124,7 @@ func buildTeamQueries(rcfg config.RepoConfig, self string) []string {
 	}
 	base := "is:pr is:open repo:" + rcfg.Remote
 	qs = append(qs, base+" review-requested:"+self+" -author:"+self)
+	qs = append(qs, base+" reviewed-by:"+self+" -author:"+self)
 	for _, l := range rcfg.WatchLabels {
 		qs = append(qs, base+` label:"`+l+`" -author:`+self)
 	}
@@ -295,8 +311,8 @@ func (e *Engine) fingerprintTick(ctx context.Context, mineQ, teamQ *refreshQueue
 	newPrevTeam := map[prKey]string{}
 	for _, rcfg := range cfg.Repos {
 		// The "to-review" roster is the UNION of the team-authors, review-requested,
-		// and per-label buckets (buildTeamQueries) — each a separate poll, since
-		// GitHub cannot OR those qualifier types in one query.
+		// reviewed-by, and per-label buckets (buildTeamQueries) — each a separate
+		// poll, since GitHub cannot OR those qualifier types in one query.
 		queries := buildTeamQueries(rcfg, cfg.SelfLogin)
 		if len(queries) == 0 {
 			continue

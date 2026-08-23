@@ -66,20 +66,26 @@ func TestBuildSplitsMineFromReview(t *testing.T) {
 }
 
 // TestBuild_MatchReasons: MatchReason explains why each PR is in the review set —
-// team-authored, review-requested (ReviewRequestedOfMe), one label:<name> per
-// matched watch label — and a PR matching several criteria carries all reasons.
+// team-authored, review-requested (ReviewRequestedOfMe), reviewed-by-me (a
+// submitted review of mine), one label:<name> per matched watch label — and a PR
+// matching several criteria carries all reasons.
 func TestBuild_MatchReasons(t *testing.T) {
 	reg, _ := agentregistry.New(nil)
 	in := BuilderInput{
 		Self:        "alice",
 		TeamMembers: []string{"bob"},
-		WatchLabels: []string{"team/findev", "team/jvm-guild"},
+		WatchLabels: []string{"lbl-one", "lbl-two"},
 		Registry:    reg,
 		PRs: []PRInput{
-			{PR: api.PR{Repo: "o/r", Number: 2, Author: "bob"}, Ownership: ownership.Team},                                                                // team-authored
-			{PR: api.PR{Repo: "o/r", Number: 5, Author: "zara", ReviewRequestedOfMe: true}, Ownership: ownership.Team},                                    // requested
-			{PR: api.PR{Repo: "o/r", Number: 6, Author: "yin", Labels: []string{"team/findev", "unrelated"}}, Ownership: ownership.Team},                  // labeled
-			{PR: api.PR{Repo: "o/r", Number: 7, Author: "bob", ReviewRequestedOfMe: true, Labels: []string{"team/jvm-guild"}}, Ownership: ownership.Team}, // all three
+			{PR: api.PR{Repo: "o/r", Number: 2, Author: "bob"}, Ownership: ownership.Team},                                                         // team-authored
+			{PR: api.PR{Repo: "o/r", Number: 5, Author: "zara", ReviewRequestedOfMe: true}, Ownership: ownership.Team},                             // requested
+			{PR: api.PR{Repo: "o/r", Number: 6, Author: "yin", Labels: []string{"lbl-one", "unrelated"}}, Ownership: ownership.Team},               // labeled
+			{PR: api.PR{Repo: "o/r", Number: 7, Author: "bob", ReviewRequestedOfMe: true, Labels: []string{"lbl-two"}}, Ownership: ownership.Team}, // authored+requested+labeled
+			{ // reviewed by me only
+				PR:        api.PR{Repo: "o/r", Number: 9, Author: "zara"},
+				Reviews:   []api.Review{{ID: "r1", Author: "alice", State: "COMMENTED"}},
+				Ownership: ownership.Team,
+			},
 		},
 	}
 	snap := Build(in)
@@ -89,8 +95,9 @@ func TestBuild_MatchReasons(t *testing.T) {
 	}
 	assertReasons(t, reasons[2], []string{"team-authored"})
 	assertReasons(t, reasons[5], []string{"review-requested"})
-	assertReasons(t, reasons[6], []string{"label:team/findev"})
-	assertReasons(t, reasons[7], []string{"team-authored", "review-requested", "label:team/jvm-guild"})
+	assertReasons(t, reasons[6], []string{"label:lbl-one"})
+	assertReasons(t, reasons[7], []string{"team-authored", "review-requested", "label:lbl-two"})
+	assertReasons(t, reasons[9], []string{"reviewed-by-me"})
 }
 
 func assertReasons(t *testing.T, got, want []string) {
@@ -126,16 +133,279 @@ func TestBuildExcludesReasonlessReviewPR(t *testing.T) {
 	snap := Build(BuilderInput{
 		Self:        "alice",
 		TeamMembers: []string{"bob"},
-		WatchLabels: []string{"team/findev"},
+		WatchLabels: []string{"lbl-one"},
 		Registry:    reg,
 		PRs: []PRInput{
 			// non-mine, non-draft, but NO reason: author is not on the team, not
-			// requested of me, and carries no watch label.
+			// requested of me, carries no watch label, and I have not reviewed it.
 			{PR: api.PR{Repo: "o/r", Number: 8, Author: "zara", Labels: []string{"unrelated"}}, Ownership: ownership.Team},
 		},
 	})
 	if len(snap.Team) != 0 {
 		t.Errorf("a reasonless non-mine PR must be excluded from PRs to Review; got %+v", snap.Team)
+	}
+}
+
+// TestBuildExcludesCommentedOnlyPR is the snapshot half of the FALLBACK for the
+// still-open interacted-with fork (the detector half is
+// TestFingerprintTick_CommentedOnlyPRNotRetrieved in internal/sync): a PR I have
+// only COMMENTED on — a bare comment, NO submitted review, not team-authored, not
+// requested of me, no watch label — carries no match reason and so is absent from
+// out.Team. A comment is not a review commitment, so the reviewed-by reason must
+// read p.Reviews and MUST NOT be satisfied by p.Comments.
+func TestBuildExcludesCommentedOnlyPR(t *testing.T) {
+	reg, _ := agentregistry.New(nil)
+	snap := Build(BuilderInput{
+		Self:        "alice",
+		TeamMembers: []string{"bob"},
+		WatchLabels: []string{"lbl-one"},
+		Registry:    reg,
+		PRs: []PRInput{{
+			PR: api.PR{Repo: "o/r", Number: 15, Author: "zara", Labels: []string{"unrelated"}},
+			// A top-level comment of mine, and NO review at all.
+			Comments:  []api.Comment{{Author: "alice", Body: "a passing thought"}},
+			Ownership: ownership.Team,
+		}},
+	})
+	if len(snap.Team) != 0 {
+		t.Errorf("a commented-only PR must be absent from PRs to Review; got %+v", snap.Team)
+	}
+}
+
+// reviewedByInput is the minimal "only qualifier is my own submitted review"
+// PRInput: non-draft, author not on the team, review not requested of me, no
+// watch label. state is the GitHub review state under test.
+func reviewedByInput(state string) BuilderInput {
+	reg, _ := agentregistry.New(nil)
+	return BuilderInput{
+		Self:        "alice",
+		TeamMembers: []string{"bob"},
+		WatchLabels: []string{"lbl-one"},
+		Registry:    reg,
+		PRs: []PRInput{{
+			PR:        api.PR{Repo: "o/r", Number: 12, Author: "zara", Title: "reviewed", URL: "u12", Labels: []string{"unrelated"}},
+			Reviews:   []api.Review{{ID: "r1", Author: "alice", State: state}},
+			Ownership: ownership.Team,
+		}},
+	}
+}
+
+// TestBuildAdmitsReviewedByMeOnly is the test that stops the reviewed-by
+// retrieval bucket shipping INERT. The detector's reviewed-by:<self> bucket
+// enqueues PRs I have already reviewed, but a PR retrieved ONLY that way carries
+// no team-authored / review-requested / watch-label reason — so without the
+// matching builder re-check, Build's `len(reasons) > 0` admission guard silently
+// drops it and the new bucket buys nothing.
+//
+// Both states that mean "I have a submitted review that still holds" must admit:
+// APPROVED and CHANGES_REQUESTED are commitments, and COMMENTED is a submitted
+// review too (a review event, unlike a bare comment).
+func TestBuildAdmitsReviewedByMeOnly(t *testing.T) {
+	for _, state := range []string{"APPROVED", "CHANGES_REQUESTED", "COMMENTED"} {
+		t.Run(state, func(t *testing.T) {
+			snap := Build(reviewedByInput(state))
+			if len(snap.Team) != 1 {
+				t.Fatalf("a PR whose only qualifier is my %s review must be admitted to Team; got %+v", state, snap.Team)
+			}
+			row := snap.Team[0]
+			if row.Number != 12 {
+				t.Errorf("wrong PR admitted: %+v", row)
+			}
+			assertReasons(t, row.MatchReason, []string{MatchReasonReviewedByMe})
+		})
+	}
+}
+
+// TestBuildReviewedByMeIgnoresDismissedAndPending pins the boundary of the
+// reviewed-by definition. DISMISSED is where this predicate deliberately
+// DIVERGES from internal/sync/revision.go's mySubmittedReviews, which keeps a
+// dismissed review as a STALE approval (INV-APPROVAL-3) because the approval
+// record must remember the approver DID approve. Here the question is whether my
+// review still HOLDS the PR in the review set, and a dismissed one does not — so
+// dismissal is this reason's exit path. PENDING was never submitted at all.
+func TestBuildReviewedByMeIgnoresDismissedAndPending(t *testing.T) {
+	for _, state := range []string{"DISMISSED", "PENDING"} {
+		t.Run(state, func(t *testing.T) {
+			snap := Build(reviewedByInput(state))
+			if len(snap.Team) != 0 {
+				t.Errorf("a %s review must NOT carry the reviewed-by reason; got %+v", state, snap.Team)
+			}
+		})
+	}
+}
+
+// TestBuildReviewedByMeRequiresExactLogin: the reviewer-author comparison is an
+// EXACT GitHub-login match, matching internal/sync/refresh.go's
+// reviewRequestedOfSelf — never case-insensitive and never a substring. A bot
+// whose login merely CONTAINS mine ("alice[bot]"), or differs only in case
+// ("Alice"), is a different reviewer, so neither admits the PR. Empty self
+// likewise matches nothing.
+func TestBuildReviewedByMeRequiresExactLogin(t *testing.T) {
+	for _, reviewer := range []string{"alice[bot]", "Alice", "alicia", "ali"} {
+		t.Run(reviewer, func(t *testing.T) {
+			in := reviewedByInput("APPROVED")
+			in.PRs[0].Reviews[0].Author = reviewer
+			if snap := Build(in); len(snap.Team) != 0 {
+				t.Errorf("reviewer %q must not match self %q; got %+v", reviewer, in.Self, snap.Team)
+			}
+		})
+	}
+	t.Run("empty self", func(t *testing.T) {
+		in := reviewedByInput("APPROVED")
+		in.Self = ""
+		// The review author stays "alice"; with no configured self login there is
+		// nothing to compare against, so the reason must not fire.
+		if snap := Build(in); len(snap.Team) != 0 {
+			t.Errorf("empty self must match no reviewer; got %+v", snap.Team)
+		}
+	})
+	// The case the empty-self guard actually buys: a review whose AUTHOR is also
+	// empty — a ghost/deleted account, or a provider that left Author unpopulated.
+	// Without the guard, "" == "" matches and an unrelated PR is admitted to the
+	// review set on a review that is not mine. Exact-match alone does NOT save us
+	// here, which is why the guard is a separate early return.
+	t.Run("empty self and empty review author", func(t *testing.T) {
+		in := reviewedByInput("APPROVED")
+		in.Self = ""
+		in.PRs[0].Reviews[0].Author = ""
+		if snap := Build(in); len(snap.Team) != 0 {
+			t.Errorf("an empty self must not match an empty review author; got %+v", snap.Team)
+		}
+	})
+}
+
+// TestBuildReviewedByMeCombinesWithTeamAuthored: a PR that is BOTH team-authored
+// and reviewed by me yields ONE row carrying BOTH reasons — the reasons are a
+// union on a single row, not one row per reason.
+func TestBuildReviewedByMeCombinesWithTeamAuthored(t *testing.T) {
+	reg, _ := agentregistry.New(nil)
+	snap := Build(BuilderInput{
+		Self:        "alice",
+		TeamMembers: []string{"bob"},
+		Registry:    reg,
+		PRs: []PRInput{{
+			PR:        api.PR{Repo: "o/r", Number: 13, Author: "bob"},
+			Reviews:   []api.Review{{ID: "r1", Author: "alice", State: "CHANGES_REQUESTED"}},
+			Ownership: ownership.Team,
+		}},
+	})
+	if len(snap.Team) != 1 {
+		t.Fatalf("a doubly-qualified PR must produce exactly ONE row; got %+v", snap.Team)
+	}
+	assertReasons(t, snap.Team[0].MatchReason,
+		[]string{MatchReasonTeamAuthored, MatchReasonReviewedByMe})
+}
+
+// TestBuildMyOwnReviewedPRStaysMine: exclude-mine applies to the reviewed-by
+// reason exactly as it does to the detector's -author:<self> bucket. A PR I
+// authored AND reviewed myself is Mine, never the review set — otherwise
+// self-reviewing my own PR would surface it as someone-else's-to-review. Both
+// halves are asserted in the same test: absent from Team, present in Mine.
+func TestBuildMyOwnReviewedPRStaysMine(t *testing.T) {
+	reg, _ := agentregistry.New(nil)
+	snap := Build(BuilderInput{
+		Self:        "alice",
+		TeamMembers: []string{"bob"},
+		Registry:    reg,
+		PRs: []PRInput{{
+			PR:        api.PR{Repo: "o/r", Number: 14, Author: "alice", Title: "mine", URL: "u14"},
+			Reviews:   []api.Review{{ID: "r1", Author: "alice", State: "APPROVED"}},
+			Ownership: ownership.Mine,
+		}},
+	})
+	if len(snap.Team) != 0 {
+		t.Errorf("my own self-reviewed PR must be absent from the review set; got %+v", snap.Team)
+	}
+	if len(snap.Mine) != 1 || snap.Mine[0].Number != 14 {
+		t.Errorf("my own self-reviewed PR must be present in Mine; got %+v", snap.Mine)
+	}
+}
+
+// TestBuildReviewedByMeExitOnDismissal is the EXIT rule for the new reason,
+// mirroring TestBuildExcludesReasonlessReviewPR's self-correcting-membership
+// guard. Build the SAME input twice, changing ONLY the review state from
+// COMMENTED to DISMISSED: the row appears on the first build and is GONE on the
+// second. Membership is recomputed from live facts on every Build — there is no
+// timer and no persisted "seen" state, so the removal happens on the very next
+// rebuild.
+//
+// The second half is the merge-request BEAD lifecycle (decided fact #2): losing
+// the qualifier removes the dashboard ROW ONLY and MUST NOT close or otherwise
+// mutate the PR's bead. Like the precedent, this needs no fakes or mocks —
+// snapshot.Build is a PURE function whose entire contract is
+// BuilderInput -> *Snapshot, so the assertion is structural: the input (its
+// BeadsDeps included) is unchanged by the call, and BuilderInput/PRInput expose
+// no func, channel, or client interface through which Build could reach a bead
+// at all. Bead closure is driven solely by the PR closing or merging
+// (internal/beadsbridge's EventPRClosed / EventPRMerged).
+func TestBuildReviewedByMeExitOnDismissal(t *testing.T) {
+	in := reviewedByInput("COMMENTED")
+	// Give the PR a merge-request bead dep so a mutation of bead state would be
+	// observable in the input after the build.
+	in.PRs[0].BeadsDeps = []beads.DepNode{
+		{ID: "mr-12", Title: "merge request", Status: "open"},
+	}
+	pristine := deepCopyInput(t, in)
+
+	if snap := Build(in); len(snap.Team) != 1 || snap.Team[0].Number != 12 {
+		t.Fatalf("with a COMMENTED review the row must be present; got %+v", snap.Team)
+	}
+
+	// SAME input, ONLY the review state changes: the qualifier is gone.
+	in.PRs[0].Reviews[0].State = "DISMISSED"
+	if snap := Build(in); len(snap.Team) != 0 {
+		t.Errorf("after the review is dismissed the row must disappear on the next rebuild; got %+v", snap.Team)
+	}
+	// Removing the review entirely is the same exit.
+	in.PRs[0].Reviews = nil
+	if snap := Build(in); len(snap.Team) != 0 {
+		t.Errorf("after the review is removed the row must disappear; got %+v", snap.Team)
+	}
+
+	// --- bead lifecycle: the row disappeared, the bead did not change ---
+	in.PRs[0].Reviews = pristine.PRs[0].Reviews // restore the only field we mutated
+	if !reflect.DeepEqual(in, pristine) {
+		t.Errorf("Build mutated its input:\n got=%+v\nwant=%+v", in, pristine)
+	}
+	assertNoIODependency(t, reflect.TypeOf(BuilderInput{}))
+	assertNoIODependency(t, reflect.TypeOf(PRInput{}))
+}
+
+// deepCopyInput round-trips a BuilderInput through JSON-independent manual copy
+// of the fields the exit test mutates, so the pristine comparison is against a
+// value Build cannot alias.
+func deepCopyInput(t *testing.T, in BuilderInput) BuilderInput {
+	t.Helper()
+	out := in
+	out.PRs = make([]PRInput, len(in.PRs))
+	copy(out.PRs, in.PRs)
+	for i := range out.PRs {
+		out.PRs[i].Reviews = append([]api.Review(nil), in.PRs[i].Reviews...)
+		out.PRs[i].BeadsDeps = append([]beads.DepNode(nil), in.PRs[i].BeadsDeps...)
+	}
+	return out
+}
+
+// assertNoIODependency proves structurally that Build cannot perform IO — and so
+// cannot close or mutate a bead — by checking the input struct carries only DATA.
+// A func, channel, or interface field would be a channel through which a bead
+// client (or any other side effect) could be injected; the sole pointer allowed
+// is the read-only *agentregistry.Registry. If a future change adds such a field,
+// this fails and the bead-lifecycle guarantee must be re-argued deliberately.
+func assertNoIODependency(t *testing.T, typ reflect.Type) {
+	t.Helper()
+	for i := 0; i < typ.NumField(); i++ {
+		f := typ.Field(i)
+		switch f.Type.Kind() {
+		case reflect.Func, reflect.Chan, reflect.Interface, reflect.UnsafePointer:
+			t.Errorf("%s.%s is a %s: Build must take only data, never an injectable dependency",
+				typ.Name(), f.Name, f.Type.Kind())
+		case reflect.Pointer:
+			if f.Type != reflect.TypeOf(&agentregistry.Registry{}) {
+				t.Errorf("%s.%s is an unexpected pointer (%s); only *agentregistry.Registry is allowed",
+					typ.Name(), f.Name, f.Type)
+			}
+		}
 	}
 }
 

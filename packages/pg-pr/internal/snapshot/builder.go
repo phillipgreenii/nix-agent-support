@@ -61,20 +61,69 @@ type BuilderInput struct {
 const (
 	MatchReasonTeamAuthored    = "team-authored"
 	MatchReasonReviewRequested = "review-requested"
+	// MatchReasonReviewedByMe marks a PR I have already submitted a review on.
+	// It is the re-checkable counterpart of the detector's reviewed-by:<self>
+	// retrieval bucket (internal/sync/detector.go's buildTeamQueries): GitHub
+	// drops a PR from review-requested:<self> once I review it, so without this
+	// reason a PR I am actively reviewing loses its last match reason and Build
+	// drops it from the review set while it is still open and still waiting on me.
+	MatchReasonReviewedByMe = "reviewed-by-me"
 	// MatchReasonLabelPrefix is prepended to each matched watch-label name, e.g.
-	// "label:team/findev".
+	// "label:lbl-one".
 	MatchReasonLabelPrefix = "label:"
 )
 
+// selfSubmittedReviewStates are the review states that count as "I have
+// reviewed this PR" for MatchReasonReviewedByMe.
+//
+// DISMISSED and PENDING are deliberately absent, which is where this predicate
+// DIVERGES from internal/sync/revision.go's mySubmittedReviews: that mapping
+// keeps a DISMISSED review as a STALE approval (INV-APPROVAL-3) because the
+// approval record must remember that the approver DID approve. Here the question
+// is whether my review still holds the PR in the review set, and a dismissed
+// review no longer does — so a dismissal is the exit path this reason needs
+// (mirroring how a removed label or a satisfied review request drops a PR out).
+// A PENDING review has not been submitted at all.
+var selfSubmittedReviewStates = map[string]struct{}{
+	"APPROVED":          {},
+	"CHANGES_REQUESTED": {},
+	"COMMENTED":         {},
+}
+
+// hasSubmittedReviewBySelf reports whether self has a submitted review on the
+// PR in one of selfSubmittedReviewStates. The author comparison is an EXACT
+// GitHub-login match, matching internal/sync/refresh.go's reviewRequestedOfSelf
+// — never case-insensitive or substring, so a bot login that merely contains
+// self's login (or differs only in case) is a different reviewer. Empty self =>
+// false (nothing to compare against).
+func hasSubmittedReviewBySelf(reviews []api.Review, self string) bool {
+	if self == "" {
+		return false
+	}
+	for _, r := range reviews {
+		if r.Author != self {
+			continue
+		}
+		if _, ok := selfSubmittedReviewStates[r.State]; ok {
+			return true
+		}
+	}
+	return false
+}
+
 // matchReasons returns why PR p is in the review set: team-authored, requested
-// of me, and/or carrying configured watch labels (one reason per matched label).
-func matchReasons(p PRInput, team map[string]struct{}, watchLabels []string) []string {
+// of me, already reviewed by me, and/or carrying configured watch labels (one
+// reason per matched label).
+func matchReasons(p PRInput, team map[string]struct{}, watchLabels []string, self string) []string {
 	var reasons []string
 	if isTeam(p.PR.Author, team) {
 		reasons = append(reasons, MatchReasonTeamAuthored)
 	}
 	if p.PR.ReviewRequestedOfMe {
 		reasons = append(reasons, MatchReasonReviewRequested)
+	}
+	if hasSubmittedReviewBySelf(p.Reviews, self) {
+		reasons = append(reasons, MatchReasonReviewedByMe)
 	}
 	if len(watchLabels) > 0 && len(p.PR.Labels) > 0 {
 		watch := make(map[string]struct{}, len(watchLabels))
@@ -117,7 +166,7 @@ func Build(in BuilderInput) *Snapshot {
 	// number, per snapshotModel.sortedInputs) among themselves.
 	var mergedMine []MineRow
 	for _, p := range in.PRs {
-		reasons := matchReasons(p, teamSet, in.WatchLabels)
+		reasons := matchReasons(p, teamSet, in.WatchLabels, in.Self)
 		excl := excluders[p.PR.Repo]
 		switch {
 		case p.Ownership.ActsAsMine():
@@ -141,13 +190,18 @@ func Build(in BuilderInput) *Snapshot {
 		case !p.PR.Draft && len(reasons) > 0:
 			// "PRs to Review": a non-mine, non-draft PR that STILL qualifies — it
 			// carries at least one live match reason (team-authored ∪ review-requested
-			// ∪ watch label). Requiring a reason here — rather than admitting every
-			// non-draft non-mine PR — makes membership self-correcting: a PR that
-			// ENTERED the set (labeled/requested) then lost the qualifier while still
-			// open+non-draft drops out instead of lingering with an empty MatchReason
-			// (pg2-ynhr.13 B5 review #1). Reasons are still SOURCED from ingest
-			// (detector.go's buckets, B3); the builder only re-checks they hold. Others'
-			// drafts and now-reasonless PRs fall through and are excluded.
+			// ∪ reviewed-by-me ∪ watch label). Requiring a reason here — rather than
+			// admitting every non-draft non-mine PR — makes membership self-correcting:
+			// a PR that ENTERED the set (labeled/requested/reviewed) then lost the
+			// qualifier while still open+non-draft drops out instead of lingering with
+			// an empty MatchReason (pg2-ynhr.13 B5 review #1). That drop-out is a pure
+			// recomputation on the NEXT Build — there is no timer and no persisted
+			// "seen" state, and it does NOT close the PR's merge-request bead: bead
+			// closure is driven solely by the PR itself closing or merging
+			// (internal/beadsbridge's EventPRClosed/EventPRMerged), never by a
+			// match-reason change. Reasons are still SOURCED from ingest (detector.go's
+			// buckets, B3); the builder only re-checks they hold. Others' drafts and
+			// now-reasonless PRs fall through and are excluded.
 			out.Team = append(out.Team, buildTeamRow(p, in.Registry, in.Self, reasons, excl))
 		}
 	}

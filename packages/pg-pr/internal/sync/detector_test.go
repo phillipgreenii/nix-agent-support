@@ -2,6 +2,8 @@ package sync
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -9,6 +11,7 @@ import (
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/telemetry"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/beads"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/provider/vcs"
 )
 
@@ -149,6 +152,175 @@ func TestFingerprintTick_ResumesAfterReset(t *testing.T) {
 	}
 	if got := testutil.ToFloat64(telemetry.GraphQLRatePaused); got != 0 {
 		t.Errorf("pause gauge should clear to 0 after resume, got %v", got)
+	}
+}
+
+// perQueryFingerprintVCS answers each fingerprint query independently, so a test
+// can truncate or fail ONE bucket (e.g. reviewed-by) while the others succeed.
+// byQuery maps a query substring to that bucket's result; errQuery names the
+// substring whose poll returns pollErr instead. Unmatched queries return an
+// empty, untruncated result. queries records every query issued, in order.
+type perQueryFingerprintVCS struct {
+	fakeFingerprintVCS
+	byQuery  map[string]vcs.FingerprintResult
+	errQuery string
+	pollErr  error
+	queries  []string
+}
+
+func (f *perQueryFingerprintVCS) FingerprintPRs(_ context.Context, query string) (vcs.FingerprintResult, error) {
+	f.queries = append(f.queries, query)
+	if f.errQuery != "" && strings.Contains(query, f.errQuery) {
+		return vcs.FingerprintResult{}, f.pollErr
+	}
+	for sub, res := range f.byQuery {
+		if strings.Contains(query, sub) {
+			return res, nil
+		}
+	}
+	return vcs.FingerprintResult{}, nil
+}
+
+// newDetectorEngine builds an Engine over one repo with the given provider,
+// zeroed prev rosters, and the supplied bead client.
+func newDetectorEngine(t *testing.T, rcfg config.RepoConfig, prov VCSProvider, bd BeadClient) *Engine {
+	t.Helper()
+	e, err := New(Deps{
+		Cfg:   &config.Config{SelfLogin: "me", Repos: []config.RepoConfig{rcfg}},
+		VCS:   map[string]VCSProvider{"github": prov},
+		Beads: bd,
+		Now:   func() time.Time { return time.Date(2026, 5, 20, 12, 0, 0, 0, time.UTC) },
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	e.prevMine = map[prKey]string{}
+	e.prevTeam = map[prKey]string{}
+	return e
+}
+
+// teamBeadClient is a BeadClient reporting one open TEAM merge-request bead
+// (author is a teammate, so openBeadsForGroup files it under team). It is the
+// "disappeared" candidate the mass-close guard must protect.
+type teamBeadClient struct {
+	repo   string
+	number int
+}
+
+func (c teamBeadClient) ListMergeRequests(context.Context, bool) ([]beads.MergeRequest, error) {
+	return []beads.MergeRequest{{
+		ID:     "mr-1",
+		Status: "open",
+		Fields: beads.MergeRequestFields{Repo: c.repo, PRNumber: c.number, Author: "teammate"},
+	}}, nil
+}
+
+// TestFingerprintTick_ReviewedByBucketAddsExactlyOnePoll pins the per-tick search
+// COST. The pre-leaf baseline for one repo was 1 (mine) + 1 (team-authors) +
+// 1 (review-requested) + N (watch labels); adding the reviewed-by bucket must
+// raise that by EXACTLY ONE poll — the bucket is one more search per repo per
+// tick, not one per team member or per label. Computed from the config rather
+// than hardcoded so the "+1" is the assertion, not a magic total.
+func TestFingerprintTick_ReviewedByBucketAddsExactlyOnePoll(t *testing.T) {
+	rcfg := config.RepoConfig{
+		Remote:      "o/r",
+		TeamMembers: []string{"teammate"},
+		WatchLabels: []string{"lbl-one", "lbl-two"},
+	}
+	vp := &perQueryFingerprintVCS{}
+	e := newDetectorEngine(t, rcfg, vp, noopBeads{})
+	mineQ, teamQ := newRefreshQueue(), newRefreshQueue()
+
+	e.fingerprintTick(context.Background(), mineQ, teamQ, discardLogger())
+
+	// mine + team-authors + review-requested + one per watch label.
+	baseline := 1 + 1 + 1 + len(rcfg.WatchLabels)
+	want := baseline + 1 // the reviewed-by bucket
+	if got := len(vp.queries); got != want {
+		t.Errorf("per-tick polls = %d, want %d (pre-leaf baseline %d + 1 for reviewed-by); queries=%#v",
+			got, want, baseline, vp.queries)
+	}
+	reviewedBy := 0
+	for _, q := range vp.queries {
+		if strings.Contains(q, "reviewed-by:me") {
+			reviewedBy++
+		}
+	}
+	if reviewedBy != 1 {
+		t.Errorf("expected exactly 1 reviewed-by poll per repo per tick, got %d: %#v", reviewedBy, vp.queries)
+	}
+}
+
+// TestFingerprintTick_TruncatedReviewedByBucketSuppressesDisappeared extends the
+// mass-close guard (INV-SYNC-2) to the NEW bucket: when the reviewed-by poll
+// comes back TRUNCATED, the tick's merge is incomplete, so an open team bead
+// absent from the roster MUST NOT be enqueued as "disappeared". A truncated
+// bucket is missing PRs, not evidence that they are gone.
+func TestFingerprintTick_TruncatedReviewedByBucketSuppressesDisappeared(t *testing.T) {
+	gone := prKey{Repo: "o/r", Number: 99} // open bead, in NO bucket this tick
+	vp := &perQueryFingerprintVCS{byQuery: map[string]vcs.FingerprintResult{
+		"reviewed-by:me": {PRs: []vcs.PRFingerprint{fp("o/r", 50, "a")}, Truncated: true},
+	}}
+	e := newDetectorEngine(t, config.RepoConfig{Remote: "o/r", TeamMembers: []string{"teammate"}},
+		vp, teamBeadClient{repo: "o/r", number: gone.Number})
+	mineQ, teamQ := newRefreshQueue(), newRefreshQueue()
+
+	before := testutil.ToFloat64(telemetry.FingerprintChangesTotal.WithLabelValues("team", "disappeared"))
+	e.fingerprintTick(context.Background(), mineQ, teamQ, discardLogger())
+
+	enq := drainQueue(teamQ)
+	if enq[gone] {
+		t.Errorf("a truncated reviewed-by bucket must NOT mass-close (INV-SYNC-2); enqueued=%+v", enq)
+	}
+	if after := testutil.ToFloat64(telemetry.FingerprintChangesTotal.WithLabelValues("team", "disappeared")); after != before {
+		t.Errorf("truncated bucket must emit no disappeared reason: %v -> %v", before, after)
+	}
+	// The bucket's own PRs are still processed — truncation suppresses only the
+	// disappeared inference, never the roster itself.
+	if !enq[prKey{Repo: "o/r", Number: 50}] {
+		t.Errorf("a truncated bucket's returned PRs must still be enqueued; enqueued=%+v", enq)
+	}
+}
+
+// TestFingerprintTick_FailedReviewedByPollKeepsPriorRoster: a reviewed-by poll
+// that ERRORS (not merely truncates) has the same consequence — the merge stays
+// incomplete, no "disappeared" is inferred, and the repo's prior roster entries
+// are carried forward so a PR that was only in the failed bucket is not
+// re-detected as new on the next tick (INV-SYNC-2).
+func TestFingerprintTick_FailedReviewedByPollKeepsPriorRoster(t *testing.T) {
+	gone := prKey{Repo: "o/r", Number: 99}
+	onlyInFailedBucket := prKey{Repo: "o/r", Number: 60}
+	vp := &perQueryFingerprintVCS{
+		byQuery: map[string]vcs.FingerprintResult{
+			"author:teammate": {PRs: []vcs.PRFingerprint{fp("o/r", 61, "b")}},
+		},
+		errQuery: "reviewed-by:me",
+		pollErr:  errors.New("boom"),
+	}
+	e := newDetectorEngine(t, config.RepoConfig{Remote: "o/r", TeamMembers: []string{"teammate"}},
+		vp, teamBeadClient{repo: "o/r", number: gone.Number})
+	// Prior tick knew about a PR that only the (now failing) reviewed-by bucket
+	// returns; its hash must survive this tick.
+	priorHash := fingerprintHash(fp("o/r", onlyInFailedBucket.Number, "z"))
+	e.prevTeam = map[prKey]string{onlyInFailedBucket: priorHash}
+	mineQ, teamQ := newRefreshQueue(), newRefreshQueue()
+
+	before := testutil.ToFloat64(telemetry.FingerprintChangesTotal.WithLabelValues("team", "disappeared"))
+	e.fingerprintTick(context.Background(), mineQ, teamQ, discardLogger())
+
+	enq := drainQueue(teamQ)
+	if enq[gone] {
+		t.Errorf("a failed reviewed-by poll must NOT mass-close (INV-SYNC-2); enqueued=%+v", enq)
+	}
+	if after := testutil.ToFloat64(telemetry.FingerprintChangesTotal.WithLabelValues("team", "disappeared")); after != before {
+		t.Errorf("failed bucket must emit no disappeared reason: %v -> %v", before, after)
+	}
+	if got := e.prevTeam[onlyInFailedBucket]; got != priorHash {
+		t.Errorf("prior roster entry for the failed bucket must be carried forward: got %q want %q", got, priorHash)
+	}
+	// The surviving buckets still did their job.
+	if !enq[prKey{Repo: "o/r", Number: 61}] {
+		t.Errorf("a succeeding bucket's PRs must still be enqueued; enqueued=%+v", enq)
 	}
 }
 
