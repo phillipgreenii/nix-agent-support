@@ -65,6 +65,12 @@ func TestParseEnrichedPRs_RecordedFixture(t *testing.T) {
 		}
 		if c.Path != "" || c.ThreadID != "" {
 			sawThread = true
+			// Path and ThreadID are asserted independently: an OR'd check
+			// here would let either field silently regress to "" as long
+			// as the other one still carries a value.
+			if c.Path == "" {
+				t.Errorf("review-thread comment missing Path: %+v", c)
+			}
 			if c.ThreadID == "" {
 				t.Errorf("review-thread comment missing ThreadID: %+v", c)
 			}
