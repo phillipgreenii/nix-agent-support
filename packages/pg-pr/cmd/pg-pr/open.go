@@ -396,7 +396,7 @@ func init() {
 	openCmd.Flags().BoolVar(&opFlags.mine, "mine", false,
 		"Open your own PRs instead of the team's review set; defaults to all of them")
 	openCmd.Flags().StringVar(&opFlags.reason, "reason", "",
-		"Keep only PRs matched for this reason; exact or prefix (team-authored, review-requested, label:team/findev, label:)")
+		"Keep only PRs matched for this reason; exact or prefix (team-authored, review-requested, reviewed-by-me, assigned-to-me, label:team/lbl-one, label:)")
 	openCmd.Flags().StringVar(&opFlags.owner, "owner", "",
 		"Keep only PRs owned by this login")
 	openCmd.Flags().StringVar(&opFlags.notOwner, "not-owner", "",

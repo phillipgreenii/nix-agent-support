@@ -179,7 +179,7 @@ func TestGetPR_ParsesReviewRequests(t *testing.T) {
 		"number": 7, "title": "t", "state": "OPEN", "author": {"login": "zara"},
 		"reviewRequests": [
 			{"__typename": "User", "login": "phillipg"},
-			{"__typename": "Team", "name": "findev", "slug": "findev"}
+			{"__typename": "Team", "name": "core-team", "slug": "core-team"}
 		]
 	}`)
 	p := NewWithRunner(gh)

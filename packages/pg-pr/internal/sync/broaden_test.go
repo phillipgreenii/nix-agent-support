@@ -159,8 +159,8 @@ func TestMergeRosters_AllBucketsSamePR_OneEntry(t *testing.T) {
 		{PRs: []vcs.PRFingerprint{same}}, // team-authors
 		{PRs: []vcs.PRFingerprint{same}}, // review-requested
 		{PRs: []vcs.PRFingerprint{same}}, // assignee
-		{PRs: []vcs.PRFingerprint{same}}, // label:team/findev
-		{PRs: []vcs.PRFingerprint{same}}, // label:team/jvm-guild
+		{PRs: []vcs.PRFingerprint{same}}, // label:team/lbl-one
+		{PRs: []vcs.PRFingerprint{same}}, // label:team/lbl-two
 	}
 	roster, complete := mergeRosters(results)
 	if len(roster) != 1 {

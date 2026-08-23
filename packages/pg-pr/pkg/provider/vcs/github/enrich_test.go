@@ -14,7 +14,7 @@ func TestParseEnrichedPRs_RecordedFixture(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read fixture: %v", err)
 	}
-	got, err := parseEnrichedPRs(raw, "ZR-Private/ziprecruiter")
+	got, err := parseEnrichedPRs(raw, "acme/widgets")
 	if err != nil {
 		t.Fatalf("parseEnrichedPRs: %v", err)
 	}
@@ -24,8 +24,8 @@ func TestParseEnrichedPRs_RecordedFixture(t *testing.T) {
 	pr := got[0]
 
 	// PR core fields.
-	if pr.PR.Number != 91071 {
-		t.Errorf("PR.Number = %d, want 91071", pr.PR.Number)
+	if pr.PR.Number != 4242 {
+		t.Errorf("PR.Number = %d, want 4242", pr.PR.Number)
 	}
 	if pr.PR.Author == "" {
 		t.Errorf("PR.Author is empty")
@@ -33,7 +33,7 @@ func TestParseEnrichedPRs_RecordedFixture(t *testing.T) {
 	if pr.PR.State != "open" {
 		t.Errorf("PR.State = %q, want open (lowercased)", pr.PR.State)
 	}
-	if pr.PR.Repo != "ZR-Private/ziprecruiter" {
+	if pr.PR.Repo != "acme/widgets" {
 		t.Errorf("PR.Repo = %q", pr.PR.Repo)
 	}
 	if pr.PR.Branch == "" || pr.PR.Base == "" {
@@ -124,7 +124,7 @@ func TestEnrichedPRs_FakeRunner(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EnrichedPRs: %v", err)
 	}
-	if len(got) != 1 || got[0].PR.Number != 91071 {
+	if len(got) != 1 || got[0].PR.Number != 4242 {
 		t.Errorf("unexpected result: %+v", got)
 	}
 }

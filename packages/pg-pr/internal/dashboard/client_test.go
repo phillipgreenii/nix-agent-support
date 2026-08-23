@@ -37,17 +37,17 @@ func TestFetchDecodesSnapshot(t *testing.T) {
 		AgeSeconds:          1,
 		Stale:               false,
 		Team: []snapshot.TeamRow{{
-			Repo:           "ZR-Private/ziprecruiter",
-			Number:         98622,
-			Title:          "feat(fdk-nextjs): safe middleware header parsing",
-			Owner:          "bradleysmagacz",
-			URL:            "https://github.com/ZR-Private/ziprecruiter/pull/98622",
+			Repo:           "acme/widgets",
+			Number:         4242,
+			Title:          "feat(web): safe middleware header parsing",
+			Owner:          "teammate",
+			URL:            "https://github.com/acme/widgets/pull/4242",
 			CIStatus:       "failure",
 			HumanApproved:  true,
 			LinesChanged:   556,
 			FilesChanged:   171,
 			NeedsAttention: true,
-			MatchReason:    []string{"label:team/findev"},
+			MatchReason:    []string{"label:team/lbl-one"},
 		}},
 	}
 	raw, err := json.Marshal(want)
@@ -62,8 +62,8 @@ func TestFetchDecodesSnapshot(t *testing.T) {
 	if len(got.Team) != 1 {
 		t.Fatalf("len(Team) = %d, want 1", len(got.Team))
 	}
-	if got.Team[0].Number != 98622 {
-		t.Errorf("Team[0].Number = %d, want 98622", got.Team[0].Number)
+	if got.Team[0].Number != 4242 {
+		t.Errorf("Team[0].Number = %d, want 4242", got.Team[0].Number)
 	}
 	if got.Team[0].URL != want.Team[0].URL {
 		t.Errorf("Team[0].URL = %q, want %q", got.Team[0].URL, want.Team[0].URL)

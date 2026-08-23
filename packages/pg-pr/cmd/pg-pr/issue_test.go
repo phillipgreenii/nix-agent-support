@@ -59,7 +59,7 @@ func TestIssueShow_HumanAutoProvider(t *testing.T) {
 		},
 	}
 	prov := &fakeIssuesProv{issue: &api.Issue{
-		ID: "ZR-42", Title: "Do the thing", State: "In Progress", URL: "https://example.com/ZR-42",
+		ID: "PROJ-42", Title: "Do the thing", State: "In Progress", URL: "https://example.com/PROJ-42",
 	}}
 	withIssueStubs(t, cfg, "owner/repo", prov)
 	isFlags.provider = ""
@@ -68,7 +68,7 @@ func TestIssueShow_HumanAutoProvider(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	rootCmd.SetOut(&stdout)
 	rootCmd.SetErr(&stderr)
-	rootCmd.SetArgs([]string{"issue", "show", "ZR-42"})
+	rootCmd.SetArgs([]string{"issue", "show", "PROJ-42"})
 
 	if err := rootCmd.Execute(); err != nil {
 		t.Fatalf("execute: %v\nstderr=%s", err, stderr.String())
@@ -76,16 +76,16 @@ func TestIssueShow_HumanAutoProvider(t *testing.T) {
 	got := stdout.String()
 	for _, want := range []string{
 		"provider: jira",
-		"id: ZR-42",
+		"id: PROJ-42",
 		"title: Do the thing",
 		"state: In Progress",
-		"url: https://example.com/ZR-42",
+		"url: https://example.com/PROJ-42",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("output missing %q:\n%s", want, got)
 		}
 	}
-	if len(prov.calls) != 1 || prov.calls[0] != "ZR-42" {
+	if len(prov.calls) != 1 || prov.calls[0] != "PROJ-42" {
 		t.Fatalf("provider calls = %+v", prov.calls)
 	}
 }
@@ -98,7 +98,7 @@ func TestIssueShow_JSON(t *testing.T) {
 		},
 	}
 	prov := &fakeIssuesProv{issue: &api.Issue{
-		ID: "ZR-1", Title: "T", State: "Open", URL: "u",
+		ID: "PROJ-1", Title: "T", State: "Open", URL: "u",
 	}}
 	withIssueStubs(t, cfg, "owner/repo", prov)
 	isFlags.provider = ""
@@ -107,7 +107,7 @@ func TestIssueShow_JSON(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	rootCmd.SetOut(&stdout)
 	rootCmd.SetErr(&stderr)
-	rootCmd.SetArgs([]string{"issue", "show", "ZR-1", "--json"})
+	rootCmd.SetArgs([]string{"issue", "show", "PROJ-1", "--json"})
 
 	if err := rootCmd.Execute(); err != nil {
 		t.Fatalf("execute: %v\nstderr=%s", err, stderr.String())
@@ -116,7 +116,7 @@ func TestIssueShow_JSON(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
 		t.Fatalf("decode: %v\n%s", err, stdout.String())
 	}
-	if got.ID != "ZR-1" {
+	if got.ID != "PROJ-1" {
 		t.Fatalf("id = %s", got.ID)
 	}
 }
@@ -227,7 +227,7 @@ func TestIssueShow_ProviderError(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	rootCmd.SetOut(&stdout)
 	rootCmd.SetErr(&stderr)
-	rootCmd.SetArgs([]string{"issue", "show", "ZR-9"})
+	rootCmd.SetArgs([]string{"issue", "show", "PROJ-9"})
 
 	err := rootCmd.Execute()
 	if err == nil {

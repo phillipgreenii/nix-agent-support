@@ -26,8 +26,8 @@ func openTestRows() []openRow {
 	return []openRow{
 		{Number: 1, Owner: "alice", URL: "u1", NeedsAttention: true, MatchReason: []string{"review-requested"}},
 		{Number: 2, Owner: "bob", URL: "u2", NeedsAttention: false, MatchReason: []string{"team-authored"}},
-		{Number: 3, Owner: "alice", URL: "u3", NeedsAttention: true, HumanApprovers: 1, MatchReason: []string{"label:team/findev"}},
-		{Number: 4, Owner: "carol", URL: "u4", NeedsAttention: true, MatchReason: []string{"label:team/jvm-guild"}},
+		{Number: 3, Owner: "alice", URL: "u3", NeedsAttention: true, HumanApprovers: 1, MatchReason: []string{"label:team/lbl-one"}},
+		{Number: 4, Owner: "carol", URL: "u4", NeedsAttention: true, MatchReason: []string{"label:team/lbl-two"}},
 	}
 }
 
@@ -62,7 +62,7 @@ func TestSelectRows(t *testing.T) {
 		{"--all keeps everything", openFlags{all: true}, []int{1, 2, 3, 4}},
 		{"--reason exact", openFlags{all: true, reason: "review-requested"}, []int{1}},
 		{"--reason prefix matches the label family", openFlags{all: true, reason: "label:"}, []int{3, 4}},
-		{"--reason prefix narrowed to one label", openFlags{all: true, reason: "label:team/findev"}, []int{3}},
+		{"--reason prefix narrowed to one label", openFlags{all: true, reason: "label:team/lbl-one"}, []int{3}},
 		{"--owner", openFlags{all: true, owner: "alice"}, []int{1, 3}},
 		{"--not-owner", openFlags{all: true, notOwner: "alice"}, []int{2, 4}},
 		{"--unapproved drops human-approved", openFlags{all: true, unapproved: true}, []int{1, 2, 4}},
@@ -136,19 +136,19 @@ func TestSelectRowsPreservesSnapshotOrder(t *testing.T) {
 
 func TestProjectRowsTeamCarriesEveryFilterableField(t *testing.T) {
 	snap := &snapshot.Snapshot{Team: []snapshot.TeamRow{{
-		Number: 98622, Owner: "bradleysmagacz", Title: "safe middleware parsing",
-		URL: "https://example.test/pull/98622", CIStatus: "failure",
+		Number: 4242, Owner: "teammate", Title: "safe middleware parsing",
+		URL: "https://example.test/pull/4242", CIStatus: "failure",
 		HumanApproved: true, AgentApproved: false,
 		HumanApprovers: 1, AgentApprovers: 0,
 		FilesChanged: 171, LinesChanged: 556,
-		NeedsAttention: true, MatchReason: []string{"label:team/findev"},
+		NeedsAttention: true, MatchReason: []string{"label:team/lbl-one"},
 	}}}
 	got := projectRows(snap, false)
 	if len(got) != 1 {
 		t.Fatalf("len = %d, want 1", len(got))
 	}
 	r := got[0]
-	if r.Number != 98622 || r.Owner != "bradleysmagacz" || r.URL != "https://example.test/pull/98622" {
+	if r.Number != 4242 || r.Owner != "teammate" || r.URL != "https://example.test/pull/4242" {
 		t.Errorf("identity fields lost: %+v", r)
 	}
 	if !r.NeedsAttention || r.HumanApprovers != 1 || r.FilesChanged != 171 || r.LinesChanged != 556 {

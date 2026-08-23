@@ -104,8 +104,8 @@ func TestNew_defaultBinaryIsJira(t *testing.T) {
 }
 
 func TestNew_respectsEnvBinaryName(t *testing.T) {
-	t.Setenv("PGPR_JIRA_BINARY", "pg-pr-issues-jira-zr")
-	if got := jiraprovider.New().Binary(); got != "pg-pr-issues-jira-zr" {
-		t.Errorf("env binary = %q, want pg-pr-issues-jira-zr", got)
+	t.Setenv("PGPR_JIRA_BINARY", "pg-pr-issues-jira-custom")
+	if got := jiraprovider.New().Binary(); got != "pg-pr-issues-jira-custom" {
+		t.Errorf("env binary = %q, want pg-pr-issues-jira-custom", got)
 	}
 }
