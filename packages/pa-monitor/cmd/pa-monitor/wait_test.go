@@ -573,6 +573,168 @@ func TestWaitUntilAgentsFinishedReportsGenuineStreamError(t *testing.T) {
 	}
 }
 
+// TestValidateConsecutiveIdleChecks is the pure-function boundary test for
+// bead pg2-e05tm: 0 and every negative value must be rejected (a streak
+// cannot reach a target below 1), while 1 — the value the DECISION comment
+// on waitUntilAgentsFinished (bead pg2-klyz7) singles out as the point where
+// the consecutiveness guarantee is vacuous — and every larger value must
+// still be accepted. This drives validateConsecutiveIdleChecks directly
+// rather than through runWaitUntilAgentsFinished, which os.Exits and so
+// cannot be exercised in-process by a normal test.
+func TestValidateConsecutiveIdleChecks(t *testing.T) {
+	for _, tc := range []struct {
+		consecutive int
+		wantErr     bool
+	}{
+		{-100, true},
+		{-1, true},
+		{0, true},
+		{1, false},
+		{2, false},
+		{3, false},
+		{100, false},
+	} {
+		err := validateConsecutiveIdleChecks(tc.consecutive)
+		if tc.wantErr && err == nil {
+			t.Errorf("validateConsecutiveIdleChecks(%d) = nil, want an error", tc.consecutive)
+		}
+		if !tc.wantErr && err != nil {
+			t.Errorf("validateConsecutiveIdleChecks(%d) = %v, want nil", tc.consecutive, err)
+		}
+	}
+}
+
+// TestWaitUntilAgentsFinishedConsecutiveIdleChecksOneExitsOnFirstIdleObservation
+// locks in the runtime behavior validateConsecutiveIdleChecks deliberately
+// leaves in place for the accepted boundary value 1: the wait must exit 0 as
+// soon as a SINGLE idle observation lands, with no debounce. This is
+// distinct from the 0/negative case, which never reaches this function at
+// all because runWaitUntilAgentsFinished rejects it first.
+func TestWaitUntilAgentsFinishedConsecutiveIdleChecksOneExitsOnFirstIdleObservation(t *testing.T) {
+	sock := waitTestSocket(t)
+	serveFakeDaemon(t, sock, &fakeWaitDaemon{push: 200 * time.Millisecond, workingN: 0})
+
+	var stderr bytes.Buffer
+	start := time.Now()
+	code := waitUntilAgentsFinished(waitParams{
+		maxWait:     30 * time.Second, // must be irrelevant to when this returns
+		consecutive: 1,
+		grace:       30 * time.Second,
+	}, &stderr)
+	elapsed := time.Since(start)
+
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0 (idle reached on the first observation); stderr: %q", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "all idle") {
+		t.Errorf("stderr = %q, want %q", stderr.String(), "all idle")
+	}
+	// Generous, but far below the 30s --maximum-wait: the expected path is a
+	// single push interval, so anything in this range proves the single
+	// observation satisfied the streak rather than the deadline ending the
+	// wait.
+	if elapsed > 10*time.Second {
+		t.Errorf("idle exit took %s: a single idle observation should satisfy --consecutive-idle-checks 1 immediately", elapsed)
+	}
+}
+
+// TestWaitUntilAgentsFinishedMaximumWaitZeroOrNegativeExitsImmediately
+// documents --maximum-wait's zero/negative behavior (see its declaration in
+// runWaitUntilAgentsFinished): the deadline is already expired at start, so
+// the wait must exit 1 (timeout) on its very first pass through the loop —
+// before ever dialing the daemon. No daemon is served on the socket at all,
+// which is the proof: if the loop dialed first, it would find nothing
+// listening and exit 2 (daemon unreachable) instead of 1.
+func TestWaitUntilAgentsFinishedMaximumWaitZeroOrNegativeExitsImmediately(t *testing.T) {
+	for _, maxWait := range []time.Duration{0, -1 * time.Second, -1 * time.Hour} {
+		t.Run(maxWait.String(), func(t *testing.T) {
+			waitTestSocket(t) // no server listens on it
+
+			var stderr bytes.Buffer
+			start := time.Now()
+			code := waitUntilAgentsFinished(waitParams{
+				maxWait:     maxWait,
+				consecutive: 3,
+				grace:       30 * time.Second,
+			}, &stderr)
+			elapsed := time.Since(start)
+
+			if code != 1 {
+				t.Fatalf("exit code = %d, want 1 (timeout: --maximum-wait %s is already expired); stderr: %q", code, maxWait, stderr.String())
+			}
+			if !strings.Contains(stderr.String(), "wait-until-agents-finished: timeout") {
+				t.Errorf("stderr = %q, want the documented timeout line", stderr.String())
+			}
+			if elapsed > 2*time.Second {
+				t.Errorf("took %s to report an already-expired deadline; want near-instant, and certainly before any dial attempt", elapsed)
+			}
+		})
+	}
+}
+
+// TestWaitUntilAgentsFinishedReconnectGraceZeroOrNegativeFailsWithoutRetry
+// documents --reconnect-grace's zero/negative behavior (see its declaration
+// in runWaitUntilAgentsFinished): a grace of zero or less skips the retry
+// loop in waitForDaemon entirely, so a daemon that disappears mid-wait must
+// fail at once with NO retry. This is deliberately distinct from
+// TestWaitUntilAgentsFinishedDaemonNeverUpFails' streak==0 "daemon
+// unreachable" path — that path never consults --reconnect-grace at all — so
+// this test first drives the streak above zero before killing the daemon,
+// and asserts the DIFFERENT ("did not return within grace") message that
+// only the grace path emits.
+func TestWaitUntilAgentsFinishedReconnectGraceZeroOrNegativeFailsWithoutRetry(t *testing.T) {
+	for _, grace := range []time.Duration{0, -1 * time.Second} {
+		t.Run(grace.String(), func(t *testing.T) {
+			sock := waitTestSocket(t)
+			d := &fakeWaitDaemon{push: 50 * time.Millisecond, workingN: 0}
+			stop := serveFakeDaemon(t, sock, d)
+
+			const maxWait = 10 * time.Second
+			type result struct {
+				code    int
+				stderr  string
+				elapsed time.Duration
+			}
+			done := make(chan result, 1)
+			start := time.Now()
+			go func() {
+				var stderr bytes.Buffer
+				code := waitUntilAgentsFinished(waitParams{
+					maxWait:     maxWait,
+					consecutive: 100, // unreachable: keeps the streak from completing
+					grace:       grace,
+				}, &stderr)
+				done <- result{code, stderr.String(), time.Since(start)}
+			}()
+
+			// Two pushes means at least one landed and was folded into the
+			// streak before the daemon goes away, which is the precondition
+			// for the grace path (rather than the streak==0 immediate-fail
+			// path) to be the one exercised below.
+			waitFor(t, 5*time.Second, func() bool { return d.pushes.Load() >= 2 })
+			stop()
+
+			select {
+			case got := <-done:
+				if got.code != 2 {
+					t.Fatalf("exit code = %d, want 2 (daemon unavailable, no retry within a %s grace); stderr: %q", got.code, grace, got.stderr)
+				}
+				if !strings.Contains(got.stderr, "daemon did not return within grace") {
+					t.Errorf("stderr = %q, want the grace-exhausted message", got.stderr)
+				}
+				if strings.Contains(got.stderr, "daemon unreachable") {
+					t.Errorf("stderr = %q: this must go through the grace path, not the streak==0 path", got.stderr)
+				}
+				if got.elapsed > maxWait {
+					t.Errorf("took %s: a %s reconnect-grace must fail fast, well before --maximum-wait (%s)", got.elapsed, grace, maxWait)
+				}
+			case <-time.After(maxWait + 30*time.Second):
+				t.Fatal("wait did not finish after the daemon disappeared with an exhausted reconnect-grace")
+			}
+		})
+	}
+}
+
 // TestWaitUntilAgentsFinishedCleanEOFStaysQuiet is the flip side: a clean EOF
 // — the daemon's DESIGNED graceful-shutdown behaviour, which a healthy long
 // wait redials through routinely — must NOT be reported as a stream error.

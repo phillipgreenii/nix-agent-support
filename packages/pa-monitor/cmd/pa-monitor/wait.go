@@ -39,14 +39,40 @@ import (
 //	0 = idle reached (no session `working` for N ticks; blocked counts as idle)
 //	1 = timeout
 //	2 = daemon unavailable past reconnect-grace; also bad flags (see below)
-//	3 = invalid args — NOT reachable today: the flag.ExitOnError flag set
-//	    below exits 2 itself, so fs.Parse never returns an error
+//	3 = invalid args. Reachable ONLY via the explicit validation below
+//	    (currently just --consecutive-idle-checks <= 0, see
+//	    validateConsecutiveIdleChecks for why); the
+//	    `if err := fs.Parse(args); err != nil` branch immediately below is
+//	    still dead code, because flag.ExitOnError makes fs.Parse call
+//	    os.Exit(2) itself on a parse error (bad flag name, non-integer value)
+//	    before ever returning one to check. Widening exit 3 into a general
+//	    parse-error contract is bead pg2-3rlwm's job, not this one's — this
+//	    comment records the split so the two do not collide.
 func runWaitUntilAgentsFinished(args []string) {
 	fs := flag.NewFlagSet("wait-until-agents-finished", flag.ExitOnError)
+	// --maximum-wait <= 0 is intentionally ACCEPTED, not rejected: it makes
+	// the deadline already-expired at start, so the wait exits 1 (timeout) on
+	// its very first pass through the loop below — before ever dialing the
+	// daemon — which is a defensible, if literal, reading of "maximum total
+	// wait ... 0 seconds": do not wait at all. That is unlike
+	// --consecutive-idle-checks <= 0 below, which cannot be satisfied on its
+	// own terms regardless of reading. See
+	// TestWaitUntilAgentsFinishedMaximumWaitZeroOrNegativeExitsImmediately.
 	maxWaitS := fs.Int("maximum-wait", 7200, "Maximum total wait in seconds")
-	consecutive := fs.Int("consecutive-idle-checks", 3, "Consecutive idle observations required (a gap in observation restarts the count)")
+	consecutive := fs.Int("consecutive-idle-checks", 3, "Consecutive idle observations required (a gap in observation restarts the count); must be >= 1")
+	// --reconnect-grace <= 0 is intentionally ACCEPTED, not rejected: it
+	// skips the retry loop in waitForDaemon entirely, so a daemon that
+	// disappears mid-wait fails at once (exit 2) with no retry — again a
+	// literal, defensible reading of "seconds to wait for daemon return ...
+	// 0 seconds". See
+	// TestWaitUntilAgentsFinishedReconnectGraceZeroOrNegativeFailsWithoutRetry.
 	graceS := fs.Int("reconnect-grace", 30, "Seconds to wait for daemon return mid-wait")
 	if err := fs.Parse(args); err != nil {
+		os.Exit(3)
+	}
+
+	if err := validateConsecutiveIdleChecks(*consecutive); err != nil {
+		fmt.Fprintf(os.Stderr, "wait-until-agents-finished: %v\n", err)
 		os.Exit(3)
 	}
 
@@ -55,6 +81,39 @@ func runWaitUntilAgentsFinished(args []string) {
 		consecutive: *consecutive,
 		grace:       time.Duration(*graceS) * time.Second,
 	}, os.Stderr))
+}
+
+// validateConsecutiveIdleChecks rejects --consecutive-idle-checks values that
+// cannot mean what they say, rather than letting the loop below silently
+// reinterpret them. It is split out of runWaitUntilAgentsFinished (which
+// os.Exits) so a test can drive it directly without terminating the test
+// process — the same reason waitUntilAgentsFinished itself is split out of
+// that wrapper (see its doc comment below).
+//
+// consecutive <= 0 is rejected. The streak counter below is non-negative and
+// only ever incremented, so a target below 1 can never be reached on its own
+// terms — accepting it would mean secretly redefining it as 1 (the exact
+// defect bead pg2-e05tm reports: --consecutive-idle-checks 0 silently
+// behaving as 1) or inventing an undocumented "never satisfied" semantics
+// nobody asked for. Neither is acceptable silently, so this is a hard error.
+//
+// consecutive == 1 is deliberately NOT rejected, even though the DECISION
+// comment on waitUntilAgentsFinished (bead pg2-klyz7) notes that its
+// gap-based streak-reset rule buys N == 1 nothing: the streak completes on
+// the very first idle observation, so "consecutive in time" is vacuous at
+// N <= 1. That is a materially different case from 0/negative: a caller
+// passing 1 gets EXACTLY the value it asked for — act on the first idle
+// reading, i.e. deliberately no debounce — which is a legitimate request,
+// not a surprise the way 0 silently becoming 1 is. Widening this rejection to
+// N <= 1 would turn that legitimate, if debounce-free, request into an error
+// for no benefit to the caller, so it stays accepted. See
+// TestWaitUntilAgentsFinishedConsecutiveIdleChecksOneExitsOnFirstIdleObservation
+// for the runtime behavior this leaves in place.
+func validateConsecutiveIdleChecks(consecutive int) error {
+	if consecutive <= 0 {
+		return fmt.Errorf("--consecutive-idle-checks must be >= 1 (a streak cannot reach a target below 1), got %d", consecutive)
+	}
+	return nil
 }
 
 // waitParams is the parsed flag set of `wait-until-agents-finished`.
