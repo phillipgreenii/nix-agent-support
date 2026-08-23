@@ -156,10 +156,12 @@ func prNodeSelection(connFirst int) string {
 
 // enrichedPRsQuery is the GraphQL search query EnrichedPRs runs once per repo
 // per tick (thread-bearing connections at first:30). See package comment for
-// node-budget math.
-var enrichedPRsQuery = `query($search: String!) {
+// node-budget math. $after drives pagination of the top-level search result
+// itself (null on the first page) — distinct from the per-node connection
+// pagination (reviews/comments/etc.) that truncationFlags reports.
+var enrichedPRsQuery = `query($search: String!, $after: String) {
   rateLimit { cost remaining resetAt }
-  search(query: $search, type: ISSUE, first: 50) {
+  search(query: $search, type: ISSUE, first: 50, after: $after) {
     issueCount
     pageInfo { hasNextPage endCursor }
     nodes {
@@ -168,6 +170,12 @@ var enrichedPRsQuery = `query($search: String!) {
     }
   }
 }`
+
+// maxEnrichedPRPages caps pagination of the top-level search result so a
+// pathological roster (>50*20 open PRs matching one query) can't loop
+// forever; hitting it appends the "search" sentinel to every accumulated
+// PR's Truncated field (see EnrichedPRs).
+const maxEnrichedPRPages = 20
 
 // enrichedPRByNumberQuery fetches a single PR by number (thread-bearing
 // connections at first:100 — ample for any observed PR). EnrichPR uses it so
@@ -183,29 +191,61 @@ var enrichedPRByNumberQuery = `query($owner: String!, $name: String!, $number: I
 
 // EnrichedPRs returns every open PR matching searchQuery in repo,
 // bundled with its reviews, top-level comments, review-thread comments,
-// and CI status. One gh GraphQL call regardless of PR count.
+// and CI status. It paginates the search result itself (first:50 per
+// page, via the $after cursor) until the roster is complete or
+// maxEnrichedPRPages is hit, so a result set beyond one page-of-50 is no
+// longer silently dropped.
 //
 // searchQuery is a GitHub-search-style string and is passed verbatim to
 // the GraphQL `search` query argument. Callers should already include a
 // `repo:<repo>` clause for clarity — the repo parameter is informational
 // (for error messages) and is not appended to the query.
+//
+// vcs.EnrichedPRsProvider's signature carries no top-level "truncated"
+// flag (unlike vcs.FingerprintResult), so when maxEnrichedPRPages is hit
+// before the roster completes, the "search" sentinel is appended to every
+// accumulated PR's Truncated field — signaling "the retrieved set itself
+// may be incomplete", distinct from the existing per-PR embedded-connection
+// truncation flags (see truncationFlags).
 func (p *Provider) EnrichedPRs(ctx context.Context, repo, searchQuery string) ([]vcs.EnrichedPR, error) {
 	if strings.TrimSpace(searchQuery) == "" {
 		return nil, fmt.Errorf("github: search query required for EnrichedPRs")
 	}
-	// The GraphQL query is fed via stdin (`-F query=@-`); search is passed
-	// as a string variable so multi-author search strings don't fight
-	// gh's shell-arg parsing.
-	raw, err := p.gh.RunStdin(
-		ctx, []byte(enrichedPRsQuery),
-		"api", "graphql",
-		"-F", "search="+searchQuery,
-		"-F", "query=@-",
-	)
-	if err != nil {
-		return nil, fmt.Errorf("github: gh api graphql for %s: %w", repo, err)
+	var acc []vcs.EnrichedPR
+	cursor := ""
+	for page := 0; ; page++ {
+		args := []string{
+			"api", "graphql",
+			"-F", "search=" + searchQuery,
+			"-F", "query=@-",
+		}
+		if cursor != "" {
+			args = append(args, "-F", "after="+cursor)
+		}
+		// The GraphQL query is fed via stdin (`-F query=@-`); search is passed
+		// as a string variable so multi-author search strings don't fight
+		// gh's shell-arg parsing.
+		raw, err := p.gh.RunStdin(ctx, []byte(enrichedPRsQuery), args...)
+		if err != nil {
+			return nil, fmt.Errorf("github: gh api graphql for %s: %w", repo, err)
+		}
+		pagePRs, next, more, err := parseEnrichedPRs(raw, repo)
+		if err != nil {
+			return nil, err
+		}
+		acc = append(acc, pagePRs...)
+		if !more {
+			break
+		}
+		if page+1 >= maxEnrichedPRPages {
+			for i := range acc {
+				acc[i].Truncated = append(acc[i].Truncated, "search")
+			}
+			break
+		}
+		cursor = next
 	}
-	return parseEnrichedPRs(raw, repo)
+	return acc, nil
 }
 
 // ghGraphQLResponse is the envelope shape returned by gh api graphql.
@@ -402,16 +442,18 @@ type ghContextsConn struct {
 	} `json:"nodes"`
 }
 
-// parseEnrichedPRs decodes a gh GraphQL response and maps it into
-// vcs.EnrichedPR shapes. Surfaces gh's `errors` envelope as a hard
-// failure so callers fall back to REST.
-func parseEnrichedPRs(raw []byte, repo string) ([]vcs.EnrichedPR, error) {
+// parseEnrichedPRs decodes one page of a gh GraphQL response and maps it
+// into vcs.EnrichedPR shapes. Surfaces gh's `errors` envelope as a hard
+// failure so callers fall back to REST. Returns the page's PRs, the
+// endCursor, and whether another page exists — mirroring
+// parseFingerprints's pagination-carrying return shape.
+func parseEnrichedPRs(raw []byte, repo string) ([]vcs.EnrichedPR, string, bool, error) {
 	var resp ghGraphQLResponse
 	if err := json.Unmarshal(raw, &resp); err != nil {
-		return nil, fmt.Errorf("github: parse GraphQL response for %s: %w", repo, err)
+		return nil, "", false, fmt.Errorf("github: parse GraphQL response for %s: %w", repo, err)
 	}
 	if len(resp.Errors) > 0 {
-		return nil, fmt.Errorf("github: GraphQL error for %s: %s", repo, resp.Errors[0].Message)
+		return nil, "", false, fmt.Errorf("github: GraphQL error for %s: %s", repo, resp.Errors[0].Message)
 	}
 	out := make([]vcs.EnrichedPR, 0, len(resp.Data.Search.Nodes))
 	for _, n := range resp.Data.Search.Nodes {
@@ -420,7 +462,7 @@ func parseEnrichedPRs(raw []byte, repo string) ([]vcs.EnrichedPR, error) {
 		}
 		out = append(out, enrichedPRFromNode(n, repo))
 	}
-	return out, nil
+	return out, resp.Data.Search.PageInfo.EndCursor, resp.Data.Search.PageInfo.HasNextPage, nil
 }
 
 // enrichedPRFromNode converts one parsed PullRequest node into an EnrichedPR.

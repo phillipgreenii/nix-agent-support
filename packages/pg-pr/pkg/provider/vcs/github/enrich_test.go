@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -16,7 +17,7 @@ func TestParseEnrichedPRs_RecordedFixture(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read fixture: %v", err)
 	}
-	got, err := parseEnrichedPRs(raw, "acme/widgets")
+	got, _, _, err := parseEnrichedPRs(raw, "acme/widgets")
 	if err != nil {
 		t.Fatalf("parseEnrichedPRs: %v", err)
 	}
@@ -105,7 +106,7 @@ func TestParseEnrichedPRs_RecordedFixture(t *testing.T) {
 
 func TestParseEnrichedPRs_GraphQLError(t *testing.T) {
 	raw := []byte(`{"errors":[{"type":"INSUFFICIENT_SCOPES","message":"oh no"}]}`)
-	_, err := parseEnrichedPRs(raw, "x/y")
+	_, _, _, err := parseEnrichedPRs(raw, "x/y")
 	if err == nil {
 		t.Fatal("want error on GraphQL errors envelope, got nil")
 	}
@@ -113,7 +114,7 @@ func TestParseEnrichedPRs_GraphQLError(t *testing.T) {
 
 func TestParseEnrichedPRs_Empty(t *testing.T) {
 	raw := []byte(`{"data":{"search":{"issueCount":0,"nodes":[]}}}`)
-	got, err := parseEnrichedPRs(raw, "x/y")
+	got, _, _, err := parseEnrichedPRs(raw, "x/y")
 	if err != nil {
 		t.Fatalf("parseEnrichedPRs: %v", err)
 	}
@@ -165,7 +166,7 @@ func TestParseEnrichedPRs_BotAuthorSuffix(t *testing.T) {
 		   {"id":"t1","comments":{"nodes":[{"id":"tc1","author":{"__typename":"Bot","login":"coderabbitai"},"authorAssociation":"NONE","body":"nit","path":"x.go","line":42}]}}
 		 ]}}
 	]}}}`)
-	got, err := parseEnrichedPRs(raw, "x/y")
+	got, _, _, err := parseEnrichedPRs(raw, "x/y")
 	if err != nil {
 		t.Fatalf("parseEnrichedPRs: %v", err)
 	}
@@ -231,7 +232,7 @@ func TestTruncationFlags(t *testing.T) {
 		 ]},
 		 "commits":{"nodes":[{"commit":{"statusCheckRollup":{"contexts":{"pageInfo":{"hasNextPage":true},"nodes":[]}}}}]}}
 	]}}}`)
-	got, err := parseEnrichedPRs(jsonResp, "x/y")
+	got, _, _, err := parseEnrichedPRs(jsonResp, "x/y")
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -365,7 +366,7 @@ func TestParseEnrichedSurfacesStalenessFields(t *testing.T) {
 	   "commits":{"nodes":[]}}
 	]}}}`
 
-	got, err := parseEnrichedPRs([]byte(resp), "x/y")
+	got, _, _, err := parseEnrichedPRs([]byte(resp), "x/y")
 	if err != nil {
 		t.Fatalf("parseEnrichedPRs: %v", err)
 	}
@@ -417,7 +418,7 @@ func TestParseEnrichedPRs_HeadSHAPropagated(t *testing.T) {
 	  }
 	]}}}`
 
-	got, err := parseEnrichedPRs([]byte(resp), "x/y")
+	got, _, _, err := parseEnrichedPRs([]byte(resp), "x/y")
 	if err != nil {
 		t.Fatalf("parseEnrichedPRs: %v", err)
 	}
@@ -454,7 +455,7 @@ func TestParseEnrichedPRs_HeadSHAEmptyWhenNoCommits(t *testing.T) {
 	   "commits":{"nodes":[]}}
 	]}}}`
 
-	got, err := parseEnrichedPRs([]byte(resp), "x/y")
+	got, _, _, err := parseEnrichedPRs([]byte(resp), "x/y")
 	if err != nil {
 		t.Fatalf("parseEnrichedPRs: %v", err)
 	}
@@ -482,7 +483,7 @@ func TestParseEnrichedPRs_BodyLabelsFilesCommits(t *testing.T) {
 	   "files":{"nodes":[{"path":"a.go"},{"path":"b.py"}]}}
 	]}}}`
 
-	got, err := parseEnrichedPRs([]byte(resp), "x/y")
+	got, _, _, err := parseEnrichedPRs([]byte(resp), "x/y")
 	if err != nil {
 		t.Fatalf("parseEnrichedPRs: %v", err)
 	}
@@ -520,7 +521,7 @@ func TestParseEnrichedPRs_Assignees(t *testing.T) {
 	   "assignees":{"nodes":[{"login":"me"},{"login":"teammate"},{"login":""}]}}
 	]}}}`
 
-	got, err := parseEnrichedPRs([]byte(resp), "o/r")
+	got, _, _, err := parseEnrichedPRs([]byte(resp), "o/r")
 	if err != nil {
 		t.Fatalf("parseEnrichedPRs: %v", err)
 	}
@@ -547,7 +548,7 @@ func TestTruncationFlags_Assignees(t *testing.T) {
 	   "assignees":{"pageInfo":{"hasNextPage":true},"nodes":[]}}
 	]}}}`
 
-	got, err := parseEnrichedPRs([]byte(resp), "o/r")
+	got, _, _, err := parseEnrichedPRs([]byte(resp), "o/r")
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -575,7 +576,7 @@ func TestParseEnrichedPRs_CommitMessages(t *testing.T) {
 	   ]}}
 	]}}}`
 
-	got, err := parseEnrichedPRs([]byte(resp), "x/y")
+	got, _, _, err := parseEnrichedPRs([]byte(resp), "x/y")
 	if err != nil {
 		t.Fatalf("parseEnrichedPRs: %v", err)
 	}
@@ -603,7 +604,7 @@ func TestTruncationFlags_NewConnections(t *testing.T) {
 	   "labels":{"pageInfo":{"hasNextPage":true},"nodes":[]}}
 	]}}}`
 
-	got, err := parseEnrichedPRs([]byte(resp), "x/y")
+	got, _, _, err := parseEnrichedPRs([]byte(resp), "x/y")
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -727,7 +728,7 @@ func TestCommentsFromGHNode_UpdatedAt(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := parseEnrichedPRs([]byte(tc.resp), "x/y")
+			got, _, _, err := parseEnrichedPRs([]byte(tc.resp), "x/y")
 			if err != nil {
 				t.Fatalf("parseEnrichedPRs: %v", err)
 			}
@@ -830,7 +831,7 @@ func TestParseEnrichedPRs_StatusContextDescription(t *testing.T) {
 			  }
 			]}}}`
 
-			got, err := parseEnrichedPRs([]byte(resp), "x/y")
+			got, _, _, err := parseEnrichedPRs([]byte(resp), "x/y")
 			if err != nil {
 				t.Fatalf("parseEnrichedPRs: %v", err)
 			}
@@ -896,7 +897,7 @@ func TestParseEnrichedPRs_CommitAuthors(t *testing.T) {
 	   ]}}
 	]}}}`
 
-	got, err := parseEnrichedPRs([]byte(resp), "x/y")
+	got, _, _, err := parseEnrichedPRs([]byte(resp), "x/y")
 	if err != nil {
 		t.Fatalf("parseEnrichedPRs: %v", err)
 	}
@@ -906,5 +907,112 @@ func TestParseEnrichedPRs_CommitAuthors(t *testing.T) {
 	want := []string{"alice", "bob"}
 	if !sliceEq(got[0].CommitAuthors, want) {
 		t.Errorf("CommitAuthors = %v, want %v", got[0].CommitAuthors, want)
+	}
+}
+
+// alwaysNextPageRunner simulates a pathological search result that never
+// reports hasNextPage=false, so EnrichedPRs' maxEnrichedPRPages cap is the
+// only thing that can terminate the loop.
+type alwaysNextPageRunner struct {
+	calls int
+}
+
+func (r *alwaysNextPageRunner) Run(_ context.Context, _ ...string) ([]byte, error) { return nil, nil }
+
+func (r *alwaysNextPageRunner) RunStdin(_ context.Context, _ []byte, _ ...string) ([]byte, error) {
+	r.calls++
+	page := fmt.Sprintf(`{"data":{"rateLimit":{"cost":1,"remaining":1},
+	  "search":{"pageInfo":{"hasNextPage":true,"endCursor":"C%d"},"nodes":[
+	    {"number":%d,"title":"t","author":{"login":"me"},"repository":{"nameWithOwner":"o/r"}}
+	  ]}}}`, r.calls, r.calls)
+	return []byte(page), nil
+}
+
+// TestEnrichedPRs_SinglePageUnchanged pins the pre-fix, single-page behavior:
+// a search result with hasNextPage=false is returned as-is, with no "search"
+// truncation sentinel on any PR — proving the pagination fix doesn't
+// reintroduce a different bug (e.g. always flagging "search").
+func TestEnrichedPRs_SinglePageUnchanged(t *testing.T) {
+	raw := []byte(`{"data":{"rateLimit":{"cost":1,"remaining":10},
+	  "search":{"issueCount":2,"pageInfo":{"hasNextPage":false},"nodes":[
+	    {"number":1,"title":"t1","author":{"login":"me"},"repository":{"nameWithOwner":"o/r"}},
+	    {"number":2,"title":"t2","author":{"login":"me"},"repository":{"nameWithOwner":"o/r"}}
+	  ]}}}`)
+	got, err := NewWithRunner(&fakeStdinRunner{out: raw}).EnrichedPRs(context.Background(), "o/r", "is:pr is:open repo:o/r author:me")
+	if err != nil {
+		t.Fatalf("EnrichedPRs: %v", err)
+	}
+	if len(got) != 2 || got[0].PR.Number != 1 || got[1].PR.Number != 2 {
+		t.Fatalf("unexpected result: %+v", got)
+	}
+	for _, pr := range got {
+		for _, flag := range pr.Truncated {
+			if flag == "search" {
+				t.Errorf("PR #%d unexpectedly carries the search truncation flag: %v", pr.PR.Number, pr.Truncated)
+			}
+		}
+	}
+}
+
+// TestEnrichedPRs_Paginates proves PR #51+ is no longer silently dropped: a
+// two-page search result (page 1 hasNextPage=true+cursor, page 2
+// hasNextPage=false) accumulates PRs from BOTH pages, with no "search"
+// truncation marker since the roster completed (just across 2 pages).
+// Mirrors TestFingerprintPRs_Paginates's pagingRunner mocking idiom exactly.
+func TestEnrichedPRs_Paginates(t *testing.T) {
+	page1 := []byte(`{"data":{"rateLimit":{"cost":1,"remaining":9},
+	  "search":{"pageInfo":{"hasNextPage":true,"endCursor":"C1"},"nodes":[
+	    {"number":1,"title":"t1","author":{"login":"me"},"repository":{"nameWithOwner":"o/r"}}]}}}`)
+	page2 := []byte(`{"data":{"rateLimit":{"cost":1,"remaining":8},
+	  "search":{"pageInfo":{"hasNextPage":false},"nodes":[
+	    {"number":2,"title":"t2","author":{"login":"me"},"repository":{"nameWithOwner":"o/r"}}]}}}`)
+	r := &pagingRunner{pages: [][]byte{page1, page2}}
+	got, err := NewWithRunner(r).EnrichedPRs(context.Background(), "o/r", "is:pr is:open repo:o/r author:me")
+	if err != nil {
+		t.Fatalf("EnrichedPRs: %v", err)
+	}
+	if r.calls != 2 {
+		t.Errorf("want 2 page fetches, got %d", r.calls)
+	}
+	if len(got) != 2 || got[0].PR.Number != 1 || got[1].PR.Number != 2 {
+		t.Fatalf("pages not accumulated: %+v", got)
+	}
+	for _, pr := range got {
+		for _, flag := range pr.Truncated {
+			if flag == "search" {
+				t.Errorf("PR #%d unexpectedly carries the search truncation flag after a completed 2-page roster: %v", pr.PR.Number, pr.Truncated)
+			}
+		}
+	}
+}
+
+// TestEnrichedPRs_HitsPageCap proves that a pathological/unbounded roster
+// (hasNextPage always true) terminates at maxEnrichedPRPages rather than
+// hanging, and that every accumulated PR is marked with the "search"
+// truncation sentinel — signaling "the retrieved set itself may be
+// incomplete" to any caller that checks EnrichedPR.Truncated.
+func TestEnrichedPRs_HitsPageCap(t *testing.T) {
+	r := &alwaysNextPageRunner{}
+	got, err := NewWithRunner(r).EnrichedPRs(context.Background(), "o/r", "is:pr is:open repo:o/r author:me")
+	if err != nil {
+		t.Fatalf("EnrichedPRs: %v", err)
+	}
+	if r.calls != maxEnrichedPRPages {
+		t.Errorf("want %d page fetches (cap hit), got %d", maxEnrichedPRPages, r.calls)
+	}
+	if len(got) != maxEnrichedPRPages {
+		t.Fatalf("want %d accumulated PRs, got %d", maxEnrichedPRPages, len(got))
+	}
+	for _, pr := range got {
+		found := false
+		for _, flag := range pr.Truncated {
+			if flag == "search" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("PR #%d Truncated = %v, want it to include %q", pr.PR.Number, pr.Truncated, "search")
+		}
 	}
 }
