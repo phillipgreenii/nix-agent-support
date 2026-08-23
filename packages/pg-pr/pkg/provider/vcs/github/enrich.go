@@ -144,6 +144,7 @@ func prNodeSelection(connFirst int) string {
                       context
                       state
                       targetUrl
+                      description
                     }
                   }
                 }
@@ -394,9 +395,10 @@ type ghContextsConn struct {
 		Conclusion string `json:"conclusion"`
 		DetailsURL string `json:"detailsUrl"`
 		// StatusContext fields
-		Context   string `json:"context"`
-		State     string `json:"state"`
-		TargetURL string `json:"targetUrl"`
+		Context     string `json:"context"`
+		State       string `json:"state"`
+		TargetURL   string `json:"targetUrl"`
+		Description string `json:"description"`
 	} `json:"nodes"`
 }
 
@@ -645,13 +647,14 @@ func ciRunsFromGHNode(n ghPRNode) []api.CIRun {
 			// Map to the same conclusion-string vocabulary the rest of
 			// pg-pr uses; "completed" stays consistent with CheckRun.
 			out = append(out, api.CIRun{
-				ID:         c.ID,
-				Name:       c.Context,
-				Status:     "completed",
-				Conclusion: strings.ToLower(c.State),
-				URL:        c.TargetURL,
-				Provider:   "github-status",
-				HeadSHA:    headSHA,
+				ID:          c.ID,
+				Name:        c.Context,
+				Status:      "completed",
+				Conclusion:  strings.ToLower(c.State),
+				URL:         c.TargetURL,
+				Provider:    "github-status",
+				HeadSHA:     headSHA,
+				Description: c.Description,
 			})
 		}
 	}

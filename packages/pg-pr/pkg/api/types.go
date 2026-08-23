@@ -76,6 +76,13 @@ type CIRun struct {
 	// HeadSHA is the commit SHA the run was triggered against. Used as
 	// subject_sha in the feedback store so ci-failure rows are per-revision.
 	HeadSHA string `json:"head_sha,omitempty"`
+	// Description is the free-text status description GitHub's commit-status
+	// API (StatusContext) attaches to a context — e.g. a branch-protection
+	// rule's rendered summary. CheckRun nodes have no equivalent GraphQL
+	// field and always leave this empty. Fetch-and-carry only: nothing yet
+	// parses this into a state (see bead pg2-4dz88.2.4, the check-interpreter
+	// leaf, for that).
+	Description string `json:"description,omitempty"`
 }
 
 // Issue is the JSON shape for an external issue (jira ticket, github issue, etc.).

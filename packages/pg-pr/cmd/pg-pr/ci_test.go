@@ -86,6 +86,46 @@ func TestCIRuns_HumanTable(t *testing.T) {
 	}
 }
 
+// TestCIRuns_HumanTable_DescriptionNotRendered guards against an accidental
+// new column: api.CIRun grew a Description field (pg2-4dz88.2.2, carrying a
+// StatusContext's GraphQL description through) but renderCIRuns is
+// deliberately left unchanged for now — parsing/rendering of the field
+// itself comes in a later leaf. A run with a non-empty Description must
+// still render exactly the same header/columns as before.
+func TestCIRuns_HumanTable_DescriptionNotRendered(t *testing.T) {
+	resetCIFlags()
+	fc := &fakeCICD{
+		runs: []api.CIRun{
+			{
+				ID: "200", Name: "approval-gate", Status: "completed", Conclusion: "failure",
+				Provider: "github-status", URL: "https://x/3", Description: "All rules are approved",
+			},
+		},
+	}
+	withFakeCICD(t, "github-status", fc)
+
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{"ci", "runs", "5", "--repo", "foo/bar"})
+
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("execute: %v (stderr=%s)", err, stderr.String())
+	}
+	out := stdout.String()
+	for _, want := range []string{"PROVIDER", "NAME", "STATUS", "CONCLUSION", "ID", "URL"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("table header missing %q; got %q", want, out)
+		}
+	}
+	if strings.Contains(out, "DESCRIPTION") {
+		t.Errorf("unexpected DESCRIPTION column in rendered table; got %q", out)
+	}
+	if strings.Contains(out, "All rules are approved") {
+		t.Errorf("Description value leaked into rendered table; got %q", out)
+	}
+}
+
 func TestCIRuns_JSON(t *testing.T) {
 	resetCIFlags()
 	fc := &fakeCICD{

@@ -7,6 +7,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
 )
 
 func TestParseEnrichedPRs_RecordedFixture(t *testing.T) {
@@ -775,6 +777,106 @@ func TestPRFromGHNodeMergeability(t *testing.T) {
 	if !prFromGHNode(n2, "o/n").AutoMergeEnabled {
 		t.Errorf("AutoMergeEnabled should be true when autoMergeRequest present")
 	}
+}
+
+// TestParseEnrichedPRs_StatusContextDescription verifies that a
+// StatusContext node's `description` field round-trips through
+// ciRunsFromGHNode into api.CIRun.Description unchanged, that it is empty
+// (not a panic) when the field is absent or explicitly null, and that a
+// sibling CheckRun node in the same rollup is parsed exactly as before
+// (additive change, not disruptive) — the mixed-rollup literal below
+// mirrors TestParseEnrichedPRs_HeadSHAPropagated's shape. (pg2-4dz88.2.2)
+func TestParseEnrichedPRs_StatusContextDescription(t *testing.T) {
+	cases := []struct {
+		name       string
+		statusJSON string
+		wantDesc   string
+	}{
+		{
+			name:       "description present round-trips unchanged",
+			statusJSON: `"description":"All rules are approved"`,
+			wantDesc:   "All rules are approved",
+		},
+		{
+			name:       "description absent from JSON => zero value, no panic",
+			statusJSON: ``,
+			wantDesc:   "",
+		},
+		{
+			name:       "description explicitly null => zero value, no panic",
+			statusJSON: `"description":null`,
+			wantDesc:   "",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			statusField := ""
+			if tc.statusJSON != "" {
+				statusField = "," + tc.statusJSON
+			}
+			resp := `{"data":{"search":{"nodes":[
+			  {"number":9,"title":"pr","author":{"__typename":"User","login":"alice"},
+			   "headRefName":"feat/x","baseRefName":"main","url":"u","isDraft":false,
+			   "state":"OPEN","merged":false,"additions":0,"deletions":0,"changedFiles":0,
+			   "repository":{"nameWithOwner":"x/y"},
+			   "reviews":{"nodes":[]},"comments":{"nodes":[]},"reviewThreads":{"nodes":[]},
+			   "commits":{"nodes":[{"commit":{
+			     "oid":"cafebabe",
+			     "statusCheckRollup":{"state":"FAILURE","contexts":{"nodes":[
+			       {"__typename":"CheckRun","id":"cr1","name":"ci","status":"COMPLETED","conclusion":"FAILURE","detailsUrl":"https://u/1"},
+			       {"__typename":"StatusContext","id":"sc1","context":"approval-gate","state":"failure","targetUrl":"https://u/2"` + statusField + `}
+			     ]}}
+			   }}]}
+			  }
+			]}}}`
+
+			got, err := parseEnrichedPRs([]byte(resp), "x/y")
+			if err != nil {
+				t.Fatalf("parseEnrichedPRs: %v", err)
+			}
+			if len(got) != 1 {
+				t.Fatalf("want 1 PR, got %d", len(got))
+			}
+			ep := got[0]
+			if len(ep.CIRuns) != 2 {
+				t.Fatalf("want 2 CIRuns, got %d", len(ep.CIRuns))
+			}
+
+			checkRun, ok := findCIRunByProvider(ep.CIRuns, "github-actions")
+			if !ok {
+				t.Fatalf("no CheckRun-derived CIRun found: %+v", ep.CIRuns)
+			}
+			statusContext, ok := findCIRunByProvider(ep.CIRuns, "github-status")
+			if !ok {
+				t.Fatalf("no StatusContext-derived CIRun found: %+v", ep.CIRuns)
+			}
+
+			// The CheckRun-derived run is unaffected by this change: it
+			// carries its normal fields and an empty Description (CheckRun
+			// has no such GraphQL field at all).
+			if checkRun.Name != "ci" || checkRun.Conclusion != "failure" || checkRun.URL != "https://u/1" {
+				t.Errorf("CheckRun-derived CIRun changed unexpectedly: %+v", checkRun)
+			}
+			if checkRun.Description != "" {
+				t.Errorf("CheckRun-derived CIRun.Description = %q, want empty", checkRun.Description)
+			}
+
+			if statusContext.Description != tc.wantDesc {
+				t.Errorf("StatusContext-derived CIRun.Description = %q, want %q", statusContext.Description, tc.wantDesc)
+			}
+		})
+	}
+}
+
+// findCIRunByProvider returns the first CIRun in runs with the given
+// Provider, and whether one was found.
+func findCIRunByProvider(runs []api.CIRun, provider string) (api.CIRun, bool) {
+	for _, r := range runs {
+		if r.Provider == provider {
+			return r, true
+		}
+	}
+	return api.CIRun{}, false
 }
 
 // TestParseEnrichedPRs_CommitAuthors verifies commit author logins map onto
