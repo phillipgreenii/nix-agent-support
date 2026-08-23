@@ -1,0 +1,101 @@
+{
+  "as_of": "2026-08-23T11:59:30Z",
+  "stale": false,
+  "identity": {
+    "repo": "o/r",
+    "number": 42,
+    "title": "Add contributor guide",
+    "state": "open",
+    "draft": false,
+    "branch": "alice/add-guide",
+    "base": "main",
+    "author": "alice",
+    "url": "https://example.invalid/o/r/pull/42",
+    "head_sha": "abc123",
+    "base_sha": "def456",
+    "merged": false,
+    "merged_at": "",
+    "additions": 120,
+    "deletions": 4,
+    "changed_files": 5,
+    "labels": ["enhancement", "needs-review"]
+  },
+  "ownership": "mine",
+  "enrichment": {
+    "kind": "feature",
+    "languages": ["Go", "Nix"],
+    "size": "M",
+    "urgency": "high",
+    "urgency_score": 7,
+    "urgency_reasons": ["label:p0", "incident-linked"]
+  },
+  "ci": {
+    "state": "failure",
+    "passed": 1,
+    "failed": 1,
+    "pending": 0
+  },
+  "merge_state": {
+    "mergeable": "MERGEABLE",
+    "merge_state_status": "CLEAN",
+    "auto_merge_enabled": false,
+    "has_conflict": false
+  },
+  "feedback": [
+    {
+      "id": 1,
+      "kind": "code-comment",
+      "status": "open",
+      "title": "Handle the error return",
+      "body": "Please handle the error return value here.",
+      "author_login": "bob",
+      "author_kind": "human",
+      "severity": "warning",
+      "file": "internal/foo/bar.go",
+      "line": 42,
+      "is_outdated": false,
+      "is_minimized": false,
+      "thread_resolved": false,
+      "disposition_action": "replied",
+      "link": "https://example.invalid/o/r/pull/42#discussion_r1"
+    }
+  ],
+  "revisions": [
+    {
+      "seq": 1,
+      "head_sha": "abc123",
+      "base_sha": "def456",
+      "observed_at": "2026-08-20T10:00:00Z",
+      "last_seen_at": "2026-08-20T10:05:00Z",
+      "ci_state": "failure",
+      "ci_passed": 1,
+      "ci_failed": 1,
+      "ci_pending": 0,
+      "gate_state": "satisfied",
+      "gate_state_n": 2,
+      "gate_state_m": 2
+    }
+  ],
+  "linked_ticket_keys": ["ABC-123"],
+  "bead_links": [
+    {
+      "id": "pg2-abc12",
+      "title": "fix thing",
+      "status": "open",
+      "labels": ["human"],
+      "url": "bd://pg2-abc12"
+    }
+  ],
+  "approvals": {
+    "available": false,
+    "reason": "approvals-with-staleness"
+  },
+  "policy_bot": {
+    "available": false,
+    "reason": "policy-bot"
+  },
+  "hide_wip": {
+    "available": false,
+    "reason": "hide-or-wip-state"
+  }
+}

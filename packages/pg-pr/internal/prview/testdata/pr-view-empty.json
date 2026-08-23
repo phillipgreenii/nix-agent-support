@@ -1,0 +1,53 @@
+{
+  "as_of": "",
+  "stale": true,
+  "identity": {
+    "repo": "o/r",
+    "number": 7,
+    "title": "",
+    "state": "",
+    "draft": false,
+    "branch": "",
+    "base": "",
+    "author": "",
+    "url": "",
+    "head_sha": "",
+    "base_sha": "",
+    "merged": false,
+    "merged_at": "",
+    "additions": 0,
+    "deletions": 0,
+    "changed_files": 0,
+    "labels": null
+  },
+  "ownership": null,
+  "enrichment": null,
+  "ci": {
+    "state": "none",
+    "passed": 0,
+    "failed": 0,
+    "pending": 0
+  },
+  "merge_state": {
+    "mergeable": "",
+    "merge_state_status": "",
+    "auto_merge_enabled": false,
+    "has_conflict": false
+  },
+  "feedback": [],
+  "revisions": [],
+  "linked_ticket_keys": [],
+  "bead_links": [],
+  "approvals": {
+    "available": false,
+    "reason": "approvals-with-staleness"
+  },
+  "policy_bot": {
+    "available": false,
+    "reason": "policy-bot"
+  },
+  "hide_wip": {
+    "available": false,
+    "reason": "hide-or-wip-state"
+  }
+}
