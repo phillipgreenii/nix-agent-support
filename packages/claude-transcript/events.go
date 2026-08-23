@@ -25,6 +25,20 @@ type Usage struct {
 	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
 	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
 	OutputTokens             int `json:"output_tokens"`
+	// CacheCreation is the per-TTL breakdown of CacheCreationInputTokens. A 1h
+	// cache write costs 2.0x a model's base input price against 5m's 1.25x, so
+	// this split is what makes cache-write cost measured rather than assumed
+	// (pg2-xgzen). Absent on payloads that predate this field — a missing
+	// "cache_creation" object leaves both sub-fields at their zero value with
+	// no unmarshal error.
+	CacheCreation CacheCreation `json:"cache_creation"`
+}
+
+// CacheCreation is the nested "usage.cache_creation" object real transcripts
+// carry: {"ephemeral_1h_input_tokens": N, "ephemeral_5m_input_tokens": M}.
+type CacheCreation struct {
+	Ephemeral1hInputTokens int `json:"ephemeral_1h_input_tokens"`
+	Ephemeral5mInputTokens int `json:"ephemeral_5m_input_tokens"`
 }
 
 // ContentList is either a plain string or a JSON array of blocks.

@@ -11,6 +11,13 @@ type Snapshot struct {
 	CacheCreationTokens int
 	CacheReadTokens     int
 	OutputTokens        int
+	// CacheCreationEphemeral1hTokens and CacheCreationEphemeral5mTokens are the
+	// per-TTL breakdown of CacheCreationTokens (a 1h cache write costs 2.0x a
+	// model's base input price against 5m's 1.25x, pg2-xgzen). Both are a
+	// subset already counted in CacheCreationTokens, so Total() must not sum
+	// them again.
+	CacheCreationEphemeral1hTokens int
+	CacheCreationEphemeral5mTokens int
 }
 
 // Total is the cumulative-tokens meter (all components summed).

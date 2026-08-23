@@ -9,6 +9,14 @@ type ModelTokens struct {
 	Output        int
 	CacheCreation int
 	CacheRead     int
+	// CacheCreationEphemeral1h and CacheCreationEphemeral5m are the per-TTL
+	// breakdown of CacheCreation (a 1h cache write costs 2.0x a model's base
+	// input price against 5m's 1.25x, pg2-xgzen). Both are a subset already
+	// counted in CacheCreation; ModelPrices.Cost below does not yet price them
+	// separately, so they are carried through purely as measured data for a
+	// future pricing change to consume.
+	CacheCreationEphemeral1h int
+	CacheCreationEphemeral5m int
 }
 
 // ModelPrices is the per-million-token USD price for each token category.

@@ -54,6 +54,8 @@ func (transcriptReader) Read(_ context.Context, path string) (Snapshot, error) {
 		s.CacheCreationTokens += u.CacheCreationInputTokens
 		s.CacheReadTokens += u.CacheReadInputTokens
 		s.OutputTokens += u.OutputTokens
+		s.CacheCreationEphemeral1hTokens += u.CacheCreation.Ephemeral1hInputTokens
+		s.CacheCreationEphemeral5mTokens += u.CacheCreation.Ephemeral5mInputTokens
 		if ev.Message.Model != "" {
 			s.Model = ev.Message.Model
 		}

@@ -85,6 +85,55 @@ func TestTranscriptReader_noIDStillSums(t *testing.T) {
 	}
 }
 
+// TestTranscriptReader_sumsCacheCreationTTLSplit proves the per-TTL
+// cache_creation breakdown (pg2-xgzen) is summed into Snapshot alongside the
+// existing CacheCreationTokens total, following the same accumulation
+// pattern as the other three usage fields.
+func TestTranscriptReader_sumsCacheCreationTTLSplit(t *testing.T) {
+	path := writeJSONL(
+		t,
+		`{"type":"assistant","message":{"model":"claude-opus-4-8","usage":{"input_tokens":100,"cache_creation_input_tokens":10951,"cache_read_input_tokens":1000,"output_tokens":50,"cache_creation":{"ephemeral_1h_input_tokens":10951,"ephemeral_5m_input_tokens":0}}}}`,
+		`{"type":"assistant","message":{"model":"claude-opus-4-8","usage":{"input_tokens":200,"cache_creation_input_tokens":500,"cache_read_input_tokens":2000,"output_tokens":80,"cache_creation":{"ephemeral_1h_input_tokens":0,"ephemeral_5m_input_tokens":500}}}}`,
+	)
+	got, err := NewTranscriptReader().Read(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := Snapshot{
+		Model:                          "claude-opus-4-8",
+		InputTokens:                    300,
+		CacheCreationTokens:            11451,
+		CacheReadTokens:                3000,
+		OutputTokens:                   130,
+		CacheCreationEphemeral1hTokens: 10951,
+		CacheCreationEphemeral5mTokens: 500,
+	}
+	if got != want {
+		t.Fatalf("got %+v want %+v", got, want)
+	}
+}
+
+// TestTranscriptReader_missingCacheCreationIsZero guards backward
+// compatibility: a payload with no "cache_creation" object (older
+// transcripts, or any usage predating this field) must still sum with no
+// error and leave the new fields at zero.
+func TestTranscriptReader_missingCacheCreationIsZero(t *testing.T) {
+	path := writeJSONL(
+		t,
+		`{"type":"assistant","message":{"model":"claude-opus-4-8","usage":{"input_tokens":100,"cache_creation_input_tokens":10,"cache_read_input_tokens":1000,"output_tokens":50}}}`,
+	)
+	got, err := NewTranscriptReader().Read(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.CacheCreationEphemeral1hTokens != 0 || got.CacheCreationEphemeral5mTokens != 0 {
+		t.Errorf("got %+v, want both TTL fields zero when cache_creation is absent", got)
+	}
+	if got.CacheCreationTokens != 10 {
+		t.Errorf("CacheCreationTokens = %d, want 10 (unaffected)", got.CacheCreationTokens)
+	}
+}
+
 func TestTranscriptReader_missingFileIsZero(t *testing.T) {
 	r := NewTranscriptReader()
 	got, err := r.Read(context.Background(), filepath.Join(t.TempDir(), "nope.jsonl"))

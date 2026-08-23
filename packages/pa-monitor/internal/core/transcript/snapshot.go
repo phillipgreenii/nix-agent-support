@@ -225,6 +225,8 @@ func (st *scanState) feed(line []byte) {
 				mt.Output += u.OutputTokens
 				mt.CacheCreation += u.CacheCreationInputTokens
 				mt.CacheRead += u.CacheReadInputTokens
+				mt.CacheCreationEphemeral1h += u.CacheCreation.Ephemeral1hInputTokens
+				mt.CacheCreationEphemeral5m += u.CacheCreation.Ephemeral5mInputTokens
 				st.modelTokens[m] = mt
 				// Timestamped pricing record for the UsagePricing observer,
 				// applying the native CostPricer's per-line skip
@@ -238,10 +240,12 @@ func (st *scanState) feed(line []byte) {
 						Timestamp: ev.Timestamp,
 						Model:     m,
 						Tokens: usage.ModelTokens{
-							Input:         u.InputTokens,
-							Output:        u.OutputTokens,
-							CacheCreation: u.CacheCreationInputTokens,
-							CacheRead:     u.CacheReadInputTokens,
+							Input:                    u.InputTokens,
+							Output:                   u.OutputTokens,
+							CacheCreation:            u.CacheCreationInputTokens,
+							CacheRead:                u.CacheReadInputTokens,
+							CacheCreationEphemeral1h: u.CacheCreation.Ephemeral1hInputTokens,
+							CacheCreationEphemeral5m: u.CacheCreation.Ephemeral5mInputTokens,
 						},
 					})
 				}
