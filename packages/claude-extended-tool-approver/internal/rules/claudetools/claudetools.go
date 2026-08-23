@@ -38,6 +38,7 @@ var approvedTools = map[string]bool{
 	"EnterWorktree":    true,
 	"Workflow":         true,
 	"ReportFindings":   true,
+	"ListAgents":       true,
 	// BashOutput retrieves output from a background Bash shell — read-only, no
 	// filesystem or external side effects — so it is auto-approved (hook-support
 	// parity; BashOutputEvaluator). KillShell is deliberately NOT here: it is
