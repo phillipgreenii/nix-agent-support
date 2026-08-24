@@ -21,20 +21,34 @@ import (
 //
 // THE RULED TABLE, and what changed:
 //
-//	command                     before          ruled
-//	gh pr create --draft        Ask             Approve
-//	gh pr create (no draft)     Ask             Reject
-//	gh pr create --web          Ask             Approve   (see WEB below)
-//	gh pr ready                 {} (ungated)    Ask
-//	gh pr ready --undo          {} (ungated)    Approve
-//	gh pr merge --auto          Abstain         Abstain   (UNCHANGED)
-//	gh pr merge (immediate)     Reject          Reject    (UNCHANGED)
+//	command                     before          ruled (pg2-25oru)   re-ruled (pg2-psiqh)
+//	gh pr create --draft        Ask             Approve             Approve   (UNCHANGED)
+//	gh pr create (no draft)     Ask             Reject              Reject    (UNCHANGED)
+//	gh pr create --web          Ask             Approve             Approve   (UNCHANGED)
+//	gh pr ready                 {} (ungated)    Ask                 Abstain
+//	gh pr ready --undo          {} (ungated)    Approve             Approve   (UNCHANGED)
+//	gh pr merge --auto          Abstain         Abstain             Abstain   (UNCHANGED)
+//	gh pr merge (immediate)     Reject          Reject              Reject    (UNCHANGED)
 //
-// WHY `gh pr ready` -> Ask IS REQUIRED AND NOT OPTIONAL. With non-draft creation
-// rejected, `gh pr ready` is the SINGLE act that makes a PR mergeable, so it is the one
-// place a person must stand. It also REPAIRS the sibling `--auto` rationale in gh.go,
-// which justified its Abstain with "a human un-drafts (the real gate)" while no such
-// gate existed — that comment now cites this enforcement instead of assuming it.
+// SUPERSEDED (operator ruling, Phillip, 2026-08-24, pg2-psiqh): the gh rule module carries
+// no Ask verdict anywhere now, and `gh pr ready` is the only row this ruling touches — it
+// moved Ask -> Abstain. The paragraph below is the ORIGINAL pg2-25oru reasoning for why
+// Ask was required; it is kept for context but is NO LONGER THE LIVE DECISION. The operator
+// was shown, explicitly, that Abstain here defers to Claude Code's own permission
+// evaluation — auto-approved in an autonomous/headless session or a repo whose settings
+// already allow the underlying Bash call, i.e. exactly the "create (Ask, auto-accepted) ->
+// ready ({}, auto-approved) -> merge --auto ({}, auto-approved)" inertness this ruling
+// originally existed to close — and chose Abstain anyway. See pg2-psiqh for the full
+// record; a later reader MUST NOT re-derive the old "Ask is required" conclusion from the
+// paragraph below without first checking whether pg2-psiqh has itself been superseded.
+//
+// WHY `gh pr ready` WAS RULED Ask (pg2-25oru, now superseded — see above). With non-draft
+// creation rejected, `gh pr ready` is the SINGLE act that makes a PR mergeable, so it was
+// ruled the one place a person must stand. It also REPAIRED the sibling `--auto` rationale
+// in gh.go, which justified its Abstain with "a human un-drafts (the real gate)" while no
+// such gate existed — that comment cites this enforcement rather than assuming it, and
+// that citation is still accurate: `gh pr ready` is still the named gate, it now runs at
+// Abstain rather than Ask.
 //
 // WEB — `gh pr create --web` / `-w` is Approve. The CLI does not create the PR: it
 // opens the browser and the human picks draft-or-not in the GitHub UI, so it is
@@ -95,15 +109,17 @@ import (
 //	                                   the blessed verdict for the forbidden action.
 //	gh pr create -t -d                 the same defect through the SHORT spelling.
 //	gh pr ready -R --undo              `--undo` becomes the REPO and the PR is marked READY,
-//	                                   yet the Ask that is this flow's single human gate was
-//	                                   answered with the `--undo` Approve.
+//	                                   yet the Abstain that is this flow's single human gate
+//	                                   (Ask before pg2-psiqh) was answered with the `--undo`
+//	                                   Approve.
 //	gh pr merge -b --auto              `--auto` becomes the merge BODY and the merge is
 //	                                   IMMEDIATE, yet the branch in gh.go took the --auto
 //	                                   Abstain instead of its Reject.
 //
 // `gh issue create` is the one gated branch this class CANNOT reach: its verdict is a flat
-// Ask that reads no flag at all, so no value can move it. TestGH_SeparatedValue_IssueCreate
-// pins that, so the day that branch becomes flag-aware the gap is already visible.
+// Abstain (Ask before pg2-psiqh) that reads no flag at all, so no value can move it.
+// TestGH_SeparatedValue_IssueCreate pins that, so the day that branch becomes flag-aware
+// the gap is already visible.
 //
 // MEASURED, gh 2.97.0 (nixpkgs), 2026-08-12, outside a git repository. Each binding is proven
 // by a MUTUAL-EXCLUSION message gh emits only while BOTH tokens are still flags — "the
@@ -129,7 +145,8 @@ import (
 //	gh pr merge -F --admin --disable-auto -> `open --admin: no such file or directory`
 //	gh pr merge -d --admin --disable-auto -> AUTO CONFLICT: `-d` is boolean, ate nothing
 //	gh issue create --title --web         -> `must provide --title and --body`: `--web` is
-//	                                         the title, and the verdict is Ask regardless
+//	                                         the title, and the verdict is Abstain regardless
+//	                                         (Ask before pg2-psiqh)
 
 // FLAG ARITY FOR THE GATED `gh pr` SUBCOMMANDS (pg2-ylrda)
 //
@@ -145,8 +162,8 @@ import (
 //   - A no-value flag MISSING from a NO-VALUE list consumes one token too many, so a real
 //     `-d` / `--undo` / `--auto` can be swallowed. That loses a POSITIVE signal, which for
 //     every gate here moves the verdict toward the STRICTER side — Reject instead of the
-//     draft Approve, Ask instead of the `--undo` Approve, Reject instead of the `--auto`
-//     Abstain. Never past a gate.
+//     draft Approve, Abstain instead of the `--undo` Approve (Ask before pg2-psiqh), Reject
+//     instead of the `--auto` Abstain. Never past a gate.
 //
 // So an unknown flag defaults to value-taking on purpose, and a gh that grows a new BOOLEAN
 // flag is the only change needing a re-measurement to stay ACCURATE — as opposed to safe.
@@ -372,10 +389,12 @@ func boolFlagRequested(flags []string, long string, short byte) bool {
 // inert: in an auto-approving session Ask is auto-accepted, so the prompt the draft-first
 // flow assumed never appeared. Reject is not user-overridable in-session, which is the
 // intended cost and not an oversight — the capability is preserved by the two-step
-// `gh pr create --draft` then `gh pr ready` (which prompts), so the only thing removed
-// is creating a MERGEABLE PR in one un-prompted call. It is deliberately NOT the weaker
-// Abstain either: Abstain hands the verdict back to Claude Code, which auto-approves it
-// in exactly the auto-approving sessions this exists for.
+// `gh pr create --draft` then `gh pr ready` (which no longer necessarily prompts —
+// pg2-psiqh moved `gh pr ready` to Abstain, see prReadyVerdict — but still requires the
+// separate, explicit un-drafting call), so the only thing removed is creating a MERGEABLE
+// PR in one un-prompted call. It is deliberately NOT the weaker Abstain either: Abstain
+// hands the verdict back to Claude Code, which auto-approves it in exactly the
+// auto-approving sessions this exists for.
 //
 // KNOWN CONSERVATIVE EDGE: `--dry-run` prints the PR instead of creating it, so a
 // non-draft `--dry-run` is Rejected while creating nothing. It is not carved out because
@@ -384,9 +403,12 @@ func boolFlagRequested(flags []string, long string, short byte) bool {
 // an operator ruling.
 //
 // WHAT WOULD JUSTIFY CHANGING ANY OF IT: only a new operator ruling on the draft-first
-// flow — the same ruling that governs the `gh pr ready` gate and the `gh pr merge
-// --auto` Abstain below, so all three MUST move together (an un-drafted PR plus
-// auto-merge is the merge this rule set exists to keep a person in front of).
+// flow. pg2-25oru originally required this Reject, the `gh pr ready` gate and the
+// `gh pr merge --auto` Abstain to move together; pg2-psiqh (2026-08-24) deliberately moved
+// ONLY the middle one (Ask -> Abstain) and left this Reject and the merge --auto Abstain
+// untouched, so "all three MUST move together" is no longer the live constraint — record
+// any FURTHER change to this Reject as its own ruling rather than assuming it still must
+// travel with `gh pr ready`.
 func (r *Rule) prCreateVerdict(args []string) hookio.RuleResult {
 	// One arity walk, both questions: a token consumed as some other flag's VALUE is neither
 	// a draft nor a web request, however much it looks like one (pg2-ylrda).
@@ -410,7 +432,7 @@ func (r *Rule) prCreateVerdict(args []string) hookio.RuleResult {
 		Reason: "gh pr create without --draft is prohibited: this workspace lands DRAFT FIRST, and a" +
 			" non-draft PR is immediately mergeable, so creating one skips the single point at which a" +
 			" person rules on that (operator ruling pg2-4yy4r item 2). Use the two-step" +
-			" `gh pr create --draft` and then `gh pr ready`, which prompts; `--web` is also allowed," +
+			" `gh pr create --draft` and then `gh pr ready`; `--web` is also allowed," +
 			" since there a human picks draft-or-not in the browser.",
 		Module: r.Name(),
 	}
@@ -419,27 +441,34 @@ func (r *Rule) prCreateVerdict(args []string) hookio.RuleResult {
 // prReadyVerdict returns the verdict for a `gh pr ready` — args being the tokens AFTER
 // the subcommand.
 //
-// MARKING READY is ASK. With non-draft creation rejected this is the SINGLE act that
-// makes a PR mergeable, so it is the one place a person must stand; left ungated (its
-// state before pg2-25oru) the entire draft-first design is inert, because the rest of
-// the chain — `gh pr ready` then `gh pr merge --auto` — is auto-approved end to end.
+// MARKING READY WAS RULED Ask BY pg2-25oru, SUPERSEDED BY pg2-psiqh — operator ruling,
+// Phillip, 2026-08-24: it is now ABSTAIN. With non-draft creation rejected this is the
+// SINGLE act that makes a PR mergeable, so pg2-25oru made it the one place a person must
+// stand; left ungated (its state before pg2-25oru) the entire draft-first design was
+// inert, because the rest of the chain — `gh pr ready` then `gh pr merge --auto` — is
+// auto-approved end to end. THAT IS THE EXACT CONSEQUENCE pg2-psiqh re-creates: Abstain
+// returns the verdict to Claude Code, which auto-approves in an autonomous/headless
+// session or a repo whose settings already allow the underlying Bash call. The operator
+// was shown this tradeoff in those terms, explicitly, before ruling — this is not a
+// rediscovery of the old defect, it is a deliberate re-acceptance of it. See pg2-psiqh for
+// the full record.
 //
-// Ask and NOT Reject: un-drafting is a legitimate, routine act that the flow REQUIRES
-// (it is the second half of the remedy prCreateVerdict names), so prohibiting it would
-// remove the capability rather than gate it. Ask and NOT Abstain: Abstain returns the
-// verdict to Claude Code, which auto-approves in an auto-approving session — that is
-// precisely the state this replaces, so Abstain here would re-create the defect.
+// Reject was and remains available as the alternative floor (un-drafting is legitimate,
+// routine, and REQUIRED by the flow — the second half of the remedy prCreateVerdict names —
+// so prohibiting it removes the capability rather than gating it) but was NOT the ruled
+// choice; the operator chose Abstain over Reject with the consequence above already
+// stated.
 //
-// `--undo` (back to draft) is APPROVE: it moves the PR AWAY from mergeable, which is the
-// direction the flow wants, and it is the documented repair when a PR came back
-// non-draft. `--undo=false` is a mark-ready and so gets the Ask. So is a `--undo` that gh
-// swallowed as the value of `-R`/`--repo`, which is a MARK-READY and was reaching this Approve
-// before pg2-ylrda — the arity filter is what tells the two apart.
+// `--undo` (back to draft) is still APPROVE, UNCHANGED by pg2-psiqh: it moves the PR AWAY
+// from mergeable, which is the direction the flow wants, and it is the documented repair
+// when a PR came back non-draft. `--undo=false` is a mark-ready and so gets the same
+// Abstain as the plain form. So is a `--undo` that gh swallowed as the value of
+// `-R`/`--repo`, which is a MARK-READY and was reaching this Approve before pg2-ylrda — the
+// arity filter is what tells the two apart.
 //
-// WHAT WOULD JUSTIFY CHANGING IT: a new operator ruling on the draft-first flow, or
-// evidence that Ask is unreachable in practice (e.g. a session mode in which Ask is
-// auto-accepted for this rule) — in which case the answer is Reject with a named
-// alternative path, never Abstain.
+// WHAT WOULD JUSTIFY CHANGING IT: a new operator ruling superseding pg2-psiqh. A reader
+// finding this Abstain surprising should read pg2-psiqh first — it is the CURRENT decision,
+// not a regression from the Ask this replaced.
 func (r *Rule) prReadyVerdict(args []string) hookio.RuleResult {
 	if boolFlagRequested(ghFlagTokens(args, prReadyArity), "undo", 0) {
 		return hookio.RuleResult{
@@ -449,10 +478,12 @@ func (r *Rule) prReadyVerdict(args []string) hookio.RuleResult {
 		}
 	}
 	return hookio.RuleResult{
-		Decision: hookio.Ask,
-		Reason: "gh pr ready makes the pull request MERGEABLE — with non-draft creation rejected it is" +
-			" the single point at which a person rules on that (operator ruling pg2-4yy4r item 2)." +
-			" `gh pr ready --undo` (back to draft) is auto-approved.",
+		Decision: hookio.NoOpinion,
+		Reason: "gh pr ready makes the pull request MERGEABLE — with non-draft creation rejected it was" +
+			" the single point at which a person ruled on that (operator ruling pg2-4yy4r item 2), until" +
+			" operator ruling pg2-psiqh (2026-08-24) removed every Ask verdict from the gh rule module" +
+			" and chose Abstain here with that consequence already stated. `gh pr ready --undo` (back to" +
+			" draft) is auto-approved.",
 		Module: r.Name(),
 	}
 }

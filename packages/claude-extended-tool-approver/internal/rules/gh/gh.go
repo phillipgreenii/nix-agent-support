@@ -119,29 +119,41 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 			// swallowed as the value of `-b`/`-t`/`-F`/`-A`/`-R`/`--body`/
 			// `--match-head-commit` took this Abstain while gh merged IMMEDIATELY (pg2-ylrda).
 			if boolFlagRequested(ghFlagTokens(rest, prMergeArity), "auto", 0) {
-				// Intentionally Abstain — NOT a bypass, and the gate it defers to is now REAL.
-				// --auto cannot merge while the PR is a draft, and since pg2-4yy4r item 2 the
-				// un-drafting is ENFORCED as a human step: non-draft creation is Rejected and
-				// `gh pr ready` Asks (see pr.go). This comment previously ASSUMED that gate —
-				// it did not exist, because `gh pr ready` was ungated and emitted `{}`, so the
-				// chain ran end to end un-prompted. Abstain also keeps the second reason
-				// intact: toggling --auto refreshes the merge-commit message from the current
-				// PR title/body. Do not change to Reject; do not weaken the `gh pr ready` Ask
-				// without moving this branch with it, because the two together ARE the gate.
+				// Intentionally Abstain — NOT a bypass on its OWN terms, though the gate it
+				// defers to no longer forces a human prompt. --auto cannot merge while the PR
+				// is a draft; since pg2-4yy4r item 2, non-draft creation is Rejected, and since
+				// pg2-25oru `gh pr ready` was the step that un-drafts a PR and made it Ask, so
+				// the two together were a real gate — this comment previously ASSUMED that
+				// gate before pg2-25oru existed, when `gh pr ready` was ungated and emitted
+				// `{}`, so the chain ran end to end un-prompted.
+				//
+				// OPERATOR RULING pg2-psiqh (2026-08-24) moved `gh pr ready` from Ask to
+				// Abstain (see pr.go's prReadyVerdict), which RE-CREATES the un-prompted chain
+				// this paragraph originally guarded against — in an autonomous/headless
+				// session or a repo with a matching settings allow rule, `gh pr ready` then
+				// `gh pr merge --auto` now both proceed with no human checkpoint from this
+				// rule. That is a known, accepted consequence of pg2-psiqh, not a defect of
+				// THIS branch: this Abstain still keeps the second reason intact (toggling
+				// --auto refreshes the merge-commit message from the current PR title/body),
+				// and pg2-psiqh deliberately left this specific branch UNCHANGED — seeing
+				// pr ready re-tightened here would just mean re-deriving the pg2-psiqh
+				// tradeoff from a different call site. A NEW operator ruling on the
+				// draft-first flow is what would justify changing THIS branch.
+				//
 				// REFUSAL, not a not-applicable (pg2-qxe85), and this site is the one the
 				// census left for last because the reading is not obvious: the branch reads
-				// as "allowed", so a not-applicable looks harmless. It is not. The paragraph
-				// above states the invariant this branch rests on — "the two together ARE the
-				// gate" — and an ErrNotApplicable makes the leaf indistinguishable from one NO
-				// rule ever examined, which is the half a LATER rule may still APPROVE. An
-				// approve here would remove the gh-side half of that gate while the comment
-				// went on asserting it.
+				// as "allowed", so a not-applicable looks harmless. It is not. An
+				// ErrNotApplicable makes the leaf indistinguishable from one NO rule ever
+				// examined, which is the half a LATER rule may still APPROVE. An approve here
+				// would remove the gh-side half of this history while the comment went on
+				// asserting it.
 				//
 				// A refusal is the floor that cannot happen to: it records that gh EXAMINED
 				// this invocation and declined to clear it, the chain still continues, and a
-				// later Ask or Reject still wins. So the reasoning below is enforced rather
-				// than merely documented, and the recorded Former Reason becomes the live one.
-				return hookio.Refused(r.Name(), "gh pr merge --auto: not cleared here — the merge cannot proceed until `gh pr ready`, which Asks, and the two together are the draft-first gate; --auto also refreshes the merge message from the PR title/body")
+				// later Reject still wins (no later rule Asks any more — pg2-psiqh). So the
+				// reasoning above is enforced rather than merely documented, and the recorded
+				// Former Reason becomes the live one.
+				return hookio.Refused(r.Name(), "gh pr merge --auto: not cleared here — the merge cannot proceed until `gh pr ready`, which now Abstains rather than Asks (operator ruling pg2-psiqh); --auto also refreshes the merge message from the PR title/body")
 			}
 			return hookio.RuleResult{
 				Decision: hookio.Reject,
@@ -159,10 +171,15 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		if resource == "pr" && subcmd == "ready" {
 			return r.prReadyVerdict(rest), nil
 		}
+		// Ask -> Abstain by operator ruling (pg2-psiqh, 2026-08-24): the gh rule module
+		// carries no Ask verdict anywhere now. Abstain hands this to Claude Code's own
+		// permission evaluation, which auto-approves in an autonomous/headless session or
+		// a repo whose settings already allow the underlying Bash call — an accepted,
+		// explicit tradeoff, not an oversight. See pg2-psiqh for the full record.
 		if modifyingIssue[subcmd] && resource == "issue" {
 			return hookio.RuleResult{
-				Decision: hookio.Ask,
-				Reason:   "modifying gh issue command",
+				Decision: hookio.NoOpinion,
+				Reason:   "modifying gh issue command (pg2-psiqh: gh module no longer Asks)",
 				Module:   r.Name(),
 			}, nil
 		}

@@ -55,10 +55,13 @@ func TestGH_ReadOnly_Approve(t *testing.T) {
 	}
 }
 
-func TestGH_Modifying_Ask(t *testing.T) {
+func TestGH_Modifying_Abstain(t *testing.T) {
 	// `gh pr create` used to belong here. It has a draft-aware verdict of its own since
 	// pg2-25oru (Approve with --draft, Reject without), pinned by the draft-first
 	// fixtures below; `gh issue create` is deliberately untouched by that ruling.
+	//
+	// This branch returned Ask until operator ruling pg2-psiqh (2026-08-24) removed every
+	// Ask verdict from the gh rule module; it is now Abstain.
 	modifying := []string{
 		"gh issue create",
 	}
@@ -69,8 +72,8 @@ func TestGH_Modifying_Ask(t *testing.T) {
 			ToolInput: mustJSON(map[string]string{"command": cmd}),
 		}
 		got := hookio.Verdict(r.Evaluate(input))
-		if got.Decision != hookio.Ask {
-			t.Errorf("cmd %q: got %s, want ask", cmd, got.Decision)
+		if got.Decision != hookio.NoOpinion {
+			t.Errorf("cmd %q: got %s, want abstain", cmd, got.Decision)
 		}
 	}
 }
@@ -120,10 +123,13 @@ func TestGH_PrMergeAutoMerge_Reject(t *testing.T) {
 }
 
 // TestGH_DraftFirstRuledTable pins EVERY row of the operator ruling VERBATIM as the
-// ruling table wrote it (2026-07-30, pg2-4yy4r item 2; implemented as pg2-25oru). The
-// last two rows are the UNCHANGED ones and belong here precisely because they are
-// unchanged: the `--auto` Abstain is only defensible while the `gh pr ready` Ask above it
-// holds, so a change to either must be read against the whole table.
+// ruling table wrote it (2026-07-30, pg2-4yy4r item 2; implemented as pg2-25oru), with
+// `gh pr ready` UPDATED by operator ruling pg2-psiqh (2026-08-24), which moved it from Ask
+// to Abstain. The other rows are UNCHANGED by pg2-psiqh and belong here precisely because
+// they are unchanged: `gh pr merge --auto`'s Abstain relies on `gh pr ready` being gated at
+// SOME level above the un-gated `{}` it held before pg2-25oru — pg2-psiqh kept that (Abstain
+// is still a real, examined verdict, just no longer a human-visible prompt) — so a change to
+// either still needs reading against the whole table.
 func TestGH_DraftFirstRuledTable(t *testing.T) {
 	tests := []struct {
 		cmd  string
@@ -132,7 +138,7 @@ func TestGH_DraftFirstRuledTable(t *testing.T) {
 		{"gh pr create --draft", hookio.Approve},
 		{"gh pr create", hookio.Reject},
 		{"gh pr create --web", hookio.Approve},
-		{"gh pr ready", hookio.Ask},
+		{"gh pr ready", hookio.NoOpinion},
 		{"gh pr ready --undo", hookio.Approve},
 		{"gh pr merge --auto", hookio.NoOpinion},
 		{"gh pr merge", hookio.Reject},
@@ -244,11 +250,16 @@ func TestGH_PrCreateWeb_Approve(t *testing.T) {
 	}
 }
 
-// TestGH_PrReady_Ask is the row the whole design rests on: before pg2-25oru `gh pr ready`
-// matched no branch and emitted `{}`, so create -> ready -> `merge --auto` ran end to end
-// with no person in it. `--undo=false` is a mark-ready in pflag terms and must NOT reach
-// the --undo Approve.
-func TestGH_PrReady_Ask(t *testing.T) {
+// TestGH_PrReady_Abstain is the row the whole design rests on: before pg2-25oru
+// `gh pr ready` matched no branch and emitted `{}`, so create -> ready -> `merge --auto`
+// ran end to end with no person in it. `--undo=false` is a mark-ready in pflag terms and
+// must NOT reach the --undo Approve.
+//
+// This branch was Ask (pg2-25oru) until operator ruling pg2-psiqh (2026-08-24) removed
+// every Ask verdict from the gh rule module; it is now Abstain, an accepted, deliberate
+// re-creation of the un-prompted chain this test's own comment describes — see pr.go's
+// prReadyVerdict for the full record.
+func TestGH_PrReady_Abstain(t *testing.T) {
 	cmds := []string{
 		"gh pr ready",
 		"gh pr ready 123",
@@ -263,8 +274,8 @@ func TestGH_PrReady_Ask(t *testing.T) {
 	}
 	for _, cmd := range cmds {
 		got := evalGH(t, cmd)
-		if got.Decision != hookio.Ask {
-			t.Errorf("cmd %q: got %s (%s), want ask — marking ready is the single point at which a PR becomes mergeable", cmd, got.Decision, got.Reason)
+		if got.Decision != hookio.NoOpinion {
+			t.Errorf("cmd %q: got %s (%s), want abstain — marking ready is the single point at which a PR becomes mergeable", cmd, got.Decision, got.Reason)
 		}
 	}
 }
@@ -395,8 +406,8 @@ func TestGH_SeparatedValue_PrReady(t *testing.T) {
 		"gh pr ready --repo --undo",
 		"gh pr ready -R --undo 123",
 	} {
-		if got := evalGH(t, cmd); got.Decision != hookio.Ask {
-			t.Errorf("cmd %q: got %s (%s), want ask — the `--undo` is the REPO value, so this MARKS THE PR READY",
+		if got := evalGH(t, cmd); got.Decision != hookio.NoOpinion {
+			t.Errorf("cmd %q: got %s (%s), want abstain — the `--undo` is the REPO value, so this MARKS THE PR READY (pg2-psiqh: mark-ready is now Abstain, not Ask)",
 				cmd, got.Decision, got.Reason)
 		}
 	}
@@ -449,13 +460,14 @@ func TestGH_SeparatedValue_PrMerge(t *testing.T) {
 }
 
 // TestGH_SeparatedValue_IssueCreate pins the ONE gated branch this class cannot reach, so the
-// gap is recorded rather than discovered later. `gh issue create` is a flat Ask that reads no
-// flag at all, so no value — however it is spelled — can move its verdict; measured,
-// `gh issue create --title --web` answers "must provide `--title` and `--body`", i.e. gh really
-// does bind `--web` as the title, and the verdict is Ask either way. What would make it
-// reachable: a ruling that makes this branch flag-aware, at which point it needs an
-// `issueCreateArity` table measured the same way (`gh issue create --help`: the no-value flags
-// are -e/--editor, -w/--web and --help; every other flag there takes a value).
+// gap is recorded rather than discovered later. `gh issue create` is a flat Abstain (Ask
+// before pg2-psiqh, 2026-08-24) that reads no flag at all, so no value — however it is
+// spelled — can move its verdict; measured, `gh issue create --title --web` answers "must
+// provide `--title` and `--body`", i.e. gh really does bind `--web` as the title, and the
+// verdict is Abstain either way. What would make it reachable: a ruling that makes this
+// branch flag-aware, at which point it needs an `issueCreateArity` table measured the same
+// way (`gh issue create --help`: the no-value flags are -e/--editor, -w/--web and --help;
+// every other flag there takes a value).
 func TestGH_SeparatedValue_IssueCreate(t *testing.T) {
 	for _, cmd := range []string{
 		"gh issue create --title --web",
@@ -463,8 +475,8 @@ func TestGH_SeparatedValue_IssueCreate(t *testing.T) {
 		"gh issue create --title x --body y",
 		"gh issue create -R --title",
 	} {
-		if got := evalGH(t, cmd); got.Decision != hookio.Ask {
-			t.Errorf("cmd %q: got %s (%s), want ask — this branch reads no flag, so a separated value cannot move it",
+		if got := evalGH(t, cmd); got.Decision != hookio.NoOpinion {
+			t.Errorf("cmd %q: got %s (%s), want abstain — this branch reads no flag, so a separated value cannot move it",
 				cmd, got.Decision, got.Reason)
 		}
 	}
@@ -712,9 +724,11 @@ func TestGH_ApiPullRequestMerge_Reject(t *testing.T) {
 	}
 }
 
-// TestGH_ApiOtherMutation_Ask pins the PATH-BLIND floor: every mutation that is not one
-// of the two operations with a control of its own gets the conservative Ask, matching
-// the verdict the equivalent porcelain already carries (`gh issue create` is Ask).
+// TestGH_ApiOtherMutation_Abstain pins the PATH-BLIND floor: every mutation that is not
+// one of the two operations with a control of its own gets the conservative floor,
+// matching the verdict the equivalent porcelain already carries (`gh issue create` is
+// also Abstain). The floor was Ask (pg2-cl0v2) until operator ruling pg2-psiqh
+// (2026-08-24) removed every Ask verdict from the gh rule module; it is now Abstain.
 //
 // `POST .../pulls` LEFT THIS TABLE IN pg2-h8h3f and is now Rejected without
 // `draft=true`, so it lives in TestGH_ApiCreate_MirrorsPrCreateVerdict and
@@ -726,7 +740,7 @@ func TestGH_ApiPullRequestMerge_Reject(t *testing.T) {
 //
 // `gh api -X POST repos/o/r/merges` also stays, deliberately — see IsPullRequestMerge for
 // why the merge Reject is not widened to it without an operator ruling.
-func TestGH_ApiOtherMutation_Ask(t *testing.T) {
+func TestGH_ApiOtherMutation_Abstain(t *testing.T) {
 	cmds := []string{
 		"gh api -X PATCH repos/o/r/pulls/5 -f draft=false",
 		"gh api repos/o/r/issues -f title=x",
@@ -736,8 +750,8 @@ func TestGH_ApiOtherMutation_Ask(t *testing.T) {
 	}
 	for _, cmd := range cmds {
 		got := evalGH(t, cmd)
-		if got.Decision != hookio.Ask {
-			t.Errorf("cmd %q: got %s (%s), want ask (generic gh api mutation)", cmd, got.Decision, got.Reason)
+		if got.Decision != hookio.NoOpinion {
+			t.Errorf("cmd %q: got %s (%s), want abstain (generic gh api mutation floor)", cmd, got.Decision, got.Reason)
 		}
 	}
 }
@@ -825,20 +839,21 @@ func TestGH_ApiCreate_MirrorsPrCreateVerdict(t *testing.T) {
 	}
 }
 
-// TestGH_ApiCreate_UnreadableBodyHoldsTheAskFloor pins the ONE case pg2-h8h3f leaves short
-// of the mirror above, so the residual is asserted rather than merely described.
+// TestGH_ApiCreate_UnreadableBodyHoldsTheAbstainFloor pins the ONE case pg2-h8h3f leaves
+// short of the mirror above, so the residual is asserted rather than merely described.
 //
 // `--input payload.json` and `-F draft=@file` put the draft value OUTSIDE argv — measured,
 // and for `--input` measured twice over, since it also DEMOTES an argv `-f draft=true` to a
 // query-string parameter while the body still comes wholly from the file. With no readable
 // value the choice is between Reject (which would refuse a legitimate draft create with no
-// in-session override — the objection that created this gap) and the pg2-cl0v2 Ask floor.
-// It is the floor.
+// in-session override — the objection that created this gap) and the conservative floor.
+// It is the floor — Ask under pg2-cl0v2, Abstain since operator ruling pg2-psiqh
+// (2026-08-24).
 //
-// So the assertion is a RANGE, not equality: at least Ask, and never Approve. That
+// So the assertion is a RANGE, not equality: at least Abstain, and never Approve. That
 // deliberately admits a future Reject if `--input` bodies ever become readable, without
 // admitting the Approve that would be the hole.
-func TestGH_ApiCreate_UnreadableBodyHoldsTheAskFloor(t *testing.T) {
+func TestGH_ApiCreate_UnreadableBodyHoldsTheAbstainFloor(t *testing.T) {
 	cmds := []string{
 		"gh api -X POST repos/o/r/pulls --input payload.json",
 		"gh api -X POST repos/o/r/pulls --input=payload.json",
@@ -850,8 +865,8 @@ func TestGH_ApiCreate_UnreadableBodyHoldsTheAskFloor(t *testing.T) {
 	}
 	for _, cmd := range cmds {
 		got := evalGH(t, cmd)
-		if got.Decision < hookio.Ask {
-			t.Errorf("cmd %q: got %s (%s) — an unreadable draft value must hold at least the pg2-cl0v2 Ask floor",
+		if got.Decision < hookio.NoOpinion {
+			t.Errorf("cmd %q: got %s (%s) — an unreadable draft value must hold at least the Abstain floor",
 				cmd, got.Decision, got.Reason)
 		}
 	}
@@ -897,9 +912,10 @@ func TestGH_ApiPullRequestCreate_DraftAware(t *testing.T) {
 		{"gh api -X post repos/o/r/pulls -f title=x", hookio.Reject}, // gh upper-cases the method
 		{"gh api -X POST /repos/o/r/pulls -f title=x", hookio.Reject},
 		{"gh api -X POST repos/{owner}/{repo}/pulls -f title=x", hookio.Reject},
-		// A `draft` on the WRONG endpoint is not this gate: these keep the generic Ask.
-		{"gh api -X PATCH repos/o/r/pulls/5 -f draft=false", hookio.Ask},
-		{"gh api -X POST repos/o/r/pulls/5/reviews -f body=x", hookio.Ask},
+		// A `draft` on the WRONG endpoint is not this gate: these keep the generic
+		// mutation floor (Abstain since pg2-psiqh, 2026-08-24; was Ask under pg2-cl0v2).
+		{"gh api -X PATCH repos/o/r/pulls/5 -f draft=false", hookio.NoOpinion},
+		{"gh api -X POST repos/o/r/pulls/5/reviews -f body=x", hookio.NoOpinion},
 		// ... and a GET of the collection is still just a read.
 		{"gh api repos/o/r/pulls", hookio.Approve},
 	}
@@ -956,7 +972,7 @@ func TestGH_Api_GluedQuoteParity(t *testing.T) {
 		{"gh api -X POST repos/o/r/pulls -f draft='true'", hookio.Approve},
 		{"gh api -X POST repos/o/r/pulls -f draft='false'", hookio.Reject},
 		{"gh api graphql -f query='{ viewer { login } }'", hookio.Approve},
-		{"gh api graphql -f query='mutation{addComment(input:{})}'", hookio.Ask},
+		{"gh api graphql -f query='mutation{addComment(input:{})}'", hookio.NoOpinion},
 		{"gh api --method='PUT' repos/o/r/pulls/5/merge", hookio.Reject},
 		{"gh api -X='PUT' repos/o/r/pulls/5/merge", hookio.Reject},
 		{"gh api --method='GET' repos/o/r/pulls", hookio.Approve},
@@ -1026,7 +1042,9 @@ func TestGH_ApiGraphQLRead_Approve(t *testing.T) {
 // 2026-08-14: `-F query=@q.graphql` really does read the file (body
 // `{"query":"{ viewer { login } }"}`), so the document is genuinely not in argv and no
 // scanner can see it. `-f query=@q.graphql` sends the literal string `@q.graphql` instead,
-// which is not a GraphQL document either — the same Ask, by a different route.
+// which is not a GraphQL document either — the same conservative floor, by a different
+// route. That floor was Ask (pg2-44dsd) until operator ruling pg2-psiqh (2026-08-24)
+// removed every Ask verdict from the gh rule module; it is now Abstain.
 func TestGH_ApiGraphQL_NotApproved(t *testing.T) {
 	cmds := []string{
 		// Genuine mutations.
@@ -1058,8 +1076,8 @@ func TestGH_ApiGraphQL_NotApproved(t *testing.T) {
 			t.Errorf("cmd %q: got APPROVE (%s) — only a document PROVEN read-only may be approved (pg2-44dsd fail-safe)",
 				cmd, got.Reason)
 		}
-		if got.Decision < hookio.Ask {
-			t.Errorf("cmd %q: got %s (%s) — must hold at least the pg2-cl0v2 Ask floor, never the Abstain that an auto-approving session accepts",
+		if got.Decision < hookio.NoOpinion {
+			t.Errorf("cmd %q: got %s (%s) — must hold at least the Abstain floor (operator ruling pg2-psiqh; was the pg2-cl0v2 Ask floor)",
 				cmd, got.Decision, got.Reason)
 		}
 	}
@@ -1069,12 +1087,17 @@ func TestGH_ApiGraphQL_NotApproved(t *testing.T) {
 // half of PR creation. `gh api graphql` carrying a `createPullRequest` mutation creates a PR
 // exactly as `POST .../pulls` does, but its draft argument lives in the document — often
 // behind a variable whose value is a separate `-f variables=<json>` blob — so there is no
-// argv-visible VALUE to sort Approve from Reject on. It is therefore PINNED at Ask: never
-// Approve (which the pg2-44dsd read branch must never reach for it), and never the Abstain
-// an auto-approving session accepts. See apiGraphQLVerdict for what would justify Reject.
+// argv-visible VALUE to sort Approve from Reject on. It is therefore PINNED: never Approve
+// (which the pg2-44dsd read branch must never reach for it). It was pinned at Ask under
+// pg2-h8h3f specifically to be "never the Abstain an auto-approving session accepts" — that
+// exact tradeoff was named and then chosen anyway by operator ruling pg2-psiqh (2026-08-24),
+// which removed every Ask verdict from the gh rule module; the pin is now Abstain. See
+// apiGraphQLVerdict for what would justify Reject, and pg2-psiqh for what would justify
+// re-tightening this pin.
 //
-// The assertion is EXACT on Ask, not a range, because that is what "pinned" means here: a
-// future Reject is a ruling, and a ruling should have to update this test.
+// The assertion is EXACT on Abstain, not a range, because that is what "pinned" means here:
+// a future Reject (or a reversion to Ask, which would need its own new operator ruling) is a
+// ruling, and a ruling should have to update this test.
 func TestGH_ApiGraphQLCreatePullRequest_Pinned(t *testing.T) {
 	cmds := []string{
 		`gh api graphql -f 'query=mutation { createPullRequest(input: {repositoryId: "x", title: "t", headRefName: "h", baseRefName: "main"}) { pullRequest { number } } }'`,
@@ -1086,8 +1109,8 @@ func TestGH_ApiGraphQLCreatePullRequest_Pinned(t *testing.T) {
 	}
 	for _, cmd := range cmds {
 		got := evalGH(t, cmd)
-		if got.Decision != hookio.Ask {
-			t.Errorf("cmd %q: got %s (%s), want ask — the GraphQL PR create is pinned at the Ask floor (pg2-h8h3f)",
+		if got.Decision != hookio.NoOpinion {
+			t.Errorf("cmd %q: got %s (%s), want abstain — the GraphQL PR create is pinned at the Abstain floor (pg2-h8h3f; operator ruling pg2-psiqh)",
 				cmd, got.Decision, got.Reason)
 		}
 	}
@@ -1297,7 +1320,15 @@ func TestGH_ParseGhAPICall(t *testing.T) {
 // global flag precede — or sit inside — gh's command path, and while Evaluate read the path
 // positionally EVERY such spelling resolved `resource` to a flag, matched no branch and
 // reached the final Abstain, which an auto-approving session accepts. It bypassed the whole
-// rule, so this pins one row per branch that has a NON-ABSTAIN verdict, not just pr.
+// rule, so this pins one row per branch that had a NON-ABSTAIN verdict AT THE TIME — not
+// just pr.
+//
+// TWO ROWS ARE NOW ABSTAIN THEMSELVES (`gh pr ready`, `gh issue create` — operator ruling
+// pg2-psiqh, 2026-08-24), the same Decision the terminal fall-through manufactures, so for
+// THOSE TWO the Decision comparison below can no longer prove the bypass stayed closed — a
+// misresolution that fell through unexamined would read identically. See the Provenance
+// checks appended after the main loop, which is the same fix
+// TestGH_GlobalFlagBeforeApi_HoldsMutationFloor applies for the analogous `gh api` case.
 //
 // Each row is stated as a PAIR and asserted twice: the prefixed spelling must reach the
 // named verdict AND the same verdict as its plain form. Written that way, a future change
@@ -1332,7 +1363,7 @@ func TestGH_GlobalFlagBeforeCommandPath(t *testing.T) {
 		{"gh pr create -d", "gh -R o/r pr create -d", hookio.Approve},
 		{"gh pr create -d", "gh -Ro/r pr create -d", hookio.Approve},
 		{"gh pr create --web", "gh --repo o/r pr create --web", hookio.Approve},
-		{"gh pr ready", "gh --repo o/r pr ready", hookio.Ask},
+		{"gh pr ready", "gh --repo o/r pr ready", hookio.NoOpinion},
 		{"gh pr ready --undo", "gh --repo o/r pr ready --undo", hookio.Approve},
 		// The landed merge controls.
 		{"gh pr merge", "gh --repo o/r pr merge", hookio.Reject},
@@ -1354,7 +1385,7 @@ func TestGH_GlobalFlagBeforeCommandPath(t *testing.T) {
 		// The pg2-44dsd GraphQL read, which must survive the same pre-path flag skipping.
 		{"gh api graphql -f query={viewer{login}}", "gh --hostname github.com api graphql -f query={viewer{login}}", hookio.Approve},
 		// The read-only branches.
-		{"gh issue create", "gh --repo o/r issue create", hookio.Ask},
+		{"gh issue create", "gh --repo o/r issue create", hookio.NoOpinion},
 		{"gh pr view", "gh --repo o/r pr view", hookio.Approve},
 		{"gh pr list", "gh -R o/r pr list", hookio.Approve},
 		{"gh issue list", "gh -R o/r issue list", hookio.Approve},
@@ -1376,30 +1407,59 @@ func TestGH_GlobalFlagBeforeCommandPath(t *testing.T) {
 				tt.prefixed, gotPrefixed.Decision, tt.plain, gotPlain.Decision)
 		}
 	}
+	// `gh pr ready` and `gh issue create` are Abstain THEMSELVES now (pg2-psiqh), the same
+	// Decision — and, on a misresolved path, the same Decision the parity check above would
+	// also see on both sides — that the chain's terminal fall-through manufactures. Only
+	// Provenance (ADR 0044) tells "gh examined this and landed on its own floor" apart from
+	// "gh never matched anything", so pin that explicitly for these two rather than trust the
+	// Decision table above to still be sufficient for them.
+	for _, cmd := range []string{"gh --repo o/r pr ready", "gh --repo o/r issue create"} {
+		got := evalGH(t, cmd)
+		if got.Provenance == hookio.ProvenanceExhaustion {
+			t.Errorf("cmd %q: abstain via chain EXHAUSTION (Reason %q), not gh's own examined verdict — the pg2-by1ij bypass is resurfacing",
+				cmd, got.Reason)
+		}
+	}
 }
 
-// TestGH_GlobalFlagBeforeApi_NotAbstain pins the ONE parity gap pg2-by1ij leaves, so it is
-// recorded rather than discovered later. `--repo` is not an inherited flag of `gh api`
-// (measured: `gh --repo o/r api repos/o/r` answers `unknown flag: --repo`), so it is absent
-// from api.go's MEASURED arity tables and parseGhAPICall reads it as boolean — which makes
-// its VALUE the endpoint operand, exactly the mis-attribution that file's doc already
-// records. The direction is the safe one and this asserts it: the verdict is the generic
-// mutation Ask, never Approve and never the fall-through Abstain that was the bypass.
+// TestGH_GlobalFlagBeforeApi_HoldsMutationFloor pins the ONE parity gap pg2-by1ij leaves,
+// so it is recorded rather than discovered later. `--repo` is not an inherited flag of
+// `gh api` (measured: `gh --repo o/r api repos/o/r` answers `unknown flag: --repo`), so it
+// is absent from api.go's MEASURED arity tables and parseGhAPICall reads it as boolean —
+// which makes its VALUE the endpoint operand, exactly the mis-attribution that file's doc
+// already records. The direction is the safe one and this asserts it: the verdict is the
+// generic mutation floor, never Approve and never the UNEXAMINED fall-through that was the
+// bypass.
+//
+// RENAMED from TestGH_GlobalFlagBeforeApi_NotAbstain (operator ruling pg2-psiqh,
+// 2026-08-24): the generic mutation floor ITSELF is now Abstain (NoOpinion), the same
+// Decision value the chain's own terminal fall-through manufactures on ErrNotApplicable —
+// see hookio.Verdict. So a bare Decision comparison can no longer tell "gh's own rule
+// examined this and landed on its floor" apart from "gh never matched anything and the
+// chain gave up", which is exactly the distinction this test exists to make. The fix is
+// Provenance (ADR 0044): the chain's manufactured exhaustion verdict is tagged
+// ProvenanceExhaustion, while every RuleResult this rule builds itself is not. Checking
+// that tag — not just the Decision — is what keeps this a real regression guard rather
+// than one that would pass identically whether or not gh ever looked at the command.
 //
 // It is not closed by adding `repo`/`R` to those tables because they are read off
 // `gh api --help` and gh REFUSES this spelling outright, so the entry would encode a flag
 // api does not have in order to sharpen a command that cannot run. What would justify it:
 // gh making `--repo` inherited by `api`, which is a re-measurement of `gh api --help`.
-func TestGH_GlobalFlagBeforeApi_NotAbstain(t *testing.T) {
+func TestGH_GlobalFlagBeforeApi_HoldsMutationFloor(t *testing.T) {
 	cmds := []string{
 		"gh --repo o/r api repos/o/r/pulls/5/merge -X PUT",
 		"gh -R o/r api repos/o/r/pulls -f title=x",
 	}
 	for _, cmd := range cmds {
 		got := evalGH(t, cmd)
-		if got.Decision != hookio.Ask {
-			t.Errorf("cmd %q: got %s (%s), want ask — the endpoint is mis-attributed by design, but the mutation floor must hold",
+		if got.Decision != hookio.NoOpinion {
+			t.Errorf("cmd %q: got %s (%s), want abstain — the endpoint is mis-attributed by design, but the mutation floor must hold",
 				cmd, got.Decision, got.Reason)
+		}
+		if got.Provenance == hookio.ProvenanceExhaustion {
+			t.Errorf("cmd %q: Decision was abstain via chain EXHAUSTION (Reason %q), not gh's own examined mutation floor — this is the bypass pg2-by1ij closed, resurfacing",
+				cmd, got.Reason)
 		}
 	}
 }

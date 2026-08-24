@@ -95,41 +95,57 @@ import (
 // path-blind Ask, though it closes the blanket approval, would still leave the
 // merge one notch below its own control, which is the defect restated.
 //
-// EVERY OTHER MUTATION is ASK — the conservative floor. Ask and not Approve because
-// `gh api` can perform any write the token permits, and the blanket Approve was
-// already measured bypassing the Ask that `gh pr create` carried at the time
-// (`gh api -X POST repos/o/r/pulls -f title=x` measured `allow`). Ask and not Reject
-// because `gh api` has no single operation to rule on: it is the whole REST surface,
-// most of it unremarkable, and a Reject would be a blanket prohibition on writing to
-// GitHub that no operator ruling covers. Ask lands each write in front of the person
-// who can judge it, and matches the verdict the equivalent porcelain
-// (`gh issue create`) carries — which is the property that makes the two consistent
-// rather than one being the other's bypass.
+// EVERY OTHER MUTATION WAS ASK — SUPERSEDED (operator ruling, Phillip, 2026-08-24,
+// pg2-psiqh): it is now ABSTAIN. The paragraph below is the ORIGINAL pg2-cl0v2 reasoning
+// for why Ask, kept for context; it is NOT the live decision — a later reader MUST NOT
+// re-derive "generic mutations Ask" from it. The operator was shown, explicitly, that
+// Abstain here defers to Claude Code's own permission evaluation — auto-approved in an
+// autonomous/headless session or a repo whose settings already allow the underlying Bash
+// call, which is bit-for-bit the `gh api -X POST repos/o/r/pulls -f title=x` bypass
+// pg2-cl0v2 was written to close — and chose Abstain anyway, for the entire unclassified
+// REST/GraphQL write surface. See pg2-psiqh for the full record; it also names what is
+// UNCHANGED — the merge Reject above and the PR-create Approve/Reject split below are
+// Ask sites, so pg2-psiqh does not touch them.
 //
-// PR CREATION NOW MIRRORS THE PORCELAIN (pg2-h8h3f), which closes the divergence
-// pg2-25oru recorded here. That divergence was NOT a ruling: `POST .../pulls` sat at
-// this Ask purely because parseGhAPICall read GitHub's `draft` as a PRESENCE boolean
-// and could not tell `-f draft=true` from `-f draft=false`, so following the porcelain
-// to Reject would also have refused the BLESSED create with no in-session override.
-// The body-parameter reader below supplies the VALUE, so apiPullRequestCreateVerdict
-// now answers Approve / Reject exactly as prCreateVerdict does — with ONE residual,
-// stated there and not papered over: an `--input` body (or `-F draft=@file`) keeps the
-// value outside argv, and that case holds the Ask floor.
+// [pg2-cl0v2's original reasoning, superseded above:] Ask and not Approve because `gh
+// api` can perform any write the token permits, and the blanket Approve was already
+// measured bypassing the Ask that `gh pr create` carried at the time (`gh api -X POST
+// repos/o/r/pulls -f title=x` measured `allow`). Ask and not Reject because `gh api` has
+// no single operation to rule on: it is the whole REST surface, most of it unremarkable,
+// and a Reject would be a blanket prohibition on writing to GitHub that no operator
+// ruling covers. Ask landed each write in front of the person who could judge it, and
+// matched the verdict the equivalent porcelain (`gh issue create`) carried at the time —
+// which is ALSO now Abstain, by the same pg2-psiqh ruling (see gh.go's modifyingIssue
+// branch), so the two remain consistent with each other.
 //
-// GRAPHQL READS ARE NOW APPROVED (pg2-44dsd). Every GraphQL call is a POST — measured
+// PR CREATION MIRRORS THE PORCELAIN (pg2-h8h3f), which closes the divergence pg2-25oru
+// recorded here. That divergence was NOT a ruling: `POST .../pulls` sat at the (former)
+// Ask purely because parseGhAPICall read GitHub's `draft` as a PRESENCE boolean and could
+// not tell `-f draft=true` from `-f draft=false`, so following the porcelain to Reject
+// would also have refused the BLESSED create with no in-session override. The
+// body-parameter reader below supplies the VALUE, so apiPullRequestCreateVerdict now
+// answers Approve / Reject exactly as prCreateVerdict does — with ONE residual, stated
+// there and not papered over: an `--input` body (or `-F draft=@file`) keeps the value
+// outside argv, and that case holds the generic mutation floor, now Abstain (pg2-psiqh).
+//
+// GRAPHQL READS ARE APPROVED (pg2-44dsd). Every GraphQL call is a POST — measured
 // below — so the method reading alone Asked on a read-only query; graphql.go's corpus
 // measurement sized that at 378 of 576 logged `gh api graphql` invocations. A document
 // that is argv-visible AND scans as query-only Approves; anything else, including a
-// `createPullRequest` mutation, holds an Ask. See apiGraphQLVerdict.
+// `createPullRequest` mutation, holds the generic mutation floor, now Abstain
+// (pg2-psiqh; was Ask). See apiGraphQLVerdict.
 //
 // WHAT WOULD JUSTIFY CHANGING WHAT IS LEFT: for the merge Reject, only a new operator
 // ruling on immediate merges — the same ruling that governs the `gh pr merge` branch it
-// mirrors, so the two MUST move together. For the generic Ask, evidence that a
-// specific endpoint class is read-only in practice (then narrow it by MEASURING the
-// method, not by re-widening the branch), or an operator ruling extending the merge
-// Reject to a broader endpoint set (`/merges`, `merge-upstream`, a `graphql`
-// mergePullRequest mutation) — see IsPullRequestMerge and
-// graphqlPullRequestCreateFields for why those are Ask today.
+// mirrors, so the two MUST move together; pg2-psiqh did not touch it. For the generic
+// Abstain floor, only a new operator ruling superseding pg2-psiqh — narrowing a specific
+// endpoint class by MEASURING it no longer buys anything at this floor's level, since
+// Abstain and a measured-safe Approve differ only in whether Claude Code's own settings
+// happen to have a rule for it; narrowing would still be worth doing to make the verdict
+// deliberate rather than incidental, per pg2-psiqh's own bead. Widening the merge Reject
+// to a broader endpoint set (`/merges`, `merge-upstream`, a `graphql` mergePullRequest
+// mutation) — see IsPullRequestMerge and graphqlPullRequestCreateFields for why those
+// hold the generic floor today.
 func (r *Rule) apiVerdict(args []string) hookio.RuleResult {
 	call := parseGhAPICall(args)
 	if !call.IsMutating() {
@@ -156,53 +172,71 @@ func (r *Rule) apiVerdict(args []string) hookio.RuleResult {
 	if call.IsPullRequestCreate() {
 		return r.apiPullRequestCreateVerdict(call)
 	}
-	return r.apiMutationAsk(call)
+	return r.apiMutationAbstain(call)
 }
 
-// apiMutationAsk is the pg2-cl0v2 conservative floor — the verdict every mutation this rule
-// has nothing more specific to say about receives. It is a function rather than an inline
-// literal because THREE sites now return it (the generic fall-through, the GraphQL branch
-// and the unreadable-draft case), and a floor that is copied is a floor that drifts: the
-// point of the pg2-cl0v2 design is that these all land on the SAME level.
-func (r *Rule) apiMutationAsk(call ghAPICall) hookio.RuleResult {
+// apiMutationAbstain is the conservative floor — the verdict every mutation this rule has
+// nothing more specific to say about receives. It is a function rather than an inline
+// literal because THREE sites return it (the generic fall-through, the GraphQL branch and
+// the unreadable-draft case), and a floor that is copied is a floor that drifts: the point
+// of the design is that these all land on the SAME level.
+//
+// WAS apiMutationAsk, RETURNING Ask, UNTIL OPERATOR RULING pg2-psiqh (2026-08-24): the gh
+// rule module carries no Ask verdict anywhere now, so this floor is Abstain. The rename is
+// deliberate — the old name would silently lie about what the function returns. Abstain
+// defers to Claude Code's own permission evaluation, auto-approved in an
+// autonomous/headless session or a repo whose settings already allow the underlying Bash
+// call; that consequence was shown to the operator explicitly before the ruling. See
+// pg2-psiqh for the full record, and pg2-cl0v2 for why this floor exists at all (closing
+// the blanket "read-only gh api" approval that ignored HTTP method).
+func (r *Rule) apiMutationAbstain(call ghAPICall) hookio.RuleResult {
 	return hookio.RuleResult{
-		Decision: hookio.Ask,
+		Decision: hookio.NoOpinion,
 		Reason: "gh: gh api with a mutating HTTP method (" + call.methodLabel() +
-			") — `gh api` is a general-purpose REST/GraphQL client, so this writes to GitHub" +
-			" (pg2-cl0v2). Only a read-only gh api is auto-approved.",
+			") — `gh api` is a general-purpose REST/GraphQL client, so this writes to GitHub." +
+			" Not gated beyond this (operator ruling pg2-psiqh, 2026-08-24; originally Ask" +
+			" under pg2-cl0v2). Only a read-only gh api is auto-approved.",
 		Module: r.Name(),
 	}
 }
 
-// apiGraphQLVerdict returns the verdict for `gh api graphql` (pg2-44dsd, pg2-h8h3f).
+// apiGraphQLVerdict returns the verdict for `gh api graphql` (pg2-44dsd, pg2-h8h3f,
+// pg2-psiqh).
 //
 // A READ-ONLY DOCUMENT IS APPROVE. Every GraphQL call is an HTTP POST — measured — so
-// pg2-cl0v2's method reading alone put a read-only query at the mutation Ask. The corpus
+// pg2-cl0v2's method reading alone put a read-only query at the mutation floor. The corpus
 // measurement in graphql.go's doc block sized that at 378 of 576 logged `gh api graphql`
 // invocations, 66%, and it is the whole reason this branch exists. The document must be
 // ARGV-VISIBLE and must SCAN: a `-F query=@file` or an `--input` body is not in argv at all
-// and cannot be shown to read, so it keeps the Ask (fail-safe, and the bead's own
-// requirement).
+// and cannot be shown to read, so it keeps the mutation floor (fail-safe, and the bead's
+// own requirement).
 //
-// A PULL-REQUEST-CREATING MUTATION IS A PINNED ASK, AND THE PIN IS CHECKED FIRST.
+// A PULL-REQUEST-CREATING MUTATION IS A PINNED VERDICT, AND THE PIN IS CHECKED FIRST.
 // `createPullRequest` creates a PR exactly as `POST /repos/o/r/pulls` does, so it belongs to
 // the draft-first design and must never be swept into the read Approve above by a
 // classifier bug — testing it BEFORE the Kind is what makes that structural rather than
 // hopeful. TestGH_ApiGraphQLCreatePullRequest_Pinned holds the level.
 //
-// WHY ASK AND NOT REJECT, which is the level the porcelain would suggest. The GraphQL draft
-// argument lives INSIDE the document (`createPullRequest(input: {draft: true})`) and
-// routinely arrives through a variable (`draft: $isDraft`) whose value is a separate
-// `-f variables=<json>` blob. So unlike the REST path below there is no argv-visible VALUE
-// to sort Approve from Reject on, and a blanket Reject would refuse the legitimate
-// draft-creating mutation with no in-session override — the same objection that stopped
-// pg2-25oru from following the porcelain here. Ask keeps the capability and still puts a
-// person in front of it.
+// THE PIN IS NOW ABSTAIN, NOT ASK — SUPERSEDED (operator ruling, Phillip, 2026-08-24,
+// pg2-psiqh). The three paragraphs below are the ORIGINAL pg2-h8h3f reasoning for why Ask
+// (and specifically not Abstain); they are kept for context but are NOT the live decision.
+// The operator was shown Abstain's consequence explicitly — auto-approved in an
+// autonomous/headless session or a repo whose settings already allow the underlying Bash
+// call, i.e. losing the human checkpoint this pin exists to guarantee — and chose Abstain
+// anyway, for the entire gh rule module. See pg2-psiqh for the full record.
 //
-// WHY ASK AND NOT ABSTAIN. Abstain returns the verdict to Claude Code, which auto-approves
-// it in exactly the auto-approving sessions the draft-first gate exists for. Ask is also
-// what this shape already received (as a generic mutation), so pinning it changes no
-// verdict today — it makes the level DELIBERATE and un-droppable instead of incidental.
+// [pg2-h8h3f's original reasoning, superseded above:] WHY ASK AND NOT REJECT, which is the
+// level the porcelain would suggest. The GraphQL draft argument lives INSIDE the document
+// (`createPullRequest(input: {draft: true})`) and routinely arrives through a variable
+// (`draft: $isDraft`) whose value is a separate `-f variables=<json>` blob. So unlike the
+// REST path below there is no argv-visible VALUE to sort Approve from Reject on, and a
+// blanket Reject would refuse the legitimate draft-creating mutation with no in-session
+// override — the same objection that stopped pg2-25oru from following the porcelain here.
+// Ask kept the capability and still put a person in front of it.
+//
+// WHY ASK AND NOT ABSTAIN (superseded — pg2-psiqh chose Abstain with this exact tradeoff
+// named). Abstain returns the verdict to Claude Code, which auto-approves it in exactly
+// the auto-approving sessions the draft-first gate exists for.
 //
 // WHAT WOULD JUSTIFY REJECT: a draft-argument reader for the GraphQL document AND its
 // variables blob, so `draft: true` could be told from `draft: false` — plus the same
@@ -218,12 +252,13 @@ func (r *Rule) apiGraphQLVerdict(call ghAPICall) hookio.RuleResult {
 
 	if doc.CreatesPullRequest() {
 		return hookio.RuleResult{
-			Decision: hookio.Ask,
+			Decision: hookio.NoOpinion,
 			Reason: "gh: gh api graphql carries a `createPullRequest` mutation, which CREATES a" +
 				" pull request just as `gh api -X POST .../pulls` does (pg2-h8h3f). Its draft" +
 				" argument lives in the GraphQL document, often behind a variable, so it cannot be" +
 				" read from argv and this call cannot be shown to be the blessed DRAFT create." +
-				" Prefer `gh pr create --draft`, which is auto-approved.",
+				" Not gated beyond this (operator ruling pg2-psiqh, 2026-08-24; originally Ask" +
+				" under pg2-h8h3f). Prefer `gh pr create --draft`, which is auto-approved.",
 			Module: r.Name(),
 		}
 	}
@@ -237,18 +272,20 @@ func (r *Rule) apiGraphQLVerdict(call ghAPICall) hookio.RuleResult {
 	}
 	if doc.Kind == graphqlWrite {
 		return hookio.RuleResult{
-			Decision: hookio.Ask,
-			Reason: "gh: gh api graphql carries a GraphQL mutation, so it writes to GitHub" +
-				" (pg2-cl0v2). Only a read-only GraphQL document is auto-approved.",
+			Decision: hookio.NoOpinion,
+			Reason: "gh: gh api graphql carries a GraphQL mutation, so it writes to GitHub. Not" +
+				" gated beyond this (operator ruling pg2-psiqh, 2026-08-24; originally Ask under" +
+				" pg2-cl0v2). Only a read-only GraphQL document is auto-approved.",
 			Module: r.Name(),
 		}
 	}
 	return hookio.RuleResult{
-		Decision: hookio.Ask,
+		Decision: hookio.NoOpinion,
 		Reason: "gh: gh api graphql whose document is not readable from the command line — it came" +
 			" from a file or stdin (`-F query=@file`, `--input`) or did not scan as GraphQL — so it" +
-			" cannot be shown to be a read (pg2-44dsd fail-safe). Pass the document as" +
-			" `-f query=…` to have a read-only query auto-approved.",
+			" cannot be shown to be a read (pg2-44dsd fail-safe). Not gated beyond this (operator" +
+			" ruling pg2-psiqh, 2026-08-24; originally Ask). Pass the document as `-f query=…` to" +
+			" have a read-only query auto-approved.",
 		Module: r.Name(),
 	}
 }
@@ -268,22 +305,28 @@ func (r *Rule) apiGraphQLVerdict(call ghAPICall) hookio.RuleResult {
 // pg2-25oru named:
 //
 //   - draft KNOWN TRUE   -> Approve. Bit-for-bit `gh pr create --draft`.
-//   - draft UNREADABLE   -> Ask, the pg2-cl0v2 floor. `--input payload.json` and
-//     `-F draft=@file` put the value outside argv (measured), and a Reject there would
-//     refuse a legitimate draft create for no reason but our inability to read it — the
-//     objection that produced this gap in the first place. Ask preserves the capability and
-//     keeps a person in the loop, so the gap narrows to "Ask is auto-accepted in an
-//     auto-approving session" instead of covering every raw-API create.
+//   - draft UNREADABLE   -> apiMutationAbstain, the conservative floor (Abstain; was Ask
+//     under pg2-cl0v2 until operator ruling pg2-psiqh, 2026-08-24 — see that function's
+//     doc comment). `--input payload.json` and `-F draft=@file` put the value outside argv
+//     (measured), and a Reject there would refuse a legitimate draft create for no reason
+//     but our inability to read it — the objection that produced this gap in the first
+//     place. The floor preserves the capability; under Abstain the gap is now "auto-approved
+//     in an autonomous/headless session or a repo whose settings already allow the
+//     underlying Bash call" (pg2-psiqh's accepted consequence), not just "Ask is
+//     auto-accepted in an auto-approving session".
 //   - draft ABSENT or KNOWN FALSE -> Reject. Bit-for-bit the non-draft create the porcelain
-//     Rejects, and the whole hole this bead is about: `gh api -X POST repos/o/r/pulls
+//     Rejects, and the whole hole pg2-cl0v2 was about: `gh api -X POST repos/o/r/pulls
 //     -f draft=false` was an Ask, hence auto-accepted, hence a non-draft PR the porcelain
-//     would have refused.
+//     would have refused. pg2-psiqh did not touch this Reject.
 //
-// WHAT WOULD JUSTIFY CHANGING IT: only the operator ruling that governs prCreateVerdict —
-// the two MUST move together now, which is exactly the property that was missing. Narrowing
-// the UNREADABLE case to a Reject would need `--input` bodies to be readable, which means
-// reading a file at hook time; that is a different kind of change (I/O in a verdict) and
-// needs its own bead.
+// WHAT WOULD JUSTIFY CHANGING IT: for the UNREADABLE case, only a new operator ruling
+// superseding pg2-psiqh (narrowing it to a Reject would ALSO need `--input` bodies to be
+// readable, which means reading a file at hook time — a different kind of change, I/O in a
+// verdict, needing its own bead regardless of the Ask/Abstain question). For the ABSENT/
+// KNOWN-FALSE Reject, the operator ruling that governs prCreateVerdict — pg2-psiqh
+// deliberately left this Reject and prCreateVerdict's untouched, so "the two MUST move
+// together" no longer describes the UNREADABLE row above, only this one and its porcelain
+// mirror.
 func (r *Rule) apiPullRequestCreateVerdict(call ghAPICall) hookio.RuleResult {
 	value, state := call.bodyParam("draft")
 	switch {
@@ -295,7 +338,7 @@ func (r *Rule) apiPullRequestCreateVerdict(call ghAPICall) hookio.RuleResult {
 			Module: r.Name(),
 		}
 	case state == bodyParamUnreadable:
-		return r.apiMutationAsk(call)
+		return r.apiMutationAbstain(call)
 	}
 	return hookio.RuleResult{
 		Decision: hookio.Reject,
