@@ -65,9 +65,19 @@ deployment concern and is not defined here (`## Scope`).
 
 ## The write surface
 
+- **Draft PR** — a state the PR's own author sets on the code host, independent of pg-pr: while a
+  PR is a draft PR, ordinary review does not begin (`INV-REVIEW-2`). A PR fact pg-pr reads, never
+  something pg-pr decides on its own initiative. Distinct from **Draft** below — an unrelated,
+  pre-existing sense of the same word in this glossary, meaning review content pg-pr holds
+  locally before posting: a PR can be a draft PR with no such content staged, and content can be
+  staged against a PR that is not a draft PR.
 - **Draft** — review content staged but not yet posted live.
 - **Pending review** — a review posted to the code host but not yet submitted with a verdict; the
   code host's own "not yet final" state for a review.
+- **WIP** — the reviewing operator's own suppression on one of their own PRs: while set, that
+  operator does not yet want the PR reviewed, even though it is a draft PR the operator would
+  otherwise be allowed to review (`INV-REVIEW-2`). WIP has no bearing on whether anyone else's PR
+  is reviewable, and no bearing once the PR is no longer a draft PR.
 - **Head-anchored** — a comment or review anchored to the exact commit it was produced against,
   so a later commit landing does not invalidate it.
 - **Supersede** — a fresh draft replaces an existing pending draft on the same PR rather than
@@ -78,6 +88,15 @@ deployment concern and is not defined here (`## Scope`).
 - **Attribution mark** — the visible and invisible marks pg-pr stamps on everything it posts under
   a shared or human account, so the content is distinguishable as agent-generated
   (`INV-ATTR-1`).
+
+## Visibility
+
+- **User-hidden** — a display-only suppression the operator sets on one specific PR they no
+  longer want to see in day-to-day surfaces. A user-hidden PR is tracked, synced, and ingested
+  exactly as any other PR — user-hidden governs visibility alone, never ingestion. Distinct from
+  the pre-existing, unrelated mechanism (outside this glossary's vocabulary) that drops a
+  team-authored draft PR from view: that mechanism is host-derived and not the operator's own
+  decision, where user-hidden is always an explicit, per-PR act by the operator.
 
 ## Excluded (named so the boundary is explicit, `## Scope`)
 

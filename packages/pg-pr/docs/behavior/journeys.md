@@ -44,7 +44,8 @@ Extensions:
 
 **Primary actor:** `ACTOR-PGPR-OP`.
 **Level:** user-goal.
-**Preconditions:** the target PR is not draft.
+**Preconditions:** the target PR is not draft, or the PR is the reviewing operator's own and WIP
+is not set on it.
 _Requires:_ `INV-REVIEW-1`, `INV-REVIEW-2`, `INV-REVIEW-3`, `INV-WRITE-1`, `INV-ATTR-1`.
 
 1. The reviewer stages review content for a PR.
@@ -56,7 +57,8 @@ _Requires:_ `INV-REVIEW-1`, `INV-REVIEW-2`, `INV-REVIEW-3`, `INV-WRITE-1`, `INV-
 
 Extensions:
 
-- 1a. The PR is still marked draft: the post is refused (`INV-REVIEW-2`).
+- 1a. The PR is draft and either belongs to someone other than the reviewing operator, or is the
+  operator's own with WIP set: the post is refused (`INV-REVIEW-2`).
 - 2a. Whether a pending draft exists cannot be determined: the post is refused rather than risked
   (`INV-REVIEW-3`).
 
@@ -153,17 +155,21 @@ into CI health (`INV-GATE-1`, `INV-GATE-4`).
 
 **Actors:** `ACTOR-PGPR-OP`, `ACTOR-PGPR-CODEHOST`.
 **Level:** summary.
-**Intent:** tell the whole arc once — a draft is staged, guarded, posted attributed and
-head-anchored, and left pending for a person to submit.
+**Intent:** tell the whole arc once — a draft is staged, guarded by a self+WIP-aware draft-PR
+check and a fail-closed pending check, posted attributed and head-anchored, and left pending for
+a person to submit.
 _Requires:_ `INV-REVIEW-1`, `INV-REVIEW-2`, `INV-REVIEW-3`, `INV-ATTR-1`, `INV-WRITE-1`.
 _Includes:_ `USECASE-PGPR-REVIEW`.
 
 ```mermaid
 flowchart TD
-    S["draft staged"] --> G{"PR marked draft? pending draft already exists?"}
-    G -->|"draft PR"| REFUSE1["refused (INV-REVIEW-2)"]
-    G -->|"pending check undetermined"| REFUSE2["refused, fail-closed (INV-REVIEW-3)"]
-    G -->|"clear"| POST["posted pending, head-anchored, attributed"]
+    S["draft staged"] --> D{"PR currently a draft PR?"}
+    D -->|"not draft"| P{"pending review already exists?"}
+    D -->|"draft, not the operator's own"| REFUSE1["refused (INV-REVIEW-2)"]
+    D -->|"draft, operator's own, WIP set"| REFUSE1
+    D -->|"draft, operator's own, WIP not set"| P
+    P -->|"undetermined"| REFUSE2["refused, fail-closed (INV-REVIEW-3)"]
+    P -->|"clear"| POST["posted pending, head-anchored, attributed"]
     POST --> SUB["a person submits with a verdict - a separate act"]
 ```
 

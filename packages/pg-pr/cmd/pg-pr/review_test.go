@@ -7,11 +7,14 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/marker"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/reviewstage"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/provider/vcs"
 )
@@ -31,9 +34,25 @@ type reviewFakeVCS struct {
 	replyRepo        string
 	replyErr         error
 	replyReturnedNil bool
+
+	// getPRResult/getPRErr control GetPR's return, for the WIP-scoped
+	// draft-review gate tests (pg2-4dz88.4.6). nil getPRResult falls back to
+	// a non-draft PR, matching every pre-existing test in this file that
+	// never sets it (draft defaults false, so the gate never engages).
+	getPRResult *api.PR
+	getPRErr    error
 }
 
-func (f *reviewFakeVCS) GetPR(context.Context, string, int) (*api.PR, error) { return &api.PR{}, nil }
+func (f *reviewFakeVCS) GetPR(context.Context, string, int) (*api.PR, error) {
+	if f.getPRErr != nil {
+		return nil, f.getPRErr
+	}
+	if f.getPRResult != nil {
+		out := *f.getPRResult
+		return &out, nil
+	}
+	return &api.PR{}, nil
+}
 func (f *reviewFakeVCS) ListMyPRs(context.Context, string) ([]api.PR, error) { return nil, nil }
 func (f *reviewFakeVCS) ListTeamPRs(context.Context, string, []string) ([]api.PR, error) {
 	return nil, nil
@@ -451,6 +470,186 @@ func TestReviewPost_JSONOutput(t *testing.T) {
 	}
 	if parsed["status"] != "posted" {
 		t.Fatalf("status: %v", parsed["status"])
+	}
+}
+
+// ----------------------------------------------------------------------
+// WIP-scoped draft-review gate (INV-REVIEW-2, pg2-4dz88.4.6)
+// ----------------------------------------------------------------------
+//
+// Ruled semantics (operator, 2026-08-21, recorded on pg2-4dz88.4): an agent
+// MAY post a review on the OPERATOR's OWN PR while it is in draft, provided
+// WIP is false; an agent MUST NEVER post a review on ANOTHER PERSON's PR
+// while that PR is in draft, regardless of WIP. A PR that is not currently
+// draft is never gated by WIP either way. `review submit` is used
+// throughout (rather than draft+post) since it exercises postStaged's gate
+// with the least setup.
+
+// TestReviewSubmit_OwnDraftPR_WIPFalse_Succeeds: my own draft PR, with the
+// store-recorded WIP suppression flag false, is reviewable.
+func TestReviewSubmit_OwnDraftPR_WIPFalse_Succeeds(t *testing.T) {
+	resetReviewFlags()
+	withConfigStub(t, &config.Config{SelfLogin: "me"}, nil)
+	setListStateHome(t)
+	seedListStore(t, store.PullRequest{Repo: "foo/bar", Number: 60, Ownership: "mine", State: "open"})
+	setStoreWIP(t, "foo/bar", 60, false)
+
+	prev := vcsProviderFor
+	t.Cleanup(func() { vcsProviderFor = prev })
+	fake := &reviewFakeVCS{getPRResult: &api.PR{Draft: true, Author: "me"}}
+	vcsProviderFor = func(string) vcs.Provider { return fake }
+
+	rootCmd.SetIn(strings.NewReader(`{"body":"top"}`))
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{"review", "submit", "60", "--repo", "foo/bar"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("submit: %v (stderr=%s)", err, stderr.String())
+	}
+	if fake.postCalls != 1 {
+		t.Fatalf("expected PostReview to be called exactly once, got %d", fake.postCalls)
+	}
+}
+
+// TestReviewSubmit_OwnDraftPR_WIPTrue_Refused: my own draft PR, but marked
+// WIP, is refused.
+func TestReviewSubmit_OwnDraftPR_WIPTrue_Refused(t *testing.T) {
+	resetReviewFlags()
+	withConfigStub(t, &config.Config{SelfLogin: "me"}, nil)
+	setListStateHome(t)
+	seedListStore(t, store.PullRequest{Repo: "foo/bar", Number: 61, Ownership: "mine", State: "open"})
+	setStoreWIP(t, "foo/bar", 61, true)
+
+	prev := vcsProviderFor
+	t.Cleanup(func() { vcsProviderFor = prev })
+	fake := &reviewFakeVCS{getPRResult: &api.PR{Draft: true, Author: "me"}}
+	vcsProviderFor = func(string) vcs.Provider { return fake }
+
+	rootCmd.SetIn(strings.NewReader(`{"body":"top"}`))
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{"review", "submit", "61", "--repo", "foo/bar"})
+	err := rootCmd.Execute()
+	if err == nil {
+		t.Fatalf("expected refusal, got success (stdout=%s)", stdout.String())
+	}
+	if !strings.Contains(err.Error(), "WIP") {
+		t.Errorf("expected error to name WIP, got %q", err.Error())
+	}
+	if fake.postCalls != 0 {
+		t.Fatalf("PostReview must NOT be called, got %d call(s)", fake.postCalls)
+	}
+}
+
+// TestReviewSubmit_OthersDraftPR_WIPTrue_Refused: another person's draft PR
+// is refused even when WIP happens to be true.
+func TestReviewSubmit_OthersDraftPR_WIPTrue_Refused(t *testing.T) {
+	resetReviewFlags()
+	withConfigStub(t, &config.Config{SelfLogin: "me"}, nil)
+	setListStateHome(t)
+	seedListStore(t, store.PullRequest{Repo: "foo/bar", Number: 62, Ownership: "team", State: "open"})
+	setStoreWIP(t, "foo/bar", 62, true)
+
+	prev := vcsProviderFor
+	t.Cleanup(func() { vcsProviderFor = prev })
+	fake := &reviewFakeVCS{getPRResult: &api.PR{Draft: true, Author: "teammate"}}
+	vcsProviderFor = func(string) vcs.Provider { return fake }
+
+	rootCmd.SetIn(strings.NewReader(`{"body":"top"}`))
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{"review", "submit", "62", "--repo", "foo/bar"})
+	err := rootCmd.Execute()
+	if err == nil {
+		t.Fatalf("expected refusal, got success (stdout=%s)", stdout.String())
+	}
+	if !strings.Contains(err.Error(), "someone else") {
+		t.Errorf("expected error naming the ownership mismatch, got %q", err.Error())
+	}
+	if fake.postCalls != 0 {
+		t.Fatalf("PostReview must NOT be called, got %d call(s)", fake.postCalls)
+	}
+}
+
+// TestReviewSubmit_OthersDraftPR_WIPFalse_Refused: another person's draft PR
+// is refused even when WIP is false — proving the refusal is driven by
+// ownership, not WIP (the "regardless of WIP" half of the ruling needs both
+// WIP states exercised, or a single case can't distinguish it from a
+// WIP-only check).
+func TestReviewSubmit_OthersDraftPR_WIPFalse_Refused(t *testing.T) {
+	resetReviewFlags()
+	withConfigStub(t, &config.Config{SelfLogin: "me"}, nil)
+	setListStateHome(t)
+	seedListStore(t, store.PullRequest{Repo: "foo/bar", Number: 63, Ownership: "team", State: "open"})
+	setStoreWIP(t, "foo/bar", 63, false)
+
+	prev := vcsProviderFor
+	t.Cleanup(func() { vcsProviderFor = prev })
+	fake := &reviewFakeVCS{getPRResult: &api.PR{Draft: true, Author: "teammate"}}
+	vcsProviderFor = func(string) vcs.Provider { return fake }
+
+	rootCmd.SetIn(strings.NewReader(`{"body":"top"}`))
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{"review", "submit", "63", "--repo", "foo/bar"})
+	err := rootCmd.Execute()
+	if err == nil {
+		t.Fatalf("expected refusal, got success (stdout=%s)", stdout.String())
+	}
+	if !strings.Contains(err.Error(), "someone else") {
+		t.Errorf("expected error naming the ownership mismatch, got %q", err.Error())
+	}
+	if fake.postCalls != 0 {
+		t.Fatalf("PostReview must NOT be called, got %d call(s)", fake.postCalls)
+	}
+}
+
+// TestReviewSubmit_NonDraftPR_UnaffectedByWIP: a non-draft PR is reviewable
+// regardless of WIP or authorship — WIP must never gate a ready PR.
+func TestReviewSubmit_NonDraftPR_UnaffectedByWIP(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		num    string
+		wip    bool
+		author string
+	}{
+		{"wip-true-self", "70", true, "me"},
+		{"wip-false-self", "71", false, "me"},
+		{"wip-true-other", "72", true, "teammate"},
+		{"wip-false-other", "73", false, "teammate"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resetReviewFlags()
+			withConfigStub(t, &config.Config{SelfLogin: "me"}, nil)
+			setListStateHome(t)
+			num, err := strconv.Atoi(tc.num)
+			if err != nil {
+				t.Fatalf("bad test PR number %q: %v", tc.num, err)
+			}
+			seedListStore(t, store.PullRequest{Repo: "foo/bar", Number: num, Ownership: "mine", State: "open"})
+			setStoreWIP(t, "foo/bar", num, tc.wip)
+
+			prev := vcsProviderFor
+			t.Cleanup(func() { vcsProviderFor = prev })
+			fake := &reviewFakeVCS{getPRResult: &api.PR{Draft: false, Author: tc.author}}
+			vcsProviderFor = func(string) vcs.Provider { return fake }
+
+			rootCmd.SetIn(strings.NewReader(`{"body":"top"}`))
+			var stdout, stderr bytes.Buffer
+			rootCmd.SetOut(&stdout)
+			rootCmd.SetErr(&stderr)
+			rootCmd.SetArgs([]string{"review", "submit", tc.num, "--repo", "foo/bar"})
+			if err := rootCmd.Execute(); err != nil {
+				t.Fatalf("submit: %v (stderr=%s)", err, stderr.String())
+			}
+			if fake.postCalls != 1 {
+				t.Fatalf("expected PostReview to be called exactly once, got %d", fake.postCalls)
+			}
+		})
 	}
 }
 

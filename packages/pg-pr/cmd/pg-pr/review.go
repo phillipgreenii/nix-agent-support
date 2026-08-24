@@ -12,8 +12,10 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/output"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/reviewinput"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/reviewstage"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/beads"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/provider/vcs"
 	"github.com/spf13/cobra"
 )
 
@@ -135,6 +137,76 @@ Run 'pg-pr review --help' for the payload schema and an example.`,
 	},
 }
 
+// draftReviewGate enforces the WIP-scoped draft-review rule (`INV-REVIEW-2`,
+// pg2-4dz88.4.6): reviewing a PR that is CURRENTLY draft is allowed only when
+// the PR is self-authored AND its store-recorded WIP suppression flag is
+// false. A draft PR authored by anyone else is refused regardless of WIP. A
+// PR that is not currently draft is never gated by WIP at all.
+//
+// The draft/author check reads the PROVIDER's live PR state — never an
+// assumption derived only from WIP, and never a possibly stale store row —
+// so ordinary sync lag, or a human manually re-drafting a PR without
+// touching WIP, can never leave a still-draft PR reviewable just because WIP
+// happens to read false (the "residual edge" pg2-4dz88.4 calls out).
+func draftReviewGate(ctx context.Context, provider vcs.Provider, repo string, num int) error {
+	pr, err := provider.GetPR(ctx, repo, num)
+	if err != nil {
+		return fmt.Errorf("check draft state for %s#%d: %w", repo, num, err)
+	}
+	if !pr.Draft {
+		return nil
+	}
+
+	// Fail-closed: an unresolvable self identity (no config, or config load
+	// error) is never treated as self-authored, matching
+	// internal/sync.Engine.isSelfAuthored's existing "empty self/author means
+	// team-mate" precedent.
+	cfg, cfgErr := newConfigLoader(ctx)
+	selfAuthored := cfgErr == nil && cfg != nil &&
+		cfg.SelfLogin != "" && pr.Author != "" && pr.Author == cfg.SelfLogin
+	if !selfAuthored {
+		return fmt.Errorf(
+			"review %s#%d: refused — PR is draft and authored by someone else (INV-REVIEW-2)",
+			repo, num,
+		)
+	}
+
+	wip, err := selfDraftWIP(ctx, repo, num)
+	if err != nil {
+		return fmt.Errorf("review %s#%d: %w", repo, num, err)
+	}
+	if wip {
+		return fmt.Errorf(
+			"review %s#%d: refused — your own PR is draft and marked WIP (INV-REVIEW-2)",
+			repo, num,
+		)
+	}
+	return nil
+}
+
+// selfDraftWIP reads the store-only WIP flag for (repo, num). Store-optional,
+// matching clearWIPOverrideIfSet's contract (pr_write.go): a PR pg-pr has
+// never observed — no store file at all, or no row for this identity — reads
+// as WIP=false, never an error.
+func selfDraftWIP(ctx context.Context, repo string, num int) (bool, error) {
+	if _, statErr := os.Stat(store.DefaultPath()); statErr != nil {
+		return false, nil
+	}
+	db, err := store.Open(store.DefaultPath())
+	if err != nil {
+		return false, fmt.Errorf("open store: %w", err)
+	}
+	defer func() { _ = db.Close() }()
+	pr, err := db.GetPR(ctx, repo, num)
+	if err != nil {
+		return false, fmt.Errorf("read store: %w", err)
+	}
+	if pr == nil {
+		return false, nil
+	}
+	return pr.WIP, nil
+}
+
 // postStaged loads, dedups, marker-stamps, and POSTs the draft. Shared by
 // review post + review submit. It reports skipped=true (without posting) when
 // the authenticated viewer already has a PENDING review on the PR, so neither
@@ -144,6 +216,14 @@ Run 'pg-pr review --help' for the payload schema and an example.`,
 // Callers MUST honor skipped: `review post` suppresses its Clear so the
 // freshly-staged draft survives the skip.
 func postStaged(ctx context.Context, draft *reviewstage.Draft, w io.Writer, emitJSON bool) (skipped bool, err error) {
+	provider := vcsProviderFor(draft.Repo)
+
+	// WIP-scoped draft-review gate (INV-REVIEW-2, pg2-4dz88.4.6). Checked
+	// first so a refusal never depends on the shape of the staged content.
+	if err := draftReviewGate(ctx, provider, draft.Repo, draft.PR); err != nil {
+		return false, err
+	}
+
 	// Refuse to post a blank comment. `review submit` came through
 	// reviewinput.Decode, which already rejects an empty body; `review post`
 	// reads the staged FILE, which may have been written by a pre-pg2-cns7a
@@ -153,8 +233,6 @@ func postStaged(ctx context.Context, draft *reviewstage.Draft, w io.Writer, emit
 	if err := errOnBlankComments(draft); err != nil {
 		return false, err
 	}
-
-	provider := vcsProviderFor(draft.Repo)
 
 	// Skip if this reviewer already has a PENDING review on the PR, so a re-run
 	// (the pr-pool review role may re-review on head advance) does not stack a

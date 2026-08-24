@@ -46,9 +46,10 @@ flowchart LR
 
 - **Out (pg-pr → code host)** — a review or comment, head-anchored (`INV-WRITE-1`), carrying its
   attribution mark (`INV-ATTR-1`), staged as a draft and posted as a pending review
-  (`INV-REVIEW-1`), never against a PR still marked draft (`INV-REVIEW-2`), superseding any
-  existing pending draft — found via a fail-closed pending check — rather than stacking
-  (`INV-REVIEW-3`).
+  (`INV-REVIEW-1`). Posting review content against a draft PR is permitted only when the PR is
+  the reviewing operator's own and WIP is not set on it; a draft PR belonging to anyone else is
+  refused regardless of WIP (`INV-REVIEW-2`). Posting supersedes any existing pending review —
+  found via a fail-closed pending check — rather than stacking (`INV-REVIEW-3`).
 - **Guarantee** — pg-pr is an **implementer** of the code host's own review-posting contract: it
   states only its own obligations above and never restates the code host's contract.
 - **Open questions** (tracked in [journeys](journeys.md)): `OQ-PGPR-VERDICT-DRIVES-POST` (whether

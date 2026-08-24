@@ -98,9 +98,13 @@ correct owner (ADR 0034) — the UUID preserves identity; only the owning set ch
   own **pending** state; submitting it with a verdict is a separate, explicit act pg-pr MUST NOT
   perform on its own. On a code host with no concept of a pending review, review content MUST be
   held for the operator to post rather than published live.
-- **`INV-REVIEW-2`** <!-- uuid: c8e0f2dd-e254-4c50-a1d0-a493c14ca57e --> — **No review of
-  drafts.** pg-pr MUST NOT post review content against a PR its author still marks draft;
-  reviewing begins only once the PR is marked ready.
+- **`INV-REVIEW-2`** <!-- uuid: c8e0f2dd-e254-4c50-a1d0-a493c14ca57e --> — **Draft review is
+  scoped to the PR's own author, and only while not suppressed.** Posting review content against
+  a draft PR is permitted only when the PR is the reviewing operator's own and WIP is not set on
+  it; a draft PR belonging to anyone else MUST be refused regardless of WIP. This determination
+  MUST read the PR's actual, current draft state — never an assumption inferred only from WIP —
+  so sync lag or an out-of-band re-draft can never leave a should-be-refused PR reviewable. A PR
+  that is not currently draft is never constrained by this invariant, regardless of WIP.
 - **`INV-REVIEW-3`** <!-- uuid: 1a763847-8b40-4500-ba7d-e982207b3503 --> — **A re-review
   supersedes; at most one pending draft.** A fresh draft on a PR that already carries a pending
   draft MUST **supersede** it rather than stack alongside it. Whether a pending draft already
