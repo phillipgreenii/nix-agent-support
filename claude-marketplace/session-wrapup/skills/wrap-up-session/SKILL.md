@@ -172,11 +172,11 @@ End git commit messages with the trailer:
 Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
 ```
 
-### 5. Integrate: invoke `integrate-branch` per in-scope repo
+### 5. Integrate: invoke `integrate-branch:integrate-branch` per in-scope repo
 
 Integration is delegated **in full** to the **`integrate-branch`** skill — wrap-up does not
 rebase, merge, push, or open/update PRs itself. For each in-scope repo that has work to land,
-`cd` into that repo (or its worktree) and invoke the `integrate-branch` skill. It runs its own
+`cd` into that repo (or its worktree) and invoke the `integrate-branch:integrate-branch` skill. It runs its own
 advisory detector, picks the method (local ff-merge, pull request, or an org-declared handler),
 and executes it end to end: a local ff-merge lands on that repo's local `main` (no push) and
 retires the standalone worktree + branch; a PR flow pushes the one branch and opens/updates the
@@ -194,7 +194,7 @@ Read back each repo's outcome; it drives capture (phases 2/7) and cleanup (phase
   off-primary/dirty anomaly halt); branch + worktree are intact. Don't force it — roll the reason
   into the handoff (phase 7).
 
-Invoke `integrate-branch` once per in-scope repo — never `pn workspace push` (which hits
+Invoke `integrate-branch:integrate-branch` once per in-scope repo — never `pn workspace push` (which hits
 untouched repos and violates scope). Keeping the whole integration flow inside `integrate-branch`
 is precisely what guarantees a wrap-up-triggered landing and a direct `integrate-branch`
 invocation never diverge.
@@ -431,7 +431,7 @@ and MUST NOT record a push obligation (**U-1**/**U-2**).
   (e.g. a rebase conflict or canonical anomaly), don't force-resolve or blindly retry — keep the
   branch/worktree and roll the reason into the handoff.
 - **Never `pn workspace push`/`rebase`** for a scoped wrapup — they hit every repo. Integrate
-  per repo via `integrate-branch`.
+  per repo via `integrate-branch:integrate-branch`.
 - **Landed is not pushed, and that is not news.** A local ff-merge leaves commits on local `main`.
   Wrapup never pushes them, never reports them (unless being unpublished BLOCKS the work — then one
   line), and never records them in the P0 handoff bead, the handoff doc, or a standing push bead — a
@@ -480,7 +480,7 @@ If nothing was in scope, say so plainly rather than inventing work.
 | dirty state                     | `git status` ; ahead of main: `git log main..`                                                           |
 | unpushed blocks the work?       | `pn workspace doctor` (read-only, never `--fix`) ; standalone: `git rev-list --count @{u}..HEAD`         |
 | run gates (nix-\* repos)        | `prek run --files <changed files>` (or `pre-commit run --files …`), NOT `--all-files`; `nix flake check` |
-| integrate a repo's work         | invoke the `integrate-branch` skill (detects method, lands, retires branch/worktree)                     |
+| integrate a repo's work         | invoke the `integrate-branch:integrate-branch` skill (detects method, lands, retires branch/worktree)    |
 | set teardown / stash cleanup    | see `references/cleanup.md`                                                                              |
 | remove pn workforest set        | `pn workspace workforest remove <branch>` (only when every repo reported `landed`)                       |
 | prune stale worktree admin      | `pn workspace workforest prune`                                                                          |

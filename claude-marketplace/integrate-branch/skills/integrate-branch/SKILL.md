@@ -119,7 +119,8 @@ pgii-integrate-branch.strategy`) is a fail-safe you MUST catch here, not somethi
    - **Infeasible** → do not invoke it. Surface the conflict and ask the user (they
      may want to add a remote, or re-declare a different strategy).
 3. **Installed and feasible** → invoke that handler skill (via the `Skill` tool,
-   using the strategy string as the skill name). Relay the handler's outcome
+   using `integrate-branch:<strategy>` as the plugin-qualified skill id — e.g.
+   `integrate-branch:ff-merge-to-main`). Relay the handler's outcome
    (`landed | pr-opened | pr-updated | stopped:<reason>`) to the user, and when `reason` in the
    report indicated the strategy was _inferred_ rather than _declared_, say so —
    the user should know the method wasn't pinned by config.
