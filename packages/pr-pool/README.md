@@ -14,17 +14,20 @@ cap, waits for completion, then tears down every `pr-pool-*` tmux session. Bare
 
 ## Subcommands
 
-| Command                   | Description                                                                                                  |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `drain`                   | run one drain pass (the default when omitted)                                                                |
-| `run-query <role>`        | run a role's discovery query and print matches (read-only)                                                   |
-| `run-role <role> <bead>`  | dispatch one bead through a role, then tear down (smoke test)                                                |
-| `config --print-defaults` | print the built-in default `config.toml` (a copy-paste start)                                                |
-| `config --show`           | print the resolved config path, role set, and worker dispatch scalars (permission-mode/allowed-tools/budget) |
-| `sessions`                | list this pool's sessions (bead/role) from session metadata                                                  |
-| `push-inject <json>`      | inject one operator-supplied event into the **running** core (text, or JSON with `--json`)                   |
-| `version`                 | print the version and exit                                                                                   |
-| `help`                    | print help and exit                                                                                          |
+| Command                   | Description                                                                                                                                                       |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `run`                     | boot the core and run indefinitely, producing + dispatching on a fixed poll interval, until SIGINT/SIGTERM requests shutdown                                      |
+| `run-until-idle`          | boot the core, discover once, drain the queue to idle, then exit (also reachable as `drain`, kept as a deprecated alias)                                          |
+| `drain`                   | run one drain pass (the default when omitted)                                                                                                                     |
+| `run-query <role>`        | run a role's discovery query and print matches (read-only)                                                                                                        |
+| `run-role <role> <bead>`  | dispatch one bead through a role, then tear down (smoke test)                                                                                                     |
+| `config --print-defaults` | print the built-in default `config.toml` (a copy-paste start)                                                                                                     |
+| `config --show`           | print the resolved config path, role set, and worker dispatch scalars (permission-mode/allowed-tools/budget)                                                      |
+| `sessions`                | list this pool's sessions (bead/role) from session metadata                                                                                                       |
+| `reconcile`               | report stranded self-owned feedback cycles, then run the pg-pr ACL: ensure a review-pr bead per open PR (reads `pg-pr pr list`; mutates beads; exit-0-on-partial) |
+| `push-inject <json>`      | inject one operator-supplied event into the **running** core (text, or JSON with `--json`)                                                                        |
+| `version`                 | print the version and exit                                                                                                                                        |
+| `help`                    | print help and exit                                                                                                                                               |
 
 `<role>` is the role's configured `name`.
 
