@@ -247,6 +247,25 @@ func TestLoad_ParsesBuildtoolsFlagFields(t *testing.T) {
 	}
 }
 
+// TestLoad_ParsesApprovedScriptDirs proves the buildtools.approvedScriptDirs
+// field (pg2-3y56d) parses from JSON. Normalization (trailing-slash cleanup,
+// dropping degenerate entries) is the buildtools rule's own responsibility
+// (see buildtools.normalizeScriptDirs); the loader passes the raw strings
+// through unchanged, like every other config field.
+func TestLoad_ParsesApprovedScriptDirs(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "rules.json")
+	body := `{"buildtools":{"approvedScriptDirs":[".claude/skills/silver-bullet/scripts"]}}`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := Load(path)
+	got := cfg.Buildtools.ApprovedScriptDirs
+	if len(got) != 1 || got[0] != ".claude/skills/silver-bullet/scripts" {
+		t.Errorf("approvedScriptDirs = %v, want [.claude/skills/silver-bullet/scripts]", got)
+	}
+}
+
 // TestLoad_ParsesCommandAwareBlocks proves the loader parses the structured
 // ssh/vault/curl/monorepo sub-configs (WS3) — the schema the ssh, vault, curl,
 // and monorepo rules consume via DI (ADR 0033).

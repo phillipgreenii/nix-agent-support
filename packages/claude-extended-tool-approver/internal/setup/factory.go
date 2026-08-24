@@ -233,7 +233,7 @@ func RuleChain(eng *engine.Engine, pe *patheval.PathEvaluator, cfg *configrules.
 		// above and kubectl below.
 		safecmds.NewWithEvaluator(eng, pe),
 		kubectl.New(eng, pe, cfg.Kubectl),
-		buildtools.New(cfg.Buildtools),
+		buildtools.New(pe, cfg.Buildtools),
 		sqlite3rule.New(pe),
 	}
 }

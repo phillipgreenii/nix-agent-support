@@ -7,12 +7,21 @@ import (
 	"testing"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/patheval"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/configrules"
 )
 
 func mustJSON(v any) json.RawMessage {
 	b, _ := json.Marshal(v)
 	return b
+}
+
+// testPE is a fixed project-root path evaluator for tests that don't care
+// about a specific project layout — every pre-existing test in this file
+// exercises basename-only matching, so the actual root value is irrelevant;
+// it exists only so New's pe parameter is non-nil.
+func testPE() *patheval.PathEvaluator {
+	return patheval.NewWithCWD("/repo", "/repo")
 }
 
 // zrBuildtoolsConfig loads the ZR consumer config fixture and returns its
@@ -26,7 +35,7 @@ func zrBuildtoolsConfig(t *testing.T) configrules.BuildtoolsConfig {
 }
 
 func TestBuildtools_Approved_Approve(t *testing.T) {
-	r := New(zrBuildtoolsConfig(t))
+	r := New(testPE(), zrBuildtoolsConfig(t))
 	commands := []string{
 		"gradle build",
 		"./gradlew test",
@@ -48,7 +57,7 @@ func TestBuildtools_Approved_Approve(t *testing.T) {
 }
 
 func TestBuildtools_BdAllSubcommands_Approve(t *testing.T) {
-	r := New(zrBuildtoolsConfig(t))
+	r := New(testPE(), zrBuildtoolsConfig(t))
 	commands := []string{
 		"bd ready --json",
 		"bd show pg2-ce6 --json",
@@ -86,7 +95,7 @@ func TestBuildtools_BdAllSubcommands_Approve(t *testing.T) {
 func TestBuildtools_Prek_Approve(t *testing.T) {
 	// pg2-o7ev5: prek is the Rust reimplementation of pre-commit and is in active
 	// use here; it must be blanket-approved exactly like pre-commit.
-	r := New(zrBuildtoolsConfig(t))
+	r := New(testPE(), zrBuildtoolsConfig(t))
 	commands := []string{
 		"prek run --all-files",
 		"prek run",
@@ -105,7 +114,7 @@ func TestBuildtools_Prek_Approve(t *testing.T) {
 }
 
 func TestBuildtools_DevboxSearch_Approve(t *testing.T) {
-	r := New(zrBuildtoolsConfig(t))
+	r := New(testPE(), zrBuildtoolsConfig(t))
 	input := &hookio.HookInput{
 		ToolName:  "Bash",
 		ToolInput: mustJSON(map[string]string{"command": "devbox search nodejs"}),
@@ -117,7 +126,7 @@ func TestBuildtools_DevboxSearch_Approve(t *testing.T) {
 }
 
 func TestBuildtools_Npm_Abstain(t *testing.T) {
-	r := New(zrBuildtoolsConfig(t))
+	r := New(testPE(), zrBuildtoolsConfig(t))
 	input := &hookio.HookInput{
 		ToolName:  "Bash",
 		ToolInput: mustJSON(map[string]string{"command": "npm install"}),
@@ -129,14 +138,14 @@ func TestBuildtools_Npm_Abstain(t *testing.T) {
 }
 
 func TestBuildtools_Name(t *testing.T) {
-	r := New(zrBuildtoolsConfig(t))
+	r := New(testPE(), zrBuildtoolsConfig(t))
 	if got := r.Name(); got != "build-tools" {
 		t.Errorf("Name() = %q, want build-tools", got)
 	}
 }
 
 func TestBuildtools_JarXf(t *testing.T) {
-	r := New(zrBuildtoolsConfig(t))
+	r := New(testPE(), zrBuildtoolsConfig(t))
 	tests := []struct {
 		name    string
 		command string
@@ -157,7 +166,7 @@ func TestBuildtools_JarXf(t *testing.T) {
 }
 
 func TestBuildtools_GenerateBuildDeps(t *testing.T) {
-	r := New(zrBuildtoolsConfig(t))
+	r := New(testPE(), zrBuildtoolsConfig(t))
 	input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": "bin/generate-build-deps"})}
 	got := hookio.Verdict(r.Evaluate(input))
 	if got.Decision != hookio.Approve {
@@ -166,7 +175,7 @@ func TestBuildtools_GenerateBuildDeps(t *testing.T) {
 }
 
 func TestBuildTools_Prove(t *testing.T) {
-	r := New(zrBuildtoolsConfig(t))
+	r := New(testPE(), zrBuildtoolsConfig(t))
 	for _, cmd := range []string{"prove -v t/foo.t", "mp/ui/customer/bin/devxp/prove t/bar.t", "yath test"} {
 		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
 		if got := hookio.Verdict(r.Evaluate(input)); got.Decision != hookio.Approve {
@@ -176,7 +185,7 @@ func TestBuildTools_Prove(t *testing.T) {
 }
 
 func TestBuildtools_CueVet(t *testing.T) {
-	r := New(zrBuildtoolsConfig(t))
+	r := New(testPE(), zrBuildtoolsConfig(t))
 	tests := []struct {
 		name    string
 		command string
@@ -204,7 +213,7 @@ func TestBuildtools_CueVet(t *testing.T) {
 // demote them (this rule ignores env), which is the whole reason they live here
 // and not only in the flat approvedCommands (which abstains when env is present).
 func TestBuildtools_ApprovedScripts(t *testing.T) {
-	r := New(zrBuildtoolsConfig(t))
+	r := New(testPE(), zrBuildtoolsConfig(t))
 	scripts := []string{
 		"zr-proto-regenerate.sh", "pre-merge-protobuf-check",
 		"fix-ai-tools-ownership", "pre-merge-py-check", "generate-build-deps",
@@ -219,10 +228,174 @@ func TestBuildtools_ApprovedScripts(t *testing.T) {
 	}
 }
 
+// --- silver-bullet skill scripts (pg2-3y56d) ---
+//
+// silver-bullet ships two named helper binaries (approved via the flat
+// ApprovedScripts basename allowlist, part 1) and an unbounded set of
+// per-invocation helper scripts under a fixed directory (approved via the new
+// ApprovedScriptDirs directory-prefix mechanism, part 2). Operator ruling
+// 2026-08-23: both should be `allow`.
+
+// silverBulletBuildtoolsConfig is the config shape THIS deployment would need
+// in rules.json to approve silver-bullet's helpers. It is NOT loaded from a
+// JSON fixture: neither testdata/zr-rules.json nor testdata/command-blocks-
+// rules.json is a domain fit (both are ZR-specific, and zr-rules.json's own
+// test asserts an EXACT ApprovedScripts count that unrelated entries would
+// break), and the actually-deployed rules.json lives outside this repo/
+// worktree entirely (XDG_CONFIG_HOME, ADR 0004) — see the pg2-3y56d report for
+// detail. An inline struct literal is the same idiom already used above for
+// TestBuildtools_VerbScopedFromConfig and the EmptyConfig tests, and it is the
+// exact schema shape a real rules.json buildtools block would carry.
+func silverBulletBuildtoolsConfig() configrules.BuildtoolsConfig {
+	return configrules.BuildtoolsConfig{
+		ApprovedScripts:    []string{"silver-bullet-tick-probe", "silver-bullet-watch-poller.sh"},
+		ApprovedScriptDirs: []string{".claude/skills/silver-bullet/scripts"},
+	}
+}
+
+// TestBuildtools_SilverBullet_NamedScripts_Approve covers part 1: the two named
+// helper binaries approve regardless of the directory they're invoked from or
+// trailing arguments, exactly like the pre-existing migrated-script fixtures.
+func TestBuildtools_SilverBullet_NamedScripts_Approve(t *testing.T) {
+	r := New(testPE(), silverBulletBuildtoolsConfig())
+	commands := []string{
+		"silver-bullet-tick-probe",
+		"silver-bullet-tick-probe --pr=123 --worktree=/foo",
+		"/repo/.claude/bin/silver-bullet-tick-probe --pr=123 --worktree=/foo",
+		".claude/bin/silver-bullet-tick-probe --pr=123",
+		"silver-bullet-watch-poller.sh",
+		"silver-bullet-watch-poller.sh --pr=123 --worktree=/foo",
+		"/repo/.claude/bin/silver-bullet-watch-poller.sh --pr=123 --worktree=/foo",
+		"bash silver-bullet-watch-poller.sh --pr=123",
+		"sh /repo/.claude/bin/silver-bullet-tick-probe --pr=123",
+	}
+	for _, cmd := range commands {
+		input := &hookio.HookInput{ToolName: "Bash", CWD: "/repo", ToolInput: mustJSON(map[string]string{"command": cmd})}
+		if got := hookio.Verdict(r.Evaluate(input)); got.Decision != hookio.Approve {
+			t.Errorf("cmd %q: got %s, want approve (named silver-bullet script)", cmd, got.Decision)
+		}
+	}
+}
+
+// TestBuildtools_ApprovedScriptDirs_Approve covers part 2: every script under
+// the configured directory approves regardless of basename or trailing args,
+// whether invoked with a leading project-root prefix or as a plain relative
+// path, and whether run directly or via bash/sh.
+func TestBuildtools_ApprovedScriptDirs_Approve(t *testing.T) {
+	r := New(testPE(), silverBulletBuildtoolsConfig())
+	commands := []string{
+		// relative, unbounded basenames
+		".claude/skills/silver-bullet/scripts/parse-args",
+		".claude/skills/silver-bullet/scripts/parse-args --flag value --other=1",
+		".claude/skills/silver-bullet/scripts/render-summary.py --verbose",
+		".claude/skills/silver-bullet/scripts/anything-at-all",
+		// absolute, prefixed with the project root ("<worktree>/...")
+		"/repo/.claude/skills/silver-bullet/scripts/parse-args --flag value",
+		"/repo/.claude/skills/silver-bullet/scripts/another-helper --x=1 --y=2",
+		// via bash/sh wrapper
+		"bash .claude/skills/silver-bullet/scripts/parse-args --flag",
+		"sh /repo/.claude/skills/silver-bullet/scripts/parse-args --flag",
+	}
+	for _, cmd := range commands {
+		input := &hookio.HookInput{ToolName: "Bash", CWD: "/repo", ToolInput: mustJSON(map[string]string{"command": cmd})}
+		if got := hookio.Verdict(r.Evaluate(input)); got.Decision != hookio.Approve {
+			t.Errorf("cmd %q: got %s, want approve (approved script directory)", cmd, got.Decision)
+		}
+	}
+}
+
+// TestBuildtools_ApprovedScriptDirs_NoCWD_FallsBackToProjectRoot proves the cwd
+// fallback (input.CWD == "" -> r.pe.ProjectRoot()) resolves a relative script
+// path the same way an explicit matching CWD does — mirroring how the monorepo
+// rule falls back (monorepo.go: `if cwd == "" { cwd = projectRoot }`).
+func TestBuildtools_ApprovedScriptDirs_NoCWD_FallsBackToProjectRoot(t *testing.T) {
+	r := New(testPE(), silverBulletBuildtoolsConfig())
+	input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": ".claude/skills/silver-bullet/scripts/parse-args --flag"})}
+	if got := hookio.Verdict(r.Evaluate(input)); got.Decision != hookio.Approve {
+		t.Errorf("no CWD: got %s, want approve", got.Decision)
+	}
+}
+
+// TestBuildtools_ApprovedScriptDirs_SimilarPathsAbstain is the negative
+// control: a path that merely RESEMBLES the approved directory — a sibling
+// directory sharing the prefix, a different skill's scripts directory, or the
+// silver-bullet skill directory WITHOUT the scripts/ subdirectory — must not
+// match. This proves the trailing-slash boundary and the literal (non-glob)
+// directory scoping both hold; a config that approves exactly one skill's
+// scripts/ directory must not silently widen to its neighbours.
+func TestBuildtools_ApprovedScriptDirs_SimilarPathsAbstain(t *testing.T) {
+	r := New(testPE(), silverBulletBuildtoolsConfig())
+	commands := []string{
+		// sibling directory sharing the "scripts" prefix (boundary check)
+		".claude/skills/silver-bullet/scripts-evil/parse-args",
+		"/repo/.claude/skills/silver-bullet/scripts-evil/parse-args",
+		// a different skill's scripts directory (no wildcard skill matching)
+		".claude/skills/other-skill/scripts/parse-args",
+		"/repo/.claude/skills/other-skill/scripts/parse-args",
+		// the skill directory itself, one level up from scripts/
+		".claude/skills/silver-bullet/run-me",
+		// a basename that merely resembles a part-1 named script
+		"silver-bullet-tick-probe-fake",
+		"bin/silver-bullet-tick-probe-imposter",
+	}
+	for _, cmd := range commands {
+		input := &hookio.HookInput{ToolName: "Bash", CWD: "/repo", ToolInput: mustJSON(map[string]string{"command": cmd})}
+		if got := hookio.Verdict(r.Evaluate(input)); got.Decision != hookio.NoOpinion {
+			t.Errorf("cmd %q: got %s, want abstain (must not false-positive widen)", cmd, got.Decision)
+		}
+	}
+}
+
+// TestBuildtools_ApprovedScriptDirs_EmptyConfigAbstains proves the safe base
+// default: an unconfigured ApprovedScriptDirs (nil/empty, the zero value) makes
+// the directory-prefix mechanism inert, matching the EmptyConfig_* tests below
+// for the rest of this rule's config-driven fields.
+func TestBuildtools_ApprovedScriptDirs_EmptyConfigAbstains(t *testing.T) {
+	r := New(testPE(), configrules.BuildtoolsConfig{})
+	input := &hookio.HookInput{ToolName: "Bash", CWD: "/repo", ToolInput: mustJSON(map[string]string{"command": ".claude/skills/silver-bullet/scripts/parse-args"})}
+	if got := hookio.Verdict(r.Evaluate(input)); got.Decision != hookio.NoOpinion {
+		t.Errorf("empty config: got %s, want abstain", got.Decision)
+	}
+}
+
+// TestBuildtools_ApprovedScriptDirs_NilPathEvaluator proves a nil pe (a caller
+// that never wired a path evaluator) makes the feature inert rather than
+// panicking, even when ApprovedScriptDirs is configured.
+func TestBuildtools_ApprovedScriptDirs_NilPathEvaluator(t *testing.T) {
+	r := New(nil, silverBulletBuildtoolsConfig())
+	input := &hookio.HookInput{ToolName: "Bash", CWD: "/repo", ToolInput: mustJSON(map[string]string{"command": ".claude/skills/silver-bullet/scripts/parse-args"})}
+	if got := hookio.Verdict(r.Evaluate(input)); got.Decision != hookio.NoOpinion {
+		t.Errorf("nil pe: got %s, want abstain (not a panic)", got.Decision)
+	}
+}
+
+// TestBuildtools_NormalizeScriptDirs pins the leading/trailing "/" cleanup and
+// the degenerate-entry drop (empty/"."/".."), mirroring the
+// ParseFlagName/ParseSpec unit tests for the other config-parsing helpers.
+func TestBuildtools_NormalizeScriptDirs(t *testing.T) {
+	got := normalizeScriptDirs([]string{
+		".claude/skills/silver-bullet/scripts",
+		"/.claude/skills/silver-bullet/scripts/",
+		"", ".", "..",
+	})
+	want := []string{
+		".claude/skills/silver-bullet/scripts/",
+		".claude/skills/silver-bullet/scripts/",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("normalizeScriptDirs = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("normalizeScriptDirs[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
 // TestBuildtools_VerbScopedFromConfig proves a consumer-authored verb-scoped
 // approval is honored (the schema is not dead code), and only for the named verb.
 func TestBuildtools_VerbScopedFromConfig(t *testing.T) {
-	r := New(configrules.BuildtoolsConfig{
+	r := New(testPE(), configrules.BuildtoolsConfig{
 		VerbScopedApprovals: []configrules.VerbScopedApproval{{Tool: "mytool", Verb: "check"}},
 	})
 	if got := hookio.Verdict(r.Evaluate(&hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": "mytool check ./x"})})); got.Decision != hookio.Approve {
@@ -282,7 +455,7 @@ func justBuildtoolsConfig() configrules.BuildtoolsConfig {
 }
 
 func TestBuildtools_JustVerbScoped_ApprovedRecipes(t *testing.T) {
-	r := New(justBuildtoolsConfig())
+	r := New(testPE(), justBuildtoolsConfig())
 	for _, cmd := range []string{
 		"just check",
 		"just check kprod",
@@ -303,7 +476,7 @@ func TestBuildtools_JustVerbScoped_ApprovedRecipes(t *testing.T) {
 }
 
 func TestBuildtools_JustVerbScoped_MutatingRecipesAbstain(t *testing.T) {
-	r := New(justBuildtoolsConfig())
+	r := New(testPE(), justBuildtoolsConfig())
 	for _, cmd := range []string{
 		// the observed denial: a real converge against the shared NAS
 		"just converge-synology synfra",
@@ -338,7 +511,7 @@ func TestBuildtools_JustVerbScoped_MutatingRecipesAbstain(t *testing.T) {
 // the `just -f <justfile> <verb>` form — the dominant form in the homelab decision
 // DB — resolves to <verb> and the verb-scoped approval applies.
 func TestBuildtools_JustVerbScoped_ValueFlagResolvesVerb(t *testing.T) {
-	r := New(justBuildtoolsConfig())
+	r := New(testPE(), justBuildtoolsConfig())
 	for _, cmd := range []string{
 		// separated short + long form
 		"just -f infrastructure/k3s/prometheus-stack/justfile lint-rules",
@@ -366,7 +539,7 @@ func TestBuildtools_JustVerbScoped_ValueFlagResolvesVerb(t *testing.T) {
 // recipe. Each command below now resolves its verb correctly and MUST still
 // Abstain because the verb is not in verbScopedApprovals.
 func TestBuildtools_JustVerbScoped_ValueFlagSafety(t *testing.T) {
-	r := New(justBuildtoolsConfig())
+	r := New(testPE(), justBuildtoolsConfig())
 	for _, cmd := range []string{
 		// the three cases named in the bead's safety requirement
 		"just -f infrastructure/machines/ansible/justfile converge-synology synfra",
@@ -391,7 +564,7 @@ func TestBuildtools_JustVerbScoped_ValueFlagSafety(t *testing.T) {
 // TestBuildtools_JustVerbScoped_MissingValueDoesNotApprove covers the truncated
 // invocation: a declared value flag with NO value must neither panic nor approve.
 func TestBuildtools_JustVerbScoped_MissingValueDoesNotApprove(t *testing.T) {
-	r := New(justBuildtoolsConfig())
+	r := New(testPE(), justBuildtoolsConfig())
 	for _, cmd := range []string{
 		"just -f",
 		"just --justfile",
@@ -418,7 +591,7 @@ func TestBuildtools_JustVerbScoped_MissingValueDoesNotApprove(t *testing.T) {
 // what actually holds tc-080p closed. This test is kept as the regression pin the
 // bead asks for: the separated form must not stop Abstaining.
 func TestBuildtools_JustVerbScoped_UndeclaredValueFlagAbstains(t *testing.T) {
-	r := New(justBuildtoolsConfig())
+	r := New(testPE(), justBuildtoolsConfig())
 	for _, cmd := range []string{
 		"just --shell /bin/evil check",
 		"just --shell-arg zsh check",
@@ -452,7 +625,7 @@ func TestBuildtools_JustVerbScoped_UndeclaredValueFlagAbstains(t *testing.T) {
 // never occupied the verb slot to begin with. Under an allowlist they need no
 // enumeration at all — they are simply not on it.
 func TestBuildtools_JustVerbScoped_ExecutionFlagsAbstainInEverySpelling(t *testing.T) {
-	r := New(justBuildtoolsConfig())
+	r := New(testPE(), justBuildtoolsConfig())
 	// The bead's SAFETY REQUIREMENT set: each MUST Abstain glued AND separated.
 	valueTaking := []string{
 		"--shell", "--shell-arg", "--command", "-c", "--dotenv-path", "-E",
@@ -510,7 +683,7 @@ func TestBuildtools_JustVerbScoped_ExecutionFlagsAbstainInEverySpelling(t *testi
 //     unrecognized token. `-f` attached therefore costs a prompt; the ask-log shows
 //     0 uses of that form against 135 uses of the separated `-f <path>`.
 func TestBuildtools_JustVerbScoped_NonCanonicalFlagSpellingsAbstain(t *testing.T) {
-	r := New(justBuildtoolsConfig())
+	r := New(testPE(), justBuildtoolsConfig())
 	for _, cmd := range []string{
 		// end-of-flags separator, alone and as a bypass attempt
 		"just -- check",
@@ -539,7 +712,7 @@ func TestBuildtools_JustVerbScoped_NonCanonicalFlagSpellingsAbstain(t *testing.T
 // allowlist must not cost the forms the consumer actually uses. Everything here
 // resolved and approved before tc-080p and MUST continue to.
 func TestBuildtools_JustVerbScoped_AllowedFlagsStillApprove(t *testing.T) {
-	r := New(justBuildtoolsConfig())
+	r := New(testPE(), justBuildtoolsConfig())
 	for _, cmd := range []string{
 		"just check",
 		"just --quiet check",
@@ -568,7 +741,7 @@ func TestBuildtools_JustVerbScoped_AllowedFlagsStillApprove(t *testing.T) {
 // pre-tc-080p behavior, INCLUDING the glued hole. Strictness is opt-in per tool,
 // so adding the field cannot change a consumer that has not adopted it.
 func TestBuildtools_AllowedFlags_AbsentEntryIsUnchanged(t *testing.T) {
-	r := New(configrules.BuildtoolsConfig{
+	r := New(testPE(), configrules.BuildtoolsConfig{
 		VerbScopedApprovals: []configrules.VerbScopedApproval{{Tool: "mytool", Verb: "check"}},
 		ValueFlags:          map[string][]string{"mytool": {"-f"}},
 	})
@@ -609,7 +782,7 @@ func TestBuildtools_AllowedFlags_EmptyEntryIsStrict(t *testing.T) {
 		{"all entries malformed", []string{"check", "", "-", "--", "--opt=x", "--opt:2"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			r := New(configrules.BuildtoolsConfig{
+			r := New(testPE(), configrules.BuildtoolsConfig{
 				VerbScopedApprovals: []configrules.VerbScopedApproval{{Tool: "mytool", Verb: "check"}},
 				ValueFlags:          map[string][]string{"mytool": {"-f"}},
 				AllowedFlags:        map[string][]string{"mytool": tc.flags},
@@ -643,7 +816,7 @@ func TestBuildtools_AllowedFlags_EmptyEntryIsStrict(t *testing.T) {
 // flag that does not exist changes nothing. So the worst outcome of a wrong entry
 // here is a prompt — never a wrong Approve.
 func TestBuildtools_AllowedFlags_MisdeclarationFailsSafe(t *testing.T) {
-	r := New(configrules.BuildtoolsConfig{
+	r := New(testPE(), configrules.BuildtoolsConfig{
 		VerbScopedApprovals: []configrules.VerbScopedApproval{{Tool: "mytool", Verb: "check"}},
 		// --shell actually TAKES a value; declaring it boolean is the mistake.
 		AllowedFlags: map[string][]string{"mytool": {"--shell", "--does-not-exist"}},
@@ -696,7 +869,7 @@ func TestBuildtools_AllowedFlags_ParseFlagName(t *testing.T) {
 // tc-xjoe change — dash tokens are skipped and the first remaining token is the
 // verb, so a flag's value still lands in the verb slot and Abstains.
 func TestBuildtools_ValueFlags_NoDeclarationIsUnchanged(t *testing.T) {
-	r := New(configrules.BuildtoolsConfig{
+	r := New(testPE(), configrules.BuildtoolsConfig{
 		VerbScopedApprovals: []configrules.VerbScopedApproval{{Tool: "mytool", Verb: "check"}},
 	})
 	cases := []struct {
@@ -720,7 +893,7 @@ func TestBuildtools_ValueFlags_NoDeclarationIsUnchanged(t *testing.T) {
 // (`--set NAME VALUE`-shaped flags, declared as `--flag:2`) and the rejection of a
 // malformed arity suffix, on a synthetic tool so the base carries no consumer data.
 func TestBuildtools_ValueFlags_Arity(t *testing.T) {
-	r := New(configrules.BuildtoolsConfig{
+	r := New(testPE(), configrules.BuildtoolsConfig{
 		VerbScopedApprovals: []configrules.VerbScopedApproval{{Tool: "mytool", Verb: "check"}},
 		ValueFlags: map[string][]string{
 			"mytool": {"--opt:2", "--one", "--bad:x", "--worse:0", "--neg:-1"},
@@ -785,7 +958,7 @@ func TestBuildtools_ValueFlags_ParseSpec(t *testing.T) {
 // literals. Under a zero BuildtoolsConfig only the generic tools are approved. ---
 
 func TestBuildtools_EmptyConfig_BaseGenericApproves(t *testing.T) {
-	r := New(configrules.BuildtoolsConfig{})
+	r := New(testPE(), configrules.BuildtoolsConfig{})
 	for _, cmd := range []string{
 		"go build ./...", "gradle build", "./gradlew test", "pre-commit run",
 		"prek run", "bats tests/", "bd ready", "tilt up",
@@ -799,7 +972,7 @@ func TestBuildtools_EmptyConfig_BaseGenericApproves(t *testing.T) {
 }
 
 func TestBuildtools_EmptyConfig_ZRToolsAbstain(t *testing.T) {
-	r := New(configrules.BuildtoolsConfig{})
+	r := New(testPE(), configrules.BuildtoolsConfig{})
 	for _, cmd := range []string{
 		"prove -v t/foo.t", "yath test",
 		"zr-proto-regenerate.sh", "bin/generate-build-deps",
@@ -817,7 +990,7 @@ func TestBuildtools_EmptyConfig_ZRToolsAbstain(t *testing.T) {
 // recipe dispatcher whose behavior is defined by the repo, so approval belongs in
 // a consumer's verbScopedApprovals, never in the generic base.
 func TestBuildtools_EmptyConfig_JustAbstains(t *testing.T) {
-	r := New(configrules.BuildtoolsConfig{})
+	r := New(testPE(), configrules.BuildtoolsConfig{})
 	for _, cmd := range []string{"just check", "just build", "just deploy kinfra"} {
 		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
 		if got := hookio.Verdict(r.Evaluate(input)); got.Decision != hookio.NoOpinion {
@@ -857,7 +1030,7 @@ func TestBuildtools_NoZRLiteralsInSource(t *testing.T) {
 // flags enumerated as output-only in baseVerbFlags MUST be accepted. A future
 // widening of this set is visible as a diff to this list.
 func TestBuildtools_BaseVerbs_PinnedApprovals(t *testing.T) {
-	r := New(configrules.BuildtoolsConfig{})
+	r := New(testPE(), configrules.BuildtoolsConfig{})
 	for _, cmd := range []string{
 		// canonical, no pre-verb flags
 		"devbox search nodejs",
@@ -894,7 +1067,7 @@ func TestBuildtools_BaseVerbs_PinnedApprovals(t *testing.T) {
 // the change — jar creates and OVERWRITES <path> there, while the old resolver
 // approved it as "jar xf (extraction)". See baseVerbFlags for the enumeration.
 func TestBuildtools_BaseVerbs_UnrecognisedFlagAbstains(t *testing.T) {
-	r := New(configrules.BuildtoolsConfig{})
+	r := New(testPE(), configrules.BuildtoolsConfig{})
 	cases := []struct {
 		name    string
 		command string
@@ -928,7 +1101,7 @@ func TestBuildtools_BaseVerbs_UnrecognisedFlagAbstains(t *testing.T) {
 // TestBuildtools_BaseVerbs_WrongVerbAbstains guards the verb slot itself: the
 // strict policy must not accidentally widen which verb resolves.
 func TestBuildtools_BaseVerbs_WrongVerbAbstains(t *testing.T) {
-	r := New(configrules.BuildtoolsConfig{})
+	r := New(testPE(), configrules.BuildtoolsConfig{})
 	for _, cmd := range []string{
 		"devbox run build", "devbox -q shell", "devbox",
 		"cue export ./x", "cue -E eval ./x", "cue cmd deploy", "cue",

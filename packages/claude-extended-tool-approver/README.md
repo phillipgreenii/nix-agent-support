@@ -204,6 +204,17 @@ or empty block leaves its rule at the safe base default (the command-aware
   "buildtools": {
     "approvedTools": [],
     "approvedScripts": [],
+    // project-root-relative directory prefixes under which EVERY script is
+    // approved regardless of basename or trailing args — for a skill/tool
+    // whose helper scripts have unbounded basenames but a fixed directory. A
+    // leading/trailing "/" is trimmed and exactly one is re-added before
+    // matching, so a prefix can never cross a directory-name boundary
+    // (".../scripts" must not match a sibling ".../scripts-evil"). An absolute
+    // path under the project root and the equivalent relative path match
+    // identically (same normalization the monorepo rule uses). Empty by
+    // default: this grants broad, path-shaped trust, so it is opt-in per
+    // directory.
+    "approvedScriptDirs": [".claude/skills/silver-bullet/scripts"],
     "verbScopedApprovals": [], // [{ "tool": "just", "verb": "lint-rules" }]
     // per-tool flags that CONSUME their value, so the verb-scope matcher does not
     // mistake the value for the verb (`just -f <justfile> <verb>`). `:<n>` declares

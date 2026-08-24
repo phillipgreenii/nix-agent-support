@@ -8,6 +8,7 @@ import (
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmdparse"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/patheval"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/configrules"
 )
 
@@ -21,10 +22,16 @@ var baseApprovedTools = map[string]bool{
 }
 
 type Rule struct {
-	approvedTools   map[string]bool
-	approvedScripts map[string]bool
-	verbScoped      map[string]map[string]bool // tool -> approved first-subcommand set
-	valueFlags      map[string]map[string]int  // tool -> flag -> tokens consumed
+	// pe supplies project-root context for approvedScriptDirs matching
+	// (cmdparse.NormalizeExecutable). May be nil (e.g. a test constructing the
+	// rule without exercising that feature); scriptInApprovedDir then always
+	// reports false rather than panicking.
+	pe                 *patheval.PathEvaluator
+	approvedTools      map[string]bool
+	approvedScripts    map[string]bool
+	approvedScriptDirs []string                   // project-root-relative prefixes, each ending "/"
+	verbScoped         map[string]map[string]bool // tool -> approved first-subcommand set
+	valueFlags         map[string]map[string]int  // tool -> flag -> tokens consumed
 	// allowedFlags is tool -> flag -> true. The PRESENCE of a tool key (even with
 	// an empty set) puts that tool in STRICT flag checking; see flagPolicy.
 	allowedFlags map[string]map[string]bool
@@ -47,16 +54,20 @@ func (r *Rule) flagPolicyFor(tool string) flagPolicy {
 	return flagPolicy{valueFlags: r.valueFlags[tool], allowed: allowed, strict: strict}
 }
 
-// New constructs the build-tools rule. cfg carries the consumer-specific tool /
-// script approvals injected by factory.go; a zero cfg yields the base generic
-// tool set only (go/gradle/bats/… plus devbox search / cue vet / jar xf).
-func New(cfg configrules.BuildtoolsConfig) *Rule {
+// New constructs the build-tools rule. pe supplies project-root context for
+// ApprovedScriptDirs matching (may be nil if that feature is not exercised).
+// cfg carries the consumer-specific tool / script approvals injected by
+// factory.go; a zero cfg yields the base generic tool set only (go/gradle/bats/…
+// plus devbox search / cue vet / jar xf).
+func New(pe *patheval.PathEvaluator, cfg configrules.BuildtoolsConfig) *Rule {
 	r := &Rule{
-		approvedTools:   mergeSet(baseApprovedTools, cfg.ApprovedTools),
-		approvedScripts: toSet(cfg.ApprovedScripts),
-		verbScoped:      map[string]map[string]bool{},
-		valueFlags:      map[string]map[string]int{},
-		allowedFlags:    map[string]map[string]bool{},
+		pe:                 pe,
+		approvedTools:      mergeSet(baseApprovedTools, cfg.ApprovedTools),
+		approvedScripts:    toSet(cfg.ApprovedScripts),
+		approvedScriptDirs: normalizeScriptDirs(cfg.ApprovedScriptDirs),
+		verbScoped:         map[string]map[string]bool{},
+		valueFlags:         map[string]map[string]int{},
+		allowedFlags:       map[string]map[string]bool{},
 	}
 	for _, vs := range cfg.VerbScopedApprovals {
 		if r.verbScoped[vs.Tool] == nil {
@@ -143,6 +154,25 @@ func toSet(items []string) map[string]bool {
 	return m
 }
 
+// normalizeScriptDirs cleans each consumer-declared ApprovedScriptDirs entry
+// into a "<relative/path>/" form: leading/trailing "/" trimmed, then exactly
+// one trailing "/" appended, so prefix matching in scriptInApprovedDir cannot
+// cross a directory-name boundary (".../scripts" must not match a sibling
+// ".../scripts-evil"). A degenerate entry (empty, ".", "..") is DROPPED —
+// narrowing what may match is the safe direction, matching parseFlagName /
+// parseValueFlagSpec above.
+func normalizeScriptDirs(raw []string) []string {
+	dirs := make([]string, 0, len(raw))
+	for _, d := range raw {
+		d = strings.Trim(strings.TrimSpace(d), "/")
+		if d == "" || d == "." || d == ".." {
+			continue
+		}
+		dirs = append(dirs, d+"/")
+	}
+	return dirs
+}
+
 func mergeSet(base map[string]bool, extra []string) map[string]bool {
 	m := make(map[string]bool, len(base)+len(extra))
 	for k := range base {
@@ -165,6 +195,10 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 	parsed, err := cmdparse.LeavesOf(input)
 	if err != nil {
 		return hookio.RuleResult{}, fmt.Errorf("build-tools: read bash command: %w", err)
+	}
+	cwd := input.CWD
+	if cwd == "" && r.pe != nil {
+		cwd = r.pe.ProjectRoot()
 	}
 	for _, pc := range parsed {
 		basename := filepath.Base(pc.Executable)
@@ -214,10 +248,23 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 				Module:   r.Name(),
 			}, nil
 		}
-		// bash/sh <script> — check if the script arg is an approved script/tool.
+		// Directory-prefix approval (BuildtoolsConfig.ApprovedScriptDirs): every
+		// script under a configured directory is approved regardless of
+		// basename or trailing args — for a skill/tool whose helper scripts have
+		// unbounded basenames but a fixed directory (e.g.
+		// ".claude/skills/silver-bullet/scripts/").
+		if r.scriptInApprovedDir(pc.Executable, cwd) {
+			return hookio.RuleResult{
+				Decision: hookio.Approve,
+				Reason:   "approved script directory: " + basename,
+				Module:   r.Name(),
+			}, nil
+		}
+		// bash/sh <script> — check if the script arg is an approved script/tool,
+		// or lives under an approved script directory.
 		if (basename == "bash" || basename == "sh") && len(pc.Args) > 0 {
 			scriptBase := filepath.Base(pc.Args[0])
-			if r.approvedScripts[scriptBase] || r.approvedTools[scriptBase] {
+			if r.approvedScripts[scriptBase] || r.approvedTools[scriptBase] || r.scriptInApprovedDir(pc.Args[0], cwd) {
 				return hookio.RuleResult{
 					Decision: hookio.Approve,
 					Reason:   "approved project script via " + basename + ": " + scriptBase,
@@ -227,6 +274,27 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		}
 	}
 	return hookio.NotApplicable()
+}
+
+// scriptInApprovedDir reports whether executable, normalized relative to the
+// project root via cmdparse.NormalizeExecutable (the same mechanism the
+// monorepo rule uses), falls under one of the consumer-configured
+// approvedScriptDirs. An absolute path under the project root and the
+// equivalent relative path therefore match identically, so a script may be
+// invoked with or without a leading "<worktree>/"-style prefix. An empty
+// approvedScriptDirs (the default) or a nil path evaluator (no project-root
+// context available) makes this always false.
+func (r *Rule) scriptInApprovedDir(executable, cwd string) bool {
+	if len(r.approvedScriptDirs) == 0 || r.pe == nil {
+		return false
+	}
+	norm := filepath.ToSlash(cmdparse.NormalizeExecutable(executable, r.pe.ProjectRoot(), cwd))
+	for _, dir := range r.approvedScriptDirs {
+		if strings.HasPrefix(norm, dir) {
+			return true
+		}
+	}
+	return false
 }
 
 // baseVerbFlags is the BUILT-IN pre-verb flag allowlist behind the base-generic

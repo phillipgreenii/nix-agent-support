@@ -212,6 +212,22 @@ type BuildtoolsConfig struct {
 	// than assumed to be 1 — over-skipping is the only direction that can
 	// manufacture a wrong Approve.
 	ValueFlags map[string][]string `json:"valueFlags"`
+	// ApprovedScriptDirs are project-root-relative DIRECTORY prefixes (e.g.
+	// ".claude/skills/silver-bullet/scripts") under which EVERY script is
+	// approved regardless of basename or trailing arguments, run directly OR
+	// via `bash <script>` / `sh <script>`. This is the directory-prefix
+	// counterpart of ApprovedScripts, for a skill/tool whose helper scripts have
+	// unbounded basenames (so a flat allowlist can't name them all) but a fixed
+	// directory. A leading/trailing "/" is trimmed and exactly one trailing "/"
+	// is added before matching, so a prefix can never cross a directory-name
+	// boundary (".../scripts" must not match a sibling ".../scripts-evil").
+	// The executable is resolved via the SAME project-root-relative
+	// normalization the monorepo rule uses (cmdparse.NormalizeExecutable), so an
+	// absolute path under the project root and the equivalent relative path
+	// match identically. Empty by default — this field grants a broad, path-
+	// shaped trust, so it MUST be declared explicitly per directory rather than
+	// defaulting to any built-in pattern.
+	ApprovedScriptDirs []string `json:"approvedScriptDirs"`
 	// AllowedFlags declares, per tool basename, the flags KNOWN NOT to change how
 	// the verb executes (e.g. "just" -> ["--quiet","--dry-run"]).
 	//
