@@ -1,0 +1,12 @@
+#compdef pw-agent-activity
+
+_pw_agent_activity() {
+    _arguments \
+        '--maximum-wait[Maximum wait time in seconds (default: 7200)]:seconds:' \
+        '--time-between-checks[Interval between checks in seconds (default: 5)]:seconds:' \
+        '--caffeinate[Keep the Mac awake while waiting]' \
+        '(-h --help)'{-h,--help}'[Show help message]' \
+        '(-v --version)'{-v,--version}'[Show version information]'
+}
+
+_pw_agent_activity "$@"

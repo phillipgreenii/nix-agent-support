@@ -1,0 +1,9 @@
+#compdef pw-reset-agents
+
+_pw_reset_agents() {
+    _arguments \
+        '(-h --help)'{-h,--help}'[Show help message]' \
+        '(-v --version)'{-v,--version}'[Show version information]'
+}
+
+_pw_reset_agents "$@"

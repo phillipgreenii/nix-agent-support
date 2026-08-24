@@ -218,8 +218,33 @@
               name = "integrate-branch-support-0.0.0-${phillipgreenii-nix-base.lib.mkSrcDigest result.packages}";
               paths = result.packages;
             };
-          pw-reset-agents = final.callPackage ./packages/pw-reset-agents { };
-          pw-agent-activity = final.callPackage ./packages/pw-agent-activity { };
+          # pw-reset-agents / pw-agent-activity: thin `agent-activity-api`
+          # wrappers, built with mkBashScript like every other bash command here
+          # (bead pg2-05lkx). They were `writeShellScriptBin` one-liners, which
+          # gave them no --help, no --version, no tests, and -- the defect that
+          # actually bit -- no resolved `agent-activity-api`: the delegate was
+          # picked up from whatever happened to be on PATH, so the commands
+          # worked in a login shell and failed under launchd / `env -i` / a
+          # ccpool-spawned session. `agent-activity` is threaded in as a real
+          # runtimeDeps entry.
+          #
+          # Unlike the aggregates above these take `result.<name>.script`
+          # directly rather than symlinkJoin-ing `result.packages`: each package
+          # holds exactly ONE script whose name equals the package's, so the
+          # join would only discard the script derivation's own pname/version
+          # (`0.0.0-<srcDigest>`, ADR 0011-visible) and meta.mainProgram.
+          pw-reset-agents =
+            (import ./packages/pw-reset-agents {
+              pkgs = final;
+              inherit bashBuilders;
+              inherit (final) agent-activity;
+            }).pw-reset-agents.script;
+          pw-agent-activity =
+            (import ./packages/pw-agent-activity {
+              pkgs = final;
+              inherit bashBuilders;
+              inherit (final) agent-activity;
+            }).pw-agent-activity.script;
         }
         // prev.lib.optionalAttrs (basePkgs ? pnwf) { inherit (basePkgs) pnwf; }
         // prev.lib.optionalAttrs (basePkgs ? wsplan) { inherit (basePkgs) wsplan; };
@@ -3243,6 +3268,22 @@
               bashBuilders = pkgs._agentSupportBashBuilders;
               inherit (pkgs) pa-monitor;
             }).checks
+            # test-pw-agent-activity / test-pw-reset-agents (bead pg2-05lkx).
+            # Same one-line idiom as wait-for-agents above: the overlay attrs
+            # take only the script derivation, so without these the two suites
+            # -- including the real-binary argument contract that catches an
+            # agent-activity-api subcommand drifting away from the wrapper --
+            # would run in no gate at all.
+            // (import ./packages/pw-agent-activity {
+              inherit pkgs;
+              bashBuilders = pkgs._agentSupportBashBuilders;
+              inherit (pkgs) agent-activity;
+            }).checks
+            // (import ./packages/pw-reset-agents {
+              inherit pkgs;
+              bashBuilders = pkgs._agentSupportBashBuilders;
+              inherit (pkgs) agent-activity;
+            }).checks
             # Nine offline golangci-lint gates, one per Go module (pg2-2cuzv):
             # <module>-golangci for each of the six Pattern-A modules plus the
             # three Pattern-B (local-replace) modules.
@@ -3274,6 +3315,16 @@
               pg-pr
               pg-ccaudit
               integrate-branch-support
+              ;
+            # The two agent-activity-api wrappers, re-exported for the same
+            # reason codeburn is: they are overlay-only attrs, so without this
+            # `nix build .#pw-agent-activity` cannot resolve them and the
+            # stripped-PATH behaviour of the shipped artifact is not directly
+            # buildable (bead pg2-05lkx). `nix flake check` builds `checks.*`,
+            # not `packages.*`, so this adds no flake-check cost.
+            inherit (pkgs)
+              pw-agent-activity
+              pw-reset-agents
               ;
             # codeburn is a manual-bump npm package (not Go/nix-update); re-exported so
             # `nix build .#codeburn` resolves it via flake.packages.<system>.
