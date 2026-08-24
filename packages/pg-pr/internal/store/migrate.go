@@ -7,7 +7,7 @@ import (
 
 // schemaVersion is the current schema. Bump it and append a migration step
 // whenever the DDL changes. Stored in SQLite's user_version pragma.
-const schemaVersion = 12
+const schemaVersion = 13
 
 // migrations is the ordered list of DDL applied to reach schemaVersion. Index i
 // migrates user_version i -> i+1.
@@ -418,6 +418,39 @@ ALTER TABLE pr_revision DROP COLUMN others_approved;
 ALTER TABLE pr_revision DROP COLUMN others_approved_at;
 ALTER TABLE pr_revision DROP COLUMN my_review_state;
 ALTER TABLE pr_revision DROP COLUMN reviewed_at;
+`,
+	// v12 -> v13: cross-process claim/lease columns on outbox (pg2-g42k5).
+	// RunOutbox used to SELECT pending rows and dispatch them with no claim of
+	// any kind, so two processes flushing the outbox concurrently (the daemon
+	// and a one-shot `pg-pr sync`, or two one-shot invocations) could both
+	// select and dispatch the SAME row — a double-apply. The store's own
+	// single-process serialization (WAL + busy_timeout + SetMaxOpenConns(1),
+	// see store.go) does not help here: the race is BETWEEN two independent
+	// connections/processes, each with its own single connection.
+	//
+	// claimed_by/claimed_at let RunOutbox claim a row with an atomic
+	// `UPDATE ... WHERE status='pending' AND (claimed_by IS NULL OR
+	// claimed_at < cutoff)` before dispatching it, checking RowsAffected to
+	// detect losing the race (see outbox.go). No new `status` value is
+	// introduced (no CHECK/table rebuild needed): "claimed" is represented by
+	// claimed_by being non-NULL and fresh, which keeps this migration a plain
+	// additive ALTER ADD COLUMN, matching the v2/v7/v10 convention rather than
+	// the 12-step rebuild v6/v8 needed for a CHECK change.
+	//
+	// claimed_at is a lease: if a claimer crashes between the claiming UPDATE
+	// and the completing UPDATE, the row would otherwise stay claimed forever.
+	// After outboxLeaseDuration with no completion, a later RunOutbox call may
+	// steal the lease and redispatch — safe under the pre-existing fire-once
+	// contract (DispatchFunc already documents that a crash between dispatch
+	// and the completing UPDATE can redispatch, so consumers must already be
+	// idempotent).
+	//
+	// Both columns default NULL (unclaimed); existing pending rows migrate as
+	// unclaimed, which is correct — nothing was claiming them before this
+	// version existed.
+	`
+ALTER TABLE outbox ADD COLUMN claimed_by TEXT;
+ALTER TABLE outbox ADD COLUMN claimed_at TEXT;
 `,
 }
 

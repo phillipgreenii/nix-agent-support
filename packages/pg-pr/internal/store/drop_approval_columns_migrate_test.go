@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"testing"
 )
 
@@ -139,6 +140,21 @@ func TestMigrate_V12PreservesSurvivingColumnData(t *testing.T) {
 	defer func() { _ = rows.Close() }()
 	if rows.Next() {
 		t.Fatal("foreign_key_check reported a violation after the v12 migration")
+	}
+
+	// This test's technique re-runs ONLY the v12 step directly
+	// (applyMigration(db, 12, ...)) against a user_version it rolled back to
+	// 11, to exercise that one migration in isolation against seeded data.
+	// Every migration ABOVE v12 (e.g. v13's outbox claim columns, pg2-g42k5)
+	// already ran physically when OpenForTest(t) did its initial full
+	// migrate at the top of this test — nothing here touches the outbox
+	// table — so user_version=12 is stale relative to the DB's actual
+	// on-disk schema, which is already at schemaVersion. Restore it before
+	// the idempotent re-migrate check below: without this, migrate(db) would
+	// see current(12) < schemaVersion and try to re-apply migrations[12]'s
+	// ALTER TABLE ADD COLUMN against columns that already physically exist.
+	if _, err := db.sql.Exec(fmt.Sprintf("PRAGMA user_version = %d", schemaVersion)); err != nil {
+		t.Fatalf("restore user_version to %d: %v", schemaVersion, err)
 	}
 
 	// Idempotent re-migrate.
