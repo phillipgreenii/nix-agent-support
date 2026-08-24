@@ -57,8 +57,8 @@ type Claude struct {
 	// worktree's own settings.local.json instead. Empty (the default) is feature
 	// off — pure default-deny, unchanged (docs/adr/0052-ccpool-mcp-consent-canonical-decisions-consultation.md).
 	// This repo supplies only the mechanism; a deployment supplies the concrete
-	// path at runtime (this repo is a public flake — see its own CLAUDE.md
-	// "Public Repository — No ZipRecruiter Disclosure").
+	// path at runtime (this repo is a public flake — see its own CLAUDE.md's
+	// public-repository / no-employer-disclosure policy section).
 	CanonicalMCPSettingsPath string `toml:"canonical_mcp_settings_path"`
 }
 type List struct {

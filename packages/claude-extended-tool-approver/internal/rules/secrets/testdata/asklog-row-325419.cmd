@@ -12,8 +12,8 @@ DEFERRED MINORS, unchanged and deliberately not blocking: CLICertChecker's time.
 
 EVIDENCE OF THE DELIVERED WORK, for anyone auditing later:
  - pre-fetch credential gate: packages/pg-pr/internal/sync/prefetch.go (PreFetchGate.Ensure, single-flight + cooldown, cert-validity probe via ~/.ssh/agent glob, classifyFetch step tokens)
- - step-cli + rg on the daemon launchd PATH: phillipg-nix-ziprecruiter/darwin/services/pg-pr-sync/default.nix:68,71
+ - step-cli + rg on the daemon launchd PATH: your-private-flake/darwin/services/pg-pr-sync/default.nix:68,71
  - --model sonnet + --permission-mode bypassPermissions on the review spawn: packages/pg-pr/cmd/pg-pr/reviewspawn.go:68
  - reviewer/orchestrator agent-def hardening (rg/git-grep, STOP-on-failure)
- - impl commits b098471 (agent-support, 9 commits 4aac4bb..b098471) and 245ae04 (ziprecruiter); b098471 is an ancestor of agent-support origin/main
+ - impl commits b098471 (agent-support, 9 commits 4aac4bb..b098471) and 245ae04 (the private flake); b098471 is an ancestor of agent-support origin/main
  - gates green at the time: go test 29/29, vet, gofmt, prek 12/12, nix flake check, pn workspace build" --actor "17c968a9-81cc-4ea5-ac6b-90a0b0e6f7be-unblock"

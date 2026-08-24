@@ -209,7 +209,7 @@ command = "/nix/store/…-pa-monitor-decorator/bin/decorator -rule scope"
 timeout_ms = 1500
 
 [decorator.env]
-PA_MONITOR_SCOPE_RULES = "ziprecruiter:~/zr"
+PA_MONITOR_SCOPE_RULES = "acme:~/acme"
 ```
 
 A single-path `command` with no arguments and no `[decorator.env]` behaves exactly as before.

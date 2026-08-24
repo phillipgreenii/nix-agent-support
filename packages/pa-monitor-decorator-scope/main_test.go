@@ -57,8 +57,8 @@ func TestRun_EmptyInput(t *testing.T) {
 // TestRunWith_MapsCWDToScope drives the read->decorate->write path with an
 // explicit rule set and asserts the mapped scope lands in the JSON envelope.
 func TestRunWith_MapsCWDToScope(t *testing.T) {
-	sample := `{"ID":"s1","CWD":"/Volumes/ziprecruiter/x"}`
-	rules := []rule{{prefix: "/Volumes/ziprecruiter", scope: "ziprecruiter"}}
+	sample := `{"ID":"s1","CWD":"/Volumes/acme/x"}`
+	rules := []rule{{prefix: "/Volumes/acme", scope: "acme"}}
 
 	var out bytes.Buffer
 	if err := runWith(strings.NewReader(sample), &out, rules); err != nil {
@@ -68,17 +68,17 @@ func TestRunWith_MapsCWDToScope(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &parsed); err != nil {
 		t.Fatalf("output is not valid JSON: %v\noutput: %q", err, out.String())
 	}
-	if parsed.Labels["workspace.scope"] != "ziprecruiter" {
-		t.Fatalf("workspace.scope = %q, want ziprecruiter; full=%v", parsed.Labels["workspace.scope"], parsed.Labels)
+	if parsed.Labels["workspace.scope"] != "acme" {
+		t.Fatalf("workspace.scope = %q, want acme; full=%v", parsed.Labels["workspace.scope"], parsed.Labels)
 	}
 }
 
 // TestDecorate_MatchEmitsScope: the canonical mapping case.
 func TestDecorate_MatchEmitsScope(t *testing.T) {
-	rules := []rule{{prefix: "/Volumes/ziprecruiter", scope: "ziprecruiter"}}
-	got := decorate(session{CWD: "/Volumes/ziprecruiter/x"}, rules)
-	if got["workspace.scope"] != "ziprecruiter" {
-		t.Fatalf("got %v, want workspace.scope=ziprecruiter", got)
+	rules := []rule{{prefix: "/Volumes/acme", scope: "acme"}}
+	got := decorate(session{CWD: "/Volumes/acme/x"}, rules)
+	if got["workspace.scope"] != "acme" {
+		t.Fatalf("got %v, want workspace.scope=acme", got)
 	}
 }
 
@@ -86,27 +86,27 @@ func TestDecorate_MatchEmitsScope(t *testing.T) {
 // determines the scope.
 func TestDecorate_LongestPrefixWins(t *testing.T) {
 	rules := []rule{
-		{prefix: "/Volumes/ziprecruiter", scope: "ziprecruiter"},
-		{prefix: "/Volumes/ziprecruiter/special", scope: "special"},
+		{prefix: "/Volumes/acme", scope: "acme"},
+		{prefix: "/Volumes/acme/special", scope: "special"},
 	}
 	// Rule order should not matter: try both orderings.
 	for _, order := range [][]rule{rules, {rules[1], rules[0]}} {
-		got := decorate(session{CWD: "/Volumes/ziprecruiter/special/deep/dir"}, order)
+		got := decorate(session{CWD: "/Volumes/acme/special/deep/dir"}, order)
 		if got["workspace.scope"] != "special" {
 			t.Fatalf("longest-prefix failed for order %v: got %v, want special", order, got)
 		}
 	}
 	// A CWD under only the shorter prefix keeps the shorter scope.
-	got := decorate(session{CWD: "/Volumes/ziprecruiter/other"}, rules)
-	if got["workspace.scope"] != "ziprecruiter" {
-		t.Fatalf("shorter-prefix CWD: got %v, want ziprecruiter", got)
+	got := decorate(session{CWD: "/Volumes/acme/other"}, rules)
+	if got["workspace.scope"] != "acme" {
+		t.Fatalf("shorter-prefix CWD: got %v, want acme", got)
 	}
 }
 
 // TestDecorate_NonMatchingCWD_EmptyLabels: no rule matches -> empty labels so
 // the daemon's DefaultScope ("personal") stands.
 func TestDecorate_NonMatchingCWD_EmptyLabels(t *testing.T) {
-	rules := []rule{{prefix: "/Volumes/ziprecruiter", scope: "ziprecruiter"}}
+	rules := []rule{{prefix: "/Volumes/acme", scope: "acme"}}
 	got := decorate(session{CWD: "/Users/phillipg/personal"}, rules)
 	if len(got) != 0 {
 		t.Fatalf("non-matching CWD should yield empty labels, got %v", got)
@@ -116,20 +116,20 @@ func TestDecorate_NonMatchingCWD_EmptyLabels(t *testing.T) {
 // TestDecorate_SegmentBoundary: a sibling path that merely shares a string
 // prefix (but not a path-segment boundary) MUST NOT match.
 func TestDecorate_SegmentBoundary(t *testing.T) {
-	rules := []rule{{prefix: "/Volumes/ziprecruiter", scope: "ziprecruiter"}}
-	got := decorate(session{CWD: "/Volumes/ziprecruiterX/y"}, rules)
+	rules := []rule{{prefix: "/Volumes/acme", scope: "acme"}}
+	got := decorate(session{CWD: "/Volumes/acmeX/y"}, rules)
 	if len(got) != 0 {
 		t.Fatalf("string-prefix-but-not-segment CWD should not match, got %v", got)
 	}
 	// An exact-prefix CWD (equal to the prefix) still matches.
-	if got := decorate(session{CWD: "/Volumes/ziprecruiter"}, rules); got["workspace.scope"] != "ziprecruiter" {
+	if got := decorate(session{CWD: "/Volumes/acme"}, rules); got["workspace.scope"] != "acme" {
 		t.Fatalf("exact-prefix CWD should match, got %v", got)
 	}
 }
 
 // TestDecorate_NoRules_EmptyLabels: with no rules configured, always empty.
 func TestDecorate_NoRules_EmptyLabels(t *testing.T) {
-	if got := decorate(session{CWD: "/Volumes/ziprecruiter/x"}, nil); len(got) != 0 {
+	if got := decorate(session{CWD: "/Volumes/acme/x"}, nil); len(got) != 0 {
 		t.Fatalf("no rules should yield empty labels, got %v", got)
 	}
 }
@@ -137,7 +137,7 @@ func TestDecorate_NoRules_EmptyLabels(t *testing.T) {
 // TestDecorate_EmptySession_EmptyLabels: an empty (zero-value) session has no
 // CWD and matches nothing.
 func TestDecorate_EmptySession_EmptyLabels(t *testing.T) {
-	rules := []rule{{prefix: "/Volumes/ziprecruiter", scope: "ziprecruiter"}}
+	rules := []rule{{prefix: "/Volumes/acme", scope: "acme"}}
 	if got := decorate(session{}, rules); len(got) != 0 {
 		t.Fatalf("empty session should yield empty labels, got %v", got)
 	}
@@ -146,9 +146,9 @@ func TestDecorate_EmptySession_EmptyLabels(t *testing.T) {
 // TestLoadRules_EnvVarParsing: rules come from PA_MONITOR_SCOPE_RULES as
 // `PREFIX=SCOPE` entries separated by ';'.
 func TestLoadRules_EnvVarParsing(t *testing.T) {
-	rules := loadRules(nil, "/Volumes/ziprecruiter=ziprecruiter; /Users/phillipg/work=work")
-	got := decorate(session{CWD: "/Volumes/ziprecruiter/x"}, rules)
-	if got["workspace.scope"] != "ziprecruiter" {
+	rules := loadRules(nil, "/Volumes/acme=acme; /Users/phillipg/work=work")
+	got := decorate(session{CWD: "/Volumes/acme/x"}, rules)
+	if got["workspace.scope"] != "acme" {
 		t.Fatalf("env rule 1 not applied: %v", got)
 	}
 	got = decorate(session{CWD: "/Users/phillipg/work/repo"}, rules)
@@ -159,8 +159,8 @@ func TestLoadRules_EnvVarParsing(t *testing.T) {
 
 // TestLoadRules_FlagParsing: repeatable -rule flags are parsed.
 func TestLoadRules_FlagParsing(t *testing.T) {
-	rules := loadRules([]string{"-rule", "/Volumes/ziprecruiter=ziprecruiter", "-rule", "/a=b"}, "")
-	if got := decorate(session{CWD: "/Volumes/ziprecruiter/x"}, rules); got["workspace.scope"] != "ziprecruiter" {
+	rules := loadRules([]string{"-rule", "/Volumes/acme=acme", "-rule", "/a=b"}, "")
+	if got := decorate(session{CWD: "/Volumes/acme/x"}, rules); got["workspace.scope"] != "acme" {
 		t.Fatalf("flag rule 1 not applied: %v", got)
 	}
 	if got := decorate(session{CWD: "/a/deep"}, rules); got["workspace.scope"] != "b" {
@@ -255,7 +255,7 @@ func TestRunWith_WriteErrorPropagates(t *testing.T) {
 // labels OBJECT, never a null. A nil map would render as {"labels":null}.
 func TestRunWith_NoMatchEmitsEmptyLabelsObject(t *testing.T) {
 	sample := `{"ID":"s1","CWD":"/Users/phillipg/personal/repo"}`
-	rules := []rule{{prefix: "/Volumes/ziprecruiter", scope: "ziprecruiter"}}
+	rules := []rule{{prefix: "/Volumes/acme", scope: "acme"}}
 
 	var out bytes.Buffer
 	if err := runWith(strings.NewReader(sample), &out, rules); err != nil {
@@ -287,12 +287,12 @@ func TestDecorate_EmptyPrefixRuleSkipped(t *testing.T) {
 // and blank out the label the shorter valid rule produced.
 func TestDecorate_EmptyScopeRuleSkipped(t *testing.T) {
 	rules := []rule{
-		{prefix: "/Volumes/ziprecruiter", scope: "ziprecruiter"},
-		{prefix: "/Volumes/ziprecruiter/blank", scope: ""},
+		{prefix: "/Volumes/acme", scope: "acme"},
+		{prefix: "/Volumes/acme/blank", scope: ""},
 	}
-	got := decorate(session{CWD: "/Volumes/ziprecruiter/blank/deep"}, rules)
-	if got["workspace.scope"] != "ziprecruiter" {
-		t.Fatalf("empty-scope rule must be skipped, not win the prefix contest: got %v, want ziprecruiter", got)
+	got := decorate(session{CWD: "/Volumes/acme/blank/deep"}, rules)
+	if got["workspace.scope"] != "acme" {
+		t.Fatalf("empty-scope rule must be skipped, not win the prefix contest: got %v, want acme", got)
 	}
 }
 
@@ -343,11 +343,11 @@ func TestParseRuleEntry_RejectsWhitespaceOnlySides(t *testing.T) {
 // whitespace is trimmed off an otherwise valid entry rather than becoming part
 // of the prefix or scope.
 func TestParseRuleEntry_TrimsBothSides(t *testing.T) {
-	prefix, scope, ok := parseRuleEntry("  /Volumes/zr  =  ziprecruiter  ")
+	prefix, scope, ok := parseRuleEntry("  /Volumes/acme  =  acme  ")
 	if !ok {
 		t.Fatalf("padded but valid entry was rejected")
 	}
-	if prefix != "/Volumes/zr" || scope != "ziprecruiter" {
-		t.Fatalf("got (%q, %q), want (\"/Volumes/zr\", \"ziprecruiter\")", prefix, scope)
+	if prefix != "/Volumes/acme" || scope != "acme" {
+		t.Fatalf("got (%q, %q), want (\"/Volumes/acme\", \"acme\")", prefix, scope)
 	}
 }

@@ -20,7 +20,7 @@
     # rebuilt 4x daily). Intentionally NOT followed onto our nixpkgs: llm-agents
     # pins its own nixpkgs for the cache hit, and a `nixpkgs.follows` override
     # forces a from-source rebuild that defeats the cache (same rationale as the
-    # flox input in ziprecruiter). Fleet policy — keep this bare in every repo;
+    # flox input in the employer's flake). Fleet policy — keep this bare in every repo;
     # the llm-agents node itself is deduped to a single node by base's
     # llm-agents-overlay flakeModule (alignment.requires) + consumer-input-alignment.
     llm-agents.url = "github:numtide/llm-agents.nix";
@@ -1441,7 +1441,7 @@
               # consistent tree. The identical runner backs the pre-commit hook,
               # invoked with the WORKING TREE as its root instead.
               #
-              # The ZR deployment set (phillipg-nix-ziprecruiter) is the third real
+              # The ZR deployment set (your-private-flake) is the third real
               # set and is deliberately NOT here: it lives in another repo, so it
               # is absent from this flake's source and unreachable from the build
               # sandbox. Its seams are checked by running the runner against a
@@ -3330,7 +3330,7 @@
             # `nix build .#codeburn` resolves it via flake.packages.<system>.
             inherit (pkgs) codeburn;
             # pg-pr SOURCE as a realized store path, for cross-repo gomod2nix
-            # Pattern-B consumers (bead pg2-wtjz). phillipg-nix-ziprecruiter's
+            # Pattern-B consumers (bead pg2-wtjz). your-private-flake's
             # modules/pg-pr-zr has a `replace => …/packages/pg-pr` in its go.mod;
             # a hermetic build there cannot see this sibling repo, so we hand it
             # the source as a store path it copies into its build sandbox. This
@@ -3418,7 +3418,7 @@
               # Thread the bash-builders factory + inputs to the ./home modules so
               # consumers (e.g. claude-settings) can build activation-lib and their
               # framework scripts WITHOUT any downstream flake having to provide
-              # these args. Mirrors how ziprecruiter's modules receive them.
+              # these args. Mirrors how the employer's flake modules receive them.
               mkBashBuildersFor =
                 p:
                 inputs.phillipgreenii-nix-base.lib.mkBashBuilders {
@@ -3503,7 +3503,7 @@
         # consumer applying overlays.default gets pkgs.buildGoApplication (required
         # by the Go packages built via mkGoApp, ADR 0008) without re-adding
         # gomod2nix themselves. Previously overlays.default carried only `overlay`,
-        # forcing every consumer (e.g. ziprecruiter) to prepend gomod2nix's overlay
+        # forcing every consumer (e.g. the employer's flake) to prepend gomod2nix's overlay
         # to satisfy this flake's own Go packages — a rediscovered burden in the
         # terminal repo (bead pg2-gkhli). gomod2nix MUST precede `overlay` so
         # buildGoApplication exists in `final` when the Go packages evaluate.

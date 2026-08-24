@@ -23,7 +23,7 @@ pr-pool's orchestrator honours the **opposite** rule, and has since bead `pg2-th
 run-role's single-session teardown so those two paths cannot drift.
 
 The ZR deployment set states the rule normatively as `INV-CCPOOL-6`
-(`phillipg-nix-ziprecruiter/modules/zm/pr-pool/docs/behavior/invariants.md`):
+(`your-private-flake/modules/zm/pr-pool/docs/behavior/invariants.md`):
 
 > A session projected as **`paused`** for a **human decision** (awaiting input) **MUST** be
 > **preserved**, not reaped, so a person can attend it; it is **non-terminal**, resumes with context
@@ -179,7 +179,7 @@ exemption that guts it. It would also require a deployment-set edit to legitimiz
   `needs_input` is such a fact (a hook-observed edge), which is why the reaper may key on it without
   making a work judgment.
 - `INV-CCPOOL-6`, `INV-CCPOOL-7`, `INV-GOV-3` in the ZR deployment set
-  (`phillipg-nix-ziprecruiter/modules/zm/pr-pool/docs/behavior/invariants.md`) — the normative
+  (`your-private-flake/modules/zm/pr-pool/docs/behavior/invariants.md`) — the normative
   statement this ADR conforms to, unchanged by it.
 - `INV-PREC-1` in `packages/pr-pool/docs/behavior/invariants.md` — the precedence ordering that
   decides the cap case.

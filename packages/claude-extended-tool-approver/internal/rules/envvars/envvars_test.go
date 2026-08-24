@@ -185,13 +185,13 @@ func TestEnvVars_AskVars_Ask(t *testing.T) {
 // ($PATH / ${PATH}, resp. $HOME) and whose every other `:`-separated component is
 // a STATIC ABSOLUTE path is affirmatively safe, so it Approves instead of asking.
 // The corpus has 984 such prompts and zero true positives; the dominant idiom is
-// `export PATH="$PATH:/Volumes/ziprecruiter/pristine/bin"` (159 rows).
+// `export PATH="$PATH:/Volumes/acme/pristine/bin"` (159 rows).
 //
 // The split is a pure NAME/VALUE decision: it MUST reach the same verdict with no
 // evaluator wired (New()) as with one, so both constructors are exercised.
 func TestEnvVars_AskVars_PreserveForm_Approve(t *testing.T) {
 	commands := []string{
-		`export PATH="$PATH:/Volumes/ziprecruiter/pristine/bin"`,  // the dominant real idiom
+		`export PATH="$PATH:/Volumes/acme/pristine/bin"`,          // the dominant real idiom
 		`export PATH="/nix/store/abc123-golangci-lint/bin:$PATH"`, // nix-store prepend
 		`export PATH="${PATH}:/opt/homebrew/bin"`,                 // brace form
 		`export PATH=$PATH:/x`,                                    // unquoted
@@ -467,7 +467,7 @@ func TestEnvVars_SafeSubstitutionComponent_HazardStaysAsk(t *testing.T) {
 func TestEnvVars_AskVars_PreserveForm_TransparentBesideCommand(t *testing.T) {
 	r := New()
 	commands := []string{
-		`PATH="$PATH:/Volumes/ziprecruiter/pristine/bin" echo hi`,
+		`PATH="$PATH:/Volumes/acme/pristine/bin" echo hi`,
 		`PATH="/nix/store/abc123-golangci-lint/bin:$PATH" golangci-lint run`,
 		`env PATH="$PATH:/x" git status`,
 		`PATH="$PATH:/x" git push --force origin main`,

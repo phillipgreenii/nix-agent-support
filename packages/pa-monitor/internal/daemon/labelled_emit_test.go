@@ -101,7 +101,7 @@ func (d *failThenSucceedDecorator) DetectOK(s labels.Session) (labels.Set, bool)
 // label appears, rather than the session sticking at the DefaultScope
 // (`personal`) for its whole lifetime.
 func TestLabelsForSession_DoesNotCacheFailedDecorator(t *testing.T) {
-	dec := &failThenSucceedDecorator{scope: "ziprecruiter"}
+	dec := &failThenSucceedDecorator{scope: "acme"}
 	cap := labels.NewCardinalityCap(10)
 	cache := map[string]labels.Set{}
 	sv := &aggregate.SessionView{Session: &session.Session{SessionID: "s1"}}
@@ -118,10 +118,10 @@ func TestLabelsForSession_DoesNotCacheFailedDecorator(t *testing.T) {
 	// Tick 2: decorator succeeds -> scope appears (retry, not stuck), and is
 	// now cached for reuse.
 	second := labelsForSession(sv, nil, []labels.FailableDetector{dec}, cap, cache)
-	if second["workspace.scope"] != "ziprecruiter" {
+	if second["workspace.scope"] != "acme" {
 		t.Fatalf("retry should surface decorator labels, got %+v", second)
 	}
-	if cache["s1"]["workspace.scope"] != "ziprecruiter" {
+	if cache["s1"]["workspace.scope"] != "acme" {
 		t.Fatalf("successful result should now be cached: %+v", cache["s1"])
 	}
 }

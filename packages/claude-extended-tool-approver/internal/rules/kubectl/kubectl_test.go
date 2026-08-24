@@ -20,12 +20,13 @@ func mustJSON(v any) json.RawMessage {
 // zrKubectlConfig loads the ZR consumer config fixture and returns its kubectl
 // sub-config. This is the golden-set source of truth: it mirrors the inline
 // builtins.toJSON block in the ZR machine config
-// (phillipg-nix-ziprecruiter machines/phillipg-mbp-02/default.nix). Every test
-// below that used to exercise baked-in ZR behavior now injects THIS config, so
-// the verdicts are identical to pre-refactor behavior yet fully config-driven.
+// (a consuming private flake's machine config, e.g. your-private-flake). Every
+// test below that used to exercise baked-in ZR behavior now injects THIS
+// config, so the verdicts are identical to pre-refactor behavior yet fully
+// config-driven.
 func zrKubectlConfig(t *testing.T) configrules.KubectlConfig {
 	t.Helper()
-	return configrules.Load("../configrules/testdata/zr-rules.json").Kubectl
+	return configrules.Load("../configrules/testdata/consumer-rules.json").Kubectl
 }
 
 func TestKubectl_ReadOnly_Approve(t *testing.T) {
@@ -226,7 +227,7 @@ func TestKubectl_ReadOnlyAdditions_Approve(t *testing.T) {
 	r := New(nil, nil, zrKubectlConfig(t))
 	cmds := []string{
 		"kubectl events", "kubectl diff -f x.yaml", "kubectl wait --for=condition=Ready pod/foo",
-		"bin/kc wslogs -n mp--ui--customer", "bin/kc zrlog -n mp--ui--customer",
+		"bin/kc wslogs -n mp--ui--customer", "bin/kc toollog -n mp--ui--customer",
 		"bin/kc wsfirstpod --ws d-phillipg01",
 		"kubectl rollout status deploy/foo", "bin/kc rollout history deploy/foo",
 	}
@@ -517,7 +518,7 @@ func TestKubectl_EmptyConfig_ZRVerbsAbstain(t *testing.T) {
 	// ZR plugin verbs are NOT base read-only/exec verbs; on real kubectl they fall
 	// through to "modifying -> abstain".
 	for _, cmd := range []string{
-		"kubectl wslogs -n x", "kubectl zrlog -n x",
+		"kubectl wslogs -n x", "kubectl toollog -n x",
 		"kubectl exe -c c -- bats", "kubectl shell -c c -- bash", "kubectl wsexec -- bats",
 		"kubectl sync -f x d-phillipg01", "kubectl syncdev d-phillipg01",
 	} {
@@ -610,12 +611,12 @@ func TestKubectl_NoZRLiteralsInSource(t *testing.T) {
 	// Search for the QUOTED literal (e.g. `"kc"`) to avoid substring false
 	// positives (`"exec"` contains exe; comments explain the extraction).
 	forbidden := []string{
-		`"kc"`, `"wslogs"`, `"zrlog"`, `"wsfirstpod"`,
+		`"kc"`, `"wslogs"`, `"toollog"`, `"wsfirstpod"`,
 		`"exe"`, `"shell"`, `"wsexec"`,
 		`"sync"`, `"syncdev"`, `"workspace"`,
 		`"--ws"`, `"--workspace"`,
 		`"KC_CLUSTER"`, `"d1-"`, `"dd1-"`, `"d-"`,
-		`"prod"`, `"dprod"`, `"euprod"`, `"fastlane"`,
+		`"prod"`, `"prod2"`, `"prod-eu"`, `"fastlane"`,
 	}
 	for _, lit := range forbidden {
 		if strings.Contains(text, lit) {

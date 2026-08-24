@@ -72,7 +72,7 @@ func TestSessionLabelsRoundTrip(t *testing.T) {
 						Session: &session.Session{SessionID: "s-lbl", PID: 7},
 						SessionEnrichment: aggregate.SessionEnrichment{
 							Labels: map[string]string{
-								"workspace.scope": "ziprecruiter",
+								"workspace.scope": "acme",
 								"agent.kind":      "polecat",
 							},
 						},
@@ -86,7 +86,7 @@ func TestSessionLabelsRoundTrip(t *testing.T) {
 		t.Fatal("shape lost")
 	}
 	got := out.Dirs[0].Sessions[0].Labels
-	if got["workspace.scope"] != "ziprecruiter" {
+	if got["workspace.scope"] != "acme" {
 		t.Errorf("workspace.scope lost: %+v", got)
 	}
 	if got["agent.kind"] != "polecat" {

@@ -131,7 +131,7 @@ func splitPath(path string) []string {
 //
 // DO NOT "optimize" this into a runtime probe of the volume's case-sensitivity.
 // Some paths in this workspace ARE on case-sensitive volumes (e.g.
-// /Volumes/ziprecruiter), so a per-volume answer would be correct-but-fragile,
+// /Volumes/acme), so a per-volume answer would be correct-but-fragile,
 // and the two error directions are wildly asymmetric: over-matching costs ONE
 // unnecessary Abstain (ceta declines to approve; Claude Code still decides), while
 // under-matching costs the ENTIRE control. Fail-safe beats precision here. The same

@@ -15,7 +15,7 @@ import (
 // They prove the extraction is genuinely config-driven — identical ZR verdicts
 // WITH the config, base-generic abstention WITHOUT it.
 
-const zrFixture = "../rules/configrules/testdata/zr-rules.json"
+const zrFixture = "../rules/configrules/testdata/consumer-rules.json"
 
 const commandBlocksFixture = "../rules/configrules/testdata/command-blocks-rules.json"
 
@@ -68,13 +68,13 @@ func TestFactory_ConfigDriven_ZRConfigLoaded(t *testing.T) {
 		{"kc sync non-dev target abstains", "bin/kc sync -f x prod-target", hookio.NoOpinion},
 		// buildtools: migrated ZR tools/scripts.
 		{"prove approves", "prove -v t/foo.t", hookio.Approve},
-		{"migrated script direct", "zr-proto-regenerate.sh", hookio.Approve},
-		{"migrated script via bash", "bash zr-proto-regenerate.sh", hookio.Approve},
+		{"migrated script direct", "proto-regenerate.sh", hookio.Approve},
+		{"migrated script via bash", "bash proto-regenerate.sh", hookio.Approve},
 		// env-var interaction: the migrated script STAYS Approve with an env prefix,
 		// via the buildtools config path — the flat approvedCommands matcher would
 		// abstain here (len(EnvVars)>0), which is exactly why it moved to
 		// buildtools.approvedScripts.
-		{"migrated script with env prefix stays approve", "FOO=bar zr-proto-regenerate.sh", hookio.Approve},
+		{"migrated script with env prefix stays approve", "FOO=bar proto-regenerate.sh", hookio.Approve},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -181,8 +181,8 @@ func TestFactory_ConfigDriven_NoConfig(t *testing.T) {
 		"AWS_PROFILE=dev/developers-dev bin/kc sync -f x d-phillipg01",
 		"bin/kc exe --ws d-phillipg01 -c c -- bats",
 		"prove -v t/foo.t",
-		"zr-proto-regenerate.sh",
-		"FOO=bar zr-proto-regenerate.sh",
+		"proto-regenerate.sh",
+		"FOO=bar proto-regenerate.sh",
 	} {
 		got := eng.EvaluateHook(bashHook(cwd, cmd))
 		if got.Decision == hookio.Approve {

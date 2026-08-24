@@ -208,7 +208,7 @@ func TestConfigAutoRestartOnVersionMismatchAbsent(t *testing.T) {
 func TestConfigAutoRestartOnVersionMismatchExplicitTrue(t *testing.T) {
 	// Load-bearing: proves the toml tag `auto_restart_on_version_mismatch`
 	// matches the key rendered by the nix home module (home/programs/pa-monitor)
-	// and enabled on this machine (phillipg-nix-ziprecruiter).
+	// and enabled on this machine (a consuming private flake, e.g. your-private-flake).
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")
 	if err := os.WriteFile(path, []byte("auto_restart_on_version_mismatch = true\n"), 0o600); err != nil {
@@ -402,7 +402,7 @@ command = "/nix/store/abc-generic-decorator/bin/decorator -rule scope"
 timeout_ms = 1500
 
 [decorator.env]
-PA_MONITOR_SCOPE_RULES = "ziprecruiter:~/zr"
+PA_MONITOR_SCOPE_RULES = "acme:~/acme"
 EXTRA = "1"
 
 [[decorator]]
@@ -420,7 +420,7 @@ command = "/nix/store/def-decorator/bin/decorator"
 		t.Fatalf("Decorators: got %d entries, want 2", len(cfg.Decorators))
 	}
 	got := cfg.Decorators[0].Env
-	if got["PA_MONITOR_SCOPE_RULES"] != "ziprecruiter:~/zr" || got["EXTRA"] != "1" {
+	if got["PA_MONITOR_SCOPE_RULES"] != "acme:~/acme" || got["EXTRA"] != "1" {
 		t.Errorf("Decorators[0].Env = %+v", got)
 	}
 	if cfg.Decorators[1].Env != nil {

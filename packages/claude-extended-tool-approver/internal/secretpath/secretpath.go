@@ -38,7 +38,7 @@
 // costs the ENTIRE control (a credential file is auto-approved silently). That
 // is also why this MUST NOT be "optimized" into a runtime probe of the volume's
 // case-sensitivity — some paths in this workspace are on case-SENSITIVE volumes
-// (e.g. /Volumes/ziprecruiter), so a per-volume answer would be
+// (e.g. /Volumes/acme), so a per-volume answer would be
 // correct-but-fragile in the direction that loses the control.
 //
 // Folding case is NOT the same as widening the match. Every structural bound

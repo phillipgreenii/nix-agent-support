@@ -13,8 +13,8 @@ import (
 )
 
 // baseApprovedTools are the generic, non-consumer-specific build tools approved
-// unconditionally. Consumer tools (e.g. ZR's Perl runners prove/yath, project
-// scripts) are NOT here — they arrive via BuildtoolsConfig (ADR 0033).
+// unconditionally. Consumer tools (e.g. a consumer's Perl runners prove/yath,
+// project scripts) are NOT here — they arrive via BuildtoolsConfig (ADR 0033).
 var baseApprovedTools = map[string]bool{
 	"go":     true,
 	"gradle": true, "gradlew": true, "pre-commit": true, "prek": true, "bats": true, "bd": true,

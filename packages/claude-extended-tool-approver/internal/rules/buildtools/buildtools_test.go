@@ -31,7 +31,7 @@ func testPE() *patheval.PathEvaluator {
 // pre-refactor behavior yet fully config-driven.
 func zrBuildtoolsConfig(t *testing.T) configrules.BuildtoolsConfig {
 	t.Helper()
-	return configrules.Load("../configrules/testdata/zr-rules.json").Buildtools
+	return configrules.Load("../configrules/testdata/consumer-rules.json").Buildtools
 }
 
 func TestBuildtools_Approved_Approve(t *testing.T) {
@@ -215,7 +215,7 @@ func TestBuildtools_CueVet(t *testing.T) {
 func TestBuildtools_ApprovedScripts(t *testing.T) {
 	r := New(testPE(), zrBuildtoolsConfig(t))
 	scripts := []string{
-		"zr-proto-regenerate.sh", "pre-merge-protobuf-check",
+		"proto-regenerate.sh", "pre-merge-protobuf-check",
 		"fix-ai-tools-ownership", "pre-merge-py-check", "generate-build-deps",
 	}
 	for _, s := range scripts {
@@ -238,8 +238,8 @@ func TestBuildtools_ApprovedScripts(t *testing.T) {
 
 // silverBulletBuildtoolsConfig is the config shape THIS deployment would need
 // in rules.json to approve silver-bullet's helpers. It is NOT loaded from a
-// JSON fixture: neither testdata/zr-rules.json nor testdata/command-blocks-
-// rules.json is a domain fit (both are ZR-specific, and zr-rules.json's own
+// JSON fixture: neither testdata/consumer-rules.json nor testdata/command-blocks-
+// rules.json is a domain fit (both are ZR-specific, and consumer-rules.json's own
 // test asserts an EXACT ApprovedScripts count that unrelated entries would
 // break), and the actually-deployed rules.json lives outside this repo/
 // worktree entirely (XDG_CONFIG_HOME, ADR 0004) — see the pg2-3y56d report for
@@ -975,7 +975,7 @@ func TestBuildtools_EmptyConfig_ZRToolsAbstain(t *testing.T) {
 	r := New(testPE(), configrules.BuildtoolsConfig{})
 	for _, cmd := range []string{
 		"prove -v t/foo.t", "yath test",
-		"zr-proto-regenerate.sh", "bin/generate-build-deps",
+		"proto-regenerate.sh", "bin/generate-build-deps",
 		"pre-merge-py-check", "bash pre-merge-protobuf-check", "sh fix-ai-tools-ownership",
 	} {
 		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
@@ -1009,7 +1009,7 @@ func TestBuildtools_NoZRLiteralsInSource(t *testing.T) {
 	text := string(src)
 	forbidden := []string{
 		`"prove"`, `"yath"`, `"generate-build-deps"`,
-		`"zr-proto-regenerate.sh"`, `"pre-merge-protobuf-check"`,
+		`"proto-regenerate.sh"`, `"pre-merge-protobuf-check"`,
 		`"fix-ai-tools-ownership"`, `"pre-merge-py-check"`,
 	}
 	for _, lit := range forbidden {

@@ -106,7 +106,7 @@ func runWith(r io.Reader, w io.Writer, rules []rule) error {
 // returns an empty map so the daemon's DefaultScope ("personal") stands.
 // Matching is path-segment aware: a rule prefix matches when the CWD equals
 // the prefix or is a child of it (CWD == prefix or CWD has "prefix/" as its
-// prefix), so `/Volumes/ziprecruiterX` does NOT match rule `/Volumes/ziprecruiter`.
+// prefix), so `/Volumes/acmeX` does NOT match rule `/Volumes/acme`.
 func decorate(s session, rules []rule) map[string]string {
 	scope := ""
 	best := -1

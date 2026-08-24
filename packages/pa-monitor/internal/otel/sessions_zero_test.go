@@ -36,13 +36,13 @@ func TestSessionsCount_CarryForwardZero(t *testing.T) {
 	e, reader := newTestEmitter(t)
 	base := map[string]string{"plan_tier": "max_20x"}
 
-	workingTuple := map[string]string{"state": "working", "workspace.scope": "ziprecruiter", "plan_tier": "max_20x"}
-	idleTuple := map[string]string{"state": "idle", "workspace.scope": "ziprecruiter", "plan_tier": "max_20x"}
+	workingTuple := map[string]string{"state": "working", "workspace.scope": "acme", "plan_tier": "max_20x"}
+	idleTuple := map[string]string{"state": "idle", "workspace.scope": "acme", "plan_tier": "max_20x"}
 
 	// Tick 1: both working and idle live.
 	e.RecordSessionGroups([]SessionGroup{
-		{Count: 1, Labels: map[string]string{"state": "working", "workspace.scope": "ziprecruiter"}},
-		{Count: 1, Labels: map[string]string{"state": "idle", "workspace.scope": "ziprecruiter"}},
+		{Count: 1, Labels: map[string]string{"state": "working", "workspace.scope": "acme"}},
+		{Count: 1, Labels: map[string]string{"state": "idle", "workspace.scope": "acme"}},
 	}, base)
 
 	m, ok := collectMetric(t, reader, "pa_monitor.sessions.count")
@@ -59,7 +59,7 @@ func TestSessionsCount_CarryForwardZero(t *testing.T) {
 
 	// Tick 2: working flips to idle — only the idle tuple is reported now.
 	e.RecordSessionGroups([]SessionGroup{
-		{Count: 2, Labels: map[string]string{"state": "idle", "workspace.scope": "ziprecruiter"}},
+		{Count: 2, Labels: map[string]string{"state": "idle", "workspace.scope": "acme"}},
 	}, base)
 
 	m, ok = collectMetric(t, reader, "pa_monitor.sessions.count")
@@ -88,18 +88,18 @@ func TestSessionsCount_CarryForwardZero(t *testing.T) {
 func TestSessionsCount_ZeroedOnce(t *testing.T) {
 	e, reader := newTestEmitter(t)
 	base := map[string]string{"plan_tier": "max_20x"}
-	workingTuple := map[string]string{"state": "working", "workspace.scope": "ziprecruiter", "plan_tier": "max_20x"}
+	workingTuple := map[string]string{"state": "working", "workspace.scope": "acme", "plan_tier": "max_20x"}
 
 	// Tick 1: working + idle.
 	e.RecordSessionGroups([]SessionGroup{
-		{Count: 1, Labels: map[string]string{"state": "working", "workspace.scope": "ziprecruiter"}},
-		{Count: 1, Labels: map[string]string{"state": "idle", "workspace.scope": "ziprecruiter"}},
+		{Count: 1, Labels: map[string]string{"state": "working", "workspace.scope": "acme"}},
+		{Count: 1, Labels: map[string]string{"state": "idle", "workspace.scope": "acme"}},
 	}, base)
 	collectMetric(t, reader, "pa_monitor.sessions.count")
 
 	// Tick 2: only idle — working zeroed once.
 	e.RecordSessionGroups([]SessionGroup{
-		{Count: 2, Labels: map[string]string{"state": "idle", "workspace.scope": "ziprecruiter"}},
+		{Count: 2, Labels: map[string]string{"state": "idle", "workspace.scope": "acme"}},
 	}, base)
 	m, _ := collectMetric(t, reader, "pa_monitor.sessions.count")
 	g := m.Data.(metricdata.Gauge[int64])
@@ -109,7 +109,7 @@ func TestSessionsCount_ZeroedOnce(t *testing.T) {
 
 	// Tick 3: still only idle — working must NOT be re-emitted (zeroed once).
 	e.RecordSessionGroups([]SessionGroup{
-		{Count: 2, Labels: map[string]string{"state": "idle", "workspace.scope": "ziprecruiter"}},
+		{Count: 2, Labels: map[string]string{"state": "idle", "workspace.scope": "acme"}},
 	}, base)
 	m, _ = collectMetric(t, reader, "pa_monitor.sessions.count")
 	g = m.Data.(metricdata.Gauge[int64])

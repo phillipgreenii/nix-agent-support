@@ -198,7 +198,7 @@ func (d *Decorator) Detect(s Session) Set {
 // The daemon's per-session label cache uses this to avoid caching a failed
 // decorator result: caching a transient failure would freeze the (wrong)
 // empty label set for the session's entire lifetime, so a session that should
-// be scoped (e.g. `workspace.scope=ziprecruiter`) would stick at the
+// be scoped (e.g. `workspace.scope=acme`) would stick at the
 // DefaultScope (`personal`) until it restarts (ADR 0024 D5). A successful
 // empty result is still safe to cache.
 func (d *Decorator) DetectOK(s Session) (Set, bool) {

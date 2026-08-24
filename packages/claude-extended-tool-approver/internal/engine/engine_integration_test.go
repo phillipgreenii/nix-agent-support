@@ -39,7 +39,7 @@ import (
 // rules.json block. It carries NO ssh/vault/curl/monorepo blocks, so those rules
 // sit at their safe base default (Abstain) in this engine; the
 // command-blocks fixture below supplies data for them.
-const zrFixture = "../rules/configrules/testdata/zr-rules.json"
+const zrFixture = "../rules/configrules/testdata/consumer-rules.json"
 
 // commandBlocksFixture supplies the ssh/vault/curl/monorepo DATA blocks with
 // neutral example values, so the command-aware classifiers are decisive rather
@@ -1329,11 +1329,11 @@ func TestIntegration_EnvVarGuard(t *testing.T) {
 		// caller's own value and adds only STATIC ABSOLUTE components is affirmatively
 		// safe and must NOT ask. 984 corpus prompts matched the old name-only Ask with
 		// zero true positives; these are the dominant real idioms.
-		{"preserve-form append dominant idiom", `export PATH="$PATH:/Volumes/ziprecruiter/pristine/bin"`, hookio.Approve},
+		{"preserve-form append dominant idiom", `export PATH="$PATH:/Volumes/acme/pristine/bin"`, hookio.Approve},
 		{"preserve-form nix-store prepend", `export PATH="/nix/store/abc123-golangci-lint/bin:$PATH"`, hookio.Approve},
 		{"preserve-form brace", `export PATH="${PATH}:/opt/homebrew/bin"`, hookio.Approve},
 		{"preserve-form unquoted", "export PATH=$PATH:/x", hookio.Approve},
-		{"preserve-form leading", `PATH="$PATH:/Volumes/ziprecruiter/pristine/bin" echo hi`, hookio.Approve},
+		{"preserve-form leading", `PATH="$PATH:/Volumes/acme/pristine/bin" echo hi`, hookio.Approve},
 		{"preserve-form env-prefix", `env PATH="$PATH:/x" git status`, hookio.Approve},
 		// KNOWINGLY ACCEPTED (pg2-0q99a): a HOSTILE static prepend is textually
 		// indistinguishable from `/nix/store/.../bin`, so the split clears it. The
@@ -2681,7 +2681,7 @@ func TestIntegration_ConfigRulesPrecedence(t *testing.T) {
 
 	runChainCases(t, eng, projectRoot, []chainCase{
 		// --- Baseline: the fixture's approvedCommands / blockedCommands decide. ---
-		{"approved consumer command", "grazr build", hookio.Approve, "config-rules"},
+		{"approved consumer command", "grawrap build", hookio.Approve, "config-rules"},
 		{"blocked consumer command", "zn-self-apply", hookio.Reject, "config-rules"},
 		// The block is reachable through the leaf fold, not only as a bare command —
 		// so it cannot be smuggled in behind an approvable sibling.
@@ -2692,16 +2692,16 @@ func TestIntegration_ConfigRulesPrecedence(t *testing.T) {
 		// hard deny; the consumer-approved one is decided by config-rules before
 		// git-directory is ever consulted.
 		{"unknown executable touching git metadata is denied", "frobnicate .git/config", hookio.Reject, "git-directory"},
-		{"consumer-approved executable outranks git-directory", "grazr .git/config", hookio.Approve, "config-rules"},
+		{"consumer-approved executable outranks git-directory", "grawrap .git/config", hookio.Approve, "config-rules"},
 		// A traversal-spelled operand. This row asserted precedence over the
 		// `path-traversal` rule until pg2-bn7sx deleted it; the operand spelling is no
 		// longer special to any rule, so what it now pins is that an `approvedCommands`
 		// Approve is ARGUMENT-BLIND — it does not start inspecting operands just because
 		// one looks like an escape. See TestIntegration_TraversalHandledByPathModel for
 		// what governs traversal now.
-		{"consumer-approved executable is argument-blind to a traversal operand", "grazr ../../x", hookio.Approve, "config-rules"},
+		{"consumer-approved executable is argument-blind to a traversal operand", "grawrap ../../x", hookio.Approve, "config-rules"},
 		// …and ahead of secrets, which would otherwise Ask on this path.
-		{"consumer-approved executable outranks secrets", "grazr /Users/testuser/.ssh/id_rsa", hookio.Approve, "config-rules"},
+		{"consumer-approved executable outranks secrets", "grawrap /Users/testuser/.ssh/id_rsa", hookio.Approve, "config-rules"},
 
 		// --- The backstops that DO survive that precedence. They are per-leaf and
 		// engine-level, so config-rules' Approve is scoped to the leaf it matched.
@@ -2710,15 +2710,15 @@ func TestIntegration_ConfigRulesPrecedence(t *testing.T) {
 		// A redirection is the SHELL writing, not the approved command; the engine
 		// evaluates redirections separately from the chain, so the write to a read-only
 		// path still Rejects (deciding module here is "engine", not a rule).
-		{"redirection is still judged", "grazr > /etc/hosts", hookio.Reject, ""},
+		{"redirection is still judged", "grawrap > /etc/hosts", hookio.Reject, ""},
 		// A dangerous SIBLING leaf is still judged on its own and demotes the fold.
-		{"dangerous sibling leaf still demotes", "grazr && sudo rm -rf /", hookio.Reject, ""},
-		{"secret-touching sibling leaf still demotes", "grazr x && rm -rf $HOME/.ssh", hookio.Ask, ""},
+		{"dangerous sibling leaf still demotes", "grawrap && sudo rm -rf /", hookio.Reject, ""},
+		{"secret-touching sibling leaf still demotes", "grawrap x && rm -rf $HOME/.ssh", hookio.Ask, ""},
 		// config-rules WITHHOLDS its approve when the leaf carries env assignments, so
 		// it cannot become an auto-approve prefix (the failure mode measured for an
-		// ungated env-vars Approve). Nothing later approves `grazr`, so this Abstains —
+		// ungated env-vars Approve). Nothing later approves `grawrap`, so this Abstains —
 		// this is exactly why ZR's scripts moved to buildtools.approvedScripts.
-		{"env-prefixed approved command is withheld", "FOO=bar grazr build", hookio.NoOpinion, ""},
+		{"env-prefixed approved command is withheld", "FOO=bar grawrap build", hookio.NoOpinion, ""},
 	})
 }
 

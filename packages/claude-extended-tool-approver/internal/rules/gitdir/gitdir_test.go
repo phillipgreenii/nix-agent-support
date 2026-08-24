@@ -440,7 +440,7 @@ func TestGitDir_QuotedHeredocBodyIsNotAnAccess(t *testing.T) {
 		name    string
 		command string
 	}{
-		{"row 126856 shape: heredoc payload in an assignment", "PAYLOAD=$(cat <<'EOF'\n{\n  \"title\": \"infra-block: ziprecruiter .git/index is 0 bytes\"\n}\nEOF\n)"},
+		{"row 126856 shape: heredoc payload in an assignment", "PAYLOAD=$(cat <<'EOF'\n{\n  \"title\": \"infra-block: acme .git/index is 0 bytes\"\n}\nEOF\n)"},
 		{"commit message mentioning a path", "git commit -m 'stop reading .git/config directly'"},
 		{"echoed prose mentioning a path", "echo 'see .git/config for the remote'"},
 		{"bead title in a double-quoted arg", "bd create \"repo .git/index is 0 bytes\""},

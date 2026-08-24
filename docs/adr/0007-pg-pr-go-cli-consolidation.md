@@ -6,7 +6,7 @@
 
 ## Context
 
-PR-agent functionality is scattered across six sources using three languages (Python, Go, Bash) and three orchestration models (claude skills, gascity pack, workflow phases): `packages/gh-prreview`, `packages/my-code-review-support`, `packages/my-code-review-support-cli`, `phillipg-nix-ziprecruiter/workflow/phases/review`, `phillipg-nix-ziprecruiter/modules/zg`, and `gc/assets/imports/zr`. Duplication exists in worktree management (3x), GitHub fetch (3x), PR body generation (2x), and feedback ingestion (2x). Two competing bead schemas. Mixed-mode work (human + gascity + claude session on one PR) is fragile because each surface talks to GitHub differently and writes beads differently.
+PR-agent functionality is scattered across six sources using three languages (Python, Go, Bash) and three orchestration models (claude skills, gascity pack, workflow phases): `packages/gh-prreview`, `packages/my-code-review-support`, `packages/my-code-review-support-cli`, `your-private-flake/workflow/phases/review`, `your-private-flake/modules/zg`, and `gc/assets/imports/zr`. Duplication exists in worktree management (3x), GitHub fetch (3x), PR body generation (2x), and feedback ingestion (2x). Two competing bead schemas. Mixed-mode work (human + gascity + claude session on one PR) is fragile because each surface talks to GitHub differently and writes beads differently.
 
 ## Decision
 
@@ -24,7 +24,7 @@ Consolidate into a single Go CLI `pg-pr` plus a Claude plugin distributed via th
 ### Negative
 
 - Five-phase strangler migration takes weeks of calendar time.
-- ZR-specific Captain's Log adapter has to live downstream in `phillipg-nix-ziprecruiter` as a separate Go binary; cross-repo coordination required for protocol changes.
+- ZR-specific Captain's Log adapter has to live downstream in `your-private-flake` as a separate Go binary; cross-repo coordination required for protocol changes.
 
 ### Neutral
 

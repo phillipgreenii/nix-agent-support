@@ -19,7 +19,7 @@ it was really **three different things wearing one hat**:
 2. The **generic tool behavior** — pr-pool's org-agnostic workflows, reviews,
    cross-cutting invariants, operating model, and capability map.
 3. The **per-project overlay** — how pr-pool is actually _used_ at a specific org
-   (ZipRecruiter): watched labels, team, integration style, configured roles, and
+   (the employer): watched labels, team, integration style, configured roles, and
    the `.pr-pool` config. This is org-specific and MUST NOT live in this public
    flake.
 
@@ -48,7 +48,7 @@ its own; and org-specific roles/workflows should move to a ZR-owned set.
   org-agnostic pr-pool behavior. Co-located with the `pr-pool` tool per the scope
   convention. Its `docs/` is excluded from the package's build fileset so doc edits
   do not rebump the pr-pool version (repo `CLAUDE.md` "Versioning").
-- **Set 3 — pr-pool @ ZR** (`phillipg-nix-ziprecruiter · pr-pool-components/docs/behavior`).
+- **Set 3 — pr-pool @ ZR** (`your-private-flake · pr-pool-components/docs/behavior`).
   The ZR overlay: watched labels, team, integration style, configured roles, `.pr-pool`
   config. Lives in the private ZR repo, never here.
 
@@ -115,7 +115,7 @@ build/fileset machinery.
 
 - Supersedes the two-layer "shared base vs per-project overlay" framing previously
   described inside `docs/behavior/README.md`.
-- See also: phillipg-nix-ziprecruiter `pr-pool-components/docs/behavior/README.md`
+- See also: your-private-flake `pr-pool-components/docs/behavior/README.md`
   (the Set 3 overlay).
 - Relates to `GOAL-SIMPLE-2` (org/repo config lives in org repos) in
   `packages/pr-pool/docs/behavior/operating-pr-pool.md`.

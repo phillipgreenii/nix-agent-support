@@ -6,7 +6,7 @@
 
 ## Context
 
-ZR-specific providers (Captain's Log CICD, ZR-flavored jira) cannot live in the org-agnostic `phillipgreenii-nix-agent-support`. We need an extension mechanism that lets `phillipg-nix-ziprecruiter` ship adapters without rebuilding `pg-pr` core. Extension binaries should be Go programs (not bash scripts) so they can reuse `pg-pr`'s `pkg/` library and stay type-safe.
+ZR-specific providers (Captain's Log CICD, ZR-flavored jira) cannot live in the org-agnostic `phillipgreenii-nix-agent-support`. We need an extension mechanism that lets `your-private-flake` ship adapters without rebuilding `pg-pr` core. Extension binaries should be Go programs (not bash scripts) so they can reuse `pg-pr`'s `pkg/` library and stay type-safe.
 
 ## Decision
 
@@ -42,7 +42,7 @@ Extension binaries are Go programs that import `github.com/phillipgreenii/philli
 
 Rejected. Go plugins are fragile on Darwin, version-locked to the host binary, and not commonly used. They would tie extension authors to the exact Go toolchain and pg-pr version used to build core.
 
-### Library-link nix-ziprecruiter's binaries against the same pg-pr source
+### Library-link the private flake's binaries against the same pg-pr source
 
 Rejected. The user explicitly requested that extensions not rebuild core. Library-link forces every extension to track core's exact source state.
 

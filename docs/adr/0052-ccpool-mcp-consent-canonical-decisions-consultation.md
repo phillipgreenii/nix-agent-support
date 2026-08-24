@@ -74,7 +74,7 @@ of re-denied.
    existing headless-safety property can never regress because of a bad canonical file. An empty
    configured path behaves exactly as before this ADR (no consultation, pure default-deny).
 5. **This repo supplies only the generic, empty-by-default mechanism.** Per this repo's own
-   "Public Repository — No ZipRecruiter Disclosure" rule, no concrete canonical path, deployment
+   public-repository / no-employer-disclosure rule, no concrete canonical path, deployment
    name, or symlink-chain layout may be hardcoded here. Which path a deployment points the
    mechanism at (and how that deployment arranges its own long-lived canonical
    `settings.local.json`) is that deployment's own configuration, supplied at runtime — out of
@@ -94,7 +94,7 @@ Rationale:
   to a fresh ephemeral pool worktree is strictly more correct than blanket-denying it.
 - **The mechanism belongs generically here; the wiring does not.** Keeping the field
   empty-by-default and the path fully caller-supplied is what lets this public flake ship the
-  capability while a private deployment (`phillipg-nix-ziprecruiter`) supplies its own
+  capability while a private deployment (`your-private-flake`) supplies its own
   ZR-specific canonical path and layout without a single ZR literal appearing in this repo.
 
 ## Consequences
@@ -127,7 +127,7 @@ Rationale:
 
 - Which deployment supplies a concrete canonical path, and how it arranges its own symlink chain of
   long-lived `settings.local.json` files, is entirely out of scope here and is expected to land in
-  `phillipg-nix-ziprecruiter`'s own configuration, not in this repo.
+  `your-private-flake`'s own configuration, not in this repo.
 - `packages/pr-pool/docs/behavior/` is unchanged by this ADR. Its Scope/Floor were read and are
   the reason this record lives in `docs/adr/` instead.
 

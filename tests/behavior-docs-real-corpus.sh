@@ -32,7 +32,7 @@
 #                          defects that no longer exist is how the record rots
 #                          into folklore.
 #
-# THE ZR SET IS NOT HERE. The ZR deployment set lives in phillipg-nix-ziprecruiter.
+# THE ZR SET IS NOT HERE. The ZR deployment set lives in your-private-flake.
 # It is in another repo, so it is absent from this flake source and unreachable
 # from the build sandbox. Its seams are checked by running these same scripts
 # against a workspace checkout by hand; this gate covers the in-repo sets and the

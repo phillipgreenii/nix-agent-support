@@ -52,7 +52,7 @@ awareness layer. Split across two repos:
    HM-scoped consumers read the **same** value. Nothing hardcodes the policy.
 
 2. **Enforcement at the overlay wrapper (facade / single chokepoint)** — in the
-   consumer `phillipg-nix-ziprecruiter`. When the flag is enabled, the
+   consumer `your-private-flake`. When the flag is enabled, the
    machine-wide `bd` derivation's single `wrapProgram` adds
    `--set BEADS_DOLT_AUTO_START 0`, so every consumer — shells, GUI apps, and
    launchd daemons — inherits it. Parameterize `package.nix` with
@@ -114,7 +114,7 @@ the overlay wrapper, which every context resolves.
   restart window can still briefly grab the port.
 - Enforcement spans two repos: building the consumer against the new option
   requires an input override / lock bump, and cross-repo landing is coordinated
-  separately (the enforcement half lives in `phillipg-nix-ziprecruiter`).
+  separately (the enforcement half lives in `your-private-flake`).
 
 ### Neutral
 

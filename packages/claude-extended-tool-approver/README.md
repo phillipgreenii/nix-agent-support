@@ -286,10 +286,10 @@ or empty block leaves its rule at the safe base default (the command-aware
   that mitigation.
 
   The exemption is per-LEAF, not total, so three backstops survive and must not
-  regress: the engine's redirection check (`grazr > /etc/hosts` → Reject), a
-  sibling leaf judged on its own (`grazr && sudo rm -rf /` → Reject), and
+  regress: the engine's redirection check (`grawrap > /etc/hosts` → Reject), a
+  sibling leaf judged on its own (`grawrap && sudo rm -rf /` → Reject), and
   `config-rules`' own withhold when the leaf carries inline env assignments
-  (`FOO=bar grazr build` → Abstain). See
+  (`FOO=bar grawrap build` → Abstain). See
   [ADR 0040](../../docs/adr/0040-ceta-approved-commands-are-absolute.md) for the
   decision and its full Consequences.
 

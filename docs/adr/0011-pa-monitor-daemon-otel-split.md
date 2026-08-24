@@ -31,7 +31,7 @@ Three forces motivate restructuring the package now:
    manipulate the same shared state.
 3. **Cross-repo move**: the package belongs in this repo
    (`phillipgreenii-nix-agent-support`), not the consuming
-   ZipRecruiter flake. ZR-specific labels (scope, role values) must
+   employer flake. ZR-specific labels (scope, role values) must
    route through an extension point, not live in this codebase.
 
 ## Decision
@@ -54,7 +54,7 @@ Key choices recorded by this ADR:
    cannot).
 4. **General label keys, decorator-supplied values.** All consumers use
    the same key set (`workspace.scope`, `workspace.project`,
-   `workspace.repo`, `agent.role`, etc.). ZipRecruiter-specific values
+   `workspace.repo`, `agent.role`, etc.). Employer-specific values
    are emitted by a shell-out decorator binary shipped from that repo,
    not by code in this repo.
 5. **Correlation labels instead of long-lived spans.** 5h blocks and
@@ -80,7 +80,7 @@ Key choices recorded by this ADR:
 - Continuous metrics regardless of TUI presence.
 - Single source of truth for caffeinate state, session enumeration, and
   signal dispatch — eliminates cross-process inconsistency.
-- ZipRecruiter labels stay out of this repo; the repo serves all
+- Employer-specific labels stay out of this repo; the repo serves all
   workspaces.
 - Generic Grafana dashboard works for every consumer; no per-consumer
   dashboard JSON to maintain.
@@ -149,5 +149,5 @@ templates.
 ## Related Decisions
 
 - See also: phillipgreenii-nix-support-apps docs/adr/0037-observability-module-redesign.md
-- See also: phillipg-nix-ziprecruiter docs/adr/0041-gascity-otel-decoupling.md
+- See also: your-private-flake docs/adr/0041-gascity-otel-decoupling.md
 - Design spec: `docs/superpowers/specs/2026-05-20-pa-monitor-daemon-otel-design.md`

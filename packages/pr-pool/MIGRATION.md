@@ -33,7 +33,7 @@ recent change (`pg2-0xa2n`) made "a source or handler whose backing command is
 absent" a **blocking pre-flight failure** in `Config.Load()` (`INV-WORKFLOW-1`
 check 5) instead of a runtime warning. `jira-issues`' backing command
 (`pg-pr-issues-jira-zr`) is a package defined **only** in the downstream
-`phillipg-nix-ziprecruiter` flake — this (upstream, public) flake can never
+`your-private-flake` (e.g. the operator's private ZR-deployment flake) — this (upstream, public) flake can never
 legitimately supply it without inverting the dependency direction. So
 `jira-issues` as a typed-in-Core source was **structurally unsatisfiable**:
 any config declaring it would refuse to load in any context where this

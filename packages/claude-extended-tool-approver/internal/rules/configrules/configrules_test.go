@@ -163,14 +163,14 @@ func TestConfigRules_NonBashAbstains(t *testing.T) {
 // kubectl{}/buildtools{} sub-configs from the ZR fixture — the schema the kubectl
 // and build-tools rules consume via DI (ADR 0033).
 func TestLoad_ParsesKubectlBuildtoolsBlocks(t *testing.T) {
-	cfg := Load("testdata/zr-rules.json")
+	cfg := Load("testdata/consumer-rules.json")
 
 	k := cfg.Kubectl
 	if got := k.ExecutableAliases; len(got) != 1 || got[0] != "kc" {
 		t.Errorf("ExecutableAliases = %v, want [kc]", got)
 	}
 	if len(k.ReadOnlyVerbs) != 3 {
-		t.Errorf("ReadOnlyVerbs = %v, want 3 (wslogs/zrlog/wsfirstpod)", k.ReadOnlyVerbs)
+		t.Errorf("ReadOnlyVerbs = %v, want 3 (wslogs/toollog/wsfirstpod)", k.ReadOnlyVerbs)
 	}
 	if len(k.ExecVerbs) != 3 {
 		t.Errorf("ExecVerbs = %v, want 3 (exe/shell/wsexec)", k.ExecVerbs)
@@ -196,7 +196,7 @@ func TestLoad_ParsesKubectlBuildtoolsBlocks(t *testing.T) {
 	// The 5 migrated scripts MUST NOT remain in the flat approvedCommands.
 	for _, cmd := range cfg.ApprovedCommands {
 		switch cmd {
-		case "zr-proto-regenerate.sh", "pre-merge-protobuf-check", "fix-ai-tools-ownership", "pre-merge-py-check", "generate-build-deps":
+		case "proto-regenerate.sh", "pre-merge-protobuf-check", "fix-ai-tools-ownership", "pre-merge-py-check", "generate-build-deps":
 			t.Errorf("migrated script %q must be removed from flat approvedCommands", cmd)
 		}
 	}

@@ -43,7 +43,7 @@ func TestRoleNames(t *testing.T) {
 func TestBuildRunRoleEvent_populatesMetadata(t *testing.T) {
 	const beadID = "zr-vd38a"
 	br := fakeBR{out: map[string]string{
-		"show " + beadID + " --json": `{"data":[{"id":"zr-vd38a","issue_type":"review-pr","title":"Review PR #99116","metadata":{"pr_number":99116,"repo":"ziprecruiter/ziprecruiter","head_sha":"abc123def","branch":"feature/x"}}]}`,
+		"show " + beadID + " --json": `{"data":[{"id":"zr-vd38a","issue_type":"review-pr","title":"Review PR #99116","metadata":{"pr_number":99116,"repo":"acme/widgets","head_sha":"abc123def","branch":"feature/x"}}]}`,
 	}}
 	role := roles.Role{Name: "review", Binds: []string{"review.ready"}}
 	ev, err := buildRunRoleEvent(context.Background(), br, role, beadID)

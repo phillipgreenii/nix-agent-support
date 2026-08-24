@@ -561,7 +561,7 @@ MUST be isolated; if they modify files directly, the test MUST generate the scen
 
 #### Version Control
 
-- **ZR monorepo ONLY** (ZR-Private/ziprecruiter): include the Jira issue as `Refs: TICKET-ID` on the line immediately after the subject (before the body). Extract the ticket ID from the branch name (format: `username.TICKET-ID.description`). A valid ticket ID matches `[A-Z]+-\d+` (e.g., `FINDEV-9208`, `CI-1494`). If the branch contains `NO-JIRA`, `NOJIRA`, or any variation instead of a real ticket ID, omit the `Refs:` line entirely. In personal/nix repos (the phillipg_mbp workspace and similar), the ticket-branch format does NOT apply: use simple branch names (e.g. `fix-foo`) and never add a `Refs:` line.
+- **ZR monorepo ONLY** (the employer's private org/monorepo): include the Jira issue as `Refs: TICKET-ID` on the line immediately after the subject (before the body). Extract the ticket ID from the branch name (format: `username.TICKET-ID.description`). A valid ticket ID matches `[A-Z]+-\d+` (e.g., `PROJ-9208`, `CI-1494`). If the branch contains `NO-JIRA`, `NOJIRA`, or any variation instead of a real ticket ID, omit the `Refs:` line entirely. In personal/nix repos (the phillipg_mbp workspace and similar), the ticket-branch format does NOT apply: use simple branch names (e.g. `fix-foo`) and never add a `Refs:` line.
 - **CRITICAL**: NEVER use `--no-verify` (or `-n`) on git commands without explicit user approval
 - IF git hooks report violations: MUST fix the violations rather than bypassing hooks
 - Agent-authored GitHub PR comments/reviews (ZR repos) MUST include 🤖 in the body — a hook rejects them otherwise (12 rejected-and-retried comment bodies in the 3-month census; 1 in the 8 days to 2026-07-30)

@@ -414,19 +414,19 @@ _installed_plugins_path() {
   # the cache holds the pre-bump version and the mock creates a NEW version dir,
   # exactly as a marketplace HEAD advance does. This is the case an apply whose
   # installs all short-circuit can never verify.
-  echo '{"enabledPlugins":{"jvm@ziprecruiter":false}}' > "$SETTINGS"
-  _write_manifest "ziprecruiter" "jvm" "19b5ada4caa6" '{"name":"jvm"}'
-  _mock_claude_enabling "$SETTINGS" "$CACHE_ROOT/ziprecruiter/jvm/c29658bd3aca"
+  echo '{"enabledPlugins":{"jvm@acme":false}}' > "$SETTINGS"
+  _write_manifest "acme" "jvm" "19b5ada4caa6" '{"name":"jvm"}'
+  _mock_claude_enabling "$SETTINGS" "$CACHE_ROOT/acme/jvm/c29658bd3aca"
 
-  run "$SCRIPT" "$CLAUDE_BIN" "jvm@ziprecruiter" "$CACHE_ROOT" "$SETTINGS" "false"
+  run "$SCRIPT" "$CLAUDE_BIN" "jvm@acme" "$CACHE_ROOT" "$SETTINGS" "false"
 
   [ "$status" -eq 0 ]
   # The install ran, and it really was a NON-short-circuiting one.
-  grep -Fxq "plugin install jvm@ziprecruiter --scope user" "$CALLS"
-  [ -f "$CACHE_ROOT/ziprecruiter/jvm/c29658bd3aca/.claude-plugin/plugin.json" ]
+  grep -Fxq "plugin install jvm@acme --scope user" "$CALLS"
+  [ -f "$CACHE_ROOT/acme/jvm/c29658bd3aca/.claude-plugin/plugin.json" ]
   # The plugin stays INSTALLED but the Nix-declared `false` is what survives.
-  [ "$(_enabled_of "jvm@ziprecruiter")" = "false" ]
-  [[ "$output" == *"jvm@ziprecruiter enablement restored to false at user scope (was true)"* ]]
+  [ "$(_enabled_of "jvm@acme")" = "false" ]
+  [[ "$output" == *"jvm@acme enablement restored to false at user scope (was true)"* ]]
 }
 
 @test "regression: the SHORT-CIRCUIT install path also enables, and is also restored" {
@@ -434,17 +434,17 @@ _installed_plugins_path() {
   # too (measured). A witness plugin whose version never moved therefore proves
   # nothing about staying disabled, which is why the earlier pg-pr witness was
   # invalid. No new cache dir here — nothing is pulled — yet the key still flips.
-  echo '{"enabledPlugins":{"slack@ziprecruiter":false}}' > "$SETTINGS"
-  _write_manifest "ziprecruiter" "slack" "19b5ada4caa6" '{"name":"slack"}'
+  echo '{"enabledPlugins":{"slack@acme":false}}' > "$SETTINGS"
+  _write_manifest "acme" "slack" "19b5ada4caa6" '{"name":"slack"}'
   _mock_claude_enabling "$SETTINGS" ""
 
-  run "$SCRIPT" "$CLAUDE_BIN" "slack@ziprecruiter" "$CACHE_ROOT" "$SETTINGS" "false"
+  run "$SCRIPT" "$CLAUDE_BIN" "slack@acme" "$CACHE_ROOT" "$SETTINGS" "false"
 
   [ "$status" -eq 0 ]
   # Only the pre-existing cached version — no new content was pulled.
-  run bash -c 'ls "$CACHE_ROOT/ziprecruiter/slack" | tr "\n" " "'
+  run bash -c 'ls "$CACHE_ROOT/acme/slack" | tr "\n" " "'
   [ "$output" = "19b5ada4caa6 " ]
-  [ "$(_enabled_of "slack@ziprecruiter")" = "false" ]
+  [ "$(_enabled_of "slack@acme")" = "false" ]
 }
 
 @test "declared TRUE is asserted too: a disabled key is restored to true" {
@@ -464,14 +464,14 @@ _installed_plugins_path() {
 @test "declared value is asserted even when install AND update both fail" {
   # The Nix declaration is authoritative regardless of how the CLI fared: a
   # partially-applied install must not leave the plugin enabled.
-  echo '{"enabledPlugins":{"jvm@ziprecruiter":true}}' > "$SETTINGS"
+  echo '{"enabledPlugins":{"jvm@acme":true}}' > "$SETTINGS"
   _mock_claude 1 1 "install boom" "update boom"
 
-  run --separate-stderr "$SCRIPT" "$CLAUDE_BIN" "jvm@ziprecruiter" "$CACHE_ROOT" "$SETTINGS" "false"
+  run --separate-stderr "$SCRIPT" "$CLAUDE_BIN" "jvm@acme" "$CACHE_ROOT" "$SETTINGS" "false"
 
   [ "$status" -eq 0 ]
-  [[ "$stderr" == *"WARNING jvm@ziprecruiter install/update failed"* ]]
-  [ "$(_enabled_of "jvm@ziprecruiter")" = "false" ]
+  [[ "$stderr" == *"WARNING jvm@acme install/update failed"* ]]
+  [ "$(_enabled_of "jvm@acme")" = "false" ]
 }
 
 @test "restore creates an absent key and touches nothing else; second run is a silent no-op" {
@@ -483,27 +483,27 @@ _installed_plugins_path() {
   "model": "opus[1m]",
   "enabledPlugins": { "other@m": true },
   "extraKnownMarketplaces": {
-    "ziprecruiter": { "source": { "source": "directory", "path": "/Volumes/ziprecruiter/pristine" } }
+    "acme": { "source": { "source": "directory", "path": "/Volumes/acme/pristine" } }
   }
 }
 JSON
   _mock_claude_enabling "$SETTINGS" ""
 
-  run "$SCRIPT" "$CLAUDE_BIN" "findev@ziprecruiter" "$CACHE_ROOT" "$SETTINGS" "false"
+  run "$SCRIPT" "$CLAUDE_BIN" "findev@acme" "$CACHE_ROOT" "$SETTINGS" "false"
   [ "$status" -eq 0 ]
-  [ "$(_enabled_of "findev@ziprecruiter")" = "false" ]
+  [ "$(_enabled_of "findev@acme")" = "false" ]
   [[ "$output" == *"restored to false at user scope (was true)"* ]]
 
   # Untouched neighbours.
   [ "$(jq -r '.model' "$SETTINGS")" = "opus[1m]" ]
   [ "$(_enabled_of "other@m")" = "true" ]
-  [ "$(jq -r '.extraKnownMarketplaces.ziprecruiter.source.path' "$SETTINGS")" = "/Volumes/ziprecruiter/pristine" ]
+  [ "$(jq -r '.extraKnownMarketplaces.acme.source.path' "$SETTINGS")" = "/Volumes/acme/pristine" ]
 
   # Second run: the install enables again, the restore corrects again, and the
   # file converges on the same content.
   local before after
   before="$(jq -S . "$SETTINGS")"
-  run "$SCRIPT" "$CLAUDE_BIN" "findev@ziprecruiter" "$CACHE_ROOT" "$SETTINGS" "false"
+  run "$SCRIPT" "$CLAUDE_BIN" "findev@acme" "$CACHE_ROOT" "$SETTINGS" "false"
   [ "$status" -eq 0 ]
   after="$(jq -S . "$SETTINGS")"
   [ "$before" = "$after" ]

@@ -1,11 +1,11 @@
 {
   "approvedCommands": [
-    "grazr",
-    "gozr",
-    "pyzr",
-    "shzr",
-    "stevedore",
-    "epoxy",
+    "grawrap",
+    "gowrap",
+    "pywrap",
+    "shwrap",
+    "deploytool",
+    "packtool",
     "validate_format",
     "check-airflow-dags.sh",
     "agent-code-review-support",
@@ -16,7 +16,7 @@
   "blockedCommands": ["zn-self-apply", "zn-self-upgrade", "pn-workspace-apply"],
   "kubectl": {
     "executableAliases": ["kc"],
-    "readOnlyVerbs": ["wslogs", "zrlog", "wsfirstpod"],
+    "readOnlyVerbs": ["wslogs", "toollog", "wsfirstpod"],
     "execVerbs": ["exe", "shell", "wsexec"],
     "scopedApproveVerbs": ["sync", "syncdev", "workspace"],
     "positionalWorkspaceVerbs": ["sync", "syncdev"],
@@ -26,18 +26,18 @@
     "devWorkspacePrefix": "d-",
     "nonDevAccounts": [
       "prod",
-      "dprod",
-      "euprod",
+      "prod2",
+      "prod-eu",
       "build",
       "fastlane",
-      "pdx",
+      "region-a",
       "test"
     ]
   },
   "buildtools": {
     "approvedTools": ["prove", "yath"],
     "approvedScripts": [
-      "zr-proto-regenerate.sh",
+      "proto-regenerate.sh",
       "pre-merge-protobuf-check",
       "fix-ai-tools-ownership",
       "pre-merge-py-check",

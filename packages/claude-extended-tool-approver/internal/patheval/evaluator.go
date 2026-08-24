@@ -619,7 +619,7 @@ func (pe *PathEvaluator) ResolvePath(path string) string {
 //     entry's path spelled in another case.
 //  3. THAT INTERSECTION IS EMPTY IN THE CONFIGURATION THIS WAS MEASURED
 //     AGAINST. This machine has exactly one known case-sensitive volume,
-//     /Volumes/ziprecruiter (`diskutil info` reports "Case-sensitive APFS";
+//     /Volumes/acme (`diskutil info` reports "Case-sensitive APFS";
 //     the home volume reports plain "APFS", i.e. case-insensitive) — and the
 //     live ~/.claude/settings.json denyWrite/denyRead lists are entirely
 //     $HOME-rooted (.ssh, .gnupg, .aws, .kube, .docker, .netrc,

@@ -76,7 +76,7 @@ func TestPrecheck_passesWithoutLocalBeadsDir(t *testing.T) {
 		"list --limit 1 --json":   "[]",
 		"config get issue_prefix": "zr",
 	}}
-	cfg := config.Config{RepoRoot: "/Volumes/ziprecruiter/slot-a", BeadsPrefix: "zr"}
+	cfg := config.Config{RepoRoot: "/Volumes/acme/slot-a", BeadsPrefix: "zr"}
 	if err := precheck(context.Background(), cfg, br); err != nil {
 		t.Errorf("precheck should pass without a local .beads dir; got %v", err)
 	}

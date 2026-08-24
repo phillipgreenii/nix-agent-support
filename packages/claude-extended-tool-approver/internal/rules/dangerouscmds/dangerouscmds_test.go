@@ -84,7 +84,7 @@ func TestMountOperandGate(t *testing.T) {
 	}{
 		// --- read-only listing forms: no longer dangerous ---
 		{"bare mount", "mount", hookio.NoOpinion},
-		{"bare mount piped", "mount | grep ziprecruiter", hookio.NoOpinion},
+		{"bare mount piped", "mount | grep acme", hookio.NoOpinion},
 		// Row 310193's exact shape: the listing reached the rule only as an
 		// assignment-only segment's command substitution (pg2-mtnmb made that
 		// position rule-visible), so the position is pinned explicitly.

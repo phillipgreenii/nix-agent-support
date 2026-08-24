@@ -12,7 +12,7 @@ import (
 )
 
 // baseReadOnlyOperations are the generic, upstream kubectl read-only verbs.
-// Consumer-specific plugin verbs (e.g. ZR's wslogs/zrlog/wsfirstpod) are NOT
+// Consumer-specific plugin verbs (e.g. ZR's wslogs/toollog/wsfirstpod) are NOT
 // here — they arrive via KubectlConfig.ReadOnlyVerbs (ADR 0033).
 var baseReadOnlyOperations = map[string]bool{
 	"get": true, "describe": true, "logs": true, "top": true,

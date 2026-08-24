@@ -40,7 +40,7 @@ func (d fakeScopeDecorator) DetectOK(labels.Session) (labels.Set, bool) {
 func TestLabelCacheClearForcesRecomputeWithNewDecorator(t *testing.T) {
 	cap := labels.NewCardinalityCap(10)
 	cache := map[string]labels.Set{}
-	sv := &aggregate.SessionView{Session: &session.Session{SessionID: "s1", Cwd: "/Volumes/ziprecruiter/x"}}
+	sv := &aggregate.SessionView{Session: &session.Session{SessionID: "s1", Cwd: "/Volumes/acme/x"}}
 	def := fakeDetector{key: "workspace.scope", fn: func(labels.Session) string { return "personal" }}
 
 	// Boot-race state: DefaultScope only, decorator not yet loaded.
@@ -50,9 +50,9 @@ func TestLabelCacheClearForcesRecomputeWithNewDecorator(t *testing.T) {
 
 	// Decorator arrives via config reload -> the reload branch clears the cache.
 	clear(cache)
-	dec := []labels.FailableDetector{fakeScopeDecorator{scope: "ziprecruiter"}}
-	if got := labelsForSession(sv, []labels.Detector{def}, dec, cap, cache)["workspace.scope"]; got != "ziprecruiter" {
-		t.Fatalf("post-reload scope = %q, want ziprecruiter (cache not honouring new decorator)", got)
+	dec := []labels.FailableDetector{fakeScopeDecorator{scope: "acme"}}
+	if got := labelsForSession(sv, []labels.Detector{def}, dec, cap, cache)["workspace.scope"]; got != "acme" {
+		t.Fatalf("post-reload scope = %q, want acme (cache not honouring new decorator)", got)
 	}
 }
 

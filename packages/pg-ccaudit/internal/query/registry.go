@@ -572,7 +572,7 @@ ORDER BY r.path, r.seq`,
 				"by hand over all 77 distinct openings the query returns: 77/77 are real refusals, so " +
 				"0 false positives. Note the emoji class measures 5 TODAY where the 2026-07-29 census " +
 				"counted 12 — 4 of the 5 predate that census, so 8 of its 12 are no longer in the " +
-				"corpus (ephemeral `/Volumes/ziprecruiter-slot-*` project directories are pruned). The " +
+				"corpus (ephemeral `/Volumes/acme-slot-*` project directories are pruned). The " +
 				"12 is a historical reading and MUST NOT be used as a present-day denominator.\n" +
 				"WHY THE MARKER MUST BE IN THE OPENING, NOT ANYWHERE IN THE BODY. A body that merely " +
 				"MENTIONS a refusal is not one, and the corpus contains the worst possible example: " +

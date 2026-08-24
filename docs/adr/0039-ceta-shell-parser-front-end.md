@@ -117,7 +117,7 @@ this is blobs and not distinct `command` strings — 177,370 of those, on the sa
 The 46 "other" failures are 8 unclosed `"`, 5 unclosed `'`, 7 unclosed heredocs, and the remainder
 genuinely invalid bash. Claude Code's `Bash` tool runs **zsh 5.9** on this machine, and the hook
 input carries **no shell field** at all, so CETA is structurally blind to the executing dialect —
-which is why the fail-safe contract below is required regardless of dialect. Across the ZipRecruiter
+which is why the fail-safe contract below is required regardless of dialect. Across the employer's
 monorepo there are **0** zsh shebangs against **2,381** bash shebangs.
 
 An initial attempt to measure zsh dependence with regexes over raw text reported 139 rows, most of
@@ -512,7 +512,7 @@ requires its own fuzz invariant and its own replay, which is a separate bead.
 ### A zsh-specific rule tier
 
 **Rejected.** Observed zsh dependence is 23/189678 = 0.0121% of the corpus and **0** in the
-ZipRecruiter monorepo. A parse failure MUST `Abstain`; that is sufficient, and it is required
+employer's monorepo. A parse failure MUST `Abstain`; that is sufficient, and it is required
 regardless of dialect anyway.
 
 ### A zsh parser

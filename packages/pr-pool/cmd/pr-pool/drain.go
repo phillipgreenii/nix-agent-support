@@ -43,7 +43,7 @@ func warnDroppedRoleEnv() {
 }
 
 // warnTrackedConfig warns if <RepoRoot>/.pr-pool/config.toml is tracked by git, so
-// repo-local prompts are not accidentally committed (e.g. to the ZipRecruiter
+// repo-local prompts are not accidentally committed (e.g. to an employer's
 // monorepo). Best-effort: a git error / untracked file is silently ignored.
 func warnTrackedConfig(ctx context.Context, cfg config.Config) {
 	cmd := exec.CommandContext(ctx, "git", "-C", cfg.RepoRoot, "ls-files", "--error-unmatch", ".pr-pool/config.toml")

@@ -10,15 +10,15 @@ ADR [0004](0004-ceta-configrules-xdg-config-for-consumer-rules.md) extracted the
 _flat_ consumer command lists (`approvedCommands` / `blockedCommands`) into
 `$XDG_CONFIG_HOME/claude-extended-tool-approver/rules.json`, consumed by the
 `config-rules` rule. It did NOT cover two rules that still hardcoded
-ZipRecruiter-specific (ZR) literals in the base Go source:
+employer-specific (ZR) literals in the base Go source:
 
 - **`kubectl`** — the `kc` executable alias, the kc-plugin verbs
-  (`wslogs`/`zrlog`/`wsfirstpod`, `exe`/`shell`/`wsexec`,
+  (`wslogs`/`toollog`/`wsfirstpod`, `exe`/`shell`/`wsexec`,
   `sync`/`syncdev`/`workspace`), the personal dev-workspace prefix `d-`, the
   `KC_CLUSTER` env var and its `d1-`/`dd1-` dev-cluster prefixes, the `--ws`/
   `--workspace` kc-plugin flags, and the non-dev AWS account names.
 - **`build-tools`** — the Perl runners `prove`/`yath`, `generate-build-deps`,
-  and five project scripts (`zr-proto-regenerate.sh`, `pre-merge-protobuf-check`,
+  and five project scripts (`proto-regenerate.sh`, `pre-merge-protobuf-check`,
   `fix-ai-tools-ownership`, `pre-merge-py-check`, plus `generate-build-deps`),
   several of which were _also_ duplicated in the flat `approvedCommands`.
 
@@ -54,7 +54,7 @@ Injection** rather than a second config-reader:
 
 4. **The five duplicated scripts move to `buildtools.approvedScripts`** and are
    **removed from the flat `approvedCommands`**. Because the `build-tools` rule
-   ignores env-var prefixes, `FOO=bar zr-proto-regenerate.sh` still approves —
+   ignores env-var prefixes, `FOO=bar proto-regenerate.sh` still approves —
    whereas the flat matcher would abstain on the env prefix. `prove`/`yath`/
    `generate-build-deps` were Go-only before, so the ZR `buildtools {}` block
    MUST newly author them or ZR loses their approval.

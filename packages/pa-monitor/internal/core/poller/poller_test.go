@@ -486,7 +486,7 @@ func TestPoller_PersistsLabels(t *testing.T) {
 		Now:              time.Now,
 		WriteService:     ws,
 		Labeler: func(sv *aggregate.SessionView) map[string]string {
-			return map[string]string{"workspace.scope": "ziprecruiter"}
+			return map[string]string{"workspace.scope": "acme"}
 		},
 	}
 	if _, _, err := assembleAndSnapshot(t, p, ctx); err != nil {
@@ -503,8 +503,8 @@ func TestPoller_PersistsLabels(t *testing.T) {
 	if sess == nil {
 		t.Fatal("GetByID returned nil session")
 	}
-	if got := sess.Labels["workspace.scope"]; got != "ziprecruiter" {
-		t.Errorf("persisted Labels[workspace.scope] = %q; want %q (poller still hardcodes nil?)", got, "ziprecruiter")
+	if got := sess.Labels["workspace.scope"]; got != "acme" {
+		t.Errorf("persisted Labels[workspace.scope] = %q; want %q (poller still hardcodes nil?)", got, "acme")
 	}
 }
 

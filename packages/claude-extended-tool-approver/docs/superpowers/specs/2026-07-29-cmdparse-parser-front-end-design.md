@@ -266,10 +266,9 @@ available came from a check that also matched literals nested inside quoted word
 bounds nothing. Threading the parent through the visitor would fix it; it is not needed for
 this decision.
 
-The ZipRecruiter monorepo has **0** zsh shebangs against **2,381** bash shebangs, and no
-skill, plugin, or agent instruction depends on zsh (the single `zsh` mention is
-`tools/devbox/plugins/base-ziprecruiter/check-shell-rc.sh`, itself a bash script handling
-either shell).
+The employer's monorepo has **0** zsh shebangs against **2,381** bash shebangs, and no
+skill, plugin, or agent instruction depends on zsh (the single `zsh` mention is in a
+devbox plugin's `check-shell-rc.sh`, itself a bash script handling either shell).
 
 ## 5. Strategies evaluated
 

@@ -30,17 +30,17 @@ func TestDetailsShowsStatusAndBlocker(t *testing.T) {
 
 // The details overlay must surface the session's workspace.scope label (from
 // the persisted label set) so a viewer can tell which workspace a session
-// belongs to (personal / ziprecruiter). It is shown only when the
+// belongs to (personal / acme). It is shown only when the
 // label is present. See pg2-4xbrm.
 func TestDetailsShowsWorkspaceScope(t *testing.T) {
 	withScope := &aggregate.SessionView{
 		Session: &session.Session{SessionID: "id-scope"},
 		SessionEnrichment: aggregate.SessionEnrichment{
-			Labels: map[string]string{"workspace.scope": "ziprecruiter"},
+			Labels: map[string]string{"workspace.scope": "acme"},
 		},
 	}
 	out := RenderDetails(withScope, 120)
-	if !strings.Contains(out, "Scope:") || !strings.Contains(out, "ziprecruiter") {
+	if !strings.Contains(out, "Scope:") || !strings.Contains(out, "acme") {
 		t.Errorf("details missing workspace.scope:\n%s", out)
 	}
 

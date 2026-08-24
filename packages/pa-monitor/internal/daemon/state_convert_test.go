@@ -44,7 +44,7 @@ func TestConvertSessionWithContribution_CarriesLabels(t *testing.T) {
 		Session: store.Session{
 			SessionID: "sid-lbl",
 			Labels: map[string]string{
-				"workspace.scope": "ziprecruiter",
+				"workspace.scope": "acme",
 				"agent.kind":      "polecat",
 			},
 		},
@@ -54,8 +54,8 @@ func TestConvertSessionWithContribution_CarriesLabels(t *testing.T) {
 	if sv == nil {
 		t.Fatal("convertSessionWithContribution returned nil")
 	}
-	if got := sv.Labels["workspace.scope"]; got != "ziprecruiter" {
-		t.Errorf("Labels[workspace.scope] = %q; want %q (labels dropped on the DB->view path)", got, "ziprecruiter")
+	if got := sv.Labels["workspace.scope"]; got != "acme" {
+		t.Errorf("Labels[workspace.scope] = %q; want %q (labels dropped on the DB->view path)", got, "acme")
 	}
 	if got := sv.Labels["agent.kind"]; got != "polecat" {
 		t.Errorf("Labels[agent.kind] = %q; want %q", got, "polecat")

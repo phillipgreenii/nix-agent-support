@@ -12,7 +12,7 @@ results — see ADR 0019). Today there are exactly two contributors:
 
 - `phillipgreenii-nix-agent-support` defines the base set (env, session, worktree, git,
   repo, pr, model, version, effort, thinking, output_style, vim, agent).
-- `phillipg-nix-ziprecruiter` appends `aws` and `workspace` parts with `lib.mkAfter`.
+- `your-private-flake` (a downstream consumer) appends `aws` and `workspace` parts with `lib.mkAfter`.
 
 NixOS/home-manager merges a `listOf` by concatenating definitions in ascending order of
 their merge priority (`lib.mkOrder N`, default `N = 1000`; `lib.mkBefore = mkOrder 500`,
@@ -80,4 +80,4 @@ Rejected: it works only by accident of there being a single `mkAfter` contributo
 
 - ADR 0019 (this repo): status line width-aware wrapping — flagged ordering as out of scope.
 - See also: phillipgreenii-nix-personal docs/adr/0034 — the `listOf` cross-module merging pattern.
-- See also: phillipg-nix-ziprecruiter modules/claude-code/default.nix — the `lib.mkAfter` contributor.
+- See also: your-private-flake modules/claude-code/default.nix — the `lib.mkAfter` contributor.
