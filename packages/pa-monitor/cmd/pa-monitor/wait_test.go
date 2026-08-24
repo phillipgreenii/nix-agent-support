@@ -764,3 +764,112 @@ func TestWaitUntilAgentsFinishedCleanEOFStaysQuiet(t *testing.T) {
 		t.Errorf("stderr = %q: a clean EOF (the daemon's designed graceful shutdown) must not be reported as a stream error", stderr.String())
 	}
 }
+
+// TestParseWaitArgsUnknownFlagExitsWithDocumentedInvalidArgsCode pins the fix
+// for bead pg2-3rlwm: an unparseable flag (bad name here) must produce
+// exit 3, the "invalid args" code the doc comment on runWaitUntilAgentsFinished
+// documents. Before the fix, the flag set used flag.ExitOnError, so fs.Parse
+// called os.Exit(2) on its own before the code below could ever run --
+// `pa-monitor wait-until-agents-finished --bogus` exited 2, never 3. This
+// drives parseWaitArgs directly (rather than through runWaitUntilAgentsFinished,
+// which os.Exits and so cannot be exercised in-process by a normal test).
+func TestParseWaitArgsUnknownFlagExitsWithDocumentedInvalidArgsCode(t *testing.T) {
+	var stderr bytes.Buffer
+	_, code, ok := parseWaitArgs([]string{"--bogus"}, &stderr)
+
+	if ok {
+		t.Fatal("ok = true, want false for an unrecognized flag")
+	}
+	if code != 3 {
+		t.Errorf("code = %d, want 3 (invalid args); stderr: %q", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "flag provided but not defined") {
+		t.Errorf("stderr = %q, want it to contain the flag package's own parse diagnostic", stderr.String())
+	}
+}
+
+// TestParseWaitArgsMalformedValueExitsWithDocumentedInvalidArgsCode covers the
+// other unparseable-flag shape the doc comment names: a value that fails
+// flag.Value.Set (a non-integer for an int flag), as opposed to an unknown
+// flag name.
+func TestParseWaitArgsMalformedValueExitsWithDocumentedInvalidArgsCode(t *testing.T) {
+	var stderr bytes.Buffer
+	_, code, ok := parseWaitArgs([]string{"--consecutive-idle-checks", "abc"}, &stderr)
+
+	if ok {
+		t.Fatal("ok = true, want false for a non-integer flag value")
+	}
+	if code != 3 {
+		t.Errorf("code = %d, want 3 (invalid args); stderr: %q", code, stderr.String())
+	}
+}
+
+// TestParseWaitArgsRejectsConsecutiveIdleChecksZero locks in that the OTHER
+// exit-3 path -- semantic validation via validateConsecutiveIdleChecks, which
+// was already reachable before this bead (pg2-e05tm) -- still works
+// unchanged now that flag parsing routes through parseWaitArgs.
+func TestParseWaitArgsRejectsConsecutiveIdleChecksZero(t *testing.T) {
+	var stderr bytes.Buffer
+	_, code, ok := parseWaitArgs([]string{"--consecutive-idle-checks", "0"}, &stderr)
+
+	if ok {
+		t.Fatal("ok = true, want false for --consecutive-idle-checks 0")
+	}
+	if code != 3 {
+		t.Errorf("code = %d, want 3 (invalid args); stderr: %q", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "must be >= 1") {
+		t.Errorf("stderr = %q, want validateConsecutiveIdleChecks's diagnostic", stderr.String())
+	}
+}
+
+// TestParseWaitArgsHelpFlagExitsZeroWithoutError guards the regression this
+// bead's fix could otherwise introduce: switching the flag set from
+// flag.ExitOnError to flag.ContinueOnError makes fs.Parse RETURN flag.ErrHelp
+// for -h/--help instead of exiting the process itself, and that return must
+// still be read as "exit 0, print nothing further" -- not folded into the
+// same code path as a genuine parse error (which would wrongly turn
+// `--help` into exit 3).
+func TestParseWaitArgsHelpFlagExitsZeroWithoutError(t *testing.T) {
+	for _, flag := range []string{"-h", "--help"} {
+		t.Run(flag, func(t *testing.T) {
+			var stderr bytes.Buffer
+			_, code, ok := parseWaitArgs([]string{flag}, &stderr)
+
+			if ok {
+				t.Fatal("ok = true, want false for a help flag (nothing to run)")
+			}
+			if code != 0 {
+				t.Errorf("code = %d, want 0 for %s; stderr: %q", code, flag, stderr.String())
+			}
+		})
+	}
+}
+
+// TestParseWaitArgsAcceptsValidFlags is the happy-path complement to the
+// rejection tests above: valid flags must parse into the expected
+// waitParams with ok=true and no stderr output.
+func TestParseWaitArgsAcceptsValidFlags(t *testing.T) {
+	var stderr bytes.Buffer
+	p, code, ok := parseWaitArgs([]string{
+		"--maximum-wait", "60",
+		"--consecutive-idle-checks", "5",
+		"--reconnect-grace", "10",
+	}, &stderr)
+
+	if !ok {
+		t.Fatalf("ok = false, want true; code=%d stderr=%q", code, stderr.String())
+	}
+	if p.maxWait != 60*time.Second {
+		t.Errorf("maxWait = %s, want 60s", p.maxWait)
+	}
+	if p.consecutive != 5 {
+		t.Errorf("consecutive = %d, want 5", p.consecutive)
+	}
+	if p.grace != 10*time.Second {
+		t.Errorf("grace = %s, want 10s", p.grace)
+	}
+	if stderr.Len() != 0 {
+		t.Errorf("stderr = %q, want empty for valid flags", stderr.String())
+	}
+}

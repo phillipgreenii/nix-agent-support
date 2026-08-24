@@ -38,18 +38,37 @@ import (
 //
 //	0 = idle reached (no session `working` for N ticks; blocked counts as idle)
 //	1 = timeout
-//	2 = daemon unavailable past reconnect-grace; also bad flags (see below)
-//	3 = invalid args. Reachable ONLY via the explicit validation below
-//	    (currently just --consecutive-idle-checks <= 0, see
-//	    validateConsecutiveIdleChecks for why); the
-//	    `if err := fs.Parse(args); err != nil` branch immediately below is
-//	    still dead code, because flag.ExitOnError makes fs.Parse call
-//	    os.Exit(2) itself on a parse error (bad flag name, non-integer value)
-//	    before ever returning one to check. Widening exit 3 into a general
-//	    parse-error contract is bead pg2-3rlwm's job, not this one's — this
-//	    comment records the split so the two do not collide.
+//	2 = daemon unavailable past reconnect-grace
+//	3 = invalid args: an unparseable flag (bad name, non-integer value) or a
+//	    value that parses but fails semantic validation (currently just
+//	    --consecutive-idle-checks <= 0; see validateConsecutiveIdleChecks).
+//	    Both routes through parseWaitArgs below, which is why its flag set
+//	    uses flag.ContinueOnError rather than flag.ExitOnError: ExitOnError
+//	    would have fs.Parse call os.Exit(2) itself on a parse error, before
+//	    ever returning one for parseWaitArgs to turn into this exit 3 — the
+//	    dead code bead pg2-3rlwm fixed.
 func runWaitUntilAgentsFinished(args []string) {
-	fs := flag.NewFlagSet("wait-until-agents-finished", flag.ExitOnError)
+	params, code, ok := parseWaitArgs(args, os.Stderr)
+	if !ok {
+		os.Exit(code)
+	}
+
+	os.Exit(waitUntilAgentsFinished(params, os.Stderr))
+}
+
+// parseWaitArgs parses and validates wait-until-agents-finished's flags. It
+// is split out of runWaitUntilAgentsFinished (which os.Exits) so a test can
+// drive it directly without terminating the test process — the same reason
+// waitUntilAgentsFinished and validateConsecutiveIdleChecks below are split
+// out of their own os.Exit-ing callers.
+//
+// ok=false means the caller MUST os.Exit(code) and do nothing else: any
+// diagnostic has already been written to stderr (by fs.Parse itself for a
+// parse error, or by this function for a validation failure). code==0 with
+// ok==false is -h/--help, whose usage text fs.Parse already wrote to stderr.
+func parseWaitArgs(args []string, stderr io.Writer) (p waitParams, code int, ok bool) {
+	fs := flag.NewFlagSet("wait-until-agents-finished", flag.ContinueOnError)
+	fs.SetOutput(stderr)
 	// --maximum-wait <= 0 is intentionally ACCEPTED, not rejected: it makes
 	// the deadline already-expired at start, so the wait exits 1 (timeout) on
 	// its very first pass through the loop below — before ever dialing the
@@ -67,28 +86,31 @@ func runWaitUntilAgentsFinished(args []string) {
 	// 0 seconds". See
 	// TestWaitUntilAgentsFinishedReconnectGraceZeroOrNegativeFailsWithoutRetry.
 	graceS := fs.Int("reconnect-grace", 30, "Seconds to wait for daemon return mid-wait")
-	if err := fs.Parse(args); err != nil {
-		os.Exit(3)
+	switch err := fs.Parse(args); {
+	case errors.Is(err, flag.ErrHelp):
+		return waitParams{}, 0, false
+	case err != nil:
+		return waitParams{}, 3, false
 	}
 
 	if err := validateConsecutiveIdleChecks(*consecutive); err != nil {
-		fmt.Fprintf(os.Stderr, "wait-until-agents-finished: %v\n", err)
-		os.Exit(3)
+		fmt.Fprintf(stderr, "wait-until-agents-finished: %v\n", err)
+		return waitParams{}, 3, false
 	}
 
-	os.Exit(waitUntilAgentsFinished(waitParams{
+	return waitParams{
 		maxWait:     time.Duration(*maxWaitS) * time.Second,
 		consecutive: *consecutive,
 		grace:       time.Duration(*graceS) * time.Second,
-	}, os.Stderr))
+	}, 0, true
 }
 
 // validateConsecutiveIdleChecks rejects --consecutive-idle-checks values that
 // cannot mean what they say, rather than letting the loop below silently
-// reinterpret them. It is split out of runWaitUntilAgentsFinished (which
-// os.Exits) so a test can drive it directly without terminating the test
-// process — the same reason waitUntilAgentsFinished itself is split out of
-// that wrapper (see its doc comment below).
+// reinterpret them. It is split out of parseWaitArgs (itself split out of
+// runWaitUntilAgentsFinished, which os.Exits) so a test can drive it directly
+// without terminating the test process — the same reason waitUntilAgentsFinished
+// itself is split out of that wrapper (see its doc comment below).
 //
 // consecutive <= 0 is rejected. The streak counter below is non-negative and
 // only ever incremented, so a target below 1 can never be reached on its own

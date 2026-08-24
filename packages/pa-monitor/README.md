@@ -75,15 +75,12 @@ busy and is indistinguishable from `idle` at these two gates.
 
 The exit-code contract is therefore:
 
-| Exit | `agents-busy-check`                                          | `wait-until-agents-finished`                               |
-| ---- | ------------------------------------------------------------ | ---------------------------------------------------------- |
-| 0    | daemon up and ≥1 session `working`                           | **idle reached** — no session `working` for N ticks        |
-| 1    | daemon up and no session `working` (prints `all idle`)       | timeout (`--maximum-wait` elapsed)                         |
-| 2    | daemon unreachable (0 with `--consider-daemon-down-as-busy`) | daemon unavailable past `--reconnect-grace`; invalid flags |
-
-(`wait-until-agents-finished`'s doc comment lists `3 = invalid args`, but its `flag.ExitOnError`
-flag set exits **2** on an unparseable flag before that code can be reached — so 3 is not observable
-today. Callers MUST NOT distinguish "bad flags" from "no daemon" by exit code.)
+| Exit | `agents-busy-check`                                          | `wait-until-agents-finished`                                                                                                                       |
+| ---- | ------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0    | daemon up and ≥1 session `working`                           | **idle reached** — no session `working` for N ticks                                                                                                |
+| 1    | daemon up and no session `working` (prints `all idle`)       | timeout (`--maximum-wait` elapsed)                                                                                                                 |
+| 2    | daemon unreachable (0 with `--consider-daemon-down-as-busy`) | daemon unavailable past `--reconnect-grace`                                                                                                        |
+| 3    | —                                                            | invalid args: an unparseable flag (bad name, non-integer value), or a value that fails semantic validation (e.g. `--consecutive-idle-checks <= 0`) |
 
 Callers MUST read these codes as statements about **activity**, not about **completion**:
 
