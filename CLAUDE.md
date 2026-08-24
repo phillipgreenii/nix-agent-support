@@ -23,6 +23,25 @@ identities — in code, tests, or docs. All ZR-specific configuration lives in
 `phillipg-nix-ziprecruiter` and is supplied at runtime via config; keep the tools here
 generic and config-driven. (User constraint, 2026-06-24.)
 
+Widened by operator ruling (Phillip, 2026-08-24, bead `pg2-tphcc`): public repos MUST carry no
+user identifier of any kind — real name, login, or handle — other than the operator's own
+(`phillipgreenii` / `phillipg@ziprecruiter.com`). No denylist of forbidden tokens (plaintext or
+hashed) may be committed to this or any repo to enforce it; a short-lived denylist MAY live only
+in this workspace's local, uncommitted `CLAUDE.md` (see its "Workspace Policies").
+
+**Mechanical guard**: `packages/pg-pr/cmd/pg-pr/identifier_allowlist_test.go`
+(`TestIdentifierAllowlistGuard`) inverts the check into a small, committable ALLOWLIST of
+known-safe identifiers (the operator's own identity plus named public bot/product accounts —
+`coderabbitai`, `policy-bot`, `dependabot` — and this module's existing generic test placeholders)
+and flags any other username/login/handle-shaped token found in a structured identity field
+(a JSON `login`/`author`/`reviewer`/`user` key, a `name.name.TICKET-NNN`-shaped branch-name
+component, or a git `Author:`/`Committer:` trailer). It runs automatically as part of
+`checks.<system>.pg-pr-go-tests` in `flake.nix` — no separate check attribute. Guarded scope is a
+RATCHET: today it covers only `packages/pg-pr`'s `testdata/` fixtures, widening as other
+directories are scrubbed (`pg2-dssp6`, `pg2-n3gez`, `pg2-k23s6`). It does NOT catch a real name
+embedded in free-text prose with no structural marker — that stays a manual-review
+responsibility. See the test file's doc comments for the full scope rationale.
+
 ## Configuration Structure
 
 - **Darwin Modules**: `darwin/` contains system-level macOS configuration

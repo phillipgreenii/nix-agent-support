@@ -1095,6 +1095,26 @@
               # seams. exec is temp-repo git (git on PATH) + in-process httptest
               # (loopback, sandbox-ok); the github.com URLs in the fixtures are
               # struct data, not live calls.
+              #
+              # Because this runs `go test ./...` from the module root (mkGoTest
+              # never sets subPackages — see this repo's CLAUDE.md "Go test
+              # gate"), it already exercises
+              # packages/pg-pr/cmd/pg-pr/identifier_allowlist_test.go — the
+              # employer/personal-identifier mechanical guard for bead pg2-tphcc.
+              # No separate check attribute was added for it: unlike the ccpool
+              # section-sign guard below, which needs a SEPARATE nix check
+              # because its non-Go surface (home/programs/ccpool/, etc.) sits
+              # outside the ccpool Go module's own walk, packages/pg-pr's
+              # currently-guarded scope (its own testdata/ fixtures) is entirely
+              # inside this module, so this one check already covers it.
+              # Guarded scope is a RATCHET: it covers only packages/pg-pr's
+              # testdata/ today and widens as other directories are scrubbed
+              # (pg2-dssp6, pg2-n3gez, pg2-k23s6) — see the doc comment on
+              # TestIdentifierAllowlistGuard in identifier_allowlist_test.go. If
+              # a future widening needs to cover a pg-pr-surface directory
+              # OUTSIDE this Go module (e.g. home/programs/pg-pr,
+              # claude-marketplace/pg-pr), it will need a companion nix check
+              # here, mirroring test-ccpool-surface-spec-citations below.
               pg-pr-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
                 pname = "pg-pr-go-tests";
                 src = ./packages/pg-pr; # matches default.nix (raw ./., no cleanSource)
