@@ -3,7 +3,8 @@
 `pr-pool` runs one drain pass over a monorepo: it discovers ready beads,
 dispatches a session per configured role (in config order) up to each role's
 cap, waits for completion, then tears down every `pr-pool-*` tmux session. Bare
-`pr-pool` is equivalent to `pr-pool drain`.
+`pr-pool` (no subcommand) now requires an explicit subcommand; see
+`run-until-idle` below for the single-pass drain behavior this used to default to.
 
 > **Behavior:** how pr-pool should behave as an **orchestrator** — the drain, roles &
 > queries from config, and the agent-runner / query-source contracts — lives in the
