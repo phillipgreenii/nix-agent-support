@@ -14,12 +14,18 @@
 # runtimeDeps. Nothing is stubbed, so a future argument drift fails here.
 #
 # READ THE MESSAGE, NOT JUST THE EXIT CODE. No daemon runs in the check
-# sandbox, so the real binary always fails -- "daemon unreachable" (args
-# accepted, wait loop reached) exits 2; "flag provided but not defined" (args
-# rejected during flag parsing) exits 3, now that pa-monitor bead pg2-3rlwm
-# made that code path reachable and split it out of the daemon-unavailable
-# exit 2. The message still confirms WHICH failure occurred, independent of
-# the exit code.
+# sandbox, so the real binary always fails -- and exit 2 covers TWO different
+# failures: the wrapper's own arg rejections (missing value, unknown option)
+# and "daemon unreachable" (args accepted, wait loop reached). Exit 3 is
+# narrower: a forwarded flag VALUE that pa-monitor's own parsing rejects
+# (e.g. `--maximum-wait abc` -> "invalid value"), now that pa-monitor bead
+# pg2-3rlwm made that code path reachable and split it out of the
+# daemon-unavailable exit 2. An unknown flag NAME is NOT that case -- the
+# wrapper's catch-all arm rejects it with "Error: Unknown option:" and exit 2,
+# so pa-monitor never receives it and can never print "flag provided but not
+# defined", which is precisely what assert_args_accepted below guards. Since
+# one exit code spans several outcomes, the message is what confirms WHICH
+# failure occurred.
 
 setup() {
   if [[ -z ${SCRIPT_UNDER_TEST:-} ]]; then
