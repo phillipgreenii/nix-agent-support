@@ -360,6 +360,13 @@ MUST be isolated; if they modify files directly, the test MUST generate the scen
   that same update — `NO promotion record; priority left at P<n> — unverified.` — and, because
   class 1 already puts the operator in the loop, ASK the operator for the correct priority in
   that same exchange and use their answer. Only an operator who declines leaves it at P<n>.
+  **Exception — provably-lossless close, no exchange held (operator ruling, 2026-08-24, bead
+  `pg2-9aewz`, implementing `pg2-q62e8`):** when the terminal action is `/unblock-human-beads`'
+  class 1a — a mechanically PROVEN-lossless teardown-and-close, with no operator exchange opened
+  at all — the agent MUST NOT open one solely to ask this question. It MUST still record the gap
+  (`NO promotion record; priority left at P<n> — unverified. No operator exchange on this
+path.`) and proceed to close; the bead is being CLOSEd, so its priority routes nothing, and
+  W-7's ordinary ASK applies unchanged to every other path (1b, or any exchange already open).
 - **W-8** Clearing the label MUST NOT be used to make a bead drain-eligible while substrate
   work REMAINS. The class-1 guard triggers on the label OR on the work itself, so the label is
   a SUFFICIENT trigger and never a necessary one — removing the marker cannot let a genuinely
@@ -367,6 +374,22 @@ MUST be isolated; if they modify files directly, the test MUST generate the scen
   down or pruned, the label MUST stay and the terminal action MUST be an in-session CLOSE with
   the operator, or a DEFER — never a RELEASE. A DEFER MUST keep BOTH the label and the promoted
   priority: the question is still open.
+  **Exception — provably-lossless close satisfies "with the operator" without an exchange
+  (operator ruling, 2026-08-24, bead `pg2-9aewz`, implementing `pg2-q62e8`):** a CLOSE whose
+  losslessness is mechanically PROVEN in the closing session — a clean worktree, and every
+  commit on the branch either an ancestor of the primary or patch-identical to one already on
+  it, corroborated by `git range-diff` — and recorded verbatim on the bead SATISFIES this
+  in-session-CLOSE requirement without a live exchange: the recorded proof, plus the operator's
+  standing ruling that a provably-landed teardown needs no approval (originating on `pg2-kl0o4`,
+  "if the bead is complete and provably been landed, then you do not need to ask me. just clean
+  up"), together stand in for the exchange this rule otherwise requires. This exception is
+  narrow and MUST NOT be read as licence to skip recording the proof, and it MUST NOT be
+  extended to a RELEASE under any circumstances: the never-release-to-drain half of this guard
+  stays UNCONDITIONAL regardless of how strong the proof is, because drain runs unattended and a
+  losslessness proof MUST NOT be inherited from an earlier session (F-1) — it must be
+  re-established by whoever acts. If ANY substrate work remains that the proof does not cover,
+  this exception does not apply and W-8's ordinary rule (in-session CLOSE with the operator, or
+  DEFER) governs.
 
 ### Unpushed Landing Debt
 
