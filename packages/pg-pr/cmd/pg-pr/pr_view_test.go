@@ -300,6 +300,15 @@ func TestRetiredNames_RemovedOutright(t *testing.T) {
 func TestPRView_SiblingSubcommandsUnaffected(t *testing.T) {
 	resetPRFlags()
 	setViewStateHome(t, false)
+	// pr files/commits below shell out to `git diff`/`git log` against the
+	// process's actual cwd (gitlocal.ChangedFiles/Commits), which is NOT a git
+	// checkout when this test runs inside a `nix build` sandbox (the flake
+	// source is copied without .git). Give it one via the package's own
+	// temp-repo helper (branch_test.go's initRepoForCLI) so the test is
+	// hermetic under both a plain `go test` and the sandboxed nix check.
+	tmp := t.TempDir()
+	initRepoForCLI(t, tmp)
+	t.Chdir(tmp)
 
 	var stdout1, stderr1 bytes.Buffer
 	rootCmd.SetOut(&stdout1)
