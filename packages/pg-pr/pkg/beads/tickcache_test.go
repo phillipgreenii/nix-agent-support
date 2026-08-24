@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestLoadTickCache_EmptyWorkspace(t *testing.T) {
@@ -148,9 +149,28 @@ func TestTickCache_DepsUpFor_NilCache(t *testing.T) {
 	}
 }
 
+// realBDCtx returns a context bounded by a generous timeout for a test that
+// drives a real (non-fake) bd-backed Client — mirrors
+// internal/sync/sync_test.go's identically-purposed helper in this same
+// module. CLIRunner.Run has no built-in timeout of its own (see
+// pkg/beads/runner.go); it relies entirely on the caller's context, which is
+// correct for production callers but means a genuinely stuck/slow `bd`
+// subprocess during a test would otherwise silently consume the whole
+// package's default 10-minute test budget instead of failing fast (pg2-kc0f0:
+// TestTickCache_OpenProcessingByPR_IgnoresClosedCycles observed running ~601s
+// under concurrent /pb:drain-beads load before go test's own timeout killed
+// it). Using this context instead of context.Background() only affects the
+// test that calls it.
+func realBDCtx(t *testing.T) context.Context {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	t.Cleanup(cancel)
+	return ctx
+}
+
 func TestTickCache_OpenProcessingByPR_IgnoresClosedCycles(t *testing.T) {
 	c, runner := newBDWorkspace(t)
-	ctx := context.Background()
+	ctx := realBDCtx(t)
 
 	prID, _, err := c.EnsureMergeRequest(ctx, "PR", MergeRequestFields{Repo: "x/y", PRNumber: 7})
 	if err != nil {

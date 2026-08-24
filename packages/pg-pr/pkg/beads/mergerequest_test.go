@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // ----------------------------------------------------------------------
@@ -44,7 +45,9 @@ func newBDWorkspace(t *testing.T) (*Client, *CLIRunner) {
 	prefix = prefix + alnumOf(n)
 
 	env := buildCleanEnv()
-	initCmd := exec.Command("bd", "init", "--prefix", prefix)
+	initCtx, initCancel := context.WithTimeout(context.Background(), realBDSetupTimeout)
+	defer initCancel()
+	initCmd := exec.CommandContext(initCtx, "bd", "init", "--prefix", prefix)
 	initCmd.Dir = dir
 	initCmd.Env = env
 	if out, err := initCmd.CombinedOutput(); err != nil {
@@ -82,7 +85,9 @@ func buildCleanEnv() []string {
 
 func bdConfigSet(t *testing.T, dir string, env []string, key, val string) error {
 	t.Helper()
-	cmd := exec.Command("bd", "config", "set", key, val)
+	ctx, cancel := context.WithTimeout(context.Background(), realBDSetupTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "bd", "config", "set", key, val)
 	cmd.Dir = dir
 	cmd.Env = env
 	if out, err := cmd.CombinedOutput(); err != nil {
@@ -91,6 +96,18 @@ func bdConfigSet(t *testing.T, dir string, env []string, key, val string) error 
 	}
 	return nil
 }
+
+// realBDSetupTimeout bounds the one-time `bd init` / `bd config set`
+// subprocesses newBDWorkspace runs to boot an isolated per-test workspace.
+// Mirrors internal/sync/sync_test.go's identically-named constant in this
+// same module: bd init has been measured at ~19s standalone but 3+ minutes
+// under heavy host load (the tc-8myb incident); pg2-kc0f0 observed the same
+// shape here (TestTickCache_OpenProcessingByPR_IgnoresClosedCycles ran ~601s
+// before hitting go test's default 10-minute timeout during concurrent
+// /pb:drain-beads sessions). 5 minutes is generous enough to tolerate that
+// load case while still failing fast — and diagnosably — well short of the
+// package's default test budget if `bd` genuinely wedges.
+const realBDSetupTimeout = 5 * time.Minute
 
 func sanitizePrefix(s string) string {
 	var b strings.Builder
