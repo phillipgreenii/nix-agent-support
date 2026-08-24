@@ -85,3 +85,19 @@ usage-distinct-from-runtime rule holds under **one** convention across every ope
 - `9` is picked as a round, memorable value well clear of the `≥3` specific range in current use
   (`drain`'s `exitPrecheck = 3`). It is not a POSIX-significant number; nothing else in the
   contract depends on the specific value, only on it being outside the reserved low band.
+
+## Addendum: `BUSY` is not a global number (2026-08-24)
+
+**Ruling** (Phillip Green II, 2026-08-24, bead `pg2-xaneb`): the reserved low band (`0`/`1`/`2`)
+covers meanings general across every app; `BUSY` is not one of them, and this ADR's choice of `9`
+for pr-pool's pre-accept capacity decline does **not** make `9` — or any single number — the
+required spelling of "busy" workspace-wide. `BUSY` is an **app-specific** meaning, so it lives in
+the `≥3` band and each app is free to pick its own value there, same as any other app-specific
+code.
+
+**Worked example**: `ccpool`'s `ErrBusy` (`packages/ccpool/internal/session/send.go`) answers a
+mid-turn session refusal with exit `5`. This is unrelated to `INV-CONC-1`'s pre-accept capacity
+decline on a bounded transport — pr-pool's `BUSY` concept — and `5` sits legally inside the `≥3`
+band this ADR already reserves for app-specific codes. `ccpool` needs no change and this ADR's
+silence on it was the gap, not a defect in `ccpool`. Do not re-file this question; the ruling
+above is the answer to it.
