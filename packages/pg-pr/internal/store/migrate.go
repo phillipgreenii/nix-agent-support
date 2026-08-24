@@ -7,7 +7,7 @@ import (
 
 // schemaVersion is the current schema. Bump it and append a migration step
 // whenever the DDL changes. Stored in SQLite's user_version pragma.
-const schemaVersion = 13
+const schemaVersion = 14
 
 // migrations is the ordered list of DDL applied to reach schemaVersion. Index i
 // migrates user_version i -> i+1.
@@ -451,6 +451,52 @@ ALTER TABLE pr_revision DROP COLUMN reviewed_at;
 	`
 ALTER TABLE outbox ADD COLUMN claimed_by TEXT;
 ALTER TABLE outbox ADD COLUMN claimed_at TEXT;
+`,
+	// v13 -> v14: per-PR USER-owned state — hide/unhide (+ optional reason) and
+	// a WIP suppression flag (pg2-4dz88.4.2). Every column on pull_request
+	// until now is host-derived or computed; these are the first that record a
+	// human decision about one specific PR, so — exactly like
+	// feedback.disposition_action/disposition_note/reply_body (SetDisposition)
+	// — they get a dedicated targeted-UPDATE setter (store.SetHidden,
+	// store.SetWIP; see user_state.go) and are deliberately OMITTED from
+	// UpsertPR's ON CONFLICT DO UPDATE SET clause, so a sync tick can never
+	// clobber a user's decision. Additive ALTER ADD COLUMN; no CHECK is
+	// widened, so no table rebuild.
+	//
+	// Naming (operator ruling, fork #7, recorded on pg2-4dz88.4.2's comments
+	// 2026-08-24): the column/vocabulary name is USER_HIDDEN, spelled
+	// user_hidden here per this file's snake_case column convention. This is
+	// deliberately NOT "hidden" alone: internal/sync/refresh.go and
+	// internal/snapshot/attention.go already use "hidden" for an unrelated,
+	// pre-existing "hidden TEAM draft" concept that DOES skip ingestion.
+	// USER_HIDDEN is the opposite by design — see the "Hide semantics" section
+	// of pg2-4dz88.4: hiding affects display only, never ingestion — and the
+	// distinct name exists precisely so the two are never conflated. The
+	// behavior-docs glossary entry (a sibling leaf) reuses this name verbatim.
+	//
+	// user_hidden_reason is an optional free-text reason recorded alongside a
+	// hide. Operator ruling (fork #5, same comment): unhiding ALWAYS clears
+	// the recorded reason — store.SetHidden enforces this at the write side
+	// (forcing reason="" whenever hidden=false), not merely as a DEFAULT here.
+	//
+	// wip is the WIP suppression flag (pg2-4dz88.4's "WIP semantics"):
+	// store-only, never synced to beads, default false. A sibling leaf drives
+	// the ready<->draft conversions from it; this migration only lands the
+	// column.
+	//
+	// Both store.SetHidden and store.SetWIP return a "not found" error against
+	// an unknown (repo, number) — operator ruling, fork #6, same comment —
+	// mirroring SetDisposition's fail-loud pattern (feedback.go), not
+	// SetEnrichment's silent no-op. That is a setter-side behavior, not
+	// expressible in this DDL.
+	//
+	// Existing rows backfill to the declared defaults: not hidden, no reason,
+	// not WIP — the only truthful values for a PR nobody has yet hidden or
+	// marked WIP.
+	`
+ALTER TABLE pull_request ADD COLUMN user_hidden        INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE pull_request ADD COLUMN user_hidden_reason TEXT    NOT NULL DEFAULT '';
+ALTER TABLE pull_request ADD COLUMN wip                INTEGER NOT NULL DEFAULT 0;
 `,
 }
 

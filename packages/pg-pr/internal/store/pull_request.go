@@ -28,6 +28,24 @@ type PullRequest struct {
 	Urgency        string
 	UrgencyScore   int
 	UrgencyReasons []string
+	// UserHidden is the USER_HIDDEN flag (schema v14, pg2-4dz88.4.2): a
+	// user-owned, display-layer-only suppression, set via SetHidden and
+	// deliberately absent from UpsertPR's ON CONFLICT clause so a sync tick
+	// can never clobber it. Distinct from the pre-existing "hidden TEAM
+	// draft" concept in internal/sync/refresh.go and
+	// internal/snapshot/attention.go, which DOES skip ingestion — USER_HIDDEN
+	// never does (see pg2-4dz88.4's "Hide semantics"). The distinct name is
+	// an explicit operator ruling (fork #7) to prevent conflating the two.
+	UserHidden bool
+	// UserHiddenReason is the optional reason recorded with a hide. Unhiding
+	// (SetHidden(..., hidden=false, ...)) ALWAYS clears it regardless of what
+	// is passed as reason — operator ruling, fork #5.
+	UserHiddenReason string
+	// WIP suppresses automatic un-drafting (pg2-4dz88.4's rebuilt promotion
+	// predicate, a sibling leaf). Store-only, never synced to beads, default
+	// false. Set via SetWIP; deliberately absent from UpsertPR's ON CONFLICT
+	// clause for the same no-clobber reason as UserHidden.
+	WIP bool
 }
 
 // nowRFC3339 is the clock; overridable in tests.
@@ -35,7 +53,8 @@ var nowRFC3339 = func() string { return time.Now().UTC().Format(time.RFC3339) }
 
 // prColumns is the canonical SELECT column order; scanPR must match it.
 const prColumns = `id, repo, number, ownership, author, state, branch, base, url,
-	head_sha, last_synced_at, kind, languages, size, urgency, urgency_score, urgency_reasons`
+	head_sha, last_synced_at, kind, languages, size, urgency, urgency_score, urgency_reasons,
+	user_hidden, user_hidden_reason, wip`
 
 type rowScanner interface{ Scan(dest ...any) error }
 
@@ -44,13 +63,17 @@ type rowScanner interface{ Scan(dest ...any) error }
 func scanPR(s rowScanner) (PullRequest, error) {
 	var pr PullRequest
 	var langs, reasons string
+	var userHidden, wip int
 	if err := s.Scan(&pr.ID, &pr.Repo, &pr.Number, &pr.Ownership, &pr.Author,
 		&pr.State, &pr.Branch, &pr.Base, &pr.URL, &pr.HeadSHA, &pr.LastSyncedAt,
-		&pr.Kind, &langs, &pr.Size, &pr.Urgency, &pr.UrgencyScore, &reasons); err != nil {
+		&pr.Kind, &langs, &pr.Size, &pr.Urgency, &pr.UrgencyScore, &reasons,
+		&userHidden, &pr.UserHiddenReason, &wip); err != nil {
 		return pr, err
 	}
 	pr.Languages = decodeJSONSlice(langs)
 	pr.UrgencyReasons = decodeJSONSlice(reasons)
+	pr.UserHidden = userHidden == 1
+	pr.WIP = wip == 1
 	return pr, nil
 }
 
