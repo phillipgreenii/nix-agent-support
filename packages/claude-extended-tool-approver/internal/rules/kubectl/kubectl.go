@@ -106,6 +106,13 @@ type Rule struct {
 	clusterEnvVar      string
 	devClusterPrefixes []string
 	devWorkspacePrefix string
+
+	// execReadOnlyClusters / execMutableClusters classify a kubectl exec TARGET
+	// (the --context/--cluster value) as safe-to-recurse vs mutable/production;
+	// see execTargetClass and classifyExecTarget below and
+	// configrules.KubectlConfig's doc comment for the design.
+	execReadOnlyClusters map[string]bool
+	execMutableClusters  map[string]bool
 }
 
 // New constructs the kubectl rule. cfg carries the consumer-specific extensions
@@ -126,6 +133,9 @@ func New(eval hookio.Evaluator, pe *patheval.PathEvaluator, cfg configrules.Kube
 		clusterEnvVar:      cfg.ClusterEnvVar,
 		devClusterPrefixes: cfg.DevClusterPrefixes,
 		devWorkspacePrefix: cfg.DevWorkspacePrefix,
+
+		execReadOnlyClusters: toSet(cfg.ExecReadOnlyClusters),
+		execMutableClusters:  toSet(cfg.ExecMutableClusters),
 	}
 	for f := range r.devScopeFlags {
 		if strings.HasPrefix(f, "--") {
@@ -204,7 +214,22 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 			if r.isDevWorkspaceScope(operation, pc.Args, pc.EnvVars) {
 				return r.evaluateExec(pc.Args, input)
 			}
-			return r.refuse("kubectl: non-dev kubectl exec (defer to mode/settings)")
+			switch r.classifyExecTarget(r.execTarget(pc.Args)) {
+			case execTargetReadOnly:
+				return r.evaluateExec(pc.Args, input)
+			case execTargetMutable:
+				// A real, terminal Ask — NOT the refuse-and-continue floor. A
+				// mutable/production-classified target must not resolve to the
+				// blanket "defer to mode/settings" abstain the unclassified and
+				// pre-classification cases get; it needs its own opinion.
+				return hookio.RuleResult{
+					Decision: hookio.Ask,
+					Reason:   "kubectl exec against mutable/production-classified target",
+					Module:   r.Name(),
+				}, nil
+			default: // execTargetUnclassified
+				return r.refuse("kubectl: non-dev kubectl exec against unclassified target (defer to mode/settings)")
+			}
 		}
 		if operation == "rollout" {
 			if rolloutReadOnlySubcommands[r.rolloutSubcommand(pc.Args)] {
@@ -410,6 +435,67 @@ func (r *Rule) isDevWorkspaceScope(operation string, args []string, env []cmdpar
 		}
 	}
 	return false
+}
+
+// execTargetFlags name the flags whose value identifies the kubectl exec
+// TARGET cluster/context. Both are base generic kubeconfig flags already in
+// baseValueFlags; checked in order, the first one present wins.
+var execTargetFlags = []string{"--context", "--cluster"}
+
+// execTarget resolves the cluster/context name a kubectl invocation names via
+// --context/--cluster, or "" if neither flag is present (an ambient
+// current-context kubectl would resolve from its kubeconfig, which this rule
+// cannot see). An empty return MUST be classified execTargetUnclassified by
+// classifyExecTarget — never treated as read-only.
+func (r *Rule) execTarget(args []string) string {
+	// NOTE: not range-over-int — the i++ below intentionally skips a flag's value.
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if a == "--" {
+			break
+		}
+		for _, f := range execTargetFlags {
+			if a == f && i+1 < len(args) {
+				return args[i+1]
+			}
+			if v, ok := strings.CutPrefix(a, f+"="); ok {
+				return v
+			}
+		}
+	}
+	return ""
+}
+
+// execTargetClass is classifyExecTarget's three-way verdict on a kubectl exec
+// TARGET (see configrules.KubectlConfig's ExecReadOnlyClusters/
+// ExecMutableClusters doc comment for the full design).
+type execTargetClass int
+
+const (
+	// execTargetUnclassified means the target is either unnamed (no
+	// --context/--cluster) or named but present in neither configured list.
+	// The caller MUST treat this conservatively — it is NOT a green light.
+	execTargetUnclassified execTargetClass = iota
+	execTargetReadOnly
+	execTargetMutable
+)
+
+// classifyExecTarget classifies a resolved exec target against the injected
+// KubectlConfig cluster lists. A target in BOTH lists (a config error) is
+// treated as mutable — checked first, the fail-safe direction. With no config
+// (both sets empty, the base/default case) every target is unclassified,
+// exactly matching pre-existing behavior.
+func (r *Rule) classifyExecTarget(target string) execTargetClass {
+	if target == "" {
+		return execTargetUnclassified
+	}
+	if r.execMutableClusters[target] {
+		return execTargetMutable
+	}
+	if r.execReadOnlyClusters[target] {
+		return execTargetReadOnly
+	}
+	return execTargetUnclassified
 }
 
 func (r *Rule) isKubectlExecutable(exec string) bool {

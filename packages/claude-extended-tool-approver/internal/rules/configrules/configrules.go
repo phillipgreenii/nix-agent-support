@@ -154,6 +154,31 @@ type KubectlConfig struct {
 	// non-dev classification (prod/shared clusters). AWS_PROFILE itself is the
 	// generic, hardcoded env var; only the account names are consumer-specific.
 	NonDevAccounts []string `json:"nonDevAccounts"`
+
+	// ExecReadOnlyClusters and ExecMutableClusters classify a `kubectl exec`
+	// TARGET (the cluster/context name resolved from the invocation's
+	// --context/--cluster flag — see the kubectl rule's execTarget) for
+	// consumers whose dev-scope has no personal-workspace-NAME-PREFIX
+	// convention to key DevWorkspacePrefix/NonDevAccounts off of (e.g. a
+	// homelab whose clusters are named by role, not by owner). This is a
+	// SEPARATE axis from the dev-workspace-scope check above: a command that
+	// clears isDevWorkspaceScope (e.g. ZR's --ws d-* convention) recurses
+	// regardless of these lists, and these lists are consulted only when it
+	// does not.
+	//
+	// ExecReadOnlyClusters names targets safe to recurse `kubectl exec`'s inner
+	// command through the full rule chain (evaluateExec). ExecMutableClusters
+	// names targets classified mutable/production, where exec must produce a
+	// real hookio.Ask rather than the blanket "defer to mode/settings" refusal
+	// non-dev/unclassified exec gets. A target present in BOTH (a config error)
+	// is treated as mutable — checked first, the fail-safe direction. A target
+	// in NEITHER list — including a bare `kubectl exec` with no --context/
+	// --cluster naming any target at all — is UNCLASSIFIED and MUST NOT be
+	// treated as read-only; the kubectl rule keeps today's non-approving
+	// refusal for it, so an empty/absent config (nobody has set either list) is
+	// byte-identical to pre-existing behavior.
+	ExecReadOnlyClusters []string `json:"execReadOnlyClusters"`
+	ExecMutableClusters  []string `json:"execMutableClusters"`
 }
 
 // BuildtoolsConfig carries consumer-specific build tool / script approvals

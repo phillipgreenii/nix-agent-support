@@ -686,6 +686,110 @@ func TestADR0044_Kubectl_RefusedSites(t *testing.T) {
 // a dev-workspace scope to be reachable at all: the invocation IS a dev-scoped exec, so
 // the rule committed to delegating, and the missing inner command after `--` is what stops
 // it. That is an examined leaf, not an unexamined one.
+// --- tc-8y2c: exec-target cluster classification (mutable vs read-only,
+// generic — no hardcoded name prefix). See configrules.KubectlConfig's
+// ExecReadOnlyClusters/ExecMutableClusters doc comment for the design and
+// kubectl.go's execTarget/classifyExecTarget for the mechanism. These commands
+// carry NO dev-workspace-scope signal (no --ws, no d- prefix, no AWS_PROFILE),
+// so isDevWorkspaceScope is false throughout and the exec-target classifier is
+// the only thing deciding the verdict — exactly the homelab shape (kagents/
+// kinfra/kprod cluster names, no personal-dev-workspace convention).
+func execTargetClassificationConfig() configrules.KubectlConfig {
+	return configrules.KubectlConfig{
+		ExecReadOnlyClusters: []string{"kagents"},
+		ExecMutableClusters:  []string{"kinfra", "kprod"},
+	}
+}
+
+// TestKubectl_ExecTarget_ReadOnlyClassified_ReachesEvaluateExec proves a
+// read-only-classified target recurses into evaluateExec — the inner command
+// after `--` is evaluated through the (mocked) full rule chain — rather than
+// stopping at the outer kubectl rule's own verdict.
+func TestKubectl_ExecTarget_ReadOnlyClassified_ReachesEvaluateExec(t *testing.T) {
+	mockEval := &mockEvaluator{
+		results: map[string]hookio.RuleResult{
+			"bats": {Decision: hookio.Approve, Reason: "ok", Module: "mock"},
+		},
+		defaultResult: hookio.RuleResult{Decision: hookio.NoOpinion, Module: "mock"},
+	}
+	r := New(mockEval, nil, execTargetClassificationConfig())
+	input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{
+		"command": "kubectl --context=kagents exec pod/foo -- bats",
+	})}
+	got := hookio.Verdict(r.Evaluate(input))
+	if got.Decision != hookio.Approve {
+		t.Errorf("kagents (read-only-classified) exec: got %s, want approve (inner command reached the mock evaluator)", got.Decision)
+	}
+}
+
+// TestKubectl_ExecTarget_MutableClassified_AsksNotAbstains proves a
+// mutable/production-classified target produces a real, terminal Ask — never
+// the blanket "defer to mode/settings" abstain — and that this holds for both
+// --context and --cluster spellings.
+func TestKubectl_ExecTarget_MutableClassified_AsksNotAbstains(t *testing.T) {
+	r := New(nil, nil, execTargetClassificationConfig())
+	cmds := []string{
+		"kubectl --context=kprod exec pod/foo -- rm -rf /var/lib/data",
+		"kubectl --context kinfra exec pod/foo -- bash",
+		"kubectl --cluster=kprod exec pod/foo -- bash",
+	}
+	for _, cmd := range cmds {
+		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
+		got := hookio.Verdict(r.Evaluate(input))
+		if got.Decision != hookio.Ask {
+			t.Errorf("cmd %q: got %s, want Ask (mutable-classified target must not silently abstain)", cmd, got.Decision)
+		}
+	}
+}
+
+// TestKubectl_ExecTarget_Unclassified_DoesNotFailOpen proves a target named
+// but classified in NEITHER list, and a bare exec with no --context/--cluster
+// at all, never resolve to Approve — they must stay at least as restrictive as
+// today's refusal.
+func TestKubectl_ExecTarget_Unclassified_DoesNotFailOpen(t *testing.T) {
+	r := New(nil, nil, execTargetClassificationConfig())
+	cmds := []string{
+		"kubectl --context=some-other-cluster exec pod/foo -- bash",
+		"kubectl exec pod/foo -- bash",
+	}
+	for _, cmd := range cmds {
+		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
+		res, err := r.Evaluate(input)
+		if !errors.Is(err, hookio.ErrRefused) {
+			t.Fatalf("cmd %q: err=%v res=%+v, want ErrRefused (unclassified must not fail open)", cmd, err, res)
+		}
+		got := hookio.Verdict(r.Evaluate(input))
+		if got.Decision == hookio.Approve {
+			t.Errorf("cmd %q: got Approve, want non-approve (unclassified target must not fail open)", cmd)
+		}
+	}
+}
+
+// TestKubectl_ExecTarget_EmptyConfig_MatchesTodaysAbstain is the backward-
+// compatibility gate: with NO kubectl config at all (today's deployed
+// rules.json, which has no top-level "kubectl" key), kubectl exec against any
+// named cluster stays exactly as safe as it is today — a refusal, never a
+// silent allow and never a new Ask nobody configured.
+func TestKubectl_ExecTarget_EmptyConfig_MatchesTodaysAbstain(t *testing.T) {
+	r := emptyRule()
+	cmds := []string{
+		"kubectl --context=kagents exec pod/foo -- bash",
+		"kubectl --context=kprod exec pod/foo -- bash",
+		"kubectl exec pod/foo -- bash",
+	}
+	for _, cmd := range cmds {
+		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
+		res, err := r.Evaluate(input)
+		if !errors.Is(err, hookio.ErrRefused) {
+			t.Fatalf("cmd %q under empty config: err=%v res=%+v, want ErrRefused (byte-identical to pre-change behavior)", cmd, err, res)
+		}
+		got := hookio.Verdict(r.Evaluate(input))
+		if got.Decision != hookio.NoOpinion {
+			t.Errorf("cmd %q under empty config: got %s, want abstain (unchanged base behavior)", cmd, got.Decision)
+		}
+	}
+}
+
 func TestADR0044_Kubectl_KcExecWithoutInnerCommandRefuses(t *testing.T) {
 	r := New(nil, nil, configrules.KubectlConfig{
 		ExecutableAliases:  []string{"kc"},
