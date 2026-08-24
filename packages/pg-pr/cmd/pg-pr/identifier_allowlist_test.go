@@ -50,7 +50,12 @@ import (
 // reason. "alice" is internal/prview/testdata/pr-view-full.json's
 // hand-authored placeholder author, predating any scrub, following the
 // long-standing Alice/Bob naming convention for examples — never a captured
-// real value.
+// real value. "review-bot" is pg2-mp02f's placeholder: that bead replaced the
+// real "coderabbitai" login/comment bodies still embedded in
+// enriched-prs-single.json (a SEPARATE concern from this guard — pg2-mp02f is
+// about not hardcoding a real vendor's bot identity in a fixture pg-pr's own
+// tests exercise, not about identity disclosure) with this generic bot login,
+// so it needs its own allowlist entry the same way "teammate" did.
 var allowlistedIdentifiers = map[string]struct{}{
 	// the operator's own identity — the one exception the ruling allows.
 	"phillipgreenii":            {},
@@ -61,8 +66,9 @@ var allowlistedIdentifiers = map[string]struct{}{
 	"policy-bot":   {},
 	"dependabot":   {},
 	// generic placeholder test identities — see doc comment above.
-	"teammate": {},
-	"alice":    {},
+	"teammate":   {},
+	"alice":      {},
+	"review-bot": {},
 }
 
 func isAllowlistedIdentifier(id string) bool {

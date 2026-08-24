@@ -63,9 +63,39 @@ This is third-party personal data plus non-public schema. It MUST be removed fro
 merely from `main`, and the base64 blob SHOULD be decoded and reviewed before disposal so the
 removal scope is known rather than assumed.
 
-- [ ] **A1** — Replace this fixture with synthetic data that exercises the same parser paths.
-- [ ] **A2** — Decode and review the embedded base64 CodeRabbit state blob; record what it held.
-- [ ] **A3** — Purge the file from all history (see §H — history rewrite).
+> **Update 2026-08-24 — A1/A2 resolved in the working tree, A3 still open.** The table above
+> describes the ORIGINAL captured payload and MUST stay as-is: it is still the record §A3's
+> history purge needs. But the working-tree copy of the fixture no longer matches it:
+>
+> - `pg2-wb9yb` (commit `afb6cd71` on `main`, message references the same work under a
+>   pre-rebase sha `62a9c573`) replaced every employer-identifying value in this fixture with a
+>   jq value-substitution program — repo/PR/URLs, the Jira id, the colleague's name/login, the
+>   internal schema/enum/path names, and the CI check inventory — while proving structural
+>   equivalence (identical line count, 68 statusCheckRollup contexts preserved at 66 CheckRun / 2
+>   StatusContext, the giant bot comment body kept verbatim in shape).
+> - `pg2-mp02f` (this bead) went further and replaced the two remaining real third-party
+>   product/bot names the identity scrub deliberately left alone (`coderabbitai`, `policy-bot`) —
+>   a SEPARATE concern from disclosure (they were already on this module's identifier allowlist
+>   as safe-to-disclose public bot names) but still a hardcoded real-vendor literal in a fixture
+>   this module's own tests exercise — with generic placeholders (`review-bot`, `advisory-gate`),
+>   and confirmed the base64 "internal state" blob A2 asks about decodes to an explicit
+>   `SYNTHETIC-...-NOT-REAL-DATA` marker, not real captured state (pg2-wb9yb's commit message
+>   already recorded this as "a synthetic blob of identical length"; this note is the
+>   corroborating decode).
+> - Re-run of this section's own verification command against just the fixture, post-fix:
+>   `rg -i -o 'ziprecruiter' packages/pg-pr/pkg/provider/vcs/github/testdata/enriched-prs-single.json | wc -l`
+>   → `0` (was 71); `starterview` → `0` (was 4); no `FINDEV`/colleague name/login remains.
+> - **A3 (history purge) is UNCHANGED and still open** — the real values above are still reachable
+>   from `main`'s history and unreachable objects. Tracked separately as `pg2-k23s6` (currently
+>   deferred); this working-tree fix does not resolve it and was not intended to.
+
+- [x] **A1** — Replace this fixture with synthetic data that exercises the same parser paths.
+      Done in the working tree by `pg2-wb9yb` + `pg2-mp02f` (see note above); history purge is §A3.
+- [x] **A2** — Decode and review the embedded base64 CodeRabbit state blob; record what it held.
+      Decoded 2026-08-24 (pg2-mp02f): a repeated `SYNTHETIC-CODERABBIT-INTERNAL-STATE-PAYLOAD-NOT-REAL-DATA-0123456789`
+      marker padding out an lz-string-shaped blob — pg2-wb9yb's own synthetic replacement, not
+      real captured state.
+- [ ] **A3** — Purge the file from all history (see §H — history rewrite). Tracked: `pg2-k23s6`.
 
 ### B. Internal toolchain / infrastructure inventory — HIGH SEVERITY
 

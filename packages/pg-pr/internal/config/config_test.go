@@ -45,6 +45,8 @@ repos:
 	}
 }
 
+// Generic login and anchored pattern only — no real bot login or verdict
+// phrasing, per this repo's public-repo identifier rule (pg2-mp02f).
 func TestLoadFile_AgentsBlock(t *testing.T) {
 	dir := t.TempDir()
 	p := writeYAML(t, dir, `
@@ -53,8 +55,8 @@ worktree_root: /tmp/wr
 repos:
   - remote: owner/name
 agents:
-  - login: claude[bot]
-    approval_regex: '(?im)^verdict:\s*approve'
+  - login: agent-one
+    approval_regex: '(?im)^ok-to-land$'
 `)
 	cfg, err := LoadFile(p)
 	if err != nil {
@@ -64,10 +66,10 @@ agents:
 		t.Fatalf("expected 1 agent, got %d", len(cfg.Agents))
 	}
 	a := cfg.Agents[0]
-	if a.Login != "claude[bot]" {
-		t.Errorf("login: got %q want %q", a.Login, "claude[bot]")
+	if a.Login != "agent-one" {
+		t.Errorf("login: got %q want %q", a.Login, "agent-one")
 	}
-	if a.ApprovalRegex != `(?im)^verdict:\s*approve` {
+	if a.ApprovalRegex != `(?im)^ok-to-land$` {
 		t.Errorf("approval_regex: got %q", a.ApprovalRegex)
 	}
 }

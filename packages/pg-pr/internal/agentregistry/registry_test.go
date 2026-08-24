@@ -6,13 +6,15 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// Generic login and anchored pattern only — no real bot login or verdict
+// phrasing, per this repo's public-repo identifier rule (pg2-mp02f).
 func TestIsAgent(t *testing.T) {
-	r, err := New([]Entry{{Login: "claude[bot]", ApprovalRegex: `(?im)^verdict:\s*approve`}})
+	r, err := New([]Entry{{Login: "agent-one", ApprovalRegex: `(?im)^ok-to-land$`}})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	if !r.IsAgent("claude[bot]") {
-		t.Error("expected claude[bot] to be classified as agent")
+	if !r.IsAgent("agent-one") {
+		t.Error("expected agent-one to be classified as agent")
 	}
 	if r.IsAgent("alice") {
 		t.Error("expected alice to not be agent")
@@ -20,14 +22,14 @@ func TestIsAgent(t *testing.T) {
 }
 
 func TestMatchApproval(t *testing.T) {
-	r, _ := New([]Entry{{Login: "claude[bot]", ApprovalRegex: `(?im)^verdict:\s*approve`}})
-	if !r.MatchApproval("claude[bot]", "Verdict: Approve\nLGTM") {
+	r, _ := New([]Entry{{Login: "agent-one", ApprovalRegex: `(?im)^ok-to-land$`}})
+	if !r.MatchApproval("agent-one", "ok-to-land") {
 		t.Error("expected approval match")
 	}
-	if r.MatchApproval("claude[bot]", "Verdict: request-changes") {
+	if r.MatchApproval("agent-one", "no-opinion") {
 		t.Error("expected no match for non-approve body")
 	}
-	if r.MatchApproval("alice", "Verdict: Approve") {
+	if r.MatchApproval("alice", "ok-to-land") {
 		t.Error("expected no match for non-agent author")
 	}
 }
@@ -73,11 +75,14 @@ policy:
 	}
 }
 
-// TestEntry_LegacyYAML verifies a legacy entry (login+approval_regex only) still loads and works.
+// TestEntry_LegacyYAML verifies a legacy entry (login+approval_regex only)
+// still loads and works. Generic login and anchored pattern only — no real
+// bot login or verdict phrasing, per this repo's public-repo identifier rule
+// (pg2-mp02f).
 func TestEntry_LegacyYAML(t *testing.T) {
 	const src = `
-login: claude[bot]
-approval_regex: '(?im)^verdict:\s*approve'
+login: agent-one
+approval_regex: '(?im)^ok-to-land$'
 `
 	var e Entry
 	if err := yaml.Unmarshal([]byte(src), &e); err != nil {
@@ -87,10 +92,10 @@ approval_regex: '(?im)^verdict:\s*approve'
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	if !r.IsAgent("claude[bot]") {
+	if !r.IsAgent("agent-one") {
 		t.Error("expected legacy entry to still be IsAgent")
 	}
-	if !r.MatchApproval("claude[bot]", "Verdict: Approve\nLGTM") {
+	if !r.MatchApproval("agent-one", "ok-to-land") {
 		t.Error("expected legacy approval regex to still match")
 	}
 	// pg2-4dz88.1.3: a legacy entry (login+approval_regex only, no
@@ -100,7 +105,7 @@ approval_regex: '(?im)^verdict:\s*approve'
 	if e.Approver {
 		t.Error("expected legacy entry to decode with Approver=false (zero value)")
 	}
-	if r.IsApprover("claude[bot]") {
+	if r.IsApprover("agent-one") {
 		t.Error("expected legacy entry to NOT be an approver despite a matching ApprovalRegex")
 	}
 }

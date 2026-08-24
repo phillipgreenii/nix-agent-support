@@ -13,9 +13,12 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/beads"
 )
 
-// Placeholder fixtures for the review-state approval guard tests below
-// (pg2-4dz88.9). Generic login and anchored pattern only — no real bot login
-// or verdict phrasing, per this repo's public-repo identifier rule.
+// Placeholder fixtures for the agent-approval tests in this file (originally
+// introduced for the review-state approval guard tests, pg2-4dz88.9; reused
+// file-wide by pg2-mp02f to de-literalise the pre-existing tests that used to
+// hardcode a real vendor bot login/verdict regex). Generic login and anchored
+// pattern only — no real bot login or verdict phrasing, per this repo's
+// public-repo identifier rule.
 const (
 	approvalGuardAgentLogin = "agent-one"
 	approvalGuardPattern    = `(?im)^ok-to-land$`
@@ -523,7 +526,7 @@ func assertNoIODependency(t *testing.T, typ reflect.Type) {
 //   - waiting_on_me derived from beads dep set
 func TestBuildDerivesApprovalAndWaiting(t *testing.T) {
 	reg, err := agentregistry.New([]agentregistry.Entry{
-		{Login: "claude[bot]", ApprovalRegex: `(?im)^verdict:\s*approve`},
+		{Login: approvalGuardAgentLogin, ApprovalRegex: approvalGuardPattern},
 	})
 	if err != nil {
 		t.Fatalf("agentregistry.New: %v", err)
@@ -548,7 +551,7 @@ func TestBuildDerivesApprovalAndWaiting(t *testing.T) {
 				},
 				Reviews: []api.Review{
 					{ID: "r1", Author: "humanreviewer", State: "APPROVED", Body: "LGTM"},
-					{ID: "r2", Author: "claude[bot]", State: "APPROVED", Body: "Verdict: approve\nDetails here"},
+					{ID: "r2", Author: approvalGuardAgentLogin, State: "APPROVED", Body: matchingBody + "\nDetails here"},
 				},
 				CIRuns: []api.CIRun{
 					{ID: "ci1", Status: "completed", Conclusion: "success"},
@@ -592,7 +595,7 @@ func TestBuildDerivesApprovalAndWaiting(t *testing.T) {
 // fixtures below set exactly the same two bits.
 func TestBuildCountsTwoApproversAsTwo(t *testing.T) {
 	reg, err := agentregistry.New([]agentregistry.Entry{
-		{Login: "claude[bot]", ApprovalRegex: `(?im)^verdict:\s*approve`},
+		{Login: approvalGuardAgentLogin, ApprovalRegex: approvalGuardPattern},
 	})
 	if err != nil {
 		t.Fatalf("agentregistry.New: %v", err)
@@ -635,7 +638,7 @@ func TestBuildCountsTwoApproversAsTwo(t *testing.T) {
 
 	// Two agents split the same way, and the two classes are counted separately.
 	agents := mk([]store.Approval{
-		{Approver: "claude[bot]", State: "approved", HeadSHA: "h1"},
+		{Approver: approvalGuardAgentLogin, State: "approved", HeadSHA: "h1"},
 		{Approver: "carol", State: "approved", HeadSHA: "h1"},
 		{Approver: "dave", State: "approved", HeadSHA: "h1"},
 	})
@@ -686,7 +689,7 @@ func TestBuildApproverCountsExcludeNonStandingRows(t *testing.T) {
 // regex cannot resurrect that login's DISMISSED approval.
 func TestBuildApproverCountsDedupeAndPreferStore(t *testing.T) {
 	reg, err := agentregistry.New([]agentregistry.Entry{
-		{Login: "claude[bot]", ApprovalRegex: `(?im)^verdict:\s*approve`},
+		{Login: approvalGuardAgentLogin, ApprovalRegex: approvalGuardPattern},
 	})
 	if err != nil {
 		t.Fatalf("agentregistry.New: %v", err)
@@ -699,7 +702,7 @@ func TestBuildApproverCountsDedupeAndPreferStore(t *testing.T) {
 				PR:        api.PR{Repo: "o/r", Number: 1, Author: "alice", HeadSHA: "h1"},
 				Ownership: ownership.Mine,
 				Approvals: approvals,
-				Comments:  []api.Comment{{Author: "claude[bot]", Body: "Verdict: approve"}},
+				Comments:  []api.Comment{{Author: approvalGuardAgentLogin, Body: matchingBody}},
 			}},
 		})
 		return snap.Mine[0]
@@ -707,14 +710,14 @@ func TestBuildApproverCountsDedupeAndPreferStore(t *testing.T) {
 
 	// Standing store row + matching body, same login → ONE agent approver.
 	if got := mkRow([]store.Approval{
-		{Approver: "claude[bot]", State: "approved", HeadSHA: "h1"},
+		{Approver: approvalGuardAgentLogin, State: "approved", HeadSHA: "h1"},
 	}).AgentApprovers; got != 1 {
 		t.Errorf("AgentApprovers = %d, want 1 — one approver observed twice is still one", got)
 	}
 
 	// DISMISSED store row + still-matching body → ZERO. The store wins.
 	if got := mkRow([]store.Approval{
-		{Approver: "claude[bot]", State: "approved", HeadSHA: "h1", Dismissed: true},
+		{Approver: approvalGuardAgentLogin, State: "approved", HeadSHA: "h1", Dismissed: true},
 	}).AgentApprovers; got != 0 {
 		t.Errorf("AgentApprovers = %d, want 0 — a matching body must not resurrect a dismissed approval", got)
 	}
@@ -729,7 +732,7 @@ func TestBuildApproverCountsDedupeAndPreferStore(t *testing.T) {
 // path, so the guard tests both fields independently rather than as a pair.
 func TestBuildRegexFallbackMinesOnlyTopLevelComments(t *testing.T) {
 	reg, err := agentregistry.New([]agentregistry.Entry{
-		{Login: "claude[bot]", ApprovalRegex: `(?im)^verdict:\s*approve`},
+		{Login: approvalGuardAgentLogin, ApprovalRegex: approvalGuardPattern},
 	})
 	if err != nil {
 		t.Fatalf("agentregistry.New: %v", err)
@@ -739,10 +742,10 @@ func TestBuildRegexFallbackMinesOnlyTopLevelComments(t *testing.T) {
 		comment api.Comment
 		want    int
 	}{
-		{"top-level body is mined", api.Comment{Author: "claude[bot]", Body: "Verdict: approve"}, 1},
-		{"inline diff comment is not", api.Comment{Author: "claude[bot]", Body: "Verdict: approve", Path: "foo.go", Line: 42}, 0},
-		{"file-level comment (path, no line) is not", api.Comment{Author: "claude[bot]", Body: "Verdict: approve", Path: "foo.go"}, 0},
-		{"line anchor with no path is not", api.Comment{Author: "claude[bot]", Body: "Verdict: approve", Line: 42}, 0},
+		{"top-level body is mined", api.Comment{Author: approvalGuardAgentLogin, Body: matchingBody}, 1},
+		{"inline diff comment is not", api.Comment{Author: approvalGuardAgentLogin, Body: matchingBody, Path: "foo.go", Line: 42}, 0},
+		{"file-level comment (path, no line) is not", api.Comment{Author: approvalGuardAgentLogin, Body: matchingBody, Path: "foo.go"}, 0},
+		{"line anchor with no path is not", api.Comment{Author: approvalGuardAgentLogin, Body: matchingBody, Line: 42}, 0},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -921,7 +924,7 @@ func TestBuildDismissedReviewNonRegisteredLoginDoesNotApprove(t *testing.T) {
 func TestBuildTeamRowApproverCounts(t *testing.T) {
 	// Registered with no ApprovalRegex: enough to make IsAgent true (the
 	// human/agent split), with the regex fallback inert.
-	reg, err := agentregistry.New([]agentregistry.Entry{{Login: "claude[bot]"}})
+	reg, err := agentregistry.New([]agentregistry.Entry{{Login: approvalGuardAgentLogin}})
 	if err != nil {
 		t.Fatalf("agentregistry.New: %v", err)
 	}
@@ -945,7 +948,7 @@ func TestBuildTeamRowApproverCounts(t *testing.T) {
 
 	mixed := row([]store.Approval{
 		{Approver: "carol", State: "approved", HeadSHA: "h1"},
-		{Approver: "claude[bot]", State: "approved", HeadSHA: "h1"},
+		{Approver: approvalGuardAgentLogin, State: "approved", HeadSHA: "h1"},
 	})
 	if mixed.HumanApprovers != 1 || mixed.AgentApprovers != 1 {
 		t.Errorf("mixed: human %d / agent %d, want 1/1", mixed.HumanApprovers, mixed.AgentApprovers)
@@ -1040,7 +1043,7 @@ func TestBuildEmptyArraysNotNil(t *testing.T) {
 // trigger agent_approved.
 func TestBuildAgentApprovedViaInlineCommentIgnored(t *testing.T) {
 	reg, err := agentregistry.New([]agentregistry.Entry{
-		{Login: "claude[bot]", ApprovalRegex: `(?im)^verdict:\s*approve`},
+		{Login: approvalGuardAgentLogin, ApprovalRegex: approvalGuardPattern},
 	})
 	if err != nil {
 		t.Fatalf("agentregistry.New: %v", err)
@@ -1058,11 +1061,11 @@ func TestBuildAgentApprovedViaInlineCommentIgnored(t *testing.T) {
 				Ownership: ownership.Mine,
 				// Inline comment — should be ignored for approval
 				Comments: []api.Comment{
-					{Author: "claude[bot]", Body: "Verdict: approve", Path: "foo.go", Line: 42},
+					{Author: approvalGuardAgentLogin, Body: matchingBody, Path: "foo.go", Line: 42},
 				},
 				// Reviews without a body that matches the approval regex
 				Reviews: []api.Review{
-					{ID: "r3", Author: "claude[bot]", State: "CHANGES_REQUESTED", Body: "needs work"},
+					{ID: "r3", Author: approvalGuardAgentLogin, State: "CHANGES_REQUESTED", Body: "needs work"},
 				},
 			},
 		},
@@ -1128,11 +1131,11 @@ func TestBuildNilRegistry(t *testing.T) {
 				Ownership: ownership.Mine,
 				Approvals: []store.Approval{
 					{Approver: "anyone", State: "approved", HeadSHA: "h1"},
-					{Approver: "claude[bot]", State: "approved", HeadSHA: "h1"},
+					{Approver: approvalGuardAgentLogin, State: "approved", HeadSHA: "h1"},
 				},
 				Reviews: []api.Review{
 					{ID: "r4", Author: "anyone", State: "APPROVED", Body: ""},
-					{ID: "r5", Author: "claude[bot]", State: "APPROVED", Body: "Verdict: approve"},
+					{ID: "r5", Author: approvalGuardAgentLogin, State: "APPROVED", Body: matchingBody},
 				},
 			},
 		},
@@ -1172,8 +1175,8 @@ func TestBuildNilRegistrySkipsRegexMiningEntirely(t *testing.T) {
 			PR:        api.PR{Repo: "o/r", Number: 40, Author: "alice", HeadSHA: "h1"},
 			Ownership: ownership.Mine,
 			// No Approvals at all, so nothing is pre-recorded.
-			Comments: []api.Comment{{Author: "claude[bot]", Body: "Verdict: approve"}},
-			Reviews:  []api.Review{{ID: "r1", Author: "claude[bot]", State: "APPROVED", Body: "Verdict: approve"}},
+			Comments: []api.Comment{{Author: approvalGuardAgentLogin, Body: matchingBody}},
+			Reviews:  []api.Review{{ID: "r1", Author: approvalGuardAgentLogin, State: "APPROVED", Body: matchingBody}},
 		}},
 	})
 	row := snap.Mine[0]
