@@ -24,6 +24,7 @@ type openFlags struct {
 	owner          string
 	notOwner       string
 	unapproved     bool
+	includeHidden  bool
 	max            int
 	printOnly      bool
 	noHyperlinks   bool
@@ -55,6 +56,12 @@ type openRow struct {
 	LinesChanged   int
 	NeedsAttention bool
 	MatchReason    []string
+	// Hidden / HiddenReason mirror snapshot.MineRow/TeamRow's identically-named
+	// fields (pg2-4dz88.4.3): a hidden PR is dropped by selectRows unless
+	// --include-hidden is passed, and the reason is shown in renderOpenRows
+	// when it is included.
+	Hidden       bool
+	HiddenReason string
 }
 
 var openCmd = &cobra.Command{
@@ -82,7 +89,12 @@ listing stays greppable and pipeable.
 
 Because the daemon's snapshot ages between ticks, a stale payload is reported as
 a warning on stderr and then opened anyway — the operator decides whether
-slightly old data is worth acting on.`,
+slightly old data is worth acting on.
+
+A PR the operator hid ('pg-pr pr hide') is excluded by default — with --all
+too, since --all only widens the attention filter, not this one. Pass
+--include-hidden to see hidden PRs anyway; the human table then shows the
+hide reason in its HIDDEN column.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		if err := validateOpenFlags(opFlags); err != nil {
@@ -198,6 +210,8 @@ func projectRows(snap *snapshot.Snapshot, mine bool) []openRow {
 				HumanApprovers: r.HumanApprovers,
 				AgentApprovers: r.AgentApprovers,
 				NeedsAttention: r.WaitingOnMe || r.NeedsMergeReminder || r.HasConflicts,
+				Hidden:         r.Hidden,
+				HiddenReason:   r.HiddenReason,
 			})
 		}
 		return out
@@ -216,6 +230,8 @@ func projectRows(snap *snapshot.Snapshot, mine bool) []openRow {
 			LinesChanged:   r.LinesChanged,
 			NeedsAttention: r.NeedsAttention,
 			MatchReason:    r.MatchReason,
+			Hidden:         r.Hidden,
+			HiddenReason:   r.HiddenReason,
 		})
 	}
 	return out
@@ -223,11 +239,17 @@ func projectRows(snap *snapshot.Snapshot, mine bool) []openRow {
 
 // selectRows applies every filter, preserving the snapshot's own ordering. It
 // does NOT apply --max: truncation warns on stderr, which is the caller's job.
+//
+// The hidden-PR exclusion (pg2-4dz88.4.3) is independent of --all/
+// --needs-attention: --all only widens the attention filter, so a hidden row
+// stays excluded even with --all, exactly like --owner/--unapproved already
+// do. --include-hidden is the one flag that admits it.
 func selectRows(rows []openRow, f openFlags) []openRow {
 	attention := attentionOnly(f)
 	out := make([]openRow, 0, len(rows))
 	for _, r := range rows {
 		switch {
+		case r.Hidden && !f.includeHidden:
 		case attention && !r.NeedsAttention:
 		case f.reason != "" && !hasReason(r.MatchReason, f.reason):
 		case f.owner != "" && r.Owner != f.owner:
@@ -317,9 +339,9 @@ func hyperlink(url, text string) string {
 func renderOpenRows(w io.Writer, rows []openRow, link bool) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 
-	header := "PR\tOWNER\tCI\tAPPROVED\tSIZE\tTITLE\n"
+	header := "PR\tOWNER\tCI\tAPPROVED\tSIZE\tHIDDEN\tTITLE\n"
 	if !link {
-		header = "PR\tOWNER\tCI\tAPPROVED\tSIZE\tURL\tTITLE\n"
+		header = "PR\tOWNER\tCI\tAPPROVED\tSIZE\tHIDDEN\tURL\tTITLE\n"
 	}
 	if _, err := io.WriteString(tw, header); err != nil {
 		return err
@@ -332,6 +354,7 @@ func renderOpenRows(w io.Writer, rows []openRow, link bool) error {
 			orDash(r.CIStatus),
 			approvedCell(r),
 			sizeCell(r),
+			hiddenCell(r),
 		}
 		if link {
 			cells = append(cells, hyperlink(r.URL, r.Title))
@@ -388,6 +411,20 @@ func sizeCell(r openRow) string {
 	return strconv.Itoa(r.FilesChanged) + "f/" + strconv.Itoa(r.LinesChanged) + "L"
 }
 
+// hiddenCell renders a row's hide state: "-" when not hidden, the recorded
+// reason when one was given, or the literal "hidden" when it was hidden with
+// no reason. Only reachable with --include-hidden — selectRows drops every
+// hidden row otherwise, so this column reads "-" everywhere by default.
+func hiddenCell(r openRow) string {
+	if !r.Hidden {
+		return "-"
+	}
+	if r.HiddenReason != "" {
+		return r.HiddenReason
+	}
+	return "hidden"
+}
+
 func init() {
 	openCmd.Flags().BoolVar(&opFlags.all, "all", false,
 		"Widen to the whole set (the default already, with --mine)")
@@ -403,6 +440,8 @@ func init() {
 		"Drop PRs owned by this login")
 	openCmd.Flags().BoolVar(&opFlags.unapproved, "unapproved", false,
 		"Drop PRs a human has already approved")
+	openCmd.Flags().BoolVar(&opFlags.includeHidden, "include-hidden", false,
+		"Include PRs hidden via `pg-pr pr hide` (excluded by default, even with --all)")
 	openCmd.Flags().IntVar(&opFlags.max, "max", 0,
 		"Cap how many PRs are opened; 0 (the default) opens every match")
 	openCmd.Flags().BoolVar(&opFlags.printOnly, "print", false,

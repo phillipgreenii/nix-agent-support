@@ -818,6 +818,82 @@ func TestSyncEmitsCloseForDisappearedPR(t *testing.T) {
 	}
 }
 
+// TestSyncHiddenPR_StillObserved_NoFalseClose is the pg2-4dz88.4.3 regression
+// guard for the close-detection half of "hiding is display-layer only": a PR
+// the operator hid, but which the VCS still reports open, must NOT be
+// mistaken for "disappeared upstream". ListOpenPRs is Sync's ONLY source for
+// that detection (see store.PullRequest.ListOpenPRs's doc) and deliberately
+// does not filter on USER_HIDDEN — filtering there would make this exact PR
+// look gone and wrongly emit pr.closed/pr.merged for a PR that never closed.
+func TestSyncHiddenPR_StillObserved_NoFalseClose(t *testing.T) {
+	ctx := realBDCtx(t)
+	db := store.OpenForTest(t)
+
+	vcs := newFakeVCS()
+	vcs.my["foo/bar"] = []api.PR{samplePR(1, "foo/bar", "feat/still-here")}
+
+	bd := newRealBDClient(t)
+	e, err := New(Deps{
+		Cfg:      minimalCfg(),
+		VCS:      map[string]VCSProvider{"github": vcs},
+		Beads:    bd,
+		StateDir: t.TempDir(),
+		Store:    db,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	// No SetStoreAndDispatch / bridge: raw outbox inspection, matching
+	// TestSyncEmitsCloseForDisappearedPR.
+
+	// Pre-seed an OPEN store row for the SAME PR the fake VCS still reports,
+	// already hidden.
+	if _, err := db.UpsertPR(ctx, store.PullRequest{
+		Repo: "foo/bar", Number: 1, Ownership: "mine", Author: "phillipg",
+		State: "open", Branch: "feat/still-here", Base: "main",
+		URL: "https://github.com/foo/bar/pull/1",
+	}); err != nil {
+		t.Fatalf("seed UpsertPR: %v", err)
+	}
+	if err := db.SetHidden(ctx, "foo/bar", 1, true, "still under review"); err != nil {
+		t.Fatalf("seed SetHidden: %v", err)
+	}
+
+	sum, err := e.Sync(ctx)
+	if err != nil {
+		t.Fatalf("Sync: %v (errors=%+v)", err, sum.Errors)
+	}
+
+	if sum.BeadsClosed != 0 {
+		t.Fatalf("BeadsClosed: got %d want 0 -- hiding must never cause a false close", sum.BeadsClosed)
+	}
+
+	open, err := db.ListOpenPRs(ctx, "foo/bar")
+	if err != nil {
+		t.Fatalf("ListOpenPRs: %v", err)
+	}
+	if len(open) != 1 || !open[0].UserHidden {
+		t.Fatalf("expected the hidden PR to remain open (and still hidden) in the store, got %+v", open)
+	}
+
+	var events []store.Event
+	if err := db.RunOutbox(ctx, func(_ context.Context, ev store.Event) error {
+		events = append(events, ev)
+		return nil
+	}); err != nil {
+		t.Fatalf("RunOutbox: %v", err)
+	}
+	for _, ev := range events {
+		if ev.Type != store.EventPRClosed && ev.Type != store.EventPRMerged {
+			continue
+		}
+		var p store.PRPayload
+		if err := json.Unmarshal(ev.Payload, &p); err == nil && p.Repo == "foo/bar" && p.Number == 1 {
+			t.Fatalf("hiding must never emit %s for a PR that never closed: %+v", ev.Type, p)
+		}
+	}
+}
+
 func TestSync_DoesNotCloseBeadsForFailedRepo(t *testing.T) {
 	ctx := realBDCtx(t)
 	vcs := newFakeVCS()

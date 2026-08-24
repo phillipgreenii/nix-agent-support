@@ -51,6 +51,15 @@ type prListItem struct {
 	Stale     bool             `json:"stale"`
 	Labels    []string         `json:"labels"`
 	Reviewers []prListReviewer `json:"reviewers"`
+	// Hidden / Reason mirror the store's USER_HIDDEN flag verbatim
+	// (pull_request.user_hidden / user_hidden_reason, pg2-4dz88.4.2/.4.3).
+	// This machine seam NEVER filters on the flag -- unlike the human-facing
+	// surfaces (`pg-pr open`, the dashboard), which exclude a hidden PR by
+	// default -- per the fork #1 operator ruling (2026-08-24): `pr list
+	// --json` is the read seam pr-pool's ACL consumes (ADR 0034), so it
+	// reports facts and leaves the judgement to that consumer.
+	Hidden bool   `json:"hidden"`
+	Reason string `json:"reason,omitempty"`
 }
 
 // prListNow is the clock the freshness stamp is computed against; overridable in
@@ -150,6 +159,8 @@ func listOpenPRItems(ctx context.Context, repo string, augment bool) ([]prListIt
 			Stale:        freshness.IsStale(asOf, now, bound),
 			Labels:       []string{},
 			Reviewers:    []prListReviewer{},
+			Hidden:       pr.UserHidden,
+			Reason:       pr.UserHiddenReason,
 		})
 	}
 	if augment {

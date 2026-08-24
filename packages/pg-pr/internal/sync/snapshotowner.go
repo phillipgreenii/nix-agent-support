@@ -84,6 +84,9 @@ func (e *Engine) runSnapshotOwner(updates <-chan snapshotUpdate, store *snapshot
 			Registry:             e.deps.AgentRegistry,
 			PRs:                  m.sortedInputs(),
 			ExcludedChecksByRepo: e.excludedChecksByRepo(),
+			// See sync.go's buildAndStoreSnapshot for why this daemon-owned
+			// shared snapshot always includes hidden PRs (pg2-4dz88.4.3).
+			IncludeHidden: true,
 		}))
 		// A snapshot has been published for the dashboard. The retired
 		// full-Sync path set this; the daemon's per-PR owner must too, or the

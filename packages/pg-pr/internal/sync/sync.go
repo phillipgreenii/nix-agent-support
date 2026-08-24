@@ -706,6 +706,12 @@ func (e *Engine) buildAndStoreSnapshot(ctx context.Context, observed map[prKey]a
 		Registry:             e.deps.AgentRegistry,
 		PRs:                  inputs,
 		ExcludedChecksByRepo: e.excludedChecksByRepo(),
+		// IncludeHidden: true — see BuilderInput.IncludeHidden's doc. The
+		// shared snapshot this Sets carries every observed PR, hidden or not,
+		// so a reader that opts in (`pg-pr open --include-hidden`) can still
+		// see them; the human default (excluding them) is enforced by that
+		// reader, not here.
+		IncludeHidden: true,
 	})
 	e.deps.Snapshot.Set(snap)
 	telemetry.SnapshotPresent.Set(1)
@@ -1017,6 +1023,12 @@ func (e *Engine) buildPRInput(ctx context.Context, pr api.PR, enriched *vcs.Enri
 			if approvals, aerr := e.deps.Store.ListApprovals(ctx, stored.ID); aerr == nil {
 				in.Approvals = approvals
 			}
+			// USER_HIDDEN (pg2-4dz88.4.3): display-layer-only, so it rides
+			// along with the same store row read above rather than a
+			// dedicated lookup. Never affects ingestion — nothing above this
+			// line reads it.
+			in.Hidden = stored.UserHidden
+			in.HiddenReason = stored.UserHiddenReason
 		}
 	}
 	return in

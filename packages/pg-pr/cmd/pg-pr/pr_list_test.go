@@ -215,6 +215,53 @@ func TestPRList_MergedPRExcluded_SeamProtection(t *testing.T) {
 	}
 }
 
+// TestPRList_HiddenPRAlwaysIncludedWithFlagAndReason is the pg2-4dz88.4.3
+// machine-seam acceptance test: `pr list --json` (the read seam pr-pool's ACL
+// consumes, per ADR 0034 / the fork #1 operator ruling) NEVER filters on
+// USER_HIDDEN -- a hidden PR appears in the default output exactly like an
+// unhidden one, carrying "hidden": true and its "reason".
+func TestPRList_HiddenPRAlwaysIncludedWithFlagAndReason(t *testing.T) {
+	resetPRFlags()
+	setListStateHome(t)
+	wireListFakes(t, &fakeListVCS{}, nil)
+	seedListStore(
+		t,
+		store.PullRequest{
+			Repo: "foo/bar", Number: 10, Ownership: "mine", State: "open",
+			Author: "phillipg", Branch: "feat/a", Base: "main", HeadSHA: "aaa111",
+		},
+		store.PullRequest{
+			Repo: "foo/bar", Number: 11, Ownership: "mine", State: "open",
+			Author: "phillipg", Branch: "feat/b", Base: "main", HeadSHA: "bbb222",
+		},
+	)
+	setStoreHidden(t, "foo/bar", 11, true, "duplicate of #10")
+
+	got := runPRList(t, "--repo", "foo/bar")
+	if len(got) != 2 {
+		t.Fatalf("hiding PR #11 must not remove it from the seam's default output: got %d, want 2: %+v", len(got), got)
+	}
+	byNum := map[int]prListItem{}
+	for _, it := range got {
+		byNum[it.Number] = it
+	}
+	if byNum[10].Hidden {
+		t.Errorf("unhidden PR 10 must not carry hidden=true: %+v", byNum[10])
+	}
+	if !byNum[11].Hidden || byNum[11].Reason != "duplicate of #10" {
+		t.Errorf("hidden PR 11 must carry hidden=true and its reason: %+v", byNum[11])
+	}
+
+	// The fields must actually be on the wire under exactly these JSON keys.
+	raw := runPRListRaw(t, "--repo", "foo/bar", "--json")
+	if !strings.Contains(raw, `"hidden": true`) {
+		t.Errorf("hidden flag missing from the emitted JSON:\n%s", raw)
+	}
+	if !strings.Contains(raw, `"reason": "duplicate of #10"`) {
+		t.Errorf("reason missing from the emitted JSON:\n%s", raw)
+	}
+}
+
 // TestPRList_RosterAndLabels verifies the --reviewers augmentation: labels come
 // from GetPR, and the roster from ListReviews with each reviewer classified
 // agent vs person via the agent registry (config.Agents).

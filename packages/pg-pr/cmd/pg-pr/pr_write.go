@@ -679,6 +679,104 @@ func runPRWipOff(cmd *cobra.Command, ctx context.Context, repo string, num int) 
 }
 
 // ----------------------------------------------------------------------
+// pr hide / pr unhide (pg2-4dz88.4.3)
+// ----------------------------------------------------------------------
+
+// prHideCmd sets the store-only USER_HIDDEN flag (+ optional reason) via
+// store.SetHidden (pg2-4dz88.4.2). Hiding is DISPLAY-LAYER ONLY: it never
+// affects ingestion, and it stays hidden until explicitly unhidden — no
+// auto-expiry (operator ruling on the parent bead pg2-4dz88.4). It suppresses
+// the PR from every HUMAN-facing surface (pg-pr open, the dashboard's
+// Mine/Team rows) unless that surface's --include-hidden is passed; the
+// machine seam (`pg-pr pr list --json`) never filters on it at all (fork #1
+// ruling, 2026-08-24) — it always reports the flag + reason as fields and
+// leaves the judgement to its consumer.
+var prHideCmd = &cobra.Command{
+	Use:   "hide <pr> [reason]",
+	Short: "Hide a PR from human-facing surfaces (pg-pr open, the dashboard)",
+	Long: `Hide a PR: sets the store-only USER_HIDDEN flag (+ optional reason).
+
+Hidden PRs are excluded by default from pg-pr open and the dashboard's
+Mine/Team rows; pass --include-hidden on those commands to see them anyway,
+with the reason displayed. There is no auto-expiry -- a hidden PR stays
+hidden until 'pg-pr pr unhide' clears it.
+
+Hiding is DISPLAY-LAYER ONLY: it never affects ingestion. The PR continues to
+be synced exactly as before -- its revisions and feedback keep being
+recorded, and it is never mistaken for closed/merged because of the hide
+alone.
+
+'pg-pr pr list --json' (the machine seam pr-pool's ACL consumes) NEVER
+filters on this flag -- it always includes the PR, carrying "hidden" and
+"reason" fields so that consumer can make its own judgement.`,
+	Args: cobra.RangeArgs(1, 2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		num, err := parsePR(args[0])
+		if err != nil {
+			return err
+		}
+		reason := ""
+		if len(args) == 2 {
+			reason = args[1]
+		}
+		ctx := cmd.Context()
+		repo, err := resolveRepo(ctx, prWF.repo)
+		if err != nil {
+			return err
+		}
+		db, err := store.Open(store.DefaultPath())
+		if err != nil {
+			return fmt.Errorf("pr hide: open store: %w", err)
+		}
+		defer func() { _ = db.Close() }()
+		if err := db.SetHidden(ctx, repo, num, true, reason); err != nil {
+			return fmt.Errorf("pr hide: %w", err)
+		}
+		if reason != "" {
+			_, err = fmt.Fprintf(cmd.OutOrStdout(), "ok PR #%d hidden (reason: %s).\n", num, reason)
+		} else {
+			_, err = fmt.Fprintf(cmd.OutOrStdout(), "ok PR #%d hidden.\n", num)
+		}
+		return err
+	},
+}
+
+// prUnhideCmd clears the store-only USER_HIDDEN flag via store.SetHidden,
+// which also ALWAYS clears the recorded reason regardless of what a caller
+// might pass (SetHidden's own fork #5 ruling) -- there is no reason argument
+// here because unhiding always discards it.
+var prUnhideCmd = &cobra.Command{
+	Use:   "unhide <pr>",
+	Short: "Unhide a previously hidden PR",
+	Long: `Unhide a PR: clears the store-only USER_HIDDEN flag and its recorded
+reason, restoring it to every human-facing surface (pg-pr open, the
+dashboard's Mine/Team rows). 'pg-pr pr list --json' was never affected by the
+hide in the first place.`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		num, err := parsePR(args[0])
+		if err != nil {
+			return err
+		}
+		ctx := cmd.Context()
+		repo, err := resolveRepo(ctx, prWF.repo)
+		if err != nil {
+			return err
+		}
+		db, err := store.Open(store.DefaultPath())
+		if err != nil {
+			return fmt.Errorf("pr unhide: open store: %w", err)
+		}
+		defer func() { _ = db.Close() }()
+		if err := db.SetHidden(ctx, repo, num, false, ""); err != nil {
+			return fmt.Errorf("pr unhide: %w", err)
+		}
+		_, err = fmt.Fprintf(cmd.OutOrStdout(), "ok PR #%d unhidden.\n", num)
+		return err
+	},
+}
+
+// ----------------------------------------------------------------------
 // pr automerge {on, off}
 // ----------------------------------------------------------------------
 
@@ -839,14 +937,14 @@ func init() {
 	addGenerateDescriptionFlags(prUpdateCmd)
 	addJSONFlag(prUpdateCmd)
 
-	// close / ready / draft / wip / merge / automerge children
-	for _, c := range []*cobra.Command{prCloseCmd, prReadyCmd, prDraftCmd, prWipOnCmd, prWipOffCmd, prMergeCmd, prAutomergeOnCmd, prAutomergeOffCmd} {
+	// close / ready / draft / wip / hide / unhide / merge / automerge children
+	for _, c := range []*cobra.Command{prCloseCmd, prReadyCmd, prDraftCmd, prWipOnCmd, prWipOffCmd, prHideCmd, prUnhideCmd, prMergeCmd, prAutomergeOnCmd, prAutomergeOffCmd} {
 		addRepoFlag(c)
 	}
 
 	prWipCmd.AddCommand(prWipOnCmd, prWipOffCmd)
 	prAutomergeCmd.AddCommand(prAutomergeOnCmd, prAutomergeOffCmd)
-	prCmd.AddCommand(prCreateCmd, prUpdateCmd, prCloseCmd, prReadyCmd, prDraftCmd, prWipCmd, prAutomergeCmd, prMergeCmd)
+	prCmd.AddCommand(prCreateCmd, prUpdateCmd, prCloseCmd, prReadyCmd, prDraftCmd, prWipCmd, prHideCmd, prUnhideCmd, prAutomergeCmd, prMergeCmd)
 }
 
 // avoid unused-warning if splitCSV is ever inlined out.

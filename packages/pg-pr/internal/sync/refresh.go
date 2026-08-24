@@ -152,6 +152,16 @@ func (e *Engine) refreshPR(ctx context.Context, repo string, number int) (*snaps
 		// merge PR also falls through unchanged.
 		if merged && own == ownership.Mine {
 			in := snapshot.PRInput{PR: *pr, Ownership: own}
+			// USER_HIDDEN survives merge (SetHidden's columns are never
+			// touched by UpsertPR); carry it through here too, this bead's
+			// only PRInput construction that bypasses buildPRInput
+			// (pg2-4dz88.4.3).
+			if e.deps.Store != nil {
+				if stored, gerr := e.deps.Store.GetPR(ctx, repo, pr.Number); gerr == nil && stored != nil {
+					in.Hidden = stored.UserHidden
+					in.HiddenReason = stored.UserHiddenReason
+				}
+			}
 			return &in, nil
 		}
 		return nil, nil

@@ -240,6 +240,98 @@ func TestIngestFeedbackToStore(t *testing.T) {
 	}
 }
 
+// TestIngestFeedbackToStore_HiddenPR_IngestsNormally is the pg2-4dz88.4.3
+// regression guard for the ingestion half of the "hiding is display-layer
+// only" invariant: a PR already marked USER_HIDDEN in the store still gets
+// its revision recorded and its feedback ingested exactly as an unhidden PR
+// would, and the hidden flag/reason survive the tick's UpsertPR untouched
+// (SetHidden's columns are deliberately absent from UpsertPR's ON CONFLICT
+// clause). This is the store-level no-clobber invariant
+// (TestUserState_NoClobber) proven again through the actual ingest call path
+// sync uses, not just a raw UpsertPR.
+func TestIngestFeedbackToStore_HiddenPR_IngestsNormally(t *testing.T) {
+	ctx := context.Background()
+	db := store.OpenForTest(t)
+
+	pr := api.PR{
+		Repo: "o/r", Number: 7, State: "open", Branch: "feat/x", Base: "main",
+		Author: "phillipg", URL: "https://github.com/o/r/pull/7", HeadSHA: "sha-abc",
+	}
+	// Pre-seed the row as HIDDEN before the tick runs, mirroring an operator
+	// having already run `pg-pr pr hide 7 <reason>` in an earlier session.
+	if _, err := db.UpsertPR(ctx, store.PullRequest{
+		Repo: pr.Repo, Number: pr.Number, Ownership: "mine", State: "open",
+	}); err != nil {
+		t.Fatalf("seed UpsertPR: %v", err)
+	}
+	if err := db.SetHidden(ctx, pr.Repo, pr.Number, true, "operator hid this"); err != nil {
+		t.Fatalf("seed SetHidden: %v", err)
+	}
+
+	enriched := &vcs.EnrichedPR{
+		PR: pr,
+		Comments: []api.Comment{{
+			ID: "c1", Author: "alice", AuthorRole: "member", Body: "please fix this",
+		}},
+	}
+
+	e, err := New(Deps{
+		Cfg: &config.Config{
+			SelfLogin: "phillipg",
+			Repos:     []config.RepoConfig{{Remote: "o/r", VCS: "github"}},
+		},
+		VCS:      map[string]VCSProvider{"github": newFakeVCS()},
+		Beads:    &noopBeads{},
+		StateDir: t.TempDir(),
+		Store:    db,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if err := e.ingestFeedbackToStore(ctx, "o/r", pr, enriched); err != nil {
+		t.Fatalf("ingestFeedbackToStore: %v", err)
+	}
+
+	storedPR, err := db.GetPR(ctx, "o/r", 7)
+	if err != nil || storedPR == nil {
+		t.Fatalf("GetPR: %v %v", storedPR, err)
+	}
+	// The hide survives the tick's own UpsertPR untouched.
+	if !storedPR.UserHidden || storedPR.UserHiddenReason != "operator hid this" {
+		t.Fatalf("a normal ingest tick clobbered the hidden flag/reason: %+v", storedPR)
+	}
+
+	// The revision timeline was recorded exactly as it would be for an
+	// unhidden PR.
+	revs, err := db.ListRevisions(ctx, storedPR.ID)
+	if err != nil {
+		t.Fatalf("ListRevisions: %v", err)
+	}
+	if len(revs) != 1 || revs[0].HeadSHA != "sha-abc" {
+		t.Fatalf("expected one revision at sha-abc for the hidden PR, got %+v", revs)
+	}
+
+	// Feedback was ingested exactly as it would be for an unhidden PR.
+	rows, err := db.ListFeedback(ctx, storedPR.ID, store.ListFilter{})
+	if err != nil {
+		t.Fatalf("ListFeedback: %v", err)
+	}
+	if len(rows) != 1 || rows[0].AuthorLogin != "alice" {
+		t.Fatalf("expected alice's comment ingested for the hidden PR, got %+v", rows)
+	}
+
+	// And the row still appears in ListOpenPRs — hiding must not remove it
+	// from sync's disappeared-upstream detection source.
+	open, err := db.ListOpenPRs(ctx, "o/r")
+	if err != nil {
+		t.Fatalf("ListOpenPRs: %v", err)
+	}
+	if len(open) != 1 || open[0].Number != 7 {
+		t.Fatalf("hidden PR must still appear in ListOpenPRs, got %+v", open)
+	}
+}
+
 // TestIngestThreadGrouping verifies the core M1 behaviour:
 //   - A review thread with 2 comments sharing the same ThreadID produces exactly
 //     ONE code-comment-thread feedback row (not two).

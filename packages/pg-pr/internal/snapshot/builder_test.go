@@ -1266,3 +1266,75 @@ func TestBuild_TeamConflictFlag(t *testing.T) {
 		t.Fatalf("want 1 team row with HasConflicts; got %d rows", len(out.Team))
 	}
 }
+
+// ----------------------------------------------------------------------
+// Hidden PR default exclusion (pg2-4dz88.4.3)
+// ----------------------------------------------------------------------
+
+// TestBuild_HiddenPR_ExcludedFromMineByDefault_IncludedWithFlag is the
+// Mine-half acceptance-criteria test: a Hidden PRInput for a PR of mine is
+// omitted from Mine when BuilderInput.IncludeHidden is unset (the default),
+// and admitted -- carrying MineRow.Hidden/HiddenReason -- when it is set.
+func TestBuild_HiddenPR_ExcludedFromMineByDefault_IncludedWithFlag(t *testing.T) {
+	in := PRInput{
+		PR:        api.PR{Repo: "o/r", Number: 1, Author: "me", Title: "hidden PR"},
+		Ownership: ownership.Mine,
+		Hidden:    true, HiddenReason: "noisy CI churn",
+	}
+
+	excluded := Build(BuilderInput{Self: "me", PRs: []PRInput{in}})
+	if len(excluded.Mine) != 0 {
+		t.Fatalf("default (IncludeHidden=false) must exclude the hidden PR from Mine, got %+v", excluded.Mine)
+	}
+
+	included := Build(BuilderInput{Self: "me", PRs: []PRInput{in}, IncludeHidden: true})
+	if len(included.Mine) != 1 || included.Mine[0].Number != 1 {
+		t.Fatalf("IncludeHidden=true must admit the hidden PR to Mine, got %+v", included.Mine)
+	}
+	if !included.Mine[0].Hidden || included.Mine[0].HiddenReason != "noisy CI churn" {
+		t.Errorf("admitted MineRow must carry Hidden+HiddenReason, got %+v", included.Mine[0])
+	}
+}
+
+// TestBuild_HiddenPR_ExcludedFromTeamByDefault_IncludedWithFlag mirrors the
+// above for the Team ("PRs to Review") half: a hidden, otherwise-qualifying
+// team PR (team-authored) is dropped by default and admitted, with the flag
+// + reason carried through, once IncludeHidden is set.
+func TestBuild_HiddenPR_ExcludedFromTeamByDefault_IncludedWithFlag(t *testing.T) {
+	in := PRInput{
+		PR:        api.PR{Repo: "o/r", Number: 2, Author: "bob", Title: "hidden team PR"},
+		Ownership: ownership.Team,
+		Hidden:    true, HiddenReason: "duplicate of #1",
+	}
+
+	excluded := Build(BuilderInput{Self: "me", TeamMembers: []string{"bob"}, PRs: []PRInput{in}})
+	if len(excluded.Team) != 0 {
+		t.Fatalf("default (IncludeHidden=false) must exclude the hidden PR from Team, got %+v", excluded.Team)
+	}
+
+	included := Build(BuilderInput{
+		Self: "me", TeamMembers: []string{"bob"}, PRs: []PRInput{in}, IncludeHidden: true,
+	})
+	if len(included.Team) != 1 || included.Team[0].Number != 2 {
+		t.Fatalf("IncludeHidden=true must admit the hidden PR to Team, got %+v", included.Team)
+	}
+	if !included.Team[0].Hidden || included.Team[0].HiddenReason != "duplicate of #1" {
+		t.Errorf("admitted TeamRow must carry Hidden+HiddenReason, got %+v", included.Team[0])
+	}
+}
+
+// TestBuild_UnhiddenPR_NeverAffectedByIncludeHidden proves IncludeHidden is a
+// pure widen-the-admission-set toggle: an ordinary (Hidden=false) PR is
+// admitted identically whether IncludeHidden is set or not, and never carries
+// a stray Hidden=true.
+func TestBuild_UnhiddenPR_NeverAffectedByIncludeHidden(t *testing.T) {
+	in := PRInput{PR: api.PR{Repo: "o/r", Number: 3, Author: "me"}, Ownership: ownership.Mine}
+
+	for _, includeHidden := range []bool{false, true} {
+		snap := Build(BuilderInput{Self: "me", PRs: []PRInput{in}, IncludeHidden: includeHidden})
+		if len(snap.Mine) != 1 || snap.Mine[0].Hidden {
+			t.Fatalf("IncludeHidden=%v: an unhidden PR must always be present and never carry Hidden=true, got %+v",
+				includeHidden, snap.Mine)
+		}
+	}
+}

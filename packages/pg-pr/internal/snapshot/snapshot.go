@@ -104,6 +104,15 @@ type MineRow struct {
 	// deliberately NOT ANSI dim). Build sorts every Merged row below the
 	// active ones in Mine (pg2-ew4kf).
 	Merged bool `json:"merged,omitempty"`
+	// Hidden mirrors the store's USER_HIDDEN flag (pg2-4dz88.4.3): a row only
+	// reaches Mine/Team at all when Build's IncludeHidden input admitted it
+	// (see BuilderInput.IncludeHidden); this field then carries the flag +
+	// reason through so a consumer that opted in (e.g. `pg-pr open
+	// --include-hidden`) can display why the operator hid it.
+	Hidden bool `json:"hidden,omitempty"`
+	// HiddenReason is the operator-supplied reason recorded with the hide, if
+	// any. Empty when Hidden is false, or when no reason was given.
+	HiddenReason string `json:"hidden_reason,omitempty"`
 }
 
 // TeamRow is one row in the "PRs to Review" table (the not-mine review set:
@@ -144,6 +153,10 @@ type TeamRow struct {
 	// team PR is also dampened out of NeedsAttention (not worth reviewing until
 	// the author rebases).
 	HasConflicts bool `json:"has_conflicts,omitempty"`
+	// Hidden / HiddenReason mirror the identically-named MineRow fields; see
+	// their doc for the contract (pg2-4dz88.4.3).
+	Hidden       bool   `json:"hidden,omitempty"`
+	HiddenReason string `json:"hidden_reason,omitempty"`
 }
 
 // JIRAItem is one resolved JIRA issue referenced by a PR.

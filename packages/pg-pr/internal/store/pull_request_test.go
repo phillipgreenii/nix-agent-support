@@ -96,6 +96,46 @@ func TestListOpenPRs(t *testing.T) {
 	}
 }
 
+// TestListOpenPRs_UnaffectedByHidden is the regression guard pg2-4dz88.4.3
+// exists to enforce: ListOpenPRs is sync's ONLY source for disappeared-
+// upstream close-detection (see internal/sync's Sync), so it MUST NOT filter
+// on USER_HIDDEN — doing so would make a hidden-but-still-open PR look "gone
+// upstream" and trigger a false pr.closed/pr.merged. A hidden PR must appear
+// in ListOpenPRs's result set exactly as an unhidden one would, carrying its
+// hidden flag + reason for any caller that cares.
+func TestListOpenPRs_UnaffectedByHidden(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+
+	if _, err := db.UpsertPR(ctx, PullRequest{Repo: "o/r", Number: 1, Ownership: "mine", State: "open"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.UpsertPR(ctx, PullRequest{Repo: "o/r", Number: 2, Ownership: "mine", State: "draft"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SetHidden(ctx, "o/r", 1, true, "noisy CI churn"); err != nil {
+		t.Fatalf("SetHidden: %v", err)
+	}
+
+	got, err := db.ListOpenPRs(ctx, "o/r")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("hiding PR #1 changed ListOpenPRs's result set: got %d rows, want 2: %+v", len(got), got)
+	}
+	byNum := map[int]PullRequest{}
+	for _, pr := range got {
+		byNum[pr.Number] = pr
+	}
+	if !byNum[1].UserHidden || byNum[1].UserHiddenReason != "noisy CI churn" {
+		t.Errorf("hidden PR #1 present but flag/reason lost: %+v", byNum[1])
+	}
+	if byNum[2].UserHidden {
+		t.Errorf("unhidden PR #2 should not carry the hidden flag: %+v", byNum[2])
+	}
+}
+
 func TestGetPRByID(t *testing.T) {
 	db := newTestDB(t)
 	ctx := context.Background()

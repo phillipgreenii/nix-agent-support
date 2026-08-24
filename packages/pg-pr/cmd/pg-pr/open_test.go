@@ -131,6 +131,105 @@ func TestSelectRowsPreservesSnapshotOrder(t *testing.T) {
 }
 
 // ----------------------------------------------------------------------
+// Hidden PR default exclusion (pg2-4dz88.4.3)
+// ----------------------------------------------------------------------
+
+// TestSelectRowsHiddenExcludedByDefault_EvenWithAll pins the acceptance
+// criterion that --all (which only widens the attention filter) must NOT
+// readmit a hidden row -- only --include-hidden does.
+func TestSelectRowsHiddenExcludedByDefault_EvenWithAll(t *testing.T) {
+	rows := []openRow{
+		{Number: 1, NeedsAttention: true},
+		{Number: 2, NeedsAttention: true, Hidden: true, HiddenReason: "noisy"},
+	}
+	assertNumbers(t, selectRows(rows, openFlags{}), 1)
+	assertNumbers(t, selectRows(rows, openFlags{all: true}), 1)
+	assertNumbers(t, selectRows(rows, openFlags{all: true, includeHidden: true}), 1, 2)
+}
+
+// TestProjectRowsCarriesHiddenFieldsBothHalves proves the Hidden/HiddenReason
+// fields survive the Mine and Team projections independently (mirroring
+// TestProjectRowsCarryApproverCountsBothHalves's shape).
+func TestProjectRowsCarriesHiddenFieldsBothHalves(t *testing.T) {
+	mine := projectRows(&snapshot.Snapshot{Mine: []snapshot.MineRow{
+		{Number: 1, URL: "u1", Hidden: true, HiddenReason: "mine reason"},
+	}}, true)
+	if len(mine) != 1 || !mine[0].Hidden || mine[0].HiddenReason != "mine reason" {
+		t.Errorf("mine half: Hidden/HiddenReason lost: %+v", mine)
+	}
+
+	team := projectRows(&snapshot.Snapshot{Team: []snapshot.TeamRow{
+		{Number: 2, URL: "u2", Hidden: true, HiddenReason: "team reason"},
+	}}, false)
+	if len(team) != 1 || !team[0].Hidden || team[0].HiddenReason != "team reason" {
+		t.Errorf("team half: Hidden/HiddenReason lost: %+v", team)
+	}
+}
+
+// TestOpenCmdHiddenExcludedByDefault_IncludedWithFlag is the end-to-end
+// acceptance test: a hidden PR is absent from both the default AND --all
+// selections, and present -- with its reason printed -- once
+// --include-hidden is passed.
+func TestOpenCmdHiddenExcludedByDefault_IncludedWithFlag(t *testing.T) {
+	snap := snapshot.Snapshot{Team: []snapshot.TeamRow{
+		{Number: 1, Owner: "alice", URL: "https://example.test/pull/1", NeedsAttention: true},
+		{
+			Number: 2, Owner: "bob", URL: "https://example.test/pull/2", NeedsAttention: true,
+			Hidden: true, HiddenReason: "duplicate work",
+		},
+	}}
+
+	opened, _, _, err := runOpenCmd(t, snap, openFlags{})
+	if err != nil {
+		t.Fatalf("RunE() error = %v", err)
+	}
+	if len(opened) != 1 || opened[0] != "https://example.test/pull/1" {
+		t.Fatalf("default selection must exclude the hidden PR, got %v", opened)
+	}
+
+	openedAll, _, _, err := runOpenCmd(t, snap, openFlags{all: true})
+	if err != nil {
+		t.Fatalf("RunE() --all error = %v", err)
+	}
+	if len(openedAll) != 1 {
+		t.Fatalf("--all must still exclude the hidden PR, got %v", openedAll)
+	}
+
+	_, stdout, _, err := runOpenCmd(t, snap, openFlags{all: true, includeHidden: true, printOnly: true})
+	if err != nil {
+		t.Fatalf("RunE() --include-hidden error = %v", err)
+	}
+	if !strings.Contains(stdout, "#2") {
+		t.Errorf("--include-hidden must surface the hidden PR:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "duplicate work") {
+		t.Errorf("--include-hidden must display the hide reason:\n%s", stdout)
+	}
+}
+
+// TestHiddenCell pins the rendered HIDDEN column: "-" when not hidden, the
+// recorded reason when one was given, and the literal "hidden" when hidden
+// with no reason.
+func TestHiddenCell(t *testing.T) {
+	tests := []struct {
+		name string
+		row  openRow
+		want string
+	}{
+		{"not hidden", openRow{}, "-"},
+		{"hidden with reason", openRow{Hidden: true, HiddenReason: "noisy"}, "noisy"},
+		{"hidden with no reason", openRow{Hidden: true}, "hidden"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := hiddenCell(tt.row); got != tt.want {
+				t.Errorf("hiddenCell() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// ----------------------------------------------------------------------
 // Projection
 // ----------------------------------------------------------------------
 

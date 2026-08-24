@@ -36,6 +36,16 @@ type PRInput struct {
 	// Ownership is the PR's classification (mine/co-owned/team), computed by the
 	// sync layer (buildPRInput) via internal/ownership. Build partitions on it.
 	Ownership ownership.Ownership
+	// Hidden mirrors the store's USER_HIDDEN flag (store.PullRequest.UserHidden,
+	// pg2-4dz88.4.2/.4.3), populated by the sync layer from the persisted PR row.
+	// Build drops a Hidden PRInput from BOTH Mine and Team unless
+	// BuilderInput.IncludeHidden is set — see Build's doc. Hiding is
+	// DISPLAY-LAYER ONLY: it never affects ingestion, so this field influences
+	// nothing upstream of Build.
+	Hidden bool
+	// HiddenReason is the operator-supplied reason recorded with the hide, if
+	// any (store.PullRequest.UserHiddenReason).
+	HiddenReason string
 }
 
 // BuilderInput is the full snapshot input.
@@ -54,6 +64,17 @@ type BuilderInput struct {
 	// regex patterns. Rebuilt from live config each snapshot (like WatchLabels) so
 	// SIGHUP edits apply immediately. nil/absent → nothing excluded. (pg2-qs46b)
 	ExcludedChecksByRepo map[string][]string
+	// IncludeHidden, when false (the default), makes Build DROP every PRInput
+	// with Hidden==true from BOTH Mine and Team — the human-facing default per
+	// the pg2-4dz88.4/.4.3 operator ruling (fork #1: hidden PRs are excluded
+	// from human-facing surfaces by default). When true, a hidden PRInput is
+	// admitted normally, with MineRow/TeamRow.Hidden + HiddenReason carrying the
+	// flag through for display. Callers decide how to source this: the daemon's
+	// shared dashboard snapshot sets it true (so `pg-pr open --include-hidden`,
+	// reading that SAME payload, can actually surface hidden rows) and leaves
+	// the human-default filtering to the CLI layer that owns the flag
+	// (cmd/pg-pr/open.go's selectRows) — see that file's doc for the rationale.
+	IncludeHidden bool
 }
 
 // Match-reason strings on TeamRow.MatchReason, explaining why a PR is in the
@@ -147,6 +168,9 @@ func matchReasons(p PRInput, team map[string]struct{}, watchLabels []string, sel
 }
 
 // Build assembles a Snapshot from the given input. Pure; no IO.
+//
+// A Hidden PRInput is dropped from both Mine and Team unless
+// in.IncludeHidden is set (pg2-4dz88.4.3) — see BuilderInput.IncludeHidden.
 func Build(in BuilderInput) *Snapshot {
 	out := &Snapshot{
 		GeneratedAt:         in.GeneratedAt,
@@ -173,6 +197,15 @@ func Build(in BuilderInput) *Snapshot {
 	// number, per snapshotModel.sortedInputs) among themselves.
 	var mergedMine []MineRow
 	for _, p := range in.PRs {
+		// Hidden-PR default exclusion (pg2-4dz88.4.3, operator fork #1 ruling):
+		// a PR the operator hid is omitted from BOTH Mine and Team unless the
+		// caller opted in via IncludeHidden. This is deliberately the FIRST
+		// check in the loop, ahead of ownership/reasons, so a hidden PR never
+		// reaches either arm below regardless of who authored it or why it
+		// would otherwise qualify.
+		if p.Hidden && !in.IncludeHidden {
+			continue
+		}
 		reasons := matchReasons(p, teamSet, in.WatchLabels, in.Self)
 		excl := excluders[p.PR.Repo]
 		switch {
@@ -238,6 +271,8 @@ func buildMineRow(p PRInput, reg *agentregistry.Registry, excl *cirollup.Exclude
 		Beads:              mapBeads(p.BeadsDeps),
 		CoOwned:            p.Ownership == ownership.CoOwned,
 		HasConflicts:       p.PR.HasConflict(),
+		Hidden:             p.Hidden,
+		HiddenReason:       p.HiddenReason,
 	}
 }
 
@@ -268,6 +303,8 @@ func buildTeamRow(p PRInput, reg *agentregistry.Registry, self string, reasons [
 		AttentionReason: reason,
 		MatchReason:     reasons,
 		HasConflicts:    p.PR.HasConflict(),
+		Hidden:          p.Hidden,
+		HiddenReason:    p.HiddenReason,
 	}
 }
 

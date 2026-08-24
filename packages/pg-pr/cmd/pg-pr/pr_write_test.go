@@ -899,6 +899,142 @@ func TestPRWipOff_UnknownPR_Errors(t *testing.T) {
 	}
 }
 
+// ----------------------------------------------------------------------
+// pr hide / pr unhide (pg2-4dz88.4.3)
+// ----------------------------------------------------------------------
+
+// setStoreHidden is a small test helper wrapping store.DB.SetHidden against
+// store.DefaultPath() (the caller has already pointed XDG_STATE_HOME at a
+// temp dir via setListStateHome), mirroring setStoreWIP.
+func setStoreHidden(t *testing.T, repo string, num int, hidden bool, reason string) {
+	t.Helper()
+	db, err := store.Open(store.DefaultPath())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	if err := db.SetHidden(context.Background(), repo, num, hidden, reason); err != nil {
+		t.Fatalf("SetHidden: %v", err)
+	}
+}
+
+// getStoreHidden reads back the hidden flag + reason for (repo, num) from the
+// default store path, mirroring getStoreWIP.
+func getStoreHidden(t *testing.T, repo string, num int) (bool, string) {
+	t.Helper()
+	db, err := store.Open(store.DefaultPath())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	pr, err := db.GetPR(context.Background(), repo, num)
+	if err != nil || pr == nil {
+		t.Fatalf("GetPR(%s#%d): pr=%v err=%v", repo, num, pr, err)
+	}
+	return pr.UserHidden, pr.UserHiddenReason
+}
+
+func TestPRHide_WithReason_SetsFlagAndPrintsConfirmation(t *testing.T) {
+	resetPRWriteFlags()
+	setListStateHome(t)
+	seedListStore(t, store.PullRequest{Repo: "foo/bar", Number: 50, Ownership: "mine", State: "open"})
+
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{"pr", "hide", "50", "noisy CI churn", "--repo", "foo/bar"})
+
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("execute: %v (stderr=%s)", err, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "#50") || !strings.Contains(stdout.String(), "hidden") {
+		t.Errorf("expected a confirmation naming the PR and \"hidden\"; got %q", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "noisy CI churn") {
+		t.Errorf("expected the reason echoed back; got %q", stdout.String())
+	}
+	hidden, reason := getStoreHidden(t, "foo/bar", 50)
+	if !hidden || reason != "noisy CI churn" {
+		t.Errorf("store state after hide: hidden=%v reason=%q, want true/\"noisy CI churn\"", hidden, reason)
+	}
+}
+
+func TestPRHide_NoReason_SetsFlagWithEmptyReason(t *testing.T) {
+	resetPRWriteFlags()
+	setListStateHome(t)
+	seedListStore(t, store.PullRequest{Repo: "foo/bar", Number: 51, Ownership: "mine", State: "open"})
+
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{"pr", "hide", "51", "--repo", "foo/bar"})
+
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("execute: %v (stderr=%s)", err, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "#51") || !strings.Contains(stdout.String(), "hidden") {
+		t.Errorf("expected a confirmation naming the PR; got %q", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "reason:") {
+		t.Errorf("no reason was given; confirmation must not claim one: %q", stdout.String())
+	}
+	hidden, reason := getStoreHidden(t, "foo/bar", 51)
+	if !hidden || reason != "" {
+		t.Errorf("store state after hide with no reason: hidden=%v reason=%q, want true/\"\"", hidden, reason)
+	}
+}
+
+func TestPRHide_UnknownPR_Errors(t *testing.T) {
+	resetPRWriteFlags()
+	setListStateHome(t)
+
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{"pr", "hide", "999", "--repo", "foo/bar"})
+
+	if err := rootCmd.Execute(); err == nil {
+		t.Fatal("expected an error when no store row exists for this PR")
+	}
+}
+
+func TestPRUnhide_ClearsFlagAndReason(t *testing.T) {
+	resetPRWriteFlags()
+	setListStateHome(t)
+	seedListStore(t, store.PullRequest{Repo: "foo/bar", Number: 52, Ownership: "mine", State: "open"})
+	setStoreHidden(t, "foo/bar", 52, true, "was hidden")
+
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{"pr", "unhide", "52", "--repo", "foo/bar"})
+
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("execute: %v (stderr=%s)", err, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "#52") || !strings.Contains(stdout.String(), "unhidden") {
+		t.Errorf("expected a confirmation naming the PR; got %q", stdout.String())
+	}
+	hidden, reason := getStoreHidden(t, "foo/bar", 52)
+	if hidden || reason != "" {
+		t.Errorf("store state after unhide: hidden=%v reason=%q, want false/\"\"", hidden, reason)
+	}
+}
+
+func TestPRUnhide_UnknownPR_Errors(t *testing.T) {
+	resetPRWriteFlags()
+	setListStateHome(t)
+
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{"pr", "unhide", "999", "--repo", "foo/bar"})
+
+	if err := rootCmd.Execute(); err == nil {
+		t.Fatal("expected an error when no store row exists for this PR")
+	}
+}
+
 func TestPRAutomerge_OnPrintsWarning(t *testing.T) {
 	resetPRWriteFlags()
 	fv, _ := swapFakes(t)
