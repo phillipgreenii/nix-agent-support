@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/beads"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/provider/vcs"
@@ -29,6 +30,15 @@ type writeFakeVCS struct {
 	createPR   *api.PR // canned return for CreatePR
 	createErr  error
 	genericErr error
+
+	// getPRResult/getPRErr control GetPR's return, for the `pr wip on` /
+	// `pr ready` + WIP tests that need to drive a specific live PR shape
+	// (ready, draft, merged, closed). nil getPRResult falls back to the
+	// bare default below, matching every write test that predates WIP and
+	// never needed GetPR to return anything meaningful.
+	getPRResult *api.PR
+	getPRErr    error
+	getPRCalls  int
 }
 
 type writeCreateCall struct {
@@ -58,6 +68,16 @@ type writeAutomergeCall struct {
 }
 
 func (f *writeFakeVCS) GetPR(_ context.Context, repo string, n int) (*api.PR, error) {
+	f.getPRCalls++
+	if f.getPRErr != nil {
+		return nil, f.getPRErr
+	}
+	if f.getPRResult != nil {
+		out := *f.getPRResult
+		out.Repo = repo
+		out.Number = n
+		return &out, nil
+	}
 	return &api.PR{Repo: repo, Number: n}, nil
 }
 func (f *writeFakeVCS) ListMyPRs(context.Context, string) ([]api.PR, error) { return nil, nil }
@@ -540,9 +560,17 @@ func TestPRClose_FindError_Warns(t *testing.T) {
 	}
 }
 
+// TestPRReady_SetsDraftFalse also proves the "no store at all" half of fork
+// #2's ruling: with no store file present, clearWIPOverrideIfSet is a
+// silent no-op and `pr ready` behaves exactly as it did before this leaf.
+// setListStateHome(t) (pr_list_test.go) points XDG_STATE_HOME at a fresh
+// temp dir WITHOUT creating the "pg-pr" subdir, so store.DefaultPath()
+// genuinely does not exist — this also keeps the test from ever touching a
+// real developer/CI machine's actual pg-pr store (isolation requirement).
 func TestPRReady_SetsDraftFalse(t *testing.T) {
 	resetPRWriteFlags()
 	fv, _ := swapFakes(t)
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
 
 	var stdout, stderr bytes.Buffer
 	rootCmd.SetOut(&stdout)
@@ -557,6 +585,67 @@ func TestPRReady_SetsDraftFalse(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "ready for review") {
 		t.Errorf("expected ready-for-review message; got %q", stdout.String())
+	}
+	if strings.Contains(stderr.String(), "OVERRIDE") {
+		t.Errorf("expected no WIP-override message with no store at all; got stderr=%q", stderr.String())
+	}
+	if _, statErr := os.Stat(store.DefaultPath()); statErr == nil {
+		t.Errorf("pr ready created a store file at %s when none existed; it must not (mirrors pr_view.go's loadPRView contract)", store.DefaultPath())
+	}
+}
+
+// TestPRReady_ClearsWIPOverride_WhenSet pins fork #2's ruling
+// (pg2-4dz88.4.4, operator 2026-08-24): `pr ready` on a PR whose
+// store-recorded WIP flag is true clears WIP as an explicit, logged
+// override, then proceeds to call SetDraft(false) exactly as before.
+func TestPRReady_ClearsWIPOverride_WhenSet(t *testing.T) {
+	resetPRWriteFlags()
+	fv, _ := swapFakes(t)
+	setListStateHome(t)
+	seedListStore(t, store.PullRequest{Repo: "foo/bar", Number: 30, Ownership: "mine", State: "open"})
+	setStoreWIP(t, "foo/bar", 30, true)
+
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{"pr", "ready", "30", "--repo", "foo/bar"})
+
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("execute: %v (stderr=%s)", err, stderr.String())
+	}
+	if len(fv.setDraft) != 1 || fv.setDraft[0].draft {
+		t.Fatalf("expected SetDraft(false) to still fire; got %+v", fv.setDraft)
+	}
+	if !strings.Contains(stderr.String(), "OVERRIDE") || !strings.Contains(stderr.String(), "WIP") {
+		t.Errorf("expected a logged WIP-override message on stderr; got %q", stderr.String())
+	}
+	if got := getStoreWIP(t, "foo/bar", 30); got {
+		t.Errorf("expected WIP cleared in the store after `pr ready`, got WIP=%v", got)
+	}
+}
+
+// TestPRReady_NoOverride_WhenWIPFalse asserts the override message is
+// pinned to the WIP=true case only: a stored, non-WIP PR gets no override
+// noise on `pr ready`.
+func TestPRReady_NoOverride_WhenWIPFalse(t *testing.T) {
+	resetPRWriteFlags()
+	fv, _ := swapFakes(t)
+	setListStateHome(t)
+	seedListStore(t, store.PullRequest{Repo: "foo/bar", Number: 31, Ownership: "mine", State: "open"})
+
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{"pr", "ready", "31", "--repo", "foo/bar"})
+
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("execute: %v (stderr=%s)", err, stderr.String())
+	}
+	if len(fv.setDraft) != 1 || fv.setDraft[0].draft {
+		t.Fatalf("expected SetDraft(false); got %+v", fv.setDraft)
+	}
+	if strings.Contains(stderr.String(), "OVERRIDE") {
+		t.Errorf("expected no WIP-override message when WIP is already false; got stderr=%q", stderr.String())
 	}
 }
 
@@ -574,6 +663,239 @@ func TestPRDraft_SetsDraftTrue(t *testing.T) {
 	}
 	if len(fv.setDraft) != 1 || !fv.setDraft[0].draft {
 		t.Fatalf("expected SetDraft(true); got %+v", fv.setDraft)
+	}
+}
+
+// ----------------------------------------------------------------------
+// pr wip {on, off} (pg2-4dz88.4.4, fork #3 ruling)
+// ----------------------------------------------------------------------
+
+// setStoreWIP is a small test helper wrapping store.DB.SetWIP against
+// store.DefaultPath() (the caller has already pointed XDG_STATE_HOME at a
+// temp dir via setListStateHome).
+func setStoreWIP(t *testing.T, repo string, num int, wip bool) {
+	t.Helper()
+	db, err := store.Open(store.DefaultPath())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	if err := db.SetWIP(context.Background(), repo, num, wip); err != nil {
+		t.Fatalf("SetWIP: %v", err)
+	}
+}
+
+// getStoreWIP reads back the WIP flag for (repo, num) from the default
+// store path.
+func getStoreWIP(t *testing.T, repo string, num int) bool {
+	t.Helper()
+	db, err := store.Open(store.DefaultPath())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	pr, err := db.GetPR(context.Background(), repo, num)
+	if err != nil || pr == nil {
+		t.Fatalf("GetPR(%s#%d): pr=%v err=%v", repo, num, pr, err)
+	}
+	return pr.WIP
+}
+
+// TestPRWipOn_ReadyPR_ConvertsToDraft pins the acceptance criterion:
+// "Toggling WIP on a currently-ready PR calls SetDraft(true) against the
+// provider exactly once, and the PR reads as draft on the next
+// observation."
+func TestPRWipOn_ReadyPR_ConvertsToDraft(t *testing.T) {
+	resetPRWriteFlags()
+	fv, _ := swapFakes(t)
+	setListStateHome(t)
+	seedListStore(t, store.PullRequest{Repo: "foo/bar", Number: 40, Ownership: "mine", State: "open"})
+	fv.getPRResult = &api.PR{State: "open", Draft: false}
+
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{"pr", "wip", "on", "40", "--repo", "foo/bar"})
+
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("execute: %v (stderr=%s)", err, stderr.String())
+	}
+	if len(fv.setDraft) != 1 || !fv.setDraft[0].draft {
+		t.Fatalf("expected exactly one SetDraft(true) call; got %+v", fv.setDraft)
+	}
+	if !strings.Contains(stdout.String(), "marked WIP") || !strings.Contains(stdout.String(), "converted to draft") {
+		t.Errorf("expected both confirmation lines; got %q", stdout.String())
+	}
+	if !getStoreWIP(t, "foo/bar", 40) {
+		t.Error("expected WIP=true persisted in the store")
+	}
+}
+
+// TestPRWipOn_AlreadyDraftPR_NoUpstreamCall pins the "already draft ->
+// no-op" branch: WIP is still persisted, but no redundant SetDraft call is
+// made and no "converted to draft" line is printed.
+func TestPRWipOn_AlreadyDraftPR_NoUpstreamCall(t *testing.T) {
+	resetPRWriteFlags()
+	fv, _ := swapFakes(t)
+	setListStateHome(t)
+	seedListStore(t, store.PullRequest{Repo: "foo/bar", Number: 41, Ownership: "mine", State: "open"})
+	fv.getPRResult = &api.PR{State: "open", Draft: true}
+
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{"pr", "wip", "on", "41", "--repo", "foo/bar"})
+
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("execute: %v (stderr=%s)", err, stderr.String())
+	}
+	if len(fv.setDraft) != 0 {
+		t.Fatalf("expected NO SetDraft calls for an already-draft PR; got %+v", fv.setDraft)
+	}
+	if strings.Contains(stdout.String(), "converted to draft") {
+		t.Errorf("expected no 'converted to draft' line; got %q", stdout.String())
+	}
+	if !getStoreWIP(t, "foo/bar", 41) {
+		t.Error("expected WIP=true persisted in the store even though no upstream call fired")
+	}
+}
+
+// TestPRWipOn_ProviderSetDraftError_Propagates proves that a failure from
+// the provider's SetDraft call (surfaced through sync.ApplyWIP) is not
+// swallowed: `pr wip on` still errors, even though WIP has already been
+// durably persisted in the store by that point (the operator's stated
+// intent is recorded regardless of a transient upstream failure).
+func TestPRWipOn_ProviderSetDraftError_Propagates(t *testing.T) {
+	resetPRWriteFlags()
+	fv, _ := swapFakes(t)
+	setListStateHome(t)
+	seedListStore(t, store.PullRequest{Repo: "foo/bar", Number: 44, Ownership: "mine", State: "open"})
+	fv.getPRResult = &api.PR{State: "open", Draft: false}
+	fv.genericErr = errors.New("upstream boom")
+
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{"pr", "wip", "on", "44", "--repo", "foo/bar"})
+
+	if err := rootCmd.Execute(); err == nil {
+		t.Fatal("expected the provider's SetDraft error to surface")
+	}
+	if len(fv.setDraft) != 1 {
+		t.Fatalf("expected exactly one attempted SetDraft(true) call; got %+v", fv.setDraft)
+	}
+	if !getStoreWIP(t, "foo/bar", 44) {
+		t.Error("expected WIP=true still persisted despite the upstream failure")
+	}
+}
+
+// TestPRWipOn_MergedOrClosedPR_NoUpstreamCall pins the acceptance
+// criterion: "A merged or closed PR carrying wip=true receives no upstream
+// draft-toggle call."
+func TestPRWipOn_MergedOrClosedPR_NoUpstreamCall(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		pr   api.PR
+	}{
+		{"merged", api.PR{State: "open", Merged: true}},
+		{"closed", api.PR{State: "closed"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resetPRWriteFlags()
+			fv, _ := swapFakes(t)
+			setListStateHome(t)
+			seedListStore(t, store.PullRequest{Repo: "foo/bar", Number: 42, Ownership: "mine", State: "open"})
+			fv.getPRResult = &tc.pr
+
+			var stdout, stderr bytes.Buffer
+			rootCmd.SetOut(&stdout)
+			rootCmd.SetErr(&stderr)
+			rootCmd.SetArgs([]string{"pr", "wip", "on", "42", "--repo", "foo/bar"})
+
+			if err := rootCmd.Execute(); err != nil {
+				t.Fatalf("execute: %v (stderr=%s)", err, stderr.String())
+			}
+			if len(fv.setDraft) != 0 {
+				t.Fatalf("expected NO upstream draft-toggle call for a %s PR; got %+v", tc.name, fv.setDraft)
+			}
+			if !getStoreWIP(t, "foo/bar", 42) {
+				t.Error("expected WIP=true still persisted in the store")
+			}
+		})
+	}
+}
+
+// TestPRWipOn_UnknownPR_Errors: the provider's GetPR failing surfaces as a
+// command error (the unknown-PR error path for `pr wip on`).
+func TestPRWipOn_UnknownPR_Errors(t *testing.T) {
+	resetPRWriteFlags()
+	fv, _ := swapFakes(t)
+	setListStateHome(t)
+	fv.getPRErr = errors.New("not found")
+
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{"pr", "wip", "on", "999", "--repo", "foo/bar"})
+
+	if err := rootCmd.Execute(); err == nil {
+		t.Fatal("expected an error when the provider cannot find the PR")
+	}
+	if len(fv.setDraft) != 0 {
+		t.Fatalf("expected no SetDraft call when the PR fetch failed; got %+v", fv.setDraft)
+	}
+}
+
+// TestPRWipOff_ClearsWIP_NoUpstreamCall pins the acceptance criterion:
+// "Toggling WIP off a currently-draft PR does NOT itself call
+// SetDraft(false) -- a test proves no upstream write happens at the moment
+// of the toggle." `pr wip off` never even fetches the live PR (getPRCalls
+// stays 0), which is the strongest form of that proof.
+func TestPRWipOff_ClearsWIP_NoUpstreamCall(t *testing.T) {
+	resetPRWriteFlags()
+	fv, _ := swapFakes(t)
+	setListStateHome(t)
+	seedListStore(t, store.PullRequest{Repo: "foo/bar", Number: 43, Ownership: "mine", State: "open"})
+	setStoreWIP(t, "foo/bar", 43, true)
+
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{"pr", "wip", "off", "43", "--repo", "foo/bar"})
+
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("execute: %v (stderr=%s)", err, stderr.String())
+	}
+	if len(fv.setDraft) != 0 {
+		t.Fatalf("expected NO SetDraft call; got %+v", fv.setDraft)
+	}
+	if fv.getPRCalls != 0 {
+		t.Fatalf("expected `pr wip off` to never fetch the live PR at all; got %d GetPR calls", fv.getPRCalls)
+	}
+	if !strings.Contains(stdout.String(), "WIP cleared") {
+		t.Errorf("expected a WIP-cleared confirmation line; got %q", stdout.String())
+	}
+	if got := getStoreWIP(t, "foo/bar", 43); got {
+		t.Error("expected WIP=false persisted in the store")
+	}
+}
+
+// TestPRWipOff_UnknownPR_Errors: SetWIP against a PR pg-pr has never
+// observed (no store row) surfaces as a command error (the unknown-PR
+// error path for `pr wip off`), matching pg2-4dz88.4.2's fork #6 ruling
+// (the setter errors rather than silently no-opping on a missing row).
+func TestPRWipOff_UnknownPR_Errors(t *testing.T) {
+	resetPRWriteFlags()
+	_, _ = swapFakes(t)
+	setListStateHome(t)
+
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{"pr", "wip", "off", "999", "--repo", "foo/bar"})
+
+	if err := rootCmd.Execute(); err == nil {
+		t.Fatal("expected an error when no store row exists for this PR")
 	}
 }
 
