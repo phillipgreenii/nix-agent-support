@@ -18,7 +18,7 @@ cap, waits for completion, then tears down every `pr-pool-*` tmux session. Bare
 | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `run`                     | boot the core and run indefinitely, producing + dispatching on a fixed poll interval, until SIGINT/SIGTERM requests shutdown                                      |
 | `run-until-idle`          | boot the core, discover once, drain the queue to idle, then exit (also reachable as `drain`, kept as a deprecated alias)                                          |
-| `drain`                   | run one drain pass (the default when omitted)                                                                                                                     |
+| `drain`                   | deprecated alias for `run-until-idle` (see above); no longer the default — bare `pr-pool` (no subcommand) now requires an explicit subcommand                     |
 | `run-query <role>`        | run a role's discovery query and print matches (read-only)                                                                                                        |
 | `run-role <role> <bead>`  | dispatch one bead through a role, then tear down (smoke test)                                                                                                     |
 | `config --print-defaults` | print the built-in default `config.toml` (a copy-paste start)                                                                                                     |
