@@ -556,7 +556,11 @@ func (e *Engine) evaluateParsed(expr string, sp cmdparse.ShellParse, normalized 
 				judgedLeaf = true
 			}
 			if pc.HasHeredoc {
-				leafResult = hookio.MostRestrictive(leafResult, heredocFloor(expr, stack))
+				// pc.Executable is always "" on this branch (the command-less-leaf
+				// arm), so it can never match heredocStdinSinkFlags — pc is threaded
+				// through anyway for a uniform signature with the call below, and
+				// messageSinkStdinHeredocCleared just no-ops on the empty executable.
+				leafResult = hookio.MostRestrictive(leafResult, heredocFloor(expr, stack, pc))
 				// inCommandVars/inCommandTempDirVars (tc-5h6e), not outerVars/outerTempDirVars:
 				// a substitution inside THIS leaf's heredoc body sees what THIS leaf sees,
 				// which is the already-overlaid value computed above — see evaluateParsed's
@@ -680,7 +684,10 @@ func (e *Engine) evaluateParsed(expr string, sp cmdparse.ShellParse, normalized 
 		// FLOORED at NoOpinion — but the body's own substitutions are still recursed when
 		// the delimiter was unquoted, because those genuinely execute (pg2-r2rf3).
 		if pc.HasHeredoc {
-			cmdResult = hookio.MostRestrictive(cmdResult, heredocFloor(expr, stack))
+			// pc here is the leaf's own real ParsedCommand (Executable/Args/Heredocs
+			// populated) — the site that lets heredocFloor test the pg2-9zrpa
+			// message-sink carve-out.
+			cmdResult = hookio.MostRestrictive(cmdResult, heredocFloor(expr, stack, pc))
 			cmdResult = hookio.MostRestrictive(cmdResult,
 				e.foldSubstitutionScan(pc.UnquotedHeredocSubstitutions(), normalized, stack, origin, inCommandVars, inCommandTempDirVars))
 		}
@@ -889,6 +896,64 @@ func unparseableExpressionFloor(sp cmdparse.ShellParse) hookio.RuleResult {
 // "nothing to add" Approve identity (the same pattern every other neutral seed in this
 // file uses) rather than replacing a real verdict with one of its own.
 //
+// # pg2-9zrpa — THE SECOND NARROWING
+//
+// heredocFloor grows one more exception, structurally DIFFERENT from pg2-u65fu's
+// rather than an extension of it: a heredoc that is fed directly to a MESSAGE-SINK
+// PROCESS's own stdin (`bd comment <id> --stdin <<'EOF' ... EOF`), not nested inside
+// a `$( )` whose result becomes an argument. `stack` is empty here — there is no
+// enclosing substitution, so recursedSubstitutionHeredocCleared structurally cannot
+// fire for this shape, whatever cmdparse says about the body — so this is a second,
+// independent condition checked ALONGSIDE it (messageSinkStdinHeredocCleared),
+// never a relaxation of pg2-u65fu's own stack check.
+//
+// Operator ruling, 2026-08-24 (bead pg2-9zrpa, itself discovered from pg2-mdn4g):
+// implement this carve-out, scoped as narrowly as pg2-u65fu's — quoted (non-
+// expanding) delimiter, an allowlisted message-sink reader, no write flag — and
+// never as a blanket "message-sink command" bypass.
+//
+// WHY THAT TRIPLE AND NOTHING LESS.
+//
+//   - The delimiter must be QUOTED for the same reason pg2-u65fu's is: an unquoted
+//     body's `$(...)` genuinely expands before bash ever hands the bytes to the
+//     sink's stdin, so an unquoted `bd comment id --stdin <<EOF ... EOF` can still
+//     smuggle a live command substitution — the sink never executing its stdin does
+//     not make an expanding delimiter safe, it only means THIS floor is not the
+//     guard that would catch it (foldSubstitutionScan's unquoted-body recursion is,
+//     unaffected by this carve-out). Requiring Quoted keeps this exception narrow
+//     even though, for `bd` specifically, the sink not executing stdin makes the
+//     condition moot today — a FUTURE sink might not be so lucky, and consistency
+//     with pg2-u65fu's own reasoning is cheap to keep.
+//   - The reader must be on an ALLOWLIST (today, `bd` only) for the same reason
+//     heredocReaderAllowlist is scoped to the corpus-measured `cat`/`/bin/cat`
+//     spellings rather than generalised to every read-only tool: widening is
+//     ADDITIVE IN PRINCIPLE but UNMEASURED, and this repo's convention (messageFlags'
+//     own doc, argflags.go) is to scope to what the corpus actually carries and earn
+//     any widening with its own replay evidence.
+//   - The leaf's Args must carry the SPECIFIC flag that tells the sink to read a
+//     message from stdin (today, `bd`'s `--stdin` only — NOT the bead's own
+//     hypothetical `--body-file -`, which is unmeasured and therefore excluded).
+//     This is what makes the carve-out about DATA CONSUMED AS A MESSAGE rather than
+//     "any heredoc that happens to precede an allowlisted command": `bd comment <id>
+//     <<'EOF' ... EOF` with no `--stdin` still floors, because without the flag
+//     bd's own CLI does not read the heredoc as a message at all — the bytes land on
+//     an fd bd never consults for that subcommand, and this floor has no way to know
+//     that from argv alone without the flag as the explicit signal.
+//
+// Together, the allowlisted sink AND the explicit flag are what keep this narrow:
+// either alone would be a materially bigger bypass — the sink name alone would
+// approve a heredoc on `bd` even when it is not being read as a message at all, and
+// the flag alone (checked against a sink that is not on the allowlist) would trust
+// an unmeasured command's argv contract. The intersection is comparably narrow to
+// pg2-u65fu's own pairing.
+//
+// NOT MODELLED, and stated as a known, accepted limitation rather than silently
+// skipped: this codebase's cmdparse.Heredoc / hookio.Redirection types record no
+// target FILE DESCRIPTOR at all (no representation of `3<<EOF` vs a plain `<<EOF`),
+// so there is nothing here to check that the heredoc actually lands on fd 0 — the
+// allowlisted-sink + explicit-flag pair is the whole of what this floor can verify,
+// and it is what the corpus rows this bead re-verifies actually carry.
+//
 // WHAT DOES NOT CHANGE, and why the two conditions are each load-bearing:
 //
 //   - A TOP-LEVEL heredoc (`cat <<'EOF' ... EOF` typed directly — `stack` is empty,
@@ -915,11 +980,31 @@ func unparseableExpressionFloor(sp cmdparse.ShellParse) hookio.RuleResult {
 //     which floors it to a decisive Ask via commandSubstitutionFloor exactly as it
 //     already does for `seq`/`mktemp`. This function does not need its own copy of
 //     that guard; it only has to stop MASKING the verdict that guard is built to see.
-func heredocFloor(expr string, stack []hookio.StackFrame) hookio.RuleResult {
+//   - A top-level heredoc into a command NOT on heredocStdinSinkFlags' key set still
+//     floors — `cat --stdin <<'EOF' ... EOF` is not `bd`, so it is unaffected by this
+//     carve-out (and `cat` taking a literal `--stdin` argument is itself contrived;
+//     the point is the sink identity, not the flag spelling).
+//   - A top-level heredoc into `bd` WITHOUT `--stdin` still floors — the flag is what
+//     establishes the data is actually consumed as a MESSAGE, not merely incidental
+//     on the leaf's stdin; `bd comment <id> <<'EOF' ... EOF` with no `--stdin` gets no
+//     help from this carve-out.
+//   - An UNQUOTED heredoc into `bd --stdin` still floors, unchanged RCE reasoning:
+//     quoting only suppresses expansion (bd does not execute its stdin either way,
+//     so this condition is moot for `bd` today), but the condition is kept for
+//     consistency with pg2-u65fu's pairing and because a future sink added to
+//     heredocStdinSinkFlags might not be so lucky.
+func heredocFloor(expr string, stack []hookio.StackFrame, pc cmdparse.ParsedCommand) hookio.RuleResult {
 	if recursedSubstitutionHeredocCleared(expr, stack) {
 		return hookio.RuleResult{
 			Decision: hookio.Approve,
 			Reason:   "heredoc body is a recursed command-substitution body already cleared by the static substitution allowlist (pg2-u65fu)",
+			Module:   "engine",
+		}
+	}
+	if messageSinkStdinHeredocCleared(pc) {
+		return hookio.RuleResult{
+			Decision: hookio.Approve,
+			Reason:   "heredoc body is fed to an allowlisted message-sink command's --stdin, already cleared by the static message-sink allowlist (pg2-9zrpa)",
 			Module:   "engine",
 		}
 	}
@@ -961,6 +1046,81 @@ func recursedSubstitutionHeredocCleared(expr string, stack []hookio.StackFrame) 
 		return false
 	}
 	return cmdparse.ClassifySubstitutionBody(expr) == cmdparse.SubstitutionCleared
+}
+
+// heredocStdinSinkFlags maps a message-sink command's basename to the flag that
+// tells IT to read its message from stdin — the pg2-9zrpa counterpart to
+// cmdparse's heredocReaderAllowlist (which vouches for a substitution-body READER
+// identity), scoped the same way: to exactly what the corpus measured.
+//
+// SCOPED TO `bd`'s `--stdin` ONLY, deliberately, rather than generalised to every
+// messageFlags command (argflags.go) or to the bead's own hypothetical
+// `--body-file -` spelling. pg2-9zrpa's motivating corpus rows are all
+// `bd comment/update/create ... --stdin <<'EOF' ... EOF`; `--body-file -` was
+// floated in that bead's text as a hypothetical, never observed, and this
+// repo's convention (heredocReaderAllowlist's own doc; messageFlags' "the set of
+// commands is closed" doc) is to admit only a corpus-measured shape and widen
+// later with its own replay evidence — never preemptively. Widening to `git`,
+// `gh`, or a different flag spelling needs its own measured case, not a guess
+// added here.
+var heredocStdinSinkFlags = map[string]map[string]bool{
+	"bd": {"--stdin": true},
+}
+
+// messageSinkStdinHeredocCleared reports whether EVERY heredoc extent on pc is
+// admissible as a message-sink command's stdin payload — the pg2-9zrpa carve-out,
+// checked ALONGSIDE (never instead of) recursedSubstitutionHeredocCleared in
+// heredocFloor. See heredocFloor's own "pg2-9zrpa — THE SECOND NARROWING" doc for
+// why this is a second, independent condition rather than a widening of the first.
+//
+// FOUR CONDITIONS, ALL REQUIRED — mirrors cmdparse.heredocClearedForSubstitution's
+// own shape (quoted delimiter + allowlisted reader), plus the two pg2-9zrpa adds
+// (the explicit stdin flag, and the pre-existing no-write-flag screen):
+//
+//  1. pc.HasHeredoc AND len(pc.Heredocs) > 0 — a HERESTRING (`<<<`) sets HasHeredoc
+//     but records no Heredocs entry (heredoc.go's own doc), so there is no extent
+//     to admit and an empty slice must refuse rather than vacuously clearing via a
+//     no-op loop below (same reasoning as heredocClearedForSubstitution's doc).
+//  2. EVERY heredoc in pc.Heredocs has Quoted == true. One unquoted extent anywhere
+//     on the leaf refuses the WHOLE leaf — mirrors heredocClearedForSubstitution's
+//     own multi-heredoc rule (`cmd <<A <<B` needs both quoted) — because an
+//     unquoted body's `$(...)` really expands regardless of which redirection on
+//     the leaf it sits on.
+//  3. pc.Executable is a key of heredocStdinSinkFlags (today, `bd` only).
+//  4. pc.Args carries the flag that map names for pc.Executable (today, `--stdin`
+//     only) — via cmdparse.HasAnyFlag, so the glued `--stdin=...` spelling (not a
+//     real bd spelling today, but consistent with every other flag check in this
+//     tree) cannot hide from it either.
+//
+// PLUS the pre-existing no-write-flag screen every other clearance in this tree
+// carries: cmdparse.MutatingFlags["bd"] has no entry today, so this is a no-op
+// safety net rather than a live restriction — matching how yq's write-flag screen
+// was added defensively before yq actually needed one (pipesink.go's own doc).
+//
+// NOT CHECKED, and deliberately: which file descriptor the heredoc targets.
+// cmdparse.Heredoc / hookio.Redirection record no target fd at all (no
+// representation of `3<<EOF` vs a plain `<<EOF`), so this function has nothing to
+// test there — see heredocFloor's own "NOT MODELLED" paragraph.
+func messageSinkStdinHeredocCleared(pc cmdparse.ParsedCommand) bool {
+	if !pc.HasHeredoc || len(pc.Heredocs) == 0 {
+		return false
+	}
+	for _, hd := range pc.Heredocs {
+		if !hd.Quoted {
+			return false
+		}
+	}
+	sinkFlags, ok := heredocStdinSinkFlags[pc.Executable]
+	if !ok {
+		return false
+	}
+	if !cmdparse.HasAnyFlag(pc.Args, sinkFlags) {
+		return false
+	}
+	if cmdparse.HasAnyFlag(pc.Args, cmdparse.MutatingFlags[pc.Executable]) {
+		return false
+	}
+	return true
 }
 
 // evaluateHeredocBodies and evaluateSubstitutionsIn — the two ENGINE TEXT HOPS

@@ -2365,6 +2365,108 @@ func TestIntegration_HeredocExtents(t *testing.T) {
 	}
 }
 
+// TestIntegration_HeredocStdinMessageSinkCarveOut pins the pg2-9zrpa carve-out —
+// heredocFloor's SECOND narrowing, structurally distinct from pg2-u65fu's
+// substitution-body one: a TOP-LEVEL heredoc (`stack` empty, no enclosing
+// substitution) fed directly to an allowlisted message-sink command's own stdin via
+// an explicit flag (today, `bd ... --stdin`).
+//
+// Unlike TestIntegration_HeredocExtents (whose own loop asserts every case there is
+// NEVER Approve — that is the pre-pg2-9zrpa invariant, still true for every case
+// that table covers), the whole point of this test is that ONE specific, narrow
+// shape now legitimately reaches Approve. It is kept as its own function rather
+// than folded into that table's blanket check for exactly that reason.
+//
+// Four things must hold, matching messageSinkStdinHeredocCleared's own four
+// conditions (engine.go's doc): quoted delimiter, allowlisted sink (`bd`),
+// explicit `--stdin`, and no write flag (today a no-op since MutatingFlags["bd"]
+// is empty). Missing ANY one of the first three must still floor to NoOpinion —
+// heredocFloor contributes nothing more, and the rest of the chain either has
+// nothing to say (bd's own leaf is unconditionally approved by build-tools, so a
+// case that satisfies all conditions resolves Approve) or is a deliberately
+// unrelated command with no rule to approve it at all.
+func TestIntegration_HeredocStdinMessageSinkCarveOut(t *testing.T) {
+	t.Setenv("WORKSPACE_ROOT", "/Users/testuser/workspace")
+	projectRoot := "/Users/testuser/workspace/my-project"
+	cwd := projectRoot
+	eng := buildFullEngine(projectRoot, cwd)
+
+	decide := func(command string) hookio.RuleResult {
+		return eng.EvaluateHook(&hookio.HookInput{
+			ToolName:  "Bash",
+			ToolInput: makeBashJSON(command),
+			CWD:       cwd,
+		})
+	}
+
+	tests := []struct {
+		name    string
+		command string
+		want    hookio.Decision
+	}{
+		// The carve-out's own positive case: quoted delimiter, bd, --stdin present.
+		// Nothing left for heredocFloor to object to, so bd's own leaf resolves
+		// through build-tools' unconditional bd approval (baseApprovedTools).
+		{
+			"quoted heredoc into bd --stdin resolves through the rest of the chain",
+			"bd comment abc-1 --stdin <<'EOF'\nhello world\nEOF",
+			hookio.Approve,
+		},
+		// Same sink and flag, UNQUOTED delimiter: condition 2 fails, so this floors
+		// exactly like any other unquoted-but-otherwise-eligible body — unchanged
+		// RCE reasoning (quoting only suppresses expansion; kept for consistency
+		// with pg2-u65fu's own pairing even though bd never executes its stdin).
+		{
+			"same but unquoted delimiter still floors",
+			"bd comment abc-1 --stdin <<EOF\nhello world\nEOF",
+			hookio.NoOpinion,
+		},
+		// Quoted and flagged, but the sink is NOT on heredocStdinSinkFlags — `cat`
+		// is on the SUBSTITUTION reader allowlist (heredocReaderAllowlist) but that
+		// is a different list for a different clearance path; it carries no entry
+		// in heredocStdinSinkFlags, so this floors.
+		{
+			"quoted heredoc into a non-allowlisted sink still floors",
+			"cat --stdin <<'EOF'\nhello world\nEOF",
+			hookio.NoOpinion,
+		},
+		// Quoted heredoc into bd, but WITHOUT --stdin: the flag is what establishes
+		// the data is consumed as a MESSAGE rather than merely present on the
+		// leaf's stdin, so its absence still floors — proves the flag check is
+		// load-bearing, not just the command name.
+		{
+			"quoted heredoc into bd without --stdin still floors",
+			"bd comment abc-1 <<'EOF'\nhello world\nEOF",
+			hookio.NoOpinion,
+		},
+		// Multi-heredoc leaf, ONE quoted and one not, both feeding a bd --stdin
+		// invocation (`cmd <<A <<B` attaches both extents to the same leaf,
+		// mirroring cmdparse.heredocClearedForSubstitution's own multi-heredoc
+		// rule): one unquoted extent anywhere on the leaf refuses the WHOLE leaf.
+		{
+			"multi-heredoc leaf with one unquoted extent still floors",
+			"bd comment abc-1 --stdin <<'A' <<B\nfoo\nA\nbar\nB",
+			hookio.NoOpinion,
+		},
+		// The same shape with BOTH extents quoted clears, confirming the "every
+		// heredoc must be quoted" rule is doing real work above rather than
+		// accidentally passing because of the leaf's first extent only.
+		{
+			"multi-heredoc leaf with both extents quoted clears",
+			"bd comment abc-1 --stdin <<'A' <<'B'\nfoo\nA\nbar\nB",
+			hookio.Approve,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := decide(tt.command)
+			if got.Decision != tt.want {
+				t.Errorf("EvaluateHook(%q) = %v (%s / %s), want %v", tt.command, got.Decision, got.Module, got.Reason, tt.want)
+			}
+		})
+	}
+}
+
 // TestIntegration_UnparseableSubstitutionNeverApproves is the pg2-wguam guard: a
 // P0 live auto-approve hole where ONE apostrophe of English prose turned `abstain`
 // into `allow`.
