@@ -1,12 +1,14 @@
 package snapshot
 
 import (
+	"strings"
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/agentregistry"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/cirollup"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/freshness"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/ownership"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/prdeps"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/beads"
@@ -75,6 +77,16 @@ type BuilderInput struct {
 	// the human-default filtering to the CLI layer that owns the flag
 	// (cmd/pg-pr/open.go's selectRows) — see that file's doc for the rationale.
 	IncludeHidden bool
+	// TrunkRefs are the ref names that mean "bottom of a chain" for the
+	// whole-set PR-dependency pass (prdeps.DeriveWithNativeStack; pg2-4dz88.3.7):
+	// a PR whose base ref names one of these is not stacked on anything.
+	// Deliberately a flat, repo-unscoped UNION rather than a
+	// repo-keyed map — prdeps.Input.TrunkRefs's own doc prescribes exactly
+	// this shape ("the same shape snapshot.BuilderInput.WatchLabels uses"),
+	// and no per-repo config for it exists anywhere yet (this is the first
+	// consumer). Nil/empty is valid and simply means no ref is recognised as
+	// trunk, matching prdeps.Input.TrunkRefs's own documented default.
+	TrunkRefs []string
 }
 
 // Match-reason strings on TeamRow.MatchReason, explaining why a PR is in the
@@ -191,6 +203,15 @@ func Build(in BuilderInput) *Snapshot {
 	for repo, pats := range in.ExcludedChecksByRepo {
 		excluders[repo] = cirollup.NewExcluder(pats)
 	}
+	// The PR-dependency pass (pg2-4dz88.3.7) is a WHOLE-SET pass, computed once
+	// here over every PRInput regardless of admission below — a PR's place in a
+	// stack does not depend on whether it ends up in Mine, Team, or dropped
+	// (hidden) — and then looked up per row inside buildMineRow/buildTeamRow.
+	depGraph := prdeps.DeriveWithNativeStack(prdeps.Input{
+		PRs:       toPRDeps(in.PRs),
+		TrunkRefs: in.TrunkRefs,
+	})
+	unresolvedRefNames := unresolvedUpstreamRefNames(depGraph)
 	// mergedMine collects retained merged-PR-of-mine rows separately so they
 	// can be appended AFTER every active Mine row below — "sort below every
 	// open/active PR" (pg2-ew4kf). Kept in in.PRs iteration order (repo then
@@ -208,6 +229,7 @@ func Build(in BuilderInput) *Snapshot {
 		}
 		reasons := matchReasons(p, teamSet, in.WatchLabels, in.Self)
 		excl := excluders[p.PR.Repo]
+		deps := dependencyFactsFor(depGraph, unresolvedRefNames, prdeps.Ref{Repo: p.PR.Repo, Number: p.PR.Number})
 		switch {
 		case p.Ownership.ActsAsMine():
 			// Retention (pg2-ew4kf): a merged PR is deliberately gated on
@@ -221,12 +243,12 @@ func Build(in BuilderInput) *Snapshot {
 				if !WithinMergedRetention(p.PR.MergedAt, in.GeneratedAt) {
 					continue // merged more than MergedRetentionWindow ago: drop
 				}
-				row := buildMineRow(p, in.Registry, excl)
+				row := buildMineRow(p, in.Registry, excl, deps)
 				row.Merged = true
 				mergedMine = append(mergedMine, row)
 				continue
 			}
-			out.Mine = append(out.Mine, buildMineRow(p, in.Registry, excl))
+			out.Mine = append(out.Mine, buildMineRow(p, in.Registry, excl, deps))
 		case !p.PR.Draft && len(reasons) > 0:
 			// "PRs to Review": a non-mine, non-draft PR that STILL qualifies — it
 			// carries at least one live match reason (team-authored ∪ review-requested
@@ -242,7 +264,7 @@ func Build(in BuilderInput) *Snapshot {
 			// match-reason change. Reasons are still SOURCED from ingest (detector.go's
 			// buckets, B3); the builder only re-checks they hold. Others' drafts and
 			// now-reasonless PRs fall through and are excluded.
-			out.Team = append(out.Team, buildTeamRow(p, in.Registry, in.Self, reasons, excl))
+			out.Team = append(out.Team, buildTeamRow(p, in.Registry, in.Self, reasons, excl, deps))
 		}
 	}
 	// Retained merged rows sort BELOW every active Mine row (pg2-ew4kf).
@@ -250,7 +272,7 @@ func Build(in BuilderInput) *Snapshot {
 	return out
 }
 
-func buildMineRow(p PRInput, reg *agentregistry.Registry, excl *cirollup.Excluder) MineRow {
+func buildMineRow(p PRInput, reg *agentregistry.Registry, excl *cirollup.Excluder, deps dependencyFacts) MineRow {
 	appr := classifyApprovals(p, reg)
 	return MineRow{
 		Repo:               p.PR.Repo,
@@ -273,13 +295,18 @@ func buildMineRow(p PRInput, reg *agentregistry.Registry, excl *cirollup.Exclude
 		HasConflicts:       p.PR.HasConflict(),
 		Hidden:             p.Hidden,
 		HiddenReason:       p.HiddenReason,
+
+		DependencyBlockedBy:              deps.BlockedBy,
+		DependencyBlockedByUnresolvedRef: deps.BlockedByUnresolvedRef,
+		DependencyUnblockedFrom:          deps.UnblockedFrom,
+		DependencyOrderingKey:            deps.OrderingKey,
 	}
 }
 
 // buildTeamRow builds a "PRs to Review" row. reasons is the non-empty match-reason
 // set Build already computed (and gated membership on), so it is threaded in rather
 // than recomputed here.
-func buildTeamRow(p PRInput, reg *agentregistry.Registry, self string, reasons []string, excl *cirollup.Excluder) TeamRow {
+func buildTeamRow(p PRInput, reg *agentregistry.Registry, self string, reasons []string, excl *cirollup.Excluder, deps dependencyFacts) TeamRow {
 	appr := classifyApprovals(p, reg)
 	// Attention is STORE-derived through the shared predicate — the SAME function
 	// and SAME inputs the bead projector uses, so the dashboard signal and the
@@ -305,7 +332,110 @@ func buildTeamRow(p PRInput, reg *agentregistry.Registry, self string, reasons [
 		HasConflicts:    p.PR.HasConflict(),
 		Hidden:          p.Hidden,
 		HiddenReason:    p.HiddenReason,
+
+		DependencyBlockedBy:              deps.BlockedBy,
+		DependencyBlockedByUnresolvedRef: deps.BlockedByUnresolvedRef,
+		DependencyUnblockedFrom:          deps.UnblockedFrom,
+		DependencyOrderingKey:            deps.OrderingKey,
 	}
+}
+
+// dependencyFacts is one PR's projection of prdeps.DeriveWithNativeStack's
+// Graph onto the FACT + ordering-key fields TeamRow/MineRow carry (pg2-4dz88.3.7).
+// See those fields' doc comments (on TeamRow, the canonical copy) for the full
+// contract; this struct exists only so buildMineRow/buildTeamRow can take the
+// same four values as one parameter rather than four.
+type dependencyFacts struct {
+	BlockedBy              string
+	BlockedByUnresolvedRef string
+	UnblockedFrom          string
+	OrderingKey            int
+}
+
+// toPRDeps projects the snapshot's PRInput set into the minimal prdeps.PR
+// shape DeriveWithNativeStack consumes. State is re-derived with the SAME
+// merged/draft precedence internal/sync's stateForPR uses (Merged wins,
+// then Draft, then the raw GitHub State) rather than passed through
+// PRInput.PR.State as-is: that field carries GitHub's raw open/closed enum,
+// not the merged/draft-aware spelling prdeps.IsOpen/isMerged compare against.
+func toPRDeps(prs []PRInput) []prdeps.PR {
+	out := make([]prdeps.PR, len(prs))
+	for i, p := range prs {
+		out[i] = prdeps.PR{
+			Repo:               p.PR.Repo,
+			Number:             p.PR.Number,
+			Head:               p.PR.Branch,
+			Base:               p.PR.Base,
+			State:              prdepsState(p.PR),
+			NativeUpstreamHead: p.PR.StackUpstreamHeadRefName,
+		}
+	}
+	return out
+}
+
+// prdepsState mirrors internal/sync's stateForPR spelling (merged | draft |
+// open | closed), which prdeps.PR.State's doc requires. It cannot call that
+// function directly (internal/sync is a different package and importing it
+// here would invert the dependency the sync layer already has on
+// internal/snapshot), so the same three-way precedence is duplicated: a
+// Merged PR reads "merged" regardless of its raw State; an open, Draft PR
+// reads "draft"; anything else reports its raw State lower-cased.
+func prdepsState(p api.PR) string {
+	if p.Merged {
+		return "merged"
+	}
+	if strings.EqualFold(p.State, "open") {
+		if p.Draft {
+			return "draft"
+		}
+		return "open"
+	}
+	return strings.ToLower(p.State)
+}
+
+// unresolvedUpstreamRefNames indexes DiagnosticUpstreamOutOfSet's RefName by
+// the blocked PR's Ref. Graph.Node carries no field naming the target ref for
+// ResolutionUpstreamOutOfSet (Upstream/MergedUpstream both stay the zero Ref —
+// there is no live PR to name), so the ref name that makes
+// DependencyBlockedByUnresolvedRef useful only exists on the accompanying
+// Diagnostic. Each blocked PR contributes at most one
+// DiagnosticUpstreamOutOfSet (native.go's per-PR switch has exactly one arm
+// that appends it), so the map never overwrites an entry.
+func unresolvedUpstreamRefNames(g prdeps.Graph) map[prdeps.Ref]string {
+	out := make(map[prdeps.Ref]string, len(g.Diagnostics))
+	for _, d := range g.Diagnostics {
+		if d.Kind == prdeps.DiagnosticUpstreamOutOfSet && len(d.Refs) > 0 {
+			out[d.Refs[0]] = d.RefName
+		}
+	}
+	return out
+}
+
+// dependencyFactsFor looks up ref's node in g and projects it to the row-level
+// facts, WITHOUT re-deriving anything the Graph already decided: the
+// resolution kind, the live upstream ref, the merged-upstream ref, and the
+// ordering key are all read straight off the Node (see prdeps.Node's doc).
+// A ref absent from g (should not happen — g is built from the same PR set
+// the caller iterates) or resolved to anything other than ResolutionUpstream /
+// ResolutionUpstreamOutOfSet / ResolutionUnblocked returns the zero value,
+// which is exactly "no relation" — the unchanged-row-shape requirement for
+// ResolutionTrunk and the other no-relation resolutions (Foreign, Self,
+// Unresolvable).
+func dependencyFactsFor(g prdeps.Graph, unresolvedRefNames map[prdeps.Ref]string, ref prdeps.Ref) dependencyFacts {
+	node, ok := g.Lookup(ref)
+	if !ok {
+		return dependencyFacts{}
+	}
+	f := dependencyFacts{OrderingKey: -node.Depth}
+	switch node.Resolution {
+	case prdeps.ResolutionUpstream:
+		f.BlockedBy = node.Upstream.String()
+	case prdeps.ResolutionUpstreamOutOfSet:
+		f.BlockedByUnresolvedRef = unresolvedRefNames[ref]
+	case prdeps.ResolutionUnblocked:
+		f.UnblockedFrom = node.MergedUpstream.String()
+	}
+	return f
 }
 
 func isTeam(author string, team map[string]struct{}) bool {

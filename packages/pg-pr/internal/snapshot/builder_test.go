@@ -3,11 +3,13 @@ package snapshot
 import (
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/agentregistry"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/ownership"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/prdeps"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/beads"
@@ -1193,7 +1195,7 @@ func TestBuildNilRegistrySkipsRegexMiningEntirely(t *testing.T) {
 func TestBuildMineRowMergeReminder(t *testing.T) {
 	mk := func(state string, auto bool) MineRow {
 		p := PRInput{PR: api.PR{Repo: "o/n", Number: 1, Author: "me", MergeStateStatus: state, AutoMergeEnabled: auto}, Ownership: ownership.Mine}
-		return buildMineRow(p, nil, nil)
+		return buildMineRow(p, nil, nil, dependencyFacts{})
 	}
 	if !mk("CLEAN", false).NeedsMergeReminder {
 		t.Errorf("CLEAN + no automerge should need reminder")
@@ -1335,6 +1337,391 @@ func TestBuild_UnhiddenPR_NeverAffectedByIncludeHidden(t *testing.T) {
 		if len(snap.Mine) != 1 || snap.Mine[0].Hidden {
 			t.Fatalf("IncludeHidden=%v: an unhidden PR must always be present and never carry Hidden=true, got %+v",
 				includeHidden, snap.Mine)
+		}
+	}
+}
+
+// --- PR-dependency annotation (pg2-4dz88.3.7) ---
+//
+// Build now calls prdeps.DeriveWithNativeStack ONCE over the whole in.PRs
+// set and projects the result onto MineRow/TeamRow's Dependency* fields. The
+// tests below exercise each prdeps.Resolution the annotation distinguishes:
+// Trunk (no relation — row unchanged), Upstream (the ranking effect), and
+// the two DeriveWithNativeStack-only outcomes, UpstreamOutOfSet (marker) and
+// Unblocked (merged-middle).
+
+// TestBuild_DependencyAnnotation_TrunkUnchanged is acceptance criterion #2:
+// a PR with no derivable relation (ResolutionTrunk: its base ref is a
+// configured trunk ref, so it sits at the bottom of a chain or is
+// standalone) must be byte-for-byte unchanged from before this bead — every
+// Dependency* field reads as its zero value, which is exactly what
+// `omitempty` drops from the wire.
+func TestBuild_DependencyAnnotation_TrunkUnchanged(t *testing.T) {
+	snap := Build(BuilderInput{
+		Self:      "alice",
+		TrunkRefs: []string{"main"},
+		PRs: []PRInput{{
+			PR:        api.PR{Repo: "o/r", Number: 1, Author: "alice", Branch: "feat-x", Base: "main", State: "open"},
+			Ownership: ownership.Mine,
+		}},
+	})
+	if len(snap.Mine) != 1 {
+		t.Fatalf("want 1 mine row, got %d", len(snap.Mine))
+	}
+	row := snap.Mine[0]
+	if row.DependencyBlockedBy != "" || row.DependencyBlockedByUnresolvedRef != "" ||
+		row.DependencyUnblockedFrom != "" || row.DependencyOrderingKey != 0 {
+		t.Errorf("a ResolutionTrunk row must carry the zero value on every dependency field, got %+v", row)
+	}
+}
+
+// TestBuild_DependencyAnnotation_NoRelationResolutionsAllReadIdentically
+// widens the same claim to EVERY prdeps.Resolution that means "no live
+// relation to rank or mark" — not just ResolutionTrunk, but also
+// ResolutionForeign (a repo-qualified base) and ResolutionSelf (a
+// self-referential base): none of them is individually called out by the
+// acceptance criteria, but the row-level annotation must not distinguish any
+// of them from the unchanged-row-shape baseline either.
+func TestBuild_DependencyAnnotation_NoRelationResolutionsAllReadIdentically(t *testing.T) {
+	tests := []struct {
+		name string
+		pr   api.PR
+	}{
+		{"foreign base (repo-qualified)", api.PR{Repo: "o/r", Number: 1, Author: "alice", Branch: "feat-x", Base: "other:main", State: "open"}},
+		{"self base", api.PR{Repo: "o/r", Number: 1, Author: "alice", Branch: "feat-x", Base: "feat-x", State: "open"}},
+		{"empty base", api.PR{Repo: "o/r", Number: 1, Author: "alice", Branch: "feat-x", Base: "", State: "open"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			snap := Build(BuilderInput{
+				Self: "alice",
+				PRs:  []PRInput{{PR: tc.pr, Ownership: ownership.Mine}},
+			})
+			if len(snap.Mine) != 1 {
+				t.Fatalf("want 1 mine row, got %d", len(snap.Mine))
+			}
+			row := snap.Mine[0]
+			if row.DependencyBlockedBy != "" || row.DependencyBlockedByUnresolvedRef != "" ||
+				row.DependencyUnblockedFrom != "" || row.DependencyOrderingKey != 0 {
+				t.Errorf("a no-relation row must carry the zero value on every dependency field, got %+v", row)
+			}
+		})
+	}
+}
+
+// TestBuild_DependencyAnnotation_RankingEffect is acceptance criterion #3
+// (the ranking effect) over a three-deep stack, admitted to Team via
+// team-authored: each PR's DependencyBlockedBy names its IMMEDIATE upstream
+// (never a transitive one), and DependencyOrderingKey strictly decreases
+// going up the stack — proving ruling #1 ("rank lower, don't suppress") in a
+// form a later multi-key comparator can consume directly.
+func TestBuild_DependencyAnnotation_RankingEffect(t *testing.T) {
+	snap := Build(BuilderInput{
+		Self:        "alice",
+		TeamMembers: []string{"bob"},
+		TrunkRefs:   []string{"main"},
+		PRs: []PRInput{
+			{PR: api.PR{Repo: "o/r", Number: 1, Author: "bob", Branch: "feat-a", Base: "main", State: "open"}, Ownership: ownership.Team},
+			{PR: api.PR{Repo: "o/r", Number: 2, Author: "bob", Branch: "feat-b", Base: "feat-a", State: "open"}, Ownership: ownership.Team},
+			{PR: api.PR{Repo: "o/r", Number: 3, Author: "bob", Branch: "feat-c", Base: "feat-b", State: "open"}, Ownership: ownership.Team},
+		},
+	})
+	got := map[int]TeamRow{}
+	for _, r := range snap.Team {
+		got[r.Number] = r
+	}
+	if len(got) != 3 {
+		t.Fatalf("want 3 team rows, got %+v", snap.Team)
+	}
+	row1, row2, row3 := got[1], got[2], got[3]
+
+	if row1.DependencyBlockedBy != "" || row1.DependencyOrderingKey != 0 {
+		t.Errorf("bottom-of-chain row #1 must carry no blocking relation, got %+v", row1)
+	}
+	if row2.DependencyBlockedBy != "o/r#1" {
+		t.Errorf("row #2 DependencyBlockedBy = %q, want %q", row2.DependencyBlockedBy, "o/r#1")
+	}
+	if row3.DependencyBlockedBy != "o/r#2" {
+		t.Errorf("row #3 DependencyBlockedBy = %q, want %q (its IMMEDIATE upstream, not #1)", row3.DependencyBlockedBy, "o/r#2")
+	}
+	if !(row3.DependencyOrderingKey < row2.DependencyOrderingKey && row2.DependencyOrderingKey < row1.DependencyOrderingKey) {
+		t.Fatalf("ordering keys must strictly decrease going up the stack: row1=%d row2=%d row3=%d",
+			row1.DependencyOrderingKey, row2.DependencyOrderingKey, row3.DependencyOrderingKey)
+	}
+	if row1.DependencyOrderingKey != 0 || row2.DependencyOrderingKey != -1 || row3.DependencyOrderingKey != -2 {
+		t.Errorf("ordering keys = %d/%d/%d, want 0/-1/-2", row1.DependencyOrderingKey, row2.DependencyOrderingKey, row3.DependencyOrderingKey)
+	}
+}
+
+// TestBuild_DependencyAnnotation_MineRowRankingEffect is the MineRow half of
+// the ranking-effect assertion — buildMineRow and buildTeamRow map the
+// dependencyFacts independently, so a mapping mistake in one is invisible in
+// the other's test (same rationale as TestBuildTeamRowApproverCounts above).
+func TestBuild_DependencyAnnotation_MineRowRankingEffect(t *testing.T) {
+	snap := Build(BuilderInput{
+		Self: "alice",
+		PRs: []PRInput{
+			{PR: api.PR{Repo: "o/r", Number: 7, Author: "alice", Branch: "feat-g", Base: "main", State: "open"}, Ownership: ownership.Mine},
+			{PR: api.PR{Repo: "o/r", Number: 8, Author: "alice", Branch: "feat-h", Base: "feat-g", State: "open"}, Ownership: ownership.Mine},
+		},
+	})
+	got := map[int]MineRow{}
+	for _, r := range snap.Mine {
+		got[r.Number] = r
+	}
+	if len(got) != 2 {
+		t.Fatalf("want 2 mine rows, got %+v", snap.Mine)
+	}
+	if got[8].DependencyBlockedBy != "o/r#7" {
+		t.Errorf("MineRow #8 DependencyBlockedBy = %q, want %q", got[8].DependencyBlockedBy, "o/r#7")
+	}
+	if got[8].DependencyOrderingKey >= got[7].DependencyOrderingKey {
+		t.Errorf("MineRow #8 (waiting on #7) must have a strictly lower ordering key: got8=%d got7=%d",
+			got[8].DependencyOrderingKey, got[7].DependencyOrderingKey)
+	}
+}
+
+// TestBuild_DependencyAnnotation_OutOfSetMarker is ruling #2 (out-of-set
+// upstream: marker only, no fetch): a base ref that names no PR anywhere in
+// the set must still populate a VISIBLE fact (the unresolved ref name)
+// rather than reading identically to "no relation at all" — see
+// TestBuild_DependencyAnnotation_TrunkUnchanged for that baseline.
+func TestBuild_DependencyAnnotation_OutOfSetMarker(t *testing.T) {
+	snap := Build(BuilderInput{
+		Self:        "alice",
+		TeamMembers: []string{"bob"},
+		PRs: []PRInput{{
+			PR:        api.PR{Repo: "o/r", Number: 4, Author: "bob", Branch: "feat-d", Base: "feat-ghost", State: "open"},
+			Ownership: ownership.Team,
+		}},
+	})
+	if len(snap.Team) != 1 {
+		t.Fatalf("want 1 team row, got %d", len(snap.Team))
+	}
+	row := snap.Team[0]
+	if row.DependencyBlockedByUnresolvedRef != "feat-ghost" {
+		t.Errorf("DependencyBlockedByUnresolvedRef = %q, want %q", row.DependencyBlockedByUnresolvedRef, "feat-ghost")
+	}
+	if row.DependencyBlockedBy != "" {
+		t.Errorf("an out-of-set marker must not populate the live DependencyBlockedBy ref, got %q", row.DependencyBlockedBy)
+	}
+	if row.DependencyOrderingKey != 0 {
+		t.Errorf("an out-of-set marker carries no live blocking relation to rank against, want ordering key 0, got %d", row.DependencyOrderingKey)
+	}
+}
+
+// TestBuild_DependencyAnnotation_MergedMiddleUnblocked is ruling #4
+// (merged-middle): a PR whose native-or-base-chain upstream has MERGED reads
+// as unblocked, carrying DependencyUnblockedFrom for traceability rather
+// than a live DependencyBlockedBy, and with no live relation left to rank
+// against (ordering key 0) — read straight from prdeps.Node.MergedUpstream,
+// never re-derived.
+func TestBuild_DependencyAnnotation_MergedMiddleUnblocked(t *testing.T) {
+	snap := Build(BuilderInput{
+		Self:        "alice",
+		TeamMembers: []string{"bob"},
+		PRs: []PRInput{
+			{ // upstream, merged
+				PR:        api.PR{Repo: "o/r", Number: 5, Author: "bob", Branch: "feat-e", Base: "main", State: "closed", Merged: true},
+				Ownership: ownership.Team,
+			},
+			{ // downstream, still open, was stacked on #5
+				PR:        api.PR{Repo: "o/r", Number: 6, Author: "bob", Branch: "feat-f", Base: "feat-e", State: "open"},
+				Ownership: ownership.Team,
+			},
+		},
+	})
+	got := map[int]TeamRow{}
+	for _, r := range snap.Team {
+		got[r.Number] = r
+	}
+	row, ok := got[6]
+	if !ok {
+		t.Fatalf("want row #6 present, got %+v", snap.Team)
+	}
+	if row.DependencyUnblockedFrom != "o/r#5" {
+		t.Errorf("DependencyUnblockedFrom = %q, want %q", row.DependencyUnblockedFrom, "o/r#5")
+	}
+	if row.DependencyBlockedBy != "" {
+		t.Errorf("an unblocked (merged-middle) row must not carry a live DependencyBlockedBy, got %q", row.DependencyBlockedBy)
+	}
+	if row.DependencyOrderingKey != 0 {
+		t.Errorf("merged-middle: no live blocking relation left to rank against, want ordering key 0, got %d", row.DependencyOrderingKey)
+	}
+}
+
+// TestPrdepsState pins prdepsState's three-way precedence directly (it is
+// unexported, so this calls it in-package rather than forcing every branch
+// through Build): Merged wins outright regardless of the raw State string;
+// an open, non-draft PR reads "open"; an open, draft PR reads "draft"; and
+// the raw State is reported lower-cased otherwise. Case-insensitivity on
+// "open" is exercised explicitly, matching internal/sync's stateForPR this
+// mirrors.
+func TestPrdepsState(t *testing.T) {
+	tests := []struct {
+		name string
+		pr   api.PR
+		want string
+	}{
+		{"merged wins over any raw state", api.PR{Merged: true, State: "closed"}, "merged"},
+		{"merged wins even over draft", api.PR{Merged: true, State: "open", Draft: true}, "merged"},
+		{"open, not draft", api.PR{State: "open"}, "open"},
+		{"open, draft", api.PR{State: "open", Draft: true}, "draft"},
+		{"OPEN case-insensitive, not draft", api.PR{State: "OPEN"}, "open"},
+		{"OPEN case-insensitive, draft", api.PR{State: "OPEN", Draft: true}, "draft"},
+		{"closed", api.PR{State: "closed"}, "closed"},
+		{"raw state lower-cased", api.PR{State: "CLOSED"}, "closed"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := prdepsState(tc.pr); got != tc.want {
+				t.Errorf("prdepsState(%+v) = %q, want %q", tc.pr, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestUnresolvedUpstreamRefNames pins the filter directly (it is unexported,
+// so this hand-builds a prdeps.Graph rather than forcing every diagnostic
+// kind through Build/DeriveWithNativeStack): ONLY DiagnosticUpstreamOutOfSet
+// entries are indexed, by their FIRST ref — a diagnostic of any OTHER kind
+// (even one carrying a non-empty RefName and Refs, e.g. a hand-built
+// DiagnosticSelfBase) must be excluded, and a DiagnosticUpstreamOutOfSet
+// with an EMPTY Refs slice (defensive; native.go never actually emits one)
+// must not panic or produce a spurious entry.
+func TestUnresolvedUpstreamRefNames(t *testing.T) {
+	blocked := prdeps.Ref{Repo: "o/r", Number: 1}
+	other := prdeps.Ref{Repo: "o/r", Number: 2}
+	g := prdeps.Graph{
+		Diagnostics: []prdeps.Diagnostic{
+			// A DIFFERENT kind, deliberately carrying a non-empty RefName and a
+			// non-empty Refs naming `other` first — must NOT be picked up.
+			{Kind: prdeps.DiagnosticSelfBase, Refs: []prdeps.Ref{other}, RefName: "feat-other"},
+			// The kind under test.
+			{Kind: prdeps.DiagnosticUpstreamOutOfSet, Refs: []prdeps.Ref{blocked}, RefName: "feat-ghost"},
+			// Defensive: right kind, no Refs at all.
+			{Kind: prdeps.DiagnosticUpstreamOutOfSet, Refs: nil, RefName: "unreachable"},
+			// A Kind NUMERICALLY GREATER than DiagnosticUpstreamOutOfSet (which is
+			// currently the highest-valued DiagnosticKind) — a value no real
+			// derivation emits today, but the filter's `==` MUST still exclude it
+			// rather than treat "greater than" as a match. This is the forward-
+			// compat guard against DiagnosticUpstreamOutOfSet ever losing its
+			// place as the last enum member.
+			{Kind: prdeps.DiagnosticKind(int(prdeps.DiagnosticUpstreamOutOfSet) + 1), Refs: []prdeps.Ref{other}, RefName: "feat-future"},
+		},
+	}
+	got := unresolvedUpstreamRefNames(g)
+	if len(got) != 1 {
+		t.Fatalf("want exactly 1 entry (only the DiagnosticUpstreamOutOfSet with Refs), got %d: %+v", len(got), got)
+	}
+	if got[blocked] != "feat-ghost" {
+		t.Errorf("unresolvedUpstreamRefNames[blocked] = %q, want %q", got[blocked], "feat-ghost")
+	}
+	if _, present := got[other]; present {
+		t.Errorf("neither the DiagnosticSelfBase nor the out-of-range-Kind entry must be indexed, but key %v is present: %+v", other, got)
+	}
+}
+
+// TestBuild_DependencyAnnotation_OutOfSetMarker_ClosedNotMergedUpstream is a
+// second out-of-set fixture, distinguishing prdeps' "matched a real PR that
+// is neither open/draft nor merged" arm from the "no PR heads that ref at
+// all" arm TestBuild_DependencyAnnotation_OutOfSetMarker already covers —
+// both share ResolutionUpstreamOutOfSet, but this one additionally exercises
+// prdepsState's raw-state passthrough (a closed, non-merged PR reports its
+// lower-cased raw State, which prdeps.IsOpen/isMerged both then reject).
+func TestBuild_DependencyAnnotation_OutOfSetMarker_ClosedNotMergedUpstream(t *testing.T) {
+	snap := Build(BuilderInput{
+		Self:        "alice",
+		TeamMembers: []string{"bob"},
+		PRs: []PRInput{
+			{ // present in the set, but closed WITHOUT merging
+				PR:        api.PR{Repo: "o/r", Number: 9, Author: "bob", Branch: "feat-i", Base: "main", State: "closed"},
+				Ownership: ownership.Team,
+			},
+			{ // based on #9's head, which is neither a live candidate nor merged
+				PR:        api.PR{Repo: "o/r", Number: 10, Author: "bob", Branch: "feat-j", Base: "feat-i", State: "open"},
+				Ownership: ownership.Team,
+			},
+		},
+	})
+	got := map[int]TeamRow{}
+	for _, r := range snap.Team {
+		got[r.Number] = r
+	}
+	row, ok := got[10]
+	if !ok {
+		t.Fatalf("want row #10 present, got %+v", snap.Team)
+	}
+	if row.DependencyBlockedByUnresolvedRef != "feat-i" {
+		t.Errorf("DependencyBlockedByUnresolvedRef = %q, want %q", row.DependencyBlockedByUnresolvedRef, "feat-i")
+	}
+	if row.DependencyBlockedBy != "" || row.DependencyUnblockedFrom != "" || row.DependencyOrderingKey != 0 {
+		t.Errorf("a closed-not-merged out-of-set upstream must not populate any other dependency field, got %+v", row)
+	}
+}
+
+// TestBuild_DependencyAnnotation_DraftUpstreamStillLive proves a DRAFT
+// upstream is still a LIVE candidate for ResolutionUpstream — prdeps.IsOpen
+// treats "draft" as open, so prdepsState must actually report "draft" for a
+// draft PR rather than collapsing it to something IsOpen rejects. Without
+// this, a stack built on top of a draft PR would silently read as an
+// out-of-set marker instead of a live blocking relation.
+func TestBuild_DependencyAnnotation_DraftUpstreamStillLive(t *testing.T) {
+	snap := Build(BuilderInput{
+		Self:        "alice",
+		TeamMembers: []string{"bob"},
+		PRs: []PRInput{
+			{ // the upstream: open AND draft
+				PR:        api.PR{Repo: "o/r", Number: 11, Author: "bob", Branch: "feat-k", Base: "main", State: "open", Draft: true},
+				Ownership: ownership.Team,
+			},
+			{ // stacked on the draft PR's head
+				PR:        api.PR{Repo: "o/r", Number: 12, Author: "bob", Branch: "feat-l", Base: "feat-k", State: "open"},
+				Ownership: ownership.Team,
+			},
+		},
+	})
+	got := map[int]TeamRow{}
+	for _, r := range snap.Team {
+		got[r.Number] = r
+	}
+	row, ok := got[12]
+	if !ok {
+		t.Fatalf("want row #12 present, got %+v", snap.Team)
+	}
+	if row.DependencyBlockedBy != "o/r#11" {
+		t.Errorf("DependencyBlockedBy = %q, want %q (a draft upstream is still a LIVE candidate)", row.DependencyBlockedBy, "o/r#11")
+	}
+	if row.DependencyOrderingKey >= 0 {
+		t.Errorf("DependencyOrderingKey = %d, want < 0 (a live blocking relation)", row.DependencyOrderingKey)
+	}
+}
+
+// TestDependencyFields_AreScalarOnly is presentation ruling #3 (no
+// grouped/collapsible stack row — FACT + ordering-key only, same visual
+// treatment as any other row plus a marker). Every Dependency* field on both
+// row types must be a plain scalar (string or int); a slice, map, or nested
+// struct would be exactly the "stack group" structure the ruling forbids.
+func TestDependencyFields_AreScalarOnly(t *testing.T) {
+	for _, typ := range []reflect.Type{reflect.TypeOf(MineRow{}), reflect.TypeOf(TeamRow{})} {
+		found := 0
+		for i := 0; i < typ.NumField(); i++ {
+			f := typ.Field(i)
+			if !strings.HasPrefix(f.Name, "Dependency") {
+				continue
+			}
+			found++
+			switch f.Type.Kind() {
+			case reflect.String, reflect.Int:
+				// scalar: fine.
+			default:
+				t.Errorf("%s.%s has kind %s; a Dependency* field must be a scalar, never a grouping structure (ruling #3)",
+					typ.Name(), f.Name, f.Type.Kind())
+			}
+		}
+		if found != 4 {
+			t.Errorf("%s: found %d Dependency* fields, want 4 (BlockedBy, BlockedByUnresolvedRef, UnblockedFrom, OrderingKey)",
+				typ.Name(), found)
 		}
 	}
 }

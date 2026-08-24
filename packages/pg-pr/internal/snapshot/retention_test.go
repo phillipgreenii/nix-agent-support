@@ -164,3 +164,57 @@ func TestBuild_MergedCoOwnedIsNotRetentionScoped(t *testing.T) {
 		t.Errorf("an out-of-scope merged CoOwned row must not carry the Merged de-emphasis marker, got %+v", snap.Mine[0])
 	}
 }
+
+// TestBuild_MergedMinePRRetention_WithDependencyPassWired is the pg2-4dz88.3.7
+// regression case this bead's task explicitly required: the pg2-ew4kf
+// "merged rows sort below every active row" ordering must survive the new
+// whole-set PR-dependency pass being wired into the SAME Build call. The
+// fixture gives the pass real work to do (a PR genuinely stacked on the
+// retained merged PR, resolving via the merged-middle ruling) rather than an
+// inert TrunkRefs-only pass, so a mistake that perturbed Mine's ordering via
+// the dependency annotation would show up here.
+func TestBuild_MergedMinePRRetention_WithDependencyPassWired(t *testing.T) {
+	active := PRInput{
+		PR:        api.PR{Repo: "o/r", Number: 30, Author: "me", Branch: "feat-active", Base: "main", State: "open"},
+		Ownership: ownership.Mine,
+	}
+	merged := mineMergedInput(31, 1*time.Hour)
+	merged.PR.Branch = "feat-merged"
+	merged.PR.Base = "main"
+	// Stacked on the retained-merged PR: resolves via ResolutionUnblocked
+	// (merged-middle), not ResolutionUpstream — #31 has already merged.
+	stacked := PRInput{
+		PR:        api.PR{Repo: "o/r", Number: 32, Author: "me", Branch: "feat-stacked", Base: "feat-merged", State: "open"},
+		Ownership: ownership.Mine,
+	}
+
+	// merged listed first, on purpose, mirroring
+	// TestBuild_MergedMinePRsSortBelowActive's ordering-is-not-input-order proof.
+	snap := Build(BuilderInput{GeneratedAt: fixedNow, Self: "me", PRs: []PRInput{merged, active, stacked}})
+
+	if len(snap.Mine) != 3 {
+		t.Fatalf("want 3 mine rows, got %+v", snap.Mine)
+	}
+	gotOrder := []int{snap.Mine[0].Number, snap.Mine[1].Number, snap.Mine[2].Number}
+	wantOrder := []int{30, 32, 31} // both actives before the retained merged row
+	for i, want := range wantOrder {
+		if gotOrder[i] != want {
+			t.Fatalf("Mine order = %v, want actives before merged: %v (pg2-ew4kf ordering must survive the dependency pass)",
+				gotOrder, wantOrder)
+		}
+	}
+	if !snap.Mine[2].Merged {
+		t.Errorf("the trailing row must be the Merged one, got %+v", snap.Mine[2])
+	}
+
+	var stackedRow MineRow
+	for _, r := range snap.Mine {
+		if r.Number == 32 {
+			stackedRow = r
+		}
+	}
+	if stackedRow.DependencyUnblockedFrom != "o/r#31" {
+		t.Errorf("stacked row #32 must carry DependencyUnblockedFrom=o/r#31 (merged-middle) even though #31 is a retained-merged row, got %q",
+			stackedRow.DependencyUnblockedFrom)
+	}
+}

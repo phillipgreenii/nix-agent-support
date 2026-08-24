@@ -113,6 +113,25 @@ type MineRow struct {
 	// HiddenReason is the operator-supplied reason recorded with the hide, if
 	// any. Empty when Hidden is false, or when no reason was given.
 	HiddenReason string `json:"hidden_reason,omitempty"`
+
+	// DependencyBlockedBy, DependencyBlockedByUnresolvedRef,
+	// DependencyUnblockedFrom and DependencyOrderingKey are the PR-dependency
+	// annotation (pg2-4dz88.3.7), projected once per Build call from
+	// prdeps.DeriveWithNativeStack's whole-set Graph. See the identically
+	// named TeamRow fields for the shared contract; all four are the zero
+	// value (and thus omitted) for a PR with no derivable relation
+	// (prdeps.ResolutionTrunk and friends), so a Trunk-resolved row is
+	// byte-for-byte unchanged from before this bead.
+	DependencyBlockedBy string `json:"dependency_blocked_by,omitempty"`
+	// DependencyBlockedByUnresolvedRef mirrors the TeamRow field of the same
+	// name; see its doc.
+	DependencyBlockedByUnresolvedRef string `json:"dependency_blocked_by_unresolved_ref,omitempty"`
+	// DependencyUnblockedFrom mirrors the TeamRow field of the same name; see
+	// its doc.
+	DependencyUnblockedFrom string `json:"dependency_unblocked_from,omitempty"`
+	// DependencyOrderingKey mirrors the TeamRow field of the same name; see
+	// its doc.
+	DependencyOrderingKey int `json:"dependency_ordering_key,omitempty"`
 }
 
 // TeamRow is one row in the "PRs to Review" table (the not-mine review set:
@@ -157,6 +176,55 @@ type TeamRow struct {
 	// their doc for the contract (pg2-4dz88.4.3).
 	Hidden       bool   `json:"hidden,omitempty"`
 	HiddenReason string `json:"hidden_reason,omitempty"`
+
+	// DependencyBlockedBy names the OPEN/DRAFT PR in this input set that this
+	// one is currently stacked on and waiting for — the ref this PR's native
+	// stack entry or base-branch chain resolved to, in Ref.String()'s
+	// `<repo>#<number>` form (prdeps.Node.Upstream, when Resolution is
+	// prdeps.ResolutionUpstream). Presentation ruling #3 (pg2-4dz88.3.6/.3.7):
+	// this is the FACT half of "rank lower, don't suppress" — the row renders
+	// exactly like any other row plus this marker and the
+	// DependencyOrderingKey effect; there is no grouped/collapsible stack
+	// row. Empty for every other resolution.
+	DependencyBlockedBy string `json:"dependency_blocked_by,omitempty"`
+	// DependencyBlockedByUnresolvedRef names the ref this PR's native-or-base
+	// chain resolved to when the winning target could NOT be turned into a
+	// live edge (prdeps.ResolutionUpstreamOutOfSet) — either no PR in the set
+	// heads that ref at all, or one does but is neither open/draft nor
+	// merged. Per the out-of-set-upstream ruling, this is MARKER ONLY: no
+	// fetch is ever made to pull the named PR into the set. It is still
+	// populated (rather than left identical to "no relation at all") so a
+	// consumer can render e.g. "blocked by <ref>, not otherwise tracked". The
+	// value is a REF NAME (a branch name), not a `<repo>#<number>` — prdeps
+	// has no PR identity to name here, only the branch it couldn't resolve.
+	DependencyBlockedByUnresolvedRef string `json:"dependency_blocked_by_unresolved_ref,omitempty"`
+	// DependencyUnblockedFrom names the PR this one was natively- or
+	// base-chain-stacked on that has since MERGED (prdeps.Node.MergedUpstream,
+	// set only when Resolution is prdeps.ResolutionUnblocked) — the
+	// merged-middle ruling: this PR is no longer blocked by anything and is
+	// NOT re-pointed to the merged PR's own upstream. Informational only;
+	// DependencyOrderingKey is the zero value here, exactly like an
+	// unrelated PR, because there is no live blocking relation left to rank
+	// against.
+	DependencyUnblockedFrom string `json:"dependency_unblocked_from,omitempty"`
+	// DependencyOrderingKey is the ordering-key half of ruling #1
+	// ("rank-lower, not suppress"): a PR that is waiting on another PR
+	// (DependencyBlockedBy set) carries a value STRICTLY LOWER than the
+	// value on the row for the PR it names — e.g. a PR one hop up a stack
+	// gets -1 while the PR it waits on gets 0, and a PR two hops up gets -2
+	// — so a comparator that sorts this key in DESCENDING order (the PR
+	// with the numerically GREATEST key first) always places an upstream PR
+	// ahead of anything waiting on it, satisfying "ordered after its
+	// upstream" without this package ever sorting anything itself. It is
+	// simply the negation of prdeps.Node.Depth, projected as-is (never
+	// re-derived): 0 for every PR with no live blocking relation — Trunk,
+	// Unblocked/merged-middle, the out-of-set marker, Foreign, Self,
+	// Unresolvable, or a PR absent from this pass entirely — and -Depth for
+	// a PR genuinely blocked on another PR in this set. This field is a KEY
+	// ONLY: Build does not sort rows by it and no comparator lives in this
+	// package; a later multi-key comparator (a different, later bead)
+	// combines it with other signals.
+	DependencyOrderingKey int `json:"dependency_ordering_key,omitempty"`
 }
 
 // JIRAItem is one resolved JIRA issue referenced by a PR.
