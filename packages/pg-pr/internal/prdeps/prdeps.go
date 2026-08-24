@@ -19,17 +19,22 @@
 // effect through. That is the code-level expression of INV-READ-1 and
 // INV-SYNC-1 in docs/behavior/invariants.md.
 //
-// # Deliberately out of scope
+// # Deliberately out of scope (for Derive)
 //
-// This package answers only the mechanically-decidable structural questions.
+// Derive answers only the mechanically-decidable structural questions of the
+// PURE base-branch chain, with no notion of the code host's native stack
+// relation at all. Anything it cannot decide mechanically it REPORTS as a
+// Diagnostic and resolves to ResolutionUnresolvable; it never invents a
+// relation, and it never returns an error (every input set is describable).
+//
 // Incorporating the code host's NATIVE stack fields, the precedence between
 // those and the base chain, what a MERGED middle PR does to the PRs stacked
 // above it, and whether an unresolvable upstream is pulled into the retrieval
-// set or left as a marker are all product rulings, and they belong to the
-// dependent leaf that merges the two relations. Anything this package cannot
-// decide mechanically it REPORTS as a Diagnostic and resolves to
-// ResolutionUnresolvable; it never invents a relation, and it never returns an
-// error (every input set is describable).
+// set or left as a marker were left to the dependent leaf that merges the two
+// relations (bead pg2-4dz88.3.6) — that leaf is DeriveWithNativeStack
+// (native.go), a separate pure function rather than a change to Derive itself,
+// specifically so Derive's own pinned base-chain semantics never have to move
+// to accommodate those rulings.
 package prdeps
 
 import (
@@ -72,6 +77,16 @@ type PR struct {
 	// stateForPR spells it: "open" | "draft" | "closed" | "merged". Compared
 	// case-insensitively, mirroring that function's own strings.ToLower.
 	State string
+	// NativeUpstreamHead is the head ref of the PR this one is stacked on
+	// according to the code host's NATIVE stacked-PR relation (GitHub's
+	// StackUpstreamHeadRefName, pkg/api.PR — bead pg2-4dz88.3.6). Empty means
+	// this PR carries no native upstream signal: it isn't part of a native
+	// stack, or it is the bottommost entry of one. DeriveWithNativeStack falls
+	// back to the base-branch chain (Base) exactly when this is empty; Derive
+	// itself never reads this field at all, which is what keeps every one of
+	// its existing tests passing unchanged with the field left at its zero
+	// value.
+	NativeUpstreamHead string
 }
 
 // Ref returns the PR's identity.
@@ -87,6 +102,14 @@ var openStates = map[string]struct{}{"open": {}, "draft": {}}
 func IsOpen(state string) bool {
 	_, ok := openStates[strings.ToLower(state)]
 	return ok
+}
+
+// isMerged reports whether a state string names a merged PR, compared
+// case-insensitively like IsOpen. Used only by DeriveWithNativeStack (native.go)
+// to apply the merged-middle ruling — Derive itself has no notion of "merged"
+// beyond "not open".
+func isMerged(state string) bool {
+	return strings.ToLower(state) == "merged"
 }
 
 // Resolution says what a PR's base ref resolved to. Every Node carries exactly
@@ -114,6 +137,29 @@ const (
 	// ResolutionSelf: the base ref equals the PR's own head ref. Rejected — a PR
 	// cannot be stacked on itself, so no self-edge is created.
 	ResolutionSelf
+	// ResolutionUpstreamOutOfSet: produced only by DeriveWithNativeStack (never
+	// by Derive). The winning detection method (native, or the base-branch
+	// chain when no native signal is present) names an upstream this input set
+	// cannot make into a live edge — either no PR anywhere in the set heads
+	// that ref at all, or one does but is neither open/draft nor merged (e.g.
+	// closed without merging). Per the out-of-set-upstream ruling (bead
+	// pg2-4dz88.3.6): no special fetch is made to pull the missing PR into the
+	// set, but this is ALWAYS a defined, reported marker — never a silent
+	// drop. Like ResolutionUnresolvable, several mechanically-indistinguishable
+	// causes deliberately share this one value; RefName on the accompanying
+	// DiagnosticUpstreamOutOfSet names the target ref that could not be
+	// resolved.
+	ResolutionUpstreamOutOfSet
+	// ResolutionUnblocked: produced only by DeriveWithNativeStack. The winning
+	// detection method names an upstream that IS in the input set and has
+	// MERGED. Per the merged-middle ruling (bead pg2-4dz88.3.6), a merged
+	// upstream no longer blocks anything stacked on it: this node reads as
+	// having no live blocking dependency, and — deliberately — is NOT
+	// re-pointed to the merged PR's own upstream. Node.MergedUpstream names the
+	// merged PR for traceability; Node.Upstream stays the zero Ref (Upstream's
+	// contract restricts it to ResolutionUpstream), and the chain walk
+	// (Depth/Cyclic) treats this node as a bottom.
+	ResolutionUnblocked
 )
 
 // String names the Resolution, for diagnostics and test failures.
@@ -129,6 +175,10 @@ func (r Resolution) String() string {
 		return "foreign"
 	case ResolutionSelf:
 		return "self"
+	case ResolutionUpstreamOutOfSet:
+		return "upstream-out-of-set"
+	case ResolutionUnblocked:
+		return "unblocked"
 	default:
 		return fmt.Sprintf("Resolution(%d)", int(r))
 	}
@@ -147,6 +197,14 @@ type Node struct {
 	// Upstream is the PR this one is stacked on. Meaningful ONLY when Resolution
 	// is ResolutionUpstream; the zero Ref otherwise.
 	Upstream Ref
+	// MergedUpstream names the PR this node was natively- or base-chain-
+	// stacked on, which has since MERGED. Meaningful ONLY when Resolution is
+	// ResolutionUnblocked (set only by DeriveWithNativeStack); the zero Ref
+	// otherwise. It is informational, not a live edge: Upstream stays the zero
+	// Ref, and Depth/Cyclic/the chain walk all treat this node as a bottom —
+	// the merged-middle ruling's "no longer blocked, not re-pointed further
+	// up".
+	MergedUpstream Ref
 	// Downstream names the PRs stacked DIRECTLY on this one, sorted by repo then
 	// number. Nil for the top of a chain. Each PR contributes at most one
 	// upstream edge, so a PR can never appear twice here.
@@ -183,6 +241,11 @@ const (
 	// (lowest number wins) AND reported, because the ambiguity is itself a data
 	// problem.
 	DiagnosticAmbiguousHead
+	// DiagnosticUpstreamOutOfSet: produced only by DeriveWithNativeStack. A PR
+	// whose native-or-base-chain-resolved upstream target could not be turned
+	// into a live edge — absent from the input set entirely, or present but
+	// not open/draft/merged.
+	DiagnosticUpstreamOutOfSet
 )
 
 // String names the DiagnosticKind, for logs and test failures.
@@ -198,6 +261,8 @@ func (k DiagnosticKind) String() string {
 		return "unresolvable-base"
 	case DiagnosticAmbiguousHead:
 		return "ambiguous-head"
+	case DiagnosticUpstreamOutOfSet:
+		return "upstream-out-of-set"
 	default:
 		return fmt.Sprintf("DiagnosticKind(%d)", int(k))
 	}

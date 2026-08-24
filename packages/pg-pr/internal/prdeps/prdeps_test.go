@@ -32,6 +32,15 @@ func statePR(n int, head, base, state string) PR {
 	return PR{Repo: repoName, Number: n, Head: head, Base: base, State: state}
 }
 
+// stackedPR builds a PR in repoName that carries a native stack upstream
+// signal, for DeriveWithNativeStack's table. base is still set (rather than
+// left empty) in most rows so a disagreeing base-chain reading is exercised
+// alongside the native one, proving native wins rather than merely being the
+// only signal present.
+func stackedPR(n int, head, base, nativeUpstream, state string) PR {
+	return PR{Repo: repoName, Number: n, Head: head, Base: base, State: state, NativeUpstreamHead: nativeUpstream}
+}
+
 // TestDerive is the whole-set table: one row per structural case the base-chain
 // detector must decide mechanically. Each row is an input PR set plus the
 // configured trunk refs, and the complete expected Graph — every Node field and
@@ -632,6 +641,509 @@ func TestDerive(t *testing.T) {
 	}
 }
 
+// TestDeriveWithNativeStack is the whole-set table for the native-aware,
+// merged-middle-aware pass (bead pg2-4dz88.3.6). Each row states the complete
+// expected Graph, the same way TestDerive's table does.
+func TestDeriveWithNativeStack(t *testing.T) {
+	cases := []struct {
+		name string
+		in   Input
+		want Graph
+	}{
+		{
+			// No native signal anywhere: DeriveWithNativeStack must fall back to
+			// the base-branch chain and agree with Derive's own "two-deep stack"
+			// case exactly.
+			name: "falls back to the base chain when no native signal is present",
+			in: Input{
+				PRs: []PR{
+					openPR(1, "feature-a", trunkRef),
+					openPR(2, "feature-b", "feature-a"),
+				},
+				TrunkRefs: []string{trunkRef},
+			},
+			want: Graph{Nodes: []Node{
+				{Ref: ref(1), Open: true, Resolution: ResolutionTrunk, Downstream: []Ref{ref(2)}},
+				{Ref: ref(2), Open: true, Resolution: ResolutionUpstream, Upstream: ref(1), Depth: 1},
+			}},
+		},
+		{
+			// The required "native and base-chain disagree" case: #2's Base says
+			// standalone (trunk), but its native upstream says #1. Native must
+			// win.
+			name: "native wins when native and base-chain disagree",
+			in: Input{
+				PRs: []PR{
+					openPR(1, "feature-a", trunkRef),
+					stackedPR(2, "feature-b", trunkRef, "feature-a", "open"),
+				},
+				TrunkRefs: []string{trunkRef},
+			},
+			want: Graph{Nodes: []Node{
+				{Ref: ref(1), Open: true, Resolution: ResolutionTrunk, Downstream: []Ref{ref(2)}},
+				{Ref: ref(2), Open: true, Resolution: ResolutionUpstream, Upstream: ref(1), Depth: 1},
+			}},
+		},
+		{
+			// The required merged-middle case, native-detected: A -> B -> C, B
+			// merges. C must read as unblocked (Depth 0, no live Upstream), NOT
+			// re-pointed to A, and NOT dropped. B keeps a normal upstream edge to
+			// A (B's own merge status doesn't affect ITS resolution against A —
+			// only whether OTHERS may use B as their upstream), and B's
+			// Downstream still names C for traceability even though the edge no
+			// longer blocks.
+			name: "merged-middle (native): C is unblocked, not re-pointed to A",
+			in: Input{
+				PRs: []PR{
+					openPR(1, "feature-a", trunkRef),
+					stackedPR(2, "feature-b", "feature-a", "feature-a", "merged"),
+					stackedPR(3, "feature-c", "feature-b", "feature-b", "open"),
+				},
+				TrunkRefs: []string{trunkRef},
+			},
+			want: Graph{Nodes: []Node{
+				{Ref: ref(1), Open: true, Resolution: ResolutionTrunk, Downstream: []Ref{ref(2)}},
+				{
+					Ref: ref(2), Open: false, Resolution: ResolutionUpstream, Upstream: ref(1), Depth: 1,
+					Downstream: []Ref{ref(3)},
+				},
+				{Ref: ref(3), Open: true, Resolution: ResolutionUnblocked, MergedUpstream: ref(2)},
+			}},
+		},
+		{
+			// The same merged-middle shape, but detected purely via the
+			// base-branch chain (no native fields at all) — the ruling applies
+			// regardless of which detection method won.
+			name: "merged-middle (base-chain fallback): C is unblocked, not re-pointed to A",
+			in: Input{
+				PRs: []PR{
+					openPR(1, "feature-a", trunkRef),
+					statePR(2, "feature-b", "feature-a", "merged"),
+					openPR(3, "feature-c", "feature-b"),
+				},
+				TrunkRefs: []string{trunkRef},
+			},
+			want: Graph{Nodes: []Node{
+				{Ref: ref(1), Open: true, Resolution: ResolutionTrunk, Downstream: []Ref{ref(2)}},
+				{
+					Ref: ref(2), Open: false, Resolution: ResolutionUpstream, Upstream: ref(1), Depth: 1,
+					Downstream: []Ref{ref(3)},
+				},
+				{Ref: ref(3), Open: true, Resolution: ResolutionUnblocked, MergedUpstream: ref(2)},
+			}},
+		},
+		{
+			// The required out-of-set-upstream case, native-detected: #2 names a
+			// native upstream head ref no PR in the set carries at all. Marker
+			// only, never dropped, and distinguishable both from ResolutionTrunk
+			// ("no dependency") and from ResolutionUnresolvable (the "no name at
+			// all" case below).
+			name: "out-of-set upstream (native): marker only, never dropped",
+			in: Input{
+				PRs: []PR{
+					stackedPR(2, "feature-b", trunkRef, "feature-a", "open"),
+				},
+				TrunkRefs: []string{trunkRef},
+			},
+			want: Graph{
+				Nodes: []Node{
+					{Ref: ref(2), Open: true, Resolution: ResolutionUpstreamOutOfSet},
+				},
+				Diagnostics: []Diagnostic{
+					{Kind: DiagnosticUpstreamOutOfSet, Refs: []Ref{ref(2)}, RefName: "feature-a"},
+				},
+			},
+		},
+		{
+			// The same out-of-set-upstream outcome via the base-chain fallback
+			// alone (the classic "deleted branch" shape) — DeriveWithNativeStack
+			// gives it the same marker-only, never-dropped treatment as the
+			// native case, unlike Derive's own (unchanged) ResolutionUnresolvable
+			// for this exact input.
+			name: "out-of-set upstream (base-chain fallback): marker only, never dropped",
+			in: Input{
+				PRs: []PR{
+					openPR(2, "feature-b", "deleted-branch"),
+				},
+				TrunkRefs: []string{trunkRef},
+			},
+			want: Graph{
+				Nodes: []Node{
+					{Ref: ref(2), Open: true, Resolution: ResolutionUpstreamOutOfSet},
+				},
+				Diagnostics: []Diagnostic{
+					{Kind: DiagnosticUpstreamOutOfSet, Refs: []Ref{ref(2)}, RefName: "deleted-branch"},
+				},
+			},
+		},
+		{
+			// A target that DOES match an in-set PR, but one that is neither a
+			// live candidate (open/draft) nor merged — closed without merging.
+			// No ruling authorizes unblocking here, so it gets the same
+			// marker-only outcome as a genuinely absent upstream, and — unlike
+			// the merged-middle case — does NOT appear in #1's Downstream (no
+			// live-or-merged edge was ever established).
+			name: "matched but closed-without-merge is out-of-set too, and creates no downstream edge",
+			in: Input{
+				PRs: []PR{
+					statePR(1, "feature-a", trunkRef, "closed"),
+					openPR(2, "feature-b", "feature-a"),
+				},
+				TrunkRefs: []string{trunkRef},
+			},
+			want: Graph{
+				Nodes: []Node{
+					{Ref: ref(1), Resolution: ResolutionTrunk},
+					{Ref: ref(2), Open: true, Resolution: ResolutionUpstreamOutOfSet},
+				},
+				Diagnostics: []Diagnostic{
+					{Kind: DiagnosticUpstreamOutOfSet, Refs: []Ref{ref(2)}, RefName: "feature-a"},
+				},
+			},
+		},
+		{
+			// No native signal AND an empty base: there is no name to blame at
+			// all, which stays ResolutionUnresolvable — a strictly less
+			// informative case than "a named target we could not resolve",
+			// and the two must stay distinguishable.
+			name: "empty base with no native signal is unresolvable, not out-of-set",
+			in: Input{
+				PRs:       []PR{openPR(1, "feature-a", "")},
+				TrunkRefs: []string{trunkRef},
+			},
+			want: Graph{
+				Nodes: []Node{
+					{Ref: ref(1), Open: true, Resolution: ResolutionUnresolvable},
+				},
+				Diagnostics: []Diagnostic{
+					{Kind: DiagnosticUnresolvableBase, Refs: []Ref{ref(1)}},
+				},
+			},
+		},
+		{
+			// Ambiguous head across states: #1 (merged) and #2 (open) both head
+			// "dup". The tie-break is the lowest number regardless of state, so
+			// #3's native upstream "dup" resolves against #1 (merged) and reads
+			// as Unblocked — NOT against #2, even though #2 is open. This is a
+			// deliberate generalisation of Derive's own "lowest number wins"
+			// tie-break to a pool that now includes non-open candidates.
+			name: "ambiguous head tie-break is lowest number regardless of state",
+			in: Input{
+				PRs: []PR{
+					statePR(1, "dup", trunkRef, "merged"),
+					openPR(2, "dup", trunkRef),
+					stackedPR(3, "feature-c", trunkRef, "dup", "open"),
+				},
+				TrunkRefs: []string{trunkRef},
+			},
+			want: Graph{
+				Nodes: []Node{
+					{Ref: ref(1), Resolution: ResolutionTrunk, Downstream: []Ref{ref(3)}},
+					{Ref: ref(2), Open: true, Resolution: ResolutionTrunk},
+					{Ref: ref(3), Open: true, Resolution: ResolutionUnblocked, MergedUpstream: ref(1)},
+				},
+				Diagnostics: []Diagnostic{
+					{Kind: DiagnosticAmbiguousHead, Refs: []Ref{ref(1), ref(2)}, RefName: "dup"},
+				},
+			},
+		},
+		{
+			// The head index is scoped by repo even for a native-sourced target:
+			// identical ref names in two repositories must never cross-match.
+			name: "identical ref names in different repos never match (native)",
+			in: Input{
+				PRs: []PR{
+					openPR(1, "feature-a", trunkRef),
+					{
+						Repo: otherRepo, Number: 2, Head: "feature-b", Base: trunkRef, State: "open",
+						NativeUpstreamHead: "feature-a",
+					},
+				},
+				TrunkRefs: []string{trunkRef},
+			},
+			want: Graph{
+				Nodes: []Node{
+					{Ref: ref(1), Open: true, Resolution: ResolutionTrunk},
+					{Ref: Ref{Repo: otherRepo, Number: 2}, Open: true, Resolution: ResolutionUpstreamOutOfSet},
+				},
+				Diagnostics: []Diagnostic{
+					{Kind: DiagnosticUpstreamOutOfSet, Refs: []Ref{{Repo: otherRepo, Number: 2}}, RefName: "feature-a"},
+				},
+			},
+		},
+		{
+			// A cycle formed purely through native pointers must terminate and
+			// be reported, exactly like a base-chain cycle.
+			name: "a cycle formed via native pointers terminates and is reported",
+			in: Input{
+				PRs: []PR{
+					stackedPR(1, "a", trunkRef, "b", "open"),
+					stackedPR(2, "b", trunkRef, "a", "open"),
+				},
+				TrunkRefs: []string{trunkRef},
+			},
+			want: Graph{
+				Nodes: []Node{
+					{
+						Ref: ref(1), Open: true, Resolution: ResolutionUpstream, Upstream: ref(2),
+						Downstream: []Ref{ref(2)}, Cyclic: true,
+					},
+					{
+						Ref: ref(2), Open: true, Resolution: ResolutionUpstream, Upstream: ref(1),
+						Downstream: []Ref{ref(1)}, Cyclic: true,
+					},
+				},
+				Diagnostics: []Diagnostic{
+					{Kind: DiagnosticCycle, Refs: []Ref{ref(1), ref(2)}},
+				},
+			},
+		},
+		{
+			// Self- and foreign-base guards still apply when the target is
+			// native-sourced.
+			name: "self-referential native upstream is rejected with no self-edge",
+			in: Input{
+				PRs:       []PR{stackedPR(1, "feature-a", trunkRef, "feature-a", "open")},
+				TrunkRefs: []string{trunkRef},
+			},
+			want: Graph{
+				Nodes: []Node{
+					{Ref: ref(1), Open: true, Resolution: ResolutionSelf},
+				},
+				Diagnostics: []Diagnostic{
+					{Kind: DiagnosticSelfBase, Refs: []Ref{ref(1)}, RefName: "feature-a"},
+				},
+			},
+		},
+		{
+			name: "repo-qualified native upstream is foreign and never matched",
+			in: Input{
+				PRs:       []PR{stackedPR(1, "feature-a", trunkRef, "fork-owner:feature-x", "open")},
+				TrunkRefs: []string{trunkRef},
+			},
+			want: Graph{
+				Nodes: []Node{
+					{Ref: ref(1), Open: true, Resolution: ResolutionForeign},
+				},
+				Diagnostics: []Diagnostic{
+					{Kind: DiagnosticForeignBase, Refs: []Ref{ref(1)}, RefName: "fork-owner:feature-x"},
+				},
+			},
+		},
+		{
+			// Empty head refs must be skipped from byHead exactly as Derive skips
+			// them from `sharing` — otherwise #1 and #2 (both headless) would be
+			// wrongly reported as sharing an ambiguous head ref "".
+			name: "empty head refs form no ambiguity and no phantom match",
+			in: Input{
+				PRs: []PR{
+					openPR(1, "", trunkRef),
+					openPR(2, "", trunkRef),
+					openPR(3, "feature-c", ""),
+				},
+				TrunkRefs: []string{trunkRef},
+			},
+			want: Graph{
+				Nodes: []Node{
+					{Ref: ref(1), Open: true, Resolution: ResolutionTrunk},
+					{Ref: ref(2), Open: true, Resolution: ResolutionTrunk},
+					{Ref: ref(3), Open: true, Resolution: ResolutionUnresolvable},
+				},
+				Diagnostics: []Diagnostic{
+					{Kind: DiagnosticUnresolvableBase, Refs: []Ref{ref(3)}},
+				},
+			},
+		},
+		{
+			// isMerged is an exact (case-insensitive) equality check against
+			// "merged", NOT a "greater than or equal to" threshold: "rejected"
+			// sorts lexically AFTER "merged" but is not itself a merge, so #2 must
+			// read as out-of-set (no ruling authorizes unblocking), never as
+			// ResolutionUnblocked.
+			name: "a state lexically past 'merged' that is not itself 'merged' is not unblocked",
+			in: Input{
+				PRs: []PR{
+					statePR(1, "feature-a", trunkRef, "rejected"),
+					openPR(2, "feature-b", "feature-a"),
+				},
+				TrunkRefs: []string{trunkRef},
+			},
+			want: Graph{
+				Nodes: []Node{
+					{Ref: ref(1), Resolution: ResolutionTrunk},
+					{Ref: ref(2), Open: true, Resolution: ResolutionUpstreamOutOfSet},
+				},
+				Diagnostics: []Diagnostic{
+					{Kind: DiagnosticUpstreamOutOfSet, Refs: []Ref{ref(2)}, RefName: "feature-a"},
+				},
+			},
+		},
+		{
+			// Every diagnostic kind DeriveWithNativeStack can emit, together, so
+			// the final sort's "a.Kind != b.Kind" branch is genuinely exercised
+			// across differing kinds rather than only ever comparing two
+			// diagnostics of the SAME kind (which TestDerive's own equivalent case
+			// does not, by itself, prove for this separate algorithm).
+			name: "every diagnostic kind appears, ordered by kind",
+			in: Input{
+				PRs: []PR{
+					openPR(1, "dup", ""),
+					openPR(2, "dup", trunkRef),
+					openPR(3, "selfish", "selfish"),
+					openPR(4, "forked", "fork-owner:elsewhere"),
+					stackedPR(5, "loop-p", trunkRef, "loop-q", "open"),
+					stackedPR(6, "loop-q", trunkRef, "loop-p", "open"),
+					stackedPR(7, "feature-g", trunkRef, "missing-ref", "open"),
+				},
+				TrunkRefs: []string{trunkRef},
+			},
+			want: Graph{
+				Nodes: []Node{
+					{Ref: ref(1), Open: true, Resolution: ResolutionUnresolvable},
+					{Ref: ref(2), Open: true, Resolution: ResolutionTrunk},
+					{Ref: ref(3), Open: true, Resolution: ResolutionSelf},
+					{Ref: ref(4), Open: true, Resolution: ResolutionForeign},
+					{
+						Ref: ref(5), Open: true, Resolution: ResolutionUpstream, Upstream: ref(6),
+						Downstream: []Ref{ref(6)}, Cyclic: true,
+					},
+					{
+						Ref: ref(6), Open: true, Resolution: ResolutionUpstream, Upstream: ref(5),
+						Downstream: []Ref{ref(5)}, Cyclic: true,
+					},
+					{Ref: ref(7), Open: true, Resolution: ResolutionUpstreamOutOfSet},
+				},
+				Diagnostics: []Diagnostic{
+					{Kind: DiagnosticCycle, Refs: []Ref{ref(5), ref(6)}},
+					{Kind: DiagnosticSelfBase, Refs: []Ref{ref(3)}, RefName: "selfish"},
+					{Kind: DiagnosticForeignBase, Refs: []Ref{ref(4)}, RefName: "fork-owner:elsewhere"},
+					{Kind: DiagnosticUnresolvableBase, Refs: []Ref{ref(1)}, RefName: ""},
+					{Kind: DiagnosticAmbiguousHead, Refs: []Ref{ref(1), ref(2)}, RefName: "dup"},
+					{Kind: DiagnosticUpstreamOutOfSet, Refs: []Ref{ref(7)}, RefName: "missing-ref"},
+				},
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := DeriveWithNativeStack(tc.in)
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("DeriveWithNativeStack() =\n%swant\n%s", dumpGraph(got), dumpGraph(tc.want))
+			}
+		})
+	}
+}
+
+// DeriveWithNativeStack must not depend on input order either.
+func TestDeriveWithNativeStackIsInputOrderIndependent(t *testing.T) {
+	forward := []PR{
+		openPR(1, "feature-a", trunkRef),
+		stackedPR(2, "feature-b", trunkRef, "feature-a", "open"),
+		statePR(3, "feature-c", "feature-b", "merged"),
+		openPR(4, "feature-d", "feature-c"),
+		stackedPR(5, "feature-e", trunkRef, "missing", "open"),
+		stackedPR(6, "loop-p", trunkRef, "loop-q", "open"),
+		stackedPR(7, "loop-q", trunkRef, "loop-p", "open"),
+	}
+	reversed := make([]PR, 0, len(forward))
+	for i := len(forward) - 1; i >= 0; i-- {
+		reversed = append(reversed, forward[i])
+	}
+	a := DeriveWithNativeStack(Input{PRs: forward, TrunkRefs: []string{trunkRef}})
+	b := DeriveWithNativeStack(Input{PRs: reversed, TrunkRefs: []string{trunkRef}})
+	if !reflect.DeepEqual(a, b) {
+		t.Errorf("reversing the input changed the graph:\nforward\n%sreversed\n%s", dumpGraph(a), dumpGraph(b))
+	}
+	if len(a.Nodes) != len(forward) || len(a.Diagnostics) == 0 {
+		t.Fatalf("fixture is not exercising the derivation: %s", dumpGraph(a))
+	}
+}
+
+// The diagnostic ordering must be a CONSISTENT total order for
+// DeriveWithNativeStack too — not one that merely happens to agree with
+// discovery order — mirroring TestDeriveDiagnosticsAreATotalOrder's adversarial
+// shape: three diagnostics of every kind DeriveWithNativeStack can emit via
+// the base-chain fallback (no native fields anywhere in this fixture), with
+// PR numbers running OPPOSITE to kind order (the highest-kind findings sit on
+// the lowest-numbered PRs). "gone-N" bases resolve to
+// ResolutionUpstreamOutOfSet here rather than Derive's ResolutionUnresolvable
+// — DeriveWithNativeStack's own out-of-set-upstream ruling — which is why
+// DiagnosticUpstreamOutOfSet, not DiagnosticUnresolvableBase, takes the
+// highest-kind (lowest-PR-number) slot this time.
+func TestDeriveWithNativeStackDiagnosticsAreATotalOrder(t *testing.T) {
+	in := Input{
+		PRs: []PR{
+			// Out-of-set upstream: highest kind, lowest numbers.
+			openPR(1, "u1", "gone-1"),
+			openPR(2, "u2", "gone-2"),
+			openPR(3, "u3", "gone-3"),
+			// Ambiguous heads: next-highest kind.
+			openPR(4, "dup-a", trunkRef),
+			openPR(5, "dup-a", trunkRef),
+			openPR(6, "dup-b", trunkRef),
+			openPR(7, "dup-b", trunkRef),
+			openPR(8, "dup-c", trunkRef),
+			openPR(9, "dup-c", trunkRef),
+			openPR(10, "f1", "fork-owner:1"),
+			openPR(11, "f2", "fork-owner:2"),
+			openPR(12, "f3", "fork-owner:3"),
+			openPR(13, "s1", "s1"),
+			openPR(14, "s2", "s2"),
+			openPR(15, "s3", "s3"),
+			// Cycles: lowest kind, highest numbers.
+			openPR(16, "p1", "q1"),
+			openPR(17, "q1", "p1"),
+			openPR(18, "p2", "q2"),
+			openPR(19, "q2", "p2"),
+			openPR(20, "p3", "q3"),
+			openPR(21, "q3", "p3"),
+		},
+		TrunkRefs: []string{trunkRef},
+	}
+	want := []Diagnostic{
+		{Kind: DiagnosticCycle, Refs: []Ref{ref(16), ref(17)}},
+		{Kind: DiagnosticCycle, Refs: []Ref{ref(18), ref(19)}},
+		{Kind: DiagnosticCycle, Refs: []Ref{ref(20), ref(21)}},
+		{Kind: DiagnosticSelfBase, Refs: []Ref{ref(13)}, RefName: "s1"},
+		{Kind: DiagnosticSelfBase, Refs: []Ref{ref(14)}, RefName: "s2"},
+		{Kind: DiagnosticSelfBase, Refs: []Ref{ref(15)}, RefName: "s3"},
+		{Kind: DiagnosticForeignBase, Refs: []Ref{ref(10)}, RefName: "fork-owner:1"},
+		{Kind: DiagnosticForeignBase, Refs: []Ref{ref(11)}, RefName: "fork-owner:2"},
+		{Kind: DiagnosticForeignBase, Refs: []Ref{ref(12)}, RefName: "fork-owner:3"},
+		{Kind: DiagnosticAmbiguousHead, Refs: []Ref{ref(4), ref(5)}, RefName: "dup-a"},
+		{Kind: DiagnosticAmbiguousHead, Refs: []Ref{ref(6), ref(7)}, RefName: "dup-b"},
+		{Kind: DiagnosticAmbiguousHead, Refs: []Ref{ref(8), ref(9)}, RefName: "dup-c"},
+		{Kind: DiagnosticUpstreamOutOfSet, Refs: []Ref{ref(1)}, RefName: "gone-1"},
+		{Kind: DiagnosticUpstreamOutOfSet, Refs: []Ref{ref(2)}, RefName: "gone-2"},
+		{Kind: DiagnosticUpstreamOutOfSet, Refs: []Ref{ref(3)}, RefName: "gone-3"},
+	}
+	got := DeriveWithNativeStack(in).Diagnostics
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("DeriveWithNativeStack().Diagnostics =\n%s\nwant\n%s", dumpDiagnostics(got), dumpDiagnostics(want))
+	}
+}
+
+// PR-body markers are explicitly OUT OF SCOPE as a detection source (see the
+// package doc and DeriveWithNativeStack's doc): only native-stack fields and
+// the base-branch chain ever decide a relation. This is proven by
+// construction rather than by scanning runtime behavior — PR carries no field
+// a body's text could occupy, so there is no code path through which
+// "Depends on #5"-shaped prose in api.PR.Body could ever reach a Resolution,
+// no matter what a caller does or doesn't project into it. The guard scans
+// PR's fields the same way TestPackageImportsStdlibOnly scans the package's
+// imports, so it keeps enforcing this if a body/description-shaped field is
+// ever added later.
+func TestPRHasNoBodyField(t *testing.T) {
+	typ := reflect.TypeOf(PR{})
+	for i := 0; i < typ.NumField(); i++ {
+		name := strings.ToLower(typ.Field(i).Name)
+		if strings.Contains(name, "body") || strings.Contains(name, "description") || strings.Contains(name, "text") {
+			t.Errorf("PR has field %q: a body/description/text-shaped field would let PR-body prose "+
+				"influence the computed relation, which is explicitly out of scope", typ.Field(i).Name)
+		}
+	}
+}
+
 // The derived graph must not depend on the order the PRs arrive in: the node
 // order, the downstream lists and the diagnostics are all keyed on (repo,
 // number), which is a TOTAL order. Reversing the input is the cheapest probe
@@ -866,6 +1378,8 @@ func TestResolutionString(t *testing.T) {
 		{ResolutionUnresolvable, "unresolvable"},
 		{ResolutionForeign, "foreign"},
 		{ResolutionSelf, "self"},
+		{ResolutionUpstreamOutOfSet, "upstream-out-of-set"},
+		{ResolutionUnblocked, "unblocked"},
 		{Resolution(42), "Resolution(42)"},
 	}
 	for _, tc := range cases {
@@ -887,6 +1401,7 @@ func TestDiagnosticKindString(t *testing.T) {
 		{DiagnosticForeignBase, "foreign-base"},
 		{DiagnosticUnresolvableBase, "unresolvable-base"},
 		{DiagnosticAmbiguousHead, "ambiguous-head"},
+		{DiagnosticUpstreamOutOfSet, "upstream-out-of-set"},
 		{DiagnosticKind(42), "DiagnosticKind(42)"},
 	}
 	for _, tc := range cases {
