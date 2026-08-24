@@ -34,7 +34,15 @@ claim/unclaim/gate/close so your ownership never collides with another session:
   from your session's OWN private path (e.g. your per-session scratchpad dir) —
   that is unique per session; do NOT derive it from the shared workspace root, or
   two sessions would pick the same id. Last resort: generate a full random UUID
-  and remember it.
+  and remember it. **Append a `-drain` suffix to whichever id you derive**
+  (operator ruling, `pg2-mcp1j`): `CLAUDE_SESSION_ID` is unset and
+  `$CLAUDE_CODE_SESSION_ID` is IDENTICAL to the parent session's when this
+  command is run from a dispatched subagent, so without the suffix a subagent
+  following this guidance derives its ORCHESTRATOR'S OWN actor id — its `bd`
+  writes become indistinguishable from the parent's in the audit trail, and any
+  post-hoc ownership guard becomes a no-op (the ids already match, so nothing
+  changes). The suffix is what makes ownership checks meaningful at all, whether
+  this command runs standalone or as a dispatched subagent.
 
 Refer to it below as ID. (Across a full process restart your id may change; the
 resume step then won't find an earlier-claimed bead.)
