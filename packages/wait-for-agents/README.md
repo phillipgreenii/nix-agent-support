@@ -49,11 +49,12 @@ forward. Tune the idle gate with `--consecutive-idle-checks` instead.
 
 ## Exit Codes
 
-| Code | Meaning                                         |
-| ---- | ----------------------------------------------- |
-| 0    | Idle reached (no agent actively running a turn) |
-| 1    | Timeout reached (agents still working)          |
-| 2    | Error (invalid arguments, etc.)                 |
+| Code | Meaning                                                                                                                        |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------ |
+| 0    | Idle reached (no agent actively running a turn)                                                                                |
+| 1    | Timeout reached (agents still working)                                                                                         |
+| 2    | Daemon unavailable (also this wrapper's own arg checks: missing value, unknown option)                                         |
+| 3    | A forwarded flag value rejected by `pa-monitor` itself (e.g. a non-numeric `--maximum-wait`/`--consecutive-idle-checks` value) |
 
 ### Exit 0 means "idle reached", not "work finished"
 
