@@ -361,6 +361,18 @@ func classifyApprovals(p PRInput, reg *agentregistry.Registry) approvalFacts {
 			mine(c.Author, c.Body)
 		}
 		for _, r := range p.Reviews {
+			// A review's body may feed the fallback only in states APPROVED
+			// and COMMENTED (pg2-4dz88.9). DISMISSED is an approval GitHub has
+			// already invalidated — resurrecting it from body text alone is
+			// the defect this guard exists to close; CHANGES_REQUESTED
+			// contradicts a positive verdict; PENDING is unsubmitted; and an
+			// unknown/empty state fails closed. COMMENTED MUST stay allowed —
+			// a review-summary verdict is normally state COMMENTED, not
+			// APPROVED, so narrowing this to an APPROVED-only allow list would
+			// delete the fallback documented above rather than fix the guard.
+			if r.State != "APPROVED" && r.State != "COMMENTED" {
+				continue
+			}
 			mine(r.Author, r.Body)
 		}
 	}

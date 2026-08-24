@@ -13,6 +13,16 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/beads"
 )
 
+// Placeholder fixtures for the review-state approval guard tests below
+// (pg2-4dz88.9). Generic login and anchored pattern only — no real bot login
+// or verdict phrasing, per this repo's public-repo identifier rule.
+const (
+	approvalGuardAgentLogin = "agent-one"
+	approvalGuardPattern    = `(?im)^ok-to-land$`
+	matchingBody            = "ok-to-land"
+	nonMatchingBody         = "no-opinion"
+)
+
 // TestBuildSplitsMineFromReview verifies the partition under the broadened "PRs
 // to Review" contract (6b/B5): PRs authored by Self go to Mine (even drafts);
 // every OTHER non-draft PR that still carries a live match reason (team-authored
@@ -774,6 +784,133 @@ func TestBuildApprovalStateMatchIsExact(t *testing.T) {
 				t.Errorf("state %q counted as an approval: HumanApprovers = %d, want 0", state, got)
 			}
 		})
+	}
+}
+
+// TestBuildDismissedReviewBodyDoesNotApprove verifies a DISMISSED review whose
+// body matches the configured approval pattern does NOT set agent_approved:
+// GitHub already invalidated that approval, and the body-text fallback must
+// not resurrect it. Fixture deliberately has no Approvals (store) row and no
+// Comments, so only the review-body fallback under test can set the result.
+// (pg2-4dz88.9)
+func TestBuildDismissedReviewBodyDoesNotApprove(t *testing.T) {
+	reg, err := agentregistry.New([]agentregistry.Entry{
+		{Login: approvalGuardAgentLogin, ApprovalRegex: approvalGuardPattern},
+	})
+	if err != nil {
+		t.Fatalf("agentregistry.New: %v", err)
+	}
+	snap := Build(BuilderInput{
+		Self:     "alice",
+		Registry: reg,
+		PRs: []PRInput{{
+			PR:        api.PR{Repo: "o/r", Number: 1, Author: "alice", HeadSHA: "h1"},
+			Ownership: ownership.Mine,
+			Reviews:   []api.Review{{ID: "r1", Author: approvalGuardAgentLogin, State: "DISMISSED", Body: matchingBody}},
+		}},
+	})
+	if len(snap.Mine) != 1 {
+		t.Fatalf("want 1 mine row, got %d", len(snap.Mine))
+	}
+	row := snap.Mine[0]
+	if row.AgentApproved {
+		t.Error("a DISMISSED review's matching body must not set AgentApproved")
+	}
+	if row.HumanApproved {
+		t.Error("a DISMISSED review's matching body must not set HumanApproved either")
+	}
+}
+
+// TestBuildAgentApprovalReviewStateGuard pins, per GitHub review state,
+// whether a body-text match in a review SUMMARY may set agent_approved. Two
+// rows are load-bearing: "COMMENTED ... still approves" fails if the guard is
+// over-corrected to an APPROVED-only allow list (a review-summary verdict is
+// normally state COMMENTED, not APPROVED — see classifyApprovals' doc
+// comment); the two APPROVED rows together prove the fix did not break the
+// legitimate approval paths. The APPROVED/non-matching-body row demonstrates
+// approval via the store ledger (the current "tier 1"; see
+// TestBuildApproverCountsDedupeAndPreferStore) rather than the body fallback,
+// since post-pg2-4dz88.1.9 a review's State alone no longer feeds approval —
+// only the body-text fallback under test, and the separate per-approver
+// store. (pg2-4dz88.9)
+func TestBuildAgentApprovalReviewStateGuard(t *testing.T) {
+	reg, err := agentregistry.New([]agentregistry.Entry{
+		{Login: approvalGuardAgentLogin, ApprovalRegex: approvalGuardPattern},
+	})
+	if err != nil {
+		t.Fatalf("agentregistry.New: %v", err)
+	}
+	for _, tc := range []struct {
+		name      string
+		state     string
+		body      string
+		approvals []store.Approval
+		wantAgent bool
+	}{
+		{"APPROVED matching body approves", "APPROVED", matchingBody, nil, true},
+		{"COMMENTED review summary still approves", "COMMENTED", matchingBody, nil, true},
+		{"DISMISSED matching body must NOT approve", "DISMISSED", matchingBody, nil, false},
+		{"CHANGES_REQUESTED matching body must NOT approve", "CHANGES_REQUESTED", matchingBody, nil, false},
+		{"PENDING matching body must NOT approve", "PENDING", matchingBody, nil, false},
+		{"unknown state fails closed", "SOME_FUTURE_STATE", matchingBody, nil, false},
+		{"empty state fails closed", "", matchingBody, nil, false},
+		{
+			"APPROVED non-matching body still approves via the store ledger",
+			"APPROVED", nonMatchingBody,
+			[]store.Approval{{Approver: approvalGuardAgentLogin, State: "approved", HeadSHA: "h1"}},
+			true,
+		},
+		{"COMMENTED non-matching body does not approve", "COMMENTED", nonMatchingBody, nil, false},
+		{"DISMISSED non-matching body does not approve", "DISMISSED", nonMatchingBody, nil, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			snap := Build(BuilderInput{
+				Self:     "alice",
+				Registry: reg,
+				PRs: []PRInput{{
+					PR:        api.PR{Repo: "o/r", Number: 1, Author: "alice", HeadSHA: "h1"},
+					Ownership: ownership.Mine,
+					Approvals: tc.approvals,
+					Reviews:   []api.Review{{ID: "r1", Author: approvalGuardAgentLogin, State: tc.state, Body: tc.body}},
+				}},
+			})
+			if len(snap.Mine) != 1 {
+				t.Fatalf("want 1 mine row, got %d", len(snap.Mine))
+			}
+			if got := snap.Mine[0].AgentApproved; got != tc.wantAgent {
+				t.Errorf("state=%q body=%q: AgentApproved = %v, want %v", tc.state, tc.body, got, tc.wantAgent)
+			}
+		})
+	}
+}
+
+// TestBuildDismissedReviewNonRegisteredLoginDoesNotApprove pins that the
+// review-state guard does not accidentally start counting a non-agent login:
+// a DISMISSED review from a login the registry does not know, whose body
+// still matches the configured pattern, must set neither agent- nor
+// human-approved. (pg2-4dz88.9)
+func TestBuildDismissedReviewNonRegisteredLoginDoesNotApprove(t *testing.T) {
+	reg, err := agentregistry.New([]agentregistry.Entry{
+		{Login: approvalGuardAgentLogin, ApprovalRegex: approvalGuardPattern},
+	})
+	if err != nil {
+		t.Fatalf("agentregistry.New: %v", err)
+	}
+	snap := Build(BuilderInput{
+		Self:     "alice",
+		Registry: reg,
+		PRs: []PRInput{{
+			PR:        api.PR{Repo: "o/r", Number: 1, Author: "alice", HeadSHA: "h1"},
+			Ownership: ownership.Mine,
+			Reviews:   []api.Review{{ID: "r1", Author: "human-one", State: "DISMISSED", Body: matchingBody}},
+		}},
+	})
+	if len(snap.Mine) != 1 {
+		t.Fatalf("want 1 mine row, got %d", len(snap.Mine))
+	}
+	row := snap.Mine[0]
+	if row.AgentApproved || row.HumanApproved {
+		t.Errorf("non-registered login must not set approval: agent=%v human=%v", row.AgentApproved, row.HumanApproved)
 	}
 }
 
