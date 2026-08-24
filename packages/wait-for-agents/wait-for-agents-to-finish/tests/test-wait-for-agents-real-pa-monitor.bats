@@ -13,10 +13,13 @@
 # mkBashScript's `check`), which carries the real pa-monitor on its PATH through
 # runtimeDeps. Nothing is stubbed, so a future argument drift fails here.
 #
-# READ THE MESSAGE, NOT THE EXIT CODE. No daemon runs in the check sandbox, so
-# the real binary always fails -- but "daemon unreachable" (args accepted, wait
-# loop reached) and "flag provided but not defined" (args rejected during flag
-# parsing) BOTH exit 2. Only the message distinguishes them.
+# READ THE MESSAGE, NOT JUST THE EXIT CODE. No daemon runs in the check
+# sandbox, so the real binary always fails -- "daemon unreachable" (args
+# accepted, wait loop reached) exits 2; "flag provided but not defined" (args
+# rejected during flag parsing) exits 3, now that pa-monitor bead pg2-3rlwm
+# made that code path reachable and split it out of the daemon-unavailable
+# exit 2. The message still confirms WHICH failure occurred, independent of
+# the exit code.
 
 setup() {
   if [[ -z ${SCRIPT_UNDER_TEST:-} ]]; then
@@ -65,4 +68,14 @@ assert_args_accepted() {
   run "$SCRIPT_UNDER_TEST" --caffeinate --maximum-wait 1
   [ "$status" -eq 2 ]
   assert_args_accepted
+}
+
+# Closes the gap pg2-3rlwm's investigation noted: a malformed flag VALUE
+# reaches pa-monitor's own flag parsing (the wrapper only checks --maximum-wait
+# is non-empty, not that it is numeric), so it exits 3 -- distinct from the
+# exit-2 "daemon unreachable" cases above.
+@test "real pa-monitor rejects a malformed --maximum-wait value with exit 3" {
+  run "$SCRIPT_UNDER_TEST" --maximum-wait abc
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"invalid value"* ]]
 }
