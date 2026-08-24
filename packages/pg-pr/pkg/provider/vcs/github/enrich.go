@@ -62,6 +62,30 @@ func prNodeSelection(connFirst int) string {
         deletions
         changedFiles
         repository { nameWithOwner }
+        stack {
+          id
+          number
+          baseRefName
+          size
+          entries(first: 50) {
+            totalCount
+            pageInfo { hasNextPage }
+            nodes {
+              id
+              position
+              pullRequest {
+                number
+                headRefName
+                baseRefName
+              }
+            }
+          }
+        }
+        stackEntry {
+          id
+          position
+          stack { id }
+        }
         reviews(first: %[1]d) {
           totalCount
           pageInfo { hasNextPage }
@@ -300,8 +324,17 @@ type ghPRNode struct {
 	Repository   struct {
 		NameWithOwner string `json:"nameWithOwner"`
 	} `json:"repository"`
-	Body   string `json:"body"`
-	Labels struct {
+	// Stack and StackEntry are GitHub's native stacked-PR fields (private
+	// preview, see testdata/native-stack-fields.json). Both are nil when the
+	// PR isn't part of a native stack, when the fields are null in the
+	// response, or when they're absent from the response entirely (older
+	// schema, or the preview withdrawn) — json.Unmarshal treats a missing key
+	// and an explicit null identically for a pointer field, so both cases
+	// degrade the same way with no error.
+	Stack      *ghPRStack      `json:"stack"`
+	StackEntry *ghPRStackEntry `json:"stackEntry"`
+	Body       string          `json:"body"`
+	Labels     struct {
 		TotalCount int        `json:"totalCount"`
 		PageInfo   ghPageInfo `json:"pageInfo"`
 		Nodes      []struct {
@@ -344,6 +377,39 @@ type ghPRNode struct {
 			} `json:"commit"`
 		} `json:"nodes"`
 	} `json:"commits"`
+}
+
+// ghPRStack mirrors GitHub's native PullRequestStack type (private preview):
+// the ordered set of PRs making up one stack, keyed by the stack's own node
+// id.
+type ghPRStack struct {
+	ID          string `json:"id"`
+	Number      int    `json:"number"`
+	BaseRefName string `json:"baseRefName"`
+	Size        int    `json:"size"`
+	Entries     struct {
+		TotalCount int        `json:"totalCount"`
+		PageInfo   ghPageInfo `json:"pageInfo"`
+		Nodes      []struct {
+			ID          string `json:"id"`
+			Position    int    `json:"position"`
+			PullRequest struct {
+				Number      int    `json:"number"`
+				HeadRefName string `json:"headRefName"`
+				BaseRefName string `json:"baseRefName"`
+			} `json:"pullRequest"`
+		} `json:"nodes"`
+	} `json:"entries"`
+}
+
+// ghPRStackEntry mirrors GitHub's native PullRequestStackEntry type (private
+// preview): this PR's own membership record within its stack.
+type ghPRStackEntry struct {
+	ID       string `json:"id"`
+	Position int    `json:"position"`
+	Stack    struct {
+		ID string `json:"id"`
+	} `json:"stack"`
 }
 
 type ghUser struct {
@@ -582,7 +648,35 @@ func prFromGHNode(n ghPRNode, repo string) api.PR {
 			pr.Assignees = append(pr.Assignees, a.Login)
 		}
 	}
+	applyStackFields(&pr, n)
 	return pr
+}
+
+// applyStackFields maps GitHub's native stacked-PR fields (n.Stack /
+// n.StackEntry) onto pr. Both are nil when the PR isn't part of a native
+// stack, when the fields are null, or when they're absent from the response
+// entirely — in every one of those cases this is a no-op and pr's stack
+// fields are left at their zero value, never an error.
+func applyStackFields(pr *api.PR, n ghPRNode) {
+	if n.StackEntry != nil {
+		pr.StackID = n.StackEntry.Stack.ID
+		pr.StackPosition = n.StackEntry.Position
+	}
+	if n.Stack == nil {
+		return
+	}
+	pr.StackSize = n.Stack.Size
+	if pr.StackID == "" {
+		pr.StackID = n.Stack.ID
+	}
+	for _, e := range n.Stack.Entries.Nodes {
+		switch e.Position {
+		case pr.StackPosition - 1:
+			pr.StackUpstreamHeadRefName = e.PullRequest.HeadRefName
+		case pr.StackPosition + 1:
+			pr.StackDownstreamHeadRefName = e.PullRequest.HeadRefName
+		}
+	}
 }
 
 func reviewsFromGHNode(n ghPRNode) []api.Review {
@@ -738,6 +832,9 @@ func truncationFlags(n ghPRNode) []string {
 	}
 	if n.Assignees.PageInfo.HasNextPage {
 		flags = append(flags, "assignees")
+	}
+	if n.Stack != nil && n.Stack.Entries.PageInfo.HasNextPage {
+		flags = append(flags, "stackEntries")
 	}
 	return flags
 }

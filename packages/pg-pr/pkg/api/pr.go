@@ -64,6 +64,28 @@ type PR struct {
 	MergeStateStatus string `json:"merge_state_status,omitempty"`
 	// AutoMergeEnabled is true when GitHub auto-merge is armed on the PR.
 	AutoMergeEnabled bool `json:"auto_merge_enabled,omitempty"`
+	// StackID identifies the native GitHub stack this PR belongs to
+	// (PullRequestStack.id, via PullRequestStackEntry.stack.id). Populated by
+	// the GraphQL enrich path only when GitHub's native stacked-PR fields
+	// (private preview) are present and non-null for this PR; empty when the
+	// PR isn't stacked, the fields are null/absent from the response (older
+	// schema, or the preview withdrawn), or on the REST fallback path.
+	StackID string `json:"stack_id,omitempty"`
+	// StackPosition is this PR's 1-based position within its native stack
+	// (PullRequestStackEntry.position). Zero when not stacked.
+	StackPosition int `json:"stack_position,omitempty"`
+	// StackSize is the total number of PRs in this PR's native stack
+	// (PullRequestStack.size). Zero when not stacked.
+	StackSize int `json:"stack_size,omitempty"`
+	// StackUpstreamHeadRefName is the head ref of the stack entry immediately
+	// upstream of this PR (StackPosition-1) — the branch this PR is stacked
+	// on. Empty when this PR is the bottommost stacked entry or not stacked.
+	StackUpstreamHeadRefName string `json:"stack_upstream_head_ref_name,omitempty"`
+	// StackDownstreamHeadRefName is the head ref of the stack entry
+	// immediately downstream of this PR (StackPosition+1) — the next PR
+	// stacked on top of this one. Empty when this PR is the topmost stacked
+	// entry or not stacked.
+	StackDownstreamHeadRefName string `json:"stack_downstream_head_ref_name,omitempty"`
 }
 
 // HasConflict reports whether GitHub signals a merge conflict on this PR, via

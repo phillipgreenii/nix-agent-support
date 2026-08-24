@@ -1016,3 +1016,229 @@ func TestEnrichedPRs_HitsPageCap(t *testing.T) {
 		}
 	}
 }
+
+// nativeStackFixture mirrors testdata/native-stack-fields.json's container
+// shape: named PR-node fragments (not full GraphQL envelopes), one per
+// scenario, so multiple test cases can share the one recorded fixture.
+type nativeStackFixture struct {
+	StackedPRExample   json.RawMessage `json:"stackedPRExample"`
+	UnstackedPRExample json.RawMessage `json:"unstackedPRExample"`
+}
+
+func loadNativeStackFixture(t *testing.T) nativeStackFixture {
+	t.Helper()
+	raw, err := os.ReadFile("testdata/native-stack-fields.json")
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	var f nativeStackFixture
+	if err := json.Unmarshal(raw, &f); err != nil {
+		t.Fatalf("parse fixture: %v", err)
+	}
+	return f
+}
+
+// wrapAsSearchNode embeds one PR-node fragment into the minimal GraphQL
+// search envelope parseEnrichedPRs expects.
+func wrapAsSearchNode(node json.RawMessage) []byte {
+	return []byte(`{"data":{"search":{"nodes":[` + string(node) + `]}}}`)
+}
+
+// TestParseEnrichedPRs_NativeStackPopulated verifies GitHub's native
+// stacked-PR fields (private preview) map onto api.PR with position/order
+// preserved when present, using the recorded stackedPRExample fixture
+// (pg2-4dz88.3.4).
+func TestParseEnrichedPRs_NativeStackPopulated(t *testing.T) {
+	f := loadNativeStackFixture(t)
+	got, _, _, err := parseEnrichedPRs(wrapAsSearchNode(f.StackedPRExample), "owner/repo")
+	if err != nil {
+		t.Fatalf("parseEnrichedPRs: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("want 1 PR, got %d", len(got))
+	}
+	pr := got[0].PR
+
+	if pr.StackID != "PullRequestStack_synthetic_1" {
+		t.Errorf("StackID = %q, want PullRequestStack_synthetic_1", pr.StackID)
+	}
+	if pr.StackPosition != 2 {
+		t.Errorf("StackPosition = %d, want 2", pr.StackPosition)
+	}
+	if pr.StackSize != 3 {
+		t.Errorf("StackSize = %d, want 3", pr.StackSize)
+	}
+	// Order preserved: the fixture's entry at position-1 is PR #40
+	// (feature-a) and at position+1 is PR #44 (feature-c).
+	if pr.StackUpstreamHeadRefName != "feature-a" {
+		t.Errorf("StackUpstreamHeadRefName = %q, want feature-a", pr.StackUpstreamHeadRefName)
+	}
+	if pr.StackDownstreamHeadRefName != "feature-c" {
+		t.Errorf("StackDownstreamHeadRefName = %q, want feature-c", pr.StackDownstreamHeadRefName)
+	}
+	// Branch/Base are unaffected by the addition.
+	if pr.Branch != "feature-b" || pr.Base != "feature-a" {
+		t.Errorf("Branch/Base = %q/%q, want feature-b/feature-a", pr.Branch, pr.Base)
+	}
+}
+
+// TestParseEnrichedPRs_NativeStackNull verifies that a PR carrying explicit
+// JSON `null` for both stack and stackEntry (an unstacked PR under the
+// preview schema) degrades to the zero value with no error, using the
+// recorded unstackedPRExample fixture (pg2-4dz88.3.4).
+func TestParseEnrichedPRs_NativeStackNull(t *testing.T) {
+	f := loadNativeStackFixture(t)
+	got, _, _, err := parseEnrichedPRs(wrapAsSearchNode(f.UnstackedPRExample), "owner/repo")
+	if err != nil {
+		t.Fatalf("parseEnrichedPRs: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("want 1 PR, got %d", len(got))
+	}
+	pr := got[0].PR
+
+	if pr.StackID != "" || pr.StackPosition != 0 || pr.StackSize != 0 ||
+		pr.StackUpstreamHeadRefName != "" || pr.StackDownstreamHeadRefName != "" {
+		t.Errorf("want zero-value stack fields when stack/stackEntry are null, got %+v", pr)
+	}
+	if pr.Branch != "hotfix-x" || pr.Base != "trunk" {
+		t.Errorf("Branch/Base = %q/%q, want hotfix-x/trunk", pr.Branch, pr.Base)
+	}
+}
+
+// TestParseEnrichedPRs_NativeStackAbsentFromResponse verifies that a response
+// which never mentions stack/stackEntry at all (an older schema, or the
+// private preview withdrawn) degrades the same way as an explicit null: zero
+// value, no error, and Branch/Base still populated — proving the base-chain
+// fallback's inputs survive this change (pg2-4dz88.3.4). Uses an inline JSON
+// literal per this file's convention for new synthetic cases, not the
+// shared testdata/enriched-prs-single.json fixture.
+func TestParseEnrichedPRs_NativeStackAbsentFromResponse(t *testing.T) {
+	const resp = `{"data":{"search":{"nodes":[
+	  {"number":9,"title":"t","author":{"__typename":"User","login":"alice"},
+	   "headRefName":"feat/old-schema","baseRefName":"main",
+	   "reviews":{"nodes":[]},"comments":{"nodes":[]},"reviewThreads":{"nodes":[]},"commits":{"nodes":[]}}
+	]}}}`
+	got, _, _, err := parseEnrichedPRs([]byte(resp), "owner/repo")
+	if err != nil {
+		t.Fatalf("parseEnrichedPRs: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("want 1 PR, got %d", len(got))
+	}
+	pr := got[0].PR
+
+	if pr.StackID != "" || pr.StackPosition != 0 || pr.StackSize != 0 ||
+		pr.StackUpstreamHeadRefName != "" || pr.StackDownstreamHeadRefName != "" {
+		t.Errorf("want zero-value stack fields when stack/stackEntry are absent from the response, got %+v", pr)
+	}
+	if pr.Branch != "feat/old-schema" || pr.Base != "main" {
+		t.Errorf("Branch/Base = %q/%q, want feat/old-schema/main", pr.Branch, pr.Base)
+	}
+}
+
+// TestGetPR_RESTFallbackHasNoStackFields verifies the REST fallback path
+// (GetPR, no GraphQL involved at all) never populates the native stack
+// fields, and that Branch/Base — the base-chain fallback's inputs — still
+// come through unaffected (pg2-4dz88.3.4).
+func TestGetPR_RESTFallbackHasNoStackFields(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["pr view"] = []byte(`{
+		"number": 42, "title": "t", "state": "OPEN", "author": {"login": "alice"},
+		"headRefName": "feature-b", "baseRefName": "feature-a"
+	}`)
+	p := NewWithRunner(gh)
+
+	pr, err := p.GetPR(context.Background(), "owner/repo", 42)
+	if err != nil {
+		t.Fatalf("GetPR: %v", err)
+	}
+	if pr.StackID != "" || pr.StackPosition != 0 || pr.StackSize != 0 ||
+		pr.StackUpstreamHeadRefName != "" || pr.StackDownstreamHeadRefName != "" {
+		t.Errorf("REST fallback path must never populate stack fields, got %+v", pr)
+	}
+	if pr.Branch != "feature-b" || pr.Base != "feature-a" {
+		t.Errorf("Branch/Base = %q/%q, want feature-b/feature-a", pr.Branch, pr.Base)
+	}
+}
+
+// TestApplyStackFields_IDFallsBackToStackWhenNoStackEntry verifies
+// applyStackFields' defensive fallback: when a response carries `stack` but
+// no `stackEntry` (a shape the schema likely never actually emits together,
+// since a PR in a stack should carry both, but nothing guarantees it),
+// StackID still comes from stack.id rather than being left empty. Found by
+// pg-go-mutate (pg2-4dz88.3.4): the `if pr.StackID == ""` guard at
+// applyStackFields survived every mutation because every prior test left
+// StackEntry populated, so the fallback assignment itself was never
+// exercised.
+func TestApplyStackFields_IDFallsBackToStackWhenNoStackEntry(t *testing.T) {
+	raw := []byte(`{
+	  "number": 50, "title": "t", "url": "u",
+	  "author": {"__typename":"User","login":"a"},
+	  "baseRefName":"main","headRefName":"f","repository":{"nameWithOwner":"o/n"},
+	  "stack": {"id":"PullRequestStack_x","number":1,"baseRefName":"trunk","size":1,
+	            "entries":{"totalCount":1,"nodes":[]}},
+	  "stackEntry": null
+	}`)
+	var n ghPRNode
+	if err := json.Unmarshal(raw, &n); err != nil {
+		t.Fatal(err)
+	}
+	pr := prFromGHNode(n, "o/n")
+	if pr.StackID != "PullRequestStack_x" {
+		t.Errorf("StackID = %q, want PullRequestStack_x (fallback to stack.id)", pr.StackID)
+	}
+	if pr.StackPosition != 0 {
+		t.Errorf("StackPosition = %d, want 0 (no stackEntry)", pr.StackPosition)
+	}
+	if pr.StackSize != 1 {
+		t.Errorf("StackSize = %d, want 1", pr.StackSize)
+	}
+}
+
+// TestApplyStackFields_StackEntryIDTakesPrecedenceOverStack verifies the
+// other direction of the same guard: when stackEntry IS present, its
+// stack.id is used as-is and is NOT overwritten by the sibling stack.id —
+// the two are expected to always agree in a real response, but the guard's
+// job is to prefer stackEntry without needing that to hold.
+func TestApplyStackFields_StackEntryIDTakesPrecedenceOverStack(t *testing.T) {
+	raw := []byte(`{
+	  "number": 51, "title": "t", "url": "u",
+	  "author": {"__typename":"User","login":"a"},
+	  "baseRefName":"main","headRefName":"f","repository":{"nameWithOwner":"o/n"},
+	  "stack": {"id":"stack-id-from-stack-field","number":1,"baseRefName":"trunk","size":1,
+	            "entries":{"totalCount":1,"nodes":[]}},
+	  "stackEntry": {"id":"entry-1","position":1,"stack":{"id":"stack-id-from-stack-entry"}}
+	}`)
+	var n ghPRNode
+	if err := json.Unmarshal(raw, &n); err != nil {
+		t.Fatal(err)
+	}
+	pr := prFromGHNode(n, "o/n")
+	if pr.StackID != "stack-id-from-stack-entry" {
+		t.Errorf("StackID = %q, want stack-id-from-stack-entry (stackEntry.stack.id takes precedence)", pr.StackID)
+	}
+}
+
+// TestTruncationFlags_StackEntries verifies stack.entries sets the
+// "stackEntries" truncation flag when hasNextPage is true, mirroring the
+// other connections in truncationFlags.
+func TestTruncationFlags_StackEntries(t *testing.T) {
+	const resp = `{"data":{"search":{"nodes":[
+	  {"number":1,
+	   "reviews":{"pageInfo":{"hasNextPage":false},"nodes":[]},
+	   "comments":{"pageInfo":{"hasNextPage":false},"nodes":[]},
+	   "reviewThreads":{"pageInfo":{"hasNextPage":false},"nodes":[]},
+	   "stack":{"id":"s1","size":40,"entries":{"pageInfo":{"hasNextPage":true},"nodes":[]}}}
+	]}}}`
+	got, _, _, err := parseEnrichedPRs([]byte(resp), "owner/repo")
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("want 1 PR, got %d", len(got))
+	}
+	if !sliceEq(got[0].Truncated, []string{"stackEntries"}) {
+		t.Errorf("Truncated = %v, want [stackEntries]", got[0].Truncated)
+	}
+}
