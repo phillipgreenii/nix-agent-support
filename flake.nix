@@ -280,197 +280,70 @@
         inputs.phillipgreenii-nix-base.flakeModules.checks
       ];
 
-      # The behavior-docs conformance gates run ON THE WAY IN, not only under a
-      # full `nix flake check` (bead pg2-wr6lm.4, plan item 6). A gate that fires
-      # only on a flake check does not hold the line while a work stream is
-      # actively editing the sets it governs, which is exactly when it is needed.
+      # pg-test-runner rewiring (bead pg2-0ppig): the per-module `nix build`
+      # pre-push gates this repo used to run at push time are REMOVED --
+      # nine `<module>-push-golangci` hooks (bead pg2-767br) and the two
+      # `behavior-docs-*` hooks (beads pg2-wr6lm.4/.6.3, pg2-2oupw). Their
+      # equivalents (`checks.<module>-golangci`, `checks.test-behavior-docs-*`
+      # below) are untouched and still run under `nix flake check` -- that
+      # thorough tier now runs at LANDING time (the integrate-branch landing
+      # handler's flake-check precondition for this repo) rather than at push
+      # time, so removing these push-time nix builds does not leave the repo
+      # ungated; the gate moved, it did not disappear.
       #
-      # WHY PRE-PUSH, NOT PRE-COMMIT (moved here at WS-3 landing, pg2-wr6lm.6.3).
-      # Originally pre-commit: measured 2026-07-31 at 7.3s over the two sets that
-      # existed then. Re-measured 2026-08-20 after WS-3 added three more real sets
-      # (pa-monitor, ccpool, pg-pr): the full runner now takes ~27.6s — materially
-      # past the budget that justified pre-commit, so it moved to pre-push per the
-      # same rule the golangci-relint hook below already follows ("too slow on
-      # every commit" -> pre-push). The `files` filter still applies, so it fires
-      # only when something it actually governs is staged: a behavior-docs set, an
-      # evaluator script, the runner, or the recorded baseline.
+      # In their place: ONE hook, `run-unit-tests`, that runs the unit tier of
+      # every touched project's tests directly against the working tree --
+      # no `nix build`, no flake evaluation, seconds rather than tens of
+      # seconds. It defers entirely to an externally-provisioned test runner
+      # resolved from PATH (installed via the home-manager
+      # `phillipgreenii.pg-test-runner` module, which this repo's locked
+      # `phillipgreenii-nix-base` input already provides): a missing runner
+      # is a LOUD hook failure, never a silent skip -- an absence-keyed skip
+      # would let any PATH breakage no-op the only commit-time test gate.
+      # Inside the nix sandbox that builds `checks.pre-commit` itself the
+      # hook skips instead (detected via a positive `IN_NIX_BUILD` or
+      # `NIX_BUILD_TOP` indicator), because the hermetic `checks.*` tier
+      # already covers everything there.
       #
-      # `always_run = false` plus that filter is what keeps it from firing at all
-      # on an unrelated push.
-      #
-      # `pass_filenames = false`: the evaluators take SET DIRECTORIES, not files.
-      # The runner resolves everything under `$PWD` — the working tree — so the
-      # hook checks what is about to be committed, while the flake check resolves
-      # the same runner against the store copy of the flake source.
-      #
-      # Push-time golangci relint per Go module (bead pg2-767br). Absent this,
-      # a golangci-lint finding can currently surface only at `nix flake check`
-      # time — the network-dependent golangci-lint pre-commit hooks were
-      # deliberately removed (pg2-6wly, pg2-2cuzv; see the `checks` comment
-      # below) in favour of the offline `checks.<system>.<module>-golangci`
-      # (mkGoLint, gomod2nix vendor env, no network). That leaves a fresh
-      # finding undetected for days/weeks until someone happens to run
-      # `nix flake check`. Reusing that SAME check at push time closes the gap
-      # without reintroducing the network dependency pg2-6wly/pg2-2cuzv
-      # rejected — no new lint logic, no excludes, just an earlier trigger.
-      #
-      # WHY PRE-PUSH, NOT PRE-COMMIT (the opposite call from
-      # behavior-docs-real-corpus above, deliberately — that hook is 7.3s and
-      # self-contained; this one is not). Measured on this repo, 2026-08-18:
-      # a cached `nix build .#checks.<system>.<module>-golangci` (nothing
-      # changed) costs ~0.4s, but a real relint (module actually touched)
-      # costs ~35s for even the smallest module (pg-ccaudit) — fine once per
-      # push, too slow on every commit. Base's own
-      # `flake-modules/pre-commit.nix` already anticipates exactly this:
-      # "Repos wanting local commit/push-time Go lint feedback can add their
-      # own hook via `extraHooks` (e.g. at stages = [ "pre-push" ] to keep it
-      # out of the sandboxed check)". That "out of the sandboxed check"
-      # property is load-bearing, not cosmetic: `checks.pre-commit`'s
-      # sandboxed buildPhase runs `prek run --all-files` with NO `--stage`,
-      # and a nested `nix build` inside that no-network sandbox would fail
-      # outright. Verified empirically (prek 0.3.11, scratch repo, 2026-08-18):
-      # `prek run --all-files` with no `--stage` skips a
-      # `stages = [ "pre-push" ]`-only hook entirely, so this hook never runs
-      # inside `checks.pre-commit`. A pre-commit-staged version would NOT have
-      # that property — `checks.pre-commit` commits the WHOLE tree, so a
-      # Go-file-scoped `files` filter would match unconditionally on every
-      # `nix flake check` and hit the nested-build failure every time.
-      #
-      # `goLintPushTouchDirs`: module -> its own dir plus any sibling module it
-      # locally `replace`s onto, so a change to a dependency also relints its
-      # dependents. Mirrors the `patternBGoLints` filesets in `checks` below —
-      # kept as a flat table here rather than derived from those
-      # `lib.fileset` values (a fileset does not walk back into path
-      # strings); the sibling repetition already exists in `patternBGoLints`
-      # itself, e.g. "claude-transcript" appears there 3 times for the same
-      # reason. A change to the root `.golangci.yml` reruns every module,
-      # since it can add or remove findings anywhere.
-      phillipgreenii.pre-commit.extraHooks =
-        pkgs:
-        let
-          inherit (pkgs) lib;
-          system = pkgs.stdenv.hostPlatform.system;
-          goLintPushTouchDirs = {
-            pg-pr = [ "pg-pr" ];
-            pb = [ "pb" ];
-            claude-extended-tool-approver = [ "claude-extended-tool-approver" ];
-            pa-monitor-decorator-scope = [ "pa-monitor-decorator-scope" ];
-            claude-transcript = [ "claude-transcript" ];
-            pg-ccaudit = [ "pg-ccaudit" ];
-            ccpool = [
-              "ccpool"
-              "claude-transcript"
-            ];
-            pa-monitor = [
-              "pa-monitor"
-              "claude-transcript"
-            ];
-            pr-pool = [
-              "pr-pool"
-              "ccpool"
-              "claude-transcript"
-            ];
-          };
-          # One reusable script (module name as $1); the per-system `system`
-          # is baked in at eval time, not passed at runtime, since this
-          # function is itself resolved once per system.
-          goLintPushHookApp = pkgs.writeShellApplication {
-            name = "go-lint-push-hook";
-            runtimeInputs = [ pkgs.nix ];
-            text = ''
-              module="$1"
-              echo "==> pre-push golangci relint: $module (bead pg2-767br)" >&2
-              if ! nix build ".#checks.${system}.$module-golangci" --no-link; then
-                echo "pre-push golangci relint FAILED for module '$module' -- fix the finding(s) reported above (do NOT bypass with --no-verify)." >&2
-                exit 1
-              fi
-            '';
-          };
-          mkGoLintPushHook =
-            module: dirs:
-            lib.nameValuePair "${module}-push-golangci" {
-              enable = true;
-              name = "${module}-push-golangci";
-              description = "pre-push offline golangci relint for the ${module} Go module (reuses checks.${module}-golangci)";
-              entry = "${goLintPushHookApp}/bin/go-lint-push-hook ${module}";
-              language = "system";
-              pass_filenames = false;
-              always_run = false;
-              stages = [ "pre-push" ];
-              files = "^(packages/(${lib.concatStringsSep "|" dirs})/|\\.golangci\\.yml$)";
-            };
-        in
-        {
-          behavior-docs-real-corpus = {
-            enable = true;
-            name = "behavior-docs-real-corpus";
-            description = "run the intra/inter/impl conformance evaluators over the real in-repo behavior-docs sets";
-            entry = "${
-              pkgs.writeShellApplication {
-                name = "behavior-docs-real-corpus-hook";
-                runtimeInputs = [
-                  pkgs.bash
-                  pkgs.gawk
-                  pkgs.gnugrep
-                  pkgs.gnused
-                  pkgs.coreutils
-                  pkgs.findutils
-                ];
-                text = ''
-                  exec bash "$PWD/tests/behavior-docs-real-corpus.sh" "$PWD"
-                '';
-              }
-            }/bin/behavior-docs-real-corpus-hook";
-            language = "system";
-            pass_filenames = false;
-            always_run = false;
-            stages = [ "pre-push" ];
-            files = "^(behavior-docs/docs/behavior/|packages/pr-pool/docs/behavior/|packages/pr-pool/.*\\.go$|packages/pa-monitor/docs/behavior/|packages/ccpool/docs/behavior/|packages/pg-pr/docs/behavior/|claude-marketplace/behavior-docs-conformance/|tests/behavior-docs-real-corpus)";
-          };
+      # `pass_filenames = true`: prek's staged-file list drives which
+      # projects the runner discovers and runs -- the runner itself never
+      # reads git state, only the file paths it is handed plus the repo
+      # toplevel (found via the `.git` entry). `require_serial = true`:
+      # prek may otherwise chunk a large staged-file list into multiple
+      # concurrent invocations of the entry, which would race one project's
+      # suite against itself.
+      phillipgreenii.pre-commit.extraHooks = pkgs: {
+        run-unit-tests = {
+          enable = true;
+          name = "run-unit-tests";
+          description = "unit tests (changed projects) -- pg-test-runner --labels unit, no nix, seconds";
+          entry = "${
+            pkgs.writeShellApplication {
+              name = "run-unit-tests-hook";
+              text = ''
+                # Inside the nix sandbox that builds checks.pre-commit the
+                # hermetic checks.* tier already covers everything -- skip
+                # rather than double-run (and nested `nix build`/network
+                # would fail outright in that no-network sandbox anyway).
+                if [ -n "''${IN_NIX_BUILD:-}" ] || [ -n "''${NIX_BUILD_TOP:-}" ]; then
+                  echo "run-unit-tests: inside the nix build sandbox; skipping (hermetic checks.* tier already covers this)" >&2
+                  exit 0
+                fi
 
-          # D5's `[<uuid>](<remote-url>)` link DEREFERENCING (bead pg2-2oupw,
-          # deferred from WS-6/pg2-wr6lm.4) — deliberately its OWN hook, not folded
-          # into behavior-docs-real-corpus above. See resolve-links.sh's header for
-          # the full reasoning; in short: that runner's baseline is shared between
-          # the sandboxed `nix flake check` caller (no sibling repos, no network,
-          # ever) and this pre-push caller (real workspace, siblings present), and
-          # a cross-repo D5 link genuinely resolves differently between the two —
-          # not a bug either caller could fix, so one shared ratchet cannot hold
-          # both correct answers. This check therefore runs ONLY here, unsandboxed,
-          # with real disk + optional real network, and NEVER inside `nix flake
-          # check` — which is also why it needs no network to keep that gate green.
-          # WARN-only by design (Q2 ruling on pg2-ijtui): this hook can never fail
-          # a push on its own account, only on a genuine usage/environment error.
-          behavior-docs-links = {
-            enable = true;
-            name = "behavior-docs-links";
-            description = "dereference D5's [<uuid>](<url>) imports-table links against a local or remote checkout (bead pg2-2oupw) -- advisory (WARN-only), never blocks a push on its own account";
-            entry = "${
-              pkgs.writeShellApplication {
-                name = "behavior-docs-links-hook";
-                runtimeInputs = [
-                  pkgs.bash
-                  pkgs.gawk
-                  pkgs.gnugrep
-                  pkgs.gnused
-                  pkgs.coreutils
-                  pkgs.findutils
-                  pkgs.git
-                  pkgs.curl
-                ];
-                text = ''
-                  exec bash "$PWD/claude-marketplace/behavior-docs-conformance/skills/behavior-docs-inter-conformance/scripts/resolve-links.sh" "$PWD/packages/pr-pool/docs/behavior"
-                '';
-              }
-            }/bin/behavior-docs-links-hook";
-            language = "system";
-            pass_filenames = false;
-            always_run = false;
-            stages = [ "pre-push" ];
-            files = "^(packages/pr-pool/docs/behavior/README\\.md|claude-marketplace/behavior-docs-conformance/(skills/behavior-docs-inter-conformance/scripts/resolve-links\\.sh|lib/imports-row\\.bash))$";
-          };
-        }
-        // lib.mapAttrs' mkGoLintPushHook goLintPushTouchDirs;
+                if ! command -v pg-test-runner >/dev/null 2>&1; then
+                  echo "run-unit-tests: pg-test-runner not found on PATH -- install it (phillipgreenii.pg-test-runner home-manager module) before committing. Do NOT bypass with --no-verify." >&2
+                  exit 1
+                fi
+
+                exec pg-test-runner --labels unit --files "$@"
+              '';
+            }
+          }/bin/run-unit-tests-hook";
+          language = "system";
+          pass_filenames = true;
+          require_serial = true;
+        };
+      };
 
       perSystem =
         {
