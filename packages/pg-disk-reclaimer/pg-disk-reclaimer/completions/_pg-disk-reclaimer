@@ -1,0 +1,11 @@
+#compdef pg-disk-reclaimer
+
+_pg_disk_reclaimer() {
+  _arguments \
+    '(-h --help)'{-h,--help}'[Show help message]' \
+    '(-v --version)'{-v,--version}'[Show version information]' \
+    '1: :(list validate reclaim)' \
+    '*:positional:_files'
+}
+
+_pg_disk_reclaimer "$@"

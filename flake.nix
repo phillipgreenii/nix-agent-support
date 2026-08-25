@@ -245,6 +245,19 @@
               inherit bashBuilders;
               inherit (final) agent-activity;
             }).pw-agent-activity.script;
+          # pg-disk-reclaimer: data-driven disk-space-reclaim CLI (epic
+          # pg2-txxyj; this task, pg2-txxyj.1, is scaffold-only -- no real
+          # subcommand logic yet). Single mkBashScript tool, so it takes
+          # `result.pg-disk-reclaimer.script` directly rather than
+          # symlinkJoin-ing `result.packages`, matching pw-reset-agents /
+          # pw-agent-activity above (same rationale: symlinkJoin would
+          # discard the script derivation's own pname/version and
+          # meta.mainProgram, and this package holds exactly one script).
+          pg-disk-reclaimer =
+            (import ./packages/pg-disk-reclaimer {
+              pkgs = final;
+              inherit bashBuilders;
+            }).pg-disk-reclaimer.script;
         }
         // prev.lib.optionalAttrs (basePkgs ? pnwf) { inherit (basePkgs) pnwf; }
         // prev.lib.optionalAttrs (basePkgs ? wsplan) { inherit (basePkgs) wsplan; };
@@ -3304,6 +3317,14 @@
               bashBuilders = pkgs._agentSupportBashBuilders;
               inherit (pkgs) agent-activity;
             }).checks
+            # test-pg-disk-reclaimer (bead pg2-txxyj.1). Same one-line idiom
+            # as pw-reset-agents/pw-agent-activity above: the overlay attr
+            # takes only the script derivation, so without this the suite
+            # would run in no gate at all.
+            // (import ./packages/pg-disk-reclaimer {
+              inherit pkgs;
+              bashBuilders = pkgs._agentSupportBashBuilders;
+            }).checks
             # Nine offline golangci-lint gates, one per Go module (pg2-2cuzv):
             # <module>-golangci for each of the six Pattern-A modules plus the
             # three Pattern-B (local-replace) modules.
@@ -3346,6 +3367,11 @@
               pw-agent-activity
               pw-reset-agents
               ;
+            # pg-disk-reclaimer is likewise an overlay-only attr (single
+            # mkBashScript tool holding just the script derivation) --
+            # re-exported for the same reason, so `nix build
+            # .#pg-disk-reclaimer` resolves via flake.packages.<system>.
+            inherit (pkgs) pg-disk-reclaimer;
             # codeburn is a manual-bump npm package (not Go/nix-update); re-exported so
             # `nix build .#codeburn` resolves it via flake.packages.<system>.
             inherit (pkgs) codeburn;
