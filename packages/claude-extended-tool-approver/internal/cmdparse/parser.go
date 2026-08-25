@@ -462,16 +462,33 @@ func hasWriteFlag(cmd string, args []string) bool {
 //     subcommand with one dangerous flag is inadmissible at this granularity — it
 //     would need a flag-aware predicate this one is not.
 //
-//     `symbolic-ref` IS THE ONE EXCEPTION TO "this one is not" (pg2-1k8sd). Its
-//     one-operand query form reads (criterion 1's disclosure leg is a ref NAME, not
-//     object content); its `--delete`/`-d` form and its two-operand SET form both
-//     MUTATE a ref — often HEAD — with no operand-count-blind admission able to tell
-//     the shapes apart. So the subcommand-name lookup below is followed, for this ONE
-//     entry, by gitSymbolicRefIsWrite — a flag/operand-aware guard mirroring
+//     `symbolic-ref` and `branch` ARE THE TWO EXCEPTIONS TO "this one is not"
+//     (pg2-1k8sd, pg2-hsymw). `symbolic-ref`'s one-operand query form reads
+//     (criterion 1's disclosure leg is a ref NAME, not object content); its
+//     `--delete`/`-d` form and its two-operand SET form both MUTATE a ref — often
+//     HEAD — with no operand-count-blind admission able to tell the shapes apart. So
+//     the subcommand-name lookup below is followed, for this entry, by
+//     gitSymbolicRefIsWrite — a flag/operand-aware guard mirroring
 //     internal/rules/git's symbolicRefVerdict exactly, so the git RULE and this
 //     substitution-body FLOOR cannot disagree about which spelling of `symbolic-ref`
-//     is safe. No other entry on this list needed one before, and adding a shape
-//     guard for a different subcommand is its own bead, not a precedent this one set.
+//     is safe.
+//
+//     `branch` IS THE SAME SHAPE, NARROWED FURTHER (pg2-hsymw). Nearly every OTHER
+//     `git branch` spelling can create, delete, move, copy or rename a ref, and
+//     internal/rules/git's isBranchUnsafe (the git RULE's own model for the BARE,
+//     non-substitution command) approves most of those outright — its question is
+//     "has git's own guard against an unintended one been removed", not "does this
+//     read". That is the WRONG question for this list, whose job is admitting
+//     bodies that emit no content, write nothing and move no ref — `git branch
+//     <name>` writes a ref, so mirroring isBranchUnsafe here would wrongly admit it.
+//     So the subcommand-name lookup is followed, for `branch`, by
+//     gitBranchIsShowCurrent — admission is one EXACT shape, not a flag/operand
+//     count: `rest[1:]` must be precisely the single token `--show-current` (no
+//     operand, no abbreviation), which prints the ref name HEAD currently points at
+//     and mutates nothing. Every other `git branch` spelling — bare list included —
+//     stays refused at THIS floor exactly as before `branch` was added to the map.
+//     No other entry on this list needed a shape guard before these two, and adding
+//     one for a different subcommand is its own bead, not a precedent they set.
 //
 //  3. Does it consult the INDEX? Index refresh compares the index against the worktree,
 //     which is the path that honors `core.fsmonitor` — a config value naming a program
@@ -614,6 +631,12 @@ var gitReadSubcommands = map[string]bool{
 	// mutations. See criterion 2's note above for why this is the one entry that
 	// needed it.
 	"symbolic-ref": true,
+	// `branch` — SHAPE-GATED to the single EXACT spelling `--show-current`
+	// (pg2-hsymw), narrower than symbolic-ref's operand-count guard: see criterion
+	// 2's note above for why isBranchUnsafe's "guard removed?" question is the
+	// wrong model here, and gitBranchIsShowCurrent immediately below the lookup
+	// for the guard itself.
+	"branch": true,
 	// `describe` and `status` reach `core.fsmonitor` (`describe` only in its `--dirty`
 	// spelling, which `tokens[1]` cannot separate) and they STAY. That is a ruling, not
 	// an oversight — see THE pg2-a5r9r RULING above, and
@@ -721,6 +744,36 @@ func gitSymbolicRefIsWrite(args []string) bool {
 	return len(Operands(args)) != 1
 }
 
+// gitBranchIsShowCurrent reports whether args — the tokens AFTER the `branch`
+// subcommand — is EXACTLY the one-token read `--show-current`: no operand, no
+// other flag alongside it, no abbreviation. It sits beside gitSymbolicRefIsWrite
+// as the shape guard gitReadSubcommands' criterion 2 promises for `branch`
+// (pg2-hsymw), but with the OPPOSITE polarity: gitSymbolicRefIsWrite finds the
+// WRITE shapes and refuses them, admitting everything else that reaches it (the
+// one-operand read, which is the common case); this function instead finds the
+// one SAFE shape and admits only that, refusing everything else. The asymmetry
+// is real, not stylistic — `git branch`'s own safe/unsafe split
+// (internal/rules/git's isBranchUnsafe) is about which of GIT'S OWN GUARDS
+// remains intact for a command this floor already knows CAN write (bare list,
+// create, delete, move, copy, rename are ALL legitimate non-substitution
+// Approves there), so there is no single "the write shapes" enumeration to
+// invert the way symbolic-ref's two mutating forms allow — admitting by
+// exclusion would have to enumerate every current and future mutating spelling
+// correctly, which is exactly the "no flag test at all" trap gitReadSubcommands'
+// own git-clean discussion (see internal/rules/git/git.go) warns against.
+// Admitting by the one known-safe shape instead needs no such enumeration.
+//
+// EXACT-MATCH ONLY, deliberately, unlike the abbreviation-tolerant matchers used
+// elsewhere in this package for REFUSAL tests. Those matchers exist to close a
+// bypass: missing an abbreviation there would wrongly let a dangerous spelling
+// through. Here the direction is reversed — this function's job is to ADMIT, so
+// under-matching an abbreviation (`--show-c`, `--show`) is fail-safe: it only
+// leaves that spelling on the refused, prompting path it already had, never a
+// security gap.
+func gitBranchIsShowCurrent(args []string) bool {
+	return len(args) == 1 && args[0] == "--show-current"
+}
+
 func classifySubstitutionCommand(tokens []string) SubstitutionClearance {
 	if len(tokens) == 0 {
 		return SubstitutionRefused
@@ -797,6 +850,15 @@ func classifySubstitutionCommand(tokens []string) SubstitutionClearance {
 			// `$(git symbolic-ref HEAD refs/heads/evil)` would clear this floor on
 			// its subcommand name alone.
 			if rest[0] == "symbolic-ref" && gitSymbolicRefIsWrite(rest[1:]) {
+				return SubstitutionRefused
+			}
+			// pg2-hsymw: `branch`'s admission above is a NAME match only, exactly like
+			// symbolic-ref's, and just as cannot tell its one admitted shape apart from
+			// every other spelling on the name alone. Unlike gitSymbolicRefIsWrite this
+			// guard must find the SAFE shape (inverted polarity — see its own doc for
+			// why), so the condition below refuses everything the guard does NOT
+			// recognize rather than everything it does.
+			if rest[0] == "branch" && !gitBranchIsShowCurrent(rest[1:]) {
 				return SubstitutionRefused
 			}
 			// UNION, folded MOST-RESTRICTIVE-WINS (minClearance, same combinator

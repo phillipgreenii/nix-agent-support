@@ -677,6 +677,13 @@ func TestIntegration_SubstitutionBodyRecursion(t *testing.T) {
 		// cmdparse.gitReadSubcommands' THE pg2-phtl3 RULING.)
 		{"git show floor", "$(git show HEAD)"},
 		{"git show floor in echo", "echo $(git show HEAD)"},
+		// pg2-hsymw: `branch` is now on gitReadSubcommands, but ONLY the exact
+		// `--show-current` shape clears it (gitBranchIsShowCurrent) — every other
+		// spelling must still floor to a non-Approve, proving the shape guard and
+		// not just the map entry.
+		{"git branch bare (list) still floors", "$(git branch)"},
+		{"git branch create still floors", "$(git branch newbranch)"},
+		{"git branch force-delete still floors", "$(git branch -D foo)"},
 		// nix run is deliberately Abstain and must not be unlocked by recursion.
 		{"nix run in double quotes", `echo "$(nix run .#x -- --version)"`},
 		// pg2-phtl3 (operator ruling, 2026-08-17): `command` bare (no -v/-V) still
@@ -715,6 +722,17 @@ func TestIntegration_SubstitutionBodyRecursion(t *testing.T) {
 		// re-asked and stay in the "must not approve" table above.
 		{"git diff now clears the floor", "echo $(git diff)"},
 		{"git log now clears the floor", "echo $(git log)"},
+		// pg2-hsymw: this repo's own global CLAUDE.md Git Workflow rule ("run
+		// `git branch --show-current` before committing to verify the branch") is
+		// commonly captured via `$(git branch --show-current)`, and that shape used
+		// to floor to Ask on every commit because `branch` was entirely absent from
+		// gitReadSubcommands (gate 1). Recursion (gate 2) already approved the bare
+		// leaf via internal/rules/git's isBranchUnsafe/modifyingSubcommands
+		// fallthrough — see the cmdparse-level pin in
+		// TestIsSafeSubstitutionBody_GitReadSubcommandAudit for gate 1 alone; this
+		// row pins BOTH gates end to end.
+		{"git branch --show-current now clears the floor", "echo $(git branch --show-current)"},
+		{"git branch --show-current as an assignment value now clears too", "current=$(git branch --show-current); echo \"$current\""},
 		// pg2-phtl3 WHICH / COMMAND -V: neither has a mutating spelling in this
 		// form, and both end up SubstitutionDelegated (pg2-ujuda's bare-relative-
 		// token widening treats the looked-up NAME as path-shaped), so the relief

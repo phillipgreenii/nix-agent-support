@@ -376,6 +376,18 @@ func TestIsSafeSubstitutionBody_GitReadSubcommandAudit(t *testing.T) {
 		{"symbolic-ref one-operand query is admitted", "git symbolic-ref --short HEAD", true},
 		{"symbolic-ref two-operand SET is refused despite the name match", "git symbolic-ref HEAD refs/heads/other", false},
 		{"symbolic-ref --delete is refused despite naming only one operand", "git symbolic-ref --delete refs/remotes/origin/HEAD", false},
+		// pg2-hsymw: `branch` is on this list by NAME, but — unlike symbolic-ref —
+		// its admission is gated to the single EXACT shape `--show-current` rather
+		// than by operand count, because nearly every OTHER `git branch` spelling
+		// can write a ref. See gitReadSubcommands' criterion 2 note and
+		// gitBranchIsShowCurrent's own doc for why the polarity is inverted from
+		// symbolic-ref's guard.
+		{"branch --show-current is admitted (shape-gated)", "git branch --show-current", true},
+		{"branch bare (list) is refused despite the name match", "git branch", false},
+		{"branch create is refused despite the name match", "git branch newbranch", false},
+		{"branch force-delete is refused despite the name match", "git branch -D foo", false},
+		{"branch --show-current with an extra operand is refused — not the admitted shape", "git branch --show-current extra", false},
+		{"branch --show-current abbreviated is refused — exact-match only, fail-safe direction", "git branch --show-c", false},
 		// pg2-phtl3 (operator ruling, 2026-08-17): `log`/`diff` reverse the
 		// criterion-1 decline pg2-a5r9r's correction (2) recorded for both — see
 		// gitReadSubcommands' THE pg2-phtl3 RULING. `show`/`diff-tree` below were
