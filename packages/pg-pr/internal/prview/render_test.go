@@ -116,6 +116,42 @@ func TestRenderHuman_Empty_UsesDistinctMarkersPerAxis(t *testing.T) {
 	}
 }
 
+// TestRenderHuman_NilCollections_RenderUnknownMarker exercises listDetails'
+// nil branch directly through Assemble+sections/RenderHuman: a View built
+// from a PRViewInput that never sets Feedback/Revisions/LinkedTicketKeys/
+// BeadLinks (all nil -- "no data source at all", per
+// TestAssemble_ZeroValueInputDoesNotPanic in prview_test.go) must render
+// sectionrender.Unknown for each of those axes, not noneMarker. This is the
+// opposite case from TestRenderHuman_Empty_UsesDistinctMarkersPerAxis, which
+// only covers emptyView's non-nil-EMPTY ("asked, got zero") shape; neither
+// existing test exercised the genuinely-nil shape through the render path.
+func TestRenderHuman_NilCollections_RenderUnknownMarker(t *testing.T) {
+	v := Assemble(PRViewInput{Now: fixedNow})
+	byHeading := sectionsByHeading(t, sections(v))
+
+	for _, heading := range []string{"Feedback", "Revisions", "Linked Tickets", "Bead Links"} {
+		s := byHeading[heading]
+		if len(s.Details) != 1 || s.Details[0] != sectionrender.Unknown {
+			t.Errorf("section %q Details = %v, want a single %q marker (nil collection, no data source at all)", heading, s.Details, sectionrender.Unknown)
+		}
+	}
+}
+
+// TestUnavailableAxisSection_AvailableTrueRendersAvailable exercises the
+// true branch of unavailableAxisSection's "if axis.Available" check.
+// Assemble itself never sets Available true today (see prview.go's
+// unavailable() helper and its "not-yet-existing axes" doc comment), so no
+// other test in this package ever constructs an UnavailableAxis with
+// Available: true -- calling unavailableAxisSection directly is the only
+// way to exercise the branch the doc comment says is "unreached but kept
+// for that reason."
+func TestUnavailableAxisSection_AvailableTrueRendersAvailable(t *testing.T) {
+	got := unavailableAxisSection("Approvals", UnavailableAxis{Available: true, Reason: AxisApprovals})
+	if len(got.Fields) != 1 || got.Fields[0].Value != "available" {
+		t.Errorf("unavailableAxisSection(Available: true) Fields = %+v, want a single field with value %q", got.Fields, "available")
+	}
+}
+
 // TestRenderHuman_SectionHeadingsMatchBetweenFullAndEmpty is the assertion
 // with real teeth per this bead's testing plan: the SET AND ORDER of
 // section headings sections() builds for the full fixture must be IDENTICAL

@@ -3,7 +3,9 @@ package main
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -519,5 +521,268 @@ func TestPRView_WriteDescriptionCaller_BodyFieldCarried(t *testing.T) {
 	}
 	if got != wantBody {
 		t.Errorf("identity.body = %q, want %q", got, wantBody)
+	}
+}
+
+// dropTable removes a table from the store file via a SECOND raw connection,
+// opened and closed after the seeding store.Open/Close has already run the
+// schema up to schemaVersion. Because migrate() only compares the stored
+// user_version against schemaVersion (it does not re-run any CREATE TABLE
+// statement once the two already match), the next store.Open call inside
+// loadPRView migrates cleanly and only the dropped table's own queries fail —
+// letting a test fault-inject exactly one of GetPR/ListRevisions/ListFeedback
+// without disturbing the others. Mirrors internal/sync/prevents_test.go's
+// breakOutbox (a second raw connection observing/mutating the same file).
+func dropTable(t *testing.T, path, table string) {
+	t.Helper()
+	raw, err := sql.Open("sqlite", "file:"+path+"?_pragma=busy_timeout(5000)")
+	if err != nil {
+		t.Fatalf("open raw sqlite: %v", err)
+	}
+	defer func() { _ = raw.Close() }()
+	if _, err := raw.Exec("DROP TABLE " + table); err != nil {
+		t.Fatalf("drop table %s: %v", table, err)
+	}
+}
+
+// errWriter always fails. It pins pr_view.go's bare
+// `_, err = fmt.Fprintf(cmd.OutOrStdout(), "%s\n", b); return err` — there is
+// no branch to take here, so the mutation under test (error_nilify: replace
+// `return err` with `return nil`) can only be caught by a writer that
+// actually fails; a bytes.Buffer (every other test in this file) never does.
+type errWriter struct{ err error }
+
+func (w errWriter) Write([]byte) (int, error) { return 0, w.err }
+
+// TestPRView_ResolveRepoErrorPropagates kills the pr_view.go:46-47 survivors
+// (`repo, err := resolveRepo(ctx, prF.repo); if err != nil { return err }`).
+// With no --repo flag and a cwd outside any git worktree, resolveRepo's own
+// branch.Detect call fails ("not in a git repository"), resolveRepo wraps it
+// as "auto-detect repo: ...; pass --repo owner/name", and this test proves
+// prViewCmd.RunE actually returns that error rather than swallowing it.
+// Mirrors branch_test.go's TestBranchDetectOutsideGitRepoFails.
+func TestPRView_ResolveRepoErrorPropagates(t *testing.T) {
+	resetPRFlags()
+	tmp := t.TempDir() // not a git repo
+	t.Chdir(tmp)
+	t.Setenv("PATH", filepath.Dir(mustLookPath(t, "git")))
+
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{"pr", "view", "7"})
+
+	err := rootCmd.Execute()
+	if err == nil {
+		t.Fatalf("expected error outside git repo with no --repo, got stdout=%q", stdout.String())
+	}
+	if !strings.Contains(err.Error(), "auto-detect repo") {
+		t.Fatalf("err = %v, want it to contain %q", err, "auto-detect repo")
+	}
+}
+
+// TestPRView_JSONWriteErrorPropagates kills the pr_view.go:59 survivor (the
+// bare `return err` after the JSON Fprintf). It gives `pr view --json` a
+// writer that always fails and confirms rootCmd.Execute() surfaces that exact
+// error — with a bytes.Buffer (which never fails) this line is unreachable in
+// every other test in this file.
+func TestPRView_JSONWriteErrorPropagates(t *testing.T) {
+	resetPRFlags()
+	setViewStateHome(t, false)
+
+	wantErr := errors.New("boom: stdout write failed")
+	var stderr bytes.Buffer
+	rootCmd.SetOut(errWriter{err: wantErr})
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{"pr", "view", "7", "--repo", "foo/bar", "--json"})
+
+	err := rootCmd.Execute()
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("execute error = %v, want %v", err, wantErr)
+	}
+}
+
+// TestPRView_StoreRowNotFound kills the pr_view.go:89 survivor
+// (`if row == nil { return prview.Assemble(in), nil }`). Unlike
+// TestPRView_HumanOutput_NoStore (no store FILE at all, so loadPRView never
+// calls GetPR), this test opens a real store — migrated, schema present —
+// with no matching PR row, so db.GetPR itself runs and returns (nil, nil).
+// Ungapping the `row == nil` guard would dereference that nil *PullRequest at
+// pr_view.go:92 (`storeRowToAPIPR(*row)`) and panic; the correct code instead
+// falls back to the same identity-only Assemble(in) rendering as the no-store
+// case, which this test asserts.
+func TestPRView_StoreRowNotFound(t *testing.T) {
+	resetPRFlags()
+	setViewStateHome(t, true)
+
+	db, err := store.Open(store.DefaultPath())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{"pr", "view", "7", "--repo", "foo/bar"})
+
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("execute: %v (stderr=%s)", err, stderr.String())
+	}
+	got := stdout.String()
+	for _, want := range []string{"  repo: foo/bar", "  number: 7"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("expected %q in output: %q", want, got)
+		}
+	}
+}
+
+// TestPRView_StoreOpenErrorPropagates kills the pr_view.go:80-81 survivors
+// (`db, err := store.Open(...); if err != nil { return prview.View{}, err }`).
+// os.Stat sees a file (so loadPRView proceeds past its no-store fast path),
+// but the file's bytes are not a SQLite database at all, so the first real
+// query inside store.Open's migrate() (`PRAGMA user_version`) fails to even
+// connect. A zero-length file would NOT reproduce this — SQLite treats an
+// empty file as a brand-new, valid database — so the corruption must be
+// non-empty bytes with the wrong header.
+func TestPRView_StoreOpenErrorPropagates(t *testing.T) {
+	resetPRFlags()
+	setViewStateHome(t, true)
+
+	if err := os.WriteFile(store.DefaultPath(), bytes.Repeat([]byte{0xFF}, 512), 0o644); err != nil {
+		t.Fatalf("write garbage store file: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{"pr", "view", "7", "--repo", "foo/bar"})
+
+	err := rootCmd.Execute()
+	if err == nil {
+		t.Fatalf("expected error opening a corrupt store file, got stdout=%q", stdout.String())
+	}
+	if !strings.Contains(err.Error(), "store:") {
+		t.Fatalf("err = %v, want it to contain %q", err, "store:")
+	}
+}
+
+// TestPRView_GetPRErrorPropagates kills the pr_view.go:86-87 survivors
+// (`row, err := db.GetPR(...); if err != nil { return prview.View{}, err }`).
+// The store is migrated (so store.Open itself succeeds) and then the
+// pull_request table is dropped out from under it via a second connection —
+// GetPR's own SELECT then fails with "no such table", independent of whether
+// any row would have matched.
+func TestPRView_GetPRErrorPropagates(t *testing.T) {
+	resetPRFlags()
+	setViewStateHome(t, true)
+
+	db, err := store.Open(store.DefaultPath())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
+	dropTable(t, store.DefaultPath(), "pull_request")
+
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{"pr", "view", "7", "--repo", "foo/bar"})
+
+	err = rootCmd.Execute()
+	if err == nil {
+		t.Fatalf("expected error with pull_request table missing, got stdout=%q", stdout.String())
+	}
+	if !strings.Contains(err.Error(), "get pr") {
+		t.Fatalf("err = %v, want it to contain %q", err, "get pr")
+	}
+}
+
+// TestPRView_ListRevisionsErrorPropagates kills the pr_view.go:96-97
+// survivors (`revs, err := db.ListRevisions(...); if err != nil { return
+// prview.View{}, err }`). A real PR row is seeded first (so GetPR succeeds
+// and the row != nil path is taken), then only the pr_revision table is
+// dropped — leaving pull_request and feedback intact — so ListRevisions is
+// the one call that fails. Without the `err != nil` check, loadPRView would
+// silently continue with revs == nil and go on to call ListFeedback (which
+// still succeeds), so the test also proves the CLI call as a whole fails
+// rather than merely checking loadPRView in isolation.
+func TestPRView_ListRevisionsErrorPropagates(t *testing.T) {
+	resetPRFlags()
+	setViewStateHome(t, true)
+
+	db, err := store.Open(store.DefaultPath())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	ctx := context.Background()
+	if _, err := db.UpsertPR(ctx, store.PullRequest{
+		Repo: "foo/bar", Number: 7, Ownership: "mine", State: "open",
+		Author: "phillipg", Branch: "feat/x", Base: "main",
+		URL: "https://github.com/foo/bar/pull/7", HeadSHA: "abc123",
+	}); err != nil {
+		t.Fatalf("upsert pr: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
+	dropTable(t, store.DefaultPath(), "pr_revision")
+
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{"pr", "view", "7", "--repo", "foo/bar"})
+
+	err = rootCmd.Execute()
+	if err == nil {
+		t.Fatalf("expected error with pr_revision table missing, got stdout=%q", stdout.String())
+	}
+	if !strings.Contains(err.Error(), "list revisions") {
+		t.Fatalf("err = %v, want it to contain %q", err, "list revisions")
+	}
+}
+
+// TestPRView_ListFeedbackErrorPropagates kills the pr_view.go:102-103
+// survivors (`fb, err := db.ListFeedback(...); if err != nil { return
+// prview.View{}, err }`). Same shape as
+// TestPRView_ListRevisionsErrorPropagates, but the seeded row is left with
+// pr_revision intact (so ListRevisions succeeds first) and only the feedback
+// table is dropped, isolating this one call.
+func TestPRView_ListFeedbackErrorPropagates(t *testing.T) {
+	resetPRFlags()
+	setViewStateHome(t, true)
+
+	db, err := store.Open(store.DefaultPath())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	ctx := context.Background()
+	if _, err := db.UpsertPR(ctx, store.PullRequest{
+		Repo: "foo/bar", Number: 7, Ownership: "mine", State: "open",
+		Author: "phillipg", Branch: "feat/x", Base: "main",
+		URL: "https://github.com/foo/bar/pull/7", HeadSHA: "abc123",
+	}); err != nil {
+		t.Fatalf("upsert pr: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
+	dropTable(t, store.DefaultPath(), "feedback")
+
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{"pr", "view", "7", "--repo", "foo/bar"})
+
+	err = rootCmd.Execute()
+	if err == nil {
+		t.Fatalf("expected error with feedback table missing, got stdout=%q", stdout.String())
+	}
+	if !strings.Contains(err.Error(), "list feedback") {
+		t.Fatalf("err = %v, want it to contain %q", err, "list feedback")
 	}
 }
