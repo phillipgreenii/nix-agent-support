@@ -30,6 +30,9 @@ If no operations are specified, displays the current status of each branch.
 If specific branches are provided, only those branches will be processed.
 The script processes each branch in order: ff → rebase → delete-merged
 Protected branches cannot be deleted but can be ff/rebased.
+The repository's own primary worktree (its main working tree) is always
+implicitly protected from deletion, in addition to any worktrees protected
+via configuration or --protect-worktree.
 
 Configuration (per-repository):
   # Protect branches from deletion
@@ -106,6 +109,12 @@ get_branch_worktree() {
   '
 }
 
+get_primary_worktree() {
+  # git worktree list --porcelain always lists the main working tree first,
+  # followed by any linked worktrees.
+  git worktree list --porcelain | awk '/^worktree / { print $2; exit }'
+}
+
 is_protected_branch() {
   local branch="$1"
   local b
@@ -121,6 +130,14 @@ is_protected_worktree() {
   for p in "${PROTECTED_WORKTREES[@]}"; do
     [[ $p == "$path" ]] && return 0
   done
+  # The repository's own primary worktree (the main working tree) is always
+  # implicitly protected, in addition to whatever is configured via
+  # git-branch-maintenance.protectedWorktree. It is never itself listed as a
+  # configured protectedWorktree, and git's own refusal to remove it is not a
+  # sufficient safety net on its own (see try_delete_merged's error handling).
+  if [[ -n ${PRIMARY_WORKTREE:-} && $path == "$PRIMARY_WORKTREE" ]]; then
+    return 0
+  fi
   return 1
 }
 
@@ -216,7 +233,10 @@ get_branch_status() {
     echo "up-to-date"
   elif git merge-base --is-ancestor "$branch_hash" "$base_hash" 2>/dev/null; then
     echo "can-fast-forward"
-  elif git branch --merged "$BASE_BRANCH" | grep -q "^[* ] $branch$"; then
+  elif git branch --merged "$BASE_BRANCH" | grep -q "^[*+ ] $branch$"; then
+    # The character class matches the three prefixes git uses in `branch`
+    # output: "*" (current branch of this worktree), "+" (checked out in a
+    # different worktree), or a plain space (not checked out anywhere).
     echo "merged"
   else
     echo "diverged"
@@ -254,6 +274,9 @@ print_branch_status() {
     ;;
   has-worktree)
     echo "  ⚠️  Has worktree, use --delete-merged-worktrees to remove"
+    ;;
+  delete-failed)
+    echo "  ❌ Failed to delete branch/worktree"
     ;;
   skipped-dirty-worktree)
     echo "  ⚠️  Skipped: worktree has uncommitted changes"
@@ -385,14 +408,18 @@ try_rebase() {
 try_delete_merged() {
   local branch="$1"
   local worktree_path="$2"
+  local worktree_remove_status
+  local branch_delete_status
 
   # Check if protected (can ff/rebase but not delete)
   if is_protected_branch "$branch"; then
     return 2 # protected
   fi
 
-  # Check if merged
-  if ! git branch --merged "$BASE_BRANCH" | grep -q "^[* ] $branch$"; then
+  # Check if merged. The character class matches "*" (current branch of this
+  # worktree), "+" (checked out in a different worktree), or a plain space
+  # (not checked out anywhere) - the three prefixes `git branch` uses.
+  if ! git branch --merged "$BASE_BRANCH" | grep -q "^[*+ ] $branch$"; then
     return 3 # not merged
   fi
 
@@ -411,9 +438,25 @@ try_delete_merged() {
 
   if [[ -n $worktree_path ]]; then
     if [[ $DELETE_MERGED_WORKTREES == "true" ]] && ! is_protected_worktree "$worktree_path"; then
-      # Delete worktree and branch
+      # Delete worktree and branch. Exit codes are captured explicitly (rather
+      # than swallowed) so a real refusal (e.g. git declining to remove a
+      # worktree) is reported instead of misreported as success. This
+      # function's sole caller always wraps the call in `set +e`, so errexit
+      # is already off for this whole function - deliberately not restoring
+      # it here before a non-zero `return`: doing so would re-arm -e and the
+      # shell would exit immediately on that `return` instead of unwinding
+      # back to the caller.
       (cd "$TMP_WORKTREE" && git worktree remove "$worktree_path" --force 2>/dev/null)
+      worktree_remove_status=$?
+      if [[ $worktree_remove_status -ne 0 ]]; then
+        return 5 # worktree removal failed
+      fi
+
       git branch -d "$branch" 2>/dev/null
+      branch_delete_status=$?
+      if [[ $branch_delete_status -ne 0 ]]; then
+        return 5 # worktree removed but branch deletion failed
+      fi
       return 0
     else
       return 4 # has worktree, skip
@@ -421,6 +464,10 @@ try_delete_merged() {
   else
     # Just delete branch
     (cd "$TMP_WORKTREE" && git branch -d "$branch" 2>/dev/null)
+    branch_delete_status=$?
+    if [[ $branch_delete_status -ne 0 ]]; then
+      return 5 # branch deletion failed
+    fi
     return 0
   fi
 }
@@ -568,6 +615,10 @@ if [[ ${#PROTECTED_WORKTREES[@]} -eq 0 ]]; then
   mapfile -t PROTECTED_WORKTREES < <(git config --get-all git-branch-maintenance.protectedWorktree 2>/dev/null || true)
 fi
 
+# The primary worktree (the main working tree) is implicitly protected -
+# see is_protected_worktree.
+PRIMARY_WORKTREE=$(get_primary_worktree)
+
 # Base branch for operations
 BASE_BRANCH="origin/main"
 
@@ -653,9 +704,11 @@ for branch in "${branches_to_process[@]}"; do
     esac
   fi
 
-  # Check if branch is now merged after FF/rebase operations
+  # Check if branch is now merged after FF/rebase operations. The character
+  # class matches "*"/"+"/" " - the three prefixes `git branch` uses
+  # depending on whether/where the branch is checked out.
   if [[ $status == "fast-forwarded" || $status == "rebased" ]]; then
-    if git branch --merged "$BASE_BRANCH" | grep -q "^[* ] $branch$"; then
+    if git branch --merged "$BASE_BRANCH" | grep -q "^[*+ ] $branch$"; then
       SUMMARY_MERGED_BRANCHES+=("$branch")
     fi
   fi
@@ -669,7 +722,7 @@ for branch in "${branches_to_process[@]}"; do
     if [[ $rebase_result -eq 0 ]]; then
       status="rebased"
       # Check if branch is now merged after rebase
-      if git branch --merged "$BASE_BRANCH" | grep -q "^[* ] $branch$"; then
+      if git branch --merged "$BASE_BRANCH" | grep -q "^[*+ ] $branch$"; then
         SUMMARY_MERGED_BRANCHES+=("$branch")
       fi
     else
@@ -696,6 +749,7 @@ for branch in "${branches_to_process[@]}"; do
     2) status="protected-from-deletion" ;;
     3) status="not-merged" ;;
     4) status="has-worktree" ;;
+    5) status="delete-failed" ;;
     esac
   fi
 

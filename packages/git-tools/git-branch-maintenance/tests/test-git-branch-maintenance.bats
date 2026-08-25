@@ -75,9 +75,12 @@ fi
 EOF
     chmod +x "$MOCK_DIR/column"
 
-    # Find the real git before adding our mock to PATH
-    local real_git
-    real_git=$(command -v git)
+    # Find the real git before adding our mock to PATH. Exported so tests
+    # that need to install their own git mock later (after $MOCK_DIR/git is
+    # already on PATH) can still reach the real binary instead of
+    # recursively re-invoking whatever mock is currently active.
+    export REAL_GIT
+    REAL_GIT=$(command -v git)
 
     # Mock git for testing - intercepts fetch commands to avoid network calls
     cat > "$MOCK_DIR/git" <<EOF
@@ -88,7 +91,7 @@ if [[ "\$1" == "fetch" ]]; then
     exit 0
 fi
 # For all other git commands, use the real git
-exec "$real_git" "\$@"
+exec "$REAL_GIT" "\$@"
 EOF
     chmod +x "$MOCK_DIR/git"
 
@@ -258,4 +261,112 @@ run_git_branch_maintenance() {
 
     # The leftover worktree should have been cleaned up
     ! git worktree list | grep -q "/tmp/test-leftover-worktree-$$"
+}
+
+@test "git-branch-maintenance never proposes deleting the repo's own primary worktree" {
+    # Check out test-branch directly in the PRIMARY worktree (this TEST_DIR
+    # is the main working tree - there is no linked worktree involved here).
+    git checkout test-branch
+
+    # Make origin/main point at the same commit, so test-branch shows as
+    # merged (the scenario from the bug report: the primary checkout sits on
+    # a branch that shows merged into origin/main).
+    git update-ref refs/remotes/origin/main test-branch
+
+    # Dry-run must not claim it would delete the primary worktree/branch.
+    run_git_branch_maintenance --dry-run --delete-merged --delete-merged-worktrees
+    [ "$status" -eq 0 ]
+    branch_block=$(echo "$output" | grep -A 1 "^Branch: test-branch$")
+    echo "$branch_block" | grep -q "skip"
+    [[ $branch_block != *"Would delete branch and worktree"* ]]
+
+    # A real (non-dry-run) invocation must not attempt to remove the primary
+    # worktree either - this directory, and the branch, must remain intact.
+    run_git_branch_maintenance --delete-merged --delete-merged-worktrees
+    [ "$status" -eq 0 ]
+    [ -d "$TEST_DIR" ]
+    [ "$(git rev-parse --abbrev-ref HEAD)" = "test-branch" ]
+    git branch | grep -q "test-branch"
+}
+
+@test "git-branch-maintenance still protects explicit worktrees and still deletes ordinary ones" {
+    # Two branches at the same commit as main, so both are trivially
+    # "merged" into origin/main without needing extra commits/merges.
+    git branch protected-branch main
+    git branch ordinary-branch main
+
+    # git canonicalizes worktree paths when it registers them (e.g. resolving
+    # /tmp to /private/tmp on macOS), and get_branch_worktree() reports that
+    # canonical form back. Build the paths already-canonical (via a fresh
+    # mktemp dir resolved with `pwd -P`) so the literal string passed to
+    # --protect-worktree is guaranteed to match what the script compares it
+    # against - a plain "/tmp/..." literal would not.
+    protected_wt="$(cd "$(mktemp -d)" && pwd -P)/protected-worktree"
+    git worktree add "$protected_wt" protected-branch
+
+    ordinary_wt="$(cd "$(mktemp -d)" && pwd -P)/ordinary-worktree"
+    git worktree add "$ordinary_wt" ordinary-branch
+
+    run_git_branch_maintenance --delete-merged --delete-merged-worktrees --protect-worktree "$protected_wt"
+    [ "$status" -eq 0 ]
+
+    # Explicitly protected worktree/branch (existing behavior) is unaffected
+    # by adding implicit primary-worktree protection.
+    [ -d "$protected_wt" ]
+    git branch | grep -q "protected-branch"
+
+    # An ordinary, unprotected worktree must still be deleted - implicit
+    # primary-worktree protection must not over-broaden to other worktrees.
+    [ ! -d "$ordinary_wt" ]
+    remaining_branches=$(git branch)
+    [[ $remaining_branches != *"ordinary-branch"* ]]
+
+    # Safety-net cleanup in case an assertion above caught a regression.
+    git worktree remove "$protected_wt" --force 2>/dev/null || true
+    git worktree remove "$ordinary_wt" --force 2>/dev/null || true
+}
+
+@test "git-branch-maintenance reports failure instead of claiming success when worktree removal fails" {
+    # Create a linked worktree for test-branch. Canonicalize the path up
+    # front (see the comment in the previous test) so the mock below matches
+    # on exactly the path the script will actually pass to
+    # `git worktree remove`.
+    fail_wt="$(cd "$(mktemp -d)" && pwd -P)/worktree-remove-fail"
+    git worktree add "$fail_wt" test-branch
+
+    # Make origin/main point at test-branch's commit so it shows as merged
+    # (fast-forwarding local main would not do this - origin/main would
+    # stay behind, exactly as pinned at setup time).
+    git update-ref refs/remotes/origin/main test-branch
+
+    # Install a git mock that specifically refuses to remove THIS worktree
+    # (leaving every other git invocation, including the tmp-gbm cleanup
+    # worktree, to the real git) so the failure is deterministic.
+    cat > "$MOCK_DIR/git" <<EOF
+#!/usr/bin/env bash
+if [[ "\$1" == "fetch" ]]; then
+    exit 0
+fi
+if [[ "\$1" == "worktree" && "\$2" == "remove" && "\$3" == "$fail_wt" ]]; then
+    echo "mock: refusing to remove worktree" >&2
+    exit 1
+fi
+exec "$REAL_GIT" "\$@"
+EOF
+    chmod +x "$MOCK_DIR/git"
+
+    run_git_branch_maintenance --delete-merged --delete-merged-worktrees
+    [ "$status" -eq 0 ]
+
+    # The failure must be reported, not silently claimed as a successful
+    # deletion.
+    echo "$output" | grep -q -i "fail"
+    [[ $output != *"Deleted (with worktree)"* ]]
+
+    # Since the worktree removal failed, the branch must NOT have been
+    # deleted either (it is only deleted after a successful removal).
+    git branch | grep -q "test-branch"
+
+    # Cleanup with the real git, bypassing the failing mock.
+    "$REAL_GIT" worktree remove "$fail_wt" --force 2>/dev/null || rm -rf "$fail_wt"
 }
