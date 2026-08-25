@@ -4,7 +4,9 @@
 # here (bead pg2-txxyj.1) -- real bodies land with tasks pg2-txxyj.4/.5/.6.
 # The registry loading + schema validation engine (pgdr_default_registry_path
 # / pgdr_validate_registry / pgdr_read_registry) is exercised below against
-# fixtures under tests/fixtures/ (bead pg2-txxyj.2).
+# fixtures under tests/fixtures/ (bead pg2-txxyj.2). The variant-selection
+# algorithm (pgdr_select_variants) is exercised against
+# tests/fixtures/selection.json (bead pg2-txxyj.3).
 
 setup() {
   if [[ -z ${SCRIPTS_DIR:-} ]]; then
@@ -150,4 +152,68 @@ JSON
   run pgdr_read_registry
   [ "$status" -eq 0 ]
   [[ "$output" =~ "npm-cache" ]]
+}
+
+@test "pgdr_select_variants with no ids and N below every variant returns an empty array" {
+  run pgdr_select_variants "$FIXTURES_DIR/selection.json" 0
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -c '.')" = "[]" ]
+}
+
+@test "pgdr_select_variants with no ids at N=2 selects the single-variant item at its own aggressiveness, the multi-variant item at its lowest qualifying aggressiveness, and never the info-only item" {
+  run pgdr_select_variants "$FIXTURES_DIR/selection.json" 2
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq '[.[] | select(.id == "single-variant-item")][0].aggressiveness')" = "2" ]
+  [ "$(echo "$output" | jq '[.[] | select(.id == "multi-variant-item")][0].aggressiveness')" = "1" ]
+  [ "$(echo "$output" | jq '[.[] | select(.id == "info-only-item")] | length')" = "0" ]
+}
+
+@test "pgdr_select_variants with no ids picks the highest qualifying variant strictly between two levels (N=4 picks aggressiveness 3, not 1 or 5)" {
+  run pgdr_select_variants "$FIXTURES_DIR/selection.json" 4
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq '[.[] | select(.id == "multi-variant-item")][0].aggressiveness')" = "3" ]
+}
+
+@test "pgdr_select_variants with no ids and N at the highest variant level selects that variant" {
+  run pgdr_select_variants "$FIXTURES_DIR/selection.json" 5
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq '[.[] | select(.id == "multi-variant-item")][0].aggressiveness')" = "5" ]
+}
+
+@test "pgdr_select_variants with an explicit id picks the highest qualifying variant, matching the no-ids rule" {
+  run pgdr_select_variants "$FIXTURES_DIR/selection.json" 4 multi-variant-item
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq 'length')" = "1" ]
+  [ "$(echo "$output" | jq '.[0].aggressiveness')" = "3" ]
+}
+
+@test "pgdr_select_variants errors when an explicit id's minimum variant aggressiveness exceeds N, naming the actual minimum" {
+  run pgdr_select_variants "$FIXTURES_DIR/selection.json" 0 multi-variant-item
+  [ "$status" -eq 1 ]
+  [[ "$output" =~ "item 'multi-variant-item' requires aggressiveness >= 1, but --aggressiveness 0 was given" ]]
+}
+
+@test "pgdr_select_variants errors on an explicit id naming the informational-only (zero-variant) item" {
+  run pgdr_select_variants "$FIXTURES_DIR/selection.json" 5 info-only-item
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"item 'info-only-item' is informational-only (no variants) and cannot be selected"* ]]
+}
+
+@test "pgdr_select_variants errors on an explicit id that does not exist in the registry" {
+  run pgdr_select_variants "$FIXTURES_DIR/selection.json" 5 does-not-exist
+  [ "$status" -eq 1 ]
+  [[ "$output" =~ "unknown item id 'does-not-exist'" ]]
+}
+
+@test "pgdr_select_variants with multiple explicit ids returns selections in registry order, not command-line order" {
+  run pgdr_select_variants "$FIXTURES_DIR/selection.json" 5 single-variant-item multi-variant-item
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '[.[].id] | join(",")')" = "multi-variant-item,single-variant-item" ]
+}
+
+@test "pgdr_select_variants fails fast on a mix of one valid and one invalid id, with no partial output for the valid one" {
+  run pgdr_select_variants "$FIXTURES_DIR/selection.json" 5 single-variant-item does-not-exist
+  [ "$status" -eq 1 ]
+  [[ "$output" =~ "unknown item id 'does-not-exist'" ]]
+  [[ ! "$output" =~ "single-variant-item" ]]
 }

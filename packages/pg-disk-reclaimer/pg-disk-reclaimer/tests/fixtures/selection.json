@@ -1,0 +1,49 @@
+[
+  {
+    "id": "info-only-item",
+    "description": "informational-only item, never reclaimable",
+    "path": "/tmp/info-only",
+    "displayCommand": "echo info",
+    "variants": []
+  },
+  {
+    "id": "multi-variant-item",
+    "description": "item with three variants at aggressiveness 1, 3, and 5",
+    "path": "/tmp/multi",
+    "displayCommand": "echo multi",
+    "variants": [
+      {
+        "aggressiveness": 1,
+        "variantDescription": "lightest touch",
+        "dryRunCommand": "echo dry-multi-1",
+        "removeCommand": "echo remove-multi-1"
+      },
+      {
+        "aggressiveness": 3,
+        "variantDescription": "moderate",
+        "dryRunCommand": "echo dry-multi-3",
+        "removeCommand": "echo remove-multi-3"
+      },
+      {
+        "aggressiveness": 5,
+        "variantDescription": "most aggressive",
+        "dryRunCommand": "echo dry-multi-5",
+        "removeCommand": "echo remove-multi-5"
+      }
+    ]
+  },
+  {
+    "id": "single-variant-item",
+    "description": "item with a single variant at aggressiveness 2",
+    "path": "/tmp/single",
+    "displayCommand": "echo single",
+    "variants": [
+      {
+        "aggressiveness": 2,
+        "variantDescription": "the only variant",
+        "dryRunCommand": "echo dry-single",
+        "removeCommand": "echo remove-single"
+      }
+    ]
+  }
+]

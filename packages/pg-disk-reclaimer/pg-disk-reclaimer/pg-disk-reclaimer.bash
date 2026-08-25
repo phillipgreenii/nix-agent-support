@@ -5,10 +5,11 @@
 #
 # Every function here started as a STUB for the scaffold task (bead
 # pg2-txxyj.1). Later tasks in the pg2-txxyj epic replace the bodies:
-#   - pg2-txxyj.2: registry loading + schema validation engine (this task;
-#     see pgdr_default_registry_path / pgdr_validate_registry /
+#   - pg2-txxyj.2: registry loading + schema validation engine (see
+#     pgdr_default_registry_path / pgdr_validate_registry /
 #     pgdr_read_registry below)
-#   - pg2-txxyj.3: variant-selection algorithm
+#   - pg2-txxyj.3: variant-selection algorithm (this task; see
+#     pgdr_select_variants below)
 #   - pg2-txxyj.4: cmd_list
 #   - pg2-txxyj.5: cmd_validate
 #   - pg2-txxyj.6: cmd_reclaim
@@ -144,6 +145,103 @@ pgdr_read_registry() {
   fi
 
   jq '.' "$path"
+}
+
+# pgdr_select_variants: selects which reclaim variant to use for each
+# candidate item in an ALREADY-VALIDATED registry at PATH, given a ceiling
+# MAX_AGGRESSIVENESS. This function does NOT re-validate the registry --
+# validation (pgdr_validate_registry / pgdr_read_registry) is the caller's
+# job, done once before selection, so this function reads the registry
+# directly with jq rather than paying that cost again.
+#
+# Usage: pgdr_select_variants <registry-path> <max-aggressiveness> [id...]
+#
+# With no ids (Case A): selects every item that has at least one variant
+# with aggressiveness <= MAX_AGGRESSIVENESS, choosing -- for each selected
+# item -- the variant with the HIGHEST aggressiveness <= MAX_AGGRESSIVENESS
+# (never just any qualifying variant). Items with no qualifying variant,
+# including a zero-variant (informational-only) item, are silently
+# EXCLUDED; an empty result ([]) is valid success.
+#
+# With one or more explicit ids (Case B): processes ONLY those ids. Each
+# requested id is checked, IN THE ORDER GIVEN ON THE COMMAND LINE, for three
+# failure categories -- unknown id, informational-only (empty variants[]),
+# and every variant's aggressiveness exceeding MAX_AGGRESSIVENESS -- and
+# this function fails fast (one message to stderr, no stdout, return 1) on
+# the FIRST id that hits any of them. If every requested id passes, the
+# selection output is built in REGISTRY order (not command-line order),
+# using the same "highest qualifying variant" rule as Case A.
+#
+# On success, prints a JSON array to stdout: one flattened object per
+# selected item -- the item's own id/description/path plus the CHOSEN
+# variant's aggressiveness/variantDescription/dryRunCommand/removeCommand
+# merged in directly (no nested variants[], no displayCommand). Returns 0.
+pgdr_select_variants() {
+  local path="$1"
+  local max_aggressiveness="$2"
+  shift 2
+
+  # Case A: no ids -- select every item with at least one qualifying
+  # variant, silently excluding items with none (including zero-variant
+  # informational-only items). An empty result ([]) is valid success.
+  if [[ $# -eq 0 ]]; then
+    jq --argjson n "$max_aggressiveness" '
+      [
+        .[]
+        | . as $item
+        | ($item.variants // []) as $variants
+        | ($variants | map(select(.aggressiveness <= $n))) as $qualifying
+        | select(($qualifying | length) > 0)
+        | ($qualifying | max_by(.aggressiveness)) as $chosen
+        | ($item | {id, description, path})
+          + ($chosen | {aggressiveness, variantDescription, dryRunCommand, removeCommand})
+      ]
+    ' "$path"
+    return 0
+  fi
+
+  # Case B: explicit ids. Check every requested id, IN THE ORDER GIVEN ON
+  # THE COMMAND LINE, before producing any output -- fail fast (one stderr
+  # message, no stdout, return 1) on the first one that is unknown,
+  # informational-only, or entirely above the aggressiveness ceiling.
+  local id
+  for id in "$@"; do
+    local item_json
+    item_json=$(jq --arg id "$id" '[.[] | select(.id == $id)][0] // empty' "$path")
+    if [[ -z $item_json ]]; then
+      echo "pg-disk-reclaimer: unknown item id '$id'" >&2
+      return 1
+    fi
+
+    if [[ $(jq '(.variants // []) | length' <<<"$item_json") -eq 0 ]]; then
+      echo "pg-disk-reclaimer: item '$id' is informational-only (no variants) and cannot be selected" >&2
+      return 1
+    fi
+
+    if [[ $(jq --argjson n "$max_aggressiveness" '(.variants | map(.aggressiveness) | min) <= $n' <<<"$item_json") != "true" ]]; then
+      local min_aggressiveness
+      min_aggressiveness=$(jq '.variants | map(.aggressiveness) | min' <<<"$item_json")
+      echo "pg-disk-reclaimer: item '$id' requires aggressiveness >= $min_aggressiveness, but --aggressiveness $max_aggressiveness was given" >&2
+      return 1
+    fi
+  done
+
+  local ids_json
+  ids_json=$(printf '%s\n' "$@" | jq -R . | jq -s .)
+
+  jq --argjson n "$max_aggressiveness" --argjson ids "$ids_json" '
+    [
+      .[]
+      | select(.id as $id | $ids | index($id) != null)
+      | . as $item
+      | ($item.variants // []) as $variants
+      | ($variants | map(select(.aggressiveness <= $n))) as $qualifying
+      | select(($qualifying | length) > 0)
+      | ($qualifying | max_by(.aggressiveness)) as $chosen
+      | ($item | {id, description, path})
+        + ($chosen | {aggressiveness, variantDescription, dryRunCommand, removeCommand})
+    ]
+  ' "$path"
 }
 
 # cmd_list: implements the `list` subcommand. Args: any list-specific
