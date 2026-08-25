@@ -112,8 +112,22 @@ func leaseCutoff(d time.Duration) string {
 // against double-dispatching the same row: the claiming UPDATE is
 // conditioned on the row still being pending-and-unclaimed-or-stale, and its
 // RowsAffected count tells this caller whether it actually won the row or
-// lost the race to a concurrent claimer. A lost row is simply skipped (it is
-// that other caller's to dispatch), never dispatched here.
+// lost the race to a concurrent claimer.
+//
+// A lost row is only skipped (left for that other caller to dispatch) once it
+// is confirmed already status='complete'. If it is still in flight — claimed,
+// not yet complete — this call STOPS here rather than continuing on to a
+// LATER row from its own snapshot (pg2-scl9p): dispatching id N+k while a
+// concurrent claimer is still mid-dispatch of the earlier id N would violate
+// the FIFO-id-order guarantee every caller relies on for a same-identity event
+// pair (e.g. beadsbridge's pr.opened → feedback.created invariant, proved by
+// internal/sync's TestConcurrentFlushNeverMissesPRBead). Every row at or after
+// the stop point — including the contended one — is left pending for a later
+// RunOutbox call (the caller's own next tick, another concurrent drainer's
+// pass, or a final synchronous drain) once the in-flight dispatch completes.
+// This costs only the throughput of one drainer's pass on a genuinely
+// contended row; an uncontended row is claimed and dispatched exactly as
+// before.
 func (db *DB) RunOutbox(ctx context.Context, dispatch DispatchFunc) error {
 	cutoff := leaseCutoff(outboxLeaseDuration)
 	rows, err := db.sql.QueryContext(ctx,
@@ -160,7 +174,23 @@ func (db *DB) RunOutbox(ctx context.Context, dispatch DispatchFunc) error {
 			// Lost the race: another caller claimed (or already completed)
 			// this row between our SELECT and this UPDATE. Not ours to
 			// dispatch.
-			continue
+			//
+			// Whether we may continue to a LATER row in our own snapshot
+			// depends on whether this one already finished: if it's already
+			// complete, whoever dispatched it did so before we could have
+			// raced ahead of it, so ordering is unaffected. If it's still in
+			// flight, continuing would risk dispatching a higher-id row
+			// concurrently with (or before) this still-pending lower-id one —
+			// see the FIFO-order note on RunOutbox above.
+			var status string
+			if err := db.sql.QueryRowContext(ctx,
+				`SELECT status FROM outbox WHERE id=?`, p.id).Scan(&status); err != nil {
+				return fmt.Errorf("store: check outbox %d status: %w", p.id, err)
+			}
+			if status == "complete" {
+				continue
+			}
+			break
 		}
 
 		_ = dispatch(ctx, p.e)

@@ -12,7 +12,15 @@ package sync
 // RunOutbox drainers run concurrently against ONE shared store/outbox (two
 // workers + a maintenance flusher in the daemon).
 //
-// This test is TEST-ONLY; it changes no production code.
+// pg2-scl9p: this test caught a genuine ordering bug in RunOutbox
+// (internal/store/outbox.go) — a caller that lost the claim race on a
+// still-in-flight lower-id row used to fall through and dispatch a later,
+// unclaimed row from its own snapshot regardless, which could dispatch
+// feedback.created before a concurrently-dispatching pr.opened finished
+// projecting the bead. RunOutbox now stops its pass instead of skipping ahead
+// in that case, leaving the rest for a later drain. This test is what proved
+// the bug reproducible (a plain, non-sandboxed `go test -count=1` failed on
+// the very first attempt) and now guards the fix.
 
 import (
 	"context"
@@ -134,7 +142,7 @@ func TestConcurrentFlushNeverMissesPRBead(t *testing.T) {
 	const iterations = 50
 	const drainers = 3 // two workers + one maintenance flusher
 
-	for i := 0; i < iterations; i++ {
+	for i := range iterations {
 		t.Run(fmt.Sprintf("iter-%02d", i), func(t *testing.T) {
 			ctx := context.Background()
 			db := store.OpenForTest(t)
@@ -195,15 +203,13 @@ func TestConcurrentFlushNeverMissesPRBead(t *testing.T) {
 
 			// Run multiple RunOutbox drainers concurrently against the shared DB.
 			var wg sync.WaitGroup
-			for d := 0; d < drainers; d++ {
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
+			for range drainers {
+				wg.Go(func() {
 					// SQLite I/O contention ("database is locked") is NOT the
 					// invariant under test; rows simply stay pending and a later
 					// drain completes them. Ignore RunOutbox's returned I/O error.
 					_ = db.RunOutbox(ctx, dispatch)
-				}()
+				})
 			}
 			wg.Wait()
 
