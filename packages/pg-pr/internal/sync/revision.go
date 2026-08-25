@@ -4,7 +4,9 @@ import (
 	"context"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/checkinterpret"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/cirollup"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
 )
@@ -31,6 +33,71 @@ func ciRollupFromSync(runs []api.CIRun, now func() time.Time, excl *cirollup.Exc
 		Pending:    r.Pending,
 		CapturedAt: capturedAt,
 	}
+}
+
+// excluderFromCheckInterpreters builds a cirollup.Excluder from the union of
+// every configured check-interpreter's Patterns, regardless of Type — any
+// check name a configured interpreter claims must also be excluded from the
+// CI rollup exactly as excluded_ci_checks used to exclude it (pg2-4dz88.2.6's
+// carried-forward invariant). cirollup and checkinterpret deliberately do not
+// share an abstraction (docs/decisions/ci-gate.md's DEC-CIGATE-1), so this is
+// the one place that reconciles "claimed by an interpreter" with "excluded
+// from the rollup" by re-deriving an Excluder from the same pattern lists a
+// Registry was built from.
+func excluderFromCheckInterpreters(interpreters []config.CheckInterpreterConfig) *cirollup.Excluder {
+	var patterns []string
+	for _, ip := range interpreters {
+		patterns = append(patterns, ip.Patterns...)
+	}
+	return cirollup.NewExcluder(patterns)
+}
+
+// checkInterpretersFrom converts a repo's configured
+// []config.CheckInterpreterConfig into the plain []checkinterpret.Interpreter
+// shape checkinterpret.New expects. The two types mirror each other
+// field-for-field (see checkinterpret.Interpreter's doc comment); this is the
+// conversion that package's doc comment names as this bead's (pg2-4dz88.2.6)
+// job, so internal/checkinterpret never needs to import internal/config.
+func checkInterpretersFrom(cfgs []config.CheckInterpreterConfig) []checkinterpret.Interpreter {
+	out := make([]checkinterpret.Interpreter, len(cfgs))
+	for i, c := range cfgs {
+		out[i] = checkinterpret.Interpreter{Patterns: c.Patterns, Type: c.Type}
+	}
+	return out
+}
+
+// gateStateFromSync scans runs for the first one claimed as
+// checkinterpret.ApprovalGateType by reg (in runs order — deterministic when
+// more than one run is claimed, though that shouldn't normally happen) and
+// classifies it into a store.GateState. now is an injectable clock, mirroring
+// ciRollupFromSync; nil defaults to time.Now.
+//
+// ok is false when NO run is claimed as the approval-gate type — callers
+// should skip the SetRevisionGateState write entirely in that case rather
+// than force a value: a brand-new revision already defaults to "unknown"
+// (store/revision.go's RecordRevision), so skipping is equivalent to writing
+// Unknown for a revision seen for the first time, and it deliberately leaves
+// an EXISTING revision's last-recorded gate state untouched if a later tick's
+// CI runs stop including any gate-claimed check (rather than clobbering a
+// real prior observation with a manufactured "unknown").
+func gateStateFromSync(runs []api.CIRun, now func() time.Time, reg *checkinterpret.Registry) (store.GateState, bool) {
+	if now == nil {
+		now = time.Now
+	}
+	for _, r := range runs {
+		typ, claimed := reg.Claim(r.Name)
+		if !claimed || typ != checkinterpret.ApprovalGateType {
+			continue
+		}
+		result := checkinterpret.ClassifyApprovalGate(r.Conclusion, r.Description)
+		return store.GateState{
+			State:      string(result.State),
+			N:          result.N,
+			M:          result.M,
+			CapturedAt: now().UTC().Format(time.RFC3339),
+		}, true
+	}
+	return store.GateState{}, false
 }
 
 // submittedReview is a filtered review targeted at a specific commit.

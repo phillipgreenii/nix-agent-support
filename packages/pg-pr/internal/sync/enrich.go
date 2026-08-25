@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/cirollup"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/enrich"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/store"
@@ -36,12 +35,13 @@ func (e *Engine) enrichAndStore(ctx context.Context, repo string, pr api.PR, enr
 		return nil
 	}
 	// ExcludedCIChecks was removed outright (operator ruling on pg2-dw73b,
-	// 2026-08-24); its replacement, rcfg.CheckInterpreters, is not yet wired
-	// into the rollup — that lands with pg2-4dz88.2.4/pg2-4dz88.2.6. Until
-	// then this Excluder claims nothing, matching the "uninterpreted checks
-	// count in CI health" safe default the check-interpreter generalization
-	// itself requires.
-	in := enrich.Input{PR: pr, Labels: pr.Labels, Excluder: cirollup.NewExcluder(nil)}
+	// 2026-08-24); its replacement, rcfg.CheckInterpreters, is now wired in
+	// (pg2-4dz88.2.6): the Excluder fed to urgency scoring is derived from
+	// the union of every configured check-interpreter's Patterns
+	// (excluderFromCheckInterpreters, internal/sync/revision.go) — a repo
+	// with no CheckInterpreters configured still gets an Excluder that
+	// claims nothing, preserving the prior safe default.
+	in := enrich.Input{PR: pr, Labels: pr.Labels, Excluder: excluderFromCheckInterpreters(rcfg.CheckInterpreters)}
 	if enriched != nil {
 		in.Files = enriched.Files
 		in.Commits = enriched.Commits

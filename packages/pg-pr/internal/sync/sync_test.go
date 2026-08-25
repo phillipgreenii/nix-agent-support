@@ -1704,6 +1704,65 @@ func TestMaybePromoteDraftBlockedByUninterpretedGateCheck(t *testing.T) {
 	}
 }
 
+// TestMaybePromoteDraftPromotesWhenGateCheckClaimed is the sibling to
+// TestMaybePromoteDraftBlockedByUninterpretedGateCheck proving the
+// NEWLY-WIRED behavior (pg2-4dz88.2.6): the same fixture (one green check,
+// one failing "gate-bot: approval required" check), but this time the repo
+// config DOES declare a CheckInterpreters entry claiming the gate-bot check
+// name. Because excluderFromCheckInterpreters now derives the rollup's
+// Excluder from that same config, the gate check is excluded from the
+// rollup entirely — regardless of its (unparseable, empty) Description —
+// leaving only the green check, so the PR is no longer blocked and gets
+// promoted.
+func TestMaybePromoteDraftPromotesWhenGateCheckClaimed(t *testing.T) {
+	ctx := realBDCtx(t)
+
+	vcs := newFakeVCS()
+	ci := newFakeCICD()
+
+	// Self-authored draft PR: real check green, gate-bot failing.
+	pr := selfDraftPR(57, "foo/bar", "feat/draft-promote-claimed")
+	pr.State = "open"
+	vcs.my["foo/bar"] = []api.PR{pr}
+	ci.runs[keyOf("foo/bar", 57)] = []api.CIRun{
+		successRun(),
+		{Name: "gate-bot: approval required", Status: "completed", Conclusion: "failure"},
+	}
+
+	bd := newRealBDClient(t)
+	db := store.OpenForTest(t)
+
+	cfg := cfgWithCICD()
+	cfg.Repos[0].CheckInterpreters = []config.CheckInterpreterConfig{
+		{Patterns: []string{"^gate-bot"}, Type: "approval-gate"},
+	}
+
+	e, err := New(Deps{
+		Cfg:      cfg,
+		VCS:      map[string]VCSProvider{"github": vcs},
+		CICD:     map[string]CICDProvider{"ci": ci},
+		Beads:    bd,
+		StateDir: t.TempDir(),
+		Store:    db,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	sum, err := e.Sync(ctx)
+	if err != nil {
+		t.Fatalf("Sync: %v (errors=%+v)", err, sum.Errors)
+	}
+
+	if len(vcs.setDraftCalls) != 1 {
+		t.Fatalf("expected 1 SetDraft call (the claimed gate check is excluded from the rollup, so only the green check counts); got %d: %+v",
+			len(vcs.setDraftCalls), vcs.setDraftCalls)
+	}
+	if sum.DraftPromoted != 1 {
+		t.Fatalf("DraftPromoted: got %d want 1", sum.DraftPromoted)
+	}
+}
+
 func TestBuildEnrichedSearchQuery(t *testing.T) {
 	cases := []struct {
 		name string

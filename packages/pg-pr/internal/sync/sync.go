@@ -1789,12 +1789,14 @@ func (e *Engine) maybePromoteDraft(ctx context.Context, enriched *vcs.EnrichedPR
 		return nil
 	}
 	// ExcludedCIChecks was removed outright (operator ruling on pg2-dw73b,
-	// 2026-08-24); its replacement, rcfg.CheckInterpreters, is not yet
-	// wired into the rollup — that lands with
-	// pg2-4dz88.2.4/pg2-4dz88.2.6. Until then this Excluder claims
-	// nothing, matching the "uninterpreted checks count in CI health" safe
-	// default the check-interpreter generalization itself requires.
-	ciExcl := cirollup.NewExcluder(nil)
+	// 2026-08-24); its replacement, rcfg.CheckInterpreters, is now wired in
+	// (pg2-4dz88.2.6): ciExcl is derived from the union of every configured
+	// check-interpreter's Patterns (excluderFromCheckInterpreters,
+	// internal/sync/revision.go), covering BOTH branches below (bulk-GraphQL
+	// enriched.CIRuns and the per-CICD ListRuns fallback) — a repo with no
+	// CheckInterpreters configured still gets an Excluder that claims
+	// nothing, preserving the prior safe default.
+	ciExcl := excluderFromCheckInterpreters(rcfg.CheckInterpreters)
 	if enriched != nil {
 		// Bulk-fetched CI runs cover every check; the rollup is over the
 		// PR's last commit so it's authoritative for "all green".

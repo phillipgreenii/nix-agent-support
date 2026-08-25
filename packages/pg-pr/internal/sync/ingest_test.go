@@ -889,6 +889,76 @@ func TestIngestNoLongerExcludesGateStyleCheck(t *testing.T) {
 	}
 }
 
+// TestIngestExcludesClaimedGateCheckAndPersistsGateState is the sibling to
+// TestIngestNoLongerExcludesGateStyleCheck proving the NEWLY-WIRED behavior
+// (pg2-4dz88.2.6): when the repo config DOES declare a CheckInterpreters
+// entry claiming the gate-bot check name, that check is (a) excluded from
+// the CI rollup — 0 ci-failure rows, exactly as excluded_ci_checks used to
+// exclude it — and (b) its parsed approval-gate state is persisted onto the
+// revision via SetRevisionGateState. The run's Description ("0/1 rules
+// approved") parses to Unsatisfied(M=1) per checkinterpret.ClassifyApprovalGate,
+// deliberately independent of the run's Conclusion ("failure") — the
+// interpreter's own documented rule that description, not conclusion, is
+// authoritative.
+func TestIngestExcludesClaimedGateCheckAndPersistsGateState(t *testing.T) {
+	ctx := context.Background()
+	db := store.OpenForTest(t)
+
+	pr := api.PR{
+		Repo: "o/r", Number: 22, State: "open",
+		Branch: "feat/w", Base: "main", Author: "alice",
+		URL: "https://github.com/o/r/pull/22", HeadSHA: "deadbeef2",
+	}
+	run := api.CIRun{
+		ID: "run-z", Name: "gate-bot: approval required", Status: "completed",
+		Conclusion: "failure", Description: "0/1 rules approved",
+		URL: "https://u", Provider: "github-actions", HeadSHA: "deadbeef2",
+	}
+	e, err := New(Deps{
+		Cfg: &config.Config{
+			SelfLogin: "bot",
+			Repos: []config.RepoConfig{{
+				Remote: "o/r", VCS: "github",
+				CheckInterpreters: []config.CheckInterpreterConfig{
+					{Patterns: []string{"^gate-bot"}, Type: "approval-gate"},
+				},
+			}},
+		},
+		VCS:      map[string]VCSProvider{"github": newFakeVCS()},
+		Beads:    &noopBeads{},
+		StateDir: t.TempDir(),
+		Store:    db,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if err := e.ingestFeedbackToStore(ctx, "o/r", pr, &vcs.EnrichedPR{PR: pr, CIRuns: []api.CIRun{run}}); err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+
+	storedPR, _ := db.GetPR(ctx, "o/r", 22)
+	rows, _ := db.ListFeedback(ctx, storedPR.ID, store.ListFilter{Kind: "ci-failure"})
+	if len(rows) != 0 {
+		t.Fatalf("expected 0 ci-failure rows now that the check-interpreter registry claims this check; got %d: %+v",
+			len(rows), rows)
+	}
+
+	rev, err := db.LatestRevision(ctx, storedPR.ID)
+	if err != nil {
+		t.Fatalf("LatestRevision: %v", err)
+	}
+	if rev == nil {
+		t.Fatal("LatestRevision: got nil, want a revision")
+	}
+	if rev.GateState != "unsatisfied" || rev.GateStateN != 0 || rev.GateStateM != 1 {
+		t.Fatalf("gate state = %q (n=%d m=%d), want unsatisfied (n=0 m=1)",
+			rev.GateState, rev.GateStateN, rev.GateStateM)
+	}
+	if rev.GateStateCapturedAt == "" {
+		t.Fatal("GateStateCapturedAt: got empty, want a timestamp")
+	}
+}
+
 // TestIngest_CoOwnedOwnership verifies that a PR authored by a non-self login
 // but with a self-authored commit (per enriched.CommitAuthors) is classified
 // as "co-owned" via ownership.Classify — not the old authorship-only "team"

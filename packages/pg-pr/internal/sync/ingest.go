@@ -8,7 +8,9 @@ import (
 	"strings"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/agentregistry"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/checkinterpret"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/cirollup"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/feedbackclassify"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/ownership"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/store"
@@ -50,12 +52,24 @@ func (e *Engine) ingestFeedbackToStore(ctx context.Context, repo string, pr api.
 	mine := own.ActsAsMine()
 
 	// ExcludedCIChecks was removed outright (operator ruling on pg2-dw73b,
-	// 2026-08-24); its replacement, RepoConfig.CheckInterpreters, is not
-	// yet wired into the rollup — that lands with
-	// pg2-4dz88.2.4/pg2-4dz88.2.6. Until then this Excluder claims nothing,
-	// matching the "uninterpreted checks count in CI health" safe default
-	// the check-interpreter generalization itself requires.
-	ciExcl := cirollup.NewExcluder(nil)
+	// 2026-08-24); its replacement, RepoConfig.CheckInterpreters, is now
+	// wired in (pg2-4dz88.2.6): ciExcl is derived from the union of every
+	// configured check-interpreter's Patterns (excluderFromCheckInterpreters,
+	// internal/sync/revision.go), so a check claimed by any interpreter Type
+	// is excluded from the CI rollup exactly as excluded_ci_checks used to
+	// exclude it — a repo with no CheckInterpreters configured still gets an
+	// Excluder that claims nothing, preserving the prior safe default.
+	rcfg, err := e.repoConfig(repo)
+	if err != nil {
+		// Defensive fallback, mirroring maybePromoteDraft's own repoConfig
+		// use: ingestFeedbackToStore must still run (e.g. the full-chain
+		// integration test calls it directly without a matching config
+		// entry) with an empty CheckInterpreters list, which is the same
+		// "nothing claimed" safe default as before this bead.
+		rcfg = config.RepoConfig{Remote: repo}
+	}
+	ciExcl := excluderFromCheckInterpreters(rcfg.CheckInterpreters)
+	checkReg := checkinterpret.New(checkInterpretersFrom(rcfg.CheckInterpreters))
 
 	// UpsertPR once, outside the per-feedback transactions, so we capture
 	// prID before the item loop. This is idempotent with the authoritative
@@ -78,6 +92,21 @@ func (e *Engine) ingestFeedbackToStore(ctx context.Context, repo string, pr api.
 	}
 	if err := e.deps.Store.SetRevisionCI(ctx, rev.ID, ciRollupFromSync(enriched.CIRuns, e.deps.Now, ciExcl)); err != nil {
 		return fmt.Errorf("ingest: set revision ci %s#%d: %w", repo, pr.Number, err)
+	}
+	// Persist the approval-gate state for this revision (pg2-4dz88.2.6,
+	// schema/store already landed by pg2-4dz88.2.5). gateStateFromSync
+	// reports ok==false when no CI run is claimed as
+	// checkinterpret.ApprovalGateType — in that case we deliberately skip
+	// the write entirely (see gateStateFromSync's doc comment) rather than
+	// force an "unknown" value: a brand-new revision already defaults to
+	// "unknown" (store.RecordRevision), so the two are equivalent for a
+	// revision seen for the first time, and skipping leaves an existing
+	// revision's last-recorded gate state untouched if a later tick's runs
+	// stop including a gate-claimed check.
+	if gs, ok := gateStateFromSync(enriched.CIRuns, e.deps.Now, checkReg); ok {
+		if err := e.deps.Store.SetRevisionGateState(ctx, rev.ID, gs); err != nil {
+			return fmt.Errorf("ingest: set revision gate state %s#%d: %w", repo, pr.Number, err)
+		}
 	}
 	for _, rv := range mySubmittedReviews(enriched.Reviews, self) {
 		// Record the self observation as a per-approver row (pg2-4dz88.1.5).
