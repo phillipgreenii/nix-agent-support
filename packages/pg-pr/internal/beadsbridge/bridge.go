@@ -23,6 +23,7 @@ import (
 	"strings"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/ownership"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/prlock"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/beads"
 )
@@ -55,6 +56,11 @@ type Handler struct {
 	// dependency is visible at the call site, not so it can vary per Handler; a
 	// per-Handler registry would defeat the whole mechanism (see projectionLocks).
 	locks *keyedLock
+	// fileLock is the cross-process extension of locks (bead pg2-4dz88.6.3):
+	// every Handler points at the one process-wide prLock, for the identical
+	// reason locks always points at projectionLocks rather than a fresh
+	// per-Handler value — see prLock's doc comment.
+	fileLock *prlock.Locker
 }
 
 // projectionLocks is the process-wide per-PR projection lock. It is
@@ -70,33 +76,55 @@ type Handler struct {
 // SCOPE — IN-PROCESS ONLY, DELIBERATELY (bead pg2-35rl6). This closes the
 // mechanism that produced the observed duplicates (one daemon, several goroutines
 // on one shared outbox; Engine.Daemon holds an exclusive flock on daemon.lock, so
-// two daemons cannot coexist). It does NOT stop a SECOND pg-pr process racing a
-// daemon tick: the one-shot `pg-pr sync` path takes no lock at all, and
-// `pg-pr pr create` reaches EnsureMergeRequest without passing through this
-// bridge. Two mutual-exclusion mechanisms were considered and NOT taken:
+// two daemons cannot coexist). On its own it does NOT stop a SECOND pg-pr process
+// racing a daemon tick: the one-shot `pg-pr sync` path takes no IN-PROCESS lock at
+// all, and `pg-pr pr create` reaches EnsureMergeRequest without passing through
+// this bridge. A post-create re-resolve that closes the loser was considered and
+// NOT taken for the cross-process case either, for the same reason it fails
+// in-process: it cannot be made airtight. The later creator always observes the
+// earlier bead, but "who loses" must be decided from stored state both processes
+// read identically, and the pairs this bug produces are created in the SAME
+// SECOND (the production evidence: two process-feedback beads at 12:35:25Z with
+// an identical fbsum digest). On a created_at tie the tiebreak can elect the
+// LATER creator, whose peer may have already re-resolved and seen only itself —
+// so neither closes and the duplicate survives. It would trade a total
+// prevention for a partial cure plus a new close-what-we-just-wrote path, in a
+// package whose FindDuplicateMergeRequests doc explicitly forbids a mutating
+// collapse counterpart.
 //
-//   - A post-create re-resolve that closes the loser cannot be made airtight. The
-//     later creator always observes the earlier bead, but "who loses" must be
-//     decided from stored state both processes read identically, and the pairs
-//     this bug produces are created in the SAME SECOND (the production evidence:
-//     two process-feedback beads at 12:35:25Z with an identical fbsum digest). On
-//     a created_at tie the tiebreak can elect the LATER creator, whose peer may
-//     have already re-resolved and seen only itself — so neither closes and the
-//     duplicate survives. It would trade a total prevention for a partial cure
-//     plus a new close-what-we-just-wrote path, in a package whose
-//     FindDuplicateMergeRequests doc explicitly forbids a mutating collapse
-//     counterpart.
-//   - Making the gate a per-key FILE lock (flock, as the daemon already does for
-//     its single-instance lock) WOULD cover both, but it moves this package from
-//     pure logic over a bead client to something owning a runtime directory, with
-//     its own failure modes and a cancellable LOCK_NB retry loop. That is a
-//     design decision with a wider blast radius than this fix, and belongs in its
-//     own bead alongside the alternative of enforcing the identity at the bd
-//     layer.
-//
-// So a cross-process race can still produce a duplicate pair; it is reported by
-// the read-only `pg-pr sync duplicates` audit, not silently absorbed.
+// The cross-process gap this in-process lock leaves open is closed by bead
+// pg2-4dz88.6.3 — see prLock below. A per-key FILE lock (flock, the same
+// mechanism the daemon already uses for its own single-instance daemon.lock) is
+// held ACROSS OS PROCESSES for the identical key this lock guards: Handle
+// acquires both (see Handle), and `pg-pr pr create` takes the cross-process lock
+// around its own EnsureMergeRequest call (cmd/pg-pr/pr_write.go's
+// mergeRequestLock) even though it never reaches this bridge. So a cross-process
+// race can no longer produce a duplicate pair (INV-MR-1); the read-only
+// `pg-pr sync duplicates` audit remains as a detector for any gap this analysis
+// missed, not as the primary defense.
 var projectionLocks = newKeyedLock()
+
+// prLock is the cross-process extension of projectionLocks (bead pg2-4dz88.6.3):
+// a per-PR-identity flock-backed lock (internal/prlock) held for the SAME key
+// and the SAME span as projectionLocks (see Handle), but enforced by the kernel
+// across OS PROCESS boundaries rather than only within this one. It exists
+// because projectionLocks alone cannot help `pg-pr sync --pr/--repo` (a fresh
+// process per invocation) or `pg-pr pr create` (which reaches EnsureMergeRequest
+// directly, never through this bridge — see cmd/pg-pr/pr_write.go's own Acquire
+// call around mergeRequestLock) resist racing a concurrently running daemon or a
+// second CLI invocation.
+//
+// Package-level for the identical reason projectionLocks is package-level: a
+// fresh Handler is built per event/invocation (see projectionLocks's doc
+// comment), so a per-Handler field would defeat cross-process mutual exclusion
+// the same way it would defeat the in-process case.
+//
+// Tests MUST override this with a Locker pointed at a t.TempDir() LockDir
+// (mirrors prlock.Options.LockDir's own doc comment) — this package's TestMain
+// (cross_process_lock_test.go) already does so for every test in this package;
+// never exercise the real $XDG_RUNTIME_DIR/pg-pr/locks path from a test, where it
+// could contend with (or silently synchronize against) a real daemon.
+var prLock = prlock.New(prlock.Options{})
 
 // Option customizes a Handler. No options are defined today — the last one
 // (WithoutDraftReviews, the NH3 review kill switch) was removed by pg2-ynhr.5
@@ -106,7 +134,7 @@ type Option func(*Handler)
 
 // New constructs the handler, applying any options.
 func New(client BeadClient, opts ...Option) *Handler {
-	h := &Handler{client: client, locks: projectionLocks}
+	h := &Handler{client: client, locks: projectionLocks, fileLock: prLock}
 	for _, opt := range opts {
 		opt(h)
 	}
@@ -122,7 +150,12 @@ type FeedbackPayload = store.FeedbackPayload
 // at-least-once outbox must not duplicate beads.
 //
 // It is also SERIALIZED PER PR IDENTITY, because idempotence alone is not enough
-// under concurrency (bead pg2-35rl6). Every projection below is a check-then-create
+// under concurrency (bead pg2-35rl6), and that serialization now spans BOTH an
+// in-process lock (projectionLocks) AND a cross-process one (prLock, bead
+// pg2-4dz88.6.3) — the latter closes the gap the former cannot: a second pg-pr OS
+// process (the daemon and a one-shot `pg-pr sync --pr/--repo` invocation, or two
+// overlapping one-shot invocations) racing the SAME PR identity. Every
+// projection below is a check-then-create
 // — ReconcileMergeRequest is handed a fresh read then creates-or-updates,
 // ensureProcessFeedbackBead reads ResolveProcessingCycle then creates —
 // and nothing at the bd layer rejects a second create for an identity that already has one
@@ -137,15 +170,16 @@ type FeedbackPayload = store.FeedbackPayload
 // team query also covers it lands in both rosters, and one tick can drive two
 // concurrent projections of the same key (in the limit, of the same outbox row).
 //
-// The lock is taken ONCE for the whole event, spanning the entire read→decide→write
-// section of every branch rather than the writes alone: locking only the create
-// would let the second goroutine finish its READ before the first's write and
-// still decide to create. Different PRs take different keys and stay fully
-// concurrent, which is what keeps the two workers parallel on the 1m poll.
+// Both locks are taken ONCE for the whole event, spanning the entire
+// read→decide→write section of every branch rather than the writes alone:
+// locking only the create would let the second goroutine (or second process)
+// finish its READ before the first's write and still decide to create.
+// Different PRs take different keys and stay fully concurrent on EITHER lock,
+// which is what keeps the two workers parallel on the 1m poll.
 //
-// An event whose payload carries no (repo, number) identity is projected WITHOUT
-// the lock: there is nothing to serialize on, and the per-branch decoders below
-// still report the malformed payload with their own error text.
+// An event whose payload carries no (repo, number) identity is projected
+// WITHOUT either lock: there is nothing to serialize on, and the per-branch
+// decoders below still report the malformed payload with their own error text.
 func (h *Handler) Handle(ctx context.Context, e store.Event) error {
 	key, ok := prIdentityKey(e.Payload)
 	if !ok {
@@ -156,6 +190,11 @@ func (h *Handler) Handle(ctx context.Context, e store.Event) error {
 		return fmt.Errorf("beadsbridge: await projection lock for %s: %w", key, err)
 	}
 	defer release()
+	frelease, ferr := h.fileLock.Acquire(ctx, key)
+	if ferr != nil {
+		return fmt.Errorf("beadsbridge: await cross-process projection lock for %s: %w", key, ferr)
+	}
+	defer frelease()
 	return h.project(ctx, e)
 }
 

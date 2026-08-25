@@ -2,11 +2,14 @@ package main
 
 import (
 	"bytes"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/browser"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/prlock"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/store"
 )
 
@@ -31,7 +34,43 @@ func TestMain(m *testing.M) {
 		panic("guard browser.BinEnvVar: " + err.Error())
 	}
 	store.SetSynchronousForTests("OFF")
-	os.Exit(m.Run())
+
+	// Point mergeRequestLock (pr_write.go) at an isolated lock dir for the
+	// whole test binary instead of its production default
+	// ($XDG_RUNTIME_DIR/pg-pr/locks). Without this, ANY test that runs
+	// `pr create` would take a REAL flock under that path — contending with
+	// (or worse, silently synchronizing against) an actual pg-pr process
+	// running on the same machine. See prlock.Options.LockDir's own doc
+	// comment: "Tests MUST inject a t.TempDir() value here instead of
+	// relying on the default." TestMain runs outside any *testing.T, so it
+	// uses os.MkdirTemp directly rather than t.TempDir().
+	lockDir, err := os.MkdirTemp("", "pg-pr-cmd-prlock-test-*")
+	if err != nil {
+		panic("create test lock dir: " + err.Error())
+	}
+	mergeRequestLock = prlock.New(prlock.Options{LockDir: lockDir})
+
+	code := m.Run()
+	_ = os.RemoveAll(lockDir)
+	os.Exit(code)
+}
+
+// TestExitCodeFor pins the error->exit-code mapping (bead pg2-4dz88.6.3): a
+// give-up on the cross-process merge-request lock (internal/prlock.ErrTimeout,
+// wrapped or bare) maps to exitBusy; every other error — including nil-vs-any
+// unexpected error — stays on the generic path (1), which per this
+// workspace's exit-code convention MUST NOT be given a specific meaning.
+func TestExitCodeFor(t *testing.T) {
+	if got := exitCodeFor(errors.New("boom")); got != 1 {
+		t.Errorf("generic error exit code = %d, want 1", got)
+	}
+	wrapped := fmt.Errorf("pr create: await merge-request lock for o/r#1: %w", prlock.ErrTimeout)
+	if got := exitCodeFor(wrapped); got != exitBusy {
+		t.Errorf("wrapped prlock.ErrTimeout exit code = %d, want exitBusy (%d)", got, exitBusy)
+	}
+	if got := exitCodeFor(prlock.ErrTimeout); got != exitBusy {
+		t.Errorf("bare prlock.ErrTimeout exit code = %d, want exitBusy (%d)", got, exitBusy)
+	}
 }
 
 func TestVersionCommand(t *testing.T) {

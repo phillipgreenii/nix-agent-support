@@ -76,7 +76,10 @@ correct owner (ADR 0034) — the UUID preserves identity; only the owning set ch
 - **`INV-MR-1`** <!-- uuid: bacb5392-230f-4cf7-a10b-6821ddb0f085 --> — pg-pr MUST be the **sole
   creator** of merge-request tracking records. At most **one** record exists per
   `(repository, PR number)`; a re-sync MUST update the existing record rather than create a
-  second one, and a **closed** record MUST NOT be reopened by sync.
+  second one, and a **closed** record MUST NOT be reopened by sync. This holds even when the
+  operator's own create (`USECASE-PGPR-CREATE`) and a background sync (`USECASE-PGPR-SYNC`) — or
+  two overlapping background syncs — race to ensure the SAME PR's record at the same time: the
+  outcome MUST still be at most one record, never two.
 
 ## Sync (`INV-SYNC-*`)
 

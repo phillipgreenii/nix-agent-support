@@ -137,6 +137,12 @@ _Requires:_ `INV-MR-1`.
 1. If a record already exists for this PR identity, update it.
 2. Otherwise create one. A closed record is never reopened by this step.
 
+Extensions:
+
+- 1a. The operator's create (`USECASE-PGPR-CREATE`) and a background sync
+  (`USECASE-PGPR-SYNC`) — or two overlapping background syncs — invoke this subfunction for the
+  SAME PR identity at the same time: at most one record still results, never two (`INV-MR-1`).
+
 ## Journeys
 
 ### `JOURNEY-PGPR-SYNC` — the sync arc <!-- uuid: e255790f-3ad5-4a0d-baf6-d1a6b63d3d4c -->

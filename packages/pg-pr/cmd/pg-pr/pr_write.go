@@ -13,6 +13,7 @@ import (
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/branch"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/output"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/prlock"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/sync"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/beads"
@@ -62,6 +63,23 @@ var prWF prWriteFlags
 var beadsClientForPR = func(dir string) beadsMergeRequestClient {
 	return beads.NewClientForRepo(dir)
 }
+
+// mergeRequestLock is the cross-process per-PR-identity lock `pr create` takes
+// around its own EnsureMergeRequest call, guarding the SAME race
+// internal/beadsbridge.Handler.Handle guards for the sync/daemon path (bead
+// pg2-4dz88.6.3, INV-MR-1): this command and `pg-pr sync`/the daemon are
+// separate OS processes that can both try to create the merge-request bead for
+// the SAME PR, and an in-process mutex cannot serialize separate processes —
+// only a shared flock file can. Both sides resolve to the same on-disk lock
+// file because both construct a Locker with the DEFAULT LockDir
+// (internal/prlock.Options.LockDir's default, $XDG_RUNTIME_DIR/pg-pr/locks);
+// the key is "owner/name#<number>", the exact shape internal/beadsbridge
+// derives (see its prIdentityKey).
+//
+// Tests MUST override this with a Locker pointed at a t.TempDir() LockDir —
+// this package's TestMain (main_test.go) already does so for every test in
+// this package; never exercise the real default path from a test.
+var mergeRequestLock = prlock.New(prlock.Options{})
 
 // beadsMergeRequestClient narrows the beads.Client API to the methods used
 // here; tests can satisfy it with an in-memory fake.
@@ -333,45 +351,63 @@ func runPRCreate(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	// Best-effort: record the merge-request bead. Failure here doesn't
-	// fail the command since the PR is already created upstream.
+	// Best-effort: record the merge-request bead. An ORDINARY bd failure here
+	// doesn't fail the command since the PR is already created upstream — but
+	// giving up on the cross-process merge-request lock below is NOT
+	// best-effort: it means another pg-pr process may be creating (or already
+	// created) the SAME PR's bead right now (INV-MR-1), so it is surfaced as
+	// this command's own error (mapped to exitBusy by main.go's exitCodeFor)
+	// instead of a warning.
 	//
 	// The bd Client is scoped to the resolved repo's monorepo root so the
 	// bead lands in that monorepo's .beads/ workspace — not whichever
 	// workspace happens to match the process cwd.
 	beadID := ""
+	var lockErr error
 	bdc := beadsClientForPR(resolveRepoPath(ctx, repo))
 	if bdc != nil {
-		id, _, berr := bdc.EnsureMergeRequest(ctx, prWF.title, beads.MergeRequestFields{
-			Repo:     repo,
-			PRNumber: pr.Number,
-			State:    "open",
-			Branch:   pr.Branch,
-			Base:     pr.Base,
-			Author:   pr.Author,
-			URL:      pr.URL,
-			Draft:    draft,
-		})
-		if berr == nil {
-			beadID = id
+		key := fmt.Sprintf("%s#%d", repo, pr.Number)
+		release, aerr := mergeRequestLock.Acquire(ctx, key)
+		if aerr != nil {
+			lockErr = fmt.Errorf("pr create: await merge-request lock for %s: %w", key, aerr)
 		} else {
-			_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "WARNING: failed to record merge-request bead: %v\n", berr)
+			defer release()
+			id, _, berr := bdc.EnsureMergeRequest(ctx, prWF.title, beads.MergeRequestFields{
+				Repo:     repo,
+				PRNumber: pr.Number,
+				State:    "open",
+				Branch:   pr.Branch,
+				Base:     pr.Base,
+				Author:   pr.Author,
+				URL:      pr.URL,
+				Draft:    draft,
+			})
+			if berr == nil {
+				beadID = id
+			} else {
+				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "WARNING: failed to record merge-request bead: %v\n", berr)
+			}
 		}
 	}
 
 	if output.Resolve(prWF.jsonOutput) {
-		return writeJSON(cmd.OutOrStdout(), map[string]any{
+		if werr := writeJSON(cmd.OutOrStdout(), map[string]any{
 			"pr":      pr,
 			"bead_id": beadID,
-		})
+		}); werr != nil {
+			return werr
+		}
+		return lockErr
 	}
 	state := "draft"
 	if !draft {
 		state = "ready"
 	}
-	_, err = fmt.Fprintf(cmd.OutOrStdout(),
-		"ok Opened PR #%d (%s) on %s: %s\n", pr.Number, state, pr.Repo, pr.URL)
-	return err
+	if _, werr := fmt.Fprintf(cmd.OutOrStdout(),
+		"ok Opened PR #%d (%s) on %s: %s\n", pr.Number, state, pr.Repo, pr.URL); werr != nil {
+		return werr
+	}
+	return lockErr
 }
 
 // ----------------------------------------------------------------------

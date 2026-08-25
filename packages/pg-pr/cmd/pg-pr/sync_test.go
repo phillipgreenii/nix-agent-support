@@ -5,10 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/beadsbridge"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/config"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/prlock"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/sync"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/beads"
@@ -283,5 +286,104 @@ func TestSyncCommand_PropagatesConfigError(t *testing.T) {
 
 	if err := rootCmd.Execute(); err == nil {
 		t.Fatalf("expected error from missing config")
+	}
+}
+
+// ----------------------------------------------------------------------
+// fakeBridgeBeads is a minimal beadsbridge.BeadClient double shared by the
+// tests below.
+// ----------------------------------------------------------------------
+
+type fakeBridgeBeads struct {
+	// findUncachedErr, when non-nil, is returned by
+	// FindByRepoAndNumberUncached — used to simulate a beadsbridge dependency
+	// failure (e.g. a wrapped prlock.ErrTimeout give-up) surfacing through
+	// Handle, for the sync CLI exit-code test (bead pg2-4dz88.6.3). nil (the
+	// zero value) preserves every other test's existing behavior.
+	findUncachedErr error
+}
+
+func (f *fakeBridgeBeads) FindByRepoAndNumberUncached(context.Context, string, int) (*beads.MergeRequest, error) {
+	if f.findUncachedErr != nil {
+		return nil, f.findUncachedErr
+	}
+	return nil, nil
+}
+
+func (f *fakeBridgeBeads) ReconcileMergeRequest(context.Context, *beads.MergeRequest, string, beads.MergeRequestFields, bool, bool, bool) (string, bool, error) {
+	return "mr-1", false, nil
+}
+
+func (f *fakeBridgeBeads) FindByRepoAndNumber(context.Context, string, int) (*beads.MergeRequest, error) {
+	return nil, nil
+}
+func (f *fakeBridgeBeads) CloseMergeRequest(context.Context, string, string) error { return nil }
+func (f *fakeBridgeBeads) ListChildrenOfPR(context.Context, string) ([]string, error) {
+	return nil, nil
+}
+
+func (f *fakeBridgeBeads) CreateProcessingCycle(context.Context, beads.CreateProcessingCycleInput) (string, error) {
+	return "", nil
+}
+
+func (f *fakeBridgeBeads) ResolveProcessingCycle(context.Context, string, string) (beads.ProcessingCycleState, error) {
+	return beads.ProcessingCycleState{}, nil
+}
+
+func (f *fakeBridgeBeads) AppendProcessingCycleNote(context.Context, string, string, string, []string) error {
+	return nil
+}
+func (f *fakeBridgeBeads) CloseProcessingCycle(context.Context, string, string) error { return nil }
+func (f *fakeBridgeBeads) CloseFeedback(context.Context, string, string) error        { return nil }
+
+// ----------------------------------------------------------------------
+// One-shot `--pr`/`--repo` lock give-up exit-code wiring (bead pg2-4dz88.6.3)
+// ----------------------------------------------------------------------
+
+// TestSyncCommand_SinglePR_LockGiveUpSurfacesBusyExit proves the CLI-level
+// half of bead pg2-4dz88.6.3's exit-code requirement: the one-shot
+// `pg-pr sync --pr/--repo` path relays a beadsbridge.Handler.Handle failure —
+// here a prlock.ErrTimeout cross-process lock give-up — as the command's own
+// error, instead of RunOutbox's fire-once contract (internal/store/outbox.go)
+// silently absorbing it. main.exitCodeFor then classifies that as exitBusy,
+// not the generic path.
+//
+// The give-up itself (real flock contention across two Lockers) is proven at
+// the primitive level by internal/prlock's own tests and at the beadsbridge
+// wiring level by internal/beadsbridge's cross-process lock tests (bead
+// pg2-4dz88.6.3); this test's job is only the CLI plumbing above that: does a
+// Handle failure escape flushOutbox/RunOutbox's discard and reach this
+// command's exit code. So the beadsbridge dependency is faked to return an
+// error WRAPPING prlock.ErrTimeout directly — Handle propagates whatever
+// h.project returns unwrapped (see bridge.go's Handle), so this exercises the
+// exact same error-shape a real give-up would produce.
+func TestSyncCommand_SinglePR_LockGiveUpSurfacesBusyExit(t *testing.T) {
+	vcs := &stubVCS{prs: map[string][]api.PR{"foo/bar": {samplePR(9)}}}
+	bd := &stubBeads{}
+	cfg := minimalCLICfg()
+	cfg.Repos[0].Path = t.TempDir() // required for newBeadsBridgeHandler's repo->path index
+	defer setStubsForSync(t, vcs, bd, cfg)()
+
+	fake := &fakeBridgeBeads{
+		findUncachedErr: fmt.Errorf("beadsbridge: await cross-process projection lock for foo/bar#9: %w", prlock.ErrTimeout),
+	}
+	prevClient := newBeadClientForRepo
+	newBeadClientForRepo = func(string) beadsbridge.BeadClient { return fake }
+	defer func() { newBeadClientForRepo = prevClient }()
+
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{"sync", "--pr", "9", "--repo", "foo/bar"})
+
+	err := rootCmd.Execute()
+	if err == nil {
+		t.Fatal("expected the lock give-up to surface as the command's error")
+	}
+	if !errors.Is(err, prlock.ErrTimeout) {
+		t.Fatalf("execute error = %v, want an error wrapping prlock.ErrTimeout", err)
+	}
+	if got := exitCodeFor(err); got != exitBusy {
+		t.Errorf("exitCodeFor(err) = %d, want exitBusy (%d)", got, exitBusy)
 	}
 }

@@ -9,7 +9,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/prlock"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/beads"
@@ -1134,6 +1136,55 @@ func TestPRCreate_PropagatesError(t *testing.T) {
 
 	if err := rootCmd.Execute(); err == nil {
 		t.Fatal("expected error from CreatePR to surface")
+	}
+}
+
+// TestPRCreate_LockGiveUp_ExitsBusy proves the OTHER half of bead
+// pg2-4dz88.6.3's exit-code requirement: when the cross-process
+// merge-request lock (mergeRequestLock) cannot be acquired because another
+// process already holds it for the SAME PR key, `pr create` returns an
+// error wrapping prlock.ErrTimeout (not a best-effort warning — see
+// runPRCreate's comment) and main.exitCodeFor maps that to exitBusy, not the
+// generic path.
+func TestPRCreate_LockGiveUp_ExitsBusy(t *testing.T) {
+	resetPRWriteFlags()
+	swapFakes(t)
+
+	dir := t.TempDir()
+	prevLock := mergeRequestLock
+	mergeRequestLock = prlock.New(prlock.Options{LockDir: dir, Timeout: 50 * time.Millisecond})
+	t.Cleanup(func() { mergeRequestLock = prevLock })
+
+	// Simulate a second OS process already holding the lock for the exact
+	// key runPRCreate will derive: writeFakeVCS.CreatePR's default return is
+	// PR{Number: 1}, so the key is "foo/bar#1".
+	holder := prlock.New(prlock.Options{LockDir: dir})
+	release, err := holder.Acquire(context.Background(), "foo/bar#1")
+	if err != nil {
+		t.Fatalf("pre-acquire (simulated second process): %v", err)
+	}
+	defer release()
+
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{
+		"pr", "create",
+		"--repo", "foo/bar",
+		"--title", "Test PR",
+		"--head", "feat/x",
+		"--body", "hello",
+	})
+
+	execErr := rootCmd.Execute()
+	if execErr == nil {
+		t.Fatal("expected a lock give-up error, got nil")
+	}
+	if !errors.Is(execErr, prlock.ErrTimeout) {
+		t.Fatalf("execute error = %v, want an error wrapping prlock.ErrTimeout", execErr)
+	}
+	if got := exitCodeFor(execErr); got != exitBusy {
+		t.Errorf("exitCodeFor(err) = %d, want exitBusy (%d)", got, exitBusy)
 	}
 }
 

@@ -155,10 +155,45 @@ configured repo.`,
 		}
 		defer func() { _ = eventStore.Close() }()
 		disp := event.New()
+		// bridgeHandler is what actually projects beads; it is wrapped below
+		// (one-shot mode only) to capture its error before registration,
+		// because event.Dispatcher.Dispatch itself discards every handler's
+		// return value unconditionally (only logging it) — see
+		// (*Dispatcher).callOne — so capturing at the Dispatch call instead
+		// of here would never see anything.
+		bridgeHandler := newBeadsBridgeHandler(engine.Config)
+
+		// In one-shot mode, wrap bridgeHandler to capture its LAST error into
+		// lastDispatchErr, so a cross-process merge-request-lock give-up
+		// (internal/prlock.ErrTimeout, surfaced through
+		// internal/beadsbridge.Handler.Handle — bead pg2-4dz88.6.3) can be
+		// relayed as `pg-pr sync --pr/--repo`'s own error below, even though
+		// BOTH event.Dispatcher.Dispatch (above) and store.DB.RunOutbox
+		// (internal/store/outbox.go's fire-once contract) intentionally
+		// discard it otherwise.
+		//
+		// This capture is wired ONLY for the non-daemon path: --daemon runs
+		// concurrent workers (mine + team queues, see
+		// internal/beadsbridge's projectionLocks doc comment) that can call
+		// this handler from multiple goroutines at once, and a shared
+		// variable written from all of them would race. The one-shot
+		// Sync/SyncPR paths call flushOutbox exactly once, synchronously, so
+		// the capture is race-free there.
+		var lastDispatchErr error
+		if !syFlags.daemon {
+			inner := bridgeHandler
+			bridgeHandler = func(ctx context.Context, e store.Event) error {
+				err := inner(ctx, e)
+				if err != nil {
+					lastDispatchErr = err
+				}
+				return err
+			}
+		}
 		// Pass engine.Config (bound method) as the live-config provider so the
 		// producer reads review.enabled per-dispatch from the daemon's per-poll
 		// config pointer, not a startup snapshot (bead pg2-8vp9e).
-		disp.Register(newBeadsBridgeHandler(engine.Config))
+		disp.Register(bridgeHandler)
 		engine.SetStoreAndDispatch(eventStore, disp.Dispatch)
 
 		if syFlags.daemon {
@@ -200,6 +235,13 @@ configured repo.`,
 			summary, err = engine.SyncPR(ctx, syFlags.repo, syFlags.pr)
 		} else {
 			summary, err = engine.Sync(ctx)
+		}
+		// Relay a captured dispatch failure (see the dispatch wrapper above)
+		// when the fetch/apply itself otherwise succeeded — most notably a
+		// merge-request-lock give-up, which must surface as this command's
+		// own error rather than vanish into RunOutbox's fire-once contract.
+		if err == nil && lastDispatchErr != nil {
+			err = lastDispatchErr
 		}
 
 		// Even on err, render the summary so callers see partial progress.
