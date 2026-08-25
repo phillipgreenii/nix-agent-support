@@ -1,0 +1,44 @@
+[
+  {
+    "id": "low-item",
+    "description": "low-aggressiveness item for reclaim dispatch tests",
+    "path": "/tmp/low-item",
+    "displayCommand": "echo low-item",
+    "variants": [
+      {
+        "aggressiveness": 1,
+        "variantDescription": "light",
+        "dryRunCommand": "echo dry-run-low",
+        "removeCommand": "echo remove-low"
+      }
+    ]
+  },
+  {
+    "id": "high-item",
+    "description": "aggressiveness-5 item for confirm-gate tests",
+    "path": "/tmp/high-item",
+    "displayCommand": "echo high-item",
+    "variants": [
+      {
+        "aggressiveness": 5,
+        "variantDescription": "aggressive",
+        "dryRunCommand": "echo dry-run-high",
+        "removeCommand": "echo remove-high"
+      }
+    ]
+  },
+  {
+    "id": "failing-item",
+    "description": "item whose commands exit non-zero, for exit-code propagation tests",
+    "path": "/tmp/failing-item",
+    "displayCommand": "echo failing-item",
+    "variants": [
+      {
+        "aggressiveness": 1,
+        "variantDescription": "always fails",
+        "dryRunCommand": "echo dry-run-fail; exit 3",
+        "removeCommand": "echo remove-fail; exit 3"
+      }
+    ]
+  }
+]

@@ -12,9 +12,10 @@
 #     pgdr_select_variants below)
 #   - pg2-txxyj.4: cmd_list
 #   - pg2-txxyj.5: cmd_validate
-#   - pg2-txxyj.6: cmd_reclaim
-# Names/signatures for cmd_list/cmd_validate/cmd_reclaim below are
-# placeholders; later tasks MAY rename them.
+#   - pg2-txxyj.6: cmd_reclaim (this task; see cmd_reclaim / pgdr_confirm
+#     below) -- its name/signature are now final, not a placeholder
+# Names/signatures for cmd_list/cmd_validate below remain placeholders;
+# their tasks MAY still rename them.
 
 # pgdr_default_registry_path: echoes the default registry file location,
 # honoring XDG_CONFIG_HOME with the usual $HOME/.config fallback.
@@ -259,10 +260,155 @@ cmd_validate() {
   return 1
 }
 
-# cmd_reclaim: implements the `reclaim` subcommand. Args: any
-# reclaim-specific options/positionals (e.g. --aggressiveness, --apply,
-# item ids), already stripped of the "reclaim" token itself.
+# pgdr_confirm: prompts PROMPT and reads a y/N confirmation directly from
+# the controlling terminal (/dev/tty), returning 0 for an explicit y/yes
+# answer and 1 for anything else -- including no controlling terminal at
+# all (read fails, reply stays empty). "No" is the safe default.
+#
+# Deliberately reads /dev/tty rather than stdin: cmd_reclaim's aggressive
+# (>=4) confirmation gate below MUST NOT be bypassable by piping an answer
+# in (e.g. `yes | pg-disk-reclaimer reclaim --apply --aggressiveness 5`),
+# since that pipe is exactly the non-interactive path -- cron/Taskfile/
+# CI -- the gate exists to keep impossible (operator decision, final; see
+# cmd_reclaim below). Reading /dev/tty means such a context simply has no
+# controlling terminal to read from and always gets the safe "no".
+#
+# Kept as its own small function precisely so a caller/bats test can
+# override/stub it out instead of ever touching a real terminal -- tests
+# MUST do this rather than exercise the real read, which would hang
+# waiting on input that never arrives in a non-interactive test run.
+pgdr_confirm() {
+  local prompt="$1"
+  local reply=""
+
+  read -r -p "$prompt" reply </dev/tty 2>/dev/null || true
+
+  case "$reply" in
+  [yY] | [yY][eE][sS])
+    return 0
+    ;;
+  *)
+    return 1
+    ;;
+  esac
+}
+
+# cmd_reclaim: implements the `reclaim` subcommand.
+#
+# Grammar: reclaim --aggressiveness N [id...] [--apply]
+#   --aggressiveness N (REQUIRED): the selection ceiling. Passed straight
+#     through to pgdr_select_variants, which does the actual selection --
+#     see its doc comment above for the no-ids/explicit-ids semantics.
+#     cmd_reclaim does NOT re-validate ids itself; pgdr_select_variants's
+#     errors (unknown id, informational-only id, id above the ceiling)
+#     surface as-is.
+#   [id...]: explicit item ids narrowing the selection (also passed
+#     straight through to pgdr_select_variants).
+#   --apply: switches from the default dry run (each selected variant's
+#     dryRunCommand) to the real reclaim (each selected variant's
+#     removeCommand).
+#
+# Aggressiveness >= 4 confirmation gate (operator decision, final): any
+# selected variant with aggressiveness >= 4 is gated behind an
+# interactive pgdr_confirm prompt immediately before its removeCommand
+# runs -- ONLY under --apply. A dry run never prompts, at any
+# aggressiveness, since it never reaches a real removeCommand. Declining
+# skips running removeCommand for THAT item only (not counted as a
+# failure -- it is a deliberate choice, not an error); other selected
+# items still proceed. There is NO bypass of any kind (no flag, no env
+# var, no non-interactive path) -- do not add one.
+#
+# dryRunCommand/removeCommand are trusted operator-authored strings from
+# the registry JSON (not user input), so running them via `eval` is safe
+# and matches this repo's existing pattern for trusted command strings
+# (e.g. claude-status-line's scripts.nix, agent-script.nix).
+#
+# Exit status: 0 if every dry-run/remove command that actually ran
+# exited 0 (an item skipped via decline does not count against this); 1
+# if --aggressiveness was missing, selection failed, or any command that
+# ran exited non-zero. One failing item's command does NOT stop the
+# other selected items from being attempted.
 cmd_reclaim() {
-  echo "pg-disk-reclaimer: 'reclaim' is not implemented yet" >&2
-  return 1
+  local max_aggressiveness=""
+  local apply=0
+  local ids=()
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+    --aggressiveness)
+      if [[ -z ${2:-} ]]; then
+        echo "pg-disk-reclaimer: --aggressiveness requires a value" >&2
+        return 1
+      fi
+      max_aggressiveness="$2"
+      shift 2
+      ;;
+    --apply)
+      apply=1
+      shift
+      ;;
+    --)
+      shift
+      ids+=("$@")
+      break
+      ;;
+    -*)
+      echo "pg-disk-reclaimer: unknown option '$1'" >&2
+      return 1
+      ;;
+    *)
+      ids+=("$1")
+      shift
+      ;;
+    esac
+  done
+
+  if [[ -z $max_aggressiveness ]]; then
+    echo "pg-disk-reclaimer: 'reclaim' requires --aggressiveness N" >&2
+    return 1
+  fi
+
+  local registry_path
+  registry_path="$(pgdr_default_registry_path)"
+
+  if ! pgdr_read_registry "$registry_path" >/dev/null; then
+    return 1
+  fi
+
+  local selected
+  if ! selected=$(pgdr_select_variants "$registry_path" "$max_aggressiveness" "${ids[@]}"); then
+    return 1
+  fi
+
+  local overall_status=0
+  local item
+  while IFS= read -r item; do
+    local id aggressiveness dry_run_command remove_command
+    id=$(jq -r '.id' <<<"$item")
+    aggressiveness=$(jq -r '.aggressiveness' <<<"$item")
+    dry_run_command=$(jq -r '.dryRunCommand' <<<"$item")
+    remove_command=$(jq -r '.removeCommand' <<<"$item")
+
+    if [[ $apply -eq 0 ]]; then
+      if ! eval "$dry_run_command"; then
+        echo "pg-disk-reclaimer: dry-run command for '$id' exited non-zero" >&2
+        overall_status=1
+      fi
+      continue
+    fi
+
+    if [[ $aggressiveness -ge 4 ]]; then
+      if ! pgdr_confirm "pg-disk-reclaimer: reclaim '$id' at aggressiveness $aggressiveness -- run its removeCommand? [y/N] "; then
+        echo "pg-disk-reclaimer: skipping '$id' (not confirmed)" >&2
+        continue
+      fi
+    fi
+
+    if ! eval "$remove_command"; then
+      echo "pg-disk-reclaimer: remove command for '$id' exited non-zero" >&2
+      overall_status=1
+    fi
+  done < <(jq -c '.[]' <<<"$selected")
+
+  return "$overall_status"
 }

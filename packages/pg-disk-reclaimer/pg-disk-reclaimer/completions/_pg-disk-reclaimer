@@ -1,11 +1,23 @@
 #compdef pg-disk-reclaimer
 
 _pg_disk_reclaimer() {
-  _arguments \
+  _arguments -C \
     '(-h --help)'{-h,--help}'[Show help message]' \
     '(-v --version)'{-v,--version}'[Show version information]' \
     '1: :(list validate reclaim)' \
-    '*:positional:_files'
+    '*::args:->args'
+
+  case $words[1] in
+  reclaim)
+    _arguments \
+      '--aggressiveness[Selection ceiling]:aggressiveness:' \
+      '--apply[Actually reclaim instead of dry-run]' \
+      '*:item id:_files'
+    ;;
+  *)
+    _files
+    ;;
+  esac
 }
 
 _pg_disk_reclaimer "$@"

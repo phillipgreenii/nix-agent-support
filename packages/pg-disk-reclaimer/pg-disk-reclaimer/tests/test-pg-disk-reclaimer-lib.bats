@@ -1,12 +1,16 @@
 #!/usr/bin/env bats
 # Unit tests for pg-disk-reclaimer's core subcommand functions
-# (pg-disk-reclaimer.bash). cmd_list/cmd_validate/cmd_reclaim remain stubs
-# here (bead pg2-txxyj.1) -- real bodies land with tasks pg2-txxyj.4/.5/.6.
+# (pg-disk-reclaimer.bash). cmd_list/cmd_validate remain stubs here (bead
+# pg2-txxyj.1) -- real bodies land with tasks pg2-txxyj.4/.5.
 # The registry loading + schema validation engine (pgdr_default_registry_path
 # / pgdr_validate_registry / pgdr_read_registry) is exercised below against
 # fixtures under tests/fixtures/ (bead pg2-txxyj.2). The variant-selection
 # algorithm (pgdr_select_variants) is exercised against
-# tests/fixtures/selection.json (bead pg2-txxyj.3).
+# tests/fixtures/selection.json (bead pg2-txxyj.3). cmd_reclaim and
+# pgdr_confirm (bead pg2-txxyj.6) are exercised against
+# tests/fixtures/reclaim.json, always with pgdr_confirm overridden --
+# never the real /dev/tty-reading implementation (see its doc comment in
+# pg-disk-reclaimer.bash for why).
 
 setup() {
   if [[ -z ${SCRIPTS_DIR:-} ]]; then
@@ -31,6 +35,16 @@ teardown() {
   rm -rf "$TEST_DIR"
 }
 
+# install_reclaim_registry: copies tests/fixtures/reclaim.json to the
+# default (XDG) registry path, matching the "defaults to the XDG
+# registry path when none is given" pattern already used above for
+# pgdr_read_registry -- cmd_reclaim has no registry-path positional of
+# its own, so its tests always exercise the default-path lookup.
+install_reclaim_registry() {
+  mkdir -p "$HOME/.config/pg-disk-reclaimer"
+  cp "$FIXTURES_DIR/reclaim.json" "$HOME/.config/pg-disk-reclaimer/registry.json"
+}
+
 @test "cmd_list is defined and fails (not implemented yet)" {
   run cmd_list
   [ "$status" -eq 1 ]
@@ -43,10 +57,16 @@ teardown() {
   [[ "$output" =~ "not implemented yet" ]]
 }
 
-@test "cmd_reclaim is defined and fails (not implemented yet)" {
+@test "cmd_reclaim requires --aggressiveness" {
   run cmd_reclaim
-  [ "$status" -eq 1 ]
-  [[ "$output" =~ "not implemented yet" ]]
+  [ "$status" -ne 0 ]
+  [[ "$output" =~ "--aggressiveness" ]]
+}
+
+@test "cmd_reclaim requires --aggressiveness even when --apply is given" {
+  run cmd_reclaim --apply
+  [ "$status" -ne 0 ]
+  [[ "$output" =~ "--aggressiveness" ]]
 }
 
 @test "pgdr_default_registry_path honors XDG_CONFIG_HOME" {
@@ -216,4 +236,110 @@ JSON
   [ "$status" -eq 1 ]
   [[ "$output" =~ "unknown item id 'does-not-exist'" ]]
   [[ ! "$output" =~ "single-variant-item" ]]
+}
+
+# cmd_reclaim (bead pg2-txxyj.6), exercised against tests/fixtures/reclaim.json
+# (install_reclaim_registry above): low-item (aggressiveness 1),
+# high-item (aggressiveness 5, so it trips the >=4 confirm gate under
+# --apply), and failing-item (aggressiveness 1, both commands exit 3, for
+# exit-code propagation). pgdr_confirm is always overridden below rather
+# than exercised for real, per its own doc comment: the real
+# implementation reads /dev/tty and must never be hit by a test.
+
+@test "cmd_reclaim without --apply runs dryRunCommand, not removeCommand" {
+  install_reclaim_registry
+  run cmd_reclaim --aggressiveness 1 low-item
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "dry-run-low" ]]
+  [[ ! "$output" =~ "remove-low" ]]
+}
+
+@test "cmd_reclaim --apply runs removeCommand, not dryRunCommand, for a qualifying item" {
+  install_reclaim_registry
+  run cmd_reclaim --aggressiveness 1 --apply low-item
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "remove-low" ]]
+  [[ ! "$output" =~ "dry-run-low" ]]
+}
+
+@test "cmd_reclaim's confirm gate fires under --apply when aggressiveness >= 4, and a 'yes' proceeds to removeCommand" {
+  install_reclaim_registry
+  pgdr_confirm() {
+    echo "CONFIRM-CALLED:$1"
+    return 0
+  }
+  run cmd_reclaim --aggressiveness 5 --apply high-item
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "CONFIRM-CALLED" ]]
+  [[ "$output" =~ "remove-high" ]]
+}
+
+@test "cmd_reclaim's confirm gate never fires on a dry run, even at aggressiveness >= 4" {
+  install_reclaim_registry
+  pgdr_confirm() {
+    echo "CONFIRM-CALLED:$1"
+    return 0
+  }
+  run cmd_reclaim --aggressiveness 5 high-item
+  [ "$status" -eq 0 ]
+  [[ ! "$output" =~ "CONFIRM-CALLED" ]]
+  [[ "$output" =~ "dry-run-high" ]]
+}
+
+@test "cmd_reclaim's confirm gate never fires under --apply when aggressiveness < 4" {
+  install_reclaim_registry
+  pgdr_confirm() {
+    echo "CONFIRM-CALLED:$1"
+    return 0
+  }
+  run cmd_reclaim --aggressiveness 1 --apply low-item
+  [ "$status" -eq 0 ]
+  [[ ! "$output" =~ "CONFIRM-CALLED" ]]
+  [[ "$output" =~ "remove-low" ]]
+}
+
+@test "cmd_reclaim's confirm gate: a 'no' answer skips removeCommand for that item only, other selected items still proceed" {
+  install_reclaim_registry
+  pgdr_confirm() { return 1; }
+  run cmd_reclaim --aggressiveness 5 --apply low-item high-item
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "remove-low" ]]
+  [[ "$output" =~ "skipping 'high-item'" ]]
+  [[ ! "$output" =~ "remove-high" ]]
+}
+
+@test "cmd_reclaim requires --aggressiveness even with an explicit id given" {
+  install_reclaim_registry
+  run cmd_reclaim low-item
+  [ "$status" -ne 0 ]
+  [[ "$output" =~ "--aggressiveness" ]]
+}
+
+@test "cmd_reclaim propagates a failing dryRunCommand's exit as overall failure" {
+  install_reclaim_registry
+  run cmd_reclaim --aggressiveness 1 failing-item
+  [ "$status" -ne 0 ]
+  [[ "$output" =~ "dry-run-fail" ]]
+}
+
+@test "cmd_reclaim propagates a failing removeCommand's exit as overall failure" {
+  install_reclaim_registry
+  run cmd_reclaim --aggressiveness 1 --apply failing-item
+  [ "$status" -ne 0 ]
+  [[ "$output" =~ "remove-fail" ]]
+}
+
+@test "cmd_reclaim continues to other selected items after one item's removeCommand fails" {
+  install_reclaim_registry
+  run cmd_reclaim --aggressiveness 1 --apply low-item failing-item
+  [ "$status" -ne 0 ]
+  [[ "$output" =~ "remove-low" ]]
+  [[ "$output" =~ "remove-fail" ]]
+}
+
+@test "cmd_reclaim surfaces pgdr_select_variants' id errors as-is (no id re-validation of its own)" {
+  install_reclaim_registry
+  run cmd_reclaim --aggressiveness 5 does-not-exist
+  [ "$status" -ne 0 ]
+  [[ "$output" =~ "unknown item id 'does-not-exist'" ]]
 }
