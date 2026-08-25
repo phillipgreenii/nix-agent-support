@@ -1,5 +1,17 @@
 #compdef pg-disk-reclaimer
 
+# _pg_disk_reclaimer_item_ids: best-effort -- offers registered item ids
+# read from the same XDG registry path pg-disk-reclaimer.bash's
+# pgdr_default_registry_path resolves. A missing/unreadable/malformed
+# registry silently yields no ids rather than erroring the completion.
+_pg_disk_reclaimer_item_ids() {
+  local registry="${XDG_CONFIG_HOME:-$HOME/.config}/pg-disk-reclaimer/registry.json"
+  [[ -r $registry ]] || return 0
+  local -a ids
+  ids=(${(f)"$(jq -r '.[].id' "$registry" 2>/dev/null)"})
+  _describe 'item id' ids
+}
+
 _pg_disk_reclaimer() {
   _arguments -C \
     '(-h --help)'{-h,--help}'[Show help message]' \
@@ -12,7 +24,7 @@ _pg_disk_reclaimer() {
     _arguments \
       '--aggressiveness[Selection ceiling]:aggressiveness:' \
       '--apply[Actually reclaim instead of dry-run]' \
-      '*:item id:_files'
+      '*:item id:_pg_disk_reclaimer_item_ids'
     ;;
   list)
     _arguments \

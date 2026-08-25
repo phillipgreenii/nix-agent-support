@@ -22,3 +22,7 @@
 - Actually remove (rather than dry-run):
 
 `pg-disk-reclaimer reclaim --aggressiveness {{2}} --apply`
+
+- Reclaim only specific registry items (by id) instead of every qualifying item:
+
+`pg-disk-reclaimer reclaim --aggressiveness {{2}} {{item-id}}`
