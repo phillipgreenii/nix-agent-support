@@ -3,6 +3,7 @@ package beads
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"strings"
@@ -678,6 +679,71 @@ func TestSetPriority_RoundTripsThroughRealBD(t *testing.T) {
 	}
 }
 
+// TestDraftFlag_RoundTripsThroughRealBD guards the pg2-4dz88.10 fix against a
+// real bd workspace: it creates a bead with draft:true, then clears it via a
+// SECOND `--metadata` update (UpdateMergeRequest, mirroring the encoder's
+// explicit-false emission), and confirms the clear actually persists through
+// real bd's merge-rather-than-replace `--metadata` semantics — the exact
+// mechanism the bug exploited (an absent key leaves the previously-stored
+// true in place forever). Modeled on TestSetPriority_RoundTripsThroughRealBD.
+func TestDraftFlag_RoundTripsThroughRealBD(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	c, _ := newBDWorkspace(t)
+
+	id, _, err := c.EnsureMergeRequest(ctx, "", MergeRequestFields{
+		Repo: "foo/bar", PRNumber: 42, State: "open", Draft: true,
+	})
+	if err != nil {
+		t.Fatalf("EnsureMergeRequest: %v", err)
+	}
+
+	got, err := c.GetMergeRequest(ctx, id)
+	if err != nil {
+		t.Fatalf("GetMergeRequest: %v", err)
+	}
+	if got == nil {
+		t.Fatalf("bead %s not found after create", id)
+	}
+	if !got.Fields.Draft {
+		t.Fatalf("expected draft=true after create, got %+v", got.Fields)
+	}
+
+	if err := c.UpdateMergeRequest(ctx, id, MergeRequestFields{
+		Repo: "foo/bar", PRNumber: 42, State: "open", Draft: false,
+	}); err != nil {
+		t.Fatalf("UpdateMergeRequest (clear draft): %v", err)
+	}
+
+	got, err = c.GetMergeRequest(ctx, id)
+	if err != nil {
+		t.Fatalf("GetMergeRequest after clear: %v", err)
+	}
+	if got == nil {
+		t.Fatalf("bead %s not found after clearing draft", id)
+	}
+	if got.Fields.Draft {
+		t.Fatalf("expected draft=false after clearing, got true (bd --metadata merge regression)")
+	}
+
+	all, err := c.ListMergeRequests(ctx, false)
+	if err != nil {
+		t.Fatalf("ListMergeRequests: %v", err)
+	}
+	var found *MergeRequest
+	for i := range all {
+		if all[i].ID == id {
+			found = &all[i]
+		}
+	}
+	if found == nil {
+		t.Fatalf("bead %s not found in ListMergeRequests", id)
+	}
+	if found.Fields.Draft {
+		t.Fatalf("ListMergeRequests: expected draft=false, got true")
+	}
+}
+
 // TestNewClientForRepo_HitsRepoWorkspace creates two real bd workspaces in
 // distinct temp dirs and verifies that NewClientForRepo(dirA) writes to
 // workspace A only — beads created on the A-scoped client are not visible
@@ -800,6 +866,181 @@ func storedMR() bdIssue {
 			"url":            "https://github.com/foo/bar/pull/7",
 			"last_synced_at": "2020-01-01T00:00:00Z",
 		},
+	}
+}
+
+// storedMRWith returns storedMR() with its metadata patched: a key mapped to
+// nil is DELETED (models a legacy bead with no "draft" key stored at all);
+// any other value is set/overwritten. A sibling fixture rather than a
+// mutation of storedMR() itself, since the existing no-op tests
+// (TestEnsureMergeRequest_NoOpDoesNotWrite, TestReconcileMergeRequest_NoOpDoesNotWrite,
+// ...) depend on storedMR()'s current shape.
+func storedMRWith(patch map[string]any) bdIssue {
+	iss := storedMR()
+	md := make(map[string]any, len(iss.Metadata)+len(patch))
+	for k, v := range iss.Metadata {
+		md[k] = v
+	}
+	for k, v := range patch {
+		if v == nil {
+			delete(md, k)
+			continue
+		}
+		md[k] = v
+	}
+	iss.Metadata = md
+	return iss
+}
+
+// metadataArg extracts the JSON string value of a --metadata argument from a
+// recorded bd call, e.g. []string{"update", "mr-1", "--metadata", `{...}`}.
+func metadataArg(t *testing.T, call []string) string {
+	t.Helper()
+	for i, a := range call {
+		if a == "--metadata" && i+1 < len(call) {
+			return call[i+1]
+		}
+	}
+	t.Fatalf("no --metadata argument found in call %v", call)
+	return ""
+}
+
+// TestEnsureMergeRequest_DraftToReadyClearsStoredTrue is the pg2-4dz88.10
+// regression test: a bead stored with draft:true, re-synced with
+// Draft:false as the ONLY delta (state held constant so it can't mask the
+// result), must issue exactly one write whose --metadata patch carries an
+// EXPLICIT "draft":false — not merely omit the key (encodeMetadata's
+// omitempty trap would otherwise leave the previously-stored true in place
+// forever, since `bd update --metadata` merges rather than replaces).
+func TestEnsureMergeRequest_DraftToReadyClearsStoredTrue(t *testing.T) {
+	ctx := context.Background()
+	r := &mrDiffRunner{listJSON: cannedList(t, storedMRWith(map[string]any{"draft": true}))}
+	c := NewClientWithRunner(r)
+
+	if _, alreadyClosed, err := c.EnsureMergeRequest(ctx, "foo/bar#7", MergeRequestFields{
+		Repo: "foo/bar", PRNumber: 7, State: "open", Draft: false,
+	}); err != nil {
+		t.Fatalf("EnsureMergeRequest: %v", err)
+	} else if alreadyClosed {
+		t.Fatalf("expected alreadyClosed=false")
+	}
+
+	w := r.writeCalls()
+	if len(w) != 1 {
+		t.Fatalf("expected exactly one write clearing draft, got %d: %v", len(w), w)
+	}
+	metaJSON := metadataArg(t, w[0])
+	if !strings.Contains(metaJSON, `"draft":false`) {
+		t.Fatalf("expected literal \"draft\":false in metadata JSON (omitempty trap), got %s", metaJSON)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal([]byte(metaJSON), &decoded); err != nil {
+		t.Fatalf("decode metadata JSON: %v", err)
+	}
+	draftVal, present := decoded["draft"]
+	if !present {
+		t.Fatalf("expected draft key present in decoded metadata, got %v", decoded)
+	}
+	if draftVal != false {
+		t.Fatalf("expected decoded draft == false, got %v", draftVal)
+	}
+}
+
+// TestEnsureMergeRequest_DraftTransitionTable is the transition table from the
+// pg2-4dz88.10 design: every (stored draft, desired Draft) combination, with
+// state held constant at "open" throughout so it can never mask the write
+// decision. Row 1 is the bug (stored true, desired false, must write and
+// clear). Rows 2/3 guard the opposite direction. Rows 4/5 are the no-op
+// guarantee: steady state must still short-circuit to zero writes. Row 6 is
+// the churn guard: a legacy bead with no "draft" key and a non-draft PR must
+// NOT earn a gratuitous write just to materialize an explicit false — absent
+// and false are the same state.
+func TestEnsureMergeRequest_DraftTransitionTable(t *testing.T) {
+	boolPtr := func(b bool) *bool { return &b }
+	cases := []struct {
+		name         string
+		storedDraft  *bool // nil = key absent from stored metadata
+		desiredDraft bool
+		wantWrite    bool
+		wantEncoded  bool // only checked when wantWrite
+	}{
+		{name: "row1_true_to_false_is_the_bug", storedDraft: boolPtr(true), desiredDraft: false, wantWrite: true, wantEncoded: false},
+		{name: "row2_absent_to_true", storedDraft: nil, desiredDraft: true, wantWrite: true, wantEncoded: true},
+		{name: "row3_false_to_true", storedDraft: boolPtr(false), desiredDraft: true, wantWrite: true, wantEncoded: true},
+		{name: "row4_true_to_true_is_noop", storedDraft: boolPtr(true), desiredDraft: true, wantWrite: false},
+		{name: "row5_false_to_false_is_noop", storedDraft: boolPtr(false), desiredDraft: false, wantWrite: false},
+		{name: "row6_absent_to_false_is_noop", storedDraft: nil, desiredDraft: false, wantWrite: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			patch := map[string]any{}
+			if tc.storedDraft != nil {
+				patch["draft"] = *tc.storedDraft
+			}
+			r := &mrDiffRunner{listJSON: cannedList(t, storedMRWith(patch))}
+			c := NewClientWithRunner(r)
+
+			if _, _, err := c.EnsureMergeRequest(ctx, "foo/bar#7", MergeRequestFields{
+				Repo: "foo/bar", PRNumber: 7, State: "open", Draft: tc.desiredDraft,
+			}); err != nil {
+				t.Fatalf("EnsureMergeRequest: %v", err)
+			}
+
+			w := r.writeCalls()
+			if tc.wantWrite {
+				if len(w) != 1 {
+					t.Fatalf("expected exactly one write, got %d: %v", len(w), w)
+				}
+				metaJSON := metadataArg(t, w[0])
+				var decoded map[string]any
+				if err := json.Unmarshal([]byte(metaJSON), &decoded); err != nil {
+					t.Fatalf("decode metadata JSON: %v", err)
+				}
+				draftVal, present := decoded["draft"]
+				if !present {
+					t.Fatalf("expected draft key present in decoded metadata, got %v", decoded)
+				}
+				if draftVal != tc.wantEncoded {
+					t.Fatalf("encoded draft: got %v want %v", draftVal, tc.wantEncoded)
+				}
+			} else if len(w) != 0 {
+				t.Fatalf("expected ZERO writes (steady state), got %d: %v", len(w), w)
+			}
+		})
+	}
+}
+
+// TestEnsureMergeRequest_DraftIdempotentAfterConvergence guards against a
+// regression where the pg2-4dz88.10 fix over-corrects into re-writing every
+// tick: a runner whose listJSON already reflects the POST-write converged
+// state (stored draft == desired draft) must record ZERO writes, and running
+// the identical tick a SECOND time in a row must still record zero — not
+// just "the first time happened to no-op".
+func TestEnsureMergeRequest_DraftIdempotentAfterConvergence(t *testing.T) {
+	for _, desiredDraft := range []bool{true, false} {
+		t.Run(fmt.Sprintf("draft=%v steady state", desiredDraft), func(t *testing.T) {
+			ctx := context.Background()
+			r := &mrDiffRunner{listJSON: cannedList(t, storedMRWith(map[string]any{"draft": desiredDraft}))}
+			c := NewClientWithRunner(r)
+			fields := MergeRequestFields{Repo: "foo/bar", PRNumber: 7, State: "open", Draft: desiredDraft}
+
+			if _, _, err := c.EnsureMergeRequest(ctx, "foo/bar#7", fields); err != nil {
+				t.Fatalf("first pass: %v", err)
+			}
+			if w := r.writeCalls(); len(w) != 0 {
+				t.Fatalf("first pass (already converged) expected zero writes, got %v", w)
+			}
+
+			// Second pass: an identical tick against the same already-converged
+			// state must remain a no-op, not accumulate a write.
+			if _, _, err := c.EnsureMergeRequest(ctx, "foo/bar#7", fields); err != nil {
+				t.Fatalf("second pass: %v", err)
+			}
+			if w := r.writeCalls(); len(w) != 0 {
+				t.Fatalf("second pass expected ZERO write calls (steady state), got %v", w)
+			}
+		})
 	}
 }
 

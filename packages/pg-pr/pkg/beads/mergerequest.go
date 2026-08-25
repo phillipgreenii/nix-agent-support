@@ -896,9 +896,10 @@ func (c *Client) FindByRepoAndNumber(ctx context.Context, repo string, prNumber 
 
 // metadataUnchanged reports whether applying encodeMetadata(desired) as a bd
 // `--metadata` patch onto stored would be a no-op — i.e. every field the patch
-// WOULD set (encodeMetadata omits zero values, and draft only when true) already
-// holds that value in stored. It mirrors encodeMetadata's omit semantics exactly,
-// so it is true precisely when `bd update --metadata` would change nothing.
+// WOULD set (encodeMetadata omits zero values for the string/int fields, but
+// emits draft unconditionally — see encodeMetadata) already holds that value
+// in stored. It mirrors encodeMetadata's omit semantics exactly, so it is true
+// precisely when `bd update --metadata` would change nothing.
 //
 // last_synced_at is INTENTIONALLY excluded: the daemon bumps it every refresh,
 // but nothing reads the bead's copy of it (the authoritative sync timestamp is
@@ -934,17 +935,23 @@ func metadataUnchanged(stored, desired MergeRequestFields) bool {
 	if desired.CIOnlyAttempts != 0 && desired.CIOnlyAttempts != stored.CIOnlyAttempts {
 		return false
 	}
-	// encodeMetadata only ever SETS draft (=true); it never clears it, so a
-	// desired.Draft==false can never produce a change regardless of stored.
-	if desired.Draft && !stored.Draft {
+	// draft is compared for EQUALITY, not one-directionally: encodeMetadata
+	// now emits an explicit draft (true or false) unconditionally
+	// (pg2-4dz88.10 — previously it only ever SET draft=true and never
+	// cleared it, so a stored true could never be brought back to false
+	// through this mechanism). A genuine draft<->ready transition in EITHER
+	// direction must therefore be treated as a change.
+	if desired.Draft != stored.Draft {
 		return false
 	}
 	// last_synced_at excluded by design (FB-1).
 	return true
 }
 
-// encodeMetadata serializes the non-zero fields of f as a JSON object that
-// bd's --metadata flag accepts.
+// encodeMetadata serializes f as a JSON object that bd's --metadata flag
+// accepts. Most fields are omitted when zero-valued (so a partial patch
+// doesn't clobber fields the caller didn't set); draft is the one exception,
+// always emitted explicitly — see its assignment below.
 func encodeMetadata(f MergeRequestFields) (string, error) {
 	m := map[string]any{}
 	if f.Repo != "" {
@@ -977,9 +984,15 @@ func encodeMetadata(f MergeRequestFields) (string, error) {
 	if f.CIOnlyAttempts != 0 {
 		m["ci_only_attempts"] = f.CIOnlyAttempts
 	}
-	if f.Draft {
-		m["draft"] = true
-	}
+	// draft is emitted UNCONDITIONALLY (both true and false), unlike the
+	// string/int fields above which omit their zero value: a bool has no
+	// "unset" representation, and desired.Draft==false (not-a-draft) is a
+	// meaningful state that must be able to clear a previously-stored true
+	// through bd's metadata-merge semantics (pg2-4dz88.10). Every caller
+	// passes the PR's current, fully-known Draft state — never a value it
+	// means to leave untouched — so this is safe for the "re-assert the full
+	// field set every tick" design EnsureMergeRequest documents.
+	m["draft"] = f.Draft
 	if len(m) == 0 {
 		return "{}", nil
 	}

@@ -545,6 +545,53 @@ func TestPRUpdatedTeamDraftToReadyCreatesDraftReview(t *testing.T) {
 	}
 }
 
+// TestPRUpdatedTeamDraftToReadyClearsDraftMetadata is the pg2-4dz88.10
+// live-producer seam test. TestPRUpdatedTeamDraftToReadyCreatesDraftReview
+// above drives the same Draft:true -> Draft:false pr.updated sequence, but
+// against draftReviewClient — a BeadClient-level fake whose ReconcileMergeRequest
+// ignores the MergeRequestFields it's given entirely, so it can never exercise
+// (or catch a regression in) beads.Client's real encodeMetadata/metadataUnchanged
+// pair. This test instead runs the same transition through a REAL *beads.Client
+// (idCountingRunner records the raw bd argv, as TestHandle_PRUpdatedReadsMRBeadOnce
+// does) and asserts the resulting `bd update --metadata` literally carries
+// "draft":false — the exact wire-level assertion the bug (an omitted key
+// leaving a stored true in place forever) requires. WithoutDraftReviews keeps
+// the assertion isolated to the merge-request metadata write; draft-review
+// bead creation on this same transition is already covered by
+// TestPRUpdatedTeamDraftToReadyCreatesDraftReview.
+func TestPRUpdatedTeamDraftToReadyClearsDraftMetadata(t *testing.T) {
+	// The canned bead already stores draft:true, mirroring the prior
+	// still-draft tick's write.
+	listJSON := `{"schema_version":1,"data":[{` +
+		`"id":"mr-1","title":"o/r#7","status":"open","issue_type":"merge-request","priority":2,` +
+		`"metadata":{"repo":"o/r","pr_number":7,"state":"open","branch":"feat","base":"main",` +
+		`"author":"teammate","url":"https://x/7","last_synced_at":"2020-01-01T00:00:00Z","draft":true}}]}`
+	r := &idCountingRunner{listJSON: listJSON}
+	client := beads.NewClientWithRunner(r)
+	h := New(client, WithoutDraftReviews())
+
+	// Draft flag removed → pr.updated with Draft=false.
+	payload, _ := json.Marshal(store.PRPayload{
+		Repo: "o/r", Number: 7, Ownership: "team", State: "open", Branch: "feat",
+		Base: "main", Author: "teammate", URL: "https://x/7", Draft: false,
+	})
+	if err := h.Handle(context.Background(), store.Event{Type: store.EventPRUpdated, Payload: payload}); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+
+	w := r.writeCalls()
+	if len(w) != 1 {
+		t.Fatalf("expected exactly one write clearing draft, got %d: %v", len(w), w)
+	}
+	metaJSON, ok := argValue(w[0], "--metadata")
+	if !ok {
+		t.Fatalf("expected --metadata in write call, got %v", w[0])
+	}
+	if !strings.Contains(metaJSON, `"draft":false`) {
+		t.Fatalf("expected literal \"draft\":false in the bd update metadata, got %s", metaJSON)
+	}
+}
+
 // TestHandle_CoOwnedCreatesMineDraftReviewAndRelabels asserts a co-owned PR
 // projects a mine-style draft-review (mine=true, per ownership.ActsAsMine) and
 // additionally triggers the team->co-owned relabel call, so a pre-existing
