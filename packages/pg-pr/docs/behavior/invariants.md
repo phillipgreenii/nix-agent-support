@@ -100,6 +100,23 @@ correct owner (ADR 0034) — the UUID preserves identity; only the owning set ch
   `INV-DEP-1` is the feature-specific promise that identifying a stacked PR never turns into
   authoring one.
 
+## Urgency (`INV-URG-*`)
+
+- **`INV-URG-1`** <!-- uuid: 04ff9927-42e5-418d-beeb-6e33e501b07d --> — **One opinionated
+  heuristic, computed by pg-pr, exposed as a fact.** pg-pr MUST compute a single urgency
+  heuristic per PR — a score and a level — deterministically, folding in signals it already
+  reads about the PR itself together with cross-domain signals it correlates in from elsewhere
+  (whether a project the PR references is currently broken, the priority recorded against a
+  linked tracking item, whether a related incident is currently active). The result MUST be
+  exposed as its own fact column on `INTF-PGPR-READ`, carrying the same freshness treatment as
+  its sibling facts (`INV-ASOF-1`). This is pg-pr's own opinionated judgement, computed once for
+  every consumer — never a per-deployment policy: pg-pr MUST NOT accept or honour a
+  per-deployment re-weighting of this heuristic. A deployment wanting different urgency weighting
+  MUST compute its own from the underlying facts rather than expect pg-pr to parameterize this
+  one. Alongside the PR-dependency ordering key (`INV-DEP-1`), this is the one piece of ranking
+  judgement an operator-approved ruling puts inside pg-pr; every other sort key not covered by
+  such a ruling remains outside pg-pr's own computation.
+
 ## The write surface (`INV-WRITE-*`, `INV-REVIEW-*`, `INV-ATTR-*`)
 
 - **`INV-WRITE-1`** <!-- uuid: f7360062-33d4-4ca5-8a45-6f8af19e6987 --> — An inline comment or

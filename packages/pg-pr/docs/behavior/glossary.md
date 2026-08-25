@@ -115,6 +115,14 @@ deployment concern and is not defined here (`## Scope`).
   PR merges, the downstream PR becomes unblocked rather than re-pointing to the upstream PR's own
   upstream.
 
+## Urgency
+
+- **Urgency heuristic** — pg-pr's own single, opinionated score and level, computed once per PR
+  from signals read about the PR itself together with cross-domain signals correlated in from
+  elsewhere, and exposed as a fact column (`INV-URG-1`). It is never a per-deployment policy: a
+  deployment wanting different weighting computes its own from the underlying facts rather than
+  reconfiguring this one.
+
 ## Excluded (named so the boundary is explicit, `## Scope`)
 
 The **legacy in-daemon review workflow** — draft-review lifecycle, an automated review consumer

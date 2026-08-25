@@ -41,17 +41,24 @@ flowchart LR
   **unblocked** because its upstream PR merged — plus the **ordering key** this ranking is
   encoded as. Fact columns also carry visibility: whether a PR is **user-hidden**, the operator's
   own display-only suppression (see [glossary](glossary.md)) — a presentation fact alongside the
-  others above, never a filter on which PRs this seam reads.
-- **Guarantee, scope of pg-pr's own ranking judgement** — a downstream deployment's own
-  judgement over these facts (urgency, cross-domain enrichment, and any sort key not covered by
-  an operator-approved ruling) remains **not pg-pr's to compute**. The one exception is the
-  PR-dependency ordering key above: an operator-approved ruling (pg2-4dz88.7, 2026-08-21 —
-  "Upstream-of-another-PR before standalone" as one key of a shared sort order) puts that
-  specific ranking judgement inside pg-pr itself (`INV-DEP-1`). This is a **carve-out for this
-  key alone**, made under precedent of that ruling — it does not reopen the general principle for
-  urgency or any other judgement no such ruling covers (urgency's own divergence from this
-  principle predates this carve-out and is tracked separately — see [README](README.md)'s
-  `## Realization gaps`).
+  others above, never a filter on which PRs this seam reads. Fact columns also include an
+  **urgency heuristic** — pg-pr's own single, opinionated score and level, computed once and
+  exposed for any consumer to read rather than recomputed per deployment (`INV-URG-1`).
+- **Guarantee, scope of pg-pr's own ranking judgement** — pg-pr computes exactly **one
+  opinionated urgency heuristic** per PR: a single score and level, folding in signals it already
+  reads from the PR itself together with cross-domain signals it correlates in from elsewhere
+  (whether a project this PR references is currently broken, the priority recorded against a
+  linked tracking item, whether a related incident is currently active) — pg-pr's own judgement,
+  computed once and exposed as a fact column for any consumer to read, never recomputed per
+  deployment (`INV-URG-1`). What remains **not pg-pr's to compute** is anything downstream of
+  that: a **per-deployment re-weighting** of this heuristic, and any other sort key not covered
+  by an operator-approved ruling. A deployment wanting different urgency weighting MUST compute
+  its own from the underlying facts; it MUST NOT expect pg-pr to honour a per-deployment
+  weighting policy (`INV-URG-1`). The PR-dependency ordering key above carries its own, separate
+  carve-out: an operator-approved ruling (pg2-4dz88.7, 2026-08-21 — "Upstream-of-another-PR
+  before standalone" as one key of a shared sort order) puts that specific ranking judgement
+  inside pg-pr itself (`INV-DEP-1`), a carve-out for that key alone that does not extend to any
+  other judgement no such ruling covers.
 - **Out (pg-pr → consumer), dashboard payload** — the same facts, human-facing, carrying a
   payload-level as-of time and stale flag rather than a per-item one. Day-to-day dashboard
   surfaces are exactly where a **user-hidden** PR's visibility fact takes effect, suppressing it
