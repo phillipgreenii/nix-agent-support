@@ -651,8 +651,8 @@ func TestSyncPR_CoOwnedPRNeverAutoPromoted(t *testing.T) {
 		t.Fatalf("SyncPR: %v (errors=%+v)", err, sum.Errors)
 	}
 
-	if len(vp.fakeVCS.setDraftCalls) != 0 {
-		t.Fatalf("a co-owned PR must never be auto-promoted; got SetDraft calls %+v", vp.fakeVCS.setDraftCalls)
+	if len(vp.setDraftCalls) != 0 {
+		t.Fatalf("a co-owned PR must never be auto-promoted; got SetDraft calls %+v", vp.setDraftCalls)
 	}
 	if sum.DraftPromoted != 0 {
 		t.Fatalf("DraftPromoted: got %d want 0", sum.DraftPromoted)
