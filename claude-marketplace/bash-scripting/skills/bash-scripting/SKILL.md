@@ -227,6 +227,37 @@ Circular library dependencies cause nix evaluation to fail; if you hit this, ext
 
 Drop [`assets/test_helper.bash`](assets/test_helper.bash) into `test-support/` (module-level) or alongside tests (per-script). It handles `SCRIPTS_DIR` / `LIB_PATH` resolution and standard `TEST_DIR` / `HOME` isolation.
 
+### Test-label vocabulary
+
+Bats suites classify tests with the workspace-wide `pg-test-runner` label vocabulary. Classify by
+STRUCTURE — what the test needs — never by a stopwatch; a reader must be able to tell a test's
+label by inspection:
+
+- **`unit`** — exercises one unit of the project: a function, class, or script-function boundary.
+  Collaborators are mocked or faked to isolate the unit under test. No shared context between
+  tests, therefore parallel-safe and order-independent. Expected to be very fast. Strives for high
+  completeness of the unit's behavior.
+- **`integration`** — exercises interaction between higher-level components. MAY use shared
+  fixtures, real collaborators, or require a specific ordering.
+- **`smoke`** — end-to-end sanity of the assembled artifact.
+- **`contract`** — drives real external systems (live Claude/bd/git/PagerDuty and similar; costs
+  tokens, credentials, or money).
+
+A test without a label is treated as `unit` — a safety net, not a steady state; every suite SHOULD
+carry an explicit label. Tag a bats file with `# bats file_tags=type:<label>`, or override one test
+with `# bats test_tags=type:<label>`:
+
+```bash
+# bats file_tags=type:unit
+
+@test "..." {
+  ...
+}
+```
+
+Run just the unit tier with `pg-test-runner --labels unit`; run every tier with `bats tests/`
+directly.
+
 ### Test isolation rules
 
 1. Every test uses `TEST_DIR="$(mktemp -d)"`.
@@ -239,7 +270,9 @@ Drop [`assets/test_helper.bash`](assets/test_helper.bash) into `test-support/` (
 ### Testing the split
 
 - **`.bash` unit tests** (`test-<name>-lib.bats`): source the library directly, call functions, assert results.
-- **`.sh` integration tests** (`test-<name>.bats`): run the script as a subprocess, check exit codes and output.
+- **`.sh` script-level tests** (`test-<name>.bats`): run the script as a subprocess, check exit
+  codes and output. Despite the subprocess boundary these are unit-tier (`type:unit`) — no shared
+  fixtures, no required ordering — so label them `unit`, not `integration`.
 
 For wrapper patterns (scripts that source libraries), shared `test_helper` loading, and bats footguns, see [`references/testing-advanced.md`](references/testing-advanced.md).
 
