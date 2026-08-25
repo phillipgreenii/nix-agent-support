@@ -41,16 +41,26 @@ echo "$first_line"
 EOF
     chmod +x "$TEST_DIR/fzf"
 
+    # Resolve the real column BEFORE $TEST_DIR goes on PATH, so the mock
+    # below execs a fixed absolute path instead of doing a PATH lookup at
+    # run time that would resolve to itself and recurse forever.
+    local real_column
+    real_column="$(command -v column || true)"
+
     # Mock column - pass through to real column if available, otherwise just cat
-    cat > "$TEST_DIR/column" <<'EOF'
+    if [[ -n "$real_column" ]]; then
+        cat > "$TEST_DIR/column" <<EOF
 #!/usr/bin/env bash
 # Mock column for testing
-if command -v column >/dev/null 2>&1; then
-    command column "$@"
-else
-    cat
-fi
+exec "$real_column" "\$@"
 EOF
+    else
+        cat > "$TEST_DIR/column" <<'EOF'
+#!/usr/bin/env bash
+# Mock column for testing
+cat
+EOF
+    fi
     chmod +x "$TEST_DIR/column"
 
     # Add mocks to PATH
