@@ -1,12 +1,15 @@
 #!/usr/bin/env bats
 # Unit tests for pg-disk-reclaimer's core subcommand functions
-# (pg-disk-reclaimer.bash). cmd_list/cmd_validate remain stubs here (bead
-# pg2-txxyj.1) -- real bodies land with tasks pg2-txxyj.4/.5.
+# (pg-disk-reclaimer.bash). cmd_validate remains a stub here (bead
+# pg2-txxyj.1) -- its real body lands with task pg2-txxyj.5.
 # The registry loading + schema validation engine (pgdr_default_registry_path
 # / pgdr_validate_registry / pgdr_read_registry) is exercised below against
 # fixtures under tests/fixtures/ (bead pg2-txxyj.2). The variant-selection
 # algorithm (pgdr_select_variants) is exercised against
-# tests/fixtures/selection.json (bead pg2-txxyj.3). cmd_reclaim and
+# tests/fixtures/selection.json (bead pg2-txxyj.3). cmd_list (bead
+# pg2-txxyj.4) is exercised against tests/fixtures/list.json, whose
+# displayCommand values are side-effect-free `echo` stubs so the table's
+# size column never touches the real filesystem. cmd_reclaim and
 # pgdr_confirm (bead pg2-txxyj.6) are exercised against
 # tests/fixtures/reclaim.json, always with pgdr_confirm overridden --
 # never the real /dev/tty-reading implementation (see its doc comment in
@@ -45,10 +48,13 @@ install_reclaim_registry() {
   cp "$FIXTURES_DIR/reclaim.json" "$HOME/.config/pg-disk-reclaimer/registry.json"
 }
 
-@test "cmd_list is defined and fails (not implemented yet)" {
-  run cmd_list
-  [ "$status" -eq 1 ]
-  [[ "$output" =~ "not implemented yet" ]]
+# install_list_registry: copies tests/fixtures/list.json to the default
+# (XDG) registry path, matching install_reclaim_registry above --
+# cmd_list has no registry-path positional of its own either, so its
+# tests always exercise the default-path lookup.
+install_list_registry() {
+  mkdir -p "$HOME/.config/pg-disk-reclaimer"
+  cp "$FIXTURES_DIR/list.json" "$HOME/.config/pg-disk-reclaimer/registry.json"
 }
 
 @test "cmd_validate is defined and fails (not implemented yet)" {
@@ -236,6 +242,121 @@ JSON
   [ "$status" -eq 1 ]
   [[ "$output" =~ "unknown item id 'does-not-exist'" ]]
   [[ ! "$output" =~ "single-variant-item" ]]
+}
+
+# cmd_list (bead pg2-txxyj.4), exercised against tests/fixtures/list.json:
+# cache-a (single variant, aggressiveness 1), cache-b (two variants, at
+# aggressiveness 2 and 5), and info-only (zero variants). All three
+# displayCommand values are side-effect-free `echo` stubs, so the size
+# column never touches the real filesystem.
+
+@test "cmd_list with no --aggressiveness lists every item, including the zero-variant informational one" {
+  install_list_registry
+  run cmd_list
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "cache-a" ]]
+  [[ "$output" =~ "cache-b" ]]
+  [[ "$output" =~ "info-only" ]]
+}
+
+@test "cmd_list --aggressiveness 1 excludes cache-b (no variant <= 1) and info-only (no variants), keeps cache-a" {
+  install_list_registry
+  run cmd_list --aggressiveness 1
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "cache-a" ]]
+  [[ ! "$output" =~ "cache-b" ]]
+  [[ ! "$output" =~ "info-only" ]]
+}
+
+@test "cmd_list --aggressiveness 5 includes a qualifying multi-variant item, showing every aggressiveness value it has (not just the chosen one)" {
+  install_list_registry
+  run cmd_list --aggressiveness 5
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "cache-a" ]]
+  [[ ! "$output" =~ "info-only" ]]
+  local cache_b_line
+  cache_b_line=$(echo "$output" | grep cache-b)
+  [[ "$cache_b_line" =~ "2,5" ]]
+}
+
+@test "cmd_list --aggressiveness below every variant lists nothing but the header" {
+  install_list_registry
+  run cmd_list --aggressiveness 0
+  [ "$status" -eq 0 ]
+  [[ ! "$output" =~ "cache-a" ]]
+  [[ ! "$output" =~ "cache-b" ]]
+  [[ ! "$output" =~ "info-only" ]]
+  [ "${#lines[@]}" -eq 1 ]
+}
+
+@test "cmd_list's size column reflects each item's (mocked) displayCommand output" {
+  install_list_registry
+  run cmd_list
+  [ "$status" -eq 0 ]
+  local cache_a_line cache_b_line info_only_line
+  cache_a_line=$(echo "$output" | grep cache-a)
+  cache_b_line=$(echo "$output" | grep cache-b)
+  info_only_line=$(echo "$output" | grep info-only)
+  [[ "$cache_a_line" =~ "10M" ]]
+  [[ "$cache_b_line" =~ "250M" ]]
+  [[ "$info_only_line" == *"1.0G"* ]]
+}
+
+@test "cmd_list renders an exact table: header, then one row per item with id/description/aggressiveness/size columns" {
+  install_list_registry
+  run cmd_list --aggressiveness 1
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = "$(printf '%-24s  %-40s  %-14s  %s' "ID" "DESCRIPTION" "AGGRESSIVENESS" "SIZE")" ]
+  [ "${lines[1]}" = "$(printf '%-24s  %-40s  %-14s  %s' "cache-a" "cache A, single low-aggressiveness variant" "1" "10M")" ]
+  [ "${#lines[@]}" -eq 2 ]
+}
+
+@test "cmd_list shows a zero-variant informational item with an exact '-' aggressiveness marker (not just any hyphen in its text)" {
+  install_list_registry
+  run cmd_list
+  [ "$status" -eq 0 ]
+  local info_only_line
+  info_only_line=$(printf '%s\n' "$output" | grep '^info-only')
+  [ "$info_only_line" = "$(printf '%-24s  %-40s  %-14s  %s' "info-only" "informational-only item, never reclaimable" "-" "1.0G")" ]
+}
+
+@test "cmd_list rejects --aggressiveness given with no value" {
+  install_list_registry
+  run cmd_list --aggressiveness
+  [ "$status" -ne 0 ]
+  [[ "$output" =~ "--aggressiveness requires a value" ]]
+}
+
+@test "cmd_list rejects an unknown option" {
+  install_list_registry
+  run cmd_list --bogus
+  [ "$status" -ne 0 ]
+  [[ "$output" =~ "unknown option" ]]
+}
+
+@test "cmd_list fails loudly when the registry is missing" {
+  run cmd_list
+  [ "$status" -ne 0 ]
+  [[ "$output" =~ "registry file not found" ]]
+}
+
+@test "cmd_list fails loudly on a malformed registry, without printing a table" {
+  mkdir -p "$HOME/.config/pg-disk-reclaimer"
+  cat >"$HOME/.config/pg-disk-reclaimer/registry.json" <<'JSON'
+[
+  {
+    "id": "broken",
+    "description": "broken json",
+    "path": "/tmp/broken",
+    "displayCommand": "echo broken",
+    "variants": [],
+  }
+]
+JSON
+  run cmd_list
+  [ "$status" -ne 0 ]
+  [[ "$output" =~ "not valid JSON" ]]
+  [[ ! "$output" =~ "ID" ]]
 }
 
 # cmd_reclaim (bead pg2-txxyj.6), exercised against tests/fixtures/reclaim.json

@@ -7,6 +7,10 @@
 
 `pg-disk-reclaimer list`
 
+- List reclaimable registry items up to an aggressiveness ceiling:
+
+`pg-disk-reclaimer list --aggressiveness {{2}}`
+
 - Validate a registry file:
 
 `pg-disk-reclaimer validate {{path/to/registry.json}}`

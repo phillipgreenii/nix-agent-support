@@ -14,6 +14,10 @@ _pg_disk_reclaimer() {
       '--apply[Actually reclaim instead of dry-run]' \
       '*:item id:_files'
     ;;
+  list)
+    _arguments \
+      '--aggressiveness[Selection ceiling]:aggressiveness:'
+    ;;
   *)
     _files
     ;;

@@ -1,0 +1,43 @@
+[
+  {
+    "id": "cache-a",
+    "description": "cache A, single low-aggressiveness variant",
+    "path": "/tmp/cache-a",
+    "displayCommand": "echo '10M'",
+    "variants": [
+      {
+        "aggressiveness": 1,
+        "variantDescription": "clear cache A",
+        "dryRunCommand": "echo dry-a",
+        "removeCommand": "echo remove-a"
+      }
+    ]
+  },
+  {
+    "id": "cache-b",
+    "description": "cache B, variants at two aggressiveness tiers",
+    "path": "/tmp/cache-b",
+    "displayCommand": "echo '250M'",
+    "variants": [
+      {
+        "aggressiveness": 2,
+        "variantDescription": "light clear of cache B",
+        "dryRunCommand": "echo dry-b-2",
+        "removeCommand": "echo remove-b-2"
+      },
+      {
+        "aggressiveness": 5,
+        "variantDescription": "full wipe of cache B",
+        "dryRunCommand": "echo dry-b-5",
+        "removeCommand": "echo remove-b-5"
+      }
+    ]
+  },
+  {
+    "id": "info-only",
+    "description": "informational-only item, never reclaimable",
+    "path": "/tmp/info-only",
+    "displayCommand": "echo '1.0G'",
+    "variants": []
+  }
+]

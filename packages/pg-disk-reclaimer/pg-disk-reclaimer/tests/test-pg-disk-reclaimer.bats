@@ -1,10 +1,11 @@
 #!/usr/bin/env bats
 # Smoke tests for pg-disk-reclaimer's entry point (arg parsing + dispatch).
-# list/validate remain stubs (bead pg2-txxyj.1, "scaffold" task; real
-# subcommand behavior lands with tasks pg2-txxyj.4/.5). reclaim is
-# implemented (pg2-txxyj.6) -- its real subcommand behavior is exercised
-# at the function level in tests/test-pg-disk-reclaimer-lib.bats, so this
-# file keeps only a CLI-level dispatch smoke test for it.
+# validate remains a stub (bead pg2-txxyj.1, "scaffold" task; real
+# subcommand behavior lands with task pg2-txxyj.5). list (pg2-txxyj.4) and
+# reclaim (pg2-txxyj.6) are implemented -- their real subcommand behavior
+# is exercised at the function level in
+# tests/test-pg-disk-reclaimer-lib.bats, so this file keeps only a
+# CLI-level dispatch smoke test for each.
 
 setup() {
   # SCRIPTS_DIR: injected by nix check (raw src dir), or computed relative to
@@ -43,12 +44,16 @@ run_pg_disk_reclaimer() {
   [[ "$output" =~ "unknown command" ]]
 }
 
-@test "list and validate dispatch (even though unimplemented)" {
-  for cmd in list validate; do
-    run_pg_disk_reclaimer "$cmd"
-    [ "$status" -ne 0 ]
-    [[ "$output" =~ "not implemented yet" ]]
-  done
+@test "validate dispatches (even though unimplemented)" {
+  run_pg_disk_reclaimer validate
+  [ "$status" -ne 0 ]
+  [[ "$output" =~ "not implemented yet" ]]
+}
+
+@test "list dispatches and validates --aggressiveness needs a value (real subcommand behavior lives in the lib bats suite)" {
+  run_pg_disk_reclaimer list --aggressiveness
+  [ "$status" -ne 0 ]
+  [[ "$output" =~ "--aggressiveness requires a value" ]]
 }
 
 @test "reclaim dispatches and requires --aggressiveness (real subcommand behavior lives in the lib bats suite)" {

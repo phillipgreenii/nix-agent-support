@@ -10,12 +10,13 @@
 #     pgdr_read_registry below)
 #   - pg2-txxyj.3: variant-selection algorithm (this task; see
 #     pgdr_select_variants below)
-#   - pg2-txxyj.4: cmd_list
+#   - pg2-txxyj.4: cmd_list (this task; see cmd_list below) -- its
+#     name/signature are now final, not a placeholder
 #   - pg2-txxyj.5: cmd_validate
 #   - pg2-txxyj.6: cmd_reclaim (this task; see cmd_reclaim / pgdr_confirm
 #     below) -- its name/signature are now final, not a placeholder
-# Names/signatures for cmd_list/cmd_validate below remain placeholders;
-# their tasks MAY still rename them.
+# Names/signatures for cmd_validate below remain a placeholder; its task
+# MAY still rename it.
 
 # pgdr_default_registry_path: echoes the default registry file location,
 # honoring XDG_CONFIG_HOME with the usual $HOME/.config fallback.
@@ -245,12 +246,113 @@ pgdr_select_variants() {
   ' "$path"
 }
 
-# cmd_list: implements the `list` subcommand. Args: any list-specific
-# options/positionals (e.g. --aggressiveness), already stripped of the
-# "list" token itself.
+# cmd_list: implements the `list` subcommand.
+#
+# Grammar: list [--aggressiveness N]
+#   --aggressiveness N (optional): a selection ceiling. With no ceiling,
+#     every registered item is listed, including zero-variant
+#     (informational-only) items. With a ceiling, the listing is
+#     restricted to items with at least one variant <= N -- reusing
+#     pgdr_select_variants' own Case A "at least one qualifying variant"
+#     filter (rather than re-implementing the <= N logic by hand) to
+#     decide INCLUSION only. A zero-variant item never has a qualifying
+#     variant under any ceiling, so it is naturally excluded once a
+#     ceiling is given, exactly like pgdr_select_variants' own Case A
+#     behavior.
+#
+# For each included item this prints a table row of: id, description,
+# EVERY aggressiveness value the item has a variant for (not just the
+# single highest-qualifying variant pgdr_select_variants would choose --
+# a zero-variant item shows "-"), and the item's current size, obtained
+# by running its displayCommand via `eval` (the same trusted-command-
+# string pattern already used for dryRunCommand/removeCommand in
+# cmd_reclaim below).
+#
+# Exit status: 0 on success (including an empty listing when a ceiling
+# excludes everything); 1 if the registry fails to load/validate, or an
+# option is malformed.
 cmd_list() {
-  echo "pg-disk-reclaimer: 'list' is not implemented yet" >&2
-  return 1
+  local max_aggressiveness=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+    --aggressiveness)
+      if [[ -z ${2:-} ]]; then
+        echo "pg-disk-reclaimer: --aggressiveness requires a value" >&2
+        return 1
+      fi
+      max_aggressiveness="$2"
+      shift 2
+      ;;
+    -*)
+      echo "pg-disk-reclaimer: unknown option '$1'" >&2
+      return 1
+      ;;
+    *)
+      echo "pg-disk-reclaimer: unexpected argument '$1'" >&2
+      return 1
+      ;;
+    esac
+  done
+
+  local registry_path
+  registry_path="$(pgdr_default_registry_path)"
+
+  if ! pgdr_read_registry "$registry_path" >/dev/null; then
+    return 1
+  fi
+
+  # Which item ids to include. No ceiling: every item. A ceiling: reuse
+  # pgdr_select_variants' Case A qualifying-variant filter to decide
+  # inclusion (its output already silently excludes non-qualifying and
+  # zero-variant items) -- we only need the resulting ids here, not its
+  # single-chosen-variant fields.
+  local included_ids_json
+  if [[ -n $max_aggressiveness ]]; then
+    local selected
+    if ! selected=$(pgdr_select_variants "$registry_path" "$max_aggressiveness"); then
+      return 1
+    fi
+    included_ids_json=$(jq -c '[.[].id]' <<<"$selected")
+  else
+    included_ids_json=$(jq -c '[.[].id]' "$registry_path")
+  fi
+
+  # Build display rows straight from the registry (not from
+  # pgdr_select_variants' output): the listing shows every aggressiveness
+  # value an item HAS variants for, not just the one chosen variant
+  # pgdr_select_variants would pick.
+  local rows
+  rows=$(jq -c --argjson ids "$included_ids_json" '
+    [
+      .[]
+      | select(.id as $id | $ids | index($id) != null)
+      | {
+          id,
+          description,
+          displayCommand,
+          aggressiveness: ((.variants // []) | map(.aggressiveness))
+        }
+    ]
+  ' "$registry_path")
+
+  printf '%-24s  %-40s  %-14s  %s\n' "ID" "DESCRIPTION" "AGGRESSIVENESS" "SIZE"
+
+  local row
+  while IFS= read -r row; do
+    local id description display_command aggressiveness_display size
+    id=$(jq -r '.id' <<<"$row")
+    description=$(jq -r '.description' <<<"$row")
+    display_command=$(jq -r '.displayCommand' <<<"$row")
+    aggressiveness_display=$(jq -r '
+      .aggressiveness
+      | if length == 0 then "-" else (map(tostring) | join(",")) end
+    ' <<<"$row")
+    size=$(eval "$display_command" 2>/dev/null)
+    printf '%-24s  %-40s  %-14s  %s\n' "$id" "$description" "$aggressiveness_display" "$size"
+  done < <(jq -c '.[]' <<<"$rows")
+
+  return 0
 }
 
 # cmd_validate: implements the `validate` subcommand. Args: an optional
