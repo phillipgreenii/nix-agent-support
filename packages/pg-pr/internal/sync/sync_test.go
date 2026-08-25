@@ -679,20 +679,28 @@ func TestSyncSummaryCounts(t *testing.T) {
 // one create and zero updates.
 func TestSyncSummaryCountsDraftPromoteNoDoubleCount(t *testing.T) {
 	ctx := realBDCtx(t)
-	vcs := newFakeVCS()
+	// A bulk-EnrichedPRsProvider fixture (rather than a bare fakeVCS) so
+	// maybePromoteDraft's fail-closed merge-conflict gate (pg2-4dz88.4.5) sees
+	// a non-nil enriched with a resolved (non-"UNKNOWN") merge state — a bare
+	// fakeVCS never runs GraphQL enrichment, which the gate now correctly
+	// reads as "unknown, block" rather than "unknown, allow".
+	vp := &enrichedPRsVCS{}
+	vp.fakeVCS = *newFakeVCS()
 	ci := newFakeCICD()
 
 	// Self-authored draft PR with all CI green — draft-promote fires and emits
 	// an extra pr.updated, mirroring TestMaybePromoteDraftEmitsUpdate's setup.
 	pr := selfDraftPR(55, "foo/bar", "feat/draft-promote")
 	pr.State = "open"
-	vcs.my["foo/bar"] = []api.PR{pr}
+	pr.Mergeable = "MERGEABLE"
+	pr.MergeStateStatus = "CLEAN"
+	vp.eps = []vcs.EnrichedPR{{PR: pr, CIRuns: []api.CIRun{successRun()}}}
 	ci.runs[keyOf("foo/bar", 55)] = []api.CIRun{successRun()}
 
 	bd := newRealBDClient(t)
 	e, err := New(Deps{
 		Cfg:      cfgWithCICD(),
-		VCS:      map[string]VCSProvider{"github": vcs},
+		VCS:      map[string]VCSProvider{"github": vp},
 		CICD:     map[string]CICDProvider{"ci": ci},
 		Beads:    bd,
 		StateDir: t.TempDir(),
@@ -1357,14 +1365,22 @@ func TestIsSelfAuthored(t *testing.T) {
 
 func TestSync_OnlyPromotesDraftForSelfAuthoredPRs(t *testing.T) {
 	ctx := realBDCtx(t)
-	vcs := newFakeVCS()
+	// Bulk-enriched fixture (see TestSyncSummaryCountsDraftPromoteNoDoubleCount's
+	// comment) so the fail-closed merge-conflict gate sees a resolved merge
+	// state for both PRs.
+	vp := &enrichedPRsVCS{}
+	vp.fakeVCS = *newFakeVCS()
 	ci := newFakeCICD()
 
 	// Mixed pool: one self draft+green, one team draft+green.
 	selfPR := selfDraftPR(10, "foo/bar", "feat/mine")
 	teamPR := teammatePR(20, "foo/bar", "feat/theirs")
-	vcs.my["foo/bar"] = []api.PR{selfPR}
-	vcs.team["foo/bar"] = []api.PR{teamPR}
+	selfPR.Mergeable, selfPR.MergeStateStatus = "MERGEABLE", "CLEAN"
+	teamPR.Mergeable, teamPR.MergeStateStatus = "MERGEABLE", "CLEAN"
+	vp.eps = []vcs.EnrichedPR{
+		{PR: selfPR, CIRuns: []api.CIRun{successRun()}},
+		{PR: teamPR, CIRuns: []api.CIRun{successRun()}},
+	}
 	ci.runs[keyOf("foo/bar", 10)] = []api.CIRun{successRun()}
 	ci.runs[keyOf("foo/bar", 20)] = []api.CIRun{successRun()}
 
@@ -1372,7 +1388,7 @@ func TestSync_OnlyPromotesDraftForSelfAuthoredPRs(t *testing.T) {
 	stateDir := t.TempDir()
 	e, err := New(Deps{
 		Cfg:      cfgWithCICD(),
-		VCS:      map[string]VCSProvider{"github": vcs},
+		VCS:      map[string]VCSProvider{"github": vp},
 		CICD:     map[string]CICDProvider{"ci": ci},
 		Beads:    bd,
 		StateDir: stateDir,
@@ -1387,11 +1403,11 @@ func TestSync_OnlyPromotesDraftForSelfAuthoredPRs(t *testing.T) {
 	}
 
 	// Exactly one SetDraft, and it must be for the self PR (#10).
-	if len(vcs.setDraftCalls) != 1 {
+	if len(vp.setDraftCalls) != 1 {
 		t.Fatalf("expected 1 SetDraft call; got %d: %+v",
-			len(vcs.setDraftCalls), vcs.setDraftCalls)
+			len(vp.setDraftCalls), vp.setDraftCalls)
 	}
-	got := vcs.setDraftCalls[0]
+	got := vp.setDraftCalls[0]
 	if got.Number != 10 || got.Draft != false {
 		t.Fatalf("expected SetDraft(repo, 10, false); got %+v", got)
 	}
@@ -1569,13 +1585,18 @@ func TestSyncCreatesBeadViaOutbox(t *testing.T) {
 func TestMaybePromoteDraftEmitsUpdate(t *testing.T) {
 	ctx := realBDCtx(t)
 
-	vcs := newFakeVCS()
+	// Bulk-enriched fixture (see TestSyncSummaryCountsDraftPromoteNoDoubleCount's
+	// comment) so the fail-closed merge-conflict gate sees a resolved merge
+	// state rather than "enrichment never ran".
+	vp := &enrichedPRsVCS{}
+	vp.fakeVCS = *newFakeVCS()
 	ci := newFakeCICD()
 
 	// Self-authored draft PR with all CI green — conditions for draft promotion.
 	pr := selfDraftPR(55, "foo/bar", "feat/draft-promote")
 	pr.State = "open"
-	vcs.my["foo/bar"] = []api.PR{pr}
+	pr.Mergeable, pr.MergeStateStatus = "MERGEABLE", "CLEAN"
+	vp.eps = []vcs.EnrichedPR{{PR: pr, CIRuns: []api.CIRun{successRun()}}}
 	ci.runs[keyOf("foo/bar", 55)] = []api.CIRun{successRun()}
 
 	bd := newRealBDClient(t)
@@ -1583,7 +1604,7 @@ func TestMaybePromoteDraftEmitsUpdate(t *testing.T) {
 
 	e, err := New(Deps{
 		Cfg:      cfgWithCICD(),
-		VCS:      map[string]VCSProvider{"github": vcs},
+		VCS:      map[string]VCSProvider{"github": vp},
 		CICD:     map[string]CICDProvider{"ci": ci},
 		Beads:    bd,
 		StateDir: t.TempDir(),
@@ -1601,8 +1622,8 @@ func TestMaybePromoteDraftEmitsUpdate(t *testing.T) {
 	}
 
 	// SetDraft must have fired (pre-existing behaviour).
-	if len(vcs.setDraftCalls) != 1 {
-		t.Fatalf("expected 1 SetDraft call; got %d: %+v", len(vcs.setDraftCalls), vcs.setDraftCalls)
+	if len(vp.setDraftCalls) != 1 {
+		t.Fatalf("expected 1 SetDraft call; got %d: %+v", len(vp.setDraftCalls), vp.setDraftCalls)
 	}
 	if sum.DraftPromoted != 1 {
 		t.Fatalf("DraftPromoted: got %d want 1", sum.DraftPromoted)
@@ -1717,17 +1738,23 @@ func TestMaybePromoteDraftBlockedByUninterpretedGateCheck(t *testing.T) {
 func TestMaybePromoteDraftPromotesWhenGateCheckClaimed(t *testing.T) {
 	ctx := realBDCtx(t)
 
-	vcs := newFakeVCS()
+	// Bulk-enriched fixture (see TestSyncSummaryCountsDraftPromoteNoDoubleCount's
+	// comment) so the fail-closed merge-conflict gate sees a resolved merge
+	// state rather than "enrichment never ran".
+	vp := &enrichedPRsVCS{}
+	vp.fakeVCS = *newFakeVCS()
 	ci := newFakeCICD()
 
 	// Self-authored draft PR: real check green, gate-bot failing.
 	pr := selfDraftPR(57, "foo/bar", "feat/draft-promote-claimed")
 	pr.State = "open"
-	vcs.my["foo/bar"] = []api.PR{pr}
-	ci.runs[keyOf("foo/bar", 57)] = []api.CIRun{
+	pr.Mergeable, pr.MergeStateStatus = "MERGEABLE", "CLEAN"
+	ciRuns := []api.CIRun{
 		successRun(),
 		{Name: "gate-bot: approval required", Status: "completed", Conclusion: "failure"},
 	}
+	vp.eps = []vcs.EnrichedPR{{PR: pr, CIRuns: ciRuns}}
+	ci.runs[keyOf("foo/bar", 57)] = ciRuns
 
 	bd := newRealBDClient(t)
 	db := store.OpenForTest(t)
@@ -1739,7 +1766,7 @@ func TestMaybePromoteDraftPromotesWhenGateCheckClaimed(t *testing.T) {
 
 	e, err := New(Deps{
 		Cfg:      cfg,
-		VCS:      map[string]VCSProvider{"github": vcs},
+		VCS:      map[string]VCSProvider{"github": vp},
 		CICD:     map[string]CICDProvider{"ci": ci},
 		Beads:    bd,
 		StateDir: t.TempDir(),
@@ -1754,9 +1781,9 @@ func TestMaybePromoteDraftPromotesWhenGateCheckClaimed(t *testing.T) {
 		t.Fatalf("Sync: %v (errors=%+v)", err, sum.Errors)
 	}
 
-	if len(vcs.setDraftCalls) != 1 {
+	if len(vp.setDraftCalls) != 1 {
 		t.Fatalf("expected 1 SetDraft call (the claimed gate check is excluded from the rollup, so only the green check counts); got %d: %+v",
-			len(vcs.setDraftCalls), vcs.setDraftCalls)
+			len(vp.setDraftCalls), vp.setDraftCalls)
 	}
 	if sum.DraftPromoted != 1 {
 		t.Fatalf("DraftPromoted: got %d want 1", sum.DraftPromoted)

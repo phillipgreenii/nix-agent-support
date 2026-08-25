@@ -1798,8 +1798,32 @@ func (e *Engine) processFeedback(ctx context.Context, _ BeadClient, _ *beads.Tic
 	return nil
 }
 
-// maybePromoteDraft inspects the PR's draft state and, when all CI runs
-// are green, promotes the PR to ready (SetDraft=false upstream).
+// maybePromoteDraft inspects the PR's draft state and, when ALL of the
+// following hold, promotes the PR to ready (SetDraft=false upstream):
+//
+//   - all CI runs are green (the original condition);
+//   - the store-only WIP suppression flag is not set (row.WIP == false);
+//   - no allowlisted approver's current, non-stale pr_approval row reads a
+//     bot-verdict-withheld "changes-requested"; and
+//   - no merge conflict is present — and, fail-closed, merge state is not
+//     UNKNOWN (see draftPromoteBlockedByConflict's doc for the operator
+//     ruling behind this).
+//
+// The self-authored/co-owned guard is DELIBERATELY NOT part of this
+// predicate: it lives at the call sites (authoredByMe in Sync,
+// e.isSelfAuthored in applyFetchedPR), gating whether this function is
+// called at all. That guard stays a raw login-equality check against
+// cfg().SelfLogin — never the 3-way ownership classifier — so a co-owned PR
+// (a teammate's PR this identity also pushed commits to) is never
+// auto-promoted on the author's behalf.
+//
+// This predicate gates PROMOTION (draft -> ready) ONLY. It has no path that
+// demotes a ready PR back to draft: a ready PR failing any of the checks
+// above (CI turning red, a bot verdict flipping to withheld, a conflict
+// appearing) is simply left alone, because the `!pr.Draft` guard below
+// returns before any of them are even evaluated. The only draft<-ready
+// transition in this codebase is the WIP-on toggle (internal/sync/wip.go's
+// ApplyWIP), which this function never calls.
 //
 // SetDraft is the authoritative upstream effect and fires immediately. The
 // merge-request bead's new state is projected via an emitted pr.updated event
@@ -1807,7 +1831,9 @@ func (e *Engine) processFeedback(ctx context.Context, _ BeadClient, _ *beads.Tic
 //
 // enriched, when non-nil, supplies the PR's CI runs from the GraphQL
 // bulk fetch — replaces per-PR ListRuns. When nil, the helper falls
-// back to per-CICD-provider ListRuns calls.
+// back to per-CICD-provider ListRuns calls. It is ALSO consulted (together
+// with pr.Mergeable) by the merge-conflict gate — see
+// draftPromoteBlockedByConflict.
 func (e *Engine) maybePromoteDraft(ctx context.Context, enriched *vcs.EnrichedPR, repo string, pr api.PR, summary *Summary) error {
 	if !pr.Draft {
 		return nil
@@ -1851,6 +1877,18 @@ func (e *Engine) maybePromoteDraft(ctx context.Context, enriched *vcs.EnrichedPR
 				return nil
 			}
 		}
+	}
+	// Merge-conflict gate (pg2-4dz88.4.5), fail-closed on unknown merge state
+	// per an explicit operator ruling — see draftPromoteBlockedByConflict's
+	// doc for why this deliberately disagrees with api.PR.HasConflict()'s own
+	// UNKNOWN default.
+	if draftPromoteBlockedByConflict(enriched) {
+		return nil
+	}
+	// WIP suppression + bot-verdict-withheld gate (pg2-4dz88.4.5), store-backed
+	// and store-optional — see draftPromoteBlockedByWIPOrBotVerdict's doc.
+	if e.draftPromoteBlockedByWIPOrBotVerdict(ctx, repo, pr) {
+		return nil
 	}
 	provider, _ := e.providerFor(rcfg)
 	dt, ok := provider.(DraftToggler)
