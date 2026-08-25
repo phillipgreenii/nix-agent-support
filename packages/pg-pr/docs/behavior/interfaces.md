@@ -39,7 +39,9 @@ flowchart LR
   waiting on a ref that does not resolve to a tracked PR at all (a marker naming the unresolved
   ref, never a special fetch to pull that PR into the listing), or whether it was recently
   **unblocked** because its upstream PR merged — plus the **ordering key** this ranking is
-  encoded as.
+  encoded as. Fact columns also carry visibility: whether a PR is **user-hidden**, the operator's
+  own display-only suppression (see [glossary](glossary.md)) — a presentation fact alongside the
+  others above, never a filter on which PRs this seam reads.
 - **Guarantee, scope of pg-pr's own ranking judgement** — a downstream deployment's own
   judgement over these facts (urgency, cross-domain enrichment, and any sort key not covered by
   an operator-approved ruling) remains **not pg-pr's to compute**. The one exception is the
@@ -51,7 +53,9 @@ flowchart LR
   principle predates this carve-out and is tracked separately — see [README](README.md)'s
   `## Realization gaps`).
 - **Out (pg-pr → consumer), dashboard payload** — the same facts, human-facing, carrying a
-  payload-level as-of time and stale flag rather than a per-item one.
+  payload-level as-of time and stale flag rather than a per-item one. Day-to-day dashboard
+  surfaces are exactly where a **user-hidden** PR's visibility fact takes effect, suppressing it
+  from view while the consolidated single-PR view below still returns it on request.
 - **Out (pg-pr → consumer), consolidated single-PR view** — on request, every PR fact pg-pr
   holds for one identified PR, assembled into a single aggregate carrying its own as-of time and
   stale flag for the whole aggregate, per the same freshness guarantee below.
