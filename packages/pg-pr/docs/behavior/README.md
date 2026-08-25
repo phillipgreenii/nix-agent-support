@@ -46,7 +46,9 @@ restated here.
   merge-request-record upsert; fingerprint-driven sync where only workers mutate and never mass
   close on partial data; head-anchored, attributed, PENDING-only review and comment posting with
   a fail-closed supersede check; the approval gate tracked as its own axis, distinct from CI
-  health, where a signal pg-pr cannot classify reads unknown rather than satisfied.
+  health, where a signal pg-pr cannot classify reads unknown rather than satisfied; identifying,
+  never authoring, a PR dependency between a downstream PR and its upstream PR, ranking the
+  downstream PR lower without suppressing it (`INV-DEP-1`).
 - **Extent (out), named explicitly (ADR 0034)** — the legacy in-daemon review **workflow**:
   draft-review record lifecycle, an automated review consumer and its own agent spawn,
   re-review-on-head-advance and any reviewed-state cursor, retry/dead-letter policy, a credential
@@ -64,9 +66,10 @@ This set's **realization-gap register** (`INV-23`): intended behavior this set's
 has not built yet, one row per gap, each keyed by the element id the gap is against. Not an open
 question — the intent is settled and the build has not caught up (`INV-15`).
 
-| Element                 | Intended                                                                                           | Where the implementation stands                                                                  | Tracked by        |
-| ----------------------- | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ | ----------------- |
-| `## Scope` (extent out) | the excluded legacy review workflow is fully removed, leaving only the kill switch's memory behind | the legacy chain still exists behind an opt-in switch defaulting off, pending a deliberate strip | bead `pg2-ynhr.5` |
+| Element                 | Intended                                                                                                                                                                                       | Where the implementation stands                                                                                                                            | Tracked by        |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------- |
+| `## Scope` (extent out) | the excluded legacy review workflow is fully removed, leaving only the kill switch's memory behind                                                                                             | the legacy chain still exists behind an opt-in switch defaulting off, pending a deliberate strip                                                           | bead `pg2-ynhr.5` |
+| `INTF-PGPR-READ`        | urgency is a downstream deployment's own judgement, not something pg-pr computes — no operator-approved ruling carves it out the way one does for the PR-dependency ordering key (`INV-DEP-1`) | pg-pr already computes urgency (level, score, reasons) and persists it as columns on every PR row — predating this decomposition and left unresolved by it | bead `pg2-tfvgy`  |
 
 ## External references
 

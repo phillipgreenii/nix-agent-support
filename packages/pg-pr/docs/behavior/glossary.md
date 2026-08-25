@@ -98,6 +98,23 @@ deployment concern and is not defined here (`## Scope`).
   team-authored draft PR from view: that mechanism is host-derived and not the operator's own
   decision, where user-hidden is always an explicit, per-PR act by the operator.
 
+## PR dependency
+
+- **PR dependency** — the fact that one PR's landing is blocked on another PR landing first,
+  identified from PR facts pg-pr already reads: the code host's own native stacking relation
+  where present, falling back to a base-branch chain (one PR's base branch naming another open
+  PR's own branch) where it is not. A PR dependency is always **read-only** — pg-pr identifies
+  and reports it, and never creates, links, or unstacks anything on the code host to express or
+  resolve it (`INV-DEP-1`).
+- **Stacked PR** — a PR that carries a PR dependency: it is either a downstream PR waiting on an
+  upstream PR, or the upstream PR something else is waiting on.
+- **Upstream PR** — in a PR dependency, the PR that must land first. Ranks higher than the
+  downstream PR waiting on it.
+- **Downstream PR** — in a PR dependency, the PR that is waiting on its upstream PR to land
+  first. Ranks lower than its upstream PR rather than being suppressed from view; if its upstream
+  PR merges, the downstream PR becomes unblocked rather than re-pointing to the upstream PR's own
+  upstream.
+
 ## Excluded (named so the boundary is explicit, `## Scope`)
 
 The **legacy in-daemon review workflow** — draft-review lifecycle, an automated review consumer

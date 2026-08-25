@@ -33,9 +33,23 @@ flowchart LR
   (`INV-ASOF-1`). Fact columns include identity, ownership, size and age, CI signal and
   review-count facts read from the code host, and the **approval gate** — its own field,
   distinct from the CI signal, carrying the same freshness treatment as its sibling facts
-  (`INV-GATE-1`, `INV-GATE-4`) — the **PR-fact** half of any triage surface built on this seam; a
-  downstream deployment's own judgement over these facts (urgency, sort, cross-domain
-  enrichment) is not pg-pr's to compute.
+  (`INV-GATE-1`, `INV-GATE-4`) — the **PR-fact** half of any triage surface built on this seam.
+  Fact columns also include the **PR dependency** (`INV-DEP-1`): whether this PR is a
+  **downstream PR** currently ranked below an **upstream PR** in this same listing, whether it is
+  waiting on a ref that does not resolve to a tracked PR at all (a marker naming the unresolved
+  ref, never a special fetch to pull that PR into the listing), or whether it was recently
+  **unblocked** because its upstream PR merged — plus the **ordering key** this ranking is
+  encoded as.
+- **Guarantee, scope of pg-pr's own ranking judgement** — a downstream deployment's own
+  judgement over these facts (urgency, cross-domain enrichment, and any sort key not covered by
+  an operator-approved ruling) remains **not pg-pr's to compute**. The one exception is the
+  PR-dependency ordering key above: an operator-approved ruling (pg2-4dz88.7, 2026-08-21 —
+  "Upstream-of-another-PR before standalone" as one key of a shared sort order) puts that
+  specific ranking judgement inside pg-pr itself (`INV-DEP-1`). This is a **carve-out for this
+  key alone**, made under precedent of that ruling — it does not reopen the general principle for
+  urgency or any other judgement no such ruling covers (urgency's own divergence from this
+  principle predates this carve-out and is tracked separately — see [README](README.md)'s
+  `## Realization gaps`).
 - **Out (pg-pr → consumer), dashboard payload** — the same facts, human-facing, carrying a
   payload-level as-of time and stale flag rather than a per-item one.
 - **Guarantee** — a consumer MUST be able to tell "stale" from "current" for every fact it acts

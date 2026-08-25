@@ -88,6 +88,18 @@ correct owner (ADR 0034) — the UUID preserves identity; only the owning set ch
   conclude that subset's PRs are gone. It MUST carry forward the prior known state for the
   unconfirmed subset rather than mass-closing it.
 
+## PR dependency (`INV-DEP-*`)
+
+- **`INV-DEP-1`** <!-- uuid: fea3e946-b2e1-4509-9abf-79e194f0daf8 --> — **Read-only, never
+  authors.** pg-pr MUST only identify and report a PR dependency between a **stacked PR** (the
+  downstream PR) and the upstream PR it is waiting on — including one signalled by the code
+  host's own native stacking relation. It MUST NOT create, link, unstack, or otherwise mutate a
+  stack, nor any other code-host state, to express or resolve a PR dependency; the relation is
+  derived only from PR facts pg-pr already reads, never asserted through `INTF-PGPR-WRITE` or any
+  other write path. This is distinct from the general read-seam purity of `INV-READ-1`:
+  `INV-DEP-1` is the feature-specific promise that identifying a stacked PR never turns into
+  authoring one.
+
 ## The write surface (`INV-WRITE-*`, `INV-REVIEW-*`, `INV-ATTR-*`)
 
 - **`INV-WRITE-1`** <!-- uuid: f7360062-33d4-4ca5-8a45-6f8af19e6987 --> — An inline comment or
