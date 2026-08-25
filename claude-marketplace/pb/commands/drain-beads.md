@@ -104,6 +104,38 @@ rather than updating it.
 
 1. **CLAIM** (atomic, race-safe — the ONLY claim path; do NOT list-then-claim):
 
+   **SELF-CHECK freshness first, once per CLAIM** — the cheapest checkpoint,
+   since a claim already costs several `bd` round-trips, so one more local
+   diff is negligible, and it bounds any staleness exposure to at most one
+   bead's worth of work. Verify that the content you are currently
+   following — this command's own body, as loaded when this session
+   started — is still current. Reuse this repo's own documented convention
+   rather than inventing a new one (`CLAUDE.md`'s "Skill / Plugin Delivery Is
+   Store-Served"): `readlink -f` the currently-installed copy of this command
+   and diff it against the repo's working-tree/HEAD source:
+
+   ```bash
+   diff "$(readlink -f ~/.local/share/pgii-marketplaces/phillipgreenii-nix-agent-support-marketplace-local/pb/commands/drain-beads.md)" \
+        <repo>/claude-marketplace/pb/commands/drain-beads.md
+   ```
+
+   You are current only if BOTH hold: the diff is EMPTY (the installed copy
+   matches the repo's source right now), AND that source still reads as what
+   you have been following since session start. If either fails, your loaded
+   content is STALE — a change has landed on disk since you started that you
+   are not operating on. You cannot reload your own command text
+   mid-session, so this is a genuine, terminal-for-this-session anomaly, not
+   something to silently continue past and not something this session can fix
+   itself:
+   - STOP the drain loop. Do not claim any further bead.
+   - If you are currently holding a claimed bead (e.g. from Startup/resume),
+     leave it exactly where the existing STUCK path would leave it — PARKED,
+     not discarded, worktree/branch KEPT — without running any further STUCK
+     step; there is no bead-shaped question here, and this is NOT a `human`
+     park.
+   - Report directly to the operator that this session's own loaded command
+     content is stale and the session should be restarted fresh.
+
    ```bash
    bd ready --claim --exclude-label human --actor "ID" --json
    ```
@@ -828,6 +860,14 @@ unchanged.
   into the worktree between the proof and the teardown and has no operator to fall back to on an
   ambiguous leg, and because a losslessness proof MUST NOT be inherited across sessions (**F-1**).
   Full contract: the always-on `Worktree-Review Label Lifecycle` rules (W-1..W-8).
+- Once per CLAIM, before claiming, SELF-CHECK that the command body you are
+  following is still current: `readlink -f` the installed copy of this command and
+  diff it against the repo's working-tree/HEAD source (the same store-served
+  convention `CLAUDE.md` documents), then confirm that source still reads as what
+  you have been following. If it has drifted, HALT the drain loop, leave any
+  currently-claimed bead PARKED per the existing STUCK path (not discarded), and
+  report to the operator that the session should be restarted fresh — this is a
+  session-level anomaly, not a `human`-labeled bead park.
 - If a skill reports the canonical clone is off its primary branch or dirty, HALT and
   report — EXCEPT under a strategy that never touches the canonical clone, where the
   handler surfaces the anomaly and proceeds (the `pull-request` handler's PR-0, R-8's
@@ -913,3 +953,10 @@ re-enters this queue by itself as soon as its last blocker closes.
   worktree and branch by design (PR-4), so a drain over such a repo accumulates one
   `.worktrees/<id>` per closed bead until someone merges the PRs. Retiring them is the
   merger's job, not this command's.
+- **Self-check is detection, not prevention** (`pg2-2l8ip`). The step-1 SELF-CHECK
+  only fires at the CLAIM checkpoint, so it can only catch drift AFTER a checkpoint
+  runs — work done between the last check and a stale invocation is not
+  retroactively protected. It halts a session that has already gone stale; it
+  cannot make Claude Code reload this command's content mid-session (no supported
+  mechanism for that is known) and cannot undo whatever the session already did
+  under the pre-fix content.
