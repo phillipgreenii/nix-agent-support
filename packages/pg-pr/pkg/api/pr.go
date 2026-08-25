@@ -1,6 +1,9 @@
 package api
 
-// PR is the JSON shape returned by `pg-pr pr show`.
+// PR is one PR's live-provider-shaped identity/state, fed into
+// internal/prview.PRViewInput.PR and threaded through to `pg-pr pr view`'s
+// assembled internal/prview.View output (Identity field) — it is not itself
+// marshaled as a command's top-level JSON shape.
 type PR struct {
 	Repo   string `json:"repo"`
 	Number int    `json:"number"`

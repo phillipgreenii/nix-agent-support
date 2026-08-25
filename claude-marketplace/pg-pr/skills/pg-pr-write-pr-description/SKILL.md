@@ -46,7 +46,7 @@ Always run, in this order:
 
 ```bash
 # 1. Existing PR body (only if updating).
-pg-pr pr show <pr> --repo <owner/name> --json
+pg-pr pr view <pr> --repo <owner/name> --json
 
 # 2. Changed files with add/delete counts.
 pg-pr pr files --base origin/main --json
@@ -55,10 +55,13 @@ pg-pr pr files --base origin/main --json
 pg-pr pr commits --base origin/main --json
 ```
 
-- `pr show` returns the full PR object including `body`. When updating,
-  treat the existing body as the starting point — preserve any
-  hand-authored sections that look intentional (e.g. a "Notes for
-  reviewer" block).
+- `pr view --json`'s `identity` object does **not** currently carry the PR's
+  own description text (no `body` field on `identity`; the only `body` key
+  anywhere in the output belongs to individual `feedback` items — review
+  comments, not the PR's own description). When updating, fetch the current
+  description separately, e.g. `gh pr view <pr> --json body --jq .body`, and
+  treat it as the starting point — preserve any hand-authored sections that
+  look intentional (e.g. a "Notes for reviewer" block).
 - `pr files --json` returns `{"files": [{path, additions, deletions,
 binary}, ...]}`. Use it to group changes by area in the body.
 - `pr commits --json` returns `{"commits": [{sha, subject, body,
@@ -121,7 +124,7 @@ commit subjects + file paths from `pr files` / `pr commits` as input.)
 
 **Tone:** matter-of-fact, present tense, technical. Match the
 repository's other recent PR descriptions if you can see them via
-`gh pr list` or `pg-pr pr show` on adjacent PRs.
+`gh pr list` or `pg-pr pr view` on adjacent PRs.
 
 ## Step 5 — emit the body
 

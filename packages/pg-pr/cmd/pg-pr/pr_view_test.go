@@ -353,3 +353,155 @@ func TestPRView_SiblingSubcommandsUnaffected(t *testing.T) {
 		t.Fatalf("pr commits after pr view: %v (stderr=%s)", err, stderr4.String())
 	}
 }
+
+// TestRetainedInvocationsStillResolve is pg2-4dz88.5.8's compatibility proof:
+// every in-repo doc/skill/agent caller that used to invoke the retired
+// `pr show`/`pr info` spellings (removed outright by pg2-4dz88.5.7 — see
+// TestRetiredNames_RemovedOutright above) has been repointed at the
+// surviving `pr view` command, and this table proves each caller's exact
+// argv — mechanically renamed only (`show`/`info` -> `view`; no flag added
+// or removed) — still resolves through rootCmd. Two or more callers sharing
+// the identical argv shape are collapsed into one row; each row's comment
+// cites every caller file:line that maps to it.
+//
+// The caller list was re-grepped against the working tree immediately
+// before writing this test (this workspace's premise-freshness convention —
+// the list this bead was handed was compiled 2026-08-21 and had drifted by
+// one citation: pg-pr-write-pr-description/SKILL.md:58 is a prose
+// reference to `pr show`'s return shape with no `pg-pr` prefix, so the
+// original `pg-pr pr show` grep pattern missed it even though it names the
+// same retired command).
+func TestRetainedInvocationsStillResolve(t *testing.T) {
+	cases := []struct {
+		name     string
+		args     []string
+		wantJSON bool
+	}{
+		{
+			// Bare form: a PR-number placeholder, no flags at all.
+			// Historical callers:
+			//   claude-marketplace/pg-pr/skills/pg-pr-workflow/SKILL.md:15
+			//     ("pg-pr pr show <n>")
+			//   claude-marketplace/pg-pr/skills/pg-pr-process-feedback/SKILL.md:84
+			//     ("pg-pr pr show" mentioned with no PR-number placeholder at
+			//     all — not independently a distinct, runnable argv, so it is
+			//     folded into this row rather than given its own).
+			name: "bare_no_flags",
+			args: []string{"pr", "view", "7"},
+		},
+		{
+			// `--json` only, no `--repo`. Historical callers (all identical
+			// after the show/info -> view rename):
+			//   claude-marketplace/pg-pr/commands/check-my-pr.md:31
+			//   claude-marketplace/pg-pr/commands/check-my-pr.md:51
+			//   claude-marketplace/pg-pr/commands/checkout-pr.md:21
+			//   claude-marketplace/pg-pr/agents/pg-pr-review-jira-alignment.md:44
+			//   claude-marketplace/pg-pr/agents/pg-pr-review-pr-structure.md:29
+			name:     "json_no_repo",
+			args:     []string{"pr", "view", "7", "--json"},
+			wantJSON: true,
+		},
+		{
+			// `--repo` + `--json`. Historical caller:
+			//   claude-marketplace/pg-pr/skills/pg-pr-write-pr-description/SKILL.md:49
+			// (The body-field claim this same skill made about this exact
+			// invocation is checked separately —
+			// TestPRView_WriteDescriptionCaller_BodyFieldNotCarried below —
+			// because it needs its own assertions, not just "did it
+			// resolve".)
+			name:     "repo_and_json",
+			args:     []string{"pr", "view", "7", "--repo", "foo/bar", "--json"},
+			wantJSON: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			resetPRFlags()
+			setViewStateHome(t, false)
+
+			// The bare and json_no_repo shapes carry no --repo, so `pr view`
+			// must fall back to auto-detecting the repo from the cwd's git
+			// remote (resolveRepo) — give it one, exactly like
+			// TestPRView_SiblingSubcommandsUnaffected does above.
+			hasRepoFlag := false
+			for _, a := range tc.args {
+				if a == "--repo" {
+					hasRepoFlag = true
+				}
+			}
+			if !hasRepoFlag {
+				tmp := t.TempDir()
+				initRepoForCLI(t, tmp)
+				t.Chdir(tmp)
+			}
+
+			var stdout, stderr bytes.Buffer
+			rootCmd.SetOut(&stdout)
+			rootCmd.SetErr(&stderr)
+			rootCmd.SetArgs(tc.args)
+
+			if err := rootCmd.Execute(); err != nil {
+				t.Fatalf("execute %v: %v (stderr=%s)", tc.args, err, stderr.String())
+			}
+
+			if tc.wantJSON {
+				var doc map[string]any
+				if err := json.Unmarshal(stdout.Bytes(), &doc); err != nil {
+					t.Fatalf("%v --json output is not valid JSON: %v\noutput:\n%s", tc.args, err, stdout.String())
+				}
+			}
+		})
+	}
+}
+
+// TestPRView_WriteDescriptionCaller_BodyFieldNotCarried is the CLI
+// round-trip check pg2-4dz88.5.8 was asked to perform for the
+// pg-pr-write-pr-description caller (SKILL.md:49/58): confirm, through the
+// real CLI path rather than trusting pkg/api.PR's Body field's json tag
+// (json:"body,omitempty"), whether `pr view --json`'s output still carries
+// the PR's own description text the way the retired `pr show` used to.
+//
+// It does not. internal/prview.Assemble builds View.Identity from
+// PRViewInput.PR field-by-field (internal/prview/prview.go) and never
+// copies api.PR.Body into it; the only `body` JSON key anywhere in a View
+// is FeedbackItem.Body (internal/prview/prview.go:231), which is a review
+// comment's body, not the PR's own description — and PRViewInput.PR itself
+// is populated by storeRowToAPIPR (cmd/pg-pr/pr_view.go), which likewise
+// never copies Body. This is a pre-existing gap from pg2-4dz88.5.7's
+// `pr show` -> `pr view` consolidation (`pr show` used to marshal the
+// live-provider api.PR directly, which does carry `body`), discovered while
+// re-pointing the write-pr-description skill's caller at `pr view` for
+// pg2-4dz88.5.8. Closing it (carrying the PR's own description onto
+// View.Identity, or wiring one in via loadPRView) is out of this bead's
+// scope; the skill text itself now tells the caller to fetch the
+// description separately (`gh pr view --json body`) instead — see this
+// bead's edit to pg-pr-write-pr-description/SKILL.md.
+func TestPRView_WriteDescriptionCaller_BodyFieldNotCarried(t *testing.T) {
+	resetPRFlags()
+	setViewStateHome(t, false)
+
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{"pr", "view", "7", "--repo", "foo/bar", "--json"})
+
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("execute: %v (stderr=%s)", err, stderr.String())
+	}
+
+	var doc map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &doc); err != nil {
+		t.Fatalf("output is not valid JSON: %v\noutput:\n%s", err, stdout.String())
+	}
+	identity, ok := doc["identity"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected identity object in output: %v", doc)
+	}
+	if _, present := identity["body"]; present {
+		t.Errorf("identity.body is now present — the gap this test documents has been closed; revert pg-pr-write-pr-description/SKILL.md's caveat (and this test) to rely on `pr view` for the existing body again")
+	}
+	if _, present := doc["body"]; present {
+		t.Errorf("a top-level body key is now present — same as above")
+	}
+}

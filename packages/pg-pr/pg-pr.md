@@ -24,6 +24,14 @@
 
 `pg-pr branch detect`
 
+- Show the consolidated view of a PR (identity, ownership, enrichment, CI, merge state, feedback, revisions, links):
+
+`pg-pr pr view {{pr_number}}`
+
+- Show the same view as machine-readable JSON, against an explicit repo:
+
+`pg-pr pr view {{pr_number}} --repo {{owner/name}} --json`
+
 - Report beads duplicated per PR, in all statuses, excluding those already adjudicated against a canonical bead via a `supersedes` edge (read-only audit; changes nothing):
 
 `pg-pr sync duplicates`

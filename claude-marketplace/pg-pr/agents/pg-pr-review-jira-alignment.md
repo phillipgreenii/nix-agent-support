@@ -41,7 +41,7 @@ Inputs are passed in the prompt by the orchestrator. Expect:
 
 1. **Extract ticket IDs** from branch (`username.TICKET-ID.desc`),
    commits (via `pg-pr pr commits --base <BASE_REF> --json`), and PR
-   description (via `pg-pr pr info <PR_NUMBER> --json`). A valid
+   description (via `pg-pr pr view <PR_NUMBER> --json`). A valid
    ticket matches `[A-Z]+-\d+`.
 
    If no tickets found, return:

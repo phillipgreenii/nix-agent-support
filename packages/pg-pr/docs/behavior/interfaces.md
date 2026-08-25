@@ -52,6 +52,9 @@ flowchart LR
   `## Realization gaps`).
 - **Out (pg-pr → consumer), dashboard payload** — the same facts, human-facing, carrying a
   payload-level as-of time and stale flag rather than a per-item one.
+- **Out (pg-pr → consumer), consolidated single-PR view** — on request, every PR fact pg-pr
+  holds for one identified PR, assembled into a single aggregate carrying its own as-of time and
+  stale flag for the whole aggregate, per the same freshness guarantee below.
 - **Guarantee** — a consumer MUST be able to tell "stale" from "current" for every fact it acts
   on (`INV-ASOF-1`); pg-pr, not the consumer, makes that determination, so a consumer MUST NOT
   re-derive its own staleness policy over these facts (`INV-ASOF-2`).

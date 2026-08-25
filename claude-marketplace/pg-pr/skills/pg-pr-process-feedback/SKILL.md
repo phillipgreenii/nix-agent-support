@@ -81,7 +81,7 @@ needing processing.
    ```
 
 5. For each feedback item:
-   1. Read upstream context (`pg-pr pr show`, `pg-pr pr files`, `pg-pr feedback show <id>`, etc.)
+   1. Read upstream context (`pg-pr pr view`, `pg-pr pr files`, `pg-pr feedback show <id>`, etc.)
       and decide the work it implies (or that it is non-actionable).
    2. **De-duplicate:** if that work matches an existing open work bead, **link/update** it —
       add this feedback as another `discovered-from` and refine the description if warranted —

@@ -28,7 +28,7 @@ name, or omitted (uses the current branch's PR).
 ### Step 1: Resolve PR
 
 ```bash
-pg-pr pr show <PR_IDENTIFIER> --json
+pg-pr pr view <PR_IDENTIFIER> --json
 ```
 
 Capture `number`, `state`, `author`. If no argument was provided and
@@ -48,7 +48,7 @@ the PR is no longer open.
 ### Step 3: Gather comments
 
 ```bash
-pg-pr pr show <NUMBER> --json    # confirms state
+pg-pr pr view <NUMBER> --json    # confirms state
 # Phase 3 will land 'pg-pr feedback gather' which materialises
 # feedback beads. Until then, fetch comments via gh and stage them
 # manually if needed.

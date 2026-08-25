@@ -18,7 +18,7 @@ amend the changes without disturbing your current workspace.
 
 1. Resolve the PR if it isn't already a number:
    ```bash
-   pg-pr pr show <PR_IDENTIFIER> --json
+   pg-pr pr view <PR_IDENTIFIER> --json
    ```
 2. Create the worktree:
    ```bash

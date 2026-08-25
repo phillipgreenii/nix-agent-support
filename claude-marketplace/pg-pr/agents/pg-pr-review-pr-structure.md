@@ -26,7 +26,7 @@ Inputs are passed in the prompt by the orchestrator. Expect:
 2. Review commit message format and atomicity.
 3. Get PR metadata:
    ```bash
-   pg-pr pr info <PR_NUMBER> --json
+   pg-pr pr view <PR_NUMBER> --json
    ```
 4. Review PR title, description, scope.
 5. Output JSON of the form:
