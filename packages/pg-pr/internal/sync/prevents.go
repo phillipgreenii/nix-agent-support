@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/ownership"
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/snapshot"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
 )
@@ -61,75 +59,6 @@ func (e *Engine) emitPREvent(ctx context.Context, eventType, repo string, pr api
 			return err
 		}
 		return tx.EnqueueEvent(eventType, payload)
-	})
-}
-
-// emitAttention re-derives the teammate-attention verdict for a PR from
-// PERSISTED store facts — its revision timeline AND its per-approver approval
-// rows (pg2-4dz88.1.9) — plus the live hasConflict signal, through the SHARED
-// snapshot.NeedsAttention predicate, and emits a pr.attention event carrying
-// that verdict. Called once per tick from refreshPR for team AND co-owned PRs.
-//
-// It consults NO bead artifact: the readiness input keyed on the pg-pr
-// draft-review bead is gone (pg2-kh1ar), because that bead is produced only by
-// the legacy review path, which ships off (ADR 0034) — see
-// snapshot.NeedsAttention.
-//
-// own gates the verdict: a non-TEAM PR (co-owned) is never a review target for
-// me, so its attention bead must not stay open — emitAttention short-circuits
-// to Need=false without consulting the revision timeline, which idempotently
-// CLOSES any attention bead a prior team-owned tick opened (a team->co-owned
-// transition, e.g. I pushed a commit onto a teammate's PR). Only the TEAM path
-// below runs the real predicate — hasConflict (the caller's pr.HasConflict(),
-// with GitHub's merge-state overlaid via overlayMergeState so the daemon REST
-// path carries it) dampens that verdict to Need=false when the PR conflicts
-// (pg2-tsgkj).
-//
-// Because it re-derives + re-emits from facts EVERY tick (never a one-shot
-// transition), a dropped fire-once pr.attention event self-heals on the next
-// tick (design §2.7, R1/D3). The bridge's projectAttentionBead ensures (need) or
-// closes (!need) the attention bead idempotently.
-//
-// It uses the SAME predicate + SAME store inputs the dashboard builder feeds
-// buildTeamRow, so the dashboard NeedsAttention signal and the open-attention-
-// bead set can never diverge (D4/R4). No-op when the store is nil.
-func (e *Engine) emitAttention(ctx context.Context, repo string, number int, prID int64, own ownership.Ownership, hasConflict bool) error {
-	if e.deps.Store == nil {
-		return nil
-	}
-	// A co-owned (or, in principle, mine) PR is never a review target for me —
-	// force Need=false so the bridge closes any open attention bead. Only a
-	// genuine TEAM PR runs the revision-timeline predicate below.
-	if own != ownership.Team {
-		payload, err := json.Marshal(store.AttentionPayload{Repo: repo, Number: number, Need: false, Reason: ""})
-		if err != nil {
-			return err
-		}
-		return e.deps.Store.InTx(ctx, func(tx *store.Tx) error {
-			return tx.EnqueueEvent(store.EventPRAttention, payload)
-		})
-	}
-	revs, err := e.deps.Store.ListRevisions(ctx, prID)
-	if err != nil {
-		return err
-	}
-	// The PER-APPROVER rows are the attention predicate's approval source since
-	// pg2-4dz88.1.9 (the collapsed pr_revision.others_approved / my_review_state
-	// pair is no longer read). Fetched HERE, beside the revisions, so the write
-	// model feeds NeedsAttention exactly what buildPRInput feeds the read model.
-	approvals, err := e.deps.Store.ListApprovals(ctx, prID)
-	if err != nil {
-		return err
-	}
-	need, reason := snapshot.NeedsAttention(revs, approvals, e.cfg().SelfLogin, hasConflict)
-	payload, err := json.Marshal(store.AttentionPayload{
-		Repo: repo, Number: number, Need: need, Reason: reason,
-	})
-	if err != nil {
-		return err
-	}
-	return e.deps.Store.InTx(ctx, func(tx *store.Tx) error {
-		return tx.EnqueueEvent(store.EventPRAttention, payload)
 	})
 }
 

@@ -336,11 +336,6 @@ func TestConcurrentPRProjectionCreatesOneMergeRequestBead(t *testing.T) {
 	if got := ws.createsOf("o/r#7: add a thing"); got != 1 {
 		t.Fatalf("merge-request beads created for o/r#7: got %d, want 1 — the resolve→create window in EnsureMergeRequest is unguarded", got)
 	}
-	// The draft-review child hangs off the same unguarded window
-	// (EnsureDraftReviewBead reads its child list, then creates).
-	if got := ws.createsOf("draft-review: o/r#7"); got != 1 {
-		t.Fatalf("draft-review beads created for o/r#7: got %d, want 1", got)
-	}
 }
 
 // TestConcurrentFeedbackProjectionCreatesOneProcessFeedbackBead is the

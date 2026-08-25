@@ -8,11 +8,14 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
 )
 
-// refreshPR for an active TEAM PR MUST emit a pr.attention event derived from
-// persisted facts (per-tick, self-healing), and the returned snapshot input MUST
-// carry the store revisions so the dashboard read model is store-derived
-// (matching the bead). Since pg2-kh1ar no bead artifact feeds either side.
-func TestRefreshPR_TeamPR_EmitsAttentionAndThreadsStore(t *testing.T) {
+// TestRefreshPR_TeamPR_ThreadsStoreRevisions: refreshPR's returned snapshot
+// input MUST carry the store revisions so the dashboard read model is
+// store-derived. (This test used to also assert refreshPR emits a
+// pr.attention event; that bead-projection mechanism was removed by
+// pg2-ynhr.5 — see internal/beadsbridge's package doc. The dashboard's own
+// attention verdict, unaffected, is covered by internal/snapshot's
+// NeedsAttention tests, which this store-threading behavior feeds.)
+func TestRefreshPR_TeamPR_ThreadsStoreRevisions(t *testing.T) {
 	ctx := context.Background()
 	db := store.OpenForTest(t)
 
@@ -25,8 +28,7 @@ func TestRefreshPR_TeamPR_EmitsAttentionAndThreadsStore(t *testing.T) {
 		t.Fatalf("RecordRevision: %v", err)
 	}
 
-	// No draft-review bead anywhere (the shipped default) → attention still needed.
-	bdc := &attnFinderBeads{}
+	bdc := &refreshFakeBeads{}
 	pr := api.PR{
 		Repo: "o/r", Number: 7, State: "open",
 		Author: "teammate", HeadSHA: "h1", Base: "b1",
@@ -42,37 +44,8 @@ func TestRefreshPR_TeamPR_EmitsAttentionAndThreadsStore(t *testing.T) {
 		t.Fatal("active team PR must yield a non-nil snapshot input")
 	}
 
-	// (a) Write model: a pr.attention{need:true} event was emitted.
-	evs := attentionEvents(t, db)
-	if len(evs) != 1 {
-		t.Fatalf("want exactly 1 pr.attention event, got %d: %+v", len(evs), evs)
-	}
-	if !evs[0].Need || evs[0].Reason != "unreviewed-by-me" {
-		t.Fatalf("attention event = %+v, want need:true unreviewed-by-me", evs[0])
-	}
-
-	// (b) Read model: the snapshot input threads the store revisions.
+	// Read model: the snapshot input threads the store revisions.
 	if len(in.Revisions) != 1 || in.Revisions[0].HeadSHA != "h1" {
 		t.Fatalf("snapshot input must carry store revisions, got %+v", in.Revisions)
-	}
-}
-
-// A MINE PR does NOT emit pr.attention (attention is a teammate-PR signal only).
-func TestRefreshPR_MinePR_NoAttentionEmit(t *testing.T) {
-	ctx := context.Background()
-	db := store.OpenForTest(t)
-	prID, _ := db.UpsertPR(ctx, store.PullRequest{Repo: "o/r", Number: 3, Ownership: "mine", State: "open", HeadSHA: "h1"})
-	if _, _, err := db.RecordRevision(ctx, prID, "h1", "b1"); err != nil {
-		t.Fatalf("RecordRevision: %v", err)
-	}
-	bdc := &attnFinderBeads{}
-	pr := api.PR{Repo: "o/r", Number: 3, State: "open", Author: "me", HeadSHA: "h1", URL: "https://github.com/o/r/pull/3"}
-	e := newRefreshEngineWithStore(t, "me", bdc, pr, db)
-
-	if _, err := e.refreshPR(ctx, "o/r", 3); err != nil {
-		t.Fatalf("refreshPR: %v", err)
-	}
-	if evs := attentionEvents(t, db); len(evs) != 0 {
-		t.Fatalf("mine PR must not emit pr.attention, got %+v", evs)
 	}
 }

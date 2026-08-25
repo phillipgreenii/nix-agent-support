@@ -70,18 +70,6 @@ type Config struct {
 	// declared. Absent/empty disables the mechanism with no error.
 	VerdictGenerations []VerdictGeneration `yaml:"verdict_generations,omitempty" json:"verdict_generations,omitempty"`
 
-	// ClaudeBin is the absolute path to the claude binary used by the
-	// draft-review spawn consumer (the pg-pr-sync daemon). When unset (the
-	// default), the daemon falls back to "claude" and relies on PATH — which
-	// works in interactive sessions but fails in launchd daemons whose PATH
-	// does not include the nix-store paths. Set this to the absolute path
-	// reported by `which claude` or the nix-store derivation path so the
-	// deployed daemon can find the binary without PATH manipulation.
-	//
-	// Example (launchd / NixOS deployment):
-	//   claude_bin: /run/current-system/sw/bin/claude
-	ClaudeBin string `yaml:"claude_bin,omitempty" json:"claude_bin,omitempty"`
-
 	// Jira, when non-nil, enables the Jira priority/incident urgency signal
 	// (pg2-jpfw.4). When nil (the default), the signal is disabled and
 	// behaviour is identical to before this bead.
@@ -90,60 +78,6 @@ type Config struct {
 	// tokens, or instance names appear in this struct. All deployment-specific
 	// details MUST be supplied via the config file.
 	Jira *JiraConfig `yaml:"jira,omitempty" json:"jira,omitempty"`
-
-	// Review gates the daemon's draft-review machinery (bead pg2-ynhr.11 kill
-	// switch). When review.enabled is false, the daemon runs neither the review
-	// CONSUMER nor draft-review bead PRODUCTION on pr.updated (beadsbridge skips
-	// EnsureDraftReviewBead). The consumer's deps are wired UNCONDITIONALLY at
-	// startup (SetReviewHook in cmd/pg-pr/syncCmd); the gate is per poll —
-	// reviewHookEnabled() re-reads this LIVE value each cycle, so a flip takes
-	// effect on the next poll without a daemon restart (bead pg2-bw30).
-	// Merge-request / attention / process-feedback production, and PR-data sync,
-	// are unaffected. Absent → disabled: the legacy pg-pr
-	// review path is the NON-owner in the pg-pr↔pr-pool split, so the
-	// resting-safe built-in default is off (pr-pool owns reviews); see
-	// ReviewEnabled and pg2-3ho1r.
-	//
-	// SCOPE — pg-pr ONLY, not system-wide (ADR 0034; bead pg2-hsap5). This switch
-	// gates pg-pr's own review chain and nothing else. pr-pool's reconcile ACL
-	// (pr-pool's cmd/pr-pool/reconcile_cmd.go reconcileACL → internal/prpoolacl
-	// Reconcile) is an INDEPENDENT producer of review-pr beads and is deliberately
-	// NOT gated on this flag: review.enabled=false is exactly the state in which
-	// pr-pool is the intended SOLE review owner, so gating the ACL too would leave
-	// ZERO review owners at the shipped default. pr-pool does not learn this value
-	// and MUST NOT — the only seam is the `pg-pr pr list --json` CLI, which carries
-	// PR facts only and no pg-pr configuration state. Consequence: there is no
-	// single switch that stops all review work; see ReviewEnabled.
-	Review ReviewConfig `yaml:"review,omitempty" json:"review,omitempty"`
-}
-
-// ReviewConfig gates the draft-review machinery. Enabled is a tri-state pointer
-// so an absent config takes the resting-safe default: nil → false.
-type ReviewConfig struct {
-	Enabled *bool `yaml:"enabled,omitempty" json:"enabled,omitempty"`
-}
-
-// ReviewEnabled reports whether the daemon's legacy draft-review machinery is
-// on. It defaults to FALSE (nil receiver, absent section, or absent enabled key)
-// so the repo's built-in default is a single review owner: pr-pool owns reviews
-// (its built-in review role ships enabled), and the pg-pr review hook is off
-// unless a deployment explicitly opts in with review.enabled=true. This avoids
-// the double-write hazard of running both paths against one shared bead store
-// (design hazard H1; bead pg2-3ho1r). The full pg-pr review strip is deferred
-// (pg2-ynhr.5); until then this flag is the kill switch.
-//
-// It is a pg-pr-SCOPED kill switch, NOT a system-wide one (see Review's doc and
-// ADR 0034 §Transition). False here does not mean "no review work exists" — it
-// means "pg-pr produces and consumes none", which is the resting state in which
-// pr-pool produces it instead. Stopping ALL review work takes two further levers
-// in pr-pool: stop invoking `pr-pool reconcile` (the only caller of its ACL; the
-// verb takes no flags and has no disable key), and declare the `review` role with
-// enabled = false in <RepoRoot>/.pr-pool/config.toml.
-func (c *Config) ReviewEnabled() bool {
-	if c == nil || c.Review.Enabled == nil {
-		return false
-	}
-	return *c.Review.Enabled
 }
 
 // JiraConfig configures the Jira priority/incident urgency signal (pg2-jpfw.4).

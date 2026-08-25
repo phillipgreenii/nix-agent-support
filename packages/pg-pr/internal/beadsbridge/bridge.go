@@ -3,6 +3,15 @@
 // in internal/sync. It creates the PR (merge-request) bead and the process-
 // feedback bead, and cascade-closes on PR close. It does NOT create feedback
 // beads — feedback now lives in internal/store.
+//
+// It also no longer produces draft-review or attention beads (pg2-ynhr.5):
+// that legacy review-workflow production (EnsureDraftReviewBead/
+// EnsureDraftReviewMineLabel and the attention-bead projection) shipped off to
+// pr-pool per ADR 0034 and epic pg2-ynhr. The pg-pr dashboard's OWN attention
+// verdict (internal/snapshot.NeedsAttention, surfaced via internal/dashboard
+// and `pg-pr pr open`) is UNRELATED and unaffected — this package never
+// computed that verdict; it only ever projected a bead FROM it, and that
+// projection is what pg2-ynhr.5 removes (FORK2a).
 package beadsbridge
 
 import (
@@ -36,20 +45,11 @@ type BeadClient interface {
 	AppendProcessingCycleNote(ctx context.Context, id, note, addLabel string, removeLabels []string) error
 	CloseProcessingCycle(ctx context.Context, id, reason string) error
 	CloseFeedback(ctx context.Context, id, reason string) error
-	EnsureDraftReviewBead(ctx context.Context, prBeadID, title string, mine bool) (string, error)
-	EnsureDraftReviewMineLabel(ctx context.Context, prBeadID string) error
-	EnsureAttentionBead(ctx context.Context, prBeadID, title string) (string, error)
-	CloseAttentionBead(ctx context.Context, prBeadID, reason string) error
 }
 
 // Handler is the beads event handler.
 type Handler struct {
 	client BeadClient
-	// suppressDraftReviews, when true, makes the pr.opened/pr.updated projection
-	// skip EnsureDraftReviewBead (the NH3 kill switch, bead pg2-ynhr.11). All
-	// other production (merge-request, attention, process-feedback) is
-	// unaffected.
-	suppressDraftReviews bool
 	// locks serializes the projection per PR identity (see Handle). Every Handler
 	// points at the one process-wide projectionLocks — the field exists so the
 	// dependency is visible at the call site, not so it can vary per Handler; a
@@ -98,15 +98,11 @@ type Handler struct {
 // the read-only `pg-pr sync duplicates` audit, not silently absorbed.
 var projectionLocks = newKeyedLock()
 
-// Option customizes a Handler.
+// Option customizes a Handler. No options are defined today — the last one
+// (WithoutDraftReviews, the NH3 review kill switch) was removed by pg2-ynhr.5
+// once draft-review production itself was removed. The type/parameter is kept
+// so a future option does not require changing New's signature.
 type Option func(*Handler)
-
-// WithoutDraftReviews disables draft-review bead PRODUCTION on pr.opened/updated
-// (the daemon's review kill switch, bead pg2-ynhr.11). Merge-request, attention,
-// and process-feedback beads are still produced.
-func WithoutDraftReviews() Option {
-	return func(h *Handler) { h.suppressDraftReviews = true }
-}
 
 // New constructs the handler, applying any options.
 func New(client BeadClient, opts ...Option) *Handler {
@@ -128,9 +124,8 @@ type FeedbackPayload = store.FeedbackPayload
 // It is also SERIALIZED PER PR IDENTITY, because idempotence alone is not enough
 // under concurrency (bead pg2-35rl6). Every projection below is a check-then-create
 // — ReconcileMergeRequest is handed a fresh read then creates-or-updates,
-// ensureProcessFeedbackBead reads ResolveProcessingCycle then creates,
-// EnsureDraftReviewBead and EnsureAttentionBead read their child list then
-// create — and nothing at the bd layer rejects a second create for an identity that already has one
+// ensureProcessFeedbackBead reads ResolveProcessingCycle then creates —
+// and nothing at the bd layer rejects a second create for an identity that already has one
 // (ProcessingCycleKey's doc calls two beads with the same key duplicates by
 // definition, but only DECLARES the invariant). Two goroutines interleaved inside
 // that read→decide→write window therefore both observe "none yet" and both write.
@@ -165,7 +160,7 @@ func (h *Handler) Handle(ctx context.Context, e store.Event) error {
 }
 
 // prIdentityKey extracts the (repo, pr_number) identity every event payload
-// carries at the top level — PRPayload, FeedbackPayload and AttentionPayload all
+// carries at the top level — PRPayload and FeedbackPayload both
 // spell it `repo` + `number` — and renders the lock key. It mirrors the
 // repo-routing header decode in cmd/pg-pr/sync.go's dispatcher: a partial decode
 // of the two fields needed, so one shape change cannot silently mis-key.
@@ -223,50 +218,18 @@ func (h *Handler) project(ctx context.Context, e store.Event) error {
 		// than raises) — the conservative direction, matching pr-pool's copy of
 		// the predicate. (pg2-q2drf)
 		mine := ownership.Ownership(p.Ownership).ActsAsMine()
-		mrID, alreadyClosed, err := h.client.ReconcileMergeRequest(ctx, existing, p.Title, beads.MergeRequestFields{
+		_, _, err = h.client.ReconcileMergeRequest(ctx, existing, p.Title, beads.MergeRequestFields{
 			Repo: p.Repo, PRNumber: p.Number, State: p.State, Branch: p.Branch,
 			Base: p.Base, Author: p.Author, URL: p.URL, Draft: p.Draft,
 			LastSyncedAt: p.LastSyncedAt,
 		}, p.Ownership == "co-owned", p.HasConflict, mine)
-		if err != nil {
-			return err
-		}
-		if alreadyClosed {
-			return nil // closed PR bead: do not attach a draft-review under it
-		}
-		// Emit the review work item. My PRs and co-owned PRs are reviewed even
-		// while a GitHub draft; team PRs wait until the draft flag is removed
-		// (which fires on the pr.updated that flips it). EnsureDraftReviewBead
-		// is idempotent. When the review kill switch is on
-		// (suppressDraftReviews), production is skipped entirely — the
-		// merge-request bead above is still reconciled.
-		if !h.suppressDraftReviews && (mine || !p.Draft) {
-			drID, err := h.client.EnsureDraftReviewBead(ctx, mrID, fmt.Sprintf("%s#%d", p.Repo, p.Number), mine)
-			if err != nil {
-				return err
-			}
-			// team->co-owned: an earlier team-style review bead must flip to mine.
-			if p.Ownership == "co-owned" {
-				if err := h.client.EnsureDraftReviewMineLabel(ctx, mrID); err != nil {
-					return err
-				}
-			}
-			_ = drID
-			return nil
-		}
-		return nil
+		return err
 	case store.EventFeedbackCreated:
 		var p FeedbackPayload
 		if err := json.Unmarshal(e.Payload, &p); err != nil {
 			return fmt.Errorf("beadsbridge: decode feedback payload: %w", err)
 		}
 		return h.ensureProcessFeedbackBead(ctx, p)
-	case store.EventPRAttention:
-		var p store.AttentionPayload
-		if err := json.Unmarshal(e.Payload, &p); err != nil {
-			return fmt.Errorf("beadsbridge: decode attention payload: %w", err)
-		}
-		return h.projectAttentionBead(ctx, p)
 	case store.EventPRClosed, store.EventPRMerged:
 		var p store.PRPayload
 		if err := json.Unmarshal(e.Payload, &p); err != nil {
@@ -445,30 +408,6 @@ func renderCycleNote(s *store.FeedbackSummary) string {
 		fmt.Fprintf(&b, "\nRaised by: %s.", strings.Join(s.Reviewers, ", "))
 	}
 	return b.String()
-}
-
-// projectAttentionBead ensures or closes the teammate-attention bead for a PR
-// from the shared needsAttention verdict carried in the event. Re-run every tick
-// (the projector re-emits from persisted facts), so both ensure and close are
-// idempotent and a dropped fire-once event self-heals on the next tick (R1).
-// Mirrors ensureProcessFeedbackBead: the FindByRepoAndNumber error PROPAGATES,
-// and a closed parent suppresses opening a new child.
-func (h *Handler) projectAttentionBead(ctx context.Context, p store.AttentionPayload) error {
-	mr, err := h.client.FindByRepoAndNumber(ctx, p.Repo, p.Number)
-	if err != nil {
-		return err
-	}
-	if mr == nil {
-		return fmt.Errorf("beadsbridge: no merge-request bead for %s#%d", p.Repo, p.Number)
-	}
-	if mr.Status == "closed" {
-		return nil // do not attach/reopen an attention child under a closed PR bead
-	}
-	if p.Need {
-		_, err := h.client.EnsureAttentionBead(ctx, mr.ID, fmt.Sprintf("%s#%d", p.Repo, p.Number))
-		return err
-	}
-	return h.client.CloseAttentionBead(ctx, mr.ID, "attention-cleared")
 }
 
 // cascadeClose closes the PR bead and its descendants.

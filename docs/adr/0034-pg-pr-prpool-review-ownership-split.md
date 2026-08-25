@@ -1,6 +1,7 @@
 # pg-pr / pr-pool review-ownership split: pg-pr is the PR-data interface, pr-pool owns the review workflow
 
-**Status**: Proposed
+**Status**: Accepted (resolves `pg2-ynhr.5`; the full legacy-path strip + mine-path
+relocation landed 2026-08-25)
 **Date**: 2026-07-25
 **Deciders**: Phillip Green II
 
@@ -110,11 +111,13 @@ submit`, and closes the bead. A failing review **MUST** escalate via a `human` l
   review _workflow_ semantics (what a good review is, which tool fills each contract) belong to
   the deployment overlay, not this repo.
 
-### Transition: the `review.enabled` kill switch, and the deferred strip
+### Transition (historical): the `review.enabled` kill switch, and the strip
 
-The two implementations coexist during migration; the transition is governed by a single kill
-switch **on the legacy `pg-pr` side only** (scope below), and the legacy code strip is
-deferred.
+The two implementations coexisted during migration, governed by a single kill switch **on
+the legacy `pg-pr` side only** (scope below), until the legacy code strip landed
+(`pg2-ynhr.5`, 2026-08-25 — see the Decision's final bullet below). What follows describes
+the transition mechanism as designed and as it operated; `review.enabled` and the code it
+gated no longer exist.
 
 - `review.enabled` is a **tri-state pointer** whose resting default is **`false`**
   (`packages/pg-pr/internal/config/config.go` `ReviewConfig`/`ReviewEnabled`): a `nil` config, an absent
@@ -153,10 +156,13 @@ deferred.
   default, so the hazard to avoid is **re-enabling** the legacy path against a store `pr-pool`
   also drains — not the default state. Enabling **both** owners against one shared store is
   prohibited.
-- The **full code strip** of the legacy `pg-pr` review path (and the mine-path store→beads
-  relocation) is **deferred** to `pg2-ynhr.5`. Until then `review.enabled` **MUST** remain the
-  opt-in switch that can re-enable the legacy path for rollback, and it **MUST NOT** be removed
-  before that strip lands.
+- **Resolved 2026-08-25 (`pg2-ynhr.5`):** the full code strip of the legacy `pg-pr` review
+  path, and the mine-path store→beads relocation, have landed. `review.enabled` (the rollback
+  switch this bullet used to protect) is removed entirely along with the code it gated —
+  there is no legacy path left to roll back to. The mine/co-owned self-review sink is
+  relocated into `pr-pool`'s review role, which files a `process-feedback:` bead directly
+  (see `docs/pr-review-flow.md` JR1) instead of `pg-pr` ingesting it into its own SQLite
+  `feedback` table.
 
 ## Consequences
 
@@ -175,26 +181,28 @@ deferred.
 
 ### Negative
 
-- Two review implementations exist simultaneously until the strip (`pg2-ynhr.5`), so the
-  kill switch and its cutover discipline are a standing operational hazard if misconfigured.
-- **There is no single switch that stops all review work.** Because the switch is
-  `pg-pr`-scoped (above), `review.enabled=false` silences `pg-pr` only; `pr-pool` keeps
-  producing `review-pr` beads. An operator who wants **no** review work produced must
-  additionally stop `pr-pool`: stop invoking `pr-pool reconcile` (the ACL runs **only** inside
-  that verb — `packages/pr-pool/cmd/pr-pool/main.go` `main`; the verb takes no flags
-  (`packages/pr-pool/cmd/pr-pool/args.go` `parseReconcileArgs`) and there is no config key
-  that disables the ACL), and declare the `review` role with `enabled = false` in
-  `<RepoRoot>/.pr-pool/config.toml` so already-emitted `review-pr` beads are not drained
-  (`packages/pr-pool/internal/config/registry.go` `buildRole`;
+- (Historical, resolved 2026-08-25.) Two review implementations existed simultaneously
+  during the transition, so the kill switch and its cutover discipline were a standing
+  operational hazard if misconfigured. `pg2-ynhr.5` removed the legacy implementation
+  entirely, retiring this hazard along with the switch that guarded it.
+- **There is no single switch that stops all review work.** `pr-pool` is now the only
+  review-work producer, and it has no disable config key of its own. An operator who wants
+  **no** review work produced must stop `pr-pool` directly: stop invoking `pr-pool reconcile`
+  (the ACL runs **only** inside that verb — `packages/pr-pool/cmd/pr-pool/main.go` `main`; the
+  verb takes no flags (`packages/pr-pool/cmd/pr-pool/args.go` `parseReconcileArgs`) and there
+  is no config key that disables the ACL), and declare the `review` role with
+  `enabled = false` in `<RepoRoot>/.pr-pool/config.toml` so already-emitted `review-pr` beads
+  are not drained (`packages/pr-pool/internal/config/registry.go` `buildRole`;
   `packages/pr-pool/internal/roles/builtin.go` `BuiltinRoleSet` — start from
   `pr-pool config --print-defaults`, since a config file's `[[role]]` array **replaces** the
-  built-in set rather than overlaying it). That is two levers in two
-  tools, by design — unifying them is out of scope for a transition switch that disappears at
-  the strip.
-- Reviewed-state is tracked in **two unsynchronized stores** during the transition — `pg-pr`
-  on the SQLite revision (`reviewed_by_agent_at`) and `pr-pool` on the bead `head_sha`; only
-  the **active** owner's cursor is authoritative.
-- Known parity gaps carried by path B: there is no classic dead-letter in the `pr-pool` review
+  built-in set rather than overlaying it). That is inherent to a single-owner design with no
+  system-wide kill switch, not a transitional gap.
+- (Historical, resolved 2026-08-25.) Reviewed-state was tracked in two unsynchronized
+  stores during the transition — `pg-pr` on the SQLite revision (`reviewed_by_agent_at`) and
+  `pr-pool` on the bead `head_sha`. `pg2-ynhr.5` dropped the `pg-pr`-side column entirely
+  (schema v16); `pr-pool`'s bead metadata (now also carrying `ownership`, refreshed on
+  reopen) is the sole cursor.
+- Known parity gaps carried by `pr-pool`'s review role: there is no classic dead-letter in that
   path (failures escalate via `human` label instead). Skip-if-present is **no longer** a gap —
   `postStaged` (`packages/pg-pr/cmd/pg-pr/review.go`) now owns the viewer-pending guard
   (`skipExistingPendingReview`, fail-closed) at the choke-point both `review post` and
@@ -207,12 +215,14 @@ deferred.
 
 ### Neutral
 
-- `review.enabled` becomes a rollback lever, not a feature flag, for the life of the
-  transition; it disappears when the strip lands.
-- Live end-to-end verification of path B is deploy-gated (`pg2-ynhr.16`) and not completable
-  in a worktree; this ADR records the decision, not that verification.
-- Legacy old-schema held dead-letter beads are reconciled separately at cutover
-  (`pg2-ynhr.10`, deferred).
+- (Historical.) `review.enabled` was a rollback lever, not a feature flag, for the life of
+  the transition; `pg2-ynhr.5` removed it along with the strip, as planned.
+- Live end-to-end verification of `pr-pool`'s review role is deploy-gated (`pg2-ynhr.16`) and
+  not completable in a worktree — it needs a real LLM executing the review role's prompt,
+  which no test in this repo does; this ADR records the decision, not that verification.
+- Legacy old-schema held dead-letter beads at cutover were reconciled by ordinary PR-merge churn
+  rather than a dedicated migration (`pg2-ynhr.10`, closed as moot 2026-08-25: zero remained open
+  by the time it was checked).
 
 ## Alternatives Considered
 
@@ -246,6 +256,8 @@ ownership safe.
 - [0023](0023-agent-pr-comments-visible-bot-attribution.md) — attribution on posted
   reviews/comments, preserved by this split.
 - Epic `pg2-ynhr` (split) and children `pg2-ynhr.1`/`.11`/`.2`/`.3`/`.4`, `pg2-3ho1r`
-  (default flip); deferred `pg2-ynhr.5` (strip), `pg2-ynhr.10` (dead-letter reconcile).
+  (default flip), `pg2-ynhr.5` (strip + mine-relocation, resolved 2026-08-25), `pg2-ynhr.10`
+  (dead-letter reconcile, closed as moot 2026-08-25); still deferred: `pg2-ynhr.7`/`.8`/`.9`
+  (multi-repo fan-out, store cleanup, scheduler).
 - See also: [`docs/pr-review-flow.md`](../pr-review-flow.md) — the living implementation
   reference (`file:line` anchors, tests, transitional state).

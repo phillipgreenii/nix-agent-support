@@ -72,17 +72,5 @@ func (f *fullChainBeadClient) CloseProcessingCycle(_ context.Context, _, _ strin
 
 func (f *fullChainBeadClient) CloseFeedback(_ context.Context, _, _ string) error { return nil }
 
-func (f *fullChainBeadClient) EnsureDraftReviewBead(context.Context, string, string, bool) (string, error) {
-	return "", nil
-}
-
-func (f *fullChainBeadClient) EnsureAttentionBead(context.Context, string, string) (string, error) {
-	return "", nil
-}
-
-func (f *fullChainBeadClient) CloseAttentionBead(context.Context, string, string) error { return nil }
-
-func (f *fullChainBeadClient) EnsureDraftReviewMineLabel(context.Context, string) error { return nil }
-
 // compile-time check: fullChainBeadClient satisfies the bridge interface.
 var _ beadsbridge.BeadClient = (*fullChainBeadClient)(nil)

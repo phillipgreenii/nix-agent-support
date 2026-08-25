@@ -42,11 +42,24 @@ const workerPromptBody = `Read {{.SkillMD}} and implement work bead {{.BeadID}}.
 // reviewPromptBody is the ported pg-pr-review-orchestrator workflow, adapted to
 // the pr-pool executor's worktree. It is self-contained (no SkillMD). The PR
 // coords are templated directly from the review-pr bead's metadata (stamped by
-// the pr-pool ACL: repo/pr_number/branch/head_sha). Because the executor mints
-// the worktree branch off the monorepo's HEAD — NOT the PR head — the agent MUST
-// fetch + check out the PR head before reviewing (NH4). It posts back by calling
-// pg-pr directly (pg-pr owns the GitHub write) and completes by closing the bead.
-const reviewPromptBody = `Review pull request {{index .Item.Metadata "repo"}}#{{index .Item.Metadata "pr_number"}} and post the review back through pg-pr. Claim this bead first: bd update {{.BeadID}} --claim.
+// the pr-pool ACL: repo/pr_number/branch/head_sha/ownership). Because the
+// executor mints the worktree branch off the monorepo's HEAD — NOT the PR head
+// — the agent MUST fetch + check out the PR head before reviewing (NH4).
+//
+// Output routing branches on ownership (pg2-ynhr.5, the mine self-review-sink
+// relocation): a self-authored PR (mine or co-owned — same acts-as-mine test
+// the ACL's selection already uses, see actsAsMine in acl.go) never goes
+// through GitHub — the legacy pg-pr reviewsink/minesink made the same choice,
+// and its rationale (you cannot meaningfully request-changes on your own PR)
+// still holds. Instead the findings are filed directly as a process-feedback
+// bead, which pr-pool's OWN "feedback" role query already discovers by title
+// prefix + the "mine" label (roles.BuiltinQuerySet's feedback-source) — so
+// nothing about the feedback/worker roles needs to change; they pick this bead
+// up exactly as they do one beadsbridge used to create from a self-review
+// ingest. A teammate PR (ownership absent/out-of-band degrades here too,
+// matching the ACL's conservative default) keeps posting through
+// pg-pr review submit, unchanged.
+const reviewPromptBody = `Review pull request {{index .Item.Metadata "repo"}}#{{index .Item.Metadata "pr_number"}}. Claim this bead first: bd update {{.BeadID}} --claim.
 
 You are in a fresh git worktree at {{.WorktreeDir}} on a scratch branch cut from the monorepo's default HEAD — this is NOT the PR's head. Before reviewing you MUST check out the exact reviewed commit there:
   git -C {{.WorktreeDir}} fetch origin pull/{{index .Item.Metadata "pr_number"}}/head
@@ -55,9 +68,14 @@ You are in a fresh git worktree at {{.WorktreeDir}} on a scratch branch cut from
 
 Review the PR's changes against its base: read the diff, and produce findings as inline comments (each keyed to file path + line) plus a short overall summary. This is a READ-ONLY review: do not modify, commit, or push any code.
 
-Post the review back by calling pg-pr directly (never call gh — pg-pr owns the GitHub write). Submit via pg-pr review submit {{index .Item.Metadata "pr_number"}} --repo {{index .Item.Metadata "repo"}}, piping a review JSON on stdin (see pg-pr review --help). That JSON MUST include "head_sha": "{{index .Item.Metadata "head_sha"}}" so pg-pr anchors the inline comments to the exact reviewed commit (an unanchored post 422s if the PR head has advanced). Post a PENDING review (no approve/request-changes event).
+{{$ownership := index .Item.Metadata "ownership"}}{{if or (eq $ownership "mine") (eq $ownership "co-owned")}}This PR is SELF-AUTHORED (ownership={{$ownership}}): do NOT post anything to GitHub — self-review never goes through the GitHub review flow. Instead, record what you found as a process-feedback bead so pr-pool's own feedback role turns it into work:
 
-Record a one-line result with bd comment {{.BeadID}} FIRST, then complete by EITHER closing the bead (bd close {{.BeadID}}) once the review is posted, OR, if you could not review/post, handing it back by unclaiming it (bd update {{.BeadID}} --status=open --assignee=""). NEVER leave the bead in_progress. You are running autonomously with no human available: the AskUserQuestion tool is disabled — use your best judgment and record any decision that needs a human with bd comment.`
+  - If you found ANY issues worth fixing, create exactly one bead: bd create --type=task --title "process-feedback: {{index .Item.Metadata "repo"}}#{{index .Item.Metadata "pr_number"}}" -d "<one paragraph: what you found, file/line where relevant, and why it matters>" --label mine --silent
+  - Link it under this PR's merge-request bead so it cascade-closes with the PR, same as this review-pr bead is linked: resolve the merge-request bead id with bd dep list {{.BeadID}} --direction=down --json (the parent-child target), then bd dep add <new-process-feedback-id> <merge-request-id> --type=parent-child --no-cycle-check. If you cannot resolve the merge-request id, file the process-feedback bead anyway — the feedback role's query finds it by title/label regardless of the parent link.
+  - If you found nothing worth fixing, create no bead at all — either way the review-pr obligation is "review was produced", not "issues exist".
+{{else}}Post the review back by calling pg-pr directly (never call gh — pg-pr owns the GitHub write). Submit via pg-pr review submit {{index .Item.Metadata "pr_number"}} --repo {{index .Item.Metadata "repo"}}, piping a review JSON on stdin (see pg-pr review --help). That JSON MUST include "head_sha": "{{index .Item.Metadata "head_sha"}}" so pg-pr anchors the inline comments to the exact reviewed commit (an unanchored post 422s if the PR head has advanced). Post a PENDING review (no approve/request-changes event).
+{{end}}
+Record a one-line result with bd comment {{.BeadID}} FIRST, then complete by EITHER closing the bead (bd close {{.BeadID}}) once the review is posted (or filed, for a self-authored PR), OR, if you could not review/post, handing it back by unclaiming it (bd update {{.BeadID}} --status=open --assignee=""). NEVER leave the bead in_progress. You are running autonomously with no human available: the AskUserQuestion tool is disabled — use your best judgment and record any decision that needs a human with bd comment.`
 
 func mustParse(name, body string) *template.Template {
 	t, err := prompt.Parse(name, body)

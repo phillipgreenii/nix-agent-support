@@ -15,7 +15,6 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/event"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/output"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/replyposter"
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/reviewsink"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/snapshot"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/sync"
@@ -31,12 +30,6 @@ import (
 // replyposter.Replier at runtime (see Engine.reconcileReplies); this guards the
 // assertion at build time so a provider regression fails the build, not a tick.
 var _ replyposter.Replier = (*github.Provider)(nil)
-
-// Compile-time check: the github VCS provider must satisfy the team-PR sink's
-// narrow review-write surface (pg2-4c5i.35). The default team sink type-asserts
-// the configured provider to reviewsink.VCSReviewer at runtime; this guards the
-// assertion at build time so a provider regression fails the build, not a tick.
-var _ reviewsink.VCSReviewer = (*github.Provider)(nil)
 
 // syncFlags holds the parsed CLI flags for `pg-pr sync`.
 type syncFlags struct {
@@ -91,16 +84,11 @@ var newSyncEngineForCLI = func(cfg *config.Config) (*sync.Engine, error) {
 // Events whose repo is not in the config are silently ignored (the repo may
 // have been removed from config between enqueueing and flushing).
 //
-// Review kill switch (bead pg2-ynhr.11 / pg2-8vp9e): the handler re-reads
-// review.enabled from the LIVE config on EACH dispatch (liveCfg is bound to the
-// engine's per-poll config pointer, which the daemon re-reads from disk each
-// poll — see Engine.reloadCfgFromDisk). So a review.enabled flip — e.g. from
-// `pn workspace apply` rewriting config.yaml — stops/starts draft-review bead
-// PRODUCTION on the NEXT poll WITHOUT a daemon restart, mirroring the review
-// CONSUMER's per-poll gate (internal/sync.reviewHookEnabled). Merge-request/
-// attention/process-feedback beads are produced regardless of the flag. The
-// repo→path index is still built once from the startup snapshot (the bead
-// scope is the review flag only).
+// The repo→path index is built once from the startup config snapshot (liveCfg
+// is accepted for parity with the engine's per-poll config accessor, but
+// nothing here re-reads it per dispatch any more — the review kill switch that
+// used to justify a per-dispatch re-read was removed by pg2-ynhr.5 along with
+// the draft-review production it gated).
 func newBeadsBridgeHandler(liveCfg func() *config.Config) event.Handler {
 	// Build a repo-remote → path index once from the startup config snapshot.
 	repoPaths := make(map[string]string)
@@ -123,23 +111,15 @@ func newBeadsBridgeHandler(liveCfg func() *config.Config) event.Handler {
 			return nil // repo not in config; skip silently
 		}
 		client := newBeadClientForRepo(path)
-		var opts []beadsbridge.Option
-		// Re-read review.enabled from the LIVE config on EACH dispatch (NOT a
-		// startup capture) so a runtime flip de-latches on the next poll without
-		// a daemon restart (bead pg2-8vp9e).
-		if !liveCfg().ReviewEnabled() {
-			opts = append(opts, beadsbridge.WithoutDraftReviews())
-		}
-		return beadsbridge.New(client, opts...).Handle(ctx, e)
+		return beadsbridge.New(client).Handle(ctx, e)
 	}
 }
 
 // newBeadClientForRepo constructs the per-repo bd client the producer bridge
-// writes through. It is a package var so tests can inject a fake bead client and
-// observe whether the review kill switch suppressed draft-review production
-// (bead pg2-8vp9e). Production returns the real per-repo CLI-backed client;
-// beads.NewClientForRepo is cheap (no I/O until a bd command is issued), so
-// constructing it per-dispatch is safe.
+// writes through. It is a package var so tests can inject a fake bead client.
+// Production returns the real per-repo CLI-backed client; beads.NewClientForRepo
+// is cheap (no I/O until a bd command is issued), so constructing it
+// per-dispatch is safe.
 var newBeadClientForRepo = func(path string) beadsbridge.BeadClient {
 	return beads.NewClientForRepo(path)
 }
@@ -204,34 +184,6 @@ configured repo.`,
 			}
 			snapStore := snapshot.NewStore()
 			engine.SetAgentRegistry(reg)
-			// Wire the draft-review consumption hook (pg2-4c5i.36): delegate
-			// LLM production to a spawned `claude -p`, route by ownership to
-			// the mine/team sink stubs (.34/.35 fill them). A per-repo bd
-			// multiplexer scans every configured workspace's `bd ready`.
-			//
-			// Review kill switch (bead pg2-ynhr.11 / pg2-bw30): the deps are
-			// wired UNCONDITIONALLY; whether the hook actually runs is gated per
-			// poll by review.enabled (reviewHookEnabled reads the LIVE config,
-			// which the daemon re-reads from disk each poll). So a review.enabled
-			// change — e.g. from `pn workspace apply` rewriting config.yaml —
-			// takes effect on the next poll WITHOUT a daemon restart: the review
-			// CONSUMER stops/starts with the flag while PR-data sync is unaffected.
-			engine.SetReviewHook(sync.ReviewHookDeps{
-				Beads:   newMultiRepoReviewBeads(cfg),
-				Spawner: newClaudeSpawner(cfg),
-				// Pre-fetch the PR head (and verify SSH-cert creds) before
-				// spawning, so `step`/SSH never enters the Claude environment
-				// and a cert expiry never dead-letters the backlog. The resolver
-				// finds the cert-bearing ssh-agent socket at runtime (the ambient
-				// SSH_AUTH_SOCK is the empty macOS-default agent).
-				PreFetch: &sync.PreFetchGate{
-					Resolver: sync.NewCLIAgentSocketResolver(),
-					Cert:     sync.NewCLICertChecker(),
-					Fetcher:  sync.NewCLIPRFetcher(),
-				},
-			})
-			logger.Info("review hook wired; runs are gated per poll by review.enabled",
-				"review_enabled", cfg.ReviewEnabled())
 			return engine.Daemon(ctx, sync.DaemonOpts{
 				Interval:    interval,
 				Logger:      logger,

@@ -122,18 +122,6 @@ func (c *concurrentBeadClient) CloseProcessingCycle(context.Context, string, str
 
 func (c *concurrentBeadClient) CloseFeedback(context.Context, string, string) error { return nil }
 
-func (c *concurrentBeadClient) EnsureDraftReviewBead(context.Context, string, string, bool) (string, error) {
-	return "", nil
-}
-
-func (c *concurrentBeadClient) EnsureAttentionBead(context.Context, string, string) (string, error) {
-	return "", nil
-}
-
-func (c *concurrentBeadClient) CloseAttentionBead(context.Context, string, string) error { return nil }
-
-func (c *concurrentBeadClient) EnsureDraftReviewMineLabel(context.Context, string) error { return nil }
-
 // compile-time check.
 var _ beadsbridge.BeadClient = (*concurrentBeadClient)(nil)
 

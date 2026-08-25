@@ -379,17 +379,6 @@ func (f *outboxFakeBeads) HumanLabeledBeads(_ context.Context) (map[string]bool,
 	return nil, nil
 }
 
-func (f *outboxFakeBeads) EnsureDraftReviewBead(context.Context, string, string, bool) (string, error) {
-	return "", nil
-}
-
-func (f *outboxFakeBeads) EnsureAttentionBead(context.Context, string, string) (string, error) {
-	return "", nil
-}
-func (f *outboxFakeBeads) CloseAttentionBead(context.Context, string, string) error { return nil }
-
-func (f *outboxFakeBeads) EnsureDraftReviewMineLabel(context.Context, string) error { return nil }
-
 // compile-time check: the same fake serves the bridge interface too.
 var _ beadsbridge.BeadClient = (*outboxFakeBeads)(nil)
 
@@ -698,16 +687,19 @@ func TestRefreshPRHiddenDraftEmitsUpdate(t *testing.T) {
 	}
 }
 
-// TestRefreshPR_TeamToCoOwned_SurfacesAndClearsAttention: a draft PR authored
-// by a teammate ("you") whose enriched CommitAuthors include SelfLogin ("me")
-// classifies as CoOwned (ownership.Classify: authored-by-self wins Mine; else
-// a self-authored commit wins CoOwned; else Team) — NOT Team. So the
-// draft-hide guard (own == ownership.Team && pr.Draft) must NOT hide it:
-// refreshPR must surface it (non-nil snapshot input) rather than treating it
-// as a hidden team draft. It must also emit pr.attention{Need:false} so any
-// attention bead opened while the PR was still team-owned is idempotently
-// CLOSED on the team->co-owned transition.
-func TestRefreshPR_TeamToCoOwned_SurfacesAndClearsAttention(t *testing.T) {
+// TestRefreshPR_TeamToCoOwned_Surfaces: a draft PR authored by a teammate
+// ("you") whose enriched CommitAuthors include SelfLogin ("me") classifies as
+// CoOwned (ownership.Classify: authored-by-self wins Mine; else a
+// self-authored commit wins CoOwned; else Team) — NOT Team. So the draft-hide
+// guard (own == ownership.Team && pr.Draft) must NOT hide it: refreshPR must
+// surface it (non-nil snapshot input) rather than treating it as a hidden
+// team draft.
+//
+// (This test used to also assert a pr.attention{Need:false} clearing event on
+// this transition; that bead-projection mechanism was removed by pg2-ynhr.5 —
+// see internal/beadsbridge's package doc. The dashboard's own attention
+// verdict, unaffected, is covered by internal/snapshot's NeedsAttention tests.)
+func TestRefreshPR_TeamToCoOwned_Surfaces(t *testing.T) {
 	ctx := context.Background()
 	db := store.OpenForTest(t)
 
@@ -753,110 +745,6 @@ func TestRefreshPR_TeamToCoOwned_SurfacesAndClearsAttention(t *testing.T) {
 	}
 	if in.PR.Number != pr.Number {
 		t.Fatalf("input PR.Number: got %d want %d", in.PR.Number, pr.Number)
-	}
-
-	var sawAttentionCleared bool
-	for _, ev := range collectOutboxEvents(t, db) {
-		if ev.Type != store.EventPRAttention {
-			continue
-		}
-		var p store.AttentionPayload
-		if err := json.Unmarshal(ev.Payload, &p); err != nil {
-			t.Fatalf("unmarshal AttentionPayload: %v", err)
-		}
-		if p.Repo == "o/r" && p.Number == pr.Number && !p.Need {
-			sawAttentionCleared = true
-		}
-	}
-	if !sawAttentionCleared {
-		t.Fatal("expected a pr.attention event with Need=false clearing any prior team-attention bead on the team->co-owned transition")
-	}
-}
-
-// TestRefreshPR_ConflictingTeamPR_DampensAttention is the emit-path
-// regression guard for the pg2-tsgkj STEP 0 fix + dampening rule together: a
-// non-draft TEAM PR that WOULD need attention (draft-review bead closed,
-// nobody approved, I haven't reviewed) but whose GraphQL enrichment reports a
-// DIRTY merge state must still emit pr.attention{Need:false}.
-//
-// This proves two things end-to-end on the daemon refreshPR path:
-//   - overlayMergeState copies the GraphQL-only merge-state (enricherVCS's ep)
-//     onto the REST-sourced `pr` var. Without that STEP 0 fix, pr.HasConflict()
-//     would stay false (the fakeVCS.GetPR path never populates Mergeable/
-//     MergeStateStatus) and this test would observe Need=true instead.
-//   - the hasConflict parameter now threaded through emitAttention actually
-//     reaches and dampens the shared snapshot.NeedsAttention predicate.
-//
-// Deliberately does NOT assert on store.PRPayload.HasConflict — that field
-// does not exist yet (added in Task B5); only the attention outcome is
-// checked here.
-func TestRefreshPR_ConflictingTeamPR_DampensAttention(t *testing.T) {
-	ctx := context.Background()
-	db := store.OpenForTest(t)
-
-	pr := api.PR{
-		Repo: "o/r", Number: 11, State: "open", Draft: false,
-		Author: "you", HeadSHA: "h1", URL: "https://github.com/o/r/pull/11",
-	}
-	// enricherVCS (sync_test.go) embeds fakeVCS and adds the SinglePREnricher
-	// capability, so enrichOnePR routes through EnrichPR and returns ep as the
-	// enrichment bundle — the ONLY source of merge-state on this path; the
-	// REST fallback (fakeVCS alone) never populates Mergeable/MergeStateStatus.
-	vp := &enricherVCS{
-		fakeVCS: fakeVCS{views: map[string]api.PR{keyOf("o/r", pr.Number): pr}},
-		ep:      &vcs.EnrichedPR{PR: api.PR{MergeStateStatus: "DIRTY"}},
-	}
-	// attnFinderBeads (attention_emit_test.go, same package) adds the
-	// draft-review-closed capability the attention emitter needs; closed+found
-	// = true is the "draft review ready" precondition that WOULD need
-	// attention absent the conflict dampening.
-	bdc := &attnFinderBeads{closed: true, found: true}
-	e, err := New(Deps{
-		Cfg: &config.Config{
-			SelfLogin: "me",
-			Repos: []config.RepoConfig{
-				{Remote: "o/r", VCS: "github", TeamMembers: []string{"you"}},
-			},
-		},
-		VCS:      map[string]VCSProvider{"github": vp},
-		Beads:    bdc,
-		StateDir: t.TempDir(),
-		Store:    db,
-	})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	// No dispatcher wired: flushOutbox is a no-op, so emitted events stay in
-	// the raw outbox for direct inspection (mirrors newRefreshEngineWithStore's
-	// pattern used by the sibling tests above).
-
-	in, err := e.refreshPR(ctx, "o/r", pr.Number)
-	if err != nil {
-		t.Fatalf("refreshPR: %v", err)
-	}
-	if in == nil {
-		t.Fatal("active non-draft team PR must be surfaced (non-nil snapshot input)")
-	}
-
-	var sawAttention bool
-	for _, ev := range collectOutboxEvents(t, db) {
-		if ev.Type != store.EventPRAttention {
-			continue
-		}
-		var p store.AttentionPayload
-		if err := json.Unmarshal(ev.Payload, &p); err != nil {
-			t.Fatalf("unmarshal AttentionPayload: %v", err)
-		}
-		if p.Repo != "o/r" || p.Number != pr.Number {
-			continue
-		}
-		sawAttention = true
-		if p.Need {
-			t.Errorf("conflicting team PR must dampen attention to Need=false, got Need=true reason=%q", p.Reason)
-		}
-	}
-	if !sawAttention {
-		t.Fatalf("expected a pr.attention event for o/r#%d", pr.Number)
 	}
 }
 

@@ -251,7 +251,11 @@ func ensureReview(ctx context.Context, r beads.Runner, pr PR, mrs, reviews []bea
 		// (it is in the open list), so the reopened bead is ready immediately — no
 		// active-pr gate is re-created (it would only be created and then resolved
 		// in this same pass; Phase 2 resolves the birth gate for open PRs).
-		if err := beads.ReopenReview(ctx, r, existing.ID, pr.HeadSHA, pr.Branch); err != nil {
+		// ownership is refreshed too (pg2-ynhr.5): the review role's prompt reads
+		// it to decide whether to post to GitHub or file a process-feedback bead
+		// (the relocated self-review-sink path), so a stale value would misroute a
+		// PR whose ownership changed between review cycles.
+		if err := beads.ReopenReview(ctx, r, existing.ID, pr.HeadSHA, pr.Branch, pr.Ownership); err != nil {
 			return "", fmt.Errorf("acl: reopen review-pr %s on head advance: %w", prKey(pr), err)
 		}
 		return existing.ID, nil
@@ -264,6 +268,11 @@ func ensureReview(ctx context.Context, r beads.Runner, pr PR, mrs, reviews []bea
 		"pr_number": pr.Number,
 		"branch":    pr.Branch,
 		"head_sha":  pr.HeadSHA,
+		// ownership drives the review role's mine/co-owned vs. team branch
+		// (pg2-ynhr.5): a self-authored PR's review findings are filed as a
+		// process-feedback bead instead of being posted to GitHub. See
+		// roles.reviewPromptBody.
+		"ownership": pr.Ownership,
 	}
 	id, err := beads.Create(ctx, r, "task", title, meta)
 	if err != nil {

@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/ownership"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/beads"
 )
@@ -79,16 +78,6 @@ func (noopBeadClient) AppendProcessingCycleNote(context.Context, string, string,
 }
 func (noopBeadClient) CloseProcessingCycle(context.Context, string, string) error { return nil }
 func (noopBeadClient) CloseFeedback(context.Context, string, string) error        { return nil }
-func (noopBeadClient) EnsureDraftReviewBead(context.Context, string, string, bool) (string, error) {
-	return "", nil
-}
-
-func (noopBeadClient) EnsureAttentionBead(context.Context, string, string) (string, error) {
-	return "", nil
-}
-func (noopBeadClient) CloseAttentionBead(context.Context, string, string) error { return nil }
-
-func (noopBeadClient) EnsureDraftReviewMineLabel(context.Context, string) error { return nil }
 
 // errFindClient returns an error from ResolveProcessingCycle; FindByRepoAndNumber
 // returns a stub (open) MR. Used to prove the find-error propagates (NOT swallowed
@@ -411,154 +400,13 @@ func TestOpenBeadGetsProcessingCycle(t *testing.T) {
 	}
 }
 
-// draftReviewClient records EnsureDraftReviewBead calls and controls the
-// alreadyClosed result of ReconcileMergeRequest.
-type draftReviewClient struct {
-	noopBeadClient
-	alreadyClosed bool
-	drCalls       int
-	mrCalls       int
-	lastPRBeadID  string
-	lastTitle     string
-	lastMine      bool
-	relabelCalls  int
-	lastRelabelID string
-	coOwnedCalls  int
-	lastCoOwned   bool
-}
-
-// ReconcileMergeRequest is the read-once + single-write projection (pg2-pz7y8):
-// one call now carries what used to be split across EnsureMergeRequest and
-// SetMergeRequestCoOwnedWith, so coOwnedCalls/lastCoOwned are recorded
-// directly from its coOwned parameter rather than from a separate call.
-func (c *draftReviewClient) ReconcileMergeRequest(_ context.Context, _ *beads.MergeRequest, _ string, _ beads.MergeRequestFields, coOwned, _, _ bool) (string, bool, error) {
-	c.mrCalls++
-	c.coOwnedCalls++
-	c.lastCoOwned = coOwned
-	return "mr-1", c.alreadyClosed, nil
-}
-
-func (c *draftReviewClient) EnsureDraftReviewBead(_ context.Context, prBeadID, title string, mine bool) (string, error) {
-	c.drCalls++
-	c.lastPRBeadID = prBeadID
-	c.lastTitle = title
-	c.lastMine = mine
-	return "dr-1", nil
-}
-
-func (c *draftReviewClient) EnsureDraftReviewMineLabel(_ context.Context, prBeadID string) error {
-	c.relabelCalls++
-	c.lastRelabelID = prBeadID
-	return nil
-}
-
-func TestPROpenedMinePRCreatesDraftReview(t *testing.T) {
-	c := &draftReviewClient{}
-	h := New(c)
-	// My PR, still a GitHub draft → review bead is still created.
-	payload, _ := json.Marshal(store.PRPayload{Repo: "o/r", Number: 7, Ownership: "mine", Draft: true})
-	if err := h.Handle(context.Background(), store.Event{Type: store.EventPROpened, Payload: payload}); err != nil {
-		t.Fatalf("Handle: %v", err)
-	}
-	if c.drCalls != 1 {
-		t.Fatalf("expected 1 draft-review ensure, got %d", c.drCalls)
-	}
-	if !c.lastMine {
-		t.Fatalf("expected mine=true for my PR")
-	}
-	if c.lastPRBeadID != "mr-1" {
-		t.Fatalf("expected parent bead id mr-1, got %q", c.lastPRBeadID)
-	}
-	if c.lastTitle != "o/r#7" {
-		t.Fatalf("expected title o/r#7, got %q", c.lastTitle)
-	}
-	if c.relabelCalls != 0 {
-		t.Fatalf("relabel must only fire on team->co-owned transition, got %d calls for a mine PR", c.relabelCalls)
-	}
-	if c.coOwnedCalls != 1 {
-		t.Fatalf("expected SetMergeRequestCoOwned called once, got %d", c.coOwnedCalls)
-	}
-	if c.lastCoOwned {
-		t.Fatalf("expected SetMergeRequestCoOwned(false) for a mine PR (removes the label), got true")
-	}
-}
-
-func TestPROpenedTeamDraftSkipsDraftReview(t *testing.T) {
-	c := &draftReviewClient{}
-	h := New(c)
-	// Teammate PR still in draft → NO review bead yet.
-	payload, _ := json.Marshal(store.PRPayload{Repo: "o/r", Number: 7, Ownership: "team", Draft: true})
-	if err := h.Handle(context.Background(), store.Event{Type: store.EventPROpened, Payload: payload}); err != nil {
-		t.Fatalf("Handle: %v", err)
-	}
-	if c.drCalls != 0 {
-		t.Fatalf("expected no draft-review for a teammate draft PR, got %d", c.drCalls)
-	}
-	if c.relabelCalls != 0 {
-		t.Fatalf("relabel must not fire for a team PR, got %d calls", c.relabelCalls)
-	}
-}
-
-func TestPROpenedTeamReadyCreatesDraftReview(t *testing.T) {
-	c := &draftReviewClient{}
-	h := New(c)
-	// Teammate PR, not a draft → review bead created.
-	payload, _ := json.Marshal(store.PRPayload{Repo: "o/r", Number: 7, Ownership: "team", Draft: false})
-	if err := h.Handle(context.Background(), store.Event{Type: store.EventPROpened, Payload: payload}); err != nil {
-		t.Fatalf("Handle: %v", err)
-	}
-	if c.drCalls != 1 {
-		t.Fatalf("expected 1 draft-review ensure for a ready teammate PR, got %d", c.drCalls)
-	}
-	if c.lastMine {
-		t.Fatalf("expected mine=false for a teammate PR")
-	}
-	if c.relabelCalls != 0 {
-		t.Fatalf("relabel must not fire for a team PR, got %d calls", c.relabelCalls)
-	}
-	if c.coOwnedCalls != 1 {
-		t.Fatalf("expected SetMergeRequestCoOwned called once, got %d", c.coOwnedCalls)
-	}
-	if c.lastCoOwned {
-		t.Fatalf("expected SetMergeRequestCoOwned(false) for a team PR (removes the label), got true")
-	}
-}
-
-func TestPRUpdatedTeamDraftToReadyCreatesDraftReview(t *testing.T) {
-	c := &draftReviewClient{}
-	h := New(c)
-	// First observation: teammate draft → no bead.
-	draftPayload, _ := json.Marshal(store.PRPayload{Repo: "o/r", Number: 7, Ownership: "team", Draft: true})
-	if err := h.Handle(context.Background(), store.Event{Type: store.EventPRUpdated, Payload: draftPayload}); err != nil {
-		t.Fatalf("Handle (draft): %v", err)
-	}
-	if c.drCalls != 0 {
-		t.Fatalf("expected no draft-review while still draft, got %d", c.drCalls)
-	}
-	// Draft flag removed → pr.updated with Draft=false → bead created.
-	readyPayload, _ := json.Marshal(store.PRPayload{Repo: "o/r", Number: 7, Ownership: "team", Draft: false})
-	if err := h.Handle(context.Background(), store.Event{Type: store.EventPRUpdated, Payload: readyPayload}); err != nil {
-		t.Fatalf("Handle (ready): %v", err)
-	}
-	if c.drCalls != 1 {
-		t.Fatalf("expected 1 draft-review ensure after draft→ready, got %d", c.drCalls)
-	}
-}
-
 // TestPRUpdatedTeamDraftToReadyClearsDraftMetadata is the pg2-4dz88.10
-// live-producer seam test. TestPRUpdatedTeamDraftToReadyCreatesDraftReview
-// above drives the same Draft:true -> Draft:false pr.updated sequence, but
-// against draftReviewClient — a BeadClient-level fake whose ReconcileMergeRequest
-// ignores the MergeRequestFields it's given entirely, so it can never exercise
-// (or catch a regression in) beads.Client's real encodeMetadata/metadataUnchanged
-// pair. This test instead runs the same transition through a REAL *beads.Client
-// (idCountingRunner records the raw bd argv, as TestHandle_PRUpdatedReadsMRBeadOnce
-// does) and asserts the resulting `bd update --metadata` literally carries
-// "draft":false — the exact wire-level assertion the bug (an omitted key
-// leaving a stored true in place forever) requires. WithoutDraftReviews keeps
-// the assertion isolated to the merge-request metadata write; draft-review
-// bead creation on this same transition is already covered by
-// TestPRUpdatedTeamDraftToReadyCreatesDraftReview.
+// live-producer seam test. It runs a Draft:true -> Draft:false pr.updated
+// transition through a REAL *beads.Client (idCountingRunner records the raw
+// bd argv, as TestHandle_PRUpdatedReadsMRBeadOnce does) and asserts the
+// resulting `bd update --metadata` literally carries "draft":false — the
+// exact wire-level assertion the bug (an omitted key leaving a stored true in
+// place forever) requires.
 func TestPRUpdatedTeamDraftToReadyClearsDraftMetadata(t *testing.T) {
 	// The canned bead already stores draft:true, mirroring the prior
 	// still-draft tick's write.
@@ -568,7 +416,7 @@ func TestPRUpdatedTeamDraftToReadyClearsDraftMetadata(t *testing.T) {
 		`"author":"teammate","url":"https://x/7","last_synced_at":"2020-01-01T00:00:00Z","draft":true}}]}`
 	r := &idCountingRunner{listJSON: listJSON}
 	client := beads.NewClientWithRunner(r)
-	h := New(client, WithoutDraftReviews())
+	h := New(client)
 
 	// Draft flag removed → pr.updated with Draft=false.
 	payload, _ := json.Marshal(store.PRPayload{
@@ -589,108 +437,6 @@ func TestPRUpdatedTeamDraftToReadyClearsDraftMetadata(t *testing.T) {
 	}
 	if !strings.Contains(metaJSON, `"draft":false`) {
 		t.Fatalf("expected literal \"draft\":false in the bd update metadata, got %s", metaJSON)
-	}
-}
-
-// TestHandle_CoOwnedCreatesMineDraftReviewAndRelabels asserts a co-owned PR
-// projects a mine-style draft-review (mine=true, per ownership.ActsAsMine) and
-// additionally triggers the team->co-owned relabel call, so a pre-existing
-// team-style draft-review bead flips to mine on the transition.
-func TestHandle_CoOwnedCreatesMineDraftReviewAndRelabels(t *testing.T) {
-	c := &draftReviewClient{}
-	h := New(c)
-	payload, _ := json.Marshal(store.PRPayload{Repo: "o/r", Number: 7, Ownership: "co-owned", Draft: true})
-	if err := h.Handle(context.Background(), store.Event{Type: store.EventPRUpdated, Payload: payload}); err != nil {
-		t.Fatalf("Handle: %v", err)
-	}
-	if c.drCalls != 1 {
-		t.Fatalf("expected 1 draft-review ensure for a co-owned PR, got %d", c.drCalls)
-	}
-	if !c.lastMine {
-		t.Fatalf("expected mine=true for a co-owned PR")
-	}
-	if c.relabelCalls != 1 {
-		t.Fatalf("expected EnsureDraftReviewMineLabel called once on team->co-owned transition, got %d", c.relabelCalls)
-	}
-	if c.lastRelabelID != "mr-1" {
-		t.Fatalf("expected relabel called with parent bead id mr-1, got %q", c.lastRelabelID)
-	}
-	if c.coOwnedCalls != 1 {
-		t.Fatalf("expected SetMergeRequestCoOwned called once, got %d", c.coOwnedCalls)
-	}
-	if !c.lastCoOwned {
-		t.Fatalf("expected SetMergeRequestCoOwned(true) for a co-owned PR, got false")
-	}
-}
-
-// TestHandle_OutOfBandOwnershipIsTeamStyle pins the draft-review selection's
-// acts-as-mine test at an OUT-OF-BAND ownership value: "" (the field absent from
-// a pr.* payload an older binary left in the durable outbox) and an unrecognised
-// string. The site delegates to the shared ownership.ActsAsMine (mine OR
-// co-owned), so such a value degrades to TEAM-style selection — a draft is
-// SKIPPED rather than auto-reviewed, and a ready PR gets a mine=false review
-// bead. The superseded local formulation `p.Ownership != "team"` called these
-// acts-as-mine, which is exactly why the case is pinned: the two formulations
-// must not silently disagree again (pg2-q2drf). Direction matches pr-pool's copy
-// of the predicate (TestActsAsMineParity) — fail closed, never auto-review.
-func TestHandle_OutOfBandOwnershipIsTeamStyle(t *testing.T) {
-	for _, tc := range []struct{ name, own string }{
-		{"empty (field absent from an older payload)", ""},
-		{"unrecognised value", "unknown"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			// The shared predicate this site delegates to must agree.
-			if ownership.Ownership(tc.own).ActsAsMine() {
-				t.Fatalf("ownership.Ownership(%q).ActsAsMine() = true; an out-of-band value must be team-like", tc.own)
-			}
-			// Draft → team-style means no review bead yet.
-			c := &draftReviewClient{}
-			draftPayload, _ := json.Marshal(store.PRPayload{Repo: "o/r", Number: 7, Ownership: tc.own, Draft: true})
-			if err := New(c).Handle(context.Background(), store.Event{Type: store.EventPROpened, Payload: draftPayload}); err != nil {
-				t.Fatalf("Handle (draft): %v", err)
-			}
-			if c.drCalls != 0 {
-				t.Errorf("ownership %q on a GitHub draft must be team-style (skipped), got %d draft-review ensures", tc.own, c.drCalls)
-			}
-			if c.relabelCalls != 0 {
-				t.Errorf("relabel must not fire for ownership %q, got %d calls", tc.own, c.relabelCalls)
-			}
-			if c.lastCoOwned {
-				t.Errorf("expected SetMergeRequestCoOwned(false) for ownership %q, got true", tc.own)
-			}
-			// Ready → review bead created, but team-style (mine=false).
-			c = &draftReviewClient{}
-			readyPayload, _ := json.Marshal(store.PRPayload{Repo: "o/r", Number: 7, Ownership: tc.own, Draft: false})
-			if err := New(c).Handle(context.Background(), store.Event{Type: store.EventPROpened, Payload: readyPayload}); err != nil {
-				t.Fatalf("Handle (ready): %v", err)
-			}
-			if c.drCalls != 1 {
-				t.Fatalf("expected 1 draft-review ensure for a ready PR with ownership %q, got %d", tc.own, c.drCalls)
-			}
-			if c.lastMine {
-				t.Errorf("expected mine=false (team-style) for ownership %q", tc.own)
-			}
-		})
-	}
-}
-
-// TestPROpenedClosedParentSkipsDraftReview proves the bridge honors
-// ReconcileMergeRequest's alreadyClosed result: no draft-review is attached
-// under a closed parent. The companion guarantee — that a closed bead's
-// co-owned/priority mutations are never even ATTEMPTED, not merely no-op'd —
-// is no longer observable at this fake-interface boundary (ReconcileMergeRequest
-// is a single opaque call now), so it is pinned directly against the real
-// pkg/beads.Client instead: see TestReconcileMergeRequest_ClosedBeadNoWrites.
-func TestPROpenedClosedParentSkipsDraftReview(t *testing.T) {
-	c := &draftReviewClient{alreadyClosed: true}
-	h := New(c)
-	// PR bead already closed → no review bead even for my PR.
-	payload, _ := json.Marshal(store.PRPayload{Repo: "o/r", Number: 7, Ownership: "mine", Draft: false})
-	if err := h.Handle(context.Background(), store.Event{Type: store.EventPROpened, Payload: payload}); err != nil {
-		t.Fatalf("Handle: %v", err)
-	}
-	if c.drCalls != 0 {
-		t.Fatalf("closed-parent guard failed: expected 0 draft-review ensures, got %d", c.drCalls)
 	}
 }
 
@@ -719,15 +465,17 @@ func (c *cascadeChildCapture) CloseProcessingCycle(_ context.Context, id, _ stri
 	return nil
 }
 
-// TestPRMergedCascadeClosesDraftReviewChild discharges the spec MUST that
-// cascadeClose closes an open draft-review child when its PR is merged.
-// cascadeClose is type-blind, so the draft-review child is closed like any
-// other; this test names one explicitly to lock the contract.
-func TestPRMergedCascadeClosesDraftReviewChild(t *testing.T) {
+// TestPRMergedCascadeClosesChildBead discharges the spec MUST that
+// cascadeClose closes an open child bead when its PR is merged. cascadeClose
+// is type-blind — it closes whatever ListChildrenOfPR reports (a
+// process-feedback cycle today; a draft-review bead before pg2-ynhr.5 removed
+// that production) — so the fixture's child id is a generic placeholder, not
+// a specific bead type.
+func TestPRMergedCascadeClosesChildBead(t *testing.T) {
 	var closedChildren []string
 	client := &cascadeChildCapture{
 		find:         &beads.MergeRequest{ID: "mr-1", Status: "open"},
-		children:     []string{"draft-review-child-1"},
+		children:     []string{"child-1"},
 		onCloseChild: func(id string) { closedChildren = append(closedChildren, id) },
 	}
 	h := New(client)
@@ -737,12 +485,12 @@ func TestPRMergedCascadeClosesDraftReviewChild(t *testing.T) {
 	}
 	found := false
 	for _, id := range closedChildren {
-		if id == "draft-review-child-1" {
+		if id == "child-1" {
 			found = true
 		}
 	}
 	if !found {
-		t.Fatalf("expected draft-review child to be closed by cascade, closed: %v", closedChildren)
+		t.Fatalf("expected child bead to be closed by cascade, closed: %v", closedChildren)
 	}
 }
 
@@ -882,11 +630,10 @@ func cannedMRList() string {
 // per tick is 1, and the write collapses to at most one combined
 // `bd update`/`bd create` call.
 //
-// A team DRAFT PR is used deliberately: it still runs the combined
-// reconciliation (which reads) but skips EnsureDraftReviewBead, so the only
-// `bd list` calls are the MR-bead reads under test. The payload's Draft=true
-// differs from the canned bead's stored draft=false, so exactly one combined
-// write (the field patch) is expected too.
+// A team DRAFT PR is used deliberately: the only `bd list` calls are the
+// MR-bead reads under test. The payload's Draft=true differs from the canned
+// bead's stored draft=false, so exactly one combined write (the field patch)
+// is expected too.
 func TestHandle_PRUpdatedReadsMRBeadOnce(t *testing.T) {
 	r := &idCountingRunner{listJSON: cannedMRList()}
 	client := beads.NewClientWithRunner(r)

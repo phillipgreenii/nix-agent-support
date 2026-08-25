@@ -81,6 +81,16 @@ func TestMigrate_V14UpgradeFromPriorVersionPreservesRows(t *testing.T) {
 			t.Fatalf("drop %s to fabricate v13 shape: %v", col, err)
 		}
 	}
+	// Same reasoning applies one table over: pg2-ynhr.5's v15->v16 step drops
+	// pr_revision.reviewed_by_agent_at, and OpenForTest above already dropped
+	// it physically. The trailing migrate() call re-runs v15->v16 (among the
+	// other remaining steps), so the column must exist again first, or that
+	// DROP COLUMN fails with "no such column" against a table that already
+	// lacks it — the exact mirror of the body/"duplicate column name" trap
+	// this comment already describes.
+	if _, err := db.sql.Exec(`ALTER TABLE pr_revision ADD COLUMN reviewed_by_agent_at TEXT`); err != nil {
+		t.Fatalf("re-add reviewed_by_agent_at to fabricate pre-v16 shape: %v", err)
+	}
 	if _, err := db.sql.Exec("PRAGMA user_version = 13"); err != nil {
 		t.Fatalf("roll user_version back to 13: %v", err)
 	}
@@ -128,9 +138,10 @@ func TestMigrate_V14UpgradeFromPriorVersionPreservesRows(t *testing.T) {
 	// applyMigration above only ran the v13->v14 step under test; the
 	// fabricated DB is genuinely at v14 now (body was dropped above, not
 	// re-added), so this migrate() call performs the REMAINING steps up to
-	// the current schemaVersion (today: just v14->v15, re-adding body) —
-	// proving the v13->v14 step composes cleanly with whatever comes after
-	// it, not that this call is a no-op.
+	// the current schemaVersion (today: v14->v15 re-adding body, then
+	// v15->v16 dropping pr_revision.reviewed_by_agent_at) — proving the
+	// v13->v14 step composes cleanly with whatever comes after it, not that
+	// this call is a no-op.
 	if err := migrate(db); err != nil {
 		t.Fatalf("second migrate: %v", err)
 	}

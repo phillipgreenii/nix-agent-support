@@ -144,6 +144,9 @@ func TestReconcile_EnsuresReviewChildGateAndResolves(t *testing.T) {
 	if f.countCalls("gate", "resolve", "g7") != 1 {
 		t.Errorf("watcher must resolve the active-pr gate for an open PR; calls=%v", f.calls)
 	}
+	if f.countCalls("create", `"ownership":"mine"`) != 1 {
+		t.Errorf("expected the birth create to stamp ownership=mine metadata (pg2-ynhr.5, feeds the review prompt's mine/team branch); calls=%v", f.calls)
+	}
 }
 
 // TestReconcile_Idempotent: an existing review-pr -> no create, no link, no new
@@ -282,6 +285,9 @@ func TestReconcile_HeadAdvancedReopensClosedReview(t *testing.T) {
 	}
 	if f.countCalls("update", "zr-rv7", "branch=feat/x") != 1 {
 		t.Errorf("expected the reopen to refresh branch; calls=%v", f.calls)
+	}
+	if f.countCalls("update", "zr-rv7", "ownership=team") != 1 {
+		t.Errorf("expected the reopen to refresh ownership metadata (pg2-ynhr.5); calls=%v", f.calls)
 	}
 	if f.countCalls("create") != 0 {
 		t.Errorf("head advance must REOPEN, not create a second bead; calls=%v", f.calls)

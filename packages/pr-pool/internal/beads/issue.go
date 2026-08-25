@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 )
 
 // Issue is the subset of a bd issue pr-pool reads. Metadata is left as a generic
@@ -21,12 +22,7 @@ type Issue struct {
 
 // HasLabel reports whether the issue carries the given label.
 func (i Issue) HasLabel(label string) bool {
-	for _, l := range i.Labels {
-		if l == label {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(i.Labels, label)
 }
 
 // ShowObj runs `bd show <id> --json` and normalizes bd's output: the
@@ -84,16 +80,23 @@ func Unclaim(ctx context.Context, r Runner, id string) error {
 
 // ReopenReview re-opens a closed review-pr bead and refreshes its review target:
 // `bd update <id> --status=open --set-metadata head_sha=<new> --set-metadata
-// branch=<new> --assignee=`. Overwriting head_sha/branch is essential — the
-// review worker checks out metadata.head_sha, so reopening WITHOUT refreshing it
-// would re-review the same old commit forever (the ACL reopens only on head
-// advance). Clearing the assignee returns the bead to the pool for a fresh
-// worker. --set-metadata is a per-key merge, so the numeric pr_number/repo keys
-// are preserved and MatchReviewPR keeps matching repo#number.
-func ReopenReview(ctx context.Context, r Runner, id, headSHA, branch string) error {
+// branch=<new> --set-metadata ownership=<new> --assignee=`. Overwriting
+// head_sha/branch is essential — the review worker checks out
+// metadata.head_sha, so reopening WITHOUT refreshing it would re-review the
+// same old commit forever (the ACL reopens only on head advance). Refreshing
+// ownership matters too (pg2-ynhr.5): the review prompt's mine/co-owned vs.
+// team branch reads this metadata, and an ownership transition (e.g. a team PR
+// becoming co-owned between review cycles) must not leave a stale value behind
+// — mirroring the legacy beadsbridge's EnsureDraftReviewMineLabel handling of
+// the same transition. Clearing the assignee returns the bead to the pool for
+// a fresh worker. --set-metadata is a per-key merge, so the numeric
+// pr_number/repo keys are preserved and MatchReviewPR keeps matching
+// repo#number.
+func ReopenReview(ctx context.Context, r Runner, id, headSHA, branch, ownership string) error {
 	_, err := r.Run(ctx, "update", id, "--status=open",
 		"--set-metadata", "head_sha="+headSHA,
 		"--set-metadata", "branch="+branch,
+		"--set-metadata", "ownership="+ownership,
 		"--assignee=")
 	if err != nil {
 		return fmt.Errorf("reopen review-pr %s: %w", id, err)

@@ -11,30 +11,43 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/config"
 )
 
-// writeReviewConfig writes a minimal, valid pg-pr config file to path with the
-// given review.enabled value.
-func writeReviewConfig(t *testing.T, path string, reviewEnabled bool) {
+// writeThresholdConfig writes a minimal, valid pg-pr config file to path with
+// the given ci_only_attempts_threshold value. This field is used purely as an
+// OBSERVABLE marker for the reload tests below — any live config field that
+// round-trips through YAML would do; ci_only_attempts_threshold was picked
+// because it is a plain scalar with no validation beyond parsing. (Formerly
+// review.enabled served this role; that field was removed by pg2-ynhr.5 along
+// with the review machinery it gated.)
+func writeThresholdConfig(t *testing.T, path string, threshold int) {
 	t.Helper()
 	body := fmt.Sprintf(`self_login: tester
 worktree_root: %s
 repos:
   - remote: o/r
-review:
-  enabled: %t
-`, filepath.Dir(path), reviewEnabled)
+ci_only_attempts_threshold: %d
+`, filepath.Dir(path), threshold)
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatalf("write config %s: %v", path, err)
 	}
 }
 
-// TestReloadCfgFromDisk_PicksUpReviewEnabledChange is the second half of the
-// bead pg2-bw30 fix: the daemon re-reads the SAME config file it loaded from,
-// each poll, so an out-of-band rewrite (e.g. a `pn workspace apply` that flips
-// review.enabled) takes effect on the next poll without a restart or SIGHUP.
-func TestReloadCfgFromDisk_PicksUpReviewEnabledChange(t *testing.T) {
+// cfgWithThreshold builds an in-memory config.Config with no source Path
+// (mirrors the retired cfgWithReview helper's shape).
+func cfgWithThreshold(n int) *config.Config {
+	return &config.Config{
+		Repos:                   []config.RepoConfig{{Remote: "o/r"}},
+		CIOnlyAttemptsThreshold: n,
+	}
+}
+
+// TestReloadCfgFromDisk_PicksUpDiskChange is the second half of the bead
+// pg2-bw30 fix: the daemon re-reads the SAME config file it loaded from, each
+// poll, so an out-of-band rewrite (e.g. a `pn workspace apply`) takes effect
+// on the next poll without a restart or SIGHUP.
+func TestReloadCfgFromDisk_PicksUpDiskChange(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
-	writeReviewConfig(t, path, true)
+	writeThresholdConfig(t, path, 1)
 
 	cfg, err := config.LoadFile(path)
 	if err != nil {
@@ -47,15 +60,15 @@ func TestReloadCfgFromDisk_PicksUpReviewEnabledChange(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	if !e.cfg().ReviewEnabled() {
-		t.Fatalf("precondition: review.enabled must start true")
+	if e.cfg().CIOnlyAttemptsThreshold != 1 {
+		t.Fatalf("precondition: threshold must start at 1")
 	}
 
-	// Rewrite the file in place with review.enabled=false and re-read.
-	writeReviewConfig(t, path, false)
+	// Rewrite the file in place with a new value and re-read.
+	writeThresholdConfig(t, path, 2)
 	e.reloadCfgFromDisk(discardLogger())
-	if e.cfg().ReviewEnabled() {
-		t.Fatalf("per-poll reload did not pick up review.enabled=false")
+	if e.cfg().CIOnlyAttemptsThreshold != 2 {
+		t.Fatalf("per-poll reload did not pick up the disk change; got %d, want 2", e.cfg().CIOnlyAttemptsThreshold)
 	}
 }
 
@@ -66,7 +79,7 @@ func TestReloadCfgFromDisk_PicksUpReviewEnabledChange(t *testing.T) {
 func TestReloadCfgFromDisk_GracefulOnMissingOrMalformed(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
-	writeReviewConfig(t, path, true)
+	writeThresholdConfig(t, path, 1)
 
 	cfg, err := config.LoadFile(path)
 	if err != nil {
@@ -80,13 +93,13 @@ func TestReloadCfgFromDisk_GracefulOnMissingOrMalformed(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 
-	// Malformed YAML → keep previous (review.enabled stays true), no panic.
+	// Malformed YAML → keep previous (threshold stays 1), no panic.
 	if err := os.WriteFile(path, []byte(":::not yaml:::"), 0o600); err != nil {
 		t.Fatalf("write malformed: %v", err)
 	}
 	e.reloadCfgFromDisk(discardLogger())
-	if !e.cfg().ReviewEnabled() {
-		t.Fatalf("malformed reload must keep the previous config (review.enabled=true)")
+	if e.cfg().CIOnlyAttemptsThreshold != 1 {
+		t.Fatalf("malformed reload must keep the previous config (threshold=1), got %d", e.cfg().CIOnlyAttemptsThreshold)
 	}
 
 	// Missing file → keep previous, no panic.
@@ -94,8 +107,8 @@ func TestReloadCfgFromDisk_GracefulOnMissingOrMalformed(t *testing.T) {
 		t.Fatalf("remove config: %v", err)
 	}
 	e.reloadCfgFromDisk(discardLogger())
-	if !e.cfg().ReviewEnabled() {
-		t.Fatalf("missing-file reload must keep the previous config (review.enabled=true)")
+	if e.cfg().CIOnlyAttemptsThreshold != 1 {
+		t.Fatalf("missing-file reload must keep the previous config (threshold=1), got %d", e.cfg().CIOnlyAttemptsThreshold)
 	}
 }
 
@@ -104,14 +117,14 @@ func TestReloadCfgFromDisk_GracefulOnMissingOrMalformed(t *testing.T) {
 // no file to re-read.
 func TestReloadCfgFromDisk_NoPathIsNoop(t *testing.T) {
 	e, err := New(Deps{
-		Cfg: cfgWithReview(true), // Path == "" (built in memory)
+		Cfg: cfgWithThreshold(1), // Path == "" (built in memory)
 		VCS: map[string]VCSProvider{"github": newFakeVCS()},
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
 	e.reloadCfgFromDisk(discardLogger())
-	if !e.cfg().ReviewEnabled() {
+	if e.cfg().CIOnlyAttemptsThreshold != 1 {
 		t.Fatalf("no-path reload must be a no-op that keeps the config intact")
 	}
 }
@@ -124,7 +137,7 @@ func TestReloadCfgFromDisk_NoPathIsNoop(t *testing.T) {
 func TestDaemon_ReReadsConfigFromDiskEachPoll(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
-	writeReviewConfig(t, path, true)
+	writeThresholdConfig(t, path, 1)
 
 	cfg, err := config.LoadFile(path)
 	if err != nil {
@@ -138,8 +151,8 @@ func TestDaemon_ReReadsConfigFromDiskEachPoll(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	if !e.cfg().ReviewEnabled() {
-		t.Fatalf("precondition: review.enabled must start true")
+	if e.cfg().CIOnlyAttemptsThreshold != 1 {
+		t.Fatalf("precondition: threshold must start at 1")
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -154,14 +167,14 @@ func TestDaemon_ReReadsConfigFromDiskEachPoll(t *testing.T) {
 		})
 	}()
 
-	// Rewrite the file in place with review.enabled=false. No SIGHUP, no restart.
-	writeReviewConfig(t, path, false)
+	// Rewrite the file in place with a new value. No SIGHUP, no restart.
+	writeThresholdConfig(t, path, 2)
 
 	deadline := time.After(2 * time.Second)
-	for e.cfg().ReviewEnabled() {
+	for e.cfg().CIOnlyAttemptsThreshold != 2 {
 		select {
 		case <-deadline:
-			t.Fatal("daemon did not pick up review.enabled=false from disk within 2s (config change latched?)")
+			t.Fatal("daemon did not pick up the disk change within 2s (config change latched?)")
 		case <-time.After(10 * time.Millisecond):
 		}
 	}

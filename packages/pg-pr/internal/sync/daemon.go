@@ -310,9 +310,9 @@ func (e *Engine) ReplaceCfg(cfg *config.Config) {
 // reloadCfgFromDisk re-reads the config from the file it was originally loaded
 // from and atomically swaps it in. The daemon loop calls it once per poll
 // interval so an out-of-band rewrite of the config file (e.g. a
-// `pn workspace apply` that flips review.enabled) takes effect on the NEXT poll
-// without a restart or a SIGHUP (bead pg2-bw30 — apply raced the daemon restart
-// ahead of the config write, so the daemon came up latched on the old value).
+// `pn workspace apply`) takes effect on the NEXT poll without a restart or a
+// SIGHUP (bead pg2-bw30 — apply raced the daemon restart ahead of the config
+// write, so the daemon came up latched on the old value).
 //
 // Best-effort and non-fatal: an empty source path (in-memory config, e.g.
 // tests), a missing file, or a malformed file leaves the previous config in
@@ -328,12 +328,7 @@ func (e *Engine) reloadCfgFromDisk(log *slog.Logger) {
 	if err != nil {
 		return // transient during a rewrite / partial write; keep last good config
 	}
-	before := e.cfg().ReviewEnabled()
 	e.ReplaceCfg(cfg)
-	if after := cfg.ReviewEnabled(); after != before {
-		log.Info("review.enabled changed on disk; applied on next poll",
-			"review_enabled", after, "path", path)
-	}
 }
 
 // xdgRuntimeDir returns $XDG_RUNTIME_DIR or os.TempDir() if unset.
@@ -379,9 +374,6 @@ func (e *Engine) maintenanceCycle(ctx context.Context, log *slog.Logger) {
 		log.Warn("reply reconcile failed", "err", err.Error())
 	}
 	flushOutbox(ctx, e.deps.Store, e.deps.Dispatch)
-	// Draft-review consumption (pg2-4c5i.36). A no-op unless the review hook
-	// deps are wired; errors are logged inside, never abort the tick.
-	e.reviewHookCycle(ctx, log)
 }
 
 // runMaintenance runs maintenanceCycle on its own ticker until ctx is cancelled.

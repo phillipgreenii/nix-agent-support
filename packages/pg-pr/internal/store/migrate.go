@@ -7,7 +7,7 @@ import (
 
 // schemaVersion is the current schema. Bump it and append a migration step
 // whenever the DDL changes. Stored in SQLite's user_version pragma.
-const schemaVersion = 15
+const schemaVersion = 16
 
 // migrations is the ordered list of DDL applied to reach schemaVersion. Index i
 // migrates user_version i -> i+1.
@@ -513,6 +513,26 @@ ALTER TABLE pull_request ADD COLUMN wip                INTEGER NOT NULL DEFAULT 
 	// this schema version.
 	`
 ALTER TABLE pull_request ADD COLUMN body TEXT NOT NULL DEFAULT '';
+`,
+	// v15 -> v16: drop pr_revision.reviewed_by_agent_at (pg2-ynhr.5). It was the
+	// re-review-on-head-advance cursor for the legacy pg-pr draft-review
+	// consumer (pg2-4c5i.36: MarkRevisionAgentReviewed / reopenStaleReviews /
+	// stampAgentReviewed in internal/sync), all removed by this bead's strip of
+	// pg-pr's review workflow — that workflow shipped entirely to pr-pool
+	// (ADR 0034), whose review-pr bead now carries its OWN head_sha cursor
+	// (pr-pool's internal/beads.ReopenReview refreshes metadata.head_sha on
+	// re-review). Nothing outside this file's now-deleted writer/reader ever
+	// consulted the column — prview.go explicitly excluded it (see
+	// RevisionItem's doc comment) — so no other read path is affected.
+	//
+	// DROP COLUMN vs rebuild-table: mirrors v11->v12's reasoning exactly.
+	// reviewed_by_agent_at is not a PRIMARY KEY, is not UNIQUE, is not indexed,
+	// and carries no CHECK constraint referencing another column, so it is one
+	// of the cases SQLite's native ALTER TABLE ... DROP COLUMN handles directly
+	// (supported since SQLite 3.35.0; verified against the pinned
+	// modernc.org/sqlite v1.57.0 driver, as v11->v12 already established).
+	`
+ALTER TABLE pr_revision DROP COLUMN reviewed_by_agent_at;
 `,
 }
 

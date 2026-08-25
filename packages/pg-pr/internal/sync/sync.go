@@ -163,12 +163,6 @@ type Deps struct {
 	// no-op. Typically set to (*event.Dispatcher).Dispatch.
 	Dispatch store.DispatchFunc
 
-	// Review configures the daemon-side draft-review consumption hook
-	// (pg2-4c5i.36). When Review.Beads or Review.Spawner is nil the hook is
-	// disabled (a no-op), so callers that don't wire review production keep
-	// running unchanged.
-	Review ReviewHookDeps
-
 	// JiraProvider, when non-nil AND cfg.Jira is non-nil, is used to build the
 	// JiraLookupFunc injected into enrich.Input (pg2-jpfw.4). Both fields must
 	// be non-nil to activate the signal; when either is nil the signal stays
@@ -1203,13 +1197,6 @@ func (e *Engine) SetAgentRegistry(reg *agentregistry.Registry) {
 func (e *Engine) SetStoreAndDispatch(db *store.DB, dispatch store.DispatchFunc) {
 	e.deps.Store = db
 	e.deps.Dispatch = dispatch
-}
-
-// SetReviewHook wires the draft-review consumption hook (pg2-4c5i.36) onto the
-// engine. Called by CLI daemon-mode setup. When deps.Beads or deps.Spawner is
-// nil the hook stays a no-op. Safe to call only before the daemon loop starts.
-func (e *Engine) SetReviewHook(deps ReviewHookDeps) {
-	e.deps.Review = deps
 }
 
 // StoreFile returns the path that the CLI should open as the SQLite store.

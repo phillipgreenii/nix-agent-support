@@ -76,24 +76,21 @@ type FeedbackPayload struct {
 	Summary *FeedbackSummary `json:"summary,omitempty"`
 }
 
-// AttentionPayload is the JSON body of pr.attention events (pg2-4c5i.13). It
-// carries the shared needsAttention verdict so the beadsbridge handler can
-// ensure (Need) or close (!Need) the teammate-attention bead. Re-emitted every
-// tick from persisted facts, so a dropped fire-once event self-heals (R1).
-type AttentionPayload struct {
-	Repo   string `json:"repo"`
-	Number int    `json:"number"`
-	Need   bool   `json:"need"`
-	Reason string `json:"reason,omitempty"`
-}
-
 // Event type constants.
+//
+// pr.attention (formerly EventPRAttention) and its AttentionPayload were
+// removed by pg2-ynhr.5: they existed only to drive beadsbridge's
+// attention-BEAD projection (a teammate-PR "needs me" bead), which is the
+// legacy pg-pr review workflow shipping to pr-pool. The pg-pr DASHBOARD'S
+// OWN attention verdict (internal/snapshot.NeedsAttention, surfaced via
+// internal/dashboard and `pg-pr pr open`) is computed independently, straight
+// from store facts, and is UNAFFECTED (FORK2a) — it never went through this
+// event.
 const (
 	EventPROpened         = "pr.opened"
 	EventPRUpdated        = "pr.updated"
 	EventPRClosed         = "pr.closed"
 	EventPRMerged         = "pr.merged"
-	EventPRAttention      = "pr.attention"
 	EventFeedbackCreated  = "feedback.created"
 	EventFeedbackDisposed = "feedback.disposed"
 	EventFeedbackResolved = "feedback.resolved"

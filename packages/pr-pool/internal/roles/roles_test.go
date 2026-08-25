@@ -117,6 +117,73 @@ func TestReviewPrompt_RendersCoordsCheckoutAndPost(t *testing.T) {
 	}
 }
 
+// TestReviewPrompt_MineOwnershipFilesProcessFeedbackNotGitHub is the Phase A
+// proof (pg2-ynhr.5) that the review prompt's rendered TEXT — for a
+// self-authored PR — routes through beads instead of GitHub: it must instruct
+// filing a "process-feedback: <repo>#<num>" bead carrying the "mine" label
+// (the exact shape roles.BuiltinQuerySet's feedback-source query selects,
+// TitlePrefix "process-feedback:" + Labels ["mine"]) and must NOT instruct
+// `pg-pr review submit`, the GitHub-posting verb only a teammate PR should use.
+func TestReviewPrompt_MineOwnershipFilesProcessFeedbackNotGitHub(t *testing.T) {
+	for _, ownership := range []string{"mine", "co-owned"} {
+		rs := BuiltinRoleSet(BuiltinParams{WorktreeDir: "/wt", MaxWorker: 1, MaxFeedback: 1})
+		rv := rs[2]
+		out, err := prompt.Render(rv.CCPool.Prompt, prompt.Context{
+			Item: item.Item{
+				ID: "zr-rv7", Type: "task", Title: "review-pr: o/r#7",
+				Metadata: map[string]any{
+					"repo": "o/r", "pr_number": float64(7), "branch": "feat/x",
+					"head_sha": "abc123", "ownership": ownership,
+				},
+			},
+			WorktreeDir: "/wt/zr-rv7",
+		})
+		if err != nil {
+			t.Fatalf("ownership=%s: review prompt render: %v", ownership, err)
+		}
+		for _, want := range []string{
+			`bd create --type=task --title "process-feedback: o/r#7"`,
+			"--label mine",
+			"do NOT post anything to GitHub",
+		} {
+			if !strings.Contains(out, want) {
+				t.Errorf("ownership=%s: review prompt missing %q:\n%s", ownership, want, out)
+			}
+		}
+		if strings.Contains(out, "pg-pr review submit") {
+			t.Errorf("ownership=%s: review prompt must NOT instruct pg-pr review submit (GitHub write) for a self-authored PR:\n%s", ownership, out)
+		}
+	}
+}
+
+// TestReviewPrompt_TeamOwnershipStillPostsToGitHub pins the unchanged teammate
+// path: an explicit ownership=team (and, by TestReviewPrompt_
+// RendersCoordsCheckoutAndPost, an absent ownership key) must still post
+// through pg-pr review submit and must NOT file a process-feedback bead.
+func TestReviewPrompt_TeamOwnershipStillPostsToGitHub(t *testing.T) {
+	rs := BuiltinRoleSet(BuiltinParams{WorktreeDir: "/wt", MaxWorker: 1, MaxFeedback: 1})
+	rv := rs[2]
+	out, err := prompt.Render(rv.CCPool.Prompt, prompt.Context{
+		Item: item.Item{
+			ID: "zr-rv7", Type: "task", Title: "review-pr: o/r#7",
+			Metadata: map[string]any{
+				"repo": "o/r", "pr_number": float64(7), "branch": "feat/x",
+				"head_sha": "abc123", "ownership": "team",
+			},
+		},
+		WorktreeDir: "/wt/zr-rv7",
+	})
+	if err != nil {
+		t.Fatalf("review prompt render: %v", err)
+	}
+	if !strings.Contains(out, "pg-pr review submit") {
+		t.Errorf("team ownership must still post via pg-pr review submit:\n%s", out)
+	}
+	if strings.Contains(out, "process-feedback:") {
+		t.Errorf("team ownership must NOT file a process-feedback bead:\n%s", out)
+	}
+}
+
 func TestBuiltinWorkerPrompt_forbidsAskUserQuestion(t *testing.T) {
 	rs := BuiltinRoleSet(BuiltinParams{WorktreeDir: "/wt", MaxWorker: 1, MaxFeedback: 1})
 	body := rs[1].CCPool.PromptBody

@@ -252,11 +252,13 @@ type FeedbackItem struct {
 
 // RevisionItem is one observed revision (internal/store.Revision), reduced to
 // the fields relevant to a consolidated view. Deliberately excludes
-// OthersApproved/OthersApprovedAt/ReviewedAt/MyReviewState/ReviewedByAgentAt:
-// store.Revision's own doc comment marks those WRITE-ONLY as of pg2-4dz88.1.9
-// — nothing outside the store package reads them any more, replaced by the
-// per-approver store.Approval rows (which this view's Approvals axis
-// deliberately defers; see the package doc).
+// OthersApproved/OthersApprovedAt/ReviewedAt/MyReviewState: store.Revision's
+// own doc comment marks those WRITE-ONLY as of pg2-4dz88.1.9 — nothing outside
+// the store package reads them any more, replaced by the per-approver
+// store.Approval rows (which this view's Approvals axis deliberately defers;
+// see the package doc). ReviewedByAgentAt (the pg2-4c5i.36 agent-review
+// cursor) was dropped entirely by pg2-ynhr.5, superseded by pr-pool's bead
+// head_sha cursor.
 type RevisionItem struct {
 	Seq        int    `json:"seq"`
 	HeadSHA    string `json:"head_sha"`
