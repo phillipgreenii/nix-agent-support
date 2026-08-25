@@ -168,12 +168,22 @@ rather than updating it.
    Dispatch ONE subagent with: the bead id, its `bd show` details, and the
    worktree/set path. Instruct it to:
    - implement the bead inside THAT worktree/set only, following repo conventions;
-   - run every gate that CAN run pre-apply: the pre-commit hooks SCOPED to its
-     own diff — `prek run --files <the files it changed>` (or `pre-commit run
---files …`), NOT `--all-files` (which re-runs every hook over the whole repo
-     and can false-block on a pre-existing violation the subagent never touched) —
-     if `.pre-commit-config.yaml`; `nix flake check` / `pn workspace build` (nix
-     repos), and the repo's tests;
+   - COMMIT the change onto that worktree's branch AS SOON AS it is ready, THEN run
+     whatever gate still needs to run standalone — never the other order. This is
+     safe: drain never LANDS anything until the orchestrator VALIDATES and LANDS it
+     (steps 5–6), so a gate that turns red AFTER the commit is handled by amending
+     that commit or parking the bead, never by having withheld the commit. The
+     commit's OWN pre-commit hook run — scoped to its diff, `prek run --files <the
+files it changed>` (or `pre-commit run --files …`), NOT `--all-files` (which
+     re-runs every hook over the whole repo and can false-block on a pre-existing
+     violation the subagent never touched) — if `.pre-commit-config.yaml` exists,
+     IS the first gate and is folded into making the commit; ONLY THEN run any gate
+     that commit did not already cover — `nix flake check` / `pn workspace build`
+     (nix repos), and the repo's tests, including a slow full suite that must be
+     backgrounded to outlive a bounded turn. Committing first means an interrupted,
+     timed-out, or prematurely-yielding subagent always leaves durable, COMMITTED
+     work behind — never a dirty worktree only the orchestrator can rescue (bead
+     `tc-xhq6`);
    - NOT claim/close the bead, NOT land/merge, NOT touch any other worktree, NOT
      create gates;
    - CLASSIFY the outcome and return a SHORT structured report with status one of:
@@ -187,6 +197,18 @@ rather than updating it.
      - `stuck` — underspecified, needs a human decision, or the pre-apply gates
        cannot be made to pass.
      - `needs-more-repos` — the change must span additional repos.
+
+     A report is NEVER just "waiting" or "still running" with no other content —
+     that has cost a drain session ~856k subagent tokens for zero delivered report
+     while 18 files sat uncommitted (`tc-xhq6`). If a gate you started (a
+     backgrounded slow test suite, or the commit's own pre-commit hook run) is
+     still resolving when you must end your turn, your report MUST still include
+     everything already COMMITTED — the commit SHA, which per the ordering above
+     should almost always exist by the time any standalone gate runs — PLUS the
+     EXACT gate command still pending and how to check it (a sentinel path, a
+     `Monitor` target). The orchestrating session cannot resume this work without
+     at least a commit SHA to anchor on.
+
    - also include: what changed, the gate commands + their pass/fail evidence, and
      repos touched. The subagent lands nothing — YOU land.
 
