@@ -2069,6 +2069,56 @@ func TestSafecmds_Pg2_4k7yd_SafeCmdSubstitutionsUnaffected(t *testing.T) {
 	}
 }
 
+// TestSafecmds_Pg2_fl9sh_BracketAliasesTest pins the pg2-fl9sh fix: "[" is
+// POSIX's alias for "test" (`[ -d /tmp ]` == `test -d /tmp`) and must take the
+// exact same zone-checked branch — in both the main loop and the xargs
+// inner-command mirror — instead of falling through to the unknown-command
+// case and abstaining the whole compound.
+//
+// MEASURED against the live installed binary before this fix (pg2-fl9sh):
+// `test -d /tmp && echo yes` measured allow; `[ -d /tmp ] && echo yes` and
+// `[ -n "$FOO" ] && echo yes` (no file operand at all) both measured abstain.
+func TestSafecmds_Pg2_fl9sh_BracketAliasesTest(t *testing.T) {
+	pe := patheval.New("/home/user/project")
+	r := New(pe)
+	verdict := func(cmd string) hookio.RuleResult {
+		input := &hookio.HookInput{ToolName: "Bash", CWD: "/home/user/project", ToolInput: mustJSON(map[string]string{"command": cmd})}
+		return hookio.Verdict(r.Evaluate(input))
+	}
+
+	// Criterion 1: ordinary "[" usage approves exactly like the equivalent
+	// "test" spelling — a readable-zone path operand, and a pure string test
+	// with no file operand at all (the trailing "]" token itself must not be
+	// mistaken for an out-of-zone path).
+	ordinary := []string{
+		"[ -d /tmp ]",
+		"[ -f README.md ]",
+		"[ -f /home/user/project/README.md ]",
+		`[ -n "$FOO" ]`,
+		"true | xargs [ -f /home/user/project/README.md ]",
+	}
+	for _, cmd := range ordinary {
+		got := verdict(cmd)
+		if got.Decision != hookio.Approve {
+			t.Errorf("cmd %q: got %s (%s), want approve (\"[\" is test's POSIX alias)", cmd, got.Decision, got.Reason)
+		}
+	}
+
+	// Criterion 2: the zone check still fires through "[" — recognizing it as
+	// test's alias MUST NOT regress into an unconditional approve.
+	sensitive := []string{
+		"[ -f /etc/shadow ]",
+		"[ -e /etc/shadow ]",
+		"true | xargs [ -f /etc/shadow ]",
+	}
+	for _, cmd := range sensitive {
+		got := verdict(cmd)
+		if got.Decision != hookio.NoOpinion {
+			t.Errorf("cmd %q: got %s (%s), want abstain (zone-checked, matching test/browsingCmds)", cmd, got.Decision, got.Reason)
+		}
+	}
+}
+
 // TestReadPathIssue_IsNeverLooserThanTheStaticSubstitutionSeam is the pg2-zpct4
 // reconciliation asserted as a RELATION, from the side that OWNS path readability.
 //

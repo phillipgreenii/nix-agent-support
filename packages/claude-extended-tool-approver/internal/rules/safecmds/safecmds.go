@@ -258,7 +258,12 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		// readPathIssue's stricter one: `test`, like `ls`/`find`, emits no file
 		// CONTENT (its whole result is an exit status), so the pg2-2ke04
 		// dynamic-path exclusion applies here too.
-		if basename == "test" {
+		//
+		// "[" is POSIX's alias for "test" (`[ -d /tmp ]` == `test -d /tmp`) — and
+		// the more common spelling in real shell scripts — so it MUST take the
+		// identical branch, not fall through to the unknown-command case and
+		// abstain the whole compound (pg2-fl9sh).
+		if basename == "test" || basename == "[" {
 			if issue := browsingPathIssue(pc.Args, pe); issue != "" {
 				return r.refuse("safe-commands: " + basename + " " + issue + " (deferred to claude-code)")
 			}
@@ -338,7 +343,9 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 			}
 			// test / [ : mirrors the main loop's dedicated "test" branch above
 			// (pg2-4k7yd) — same zone check, no dynamic-expansion refusal.
-			if innerBase == "test" {
+			// "[" is included alongside "test" for the same reason as the main
+			// loop's branch (pg2-fl9sh): it's POSIX's alias for "test".
+			if innerBase == "test" || innerBase == "[" {
 				if issue := browsingPathIssue(innerArgs, pe); issue != "" {
 					return r.refuse("safe-commands: xargs " + innerBase + " " + issue + " (deferred to claude-code)")
 				}
