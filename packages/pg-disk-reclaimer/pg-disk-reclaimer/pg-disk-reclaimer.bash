@@ -246,6 +246,69 @@ pgdr_select_variants() {
   ' "$path"
 }
 
+# PGDR_DISPLAY_TIMEOUT_SECONDS: per-item ceiling (wall-clock seconds) on how
+# long cmd_list will wait on one item's displayCommand. Overridable via the
+# environment (tests use a short value so a deliberately-slow fixture
+# doesn't make the suite slow). A single displayCommand -- e.g. `du` over a
+# large/networked/permission-restricted volume -- has been observed to take
+# 1-2 minutes on its own; this bounds that cost per item instead of letting
+# one pathological item dominate the whole listing.
+: "${PGDR_DISPLAY_TIMEOUT_SECONDS:=10}"
+
+# pgdr_display_output: runs displayCommand under the PGDR_DISPLAY_TIMEOUT_SECONDS
+# ceiling and ALWAYS prints something usable to stdout, returning 0
+# regardless of what displayCommand did -- a display command is purely
+# informational (see cmd_list below), so its failure or slowness must never
+# stop or abort the listing of other items.
+#
+# `timeout` needs an actual child process to police, so this runs the
+# (trusted, operator-authored) command string via `bash -c` rather than
+# `eval` in the current shell -- `eval` has no separate process for
+# `timeout` to kill, and a bare `$(eval "$cmd")` assignment is exactly what
+# used to make one failing displayCommand (a `du` that hit a
+# permission-denied subdirectory) abort the ENTIRE script: this function
+# runs under the nix wrapper's `set -euo pipefail`, where a failing command
+# substitution used as a plain assignment is fatal, so the exit status is
+# always captured and checked explicitly here rather than left to trigger
+# that.
+#
+# stdout and stderr are captured together: on failure/timeout the command's
+# own partial output (e.g. `du`'s real total alongside its permission
+# warnings) is still shown, labeled with the exit status, rather than
+# thrown away -- seeing a plausible number beats seeing nothing.
+pgdr_display_output() {
+  local display_command="$1"
+  local out status
+
+  # NOT `out=$(...); status=$?` -- that bare assignment is a plain simple
+  # command whose exit status is the command substitution's, and it is
+  # exactly the shape that made cmd_list's OLD implementation abort the
+  # whole script under `set -e` on a non-zero-exit display command. Putting
+  # it as the condition of an `if` is what actually makes the failure
+  # non-fatal (the same reason cmd_reclaim already wraps its evals in
+  # `if ! eval ...`): commands tested by `if`/`!` are exempt from
+  # triggering `errexit`. (Caught by manually running this against the real
+  # registry under `set -euo pipefail` -- like the nix-wrapped binary runs
+  # it -- since bats' own `run` helper neutralizes `errexit` and so cannot
+  # exercise this failure mode at all.)
+  if out=$(timeout "$PGDR_DISPLAY_TIMEOUT_SECONDS" bash -c "$display_command" 2>&1); then
+    status=0
+  else
+    status=$?
+  fi
+
+  if [[ $status -eq 124 ]]; then
+    printf '(display command timed out after %ss)\n' "$PGDR_DISPLAY_TIMEOUT_SECONDS"
+  elif [[ $status -ne 0 ]]; then
+    printf '(display command exited %s)\n' "$status"
+    [[ -n $out ]] && printf '%s\n' "$out"
+  else
+    printf '%s\n' "$out"
+  fi
+
+  return 0
+}
+
 # cmd_list: implements the `list` subcommand.
 #
 # Grammar: list [--aggressiveness N]
@@ -260,17 +323,23 @@ pgdr_select_variants() {
 #     ceiling is given, exactly like pgdr_select_variants' own Case A
 #     behavior.
 #
-# For each included item this prints a table row of: id, description,
-# EVERY aggressiveness value the item has a variant for (not just the
-# single highest-qualifying variant pgdr_select_variants would choose --
-# a zero-variant item shows "-"), and the item's current size, obtained
-# by running its displayCommand via `eval` (the same trusted-command-
-# string pattern already used for dryRunCommand/removeCommand in
-# cmd_reclaim below).
+# For each included item this prints a header block (ID/DESCRIPTION/
+# AGGRESSIVENESS -- EVERY aggressiveness value the item has a variant for,
+# not just the single highest-qualifying variant pgdr_select_variants would
+# choose; a zero-variant item shows "-"), then the verbatim output of
+# running its displayCommand (via pgdr_display_output, bounded by
+# PGDR_DISPLAY_TIMEOUT_SECONDS and never fatal to the run), then a "---"
+# separator line before the next item. A fixed-width table was tried here
+# before, but displayCommand strings have no contract to produce single-line
+# output -- one registry entry's `find ... -exec du -sh {} +` legitimately
+# prints one line PER matched file -- so a table row is the wrong shape;
+# this header/output/separator block has no such assumption.
 #
 # Exit status: 0 on success (including an empty listing when a ceiling
-# excludes everything); 1 if the registry fails to load/validate, or an
-# option is malformed.
+# excludes everything, or when every included item's displayCommand itself
+# failed/timed out -- those are reported inline, not treated as a listing
+# failure); 1 if the registry fails to load/validate, or an option is
+# malformed.
 cmd_list() {
   local max_aggressiveness=""
 
@@ -336,11 +405,9 @@ cmd_list() {
     ]
   ' "$registry_path")
 
-  printf '%-24s  %-40s  %-14s  %s\n' "ID" "DESCRIPTION" "AGGRESSIVENESS" "SIZE"
-
   local row
   while IFS= read -r row; do
-    local id description display_command aggressiveness_display size
+    local id description display_command aggressiveness_display
     id=$(jq -r '.id' <<<"$row")
     description=$(jq -r '.description' <<<"$row")
     display_command=$(jq -r '.displayCommand' <<<"$row")
@@ -348,8 +415,12 @@ cmd_list() {
       .aggressiveness
       | if length == 0 then "-" else (map(tostring) | join(",")) end
     ' <<<"$row")
-    size=$(eval "$display_command" 2>/dev/null)
-    printf '%-24s  %-40s  %-14s  %s\n' "$id" "$description" "$aggressiveness_display" "$size"
+
+    printf 'ID: %s\n' "$id"
+    printf 'DESCRIPTION: %s\n' "$description"
+    printf 'AGGRESSIVENESS: %s\n' "$aggressiveness_display"
+    pgdr_display_output "$display_command"
+    printf -- '---\n'
   done < <(jq -c '.[]' <<<"$rows")
 
   return 0

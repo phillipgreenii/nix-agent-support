@@ -1,0 +1,44 @@
+[
+  {
+    "id": "failing-item",
+    "description": "displayCommand exits non-zero",
+    "path": "/tmp/failing-item",
+    "displayCommand": "echo partial-output && exit 7",
+    "variants": [
+      {
+        "aggressiveness": 1,
+        "variantDescription": "n/a",
+        "dryRunCommand": "echo dry-failing",
+        "removeCommand": "echo remove-failing"
+      }
+    ]
+  },
+  {
+    "id": "slow-item",
+    "description": "displayCommand outlives the timeout",
+    "path": "/tmp/slow-item",
+    "displayCommand": "sleep 5 && echo should-not-appear",
+    "variants": [
+      {
+        "aggressiveness": 1,
+        "variantDescription": "n/a",
+        "dryRunCommand": "echo dry-slow",
+        "removeCommand": "echo remove-slow"
+      }
+    ]
+  },
+  {
+    "id": "ok-item",
+    "description": "displayCommand succeeds normally",
+    "path": "/tmp/ok-item",
+    "displayCommand": "echo OK-SIZE",
+    "variants": [
+      {
+        "aggressiveness": 1,
+        "variantDescription": "n/a",
+        "dryRunCommand": "echo dry-ok",
+        "removeCommand": "echo remove-ok"
+      }
+    ]
+  }
+]
