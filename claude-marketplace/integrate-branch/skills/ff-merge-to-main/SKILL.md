@@ -210,7 +210,54 @@ rebase --abort` to restore the pre-rebase state, keep the branch and worktree
   MUST NOT assert either recovery above — which one applies is exactly what could
   not be determined, and a confident wrong answer is worse than an honest unknown.
 
-## FF-2 — Fast-forward-only merge in the canonical clone
+## FF-2 — Precondition: repo-scoped `nix flake check`, then fast-forward-only merge
+
+FF-2 splits into two parts, the same way FF-0 does: FF-2a is a **blocking
+precondition** that only two specific repos require, and FF-2b is the
+fast-forward merge itself, unchanged for every other repo this handler lands.
+
+### FF-2a — Repo-scoped `nix flake check` (blocking)
+
+`phillipgreenii-nix-agent-support` and `phillipg-nix-ziprecruiter` have no
+external CI system — their pre-commit/pre-push hooks have historically been the
+only automated, whole-repo check they get, and a separate design is narrowing
+those hooks (moving heavyweight test hooks out of pre-commit). For **these two
+repos only**, this handler runs a full `nix flake check` against the just-rebased
+`<WT>` before it moves `<CC>`'s primary branch, so trimming those hooks does not
+leave a landing with no automated check at all:
+
+```bash
+case "$(basename "$CC")" in
+phillipgreenii-nix-agent-support | phillipg-nix-ziprecruiter)
+  (cd "$WT" && nix flake check)
+  ;;
+esac
+```
+
+Match on `basename "$CC"` — the canonical clone's directory name, the same
+identifier this workspace's own `pn-workspace.toml` and root `CLAUDE.md` repo-label
+table key on — not on the git remote: for at least one of these two repos
+(`phillipg-nix-ziprecruiter`, remote `phillipg_mbp.git`) the remote's repo name
+does not match the conventional workspace name.
+
+Every other repo this handler lands (every other repo in this workspace's
+`pn-workspace.toml`, all of which also resolve to `ff-merge-to-main`) skips this
+step entirely — they either already have external CI or have not been evaluated
+for this gap, and this handler MUST NOT widen the check to them without a
+separate decision.
+
+`nix flake check` can run long. Give it an explicit generous timeout, or run it
+in the background and wait for it to finish, per this workspace's guidance on
+long-running nix commands — do not skip or truncate it for expediency.
+
+A non-zero exit here is a **new**, repo-scoped precondition failure — distinct
+from every rebase/merge reason below. **Halt and report** `stopped:flake-check-failed`
+with the repo name and the command's own failure output, and do **not** proceed
+to FF-2b. Do not attempt to fix the failure yourself; that decision (fix the
+flake, or investigate what the narrowed pre-commit hooks would have missed)
+belongs to the operator.
+
+### FF-2b — Fast-forward-only merge in the canonical clone
 
 ```bash
 git -C "$CC" merge --ff-only "$FB"
@@ -222,13 +269,15 @@ checked out where it runs.
 
 ## FF-3 — Retry loop on a lost fast-forward race
 
-The primary branch can advance between FF-0's check and FF-2's merge (another
+The primary branch can advance between FF-0's check and FF-2b's merge (another
 agent landing concurrently, per R-7) — so `merge --ff-only` can fail with "not
 possible to fast-forward." Handle it as a bounded retry, not a one-shot failure:
 
 - `attempts = 0`.
-- If FF-2 fails as non-fast-forward: `attempts++`, then **retry from FF-1**
-  (rebase `<WT>` onto the now-advanced primary again, then re-attempt FF-2).
+- If FF-2b fails as non-fast-forward: `attempts++`, then **retry from FF-1**
+  (rebase `<WT>` onto the now-advanced primary again, then re-attempt FF-2 — for
+  the two named repos this re-runs FF-2a's `nix flake check` too, against the
+  freshly rebased tree, before FF-2b's merge is retried).
 - When `attempts` reaches **2** (the second consecutive non-ff failure), **stop
   and ask** the user rather than retry indefinitely — a persistent ff-race
   warrants attention (R-7).
@@ -241,7 +290,8 @@ first appears on a retry is therefore reported the same way, by FF-1.
 
 ## FF-4 — Cleanup
 
-Only reached after FF-2 succeeds. Run every command against `<CC>`, and **relocate
+Only reached after FF-2 succeeds (FF-2a's check, when it applies, and FF-2b's
+merge). Run every command against `<CC>`, and **relocate
 the shell out of `<WT>` first** — removing the worktree you are currently standing
 in breaks every subsequent command in that shell. Also **stop `<WT>`'s fsmonitor
 daemon before removing the worktree** (best-effort): the daemon is keyed by
@@ -272,13 +322,15 @@ flowchart TD
     F0B -->|Yes| INIT["attempts = 0"]
     INIT --> B["FF-1: git -C WT rebase primary"]
     B --> C{"exit 0?"}
-    C -->|Yes| G["FF-2: git -C CC merge --ff-only FB"]
+    C -->|Yes| F2A{"FF-2a: repo is agent-support or ziprecruiter? run nix flake check"}
     C -->|No| P{"rebase in progress in WT? (--git-path probe)"}
     P -->|"unreadable"| S4["STOP: stopped:rebase-indeterminate — assert neither recovery"]
     P -->|"No — refused, never started"| S5["STOP: stopped:rebase-refused — relay git's message, NO abort/continue"]
     P -->|"Yes — conflict"| C2{"confident in the resolution?"}
-    C2 -->|Yes| D["resolve + continue + summarize"] --> G
+    C2 -->|Yes| D["resolve + continue + summarize"] --> F2A
     C2 -->|No| S1["STOP: stopped:rebase-conflict — abort, keep branch"]
+    F2A -->|"fails"| S11["STOP: stopped:flake-check-failed — operator fixes it"]
+    F2A -->|"passes, or repo not in scope"| G["FF-2b: git -C CC merge --ff-only FB"]
     G --> H{"ff-only ok?"}
     H -->|Yes| I["FF-4: worktree remove + branch -d + prune"]
     H -->|"No: attempts++"| J{"attempts < 2?"}
@@ -293,16 +345,17 @@ completed) or `stopped:<reason>` (any halt above). This handler never returns
 `pr-opened` — that outcome belongs to the `pull-request` handler. Its `<reason>`
 values, and the disposition each one asks of the operator:
 
-| `<reason>`                     | Raised by | What the operator does next                               |
-| ------------------------------ | --------- | --------------------------------------------------------- |
-| detached `HEAD`                | Step 0    | check out the feature branch                              |
-| canonical off-primary or dirty | FF-0a     | Tier R guidance — never reset the canonical (R-3/R-8)     |
-| `worktree-dirty`               | FF-0b     | commit or stash in `<WT>`, then re-invoke                 |
-| `rebase-in-progress`           | FF-0b     | finish or abort **that** rebase in `<WT>`, then re-invoke |
-| `rebase-conflict`              | FF-1      | resolve the conflict, then re-invoke                      |
-| `rebase-refused`               | FF-1      | disposition whatever git's message names, then re-invoke  |
-| `rebase-indeterminate`         | FF-1      | inspect `<WT>`; the handler asserts no recovery           |
-| ff-race retry limit hit        | FF-3      | re-run once concurrent landings settle                    |
+| `<reason>`                     | Raised by | What the operator does next                                                  |
+| ------------------------------ | --------- | ---------------------------------------------------------------------------- |
+| detached `HEAD`                | Step 0    | check out the feature branch                                                 |
+| canonical off-primary or dirty | FF-0a     | Tier R guidance — never reset the canonical (R-3/R-8)                        |
+| `worktree-dirty`               | FF-0b     | commit or stash in `<WT>`, then re-invoke                                    |
+| `rebase-in-progress`           | FF-0b     | finish or abort **that** rebase in `<WT>`, then re-invoke                    |
+| `rebase-conflict`              | FF-1      | resolve the conflict, then re-invoke                                         |
+| `rebase-refused`               | FF-1      | disposition whatever git's message names, then re-invoke                     |
+| `rebase-indeterminate`         | FF-1      | inspect `<WT>`; the handler asserts no recovery                              |
+| `flake-check-failed`           | FF-2a     | fix the flake (repo-scoped; only agent-support/ziprecruiter), then re-invoke |
+| ff-race retry limit hit        | FF-3      | re-run once concurrent landings settle                                       |
 
 These reasons MUST NOT be collapsed into one another — above all,
 `rebase-conflict` MUST NOT absorb the four other rebase reasons
@@ -337,6 +390,15 @@ exist, and prescribes a `git rebase --continue` that exits 128.
 - The handler MUST rebase (`<WT>` onto primary) before attempting the fast-forward
   merge — this is the rebase-first requirement; it MUST NOT fall back to a plain
   non-fast-forward merge.
+- When the repo being landed is `phillipgreenii-nix-agent-support` or
+  `phillipg-nix-ziprecruiter` (identified by `basename "$CC"`), FF-2a MUST run a
+  full `nix flake check` against the rebased `<WT>` and MUST halt and report
+  `stopped:flake-check-failed` on any non-zero exit, rather than proceed to
+  FF-2b's merge — these two repos have no external CI, so this handler's own gate
+  is the only whole-repo check they get at landing time. The handler MUST NOT
+  widen this requirement to any other repo it lands without a separate decision,
+  and MUST NOT identify the repo by git remote (it does not match the
+  conventional repo name for at least one of these two).
 - The handler MUST classify a non-zero `git rebase` exit by git's own
   rebase-in-progress state directory, probed with `git rev-parse --git-path` for
   **both** `rebase-merge` and `rebase-apply`, re-anchoring a relative answer on the
