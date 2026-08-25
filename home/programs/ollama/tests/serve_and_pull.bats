@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# bats file_tags=type:integration
 #
 # Verify pgii-ollama-server:
 #   - calls `ollama serve` exactly once

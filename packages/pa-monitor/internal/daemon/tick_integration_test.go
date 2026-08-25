@@ -1,3 +1,5 @@
+//go:build integration
+
 package daemon
 
 import (
@@ -345,16 +347,8 @@ func TestCaffeinate_TogglePersistsAcrossTicks(t *testing.T) {
 	}
 }
 
-// stubPoller is a minimal PollerInterface implementation used by the
-// integration test. Avoids needing to construct the full *poller.Poller
-// with its many dependencies.
-type stubPoller struct {
-	snapshot func(ctx context.Context) (*aggregate.Tree, bool, error)
-}
-
-func (s *stubPoller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
-	return s.snapshot(ctx)
-}
+// stubPoller moved to pollerstub_test.go (untagged) — nudger_lifecycle_test.go
+// (unit) uses it too (bead pg2-h05lt).
 
 // TestTickIntegration_WritesBlocksAndContributions verifies that when
 // WriteService is wired into RunOptions:

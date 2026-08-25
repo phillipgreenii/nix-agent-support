@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# bats file_tags=type:integration
 
 # This suite runs against BOTH build variants of the wrapper:
 #   - nerd-font OFF (test-claude-status-line):        CLAUDE_SL_TEST_NERD_FONT unset -> text fallbacks

@@ -1,3 +1,5 @@
+//go:build smoke
+
 package main
 
 // This file is pr-pool's Cluster-5 end-to-end test (bead pg2-f3mcb.5): it builds

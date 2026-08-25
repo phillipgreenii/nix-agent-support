@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# bats file_tags=type:integration
 # Argument-contract tests for pw-agent-activity against the REAL
 # agent-activity-api binary -- NO PATH stub.
 #

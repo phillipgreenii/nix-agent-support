@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# bats file_tags=type:unit
 # Unit tests for wait-for-agents-to-finish's argument assembly.
 #
 # Every case here STUBS `pa-monitor` on PATH, so none of them can see the

@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# bats file_tags=type:unit
 
 setup() {
   # SCRIPTS_DIR: injected by nix check (raw src dir), or computed relative to

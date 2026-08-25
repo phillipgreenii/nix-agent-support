@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# bats file_tags=type:unit
 #
 # Verify claude-settings-install-plugin.sh:
 #   - validates cache manifests; removes corrupt cached versions with warning

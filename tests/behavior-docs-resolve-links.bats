@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# bats file_tags=type:integration
 # resolve-links.sh mechanical coverage (bead pg2-2oupw) -- the DEREFERENCING
 # half of D5's `[<uuid>](<url>)` imports-table links. resolve-imports.sh only
 # PARSES the link (tested in tests/behavior-docs-inter-conformance.bats); this

@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# bats file_tags=type:unit
 
 # Smoke test for git-choose-branch
 # Tests that the script can be invoked and handles basic scenarios

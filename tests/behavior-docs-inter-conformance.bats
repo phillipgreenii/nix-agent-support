@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# bats file_tags=type:integration
 # INTER-evaluator mechanical coverage (bead pg2-hvlyj.15, plan item 5.3).
 # Drives resolve-imports.sh (on PATH as `resolve-imports`) over a shared owner
 # set and per-seam-check-type implementer fixtures, asserting the classification

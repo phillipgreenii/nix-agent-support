@@ -1,3 +1,5 @@
+//go:build integration
+
 package beads
 
 // Integration/smoke tests that exercise pr-pool's bd client against a REAL `bd`

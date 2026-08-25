@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# bats file_tags=type:integration
 # Regression guard for the pg-pr PreToolUse agent-marker hook
 # (beads pg2-o3eyk wired+de-locale-fragile'd it; pg2-dumx fixed the enforcement
 # contract + the marker it checks).

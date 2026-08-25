@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# bats file_tags=type:unit
 
 # Unit tests for the visible-width strip_ansi() helper. The status-line wrapper injects this
 # function verbatim via `builtins.readFile ./strip-ansi.bash` (see scripts.nix); testing the

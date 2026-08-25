@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# bats file_tags=type:unit
 #
 # Verify claude-settings-gc-plugin-cache.sh (pg2-x3a3t):
 #   - primary rule: a version reachable from a LOCAL nix-built marketplace's

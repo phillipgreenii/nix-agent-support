@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# bats file_tags=type:unit
 #
 # Verify claude-settings-register-marketplace.sh:
 #   - registers a directory marketplace via `claude plugin marketplace add <path>`

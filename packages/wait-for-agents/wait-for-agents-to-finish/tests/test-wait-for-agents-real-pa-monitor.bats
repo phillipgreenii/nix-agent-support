@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# bats file_tags=type:integration
 # Argument-contract tests for wait-for-agents-to-finish against the REAL
 # pa-monitor binary -- NO PATH stub.
 #

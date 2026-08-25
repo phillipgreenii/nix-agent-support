@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# bats file_tags=type:unit
 
 # Unit tests for git-branch-maintenance
 # Tests key functionality without modifying the real repository

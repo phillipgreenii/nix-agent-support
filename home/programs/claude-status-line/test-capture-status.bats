@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# bats file_tags=type:unit
 
 # Unit tests for the status-line rate_limits capture helper (ADR 0021 §1). The
 # wrapper injects capture-status.bash verbatim via `builtins.readFile` (see

@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# bats file_tags=type:unit
 
 # Smoke test for git-branch-status
 # Tests that the script runs without errors in basic scenarios

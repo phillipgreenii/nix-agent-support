@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# bats file_tags=type:unit
 #
 # Verify claude-settings-replace-managed-keys.sh:
 #   - replaces enabledPlugins and extraKnownMarketplaces with the Nix-declared set

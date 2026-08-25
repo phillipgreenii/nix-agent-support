@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# bats file_tags=type:unit
 
 # Unit tests for pg2-agent with plugin architecture
 # Tests AI agent wrapper with configurable agent plugins

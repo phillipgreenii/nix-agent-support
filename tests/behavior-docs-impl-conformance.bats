@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# bats file_tags=type:integration
 # IMPL-evaluator mechanical coverage (bead pg2-wr6lm.4) — the third parallel
 # evaluator: an implementation reconciled against ITS OWN behavior-docs set.
 # Drives impl-traces.sh (on PATH as `impl-traces`) over inline fixtures asserting

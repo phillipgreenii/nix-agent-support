@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# bats file_tags=type:integration
 # INTRA-evaluator mechanical coverage (bead pg2-hvlyj.14, plan item 5.2).
 # Drives the bundled self-checks.sh (on PATH as `self-checks`) over per-category
 # FAIL/PASS fixtures and asserts the mechanical sections flag the FAIL and stay

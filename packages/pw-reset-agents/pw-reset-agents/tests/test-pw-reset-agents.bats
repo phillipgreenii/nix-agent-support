@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# bats file_tags=type:unit
 # Unit tests for pw-reset-agents' passthrough contract.
 #
 # Every case here STUBS `agent-activity-api` on PATH, so none of them can see
