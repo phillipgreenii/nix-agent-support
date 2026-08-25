@@ -480,6 +480,145 @@ func TestShellParse_ArgLiveExpansion(t *testing.T) {
 	})
 }
 
+// TestShellParse_QuotedMetacharacterArgsDoNotAbstain is pg2-nw3e2's
+// investigation of a reported whole-compound abstain: `bd comments add <id>
+// "<content>" && tail -1` allegedly approves for plain content but abstains
+// once the quoted content carries a bare backtick, a `$VAR` reference, or an
+// embedded escaped quote — even though both leaf commands ("bd", "tail") are
+// individually on their respective safe-list/build-tool allowlists already
+// (ruled out as a missing-entry problem by pg2-lpcpn). The bead asked for
+// isolated repro cases in cmdparse's OWN suite, varying one candidate trigger
+// at a time, to find out whether cmdparse's tokenization/quote-handling is
+// where the whole-compound verdict goes wrong.
+//
+// CONCLUSION (measured against this commit, 2026-08-25): it is NOT. For all
+// four constructs below — (a) bare backtick alone, (b) `$VAR` alone, (c) an
+// embedded escaped quote alone, and (d) the full combination verbatim from
+// the bead report — ParseShell returns Unparseable=false with a clean
+// two-leaf split (`bd ...`, `tail -1`), exactly as it does for the
+// plain-content case. cmdparse does not misclassify the command, does not
+// fall through to Abstain, and does not even see the two leaves as anything
+// but two ordinary simple commands. ArgLiveExpansion — the field that
+// actually distinguishes a live shell expansion from an inert quoted/escaped
+// byte (see TestShellParse_ArgLiveExpansion above) — is computed correctly in
+// every case: false for the escaped backtick and the escaped quote (neither
+// is a live expansion), true for the bare `$HOME` (which IS live inside
+// double quotes, unescaped).
+//
+// A manual, uncommitted end-to-end probe of the compiled hook binary against
+// all four exact command strings (this worktree, permission_mode=auto and
+// =default, cwd=this worktree) also returned "allow" for every one of them —
+// "bd" is unconditionally approved by internal/rules/buildtools'
+// baseApprovedTools (present since this repo's May 2026 migration commit, long
+// before this bead), and "tail -1" clears internal/rules/safecmds
+// independently of its neighbor's argument content. So if the reported
+// abstain is real, it is NOT a cmdparse tokenization/quote-handling defect —
+// the cause, if any, lies downstream of cmdparse (e.g. in
+// internal/rules/safecmds or internal/engine's verdict folding) or depends on
+// session/config context this minimal repro does not capture. Per this
+// bead's scope, no fix belongs here; a follow-up bead (if the abstain can be
+// reproduced against the real binary/session) should investigate the
+// downstream rule-evaluation layer instead of cmdparse.
+//
+// KNOWN BUG (pg2-nw3e2), noted but NOT fixed here, and NOT the cause of any
+// abstain: case (a)'s escaped backtick byte sequence — a backslash directly
+// followed by a backtick, inside a double-quoted string — keeps the escaping
+// BACKSLASH in the flattened Args value instead of stripping it. Real
+// POSIX/bash strips the backslash before a backtick inside double quotes
+// (measured: running the shell builtin echo on the two-character sequence
+// backslash-backtick between "a" and "b", inside double quotes, prints
+// "a" + backtick + "b" with NO backslash surviving). This is not a new
+// defect: parser.go's unquote helper (see its func doc a few hundred lines
+// above this file's own package, in parser.go) only special-cases an escaped
+// double-quote and an escaped backslash in its switch; any other escaped
+// byte — the backtick here, a dollar sign already — falls to its default
+// branch, which keeps the backslash. TestShellParse_ArgLiveExpansion already
+// pins the identical retention for a backslash-escaped dollar sign (source
+// echo "\$X" lowers to Args element "\$X", backslash retained), so this is
+// that same documented, symmetric behavior extended to backtick, not a newly
+// discovered asymmetry. It does not change ArgLiveExpansion (still correctly
+// false — a backslash-escaped byte is never live), so it does not
+// misrepresent safety-relevant provenance; it is a cosmetic content
+// deviation in the flattened Args string only.
+func TestShellParse_QuotedMetacharacterArgsDoNotAbstain(t *testing.T) {
+	type wantLeaf struct {
+		executable string
+		args       []string
+		live       []bool
+	}
+	cases := []struct {
+		name string
+		src  string
+		want []wantLeaf
+	}{
+		{
+			name: "a: bare backtick alone (escaped, inert)",
+			src:  "bd comments add 42 \"text with a backtick \\` inside\" && tail -1",
+			want: []wantLeaf{
+				{"bd", []string{"comments", "add", "42", "text with a backtick \\` inside"}, []bool{false, false, false, false}},
+				{"tail", []string{"-1"}, []bool{false}},
+			},
+		},
+		{
+			name: "b: $VAR reference alone (unescaped, live)",
+			src:  "bd comments add 42 \"text with a dollar $HOME inside\" && tail -1",
+			want: []wantLeaf{
+				{"bd", []string{"comments", "add", "42", "text with a dollar $HOME inside"}, []bool{false, false, false, true}},
+				{"tail", []string{"-1"}, []bool{false}},
+			},
+		},
+		{
+			name: "c: embedded escaped quote alone (inert)",
+			src:  "bd comments add 42 \"text with \\\"quotes\\\" inside\" && tail -1",
+			want: []wantLeaf{
+				{"bd", []string{"comments", "add", "42", "text with \"quotes\" inside"}, []bool{false, false, false, false}},
+				{"tail", []string{"-1"}, []bool{false}},
+			},
+		},
+		{
+			name: "d: full combination, verbatim from the bead report",
+			src:  "bd comments add 42 \"text with a backtick \\` and a dollar $HOME and \\\"quotes\\\" inside\" && tail -1",
+			want: []wantLeaf{
+				{"bd", []string{"comments", "add", "42", "text with a backtick \\` and a dollar $HOME and \"quotes\" inside"}, []bool{false, false, false, true}},
+				{"tail", []string{"-1"}, []bool{false}},
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sp := ParseShell(tc.src)
+			if sp.Unparseable {
+				t.Fatalf("Unparseable = true (Reason=%q, Dialect=%q), want false — cmdparse abstaining is exactly what this test exists to rule out", sp.Reason, sp.Dialect)
+			}
+			if len(sp.Leaves) != len(tc.want) {
+				t.Fatalf("Leaves = %d, want %d", len(sp.Leaves), len(tc.want))
+			}
+			for i, wl := range tc.want {
+				leaf := sp.Leaves[i]
+				if leaf.Executable != wl.executable {
+					t.Errorf("Leaves[%d].Executable = %q, want %q", i, leaf.Executable, wl.executable)
+				}
+				if len(leaf.Args) != len(wl.args) {
+					t.Fatalf("Leaves[%d].Args = %v, want %v", i, leaf.Args, wl.args)
+				}
+				for j := range wl.args {
+					if leaf.Args[j] != wl.args[j] {
+						t.Errorf("Leaves[%d].Args[%d] = %q, want %q", i, j, leaf.Args[j], wl.args[j])
+					}
+				}
+				if len(leaf.ArgLiveExpansion) != len(wl.live) {
+					t.Fatalf("Leaves[%d].ArgLiveExpansion = %v, want %v", i, leaf.ArgLiveExpansion, wl.live)
+				}
+				for j := range wl.live {
+					if leaf.ArgLiveExpansion[j] != wl.live[j] {
+						t.Errorf("Leaves[%d].ArgLiveExpansion[%d] = %v, want %v", i, j, leaf.ArgLiveExpansion[j], wl.live[j])
+					}
+				}
+			}
+		})
+	}
+}
+
 // TestShellParse_ResolveLoopsReplacementSemantics pins the EXACT post-pg2-qkecz
 // loop semantics, which is what the lowering had to replicate — not the
 // pre-fix behaviour.
