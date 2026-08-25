@@ -49,8 +49,13 @@ func (e *Engine) ingestFeedbackToStore(ctx context.Context, repo string, pr api.
 	})
 	mine := own.ActsAsMine()
 
-	rcfg, _ := e.repoConfig(repo) // repo is guaranteed in config here (processFeedback gates on it)
-	ciExcl := cirollup.NewExcluder(rcfg.ExcludedCIChecks)
+	// ExcludedCIChecks was removed outright (operator ruling on pg2-dw73b,
+	// 2026-08-24); its replacement, RepoConfig.CheckInterpreters, is not
+	// yet wired into the rollup — that lands with
+	// pg2-4dz88.2.4/pg2-4dz88.2.6. Until then this Excluder claims nothing,
+	// matching the "uninterpreted checks count in CI health" safe default
+	// the check-interpreter generalization itself requires.
+	ciExcl := cirollup.NewExcluder(nil)
 
 	// UpsertPR once, outside the per-feedback transactions, so we capture
 	// prID before the item loop. This is idempotent with the authoritative

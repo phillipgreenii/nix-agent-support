@@ -1647,26 +1647,36 @@ func TestMaybePromoteDraftEmitsUpdate(t *testing.T) {
 // promotes once the real checks are green — the shared cirollup classifier
 // drops the excluded check from the rollup entirely, so it no longer blocks
 // promotion. (pg2-qs46b)
-func TestMaybePromoteDraftIgnoresExcludedCICheck(t *testing.T) {
+// TestMaybePromoteDraftBlockedByUninterpretedGateCheck pins the
+// transitional safe-default after excluded_ci_checks was removed outright
+// (operator ruling on pg2-dw73b, 2026-08-24) and before
+// pg2-4dz88.2.4/pg2-4dz88.2.6 wire the new check-interpreter registry
+// (RepoConfig.CheckInterpreters, pg2-4dz88.2.3) into the rollup: with no
+// interpreter mechanism consulted yet, a failing approval-gate-style check
+// now blocks draft promotion like any other failing check — the
+// "uninterpreted checks are never silently excluded" safe default the
+// check-interpreter generalization itself requires. Successor to the
+// now-removed TestMaybePromoteDraftIgnoresExcludedCICheck, which pinned
+// the OLD mechanism's opposite behavior.
+func TestMaybePromoteDraftBlockedByUninterpretedGateCheck(t *testing.T) {
 	ctx := realBDCtx(t)
 
 	vcs := newFakeVCS()
 	ci := newFakeCICD()
 
-	// Self-authored draft PR: real check green, policy-bot failing.
+	// Self-authored draft PR: real check green, gate-bot failing.
 	pr := selfDraftPR(56, "foo/bar", "feat/draft-promote-excl")
 	pr.State = "open"
 	vcs.my["foo/bar"] = []api.PR{pr}
 	ci.runs[keyOf("foo/bar", 56)] = []api.CIRun{
 		successRun(),
-		{Name: "policy-bot: approval required", Status: "completed", Conclusion: "failure"},
+		{Name: "gate-bot: approval required", Status: "completed", Conclusion: "failure"},
 	}
 
 	bd := newRealBDClient(t)
 	db := store.OpenForTest(t)
 
 	cfg := cfgWithCICD()
-	cfg.Repos[0].ExcludedCIChecks = []string{"^policy-bot"}
 
 	e, err := New(Deps{
 		Cfg:      cfg,
@@ -1685,12 +1695,12 @@ func TestMaybePromoteDraftIgnoresExcludedCICheck(t *testing.T) {
 		t.Fatalf("Sync: %v (errors=%+v)", err, sum.Errors)
 	}
 
-	if len(vcs.setDraftCalls) != 1 {
-		t.Fatalf("expected 1 SetDraft call (excluded check must not block promotion); got %d: %+v",
+	if len(vcs.setDraftCalls) != 0 {
+		t.Fatalf("expected 0 SetDraft calls (no interpreter claims the failing check, so it must block promotion); got %d: %+v",
 			len(vcs.setDraftCalls), vcs.setDraftCalls)
 	}
-	if sum.DraftPromoted != 1 {
-		t.Fatalf("DraftPromoted: got %d want 1", sum.DraftPromoted)
+	if sum.DraftPromoted != 0 {
+		t.Fatalf("DraftPromoted: got %d want 0", sum.DraftPromoted)
 	}
 }
 

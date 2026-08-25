@@ -840,12 +840,18 @@ func TestIngestCIFailure_SubjectSHASet(t *testing.T) {
 	}
 }
 
-// TestIngestSkipsExcludedCICheck verifies that a CI run matching the repo's
-// excluded_ci_checks pattern (e.g. policy-bot) does NOT produce a ci-failure
-// feedback row — the ingest loop guard is now cirollup.Classify, which
-// short-circuits excluded checks to Excluded regardless of conclusion.
-// (pg2-qs46b)
-func TestIngestSkipsExcludedCICheck(t *testing.T) {
+// TestIngestNoLongerExcludesGateStyleCheck pins the transitional
+// safe-default after excluded_ci_checks was removed outright (operator
+// ruling on pg2-dw73b, 2026-08-24) and before pg2-4dz88.2.4/pg2-4dz88.2.6
+// wire the new check-interpreter registry (RepoConfig.CheckInterpreters,
+// pg2-4dz88.2.3) into the rollup: with no interpreter mechanism consulted
+// yet, a check that would previously have matched excluded_ci_checks (e.g.
+// an approval-gate-style check) now counts toward CI health like any other
+// check — the "uninterpreted checks are never silently excluded" safe
+// default the check-interpreter generalization itself requires. Successor
+// to the now-removed TestIngestSkipsExcludedCICheck, which pinned the OLD
+// mechanism's opposite behavior.
+func TestIngestNoLongerExcludesGateStyleCheck(t *testing.T) {
 	ctx := context.Background()
 	db := store.OpenForTest(t)
 
@@ -855,14 +861,14 @@ func TestIngestSkipsExcludedCICheck(t *testing.T) {
 		URL: "https://github.com/o/r/pull/21", HeadSHA: "deadbeef",
 	}
 	run := api.CIRun{
-		ID: "run-y", Name: "policy-bot: approval required", Status: "completed",
+		ID: "run-y", Name: "gate-bot: approval required", Status: "completed",
 		Conclusion: "failure", URL: "https://u", Provider: "github-actions",
 		HeadSHA: "deadbeef",
 	}
 	e, err := New(Deps{
 		Cfg: &config.Config{
 			SelfLogin: "bot",
-			Repos:     []config.RepoConfig{{Remote: "o/r", VCS: "github", ExcludedCIChecks: []string{"^policy-bot"}}},
+			Repos:     []config.RepoConfig{{Remote: "o/r", VCS: "github"}},
 		},
 		VCS:      map[string]VCSProvider{"github": newFakeVCS()},
 		Beads:    &noopBeads{},
@@ -877,8 +883,9 @@ func TestIngestSkipsExcludedCICheck(t *testing.T) {
 	}
 	storedPR, _ := db.GetPR(ctx, "o/r", 21)
 	rows, _ := db.ListFeedback(ctx, storedPR.ID, store.ListFilter{Kind: "ci-failure"})
-	if len(rows) != 0 {
-		t.Fatalf("expected 0 ci-failure rows for excluded check; got %d: %+v", len(rows), rows)
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 ci-failure row now that no interpreter/exclusion mechanism claims this check; got %d: %+v",
+			len(rows), rows)
 	}
 }
 

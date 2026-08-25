@@ -35,7 +35,13 @@ func (e *Engine) enrichAndStore(ctx context.Context, repo string, pr api.PR, enr
 	if e.deps.Store == nil {
 		return nil
 	}
-	in := enrich.Input{PR: pr, Labels: pr.Labels, Excluder: cirollup.NewExcluder(rcfg.ExcludedCIChecks)}
+	// ExcludedCIChecks was removed outright (operator ruling on pg2-dw73b,
+	// 2026-08-24); its replacement, rcfg.CheckInterpreters, is not yet wired
+	// into the rollup — that lands with pg2-4dz88.2.4/pg2-4dz88.2.6. Until
+	// then this Excluder claims nothing, matching the "uninterpreted checks
+	// count in CI health" safe default the check-interpreter generalization
+	// itself requires.
+	in := enrich.Input{PR: pr, Labels: pr.Labels, Excluder: cirollup.NewExcluder(nil)}
 	if enriched != nil {
 		in.Files = enriched.Files
 		in.Commits = enriched.Commits

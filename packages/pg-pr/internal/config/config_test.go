@@ -456,7 +456,130 @@ func contains(ss []string, want string) bool {
 	return slices.Contains(ss, want)
 }
 
-func TestExcludedCIChecksParsed(t *testing.T) {
+// ----------------------------------------------------------------------
+// CheckInterpreters (pg2-4dz88.2.3) — the pluggable check/status
+// interpreter registry schema, replacing the removed ExcludedCIChecks /
+// excluded_ci_checks (operator ruling on pg2-dw73b, 2026-08-24: removed
+// outright). This leaf defines and parses the SCHEMA only; the actual
+// matching/classification logic is pg2-4dz88.2.4.
+// ----------------------------------------------------------------------
+
+// TestCheckInterpretersParsed proves the new interpreter-registry block
+// round-trips from YAML into the config struct — case 1 of this leaf's
+// testing plan. Generic placeholder names only (pg2-4dz88.2's constraint):
+// no real host/rule/team name.
+func TestCheckInterpretersParsed(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte(`
+self_login: me
+worktree_root: /tmp/wt
+repos:
+  - remote: owner/name
+    check_interpreters:
+      - patterns: ["^approval-gate$", "^gate-bot$"]
+        type: approval-gate
+      - patterns: ["^check-a"]
+        type: some-other-type
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadFile(path)
+	if err != nil {
+		t.Fatalf("LoadFile: %v", err)
+	}
+	got := cfg.Repos[0].CheckInterpreters
+	if len(got) != 2 {
+		t.Fatalf("CheckInterpreters: got %d entries, want 2: %+v", len(got), got)
+	}
+	if got[0].Type != "approval-gate" {
+		t.Errorf("CheckInterpreters[0].Type = %q, want approval-gate", got[0].Type)
+	}
+	if len(got[0].Patterns) != 2 || got[0].Patterns[0] != "^approval-gate$" || got[0].Patterns[1] != "^gate-bot$" {
+		t.Errorf("CheckInterpreters[0].Patterns = %v, want [^approval-gate$ ^gate-bot$]", got[0].Patterns)
+	}
+	if got[1].Type != "some-other-type" {
+		t.Errorf("CheckInterpreters[1].Type = %q, want some-other-type", got[1].Type)
+	}
+	if len(got[1].Patterns) != 1 || got[1].Patterns[0] != "^check-a" {
+		t.Errorf("CheckInterpreters[1].Patterns = %v, want [^check-a]", got[1].Patterns)
+	}
+}
+
+// TestCheckInterpretersAbsentIsZeroValue proves an absent block yields a
+// zero-value config that configures no interpreters and errors on
+// nothing — case 2 of this leaf's testing plan.
+func TestCheckInterpretersAbsentIsZeroValue(t *testing.T) {
+	dir := t.TempDir()
+	p := writeYAML(t, dir, minimalYAML)
+	cfg, err := LoadFile(p)
+	if err != nil {
+		t.Fatalf("LoadFile: %v", err)
+	}
+	if len(cfg.Repos[0].CheckInterpreters) != 0 {
+		t.Errorf("expected no CheckInterpreters for a config predating this field, got %+v",
+			cfg.Repos[0].CheckInterpreters)
+	}
+}
+
+// TestCheckInterpretersEmptyListSameAsAbsent proves an explicit empty
+// check_interpreters list behaves the same as an absent one — case 3 of
+// this leaf's testing plan.
+func TestCheckInterpretersEmptyListSameAsAbsent(t *testing.T) {
+	dir := t.TempDir()
+	p := writeYAML(t, dir, `
+self_login: me
+worktree_root: /tmp/wt
+repos:
+  - remote: owner/name
+    check_interpreters: []
+`)
+	cfg, err := LoadFile(p)
+	if err != nil {
+		t.Fatalf("LoadFile: %v", err)
+	}
+	if len(cfg.Repos[0].CheckInterpreters) != 0 {
+		t.Errorf("expected an explicit empty check_interpreters list to parse as no interpreters, got %+v",
+			cfg.Repos[0].CheckInterpreters)
+	}
+}
+
+// TestCheckInterpretersEmptyPatternListRoundTrips proves a single
+// declaration with an empty (or absent) Patterns list parses successfully
+// — the schema layer merely represents "claims nothing"; enforcing that an
+// empty pattern list actually claims nothing is pg2-4dz88.2.4's job, per
+// this leaf's design note ("carried forward to leaf 2.4").
+func TestCheckInterpretersEmptyPatternListRoundTrips(t *testing.T) {
+	dir := t.TempDir()
+	p := writeYAML(t, dir, `
+self_login: me
+worktree_root: /tmp/wt
+repos:
+  - remote: owner/name
+    check_interpreters:
+      - type: approval-gate
+`)
+	cfg, err := LoadFile(p)
+	if err != nil {
+		t.Fatalf("LoadFile: %v", err)
+	}
+	got := cfg.Repos[0].CheckInterpreters
+	if len(got) != 1 || got[0].Type != "approval-gate" {
+		t.Fatalf("CheckInterpreters = %+v, want one entry with Type approval-gate", got)
+	}
+	if len(got[0].Patterns) != 0 {
+		t.Errorf("expected empty Patterns for an entry declaring none, got %v", got[0].Patterns)
+	}
+}
+
+// TestExcludedCIChecksRemovedIsHardError pins the excluded_ci_checks
+// disposition ruled on pg2-dw73b (2026-08-24: removed outright, not
+// retained as sugar) — case 4 of this leaf's testing plan. A config still
+// carrying the old key is a hard config-load error, not a silent ignore:
+// an unpinned silent-ignore is exactly the failure mode the
+// check-interpreter generalization's grooming review warns against at the
+// config layer.
+func TestExcludedCIChecksRemovedIsHardError(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
 	if err := os.WriteFile(path, []byte(`
@@ -465,17 +588,195 @@ worktree_root: /tmp/wt
 repos:
   - remote: owner/name
     excluded_ci_checks:
-      - "^policy-bot"
+      - "^approval-gate"
 `), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := LoadFile(path)
+	_, err := LoadFile(path)
+	if err == nil {
+		t.Fatal("expected LoadFile to fail on the removed excluded_ci_checks key, got nil error")
+	}
+	if !strings.Contains(err.Error(), "excluded_ci_checks") {
+		t.Errorf("error %q does not mention excluded_ci_checks", err.Error())
+	}
+}
+
+// TestCheckInterpretersMalformedDeclarationIsNotALoadFailure proves a bad
+// regex string and an unrecognized interpreter Type tag both parse
+// successfully — case 5 of this leaf's testing plan. This leaf defines and
+// parses the SCHEMA only (raw strings); compiling Patterns and validating
+// Type against the registered interpreter set — with a warn-and-skip on a
+// malformed entry, mirroring cirollup.NewExcluder's existing
+// invalid-pattern-skip behavior — is pg2-4dz88.2.4's responsibility. So at
+// THIS layer, "malformed" must not fail config load at all.
+func TestCheckInterpretersMalformedDeclarationIsNotALoadFailure(t *testing.T) {
+	dir := t.TempDir()
+	p := writeYAML(t, dir, `
+self_login: me
+worktree_root: /tmp/wt
+repos:
+  - remote: owner/name
+    check_interpreters:
+      - patterns: ["["]
+        type: totally-unknown-type
+`)
+	cfg, err := LoadFile(p)
+	if err != nil {
+		t.Fatalf("LoadFile should not fail on a malformed pattern/unknown type at the schema layer: %v", err)
+	}
+	got := cfg.Repos[0].CheckInterpreters
+	if len(got) != 1 || got[0].Type != "totally-unknown-type" || len(got[0].Patterns) != 1 || got[0].Patterns[0] != "[" {
+		t.Fatalf("CheckInterpreters = %+v, want the malformed declaration stored as given", got)
+	}
+}
+
+func TestValidate_CheckInterpreterTypeRequired(t *testing.T) {
+	cfg := &Config{
+		SelfLogin:    "me",
+		WorktreeRoot: "/tmp",
+		Repos: []RepoConfig{{
+			Remote: "owner/repo",
+			CheckInterpreters: []CheckInterpreterConfig{
+				{Patterns: []string{"^check-a"}, Type: ""},
+			},
+		}},
+	}
+	rep, _ := cfg.Validate()
+	paths := issuePaths(rep)
+	if !contains(paths, "repos[0].check_interpreters[0].type") {
+		t.Errorf("expected error for repos[0].check_interpreters[0].type, got %v", paths)
+	}
+}
+
+// TestRepoConfigUnmarshalYAML_DecodeErrorPropagates proves RepoConfig's
+// custom UnmarshalYAML (added for the excluded_ci_checks hard-error guard)
+// still surfaces a genuine decode error — e.g. a repos[] entry that isn't a
+// mapping at all — rather than swallowing it. Closes a pg-go-mutate gap on
+// the err != nil check guarding value.Decode(&p).
+func TestRepoConfigUnmarshalYAML_DecodeErrorPropagates(t *testing.T) {
+	dir := t.TempDir()
+	p := writeYAML(t, dir, `
+self_login: me
+worktree_root: /tmp/wt
+repos:
+  - "not-a-mapping"
+`)
+	_, err := LoadFile(p)
+	if err == nil {
+		t.Fatal("expected LoadFile to fail when a repos[] entry is not a mapping")
+	}
+}
+
+// TestExpandHome_UserHomeDirErrorPropagates proves expandHome surfaces
+// os.UserHomeDir's error for both the bare "~" and the "~/..." forms,
+// rather than silently returning a zero-value expansion. Closes a
+// pg-go-mutate gap on the err != nil checks in expandHome.
+func TestExpandHome_UserHomeDirErrorPropagates(t *testing.T) {
+	t.Setenv("HOME", "")
+	// Also clear USERPROFILE-equivalents os.UserHomeDir might consult; on
+	// this workspace's supported platforms (darwin/linux) HOME is
+	// authoritative for os.UserHomeDir.
+	for _, tc := range []string{"~", "~/sub/dir"} {
+		if _, err := expandHome(tc); err == nil {
+			t.Errorf("expandHome(%q): expected an error with $HOME unset, got nil", tc)
+		}
+	}
+}
+
+// TestLoadFile_ConfigPathTildeExpansionErrorPropagates proves LoadFile
+// surfaces expandHome's error for the config file PATH argument itself
+// (the very first expandHome call in LoadFile) when $HOME is unset. Closes
+// a pg-go-mutate gap on LoadFile's own err != nil check after expandHome.
+func TestLoadFile_ConfigPathTildeExpansionErrorPropagates(t *testing.T) {
+	t.Setenv("HOME", "")
+	if _, err := LoadFile("~/config.yaml"); err == nil {
+		t.Fatal("expected LoadFile to fail expanding a tilde config path with $HOME unset")
+	}
+}
+
+// TestFinalize_WorktreeRootTildeExpansionErrorPropagates proves finalize
+// surfaces expandHome's error for worktree_root when $HOME is unset.
+// Closes a pg-go-mutate gap on finalize's err != nil check after
+// expandHome(cfg.WorktreeRoot).
+func TestFinalize_WorktreeRootTildeExpansionErrorPropagates(t *testing.T) {
+	dir := t.TempDir()
+	p := writeYAML(t, dir, `
+self_login: me
+worktree_root: ~/somewhere
+repos:
+  - remote: owner/name
+`)
+	t.Setenv("HOME", "")
+	if _, err := LoadFile(p); err == nil {
+		t.Fatal("expected LoadFile to fail expanding worktree_root's tilde with $HOME unset")
+	}
+}
+
+// TestFinalize_RepoPathTildeExpansion proves finalize actually expands a
+// repo's tilde-prefixed path field (not merely "doesn't error") — closes a
+// pg-go-mutate gap on the "r.Path != \"\"" branch guarding
+// expandHome(r.Path): a branch forced to skip that call would leave the
+// tilde unexpanded, which this test would catch.
+func TestFinalize_RepoPathTildeExpansion(t *testing.T) {
+	dir := t.TempDir()
+	p := writeYAML(t, dir, `
+self_login: me
+worktree_root: /tmp/wt
+repos:
+  - remote: owner/name
+    path: ~/somewhere
+`)
+	cfg, err := LoadFile(p)
 	if err != nil {
 		t.Fatalf("LoadFile: %v", err)
 	}
-	got := cfg.Repos[0].ExcludedCIChecks
-	if len(got) != 1 || got[0] != "^policy-bot" {
-		t.Errorf("ExcludedCIChecks = %v, want [^policy-bot]", got)
+	got := cfg.Repos[0].Path
+	if strings.HasPrefix(got, "~") {
+		t.Fatalf("repos[0].path still contains tilde: %q", got)
+	}
+	if !strings.HasSuffix(got, "/somewhere") {
+		t.Fatalf("repos[0].path not expanded: %q", got)
+	}
+}
+
+// TestFinalize_RepoPathTildeExpansionErrorPropagates proves finalize
+// surfaces expandHome's error for a repo's path field when $HOME is unset
+// — closes a pg-go-mutate gap on finalize's err != nil check after
+// expandHome(r.Path). worktree_root here is a plain path (no tilde) so
+// this isolates the repo-path expandHome call from the worktree_root one.
+func TestFinalize_RepoPathTildeExpansionErrorPropagates(t *testing.T) {
+	dir := t.TempDir()
+	p := writeYAML(t, dir, `
+self_login: me
+worktree_root: /tmp/wt
+repos:
+  - remote: owner/name
+    path: ~/somewhere
+`)
+	t.Setenv("HOME", "")
+	if _, err := LoadFile(p); err == nil {
+		t.Fatal("expected LoadFile to fail expanding repos[0].path's tilde with $HOME unset")
+	}
+}
+
+func TestValidate_CheckInterpreterValid(t *testing.T) {
+	tmp := t.TempDir()
+	cfg := &Config{
+		SelfLogin:    "me",
+		WorktreeRoot: tmp,
+		Repos: []RepoConfig{{
+			Remote: "owner/repo", VCS: "github", CICD: []string{"github-actions"},
+			CheckInterpreters: []CheckInterpreterConfig{
+				{Patterns: []string{"^approval-gate$"}, Type: "approval-gate"},
+			},
+		}},
+	}
+	rep, err := cfg.Validate()
+	if err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	if rep.HasErrors() {
+		t.Fatalf("expected no errors for a fully-specified check interpreter, got %+v", rep.Issues)
 	}
 }
 

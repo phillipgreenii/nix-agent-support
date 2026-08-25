@@ -159,12 +159,84 @@ type RepoConfig struct {
 	// extraction for this repo. No patterns are hardcoded in pg-pr itself;
 	// the consuming config (e.g. phillipg-nix-ziprecruiter) supplies them.
 	TicketPatterns []string `yaml:"ticket_patterns,omitempty" json:"ticket_patterns,omitempty"`
-	// ExcludedCIChecks is a list of Go regular-expression strings matched
-	// against each CI check's name. A matched check is EXCLUDED from the CI
-	// failure rollup entirely (never fails/pends/passes it) — see
-	// internal/cirollup. Nothing is hardcoded in pg-pr; the consuming config
-	// (e.g. phillipg-nix-ziprecruiter) supplies patterns such as `^policy-bot`.
-	ExcludedCIChecks []string `yaml:"excluded_ci_checks,omitempty" json:"excluded_ci_checks,omitempty"`
+	// CheckInterpreters is the ORDERED list of check/status interpreter
+	// declarations for this repo — the generalized, pluggable replacement
+	// for the removed ExcludedCIChecks/excluded_ci_checks mechanism
+	// (operator ruling on pg2-dw73b, 2026-08-24: removed outright, not
+	// retained as sugar). Each declaration names the check/status-name
+	// Patterns it claims and the interpreter Type responsible for
+	// classifying them (e.g. "approval-gate"). Declaration order is
+	// preserved through YAML decoding and is load-bearing for the
+	// consuming registry's precedence rule when two declarations could
+	// both claim one name (pg2-4dz88.2.4).
+	//
+	// This field defines and parses the SCHEMA only. Compiling Patterns
+	// into matchers, resolving Type against the set of registered
+	// interpreters, and the actual classification are pg2-4dz88.2.4's
+	// responsibility — mirroring how the old ExcludedCIChecks carried raw
+	// strings while cirollup.NewExcluder (a different package) did the
+	// compiling and warn-and-skip. Consequently, a malformed pattern or an
+	// unrecognized Type does NOT fail config load here; LoadFile stores
+	// the declaration exactly as given, and it is the later
+	// registry-construction step (pg2-4dz88.2.4) that warns-and-skips it.
+	// Absent/empty disables interpretation with no error. Nothing is
+	// hardcoded in pg-pr; the consuming config supplies the actual
+	// patterns and type tags.
+	CheckInterpreters []CheckInterpreterConfig `yaml:"check_interpreters,omitempty" json:"check_interpreters,omitempty"`
+}
+
+// CheckInterpreterConfig declares one entry in a repo's check/status
+// interpreter registry: which check/status names it claims (via Patterns)
+// and which interpreter Type is responsible for classifying them. See
+// RepoConfig.CheckInterpreters for the schema-vs-classification scope split.
+type CheckInterpreterConfig struct {
+	// Patterns is a list of Go regular-expression strings matched against a
+	// check/status name. A name matching any pattern is claimed by this
+	// entry's Type. An empty (or absent) list claims nothing — mirrors the
+	// former ExcludedCIChecks/cirollup.Excluder "empty pattern list claims
+	// nothing" contract, carried forward for pg2-4dz88.2.4 to implement.
+	Patterns []string `yaml:"patterns,omitempty" json:"patterns,omitempty"`
+	// Type is the interpreter-type tag responsible for names matching
+	// Patterns (e.g. "approval-gate"). Nothing is hardcoded in pg-pr; the
+	// consuming config supplies the type tags its interpreter registry
+	// recognizes.
+	Type string `yaml:"type" json:"type"`
+}
+
+// errExcludedCIChecksRemoved is returned when a config still declares the
+// removed excluded_ci_checks key on a repo entry. Operator ruling on
+// pg2-dw73b (2026-08-24): excluded_ci_checks is removed outright, not
+// retained as back-compat sugar, so a config carrying the old key is a hard
+// load failure rather than a silent no-op — an unpinned silent-ignore is
+// exactly the failure mode the check-interpreter generalization warns
+// against (pg2-4dz88.2's grooming review).
+var errExcludedCIChecksRemoved = errors.New(
+	"config: repos[].excluded_ci_checks was removed; use repos[].check_interpreters instead (pg2-dw73b)",
+)
+
+// UnmarshalYAML decodes a RepoConfig normally, then rejects the removed
+// excluded_ci_checks key explicitly. yaml.v3's KnownFields(false) (set in
+// parse, for forward-compatibility with fields this build doesn't know
+// about yet) would otherwise silently drop an old deployment's
+// excluded_ci_checks with no signal at all; this hook targets that one
+// removed key without turning on strict-unknown-field checking for the
+// whole config tree.
+func (r *RepoConfig) UnmarshalYAML(value *yaml.Node) error {
+	type plain RepoConfig
+	var p plain
+	if err := value.Decode(&p); err != nil {
+		return err
+	}
+	*r = RepoConfig(p)
+
+	if value.Kind == yaml.MappingNode {
+		for i := 0; i+1 < len(value.Content); i += 2 {
+			if value.Content[i].Value == "excluded_ci_checks" {
+				return errExcludedCIChecksRemoved
+			}
+		}
+	}
+	return nil
 }
 
 // Load reads and parses the config file using the resolution order described
@@ -411,6 +483,12 @@ func (cfg *Config) Validate() (*ValidationReport, error) {
 			if strings.TrimSpace(m) == "" {
 				add("error", fmt.Sprintf("%s.team_members[%d]", prefix, j),
 					"empty team-member entry")
+			}
+		}
+		for j, ci := range r.CheckInterpreters {
+			if strings.TrimSpace(ci.Type) == "" {
+				add("error", fmt.Sprintf("%s.check_interpreters[%d].type", prefix, j),
+					"required")
 			}
 		}
 	}

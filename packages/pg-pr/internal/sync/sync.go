@@ -1066,17 +1066,17 @@ func (e *Engine) allWatchLabels() []string {
 	return out
 }
 
-// excludedChecksByRepo maps each configured repo's remote to its
-// excluded_ci_checks patterns, for the snapshot's cirollup excluder. (pg2-qs46b)
+// excludedChecksByRepo maps each configured repo's remote to its excluded
+// check patterns, for the snapshot's cirollup excluder. (pg2-qs46b)
+//
+// ExcludedCIChecks/excluded_ci_checks was removed outright (operator ruling
+// on pg2-dw73b, 2026-08-24); its replacement, RepoConfig.CheckInterpreters,
+// is not yet wired into the rollup — that lands with
+// pg2-4dz88.2.4/pg2-4dz88.2.6. Until then this always returns an empty map
+// (no exclusions), matching the "uninterpreted checks count in CI health"
+// safe default the check-interpreter generalization itself requires.
 func (e *Engine) excludedChecksByRepo() map[string][]string {
-	repos := e.cfg().Repos
-	out := make(map[string][]string, len(repos))
-	for _, r := range repos {
-		if len(r.ExcludedCIChecks) > 0 {
-			out[r.Remote] = r.ExcludedCIChecks
-		}
-	}
-	return out
+	return map[string][]string{}
 }
 
 // isSelfAuthored reports whether the given GitHub login matches the
@@ -1788,7 +1788,13 @@ func (e *Engine) maybePromoteDraft(ctx context.Context, enriched *vcs.EnrichedPR
 	if err != nil {
 		return nil
 	}
-	ciExcl := cirollup.NewExcluder(rcfg.ExcludedCIChecks)
+	// ExcludedCIChecks was removed outright (operator ruling on pg2-dw73b,
+	// 2026-08-24); its replacement, rcfg.CheckInterpreters, is not yet
+	// wired into the rollup — that lands with
+	// pg2-4dz88.2.4/pg2-4dz88.2.6. Until then this Excluder claims
+	// nothing, matching the "uninterpreted checks count in CI health" safe
+	// default the check-interpreter generalization itself requires.
+	ciExcl := cirollup.NewExcluder(nil)
 	if enriched != nil {
 		// Bulk-fetched CI runs cover every check; the rollup is over the
 		// PR's last commit so it's authoritative for "all green".
