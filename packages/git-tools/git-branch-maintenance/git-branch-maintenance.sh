@@ -115,6 +115,25 @@ get_primary_worktree() {
   git worktree list --porcelain | awk '/^worktree / { print $2; exit }'
 }
 
+canonicalize_path() {
+  # Resolve a path to its canonical (symlink-free) form, the same form git
+  # itself reports in `git worktree list --porcelain` (e.g. macOS resolving
+  # /tmp to /private/tmp, or a symlinked mktemp prefix). Falls back to the
+  # original string unchanged when the path can't be entered (doesn't exist,
+  # or is empty - `cd ""` would otherwise `cd` to $HOME).
+  local path="$1"
+  local resolved
+  if [[ -z $path ]]; then
+    printf '%s' "$path"
+    return
+  fi
+  if resolved=$(cd "$path" 2>/dev/null && pwd -P); then
+    printf '%s' "$resolved"
+  else
+    printf '%s' "$path"
+  fi
+}
+
 is_protected_branch() {
   local branch="$1"
   local b
@@ -126,16 +145,23 @@ is_protected_branch() {
 
 is_protected_worktree() {
   local path="$1"
+  local canonical_path
+  canonical_path=$(canonicalize_path "$path")
   local p
   for p in "${PROTECTED_WORKTREES[@]}"; do
-    [[ $p == "$path" ]] && return 0
+    [[ $(canonicalize_path "$p") == "$canonical_path" ]] && return 0
   done
   # The repository's own primary worktree (the main working tree) is always
   # implicitly protected, in addition to whatever is configured via
   # git-branch-maintenance.protectedWorktree. It is never itself listed as a
   # configured protectedWorktree, and git's own refusal to remove it is not a
   # sufficient safety net on its own (see try_delete_merged's error handling).
-  if [[ -n ${PRIMARY_WORKTREE:-} && $path == "$PRIMARY_WORKTREE" ]]; then
+  # PROTECTED_WORKTREES and PRIMARY_WORKTREE are each canonicalized here
+  # (rather than once at population time) so both the configured path(s) -
+  # from --protect-worktree or git-branch-maintenance.protectedWorktree,
+  # which populate the same array - and the worktree path being compared
+  # against are resolved before the string comparison, however they arrived.
+  if [[ -n ${PRIMARY_WORKTREE:-} && $canonical_path == "$(canonicalize_path "$PRIMARY_WORKTREE")" ]]; then
     return 0
   fi
   return 1

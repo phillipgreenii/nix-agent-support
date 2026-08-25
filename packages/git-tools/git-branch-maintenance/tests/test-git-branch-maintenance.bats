@@ -326,6 +326,45 @@ run_git_branch_maintenance() {
     git worktree remove "$ordinary_wt" --force 2>/dev/null || true
 }
 
+@test "git-branch-maintenance protects a worktree configured with a raw non-canonicalized path" {
+    # Two branches at the same commit as main, so both are trivially
+    # "merged" into origin/main without needing extra commits/merges.
+    git branch protected-branch main
+    git branch ordinary-branch main
+
+    # Deliberately DO NOT canonicalize this path (contrast with the previous
+    # test's `cd "$(mktemp -d)" && pwd -P`). On macOS, mktemp -d returns a
+    # path under /var/folders/... which is itself a symlink chain to
+    # /private/var/folders/...; git canonicalizes worktree paths when it
+    # registers them, so get_branch_worktree() reports back the resolved
+    # /private/... form. A raw, un-resolved --protect-worktree path must
+    # still match - is_protected_worktree() must canonicalize the configured
+    # path(s), not just compare the literal strings.
+    protected_wt="$(mktemp -d)/protected-worktree-raw"
+    git worktree add "$protected_wt" protected-branch
+
+    ordinary_wt="$(mktemp -d)/ordinary-worktree-raw"
+    git worktree add "$ordinary_wt" ordinary-branch
+
+    run_git_branch_maintenance --delete-merged --delete-merged-worktrees --protect-worktree "$protected_wt"
+    [ "$status" -eq 0 ]
+
+    # The worktree/branch protected via a raw, non-canonical path must still
+    # be protected.
+    [ -d "$protected_wt" ]
+    git branch | grep -q "protected-branch"
+
+    # An ordinary, unprotected worktree must still be deleted - the
+    # canonicalization fix must not over-broaden protection.
+    [ ! -d "$ordinary_wt" ]
+    remaining_branches=$(git branch)
+    [[ $remaining_branches != *"ordinary-branch"* ]]
+
+    # Safety-net cleanup in case an assertion above caught a regression.
+    git worktree remove "$protected_wt" --force 2>/dev/null || true
+    git worktree remove "$ordinary_wt" --force 2>/dev/null || true
+}
+
 @test "git-branch-maintenance reports failure instead of claiming success when worktree removal fails" {
     # Create a linked worktree for test-branch. Canonicalize the path up
     # front (see the comment in the previous test) so the mock below matches
