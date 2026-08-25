@@ -1,10 +1,10 @@
 #!/usr/bin/env bats
 # Unit tests for the bash completion script's registry-driven item-id
-# helper (completions/pg-disk-reclaimer.bash, bead pg2-txxyj.7).
-# _pg_disk_reclaimer_item_ids is plain bash+jq and is tested directly here
-# without loading the bash-completion framework (_init_completion et al.)
-# -- this suite never calls the top-level _pg_disk_reclaimer completion
-# function, only the id-extraction helper it delegates to.
+# helpers (completions/pg-disk-reclaimer.bash, beads pg2-txxyj.7/pg2-d2lo7).
+# _pg_disk_reclaimer_item_ids and _pg_disk_reclaimer_complete_item_ids are
+# plain bash+jq and are tested directly here without loading the
+# bash-completion framework (_init_completion et al.) -- this suite never
+# calls the top-level _pg_disk_reclaimer completion function.
 
 setup() {
   if [[ -z ${SCRIPTS_DIR:-} ]]; then
@@ -59,4 +59,39 @@ not valid json
 JSON
   run _pg_disk_reclaimer_item_ids
   [ -z "$output" ]
+}
+
+@test "_pg_disk_reclaimer_complete_item_ids offers every id with no prefix filter" {
+  mkdir -p "$HOME/.config/pg-disk-reclaimer"
+  cp "$FIXTURES_DIR/valid.json" "$HOME/.config/pg-disk-reclaimer/registry.json"
+  _pg_disk_reclaimer_complete_item_ids ""
+  [ "${#COMPREPLY[@]}" -eq 2 ]
+  [ "${COMPREPLY[0]}" = "npm-cache" ]
+  [ "${COMPREPLY[1]}" = "brew-prefix-info" ]
+}
+
+@test "_pg_disk_reclaimer_complete_item_ids filters to ids matching the given prefix" {
+  mkdir -p "$HOME/.config/pg-disk-reclaimer"
+  cp "$FIXTURES_DIR/valid.json" "$HOME/.config/pg-disk-reclaimer/registry.json"
+  _pg_disk_reclaimer_complete_item_ids "npm"
+  [ "${#COMPREPLY[@]}" -eq 1 ]
+  [ "${COMPREPLY[0]}" = "npm-cache" ]
+}
+
+@test "_pg_disk_reclaimer_complete_item_ids treats a command-substitution-shaped id as a literal candidate, never executing it (regression for pg2-d2lo7)" {
+  # pg2-d2lo7: the original implementation piped ids through
+  # `compgen -W "$ids" -- "$cur"`, and compgen -W EXPANDS each word in its
+  # list -- including command substitution -- so an id like
+  # "$(touch ...)" executed the moment a user tab-completed `reclaim`.
+  # This test proves the fix: the crafted id comes back as an inert
+  # string, and nothing on disk gets created.
+  local marker="$TEST_DIR/pwned-marker"
+  mkdir -p "$HOME/.config/pg-disk-reclaimer"
+  cat >"$HOME/.config/pg-disk-reclaimer/registry.json" <<JSON
+[{"id": "\$(touch $marker)", "description": "x", "path": "/tmp/x", "displayCommand": "echo x", "variants": []}]
+JSON
+  _pg_disk_reclaimer_complete_item_ids ""
+  [ "${#COMPREPLY[@]}" -eq 1 ]
+  [ "${COMPREPLY[0]}" = '$(touch '"$marker"')' ]
+  [ ! -e "$marker" ]
 }

@@ -19,6 +19,26 @@ _pg_disk_reclaimer_item_ids() {
   jq -r '.[].id' "$registry" 2>/dev/null
 }
 
+# _pg_disk_reclaimer_complete_item_ids: fills COMPREPLY with the ids from
+# _pg_disk_reclaimer_item_ids that prefix-match CUR. Deliberately does NOT
+# route those ids through `compgen -W "$ids" -- "$cur"`: compgen -W splits
+# its wordlist and then EXPANDS each resultant word -- including command
+# substitution -- so a registry item whose id contains e.g. `$(...)` would
+# execute the moment a user tab-completes `reclaim <TAB>`, without ever
+# running any command themselves. Matching ids by hand in [[ ]] never
+# re-expands their content as shell code.
+_pg_disk_reclaimer_complete_item_ids() {
+  local cur="$1"
+  local -a ids
+  mapfile -t ids < <(_pg_disk_reclaimer_item_ids)
+  COMPREPLY=()
+  local id
+  for id in "${ids[@]}"; do
+    [[ $id == "$cur"* ]] && COMPREPLY+=("$id")
+  done
+  return 0
+}
+
 _pg_disk_reclaimer() {
   local cur prev words
   _init_completion || return
@@ -36,7 +56,7 @@ _pg_disk_reclaimer() {
     if [[ $cur == -* ]]; then
       mapfile -t COMPREPLY < <(compgen -W "--aggressiveness --apply --help -h --version -v" -- "$cur")
     else
-      mapfile -t COMPREPLY < <(compgen -W "$(_pg_disk_reclaimer_item_ids)" -- "$cur")
+      _pg_disk_reclaimer_complete_item_ids "$cur"
     fi
     return
   fi
