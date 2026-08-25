@@ -101,6 +101,88 @@ func TestBuildPRInput_OverlaysMergeability(t *testing.T) {
 	}
 }
 
+// TestBuildPRInput_PopulatesHiddenFromStore is the direct unit-test coverage
+// for the pg2-4dz88.4.3 USER_HIDDEN plumbing inside buildPRInput's
+// `e.deps.Store != nil` branch: in.Hidden/in.HiddenReason are read from the
+// same stored PullRequest row the revisions/approvals lookups just used, not
+// re-derived elsewhere. Flagged as an unmeasured candidate gap on pg2-vqidw
+// (sync.go's buildPRInput, guarded by Store != nil) because neither existing
+// buildPRInput test above sets Deps.Store (so this branch never runs for
+// them) and TestSyncHiddenPR_StillObserved_NoFalseClose asserts only the
+// store-level ListOpenPRs/outbox behavior, never in.Hidden/in.HiddenReason on
+// the snapshot input — so no test previously asserted this specific overlay.
+func TestBuildPRInput_PopulatesHiddenFromStore(t *testing.T) {
+	ctx := context.Background()
+	db := store.OpenForTest(t)
+	bdc := &fakeDepBeads{}
+	e, err := New(Deps{
+		Cfg:   &config.Config{SelfLogin: "me", Repos: []config.RepoConfig{{Remote: "o/r"}}},
+		VCS:   map[string]VCSProvider{"github": &fakeVCS{}},
+		Beads: bdc,
+		Store: db,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if _, err := db.UpsertPR(ctx, store.PullRequest{
+		Repo: "o/r", Number: 1, Ownership: "mine", Author: "me",
+		State: "open", Branch: "feat/x", Base: "main",
+		URL: "https://example.invalid/o/r/pull/1",
+	}); err != nil {
+		t.Fatalf("seed UpsertPR: %v", err)
+	}
+	if err := db.SetHidden(ctx, "o/r", 1, true, "still baking"); err != nil {
+		t.Fatalf("seed SetHidden: %v", err)
+	}
+
+	pr := api.PR{Repo: "o/r", Number: 1, Author: "me", State: "open"}
+	in := e.buildPRInput(ctx, pr, nil, bdc, nil, config.RepoConfig{Remote: "o/r"}, "")
+
+	if !in.Hidden {
+		t.Error("expected in.Hidden true for a store row with UserHidden set")
+	}
+	if in.HiddenReason != "still baking" {
+		t.Errorf("expected in.HiddenReason %q, got %q", "still baking", in.HiddenReason)
+	}
+}
+
+// TestBuildPRInput_HiddenFalseWhenStoreRowNotHidden is the symmetric negative
+// case for the same branch: a Store row that was never hidden must leave
+// in.Hidden false and in.HiddenReason empty, so a future default-value bug
+// (e.g. always reporting hidden) would be caught alongside the positive case
+// above.
+func TestBuildPRInput_HiddenFalseWhenStoreRowNotHidden(t *testing.T) {
+	ctx := context.Background()
+	db := store.OpenForTest(t)
+	bdc := &fakeDepBeads{}
+	e, err := New(Deps{
+		Cfg:   &config.Config{SelfLogin: "me", Repos: []config.RepoConfig{{Remote: "o/r"}}},
+		VCS:   map[string]VCSProvider{"github": &fakeVCS{}},
+		Beads: bdc,
+		Store: db,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if _, err := db.UpsertPR(ctx, store.PullRequest{
+		Repo: "o/r", Number: 1, Ownership: "mine", Author: "me",
+		State: "open", Branch: "feat/x", Base: "main",
+		URL: "https://example.invalid/o/r/pull/1",
+	}); err != nil {
+		t.Fatalf("seed UpsertPR: %v", err)
+	}
+
+	pr := api.PR{Repo: "o/r", Number: 1, Author: "me", State: "open"}
+	in := e.buildPRInput(ctx, pr, nil, bdc, nil, config.RepoConfig{Remote: "o/r"}, "")
+
+	if in.Hidden {
+		t.Error("expected in.Hidden false for a store row that was never hidden")
+	}
+	if in.HiddenReason != "" {
+		t.Errorf("expected empty in.HiddenReason, got %q", in.HiddenReason)
+	}
+}
+
 // ----------------------------------------------------------------------
 // refreshPR tests
 // ----------------------------------------------------------------------
