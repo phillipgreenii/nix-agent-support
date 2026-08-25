@@ -1,0 +1,29 @@
+[
+  {
+    "id": "npm-cache",
+    "description": "npm package cache",
+    "path": "~/.npm",
+    "displayCommand": "du -sh ~/.npm",
+    "variants": [
+      {
+        "aggressiveness": 0,
+        "variantDescription": "clear stale entries only",
+        "dryRunCommand": "npm cache verify",
+        "removeCommand": "npm cache clean --force"
+      },
+      {
+        "aggressiveness": 2,
+        "variantDescription": "wipe entire cache",
+        "dryRunCommand": "echo would remove ~/.npm",
+        "removeCommand": "rm -rf ~/.npm"
+      }
+    ]
+  },
+  {
+    "id": "brew-prefix-info",
+    "description": "Homebrew installation info (informational only)",
+    "path": "/opt/homebrew",
+    "displayCommand": "brew --prefix",
+    "variants": []
+  }
+]

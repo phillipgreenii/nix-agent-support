@@ -1,0 +1,22 @@
+[
+  {
+    "id": "dup-aggr",
+    "description": "item with duplicate variant aggressiveness",
+    "path": "/tmp/c",
+    "displayCommand": "echo c",
+    "variants": [
+      {
+        "aggressiveness": 1,
+        "variantDescription": "variant one",
+        "dryRunCommand": "echo dry1",
+        "removeCommand": "echo remove1"
+      },
+      {
+        "aggressiveness": 1,
+        "variantDescription": "variant two",
+        "dryRunCommand": "echo dry2",
+        "removeCommand": "echo remove2"
+      }
+    ]
+  }
+]

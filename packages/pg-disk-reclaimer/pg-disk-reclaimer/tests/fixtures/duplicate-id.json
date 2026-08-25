@@ -1,0 +1,16 @@
+[
+  {
+    "id": "dup-id",
+    "description": "first",
+    "path": "/tmp/a",
+    "displayCommand": "echo a",
+    "variants": []
+  },
+  {
+    "id": "dup-id",
+    "description": "second",
+    "path": "/tmp/b",
+    "displayCommand": "echo b",
+    "variants": []
+  }
+]

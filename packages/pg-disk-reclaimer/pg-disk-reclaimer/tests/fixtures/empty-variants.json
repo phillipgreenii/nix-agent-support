@@ -1,0 +1,9 @@
+[
+  {
+    "id": "info-only",
+    "description": "informational-only item, never reclaimable",
+    "path": "/tmp/info",
+    "displayCommand": "echo info",
+    "variants": []
+  }
+]
