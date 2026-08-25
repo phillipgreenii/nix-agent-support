@@ -2436,6 +2436,158 @@ func TestIntegration_HeredocStdinMessageSinkCarveOut(t *testing.T) {
 	}
 }
 
+// TestIntegration_HeredocPipeRelayMessageSinkCarveOut is the pg2-yxxwg carve-out:
+// a heredoc RELAYED through a separate allowlisted reader leaf into an
+// allowlisted message-sink's `--stdin`, across a pipe — `cat <<'EOF' ... EOF |
+// bd comment <id> --stdin` — as opposed to
+// TestIntegration_HeredocStdinMessageSinkCarveOut's shape, where the heredoc
+// lands DIRECTLY on the sink's own leaf with no pipe at all.
+//
+// pg2-9zrpa's own carve-out does not cover this shape: heredocFloor is called
+// for the `cat` leaf (which carries the heredoc), and
+// messageSinkStdinHeredocCleared checks THAT leaf's own Executable/Args against
+// heredocStdinSinkFlags — but the leaf is `cat`, not `bd`, so the check always
+// fails and the whole expression floors to NoOpinion even though `bd`'s leaf
+// right after the pipe DOES carry `--stdin`. This is the corpus finding recorded
+// in pg2-9zrpa's own close reason, and the reason this bead exists.
+func TestIntegration_HeredocPipeRelayMessageSinkCarveOut(t *testing.T) {
+	t.Setenv("WORKSPACE_ROOT", "/Users/testuser/workspace")
+	projectRoot := "/Users/testuser/workspace/my-project"
+	cwd := projectRoot
+	eng := buildFullEngine(projectRoot, cwd)
+
+	decide := func(command string) hookio.RuleResult {
+		return eng.EvaluateHook(&hookio.HookInput{
+			ToolName:  "Bash",
+			ToolInput: makeBashJSON(command),
+			CWD:       cwd,
+		})
+	}
+
+	tests := []struct {
+		name    string
+		command string
+		want    hookio.Decision
+	}{
+		// The carve-out's own positive case: quoted delimiter, allowlisted reader
+		// (`cat`), piped into exactly one downstream leaf that is the allowlisted
+		// sink (`bd`) carrying `--stdin`. Nothing left for heredocFloor to object
+		// to on the reader leaf, and bd's own leaf resolves through build-tools'
+		// unconditional bd approval exactly as the direct-shape carve-out's
+		// positive case does.
+		//
+		// The pipe target sits on the SAME source line as the `<<'EOF'` redirect,
+		// before the heredoc body — that is where bash's own grammar requires it;
+		// the body and closing delimiter follow on their own lines, and nothing may
+		// share the closing delimiter's line or the heredoc is never terminated.
+		{
+			"quoted heredoc relayed through cat into bd --stdin resolves Approve",
+			"cat <<'EOF' | bd comment abc-1 --stdin\nhello world\nEOF",
+			hookio.Approve,
+		},
+		// Same shape, UNQUOTED delimiter: condition 1 fails on the READER leaf, so
+		// this floors exactly like the direct-shape carve-out's own unquoted case —
+		// unchanged RCE reasoning, quoting only suppresses expansion.
+		{
+			"same but unquoted delimiter still floors",
+			"cat <<EOF | bd comment abc-1 --stdin\nhello world\nEOF",
+			hookio.NoOpinion,
+		},
+		// Reader not on heredocReaderAllowlist: `grep` is a read-only filter (it can
+		// read the heredoc body from stdin exactly as `cat` can, since it is given
+		// no file operand of its own — its argument is the search PATTERN, not a
+		// path) but is not one of the two corpus-measured spellings
+		// (heredocReaderAllowlist admits `cat`/`/bin/cat` only, deliberately not
+		// widened by this bead), so condition 2 fails and this still floors.
+		{
+			"reader not on heredocReaderAllowlist still floors",
+			"grep foo <<'EOF' | bd comment abc-1 --stdin\nhello world\nEOF",
+			hookio.NoOpinion,
+		},
+		// Quoted, allowlisted reader, allowlisted sink identity, but the sink is
+		// missing `--stdin`: condition 4 fails, so the sink is not provably
+		// consuming the relayed bytes as a MESSAGE (bd's CLI would not read them at
+		// all for this invocation), and this still floors.
+		{
+			"sink without --stdin in the pipe-relay shape still floors",
+			"cat <<'EOF' | bd comment abc-1\nhello world\nEOF",
+			hookio.NoOpinion,
+		},
+		// Quoted, allowlisted reader, but the pipe target is not on
+		// heredocStdinSinkFlags at all (echo is not bd): condition 3 fails.
+		{
+			"sink not on heredocStdinSinkFlags still floors",
+			"cat <<'EOF' | echo\nhello world\nEOF",
+			hookio.NoOpinion,
+		},
+		// A THIRD stage after the sink. cmdparse.DownstreamStages returns every
+		// leaf whose PipelineIndex exceeds the reader's within the same pipeline,
+		// transitively — not merely the next one — so a third stage always makes
+		// pipeRelayHeredocCleared see TWO downstream leaves (the sink AND the third
+		// stage) and refuse, exactly as heredocFloor's own doc says it must: this
+		// carve-out reasons about a strict two-stage reader-to-sink relay only, and
+		// does not attempt to reason about what a third stage might do with bd's
+		// own stdout.
+		//
+		// A true FAN-OUT (one stdout landing on two destinations at once) is not
+		// meaningfully constructible with plain `|` alone — POSIX/bash pipe syntax
+		// only ever connects one stage's stdout to the NEXT stage's stdin, so
+		// expressing a fan-out needs `tee` or a process substitution, either of
+		// which would fail this carve-out for an entirely separate reason (`tee`/
+		// the substitution's own inner command is not `bd`, so pipeRelaySinkCleared
+		// already refuses it) rather than exercising the "more than one downstream
+		// leaf" branch specifically. No separate fan-out case is added for that
+		// reason; the three-stage case below is what actually exercises that branch.
+		{
+			"a third stage after the sink still floors",
+			"cat <<'EOF' | bd comment abc-1 --stdin | cat\nhello world\nEOF",
+			hookio.NoOpinion,
+		},
+		// Multi-heredoc reader leaf, ONE quoted and one not (mirrors the direct
+		// carve-out's own multi-heredoc case): one unquoted extent anywhere on the
+		// reader refuses the WHOLE leaf.
+		{
+			"multi-heredoc reader with one unquoted extent still floors",
+			"cat <<'A' <<B | bd comment abc-1 --stdin\nfoo\nA\nbar\nB",
+			hookio.NoOpinion,
+		},
+		// The same shape with BOTH extents quoted clears.
+		{
+			"multi-heredoc reader with both extents quoted clears",
+			"cat <<'A' <<'B' | bd comment abc-1 --stdin\nfoo\nA\nbar\nB",
+			hookio.Approve,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := decide(tt.command)
+			if got.Decision != tt.want {
+				t.Errorf("EvaluateHook(%q) = %v (%s / %s), want %v", tt.command, got.Decision, got.Module, got.Reason, tt.want)
+			}
+		})
+	}
+
+	// NOT ENUMERATED BY THE OPERATOR RULING'S FIVE CONDITIONS, BUT LOAD-BEARING:
+	// the reader leaf's own argv must independently clear the same static screen
+	// ClassifySubstitutionBody already applies to an identical reader shape
+	// (cmdparse.HeredocReaderCleared's conditions 3-4). Without it, a positional
+	// file operand on the SAME leaf as the heredoc makes `cat` emit that FILE's
+	// bytes instead of the heredoc body — verified empirically in this bead's own
+	// investigation (see HeredocReaderCleared's doc) — which piped into bd's
+	// `--stdin` would be an arbitrary-file-exfiltration route. This asserts only
+	// the security property that matters (never Approve), not a specific floor
+	// verdict, since the exact non-Approve decision for an arbitrary path may
+	// depend on patheval/secretpath's own classification of that path rather than
+	// on this carve-out.
+	t.Run("reader with an extra file operand alongside its heredoc never approves", func(t *testing.T) {
+		got := decide("cat /tmp/some-other-file.txt <<'EOF' | bd comment abc-1 --stdin\nhello world\nEOF")
+		if got.Decision == hookio.Approve {
+			t.Errorf("EvaluateHook(...) = approve (%s: %s); a reader with a file operand alongside its heredoc must never be green-lit — cat would emit the FILE's bytes, not the heredoc body",
+				got.Module, got.Reason)
+		}
+	})
+}
+
 // TestIntegration_UnparseableSubstitutionNeverApproves is the pg2-wguam guard: a
 // P0 live auto-approve hole where ONE apostrophe of English prose turned `abstain`
 // into `allow`.

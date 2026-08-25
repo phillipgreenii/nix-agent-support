@@ -1438,3 +1438,75 @@ func TestClassifySubstitutionBody_HeredocReaderAdmission(t *testing.T) {
 		})
 	}
 }
+
+// TestHeredocReaderCleared pins HeredocReaderCleared's own leaf-based contract —
+// the pg2-yxxwg accessor `internal/engine` uses for its pipe-relay carve-out's
+// reader half (see that function's own doc). It is the LEAF-based counterpart of
+// TestClassifySubstitutionBody_HeredocReaderAdmission's TEXT-based table above:
+// every case there that reaches the `leaf.HasHeredoc` branch of
+// ClassifySubstitutionBody is repeated here against the single leaf Parse(body)
+// produces, and must agree (HeredocReaderCleared == (ClassifySubstitutionBody ==
+// SubstitutionCleared)) — plus the four cases that table does not cover at all,
+// because ClassifySubstitutionBody's own test never needed them: a reader leaf
+// carrying an extra ARGV operand or an extra REDIRECTION alongside its heredoc,
+// which readerArgsClearance/redirectClearance already screen for the TEXT entry
+// point (this function reuses the exact same two helpers) but which had no
+// dedicated regression case before this bead added one — see this bead's own
+// investigation, recorded in HeredocReaderCleared's doc comment, for why this
+// screen is load-bearing rather than incidental.
+func TestHeredocReaderCleared(t *testing.T) {
+	leafOf := func(t *testing.T, command string) ParsedCommand {
+		t.Helper()
+		leaves := Parse(command)
+		if len(leaves) != 1 {
+			t.Fatalf("Parse(%q) = %d leaves, want exactly 1", command, len(leaves))
+		}
+		return leaves[0]
+	}
+
+	tests := []struct {
+		name    string
+		command string
+		want    bool
+	}{
+		// --- Agrees with TestClassifySubstitutionBody_HeredocReaderAdmission's
+		//     ADMISSION cases ---
+		{"quoted heredoc into cat clears", "cat <<'EOF'\nhello\nEOF", true},
+		{"double-quoted delimiter is quoted too", "cat <<\"EOF\"\nhello\nEOF", true},
+		{"backslash-escaped delimiter is quoted too", "cat <<\\EOF\nhello\nEOF", true},
+		{"the corpus's one non-cat spelling: /bin/cat", "/bin/cat <<'EOF'\nhello\nEOF", true},
+		{"a quoted heredoc body that itself LOOKS like a substitution is still inert data", "cat <<'EOF'\n$(rm -rf ~)\nEOF", true},
+		{"the <<- strip-tabs form is quoted the same way", "cat <<-'EOF'\n\thello\n\tEOF", true},
+		{"two quoted heredocs into cat both clear", "cat <<'A' <<'B'\nbody a\nA\nbody b\nB", true},
+
+		// --- Agrees with the same table's REFUSAL cases ---
+		{"unquoted heredoc into cat stays refused", "cat <<EOF\nhello\nEOF", false},
+		{"quoted heredoc into an unlisted reader stays refused", "grep foo <<'EOF'\nhello\nEOF", false},
+		{"quoted heredoc into sh still refuses (RCE, not merely unsafe expansion)", "sh <<'EOF'\nrm -rf /\nEOF", false},
+		{"quoted heredoc into python still refuses", "python <<'EOF'\nimport os\nEOF", false},
+		{"a herestring into cat stays refused (no Heredocs extent to admit)", "cat <<< 'hello'", false},
+		{"one unquoted heredoc among two refuses the whole leaf", "cat <<'A' <<B\nbody a\nA\nbody b\nB", false},
+		{"a write flag still refuses despite the quoted heredoc", "yq -i <<'EOF'\nhello\nEOF", false},
+
+		// --- NOT covered by that table at all: this function's own load-bearing
+		//     argv/redirect screen (see HeredocReaderCleared's doc — the
+		//     empirically-verified file-operand bypass this bead discovered) ---
+		{"an extra file operand alongside the heredoc refuses (readerArgsClearance delegates, not clears)", "cat /tmp/some-other-file.txt <<'EOF'\nhello\nEOF", false},
+		{"a bare formatting flag with no operand still clears (readerArgsClearance skips it)", "cat -n <<'EOF'\nhello\nEOF", true},
+		{"an extra read redirection alongside the heredoc refuses the same way", "cat < /tmp/some-other-file.txt <<'EOF'\nhello\nEOF", false},
+		{"an extra WRITE redirection alongside the heredoc refuses outright", "cat > /tmp/out.txt <<'EOF'\nhello\nEOF", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			leaf := leafOf(t, tt.command)
+			got := HeredocReaderCleared(leaf)
+			if got != tt.want {
+				t.Errorf("HeredocReaderCleared(Parse(%q)[0]) = %v, want %v", tt.command, got, tt.want)
+			}
+			if wantClassified := ClassifySubstitutionBody(tt.command) == SubstitutionCleared; got != wantClassified {
+				t.Errorf("HeredocReaderCleared(%q) = %v disagrees with ClassifySubstitutionBody(...)==SubstitutionCleared = %v — the leaf-based and text-based entry points must agree for a body that IS a sole simple command",
+					tt.command, got, wantClassified)
+			}
+		})
+	}
+}

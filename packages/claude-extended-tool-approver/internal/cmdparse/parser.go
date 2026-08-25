@@ -1117,6 +1117,79 @@ func heredocClearedForSubstitution(leaf ParsedCommand) bool {
 	return true
 }
 
+// HeredocReaderCleared reports whether leaf is admissible as a heredoc READER whose
+// stdout may safely be trusted to carry EXACTLY leaf's own heredoc body, verbatim —
+// the leaf-shaped analogue of ClassifySubstitutionBody's own `leaf.HasHeredoc`
+// branch (pg2-phtl3), exported for `internal/engine`'s pg2-yxxwg pipe-relay
+// carve-out (heredocFloor's "THE THIRD NARROWING"), which needs the identical
+// admission test applied to a REAL PIPELINE LEAF rather than a recursed
+// substitution body's sole leaf. ClassifySubstitutionBody itself cannot be reused
+// for that call site: its signature takes raw TEXT and re-parses it
+// (soleSimpleCommandLeaf), and ADR 0039 forbids re-parsing a leaf this seam has
+// already parsed once.
+//
+// FOUR CONDITIONS, ALL REQUIRED, reproducing ClassifySubstitutionBody's
+// `leaf.HasHeredoc` branch line for line rather than sharing code with it — a
+// deliberate duplication, not an oversight, so that pg2-phtl3's own approved path
+// is never put at risk by a change made for a different bead:
+//
+//  1. heredocClearedForSubstitution(leaf) — every heredoc extent quoted, and the
+//     leaf's own executable on heredocReaderAllowlist (today `cat`/`/bin/cat`
+//     only).
+//  2. No write flag on leaf (hasWriteFlag) — `cat` carries none today
+//     (MutatingFlags["cat"] is absent, so this is a no-op safety net), kept for
+//     the same reason ClassifySubstitutionBody keeps it: a future reader added to
+//     heredocReaderAllowlist might have one.
+//  3. Every argv token on leaf clears readerArgsClearance.
+//  4. Every redirection on leaf clears redirectClearance.
+//
+// CONDITIONS 3 AND 4 ARE THE LOAD-BEARING PART OF THIS FUNCTION, AND THE PART THE
+// pg2-yxxwg OPERATOR RULING'S OWN FIVE-POINT LIST DOES NOT NAME — the ruling was
+// written against the SINK's argv (bd's `<id> --stdin`), not the READER's, and
+// nothing in "quoted delimiter + allowlisted reader + allowlisted sink + --stdin
+// flag + no write flag" mentions the reader's own OTHER arguments or
+// redirections. Left unchecked, that is a real hole, verified empirically
+// (2026-08-25, pg2-yxxwg): a heredoc redirection and a positional file operand can
+// coexist on the SAME leaf, and when they do, `cat` reads the NAMED FILE, not the
+// heredoc — the shell still attaches the heredoc to fd 0 exactly as always, but
+// `cat` never opens fd 0 once it has been given a non-flag operand telling it to
+// open a different file instead:
+//
+//	$ echo REAL-FILE-CONTENT > /tmp/probe.txt
+//	$ cat /tmp/probe.txt <<'EOF'
+//	SECRET-HEREDOC-BODY
+//	EOF
+//	REAL-FILE-CONTENT
+//
+// Piped into an allowlisted sink's `--stdin`
+// (`cat /etc/shadow <<'EOF'\nx\nEOF | bd comment 1 --stdin`), that shape would be
+// an arbitrary-file-exfiltration route this composition must not approve — and it
+// is exactly the class of hole IsSafeSubstitutionBody's own "DECLINED PIPELINE
+// RELAXATION" note warns about for a different shape ("the allowlist's safety
+// claim is argv-only; a pipeline adds stdin"): this carve-out's safety argument
+// rests entirely on the reader's stdout being provably its OWN heredoc body, and
+// that claim is false the moment the reader's argv can redirect it elsewhere.
+// Conditions 3-4 close exactly that gap, the same way they already close it for
+// ClassifySubstitutionBody's identical `leaf.HasHeredoc` branch: readerArgsClearance
+// treats a bare formatting flag (`-n`, no operand) as clearing, but any non-flag
+// operand as AT BEST SubstitutionDelegated (a path-shaped token patheval must
+// still adjudicate) or SubstitutionRefused (a deny-listed secret) — and this
+// function requires the union to be SubstitutionCleared EXACTLY, so a leaf with
+// any such operand — or a redirection failing redirectClearance the same way —
+// is refused here, floors at heredocFloor's neutral NoOpinion, and gets no help
+// from this carve-out. That is the correct outcome for a static bool gate: a
+// Delegated verdict is a question for patheval to adjudicate at runtime, not one
+// this function can answer with true.
+func HeredocReaderCleared(leaf ParsedCommand) bool {
+	if !heredocClearedForSubstitution(leaf) {
+		return false
+	}
+	if hasWriteFlag(leaf.Executable, leaf.Args) {
+		return false
+	}
+	return minClearance(readerArgsClearance(leaf.Args), redirectClearance(leaf.Redirections)) == SubstitutionCleared
+}
+
 // redirectClearance classifies the redirections a substitution body carries: a PURE READ
 // from a path this seam can dispose of. It replaces the blanket
 // `len(leaf.Redirections) > 0` refusal (pg2-xl79d), whose only measured cost was the

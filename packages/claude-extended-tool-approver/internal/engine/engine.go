@@ -557,10 +557,16 @@ func (e *Engine) evaluateParsed(expr string, sp cmdparse.ShellParse, normalized 
 			}
 			if pc.HasHeredoc {
 				// pc.Executable is always "" on this branch (the command-less-leaf
-				// arm), so it can never match heredocStdinSinkFlags — pc is threaded
-				// through anyway for a uniform signature with the call below, and
-				// messageSinkStdinHeredocCleared just no-ops on the empty executable.
-				leafResult = hookio.MostRestrictive(leafResult, heredocFloor(expr, stack, pc))
+				// arm), so it can never match heredocStdinSinkFlags or
+				// heredocReaderAllowlist — pc is threaded through anyway for a
+				// uniform signature with the call below, and
+				// messageSinkStdinHeredocCleared/pipeRelayHeredocCleared (via
+				// cmdparse.HeredocReaderCleared) both just no-op on the empty
+				// executable. parsed (this leaf's own sibling slice) is threaded
+				// through too, for the same uniform-signature reason — pc having no
+				// executable makes pipeRelayHeredocCleared refuse before it would
+				// ever consult parsed.
+				leafResult = hookio.MostRestrictive(leafResult, heredocFloor(expr, stack, pc, parsed))
 				// inCommandVars/inCommandTempDirVars (tc-5h6e), not outerVars/outerTempDirVars:
 				// a substitution inside THIS leaf's heredoc body sees what THIS leaf sees,
 				// which is the already-overlaid value computed above — see evaluateParsed's
@@ -686,8 +692,11 @@ func (e *Engine) evaluateParsed(expr string, sp cmdparse.ShellParse, normalized 
 		if pc.HasHeredoc {
 			// pc here is the leaf's own real ParsedCommand (Executable/Args/Heredocs
 			// populated) — the site that lets heredocFloor test the pg2-9zrpa
-			// message-sink carve-out.
-			cmdResult = hookio.MostRestrictive(cmdResult, heredocFloor(expr, stack, pc))
+			// message-sink carve-out. parsed (this expression's full leaf slice,
+			// already in scope in this loop) is threaded through too, for the
+			// pg2-yxxwg pipe-relay carve-out — it is what lets pipeRelayHeredocCleared
+			// find what pc's stdout flows into via cmdparse.DownstreamStages.
+			cmdResult = hookio.MostRestrictive(cmdResult, heredocFloor(expr, stack, pc, parsed))
 			cmdResult = hookio.MostRestrictive(cmdResult,
 				e.foldSubstitutionScan(pc.UnquotedHeredocSubstitutions(), normalized, stack, origin, inCommandVars, inCommandTempDirVars))
 		}
@@ -993,7 +1002,84 @@ func unparseableExpressionFloor(sp cmdparse.ShellParse) hookio.RuleResult {
 //     so this condition is moot for `bd` today), but the condition is kept for
 //     consistency with pg2-u65fu's pairing and because a future sink added to
 //     heredocStdinSinkFlags might not be so lucky.
-func heredocFloor(expr string, stack []hookio.StackFrame, pc cmdparse.ParsedCommand) hookio.RuleResult {
+//
+// # pg2-yxxwg — THE THIRD NARROWING
+//
+// heredocFloor grows a third exception, structurally DIFFERENT again from both of
+// the above rather than an extension of either: a heredoc-bearing leaf whose
+// stdout is PIPED INTO a separate leaf that is itself an allowlisted message-sink
+// consuming its own `--stdin` — `cat <<'EOF' ... EOF | bd comment <id> --stdin`,
+// as opposed to pg2-9zrpa's shape where the heredoc lands DIRECTLY on the sink's
+// own leaf (`bd comment <id> --stdin <<'EOF' ... EOF`, no pipe at all).
+//
+// Operator ruling, 2026-08-24 (bead pg2-yxxwg, discovered from pg2-9zrpa's own
+// corpus verification): pg2-9zrpa's carve-out was written and measured against
+// the corpus rows the bead's own text named, but those rows turned out to
+// predominantly be this PIPE-RELAY shape rather than the direct shape pg2-9zrpa
+// actually covers — `heredocFloor` is called for the `cat` leaf (which carries
+// the heredoc), `messageSinkStdinHeredocCleared` checks THAT leaf's own
+// Executable/Args against heredocStdinSinkFlags, the leaf is `cat` and not `bd`,
+// the check fails, and the whole expression floors to NoOpinion even though
+// `bd`'s leaf right after the pipe DOES carry `--stdin`. The operator approved
+// COMPOSING pg2-phtl3's reader-identity carve-out with pg2-9zrpa's sink-identity
+// carve-out across the pipe boundary, gated on the same conjunctive narrowness
+// both individual carve-outs already apply — never as a general "an allowlisted
+// reader piped into an allowlisted sink" relaxation.
+//
+// FIVE CONDITIONS, ALL REQUIRED (the operator ruling's own enumeration; see
+// pipeRelayHeredocCleared's doc for exactly which function checks which):
+//
+//  1. Heredoc delimiter QUOTED on the heredoc-bearing leaf — every extent, same
+//     "all must be quoted" rule as both existing carve-outs.
+//  2. The heredoc-bearing leaf's own executable is on heredocReaderAllowlist
+//     (today `cat`/`/bin/cat` only — NOT widened here; that widening was
+//     explicitly declined and is its own bead if ever wanted).
+//  3. The pipe TARGET — what the heredoc-bearing leaf's stdout flows into,
+//     found via cmdparse.DownstreamStages — is an allowlisted message-sink
+//     (today `bd` only, via the existing heredocStdinSinkFlags map).
+//  4. The content lands on the sink leaf's `--stdin` flag
+//     (cmdparse.HasAnyFlag against heredocStdinSinkFlags[sink.Executable]).
+//  5. No write flag on EITHER leaf — the sink screen mirrors
+//     messageSinkStdinHeredocCleared's own cmdparse.MutatingFlags check exactly
+//     (pipeRelaySinkCleared); the READER leaf gets the identical screen via
+//     cmdparse.HeredocReaderCleared, for the same reason
+//     messageSinkStdinHeredocCleared screens the sink even though `bd` carries no
+//     mutating flag today — consistency with a future addition, not a live
+//     restriction.
+//
+// A SIXTH CONDITION THE RULING DOES NOT ENUMERATE, BUT WHICH IS LOAD-BEARING AND
+// NOT OPTIONAL: the reader leaf's OWN argv and redirections must independently
+// clear the same static screen ClassifySubstitutionBody already applies to an
+// identical reader shape (cmdparse.HeredocReaderCleared's conditions 3-4; see its
+// own doc for the empirically-verified reason — a positional file operand on the
+// SAME leaf as the heredoc makes `cat` emit that FILE's bytes instead of the
+// heredoc body, an arbitrary-file-exfiltration route through `bd`'s `--stdin`
+// that the ruling's five conditions alone do not exclude, because the ruling was
+// written against the SINK's argv, not the READER's). Composing two narrow
+// carve-outs must not produce something LESS safe than either carve-out is on
+// its own, and pg2-phtl3's own carve-out (via ClassifySubstitutionBody) already
+// requires exactly this for the identical reader shape — omitting it here would
+// be a regression relative to that precedent, not a faithful composition of it.
+//
+// REFUSED, AND DELIBERATELY, WHEN THE PIPE TOPOLOGY IS ANYTHING OTHER THAN A
+// STRICT TWO-STAGE READER-TO-SINK RELAY: pipeRelayHeredocCleared requires
+// cmdparse.DownstreamStages to report EXACTLY ONE downstream leaf. Zero means no
+// pipe at all — a top-level `cat --stdin <<'EOF' ... EOF` with no `|` anywhere,
+// which must keep flooring exactly as TestIntegration_HeredocStdinMessageSinkCarveOut
+// already pins (`cat` is a reader, not a sink, and there is no pipe target to
+// even ask the sink question of). More than one means either a THIRD stage after
+// the sink (`cat <<'EOF' ... EOF | bd comment 1 --stdin | othercmd`) or a fan-out
+// — DownstreamStages returns every leaf whose PipelineIndex exceeds the reader's
+// within the same pipeline, transitively, so a third stage always shows up
+// alongside the sink and trips this refusal; this floor does not attempt to
+// reason about what a third stage might do with bd's own stdout.
+//
+// NOT MODELLED, same limitation as pg2-9zrpa's own carve-out and for the same
+// reason: no target file descriptor is recorded for either the heredoc or the
+// pipe, so there is nothing here to check that the heredoc genuinely lands on the
+// reader's fd 0 or that the pipe genuinely lands on the sink's fd 0 beyond what
+// ordinary shell-pipe semantics already guarantee.
+func heredocFloor(expr string, stack []hookio.StackFrame, pc cmdparse.ParsedCommand, leaves []cmdparse.ParsedCommand) hookio.RuleResult {
 	if recursedSubstitutionHeredocCleared(expr, stack) {
 		return hookio.RuleResult{
 			Decision: hookio.Approve,
@@ -1005,6 +1091,13 @@ func heredocFloor(expr string, stack []hookio.StackFrame, pc cmdparse.ParsedComm
 		return hookio.RuleResult{
 			Decision: hookio.Approve,
 			Reason:   "heredoc body is fed to an allowlisted message-sink command's --stdin, already cleared by the static message-sink allowlist (pg2-9zrpa)",
+			Module:   "engine",
+		}
+	}
+	if pipeRelayHeredocCleared(pc, leaves) {
+		return hookio.RuleResult{
+			Decision: hookio.Approve,
+			Reason:   "heredoc body is relayed through an allowlisted reader into an allowlisted message-sink's --stdin, already cleared by composing the static substitution and message-sink allowlists (pg2-yxxwg)",
 			Module:   "engine",
 		}
 	}
@@ -1121,6 +1214,83 @@ func messageSinkStdinHeredocCleared(pc cmdparse.ParsedCommand) bool {
 		return false
 	}
 	return true
+}
+
+// pipeRelaySinkCleared reports whether sink — the leaf found immediately (and
+// exclusively) downstream of a pg2-yxxwg pipe-relay reader — is an allowlisted
+// message-sink consuming its stdin as a message: the SINK-side half of the
+// pg2-yxxwg carve-out, checked by pipeRelayHeredocCleared once it has confirmed
+// the reader half via cmdparse.HeredocReaderCleared.
+//
+// DUPLICATES three of messageSinkStdinHeredocCleared's five conditions (sink
+// identity, the --stdin flag, no write flag) RATHER THAN CALLING IT, and that is
+// deliberate, not an oversight: sink here is bd's OWN leaf, and in the pipe-relay
+// shape bd's leaf carries NO heredoc of its own — the heredoc sits on the READER
+// leaf upstream of the pipe. messageSinkStdinHeredocCleared's first two
+// conditions are `!pc.HasHeredoc || len(pc.Heredocs) == 0 { return false }`, which
+// would refuse sink immediately and unconditionally, so it cannot be reused as-is
+// for this call site. Duplicating the remaining three conditions here — rather
+// than restructuring messageSinkStdinHeredocCleared to expose them separately —
+// keeps pg2-9zrpa's own approved function completely untouched, per this bead's
+// explicit scope (compose alongside pg2-9zrpa's carve-out, never edit it).
+//
+// THREE CONDITIONS, ALL REQUIRED, identical in substance to
+// messageSinkStdinHeredocCleared's conditions 3-5:
+//
+//  1. sink.Executable is a key of heredocStdinSinkFlags (today, `bd` only).
+//  2. sink.Args carries the flag that map names for sink.Executable (today,
+//     `--stdin` only), via cmdparse.HasAnyFlag — the glued `--stdin=...`
+//     spelling cannot hide from it either, same as pg2-9zrpa's own check.
+//  3. sink.Args carries no mutating flag (cmdparse.MutatingFlags[sink.Executable]
+//     — empty for `bd` today, a no-op safety net matching pg2-9zrpa's own).
+func pipeRelaySinkCleared(sink cmdparse.ParsedCommand) bool {
+	sinkFlags, ok := heredocStdinSinkFlags[sink.Executable]
+	if !ok {
+		return false
+	}
+	if !cmdparse.HasAnyFlag(sink.Args, sinkFlags) {
+		return false
+	}
+	if cmdparse.HasAnyFlag(sink.Args, cmdparse.MutatingFlags[sink.Executable]) {
+		return false
+	}
+	return true
+}
+
+// pipeRelayHeredocCleared reports whether pc — a heredoc-bearing leaf — is
+// admissible as the READER half of a pg2-yxxwg two-stage pipe relay into an
+// allowlisted message-sink's `--stdin`: `cat <<'EOF' ... EOF | bd comment <id>
+// --stdin`. See heredocFloor's own "pg2-yxxwg — THE THIRD NARROWING" doc for the
+// full five-plus-one condition rationale; this function is where each condition
+// is actually checked.
+//
+// leaves is the full leaf slice of the expression pc belongs to — evaluateParsed's
+// own `parsed`, threaded in from both of heredocFloor's call sites exactly as
+// `expr`/`stack` already are — because finding what pc's stdout flows into needs
+// pc's SIBLING leaves, not just pc itself.
+//
+//  1. cmdparse.HeredocReaderCleared(pc) — conditions 1, 2 and 5's reader half (see
+//     that function's own doc), PLUS the sixth, unenumerated condition (reader
+//     argv/redirect safety) its doc explains at length.
+//  2. cmdparse.DownstreamStages(leaves, pc.Raw) must return EXACTLY ONE leaf. Zero
+//     means pc is not in a pipeline at all (or is the pipeline's last stage) —
+//     there is no sink to even ask about, so this must refuse rather than treat
+//     "no pipe" as "vacuously fine". More than one means a third stage sits
+//     downstream of whatever the immediate sink is (DownstreamStages returns
+//     every later stage in the pipeline, not just the next one), which this floor
+//     does not attempt to reason about — see heredocFloor's own doc for why a
+//     third stage is refused rather than merely ignored.
+//  3. pipeRelaySinkCleared on that one downstream leaf — conditions 3, 4 and 5's
+//     sink half.
+func pipeRelayHeredocCleared(pc cmdparse.ParsedCommand, leaves []cmdparse.ParsedCommand) bool {
+	if !cmdparse.HeredocReaderCleared(pc) {
+		return false
+	}
+	downstream := cmdparse.DownstreamStages(leaves, pc.Raw)
+	if len(downstream) != 1 {
+		return false
+	}
+	return pipeRelaySinkCleared(downstream[0])
 }
 
 // evaluateHeredocBodies and evaluateSubstitutionsIn — the two ENGINE TEXT HOPS
