@@ -185,6 +185,74 @@ func TestSafecmds_Cd_Approve(t *testing.T) {
 	}
 }
 
+// TestSafecmds_Base64_Commands is the pg2-51v0k regression guard for base64's
+// membership in safeReadCmds (safecmds.go's `alwaysSafe`-vs-`safeReadCmds`
+// doc on the "base64" entry explains why it landed in THIS map, not
+// alwaysSafe: unlike a zero-filesystem-access command, base64 accepts a file
+// operand and prints that file's content, so it needs the same zone check
+// cat/xxd/jq already get). Mirrors TestSafecmds_Pg2_5k6pu_Commands' table
+// shape for xxd, which is the closest existing precedent for a safeReadCmds
+// member with the same "no-operand vs. project-path vs. out-of-zone-path"
+// cases.
+func TestSafecmds_Base64_Commands(t *testing.T) {
+	pe := patheval.New("/home/user/project")
+	r := New(pe)
+	cases := []struct {
+		cmd  string
+		want hookio.Decision
+	}{
+		// base64 with no file operand (encode or decode) reads only stdin —
+		// no path candidate for readPathIssue to check at all.
+		{"base64", hookio.Approve},
+		{"base64 -d", hookio.Approve},
+		{"echo hi | base64", hookio.Approve},
+		{"echo aGkK | base64 -d", hookio.Approve},
+		// base64 with a project-zone file operand approves, same as xxd/cat.
+		{"base64 /home/user/project/data.bin", hookio.Approve},
+		{"base64 -d /home/user/project/data.b64", hookio.Approve},
+		// base64 on an out-of-zone path defers, same as xxd/cat on /etc/shadow.
+		{"base64 /etc/shadow", hookio.NoOpinion},
+		{"base64 -d /etc/shadow", hookio.NoOpinion},
+	}
+	for _, c := range cases {
+		input := &hookio.HookInput{ToolName: "Bash", CWD: "/home/user/project", ToolInput: mustJSON(map[string]string{"command": c.cmd})}
+		if got := hookio.Verdict(r.Evaluate(input)); got.Decision != c.want {
+			t.Errorf("cmd %q: got %s (%s), want %s", c.cmd, got.Decision, got.Reason, c.want)
+		}
+	}
+}
+
+// TestSafecmds_Compound_JqAndBase64_Approve covers the idiom pg2-51v0k was
+// filed for — decoding a GitHub API file-content response
+// (`gh api ... --jq .content && base64 -d`) — mirroring
+// TestSafecmds_Compound_JqAndYq_ProjectPaths_Approve's two-safe-leaves shape.
+//
+// The literal `gh api ... && base64 -d` string is NOT used here: safecmds'
+// Evaluate walks every leaf of a compound command and returns NotApplicable
+// as soon as ONE leaf is outside its own jurisdiction (safecmds does not
+// recognize "gh" at all — that leaf belongs to the separate gh rule module),
+// so this rule in isolation would report NotApplicable for that exact string
+// regardless of whether base64 is safe-listed, proving nothing about this
+// change. The overall multi-module chain verdict for a `gh ... && base64 -d`
+// command is an ENGINE-level aggregation across rule modules, out of this
+// package's test scope — matching this ticket's own fallback guidance to
+// test the base64 leaf's resolution within safecmds' actual jurisdiction.
+// jq is the stand-in leaf here because, like "gh api ... --jq .content", it
+// is a safecmds-recognized read command producing the text base64 decodes.
+func TestSafecmds_Compound_JqAndBase64_Approve(t *testing.T) {
+	pe := patheval.New("/home/user/project")
+	r := New(pe)
+	input := &hookio.HookInput{
+		ToolName:  "Bash",
+		CWD:       "/home/user/project",
+		ToolInput: mustJSON(map[string]string{"command": "jq -r '.content' /home/user/project/response.json && base64 -d"}),
+	}
+	got := hookio.Verdict(r.Evaluate(input))
+	if got.Decision != hookio.Approve {
+		t.Errorf("jq --jq-style-content && base64 -d: got %s (%s), want approve", got.Decision, got.Reason)
+	}
+}
+
 func TestSafecmds_JqWithProjectPath_Approve(t *testing.T) {
 	pe := patheval.New("/home/user/project")
 	r := New(pe)

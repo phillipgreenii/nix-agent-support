@@ -118,6 +118,24 @@ var safeReadCmds = map[string]bool{
 	// is routed through the same readPathIssue zone check as cat/head/tail
 	// (pg2-t76k8). Previously it hit the unknown-command fallthrough and abstained.
 	"strings": true,
+	// base64 (pg2-51v0k): a pure stdin/stdout text transform, the same safety
+	// class as xxd/jq — but like them it ALSO accepts a file operand (GNU
+	// `base64 [OPTION]... [FILE]`; macOS `base64 -i in_file`) and prints that
+	// file's encoded/decoded content to stdout, so it is a content reader, not
+	// a zero-filesystem-access command. It belongs HERE, not in alwaysSafe:
+	// `base64 /etc/shadow` must get the same zone check `cat /etc/shadow`
+	// already gets, not an unconditional Approve. The bead that requested this
+	// entry (pg2-51v0k, quoting pg2-cvmiu) asserted base64's siblings
+	// jq/tq/xxd/cat/head/tail already live in alwaysSafe — checked directly
+	// against this file and that is NOT the current layout; they are members
+	// of THIS map. Placing base64 in alwaysSafe as originally proposed would
+	// have been a real bypass (the same "one variable hop erases the
+	// deny-list" class of hole readPathIssue's doc records for reads), so this
+	// follows the map their actual membership sits in rather than the bead's
+	// description of it. The idiom the bead exists for
+	// (`gh api ... --jq .content && base64 -d`) still approves: with no file
+	// operand, readPathIssue finds no path candidate to check at all.
+	"base64": true,
 }
 
 // logReadSubcommands are the macOS unified-logging verbs that only read; the
