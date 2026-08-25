@@ -91,6 +91,7 @@ func TestCreateProcessingCycle_TeamCycleUnlabeled(t *testing.T) {
 }
 
 func TestCreateProcessingCycle_CreatesAndLinks(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := newBDWorkspace(t)
 
@@ -189,6 +190,7 @@ func TestCreateProcessingCycle_NoPredecessorWritesNoSupersedesEdge(t *testing.T)
 }
 
 func TestFindOpenProcessingCycle_NoneOpen(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := newBDWorkspace(t)
 
@@ -206,6 +208,7 @@ func TestFindOpenProcessingCycle_NoneOpen(t *testing.T) {
 }
 
 func TestFindOpenProcessingCycle_AfterClose(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := newBDWorkspace(t)
 
@@ -246,6 +249,7 @@ func TestExtractIDs(t *testing.T) {
 }
 
 func TestListChildrenOfPR(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := newBDWorkspace(t)
 

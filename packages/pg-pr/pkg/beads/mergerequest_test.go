@@ -14,6 +14,26 @@ import (
 // ----------------------------------------------------------------------
 // Real-bd integration helpers
 // ----------------------------------------------------------------------
+//
+// Every test in this package that calls newBDWorkspace shells out to the
+// REAL `bd` CLI (embedded-Dolt mode, isolated per test under t.TempDir() —
+// it never touches this machine's shared dolt server on :25252). That
+// isolation makes each call correct, but not cheap: every `bd` invocation
+// pays real embedded-Dolt engine startup (roughly 0.5-1.5s measured on a
+// quiet machine, more under load), and a single test typically issues
+// several (init, config set, create, dep add, close, ...). Multiplied
+// across the ~20 workspace-creating tests in this package, a *serial* run
+// legitimately takes minutes, and under heavy concurrent load from sibling
+// sessions on a shared dev machine it can run past ten minutes — this is
+// what pg2-8tpoz observed as an apparent "hang" in
+// TestTickCache_OpenProcessingByPR_IgnoresClosedCycles; that test is not
+// stuck, the whole package is just slow by construction. Every such test
+// therefore calls t.Parallel() (workspaceCounter below exists exactly to
+// keep their bd issue prefixes collision-free under that concurrency) to
+// bound the wall-clock cost. Do NOT run `go test ./...` (or even
+// `./pkg/beads/...`) bare/unbounded in this package for the same reason
+// pg2-8tpoz was filed: always pass an explicit generous -timeout or run it
+// backgrounded, per this workspace's Bash-timeout rules.
 
 // workspaceCounter generates unique prefixes so parallel tests get distinct
 // bd issue IDs.
@@ -47,7 +67,13 @@ func newBDWorkspace(t *testing.T) (*Client, *CLIRunner) {
 	env := buildCleanEnv()
 	initCtx, initCancel := context.WithTimeout(context.Background(), realBDSetupTimeout)
 	defer initCancel()
-	initCmd := exec.CommandContext(initCtx, "bd", "init", "--prefix", prefix)
+	// --skip-agents/--skip-hooks/-q/--non-interactive: this is a throwaway
+	// fixture torn down at test end, so skip the AGENTS.md/CLAUDE.md/git-hooks
+	// generation and interactive-mode side effects bd init otherwise performs
+	// (a real git commit included) — pure overhead multiplied across the
+	// package's dozens of newBDWorkspace calls.
+	initCmd := exec.CommandContext(initCtx, "bd", "init", "--prefix", prefix,
+		"--non-interactive", "-q", "--skip-agents", "--skip-hooks")
 	initCmd.Dir = dir
 	initCmd.Env = env
 	if out, err := initCmd.CombinedOutput(); err != nil {
@@ -148,6 +174,7 @@ func alnumOf(n int64) string {
 // ----------------------------------------------------------------------
 
 func TestEnsureMergeRequest_CreatesWhenAbsent(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := newBDWorkspace(t)
 
@@ -190,6 +217,7 @@ func TestEnsureMergeRequest_CreatesWhenAbsent(t *testing.T) {
 }
 
 func TestEnsureMergeRequest_UpdatesWhenPresent(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := newBDWorkspace(t)
 
@@ -221,6 +249,7 @@ func TestEnsureMergeRequest_UpdatesWhenPresent(t *testing.T) {
 }
 
 func TestEnsureMergeRequest_SkipsClosedBead(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := newBDWorkspace(t)
 
@@ -256,6 +285,7 @@ func TestEnsureMergeRequest_SkipsClosedBead(t *testing.T) {
 }
 
 func TestCloseMergeRequest_Idempotent(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := newBDWorkspace(t)
 
@@ -274,6 +304,7 @@ func TestCloseMergeRequest_Idempotent(t *testing.T) {
 }
 
 func TestListMergeRequests_OpenOnly(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := newBDWorkspace(t)
 
@@ -327,6 +358,7 @@ func (f *fakeRunner) Run(_ context.Context, _ ...string) (string, error) {
 }
 
 func TestFindByRepoAndNumber_HitAndMiss(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := newBDWorkspace(t)
 
@@ -604,6 +636,7 @@ func TestBdIssueToMergeRequest_ParsesPriorityAndLabels(t *testing.T) {
 // bd list --json round trip (a regression the unit tests above — which
 // construct bdIssue directly and never touch JSON — cannot catch).
 func TestSetPriority_RoundTripsThroughRealBD(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := newBDWorkspace(t)
 
@@ -650,6 +683,7 @@ func TestSetPriority_RoundTripsThroughRealBD(t *testing.T) {
 // workspace A only — beads created on the A-scoped client are not visible
 // from the B-scoped client.
 func TestNewClientForRepo_HitsRepoWorkspace(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	if _, err := exec.LookPath("bd"); err != nil {
 		t.Skip("bd not on PATH")

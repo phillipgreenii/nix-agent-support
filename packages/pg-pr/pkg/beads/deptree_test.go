@@ -45,6 +45,7 @@ func closeBead(t *testing.T, runner *CLIRunner, id string) {
 }
 
 func TestDepTreeUp_Empty(t *testing.T) {
+	t.Parallel()
 	c, _ := newBDWorkspace(t)
 	ctx := context.Background()
 	mr, _, err := c.EnsureMergeRequest(ctx, "MR-empty", MergeRequestFields{Repo: "x/y", PRNumber: 1})
@@ -61,6 +62,7 @@ func TestDepTreeUp_Empty(t *testing.T) {
 }
 
 func TestDepTreeUp_WithChildren(t *testing.T) {
+	t.Parallel()
 	c, runner := newBDWorkspace(t)
 	ctx := context.Background()
 	mr, _, err := c.EnsureMergeRequest(ctx, "MR-children", MergeRequestFields{Repo: "x/y", PRNumber: 2})
@@ -131,6 +133,7 @@ func TestDepTreeUp_WithChildren(t *testing.T) {
 }
 
 func TestHumanLabeledBeads_EmptyWorkspace(t *testing.T) {
+	t.Parallel()
 	c, _ := newBDWorkspace(t)
 	set, err := c.HumanLabeledBeads(context.Background())
 	if err != nil {
@@ -142,6 +145,7 @@ func TestHumanLabeledBeads_EmptyWorkspace(t *testing.T) {
 }
 
 func TestHumanLabeledBeads_OnlyHumanLabeled(t *testing.T) {
+	t.Parallel()
 	c, runner := newBDWorkspace(t)
 	ctx := context.Background()
 

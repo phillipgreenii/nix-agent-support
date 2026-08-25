@@ -8,6 +8,7 @@ import (
 )
 
 func TestLoadTickCache_EmptyWorkspace(t *testing.T) {
+	t.Parallel()
 	c, _ := newBDWorkspace(t)
 	cache := c.LoadTickCache(context.Background())
 	if cache == nil {
@@ -28,6 +29,7 @@ func TestLoadTickCache_EmptyWorkspace(t *testing.T) {
 }
 
 func TestLoadTickCache_PRWithOpenCycleAndFeedback(t *testing.T) {
+	t.Parallel()
 	c, runner := newBDWorkspace(t)
 	ctx := context.Background()
 
@@ -101,6 +103,7 @@ func TestTickCache_NilSafe(t *testing.T) {
 }
 
 func TestLoadTickCache_DepsUpByPR(t *testing.T) {
+	t.Parallel()
 	c, runner := newBDWorkspace(t)
 	ctx := context.Background()
 
@@ -169,6 +172,7 @@ func realBDCtx(t *testing.T) context.Context {
 }
 
 func TestTickCache_OpenProcessingByPR_IgnoresClosedCycles(t *testing.T) {
+	t.Parallel()
 	c, runner := newBDWorkspace(t)
 	ctx := realBDCtx(t)
 

@@ -7,6 +7,7 @@ import (
 )
 
 func TestCreateAction_CreatesAndLinks(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := newBDWorkspace(t)
 
@@ -56,6 +57,7 @@ func TestCreateAction_RejectsBadBdType(t *testing.T) {
 }
 
 func TestCreateAction_DefaultsBdTypeToTask(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := newBDWorkspace(t)
 	prID, _, _ := c.EnsureMergeRequest(ctx, "", MergeRequestFields{Repo: "a/b", PRNumber: 1})
