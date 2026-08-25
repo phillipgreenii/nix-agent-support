@@ -40,10 +40,16 @@ import (
 // than Abstaining.
 const commandBlocksFixture = "../rules/configrules/testdata/command-blocks-rules.json"
 
-// zrFixture, buildFullEngine, buildFullEngineWithConfig, makeFileJSON, and
-// makeBashJSON moved to enginetest_helpers_test.go (untagged) — several
-// sibling `engine_test` files call them too, so they must compile even when
-// this file's `integration` tag is absent (bead pg2-h05lt).
+// zrFixture, buildFullEngine, buildFullEngineWithConfig, and makeBashJSON
+// moved to enginetest_helpers_test.go (untagged) — several sibling
+// `engine_test` files call them too, so they must compile even when this
+// file's `integration` tag is absent (bead pg2-h05lt). makeFileJSON stayed
+// here (or moved back here, pg2-jn7x7): its only callers are both in this
+// file, so under the default build tag it would otherwise be dead code.
+func makeFileJSON(path string) json.RawMessage {
+	b, _ := json.Marshal(hookio.FileToolInput{FilePath: path})
+	return b
+}
 
 // TestIntegration_HookBypassRegression drives every known ceta bypass (pg2-t4uyx)
 // through EvaluateHook — the real PreToolUse decision path — and asserts none is

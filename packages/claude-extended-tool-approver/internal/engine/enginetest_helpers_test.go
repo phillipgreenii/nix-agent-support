@@ -1,15 +1,20 @@
 // Shared full-chain test helpers, deliberately carrying NO build tag.
 //
-// buildFullEngine/buildFullEngineWithConfig/makeBashJSON/makeFileJSON started
-// life inside engine_integration_test.go, but several sibling `engine_test`
-// files (declare_incommandvars_test.go, jq_flag_operands_test.go, and others)
-// also call buildFullEngine/makeBashJSON to drive the real composed rule
-// chain for a single focused case. engine_integration_test.go itself became
-// the curated `TestIntegration_*` regression suite and picked up
+// buildFullEngine/buildFullEngineWithConfig/makeBashJSON started life inside
+// engine_integration_test.go, but several sibling `engine_test` files
+// (declare_incommandvars_test.go, jq_flag_operands_test.go, and others) also
+// call buildFullEngine/makeBashJSON to drive the real composed rule chain for
+// a single focused case. engine_integration_test.go itself became the
+// curated `TestIntegration_*` regression suite and picked up
 // `//go:build integration` (bead pg2-h05lt) so it stops running in the unit
-// tier; these three helpers had to move here first; otherwise every untagged
+// tier; these helpers had to move here first; otherwise every untagged
 // sibling that calls them would fail to compile once the integration tag is
 // absent (the default `go test ./...` build).
+//
+// makeFileJSON does NOT share that reason: its only callers are both inside
+// engine_integration_test.go itself, so it lives there (tagged) instead — an
+// untagged definition with no untagged caller is dead code under the default
+// build tag (pg2-jn7x7).
 package engine_test
 
 import (
@@ -63,11 +68,6 @@ func buildFullEngineWithConfig(projectRoot, cwd, fixture string) *engine.Engine 
 	// rule fails secure (Ask) — the same posture as offline replay.
 	eng.RegisterRules(setup.RuleChain(eng, pe, cfg, nil)...)
 	return eng
-}
-
-func makeFileJSON(path string) json.RawMessage {
-	b, _ := json.Marshal(hookio.FileToolInput{FilePath: path})
-	return b
 }
 
 func makeBashJSON(cmd string) json.RawMessage {
