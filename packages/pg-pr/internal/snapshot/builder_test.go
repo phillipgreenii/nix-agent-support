@@ -1444,7 +1444,7 @@ func TestBuild_DependencyAnnotation_RankingEffect(t *testing.T) {
 	if row3.DependencyBlockedBy != "o/r#2" {
 		t.Errorf("row #3 DependencyBlockedBy = %q, want %q (its IMMEDIATE upstream, not #1)", row3.DependencyBlockedBy, "o/r#2")
 	}
-	if !(row3.DependencyOrderingKey < row2.DependencyOrderingKey && row2.DependencyOrderingKey < row1.DependencyOrderingKey) {
+	if row3.DependencyOrderingKey >= row2.DependencyOrderingKey || row2.DependencyOrderingKey >= row1.DependencyOrderingKey {
 		t.Fatalf("ordering keys must strictly decrease going up the stack: row1=%d row2=%d row3=%d",
 			row1.DependencyOrderingKey, row2.DependencyOrderingKey, row3.DependencyOrderingKey)
 	}
