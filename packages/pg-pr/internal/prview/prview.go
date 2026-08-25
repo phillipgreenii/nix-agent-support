@@ -89,11 +89,14 @@ import (
 //     a store table.
 //   - BeadLinks mirrors PRInput.BeadsDeps (pkg/beads.DepNode, from an
 //     already-performed `bd dep tree` walk).
-//   - CIRuns and ExcludedCIChecks mirror PRInput.CIRuns and
-//     BuilderInput.ExcludedChecksByRepo (per-repo, here already scoped to
-//     this PR's one repo) — internal/cirollup.Compute/NewExcluder are pure
+//   - CIRuns and ExcludedCIChecks mirror PRInput.CIRuns and a repo's
+//     configured excluder patterns (per-repo, here already scoped to this
+//     PR's one repo) — internal/cirollup.Compute/NewExcluder are pure
 //     (regexp compilation only), so building the CI rollup inside Assemble
-//     adds no IO.
+//     adds no IO. internal/snapshot.BuilderInput's own equivalent field is
+//     CheckInterpretersByRepo (pg2-4dz88.2.8), a richer per-repo shape this
+//     package does not mirror — ExcludedCIChecks here stays a flat pattern
+//     list.
 //   - Now is the instant the freshness verdict is judged against — threaded
 //     in exactly like internal/snapshot.BuilderInput.GeneratedAt, so Assemble
 //     never reads the clock itself.

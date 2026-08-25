@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -255,6 +256,38 @@ func TestProjectRowsTeamCarriesEveryFilterableField(t *testing.T) {
 	}
 	if !hasReason(r.MatchReason, "label:") {
 		t.Errorf("MatchReason lost: %+v", r.MatchReason)
+	}
+}
+
+// TestOpenRow_DeliberatelyOmitsGateState guards against an accidental new
+// column: the approval-gate state (snapshot.MineRow/TeamRow.GateState,
+// pg2-4dz88.2.8) is a store-level FACT that leaf projects onto the snapshot
+// read seam, but cmd/pg-pr open's already-curated openRow — which already
+// excludes several MineRow/TeamRow fields (JIRA, Beads, Merged, the
+// Dependency* family) — is deliberately NOT extended to carry it, mirroring
+// the ci_test.go precedent for the raw CI-run description
+// (TestCIRuns_HumanTable_DescriptionNotRendered): pg-pr's machine read seam
+// (`pg-pr pr view --json`, internal/prview) already surfaces gate_state
+// end-to-end; `open`'s human table stays limited to the columns it curates
+// today. If a future change deliberately adds a column here, update this
+// test's doc comment alongside it rather than deleting the test.
+func TestOpenRow_DeliberatelyOmitsGateState(t *testing.T) {
+	typ := reflect.TypeOf(openRow{})
+	for i := 0; i < typ.NumField(); i++ {
+		if strings.HasPrefix(typ.Field(i).Name, "GateState") {
+			t.Fatalf("openRow unexpectedly carries a GateState* field (%s)", typ.Field(i).Name)
+		}
+	}
+
+	// Also prove projectRows compiles/runs fine over a row that DOES carry a
+	// gate observation — the field is dropped by the projection, not by
+	// some earlier guard that would also reject the row outright.
+	snap := &snapshot.Snapshot{Team: []snapshot.TeamRow{{
+		Number: 1, Owner: "teammate", URL: "u1", GateState: "unsatisfied", GateStateM: 1,
+	}}}
+	got := projectRows(snap, false)
+	if len(got) != 1 || got[0].Number != 1 {
+		t.Fatalf("projectRows over a gate-bearing row: got %+v, want 1 row for #1", got)
 	}
 }
 

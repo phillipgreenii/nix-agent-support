@@ -693,14 +693,14 @@ func (e *Engine) buildAndStoreSnapshot(ctx context.Context, observed map[prKey]a
 	}
 
 	snap := snapshot.Build(snapshot.BuilderInput{
-		GeneratedAt:          e.deps.Now(),
-		SyncIntervalSeconds:  int(e.deps.SyncInterval.Seconds()),
-		Self:                 e.cfg().SelfLogin,
-		TeamMembers:          e.allTeamMembers(),
-		WatchLabels:          e.allWatchLabels(),
-		Registry:             e.deps.AgentRegistry,
-		PRs:                  inputs,
-		ExcludedChecksByRepo: e.excludedChecksByRepo(),
+		GeneratedAt:             e.deps.Now(),
+		SyncIntervalSeconds:     int(e.deps.SyncInterval.Seconds()),
+		Self:                    e.cfg().SelfLogin,
+		TeamMembers:             e.allTeamMembers(),
+		WatchLabels:             e.allWatchLabels(),
+		Registry:                e.deps.AgentRegistry,
+		PRs:                     inputs,
+		CheckInterpretersByRepo: e.checkInterpretersByRepo(),
 		// IncludeHidden: true — see BuilderInput.IncludeHidden's doc. The
 		// shared snapshot this Sets carries every observed PR, hidden or not,
 		// so a reader that opts in (`pg-pr open --include-hidden`) can still
@@ -1067,17 +1067,33 @@ func (e *Engine) allWatchLabels() []string {
 	return out
 }
 
-// excludedChecksByRepo maps each configured repo's remote to its excluded
-// check patterns, for the snapshot's cirollup excluder. (pg2-qs46b)
+// checkInterpretersByRepo maps each configured repo's remote to its
+// configured check/status interpreter declarations
+// (RepoConfig.CheckInterpreters), for the snapshot builder's
+// CheckInterpretersByRepo input — the source snapshot.Build derives its own
+// per-repo CI-rollup Excluder from (pg2-4dz88.2.8). (pg2-qs46b)
 //
 // ExcludedCIChecks/excluded_ci_checks was removed outright (operator ruling
-// on pg2-dw73b, 2026-08-24); its replacement, RepoConfig.CheckInterpreters,
-// is not yet wired into the rollup — that lands with
-// pg2-4dz88.2.4/pg2-4dz88.2.6. Until then this always returns an empty map
-// (no exclusions), matching the "uninterpreted checks count in CI health"
-// safe default the check-interpreter generalization itself requires.
-func (e *Engine) excludedChecksByRepo() map[string][]string {
-	return map[string][]string{}
+// on pg2-dw73b, 2026-08-24); this is the read-seam counterpart of
+// excluderFromCheckInterpreters (internal/sync/revision.go), which already
+// wires RepoConfig.CheckInterpreters into the sync-side rollup/persistence
+// call sites (pg2-4dz88.2.4/pg2-4dz88.2.6/pg2-4dz88.2.7). Before this
+// function was fixed it always returned an empty map, which meant the
+// dashboard snapshot's ci_status silently stopped excluding the gate (or
+// anything else a configured interpreter claims) even though every other
+// consumer had already been wired — checkInterpretersFrom is the SAME
+// conversion helper those call sites use, so a repo's declarations are
+// projected identically everywhere they are consumed. A repo with no
+// CheckInterpreters configured still gets an empty (nothing-claiming)
+// entry, preserving the "uninterpreted checks count in CI health" safe
+// default.
+func (e *Engine) checkInterpretersByRepo() map[string][]checkinterpret.Interpreter {
+	repos := e.cfg().Repos
+	out := make(map[string][]checkinterpret.Interpreter, len(repos))
+	for _, r := range repos {
+		out[r.Remote] = checkInterpretersFrom(r.CheckInterpreters)
+	}
+	return out
 }
 
 // isSelfAuthored reports whether the given GitHub login matches the

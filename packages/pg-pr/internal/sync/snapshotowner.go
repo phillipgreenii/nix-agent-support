@@ -76,14 +76,14 @@ func (e *Engine) runSnapshotOwner(updates <-chan snapshotUpdate, store *snapshot
 		now := e.deps.Now()
 		m.pruneExpiredMerged(now)
 		store.Set(snapshot.Build(snapshot.BuilderInput{
-			GeneratedAt:          now,
-			SyncIntervalSeconds:  int(e.deps.SyncInterval.Seconds()),
-			Self:                 e.cfg().SelfLogin,
-			TeamMembers:          e.allTeamMembers(),
-			WatchLabels:          e.allWatchLabels(),
-			Registry:             e.deps.AgentRegistry,
-			PRs:                  m.sortedInputs(),
-			ExcludedChecksByRepo: e.excludedChecksByRepo(),
+			GeneratedAt:             now,
+			SyncIntervalSeconds:     int(e.deps.SyncInterval.Seconds()),
+			Self:                    e.cfg().SelfLogin,
+			TeamMembers:             e.allTeamMembers(),
+			WatchLabels:             e.allWatchLabels(),
+			Registry:                e.deps.AgentRegistry,
+			PRs:                     m.sortedInputs(),
+			CheckInterpretersByRepo: e.checkInterpretersByRepo(),
 			// See sync.go's buildAndStoreSnapshot for why this daemon-owned
 			// shared snapshot always includes hidden PRs (pg2-4dz88.4.3).
 			IncludeHidden: true,

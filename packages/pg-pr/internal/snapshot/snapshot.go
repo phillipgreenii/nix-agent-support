@@ -62,14 +62,39 @@ func (s *Snapshot) WithFreshness(now time.Time) *Snapshot {
 
 // MineRow is one row in the "My PRs" table.
 type MineRow struct {
-	Repo          string `json:"repo"`
-	Number        int    `json:"number"`
-	Title         string `json:"title"`
-	URL           string `json:"url"`
-	Draft         bool   `json:"draft"`
-	CIStatus      string `json:"ci_status"`
-	HumanApproved bool   `json:"human_approved"`
-	AgentApproved bool   `json:"agent_approved"`
+	Repo     string `json:"repo"`
+	Number   int    `json:"number"`
+	Title    string `json:"title"`
+	URL      string `json:"url"`
+	Draft    bool   `json:"draft"`
+	CIStatus string `json:"ci_status"`
+	// GateState is the approval-gate's own axis (INV-GATE-1), distinct from
+	// CIStatus: one of "satisfied" | "partially-satisfied" | "unsatisfied".
+	// Build never re-classifies a CI run to produce this value; it PROJECTS
+	// the already-persisted verdict off the PR's latest revision
+	// (store.Revision.GateState, schema v11 pg2-4dz88.2.5, written by sync's
+	// gateStateFromSync via pg2-4dz88.2.6/.2.7) — the same source and the
+	// same per-item facts CIStatus's own inputs ride alongside. Empty
+	// (omitted) when the PR carries no gate observation at all: either no
+	// revision has ever recorded one, or the persisted state is the store's
+	// own "unknown" default. Per INV-GATE-2 an unmatched/absent gate MUST
+	// read as unknown, never satisfied, and this omitted-field spelling is
+	// how that floor surfaces here — never coerced to a positive state.
+	//
+	// This field carries no as-of/stale stamp of its own: like every other
+	// fact in this row, it rides the SAME payload-level freshness contract
+	// (Snapshot.GeneratedAt / WithFreshness, INV-ASOF-1/INV-ASOF-2/
+	// INV-GATE-4) rather than a second, independently-computed staleness
+	// story.
+	GateState string `json:"gate_state,omitempty"`
+	// GateStateN / GateStateM carry the gate's satisfied/total counts (e.g.
+	// partially-satisfied(n,m) or unsatisfied(0,m)) — populated only when
+	// GateState is "partially-satisfied" or "unsatisfied", mirroring
+	// store.GateState.N/M and checkinterpret.Result.N/M exactly.
+	GateStateN    int  `json:"gate_state_n,omitempty"`
+	GateStateM    int  `json:"gate_state_m,omitempty"`
+	HumanApproved bool `json:"human_approved"`
+	AgentApproved bool `json:"agent_approved"`
 	// HumanApprovers / AgentApprovers count the DISTINCT approvers whose
 	// approval currently STANDS, split by whether the approver is a registered
 	// agent. They are the per-approver facts (INV-APPROVAL-1): two approvers
@@ -139,12 +164,18 @@ type MineRow struct {
 // watch-labeled). The JSON key stays "team" for consumer compatibility (the
 // external Grafana panel queries .team).
 type TeamRow struct {
-	Repo          string `json:"repo"`
-	Number        int    `json:"number"`
-	Title         string `json:"title"`
-	Owner         string `json:"owner"`
-	URL           string `json:"url"`
-	CIStatus      string `json:"ci_status"`
+	Repo     string `json:"repo"`
+	Number   int    `json:"number"`
+	Title    string `json:"title"`
+	Owner    string `json:"owner"`
+	URL      string `json:"url"`
+	CIStatus string `json:"ci_status"`
+	// GateState / GateStateN / GateStateM mirror the identically-named
+	// MineRow fields; see their doc for the full contract (INV-GATE-1,
+	// INV-GATE-2, INV-GATE-4).
+	GateState     string `json:"gate_state,omitempty"`
+	GateStateN    int    `json:"gate_state_n,omitempty"`
+	GateStateM    int    `json:"gate_state_m,omitempty"`
 	HumanApproved bool   `json:"human_approved"`
 	AgentApproved bool   `json:"agent_approved"`
 	// HumanApprovers / AgentApprovers are the per-approver counts; see the

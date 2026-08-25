@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/agentregistry"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/checkinterpret"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/cirollup"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/freshness"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/ownership"
@@ -62,10 +63,23 @@ type BuilderInput struct {
 	WatchLabels []string
 	Registry    *agentregistry.Registry
 	PRs         []PRInput
-	// ExcludedChecksByRepo maps a repo remote (PR.Repo) to its excluded_ci_checks
-	// regex patterns. Rebuilt from live config each snapshot (like WatchLabels) so
-	// SIGHUP edits apply immediately. nil/absent → nothing excluded. (pg2-qs46b)
-	ExcludedChecksByRepo map[string][]string
+	// CheckInterpretersByRepo maps a repo remote (PR.Repo) to its configured
+	// check/status interpreter declarations (RepoConfig.CheckInterpreters,
+	// mirrored here as the plain-data checkinterpret.Interpreter so this
+	// package needn't import internal/config — see that package's doc for
+	// the rationale). Rebuilt from live config each snapshot (like
+	// WatchLabels) so SIGHUP edits apply immediately.
+	//
+	// This replaces the pre-pg2-4dz88.2 ExcludedChecksByRepo (a flat
+	// per-repo regex-pattern list, matching the now-removed
+	// excluded_ci_checks config key, pg2-dw73b). Build derives the SAME
+	// per-repo CI-rollup Excluder from the union of every entry's Patterns,
+	// regardless of Type — mirroring internal/sync/revision.go's
+	// excluderFromCheckInterpreters — so a check/status any configured
+	// interpreter claims is excluded from CI health exactly as
+	// excluded_ci_checks used to exclude it (pg2-4dz88.2.8). nil/absent →
+	// nothing excluded, matching the prior default. (pg2-qs46b)
+	CheckInterpretersByRepo map[string][]checkinterpret.Interpreter
 	// IncludeHidden, when false (the default), makes Build DROP every PRInput
 	// with Hidden==true from BOTH Mine and Team — the human-facing default per
 	// the pg2-4dz88.4/.4.3 operator ruling (fork #1: hidden PRs are excluded
@@ -199,9 +213,9 @@ func Build(in BuilderInput) *Snapshot {
 	for _, m := range in.TeamMembers {
 		teamSet[m] = struct{}{}
 	}
-	excluders := make(map[string]*cirollup.Excluder, len(in.ExcludedChecksByRepo))
-	for repo, pats := range in.ExcludedChecksByRepo {
-		excluders[repo] = cirollup.NewExcluder(pats)
+	excluders := make(map[string]*cirollup.Excluder, len(in.CheckInterpretersByRepo))
+	for repo, interps := range in.CheckInterpretersByRepo {
+		excluders[repo] = excluderFromInterpreters(interps)
 	}
 	// The PR-dependency pass (pg2-4dz88.3.7) is a WHOLE-SET pass, computed once
 	// here over every PRInput regardless of admission below — a PR's place in a
@@ -272,8 +286,61 @@ func Build(in BuilderInput) *Snapshot {
 	return out
 }
 
+// excluderFromInterpreters derives a cirollup.Excluder from the union of
+// every Interpreter's Patterns, regardless of Type — a check/status any
+// configured interpreter claims is excluded from the CI rollup, mirroring
+// internal/sync/revision.go's excluderFromCheckInterpreters exactly. That
+// function cannot be called directly (it takes
+// []config.CheckInterpreterConfig, and this package must not import
+// internal/config — see BuilderInput.CheckInterpretersByRepo's doc), so the
+// same small union-of-Patterns logic is duplicated here rather than shared;
+// see checkinterpret's package doc for why cirollup/checkinterpret/config
+// deliberately do not share one abstraction.
+func excluderFromInterpreters(interps []checkinterpret.Interpreter) *cirollup.Excluder {
+	var patterns []string
+	for _, ip := range interps {
+		patterns = append(patterns, ip.Patterns...)
+	}
+	return cirollup.NewExcluder(patterns)
+}
+
+// gateStateFacts is one PR's projection of the persisted approval-gate
+// verdict onto the row-level fields MineRow/TeamRow carry (INV-GATE-1: its
+// own axis, never folded into CIStatus).
+type gateStateFacts struct {
+	State string
+	N, M  int
+}
+
+// gateStateFor projects the PR's LATEST revision's persisted gate verdict
+// (store.Revision.GateState/GateStateN/GateStateM, schema v11
+// pg2-4dz88.2.5) — the same revs[len(revs)-1] "latest" idiom
+// NeedsAttention already uses for this same slice. Build never
+// re-classifies a CI run to produce this value; it only projects what sync
+// already observed and persisted (gateStateFromSync,
+// internal/sync/revision.go), so there is exactly one place a check/status
+// description is ever parsed into a gate verdict.
+//
+// A PR with no revisions at all, or whose latest revision has never had
+// SetRevisionGateState called on it (the store's "unknown" default), both
+// collapse to the zero value here: per INV-GATE-2 an unmatched/absent gate
+// MUST read as unknown, never satisfied, and "never observed" is exactly
+// that same not-yet-asserted signal, not a distinct state consumers need
+// to tell apart from it.
+func gateStateFor(revs []store.Revision) gateStateFacts {
+	if len(revs) == 0 {
+		return gateStateFacts{}
+	}
+	latest := revs[len(revs)-1]
+	if latest.GateState == "" || latest.GateState == "unknown" {
+		return gateStateFacts{}
+	}
+	return gateStateFacts{State: latest.GateState, N: latest.GateStateN, M: latest.GateStateM}
+}
+
 func buildMineRow(p PRInput, reg *agentregistry.Registry, excl *cirollup.Excluder, deps dependencyFacts) MineRow {
 	appr := classifyApprovals(p, reg)
+	gate := gateStateFor(p.Revisions)
 	return MineRow{
 		Repo:               p.PR.Repo,
 		Number:             p.PR.Number,
@@ -281,6 +348,9 @@ func buildMineRow(p PRInput, reg *agentregistry.Registry, excl *cirollup.Exclude
 		URL:                p.PR.URL,
 		Draft:              p.PR.Draft,
 		CIStatus:           cirollup.Compute(p.CIRuns, excl).State,
+		GateState:          gate.State,
+		GateStateN:         gate.N,
+		GateStateM:         gate.M,
 		HumanApproved:      appr.Human > 0,
 		AgentApproved:      appr.Agent > 0,
 		HumanApprovers:     appr.Human,
@@ -308,6 +378,7 @@ func buildMineRow(p PRInput, reg *agentregistry.Registry, excl *cirollup.Exclude
 // than recomputed here.
 func buildTeamRow(p PRInput, reg *agentregistry.Registry, self string, reasons []string, excl *cirollup.Excluder, deps dependencyFacts) TeamRow {
 	appr := classifyApprovals(p, reg)
+	gate := gateStateFor(p.Revisions)
 	// Attention is STORE-derived through the shared predicate — the SAME function
 	// and SAME inputs the bead projector uses, so the dashboard signal and the
 	// open-attention-bead set can never diverge (design §2.7, D4 / R4).
@@ -319,6 +390,9 @@ func buildTeamRow(p PRInput, reg *agentregistry.Registry, self string, reasons [
 		Owner:           p.PR.Author,
 		URL:             p.PR.URL,
 		CIStatus:        cirollup.Compute(p.CIRuns, excl).State,
+		GateState:       gate.State,
+		GateStateN:      gate.N,
+		GateStateM:      gate.M,
 		HumanApproved:   appr.Human > 0,
 		AgentApproved:   appr.Agent > 0,
 		HumanApprovers:  appr.Human,

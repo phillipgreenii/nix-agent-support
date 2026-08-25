@@ -1763,6 +1763,116 @@ func TestMaybePromoteDraftPromotesWhenGateCheckClaimed(t *testing.T) {
 	}
 }
 
+// TestSync_SnapshotCIStatus_ExcludesConfiguredCheckInterpreter is the
+// dashboard-snapshot sibling of TestMaybePromoteDraftPromotesWhenGateCheckClaimed,
+// proving the pg2-4dz88.2.8 fix to checkInterpretersByRepo (formerly
+// excludedChecksByRepo, a stub that always returned an empty map with a
+// comment claiming it was blocked on pg2-4dz88.2.4/pg2-4dz88.2.6 — both long
+// closed by the time this test was written): the dashboard snapshot's
+// ci_status must ALSO exclude a check a configured interpreter claims, not
+// just draft-promotion's own rollup. Without the fix, this test fails with
+// CIStatus == "failure" because the snapshot builder's excluders map is
+// built from an empty CheckInterpretersByRepo regardless of what the repo
+// config declares.
+func TestSync_SnapshotCIStatus_ExcludesConfiguredCheckInterpreter(t *testing.T) {
+	ctx := realBDCtx(t)
+
+	vcs := newFakeVCS()
+	ci := newFakeCICD()
+
+	pr := samplePR(58, "foo/bar", "feat/snapshot-excl")
+	vcs.my["foo/bar"] = []api.PR{pr}
+	ci.runs[keyOf("foo/bar", 58)] = []api.CIRun{
+		successRun(),
+		{Name: "gate-bot: approval required", Status: "completed", Conclusion: "failure"},
+	}
+
+	bd := newRealBDClient(t)
+	db := store.OpenForTest(t)
+	snap := snapshot.NewStore()
+
+	cfg := cfgWithCICD()
+	cfg.Repos[0].CheckInterpreters = []config.CheckInterpreterConfig{
+		{Patterns: []string{"^gate-bot"}, Type: "approval-gate"},
+	}
+
+	e, err := New(Deps{
+		Cfg:      cfg,
+		VCS:      map[string]VCSProvider{"github": vcs},
+		CICD:     map[string]CICDProvider{"ci": ci},
+		Beads:    bd,
+		StateDir: t.TempDir(),
+		Store:    db,
+		Snapshot: snap,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if _, err := e.Sync(ctx); err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+
+	got, ok := snap.Get()
+	if !ok || got == nil || len(got.Mine) != 1 {
+		t.Fatalf("expected 1 Mine row after Sync; got %+v (ok=%v)", got, ok)
+	}
+	if got.Mine[0].CIStatus != "success" {
+		t.Fatalf("Mine[0].CIStatus = %q, want success (the claimed gate-bot check must be excluded from the rollup)", got.Mine[0].CIStatus)
+	}
+}
+
+// TestSync_SnapshotCIStatus_UninterpretedCheckStillCounts is the negative
+// control for TestSync_SnapshotCIStatus_ExcludesConfiguredCheckInterpreter:
+// the SAME fixture, but with no CheckInterpreters configured at all. The
+// failing check must still count toward the rollup (INV-GATE-3's mandatory
+// unclaimed-check fallback) — proving the fix does not accidentally exclude
+// everything unconditionally.
+func TestSync_SnapshotCIStatus_UninterpretedCheckStillCounts(t *testing.T) {
+	ctx := realBDCtx(t)
+
+	vcs := newFakeVCS()
+	ci := newFakeCICD()
+
+	pr := samplePR(59, "foo/bar", "feat/snapshot-no-excl")
+	vcs.my["foo/bar"] = []api.PR{pr}
+	ci.runs[keyOf("foo/bar", 59)] = []api.CIRun{
+		successRun(),
+		{Name: "gate-bot: approval required", Status: "completed", Conclusion: "failure"},
+	}
+
+	bd := newRealBDClient(t)
+	db := store.OpenForTest(t)
+	snap := snapshot.NewStore()
+
+	cfg := cfgWithCICD() // no CheckInterpreters declared
+
+	e, err := New(Deps{
+		Cfg:      cfg,
+		VCS:      map[string]VCSProvider{"github": vcs},
+		CICD:     map[string]CICDProvider{"ci": ci},
+		Beads:    bd,
+		StateDir: t.TempDir(),
+		Store:    db,
+		Snapshot: snap,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if _, err := e.Sync(ctx); err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+
+	got, ok := snap.Get()
+	if !ok || got == nil || len(got.Mine) != 1 {
+		t.Fatalf("expected 1 Mine row after Sync; got %+v (ok=%v)", got, ok)
+	}
+	if got.Mine[0].CIStatus != "failure" {
+		t.Fatalf("Mine[0].CIStatus = %q, want failure (an unclaimed failing check must still count)", got.Mine[0].CIStatus)
+	}
+}
+
 func TestBuildEnrichedSearchQuery(t *testing.T) {
 	cases := []struct {
 		name string

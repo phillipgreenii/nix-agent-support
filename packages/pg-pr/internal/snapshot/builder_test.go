@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/agentregistry"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/checkinterpret"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/ownership"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/prdeps"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/store"
@@ -1105,13 +1106,163 @@ func TestBuildExcludesAdvisoryCIChecks(t *testing.T) {
 		t.Fatalf("no exclusion: got %+v, want CIStatus=failure", snap.Mine)
 	}
 	// With exclusion: policy-bot dropped, real check passes → "success".
+	// Sourced from CheckInterpretersByRepo (pg2-4dz88.2.8's registry-shaped
+	// replacement for the old raw-pattern ExcludedChecksByRepo) rather than a
+	// flat pattern list, but the excluder Build derives from it must still
+	// exclude the exact same names — this is the regression this bead's own
+	// testing plan (case 5) requires: the pre-existing no-exclusion/
+	// with-exclusion ci_status behavior must survive the excluders map being
+	// swapped from a directly-configured cirollup.Excluder to one derived
+	// from the pg2-4dz88.2.4 registry's own Interpreter declarations.
 	snap = Build(BuilderInput{
-		Self:                 "me",
-		PRs:                  []PRInput{prInput},
-		ExcludedChecksByRepo: map[string][]string{"o/n": {"^policy-bot"}},
+		Self: "me",
+		PRs:  []PRInput{prInput},
+		CheckInterpretersByRepo: map[string][]checkinterpret.Interpreter{
+			"o/n": {{Patterns: []string{"^policy-bot"}, Type: checkinterpret.ApprovalGateType}},
+		},
 	})
 	if len(snap.Mine) != 1 || snap.Mine[0].CIStatus != "success" {
 		t.Fatalf("with exclusion: got %+v, want CIStatus=success", snap.Mine)
+	}
+}
+
+// TestBuildGateState_IndependentFromCIStatus pins INV-GATE-1: the gate's own
+// state and the CI-rollup state are computed from independent sources (the
+// gate from the PR's latest persisted revision, store.Revision.GateState;
+// CIStatus from the live CIRuns/excluder rollup) and must never collapse
+// into each other. Two directions, each asserting BOTH fields in the SAME
+// result per the bead's acceptance criteria.
+func TestBuildGateState_IndependentFromCIStatus(t *testing.T) {
+	// Direction 1: a failing gate alongside a green real check. ci_status
+	// must read success (the gate is its own axis, not folded into CI
+	// health) AND the gate field must read unsatisfied.
+	failingGate := PRInput{
+		PR:        api.PR{Repo: "o/n", Number: 1, Author: "me"},
+		Ownership: ownership.Mine,
+		CIRuns: []api.CIRun{
+			{Name: "build", Status: "completed", Conclusion: "success"},
+		},
+		Revisions: []store.Revision{
+			{Seq: 1, HeadSHA: "h1", GateState: "unsatisfied", GateStateM: 1},
+		},
+	}
+	snap := Build(BuilderInput{Self: "me", PRs: []PRInput{failingGate}})
+	if len(snap.Mine) != 1 {
+		t.Fatalf("len(Mine) = %d, want 1", len(snap.Mine))
+	}
+	if got := snap.Mine[0]; got.CIStatus != "success" || got.GateState != "unsatisfied" || got.GateStateM != 1 {
+		t.Fatalf("failing gate + green checks: got %+v, want CIStatus=success, GateState=unsatisfied, GateStateM=1", got)
+	}
+
+	// Direction 2 (the inverse): a red real check alongside a satisfied
+	// gate. ci_status must read failure AND the gate field must read
+	// satisfied — proving the two axes are independent in both directions,
+	// not merely that the gate never suppresses a failure.
+	satisfiedGate := PRInput{
+		PR:        api.PR{Repo: "o/n", Number: 2, Author: "me"},
+		Ownership: ownership.Mine,
+		CIRuns: []api.CIRun{
+			{Name: "build", Status: "completed", Conclusion: "failure"},
+		},
+		Revisions: []store.Revision{
+			{Seq: 1, HeadSHA: "h1", GateState: "satisfied"},
+		},
+	}
+	snap = Build(BuilderInput{Self: "me", PRs: []PRInput{satisfiedGate}})
+	if len(snap.Mine) != 1 {
+		t.Fatalf("len(Mine) = %d, want 1", len(snap.Mine))
+	}
+	if got := snap.Mine[0]; got.CIStatus != "failure" || got.GateState != "satisfied" || got.GateStateN != 0 || got.GateStateM != 0 {
+		t.Fatalf("red check + satisfied gate: got %+v, want CIStatus=failure, GateState=satisfied, N=M=0", got)
+	}
+}
+
+// TestBuildGateState_AbsentWhenNoObservation pins INV-GATE-2 on this read
+// seam: a PR that carries no gate observation at all — no revisions, or a
+// revision whose gate state is the store's own "unknown" default — MUST
+// project to the zero value (omitted on the wire), never "satisfied" or any
+// other positive state. Covers both TeamRow and MineRow, and both the
+// no-revisions and explicit-unknown shapes.
+func TestBuildGateState_AbsentWhenNoObservation(t *testing.T) {
+	noRevisions := PRInput{
+		PR:        api.PR{Repo: "o/n", Number: 1, Author: "me"},
+		Ownership: ownership.Mine,
+	}
+	explicitUnknown := PRInput{
+		PR:        api.PR{Repo: "o/n", Number: 2, Author: "someone", ReviewRequestedOfMe: true},
+		Ownership: ownership.Team,
+		Revisions: []store.Revision{{Seq: 1, HeadSHA: "h1", GateState: "unknown"}},
+	}
+	snap := Build(BuilderInput{Self: "me", PRs: []PRInput{noRevisions, explicitUnknown}})
+	if len(snap.Mine) != 1 || snap.Mine[0].GateState != "" || snap.Mine[0].GateStateN != 0 || snap.Mine[0].GateStateM != 0 {
+		t.Fatalf("no revisions at all: got %+v, want zero-value GateState", snap.Mine)
+	}
+	if len(snap.Team) != 1 || snap.Team[0].GateState != "" || snap.Team[0].GateStateN != 0 || snap.Team[0].GateStateM != 0 {
+		t.Fatalf("explicit unknown revision: got %+v, want zero-value GateState", snap.Team)
+	}
+}
+
+// TestGateStateFields_NoSeparateFreshnessField pins the freshness half of
+// this bead's acceptance criteria (INV-ASOF-1, INV-GATE-4): the gate state
+// carries no as-of/stale stamp of its own on this seam — it rides the SAME
+// payload-level freshness contract (Snapshot.GeneratedAt/WithFreshness)
+// every other row-level fact does. A field literally named to carry a
+// parallel freshness computation (e.g. AsOf/Stale/CapturedAt) would be
+// exactly the "second, unstamped extra field" the design forbids. Modelled
+// on TestDependencyFields_AreScalarOnly's reflection style.
+func TestGateStateFields_NoSeparateFreshnessField(t *testing.T) {
+	for _, typ := range []reflect.Type{reflect.TypeOf(MineRow{}), reflect.TypeOf(TeamRow{})} {
+		found := 0
+		for i := 0; i < typ.NumField(); i++ {
+			f := typ.Field(i)
+			if !strings.HasPrefix(f.Name, "GateState") {
+				continue
+			}
+			found++
+			if f.Type.Kind() != reflect.String && f.Type.Kind() != reflect.Int {
+				t.Errorf("%s.%s has kind %s; a GateState* field must be a scalar, never a grouping structure",
+					typ.Name(), f.Name, f.Type.Kind())
+			}
+		}
+		if found != 3 {
+			t.Errorf("%s: found %d GateState* fields, want 3 (GateState, GateStateN, GateStateM) — no separate as-of/stale field",
+				typ.Name(), found)
+		}
+	}
+}
+
+// TestGateState_RidesPayloadLevelFreshness proves the gate field is
+// unaffected by WithFreshness's serve-time stamp: the row-level facts
+// (including GateState) are copied through unchanged while only the
+// payload-level AgeSeconds/Stale scalars change, exactly like every other
+// row fact (CIStatus included).
+func TestGateState_RidesPayloadLevelFreshness(t *testing.T) {
+	in := BuilderInput{
+		// freshness.BoundSeconds(60) == 120 (BoundIntervals == 2): age this
+		// past the bound so Stale is deterministically true below.
+		GeneratedAt:         time.Now().Add(-150 * time.Second),
+		SyncIntervalSeconds: 60,
+		Self:                "me",
+		PRs: []PRInput{{
+			PR:        api.PR{Repo: "o/n", Number: 1, Author: "me"},
+			Ownership: ownership.Mine,
+			Revisions: []store.Revision{{Seq: 1, HeadSHA: "h1", GateState: "unsatisfied", GateStateM: 1}},
+		}},
+	}
+	snap := Build(in)
+	if len(snap.Mine) != 1 || snap.Mine[0].GateState != "unsatisfied" {
+		t.Fatalf("build: got %+v, want GateState=unsatisfied", snap.Mine)
+	}
+
+	served := snap.WithFreshness(time.Now())
+	if len(served.Mine) != 1 || served.Mine[0].GateState != "unsatisfied" || served.Mine[0].GateStateM != 1 {
+		t.Fatalf("WithFreshness must not alter row-level gate facts: got %+v", served.Mine)
+	}
+	if served.AgeSeconds <= 0 {
+		t.Errorf("AgeSeconds = %d, want > 0 after WithFreshness on a snapshot built 90s ago", served.AgeSeconds)
+	}
+	if !served.Stale {
+		t.Errorf("Stale = false, want true (age 90s > bound derived from a 60s sync interval)")
 	}
 }
 
