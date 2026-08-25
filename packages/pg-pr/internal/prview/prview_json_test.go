@@ -43,6 +43,7 @@ import (
 var fullView = Assemble(PRViewInput{
 	PR: api.PR{
 		Repo: "o/r", Number: 42, Title: "Add contributor guide",
+		Body:  "Adds a CONTRIBUTING.md with setup and PR guidelines.",
 		State: "open", Draft: false,
 		Branch: "alice/add-guide", Base: "main", Author: "alice",
 		URL:     "https://example.invalid/o/r/pull/42",

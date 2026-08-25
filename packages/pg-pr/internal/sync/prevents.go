@@ -26,6 +26,7 @@ func (e *Engine) prToStoreRow(repo string, pr api.PR, ownership string) store.Pu
 		Base:         pr.Base,
 		URL:          pr.URL,
 		HeadSHA:      pr.HeadSHA,
+		Body:         pr.Body,
 		LastSyncedAt: e.deps.Now().UTC().Format(time.RFC3339),
 	}
 }

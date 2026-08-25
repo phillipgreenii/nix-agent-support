@@ -45,14 +45,19 @@ func TestMigrate_V14UserStateColumns(t *testing.T) {
 // drop_approval_columns_migrate_test.go's TestMigrate_V12PreservesSurvivingColumnData
 // for the precedent this mirrors almost line-for-line), seeds a row against
 // that shape, then re-runs ONLY the v13->v14 step directly via
-// applyMigration. v14 is the terminal schemaVersion today, so a full
-// migrate() call against an already-migrated DB would be a no-op; and simply
-// rolling PRAGMA user_version back without also dropping the columns would
-// make the ADD COLUMN statements fail on "duplicate column name" (unlike a
-// table-rebuild migration, a plain ADD COLUMN step is not safe to re-run
-// against a table that already has the column). Asserts the pre-existing row
-// keeps its id and every prior column value, and the three new columns
-// backfill to their declared defaults.
+// applyMigration. Simply rolling PRAGMA user_version back without also
+// dropping the columns would make the ADD COLUMN statements fail on
+// "duplicate column name" (unlike a table-rebuild migration, a plain ADD
+// COLUMN step is not safe to re-run against a table that already has the
+// column) — this is why the fabricated shape must also drop `body` (the
+// v14->v15 column, pg2-1o1dp): OpenForTest below migrates the fresh DB all
+// the way to the CURRENT schemaVersion, so body already exists before this
+// test starts undoing columns; leaving it in place would make the v13
+// fabrication dishonest and would make the trailing migrate() call below
+// fail with exactly that "duplicate column name: body" error (which is
+// literally what happened before this test was updated for schema v15).
+// Asserts the pre-existing row keeps its id and every prior column value,
+// and the three v13->v14 columns backfill to their declared defaults.
 func TestMigrate_V14UpgradeFromPriorVersionPreservesRows(t *testing.T) {
 	db := OpenForTest(t) // full v14 schema present
 
@@ -67,8 +72,11 @@ func TestMigrate_V14UpgradeFromPriorVersionPreservesRows(t *testing.T) {
 	}
 
 	// Fabricate the v13 shape: physically drop the 3 columns this migration
-	// adds, then roll the version counter back to match.
-	for _, col := range []string{"user_hidden", "user_hidden_reason", "wip"} {
+	// adds, PLUS `body` (added later still, by v14->v15) — OpenForTest above
+	// already brought this DB to the current schemaVersion, so body exists
+	// and must come off too for the fabricated shape to be honestly v13's,
+	// then roll the version counter back to match.
+	for _, col := range []string{"user_hidden", "user_hidden_reason", "wip", "body"} {
 		if _, err := db.sql.Exec("ALTER TABLE pull_request DROP COLUMN " + col); err != nil {
 			t.Fatalf("drop %s to fabricate v13 shape: %v", col, err)
 		}
@@ -117,11 +125,21 @@ func TestMigrate_V14UpgradeFromPriorVersionPreservesRows(t *testing.T) {
 		t.Fatal("foreign_key_check reported a violation after the v13->v14 migration")
 	}
 
-	// applyMigration already set user_version to 14 (== schemaVersion, since
-	// v14 is terminal today), so this is a genuine idempotent re-migrate, not
-	// a further step.
+	// applyMigration above only ran the v13->v14 step under test; the
+	// fabricated DB is genuinely at v14 now (body was dropped above, not
+	// re-added), so this migrate() call performs the REMAINING steps up to
+	// the current schemaVersion (today: just v14->v15, re-adding body) —
+	// proving the v13->v14 step composes cleanly with whatever comes after
+	// it, not that this call is a no-op.
 	if err := migrate(db); err != nil {
 		t.Fatalf("second migrate: %v", err)
+	}
+	var body string
+	if err := db.sql.QueryRow("SELECT body FROM pull_request WHERE id=?", prID).Scan(&body); err != nil {
+		t.Fatalf("body column missing after migrate() caught up to schemaVersion: %v", err)
+	}
+	if body != "" {
+		t.Fatalf("body did not backfill to its declared default: got %q", body)
 	}
 }
 

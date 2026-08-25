@@ -59,7 +59,10 @@ func TestEmitPREvent_UpsertsAuthoritativeRow(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close() })
 
 	e := &Engine{deps: Deps{Store: db, Now: func() time.Time { return time.Unix(0, 0).UTC() }}}
-	pr := api.PR{Number: 9, Title: "t", Branch: "b", Base: "main", Author: "me", URL: "u", State: "open"}
+	pr := api.PR{
+		Number: 9, Title: "t", Body: "the description", Branch: "b", Base: "main",
+		Author: "me", URL: "u", State: "open",
+	}
 	if err := e.emitPREvent(ctx, store.EventPROpened, "o/r", pr, "mine"); err != nil {
 		t.Fatalf("emit: %v", err)
 	}
@@ -73,6 +76,12 @@ func TestEmitPREvent_UpsertsAuthoritativeRow(t *testing.T) {
 	}
 	if got.State != "open" || got.Ownership != "mine" || got.Author != "me" {
 		t.Fatalf("row = %+v; want state=open ownership=mine author=me", got)
+	}
+	// pg2-1o1dp: prToStoreRow must carry api.PR.Body through to the store row
+	// (the ingest-side half of the fix; storeRowToAPIPR/Assemble is the
+	// read-side half, covered in cmd/pg-pr and internal/prview's own tests).
+	if got.Body != "the description" {
+		t.Fatalf("row.Body = %q, want %q", got.Body, "the description")
 	}
 	if typ, p := drainOneEvent(t, db); typ != store.EventPROpened || p.Number != 9 {
 		t.Fatalf("event = %s %+v; want pr.opened #9", typ, p)

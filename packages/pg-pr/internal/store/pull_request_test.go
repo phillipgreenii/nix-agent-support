@@ -51,6 +51,49 @@ func TestUpsertPRInsertsThenUpdates(t *testing.T) {
 	}
 }
 
+// TestUpsertPR_BodyRoundTripAndUpdates is the store-layer regression guard
+// for pg2-1o1dp: `pg-pr pr view` was dropping the PR's own description
+// because nothing on the read path carried api.PR.Body through, and one of
+// the two things that gap needed was Body actually persisting through
+// UpsertPR's INSERT *and* its ON CONFLICT ... DO UPDATE path (unlike the
+// enrichment columns, body IS in that UPDATE SET clause — see
+// TestSetEnrichment_RoundTripAndNoClobber's no-clobber case for the
+// contrast). Mirrors TestUpsertPRInsertsThenUpdates's insert-then-update
+// shape, but for Body specifically.
+func TestUpsertPR_BodyRoundTripAndUpdates(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+
+	pr := PullRequest{
+		Repo: "owner/repo", Number: 42, Ownership: "mine",
+		Author: "phillipg", State: "open", HeadSHA: "abc123",
+		Body: "## Summary\nfirst description",
+	}
+	if _, err := db.UpsertPR(ctx, pr); err != nil {
+		t.Fatalf("UpsertPR insert: %v", err)
+	}
+
+	got, err := db.GetPR(ctx, "owner/repo", 42)
+	if err != nil || got == nil {
+		t.Fatalf("GetPR: %v %v", got, err)
+	}
+	if got.Body != pr.Body {
+		t.Fatalf("Body after insert = %q, want %q", got.Body, pr.Body)
+	}
+
+	pr.Body = "## Summary\nupdated description"
+	if _, err := db.UpsertPR(ctx, pr); err != nil {
+		t.Fatalf("UpsertPR update: %v", err)
+	}
+	got2, err := db.GetPR(ctx, "owner/repo", 42)
+	if err != nil || got2 == nil {
+		t.Fatalf("GetPR after update: %v %v", got2, err)
+	}
+	if got2.Body != pr.Body {
+		t.Fatalf("Body after update = %q, want %q (ON CONFLICT DO UPDATE must overwrite body)", got2.Body, pr.Body)
+	}
+}
+
 func TestListOpenPRs(t *testing.T) {
 	db := newTestDB(t)
 	ctx := context.Background()

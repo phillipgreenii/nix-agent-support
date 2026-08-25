@@ -21,7 +21,7 @@ var fixedNow = time.Date(2026, 8, 23, 12, 0, 0, 0, time.UTC)
 func TestAssemble_Identity_Populated(t *testing.T) {
 	in := PRViewInput{
 		PR: api.PR{
-			Repo: "o/r", Number: 42, Title: "add feature", State: "open",
+			Repo: "o/r", Number: 42, Title: "add feature", Body: "This adds a feature.", State: "open",
 			Branch: "alice/add-feature", Base: "main", Author: "alice",
 			URL: "https://example.invalid/o/r/pull/42", HeadSHA: "head1", BaseSHA: "base1",
 			Additions: 10, Deletions: 4, ChangedFiles: 3,
@@ -31,7 +31,7 @@ func TestAssemble_Identity_Populated(t *testing.T) {
 	}
 	got := Assemble(in).Identity
 	want := IdentityState{
-		Repo: "o/r", Number: 42, Title: "add feature", State: "open",
+		Repo: "o/r", Number: 42, Title: "add feature", Body: "This adds a feature.", State: "open",
 		Branch: "alice/add-feature", Base: "main", Author: "alice",
 		URL: "https://example.invalid/o/r/pull/42", HeadSHA: "head1", BaseSHA: "base1",
 		Additions: 10, Deletions: 4, ChangedFiles: 3,
@@ -55,7 +55,7 @@ func TestAssemble_Identity_Absent(t *testing.T) {
 }
 
 func identityEqual(a, b IdentityState) bool {
-	if a.Repo != b.Repo || a.Number != b.Number || a.Title != b.Title || a.State != b.State ||
+	if a.Repo != b.Repo || a.Number != b.Number || a.Title != b.Title || a.Body != b.Body || a.State != b.State ||
 		a.Draft != b.Draft || a.Branch != b.Branch || a.Base != b.Base || a.Author != b.Author ||
 		a.URL != b.URL || a.HeadSHA != b.HeadSHA || a.BaseSHA != b.BaseSHA || a.Merged != b.Merged ||
 		a.MergedAt != b.MergedAt || a.Additions != b.Additions || a.Deletions != b.Deletions ||

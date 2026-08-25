@@ -7,7 +7,7 @@ import (
 
 // schemaVersion is the current schema. Bump it and append a migration step
 // whenever the DDL changes. Stored in SQLite's user_version pragma.
-const schemaVersion = 14
+const schemaVersion = 15
 
 // migrations is the ordered list of DDL applied to reach schemaVersion. Index i
 // migrates user_version i -> i+1.
@@ -497,6 +497,22 @@ ALTER TABLE outbox ADD COLUMN claimed_at TEXT;
 ALTER TABLE pull_request ADD COLUMN user_hidden        INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE pull_request ADD COLUMN user_hidden_reason TEXT    NOT NULL DEFAULT '';
 ALTER TABLE pull_request ADD COLUMN wip                INTEGER NOT NULL DEFAULT 0;
+`,
+	// v14 -> v15: persist the PR's own description text (pg2-1o1dp). `pg-pr pr
+	// view`'s store-read-default path (internal/prview.Assemble, fed via
+	// cmd/pg-pr/pr_view.go's storeRowToAPIPR) never carried api.PR.Body onto
+	// View.Identity — a regression from the `pr show`/`pr info` -> `pr view`
+	// consolidation, since the retired `pr show` marshaled the live-provider
+	// api.PR (which always carried Body) directly. Per INV-READ-1 the base
+	// machine read seam must stay network-free, so the fix persists Body as
+	// a store column rather than fetching it live in loadPRView — the same
+	// choice already made for the sibling host-derived columns (author,
+	// branch, base, url, head_sha). Additive ALTER ADD COLUMN, no CHECK
+	// touched, so no table rebuild; existing rows backfill to '', the only
+	// truthful value for a PR whose description was never observed under
+	// this schema version.
+	`
+ALTER TABLE pull_request ADD COLUMN body TEXT NOT NULL DEFAULT '';
 `,
 }
 

@@ -159,9 +159,18 @@ type PRViewInput struct {
 // again here, over the live-provider shape, would just be a second,
 // differently-timed collapse of the same fact.
 type IdentityState struct {
-	Repo         string   `json:"repo"`
-	Number       int      `json:"number"`
-	Title        string   `json:"title"`
+	Repo   string `json:"repo"`
+	Number int    `json:"number"`
+	Title  string `json:"title"`
+	// Body is the PR's own description text (api.PR.Body), sourced directly
+	// from PRViewInput.PR exactly like Title. Regression fix (pg2-1o1dp): the
+	// `pr show`/`pr info` -> `pr view` consolidation dropped it entirely —
+	// the retired `pr show` used to marshal the live-provider api.PR (which
+	// always carried Body) directly, but Assemble never copied it onto
+	// Identity. No omitempty, consistent with the rest of this type: an
+	// unmerged/no-store PR's empty description renders as "" like Title
+	// does, not as a distinct unknown marker.
+	Body         string   `json:"body"`
 	State        string   `json:"state"`
 	Draft        bool     `json:"draft"`
 	Branch       string   `json:"branch"`
@@ -359,6 +368,7 @@ func Assemble(in PRViewInput) View {
 			Repo:         in.PR.Repo,
 			Number:       in.PR.Number,
 			Title:        in.PR.Title,
+			Body:         in.PR.Body,
 			State:        in.PR.State,
 			Draft:        in.PR.Draft,
 			Branch:       in.PR.Branch,

@@ -114,7 +114,11 @@ func loadPRView(ctx context.Context, repo string, num int) (prview.View, error) 
 // merge_state_status, …) — those axes render through their own unknown
 // marker rather than a network round-trip, matching this view's
 // store-read-default posture (pg2-4dz88.5.3); a future bead may widen the
-// store row to carry more of them.
+// store row to carry more of them. Body IS persisted (pg2-1o1dp, schema
+// v15) — the PR's own description was previously dropped entirely by the
+// `pr show`/`pr info` -> `pr view` consolidation, a real regression, so it
+// was added to this column set rather than left alongside the
+// still-unpersisted fields above.
 func storeRowToAPIPR(row store.PullRequest) api.PR {
 	return api.PR{
 		Repo:    row.Repo,
@@ -125,6 +129,7 @@ func storeRowToAPIPR(row store.PullRequest) api.PR {
 		Author:  row.Author,
 		URL:     row.URL,
 		HeadSHA: row.HeadSHA,
+		Body:    row.Body,
 	}
 }
 

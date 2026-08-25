@@ -406,7 +406,7 @@ func TestRetainedInvocationsStillResolve(t *testing.T) {
 			//   claude-marketplace/pg-pr/skills/pg-pr-write-pr-description/SKILL.md:49
 			// (The body-field claim this same skill made about this exact
 			// invocation is checked separately —
-			// TestPRView_WriteDescriptionCaller_BodyFieldNotCarried below —
+			// TestPRView_WriteDescriptionCaller_BodyFieldCarried below —
 			// because it needs its own assertions, not just "did it
 			// resolve".)
 			name:     "repo_and_json",
@@ -455,31 +455,46 @@ func TestRetainedInvocationsStillResolve(t *testing.T) {
 	}
 }
 
-// TestPRView_WriteDescriptionCaller_BodyFieldNotCarried is the CLI
-// round-trip check pg2-4dz88.5.8 was asked to perform for the
-// pg-pr-write-pr-description caller (SKILL.md:49/58): confirm, through the
-// real CLI path rather than trusting pkg/api.PR's Body field's json tag
-// (json:"body,omitempty"), whether `pr view --json`'s output still carries
-// the PR's own description text the way the retired `pr show` used to.
+// TestPRView_WriteDescriptionCaller_BodyFieldCarried is the CLI round-trip
+// check for the pg-pr-write-pr-description caller (SKILL.md:49): confirm,
+// through the real CLI path rather than trusting pkg/api.PR's Body field's
+// json tag alone, that `pr view --json`'s output carries the PR's own
+// description text the way the retired `pr show` used to.
 //
-// It does not. internal/prview.Assemble builds View.Identity from
-// PRViewInput.PR field-by-field (internal/prview/prview.go) and never
-// copies api.PR.Body into it; the only `body` JSON key anywhere in a View
-// is FeedbackItem.Body (internal/prview/prview.go:231), which is a review
-// comment's body, not the PR's own description — and PRViewInput.PR itself
-// is populated by storeRowToAPIPR (cmd/pg-pr/pr_view.go), which likewise
-// never copies Body. This is a pre-existing gap from pg2-4dz88.5.7's
-// `pr show` -> `pr view` consolidation (`pr show` used to marshal the
-// live-provider api.PR directly, which does carry `body`), discovered while
-// re-pointing the write-pr-description skill's caller at `pr view` for
-// pg2-4dz88.5.8. Closing it (carrying the PR's own description onto
-// View.Identity, or wiring one in via loadPRView) is out of this bead's
-// scope; the skill text itself now tells the caller to fetch the
-// description separately (`gh pr view --json body`) instead — see this
-// bead's edit to pg-pr-write-pr-description/SKILL.md.
-func TestPRView_WriteDescriptionCaller_BodyFieldNotCarried(t *testing.T) {
+// This test used to be named …_BodyFieldNotCarried and documented the
+// opposite: pg2-4dz88.5.7's `pr show` -> `pr view` consolidation had dropped
+// api.PR.Body entirely (Assemble never copied it onto View.Identity, and
+// storeRowToAPIPR never copied it out of the store row either) — a real
+// regression, since the retired `pr show` used to marshal the live-provider
+// api.PR (which always carries Body) directly. pg2-1o1dp closed that gap:
+// internal/store.PullRequest now persists Body (schema v15) alongside the
+// sibling host-derived columns (author/branch/base/url/head_sha),
+// cmd/pg-pr/pr_view.go's storeRowToAPIPR copies it back out, and
+// internal/prview.Assemble copies it onto View.Identity — so this test now
+// asserts the CORRECT (carried-through) behavior instead of the gap.
+// pg-pr-write-pr-description/SKILL.md's `gh pr view --json body` workaround
+// is reverted in the same change; the skill relies on `pr view` again.
+func TestPRView_WriteDescriptionCaller_BodyFieldCarried(t *testing.T) {
 	resetPRFlags()
-	setViewStateHome(t, false)
+	setViewStateHome(t, true)
+
+	db, err := store.Open(store.DefaultPath())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	ctx := context.Background()
+	const wantBody = "## Summary\nThis PR does the thing.\n"
+	if _, err := db.UpsertPR(ctx, store.PullRequest{
+		Repo: "foo/bar", Number: 7, Ownership: "mine", State: "open",
+		Author: "phillipg", Branch: "feat/x", Base: "main",
+		URL: "https://github.com/foo/bar/pull/7", HeadSHA: "abc123",
+		Body: wantBody,
+	}); err != nil {
+		t.Fatalf("upsert pr: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
 
 	var stdout, stderr bytes.Buffer
 	rootCmd.SetOut(&stdout)
@@ -498,10 +513,11 @@ func TestPRView_WriteDescriptionCaller_BodyFieldNotCarried(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected identity object in output: %v", doc)
 	}
-	if _, present := identity["body"]; present {
-		t.Errorf("identity.body is now present — the gap this test documents has been closed; revert pg-pr-write-pr-description/SKILL.md's caveat (and this test) to rely on `pr view` for the existing body again")
+	got, present := identity["body"]
+	if !present {
+		t.Fatalf("identity.body is missing from the output: %v", doc)
 	}
-	if _, present := doc["body"]; present {
-		t.Errorf("a top-level body key is now present — same as above")
+	if got != wantBody {
+		t.Errorf("identity.body = %q, want %q", got, wantBody)
 	}
 }

@@ -5,6 +5,7 @@
     "repo": "o/r",
     "number": 42,
     "title": "Add contributor guide",
+    "body": "Adds a CONTRIBUTING.md with setup and PR guidelines.",
     "state": "open",
     "draft": false,
     "branch": "alice/add-guide",

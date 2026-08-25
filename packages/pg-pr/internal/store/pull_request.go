@@ -11,16 +11,25 @@ import (
 
 // PullRequest is the authoritative PR row.
 type PullRequest struct {
-	ID             int64
-	Repo           string
-	Number         int
-	Ownership      string // "mine" | "co-owned" | "team"
-	Author         string
-	State          string
-	Branch         string
-	Base           string
-	URL            string
-	HeadSHA        string
+	ID        int64
+	Repo      string
+	Number    int
+	Ownership string // "mine" | "co-owned" | "team"
+	Author    string
+	State     string
+	Branch    string
+	Base      string
+	URL       string
+	HeadSHA   string
+	// Body is the PR's own description text (api.PR.Body), persisted alongside
+	// the other live-provider-shaped columns (Author/Branch/Base/URL/HeadSHA)
+	// so `pg-pr pr view`'s store-read-default path (cmd/pg-pr/pr_view.go's
+	// storeRowToAPIPR) can carry it through without a network call
+	// (pg2-1o1dp; INV-READ-1). Written on every sync tick like those sibling
+	// columns — not omitted from UpsertPR's ON CONFLICT clause the way the
+	// USER_HIDDEN/WIP columns deliberately are, since Body is host-derived,
+	// not a user decision.
+	Body           string
 	LastSyncedAt   string
 	Kind           string
 	Languages      []string
@@ -53,7 +62,7 @@ var nowRFC3339 = func() string { return time.Now().UTC().Format(time.RFC3339) }
 
 // prColumns is the canonical SELECT column order; scanPR must match it.
 const prColumns = `id, repo, number, ownership, author, state, branch, base, url,
-	head_sha, last_synced_at, kind, languages, size, urgency, urgency_score, urgency_reasons,
+	head_sha, body, last_synced_at, kind, languages, size, urgency, urgency_score, urgency_reasons,
 	user_hidden, user_hidden_reason, wip`
 
 type rowScanner interface{ Scan(dest ...any) error }
@@ -65,7 +74,7 @@ func scanPR(s rowScanner) (PullRequest, error) {
 	var langs, reasons string
 	var userHidden, wip int
 	if err := s.Scan(&pr.ID, &pr.Repo, &pr.Number, &pr.Ownership, &pr.Author,
-		&pr.State, &pr.Branch, &pr.Base, &pr.URL, &pr.HeadSHA, &pr.LastSyncedAt,
+		&pr.State, &pr.Branch, &pr.Base, &pr.URL, &pr.HeadSHA, &pr.Body, &pr.LastSyncedAt,
 		&pr.Kind, &langs, &pr.Size, &pr.Urgency, &pr.UrgencyScore, &reasons,
 		&userHidden, &pr.UserHiddenReason, &wip); err != nil {
 		return pr, err
@@ -150,15 +159,15 @@ func (t *Tx) UpsertPR(pr PullRequest) (int64, error) {
 	_, err := t.Exec(
 		`
 INSERT INTO pull_request
-  (repo, number, ownership, author, state, branch, base, url, head_sha, last_synced_at, created_at, updated_at)
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+  (repo, number, ownership, author, state, branch, base, url, head_sha, body, last_synced_at, created_at, updated_at)
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT(repo, number) DO UPDATE SET
   ownership=excluded.ownership, author=excluded.author, state=excluded.state,
   branch=excluded.branch, base=excluded.base, url=excluded.url,
-  head_sha=excluded.head_sha, last_synced_at=excluded.last_synced_at,
+  head_sha=excluded.head_sha, body=excluded.body, last_synced_at=excluded.last_synced_at,
   updated_at=excluded.updated_at`,
 		pr.Repo, pr.Number, pr.Ownership, pr.Author, pr.State, pr.Branch, pr.Base,
-		pr.URL, pr.HeadSHA, pr.LastSyncedAt, now, now,
+		pr.URL, pr.HeadSHA, pr.Body, pr.LastSyncedAt, now, now,
 	)
 	if err != nil {
 		return 0, fmt.Errorf("store: upsert pr %s#%d: %w", pr.Repo, pr.Number, err)

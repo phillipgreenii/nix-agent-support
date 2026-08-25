@@ -55,13 +55,9 @@ pg-pr pr files --base origin/main --json
 pg-pr pr commits --base origin/main --json
 ```
 
-- `pr view --json`'s `identity` object does **not** currently carry the PR's
-  own description text (no `body` field on `identity`; the only `body` key
-  anywhere in the output belongs to individual `feedback` items — review
-  comments, not the PR's own description). When updating, fetch the current
-  description separately, e.g. `gh pr view <pr> --json body --jq .body`, and
-  treat it as the starting point — preserve any hand-authored sections that
-  look intentional (e.g. a "Notes for reviewer" block).
+- `pr view --json`'s `identity.body` is the PR's existing description. When
+  updating, treat it as the starting point — preserve any hand-authored
+  sections that look intentional (e.g. a "Notes for reviewer" block).
 - `pr files --json` returns `{"files": [{path, additions, deletions,
 binary}, ...]}`. Use it to group changes by area in the body.
 - `pr commits --json` returns `{"commits": [{sha, subject, body,
