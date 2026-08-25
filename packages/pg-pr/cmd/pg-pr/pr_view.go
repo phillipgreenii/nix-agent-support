@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/event"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/output"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/prview"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/store"
@@ -34,7 +36,11 @@ as-of time and a staleness verdict for the whole view.
 
 Reads from the local store by default and makes no network call (matching
 'pr list'); a missing store is not an error, it just means less is known
-yet about this PR.`,
+yet about this PR.
+
+With --force-reload, a live SyncPR refresh runs first (fetching from the
+provider and updating the store) and the view is then assembled from the
+post-refresh state.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		num, err := parsePR(args[0])
@@ -45,6 +51,11 @@ yet about this PR.`,
 		repo, err := resolveRepo(ctx, prF.repo)
 		if err != nil {
 			return err
+		}
+		if prF.forceReload {
+			if err := forceReloadPR(ctx, repo, num); err != nil {
+				return err
+			}
 		}
 		v, err := loadPRView(ctx, repo, num)
 		if err != nil {
@@ -133,10 +144,75 @@ func storeRowToAPIPR(row store.PullRequest) api.PR {
 	}
 }
 
+// forceReloadPR runs a one-shot Engine.SyncPR refresh for (repo, num) before
+// pr view's store read, wiring the same config/engine/store/dispatch
+// construction the `pg-pr sync --pr` one-shot path uses (syncCmd.RunE in
+// cmd/pg-pr/sync.go) — reusing newSyncEngineForCLI verbatim rather than a
+// second engine-construction path — so this flag inherits SyncPR's
+// beadsbridge dispatch and, with it, the cross-process per-PR lock the
+// beadsbridge handler applies (pg2-4dz88.6.3), for free, with no new locking
+// code here.
+//
+// event.Dispatcher.Dispatch and store.DB.RunOutbox both intentionally
+// discard a handler's returned error (they only log it — see sync.go's
+// flushOutbox and its callers' comments), so a lock give-up
+// (prlock.ErrTimeout) would otherwise vanish instead of surfacing through
+// `pr view`'s own RunE return. It is captured at the handler itself and
+// relayed here, mirroring syncCmd.RunE's own lastDispatchErr wrapper for its
+// non-daemon --pr path.
+func forceReloadPR(ctx context.Context, repo string, num int) error {
+	cfg, err := loadConfigForCLI(ctx)
+	if err != nil {
+		return err
+	}
+	engine, err := newSyncEngineForCLI(cfg)
+	if err != nil {
+		return err
+	}
+
+	// Unlike this default (no-flag) view path — which stat-guards
+	// store.DefaultPath() so a machine with no store yet is never mutated —
+	// --force-reload is itself a write path, so it is responsible for its
+	// own state directory exactly like the "MUST succeed standalone, no
+	// daemon required" contract demands: store.Open (unlike sync.go's own
+	// syncCmd.RunE, which relies on the directory already existing from a
+	// prior run) does not create missing parent directories, so a genuinely
+	// first-ever invocation on a machine with no ~/.local/state/pg-pr yet
+	// would otherwise fail here.
+	if err := os.MkdirAll(filepath.Dir(engine.StoreFile()), 0o755); err != nil {
+		return fmt.Errorf("create state dir: %w", err)
+	}
+	eventStore, err := store.Open(engine.StoreFile())
+	if err != nil {
+		return fmt.Errorf("open event store: %w", err)
+	}
+	defer func() { _ = eventStore.Close() }()
+
+	disp := event.New()
+	var lastDispatchErr error
+	bridgeHandler := newBeadsBridgeHandler(engine.Config)
+	disp.Register(func(ctx context.Context, e store.Event) error {
+		err := bridgeHandler(ctx, e)
+		if err != nil {
+			lastDispatchErr = err
+		}
+		return err
+	})
+	engine.SetStoreAndDispatch(eventStore, disp.Dispatch)
+
+	_, err = engine.SyncPR(ctx, repo, num)
+	if err == nil && lastDispatchErr != nil {
+		err = lastDispatchErr
+	}
+	return err
+}
+
 func init() {
 	prViewCmd.Flags().BoolVar(&prF.jsonOutput, "json", false,
 		"Emit machine-readable JSON instead of human-readable output")
 	prViewCmd.Flags().StringVar(&prF.repo, "repo", "",
 		"Repository in owner/name form (defaults to auto-detected remote)")
+	prViewCmd.Flags().BoolVar(&prF.forceReload, "force-reload", false,
+		"Refresh this PR from the provider (SyncPR) before rendering, so the view reflects post-refresh state")
 	prCmd.AddCommand(prViewCmd)
 }

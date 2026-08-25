@@ -20,10 +20,11 @@ import (
 
 // prFlags holds the parsed CLI flags for the `pg-pr pr` subcommands.
 type prFlags struct {
-	jsonOutput bool
-	repo       string
-	base       string
-	reviewers  bool // pr list: augment each PR with the live reviewer roster + labels
+	jsonOutput  bool
+	repo        string
+	base        string
+	reviewers   bool // pr list: augment each PR with the live reviewer roster + labels
+	forceReload bool // pr view: run a live SyncPR refresh before rendering (pg2-4dz88.6.4)
 }
 
 var prF prFlags

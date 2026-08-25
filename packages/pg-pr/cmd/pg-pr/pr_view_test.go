@@ -6,12 +6,19 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/beadsbridge"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/config"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/prlock"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/store"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/sync"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/provider/vcs"
 )
 
@@ -784,5 +791,220 @@ func TestPRView_ListFeedbackErrorPropagates(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "list feedback") {
 		t.Fatalf("err = %v, want it to contain %q", err, "list feedback")
+	}
+}
+
+// ----------------------------------------------------------------------
+// --force-reload (pg2-4dz88.6.4)
+// ----------------------------------------------------------------------
+
+// setViewSyncStubs overrides loadConfigForCLI and newSyncEngineForCLI for a
+// `pr view --force-reload` test, mirroring sync_test.go's setStubsForSync.
+// It deliberately leaves sync.Deps.StateDir UNSET — unlike setStubsForSync,
+// which sets it to t.TempDir() for its own tests — so the constructed
+// engine's store file resolves through defaultStoreFile()'s own
+// XDG_STATE_HOME lookup: the SAME resolution store.DefaultPath() uses. That
+// is load-bearing here: a SyncPR write through this engine must be visible
+// to loadPRView's own subsequent store.Open(store.DefaultPath()) re-read, so
+// the caller must have pointed XDG_STATE_HOME at the same temp dir first
+// (setViewStateHome does this).
+//
+// calledPtr, when non-nil, is set true the first time newSyncEngineForCLI
+// runs — proving --force-reload actually reached engine construction rather
+// than the wiring silently no-op'ing.
+func setViewSyncStubs(t *testing.T, vcsProv sync.VCSProvider, cfg *config.Config, now func() time.Time, calledPtr *bool) func() {
+	t.Helper()
+	prevCfg := loadConfigForCLI
+	prevEng := newSyncEngineForCLI
+	loadConfigForCLI = func(_ context.Context) (*config.Config, error) { return cfg, nil }
+	newSyncEngineForCLI = func(c *config.Config) (*sync.Engine, error) {
+		if calledPtr != nil {
+			*calledPtr = true
+		}
+		return sync.New(sync.Deps{
+			Cfg: c,
+			VCS: map[string]sync.VCSProvider{"github": vcsProv},
+			Now: now,
+		})
+	}
+	return func() {
+		loadConfigForCLI = prevCfg
+		newSyncEngineForCLI = prevEng
+	}
+}
+
+// TestPRView_ForceReload_CallsSyncEngine proves `pr view --force-reload`
+// reaches newSyncEngineForCLI/Engine.SyncPR — this bead's own wiring — the
+// counterpart to TestPRView_NoNetworkCall's proof that the default (no-flag)
+// path never calls the VCS provider at all.
+func TestPRView_ForceReload_CallsSyncEngine(t *testing.T) {
+	resetPRFlags()
+	setViewStateHome(t, false)
+
+	cfg := minimalCLICfg()
+	vcs := &stubVCS{prs: map[string][]api.PR{"foo/bar": {samplePR(7)}}}
+	var called bool
+	defer setViewSyncStubs(t, vcs, cfg, nil, &called)()
+
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{"pr", "view", "7", "--repo", "foo/bar", "--force-reload"})
+
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("execute: %v (stderr=%s)", err, stderr.String())
+	}
+	if !called {
+		t.Error("expected --force-reload to call newSyncEngineForCLI (Engine.SyncPR)")
+	}
+}
+
+// TestPRView_NoForceReload_NoSyncEngineCall proves `pr view`'s default (no
+// --force-reload) path never reaches newSyncEngineForCLI/Engine.SyncPR — the
+// higher CLI-wiring counterpart to TestPRView_NoNetworkCall above, which
+// pins the lower vcsProviderFor seam instead.
+func TestPRView_NoForceReload_NoSyncEngineCall(t *testing.T) {
+	resetPRFlags()
+	setViewStateHome(t, false)
+
+	prev := newSyncEngineForCLI
+	t.Cleanup(func() { newSyncEngineForCLI = prev })
+	newSyncEngineForCLI = func(*config.Config) (*sync.Engine, error) {
+		t.Fatal("pr view without --force-reload must not call newSyncEngineForCLI")
+		return nil, nil
+	}
+
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{"pr", "view", "7", "--repo", "foo/bar"})
+
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("execute: %v (stderr=%s)", err, stderr.String())
+	}
+}
+
+// TestPRView_ForceReload_AsOfReflectsPostRefresh proves INV-ASOF-1 for the
+// new flag: with --force-reload, the rendered as-of time comes from the
+// POST-refresh store row Engine.SyncPR just wrote (stamped with this test's
+// own fixed engine clock), not the pre-existing, easily-distinguishable
+// LastSyncedAt the row was seeded with before the refresh ran.
+func TestPRView_ForceReload_AsOfReflectsPostRefresh(t *testing.T) {
+	resetPRFlags()
+	setViewStateHome(t, true)
+
+	db, err := store.Open(store.DefaultPath())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	ctx := context.Background()
+	if _, err := db.UpsertPR(ctx, store.PullRequest{
+		Repo: "foo/bar", Number: 7, Ownership: "mine", State: "open",
+		Author: "phillipg", Branch: "feat/x", Base: "main",
+		URL: "https://github.com/foo/bar/pull/7", HeadSHA: "abc123",
+		LastSyncedAt: "2000-01-01T00:00:00Z",
+	}); err != nil {
+		t.Fatalf("upsert pr: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
+
+	cfg := minimalCLICfg()
+	vcs := &stubVCS{prs: map[string][]api.PR{"foo/bar": {samplePR(7)}}}
+	fixedNow := time.Date(2030, 6, 15, 12, 0, 0, 0, time.UTC)
+	defer setViewSyncStubs(t, vcs, cfg, func() time.Time { return fixedNow }, nil)()
+
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{"pr", "view", "7", "--repo", "foo/bar", "--force-reload", "--json"})
+
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("execute: %v (stderr=%s)", err, stderr.String())
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &doc); err != nil {
+		t.Fatalf("output is not valid JSON: %v\noutput:\n%s", err, stdout.String())
+	}
+	wantAsOf := fixedNow.UTC().Format(time.RFC3339)
+	if got := doc["as_of"]; got != wantAsOf {
+		t.Errorf("as_of = %v, want %v (post-refresh, not the pre-refresh 2000-01-01 row)", got, wantAsOf)
+	}
+}
+
+// TestPRView_ForceReloadError_Propagates proves a SyncPR failure (here: the
+// stub VCS provider has no PR #7 configured, so provider.GetPR fails)
+// surfaces as `pr view --force-reload`'s own command error rather than being
+// silently swallowed and falling through to a (stale/wrong) rendered view.
+func TestPRView_ForceReloadError_Propagates(t *testing.T) {
+	resetPRFlags()
+	setViewStateHome(t, false)
+
+	cfg := minimalCLICfg()
+	vcs := &stubVCS{} // no PRs configured -> GetPR always "not found"
+	defer setViewSyncStubs(t, vcs, cfg, nil, nil)()
+
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{"pr", "view", "7", "--repo", "foo/bar", "--force-reload"})
+
+	err := rootCmd.Execute()
+	if err == nil {
+		t.Fatalf("expected the SyncPR fetch error to propagate, got stdout=%q", stdout.String())
+	}
+	if !strings.Contains(err.Error(), "sync PR") {
+		t.Fatalf("err = %v, want it to contain %q", err, "sync PR")
+	}
+	// No view was rendered from stale/absent data: the only stdout content
+	// on this error path is cobra's own default usage text (unrelated to
+	// prview.RenderHuman/MarshalView), never the "repo:"/"number:" markers
+	// loadPRView's rendering would have produced had it run.
+	for _, mustNotContain := range []string{"repo: foo/bar", "number: 7"} {
+		if strings.Contains(stdout.String(), mustNotContain) {
+			t.Errorf("expected no rendered view output on a propagated SyncPR error, found %q in %q", mustNotContain, stdout.String())
+		}
+	}
+}
+
+// TestPRView_ForceReload_LockGiveUpSurfacesBusyExit is pr_view's counterpart
+// to sync_test.go's TestSyncCommand_SinglePR_LockGiveUpSurfacesBusyExit: it
+// proves Engine.SyncPR's call path, wired through forceReloadPR the same way
+// syncCmd.RunE wires its own one-shot --pr path, reaches the SAME registered
+// beadsbridge handler that carries the cross-process per-PR lock
+// (pg2-4dz88.6.3) — so --force-reload inherits that protection with no new
+// locking code in pr_view.go, and a give-up surfaces through `pr view`'s own
+// RunE return, classified by main's existing exitCodeFor as exitBusy.
+func TestPRView_ForceReload_LockGiveUpSurfacesBusyExit(t *testing.T) {
+	resetPRFlags()
+	setViewStateHome(t, false)
+
+	cfg := minimalCLICfg()
+	cfg.Repos[0].Path = t.TempDir() // required for newBeadsBridgeHandler's repo->path index
+	vcs := &stubVCS{prs: map[string][]api.PR{"foo/bar": {samplePR(9)}}}
+	defer setViewSyncStubs(t, vcs, cfg, nil, nil)()
+
+	fake := &fakeBridgeBeads{
+		findUncachedErr: fmt.Errorf("beadsbridge: await cross-process projection lock for foo/bar#9: %w", prlock.ErrTimeout),
+	}
+	prevClient := newBeadClientForRepo
+	newBeadClientForRepo = func(string) beadsbridge.BeadClient { return fake }
+	defer func() { newBeadClientForRepo = prevClient }()
+
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{"pr", "view", "9", "--repo", "foo/bar", "--force-reload"})
+
+	err := rootCmd.Execute()
+	if err == nil {
+		t.Fatal("expected the lock give-up to surface as the command's error")
+	}
+	if !errors.Is(err, prlock.ErrTimeout) {
+		t.Fatalf("execute error = %v, want an error wrapping prlock.ErrTimeout", err)
+	}
+	if got := exitCodeFor(err); got != exitBusy {
+		t.Errorf("exitCodeFor(err) = %d, want exitBusy (%d)", got, exitBusy)
 	}
 }

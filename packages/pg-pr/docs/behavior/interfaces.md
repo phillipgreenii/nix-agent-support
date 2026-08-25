@@ -65,7 +65,13 @@ flowchart LR
   from view while the consolidated single-PR view below still returns it on request.
 - **Out (pg-pr → consumer), consolidated single-PR view** — on request, every PR fact pg-pr
   holds for one identified PR, assembled into a single aggregate carrying its own as-of time and
-  stale flag for the whole aggregate, per the same freshness guarantee below.
+  stale flag for the whole aggregate, per the same freshness guarantee below. The requester MAY
+  additionally ask that this assembly be preceded by an on-demand refresh of that one PR — the
+  **augmented read** `INV-READ-1` carves out of its own no-network-call guarantee — so the
+  resulting as-of time reflects the refreshed state rather than whatever was already stored. That
+  refresh is the same on-demand path `USECASE-PGPR-SYNC` already describes, scoped to the one
+  requested PR; any merge-request record it touches remains governed by `INV-MR-1`'s
+  sole-creator, single-record guarantee regardless of what requested the refresh.
 - **Guarantee** — a consumer MUST be able to tell "stale" from "current" for every fact it acts
   on (`INV-ASOF-1`); pg-pr, not the consumer, makes that determination, so a consumer MUST NOT
   re-derive its own staleness policy over these facts (`INV-ASOF-2`).
