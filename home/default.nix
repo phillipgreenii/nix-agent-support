@@ -39,5 +39,6 @@
     # Relocated from nix-personal (Plan 5): agent tooling belongs here.
     ./programs/perles
     ./programs/rtk
+    ./programs/pg-disk-reclaimer
   ];
 }
