@@ -1169,16 +1169,28 @@
               # the enforcer the Cluster-5 Go items (.13/.16/.17/.18) cite by
               # name. It EXTENDS the base `mkGoTest` builder (ADR 0021's preferred
               # builder, same as pa-monitor-go-tests): mkGoTest runs
-              # `go test -coverprofile=cover.out -covermode=set ./...` from the
-              # module root (its vendor/goConfigHook setup is reused verbatim),
-              # then an overridden postBuild runs the committed coverage-gate
-              # script against the committed thresholds table and FAILs the build
-              # if any gated package is below its pinned bar. Pattern-B module
-              # (local replace ../ccpool, ../claude-transcript) so root the
-              # fileset at packages/ and pass modRoot, mirroring the pr-pool
-              # goLint + default.nix (docs excluded — behavior docs, not build
-              # inputs). The thresholds start empty and each Go bead activates its
-              # line as its package lands (the gate is wired first, extended after).
+              # `go test -coverprofile=cover.out -covermode=atomic ./...` from
+              # the module root (its vendor/goConfigHook setup is reused
+              # verbatim), then an overridden postBuild runs the committed
+              # coverage-gate script against the committed thresholds table and
+              # FAILs the build if any gated package is below its pinned bar.
+              # Pattern-B module (local replace ../ccpool, ../claude-transcript)
+              # so root the fileset at packages/ and pass modRoot, mirroring the
+              # pr-pool goLint + default.nix (docs excluded — behavior docs, not
+              # build inputs). The thresholds start empty and each Go bead
+              # activates its line as its package lands (the gate is wired
+              # first, extended after).
+              #
+              # `-covermode=atomic`, not `set` (bead pg2-j7vgy): mkGoTest now
+              # defaults `enableRace = true`, appending `-race`, and Go's `go
+              # test` REJECTS `-covermode=set` combined with `-race` outright
+              # ("-covermode must be \"atomic\", not \"set\", when -race is
+              # enabled") — `set`'s non-atomic counters are themselves a data
+              # race under the detector's instrumentation. `atomic` is a pure
+              # instrumentation change (race-safe counters); coverage-gate.sh
+              # only tests `count > 0` per statement, which atomic's non-binary
+              # counts still satisfy identically, so the gate's thresholds are
+              # unaffected.
               pr-pool-go-tests =
                 (pkgs._agentSupportGoBuilders.mkGoTest {
                   pname = "pr-pool-go-tests";
@@ -1194,7 +1206,7 @@
                   gomod2nixToml = ./packages/pr-pool/gomod2nix.toml;
                   testFlags = [
                     "-coverprofile=cover.out"
-                    "-covermode=set"
+                    "-covermode=atomic"
                   ];
                 }).overrideAttrs
                   (old: {
