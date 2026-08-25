@@ -1,12 +1,20 @@
+//go:build integration || smoke
+
 package gate_test
 
-// Shared real-bd/real-git test helpers, deliberately carrying NO build tag.
-// requireBinaries/isolateBeadsEnv/initGitRepoWithCommit/runTool/
-// createDeferredBead/inReady started life in create_fleetrace_test.go, but
-// lifecycle_smoke_test.go (tagged `//go:build smoke`) uses them too. Passing
-// only ONE of `-tags integration` / `-tags smoke` builds the other file out,
-// so these helpers must live where both can reach them regardless of which
-// non-unit label is selected (bead pg2-h05lt).
+// Shared real-bd/real-git test helpers for create_fleetrace_test.go
+// (`//go:build integration`) and lifecycle_smoke_test.go
+// (`//go:build smoke`) -- requireBinaries/isolateBeadsEnv/
+// initGitRepoWithCommit/runTool/createDeferredBead/inReady (bead pg2-h05lt).
+//
+// Tagged `integration || smoke` rather than left untagged: reachable under
+// EITHER `-tags integration` or `-tags smoke` alone (an OR, not an AND), so
+// both callers still see it regardless of which non-unit label is selected
+// -- but excluded from the plain untagged build, exactly like both of its
+// callers already are. Left untagged, this file compiled unconditionally,
+// so `golangci-lint run ./...` (no tags; mkGoLint in phillipg-nix-repo-base
+// passes none) saw these functions with neither caller compiled alongside
+// them and flagged all six "unused" (bead pg2-h8vj7).
 
 import (
 	"bytes"
