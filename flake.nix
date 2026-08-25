@@ -3337,6 +3337,14 @@
               inherit pkgs;
               bashBuilders = pkgs._agentSupportBashBuilders;
             }).checks
+            # test-git-branch-maintenance / test-git-branch-status /
+            # test-git-choose-branch (bead pg2-ly46t). Same one-line idiom as
+            # pg-disk-reclaimer above: without this the suite ran in no gate
+            # at all.
+            // (import ./packages/git-tools {
+              inherit pkgs;
+              bashBuilders = pkgs._agentSupportBashBuilders;
+            }).checks
             # Nine offline golangci-lint gates, one per Go module (pg2-2cuzv):
             # <module>-golangci for each of the six Pattern-A modules plus the
             # three Pattern-B (local-replace) modules.
