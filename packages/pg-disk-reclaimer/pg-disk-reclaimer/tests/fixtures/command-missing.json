@@ -1,0 +1,16 @@
+[
+  {
+    "id": "missing-binary-item",
+    "description": "item whose removeCommand references a nonexistent binary",
+    "path": "/tmp/missing-binary-item",
+    "displayCommand": "true",
+    "variants": [
+      {
+        "aggressiveness": 1,
+        "variantDescription": "removeCommand names a command/function that does not exist",
+        "dryRunCommand": "true",
+        "removeCommand": "pg-disk-reclaimer-test-nonexistent-cmd-xyz --flag"
+      }
+    ]
+  }
+]

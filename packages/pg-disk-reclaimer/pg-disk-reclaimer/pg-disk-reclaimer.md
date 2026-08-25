@@ -11,7 +11,7 @@
 
 `pg-disk-reclaimer list --aggressiveness {{2}}`
 
-- Validate a registry file:
+- Validate a registry file (schema checks plus a best-effort check that each command's leading token exists; it cannot validate pipes, subshells, or later commands in a `&&` chain):
 
 `pg-disk-reclaimer validate {{path/to/registry.json}}`
 

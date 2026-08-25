@@ -28,6 +28,13 @@ Options:
   -h, --help     Show this help message
   -v, --version  Show version information
 
+Notes:
+  'validate' checks the registry's JSON schema, then does a best-effort
+  check that each command string's leading command/function exists. It
+  cannot validate arbitrary shell logic inside a command string (pipes,
+  subshells, a later command in a `&&` chain) -- only that the first
+  invoked command/function exists.
+
 Report bugs to: <https://github.com/phillipgreenii/phillipgreenii-nix-agent-support/issues>
 HELP
 }

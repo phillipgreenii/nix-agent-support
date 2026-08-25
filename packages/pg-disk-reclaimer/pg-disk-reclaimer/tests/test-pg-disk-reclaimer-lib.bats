@@ -1,7 +1,8 @@
 #!/usr/bin/env bats
 # Unit tests for pg-disk-reclaimer's core subcommand functions
-# (pg-disk-reclaimer.bash). cmd_validate remains a stub here (bead
-# pg2-txxyj.1) -- its real body lands with task pg2-txxyj.5.
+# (pg-disk-reclaimer.bash). list, validate, and reclaim are all now
+# implemented (beads pg2-txxyj.4/.5/.6) -- only the scaffold task
+# (pg2-txxyj.1) ever left them as stubs.
 # The registry loading + schema validation engine (pgdr_default_registry_path
 # / pgdr_validate_registry / pgdr_read_registry) is exercised below against
 # fixtures under tests/fixtures/ (bead pg2-txxyj.2). The variant-selection
@@ -9,11 +10,14 @@
 # tests/fixtures/selection.json (bead pg2-txxyj.3). cmd_list (bead
 # pg2-txxyj.4) is exercised against tests/fixtures/list.json, whose
 # displayCommand values are side-effect-free `echo` stubs so the table's
-# size column never touches the real filesystem. cmd_reclaim and
-# pgdr_confirm (bead pg2-txxyj.6) are exercised against
-# tests/fixtures/reclaim.json, always with pgdr_confirm overridden --
-# never the real /dev/tty-reading implementation (see its doc comment in
-# pg-disk-reclaimer.bash for why).
+# size column never touches the real filesystem. cmd_validate and its
+# best-effort command-existence check (pgdr_command_exists /
+# pgdr_validate_commands_exist, bead pg2-txxyj.5) are exercised against
+# tests/fixtures/command-exists.json and tests/fixtures/command-missing.json,
+# plus the shared schema fixtures above. cmd_reclaim and pgdr_confirm (bead
+# pg2-txxyj.6) are exercised against tests/fixtures/reclaim.json, always
+# with pgdr_confirm overridden -- never the real /dev/tty-reading
+# implementation (see its doc comment in pg-disk-reclaimer.bash for why).
 
 setup() {
   if [[ -z ${SCRIPTS_DIR:-} ]]; then
@@ -57,10 +61,58 @@ install_list_registry() {
   cp "$FIXTURES_DIR/list.json" "$HOME/.config/pg-disk-reclaimer/registry.json"
 }
 
-@test "cmd_validate is defined and fails (not implemented yet)" {
+@test "cmd_validate fails loudly when the registry file is missing" {
+  run cmd_validate "$TEST_DIR/does-not-exist.json"
+  [ "$status" -ne 0 ]
+  [[ "$output" =~ "registry file not found" ]]
+}
+
+@test "cmd_validate defaults to the XDG registry path when none is given" {
+  # Uses command-exists.json, not valid.json: valid.json's commands
+  # (npm/brew) don't resolve in the nix sandbox's bats run, which only puts
+  # jq on PATH (see default.nix's testDeps) -- cmd_validate's 4th check
+  # (pgdr_validate_commands_exist) would correctly reject it there.
+  # command-exists.json's commands (a builtin, a pg-disk-reclaimer.bash
+  # function) resolve anywhere this suite runs.
+  mkdir -p "$HOME/.config/pg-disk-reclaimer"
+  cp "$FIXTURES_DIR/command-exists.json" "$HOME/.config/pg-disk-reclaimer/registry.json"
   run cmd_validate
-  [ "$status" -eq 1 ]
-  [[ "$output" =~ "not implemented yet" ]]
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "is valid" ]]
+}
+
+@test "cmd_validate propagates a schema check (1-3) failure from pgdr_validate_registry" {
+  run cmd_validate "$FIXTURES_DIR/missing-field.json"
+  [ "$status" -ne 0 ]
+  [[ "$output" =~ "missing a non-empty id/description/path/displayCommand" ]]
+}
+
+@test "cmd_validate accepts a registry whose commands resolve to a real command or a pg-disk-reclaimer.bash helper function" {
+  run cmd_validate "$FIXTURES_DIR/command-exists.json"
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "is valid" ]]
+}
+
+@test "cmd_validate rejects a registry whose command references a nonexistent binary, naming the item and the command" {
+  run cmd_validate "$FIXTURES_DIR/command-missing.json"
+  [ "$status" -ne 0 ]
+  [[ "$output" =~ "missing-binary-item" ]]
+  [[ "$output" =~ "pg-disk-reclaimer-test-nonexistent-cmd-xyz" ]]
+}
+
+@test "pgdr_command_exists accepts a real command" {
+  run pgdr_command_exists true
+  [ "$status" -eq 0 ]
+}
+
+@test "pgdr_command_exists accepts a pg-disk-reclaimer.bash-defined function" {
+  run pgdr_command_exists pgdr_default_registry_path
+  [ "$status" -eq 0 ]
+}
+
+@test "pgdr_command_exists rejects a nonexistent command/function" {
+  run pgdr_command_exists pg-disk-reclaimer-test-nonexistent-cmd-xyz
+  [ "$status" -ne 0 ]
 }
 
 @test "cmd_reclaim requires --aggressiveness" {

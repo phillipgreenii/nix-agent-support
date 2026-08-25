@@ -1,0 +1,23 @@
+[
+  {
+    "id": "real-binary-item",
+    "description": "item whose commands reference a real command (a builtin)",
+    "path": "/tmp/real-binary-item",
+    "displayCommand": "true",
+    "variants": [
+      {
+        "aggressiveness": 1,
+        "variantDescription": "both commands are the true builtin",
+        "dryRunCommand": "true",
+        "removeCommand": "true --ignored-arg"
+      }
+    ]
+  },
+  {
+    "id": "helper-function-item",
+    "description": "item whose displayCommand calls a pg-disk-reclaimer.bash helper function",
+    "path": "/tmp/helper-function-item",
+    "displayCommand": "pgdr_default_registry_path",
+    "variants": []
+  }
+]

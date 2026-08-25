@@ -12,11 +12,11 @@
 #     pgdr_select_variants below)
 #   - pg2-txxyj.4: cmd_list (this task; see cmd_list below) -- its
 #     name/signature are now final, not a placeholder
-#   - pg2-txxyj.5: cmd_validate
+#   - pg2-txxyj.5: cmd_validate (this task; see cmd_validate /
+#     pgdr_command_exists / pgdr_validate_commands_exist below) -- its
+#     name/signature are now final, not a placeholder
 #   - pg2-txxyj.6: cmd_reclaim (this task; see cmd_reclaim / pgdr_confirm
 #     below) -- its name/signature are now final, not a placeholder
-# Names/signatures for cmd_validate below remain a placeholder; its task
-# MAY still rename it.
 
 # pgdr_default_registry_path: echoes the default registry file location,
 # honoring XDG_CONFIG_HOME with the usual $HOME/.config fallback.
@@ -355,11 +355,117 @@ cmd_list() {
   return 0
 }
 
-# cmd_validate: implements the `validate` subcommand. Args: an optional
-# registry path positional.
-cmd_validate() {
-  echo "pg-disk-reclaimer: 'validate' is not implemented yet" >&2
+# pgdr_command_exists: returns 0 if TOKEN resolves as something bash could
+# actually invoke -- a binary on PATH, a builtin, or a function currently
+# defined in this shell (which includes every pgdr_*/cmd_* function, since
+# pg-disk-reclaimer.bash is always sourced before any subcommand runs) --
+# and 1 otherwise.
+#
+# `command -v` alone already resolves a currently-defined function (bash
+# feature, not POSIX-guaranteed), so the `declare -F` fallback below is
+# belt-and-suspenders rather than load-bearing today -- kept because the
+# bead's contract is phrased as the disjunction of the two, and dropping it
+# would make that contract rely on an unstated bash-only behavior of
+# `command -v`.
+pgdr_command_exists() {
+  local token="$1"
+  command -v "$token" >/dev/null 2>&1 && return 0
+  declare -F "$token" >/dev/null 2>&1 && return 0
   return 1
+}
+
+# pgdr_validate_commands_exist: best-effort 4th check, layered on top of an
+# ALREADY schema-validated registry at PATH (pgdr_validate_registry's
+# checks 1-3) -- for every command string in the registry (each item's
+# displayCommand, and each variant's dryRunCommand/removeCommand), extracts
+# its leading whitespace-delimited token and confirms it resolves via
+# pgdr_command_exists.
+#
+# Deliberately best-effort: it CANNOT validate arbitrary shell logic inside
+# a command string -- a pipe, a subshell, or a later command in a `&&`
+# chain -- only that the first invoked command/function exists. See also
+# cmd_validate below, --help, and the tldr page.
+#
+# Fails fast: on the first item/field whose leading token does not
+# resolve, prints one descriptive message to stderr (naming the item id,
+# the field, and the token) and returns 1. Prints nothing and returns 0 on
+# success.
+pgdr_validate_commands_exist() {
+  local path="$1"
+  local entry
+
+  while IFS= read -r entry; do
+    local id field cmd token
+    id=$(jq -r '.id' <<<"$entry")
+    field=$(jq -r '.field' <<<"$entry")
+    cmd=$(jq -r '.cmd' <<<"$entry")
+
+    read -r token _ <<<"$cmd"
+
+    if ! pgdr_command_exists "$token"; then
+      echo "pg-disk-reclaimer: registry '$path' item '$id' has a $field whose command does not exist: '$token'" >&2
+      return 1
+    fi
+  done < <(jq -c '
+    .[] as $item
+    | ($item.id) as $id
+    | (
+        [{id: $id, field: "displayCommand", cmd: $item.displayCommand}]
+        + (($item.variants // []) | to_entries | map({
+            id: $id,
+            field: ("variants[" + (.key | tostring) + "].dryRunCommand"),
+            cmd: .value.dryRunCommand
+          }))
+        + (($item.variants // []) | to_entries | map({
+            id: $id,
+            field: ("variants[" + (.key | tostring) + "].removeCommand"),
+            cmd: .value.removeCommand
+          }))
+      )[]
+  ' "$path")
+
+  return 0
+}
+
+# cmd_validate: implements the `validate` subcommand.
+#
+# Grammar: validate [path]
+#   [path] (optional): registry file to validate. Defaults to
+#     pgdr_default_registry_path when omitted, so `pg-disk-reclaimer
+#     validate` with no args checks the registry that list/reclaim would
+#     actually load.
+#
+# Runs pgdr_validate_registry's checks 1-3 (JSON parses; every item has its
+# required fields and a unique id; every variant has its required fields
+# and a unique, non-negative aggressiveness) FIRST, then
+# pgdr_validate_commands_exist's best-effort command-existence check --
+# unlike checks 1-3, this 4th check is validate-only and NOT shared with
+# the list/reclaim load path, since a malformed command string doesn't
+# stop list/reclaim from loading the registry itself.
+#
+# On the first failure from either stage, that stage's own descriptive
+# stderr message is left as-is and cmd_validate returns 1 without adding
+# anything further. On success, prints one confirmation line to stdout and
+# returns 0 -- pgdr_validate_registry deliberately stays silent on success
+# so callers can layer their own reporting on top; this is that reporting.
+cmd_validate() {
+  local path="${1:-$(pgdr_default_registry_path)}"
+
+  if [[ ! -f $path ]]; then
+    echo "pg-disk-reclaimer: registry file not found: $path" >&2
+    return 1
+  fi
+
+  if ! pgdr_validate_registry "$path"; then
+    return 1
+  fi
+
+  if ! pgdr_validate_commands_exist "$path"; then
+    return 1
+  fi
+
+  echo "pg-disk-reclaimer: registry '$path' is valid"
+  return 0
 }
 
 # pgdr_confirm: prompts PROMPT and reads a y/N confirmation directly from

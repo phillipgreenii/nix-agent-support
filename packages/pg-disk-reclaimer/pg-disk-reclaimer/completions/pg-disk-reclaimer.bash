@@ -1,9 +1,10 @@
 # bash completion for pg-disk-reclaimer
 #
-# Subcommand-only for validate: it has no stable option surface yet
-# (pg2-txxyj.5 adds it later). list's flag (pg2-txxyj.4) and reclaim's
-# flags (pg2-txxyj.6) are completed below. Update this together with the
-# tldr page and show_help() whenever a subcommand's flags change.
+# list's --aggressiveness (pg2-txxyj.4) and reclaim's flags (pg2-txxyj.6)
+# are completed below. validate takes only an optional registry-path
+# positional (pg2-txxyj.5) and needs no completion of its own -- the
+# _filedir fallback below already covers it. Update this together with
+# the tldr page and show_help() whenever a subcommand's flags change.
 
 _pg_disk_reclaimer() {
   local cur prev words

@@ -1,11 +1,9 @@
 #!/usr/bin/env bats
 # Smoke tests for pg-disk-reclaimer's entry point (arg parsing + dispatch).
-# validate remains a stub (bead pg2-txxyj.1, "scaffold" task; real
-# subcommand behavior lands with task pg2-txxyj.5). list (pg2-txxyj.4) and
-# reclaim (pg2-txxyj.6) are implemented -- their real subcommand behavior
-# is exercised at the function level in
-# tests/test-pg-disk-reclaimer-lib.bats, so this file keeps only a
-# CLI-level dispatch smoke test for each.
+# list, validate, and reclaim are all implemented (beads
+# pg2-txxyj.4/.5/.6) -- their real subcommand behavior is exercised at
+# the function level in tests/test-pg-disk-reclaimer-lib.bats, so this
+# file keeps only a CLI-level dispatch smoke test for each.
 
 setup() {
   # SCRIPTS_DIR: injected by nix check (raw src dir), or computed relative to
@@ -44,16 +42,16 @@ run_pg_disk_reclaimer() {
   [[ "$output" =~ "unknown command" ]]
 }
 
-@test "validate dispatches (even though unimplemented)" {
-  run_pg_disk_reclaimer validate
-  [ "$status" -ne 0 ]
-  [[ "$output" =~ "not implemented yet" ]]
-}
-
 @test "list dispatches and validates --aggressiveness needs a value (real subcommand behavior lives in the lib bats suite)" {
   run_pg_disk_reclaimer list --aggressiveness
   [ "$status" -ne 0 ]
   [[ "$output" =~ "--aggressiveness requires a value" ]]
+}
+
+@test "validate dispatches and rejects a missing registry file (real subcommand behavior lives in the lib bats suite)" {
+  run_pg_disk_reclaimer validate /nonexistent/pg-disk-reclaimer-test-registry.json
+  [ "$status" -ne 0 ]
+  [[ "$output" =~ "registry file not found" ]]
 }
 
 @test "reclaim dispatches and requires --aggressiveness (real subcommand behavior lives in the lib bats suite)" {
