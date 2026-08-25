@@ -47,3 +47,7 @@ docs cite. An entry that overlaps an existing repository ADR MUST **cite** it, n
 
 - [`DEC-FRESH-1`](freshness.md) — the staleness bound is a multiplier of pg-pr's own sync
   interval, not a fixed wall-clock number.
+- [`DEC-CIGATE-1`](ci-gate.md) — the check interpreter and the verdict parser do not share a
+  code-level abstraction.
+- [`DEC-CIGATE-2`](ci-gate.md) — `excluded_ci_checks` is removed outright, not kept as back-compat
+  sugar.
