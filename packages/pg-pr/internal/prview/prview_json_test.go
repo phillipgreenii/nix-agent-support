@@ -84,10 +84,6 @@ var fullView = Assemble(PRViewInput{
 	BeadLinks: []beads.DepNode{
 		{ID: "pg2-abc12", Title: "fix thing", Status: "open", Labels: []string{"human"}},
 	},
-	CIRuns: []api.CIRun{
-		{Name: "unit", Status: "completed", Conclusion: "success"},
-		{Name: "lint", Status: "completed", Conclusion: "failure"},
-	},
 	Now: fixedNow,
 })
 

@@ -119,11 +119,16 @@ func TestAssemble_Enrichment_Absent(t *testing.T) {
 	}
 }
 
+// TestAssemble_CIRollup_Populated proves the bug's real symptom is fixed
+// (pg2-w3kpb): the latest revision's persisted, already-excluded CI rollup
+// (written at sync time by internal/sync/revision.go's ciRollupFromSync) now
+// actually surfaces on View.CI, instead of the always-empty rollup the prior
+// CIRuns/ExcludedCIChecks-based computation produced (nothing ever populated
+// those fields from the one real caller, cmd/pg-pr/pr_view.go's loadPRView).
 func TestAssemble_CIRollup_Populated(t *testing.T) {
 	in := PRViewInput{
-		CIRuns: []api.CIRun{
-			{Name: "unit", Status: "completed", Conclusion: "success"},
-			{Name: "lint", Status: "completed", Conclusion: "failure"},
+		Revisions: []store.Revision{
+			{Seq: 1, HeadSHA: "h1", CIState: "failure", CIPassed: 1, CIFailed: 1, CIPending: 0},
 		},
 		Now: fixedNow,
 	}
@@ -134,9 +139,28 @@ func TestAssemble_CIRollup_Populated(t *testing.T) {
 	}
 }
 
+// TestAssemble_CIRollup_UsesLatestRevision pins that multiple revisions use
+// the LAST one (highest seq — the most recently observed), not an earlier
+// one, matching PRViewInput.Revisions' documented ascending-seq order.
+func TestAssemble_CIRollup_UsesLatestRevision(t *testing.T) {
+	in := PRViewInput{
+		Revisions: []store.Revision{
+			{Seq: 1, HeadSHA: "h1", CIState: "failure", CIFailed: 1},
+			{Seq: 2, HeadSHA: "h2", CIState: "success", CIPassed: 3},
+		},
+		Now: fixedNow,
+	}
+	got := Assemble(in).CI
+	want := CIRollup{State: "success", Passed: 3, Failed: 0, Pending: 0}
+	if got != want {
+		t.Fatalf("CI = %+v, want %+v (the seq-2 revision, not seq-1)", got, want)
+	}
+}
+
 func TestAssemble_CIRollup_Absent(t *testing.T) {
-	// No CI runs is a real, defined value ("none"/0/0/0) — see cirollup.Compute
-	// — not an unknown marker; this is the axis's degenerate case.
+	// No revisions at all is a real, defined value ("none"/0/0/0) — see
+	// ciRollupFromRevisions — not an unknown marker; this is the axis's
+	// degenerate case.
 	got := Assemble(PRViewInput{Now: fixedNow}).CI
 	want := CIRollup{State: "none"}
 	if got != want {
@@ -437,8 +461,7 @@ func TestAssemble_NoStoreRow_BuildsFromProviderInputAlone(t *testing.T) {
 			Repo: "o/r", Number: 42, Title: "add feature", State: "open", Author: "alice",
 			Mergeable: "MERGEABLE", MergeStateStatus: "CLEAN",
 		},
-		CIRuns: []api.CIRun{{Name: "unit", Status: "completed", Conclusion: "success"}},
-		Now:    fixedNow,
+		Now: fixedNow,
 	}
 	got := Assemble(in)
 
@@ -449,12 +472,17 @@ func TestAssemble_NoStoreRow_BuildsFromProviderInputAlone(t *testing.T) {
 	if got.MergeState.Mergeable != "MERGEABLE" {
 		t.Errorf("MergeState = %+v, want provider-derived Mergeable present", got.MergeState)
 	}
-	if got.CI.State != "success" {
-		t.Errorf("CI = %+v, want provider-derived rollup computed", got.CI)
-	}
 
 	// Store-backed sections carry no data — nil, not an error, not a zero
 	// (but non-nil) struct that would misleadingly look like "known empty".
+	// CI belongs in THIS group, not the provider-derived group above: it is
+	// sourced from Revisions (see CIRollup's doc comment), and the real
+	// caller (cmd/pg-pr/pr_view.go's loadPRView) never populates Revisions
+	// when there is no store row either — so CI degrades to "none" right
+	// alongside Feedback/Revisions, not to a provider-computed rollup.
+	if got.CI != (CIRollup{State: "none"}) {
+		t.Errorf("CI = %+v, want the defined empty rollup (no store row -> no Revisions)", got.CI)
+	}
 	if got.Ownership != nil {
 		t.Errorf("Ownership = %v, want nil", *got.Ownership)
 	}

@@ -55,7 +55,6 @@ package prview
 import (
 	"time"
 
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/cirollup"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/freshness"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
@@ -89,14 +88,24 @@ import (
 //     a store table.
 //   - BeadLinks mirrors PRInput.BeadsDeps (pkg/beads.DepNode, from an
 //     already-performed `bd dep tree` walk).
-//   - CIRuns and ExcludedCIChecks mirror PRInput.CIRuns and a repo's
-//     configured excluder patterns (per-repo, here already scoped to this
-//     PR's one repo) — internal/cirollup.Compute/NewExcluder are pure
-//     (regexp compilation only), so building the CI rollup inside Assemble
-//     adds no IO. internal/snapshot.BuilderInput's own equivalent field is
-//     CheckInterpretersByRepo (pg2-4dz88.2.8), a richer per-repo shape this
-//     package does not mirror — ExcludedCIChecks here stays a flat pattern
-//     list.
+//   - CI is derived from Revisions' latest entry rather than from a CIRuns
+//     field of its own (pg2-w3kpb). This view is store-read-default
+//     (INV-READ-1) and never has live api.CIRun data to compute against —
+//     an earlier version of this type carried CIRuns/ExcludedCIChecks fields
+//     for exactly that purpose (mirroring internal/snapshot.PRInput.CIRuns
+//     and a repo's excluder patterns), but nothing ever populated them: the
+//     one real caller, cmd/pg-pr/pr_view.go's loadPRView, never set either,
+//     so `pr view`'s CI axis was always the empty rollup regardless of a
+//     PR's actual CI state. The sync loop has already computed the
+//     correctly-excluded rollup once, at ingest time
+//     (internal/sync/revision.go's ciRollupFromSync +
+//     excluderFromCheckInterpreters, sourced from RepoConfig.
+//     CheckInterpreters — internal/snapshot.BuilderInput.
+//     CheckInterpretersByRepo is the live-fetch sibling of the same
+//     mechanism), and persisted it onto store.Revision's
+//     CIState/CIPassed/CIFailed/CIPending columns; Assemble just surfaces
+//     the latest one (see ciRollupFromRevisions) instead of re-deriving it
+//     from data this read path structurally cannot have.
 //   - Now is the instant the freshness verdict is judged against — threaded
 //     in exactly like internal/snapshot.BuilderInput.GeneratedAt, so Assemble
 //     never reads the clock itself.
@@ -132,14 +141,6 @@ type PRViewInput struct {
 	// (pkg/beads.DepNode, from an already-performed `bd dep tree` walk). Same
 	// nil-vs-empty distinction.
 	BeadLinks []beads.DepNode
-	// CIRuns is this PR's CI runs, already fetched (pkg/api.CIRun). Same
-	// nil-vs-empty distinction; zero runs is a real, defined rollup state
-	// ("none" — internal/cirollup.Compute), not an unknown marker.
-	CIRuns []api.CIRun
-	// ExcludedCIChecks is this PR's repo's excluded_ci_checks regex patterns
-	// (internal/config.RepoConfig), used to build the internal/cirollup
-	// Excluder. nil/empty means nothing is excluded.
-	ExcludedCIChecks []string
 	// Now is the instant the freshness verdict is judged against. Threaded in
 	// (never read from the clock inside Assemble) so Assemble stays pure —
 	// mirrors internal/snapshot.BuilderInput.GeneratedAt.
@@ -202,12 +203,20 @@ type MergeState struct {
 	HasConflict      bool   `json:"has_conflict"`
 }
 
-// CIRollup is the CI-health rollup axis, computed via internal/cirollup.Compute
-// exactly as internal/snapshot/builder.go does for MineRow/TeamRow. Given json
-// tags of its own (cirollup.Rollup has none) so the wire shape stays
-// snake_case like the rest of View. Zero runs is a real, defined value
-// (State "none"), so this field is never nil — the "absent" test case for
-// this axis is "no CI runs were given," not "unknown."
+// CIRollup is the CI-health rollup axis. Unlike internal/snapshot/builder.go's
+// MineRow/TeamRow (which recompute live via internal/cirollup.Compute over a
+// freshly-fetched []api.CIRun), this axis is sourced from the LATEST entry in
+// PRViewInput.Revisions — a store.Revision's already-persisted, already-
+// excluded CIState/CIPassed/CIFailed/CIPending, written once by the sync loop
+// (internal/sync/revision.go's ciRollupFromSync) and just surfaced here (see
+// ciRollupFromRevisions). This view's store-read-default posture (INV-READ-1)
+// never has a live []api.CIRun to compute against, so re-deriving via
+// cirollup.Compute at this layer would always operate on an empty set
+// (pg2-w3kpb). Given json tags of its own (cirollup.Rollup has none) so the
+// wire shape stays snake_case like the rest of View. No revisions observed is
+// a real, defined value (State "none"), so this field is never nil — the
+// "absent" test case for this axis is "no revisions were given," not
+// "unknown."
 type CIRollup struct {
 	State   string `json:"state"`
 	Passed  int    `json:"passed"`
@@ -355,8 +364,7 @@ type View struct {
 // panics, including on a zero-value PRViewInput{} (see
 // TestAssemble_ZeroValueInputDoesNotPanic).
 func Assemble(in PRViewInput) View {
-	excl := cirollup.NewExcluder(in.ExcludedCIChecks)
-	rollup := cirollup.Compute(in.CIRuns, excl)
+	rollup := ciRollupFromRevisions(in.Revisions)
 
 	asOf := ""
 	if in.Store != nil {
@@ -391,12 +399,7 @@ func Assemble(in PRViewInput) View {
 		},
 		Ownership:  ownershipAxis(in.Store),
 		Enrichment: enrichmentAxis(in.Store),
-		CI: CIRollup{
-			State:   rollup.State,
-			Passed:  rollup.Passed,
-			Failed:  rollup.Failed,
-			Pending: rollup.Pending,
-		},
+		CI:         rollup,
 		MergeState: MergeState{
 			Mergeable:        in.PR.Mergeable,
 			MergeStateStatus: in.PR.MergeStateStatus,
@@ -471,6 +474,44 @@ func mapFeedback(in []store.Feedback) []FeedbackItem {
 		})
 	}
 	return out
+}
+
+// ciRollupFromRevisions derives the CI axis from the latest observed
+// revision's already-persisted, already-excluded CI rollup
+// (store.Revision.CIState/CIPassed/CIFailed/CIPending) rather than
+// recomputing one via internal/cirollup.Compute over a live []api.CIRun —
+// this view never has one (INV-READ-1; see CIRollup's own doc comment and
+// pg2-w3kpb).
+//
+// revs is expected in ascending seq order — PRViewInput.Revisions' documented
+// order, which is exactly internal/store.ListRevisions' own ("ORDER BY seq
+// ASC") — so the last element is the most recently observed revision.
+// internal/sync/ingest.go's RecordRevision + SetRevisionCI calls both use the
+// SAME sync-tick-fetched api.PR.HeadSHA that also lands on the store PR row's
+// head_sha column, so the latest revision by seq and "the revision for the
+// PR's current head" are the same row in normal operation; there is no
+// separate head-SHA lookup here.
+//
+// No revisions at all (nil or empty) is the real, defined "none" rollup —
+// matching cirollup.Compute's own zero-runs default — not an unknown marker;
+// a revision whose own CIState happens to be "" (a hand-built test value;
+// the DB column itself is NOT NULL DEFAULT 'none', so a store-read row is
+// never actually empty here) is treated the same way.
+func ciRollupFromRevisions(revs []store.Revision) CIRollup {
+	if len(revs) == 0 {
+		return CIRollup{State: "none"}
+	}
+	latest := revs[len(revs)-1]
+	state := latest.CIState
+	if state == "" {
+		state = "none"
+	}
+	return CIRollup{
+		State:   state,
+		Passed:  latest.CIPassed,
+		Failed:  latest.CIFailed,
+		Pending: latest.CIPending,
+	}
 }
 
 // mapRevisions preserves the same nil-vs-non-nil-empty distinction as
