@@ -100,6 +100,45 @@ func gateStateFromSync(runs []api.CIRun, now func() time.Time, reg *checkinterpr
 	return store.GateState{}, false
 }
 
+// mergeClaimedRuns returns newRuns with any run from originalRuns that reg
+// claims (via Registry.Claim, by run Name) appended — unless newRuns already
+// carries a run with that same Name, in which case the newRuns entry wins
+// (idempotence/no-duplication guard).
+//
+// This exists for reconcileTruncatedCI (sync.go, pg2-4dz88.2.7): that
+// function wholesale-replaces a truncated bulk-fetched CIRuns with the
+// dedicated CICD provider's re-sourced list, but the CICD provider is
+// structurally Actions/CheckRun-only and can never carry a commit-status run
+// (only GraphQL's statusCheckRollup can) — so a check-interpreter-claimed
+// run such as an approval gate would otherwise be silently discarded on
+// every truncated tick. Merging the claimed run(s) back in preserves the
+// gate's rich, Description-bearing observation across the re-source.
+//
+// A nil/empty reg or originalRuns is a no-op (returns newRuns unchanged),
+// mirroring checkinterpret.Registry's own "nil-safe, claims nothing" and
+// "empty is valid" conventions.
+func mergeClaimedRuns(newRuns, originalRuns []api.CIRun, reg *checkinterpret.Registry) []api.CIRun {
+	if reg == nil || len(originalRuns) == 0 {
+		return newRuns
+	}
+	existing := make(map[string]struct{}, len(newRuns))
+	for _, r := range newRuns {
+		existing[r.Name] = struct{}{}
+	}
+	out := newRuns
+	for _, r := range originalRuns {
+		if _, claimed := reg.Claim(r.Name); !claimed {
+			continue
+		}
+		if _, dup := existing[r.Name]; dup {
+			continue
+		}
+		out = append(out, r)
+		existing[r.Name] = struct{}{}
+	}
+	return out
+}
+
 // submittedReview is a filtered review targeted at a specific commit.
 type submittedReview struct {
 	// Approver is the GitHub login the review is attributed to — self for

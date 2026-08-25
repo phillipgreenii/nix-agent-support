@@ -36,6 +36,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/agentregistry"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/checkinterpret"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/cirollup"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/ownership"
@@ -1142,7 +1143,18 @@ func (e *Engine) reconcileTruncatedCI(ctx context.Context, enriched *vcs.Enriche
 		// the pre-fix behaviour, and self-heals on a later tick.
 		return
 	}
-	enriched.CIRuns = runs
+	// Preserve any run from the ORIGINAL (pre-reconcile) CIRuns that a
+	// configured check-interpreter claims — e.g. an approval-gate check whose
+	// Description only GraphQL's commit-status rollup carries. The CICD
+	// provider re-sourced above can never reproduce such a run (only
+	// GraphQL's statusCheckRollup surfaces a commit-status Description), so
+	// without this merge a claimed gate check would be silently dropped on
+	// every truncated tick — permanently starving gate_state of any real
+	// observation for a PR that consistently exceeds the 30-context cap
+	// (pg2-4dz88.2.7). The merge is additive only: it never removes or
+	// alters anything the CICD provider returned.
+	reg := checkinterpret.New(checkInterpretersFrom(rcfg.CheckInterpreters))
+	enriched.CIRuns = mergeClaimedRuns(runs, enriched.CIRuns, reg)
 	// CI is now complete from the CICD provider; drop the stale ciContexts flag
 	// so downstream readers no longer treat CI as truncated.
 	enriched.Truncated = withoutFlag(enriched.Truncated, "ciContexts")
