@@ -767,8 +767,12 @@ func (e *Engine) refreshHumanLabels(ctx context.Context) {
 // pipeline (processFeedback / maybePromoteDraft) and the snapshot builder
 // (buildPRInput) share a single fetch instead of each issuing its own. CI runs
 // come from the first configured CICD provider, preferring the branch-known
-// path (matching buildPRInput's existing cache-less CI behavior). Providers
-// lacking an optional capability leave the corresponding field empty.
+// path (matching buildPRInput's existing cache-less CI behavior), MERGED with
+// any run a configured check-interpreter claims from GraphQL's
+// statusCheckRollup — the only source of a classic commit-Status-API run
+// (e.g. policy-bot) — so approval-gate classification works identically to
+// the bulk daemon path (pg2-g9fu0). Providers lacking an optional capability
+// leave the corresponding field empty.
 func (e *Engine) enrichOnePR(ctx context.Context, rcfg config.RepoConfig, pr api.PR) *vcs.EnrichedPR {
 	if pr.Repo == "" {
 		pr.Repo = rcfg.Remote
@@ -784,6 +788,14 @@ func (e *Engine) enrichOnePR(ctx context.Context, rcfg config.RepoConfig, pr api
 	// matters here — ciContexts/files truncation is routine on large PRs and
 	// irrelevant to thread identity.
 	gotGraphQL := false
+	// graphQLCIRuns carries GraphQL's own statusCheckRollup-derived CIRuns
+	// (ep.CIRuns below) — the ONLY source that can ever surface a classic
+	// commit-Status-API context (e.g. policy-bot's approval-gate status);
+	// the dedicated CICD provider used for out.CIRuns below is structurally
+	// Actions/CheckRun-only. It is merged back into out.CIRuns after the CICD
+	// fetch (see the mergeClaimedRuns call below), mirroring
+	// reconcileTruncatedCI's own merge for the bulk path (pg2-g9fu0).
+	var graphQLCIRuns []api.CIRun
 	if vp, err := e.providerFor(rcfg); err == nil {
 		if spe, ok := vp.(SinglePREnricher); ok {
 			ep, eerr := spe.EnrichPR(ctx, pr.Repo, pr.Number)
@@ -797,6 +809,7 @@ func (e *Engine) enrichOnePR(ctx context.Context, rcfg config.RepoConfig, pr api
 				// would never see per-commit authors on the GraphQL single-PR path,
 				// silently defeating co-owned detection in the daemon.
 				out.CommitAuthors = ep.CommitAuthors
+				graphQLCIRuns = ep.CIRuns
 				// GraphQL is the only source of these merge-state fields; the
 				// REST GetPR path (refreshPR) leaves them empty. Carry them so the
 				// daemon snapshot / mine-panel reminder work, not just one-shot sync. (pg2-dwfld)
@@ -825,19 +838,32 @@ func (e *Engine) enrichOnePR(ctx context.Context, rcfg config.RepoConfig, pr api
 		}
 	}
 
-	// CI runs always come from the dedicated CICD provider (unchanged), so a PR
-	// with many checks keeps complete CI regardless of which enrichment path ran
-	// above — GraphQL statusCheckRollup caps at 30 contexts and is not used for
-	// CI here.
+	// CI runs come from the dedicated CICD provider (unchanged), so a PR with
+	// many checks keeps complete CI regardless of which enrichment path ran
+	// above — GraphQL statusCheckRollup caps at 30 contexts and is not used as
+	// the primary CI source here. But any run a configured check-interpreter
+	// CLAIMS (e.g. an approval-gate check like policy-bot) is merged back in
+	// from graphQLCIRuns: the CICD provider is structurally Actions/CheckRun-
+	// only and can never reproduce a classic commit-Status-API run, so
+	// without this merge a status-API bot is invisible to gateStateFromSync
+	// on every per-PR refresh — exactly pg2-g9fu0's root cause, and the
+	// reason gate_state never left "unknown" in production. The merge is
+	// additive only (mergeClaimedRuns): it never removes or alters anything
+	// the CICD provider returned, and an UNCLAIMED GraphQL run (ordinary CI
+	// noise) is never merged in, so a PR with >30 total contexts still gets
+	// its complete CI from the CICD provider exactly as before.
+	var cicdRuns []api.CIRun
 	if cp := e.firstCICDFor(rcfg); cp != nil {
 		if bl, ok := cp.(CICDBranchLister); ok && strings.TrimSpace(pr.Branch) != "" {
 			if runs, cerr := bl.ListRunsByBranch(ctx, pr.Repo, pr.Branch); cerr == nil {
-				out.CIRuns = runs
+				cicdRuns = runs
 			}
 		} else if runs, cerr := cp.ListRuns(ctx, pr.Repo, pr.Number); cerr == nil {
-			out.CIRuns = runs
+			cicdRuns = runs
 		}
 	}
+	reg := checkinterpret.New(checkInterpretersFrom(rcfg.CheckInterpreters))
+	out.CIRuns = mergeClaimedRuns(cicdRuns, graphQLCIRuns, reg)
 	return &out
 }
 

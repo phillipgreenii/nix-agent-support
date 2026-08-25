@@ -99,8 +99,11 @@ func TestEnrichOnePR_FallsBackOnError(t *testing.T) {
 
 func TestEnrichOnePR_CIAlwaysFromCICDProvider(t *testing.T) {
 	// Even when single-PR GraphQL succeeds (and carries its own statusCheckRollup
-	// CIRuns), CI must come from the dedicated CICD provider so large PRs keep
-	// complete CI (GraphQL statusCheckRollup caps at 30 contexts).
+	// CIRuns), an UNCLAIMED GraphQL run must NOT leak into the result -- CI still
+	// comes from the dedicated CICD provider so large PRs keep complete CI
+	// (GraphQL statusCheckRollup caps at 30 contexts). A run a configured
+	// check-interpreter DOES claim is a different case, covered by
+	// TestEnrichOnePR_MergesClaimedGraphQLRunIntoCICDRuns below (pg2-g9fu0).
 	vp := &enricherVCS{ep: &vcs.EnrichedPR{
 		Comments: []api.Comment{{ID: "PRRC_1", ThreadID: "PRRT_abc", Path: "x.go"}},
 		CIRuns:   []api.CIRun{{Name: "from-graphql"}},
@@ -115,10 +118,64 @@ func TestEnrichOnePR_CIAlwaysFromCICDProvider(t *testing.T) {
 		config.RepoConfig{Remote: "o/r", VCS: "github", CICD: []string{"gh-actions"}},
 		api.PR{Repo: "o/r", Number: 42})
 	if len(got.CIRuns) != 1 || got.CIRuns[0].Name != "from-cicd" {
-		t.Errorf("CI must come from the CICD provider, got %+v", got.CIRuns)
+		t.Errorf("CI must come from the CICD provider (unclaimed GraphQL run must not leak in), got %+v", got.CIRuns)
 	}
 	if len(got.Comments) != 1 || got.Comments[0].ThreadID != "PRRT_abc" {
 		t.Errorf("comments should still come from GraphQL, got %+v", got.Comments)
+	}
+}
+
+// TestEnrichOnePR_MergesClaimedGraphQLRunIntoCICDRuns is the per-PR-path
+// counterpart of TestReconcileTruncatedCI_PreservesClaimedGateRun (bulk
+// path, ci_truncation_test.go): a run a configured check-interpreter CLAIMS
+// (e.g. an approval-gate check like policy-bot) is a classic
+// commit-Status-API context, which the dedicated CICD provider structurally
+// can never reproduce (Actions/CheckRun only) -- so it must be merged back
+// in from GraphQL's statusCheckRollup (ep.CIRuns), additive to (never
+// replacing) the CICD-sourced runs. This is pg2-g9fu0's fix: before it,
+// enrichOnePR discarded ep.CIRuns entirely, so gateStateFromSync could never
+// observe a classic-status gate check via the per-PR daemon path.
+func TestEnrichOnePR_MergesClaimedGraphQLRunIntoCICDRuns(t *testing.T) {
+	gateRun := api.CIRun{
+		Name:        "policy-bot: approval required (click for details): main",
+		Status:      "completed",
+		Conclusion:  "failure",
+		Description: "0/1 rules approved",
+		Provider:    "github-status",
+	}
+	vp := &enricherVCS{ep: &vcs.EnrichedPR{
+		CIRuns: []api.CIRun{{Name: "from-graphql-unclaimed"}, gateRun},
+	}}
+	cicd := newFakeCICD()
+	cicd.runs[keyOf("o/r", 42)] = []api.CIRun{{Name: "from-cicd"}}
+	e := &Engine{deps: Deps{
+		VCS:  map[string]VCSProvider{"github": vp},
+		CICD: map[string]CICDProvider{"gh-actions": cicd},
+	}}
+	rcfg := config.RepoConfig{
+		Remote: "o/r", VCS: "github", CICD: []string{"gh-actions"},
+		CheckInterpreters: []config.CheckInterpreterConfig{
+			{Patterns: []string{"^policy-bot"}, Type: "approval-gate"},
+		},
+	}
+	got := e.enrichOnePR(context.Background(), rcfg, api.PR{Repo: "o/r", Number: 42})
+
+	byName := map[string]api.CIRun{}
+	for _, r := range got.CIRuns {
+		byName[r.Name] = r
+	}
+	if _, ok := byName["from-cicd"]; !ok {
+		t.Errorf("CICD-provided run must survive the merge, got %+v", got.CIRuns)
+	}
+	if _, ok := byName["from-graphql-unclaimed"]; ok {
+		t.Errorf("an UNCLAIMED GraphQL run must NOT be merged in, got %+v", got.CIRuns)
+	}
+	merged, ok := byName[gateRun.Name]
+	if !ok {
+		t.Fatalf("the check-interpreter-CLAIMED GraphQL run (policy-bot) must be merged in, got %+v", got.CIRuns)
+	}
+	if merged.Description != "0/1 rules approved" {
+		t.Errorf("merged gate run's Description must be preserved intact, got %q", merged.Description)
 	}
 }
 

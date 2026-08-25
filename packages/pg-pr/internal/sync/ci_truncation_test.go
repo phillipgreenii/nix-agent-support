@@ -249,13 +249,23 @@ func TestReconcileTruncatedCI(t *testing.T) {
 //   - P1 (bulk, <=30 contexts): already correct pre-existing behaviour --
 //     TestBulkGateCheckObserved_PersistsGateState pins it as a regression
 //     guard.
-//   - P2 (bulk, >30 contexts / reconcileTruncatedCI): the real gap this bead
-//     fixes -- TestReconcileTruncatedCI_PreservesClaimedGateRun proves the
-//     merge in isolation, TestBulkTruncatedGateCheck_StillPersistsGateState
+//   - P2 (bulk, >30 contexts / reconcileTruncatedCI): the real gap
+//     pg2-4dz88.2.7 fixed -- TestReconcileTruncatedCI_PreservesClaimedGateRun
+//     proves the merge in isolation, TestBulkTruncatedGateCheck_StillPersistsGateState
 //     proves it end-to-end through the store.
-//   - P3 (per-PR / enrichOnePR path): already correct by construction --
-//     TestPerPRPath_GateCheckNeverObserved_PreservesUnknown pins both halves
-//     of "preserved, never falsely satisfied".
+//   - P3 (per-PR / enrichOnePR path): had a SEPARATE, wider gap of its own
+//     (pg2-g9fu0) -- enrichOnePR discarded GraphQL's statusCheckRollup CIRuns
+//     entirely on every call, not just on truncation, so a classic
+//     commit-Status-API gate check (e.g. policy-bot) could NEVER be observed
+//     via this path, regardless of the 30-context cap. This is the path the
+//     daemon's per-PR refresh (refreshPR) actually runs on every tick, which
+//     is why gate_state never left "unknown" in production.
+//     TestPerPRPath_GateCheckNeverObserved_PreservesUnknown pins the
+//     genuinely-unclaimable case (no GraphQL enrichment available at all);
+//     TestPerPRPath_ClassicStatusGateCheck_PersistsGateState proves the fix:
+//     when GraphQL enrichment IS available and carries a claimed classic
+//     status, gate_state now populates through refreshPR exactly like the
+//     bulk path.
 // ----------------------------------------------------------------------
 
 // TestBulkGateCheckObserved_PersistsGateState is P1: a regression test for
@@ -494,20 +504,23 @@ func TestBulkTruncatedGateCheck_StillPersistsGateState(t *testing.T) {
 	}
 }
 
-// TestPerPRPath_GateCheckNeverObserved_PreservesUnknown is P3: a regression
-// test proving the ALREADY-CORRECT per-PR path (refreshPR -> enrichOnePR ->
-// applyFetchedPR -> processFeedback -> ingestFeedbackToStore). enrichOnePR's
-// CI always comes from the dedicated CICD provider (Actions-only), never
-// from GraphQL's statusCheckRollup, so it can structurally never carry a
-// commit-status run with a Description -- gateStateFromSync therefore
-// always reports ok==false on this path, and ingestFeedbackToStore's
+// TestPerPRPath_GateCheckNeverObserved_PreservesUnknown is P3's negative
+// case: a regression test proving the per-PR path (refreshPR -> enrichOnePR
+// -> applyFetchedPR -> processFeedback -> ingestFeedbackToStore) behaves
+// correctly when NO GraphQL enrichment is available at all (the VCS fake
+// here, plain fakeVCS, does not implement SinglePREnricher, so enrichOnePR's
+// GraphQL branch never fires and CI comes solely from the CICD-only
+// provider -- matching a real single-PR GraphQL failure). gateStateFromSync
+// therefore reports ok==false, and ingestFeedbackToStore's
 // write-only-when-ok design (see gateStateFromSync's doc comment,
 // revision.go) skips SetRevisionGateState entirely. Both halves of the
 // bead's "not silently satisfied and not vanished" pair are asserted: a
 // never-yet-observed revision stays at the DB default "unknown" (never a
 // false "satisfied"), and a revision that already carries a REAL prior gate
 // observation (e.g. from an earlier bulk tick) is left UNCHANGED by a
-// subsequent per-PR-only tick.
+// subsequent per-PR-only tick that observes no gate-claimed run. Contrast
+// with TestPerPRPath_ClassicStatusGateCheck_PersistsGateState below, which
+// covers the case GraphQL enrichment IS available (pg2-g9fu0's actual fix).
 func TestPerPRPath_GateCheckNeverObserved_PreservesUnknown(t *testing.T) {
 	ctx := context.Background()
 	db := store.OpenForTest(t)
@@ -586,5 +599,107 @@ func TestPerPRPath_GateCheckNeverObserved_PreservesUnknown(t *testing.T) {
 	}
 	if rev2.GateState != "satisfied" {
 		t.Fatalf("a prior real gate_state must be PRESERVED across a per-PR-only tick that observes no gate-claimed run; got %q, want %q", rev2.GateState, "satisfied")
+	}
+}
+
+// TestPerPRPath_ClassicStatusGateCheck_PersistsGateState is P3's fix proof
+// (pg2-g9fu0): the per-PR daemon path (refreshPR -> enrichOnePR) must
+// observe a classic commit-Status-API gate check (e.g. policy-bot) exactly
+// like the bulk path already does, even though CI otherwise still comes
+// from the dedicated (Actions-only) CICD provider. Before the fix,
+// enrichOnePR unconditionally discarded GraphQL's statusCheckRollup-derived
+// CIRuns -- the only source that can ever carry such a run -- so gate_state
+// never left "unknown" for a PR observed exclusively through this path,
+// matching the bead's live-DB evidence of 0/1541 rows ever populated.
+func TestPerPRPath_ClassicStatusGateCheck_PersistsGateState(t *testing.T) {
+	ctx := context.Background()
+	db := store.OpenForTest(t)
+	bdc := &refreshFakeBeads{}
+
+	pr := api.PR{
+		Repo: "o/r", Number: 42, State: "open",
+		Branch: "feat/w", Base: "main", Author: "me",
+		URL: "https://github.com/o/r/pull/42", HeadSHA: "sha-per-pr-classic-status",
+	}
+
+	// GraphQL's single-PR enrichment (the ONLY source of a classic
+	// commit-Status-API run) carries the policy-bot-shaped status alongside
+	// an ordinary check-run, exactly as GitHub's real statusCheckRollup
+	// would.
+	vp := &enricherVCS{ep: &vcs.EnrichedPR{
+		CIRuns: []api.CIRun{
+			{Name: "build", Status: "completed", Conclusion: "success", Provider: "github-actions", HeadSHA: pr.HeadSHA},
+			{
+				Name:        "policy-bot: approval required (click for details): main",
+				Status:      "completed",
+				Conclusion:  "failure",
+				Description: "0/1 rules approved",
+				Provider:    "github-status",
+				HeadSHA:     pr.HeadSHA,
+			},
+		},
+	}}
+	vp.fakeVCS = *newFakeVCS()
+	vp.views[keyOf("o/r", pr.Number)] = pr
+
+	ci := newFakeCICD()
+	// The dedicated CICD provider is Actions-only: it never carries the
+	// policy-bot commit-status run, matching reality.
+	ci.runs[keyOf("o/r", pr.Number)] = []api.CIRun{
+		{Name: "build", Status: "completed", Conclusion: "success", Provider: "github-actions", HeadSHA: pr.HeadSHA},
+	}
+
+	e, err := New(Deps{
+		Cfg: &config.Config{
+			SelfLogin: "me",
+			Repos: []config.RepoConfig{{
+				Remote: "o/r", VCS: "github", CICD: []string{"ci"},
+				CheckInterpreters: []config.CheckInterpreterConfig{
+					{Patterns: []string{"^policy-bot"}, Type: "approval-gate"},
+				},
+			}},
+		},
+		VCS:      map[string]VCSProvider{"github": vp},
+		CICD:     map[string]CICDProvider{"ci": ci},
+		Beads:    bdc,
+		StateDir: t.TempDir(),
+		Store:    db,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if _, err := e.refreshPR(ctx, "o/r", pr.Number); err != nil {
+		t.Fatalf("refreshPR: %v", err)
+	}
+
+	storedPR, err := db.GetPR(ctx, "o/r", pr.Number)
+	if err != nil || storedPR == nil {
+		t.Fatalf("GetPR: %v", err)
+	}
+	rev, err := db.LatestRevision(ctx, storedPR.ID)
+	if err != nil {
+		t.Fatalf("LatestRevision: %v", err)
+	}
+	if rev == nil {
+		t.Fatal("LatestRevision: got nil, want a revision")
+	}
+	if rev.GateState != "unsatisfied" || rev.GateStateN != 0 || rev.GateStateM != 1 {
+		t.Fatalf("gate state via the per-PR path = %q (n=%d m=%d), want unsatisfied (n=0 m=1) -- a classic commit-Status-API check must be observed exactly like the bulk path",
+			rev.GateState, rev.GateStateN, rev.GateStateM)
+	}
+
+	// The merge must be additive: the CICD-sourced "build" check-run's own
+	// CI rollup must still reflect success, and the gate-bot run (excluded
+	// from the rollup by its own CheckInterpreters entry, like any claimed
+	// check) must not produce a ci-failure row despite its own "failure"
+	// conclusion -- proving the merge feeds gate classification without also
+	// corrupting the ordinary CI-failure ingestion path.
+	rows, err := db.ListFeedback(ctx, storedPR.ID, store.ListFilter{Kind: "ci-failure"})
+	if err != nil {
+		t.Fatalf("ListFeedback: %v", err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("expected no ci-failure rows (build succeeded; policy-bot is a claimed/excluded gate check), got %d: %+v", len(rows), rows)
 	}
 }

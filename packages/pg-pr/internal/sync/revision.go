@@ -105,14 +105,15 @@ func gateStateFromSync(runs []api.CIRun, now func() time.Time, reg *checkinterpr
 // carries a run with that same Name, in which case the newRuns entry wins
 // (idempotence/no-duplication guard).
 //
-// This exists for reconcileTruncatedCI (sync.go, pg2-4dz88.2.7): that
-// function wholesale-replaces a truncated bulk-fetched CIRuns with the
-// dedicated CICD provider's re-sourced list, but the CICD provider is
-// structurally Actions/CheckRun-only and can never carry a commit-status run
-// (only GraphQL's statusCheckRollup can) — so a check-interpreter-claimed
-// run such as an approval gate would otherwise be silently discarded on
-// every truncated tick. Merging the claimed run(s) back in preserves the
-// gate's rich, Description-bearing observation across the re-source.
+// This exists for reconcileTruncatedCI (sync.go, pg2-4dz88.2.7) and
+// enrichOnePR (sync.go, pg2-g9fu0): both functions wholesale-replace (or, for
+// enrichOnePR, always source) CIRuns from the dedicated CICD provider, but
+// that provider is structurally Actions/CheckRun-only and can never carry a
+// commit-status run (only GraphQL's statusCheckRollup can) — so a
+// check-interpreter-claimed run such as an approval gate would otherwise be
+// silently discarded on every truncated tick (reconcileTruncatedCI) or every
+// per-PR refresh (enrichOnePR). Merging the claimed run(s) back in preserves
+// the gate's rich, Description-bearing observation in both cases.
 //
 // A nil/empty reg or originalRuns is a no-op (returns newRuns unchanged),
 // mirroring checkinterpret.Registry's own "nil-safe, claims nothing" and
