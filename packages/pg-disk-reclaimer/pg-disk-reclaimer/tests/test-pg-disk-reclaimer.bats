@@ -59,3 +59,22 @@ run_pg_disk_reclaimer() {
   [ "$status" -ne 0 ]
   [[ "$output" =~ "--aggressiveness" ]]
 }
+
+@test "list --verbose is accepted alongside --aggressiveness (dispatches to cmd_list, not rejected as an unknown option)" {
+  # Paired with a bare --aggressiveness (missing its value) rather than a
+  # real registry lookup: this test has no HOME/XDG isolation of its own
+  # (see setup() above), so asserting on registry-not-found would depend on
+  # whatever real registry the invoking user's actual $HOME happens to
+  # have. Option-parsing-stage failure is independent of that.
+  run_pg_disk_reclaimer list --verbose --aggressiveness
+  [ "$status" -ne 0 ]
+  [[ ! "$output" =~ "unknown option" ]]
+  [[ "$output" =~ "--aggressiveness requires a value" ]]
+}
+
+@test "list -v is accepted alongside --aggressiveness (dispatches to cmd_list, not rejected as an unknown option)" {
+  run_pg_disk_reclaimer list -v --aggressiveness
+  [ "$status" -ne 0 ]
+  [[ ! "$output" =~ "unknown option" ]]
+  [[ "$output" =~ "--aggressiveness requires a value" ]]
+}

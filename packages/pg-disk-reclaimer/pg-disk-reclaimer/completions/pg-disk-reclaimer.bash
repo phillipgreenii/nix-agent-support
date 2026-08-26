@@ -67,7 +67,7 @@ _pg_disk_reclaimer() {
       return
     fi
     if [[ $cur == -* ]]; then
-      mapfile -t COMPREPLY < <(compgen -W "--aggressiveness --help -h --version -v" -- "$cur")
+      mapfile -t COMPREPLY < <(compgen -W "--aggressiveness --verbose -v --help -h --version" -- "$cur")
     fi
     return
   fi

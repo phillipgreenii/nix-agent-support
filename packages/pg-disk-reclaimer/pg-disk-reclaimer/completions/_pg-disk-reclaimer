@@ -28,7 +28,8 @@ _pg_disk_reclaimer() {
     ;;
   list)
     _arguments \
-      '--aggressiveness[Selection ceiling]:aggressiveness:'
+      '--aggressiveness[Selection ceiling]:aggressiveness:' \
+      '(-v --verbose)'{-v,--verbose}'[Also show items whose path does not exist]'
     ;;
   *)
     _files

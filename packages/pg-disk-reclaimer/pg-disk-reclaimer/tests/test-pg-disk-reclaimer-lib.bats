@@ -19,6 +19,40 @@
 # with pgdr_confirm overridden -- never the real /dev/tty-reading
 # implementation (see its doc comment in pg-disk-reclaimer.bash for why).
 
+# setup_file/teardown_file (run exactly ONCE for this whole file, unlike
+# setup()/teardown() below which run per-test): cmd_list/cmd_reclaim now
+# guard on each item's registry `path` actually existing on disk (this bug
+# fix) -- create every synthetic path used by tests/fixtures/list.json,
+# list-resilience.json, and reclaim.json so those existing tests keep
+# exercising cmd_list/cmd_reclaim's real behavior instead of silently
+# having every item skipped by the new guard. reclaim.json's
+# low-item/high-item/failing-item paths are included here too even though
+# cmd_reclaim's own guard logic is a separate follow-up bead -- this keeps
+# the one shared fixture-path fix in a single task.
+# tests/fixtures/selection.json's paths (/tmp/info-only, /tmp/multi,
+# /tmp/single) are deliberately NOT created here: that fixture is
+# exercised only via pgdr_select_variants directly, never through
+# cmd_list/cmd_reclaim, so the new guard never applies to it.
+#
+# Deliberately setup_file/teardown_file, NOT per-test setup()/teardown():
+# this suite runs under this repo's real commit-time gate with bats
+# parallel jobs enabled (pg-test-runner, backed by GNU parallel), so
+# per-test mkdir/rm of these SHARED, fixed /tmp paths races -- one test's
+# teardown() removing a directory while another concurrently-running
+# test's cmd_list is still reading it (confirmed empirically: `bats --jobs
+# 4` on this file intermittently failed cmd_list assertions that pass
+# every time under `--jobs 1`). None of the registry fixtures' dryRunCommand/
+# removeCommand actually touch these directories (they're `echo` stubs), so
+# creating them once for the whole file and leaving them in place for every
+# test to read is safe and race-free.
+setup_file() {
+  mkdir -p /tmp/cache-a /tmp/cache-b /tmp/info-only /tmp/failing-item /tmp/slow-item /tmp/ok-item /tmp/low-item /tmp/high-item
+}
+
+teardown_file() {
+  rm -rf /tmp/cache-a /tmp/cache-b /tmp/info-only /tmp/failing-item /tmp/slow-item /tmp/ok-item /tmp/low-item /tmp/high-item
+}
+
 setup() {
   if [[ -z ${SCRIPTS_DIR:-} ]]; then
     SCRIPTS_DIR="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)"
@@ -467,6 +501,70 @@ JSON
   [[ ! "$output" =~ "should-not-appear" ]]
   [[ "$output" =~ "ID: ok-item" ]]
   [[ "$output" =~ "OK-SIZE" ]]
+}
+
+# cmd_list path-existence guard (this bug fix, operator dogfooding
+# feedback): a registry item whose `path` does not currently exist on this
+# machine has nothing to reclaim, so it's skipped by default and shown only
+# under --verbose -- and even under --verbose, its displayCommand is never
+# run (so no `du: cannot access ...`-style noise ever reaches the output).
+# Built inline via heredoc into the default XDG registry path, following
+# this file's existing "malformed.json" inline-fixture pattern above,
+# rather than a new committed tests/fixtures/*.json file.
+
+install_missing_path_registry() {
+  mkdir -p "$HOME/.config/pg-disk-reclaimer"
+  cat >"$HOME/.config/pg-disk-reclaimer/registry.json" <<'JSON'
+[
+  {
+    "id": "missing-path-item",
+    "description": "item whose path does not exist on this machine",
+    "path": "/tmp/pg-disk-reclaimer-test-missing-xyz",
+    "displayCommand": "du -sh /tmp/pg-disk-reclaimer-test-missing-xyz",
+    "variants": [
+      {
+        "aggressiveness": 1,
+        "variantDescription": "n/a",
+        "dryRunCommand": "echo dry-missing",
+        "removeCommand": "echo remove-missing"
+      }
+    ]
+  }
+]
+JSON
+}
+
+@test "cmd_list skips an item whose path does not exist, by default (no --verbose)" {
+  install_missing_path_registry
+  run cmd_list
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "cmd_list --verbose shows an item whose path does not exist, without running its displayCommand" {
+  install_missing_path_registry
+  run cmd_list --verbose
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "ID: missing-path-item" ]]
+  [[ "$output" =~ "does not exist" ]]
+  [[ ! "$output" =~ "du:" ]]
+  [[ ! "$output" =~ "cannot access" ]]
+  [[ ! "$output" =~ "No such file" ]]
+}
+
+@test "cmd_list -v is the same as --verbose for a missing-path item" {
+  install_missing_path_registry
+  run cmd_list -v
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "ID: missing-path-item" ]]
+  [[ "$output" =~ "does not exist" ]]
+}
+
+@test "cmd_list separates item blocks with a blank line after each '---' separator" {
+  install_list_registry
+  run cmd_list --aggressiveness 5
+  [ "$status" -eq 0 ]
+  [[ "$output" == *$'---\n\nID: cache-b'* ]]
 }
 
 # cmd_reclaim (bead pg2-txxyj.6), exercised against tests/fixtures/reclaim.json

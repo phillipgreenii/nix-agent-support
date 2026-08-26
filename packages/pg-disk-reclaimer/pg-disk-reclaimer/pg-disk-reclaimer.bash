@@ -246,6 +246,16 @@ pgdr_select_variants() {
   ' "$path"
 }
 
+# pgdr_path_exists: true if PATH (a trusted, operator-authored registry `path`
+# string, e.g. "~/.cache/uv") currently exists on disk. Deliberately
+# unquoted inside eval -- this is what lets `~` expand; quoting $1 here
+# would silently break tilde expansion and make every ~-based item look
+# nonexistent. Same trust model as this file's other eval usages
+# (dryRunCommand/removeCommand): registry data, not user input.
+pgdr_path_exists() {
+  eval "[[ -e $1 ]]" 2>/dev/null
+}
+
 # PGDR_DISPLAY_TIMEOUT_SECONDS: per-item ceiling (wall-clock seconds) on how
 # long cmd_list will wait on one item's displayCommand. Overridable via the
 # environment (tests use a short value so a deliberately-slow fixture
@@ -311,7 +321,7 @@ pgdr_display_output() {
 
 # cmd_list: implements the `list` subcommand.
 #
-# Grammar: list [--aggressiveness N]
+# Grammar: list [--aggressiveness N] [-v|--verbose]
 #   --aggressiveness N (optional): a selection ceiling. With no ceiling,
 #     every registered item is listed, including zero-variant
 #     (informational-only) items. With a ceiling, the listing is
@@ -322,26 +332,44 @@ pgdr_display_output() {
 #     variant under any ceiling, so it is naturally excluded once a
 #     ceiling is given, exactly like pgdr_select_variants' own Case A
 #     behavior.
+#   -v|--verbose (optional): show items whose `path` does not currently
+#     exist on disk. Without this flag such items are skipped entirely
+#     (no output at all) -- see the path-existence guard below.
 #
-# For each included item this prints a header block (ID/DESCRIPTION/
-# AGGRESSIVENESS -- EVERY aggressiveness value the item has a variant for,
-# not just the single highest-qualifying variant pgdr_select_variants would
-# choose; a zero-variant item shows "-"), then the verbatim output of
-# running its displayCommand (via pgdr_display_output, bounded by
-# PGDR_DISPLAY_TIMEOUT_SECONDS and never fatal to the run), then a "---"
-# separator line before the next item. A fixed-width table was tried here
-# before, but displayCommand strings have no contract to produce single-line
-# output -- one registry entry's `find ... -exec du -sh {} +` legitimately
-# prints one line PER matched file -- so a table row is the wrong shape;
-# this header/output/separator block has no such assumption.
+# For each included item whose `path` exists, this prints a header block
+# (ID/DESCRIPTION/AGGRESSIVENESS -- EVERY aggressiveness value the item has
+# a variant for, not just the single highest-qualifying variant
+# pgdr_select_variants would choose; a zero-variant item shows "-"), then
+# the verbatim output of running its displayCommand (via
+# pgdr_display_output, bounded by PGDR_DISPLAY_TIMEOUT_SECONDS and never
+# fatal to the run), then a "---" separator line and a blank line before
+# the next item. A fixed-width table was tried here before, but
+# displayCommand strings have no contract to produce single-line output --
+# one registry entry's `find ... -exec du -sh {} +` legitimately prints one
+# line PER matched file -- so a table row is the wrong shape; this
+# header/output/separator block has no such assumption.
+#
+# Path-existence guard (operator-reported dogfooding feedback): every
+# registry item's `path` is the generic, cheap "is there anything here at
+# all" signal -- if it doesn't exist on this machine, there is nothing to
+# reclaim for that item, full stop. Without --verbose such an item is
+# skipped entirely (no header, no separator -- silence, since "print
+# nothing when there's nothing to reclaim" was the reported expectation).
+# With --verbose the header block still prints, followed by one
+# "(path '...' does not exist -- nothing to do)" line INSTEAD of running
+# displayCommand -- this also avoids running e.g. `du -sh` against a path
+# that isn't there, whose stderr (`du: cannot access ...`) was the other
+# half of the reported noise.
 #
 # Exit status: 0 on success (including an empty listing when a ceiling
-# excludes everything, or when every included item's displayCommand itself
+# excludes everything, every included item's path is missing and --verbose
+# was not given, or when every included item's displayCommand itself
 # failed/timed out -- those are reported inline, not treated as a listing
 # failure); 1 if the registry fails to load/validate, or an option is
 # malformed.
 cmd_list() {
   local max_aggressiveness=""
+  local verbose=0
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -352,6 +380,10 @@ cmd_list() {
       fi
       max_aggressiveness="$2"
       shift 2
+      ;;
+    -v | --verbose)
+      verbose=1
+      shift
       ;;
     -*)
       echo "pg-disk-reclaimer: unknown option '$1'" >&2
@@ -399,6 +431,7 @@ cmd_list() {
       | {
           id,
           description,
+          path,
           displayCommand,
           aggressiveness: ((.variants // []) | map(.aggressiveness))
         }
@@ -407,20 +440,29 @@ cmd_list() {
 
   local row
   while IFS= read -r row; do
-    local id description display_command aggressiveness_display
+    local id description path display_command aggressiveness_display
     id=$(jq -r '.id' <<<"$row")
     description=$(jq -r '.description' <<<"$row")
+    path=$(jq -r '.path' <<<"$row")
     display_command=$(jq -r '.displayCommand' <<<"$row")
     aggressiveness_display=$(jq -r '
       .aggressiveness
       | if length == 0 then "-" else (map(tostring) | join(",")) end
     ' <<<"$row")
 
-    printf 'ID: %s\n' "$id"
-    printf 'DESCRIPTION: %s\n' "$description"
-    printf 'AGGRESSIVENESS: %s\n' "$aggressiveness_display"
-    pgdr_display_output "$display_command"
-    printf -- '---\n'
+    if pgdr_path_exists "$path"; then
+      printf 'ID: %s\n' "$id"
+      printf 'DESCRIPTION: %s\n' "$description"
+      printf 'AGGRESSIVENESS: %s\n' "$aggressiveness_display"
+      pgdr_display_output "$display_command"
+      printf -- '---\n\n'
+    elif [[ $verbose -eq 1 ]]; then
+      printf 'ID: %s\n' "$id"
+      printf 'DESCRIPTION: %s\n' "$description"
+      printf 'AGGRESSIVENESS: %s\n' "$aggressiveness_display"
+      printf "(path '%s' does not exist -- nothing to do)\n" "$path"
+      printf -- '---\n\n'
+    fi
   done < <(jq -c '.[]' <<<"$rows")
 
   return 0

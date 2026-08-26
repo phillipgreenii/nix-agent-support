@@ -20,13 +20,19 @@ pg-disk-reclaimer: Data-driven disk-space-reclaim CLI
 Usage: pg-disk-reclaimer <command> [OPTIONS] [ARGS]
 
 Commands:
-  list [--aggressiveness N]            List reclaimable registry items
-  validate [PATH]                      Validate a registry file
-  reclaim --aggressiveness N [ID...]   Reclaim disk space (dry-run unless --apply)
+  list [--aggressiveness N] [-v|--verbose]  List reclaimable registry items
+  validate [PATH]                           Validate a registry file
+  reclaim --aggressiveness N [ID...]        Reclaim disk space (dry-run unless --apply)
 
 Options:
   -h, --help     Show this help message
   -v, --version  Show version information
+
+'list' options:
+  -v, --verbose  Also show items whose path does not exist on this
+                 machine (skipped silently by default). This is a
+                 list-only flag, unrelated to the top-level -v/--version
+                 above, which is parsed before subcommand dispatch.
 
 Notes:
   'validate' checks the registry's JSON schema, then does a best-effort
