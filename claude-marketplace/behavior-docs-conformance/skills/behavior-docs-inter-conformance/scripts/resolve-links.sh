@@ -76,14 +76,22 @@
 #     something a single-derivation FOD can be handed without vendoring that
 #     repo into this flake's source, which is not wanted for a rot-tolerant,
 #     by-design-optional check.
-#   - So this script runs OUTSIDE the nix sandbox entirely: wired as its own
-#     pre-push, `language = "system"` pre-commit hook (see `flake.nix`,
-#     `behavior-docs-links`), exactly like the existing `behavior-docs-real-corpus`
-#     and `<module>-push-golangci` hooks — real filesystem, real (optional)
-#     network, real workspace siblings. `nix flake check` never invokes it, so
-#     it structurally cannot make that gate require network access; today, run
-#     for real against this workspace, it needs no network either (all nine
-#     links resolve locally — see the Gates section of the bead).
+#   - So this script runs OUTSIDE the nix sandbox entirely: real filesystem,
+#     real (optional) network, real workspace siblings. `nix flake check`
+#     never invokes it for real, so it structurally cannot make that gate
+#     require network access; today, run for real against this workspace, it
+#     needs no network either (all nine links resolve locally — see the Gates
+#     section of the bead). Its own LOGIC is covered hermetically by
+#     `tests/behavior-docs-resolve-links.bats`, driven as part of
+#     `checks.test-behavior-docs-inter-conformance` (see `flake.nix`) against
+#     fixture data, not the real corpus.
+#   - It is NOT wired as an automatic hook of any kind. The `behavior-docs-links`
+#     pre-push hook that used to run it for real (alongside the sibling
+#     `behavior-docs-real-corpus` and `<module>-push-golangci` pre-push hooks)
+#     was removed (pg2-0ppig) in favor of one `run-unit-tests` pre-commit hook
+#     driven by pg-test-runner; that hook does not invoke this script. Running
+#     this script for real against the live corpus has no automatic trigger —
+#     invoke it manually when checking the corpus's actual links.
 #
 # Usage: resolve-links.sh [--timeout SECONDS] <implementer-set-dir>
 # Env:   RESOLVE_LINKS_TIMEOUT  per-fetch network timeout in seconds (default 10);
