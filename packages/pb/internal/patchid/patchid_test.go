@@ -12,6 +12,24 @@ import (
 	"github.com/phillipgreenii/pb/internal/run"
 )
 
+// hermetic environment removes git env vars inherited from a parent `git commit`'s hook
+// environment (GIT_DIR, GIT_INDEX_FILE, GIT_WORK_TREE, GIT_PREFIX,
+// GIT_OBJECT_DIRECTORY, GIT_COMMON_DIR). These variables repoint tempdir git calls at the
+// real repo, breaking test hermeticity when tests are run from a git commit hook.
+func hermeticEnviron() []string {
+	skipVars := map[string]bool{
+		"GIT_DIR": true, "GIT_INDEX_FILE": true, "GIT_WORK_TREE": true,
+		"GIT_PREFIX": true, "GIT_OBJECT_DIRECTORY": true, "GIT_COMMON_DIR": true,
+	}
+	var env []string
+	for _, kv := range os.Environ() {
+		if k := strings.SplitN(kv, "=", 2)[0]; !skipVars[k] {
+			env = append(env, kv)
+		}
+	}
+	return env
+}
+
 // Equivalent mutants in this package, and why nothing below kills them.
 //
 // pg-go-mutate reports five surviving mutants in patchid.go. Every one is
@@ -55,7 +73,7 @@ func runGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
 	cmd.Env = append(
-		os.Environ(),
+		hermeticEnviron(),
 		"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@e.com",
 		"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@e.com",
 	)
@@ -77,7 +95,7 @@ func TestComputeAndScan_findsCommitPatchID(t *testing.T) {
 	dir := initRepo(t)
 	commit(t, dir, "a.txt", "hello\n", "add a")
 	commit(t, dir, "b.txt", "world\n", "add b")
-	c := Client{R: run.CLIRunner{}}
+	c := Client{R: hermeticCLIRunner{}}
 	id, err := c.Compute(context.Background(), dir, "HEAD")
 	if err != nil || id == "" {
 		t.Fatalf("Compute: id=%q err=%v", id, err)
@@ -103,7 +121,7 @@ func TestScanPatchIDCommits_mapsPatchIDToItsCommit(t *testing.T) {
 	commit(t, dir, "b.txt", "world\n", "add b")
 	head := strings.TrimSpace(mustGit(t, dir, "rev-parse", "HEAD"))
 
-	c := Client{R: run.CLIRunner{}}
+	c := Client{R: hermeticCLIRunner{}}
 	id, err := c.Compute(context.Background(), dir, "HEAD")
 	if err != nil {
 		t.Fatalf("Compute: %v", err)
@@ -132,7 +150,7 @@ func TestScanPatchIDCommits_mapsPatchIDToItsCommit(t *testing.T) {
 func TestScan_emptyRangeYieldsEmptySet(t *testing.T) {
 	dir := initRepo(t)
 	commit(t, dir, "a.txt", "hello\n", "c1")
-	c := Client{R: run.CLIRunner{}}
+	c := Client{R: hermeticCLIRunner{}}
 	// HEAD..HEAD is an empty range.
 	set, err := c.ScanPatchIDs(context.Background(), dir, "HEAD..HEAD")
 	if err != nil {
@@ -147,7 +165,7 @@ func TestComputeStableAcrossRebase(t *testing.T) {
 	dir := initRepo(t)
 	commit(t, dir, "base.txt", "base\n", "base")
 	commit(t, dir, "feat.txt", "feature\n", "feat")
-	c := Client{R: run.CLIRunner{}}
+	c := Client{R: hermeticCLIRunner{}}
 	before, err := c.Compute(context.Background(), dir, "HEAD")
 	if err != nil {
 		t.Fatalf("Compute before: %v", err)
@@ -166,7 +184,7 @@ func TestComputeStableAcrossRebase(t *testing.T) {
 func TestIsAncestor(t *testing.T) {
 	dir := initRepo(t)
 	commit(t, dir, "a.txt", "1\n", "c1")
-	c := Client{R: run.CLIRunner{}}
+	c := Client{R: hermeticCLIRunner{}}
 	first := strings.TrimSpace(mustGit(t, dir, "rev-parse", "HEAD"))
 	commit(t, dir, "a.txt", "2\n", "c2")
 	if !c.IsAncestor(context.Background(), dir, first, "HEAD") {
@@ -179,11 +197,26 @@ func TestIsAncestor(t *testing.T) {
 
 func mustGit(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).Output()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	cmd.Env = hermeticEnviron()
+	out, err := cmd.Output()
 	if err != nil {
 		t.Fatalf("git %v: %v", args, err)
 	}
 	return string(out)
+}
+
+// hermeticCLIRunner is a thin wrapper around CLIRunner that scrubs inherited git
+// environment variables before running subprocesses, ensuring test hermeticity
+// when run from a git commit hook environment.
+type hermeticCLIRunner struct{}
+
+// Run executes name with args, using a hermetic environment (no inherited git vars).
+func (hermeticCLIRunner) Run(ctx context.Context, name string, args []string, opts run.Options) (run.Result, error) {
+	if opts.Env == nil {
+		opts.Env = hermeticEnviron()
+	}
+	return run.CLIRunner{}.Run(ctx, name, args, opts)
 }
 
 // The tests below drive the Client through run.FakeRunner instead of real git. The
