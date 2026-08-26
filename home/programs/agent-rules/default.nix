@@ -99,6 +99,19 @@ in
   # name+description are ever always-on. See pg2-44sj and
   # docs/superpowers/specs/2026-06-25-agent-rules-delivery-design.md.
   #
+  # PARTIAL SUPERSESSION (tc-ql0o Stage C, tc-ql0o.3, operator Decisions 1-3,
+  # 2026-08-25/26): the "skill is the wrong vehicle" argument above still
+  # holds for clauses with NO observable in-session trigger (bare
+  # prohibitions, conversation-time rulings) — those stay in pgii-agent-rules.md,
+  # unconditionally always-on, exactly as this comment originally argued. It
+  # does NOT hold for clauses that key on an observable trigger a model can
+  # gate on (a `bd` verb, a park/release/accept action, a worktree-review/human
+  # label mutation): those moved to the `beads-lifecycle` skill
+  # (claude-marketplace/beads-lifecycle), behind a short MUST-invoke tripwire
+  # stub that DOES stay always-on here. The pg2-44sj context above is
+  # preserved because it is still the reason the REMAINING core content can't
+  # move the same way.
+  #
   # agent-rules is NOT a plugin: a SessionStart hook plugin was briefly added
   # (pg2-44sj, commit 63a696b) during the marketplace migration but injected the
   # same rules a second time (double-injection); it was removed (pg2-qewh). The

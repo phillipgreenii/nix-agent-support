@@ -818,6 +818,94 @@
                   touch $out
                 '';
 
+              # Stale-location guard for the tc-ql0o Stage C agent-rules move
+              # (bead tc-ql0o.3, 2026-08-26): F-*/B-*/D-*/P-*/W-* rule packs
+              # moved out of the always-on `pgii-agent-rules.md` into the
+              # `beads-lifecycle` skill, behind a MUST-invoke tripwire stub.
+              # Anything under `claude-marketplace/` that still asserts one of
+              # those IDs is "always-on" — a location claim, not just a rule
+              # citation — is now WRONG unless that exact ID still ships in the
+              # rendered core file (a handful do: the stub keeps B-1/B-2's
+              # essence and F-1/F-9 as one-liners). This check fails on any
+              # OTHER always-on claim for those five letters.
+              #
+              # It does NOT flag S-*/T-*/U-*/R-*/M-*/L-*/V-*/A- citations —
+              # those packs did not move and are still genuinely always-on.
+              #
+              # A NEW moved-out rule pack (a future Stage) MUST update the
+              # `movedLetters` set below, or this guard silently stops
+              # covering it.
+              test-agent-rules-tripwire-citations =
+                let
+                  surface = lib.fileset.toSource {
+                    root = ./.;
+                    fileset = ./claude-marketplace;
+                  };
+                  core = ./home/programs/agent-rules/pgii-agent-rules.md;
+                in
+                pkgs.runCommand "test-agent-rules-tripwire-citations" { } ''
+                  # Liveness self-check FIRST: the expected violation count is
+                  # zero, so "found nothing" cannot double as proof the scan ran.
+                  if [ ! -f "${surface}/claude-marketplace/pb/commands/drain-beads.md" ] || \
+                     [ ! -f "${surface}/claude-marketplace/pb/commands/unblock-human-beads.md" ]; then
+                    echo "FAIL: guard never scanned the pb commands -- they were" >&2
+                    echo "      renamed or moved out from under claude-marketplace/" >&2
+                    exit 1
+                  fi
+                  if [ ! -f "${core}" ]; then
+                    echo "FAIL: core rules file moved -- update the guard's core path" >&2
+                    exit 1
+                  fi
+
+                  scanned="$(find ${surface} -type f -name '*.md' | wc -l)"
+                  if [ "$scanned" -lt 3 ]; then
+                    echo "FAIL: guard scanned only $scanned markdown file(s) under" >&2
+                    echo "      claude-marketplace/; expected at least 3" >&2
+                    exit 1
+                  fi
+
+                  fail=0
+                  while IFS=: read -r file line text; do
+                    # Extract every F-*/B-*/D-*/P-*/W-* single-ID or range
+                    # token on this "always-on" line, e.g. "D-1..D-8", "F-3".
+                    tokens="$(printf '%s\n' "$text" | grep -oE '\b[FBDPW]-[0-9]+(\.\.[FBDPW]-[0-9]+)?\b' || true)"
+                    [ -z "$tokens" ] && continue
+                    while IFS= read -r tok; do
+                      [ -z "$tok" ] && continue
+                      if printf '%s' "$tok" | grep -q '\.\.'; then
+                        lo_full="''${tok%%..*}"
+                        hi_full="''${tok##*..}"
+                        letter="''${lo_full%%-*}"
+                        lo="''${lo_full##*-}"
+                        hi="''${hi_full##*-}"
+                      else
+                        letter="''${tok%%-*}"
+                        lo="''${tok##*-}"
+                        hi="$lo"
+                      fi
+                      i=$lo
+                      while [ "$i" -le "$hi" ]; do
+                        id="''${letter}-''${i}"
+                        if ! grep -qE "\\b''${id}\\b" "${core}"; then
+                          echo "FAIL: $file:$line asserts \"$id\" is always-on, but it does not" >&2
+                          echo "      appear in $(basename ${core}) -- it moved to the" >&2
+                          echo "      beads-lifecycle skill (tc-ql0o Stage C). Rewrite the" >&2
+                          echo "      citation as an invocation obligation, not a location claim." >&2
+                          fail=1
+                        fi
+                        i=$((i + 1))
+                      done
+                    done <<< "$tokens"
+                  done < <(grep -rn "always-on" ${surface} --include='*.md' || true)
+
+                  if [ "$fail" -ne 0 ]; then
+                    exit 1
+                  fi
+
+                  echo "ok: $scanned markdown file(s) scanned under claude-marketplace/; no stale always-on claims for moved rule packs"
+                  touch $out
+                '';
+
               # ── Full-module Go test gates (bead pg2-adhga; converged onto the
               # fleet builder by bead pg2-spwj9) ────────────────────────────────
               #

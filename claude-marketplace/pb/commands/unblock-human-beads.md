@@ -71,8 +71,12 @@ exit on an error.
 
 ## Startup / resume (survives compaction)
 
-1. Run `bd prime` for workflow context.
-2. Recover any bead you already own but didn't finish:
+1. Invoke the `beads-lifecycle` skill (claim/release hygiene, dependency-vs-human blocker
+   modeling, handoff preconditions, premise freshness, worktree-review label lifecycle) —
+   before running `bd prime` or any other `bd` command. This is a session-level prerequisite
+   for the whole run below, not a per-bead step to redo.
+2. Run `bd prime` for workflow context.
+3. Recover any bead you already own but didn't finish:
 
    ```bash
    bd list --status in_progress --assignee "ID" --label human --json
@@ -81,7 +85,7 @@ exit on an error.
    If one exists, resume it (UNDERSTAND → FRESHNESS CHECK → TRIAGE → terminal action) before claiming new
    work.
 
-3. Start with an empty session skip-set.
+4. Start with an empty session skip-set.
 
 ## Main loop — repeat until the Goal is met
 
@@ -136,7 +140,7 @@ module trees had been DELETED and unified elsewhere — one approval away from l
 "Accepted" ADR prescribing edits to modules that do not exist. `git ls-tree` on the two paths
 it named was the whole check.
 
-Follow the always-on `Premise Freshness` rules (F-1..F-8) and run the NAMED PROBES from F-3 —
+Invoke the `beads-lifecycle` skill and follow its `Premise Freshness` rules (F-1..F-9), running the NAMED PROBES from F-3 —
 one per external referent the bead OR its `stuck:` comment names — keeping each decisive
 output verbatim:
 
@@ -350,8 +354,8 @@ landed and it was waiting purely on two that needed decisions. Two `bd dep add` 
 release took it out of the human queue entirely, correctly absent from `bd ready` while
 `status=open`, and it will flow to drain by itself when the blockers clear. **This class MUST
 NOT ENGAGE the operator.** There is no question here, and a prompt spends the one serial
-resource — the operator — to discover there never was one. Full contract: the always-on
-`Blocker Modeling` rules (**D-1..D-8**).
+resource — the operator — to discover there never was one. Full contract: invoke the
+`beads-lifecycle` skill and follow its `Blocker Modeling` rules (**D-1..D-9**).
 
 Recognition is mechanical and reuses work you have already done: the FRESHNESS CHECK's
 `sibling-open?` probe reads the status of every bead this one names. All you add is the
@@ -593,8 +597,8 @@ rule on"), not a permanent property of the bead. Nothing used to remove it, so a
 already-adjudicated bead re-triggered this operator prompt on every later run and a later
 sweep re-promoted and re-parked it; and because the sweep records its promotion as
 `Promoted P<n>->P0` in `notes` and nothing undid that, adjudicated beads keep a P0 that no
-longer reflects urgency. Follow the always-on `Worktree-Review Label Lifecycle` rules
-(W-1..W-8). In this command that means:
+longer reflects urgency. Invoke the `beads-lifecycle` skill and follow its
+`Worktree-Review Label Lifecycle` rules (W-1..W-8). In this command that means:
 
 - **Read the promotion record BEFORE the terminal action** (W-3) — you need `<prior>`:
 
@@ -873,7 +877,8 @@ arguments, drain the whole ready `human` queue.
   the label — with the EDGE, not the window, as the gate. This class ranks above classes 4 and 5
   and below classes 1 and 2; its release MUST also drop a `planning-session-required` or
   `stale-precondition` marker, which this class outranks and therefore leaves unchecked. Full
-  contract: the always-on `Blocker Modeling` rules (**D-1..D-8**).
+  contract: invoke the `beads-lifecycle` skill and follow its `Blocker Modeling` rules
+  (**D-1..D-9**).
 - **Planning-session marker (class 4) MUST NOT prompt.** A `human` bead whose blocker is a
   design/planning SESSION rather than a single answerable question MUST be labeled
   `planning-session-required`, and `human` MUST be KEPT alongside it — the marker is a REFINEMENT of
@@ -929,10 +934,11 @@ arguments, drain the whole ready `human` queue.
   MUST be asked in the same class-1b exchange, but on the class-1a path an exchange MUST NOT be
   opened solely to ask — the bead is being CLOSEd, so its priority routes nothing, and the recorded
   gap is the whole obligation. Guessing and silent no-ops remain forbidden on both paths.
-  A DEFER MUST keep the label and the promoted priority. Full contract: the always-on
-  `Worktree-Review Label Lifecycle` rules (W-1..W-8).
+  A DEFER MUST keep the label and the promoted priority. Full contract: invoke the
+  `beads-lifecycle` skill and follow its `Worktree-Review Label Lifecycle` rules (W-1..W-8).
 - **Freshness guard.** Before TRIAGE, the bead's premise MUST be re-verified against CURRENT
-  reality with the matching named probes from the always-on `Premise Freshness` rules (F-3) —
+  reality with the matching named probes from the `beads-lifecycle` skill's `Premise
+Freshness` rules (F-3) —
   one per external referent the bead or its `stuck:` comment names (commits, external tickets,
   files/modules/symbols, sibling beads, recorded "next free" ids) — and each decisive output
   MUST be recorded verbatim as a `FRESHNESS:` line in whatever comment the terminal action

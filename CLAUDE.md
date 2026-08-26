@@ -271,6 +271,12 @@ Verified against Claude Code 2.1.186:
 - CONVENTION: always-on rules live in `home/programs/agent-rules/pgii-agent-rules.md` (delivered
   to `~/.claude/CLAUDE.md` via home.file); skills/plugins ship via the nix-managed marketplace.
   Rules CANNOT ride in a plugin, so "plugin owns its rules" is impossible.
+- TRIPWIRE PATTERN (tc-ql0o Stage C, `claude-marketplace/beads-lifecycle`, 2026-08-26): a rule
+  pack whose violation window has an OBSERVABLE in-session trigger (a `bd` verb, a
+  park/release/accept action, a label mutation) MAY move its full body into a skill, provided
+  `pgii-agent-rules.md` keeps a short MUST-invoke stub naming the skill and the trigger. A pack
+  with NO such trigger (a bare prohibition, a conversation-time ruling) MUST stay always-on in
+  `pgii-agent-rules.md` itself — the tripwire pattern does not relax that.
 - Plugin `bin/` dirs put executables on the Bash-tool PATH only (not login shells),
   auto-discovered with no manifest entry — BUT the marketplace directory-source cache copy SKIPS
   symlinks pointing outside the plugin dir, so a `/nix/store` symlink would be silently dropped.

@@ -74,8 +74,12 @@ on every land. If you find a standing push bead, report it as this defect
 
 ## Startup / resume (survives compaction)
 
-1. Run `bd prime` for workflow context.
-2. Recover any bead you already own but didn't finish:
+1. Invoke the `beads-lifecycle` skill now, before any `bd` command runs this session. It
+   carries claim/release hygiene, dependency-vs-human blocker modeling, handoff-precondition
+   phrasing, premise freshness, and the worktree-review label lifecycle — all cited by rule ID
+   throughout this command. Invoke it ONCE per session; you do not need to re-invoke it per bead.
+2. Run `bd prime` for workflow context.
+3. Recover any bead you already own but didn't finish:
 
    ```bash
    bd list --status in_progress --assignee "ID" --json

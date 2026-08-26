@@ -1,0 +1,6 @@
+{
+  "name": "beads-lifecycle",
+  "description": "Claude skill: beads (bd) claim/release hygiene, dependency-vs-human blocker modeling, handoff preconditions, premise freshness, and the worktree-review label lifecycle — moved here from the always-on agent rules (tc-ql0o Stage C) to keep that file token-lean.",
+  "version": "1.0.0",
+  "defaultEnabled": true
+}
