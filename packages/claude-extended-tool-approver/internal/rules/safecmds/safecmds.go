@@ -230,6 +230,20 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 	}
 	pe := baseEval.WithCWD(cwd)
 	for i, pc := range parsed {
+		// Data leaves (a for word list, a case subject, an arithmetic/test/let
+		// command's embedded substitution — cmdparse's emitDataSpan,
+		// PipelineID -1, no Executable) are never commands and must never be
+		// judged as one (pg2-0h53n). Without this skip, filepath.Base("") is
+		// "." — a lookup miss in every map below — which fell through to the
+		// unknown-command path and abstained the WHOLE compound even when
+		// every REAL command leaf was safe-listed (verified: `for i in 1; do
+		// true; done` abstained despite `true` being alwaysSafe). Substitution
+		// walking for a data leaf's own text is a separate, engine-level
+		// concern this rule never touches (it has no Substitutions reference
+		// anywhere), so skipping it here loses no check.
+		if pc.PipelineID == -1 {
+			continue
+		}
 		basename := filepath.Base(pc.Executable)
 		// The variables THIS SAME command establishes for leaf i (pg2-yeli3, wiring
 		// the pg2-wq3ki InCommandVars/ExpandInCommand seam into the read guard —

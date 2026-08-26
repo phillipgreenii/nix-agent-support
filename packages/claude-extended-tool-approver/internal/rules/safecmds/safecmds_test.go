@@ -185,6 +185,43 @@ func TestSafecmds_Cd_Approve(t *testing.T) {
 	}
 }
 
+// TestSafecmds_DataLeavesAreNeverJudgedAsCommands is the pg2-0h53n regression
+// guard: cmdparse's emitDataSpan produces DATA leaves (PipelineID -1, no
+// Executable) for a `for` word list, a `case` subject word, and an
+// arithmetic/test/let command's embedded substitution — these are merged into
+// the SAME ParsedCommand slice safecmds walks (shellparse.go:150), and MUST
+// be skipped rather than treated as an unrecognized command. Before this fix,
+// filepath.Base("") == "." missed every safe-command map and fell through to
+// the "unknown command" abstain, dragging the WHOLE compound down even when
+// every real command leaf was safe-listed — verified pre-fix: `for i in 1;
+// do true; done` abstained despite `true` being alwaysSafe.
+func TestSafecmds_DataLeavesAreNeverJudgedAsCommands(t *testing.T) {
+	pe := patheval.New("/home/user/project")
+	r := New(pe)
+	commands := []string{
+		// for: the word list ("1", "a b c") is the data leaf.
+		"for i in 1; do true; done",
+		"for i in a b c; do echo $i; done",
+		"for i in 1 2; do true; true; done",
+		// case: the subject word ("$x") is the data leaf.
+		"case $x in a) true;; *) false;; esac",
+		// arithmetic/test/let: pure data leaves, no command of their own.
+		"(( 1 + 1 )); true",
+		"[[ -n foo ]] && true",
+	}
+	for _, cmd := range commands {
+		input := &hookio.HookInput{
+			ToolName:  "Bash",
+			CWD:       "/home/user/project",
+			ToolInput: mustJSON(map[string]string{"command": cmd}),
+		}
+		got := hookio.Verdict(r.Evaluate(input))
+		if got.Decision != hookio.Approve {
+			t.Errorf("cmd %q: got %s (%s), want approve (data leaf must not abstain the compound)", cmd, got.Decision, got.Reason)
+		}
+	}
+}
+
 // TestSafecmds_Base64_Commands is the pg2-51v0k regression guard for base64's
 // membership in safeReadCmds (safecmds.go's `alwaysSafe`-vs-`safeReadCmds`
 // doc on the "base64" entry explains why it landed in THIS map, not
