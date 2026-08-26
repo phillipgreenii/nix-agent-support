@@ -179,6 +179,70 @@ func TestIsolate_linksPrecommitConfig(t *testing.T) {
 	}
 }
 
+func TestIsolate_precommitPresentOnReuse(t *testing.T) {
+	repo := newRepo(t)
+	target := filepath.Join(t.TempDir(), "generated-config.yaml")
+	if err := os.WriteFile(target, []byte("repos: []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// canonical clones carry a gitignored SYMLINK to the nix-generated config
+	src := filepath.Join(repo, ".pre-commit-config.yaml")
+	if err := os.Symlink(target, src); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Isolate(context.Background(), run.CLIRunner{}, Params{RepoPath: repo, BeadID: "pg2-xb"}); err != nil {
+		t.Fatal(err)
+	}
+	out, err := Isolate(context.Background(), run.CLIRunner{}, Params{RepoPath: repo, BeadID: "pg2-xb"})
+	if err != nil {
+		t.Fatalf("second Isolate: %v", err)
+	}
+	if out.Reused != "worktree" {
+		t.Errorf("Reused = %q, want worktree", out.Reused)
+	}
+	if out.Precommit != "present" {
+		t.Errorf("Precommit = %q, want present (already-linked config on a reused worktree)", out.Precommit)
+	}
+}
+
+func TestIsolate_danglingPrecommitLinkIsRepointed(t *testing.T) {
+	repo := newRepo(t)
+	target := filepath.Join(t.TempDir(), "generated-config.yaml")
+	if err := os.WriteFile(target, []byte("repos: []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// canonical clones carry a gitignored SYMLINK to the nix-generated config
+	src := filepath.Join(repo, ".pre-commit-config.yaml")
+	if err := os.Symlink(target, src); err != nil {
+		t.Fatal(err)
+	}
+	out, err := Isolate(context.Background(), run.CLIRunner{}, Params{RepoPath: repo, BeadID: "pg2-xc"})
+	if err != nil {
+		t.Fatalf("Isolate: %v", err)
+	}
+	// Break the WORKTREE's link (not the canonical one) by repointing it at a
+	// nonexistent target — this is the shape a half-finished/corrupted worktree
+	// link takes, and it must be REPAIRED, not mistaken for "present".
+	wtCfg := filepath.Join(out.Worktree, ".pre-commit-config.yaml")
+	if err := os.Remove(wtCfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("/nonexistent/target", wtCfg); err != nil {
+		t.Fatal(err)
+	}
+	out2, err := Isolate(context.Background(), run.CLIRunner{}, Params{RepoPath: repo, BeadID: "pg2-xc"})
+	if err != nil {
+		t.Fatalf("second Isolate: %v", err)
+	}
+	if out2.Precommit != "linked" {
+		t.Errorf("Precommit = %q, want linked (a dangling link must be repointed, never read as present)", out2.Precommit)
+	}
+	got, err := os.Readlink(wtCfg)
+	if err != nil || got != src {
+		t.Errorf("worktree config link = %q, %v; want repointed to canonical %q", got, err, src)
+	}
+}
+
 func TestIsolate_detachedWorktreeAtPathConflicts(t *testing.T) {
 	repo := newRepo(t)
 	sha := strings.TrimSpace(gitTest(t, repo, "rev-parse", "HEAD"))
