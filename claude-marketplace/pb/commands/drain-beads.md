@@ -3,8 +3,8 @@ disable-model-invocation: true
 description: >-
   Autonomously drain this pn-workspace's beads queue as an orchestrator: loop
   claim → isolate → delegate the implementation to a subagent → validate → land
-  (via the repo's declared integrate-branch strategy — local ff-merge, or push +
-  draft PR) → close, cooperating with other concurrent /drain-beads
+  via a lander subagent (via the repo's declared integrate-branch strategy —
+  local ff-merge, or push + draft PR) → close, cooperating with other concurrent /drain-beads
   sessions via atomic claims. Post-deploy verification is handled by a
   `pn:applied` gate on a verification child bead (or, where no such gate could ever
   resolve, by a `human` verification child) — never by labeling the IMPLEMENTATION
@@ -30,19 +30,12 @@ This is what lets you loop for a long time without exhausting context.
 Pick a STABLE, UNIQUE id and pass it as `--actor` on EVERY `bd`
 claim/unclaim/gate/close so your ownership never collides with another session:
 
-- Prefer `$CLAUDE_SESSION_ID` (stable across compaction). If unset, use the UUID
-  from your session's OWN private path (e.g. your per-session scratchpad dir) —
-  that is unique per session; do NOT derive it from the shared workspace root, or
-  two sessions would pick the same id. Last resort: generate a full random UUID
-  and remember it. **Append a `-drain` suffix to whichever id you derive**
-  (operator ruling, `pg2-mcp1j`): `CLAUDE_SESSION_ID` is unset and
-  `$CLAUDE_CODE_SESSION_ID` is IDENTICAL to the parent session's when this
-  command is run from a dispatched subagent, so without the suffix a subagent
-  following this guidance derives its ORCHESTRATOR'S OWN actor id — its `bd`
-  writes become indistinguishable from the parent's in the audit trail, and any
-  post-hoc ownership guard becomes a no-op (the ids already match, so nothing
-  changes). The suffix is what makes ownership checks meaningful at all, whether
-  this command runs standalone or as a dispatched subagent.
+- Prefer `$CLAUDE_SESSION_ID` (stable across compaction), else the UUID from
+  your session's OWN private path (e.g. your scratchpad dir — never the shared
+  workspace root, or two sessions collide), else a fresh random UUID.
+  **Append a `-drain` suffix to whichever id you derive** (operator ruling,
+  `pg2-mcp1j`) — without it a dispatched subagent would derive its
+  ORCHESTRATOR'S OWN actor id, making ownership checks a no-op.
 
 Refer to it below as ID. (Across a full process restart your id may change; the
 resume step then won't find an earlier-claimed bead.)
@@ -66,27 +59,18 @@ the loop ends cleanly while they wait, and they resurface after the next
 
 ### Unpushed commits when you STOP
 
-Where the resolved strategy is `ff-merge-to-main` you LAND locally and never push, so
-every bead you closed added commits to local `main` that this session did NOT
-publish. That is EXPECTED and is NOT a problem worth the operator's attention, so
-**REPORT NOTHING ABOUT IT** — no heading, no `pn workspace doctor` output, no
-per-repo counts, no remediation sequence. Do not run the probe just to have something
-to say. A repo whose resolved strategy is `pull-request` leaves no unpushed debt at
-all — there the push IS the landing. Full contract: the always-on
-`Unpushed Landing Debt` rules (**U-1..U-6**).
+Where the resolved strategy is `ff-merge-to-main` you LAND locally without
+pushing, so every closed bead adds unpublished commits to local `main`. That is
+EXPECTED — **REPORT NOTHING ABOUT IT** (no heading, no probe output, no counts,
+no remediation sequence) unless being unpublished BLOCKS the work itself, which
+earns ONE line. A `pull-request` repo leaves no such debt (the push IS the
+landing). Never push to clear it — read-only probes only, never `--fix` (U-4,
+U-5). Full contract: the always-on `Unpushed Landing Debt` rules (**U-1..U-6**).
 
-The ONE exception is a CONSEQUENCE for the work itself: if being unpublished
-BLOCKS it — e.g. a consumer flake pins these repos as `github:` inputs, so a
-closed bead's change cannot take effect on apply until they are pushed and
-relocked — say that in ONE line and stop there. Still do not push (U-5); if you
-probe at all, it is read-only, never `--fix` (U-4).
-
-Do NOT `bd create` anything for this either way. There is deliberately NO
-standing push bead: `pg2-5subz` became one by accident and nearly orphaned 11
-commits, and `pg2-dawg2` replaced it, pushed all 12, and closed correctly — after
-which the debt regenerated within a day. A bead describes one instant; the probe
-describes now. If you find a standing push bead, report it as this defect (U-2)
-rather than updating it.
+Do NOT `bd create` anything for this either way — there is deliberately NO
+standing push bead (provenance: `pg2-5subz`, `pg2-dawg2`); the debt regenerates
+on every land. If you find a standing push bead, report it as this defect
+(U-2) rather than updating it.
 
 ## Startup / resume (survives compaction)
 
@@ -147,70 +131,95 @@ rather than updating it.
    (see "Optional scope arguments"); they never remove `--exclude-label human` or the
    deferred exclusion.
 
-2. **UNDERSTAND** (brief — keep it light to save context): `bd show <id>` to learn
-   the target repo(s) and the acceptance criteria. Note whether any acceptance
-   criterion can only be confirmed once the change is LIVE on the machine. If the
-   bead is a HANDOFF POINTER holding no executable work of its own — a
+2. **UNDERSTAND** (orchestrator reads the BEAD ONLY): `bd show <id>` to learn the
+   target repo(s), whether the work spans repos, and whether any acceptance
+   criterion can only be confirmed once the change is LIVE. You MUST NOT Read any
+   file, plan, spec, or doc the bead references — those are the implementation
+   subagent's to read (measured: one session read the same referenced plan doc
+   eight times to compose briefs, ~20K tokens of pure duplication). Record the
+   referenced paths; step 4 passes them through as pointers.
+   If the bead is a HANDOFF POINTER holding no executable work of its own — a
    `session-wrapup` `Resume: …` / next-session bead, born P0 to let one session
-   resume cold — do NOT ISOLATE or DELEGATE it: take
-   **CLOSE-WITH-ABSORPTION-TRACE** below.
+   resume cold — do NOT ISOLATE or DELEGATE it: invoke the
+   `pb:drain-absorb-pointer` skill with the bead id and your actor ID, follow it
+   to the close, then return to CLAIM.
 
-3. **ISOLATE** off local main (never work a primary branch directly). Name it by
-   the bead id so concurrent sessions never collide and a parked bead is
-   resumable:
-   - Single repo → git worktree at `.worktrees/<id>` on branch `drain/<id>`
-     (branch off local main). If that worktree/branch already exists (a
-     parked/resumed bead), REUSE it.
+3. **ISOLATE** off local main (never work a primary branch directly):
+   - Single repo → ONE call:
+
+     ```bash
+     pb drain isolate --bead <id> --repo <abs-canonical-clone-path>
+     ```
+
+     It reuses an existing worktree or parked branch, otherwise creates
+     `.worktrees/<id>` on `drain/<id>` off the repo's primary branch, and links
+     the nix-generated pre-commit config into the worktree. Exit 0 → proceed
+     (the output line names the worktree). Exit 3 → conflicting isolation state
+     (someone else's checkout) — do NOT force anything; route to STUCK. Any
+     other failure → transient-vs-genuine per the Rules.
+
    - Multiple repos → a coordinated set via the
      `pn-workspace-rules:fork-workforest` skill, keyed to the bead id.
 
 4. **DELEGATE THE WORK** to a subagent (REQUIRED — this preserves your context).
-   Dispatch ONE subagent with: the bead id, its `bd show` details, and the
-   worktree/set path. Instruct it to:
-   - implement the bead inside THAT worktree/set only, following repo conventions;
-   - COMMIT the change onto that worktree's branch AS SOON AS it is ready, THEN run
-     whatever gate still needs to run standalone — never the other order. This is
-     safe: drain never LANDS anything until the orchestrator VALIDATES and LANDS it
-     (steps 5–6), so a gate that turns red AFTER the commit is handled by amending
-     that commit or parking the bead, never by having withheld the commit. The
-     commit's OWN pre-commit hook run — scoped to its diff, `prek run --files <the
-files it changed>` (or `pre-commit run --files …`), NOT `--all-files` (which
-     re-runs every hook over the whole repo and can false-block on a pre-existing
-     violation the subagent never touched) — if `.pre-commit-config.yaml` exists,
-     IS the first gate and is folded into making the commit; ONLY THEN run any gate
-     that commit did not already cover — `nix flake check` / `pn workspace build`
-     (nix repos), and the repo's tests, including a slow full suite that must be
-     backgrounded to outlive a bounded turn. Committing first means an interrupted,
-     timed-out, or prematurely-yielding subagent always leaves durable, COMMITTED
-     work behind — never a dirty worktree only the orchestrator can rescue (bead
-     `tc-xhq6`);
-   - NOT claim/close the bead, NOT land/merge, NOT touch any other worktree, NOT
-     create gates;
-   - CLASSIFY the outcome and return a SHORT structured report with status one of:
-     - `done` — implemented, all gates PASS, and every acceptance criterion is
-       confirmable NOW (nothing requires the change to be live).
-     - `done-pending-apply-verification` — implemented, all pre-apply gates PASS,
-       but one or more acceptance checks can only be confirmed once the change is
-       APPLIED to the live machine. MUST enumerate the concrete post-deploy checks
-       (what to run/observe after apply). If it cannot name them, it is NOT this
-       status — it is `stuck`.
-     - `stuck` — underspecified, needs a human decision, or the pre-apply gates
-       cannot be made to pass.
-     - `needs-more-repos` — the change must span additional repos.
+   The brief is a POINTER, not a payload. It MUST contain exactly:
+   - the bead id, with the instruction to run `bd show <id>` ITSELF for the full
+     description and acceptance criteria;
+   - the absolute repo root and the worktree/set path (state the root once —
+     A-3);
+   - the paths of any docs the bead references, with the instruction to read
+     them ITSELF from inside the worktree;
+   - the standing constraints: explicit timeouts or `run_in_background` for
+     builds/checks (L-3); never `run_in_background` for git commits; COMMIT the
+     change onto that worktree's branch AS SOON AS it is ready, THEN run
+     whatever gate still needs to run standalone — never the other order (this
+     is safe: drain never LANDS anything until the orchestrator VALIDATES and
+     LANDS it in steps 5–6, so a gate that turns red after the commit is
+     handled by amending that commit or parking the bead, never by having
+     withheld the commit — bead `tc-xhq6`); report fully in ONE turn (no
+     waiting/monitoring across turns).
 
-     A report is NEVER just "waiting" or "still running" with no other content —
-     that has cost a drain session ~856k subagent tokens for zero delivered report
-     while 18 files sat uncommitted (`tc-xhq6`). If a gate you started (a
-     backgrounded slow test suite, or the commit's own pre-commit hook run) is
-     still resolving when you must end your turn, your report MUST still include
-     everything already COMMITTED — the commit SHA, which per the ordering above
-     should almost always exist by the time any standalone gate runs — PLUS the
-     EXACT gate command still pending and how to check it (a sentinel path, a
-     `Monitor` target). The orchestrating session cannot resume this work without
-     at least a commit SHA to anchor on.
+   The brief MUST NOT transcribe the bead description, doc content, or plan
+   steps — if you are pasting more than paths and ids, you are doing the
+   subagent's reading for it.
 
+   Instruct it to: implement inside THAT worktree/set only, following repo
+   conventions; COMMIT as soon as the change is ready — the commit's OWN
+   pre-commit hook run, scoped to its diff (`prek run --files <the files it
+changed>` / `pre-commit run --files …`, never `--all-files`, which re-runs
+   every hook over the whole repo and can false-block on a pre-existing
+   violation the subagent never touched), IS the first gate and is folded into
+   making the commit if `.pre-commit-config.yaml` exists — ONLY THEN run any
+   gate the commit did not already cover (`nix flake check` / `pn workspace
+build` for nix repos, and the repo's tests, including a slow full suite
+   backgrounded to outlive a bounded turn); NOT claim/close the bead, NOT
+   land/merge, NOT touch any other worktree, NOT create gates; and CLASSIFY the
+   outcome as one of the four statuses below (the kept `also include:` line
+   carries the gate-evidence and repos-touched requirements).
+   - `done` — implemented, all gates PASS, and every acceptance criterion is
+     confirmable NOW (nothing requires the change to be live).
+   - `done-pending-apply-verification` — implemented, all pre-apply gates PASS,
+     but one or more acceptance checks can only be confirmed once the change is
+     APPLIED to the live machine. MUST enumerate the concrete post-deploy checks
+     (what to run/observe after apply). If it cannot name them, it is NOT this
+     status — it is `stuck`.
+   - `stuck` — underspecified, needs a human decision, or the pre-apply gates
+     cannot be made to pass.
+   - `needs-more-repos` — the change must span additional repos.
+
+   A report is NEVER just "waiting" or "still running" with no other content —
+   that has cost a drain session ~856k subagent tokens for zero delivered report
+   while 18 files sat uncommitted (`tc-xhq6`). If a gate you started (a
+   backgrounded slow test suite, or the commit's own pre-commit hook run) is
+   still resolving when you must end your turn, your report MUST still include
+   everything already COMMITTED — the commit SHA, which per the ordering above
+   should almost always exist by the time any standalone gate runs — PLUS the
+   EXACT gate command still pending and how to check it (a sentinel path, a
+   `Monitor` target). The orchestrating session cannot resume this work without
+   at least a commit SHA to anchor on.
    - also include: what changed, the gate commands + their pass/fail evidence, and
-     repos touched. The subagent lands nothing — YOU land.
+     repos touched. The implementation subagent lands nothing — the LANDER
+     subagent (step 6) does.
 
    Re-dispatch with guidance if the report is incomplete. If it reports
    `needs-more-repos`, re-ISOLATE as a `pn-workspace-rules:fork-workforest` set and
@@ -220,20 +229,43 @@ files it changed>` (or `pre-commit run --files …`), NOT `--all-files` (which
    either `done` or `done-pending-apply-verification`. If a gate fails, or the
    status is `stuck` → STUCK.
 
-6. **LAND** by the strategy the REPO declares — never a hardcoded local ff-merge.
-   Keep landing in THIS session — the skills need persistent shell/cwd state:
-   - Single repo → invoke the `integrate-branch:integrate-branch` skill and let IT
-     resolve the strategy. You MUST NOT name a handler: the dispatcher reads
-     `pgii-integrate-branch.strategy` (already set per repo by the workspace's
-     `post-clone` hooks — no setup step of yours) and dispatches
-     `integrate-branch:ff-merge-to-main`, `integrate-branch:pull-request`, or a
-     declared custom handler. Naming a handler hardcodes ff-merge and makes this
-     command UNUSABLE in a `pull-request` repo (a protected-`main` monorepo, where an
-     `--ff-only` merge into local `main` would land unreviewed commits past the PR,
-     CODEOWNERS and CI).
-   - Workforest set → invoke the `pn-workspace-rules:land-workforest` skill; it is
-     itself a per-repo orchestrator over the same dispatcher, so each member repo
-     lands by ITS OWN strategy.
+6. **LAND via a dedicated LANDER SUBAGENT** — dispatched synchronously, ONE at a
+   time, never in parallel with another land and never fanned out. Landing must
+   go through the repo-declared strategy, so the lander invokes the dispatcher
+   itself in its own context (a subagent has its own persistent shell; keeping
+   the ~37KB of dispatcher+handler skill text out of YOUR context is the point).
+
+   The lander brief MUST contain: the bead id; the absolute canonical repo root;
+   the worktree path and branch `drain/<id>`; and these instructions:
+   - invoke the `integrate-branch:integrate-branch` skill and let IT resolve the
+     strategy — NEVER name a handler (naming one hardcodes ff-merge and breaks
+     `pull-request` repos). For a workforest set, invoke
+     `pn-workspace-rules:land-workforest` instead;
+   - a lost FAST-FORWARD RACE or a REJECTED NON-FAST-FORWARD PUSH is TRANSIENT:
+     re-rebase and re-invoke, at most 3 attempts, then report `stopped:` with
+     the reason;
+   - MUST NOT merge any PR, MUST NOT push any primary branch, MUST NOT use
+     `run_in_background` for git operations, and MUST report fully in ONE turn;
+   - return a structured report: `outcome` (`landed` | `pr-opened` |
+     `pr-updated` | `stopped:<reason>`), the landed/pushed SHA per changed repo
+     (the tip of `drain/<id>` — NOT a re-read of the shared primary branch,
+     which a peer may have advanced), and the PR number + URL when applicable.
+
+   VERIFY the verdict with ONE observation of your own before recording — the
+   report is a subagent's prose, not evidence:
+   - `landed` →
+     `git -C <repo> merge-base --is-ancestor drain/<id> <primary>; echo $?`
+     must print 0, and take the gate SHA from
+     `git -C <repo> rev-parse drain/<id>` YOURSELF rather than from the report
+     (never from the shared primary branch, which a peer may have advanced).
+   - `pr-opened` / `pr-updated` → `gh pr view <n> --json state,isDraft` must
+     show OPEN and draft; record the pushed head from
+     `git -C <repo> rev-parse drain/<id>`.
+
+   A verdict that fails its check is `stopped:<unverified>` — never record it
+   as landed. What "LANDED" means per strategy, the pre-authorized-push rule
+   for `pull-request` repos, and the draft-PR requirements are unchanged (kept
+   verbatim below).
 
    **What "LANDED" means depends on the resolved strategy.** Record whichever the
    handler reports:
@@ -261,24 +293,18 @@ files it changed>` (or `pre-commit run --files …`), NOT `--all-files` (which
    declaring `pgii-integrate-branch.strategy = pull-request` for that repo.
 
    If landing returns `stopped:` due to a lost FAST-FORWARD RACE (another session
-   advanced local main first), that is TRANSIENT: re-rebase and re-invoke LAND a
-   few more times (short backoff) before giving up. The `pull-request` analogue is a
-   REJECTED NON-FAST-FORWARD PUSH (a peer advanced the remote `drain/<id>`): also
-   TRANSIENT — rebase onto the UPDATED REMOTE branch and re-invoke LAND a few more
-   times. Only route to STUCK for a GENUINE stop (rebase-conflict,
-   `stopped:ambiguous-remote`, `stopped:no-pr-host`, or a canonical off-primary/dirty
-   halt). A canonical off-primary/dirty clone halts only a canonical-ADVANCING
-   strategy: the `pull-request` handler's PR-0 SURFACES that anomaly and PROCEEDS,
-   because it never reads or writes the canonical clone (R-8's carve-out). Under
+   advanced local main first), that is TRANSIENT: re-dispatch the lander at most
+   ONCE more (it already retried 3× internally); a second failure is a GENUINE
+   stop → STUCK. The `pull-request` analogue is a REJECTED NON-FAST-FORWARD PUSH (a
+   peer advanced the remote `drain/<id>`): also TRANSIENT — rebase onto the
+   UPDATED REMOTE branch and re-dispatch the lander at most ONCE more (it already
+   retried 3× internally); a second failure is a GENUINE stop → STUCK. Only route
+   to STUCK for a GENUINE stop (rebase-conflict, `stopped:ambiguous-remote`,
+   `stopped:no-pr-host`, or a canonical off-primary/dirty halt). A canonical
+   off-primary/dirty clone halts only a canonical-ADVANCING strategy: the
+   `pull-request` handler's PR-0 SURFACES that anomaly and PROCEEDS, because it
+   never reads or writes the canonical clone (R-8's carve-out). Under
    `pull-request` it MUST therefore be reported and NOT treated as a stop.
-
-   After a successful land, RECORD the SHA per changed repo — the merged commit for
-   `ff-merge-to-main`, the pushed head for `pull-request`. Use the SHA the
-   `integrate-branch:integrate-branch` / `pn-workspace-rules:land-workforest` skill
-   reports (equivalently, the tip of the feature branch, e.g.
-   `git -C <repo> rev-parse drain/<id>`). Do NOT re-read the shared primary branch
-   (`rev-parse main`): a peer session may have advanced it, which would gate the
-   child on the wrong change. The post-deploy gate keys on this SHA.
 
 7. **FINISH** — branch on the report status.
 
@@ -303,484 +329,101 @@ files it changed>` (or `pre-commit run --files …`), NOT `--all-files` (which
    - `done`: CLEANUP the worktree (for a set,
      `pn-workspace-rules:cleanup-workforest`), then
      `bd close <id> --reason "<short note>" --actor "ID"`.
-   - `done-pending-apply-verification`: attach the post-deploy gate (see
-     **POST-DEPLOY VERIFICATION GATE** below) instead of labeling `human`. ONLY
-     after the child bead is fully gated and un-deferred, CLEANUP the worktree,
-     then
-     `bd close <id> --reason "implemented + gates pass + landed; post-deploy verification gated as <child> (pn:applied)" --actor "ID"`.
-     If gating did NOT complete (any `pb gate create` failed), do NOT close `<id>`
-     — route it to STUCK instead. Where that section says the gate path does NOT
-     APPLY (a non-pn-workspace repo, or resolved strategy `pull-request`), take its
-     `human`-child FALLBACK instead and close `<id>` naming that child and the PR:
-     STUCK is for a gate creation that FAILED, not for a repo where gating is
-     structurally impossible.
+   - `done-pending-apply-verification`: run `pb gate attach-verified-child` per
+     **POST-DEPLOY VERIFICATION GATE** below; exit 0 → cleanup + close; exit 3/4
+     → do NOT close, route to STUCK.
 
 8. Go to 1.
 
 ## POST-DEPLOY VERIFICATION GATE (use INSTEAD of `human` for deploy-only tails)
 
-When a bead is implemented, its pre-apply gates PASS, and it has LANDED, but the
-only thing left is confirming it works on the LIVE machine (subagent status
-`done-pending-apply-verification`), DO NOT label it `human`. Attach a `pn:applied`
-gate to a fresh verification child bead. The gate holds that child out of
-`bd ready` until a `pn workspace apply` actually applies the change; the apply's
-post-hook (`pb gate check`) then resolves it and the child surfaces as ordinary
-work for a later session (or a human) to run the live checks. A gate left
-unapplied past its stale window auto-converts to a `human` bead — so even the
-failure mode escalates to a person without you pre-labeling one.
+When a bead is implemented, its pre-apply gates PASS, and it has LANDED, but
+the only thing left is confirming it works on the LIVE machine (subagent status
+`done-pending-apply-verification`), DO NOT label it `human`. Attach a
+`pn:applied` gate to a fresh verification child bead — ONE call, which runs the
+whole deferred-first sequence (create the child DEFERRED → prove it is absent
+from `bd ready` → attach every gate → un-defer → re-prove absence → comment the
+link on the impl bead):
+
+```bash
+pb gate attach-verified-child \
+  --impl <impl-id> \
+  --title "verify <thing> works after apply (<impl-id>): <concrete checks>" \
+  --gate <repo-key>=<landed-sha> \
+  --actor "ID"
+# one --gate per changed repo; the child unblocks only when ALL are applied
+```
+
+Pin `<landed-sha>` to the SHA the lander reported — never HEAD (a peer may have
+advanced it). Branch on the exit code:
+
+- `0` → fully gated; the output names the child. CLEANUP per FINISH, then close
+  the impl bead naming the child.
+- `0` with a `comment failed` warning on stderr (JSON: `"comment_failed": true`)
+  → gating is complete and safe, but the provenance link was not recorded:
+  record it yourself —
+  `bd comment <impl-id> "post-deploy verification gated as <child> (pn:applied)." --actor "ID"`
+  — before closing.
+- `3` → gating INCOMPLETE and the child was left DEFERRED (safe — no peer can
+  claim it). Do NOT close the impl bead; route it to STUCK naming the child.
+- `4` → the child could NOT be proven un-workable. Do NOT close the impl bead;
+  route it to STUCK and say so in the park comment — a peer could otherwise
+  claim the child and "verify" unapplied code.
+- `1` with `is not in workspace` in the error → an INVOCATION mistake, not a
+  transient: a mistyped `--gate` repo key (fix it and re-run — nothing was
+  created), or a repo genuinely outside the workspace (take the FALLBACK below
+  instead).
+- any other non-zero → transient-vs-genuine per the Rules; retry once, then
+  STUCK.
+
+The gate resolves via `pn workspace apply`'s post-hook (`pb gate check`); a
+gate left unapplied past its stale window auto-converts to a `human` bead. Gate
+semantics, stale handling, and the squash-merge prohibition:
+the `pb:pb-gate-lifecycle` skill.
 
 **SCOPE — this gate path applies ONLY when the changed repo is a `pn workspace`
-MEMBER and its resolved strategy is `ff-merge-to-main`.** `pb gate create` resolves
-`--repo` through `pn workspace info` and fails
-(`repo "<x>" is not in workspace "<root>"`) for anything outside it, so in a repo with
-no `pn-workspace.toml` a `pn:applied` gate can NEVER be created — and even if it
-could, nothing there ever runs `pn workspace apply` / `pb gate check` to resolve one,
-so it would sit until it stale-converted. A `pull-request` repo is excluded for a
-second, independent reason: the `pb:pb-gate-lifecycle` skill's own squash-merge rule —
-an upstream squash rewrites the patch-id, so the gate can never auto-resolve.
+MEMBER and its resolved strategy is `ff-merge-to-main`.** `pb gate create`
+cannot resolve `--repo` outside the workspace, and a squash-merged PR rewrites
+the patch-id so a gate could never auto-resolve (provenance: the
+`pb:pb-gate-lifecycle` skill).
 
 **FALLBACK when the gate path does NOT apply** (repo outside a pn-workspace, or
-resolved strategy `pull-request`). This outcome MUST still TERMINATE: you MUST NOT
-attempt `pb gate create`, MUST NOT route the bead to STUCK, and MUST NOT leave the
-verification tail unrecorded. File the verification child as a `human` bead instead —
-CORRECT under **D-1**, because what stands between the code and the live machine is a
-PERSON's out-of-band action (merging the draft PR, then that repo's own deploy), not
-another bead:
+resolved strategy `pull-request`): file the verification child as a `human`
+bead instead — CORRECT under **D-1**, because a PERSON's out-of-band action
+(merging the draft PR, then deploying) stands between the code and the live
+machine:
 
 ```bash
 bd create "verify <thing> works once <pr-url> is merged and deployed (<impl-id>): <concrete checks>" \
   --labels human --deps "discovered-from:<impl-id>" --actor "ID" --json
-# capture the new id as <child>. No --defer and NO gate: nothing here would resolve one.
+# capture the id as <child>. No --defer and NO gate: nothing here would resolve one.
 ```
 
-Born ready-and-`human`, it is invisible to drain's `--exclude-label human` claim query
-and visible to `/unblock-human-beads` immediately — which is intended, not noise: the
-operator is the one who merges the PR, so "merge this, then verify" is exactly the
-work being handed over. Then CLEANUP per FINISH step 7 (for `pull-request`, KEEP the
-isolation) and close the impl bead with a reason naming `<child>` and the PR.
-
-Follow the `pb:pb-gate-lifecycle` skill's sequence — with `--commit <landed-sha>`
-pinned instead of the skill's `HEAD` default, for concurrency-safety (a peer may
-have advanced HEAD). The change is already committed + landed (step 6), so the
-patch-id exists. Do these IN ORDER — deferred-first is mandatory: it closes the
-fleet-claim race, so the child is never both workable and ungated.
-
-1. Create the verification child, born non-workable and linked to the impl bead
-   for provenance:
-
-   ```bash
-   bd create "verify <thing> works after apply (<impl-id>): <concrete checks>" \
-     --defer 2126-01-01 --deps "discovered-from:<impl-id>" --actor "ID" --json
-   # capture the new id as <child>
-   # far-future ABSOLUTE date: --defer takes --due's formats, which have NO y unit
-   ```
-
-2. CONFIRM the child is NOT WORKABLE — by READINESS, never by reading `status`.
-   NEITHER field is a usable check: on `bd 1.2.2 (dev)`, `bd create --defer` returns
-   `status: deferred` with the defer in `defer_until` (observed 2026-08-21; an earlier
-   2026-08-13 observation of `status: open` has since drifted), while `deferred_until`
-   reads `null` in the `bd show --json` projection — so which field carries the truth
-   has already changed once underneath this instruction, and a field read reports a
-   FALSE failure. That false reading is dangerous: the "repair" for it is to drop or
-   re-order the mandatory deferred-first step, which OPENS the fleet-claim race. Assert
-   the OUTCOME the ordering exists to produce (**P-1**):
-
-   ```bash
-   # -n 0: bd ready caps at 100 rows by default, so a capped query proves nothing.
-   # NO --exclude-label human: absence would then prove the LABEL, not the defer.
-   # Positive control = a NON-EMPTY .data: it proves bd ready ran and is not vacuously
-   # empty, so the absence half carries weight. Both halves read ONE snapshot, so the
-   # control cannot pass against a different query than the absence check.
-   # NOT --include-deferred: that flag re-admits only status:open beads with a future
-   # defer_until, never status:deferred ones -- so it can never see the child you just
-   # created, and as a control it would invert the verdict (bead tc-8x45).
-   READY="$(bd ready --json -n 0)"
-   jq -e '(.data // []) | length > 0' <<<"$READY" >/dev/null &&
-     jq -e --arg id "<child>" 'all(.data[]?; .id != $id)' <<<"$READY" >/dev/null &&
-     echo "OK: <child> is not workable" || echo "FAIL: <child> is workable, or bd ready is broken -- do NOT gate"
-   ```
-
-   On FAIL — the child is present in `bd ready`, or `bd ready` itself came back empty or
-   erroring, in which case its absence proves nothing — do NOT attach gates. Re-apply
-   the defer with `bd update <child> --defer 2126-01-01 --actor "ID"` and re-check; if
-   it stays workable, do NOT close the impl bead — route the impl bead to STUCK.
-
-3. Attach a gate on the landed commit — one per changed repo — and CONFIRM each
-   succeeds:
-
-   ```bash
-   pb gate create --blocks <child> --repo <repo-key> --commit <landed-sha> \
-     --reason "post-deploy verify for <impl-id>"
-   ```
-
-   One gate for a single-repo bead; for a cross-repo/workforest bead, create one
-   gate per changed repo — the child unblocks only when ALL are applied.
-
-4. ONLY IF every gate above was created successfully, make the child workable (the
-   gates now hold it out of `bd ready`):
-
-   ```bash
-   bd update <child> --defer "" --actor "ID"
-   ```
-
-   Then re-run step 2's check IN FULL: the child MUST still be absent from `bd ready`.
-   The positive control still applies unchanged — it tests the QUERY, not the defer —
-   and the gates, not a defer, are now what hold the child.
-
-   If ANY `pb gate create` failed: leave the child DEFERRED (do NOT un-defer), do
-   NOT close the impl bead, and route the impl bead to STUCK so a human resolves
-   it. NEVER un-defer a child that is not fully gated — a peer draining `bd ready`
-   would claim it and "verify" against not-yet-applied code.
-
-5. Record the link on the implementation bead:
-
-   ```bash
-   bd comment <impl-id> "post-deploy verification gated as <child> (pn:applied)." --actor "ID"
-   ```
-
-Single-commit gating (`--commit <sha>`) is what you want here. The `--ff-only`
-merge itself rewrites nothing, so it preserves the patch-id; note the rebase in
-step 6 can, rarely, land another change within the gated hunk's ~3-line diff
-context and shift the patch-id (the gate then falls to stale-handling). NEVER
-squash-merge a gated change — a squash rewrites the patch-id and the gate can
-never auto-resolve.
-
-## STUCK — cannot complete a claimed bead (LAST RESORT: escalate to a human)
-
-`human` means A PERSON IS THE BLOCKER. It is the LAST RESORT, for work a person
-must move forward — never a generic "not workable right now" park. Do NOT use it
-merely because final acceptance needs the change deployed (that is the POST-DEPLOY
-VERIFICATION GATE's job), and do NOT use it because ANOTHER BEAD must finish first
-(that is a DEPENDENCY — step 3).
-
-Triggers: underspecified / needs a human decision; the pre-apply gates cannot be
-made to pass; landing returns a GENUINE `stopped:<reason>` (not a transient ff-race
-or rejected non-ff push); a post-deploy gate could not be attached; repeated failed
-attempts.
-NOT a trigger: "another bead has to land first".
-
-Step 1 only PRESERVES the work; the park that goes in front of a human is the
-COMMENT + `human` label in steps 6–7. Steps 2 and 3 stand between the two
-deliberately, and each has its OWN exit that is not a park: a bead whose premise
-the probes prove MOOT leaves via **CLOSE-AS-MOOT**, and a bead whose live blockers
-are all OTHER BEADS leaves via **CONVERT-TO-DEPENDENCY**. Reaching step 4 means a
-person really is the blocker.
-
-1. PARK the change (do NOT discard it). KEEP the isolated worktree/branch — do NOT
-   clean it up; the park IS leaving it in place. If the WIP commits cleanly, commit
-   it on branch `drain/<id>` with a `WIP (parked): <id> <why>` message; if
-   pre-commit hooks block the commit, leave the changes uncommitted in the retained
-   worktree (do NOT use `--no-verify`).
-2. FRESHNESS CHECK — re-verify the bead's PREMISE against CURRENT reality BEFORE you
-   write any park comment or apply any label. The bead body is a snapshot from FILING
-   time and the reason you are stuck may already be answered: in one pass over the
-   parked queue, 5 of 9 beads were already resolved or void. Follow the always-on
-   `Premise Freshness` rules (F-1..F-8) and run the NAMED PROBES from F-3 — one per
-   external referent this bead names — keeping each decisive output verbatim:
-   - `landed?` / `pushed?` / `patch-identical?` for commits and parked branches;
-     `path-exists?` / `symbol-shape?` for the files, modules, and symbols the bead's
-     steps or design edit; `ticket-open?` for external tickets; `sibling-open?` for
-     referenced beads; `next-free-id?` for any "next free" number the bead recorded.
-   - An earlier REVIEW of this bead's plan is NOT a freshness signal (F-6). A reviewed
-     snapshot ages exactly as fast as the snapshot, so "already reviewed" / "looks
-     plan-ready" MUST NOT stand in for running the probes.
-   - An unresolvable probe (`exit 128`, missing repo, referent too vague to probe) reads
-     as STILL LIVE, never as moot (F-4).
-   - Premise STILL LIVE → continue to step 3, and carry this line into the step-6
-     comment so the next reader inherits the check:
-     `FRESHNESS: <ISO date> — <probe>=<decisive output>; <probe>=<decisive output> ⇒ premise LIVE`
-     If the bead names no external referent, record that instead (F-5):
-     `FRESHNESS: <ISO date> — no external referent named ⇒ nothing to re-verify`
-   - Premise PROVABLY MOOT → this bead is answered, not blocked. Do NOT park it and do
-     NOT label it `human`: go to **CLOSE-AS-MOOT** below.
-
-3. CLASSIFY THE BLOCKER — is a PERSON the blocker, or is it ANOTHER BEAD? This is the
-   branch BEFORE the escalation, not a check inside it: drain claims with
-   `--exclude-label human` and `/unblock-human-beads` claims with `--label human`, so
-   the label simultaneously hides the bead from the queue that would work it AND puts
-   it in front of the operator. If you are waiting on another bead, the operator has
-   nothing to answer and the tracker can express the wait exactly. Full contract: the
-   always-on `Blocker Modeling` rules (**D-1..D-8**).
-   - Name every live blocker, then ask of each: could a PERSON clear this now with a
-     decision, an input, an approval, or an out-of-band action? Or must ANOTHER BEAD
-     finish first? Step 2's `sibling-open?` probe already answers the second half for
-     every bead this one names — REUSE those readings rather than inventing a parallel
-     check: `bd show <sib> --json | jq -r '.data[0].status'`. `open` / `in_progress` /
-     `blocked` ⇒ a live blocker. `closed` ⇒ NOT a blocker at all, so it MUST NOT get an
-     edge; if every named bead reads `closed`, the reason you were stuck has already
-     died — go back to step 2 and re-read the premise.
-   - A bead you WISH existed is not a dependency. If the blocking work has no bead, the
-     bead you hold is underspecified or needs a decision — that is a HUMAN blocker. MUST
-     NOT invent a placeholder bead to depend on (**D-1**).
-   - EVERY live blocker is a bead → go to **CONVERT-TO-DEPENDENCY**. Do NOT write a
-     PRECONDITION block, do NOT touch the repeat counter, and do NOT apply `human`:
-     steps 4–9 are the human-escalation path and you are not on it. A prose
-     PRECONDITION is for a condition the tracker CANNOT express; this one it can, and
-     prose about it would rot exactly as **P-1** describes while the graph would not.
-   - ANY live blocker needs a PERSON → continue to step 4. If some blockers are ALSO
-     beads, this is the MIXED case: do CONVERT-TO-DEPENDENCY's step 1 for the bead half
-     first, then come back here and finish the escalation (**D-7**).
-
-4. NAME THE PRECONDITION — only when the park is blocked on something that must
-   become TRUE before the bead is workable (skip it for an underspecified /
-   decision-needed park). What you write here becomes an INSTRUCTION to a later
-   agent and keeps being obeyed long after the implementation it describes has been
-   refactored, so it MUST be drift-detectable:
-   - `PRECONDITION:` MUST state an OBSERVABLE OUTCOME — something a reader can run
-     and see ("`nb` run from a subdirectory opens the Gradle ROOT project"). It MUST
-     NOT state a MECHANISM ("`nb` is a function defined in `~/.zshrc`"): the next
-     refactor makes a mechanism claim permanently false, and every later reader then
-     concludes "not applied yet" and re-parks forever.
-   - `PRECONDITION-KEY:` MUST be a short kebab slug naming that OUTCOME, not this
-     attempt — `nb-opens-gradle-root`, never `nb-check-2` — so a later park blocked
-     on the SAME thing produces the SAME key. Step 5 counts these.
-   - `DERIVED-FROM:` MUST cite the commit and the file(s) you actually read to write
-     the line (`<repo>@<sha> — <path>`), so a later reader can re-derive it and see
-     the drift.
-   - The failure branch MUST be bounded. MUST NOT write "if not yet applied, re-park
-     or wait" with no limit — step 5 IS the limit.
-
-5. DETECT A REPEAT — before commenting, check whether this bead was already parked
-   on the same precondition:
-
-   ```bash
-   bd show <id> --json | jq -r '(.data[0].comments // [])[].text' | rg -o 'PRECONDITION-KEY: .*'
-   ```
-
-   (`comments` is `null` on a bead with none, hence the `// []`; empty output — `rg`
-   exit 1 — means no prior key, NOT a failure.)
-   - The key you are about to write is ABSENT → ordinary park (step 6a).
-   - The key is ALREADY PRESENT — this would be the SECOND park on the same unmet
-     precondition → the precondition itself is the suspect, not the world: escalate
-     it as stale (step 6b + step 7b). There is NO third park on one key.
-   - The bead ALREADY carries the `stale-precondition` label → an earlier staleness
-     escalation was released without resolving it. Write NO precondition block at
-     all: comment plainly what you observed, re-apply `human` (step 7a), and leave
-     `stale-precondition` in place so it stays visible as unresolved.
-
-6. COMMENT what you tried, why you couldn't finish, and where the work is parked so
-   a human can resume. Either form MUST carry the step-2 `FRESHNESS:` line.
-
-   **6a — ordinary park**, carrying the step-4 block when there is a precondition:
-
-   ```bash
-   bd comment <id> "stuck: <what you tried / why>. Parked on branch drain/<id> in <repo> at <worktree-path>.
-   FRESHNESS: <ISO date> — <probe>=<decisive output> ⇒ premise LIVE
-   PRECONDITION: <observable outcome that must hold before this is workable>
-   PRECONDITION-KEY: <stable-outcome-slug>
-   DERIVED-FROM: <repo>@<sha> — <path(s) you read>" --actor "ID"
-   ```
-
-   **6b — staleness escalation** (step 5 found the key). Say it is a repeat, point at
-   the provenance to re-derive, and record what you ACTUALLY observed — do NOT
-   restate the old precondition as though it were fresh:
-
-   ```bash
-   bd comment <id> "stuck (SUSPECTED STALE PRECONDITION): SECOND park on PRECONDITION-KEY <slug>, so the precondition may be unsatisfiable rather than merely unmet. Re-derive it from its provenance (<repo>@<sha> — <path>) against CURRENT source before acting on it. Observed now: <what you ran and saw>. FRESHNESS: <ISO date> — <probe>=<decisive output> ⇒ premise LIVE. Do NOT re-park on this key. Parked on branch drain/<id> in <repo> at <worktree-path>." --actor "ID"
-   ```
-
-7. ESCALATE by labeling for a human (hides the bead from BOTH the claim and the
-   termination query, which use `--exclude-label human`). Reaching here means step 3
-   found a PERSON in the way — if it did not, you are on the wrong path:
-
-   **7a — ordinary park:**
-
-   ```bash
-   bd update <id> --add-label human --actor "ID"
-   ```
-
-   **7b — after a 6b staleness escalation** — both labels in ONE call, so the
-   unblocker recognizes the class mechanically instead of re-reading the churn:
-
-   ```bash
-   bd update <id> --add-label human,stale-precondition --actor "ID"
-   ```
-
-8. UNCLAIM — do this LAST, only after the label (and any step-3 dependency edge) is
-   applied, so no other session can grab it in an unlabeled, unblocked `open` window:
-
-   ```bash
-   bd update <id> --assignee "" --status open --actor "ID"
-   ```
-
-9. Do NOT clean up the parked worktree/branch. Return to step 1 (CLAIM).
-
-## CLOSE-AS-MOOT (STUCK step 2 disproved the premise)
-
-Reached ONLY from a FRESHNESS CHECK whose probes decisively answered the bead's own
-question. The bead is not blocked — it is ANSWERED, so parking it would put a
-non-question in front of the operator. Close it instead. But a moot bead is not
-worthless: stale work often contains a PREDICTION about the code, and a blind close
-throws that away (F-7). EXTRACT first, close second.
-
-1. READ the stale work before discarding it — the bead's description/design, its
-   comments, and any WIP commit on `drain/<id>`. You are looking for a claim it makes
-   that CURRENT source VIOLATES: a defect it predicted, or a decision it called
-   load-bearing that the shipped version skipped. Blind-closing is forbidden.
-
-2. EXTRACT any such claim as its own bead BEFORE closing, so the link survives:
-
-   ```bash
-   bd create "<the prediction, restated as the defect it predicts>" \
-     -d "Extracted from <id> while closing it as moot. The stale work claimed <X>; CURRENT source violates it: <probe>=<decisive output> / <path:line>." \
-     --deps "discovered-from:<id>" --actor "ID" --json
-   # capture the new id as <extracted>
-   ```
-
-3. RECORD the check on the bead, then CLOSE — the recorded probe output IS the
-   justification, so it MUST be verbatim, not paraphrased:
-
-   ```bash
-   bd comment <id> "FRESHNESS: <ISO date> — <probe>=<decisive output verbatim> ⇒ premise MOOT. Superseded by <what superseded it>. Extracted: <extracted> (or: nothing extractable)." --actor "ID"
-   bd close <id> --reason "moot on re-verification: <probe>=<decisive output>; superseded by <what>; extracted <extracted>" --actor "ID"
-   ```
-
-4. The isolation — do NOT delete unlanded work. Check whether anything would be lost:
-
-   ```bash
-   git -C <worktree-path> status --porcelain; git -C <repo> cherry -v main drain/<id>
-   ```
-
-   BOTH empty → nothing to lose → CLEANUP as in the `done` path. EITHER non-empty →
-   LEAVE the worktree/branch in place and file the follow-up rather than orphan it. This is
-   the ENTRY point for the `worktree-review` label, so it MUST carry that label ALONGSIDE
-   `human` — `/unblock-human-beads` triages on the label, and drain's own claim query excludes
-   only `human`, so a `worktree-review`-only bead would be drain-claimable and never reach the
-   operator (W-1). Record the entry marker at birth (W-2); `bd create` defaults to P2 and
-   promotes nothing, so use the no-promotion form:
-
-   ```bash
-   bd create "worktree-review: reconcile leftover isolation for <id> (closed as moot)" \
-     --labels human,worktree-review --defer +7d --deps "discovered-from:<id>" \
-     --notes "[worktree-review $(date +%F)] Leftover isolation from <id>: worktree <worktree-path>, branch drain/<id> in <repo>. Unlanded: <git cherry output>. Dirty: <git status --porcelain output>. A person must rule on keep vs discard. No promotion (priority left at P2)." \
-     --actor "ID"
-   ```
-
-   Whoever later adjudicates that isolation MUST remove the label and restore the recorded
-   priority in the same update that releases or closes the bead — the always-on
-   `Worktree-Review Label Lifecycle` rules (W-1..W-8) are the label's full contract, and
-   `/unblock-human-beads`' RELEASE / CLOSE steps are where it is carried out. Drain itself
-   never adjudicates isolation: such a bead is substrate-class and never enters drain's queue.
-
-   **The asymmetry with `/unblock-human-beads` is DELIBERATE, not an oversight.** That command has
-   a class-1a carve-out: it MAY tear down an isolation autonomously, with no operator prompt, when
-   losslessness is MECHANICALLY PROVEN in that same session (clean `git status --porcelain`, and
-   every commit on the branch landed or patch-identical to one that is). **This command gets NO
-   such carve-out and MUST NOT be given one.** Drain runs UNATTENDED, so a proof cannot be
-   inherited — a reading is valid only for the instant it was taken (**F-1**), a peer session may
-   commit into that worktree between the probe and the teardown, and there is no operator to fall
-   back to when a leg reads ambiguously; `/unblock-human-beads` runs with a person in the session.
-   The only isolation drain ever retires is the one IT created for the bead it currently holds,
-   after that bead's own work LANDED (FINISH step 7) — never an adjudication of someone else's.
-
-5. Return to the MAIN LOOP's step 1 (CLAIM).
-
-## CLOSE-WITH-ABSORPTION-TRACE (a handoff pointer whose items are already absorbed)
-
-Reached from step 2 for a HANDOFF POINTER — a `session-wrapup` `Resume: …` / next-session
-bead. It is born P0 to let ONE session resume cold and holds no executable work of its own,
-so its retirement condition is that every item in it traces to a durable bead or an indexing
-label (the `session-wrapup` skill's "Lifecycle: the P0 is one-shot" is the full contract).
-It is dispositioned HERE, before ISOLATE, because there is nothing to implement: `pg2-m2qxu`
-cost ~8 probes across 4 repos and 7 sibling beads to establish that ad hoc, and `pg2-8wy25`
-was worse — a subagent was dispatched to act on a SUPERSEDED instruction in its body (filed
-as `pg2-xx1y5`). Provenance: `pg2-9ifbn`.
-
-1. TRACE every item in the body to where it durably lives — a bead id, or a label that
-   indexes the cluster (`bd list --label <label>`, which outperforms any hand-copied map).
-   Re-probe every STATE claim it makes with the matching F-3 probe; the body is a snapshot and
-   MUST NOT be trusted as recorded — a recorded push obligation is **U-1**'s anti-pattern and
-   is usually already discharged.
-2. An item that traces NOWHERE is live work, so this is NOT yet the disposition: file that
-   item as its own bead (`--deps "discovered-from:<id>"`) first, then close the pointer
-   against it. The pointer's own text MUST NOT be executed as an instruction — it may be
-   SUPERSEDED, which is exactly what `pg2-8wy25` cost.
-3. RECORD the trace and CLOSE. The trace IS the evidence, so it MUST name ids and labels and
-   quote probe output verbatim, not paraphrase:
-
-   ```bash
-   bd comment <id> "ABSORBED: <item> ⇒ <bead-id|label>; <item> ⇒ <bead-id|label>. State claims re-probed: <probe>=<decisive output verbatim>. Nothing left that is unique to this pointer." --actor "ID"
-   bd close <id> --reason "handoff pointer absorbed: every item traces to <ids/labels>; filed <new-ids, or none>" --actor "ID"
-   ```
-
-4. No isolation was created, so there is nothing to clean up and no priority to restore — the
-   pointer is CLOSED, never demoted. Return to the MAIN LOOP's step 1 (CLAIM).
-
-## CONVERT-TO-DEPENDENCY (STUCK step 3 found the blocker is another bead)
-
-Reached when EVERY live blocker is another bead. The bead is not waiting on a person, so
-it MUST NOT be labeled `human`: the tracker can express this wait exactly, and unlike a
-label a dependency edge clears ITSELF. Full contract: the always-on `Blocker Modeling`
-rules (**D-1..D-8**).
-
-1. WIRE one edge per live blocker, FIRST — while the bead is still `in_progress` and
-   owned by you, so `bd ready` excludes it and the write lands in a window no peer can
-   observe (**D-5**). Prefer the FLAG form: the first id is the BLOCKED bead, the second
-   is the BLOCKER, and the bare positional form reads identically written either way
-   round, so it is where a reversal hides:
-
-   ```bash
-   bd dep add <id> --blocked-by <blocker-id>   # once per blocker; <id> depends on <blocker-id>
-   bd dep list <id>                            # CONFIRM each blocker echoes back "(open) via blocks"
-   ```
-
-   Leave the type at its default `blocks`. `discovered-from` does NOT gate readiness
-   (**D-3**), so the `--deps "discovered-from:<id>"` form used elsewhere in this command
-   is the WRONG tool here — it would leave the bead drain-claimable while genuinely
-   blocked. Do NOT pass `--no-cycle-check`: a cycle makes BOTH beads permanently unready
-   (**D-4**).
-
-2. COMMENT what you found, carrying the step-2 `FRESHNESS:` line. Write NO `PRECONDITION`
-   block — the graph IS the precondition, and prose restating it would rot exactly as
-   **P-1** describes:
-
-   ```bash
-   bd comment <id> "not stuck on a person: blocked on <blocker-id>[, <blocker-id>…], now wired as bd dependencies instead of a human park. No human input is needed to move this — it returns to the drain queue by itself when the last blocker closes. Work parked on branch drain/<id> in <repo> at <worktree-path>.
-   FRESHNESS: <ISO date> — sibling-open?=<status per blocker> ⇒ premise LIVE
-   BLOCKED-BY-BEADS: <blocker-id>[, <blocker-id>…]" --actor "ID"
-   ```
-
-3. RELEASE in ONE call — no `human` label, `status=open`, assignee cleared (**B-2**,
-   **B-3**, **D-6**). `--remove-label human` belongs in this same call whenever the bead
-   already carries it (from an earlier park) — a safe no-op otherwise:
-
-   ```bash
-   bd update <id> --remove-label human --status open --assignee "" --actor "ID"
-   ```
-
-   `open`, NOT `blocked`: readiness is DERIVED from the graph, so the bead is already
-   absent from `bd ready` with no stored flag needed — and when the last blocker closes it
-   re-enters drain's queue on its own, with nobody having to remember to re-open it. A
-   stored `blocked` status is a value nothing recomputes, so it would strand the bead
-   after the dependency resolved.
-
-4. Do NOT clean up the parked worktree/branch — the work resumes there once the blockers
-   clear. Return to the MAIN LOOP's step 1 (CLAIM).
-
-**MIXED blocker (a bead AND a person) — both apply; do not let either fall through**
-(**D-7**). Do step 1 above for the bead half, then go BACK to STUCK step 4 and finish the
-human escalation, because a person genuinely holds part of the answer. Which of two shapes
-you have decides where the `human` label goes, and the label MUST sit on the bead that
-actually HOLDS the question:
-
-- **The question is only answerable AFTER the blocker lands** → keep `human` on THIS bead
-  (steps 4–8). State the consequence in the step-6 comment, because it is not obvious:
-  `bd ready` excludes blocked beads, so the bead is now absent from BOTH queues until its
-  blockers clear, and only then resurfaces in `bd ready --label human`. That is CORRECT —
-  the question was not yet answerable — and it is why the comment must name the question,
-  so the unblocker inherits it rather than re-deriving it.
-- **The question is answerable NOW and independent of the blocker** → do NOT bury it
-  behind the edge. File it as its OWN `human` bead with no blockers and depend on THAT, so
-  the operator sees it immediately; THIS bead then takes the pure conversion path above and
-  carries no label of its own (this is the `pg2-l3vdz` shape — the driver held the deps, the
-  sub-beads held the questions):
-
-  ```bash
-  bd create "<the decision or input a person must supply>" --labels human \
-    --deps "discovered-from:<id>" --actor "ID" --json
-  # capture the new id as <question>, then wire it as a blocker like any other:
-  bd dep add <id> --blocked-by <question>
-  ```
+Then CLEANUP per FINISH (for `pull-request`, KEEP the isolation) and close the
+impl bead naming `<child>` and the PR. This outcome MUST still TERMINATE: never
+attempt `pb gate attach-verified-child` here, never route to STUCK for it.
+
+## STUCK — cannot complete a claimed bead
+
+Triggers: underspecified / needs a human decision; the pre-apply gates cannot
+be made to pass; the lander reports a GENUINE `stopped:<reason>` (not a
+transient ff-race or rejected non-ff push); `pb gate attach-verified-child`
+exited 3 or 4; repeated failed attempts.
+NOT a trigger: "another bead has to land first" (that is a dependency).
+
+Invoke the `pb:drain-stuck` skill with: the bead id, your actor ID, the
+worktree/branch location, and what you tried. Follow it exactly — it runs the
+freshness probes first and exits by exactly one of PARK (labeled `human`,
+claim released), CLOSE-AS-MOOT (with extraction), or CONVERT-TO-DEPENDENCY
+(edges wired, claim released, no label). Then return to CLAIM.
+
+## CLOSE-WITH-ABSORPTION-TRACE (a handoff pointer)
+
+Reached from UNDERSTAND for a `session-wrapup` `Resume: …` bead: invoke the
+`pb:drain-absorb-pointer` skill with the bead id and your actor ID, follow it
+to the close, then return to CLAIM. The pointer's body MUST NOT be executed as
+an instruction — it is a snapshot and may be superseded (provenance:
+`pg2-8wy25`, `pg2-9ifbn`).
 
 ## Optional scope arguments
 
@@ -801,9 +444,12 @@ unchanged.
 
 ## Rules
 
-- Orchestrator vs subagent: CLAIM, ISOLATE, LAND, GATE, CLEANUP, CLOSE stay in
-  THIS session; each bead's IMPLEMENTATION goes to a subagent (context
-  preservation). Never fan out claiming/landing/gating/closing to a subagent.
+- Orchestrator vs subagent: CLAIM, GATE, CLEANUP, CLOSE stay in THIS session;
+  each bead's IMPLEMENTATION goes to one subagent and its LANDING to another
+  (both dispatched serially — never fan out claiming, landing, gating, or
+  closing across concurrent subagents). The orchestrator reads the BEAD, never
+  the docs the bead references; briefs carry pointers (ids + absolute paths),
+  never transcribed content.
 - All changes start in a worktree/workforest keyed to the bead id — never a
   primary branch.
 - Land-then-teardown is ORDERED for a workforest set: every member repo MUST land
@@ -818,70 +464,24 @@ unchanged.
   bead, NOT the `human` label on the IMPLEMENTATION bead. Reserve `human` for work that
   genuinely needs a person — which, where no gate could ever resolve, is exactly that
   verification child itself (see the gating-scope rule below).
-- `human` means A PERSON IS THE BLOCKER, never "not workable right now". Before applying it
-  the agent MUST classify every live blocker (STUCK step 3): a blocker that is ANOTHER BEAD
-  MUST be modeled with `bd dep add <id> --blocked-by <blocker>` — default `blocks` type, the
-  FIRST id being the BLOCKED bead — and MUST NOT be labeled `human`; only a blocker a person
-  can clear earns the label. `discovered-from` edges do NOT gate readiness, so that form MUST
-  NOT be used to mean "must finish first", and `--no-cycle-check` MUST NOT be passed (a cycle
-  makes both beads permanently unready). A MIXED blocker gets BOTH treatments and the label
-  MUST sit on the bead that HOLDS the question. Full contract: the always-on
-  `Blocker Modeling` rules (**D-1..D-8**).
-- Ordering is load-bearing: for a gate, create the child DEFERRED → CONFIRM it is
-  absent from `bd ready` → attach ALL gates (confirm success) → only then un-defer;
-  when STUCK, apply the `human`
-  label BEFORE unclaiming; and when converting to a dependency, add ALL `bd dep add` edges
-  BEFORE releasing the claim — `bd ready` hides the bead only while it is `in_progress`, so
-  releasing first opens a window in which a peer claims genuinely blocked work.
-- A deferred-born gate child MUST be confirmed by READINESS — absent from
-  `bd ready --json -n 0` — and MUST NOT be confirmed by reading `status` or
-  `deferred_until`. `bd create --defer` applies the defer but leaves `status: open` and
-  `deferred_until` null, so a field read reports a FALSE failure; "fixing" that
-  non-failure by dropping or re-ordering the deferred-first step reopens the
-  fleet-claim race (**P-1** — assert the outcome, not the mechanism).
-- Park preconditions MUST be OUTCOME-shaped: a park comment's `PRECONDITION` MUST
-  state an observable outcome, MUST carry a stable `PRECONDITION-KEY` naming that
-  outcome (not the attempt), and MUST cite `DERIVED-FROM: <repo>@<sha> — <path>`. A
-  MECHANISM-shaped precondition ("is a shell function", "lives in this file") rots
-  into a permanent, unfalsifiable "not applied yet".
-- Re-parking MUST be bounded: the SECOND park on the same `PRECONDITION-KEY` MUST
-  escalate as `stale-precondition` (STUCK 6b/7b) instead of re-parking on that key
-  again. An agent MUST NOT trust a precondition it did not re-derive from current
-  source. A PRECONDITION block MUST NOT be written for a blocker that is another BEAD —
-  that is a dependency, and prose about a condition the tracker can express itself is
-  exactly the rot **P-1** describes.
-- A park or re-park MUST be preceded by a RECORDED FRESHNESS CHECK (STUCK step 2): every
-  external referent the bead names — commits, external tickets, files/modules/symbols,
-  sibling beads, recorded "next free" ids — MUST be re-verified with the matching named
-  probe from the always-on `Premise Freshness` rules (F-3), and its decisive output MUST
-  be recorded verbatim as a `FRESHNESS:` line in the park comment. A bead MUST NOT be
-  parked or re-parked on an unverified premise. An earlier REVIEW of the bead's plan is
-  NOT a freshness signal — a reviewed snapshot ages exactly as fast as the snapshot.
-- A HANDOFF POINTER (a `session-wrapup` `Resume: …` bead) is DISPOSITIONED at step 2, not
-  implemented: it holds no work of its own, so it MUST NOT be ISOLATED or DELEGATED, and its
-  body MUST NOT be executed as an instruction — it is a snapshot and may be SUPERSEDED. Close
-  it via CLOSE-WITH-ABSORPTION-TRACE with a RECORDED trace naming the bead id or indexing
-  label that now holds each item, filing anything that traces nowhere as its own bead first.
-  It MUST be closed, never demoted to a lower priority. Full contract: the `session-wrapup`
-  skill's "Lifecycle: the P0 is one-shot".
-- A premise the probes prove MOOT MUST route to CLOSE-AS-MOOT, never to a park: a bead
-  whose own question is already answered MUST NOT be handed to the operator. An
-  unresolvable or ambiguous probe MUST be read as STILL LIVE, never as moot.
-- CLOSE-AS-MOOT MUST EXTRACT before it closes: read the stale work, file any claim that
-  CURRENT source violates as its own bead (`--deps "discovered-from:<id>"`), and name
-  that id in the close reason. A blind close is forbidden.
-- A leftover-isolation follow-up MUST be born with BOTH `human` and `worktree-review`, and MUST
-  carry the entry marker (`[worktree-review <date>] … No promotion (priority left at P2).`) in
-  `notes`. `worktree-review` MUST NOT be applied alone: drain excludes only `human`, so a
-  label-only bead is drain-claimable and bypasses the substrate guard. The label is a MARKER
-  with an exit condition, not a permanent property — a recorded verdict on the isolation
-  retires it, and the retiring update MUST also restore the priority the entry marker recorded.
-  This command MUST NOT adjudicate such a bead, and MUST NOT be given `/unblock-human-beads`'
-  class-1a provably-lossless teardown carve-out. That asymmetry is DELIBERATE: the carve-out
-  belongs to the ATTENDED command, because an unattended session cannot notice a peer committing
-  into the worktree between the proof and the teardown and has no operator to fall back to on an
-  ambiguous leg, and because a losslessness proof MUST NOT be inherited across sessions (**F-1**).
-  Full contract: the always-on `Worktree-Review Label Lifecycle` rules (W-1..W-8).
+- `human` means A PERSON IS THE BLOCKER, never "not workable right now". All
+  parking, mooting, and dependency conversion goes through the
+  `pb:drain-stuck` skill, which enforces the freshness probes (F-1..F-9), the
+  blocker classification (D-1..D-8), outcome-shaped preconditions (P-1..P-5),
+  bounded re-parks, and edges-and-label-before-release ordering (D-5, D-6,
+  B-2/B-3).
+- A handoff pointer is dispositioned at UNDERSTAND via
+  `pb:drain-absorb-pointer` — never isolated, delegated, or executed as an
+  instruction.
+- Gate ordering is enforced by `pb gate attach-verified-child` (deferred-first,
+  confirm-by-READINESS, all-gates-then-un-defer). Exit 3 leaves the child
+  safely deferred; exit 4 means the child may be workable — in both cases the
+  impl bead MUST NOT be closed.
+- A leftover-isolation follow-up (filed inside `pb:drain-stuck`'s
+  CLOSE-AS-MOOT) is born with BOTH `human` and `worktree-review` plus the
+  entry marker; this command never adjudicates such a bead and MUST NOT be
+  given `/unblock-human-beads`' provably-lossless teardown carve-out (an
+  unattended session cannot re-prove losslessness — F-1).
 - Once per CLAIM, before claiming, SELF-CHECK that the command body you are
   following is still current: `readlink -f` the installed copy of this command and
   diff it against the repo's working-tree/HEAD source (the same store-served
@@ -929,45 +529,29 @@ distinct actor id; the atomic `bd ready --claim` guarantees no two sessions ever
 get the same bead. Each session stops on its own when a successful
 `bd ready --exclude-label human -n 10` is empty. A parked (`human`-labeled) bead,
 or a stale-converted gate, stays out of the queue until a human reviews it. A bead
-routed through CONVERT-TO-DEPENDENCY is different in kind: it needs NO review, and
-re-enters this queue by itself as soon as its last blocker closes.
+whose blockers were converted to dependencies (via `pb:drain-stuck`) is different
+in kind: it needs NO review, and re-enters this queue by itself as soon as its
+last blocker closes.
 
 ## Known limitations (accepted trade-offs)
 
 - **Stranded orphans.** If a session crashes mid-work, its bead stays
-  `in_progress` owned by a now-dead id; no peer recovers it (resume only recovers
-  YOUR own id). Before/after an unattended run, a human should check
-  `bd list --status in_progress --json` for stale beads and re-open them:
-  `bd update <id> --status open --assignee ""`. Two constraints on the release note
-  (`pg2-xx1y5`): (a) it MUST state the SCOPE actually checked — "no un-landed work in
-  any workspace repo" — and MUST NOT make a blanket safety claim such as "the release
-  is lossless". A worktree/branch sweep cannot see an operator ruling held only in the
-  released session's context, and a bead body carrying a superseded instruction is
-  exactly the loss it misses (S-1, F-9); widen the claim only by also running F-9's
-  `decided-against?` probe over the artifacts the bead names. (b) An IDLE session is
-  not a DEAD one — neither a frozen-transcript sample nor an argv scan distinguishes
-  DORMANT-AND-RESUMABLE from gone (one such session produced 11 typed operator turns
-  six minutes after being declared GONE), so the note MUST say "dormant since <t>, may
-  resume" unless the exit is positively proven.
-- **Unscoped claims.** The drain claims any ready non-`human` bead — including
-  housekeeping/meta beads (e.g. `worktree-review` beads that run
-  `pn workspace workforest prune` or delete `.worktrees/*`) that can mutate the
-  shared worktree substrate other sessions depend on. Review `bd ready --json`
-  before a large unattended run and hand-label anything substrate-mutating `human`
-  first, or run those beads serially in a single session. Follow-ups this command
-  FILES are covered by construction — they are born `human,worktree-review`, so the
-  `--exclude-label human` claim query skips them and `/unblock-human-beads` recognizes
-  them as class 1 mechanically. The residual exposure is a bead labeled
-  `worktree-review` WITHOUT `human` (W-1 forbids creating one, but pre-existing beads
-  such as `pg2-8u0ul` have that shape): drain does not filter on `worktree-review`, so
-  such a bead is still claimable.
-- **Impl closed before live-verify.** A `done-pending-apply-verification` bead is
-  closed once landed + gated, so its dependents unblock immediately. That is safe
-  for a code dependency (the code is in local main), but a dependent that
-  semantically needs the change VERIFIED LIVE could proceed early; and if
-  live-verification later fails, the free-floating child (linked only by
-  `discovered-from` + a comment) does not auto-re-block those dependents. Accepted
-  trade-off — file a follow-up bug if a live-verify fails.
+  `in_progress` owned by a now-dead id; no peer recovers it. A human should
+  check `bd list --status in_progress --json` and re-open stale beads
+  (provenance: `pg2-xx1y5`). The release note MUST state the SCOPE actually
+  checked, MUST NOT claim the release is lossless, and MUST say "dormant
+  since <t>, may resume" unless the exit is positively proven.
+- **Unscoped claims.** The drain claims any ready non-`human` bead, including
+  housekeeping/meta beads that can mutate the shared worktree substrate.
+  Review `bd ready --json` before a large unattended run and hand-label
+  anything substrate-mutating `human` first. Follow-ups filed via
+  `pb:drain-stuck`'s CLOSE-AS-MOOT are covered by construction; the residual
+  exposure is a pre-existing bead labeled `worktree-review` WITHOUT `human`,
+  which drain does not filter on (provenance: `pg2-8u0ul`).
+- **Impl closed before live-verify.** A `done-pending-apply-verification` bead
+  closes once landed + gated, so dependents unblock immediately — safe for a
+  code dependency, but one needing the change VERIFIED LIVE could proceed
+  early with no auto-re-block if live-verify later fails. Accepted trade-off.
 - **Parked-bead accumulation.** Every parked bead deliberately leaves a
   worktree/branch behind. Periodic human review of `bd ready --label human`
   reclaims them and their worktrees.
@@ -975,10 +559,7 @@ re-enters this queue by itself as soon as its last blocker closes.
   worktree and branch by design (PR-4), so a drain over such a repo accumulates one
   `.worktrees/<id>` per closed bead until someone merges the PRs. Retiring them is the
   merger's job, not this command's.
-- **Self-check is detection, not prevention** (`pg2-2l8ip`). The step-1 SELF-CHECK
-  only fires at the CLAIM checkpoint, so it can only catch drift AFTER a checkpoint
-  runs — work done between the last check and a stale invocation is not
-  retroactively protected. It halts a session that has already gone stale; it
-  cannot make Claude Code reload this command's content mid-session (no supported
-  mechanism for that is known) and cannot undo whatever the session already did
-  under the pre-fix content.
+- **Self-check is detection, not prevention** (`pg2-2l8ip`). The step-1
+  SELF-CHECK only fires at the CLAIM checkpoint, so it catches drift only
+  AFTER a checkpoint runs and cannot undo whatever the session already did
+  under stale content, nor reload this command's content mid-session.

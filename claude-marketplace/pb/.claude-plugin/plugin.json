@@ -1,6 +1,6 @@
 {
   "name": "pb",
   "description": "pn:applied gate lifecycle (pb gate create) plus the /drain-beads autonomous queue-draining command; gate a follow-up bead until `pn workspace apply` applies the change, and drain ready beads while gating post-deploy verification instead of over-using the `human` label.",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "defaultEnabled": true
 }
