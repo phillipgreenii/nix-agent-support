@@ -24,6 +24,7 @@ _pg_disk_reclaimer() {
     _arguments \
       '--aggressiveness[Selection ceiling]:aggressiveness:' \
       '--apply[Actually reclaim instead of dry-run]' \
+      '(-v --verbose)'{-v,--verbose}'[Show a note when a selected item path does not exist]' \
       '*:item id:_pg_disk_reclaimer_item_ids'
     ;;
   list)

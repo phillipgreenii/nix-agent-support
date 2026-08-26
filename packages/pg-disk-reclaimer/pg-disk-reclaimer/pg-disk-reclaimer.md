@@ -30,3 +30,7 @@
 - Reclaim only specific registry items (by id) instead of every qualifying item:
 
 `pg-disk-reclaimer reclaim --aggressiveness {{2}} {{item-id}}`
+
+- Reclaim, also showing a note when a selected item's path does not exist on this machine (hidden by default):
+
+`pg-disk-reclaimer reclaim --aggressiveness {{2}} --verbose`

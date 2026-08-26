@@ -616,7 +616,7 @@ pgdr_confirm() {
 
 # cmd_reclaim: implements the `reclaim` subcommand.
 #
-# Grammar: reclaim --aggressiveness N [id...] [--apply]
+# Grammar: reclaim --aggressiveness N [id...] [--apply] [-v|--verbose]
 #   --aggressiveness N (REQUIRED): the selection ceiling. Passed straight
 #     through to pgdr_select_variants, which does the actual selection --
 #     see its doc comment above for the no-ids/explicit-ids semantics.
@@ -628,6 +628,22 @@ pgdr_confirm() {
 #   --apply: switches from the default dry run (each selected variant's
 #     dryRunCommand) to the real reclaim (each selected variant's
 #     removeCommand).
+#   -v|--verbose (optional): show a note when a selected item's path does
+#     not currently exist on disk. Without this flag such an item is
+#     skipped entirely (no output at all) -- see the path-existence guard
+#     below.
+#
+# Path-existence guard (same operator-reported dogfooding feedback as
+# cmd_list's guard): a selected item's `path` is the generic, cheap "is
+# there anything here at all" signal -- if it doesn't exist on this
+# machine, there is nothing to reclaim for that item, full stop. This is
+# checked immediately before running dryRunCommand (dry-run branch) or
+# removeCommand (--apply branch), in both cases before the aggressiveness
+# confirm gate below (no point prompting to confirm removal of nothing).
+# Without --verbose the item is skipped silently (no output, and NOT
+# counted against overall_status -- matching how a declined confirm-gate
+# is already handled). With --verbose one line is printed to stderr and
+# the item is still skipped, still not a failure.
 #
 # Aggressiveness >= 4 confirmation gate (operator decision, final): any
 # selected variant with aggressiveness >= 4 is gated behind an
@@ -652,6 +668,7 @@ pgdr_confirm() {
 cmd_reclaim() {
   local max_aggressiveness=""
   local apply=0
+  local verbose=0
   local ids=()
 
   while [[ $# -gt 0 ]]; do
@@ -666,6 +683,10 @@ cmd_reclaim() {
       ;;
     --apply)
       apply=1
+      shift
+      ;;
+    -v | --verbose)
+      verbose=1
       shift
       ;;
     --)
@@ -704,16 +725,31 @@ cmd_reclaim() {
   local overall_status=0
   local item
   while IFS= read -r item; do
-    local id aggressiveness dry_run_command remove_command
+    local id aggressiveness dry_run_command remove_command path
     id=$(jq -r '.id' <<<"$item")
     aggressiveness=$(jq -r '.aggressiveness' <<<"$item")
     dry_run_command=$(jq -r '.dryRunCommand' <<<"$item")
     remove_command=$(jq -r '.removeCommand' <<<"$item")
+    path=$(jq -r '.path' <<<"$item")
 
     if [[ $apply -eq 0 ]]; then
+      if ! pgdr_path_exists "$path"; then
+        if [[ $verbose -eq 1 ]]; then
+          echo "pg-disk-reclaimer: '$id' path '$path' does not exist -- nothing to do, skipping" >&2
+        fi
+        continue
+      fi
+
       if ! eval "$dry_run_command"; then
         echo "pg-disk-reclaimer: dry-run command for '$id' exited non-zero" >&2
         overall_status=1
+      fi
+      continue
+    fi
+
+    if ! pgdr_path_exists "$path"; then
+      if [[ $verbose -eq 1 ]]; then
+        echo "pg-disk-reclaimer: '$id' path '$path' does not exist -- nothing to do, skipping" >&2
       fi
       continue
     fi

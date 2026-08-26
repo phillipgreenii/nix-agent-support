@@ -78,3 +78,17 @@ run_pg_disk_reclaimer() {
   [[ ! "$output" =~ "unknown option" ]]
   [[ "$output" =~ "--aggressiveness requires a value" ]]
 }
+
+@test "reclaim --verbose is accepted (dispatches to cmd_reclaim, not rejected as an unknown option; still requires --aggressiveness)" {
+  run_pg_disk_reclaimer reclaim --verbose
+  [ "$status" -ne 0 ]
+  [[ ! "$output" =~ "unknown option" ]]
+  [[ "$output" =~ "--aggressiveness" ]]
+}
+
+@test "reclaim -v is accepted (dispatches to cmd_reclaim, not rejected as an unknown option; still requires --aggressiveness)" {
+  run_pg_disk_reclaimer reclaim -v
+  [ "$status" -ne 0 ]
+  [[ ! "$output" =~ "unknown option" ]]
+  [[ "$output" =~ "--aggressiveness" ]]
+}

@@ -33,6 +33,9 @@
 # /tmp/single) are deliberately NOT created here: that fixture is
 # exercised only via pgdr_select_variants directly, never through
 # cmd_list/cmd_reclaim, so the new guard never applies to it.
+# /tmp/real-item is this bead's own addition (cmd_reclaim's
+# path-existence guard, pg2-eqniv.2): the "real, existing path" half of
+# the mixed missing/real registry used by the guard tests below.
 #
 # Deliberately setup_file/teardown_file, NOT per-test setup()/teardown():
 # this suite runs under this repo's real commit-time gate with bats
@@ -46,11 +49,11 @@
 # creating them once for the whole file and leaving them in place for every
 # test to read is safe and race-free.
 setup_file() {
-  mkdir -p /tmp/cache-a /tmp/cache-b /tmp/info-only /tmp/failing-item /tmp/slow-item /tmp/ok-item /tmp/low-item /tmp/high-item
+  mkdir -p /tmp/cache-a /tmp/cache-b /tmp/info-only /tmp/failing-item /tmp/slow-item /tmp/ok-item /tmp/low-item /tmp/high-item /tmp/real-item
 }
 
 teardown_file() {
-  rm -rf /tmp/cache-a /tmp/cache-b /tmp/info-only /tmp/failing-item /tmp/slow-item /tmp/ok-item /tmp/low-item /tmp/high-item
+  rm -rf /tmp/cache-a /tmp/cache-b /tmp/info-only /tmp/failing-item /tmp/slow-item /tmp/ok-item /tmp/low-item /tmp/high-item /tmp/real-item
 }
 
 setup() {
@@ -671,4 +674,138 @@ JSON
   run cmd_reclaim --aggressiveness 5 does-not-exist
   [ "$status" -ne 0 ]
   [[ "$output" =~ "unknown item id 'does-not-exist'" ]]
+}
+
+# cmd_reclaim path-existence guard (this bead, pg2-eqniv.2, mirroring
+# cmd_list's guard above from pg2-eqniv.1): a selected item whose `path`
+# does not currently exist on this machine has nothing to reclaim, so
+# neither dryRunCommand nor removeCommand is ever run for it -- silently
+# by default (no output, and NOT counted against overall_status, same as
+# a declined confirm-gate), or with one stderr note under --verbose.
+# Built inline via heredoc into the default XDG registry path, following
+# this file's existing "malformed.json"/install_missing_path_registry
+# inline-fixture pattern above, rather than a new committed
+# tests/fixtures/*.json file. Both variants' commands are the literal
+# `echo SHOULD-NOT-RUN` sentinel from the bead spec, so any test failure
+# to actually skip the item is immediately visible in the output.
+
+install_reclaim_missing_path_registry() {
+  mkdir -p "$HOME/.config/pg-disk-reclaimer"
+  cat >"$HOME/.config/pg-disk-reclaimer/registry.json" <<'JSON'
+[
+  {
+    "id": "missing-path-item",
+    "description": "item whose path does not exist on this machine",
+    "path": "/tmp/pg-disk-reclaimer-test-missing-xyz",
+    "displayCommand": "echo missing-path-item",
+    "variants": [
+      {
+        "aggressiveness": 1,
+        "variantDescription": "n/a",
+        "dryRunCommand": "echo SHOULD-NOT-RUN",
+        "removeCommand": "echo SHOULD-NOT-RUN"
+      }
+    ]
+  }
+]
+JSON
+}
+
+# install_reclaim_mixed_path_registry: one missing-path item plus one item
+# whose path (/tmp/real-item) genuinely exists (mkdir'd/rm'd in
+# setup_file/teardown_file above, alongside this file's other shared
+# fixture paths -- see that comment for why NOT per-test setup()/
+# teardown()) -- for confirming the guard applies per-item, not to the
+# whole run.
+install_reclaim_mixed_path_registry() {
+  mkdir -p "$HOME/.config/pg-disk-reclaimer"
+  cat >"$HOME/.config/pg-disk-reclaimer/registry.json" <<'JSON'
+[
+  {
+    "id": "missing-path-item",
+    "description": "item whose path does not exist on this machine",
+    "path": "/tmp/pg-disk-reclaimer-test-missing-xyz",
+    "displayCommand": "echo missing-path-item",
+    "variants": [
+      {
+        "aggressiveness": 1,
+        "variantDescription": "n/a",
+        "dryRunCommand": "echo SHOULD-NOT-RUN",
+        "removeCommand": "echo SHOULD-NOT-RUN"
+      }
+    ]
+  },
+  {
+    "id": "real-item",
+    "description": "item whose path exists on this machine",
+    "path": "/tmp/real-item",
+    "displayCommand": "echo real-item",
+    "variants": [
+      {
+        "aggressiveness": 1,
+        "variantDescription": "n/a",
+        "dryRunCommand": "echo dry-real",
+        "removeCommand": "echo remove-real"
+      }
+    ]
+  }
+]
+JSON
+}
+
+@test "cmd_reclaim skips a missing-path item by default (dry run, no --verbose): no SHOULD-NOT-RUN, no output at all" {
+  install_reclaim_missing_path_registry
+  run cmd_reclaim --aggressiveness 1 missing-path-item
+  [ "$status" -eq 0 ]
+  [[ ! "$output" =~ "SHOULD-NOT-RUN" ]]
+  [ -z "$output" ]
+}
+
+@test "cmd_reclaim --verbose shows the skip note for a missing-path item (dry run), still no SHOULD-NOT-RUN" {
+  install_reclaim_missing_path_registry
+  run cmd_reclaim --aggressiveness 1 --verbose missing-path-item
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "does not exist -- nothing to do, skipping" ]]
+  [[ ! "$output" =~ "SHOULD-NOT-RUN" ]]
+}
+
+@test "cmd_reclaim --apply skips a missing-path item by default (no --verbose): no SHOULD-NOT-RUN" {
+  install_reclaim_missing_path_registry
+  run cmd_reclaim --aggressiveness 1 --apply missing-path-item
+  [ "$status" -eq 0 ]
+  [[ ! "$output" =~ "SHOULD-NOT-RUN" ]]
+}
+
+@test "cmd_reclaim --apply --verbose shows the skip note for a missing-path item, still no SHOULD-NOT-RUN" {
+  install_reclaim_missing_path_registry
+  run cmd_reclaim --aggressiveness 1 --apply --verbose missing-path-item
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "does not exist -- nothing to do, skipping" ]]
+  [[ ! "$output" =~ "SHOULD-NOT-RUN" ]]
+}
+
+@test "cmd_reclaim -v is the same as --verbose for a missing-path item under --apply" {
+  install_reclaim_missing_path_registry
+  run cmd_reclaim --aggressiveness 1 --apply -v missing-path-item
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "does not exist -- nothing to do, skipping" ]]
+  [[ ! "$output" =~ "SHOULD-NOT-RUN" ]]
+}
+
+@test "cmd_reclaim mixed case: the real item's dry-run command still runs and the missing-path item is silently skipped (no --verbose)" {
+  install_reclaim_mixed_path_registry
+  run cmd_reclaim --aggressiveness 1
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "dry-real" ]]
+  [[ ! "$output" =~ "SHOULD-NOT-RUN" ]]
+  [[ ! "$output" =~ "does not exist" ]]
+}
+
+@test "cmd_reclaim mixed case under --verbose: the real item's dry-run command still runs and the missing-path item shows its skip note" {
+  install_reclaim_mixed_path_registry
+  run cmd_reclaim --aggressiveness 1 --verbose
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "dry-real" ]]
+  [[ "$output" =~ "does not exist -- nothing to do, skipping" ]]
+  [[ ! "$output" =~ "SHOULD-NOT-RUN" ]]
 }
