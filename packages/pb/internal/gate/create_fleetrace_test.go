@@ -29,6 +29,22 @@ import (
 	"github.com/phillipgreenii/pb/internal/run"
 )
 
+// hermeticCLIRunner wraps run.CLIRunner, filling in hermeticEnviron()
+// (gatetest_helpers_test.go) whenever the caller leaves opts.Env nil.
+// patchid.go's and gate/create.go's own git invocations both leave Env nil,
+// so without this a `git` subprocess spawned by gate.Create below inherits
+// GIT_DIR/GIT_INDEX_FILE/etc. from an enclosing git commit hook and gets
+// redirected at the REAL repo instead of this test's own tmpdir workspace
+// ws -- the same hermeticity leak patchid_test.go had before 98f8c95d.
+type hermeticCLIRunner struct{}
+
+func (hermeticCLIRunner) Run(ctx context.Context, name string, args []string, opts run.Options) (run.Result, error) {
+	if opts.Env == nil {
+		opts.Env = hermeticEnviron()
+	}
+	return run.CLIRunner{}.Run(ctx, name, args, opts)
+}
+
 func TestFleetRace_beadHeldUntilGateResolves(t *testing.T) {
 	requireBinaries(t, "bd", "git")
 	isolateBeadsEnv(t)
@@ -53,7 +69,7 @@ func TestFleetRace_beadHeldUntilGateResolves(t *testing.T) {
 	)
 	fakePN.AddResponse("pn", []string{"workspace", "info", "--json"}, run.Result{Stdout: info}, nil)
 
-	real := run.CLIRunner{}
+	real := hermeticCLIRunner{}
 	deps := gate.CreateDeps{
 		PN:      pn.Client{R: fakePN},
 		BD:      bd.Client{R: real},

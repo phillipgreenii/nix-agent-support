@@ -44,6 +44,42 @@ func skipNoBin(t *testing.T, names ...string) {
 	}
 }
 
+// hermeticEnviron returns os.Environ() with the git-hook-injected vars
+// (GIT_DIR, GIT_INDEX_FILE, GIT_WORK_TREE, GIT_PREFIX, GIT_OBJECT_DIRECTORY,
+// GIT_COMMON_DIR) removed. Those vars repoint a test's own tmpdir git/bd
+// subprocesses at the REAL repo when the test binary itself runs from inside
+// a git commit hook (e.g. this repo's own pre-commit/pre-push test gate) --
+// the same hermeticity leak packages/pb/internal/patchid/patchid_test.go had
+// before 98f8c95d. Duplicated per-package rather than shared/exported:
+// patchid_test.go's copy of this helper is unexported and test-only, so it
+// cannot be imported from another package.
+func hermeticEnviron() []string {
+	skipVars := map[string]bool{
+		"GIT_DIR": true, "GIT_INDEX_FILE": true, "GIT_WORK_TREE": true,
+		"GIT_PREFIX": true, "GIT_OBJECT_DIRECTORY": true, "GIT_COMMON_DIR": true,
+	}
+	var env []string
+	for _, kv := range os.Environ() {
+		if k := strings.SplitN(kv, "=", 2)[0]; !skipVars[k] {
+			env = append(env, kv)
+		}
+	}
+	return env
+}
+
+// hermeticCLIRunner wraps run.CLIRunner, filling in hermeticEnviron() whenever
+// the caller leaves opts.Env nil -- patchid.go's and pn/info.go's git/pn
+// invocations both do, so without this TestContract_GitPatchID and
+// TestContract_PNInfoSchema would inherit the same leak.
+type hermeticCLIRunner struct{}
+
+func (hermeticCLIRunner) Run(ctx context.Context, name string, args []string, opts run.Options) (run.Result, error) {
+	if opts.Env == nil {
+		opts.Env = hermeticEnviron()
+	}
+	return run.CLIRunner{}.Run(ctx, name, args, opts)
+}
+
 // isolate pins HOME + XDG_* to a temp dir, scrubs workspace-binding vars, sets
 // BD_JSON_ENVELOPE=1 and a deterministic git identity. The result: real bd boots
 // an embedded Dolt DB and git is hermetic.
@@ -90,6 +126,7 @@ func shellTry(dir, name string, args ...string) (string, error) {
 	var stdout, stderr bytes.Buffer
 	cmd := exec.Command(name, args...)
 	cmd.Dir = dir
+	cmd.Env = hermeticEnviron()
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
@@ -320,7 +357,7 @@ func TestContract_MultiDBDedupeKey(t *testing.T) {
 func TestContract_GitPatchID(t *testing.T) {
 	skipNoBin(t, "git")
 	isolate(t)
-	c := patchid.Client{R: run.CLIRunner{}}
+	c := patchid.Client{R: hermeticCLIRunner{}}
 	ctx := context.Background()
 
 	newRepo := func(name string) string {
@@ -483,6 +520,7 @@ func TestContract_GitPatchID(t *testing.T) {
 		show := shellOut(t, dir, "git", "show", "HEAD")
 		var sout, serr bytes.Buffer
 		vc := exec.Command("git", "-C", dir, "patch-id", "--verbatim")
+		vc.Env = hermeticEnviron()
 		vc.Stdin = strings.NewReader(show)
 		vc.Stdout = &sout
 		vc.Stderr = &serr
@@ -507,7 +545,7 @@ func TestContract_PNInfoSchema(t *testing.T) {
 		t.Skip("set PB_CONTRACT_PN_WS=<a real pn workspace dir> to run the live pn info schema check; " +
 			"the Phase-3 smoke harness otherwise covers the live path")
 	}
-	info, err := pn.Client{R: run.CLIRunner{}}.Info(context.Background(), ws)
+	info, err := pn.Client{R: hermeticCLIRunner{}}.Info(context.Background(), ws)
 	if err != nil {
 		t.Fatalf("pn workspace info in %q: %v", ws, err)
 	}

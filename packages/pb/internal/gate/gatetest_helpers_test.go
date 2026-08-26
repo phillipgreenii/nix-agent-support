@@ -5,7 +5,8 @@ package gate_test
 // Shared real-bd/real-git test helpers for create_fleetrace_test.go
 // (`//go:build integration`) and lifecycle_smoke_test.go
 // (`//go:build smoke`) -- requireBinaries/isolateBeadsEnv/
-// initGitRepoWithCommit/runTool/createDeferredBead/inReady (bead pg2-h05lt).
+// initGitRepoWithCommit/runTool/createDeferredBead/inReady (bead pg2-h05lt),
+// plus hermeticEnviron (bead pg2-f6cgn) used by runTool below.
 //
 // Tagged `integration || smoke` rather than left untagged: reachable under
 // EITHER `-tags integration` or `-tags smoke` alone (an OR, not an AND), so
@@ -25,6 +26,29 @@ import (
 	"strings"
 	"testing"
 )
+
+// hermeticEnviron returns os.Environ() with the git-hook-injected vars
+// (GIT_DIR, GIT_INDEX_FILE, GIT_WORK_TREE, GIT_PREFIX, GIT_OBJECT_DIRECTORY,
+// GIT_COMMON_DIR) removed. Those vars repoint a test's own tmpdir git/bd
+// subprocesses at the REAL repo when the test binary itself runs from inside
+// a git commit hook (e.g. this repo's own pre-commit/pre-push test gate) --
+// the same hermeticity leak packages/pb/internal/patchid/patchid_test.go had
+// before 98f8c95d. Duplicated per-package rather than shared/exported:
+// patchid_test.go's copy of this helper is unexported and test-only, so it
+// cannot be imported from another package.
+func hermeticEnviron() []string {
+	skipVars := map[string]bool{
+		"GIT_DIR": true, "GIT_INDEX_FILE": true, "GIT_WORK_TREE": true,
+		"GIT_PREFIX": true, "GIT_OBJECT_DIRECTORY": true, "GIT_COMMON_DIR": true,
+	}
+	var env []string
+	for _, kv := range os.Environ() {
+		if k := strings.SplitN(kv, "=", 2)[0]; !skipVars[k] {
+			env = append(env, kv)
+		}
+	}
+	return env
+}
 
 func requireBinaries(t *testing.T, names ...string) {
 	t.Helper()
@@ -84,6 +108,7 @@ func runTool(t *testing.T, dir, name string, args ...string) string {
 	var stdout, stderr bytes.Buffer
 	cmd := exec.Command(name, args...)
 	cmd.Dir = dir
+	cmd.Env = hermeticEnviron()
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
