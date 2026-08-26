@@ -1,6 +1,6 @@
 {
   "name": "pb",
-  "description": "pn:applied gate lifecycle (pb gate create) plus the /drain-beads autonomous queue-draining command; gate a follow-up bead until `pn workspace apply` applies the change, and drain ready beads while gating post-deploy verification instead of over-using the `human` label.",
+  "description": "pn:applied gate lifecycle (pb gate create, pb gate attach-verified-child) plus pb drain isolate and the /drain-beads autonomous queue-draining command; isolate a bead's worktree, gate a follow-up bead until `pn workspace apply` applies the change, and drain ready beads (parking/mooting/dependency-conversion via the pb:drain-stuck skill, handoff pointers via pb:drain-absorb-pointer) instead of over-using the `human` label.",
   "version": "1.1.0",
   "defaultEnabled": true
 }

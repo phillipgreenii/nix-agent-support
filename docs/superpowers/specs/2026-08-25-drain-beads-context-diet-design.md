@@ -82,11 +82,14 @@ root, worktree path, branch `drain/<id>`, bead id, and instructions to:
   applicable.
 
 The orchestrator records the verdict and SHA only — but VERIFIES before recording,
-because the report is a subagent's prose, not evidence: for `landed`,
-`git -C <repo> merge-base --is-ancestor drain/<id> <primary>` must hold and the gate
-SHA is taken from the orchestrator's own `git -C <repo> rev-parse drain/<id>`; for
-`pr-opened`/`pr-updated`, `gh pr view <n> --json state,isDraft` must show OPEN and
-draft. A verdict failing its check is treated as `stopped:`, never recorded as landed.
+because the report is a subagent's prose, not evidence: for `landed`, the orchestrator
+verifies the REPORTED sha rather than re-deriving it from `drain/<id>` (the handler's
+FF-4 deletes that branch and worktree BEFORE reporting `landed`, so it is already gone)
+— `git -C <repo> merge-base --is-ancestor <reported-sha> <primary>` must hold, and that
+same verified sha becomes the gate SHA; for `pr-opened`/`pr-updated`, `gh pr view <n>
+--json state,isDraft` must show OPEN and draft, and the pushed head comes from
+`git -C <repo> rev-parse drain/<id>` (valid only on this path, since PR-4 keeps the
+branch). A verdict failing its check is treated as `stopped:`, never recorded as landed.
 Re-dispatch after a transient `stopped:` is bounded at ONE (the lander already retried
 3× internally).
 
@@ -237,10 +240,10 @@ way).
   orchestrator observed every landing command; now the verdict arrives as a subagent's
   self-report, which could misstate the outcome (a violated MUST NOT, a wrong SHA that
   would pin a never-resolving gate). Mitigation is D2's mandatory orchestrator-side
-  verification: one `merge-base --is-ancestor` / `gh pr view` observation per land, and
-  the gate SHA read from `git rev-parse drain/<id>` directly, never from the report.
-  The brief carries the same MUST NOTs the orchestrator had; the handler skills enforce
-  PR-3/PR-4.
+  verification: one `merge-base --is-ancestor` (against the REPORTED sha, never a
+  re-derive from `drain/<id>` — FF-4 deletes that branch before `landed` is reported) or
+  `gh pr view` observation per land. The brief carries the same MUST NOTs the
+  orchestrator had; the handler skills enforce PR-3/PR-4.
 - **`bd ready` scope**: `bd ready` run via `-C <db>` sees that DB only — same behavior as
   the prose procedure, which ran from the workspace. Attach runs all its bd calls
   against the impl bead's own DB, which is strictly more consistent than the prose

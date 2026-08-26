@@ -194,7 +194,7 @@ changed>` / `pre-commit run --files …`, never `--all-files`, which re-runs
 build` for nix repos, and the repo's tests, including a slow full suite
    backgrounded to outlive a bounded turn); NOT claim/close the bead, NOT
    land/merge, NOT touch any other worktree, NOT create gates; and CLASSIFY the
-   outcome as one of the four statuses below (the kept `also include:` line
+   outcome as one of the four statuses below (the `also include:` bullet below
    carries the gate-evidence and repos-touched requirements).
    - `done` — implemented, all gates PASS, and every acceptance criterion is
      confirmable NOW (nothing requires the change to be live).
@@ -232,65 +232,66 @@ build` for nix repos, and the repo's tests, including a slow full suite
 6. **LAND via a dedicated LANDER SUBAGENT** — dispatched synchronously, ONE at a
    time, never in parallel with another land and never fanned out. Landing must
    go through the repo-declared strategy, so the lander invokes the dispatcher
-   itself in its own context (a subagent has its own persistent shell; keeping
-   the ~37KB of dispatcher+handler skill text out of YOUR context is the point).
+   itself in its own context (its own persistent shell keeps the ~37KB of
+   dispatcher+handler skill text out of YOUR context).
 
-   The lander brief MUST contain: the bead id; the absolute canonical repo root;
-   the worktree path and branch `drain/<id>`; and these instructions:
-   - invoke the `integrate-branch:integrate-branch` skill and let IT resolve the
-     strategy — NEVER name a handler (naming one hardcodes ff-merge and breaks
-     `pull-request` repos). For a workforest set, invoke
-     `pn-workspace-rules:land-workforest` instead;
-   - a lost FAST-FORWARD RACE or a REJECTED NON-FAST-FORWARD PUSH is TRANSIENT:
-     re-rebase and re-invoke, at most 3 attempts, then report `stopped:` with
+   The lander brief MUST contain: the bead id; the absolute canonical repo
+   root; the worktree path and branch `drain/<id>`; the working directory to
+   `cd` into first (worktree path, or for a set the set root
+   `<workspace_root>/.workforests/<set-branch>`); and these instructions:
+   - `cd` there and confirm `git rev-parse --abbrev-ref HEAD` prints
+     `drain/<id>` BEFORE invoking any skill, else report `stopped:wrong-branch`
+     and land NOTHING;
+   - invoke `integrate-branch:integrate-branch` and let IT resolve the strategy
+     — NEVER name a handler (breaks `pull-request` repos); for a workforest
+     set, invoke `pn-workspace-rules:land-workforest` instead;
+   - a lost FAST-FORWARD RACE or REJECTED NON-FAST-FORWARD PUSH is TRANSIENT:
+     re-rebase and re-invoke (at most 3 attempts), then report `stopped:` with
      the reason;
    - MUST NOT merge any PR, MUST NOT push any primary branch, MUST NOT use
      `run_in_background` for git operations, and MUST report fully in ONE turn;
    - return a structured report: `outcome` (`landed` | `pr-opened` |
-     `pr-updated` | `stopped:<reason>`), the landed/pushed SHA per changed repo
-     (the tip of `drain/<id>` — NOT a re-read of the shared primary branch,
-     which a peer may have advanced), and the PR number + URL when applicable.
+     `pr-updated` | `stopped:<reason>`), the landed/pushed SHA per repo (tip
+     of `drain/<id>`, never a re-read of primary), and PR number + URL.
 
-   VERIFY the verdict with ONE observation of your own before recording — the
-   report is a subagent's prose, not evidence:
-   - `landed` →
-     `git -C <repo> merge-base --is-ancestor drain/<id> <primary>; echo $?`
-     must print 0, and take the gate SHA from
-     `git -C <repo> rev-parse drain/<id>` YOURSELF rather than from the report
-     (never from the shared primary branch, which a peer may have advanced).
-   - `pr-opened` / `pr-updated` → `gh pr view <n> --json state,isDraft` must
-     show OPEN and draft; record the pushed head from
-     `git -C <repo> rev-parse drain/<id>`.
+   VERIFY the verdict with ONE observation before recording — the report is a
+   subagent's prose, not evidence:
+   - `landed` → verify the REPORTED sha, never re-derive from `drain/<id>` (the
+     handler's FF-4 deletes that branch+worktree BEFORE reporting `landed`, so
+     a stale pre-rebase sha still fails this check):
+     `git -C <repo> merge-base --is-ancestor <reported-sha> <primary>; echo $?`
+     must print 0, where `<primary>` resolves as `git config
+pgii-integrate-branch.primaryBranch` → `git symbolic-ref
+refs/remotes/origin/HEAD` → `main`. Use that verified sha as the gate SHA.
+   - `pr-opened` / `pr-updated` → `gh pr view <n> -R <owner/repo> --json
+state,isDraft` must show OPEN and draft (cwd cannot be assumed); record
+     the pushed head from `git -C <repo> rev-parse drain/<id>` — valid ONLY on
+     this path, since PR-4 KEEPS the branch.
 
-   A verdict that fails its check is `stopped:<unverified>` — never record it
-   as landed. What "LANDED" means per strategy, the pre-authorized-push rule
-   for `pull-request` repos, and the draft-PR requirements are unchanged (kept
-   verbatim below).
+   A verdict failing its check is `stopped:<unverified>`, never recorded as
+   landed. Strategy-specific LANDED/push/draft-PR requirements are below.
 
    **What "LANDED" means depends on the resolved strategy.** Record whichever the
    handler reports:
-   - `ff-merge-to-main` → outcome `landed`: the rebase-then-`--ff-only` merge onto the
-     canonical clone's primary branch succeeded. RECORD the landed commit SHA per
-     changed repo.
-   - `pull-request` → outcome `pr-opened` or `pr-updated`: the branch was pushed and a
-     PR was created or refreshed by that push. **THAT IS THE LANDED STATE** — nothing
-     further is required, and this command MUST NOT merge the PR or wait for a merge
-     (the handler's PR-3 forbids it; merging is a human action). RECORD the pushed head
-     SHA per changed repo AND the PR number + URL. If a PR already EXISTS for
-     `drain/<id>`, the push UPDATES it and a second PR MUST NOT be opened (the handler
-     probes for an open PR on the branch before creating one). The PR MUST be a DRAFT —
-     `gh pr create --draft` (promotion to ready is a separate human step); if it came
-     back non-draft, convert it immediately with `gh pr ready --undo <number>`.
+   - `ff-merge-to-main` → outcome `landed`: the rebase-then-`--ff-only` merge
+     succeeded. RECORD the landed commit SHA per changed repo.
+   - `pull-request` → outcome `pr-opened` or `pr-updated`: the branch was
+     pushed and a PR created/refreshed by that push. **THAT IS THE LANDED
+     STATE** — this command MUST NOT merge the PR or wait for a merge (PR-3;
+     merging is a human action). RECORD the pushed head SHA per changed repo
+     AND the PR number + URL. If a PR already EXISTS for `drain/<id>`, the
+     push UPDATES it and a second PR MUST NOT be opened. The PR MUST be a
+     DRAFT (`gh pr create --draft`); if it came back non-draft, convert it
+     immediately with `gh pr ready --undo <number>`.
 
-   **Autonomy — push and draft-PR are PRE-AUTHORIZED; merging is not.** When the
-   resolved strategy is `pull-request`, you MAY push `drain/<id>` and create or update
-   its DRAFT PR WITHOUT per-bead operator confirmation, and you MUST NOT stop to ask:
-   that push IS the landing method the repo itself declared, the PR is a draft nobody
-   has merged, and review + CODEOWNERS + CI still gate the merge. You MUST NOT merge
-   the PR, enable automerge, or push any PRIMARY branch. This is NOT the **U-5**
-   prohibition: U-5 bars pushing on your own initiative to discharge unpushed
-   local-`main` debt, whereas here the operator authorized the push in advance by
-   declaring `pgii-integrate-branch.strategy = pull-request` for that repo.
+   **Autonomy — push and draft-PR are PRE-AUTHORIZED; merging is not.** When
+   the resolved strategy is `pull-request`, you MAY push `drain/<id>` and
+   create/update its DRAFT PR WITHOUT per-bead confirmation, and MUST NOT stop
+   to ask: that push IS the landing method the repo declared, and review +
+   CODEOWNERS + CI still gate the merge. You MUST NOT merge the PR, enable
+   automerge, or push any PRIMARY branch. This is NOT **U-5** (self-initiated
+   pushes to discharge unpushed local-`main` debt) — here the push is
+   pre-authorized by the repo's declared strategy.
 
    If landing returns `stopped:` due to a lost FAST-FORWARD RACE (another session
    advanced local main first), that is TRANSIENT: re-dispatch the lander at most
@@ -300,11 +301,10 @@ build` for nix repos, and the repo's tests, including a slow full suite
    UPDATED REMOTE branch and re-dispatch the lander at most ONCE more (it already
    retried 3× internally); a second failure is a GENUINE stop → STUCK. Only route
    to STUCK for a GENUINE stop (rebase-conflict, `stopped:ambiguous-remote`,
-   `stopped:no-pr-host`, or a canonical off-primary/dirty halt). A canonical
-   off-primary/dirty clone halts only a canonical-ADVANCING strategy: the
-   `pull-request` handler's PR-0 SURFACES that anomaly and PROCEEDS, because it
-   never reads or writes the canonical clone (R-8's carve-out). Under
-   `pull-request` it MUST therefore be reported and NOT treated as a stop.
+   `stopped:no-pr-host`, or a canonical off-primary/dirty halt — the latter
+   only for a canonical-ADVANCING strategy: `pull-request`'s PR-0 surfaces it
+   and PROCEEDS, since it never touches the canonical clone (R-8's carve-out);
+   there it MUST be reported and NOT treated as a stop).
 
 7. **FINISH** — branch on the report status.
 
@@ -354,8 +354,9 @@ pb gate attach-verified-child \
 # one --gate per changed repo; the child unblocks only when ALL are applied
 ```
 
-Pin `<landed-sha>` to the SHA the lander reported — never HEAD (a peer may have
-advanced it). Branch on the exit code:
+Pin `<landed-sha>` to the sha the lander reported AND you verified in LAND's
+check — never HEAD, never a re-read of the shared primary branch (a peer may
+have advanced either). Branch on the exit code:
 
 - `0` → fully gated; the output names the child. CLEANUP per FINISH, then close
   the impl bead naming the child.
@@ -405,10 +406,10 @@ attempt `pb gate attach-verified-child` here, never route to STUCK for it.
 
 ## STUCK — cannot complete a claimed bead
 
-Triggers: underspecified / needs a human decision; the pre-apply gates cannot
-be made to pass; the lander reports a GENUINE `stopped:<reason>` (not a
-transient ff-race or rejected non-ff push); `pb gate attach-verified-child`
-exited 3 or 4; repeated failed attempts.
+Triggers: underspecified / needs a human decision; `pb drain isolate` exited 3
+(conflicting isolation state); pre-apply gates that cannot be made to pass; a
+GENUINE lander `stopped:<reason>` (not a transient ff-race/rejected push);
+`pb gate attach-verified-child` exited 3 or 4; repeated failed attempts.
 NOT a trigger: "another bead has to land first" (that is a dependency).
 
 Invoke the `pb:drain-stuck` skill with: the bead id, your actor ID, the
