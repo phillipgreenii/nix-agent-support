@@ -47,7 +47,7 @@ func hermeticEnviron() []string {
 // hermetic too. See the mandatory amendment in this task's brief.
 func TestMain(m *testing.M) {
 	for _, v := range gitEnvVars {
-		os.Unsetenv(v)
+		_ = os.Unsetenv(v)
 	}
 	os.Exit(m.Run())
 }
