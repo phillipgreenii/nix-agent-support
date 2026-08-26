@@ -17,12 +17,13 @@ func nowUTC() time.Time { return time.Now().UTC() }
 func newRootCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:           "pb",
-		Short:         "phillip-beads: pn:applied gate create/check",
+		Short:         "phillip-beads: pn:applied gates + drain-loop helpers",
 		Version:       Version,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
 	root.AddCommand(newGateCmd())
+	root.AddCommand(newDrainCmd())
 	return root
 }
 

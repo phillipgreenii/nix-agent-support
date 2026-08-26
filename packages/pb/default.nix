@@ -39,7 +39,7 @@ mkGoApp {
   '';
 
   meta = {
-    description = "phillip-beads: pn:applied gate create/check (consumes pn workspace info; pn required on PATH)";
+    description = "phillip-beads: pn:applied gates + drain-loop helpers (consumes pn workspace info; pn required on PATH)";
     mainProgram = "pb";
   };
 }

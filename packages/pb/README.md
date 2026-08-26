@@ -1,10 +1,12 @@
-# pb — phillip-beads `pn:applied` gate create/check
+# pb — phillip-beads: `pn:applied` gates + drain-loop helpers
 
 `pb` writes and resolves **`pn:applied` gates**: beads (issues) that MUST NOT become
 workable until the change they depend on has been _applied_ by a `pn workspace apply`.
 It is the Phase-2 producer/consumer of the `pn:applied` contract (design spec:
 `docs/superpowers/specs/2026-06-25-pn-applied-gates-design.md`; contract: ADR
-`docs/adr/0018-pb-tool-and-pn-applied-contract.md`).
+`docs/adr/0018-pb-tool-and-pn-applied-contract.md`). It also carries `pb drain`, a small
+family of helpers for the `/drain-beads` work loop — starting with `drain isolate`,
+which sets up a bead's isolated worktree.
 
 A gate is keyed to a change's **`git patch-id`** (not its commit SHA) so it survives the
 local rebases this workflow performs — the SHA changes on rebase, the diff (and thus the
@@ -140,6 +142,40 @@ pb gate attach-verified-child \
   --title "verify tldr wsplan renders after apply (pg2-huyhg): run tldr wsplan, compare against a known-good sibling page" \
   --gate phillipg-nix-repo-base=9167a60 \
   --actor "$CLAUDE_SESSION_ID-drain"
+```
+
+## `pb drain isolate`
+
+Idempotent isolation for one bead in the `/drain-beads` work loop: creates or reuses
+`.worktrees/<bead>` on branch `drain/<bead>` (branching off the repo's primary branch when
+neither the worktree nor the branch already exists), then links the canonical clone's
+gitignored, nix-generated `.pre-commit-config.yaml` into the worktree so commits there run
+the hooks (`phillipg-nix-repo-base` ADR 0016). Safe to re-run: an existing worktree or parked
+branch is reused rather than recreated, and an already-linked pre-commit config is left alone.
+
+```
+pb drain isolate --bead <id> --repo <abs-path> [--json]
+```
+
+- `--bead` and `--repo` are required. `--repo` MUST be an absolute path to the canonical
+  clone — orchestrators are expected to pass an observed absolute root, not a relative path
+  or (despite the name overlap) `pb gate create --repo`'s workspace repo _key_; an `IsAbs`
+  check rejects a key passed by mistake.
+- `--bead` is validated against `^[A-Za-z0-9._-]+$` (letters, digits, dot, dash, underscore)
+  since the id lands in both a filesystem path and a branch ref; bare `.`/`..` are also
+  rejected. Dots are otherwise legal — live ids such as `pg2-4dz88.2.3` exist.
+- Human output is one line:
+  `worktree=<abs> branch=drain/<id> reused=<none|worktree|branch> precommit=<linked|present|none>`.
+  `--json` emits the same fields as a JSON object instead.
+
+| Exit | Meaning                                                                                                                                                  |
+| ---- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `0`  | Isolated (worktree created, or an existing worktree/branch reused).                                                                                      |
+| `1`  | Generic failure (bad flags, git unreachable, etc).                                                                                                       |
+| `3`  | Conflicting isolation state — the worktree path holds another branch, or `drain/<bead>` is checked out elsewhere. Never forced; route the bead to STUCK. |
+
+```bash
+pb drain isolate --bead pg2-1qcro.7 --repo /Users/phillipg/phillipg_mbp/phillipg-nix-repo-base
 ```
 
 ## Versioning
