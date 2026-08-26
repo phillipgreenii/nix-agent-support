@@ -49,8 +49,13 @@ Signals that something is in-session (gather these first, read-only):
 - **The branch/worktree you're in.** The cwd's repo, its current branch, and whether it's a
   git worktree or a `pn` coordinated workforest set. This is almost always the spine of the
   session.
-- **Beads you moved.** `bd list --status in_progress` and anything you `--claim`ed or created
-  this conversation. These name the work's intent.
+- **Beads you moved.** Anything you `--claim`ed or created this conversation. This workspace's
+  beads tracker is shared across every repo and every concurrent session, so an unscoped
+  `bd list --status in_progress` also returns other sessions' claims — narrow it with the
+  `--assignee` filter (a claim's `--actor` becomes its assignee, per the Beads Claim Hygiene
+  rules — `--actor` itself only affects writes, has no effect on `list`) or this repo's label
+  before using it as a signal, and never let the raw unscoped list stand in for "beads you
+  moved."
 - **Dirty + ahead state.** `git status` (uncommitted changes) and `git log @{u}..` /
   `git log main..` (commits not yet on main) in the repos you've been editing.
 - **The conversation itself.** What files did you edit, what did the user ask for? You have
@@ -467,13 +472,18 @@ For a no-beads repo, replace the Beads / Next-session lines with the handoff doc
 There is deliberately NO unpushed-debt block: commits landed locally and not pushed are expected,
 and are mentioned only when being unpublished BLOCKS the work — then as ONE line, not a section.
 
+There is likewise no "in-progress elsewhere" block. `bd list --status in_progress` with no
+filter spans every repo and every concurrent session sharing this tracker, so its raw output
+MUST NOT appear in the report — the summary covers only beads THIS session closed, filed, or
+left as the next-session pointer.
+
 If nothing was in scope, say so plainly rather than inventing work.
 
 ## Command quick reference
 
 | need                            | command                                                                                                  |
 | ------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| in-progress beads               | `bd list --status in_progress`                                                                           |
+| in-progress beads (scope check) | `bd list --status in_progress --assignee <you>` or `--label <repo-label>` (tracker is shared)            |
 | PR-tracker beads                | `bd list --type=merge-request`                                                                           |
 | close finished work             | `bd close <id> [<id>...] --reason="..."`                                                                 |
 | file discovered/unfinished      | `bd create --title=... --description=... --type=... -p <0-4>`                                            |
