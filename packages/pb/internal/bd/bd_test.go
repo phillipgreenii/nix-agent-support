@@ -111,3 +111,110 @@ func TestListGates_propagatesError(t *testing.T) {
 func envHas(env []string, want string) bool {
 	return slices.Contains(env, want)
 }
+
+func TestCreateBead_argvAndID(t *testing.T) {
+	f := run.NewFakeRunner()
+	f.AddResponse("bd", []string{
+		"-C", "/db", "create", "verify x after apply (pg2-a)",
+		"--defer", "2126-01-01", "--deps", "discovered-from:pg2-a",
+		"--actor", "sess-1", "--json",
+	}, run.Result{Stdout: `{"data":{"id":"pg2-child"}}`}, nil)
+	c := Client{R: f}
+	id, err := c.CreateBead(context.Background(), "/db",
+		"verify x after apply (pg2-a)", "2126-01-01", "discovered-from:pg2-a", "sess-1")
+	if err != nil {
+		t.Fatalf("CreateBead: %v", err)
+	}
+	if id != "pg2-child" {
+		t.Errorf("id = %q, want pg2-child", id)
+	}
+}
+
+func TestCreateBead_arrayEnvelope(t *testing.T) {
+	f := run.NewFakeRunner()
+	f.AddResponse("bd", []string{
+		"-C", "/db", "create", "t", "--defer", "2126-01-01",
+		"--deps", "discovered-from:pg2-a", "--actor", "s", "--json",
+	}, run.Result{Stdout: `{"data":[{"id":"pg2-child"}]}`}, nil)
+	id, err := Client{R: f}.CreateBead(context.Background(), "/db", "t", "2126-01-01", "discovered-from:pg2-a", "s")
+	if err != nil || id != "pg2-child" {
+		t.Fatalf("id, err = %q, %v; want pg2-child, nil", id, err)
+	}
+}
+
+func TestCreateBead_noIDErrors(t *testing.T) {
+	f := run.NewFakeRunner()
+	f.AddResponse("bd", []string{
+		"-C", "/db", "create", "t", "--defer", "2126-01-01",
+		"--deps", "discovered-from:pg2-a", "--actor", "s", "--json",
+	}, run.Result{Stdout: `{"data":{}}`}, nil)
+	if _, err := (Client{R: f}).CreateBead(context.Background(), "/db", "t", "2126-01-01", "discovered-from:pg2-a", "s"); err == nil {
+		t.Fatal("expected error when bd create returns no id")
+	}
+}
+
+func TestReadyIDs_uncappedQueryAndParse(t *testing.T) {
+	f := run.NewFakeRunner()
+	f.AddResponse("bd", []string{"-C", "/db", "ready", "--json", "-n", "0"},
+		run.Result{Stdout: `{"data":[{"id":"pg2-x"},{"id":"pg2-y"}]}`}, nil)
+	ids, err := Client{R: f}.ReadyIDs(context.Background(), "/db")
+	if err != nil {
+		t.Fatalf("ReadyIDs: %v", err)
+	}
+	if len(ids) != 2 || ids[0] != "pg2-x" || ids[1] != "pg2-y" {
+		t.Errorf("ids = %v", ids)
+	}
+}
+
+func TestReadyIDs_emptyQueueIsNotAnError(t *testing.T) {
+	f := run.NewFakeRunner()
+	f.AddResponse("bd", []string{"-C", "/db", "ready", "--json", "-n", "0"},
+		run.Result{Stdout: `{"data":[]}`}, nil)
+	ids, err := Client{R: f}.ReadyIDs(context.Background(), "/db")
+	if err != nil || len(ids) != 0 {
+		t.Fatalf("ids, err = %v, %v; want empty, nil", ids, err)
+	}
+}
+
+// The `data` key's PRESENCE is the positive control: output that parses but
+// carries no data key (an error envelope, `{}`) must be an ERROR, never an
+// empty set — an absence check against a vacuous parse proves nothing.
+func TestReadyIDs_missingDataKeyErrors(t *testing.T) {
+	f := run.NewFakeRunner()
+	f.AddResponse("bd", []string{"-C", "/db", "ready", "--json", "-n", "0"},
+		run.Result{Stdout: `{}`}, nil)
+	if _, err := (Client{R: f}).ReadyIDs(context.Background(), "/db"); err == nil {
+		t.Fatal("expected error for envelope without a data key")
+	}
+}
+
+func TestReadyIDs_nullDataErrors(t *testing.T) {
+	f := run.NewFakeRunner()
+	f.AddResponse("bd", []string{"-C", "/db", "ready", "--json", "-n", "0"},
+		run.Result{Stdout: `{"data":null,"error":"boom"}`}, nil)
+	if _, err := (Client{R: f}).ReadyIDs(context.Background(), "/db"); err == nil {
+		t.Fatal("expected error for null data")
+	}
+}
+
+func TestUpdateDefer_clearUsesEmptyValue(t *testing.T) {
+	f := run.NewFakeRunner()
+	f.AddResponse("bd", []string{"-C", "/db", "update", "pg2-c", "--defer", "", "--actor", "s"},
+		run.Result{}, nil)
+	if err := (Client{R: f}).UpdateDefer(context.Background(), "/db", "pg2-c", "", "s"); err != nil {
+		t.Fatalf("UpdateDefer: %v", err)
+	}
+}
+
+func TestComment_argv(t *testing.T) {
+	f := run.NewFakeRunner()
+	f.AddResponse("bd", []string{
+		"-C", "/db", "comment", "pg2-a",
+		"post-deploy verification gated as pg2-c (pn:applied).", "--actor", "s",
+	},
+		run.Result{}, nil)
+	if err := (Client{R: f}).Comment(context.Background(), "/db", "pg2-a",
+		"post-deploy verification gated as pg2-c (pn:applied).", "s"); err != nil {
+		t.Fatalf("Comment: %v", err)
+	}
+}
