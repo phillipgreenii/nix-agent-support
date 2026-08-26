@@ -818,23 +818,29 @@
                   touch $out
                 '';
 
-              # Stale-location guard for the tc-ql0o Stage C agent-rules move
-              # (bead tc-ql0o.3, 2026-08-26): F-*/B-*/D-*/P-*/W-* rule packs
-              # moved out of the always-on `pgii-agent-rules.md` into the
-              # `beads-lifecycle` skill, behind a MUST-invoke tripwire stub.
+              # Stale-location guard for the tc-ql0o rule-pack moves out of the
+              # always-on `pgii-agent-rules.md`:
+              #   - Stage C (bead tc-ql0o.3, 2026-08-26): F-*/B-*/D-*/P-*/W-*
+              #     moved into the `beads-lifecycle` skill, behind a
+              #     MUST-invoke tripwire stub.
+              #   - Stage D (bead tc-ql0o.4, 2026-08-26): R-7/R-8 moved into
+              #     the `integrate-branch` skill; U-1..U-4/U-6 moved into the
+              #     `session-wrapup:wrap-up-session` skill's
+              #     `references/unpushed-landing-debt.md`.
               # Anything under `claude-marketplace/` that still asserts one of
               # those IDs is "always-on" — a location claim, not just a rule
               # citation — is now WRONG unless that exact ID still ships in the
-              # rendered core file (a handful do: the stub keeps B-1/B-2's
-              # essence and F-1/F-9 as one-liners). This check fails on any
-              # OTHER always-on claim for those five letters.
+              # rendered core file (a handful do: the beads-lifecycle stub
+              # keeps B-1/B-2's essence and F-1/F-9 as one-liners; the core
+              # file also still carries R-1..R-6, R-9, and U-5 verbatim). This
+              # check fails on any OTHER always-on claim for these letters.
               #
-              # It does NOT flag S-*/T-*/U-*/R-*/M-*/L-*/V-*/A- citations —
-              # those packs did not move and are still genuinely always-on.
+              # It does NOT flag S-*/T-*/M-*/L-*/V-*/A-* citations — those
+              # packs did not move and are still genuinely always-on.
               #
-              # A NEW moved-out rule pack (a future Stage) MUST update the
-              # `movedLetters` set below, or this guard silently stops
-              # covering it.
+              # A NEW moved-out rule pack (a future Stage) MUST widen the
+              # bracket expression in the `grep -oE` below (currently
+              # `[FBDPWRU]`), or this guard silently stops covering it.
               test-agent-rules-tripwire-citations =
                 let
                   surface = lib.fileset.toSource {
@@ -866,9 +872,10 @@
 
                   fail=0
                   while IFS=: read -r file line text; do
-                    # Extract every F-*/B-*/D-*/P-*/W-* single-ID or range
-                    # token on this "always-on" line, e.g. "D-1..D-8", "F-3".
-                    tokens="$(printf '%s\n' "$text" | grep -oE '\b[FBDPW]-[0-9]+(\.\.[FBDPW]-[0-9]+)?\b' || true)"
+                    # Extract every F-*/B-*/D-*/P-*/W-*/R-*/U-* single-ID or
+                    # range token on this "always-on" line, e.g. "D-1..D-8",
+                    # "F-3", "U-1..U-6".
+                    tokens="$(printf '%s\n' "$text" | grep -oE '\b[FBDPWRU]-[0-9]+(\.\.[FBDPWRU]-[0-9]+)?\b' || true)"
                     [ -z "$tokens" ] && continue
                     while IFS= read -r tok; do
                       [ -z "$tok" ] && continue
@@ -888,9 +895,10 @@
                         id="''${letter}-''${i}"
                         if ! grep -qE "\\b''${id}\\b" "${core}"; then
                           echo "FAIL: $file:$line asserts \"$id\" is always-on, but it does not" >&2
-                          echo "      appear in $(basename ${core}) -- it moved to the" >&2
-                          echo "      beads-lifecycle skill (tc-ql0o Stage C). Rewrite the" >&2
-                          echo "      citation as an invocation obligation, not a location claim." >&2
+                          echo "      appear in $(basename ${core}) -- it moved out of core (F/B/D/P/W" >&2
+                          echo "      -> beads-lifecycle, tc-ql0o Stage C; R -> integrate-branch or" >&2
+                          echo "      U -> session-wrapup:wrap-up-session, tc-ql0o Stage D). Rewrite" >&2
+                          echo "      the citation to name the skill, not a core location claim." >&2
                           fail=1
                         fi
                         i=$((i + 1))

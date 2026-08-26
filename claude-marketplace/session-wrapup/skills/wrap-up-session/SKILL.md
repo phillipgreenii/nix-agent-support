@@ -284,8 +284,9 @@ STATE, and is NOT worth the operator's attention:
   thing that REMEMBERS it. `pg2-5subz` was exactly a phase-7 P0 handoff bead and became the
   accidental handle for a whole batch push — closing it would have orphaned 11 unrelated commits.
   Its replacement `pg2-dawg2` pushed all 12 and closed correctly, and the debt was back within a
-  day. A bead describes one instant; the probe describes now. Full contract: the always-on
-  `Unpushed Landing Debt` rules (U-1..U-6).
+  day. A bead describes one instant; the probe describes now. Full contract:
+  `references/unpushed-landing-debt.md` (U-1..U-4, U-6). U-5 alone remains in the core rules,
+  unconditionally.
 
 (There's no separate beads "sync" step: in server mode `bd create`/`bd close` write straight
 to the shared remote, so the housekeeping in phase 2 is already persisted.)
@@ -440,7 +441,8 @@ and MUST NOT record a push obligation (**U-1**/**U-2**).
 - **Landed is not pushed, and that is not news.** A local ff-merge leaves commits on local `main`.
   Wrapup never pushes them, never reports them (unless being unpublished BLOCKS the work — then one
   line), and never records them in the P0 handoff bead, the handoff doc, or a standing push bead — a
-  bead duplicating computable state is the defect this replaced (`Unpushed Landing Debt`, U-1..U-6).
+  bead duplicating computable state is the defect this replaced (`references/unpushed-landing-debt.md`,
+  U-1..U-4, U-6).
 - **Don't reconfigure beads to local.** Beads writes go to the shared remote automatically in
   server mode; if beads access fails, stop and surface it rather than switching to local
   (project rule).

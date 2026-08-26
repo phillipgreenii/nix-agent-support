@@ -9,6 +9,20 @@ let
   rulesFile = ./pgii-agent-rules.md;
   doltNoAutostartRule = ./beads-dolt-no-autostart-rule.md;
   doltLaunchdRule = ./beads-dolt-launchd-rule.md;
+  # Path-scoped rule files (tc-ql0o Stage D, 2026-08-26): file-keyed detail that
+  # only matters while working on a matching file family, delivered to
+  # ~/.claude/rules/ with `paths:` frontmatter instead of riding in the
+  # always-on core file. `paths:` (not `applies-to:`) is the recognized
+  # scoping key — confirmed empirically against deployed Claude Code 2.1.233
+  # (tc-ql0o Stage B.1 spike): a `paths:`-scoped rule is absent at session
+  # start and injected on a matching Read; an unrecognized key like
+  # `applies-to:` is silently ignored, which makes the rule fail OPEN
+  # (always-loads) rather than erroring. That is why
+  # `workspace/.claude/rules/beads-remote-server.md` deliberately keeps
+  # `applies-to:` — it is meant to always-load — rather than being "corrected"
+  # to `paths:`, which would newly scope it down to `.beads/**/*` reads only.
+  nixHowToFile = ./nix-how-to.md;
+  codeFileStandardsFile = ./code-file-standards.md;
   # Read the machine-wide policy flags propagated from the agent-support darwin
   # beads module via `home-manager.extraSpecialArgs` (design's flag-propagation
   # decision). Read off the module argument set — a named `arg ? DEFAULT`
@@ -135,9 +149,13 @@ in
   #
   # A blank line keeps appended sections separated cleanly.
   config = lib.mkIf cfg.enable {
-    home.file.".claude/CLAUDE.md".text =
-      rulesText
-      + lib.optionalString forbidDoltAutoStart ("\n" + builtins.readFile doltNoAutostartRule)
-      + lib.optionalString localDoltLaunchdServer ("\n" + builtins.readFile doltLaunchdRule);
+    home.file = {
+      ".claude/CLAUDE.md".text =
+        rulesText
+        + lib.optionalString forbidDoltAutoStart ("\n" + builtins.readFile doltNoAutostartRule)
+        + lib.optionalString localDoltLaunchdServer ("\n" + builtins.readFile doltLaunchdRule);
+      ".claude/rules/nix-how-to.md".source = nixHowToFile;
+      ".claude/rules/code-file-standards.md".source = codeFileStandardsFile;
+    };
   };
 }

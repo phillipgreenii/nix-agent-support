@@ -59,66 +59,9 @@ Each program module:
 
 ## Status Line (`home/programs/claude-status-line`)
 
-The Claude Code status line is assembled from an ordered list of "part" scripts. The
-wrapper (`scripts.nix` / `mkWrapperScript`) reads Claude's stdin JSON into `CLAUDE_SL_*`
-env vars, runs each part, and width-wraps the non-empty outputs across rows (see
-`docs/adr/0019-status-line-width-aware-wrapping.md`).
-
-- **Extension point**: append part-script store paths to
-  `phillipgreenii.programs.claude.status-line-parts` (a `listOf str` — any module MAY
-  contribute, including downstream flakes like `phillipg-nix-ziprecruiter`).
-- **Ordering convention** (see `docs/adr/0020-status-line-parts-ordering-convention.md`):
-  the list is merged across modules by ascending priority band, so contributors MUST place
-  their parts with an explicit order helper and MUST NOT use plain assignment (which lands
-  at the default band and orders by module-import order — non-deterministic across
-  contributors). Bands: `lib.mkBefore` (500) leads; the base default set is `lib.mkOrder
-1000`; `lib.mkAfter` (1500) trails (e.g. ZR's `aws` / `workspace` parts). For finer
-  placement use `lib.mkOrder N` with N between bands. Within one definition list, order is
-  the list order.
-- **Part contract**: a part reads its data from the exported `CLAUDE_SL_*` env vars
-  (`CLAUDE_SL_SESSION_NAME`, `_SESSION_ID`, `_WORKTREE`, `_BRANCH`, `_VERSION`, `_MODEL`,
-  `_CONTEXT_USED_PCT`, `_EXCEEDS_200K`, `_REPO_OWNER`, `_REPO_NAME`, `_PR_NUMBER`, `_PR_URL`,
-  `_PR_REVIEW_STATE`, `_EFFORT`, `_THINKING`, `_VIM_MODE`, `_AGENT`, `_5H_PCT`, `_5H_RESET`,
-  `_7D_PCT`, `_7D_RESET`)
-  or its own environment; prints **one** formatted segment to stdout
-  (ANSI colors allowed); and exits non-zero to be skipped silently. Keep segments compact —
-  they share rows and the right edge is reserved for notifications.
-- **Default segment order** (base set, `home/programs/claude-status-line/scripts.nix`):
-  vim, session name?, session id, location (repo + worktree + branch + `PR#<n>`), model
-  (+effort +thinking), agent, context (+200k alert), limits (5h + 7d), version. The PR sub-part
-  is appended after branch inside the single location segment (colored by `pr.review_state`,
-  no glyph prefix); the `CLAUDE_SL_PR_*` vars remain exported for custom parts.
-- **Nerd-font glyphs**: `phillipgreenii.programs.claude.status-line-nerd-font` (bool, default
-  false) picks MDI glyphs vs text fallbacks. The choice is baked at Nix eval time (no runtime
-  branch) via the `nerdFont` arg threaded into `scripts.nix`. In text (off) mode the location
-  sub-parts carry `repo:` / `wt:` / `br:` labels (matching the `ctx:` / `5h:` / `7d:` idiom); in
-  glyph (on) mode the MDI marker replaces the label. Glyphs are emitted as precomputed
-  raw UTF-8 bytes (`printf '\xNN...'`), NOT `printf '\U...'`, because `\U` needs a UTF-8 active
-  locale (the nix build sandbox and `LC_ALL=C` shells have none) — byte escapes are
-  locale-independent. Both a nerd-off and a nerd-on test package are built in `flake.nix`
-  (`test-claude-status-line`, `test-claude-status-line-nerdfont`); the shared bats file branches
-  on the `CLAUDE_SL_TEST_NERD_FONT` env marker the nerd-on package sets.
-- **Locale-safe width**: the wrapper forces a UTF-8 locale (baked: `en_US.UTF-8` on darwin,
-  `C.UTF-8` elsewhere) for the visible-width math when the active `LC_CTYPE` isn't UTF-8, so a
-  4-byte MDI glyph counts as one character (`${#}` == 1) instead of over-wrapping.
-- **New JSON field**: extend the wrapper's `jq` extraction in `mkWrapperScript` to export a
-  new `CLAUDE_SL_*` var, then add a part that consumes it.
-- **Branch fallback**: `worktree.branch` is only present inside a Claude worktree session.
-  In a normal checkout the wrapper derives `CLAUDE_SL_BRANCH` from the repo's `.git/HEAD`
-  (walking up from `workspace.current_dir`) using the `read` builtin — deliberately **no
-  `git` subprocess**, to preserve the single-process-per-render goal. JSON `worktree.branch`
-  always wins when present; a detached HEAD shows no branch.
-- **Colors**: override named ANSI codes via `phillipgreenii.programs.claude.status-line-colors`
-  (the `claude-theme` module injects Stylix truecolor). Do not hardcode new colors in parts
-  without a matching key.
-- **Width / wrapping contract**: the wrapper wraps at `COLUMNS - reserve`, where `reserve`
-  is `phillipgreenii.programs.claude.status-line-notification-reserve` (default 20),
-  applied uniformly to every row. Wrapping is disabled when `COLUMNS` is unset/0/non-numeric.
-  A single segment wider than the budget is emitted whole on its own row (never split). When
-  adding parts, prefer short labels so rows pack well on narrow terminals.
-- **Tests**: `test-claude-status-line.bats`. Width tests MUST pass `COLUMNS` /
-  `CLAUDE_SL_RESERVE` via `env` (the wrapper runs in a pipeline; a plain assignment does not
-  reach it).
+Full contract (part-script protocol, ordering convention, glyph/width/locale mechanics) moved to
+the `.claude/rules/claude-status-line.md` path-rule (tc-ql0o Stage D, 2026-08-26) — it rides in
+only while editing files under `home/programs/claude-status-line/`.
 
 ## Development Workflow
 
@@ -150,32 +93,9 @@ cross-root split in this repo.
 
 ## Versioning of Custom Packages
 
-Custom artifacts (Bash, Python, Go) version from a **per-source content digest**, never the repo
-git rev. The `--version` string is `YY.MM.DD.SSSSS+<srcDigest>` (build-time date + an 8-char digest
-of the artifact's own source). It changes iff that artifact's source changes (committed or dirty);
-an unrelated commit elsewhere in the repo leaves it cached. As of `phillipg-nix-repo-base` ADR 0011,
-the per-source digest now ALSO appears in the derivation `version` for Bash and Python artifacts
-(matching Go), so it shows up in `nvd` / "Package changes" output. The helpers (`mkSrcDigest`,
-`mkBashScript`/`mkBashBuilders`, `mkGoApp`/`mkGoBinary`, `mkPythonPackage`) do this for you — do
-**not** thread a repo `gitHash` into a package build (that rebuilds every stamped artifact on every
-commit). The repo git rev belongs only in the repo-meta install-metadata module. Third-party deps
-bump only via `update-locks.sh`. Authority: `phillipg-nix-repo-base` ADR 0006; see also the
-`bash-scripting` skill's "Help and Version" section.
-
-**Go packages** (`mkGoApp`/`mkGoBinary`) use the **gomod2nix engine** — pass
-`gomod2nixToml = ./gomod2nix.toml;`, commit that toml beside `go.mod`, and refresh deps with
-`go mod tidy && nix run github:nix-community/gomod2nix -- generate` (NOT `nix-update`; there is no
-`vendorHash` for this family). A local `replace => ../sibling` (e.g. `../claude-transcript`) is
-resolved natively — use the rooted-fileset + `modRoot` form (Pattern B). Authority and the full
-A/B pattern: `phillipg-nix-repo-base` ADR 0008 and its `CLAUDE.md` "Go packages" section. Do not
-reintroduce `vendorHash`/`buildGoModule`/`localReplaceModules` for these packages.
-
-**Go test gate**: a Go package with `subPackages` set means `nix build .#<pkg>` compiles only
-`cmd/` — packages outside `cmd/` are never compiled and their tests never run, so a green package
-build is NOT a whole-module test gate (proven 2026-08-12, bead `pg2-3nb2t`: `nix build .#pg-pr`
-exited 0 while `checks.pg-pr-go-tests` had been red for a week). The whole-module gate is
-`nix build .#checks.<system>.<pkg>-go-tests`, or the full `nix flake check` — which builds
-`checks.*` but NOT `packages.*`.
+Full contract (per-source-digest versioning, the gomod2nix engine, the whole-module Go test gate)
+moved to the `.claude/rules/package-versioning.md` path-rule (tc-ql0o Stage D, 2026-08-26) — it
+rides in only while working under `packages/`.
 
 ## Key Principles
 
@@ -277,6 +197,21 @@ Verified against Claude Code 2.1.186:
   `pgii-agent-rules.md` keeps a short MUST-invoke stub naming the skill and the trigger. A pack
   with NO such trigger (a bare prohibition, a conversation-time ruling) MUST stay always-on in
   `pgii-agent-rules.md` itself — the tripwire pattern does not relax that.
+- PATH-SCOPED RULE PATTERN (tc-ql0o Stage D, 2026-08-26): file-keyed detail whose violation
+  window is scoped to a file FAMILY (not a `bd`/git verb) MAY move into `.claude/rules/*.md` with
+  `paths:` frontmatter instead — a repo-level example is this repo's own
+  `claude-status-line.md`/`package-versioning.md`/`markdown-conventions.md`; the user-level
+  analogue (delivered by `home/programs/agent-rules`) is `nix-how-to.md`/`code-file-standards.md`
+  under `~/.claude/rules/`. `paths:` (NOT `applies-to:`) is the recognized scoping key — confirmed
+  empirically against deployed Claude Code 2.1.233 (tc-ql0o Stage B.1 spike): a rule scoped with
+  `paths:` is absent at session start and injected only on a matching Read; an UNRECOGNIZED key
+  like `applies-to:` is silently ignored, so the rule fails OPEN (always-loads) rather than
+  erroring. That is why `workspace/.claude/rules/beads-remote-server.md` deliberately keeps
+  `applies-to:` — it is meant to always-load regardless of which file is being read — rather than
+  being "corrected" to `paths:`, which would newly scope it down to `.beads/**/*` reads only. A
+  gate obligation that triggers on a REPO PROPERTY rather than a file read (pre-commit hooks
+  exist; `flake.nix` exists) cannot be carried by a path-rule and MUST stay in the always-on core
+  (the `pg2-3nb2t` class: a Go edit in a flake repo never reads a `.nix` file).
 - Plugin `bin/` dirs put executables on the Bash-tool PATH only (not login shells),
   auto-discovered with no manifest entry — BUT the marketplace directory-source cache copy SKIPS
   symlinks pointing outside the plugin dir, so a `/nix/store` symlink would be silently dropped.
@@ -338,9 +273,9 @@ allowlist longer than the rule. Everywhere else rules 1-3 are convention, not a 
 
 ## Markdown Authoring Conventions
 
-This project uses prettier to format `*.md` files. Always wrap glob patterns, cron expressions,
-file paths with underscores, and Python identifiers in backticks to prevent prettier from
-interpreting them as markdown emphasis or bold markup.
+Full contract (the prettier-safe backtick-wrapping convention) moved to the
+`.claude/rules/markdown-conventions.md` path-rule (tc-ql0o Stage D, 2026-08-26) — it rides in only
+while editing a `*.md` file.
 
 ---
 

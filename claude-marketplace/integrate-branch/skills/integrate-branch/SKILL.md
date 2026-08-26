@@ -172,6 +172,22 @@ flowchart TD
 
 ## Rules this skill enforces (Tier R, RFC 2119)
 
+Two Tier R rules that used to ride in the always-on core rules file MOVED here in full (tc-ql0o
+Stage D, 2026-08-26): both key on the landing moment itself, which this skill is the mandatory
+entry point for (core's R-9), so the skill invoked at exactly that moment is a sufficient — and
+more complete — home for them than a core bullet ever was.
+
+- **R-7** Concurrent agents in different worktrees are expected; the primary branch advancing
+  during work is absorbed by the rebase. Only a rebase conflict or a persistent ff-race during
+  landing warrants attention. Enforced concretely by `ff-merge-to-main`'s FF-3 retry-and-stop-at-2
+  loop and by `pull-request`'s matching push-race framing.
+- **R-8 (floating-branch halt)** If an integration would advance the canonical primary branch
+  (e.g. a local ff-merge) and the canonical clone is not on its primary branch, the agent MUST
+  halt and report — merging then advances the wrong branch and orphans work into hanging
+  branches. For methods that do not touch the canonical primary (e.g. `pull-request`), an
+  off-primary/dirty canonical is an R-3 anomaly to surface, not necessarily to halt. Enforced
+  concretely by `ff-merge-to-main`'s FF-0a halt and `pull-request`'s PR-0 surface-and-proceed
+  carve-out.
 - The agent MUST run `integrate-branch-support` before deciding anything — never
   skip straight to a handler on assumption.
 - The agent MUST treat the tool's output as advisory: it MUST NOT invoke a handler

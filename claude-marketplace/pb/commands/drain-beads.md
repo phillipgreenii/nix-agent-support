@@ -65,7 +65,9 @@ EXPECTED — **REPORT NOTHING ABOUT IT** (no heading, no probe output, no counts
 no remediation sequence) unless being unpublished BLOCKS the work itself, which
 earns ONE line. A `pull-request` repo leaves no such debt (the push IS the
 landing). Never push to clear it — read-only probes only, never `--fix` (U-4,
-U-5). Full contract: the always-on `Unpushed Landing Debt` rules (**U-1..U-6**).
+U-5). Full contract: the `session-wrapup:wrap-up-session` skill's
+`references/unpushed-landing-debt.md` (**U-1..U-4, U-6**). **U-5** alone
+remains in the core agent rules, unconditionally.
 
 Do NOT `bd create` anything for this either way — there is deliberately NO
 standing push bead (provenance: `pg2-5subz`, `pg2-dawg2`); the debt regenerates
@@ -676,7 +678,8 @@ arguments, behavior is otherwise unchanged.
   BLOCKS the work, which earns ONE line. Never push to clear it (read-only probes only,
   never `--fix`), and never file or update a standing push bead to track it: the debt is
   DERIVED STATE and a bead describes one instant while it regenerates on every land. Full
-  contract: the always-on `Unpushed Landing Debt` rules (U-1..U-6).
+  contract: the `session-wrapup:wrap-up-session` skill's `references/unpushed-landing-debt.md`
+  (U-1..U-4, U-6). U-5 alone remains in the core agent rules, unconditionally.
 
 ## Running several at once
 

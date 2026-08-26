@@ -61,10 +61,16 @@
 
 **CRITICAL**: Before claiming any change is complete:
 
-- If the project has `.pre-commit-config.yaml` (test with `test -f .pre-commit-config.yaml && echo yes || echo no` — an exit-0 probe; do NOT probe by running the tool, and do NOT probe with bare `ls`, which exits nonzero on a missing file and is therefore itself a failed tool call — 19 such failures in the 8 days to 2026-07-30): the pre-commit hooks MUST pass on the **changed** files. The **commit's own hook run is the gate** — a `git commit` fires `prek`/`pre-commit` on the staged files (so `git add -A` first, or a generated change escapes the run). To validate before committing, run `prek run --files <the changed files>` (scoped, fast). Do **NOT** use `prek`/`pre-commit run --all-files` as the completion gate: it re-runs every hook over the whole repo — duplicating the commit run, forcing the slow always-on hooks (bats, nix, …) even for an unrelated diff, and **false-blocking** a clean change on a pre-existing violation in a file it never touched. Reserve `--all-files` for a deliberate full-repo sweep, not per-change validation.
-- If the project has `flake.nix` (same exit-0 probe: `test -f flake.nix && echo yes || echo no`): `nix flake check` MUST pass. For machine-config validation use the build-only `nix build .#darwinConfigurations.<host>.system` (or `zn-self-build`) — `darwin-rebuild check` MUST NOT be used: on current nix-darwin it bails immediately with "system activation must now be run as root" and does NO build/eval (observed 2026, nix-darwin 26.05)
+- If the project has `.pre-commit-config.yaml` (test with `test -f .pre-commit-config.yaml && echo yes || echo no` — an exit-0 probe; do NOT probe by running the tool, and do NOT probe with bare `ls`, which exits nonzero on a missing file and is therefore itself a failed tool call — 19 such failures in the 8 days to 2026-07-30): the pre-commit hooks MUST pass on the **changed** files. The **commit's own hook run is the gate** — a `git commit` fires `prek`/`pre-commit` on the staged files (so `git add -A` first, or a generated change escapes the run). (How to validate before committing without over-running the hook suite: the `nix-how-to` path-rule, `.claude/rules/nix-how-to.md`.)
+- If the project has `flake.nix` (same exit-0 probe: `test -f flake.nix && echo yes || echo no`): `nix flake check` MUST pass. (Build-only machine-config validation forms and the `darwin-rebuild check` caveat: the `nix-how-to` path-rule.)
 - IF no tests exist for changed code: create them
 - NEVER claim code is complete without passing tests
+
+> Both gate OBLIGATIONS above stay here unconditionally (tc-ql0o Stage D, 2026-08-26): they
+> trigger on a repo PROPERTY (does `.pre-commit-config.yaml`/`flake.nix` exist), not on reading a
+> `.nix` file — a Go-only edit in a flake repo never reads one (the `pg2-3nb2t` class) — so a
+> file-glob-triggered path-rule cannot carry the obligation itself, only the HOW-TO detail once
+> you're already working with `.nix`/`flake.nix` files.
 
 > Observed 2026-07-30 (8-day census): 127 Bash timeouts across 69 sessions — mostly `git`
 > fetch/clone on the monorepo, `nix` builds/checks, and test loops re-issued unchanged after the
@@ -77,10 +83,6 @@
   background or with a larger explicit timeout, and narrow it if possible.
 - **L-3** A subagent brief that instructs a build, check, or full test run MUST state the timeout to
   use, or say to run it in the background.
-
-#### Structured Data Files
-
-MUST use `jq`/`yq`/`tq` for JSON/YAML/TOML manipulation over text-based editing (sed, awk, python).
 
 #### Scratch / Payload File Writes
 
@@ -98,15 +100,10 @@ MUST use `jq`/`yq`/`tq` for JSON/YAML/TOML manipulation over text-based editing 
   Read of a 4-line file satisfied the precondition — so the cost is one cheap call, not reading a
   large file in full.
 
-#### Exit Codes
-
-In ANY language, exit code 1 is the conventional general/catch-all error and MUST NOT be given a
-specific branchable meaning. If an exit code must carry a specific meaning (so callers/scripts can
-branch on it), it MUST be a distinct value >= 2, with 1 reserved for generic/unexpected errors.
-
-#### Unit Tests
-
-MUST be isolated; if they modify files directly, the test MUST generate the scenario in a temp directory.
+> Exit-code conventions, unit-test isolation, and structured-data-file tooling MOVED to the
+> `code-file-standards` path-rule (`.claude/rules/code-file-standards.md`, tc-ql0o Stage D,
+> 2026-08-26): each is scoped to a file type (shell/bats, source, or JSON/YAML/TOML), so it now
+> rides in only when a matching file is read instead of every session unconditionally.
 
 ### Beads & Workflow Lifecycle (see `beads-lifecycle` skill)
 
@@ -179,50 +176,25 @@ MUST be isolated; if they modify files directly, the test MUST generate the scen
   ruled, when) so a later reader can tell an EXECUTED DECISION from an open question. That recorded
   ruling is also what the `beads-lifecycle` skill's F-9 `decided-against?` probe greps for.
 
-### Unpushed Landing Debt
+### Unpushed Landing Debt (see `wrap-up-session` skill)
 
 > A local ff-merge makes work LANDED, not PUBLISHED, and the debt REGENERATES on every land — so it
 > is computable state that no record can hold, and a standing bead for it is a defect (`pg2-5subz`
 > nearly orphaned 11 unrelated commits; its replacement `pg2-dawg2` pushed 12, closed correctly, and
 > the debt was back within a day). Unpushed commits are NOT in themselves a problem, so the
-> OBLIGATION IS TO LOOK WHEN IT MATTERS — not to narrate the count at every session end.
+> OBLIGATION IS TO LOOK WHEN IT MATTERS — not to narrate the count at every session end. The full
+> derivation/never-standing-bead/read-only-probe/one-line-reporting contract (U-1..U-4, U-6) MOVED
+> to the `session-wrapup:wrap-up-session` skill's `references/unpushed-landing-debt.md`
+> (tc-ql0o Stage D, 2026-08-26): session close-out is exactly the observable moment this debt is
+> assessed, so the skill invoked at that moment is a sufficient home for the full text.
 
-- **U-1** Unpushed landing debt MUST be treated as DERIVED STATE and re-derived from git at the
-  moment it matters. No bead, label, comment, handoff doc, or earlier reading is its handle: a
-  reading is valid only for the instant it was taken (the `beads-lifecycle` skill's F-1) and MUST NOT be cached across a
-  later land, a peer session, or a hand-off.
-- **U-2** An agent MUST NOT create, maintain, or "restore" a standing push bead, a
-  `push-carryover` bead, or a handoff-doc section whose PURPOSE is to remember that locally landed
-  commits are unpushed. Such a record duplicates computable state, goes stale at the very next
-  land, and can be closed while the condition it names is still true — that IS this defect. A bead
-  for ONE push a person has already authorized as a discrete task is NOT this; making a bead the
-  standing accounting for the aggregate debt IS.
-- **U-3** In a `pn` workspace the probe is `pn workspace doctor`, run from anywhere inside the
-  workspace — it already computes `origin/<branch>` vs local for EVERY repo, so an agent MUST reuse
-  it rather than write another per-repo `git rev-list --count origin/main..main` loop. The debt is a
-  `branch-synced` finding carrying `ahead N` with `N > 0`; `behind M` alone is NOT (that is
-  un-pulled remote work), and a repo with no debt emits no section at all. The agent MUST read the
-  `branch-synced` findings specifically — the trailer's error count also includes other checks. This
-  workspace-wide AGGREGATE is NOT the `beads-lifecycle` skill's F-3 `pushed?` probe, which answers whether ONE named
-  commit is on a remote; a single `pushed?` reading MUST NOT be generalized to "that repo is pushed".
-- **U-4** The probe MUST be run READ-ONLY. An agent MUST NOT pass `--fix`: its `branch-synced` plan
-  is `git merge --ff-only origin/<branch>` executed in the CANONICAL clone, which cannot publish an
-  ahead-only divergence (so it does not clear the debt) and mutates the canonical clone, which
-  **R-3** forbids.
 - **U-5** Discharging the debt is OUTWARD-FACING and operator-authorized. An agent MUST NOT
   `git push`, `pn workspace push`, `pn workspace update`, or `pn workspace apply`, and MUST NOT
   invoke `/pn-workspace-sync` or `/pn-workspace-update`, on its own initiative to clear it.
   REPORTING is in scope; PUBLISHING is not. Trimming the reporting duty (**U-6**) does NOT relax
-  this restraint.
-- **U-6** REPORTING IS NOT MANDATORY, AND WHEN DUE IT MUST BE AT MOST ONE LINE. A count of
-  unpublished commits is not a problem, so an agent MUST NOT give unpushed state its own heading,
-  quote probe output verbatim, attribute commits to sessions, or spell out the remediation sequence,
-  and MUST NOT run the U-3 probe merely to have something to report. A session that landed locally
-  and is not blocked by that fact reports NOTHING about it. The one case that earns a line is a
-  CONSEQUENCE for the work in hand: unpublished state BLOCKS it — e.g. a consumer flake pins these
-  repos as `github:` inputs, so the change cannot take effect on apply until they are pushed and
-  relocked. Then name the blockage and the repos in ONE line and stop; the operator asks for the
-  probe output or the remediation path if they want it.
+  this restraint. U-5 stays here, unmoved: it is a bare prohibition against acting on ANY
+  push/apply/update at ANY moment, not only at session close-out, so it has no session-close-scoped
+  trigger the moved skill could gate on (Design P1).
 
 ### General Guidelines
 
@@ -252,8 +224,14 @@ MUST be isolated; if they modify files directly, the test MUST generate the scen
 - **R-4** By default an isolated single-repo change MUST be done in a git worktree.
 - **R-5** The worktree (R-4) and workforest requirements MAY be overridden when the user explicitly says so.
 - **R-6** For a change judged very small/quick, the agent MAY take the direct-commit path (commit on the primary branch in the canonical clone) — but if it does, it MUST first ask the user.
-- **R-7** Concurrent agents in different worktrees are expected; the primary branch advancing during work is absorbed by the rebase. Only a rebase conflict or a persistent ff-race during landing warrants attention.
-- **R-8 (floating-branch halt)** If an integration would advance the canonical primary branch (e.g. a local ff-merge) and the canonical clone is not on its primary branch, the agent MUST halt and report — merging then advances the wrong branch and orphans work into hanging branches. (For methods that do not touch the canonical primary — e.g. `pull-request` — an off-primary/dirty canonical is an R-3 anomaly to surface, not necessarily to halt.)
+
+> R-7 (concurrent-landing races) and R-8 (floating-branch halt) MOVED to the `integrate-branch`
+> skill (tc-ql0o Stage D, 2026-08-26): both key on the landing moment itself, which R-9 below
+> already forces every integration through, so the skill invoked at exactly that moment is a
+> sufficient — and more complete — home for them than a core bullet. `ff-merge-to-main`'s FF-0a
+> halt and FF-3 retry-and-stop-at-2 loop already implement R-8 and R-7 respectively in executable
+> form.
+
 - **R-9 (integration entry point)** To integrate completed work, the agent MUST invoke the Skill tool with the plugin-qualified id `integrate-branch:integrate-branch` (handlers: `integrate-branch:ff-merge-to-main`, `integrate-branch:pull-request`; session close-out is `session-wrapup:wrap-up-session`). Qualified ids are the form the Skill tool documents for plugin skills, and they are unambiguous where a bare name is not: a bare name can resolve to a different plugin's skill silently, whereas a stale qualified id fails loudly as `Unknown skill: <id>`. Bare names DO currently resolve — verified 2026-07-30: 7 bare `integrate-branch` invocations succeeded among 199 Skill calls over 8 days — so this is a SPECIFICITY requirement, NOT a fix for a live failure, and MUST NOT be cited as evidence of one. The agent MUST NOT use `superpowers:finishing-a-development-branch` (plain non-ff merge, no rebase).
 
 ### Prohibited Actions
