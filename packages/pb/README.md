@@ -106,6 +106,42 @@ pb gate check [--dry-run] [--strict] [--last-n N] [--stale-handler convert-to-hu
 - **Best-effort:** undeterminable gates are skipped and reported; the command exits
   non-zero if anything was skipped.
 
+## `pb gate attach-verified-child`
+
+Runs the whole deferred-first post-deploy gate sequence for a landed implementation
+bead in one call, rather than leaving the caller to script the `bd create --defer` /
+`pb gate create` / `bd update --defer ""` steps (and their ordering) by hand: creates
+the verification child bead **deferred**, proves it is absent from `bd ready`, attaches
+one `pn:applied` gate per `--gate <repo-key>=<sha>`, un-defers the child, re-proves
+absence (now held by the gates, not the defer), and comments the child's id back onto
+`--impl`. The ordering is load-bearing — the child is never simultaneously workable
+and ungated, closing the fleet-claim race where a peer agent claims the child and
+"verifies" code that was never applied.
+
+```
+pb gate attach-verified-child --impl <beadid> --title <t> --gate <repo>=<sha> [--gate <repo>=<sha> ...] --actor <a> [--reason <r>] [--json]
+```
+
+- `--impl`, `--title`, `--gate` (repeatable — one per changed repo) and `--actor` are
+  required. `--reason` defaults to `post-deploy verify for <impl>`.
+- Human output: `child=<id> gates=<n>`. `--json` emits the `AttachResult` envelope
+  (`child`, `gates`, `comment_failed`) instead.
+
+| Exit | Meaning                                                                                                                  |
+| ---- | ------------------------------------------------------------------------------------------------------------------------ |
+| `0`  | Fully gated: child created, gated, un-deferred, and proven absent from `bd ready`.                                       |
+| `1`  | Generic failure (e.g. bad flags, `pn`/`bd` unreachable) — nothing to clean up.                                           |
+| `3`  | Gating incomplete; the child was **left deferred** — safe, no peer can claim it. Route the impl bead to STUCK and retry. |
+| `4`  | The child could **not be proven un-workable** — do **NOT** close the impl bead until this is resolved by hand.           |
+
+```bash
+pb gate attach-verified-child \
+  --impl pg2-huyhg \
+  --title "verify tldr wsplan renders after apply (pg2-huyhg): run tldr wsplan, compare against a known-good sibling page" \
+  --gate phillipg-nix-repo-base=9167a60 \
+  --actor "$CLAUDE_SESSION_ID-drain"
+```
+
 ## Versioning
 
 Per-source content digest (agent-support "Versioning"): `mkGoApp` stamps `main.Version`.

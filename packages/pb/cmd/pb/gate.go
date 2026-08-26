@@ -9,5 +9,6 @@ func newGateCmd() *cobra.Command {
 	}
 	cmd.AddCommand(newGateCreateCmd())
 	cmd.AddCommand(newGateCheckCmd())
+	cmd.AddCommand(newGateAttachVerifiedChildCmd())
 	return cmd
 }
