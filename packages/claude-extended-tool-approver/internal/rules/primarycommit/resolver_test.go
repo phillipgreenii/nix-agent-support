@@ -6,8 +6,38 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
+
+// hermeticEnviron removes git env vars inherited from a parent `git commit`'s hook
+// environment (GIT_DIR, GIT_INDEX_FILE, GIT_WORK_TREE, GIT_PREFIX,
+// GIT_OBJECT_DIRECTORY, GIT_COMMON_DIR). These variables repoint tempdir git calls at
+// the real repo, breaking test hermeticity when tests are run from a git commit hook —
+// same pattern and same fix as pg2-f6cgn / commit 98f8c95d in packages/pb, ported here
+// for pg2-rrhw2: the sibling fixture in internal/engine (which shares this exact
+// pattern) corrupted the AMBIENT repo's shared .git/config this way, confirmed by
+// reproduction — `GIT_DIR=<ambient>/.git git -C <dir> config user.email …` silently
+// writes into <ambient>, not <dir>, and <dir>/.git is never even created. This file's
+// own three `git()` helpers share the identical `-C d`-with-no-other-isolation
+// pattern, so they share the identical exposure.
+//
+// t.Setenv cannot fix this: GIT_DIR="" is not "unset" to git — it is a fatal "the
+// empty string is not a valid path" — so the only reliable fix is to omit these
+// variables from the subprocess's OWN environment entirely.
+func hermeticEnviron() []string {
+	skipVars := map[string]bool{
+		"GIT_DIR": true, "GIT_INDEX_FILE": true, "GIT_WORK_TREE": true,
+		"GIT_PREFIX": true, "GIT_OBJECT_DIRECTORY": true, "GIT_COMMON_DIR": true,
+	}
+	var env []string
+	for _, kv := range os.Environ() {
+		if k := strings.SplitN(kv, "=", 2)[0]; !skipVars[k] {
+			env = append(env, kv)
+		}
+	}
+	return env
+}
 
 // Contract test: pins our assumptions about the on-disk git file formats the resolver
 // reads (.git dir-vs-file, .git/HEAD ref line, .git/config section). Uses real `git`
@@ -18,7 +48,9 @@ func TestFileResolver_Contract(t *testing.T) {
 	dir := t.TempDir()
 	git := func(d string, args ...string) {
 		t.Helper()
-		if out, err := exec.Command("git", append([]string{"-C", d}, args...)...).CombinedOutput(); err != nil {
+		cmd := exec.Command("git", append([]string{"-C", d}, args...)...)
+		cmd.Env = hermeticEnviron()
+		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git -C %s %v: %v\n%s", d, args, err, out)
 		}
 	}
@@ -67,7 +99,9 @@ func TestFileResolver_WalkUpAndDetached(t *testing.T) {
 	dir := t.TempDir()
 	git := func(d string, args ...string) {
 		t.Helper()
-		if out, err := exec.Command("git", append([]string{"-C", d}, args...)...).CombinedOutput(); err != nil {
+		cmd := exec.Command("git", append([]string{"-C", d}, args...)...)
+		cmd.Env = hermeticEnviron()
+		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git -C %s %v: %v\n%s", d, args, err, out)
 		}
 	}
@@ -112,7 +146,9 @@ func TestFileResolver_MissingDir(t *testing.T) {
 	dir := t.TempDir()
 	git := func(d string, args ...string) {
 		t.Helper()
-		if out, err := exec.Command("git", append([]string{"-C", d}, args...)...).CombinedOutput(); err != nil {
+		cmd := exec.Command("git", append([]string{"-C", d}, args...)...)
+		cmd.Env = hermeticEnviron()
+		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git -C %s %v: %v\n%s", d, args, err, out)
 		}
 	}

@@ -13,6 +13,7 @@
 package engine_test
 
 import (
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -20,6 +21,40 @@ import (
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
 )
+
+// hermeticEnviron removes git env vars inherited from a parent `git commit`'s hook
+// environment (GIT_DIR, GIT_INDEX_FILE, GIT_WORK_TREE, GIT_PREFIX,
+// GIT_OBJECT_DIRECTORY, GIT_COMMON_DIR). These variables repoint tempdir git calls at
+// the real repo, breaking test hermeticity when tests are run from a git commit hook —
+// same pattern and same fix as pg2-f6cgn / commit 98f8c95d in packages/pb, ported here
+// for pg2-rrhw2.
+//
+// `-C <dir>` only changes the working directory before git runs; it does NOT override
+// these variables, which git's own repo discovery consults FIRST and which `-C` cannot
+// override. A value leaked into the environment of whatever shell/session launched
+// `go test` (a git hook context, a forgotten `export GIT_DIR=...`) silently redirects
+// every "isolated" `-C canonical` call here onto whatever repository that variable
+// names instead — this is exactly how this fixture corrupted the AMBIENT repo's shared
+// .git/config in pg2-rrhw2 (confirmed by reproduction: `GIT_DIR=<ambient>/.git git -C
+// <canonical> config user.email …` silently writes into <ambient>, not <canonical>,
+// and <canonical>/.git is never even created).
+//
+// t.Setenv cannot fix this: GIT_DIR="" is not "unset" to git — it is a fatal "the
+// empty string is not a valid path" — so the only reliable fix is to omit these
+// variables from the subprocess's OWN environment entirely.
+func hermeticEnviron() []string {
+	skipVars := map[string]bool{
+		"GIT_DIR": true, "GIT_INDEX_FILE": true, "GIT_WORK_TREE": true,
+		"GIT_PREFIX": true, "GIT_OBJECT_DIRECTORY": true, "GIT_COMMON_DIR": true,
+	}
+	var env []string
+	for _, kv := range os.Environ() {
+		if k := strings.SplitN(kv, "=", 2)[0]; !skipVars[k] {
+			env = append(env, kv)
+		}
+	}
+	return env
+}
 
 // nestedWorktreeFixture builds a canonical clone on branch "main" with a linked worktree
 // on branch "feat" at <canonical>/.worktrees/feat, and returns both paths.
@@ -30,7 +65,9 @@ func nestedWorktreeFixture(t *testing.T) (canonical, worktree string) {
 	canonical = t.TempDir()
 	git := func(args ...string) {
 		t.Helper()
-		if out, err := exec.Command("git", append([]string{"-C", canonical}, args...)...).CombinedOutput(); err != nil {
+		cmd := exec.Command("git", append([]string{"-C", canonical}, args...)...)
+		cmd.Env = hermeticEnviron()
+		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git -C %s %v: %v\n%s", canonical, args, err, out)
 		}
 	}
@@ -200,7 +237,9 @@ func TestIntegration_PrimaryCommitMissingDirNeverApproves(t *testing.T) {
 	canonical, worktree := nestedWorktreeFixture(t)
 	git := func(args ...string) {
 		t.Helper()
-		if out, err := exec.Command("git", append([]string{"-C", canonical}, args...)...).CombinedOutput(); err != nil {
+		cmd := exec.Command("git", append([]string{"-C", canonical}, args...)...)
+		cmd.Env = hermeticEnviron()
+		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git -C %s %v: %v\n%s", canonical, args, err, out)
 		}
 	}
