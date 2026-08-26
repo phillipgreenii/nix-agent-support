@@ -222,6 +222,86 @@ func TestSafecmds_DataLeavesAreNeverJudgedAsCommands(t *testing.T) {
 	}
 }
 
+// TestSafecmds_ReadAndControlFlow_AlwaysSafe is the pg2-lpcpn regression guard
+// for read/break/continue/return/exit's membership in alwaysSafe: none of the
+// five has a file-operand form (read only ever consumes stdin or an fd via
+// -u; the other four are pure shell control-flow keywords), so all five are
+// unconditionally safe rather than needing safeReadCmds' zone check. Covers
+// both a bare form and a control-flow context (an if/then/fi wrapping the
+// leaf), mirroring TestSafecmds_AlwaysSafe_Approve's table shape.
+//
+// Uses if/then/fi, NOT for/do/done, for the control-flow cases: a `for`
+// loop's body is opaque to this rule engine's leaf-walker regardless of
+// content — verified independently that even the long-established alwaysSafe
+// members `true`/`echo` abstain when wrapped in `for i in 1; do ...; done`,
+// while the identical wrapping in `if true; then ...; fi` walks correctly.
+// That is a pre-existing, unrelated gap in cmdparse's control-flow handling,
+// not something this change introduces or is in scope to fix (tracked
+// separately, same "own investigation, don't bundle" treatment this bead
+// already gives the quoted-argument parser issue) — filed as pg2-1m8en
+// (closed; root cause folded into pg2-0h53n).
+func TestSafecmds_ReadAndControlFlow_AlwaysSafe(t *testing.T) {
+	pe := patheval.New("/home/user/project")
+	r := New(pe)
+	commands := []string{
+		// read: bare and piped from stdin — no file operand.
+		"read x",
+		"read -r x",
+		"echo hi | read x",
+		// break/continue/return/exit: bare.
+		"break",
+		"continue",
+		"return",
+		"exit",
+		"exit 0",
+		// Same five in a control-flow context.
+		"true; break",
+		"if true; then break; fi",
+		"if true; then continue; fi",
+		"if true; then read x; fi",
+		"if true; then return; fi",
+		"if true; then exit 1; fi",
+	}
+	for _, cmd := range commands {
+		input := &hookio.HookInput{
+			ToolName:  "Bash",
+			CWD:       "/home/user/project",
+			ToolInput: mustJSON(map[string]string{"command": cmd}),
+		}
+		got := hookio.Verdict(r.Evaluate(input))
+		if got.Decision != hookio.Approve {
+			t.Errorf("cmd %q: got %s (%s), want approve", cmd, got.Decision, got.Reason)
+		}
+	}
+}
+
+// TestSafecmds_Paste_Commands is the pg2-lpcpn regression guard for paste's
+// membership in safeReadCmds (a pure stdin/stdout transform like base64/xxd/jq,
+// but one that also accepts file operands and prints their content — so it
+// needs the same zone check base64 already gets, not alwaysSafe). Mirrors
+// TestSafecmds_Base64_Commands' table shape exactly.
+func TestSafecmds_Paste_Commands(t *testing.T) {
+	pe := patheval.New("/home/user/project")
+	r := New(pe)
+	cases := []struct {
+		cmd  string
+		want hookio.Decision
+	}{
+		// paste with a project-zone file operand approves, same as base64/xxd/cat.
+		{"paste /home/user/project/a.txt /home/user/project/b.txt", hookio.Approve},
+		{"paste -d, /home/user/project/a.txt /home/user/project/b.txt", hookio.Approve},
+		// paste on an out-of-zone path defers, same as base64/xxd/cat on /etc/shadow.
+		{"paste /etc/shadow", hookio.NoOpinion},
+		{"paste /home/user/project/a.txt /etc/shadow", hookio.NoOpinion},
+	}
+	for _, c := range cases {
+		input := &hookio.HookInput{ToolName: "Bash", CWD: "/home/user/project", ToolInput: mustJSON(map[string]string{"command": c.cmd})}
+		if got := hookio.Verdict(r.Evaluate(input)); got.Decision != c.want {
+			t.Errorf("cmd %q: got %s (%s), want %s", c.cmd, got.Decision, got.Reason, c.want)
+		}
+	}
+}
+
 // TestSafecmds_Base64_Commands is the pg2-51v0k regression guard for base64's
 // membership in safeReadCmds (safecmds.go's `alwaysSafe`-vs-`safeReadCmds`
 // doc on the "base64" entry explains why it landed in THIS map, not

@@ -58,6 +58,14 @@ var alwaysSafe = map[string]bool{
 	"claude-extended-tool-approver": true, "claude-pretool-hook": true,
 	"shellcheck": true, "colima": true, "contained-claude": true,
 	"my-code-review-support-cli": true,
+	// read (pg2-lpcpn): the shell builtin has NO file-operand form — it only
+	// ever reads from stdin or a file descriptor via -u, never an arbitrary
+	// named file — so unlike base64/paste below it belongs here unconditionally,
+	// not in the zone-checked safeReadCmds.
+	"read": true,
+	// break/continue/return/exit (pg2-lpcpn): shell control-flow keywords with
+	// zero filesystem/network side effects of their own, same class as read.
+	"break": true, "continue": true, "return": true, "exit": true,
 }
 
 // browsingCmds list/stat filesystem entries but don't read file contents.
@@ -136,6 +144,11 @@ var safeReadCmds = map[string]bool{
 	// (`gh api ... --jq .content && base64 -d`) still approves: with no file
 	// operand, readPathIssue finds no path candidate to check at all.
 	"base64": true,
+	// paste (pg2-lpcpn): a pure stdin/stdout text transform like base64/xxd/jq,
+	// but it too accepts file operands (`paste FILE1 FILE2...`) and prints their
+	// content to stdout, so it is a content reader and belongs here (zone-checked),
+	// not in alwaysSafe.
+	"paste": true,
 }
 
 // logReadSubcommands are the macOS unified-logging verbs that only read; the
