@@ -619,6 +619,49 @@ func TestShellParse_QuotedMetacharacterArgsDoNotAbstain(t *testing.T) {
 	}
 }
 
+// TestShellParse_UnescapedBacktickInDoubleQuoteIsGenuinelyUnparseable is
+// pg2-00dey's re-confirmation of the report TestShellParse_QuotedMetacharacterArgsDoNotAbstain
+// (pg2-nw3e2) could not reproduce. The original abstain is real, and this
+// pins its EXACT provenance: asks.db row 406002 (created 2026-08-25T19:58:26Z
+// by session 359a8322's manual end-to-end probe of the compiled hook binary
+// during the pg2-k3ygd investigation — session_id "", cwd "/tmp",
+// permission_mode unset, NOT a live agent session). Byte-for-byte (verified
+// via `od -c` on the row's decoded tool_input_json), that probe's backtick is
+// BARE — no escaping backslash before it — unlike every case pg2-nw3e2 tested
+// (which escaped it as “ \` “, per that bead's own request to isolate "a
+// bare backtick" as an INERT construct). A bare backtick inside a
+// double-quoted bash string opens a command substitution that this command
+// never closes (no second backtick anywhere in it), which is genuinely
+// invalid, unterminated shell syntax — a DIFFERENT construct than the one
+// pg2-nw3e2 investigated, not the same one re-tested.
+//
+// So: cmdparse correctly reports Unparseable here (I1b's fail-safe floor),
+// and the engine correctly abstains and defers to claude-code — asks.db's
+// stored hook_reason for row 406002, "unparseable command (shell parse
+// failed: reached EOF without closing quote `\"`): no leaf could be
+// evaluated (deferred to claude-code)", matches sp.Reason below exactly
+// modulo the engine's own wrapping text. This is the rule engine WORKING AS
+// INTENDED on malformed input, not a cmdparse tokenization defect and not a
+// missing safe-list entry. The bead prose that carried the report rendered
+// the backtick as escaped (“ \` “); the real probe that actually produced
+// the abstain did not — that transcription gap is what sent pg2-nw3e2's
+// otherwise-correct investigation looking at a different, already-valid
+// construct.
+func TestShellParse_UnescapedBacktickInDoubleQuoteIsGenuinelyUnparseable(t *testing.T) {
+	src := "bd comments add pg2-fl9sh \"line one with a backtick ` and a dollar $HOME and \\\"quotes\\\" inside\" && tail -1"
+	sp := ParseShell(src)
+	if !sp.Unparseable {
+		t.Fatalf("Unparseable = false, want true — this command has an unclosed backtick command substitution and IS genuinely malformed shell (leaves=%d)", len(sp.Leaves))
+	}
+	if sp.Dialect != "" {
+		t.Errorf("Dialect = %q, want empty — the parser attributes no dialect for this failure (I10)", sp.Dialect)
+	}
+	const wantReasonSubstr = "reached EOF without closing quote"
+	if !strings.Contains(sp.Reason, wantReasonSubstr) {
+		t.Errorf("Reason = %q, want it to contain %q", sp.Reason, wantReasonSubstr)
+	}
+}
+
 // TestShellParse_ResolveLoopsReplacementSemantics pins the EXACT post-pg2-qkecz
 // loop semantics, which is what the lowering had to replicate — not the
 // pre-fix behaviour.
