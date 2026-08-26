@@ -48,9 +48,7 @@
 > cwd, so each one is a round trip spent asking for something the harness had already answered.
 
 - **A-1** An absolute path MUST be built only from a root OBSERVED this session (the env block's
-  working directory, a tool result, or the user's text). This machine's roots are `/Users`,
-  `/Volumes`, `/nix` and `/private`; `/home`, `/mnt` and `/repo` do not exist on it, so producing
-  one means the root was invented rather than observed.
+  working directory, a tool result, or the user's text).@KNOWN_ABSENT_ROOTS_SENTENCE@
 - **A-2** Given a repo-relative path, resolve it as `<session-cwd>/<relative>`. If the root is
   uncertain, probe first (`ls` the parent, Glob the suffix, or `git ls-files -- '*<name>'`) — MUST
   NOT Read a guessed absolute path.

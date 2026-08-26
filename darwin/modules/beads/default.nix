@@ -33,12 +33,37 @@
     '';
   };
 
-  # Propagate the single flag INTO home-manager so HM-scoped consumers (the
+  # Whether THIS machine runs the shared per-user launchd dolt server
+  # (`org.nixos.beads-dolt-server` on `127.0.0.1:25252`; the launchd service
+  # itself is defined in the consuming machine flake, not here). Gates the
+  # Mac-local launchd portion of the agent rule (the rogue-server smell, the
+  # `beads-dolt-doctor` pointer) separately from the generic no-autostart
+  # posture: that text is only TRUE where the launchd server exists, and on a
+  # machine using a remote dolt server it contradicts the real policy. Default
+  # true at DARWIN scope, same plain-`mkOption` style as above: importing this
+  # darwin module means the machine class that runs the launchd server. NixOS
+  # machines never import it, so the agent-rules module's own default (false)
+  # applies there and no launchd text renders.
+  options.phillipgreenii.beads.localDoltLaunchdServer = lib.mkOption {
+    type = lib.types.bool;
+    default = true;
+    description = ''
+      This machine runs the shared per-user launchd dolt server
+      (`org.nixos.beads-dolt-server`, port 25252). When enabled (default on
+      darwin), the Mac-local launchd section of the beads/dolt agent rule is
+      delivered alongside the generic no-autostart posture. Set `false` on a
+      darwin machine that does not run the local launchd server.
+    '';
+  };
+
+  # Propagate the flags INTO home-manager so HM-scoped consumers (the
   # agent-rules module, the `beads-dolt-doctor` skill enablement, the vscode
-  # extension removal) read the SAME value as a specialArg (design P6: one flag,
+  # extension removal) read the SAME values as specialArgs (design P6: one flag,
   # nothing hardcodes the policy). Set unconditionally — the value itself
   # carries the policy — mirroring how the other darwin modules write
   # `home-manager.*` in this repo.
-  config.home-manager.extraSpecialArgs.forbidDoltAutoStart =
-    config.phillipgreenii.beads.forbidDoltAutoStart;
+  config.home-manager.extraSpecialArgs = {
+    forbidDoltAutoStart = config.phillipgreenii.beads.forbidDoltAutoStart;
+    localDoltLaunchdServer = config.phillipgreenii.beads.localDoltLaunchdServer;
+  };
 }

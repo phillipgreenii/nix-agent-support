@@ -12,15 +12,20 @@ One dolt server is legitimate: the shared per-user launchd agent
 `org.nixos.beads-dolt-server` (`keepAlive=true`), owning `127.0.0.1:25252` and
 serving the real data under `~/.local/share/beads-dolt`. The machine-wide `bd`
 (the overlay/`package.nix` wrapper) exports `BEADS_DOLT_AUTO_START=0`, so no
-context transparently auto-starts a server. This is gated by the single flag
-`phillipgreenii.beads.forbidDoltAutoStart` (darwin scope, default `true`).
+context transparently auto-starts a server. The generic no-autostart posture is
+gated by `phillipgreenii.beads.forbidDoltAutoStart` (darwin scope, default
+`true`); the Mac-local launchd-server portion of the agent rule is gated
+separately by `phillipgreenii.beads.localDoltLaunchdServer` (darwin scope,
+default `true`; machines without the launchd server render no launchd text).
 
 ```mermaid
 flowchart TD
     FLAG["phillipgreenii.beads.forbidDoltAutoStart\n(darwin, default true)"]
     FLAG --> WRAP["overlay bd wrapper:\n--set BEADS_DOLT_AUTO_START 0"]
-    FLAG --> RULE["always-on agent rule\n(beads-dolt-rule.md)"]
+    FLAG --> RULE["always-on agent rule\n(beads-dolt-no-autostart-rule.md)"]
     FLAG --> SKILL["beads-dolt-doctor skill"]
+    LFLAG["phillipgreenii.beads.localDoltLaunchdServer\n(darwin, default true)"]
+    LFLAG --> LRULE["always-on agent rule\n(beads-dolt-launchd-rule.md)"]
     WRAP --> SHELL["shells"]
     WRAP --> GUI["GUI apps (VS Code)"]
     WRAP --> AGENT["per-user launchd agents (pg-pr-sync)"]
@@ -131,5 +136,8 @@ All steps are read-only until data safety is confirmed. None start a server.
 
 - Design: `docs/superpowers/specs/2026-07-24-beads-dolt-no-autostart-design.md`
 - ADR: `docs/adr/0032-beads-dolt-no-autostart.md`
-- Agent rule: `home/programs/agent-rules/beads-dolt-rule.md` (flag-gated)
+- Agent rules: `home/programs/agent-rules/beads-dolt-no-autostart-rule.md`
+  (generic posture, gated by `forbidDoltAutoStart`) and
+  `home/programs/agent-rules/beads-dolt-launchd-rule.md` (Mac-local launchd
+  specifics, gated by `localDoltLaunchdServer`)
 - Skill: `claude-marketplace/beads-dolt-doctor/`
