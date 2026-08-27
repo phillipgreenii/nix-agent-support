@@ -183,7 +183,12 @@ func RuleChain(eng *engine.Engine, pe *patheval.PathEvaluator, cfg *configrules.
 		// (pg2-gkd5e). It takes the engine as its Evaluator so a dynamic value's
 		// substitution body can be recursed through the full chain.
 		envvars.NewWithEvaluator(eng),
-		assume.New(),
+		// assume takes the engine as its Evaluator (pg2-bm0ai) so its
+		// `--exec "<inner>"` payload can be structurally delegated through
+		// the I13 entry point (EvaluateStructure) rather than the bare-Reject
+		// blanket that would otherwise cover the wrapped form — mirroring
+		// safecmds/kubectl/nix/docker above.
+		assume.NewWithEvaluator(eng),
 		new(webfetch.Rule),
 		claudetools.New(),
 		// killshell gates the (non-Bash) KillShell tool by shell ownership. It is
