@@ -91,7 +91,9 @@ _Requires:_ `INV-WRITE-1`, `INV-ATTR-1`.
 _Requires:_ `INV-MR-1`.
 _Includes:_ `USECASE-PGPR-ENSURE-MR`.
 
-1. The operator creates or updates a PR through pg-pr.
+1. The operator creates or updates a PR through pg-pr, supplying its title directly or having
+   pg-pr generate one from the change (and, at creation, optionally generating the body the same
+   way).
 2. pg-pr ensures the PR's merge-request record exists, creating it if this is the first time.
 
 ### `USECASE-PGPR-SYNC` — sync PR facts from the code host <!-- uuid: 17c96eaf-5307-44c0-bc4f-ed5de759269a -->

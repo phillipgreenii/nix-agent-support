@@ -50,6 +50,17 @@ type prWriteFlags struct {
 	generateDesc bool
 	agentCLI     string
 	skillPath    string
+
+	// LLM-driven title generation (create-only; pg2-4dz88.8.4). When
+	// generateTitle is true, the CLI shells out to an agent CLI (same
+	// resolution as generateDesc's agentCLI/skillPath -- --agent-cli is
+	// shared verbatim; --skill-path is shared too, but resolves against a
+	// DIFFERENT default relative path when left unset, since the title
+	// generator loads pg-pr-write-pr-title's own SKILL.md, not the
+	// description skill's) which loads the pg-pr-write-pr-title SKILL and
+	// emits the title on stdout. Mutually exclusive with --title. Never
+	// registered on `pr update` (see addGenerateTitleFlags).
+	generateTitle bool
 }
 
 var prWF prWriteFlags
@@ -141,12 +152,20 @@ func resolveBody(cmd *cobra.Command, body, bodyFile string, bodyStdin bool) (str
 // installs the SKILL.md (see home/programs/pg-pr-plugin/default.nix).
 const defaultSkillRelPath = ".local/share/pgii-local-plugins/pg-pr/skills/pg-pr-write-pr-description/SKILL.md"
 
+// defaultTitleSkillRelPath is the sibling install path for the
+// pg-pr-write-pr-title SKILL.md (pg2-4dz88.8.4), under the SAME
+// pgii-local-plugins root defaultSkillRelPath resolves against.
+const defaultTitleSkillRelPath = ".local/share/pgii-local-plugins/pg-pr/skills/pg-pr-write-pr-title/SKILL.md"
+
 // agentCLIEnv is the env var that overrides the agent-CLI binary used
-// by --generate-description.
+// by --generate-description / --generate-title.
 const agentCLIEnv = "PG_PR_AGENT_CLI"
 
 // skillPathEnv lets callers point at an alternative SKILL.md (mostly
-// for tests and for non-standard plugin install locations).
+// for tests and for non-standard plugin install locations). Shared by
+// --generate-description and --generate-title; when unset, each falls
+// back to its OWN default (defaultSkillRelPath vs
+// defaultTitleSkillRelPath) via resolveSkillPathWithDefault.
 const skillPathEnv = "PG_PR_SKILL_PATH"
 
 // generateDescriptionConflictMsg is the error returned when
@@ -154,17 +173,27 @@ const skillPathEnv = "PG_PR_SKILL_PATH"
 // constant so tests can assert on it.
 const generateDescriptionConflictMsg = "--generate-description is mutually exclusive with --body, --body-file, and --body-stdin"
 
+// generateTitleConflictMsg is the error returned when --generate-title
+// is combined with --title (pg2-4dz88.8.4 Fork 2, resolved as a hard
+// conflict matching generateDescriptionConflictMsg's precedent exactly).
+// Kept as a constant so tests can assert on it.
+const generateTitleConflictMsg = "--generate-title is mutually exclusive with --title"
+
 // missingAgentCLIMsg is the error returned when no agent CLI can be
-// resolved. Kept as a constant so tests can assert on it.
+// resolved for --generate-description. Kept as a constant so tests can
+// assert on it.
 const missingAgentCLIMsg = "--generate-description requires an agent CLI: set --agent-cli <path>, the PG_PR_AGENT_CLI env var, or place 'zr-agent' on your PATH (the SKILL at %s can also be invoked directly from a claude session)"
 
-// generateDescription shells out to the configured agent CLI, passing
-// the SKILL.md path on stdin and capturing the body on stdout. Exposed
-// as a package-level var so tests can inject a fake.
-var generateDescription = func(ctx context.Context, agentCLI, skillPath string) (string, error) {
-	// Read the skill so it can be piped as stdin context; the SKILL
-	// itself instructs the agent to call back into `pg-pr` for diff
-	// context, so stdin only carries the prompt.
+// missingAgentCLITitleMsg is missingAgentCLIMsg's sibling for
+// --generate-title. Kept as a constant so tests can assert on it.
+const missingAgentCLITitleMsg = "--generate-title requires an agent CLI: set --agent-cli <path>, the PG_PR_AGENT_CLI env var, or place 'zr-agent' on your PATH (the SKILL at %s can also be invoked directly from a claude session)"
+
+// runAgentCLIPipingSkill is the shared subprocess-invocation shape used
+// by both generateDescription and generateTitle: it pipes the SKILL.md
+// bytes on the agent CLI's stdin and captures stdout. The SKILL itself
+// instructs the agent to call back into `pg-pr` for diff/PR context, so
+// stdin only ever carries the prompt.
+func runAgentCLIPipingSkill(ctx context.Context, agentCLI, skillPath string) (string, error) {
 	skillBytes, err := os.ReadFile(skillPath)
 	if err != nil {
 		return "", fmt.Errorf("read skill: %w", err)
@@ -179,6 +208,22 @@ var generateDescription = func(ctx context.Context, agentCLI, skillPath string) 
 			agentCLI, err, strings.TrimSpace(stderr.String()))
 	}
 	return strings.TrimSpace(stdout.String()), nil
+}
+
+// generateDescription shells out to the configured agent CLI, passing
+// the SKILL.md path on stdin and capturing the body on stdout. Exposed
+// as a package-level var so tests can inject a fake.
+var generateDescription = func(ctx context.Context, agentCLI, skillPath string) (string, error) {
+	return runAgentCLIPipingSkill(ctx, agentCLI, skillPath)
+}
+
+// generateTitle is generateDescription's sibling for --generate-title
+// (pg2-4dz88.8.4): same agent-CLI shell-out shape, pointed at the
+// pg-pr-write-pr-title SKILL instead. Exposed as a package-level var so
+// tests can inject a fake -- no unit test may resolve a real agent CLI
+// or make a network call.
+var generateTitle = func(ctx context.Context, agentCLI, skillPath string) (string, error) {
+	return runAgentCLIPipingSkill(ctx, agentCLI, skillPath)
 }
 
 // resolveAgentCLI returns the agent CLI binary path. Priority:
@@ -201,12 +246,18 @@ func resolveAgentCLI(flag string) string {
 	return ""
 }
 
-// resolveSkillPath returns the path to the pg-pr-write-pr-description
-// SKILL.md. Priority:
+// resolveSkillPathWithDefault returns the path to a SKILL.md, given the
+// default relative path (under $HOME) to fall back to. Priority:
 //  1. --skill-path flag.
 //  2. PG_PR_SKILL_PATH env var.
-//  3. ~/.local/share/pgii-local-plugins/pg-pr/skills/.../SKILL.md.
-func resolveSkillPath(flag string) (string, error) {
+//  3. ~/<defaultRelPath>.
+//
+// Shared by resolveSkillPath (description) and resolveTitleSkillPath
+// (title, pg2-4dz88.8.4) -- both flag and env var are shared verbatim
+// between --generate-description and --generate-title; only the
+// fallback DEFAULT differs, since each generator loads a different
+// SKILL.md when no override is given.
+func resolveSkillPathWithDefault(flag, defaultRelPath string) (string, error) {
 	if flag != "" {
 		return flag, nil
 	}
@@ -217,7 +268,24 @@ func resolveSkillPath(flag string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolve home dir: %w", err)
 	}
-	return filepath.Join(home, defaultSkillRelPath), nil
+	return filepath.Join(home, defaultRelPath), nil
+}
+
+// resolveSkillPath returns the path to the pg-pr-write-pr-description
+// SKILL.md. Priority:
+//  1. --skill-path flag.
+//  2. PG_PR_SKILL_PATH env var.
+//  3. ~/.local/share/pgii-local-plugins/pg-pr/skills/.../SKILL.md.
+func resolveSkillPath(flag string) (string, error) {
+	return resolveSkillPathWithDefault(flag, defaultSkillRelPath)
+}
+
+// resolveTitleSkillPath is resolveSkillPath's sibling for the
+// pg-pr-write-pr-title SKILL.md (pg2-4dz88.8.4). Same flag/env-var
+// priority; the fallback default is defaultTitleSkillRelPath instead of
+// defaultSkillRelPath.
+func resolveTitleSkillPath(flag string) (string, error) {
+	return resolveSkillPathWithDefault(flag, defaultTitleSkillRelPath)
 }
 
 // runGenerateDescription is the single entry point for both `pr
@@ -248,6 +316,38 @@ func runGenerateDescription(ctx context.Context, f prWriteFlags) (string, error)
 		return "", fmt.Errorf("agent CLI %s produced empty body", agentCLI)
 	}
 	return body, nil
+}
+
+// runGenerateTitle is runGenerateDescription's sibling for `pr create
+// --generate-title` (pg2-4dz88.8.4). It is create-only -- `pr update`
+// never registers --generate-title (see addGenerateTitleFlags), so this
+// is never called from the update path. It validates the --title
+// conflict, resolves the agent + pg-pr-write-pr-title SKILL, executes,
+// and returns the captured title.
+func runGenerateTitle(ctx context.Context, f prWriteFlags) (string, error) {
+	if f.title != "" {
+		return "", errors.New(generateTitleConflictMsg)
+	}
+	skillPath, err := resolveTitleSkillPath(f.skillPath)
+	if err != nil {
+		return "", err
+	}
+	if _, statErr := os.Stat(skillPath); statErr != nil {
+		return "", fmt.Errorf("skill file not found at %s: %w", skillPath, statErr)
+	}
+	agentCLI := resolveAgentCLI(f.agentCLI)
+	if agentCLI == "" {
+		return "", fmt.Errorf(missingAgentCLITitleMsg, skillPath)
+	}
+	title, err := generateTitle(ctx, agentCLI, skillPath)
+	if err != nil {
+		return "", err
+	}
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return "", fmt.Errorf("agent CLI %s produced empty title", agentCLI)
+	}
+	return title, nil
 }
 
 // detectCurrentBranch returns the current branch name when cwd is inside a
@@ -292,7 +392,11 @@ The PR is created in DRAFT state by default. Pass --no-draft to open a
 ready-for-review PR directly. The PR body may be supplied via --body,
 --body-file <path> (use - for stdin), --body-stdin, or
 --generate-description (LLM-driven via the pg-pr-write-pr-description
-SKILL; shells out to an agent CLI such as zr-agent).
+SKILL; shells out to an agent CLI such as zr-agent). The PR title may be
+supplied via --title, or via --generate-title (LLM-driven via the
+pg-pr-write-pr-title SKILL, the same shell-out shape). --generate-title
+works standalone or together with --generate-description; passing both
+invokes the agent CLI twice, once per generator.
 
 On success, a corresponding merge-request bead is created via
 beads.EnsureMergeRequest so subsequent pg-pr sync runs treat the PR as
@@ -306,9 +410,19 @@ gh's --reviewer/--label flags (one repeated flag per entry).`,
 
 func runPRCreate(cmd *cobra.Command, _ []string) error {
 	ctx := cmd.Context()
-	if strings.TrimSpace(prWF.title) == "" {
+
+	title := prWF.title
+	if prWF.generateTitle {
+		generated, terr := runGenerateTitle(ctx, prWF)
+		if terr != nil {
+			return terr
+		}
+		title = generated
+	}
+	if strings.TrimSpace(title) == "" {
 		return errors.New("pr create: --title is required")
 	}
+
 	var body string
 	var err error
 	if prWF.generateDesc {
@@ -346,7 +460,7 @@ func runPRCreate(cmd *cobra.Command, _ []string) error {
 	reviewers := splitCSV(prWF.reviewers)
 	labels := splitCSV(prWF.labels)
 	provider := vcsProviderFor(repo)
-	pr, err := provider.CreatePR(ctx, repo, draft, prWF.title, body, headBranch, base, reviewers, labels)
+	pr, err := provider.CreatePR(ctx, repo, draft, title, body, headBranch, base, reviewers, labels)
 	if err != nil {
 		return err
 	}
@@ -372,7 +486,7 @@ func runPRCreate(cmd *cobra.Command, _ []string) error {
 			lockErr = fmt.Errorf("pr create: await merge-request lock for %s: %w", key, aerr)
 		} else {
 			defer release()
-			id, _, berr := bdc.EnsureMergeRequest(ctx, prWF.title, beads.MergeRequestFields{
+			id, _, berr := bdc.EnsureMergeRequest(ctx, title, beads.MergeRequestFields{
 				Repo:     repo,
 				PRNumber: pr.Number,
 				State:    "open",
@@ -954,9 +1068,25 @@ func addGenerateDescriptionFlags(c *cobra.Command) {
 			"(default: $PG_PR_SKILL_PATH, else "+defaultSkillRelPath+" under $HOME)")
 }
 
+// addGenerateTitleFlags attaches the --generate-title flag to a command.
+// Create-only (see Fork 4's resolution, pg2-4dz88.8.4): `pr update` never
+// registers this flag at all -- it has no --title parameter to piggyback
+// on, unlike --generate-description's body-only update path. This
+// deliberately does NOT re-register --agent-cli / --skill-path: those are
+// shared verbatim with --generate-description via
+// addGenerateDescriptionFlags, which prCreateCmd already installs, and
+// registering a flag twice on the same command panics.
+func addGenerateTitleFlags(c *cobra.Command) {
+	c.Flags().BoolVar(&prWF.generateTitle, "generate-title", false,
+		"Generate the PR title via the pg-pr-write-pr-title SKILL "+
+			"(shells out to an agent CLI; mutually exclusive with --title; "+
+			"shares --agent-cli / --skill-path with --generate-description, "+
+			"default: "+defaultTitleSkillRelPath+" under $HOME)")
+}
+
 func init() {
 	// create
-	prCreateCmd.Flags().StringVar(&prWF.title, "title", "", "PR title (required)")
+	prCreateCmd.Flags().StringVar(&prWF.title, "title", "", "PR title (required, unless --generate-title is set)")
 	prCreateCmd.Flags().StringVar(&prWF.head, "head", "", "Head branch (defaults to current branch)")
 	prCreateCmd.Flags().StringVar(&prWF.base, "base", "origin/main", "Base branch")
 	prCreateCmd.Flags().StringVar(&prWF.reviewers, "reviewers", "", "Comma-separated list of reviewers to assign on the GitHub PR")
@@ -965,6 +1095,7 @@ func init() {
 	addRepoFlag(prCreateCmd)
 	addBodyFlags(prCreateCmd)
 	addGenerateDescriptionFlags(prCreateCmd)
+	addGenerateTitleFlags(prCreateCmd)
 	addJSONFlag(prCreateCmd)
 
 	// update
