@@ -46,8 +46,8 @@ person really is the blocker.
 2. FRESHNESS CHECK — re-verify the bead's PREMISE against CURRENT reality BEFORE you
    write any park comment or apply any label. The bead body is a snapshot from FILING
    time and the reason you are stuck may already be answered: in one pass over the
-   parked queue, 5 of 9 beads were already resolved or void. Follow the always-on
-   `Premise Freshness` rules (F-1..F-9) and run the NAMED PROBES from F-3 — one per
+   parked queue, 5 of 9 beads were already resolved or void. Follow the
+   `beads-lifecycle` skill's `Premise Freshness` rules (F-1..F-9) and run the NAMED PROBES from F-3 — one per
    external referent this bead names — keeping each decisive output verbatim:
    - `landed?` / `pushed?` / `patch-identical?` for commits and parked branches;
      `path-exists?` / `symbol-shape?` for the files, modules, and symbols the bead's
@@ -72,7 +72,7 @@ person really is the blocker.
    the label simultaneously hides the bead from the queue that would work it AND puts
    it in front of the operator. If you are waiting on another bead, the operator has
    nothing to answer and the tracker can express the wait exactly. Full contract: the
-   always-on `Blocker Modeling` rules (**D-1..D-8**).
+   `beads-lifecycle` skill's `Blocker Modeling` rules (**D-1..D-8**).
    - Name every live blocker, then ask of each: could a PERSON clear this now with a
      decision, an input, an approval, or an out-of-band action? Or must ANOTHER BEAD
      finish first? Step 2's `sibling-open?` probe already answers the second half for
@@ -230,8 +230,8 @@ throws that away (F-7). EXTRACT first, close second.
    ```
 
    Whoever later adjudicates that isolation MUST remove the label and restore the recorded
-   priority in the same update that releases or closes the bead — the always-on
-   `Worktree-Review Label Lifecycle` rules (W-1..W-8) are the label's full contract, and
+   priority in the same update that releases or closes the bead — the
+   `beads-lifecycle` skill's `Worktree-Review Label Lifecycle` rules (W-1..W-8) are the label's full contract, and
    `/unblock-human-beads`' RELEASE / CLOSE steps are where it is carried out. Drain itself
    never adjudicates isolation: such a bead is substrate-class and never enters drain's queue.
 
@@ -252,8 +252,8 @@ throws that away (F-7). EXTRACT first, close second.
 
 Reached when EVERY live blocker is another bead. The bead is not waiting on a person, so
 it MUST NOT be labeled `human`: the tracker can express this wait exactly, and unlike a
-label a dependency edge clears ITSELF. Full contract: the always-on `Blocker Modeling`
-rules (**D-1..D-8**).
+label a dependency edge clears ITSELF. Full contract: the `beads-lifecycle` skill's
+`Blocker Modeling` rules (**D-1..D-8**).
 
 1. WIRE one edge per live blocker, FIRST — while the bead is still `in_progress` and
    owned by you, so `bd ready` excludes it and the write lands in a window no peer can
