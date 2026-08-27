@@ -892,7 +892,8 @@ func TestRule_ResolutionBudgetBounded(t *testing.T) {
 //
 //	<root>/secrets/prod.env             a credential store OUTSIDE any repo
 //	<root>/repo/.git/                   repo marker (directory form)
-//	<root>/repo/internal/rules/secrets/secrets.go   the reported false positive
+//	<root>/repo/internal/rules/secrets/secrets.go       the reported false positive
+//	<root>/repo/internal/rules/secrets/secrets_test.go  same false positive, "_test.go"
 //	<root>/repo/deploy/secrets/token    the operator-OVERRIDDEN guard
 //	<root>/repo/.env                    repo-blind `.env` arm
 //	<root>/repo/secrets/.ssh/id_rsa     both arms match; the stronger must win
@@ -906,6 +907,7 @@ func repoScopeFixture(t *testing.T) string {
 		filepath.Join("secrets", "prod.env"),
 		filepath.Join("deploy", "secrets", "token"),
 		filepath.Join("repo", "internal", "rules", "secrets", "secrets.go"),
+		filepath.Join("repo", "internal", "rules", "secrets", "secrets_test.go"),
 		filepath.Join("repo", "deploy", "secrets", "token"),
 		filepath.Join("repo", ".env"),
 		filepath.Join("repo", "secrets", ".ssh", "id_rsa"),
@@ -957,6 +959,11 @@ func repoScopeFixture(t *testing.T) string {
 // component INSIDE a git repository stops prompting; every other shape keeps the
 // verdict it had.
 //
+// pg2-n4i7n's Go-source exception is pinned HERE too (the "this rule's own
+// source tree" rows below): unlike every other GenericSecretsDir match, a
+// ".go"/"_test.go" path is exempted on BOTH directions, not read-only, because
+// it is source code rather than credential data. See isGoSourceInRepo.
+//
 // GUARD 2 IS DELIBERATELY OVERRIDDEN HERE. pg2-pmk9q pinned
 // `deploy/secrets/token` as a NON-NEGOTIABLE regression guard that must keep
 // Asking. The operator OVERRODE it on 2026-08-13, with the guard's text in front of
@@ -975,11 +982,17 @@ func TestRule_GenericSecretsComponentSkippedInsideAGitRepo(t *testing.T) {
 		path string
 		read hookio.Decision
 		// write is the SAME path via a write tool. Reads and writes MUST stay
-		// distinguished (pg2-pmk9q guard 3), and the relaxation is read-only.
+		// distinguished (pg2-pmk9q guard 3) for every OTHER GenericSecretsDir
+		// match, and that relaxation is read-only. The Go-source rows below are
+		// the ONE exception (pg2-n4i7n): a ".go"/"_test.go" path is exempted on
+		// BOTH directions, so read and write agree there instead of diverging.
 		write hookio.Decision
 	}{
 		// RELAXED — the reported false positive, and the general case it subsumes.
-		{"this rule's own source tree", filepath.Join(root, "repo", "internal", "rules", "secrets", "secrets.go"), hookio.NoOpinion, hookio.Ask},
+		// pg2-n4i7n: exempted on BOTH directions, unlike every other row here —
+		// a .go/_test.go file is source, never credential data.
+		{"this rule's own source tree (secrets.go)", filepath.Join(root, "repo", "internal", "rules", "secrets", "secrets.go"), hookio.NoOpinion, hookio.NoOpinion},
+		{"this rule's own test source (secrets_test.go, pg2-n4i7n)", filepath.Join(root, "repo", "internal", "rules", "secrets", "secrets_test.go"), hookio.NoOpinion, hookio.NoOpinion},
 		{"deploy/secrets/token (guard 2, operator-OVERRIDDEN)", filepath.Join(root, "deploy", "secrets", "token"), hookio.Ask, hookio.Ask},
 		{"in-repo deploy/secrets/token", filepath.Join(root, "repo", "deploy", "secrets", "token"), hookio.NoOpinion, hookio.Ask},
 		{"in-WORKTREE secrets/token (.git is a FILE)", filepath.Join(root, "wt", "secrets", "token"), hookio.NoOpinion, hookio.Ask},
@@ -1030,6 +1043,7 @@ func TestRule_WriteNeverLessRestrictiveThanRead(t *testing.T) {
 	r := New(patheval.NewWithCWD(project, project))
 	for _, p := range []string{
 		filepath.Join(root, "repo", "internal", "rules", "secrets", "secrets.go"),
+		filepath.Join(root, "repo", "internal", "rules", "secrets", "secrets_test.go"),
 		filepath.Join(root, "repo", "deploy", "secrets", "token"),
 		filepath.Join(root, "wt", "secrets", "token"),
 		filepath.Join(root, "secrets", "prod.env"),
@@ -1057,6 +1071,7 @@ func TestRule_InRepoRelaxationFailsClosedWithoutAnEvaluator(t *testing.T) {
 	r := New(nil)
 	for _, p := range []string{
 		filepath.Join(root, "repo", "internal", "rules", "secrets", "secrets.go"),
+		filepath.Join(root, "repo", "internal", "rules", "secrets", "secrets_test.go"),
 		filepath.Join(root, "repo", "deploy", "secrets", "token"),
 	} {
 		if got := hookio.Verdict(r.Evaluate(fileInput("Read", p))); got.Decision != hookio.Ask {
@@ -1098,9 +1113,85 @@ func TestRule_ReadingThisRulesOwnSourceNoLongerPrompts(t *testing.T) {
 			t.Errorf("%s = %v, want abstain — reading the secrets rule's own source must not prompt (reason %q)", label, got.Decision, got.Reason)
 		}
 	}
-	// A WRITE to the same file is NOT relaxed (guard 3).
-	if got := hookio.Verdict(r.Evaluate(fileInput("Write", self))); got.Decision != hookio.Ask {
-		t.Errorf("Write %s = %v, want ask — the relaxation is read-only (reason %q)", self, got.Decision, got.Reason)
+	// A WRITE to the same file was NOT relaxed by pg2-pmk9q's read-only guard 3
+	// — but IS relaxed by pg2-n4i7n's narrower Go-source exception
+	// (isGoSourceInRepo), which fires on BOTH directions. See
+	// TestRule_EditingThisRulesOwnGoSourceNoLongerAsks for the full acceptance
+	// coverage (Write/Edit/MultiEdit/Delete, plus secrets_test.go).
+	if got := hookio.Verdict(r.Evaluate(fileInput("Write", self))); got.Decision != hookio.NoOpinion {
+		t.Errorf("Write %s = %v, want abstain — a Go source file under this rule module is exempted on both directions (pg2-n4i7n, reason %q)", self, got.Decision, got.Reason)
+	}
+}
+
+// ===========================================================================
+// pg2-n4i7n — a Go SOURCE file under this rule's own module is not credential
+// DATA, so it is exempted from the `secrets` component match on BOTH
+// directions, not read-only like pg2-pmk9q's general relaxation.
+// ===========================================================================
+
+// TestRule_EditingThisRulesOwnGoSourceNoLongerAsks is the literal acceptance
+// criterion of pg2-n4i7n (pg2-kfyv2's asklog evidence: every Edit to
+// secrets.go/secrets_test.go across ≥8 worktrees, Asked and always approved),
+// proven against the REAL files rather than only a fixture that merely
+// resembles them — the same "test the actual reported path" discipline
+// TestRule_ReadingThisRulesOwnSourceNoLongerPrompts already applies to reads.
+//
+// It SKIPS when the checkout is not a git working tree for the same reason
+// that test does: the nix build sandbox copies the source WITHOUT `.git`, so
+// repoScopeFixture (via TestRule_GenericSecretsComponentSkippedInsideAGitRepo)
+// carries the unconditional guarantee instead.
+func TestRule_EditingThisRulesOwnGoSourceNoLongerAsks(t *testing.T) {
+	for _, name := range []string{"secrets.go", "secrets_test.go"} {
+		t.Run(name, func(t *testing.T) {
+			self, err := filepath.Abs(name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := secretpath.Classify(self); got != secretpath.GenericSecretsDir {
+				t.Fatalf("precondition: Classify(%s) = %v, want GenericSecretsDir — this path must still match the arm being exempted, or the test proves nothing", self, got)
+			}
+			if !patheval.InGitRepo(self) {
+				t.Skipf("checkout at %s is not a git working tree (nix build sandbox); repoScopeFixture carries this guarantee unconditionally", self)
+			}
+			dir := filepath.Dir(self)
+			r := New(patheval.NewWithCWD(dir, dir))
+			for _, tool := range []string{"Write", "Edit", "MultiEdit", "Delete"} {
+				t.Run(tool, func(t *testing.T) {
+					got := hookio.Verdict(r.Evaluate(fileInput(tool, self)))
+					if got.Decision != hookio.NoOpinion {
+						t.Errorf("%s %s = %v, want abstain — a Go source file under this rule module must not Ask on write (pg2-n4i7n, reason %q)", tool, self, got.Decision, got.Reason)
+					}
+				})
+			}
+		})
+	}
+}
+
+// TestRule_EditingAGenuineCredentialFileStillAsks is the pg2-ifbfa regression
+// guard this bead must not reopen: the Go-source exemption above is keyed on
+// the FILE EXTENSION, not on "any file under a secrets/ component", so a
+// non-.go path under the identical component — a real credential store's
+// contents — must still Ask on write exactly as before.
+func TestRule_EditingAGenuineCredentialFileStillAsks(t *testing.T) {
+	root := repoScopeFixture(t)
+	project := t.TempDir()
+	r := New(patheval.NewWithCWD(project, project))
+	for _, tt := range []struct {
+		name string
+		path string
+	}{
+		{"in-repo deploy/secrets/token", filepath.Join(root, "repo", "deploy", "secrets", "token")},
+		{"in-repo secrets/.ssh/id_rsa", filepath.Join(root, "repo", "secrets", ".ssh", "id_rsa")},
+		{"in-WORKTREE secrets/token", filepath.Join(root, "wt", "secrets", "token")},
+		{"outside any repo, secrets/prod.env", filepath.Join(root, "secrets", "prod.env")},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			for _, tool := range []string{"Write", "Edit", "MultiEdit", "Delete"} {
+				if got := hookio.Verdict(r.Evaluate(fileInput(tool, tt.path))); got.Decision != hookio.Ask {
+					t.Errorf("%s %s = %v, want ask — the genuine credential-file write guard (pg2-ifbfa) must not be reopened by the Go-source exemption (reason %q)", tool, tt.path, got.Decision, got.Reason)
+				}
+			}
+		})
 	}
 }
 

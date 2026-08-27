@@ -53,7 +53,10 @@
 //     secret. if someone does have secrets in a repo, then they can explicitly
 //     set those paths in the config" — and the escape hatch is real, because
 //     LoadSandboxFilesystemConfig already merges the PROJECT-level
-//     .claude/settings.json.
+//     .claude/settings.json. A NARROWER exception on top of this (pg2-n4i7n):
+//     a `.go`/`_test.go` file under the component is skipped on BOTH reads and
+//     writes, because it is source code rather than credential data — see
+//     isGoSourceInRepo. It does not widen the write guard for anything else.
 //  4. EXTENSION ARMS ARE OUT OF THIS RULE — no `*.p12`, `*.pfx`, `*.keystore`,
 //     `service-account*.json` — on false-positive grounds: a repo full of test
 //     fixtures named `*.pem` is common. `*.pem`/`*.key` themselves WERE this
@@ -98,6 +101,20 @@
 // cover Bash writes too, not just Bash reads — it is not a gap this rule needs to
 // close. See bashRef's comment for the mechanism and lexicalHit's for the
 // resulting condition.
+//
+// ONE NARROW EXCEPTION to "a write under a `secrets/` component is NOT relaxed":
+// a Go SOURCE file (".go", including "_test.go") under that component, inside a
+// git repository, is relaxed on BOTH directions (pg2-n4i7n — see
+// isGoSourceInRepo). The bare `secrets` component is a ROLE-DESCRIBING directory
+// name a Go package tree can hold innocently — this rule's OWN module,
+// internal/rules/secrets/, is exactly such a tree — and a .go file is source
+// code, never credential DATA, so classifying it as one on the write side was
+// always the wrong call; it just took until pg2-kfyv2's asklog evidence (every
+// Edit to secrets.go/secrets_test.go across ≥8 worktrees, Asked and always
+// approved) to surface it. The exception is keyed on the EXTENSION alone, not on
+// the directory, so it does not widen pg2-ifbfa's guard for any other file: a
+// genuine credential store's non-.go contents (secrets/prod.env,
+// deploy/secrets/token) still Ask on write exactly as before.
 package secrets
 
 import (
@@ -433,13 +450,18 @@ func (r *Rule) lexicalRef(isWrite bool) candidateMatch {
 	}
 }
 
-// lexicalHit applies secretpath's classification and then the ONE relaxation the
-// operator ruled for it: a match on the bare, role-describing `secrets` component
-// and nothing else is DROPPED for a READ of a path inside a git repository (see
-// the package comment's decision 3).
+// lexicalHit applies secretpath's classification and then TWO relaxations of a
+// match on the bare, role-describing `secrets` component: the operator-ruled one
+// (dropped for a READ of a path inside a git repository — see the package
+// comment's decision 3) and the Go-source one (dropped for a ".go"/"_test.go"
+// path inside a git repository, on EITHER direction — pg2-n4i7n, see
+// isGoSourceInRepo). The Go-source check runs first and, when it fires, skips the
+// read/write branch entirely — a .go file is source, never credential data,
+// regardless of which access direction touched it.
 //
-// TWO CONDITIONS, both necessary — but the first only BINDS where its caller
-// passes a real, per-call `isWrite`:
+// For every OTHER GenericSecretsDir match, TWO CONDITIONS gate the read
+// relaxation, both necessary — but the first only BINDS where its caller passes a
+// real, per-call `isWrite`:
 //
 //   - READ ONLY ON THE DIRECT-TOOL ROUTE (Write/Edit/MultiEdit/Delete, via
 //     Check). A write under a `secrets/` component is never relaxed there. This
@@ -465,10 +487,45 @@ func (r *Rule) lexicalHit(path string, isWrite bool) bool {
 	case secretpath.WellKnownSecret:
 		return true
 	case secretpath.GenericSecretsDir:
+		if r.isGoSourceInRepo(path) {
+			return false
+		}
 		return isWrite || !r.inGitRepo(path)
 	default:
 		return false
 	}
+}
+
+// isGoSourceInRepo reports whether path is itself Go SOURCE — a ".go" file,
+// which covers both ordinary and "_test.go" files, since the latter is a
+// suffix of the former — sitting inside a git working tree (pg2-n4i7n).
+//
+// It is checked BEFORE the read/write branch below, so it exempts a Go
+// source file on BOTH directions of access, unlike decision 3's read-only
+// relaxation. That is deliberate and narrower than it looks: the exemption
+// is keyed on the FILE EXTENSION, not on "any file under a secrets/
+// component", so it fixes exactly the false positive this bead is about —
+// this rule's own module, internal/rules/secrets/secrets.go and
+// secrets_test.go, prompting on every Edit because the bare `secrets`
+// component matches GenericSecretsDir and isWrite is hardcoded true on the
+// direct-tool route — WITHOUT reopening pg2-ifbfa's genuine credential-file
+// write guard: a non-.go path under the same component (secrets/prod.env,
+// deploy/secrets/token) still Asks on write exactly as before, because this
+// check declines for it and falls through to the unchanged isWrite||…
+// expression.
+//
+// Nothing here names this repo or this rule's own path specifically, so any
+// project's "secrets" package tree is covered the same way decision 3
+// already covers reads project-wide.
+//
+// It fails closed the same way inGitRepo does: outside a git working tree
+// (or with a nil evaluator) it returns false, leaving the `secrets` arm
+// firing exactly as it did before this exemption existed.
+func (r *Rule) isGoSourceInRepo(path string) bool {
+	if filepath.Ext(path) != ".go" {
+		return false
+	}
+	return r.inGitRepo(path)
 }
 
 // inGitRepo reports whether path lies inside a git working tree, asked of the
