@@ -1055,10 +1055,21 @@ func (r *Rule) evaluateAssignment(ev cmdparse.EnvAssignment, input *hookio.HookI
 		var subResults []hookio.RuleResult
 		clearedByRecursion := false
 		exhaustionOnly := false
+		// refusalIsOnlyDynamicPathRead (pg2-4x2mu, operator ruling 2026-08-27): true
+		// only when every substitution NOT positively cleared is EXACTLY the
+		// pg2-2ke04 dynamic-path READ shape — safe-commands.readPathIssue's ONE
+		// call site that stamps hookio.RefusalCategoryDynamicPathRead (see that
+		// category's own doc). Computed alongside clearedByRecursion/exhaustionOnly
+		// by the identical seed-then-narrow pattern, over the SAME subs loop, so a
+		// capture whose only refusals are this narrow shape gets a THIRD way to
+		// clear the fallback below — independent of, and without touching,
+		// exhaustionOnly's own "no rule models this" relief (pg2-et8ns's territory).
+		refusalIsOnlyDynamicPathRead := false
 		if r.exprEval != nil {
 			subs := cmdparse.EnumerateSubstitutions(ev.Value)
 			clearedByRecursion = len(subs) > 0
 			exhaustionOnly = len(subs) > 0
+			refusalIsOnlyDynamicPathRead = len(subs) > 0
 			for _, sub := range subs {
 				stack := []hookio.StackFrame{{RuleName: name, Command: "env-value", Expression: ev.Raw}}
 				// TEXT RE-ENTRY DECISION (pg2-30wro's adjacent audit item, ADR 0039 I13).
@@ -1087,12 +1098,27 @@ func (r *Rule) evaluateAssignment(ev cmdparse.EnvAssignment, input *hookio.HookI
 				if !bodyIsUnmodelled(subResult) {
 					exhaustionOnly = false
 				}
+				if !bodyIsOnlyDynamicPathReadRefusal(subResult) {
+					refusalIsOnlyDynamicPathRead = false
+				}
 				subResults = append(subResults, subResult)
 			}
 		}
 		switch {
 		case clearedByRecursion:
 			// Positively cleared: no escalation at all, exactly as before.
+		case refusalIsOnlyDynamicPathRead:
+			// NARROW RELIEF (pg2-4x2mu, operator ruling 2026-08-27). Every
+			// substitution that was not positively cleared refused for EXACTLY the
+			// pg2-2ke04 shape: a read-only command whose path operand could not be
+			// pinned to a literal. That command never writes or exfiltrates — a
+			// mutating command, credential/secret access, a kill/signal, a
+			// KNOWN-BAD resolved path, or ANY other refusal reason carries a
+			// DIFFERENT (or unspecified) hookio.RefusalCategory and fails
+			// bodyIsOnlyDynamicPathReadRefusal, which routes the whole value to
+			// `default` below, unrelieved — see that function's doc. No escalation
+			// here, exactly like clearedByRecursion; this is deliberately NOT gated
+			// on ev.Name (pg2-5huwx forbids name-gating this relief).
 		case exhaustionOnly:
 			// RELIEVED (pg2-et8ns, operator ruling on pg2-o7l2f, 2026-08-27): no
 			// longer escalated to Ask. See "THE RULING THAT SUPERSEDES THIS
@@ -1163,4 +1189,46 @@ func bodyIsUnmodelled(subResult hookio.RuleResult) bool {
 	}
 	return subResult.Decision == hookio.NoOpinion &&
 		subResult.Provenance == hookio.ProvenanceExhaustion
+}
+
+// bodyIsOnlyDynamicPathReadRefusal reports whether a recursed substitution body's
+// verdict is one the assignment may RELIEVE under the narrow pg2-4x2mu ruling —
+// the sibling classification to bodyIsUnmodelled, same shape, different
+// authorized category.
+//
+// The Approve arm is here for the identical reason bodyIsUnmodelled's is: a value
+// mixing a positively-cleared body with a dynamic-path-read refusal
+// (`X=$(mktemp)$(cat "$dynamic/path")`) should still relieve, so "nothing here was
+// UNRELIEVABLE" must not be defeated by a body that needed no relief at all.
+//
+// The refusal arm is DELIBERATELY NARROWER than bodyIsUnmodelled's exhaustion arm:
+// it requires Provenance == ProvenanceRefusal (a rule EXAMINED this and would not
+// clear it — the opposite of exhaustion's "no rule claimed it") AND RefusalCategory
+// == hookio.RefusalCategoryDynamicPathRead, the ONE category
+// safecmds.readPathIssue stamps for the pg2-2ke04 shape (a read-only command's
+// path operand that could not be pinned to a literal). Every other shape returns
+// false and routes the value to the decisive fallback below:
+//
+//   - an unmodelled/exhausted body (Provenance == ProvenanceExhaustion) — that is
+//     exhaustionOnly's own relief (pg2-et8ns's territory), a DIFFERENT provenance
+//     value entirely, so this function does not and must not grant it;
+//   - a refusal carrying RefusalCategoryUnspecified — a mutating command,
+//     credential/secret access, a kill/signal, a KNOWN-BAD resolved path,
+//     malformed glued quoting, or any refusal this channel was never taught to
+//     classify;
+//   - every Ask/Reject — a rule formed a DECISIVE opinion, not a mere
+//     refusal-to-resolve, and MostRestrictive's tie-merge (mergeRefusalCategory)
+//     already ensures a MIXED refusal (dynamic-path-read tied with anything else
+//     on the SAME leaf) reports RefusalCategoryUnspecified, not the narrow one, so
+//     this test alone is sufficient without re-deriving that merge here.
+//
+// Gated purely on Decision/Provenance/RefusalCategory — never on ev.Name, which
+// pg2-5huwx already refuted as a gating mechanism for this same relief family.
+func bodyIsOnlyDynamicPathReadRefusal(subResult hookio.RuleResult) bool {
+	if subResult.Decision == hookio.Approve {
+		return true
+	}
+	return subResult.Decision == hookio.NoOpinion &&
+		subResult.Provenance == hookio.ProvenanceRefusal &&
+		subResult.RefusalCategory == hookio.RefusalCategoryDynamicPathRead
 }

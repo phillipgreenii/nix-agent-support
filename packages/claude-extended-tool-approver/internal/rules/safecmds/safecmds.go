@@ -222,6 +222,16 @@ func (r *Rule) refuse(reason string) (hookio.RuleResult, error) {
 	return hookio.Refused(r.Name(), reason)
 }
 
+// refuseCategorized is refuse's sibling for a refusal readPathIssue has already
+// classified (pg2-4x2mu): category rides along on the returned RuleResult so a
+// downstream consumer (envvars' narrow relief) can act on WHAT KIND of refusal
+// this is without parsing reason text. Passing hookio.RefusalCategoryUnspecified
+// here is equivalent to refuse — every readPathIssue call site uses this helper
+// uniformly rather than branching on whether a category was actually assigned.
+func (r *Rule) refuseCategorized(category hookio.RefusalCategory, reason string) (hookio.RuleResult, error) {
+	return hookio.RefusedWithCategory(r.Name(), reason, category)
+}
+
 func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 	if input.ToolName != "Bash" {
 		return hookio.NotApplicable()
@@ -391,8 +401,8 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 				if malformed {
 					return r.refuse("safe-commands: xargs " + innerBase + " has malformed glued quoting (deferred to claude-code)")
 				}
-				if issue := readPathIssue(fileArgs, pe, "", true, vars); issue != "" {
-					return r.refuse("safe-commands: xargs " + innerBase + " " + issue + " (deferred to claude-code)")
+				if issue, cat := readPathIssue(fileArgs, pe, "", true, vars); issue != "" {
+					return r.refuseCategorized(cat, "safe-commands: xargs "+innerBase+" "+issue+" (deferred to claude-code)")
 				}
 				continue
 			}
@@ -400,8 +410,8 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 			// real shape, and the conservative direction (a needless Abstain) is the
 			// safe one to take for it.
 			if safeReadCmds[innerBase] {
-				if issue := readPathIssue(innerArgs, pe, "", true, vars); issue != "" {
-					return r.refuse("safe-commands: xargs " + innerBase + " " + issue + " (deferred to claude-code)")
+				if issue, cat := readPathIssue(innerArgs, pe, "", true, vars); issue != "" {
+					return r.refuseCategorized(cat, "safe-commands: xargs "+innerBase+" "+issue+" (deferred to claude-code)")
 				}
 				continue
 			}
@@ -425,8 +435,8 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 			// straight through is behaviour-preserving for the clean case (readPathIssue
 			// applies the identical pathCandidate-based filter inline) and closes that
 			// loss for the malformed case. extractBashSyntaxCheckFiles is deleted below.
-			if issue := readPathIssue(pc.Args, pe, "", true, vars); issue != "" {
-				return r.refuse("safe-commands: " + basename + " -n " + issue + " (deferred to claude-code)")
+			if issue, cat := readPathIssue(pc.Args, pe, "", true, vars); issue != "" {
+				return r.refuseCategorized(cat, "safe-commands: "+basename+" -n "+issue+" (deferred to claude-code)")
 			}
 			continue
 		}
@@ -445,8 +455,8 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		// jar: tf/xf are safe read operations
 		if basename == "jar" {
 			if len(pc.Args) >= 1 && (pc.Args[0] == "tf" || pc.Args[0] == "xf") {
-				if issue := readPathIssue(pc.Args[1:], pe, "", true, vars); issue != "" {
-					return r.refuse("safe-commands: jar " + pc.Args[0] + " " + issue + " (deferred to claude-code)")
+				if issue, cat := readPathIssue(pc.Args[1:], pe, "", true, vars); issue != "" {
+					return r.refuseCategorized(cat, "safe-commands: jar "+pc.Args[0]+" "+issue+" (deferred to claude-code)")
 				}
 				continue
 			}
@@ -488,8 +498,8 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		// of early-`continue`-ing is what lets yq inherit that guard rather than
 		// needing its own copy of it.
 		if basename == "yq" && !isYqInPlace(pc.Args) {
-			if issue := readPathIssue(pc.Args, pe, "", true, vars); issue != "" {
-				return r.refuse("safe-commands: yq " + issue + " (deferred to claude-code)")
+			if issue, cat := readPathIssue(pc.Args, pe, "", true, vars); issue != "" {
+				return r.refuseCategorized(cat, "safe-commands: yq "+issue+" (deferred to claude-code)")
 			}
 			continue
 		}
@@ -502,8 +512,8 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 				continue
 			}
 			sedOp, sedOpLive := programOperand("sed", pc.Args, pc.ArgLiveExpansion)
-			if issue := readPathIssue(pc.Args, pe, sedOp, sedOpLive, vars); issue != "" {
-				return r.refuse("safe-commands: sed " + issue + " (deferred to claude-code)")
+			if issue, cat := readPathIssue(pc.Args, pe, sedOp, sedOpLive, vars); issue != "" {
+				return r.refuseCategorized(cat, "safe-commands: sed "+issue+" (deferred to claude-code)")
 			}
 			continue
 		}
@@ -516,8 +526,8 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 			if isGofmtWrite(pc.Args) {
 				return hookio.NotApplicable()
 			}
-			if issue := readPathIssue(pc.Args, pe, "", true, vars); issue != "" {
-				return r.refuse("safe-commands: gofmt " + issue + " (deferred to claude-code)")
+			if issue, cat := readPathIssue(pc.Args, pe, "", true, vars); issue != "" {
+				return r.refuseCategorized(cat, "safe-commands: gofmt "+issue+" (deferred to claude-code)")
 			}
 			continue
 		}
@@ -538,8 +548,8 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 			if malformed {
 				return r.refuse("safe-commands: " + basename + " has malformed glued quoting (deferred to claude-code)")
 			}
-			if issue := readPathIssue(fileArgs, pe, "", true, vars); issue != "" {
-				return r.refuse("safe-commands: " + basename + " " + issue + " (deferred to claude-code)")
+			if issue, cat := readPathIssue(fileArgs, pe, "", true, vars); issue != "" {
+				return r.refuseCategorized(cat, "safe-commands: "+basename+" "+issue+" (deferred to claude-code)")
 			}
 			continue
 		}
@@ -552,15 +562,15 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 			// conservative (operandLive always true) reading — see
 			// programOperand's and readPathIssue's docs.
 			jqOp, jqOpLive := programOperand("jq", fileArgs, nil)
-			if issue := readPathIssue(fileArgs, pe, jqOp, jqOpLive, vars); issue != "" {
-				return r.refuse("safe-commands: jq " + issue + " (deferred to claude-code)")
+			if issue, cat := readPathIssue(fileArgs, pe, jqOp, jqOpLive, vars); issue != "" {
+				return r.refuseCategorized(cat, "safe-commands: jq "+issue+" (deferred to claude-code)")
 			}
 			continue
 		}
 		if safeReadCmds[basename] {
 			op, opLive := programOperand(basename, pc.Args, pc.ArgLiveExpansion)
-			if issue := readPathIssue(pc.Args, pe, op, opLive, vars); issue != "" {
-				return r.refuse("safe-commands: " + basename + " " + issue + " (deferred to claude-code)")
+			if issue, cat := readPathIssue(pc.Args, pe, op, opLive, vars); issue != "" {
+				return r.refuseCategorized(cat, "safe-commands: "+basename+" "+issue+" (deferred to claude-code)")
 			}
 			continue
 		}
@@ -1092,7 +1102,18 @@ func browsingPathIssue(args []string, pe *patheval.PathEvaluator) string {
 // tested instead of blindly refused. The PROGRAM-operand narrowing above (the
 // `dynamic = programLive && isDynamicPathOperand(cand)` line) runs UNCHANGED before
 // this resolution attempt, so awk/sed/jq code text is unaffected either way.
-func readPathIssue(args []string, pe *patheval.PathEvaluator, program string, programLive bool, vars map[string]string) string {
+// readPathIssue returns ("", _) when no argument raises a concern, and otherwise a
+// non-empty REASON FRAGMENT plus the hookio.RefusalCategory that fragment belongs
+// to (pg2-4x2mu). Exactly ONE fragment shape is categorized
+// hookio.RefusalCategoryDynamicPathRead: "has a dynamically-expanded path arg " —
+// the pg2-2ke04 shape, a read-only command's path operand that could not be
+// pinned to a literal even through the in-command $VAR seam just below. Every
+// other fragment (malformed glued quoting, or a path that WAS resolved/known and
+// judged unreadable) returns hookio.RefusalCategoryUnspecified: the path is
+// KNOWN, not merely unresolvable text, which is a substantive finding this
+// category deliberately excludes — see the category's own doc for why that
+// distinction is load-bearing for envvars' relief.
+func readPathIssue(args []string, pe *patheval.PathEvaluator, program string, programLive bool, vars map[string]string) (string, hookio.RefusalCategory) {
 	for _, a := range args {
 		// pg2-wxbr9: route through pathCandidate so a glued flag's VALUE (not
 		// just a bare positional) is tested — see pathCandidate's doc. `program`
@@ -1108,7 +1129,7 @@ func readPathIssue(args []string, pe *patheval.PathEvaluator, program string, pr
 		// is reported through the SAME choke point as an unknown/dynamic path —
 		// see pathCandidate's doc for the measured pre-fix bypass this closes.
 		if malformed {
-			return "has malformed glued quoting " + cand
+			return "has malformed glued quoting " + cand, hookio.RefusalCategoryUnspecified
 		}
 		dynamic := argHasDynamicExpansion(cand)
 		if program != "" && cand == program {
@@ -1135,20 +1156,20 @@ func readPathIssue(args []string, pe *patheval.PathEvaluator, program string, pr
 				// verdict a literal `resolved` would have produced.
 				if looksLikePath(resolved) {
 					if !pe.Evaluate(resolved).CanRead() {
-						return "references unknown path " + resolved
+						return "references unknown path " + resolved, hookio.RefusalCategoryUnspecified
 					}
 				}
 				continue
 			}
-			return "has a dynamically-expanded path arg " + cand
+			return "has a dynamically-expanded path arg " + cand, hookio.RefusalCategoryDynamicPathRead
 		}
 		if looksLikePath(cand) {
 			if !pe.Evaluate(cand).CanRead() {
-				return "references unknown path " + cand
+				return "references unknown path " + cand, hookio.RefusalCategoryUnspecified
 			}
 		}
 	}
-	return ""
+	return "", hookio.RefusalCategoryUnspecified
 }
 
 // hasUnsafeWritePath returns (true, path) if any path-like arg is not in a writable zone.

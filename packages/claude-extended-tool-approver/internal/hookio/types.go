@@ -117,6 +117,102 @@ func mergeProvenance(a, b Provenance) Provenance {
 	return ProvenanceRefusal
 }
 
+// RefusalCategory further classifies a NoOpinion+ProvenanceRefusal verdict by WHAT
+// KIND of refusal it is (pg2-4x2mu). Provenance alone answers "did a rule refuse,
+// or did the chain merely exhaust?"; this answers, for the refusal half only, "is
+// this the ONE narrow refusal shape a consumer is authorized to relieve, or is it
+// something else?" It is meaningful only when Decision == NoOpinion && Provenance
+// == ProvenanceRefusal, and is ignored otherwise — the identical discipline
+// Provenance itself already documents.
+//
+// WHY THIS CANNOT BE A REASON-STRING MATCH. Two refusal sites in this tree can
+// share nearly the same words ("has a dynamically-expanded path arg") for a READ
+// and for a WRITE, and pg2-5huwx already refuted gating relief on the env var
+// NAME. A structured category, set explicitly at the ONE call site that knows it
+// is forming this exact shape, is the only way a consumer can tell them apart
+// without parsing prose or guessing from a name.
+//
+// FAIL-SAFE ZERO VALUE, same discipline as Provenance: RefusalCategoryUnspecified
+// is 0, so every existing RuleResult literal in the tree — and every refusal this
+// channel was never taught to classify — reads as "no specific category" without
+// being touched, and can never be MISTAKEN for the one category a consumer may
+// act on.
+type RefusalCategory int
+
+const (
+	// RefusalCategoryUnspecified is the zero value: this refusal carries no
+	// specific category, either because it predates this channel or because it
+	// is a refusal shape (a mutating command, credential/secret access, a
+	// kill/signal, a git destructive spelling, malformed glued quoting, a
+	// KNOWN-BAD resolved path, ...) that is not the one narrow shape a consumer
+	// is authorized to relieve.
+	RefusalCategoryUnspecified RefusalCategory = iota
+	// RefusalCategoryDynamicPathRead means this NoOpinion refusal is EXACTLY the
+	// pg2-2ke04 shape: a READ-ONLY command whose path OPERAND is a
+	// dynamically-expanded expression ($VAR, ${VAR}, $D/sub/path, ...) that
+	// could not be pinned to a literal — not even through the in-command $VAR
+	// seam (cmdparse.ExpandInCommand) — so the rule refused rather than
+	// guessing. It is deliberately NEVER set for: a WRITE command (the mirror
+	// refusal in command/write position stays uncategorized on purpose — this
+	// category exists only for the READ-and-never-write shape pg2-xl79d's
+	// analysis grounds the relief in); a path that WAS resolved and judged
+	// unreadable (that is a substantive, KNOWN-BAD finding, not merely an
+	// unresolvable expression); malformed glued quoting; or any other refusal
+	// reason. internal/rules/envvars is this category's one authorized consumer.
+	RefusalCategoryDynamicPathRead
+)
+
+func (c RefusalCategory) String() string {
+	if c == RefusalCategoryDynamicPathRead {
+		return "dynamic-path-read"
+	}
+	return "unspecified"
+}
+
+// mergeRefusalCategory folds two TIED RuleResults' RefusalCategory, and — unlike
+// mergeProvenance — it MUST consult each side's Provenance to do it, not just the
+// two bare categories. Here is why a naive category-only AND is wrong.
+//
+// engine.Evaluate's loop-exhaustion manufactures a bare `RuleResult{Decision:
+// NoOpinion}` and stamps its Provenance to ProvenanceExhaustion — but it never
+// touches RefusalCategory, which therefore stays its zero value
+// (RefusalCategoryUnspecified) on that manufactured verdict REGARDLESS of what any
+// real rule refused. When a genuine dynamic-path-read refusal is the ONLY thing
+// that examined a leaf and every other rule answers "not applicable", the
+// manufactured NoOpinion ties with that refusal's floor — the exact case
+// TestMostRestrictiveMergesProvenanceConservatively pins as "exhaustion tied with
+// refusal" for Provenance itself. An AND over the bare categories
+// (RefusalCategoryDynamicPathRead AND RefusalCategoryUnspecified) would read the
+// manufactured seed's zero-value "no opinion" as an AFFIRMATIVE "not
+// dynamic-path-read" claim and downgrade the tie to Unspecified — silently
+// defeating envvars' relief on precisely the single-refusing-rule shape pg2-4x2mu
+// exists to relieve.
+//
+// So a side's RefusalCategory is a REAL claim only when that side is ACTUALLY a
+// refusal (Provenance == ProvenanceRefusal, mirroring RefusalCategory's own "only
+// meaningful for a refusal" doc); an exhaustion side contributes no opinion and
+// must not be allowed to downgrade the other side's claim. Two genuine refusals
+// still AND conservatively — mirroring mergeProvenance's own shape one level
+// down — so a leaf combining a dynamic-path-read refusal with any OTHER refusal
+// is still correctly Unspecified.
+func mergeRefusalCategory(a, b RuleResult) RefusalCategory {
+	aIsRefusal := a.Provenance == ProvenanceRefusal
+	bIsRefusal := b.Provenance == ProvenanceRefusal
+	switch {
+	case aIsRefusal && bIsRefusal:
+		if a.RefusalCategory == RefusalCategoryDynamicPathRead && b.RefusalCategory == RefusalCategoryDynamicPathRead {
+			return RefusalCategoryDynamicPathRead
+		}
+		return RefusalCategoryUnspecified
+	case aIsRefusal:
+		return a.RefusalCategory
+	case bIsRefusal:
+		return b.RefusalCategory
+	default:
+		return RefusalCategoryUnspecified
+	}
+}
+
 // ErrNotApplicable reports that this rule does not govern this input. It is a
 // CONTROL SIGNAL, not a failure (cf. fs.SkipDir): the engine's first-match chain
 // treats it as "continue to the next rule" and ignores the returned RuleResult
@@ -194,6 +290,17 @@ func Refuse(floor RuleResult) (RuleResult, error) { return floor, ErrRefused }
 // Provenance is left at its zero value ProvenanceRefusal, which is the point.
 func Refused(module, reason string) (RuleResult, error) {
 	return Refuse(RuleResult{Decision: NoOpinion, Reason: reason, Module: module})
+}
+
+// RefusedWithCategory is Refused's sibling for a refusal the caller can already
+// tell apart from every other refusal it forms — the structured RefusalCategory
+// classification (pg2-4x2mu) a consumer may act on WITHOUT gating on the reason
+// string or on any name the leaf mentions. Provenance is left at its zero value
+// ProvenanceRefusal, exactly as Refused leaves it. Use Refused for the ordinary,
+// uncategorized case; use this only at a site that KNOWS it is forming one of the
+// declared RefusalCategory values.
+func RefusedWithCategory(module, reason string, category RefusalCategory) (RuleResult, error) {
+	return Refuse(RuleResult{Decision: NoOpinion, Reason: reason, Module: module, RefusalCategory: category})
 }
 
 // FromRecursion translates the verdict of a recursively-evaluated INNER expression
@@ -295,6 +402,13 @@ type RuleResult struct {
 	// Its zero value is ProvenanceRefusal, so every existing literal is a refusal
 	// and only an explicit claim can be an exhaustion.
 	Provenance Provenance
+
+	// RefusalCategory further classifies a NoOpinion+ProvenanceRefusal verdict —
+	// see its own doc. Meaningless outside that combination. Merged the same
+	// conservative way Provenance is (mergeRefusalCategory), on a
+	// MostRestrictive tie. Its zero value is RefusalCategoryUnspecified, so
+	// every existing literal reads as uncategorized without being touched.
+	RefusalCategory RefusalCategory
 }
 
 // MostRestrictive returns whichever of current/candidate is more restrictive
@@ -324,12 +438,22 @@ type RuleResult struct {
 //     conservatively (exhaustion only if both are). Two equally-restrictive NoOpinions
 //     are jointly the verdict, so if either was a refusal the pair is one, and the
 //     result cannot depend on fold order.
+//
+// REFUSALCATEGORY (pg2-4x2mu) rides the identical asymmetry, one level narrower:
+// it is meaningful only for a refusal (NoOpinion+ProvenanceRefusal), and on a TIE
+// it merges conservatively the same way (mergeRefusalCategory) — but that merge
+// MUST consult each side's ORIGINAL Provenance, not just the two bare categories,
+// which is why it is computed BEFORE current.Provenance is overwritten below —
+// see mergeRefusalCategory's own doc for the manufactured-exhaustion trap this
+// ordering avoids.
 func MostRestrictive(current, candidate RuleResult) RuleResult {
 	if candidate.Decision > current.Decision {
 		return candidate
 	}
 	if candidate.Decision == current.Decision {
+		mergedCategory := mergeRefusalCategory(current, candidate)
 		current.Provenance = mergeProvenance(current.Provenance, candidate.Provenance)
+		current.RefusalCategory = mergedCategory
 	}
 	return current
 }

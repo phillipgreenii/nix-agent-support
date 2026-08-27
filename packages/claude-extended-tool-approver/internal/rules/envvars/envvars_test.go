@@ -17,11 +17,21 @@ func mustJSON(v any) json.RawMessage {
 // fakeEvaluator lets the value-recursion path be exercised in isolation: it
 // returns a verdict keyed on the recursed body so a test can assert the env-var
 // rule INHERITS the inner command's verdict (pg2-gkd5e value-recursion).
+//
+// results is checked FIRST and takes a FULL hookio.RuleResult — the only way a
+// test can express Provenance/RefusalCategory (pg2-4x2mu), which a bare Decision
+// cannot carry. verdicts stays for every pre-existing test that only cares about
+// Decision; a key present in both is unreachable in practice (no test sets both
+// for the same expr), so results simply wins.
 type fakeEvaluator struct {
 	verdicts map[string]hookio.Decision
+	results  map[string]hookio.RuleResult
 }
 
 func (f *fakeEvaluator) EvaluateExpression(expr string, _ []hookio.StackFrame, _ *hookio.HookInput) hookio.RuleResult {
+	if r, ok := f.results[expr]; ok {
+		return r
+	}
 	d, ok := f.verdicts[expr]
 	if !ok {
 		d = hookio.Approve
@@ -1041,6 +1051,173 @@ func TestEnvVars_UnenumerableUnknownValue_Ask(t *testing.T) {
 	}
 	if strings.Contains(got.Reason, "no rule models") {
 		t.Errorf("unenumerable unknown value: reason %q classifies it as an EXHAUSTION; it enumerates to zero substitutions and is unclassifiable", got.Reason)
+	}
+}
+
+// dynamicPathReadRefusal builds the RuleResult a recursed substitution body gets
+// when safe-commands' readPathIssue refused it for EXACTLY the pg2-2ke04 shape —
+// the hookio.RefusalCategoryDynamicPathRead category envvars' narrow relief
+// (pg2-4x2mu) is authorized to clear.
+func dynamicPathReadRefusal(reason string) hookio.RuleResult {
+	return hookio.RuleResult{
+		Decision:        hookio.NoOpinion,
+		Provenance:      hookio.ProvenanceRefusal,
+		RefusalCategory: hookio.RefusalCategoryDynamicPathRead,
+		Module:          "safe-commands",
+		Reason:          reason,
+	}
+}
+
+// otherRefusal builds an UNCATEGORIZED refusal — the shape a mutating command,
+// credential/secret access, kill/signal, or a KNOWN-BAD resolved path produces.
+// It deliberately carries RefusalCategoryUnspecified (the zero value), the same
+// as every refusal site this bead does not touch.
+func otherRefusal(module, reason string) hookio.RuleResult {
+	return hookio.RuleResult{
+		Decision:   hookio.NoOpinion,
+		Provenance: hookio.ProvenanceRefusal,
+		Module:     module,
+		Reason:     reason,
+	}
+}
+
+// TestEnvVars_DynamicPathReadRefusal_Relieved is pg2-4x2mu's core acceptance case:
+// a capture whose ONLY refusal is the dynamic-path READ shape clears the
+// "unevaluated/unsafe expression" fallback entirely — no escalation, and NOT
+// marked as examined-and-refused, exactly like clearedByRecursion's existing
+// fully-approved case.
+func TestEnvVars_DynamicPathReadRefusal_Relieved(t *testing.T) {
+	fe := &fakeEvaluator{results: map[string]hookio.RuleResult{
+		`cat "$dynamic/path"`: dynamicPathReadRefusal(`safe-commands: cat has a dynamically-expanded path arg $dynamic/path (deferred to claude-code)`),
+	}}
+	r := NewWithEvaluator(fe)
+	ev := cmdparse.EnvAssignment{
+		Name:      "out",
+		Value:     `$(cat "$dynamic/path")`,
+		Raw:       `out=$(cat "$dynamic/path")`,
+		Expansion: cmdparse.ExpansionUnknown,
+	}
+	got, refused := r.evaluateAssignment(ev, &hookio.HookInput{ToolName: "Bash"}, nil, nil, false)
+	if got.Decision == hookio.Ask {
+		t.Errorf("dynamic-path-read-only capture: got %s (%s), want the fallback relieved (no ask)", got.Decision, got.Reason)
+	}
+	if refused {
+		t.Error("dynamic-path-read-only capture: marked as examined-and-refused; the relief must clear it exactly like clearedByRecursion")
+	}
+	if strings.Contains(got.Reason, "unevaluated/unsafe expression") || strings.Contains(got.Reason, "no rule models") {
+		t.Errorf("dynamic-path-read-only capture: reason %q still names a fallback Ask", got.Reason)
+	}
+}
+
+// TestEnvVars_DynamicPathReadRefusal_MixedWithApprove_StillRelieved pins the
+// bodyIsOnlyDynamicPathReadRefusal Approve arm (mirroring bodyIsUnmodelled's own
+// Approve arm): a value mixing a POSITIVELY CLEARED body with a dynamic-path-read
+// refusal must still relieve — nothing here was UNRELIEVABLE.
+func TestEnvVars_DynamicPathReadRefusal_MixedWithApprove_StillRelieved(t *testing.T) {
+	fe := &fakeEvaluator{results: map[string]hookio.RuleResult{
+		"mktemp":         {Decision: hookio.Approve, Module: "fake"},
+		`cat "$dynamic"`: dynamicPathReadRefusal(`safe-commands: cat has a dynamically-expanded path arg $dynamic (deferred to claude-code)`),
+	}}
+	r := NewWithEvaluator(fe)
+	ev := cmdparse.EnvAssignment{
+		Name:      "out",
+		Value:     `$(mktemp)$(cat "$dynamic")`,
+		Raw:       `out=$(mktemp)$(cat "$dynamic")`,
+		Expansion: cmdparse.ExpansionUnknown,
+	}
+	got, refused := r.evaluateAssignment(ev, &hookio.HookInput{ToolName: "Bash"}, nil, nil, false)
+	if got.Decision == hookio.Ask {
+		t.Errorf("approve+dynamic-path-read capture: got %s (%s), want relieved", got.Decision, got.Reason)
+	}
+	if refused {
+		t.Error("approve+dynamic-path-read capture: marked as examined-and-refused")
+	}
+}
+
+// TestEnvVars_MutatingCommandRefusal_StillAsks is the bead's negative case: a
+// capture whose refusal carries NO RefusalCategory (the shape a mutating
+// command, credential/secret access, or kill/signal produces) must keep the
+// decisive Ask — the relief is gated on CATEGORY, never inferred from "the body
+// looks similar".
+func TestEnvVars_MutatingCommandRefusal_StillAsks(t *testing.T) {
+	fe := &fakeEvaluator{results: map[string]hookio.RuleResult{
+		`rm -rf "$p"`: otherRefusal("safe-commands", `safe-commands: rm has a dynamically-expanded path arg (deferred to claude-code)`),
+	}}
+	r := NewWithEvaluator(fe)
+	ev := cmdparse.EnvAssignment{
+		Name:      "out",
+		Value:     `$(rm -rf "$p")`,
+		Raw:       `out=$(rm -rf "$p")`,
+		Expansion: cmdparse.ExpansionUnknown,
+	}
+	got, refused := r.evaluateAssignment(ev, &hookio.HookInput{ToolName: "Bash"}, nil, nil, false)
+	if got.Decision != hookio.Ask {
+		t.Errorf("mutating-command capture: got %s (%s), want ask", got.Decision, got.Reason)
+	}
+	if !refused {
+		t.Error("mutating-command capture: not marked as examined-and-refused")
+	}
+	if !strings.Contains(got.Reason, "unevaluated/unsafe expression") {
+		t.Errorf("mutating-command capture: reason %q, want the default fallback reason", got.Reason)
+	}
+}
+
+// TestEnvVars_MixedDynamicPathReadAndOtherRefusal_StillAsks is the bead's other
+// negative case: a value with TWO substitutions — one a dynamic-path-read
+// refusal, the other some OTHER refusal category — must still ask. Every
+// substitution must clear (or be exactly dynamic-path-read) for the relief to
+// apply; one non-matching refusal is enough to keep the fallback.
+func TestEnvVars_MixedDynamicPathReadAndOtherRefusal_StillAsks(t *testing.T) {
+	fe := &fakeEvaluator{results: map[string]hookio.RuleResult{
+		`cat "$p"`:        dynamicPathReadRefusal(`safe-commands: cat has a dynamically-expanded path arg $p (deferred to claude-code)`),
+		"cat /etc/shadow": otherRefusal("safe-commands", "safe-commands: cat references unknown path /etc/shadow (deferred to claude-code)"),
+	}}
+	r := NewWithEvaluator(fe)
+	ev := cmdparse.EnvAssignment{
+		Name:      "out",
+		Value:     `$(cat "$p")$(cat /etc/shadow)`,
+		Raw:       `out=$(cat "$p")$(cat /etc/shadow)`,
+		Expansion: cmdparse.ExpansionUnknown,
+	}
+	got, refused := r.evaluateAssignment(ev, &hookio.HookInput{ToolName: "Bash"}, nil, nil, false)
+	if got.Decision != hookio.Ask {
+		t.Errorf("mixed-category capture: got %s (%s), want ask", got.Decision, got.Reason)
+	}
+	if !refused {
+		t.Error("mixed-category capture: not marked as examined-and-refused")
+	}
+}
+
+// TestEnvVars_ExhaustionOnlyBranch_Pinned pins the CURRENT exhaustionOnly
+// behavior (pg2-et8ns's territory, the sibling "no rule models this" relief
+// ticket) so a future regression in EITHER bead is caught: this bead's relief
+// must not touch it, and it must not touch this bead's relief.
+//
+// No test previously exercised this branch's distinct reason — every existing
+// fakeEvaluator caller only sets Decision, and a bare NoOpinion Decision reads as
+// ProvenanceRefusal (the zero value), not ProvenanceExhaustion, so
+// TestEnvVars_PostRecursionAskFallback's "abstaining body still reaches ask
+// fallback" row exercises the DEFAULT branch, never exhaustionOnly.
+func TestEnvVars_ExhaustionOnlyBranch_Pinned(t *testing.T) {
+	fe := &fakeEvaluator{results: map[string]hookio.RuleResult{
+		"seq 1 3": {Decision: hookio.NoOpinion, Provenance: hookio.ProvenanceExhaustion, Module: "engine"},
+	}}
+	r := NewWithEvaluator(fe)
+	ev := cmdparse.EnvAssignment{
+		Name:      "n",
+		Value:     `$(seq 1 3)`,
+		Raw:       `n=$(seq 1 3)`,
+		Expansion: cmdparse.ExpansionUnknown,
+	}
+	got, refused := r.evaluateAssignment(ev, &hookio.HookInput{ToolName: "Bash"}, nil, nil, false)
+	if got.Decision != hookio.Ask {
+		t.Errorf("exhaustion-only capture: got %s (%s), want ask", got.Decision, got.Reason)
+	}
+	if !refused {
+		t.Error("exhaustion-only capture: not marked as examined-and-refused")
+	}
+	if !strings.Contains(got.Reason, "no rule models") {
+		t.Errorf("exhaustion-only capture: reason %q, want the exhaustionOnly reason (\"no rule models\") — this bead's relief must not touch this branch", got.Reason)
 	}
 }
 

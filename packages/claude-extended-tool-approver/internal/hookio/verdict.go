@@ -45,7 +45,18 @@ func Verdict(res RuleResult, err error) RuleResult {
 		if errors.Is(err, ErrRefused) {
 			// The floor is `current`, so its Reason survives a tie with the reason-less
 			// manufactured verdict — matching engine.Evaluate's exhaustion fold.
-			return MostRestrictive(res, RuleResult{Decision: NoOpinion})
+			//
+			// Provenance: ProvenanceExhaustion on the manufactured candidate (pg2-4x2mu)
+			// is REQUIRED, not cosmetic, now that RefusalCategory exists.
+			// engine.Evaluate's REAL loop-exhaustion seed always attempts
+			// ProvenanceExhaustion and relies on the SUBSEQUENT tie-merge to downgrade
+			// it to Refusal when `res` is a genuine refusal — see mergeRefusalCategory's
+			// doc for why a bare zero-value candidate (Provenance defaulting to
+			// ProvenanceRefusal) would be misread as a SECOND, competing refusal with
+			// RefusalCategoryUnspecified and silently AND the real category away. This
+			// mirrors the ErrNotApplicable branch below, which already sets it
+			// explicitly for the identical reason.
+			return MostRestrictive(res, RuleResult{Decision: NoOpinion, Provenance: ProvenanceExhaustion})
 		}
 		if errors.Is(err, ErrNotApplicable) {
 			return RuleResult{Decision: NoOpinion, Provenance: ProvenanceExhaustion}

@@ -1994,6 +1994,45 @@ func TestSafecmds_DynamicReadPath_Abstain(t *testing.T) {
 	}
 }
 
+// TestSafecmds_DynamicReadPath_RefusalCategory pins the pg2-4x2mu plumbing at its
+// SOURCE: readPathIssue's ONE call site that stamps
+// hookio.RefusalCategoryDynamicPathRead is the "has a dynamically-expanded path
+// arg" branch, and ONLY that branch — a KNOWN-BAD resolved path
+// ("references unknown path") and a WRITE command's OWN dynamic-path refusal
+// (a DIFFERENT call site entirely, safecmds.go's `safeWriteCmds[basename] &&
+// argsHaveDynamicExpansion` branch, which shares similar wording but is never
+// routed through readPathIssue) must both stay uncategorized. envvars' relief is
+// gated on this category, so a leak in either direction here would either
+// silently widen the relief to writes/known-bad-paths, or silently fail to
+// relieve the read shape it exists for.
+func TestSafecmds_DynamicReadPath_RefusalCategory(t *testing.T) {
+	pe := patheval.New("/home/user/project")
+	r := New(pe)
+
+	tests := []struct {
+		name         string
+		cmd          string
+		wantCategory hookio.RefusalCategory
+	}{
+		{"genuinely unresolvable dynamic path on a read", "cat $F", hookio.RefusalCategoryDynamicPathRead},
+		{"same shape through a different reader", "jq . $F", hookio.RefusalCategoryDynamicPathRead},
+		{"a KNOWN-BAD literal path is a substantive finding, not merely unresolvable", "cat /etc/shadow", hookio.RefusalCategoryUnspecified},
+		{"a WRITE command's dynamic path is a DIFFERENT call site entirely", "mv $F /home/user/project/dest", hookio.RefusalCategoryUnspecified},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := &hookio.HookInput{ToolName: "Bash", CWD: "/home/user/project", ToolInput: mustJSON(map[string]string{"command": tt.cmd})}
+			got := hookio.Verdict(r.Evaluate(input))
+			if got.Decision != hookio.NoOpinion {
+				t.Fatalf("precondition: cmd %q got %s (%s), want abstain", tt.cmd, got.Decision, got.Reason)
+			}
+			if got.RefusalCategory != tt.wantCategory {
+				t.Errorf("cmd %q: RefusalCategory = %v (%s), want %v", tt.cmd, got.RefusalCategory, got.Reason, tt.wantCategory)
+			}
+		})
+	}
+}
+
 // TestSafecmds_EverySafeReadCmdGatesDynamicPath enumerates safeReadCmds FROM THE MAP
 // ITSELF — not from a hand-copied list — so a member added later cannot silently
 // escape the pg2-2ke04 guard. Each member is asked to read a deny-listed credential
@@ -2276,7 +2315,7 @@ func TestReadPathIssue_IsNeverLooserThanTheStaticSubstitutionSeam(t *testing.T) 
 	for _, r := range readers {
 		for _, p := range paths {
 			args := append(strings.Fields(r)[1:], p)
-			if readPathIssue(args, pe, "", true, nil) == "" {
+			if issue, _ := readPathIssue(args, pe, "", true, nil); issue == "" {
 				continue // this rule clears the read; the seam may do as it likes
 			}
 			for _, body := range []string{r + " " + p, r + " < " + p} {
