@@ -34,15 +34,28 @@ type Result struct {
 }
 
 func Isolate(ctx context.Context, r run.Runner, p Params) (Result, error) {
-	top, err := r.Run(ctx, "git", []string{"-C", p.RepoPath, "rev-parse", "--show-toplevel"}, run.Options{})
+	// Resolve the repo root ourselves from the CALLER-supplied path rather
+	// than trust `git -C p.RepoPath rev-parse --show-toplevel`'s stdout for
+	// it. That command reads core.worktree off .git/config, and when the
+	// CANONICAL clone's own config has a corrupted core.worktree pointing
+	// at some OTHER existing worktree's path (an unrelated bug — a
+	// git-fixture test-isolation escape elsewhere in this repo, tracked as
+	// pg2-5ek6b/pg2-12795 — can leave it that way), --show-toplevel
+	// silently reports that OTHER worktree's path instead of p.RepoPath's
+	// own. Isolate would then join .worktrees/<bead> onto the WRONG
+	// directory — exit 0, no error, a new worktree silently nested inside
+	// an unrelated one (observed 2026-08-27, pg2-x4e06). --repo is
+	// documented (cmd/pb's drain isolate) as "the canonical clone", i.e.
+	// already the toplevel, so the caller-supplied path is the source of
+	// truth; git is still asked below to CONFIRM it's a git repo, but its
+	// opinion of the toplevel path is never used.
+	repo, err := resolveRepo(p.RepoPath)
 	if err != nil {
 		return Result{}, fmt.Errorf("%s is not a git repo: %w", p.RepoPath, err)
 	}
-	// Use git's own view of the toplevel from here on: `git worktree list
-	// --porcelain` reports symlink-RESOLVED paths (macOS /var → /private/var),
-	// so building wt from the caller's spelling would miss the map lookup and
-	// misread an existing worktree as absent.
-	repo := strings.TrimSpace(top.Stdout)
+	if _, err := r.Run(ctx, "git", []string{"-C", repo, "rev-parse", "--show-toplevel"}, run.Options{}); err != nil {
+		return Result{}, fmt.Errorf("%s is not a git repo: %w", p.RepoPath, err)
+	}
 	branch := "drain/" + p.BeadID
 	ref := "refs/heads/" + branch
 	wt := filepath.Join(repo, ".worktrees", p.BeadID)
@@ -103,6 +116,20 @@ func Isolate(ctx context.Context, r run.Runner, p Params) (Result, error) {
 	}
 	res.Precommit = pc
 	return res, nil
+}
+
+// resolveRepo resolves the caller-supplied repo path to an absolute,
+// symlink-free form — matching how `git worktree list --porcelain` reports
+// paths (macOS /var → /private/var) — WITHOUT asking git for its own
+// opinion of the toplevel. See Isolate's comment for why: trusting
+// `git rev-parse --show-toplevel` here is exactly the corruption vector
+// this function exists to avoid.
+func resolveRepo(path string) (string, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	return filepath.EvalSymlinks(abs)
 }
 
 // primaryBranch resolves the integration branch exactly as the R-rules do:

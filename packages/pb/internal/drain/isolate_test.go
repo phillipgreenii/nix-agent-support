@@ -3,6 +3,7 @@ package drain
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -290,6 +291,129 @@ func TestIsolate_primaryBranchFromGitConfig(t *testing.T) {
 	}
 	if _, statErr := os.Stat(filepath.Join(out.Worktree, "g.txt")); statErr == nil {
 		t.Error("worktree contains main's commit; branch was not based on the configured primary (trunk)")
+	}
+}
+
+// TestIsolate_corruptedCoreWorktreeDoesNotRedirectRepo guards the confirmed
+// real-world mechanism behind pg2-x4e06 / pg2-12795: an unrelated bug (a
+// git-fixture test-isolation escape in packages/pg-pr, tracked separately as
+// pg2-5ek6b) can leave the CANONICAL clone's own .git/config with
+// core.worktree pointing at some OTHER existing worktree's path. Before this
+// fix, Isolate derived its repo root from `git rev-parse --show-toplevel`,
+// which under that corruption silently reports the OTHER worktree's path
+// instead of the repo's own -- exit 0, no error -- so `.worktrees/<bead>`
+// got joined onto the wrong directory and a new worktree was nested inside
+// an unrelated one instead of created as a sibling of the canonical clone.
+func TestIsolate_corruptedCoreWorktreeDoesNotRedirectRepo(t *testing.T) {
+	repo := newRepo(t)
+
+	other, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	other = filepath.Join(other, "elsewhere-worktree")
+	if err := os.MkdirAll(other, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gitTest(t, repo, "config", "core.worktree", other)
+
+	// Sanity: confirm the corruption actually fools plain rev-parse against
+	// this repo, so the rest of the test exercises the real mechanism
+	// rather than a hypothetical one that no longer applies to this git
+	// version.
+	if got := strings.TrimSpace(gitTest(t, repo, "rev-parse", "--show-toplevel")); got != other {
+		t.Fatalf("corruption setup didn't take: rev-parse --show-toplevel = %q, want %q", got, other)
+	}
+
+	out, err := Isolate(context.Background(), run.CLIRunner{}, Params{RepoPath: repo, BeadID: "pg2-xd"})
+	if err != nil {
+		t.Fatalf("Isolate: %v", err)
+	}
+	want := filepath.Join(repo, ".worktrees", "pg2-xd")
+	if out.Worktree != want {
+		t.Errorf("Worktree = %q, want %q (must anchor to repo, not the corrupted core.worktree target)", out.Worktree, want)
+	}
+	if strings.HasPrefix(out.Worktree, other) {
+		t.Fatalf("worktree nested inside the corrupted core.worktree target %q: got %q", other, out.Worktree)
+	}
+	if _, statErr := os.Stat(filepath.Join(out.Worktree, "f.txt")); statErr != nil {
+		t.Errorf("worktree not materialized at the correct path: %v", statErr)
+	}
+}
+
+// TestIsolate_concurrentIsolateCallsStayAnchoredToRepo is the concurrency
+// stress test the bead's acceptance criteria ask for: many concurrent
+// Isolate calls against a --repo whose core.worktree is ALSO corrupted (the
+// confirmed mechanism) and which already has other worktrees present (the
+// shape of the observed incident -- pg2-4dz88.8.5 was a pre-existing,
+// unrelated worktree, not one created by the misfiring call). Every
+// resulting worktree path must be a direct child of <repo>/.worktrees/,
+// never nested under another bead's worktree or the corrupted target.
+//
+// The concurrent calls all hit the REUSE path (worktrees pre-created
+// sequentially below) rather than creating fresh worktrees concurrently:
+// `git worktree add` against the same repo from several goroutines at once
+// hits git's own worktree-metadata locking and is flaky independent of
+// anything Isolate does (confirmed by hand: concurrent fresh-creates
+// intermittently fail with "failed to read .git/worktrees/.../commondir",
+// reproducing with or without this bead's fix) -- a separate, pre-existing
+// git-level concern, not the silent-misdirection bug this test guards.
+func TestIsolate_concurrentIsolateCallsStayAnchoredToRepo(t *testing.T) {
+	repo := newRepo(t)
+
+	// A pre-existing, unrelated worktree -- the shape of the observed
+	// incident.
+	preexisting := filepath.Join(repo, ".worktrees", "preexisting")
+	gitTest(t, repo, "worktree", "add", preexisting, "-b", "drain/preexisting", "main")
+
+	const n = 12
+	beads := make([]string, n)
+	for i := range beads {
+		beads[i] = fmt.Sprintf("pg2-conc%d", i)
+		if _, err := Isolate(context.Background(), run.CLIRunner{}, Params{RepoPath: repo, BeadID: beads[i]}); err != nil {
+			t.Fatalf("seeding Isolate(%s): %v", beads[i], err)
+		}
+	}
+
+	other, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	other = filepath.Join(other, "elsewhere-worktree")
+	if err := os.MkdirAll(other, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gitTest(t, repo, "config", "core.worktree", other)
+
+	type outcome struct {
+		bead string
+		out  Result
+		err  error
+	}
+	results := make(chan outcome, n)
+	for _, bead := range beads {
+		go func(bead string) {
+			out, err := Isolate(context.Background(), run.CLIRunner{}, Params{RepoPath: repo, BeadID: bead})
+			results <- outcome{bead: bead, out: out, err: err}
+		}(bead)
+	}
+
+	for i := 0; i < n; i++ {
+		res := <-results
+		if res.err != nil {
+			t.Errorf("Isolate(%s): %v", res.bead, res.err)
+			continue
+		}
+		if res.out.Reused != "worktree" {
+			t.Errorf("Isolate(%s): Reused = %q, want worktree (pre-seeded)", res.bead, res.out.Reused)
+		}
+		want := filepath.Join(repo, ".worktrees", res.bead)
+		if res.out.Worktree != want {
+			t.Errorf("Isolate(%s): Worktree = %q, want %q", res.bead, res.out.Worktree, want)
+		}
+		if strings.HasPrefix(res.out.Worktree, preexisting) || strings.HasPrefix(res.out.Worktree, other) {
+			t.Errorf("Isolate(%s): worktree %q nested inside another worktree's tree", res.bead, res.out.Worktree)
+		}
 	}
 }
 
