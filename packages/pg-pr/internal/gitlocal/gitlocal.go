@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/gitenv"
 )
 
 // FileChange is one entry from `git diff --numstat`.
@@ -40,13 +42,10 @@ type CLIRunner struct{}
 func NewCLIRunner() Runner { return &CLIRunner{} }
 
 func (CLIRunner) Run(ctx context.Context, dir string, args ...string) ([]byte, error) {
-	full := make([]string, 0, len(args)+2)
-	if dir != "" {
-		full = append(full, "-C", dir)
-	}
-	full = append(full, args...)
-
-	cmd := exec.CommandContext(ctx, "git", full...)
+	// gitenv.Command owns the child environment: a leaked GIT_DIR /
+	// GIT_INDEX_FILE outranks `-C dir`, so passing dir alone is not enough to
+	// keep this call inside dir. See internal/gitenv (pg2-lx41y).
+	cmd := gitenv.Command(ctx, dir, args...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

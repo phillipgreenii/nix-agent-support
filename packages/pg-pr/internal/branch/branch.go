@@ -21,6 +21,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/gitenv"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/provider/vcs/github"
 )
@@ -143,13 +144,10 @@ func (g *CLIGitRunner) RemoteOriginURL(ctx context.Context, dir string) (string,
 // runGit invokes `git -C dir <args...>` and returns stdout. Errors include
 // captured stderr to aid debugging.
 func runGit(ctx context.Context, dir string, args ...string) (string, error) {
-	full := make([]string, 0, len(args)+2)
-	if dir != "" {
-		full = append(full, "-C", dir)
-	}
-	full = append(full, args...)
-
-	cmd := exec.CommandContext(ctx, "git", full...)
+	// gitenv.Command owns the child environment: a leaked GIT_DIR /
+	// GIT_INDEX_FILE outranks `-C dir`, so passing dir alone is not enough to
+	// keep this call inside dir. See internal/gitenv (pg2-lx41y).
+	cmd := gitenv.Command(ctx, dir, args...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
