@@ -708,6 +708,40 @@
                     touch $out
                   '';
 
+              # Shared-reference doc-conformance guard, OUTSIDE the Go module's
+              # src (pg-pr-go-tests only sees ./packages/pg-pr, same structural
+              # gap as test-pg-pr-review-input-assets above) (pg2-4dz88.8.4).
+              #
+              # A prior revision had two Go tests read these files directly via
+              # a repo-root-escaping path, which is exactly this structural gap
+              # and broke under nix flake check's hermetic sandbox (the sandbox
+              # only sees pg-pr-src, i.e. ./packages/pg-pr). Operator ruling
+              # (Phillip, 2026-08-27): a test MUST NOT depend on files existing
+              # outside what its own build packages; content that genuinely IS
+              # the real committed file belongs in a check built from the real
+              # source, as here.
+              test-pg-pr-shared-reference-docs = pkgs.runCommand "test-pg-pr-shared-reference-docs" { } ''
+                shared_path=".local/share/pgii-local-plugins/pg-pr/lib/pr-generation-shared.md"
+
+                for skill in \
+                  ${./claude-marketplace/pg-pr/skills/pg-pr-write-pr-description/SKILL.md} \
+                  ${./claude-marketplace/pg-pr/skills/pg-pr-write-pr-title/SKILL.md}; do
+                  if ! grep -qF "$shared_path" "$skill"; then
+                    echo "FAIL: $skill does not name the shared reference path $shared_path" >&2
+                    exit 1
+                  fi
+                done
+
+                description_skill=${./claude-marketplace/pg-pr/skills/pg-pr-write-pr-description/SKILL.md}
+                if ! grep -qF "# pg-pr write PR description" "$description_skill"; then
+                  echo "FAIL: $description_skill lost its own wire-contract heading" >&2
+                  exit 1
+                fi
+
+                echo "ok: both skills name the shared reference; description skill kept its own heading"
+                touch $out
+              '';
+
               # Durable-citation guard for the ccpool surface OUTSIDE the Go
               # module (bead pg2-qkk8n, widening pg2-oxrha's guard).
               #

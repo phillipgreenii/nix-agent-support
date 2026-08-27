@@ -1890,33 +1890,15 @@ func TestPRCreate_GenerateTitle_NotRegisteredOnUpdate(t *testing.T) {
 // production code.
 const sharedReferenceRelPath = ".local/share/pgii-local-plugins/pg-pr/lib/pr-generation-shared.md"
 
-// pgPrRepoRoot resolves this repo's root -- two levels above the pg-pr Go
-// module root (packages/pg-pr -> packages -> repo root) -- reusing
-// pgPrModuleRoot (identifier_allowlist_test.go, same package) rather than
-// a fragile "../../.." chain relative to the test's own working
-// directory.
-func pgPrRepoRoot(t *testing.T) string {
-	t.Helper()
-	return filepath.Dir(filepath.Dir(pgPrModuleRoot(t)))
-}
-
-// TestSharedReference_NamedInBothSkills proves both SKILL.md bodies
-// actually name the anchored shared-reference path -- grepping the
-// literal path against the real, on-disk, currently-committed SKILL.md
-// content (not a copy or a description of it).
-func TestSharedReference_NamedInBothSkills(t *testing.T) {
-	root := pgPrRepoRoot(t)
-	for _, skill := range []string{"pg-pr-write-pr-description", "pg-pr-write-pr-title"} {
-		p := filepath.Join(root, "claude-marketplace", "pg-pr", "skills", skill, "SKILL.md")
-		b, err := os.ReadFile(p)
-		if err != nil {
-			t.Fatalf("read %s: %v", p, err)
-		}
-		if !strings.Contains(string(b), sharedReferenceRelPath) {
-			t.Errorf("%s does not name the shared reference path %q", p, sharedReferenceRelPath)
-		}
-	}
-}
+// Whether the real, on-disk, currently-committed SKILL.md bodies name the
+// shared-reference path is checked by checks.<system>.test-pg-pr-shared-reference-docs
+// in flake.nix, not here: that content lives OUTSIDE the pg-pr Go module's
+// src (pg-pr-go-tests only sees ./packages/pg-pr), so a Go test reading it
+// via a repo-root-escaping path breaks under the hermetic build (operator
+// ruling, Phillip, 2026-08-27: a test MUST NOT rely on files existing
+// outside what its own build packages; a test needing a specific structure
+// builds it in its own setup instead). Same structural gap and same fix
+// shape as test-pg-pr-review-input-assets / test-ccpool-surface-spec-citations.
 
 // TestSharedReference_ReachesAgent_ViaAnchoredHomePath simulates the
 // invoked agent's own `cat ~/<sharedReferenceRelPath>` against a
@@ -1983,21 +1965,29 @@ func TestSharedReference_UnreadableFile_NegativeCase(t *testing.T) {
 
 // TestGenerateDescription_StillWorksAfterSharedReferenceExtracted is the
 // retrofit regression guard: pg-pr-write-pr-description's existing
-// --generate-description path is unaffected by moving its shared
-// context/content-rule guidance out into
-// claude-marketplace/pg-pr/lib/pr-generation-shared.md. Mirrors
-// TestGenerateDescription_SubprocessIntegration but points --skill-path
-// at the REAL, retrofitted SKILL.md (not a stub), proving the file is
-// still readable and still pipes through the exact same
-// generateDescription code path end to end, and that its own unchanged
-// wire-contract phrase survived the retrofit.
+// --generate-description path is unaffected by the SHAPE the retrofit left
+// it in -- a SKILL.md whose own wire-contract heading survives alongside a
+// "read the shared reference first" step, with the body-generation content
+// no longer inline. Builds that shape as its own fixture (t.TempDir()),
+// rather than reading the real repo file: whether the REAL, on-disk
+// SKILL.md still has that shape is checks.<system>.test-pg-pr-shared-reference-docs's
+// job (flake.nix), not this test's -- see the comment above where
+// TestSharedReference_NamedInBothSkills used to be. This test only proves
+// the generateDescription code path still works end to end when handed a
+// SKILL.md of the retrofitted shape.
 func TestGenerateDescription_StillWorksAfterSharedReferenceExtracted(t *testing.T) {
 	resetPRWriteFlags()
 	fv, _ := swapFakes(t)
 
-	skill := filepath.Join(pgPrRepoRoot(t), "claude-marketplace", "pg-pr", "skills", "pg-pr-write-pr-description", "SKILL.md")
-	if _, err := os.Stat(skill); err != nil {
-		t.Fatalf("retrofitted SKILL.md missing: %v", err)
+	dir := t.TempDir()
+	skill := filepath.Join(dir, "SKILL.md")
+	retrofittedShape := "# pg-pr write PR description\n\n" +
+		"## Step 0 -- read the shared reference\n\n" +
+		"cat ~/.local/share/pgii-local-plugins/pg-pr/lib/pr-generation-shared.md\n\n" +
+		"## When called via `pg-pr pr create --generate-description`\n\n" +
+		"Expects the PR body -- and only the PR body -- on stdout.\n"
+	if err := os.WriteFile(skill, []byte(retrofittedShape), 0o600); err != nil {
+		t.Fatal(err)
 	}
 
 	cat, err := exec.LookPath("cat")
