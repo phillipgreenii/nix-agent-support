@@ -22,35 +22,67 @@ import (
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
 )
 
-// hermeticEnviron removes git env vars inherited from a parent `git commit`'s hook
-// environment (GIT_DIR, GIT_INDEX_FILE, GIT_WORK_TREE, GIT_PREFIX,
-// GIT_OBJECT_DIRECTORY, GIT_COMMON_DIR). These variables repoint tempdir git calls at
-// the real repo, breaking test hermeticity when tests are run from a git commit hook —
-// same pattern and same fix as pg2-f6cgn / commit 98f8c95d in packages/pb, ported here
-// for pg2-rrhw2.
+// hermeticEnviron builds a MINIMAL, EXPLICITLY ALLOWLISTED environment for the git
+// subprocesses this fixture shells out to, so that no code path here can touch a real
+// git repo/path BY CONSTRUCTION — not merely because today's known-leaky var names
+// happen to be scrubbed.
+//
+// pg2-rrhw2's original fix (this function, before pg2-8wnhc) scrubbed a DENYLIST of six
+// named vars (GIT_DIR, GIT_INDEX_FILE, GIT_WORK_TREE, GIT_PREFIX, GIT_OBJECT_DIRECTORY,
+// GIT_COMMON_DIR) out of the inherited os.Environ() — same pattern and same fix as
+// pg2-f6cgn / commit 98f8c95d in packages/pb. That denylist already missed
+// GIT_CEILING_DIRECTORIES — the SAME variable pg2-jqwrr's original bug report named as a
+// leak vector — which is not hypothetical: it is the exact failure mode ("a new
+// inheritable git-location var the list doesn't yet know about") the operator design
+// guidance behind pg2-8wnhc warned could recur, demonstrated by the very fix meant to
+// prevent it.
 //
 // `-C <dir>` only changes the working directory before git runs; it does NOT override
-// these variables, which git's own repo discovery consults FIRST and which `-C` cannot
-// override. A value leaked into the environment of whatever shell/session launched
-// `go test` (a git hook context, a forgotten `export GIT_DIR=...`) silently redirects
-// every "isolated" `-C canonical` call here onto whatever repository that variable
-// names instead — this is exactly how this fixture corrupted the AMBIENT repo's shared
-// .git/config in pg2-rrhw2 (confirmed by reproduction: `GIT_DIR=<ambient>/.git git -C
-// <canonical> config user.email …` silently writes into <ambient>, not <canonical>,
-// and <canonical>/.git is never even created).
+// GIT_DIR and friends, which git's own repo discovery consults FIRST and which `-C`
+// cannot override. A value leaked into the environment of whatever shell/session
+// launched `go test` (a git hook context, a forgotten `export GIT_DIR=...`) silently
+// redirects every "isolated" `-C canonical` call here onto whatever repository that
+// variable names instead — this is exactly how this fixture corrupted the AMBIENT
+// repo's shared .git/config in pg2-rrhw2 (confirmed by reproduction: `GIT_DIR=<ambient>
+// /.git git -C <canonical> config user.email …` silently writes into <ambient>, not
+// <canonical>, and <canonical>/.git is never even created).
 //
-// t.Setenv cannot fix this: GIT_DIR="" is not "unset" to git — it is a fatal "the
-// empty string is not a valid path" — so the only reliable fix is to omit these
-// variables from the subprocess's OWN environment entirely.
-func hermeticEnviron() []string {
-	skipVars := map[string]bool{
-		"GIT_DIR": true, "GIT_INDEX_FILE": true, "GIT_WORK_TREE": true,
-		"GIT_PREFIX": true, "GIT_OBJECT_DIRECTORY": true, "GIT_COMMON_DIR": true,
-	}
-	var env []string
+// Fixed structurally here by inverting denylist to allowlist: the subprocess
+// environment is built by ADDING only the handful of vars git demonstrably needs for
+// these local, no-network operations (init/config/commit/worktree/checkout), rather
+// than by SUBTRACTING vars known to be dangerous. Any git env var this list does not
+// name — known today, forgotten today (GIT_CEILING_DIRECTORIES), or invented by a
+// future git release — is excluded automatically, because inclusion requires an
+// explicit entry rather than someone remembering to add it to a ban list before it can
+// leak.
+//
+// HOME is a second, independent confinement layer: instead of forwarding the ambient
+// value, it is pointed at its own fresh t.TempDir(). Even a git code path this allowlist
+// has not anticipated that falls back to $HOME/<something> lands in a directory created
+// empty for this test and torn down with it — never the real user's home.
+// GIT_CONFIG_NOSYSTEM=1 is set unconditionally for the same reason: system config is
+// skipped outright, not merely redirected by GIT_CONFIG_SYSTEM (still forwarded below,
+// since callers rely on t.Setenv-ing it to "/dev/null" explicitly).
+//
+// t.Setenv alone cannot fix any of this: GIT_DIR="" is not "unset" to git — it is a
+// fatal "the empty string is not a valid path" — so the only reliable fix is to omit
+// these variables from the subprocess's OWN environment entirely.
+func hermeticEnviron(t *testing.T) []string {
+	t.Helper()
+	ambient := map[string]string{}
 	for _, kv := range os.Environ() {
-		if k := strings.SplitN(kv, "=", 2)[0]; !skipVars[k] {
-			env = append(env, kv)
+		if k, v, ok := strings.Cut(kv, "="); ok {
+			ambient[k] = v
+		}
+	}
+	env := []string{"HOME=" + t.TempDir(), "GIT_CONFIG_NOSYSTEM=1"}
+	// PATH: to locate the git binary and anything it execs. TMPDIR: git's own scratch
+	// files. GIT_CONFIG_GLOBAL/_SYSTEM: forwarded so a caller's t.Setenv override
+	// (every caller here points them at /dev/null) actually reaches the subprocess.
+	// None of these four names a git repository location.
+	for _, k := range []string{"PATH", "TMPDIR", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM"} {
+		if v, ok := ambient[k]; ok {
+			env = append(env, k+"="+v)
 		}
 	}
 	return env
@@ -66,7 +98,7 @@ func nestedWorktreeFixture(t *testing.T) (canonical, worktree string) {
 	git := func(args ...string) {
 		t.Helper()
 		cmd := exec.Command("git", append([]string{"-C", canonical}, args...)...)
-		cmd.Env = hermeticEnviron()
+		cmd.Env = hermeticEnviron(t)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git -C %s %v: %v\n%s", canonical, args, err, out)
 		}
@@ -238,7 +270,7 @@ func TestIntegration_PrimaryCommitMissingDirNeverApproves(t *testing.T) {
 	git := func(args ...string) {
 		t.Helper()
 		cmd := exec.Command("git", append([]string{"-C", canonical}, args...)...)
-		cmd.Env = hermeticEnviron()
+		cmd.Env = hermeticEnviron(t)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git -C %s %v: %v\n%s", canonical, args, err, out)
 		}
