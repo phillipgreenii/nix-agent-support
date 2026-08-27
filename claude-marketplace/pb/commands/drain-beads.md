@@ -239,12 +239,18 @@ build` for nix repos, and the repo's tests, including a slow full suite
    root; the worktree path and branch `drain/<id>`; the working directory to
    `cd` into first (worktree path, or for a set the set root
    `<workspace_root>/.workforests/<set-branch>`); and these instructions:
-   - `cd` there and confirm `git rev-parse --abbrev-ref HEAD` prints
-     `drain/<id>` BEFORE invoking any skill, else report `stopped:wrong-branch`
-     and land NOTHING;
-   - invoke `integrate-branch:integrate-branch` and let IT resolve the strategy
-     — NEVER name a handler (breaks `pull-request` repos); for a workforest
-     set, invoke `pn-workspace-rules:land-workforest` instead;
+   - for the SINGLE-REPO path: `cd` into the worktree and confirm
+     `git rev-parse --abbrev-ref HEAD` prints `drain/<id>` BEFORE invoking any
+     skill, else report `stopped:wrong-branch` and land NOTHING; then invoke
+     `integrate-branch:integrate-branch` and let IT resolve the strategy —
+     NEVER name a handler (breaks `pull-request` repos);
+   - for the WORKFOREST-SET path: `cd` into the set root and invoke
+     `pn-workspace-rules:land-workforest` instead — the set root is NOT
+     itself a git repository, so the `git rev-parse` branch-precheck above
+     MUST NOT be run there (it would exit 128, a false
+     `stopped:wrong-branch` on a path that never should have run it);
+     `land-workforest` is responsible for verifying each member repo's own
+     branch itself;
    - a lost FAST-FORWARD RACE or REJECTED NON-FAST-FORWARD PUSH is TRANSIENT:
      re-rebase and re-invoke (at most 3 attempts), then report `stopped:` with
      the reason;
