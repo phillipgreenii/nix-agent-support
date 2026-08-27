@@ -1,0 +1,42 @@
+[
+  {
+    "number": 101,
+    "owner": "alice",
+    "title": "Add contributor guide",
+    "url": "https://example.test/pull/101",
+    "ci_status": "success",
+    "human_approvers": 1,
+    "agent_approvers": 0,
+    "files_changed": 12,
+    "lines_changed": 340,
+    "needs_attention": true,
+    "match_reason": ["review-requested"],
+    "hidden": false,
+    "hidden_reason": "",
+    "generated_at": "2026-08-20T10:00:00Z",
+    "age_seconds": 45,
+    "stale": false,
+    "stale_after_seconds": 120,
+    "truncated": false
+  },
+  {
+    "number": 202,
+    "owner": "",
+    "title": "Fix flaky test",
+    "url": "https://example.test/pull/202",
+    "ci_status": "failure",
+    "human_approvers": 0,
+    "agent_approvers": 2,
+    "files_changed": 0,
+    "lines_changed": 0,
+    "needs_attention": false,
+    "match_reason": [],
+    "hidden": true,
+    "hidden_reason": "duplicate work",
+    "generated_at": "2026-08-20T10:00:00Z",
+    "age_seconds": 45,
+    "stale": false,
+    "stale_after_seconds": 120,
+    "truncated": false
+  }
+]

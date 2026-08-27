@@ -7,9 +7,11 @@ import (
 	"strconv"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/browser"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/dashboard"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/output"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/snapshot"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/sync"
 	"github.com/spf13/cobra"
@@ -29,6 +31,7 @@ type openFlags struct {
 	printOnly      bool
 	noHyperlinks   bool
 	addr           string
+	jsonOutput     bool
 }
 
 var opFlags openFlags
@@ -94,12 +97,19 @@ slightly old data is worth acting on.
 A PR the operator hid ('pg-pr pr hide') is excluded by default — with --all
 too, since --all only widens the attention filter, not this one. Pass
 --include-hidden to see hidden PRs anyway; the human table then shows the
-hide reason in its HIDDEN column.`,
+hide reason in its HIDDEN column.
+
+Pass --json (or set PGPR_OUTPUT=json) to emit the selection as a bare JSON
+array instead of opening a browser or printing the human table. Every row
+repeats the snapshot's freshness scalars (generated_at/age_seconds/stale/
+stale_after_seconds) and a truncated flag reflecting --max, since a machine
+consumer cannot see the stderr warnings a human reads for either signal.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		if err := validateOpenFlags(opFlags); err != nil {
 			return err
 		}
+		jsonMode := output.Resolve(opFlags.jsonOutput)
 
 		snap, err := dashboard.Fetch(cmd.Context(), opFlags.addr)
 		if err != nil {
@@ -113,13 +123,21 @@ hide reason in its HIDDEN column.`,
 
 		rows := selectRows(projectRows(snap, opFlags.mine), opFlags)
 		if len(rows) == 0 {
+			if jsonMode {
+				return writeJSON(cmd.OutOrStdout(), openJSONRows(rows, snap, false))
+			}
 			_, err := io.WriteString(cmd.OutOrStdout(), "(no PRs match)\n")
 			return err
 		}
-		if opFlags.max > 0 && len(rows) > opFlags.max {
+		truncated := opFlags.max > 0 && len(rows) > opFlags.max
+		if truncated {
 			fmt.Fprintf(cmd.ErrOrStderr(),
 				"warning: %d PRs matched, showing the first %d (--max)\n", len(rows), opFlags.max)
 			rows = rows[:opFlags.max]
+		}
+
+		if jsonMode {
+			return writeJSON(cmd.OutOrStdout(), openJSONRows(rows, snap, truncated))
 		}
 
 		if opFlags.printOnly {
@@ -127,6 +145,87 @@ hide reason in its HIDDEN column.`,
 		}
 		return browser.OpenWindow(urlsOf(rows))
 	},
+}
+
+// openJSONRow is the JSON shape emitted per selected row by `pg-pr open
+// --json`. It projects openRow's already-curated column set into
+// machine-readable form, additionally carrying the snapshot's shared
+// freshness scalars and the --max truncation fact on EVERY row.
+//
+// The freshness scalars are repeated per row rather than hoisted into an
+// envelope because the top-level payload is a bare array (pg2-4dz88.7.7's
+// pinned JSON shape) — an envelope would break the "empty selection is an
+// empty array" contract. Unlike cmd/pg-pr/pr_list.go's prListItem, where
+// LastSyncedAt/Stale genuinely vary per row (real per-PR store columns),
+// these four values are identical across every row in one response: they
+// describe the one dashboard snapshot the whole selection was read from.
+type openJSONRow struct {
+	Number         int      `json:"number"`
+	Owner          string   `json:"owner"`
+	Title          string   `json:"title"`
+	URL            string   `json:"url"`
+	CIStatus       string   `json:"ci_status"`
+	HumanApprovers int      `json:"human_approvers"`
+	AgentApprovers int      `json:"agent_approvers"`
+	FilesChanged   int      `json:"files_changed"`
+	LinesChanged   int      `json:"lines_changed"`
+	NeedsAttention bool     `json:"needs_attention"`
+	MatchReason    []string `json:"match_reason"`
+	Hidden         bool     `json:"hidden"`
+	HiddenReason   string   `json:"hidden_reason"`
+
+	// GeneratedAt/AgeSeconds/Stale/StaleAfterSeconds mirror
+	// snapshot.Snapshot's identically-tagged fields verbatim — the same
+	// freshness contract (pr-pool INV-FRESH-1) the human renderer's
+	// stderr warning is derived from, but JSON-visible on every row so a
+	// stale snapshot yields stale:true in the payload itself.
+	GeneratedAt       time.Time `json:"generated_at"`
+	AgeSeconds        int       `json:"age_seconds"`
+	Stale             bool      `json:"stale"`
+	StaleAfterSeconds int       `json:"stale_after_seconds"`
+
+	// Truncated is true on every row when --max cut the result set short.
+	// It is the JSON-visible counterpart to the existing stderr warning
+	// (TestOpenCmdMaxTruncatesAndWarns) — that warning alone is invisible
+	// to a machine consumer, the same class of gap this bead already
+	// fixes for staleness.
+	Truncated bool `json:"truncated"`
+}
+
+// openJSONRows projects rows into their --json shape, stamping every row
+// with snap's freshness scalars and the truncated fact. rows is iterated in
+// place, so the emitted order is exactly selectRows' order — the same order
+// renderOpenRows and urlsOf already consume — which is what keeps --json's
+// row order identical to the human renderer's over the same input.
+func openJSONRows(rows []openRow, snap *snapshot.Snapshot, truncated bool) []openJSONRow {
+	out := make([]openJSONRow, 0, len(rows))
+	for _, r := range rows {
+		matchReason := r.MatchReason
+		if matchReason == nil {
+			matchReason = []string{}
+		}
+		out = append(out, openJSONRow{
+			Number:            r.Number,
+			Owner:             r.Owner,
+			Title:             r.Title,
+			URL:               r.URL,
+			CIStatus:          r.CIStatus,
+			HumanApprovers:    r.HumanApprovers,
+			AgentApprovers:    r.AgentApprovers,
+			FilesChanged:      r.FilesChanged,
+			LinesChanged:      r.LinesChanged,
+			NeedsAttention:    r.NeedsAttention,
+			MatchReason:       matchReason,
+			Hidden:            r.Hidden,
+			HiddenReason:      r.HiddenReason,
+			GeneratedAt:       snap.GeneratedAt,
+			AgeSeconds:        snap.AgeSeconds,
+			Stale:             snap.Stale,
+			StaleAfterSeconds: snap.StaleAfterSeconds,
+			Truncated:         truncated,
+		})
+	}
+	return out
 }
 
 // attentionOnly decides whether the needs-attention filter applies. The default
@@ -159,9 +258,19 @@ func attentionOnly(f openFlags) bool {
 // not a MineRow, so pairing them with --mine would silently return an empty
 // selection — indistinguishable from "you have no work". Failing with a usage
 // error says which flag is wrong instead.
+//
+// --json and --print are likewise contradictory: both mean "list the
+// selection instead of opening a browser," but in two different formats
+// (machine JSON vs. the human table), so combining them can only ever pick
+// one silently. This is a DECIDED rejection (pg2-4dz88.7.7), not an
+// oversight — a future bead that finds a genuine need to combine them must
+// change this decision deliberately, including the pinning test.
 func validateOpenFlags(f openFlags) error {
 	if f.all && f.needsAttention {
 		return fmt.Errorf("--all and --needs-attention are contradictory: one widens the selection, the other narrows it")
+	}
+	if f.jsonOutput && f.printOnly {
+		return fmt.Errorf("--json and --print are contradictory: --json already lists the selection instead of opening a browser")
 	}
 	if !f.mine {
 		return nil
@@ -450,6 +559,8 @@ func init() {
 		"With --print, never emit OSC 8 terminal hyperlinks")
 	openCmd.Flags().StringVar(&opFlags.addr, "addr", sync.DefaultMetricsAddr,
 		"Address of the pg-pr sync daemon serving the dashboard endpoint")
+	openCmd.Flags().BoolVar(&opFlags.jsonOutput, "json", false,
+		"Emit the selection as a bare JSON array instead of opening a browser (also selected by PGPR_OUTPUT=json)")
 
 	rootCmd.AddCommand(openCmd)
 }
