@@ -30,6 +30,29 @@ import (
 // store.synchronousPragma for the full write-up; mirrors ceta commit
 // `1138b8a1`.
 func TestMain(m *testing.M) {
+	// Unset every git-location env var BEFORE any test runs. A git hook
+	// (pre-commit/prek, invoking `go test` for this very package as its
+	// run-unit-tests hook) exports GIT_DIR/GIT_WORK_TREE for the commit in
+	// progress, and this test binary inherits that. `-C <dir>` and even an
+	// explicit repo path argument do NOT override these — git's own repo
+	// discovery consults them FIRST — so every test here that builds an
+	// isolated fixture under t.TempDir() and then drives this package's real
+	// git-invoking code (branch detect, worktree add, RepoFromRemote, ...)
+	// would otherwise silently operate on the AMBIENT repo (this checkout)
+	// instead of the fixture: confirmed 2026-08-27 (pg2-5ek6b/pg2-12795) —
+	// TestBranchDetectHuman and friends reported this checkout's own
+	// repo/branch instead of the fixture's "owner/repo"/"main" under a real
+	// commit-time hook run, though a plain `go test` from an uncontaminated
+	// shell never reproduces it. Unsetting these here, once, for the whole
+	// process is sufficient: nothing in this package's tests or the code
+	// under test re-sets them.
+	for _, k := range []string{
+		"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_CEILING_DIRECTORIES",
+		"GIT_COMMON_DIR", "GIT_PREFIX", "GIT_OBJECT_DIRECTORY",
+	} {
+		_ = os.Unsetenv(k)
+	}
+
 	if err := os.Setenv(browser.BinEnvVar, filepath.Join(os.TempDir(), "pg-pr-test-must-never-be-a-real-browser")); err != nil {
 		panic("guard browser.BinEnvVar: " + err.Error())
 	}

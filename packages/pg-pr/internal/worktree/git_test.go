@@ -3,7 +3,6 @@ package worktree
 import (
 	"context"
 	"fmt"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
@@ -21,6 +20,7 @@ func createPullHeadRef(t *testing.T, dir string, pr int) {
 	t.Helper()
 	cmd := exec.Command("git", "-C", dir, "update-ref",
 		fmt.Sprintf("refs/pull/%d/head", pr), "HEAD")
+	cmd.Env = hermeticEnviron(t)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("update-ref refs/pull/%d/head: %v\n%s", pr, err, out)
 	}
@@ -33,7 +33,7 @@ func advancePullHeadRef(t *testing.T, dir string, pr int) {
 	t.Helper()
 	cmd := exec.Command("git", "-C", dir, "commit", "--allow-empty", "-m", "advance")
 	cmd.Env = append(
-		os.Environ(),
+		hermeticEnviron(t),
 		"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@example.com",
 		"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@example.com",
 	)
@@ -47,6 +47,7 @@ func advancePullHeadRef(t *testing.T, dir string, pr int) {
 func gitConfig(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.Command("git", append([]string{"-C", dir, "config"}, args...)...)
+	cmd.Env = hermeticEnviron(t)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git config %v: %v\n%s", args, err, out)
 	}
