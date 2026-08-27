@@ -55,6 +55,25 @@ func eventually(t *testing.T, timeout time.Duration, cond func() bool, msg strin
 	t.Fatalf("condition not met within %s: %s", timeout, msg)
 }
 
+// notifyOrDone delivers fs on ch, unless ctx is cancelled first. A fake
+// watchFunc's test-observability push must be ctx-aware like the rest of the
+// watchFunc contract (dialWatch's real Dial/WatchState calls both respect
+// ctx): otherwise, once the receiver (the test body) stops draining ch —
+// e.g. after it has seen the reconnect it was waiting for — a later redial
+// cycle can find ch full and block on a bare `ch <- fs` forever, since a
+// plain channel send does not observe context cancellation. That leaves
+// StreamingPoller.run parked inside watch() with no way out, so Close's
+// `<-p.done` (streaming_poller.go) never returns. A short watchdogBudget
+// (as in TestStreamingPoller_WatchdogTripsOnSilence) makes redials frequent
+// enough that this timing window is reachable in practice, which is what
+// caused that test's observed 10-minute hang.
+func notifyOrDone(ctx context.Context, ch chan<- *fakeWatchStream, fs *fakeWatchStream) {
+	select {
+	case ch <- fs:
+	case <-ctx.Done():
+	}
+}
+
 // sampleState builds a DaemonState with distinct, non-overlapping values on
 // every field the poller mirrors, so a field-swap in apply() fails a test
 // rather than passing silently.
@@ -181,7 +200,7 @@ func TestStreamingPoller_ConsumesPushesAndReconnects(t *testing.T) {
 		calls++
 		mu.Unlock()
 		fs := newFakeWatchStream(ctx)
-		streams <- fs
+		notifyOrDone(ctx, streams, fs)
 		return fs, func() {}, nil
 	}
 
@@ -225,7 +244,7 @@ func TestStreamingPoller_WatchdogTripsOnSilence(t *testing.T) {
 	streams := make(chan *fakeWatchStream, 4)
 	watch := func(ctx context.Context, _ uint32) (watchStream, func(), error) {
 		fs := newFakeWatchStream(ctx)
-		streams <- fs
+		notifyOrDone(ctx, streams, fs)
 		return fs, func() {}, nil
 	}
 
@@ -261,7 +280,7 @@ func TestStreamingPoller_CloseStopsLoopIdempotently(t *testing.T) {
 	streams := make(chan *fakeWatchStream, 1)
 	watch := func(ctx context.Context, _ uint32) (watchStream, func(), error) {
 		fs := newFakeWatchStream(ctx) // connects but never pushes
-		streams <- fs
+		notifyOrDone(ctx, streams, fs)
 		return fs, func() {}, nil
 	}
 	p := newStreamingPoller("", time.Second)
