@@ -102,10 +102,11 @@ func leaseCutoff(d time.Duration) string {
 	return now.Add(-d).Format(time.RFC3339)
 }
 
-// RunOutbox pulls each pending-and-unclaimed (or staled-claim) row, atomically
-// claims it, dispatches it, then marks it complete — regardless of the
-// dispatch outcome (fire-once / best-effort, see DispatchFunc). Returns the
-// first I/O error (not handler errors).
+// RunOutbox pulls every pending row — whether unclaimed, stale-claimed, or
+// actively claimed by a concurrent caller — atomically claims each one in id
+// order, dispatches the ones it wins, then marks them complete — regardless
+// of the dispatch outcome (fire-once / best-effort, see DispatchFunc).
+// Returns the first I/O error (not handler errors).
 //
 // The claim step is what makes two concurrent callers — e.g. the daemon and a
 // one-shot `pg-pr sync`, which take none of the same locks (pg2-g42k5) — safe
@@ -128,12 +129,34 @@ func leaseCutoff(d time.Duration) string {
 // This costs only the throughput of one drainer's pass on a genuinely
 // contended row; an uncontended row is claimed and dispatched exactly as
 // before.
+//
+// The candidate SELECT below (unlike the pg2-scl9p fix's claim-time check)
+// MUST NOT filter on claim state — it MUST return every status='pending' row
+// regardless of whether it is currently claimed by someone else. An earlier
+// version filtered the SELECT down to `claimed_by IS NULL OR claimed_at <
+// cutoff`, exactly like the claim UPDATE's own guard; that made the two
+// checks look like the same rule applied twice, but they are not equivalent
+// as a PAIR (tc-wrij). Filtering the SELECT means a row actively claimed
+// (in-flight, not stale) by a concurrent caller never enters THIS caller's
+// own candidate snapshot at all — so this caller never attempts to claim it,
+// never loses that race, and therefore never reaches the pg2-scl9p break
+// check above, which only fires for a row already IN the snapshot. Its
+// snapshot can then start at a HIGHER id (e.g. only the feedback.created row,
+// because the lower-id pr.opened row is mid-dispatch elsewhere and so was
+// filtered out), so this caller claims and dispatches that later row with no
+// ordering check against the earlier one at all — the exact invariant
+// violation TestConcurrentFlushNeverMissesPRBead exists to catch, reproduced
+// locally under artificial CPU contention (tc-wrij). Leaving claimed rows IN
+// the SELECT restores the guarantee: every caller's snapshot always contains
+// every pending row up to its own query time, in id order, so the claim-loop
+// break below is reachable for every row a concurrent caller is still
+// working on.
 func (db *DB) RunOutbox(ctx context.Context, dispatch DispatchFunc) error {
 	cutoff := leaseCutoff(outboxLeaseDuration)
 	rows, err := db.sql.QueryContext(ctx,
 		`SELECT id, type, payload FROM outbox
-		 WHERE status='pending' AND (claimed_by IS NULL OR claimed_at < ?)
-		 ORDER BY id`, cutoff)
+		 WHERE status='pending'
+		 ORDER BY id`)
 	if err != nil {
 		return fmt.Errorf("store: select pending outbox: %w", err)
 	}
