@@ -57,7 +57,7 @@ Body sections: concepts (docket/packet/all-in budget, §4 identification rules);
 medium contract table (§5.2) with the D7 binding-resolution rule (named binding, else
 auto-select a sole installed binding with announcement, else refuse with candidates); modes
 `check` / `decompose` / `reconcile` (§8.1–§8.11 verbatim procedure: boundary sketch,
-pre-check + durable gap report, dedup/resume via `pd-phase` and `pd-source`, HELD-as-deferred,
+pre-check + durable gap report, dedup/resume via `pd_phase` and `pd_source`, HELD-as-deferred,
 mechanical pre-filter, cold-read with re-check-on-edit, semantic post-check, §8.10 loop
 bounds, §8.7 abort path, §8.11 reconcile ordering and claimed-packet handling); packet anatomy
 (§6, nine parts, §6.1 citation syntax); metadata keys + sizing resolution (§7, D9); cost
@@ -77,17 +77,18 @@ procedure is followable without this plan or the design open (the skill must sta
 **Content contract (from design §11, updated by Task 0's probe results):** frontmatter
 description (triggers when plan-decompose needs its beads binding; names the abstract ops it
 implements). Body: the §11 operation table verbatim, including `find-docket` via the `docket`
-label + `pd-source` metadata; native metadata commands (`--metadata`, `--set-metadata`, JSON
+label + `pd_source` metadata; native metadata commands (`--metadata`, `--set-metadata`, JSON
 read path from Task 0); create-deferred (or create-then-defer) with `--no-inherit-labels`;
 the 65,535-byte DESIGN-field chunking rule with the numbered chunk index; `bd undefer` release
-sweep with `pd-phase` progress; `write-report`/`append-metric` via comments; docket-scoped
+sweep with `pd_phase` progress; `write-report`/`append-metric` via comments; docket-scoped
 filtering of the global `bd dep cycles` output; the S-2 amend procedure for plain and chunked
 designs; `close-docket` semantics; and citations (not restatements) of the workspace's
 standing bd hygiene rules.
 
 **Validate:** every abstract operation named in the core skill's §5.2 table has exactly one
-mapping row here, with the SAME row grouping as §5.2 (slash-paired operations share a row);
-`prek run --files`.
+mapping SECTION here, same grouping and order as §5.2 (slash-paired operations share a
+section; the binding uses headings rather than a table because prettier re-parses unescaped
+pipes inside table cells as column breaks); `prek run --files`.
 
 ## Task 4 — Agent `plan-decomposer`
 
@@ -128,10 +129,10 @@ fallback, overridable at dispatch from docket policy (design §10.2; sanctioned 
 Global Constraints exception (b)).
 
 **Body:** the §10.2 discipline verbatim: claim-with-actor; stamp check as two metadata reads
-(`pd-curated-rev` vs docket `pd-rev`, `pd-stale` unset), mismatch ⇒ re-defer + `pd-stale` +
+(`pd_curated_rev` vs docket `pd_rev`, `pd_stale` unset), mismatch ⇒ re-defer + `pd_stale` +
 stop; one content read; change-scoped validation only; the three-step escalation ladder with
-`pd-stale` re-check and recorded docket reads; never guess across a contract seam; never read
-sibling packets; closeout `pd-stale` re-check + metric record (§7 fixed key order) +
+`pd_stale` re-check and recorded docket reads; never guess across a contract seam; never read
+sibling packets; closeout `pd_stale` re-check + metric record (§7 fixed key order) +
 close-or-release hygiene.
 
 **Validate:** `prek run --files`; cross-check that every discipline item the design hoists out
@@ -166,6 +167,6 @@ MUST be recomputed at land time (F-8), not trusted from drafting.
 2. Report/aggregation mode over `read-metrics` (design D10, §13) — scoped by docket, paginated.
 3. Decide whether `/drain-beads` should prefer `packet-implementer` for beads carrying
    curation metadata (design §17; a `pb` change, operator decision).
-4. Tune `pd-read-target` and the §9.2 floor against gathered metrics (design §17).
+4. Tune `pd_read_target` and the §9.2 floor against gathered metrics (design §17).
 5. Diff-based `amend-design` (design §17) — a patch form to cut the reconcile resupply cost
    for large designs.

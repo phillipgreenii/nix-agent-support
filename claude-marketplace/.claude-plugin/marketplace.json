@@ -73,6 +73,11 @@
       "name": "pg-go-mutate",
       "source": "./pg-go-mutate",
       "description": "Claude skill: find missing test assertions in a Go package with pg-go-mutate (mutation testing, surfaced as a test-writing workflow)"
+    },
+    {
+      "name": "plan-decompose",
+      "source": "./plan-decompose",
+      "description": "Claude skill + agents: decompose an approved design into curated, self-contained work-packet beads (docket epic + children), with staleness stamps, reconcile, and a packet-first implementer agent."
     }
   ]
 }

@@ -102,8 +102,8 @@ hold conventions unchanged, pg-pr supplies the packaging topology.
   marker, indexes the packets, states the docket-wide defaults (sizing policy and
   lifecycle-bounds default — carried in docket METADATA, §7; there is no separate
   "docket defaults" text store), and is the escalation path. A docket is never claimable work. A bead IS a docket
-  iff its metadata carries `pd-rev`; a bead IS a packet iff its metadata carries
-  `pd-curated-rev`.
+  iff its metadata carries `pd_rev`; a bead IS a packet iff its metadata carries
+  `pd_curated_rev`.
 - **Work packet** — one self-contained unit of implementation work, sized to a stated model and
   all-in token budget. Content anatomy in §6; metadata in §7.
 - **Medium binding** — a skill mapping the core's abstract operations (§5.2) onto a concrete
@@ -160,7 +160,7 @@ flowchart TD
     A["approved design"] --> B["Phase 0: boundary sketch + decomposability pre-check"]
     B -->|"gaps"| G["gap report (durable) - HALT"]
     B -->|"pass"| C["find-docket"]
-    C -->|"existing docket"| R["resume from pd-phase, or RECONCILE if the design changed"]
+    C -->|"existing docket"| R["resume from pd_phase, or RECONCILE if the design changed"]
     C -->|"none"| C2["create docket: design of record + rev + metadata"]
     C2 --> D["curate packets (HELD/deferred), every part cited, planned ordering recorded"]
     D --> P["mechanical pre-filter (scripted checks)"]
@@ -170,7 +170,7 @@ flowchart TD
     E -->|"pass"| F["semantic post-check (fresh eyes)"]
     F -->|"findings"| D2
     D2 --> P
-    D2 -->|"same finding twice, or round 4"| X["abort path 8.7: packets stay deferred, pd-phase failed, failure report"]
+    D2 -->|"same finding twice, or round 4"| X["abort path 8.7: packets stay deferred, pd_phase failed, failure report"]
     F -->|"clean"| H["wire ordering edges + read-backs + cycle check"]
     H --> I["release set + decomposition report on docket"]
     I --> J["consumers: drain queue / packet-implementer / interactive"]
@@ -218,17 +218,20 @@ and 5 that are verbatim copies cite their source section once for the whole bloc
 
 ## 7. Metadata (structured channel, replace semantics)
 
-All keys are prefixed `pd-` to avoid collision with other tooling.
+All keys are prefixed `pd_` to avoid collision with other tooling. Underscores, not hyphens:
+bd's `--set-metadata` validates keys against `[a-zA-Z_][a-zA-Z0-9_.]*` (probed 2026-08-27;
+the JSON `--metadata` form skips that validation, so a hyphenated key would create a value
+`--set-metadata` can never update). Values are compared as strings.
 
 | Key                                                       | On     | Meaning                                                                                                                                                                                                                    |
 | --------------------------------------------------------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `pd-rev`                                                  | docket | Design-of-record revision, bumped by RECONCILE                                                                                                                                                                             |
-| `pd-model`, `pd-budget`, `pd-read-target`                 | docket | Sizing policy for the decomposition (e.g. `sonnet`, `250k`, `25`)                                                                                                                                                          |
-| `pd-phase`                                                | docket | Pipeline phase marker: `precheck` / `curating` / `prefilter` / `coldread` / `postcheck` / `wiring` / `releasing:<n>/<m>` / `released` / `reconciling:<rev>` / `failed:<phase>` — written at every transition (§8.9, §8.11) |
-| `pd-source`                                               | docket | The design source identifier (path or bead id) used by `find-docket` dedup                                                                                                                                                 |
-| `pd-model`, `pd-budget`                                   | packet | Deviation ONLY — absent means docket policy applies                                                                                                                                                                        |
-| `pd-curated-rev`, `pd-curated-date`, `pd-curated-session` | packet | Curation provenance stamp (session = the decomposer's own session id, B-5 style)                                                                                                                                           |
-| `pd-stale`                                                | packet | Set by a stamp-mismatch release or by RECONCILE on a claimed packet (`reconcile-pending`); cleared by re-curation                                                                                                          |
+| `pd_rev`                                                  | docket | Design-of-record revision, bumped by RECONCILE                                                                                                                                                                             |
+| `pd_model`, `pd_budget`, `pd_read_target`                 | docket | Sizing policy for the decomposition (e.g. `sonnet`, `250k`, `25`)                                                                                                                                                          |
+| `pd_phase`                                                | docket | Pipeline phase marker: `precheck` / `curating` / `prefilter` / `coldread` / `postcheck` / `wiring` / `releasing:<n>/<m>` / `released` / `reconciling:<rev>` / `failed:<phase>` — written at every transition (§8.9, §8.11) |
+| `pd_source`                                               | docket | The design source identifier (path or bead id) used by `find-docket` dedup                                                                                                                                                 |
+| `pd_model`, `pd_budget`                                   | packet | Deviation ONLY — absent means docket policy applies                                                                                                                                                                        |
+| `pd_curated_rev`, `pd_curated_date`, `pd_curated_session` | packet | Curation provenance stamp (session = the decomposer's own session id, B-5 style)                                                                                                                                           |
+| `pd_stale`                                                | packet | Set by a stamp-mismatch release or by RECONCILE on a claimed packet (`reconcile-pending`); cleared by re-curation                                                                                                          |
 
 Resolution order for sizing: packet metadata → docket metadata → the skill's documented
 fallback default (stated ONCE in the core skill, labeled as the fallback). No model name or
@@ -238,7 +241,7 @@ report; an implementer treats a malformed stamp as a mismatch (suspected-stale).
 
 Metric records are NOT metadata (they are history): they ride the medium's append-only channel
 (§11) as single-line records with fixed key order:
-`pd-metrics outcome=<done|blocked|released> escalation-reads=<n> validation-retries=<n> tokens=<k>`.
+`pd_metrics outcome=<done|blocked|released> escalation-reads=<n> validation-retries=<n> tokens=<k>`.
 
 ## 8. Decomposition procedure (core skill, mode `decompose`)
 
@@ -263,8 +266,8 @@ tracking issue precisely for this pre-docket case — so it survives the session
 
 ### 8.2 Build and curate
 
-`find-docket` first (§8.9). Create the docket (design verbatim + `pd-rev` + metadata +
-`pd-source`). Draft packet boundaries from the sketch with the task-boundary test (from
+`find-docket` first (§8.9). Create the docket (design verbatim + `pd_rev` + metadata +
+`pd_source`). Draft packet boundaries from the sketch with the task-boundary test (from
 writing-plans, §2): split only where a reviewer could reject one half while approving the
 other; otherwise fold. Curate each packet per §6, citing per §6.1, and record the PLANNED
 ORDERING as you go — the blocked-by pairs implied by each Contract's Consumes/Produces — in
@@ -280,7 +283,7 @@ self-containment (D1) outranks deduplication, so the preamble is the sanctioned 
 ### 8.3 Sizing
 
 Estimate each packet's fixed inputs (packet text + expected read-set, bytes ÷ 4) against the
-resolved policy; target fixed inputs ≤ `pd-read-target`% of budget. Over target ⇒ split.
+resolved policy; target fixed inputs ≤ `pd_read_target`% of budget. Over target ⇒ split.
 **Unsplittable** means no boundary passes the reviewer-reject test — any split would create
 halves a reviewer could not independently accept. Genuinely unsplittable ⇒ write a
 packet-metadata deviation and proceed — sizing never halts (D3). Per-packet estimates go in
@@ -292,7 +295,7 @@ own cost scales with Σ packet fixed-reads, so the target also bounds check cost
 **Pre-filter (scripted or trivial-model, near-zero cost, runs first and gates):** uncited
 clauses (grep for §6.1 markers); file-overlap collisions across packets' Files parts without a
 connecting ordering edge; out-of-scope pointers whose target packet lacks the pointed-at
-concern; byte-identity of shared preambles; metadata completeness (stamps, policy, `pd-rev`).
+concern; byte-identity of shared preambles; metadata completeness (stamps, policy, `pd_rev`).
 Failures loop to §8.2 without spending a single agent dispatch.
 
 **Cold-read check (per packet, cheap model):** an agent reads ONLY the packet content and
@@ -325,7 +328,7 @@ bounded per §8.10.
 Wire ordering edges (blocked-by direction verified by read-back on EVERY edge; a failed
 read-back is re-tried once and then treated as a §8.10 recurring finding). Cycle check after
 bulk wiring — the medium's cycle probe MAY be global, so its output MUST be filtered to this
-docket's packet ids. Release the set, recording per-packet progress in `pd-phase`
+docket's packet ids. Release the set, recording per-packet progress in `pd_phase`
 (`releasing:<n>/<m>`) so an interrupted sweep resumes rather than restarts. Write the
 decomposition report (`write-report`): packet index, per-packet fixed-read estimates and
 dispatch counts, sizing deviations, check outcomes, hoisting flags (advisory — they never
@@ -336,7 +339,7 @@ block release), not-decomposed records, and an explicit "no uncited content" ass
 If the decomposer stops early on ANY exit (error, context exhaustion, operator interrupt), it
 MUST: leave all packets DEFERRED (never release an unverified set — an aborted release of
 uncurated, unwired packets into the claimable queue is the worst failure this design can
-produce), set `pd-phase=failed:<phase>`, and `write-report` a failure note stating what was
+produce), set `pd_phase=failed:<phase>`, and `write-report` a failure note stating what was
 completed. A successor (or the same skill re-invoked) finds the state via §8.9. The decomposer
 holds no bead claims in the normal path — packets are DEFERRED, not assigned — so claim
 hygiene (B-1) is satisfied by construction; a claim the DISPATCHING session holds on an
@@ -351,11 +354,11 @@ gaps, the §8.1 gap report. Same durability rules as §8.1.
 ### 8.9 Dedup, phase marker, resume
 
 Before creating a docket, `find-docket(design-source)` (beads: metadata/label query on
-`pd-source`). An existing docket for the same source ⇒ MUST NOT create a second; route to
-RECONCILE (if the design changed) or resume. Resume: read `pd-phase` and the docket's existing
+`pd_source`). An existing docket for the same source ⇒ MUST NOT create a second; route to
+RECONCILE (if the design changed) or resume. Resume: read `pd_phase` and the docket's existing
 packets, continue from the recorded phase. The phase marker is what distinguishes
 "decomposition in progress / died mid-flight" from an ordinary stranded bead (B-6): a deferred
-packet under a docket whose `pd-phase` is not `released` is mid-decomposition by definition,
+packet under a docket whose `pd_phase` is not `released` is mid-decomposition by definition,
 and MUST be reported, not stolen or force-released.
 
 ### 8.10 Loop bounds and halts (P-4/P-5 idiom)
@@ -374,8 +377,8 @@ No loop in this pipeline is unbounded:
 ### 8.11 Mode `reconcile`
 
 Input: a docket and the amended design text. Order is load-bearing: run the §8.1 pre-check on
-the AMENDED design FIRST; only after it passes, `amend-design` (bump `pd-rev`, supersede per
-S-2 — struck/rewritten text, ruling recorded), setting `pd-phase=reconciling:<new-rev>` at
+the AMENDED design FIRST; only after it passes, `amend-design` (bump `pd_rev`, supersede per
+S-2 — struck/rewritten text, ruling recorded), setting `pd_phase=reconciling:<new-rev>` at
 that moment and restoring `released` when the reconcile completes — an interrupted reconcile
 is thereby detectable and resumable via §8.9 like any other phase. Then re-curate the
 affected OPEN, UNCLAIMED
@@ -385,14 +388,14 @@ semantic check is for initial release and deliberate audits, not every amendment
 untouched by the amendment keep their stamps.
 
 **Claimed packets:** RECONCILE MUST NOT rewrite a packet that is actively claimed. It sets
-`pd-stale=reconcile-pending` on it instead; the implementer's escalation ladder and closeout
-both check `pd-stale` (§10.2), so the change is caught at the packet's next natural
+`pd_stale=reconcile-pending` on it instead; the implementer's escalation ladder and closeout
+both check `pd_stale` (§10.2), so the change is caught at the packet's next natural
 checkpoint rather than under the implementer's feet.
 
 **Stamp-mismatch releases** (an implementer found rotted curation before reconcile ran): the
-release MUST re-DEFER the packet and set `pd-stale=<found-rev>`, not return it to the open
+release MUST re-DEFER the packet and set `pd_stale=<found-rev>`, not return it to the open
 pool — otherwise every queue consumer claims, checks, and releases it in an endless
-cross-session spin (the P-4 shape). RECONCILE is what clears `pd-stale` and undefers. The
+cross-session spin (the P-4 shape). RECONCILE is what clears `pd_stale` and undefers. The
 docket failure/report channel tells the operator a reconcile is owed.
 
 ## 9. Cost model and the floor
@@ -443,17 +446,17 @@ human).
 The reference consumer; carries all hoisted common discipline so packets never repeat it:
 
 1. Claim with an explicit actor. **Stamp check** (two metadata reads, cost independent of
-   design size): packet `pd-curated-rev` vs docket `pd-rev`, and `pd-stale` unset — any
-   mismatch ⇒ suspected-stale ⇒ re-defer with `pd-stale` set (§8.11) and stop; MUST NOT work
+   design size): packet `pd_curated_rev` vs docket `pd_rev`, and `pd_stale` unset — any
+   mismatch ⇒ suspected-stale ⇒ re-defer with `pd_stale` set (§8.11) and stop; MUST NOT work
    rotted curation.
 2. Read the packet content once; work packet-first; validate change-scoped only.
 3. **Escalation ladder when stuck:** (a) re-read your packet — is it actually answered?
-   (b) re-check `pd-stale` (a reconcile may be pending), then read the docket design,
+   (b) re-check `pd_stale` (a reconcile may be pending), then read the docket design,
    RECORDING that you did (the `escalation-reads` metric); (c) still stuck ⇒ release with a
    what-was-missing note. It MUST NOT guess across a contract seam and MUST NOT read sibling
    packets — if the contract is insufficient, that is a curation defect to report, not a
    research prompt.
-4. Closeout: re-check `pd-stale` once, append the metric record (§7 format), then close or
+4. Closeout: re-check `pd_stale` once, append the metric record (§7 format), then close or
    release per claim-hygiene rules.
 
 Default model comes from the docket policy via the dispatcher; the agent frontmatter carries a
@@ -463,16 +466,16 @@ static default that mirrors the core skill's documented fallback (overridable at
 
 | Abstract operation                   | Beads mapping                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `find-docket`                        | Query beads labeled `docket` and match `pd-source` metadata against the design source                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `find-docket`                        | Query beads labeled `docket` and match `pd_source` metadata against the design source                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `create-docket`                      | Epic bead, label `docket`; design of record VERBATIM in the DESIGN field. Field cap: description/design cap at 65,535 bytes (previously verified in this workspace); larger designs chunk into `bd comment --file` parts, the DESIGN field holding the header + a numbered chunk index (`part <n>/<m>: comment <id>`) that `read-docket-design` follows in order. Container note "do not claim for direct work"; drain's `--exclude-type epic` keeps it out of the drain queue (that exclusion lives in drain, not bd — `bd ready` itself returns epics)                                             |
-| `read-metadata` / `write-metadata`   | Native bd metadata: `--metadata k=v` at create, `bd update <id> --set-metadata k=v` to change, read via `bd show <id> --json` metadata field (exact JSON path verified at build time). REPLACE semantics per key — never notes tokens (append-only notes cannot supersede `pd-rev`)                                                                                                                                                                                                                                                                                                                  |
+| `read-metadata` / `write-metadata`   | Native bd metadata: `--metadata k=v` at create, `bd update <id> --set-metadata k=v` to change, read via `bd show <id> --json` metadata field (exact JSON path verified at build time). REPLACE semantics per key — never notes tokens (append-only notes cannot supersede `pd_rev`)                                                                                                                                                                                                                                                                                                                  |
 | `create-packet`                      | Child bead (`--parent <epic>`, type task, `--no-inherit-labels` — without it every packet inherits the `docket` label and breaks discovery): §6 body → description; criteria → the dedicated `--acceptance` field; HELD = created DEFERRED (single-call create-deferred if `bd create` supports it — verify at build time; else create-then-`bd defer` immediately, window noted). `bd defer` is the mechanism `bd ready` actually respects — assignee does NOT hide a bead from `bd ready` (verified: the default ready query has no assignee filter; `-u` is opt-in) — pb-gate-lifecycle precedent |
 | `wire-ordering`                      | `bd dep add <blocked> --blocked-by <blocker>` then `bd dep list <blocked>` read-back on EVERY edge; `bd dep cycles` after bulk wiring, output FILTERED to this docket's packet ids (the command is database-global)                                                                                                                                                                                                                                                                                                                                                                                  |
 | `read-packet` / `read-docket-design` | `bd show <id>` / the epic's DESIGN field (+ chunk index when chunked)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| `release-set`                        | Per packet: `bd undefer <id>`, with `pd-phase=releasing:<n>/<m>` updated as the sweep proceeds                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `release-set`                        | Per packet: `bd undefer <id>`, with `pd_phase=releasing:<n>/<m>` updated as the sweep proceeds                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `write-report`                       | `bd comment <target-bead>` — the docket epic, or the named tracking bead for pre-docket gap reports (append-only; immune to the row-clobber failure mode)                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `append-metric` / `read-metrics`     | `bd comment <packet-id>` with the §7 record / `bd comments <id> --json` over the docket's children (aggregation, when built, MUST scope by docket and paginate)                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| `amend-design`                       | Rewrite the DESIGN field (S-2: superseded text struck/rewritten, ruling recorded verbatim); for chunked designs, rewrite the header/index and append new-revision chunks, striking superseded chunks in the index (comments cannot be edited); bump `pd-rev` via `--set-metadata`                                                                                                                                                                                                                                                                                                                    |
+| `amend-design`                       | Rewrite the DESIGN field (S-2: superseded text struck/rewritten, ruling recorded verbatim); for chunked designs, rewrite the header/index and append new-revision chunks, striking superseded chunks in the index (comments cannot be edited); bump `pd_rev` via `--set-metadata`                                                                                                                                                                                                                                                                                                                    |
 | `close-docket`                       | `bd close <epic>` once children are closed (bd refuses an epic close with open children; the documented `--force` override is for the operator, not this skill)                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 
 Claim/close hygiene, `human` labeling, and dependency-direction rules follow the workspace's
@@ -511,7 +514,7 @@ Signals and their sources:
 | `validation-retries`   | Validation-section quality            | Implementer closeout record                         |
 | `outcome`              | done / blocked / released             | Implementer closeout record                         |
 | `tokens`               | Actual vs estimated budget            | Implementer closeout record vs decomposition report |
-| `pd-stale` occurrences | Reconcile misses / staleness pressure | Packet metadata + docket reports                    |
+| `pd_stale` occurrences | Reconcile misses / staleness pressure | Packet metadata + docket reports                    |
 
 Bare consumers (drain without the agent, interactive sessions) will not emit records —
 accepted; coverage is best-effort. Ground-truth backstop: pg-ccaudit's transcript index can
@@ -525,7 +528,7 @@ contract operations above are sufficient for it to be added without changing v1 
   boundary sketch, or gap report.
 - **Decompose:** "decompose `<design>` into beads" (optionally: sizing policy, tracking bead)
   → the session dispatches `plan-decomposer` with the brief per §10.1; progress is visible in
-  the docket's `pd-phase` and phase-transition report comments.
+  the docket's `pd_phase` and phase-transition report comments.
 - **Reconcile:** "the design for docket `<id>` changed — reconcile" → mode `reconcile` with
   the amended text.
 - **Not for:** designs below the §9.2 floor; grooming existing beads (bead-grooming); working
@@ -576,4 +579,4 @@ contract operations above are sufficient for it to be added without changing v1 
   by the binder when serving content; Jira) — explicitly YAGNI until a consumer exists.
 - Whether `/drain-beads` should prefer `packet-implementer` when a claimed bead carries
   curation metadata — a later `pb` change, deliberately out of scope (D1 keeps it optional).
-- Tuning `pd-read-target` (25 starting default) and the §9.2 floor against gathered metrics.
+- Tuning `pd_read_target` (25 starting default) and the §9.2 floor against gathered metrics.
