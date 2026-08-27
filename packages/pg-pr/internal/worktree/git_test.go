@@ -3,13 +3,18 @@ package worktree
 import (
 	"context"
 	"fmt"
-	"os/exec"
 	"path/filepath"
 	"testing"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/gitfixture"
 )
 
 // ----------------------------------------------------------------------
 // Helpers (local git "origin" fixtures — no network)
+//
+// Every git call below goes through internal/gitfixture's allowlisted,
+// hermetic environment (pg2-12795) so that no fixture here can touch a real
+// git repo/config by construction.
 // ----------------------------------------------------------------------
 
 // createPullHeadRef forges refs/pull/<pr>/head in dir pointing at HEAD. dir
@@ -18,12 +23,7 @@ import (
 // way CLIGitClient.FetchPR does against the real remote.
 func createPullHeadRef(t *testing.T, dir string, pr int) {
 	t.Helper()
-	cmd := exec.Command("git", "-C", dir, "update-ref",
-		fmt.Sprintf("refs/pull/%d/head", pr), "HEAD")
-	cmd.Env = hermeticEnviron(t)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("update-ref refs/pull/%d/head: %v\n%s", pr, err, out)
-	}
+	gitfixture.MustRun(t, dir, "update-ref", fmt.Sprintf("refs/pull/%d/head", pr), "HEAD")
 }
 
 // advancePullHeadRef commits a new empty commit in dir and repoints
@@ -31,26 +31,14 @@ func createPullHeadRef(t *testing.T, dir string, pr int) {
 // pushed to the PR) between two daemon review cycles.
 func advancePullHeadRef(t *testing.T, dir string, pr int) {
 	t.Helper()
-	cmd := exec.Command("git", "-C", dir, "commit", "--allow-empty", "-m", "advance")
-	cmd.Env = append(
-		hermeticEnviron(t),
-		"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@example.com",
-		"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@example.com",
-	)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git commit --allow-empty: %v\n%s", err, out)
-	}
+	gitfixture.MustRun(t, dir, "commit", "--allow-empty", "-m", "advance")
 	createPullHeadRef(t, dir, pr)
 }
 
 // gitConfig runs `git -C dir config <args...>`, failing the test on error.
 func gitConfig(t *testing.T, dir string, args ...string) {
 	t.Helper()
-	cmd := exec.Command("git", append([]string{"-C", dir, "config"}, args...)...)
-	cmd.Env = hermeticEnviron(t)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git config %v: %v\n%s", args, err, out)
-	}
+	gitfixture.MustRun(t, dir, append([]string{"config"}, args...)...)
 }
 
 // ----------------------------------------------------------------------

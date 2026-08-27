@@ -4,63 +4,22 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/gitfixture"
 )
 
 // ----------------------------------------------------------------------
 // Helpers
+//
+// Every git call below goes through internal/gitfixture's allowlisted,
+// hermetic environment (pg2-12795) so that no fixture here can touch a real
+// git repo/config by construction, even if this whole `go test` process was
+// itself invoked from inside a git hook that leaked GIT_DIR/GIT_WORK_TREE
+// into its own environment.
 // ----------------------------------------------------------------------
-
-// hermeticEnviron builds a MINIMAL, EXPLICITLY ALLOWLISTED environment for
-// the git subprocesses these fixtures shell out to, so that no fixture here
-// can touch a real git repo/config BY CONSTRUCTION.
-//
-// `-C <dir>` only changes the working directory before git runs; it does NOT
-// override GIT_DIR, GIT_WORK_TREE, GIT_INDEX_FILE, GIT_CEILING_DIRECTORIES,
-// or GIT_COMMON_DIR — vars git's own repo discovery consults FIRST and which
-// -C cannot override. If any of those leak into the environment that
-// launched `go test` (a git hook — pre-commit/prek — exports exactly these
-// for the commit in progress, and `go test` inherits that environment when
-// it is run AS the commit-time hook, as pg-test-runner's run-unit-tests hook
-// does for this module), every "isolated" `-C <fixture>` call below silently
-// redirects onto whatever repository those variables name instead. This is
-// the exact mechanism that corrupted the CANONICAL clone's own .git/config
-// (core.worktree + user.email/user.name) — see pg2-12795 / pg2-5ek6b — and
-// the identical bug class already fixed the same way in
-// claude-extended-tool-approver's hermeticEnviron (pg2-8wnhc / pg2-rrhw2):
-// see that package's primarycommit_worktree_test.go for the full writeup.
-//
-// Fixed by inverting denylist to allowlist: the subprocess environment is
-// built by ADDING only what git demonstrably needs for these local,
-// no-network operations (init/config/commit/worktree/checkout), instead of
-// SUBTRACTING known-dangerous vars — a name this list doesn't yet know about
-// (forgotten today, or invented by a future git release) is excluded
-// automatically. HOME is pointed at a fresh t.TempDir() (not the ambient
-// value) so even a fallback this allowlist hasn't anticipated lands in an
-// empty per-test directory, never the real user's home.
-func hermeticEnviron(t *testing.T) []string {
-	t.Helper()
-	ambient := map[string]string{}
-	for _, kv := range os.Environ() {
-		if k, v, ok := strings.Cut(kv, "="); ok {
-			ambient[k] = v
-		}
-	}
-	env := []string{"HOME=" + t.TempDir(), "GIT_CONFIG_NOSYSTEM=1"}
-	// PATH: to locate the git binary and anything it execs. TMPDIR: git's own
-	// scratch files. GIT_CONFIG_GLOBAL/_SYSTEM: forwarded so a caller's
-	// t.Setenv override reaches the subprocess. None of these four names a
-	// git repository location.
-	for _, k := range []string{"PATH", "TMPDIR", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM"} {
-		if v, ok := ambient[k]; ok {
-			env = append(env, k+"="+v)
-		}
-	}
-	return env
-}
 
 // initRepo creates a bare-like git repo at dir with an initial commit on
 // `main`, and configures user.name / user.email so commits succeed in
@@ -69,27 +28,15 @@ func initRepo(t *testing.T, dir string) {
 	t.Helper()
 	run := func(args ...string) {
 		t.Helper()
-		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
-		cmd.Env = append(
-			hermeticEnviron(t),
-			"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@example.com",
-			"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@example.com",
-		)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
-		}
+		gitfixture.MustRun(t, dir, args...)
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	// Use -b main; if old git, fall back.
-	cmd := exec.Command("git", "-C", dir, "init", "-b", "main")
-	cmd.Env = hermeticEnviron(t)
-	if out, err := cmd.CombinedOutput(); err != nil {
+	if out, err := gitfixture.Run(t, dir, "init", "-b", "main"); err != nil {
 		// Fallback for older git versions.
-		cmd2 := exec.Command("git", "-C", dir, "init")
-		cmd2.Env = hermeticEnviron(t)
-		if out2, err2 := cmd2.CombinedOutput(); err2 != nil {
+		if out2, err2 := gitfixture.Run(t, dir, "init"); err2 != nil {
 			t.Fatalf("git init: %v\n%s\n%s", err, out, out2)
 		}
 		run("symbolic-ref", "HEAD", "refs/heads/main")
@@ -112,11 +59,7 @@ func initRepo(t *testing.T, dir string) {
 // RepoFromRemote succeeds. It does not create a real remote.
 func configureRemote(t *testing.T, dir, url string) {
 	t.Helper()
-	cmd := exec.Command("git", "-C", dir, "remote", "add", "origin", url)
-	cmd.Env = hermeticEnviron(t)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git remote add: %v\n%s", err, out)
-	}
+	gitfixture.MustRun(t, dir, "remote", "add", "origin", url)
 }
 
 // createOriginPRRef forges a ref refs/remotes/origin/pr/<n> pointing at HEAD,
@@ -124,12 +67,7 @@ func configureRemote(t *testing.T, dir, url string) {
 // fetch.
 func createOriginPRRef(t *testing.T, dir string, pr int) {
 	t.Helper()
-	cmd := exec.Command("git", "-C", dir, "update-ref",
-		fmt.Sprintf("refs/remotes/origin/pr/%d", pr), "HEAD")
-	cmd.Env = hermeticEnviron(t)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("update-ref: %v\n%s", err, out)
-	}
+	gitfixture.MustRun(t, dir, "update-ref", fmt.Sprintf("refs/remotes/origin/pr/%d", pr), "HEAD")
 }
 
 // ----------------------------------------------------------------------
@@ -313,17 +251,7 @@ func createUnmergedOriginPRRef(t *testing.T, dir string, pr int) {
 	t.Helper()
 	run := func(args ...string) string {
 		t.Helper()
-		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
-		cmd.Env = append(
-			hermeticEnviron(t),
-			"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@example.com",
-			"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@example.com",
-		)
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
-		}
-		return strings.TrimSpace(string(out))
+		return gitfixture.MustRun(t, dir, args...)
 	}
 	primary := run("symbolic-ref", "--short", "HEAD")
 	prHead := run("commit-tree", "-p", "HEAD", "-m", fmt.Sprintf("PR #%d head", pr), run("rev-parse", "HEAD^{tree}"))
@@ -364,9 +292,7 @@ func TestRemoveForceDeletesUnmergedButNotAheadBranch(t *testing.T) {
 	// Sanity check: plain `git branch -d` (unforced) genuinely refuses this
 	// branch (it isn't merged into main), so the test is actually
 	// exercising the "unmerged" case.
-	unforced := exec.Command("git", "-C", repoDir, "branch", "-d", "review/pr-55")
-	unforced.Env = hermeticEnviron(t)
-	if out, err := unforced.CombinedOutput(); err == nil {
+	if out, err := gitfixture.Run(t, repoDir, "branch", "-d", "review/pr-55"); err == nil {
 		t.Fatalf("expected `git branch -d` to refuse the unmerged branch, but it succeeded:\n%s", out)
 	}
 
@@ -384,9 +310,7 @@ func TestRemoveForceDeletesUnmergedButNotAheadBranch(t *testing.T) {
 	}
 
 	// The branch must actually be gone.
-	verify := exec.Command("git", "-C", repoDir, "rev-parse", "--verify", "--quiet", "refs/heads/review/pr-55")
-	verify.Env = hermeticEnviron(t)
-	if out, err := verify.CombinedOutput(); err == nil {
+	if out, err := gitfixture.Run(t, repoDir, "rev-parse", "--verify", "--quiet", "refs/heads/review/pr-55"); err == nil {
 		t.Fatalf("expected branch review/pr-55 to be deleted, but it still resolves:\n%s", out)
 	}
 
@@ -436,27 +360,9 @@ func TestRemoveDoesNotDeleteBranchWithLocalCommits(t *testing.T) {
 	if err := os.WriteFile(extra, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	commit := exec.Command("git", "-C", addRes.Path, "add", "extra.txt")
-	commit.Env = hermeticEnviron(t)
-	if out, err := commit.CombinedOutput(); err != nil {
-		t.Fatalf("git add: %v\n%s", err, out)
-	}
-	commit = exec.Command("git", "-C", addRes.Path, "commit", "-m", "local review fixup")
-	commit.Env = append(
-		hermeticEnviron(t),
-		"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@example.com",
-		"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@example.com",
-	)
-	if out, err := commit.CombinedOutput(); err != nil {
-		t.Fatalf("git commit: %v\n%s", err, out)
-	}
-	localCommit := exec.Command("git", "-C", repoDir, "rev-parse", "review/pr-55")
-	localCommit.Env = hermeticEnviron(t)
-	localSHAOut, err := localCommit.CombinedOutput()
-	if err != nil {
-		t.Fatalf("rev-parse review/pr-55: %v\n%s", err, localSHAOut)
-	}
-	localSHA := strings.TrimSpace(string(localSHAOut))
+	gitfixture.MustRun(t, addRes.Path, "add", "extra.txt")
+	gitfixture.MustRun(t, addRes.Path, "commit", "-m", "local review fixup")
+	localSHA := gitfixture.MustRun(t, repoDir, "rev-parse", "review/pr-55")
 
 	// The worktree has no uncommitted changes (we committed above), so
 	// Remove proceeds without needing opts.Force.
@@ -475,14 +381,12 @@ func TestRemoveDoesNotDeleteBranchWithLocalCommits(t *testing.T) {
 	}
 
 	// The branch — and its local-only commit — must still exist.
-	verify := exec.Command("git", "-C", repoDir, "rev-parse", "--verify", "--quiet", "refs/heads/review/pr-55")
-	verify.Env = hermeticEnviron(t)
-	out, verifyErr := verify.CombinedOutput()
+	out, verifyErr := gitfixture.Run(t, repoDir, "rev-parse", "--verify", "--quiet", "refs/heads/review/pr-55")
 	if verifyErr != nil {
 		t.Fatalf("expected branch review/pr-55 to still exist, but it's gone: %v\n%s", verifyErr, out)
 	}
-	if got := strings.TrimSpace(string(out)); got != localSHA {
-		t.Fatalf("expected review/pr-55 to still point at the local commit %s, got %s", localSHA, got)
+	if out != localSHA {
+		t.Fatalf("expected review/pr-55 to still point at the local commit %s, got %s", localSHA, out)
 	}
 }
 
