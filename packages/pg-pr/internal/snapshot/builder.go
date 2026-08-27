@@ -49,6 +49,15 @@ type PRInput struct {
 	// HiddenReason is the operator-supplied reason recorded with the hide, if
 	// any (store.PullRequest.UserHiddenReason).
 	HiddenReason string
+	// WIP mirrors the store's WIP suppression flag (store.PullRequest.WIP,
+	// pg2-4dz88.4's "WIP semantics"), populated by the sync layer from the
+	// persisted PR row (mirroring how Hidden is populated). Consumed by the
+	// mine-panel ACT-NOW WIP-promotion clause (pg2-4dz88.7.4, mine_panels.go):
+	// a draft carrying WIP==true that otherwise meets
+	// internal/sync/draft_promotion.go's promotion predicate surfaces in ACT
+	// NOW as "something for me to flip off". Never affects ingestion, exactly
+	// like Hidden.
+	WIP bool
 }
 
 // BuilderInput is the full snapshot input.
@@ -102,13 +111,17 @@ type BuilderInput struct {
 	// trunk, matching prdeps.Input.TrunkRefs's own documented default.
 	TrunkRefs []string
 	// ApproverAllowlist mirrors config.Config.ApproverAllowlist: the set of
-	// logins whose verdict counts toward approval AND, as of pg2-4dz88.7.3,
-	// toward the bot-disapproval clause of the team-panel ACT-NOW predicate
-	// (see TeamRow.BotDisapproved, internal/snapshot/panels.go's ActNow).
-	// This package must not import internal/config (see
+	// logins whose verdict counts toward approval and toward bot-disapproval.
+	// Consumed by the team-panel ACT-NOW bot-disapproval clause (pg2-4dz88.7.3,
+	// see TeamRow.BotDisapproved, internal/snapshot/panels.go's ActNow) and by
+	// the mine-panel ACT-NOW blocking-bot-verdict and WIP-promotion clauses
+	// (pg2-4dz88.7.4, mine_panels.go), both of which filter PRInput.Approvals
+	// to this set — deliberately NOT agentregistry.Registry.IsAgent's set, a
+	// different, independently configured signal that can silently diverge
+	// from it. This package must not import internal/config (see
 	// CheckInterpretersByRepo's doc for the same rationale), so the caller
-	// (internal/sync) supplies the plain login list. Nil/empty means no
-	// login is allowlisted, so botDisapproved never fires — matching
+	// (internal/sync) supplies the plain login list. Nil/empty means no login
+	// is allowlisted, so neither bot-verdict clause ever fires — matching
 	// config.Config.ApproverAllowlist's own documented absent/empty default.
 	ApproverAllowlist []string
 }
@@ -225,21 +238,24 @@ func Build(in BuilderInput) *Snapshot {
 		// declared cadence); the age/stale VERDICT against it is stamped at serve
 		// time by Snapshot.WithFreshness, because a just-built snapshot is by
 		// construction never stale.
-		StaleAfterSeconds: freshness.BoundSeconds(in.SyncIntervalSeconds),
-		Mine:              []MineRow{},
-		Team:              []TeamRow{},
+		StaleAfterSeconds:       freshness.BoundSeconds(in.SyncIntervalSeconds),
+		Mine:                    []MineRow{},
+		Team:                    []TeamRow{},
+		MineActNow:              []MineRow{},
+		MineAwaitingOthers:      []MineRow{},
+		MineAwaitingOtherThings: []MineRow{},
 	}
 	teamSet := make(map[string]struct{}, len(in.TeamMembers))
 	for _, m := range in.TeamMembers {
 		teamSet[m] = struct{}{}
 	}
+	// approverAllowlist backs the team-panel ACT-NOW bot-disapproval clause
+	// (pg2-4dz88.7.3) and the mine-panel ACT-NOW bot-verdict/WIP-promotion
+	// clauses (pg2-4dz88.7.4, mine_panels.go's blockingBotVerdict).
+	approverAllowlist := allowlistSet(in.ApproverAllowlist)
 	excluders := make(map[string]*cirollup.Excluder, len(in.CheckInterpretersByRepo))
 	for repo, interps := range in.CheckInterpretersByRepo {
 		excluders[repo] = excluderFromInterpreters(interps)
-	}
-	approverAllowlist := make(map[string]struct{}, len(in.ApproverAllowlist))
-	for _, login := range in.ApproverAllowlist {
-		approverAllowlist[login] = struct{}{}
 	}
 	// The PR-dependency pass (pg2-4dz88.3.7) is a WHOLE-SET pass, computed once
 	// here over every PRInput regardless of admission below — a PR's place in a
@@ -286,7 +302,22 @@ func Build(in BuilderInput) *Snapshot {
 				mergedMine = append(mergedMine, row)
 				continue
 			}
-			out.Mine = append(out.Mine, buildMineRow(p, in.Registry, excl, deps, approverAllowlist))
+			row := buildMineRow(p, in.Registry, excl, deps, approverAllowlist)
+			out.Mine = append(out.Mine, row)
+			// Three-view membership (pg2-4dz88.7.4): computed for every
+			// ACTIVE (non-merged) mine/co-owned row, never for a retained
+			// merged-of-mine row above — a merged PR is no longer "in
+			// flight" in any of the three senses these views classify.
+			appr := classifyApprovals(p, in.Registry)
+			facts := mineViewFactsFor(p, excl, approverAllowlist, appr.Human > 0)
+			switch ClassifyMine(facts) {
+			case MineViewActNow:
+				out.MineActNow = append(out.MineActNow, row)
+			case MineViewAwaitingOtherThings:
+				out.MineAwaitingOtherThings = append(out.MineAwaitingOtherThings, row)
+			default:
+				out.MineAwaitingOthers = append(out.MineAwaitingOthers, row)
+			}
 		case !p.PR.Draft && len(reasons) > 0:
 			// "PRs to Review": a non-mine, non-draft PR that STILL qualifies — it
 			// carries at least one live match reason (team-authored ∪ review-requested

@@ -46,6 +46,25 @@ type Snapshot struct {
 	// vanish from the payload, so a consumer can distinguish "checked, zero
 	// dropped" from "field absent."
 	DroppedCount int `json:"dropped_count"`
+
+	// MineActNow / MineAwaitingOthers / MineAwaitingOtherThings partition
+	// every ACTIVE (non-merged) row of Mine into exactly one of the three
+	// "My PRs" panel membership views (pg2-4dz88.7.4) — see
+	// mine_panels.go's ClassifyMine for the precedence and predicates. Each
+	// is always a non-nil slice, "[]" when empty, matching Mine/Team's own
+	// convention.
+	//
+	// DELIBERATELY json:"-": this is classification logic only, per this
+	// bead's own cross-ref note on sibling pg2-4dz88.7.8 — neither this bead
+	// nor .7.3 (team-panel membership) commits to a wire shape (separate
+	// arrays vs. a per-row discriminator field on MineRow); that decision is
+	// explicitly .7.8's to make once both land. Keeping these fields
+	// unmarshaled avoids baking "separate arrays" into the payload contract
+	// before that decision is made, while still letting Build/tests/a future
+	// consumer read the partition directly off the Go value.
+	MineActNow              []MineRow `json:"-"`
+	MineAwaitingOthers      []MineRow `json:"-"`
+	MineAwaitingOtherThings []MineRow `json:"-"`
 }
 
 // WithFreshness returns a shallow COPY of s with the serve-time half of the

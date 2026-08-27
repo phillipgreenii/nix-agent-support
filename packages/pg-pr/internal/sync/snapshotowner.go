@@ -84,7 +84,10 @@ func (e *Engine) runSnapshotOwner(updates <-chan snapshotUpdate, store *snapshot
 			Registry:                e.deps.AgentRegistry,
 			PRs:                     m.sortedInputs(),
 			CheckInterpretersByRepo: e.checkInterpretersByRepo(),
-			ApproverAllowlist:       e.cfg().ApproverAllowlist,
+			// ApproverAllowlist backs both the team-panel ACT-NOW bot-
+			// disapproval clause (pg2-4dz88.7.3) and the mine-panel ACT-NOW
+			// bot-verdict/WIP-promotion clauses (pg2-4dz88.7.4).
+			ApproverAllowlist: e.cfg().ApproverAllowlist,
 			// See sync.go's buildAndStoreSnapshot for why this daemon-owned
 			// shared snapshot always includes hidden PRs (pg2-4dz88.4.3).
 			IncludeHidden: true,

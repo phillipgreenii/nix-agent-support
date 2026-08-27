@@ -701,7 +701,10 @@ func (e *Engine) buildAndStoreSnapshot(ctx context.Context, observed map[prKey]a
 		Registry:                e.deps.AgentRegistry,
 		PRs:                     inputs,
 		CheckInterpretersByRepo: e.checkInterpretersByRepo(),
-		ApproverAllowlist:       e.cfg().ApproverAllowlist,
+		// ApproverAllowlist backs both the team-panel ACT-NOW bot-
+		// disapproval clause (pg2-4dz88.7.3) and the mine-panel ACT-NOW
+		// bot-verdict/WIP-promotion clauses (pg2-4dz88.7.4).
+		ApproverAllowlist: e.cfg().ApproverAllowlist,
 		// IncludeHidden: true — see BuilderInput.IncludeHidden's doc. The
 		// shared snapshot this Sets carries every observed PR, hidden or not,
 		// so a reader that opts in (`pg-pr open --include-hidden`) can still
@@ -1051,6 +1054,9 @@ func (e *Engine) buildPRInput(ctx context.Context, pr api.PR, enriched *vcs.Enri
 			// line reads it.
 			in.Hidden = stored.UserHidden
 			in.HiddenReason = stored.UserHiddenReason
+			// WIP (pg2-4dz88.7.4): mirrors Hidden's ride-along above, feeding
+			// the mine-panel ACT-NOW WIP-promotion clause.
+			in.WIP = stored.WIP
 		}
 	}
 	return in
