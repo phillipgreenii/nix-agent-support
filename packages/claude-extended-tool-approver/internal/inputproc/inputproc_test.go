@@ -22,14 +22,33 @@ import (
 // test`'s 10-minute panic.
 const testTimeout = 60 * time.Second
 
+// forkedChildSleepSeconds is how long the forking mocks' backgrounded `sleep`
+// stays alive. It sets the DEFECT-PRESENT floor: if isolateProcessGroup or
+// reapProcessGroup regresses, Process() blocks for this whole duration (the
+// background holder of the pipe is never killed, so cmd.Output() cannot return
+// until it exits on its own). It costs nothing on the passing path — the fixed
+// code kills the group immediately, well before this ever elapses — so raising
+// it only buys margin for forkStallBound below, never slows a green run.
+const forkedChildSleepSeconds = 120
+
 // forkStallBound is the wall clock the forking-mock tests below must return
-// within. It sits deliberately far from BOTH outcomes it discriminates, so it is
-// a verdict about the code and never about the machine: with the defect present
-// Process() parked for the mock's whole `sleep 30` (measured 30.25s against a
-// 300ms deadline), while the bounded path costs the deadline plus waitGrace —
-// under 600ms for every mock here. Scheduling latency cannot stretch 600ms to 5s,
-// and no machine is fast enough to bring 30s under it.
-const forkStallBound = 5 * time.Second
+// within. It discriminates two outcomes: with the defect present, Process()
+// blocks for the mock's whole forkedChildSleepSeconds; with the fix in place,
+// the bounded path costs only the deadline/WaitDelay plus a small kill+reap
+// overhead — historically under 600ms on an idle machine.
+//
+// It is wider than that historical cost because CPU contention inside the nix
+// build sandbox can stall Go's own exec/timer machinery by several seconds on a
+// loaded machine, not just the mock's fork+exec: TestProcess_ForkedGrandchild_
+// IsBoundedAndReaped measured 5.44s and 9.82s against a previous 5s bound with
+// the fix correctly in place (pg2-udv6u) — so "scheduling latency cannot stretch
+// this to 5s" was empirically false for this sandbox, the same class of failure
+// pg2-tl0ry diagnosed for the exec deadline. forkStallBound is widened here for
+// the same reason TestMain widens that deadline package-wide, and
+// forkedChildSleepSeconds is raised alongside it so the defect-present floor
+// stays a comfortable ~4x multiple above this bound rather than the
+// discriminating margin silently shrinking.
+const forkStallBound = 30 * time.Second
 
 // TestMain installs testTimeout for the WHOLE package rather than per test, for
 // the same reason cmd/claude-extended-tool-approver's TestMain isolates
@@ -230,7 +249,10 @@ func TestProcess_DeadlineKill_IsDistinguishable(t *testing.T) {
 // the defect the deadline did NOT buy (pg2-15uhy): the mock FORKS, so killing the
 // direct child leaves a grandchild holding the inherited stdout write end, and
 // cmd.Output() reads to an EOF that cannot arrive until that grandchild exits.
-// Measured before the fix: 30.25s against a 300ms deadline, ~100x the budget.
+// Measured before the fix: 30.25s against a 300ms deadline, ~100x the budget,
+// back when the mock's background sleep was a literal 30s; it is now
+// forkedChildSleepSeconds, raised to keep a defect regression's floor well
+// above the widened forkStallBound below.
 //
 // The 300ms deadline is chosen, not inherited: /bin/sh needs 20-180ms here to
 // start and fork, so at the 50ms TestProcess_DeadlineKill_IsDistinguishable uses
@@ -240,7 +262,7 @@ func TestProcess_DeadlineKill_IsDistinguishable(t *testing.T) {
 // deterministic half of the reproduction is the test below.
 func TestProcess_ForkedGrandchild_DeadlineBoundsWallClock(t *testing.T) {
 	withTimeout(t, 300*time.Millisecond)
-	script := writeMockProcessor(t, "forker", "sleep 30 &\nwait")
+	script := writeMockProcessor(t, "forker", fmt.Sprintf("sleep %d &\nwait", forkedChildSleepSeconds))
 	t.Setenv(envKey, script)
 
 	start := time.Now()
@@ -267,7 +289,8 @@ func TestProcess_ForkedGrandchild_DeadlineBoundsWallClock(t *testing.T) {
 // with the fork — the mock's `echo` cannot run until after the `&`, and
 // cmd.Output() cannot return until the direct child has exited. Measured before
 // the fix: 30.21s under a 60s deadline that never fired, with the rewrite applied
-// at the end.
+// at the end (the mock's background sleep was a literal 30s then; it is now
+// forkedChildSleepSeconds, raised alongside the widened forkStallBound below).
 //
 // It pins both halves of the decision:
 //   - BOUNDED, and fail-safe rather than best-effort — the rewrite is DISCARDED.
@@ -280,7 +303,7 @@ func TestProcess_ForkedGrandchild_DeadlineBoundsWallClock(t *testing.T) {
 //     is gone either way.
 func TestProcess_ForkedGrandchild_IsBoundedAndReaped(t *testing.T) {
 	pidFile := filepath.Join(t.TempDir(), "grandchild.pid")
-	script := writeMockProcessor(t, "backgrounder", fmt.Sprintf("sleep 30 &\necho $! > %s\necho \"wrapped $1\"", pidFile))
+	script := writeMockProcessor(t, "backgrounder", fmt.Sprintf("sleep %d &\necho $! > %s\necho \"wrapped $1\"", forkedChildSleepSeconds, pidFile))
 	t.Setenv(envKey, script)
 
 	start := time.Now()
