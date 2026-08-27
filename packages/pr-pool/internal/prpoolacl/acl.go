@@ -36,6 +36,13 @@ type PR struct {
 	Branch    string `json:"branch"`
 	State     string `json:"state"`
 	Ownership string `json:"ownership"`
+	// Draft is the seam's explicit draftness bool, set by pg-pr as
+	// `Draft: pr.State == "draft"` (packages/pg-pr/cmd/pg-pr/pr_list.go:99). The
+	// ACL consumes THIS field for draft-gating (see ensureReview) rather than
+	// re-deriving draftness from State itself: State's vocabulary is pg-pr's to
+	// grow, and re-deriving here would silently diverge the moment a new
+	// draft-like state is added that isn't the literal string "draft" (pg2-9y7ah).
+	Draft bool `json:"draft"`
 	// LastSyncedAt is pg-pr's AS-OF time for this row (RFC3339 UTC, the store's
 	// pull_request.last_synced_at column emitted verbatim). The base seam is
 	// network-free, so every field above is only as true as this timestamp.
@@ -213,12 +220,16 @@ func ensureReview(ctx context.Context, r beads.Runner, pr PR, mrs, reviews []bea
 	//	mine := p.Ownership != "team" // mine OR co-owned
 	//	if !h.suppressDraftReviews && (mine || !p.Draft) {
 	//
-	// pr.State == "draft" is the SAME fact as pg-pr's p.Draft — the seam derives
-	// Draft as `pr.State == "draft"` (packages/pg-pr/cmd/pg-pr/pr_list.go:99). See
-	// actsAsMine for why the predicate is copied rather than imported. (pg-pr's
-	// suppressDraftReviews review kill switch has no pr-pool counterpart; it is not
-	// part of this ownership/draft predicate.)
-	if !actsAsMine(pr.Ownership) && pr.State == "draft" {
+	// pr.Draft is consumed directly (not re-derived from pr.State — see the PR
+	// struct's Draft field doc): the seam already emits it as
+	// `Draft: pr.State == "draft"` (packages/pg-pr/cmd/pg-pr/pr_list.go:99), so
+	// consuming it here keeps this predicate correct even if pg-pr's State
+	// vocabulary grows a new draft-like value that isn't the literal string
+	// "draft" (pg2-9y7ah). See actsAsMine for why the ownership predicate is
+	// copied rather than imported. (pg-pr's suppressDraftReviews review kill
+	// switch has no pr-pool counterpart; it is not part of this
+	// ownership/draft predicate.)
+	if !actsAsMine(pr.Ownership) && pr.Draft {
 		return "", nil
 	}
 

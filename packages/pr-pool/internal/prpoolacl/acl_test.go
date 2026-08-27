@@ -373,18 +373,19 @@ func TestReconcile_DraftSelectionMatrix(t *testing.T) {
 		name      string
 		ownership string
 		state     string
+		draft     bool
 		reviewed  bool
 	}{
-		{"mine/not-draft", ownershipMine, "open", true},
-		{"mine/draft", ownershipMine, "draft", true},
-		{"co-owned/not-draft", ownershipCoOwned, "open", true},
-		{"co-owned/draft", ownershipCoOwned, "draft", true},
-		{"team/not-draft", ownershipTeam, "open", true},
-		{"team/draft", ownershipTeam, "draft", false},
+		{"mine/not-draft", ownershipMine, "open", false, true},
+		{"mine/draft", ownershipMine, "draft", true, true},
+		{"co-owned/not-draft", ownershipCoOwned, "open", false, true},
+		{"co-owned/draft", ownershipCoOwned, "draft", true, true},
+		{"team/not-draft", ownershipTeam, "open", false, true},
+		{"team/draft", ownershipTeam, "draft", true, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := birthFake()
-			prs := fresh(PR{Repo: "o/r", Number: 7, HeadSHA: "abc123", Branch: "feat/x", State: tc.state, Ownership: tc.ownership})
+			prs := fresh(PR{Repo: "o/r", Number: 7, HeadSHA: "abc123", Branch: "feat/x", State: tc.state, Draft: tc.draft, Ownership: tc.ownership})
 
 			ids, errs := Reconcile(context.Background(), f, prs)
 			if len(errs) != 0 {
@@ -415,7 +416,7 @@ func TestReconcile_DraftSelectionMatrix(t *testing.T) {
 // (`mine := p.Ownership != "team"`, bridge.go:111-112) and reviews mine while draft.
 func TestReconcile_CoOwnedDraftReviewed(t *testing.T) {
 	f := birthFake()
-	prs := fresh(PR{Repo: "o/r", Number: 7, HeadSHA: "abc123", Branch: "feat/x", State: "draft", Ownership: ownershipCoOwned})
+	prs := fresh(PR{Repo: "o/r", Number: 7, HeadSHA: "abc123", Branch: "feat/x", State: "draft", Draft: true, Ownership: ownershipCoOwned})
 
 	ids, errs := Reconcile(context.Background(), f, prs)
 	if len(errs) != 0 {
@@ -432,6 +433,48 @@ func TestReconcile_CoOwnedDraftReviewed(t *testing.T) {
 	}
 	if f.countCalls("gate", "create", "--type=pg-pr:active-pr") != 1 {
 		t.Errorf("expected an active-pr gate created at birth; calls=%v", f.calls)
+	}
+}
+
+// TestReconcile_DraftFollowsExplicitBoolNotState (pg2-9y7ah) proves the draft
+// gate consumes pr.Draft directly rather than re-deriving it from pr.State: a
+// team PR (the only ownership row the draft gate actually branches on) carrying
+// an UNRECOGNISED/future state string is still skipped when Draft is true, and
+// still reviewed when Draft is false — the literal string "draft" never
+// appears. If ensureReview regressed to `pr.State == "draft"`, both rows here
+// would incorrectly select "reviewed", since neither state string equals
+// "draft".
+func TestReconcile_DraftFollowsExplicitBoolNotState(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		state    string
+		draft    bool
+		reviewed bool
+	}{
+		{"unrecognised state, draft=true is still skipped", "in-progress-review", true, false},
+		{"unrecognised state, draft=false is still reviewed", "ready-for-merge", false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := birthFake()
+			prs := fresh(PR{Repo: "o/r", Number: 7, HeadSHA: "abc123", Branch: "feat/x", State: tc.state, Draft: tc.draft, Ownership: ownershipTeam})
+
+			ids, errs := Reconcile(context.Background(), f, prs)
+			if len(errs) != 0 {
+				t.Fatalf("unexpected errs: %v", errs)
+			}
+			if tc.reviewed {
+				if len(ids) != 1 || ids[0] != "zr-rv7" {
+					t.Fatalf("state=%q draft=%v must be reviewed, got ids=%v", tc.state, tc.draft, ids)
+				}
+				return
+			}
+			if len(ids) != 0 {
+				t.Fatalf("state=%q draft=%v must be skipped, got ids=%v", tc.state, tc.draft, ids)
+			}
+			if f.countCalls("create") != 0 {
+				t.Errorf("a draft=true team PR must not be reviewed regardless of state; calls=%v", f.calls)
+			}
+		})
 	}
 }
 
@@ -479,6 +522,15 @@ func TestParsePRList(t *testing.T) {
 	}
 	if prs[1].Number != 9 || prs[1].Ownership != "team" {
 		t.Errorf("PR1 parsed wrong: %+v", prs[1])
+	}
+	// The explicit draft bool (pg2-9y7ah) must actually decode onto the struct —
+	// both fixtures carry a "draft" key, so a silently-dropped field would leave
+	// both false and this assertion would catch it.
+	if prs[0].Draft {
+		t.Errorf("PR0 draft parsed wrong: got %v, want false", prs[0].Draft)
+	}
+	if !prs[1].Draft {
+		t.Errorf("PR1 draft parsed wrong: got %v, want true", prs[1].Draft)
 	}
 	// The freshness fields must decode under pg-pr's exact wire names, or the
 	// ACL would silently see every row as "as-of unknown".
