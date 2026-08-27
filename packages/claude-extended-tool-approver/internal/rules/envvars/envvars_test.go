@@ -1189,15 +1189,19 @@ func TestEnvVars_MixedDynamicPathReadAndOtherRefusal_StillAsks(t *testing.T) {
 }
 
 // TestEnvVars_ExhaustionOnlyBranch_Pinned pins the CURRENT exhaustionOnly
-// behavior (pg2-et8ns's territory, the sibling "no rule models this" relief
-// ticket) so a future regression in EITHER bead is caught: this bead's relief
-// must not touch it, and it must not touch this bead's relief.
+// behavior (pg2-et8ns's landed relief: a floored NoOpinion/abstain rather than
+// the pre-relief Ask, per envvars.go's `case exhaustionOnly:` comment) so a
+// future regression in EITHER sibling bead is caught: this bead's own relief
+// (pg2-4x2mu, dynamic-path-read-only) must not touch this branch, and the
+// ADR 0044 floor (`refused == true`) must still hold even though the branch no
+// longer escalates to Ask.
 //
-// No test previously exercised this branch's distinct reason — every existing
-// fakeEvaluator caller only sets Decision, and a bare NoOpinion Decision reads as
-// ProvenanceRefusal (the zero value), not ProvenanceExhaustion, so
-// TestEnvVars_PostRecursionAskFallback's "abstaining body still reaches ask
-// fallback" row exercises the DEFAULT branch, never exhaustionOnly.
+// No test previously exercised this branch's distinct provenance — every
+// existing fakeEvaluator caller only sets Decision, and a bare NoOpinion
+// Decision reads as ProvenanceRefusal (the zero value), not
+// ProvenanceExhaustion, so TestEnvVars_PostRecursionAskFallback's "abstaining
+// body still reaches ask fallback" row exercises the DEFAULT branch, never
+// exhaustionOnly.
 func TestEnvVars_ExhaustionOnlyBranch_Pinned(t *testing.T) {
 	fe := &fakeEvaluator{results: map[string]hookio.RuleResult{
 		"seq 1 3": {Decision: hookio.NoOpinion, Provenance: hookio.ProvenanceExhaustion, Module: "engine"},
@@ -1210,14 +1214,11 @@ func TestEnvVars_ExhaustionOnlyBranch_Pinned(t *testing.T) {
 		Expansion: cmdparse.ExpansionUnknown,
 	}
 	got, refused := r.evaluateAssignment(ev, &hookio.HookInput{ToolName: "Bash"}, nil, nil, false)
-	if got.Decision != hookio.Ask {
-		t.Errorf("exhaustion-only capture: got %s (%s), want ask", got.Decision, got.Reason)
+	if got.Decision != hookio.NoOpinion {
+		t.Errorf("exhaustion-only capture: got %s (%s), want NoOpinion (pg2-et8ns relieved this branch to a floored abstain)", got.Decision, got.Reason)
 	}
 	if !refused {
-		t.Error("exhaustion-only capture: not marked as examined-and-refused")
-	}
-	if !strings.Contains(got.Reason, "no rule models") {
-		t.Errorf("exhaustion-only capture: reason %q, want the exhaustionOnly reason (\"no rule models\") — this bead's relief must not touch this branch", got.Reason)
+		t.Error("exhaustion-only capture: not marked as examined-and-refused (the ADR 0044 floor must still hold)")
 	}
 }
 
