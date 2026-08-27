@@ -121,15 +121,46 @@ on every land. If you find a standing push bead, report it as this defect
      content is stale and the session should be restarted fresh.
 
    ```bash
-   bd ready --claim --exclude-label human --actor "ID" --json
+   bd ready --claim --exclude-label human --exclude-type epic --actor "ID" --json
    ```
 
    Atomically claims the highest-priority ready bead (assignee=ID,
    status=in_progress) and returns it. No other session can get the same bead. A
    SUCCESSFUL empty result → Goal met → STOP. A transient error → retry. If the
    invocation supplied `$ARGUMENTS`, apply them as additional NARROWING filters here
-   (see "Optional scope arguments"); they never remove `--exclude-label human` or the
-   deferred exclusion.
+   (see "Optional scope arguments"); they never remove `--exclude-label human`, the
+   `--exclude-type epic` exclusion, or the deferred exclusion.
+
+   **`--exclude-type epic` is load-bearing, not cosmetic** (provenance: bead
+   `pg2-xcw7u`). In this workspace's convention every epic — sampled across all
+   open and closed epics, no exception found — decomposes into children that carry
+   the actual closeable work; the epic bead itself is never the direct target of
+   implementation (a container has no deliverable of its own). Left unfiltered,
+   `bd ready`'s tie-break for equal priority sorts by `created_at` DESCENDING
+   (confirmed live against `bd` 1.0.4: `--sort priority`, the default, orders
+   same-priority issues newest-created-first, distinct from `--sort oldest`/
+   `hybrid`), so the single newest bead at a priority wins EVERY time and a
+   claim → observe-container-note → release cycle re-picks that SAME epic forever
+   — starving every other ready bead at that priority, exactly the busy-loop this
+   bead reported. `--exclude-type epic` removes the whole class from the atomic
+   claim so this hazard cannot surface via this path. It does not lock any epic
+   out of drain forever: the documented id-targeted safe path ("Optional scope
+   arguments" below, `bd update <id> --claim`) still reaches a specific epic
+   instance on the rare occasion one is genuinely meant to be claimed directly.
+
+   **Container-note guard — defense in depth for a container that is NOT type
+   `epic`.** After a successful claim, check the claimed bead's `notes` for a
+   container-marker pattern (contains "Do NOT claim this container bead for
+   direct work", or is prefixed `[container note`). A match means this is a
+   dependency-shaped non-issue, not a park: release it in ONE call — `bd update
+<id> --status open --assignee "" --actor "ID"` (B-2/B-3: status and assignee
+   together, no label change) — then re-run the atomic claim above. Bound this to
+   3 consecutive container-note releases within one CLAIM invocation; a 4th
+   container-note hit without making progress means the guard itself isn't
+   resolving the hazard (e.g. a non-epic container slipped through, or every
+   ready bead at this priority is a container) — stop retrying and route to
+   STUCK, reporting the bead id and its note verbatim, rather than looping
+   (P-4: a blocked precondition MUST bound its repeats and name the escalation).
 
 2. **UNDERSTAND** (orchestrator reads the BEAD ONLY): `bd show <id>` to learn the
    target repo(s), whether the work spans repos, and whether any acceptance
@@ -445,9 +476,12 @@ in-scope, not deferred, not `human`), then claim it with
 chosen id — it claims the first filter match).
 
 Arguments may only NARROW the query. They MUST NOT broaden scope and MUST
-NOT remove the safety filters — `--exclude-label human` and the default
-deferred-exclusion always remain. With no arguments, behavior is
-unchanged.
+NOT remove the safety filters — `--exclude-label human`, `--exclude-type
+epic`, and the default deferred-exclusion always remain. A `--type epic`
+argument would contradict the standing `--exclude-type epic` exclusion and
+yield nothing through this path; to work one specific epic instance
+deliberately, use the id-targeted safe path above instead. With no
+arguments, behavior is otherwise unchanged.
 
 ## Rules
 
