@@ -942,11 +942,14 @@ func (r *Rule) evaluateAssignment(ev cmdparse.EnvAssignment, input *hookio.HookI
 	//     heredoc floor, or a COMPOSITION no rule audits as a unit (`curl … | sh` is two
 	//     leaves — see engine.withExpressionProvenance).
 	//
-	// BOTH HALVES KEEP THE DECISIVE Ask. Only the REASON differs, so the split is
-	// visible in the ask-log and in `evaluate` output without any verdict moving. That
-	// is deliberate, and it is the opposite of what pg2-d0ja3 expected, so the
-	// measurement that changed the answer is recorded here rather than in a commit
-	// message nobody will find.
+	// AS MEASURED BELOW (2026-08-13), BOTH HALVES KEPT THE DECISIVE Ask, with only the
+	// REASON differing — visible in the ask-log and in `evaluate` output without any
+	// verdict moving, the opposite of what pg2-d0ja3 expected, so the measurement that
+	// changed the answer is recorded here rather than in a commit message nobody will
+	// find. pg2-et8ns (2026-08-27) later relieved the EXHAUSTION half specifically —
+	// see "THE RULING THAT SUPERSEDES THIS MEASUREMENT" after the counter-argument
+	// below — so as of that change only the REFUSAL half (the `default:` case) still
+	// asks; the measurement itself is left as historical evidence, unedited.
 	//
 	// THE MEASUREMENT (this worktree, 2026-08-13, `permission_mode=auto`, one probe per
 	// row through the built binary). The bead's premise was that exhaustion is "the
@@ -967,22 +970,69 @@ func (r *Rule) evaluateAssignment(ev cmdparse.EnvAssignment, input *hookio.HookI
 	// EXHAUSTION IS NOT A SAFETY PROPERTY. It says "ceta has no model for this", and
 	// ceta has no model for any interpreter — so the half contains arbitrary code
 	// execution, and `seq 1 3` is not separable from `bash -c` by anything the
-	// provenance channel knows. Withdrawing the Ask also failed FOUR deliberate
-	// guarantees at once (cmd's TestIntegration_EnvVars_UnknownExpression_Ask, engine's
-	// TestIntegration_EnvVarGuard "leading value curl" and "leading value mixed
-	// approvable and not", and TestIntegration_MountOperandGate's two substitution
-	// rows), which is the signal that the demotion is an operator ruling and not an
-	// implementation detail.
+	// provenance channel knows. At the time of this measurement, withdrawing the Ask
+	// also failed FOUR deliberate guarantees at once (cmd's
+	// TestIntegration_EnvVars_UnknownExpression_Ask, engine's TestIntegration_EnvVarGuard
+	// "leading value curl" and "leading value mixed approvable and not", and
+	// TestIntegration_MountOperandGate's two substitution rows), which was the signal
+	// that the demotion had to be an operator ruling and not an implementation detail —
+	// pg2-et8ns is that ruling landing, and it updated those same four guarantees to
+	// their new expected (relieved) outcome rather than deleting them, so they still
+	// guard the shape (a genuinely exhaustion-only body), just not the old verdict.
 	//
-	// THE COUNTER-ARGUMENT IS REAL AND STILL DID NOT CARRY IT, recorded so the ruling
-	// can be made on the whole picture: every one of those bodies ALREADY reaches
-	// `abstain` in COMMAND position (`echo $(bash -c "rm -rf /")` measured abstain on
-	// the same tree), because the engine's substitution fold floors at NoOpinion rather
-	// than Ask. So this Ask is position-dependent strictness, and harmonizing the two
-	// positions is a legitimate goal (envvars' own pg2-gkd5e position-independence
-	// invariant). But it can be harmonized UP as well as DOWN, the four guarantees say
-	// which way the repo has chosen so far, and the choice belongs to whoever can also
-	// weigh the command-position half. It is not made here.
+	// THE COUNTER-ARGUMENT IS REAL AND STILL DID NOT CARRY IT ON ITS OWN, recorded so
+	// the ruling below could be made on the whole picture: every one of those bodies
+	// ALREADY reaches `abstain` in COMMAND position (`echo $(bash -c "rm -rf /")`
+	// measured abstain on the same tree), because the engine's substitution fold floors
+	// at NoOpinion rather than Ask. So this Ask was position-dependent strictness, and
+	// harmonizing the two positions was a legitimate goal (envvars' own pg2-gkd5e
+	// position-independence invariant) that could be harmonized UP as well as DOWN. The
+	// four guarantees recorded which way the repo had chosen SO FAR; they did not by
+	// themselves settle which way was correct, and that choice is what the next section
+	// makes, scoped to the exhaustion half only.
+	//
+	// # THE RULING THAT SUPERSEDES THIS MEASUREMENT, FOR THE EXHAUSTION HALF ONLY
+	// (pg2-et8ns, operator ruling on pg2-o7l2f, 2026-08-27)
+	//
+	// The measurement above weighed a PREDICTION against ten hand-picked hypothetical
+	// command shapes. pg2-o7l2f instead counted the LIVE ask-log this Ask reason
+	// actually produced: 235 rows replayed "env var value runs a command no rule
+	// models", and every single one resolved approved=222 or unresolved=13 —
+	// denied=0. Given the counted rows rather than the prediction, the operator ruled
+	// to relieve the EXHAUSTION half (this function's `exhaustionOnly:` case, just
+	// below). The REFUSAL half (the `default:` case, right after it) is deliberately
+	// UNCHANGED by this ruling — it is the cohort with real catches (pg2-2ke04's
+	// dynamic-path refusal, pg2-2u5jf's dynamic-redirect floor, a composition no rule
+	// audits as a unit), and its own narrower relief is sibling ticket pg2-4x2mu's,
+	// not this one's.
+	//
+	// THE RELIEVED LEVEL IS NoOpinion, NOT Approve, AND THIS WAS MEASURED, NOT
+	// ASSUMED. hookio's FormatOutput emits `{}` for NoOpinion, which carries no hook
+	// opinion at all, so in `auto`/`bypassPermissions` mode ADR 0043 already
+	// auto-approves it silently — which is exactly the mode this bead's 235-row
+	// cohort was measured in ("auto-mode/prompt false-positive" — see the bead), so
+	// NoOpinion fully withdraws the Ask that mattered. `default` (interactive) mode
+	// still reaches Claude Code's own normal permission flow for an unmodelled Bash
+	// command, exactly as it already does today for the SAME body at command
+	// position — no new prompt, but no new gap either.
+	//
+	// Approve was tried first and REJECTED on a measured regression, not a hunch: it
+	// made FuzzADR0044_EnvValueIsNeverLessRestrictiveThanItsBody fail immediately —
+	// `X=$(mount) echo hi` reached a decisive Approve (safe-commands' own approval of
+	// the trailing `echo` won outright) while `mount` alone, at command position,
+	// stays abstain. That is the exact APPROVAL-WIDENING shape ADR 0044/pg2-whumr
+	// exist to forbid: wrapping ANY unmodelled command — not just the 235 counted
+	// rows, ANY of them, including a genuinely dangerous one no rule happens to model
+	// yet — in a throwaway leading assignment would launder it to a full auto-approve
+	// in EVERY permission mode, not only `auto`. NoOpinion does not have this
+	// problem because it is FLOORED (`refused = true`, below) rather than returned
+	// as this assignment's own terminal verdict: the floor keeps the whole leaf from
+	// resolving BELOW NoOpinion no matter what a co-leaf command's own rule decides,
+	// which is exactly the same "no less gated than command position" property the
+	// fuzz target checks. This is the harmonize-DOWN resolution the counter-argument
+	// above said the four guarantees had not yet authorized — pg2-o7l2f is that
+	// authorization, scoped to exhaustion only, at the NoOpinion level the measurement
+	// above shows is the one that is actually safe.
 	//
 	// # pg2-kzqw2: A result ALREADY Approve is POSITIVELY CLEARED and skips this block
 	//
@@ -1044,15 +1094,32 @@ func (r *Rule) evaluateAssignment(ev cmdparse.EnvAssignment, input *hookio.HookI
 		case clearedByRecursion:
 			// Positively cleared: no escalation at all, exactly as before.
 		case exhaustionOnly:
-			// SAME Ask, DIFFERENT reason. The reason is the whole deliverable of this
-			// branch: it partitions the live ask cohort into the half a future ruling
-			// could safely relieve and the half it must not, so the ruling can be made
-			// on counted rows instead of on a prediction.
-			result = hookio.MostRestrictive(result, hookio.RuleResult{
-				Decision: hookio.Ask,
-				Reason:   "env var value runs a command no rule models: " + sanitizeReasonName(ev.Name),
-				Module:   name,
-			})
+			// RELIEVED (pg2-et8ns, operator ruling on pg2-o7l2f, 2026-08-27): no
+			// longer escalated to Ask. See "THE RULING THAT SUPERSEDES THIS
+			// MEASUREMENT" in the doc comment above this function for the ruling
+			// itself and for why the relieved level is NoOpinion and not Approve.
+			//
+			// `result` is deliberately left UNTOUCHED here — no MostRestrictive
+			// call — so it stays whatever the NAME already decided: the NoOpinion
+			// identity for an ordinary variable, or the NAME-derived Ask/Reject for
+			// PATH/HOME/an injector, which this relief must not lower (that
+			// invariant predates this change and is unrelated to it).
+			//
+			// `refused` STAYS true. This is the part that is easy to get backwards:
+			// it is NOT "this assignment refuses", it is ADR 0044's FLOOR mechanism
+			// (hookio.Refuse), and dropping it here — trying refused = false so this
+			// assignment looks like "nothing was mine" — was measured to reopen the
+			// exact bypass FuzzADR0044_EnvValueIsNeverLessRestrictiveThanItsBody
+			// exists to catch: `X=$(mount) echo hi` (or any other unmodelled leading
+			// assignment ahead of an ordinary safe trailing command) would let
+			// safe-commands' own Approve of the TRAILING command decide the whole
+			// leaf, reaching Approve while `mount` alone stays abstain — an
+			// approval-widening bypass, laundering any unmodelled command through a
+			// throwaway env assignment. Keeping the floor at NoOpinion instead of
+			// Ask means the leaf can never resolve BELOW NoOpinion regardless of what
+			// the rest of the leaf does, which is exactly parity with evaluating the
+			// same body at command position — never less gated, per that same fuzz
+			// invariant — while no longer forcing the decisive Ask this bead relieves.
 			refused = true
 		default:
 			result = hookio.MostRestrictive(result, hookio.RuleResult{
@@ -1064,7 +1131,10 @@ func (r *Rule) evaluateAssignment(ev cmdparse.EnvAssignment, input *hookio.HookI
 		}
 		// Folded after the fallback so a body that is itself Ask keeps the
 		// fallback's reason (MostRestrictive keeps `current` on a tie), preserving
-		// the pre-pg2-5huwx reason precedence for every non-cleared value.
+		// the pre-pg2-5huwx reason precedence for every non-cleared value. For the
+		// relieved exhaustionOnly case this is a no-op by construction (every
+		// subResult there is Approve or an exhaustion-provenance NoOpinion, neither
+		// of which outranks whatever `result` already holds).
 		for _, subResult := range subResults {
 			result = hookio.MostRestrictive(result, subResult)
 		}

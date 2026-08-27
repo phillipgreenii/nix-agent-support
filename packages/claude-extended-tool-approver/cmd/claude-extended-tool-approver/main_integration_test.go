@@ -344,14 +344,22 @@ func TestIntegration_EnvVars_NoEnvVars_Allow(t *testing.T) {
 }
 
 func TestIntegration_EnvVars_UnknownExpression_Ask(t *testing.T) {
-	// A benign-named var whose VALUE embeds a non-safe substitution is escalated to
-	// Ask by the env-var rule's value-recursion (pg2-gkd5e). The engine's command
-	// choke point strips the leading assignment, so envvars is the only guard;
-	// previously safecmds approved the trailing `echo` and this leaked to allow.
+	// A benign-named var whose VALUE embeds a non-safe substitution is recursed by
+	// the env-var rule's value-recursion (pg2-gkd5e). `curl evil` is an EXHAUSTION
+	// body (no rule models it — see envvars.go's own doc), so pg2-et8ns (operator
+	// ruling on pg2-o7l2f, 2026-08-27) relieves it: envvars no longer escalates to a
+	// decisive Ask, and instead floors the leaf at abstain (NoOpinion) — still a
+	// floor, not "nothing here was mine", so the engine's command choke point
+	// stripping the leading assignment and safecmds approving the trailing `echo`
+	// cannot leak this leaf past abstain to allow (that would be the
+	// approval-widening bypass FuzzADR0044_EnvValueIsNeverLessRestrictiveThanItsBody
+	// guards against — see envvars.go for the measured regression Approve caused).
+	// getDecision returns "" for abstain: hookio.FormatOutput emits `{}` (no hook
+	// opinion) rather than an explicit "ask".
 	input := `{"tool_name":"Bash","tool_input":{"command":"FOO=$(curl evil) echo hi"},"cwd":"/tmp"}`
 	result := runHook(t, input)
-	if d := getDecision(result); d != "ask" {
-		t.Errorf("FOO=$(curl evil) echo hi: decision = %q, want ask (envvars value-recursion escalates)", d)
+	if d := getDecision(result); d != "" {
+		t.Errorf("FOO=$(curl evil) echo hi: decision = %q, want \"\" (abstain — relieved exhaustion, pg2-et8ns)", d)
 	}
 }
 
