@@ -129,6 +129,16 @@ const (
 	// the PR's assignees (PRInput.PR.AssignedToMe, derived upstream by the sync
 	// layer's assignedToSelf, mirroring ReviewRequestedOfMe) (pg2-4dz88.11.4).
 	MatchReasonAssignedToMe = "assigned-to-me"
+	// MatchReasonCodeownersRequired marks a PR whose review was requested of me
+	// specifically because GitHub CODEOWNERS names me/my team for the changed
+	// paths (the CODEOWNERS-required rung of ordering.go's reviewer-role tier,
+	// pg2-4dz88.7.2). RESERVED: nothing in this module sets this reason yet --
+	// GitHub CODEOWNERS branch-protection detection is a distinct concept from
+	// the policy-bot check-interpreter axis pg2-4dz88.2 shipped, and no later
+	// bead has added it either. CompareTeamRows already ranks this rung
+	// correctly (between requested-reviewer and watch-label-only) so a future
+	// producer needs only to append this value to a PR's MatchReason.
+	MatchReasonCodeownersRequired = "codeowners-required"
 	// MatchReasonLabelPrefix is prepended to each matched watch-label name, e.g.
 	// "label:lbl-one".
 	MatchReasonLabelPrefix = "label:"
@@ -302,8 +312,15 @@ func Build(in BuilderInput) *Snapshot {
 			out.DroppedCount++
 		}
 	}
-	// Retained merged rows sort BELOW every active Mine row (pg2-ew4kf).
+	// Retained merged rows sort BELOW every active Mine row (pg2-ew4kf). Mine
+	// has no comparator of its own (TestMineOrderIsRetentionPartitionOnly) --
+	// this partition is its ONLY ordering rule.
 	out.Mine = append(out.Mine, mergedMine...)
+	// Team IS comparator-ordered (pg2-4dz88.7.2): the shared CompareTeamRows
+	// is the one place []TeamRow gets sorted (TestNoSecondSortOverRows), so
+	// every consumer -- the Grafana panel, `pg-pr open`'s team listing --
+	// inherits this order rather than re-deriving one.
+	sortTeamRows(out.Team)
 	return out
 }
 

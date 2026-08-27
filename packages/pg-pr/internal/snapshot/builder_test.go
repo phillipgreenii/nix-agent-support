@@ -3,6 +3,7 @@ package snapshot
 import (
 	"encoding/json"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -1910,6 +1911,50 @@ func TestDependencyFields_AreScalarOnly(t *testing.T) {
 		if found != 4 {
 			t.Errorf("%s: found %d Dependency* fields, want 4 (BlockedBy, BlockedByUnresolvedRef, UnblockedFrom, OrderingKey)",
 				typ.Name(), found)
+		}
+	}
+}
+
+// TestBuild_TeamRowsAreComparatorSorted is the ordering-is-SHARED acceptance
+// test (pg2-4dz88.7.2, parent design section 2): build from inputs
+// deliberately supplied in an order the comparator must change, then assert
+// snap.Team equals the result of sorting those same rows with CompareTeamRows.
+// The expectation is COMPUTED by calling the comparator on a clone of the
+// actual output, not hand-copied -- if Build stopped sorting Team at all (or
+// sorted it some other way), re-sorting that clone with CompareTeamRows would
+// change it and this test would fail; only a snap.Team that is ALREADY a
+// fixed point of the comparator's own sort passes.
+func TestBuild_TeamRowsAreComparatorSorted(t *testing.T) {
+	in := BuilderInput{
+		GeneratedAt: time.Now(),
+		Self:        "alice",
+		TeamMembers: []string{"bob"},
+		PRs: []PRInput{
+			// Fed in the WORST-to-best reviewer-role order on purpose: rest,
+			// already-engaged, requested-reviewer -- the comparator must
+			// reorder this to already-engaged, requested-reviewer, rest.
+			{PR: api.PR{Repo: "o/r", Number: 1, Author: "bob", Title: "team-authored only"}, Ownership: ownership.Team},
+			{PR: api.PR{Repo: "o/r", Number: 2, Author: "dave", Title: "assigned to me", AssignedToMe: true}, Ownership: ownership.Team},
+			{PR: api.PR{Repo: "o/r", Number: 3, Author: "eve", Title: "review requested", ReviewRequestedOfMe: true}, Ownership: ownership.Team},
+		},
+	}
+	snap := Build(in)
+
+	if len(snap.Team) != 3 {
+		t.Fatalf("fixture too small to prove anything: got %d Team rows, want 3: %+v", len(snap.Team), snap.Team)
+	}
+	want := slices.Clone(snap.Team)
+	slices.SortStableFunc(want, CompareTeamRows)
+	if !reflect.DeepEqual(snap.Team, want) {
+		t.Fatalf("snap.Team is not CompareTeamRows-sorted:\n got  %+v\n want %+v", snap.Team, want)
+	}
+	// Sanity: the fixture really did require reordering (input order was
+	// 1,2,3; comparator order is 2,3,1), so this cannot pass vacuously.
+	gotOrder := []int{snap.Team[0].Number, snap.Team[1].Number, snap.Team[2].Number}
+	wantOrder := []int{2, 3, 1}
+	for i := range wantOrder {
+		if gotOrder[i] != wantOrder[i] {
+			t.Fatalf("Team order = %v, want %v (already-engaged, requested-reviewer, rest)", gotOrder, wantOrder)
 		}
 	}
 }

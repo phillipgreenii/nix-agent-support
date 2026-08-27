@@ -77,6 +77,28 @@ func TestSelectRows(t *testing.T) {
 	}
 }
 
+// TestOpenPreservesSnapshotOrder is the pg2-4dz88.7.2 acceptance test for the
+// consolidated ordering contract: `selectRows` must never reorder. Given a
+// snapshot already in the shared comparator's order, filtering out MIDDLE
+// rows must leave the survivors in the SAME relative order as the input -- a
+// subsequence, not merely the same set. selectRows' own doc comment already
+// claims this ("preserving the snapshot's own ordering") but nothing
+// asserted it before this bead; this is the test that fails the day the CLI
+// starts re-sorting.
+func TestOpenPreservesSnapshotOrder(t *testing.T) {
+	snap := &snapshot.Snapshot{
+		Team: []snapshot.TeamRow{
+			{Number: 1, Owner: "alice", URL: "u1"},
+			{Number: 2, Owner: "bob", URL: "u2"}, // dropped: not alice
+			{Number: 3, Owner: "alice", URL: "u3"},
+			{Number: 4, Owner: "carol", URL: "u4"}, // dropped: not alice
+			{Number: 5, Owner: "alice", URL: "u5"},
+		},
+	}
+	rows := selectRows(projectRows(snap, false), openFlags{all: true, owner: "alice"})
+	assertNumbers(t, rows, 1, 3, 5)
+}
+
 // TestAttentionOnlyDefaultsPerSource is the regression test for the defect the
 // operator hit: --mine alone printed "(no PRs match)" because the
 // needs-attention default was applied uniformly, and a MineRow's attention
