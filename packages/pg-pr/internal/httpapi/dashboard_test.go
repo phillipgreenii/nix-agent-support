@@ -52,6 +52,52 @@ func TestDashboard200WhenPopulated(t *testing.T) {
 	}
 }
 
+// TestDashboardDroppedCountSerializesAsZero proves the JSON-encode
+// present-vs-absent-scalar risk for Snapshot.DroppedCount (pg2-4dz88.7.6): a
+// snapshot with nothing dropped must still round-trip the field as the
+// numeral 0, not omit it — the concrete regression this guards against is
+// DroppedCount someday becoming a `*int` or picking up an `omitempty` tag,
+// either of which would make the key vanish from the payload precisely when
+// its value is the zero value. Decoding into snapshot.Snapshot alone would
+// not catch that (a missing key and an explicit 0 both decode to the Go zero
+// value), so this asserts against the raw JSON object instead.
+func TestDashboardDroppedCountSerializesAsZero(t *testing.T) {
+	s := snapshot.NewStore()
+	s.Set(&snapshot.Snapshot{
+		GeneratedAt:         time.Unix(1700000000, 0).UTC(),
+		SyncIntervalSeconds: 60,
+		Mine:                []snapshot.MineRow{},
+		Team:                []snapshot.TeamRow{},
+		DroppedCount:        0,
+	})
+	srv := httptest.NewServer(DashboardHandler(s))
+	defer srv.Close()
+	resp, err := http.Get(srv.URL + "/api/v1/dashboard")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	var raw map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	got, present := raw["dropped_count"]
+	if !present {
+		t.Fatal("dropped_count key must be present even when nothing was dropped (no omitempty)")
+	}
+	if got == nil {
+		t.Fatalf("dropped_count must not be null; got %v", got)
+	}
+	n, ok := got.(float64)
+	if !ok {
+		t.Fatalf("dropped_count must decode as a JSON number, got %T (%v)", got, got)
+	}
+	if n != 0 {
+		t.Errorf("dropped_count = %v, want 0", n)
+	}
+}
+
 // fixedNow pins the handler's serve-time clock for the test.
 func fixedNow(t *testing.T, now time.Time) {
 	t.Helper()

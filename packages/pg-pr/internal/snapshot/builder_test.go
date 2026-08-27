@@ -250,6 +250,11 @@ func TestBuildExcludesReasonlessReviewPR(t *testing.T) {
 	if len(snap.Team) != 0 {
 		t.Errorf("a reasonless non-mine PR must be excluded from PRs to Review; got %+v", snap.Team)
 	}
+	// pg2-4dz88.7.6: this exact dropped shape (non-mine, non-draft, zero
+	// match reasons) must be counted by Build()'s new default: branch.
+	if snap.DroppedCount != 1 {
+		t.Errorf("DroppedCount = %d, want 1 for the reasonless non-mine PR", snap.DroppedCount)
+	}
 }
 
 // TestBuildExcludesCommentedOnlyPR is the snapshot half of the FALLBACK for the
@@ -275,6 +280,38 @@ func TestBuildExcludesCommentedOnlyPR(t *testing.T) {
 	})
 	if len(snap.Team) != 0 {
 		t.Errorf("a commented-only PR must be absent from PRs to Review; got %+v", snap.Team)
+	}
+	// pg2-4dz88.7.6: a commented-only PR is the SAME dropped shape as the
+	// reasonless case above (non-mine, non-draft, zero live match reasons —
+	// a bare comment does not produce one) and must also be counted.
+	if snap.DroppedCount != 1 {
+		t.Errorf("DroppedCount = %d, want 1 for the commented-only PR", snap.DroppedCount)
+	}
+}
+
+// TestBuildCountsDraftNotMinePR is the third dropped shape (pg2-4dz88.7.6),
+// not covered by either test above: a DRAFT PR I do not own. It fails the
+// `!p.PR.Draft` half of the second admitting case regardless of how many
+// match reasons it carries, and — being non-mine — never reaches the first
+// case either, so it falls through to the new default: branch and must be
+// counted, without landing in either Mine or Team.
+func TestBuildCountsDraftNotMinePR(t *testing.T) {
+	reg, _ := agentregistry.New(nil)
+	snap := Build(BuilderInput{
+		Self:        "alice",
+		TeamMembers: []string{"bob"},
+		Registry:    reg,
+		PRs: []PRInput{
+			// non-mine, DRAFT, and carries a live reason (team-authored) — proves
+			// the drop is driven by Draft, not by an absence of reasons.
+			{PR: api.PR{Repo: "o/r", Number: 21, Author: "bob", Draft: true}, Ownership: ownership.Team},
+		},
+	})
+	if len(snap.Mine) != 0 || len(snap.Team) != 0 {
+		t.Fatalf("a draft PR not owned by me must land in neither Mine nor Team; got mine=%+v team=%+v", snap.Mine, snap.Team)
+	}
+	if snap.DroppedCount != 1 {
+		t.Errorf("DroppedCount = %d, want 1 for the draft-not-mine PR", snap.DroppedCount)
 	}
 }
 

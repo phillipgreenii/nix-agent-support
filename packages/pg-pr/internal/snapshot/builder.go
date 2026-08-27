@@ -279,6 +279,13 @@ func Build(in BuilderInput) *Snapshot {
 			// buckets, B3); the builder only re-checks they hold. Others' drafts and
 			// now-reasonless PRs fall through and are excluded.
 			out.Team = append(out.Team, buildTeamRow(p, in.Registry, in.Self, reasons, excl, deps))
+		default:
+			// Purely observational (pg2-4dz88.7.6): a draft PR I don't own, or a
+			// non-mine non-draft PR matching zero review-set reasons, falls
+			// through both admitting cases above and is silently dropped today.
+			// This branch only COUNTS that drop — it does not admit the row to
+			// either Mine or Team, and it does not change either case above.
+			out.DroppedCount++
 		}
 	}
 	// Retained merged rows sort BELOW every active Mine row (pg2-ew4kf).

@@ -35,6 +35,17 @@ type Snapshot struct {
 	Stale bool      `json:"stale"`
 	Mine  []MineRow `json:"mine"`
 	Team  []TeamRow `json:"team"`
+	// DroppedCount is the number of PRInputs Build() silently dropped this
+	// pass — a draft PR not owned by me, or a non-mine non-draft PR matching
+	// zero review-set reasons (pg2-4dz88.7.6) — purely observational over the
+	// existing two-branch admitting switch in Build; it does not include the
+	// pg2-ew4kf merged-retention drop (deliberate retention behavior, not
+	// part of this count) or a Hidden PRInput (a different, user-initiated
+	// exclusion, pg2-4dz88.4). Deliberately a plain int with NO `omitempty`:
+	// it MUST serialize as the numeral 0 when nothing was dropped, never
+	// vanish from the payload, so a consumer can distinguish "checked, zero
+	// dropped" from "field absent."
+	DroppedCount int `json:"dropped_count"`
 }
 
 // WithFreshness returns a shallow COPY of s with the serve-time half of the
