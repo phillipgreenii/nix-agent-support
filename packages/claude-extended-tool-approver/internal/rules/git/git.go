@@ -1219,7 +1219,17 @@ var configWriteSubcommands = map[string]bool{
 // operands it carries. It exists for the spellings configIsRead's operand bound
 // cannot see: `--unset <key>` and `--unset-all <key>` name ONE operand, exactly
 // like a bare read, and `--edit` names none.
+//
+// STRIPS A LITERAL "--" FIRST (pg2-uaxa3, found via the substitution-body
+// floor's cmdparse mirror of this exact function): `git config`, unlike most
+// git subcommands, does not treat "--" as an end-of-options terminator, but
+// cmdparse.FirstOperand/HasAbbrevLongFlag (and, until this fix, the `-e` check
+// below) all stop scanning at one. MEASURED on git 2.54.0, 2026-08-27: `git
+// config -- --edit` and `git config -- -e` both invoke $GIT_EDITOR, yet both
+// used to reach configIsRead's Approve. See cmdparse.ConfigStripDashDash's own
+// doc for the full measurement.
 func configWriteIndicated(args []string) bool {
+	args = cmdparse.ConfigStripDashDash(args)
 	if sub, _ := cmdparse.FirstOperand(args); configWriteSubcommands[sub] {
 		return true
 	}
@@ -1228,11 +1238,13 @@ func configWriteIndicated(args []string) bool {
 			return true
 		}
 	}
-	// `-e` is git's short spelling of --edit. Tested by EXACT token rather than
-	// with cmdparse.HasShortFlag because `git config`'s value-taking shorts are
-	// `-f` and `-t`, and a glued value (`-fsome.env`) would contribute a stray `e`
-	// to a cluster scan.
-	return hasFlag(args, "-e")
+	// `-e` is git's short spelling of --edit, in ANY short-cluster spelling
+	// (`-e`, `-ez`, `-ze`, …). Used to be tested by EXACT token instead, which
+	// avoids a `-f`/`-t` glued-value false trigger (`git config`'s value-taking
+	// shorts) but MEASURED (pg2-uaxa3) to miss a clustered spelling like `-ez`/
+	// `-ze` — both invoke $GIT_EDITOR on git 2.54.0. cmdparse.ConfigHasEditFlag
+	// gets both right: cluster-aware, and glued-value-aware for -f/-t.
+	return cmdparse.ConfigHasEditFlag(args)
 }
 
 // configIsRead reports whether a `git config` invocation only READS configuration.

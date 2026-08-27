@@ -211,6 +211,68 @@ func HasAbbrevLongFlag(args []string, name string, minLen int) (string, bool) {
 	return "", false
 }
 
+// ConfigStripDashDash removes every literal "--" token from args. UNLIKE most
+// git subcommands, `git config` does not treat "--" as an end-of-options
+// terminator: MEASURED on git 2.54.0, 2026-08-27, each of `git config --
+// --edit`, `git config -- -e`, `git config -- --unset <key>` and `git config
+// -- <key> <value>` performs the SAME write/edit its unprefixed spelling does.
+// Every OTHER primitive in this file (HasShortFlag, HasLongFlag,
+// HasAbbrevLongFlag, FirstOperand, Operands) DOES treat "--" as a
+// terminator — correctly, for the subcommands they were measured against — so
+// a caller checking `git config`'s write shape must strip a literal "--"
+// token BEFORE handing args to any of them, or a write hidden behind one
+// silently clears (pg2-uaxa3 measured this for `git config -- --edit`/`-- -e`
+// slipping past both the write-flag and write-subcommand checks).
+//
+// NOT A GENERAL-PURPOSE PRIMITIVE: do not reuse this for a subcommand where
+// "--" really does terminate options (nearly every other one).
+func ConfigStripDashDash(args []string) []string {
+	out := make([]string, 0, len(args))
+	for _, a := range args {
+		if a != "--" {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+// ConfigHasEditFlag reports whether args contains git config's
+// --edit-invoking `-e` in ANY short-cluster spelling (`-e`, `-ez`, `-ze`, …),
+// correctly treating a byte following `-f` or `-t` WITHIN THE SAME TOKEN as
+// that flag's glued value rather than a further flag letter — `git config`'s
+// only two value-taking shorts.
+//
+// NEITHER existing short-flag primitive gets this right: an exact-token test
+// (`a == "-e"`) avoids the `-f`/`-t` glued-value false trigger but then misses
+// every clustered spelling; HasShortFlag catches every cluster but knows no
+// flag arity, so it ALSO fires on a glued value that merely happens to
+// contain the byte 'e' (`-fsome.env`). This is the narrower, config-specific
+// primitive that gets both right. MEASURED on git 2.54.0, 2026-08-27: `git
+// config -ez` and `git config -ze` both invoke $GIT_EDITOR (pg2-uaxa3).
+//
+// Does NOT itself ignore a literal "--" token (it is not a flag by this
+// scan's own `a[0] != '-'` test already excludes it, but a byte AFTER "--" is
+// still scanned normally, matching the measured non-terminating behavior) —
+// see ConfigStripDashDash's doc for why "--" needs no special handling here
+// either way once this scan simply keeps going past it.
+func ConfigHasEditFlag(args []string) bool {
+	for _, a := range args {
+		if len(a) < 2 || a[0] != '-' || a[1] == '-' {
+			continue // operand, lone "-", or a long flag
+		}
+		for i := 1; i < len(a); i++ {
+			c := a[i]
+			if c == 'e' {
+				return true
+			}
+			if c == 'f' || c == 't' {
+				break // rest of THIS token is that flag's glued value
+			}
+		}
+	}
+	return false
+}
+
 // FirstOperand returns the first non-flag token in args and its index, or
 // ("", -1) when args holds no operand.
 //

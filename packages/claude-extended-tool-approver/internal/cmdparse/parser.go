@@ -637,6 +637,33 @@ var gitReadSubcommands = map[string]bool{
 	// wrong model here, and gitBranchIsShowCurrent immediately below the lookup
 	// for the guard itself.
 	"branch": true,
+	// `config` — SHAPE-GATED like symbolic-ref/branch, but by gitConfigIsWrite
+	// (an operand bound, not one exact shape or a flag/operand-count pair): a
+	// READ (`--get`, `--get-regexp`, `--list`, the bare-key form, the git-2.54
+	// `get`/`list` subcommand spellings) is admitted; a WRITE (`<key> <value>`,
+	// `set <key> <value>`, `--unset[-all]`, `--replace-all`, `--add`,
+	// `--rename-section`, `--remove-section`, `--edit`/`-e`) is not. See
+	// gitConfigIsWrite's own doc for why this mirrors, and must not disagree
+	// with, internal/rules/git's configWriteIndicated/configIsRead.
+	//
+	// CRITERION 1 (content emission): a config VALUE is not repo object
+	// content — no textconv/`diff.external`/clean-filter program is ever
+	// invoked reading it. It CAN disclose a secret some other config value
+	// embeds (a token in `credential.helper` or `remote.origin.url`), which is
+	// criterion 1's DISCLOSURE leg, not its RCE leg — but that is not a NEW
+	// exposure this admission opens: internal/rules/git's configIsRead already
+	// unconditionally approves every git-config READ, of every key, for a BARE
+	// (non-substitution) command — it runs before, and short-circuits, that
+	// rule's own gatedConfigKey lookup. Admitting `config` here only extends an
+	// exposure the git RULE already accepted into the one position
+	// (substitution body) where this list previously still asked; it grants no
+	// privilege the bare command did not already have.
+	// CRITERION 2: gitConfigIsWrite, as above.
+	// CRITERION 4 (remote): a config read touches only the local config
+	// file(s); no network egress.
+	// CRITERION 5 (writes/refs): excluded by construction — gitConfigIsWrite
+	// refuses every write shape before this admission can apply.
+	"config": true,
 	// `describe` and `status` reach `core.fsmonitor` (`describe` only in its `--dirty`
 	// spelling, which `tokens[1]` cannot separate) and they STAY. That is a ruling, not
 	// an oversight — see THE pg2-a5r9r RULING above, and
@@ -774,6 +801,85 @@ func gitBranchIsShowCurrent(args []string) bool {
 	return len(args) == 1 && args[0] == "--show-current"
 }
 
+// configWriteSubcommands mirrors internal/rules/git's identically-named table: the
+// git 2.54 SUBCOMMAND spelling of a `git config` write (`git config set
+// core.hooksPath /tmp/h` puts the key at the SECOND operand, a displacement the
+// operand-count bound in gitConfigIsWrite does not see on its own).
+var configWriteSubcommands = map[string]bool{
+	"set": true, "unset": true, "rename-section": true,
+	"remove-section": true, "edit": true,
+}
+
+// configWriteLongFlags mirrors internal/rules/git's configWriteFlags: the
+// legacy-syntax long options that make a `git config` invocation a WRITE
+// regardless of operand count (`--unset <key>`/`--unset-all <key>` name one
+// operand exactly like a read, and `--edit` names none). The abbreviation
+// minimums are the SAME measured-against-git-2.54.0 values as that table — see
+// internal/rules/git/git.go's configWriteFlags and its minAbbrev* constants for
+// the measurement. This is a second copy, not a shared one: internal/rules/git
+// already imports this package, so the reverse import would cycle — the same
+// reason gitSymbolicRefIsWrite/gitBranchIsShowCurrent mirror rather than call
+// into internal/rules/git.
+var configWriteLongFlags = map[string]int{
+	"unset": len("unset"), "unset-all": len("unset-"), "replace-all": len("rep"),
+	"add": len("a"), "remove-section": len("rem"), "rename-section": len("ren"),
+	"edit": len("ed"),
+}
+
+// KNOWN, PRE-EXISTING WRINKLE (pg2-uaxa3), shared with internal/rules/git's
+// identical configWriteFlags table and left as-is here for the same reason:
+// "add"'s minimum of 1 (`--a`) also matches an abbreviation of git 2.54's
+// `get`/`unset`/`set` subcommand-mode `--all` flag (a READ, unrelated to the
+// legacy `--add` WRITE). A collision here can only mis-flag a read AS a write
+// (fail-safe: an extra Ask, never a wrongly-cleared write), so it is left
+// unfixed rather than widening this bead's scope.
+
+// gitConfigIsWrite reports whether args — the tokens AFTER the `config`
+// subcommand — is a WRITE, mirroring internal/rules/git's configWriteIndicated +
+// configIsRead read/write discrimination EXACTLY, on purpose: the git RULE and
+// this substitution-body FLOOR must not disagree about which spelling of `git
+// config` reads (the same discipline gitReadSubcommands' own doc states for its
+// `log`/`diff` admission).
+//
+// STRIPS A LITERAL "--" FIRST (pg2-uaxa3): `git config`, unlike most git
+// subcommands, does not treat "--" as an end-of-options terminator, but every
+// check below does — see ConfigStripDashDash's own doc for the measurement and
+// why skipping this step lets `git config -- --edit` / `-- -e` slip through
+// silently classified as a read.
+//
+// AN OPERAND BOUND, NOT A FLAG ALLOWLIST, which is what makes it safe:
+// `--global`/`--local`/`--system`/`--type=bool` are flags the operand walk
+// skips, so none of them can push a write out of the bound — only a genuine
+// key+value pair, or one of the write-shaped spellings checked first, can.
+//
+// DELIBERATELY DOES NOT elide a separated flag-VALUE argument (`-f <file>`,
+// `--comment <msg>`, …) the way internal/rules/git's configElideFlagValues does
+// at the top level. That is a fail-safe omission, not a gap: an unelided
+// separated value only pushes a READ out of the bound — one extra prompt on,
+// say, `git config -f <file> --get <key>` inside a substitution — never a WRITE
+// into it, so it cannot wrongly clear a mutation. Widen this if that shape is
+// ever measured to matter.
+func gitConfigIsWrite(args []string) bool {
+	args = ConfigStripDashDash(args)
+	sub, _ := FirstOperand(args)
+	if configWriteSubcommands[sub] {
+		return true
+	}
+	for name, minLen := range configWriteLongFlags {
+		if _, ok := HasAbbrevLongFlag(args, name, minLen); ok {
+			return true
+		}
+	}
+	if ConfigHasEditFlag(args) {
+		return true
+	}
+	maxOperands := 1
+	if sub == "get" || sub == "list" {
+		maxOperands = 2 // the git 2.54 subcommand token, plus at most one key
+	}
+	return len(Operands(args)) > maxOperands
+}
+
 func classifySubstitutionCommand(tokens []string) SubstitutionClearance {
 	if len(tokens) == 0 {
 		return SubstitutionRefused
@@ -859,6 +965,16 @@ func classifySubstitutionCommand(tokens []string) SubstitutionClearance {
 			// why), so the condition below refuses everything the guard does NOT
 			// recognize rather than everything it does.
 			if rest[0] == "branch" && !gitBranchIsShowCurrent(rest[1:]) {
+				return SubstitutionRefused
+			}
+			// `config`'s admission above is a NAME match only, exactly like
+			// symbolic-ref's, and cannot on its own tell a read (`--get`, `--list`, the
+			// bare-key form) apart from a write (`<key> <value>`, `--unset`, `set`,
+			// `--edit`, …). gitConfigIsWrite is the shape-aware guard, mirroring the git
+			// RULE's own configWriteIndicated/configIsRead exactly, per criterion 2's
+			// note above. (No bead filed yet for this admission — file one before
+			// landing, per this list's own convention of recording each addition.)
+			if rest[0] == "config" && gitConfigIsWrite(rest[1:]) {
 				return SubstitutionRefused
 			}
 			// UNION, folded MOST-RESTRICTIVE-WINS (minClearance, same combinator

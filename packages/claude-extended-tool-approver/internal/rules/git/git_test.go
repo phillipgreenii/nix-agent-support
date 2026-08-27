@@ -1116,6 +1116,43 @@ func TestGit_ConfigRead_Approve(t *testing.T) {
 	}
 }
 
+// TestGit_ConfigEditFlagClassifiedAsWrite pins pg2-uaxa3: `--edit`/`-e` must be
+// classified as a WRITE by configWriteIndicated, in every spelling git 2.54.0
+// actually invokes $GIT_EDITOR for — a clustered short (`-ez`, `-ze`), and a
+// spelling hidden behind `git config`'s own non-terminating "--" — even though
+// `--edit`/`-e` name no gated key, so the observable DECISION here is Approve
+// either way (the ordinary "modifying git command" fallback, same bucket
+// TestGit_ConfigOrdinaryWrite_Approve pins for every other ungated write). What
+// this test pins is the REASON, which is the classification: reaching
+// "read-only git config" for a command that actually opens an editor is wrong
+// (mirrors why TestGit_ConfigRead_Approve pins the reason too), and it is what
+// the substitution-body floor's recursion depends on to floor a Cleared
+// misclassification (see cmdparse's identically-shaped pinned rows).
+func TestGit_ConfigEditFlagClassifiedAsWrite(t *testing.T) {
+	write := []string{
+		"git config -e",
+		"git config -ez",
+		"git config -ze",
+		"git config --edit",
+		"git config -- --edit",
+		"git config -- -e",
+	}
+	r := New(nil)
+	for _, cmd := range write {
+		input := &hookio.HookInput{
+			ToolName:  "Bash",
+			ToolInput: mustJSON(map[string]string{"command": cmd}),
+		}
+		got := hookio.Verdict(r.Evaluate(input))
+		if got.Decision != hookio.Approve {
+			t.Errorf("cmd %q: got %s (%s), want approve (ungated write, same fallback as any other) — MEASURED to invoke $GIT_EDITOR", cmd, got.Decision, got.Reason)
+		}
+		if got.Reason != "modifying git command" {
+			t.Errorf("cmd %q: reason is %q, want %q — classified as a READ despite MEASURED to invoke $GIT_EDITOR (pg2-uaxa3)", cmd, got.Reason, "modifying git command")
+		}
+	}
+}
+
 // TestGit_ConfigOrdinaryWrite_Approve is the pg2-szadj FALSE-POSITIVE guard, and
 // the test that makes a blanket gate on `git config` writes fail. Routine config
 // writes carry no mechanism — they execute nothing, disable no refusal and redirect

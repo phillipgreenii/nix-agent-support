@@ -388,6 +388,32 @@ func TestIsSafeSubstitutionBody_GitReadSubcommandAudit(t *testing.T) {
 		{"branch force-delete is refused despite the name match", "git branch -D foo", false},
 		{"branch --show-current with an extra operand is refused — not the admitted shape", "git branch --show-current extra", false},
 		{"branch --show-current abbreviated is refused — exact-match only, fail-safe direction", "git branch --show-c", false},
+		// `config` is on this list by NAME, shape-gated by gitConfigIsWrite (an
+		// operand bound mirroring internal/rules/git's configWriteIndicated +
+		// configIsRead) rather than one exact shape or an operand-count pair —
+		// see gitReadSubcommands' own `config` note above.
+		{"config --get read is admitted", "git config --local --get core.hooksPath", true},
+		{"config --list read is admitted", "git config --list", true},
+		{"config bare-key read is admitted", "git config user.email", true},
+		{"config get-subcommand read is admitted", "git config get core.hooksPath", true},
+		{"config key+value write is refused despite the name match", "git config core.hooksPath /tmp/h", false},
+		{"config set-subcommand write is refused despite the name match", "git config set core.hooksPath /tmp/h", false},
+		{"config --unset write is refused despite naming only one operand", "git config --unset core.hooksPath", false},
+		{"config --edit write is refused despite naming no operand", "git config --edit", false},
+		// pg2-uaxa3: MEASURED on git 2.54.0 to invoke $GIT_EDITOR — a clustered
+		// -e spelling and a write hidden behind git config's own non-terminating
+		// "--" both used to slip past as Cleared. See ConfigStripDashDash's and
+		// ConfigHasEditFlag's own docs in cmdparse/git.go for the measurement.
+		{"config -ez clustered edit write is refused", "git config -ez", false},
+		{"config -ze clustered edit write is refused", "git config -ze", false},
+		{"config -- --edit is refused despite the -- prefix", "git config -- --edit", false},
+		{"config -- -e is refused despite the -- prefix", "git config -- -e", false},
+		{"config -- --unset <key> is refused despite the -- prefix", "git config -- --unset core.hooksPath", false},
+		{"config -- <key> <value> write is refused despite the -- prefix", "git config -- core.hooksPath /tmp/h", false},
+		// Fail-safe check: -f's glued value containing 'e' must not itself be
+		// mistaken for -e (this is the false-positive ConfigHasEditFlag's doc
+		// says the exact-token predecessor was written to avoid).
+		{"config -f<value with e> read is still admitted, not mistaken for -e", "git config -fsome.env --get core.hooksPath", true},
 		// pg2-phtl3 (operator ruling, 2026-08-17): `log`/`diff` reverse the
 		// criterion-1 decline pg2-a5r9r's correction (2) recorded for both — see
 		// gitReadSubcommands' THE pg2-phtl3 RULING. `show`/`diff-tree` below were
@@ -1213,6 +1239,15 @@ func TestClassifySubstitutionBody_GitDashCTokenPosition(t *testing.T) {
 		// path, so the union is Delegated, not Refused.
 		{"log admitted via -C, delegated on the -C path", "git -C /x log", SubstitutionDelegated},
 		{"diff admitted via -C, delegated on the -C path", "git -C /x diff", SubstitutionDelegated},
+		// `config` is now on gitReadSubcommands too (shape-gated by
+		// gitConfigIsWrite): a bare `git config` with no key at all is,
+		// perhaps surprisingly, a READ by that same operand bound — and by
+		// internal/rules/git's identical configIsRead, which this floor must
+		// not disagree with (measured: a bare `git -C /tmp config` already
+		// answers "read-only git config" at the top level). So it resolves the
+		// same way rev-parse/status/log/diff do above: Cleared admission,
+		// unscreened -C path, union Delegated.
+		{"config admitted via -C, delegated on the -C path", "git -C /x config", SubstitutionDelegated},
 
 		// --- every OTHER leading global option must still refuse: tokens[1] is not
 		//     the subcommand for any of these, and none is "-C" so stripGitDashC must
@@ -1236,7 +1271,6 @@ func TestClassifySubstitutionBody_GitDashCTokenPosition(t *testing.T) {
 		//     confirms this is a token-POSITION fix, not a widening of the admitted
 		//     subcommand set. ---
 		{"branch is not admitted even with -C stripped", "git -C /x branch", SubstitutionRefused},
-		{"config is not admitted even with -C stripped", "git -C /x config", SubstitutionRefused},
 		{"show is not admitted even with -C stripped", "git -C /x show HEAD", SubstitutionRefused},
 
 		// --- write-flag screening still fires through a -C prefix (point 3: hasWriteFlag's
