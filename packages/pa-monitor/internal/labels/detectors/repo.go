@@ -1,13 +1,14 @@
 package detectors
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"os/exec"
-	"path/filepath"
+	"errors"
 	"strings"
 
 	"github.com/phillipgreenii/pa-monitor/internal/labels"
+	"github.com/phillipgreenii/x/gitclient"
 )
 
 // Repo identifies a session's repository via canonical git origin URL.
@@ -47,21 +48,50 @@ func (r Repo) Detect(s labels.Session) labels.Set {
 // git-common-dir. Returns ("", false) for an empty cwd or a non-git dir. This is
 // the git-subprocess fetch shared by the inline detector path and the provider's
 // per-cwd RepoLabel cache (buildPoller), so both produce identical labels.
+//
+// RepoLabelFor takes no context because both its callers -- the inline
+// Detect path above and provider.Cache.FetchRepoLabel (wired in
+// cmd/pa-monitor/daemon.go) -- have none to thread through; a package-scoped
+// context.Background() is used for the git calls, matching this function's
+// pre-migration lack of any deadline.
+//
+// Migrated onto x/gitclient's Locator role (bead pg2-lv9jc, per epic
+// pg2-svfbb's design section 4.5). Two deliberate, documented behavior notes
+// from that design (section 4.2):
+//   - The no-remote fallback below uses Locator.CommonDir, which always runs
+//     `rev-parse --path-format=absolute --git-common-dir` anchored at cwd.
+//     The pre-migration call ran plain `rev-parse --git-common-dir` (no
+//     --path-format=absolute) and absolutized the result against the
+//     PROCESS's cwd rather than the cwd argument -- a latent bug this
+//     migration fixes. It changes the local:<hash> value emitted in that
+//     fallback path; no consumer (dashboards, alerting, or stored session
+//     history) was found to pin a specific local:<hash> value -- see the
+//     bead's close reason for the check performed.
+//   - RemoteURL wraps the same raw `config --get remote.<remote>.url` read
+//     (no insteadOf expansion), so the primary (has-a-remote) path's label
+//     values are unchanged.
 func RepoLabelFor(cwd string) (string, bool) {
 	if cwd == "" {
 		return "", false
 	}
-	out, err := exec.Command("git", "-C", cwd, "config", "--get", "remote.origin.url").Output()
+	ctx := context.Background()
+	client, err := gitclient.Discover(ctx, cwd)
 	if err != nil {
-		gcd, gErr := exec.Command("git", "-C", cwd, "rev-parse", "--git-common-dir").Output()
-		if gErr != nil {
-			return "", false
-		}
-		abs, _ := filepath.Abs(strings.TrimSpace(string(gcd)))
-		sum := sha256.Sum256([]byte(abs))
-		return "local:" + hex.EncodeToString(sum[:6]), true
+		return "", false
 	}
-	return NormaliseOrigin(strings.TrimSpace(string(out))), true
+	url, err := client.RemoteURL(ctx, "origin")
+	if err == nil {
+		return NormaliseOrigin(url), true
+	}
+	if !errors.Is(err, gitclient.ErrNoRemote) {
+		return "", false
+	}
+	gcd, err := client.CommonDir(ctx)
+	if err != nil {
+		return "", false
+	}
+	sum := sha256.Sum256([]byte(gcd))
+	return "local:" + hex.EncodeToString(sum[:6]), true
 }
 
 // NormaliseOrigin maps common git remote URL forms to a canonical

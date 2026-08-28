@@ -1,6 +1,6 @@
 module github.com/phillipgreenii/pa-monitor
 
-go 1.25.0
+go 1.25.9
 
 require (
 	github.com/BurntSushi/toml v1.6.0
@@ -10,6 +10,7 @@ require (
 	github.com/charmbracelet/x/ansi v0.11.8
 	github.com/gofrs/flock v0.13.0
 	github.com/phillipgreenii/claude-transcript v0.0.0
+	github.com/phillipgreenii/x v0.0.0-20260828055400-434334771eea
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.70.0
 	go.opentelemetry.io/otel v1.45.0
 	go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc v0.21.0

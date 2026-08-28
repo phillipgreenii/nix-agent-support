@@ -109,6 +109,10 @@ schema = 3
     version = 'v1.0.0'
     hash = 'sha256-GYIwYDONuv/yTE0AEugCHQbtV3oiBaco93xUNYFcVBQ='
 
+  [mod.'github.com/phillipgreenii/x']
+    version = 'v0.0.0-20260828055400-434334771eea'
+    hash = 'sha256-HlFyPQs0qle76h6Ia3Qi0HhFe+Y+HR26vzlheDUYTA4='
+
   [mod.'github.com/remyoudompheng/bigfft']
     version = 'v0.0.0-20230129092748-24d4a6f8daec'
     hash = 'sha256-vYmpyCE37eBYP/navhaLV4oX4/nu0Z/StAocLIFqrmM='
