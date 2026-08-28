@@ -148,3 +148,22 @@ config ...` — is refused exactly as it was before this decision landed: the ca
   genuine gap the side-finding surfaced, not merely the bare-`GIT_DIR` case named in the Context —
   it is a strictly MORE conservative posture for these three variables, in exchange for the new
   carve-out giving back the relief for a temp fixture.
+- A THIRD, independent call site needed the same `internal/temproot.Under` check, discovered only
+  when `nix flake check` (not the narrower go-tests check) ran
+  `TestIntegration_TempRepoCarveOut_BeadReproductionShapes` inside a nix build sandbox: `gitdir`'s
+  own carve-out relaxes correctly (`tempFixtureCarveOutApplies` is unaffected by this), but
+  `internal/engine`'s `evaluateRedirections` — a generic, pre-existing redirection-safety check that
+  runs on EVERY Bash redirection, independent of and earlier than the rule chain that carries the
+  carve-out — hard-Rejects a write whose target `internal/patheval`'s `classify()` ladder marks
+  `PathReadOnly`. That ladder's unconditional `/nix/**` rule (meant to protect the immutable
+  `/nix/store`) also matches `/nix/var/nix/builds/<id>` — this machine's nix places `$TMPDIR` /
+  `NIX_BUILD_TOP` there during a sandboxed build, so a fixture built with `t.TempDir()` inside that
+  sandbox lands under `/nix` and was rejected before the carve-out ever got a say. Fixed by making
+  `evaluateRedirections` treat a `PathReadOnly` target as approved when it ALSO resolves under
+  `temproot.Under` — `/nix/store` can never be a descendant of a temp root, so the relaxation cannot
+  reach it. `internal/patheval`'s own zone ladder (`classify()`) is deliberately left untouched, for
+  the same reason `escape_zone_ladder_test.go` (bead `pg2-lw19e`) already declined to touch it: a
+  `t.TempDir()`-rooted `HOME`/`XDG_DATA_HOME` fixture is ALSO nested under `$TMPDIR`/`NIX_BUILD_TOP`
+  in that same sandboxed environment, so narrowing or reordering `classify()`'s ladder to exempt the
+  build's scratch directory would relax those more-specific zone checks too — a much larger blast
+  radius than this one redirection-safety check.
