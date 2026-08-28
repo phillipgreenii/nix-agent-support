@@ -848,6 +848,34 @@
               # `nativeCheckInputs` is a hard eval error, not a silently dropped
               # dependency.
               #
+              # ccpool — bead pg2-ei1xj, discovered while implementing
+              # pg2-aqpvr. default.nix sets no subPackages, so gomod2nix's
+              # default checkPhase coincidentally swept every *_test.go via
+              # `find . -name` as a side effect of building the PACKAGE
+              # derivation — but `nix flake check` only builds checks.*, never
+              # packages.*, so ccpool got ZERO Go test coverage from
+              # `nix flake check` until this gate. Pattern-B module (local
+              # replace ../claude-transcript, same shape as pa-monitor above),
+              # so root the fileset at packages/ and pass modRoot. git on PATH
+              # for internal/gitfacet's real-git fixture tests (matches
+              # default.nix's nativeCheckInputs = [ pkgs.git ]). cmd/ccpool's
+              # `integration`/`contract`-tagged suites stay off by default
+              # (bare `go test ./...`, no -tags), matching every other
+              # tagged-suite split in this flake.
+              ccpool-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
+                pname = "ccpool-go-tests";
+                src = lib.fileset.toSource {
+                  root = ./packages;
+                  fileset = lib.fileset.unions [
+                    ./packages/ccpool
+                    ./packages/claude-transcript
+                  ];
+                };
+                modRoot = "ccpool";
+                gomod2nixToml = ./packages/ccpool/gomod2nix.toml;
+                testDeps = [ pkgs.git ];
+              };
+
               # ceta — the finding's primary motivation: internal rule / engine /
               # patheval security tests. git on PATH for the primary-commit
               # resolver's real-git contract test (builds fixtures only; the
