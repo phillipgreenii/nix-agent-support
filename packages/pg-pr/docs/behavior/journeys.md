@@ -11,7 +11,7 @@ and what it includes (`INV-22`).
   a machine consumer, I want PR facts I can trust the freshness of, so I never act on stale
   information. _(→ `USECASE-PGPR-LIST`; `INV-READ-1`, `INV-ASOF-1`, `INV-ASOF-2`,
   `INV-APPROVAL-1`, `INV-APPROVAL-2`, `INV-APPROVAL-3`, `INV-APPROVAL-4`, `INV-APPROVAL-5`,
-  `INV-GATE-1`, `INV-GATE-4`, `INV-DEP-1`, `INV-URG-1`.)_
+  `INV-GATE-1`, `INV-GATE-4`, `INV-DEP-1`, `INV-URG-1`, `INV-ORDER-1`.)_
 - **`STORY-PGPR-REVIEW`** <!-- uuid: 23724212-5d46-416d-ba0e-e43644d1269c --> — As a reviewer
   (human or agent), I want to stage and post a review safely, so my feedback lands attributed and
   never stacks a duplicate. _(→ `USECASE-PGPR-REVIEW`; `INV-REVIEW-1`, `INV-ATTR-1`.)_
@@ -28,21 +28,33 @@ and what it includes (`INV-22`).
 **Preconditions:** none.
 _Requires:_ `INV-READ-1`, `INV-ASOF-1`, `INV-ASOF-2`, `INV-APPROVAL-1`, `INV-APPROVAL-2`,
 `INV-APPROVAL-3`, `INV-APPROVAL-4`, `INV-APPROVAL-5`, `INV-GATE-1`, `INV-GATE-4`, `INV-DEP-1`,
-`INV-URG-1`.
+`INV-URG-1`, `INV-ORDER-1`.
 
 1. The actor asks for the current PR listing, machine or human-facing.
-2. pg-pr returns PR facts read from its store, each carrying its own freshness signal —
-   including, per PR, each approver's verdict and its own staleness (`INV-APPROVAL-1`,
-   `INV-APPROVAL-3`), the approval gate's own state, distinct from CI health and carrying the
-   same freshness treatment as the facts beside it (`INV-GATE-1`, `INV-GATE-4`), and pg-pr's own
-   **urgency heuristic** — a single opinionated score and level pg-pr computed once, never a
-   per-deployment policy (`INV-URG-1`).
+2. pg-pr returns PR facts read from its store, in the one order it computes for that listing
+   (`INV-ORDER-1`), each carrying its own freshness signal — including, per PR, each approver's
+   verdict and its own staleness (`INV-APPROVAL-1`, `INV-APPROVAL-3`), the approval gate's own
+   state, distinct from CI health and carrying the same freshness treatment as the facts beside
+   it (`INV-GATE-1`, `INV-GATE-4`), and pg-pr's own **urgency heuristic** — a single opinionated
+   score and level pg-pr computed once, never a per-deployment policy (`INV-URG-1`).
 3. If the PR is a **stacked PR** waiting on another, the listing also carries its **PR
    dependency**: the **downstream PR** ranks lower than the **upstream PR** it is waiting on
    (`INV-DEP-1`), never suppressed from the listing.
+4. When the listing is the team's PRs or the operator's own ("mine") PRs specifically, pg-pr
+   additionally partitions the returned rows, within that same shared order, by whether there is
+   something to act on: the team's rows into an immediately-actionable group and its exhaustive
+   complement — everything currently blocked from action; the operator's own rows into three
+   groups — immediately actionable, waiting only on someone else's approval, and in flight but
+   not yet actionable by the operator — resolving a row whose facts would otherwise qualify for
+   more than one group to the most actionable one.
 
 Extensions:
 
+- 1a. The actor asks for the listing machine-readable rather than for a person to read: pg-pr
+  emits every selected row as a bare list, one element per row, never bundled inside one
+  enclosing wrapper, each row still carrying the freshness signal from step 2. If the actor also
+  asked to cap how many rows come back, the cap actually being reached is stated in the response
+  itself, never a silently shortened list.
 - 2a. A fact's as-of time is unusable: it is reported stale, and a consumer MUST NOT act on it
   (`INV-ASOF-1`).
 - 3a. The downstream PR's upstream PR lies outside pg-pr's current retrieval set: the PR

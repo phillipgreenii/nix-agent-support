@@ -116,9 +116,24 @@ correct owner (ADR 0034) — the UUID preserves identity; only the owning set ch
   every consumer — never a per-deployment policy: pg-pr MUST NOT accept or honour a
   per-deployment re-weighting of this heuristic. A deployment wanting different urgency weighting
   MUST compute its own from the underlying facts rather than expect pg-pr to parameterize this
-  one. Alongside the PR-dependency ordering key (`INV-DEP-1`), this is the one piece of ranking
-  judgement an operator-approved ruling puts inside pg-pr; every other sort key not covered by
-  such a ruling remains outside pg-pr's own computation.
+  one. Alongside the full team-PR sort-key sequence the same 2026-08-21 operator-approved ruling
+  fixes — reviewer-role standing, staleness of a prior review, the PR-dependency ordering key
+  (`INV-DEP-1`), size, and a final repo-and-number tie-break — this is ranking judgement an
+  operator-approved ruling puts inside pg-pr; every other sort key not covered by such a ruling
+  remains outside pg-pr's own computation.
+
+## Ordering (`INV-ORDER-*`)
+
+- **`INV-ORDER-1`** <!-- uuid: ef3151e4-d947-4abc-b2d4-caa6771e3ce4 --> — **One shared order,
+  computed once.** Whenever pg-pr's read seam returns more than one row together, that group
+  carries a single, deterministic order: presenting the same underlying rows again yields that
+  same order, and pg-pr computes it in exactly one place — never a second time, by pg-pr itself or
+  by a consumer. Every consumer of that seam — dashboard, machine-readable, or any other
+  presentation built on it — MUST receive and preserve that order as given; a consumer MUST NOT
+  re-sort, re-rank, or otherwise independently produce a different sequence over the same rows,
+  and pg-pr MUST NOT compute a second, divergent order over the same rows anywhere else in its own
+  code. This invariant governs sequence alone; which rows are included in the first place, and by
+  what facts any one order ranks them, are separate concerns it does not decide.
 
 ## The write surface (`INV-WRITE-*`, `INV-REVIEW-*`, `INV-ATTR-*`)
 

@@ -54,11 +54,14 @@ flowchart LR
   that: a **per-deployment re-weighting** of this heuristic, and any other sort key not covered
   by an operator-approved ruling. A deployment wanting different urgency weighting MUST compute
   its own from the underlying facts; it MUST NOT expect pg-pr to honour a per-deployment
-  weighting policy (`INV-URG-1`). The PR-dependency ordering key above carries its own, separate
-  carve-out: an operator-approved ruling (pg2-4dz88.7, 2026-08-21 — "Upstream-of-another-PR
-  before standalone" as one key of a shared sort order) puts that specific ranking judgement
-  inside pg-pr itself (`INV-DEP-1`), a carve-out for that key alone that does not extend to any
-  other judgement no such ruling covers.
+  weighting policy (`INV-URG-1`). The team-PR ordering above carries its own, separate carve-out,
+  now broader than the PR-dependency key alone: the same operator-approved ruling (pg2-4dz88.7,
+  2026-08-21, amended 2026-08-24) fixes the full sort-key sequence a team-PR listing is presented
+  in — reviewer-role standing, staleness of a prior review, the PR-dependency ordering key
+  (`INV-DEP-1`), size, and a final repo-and-number tie-break — and pg-pr computes that whole
+  sequence, in one shared place, as its own ranking judgement (`INV-ORDER-1`). This carve-out
+  covers exactly that ruling-backed sequence; any other sort key no such ruling covers remains
+  outside pg-pr's own computation.
 - **Out (pg-pr → consumer), dashboard payload** — the same facts, human-facing, carrying a
   payload-level as-of time and stale flag rather than a per-item one. Day-to-day dashboard
   surfaces are exactly where a **user-hidden** PR's visibility fact takes effect, suppressing it

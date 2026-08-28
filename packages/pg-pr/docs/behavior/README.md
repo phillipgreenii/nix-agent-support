@@ -68,10 +68,9 @@ This set's **realization-gap register** (`INV-23`): intended behavior this set's
 has not built yet, one row per gap, each keyed by the element id the gap is against. Not an open
 question — the intent is settled and the build has not caught up (`INV-15`).
 
-| Element | Intended | Where the implementation stands | Tracked by |
-| ------- | -------- | ------------------------------- | ---------- |
-
-_No open realization gaps._
+| Element          | Intended                                                                                                                                                                                                                                   | Where the implementation stands                                                                                                                                                                                   | Tracked by                                                                                                                                   |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `INTF-PGPR-READ` | the dashboard payload de-emphasizes a PR of the operator's own ("mine") retained past merge under its grace window (`pg2-ew4kf`: "always at the bottom and dimmed") with a distinguishing rendering, not just its underlying sort position | `MineRow.Merged` exists and Build already sorts every merged row below the active ones; the My PRs panel still selects no merged column and applies no colour key, so the visual de-emphasis itself is unrealized | not yet tracked by a bead of its own — whoever ships the merged column/colour key (e.g. a future dashboard bead) should also remove this row |
 
 ## External references
 
