@@ -107,18 +107,32 @@ on every land. If you find a standing push bead, report it as this defect
    matches the repo's source right now), AND that source still reads as what
    you have been following since session start. If either fails, your loaded
    content is STALE — a change has landed on disk since you started that you
-   are not operating on. You cannot reload your own command text
-   mid-session, so this is a genuine, terminal-for-this-session anomaly, not
-   something to silently continue past and not something this session can fix
-   itself:
-   - STOP the drain loop. Do not claim any further bead.
-   - If you are currently holding a claimed bead (e.g. from Startup/resume),
-     leave it exactly where the existing STUCK path would leave it — PARKED,
-     not discarded, worktree/branch KEPT — without running any further STUCK
-     step; there is no bead-shaped question here, and this is NOT a `human`
-     park.
-   - Report directly to the operator that this session's own loaded command
-     content is stale and the session should be restarted fresh.
+   are not operating on. What happens next depends on HOW this session was
+   invoked (operator ruling, `pg2-t37tc`: "if I say run a skill, then run"):
+   - **Direct interactive invocation** — a human directly typed
+     `/pb:drain-beads` (or otherwise invoked it themselves) in the CURRENT
+     turn, i.e. there is a live operator turn actually watching this session
+     start. That live operator IS the mitigation this guard exists to
+     provide — there is no unattended runaway loop here for anyone to be
+     protected from. Do NOT halt: log the drift in ONE line (e.g.
+     `SELF-CHECK: installed copy differs from repo source (<n> lines) —
+proceeding on currently loaded text (direct interactive invocation).`)
+     and continue to CLAIM using the CURRENTLY LOADED command text,
+     unchanged.
+   - **Unattended/autonomous resume** — this invocation was spawned by
+     `/loop`, a cron-triggered routine, or a background task notification,
+     with no live operator turn driving it. You cannot reload your own
+     command text mid-session, so this is a genuine, terminal-for-this-session
+     anomaly, not something to silently continue past and not something this
+     session can fix itself:
+     - STOP the drain loop. Do not claim any further bead.
+     - If you are currently holding a claimed bead (e.g. from Startup/resume),
+       leave it exactly where the existing STUCK path would leave it — PARKED,
+       not discarded, worktree/branch KEPT — without running any further STUCK
+       step; there is no bead-shaped question here, and this is NOT a `human`
+       park.
+     - Report directly to the operator that this session's own loaded command
+       content is stale and the session should be restarted fresh.
 
    ```bash
    bd ready --claim --exclude-label human --exclude-type epic --actor "ID" --json
@@ -531,10 +545,17 @@ arguments, behavior is otherwise unchanged.
   following is still current: `readlink -f` the installed copy of this command and
   diff it against the repo's working-tree/HEAD source (the same store-served
   convention `CLAUDE.md` documents), then confirm that source still reads as what
-  you have been following. If it has drifted, HALT the drain loop, leave any
-  currently-claimed bead PARKED per the existing STUCK path (not discarded), and
-  report to the operator that the session should be restarted fresh — this is a
-  session-level anomaly, not a `human`-labeled bead park.
+  you have been following. Drift's response depends on how THIS session was
+  invoked: a DIRECT interactive invocation (a human typed `/pb:drain-beads`
+  themselves in the current turn, watching the session start — that live
+  operator IS the mitigation) MUST NOT halt on drift — log it in one line and
+  proceed on the currently loaded text. An UNATTENDED/autonomous resume
+  (spawned by `/loop`, a cron routine, or a background task notification with
+  no live operator turn) still HALTs the drain loop on drift exactly as
+  before: leave any currently-claimed bead PARKED per the existing STUCK path
+  (not discarded), and report to the operator that the session should be
+  restarted fresh — this is a session-level anomaly, not a `human`-labeled
+  bead park.
 - If a skill reports the canonical clone is off its primary branch or dirty, HALT and
   report — EXCEPT under a strategy that never touches the canonical clone, where the
   handler surfaces the anomaly and proceeds (the `pull-request` handler's PR-0, R-8's
