@@ -1,12 +1,12 @@
 module github.com/phillipgreenii/claude-extended-tool-approver
 
-go 1.25.9
+go 1.26.0
 
 require (
-	github.com/phillipgreenii/x v0.0.0-20260828055400-434334771eea
+	github.com/phillipgreenii/x v0.0.0-20260828074718-387984c818b9
 	github.com/spf13/cobra v1.10.2
 	modernc.org/sqlite v1.57.0
-	mvdan.cc/sh/v3 v3.13.1
+	mvdan.cc/sh/v3 v3.14.0
 )
 
 require (
@@ -18,7 +18,7 @@ require (
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
 	golang.org/x/sys v0.47.0 // indirect
-	modernc.org/libc v1.75.5 // indirect
+	modernc.org/libc v1.75.6 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect
 )
