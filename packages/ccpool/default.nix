@@ -1,4 +1,5 @@
 {
+  pkgs,
   lib,
   mkGoApp,
   makeWrapper,
@@ -28,6 +29,16 @@ mkGoApp {
   gomod2nixToml = ./gomod2nix.toml;
 
   nativeBuildInputs = [ makeWrapper ];
+
+  # internal/gitfacet's tests (pg2-svfbb.8, migrated onto x/gitclient's
+  # gittest/gitfixture) build real throwaway repos via the `git` binary rather
+  # than skipping when it is absent (the pre-migration tests used a
+  # gitAvailable(t) skip so the doCheck phase degraded gracefully in a
+  # git-less sandbox). gomod2nix's buildGoApplication runs doCheck (`go test
+  # ./...`) with no subPackages scoping here, so git must be on PATH during
+  # the build sandbox's check phase — mirrors pg-pr's own
+  # nativeCheckInputs = [ pkgs.git ] (packages/pg-pr/default.nix).
+  nativeCheckInputs = [ pkgs.git ];
 
   # Render the hook plugin with an ABSOLUTE binary path (the repo's template uses
   # `ccpool hook <event>`; substitute the store path). Wrap tmux onto PATH so the

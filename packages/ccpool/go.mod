@@ -1,6 +1,6 @@
 module github.com/phillipgreenii/ccpool
 
-go 1.25.0
+go 1.25.9
 
 require (
 	github.com/BurntSushi/toml v1.6.0
@@ -10,6 +10,7 @@ require (
 require (
 	github.com/gen2brain/beeep v0.11.2
 	github.com/gofrs/flock v0.13.0
+	github.com/phillipgreenii/x v0.0.0-20260828055400-434334771eea
 )
 
 require (
