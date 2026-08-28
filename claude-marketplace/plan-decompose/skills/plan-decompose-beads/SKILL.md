@@ -119,10 +119,36 @@ Read, for mode `report` (scoped to one docket, paginated over its children — p
 
 ## `amend-design`
 
-Rewrite the DESIGN field (superseded text struck/rewritten, the ruling recorded verbatim —
-never two live instructions); for chunked designs, rewrite the header/index and APPEND
-new-revision chunks, striking superseded chunks in the index (comments cannot be edited);
-bump `pd_rev` via `--set-metadata`.
+Two phases — RESOLVE the merged text, then (only after the core skill's mode-`reconcile`
+step 1 pre-check passes it) COMMIT it to bd. Never write to bd before the pre-check runs; the
+text resolved here is exactly what gets pre-checked.
+
+**Resolve.** Input is either a **unified diff** against the design text `read-docket-design`
+currently returns, or **full replacement text** — the caller states which explicitly; never
+infer the shape from content (design prose can itself contain lines starting with `---`/`+++`,
+which would misfire a content-sniffing heuristic).
+
+- **No prior revision to diff against** (the docket's design field is empty/absent, or
+  `read-metadata` shows no `pd_rev` at all): a diff input MUST be refused with a gap report —
+  there is nothing to apply it to. Full-text input MUST be accepted unconditionally and used
+  as the resolved text as-is. This is the fallback for the first amend on a docket with no
+  design yet.
+- **A prior revision exists:**
+  - **Full-text input** — the resolved text is the input itself (the pre-existing v1 form;
+    always available — diff support does not remove it).
+  - **Diff input** — reassemble the current design across chunks when chunked, write it to a
+    scratch file, then apply the diff: `patch <scratchfile> < <diff-file>` for a `diff -u`
+    hunk, or `git apply --unidiff-zero <diff-file>` against the same scratch file for a
+    `git diff --no-index`-style hunk. The apply command's exit status is authoritative: a
+    rejected hunk (nonzero exit, a `.rej` file produced) MUST HALT the amendment with a gap
+    report — never apply partially or guess past a reject. The patched scratch file's content
+    is the resolved text.
+
+**Commit** (only after the pre-check passes the resolved text): rewrite the DESIGN field with
+it (superseded text struck/rewritten, the ruling recorded verbatim — never two live
+instructions); for chunked designs, rewrite the header/index and APPEND new-revision chunks,
+striking superseded chunks in the index (comments cannot be edited); bump `pd_rev` via
+`--set-metadata`.
 
 ## `close-docket`
 

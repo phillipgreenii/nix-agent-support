@@ -59,7 +59,7 @@ fall back to ad-hoc files or a different tracker.
 | `release-set(docket)`                                    | Make held packets claimable, recording per-packet progress                                                                                                      |
 | `write-report(target, report)`                           | Append a durable report to the docket — or to a named tracking issue pre-docket                                                                                 |
 | `append-metric(packet, record)` / `read-metrics(docket)` | Append-only metric records; `read-metrics` powers mode `report`, MUST scope to one docket and MUST paginate over children (never load the whole docket at once) |
-| `amend-design(docket, design, revision+1)`               | RECONCILE entry point                                                                                                                                           |
+| `amend-design(docket, design-or-diff, revision+1)`       | RECONCILE entry point; accepts a diff against the current design (binding resolves the merge) or, with no prior design revision, full replacement text          |
 | `close-docket(docket)`                                   | Terminal close; never automatic mid-flight                                                                                                                      |
 
 ## Metadata keys (per-key replace semantics; never packet content)
@@ -209,11 +209,16 @@ mid-decomposition by definition — report it, never steal or force-release it.
 
 ## Mode `reconcile`
 
-Input: a docket + the amended design text. Order is load-bearing:
+Input: a docket + either a diff against the docket's current design or, when the docket
+carries no prior design revision yet, full replacement text. The binding's `amend-design`
+RESOLVES this into the full amended design text (patch-applying a diff, or using full text
+as-is) before anything is written to the docket. Order is load-bearing:
 
-1. Run the pre-check on the AMENDED design FIRST. Gaps ⇒ gap report, no amendment applied.
-2. `amend-design` (bump `pd_rev`; superseded text struck/rewritten, ruling recorded — never
-   two live instructions). Set `pd_phase=reconciling:<new-rev>`; restore `released` when done.
+1. Run the pre-check on the RESOLVED amended design FIRST — the binding's `amend-design`
+   Resolve step, not yet committed to the docket. Gaps ⇒ gap report, no amendment applied.
+2. `amend-design`'s Commit step (bump `pd_rev`; superseded text struck/rewritten, ruling
+   recorded — never two live instructions). Set `pd_phase=reconciling:<new-rev>`; restore
+   `released` when done.
 3. Re-curate affected OPEN, UNCLAIMED packets; restamp (`pd_curated_rev`); clear `pd_stale`.
    "Affected" is determined by the citation markers: a packet is affected iff any of its
    `[design: <section>]` citations points into an amended section. A packet actively CLAIMED
@@ -293,7 +298,8 @@ time, paginated over its children — via mode `report`.
 - "decompose `<design>` into beads" (optionally sizing policy, tracking issue) → dispatch
   `plan-decomposer` with: design source, binding, absolute repo root(s), docket metadata,
   tracking issue. Progress: docket `pd_phase` + report comments.
-- "the design for docket `<id>` changed — reconcile" → mode `reconcile` with the amended text.
+- "the design for docket `<id>` changed — reconcile" → mode `reconcile` with a diff against
+  the current design, or full text when the docket has no design revision yet.
 - "report on docket `<id>`'s metrics" / "what's the escalation rate for docket `<id>`?" →
   mode `report`, run directly against that one docket (no agent dispatch required — it is
   read-only and paginated, safe for the invoking session itself).
