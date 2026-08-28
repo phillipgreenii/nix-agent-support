@@ -12,9 +12,9 @@ import (
 	"github.com/phillipgreenii/pr-pool/conformance"
 	"github.com/phillipgreenii/pr-pool/internal/beads"
 	"github.com/phillipgreenii/pr-pool/internal/config"
-	"github.com/phillipgreenii/pr-pool/internal/gitenv"
 	"github.com/phillipgreenii/pr-pool/internal/query"
 	"github.com/phillipgreenii/pr-pool/internal/reconcile"
+	"github.com/phillipgreenii/x/gitclient"
 )
 
 // Exit codes. The general codes (ok / unexpected / usage) are global across these
@@ -46,13 +46,20 @@ func warnDroppedRoleEnv() {
 // warnTrackedConfig warns if <RepoRoot>/.pr-pool/config.toml is tracked by git, so
 // repo-local prompts are not accidentally committed (e.g. to an employer's
 // monorepo). Best-effort: a git error / untracked file is silently ignored.
-// Read-only, but still built via gitenv.Command rather than a bare
-// exec.CommandContext: a leaked ambient GIT_DIR/GIT_WORK_TREE outranks -C in
-// git's own repository discovery and would otherwise make this check answer
-// about the wrong repository (pg2-bh09g).
+// Read-only, but still routed through x/gitclient's StatusReader role
+// (IsTracked) rather than a bare exec.CommandContext: git's own repository
+// discovery consults the ambient environment (GIT_DIR/GIT_WORK_TREE) before
+// -C, and a leak there would otherwise make this check answer about the
+// wrong repository (pg2-bh09g). gitclient's Client builds every child's
+// environment from its own allowlist, so this call site needs no explicit
+// hermetic-env helper of its own anymore (pg2-a8bhp).
 func warnTrackedConfig(ctx context.Context, cfg config.Config) {
-	cmd := gitenv.Command(ctx, cfg.RepoRoot, "ls-files", "--error-unmatch", ".pr-pool/config.toml")
-	if err := cmd.Run(); err == nil {
+	client, err := gitclient.New(ctx, cfg.RepoRoot)
+	if err != nil {
+		return
+	}
+	tracked, err := client.IsTracked(ctx, ".pr-pool/config.toml")
+	if err == nil && tracked {
 		slog.Warn("`.pr-pool/config.toml` is tracked by git; prompts may be committed — add `.pr-pool/` to .git/info/exclude", "repo", cfg.RepoRoot)
 	}
 }
