@@ -11,6 +11,7 @@ import (
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/metrics"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/patheval"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/temproot"
 )
 
 // isSafeRedirectTarget is hookio.IsSafeRedirectTarget, kept as a local alias so
@@ -1752,7 +1753,43 @@ func (e *Engine) evaluateRedirections(redirs []hookio.Redirection, override *pat
 			continue
 		}
 		if access == patheval.PathReadOnly {
-			return hookio.RuleResult{Decision: hookio.Reject, Reason: "redirection: write to read-only path " + r.Path, Module: "engine"}
+			// pg2-yoqsr fallout, root-caused from this exact nix-sandbox gate
+			// failure (TestIntegration_TempRepoCarveOut_BeadReproductionShapes'
+			// reproduction 2). classify()'s "/nix/**" rule exists to protect the
+			// immutable /nix/store, but it matches ANY path under /nix/ by prefix
+			// — including /nix/var/nix/builds/<id>, a RUNNING nix build's own
+			// PRIVATE, WRITABLE scratch directory (on this machine's nix, $TMPDIR
+			// and NIX_BUILD_TOP both land there — verified via the build's own
+			// t.TempDir() path in the failing check's log). That is the SAME
+			// misclassification internal/patheval's escape_zone_ladder_test.go
+			// independently discovered and root-caused for a different test
+			// (bead pg2-lw19e) — and that investigation deliberately left
+			// classify() itself unchanged: t.TempDir()-rooted HOME/XDG fixtures
+			// are ALSO nested under $TMPDIR/NIX_BUILD_TOP in this same
+			// environment, so narrowing or reordering classify()'s ladder to
+			// exempt the build's scratch directory would ALSO relax the
+			// more-specific HOME/XDG zone checks that currently run only because
+			// "/nix/**" is unconditional — a much larger blast radius than this
+			// one redirection-safety check.
+			//
+			// Scoped here instead, to the ONE decisive check this actually
+			// broke: a write whose RESOLVED target ALSO resolves under one of
+			// pg2-yoqsr's own already-vetted temporary roots (temproot.Under —
+			// realpath of $TMPDIR, /private/var/folders, /private/tmp, or
+			// CETA_EXTRA_TEMP_ROOTS) is this session's own disposable scratch
+			// space, not the real read-only resource "/nix/**" exists to
+			// protect. /nix/store itself can never be a descendant of any of
+			// those roots (a nix store path is a fixed, content-addressed
+			// location, never inside a build's own ephemeral $TMPDIR), so this
+			// relaxation never reaches the store — it only ever fires for a
+			// path that is ALSO, independently, inside this process's own temp
+			// scratch tree. pe.ResolvePath reuses the SAME cwd-join + symlink
+			// resolution Evaluate() already applied to compute `access`, so
+			// temproot.Under sees exactly the path that was actually classified.
+			if !temproot.Under(pe.ResolvePath(r.Path)) {
+				return hookio.RuleResult{Decision: hookio.Reject, Reason: "redirection: write to read-only path " + r.Path, Module: "engine"}
+			}
+			continue
 		}
 		if !access.CanWrite() {
 			return hookio.RuleResult{Decision: hookio.NoOpinion, Reason: "redirection: write to non-writable path " + r.Path, Module: "engine"}
