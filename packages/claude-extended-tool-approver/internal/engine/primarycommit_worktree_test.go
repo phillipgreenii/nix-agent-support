@@ -304,3 +304,80 @@ func TestIntegration_PrimaryCommitMissingDirNeverApproves(t *testing.T) {
 		}
 	}
 }
+
+// TestIntegration_PrimaryCommitSelfCreatedDir is pg2-70g51's whole-chain guard for the
+// literal-but-missing-dir shape (pg2-69i0d's row 426677): the SAME "removed worktree"
+// fixture TestIntegration_PrimaryCommitMissingDirNeverApproves uses, but the command
+// ITSELF recreates that exact path (`mkdir`/`git init`) before committing to it, rather
+// than assuming it is still there. Every POSITIVE row is "&&"-chained end to end, so
+// mkdir's success is REQUIRED for the commit to ever run — the directory it creates
+// cannot be the pre-existing canonical clone, whatever path it is. Every NEGATIVE row
+// swaps in a ";"/newline, reproducing row 426677's OWN shape exactly: a failed mkdir
+// there falls through to a `cd` that ALSO fails and leaves the shell wherever it
+// already was (the canonical clone, in this fixture) — those rows MUST keep the
+// pre-existing fail-safe verdict, never Approve or the empty NoOpinion (an approval by
+// another route in an auto-accepting session).
+func TestIntegration_PrimaryCommitSelfCreatedDir(t *testing.T) {
+	canonical, worktree := nestedWorktreeFixture(t)
+	git := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", canonical}, args...)...)
+		cmd.Env = hermeticEnviron(t)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git -C %s %v: %v\n%s", canonical, args, err, out)
+		}
+	}
+	// Mirror TestIntegration_PrimaryCommitMissingDirNeverApproves: the path existed as
+	// a linked worktree and has since been cleaned up, so it is genuinely absent —
+	// exactly what pg2-70g51's own live-repro recipe uses `rm -rf`+`mktemp -d` for.
+	git("worktree", "remove", "--force", worktree)
+
+	positive := []string{
+		"mkdir -p " + worktree + " && cd " + worktree + " && git init -q && git commit -q -m seed --allow-empty",
+		"mkdir -p " + worktree + " && git -C " + worktree + " init -q && git -C " + worktree + " commit -q -m seed --allow-empty",
+		"git init -q " + worktree + " && cd " + worktree + " && git commit -q -m seed --allow-empty",
+	}
+	for _, mode := range []string{"bypassPermissions", "auto", "dontAsk", "default", "plan", "acceptEdits", ""} {
+		for _, cmd := range positive {
+			t.Run("positive "+mode+" "+cmd, func(t *testing.T) {
+				eng := buildFullEngine(canonical, canonical)
+				got := eng.EvaluateHook(&hookio.HookInput{
+					ToolName: "Bash", CWD: canonical,
+					ToolInput: makeBashJSON(cmd), PermissionMode: mode,
+				})
+				// NoOpinion (Abstain), not Approve: primarycommit defers entirely
+				// (findingNone -> NotApplicable) and nothing else in the chain has an
+				// opinion on a bare mkdir/git-init/git-commit sequence either — the
+				// same "allow" outcome TestPrimaryCommit_MissingDir's own "bare CWD
+				// reported missing stays fail-open" case already asserts. What MUST
+				// NOT happen is Ask or Reject.
+				if got.Decision != hookio.NoOpinion {
+					t.Errorf("%q in %q mode: got %s (%s: %s), want NoOpinion (allow)", cmd, mode, got.Decision, got.Module, got.Reason)
+				}
+			})
+		}
+	}
+
+	negative := []string{
+		// row 426677's OWN shape: ";"-separated create-then-cd on one logical unit,
+		// the commit reached only via a LATER, independently-connected leaf.
+		"mkdir -p " + worktree + "; cd " + worktree + " && git init -q && git commit -q -m seed --allow-empty",
+		"mkdir -p " + worktree + "\ncd " + worktree + " && git init -q && git commit -q -m seed --allow-empty",
+		// No creating leaf at all — an absent directory the command merely NAMES.
+		"cd " + worktree + " && git commit -q -m seed --allow-empty",
+	}
+	for _, mode := range []string{"bypassPermissions", "auto", "dontAsk", "default", "plan", "acceptEdits", ""} {
+		for _, cmd := range negative {
+			t.Run("negative "+mode+" "+cmd, func(t *testing.T) {
+				eng := buildFullEngine(canonical, canonical)
+				got := eng.EvaluateHook(&hookio.HookInput{
+					ToolName: "Bash", CWD: canonical,
+					ToolInput: makeBashJSON(cmd), PermissionMode: mode,
+				})
+				if got.Decision == hookio.Approve || got.Decision == hookio.NoOpinion {
+					t.Errorf("%q in %q mode: got %s (%s: %s); a ';'-broken (or absent) creator MUST NOT reach Approve or an empty verdict", cmd, mode, got.Decision, got.Module, got.Reason)
+				}
+			})
+		}
+	}
+}

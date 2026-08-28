@@ -1994,6 +1994,54 @@ type ParsedCommand struct {
 	// after step 4) would fall back to cmdparse.ScanSubstitutions(Raw), the
 	// permanent text entry point I7 describes.
 	Substitutions []Substitution
+	// AndChainID exposes the "&&"-ONLY SEQUENCING relation between leaves (pg2-70g51)
+	// — the one compound-operator DISTINCTION splitCompound/the pre-ADR-0039 front end
+	// never tracked at all: a `;`/newline boundary and an "&&" boundary both simply
+	// started the next segment, so a rule holding one leaf could not tell "this leaf
+	// runs UNCONDITIONALLY next" from "this leaf runs only if the PRECEDING one
+	// succeeded". primarycommit's ErrDirNotExist/Unresolved fail-safe branches need
+	// exactly that distinction: `mkdir -p "$D" && cd "$D" && git commit` (mkdir's
+	// success is REQUIRED for the commit to run at all, so its target can never be a
+	// pre-existing directory) is safe to relax, while the outwardly similar
+	// `mkdir -p "$D"; cd "$D" && git commit` is NOT (a failed, non-aborting `mkdir`
+	// leaves the commit free to run wherever the shell already was).
+	//
+	// Leaves of the SAME expression that share a NONZERO AndChainID are members of
+	// one unbroken "&&" sequence, in the SAME left-to-right order they appear in the
+	// leaf slice: for two such leaves A (earlier) and B (later), B actually running
+	// GUARANTEES A ran and exited zero. Members are minted moving left-to-right
+	// through a *syntax.BinaryCmd's nested AndStmt tree ONLY — an "||", a ";"/newline
+	// boundary between top-level statements, a nested body (Subshell/Block/If/While/
+	// For/Case/FuncDecl/Coproc — its own contents get a FRESH, unrelated id scope) and
+	// a pipeline stage boundary (`|`, whose right side runs regardless of the left
+	// side's exit status) all start a NEW id instead of continuing the incoming one.
+	//
+	// ANY "||" ANYWHERE in a top-level statement's own "&&"/"||" tree disables
+	// tracking for that statement's ENTIRE tree (AndChainID 0 throughout), rather than
+	// modeling the disjunction precisely: "&&" and "||" share precedence and associate
+	// left, so `a && b || c && d` is ONE *syntax.Stmt whose tree is
+	// `((a && b) || c) && d`, and "d shares a's chain" would wrongly claim d running
+	// proves a ran and succeeded — false whenever the run actually took the `c`
+	// disjunct. This is strictly MORE conservative than necessary (a trailing
+	// `|| true` idiom loses tracking on an otherwise-safe leading "&&" run too) but
+	// never unsound, and it is documented on shellparse.go's `startChain`/
+	// `containsOrStmt`, which implement it.
+	//
+	// The ZERO value is "not part of any tracked chain" and NEVER matches ANY other
+	// leaf, including another zero-value one — DELIBERATELY UNLIKE PipelineID's own
+	// "zero is a lone stage of the first pipeline" convention, chosen because a
+	// hand-built ParsedCommand in a test leaves every unset int field at Go's zero,
+	// and two such leaves accidentally comparing as "chained" would be exactly the
+	// false-safety this field exists to prevent. Real ids start at 1 (nextAndChainID,
+	// mirroring nextSubshellID's convention rather than nextPipelineID's own -1-primed
+	// one). A data leaf (PipelineID -1) is likewise never a chain member, though
+	// nothing currently reads AndChainID on one.
+	//
+	// Like PipelineID, ids are per-Parse-call: a chain id from one leaf set MUST NOT
+	// be compared against a different Parse call's (e.g. a leaf reached through
+	// primarycommit.go's shell-alias-body recursion, which re-parses the alias body on
+	// its own).
+	AndChainID int
 }
 
 // ArgIsLiveExpansion is the SAFE accessor for ArgLiveExpansion: it reports

@@ -358,6 +358,13 @@ type lowering struct {
 	// nextSubshellID, so two subshells at the SAME nesting depth still get
 	// DIFFERENT ids and are never confused for one another.
 	subshellSeq int
+	// andChainSeq is the source of fresh "&&"-CHAIN ids (pg2-70g51), mirroring
+	// subshellSeq/nextSubshellID (starts at 0, pre-incremented, so the first minted
+	// id is 1) rather than pipeSeq/nextPipelineID's -1-primed convention — 0 is
+	// ParsedCommand.AndChainID's reserved "not part of any tracked chain" sentinel,
+	// and starting real ids at 1 keeps a hand-built (zero-value) test leaf from ever
+	// colliding with one.
+	andChainSeq int
 	// scopePath is the walk's CURRENT subshell nesting path, outermost to
 	// innermost — the subshell ids (in nextSubshellID order) of every `( … )` the
 	// walk is presently inside. It is pushed on entering a Subshell's body and
@@ -421,6 +428,50 @@ func (lw *lowering) nextPipelineID() int {
 func (lw *lowering) nextSubshellID() int {
 	lw.subshellSeq++
 	return lw.subshellSeq
+}
+
+// nextAndChainID mints a fresh "&&"-chain id (pg2-70g51, ParsedCommand.AndChainID's
+// doc), mirroring nextSubshellID: every fresh top-level statement, pipeline stage, or
+// nested-body entry gets its own id from here via startChain, so two unrelated
+// statements are never confused for members of the same chain.
+func (lw *lowering) nextAndChainID() int {
+	lw.andChainSeq++
+	return lw.andChainSeq
+}
+
+// startChain mints the AndChainID for st — a statement about to be lowered as one
+// member of a `;`/newline-separated list, a pipeline stage, or a nested body's own
+// entry — UNLESS st's "&&"/"||" tree contains an "||" ANYWHERE, in which case it
+// returns 0 (ParsedCommand.AndChainID's "not part of any tracked chain" sentinel) for
+// the statement's WHOLE tree instead. See that field's doc for why "||" anywhere
+// disables tracking for the entire statement rather than modeling the disjunction
+// precisely.
+func (lw *lowering) startChain(st *syntax.Stmt) int {
+	if st == nil || containsOrStmt(st.Cmd) {
+		return 0
+	}
+	return lw.nextAndChainID()
+}
+
+// containsOrStmt reports whether cmd's own "&&"/"||" tree contains an OrStmt anywhere,
+// WITHOUT descending into a nested body: a Subshell/Block/If/While/For/Case/FuncDecl/
+// Coproc's body, or a Pipe's stages, is a SEPARATE chain scope (restarted fresh at its
+// own entry point by another startChain call, in lowerStmtList/lowerStmtsFresh or the
+// Pipe/PipeAll branch below) regardless of what encloses or is enclosed by it, so an
+// "||" on one side of that boundary must never poison the other.
+func containsOrStmt(cmd syntax.Command) bool {
+	bc, ok := cmd.(*syntax.BinaryCmd)
+	if !ok {
+		return false
+	}
+	switch bc.Op {
+	case syntax.OrStmt:
+		return true
+	case syntax.Pipe, syntax.PipeAll:
+		return false
+	default: // AndStmt
+		return containsOrStmt(bc.X.Cmd) || containsOrStmt(bc.Y.Cmd)
+	}
 }
 
 // slice returns the exact source slice a node spans, clamped to the source. Every
@@ -640,7 +691,7 @@ func (lw *lowering) emptyHeredocTerminatorEnd(operatorLineTokenEnd, emptyBodies 
 // pipeline.
 func (lw *lowering) lowerStmtsFresh(stmts []*syntax.Stmt) {
 	for _, st := range stmts {
-		lw.lowerStmt(st, lw.nextPipelineID(), 0)
+		lw.lowerStmt(st, lw.nextPipelineID(), 0, lw.startChain(st))
 	}
 }
 
@@ -665,7 +716,11 @@ func (lw *lowering) lowerStmtsFresh(stmts []*syntax.Stmt) {
 // downstream of `a` inside the group.
 func (lw *lowering) lowerStmtList(stmts []*syntax.Stmt, pid, idx int) {
 	for _, st := range stmts {
-		lw.lowerStmt(st, pid, idx)
+		// EACH entry gets its OWN fresh AndChainID (pg2-70g51) via startChain, never
+		// one shared across the list the way pid/idx are: a `;`/newline still breaks
+		// the "&&" guarantee between two statements sharing a compound BODY exactly as
+		// it does at the top level, even though they share this body's pipeline stage.
+		lw.lowerStmt(st, pid, idx, lw.startChain(st))
 	}
 }
 
@@ -697,16 +752,27 @@ func flattenPipe(st *syntax.Stmt, out *[]*syntax.Stmt) {
 // carrying redirections or a heredoc, to be covered by at least one leaf source
 // span — INCLUDING nodes in untaken branches, because CETA cannot know which
 // branch runs and MUST judge every branch that could.
-func (lw *lowering) lowerStmt(st *syntax.Stmt, pid, idx int) {
+//
+// chain is st's own AndChainID (pg2-70g51, minted once by whichever caller started
+// st — startChain, for a fresh top-level/pipeline-stage/nested-body entry, or an
+// enclosing BinaryCmd's own incoming chain, continued unchanged into cmd.X/cmd.Y
+// below regardless of "&&" vs "||": startChain already zeroed it for the WHOLE
+// statement if an "||" appears anywhere in st's tree, so by the time this switch
+// is looking at one BinaryCmd node, either chain is 0 (stays 0, no tracking either
+// way) or the statement's tree is proven "&&"-only from the top (so there is no
+// OrStmt left to special-case). Passed through UNCHANGED to emitCompoundRedirs in
+// every branch: that leaf represents st's OWN position in ITS enclosing sequence,
+// never the fresh scope minted for whatever nested body st might also own.
+func (lw *lowering) lowerStmt(st *syntax.Stmt, pid, idx, chain int) {
 	switch cmd := st.Cmd.(type) {
 	case nil:
 		// A statement with no command at all — `> file` on its own. Its
 		// redirections MUST still be evaluated, so it becomes a command-less leaf
 		// exactly as the outgoing front end's redirection-only segment did.
-		lw.emitRedirOnly(st, pid, idx)
+		lw.emitRedirOnly(st, pid, idx, chain)
 
 	case *syntax.CallExpr:
-		lw.lowerCall(st, cmd, pid, idx)
+		lw.lowerCall(st, cmd, pid, idx, chain)
 
 	case *syntax.BinaryCmd:
 		switch cmd.Op {
@@ -716,15 +782,18 @@ func (lw *lowering) lowerStmt(st *syntax.Stmt, pid, idx int) {
 			flattenPipe(cmd.X, &stages)
 			flattenPipe(cmd.Y, &stages)
 			for i, stage := range stages {
-				lw.lowerStmt(stage, pid, idx+i)
+				// Each stage gets its OWN fresh AndChainID (pg2-70g51): `a | b` runs b
+				// regardless of a's exit status, so a pipe stage boundary is never a
+				// safe "&&" continuation.
+				lw.lowerStmt(stage, pid, idx+i, lw.startChain(stage))
 			}
 			// A pipeline that itself carries redirections (only reachable when the
 			// whole pipeline is a redirected compound) still owes its redirection leaf.
-			lw.emitCompoundRedirs(st, pid, idx)
+			lw.emitCompoundRedirs(st, pid, idx, chain)
 		default: // && and ||
-			lw.lowerStmt(cmd.X, pid, idx)
-			lw.lowerStmt(cmd.Y, lw.nextPipelineID(), 0)
-			lw.emitCompoundRedirs(st, pid, idx)
+			lw.lowerStmt(cmd.X, pid, idx, chain)
+			lw.lowerStmt(cmd.Y, lw.nextPipelineID(), 0, chain)
+			lw.emitCompoundRedirs(st, pid, idx, chain)
 		}
 
 	case *syntax.Subshell:
@@ -736,14 +805,16 @@ func (lw *lowering) lowerStmt(st *syntax.Stmt, pid, idx int) {
 		// that leaves lowered before/after this Subshell (in the ENCLOSING scope)
 		// do not carry, so InCommandVars can tell "this leaf's write is still open
 		// here" from "that subshell already closed" or "that's a sibling subshell".
+		// lowerStmtList mints its OWN fresh AndChainID per body statement (pg2-70g51);
+		// chain here is used only below, for the subshell's OWN emitCompoundRedirs.
 		lw.scopePath = append(lw.scopePath, lw.nextSubshellID())
 		lw.lowerStmtList(cmd.Stmts, pid, idx)
 		lw.scopePath = lw.scopePath[:len(lw.scopePath)-1]
-		lw.emitCompoundRedirs(st, pid, idx)
+		lw.emitCompoundRedirs(st, pid, idx, chain)
 
 	case *syntax.Block:
 		lw.lowerStmtList(cmd.Stmts, pid, idx)
-		lw.emitCompoundRedirs(st, pid, idx)
+		lw.emitCompoundRedirs(st, pid, idx, chain)
 
 	case *syntax.IfClause:
 		// Both branches are lowered. `if false; then rm -rf /; fi` executes nothing,
@@ -756,7 +827,7 @@ func (lw *lowering) lowerStmt(st *syntax.Stmt, pid, idx int) {
 			lw.lowerStmtsFresh(els.Cond)
 			lw.lowerStmtsFresh(els.Then)
 		}
-		lw.emitCompoundRedirs(st, pid, idx)
+		lw.emitCompoundRedirs(st, pid, idx, chain)
 
 	case *syntax.WhileClause:
 		// The condition keeps the header's pipeline coordinates: in
@@ -764,12 +835,12 @@ func (lw *lowering) lowerStmt(st *syntax.Stmt, pid, idx int) {
 		// downstream of the cat, and losing that would lose the relation.
 		lw.lowerStmtList(cmd.Cond, pid, idx)
 		lw.lowerStmtsFresh(cmd.Do)
-		lw.emitCompoundRedirs(st, pid, idx)
+		lw.emitCompoundRedirs(st, pid, idx, chain)
 
 	case *syntax.ForClause:
 		lw.lowerLoop(cmd.Loop)
 		lw.lowerStmtList(cmd.Do, pid, idx)
-		lw.emitCompoundRedirs(st, pid, idx)
+		lw.emitCompoundRedirs(st, pid, idx, chain)
 
 	case *syntax.CaseClause:
 		// The subject word is DATA — `case $(curl|sh) in` executes the substitution
@@ -782,30 +853,32 @@ func (lw *lowering) lowerStmt(st *syntax.Stmt, pid, idx int) {
 			}
 			lw.lowerStmtsFresh(item.Stmts)
 		}
-		lw.emitCompoundRedirs(st, pid, idx)
+		lw.emitCompoundRedirs(st, pid, idx, chain)
 
 	case *syntax.FuncDecl:
 		// A function BODY is not executed at declaration time, but by I14's static
 		// surrogate it is judged anyway: nothing here can know whether it is called.
+		// It is a fresh chain scope of its own (pg2-70g51), like any other nested body.
 		if cmd.Body != nil {
-			lw.lowerStmt(cmd.Body, lw.nextPipelineID(), 0)
+			lw.lowerStmt(cmd.Body, lw.nextPipelineID(), 0, lw.startChain(cmd.Body))
 		}
-		lw.emitCompoundRedirs(st, pid, idx)
+		lw.emitCompoundRedirs(st, pid, idx, chain)
 
 	case *syntax.TimeClause:
 		if cmd.Stmt != nil {
-			lw.lowerStmt(cmd.Stmt, pid, idx)
+			lw.lowerStmt(cmd.Stmt, pid, idx, chain)
 		}
-		lw.emitCompoundRedirs(st, pid, idx)
+		lw.emitCompoundRedirs(st, pid, idx, chain)
 
 	case *syntax.CoprocClause:
+		// A fresh chain scope of its own (pg2-70g51), like FuncDecl's body.
 		if cmd.Stmt != nil {
-			lw.lowerStmt(cmd.Stmt, lw.nextPipelineID(), 0)
+			lw.lowerStmt(cmd.Stmt, lw.nextPipelineID(), 0, lw.startChain(cmd.Stmt))
 		}
-		lw.emitCompoundRedirs(st, pid, idx)
+		lw.emitCompoundRedirs(st, pid, idx, chain)
 
 	case *syntax.DeclClause:
-		lw.lowerDecl(st, cmd, pid, idx)
+		lw.lowerDecl(st, cmd, pid, idx, chain)
 
 	case *syntax.ArithmCmd, *syntax.TestClause, *syntax.LetClause:
 		// `(( i++ ))`, `[[ -f $x ]]`, `let a=b`. None of these EXECUTES a command,
@@ -814,14 +887,14 @@ func (lw *lowering) lowerStmt(st *syntax.Stmt, pid, idx int) {
 		// outgoing front end did, yielding executables `[[` and `((`) is what this
 		// deliberately stops.
 		lw.emitDataNode(st.Cmd)
-		lw.emitCompoundRedirs(st, pid, idx)
+		lw.emitCompoundRedirs(st, pid, idx, chain)
 
 	default:
 		// An unmodelled command type MUST NOT vanish (root cause 4: a pass may
 		// DELETE a segment, so the leaf set stops being a cover). Emitting its source
 		// span as a data leaf keeps I14's coverage while judging nothing.
 		lw.emitDataNode(st.Cmd)
-		lw.emitCompoundRedirs(st, pid, idx)
+		lw.emitCompoundRedirs(st, pid, idx, chain)
 	}
 }
 
@@ -856,13 +929,14 @@ func (lw *lowering) lowerLoop(loop syntax.Loop) {
 // exactly like the leading `VAR=VALUE` form (pg2-gkd5e), while a bare
 // `export`/`export NAME` stays a read-only query the safe-commands rule can
 // approve.
-func (lw *lowering) lowerDecl(st *syntax.Stmt, cmd *syntax.DeclClause, pid, idx int) {
+func (lw *lowering) lowerDecl(st *syntax.Stmt, cmd *syntax.DeclClause, pid, idx, chain int) {
 	leaf := ParsedCommand{
 		Executable:    cmd.Variant.Value,
 		Raw:           lw.stmtRaw(st),
 		Comment:       lw.stmtComment(st),
 		PipelineID:    pid,
 		PipelineIndex: idx,
+		AndChainID:    chain,
 	}
 	for _, a := range cmd.Args {
 		// live mirrors wordToken's rule: a value carries a live expansion when its
@@ -915,12 +989,13 @@ func (lw *lowering) assignRaw(a *syntax.Assign) string {
 }
 
 // lowerCall lowers a simple command.
-func (lw *lowering) lowerCall(st *syntax.Stmt, cmd *syntax.CallExpr, pid, idx int) {
+func (lw *lowering) lowerCall(st *syntax.Stmt, cmd *syntax.CallExpr, pid, idx, chain int) {
 	leaf := ParsedCommand{
 		Raw:           lw.stmtRaw(st),
 		Comment:       lw.stmtComment(st),
 		PipelineID:    pid,
 		PipelineIndex: idx,
+		AndChainID:    chain,
 	}
 	// LEADING ASSIGNMENTS land in CallExpr.Assigns; the `env FOO=1 cmd` form lands
 	// in Args and is consumed by unwrapExecPrefix below. The lowering MUST NOT
@@ -1022,8 +1097,8 @@ func (lw *lowering) callSubstitutions(cmd *syntax.CallExpr, redirs []*syntax.Red
 
 // emitRedirOnly emits a command-less leaf for a statement that is nothing but
 // redirections.
-func (lw *lowering) emitRedirOnly(st *syntax.Stmt, pid, idx int) {
-	leaf := ParsedCommand{Raw: lw.stmtRaw(st), PipelineID: pid, PipelineIndex: idx}
+func (lw *lowering) emitRedirOnly(st *syntax.Stmt, pid, idx, chain int) {
+	leaf := ParsedCommand{Raw: lw.stmtRaw(st), PipelineID: pid, PipelineIndex: idx, AndChainID: chain}
 	lw.attachRedirs(st, &leaf)
 	leaf.Substitutions = lw.substitutionsOf(redirNodes(st.Redirs), true)
 	// `len(leaf.Args) > 0` is the fd-prefixed INPUT redirection parity path (see
@@ -1058,7 +1133,7 @@ func (lw *lowering) emitRedirOnly(st *syntax.Stmt, pid, idx int) {
 // `done 2>/dev/null` on a loop inside a pipeline. That is a coverage gap rather than a
 // dropped redirection (the leaf existed and recorded the write), but the guard's whole
 // job is to refuse "close enough" about which bytes a leaf answers for.
-func (lw *lowering) emitCompoundRedirs(st *syntax.Stmt, pid, idx int) {
+func (lw *lowering) emitCompoundRedirs(st *syntax.Stmt, pid, idx, chain int) {
 	if len(st.Redirs) == 0 {
 		return
 	}
@@ -1066,6 +1141,7 @@ func (lw *lowering) emitCompoundRedirs(st *syntax.Stmt, pid, idx int) {
 		Raw:           strings.TrimSpace(lw.src[min(int(st.Redirs[0].Pos().Offset()), len(lw.src)):lw.stmtEndOffset(st)]),
 		PipelineID:    pid,
 		PipelineIndex: idx,
+		AndChainID:    chain,
 	}
 	lw.attachRedirs(st, &leaf)
 	leaf.Substitutions = lw.substitutionsOf(redirNodes(st.Redirs), true)
@@ -1125,7 +1201,9 @@ func (lw *lowering) emitDataSpan(from, to syntax.Pos, subNodes []syntax.Node) {
 	// reported as a stage (tc-vul7). SubshellScope is stamped for consistency with
 	// appendLeaf's command leaves, though nothing currently reads it here: a data
 	// leaf carries no Executable/EnvVars, so it never contributes a write
-	// InCommandVars would need to scope (pg2-4ak2k).
+	// InCommandVars would need to scope (pg2-4ak2k). AndChainID is left at its zero
+	// value (pg2-70g51) — "not part of any tracked chain" — left implicit rather
+	// than stamped like PipelineID's -1, because 0 (not -1) is that sentinel here.
 	lw.dataLeaves = append(lw.dataLeaves, ParsedCommand{
 		Raw: raw, PipelineID: -1, PipelineIndex: -1,
 		SubshellScope: append([]int(nil), lw.scopePath...),
@@ -2106,7 +2184,7 @@ func soleSimpleCommandLeaf(text string) (ParsedCommand, bool) {
 		return ParsedCommand{}, false
 	}
 	lw := &lowering{src: text, pipeSeq: -1}
-	lw.lowerCall(st, call, 0, 0)
+	lw.lowerCall(st, call, 0, 0, 0)
 	if len(lw.leaves) != 1 || len(lw.dataLeaves) != 0 {
 		return ParsedCommand{}, false
 	}

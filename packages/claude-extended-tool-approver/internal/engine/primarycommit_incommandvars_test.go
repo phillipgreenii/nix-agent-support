@@ -107,10 +107,13 @@ func TestIntegration_PrimaryCommitInCommandVars(t *testing.T) {
 			reasonHas: "cannot determine which repository or branch",
 		},
 		{
-			name:     "value from a non-derivable substitution, cd spelling",
+			// pg2-70g51: a `mktemp -d`-bound variable IS a narrow exception to
+			// ACCEPTANCE 3's "not established" rule, not an instance of it — see the
+			// dedicated ACCEPTANCE 5 block below. This row is the "cd" spelling; the
+			// "-C" spelling is covered there too.
+			name:     "value from a fresh mktemp -d, cd spelling, is now recognized safe",
 			command:  "WT=$(mktemp -d) && cd \"$WT\" && git commit -m x",
-			wantAuto: hookio.Reject, wantInteractive: hookio.Ask,
-			reasonHas: "cannot determine which repository or branch",
+			wantAuto: hookio.Approve, wantInteractive: hookio.Approve,
 		},
 		{
 			// A PREFIX assignment is scoped to that one command's environment AND is
@@ -130,9 +133,13 @@ func TestIntegration_PrimaryCommitInCommandVars(t *testing.T) {
 			reasonHas: "cannot determine which repository or branch",
 		},
 		{
-			// A later unreadable assignment REVOKES the earlier literal one.
-			name:     "reassignment to a non-literal revokes the binding",
-			command:  "WT=" + worktree + " && WT=$(mktemp -d) && git -C \"$WT\" commit -m x",
+			// A later unreadable, non-mktemp assignment REVOKES the earlier literal
+			// one — deliberately reassigned to $(git rev-parse --show-toplevel)
+			// rather than $(mktemp -d) so this row keeps testing REVOCATION and does
+			// not collide with pg2-70g51's ACCEPTANCE 5 (below), which is what a
+			// mktemp -d reassignment would now trigger.
+			name:     "reassignment to a non-literal, non-mktemp value revokes the binding",
+			command:  "WT=" + worktree + " && WT=$(git rev-parse --show-toplevel) && git -C \"$WT\" commit -m x",
 			wantAuto: hookio.Reject, wantInteractive: hookio.Ask,
 			reasonHas: "cannot determine which repository or branch",
 		},
@@ -166,6 +173,34 @@ func TestIntegration_PrimaryCommitInCommandVars(t *testing.T) {
 			command:  "WT=" + canonical + " && cd \"$WT\" && git commit -m x",
 			wantAuto: hookio.Reject, wantInteractive: hookio.Approve,
 			reasonHas: "Directory evaluated: " + canonical,
+		},
+		// ── ACCEPTANCE 5 (pg2-70g51): an "&&"-chained `mktemp -d` binding is safe ────
+		// regardless of the literal value — see selfCreatedTempDir's own doc for the
+		// full argument. Every positive row here is paired with a ";"-separated
+		// NEGATIVE row proving the safety argument really does hinge on "&&": with a
+		// ";" the `mktemp -d` leaf's own success is no longer REQUIRED for the
+		// commit leaf to run at all, so the target stays genuinely unresolvable.
+		{
+			name:     "-C spelling, mktemp -d bound directly",
+			command:  "WT=$(mktemp -d) && git -C \"$WT\" commit -m x",
+			wantAuto: hookio.Approve, wantInteractive: hookio.Approve,
+		},
+		{
+			name:     "reassignment TO a fresh mktemp -d is also recognized safe",
+			command:  "WT=" + worktree + " && WT=$(mktemp -d) && git -C \"$WT\" commit -m x",
+			wantAuto: hookio.Approve, wantInteractive: hookio.Approve,
+		},
+		{
+			name:     "NEGATIVE: ';'-separated mktemp -d is still unresolved",
+			command:  "WT=$(mktemp -d); git -C \"$WT\" commit -m x",
+			wantAuto: hookio.Reject, wantInteractive: hookio.Ask,
+			reasonHas: "cannot determine which repository or branch",
+		},
+		{
+			name:     "NEGATIVE: ';'-separated mktemp -d, cd spelling, is still unresolved",
+			command:  "WT=$(mktemp -d); cd \"$WT\" && git commit -m x",
+			wantAuto: hookio.Reject, wantInteractive: hookio.Ask,
+			reasonHas: "cannot determine which repository or branch",
 		},
 		// ── SCOPE: a non-commit git subcommand is none of this rule's business ──────
 		{
@@ -236,11 +271,19 @@ func TestIntegration_PrimaryCommitInCommandVarsNeverApprovesTheUnestablished(t *
 	commands := []string{
 		"WT=$(git rev-parse --show-toplevel) && git -C \"$WT\" commit -m x",
 		"WT=$(git rev-parse --show-toplevel); cd \"$WT\" && git commit -m x",
-		"WT=$(mktemp -d) && git -C \"$WT\" commit -m x",
+		// NOT here: "WT=$(mktemp -d) && git -C \"$WT\" commit -m x" and
+		// "WT=" + worktree + " && WT=$(mktemp -d) && git -C \"$WT\" commit -m x" moved
+		// OUT to TestIntegration_PrimaryCommitInCommandVars's ACCEPTANCE 5 (pg2-70g51):
+		// an "&&"-chained `mktemp -d` binding IS now established, for reasons that do
+		// not apply to $(git rev-parse …)/`pwd` above — a `mktemp -d` directory cannot
+		// be the canonical clone REGARDLESS of its literal value, which
+		// selfCreatedTempDir proves structurally rather than by resolving it. The
+		// ";"-separated variant of the SAME command stays in this "never approves"
+		// list below (unchanged, still genuinely unestablished).
+		"WT=$(mktemp -d); git -C \"$WT\" commit -m x",
 		"WT=`pwd` && git -C \"$WT\" commit -m x",
 		"WT=" + worktree + " git -C \"$WT\" commit -m x",
 		"WT=" + worktree + " | cat && git -C \"$WT\" commit -m x",
-		"WT=" + worktree + " && WT=$(mktemp -d) && git -C \"$WT\" commit -m x",
 		"OTHER=" + worktree + " && git -C \"$WT\" commit -m x",
 		"WT=" + worktree + " && git -C \"${WT:-/tmp}\" commit -m x",
 		"WT=" + worktree + " && git -C \"$WTX\" commit -m x",

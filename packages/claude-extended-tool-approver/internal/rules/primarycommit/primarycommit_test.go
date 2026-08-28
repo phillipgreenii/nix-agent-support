@@ -416,6 +416,161 @@ func TestDirNamedByCommand(t *testing.T) {
 	}
 }
 
+// TestPrimaryCommit_SelfCreatedDir covers pg2-70g51's literal-but-missing-dir shape
+// (pg2-69i0d's row 426677): a `mkdir`/`git init` leaf earlier in the SAME command
+// creates the exact directory a `git commit` targets, currently ABSENT from disk
+// (simulated here, as TestPrimaryCommit_MissingDir does, via a stubResolver returning
+// ErrDirNotExist unconditionally). The positive rows are "&&"-chained end to end, so
+// the creating leaf's success is REQUIRED for the commit to run at all; the negative
+// rows swap in a ";" (or a newline) between the creator and the rest, reproducing row
+// 426677's own shape exactly — a FAILED creator there falls through to a commit that
+// could land wherever the shell already was, so those rows MUST keep the pre-existing
+// fail-safe verdict.
+//
+// Every row uses `-C` on the commit leaf, DELIBERATELY, never a bare `cd`: this rule
+// (unlike the engine) does not itself model a `cd`'s effect on a LATER leaf's cwd — the
+// engine's per-leaf cwd advancement is a different layer entirely (dirresolve.go's own
+// DIRECTORY RESOLUTION comment) — so a raw Evaluate() call here always resolves every
+// leaf against the SAME input.CWD regardless of an earlier `cd`. The "cd" spelling of
+// both the positive and negative case IS covered, with the real engine's cwd modeling
+// in play, by TestIntegration_PrimaryCommitSelfCreatedDir (internal/engine).
+func TestPrimaryCommit_SelfCreatedDir(t *testing.T) {
+	missing := func() *stubResolver { return &stubResolver{canonicalErr: ErrDirNotExist} }
+
+	tests := []struct {
+		name    string
+		command string
+		want    hookio.Decision
+	}{
+		{
+			name:    "POSITIVE: mkdir && -C into it && commit",
+			command: `mkdir -p /scratch/wt && git -C /scratch/wt init -q && git -C /scratch/wt commit -q -m seed`,
+			want:    hookio.NoOpinion,
+		},
+		{
+			name:    "POSITIVE: git init <dir> (no mkdir) && -C into it && commit",
+			command: `git init -q /scratch/wt && git -C /scratch/wt commit -q -m seed`,
+			want:    hookio.NoOpinion,
+		},
+		{
+			name: "NEGATIVE: row 426677's own shape — ';'/newline separated, mkdir " +
+				"then a SEPARATE line",
+			command: "mkdir -p /scratch/wt; git -C /scratch/wt init -q\n" +
+				"git -C /scratch/wt commit -q -m seed",
+			want: hookio.Ask,
+		},
+		{
+			name:    "NEGATIVE: no creating leaf at all, just an unrelated -C",
+			command: `git -C /scratch/wt status; git -C /scratch/wt commit -q -m seed`,
+			want:    hookio.Ask,
+		},
+		{
+			name:    "NEGATIVE: mkdir targets a DIFFERENT directory",
+			command: `mkdir -p /scratch/other && git -C /scratch/wt init -q && git -C /scratch/wt commit -q -m seed`,
+			want:    hookio.Ask,
+		},
+		{
+			// NO ";"/newline anywhere — this is ONE *syntax.Stmt, entirely "&&"/"||"
+			// (left-associative, same precedence): `((mkdir || true) && init) &&
+			// commit`. Without the "||"-anywhere-poisons-the-whole-statement rule
+			// (cmdparse's AndChainID doc, containsOrStmt), a naive "just continue
+			// through every '&&'" scheme would still relate mkdir to the commit here
+			// — this row is what catches THAT mistake, not the ";" one above.
+			name:    "NEGATIVE: an '||' anywhere in the statement disables tracking entirely",
+			command: `mkdir -p /scratch/wt || true && git -C /scratch/wt init -q && git -C /scratch/wt commit -q -m seed`,
+			want:    hookio.Ask,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			in := &hookio.HookInput{
+				ToolName: "Bash", ToolInput: mustJSON(tt.command), CWD: "/repo", PermissionMode: "default",
+			}
+			if got := hookio.Verdict(New(missing()).Evaluate(in)).Decision; got != tt.want {
+				t.Errorf("Decision = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestPrimaryCommit_SelfCreatedTempDir covers pg2-70g51's var-opaque shape (pg2-69i0d's
+// rows 427912/428023): a variable bound, earlier in the SAME command, to nothing but
+// the output of `mktemp -d` — unresolvable to a literal path, but PROVABLY not the
+// canonical clone regardless of that path's actual value, since mktemp always creates
+// a fresh, session-unique directory. The positive rows are "&&"-chained end to end; the
+// negative rows swap in a ";" so the mktemp call's own success is no longer required
+// for the commit to run, reproducing the SAME hazard TestPrimaryCommit_SelfCreatedDir's
+// negative rows do for the literal shape.
+//
+// Every row uses `-C` on the commit leaf, for the SAME reason
+// TestPrimaryCommit_SelfCreatedDir's own doc gives: this rule does not itself model a
+// `cd`'s effect on a LATER leaf's cwd, so a bare `cd "$d"` here would leave cwd at
+// input.CWD unchanged (never actually advancing to "$d"'s value, resolved or not) and
+// exercise a DIFFERENT, uninteresting code path instead. The "cd" spelling, with the
+// real engine's cwd modeling in play, is covered by
+// TestIntegration_PrimaryCommitInCommandVars's ACCEPTANCE 5 block (internal/engine).
+func TestPrimaryCommit_SelfCreatedTempDir(t *testing.T) {
+	tests := []struct {
+		name    string
+		command string
+		want    hookio.Decision
+	}{
+		{
+			name:    "POSITIVE: mktemp -d assignment && -C into it && commit",
+			command: `d=$(mktemp -d) && git -C "$d" commit -q -m seed`,
+			want:    hookio.NoOpinion,
+		},
+		{
+			name:    "POSITIVE: braced reference",
+			command: `d=$(mktemp -d) && git -C "${d}" commit -q -m seed`,
+			want:    hookio.NoOpinion,
+		},
+		{
+			name:    "POSITIVE: an intervening git-init leaf stays in the same chain",
+			command: `d=$(mktemp -d) && git -C "$d" init -q && git -C "$d" commit -q -m seed`,
+			want:    hookio.NoOpinion,
+		},
+		{
+			name: "NEGATIVE: rows 427912/428023's own shape — ';'/newline separated",
+			command: "d=$(mktemp -d);\n" +
+				"git -C \"$d\" init -q && git -C \"$d\" commit -q -m seed --allow-empty",
+			want: hookio.Ask,
+		},
+		{
+			name:    "NEGATIVE: ';'-separated, direct -C spelling",
+			command: `d=$(mktemp -d); git -C "$d" commit -q -m seed`,
+			want:    hookio.Ask,
+		},
+		{
+			// Mirrors TestPrimaryCommit_SelfCreatedDir's own "||"-anywhere-poisons row:
+			// still ONE *syntax.Stmt, no ";"/newline at all.
+			name:    "NEGATIVE: an '||' anywhere in the statement disables tracking entirely",
+			command: `d=$(mktemp -d) || true && git -C "$d" commit -q -m seed`,
+			want:    hookio.Ask,
+		},
+		{
+			name:    "NEGATIVE: a DIFFERENT variable is not this one's binding",
+			command: `d=$(mktemp -d) && git -C "$other" commit -q -m seed`,
+			want:    hookio.Ask,
+		},
+		{
+			name:    "NEGATIVE: not a mktemp -d value at all",
+			command: `d=$(git rev-parse --show-toplevel) && git -C "$d" commit -q -m seed`,
+			want:    hookio.Ask,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			in := &hookio.HookInput{
+				ToolName: "Bash", ToolInput: mustJSON(tt.command), CWD: "/repo", PermissionMode: "default",
+			}
+			if got := hookio.Verdict(New(canonMain()).Evaluate(in)).Decision; got != tt.want {
+				t.Errorf("Decision = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestPrimaryCommit_NilResolver(t *testing.T) {
 	got := hookio.Verdict(New(nil).Evaluate(&hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON("git commit"), CWD: "/repo", PermissionMode: "bypassPermissions"})).Decision
 	if got != hookio.NoOpinion {

@@ -586,6 +586,30 @@ func plainVarRef(s string, at int) (name string, end int, ok bool) {
 	return name, i, true
 }
 
+// PlainVarRefWhole reports whether token is EXACTLY ONE `$NAME`/`${NAME}` parameter
+// reference — the WHOLE string, with no literal prefix or suffix glued alongside it —
+// returning NAME. It is plainVarRef's contract (only the two forms whose value IS the
+// variable and nothing else) applied to a whole token instead of a scan position, for
+// a caller that has already isolated ONE path component (dirresolve.go's
+// unresolvableToken, whose own doc names token as the offending component "as
+// written") and needs to know whether that entire component is a bare variable
+// reference before treating the variable's BINDING — rather than its (unknowable)
+// literal value — as safety-relevant (primarycommit's fresh-temp-dir recognition,
+// pg2-70g51). A glued literal (`${d}extra`, `x$d`) reports ok=false: `x$d` is not
+// even a reference to "d" at all (bash reads the longest valid identifier, so it
+// names variable "dx"), and `${d}extra` genuinely does reference "d" but with a
+// literal suffix this function's caller must not silently ignore.
+func PlainVarRefWhole(token string) (name string, ok bool) {
+	if token == "" || token[0] != '$' {
+		return "", false
+	}
+	name, end, ok := plainVarRef(token, 0)
+	if !ok || end != len(token) {
+		return "", false
+	}
+	return name, true
+}
+
 func isVarNameByte(c byte, first bool) bool {
 	if c == '_' || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') {
 		return true

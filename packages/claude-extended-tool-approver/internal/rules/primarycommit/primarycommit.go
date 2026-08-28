@@ -102,6 +102,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmdparse"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
@@ -214,7 +215,13 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		// reads them off the leaves before this one. Empty in the ordinary case, and an
 		// empty environment resolves nothing — every verdict is then the one this rule
 		// reached before the environment existed.
-		f := r.inspectCommit(pc, input.CWD, LeafVars(input.InCommandVars, leaves, i), true, rootLeaves)
+		//
+		// tempDirVars is LeafVars' sibling for the fresh-temp-dir MARKER (pg2-70g51,
+		// LeafTempDirVars's own doc) — consulted only when the directory resolution
+		// below is Unresolved, to recognize a `d=$(mktemp -d) && cd "$d" && … commit`
+		// shape whose target CANNOT be the canonical clone regardless of the literal
+		// path mktemp produced.
+		f := r.inspectCommit(pc, input.CWD, LeafVars(input.InCommandVars, leaves, i), LeafTempDirVars(input.InCommandTempDirVars, leaves, i), true, rootLeaves)
 		silentlyAccepts := AutoApprovingModes[input.PermissionMode]
 		switch f.kind {
 		case findingUnresolved:
@@ -362,7 +369,12 @@ func (f commitFinding) missingDirReason(deny bool) string {
 // re-parsed and each git command in it checked with expansion OFF (single-pass, which
 // also bounds recursion). A resolver error, a linked worktree, or being off primary all
 // yield findingNone — the fail-open posture the worktree discipline relies on.
-func (r *Rule) inspectCommit(pc cmdparse.ParsedCommand, cwd string, vars map[string]string, expandAliases bool, rootLeaves []cmdparse.ParsedCommand) commitFinding {
+//
+// tempDirVars is LeafTempDirVars's result at pc's position — consulted only from the
+// Unresolved branch below (pg2-70g51) — and, like vars, is threaded UNCHANGED into the
+// alias-body recursion: an alias body is part of the same command, so a variable (or
+// fresh-temp-dir marker) the command established is in scope inside it too.
+func (r *Rule) inspectCommit(pc cmdparse.ParsedCommand, cwd string, vars, tempDirVars map[string]string, expandAliases bool, rootLeaves []cmdparse.ParsedCommand) commitFinding {
 	chdirs, subcmd, rest := cmdparse.GitInvocation(pc.Args)
 	res := ResolveDir(cwd, chdirs, vars)
 	dir := res.Dir
@@ -379,7 +391,7 @@ func (r *Rule) inspectCommit(pc cmdparse.ParsedCommand, cwd string, vars map[str
 				// variable the command established is in scope inside it. scope stays
 				// the OUTER expression: the alias body is not itself part of the root
 				// expression's text, so there is nothing more specific to hand down.
-				if f := r.inspectCommit(sub, dir, vars, false, rootLeaves); f.kind != findingNone {
+				if f := r.inspectCommit(sub, dir, vars, tempDirVars, false, rootLeaves); f.kind != findingNone {
 					return f
 				}
 			}
@@ -396,6 +408,17 @@ func (r *Rule) inspectCommit(pc cmdparse.ParsedCommand, cwd string, vars map[str
 	// only ever governs a commit), and the resolver's walk-up is precisely what turns an
 	// unresolvable path into a confident wrong answer, so it must not run on one.
 	if res.Unresolved() {
+		// pg2-70g51: an UNRESOLVABLE token is not ALWAYS a dead end. `d=$(mktemp -d) &&
+		// cd "$d" && … commit` cannot be resolved to a literal path (mktemp's output is
+		// unknowable statically), but the shape proves the target CANNOT be the
+		// canonical clone regardless of what that path turns out to be — a `mktemp -d`
+		// directory is freshly created and session-unique by construction, and pc
+		// executing GUARANTEES (via an unbroken "&&" chain, never merely "somewhere
+		// earlier in the compound") that the mktemp call ran and succeeded. See
+		// selfCreatedTempDir's own doc for the full argument and its "&&"-vs-";" hazard.
+		if selfCreatedTempDir(pc, res.Token, tempDirVars, rootLeaves) {
+			return commitFinding{}
+		}
 		return commitFinding{kind: findingUnresolved, token: res.Token, source: res.Source}
 	}
 	canonical, err := r.resolver.IsCanonical(dir)
@@ -421,6 +444,18 @@ func (r *Rule) inspectCommit(pc cmdparse.ParsedCommand, cwd string, vars map[str
 	// a synthetic, nonexistent CWD as shorthand for "not inside any repo at all"; those
 	// must keep the ordinary fail-open verdict below.
 	if errors.Is(err, ErrDirNotExist) && dirNamedByCommand(chdirs, rootLeaves) {
+		// pg2-70g51: dirNamedByCommand is coarse BY DESIGN — "some cd/pushd leaf
+		// happened somewhere in the compound" — which is exactly what makes a blind
+		// "an earlier leaf created this directory, therefore allow" unsafe: row
+		// 426677's shape (`rm -rf "$D"; mkdir -p "$D"; cd "$D"` on one line, `git
+		// init -q …` on the next, ";"/newline-separated) lets a FAILED mkdir fall
+		// through to a `cd` that ALSO fails and leaves the cwd wherever the shell
+		// already was — possibly the canonical clone. selfCreatedDir additionally
+		// requires an unbroken "&&" chain from the creating leaf to pc, so that
+		// failure mode still reaches the fail-safe verdict below unchanged.
+		if selfCreatedDir(pc, dir, cwd, vars, rootLeaves) {
+			return commitFinding{}
+		}
 		return commitFinding{kind: findingDirMissing, dir: dir, chosen: res.Chosen}
 	}
 	if err != nil || !canonical {
@@ -469,6 +504,199 @@ func dirNamedByCommand(chdirs []string, rootLeaves []cmdparse.ParsedCommand) boo
 		if leaf.Executable == "cd" || leaf.Executable == "pushd" {
 			return true
 		}
+	}
+	return false
+}
+
+// ==================== pg2-70g51: SELF-CREATED-DIRECTORY RECOGNITION ====================
+//
+// Both selfCreatedDir and selfCreatedTempDir answer the SAME underlying question —
+// "does pc executing GUARANTEE that an earlier leaf, which created this exact
+// directory, ran and succeeded?" — for the two distinct shapes pg2-69i0d's analysis
+// separated: a LITERAL target that simply does not exist YET (selfCreatedDir, the
+// findingDirMissing/ErrDirNotExist branch), and a genuinely UNRESOLVABLE one bound to a
+// fresh `mktemp -d` (selfCreatedTempDir, the findingUnresolved branch). Both rely on
+// cmdparse.ParsedCommand.AndChainID (that field's own doc has the full "&&"-vs-";"
+// argument) rather than dirNamedByCommand's coarser "some cd/pushd happened somewhere"
+// scan: a chain id is required precisely because that coarser scan is UNSAFE to invert
+// into "therefore allow" (see inspectCommit's citation of row 426677's ";"-separated
+// shape).
+
+// leafIndex finds pc's own position within rootLeaves — the SAME Parse call's leaf set
+// AndChainID/PipelineID are scoped to (their own docs) — matching on Raw plus its
+// pipeline coordinates, which are unique per position within one parse. -1 when pc
+// cannot be found: rootLeaves came from a DIFFERENT parse call (inspectCommit's own
+// shell-alias-body recursion, which re-parses the alias body on its own) or the rare
+// heredoc-bleed re-parse engine.go's parsedLeafFor documents. Every caller here treats
+// -1 as "cannot establish order", the pre-existing fail-safe outcome.
+func leafIndex(rootLeaves []cmdparse.ParsedCommand, pc cmdparse.ParsedCommand) int {
+	for i, l := range rootLeaves {
+		if l.Raw == pc.Raw && l.PipelineID == pc.PipelineID && l.PipelineIndex == pc.PipelineIndex {
+			return i
+		}
+	}
+	return -1
+}
+
+// selfCreatedDir reports whether dir — the literal directory ResolveDir chose for pc,
+// currently ABSENT from disk (the caller only ever reaches this from the
+// ErrDirNotExist branch) — is the target of a `mkdir`/`git init` leaf that appears
+// EARLIER than pc in rootLeaves and shares pc's AndChainID: reachable from that leaf by
+// an unbroken "&&", so pc executing GUARANTEES that leaf ran and succeeded. For a
+// `mkdir`/`git init` target that means dir did not exist before THIS command ran (both
+// commands FAIL if asked to create a directory that already exists in the shape this
+// function recognizes — see mkdirTarget/gitInitTarget), and a directory that did not
+// exist a moment ago cannot be the pre-existing canonical clone, whatever literal path
+// it is. cwd/vars are pc's own in-command environment (the same ones ResolveDir used
+// for pc itself), reused to resolve a creator leaf's own — possibly var-named or
+// relative — target on equal footing.
+func selfCreatedDir(pc cmdparse.ParsedCommand, dir, cwd string, vars map[string]string, rootLeaves []cmdparse.ParsedCommand) bool {
+	if pc.AndChainID == 0 {
+		return false
+	}
+	pcIdx := leafIndex(rootLeaves, pc)
+	if pcIdx < 0 {
+		return false
+	}
+	for i := 0; i < pcIdx; i++ {
+		leaf := rootLeaves[i]
+		if leaf.AndChainID != pc.AndChainID {
+			continue
+		}
+		if target, ok := creatorTarget(leaf, cwd, vars); ok && target == dir {
+			return true
+		}
+	}
+	return false
+}
+
+// creatorTarget reports the directory leaf would create, for the narrow set of
+// commands this function recognizes as directory-creating (pg2-70g51's acceptance
+// criteria): `mkdir` or `git init`. "", false for anything else, INCLUDING a shape this
+// function cannot confidently parse (a multi-target mkdir, a `git init` with an
+// ambiguous flag/positional mix) — the caller's existing fail-safe default (Ask/Reject)
+// is exactly what a command in one of those shapes gets, unchanged.
+func creatorTarget(leaf cmdparse.ParsedCommand, cwd string, vars map[string]string) (string, bool) {
+	switch filepath.Base(leaf.Executable) {
+	case "mkdir":
+		return mkdirTarget(leaf, cwd, vars)
+	case "git":
+		return gitInitTarget(leaf, cwd, vars)
+	}
+	return "", false
+}
+
+// mkdirTarget recognizes `mkdir [flags] <target>` with EXACTLY ONE non-flag argument
+// — deliberately narrow: a multi-target `mkdir a b` is left unrecognized (found != 1)
+// rather than guessed at, since nothing here needs to widen past pg2-70g51's own
+// reproduction shape (`mkdir -p "$D"`). `-p`/`--parents` is not required: whether or
+// not it is given, `dir` not existing a moment ago (ErrDirNotExist, the ONLY branch
+// that calls this) means mkdir is about to create it fresh either way — `-p` only
+// changes what happens when the target ALREADY exists, which is precisely the case
+// ErrDirNotExist already rules out.
+func mkdirTarget(leaf cmdparse.ParsedCommand, cwd string, vars map[string]string) (string, bool) {
+	var target string
+	found := 0
+	for _, a := range leaf.Args {
+		if strings.HasPrefix(a, "-") {
+			continue
+		}
+		found++
+		target = a
+	}
+	if found != 1 {
+		return "", false
+	}
+	return resolveTargetArg(target, cwd, vars)
+}
+
+// gitInitTarget recognizes `git init [flags] <target>`: EXACTLY ONE non-flag
+// positional argument after `init`, and — DELIBERATELY, this is NOT the same
+// narrowness as mkdirTarget's — NO `-C` on this same invocation at all. `git -C <dir>
+// init` does NOT create `<dir>`: `-C` changes directory BEFORE git runs anything, so
+// it REQUIRES the directory to already exist and fails otherwise, exactly like `cd`
+// does; only a POSITIONAL `git init <newdir>` argument creates the directory (relative
+// to whatever `-C`/cwd already established) when it is missing. Treating a `-C`-only
+// invocation as a creator would therefore be a genuine safety bug, not merely an
+// overly narrow one. A bare `git init`/`git init -q` (pg2-70g51's own reproduction:
+// the directory is already created by an earlier `mkdir`, so `git init` alone need
+// not itself be a creator) has no qualifying positional target and reports ok=false,
+// leaving mkdir to carry that shape.
+func gitInitTarget(leaf cmdparse.ParsedCommand, cwd string, vars map[string]string) (string, bool) {
+	chdirs, subcmd, rest := cmdparse.GitInvocation(leaf.Args)
+	if subcmd != "init" || len(chdirs) > 0 {
+		return "", false
+	}
+	var target string
+	found := 0
+	for _, a := range rest {
+		if strings.HasPrefix(a, "-") {
+			continue
+		}
+		found++
+		target = a
+	}
+	if found != 1 {
+		return "", false
+	}
+	return resolveTargetArg(target, cwd, vars)
+}
+
+// resolveTargetArg expands arg against vars (cmdparse.ExpandInCommand, the SAME
+// literal-value scan ResolveDir itself uses) and joins it onto cwd exactly as
+// effectiveDir does for a `-C` chain, so a var-named or relative creator target
+// compares against ResolveDir's own `dir` on equal footing. ok=false when arg is not
+// fully literal (an unbound name, a `$(…)`, a glob, …) — the caller's match then simply
+// fails, another instance of the existing fail-safe default.
+func resolveTargetArg(arg, cwd string, vars map[string]string) (string, bool) {
+	lit, ok := cmdparse.ExpandInCommand(arg, vars)
+	if !ok {
+		return "", false
+	}
+	return effectiveDir(cwd, []string{lit}), true
+}
+
+// selfCreatedTempDir reports whether token — the text that defeated ResolveDir's
+// static resolution (res.Token) — is a BARE `$NAME`/`${NAME}` reference to a shell
+// variable this SAME command bound, earlier, to nothing but the output of a fresh
+// `mktemp -d`/`mktemp --directory` (cmdparse.IsFreshTempDirAssignment, via
+// tempDirVars — LeafTempDirVars's result), AND that binding is reachable from pc by an
+// unbroken "&&" (pg2-70g51): pc executing GUARANTEES the mktemp call ran and succeeded.
+// In that shape the directory mktemp produced is, by construction, freshly created and
+// session-unique — it cannot be the canonical clone REGARDLESS of the literal path it
+// turned out to be, so this function never needs (and cannot obtain) that literal
+// value to authorize the finding.
+//
+// tempDirVars answers ONLY "is name bound to a fresh temp dir SOMEWHERE visible from
+// pc" (subshell-scope-aware, revocation-aware — cmdparse.InCommandTempDirVars's own
+// doc), not "which leaf bound it", so the "&&"-chain half re-derives the binding LEAF
+// by re-running that same, already-correct scan at each earlier position and watching
+// for name to newly appear — cheaper and safer than re-deriving shellVarWrites'
+// assignment-builtin/prefix-assignment rules a second time here.
+func selfCreatedTempDir(pc cmdparse.ParsedCommand, token string, tempDirVars map[string]string, rootLeaves []cmdparse.ParsedCommand) bool {
+	if pc.AndChainID == 0 {
+		return false
+	}
+	name, ok := cmdparse.PlainVarRefWhole(token)
+	if !ok {
+		return false
+	}
+	if _, known := tempDirVars[name]; !known {
+		return false
+	}
+	pcIdx := leafIndex(rootLeaves, pc)
+	if pcIdx < 0 {
+		return false
+	}
+	before := cmdparse.InCommandTempDirVars(rootLeaves, 0)
+	for j := 0; j < pcIdx; j++ {
+		after := cmdparse.InCommandTempDirVars(rootLeaves, j+1)
+		_, was := before[name]
+		_, now := after[name]
+		if now && !was && rootLeaves[j].AndChainID == pc.AndChainID {
+			return true
+		}
+		before = after
 	}
 	return false
 }
