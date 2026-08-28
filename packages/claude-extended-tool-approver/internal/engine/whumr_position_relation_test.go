@@ -24,7 +24,7 @@
 // tree (buildFullEngine, cwd=/Users/testuser/workspace/my-project):
 //
 //	echo $(cat /etc/shadow)              abstain   safe-commands: cat references unknown path
-//	X=$(cat /etc/shadow) echo hi          ask       env var value contains an unevaluated/unsafe expression: X
+//	X=$(cat /etc/shadow) echo hi          reject    value is unverifiable and stays so however rephrased or run. Use a literal: X
 //
 // Same shape for `cat /etc/passwd`, `head -1 /etc/shadow`, `wc -l < /etc/shadow`,
 // `cat ~someuser/notes.txt`, `cat /Users/otheruser/notes.txt` — any Delegated body

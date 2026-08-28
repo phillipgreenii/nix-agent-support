@@ -1400,6 +1400,15 @@ func pipeRelayHeredocCleared(pc cmdparse.ParsedCommand, leaves []cmdparse.Parsed
 // assignment position's existing abstain — the two positions now agree by
 // both landing on abstain, not by command position being raised to Ask.
 //
+// pg2-kxmpe (operator ruling, 2026-08-28) raises what remains of this floor —
+// the SubstitutionRefused branch above, and envvars.go's own genuine-refusal
+// `default:` fallback — from Ask to Reject: neither case becomes approvable
+// by retrying variations of the same shape, so holding it at a mere Ask only
+// invited spinning on denied rephrasings. The Cleared+Exhaustion narrowing
+// pg2-g4jet made just above is UNCHANGED by this: it stays at abstain, not
+// Reject, because recursion there has no opinion to escalate in the first
+// place.
+//
 // Delegated bodies never reach this floor — see the call site's own
 // "DELEGATED NEVER FLOORS HERE" comment for why such a body must stay governed
 // by recursion alone, in both directions. Folded through hookio.MostRestrictive
@@ -1407,10 +1416,23 @@ func pipeRelayHeredocCleared(pc cmdparse.ParsedCommand, leaves []cmdparse.Parsed
 // raise a verdict, never mask a Reject a sibling substitution or the leaf's
 // own rules already earned.
 func commandSubstitutionFloor(body string) hookio.RuleResult {
+	// pg2-kxmpe review finding: an earlier draft of this text suggested "run the
+	// command directly instead" as a safe fallback. It is NOT — a bare top-level
+	// leaf that exhausts (no rule claims it) resolves to NoOpinion, not this same
+	// Reject, so that advice was a genuine bypass of the floor it was attached
+	// to. Removed; only the `-C`-flag suggestion survives, because THAT names a
+	// different, independently-verified shape rather than re-running the SAME
+	// unverified content through a weaker code path.
 	return hookio.RuleResult{
-		Decision: hookio.Ask,
-		Reason:   "command substitution not positively cleared by both gates (static allowlist and full-engine recursion): " + body,
-		Module:   "engine",
+		Decision: hookio.Reject,
+		Reason: "command substitution denied — its inner command could not be verified safe by either the " +
+			"static allowlist or full rule-chain recursion, and rephrasing it or running it standalone will " +
+			"not make it safer (this is a deliberate stop, not a temporary one — pg2-kxmpe). If this is a " +
+			"`cd DIR && cmd` compound, check whether cmd has its own working-directory flag (e.g. " +
+			"`git -C DIR ...`) — that is a different, independently-verifiable shape, not a workaround of " +
+			"this one. Otherwise this genuinely cannot be automatically approved; tell the user what you " +
+			"needed and move on to other work rather than retrying variations: " + body,
+		Module: "engine",
 	}
 }
 
@@ -1540,8 +1562,7 @@ func (e *Engine) foldSubstitutionScan(subs []cmdparse.Substitution, normalized s
 		// no opinion to add either way, and flooring it would punish the seam for
 		// correctly declining to hold one.
 		if sub.IsCommandSubstitution() {
-			switch cmdparse.ClassifySubstitutionBody(sub.Body) {
-			case cmdparse.SubstitutionRefused:
+			if cmdparse.ClassifySubstitutionBody(sub.Body) == cmdparse.SubstitutionRefused {
 				subResult = hookio.MostRestrictive(subResult, commandSubstitutionFloor(sub.Body))
 			}
 		}

@@ -538,8 +538,9 @@ func TestEngine_EvaluateExpression_SubstitutionRecursion(t *testing.T) {
 		// An unowned command substitution is exactly the EXHAUSTION shape pg2-whumr's
 		// commandSubstitutionFloor raises (operator ruling pg2-gwp57, ADR 0048):
 		// "unowned" is on no static allowlist, so the floor demotes the outer approve
-		// to a decisive Ask rather than the pre-pg2-whumr NoOpinion.
-		{"unowned inner demotes to a decisive ask", "echo $(unowned thing)", hookio.Ask},
+		// to a decisive verdict rather than the pre-pg2-whumr NoOpinion — Reject as of
+		// pg2-kxmpe (2026-08-28), which flips this floor from Ask to Reject.
+		{"unowned inner demotes to a decisive reject", "echo $(unowned thing)", hookio.Reject},
 		// Nested: the inner rm surfaces on re-evaluation of the outer body.
 		{"nested rm surfaces", "echo $(cat $(rm -rf /))", hookio.Reject},
 		{"process sub nested in cmd sub", "echo $(cat <(rm -rf /))", hookio.Reject},

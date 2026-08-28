@@ -112,9 +112,10 @@ func TestIntegration_NestedSubstitutionInCommandLiteralResolves(t *testing.T) {
 // not a sole simple command. internal/cmdparse/parser.go's ClassifySubstitutionBody
 // (via soleSimpleCommandLeaf) classifies ANY non-sole-simple-command body
 // SubstitutionRefused, and engine.go's foldSubstitutionScan floors a Refused body's
-// contribution to commandSubstitutionFloor's Ask UNCONDITIONALLY (ADR 0048 / operator
-// ruling pg2-gwp57's "both gates" requirement: recursion approving a Refused body must
-// never leak an Approve through). That floor is INDEPENDENT of variable resolution —
+// contribution to commandSubstitutionFloor's decisive verdict UNCONDITIONALLY (ADR
+// 0048 / operator ruling pg2-gwp57's "both gates" requirement, now Reject rather than
+// Ask per pg2-kxmpe, 2026-08-28: recursion approving a Refused body must never leak an
+// Approve through). That floor is INDEPENDENT of variable resolution —
 // it fires for `cat /literal/path || echo running` exactly as it fires for
 // `cat $S/full2.done || echo running` — so this bead's fix does not and MUST NOT move
 // this command's outer verdict to Approve; doing so would require loosening the
@@ -125,10 +126,10 @@ func TestIntegration_NestedSubstitutionInCommandLiteralResolves(t *testing.T) {
 // leaf's own judgment: cat's own reason for not clearing must no longer be the
 // unresolved-variable refusal ("has a dynamically-expanded path arg") — that leaf now
 // resolves $S and is judged safe on its own — so the ONLY thing left holding the outer
-// verdict at Ask is the ADR 0048 floor's own reason text, not a residual variable-
+// verdict at Reject is the ADR 0048 floor's own reason text, not a residual variable-
 // resolution failure. A regression that reintroduced the propagation gap would still
-// show "ask" here (masked by the ADR 0048 floor), which is exactly why the reason text,
-// not just the Decision, is asserted.
+// show "reject" here (masked by the ADR 0048 floor), which is exactly why the reason
+// text, not just the Decision, is asserted.
 func TestIntegration_NestedSubstitutionOrCombinatorInnerLeafResolves(t *testing.T) {
 	t.Setenv("WORKSPACE_ROOT", "/Users/testuser/workspace")
 	projectRoot := "/Users/testuser/workspace/my-project"
@@ -137,22 +138,25 @@ func TestIntegration_NestedSubstitutionOrCombinatorInnerLeafResolves(t *testing.
 
 	cmd := `S=` + projectRoot + `; echo "done: $(cat $S/full2.done 2>/dev/null || echo running)"`
 	got := eng.EvaluateHook(&hookio.HookInput{ToolName: "Bash", CWD: cwd, ToolInput: makeBashJSON(cmd)})
-	if got.Decision != hookio.Ask {
-		t.Fatalf("%q got %v (%s: %s); want Ask — the ADR 0048 \"both gates\" floor for a non-sole-simple-command substitution body is unrelated to this bead and must still apply",
+	// pg2-kxmpe (2026-08-28) flips the ADR 0048 floor's own Decision from Ask to
+	// Reject — this test's Decision expectation moves with it; the point being
+	// pinned here (variable resolution vs. combinator-shape refusal) is unaffected.
+	if got.Decision != hookio.Reject {
+		t.Fatalf("%q got %v (%s: %s); want Reject — the ADR 0048 \"both gates\" floor for a non-sole-simple-command substitution body is unrelated to this bead and must still apply",
 			cmd, got.Decision, got.Module, got.Reason)
 	}
 	if strings.Contains(got.Reason, "dynamically-expanded") {
 		t.Errorf("%q reason %q still cites an unresolved variable; tc-5h6e's propagation fix should have resolved $S for the inner `cat` leaf, leaving only the ADR 0048 floor's own reason",
 			cmd, got.Reason)
 	}
-	if !strings.Contains(got.Reason, "not positively cleared by both gates") {
-		t.Errorf("%q reason %q does not name the ADR 0048 floor; want confirmation THAT mechanism (not variable resolution) is what still holds this at Ask",
+	if !strings.Contains(got.Reason, "could not be verified safe by either the static allowlist or full rule-chain recursion") {
+		t.Errorf("%q reason %q does not name the ADR 0048 floor; want confirmation THAT mechanism (not variable resolution) is what still holds this at Reject",
 			cmd, got.Reason)
 	}
 
 	// CONTROL: the identical body WITHOUT the `||` combinator — a sole simple command —
 	// is not subject to the ADR 0048 floor at all, and DOES reach Approve once $S
-	// resolves. This is what proves the Ask above is caused by the combinator shape,
+	// resolves. This is what proves the Reject above is caused by the combinator shape,
 	// not by some OTHER thing this bead's fix failed to reach.
 	controlCmd := `S=` + projectRoot + `; echo "done: $(cat $S/README.md)"`
 	controlGot := eng.EvaluateHook(&hookio.HookInput{ToolName: "Bash", CWD: cwd, ToolInput: makeBashJSON(controlCmd)})

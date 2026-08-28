@@ -66,19 +66,20 @@ func TestEnvVars_DynamicPathReadRelief_RealChain(t *testing.T) {
 			want: hookio.Approve,
 		},
 		{
-			name: "mixing a dynamic-path read with a mutating command WITHIN one substitution body still asks",
+			// pg2-kxmpe (2026-08-28) flips this fallback from Ask to Reject.
+			name: "mixing a dynamic-path read with a mutating command WITHIN one substitution body still denies",
 			cmd:  `out=$(cat "$p"; rm -rf /etc)`,
-			want: hookio.Ask,
+			want: hookio.Reject,
 		},
 		{
-			name: "mixing a dynamic-path read with a known-bad literal path ACROSS substitutions still asks",
+			name: "mixing a dynamic-path read with a known-bad literal path ACROSS substitutions still denies",
 			cmd:  `out=$(cat "$p")$(cat /etc/shadow)`,
-			want: hookio.Ask,
+			want: hookio.Reject,
 		},
 		{
-			name: "a capture whose only refusal is an unrelated category still asks",
+			name: "a capture whose only refusal is an unrelated category still denies",
 			cmd:  `out=$(rm -rf /etc)`,
-			want: hookio.Ask,
+			want: hookio.Reject,
 		},
 	}
 	for _, tt := range tests {

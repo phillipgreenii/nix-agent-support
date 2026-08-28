@@ -1487,10 +1487,24 @@ func (r *Rule) evaluateAssignment(ev cmdparse.EnvAssignment, input *hookio.HookI
 			// invariant — while no longer forcing the decisive Ask this bead relieves.
 			refused = true
 		default:
+			// pg2-kxmpe (2026-08-28): the reason text MUST stay actionable (say
+			// this won't clear by retrying, name an alternative) while staying
+			// within TestEnvVars_ReasonNeverLeaksCommandFragment's 160-byte bound.
+			// Review finding: an earlier draft said "run it separately" — that is
+			// NOT a safe alternative (a bare top-level leaf that exhausts resolves
+			// to NoOpinion, not this same Reject, so it was a real bypass of the
+			// check it was attached to). Removed; "use a literal" is the only
+			// suggestion left, since restructuring to a literal is genuinely
+			// re-verifiable, not a re-run of the same unverified content through a
+			// weaker path. Prefix length is measured against
+			// sanitizeReasonName's EMPIRICAL worst case (69 bytes, all-NUL input,
+			// see TestSanitizeReasonName_WorstCaseFitsReasonBudget), not the
+			// nominal maxReasonNameLen+"..." estimate, which undercounts it.
 			result = hookio.MostRestrictive(result, hookio.RuleResult{
-				Decision: hookio.Ask,
-				Reason:   "env var value contains an unevaluated/unsafe expression: " + sanitizeReasonName(ev.Name),
-				Module:   name,
+				Decision: hookio.Reject,
+				Reason: "value is unverifiable and stays so however rephrased or run. Use a literal: " +
+					sanitizeReasonName(ev.Name),
+				Module: name,
 			})
 			refused = true
 		}
