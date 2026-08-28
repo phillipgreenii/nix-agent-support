@@ -395,7 +395,9 @@ func TestGitDir_ReadWriteAsymmetry(t *testing.T) {
 	if write.Decision != hookio.Reject {
 		t.Errorf("write Decision = %v, want Reject", write.Decision)
 	}
-	if want := "refusing to write git metadata under .git/ directly — modify it through git commands only"; write.Reason != want {
+	if want := "refusing to write git metadata under .git/ directly — modify it through git commands only " +
+		"(permitted only when the effective git directory resolves under a temporary root — see " +
+		"docs/adr/0059-ceta-temp-repo-carve-out.md in phillipgreenii-nix-agent-support)"; write.Reason != want {
 		t.Errorf("write Reason = %q, want %q", write.Reason, want)
 	}
 }

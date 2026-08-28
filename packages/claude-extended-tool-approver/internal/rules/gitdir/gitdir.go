@@ -150,6 +150,7 @@ import (
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmdparse"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/temproot"
 )
 
 // direction is the access direction of a matched git-metadata path. The zero
@@ -229,6 +230,15 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 			rootLeaves = cmdparse.RootLeavesOf(input)
 		}
 		if dir, matched := bashAccessLeaves(leaves, scope, rootLeaves); matched {
+			if dir == dirWrite && tempFixtureCarveOutApplies(leaves, input.CWD) {
+				// pg2-yoqsr R1-R6: every repo-locating operand this leaf carries
+				// resolves under a temporary root, so this is the disposable-
+				// fixture case the guard exists to permit, not the real-repository
+				// write it exists to refuse. Fall through exactly as a leaf this
+				// rule never matched at all — the generic approvers registered
+				// after it decide, unchanged from today's non-.git traffic.
+				return hookio.NotApplicable()
+			}
 			return r.verdict(dir)
 		}
 	case "Read":
@@ -245,6 +255,12 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 			return hookio.RuleResult{}, fmt.Errorf("git-directory: read file_path: %w", err)
 		}
 		if isGitMetadataPath(path) {
+			if temproot.Under(temproot.ResolveOperand(input.CWD, path)) {
+				// Same carve-out as the Bash case, for Claude's own Write/Edit/
+				// MultiEdit/Delete tools: a `.git`-shaped path under a temporary
+				// root is a disposable fixture, not a real repository.
+				return hookio.NotApplicable()
+			}
 			return r.verdict(dirWrite)
 		}
 	case "Glob", "Grep":
@@ -271,8 +287,10 @@ func (r *Rule) verdict(d direction) (hookio.RuleResult, error) {
 	case dirWrite:
 		return hookio.RuleResult{
 			Decision: hookio.Reject,
-			Reason:   "refusing to write git metadata under .git/ directly — modify it through git commands only",
-			Module:   r.Name(),
+			Reason: "refusing to write git metadata under .git/ directly — modify it through git commands only " +
+				"(permitted only when the effective git directory resolves under a temporary root — see " +
+				"docs/adr/0059-ceta-temp-repo-carve-out.md in phillipgreenii-nix-agent-support)",
+			Module: r.Name(),
 		}, nil
 	case dirCopyOut:
 		return hookio.RuleResult{
@@ -351,12 +369,111 @@ func bashAccessLeaves(leaves []cmdparse.ParsedCommand, scopeText string, rootLea
 		// An assignment BINDS a path; it accesses nothing itself. Its direction is
 		// whatever the expression later does with the variable.
 		for _, ev := range pc.EnvVars {
-			if isGitMetadataPath(ev.Value) {
+			switch {
+			case isGitMetadataPath(ev.Value):
 				note(bindingDirection(ev.Name, pipes))
+			case temproot.CanonicalRepoLocatingEnvVars[ev.Name]:
+				// pg2-yoqsr SIDE-FINDING FIX: GIT_DIR / GIT_WORK_TREE /
+				// GIT_INDEX_FILE / GIT_COMMON_DIR / GIT_OBJECT_DIRECTORY redirect
+				// WHICH files a git invocation touches regardless of what their
+				// VALUE looks like — a bare repository's GIT_DIR is its own
+				// top-level directory, with no `.git` path COMPONENT anywhere in
+				// it for the branch above to anchor on, so `GIT_DIR=<bare-repo>`
+				// used to fall through this loop unmatched entirely (a bare repo
+				// is a real repo; the miss was in the guard, not the input). This
+				// branch is keyed on the variable NAME rather than the value's
+				// shape, so it catches a bare-repo value exactly as it does a
+				// non-bare one, and folds to the SAME fail-safe dirWrite the
+				// branch above reaches when nothing in scope consumes the
+				// binding — see Evaluate's carve-out check (temproot.Under) for
+				// the ONLY thing that relaxes this: every repo-locating operand
+				// on this leaf resolving under a temporary root.
+				note(dirWrite)
 			}
 		}
 	}
 	return dir, matched
+}
+
+// tempFixtureCarveOutApplies implements pg2-yoqsr's R1-R6 temp-root
+// carve-out. It re-gathers, from the SAME leaves bashAccessLeaves just
+// matched a `.git`-metadata WRITE against, every operand that participates
+// in resolving WHICH files that write actually touches, and reports true —
+// RELAX the refusal — only when at least one such operand was found AND
+// EVERY one of them resolves under a temporary root (temproot.Under).
+//
+// THE PARTICIPANTS, mirroring pg2-yoqsr's R2 enumeration exactly:
+//
+//   - a literal `.git`-shaped path OPERAND or REDIRECTION target (the same
+//     isGitMetadataPath match pathOperands/commandDirection already found —
+//     refusal #1's ordinary case, `cat > .git/config`);
+//   - the value of any of the five canonical repo-locating env vars,
+//     regardless of shape (the side-finding fix above), or of any OTHER
+//     variable bound to a `.git`-shaped value (the pre-existing binding
+//     case, `f=".../.git/config"`);
+//   - for a `git` leaf itself, its own `-C` / `--git-dir` / `--work-tree`
+//     pre-subcommand option values. cmdparse has ALREADY unwrapped any
+//     env/command/nice/... prefix by the time a rule sees pc.Executable
+//     (see cmdparse's unwrapCommand), so `env GIT_DIR=... git -C ... init` —
+//     this bead's own reproduction shape — reaches this exactly like the
+//     native `GIT_DIR=... git -C ... init` spelling: no separate unwrapping
+//     belongs here.
+//
+// MIXED REAL+TEMP — the R2 regression this bead exists to keep refused,
+// `GIT_DIR=<real-canonical>/.git git -C <tmpdir> config ...` — fails this on
+// the first non-temp participant (the GIT_DIR value) by construction: it is
+// never specially detected, it simply is not in the all-true fold. An empty
+// participant list (should not happen when the caller already matched a
+// write, but kept as an explicit fail-safe) never relaxes anything.
+func tempFixtureCarveOutApplies(leaves []cmdparse.ParsedCommand, cwd string) bool {
+	var participants []string
+	add := func(base string, value string) {
+		participants = append(participants, temproot.ResolveOperand(base, value))
+	}
+	for _, pc := range leaves {
+		base, _ := cmdparse.EffectiveExec(pc)
+		gitPorcelain := base == "git"
+		if gitPorcelain {
+			chdirs, _, _ := cmdparse.GitInvocation(pc.Args)
+			leafCwd := temproot.EffectiveDir(cwd, chdirs)
+			for _, c := range chdirs {
+				add(cwd, c)
+			}
+			gitDirs, workTrees := cmdparse.GitDirWorkTreeOperands(pc.Args)
+			for _, v := range gitDirs {
+				add(leafCwd, v)
+			}
+			for _, v := range workTrees {
+				add(leafCwd, v)
+			}
+		} else {
+			tokens, _ := pathOperands(pc)
+			for _, tok := range tokens {
+				if isGitMetadataPath(tok) {
+					add(cwd, tok)
+				}
+			}
+		}
+		for _, rd := range pc.Redirections {
+			if isGitMetadataPath(rd.Path) {
+				add(cwd, rd.Path)
+			}
+		}
+		for _, ev := range pc.EnvVars {
+			if temproot.CanonicalRepoLocatingEnvVars[ev.Name] || isGitMetadataPath(ev.Value) {
+				add(cwd, ev.Value)
+			}
+		}
+	}
+	if len(participants) == 0 {
+		return false
+	}
+	for _, p := range participants {
+		if !temproot.Under(p) {
+			return false
+		}
+	}
+	return true
 }
 
 // bindingDirection resolves the direction of a git-metadata path bound to the

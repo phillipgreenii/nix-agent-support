@@ -287,21 +287,111 @@ func TestIntegration_GitResetHardCompound_EmitsEmptyObject(t *testing.T) {
 	assertEmptyHookOutput(t, cmd, runHook(t, input))
 }
 
-// TestIntegration_GitResetRedirectedContext_StillAsks is the other half of the
-// reorder pg2-ur9zc made inside the reset arm. The redirect test now precedes the
-// `--hard` test, so a GIT_DIR-redirected reset keeps its always-prompting `ask` for
-// BOTH spellings. Asserted at the boundary rather than on Decision alone because the
-// defect it guards against is a verdict INVERSION — the hard form emitting the
-// weaker `{}` while the soft form emitted `ask` — and only the emitted output shows
-// the two side by side.
-func TestIntegration_GitResetRedirectedContext_StillAsks(t *testing.T) {
+// TestIntegration_TempRepoCarveOut_R2Regression is the boundary assertion for
+// pg2-yoqsr's R2 regression, which its own Verification section names
+// explicitly as something that "MUST NOT be dropped": GIT_DIR pointing at a
+// REAL, non-temp canonical repository, mixed with a `-C` that happens to be a
+// tempdir, MUST stay refused end to end — not merely at the gitdir rule's own
+// scope, but in what the hook actually EMITS, since a later rule in the
+// chain could in principle re-approve it. See
+// docs/adr/0059-ceta-temp-repo-carve-out.md in phillipgreenii-nix-agent-support.
+func TestIntegration_TempRepoCarveOut_R2Regression(t *testing.T) {
+	tmp := t.TempDir()
+	cmd := fmt.Sprintf(`GIT_DIR=/etc/pg2-yoqsr-real-integration/.git git -C %s config user.email t@example.com`, tmp)
+	input := fmt.Sprintf(`{"tool_name":"Bash","tool_input":{"command":%q},"cwd":"/tmp"}`, cmd)
+	result := runHook(t, input)
+	if d := getDecision(result); d != "deny" {
+		t.Errorf("cmd %q: decision = %q, want deny (R2 regression — GIT_DIR outranks -C; mixed real+temp MUST stay refused)", cmd, d)
+	}
+}
+
+// TestIntegration_TempRepoCarveOut_AllTempApproved is the positive boundary
+// case: the one participating operand (GIT_DIR) under a temporary root
+// reaches `allow` end to end, not merely a non-Reject verdict at one rule's
+// own scope.
+//
+// Deliberately NO `-C` here, even though this bead's OWN reproduction shapes
+// use one: adding one would additionally exercise the `git` rule's
+// PRE-EXISTING, UNRELATED `-C` zone check (chdirSafe, via internal/patheval),
+// which — confirmed reproducing identically on an unmodified binary —
+// recognises `/private/tmp/**` as writable but NOT `$TMPDIR`'s
+// `/private/var/folders/**` (where `t.TempDir()` lands on this machine), and
+// would demote this test's Approve to Abstain for a reason that has nothing
+// to do with pg2-yoqsr's carve-out. That gap is real but out of this bead's
+// scope (R1-R6 name the gitdir/git REFUSALS, never patheval's zone model);
+// tracking it is a separate bead's job. GIT_DIR alone is sufficient to prove
+// the carve-out's positive case end to end.
+func TestIntegration_TempRepoCarveOut_AllTempApproved(t *testing.T) {
+	tmp := t.TempDir()
+	cmd := fmt.Sprintf(`GIT_DIR=%s/.git git config user.email t@example.com`, tmp)
+	input := fmt.Sprintf(`{"tool_name":"Bash","tool_input":{"command":%q},"cwd":"/tmp"}`, cmd)
+	result := runHook(t, input)
+	if d := getDecision(result); d != "allow" {
+		t.Errorf("cmd %q: decision = %q, want allow (the one operand present resolves under a temp root)", cmd, d)
+	}
+}
+
+// TestIntegration_TempRepoCarveOut_BeadReproductionShapes replays the two
+// EXACT command shapes pg2-yoqsr's own Context quotes as having been
+// wrongly refused before this bead, verbatim in structure (env-prefixed
+// GIT_DIR + `-C` for the first, a heredoc write into a fixture's
+// `.git/hooks/` for the second) — the Verification section requires both
+// "APPROVED", i.e. NOT the `deny` they measured before this bead.
+func TestIntegration_TempRepoCarveOut_BeadReproductionShapes(t *testing.T) {
+	tmp := t.TempDir()
+	initCmd := fmt.Sprintf(`env GIT_DIR=%s/fake-canonical/.git git -C %s/fixture init`, tmp, tmp)
+	input := fmt.Sprintf(`{"tool_name":"Bash","tool_input":{"command":%q},"cwd":"/tmp"}`, initCmd)
+	if d := getDecision(runHook(t, input)); d == "deny" {
+		t.Errorf("reproduction 1 (%q): decision = deny, want NOT deny (the carve-out this bead adds)", initCmd)
+	}
+
+	hookCmd := fmt.Sprintf("cat > %s/fake-canonical/.git/hooks/pre-commit <<'HOOK'\necho pwned\nHOOK", tmp)
+	input = fmt.Sprintf(`{"tool_name":"Bash","tool_input":{"command":%q},"cwd":"/tmp"}`, hookCmd)
+	if d := getDecision(runHook(t, input)); d == "deny" {
+		t.Errorf("reproduction 2 (heredoc write into %s/fake-canonical/.git/hooks/pre-commit): decision = deny, want NOT deny", tmp)
+	}
+}
+
+// TestIntegration_TempRepoCarveOut_GitDirFlag_Real_Denied is the flag-form
+// gap this bead ALSO closes (not a regression — measured against main before
+// this bead, `git --git-dir=<real>/.git config ...` was auto-APPROVED
+// outright, with no refusal at all): a `--git-dir` operand pointing at a
+// real, non-temp location must now be denied end to end.
+func TestIntegration_TempRepoCarveOut_GitDirFlag_Real_Denied(t *testing.T) {
+	cmd := "git --git-dir=/etc/pg2-yoqsr-real-integration/.git config user.email t@example.com"
+	input := fmt.Sprintf(`{"tool_name":"Bash","tool_input":{"command":%q},"cwd":"/tmp"}`, cmd)
+	if d := getDecision(runHook(t, input)); d != "deny" {
+		t.Errorf("cmd %q: decision = %q, want deny", cmd, d)
+	}
+}
+
+// TestIntegration_GitResetRedirectedContext_StillDenies is the other half of
+// the reorder pg2-ur9zc made inside the reset arm. The redirect test still
+// precedes the `--hard` test, so a GIT_DIR-redirected reset keeps a UNIFORM
+// verdict for BOTH spellings — never the verdict INVERSION this test guards
+// against, the hard form emitting a WEAKER outcome than the soft form.
+//
+// SUPERSEDED EXPECTATION (pg2-yoqsr, 2026-08-28): this test used to assert
+// `ask`, from the `git` rule's own hasRedirectEnvVar. `GIT_DIR=/other` was
+// chosen as a value with NO `.git` path segment, which — before this bead's
+// side-finding fix — made it invisible to the gitdir rule's env-var check
+// entirely (keyed on a literal `.git` component, not on the variable NAME),
+// so THIS rule's weaker Ask was the only verdict in play. That was the exact
+// bare-repo false negative pg2-yoqsr's side-finding closes: the check is now
+// keyed on the NAME (GIT_DIR/GIT_WORK_TREE/...) regardless of the value's
+// shape, so the gitdir rule now recognises `/other` too, and its Reject — the
+// SAME severity a `.git`-suffixed redirect already had before this bead —
+// wins the chain before this rule's Ask is ever reached. The verdict is
+// STRICTER, not weaker, and STILL uniform across both reset spellings, which
+// is what this test's own reordering rationale (pg2-ur9zc) still requires.
+func TestIntegration_GitResetRedirectedContext_StillDenies(t *testing.T) {
 	for _, cmd := range []string{
 		"GIT_DIR=/other git reset --hard HEAD~1",
 		"GIT_DIR=/other git reset --soft HEAD~1",
 	} {
 		input := fmt.Sprintf(`{"tool_name":"Bash","tool_input":{"command":%q},"cwd":"/tmp"}`, cmd)
-		if d := getDecision(runHook(t, input)); d != "ask" {
-			t.Errorf("cmd %q: emitted permissionDecision=%q, want ask — a redirected context keeps its prompt for EVERY reset spelling", cmd, d)
+		if d := getDecision(runHook(t, input)); d != "deny" {
+			t.Errorf("cmd %q: emitted permissionDecision=%q, want deny — a redirected context keeps a UNIFORM verdict for EVERY reset spelling", cmd, d)
 		}
 	}
 }

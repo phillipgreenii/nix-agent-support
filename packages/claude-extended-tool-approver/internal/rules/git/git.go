@@ -11,6 +11,7 @@ import (
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmdparse"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/patheval"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/temproot"
 )
 
 var readOnlySubcommands = map[string]bool{
@@ -159,6 +160,31 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		// already the stricter of the two, so the pair converges to equality.
 		configFlagInjection := hasGitConfigInjection(pc.Args)
 		chdirs, subcmd, rest := cmdparse.GitInvocation(pc.Args)
+		// leafCwd (pg2-yoqsr) is the `-C`-chain-folded running directory, needed
+		// both by the redirect-flag floor immediately below and by classify
+		// further down (threaded through so a GIT_DIR/GIT_WORK_TREE value can be
+		// resolved the way git itself would — relative to where `-C` leaves the
+		// process, not the raw invocation cwd — before being checked against the
+		// temp-root carve-out).
+		leafCwd := effectiveDir(input.CWD, chdirs)
+		// `--git-dir` / `--work-tree` redirect the effective repository EXACTLY
+		// as GIT_DIR / GIT_WORK_TREE do — measured, this worktree, 2026-08-28:
+		// `git --git-dir=<real>/.git config user.email x` was APPROVED outright
+		// before this check existed, with NEITHER this rule's OTHER screens NOR
+		// the gitdir rule recognising the flag's VALUE at all (gitdir explicitly
+		// leaves git's OWN pre-subcommand options to this rule — see its
+		// "an argument to git ITSELF" doc comment and
+		// TestGitDir_ExclusionRolesAreNotAccesses's `--git-dir` row; GitInvocation
+		// only skips PAST the flag to find the subcommand, never returning its
+		// value). REJECT unconditionally — matching the severity gitdir's own
+		// rule already gives the env-var spelling of the identical hazard — UNLESS
+		// the value resolves under a temporary root (pg2-yoqsr's carve-out). This
+		// is a FLOOR like configFlagInjection above: checked before subcmd is
+		// even known, so `git --git-dir=<real>/.git init` — a subcommand classify
+		// never recognises — is caught too, not only the ones classify reaches.
+		if reason, ok := gitDirWorkTreeRedirectReason(pc.Args, leafCwd); ok {
+			return hookio.RuleResult{Decision: hookio.Reject, Reason: reason, Module: r.Name()}, nil
+		}
 		if subcmd == "" {
 			// No subcommand to classify, so there is no verdict for the floor to sit
 			// under: a bare `git -c k=v` keeps the refusal it has always had rather than
@@ -173,7 +199,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		// to answer Abstain and Evaluate returned it, so the chain continued. It also
 		// SKIPS the chdir demotion below, correctly — that demotion only ever
 		// demotes an Approve, and there is no Approve to demote here.
-		res, err := r.classify(pc, envs, subcmd, rest)
+		res, err := r.classify(pc, envs, subcmd, rest, leafCwd)
 		if err != nil {
 			// `res` is forwarded WITH the error since ADR 0044: classify's error may be
 			// a REFUSAL whose RuleResult is the floor, and dropping it would report
@@ -349,7 +375,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 //     and `git --config-en=X=Y log` each answered `unknown option: …`, while every
 //     full spelling worked. So the exact-token test IS git's own parse there, and
 //     prefix-matching them would over-match with no bypass to close.
-func (r *Rule) classify(pc cmdparse.ParsedCommand, envs []cmdparse.EnvAssignment, subcmd string, rest []string) (hookio.RuleResult, error) {
+func (r *Rule) classify(pc cmdparse.ParsedCommand, envs []cmdparse.EnvAssignment, subcmd string, rest []string, cwd string) (hookio.RuleResult, error) {
 	// push: the force / remote-ref-destroying spellings (pg2-bohpm) and a NETWORK
 	// destination given in place of a remote name (pg2-abb65) are REJECTED — see
 	// pushVerdict for both rulings and their rationale. Every other push falls
@@ -378,7 +404,7 @@ func (r *Rule) classify(pc cmdparse.ParsedCommand, envs []cmdparse.EnvAssignment
 		}, nil
 	}
 	if subcmd == "checkout" {
-		if hasRedirectEnvVar(envs) {
+		if hasRedirectEnvVar(envs, cwd) {
 			return hookio.RuleResult{Decision: hookio.Ask, Reason: "git command with redirected context", Module: r.Name()}, nil
 		}
 		return hookio.RuleResult{Decision: hookio.Approve, Reason: "git checkout", Module: r.Name()}, nil
@@ -404,14 +430,14 @@ func (r *Rule) classify(pc cmdparse.ParsedCommand, envs []cmdparse.EnvAssignment
 				return r.refuse("git rebase -i requires editor")
 			}
 		}
-		if hasRedirectEnvVar(envs) {
+		if hasRedirectEnvVar(envs, cwd) {
 			return hookio.RuleResult{Decision: hookio.Ask, Reason: "git command with redirected context", Module: r.Name()}, nil
 		}
 		return hookio.RuleResult{Decision: hookio.Approve, Reason: "modifying git command", Module: r.Name()}, nil
 	}
 	// filter-branch: approve (history rewriting used by agents for commit cleanup)
 	if subcmd == "filter-branch" {
-		if hasRedirectEnvVar(envs) {
+		if hasRedirectEnvVar(envs, cwd) {
 			return hookio.RuleResult{Decision: hookio.Ask, Reason: "git command with redirected context", Module: r.Name()}, nil
 		}
 		return hookio.RuleResult{Decision: hookio.Approve, Reason: "modifying git command", Module: r.Name()}, nil
@@ -430,7 +456,7 @@ func (r *Rule) classify(pc cmdparse.ParsedCommand, envs []cmdparse.EnvAssignment
 	// every ordinary write keep their Approve — see configVerdict for the key-by-key
 	// ruling and the invariant each verdict rests on.
 	if subcmd == "config" {
-		return r.configVerdict(envs, rest), nil
+		return r.configVerdict(envs, rest, cwd), nil
 	}
 	// symbolic-ref: a ONE-OPERAND query READS what <name> currently points at and
 	// stays Approve; every other shape MUTATES a ref (often HEAD, or a
@@ -442,7 +468,7 @@ func (r *Rule) classify(pc cmdparse.ParsedCommand, envs []cmdparse.EnvAssignment
 	}
 	// modifying: approve (includes tag, mv, rm, worktree, etc.)
 	if modifyingSubcommands[subcmd] {
-		if hasRedirectEnvVar(envs) {
+		if hasRedirectEnvVar(envs, cwd) {
 			return hookio.RuleResult{Decision: hookio.Ask, Reason: "git command with redirected context", Module: r.Name()}, nil
 		}
 		return hookio.RuleResult{Decision: hookio.Approve, Reason: "modifying git command", Module: r.Name()}, nil
@@ -530,7 +556,7 @@ func (r *Rule) classify(pc cmdparse.ParsedCommand, envs []cmdparse.EnvAssignment
 		//	redirected context, any reset spelling  -> Ask      (unchanged)
 		//	--hard, any abbreviation, no redirect   -> Abstain  (the ruling)
 		//	soft / mixed / keep / merge, no redirect -> Approve (unchanged)
-		if hasRedirectEnvVar(envs) {
+		if hasRedirectEnvVar(envs, cwd) {
 			return hookio.RuleResult{Decision: hookio.Ask, Reason: "git command with redirected context", Module: r.Name()}, nil
 		}
 		if cmdparse.HasLongFlagPrefix(rest, "hard") {
@@ -1438,7 +1464,7 @@ func gatedConfigKey(args []string) (string, configGateClass, bool) {
 // isGitExecutable(pc.Executable), so `git config clean.requireForce false` quoted
 // in a commit message or a `bd comment` body is TEXT and never matches. That is the
 // pg2-5b901 failure mode; do not reintroduce a strings.Contains over command text.
-func (r *Rule) configVerdict(envs []cmdparse.EnvAssignment, rest []string) hookio.RuleResult {
+func (r *Rule) configVerdict(envs []cmdparse.EnvAssignment, rest []string, cwd string) hookio.RuleResult {
 	// Elide separated flag ARGUMENTS once, here, so the read/write bound and the key
 	// scan agree about what is an operand. Both consumers below take elided args.
 	args := configElideFlagValues(rest)
@@ -1448,7 +1474,7 @@ func (r *Rule) configVerdict(envs []cmdparse.EnvAssignment, rest []string) hooki
 	if key, class, ok := gatedConfigKey(args); ok {
 		return r.configGateResult(key, class)
 	}
-	if hasRedirectEnvVar(envs) {
+	if hasRedirectEnvVar(envs, cwd) {
 		return hookio.RuleResult{Decision: hookio.Ask, Reason: "git command with redirected context", Module: r.Name()}
 	}
 	return hookio.RuleResult{Decision: hookio.Approve, Reason: "modifying git command", Module: r.Name()}
@@ -1899,13 +1925,72 @@ func hasFlag(args []string, flag string) bool {
 // made the leaf-local prefix `GIT_DIR=/other git commit -m x` an Ask while the persistent
 // `export GIT_DIR=/other; git commit -m x` measured `allow` — one redirection, two
 // spellings, opposite answers. See visibleEnvVars for the seam and its limits.
-func hasRedirectEnvVar(envs []cmdparse.EnvAssignment) bool {
+//
+// pg2-yoqsr's temp-root carve-out: cwd is the `-C`-chain-folded running
+// directory (this file's effectiveDir), used to resolve a RELATIVE
+// GIT_DIR/GIT_WORK_TREE value exactly as git itself would. A value that
+// resolves under a temporary root is not a redirect this rule needs to ask
+// about — it is the disposable-fixture case the carve-out exists to permit,
+// and by the time this runs the gitdir rule (earlier in the chain) has
+// ALREADY either refused the leaf outright (a real, non-temp participant is
+// present somewhere on it) or relaxed its own refusal (every participant,
+// including this same value, is temp) — see docs/adr/0059-ceta-temp-repo-
+// carve-out.md's Consequences for why this half is needed too: without it, a
+// leaf gitdir relaxes would still surface THIS rule's Ask on top, defeating
+// the carve-out for checkout/rebase/filter-branch/the modifying set/soft
+// reset. A MIXED leaf (this value temp, some OTHER operand real) is not a
+// case this function alone needs to re-detect: gitdir's own check already
+// covers the cross-operand comparison, so this function only needs to ask
+// "is MY OWN value temp", independently, per R2.
+func hasRedirectEnvVar(envs []cmdparse.EnvAssignment, cwd string) bool {
 	for _, ev := range envs {
-		if ev.Name == "GIT_DIR" || ev.Name == "GIT_WORK_TREE" {
+		if ev.Name != "GIT_DIR" && ev.Name != "GIT_WORK_TREE" {
+			continue
+		}
+		if !temproot.Under(temproot.ResolveOperand(cwd, ev.Value)) {
 			return true
 		}
 	}
 	return false
+}
+
+// gitDirWorkTreeRedirectReason reports the Reject reason for a `--git-dir` /
+// `--work-tree` operand that does NOT resolve under a temporary root
+// (pg2-yoqsr's carve-out — docs/adr/0059-ceta-temp-repo-carve-out.md in
+// phillipgreenii-nix-agent-support). ok is false when NEITHER flag is
+// present on this leaf, or every value present resolves under a temp root
+// (the carve-out case): the leaf then keeps whatever verdict classify
+// reaches, unaffected by this check.
+//
+// UNCONDITIONAL SEVERITY, MATCHING THE ENV-VAR SPELLING. GIT_DIR/GIT_WORK_TREE
+// (gitdir's rule, hasRedirectEnvVar above) each Reject/Ask a redirect
+// regardless of the subcommand they accompany — including a plain READ —
+// because the mechanism that catches them cannot tell what will consume the
+// value. This function is not obligated to inherit that same reasoning, but
+// deliberately DOES apply regardless of subcommand anyway, for the OTHER
+// principle this file states elsewhere and gitdir's own doc comment states
+// explicitly: "THREE SPELLINGS, ONE ACCESS... MUST reach the same verdict or
+// the treatment is decoration." `--git-dir`/`--work-tree` and
+// GIT_DIR/GIT_WORK_TREE are the identical hazard by two spellings.
+func gitDirWorkTreeRedirectReason(args []string, cwd string) (string, bool) {
+	gitDirs, workTrees := cmdparse.GitDirWorkTreeOperands(args)
+	for _, v := range gitDirs {
+		if !temproot.Under(temproot.ResolveOperand(cwd, v)) {
+			return "git: `--git-dir` redirects the effective repository — the same hazard " +
+				"GIT_DIR's env-var spelling refuses, by another flag (pg2-yoqsr); permitted " +
+				"only when it resolves under a temporary root — see " +
+				"docs/adr/0059-ceta-temp-repo-carve-out.md in phillipgreenii-nix-agent-support", true
+		}
+	}
+	for _, v := range workTrees {
+		if !temproot.Under(temproot.ResolveOperand(cwd, v)) {
+			return "git: `--work-tree` redirects the effective repository — the same hazard " +
+				"GIT_WORK_TREE's env-var spelling refuses, by another flag (pg2-yoqsr); " +
+				"permitted only when it resolves under a temporary root — see " +
+				"docs/adr/0059-ceta-temp-repo-carve-out.md in phillipgreenii-nix-agent-support", true
+		}
+	}
+	return "", false
 }
 
 // visibleEnvVars returns the env assignments GIT WILL SEE on leaf `before` of this

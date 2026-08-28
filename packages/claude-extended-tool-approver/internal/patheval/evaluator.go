@@ -536,6 +536,30 @@ func (pe *PathEvaluator) ResolvePath(path string) string {
 	return pe.resolvePath(path)
 }
 
+// ResolveRealPath exposes resolveRefPath — the free-function realpath
+// primitive this package already uses for its OWN projectRoot/cwd/home/
+// tmpRoot resolution: clean, then resolve symlinks, falling back to the
+// nearest EXISTING ancestor when path does not yet exist on disk (so a
+// not-yet-created `git init` target still resolves to a comparable absolute
+// form). Unlike ResolvePath/CleanPath above, it needs no *PathEvaluator
+// (no cwd-relative join, no `~`/env-var expansion) — a caller with its OWN
+// join/expand step (internal/temproot's ResolveOperand) wants exactly the
+// bare realpath, not a second, potentially-diverging resolver. Returns ""
+// only for an empty input or a broken symlink.
+func ResolveRealPath(path string) string {
+	return resolveRefPath(path)
+}
+
+// PathContains exposes pathContains: whether path is EQUAL TO dir or a
+// DIRECTORY-BOUNDARY DESCENDANT of it — never a substring match (so
+// dir="/tmp" does not match path="/tmp-evil"). Exported for
+// internal/temproot's Under, which needs the identical boundary semantics
+// this package already uses for its own zone-membership tests rather than a
+// second, potentially-diverging implementation of the same one-line rule.
+func PathContains(dir, path string) bool {
+	return pathContains(dir, path)
+}
+
 // IsDenyRead returns true if path is blocked for reading by sandbox.filesystem.denyRead,
 // accounting for allowRead overrides (allowRead takes precedence over denyRead).
 //

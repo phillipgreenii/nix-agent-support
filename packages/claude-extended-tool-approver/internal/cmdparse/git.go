@@ -468,3 +468,60 @@ func GitInvocation(args []string) (chdirs []string, subcmd string, rest []string
 	}
 	return chdirs, "", nil
 }
+
+// GitDirWorkTreeOperands scans args — a git invocation's own argv, after the
+// executable (cmdparse has already unwrapped any env/command/nice/...
+// prefix by this point — see unwrapCommand — so `env GIT_DIR=... git
+// --work-tree=... init` reaches here exactly like the native
+// `GIT_DIR=... git --work-tree=... init` spelling: the `env` assignment is
+// lifted into ParsedCommand.EnvVars and only `--work-tree=...` remains in
+// Args) — for the PRE-SUBCOMMAND `--git-dir` / `--work-tree` options and
+// returns every value found, in argv order.
+//
+// It walks the identical pre-subcommand span GitInvocation walks, honouring
+// the same `-C`/`-c`/`--namespace` arities, so the two scans always agree on
+// where the subcommand starts. Unlike GitInvocation — which only needs to
+// skip PAST `--git-dir`/`--work-tree` to find the subcommand and so never
+// returns their VALUE — this exists to recover exactly that value:
+// pg2-yoqsr's temp-root carve-out needs to see where these two flags
+// redirect the effective repository, the same way it needs to see
+// GIT_DIR/GIT_WORK_TREE.
+//
+// Both the separated (`--git-dir <path>`) and glued (`--git-dir=<path>`)
+// spellings are recognised. Git accepts no ABBREVIATION of either — measured
+// on git 2.54.0 (see internal/rules/git's classify doc comment for the
+// citation and method: `--git-di=<dir>`, `--work-tre=<dir>` etc. all answer
+// "unknown option") — so an exact-token/exact-prefix test is git's own parse
+// here, not an under-match the way an abbreviation-blind test would be for a
+// flag git DOES let the caller shorten.
+func GitDirWorkTreeOperands(args []string) (gitDirs, workTrees []string) {
+	i := 0
+	for i < len(args) {
+		a := args[i]
+		switch {
+		case a == "--git-dir":
+			if i+1 < len(args) {
+				gitDirs = append(gitDirs, args[i+1])
+			}
+			i += 2
+		case strings.HasPrefix(a, "--git-dir="):
+			gitDirs = append(gitDirs, strings.TrimPrefix(a, "--git-dir="))
+			i++
+		case a == "--work-tree":
+			if i+1 < len(args) {
+				workTrees = append(workTrees, args[i+1])
+			}
+			i += 2
+		case strings.HasPrefix(a, "--work-tree="):
+			workTrees = append(workTrees, strings.TrimPrefix(a, "--work-tree="))
+			i++
+		case a == "-C" || a == "-c" || a == "--namespace":
+			i += 2 // consumed by GitInvocation for a different purpose; not this scan's concern
+		case strings.HasPrefix(a, "-"):
+			i++
+		default:
+			return gitDirs, workTrees // reached the subcommand
+		}
+	}
+	return gitDirs, workTrees
+}
