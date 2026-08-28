@@ -159,10 +159,18 @@ config ...` — is refused exactly as it was before this decision landed: the ca
   `/nix/store`) also matches `/nix/var/nix/builds/<id>` — this machine's nix places `$TMPDIR` /
   `NIX_BUILD_TOP` there during a sandboxed build, so a fixture built with `t.TempDir()` inside that
   sandbox lands under `/nix` and was rejected before the carve-out ever got a say. Fixed by making
-  `evaluateRedirections` treat a `PathReadOnly` target as approved when it ALSO resolves under
-  `temproot.Under` — `/nix/store` can never be a descendant of a temp root, so the relaxation cannot
-  reach it. `internal/patheval`'s own zone ladder (`classify()`) is deliberately left untouched, for
-  the same reason `escape_zone_ladder_test.go` (bead `pg2-lw19e`) already declined to touch it: a
+  `evaluateRedirections` fall through to its EXISTING `!CanWrite()` check — yielding `NoOpinion`,
+  never `Reject` — when a `PathReadOnly` target ALSO resolves under `temproot.Under`; `access` stays
+  `PathReadOnly` (that check still fires), so this is deliberately NOT a blanket Approve.
+  `/nix/store` can never be a descendant of a temp root, so the relaxation cannot reach it. The
+  distinction between "not decisively rejected" and "actively approved" matters: a first cut of this
+  fix instead skipped the `!CanWrite()` check entirely (`continue`), which turned into an outright
+  `Approve` for ANY redirect target under a temp root — and in this SAME sandboxed run,
+  `mkGoTest`'s `buildPhase` sets `HOME="$TMPDIR"`, so `~/.ssh/authorized_keys` is ALSO,
+  coincidentally, under a temp root there. `TestIntegration_HookBypassRegression`'s
+  "loop terminator redirect ssh keys" case (which must never resolve to `Approve`) caught this
+  immediately. `internal/patheval`'s own zone ladder (`classify()`) is deliberately left untouched,
+  for the same reason `escape_zone_ladder_test.go` (bead `pg2-lw19e`) already declined to touch it: a
   `t.TempDir()`-rooted `HOME`/`XDG_DATA_HOME` fixture is ALSO nested under `$TMPDIR`/`NIX_BUILD_TOP`
   in that same sandboxed environment, so narrowing or reordering `classify()`'s ladder to exempt the
   build's scratch directory would relax those more-specific zone checks too — a much larger blast
