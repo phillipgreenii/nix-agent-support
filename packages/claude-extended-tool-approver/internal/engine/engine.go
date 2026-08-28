@@ -986,10 +986,13 @@ func unparseableExpressionFloor(sp cmdparse.ShellParse) hookio.RuleResult {
 //     slip through to Approve: skipping this floor only removes ITS OWN NoOpinion
 //     contribution, so the leaf's own chain verdict — an unmodelled reader's terminal
 //     loop-exhaustion NoOpinion+ProvenanceExhaustion — flows through unobstructed to
-//     foldSubstitutionScan's existing SubstitutionCleared/ProvenanceExhaustion branch,
-//     which floors it to a decisive Ask via commandSubstitutionFloor exactly as it
-//     already does for `seq`/`mktemp`. This function does not need its own copy of
-//     that guard; it only has to stop MASKING the verdict that guard is built to see.
+//     foldSubstitutionScan's own recursion result. Before pg2-g4jet (2026-08-28) that
+//     landed on foldSubstitutionScan's SubstitutionCleared/ProvenanceExhaustion
+//     branch, which floored it to a decisive Ask via commandSubstitutionFloor; that
+//     branch is now removed, so a body of this shape abstains instead — exactly like
+//     `seq`/`mktemp` already do post-ruling. This function does not need its own copy
+//     of any guard here either way; it only has to stop MASKING the verdict recursion
+//     already reached.
 //   - A top-level heredoc into a command NOT on heredocStdinSinkFlags' key set still
 //     floors — `cat --stdin <<'EOF' ... EOF` is not `bd`, so it is unaffected by this
 //     carve-out (and `cat` taking a literal `--stdin` argument is itself contrived;
@@ -1338,9 +1341,10 @@ func pipeRelayHeredocCleared(pc cmdparse.ParsedCommand, leaves []cmdparse.Parsed
 // TEXT-based callers (rules/ssh's carriesSubstitution reads it inline).
 
 // commandSubstitutionFloor is the verdict contributed by a COMMAND substitution
-// ($()/backtick) body that fails EITHER gate of cmdparse's static
-// safe-substitution clearance: the seam REFUSES it outright, or the seam
-// CLEARS it but full-engine recursion did not independently approve it.
+// ($()/backtick) body that the seam REFUSES outright (cmdparse.SubstitutionRefused
+// — not on any curated per-command allowlist). As of pg2-g4jet (operator ruling,
+// 2026-08-28), a body the seam CLEARS instead (cmdparse.SubstitutionCleared) never
+// reaches this floor at all — see the call site's own comment for why.
 //
 // pg2-whumr (operator ruling pg2-gwp57, "harmonize up", recorded in ADR 0048):
 // ADR 0043 states NoOpinion is auto-approved in `auto` mode, so a command
@@ -1357,28 +1361,44 @@ func pipeRelayHeredocCleared(pc cmdparse.ParsedCommand, leaves []cmdparse.Parsed
 // body reached NoOpinion end to end: auto-approved in `auto` mode, a live RCE
 // hole this floor closes.
 //
-// The SAME hole recurs for a body the allowlist CLEARS rather than refuses:
-// `seq` and `mktemp` are on cmdparse's static list PRECISELY BECAUSE no rule
-// approves them standalone (envvars' ExpansionSafeCmd path exploits that by
-// skipping recursion entirely for a Cleared body, but command position always
-// recurses), so `echo $(seq 1 3)` / `echo $(mktemp)` reached recursion's own
-// terminal exhaustion NoOpinion with nothing left to raise it — identical
-// auto-approve shape, different gate. ceta models no interpreter (ADR 0044),
-// so a rule cannot tell `seq 1 3`'s harmless exhaustion apart from `bash -c`'s
-// dangerous one — the ruling this floor implements explicitly forbids trying,
-// and instead raises the floor for the WHOLE exhaustion class uniformly,
-// whichever gate it slips through, in COMMAND position only. A Cleared body a
-// rule DOES independently approve (`date`, `hostname`, and — since pg2-u65fu —
-// a quoted-heredoc-into-`cat` body, which safe-commands approves as a bare
-// argument-less read once heredocFloor stops masking that verdict for exactly
-// this recursed-and-cleared case) never reaches this floor at all, and neither
-// does a Cleared body some OTHER mechanism already examined and declined for
-// its own recorded reason (a substitution-cycle guard's own NoOpinion) — see
-// the call site's own ProvenanceExhaustion gate for the case split.
+// A DIFFERENT hole was SUSPECTED for a body the allowlist CLEARS rather than
+// refuses: `seq` and `mktemp` are on cmdparse's static list PRECISELY BECAUSE
+// no rule approves them standalone (envvars' ExpansionSafeCmd path exploits
+// that by skipping recursion entirely for a Cleared body, but command
+// position always recurses), so `echo $(seq 1 3)` / `echo $(mktemp)` reach
+// recursion's own terminal exhaustion NoOpinion with nothing left to raise
+// it. Pre-pg2-g4jet, this floor raised THAT case to Ask too, on the theory
+// that ceta models no interpreter (ADR 0044) and so cannot tell `seq 1 3`'s
+// harmless exhaustion apart from `bash -c`'s dangerous one. Operator ruling
+// pg2-g4jet (2026-08-28) narrowed that: for the
+// SubstitutionCleared+ProvenanceExhaustion cohort specifically, recursion has
+// genuinely no opinion — positive or negative — in EITHER the use-site
+// (`$(seq 1 3)`) or the assignment (`x=$(seq 1 3)`) form, and at execution
+// time the two forms are identical (run the command once, capture stdout) —
+// so there is no basis for the forms to diverge, and this floor no longer
+// applies to a Cleared body at all. Its contribution now stays whatever
+// recursion already concluded (NoOpinion), matching envvars' existing
+// assignment-position relief (pg2-et8ns/pg2-o7l2f) instead of overriding it.
+// `bash -c`'s dangerous exhaustion is unaffected by this narrowing: it is
+// SubstitutionRefused, not Cleared, so it still floors via the paragraph
+// above, unconditionally. A Cleared body a rule DOES independently approve
+// (`date`, `hostname`, and — since pg2-u65fu — a quoted-heredoc-into-`cat`
+// body, which safe-commands approves as a bare argument-less read once
+// heredocFloor stops masking that verdict for exactly this recursed-and-cleared
+// case) never reached this floor either way, and neither does a Cleared body
+// some OTHER mechanism already examined and declined for its own recorded
+// reason (a substitution-cycle guard's own NoOpinion) — see the call site's
+// own comment for the case split. The downstream-consumer risk of an
+// abstained substitution's value being used unsafely later is explicitly out
+// of scope for pg2-g4jet's ruling (tracked separately, pg2-kxmpe).
 //
-// Env-value position is UNCHANGED: it clears on EITHER gate
-// (internal/rules/envvars.go's positively-cleared predicate), so this floor
-// converges the two positions upward rather than widening either one downward.
+// Env-value position is UNCHANGED for the REFUSED gate: it clears on EITHER
+// gate (internal/rules/envvars.go's positively-cleared predicate), so this
+// floor still converges the two positions upward for a Refused body. For the
+// Cleared+Exhaustion cohort, pg2-g4jet flipped the convergence direction
+// instead of widening it: the use-site floor no longer raises above the
+// assignment position's existing abstain — the two positions now agree by
+// both landing on abstain, not by command position being raised to Ask.
 //
 // Delegated bodies never reach this floor — see the call site's own
 // "DELEGATED NEVER FLOORS HERE" comment for why such a body must stay governed
@@ -1468,30 +1488,38 @@ func (e *Engine) foldSubstitutionScan(subs []cmdparse.Substitution, normalized s
 		// stop), and recursion NOT approving it must not remain a silent NoOpinion
 		// either — both directions land on at least Ask.
 		//
-		// CLEARED floors ONLY WHEN RECURSION DID NOT ALSO APPROVE. Several
-		// entries on cmdparse's static allowlist (`seq`, `mktemp`, and any other
-		// body no rule models standalone) are on the list PRECISELY BECAUSE no
-		// rule approves them independently — envvars' ExpansionSafeCmd path
-		// exploits that by skipping recursion entirely, but command position
-		// always recurses, so a Cleared-but-unmodeled body reached recursion's
-		// own terminal loop-EXHAUSTION NoOpinion with nothing left to raise it.
-		// That is the identical auto-approved-in-`auto`-mode hole this bead
-		// closes for Refused bodies, wearing a different clearance: `echo
-		// $(seq 1 3)` and `echo $(mktemp)` must become Ask, not stay Abstain
-		// (per the ruling, clearing an exhaustion anywhere is forbidden
-		// regardless of which list vouches for it) — while `echo
-		// $(date)`/`echo $(hostname)`, whose bare forms a rule DOES approve,
-		// are untouched because recursion already carries the Approve.
+		// CLEARED NEVER FLOORS HERE (pg2-g4jet, operator ruling 2026-08-28,
+		// superseding pg2-whumr's original wider scope below). Several entries
+		// on cmdparse's static allowlist (`seq`, `mktemp`, and any other body no
+		// rule models standalone) are on the list PRECISELY BECAUSE no rule
+		// approves them independently — envvars' ExpansionSafeCmd path exploits
+		// that by skipping recursion entirely, but command position always
+		// recurses, so a Cleared-but-unmodeled body reaches recursion's own
+		// terminal loop-EXHAUSTION NoOpinion with nothing left to raise it. This
+		// floor USED TO raise that case to Ask too — the identical
+		// auto-approved-in-`auto`-mode hole the REFUSED paragraph above still
+		// closes, wearing a different clearance. Operator ruling pg2-g4jet
+		// determined there is no difference between the use-site (`echo
+		// $(seq 1 3)`) and assignment (`x=$(seq 1 3)`) forms for this cohort:
+		// recursion has genuinely no opinion, positive or negative, in either
+		// position, and at execution time both forms just run the command once
+		// and capture its output — so `echo $(seq 1 3)` / `echo $(mktemp)` now
+		// stay Abstain, matching the assignment position's existing abstain
+		// (envvars' pg2-et8ns/pg2-o7l2f relief) instead of diverging from it.
+		// `echo $(date)`/`echo $(hostname)`, whose bare forms a rule DOES
+		// approve, were and remain untouched either way because recursion
+		// already carries the Approve. The downstream-consumer risk of an
+		// abstained value being used unsafely later is explicitly out of scope
+		// for this ruling (tracked separately, pg2-kxmpe).
 		//
-		// GATED ON ProvenanceExhaustion SPECIFICALLY (ADR 0044), not on any
-		// NoOpinion: a Cleared body can also land on NoOpinion because some
-		// OTHER floor already examined and declined it — e.g. the
-		// substitution-cycle guard's own NoOpinion (ProvenanceRefusal, not
-		// Exhaustion) when a Cleared body happens to repeat an expression
-		// already on the evaluation stack. Those are considered refusals with
-		// their own recorded reason, not "nobody modelled this" — flooring
-		// them here would reach past this bead's authorized scope and
-		// duplicate a decision that belongs to whichever mechanism made it.
+		// A Cleared body that lands on NoOpinion for a reason OTHER than
+		// ProvenanceExhaustion — e.g. the substitution-cycle guard's own
+		// NoOpinion (ProvenanceRefusal, not Exhaustion) when a Cleared body
+		// happens to repeat an expression already on the evaluation stack — is
+		// unaffected by any of this: this switch never floored those either
+		// (the removed branch was itself gated on ProvenanceExhaustion
+		// specifically, ADR 0044), so they were and remain governed solely by
+		// whichever mechanism already examined and declined them.
 		//
 		// A quoted heredoc admitted onto cmdparse's static list (pg2-phtl3) USED
 		// to be exactly this shape too — recursing through heredocFloor()'s own
@@ -1515,10 +1543,6 @@ func (e *Engine) foldSubstitutionScan(subs []cmdparse.Substitution, normalized s
 			switch cmdparse.ClassifySubstitutionBody(sub.Body) {
 			case cmdparse.SubstitutionRefused:
 				subResult = hookio.MostRestrictive(subResult, commandSubstitutionFloor(sub.Body))
-			case cmdparse.SubstitutionCleared:
-				if subResult.Decision == hookio.NoOpinion && subResult.Provenance == hookio.ProvenanceExhaustion {
-					subResult = hookio.MostRestrictive(subResult, commandSubstitutionFloor(sub.Body))
-				}
 			}
 		}
 

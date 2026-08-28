@@ -192,8 +192,15 @@ func TestIntegration_DeclareSpellingNeverApprovesTheUnestablished(t *testing.T) 
 		"OTHER=/x declare WT=" + worktree + ` && git -C "$WT" commit -m x`,
 		// A declare in a PIPELINE STAGE assigns in a subshell that dies with it.
 		"declare WT=" + worktree + ` | cat && git -C "$WT" commit -m x`,
-		// The value itself is not derivable, whatever the spelling.
-		"declare WT=$(mktemp -d)" + ` && git -C "$WT" commit -m x`,
+		// The value itself is not derivable, whatever the spelling. (NOT
+		// `declare WT=$(mktemp -d)`: `mktemp -d` is cmdparse's
+		// SubstitutionCleared+ProvenanceExhaustion cohort — the SAME body used bare in
+		// TestPg2G4jet_SubstitutionClearedExhaustionAbstainsInCommandPosition
+		// (pg2g4jet_cleared_exhaustion_test.go) — and pg2-g4jet's operator ruling
+		// (2026-08-28) means this leaf's substitution no longer contributes an Ask
+		// floor either, so the whole command legitimately reaches the empty NoOpinion
+		// this test otherwise guards against; asserting against it here would just be
+		// re-litigating pg2-g4jet in a second place.)
 		"typeset WT=$(git rev-parse --show-toplevel)" + ` && git -C "$WT" commit -m x`,
 		// A REVOKED binding: the literal is established and then reassigned unreadably
 		// through a declare, so the earlier value must not survive.
