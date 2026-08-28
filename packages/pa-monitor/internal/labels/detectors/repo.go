@@ -70,6 +70,20 @@ func (r Repo) Detect(s labels.Session) labels.Set {
 //   - RemoteURL wraps the same raw `config --get remote.<remote>.url` read
 //     (no insteadOf expansion), so the primary (has-a-remote) path's label
 //     values are unchanged.
+//
+// DECISION (pg2-vc5bp's fail-vs-silently-return question, recorded here per
+// its acceptance criteria; same disposition as gh.ExecBranchResolver.
+// CurrentBranch's DECISION 2): RepoLabelFor is NOT changed to error when
+// cwd's resolved anchor differs from the expected repository. That mismatch
+// was only reachable through the env-leak vector (a leaked GIT_DIR making
+// `-C cwd`-shaped calls silently answer about a different repository) that
+// this migration closes by construction -- gitclient.Discover walks up from
+// cwd through the filesystem under its own hermetic, allowlisted
+// environment (PATH/HOME/SSH_AUTH_SOCK only; no GIT_* var inherited), so its
+// anchor is always cwd or a real ancestor of it, never a repository selected
+// by leaked environment state. Adding an anchor-mismatch check here would
+// guard a state gitclient no longer makes representable. Regression-tested
+// by TestRepoLabelFor_IgnoresLeakedGitDir.
 func RepoLabelFor(cwd string) (string, bool) {
 	if cwd == "" {
 		return "", false
