@@ -1786,10 +1786,30 @@ func (e *Engine) evaluateRedirections(redirs []hookio.Redirection, override *pat
 			// scratch tree. pe.ResolvePath reuses the SAME cwd-join + symlink
 			// resolution Evaluate() already applied to compute `access`, so
 			// temproot.Under sees exactly the path that was actually classified.
+			//
+			// DELIBERATELY NOT "continue" / NOT Approve. Falling through to the
+			// `!access.CanWrite()` check below (access is STILL PathReadOnly,
+			// so CanWrite() is still false) downgrades this to NoOpinion rather
+			// than granting an outright Approve. That distinction is what keeps
+			// TestIntegration_HookBypassRegression's "loop terminator redirect
+			// ssh keys" case correct: mkGoTest's buildPhase sets HOME="$TMPDIR"
+			// for this SAME nix-sandboxed run, so `~/.ssh/authorized_keys` is
+			// ALSO, coincidentally, under a temp root there — and a bare
+			// `continue` (treating it as fully safe) actively APPROVED that
+			// write in the sandbox alone, a real regression a first cut of this
+			// fix introduced and this comment now guards against. NoOpinion
+			// defers to whatever later rule or Claude Code's own prompt would
+			// otherwise decide, exactly matching this SAME command's ambient
+			// (non-sandboxed) verdict today, where `~/.ssh` was never under
+			// tmpRoot/$TMPDIR at all and reached NoOpinion by the same
+			// `!CanWrite()` branch — this change does not touch that outcome.
 			if !temproot.Under(pe.ResolvePath(r.Path)) {
 				return hookio.RuleResult{Decision: hookio.Reject, Reason: "redirection: write to read-only path " + r.Path, Module: "engine"}
 			}
-			continue
+			// Falls through to the CanWrite() check below rather than
+			// continuing past it -- access is still PathReadOnly there, so
+			// that check still fires and yields NoOpinion, never Approve,
+			// for the relaxed case (see the comment above).
 		}
 		if !access.CanWrite() {
 			return hookio.RuleResult{Decision: hookio.NoOpinion, Reason: "redirection: write to non-writable path " + r.Path, Module: "engine"}
