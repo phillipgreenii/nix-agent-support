@@ -4,21 +4,41 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	"github.com/phillipgreenii/x/gitclient"
 )
 
-type fakeRunner struct {
-	out  []byte
-	err  error
-	args [][]string
+// fakeHistoryReader is a canned x/gitclient.HistoryReader for exercising
+// ChangedFiles/Commits' mapping to this package's own FileChange/Commit
+// types without touching a real git repository. It also records the
+// argument each call was made with, so tests can assert on the default-base
+// behavior ChangedFiles/Commits apply before delegating.
+type fakeHistoryReader struct {
+	changes    []gitclient.FileChange
+	changesErr error
+	lastBase   string
+
+	commits    []gitclient.Commit
+	commitsErr error
+	lastOpts   gitclient.LogOptions
 }
 
-func (f *fakeRunner) Run(_ context.Context, _ string, args ...string) ([]byte, error) {
-	f.args = append(f.args, append([]string(nil), args...))
-	return f.out, f.err
+func (f *fakeHistoryReader) ChangedFiles(_ context.Context, base string) ([]gitclient.FileChange, error) {
+	f.lastBase = base
+	return f.changes, f.changesErr
 }
 
-func TestChangedFiles_ParsesNumstat(t *testing.T) {
-	r := &fakeRunner{out: []byte("10\t2\tmain.go\n5\t0\treadme.md\n-\t-\tfoo.bin\n")}
+func (f *fakeHistoryReader) Commits(_ context.Context, opts gitclient.LogOptions) ([]gitclient.Commit, error) {
+	f.lastOpts = opts
+	return f.commits, f.commitsErr
+}
+
+func TestChangedFiles_MapsGitclientFileChanges(t *testing.T) {
+	r := &fakeHistoryReader{changes: []gitclient.FileChange{
+		{Path: "main.go", Additions: 10, Deletions: 2},
+		{Path: "readme.md", Additions: 5, Deletions: 0},
+		{Path: "foo.bin", Binary: true},
+	}}
 	files, err := ChangedFiles(context.Background(), r, "/tmp", "")
 	if err != nil {
 		t.Fatalf("err: %v", err)
@@ -33,25 +53,30 @@ func TestChangedFiles_ParsesNumstat(t *testing.T) {
 		t.Fatalf("file[2] should be binary: %+v", files[2])
 	}
 	// Default base used.
-	last := r.args[len(r.args)-1]
-	if last[len(last)-1] != "origin/main...HEAD" {
-		t.Fatalf("expected default base origin/main, got %v", last)
+	if r.lastBase != "origin/main" {
+		t.Fatalf("expected default base origin/main, got %q", r.lastBase)
 	}
 }
 
 func TestChangedFiles_PropagatesError(t *testing.T) {
-	r := &fakeRunner{err: errors.New("git boom")}
+	r := &fakeHistoryReader{changesErr: errors.New("git boom")}
 	_, err := ChangedFiles(context.Background(), r, "/tmp", "")
 	if err == nil {
 		t.Fatalf("expected error")
 	}
 }
 
-func TestCommits_ParsesLog(t *testing.T) {
-	// Two commits, each is 4 NUL-separated fields. -z separates records by
-	// another \x00 byte. Final trailing \x00 is trimmed.
-	out := "abc123\x00first subject\x00first body\x00alice <a@x>\x00def456\x00second subject\x00\x00bob <b@x>\x00"
-	r := &fakeRunner{out: []byte(out)}
+func TestCommits_MapsGitclientCommits(t *testing.T) {
+	r := &fakeHistoryReader{commits: []gitclient.Commit{
+		{
+			SHA: "abc123", Subject: "first subject", Body: "first body",
+			Author: gitclient.Signature{Name: "alice", Email: "a@x"},
+		},
+		{
+			SHA: "def456", Subject: "second subject", Body: "",
+			Author: gitclient.Signature{Name: "bob", Email: "b@x"},
+		},
+	}}
 	cs, err := Commits(context.Background(), r, "/tmp", "main")
 	if err != nil {
 		t.Fatalf("err: %v", err)
@@ -65,19 +90,24 @@ func TestCommits_ParsesLog(t *testing.T) {
 	if cs[1].Body != "" {
 		t.Fatalf("commit[1] body should be empty (trimmed), got %q", cs[1].Body)
 	}
-	last := r.args[len(r.args)-1]
-	if last[1] != "main..HEAD" {
-		t.Fatalf("expected main..HEAD, got %v", last)
+	// base is threaded through as LogOptions.Base (Base..Head, Head
+	// defaulting to HEAD inside x/gitclient).
+	if r.lastOpts.Base != "main" {
+		t.Fatalf("expected LogOptions.Base = %q, got %+v", "main", r.lastOpts)
 	}
 }
 
 func TestCommits_EmptyOutput(t *testing.T) {
-	r := &fakeRunner{out: []byte("")}
+	r := &fakeHistoryReader{commits: nil}
 	cs, err := Commits(context.Background(), r, "/tmp", "")
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
 	if len(cs) != 0 {
 		t.Fatalf("expected 0 commits, got %d", len(cs))
+	}
+	// Default base used.
+	if r.lastOpts.Base != "origin/main" {
+		t.Fatalf("expected default base origin/main, got %+v", r.lastOpts)
 	}
 }
