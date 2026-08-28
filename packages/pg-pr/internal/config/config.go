@@ -8,9 +8,8 @@
 //
 // Phase 1 only loads the fields the sync engine needs: self_login,
 // worktree_root, and a list of repos with team-member / watch-label
-// configuration. Additional fields (issues, cicd, pr_body_template,
-// ci_only_attempts_threshold) are parsed when present but are not yet
-// consumed.
+// configuration. Additional fields (issues, cicd, ci_only_attempts_threshold)
+// are parsed when present but are not yet consumed.
 package config
 
 import (
@@ -143,15 +142,14 @@ type VerdictGeneration struct {
 
 // RepoConfig is a single repo's configuration.
 type RepoConfig struct {
-	Path           string   `yaml:"path" json:"path,omitempty"`
-	Remote         string   `yaml:"remote" json:"remote"`
-	VCS            string   `yaml:"vcs" json:"vcs,omitempty"`
-	CICD           []string `yaml:"cicd,omitempty" json:"cicd,omitempty"`
-	Issues         string   `yaml:"issues,omitempty" json:"issues,omitempty"`
-	Org            string   `yaml:"org,omitempty" json:"org,omitempty"`
-	TeamMembers    []string `yaml:"team_members,omitempty" json:"team_members,omitempty"`
-	WatchLabels    []string `yaml:"watch_labels,omitempty" json:"watch_labels,omitempty"`
-	PRBodyTemplate string   `yaml:"pr_body_template,omitempty" json:"pr_body_template,omitempty"`
+	Path        string   `yaml:"path" json:"path,omitempty"`
+	Remote      string   `yaml:"remote" json:"remote"`
+	VCS         string   `yaml:"vcs" json:"vcs,omitempty"`
+	CICD        []string `yaml:"cicd,omitempty" json:"cicd,omitempty"`
+	Issues      string   `yaml:"issues,omitempty" json:"issues,omitempty"`
+	Org         string   `yaml:"org,omitempty" json:"org,omitempty"`
+	TeamMembers []string `yaml:"team_members,omitempty" json:"team_members,omitempty"`
+	WatchLabels []string `yaml:"watch_labels,omitempty" json:"watch_labels,omitempty"`
 	// TicketPatterns is a list of Go regular-expression strings used to
 	// extract linked external ticket keys from a PR's branch name, title,
 	// and body. Each pattern is applied in order; keys are de-duplicated

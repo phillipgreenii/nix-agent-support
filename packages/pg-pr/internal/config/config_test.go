@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -598,6 +599,63 @@ repos:
 	}
 	if !strings.Contains(err.Error(), "excluded_ci_checks") {
 		t.Errorf("error %q does not mention excluded_ci_checks", err.Error())
+	}
+}
+
+// TestLoadFile_PRBodyTemplate_IgnoredAfterRemoval pins the SILENT-IGNORE
+// posture for the removed pr_body_template repo key (pg2-4dz88.8.3),
+// deliberately the opposite of TestExcludedCIChecksRemovedIsHardError above:
+// pr_body_template was never wired to anything (no live consumer, no
+// behaviour to protect), so a config file written before its removal must
+// keep loading and validating cleanly via the general
+// dec.KnownFields(false) unknown-key posture, with no error and no
+// validation warning. A future switch to stricter parsing is then a
+// deliberate, visible break of this test rather than an accident.
+func TestLoadFile_PRBodyTemplate_IgnoredAfterRemoval(t *testing.T) {
+	dir := t.TempDir()
+	p := writeYAML(t, dir, `
+self_login: me
+worktree_root: `+dir+`
+repos:
+  - remote: owner/repo
+    vcs: github
+    cicd: [github-actions]
+    issues: jira
+    path: `+dir+`
+    pr_body_template: .github/PULL_REQUEST_TEMPLATE.md
+`)
+	cfg, err := LoadFile(p)
+	if err != nil {
+		t.Fatalf("LoadFile should silently ignore the removed pr_body_template key, got error: %v", err)
+	}
+	rep, verr := cfg.Validate()
+	if verr != nil {
+		t.Fatalf("Validate: %v", verr)
+	}
+	if len(rep.Issues) != 0 {
+		t.Fatalf("expected no validation issues (error or warning) for a stale pr_body_template key, got %+v", rep.Issues)
+	}
+}
+
+// TestRepoConfig_SchemaOmitsPRBodyTemplate is a regression guard against
+// reintroducing the removed pr_body_template field. It inspects the
+// RepoConfig struct's fields directly via reflection rather than
+// marshaling a populated value: PRBodyTemplate carried `omitempty` on both
+// tags, so a marshal-and-scan-the-output check would stay green even if the
+// field were reintroduced but merely left unset in the test fixture — it
+// would only ever catch a reintroduction the test author also remembered to
+// populate. Walking the struct's tags instead catches the field existing at
+// all, regardless of whether any value is ever assigned to it.
+func TestRepoConfig_SchemaOmitsPRBodyTemplate(t *testing.T) {
+	typ := reflect.TypeOf(RepoConfig{})
+	for i := 0; i < typ.NumField(); i++ {
+		f := typ.Field(i)
+		yamlName := strings.Split(f.Tag.Get("yaml"), ",")[0]
+		jsonName := strings.Split(f.Tag.Get("json"), ",")[0]
+		if f.Name == "PRBodyTemplate" || yamlName == "pr_body_template" || jsonName == "pr_body_template" {
+			t.Fatalf("RepoConfig still declares a pr_body_template field (Go field %q, yaml tag %q, json tag %q)",
+				f.Name, yamlName, jsonName)
+		}
 	}
 }
 

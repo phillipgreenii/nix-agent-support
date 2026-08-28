@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -90,6 +92,78 @@ func TestConfigShow_JSON(t *testing.T) {
 	repo := repos[0].(map[string]any)
 	if repo["remote"] != "owner/repo" {
 		t.Fatalf("remote = %v", repo["remote"])
+	}
+	// Regression guard for pg2-4dz88.8.3: the removed pr_body_template field
+	// must never resurface in the rendered payload.
+	if _, present := repo["pr_body_template"]; present {
+		t.Fatalf("config show --json emitted removed pr_body_template key: %v", repo)
+	}
+}
+
+// TestConfigShowAndValidate_PRBodyTemplateStaleKey proves the removed
+// pr_body_template config key is silently ignored end-to-end (pg2-4dz88.8.3):
+// a config FILE (not a stubbed struct — the field no longer exists on
+// config.RepoConfig, so there's nothing to stub) that still declares
+// pr_body_template loads through the real newConfigLoader and both
+// `config show --json` and `config validate` succeed with no error, no
+// warning, and no mention of the removed key anywhere in their output.
+func TestConfigShowAndValidate_PRBodyTemplateStaleKey(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	body := `
+self_login: me
+worktree_root: ` + dir + `
+repos:
+  - remote: owner/repo
+    vcs: github
+    cicd: [github-actions]
+    issues: jira
+    path: ` + dir + `
+    pr_body_template: .github/PULL_REQUEST_TEMPLATE.md
+`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PG_PR_CONFIG", path)
+	cfFlags.jsonOutput = false
+
+	var showOut, showErr bytes.Buffer
+	rootCmd.SetOut(&showOut)
+	rootCmd.SetErr(&showErr)
+	rootCmd.SetArgs([]string{"config", "show", "--json"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("config show --json: %v\nstderr=%s", err, showErr.String())
+	}
+	var parsed map[string]any
+	if err := json.Unmarshal(showOut.Bytes(), &parsed); err != nil {
+		t.Fatalf("decode: %v\n%s", err, showOut.String())
+	}
+	repos, ok := parsed["repos"].([]any)
+	if !ok || len(repos) != 1 {
+		t.Fatalf("repos = %v", parsed["repos"])
+	}
+	repo := repos[0].(map[string]any)
+	if _, present := repo["pr_body_template"]; present {
+		t.Fatalf("config show --json emitted removed pr_body_template key for a stale config file: %v", repo)
+	}
+
+	// config show --json above left the shared cfFlags.jsonOutput var (bound
+	// to BOTH configShowCmd's and configValidateCmd's --json flag) set to
+	// true; reset it so this validate call renders the human-readable report
+	// its own args ask for, not JSON left over from the previous command.
+	cfFlags.jsonOutput = false
+	var validateOut, validateErr bytes.Buffer
+	rootCmd.SetOut(&validateOut)
+	rootCmd.SetErr(&validateErr)
+	rootCmd.SetArgs([]string{"config", "validate"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("config validate: %v\nstdout=%s\nstderr=%s", err, validateOut.String(), validateErr.String())
+	}
+	if strings.Contains(validateOut.String(), "pr_body_template") {
+		t.Fatalf("config validate output mentions removed pr_body_template key:\n%s", validateOut.String())
+	}
+	if !strings.Contains(validateOut.String(), "ok: no validation issues") {
+		t.Fatalf("expected a clean validation report for a config file with only a stale pr_body_template key, got:\n%s", validateOut.String())
 	}
 }
 
