@@ -1384,7 +1384,7 @@ func TestBuildNilRegistrySkipsRegexMiningEntirely(t *testing.T) {
 func TestBuildMineRowMergeReminder(t *testing.T) {
 	mk := func(state string, auto bool) MineRow {
 		p := PRInput{PR: api.PR{Repo: "o/n", Number: 1, Author: "me", MergeStateStatus: state, AutoMergeEnabled: auto}, Ownership: ownership.Mine}
-		return buildMineRow(p, nil, nil, dependencyFacts{})
+		return buildMineRow(p, nil, nil, dependencyFacts{}, nil)
 	}
 	if !mk("CLEAN", false).NeedsMergeReminder {
 		t.Errorf("CLEAN + no automerge should need reminder")

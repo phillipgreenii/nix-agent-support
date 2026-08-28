@@ -281,12 +281,12 @@ func Build(in BuilderInput) *Snapshot {
 				if !WithinMergedRetention(p.PR.MergedAt, in.GeneratedAt) {
 					continue // merged more than MergedRetentionWindow ago: drop
 				}
-				row := buildMineRow(p, in.Registry, excl, deps)
+				row := buildMineRow(p, in.Registry, excl, deps, approverAllowlist)
 				row.Merged = true
 				mergedMine = append(mergedMine, row)
 				continue
 			}
-			out.Mine = append(out.Mine, buildMineRow(p, in.Registry, excl, deps))
+			out.Mine = append(out.Mine, buildMineRow(p, in.Registry, excl, deps, approverAllowlist))
 		case !p.PR.Draft && len(reasons) > 0:
 			// "PRs to Review": a non-mine, non-draft PR that STILL qualifies — it
 			// carries at least one live match reason (team-authored ∪ review-requested
@@ -376,16 +376,17 @@ func gateStateFor(revs []store.Revision) gateStateFacts {
 	return gateStateFacts{State: latest.GateState, N: latest.GateStateN, M: latest.GateStateM}
 }
 
-func buildMineRow(p PRInput, reg *agentregistry.Registry, excl *cirollup.Excluder, deps dependencyFacts) MineRow {
+func buildMineRow(p PRInput, reg *agentregistry.Registry, excl *cirollup.Excluder, deps dependencyFacts, allowlist map[string]struct{}) MineRow {
 	appr := classifyApprovals(p, reg)
 	gate := gateStateFor(p.Revisions)
+	ci := cirollup.Compute(p.CIRuns, excl).State
 	return MineRow{
 		Repo:               p.PR.Repo,
 		Number:             p.PR.Number,
 		Title:              p.PR.Title,
 		URL:                p.PR.URL,
 		Draft:              p.PR.Draft,
-		CIStatus:           cirollup.Compute(p.CIRuns, excl).State,
+		CIStatus:           ci,
 		GateState:          gate.State,
 		GateStateN:         gate.N,
 		GateStateM:         gate.M,
@@ -401,6 +402,8 @@ func buildMineRow(p PRInput, reg *agentregistry.Registry, excl *cirollup.Exclude
 		Beads:              mapBeads(p.BeadsDeps),
 		CoOwned:            p.Ownership == ownership.CoOwned,
 		HasConflicts:       p.PR.HasConflict(),
+		BuildState:         buildStateFor(ci),
+		BotVerdict:         botVerdictFor(p.Approvals, allowlist, p.PR.HeadSHA),
 		Hidden:             p.Hidden,
 		HiddenReason:       p.HiddenReason,
 
@@ -422,30 +425,39 @@ func buildTeamRow(p PRInput, reg *agentregistry.Registry, self string, reasons [
 	// and SAME inputs the bead projector uses, so the dashboard signal and the
 	// open-attention-bead set can never diverge (design §2.7, D4 / R4).
 	need, reason := NeedsAttention(p.Revisions, p.Approvals, self, p.PR.HasConflict())
+	ci := cirollup.Compute(p.CIRuns, excl).State
+	verdict := botVerdictFor(p.Approvals, allowlist, p.PR.HeadSHA)
 	return TeamRow{
-		Repo:            p.PR.Repo,
-		Number:          p.PR.Number,
-		Title:           p.PR.Title,
-		Owner:           p.PR.Author,
-		URL:             p.PR.URL,
-		CIStatus:        cirollup.Compute(p.CIRuns, excl).State,
-		GateState:       gate.State,
-		GateStateN:      gate.N,
-		GateStateM:      gate.M,
-		HumanApproved:   appr.Human > 0,
-		AgentApproved:   appr.Agent > 0,
-		HumanApprovers:  appr.Human,
-		AgentApprovers:  appr.Agent,
-		LinesChanged:    p.PR.Additions + p.PR.Deletions,
-		FilesChanged:    p.PR.ChangedFiles,
-		JIRA:            mapJIRA(p.JIRA),
-		NeedsAttention:  need,
-		AttentionReason: reason,
-		MatchReason:     reasons,
-		HasConflicts:    p.PR.HasConflict(),
-		BotDisapproved:  botDisapproved(p.Approvals, allowlist, p.PR.HeadSHA),
-		Hidden:          p.Hidden,
-		HiddenReason:    p.HiddenReason,
+		Repo:                 p.PR.Repo,
+		Number:               p.PR.Number,
+		Title:                p.PR.Title,
+		Owner:                p.PR.Author,
+		URL:                  p.PR.URL,
+		CIStatus:             ci,
+		GateState:            gate.State,
+		GateStateN:           gate.N,
+		GateStateM:           gate.M,
+		HumanApproved:        appr.Human > 0,
+		AgentApproved:        appr.Agent > 0,
+		HumanApprovers:       appr.Human,
+		AgentApprovers:       appr.Agent,
+		LinesChanged:         p.PR.Additions + p.PR.Deletions,
+		FilesChanged:         p.PR.ChangedFiles,
+		JIRA:                 mapJIRA(p.JIRA),
+		NeedsAttention:       need,
+		AttentionReason:      reason,
+		MatchReason:          reasons,
+		HasConflicts:         p.PR.HasConflict(),
+		BotDisapproved:       verdict == BotVerdictDisapproved,
+		BuildState:           buildStateFor(ci),
+		BotVerdict:           verdict,
+		MatchTeamAuthored:    hasMatchReason(reasons, MatchReasonTeamAuthored),
+		MatchReviewRequested: hasMatchReason(reasons, MatchReasonReviewRequested),
+		MatchHasWatchLabel:   hasWatchLabelReason(reasons),
+		SelfApprovalState:    selfApprovalStateFor(p.Approvals, self, p.PR.HeadSHA),
+		SelfCommented:        selfCommentedFor(p.Approvals, self),
+		Hidden:               p.Hidden,
+		HiddenReason:         p.HiddenReason,
 
 		DependencyBlockedBy:              deps.BlockedBy,
 		DependencyBlockedByUnresolvedRef: deps.BlockedByUnresolvedRef,
@@ -666,56 +678,6 @@ func classifyApprovals(p PRInput, reg *agentregistry.Registry) approvalFacts {
 		}
 	}
 	return f
-}
-
-// botDisapproved reports whether p currently carries a STANDING
-// "changes-requested" verdict from an ALLOWLISTED approver — a login in
-// allowlist, Build's set from BuilderInput.ApproverAllowlist
-// (config.Config.ApproverAllowlist).
-//
-// # Why not AgentApproved/AgentApprovers (pg2-4dz88.7.3's read-source decision)
-//
-// ApproverAllowlist is a SEPARATE set from the agent-registration set
-// agentregistry.Registry.IsAgent that classifyApprovals's Human/Agent split
-// uses — config.Config.ApproverAllowlist's own doc comment says membership
-// here is "never implied" by an agent registration. A login can be a
-// registered, ingested agent (counted in AgentApproved/AgentApprovers)
-// without being an allowlisted approver, or vice versa. Reusing
-// AgentApproved/AgentApprovers here would silently misclassify a bot verdict
-// whenever the two sets diverge, which is exactly the failure mode this
-// bead's description flags. This function therefore filters p.Approvals
-// (store.Approval, the same per-approver source classifyApprovals reads)
-// directly against allowlist, never against the registry.
-//
-// A row counts only when it is BOTH:
-//   - state "changes-requested" — the mapping internal/sync/approver.go's
-//     approverApprovalState gives verdict.Withheld, regardless of Findings; and
-//   - currently STANDING — !Approval.IsStale(headSHA).
-//
-// # Staleness decision (pg2-4dz88.7.3)
-//
-// A disapproval that no longer stands for the PR's current head — an
-// earlier-head observation, or one the code host dismissed — is treated as
-// WITHDRAWN, not blocking. This mirrors classifyApprovals and NeedsAttention,
-// which already give every other pr_approval row this exact staleness
-// treatment (INV-APPROVAL-3): the row still records that the disapproval
-// happened, it just no longer holds the PR back once superseded. A second,
-// bot-specific staleness policy would diverge from that established meaning
-// of "stale" for no documented reason.
-func botDisapproved(approvals []store.Approval, allowlist map[string]struct{}, headSHA string) bool {
-	for _, a := range approvals {
-		if _, ok := allowlist[a.Approver]; !ok {
-			continue
-		}
-		if a.State != "changes-requested" {
-			continue
-		}
-		if a.IsStale(headSHA) {
-			continue
-		}
-		return true
-	}
-	return false
 }
 
 func mapJIRA(issues []api.Issue) []JIRAItem {

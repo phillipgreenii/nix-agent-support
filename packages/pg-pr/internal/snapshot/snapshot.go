@@ -134,6 +134,15 @@ type MineRow struct {
 	// On a Mine-panel row (mine/co-owned) this IS the "resolve conflicts" nudge —
 	// the panel is already scoped to PRs I can fix.
 	HasConflicts bool `json:"has_conflicts,omitempty"`
+	// BuildState mirrors the identically-named TeamRow field; see its doc for
+	// the buildStateFor mapping and the "none" decision (pg2-4dz88.7.5).
+	BuildState string `json:"build_state"`
+	// BotVerdict mirrors the identically-named TeamRow field; see its doc for
+	// the shared botVerdictFor computation (pg2-4dz88.7.5). A Mine-panel row
+	// gets this too because a bot can review a PR I authored (e.g. the O6
+	// "blocking bot verdicts" clause pg2-4dz88.7.4's My-PRs ACT NOW view
+	// needs), not only a team PR I am reviewing.
+	BotVerdict string `json:"bot_verdict"`
 	// Merged is true for a PR retained past merge under the
 	// MergedRetentionWindow grace period rather than actively open/draft. A
 	// surface renders this as de-emphasised (a greyed row or a "merged" tag —
@@ -226,6 +235,67 @@ type TeamRow struct {
 	// second, bot-specific staleness policy. See internal/snapshot/panels.go's
 	// ActNow, the ONE predicate this field feeds (pg2-4dz88.7.3).
 	BotDisapproved bool `json:"bot_disapproved,omitempty"`
+	// BuildState is the operator's requested three-valued build-state
+	// indicator ("broken/pending/passing build") derived from CIStatus via
+	// buildStateFor — see that function's doc (indicators.go) for the exact
+	// mapping and, specifically, the decided treatment of cirollup's fourth
+	// "none" state. Universal: computed identically regardless of which team
+	// panel (ACT-NOW/BLOCKED) the row lands in (pg2-4dz88.7.5).
+	BuildState string `json:"build_state"`
+	// BotVerdict is the genuine tri-state read (BotVerdictApproved /
+	// BotVerdictDisapproved / BotVerdictNoDecision, indicators.go's
+	// botVerdictFor) behind BotDisapproved above. BotDisapproved is RETAINED,
+	// now derived from this same computation, because it is an existing
+	// consumer contract (panels.go's ActNow reads it directly); BotVerdict is
+	// the richer field pg2-4dz88.7.5's description asks for, and the ONE
+	// shared computation pg2-4dz88.7.3/.7.4 read rather than each re-deriving
+	// their own allowlist-filtered scan of the per-approver rows.
+	BotVerdict string `json:"bot_verdict"`
+	// MatchTeamAuthored / MatchReviewRequested / MatchHasWatchLabel are the
+	// discrete, Grafana-column-renderable decomposition of the requested
+	// "assigned reviewer / my team is a reviewer / has label" indicator
+	// (pg2-4dz88.7.5's indicator #5) — the joined MatchReason []string above
+	// stays for `--reason` filtering, but a table panel with zero
+	// transformations can only colour/render from a column that is a
+	// discrete field in the payload, not a joined array a consumer would
+	// need a transformation to unpack.
+	//
+	// MatchTeamAuthored is a DELIBERATE PROXY for "my team is a reviewer":
+	// pkg/provider/vcs/github/github.go's review-request parsing discards
+	// GitHub's literal team-review-request signal at ingest ("teams carry
+	// name/slug, no login, and are ignored for 'requested of me'"), so that
+	// literal signal does not exist anywhere in this data model. Capturing it
+	// for real would be new ingest work and is explicitly OUT OF SCOPE for
+	// this bead; MatchTeamAuthored (the PR's AUTHOR is a teammate) is the
+	// closest existing fact, exposed as a named proxy rather than left
+	// unbuilt.
+	//
+	// MatchReasonReviewedByMe is DELIBERATELY NOT decomposed into a boolean
+	// here: it reads closer to the my-review-state indicator below
+	// (SelfApprovalState/SelfCommented) than to this membership-reason
+	// breakdown, and a boolean in BOTH places would double-count it, which
+	// this bead's acceptance criteria explicitly forbid. MatchReasonAssignedToMe
+	// is left undecomposed for the same reason of scope: the operator's
+	// three-item list named "assigned reviewer" (review-requested), "my team
+	// is a reviewer" (team-authored, above) and "has label" only.
+	MatchTeamAuthored    bool `json:"match_team_authored"`
+	MatchReviewRequested bool `json:"match_review_requested"`
+	MatchHasWatchLabel   bool `json:"match_has_watch_label"`
+	// SelfApprovalState is the tri-state "have I approved, and is it stale"
+	// indicator (SelfApprovalNotApproved / SelfApprovalStanding /
+	// SelfApprovalStale, indicators.go's selfApprovalStateFor). Genuinely new
+	// wiring, not a re-export of NeedsAttention/AttentionReasonReReview — see
+	// that function's doc for why NeedsAttention cannot answer this question
+	// on its own (it conflates self-approval with teammate-approval and
+	// conflict-dampening).
+	SelfApprovalState string `json:"self_approval_state"`
+	// SelfCommented is the "have I commented" indicator, scoped (see
+	// indicators.go's selfCommentedFor doc for the explicit scope decision
+	// among this bead's three named options) to the pre-existing
+	// store.Approval{Approver: self, State: "commented"} fact
+	// internal/sync/revision.go's mySubmittedReviews already writes — not a
+	// new, broader "any comment I authored anywhere" count.
+	SelfCommented bool `json:"self_commented"`
 	// Hidden / HiddenReason mirror the identically-named MineRow fields; see
 	// their doc for the contract (pg2-4dz88.4.3).
 	Hidden       bool   `json:"hidden,omitempty"`
