@@ -491,6 +491,10 @@ arguments, behavior is otherwise unchanged.
   closing across concurrent subagents). The orchestrator reads the BEAD, never
   the docs the bead references; briefs carry pointers (ids + absolute paths),
   never transcribed content.
+- Subagent dispatch (step 4/6) is ASYNC. Do NOT call `ScheduleWakeup` to wait
+  on it — end the turn instead; the task notification resumes you
+  automatically. `ScheduleWakeup` is `/loop`-only and needs a `prompt` this
+  command never has.
 - All changes start in a worktree/workforest keyed to the bead id — never a
   primary branch.
 - Land-then-teardown is ORDERED for a workforest set: every member repo MUST land
