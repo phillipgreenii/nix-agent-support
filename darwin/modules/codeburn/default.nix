@@ -36,6 +36,12 @@ in
       # verified not to crash codeburn, so this is belt-and-suspenders — flip it on once the
       # trial proves stable if you want activation to gate on the server being up.
       healthCheck = false;
+      # Working signal: `phillipgreenii-nix-support-apps` ADR 0041, category (d) recorded
+      # exemption. No metricsTargets, functional probe, or logSources errorAlert is registered
+      # for codeburn web — for now that's acceptable because the trial is a single local web
+      # dashboard with no other consumers, so a silent failure has low consequence. Revisit with
+      # category (a) (metrics) or (c) (log-based alert on the plain-text logs below) on the same
+      # trigger as the healthCheck comment above: once the trial graduates to permanent.
       serviceConfig = {
         StandardOutPath = "/Users/${primaryUser}/Library/Logs/codeburn-web.out.log";
         StandardErrorPath = "/Users/${primaryUser}/Library/Logs/codeburn-web.err.log";
