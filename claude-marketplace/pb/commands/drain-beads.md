@@ -311,6 +311,51 @@ build` for nix repos, and the repo's tests, including a slow full suite
    itself in its own context (its own persistent shell keeps the ~37KB of
    dispatcher+handler skill text out of YOUR context).
 
+   **Worktree-pinning check — run BEFORE dispatching the lander.** Your OWN
+   session, not the bead's isolation worktree, can be environment-pinned: the
+   harness enforces a hard refusal on any git operation — direct, or via a
+   dispatched subagent — that targets a path outside that pin, including the
+   repo's own canonical clone. This is intentional, correct harness behavior
+   (see the closed, mischaracterized `pg2-79gml`; provenance for this check:
+   `pg2-weug3`, incident on epic `pg2-99f1r`). It is observable two ways:
+   your OWN environment block states it explicitly (something like "This is a
+   git worktree… Run all commands from this directory. Do NOT `cd` to the
+   original repository root"); or mechanically — `pwd` resolves under this
+   repo's `.worktrees/<id>` isolation directory (see ISOLATE above) while a
+   canonical-clone git query run from here (e.g. the `<primary>`-resolution
+   query LAND's own verification step uses below) either still names the
+   CANONICAL repo rather than this worktree, or is refused outright. Either
+   reading means the same thing: this session cannot reach the canonical
+   clone.
+
+   That matters only when landing actually NEEDS canonical-clone access.
+   Check the resolved strategy the same cheap way the lander itself would —
+   `git config --get pgii-integrate-branch.strategy`, or run the bare
+   `integrate-branch-support` advisory command yourself and read its
+   `strategy` field — before deciding:
+   - NOT pinned, OR the resolved strategy is (or will resolve to)
+     `pull-request` (pushing `drain/<id>` needs no canonical-clone access) →
+     this check does not apply; proceed to dispatch the lander as below.
+   - PINNED AND the resolved strategy is (or will resolve to)
+     `ff-merge-to-main` → do NOT dispatch a lander subagent for this repo. It
+     would fail by construction — the harness's refusal applies to a
+     dispatched subagent exactly as it does to your own direct calls, so the
+     dispatch is a wasted call on an outcome already known. Instead, for
+     THIS bead: STOP short of landing and report directly to the operator —
+     the bead id, the worktree path, the branch (`drain/<id>`), and the
+     commit state already known from the implementation report (fully
+     committed, gates green; only landing is blocked) — the same shape of
+     report a genuine `stopped:` lander outcome produces today, reached
+     without spending a subagent dispatch on a call that cannot succeed.
+     Release the claim in that SAME call, per B-2/B-3
+     (`bd update <id> --status open --assignee "" --actor "ID"`) — do NOT
+     leave it `in_progress` under an actor id that can never come back to
+     finish it (B-1). Do NOT add the `human` label either — no PERSON needs to decide
+     anything about this bead; it only needs a session that is not pinned to
+     this worktree, same reasoning as the CLAIM-step SELF-CHECK's unattended
+     halt above being NOT a `human` park. Leave the worktree/branch exactly
+     as committed — nothing here is discarded. Then return to CLAIM.
+
    The lander brief MUST contain: the bead id; the absolute canonical repo
    root; the worktree path and branch `drain/<id>`; the working directory to
    `cd` into first (worktree path, or for a set the set root
@@ -587,6 +632,17 @@ arguments, behavior is otherwise unchanged.
   (not discarded), and report to the operator that the session should be
   restarted fresh — this is a session-level anomaly, not a `human`-labeled
   bead park.
+- Before dispatching a LAND-step (step 6) lander, check whether YOUR OWN
+  session is environment-pinned to a worktree in a way that blocks
+  canonical-clone access (the environment block says so, or a canonical-clone
+  git query from here still resolves to — or is refused for — the canonical
+  repo rather than this worktree). Where the resolved strategy needs
+  canonical-clone access (`ff-merge-to-main`), a pinned session MUST NOT
+  dispatch a lander for that repo — it fails by construction — and MUST
+  instead report to the operator and release the claim (open, unassigned,
+  no `human` label — a session-shaped blocker, not a person-shaped one),
+  leaving the worktree/branch exactly as committed. Does not apply to
+  `pull-request`, which needs no canonical-clone access.
 - If a skill reports the canonical clone is off its primary branch or dirty, HALT and
   report — EXCEPT under a strategy that never touches the canonical clone, where the
   handler surfaces the anomaly and proceeds (the `pull-request` handler's PR-0, R-8's
