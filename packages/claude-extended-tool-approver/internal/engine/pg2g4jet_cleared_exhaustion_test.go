@@ -81,8 +81,10 @@ func TestPg2G4jet_SubstitutionClearedExhaustionAbstainsInCommandPosition(t *test
 
 // TestPg2G4jet_SubstitutionRefusedStillFloorsUnconditionally is the regression guard
 // against this relief accidentally widening past SubstitutionCleared: a body the seam
-// REFUSES outright must stay floored to a decisive Ask in command position, exactly as
-// before this bead, however confidently recursion judges the bare form.
+// REFUSES outright must stay floored UNCONDITIONALLY in command position, exactly as
+// before this bead, however confidently recursion judges the bare form. The floor's
+// own decisive value moved from Ask to Reject under pg2-kxmpe (2026-08-28, unrelated
+// to and unaffected by pg2-g4jet) — this test asserts against that current value.
 func TestPg2G4jet_SubstitutionRefusedStillFloorsUnconditionally(t *testing.T) {
 	t.Setenv("WORKSPACE_ROOT", "/Users/testuser/workspace")
 	projectRoot := "/Users/testuser/workspace/my-project"
@@ -104,8 +106,12 @@ func TestPg2G4jet_SubstitutionRefusedStillFloorsUnconditionally(t *testing.T) {
 	for _, body := range bodies {
 		t.Run(body, func(t *testing.T) {
 			got := eng.EvaluateHook(provenanceInput(projectRoot, commandPositionCmd(body)))
-			if got.Decision != hookio.Ask {
-				t.Errorf("%q = %s (%s: %s); want Ask — pg2-g4jet must NOT touch the SubstitutionRefused floor",
+			// pg2-kxmpe (2026-08-28, landed after this test) raises the SubstitutionRefused
+			// floor itself from Ask to Reject — unrelated to and unaffected by pg2-g4jet,
+			// which this test guards. The floor being UNCONDITIONAL is what this test pins;
+			// its exact decisive value moved out from under it via a separate ruling.
+			if got.Decision != hookio.Reject {
+				t.Errorf("%q = %s (%s: %s); want Reject — pg2-g4jet must NOT touch the SubstitutionRefused floor",
 					commandPositionCmd(body), got.Decision, got.Module, got.Reason)
 			}
 		})
