@@ -1085,7 +1085,16 @@
               # merely shell out to a system tool absent from the sandbox PATH
               # (`caffeinate`, `ps`) `t.Skip` when the tool is missing, matching
               # the repo's tool-absent skip idiom (pb's bd/pn tests) so a dev
-              # machine still exercises them.
+              # machine still exercises them. git on PATH (pg2-vc5bp): the
+              # RepoLabelFor GIT_DIR-leak regression tests
+              # (TestRepoLabelFor_StillWorksUnleaked,
+              # TestRepoLabelFor_IgnoresLeakedGitDir in
+              # internal/labels/detectors/repo_test.go) use x/gittest +
+              # x/gitfixture to spin up real git repo fixtures and exec real
+              # `git` commands against them — matching the same testDeps
+              # pattern already used by ccpool-go-tests,
+              # claude-extended-tool-approver-go-tests, pb-go-tests and
+              # pg-pr-go-tests above.
               pa-monitor-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
                 pname = "pa-monitor-go-tests";
                 src = lib.fileset.toSource {
@@ -1097,6 +1106,7 @@
                 };
                 modRoot = "pa-monitor";
                 gomod2nixToml = ./packages/pa-monitor/gomod2nix.toml;
+                testDeps = [ pkgs.git ];
               };
 
               # pr-pool — full internal/* suite PLUS a per-package STATEMENT-
