@@ -54,17 +54,40 @@ type Snapshot struct {
 	// is always a non-nil slice, "[]" when empty, matching Mine/Team's own
 	// convention.
 	//
-	// DELIBERATELY json:"-": this is classification logic only, per this
-	// bead's own cross-ref note on sibling pg2-4dz88.7.8 — neither this bead
-	// nor .7.3 (team-panel membership) commits to a wire shape (separate
-	// arrays vs. a per-row discriminator field on MineRow); that decision is
-	// explicitly .7.8's to make once both land. Keeping these fields
-	// unmarshaled avoids baking "separate arrays" into the payload contract
-	// before that decision is made, while still letting Build/tests/a future
-	// consumer read the partition directly off the Go value.
-	MineActNow              []MineRow `json:"-"`
-	MineAwaitingOthers      []MineRow `json:"-"`
-	MineAwaitingOtherThings []MineRow `json:"-"`
+	// WIRE-SHAPE DECISION (resolved by pg2-4dz88.7.8): separate arrays, not a
+	// per-row discriminator field. Neither this bead nor .7.3 (team-panel
+	// membership) committed to a wire shape when they landed — the two
+	// options on the table were (a) one array/key per view, or (b) one flat
+	// array plus a per-row discriminator field the Grafana Infinity
+	// datasource could filter on. Option (a) was chosen because it needs NO
+	// Grafana-side filtering at all (each panel's root_selector points
+	// straight at its own key), which both sidesteps any question about the
+	// Infinity plugin's filter-expression capabilities (an OR-of-negations
+	// like AWAITING OTHERS cannot be expressed as an AND-only field filter
+	// without recomputing the predicate client-side) and best preserves this
+	// package's "categorization stays in Go" principle (pg2-4dz88.7's design
+	// section 1: computing it again in Grafana via UQL/computed columns would
+	// reopen the exact divergence risk the shared ClassifyMine/ActNow
+	// predicates exist to close). The classification itself is NOT new — it
+	// is the same ClassifyMine computation Build already made; only the JSON
+	// exposure of that existing result changed, from json:"-" to a real key.
+	MineActNow              []MineRow `json:"mine_act_now"`
+	MineAwaitingOthers      []MineRow `json:"mine_awaiting_others"`
+	MineAwaitingOtherThings []MineRow `json:"mine_awaiting_other_things"`
+
+	// TeamActNow / TeamBlocked mirror the Mine partition above for the two
+	// team panels (pg2-4dz88.7.3): the EXHAUSTIVE ActNow/!ActNow complement
+	// computed by panels.go's PartitionTeamPanels, exposed as two separate
+	// JSON arrays for the identical reason recorded on the Mine fields above
+	// (pg2-4dz88.7.8's wire-shape decision applies to both sides — the team
+	// side's own BLOCKED panel is exactly the "OR-of-negations" shape a
+	// discriminator-plus-filter approach cannot express without a
+	// transformation). The flat Team field (json:"team") is UNCHANGED and
+	// stays populated — pg2-hwzs/pg2-ynhr.13 retained it for query
+	// compatibility, and nothing about adding these two new keys touches it.
+	// Always non-nil ("[]" when empty), matching Team's own convention.
+	TeamActNow  []TeamRow `json:"team_act_now"`
+	TeamBlocked []TeamRow `json:"team_blocked"`
 }
 
 // WithFreshness returns a shallow COPY of s with the serve-time half of the

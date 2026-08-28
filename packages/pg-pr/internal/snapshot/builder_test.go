@@ -1958,3 +1958,90 @@ func TestBuild_TeamRowsAreComparatorSorted(t *testing.T) {
 		}
 	}
 }
+
+// TestBuild_TeamActNowBlockedMatchesPartitionFunction is the drift guard for
+// pg2-4dz88.7.8's wire-shape wiring: Build's out.TeamActNow/out.TeamBlocked
+// must equal calling PartitionTeamPanels(out.Team) directly, so this can
+// never silently diverge into a second, hand-rolled partition of Team. The
+// expectation is COMPUTED by calling the same exported function Build calls,
+// mirroring TestBuild_TeamRowsAreComparatorSorted's pattern for the
+// comparator.
+func TestBuild_TeamActNowBlockedMatchesPartitionFunction(t *testing.T) {
+	in := BuilderInput{
+		GeneratedAt: time.Now(),
+		Self:        "alice",
+		TeamMembers: []string{"bob"},
+		PRs: []PRInput{
+			// ACT NOW: CI green, no conflict, no bot disapproval.
+			{PR: api.PR{Repo: "o/r", Number: 1, Author: "bob", Title: "act now", Mergeable: "MERGEABLE"}, CIRuns: []api.CIRun{{Name: "build", Status: "completed", Conclusion: "success"}}, Ownership: ownership.Team},
+			// BLOCKED: merge conflict.
+			{PR: api.PR{Repo: "o/r", Number: 2, Author: "bob", Title: "blocked", Mergeable: "CONFLICTING"}, Ownership: ownership.Team},
+		},
+	}
+	snap := Build(in)
+
+	if len(snap.Team) != 2 {
+		t.Fatalf("fixture too small to prove anything: got %d Team rows, want 2: %+v", len(snap.Team), snap.Team)
+	}
+	wantActNow, wantBlocked := PartitionTeamPanels(snap.Team)
+	if !reflect.DeepEqual(snap.TeamActNow, wantActNow) {
+		t.Errorf("snap.TeamActNow = %+v, want %+v (PartitionTeamPanels(snap.Team))", snap.TeamActNow, wantActNow)
+	}
+	if !reflect.DeepEqual(snap.TeamBlocked, wantBlocked) {
+		t.Errorf("snap.TeamBlocked = %+v, want %+v (PartitionTeamPanels(snap.Team))", snap.TeamBlocked, wantBlocked)
+	}
+	// Sanity: the fixture actually exercises both panels, so this cannot pass
+	// vacuously against an always-empty partition.
+	if len(snap.TeamActNow) != 1 || len(snap.TeamBlocked) != 1 {
+		t.Fatalf("fixture must split 1/1 across ActNow/Blocked, got ActNow=%d Blocked=%d", len(snap.TeamActNow), len(snap.TeamBlocked))
+	}
+}
+
+// TestBuild_TeamActNowBlockedEmptyNotNil mirrors
+// TestMinePanelMembership_ThreeViews's empty-set case for the team side: on
+// an empty PR set both new wire arrays must be [], never null, matching
+// Team's own established convention.
+func TestBuild_TeamActNowBlockedEmptyNotNil(t *testing.T) {
+	snap := Build(BuilderInput{Self: "alice"})
+	if snap.TeamActNow == nil {
+		t.Error("TeamActNow must be non-nil ([]TeamRow{}) when empty")
+	}
+	if snap.TeamBlocked == nil {
+		t.Error("TeamBlocked must be non-nil ([]TeamRow{}) when empty")
+	}
+}
+
+// TestBuild_MineAndTeamPanelWireKeysRoundTripThroughJSON proves the
+// pg2-4dz88.7.8 wire-shape decision (separate arrays, real JSON keys rather
+// than json:"-") actually survives the JSON encoder — a Go-only field is
+// unrenderable to Grafana, which is the exact risk this bead's own testing
+// section names for every new indicator/wire field in this decomposition.
+func TestBuild_MineAndTeamPanelWireKeysRoundTripThroughJSON(t *testing.T) {
+	snap := Build(BuilderInput{Self: "alice"})
+	b, err := json.Marshal(snap)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	var raw map[string]interface{}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	for _, key := range []string{
+		"mine_act_now", "mine_awaiting_others", "mine_awaiting_other_things",
+		"team_act_now", "team_blocked",
+	} {
+		v, present := raw[key]
+		if !present {
+			t.Errorf("key %q must be present in the JSON payload", key)
+			continue
+		}
+		arr, ok := v.([]interface{})
+		if !ok {
+			t.Errorf("key %q must decode as a JSON array, got %T (%v)", key, v, v)
+			continue
+		}
+		if arr == nil {
+			t.Errorf("key %q must be [], not null, when empty", key)
+		}
+	}
+}

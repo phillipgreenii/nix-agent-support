@@ -244,6 +244,8 @@ func Build(in BuilderInput) *Snapshot {
 		MineActNow:              []MineRow{},
 		MineAwaitingOthers:      []MineRow{},
 		MineAwaitingOtherThings: []MineRow{},
+		TeamActNow:              []TeamRow{},
+		TeamBlocked:             []TeamRow{},
 	}
 	teamSet := make(map[string]struct{}, len(in.TeamMembers))
 	for _, m := range in.TeamMembers {
@@ -352,6 +354,15 @@ func Build(in BuilderInput) *Snapshot {
 	// every consumer -- the Grafana panel, `pg-pr open`'s team listing --
 	// inherits this order rather than re-deriving one.
 	sortTeamRows(out.Team)
+	// Team-panel membership (pg2-4dz88.7.3/pg2-4dz88.7.8): partition the
+	// already-sorted, already-filtered Team slice into the two dashboard
+	// panels via the ONE exported predicate (panels.go's ActNow/
+	// PartitionTeamPanels) — never a second hand-rolled predicate for either
+	// panel (that is the exact O3 grooming-review hole PartitionTeamPanels's
+	// own doc comment guards against). Partitioning AFTER sortTeamRows
+	// preserves comparator order within each resulting panel, since
+	// partitioning is a stable filter over an already-ordered slice.
+	out.TeamActNow, out.TeamBlocked = PartitionTeamPanels(out.Team)
 	return out
 }
 
