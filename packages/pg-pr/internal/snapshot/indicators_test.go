@@ -200,6 +200,13 @@ func TestSelfApprovalStateFor_Staleness(t *testing.T) {
 		want      string
 	}{
 		{"empty self", []store.Approval{{Approver: self, State: "approved", HeadSHA: "h1"}}, "h1", "", SelfApprovalNotApproved},
+		// A coincidental row with Approver=="" must NOT be treated as self's
+		// own row when self is ALSO "": self=="" means "no viewer identified
+		// at all", never "the viewer whose login happens to be empty". This
+		// pins the early-return guard itself (pg-go-mutate: without it, the
+		// loop below would match this row by login equality and misreport
+		// SelfApprovalStanding).
+		{"empty self guards against a coincidental empty-login approver row", []store.Approval{{Approver: "", State: "approved", HeadSHA: "h1"}}, "h1", "", SelfApprovalNotApproved},
 		{"no rows at all", nil, "h1", self, SelfApprovalNotApproved},
 		{"self commented, not approved", []store.Approval{{Approver: self, State: "commented", HeadSHA: "h1"}}, "h1", self, SelfApprovalNotApproved},
 		{"self changes-requested (own review, not approved)", []store.Approval{{Approver: self, State: "changes-requested", HeadSHA: "h1"}}, "h1", self, SelfApprovalNotApproved},
@@ -216,6 +223,35 @@ func TestSelfApprovalStateFor_Staleness(t *testing.T) {
 	}
 }
 
+// TestSelfApprovalStateFor_OnlyMatchesExactSelfLogin proves the per-row
+// login match (indicators.go's `a.Approver != self` guard) is an EXACT
+// equality check, not an ordering comparison — pinned in BOTH lexical
+// directions so a mutation replacing != with an ordering operator (>, >=,
+// <, <=) cannot survive by accident on just one direction. A teammate whose
+// login sorts either before or after self must be skipped identically: self
+// never approved, regardless of whose login is lexically "smaller".
+func TestSelfApprovalStateFor_OnlyMatchesExactSelfLogin(t *testing.T) {
+	const head = "h1"
+	tests := []struct {
+		name     string
+		self     string
+		approver string
+	}{
+		{"teammate login sorts BEFORE self", "carol", "alice"},
+		{"teammate login sorts AFTER self", "alice", "carol"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			approvals := []store.Approval{{Approver: tc.approver, State: "approved", HeadSHA: head}}
+			if got := selfApprovalStateFor(approvals, tc.self, head); got != SelfApprovalNotApproved {
+				t.Errorf("selfApprovalStateFor(self=%q, approver=%q) = %q, want %q — "+
+					"a teammate's standing approval must never be read as self's own",
+					tc.self, tc.approver, got, SelfApprovalNotApproved)
+			}
+		})
+	}
+}
+
 // TestSelfCommentedFor covers the scoped (option-b) reading directly.
 func TestSelfCommentedFor(t *testing.T) {
 	const self = "alice"
@@ -226,6 +262,10 @@ func TestSelfCommentedFor(t *testing.T) {
 		want      bool
 	}{
 		{"empty self", []store.Approval{{Approver: self, State: "commented"}}, "", false},
+		// Mirrors selfApprovalStateFor's guard test: a coincidental
+		// Approver=="" row must not be read as self's own comment when self
+		// is ALSO "" — pins the early-return guard itself.
+		{"empty self guards against a coincidental empty-login approver row", []store.Approval{{Approver: "", State: "commented"}}, "", false},
 		{"no rows", nil, self, false},
 		{"self approved, not commented", []store.Approval{{Approver: self, State: "approved"}}, self, false},
 		{"self changes-requested, not commented", []store.Approval{{Approver: self, State: "changes-requested"}}, self, false},
@@ -236,6 +276,30 @@ func TestSelfCommentedFor(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := selfCommentedFor(tc.approvals, tc.self); got != tc.want {
 				t.Errorf("selfCommentedFor() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestSelfCommentedFor_OnlyMatchesExactSelfLogin is selfCommentedFor's
+// counterpart to TestSelfApprovalStateFor_OnlyMatchesExactSelfLogin: the
+// per-row login match (`a.Approver == self`) is exact equality, not an
+// ordering comparison, pinned in both lexical directions.
+func TestSelfCommentedFor_OnlyMatchesExactSelfLogin(t *testing.T) {
+	tests := []struct {
+		name     string
+		self     string
+		approver string
+	}{
+		{"teammate login sorts BEFORE self", "bob", "aaron"},
+		{"teammate login sorts AFTER self", "aaron", "bob"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			approvals := []store.Approval{{Approver: tc.approver, State: "commented"}}
+			if got := selfCommentedFor(approvals, tc.self); got {
+				t.Errorf("selfCommentedFor(self=%q, approver=%q) = true, want false — "+
+					"a teammate's comment must never be read as self's own", tc.self, tc.approver)
 			}
 		})
 	}

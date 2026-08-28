@@ -278,3 +278,41 @@ func TestBuildTeamRow_StaleBotDisapprovalWithdrawn(t *testing.T) {
 		t.Error("a host-dismissed bot disapproval must be treated as withdrawn, not blocking")
 	}
 }
+
+// TestBuildTeamRow_BotVerdictApprovedDoesNotSetBotDisapproved (pg2-4dz88.7.5)
+// covers the one bot-verdict shape none of this file's existing BotDisapproved
+// tests exercise: an ALLOWLISTED approver's STANDING "approved" row. Both
+// BotDisapproved==false and BotVerdict==BotVerdictApproved must hold
+// together — pinning that "not disapproved" and "positively approved" are
+// two different facts, not the same boolean read twice (pg-go-mutate: a
+// mutation weakening BotDisapproved's `== BotVerdictDisapproved` check to an
+// ordering comparison collapses this exact case, since "approved" sorts
+// before "disapproved" lexicographically).
+func TestBuildTeamRow_BotVerdictApprovedDoesNotSetBotDisapproved(t *testing.T) {
+	reg, _ := agentregistry.New(nil)
+	in := BuilderInput{
+		GeneratedAt: time.Now(),
+		Self:        "alice",
+		TeamMembers: []string{"bob"},
+		Registry:    reg,
+		PRs: []PRInput{
+			{
+				PR:        api.PR{Repo: "o/r", Number: 30, Author: "bob", URL: "u30", HeadSHA: "h1"},
+				Revisions: []store.Revision{{Seq: 1, HeadSHA: "h1"}},
+				Approvals: []store.Approval{{Approver: "policy-bot", State: "approved", HeadSHA: "h1"}},
+			},
+		},
+		ApproverAllowlist: []string{"policy-bot"},
+	}
+	snap := Build(in)
+	if len(snap.Team) != 1 {
+		t.Fatalf("want 1 team row, got %d", len(snap.Team))
+	}
+	row := snap.Team[0]
+	if row.BotDisapproved {
+		t.Error("an allowlisted approver's standing APPROVAL must NOT set BotDisapproved")
+	}
+	if row.BotVerdict != BotVerdictApproved {
+		t.Errorf("BotVerdict = %q, want %q", row.BotVerdict, BotVerdictApproved)
+	}
+}
