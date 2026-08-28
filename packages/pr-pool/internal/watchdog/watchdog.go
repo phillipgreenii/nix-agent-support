@@ -32,9 +32,16 @@ type Watchdog struct {
 	Budget                 budget.Budget
 	RepoRoot, WorktreeDir  string
 	ReminderMsg, WrapUpMsg string
-	Git                    GitRunner
-	Now                    func() time.Time
-	Poll                   time.Duration
+	// Git is no longer read by this package's own hard-stop sequence
+	// (terminal/safeToReset migrated onto x/gitclient's Cleaner+Locator
+	// roles, bead pg2-ljyaj -- see terminal.go's openGit). The field stays
+	// here because internal/executor/orchestrator still populate it as part
+	// of the shared worktree-creation git seam (executor.Deps.git), and
+	// removing it would require editing those out-of-scope packages;
+	// retire it once pg2-mj9n0 migrates that seam too.
+	Git  GitRunner
+	Now  func() time.Time
+	Poll time.Duration
 
 	// FirstTurnStarted reports whether the model has taken at least one turn in the
 	// session transcript. The reminder/wrap-up NUDGES are gated on this: a

@@ -1,6 +1,6 @@
 module github.com/phillipgreenii/pr-pool
 
-go 1.25.0
+go 1.25.9
 
 require (
 	github.com/phillipgreenii/ccpool v0.0.0
@@ -9,6 +9,7 @@ require (
 
 require (
 	github.com/BurntSushi/toml v1.6.0
+	github.com/phillipgreenii/x v0.0.0-20260828055400-434334771eea
 	go.opentelemetry.io/otel v1.44.0
 	go.opentelemetry.io/otel/metric v1.44.0
 	go.opentelemetry.io/otel/sdk/metric v1.44.0
