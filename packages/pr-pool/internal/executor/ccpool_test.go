@@ -724,6 +724,29 @@ func TestDispatch_watchdogHardStop_unclaimed(t *testing.T) {
 	deps := newExec(cc, bd, cfg).deps
 	deps.ExternalID = "pr-pool-worker-zr-w"
 	deps.Git = &dtest.NoopGit{}
+	// This test exercises the real waitDone/watchdog race (workerWaitWithWatchdog),
+	// not a single deterministic path, so it must not let the two racers run on
+	// mismatched clocks: newExec's default Tick advances the manual clock with NO
+	// real sleep, while the watchdog's own Poll wait is a real time.After. That
+	// mismatch let waitDone's MaxWait deadline spin through all its iterations
+	// (pure CPU, no real elapsed time) and occasionally win the terminal-claim
+	// race before the watchdog's near-zero-cost first budget check ever got a
+	// scheduler slice — reproduced at ~1/200 under GOMAXPROCS=1 (matching a
+	// contended/single-core nix build sandbox), reporting Escalated instead of
+	// Unclaimed. Wrapping Tick with a real sleep puts both racers on the same
+	// wall-clock timeline (as in production), so the watchdog reliably wins by a
+	// wide margin; the wrapped call still advances the manual clock afterward, so
+	// a genuine regression in the watchdog still fails fast via the deadline path
+	// instead of hanging.
+	origTick := deps.Tick
+	deps.Tick = func(ctx context.Context, d time.Duration) error {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(d):
+		}
+		return origTick(ctx, d)
+	}
 	deps.UsageReader = &dtest.RampReader{Seq: []usage.Snapshot{{OutputTokens: 2000}}} // immediately >100%
 	res, err := ccpoolExecutor{}.Dispatch(context.Background(), d, deps)
 	if err == nil {
