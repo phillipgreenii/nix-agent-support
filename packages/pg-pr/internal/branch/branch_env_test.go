@@ -3,7 +3,6 @@ package branch
 import (
 	"context"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -14,9 +13,18 @@ import (
 // that inherits them fails loudly instead of reporting facts about the wrong
 // clone.
 //
-// See internal/gitenv for the mechanism (pg2-lx41y): git's repo discovery
-// consults these BEFORE it looks at `-C dir`, so `-C dir` cannot override
-// them.
+// Before this package migrated onto x/gitclient (pg2-66340), the mechanism
+// under test here was internal/gitenv (pg2-lx41y): git's repo discovery
+// consults these vars BEFORE it looks at `-C dir`, so `-C dir` alone cannot
+// override them, and gitenv.Command filtered the INHERITED process
+// environment down to an allowlist. x/gitclient's Client goes further
+// (design §4.4's environment contract): it BUILDS the child environment from
+// scratch — PATH/HOME/SSH_AUTH_SOCK plus whatever an Option explicitly adds —
+// so a var like GIT_DIR that was never passed through an Option has no path
+// into the child at all, regardless of what this process's own environment
+// contains. This test exercises that guarantee through the package's real
+// production entry point (CLIGitRunner), the same way it did against the
+// retired runGit helper.
 func leakGitLocationVars(t *testing.T) {
 	t.Helper()
 	leaked := filepath.Join(t.TempDir(), "leaked-git-dir")
@@ -26,31 +34,8 @@ func leakGitLocationVars(t *testing.T) {
 	t.Setenv("GIT_COMMON_DIR", leaked)
 }
 
-// TestRunGitStaysInDirUnderLeakedGitDir drives the package's real runGit —
-// the helper behind Detect's toplevel/branch/remote lookups — and asserts it
-// resolved the directory it was handed rather than the leaked repository.
-func TestRunGitStaysInDirUnderLeakedGitDir(t *testing.T) {
-	repo := t.TempDir()
-	initRepo(t, repo)
-	leakGitLocationVars(t)
-
-	out, err := runGit(context.Background(), repo, "rev-parse", "--absolute-git-dir")
-	if err != nil {
-		t.Fatalf("runGit inherited the leaked GIT_DIR and could not resolve %s: %v", repo, err)
-	}
-
-	resolved, err := filepath.EvalSymlinks(repo)
-	if err != nil {
-		resolved = repo
-	}
-	want := filepath.Join(resolved, ".git")
-	if got := strings.TrimSpace(out); got != want {
-		t.Fatalf("runGit resolved the wrong repository\n got: %s\nwant: %s", got, want)
-	}
-}
-
 // TestCLIGitRunnerStaysInDirUnderLeakedGitDir covers the exported production
-// path too: CLIGitRunner's whole contract is "report facts about THIS
+// path: CLIGitRunner's whole contract is "report facts about THIS
 // directory", which a leaked GIT_DIR silently breaks.
 func TestCLIGitRunnerStaysInDirUnderLeakedGitDir(t *testing.T) {
 	repo := t.TempDir()

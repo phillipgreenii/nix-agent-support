@@ -21,9 +21,9 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/gitenv"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/provider/vcs/github"
+	"github.com/phillipgreenii/x/gitclient"
 )
 
 // Options carries injectable dependencies for Detect. Production callers
@@ -104,62 +104,74 @@ func defaultBase() string { return "origin/main" }
 type GitRunner interface {
 	// WorktreeRoot returns `git -C dir rev-parse --show-toplevel`.
 	WorktreeRoot(ctx context.Context, dir string) (string, error)
-	// CurrentBranch returns `git -C dir rev-parse --abbrev-ref HEAD`.
+	// CurrentBranch returns the branch checked out at dir, preserving the
+	// legacy `rev-parse --abbrev-ref HEAD` sentinel behavior on detached
+	// HEAD (see the gitclient.ErrDetachedHEAD handling below).
 	CurrentBranch(ctx context.Context, dir string) (string, error)
 	// RemoteOriginURL returns the URL of remote.origin or an error if
 	// no such remote is configured.
 	RemoteOriginURL(ctx context.Context, dir string) (string, error)
 }
 
-// CLIGitRunner shells out to the system `git` binary.
+// opener anchors a gitclient.Locator at dir (design §4.5's consumer mapping:
+// "pg-pr branch -> Locator"; §4.6's app-local opener seam). It is a
+// package-level var, not a plain function, so tests can substitute a fake
+// opener without threading a new testing seam through GitRunner/CLIGitRunner
+// itself — mirroring internal/worktree's openGit.
+type opener func(ctx context.Context, dir string) (gitclient.Locator, error)
+
+var openGit opener = func(ctx context.Context, dir string) (gitclient.Locator, error) {
+	return gitclient.New(ctx, dir)
+}
+
+// CLIGitRunner shells out to the system `git` binary via x/gitclient.
 type CLIGitRunner struct{}
 
 // NewCLIGitRunner returns the default GitRunner.
 func NewCLIGitRunner() GitRunner { return &CLIGitRunner{} }
 
 func (g *CLIGitRunner) WorktreeRoot(ctx context.Context, dir string) (string, error) {
-	out, err := runGit(ctx, dir, "rev-parse", "--show-toplevel")
+	client, err := openGit(ctx, dir)
 	if err != nil {
 		return "", err
 	}
-	return strings.TrimSpace(out), nil
+	return client.Toplevel(ctx)
 }
 
 func (g *CLIGitRunner) CurrentBranch(ctx context.Context, dir string) (string, error) {
-	out, err := runGit(ctx, dir, "rev-parse", "--abbrev-ref", "HEAD")
+	client, err := openGit(ctx, dir)
 	if err != nil {
 		return "", err
 	}
-	return strings.TrimSpace(out), nil
+	branch, err := client.CurrentBranch(ctx)
+	if err != nil {
+		if errors.Is(err, gitclient.ErrDetachedHEAD) {
+			// The previous `rev-parse --abbrev-ref HEAD` implementation
+			// returned the literal string "HEAD" on detached HEAD;
+			// gitclient's CurrentBranch (`branch --show-current`) returns
+			// ErrDetachedHEAD instead. Map the sentinel back to "HEAD" to
+			// preserve that behavior deliberately (design §4.2 migration
+			// behavior note (b) — the same note internal/worktree's
+			// WorktreeInfo absorbs for its own --abbrev-ref caller).
+			return "HEAD", nil
+		}
+		return "", err
+	}
+	return branch, nil
 }
 
 func (g *CLIGitRunner) RemoteOriginURL(ctx context.Context, dir string) (string, error) {
-	out, err := runGit(ctx, dir, "remote", "get-url", "origin")
+	client, err := openGit(ctx, dir)
 	if err != nil {
 		return "", err
 	}
-	return strings.TrimSpace(out), nil
-}
-
-// runGit invokes `git -C dir <args...>` and returns stdout. Errors include
-// captured stderr to aid debugging.
-func runGit(ctx context.Context, dir string, args ...string) (string, error) {
-	// gitenv.Command owns the child environment: a leaked GIT_DIR /
-	// GIT_INDEX_FILE outranks `-C dir`, so passing dir alone is not enough to
-	// keep this call inside dir. See internal/gitenv (pg2-lx41y).
-	cmd := gitenv.Command(ctx, dir, args...)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			return stdout.String(), fmt.Errorf("git %s: %w: %s",
-				strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
-		}
-		return stdout.String(), fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
-	}
-	return stdout.String(), nil
+	// gitclient.Locator.RemoteURL reads raw `config --get
+	// remote.<remote>.url` (no insteadOf expansion), whereas the previous
+	// implementation ran `remote get-url origin` (which does expand
+	// insteadOf). This is a deliberate, documented behavior change (design
+	// §4.2's RemoteURL doc note): it only differs on hosts with an
+	// insteadOf rewrite configured for their origin remote.
+	return client.RemoteURL(ctx, "origin")
 }
 
 // ----------------------------------------------------------------------
