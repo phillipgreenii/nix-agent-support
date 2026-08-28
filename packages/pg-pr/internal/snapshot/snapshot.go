@@ -274,10 +274,11 @@ type TeamRow struct {
 	// re-derived): 0 for every PR with no live blocking relation — Trunk,
 	// Unblocked/merged-middle, the out-of-set marker, Foreign, Self,
 	// Unresolvable, or a PR absent from this pass entirely — and -Depth for
-	// a PR genuinely blocked on another PR in this set. This field is a KEY
-	// ONLY: Build does not sort rows by it and no comparator lives in this
-	// package; a later multi-key comparator (a different, later bead)
-	// combines it with other signals.
+	// a PR genuinely blocked on another PR in this set. It is sort key 3 of
+	// ordering.go's CompareTeamRows (pg2-4dz88.7.2), which Build now applies
+	// to snap.Team before returning: descending on this field, so a higher
+	// (less-blocked) value ranks first, exactly as described above. This
+	// field remains a projected FACT, never re-derived by the comparator.
 	DependencyOrderingKey int `json:"dependency_ordering_key,omitempty"`
 }
 

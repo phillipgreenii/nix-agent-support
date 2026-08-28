@@ -44,8 +44,16 @@ func TestCompareTeamRows_TieBreakLadder(t *testing.T) {
 			for lo := hi + 1; lo < len(rungs); lo++ {
 				name := rungs[hi].name + " before " + rungs[lo].name
 				t.Run(name, func(t *testing.T) {
+					// SAME identity (Repo+Number) on both rows -- deliberately, so
+					// the final tie-break key can never mask a bug in key1. If
+					// reviewerRoleTier ties (or reverses) two rungs, the identical
+					// identity produces an exact 0, which these strict inequality
+					// checks fail on; only a genuinely decisive key1 comparison
+					// passes. (Caught by mutation testing 2026-08-28: with
+					// ascending Numbers the final key independently reproduced the
+					// expected sign regardless of whether key1 worked at all.)
 					better := teamRowWithReasons(1, rungs[hi].reasons...)
-					worse := teamRowWithReasons(2, rungs[lo].reasons...)
+					worse := teamRowWithReasons(1, rungs[lo].reasons...)
 					if got := CompareTeamRows(better, worse); got >= 0 {
 						t.Errorf("CompareTeamRows(%s, %s) = %d, want < 0", rungs[hi].name, rungs[lo].name, got)
 					}
@@ -60,34 +68,53 @@ func TestCompareTeamRows_TieBreakLadder(t *testing.T) {
 	// already-engaged fires on EITHER reviewed-by-me OR assigned-to-me,
 	// regardless of owner/labels riding alongside -- a row carrying both a
 	// lower-rung label reason AND an already-engaged reason must still rank
-	// as already-engaged.
+	// as already-engaged. SAME identity on both rows for the reason given
+	// above.
 	t.Run("key1: already-engaged wins even alongside a lower-rung reason", func(t *testing.T) {
 		engaged := teamRowWithReasons(1, MatchReasonAssignedToMe, MatchReasonLabelPrefix+"watch-a")
-		labelOnly := teamRowWithReasons(2, MatchReasonLabelPrefix+"watch-a")
+		labelOnly := teamRowWithReasons(1, MatchReasonLabelPrefix+"watch-a")
 		if got := CompareTeamRows(engaged, labelOnly); got >= 0 {
 			t.Errorf("CompareTeamRows(engaged+label, label-only) = %d, want < 0", got)
 		}
 	})
 
 	t.Run("key2: stale-review-of-mine before never-reviewed, key1 held equal", func(t *testing.T) {
+		// SAME identity on both rows -- see the key1 pairwise subtest's comment.
 		stale := TeamRow{Repo: "o/r", Number: 1, MatchReason: []string{MatchReasonTeamAuthored}, AttentionReason: AttentionReasonReReview}
-		never := TeamRow{Repo: "o/r", Number: 2, MatchReason: []string{MatchReasonTeamAuthored}, AttentionReason: AttentionReasonUnreviewed}
+		never := TeamRow{Repo: "o/r", Number: 1, MatchReason: []string{MatchReasonTeamAuthored}, AttentionReason: AttentionReasonUnreviewed}
 		if got := CompareTeamRows(stale, never); got >= 0 {
 			t.Errorf("CompareTeamRows(stale-review, never-reviewed) = %d, want < 0", got)
 		}
 	})
 
+	// never-reviewed before nothing-to-review-at-all (the third, lowest-urgency
+	// stalenessRank rung: any AttentionReason other than the two named
+	// constants, including empty). Distinct from the case above -- without
+	// this, the default rung's assigned rank value is never actually
+	// exercised against a decisive comparison (caught by mutation testing
+	// 2026-08-28: stalenessRank's default case survived "return 2 with return
+	// 0" since nothing pinned it as ranking BELOW never-reviewed).
+	t.Run("key2: never-reviewed before nothing-to-review, key1 held equal", func(t *testing.T) {
+		never := TeamRow{Repo: "o/r", Number: 1, MatchReason: []string{MatchReasonTeamAuthored}, AttentionReason: AttentionReasonUnreviewed}
+		nothing := TeamRow{Repo: "o/r", Number: 1, MatchReason: []string{MatchReasonTeamAuthored}, AttentionReason: ""}
+		if got := CompareTeamRows(never, nothing); got >= 0 {
+			t.Errorf("CompareTeamRows(never-reviewed, nothing-to-review) = %d, want < 0", got)
+		}
+	})
+
 	t.Run("key3: upstream-of-another-PR (or standalone) before waiting-on-another-PR, keys 1-2 held equal", func(t *testing.T) {
+		// SAME identity on both rows -- see the key1 pairwise subtest's comment.
 		upstreamOrStandalone := TeamRow{Repo: "o/r", Number: 1, MatchReason: []string{MatchReasonTeamAuthored}, DependencyOrderingKey: 0}
-		waiting := TeamRow{Repo: "o/r", Number: 2, MatchReason: []string{MatchReasonTeamAuthored}, DependencyOrderingKey: -1}
+		waiting := TeamRow{Repo: "o/r", Number: 1, MatchReason: []string{MatchReasonTeamAuthored}, DependencyOrderingKey: -1}
 		if got := CompareTeamRows(upstreamOrStandalone, waiting); got >= 0 {
 			t.Errorf("CompareTeamRows(not-blocked, blocked) = %d, want < 0", got)
 		}
 	})
 
 	t.Run("key4: smaller first, keys 1-3 held equal", func(t *testing.T) {
+		// SAME identity on both rows -- see the key1 pairwise subtest's comment.
 		small := TeamRow{Repo: "o/r", Number: 1, MatchReason: []string{MatchReasonTeamAuthored}, LinesChanged: 10}
-		big := TeamRow{Repo: "o/r", Number: 2, MatchReason: []string{MatchReasonTeamAuthored}, LinesChanged: 1000}
+		big := TeamRow{Repo: "o/r", Number: 1, MatchReason: []string{MatchReasonTeamAuthored}, LinesChanged: 1000}
 		if got := CompareTeamRows(small, big); got >= 0 {
 			t.Errorf("CompareTeamRows(small, big) = %d, want < 0", got)
 		}
@@ -103,9 +130,11 @@ func TestCompareTeamRows_HigherKeyWins(t *testing.T) {
 	t.Run("key1 overrides key2", func(t *testing.T) {
 		// betterTier has the worse (higher-numbered) staleness rank; worseTier
 		// has the better staleness rank. On key2 alone, worseTier would sort
-		// first -- key1 must override that.
+		// first -- key1 must override that. SAME identity on both rows so the
+		// final tie-break key cannot mask a bug that ties or reverses key1 --
+		// see TestCompareTeamRows_TieBreakLadder's key1 pairwise subtest.
 		betterTier := TeamRow{Repo: "o/r", Number: 1, MatchReason: []string{MatchReasonReviewedByMe}, AttentionReason: ""}
-		worseTier := TeamRow{Repo: "o/r", Number: 2, MatchReason: []string{MatchReasonTeamAuthored}, AttentionReason: AttentionReasonReReview}
+		worseTier := TeamRow{Repo: "o/r", Number: 1, MatchReason: []string{MatchReasonTeamAuthored}, AttentionReason: AttentionReasonReReview}
 		if got := CompareTeamRows(betterTier, worseTier); got >= 0 {
 			t.Fatalf("CompareTeamRows(better-tier-worse-staleness, worse-tier-better-staleness) = %d, want < 0 (key1 must win)", got)
 		}
@@ -114,9 +143,10 @@ func TestCompareTeamRows_HigherKeyWins(t *testing.T) {
 	t.Run("key2 overrides key3", func(t *testing.T) {
 		// Both rows share key1. betterStale has the worse dependency key;
 		// worseStale has the better one. On key3 alone, worseStale sorts
-		// first -- key2 must override that.
+		// first -- key2 must override that. SAME identity on both rows (see
+		// above).
 		betterStale := TeamRow{Repo: "o/r", Number: 1, MatchReason: []string{MatchReasonTeamAuthored}, AttentionReason: AttentionReasonReReview, DependencyOrderingKey: -1}
-		worseStale := TeamRow{Repo: "o/r", Number: 2, MatchReason: []string{MatchReasonTeamAuthored}, AttentionReason: AttentionReasonUnreviewed, DependencyOrderingKey: 0}
+		worseStale := TeamRow{Repo: "o/r", Number: 1, MatchReason: []string{MatchReasonTeamAuthored}, AttentionReason: AttentionReasonUnreviewed, DependencyOrderingKey: 0}
 		if got := CompareTeamRows(betterStale, worseStale); got >= 0 {
 			t.Fatalf("CompareTeamRows(better-stale-worse-dep, worse-stale-better-dep) = %d, want < 0 (key2 must win)", got)
 		}
@@ -125,9 +155,10 @@ func TestCompareTeamRows_HigherKeyWins(t *testing.T) {
 	t.Run("key3 overrides key4", func(t *testing.T) {
 		// Both rows share key1 and key2. betterDep has the worse (larger)
 		// size; worseDep has the smaller size. On key4 alone, worseDep sorts
-		// first -- key3 must override that.
+		// first -- key3 must override that. SAME identity on both rows (see
+		// above).
 		betterDep := TeamRow{Repo: "o/r", Number: 1, MatchReason: []string{MatchReasonTeamAuthored}, DependencyOrderingKey: 0, LinesChanged: 1000}
-		worseDep := TeamRow{Repo: "o/r", Number: 2, MatchReason: []string{MatchReasonTeamAuthored}, DependencyOrderingKey: -1, LinesChanged: 1}
+		worseDep := TeamRow{Repo: "o/r", Number: 1, MatchReason: []string{MatchReasonTeamAuthored}, DependencyOrderingKey: -1, LinesChanged: 1}
 		if got := CompareTeamRows(betterDep, worseDep); got >= 0 {
 			t.Fatalf("CompareTeamRows(better-dep-bigger, worse-dep-smaller) = %d, want < 0 (key3 must win)", got)
 		}
