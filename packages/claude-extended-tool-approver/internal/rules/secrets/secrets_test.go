@@ -1080,6 +1080,82 @@ func TestRule_InRepoRelaxationFailsClosedWithoutAnEvaluator(t *testing.T) {
 	}
 }
 
+// ===========================================================================
+// pg2-q5ogr — a shell-variable-BOUND in-repo path argument gets the SAME
+// in-repo relaxation a literal spelling of the identical path already gets.
+// ===========================================================================
+
+// TestRule_VarBoundInRepoPathArgumentRelaxed is the bead's own live-repro
+// shape, reproduced as a unit test:
+//
+//	P=packages/claude-extended-tool-approver; git ls-tree -r --name-only main -- $P/internal/rules/secrets/
+//
+// reached "ask" on the pre-fix binary even though $P's own bound value
+// resolves inside the repo, because lexicalHit's in-repo relaxation asked
+// r.pe.CleanPath("$P/internal/rules/secrets/") — which cannot expand a
+// shell-LOCAL binding (CETA receives no environment at all) — got "" back
+// (unexpanded-variable pattern), and inGitRepo failed closed. See
+// lexicalRef's doc for the fix.
+//
+// The command text mirrors the bead's repro, substituting repoScopeFixture's
+// own worktree row (its doc calls "<root>/wt/secrets/token" "the SAME
+// relaxation, reached via a worktree") for the bead's literal packages/…
+// path, so the precondition that the target both matches GenericSecretsDir
+// and sits inside a git working tree is the fixture's own, already-verified
+// guarantee rather than a fresh one. InCommandVars is set directly rather
+// than fed as a compound "P=…; git …" command, matching the established
+// convention (see safecmds_test.go's TestSafecmds_InCommandLiteralRelief_*):
+// the ENGINE only ever hands a rule the ONE leaf being judged, with
+// InCommandVars already computed from the OTHER leaves and attached to that
+// single-leaf synthetic HookInput.
+func TestRule_VarBoundInRepoPathArgumentRelaxed(t *testing.T) {
+	root := repoScopeFixture(t)
+	project := t.TempDir()
+	r := New(patheval.NewWithCWD(project, project))
+
+	input := bashInput(`git ls-tree -r --name-only main -- $P/secrets/token`)
+	input.InCommandVars = map[string]string{"P": filepath.Join(root, "wt")}
+
+	if got := hookio.Verdict(r.Evaluate(input)); got.Decision != hookio.NoOpinion {
+		t.Errorf("$P bound in-repo, `git ls-tree -- $P/secrets/token` = %v, want abstain (NoOpinion) — the in-repo relaxation must resolve the bound value (reason %q)", got.Decision, got.Reason)
+	}
+}
+
+// TestRule_VarBoundOutsideRepoPathArgumentStillAsks is the required negative
+// case: a shell variable that resolves to a path OUTSIDE any git repository
+// must not be relaxed just because it is spelled through a variable — the
+// bug this bead fixes must not become "any $VAR-prefixed secrets path is
+// approved unconditionally".
+func TestRule_VarBoundOutsideRepoPathArgumentStillAsks(t *testing.T) {
+	root := repoScopeFixture(t)
+	project := t.TempDir()
+	r := New(patheval.NewWithCWD(project, project))
+
+	input := bashInput(`git ls-tree -r --name-only main -- $P/secrets/prod.env`)
+	input.InCommandVars = map[string]string{"P": root}
+
+	if got := hookio.Verdict(r.Evaluate(input)); got.Decision != hookio.Ask {
+		t.Errorf("$P bound OUTSIDE a repo, `git ls-tree -- $P/secrets/prod.env` = %v, want ask — resolving outside the repo must not be relaxed (reason %q)", got.Decision, got.Reason)
+	}
+}
+
+// TestRule_VarBoundNoInCommandBindingUnaffected pins the "completely
+// unaffected" half of lexicalRef's contract: when InCommandVars carries no
+// binding for the name at all (the ordinary case — no assignment anywhere in
+// the command, or the engine simply never threaded one), a $VAR-prefixed
+// candidate is tested exactly as it was before this bead — as its own
+// unexpanded literal text, which the in-repo relaxation cannot resolve and so
+// fails closed to Ask.
+func TestRule_VarBoundNoInCommandBindingUnaffected(t *testing.T) {
+	project := t.TempDir()
+	r := New(patheval.NewWithCWD(project, project))
+
+	got := hookio.Verdict(r.Evaluate(bashInput(`git ls-tree -r --name-only main -- $P/secrets/token`)))
+	if got.Decision != hookio.Ask {
+		t.Errorf("no InCommandVars binding for $P = %v, want ask — an unresolvable variable must keep the pre-fix fail-safe verdict (reason %q)", got.Decision, got.Reason)
+	}
+}
+
 // The ACCEPTANCE CRITERION of pg2-pmk9q against the REAL path it was reported
 // for — this very file — rather than a fixture that merely resembles it. The four
 // observed asklog rows (327201, 327344, 327371, 327471) were all read-only
@@ -1402,7 +1478,7 @@ func TestBashRef_SharesShellDashCParseAcrossPasses(t *testing.T) {
 	restore := cmdparse.SetParseObserver(func(source string) { counts[source]++ })
 	defer restore()
 
-	if _, found, malformed := r.bashRef(leaves); found || malformed {
+	if _, found, malformed := r.bashRef(leaves, nil); found || malformed {
 		t.Fatalf("bashRef(%q) = found=%v malformed=%v, want neither -- this test measures parse count, not verdict", inner, found, malformed)
 	}
 

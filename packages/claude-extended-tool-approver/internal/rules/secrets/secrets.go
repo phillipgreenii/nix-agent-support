@@ -202,7 +202,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		if err != nil {
 			return hookio.RuleResult{}, fmt.Errorf("secrets: read bash command: %w", err)
 		}
-		ref, found, malformed := r.bashRef(leaves)
+		ref, found, malformed := r.bashRef(leaves, input.InCommandVars)
 		if malformed {
 			// pg2-52eod: a glued flag value's shell quoting could not be
 			// resolved (cmdparse.GluedFlagValue's decline, generalized from
@@ -350,7 +350,20 @@ func (r *Rule) pathRef(path string, isWrite bool) (secretRef, bool) {
 // budget would instead let a long argument list spend the whole allowance on pass
 // 2 and silently disable the deny-list pass, which is the fail-OPEN direction for
 // a control the user configured explicitly.
-func (r *Rule) bashRef(leaves []cmdparse.ParsedCommand) (ref secretRef, found bool, malformed bool) {
+//
+// vars is hookio.HookInput.InCommandVars — the shell variables THIS SAME
+// expression's own earlier text binds to a literal value (pg2-wq3ki),
+// engine-computed per leaf. It is threaded into EVERY ONE of the three
+// passes below (see expandCandidate): a candidate that is a
+// `$NAME`/`${NAME}…` reference to one of these is tested against its BOUND
+// VALUE, not its unexpanded text (pg2-q5ogr — see lexicalRef's doc for why
+// this was missing, and why the fix could not be confined to the lexical
+// pass alone: patheval's own path cleaning silently substitutes an unknown
+// `$NAME` with the EMPTY string via os.ExpandEnv rather than leaving it
+// unexpanded, so resolvedRef's and configRef's filesystem-touching passes
+// could otherwise still classify the mangled remainder as a plausible, but
+// entirely wrong, absolute path).
+func (r *Rule) bashRef(leaves []cmdparse.ParsedCommand, vars map[string]string) (ref secretRef, found bool, malformed bool) {
 	// Bash read/write intent is ambiguous per-argument, so every candidate is
 	// judged as a READ — the direction the beads are about, and the one that
 	// governs the in-repo relaxation.
@@ -388,18 +401,40 @@ func (r *Rule) bashRef(leaves []cmdparse.ParsedCommand) (ref secretRef, found bo
 	// so it is deterministic per COMMAND, not per candidateMatch — every pass would
 	// report the same malformed verdict for the same cmd. The first pass that finds
 	// EITHER a match OR a malformed value short-circuits the remaining passes.
-	if ref, found, malformed := firstSecretRefIn(cache, leaves, maxShellUnwrap, r.lexicalRef(isWrite)); found || malformed {
+	if ref, found, malformed := firstSecretRefIn(cache, leaves, maxShellUnwrap, r.lexicalRef(isWrite, vars)); found || malformed {
 		return ref, found, malformed
 	}
 	if r.pe == nil {
 		return secretRef{}, false, false
 	}
 	resolveBudget := maxResolutions
-	if ref, found, malformed := firstSecretRefIn(cache, leaves, maxShellUnwrap, r.resolvedRef(&resolveBudget, isWrite)); found || malformed {
+	if ref, found, malformed := firstSecretRefIn(cache, leaves, maxShellUnwrap, r.resolvedRef(&resolveBudget, isWrite, vars)); found || malformed {
 		return ref, found, malformed
 	}
 	denyBudget := maxResolutions
-	return firstSecretRefIn(cache, leaves, maxShellUnwrap, r.configRef(&denyBudget, isWrite))
+	return firstSecretRefIn(cache, leaves, maxShellUnwrap, r.configRef(&denyBudget, isWrite, vars))
+}
+
+// expandCandidate substitutes a shell-variable reference (`$NAME`/`${NAME}…`,
+// whole or as a prefix) that THIS SAME command's own earlier text binds to a
+// literal value, returning the substituted text when cmdparse.ExpandInCommand
+// can fully resolve it and path UNCHANGED otherwise (pg2-q5ogr). It is the
+// one seam all three of bashRef's passes call before doing whatever
+// filesystem/config work that pass already does, so every pass judges the
+// SAME real path when one exists — see lexicalRef's doc for why leaving even
+// one pass on the raw, still-variable-shaped text reopens the bug this
+// function exists to close.
+//
+// A candidate with no resolvable binding — no "$" at all, an unknown name, a
+// `$(…)`, a backtick, a glob, or a leading `~` — comes back byte-identical to
+// path (ExpandInCommand's own fail-safe default), so a command with nothing
+// for vars to resolve is completely unaffected: every existing caller's
+// behaviour before this bead is preserved exactly.
+func expandCandidate(path string, vars map[string]string) string {
+	if expanded, ok := cmdparse.ExpandInCommand(path, vars); ok {
+		return expanded
+	}
+	return path
 }
 
 // shellCScriptCache memoizes cmdparse.Parse for the descent into a nested
@@ -440,11 +475,66 @@ func (c *shellCScriptCache) parse(script string) []cmdparse.ParsedCommand {
 }
 
 // lexicalRef is the lexical candidate test: the candidate exactly as the call
-// named it, run through lexicalHit.
-func (r *Rule) lexicalRef(isWrite bool) candidateMatch {
+// named it, run through lexicalHit — or, when the candidate is a shell
+// variable reference (`$NAME`/`${NAME}…`, whole or as a prefix) that THIS SAME
+// command's own earlier text binds to a literal value, the candidate with
+// that binding substituted in (pg2-q5ogr).
+//
+// WHY THIS WAS MISSING. lexicalHit's in-repo relaxation (decision 3, see the
+// package doc) asks r.inGitRepo(path), which asks r.pe.CleanPath(path) — and
+// CleanPath can only expand a REAL environment variable or `~`
+// (patheval.cleanPath's os.ExpandEnv only ever sees the CETA PROCESS's own
+// environment; CETA receives no environment from the shell it is judging at
+// all). It has no way to see a shell-LOCAL binding written down in the SAME
+// command, so `P=packages/claude-extended-tool-approver; git ls-tree … --
+// $P/internal/rules/secrets/` reached lexicalHit with the literal text
+// `$P/internal/rules/secrets/`; CleanPath returned "" (unexpanded variable
+// pattern), inGitRepo failed closed to false, and the relaxation never got a
+// chance to fire even though $P's own bound value plainly resolves inside the
+// repo. Every OTHER candidate shape (a literal path, a path already
+// symlink-resolved by resolvedRef) never hit this at all — only a candidate
+// that is itself an unexpanded shell-variable reference did.
+//
+// THE FIX REUSES THE EXISTING SEAM RATHER THAN BUILDING A NEW ONE.
+// hookio.HookInput.InCommandVars / cmdparse.ExpandInCommand (pg2-wq3ki)
+// already solve exactly this — resolving a $NAME the SAME expression's own
+// earlier text assigns a literal, engine-computed once per leaf — and
+// internal/rules/safecmds already reused it for its own path guard
+// (pg2-yeli3; see its TestSafecmds_InCommandLiteralRelief_* tests for the
+// identical shape). vars here is that same map, threaded down from Evaluate
+// through bashRef. ExpandInCommand's own fail-safe defaults carry over
+// unchanged — an unknown name, a `$(…)`, a backtick, a glob, or a leading `~`
+// all report ok=false, and this then falls back to testing the ORIGINAL
+// candidate text exactly as bashRef did before this bead, so a command with
+// no resolvable binding (the overwhelming majority — vars is nil whenever the
+// engine found no qualifying assignment) is completely unaffected.
+//
+// EVERY ONE OF bashRef's THREE PASSES NEEDS THIS, not just this lexical one —
+// see expandCandidate's doc. The first cut of this fix touched only this
+// function, on the reasoning that resolvedRef and configRef "already fail
+// closed on a candidate CleanPath cannot expand". That reasoning was wrong,
+// proven by TestRule_VarBoundInRepoPathArgumentRelaxed failing against it:
+// patheval.cleanPath calls os.ExpandEnv FIRST, and os.ExpandEnv does not
+// leave an unknown `$NAME` unexpanded — it substitutes the EMPTY string (per
+// os.Expand's own contract for a name the mapping function does not
+// recognize), so `$P/secrets/token` with no real "P" environment variable
+// becomes the ABSOLUTE path "/secrets/token", which resolvedRef's symlink
+// pass then classified as GenericSecretsDir and, finding it outside any git
+// repository (it is not the fixture's tree at all), refused to relax — a
+// false Ask reached through a DIFFERENT candidate string than the one this
+// pass correctly declined to match. Substituting the SAME real value before
+// every pass removes the mangled intermediate string entirely.
+func (r *Rule) lexicalRef(isWrite bool, vars map[string]string) candidateMatch {
 	return func(path string) (secretRef, bool) {
-		if !r.lexicalHit(path, isWrite) {
+		candidate := expandCandidate(path, vars)
+		if !r.lexicalHit(candidate, isWrite) {
 			return secretRef{}, false
+		}
+		if candidate != path {
+			// Mirror resolvedForm's reporting: the reason names both the text the
+			// call used and what it resolved to, so an asklog reader is not left
+			// to reconstruct the substitution themselves.
+			return secretRef{named: path, resolved: candidate}, true
 		}
 		return secretRef{named: path}, true
 	}
@@ -565,13 +655,28 @@ func (r *Rule) inGitRepo(path string) bool {
 // detected. Closing it means resolving every bare word of every command, which
 // buys back that false-positive class and the stat storm together. A path-shaped
 // spelling of the same link IS caught, including `./mykey`.
-func (r *Rule) resolvedRef(budget *int, isWrite bool) candidateMatch {
+//
+// vars is expandCandidate's substitution map (pg2-q5ogr): the candidate is
+// substituted BEFORE the isPathShaped gate and the resolve call, so a
+// `$NAME`-prefixed candidate this SAME command binds to a literal value is
+// resolved from its real value rather than from patheval.cleanPath's
+// os.ExpandEnv-mangled reading of the raw text (see lexicalRef's doc for the
+// measured false-Ask that reading produced). named on the returned reference
+// stays the ORIGINAL, unexpanded path — what the call actually wrote — so the
+// substitution is invisible in the reason text unless resolve() ALSO finds a
+// further symlink indirection worth reporting.
+func (r *Rule) resolvedRef(budget *int, isWrite bool, vars map[string]string) candidateMatch {
 	return func(path string) (secretRef, bool) {
-		if *budget <= 0 || !isPathShaped(path) {
+		candidate := expandCandidate(path, vars)
+		if *budget <= 0 || !isPathShaped(candidate) {
 			return secretRef{}, false
 		}
 		*budget--
-		return r.resolvedForm(path, isWrite)
+		resolved := r.resolve(candidate)
+		if resolved == "" || !r.lexicalHit(resolved, isWrite) {
+			return secretRef{}, false
+		}
+		return secretRef{named: path, resolved: resolved}, true
 	}
 }
 
@@ -601,13 +706,20 @@ func (r *Rule) resolvedForm(path string, isWrite bool) (secretRef, bool) {
 // deny-listed tree, `kubectl get secrets` would resolve `secrets` to
 // `<cwd>/secrets`, land inside that tree and hard-REJECT — a false positive worse
 // than the pg2-ia640.2 class, since a Reject cannot be waved through.
-func (r *Rule) configRef(budget *int, isWrite bool) candidateMatch {
+//
+// vars is expandCandidate's substitution map (pg2-q5ogr), applied for the SAME
+// reason resolvedRef takes it: IsDenyRead/IsDenyWrite resolve through
+// patheval.cleanPath too, so a `$NAME`-prefixed candidate would otherwise be
+// deny-listed (or cleared) against the os.ExpandEnv-mangled reading of the raw
+// text rather than the value this command actually binds.
+func (r *Rule) configRef(budget *int, isWrite bool, vars map[string]string) candidateMatch {
 	return func(path string) (secretRef, bool) {
-		if *budget <= 0 || !isPathShaped(path) {
+		candidate := expandCandidate(path, vars)
+		if *budget <= 0 || !isPathShaped(candidate) {
 			return secretRef{}, false
 		}
 		*budget--
-		if !r.denyListed(path, isWrite) {
+		if !r.denyListed(candidate, isWrite) {
 			return secretRef{}, false
 		}
 		return secretRef{named: path}, true
