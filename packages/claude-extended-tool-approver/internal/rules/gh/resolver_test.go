@@ -1,167 +1,107 @@
 package gh
 
 import (
-	"os"
-	"os/exec"
-	"slices"
-	"strings"
+	"errors"
 	"testing"
+
+	"github.com/phillipgreenii/x/gitclient"
+	"github.com/phillipgreenii/x/gitfixture"
+	"github.com/phillipgreenii/x/gittest"
 )
 
-// leakedByAGitHookCommit is the GIT_* set a `git commit` FROM A LINKED
-// WORKTREE actually exports into the hook environment (git 2.54.0; measured
-// for pg-pr's pg2-lx41y, the structurally identical prior fix this one
-// mirrors). Every descendant of the hook -- including a CETA process invoked
-// from within it, or from a nested tool itself launched from one -- inherits
-// these unless the child's environment is built explicitly.
-var leakedByAGitHookCommit = []string{
-	"GIT_DIR=/canonical/.git/worktrees/wt",
-	"GIT_INDEX_FILE=/canonical/.git/worktrees/wt/index",
-	"GIT_PREFIX=packages/claude-extended-tool-approver/",
-	"GIT_EXEC_PATH=/nix/store/xxx-git/libexec/git-core",
-	"GIT_AUTHOR_NAME=Someone",
-	"GIT_AUTHOR_EMAIL=someone@example.com",
-	"GIT_COMMITTER_NAME=Someone",
-	"GIT_COMMITTER_EMAIL=someone@example.com",
-}
-
-// mustNotReachAChild lists, beyond the hook set above, every GIT_* variable
-// that can redirect the child at a repository, an index, an object store, or
-// a discovery boundary.
-var mustNotReachAChild = []string{
-	"GIT_WORK_TREE=/canonical",
-	"GIT_COMMON_DIR=/canonical/.git",
-	"GIT_OBJECT_DIRECTORY=/canonical/.git/objects",
-	"GIT_ALTERNATE_OBJECT_DIRECTORIES=/elsewhere/objects",
-	"GIT_CEILING_DIRECTORIES=/",
-	"GIT_NAMESPACE=refs/namespaces/x",
-	"GIT_DISCOVERY_ACROSS_FILESYSTEM=1",
-}
-
-func envKeys(env []string) []string {
-	keys := make([]string, 0, len(env))
-	for _, kv := range env {
-		if k, _, ok := strings.Cut(kv, "="); ok {
-			keys = append(keys, k)
-		}
-	}
-	return keys
-}
-
-// TestHermeticGitEnviron_DropsEveryRepoRedirectingVar is the regression test
-// the fix exists for: if any of these reaches the `git -C cwd rev-parse`
-// child, `-C` is a lie and CurrentBranch answers with the leaked repository's
-// branch instead of cwd's.
-func TestHermeticGitEnviron_DropsEveryRepoRedirectingVar(t *testing.T) {
-	base := slices.Concat(leakedByAGitHookCommit, mustNotReachAChild)
-	for _, kv := range base {
-		k, v, _ := strings.Cut(kv, "=")
-		t.Setenv(k, v)
-	}
-	got := envKeys(hermeticGitEnviron())
-	for _, kv := range base {
-		k, _, _ := strings.Cut(kv, "=")
-		if slices.Contains(got, k) {
-			t.Errorf("hermeticGitEnviron leaked %q, which must never reach the git child", k)
-		}
-	}
-}
-
-// TestHermeticGitEnviron_PassesNonGitVarsThrough guards the other half of the
-// contract: production git needs the ambient non-GIT_ environment (PATH,
-// HOME, transport, locale), so filtering must not degrade into a full
-// allowlist that breaks the resolver outright.
-func TestHermeticGitEnviron_PassesNonGitVarsThrough(t *testing.T) {
-	t.Setenv("CETA_RESOLVER_TEST_MARKER", "present")
-	got := hermeticGitEnviron()
-	if !slices.Contains(got, "CETA_RESOLVER_TEST_MARKER=present") {
-		t.Fatalf("hermeticGitEnviron dropped a non-GIT_ variable it must pass through")
-	}
-	if !slices.Contains(got, "PATH="+os.Getenv("PATH")) {
-		t.Fatalf("hermeticGitEnviron dropped PATH")
-	}
-}
-
-// TestHermeticGitEnviron_KeepsAllowlistedGitVars asserts the allowlist half:
-// a GIT_-prefixed variable naming a PROGRAM or config FILE (never a
-// repository) still reaches the child, since callers rely on
-// GIT_CONFIG_GLOBAL/GIT_CONFIG_SYSTEM to sandbox git in tests elsewhere in
-// this codebase.
-func TestHermeticGitEnviron_KeepsAllowlistedGitVars(t *testing.T) {
-	for k := range inheritableGitVars {
-		t.Setenv(k, "x")
-	}
-	got := hermeticGitEnviron()
-	for k := range inheritableGitVars {
-		if !slices.Contains(got, k+"=x") {
-			t.Errorf("hermeticGitEnviron dropped allowlisted %q", k)
-		}
-	}
-}
-
-// initTestRepo creates a fresh git repo at a temp dir, checked out on branch,
-// with one empty commit so HEAD resolves. The fixture's OWN git invocations
-// use a minimal, explicit env (no ambient GIT_* forwarded) so they cannot be
-// disturbed by the leak this test simulates around the call under test.
-func initTestRepo(t *testing.T, branch string) string {
-	t.Helper()
-	dir := t.TempDir()
-	fixtureEnv := []string{
-		"HOME=" + t.TempDir(),
-		"PATH=" + os.Getenv("PATH"),
-		"GIT_CONFIG_NOSYSTEM=1",
-		"GIT_CONFIG_GLOBAL=/dev/null",
-	}
-	run := func(args ...string) {
-		t.Helper()
-		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
-		cmd.Env = fixtureEnv
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git -C %s %v: %v\n%s", dir, args, err, out)
-		}
-	}
-	run("init", "-q", "-b", branch)
-	run("config", "user.email", "t@example.com")
-	run("config", "user.name", "t")
-	run("commit", "-q", "--allow-empty", "-m", "init")
-	return dir
-}
+// Fixtures are built through gittest/gitfixture (bead pg2-svfbb's design,
+// "gittest -- the isolated-repo fixture") rather than this file's own
+// hand-rolled initTestRepo helper: the fixture is hermetic by CONSTRUCTION
+// (isolated HOME, no system config, no hooks), so there is no longer a need
+// for a bespoke fixture env, nor for this package's own
+// hermeticGitEnviron/inheritableGitVars plumbing -- gitclient's child
+// environment is built from an explicit allowlist (PATH/HOME/SSH_AUTH_SOCK)
+// and never inherits GIT_DIR/GIT_WORK_TREE/etc from the test process's
+// environment regardless of what it contains (bead pg2-4xfur, migrating
+// pg2-2pokz's hand-rolled hermeticGitEnviron fix onto x/gitclient).
 
 // TestExecBranchResolver_CurrentBranch_IgnoresLeakedGitDir drives the real
 // production resolver (not a stub) with GIT_DIR/GIT_WORK_TREE naming a
-// DIFFERENT repository than the -C argument -- exactly what a `git commit`
-// from a linked worktree exports into every descendant process -- and asserts
-// CurrentBranch resolves the directory it was HANDED, not the leaked one.
-// Verified to FAIL against the pre-fix `cmd.Env` left nil (which inherits
-// os.Environ() wholesale): it then reports "leaked-branch" for a call asking
-// about target's branch.
+// DIFFERENT repository than the cwd argument -- exactly what a `git commit`
+// from a linked worktree exports into every descendant process -- and
+// asserts CurrentBranch resolves the directory it was HANDED, not the
+// leaked one. Now proven via x/gitclient's own env allowlist rather than
+// this package's former hermeticGitEnviron, which no longer exists.
 func TestExecBranchResolver_CurrentBranch_IgnoresLeakedGitDir(t *testing.T) {
-	target := initTestRepo(t, "target-branch")
-	leaked := initTestRepo(t, "leaked-branch")
+	target := gittest.New(t, gitfixture.RepoOptions{Suite: "target", InitialBranch: "target-branch"})
+	if _, err := target.Commit(t.Context(), "init", nil); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+	leaked := gittest.New(t, gitfixture.RepoOptions{Suite: "leaked", InitialBranch: "leaked-branch"})
+	if _, err := leaked.Commit(t.Context(), "init", nil); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
 
-	t.Setenv("GIT_DIR", leaked+"/.git")
-	t.Setenv("GIT_WORK_TREE", leaked)
+	// Simulate the leak vector: GIT_DIR/GIT_WORK_TREE set in the ambient
+	// environment (e.g. by an invoking git hook) pointing at a DIFFERENT
+	// repository than the one CurrentBranch is asked about.
+	t.Setenv("GIT_DIR", leaked.Dir+"/.git")
+	t.Setenv("GIT_WORK_TREE", leaked.Dir)
 
 	r := NewExecResolver()
-	branch, err := r.CurrentBranch(target)
+	branch, err := r.CurrentBranch(target.Dir)
 	if err != nil {
-		t.Fatalf("CurrentBranch(%s) error: %v", target, err)
+		t.Fatalf("CurrentBranch(%s) error: %v", target.Dir, err)
 	}
 	if branch != "target-branch" {
-		t.Fatalf("CurrentBranch(%s) = %q; want %q -- a leaked GIT_DIR/GIT_WORK_TREE silently overrode -C", target, branch, "target-branch")
+		t.Fatalf("CurrentBranch(%s) = %q; want %q -- a leaked GIT_DIR/GIT_WORK_TREE silently overrode target %s", target.Dir, branch, "target-branch", target.Dir)
 	}
 }
 
 // TestExecBranchResolver_CurrentBranch_StillWorksUnleaked pins the ordinary,
 // no-leak path so the fix cannot be "pass by never resolving anything".
 func TestExecBranchResolver_CurrentBranch_StillWorksUnleaked(t *testing.T) {
-	dir := initTestRepo(t, "plain-branch")
+	repo := gittest.New(t, gitfixture.RepoOptions{InitialBranch: "plain-branch"})
+	if _, err := repo.Commit(t.Context(), "init", nil); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
 	r := NewExecResolver()
-	branch, err := r.CurrentBranch(dir)
+	branch, err := r.CurrentBranch(repo.Dir)
 	if err != nil {
-		t.Fatalf("CurrentBranch(%s) error: %v", dir, err)
+		t.Fatalf("CurrentBranch(%s) error: %v", repo.Dir, err)
 	}
 	if branch != "plain-branch" {
-		t.Fatalf("CurrentBranch(%s) = %q; want %q", dir, branch, "plain-branch")
+		t.Fatalf("CurrentBranch(%s) = %q; want %q", repo.Dir, branch, "plain-branch")
+	}
+}
+
+// TestExecBranchResolver_CurrentBranch_DetachedHEAD pins DECISION 1 recorded
+// on CurrentBranch's doc comment: on a detached checkout, gitclient reports
+// the typed gitclient.ErrDetachedHEAD, but this resolver maps that back onto
+// the literal string "HEAD" the pre-migration raw `rev-parse --abbrev-ref
+// HEAD` call used to return, so gh.go's `gh run rerun` gating is unchanged.
+func TestExecBranchResolver_CurrentBranch_DetachedHEAD(t *testing.T) {
+	repo := gittest.New(t, gitfixture.RepoOptions{InitialBranch: "main"})
+	if _, err := repo.Commit(t.Context(), "init", nil); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+	if _, err := repo.Client.Run(t.Context(), "checkout", "--detach", "HEAD"); err != nil {
+		t.Fatalf("checkout --detach: %v", err)
+	}
+
+	r := NewExecResolver()
+	branch, err := r.CurrentBranch(repo.Dir)
+	if err != nil {
+		t.Fatalf("CurrentBranch(%s) on detached HEAD: unexpected error %v (want the literal \"HEAD\", not an error)", repo.Dir, err)
+	}
+	if branch != "HEAD" {
+		t.Fatalf("CurrentBranch(%s) on detached HEAD = %q; want the literal %q", repo.Dir, branch, "HEAD")
+	}
+}
+
+// TestExecBranchResolver_CurrentBranch_OutsideRepo pins the ErrNotARepository
+// path through Discover: a cwd outside any git work tree is a genuine error,
+// never the empty string.
+func TestExecBranchResolver_CurrentBranch_OutsideRepo(t *testing.T) {
+	dir := t.TempDir()
+	r := NewExecResolver()
+	_, err := r.CurrentBranch(dir)
+	if !errors.Is(err, gitclient.ErrNotARepository) {
+		t.Fatalf("CurrentBranch(%s) error = %v; want errors.Is(_, gitclient.ErrNotARepository)", dir, err)
 	}
 }
