@@ -214,6 +214,18 @@ type TeamRow struct {
 	// team PR is also dampened out of NeedsAttention (not worth reviewing until
 	// the author rebases).
 	HasConflicts bool `json:"has_conflicts,omitempty"`
+	// BotDisapproved is true when an ALLOWLISTED approver (a login in
+	// config.Config.ApproverAllowlist, threaded through as
+	// BuilderInput.ApproverAllowlist — a set DELIBERATELY SEPARATE from the
+	// agent-registration set AgentApproved/AgentApprovers use) currently holds
+	// a STANDING "changes-requested" verdict on this PR. "Currently holds"
+	// means not stale (store.Approval.IsStale against the PR's head) — a bot
+	// disapproval of a superseded or host-dismissed head is treated as
+	// WITHDRAWN, the same staleness treatment every other pr_approval reader
+	// in this package already gives a row (INV-APPROVAL-3), rather than a
+	// second, bot-specific staleness policy. See internal/snapshot/panels.go's
+	// ActNow, the ONE predicate this field feeds (pg2-4dz88.7.3).
+	BotDisapproved bool `json:"bot_disapproved,omitempty"`
 	// Hidden / HiddenReason mirror the identically-named MineRow fields; see
 	// their doc for the contract (pg2-4dz88.4.3).
 	Hidden       bool   `json:"hidden,omitempty"`

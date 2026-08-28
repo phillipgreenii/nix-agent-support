@@ -84,6 +84,7 @@ func (e *Engine) runSnapshotOwner(updates <-chan snapshotUpdate, store *snapshot
 			Registry:                e.deps.AgentRegistry,
 			PRs:                     m.sortedInputs(),
 			CheckInterpretersByRepo: e.checkInterpretersByRepo(),
+			ApproverAllowlist:       e.cfg().ApproverAllowlist,
 			// See sync.go's buildAndStoreSnapshot for why this daemon-owned
 			// shared snapshot always includes hidden PRs (pg2-4dz88.4.3).
 			IncludeHidden: true,

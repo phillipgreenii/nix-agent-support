@@ -101,6 +101,16 @@ type BuilderInput struct {
 	// consumer). Nil/empty is valid and simply means no ref is recognised as
 	// trunk, matching prdeps.Input.TrunkRefs's own documented default.
 	TrunkRefs []string
+	// ApproverAllowlist mirrors config.Config.ApproverAllowlist: the set of
+	// logins whose verdict counts toward approval AND, as of pg2-4dz88.7.3,
+	// toward the bot-disapproval clause of the team-panel ACT-NOW predicate
+	// (see TeamRow.BotDisapproved, internal/snapshot/panels.go's ActNow).
+	// This package must not import internal/config (see
+	// CheckInterpretersByRepo's doc for the same rationale), so the caller
+	// (internal/sync) supplies the plain login list. Nil/empty means no
+	// login is allowlisted, so botDisapproved never fires — matching
+	// config.Config.ApproverAllowlist's own documented absent/empty default.
+	ApproverAllowlist []string
 }
 
 // Match-reason strings on TeamRow.MatchReason, explaining why a PR is in the
@@ -217,6 +227,10 @@ func Build(in BuilderInput) *Snapshot {
 	for repo, interps := range in.CheckInterpretersByRepo {
 		excluders[repo] = excluderFromInterpreters(interps)
 	}
+	approverAllowlist := make(map[string]struct{}, len(in.ApproverAllowlist))
+	for _, login := range in.ApproverAllowlist {
+		approverAllowlist[login] = struct{}{}
+	}
 	// The PR-dependency pass (pg2-4dz88.3.7) is a WHOLE-SET pass, computed once
 	// here over every PRInput regardless of admission below — a PR's place in a
 	// stack does not depend on whether it ends up in Mine, Team, or dropped
@@ -278,7 +292,7 @@ func Build(in BuilderInput) *Snapshot {
 			// match-reason change. Reasons are still SOURCED from ingest (detector.go's
 			// buckets, B3); the builder only re-checks they hold. Others' drafts and
 			// now-reasonless PRs fall through and are excluded.
-			out.Team = append(out.Team, buildTeamRow(p, in.Registry, in.Self, reasons, excl, deps))
+			out.Team = append(out.Team, buildTeamRow(p, in.Registry, in.Self, reasons, excl, deps, approverAllowlist))
 		default:
 			// Purely observational (pg2-4dz88.7.6): a draft PR I don't own, or a
 			// non-mine non-draft PR matching zero review-set reasons, falls
@@ -382,8 +396,9 @@ func buildMineRow(p PRInput, reg *agentregistry.Registry, excl *cirollup.Exclude
 
 // buildTeamRow builds a "PRs to Review" row. reasons is the non-empty match-reason
 // set Build already computed (and gated membership on), so it is threaded in rather
-// than recomputed here.
-func buildTeamRow(p PRInput, reg *agentregistry.Registry, self string, reasons []string, excl *cirollup.Excluder, deps dependencyFacts) TeamRow {
+// than recomputed here. allowlist is Build's precomputed set from
+// BuilderInput.ApproverAllowlist, feeding BotDisapproved.
+func buildTeamRow(p PRInput, reg *agentregistry.Registry, self string, reasons []string, excl *cirollup.Excluder, deps dependencyFacts, allowlist map[string]struct{}) TeamRow {
 	appr := classifyApprovals(p, reg)
 	gate := gateStateFor(p.Revisions)
 	// Attention is STORE-derived through the shared predicate — the SAME function
@@ -411,6 +426,7 @@ func buildTeamRow(p PRInput, reg *agentregistry.Registry, self string, reasons [
 		AttentionReason: reason,
 		MatchReason:     reasons,
 		HasConflicts:    p.PR.HasConflict(),
+		BotDisapproved:  botDisapproved(p.Approvals, allowlist, p.PR.HeadSHA),
 		Hidden:          p.Hidden,
 		HiddenReason:    p.HiddenReason,
 
@@ -633,6 +649,56 @@ func classifyApprovals(p PRInput, reg *agentregistry.Registry) approvalFacts {
 		}
 	}
 	return f
+}
+
+// botDisapproved reports whether p currently carries a STANDING
+// "changes-requested" verdict from an ALLOWLISTED approver — a login in
+// allowlist, Build's set from BuilderInput.ApproverAllowlist
+// (config.Config.ApproverAllowlist).
+//
+// # Why not AgentApproved/AgentApprovers (pg2-4dz88.7.3's read-source decision)
+//
+// ApproverAllowlist is a SEPARATE set from the agent-registration set
+// agentregistry.Registry.IsAgent that classifyApprovals's Human/Agent split
+// uses — config.Config.ApproverAllowlist's own doc comment says membership
+// here is "never implied" by an agent registration. A login can be a
+// registered, ingested agent (counted in AgentApproved/AgentApprovers)
+// without being an allowlisted approver, or vice versa. Reusing
+// AgentApproved/AgentApprovers here would silently misclassify a bot verdict
+// whenever the two sets diverge, which is exactly the failure mode this
+// bead's description flags. This function therefore filters p.Approvals
+// (store.Approval, the same per-approver source classifyApprovals reads)
+// directly against allowlist, never against the registry.
+//
+// A row counts only when it is BOTH:
+//   - state "changes-requested" — the mapping internal/sync/approver.go's
+//     approverApprovalState gives verdict.Withheld, regardless of Findings; and
+//   - currently STANDING — !Approval.IsStale(headSHA).
+//
+// # Staleness decision (pg2-4dz88.7.3)
+//
+// A disapproval that no longer stands for the PR's current head — an
+// earlier-head observation, or one the code host dismissed — is treated as
+// WITHDRAWN, not blocking. This mirrors classifyApprovals and NeedsAttention,
+// which already give every other pr_approval row this exact staleness
+// treatment (INV-APPROVAL-3): the row still records that the disapproval
+// happened, it just no longer holds the PR back once superseded. A second,
+// bot-specific staleness policy would diverge from that established meaning
+// of "stale" for no documented reason.
+func botDisapproved(approvals []store.Approval, allowlist map[string]struct{}, headSHA string) bool {
+	for _, a := range approvals {
+		if _, ok := allowlist[a.Approver]; !ok {
+			continue
+		}
+		if a.State != "changes-requested" {
+			continue
+		}
+		if a.IsStale(headSHA) {
+			continue
+		}
+		return true
+	}
+	return false
 }
 
 func mapJIRA(issues []api.Issue) []JIRAItem {

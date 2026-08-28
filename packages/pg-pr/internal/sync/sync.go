@@ -701,6 +701,7 @@ func (e *Engine) buildAndStoreSnapshot(ctx context.Context, observed map[prKey]a
 		Registry:                e.deps.AgentRegistry,
 		PRs:                     inputs,
 		CheckInterpretersByRepo: e.checkInterpretersByRepo(),
+		ApproverAllowlist:       e.cfg().ApproverAllowlist,
 		// IncludeHidden: true — see BuilderInput.IncludeHidden's doc. The
 		// shared snapshot this Sets carries every observed PR, hidden or not,
 		// so a reader that opts in (`pg-pr open --include-hidden`) can still
