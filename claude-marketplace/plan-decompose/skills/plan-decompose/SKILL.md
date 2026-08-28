@@ -3,13 +3,17 @@ name: plan-decompose
 description: >-
   Use to turn an APPROVED design or plan into curated, SELF-CONTAINED implementation issues
   (work packets) that an agent can execute without reading the full design — plus to check
-  whether a plan is ready for that ("is this plan ready to decompose?"), and to RECONCILE
-  already-decomposed packets after the design is amended. Fires on: decompose a design/plan
-  into beads/issues/tickets/work packets; "split this plan into implementation issues";
-  "create the epic and children from this design"; "reconcile docket <id>". Do NOT use for:
-  designs that would yield fewer than 3 packets (below the floor — file the beads directly);
-  improving EXISTING issues (that is bead-grooming); finding or working ready issues (that is
-  bd ready / the drain queue); writing the design itself (brainstorming/writing-plans).
+  whether a plan is ready for that ("is this plan ready to decompose?"), to RECONCILE
+  already-decomposed packets after the design is amended, and to REPORT a single docket's
+  metrics (escalation rate, validation-retry rate, actual-vs-estimated budget, stuck/released
+  counts). Fires on: decompose a design/plan into beads/issues/tickets/work packets; "split
+  this plan into implementation issues"; "create the epic and children from this design";
+  "reconcile docket <id>"; "report on docket <id>'s metrics" / "what's the escalation rate for
+  docket <id>?". Do NOT use for: designs that would yield fewer than 3 packets (below the
+  floor — file the beads directly); improving EXISTING issues (that is bead-grooming); finding
+  or working ready issues (that is bd ready / the drain queue); writing the design itself
+  (brainstorming/writing-plans); a workspace-wide metrics rollup (this mode is always scoped to
+  one docket).
 ---
 
 # plan-decompose — curated, self-contained work packets from an approved design
@@ -44,19 +48,19 @@ named and exactly ONE `plan-decompose-*` binding skill is installed, auto-select
 SO; with zero or several candidates and none named, REFUSE and list the candidates. Never
 fall back to ad-hoc files or a different tracker.
 
-| Abstract operation                                       | Purpose                                                                         |
-| -------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| `find-docket(design-source)`                             | Dedup/resume probe — MUST run before creating a docket                          |
-| `create-docket(design, revision, metadata)`              | Persist design of record + revision + policy; never claimable                   |
-| `create-packet(docket, content, criteria, metadata)`     | Persist one packet, HELD (invisible to ready queues) until released             |
-| `wire-ordering(blocked, blocker)`                        | Ordering edge; read-back verified; cycle-checked after bulk wiring              |
-| `read-packet(packet)` / `read-docket-design(docket)`     | Content reads (implementer path / escalation path)                              |
-| `read-metadata(obj)` / `write-metadata(obj, kv)`         | Per-key REPLACE-semantics channel; cheap independent of design size             |
-| `release-set(docket)`                                    | Make held packets claimable, recording per-packet progress                      |
-| `write-report(target, report)`                           | Append a durable report to the docket — or to a named tracking issue pre-docket |
-| `append-metric(packet, record)` / `read-metrics(docket)` | Append-only metric records (gathering only; aggregation is future work)         |
-| `amend-design(docket, design, revision+1)`               | RECONCILE entry point                                                           |
-| `close-docket(docket)`                                   | Terminal close; never automatic mid-flight                                      |
+| Abstract operation                                       | Purpose                                                                                                                                                         |
+| -------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `find-docket(design-source)`                             | Dedup/resume probe — MUST run before creating a docket                                                                                                          |
+| `create-docket(design, revision, metadata)`              | Persist design of record + revision + policy; never claimable                                                                                                   |
+| `create-packet(docket, content, criteria, metadata)`     | Persist one packet, HELD (invisible to ready queues) until released                                                                                             |
+| `wire-ordering(blocked, blocker)`                        | Ordering edge; read-back verified; cycle-checked after bulk wiring                                                                                              |
+| `read-packet(packet)` / `read-docket-design(docket)`     | Content reads (implementer path / escalation path)                                                                                                              |
+| `read-metadata(obj)` / `write-metadata(obj, kv)`         | Per-key REPLACE-semantics channel; cheap independent of design size                                                                                             |
+| `release-set(docket)`                                    | Make held packets claimable, recording per-packet progress                                                                                                      |
+| `write-report(target, report)`                           | Append a durable report to the docket — or to a named tracking issue pre-docket                                                                                 |
+| `append-metric(packet, record)` / `read-metrics(docket)` | Append-only metric records; `read-metrics` powers mode `report`, MUST scope to one docket and MUST paginate over children (never load the whole docket at once) |
+| `amend-design(docket, design, revision+1)`               | RECONCILE entry point                                                                                                                                           |
+| `close-docket(docket)`                                   | Terminal close; never automatic mid-flight                                                                                                                      |
 
 ## Metadata keys (per-key replace semantics; never packet content)
 
@@ -225,6 +229,54 @@ every queue consumer claims/checks/releases it in an endless cross-session spin.
 clears `pd_stale` and undefers; the docket report channel tells the operator a reconcile is
 owed.
 
+## Mode `report` — aggregate one docket's metrics (D10)
+
+Reads a docket's children plus their `pd_metrics` comments and reports **escalation rate**,
+**validation-retry rate**, **actual-vs-estimated budget**, and **stuck/released counts** — the
+signals named in the design's metrics table. Read-only: it writes nothing unless the caller
+explicitly asks for a durable copy (step 5).
+
+**Scope is mandatory and singular.** This mode takes exactly one docket id and reports on that
+docket ALONE — it MUST NOT default to a workspace-wide scan. Unlike `find-docket` (used by the
+other modes to dedup across ALL dockets), `report` never enumerates dockets: given no id, or an
+id that is not a docket (`read-metadata` shows no `pd_rev`), it refuses rather than guessing a
+target.
+
+1. **Resolve the binding** (as in every mode) and confirm the argument is a docket (`pd_rev`
+   set in its metadata); refuse otherwise.
+2. **Locate the estimate side once.** Read the docket's most recent decomposition/release
+   report (the `write-report` comment from `decompose` step 10, or the latest `reconcile`
+   re-curation report if newer) and extract its per-packet fixed-read/budget estimates. A
+   docket with no such report has no "estimated" side for step 4c — say so plainly rather than
+   inventing a number; the other three metrics are unaffected.
+3. **Page over the children — never load the whole docket at once.** List the docket's
+   children ids once (a lightweight, structured read: id/status/metadata/comment-count only,
+   never comment bodies or description text), then walk that list in bounded pages (binding
+   default: 20 ids/page). For each page, fold its contribution into RUNNING totals before
+   advancing to the next page — never hold every child's full comment thread in context at
+   once. A child whose comment count is already known to be zero contributes to `no-record`
+   without an extra read.
+4. **Per child in a page**, read its `pd_metrics` comments (`read-metrics`; one record per
+   closeout attempt — a packet re-claimed after a stuck-release carries more than one, and
+   each record is its own curation-quality data point per the design's metrics table, so count
+   RECORDS, not packets). Parse the fixed key order (`outcome`, `escalation-reads`,
+   `validation-retries`, `tokens`); a malformed line is skipped and counted as `unparsed`,
+   never guessed at. Fold in:
+   a. **escalation rate** = records with `escalation-reads > 0` ÷ total records parsed
+   b. **validation-retry rate** = records with `validation-retries > 0` ÷ total records parsed
+   c. **actual-vs-estimated budget** = for every packet with both an actual `tokens` value
+   (its latest record) and a step-2 estimate: `actual ÷ estimated`; report the aggregate
+   `Σactual ÷ Σestimated` plus every packet missing either side, named, never dropped
+   d. **stuck/released counts** = records with `outcome=blocked` ("stuck" — validation never
+   passed) and records with `outcome=released` (escalated to the docket design and still
+   insufficient, handed back) respectively. `outcome=done` MAY be reported alongside for
+   context; it is not one of the two counts asked for.
+5. **Report.** Return the four metrics, the docket id they were scoped to, total children
+   seen, and the `no-record`/`unparsed` counts, to the caller. This mode does not itself
+   `write-report` — every ad-hoc query would otherwise spam the docket with a comment; a
+   caller that wants a durable copy calls `write-report(docket, report)` explicitly (the same
+   op `decompose`/`reconcile` use for their own reports).
+
 ## Consumers
 
 Packets work with zero consumer changes: drain-style pointer briefs ("read your issue
@@ -232,7 +284,8 @@ yourself") land on a self-contained packet. The optimized path is the `packet-im
 agent (this plugin): stamp check at claim, packet-first work, escalation ladder, metric
 closeout. Decomposition itself is executed by the `plan-decomposer` agent so a context-heavy
 session can hand it off. Recorded escalation reads and validation retries (the metric
-records) are the curation-quality signal; aggregation/reporting is future work.
+records) are the curation-quality signal, aggregated on demand — scoped to one docket at a
+time, paginated over its children — via mode `report`.
 
 ## Usage
 
@@ -241,3 +294,6 @@ records) are the curation-quality signal; aggregation/reporting is future work.
   `plan-decomposer` with: design source, binding, absolute repo root(s), docket metadata,
   tracking issue. Progress: docket `pd_phase` + report comments.
 - "the design for docket `<id>` changed — reconcile" → mode `reconcile` with the amended text.
+- "report on docket `<id>`'s metrics" / "what's the escalation rate for docket `<id>`?" →
+  mode `report`, run directly against that one docket (no agent dispatch required — it is
+  read-only and paginated, safe for the invoking session itself).

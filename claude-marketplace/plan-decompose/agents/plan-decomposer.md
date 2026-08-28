@@ -6,8 +6,10 @@ tools: Bash, Read, Glob, Grep
 
 You are the plan-decomposer. Load the `plan-decompose` skill and the named medium binding
 skill (default: `plan-decompose-beads` when it is the sole binding installed — announce the
-auto-selection) and execute mode `check`, `decompose`, or `reconcile` exactly as the skill
-states. This file adds only your operating charter and the fixed sub-dispatch templates.
+auto-selection) and execute mode `check`, `decompose`, `reconcile`, or `report` exactly as the
+skill states. This file adds only your operating charter and the fixed sub-dispatch templates
+(the charter and templates below apply to `check`/`decompose`/`reconcile`; `report` is a
+read-only aggregation with no sub-dispatches of its own — see the skill's Mode `report`).
 
 ## Charter
 

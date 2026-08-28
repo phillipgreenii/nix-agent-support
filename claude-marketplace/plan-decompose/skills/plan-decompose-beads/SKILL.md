@@ -84,8 +84,38 @@ dollar signs.
 
 ## `append-metric` / `read-metrics`
 
-Append: `bd comment <packet-id> "<pd_metrics record>"`. Read: `bd comments <id> --json` over
-the docket's children (aggregation, when built, MUST scope by docket and paginate).
+Append: `bd comment <packet-id> "<pd_metrics record>"`.
+
+Read, for mode `report` (scoped to one docket, paginated over its children — probed
+2026-08-28 against bd 1.2.2):
+
+- **`--offset` is unreachable from this CLI.** `bd list`'s help documents `--offset` as
+  "Only supported under `--proxied-server`", and that flag is not itself exposed:
+  `bd list --parent <docket> --status all -n <k> --offset <n> --json` fails with
+  `Error: --offset is only supported under --proxied-server`, and adding
+  `--proxied-server` fails with `Error: unknown flag: --proxied-server`. So server-side
+  offset pagination does not exist here — pagination is done CLIENT-SIDE, over the cheap
+  part, never the expensive part:
+  1. **Children list, once** — `bd list --parent <docket> --status all -n 0 --json`. This
+     returns id/status/`metadata`/`comment_count` per child, never description or comment
+     bodies, so one unbounded call here is cheap regardless of docket size (confirmed
+     `metadata` DOES appear as a JSON key on `bd show`/`bd list --json` once any key is set
+     on that issue — probed via a scratch bead — but is OMITTED entirely, not `null`, when
+     empty; check for key presence, not truthiness).
+  2. **Chunk that id list locally** into pages (default 20) and, for each page, call
+     `bd comments <id> --json` for every child IN that page — one call per child, folding
+     results into running totals before advancing to the next page. This is the paginated,
+     bounded step: it is what "never load the whole docket at once" actually guards, since
+     comment threads (not the children list) are the part whose size scales with docket
+     history.
+  3. **Skip for free**: a child whose `bd list` row already shows `comment_count: 0` needs
+     no `bd comments` call at all — count it directly as `no-record`.
+- **Estimate side** (mode `report` step 2): `bd comments <docket-id> --json`, find the most
+  recent comment matching the `write-report` packet-index shape (from `decompose` step 10 or
+  a `reconcile` re-curation report), and read its per-packet fixed-read/budget estimates from
+  that comment's text. When more than one such report exists, the estimate for a given
+  packet id is the one from the MOST RECENT report that names it — an initial release
+  estimate superseded by a reconcile's re-estimate.
 
 ## `amend-design`
 
