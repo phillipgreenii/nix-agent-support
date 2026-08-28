@@ -207,7 +207,38 @@ proceeding on currently loaded text (direct interactive invocation).`)
      `pn-workspace-rules:fork-workforest` skill, keyed to the bead id.
 
 4. **DELEGATE THE WORK** to a subagent (REQUIRED — this preserves your context).
-   The brief is a POINTER, not a payload. It MUST contain exactly:
+
+   **Curated-packet check (first action of this step):**
+   `bd show <id> --json | jq -c '.data[0].metadata.pd_curated_rev'`. A non-null result means
+   this bead is a `plan-decompose` work packet — take the CURATED PATH just below. `null` (the
+   common case today) means take the UNCURATED PATH — the ad-hoc brief, exactly as before this
+   check existed.
+
+   **CURATED PATH.** Dispatch the `plan-decompose:packet-implementer` agent instead of
+   composing a brief yourself. This is an OPTIMIZATION, never a requirement (ADR 0058's
+   Decision, D1: agents are never load-bearing — a curated packet's own content is
+   self-contained, so it is ALWAYS also workable via the UNCURATED PATH below; if this agent is
+   unavailable in this session, or its dispatch does not come back with a usable report of the
+   shape described below, that is NOT a bead failure — fall back to the UNCURATED PATH for this
+   bead instead). When it IS available, its brief MUST contain exactly: the bead id (it
+   re-derives everything else — the packet content, the docket, the stamp check — itself via
+   `bd show`; never transcribe the packet body or metadata); and the absolute repo root and the
+   worktree/set path from ISOLATE. Layer these two overrides on top of its own stock procedure
+   (its other steps stand as documented in its own agent file):
+   - You already hold the claim (from step 1) — it MUST NOT re-claim or derive its own actor id
+     for claiming.
+   - It MUST NOT close or re-`defer` the bead at closeout. CLAIM/LAND/CLEANUP/CLOSE stay in
+     THIS session (see "Rules" → "Orchestrator vs subagent"). Instead it MUST end its turn with
+     a report classified into this step's four statuses below
+     (`done` / `done-pending-apply-verification` / `stuck` / `needs-more-repos`), carrying the
+     same gate-evidence and repos-touched requirements as the UNCURATED PATH.
+
+   Its own agent file explicitly leaves isolation/landing/cleanup/claim-hygiene "environment
+   conventions" to whoever dispatches it, so the brief ALSO carries the UNCURATED PATH's
+   "standing constraints" bullet unchanged (timeouts / `run_in_background` for builds only,
+   never for git commits; commit-then-gate ordering; report fully in ONE turn).
+
+   **UNCURATED PATH.** The brief is a POINTER, not a payload. It MUST contain exactly:
    - the bead id, with the instruction to run `bd show <id>` ITSELF for the full
      description and acceptance criteria;
    - the absolute repo root and the worktree/set path (state the root once —
