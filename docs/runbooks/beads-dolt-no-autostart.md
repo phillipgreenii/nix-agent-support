@@ -74,6 +74,29 @@ row; `home.packages` / `home.sessionVariables` miss the launchd/daemon rows.
   **launchd daemons**, not just interactive shells — hence the overlay wrapper,
   not `home.sessionVariables`.
 
+### 2026-08-28 — `mysql-probe-exporter` write canary is expected, not a rogue signal
+
+- **What's new:** as part of the beads-dolt monitoring Phase 2 work (epic
+  `pg2-xtjgf`), `mysql-probe-exporter`'s optional per-target write canary
+  (`writeCanary = true`) is now configured against the shared
+  `org.nixos.beads-dolt-server` instance. Every poll cycle it ensures its own
+  dedicated `observability_probe` database exists, writes/reads a heartbeat
+  row, and — once `rotationPeriod` (default `24h`) has elapsed since the
+  database was last (re)created — drops, purges, and re-creates it before the
+  next write.
+- **Expected, benign symptom:** `observability_probe` appearing in
+  `SHOW DATABASES` on the shared server, and briefly appearing in
+  `.dolt_dropped_databases` immediately after a rotation, is normal
+  write-canary activity — **not** a sign of a second/rogue server. It is
+  created and dropped by the same probe, never by `bd` or by any repo's own
+  database (`pg2`, `zr`, …).
+- **How to tell the difference from a real incident:** the write canary only
+  ever touches its own `observability_probe` database — it never writes to
+  `pg2`, `zr`, or any other configured database. If a rogue-server incident is
+  suspected, apply the debugging playbook below; a lone `observability_probe`
+  database with no accompanying second `dolt sql-server` process (per step 1)
+  and no port contention (per step 2) is the canary, not a rogue.
+
 ## Debugging playbook (docs-only)
 
 All steps are read-only until data safety is confirmed. None start a server.
