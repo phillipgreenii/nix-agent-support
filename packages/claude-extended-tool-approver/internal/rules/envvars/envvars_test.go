@@ -1838,6 +1838,39 @@ func TestSanitizeReasonName_WorstCaseFitsReasonBudget(t *testing.T) {
 	}
 }
 
+// TestEnvVars_DefaultFallbackReasonFitsBudgetAtWorstCase closes a gap left by the
+// two tests above: neither exercises the ACTUAL ASSEMBLED default-fallback Reason
+// (evaluateAssignment's `default:` case) at sanitizeReasonName's genuine worst case.
+// TestSanitizeReasonName_WorstCaseFitsReasonBudget checks sanitizeReasonName alone,
+// never through the assembled string, and TestEnvVars_ReasonNeverLeaksCommandFragment
+// checks the 160-byte bound only against one 89-byte printable-ASCII fragment that
+// never reaches the 69-byte control-byte-expansion worst case. A future lengthening of
+// the fallback's fixed prefix (envvars.go's `default:` case) could push the real
+// assembled reason past 160 bytes with neither existing test noticing.
+func TestEnvVars_DefaultFallbackReasonFitsBudgetAtWorstCase(t *testing.T) {
+	fe := &fakeEvaluator{results: map[string]hookio.RuleResult{
+		`rm -rf "$p"`: otherRefusal("safe-commands", `safe-commands: rm has a dynamically-expanded path arg (deferred to claude-code)`),
+	}}
+	r := NewWithEvaluator(fe)
+	worstCaseName := strings.Repeat("\x00", 200)
+	ev := cmdparse.EnvAssignment{
+		Name:      worstCaseName,
+		Value:     `$(rm -rf "$p")`,
+		Raw:       worstCaseName + `=$(rm -rf "$p")`,
+		Expansion: cmdparse.ExpansionUnknown,
+	}
+	got, refused := r.evaluateAssignment(ev, &hookio.HookInput{ToolName: "Bash"}, nil, nil, false)
+	if got.Decision != hookio.Reject {
+		t.Fatalf("worst-case-name capture: got %s (%s), want reject", got.Decision, got.Reason)
+	}
+	if !refused {
+		t.Error("worst-case-name capture: not marked as examined-and-refused")
+	}
+	if len(got.Reason) > 160 {
+		t.Errorf("assembled default-fallback Reason is %d bytes at sanitizeReasonName's worst case; want <=160: %q", len(got.Reason), got.Reason)
+	}
+}
+
 // TestEnvVars_ReasonNeverLeaksCommandFragment asserts the rule's own reason string
 // is safe even when handed the exact adversarial name the pg2-3ggxm parser desync
 // used to produce: a multi-line command fragment. The live hook emitted that
