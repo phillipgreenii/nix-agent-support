@@ -2,12 +2,12 @@ package watchdog
 
 import (
 	"context"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/phillipgreenii/pr-pool/internal/beads"
+	"github.com/phillipgreenii/pr-pool/internal/gitenv"
 )
 
 // gitCallTimeout bounds the read-only `git rev-parse` probe so a wedged git can
@@ -95,16 +95,25 @@ func gitToplevel(ctx context.Context, path string) (string, error) {
 
 // execGit runs `git -C dir args...` under ctx with a bounded timeout, so the
 // probe honors cancellation and can't wedge the hard-stop sequence (pg2-yy42).
+// The child's environment is built by gitenv.Command (hermetic allowlist),
+// never inherited wholesale — a leaked ambient GIT_DIR/GIT_WORK_TREE outranks
+// -C in git's own repository discovery and would otherwise redirect this
+// probe at the wrong repository (pg2-bh09g).
 func execGit(ctx context.Context, dir string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, gitCallTimeout)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...).Output()
+	out, err := gitenv.Command(ctx, dir, args...).Output()
 	return string(out), err
 }
 
 // OSGit is the production GitRunner — runs `git -C <dir> <args...>`.
 type OSGit struct{}
 
+// Run is the MUTATING half of this file's git calls (reset --hard, clean
+// -fd, from terminal's hard-stop sequence): under a leaked ambient GIT_DIR it
+// would otherwise act on the wrong repository instead of dir, which is why
+// its child environment is built by gitenv.Command rather than inherited
+// (pg2-bh09g).
 func (OSGit) Run(ctx context.Context, dir string, args ...string) error {
-	return exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...).Run()
+	return gitenv.Command(ctx, dir, args...).Run()
 }

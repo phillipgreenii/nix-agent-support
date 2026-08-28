@@ -12,6 +12,7 @@ import (
 	"github.com/phillipgreenii/pr-pool/conformance"
 	"github.com/phillipgreenii/pr-pool/internal/beads"
 	"github.com/phillipgreenii/pr-pool/internal/config"
+	"github.com/phillipgreenii/pr-pool/internal/gitenv"
 	"github.com/phillipgreenii/pr-pool/internal/query"
 	"github.com/phillipgreenii/pr-pool/internal/reconcile"
 )
@@ -45,8 +46,12 @@ func warnDroppedRoleEnv() {
 // warnTrackedConfig warns if <RepoRoot>/.pr-pool/config.toml is tracked by git, so
 // repo-local prompts are not accidentally committed (e.g. to an employer's
 // monorepo). Best-effort: a git error / untracked file is silently ignored.
+// Read-only, but still built via gitenv.Command rather than a bare
+// exec.CommandContext: a leaked ambient GIT_DIR/GIT_WORK_TREE outranks -C in
+// git's own repository discovery and would otherwise make this check answer
+// about the wrong repository (pg2-bh09g).
 func warnTrackedConfig(ctx context.Context, cfg config.Config) {
-	cmd := exec.CommandContext(ctx, "git", "-C", cfg.RepoRoot, "ls-files", "--error-unmatch", ".pr-pool/config.toml")
+	cmd := gitenv.Command(ctx, cfg.RepoRoot, "ls-files", "--error-unmatch", ".pr-pool/config.toml")
 	if err := cmd.Run(); err == nil {
 		slog.Warn("`.pr-pool/config.toml` is tracked by git; prompts may be committed — add `.pr-pool/` to .git/info/exclude", "repo", cfg.RepoRoot)
 	}
