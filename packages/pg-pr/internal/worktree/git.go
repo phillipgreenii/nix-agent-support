@@ -1,21 +1,18 @@
 package worktree
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"os/exec"
 	"regexp"
-	"strconv"
 	"strings"
 
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/gitenv"
+	"github.com/phillipgreenii/x/gitclient"
 )
 
 // GitClient abstracts the git operations the worktree package needs.
-// The default implementation shells out to the `git` CLI; tests inject
-// fakes.
+// The default implementation shells out to the `git` CLI (via x/gitclient);
+// tests inject fakes.
 type GitClient interface {
 	// RepoFromRemote parses `git -C dir config --get remote.origin.url`
 	// and returns the GitHub owner/repo it points to.
@@ -27,8 +24,8 @@ type GitClient interface {
 	// RefExists reports whether ref resolves to a commit in dir (e.g.
 	// "origin/pr/12"). Used to skip a redundant fetch when the PR head has
 	// already been fetched (by the daemon's pre-fetch gate or an earlier run).
-	// Returns (false, nil) when the ref is absent or on any error — a false
-	// negative is safe (the caller just fetches anyway).
+	// Returns (false, nil) on any error — a false negative is safe (the
+	// caller just fetches anyway).
 	//
 	// Note: this only checks ref *presence*, not *currency* — it cannot tell a
 	// freshly-fetched head from a stale one. That's safe in production because
@@ -63,7 +60,38 @@ type GitClient interface {
 	WorktreeInfo(ctx context.Context, path string) (*Worktree, error)
 }
 
-// CLIGitClient invokes the system `git` binary.
+// gitRepo is the composite role set this package's git plumbing needs from
+// x/gitclient (design §4.5's consumer mapping: "pg-pr worktree -> composes
+// Locator+RefReader+StatusReader+Fetcher+WorktreeManager+BranchManager;
+// domain methods (RepoFromRemote, FetchPR, WorktreeInfo) stay local, built
+// on these").
+type gitRepo interface {
+	gitclient.Locator
+	gitclient.RefReader
+	gitclient.StatusReader
+	gitclient.Fetcher
+	gitclient.WorktreeManager
+	gitclient.BranchManager
+}
+
+// opener anchors a gitclient at dir, sized to the widest role set this
+// package needs (design §4.6's app-local opener seam for multi-directory
+// consumers). Unlike branch.go/gitlocal.go, this package cannot use one
+// shared package-level Client: WorktreeInfo(path) and List's per-entry scan
+// probe arbitrary paths, and CreateWorktree/FetchPR/RepoFromRemote anchor at
+// whatever repoDir the caller supplies, so every call opens its own client.
+type opener func(ctx context.Context, dir string) (gitRepo, error)
+
+// openGit is a package-level var, not a plain function, so tests can
+// substitute a fake opener (map-backed, or one that fails) without
+// threading a new testing seam through GitClient/CLIGitClient itself. This
+// mirrors pr-pool's internal/worktree.Opener and internal/watchdog's
+// gitOpener.
+var openGit opener = func(ctx context.Context, dir string) (gitRepo, error) {
+	return gitclient.New(ctx, dir)
+}
+
+// CLIGitClient invokes the system `git` binary via x/gitclient.
 type CLIGitClient struct{}
 
 // NewCLIGitClient returns a GitClient backed by the system `git` binary.
@@ -72,11 +100,15 @@ func NewCLIGitClient() GitClient { return &CLIGitClient{} }
 var ghRemoteRE = regexp.MustCompile(`github\.com[:/]([^/]+)/(.+?)(?:\.git)?$`)
 
 func (g *CLIGitClient) RepoFromRemote(ctx context.Context, dir string) (string, string, error) {
-	out, err := runGit(ctx, dir, "config", "--get", "remote.origin.url")
+	client, err := openGit(ctx, dir)
 	if err != nil {
 		return "", "", err
 	}
-	url := strings.TrimSpace(out)
+	url, err := client.RemoteURL(ctx, "origin")
+	if err != nil {
+		return "", "", err
+	}
+	url = strings.TrimSpace(url)
 	m := ghRemoteRE.FindStringSubmatch(url)
 	if m == nil {
 		return "", "", fmt.Errorf("remote.origin.url is not a github URL: %q", url)
@@ -85,95 +117,112 @@ func (g *CLIGitClient) RepoFromRemote(ctx context.Context, dir string) (string, 
 }
 
 func (g *CLIGitClient) FetchPR(ctx context.Context, dir string, pr int) error {
-	// Force-update (+) and disable prune: dir may already have
-	// refs/remotes/origin/pr/<pr> from a prior fetch (this call re-fetches on
-	// every re-review), and without both of these git's default prune pass
-	// deletes that tracking ref (it doesn't match the default
-	// refs/heads/*:refs/remotes/origin/* fetch refspec's source side) and then
-	// fails to recreate it — see CLIPRFetcher.FetchPRHead in
-	// internal/sync/prefetch.go, whose refspec this mirrors exactly.
+	client, err := openGit(ctx, dir)
+	if err != nil {
+		return err
+	}
+	// Force-update (+) and disable prune (the zero-value FetchOptions.AllowPrune
+	// default): dir may already have refs/remotes/origin/pr/<pr> from a prior
+	// fetch (this call re-fetches on every re-review), and without both of
+	// these git's default prune pass deletes that tracking ref (it doesn't
+	// match the default refs/heads/*:refs/remotes/origin/* fetch refspec's
+	// source side) and then fails to recreate it — see CLIPRFetcher.FetchPRHead
+	// in internal/sync/prefetch.go, whose refspec this mirrors exactly.
 	refspec := fmt.Sprintf("+pull/%d/head:refs/remotes/origin/pr/%d", pr, pr)
-	_, err := runGit(ctx, dir, "fetch", "--no-prune", "origin", refspec)
-	return err
+	return client.Fetch(ctx, gitclient.FetchOptions{Remote: "origin", Refspec: refspec})
 }
 
 func (g *CLIGitClient) RefExists(ctx context.Context, dir, ref string) (bool, error) {
-	// `rev-parse --verify --quiet <ref>^{commit}` exits 0 when the ref resolves
-	// to a commit and non-zero (empty output) otherwise. runGit returns an
-	// error on any non-zero exit; treat every error as "not present".
-	if _, err := runGit(ctx, dir, "rev-parse", "--verify", "--quiet", ref+"^{commit}"); err != nil {
+	client, err := openGit(ctx, dir)
+	if err != nil {
 		return false, nil
 	}
-	return true, nil
+	// Treat every error (not just "ref does not exist") as "not present" —
+	// matches the previous runGit-based behavior, where any non-zero exit
+	// from `rev-parse --verify --quiet` collapsed to (false, nil).
+	exists, err := client.RefExists(ctx, ref)
+	if err != nil {
+		return false, nil
+	}
+	return exists, nil
 }
 
 func (g *CLIGitClient) CreateWorktree(ctx context.Context, dir, target, branch, startPoint string) error {
-	args := []string{"worktree", "add", target, "-b", branch}
-	if startPoint != "" {
-		args = append(args, startPoint)
+	client, err := openGit(ctx, dir)
+	if err != nil {
+		return err
 	}
-	_, err := runGit(ctx, dir, args...)
-	return err
+	return client.CreateWorktree(ctx, target, branch, gitclient.CreateWorktreeOptions{StartPoint: startPoint})
 }
 
 func (g *CLIGitClient) RemoveWorktree(ctx context.Context, dir, target string, force bool) error {
-	args := []string{"worktree", "remove"}
-	if force {
-		args = append(args, "--force")
+	client, err := openGit(ctx, dir)
+	if err != nil {
+		return err
 	}
-	args = append(args, target)
-	_, err := runGit(ctx, dir, args...)
-	return err
+	return client.RemoveWorktree(ctx, target, force)
 }
 
 func (g *CLIGitClient) PruneWorktrees(ctx context.Context, dir string) error {
-	_, err := runGit(ctx, dir, "worktree", "prune")
-	return err
+	client, err := openGit(ctx, dir)
+	if err != nil {
+		return err
+	}
+	return client.PruneWorktrees(ctx)
 }
 
 func (g *CLIGitClient) DeleteBranch(ctx context.Context, dir, branch string, force bool) error {
-	flag := "-d"
-	if force {
-		flag = "-D"
+	client, err := openGit(ctx, dir)
+	if err != nil {
+		return err
 	}
-	_, err := runGit(ctx, dir, "branch", flag, branch)
-	return err
+	return client.DeleteBranch(ctx, branch, force)
 }
 
 func (g *CLIGitClient) BranchAheadOfRef(ctx context.Context, dir, branch, ref string) (bool, error) {
-	out, err := runGit(ctx, dir, "rev-list", "--count", ref+".."+branch)
+	client, err := openGit(ctx, dir)
 	if err != nil {
 		return false, err
 	}
-	n, err := strconv.Atoi(strings.TrimSpace(out))
+	n, err := client.CommitsAhead(ctx, ref, branch)
 	if err != nil {
-		return false, fmt.Errorf("parse rev-list --count output %q: %w", out, err)
+		return false, err
 	}
 	return n > 0, nil
 }
 
 func (g *CLIGitClient) WorktreeInfo(ctx context.Context, path string) (*Worktree, error) {
-	// Branch name.
-	branchOut, err := runGit(ctx, path, "rev-parse", "--abbrev-ref", "HEAD")
+	client, err := openGit(ctx, path)
 	if err != nil {
-		return nil, fmt.Errorf("rev-parse HEAD: %w", err)
+		return nil, fmt.Errorf("open %s: %w", path, err)
 	}
-	branch := strings.TrimSpace(branchOut)
+
+	// Branch name. CurrentBranch (`branch --show-current`) returns
+	// gitclient.ErrDetachedHEAD when HEAD does not point at a branch; the
+	// previous `rev-parse --abbrev-ref HEAD` returned the literal string
+	// "HEAD" in that case (design §4.2's migration behavior note (b)), so
+	// that sentinel is mapped back to "HEAD" here to preserve behavior.
+	branch, err := client.CurrentBranch(ctx)
+	if err != nil {
+		if errors.Is(err, gitclient.ErrDetachedHEAD) {
+			branch = "HEAD"
+		} else {
+			return nil, fmt.Errorf("current branch: %w", err)
+		}
+	}
 
 	// Uncommitted changes.
-	statusOut, err := runGit(ctx, path, "status", "--porcelain")
+	entries, err := client.Status(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("status: %w", err)
 	}
-	hasChanges := strings.TrimSpace(statusOut) != ""
+	hasChanges := len(entries) > 0
 
 	// Unpushed commits (0 if no upstream).
 	unpushed := 0
-	if _, err := runGit(ctx, path, "rev-parse", "@{u}"); err == nil {
-		if cnt, err := runGit(ctx, path, "rev-list", "--count", "@{u}..HEAD"); err == nil {
-			if n, parseErr := strconv.Atoi(strings.TrimSpace(cnt)); parseErr == nil {
-				unpushed = n
-			}
+	if hasUpstream, err := client.HasUpstream(ctx); err == nil && hasUpstream {
+		if n, err := client.CommitsAhead(ctx, "@{u}", "HEAD"); err == nil {
+			unpushed = n
 		}
 	}
 
@@ -184,26 +233,4 @@ func (g *CLIGitClient) WorktreeInfo(ctx context.Context, path string) (*Worktree
 		HasUncommittedChange: hasChanges,
 		UnpushedCommits:      unpushed,
 	}, nil
-}
-
-// runGit invokes `git -C dir <args...>` and returns its stdout. If the
-// command fails, the returned error includes the captured stderr to aid
-// debugging.
-func runGit(ctx context.Context, dir string, args ...string) (string, error) {
-	// gitenv.Command owns the child environment: a leaked GIT_DIR /
-	// GIT_INDEX_FILE outranks `-C dir`, so passing dir alone is not enough to
-	// keep this call inside dir. See internal/gitenv (pg2-lx41y).
-	cmd := gitenv.Command(ctx, dir, args...)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			return stdout.String(), fmt.Errorf("git %s: %w: %s",
-				strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
-		}
-		return stdout.String(), fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
-	}
-	return stdout.String(), nil
 }

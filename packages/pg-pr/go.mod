@@ -1,9 +1,10 @@
 module github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr
 
-go 1.25.0
+go 1.25.9
 
 require (
 	github.com/go-enry/go-enry/v2 v2.9.6
+	github.com/phillipgreenii/x v0.0.0-20260828074718-387984c818b9
 	github.com/prometheus/client_golang v1.24.1
 	github.com/spf13/cobra v1.10.2
 	go.opentelemetry.io/contrib/bridges/otelslog v0.20.0

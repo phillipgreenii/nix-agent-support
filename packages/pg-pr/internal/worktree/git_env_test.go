@@ -2,8 +2,8 @@ package worktree
 
 import (
 	"context"
+	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -13,9 +13,18 @@ import (
 // pass. The values point at a path that is not a repository at all, so a call
 // that inherits them fails loudly instead of silently mutating a real clone.
 //
-// See internal/gitenv for the mechanism (pg2-lx41y): git's repo discovery
-// consults these BEFORE it looks at `-C dir`, so `-C dir` cannot override
-// them.
+// Before this package migrated onto x/gitclient (pg2-3sl0t), the mechanism
+// under test here was internal/gitenv (pg2-lx41y): git's repo discovery
+// consults these vars BEFORE it looks at `-C dir`, so `-C dir` alone cannot
+// override them, and gitenv.Command filtered the INHERITED process
+// environment down to an allowlist. x/gitclient's Client goes further
+// (design §4.4's environment contract): it BUILDS the child environment from
+// scratch — PATH/HOME/SSH_AUTH_SOCK plus whatever an Option explicitly adds —
+// so a var like GIT_DIR that was never passed through an Option has no path
+// into the child at all, regardless of what this process's own environment
+// contains. This test suite exercises that guarantee through this package's
+// real production entry points (CLIGitClient), the same way it did against
+// the retired runGit helper.
 func leakGitLocationVars(t *testing.T) {
 	t.Helper()
 	leaked := filepath.Join(t.TempDir(), "leaked-git-dir")
@@ -25,26 +34,39 @@ func leakGitLocationVars(t *testing.T) {
 	t.Setenv("GIT_COMMON_DIR", leaked)
 }
 
-// TestRunGitStaysInDirUnderLeakedGitDir drives the package's real runGit —
-// the same helper every mutating verb here goes through (worktree add,
-// worktree remove, fetch, config) — and asserts it resolved the directory it
-// was handed rather than the leaked repository.
-func TestRunGitStaysInDirUnderLeakedGitDir(t *testing.T) {
+// TestWorktreeInfoStaysInDirUnderLeakedGitDir drives CLIGitClient.WorktreeInfo
+// — the read-only probe both List and Remove rely on — under a leaked
+// ambient GIT_DIR/GIT_WORK_TREE/etc, and asserts it reports the repo actually
+// at path rather than silently redirecting onto the (nonexistent) leaked
+// location.
+func TestWorktreeInfoStaysInDirUnderLeakedGitDir(t *testing.T) {
 	repo := t.TempDir()
 	initRepo(t, repo)
 	leakGitLocationVars(t)
 
-	out, err := runGit(context.Background(), repo, "rev-parse", "--absolute-git-dir")
+	wt, err := NewCLIGitClient().WorktreeInfo(context.Background(), repo)
 	if err != nil {
-		t.Fatalf("runGit inherited the leaked GIT_DIR and could not resolve %s: %v", repo, err)
+		t.Fatalf("WorktreeInfo inherited the leaked GIT_DIR and could not resolve %s: %v", repo, err)
 	}
+	if wt.Branch != "main" {
+		t.Fatalf("WorktreeInfo resolved the wrong repository: got branch %q, want %q", wt.Branch, "main")
+	}
+}
 
-	resolved, err := filepath.EvalSymlinks(repo)
-	if err != nil {
-		resolved = repo
+// TestCreateWorktreeStaysInDirUnderLeakedGitDir drives
+// CLIGitClient.CreateWorktree — a MUTATING verb — under the same leaked
+// environment, and asserts the new worktree is actually created off repo
+// rather than the leaked location.
+func TestCreateWorktreeStaysInDirUnderLeakedGitDir(t *testing.T) {
+	repo := t.TempDir()
+	initRepo(t, repo)
+	leakGitLocationVars(t)
+
+	target := filepath.Join(t.TempDir(), "wt")
+	if err := NewCLIGitClient().CreateWorktree(context.Background(), repo, target, "leak-test", ""); err != nil {
+		t.Fatalf("CreateWorktree inherited the leaked GIT_DIR and failed: %v", err)
 	}
-	want := filepath.Join(resolved, ".git")
-	if got := strings.TrimSpace(out); got != want {
-		t.Fatalf("runGit resolved the wrong repository\n got: %s\nwant: %s", got, want)
+	if _, err := os.Stat(filepath.Join(target, ".git")); err != nil {
+		t.Fatalf("worktree not created inside target %s: %v", target, err)
 	}
 }
