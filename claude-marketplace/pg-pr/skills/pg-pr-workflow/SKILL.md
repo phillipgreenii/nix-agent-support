@@ -15,6 +15,9 @@ Prefer `pg-pr` over ad-hoc `gh` invocations for anything PR-related:
 - Discover: `pg-pr pr view <n>`, `pg-pr pr files`, `pg-pr pr commits`
 - Worktree: `pg-pr worktree add|remove|list <n>`
 - Sync: `pg-pr sync` (refreshes merge-request beads)
+- Create/update: `pg-pr pr create`, `pg-pr pr update <n>`
+- Lifecycle: `pg-pr pr ready <n>`, `pg-pr pr draft <n>`, `pg-pr pr wip on|off <n>`
+- Visibility: `pg-pr pr hide <n> [reason]`, `pg-pr pr unhide <n>`
 - Review: `pg-pr review draft|post|submit <n>`
 - Comment: `pg-pr comment add|respond|resolve`
 

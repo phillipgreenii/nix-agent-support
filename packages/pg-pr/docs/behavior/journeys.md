@@ -96,6 +96,13 @@ _Includes:_ `USECASE-PGPR-ENSURE-MR`.
    way).
 2. pg-pr ensures the PR's merge-request record exists, creating it if this is the first time.
 
+Extensions:
+
+- 1a. No explicit draft/ready state is requested: the PR opens as a draft. Promotion to ready is
+  not part of this use case — it happens the next time `USECASE-PGPR-SYNC` runs and finds WIP
+  false, CI green (configured check-interpreters excluded), no bot disapproval, and no merge
+  conflict.
+
 ### `USECASE-PGPR-SYNC` — sync PR facts from the code host <!-- uuid: 17c96eaf-5307-44c0-bc4f-ed5de759269a -->
 
 **Primary actor:** none — a scheduled or triggered background actor.

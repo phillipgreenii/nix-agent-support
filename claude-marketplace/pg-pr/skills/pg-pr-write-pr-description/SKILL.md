@@ -107,6 +107,14 @@ BODY
 By default the PR opens in draft. Pass `--no-draft` only when the
 user explicitly asks for a ready-for-review PR.
 
+Promotion to ready is automatic, not something an agent drives: `pg-pr
+sync` promotes one of your own draft PRs once WIP is false, CI is green
+(configured check-interpreters such as policy-bot excluded), no bot
+disapproves, and there is no merge conflict. Use `pg-pr pr wip on <n>`
+to suppress that — it is the only way to keep a green PR in draft, and
+it is also the only way to send a ready PR back to draft (a red build
+or a fresh conflict never re-drafts it on their own).
+
 ### Updating an existing PR
 
 ```bash

@@ -11,17 +11,17 @@ The four interfaces are described on **two axes** — the **kind** of party on t
 whether that party is an **essential or optional** participant in what pg-pr exists to do
 (`INV-8`); all four are essential — pg-pr has no optional participant.
 
-| Interface         | Boundary                     | Counterparty (kind)           | Participation           | Initiator |
-| ----------------- | ---------------------------- | ----------------------------- | ----------------------- | --------- |
-| `INTF-PGPR-READ`  | PR facts out, with freshness | `ACTOR-PGPR-CONSUMER` (actor) | essential, driving port | consumer  |
-| `INTF-PGPR-WRITE` | reviews and comments posted  | `ACTOR-PGPR-CODEHOST` (owner) | essential               | pg-pr     |
-| `INTF-PGPR-SYNC`  | PR facts pulled in           | `ACTOR-PGPR-CODEHOST` (owner) | essential               | pg-pr     |
-| `INTF-PGPR-MR`    | merge-request record upsert  | `ACTOR-PGPR-TRACKER` (owner)  | essential               | pg-pr     |
+| Interface         | Boundary                                         | Counterparty (kind)           | Participation           | Initiator |
+| ----------------- | ------------------------------------------------ | ----------------------------- | ----------------------- | --------- |
+| `INTF-PGPR-READ`  | PR facts out, with freshness                     | `ACTOR-PGPR-CONSUMER` (actor) | essential, driving port | consumer  |
+| `INTF-PGPR-WRITE` | PRs created/updated, reviews and comments posted | `ACTOR-PGPR-CODEHOST` (owner) | essential               | pg-pr     |
+| `INTF-PGPR-SYNC`  | PR facts pulled in                               | `ACTOR-PGPR-CODEHOST` (owner) | essential               | pg-pr     |
+| `INTF-PGPR-MR`    | merge-request record upsert                      | `ACTOR-PGPR-TRACKER` (owner)  | essential               | pg-pr     |
 
 ```mermaid
 flowchart LR
     HOST["code host"] -- "INTF-PGPR-SYNC: PR facts" --> PGPR["pg-pr"]
-    PGPR -- "INTF-PGPR-WRITE: reviews, comments" --> HOST
+    PGPR -- "INTF-PGPR-WRITE: PR create/update, reviews, comments" --> HOST
     PGPR -- "INTF-PGPR-READ: facts + freshness" --> CONSUMER["machine read consumer / operator"]
     PGPR -- "INTF-PGPR-MR: upsert" --> TRACKER["work tracker"]
 ```
@@ -76,16 +76,20 @@ flowchart LR
   on (`INV-ASOF-1`); pg-pr, not the consumer, makes that determination, so a consumer MUST NOT
   re-derive its own staleness policy over these facts (`INV-ASOF-2`).
 
-## `INTF-PGPR-WRITE` — reviews and comments posted <!-- uuid: 59ab0dcd-d1e9-4a81-8d91-46b1f9146b6b -->
+## `INTF-PGPR-WRITE` — PRs created/updated, reviews and comments posted <!-- uuid: 59ab0dcd-d1e9-4a81-8d91-46b1f9146b6b -->
 
-- **Out (pg-pr → code host)** — a review or comment, head-anchored (`INV-WRITE-1`), carrying its
-  attribution mark (`INV-ATTR-1`), staged as a draft and posted as a pending review
-  (`INV-REVIEW-1`). Posting review content against a draft PR is permitted only when the PR is
-  the reviewing operator's own and WIP is not set on it; a draft PR belonging to anyone else is
-  refused regardless of WIP (`INV-REVIEW-2`). Posting supersedes any existing pending review —
-  found via a fail-closed pending check — rather than stacking (`INV-REVIEW-3`).
-- **Guarantee** — pg-pr is an **implementer** of the code host's own review-posting contract: it
-  states only its own obligations above and never restates the code host's contract.
+- **Out (pg-pr → code host), PR create/update** — a PR opened or updated against the code host
+  (title, body, head/base, draft state), per `USECASE-PGPR-CREATE`. This crosses the same
+  code-host boundary as the review/comment traffic below, not a separate one.
+- **Out (pg-pr → code host), review/comment** — a review or comment, head-anchored
+  (`INV-WRITE-1`), carrying its attribution mark (`INV-ATTR-1`), staged as a draft and posted as
+  a pending review (`INV-REVIEW-1`). Posting review content against a draft PR is permitted only
+  when the PR is the reviewing operator's own and WIP is not set on it; a draft PR belonging to
+  anyone else is refused regardless of WIP (`INV-REVIEW-2`). Posting supersedes any existing
+  pending review — found via a fail-closed pending check — rather than stacking (`INV-REVIEW-3`).
+- **Guarantee** — pg-pr is an **implementer** of the code host's own PR and review/comment-posting
+  contracts: it states only its own obligations above and never restates the code host's
+  contract.
 - **Open questions** (tracked in [journeys](journeys.md)): `OQ-PGPR-VERDICT-DRIVES-POST` (whether
   the staged review verdict should eventually drive the posted review state, rather than the
   posted state always being `PENDING` with no approve/request-changes event).
