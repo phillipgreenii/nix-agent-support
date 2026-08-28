@@ -66,6 +66,22 @@ func TestEnvWithGHToken(t *testing.T) {
 	}
 }
 
+// TestGHAuthTokenCommand_ExcludesLeakedGitDirFamily is the token-resolver half
+// of bead pg2-5xn2j's regression: ghAuthTokenCommand has the same
+// os.Environ()-passthrough shape as ghexec.go's choke point, so it must be
+// scrubbed the same way even though `gh auth token` is account-scoped rather
+// than repository-scoped.
+func TestGHAuthTokenCommand_ExcludesLeakedGitDirFamily(t *testing.T) {
+	for _, kv := range leakedGitDirFamily {
+		k, v, _ := strings.Cut(kv, "=")
+		t.Setenv(k, v)
+	}
+
+	cmd := ghAuthTokenCommand(context.Background())
+
+	assertNoLeakedGitDirFamily(t, cmd.Env)
+}
+
 func TestIsAuthFailure(t *testing.T) {
 	cases := []struct {
 		name   string

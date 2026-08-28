@@ -6,6 +6,8 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/gitenv"
 )
 
 // TokenSource retrieves a GitHub auth token. The default reads gh's own auth;
@@ -34,10 +36,24 @@ func (e envTokenSource) Token(_ context.Context) (string, error) {
 // them separate avoids a chicken-and-egg.
 type ghCLITokenSource struct{}
 
-func (ghCLITokenSource) Token(ctx context.Context) (string, error) {
+// ghAuthTokenCommand builds the token resolver's own `gh auth token` command.
+// Split out from Token so the constructed *exec.Cmd can be asserted on
+// directly in tests without executing gh.
+//
+// Like cliGHRunner.command (ghexec.go), this passes the child env through
+// gitenv.Hermetic: `gh auth token` is account-scoped rather than
+// repository-scoped, so a leaked GIT_DIR cannot make it answer about the
+// wrong repo, but it is still the same defect shape (bead pg2-5xn2j) — an
+// os.Environ() passthrough hands the whole GIT_* family to a gh child for no
+// reason gh needs.
+func ghAuthTokenCommand(ctx context.Context) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, "gh", "auth", "token")
-	cmd.Env = envWithoutGHToken(os.Environ())
-	out, err := cmd.Output()
+	cmd.Env = envWithoutGHToken(gitenv.Hermetic(os.Environ()))
+	return cmd
+}
+
+func (ghCLITokenSource) Token(ctx context.Context) (string, error) {
+	out, err := ghAuthTokenCommand(ctx).Output()
 	if err != nil {
 		return "", fmt.Errorf("gh auth token: %w", err)
 	}

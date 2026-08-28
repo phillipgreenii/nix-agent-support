@@ -7,6 +7,8 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/gitenv"
 )
 
 // CLI is the token-protected gateway through which pg-pr invokes the `gh`
@@ -67,6 +69,17 @@ func (c *CLI) RunStdin(ctx context.Context, stdin []byte, args ...string) ([]byt
 
 // command is the choke point: token first, process second. Every gh invocation
 // in this module (except the token resolver itself) is built here.
+//
+// gh resolves "which repository am I talking about" by shelling out to git in
+// its working directory (`git remote -v` / `git rev-parse`), and those git
+// children inherit gh's environment. A leaked GIT_DIR/GIT_WORK_TREE/etc.
+// therefore redirects gh's git children exactly as it would redirect a direct
+// git call (see internal/gitenv), and gh's answer ends up describing the
+// LEAKED repository rather than the one a caller pointed it at via cmd.Dir or
+// --repo (bead pg2-5xn2j; mechanism proven on pg2-67h4y, fixed for direct git
+// exec sites on pg2-lx41y). gitenv.Hermetic is the same allowlist those git
+// sites use: it drops the GIT_DIR family while leaving gh's own needs (PATH,
+// HOME, GH_*, proxies, SSH) untouched.
 func (r *cliGHRunner) command(ctx context.Context, args ...string) (*exec.Cmd, error) {
 	tok, err := r.token(ctx)
 	if err != nil {
@@ -74,6 +87,6 @@ func (r *cliGHRunner) command(ctx context.Context, args ...string) (*exec.Cmd, e
 			strings.Join(args, " "), errors.Join(ErrGHAuthInvalid, err))
 	}
 	cmd := exec.CommandContext(ctx, "gh", args...)
-	cmd.Env = envWithGHToken(os.Environ(), tok)
+	cmd.Env = envWithGHToken(gitenv.Hermetic(os.Environ()), tok)
 	return cmd, nil
 }

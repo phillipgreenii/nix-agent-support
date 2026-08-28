@@ -46,6 +46,70 @@ func assertGHNotExecuted(t *testing.T, marker string) {
 	}
 }
 
+// leakedGitDirFamily is the enumerated set from bead pg2-5xn2j's acceptance
+// criteria: none of these may reach a gh child. gh resolves "which repository
+// am I talking about" by shelling out to git in its working directory (`git
+// remote -v` / `git rev-parse`), and those git children inherit gh's
+// environment exactly as they would a direct git call — see internal/gitenv
+// for the full mechanism (proven on pg2-67h4y, fixed for direct git exec
+// sites on pg2-lx41y).
+var leakedGitDirFamily = []string{
+	"GIT_DIR=/leaked/.git",
+	"GIT_WORK_TREE=/leaked",
+	"GIT_INDEX_FILE=/leaked/.git/index",
+	"GIT_COMMON_DIR=/leaked/.git",
+	"GIT_OBJECT_DIRECTORY=/leaked/.git/objects",
+	"GIT_PREFIX=packages/pg-pr/",
+	"GIT_CEILING_DIRECTORIES=/",
+}
+
+// envKeySet returns the set of variable names present in env.
+func envKeySet(env []string) map[string]bool {
+	keys := make(map[string]bool, len(env))
+	for _, kv := range env {
+		if k, _, ok := strings.Cut(kv, "="); ok {
+			keys[k] = true
+		}
+	}
+	return keys
+}
+
+// assertNoLeakedGitDirFamily fails for every key in leakedGitDirFamily that
+// is present in env.
+func assertNoLeakedGitDirFamily(t *testing.T, env []string) {
+	t.Helper()
+	present := envKeySet(env)
+	for _, kv := range leakedGitDirFamily {
+		k, _, _ := strings.Cut(kv, "=")
+		if present[k] {
+			t.Errorf("cmd.Env carries leaked %q into the gh child", k)
+		}
+	}
+}
+
+// TestCLICommand_ExcludesLeakedGitDirFamily is the regression test for bead
+// pg2-5xn2j: ghexec.go's command() is the choke point every gh invocation in
+// this module (except the token resolver) goes through, so proving it here
+// covers every caller — including internal/branch's PRForBranch and
+// internal/worktree's PRExists, which both set cmd.Dir/--repo on the
+// *exec.Cmd this method returns and would otherwise silently lose to an
+// inherited GIT_DIR (git's repo discovery consults the environment before
+// -C/--repo).
+func TestCLICommand_ExcludesLeakedGitDirFamily(t *testing.T) {
+	for _, kv := range leakedGitDirFamily {
+		k, v, _ := strings.Cut(kv, "=")
+		t.Setenv(k, v)
+	}
+
+	cli := NewCLIWithTokenSource(&fakeTokenSource{tok: "resolved-tok"})
+	cmd, err := cli.Command(context.Background(), "pr", "view", "1")
+	if err != nil {
+		t.Fatalf("Command: %v", err)
+	}
+
+	assertNoLeakedGitDirFamily(t, cmd.Env)
+}
+
 // countTokenEntries returns how many GH_TOKEN / GITHUB_TOKEN entries env holds
 // and the value of the last GH_TOKEN seen.
 func countTokenEntries(env []string) (ghCount, githubCount int, ghValue string) {
