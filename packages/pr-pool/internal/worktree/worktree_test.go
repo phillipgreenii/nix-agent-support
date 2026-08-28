@@ -3,70 +3,105 @@ package worktree
 import (
 	"context"
 	"path/filepath"
-	"strings"
 	"testing"
+
+	"github.com/phillipgreenii/x/gitclient"
 )
 
-type recGit struct {
-	calls [][]string
-	// existsAt: a path the fake reports as an existing worktree (rev-parse ok).
-	existsAt string
+// recWTM records every CreateWorktree call a fake Opener's client receives.
+type recWTM struct {
+	calls []struct {
+		path, branch string
+		opts         gitclient.CreateWorktreeOptions
+	}
 }
 
-func (g *recGit) Run(_ context.Context, dir string, args ...string) error {
-	g.calls = append(g.calls, append([]string{dir}, args...))
-	// Simulate "worktree already present": `git -C <path> rev-parse` succeeds only
-	// for existsAt.
-	if len(args) > 0 && args[0] == "rev-parse" {
-		if dir == g.existsAt {
-			return nil
-		}
-		return errNotARepo
-	}
+func (m *recWTM) CreateWorktree(_ context.Context, path, branch string, opts gitclient.CreateWorktreeOptions) error {
+	m.calls = append(m.calls, struct {
+		path, branch string
+		opts         gitclient.CreateWorktreeOptions
+	}{path, branch, opts})
 	return nil
 }
 
+func (m *recWTM) RemoveWorktree(context.Context, string, bool) error { return nil }
+func (m *recWTM) PruneWorktrees(context.Context) error               { return nil }
+
+// recOpener is a fake Opener: it reports gitclient.ErrNotARepository for any
+// dir in missingAt, and otherwise succeeds, returning the shared recWTM so
+// CreateWorktree calls are observable.
+type recOpener struct {
+	calls     []string
+	missingAt map[string]bool
+	wtm       *recWTM
+}
+
+func newRecOpener(missingAt map[string]bool) *recOpener {
+	return &recOpener{missingAt: missingAt, wtm: &recWTM{}}
+}
+
+func (o *recOpener) Open(_ context.Context, dir string) (gitclient.WorktreeManager, error) {
+	o.calls = append(o.calls, dir)
+	if o.missingAt[dir] {
+		return nil, gitclient.ErrNotARepository
+	}
+	return o.wtm, nil
+}
+
 func TestEnsure_createsFreshPerBeadWorktree(t *testing.T) {
-	g := &recGit{}
 	wtDir := t.TempDir()
-	got, err := Ensure(context.Background(), g, wtDir, "/repo", "zr-6bq.3")
+	want := filepath.Join(wtDir, "zr-6bq.3")
+	o := newRecOpener(map[string]bool{want: true}) // the target path doesn't exist yet
+
+	got, err := Ensure(context.Background(), o.Open, wtDir, "/repo", "zr-6bq.3")
 	if err != nil {
 		t.Fatalf("Ensure: %v", err)
 	}
-	want := filepath.Join(wtDir, "zr-6bq.3")
 	if got != want {
 		t.Errorf("path = %q, want %q", got, want)
 	}
-	// Must have run `git -C /repo worktree add -B pr-pool/zr-6bq.3 <path>`.
-	var added bool
-	for _, c := range g.calls {
-		joined := strings.Join(c, " ")
-		if strings.Contains(joined, "/repo worktree add") &&
-			strings.Contains(joined, "pr-pool/zr-6bq.3") &&
-			strings.Contains(joined, want) {
-			added = true
-		}
+	if len(o.wtm.calls) != 1 {
+		t.Fatalf("expected exactly one CreateWorktree call, got %d: %+v", len(o.wtm.calls), o.wtm.calls)
 	}
-	if !added {
-		t.Errorf("expected a `git -C /repo worktree add -B pr-pool/zr-6bq.3 %s`; calls=%v", want, g.calls)
+	c := o.wtm.calls[0]
+	if c.path != want || c.branch != "pr-pool/zr-6bq.3" || !c.opts.ResetBranch {
+		t.Errorf("CreateWorktree(%q, %q, %+v); want (%q, %q, ResetBranch=true)", c.path, c.branch, c.opts, want, "pr-pool/zr-6bq.3")
+	}
+	// The create call must anchor at repoRoot, not the worktree path itself.
+	if len(o.calls) < 2 || o.calls[1] != "/repo" {
+		t.Errorf("expected the second open to anchor at repoRoot; opens=%v", o.calls)
 	}
 }
 
 func TestEnsure_reusesExistingWorktree(t *testing.T) {
 	wtDir := t.TempDir()
 	path := filepath.Join(wtDir, "zr-1")
-	g := &recGit{existsAt: path}
-	got, err := Ensure(context.Background(), g, wtDir, "/repo", "zr-1")
+	o := newRecOpener(nil) // nothing missing: path probe succeeds ⇒ reuse
+
+	got, err := Ensure(context.Background(), o.Open, wtDir, "/repo", "zr-1")
 	if err != nil {
 		t.Fatalf("Ensure: %v", err)
 	}
 	if got != path {
 		t.Errorf("path = %q, want %q", got, path)
 	}
-	// Reuse path must NOT run `worktree add`.
-	for _, c := range g.calls {
-		if strings.Contains(strings.Join(c, " "), "worktree add") {
-			t.Errorf("existing worktree must be reused, not re-added; calls=%v", g.calls)
-		}
+	if len(o.wtm.calls) != 0 {
+		t.Errorf("existing worktree must be reused, not re-added; calls=%+v", o.wtm.calls)
+	}
+	if len(o.calls) != 1 || o.calls[0] != path {
+		t.Errorf("reuse path must open only the target path once; opens=%v", o.calls)
+	}
+}
+
+func TestEnsure_probeErrorOtherThanNotARepositoryPropagates(t *testing.T) {
+	wtDir := t.TempDir()
+	sentinel := context.Canceled
+	open := func(context.Context, string) (gitclient.WorktreeManager, error) {
+		return nil, sentinel
+	}
+
+	_, err := Ensure(context.Background(), open, wtDir, "/repo", "zr-2")
+	if err == nil {
+		t.Fatal("expected an error to propagate rather than fall through to create")
 	}
 }

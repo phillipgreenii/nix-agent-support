@@ -5,18 +5,21 @@ package dtest
 import (
 	"context"
 	"errors"
+	"strconv"
 	"sync"
 	"time"
 
 	"github.com/phillipgreenii/pr-pool/internal/beads"
 	"github.com/phillipgreenii/pr-pool/internal/ccpool"
 	"github.com/phillipgreenii/pr-pool/internal/usage"
+	"github.com/phillipgreenii/x/gitclient"
 )
 
 // Ensure the fakes satisfy their interfaces at compile time.
 var (
-	_ ccpool.Runner = (*FakeCC)(nil)
-	_ beads.Runner  = (*ScriptBD)(nil)
+	_ ccpool.Runner             = (*FakeCC)(nil)
+	_ beads.Runner              = (*ScriptBD)(nil)
+	_ gitclient.WorktreeManager = (*NoopWorktreeManager)(nil)
 )
 
 // TestStamp is the fixed per-attempt stamp injected in tests so external_ids are
@@ -151,15 +154,17 @@ func (s *ScriptBD) Run(_ context.Context, args ...string) (string, error) {
 	return "", nil
 }
 
-// NoopGit is a recording GitRunner/worktree.Git that performs no real git
-// commands — so executor tests exercise the worktree path without touching any
-// real repo. rev-parse returns nil (the path "exists") so worktree.Ensure reuses
-// the per-bead path rather than running `worktree add`; tests that need a fresh
-// add should set NoopGit.AddOnly true to force the create path.
+// NoopGit is a recording watchdog.GitRunner that performs no real git
+// commands — so tests exercise the watchdog's hard-stop reset/clean seam
+// (Deps.Git / Orchestrator.git) without touching any real repo. It has no
+// bearing on per-bead worktree CREATION any more (pg2-mj9n0 moved that onto
+// x/gitclient's WorktreeManager via GitOpener/NoopGitOpener below); this
+// fake's rev-parse/AddOnly plumbing exists only for whatever future watchdog
+// (pg2-ljyaj) or other GitRunner test still shells a probe through it.
 type NoopGit struct {
 	mu      sync.Mutex
 	Calls   [][]string
-	AddOnly bool // when true, rev-parse fails so Ensure takes the `worktree add` path
+	AddOnly bool // when true, rev-parse fails
 }
 
 func (g *NoopGit) Run(_ context.Context, dir string, args ...string) error {
@@ -170,6 +175,60 @@ func (g *NoopGit) Run(_ context.Context, dir string, args ...string) error {
 		return errors.New("not a git worktree")
 	}
 	return nil
+}
+
+// NoopWorktreeManager is a recording gitclient.WorktreeManager that performs
+// no real git commands — the CreateWorktree/RemoveWorktree/PruneWorktrees
+// half of NoopGitOpener's fake.
+type NoopWorktreeManager struct {
+	mu    sync.Mutex
+	Calls [][]string
+}
+
+func (m *NoopWorktreeManager) CreateWorktree(_ context.Context, path, branch string, opts gitclient.CreateWorktreeOptions) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.Calls = append(m.Calls, []string{"add", path, branch, strconv.FormatBool(opts.ResetBranch)})
+	return nil
+}
+
+func (m *NoopWorktreeManager) RemoveWorktree(_ context.Context, path string, force bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.Calls = append(m.Calls, []string{"remove", path, strconv.FormatBool(force)})
+	return nil
+}
+
+func (m *NoopWorktreeManager) PruneWorktrees(context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.Calls = append(m.Calls, []string{"prune"})
+	return nil
+}
+
+// NoopGitOpener is a worktree.Opener (see internal/executor.Deps.GitOpener)
+// that never touches a real repo. Open succeeds — returning a shared
+// NoopWorktreeManager — for any dir NOT listed in MissingAt; dirs in
+// MissingAt fail with gitclient.ErrNotARepository, which is how
+// worktree.Ensure decides a worktree doesn't exist yet and must be created.
+// The default (MissingAt nil) makes every probe succeed, so Ensure always
+// takes the reuse path without shelling out to real git — mirroring
+// pre-migration NoopGit's default behavior for the worktree-creation seam.
+type NoopGitOpener struct {
+	mu        sync.Mutex
+	Calls     []string
+	MissingAt map[string]bool
+	WTM       NoopWorktreeManager
+}
+
+func (o *NoopGitOpener) Open(_ context.Context, dir string) (gitclient.WorktreeManager, error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.Calls = append(o.Calls, dir)
+	if o.MissingAt[dir] {
+		return nil, gitclient.ErrNotARepository
+	}
+	return &o.WTM, nil
 }
 
 // Contains reports whether a is in the slice x.

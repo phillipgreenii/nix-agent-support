@@ -19,6 +19,8 @@ import (
 	"github.com/phillipgreenii/pr-pool/internal/report"
 	"github.com/phillipgreenii/pr-pool/internal/usage"
 	"github.com/phillipgreenii/pr-pool/internal/watchdog"
+	"github.com/phillipgreenii/pr-pool/internal/worktree"
+	"github.com/phillipgreenii/x/gitclient"
 )
 
 // Executor dispatches one item for a role and reports the failure action it took.
@@ -40,9 +42,16 @@ type Deps struct {
 	Tick        func(context.Context, time.Duration) error // cancellable wait; nil ⇒ select poll
 	UsageReader usage.Reader                               // nil ⇒ usage.NewTranscriptReader()
 	ExternalID  string                                     // resolved once by the orchestrator
-	// Git creates the per-bead worktree at dispatch (nil ⇒ watchdog.OSGit{}). Shared
-	// with the watchdog so the worktree it resets is the one the worker ran in.
+	// Git is the watchdog's own hard-stop reset/clean seam (nil ⇒
+	// watchdog.OSGit{}); the per-bead worktree it resets is the one the worker
+	// ran in. Unrelated to worktree creation below — that migrated onto
+	// GitOpener (pg2-mj9n0); the watchdog's own migration onto x/gitclient's
+	// Cleaner+Locator is separate (pg2-ljyaj).
 	Git watchdog.GitRunner
+	// GitOpener creates the per-bead worktree at dispatch (nil ⇒
+	// gitclient.New in production). Tests substitute a fake so they never
+	// touch a real repo.
+	GitOpener worktree.Opener
 }
 
 func (d Deps) git() watchdog.GitRunner {
@@ -50,6 +59,15 @@ func (d Deps) git() watchdog.GitRunner {
 		return d.Git
 	}
 	return watchdog.OSGit{}
+}
+
+func (d Deps) gitOpener() worktree.Opener {
+	if d.GitOpener != nil {
+		return d.GitOpener
+	}
+	return func(ctx context.Context, dir string) (gitclient.WorktreeManager, error) {
+		return gitclient.New(ctx, dir)
+	}
 }
 
 func (d Deps) clock() time.Time {

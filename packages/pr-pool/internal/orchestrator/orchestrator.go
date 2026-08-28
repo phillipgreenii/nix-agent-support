@@ -42,6 +42,7 @@ import (
 	"github.com/phillipgreenii/pr-pool/internal/roles"
 	"github.com/phillipgreenii/pr-pool/internal/usage"
 	"github.com/phillipgreenii/pr-pool/internal/watchdog"
+	"github.com/phillipgreenii/pr-pool/internal/worktree"
 )
 
 type Orchestrator struct {
@@ -55,7 +56,8 @@ type Orchestrator struct {
 	tick        func(context.Context, time.Duration) error // cancellable wait (default below)
 	stamp       func() string                              // per-attempt id stamp seam (default below)
 	usageReader usage.Reader                               // default usage.NewTranscriptReader()
-	git         watchdog.GitRunner                         // per-bead worktree git seam (nil ⇒ executor's OSGit{}); tests inject a fake so they never touch the real repo
+	git         watchdog.GitRunner                         // watchdog's hard-stop reset/clean seam (nil ⇒ executor's OSGit{}); tests inject a fake so they never touch the real repo
+	gitOpener   worktree.Opener                            // per-bead worktree creation seam (nil ⇒ executor's gitclient.New{} default); tests inject a fake so they never touch the real repo
 }
 
 // attemptStamp returns a fresh per-attempt timestamp token. A unique stamp per
@@ -234,7 +236,8 @@ func (o *Orchestrator) buildDeps(externalID string) executor.Deps {
 	return executor.Deps{
 		CC: o.CC, BD: o.BD, Cmd: o.commander(), Log: o.Log, Cfg: o.Cfg,
 		Now: o.now, Tick: o.tick, UsageReader: o.usageReader, ExternalID: externalID,
-		Git: o.git, // nil ⇒ executor falls back to OSGit{} in production
+		Git:       o.git,       // nil ⇒ executor falls back to OSGit{} in production
+		GitOpener: o.gitOpener, // nil ⇒ executor falls back to gitclient.New in production
 	}
 }
 

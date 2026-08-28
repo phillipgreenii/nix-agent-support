@@ -34,7 +34,7 @@ type Isolation interface {
 func newIsolation(cfg roles.IsolationConfig, deps Deps) Isolation {
 	switch cfg.Type {
 	case "", "worktree":
-		return worktreeIsolation{git: deps.git(), worktreeDir: deps.Cfg.WorktreeDir, repoRoot: deps.Cfg.RepoRoot}
+		return worktreeIsolation{open: deps.gitOpener(), worktreeDir: deps.Cfg.WorktreeDir, repoRoot: deps.Cfg.RepoRoot}
 	case "none":
 		return noneIsolation{repoRoot: deps.Cfg.RepoRoot}
 	case "path":
@@ -48,17 +48,16 @@ func newIsolation(cfg roles.IsolationConfig, deps Deps) Isolation {
 
 // worktreeIsolation is the long-standing default: a fresh, isolated per-item
 // git worktree so a worker never runs on whatever branch RepoRoot happens to be
-// on (pg2-yukh root cause #2). Thin wrapper around the unchanged
-// internal/worktree.Ensure — behavior is byte-for-byte identical to before this
-// type existed.
+// on (pg2-yukh root cause #2). Thin wrapper around internal/worktree.Ensure,
+// which is built on x/gitclient's WorktreeManager role (pg2-mj9n0).
 type worktreeIsolation struct {
-	git         worktree.Git
+	open        worktree.Opener
 	worktreeDir string
 	repoRoot    string
 }
 
 func (w worktreeIsolation) Ensure(ctx context.Context, itemID string) (string, error) {
-	return worktree.Ensure(ctx, w.git, w.worktreeDir, w.repoRoot, itemID)
+	return worktree.Ensure(ctx, w.open, w.worktreeDir, w.repoRoot, itemID)
 }
 
 // noneIsolation creates nothing: the dispatched session's WORKSPACE_ROOT is

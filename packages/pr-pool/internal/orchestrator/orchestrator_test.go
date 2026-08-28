@@ -46,6 +46,7 @@ func newOrch(cc ccpool.Runner, bd *dtest.ScriptBD, cfg config.Config) *Orchestra
 	// git against the real repo (pg2-yukh #2). Combined with fastCfg's tempdir
 	// WorktreeDir, dispatch tests leave no worktree/branch state behind.
 	o.git = &dtest.NoopGit{}
+	o.gitOpener = (&dtest.NoopGitOpener{}).Open
 	return o
 }
 

@@ -500,7 +500,8 @@ func dispatchWorker(t *testing.T, cc *dtest.FakeCC, bd *dtest.ScriptBD, cfg conf
 	d := discover.DispatchContext{Role: workerRole(cfg), Item: item.Item{ID: "zr-w"}}
 	deps := newExec(cc, bd, cfg).deps
 	deps.ExternalID = ext
-	deps.Git = &dtest.NoopGit{} // never shell out to real git in tests
+	deps.Git = &dtest.NoopGit{}                    // never shell out to real git in tests
+	deps.GitOpener = (&dtest.NoopGitOpener{}).Open // ditto, for per-bead worktree creation
 	return ccpoolExecutor{}.Dispatch(context.Background(), d, deps)
 }
 
@@ -523,6 +524,7 @@ func TestDispatch_launchesInFreshPerBeadWorktree(t *testing.T) {
 	deps := newExec(cc, bd, cfg).deps
 	deps.ExternalID = "pr-pool-worker-zr-w"
 	deps.Git = &dtest.NoopGit{}
+	deps.GitOpener = (&dtest.NoopGitOpener{}).Open
 	_, err := ccpoolExecutor{}.Dispatch(context.Background(), d, deps)
 	if err != nil {
 		t.Fatalf("dispatch should succeed (bead closed), got %v", err)
@@ -555,6 +557,7 @@ func TestDispatch_reviewRole_completeOnClose(t *testing.T) {
 	deps := newExec(cc, bd, cfg).deps
 	deps.ExternalID = "pr-pool-review-zr-rv"
 	deps.Git = &dtest.NoopGit{}
+	deps.GitOpener = (&dtest.NoopGitOpener{}).Open
 	_, err := ccpoolExecutor{}.Dispatch(context.Background(), d, deps)
 	if err != nil {
 		t.Fatalf("review dispatch should succeed on bead close, got %v; updates=%v", err, bd.Updates)
@@ -612,6 +615,7 @@ func TestDispatch_sendFailFeedbackUnclaim_unclaimed(t *testing.T) {
 	deps := newExec(cc, bd, cfg).deps
 	deps.ExternalID = "pr-pool-feedback-zr-c"
 	deps.Git = &dtest.NoopGit{}
+	deps.GitOpener = (&dtest.NoopGitOpener{}).Open
 	res, _ := ccpoolExecutor{}.Dispatch(context.Background(), d, deps)
 	if v := verbOf(res); v != report.Unclaimed {
 		t.Errorf("feedback send-fail (unclaim) must report Unclaimed, got %q", v)
@@ -667,6 +671,7 @@ func TestRegression_droppedNudge_noWriteToOtherBead_pg2yukh(t *testing.T) {
 	deps := newExec(cc, bd, cfg).deps
 	deps.ExternalID = "pr-pool-worker-zr-6bq.3"
 	deps.Git = &dtest.NoopGit{}
+	deps.GitOpener = (&dtest.NoopGitOpener{}).Open
 	res, err := ccpoolExecutor{}.Dispatch(context.Background(), d, deps)
 	if err == nil {
 		t.Fatal("dropped nudge must fail the dispatch")
@@ -724,6 +729,7 @@ func TestDispatch_watchdogHardStop_unclaimed(t *testing.T) {
 	deps := newExec(cc, bd, cfg).deps
 	deps.ExternalID = "pr-pool-worker-zr-w"
 	deps.Git = &dtest.NoopGit{}
+	deps.GitOpener = (&dtest.NoopGitOpener{}).Open
 	// This test exercises the real waitDone/watchdog race (workerWaitWithWatchdog),
 	// not a single deterministic path, so it must not let the two racers run on
 	// mismatched clocks: newExec's default Tick advances the manual clock with NO

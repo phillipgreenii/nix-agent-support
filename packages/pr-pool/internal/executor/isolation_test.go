@@ -10,6 +10,7 @@ import (
 
 	"github.com/phillipgreenii/pr-pool/internal/config"
 	"github.com/phillipgreenii/pr-pool/internal/roles"
+	"github.com/phillipgreenii/x/gitclient"
 )
 
 // testCfg builds a minimal config.Config carrying only what the isolation
@@ -18,25 +19,36 @@ func testCfg(repoRoot, worktreeDir string) config.Config {
 	return config.Config{RepoRoot: repoRoot, WorktreeDir: worktreeDir}
 }
 
-// fakeGit records every `git -C dir args...` invocation newIsolation's
-// worktree strategy issues, and reports "already a worktree" (rev-parse
-// succeeds) for any path in existsAt — mirroring worktree_test.go's recGit,
-// reimplemented here (unexported) since that fake is internal to package
-// worktree and this file lives in package executor.
-type fakeGit struct {
-	existsAt map[string]bool
-	calls    [][]string
+// fakeWTM records every CreateWorktree call newIsolation's worktree strategy
+// issues via the fake Opener below.
+type fakeWTM struct {
+	calls [][]string
 }
 
-func (g *fakeGit) Run(_ context.Context, dir string, args ...string) error {
-	g.calls = append(g.calls, append([]string{dir}, args...))
-	if len(args) > 0 && args[0] == "rev-parse" {
-		if g.existsAt[dir] {
-			return nil
-		}
-		return errors.New("not a git worktree")
-	}
+func (m *fakeWTM) CreateWorktree(_ context.Context, path, branch string, opts gitclient.CreateWorktreeOptions) error {
+	m.calls = append(m.calls, []string{"add", path, branch})
 	return nil
+}
+func (m *fakeWTM) RemoveWorktree(context.Context, string, bool) error { return nil }
+func (m *fakeWTM) PruneWorktrees(context.Context) error               { return nil }
+
+// fakeGitOpener is a fake worktree.Opener: it reports gitclient.ErrNotARepository
+// for any dir in missingAt (i.e. not yet a worktree) and otherwise succeeds,
+// returning a shared fakeWTM so CreateWorktree calls are observable — mirroring
+// worktree_test.go's recOpener, reimplemented here (unexported) since that fake
+// is internal to package worktree and this file lives in package executor.
+type fakeGitOpener struct {
+	missingAt map[string]bool
+	wtm       fakeWTM
+	calls     []string
+}
+
+func (g *fakeGitOpener) Open(_ context.Context, dir string) (gitclient.WorktreeManager, error) {
+	g.calls = append(g.calls, dir)
+	if g.missingAt[dir] {
+		return nil, gitclient.ErrNotARepository
+	}
+	return &g.wtm, nil
 }
 
 // fakeCmd is a scripted query.Commander for the workforest strategy's `pn
@@ -61,29 +73,23 @@ func (c *fakeCmd) Run(_ context.Context, argv []string) ([]byte, error) {
 func TestNewIsolation_worktreeIsDefault(t *testing.T) {
 	dir := t.TempDir()
 	worktreeDir := filepath.Join(dir, "worktrees")
-	g := &fakeGit{existsAt: map[string]bool{}}
-	deps := Deps{Cfg: testCfg(dir, worktreeDir), Git: g}
+	want := filepath.Join(worktreeDir, "bead-1")
+	g := &fakeGitOpener{missingAt: map[string]bool{want: true}}
+	deps := Deps{Cfg: testCfg(dir, worktreeDir), GitOpener: g.Open}
 
 	for _, typ := range []string{"", "worktree"} {
 		got, err := newIsolation(roles.IsolationConfig{Type: typ}, deps).Ensure(context.Background(), "bead-1")
 		if err != nil {
 			t.Fatalf("Type=%q: unexpected error: %v", typ, err)
 		}
-		want := filepath.Join(worktreeDir, "bead-1")
 		if got != want {
 			t.Fatalf("Type=%q: workspaceRoot = %q, want %q", typ, got, want)
 		}
 	}
 	// Both calls must have gone through the real worktree.Ensure — proven by
-	// the `git worktree add` invocation appearing in the fake's call log.
-	found := false
-	for _, c := range g.calls {
-		if len(c) > 1 && c[1] == "worktree" {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("expected a `git worktree add` call, got calls: %+v", g.calls)
+	// the CreateWorktree invocation appearing in the fake's call log.
+	if len(g.wtm.calls) == 0 {
+		t.Fatalf("expected a CreateWorktree call, got none; opens=%v", g.calls)
 	}
 }
 
