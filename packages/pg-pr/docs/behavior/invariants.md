@@ -80,6 +80,19 @@ correct owner (ADR 0034) — the UUID preserves identity; only the owning set ch
   operator's own create (`USECASE-PGPR-CREATE`) and a background sync (`USECASE-PGPR-SYNC`) — or
   two overlapping background syncs — race to ensure the SAME PR's record at the same time: the
   outcome MUST still be at most one record, never two.
+- **`INV-MR-2`** <!-- uuid: ac75919d-3005-4d89-91a4-acd8b59e5953 --> — **Delivery order preserved,
+  never raced past.** Whenever pg-pr has more than one internally-produced item pending delivery —
+  for instance, the item that brings a PR's merge-request record into existence, followed by a
+  later item for that same PR that depends on the record already existing — pg-pr MUST deliver
+  every pending item in the order it was produced, even when delivery happens through more than one
+  concurrent internal caller pulling from a shared backlog. A caller that finds an earlier-produced
+  item already claimed by another, still-unfinished caller MUST NOT go on to deliver a
+  later-produced item from its own backlog regardless of what that later item concerns; it MUST
+  instead defer every item from that point on — including the contended one — to a later delivery
+  pass, so nothing is ever delivered while an earlier-produced item is still in flight. Only an
+  earlier item already fully delivered by the time the contention is discovered is safe to skip
+  past, since production order was never at risk for it. This bounds the cost of genuine contention
+  to the throughput of one delivery pass; an uncontended item is delivered immediately as before.
 
 ## Sync (`INV-SYNC-*`)
 

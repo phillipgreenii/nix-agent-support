@@ -120,7 +120,7 @@ Extensions:
 **Primary actor:** none — a scheduled or triggered background actor.
 **Level:** user-goal.
 **Preconditions:** none.
-_Requires:_ `INV-SYNC-1`, `INV-SYNC-2`, `INV-GATE-1`, `INV-GATE-2`, `INV-GATE-3`.
+_Requires:_ `INV-SYNC-1`, `INV-SYNC-2`, `INV-GATE-1`, `INV-GATE-2`, `INV-GATE-3`, `INV-MR-2`.
 _Includes:_ `USECASE-PGPR-ENSURE-MR`.
 
 1. The detector compares the code host's current state — pg-pr's own PRs plus every not-mine PR
@@ -130,7 +130,9 @@ _Includes:_ `USECASE-PGPR-ENSURE-MR`.
    kept out of the CI-health comparison (`INV-GATE-1`); a signal that cannot be classified
    compares as `unknown`, never `satisfied` (`INV-GATE-2`).
 2. For each detected change, a worker applies it — ensuring the affected PR's merge-request
-   record — and is the sole authority that closes or removes a record.
+   record — and is the sole authority that closes or removes a record. Every item this produces
+   for internal delivery, across every concurrently running worker, is delivered in the order it
+   was produced (`INV-MR-2`).
 
 Extensions:
 
@@ -172,8 +174,8 @@ Extensions:
 **Level:** summary.
 **Intent:** tell the whole arc once — facts flow from the code host through a mutate-nothing
 detector to a mutate-only worker, landing as fresh, actable facts for any consumer.
-_Requires:_ `INV-SYNC-1`, `INV-SYNC-2`, `INV-ASOF-1`, `INV-ASOF-2`, `INV-MR-1`, `INV-GATE-1`,
-`INV-GATE-4`.
+_Requires:_ `INV-SYNC-1`, `INV-SYNC-2`, `INV-ASOF-1`, `INV-ASOF-2`, `INV-MR-1`, `INV-MR-2`,
+`INV-GATE-1`, `INV-GATE-4`.
 _Includes:_ `USECASE-PGPR-SYNC`, `USECASE-PGPR-LIST`.
 
 ```mermaid
@@ -187,7 +189,10 @@ flowchart LR
 A pass that cannot confirm completeness for some subset carries that subset's prior state
 forward — it never mass-closes on partial data (`INV-SYNC-2`). Among the facts landing fresh at
 the end of the arc is the approval gate, tracked the whole way as its own axis rather than folded
-into CI health (`INV-GATE-1`, `INV-GATE-4`).
+into CI health (`INV-GATE-1`, `INV-GATE-4`). The worker stage runs as more than one concurrent
+instance, so a PR's merge-request record and anything delivered afterward that depends on it are
+never raced past each other: internal delivery preserves production order even under that
+concurrency (`INV-MR-2`).
 
 ### `JOURNEY-PGPR-WRITE` — the review write arc <!-- uuid: c1a8aef4-585d-44dc-bdf1-286bb213d110 -->
 
