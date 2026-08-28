@@ -169,6 +169,14 @@ func TestGitDir_Bash(t *testing.T) {
 // redirection would swallow `2>/dev/null`, which the corpus attaches to routine
 // `ls`/`cat` inspections (rows 474, 475, 3200, 3204) and which captures none of the
 // file; promoting a destination that stores nothing would swallow `> /dev/null`.
+//
+// pg2-pcm1m NARROWS the positive verdict, but not the mechanism this test pins:
+// every fixture above still names `.git/config` (or the whole `.git` directory,
+// which carries `.git/config`'s bytes along on a recursive copy) precisely so it
+// stays credential-bearing and Asks. The negative-for-a-different-reason case —
+// a captured listing of a NON-credential `.git/*` path, which now Abstains
+// instead of Asking — is its own fixture below, alongside the other "not a
+// copy-out" cases, since it is no longer a copy-out this rule has a verdict on.
 func TestGitDir_CopyOutIsNotAPlainRead(t *testing.T) {
 	r := New()
 	tests := []struct {
@@ -187,7 +195,6 @@ func TestGitDir_CopyOutIsNotAPlainRead(t *testing.T) {
 		{"stdout capture", "cat .git/config > /tmp/backup", hookio.Ask},
 		{"stdout append capture", "cat .git/config >> /tmp/backup", hookio.Ask},
 		{"&> capture", "grep url .git/config &> /tmp/backup", hookio.Ask},
-		{"capture of a listing", "ls -la .git/hooks > /tmp/list", hookio.Ask},
 		// A path BOUND to a variable and copied out through it is the same access.
 		{"bound path is cp'd out", "f=/repo/.git/config\ncp \"$f\" /tmp/backup", hookio.Ask},
 
@@ -198,11 +205,63 @@ func TestGitDir_CopyOutIsNotAPlainRead(t *testing.T) {
 		{"stdout to the tty", "cat .git/config > /dev/tty", hookio.NoOpinion},
 		{"stdout to an inherited fd", "cat .git/config > /dev/fd/3", hookio.NoOpinion},
 		{"stdin FROM gitmeta is not a capture", "wc -l < .git/config", hookio.NoOpinion},
+		// pg2-pcm1m: a captured listing of a NON-credential-bearing .git/* path
+		// (.git/hooks cannot itself hold a remote-URL token) now Abstains, same
+		// as a plain read of it — this used to Ask under the old blanket policy.
+		{"capture of a listing of a non-credential path no longer asks", "ls -la .git/hooks > /tmp/list", hookio.NoOpinion},
 
 		// A copy-out must never MASK a write: the write side still Rejects.
 		{"cp ONTO gitmeta is still a write", "cp /tmp/evil .git/config", hookio.Reject},
 		{"redirect ONTO gitmeta is still a write", "cat /tmp/evil > .git/config", hookio.Reject},
 		{"mv out is destructive, not a copy-out", "mv .git/HEAD /tmp/x", hookio.Reject},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := hookio.Decision(hookio.Approve)
+			for _, leaf := range leavesOf(tt.command) {
+				in := &hookio.HookInput{
+					ToolName:       "Bash",
+					ToolInput:      bashJSON(leaf),
+					RootExpression: tt.command,
+				}
+				if d := hookio.Verdict(r.Evaluate(in)).Decision; d > got {
+					got = d
+				}
+			}
+			if got != tt.want {
+				t.Errorf("Decision = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestGitDir_CredentialBearingCopyOutDiscrimination is pg2-pcm1m's own pinning
+// test: the SAME blanket Ask that used to fire for every `.git/*` copy-out now
+// discriminates by whether the matched path can itself carry a credential
+// (isCredentialBearingGitPath). pg2-kpf8f's analysis named `.git/index` and
+// `.git/rebase-merge/message` verbatim as rows that prompted with no security
+// payoff; both are pinned here as the acceptance criterion's named examples,
+// alongside the credential-bearing paths that must still Ask.
+func TestGitDir_CredentialBearingCopyOutDiscrimination(t *testing.T) {
+	r := New()
+	tests := []struct {
+		name    string
+		command string
+		want    hookio.Decision
+	}{
+		// Still Ask: the matched path can itself hold a credential.
+		{"cp .git/config still asks", "cp .git/config /tmp/backup", hookio.Ask},
+		{"cat .git/config redirected still asks", "cat .git/config > /tmp/backup", hookio.Ask},
+		{"cp of the whole .git dir still asks (recursive copy carries config)", "cp -r .git /tmp/backup", hookio.Ask},
+		{"a submodule's own config still asks", "cp .git/modules/vendor/config /tmp/backup", hookio.Ask},
+		{"a bound path to a submodule config still asks", "f=.git/modules/vendor/config\ncp \"$f\" /tmp/backup", hookio.Ask},
+
+		// Now Allow/NotApplicable: these cannot structurally carry a credential.
+		{"cp .git/index no longer asks", "cp .git/index /tmp/backup", hookio.NoOpinion},
+		{"cp .git/rebase-merge/message no longer asks", "cp .git/rebase-merge/message /tmp/backup", hookio.NoOpinion},
+		{"cat .git/index redirected no longer asks", "cat .git/index > /tmp/backup", hookio.NoOpinion},
+		{"ln -s .git/HEAD no longer asks", "ln -s .git/HEAD /tmp/link", hookio.NoOpinion},
+		{"pipe of .git/rebase-merge/message to tee no longer asks", "cat .git/rebase-merge/message | tee /tmp/backup", hookio.NoOpinion},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -331,7 +390,7 @@ func TestGitDir_DestructiveOnSourceOperand(t *testing.T) {
 // (tc-k2m3, extended by tc-403c).
 //
 // Why one grouped test and not three independent ones. The rule's entire value is
-// the ASYMMETRY: on `.git/hooks`, a read defers, a copy-out prompts, a write is a
+// the ASYMMETRY: on `.git/config`, a read defers, a copy-out prompts, a write is a
 // hard block. Split across separate tests, a change that made verdict() return one
 // decision for two directions fails only the half that moved, which reads as "one
 // expectation drifted" rather than "the security property was deleted" — and if the
@@ -343,9 +402,16 @@ func TestGitDir_DestructiveOnSourceOperand(t *testing.T) {
 // in a way no decision assertion could catch: the pre-pg2-3hk7t rule told the user
 // it was refusing to let them MODIFY git metadata when they had only run `ls`. A
 // reason that misdescribes the direction is its own defect.
+//
+// pg2-pcm1m: the demonstration path MUST be credential-bearing, or the copy-out
+// leg no longer Asks and the three-way asymmetry this test exists to pin
+// collapses to two — `.git/config` is the canonical case (see
+// isCredentialBearingGitPath). `.git/hooks` — this test's path before pg2-pcm1m
+// — is exactly the shape the fix now Abstains on; TestGitDir_CopyOutIsNotAPlainRead
+// pins that case on its own.
 func TestGitDir_ReadWriteAsymmetry(t *testing.T) {
 	r := New()
-	const path = ".git/hooks"
+	const path = ".git/config"
 
 	read := hookio.Verdict(r.Evaluate(bashInput("ls -la " + path)))
 	copyOut := hookio.Verdict(r.Evaluate(bashInput("cp -r " + path + " /tmp/backup")))
@@ -737,6 +803,53 @@ func TestIsGitMetadataPath(t *testing.T) {
 	}
 }
 
+// TestIsCredentialBearingGitPath pins pg2-pcm1m's discriminator directly, at
+// detector scope, separately from the rule-level Decision assertions above.
+func TestIsCredentialBearingGitPath(t *testing.T) {
+	tests := []struct {
+		in   string
+		want bool
+	}{
+		// Credential-bearing: the top-level config, bare or nested under a repo root.
+		{".git/config", true},
+		{"repo/.git/config", true},
+		{"/abs/repo/.git/config", true},
+		{"\"$r/.git/config\"", true},
+		// Credential-bearing: the .git directory as a whole (a recursive copy
+		// carries .git/config's bytes along with everything else).
+		{".git", true},
+		{".git/", true},
+		{"repo/.git", true},
+		{"\"$r/.git\"", true},
+		// Credential-bearing: a submodule's own config, one level deep.
+		{".git/modules/vendor/config", true},
+		{"repo/.git/modules/vendor/config", true},
+
+		// NOT credential-bearing: every other .git/* path.
+		{".git/index", false},
+		{".git/HEAD", false},
+		{".git/hooks", false},
+		{".git/hooks/pre-commit", false},
+		{".git/rebase-merge/message", false},
+		{".git/refs/heads/main", false},
+		{".git/objects", false},
+		{".git/info/exclude", false},
+		// A submodule-of-a-submodule config is deliberately out of scope.
+		{".git/modules/a/modules/b/config", false},
+		// A bare "config" with no .git ancestor at all is not this rule's business.
+		{"config", false},
+		{"/tmp/config", false},
+		{"", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.in, func(t *testing.T) {
+			if got := isCredentialBearingGitPath(tt.in); got != tt.want {
+				t.Errorf("isCredentialBearingGitPath(%q) = %v, want %v", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestHasInPlaceFlag(t *testing.T) {
 	tests := []struct {
 		name string
@@ -795,8 +908,15 @@ func TestGitDir_PipeToWritingSinkIsACopyOut(t *testing.T) {
 		{"an UNKNOWN sink fails closed", "cat .git/config | frobnicate", hookio.Ask},
 		{"a sink that runs an arbitrary command fails closed", "cat .git/config | xargs -I{} echo {}", hookio.Ask},
 		{"a shell as the sink fails closed", "cat .git/config | sh", hookio.Ask},
-		{"a listing piped to a writer", "ls -la .git/hooks | tee /tmp/list", hookio.Ask},
 		{"a filter with a writing flag", "cat .git/config | sort -o /tmp/x", hookio.Ask},
+
+		// pg2-pcm1m: a listing of a NON-credential-bearing .git/* path piped to a
+		// writing sink now Abstains — .git/hooks cannot itself hold a remote-URL
+		// token, so this is the pipe spelling of the same narrowing
+		// TestGitDir_CopyOutIsNotAPlainRead pins for the plain-redirection
+		// spelling. The SINK classification this test exists to pin (tee IS a
+		// writer) is unaffected; only the credential question changed the verdict.
+		{"a listing of a non-credential path piped to a writer no longer asks", "ls -la .git/hooks | tee /tmp/list", hookio.NoOpinion},
 
 		// The FILTER half: a stage that consumes without persisting is not a copy-out.
 		{"pipe to grep", "cat .git/config | grep url", hookio.NoOpinion},

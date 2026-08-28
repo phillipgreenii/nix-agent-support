@@ -12,7 +12,14 @@
 //     (`assume` Rejects assume-role; `config-rules` Rejects blocked basenames).
 //   - a COPY-OUT — a read whose DESTINATION is a write (`cp .git/config /tmp/x`,
 //     `cat .git/config > /tmp/x`, `ln -s .git/config /tmp/link`,
-//     `cat .git/config | tee /tmp/x`) — Asks.
+//     `cat .git/config | tee /tmp/x`) — Asks ONLY when the matched path can
+//     itself carry a credential (pg2-pcm1m: `.git/config`, a submodule's own
+//     `.git/modules/<name>/config`, or the `.git` directory as a whole, since a
+//     recursive copy of it carries `.git/config`'s bytes too). Every other
+//     `.git/*` copy-out — `.git/index`, `.git/HEAD`, `.git/hooks/*`,
+//     `.git/rebase-merge/*`, a directory listing of any of them — cannot
+//     structurally hold a credential and Abstains, exactly like a plain read of
+//     the same file. See "WHY ONLY CREDENTIAL-BEARING PATHS ASK" below.
 //   - a plain READ (`ls`, `cat`, `grep`, `readlink`, `[ -e ]`, `head`, `wc`,
 //     `stat`, `diff`) ABSTAINS: no verdict, the rest of the chain decides.
 //   - an access whose direction cannot be determined is treated as a WRITE.
@@ -125,6 +132,50 @@
 // side twice already. And it is not Abstain: deferring would hand the decision to
 // a layer that has no idea the source is git metadata.
 //
+// # WHY ONLY CREDENTIAL-BEARING PATHS ASK (pg2-pcm1m)
+//
+// The blanket Ask above used to fire for EVERY copy-out under the SAME reason
+// string regardless of which `.git/*` file was actually being copied —
+// `.git/index`, `.git/rebase-merge/message`, `.git/hooks/*`, `.git/HEAD`, and
+// every other non-credential file prompted with a rationale ("`.git/config`
+// can carry a credential") that was simply FALSE for the file actually named.
+// That is pure friction with no security payoff: pg2-kpf8f's 30-day sample
+// found 13 such rows, every one resolved `ask` → operator-approved, none
+// refused, because the file copied could never have carried a token in the
+// first place.
+//
+// isCredentialBearingGitPath narrows the Ask to the paths that genuinely can:
+//
+//   - `.git/config` itself — the canonical case this rule's reason string
+//     already names; a remote URL there can embed `x-access-token:ghp_…@`.
+//   - a submodule's own `.git/modules/<name>/config` — DECIDED IN FAVOR of
+//     covering it (the analysis bead left this open): a submodule's config is
+//     byte-for-byte the same format and carries its own independent remote
+//     URL, so it is exactly as capable of holding a token as the
+//     superproject's. A nested submodule-of-a-submodule
+//     (`.git/modules/a/modules/b/config`) is NOT matched — out of scope for
+//     this bead, and no corpus row named one.
+//   - the `.git` directory ITSELF, named bare or as a path's final component
+//     with no sub-path (`cp -r .git /tmp/backup`). A RECURSIVE copy of the
+//     whole directory carries `.git/config`'s bytes along with everything
+//     else, so declining to special-case it here would let the identical
+//     credential exposure through under a different spelling — the same
+//     "one access, one verdict" principle THREE SPELLINGS above already
+//     applies to cp/redirection/pipe.
+//
+// Every other `.git/*` copy-out — a listing of `.git/hooks`, the bytes of
+// `.git/index` or `.git/HEAD`, a `.git/rebase-merge/message` — now Abstains
+// (verdict's dirCopyOut case, given credentialCopyOut=false, falls through to
+// hookio.NotApplicable — the SAME return the dirRead case already takes),
+// matching how a plain READ of the identical file behaves under this rule's
+// own read-side policy above. This is a change to the FINAL VERDICT ONLY: the
+// direction classification (bashAccessLeaves, commandDirection, pipeScope, …)
+// is completely unaffected — a copy-out of a non-credential path is still
+// classified dirCopyOut and still folds via `worse` exactly as before; only
+// verdict()'s dirCopyOut branch now consults whether the SPECIFIC matched
+// path (threaded through bashAccessLeaves' note closure) was
+// credential-bearing before deciding Ask vs. Abstain.
+//
 // SYNTACTIC ROLE, not bare text. A git-metadata path token is a violation only
 // when it is a path the command actually OPERATES ON. The rule therefore parses
 // the command and inspects operands by role, following
@@ -229,7 +280,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		} else {
 			rootLeaves = cmdparse.RootLeavesOf(input)
 		}
-		if dir, matched := bashAccessLeaves(leaves, scope, rootLeaves); matched {
+		if dir, matched, credentialCopyOut := bashAccessLeaves(leaves, scope, rootLeaves); matched {
 			if dir == dirWrite && tempFixtureCarveOutApplies(leaves, input.CWD) {
 				// pg2-yoqsr R1-R6: every repo-locating operand this leaf carries
 				// resolves under a temporary root, so this is the disposable-
@@ -239,7 +290,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 				// after it decide, unchanged from today's non-.git traffic.
 				return hookio.NotApplicable()
 			}
-			return r.verdict(dir)
+			return r.verdict(dir, credentialCopyOut)
 		}
 	case "Read":
 		path, err := input.FilePath()
@@ -247,7 +298,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 			return hookio.RuleResult{}, fmt.Errorf("git-directory: read file_path: %w", err)
 		}
 		if isGitMetadataPath(path) {
-			return r.verdict(dirRead)
+			return r.verdict(dirRead, false)
 		}
 	case "Write", "Edit", "MultiEdit", "Delete":
 		path, err := input.FilePath()
@@ -261,7 +312,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 				// root is a disposable fixture, not a real repository.
 				return hookio.NotApplicable()
 			}
-			return r.verdict(dirWrite)
+			return r.verdict(dirWrite, false)
 		}
 	case "Glob", "Grep":
 		path, err := input.SearchPath()
@@ -269,7 +320,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 			return hookio.RuleResult{}, fmt.Errorf("git-directory: read search path: %w", err)
 		}
 		if isGitMetadataPath(path) {
-			return r.verdict(dirRead)
+			return r.verdict(dirRead, false)
 		}
 	}
 	// No .git path anywhere in this call: not this rule's business, and the generic
@@ -282,7 +333,17 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 // verdict; later rules decide". A terminal NoOpinion there would stop the chain and
 // prevent path-safety/safe-commands from deciding a plain `.git` READ, which is a
 // decision change this bead forbids.
-func (r *Rule) verdict(d direction) (hookio.RuleResult, error) {
+//
+// credentialCopyOut (pg2-pcm1m) is consulted ONLY in the dirCopyOut case: a
+// non-credential-bearing copy-out (e.g. `.git/index`, `.git/hooks/*`) now
+// takes the SAME not-applicable path dirRead already does, per "WHY ONLY
+// CREDENTIAL-BEARING PATHS ASK" above. dirWrite Rejects the same way
+// regardless of the flag — a write is a hard block whichever `.git` file it
+// targets, so the distinction is irrelevant there — and the three callers
+// that pass dirRead/dirWrite pass a constant false since neither of those
+// branches reads it. See isCredentialBearingGitPath's doc for what counts as
+// credential-bearing.
+func (r *Rule) verdict(d direction, credentialCopyOut bool) (hookio.RuleResult, error) {
 	switch d {
 	case dirWrite:
 		return hookio.RuleResult{
@@ -293,6 +354,11 @@ func (r *Rule) verdict(d direction) (hookio.RuleResult, error) {
 			Module: r.Name(),
 		}, nil
 	case dirCopyOut:
+		if !credentialCopyOut {
+			// The matched path cannot itself carry a credential — abstain, exactly
+			// as a plain read of it would, and let the rest of the chain decide.
+			return hookio.NotApplicable()
+		}
 		return hookio.RuleResult{
 			Decision: hookio.Ask,
 			Reason:   "copying git metadata out of .git/ to another location — .git/config can carry a credential in a remote URL",
@@ -312,8 +378,15 @@ func (r *Rule) verdict(d direction) (hookio.RuleResult, error) {
 // structure: it parses leafText fresh and passes no root leaves, which makes
 // pipeScope fall back to lazily parsing scopeText on first use — exactly this
 // function's behaviour before ADR 0039 step 3.
+//
+// The third value bashAccessLeaves returns (credentialCopyOut, pg2-pcm1m) is
+// deliberately dropped here: every existing caller of bashAccess wants only
+// the direction/matched pair, and Evaluate — the one caller that needs the
+// credential flag to pick verdict()'s dirCopyOut branch — calls
+// bashAccessLeaves directly instead.
 func bashAccess(leafText, scopeText string) (direction, bool) {
-	return bashAccessLeaves(cmdparse.Parse(leafText), scopeText, nil)
+	dir, matched, _ := bashAccessLeaves(cmdparse.Parse(leafText), scopeText, nil)
+	return dir, matched
 }
 
 // bashAccessLeaves is bashAccess's core, over an ALREADY-PARSED leaf set —
@@ -323,11 +396,25 @@ func bashAccess(leafText, scopeText string) (direction, bool) {
 // forwarded to newPipeScope so pipeScope.sinkDirection need not re-parse
 // scopeText either; nil is a legitimate value (a direct caller with no
 // pre-parsed root) and simply falls back to pipeScope's own lazy parse.
-func bashAccessLeaves(leaves []cmdparse.ParsedCommand, scopeText string, rootLeaves []cmdparse.ParsedCommand) (direction, bool) {
-	dir, matched := dirRead, false
-	note := func(d direction) {
+//
+// The third return, credentialCopyOut (pg2-pcm1m), is true iff at least one
+// of the matched accesses that reached dirCopyOut named a path
+// isCredentialBearingGitPath accepts. It is folded independently of dir: dir
+// itself still folds worst-of-all-matches via `worse` exactly as before (a
+// dirWrite match anywhere still wins), while credentialCopyOut is an OR
+// across only the matches that were themselves dirCopyOut — so a leaf that
+// copies out BOTH `.git/config` and `.git/index` in one command still Asks
+// (credentialCopyOut is true from the `.git/config` match), and a leaf that
+// copies out only non-credential paths correctly carries credentialCopyOut
+// false through to verdict().
+func bashAccessLeaves(leaves []cmdparse.ParsedCommand, scopeText string, rootLeaves []cmdparse.ParsedCommand) (direction, bool, bool) {
+	dir, matched, credentialCopyOut := dirRead, false, false
+	note := func(d direction, path string) {
 		dir = worse(dir, d)
 		matched = true
+		if d == dirCopyOut && isCredentialBearingGitPath(path) {
+			credentialCopyOut = true
+		}
 	}
 	pipes := newPipeScope(scopeText, rootLeaves)
 	for _, pc := range leaves {
@@ -347,12 +434,14 @@ func bashAccessLeaves(leaves []cmdparse.ParsedCommand, scopeText string, rootLea
 				// not be resolved (cmdparse.SkipGrepPattern), so this rule cannot tell
 				// whether it names a path inside .git at all. Fail safe with this
 				// file's own documented default for an unclassifiable operand:
-				// "Anything not positively known to be read-only is a write."
-				note(dirWrite)
+				// "Anything not positively known to be read-only is a write." The
+				// path is unknown, so pass "" — harmless, since credential status is
+				// only ever consulted for a dirCopyOut match, never a dirWrite one.
+				note(dirWrite, "")
 			}
 			for _, tok := range tokens {
 				if isGitMetadataPath(tok) {
-					note(commandDirection(pc, func(s string) bool { return s == tok }, pipes))
+					note(commandDirection(pc, func(s string) bool { return s == tok }, pipes), tok)
 				}
 			}
 		}
@@ -361,9 +450,9 @@ func bashAccessLeaves(leaves []cmdparse.ParsedCommand, scopeText string, rootLea
 				continue
 			}
 			if rd.Kind.IsWrite() {
-				note(dirWrite)
+				note(dirWrite, rd.Path)
 			} else {
-				note(dirRead)
+				note(dirRead, rd.Path)
 			}
 		}
 		// An assignment BINDS a path; it accesses nothing itself. Its direction is
@@ -371,7 +460,7 @@ func bashAccessLeaves(leaves []cmdparse.ParsedCommand, scopeText string, rootLea
 		for _, ev := range pc.EnvVars {
 			switch {
 			case isGitMetadataPath(ev.Value):
-				note(bindingDirection(ev.Name, pipes))
+				note(bindingDirection(ev.Name, pipes), ev.Value)
 			case temproot.CanonicalRepoLocatingEnvVars[ev.Name]:
 				// pg2-yoqsr SIDE-FINDING FIX: GIT_DIR / GIT_WORK_TREE /
 				// GIT_INDEX_FILE / GIT_COMMON_DIR / GIT_OBJECT_DIRECTORY redirect
@@ -388,11 +477,11 @@ func bashAccessLeaves(leaves []cmdparse.ParsedCommand, scopeText string, rootLea
 				// binding — see Evaluate's carve-out check (temproot.Under) for
 				// the ONLY thing that relaxes this: every repo-locating operand
 				// on this leaf resolving under a temporary root.
-				note(dirWrite)
+				note(dirWrite, "")
 			}
 		}
 	}
-	return dir, matched
+	return dir, matched, credentialCopyOut
 }
 
 // tempFixtureCarveOutApplies implements pg2-yoqsr's R1-R6 temp-root
@@ -741,6 +830,49 @@ func unquoteOperand(s string) string {
 		return s[1 : len(s)-1]
 	}
 	return s
+}
+
+// isCredentialBearingGitPath reports whether s — already known to be a `.git`
+// metadata path (isGitMetadataPath) — names something that can itself HOLD a
+// credential (pg2-pcm1m; see the package doc's "WHY ONLY CREDENTIAL-BEARING
+// PATHS ASK"). Only three shapes qualify:
+//
+//   - `.git/config` — a remote URL there can embed a token.
+//   - a submodule's own `.git/modules/<name>/config` — the SAME format, its
+//     own independent remote URL, equally capable of holding one. A
+//     submodule-of-a-submodule (`.git/modules/a/modules/b/config`) is
+//     deliberately NOT matched — out of this bead's scope.
+//   - the `.git` directory itself, bare or as a path's final component with
+//     no sub-path — a recursive copy of it (`cp -r .git /tmp/x`) carries
+//     `.git/config`'s bytes along with everything else, so it must resolve
+//     the same way copying `.git/config` directly does.
+//
+// Every other `.git/*` path — `.git/index`, `.git/HEAD`, `.git/hooks/*`,
+// `.git/rebase-merge/*`, `.git/objects/*` — returns false: none of them can
+// structurally carry a credential in this sense.
+//
+// This is a NARROWER test than isGitMetadataPath's component walk: it looks
+// only at the LAST one or two path components, not whether `.git` appears
+// anywhere in s, because the credential question is "what specific file is
+// this" rather than "is this under git metadata at all".
+func isCredentialBearingGitPath(s string) bool {
+	s = unquoteOperand(s)
+	s = strings.TrimSuffix(s, "/")
+	if s == "" {
+		return false
+	}
+	comps := strings.Split(s, "/")
+	last := comps[len(comps)-1]
+	if last == ".git" {
+		return true
+	}
+	if last != "config" {
+		return false
+	}
+	if len(comps) >= 2 && comps[len(comps)-2] == ".git" {
+		return true
+	}
+	return len(comps) >= 4 && comps[len(comps)-3] == "modules" && comps[len(comps)-4] == ".git"
 }
 
 // shellKeywords / effectiveExec / hasAnyFlag / mutatingFlags / capturesStdout and
