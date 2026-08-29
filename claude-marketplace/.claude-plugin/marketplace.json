@@ -65,6 +65,11 @@
       "description": "Claude skill: the beads (bd) binding for the engineering skills that ask for an issue tracker — wayfinder map/tickets/blocking/frontier operations, plus the triage label vocabulary."
     },
     {
+      "name": "beads-lifecycle",
+      "source": "./beads-lifecycle",
+      "description": "Claude skill: beads (bd) claim/release hygiene, dependency-vs-human blocker modeling, handoff preconditions, premise freshness, and the worktree-review label lifecycle."
+    },
+    {
       "name": "pg-ccaudit",
       "source": "./pg-ccaudit",
       "description": "Claude skill + command: tool-error waste review driven by the pg-ccaudit SQLite transcript index (query the pre-built index; never scan the raw JSONL)"
