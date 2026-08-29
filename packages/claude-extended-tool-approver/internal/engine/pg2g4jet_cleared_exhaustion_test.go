@@ -19,12 +19,22 @@
 // This file is deliberately narrow and pairs the ONE relation the ruling changed with
 // the ONE relation it explicitly did NOT — a SubstitutionRefused body (off the curated
 // per-command allowlist entirely, e.g. `git show HEAD`'s textconv/external-diff RCE
-// surface, or `paste`, which this bead's own "Correction" measured structurally
-// identical to `git show HEAD` here and explicitly out of scope) still floors
-// UNCONDITIONALLY, regardless of what recursion concludes about the bare form. Without
-// this second half sitting right beside the first, a future retune of
-// commandSubstitutionFloor's call site could widen this relief past
+// surface) still floors UNCONDITIONALLY, regardless of what recursion concludes about
+// the bare form. Without this second half sitting right beside the first, a future
+// retune of commandSubstitutionFloor's call site could widen this relief past
 // SubstitutionCleared with nothing here to catch it.
+//
+// `paste` USED TO sit beside `git show HEAD` in that second half — this bead's own
+// "Correction" measured it structurally identical (falls through
+// classifySubstitutionCommand's final `return SubstitutionRefused`) and ruled it out of
+// THIS bead's scope, tracked separately as pg2-iuapn. pg2-iuapn has since LANDED: `paste`
+// is now on cmdparse's fileReaderSubstitutions (the command safe-commands already
+// trusted via its own safeReadCmds), so it DELEGATES rather than refuses and is gone
+// from this file's list. See engine_integration_test.go's
+// TestIntegration_SubstitutionBodyRecursion ("paste at argument position now approves
+// via recursion (pg2-iuapn)") and cmdparse's substitution_test.go
+// (TestClassifySubstitutionBody_Pg2IuapnSafeCommandsSync) for the coverage that replaced
+// it.
 package engine_test
 
 import (
@@ -95,13 +105,13 @@ func TestPg2G4jet_SubstitutionRefusedStillFloorsUnconditionally(t *testing.T) {
 		// the curated per-command substitution allowlist; recursion's bare Approve for
 		// `git show HEAD` must never leak through the substitution.
 		"git show HEAD",
-		// `paste` is Approved standalone (safe-commands' allowlist, given an in-zone
-		// file) but is NOT on cmdparse's curated per-command SUBSTITUTION allowlist —
-		// this bead's own "Correction" measured it structurally identical to
-		// `git show HEAD` here (falls through classifySubstitutionCommand's final
-		// `return SubstitutionRefused`), and ruled it explicitly out of THIS bead's
-		// scope (tracked separately, pg2-iuapn).
-		"paste go.mod",
+		// `paste go.mod` USED TO be here, pinned Reject as this bead's explicitly
+		// out-of-scope sibling of `git show HEAD` (tracked separately, pg2-iuapn). That
+		// bead has since landed — `paste` moved to cmdparse's fileReaderSubstitutions,
+		// so it now delegates instead of refusing and no longer belongs in this
+		// "still floors unconditionally" list. See pg2g4jet_cleared_exhaustion_test.go's
+		// (this file's) top-of-file doc comment for where its replacement coverage
+		// lives.
 	}
 	for _, body := range bodies {
 		t.Run(body, func(t *testing.T) {

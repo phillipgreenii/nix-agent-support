@@ -1177,6 +1177,65 @@ func TestClassifySubstitutionBody_PathReadabilityIsDelegated(t *testing.T) {
 	}
 }
 
+// TestClassifySubstitutionBody_Pg2IuapnSafeCommandsSync pins pg2-iuapn's audit of
+// cmdparse's static substitution allowlists (safeCmdSubstitutions,
+// fileReaderSubstitutions) against internal/rules/safecmds' own allowlists
+// (alwaysSafe, safeReadCmds). `paste` was the confirmed concrete gap — a single,
+// non-compound, read-only verb safe-commands already trusted at command position
+// (safeReadCmds) that fell through classifySubstitutionCommand's final
+// `return SubstitutionRefused` when wrapped in $(...); this also covers the other
+// verbs the bead named (`sort`, `cut`, `tr`) and pins that the three checked-but-
+// absent verbs (`comm`, `join`, `column`) were deliberately NOT added, because
+// grepping internal/rules/safecmds/safecmds.go directly (not assumed) shows they
+// are not trusted by safe-commands AT ALL.
+func TestClassifySubstitutionBody_Pg2IuapnSafeCommandsSync(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want SubstitutionClearance
+	}{
+		// paste, sort, cut: added to fileReaderSubstitutions (dispositioned, not
+		// blanket-cleared) because each can read a FILE's content given a path
+		// operand — exactly like cat/head/tail/wc — whatever level of trust
+		// safe-commands itself extends to the bare command (cut's is unconditional
+		// via alwaysSafe; this seam is deliberately more conservative and still
+		// delegates, per fileReaderSubstitutions' own "the safe default for a new
+		// entry is HERE" doc comment).
+		{"paste with no operand is cleared (reads only stdin)", "paste", SubstitutionCleared},
+		{"paste holding an in-project path delegates, not blanket-cleared", "paste -sd, data.csv", SubstitutionDelegated},
+		{"paste holding an out-of-zone path delegates, not blanket-cleared", "paste -sd, /etc/hosts", SubstitutionDelegated},
+		{"paste holding a deny-listed secret refuses", "paste .env", SubstitutionRefused},
+		{"sort with no operand is cleared (reads only stdin)", "sort", SubstitutionCleared},
+		{"sort holding a path delegates", "sort ./data.txt", SubstitutionDelegated},
+		{"sort holding a deny-listed secret refuses", "sort .env", SubstitutionRefused},
+		{"sort's own write flag still refuses (MutatingFlags, unaffected by this addition)", "sort -o out.txt in.txt", SubstitutionRefused},
+		{"cut with no operand is cleared (reads only stdin)", "cut -f1", SubstitutionCleared},
+		{"cut holding a path delegates, not blanket-cleared despite alwaysSafe's unconditional bare trust", "cut -f1 data.csv", SubstitutionDelegated},
+		{"cut holding a deny-listed secret refuses", "cut -f1 .env", SubstitutionRefused},
+		// tr: added to safeCmdSubstitutions (unconditional), not
+		// fileReaderSubstitutions, because tr's whole grammar has no FILE operand
+		// at all — it only ever transforms stdin, so an argument that LOOKS like a
+		// path is still just a translation SET, never a file to read.
+		{"tr is cleared with no path-shaped argument", "tr -d '\\n'", SubstitutionCleared},
+		{"tr is cleared even holding a path-shaped argument (no file operand exists)", "tr /etc/shadow abc", SubstitutionCleared},
+		// comm/join/column: checked directly against safecmds.go and confirmed
+		// ABSENT from every one of its allowlists (alwaysSafe, safeReadCmds), so
+		// they are NOT genuinely "already trusted at command position" and must
+		// stay refused here too — this seam must never trust a verb safe-commands
+		// itself does not.
+		{"comm is not trusted by safe-commands, stays refused", "comm a.txt b.txt", SubstitutionRefused},
+		{"join is not trusted by safe-commands, stays refused", "join a.txt b.txt", SubstitutionRefused},
+		{"column is not trusted by safe-commands, stays refused", "column -t data.txt", SubstitutionRefused},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ClassifySubstitutionBody(tt.body); got != tt.want {
+				t.Errorf("ClassifySubstitutionBody(%q) = %v, want %v", tt.body, got, tt.want)
+			}
+		})
+	}
+}
+
 // TestStripGitDashC pins stripGitDashC's contract directly (pg2-jq8tn): which leading
 // `-C <path>` pairs it consumes, what it collects, and the one fail-closed case.
 func TestStripGitDashC(t *testing.T) {

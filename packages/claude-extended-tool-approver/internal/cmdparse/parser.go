@@ -295,6 +295,15 @@ var safeCmdSubstitutions = map[string]bool{
 	// `test` / `[` are NOT here, and the reason is measured — see
 	// fileReaderSubstitutions.
 	"seq": true,
+	// pg2-iuapn addition. `tr` is trusted UNCONDITIONALLY by
+	// `internal/rules/safecmds`' alwaysSafe, and — unlike the pg2-iuapn cut/paste/
+	// sort addition to fileReaderSubstitutions below — it belongs HERE rather than on
+	// the dispositioned list: tr's whole grammar (`tr [OPTION]... SET1 [SET2]`,
+	// verified against both GNU coreutils and macOS/BSD tr) has NO FILE operand at
+	// all. It only ever transforms stdin to stdout; SET1/SET2 are character sets, not
+	// paths. So, exactly like `seq` above, no argument spelling can ever name a path
+	// this seam could have missed — there is no file read to disposition.
+	"tr": true,
 }
 
 // fileReaderSubstitutions: read-only commands whose PATH ARGS are DISPOSITIONED rather
@@ -389,6 +398,24 @@ var fileReaderSubstitutions = map[string]bool{
 	// a *syntax.TestClause rather than a CallExpr, so soleSimpleCommandLeaf refuses it
 	// and no entry here can change that.
 	"test": true, "[": true,
+	// pg2-iuapn addition: `cut`, `paste`, and `sort` are read-only content readers
+	// already trusted at command position by `internal/rules/safecmds` — `paste`
+	// and `sort` on its safeReadCmds (zone-checked), `cut` on its alwaysSafe
+	// (unconditional) — see that module's doc comments for each. All three accept
+	// optional FILE operands and, given one, print that file's content (paste/sort)
+	// or selected columns of it (cut) to stdout, so — like jq/yq/tq above — they
+	// belong on THIS dispositioned list rather than safeCmdSubstitutions: a path
+	// operand must still clear readerArgsClearance/patheval, never be blanket-
+	// cleared, whatever level of trust safe-commands itself extends to the bare
+	// command. `sort`'s one write spelling (`-o`/`--output`, MutatingFlags in
+	// pipesink.go) disqualifies before this list is ever consulted (hasWriteFlag);
+	// `cut` and `paste` have no write spelling at all (verified against both GNU
+	// coreutils and macOS/BSD man pages).
+	//
+	// NOT ADDED, checked and confirmed absent from every safecmds allowlist rather
+	// than assumed: `comm`, `join`, `column`. This seam must not trust a verb
+	// safe-commands itself does not.
+	"cut": true, "paste": true, "sort": true,
 }
 
 // substitutionWriteFlags SUPPLEMENTS the shared MutatingFlags vocabulary

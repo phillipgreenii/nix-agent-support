@@ -763,15 +763,27 @@ func TestIntegration_SubstitutionBodyRecursion(t *testing.T) {
 		// policy — see engine.go's foldSubstitutionScan doc for the full ruling.
 		{"mktemp at argument position relieved to abstain", `echo "$(mktemp -d)"`, hookio.NoOpinion},
 		{"seq at argument position relieved to abstain", `echo "$(seq 1 3)"`, hookio.NoOpinion},
-		// REGRESSION GUARDS for the SubstitutionRefused branch, which pg2-g4jet
-		// does NOT touch: `paste` (naively assumed during this ruling's review to
-		// be the same shape as mktemp/seq, then found to actually be Refused, not
-		// Cleared+Exhaustion — recursion independently APPROVES bare `paste`, so
-		// this is the git-show-HEAD shape, not the mktemp shape) and `git show
-		// HEAD` (the textconv/external-diff RCE surface pg2-whumr/ADR 0048's
-		// unconditional floor exists to catch) must stay exactly as before.
-		{"paste at argument position stays floored (Refused, not Cleared)", `echo "$(paste -sd, /etc/hosts)"`, hookio.Reject},
+		// REGRESSION GUARD for the SubstitutionRefused branch, which pg2-g4jet does
+		// NOT touch: `git show HEAD` (the textconv/external-diff RCE surface
+		// pg2-whumr/ADR 0048's unconditional floor exists to catch) must stay
+		// exactly as before.
 		{"git show HEAD at argument position stays floored (Refused, not Cleared)", `echo "$(git show HEAD)"`, hookio.Reject},
+		// pg2-iuapn CLOSES the gap this row used to pin (as `hookio.Reject`, name
+		// "paste at argument position stays floored (Refused, not Cleared)"): `paste`
+		// was naively assumed during pg2-g4jet's review to be the same shape as
+		// mktemp/seq, then found to actually be SubstitutionRefused (absent from
+		// BOTH of cmdparse's static substitution allowlists, unlike safe-commands'
+		// own safeReadCmds, which already trusted it) — recursion independently
+		// APPROVES bare `paste`, so wrapping it in $(...) used to take the
+		// git-show-HEAD shape (an unmodeled command floored to Reject regardless of
+		// what recursion would say), not the mktemp shape. pg2-iuapn adds `paste` to
+		// cmdparse's fileReaderSubstitutions, so the body now DELEGATES instead of
+		// refusing, and recursion's independent Approve of bare
+		// `paste -sd, /etc/hosts` (a world-readable system path — see "static read
+		// still approves" above) reaches the top, matching what the bare command
+		// already resolved to. This row is kept (not deleted) so a reader sees the
+		// resolution, not just its absence.
+		{"paste at argument position now approves via recursion (pg2-iuapn)", `echo "$(paste -sd, /etc/hosts)"`, hookio.Approve},
 		// pg2-u65fu CLOSES the residual limit pg2-phtl3's HEREDOC BODIES admission left
 		// open: the SAME body that clears as an assignment VALUE above ("quoted heredoc
 		// into cat clears as an assignment value") now ALSO clears when the
