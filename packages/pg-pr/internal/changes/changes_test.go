@@ -4,11 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/store"
 )
 
 // stubRunner implements beads.Runner with a canned response.
@@ -77,7 +78,7 @@ func TestSince_CategorizesCreatedUpdatedClosed(t *testing.T) {
 	stdout, _ := json.Marshal(rows)
 	runner := &stubRunner{stdout: string(stdout)}
 
-	cs, err := Since(context.Background(), since, runner, "")
+	cs, err := Since(context.Background(), since, runner)
 	if err != nil {
 		t.Fatalf("Since: %v", err)
 	}
@@ -98,7 +99,7 @@ func TestSince_CategorizesCreatedUpdatedClosed(t *testing.T) {
 func TestSince_PassesUpdatedAfterFlag(t *testing.T) {
 	runner := &stubRunner{stdout: "[]"}
 	since := ts("2026-05-20T10:00:00Z")
-	_, err := Since(context.Background(), since, runner, "")
+	_, err := Since(context.Background(), since, runner)
 	if err != nil {
 		t.Fatalf("Since: %v", err)
 	}
@@ -119,7 +120,7 @@ func TestSince_PassesUpdatedAfterFlag(t *testing.T) {
 
 func TestSince_EmptyResultIsNotAnError(t *testing.T) {
 	runner := &stubRunner{stdout: ""}
-	cs, err := Since(context.Background(), ts("2026-01-01T00:00:00Z"), runner, "")
+	cs, err := Since(context.Background(), ts("2026-01-01T00:00:00Z"), runner)
 	if err != nil {
 		t.Fatalf("Since on empty: %v", err)
 	}
@@ -130,64 +131,89 @@ func TestSince_EmptyResultIsNotAnError(t *testing.T) {
 
 func TestSince_RunnerErrorPropagates(t *testing.T) {
 	runner := &stubRunner{err: errors.New("bd not found")}
-	_, err := Since(context.Background(), time.Now(), runner, "")
+	_, err := Since(context.Background(), time.Now(), runner)
 	if err == nil {
 		t.Fatal("expected runner error to propagate")
 	}
 }
 
 func TestSince_RequiresRunner(t *testing.T) {
-	_, err := Since(context.Background(), time.Now(), nil, "")
+	_, err := Since(context.Background(), time.Now(), nil)
 	if err == nil {
 		t.Fatal("expected error when runner is nil")
 	}
 }
 
-func TestSince_ReadsStateFileErrors(t *testing.T) {
-	dir := t.TempDir()
-	stateFile := filepath.Join(dir, "repo-state.json")
-	payload := map[string]any{
-		"repos": map[string]any{
-			"foo/bar": map[string]any{
-				"last_error": map[string]any{
-					"code":    "enum_failed",
-					"message": "gh auth required",
-				},
-			},
-			"baz/qux": map[string]any{
-				// no last_error -> excluded
-			},
-		},
+// openTestStore opens a real SQLite store at a fresh temp path, returning
+// both the handle and its path (unlike store.OpenForTest, which hides the
+// path — LoadRepoErrors needs it to re-open the store independently, exactly
+// as the CLI wiring does). Callers close db themselves before calling
+// LoadRepoErrors against the same path.
+func openTestStore(t *testing.T) (*store.DB, string) {
+	t.Helper()
+	store.SetSynchronousForTests("OFF")
+	path := filepath.Join(t.TempDir(), "test.db")
+	db, err := store.Open(path)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
 	}
-	data, _ := json.Marshal(payload)
-	if err := os.WriteFile(stateFile, data, 0o644); err != nil {
-		t.Fatal(err)
+	return db, path
+}
+
+func TestLoadRepoErrors_ReadsFromStore(t *testing.T) {
+	db, path := openTestStore(t)
+	ctx := context.Background()
+	if err := db.UpsertRepoSyncState(ctx, store.RepoSyncState{
+		Repo:             "foo/bar",
+		LastSyncedAt:     "2026-01-01T00:00:00Z",
+		LastErrorCode:    "enum_failed",
+		LastErrorMessage: "gh auth required",
+	}); err != nil {
+		t.Fatalf("UpsertRepoSyncState foo/bar: %v", err)
+	}
+	if err := db.UpsertRepoSyncState(ctx, store.RepoSyncState{
+		Repo:         "baz/qux",
+		LastSyncedAt: "2026-01-01T00:00:00Z",
+		// no error -> excluded
+	}); err != nil {
+		t.Fatalf("UpsertRepoSyncState baz/qux: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close: %v", err)
 	}
 
-	runner := &stubRunner{stdout: "[]"}
-	cs, err := Since(context.Background(), ts("2026-01-01T00:00:00Z"), runner, stateFile)
+	errs, err := LoadRepoErrors(ctx, path)
 	if err != nil {
-		t.Fatalf("Since: %v", err)
+		t.Fatalf("LoadRepoErrors: %v", err)
 	}
-	if len(cs.Errors) != 1 {
-		t.Fatalf("Errors: got %+v", cs.Errors)
+	if len(errs) != 1 {
+		t.Fatalf("Errors: got %+v", errs)
 	}
-	if cs.Errors[0].Repo != "foo/bar" || cs.Errors[0].Code != "enum_failed" {
-		t.Fatalf("Error[0]: got %+v", cs.Errors[0])
+	if errs[0].Repo != "foo/bar" || errs[0].Code != "enum_failed" {
+		t.Fatalf("Error[0]: got %+v", errs[0])
 	}
-	if !strings.Contains(cs.Errors[0].Message, "gh auth") {
-		t.Fatalf("Error[0].Message: %q", cs.Errors[0].Message)
+	if !strings.Contains(errs[0].Message, "gh auth") {
+		t.Fatalf("Error[0].Message: %q", errs[0].Message)
 	}
 }
 
-func TestSince_MissingStateFileIsNotFatal(t *testing.T) {
-	runner := &stubRunner{stdout: "[]"}
-	cs, err := Since(context.Background(), ts("2026-01-01T00:00:00Z"), runner, "/no/such/path.json")
+func TestLoadRepoErrors_MissingStoreIsNotFatal(t *testing.T) {
+	errs, err := LoadRepoErrors(context.Background(), "/no/such/path.db")
 	if err != nil {
-		t.Fatalf("Since: %v", err)
+		t.Fatalf("LoadRepoErrors: %v", err)
 	}
-	if len(cs.Errors) != 0 {
-		t.Fatalf("unexpected Errors: %+v", cs.Errors)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected Errors: %+v", errs)
+	}
+}
+
+func TestLoadRepoErrors_EmptyPathIsNotFatal(t *testing.T) {
+	errs, err := LoadRepoErrors(context.Background(), "")
+	if err != nil {
+		t.Fatalf("LoadRepoErrors: %v", err)
+	}
+	if len(errs) != 0 {
+		t.Fatalf("unexpected Errors: %+v", errs)
 	}
 }
 
@@ -220,19 +246,12 @@ func TestSince_FiltersToManagedTypes(t *testing.T) {
 	}
 	data, _ := json.Marshal(rows)
 	runner := &stubRunner{stdout: string(data)}
-	cs, err := Since(context.Background(), ts("2026-05-19T00:00:00Z"), runner, "")
+	cs, err := Since(context.Background(), ts("2026-05-19T00:00:00Z"), runner)
 	if err != nil {
 		t.Fatalf("Since: %v", err)
 	}
 	// 4 managed types (mr, feedback, task, bug) should appear in Created.
 	if len(cs.Created) != 4 {
 		t.Fatalf("Created count: got %d want 4 (rows=%+v)", len(cs.Created), cs.Created)
-	}
-}
-
-func TestDefaultStateFile_HonorsXDG(t *testing.T) {
-	t.Setenv("XDG_STATE_HOME", "/state")
-	if got := DefaultStateFile(); got != "/state/pg-pr/repo-state.json" {
-		t.Fatalf("DefaultStateFile: %q", got)
 	}
 }

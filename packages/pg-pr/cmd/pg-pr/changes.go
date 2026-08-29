@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"text/tabwriter"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/changes"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/output"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/beads"
 )
 
@@ -18,7 +20,7 @@ import (
 type changesFlags struct {
 	since      string
 	jsonOutput bool
-	stateFile  string
+	store      string
 }
 
 var chFlags changesFlags
@@ -40,7 +42,7 @@ var changesCmd = &cobra.Command{
 	Short: "List pg-pr-managed bead changes since a timestamp",
 	Long: `Reports merge-request / feedback / action beads that were created,
 updated, or closed since the given timestamp, plus any per-repo sync errors
-recorded in the state file.
+recorded in the local pg-pr SQLite store.
 
 Used by integrations (the pg-pr skill and other polling agents) to drive
 incremental updates without re-scanning the whole bd workspace.
@@ -62,9 +64,13 @@ Example:
 		if err != nil {
 			return fmt.Errorf("changes: --since %q is not RFC3339: %w", chFlags.since, err)
 		}
-		stateFile := chFlags.stateFile
-		if stateFile == "" {
-			stateFile = changes.DefaultStateFile()
+
+		// The sync engine's store is process-global (one store.db, not one
+		// per bd workspace), so this is read exactly once regardless of how
+		// many repos are fanned out below.
+		repoErrors, err := changes.LoadRepoErrors(cmd.Context(), chFlags.store)
+		if err != nil {
+			return err
 		}
 
 		// Try to load config so we can fan out per repo. A missing config
@@ -86,7 +92,7 @@ Example:
 		var merged *changes.ChangeSet
 		if len(paths) == 0 {
 			runner := newChangesRunner()
-			merged, err = changes.Since(cmd.Context(), since, runner, stateFile)
+			merged, err = changes.Since(cmd.Context(), since, runner)
 			if err != nil {
 				return err
 			}
@@ -94,7 +100,7 @@ Example:
 			merged = &changes.ChangeSet{Since: since.UTC()}
 			for _, p := range paths {
 				runner := newChangesRunnerForRepo(p)
-				cs, qerr := changes.Since(cmd.Context(), since, runner, stateFile)
+				cs, qerr := changes.Since(cmd.Context(), since, runner)
 				if qerr != nil {
 					return qerr
 				}
@@ -104,38 +110,15 @@ Example:
 				merged.Created = append(merged.Created, cs.Created...)
 				merged.Updated = append(merged.Updated, cs.Updated...)
 				merged.Closed = append(merged.Closed, cs.Closed...)
-				merged.Errors = append(merged.Errors, cs.Errors...)
 			}
-			// Each fan-out iteration re-reads the shared state file, so the
-			// merged Errors slice contains N copies of every repo error.
-			// Dedup back down to one entry per (repo, code, message).
-			merged.Errors = dedupRepoErrors(merged.Errors)
 		}
+		merged.Errors = repoErrors
 
 		if output.Resolve(chFlags.jsonOutput) {
 			return writeJSON(cmd.OutOrStdout(), merged)
 		}
 		return renderChanges(cmd.OutOrStdout(), merged)
 	},
-}
-
-// dedupRepoErrors removes duplicate (repo, code, message) tuples that arise
-// when multiple per-repo runs each read the same shared state file. Stable
-// order is preserved.
-func dedupRepoErrors(in []changes.RepoError) []changes.RepoError {
-	if len(in) == 0 {
-		return nil
-	}
-	seen := map[changes.RepoError]bool{}
-	out := make([]changes.RepoError, 0, len(in))
-	for _, e := range in {
-		if seen[e] {
-			continue
-		}
-		seen[e] = true
-		out = append(out, e)
-	}
-	return out
 }
 
 // renderChanges prints the human-readable view of a ChangeSet.
@@ -182,7 +165,15 @@ func init() {
 		"RFC3339 timestamp: report changes at or after this moment (required)")
 	changesCmd.Flags().BoolVar(&chFlags.jsonOutput, "json", false,
 		"Emit machine-readable JSON (PGPR_OUTPUT=json env also honored)")
-	changesCmd.Flags().StringVar(&chFlags.stateFile, "state-file", "",
-		"Override the sync state file (defaults to $XDG_STATE_HOME/pg-pr/repo-state.json)")
+
+	// --store / PG_PR_STORE env override, matching `pg-pr feedback`'s
+	// convention (cmd/pg-pr/feedback.go) — resolved at flag-parse time.
+	defaultStore := os.Getenv("PG_PR_STORE")
+	if defaultStore == "" {
+		defaultStore = store.DefaultPath()
+	}
+	changesCmd.Flags().StringVar(&chFlags.store, "store", defaultStore,
+		"Path to the pg-pr SQLite store (env: PG_PR_STORE)")
+
 	rootCmd.AddCommand(changesCmd)
 }

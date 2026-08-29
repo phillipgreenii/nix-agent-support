@@ -710,7 +710,11 @@ func TestSync_DoesNotCloseBeadsForFailedRepo(t *testing.T) {
 	}
 }
 
-func TestSync_WritesStateFile(t *testing.T) {
+// TestSync_WritesRepoSyncState verifies Sync persists the per-repo cursor
+// into the SQLite store (pg2-ynhr.8) rather than the old separate
+// repo-state.json file — makeEngine wires a real store via wireOutboxBridge,
+// so e.deps.Store is non-nil here.
+func TestSync_WritesRepoSyncState(t *testing.T) {
 	ctx := realBDCtx(t)
 	vcs := newFakeVCS()
 	vcs.my["foo/bar"] = []api.PR{samplePR(1, "foo/bar", "feat/x")}
@@ -719,17 +723,21 @@ func TestSync_WritesStateFile(t *testing.T) {
 	if _, err := e.Sync(ctx); err != nil {
 		t.Fatalf("sync: %v", err)
 	}
-	statePath := filepath.Join(e.deps.StateDir, "repo-state.json")
-	data, err := os.ReadFile(statePath)
+	states, err := e.deps.Store.RepoSyncStates(ctx)
 	if err != nil {
-		t.Fatalf("read state: %v", err)
+		t.Fatalf("RepoSyncStates: %v", err)
 	}
-	var sf stateFile
-	if err := json.Unmarshal(data, &sf); err != nil {
-		t.Fatalf("unmarshal state: %v", err)
+	found := false
+	for _, st := range states {
+		if st.Repo == "foo/bar" {
+			found = true
+			if st.LastSyncedAt == "" {
+				t.Fatalf("expected LastSyncedAt to be set, got %+v", st)
+			}
+		}
 	}
-	if _, ok := sf.Repos["foo/bar"]; !ok {
-		t.Fatalf("expected state for foo/bar, got %+v", sf)
+	if !found {
+		t.Fatalf("expected repo sync state for foo/bar, got %+v", states)
 	}
 }
 
@@ -882,37 +890,40 @@ func TestSyncPR_RejectsUnknownRepo(t *testing.T) {
 	}
 }
 
-func TestSync_ProgressesEvenIfStateSaveFails(t *testing.T) {
-	// Exercise the state-save error path by pointing StateDir at a file
-	// where MkdirAll will fail (a regular file with .ext acting as parent).
+// TestSync_SkipsRepoSyncStateWhenStoreNil proves Sync degrades gracefully
+// when Deps.Store is unset (as several other tests in this package leave
+// it): the repo-sync-state UPSERT this bead's cursor-fold introduced is
+// skipped rather than dereferencing a nil *store.DB, and the rest of Sync
+// still completes and reports the work it did.
+//
+// This replaces the pre-SQLite TestSync_ProgressesEvenIfStateSaveFails,
+// which forced a state-SAVE failure by pointing StateDir at an uncreatable
+// directory (repo-state.json's own MkdirAll failing). That failure mode is
+// retired along with the file it wrote to: state persistence is now a plain
+// UPSERT against an already-open store handle, not a filesystem write with
+// its own directory to fail to create, so there is no longer a way to make
+// JUST the state write fail without also breaking the PR writes the test
+// wanted to prove survive it.
+func TestSync_SkipsRepoSyncStateWhenStoreNil(t *testing.T) {
 	ctx := realBDCtx(t)
 	vcs := newFakeVCS()
 	vcs.my["foo/bar"] = []api.PR{samplePR(1, "foo/bar", "feat/x")}
 
 	bd := newRealBDClient(t)
-	parent := t.TempDir()
-	blockerFile := filepath.Join(parent, "blocker")
-	if err := os.WriteFile(blockerFile, []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	// StateDir is the blocker file (not a directory). MkdirAll on
-	// blocker/repo-state.json's parent will fail because blocker is a file.
-	stateDir := filepath.Join(blockerFile, "subdir")
 	e, err := New(Deps{
 		Cfg:      minimalCfg(),
 		VCS:      map[string]VCSProvider{"github": vcs},
 		Beads:    bd,
-		StateDir: stateDir,
+		StateDir: t.TempDir(),
 		Now:      func() time.Time { return time.Date(2026, 5, 20, 0, 0, 0, 0, time.UTC) },
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	sum, err := e.Sync(ctx)
-	if err == nil {
-		t.Fatalf("expected aggregate error due to state-save failure")
+	if err != nil {
+		t.Fatalf("Sync with a nil Store should not error: %v", err)
 	}
-	// BeadsCreated should still reflect work done.
 	if sum.BeadsCreated != 1 {
 		t.Fatalf("BeadsCreated: %d", sum.BeadsCreated)
 	}

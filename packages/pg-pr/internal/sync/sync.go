@@ -25,10 +25,8 @@ package sync
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -328,7 +326,6 @@ type SummaryError struct {
 func (e *Engine) Sync(ctx context.Context) (*Summary, error) {
 	summary := &Summary{StartedAt: e.deps.Now()}
 	repoStates := map[string]repoState{}
-	prevState, _ := loadState(e.stateFile())
 
 	// Authoritative set of (repo, pr_number) observed across this sync.
 	observed := map[prKey]api.PR{}
@@ -616,18 +613,28 @@ func (e *Engine) Sync(ctx context.Context) (*Summary, error) {
 		}
 	}
 
-	// Persist per-repo state, preserving entries for repos we didn't try
-	// this run.
-	mergedState := prevState
-	if mergedState.Repos == nil {
-		mergedState.Repos = map[string]repoState{}
-	}
-	maps.Copy(mergedState.Repos, repoStates)
-	if err := saveState(e.stateFile(), mergedState); err != nil {
-		summary.Errors = append(summary.Errors, SummaryError{
-			Repo:    "(state)",
-			Message: fmt.Sprintf("save state file: %v", err),
-		})
+	// Persist per-repo sync state into the SQLite store (pg2-ynhr.8), one
+	// UPSERT per repo touched this tick. This replaces the old separate
+	// $XDG_STATE_HOME/pg-pr/repo-state.json file: state now lives in the same
+	// database as the PR rows it describes, so the two can never drift out
+	// of sync from a crash between two independent file writes. A repo not
+	// visited this tick simply keeps whatever row a previous tick wrote for
+	// it — there is no merge-with-previous-state step to get wrong, unlike
+	// the old JSON file's read-modify-write-whole-file cycle.
+	if e.deps.Store != nil {
+		for repo, st := range repoStates {
+			rss := store.RepoSyncState{Repo: repo, LastSyncedAt: st.LastSyncedAt}
+			if st.LastError != nil {
+				rss.LastErrorCode = st.LastError.Code
+				rss.LastErrorMessage = st.LastError.Message
+			}
+			if err := e.deps.Store.UpsertRepoSyncState(ctx, rss); err != nil {
+				summary.Errors = append(summary.Errors, SummaryError{
+					Repo:    "(state)",
+					Message: fmt.Sprintf("save repo sync state: %v", err),
+				})
+			}
+		}
 	}
 
 	summary.FinishedAt = e.deps.Now()
@@ -1661,7 +1668,10 @@ func stateForPR(pr api.PR) string {
 }
 
 // ---------------------------------------------------------------------
-// repoState: $XDG_STATE_HOME/pg-pr/repo-state.json
+// repoState: the sync engine's per-repo cursor, persisted via
+// store.DB.UpsertRepoSyncState into the same SQLite database as the PR data
+// it describes (pg2-ynhr.8; previously a separate
+// $XDG_STATE_HOME/pg-pr/repo-state.json file).
 // ---------------------------------------------------------------------
 
 type prKey struct {
@@ -1669,34 +1679,14 @@ type prKey struct {
 	Number int
 }
 
-type stateFile struct {
-	Repos map[string]repoState `json:"repos"`
-}
-
 type repoState struct {
-	LastSyncedAt string   `json:"last_synced_at"`
-	LastError    *repoErr `json:"last_error,omitempty"`
+	LastSyncedAt string
+	LastError    *repoErr
 }
 
 type repoErr struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
-}
-
-// stateFile returns the path to the persistent state file.
-func (e *Engine) stateFile() string {
-	if e.deps.StateDir != "" {
-		return filepath.Join(e.deps.StateDir, "repo-state.json")
-	}
-	return defaultStateFile()
-}
-
-func defaultStateFile() string {
-	if xdg := os.Getenv("XDG_STATE_HOME"); xdg != "" {
-		return filepath.Join(xdg, "pg-pr", "repo-state.json")
-	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".local", "state", "pg-pr", "repo-state.json")
+	Code    string
+	Message string
 }
 
 // storeFile returns the path to the SQLite store database.
@@ -1767,32 +1757,6 @@ func flushOutbox(ctx context.Context, db *store.DB, dispatch store.DispatchFunc)
 	if err := db.RunOutbox(ctx, dispatch); err != nil {
 		_ = err // pending rows are retried next run; daemon logs separately
 	}
-}
-
-func loadState(path string) (stateFile, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return stateFile{Repos: map[string]repoState{}}, err
-	}
-	var sf stateFile
-	if err := json.Unmarshal(data, &sf); err != nil {
-		return stateFile{Repos: map[string]repoState{}}, err
-	}
-	if sf.Repos == nil {
-		sf.Repos = map[string]repoState{}
-	}
-	return sf, nil
-}
-
-func saveState(path string, sf stateFile) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	data, err := json.MarshalIndent(sf, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(path, data, 0o644)
 }
 
 // ---------------------------------------------------------------------

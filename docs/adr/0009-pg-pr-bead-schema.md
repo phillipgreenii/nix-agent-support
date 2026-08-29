@@ -19,7 +19,9 @@ Four bead types in the schema:
 
 Hierarchy via bd's `parent-child` dep type (non-blocking; shows `↑ parent` in `bd show`). Action-to-feedback link via `discovered-from` (soft, non-blocking). CLI implements cascade-on-PR-close explicitly because bd has no native cascading closure.
 
-Repo-level sync errors live in `$XDG_STATE_HOME/pg-pr/repo-state.json`, not in beads.
+Repo-level sync errors live in pg-pr's own SQLite store, not in beads (originally a separate
+`$XDG_STATE_HOME/pg-pr/repo-state.json` file; folded into the store's `repo_sync_state` table by
+`pg2-ynhr.8` so the cursor can never drift out of sync with the PR rows it describes).
 
 ## Consequences
 
@@ -36,7 +38,8 @@ Repo-level sync errors live in `$XDG_STATE_HOME/pg-pr/repo-state.json`, not in b
 
 ### Neutral
 
-- Repo errors in a state file instead of beads is a small bifurcation of where to look for state.
+- Repo errors in the SQLite store instead of beads is a small bifurcation of where to look for
+  state.
 
 ## Alternatives Considered
 

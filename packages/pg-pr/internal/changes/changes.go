@@ -1,8 +1,11 @@
 // Package changes implements the `pg-pr changes --since <ts>` query.
 //
 // It reports pg-pr-managed beads that were created, updated, or closed
-// since a caller-supplied timestamp, plus any per-repo errors recorded in
-// the sync state file ($XDG_STATE_HOME/pg-pr/repo-state.json).
+// since a caller-supplied timestamp (Since), plus any per-repo sync errors
+// recorded by the sync engine (LoadRepoErrors). The latter used to live in a
+// separate $XDG_STATE_HOME/pg-pr/repo-state.json file; it now reads the
+// sync engine's own SQLite store (schema v17's repo_sync_state table,
+// pg2-ynhr.8) instead.
 //
 // Managed bead scope:
 //
@@ -22,9 +25,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/beads"
 )
 
@@ -39,7 +42,8 @@ type Bead struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// RepoError is a single sync error scraped from the state file.
+// RepoError is a single sync error read from the sync engine's store
+// (see LoadRepoErrors).
 type RepoError struct {
 	Repo    string `json:"repo"`
 	Code    string `json:"code,omitempty"`
@@ -66,10 +70,12 @@ var managedTypes = map[string]bool{
 
 // Since returns the ChangeSet for all managed beads with activity at or
 // after ts. The runner is used to invoke `bd list --json --all
-// --updated-after <ts>`; tests inject a stub runner. The stateFile path
-// is read (best-effort) for repo errors; a missing or unreadable file is
-// not an error.
-func Since(ctx context.Context, ts time.Time, runner beads.Runner, stateFile string) (*ChangeSet, error) {
+// --updated-after <ts>`; tests inject a stub runner. The returned
+// ChangeSet.Errors is always empty — callers that also want per-repo sync
+// errors call LoadRepoErrors separately and merge it in (a fan-out caller
+// querying several bd workspaces needs that lookup only once, not once per
+// workspace).
+func Since(ctx context.Context, ts time.Time, runner beads.Runner) (*ChangeSet, error) {
 	if runner == nil {
 		return nil, errors.New("changes: runner required")
 	}
@@ -109,7 +115,6 @@ func Since(ctx context.Context, ts time.Time, runner beads.Runner, stateFile str
 		}
 	}
 
-	cs.Errors = loadStateErrors(stateFile)
 	return cs, nil
 }
 
@@ -137,49 +142,36 @@ func parseRows(stdout string) ([]row, error) {
 	return rows, nil
 }
 
-// loadStateErrors reads the sync state file and returns one RepoError per
-// repo whose last_error is non-nil. A missing or unparseable file yields
-// an empty slice (this is not a fatal condition for the command).
-func loadStateErrors(path string) []RepoError {
+// LoadRepoErrors reads the sync engine's per-repo sync state from the SQLite
+// store at path and returns one RepoError per repo whose most recent sync
+// attempt failed. It follows the same stat-before-open contract as the rest
+// of this CLI's store-reading code paths (see cmd/pg-pr/pr_view.go's
+// loadPRView): a store that doesn't exist yet (an idle, never-synced
+// machine) is not an error and this function never creates one as a side
+// effect. path == "" is likewise treated as "nothing to read", not an error.
+func LoadRepoErrors(ctx context.Context, path string) ([]RepoError, error) {
 	if path == "" {
-		return nil
+		return nil, nil
 	}
-	data, err := os.ReadFile(path)
+	if _, statErr := os.Stat(path); statErr != nil {
+		return nil, nil
+	}
+	db, err := store.Open(path)
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("changes: open store: %w", err)
 	}
-	var sf struct {
-		Repos map[string]struct {
-			LastError *struct {
-				Code    string `json:"code"`
-				Message string `json:"message"`
-			} `json:"last_error,omitempty"`
-		} `json:"repos"`
+	defer func() { _ = db.Close() }()
+
+	states, err := db.RepoSyncStates(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("changes: read repo sync state: %w", err)
 	}
-	if err := json.Unmarshal(data, &sf); err != nil {
-		return nil
-	}
-	out := make([]RepoError, 0, len(sf.Repos))
-	for repo, st := range sf.Repos {
-		if st.LastError == nil {
+	out := make([]RepoError, 0, len(states))
+	for _, st := range states {
+		if st.LastErrorMessage == "" {
 			continue
 		}
-		out = append(out, RepoError{
-			Repo:    repo,
-			Code:    st.LastError.Code,
-			Message: st.LastError.Message,
-		})
+		out = append(out, RepoError{Repo: st.Repo, Code: st.LastErrorCode, Message: st.LastErrorMessage})
 	}
-	return out
-}
-
-// DefaultStateFile returns the same default sync state file path the sync
-// engine uses. Exposed so the CLI wiring can find it without importing
-// the (private) sync helper.
-func DefaultStateFile() string {
-	if xdg := os.Getenv("XDG_STATE_HOME"); xdg != "" {
-		return filepath.Join(xdg, "pg-pr", "repo-state.json")
-	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".local", "state", "pg-pr", "repo-state.json")
+	return out, nil
 }

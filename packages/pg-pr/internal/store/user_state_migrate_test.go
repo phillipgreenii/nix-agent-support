@@ -91,6 +91,14 @@ func TestMigrate_V14UpgradeFromPriorVersionPreservesRows(t *testing.T) {
 	if _, err := db.sql.Exec(`ALTER TABLE pr_revision ADD COLUMN reviewed_by_agent_at TEXT`); err != nil {
 		t.Fatalf("re-add reviewed_by_agent_at to fabricate pre-v16 shape: %v", err)
 	}
+	// pg2-ynhr.8's v16->v17 step CREATEs repo_sync_state, and OpenForTest
+	// above already created it. The trailing migrate() call re-runs v16->v17
+	// too, so the table must be ABSENT first, or that CREATE TABLE fails with
+	// "table repo_sync_state already exists" — the table-level mirror of the
+	// two column-level traps above.
+	if _, err := db.sql.Exec(`DROP TABLE repo_sync_state`); err != nil {
+		t.Fatalf("drop repo_sync_state to fabricate pre-v17 shape: %v", err)
+	}
 	if _, err := db.sql.Exec("PRAGMA user_version = 13"); err != nil {
 		t.Fatalf("roll user_version back to 13: %v", err)
 	}

@@ -7,7 +7,7 @@ import (
 
 // schemaVersion is the current schema. Bump it and append a migration step
 // whenever the DDL changes. Stored in SQLite's user_version pragma.
-const schemaVersion = 16
+const schemaVersion = 17
 
 // migrations is the ordered list of DDL applied to reach schemaVersion. Index i
 // migrates user_version i -> i+1.
@@ -533,6 +533,35 @@ ALTER TABLE pull_request ADD COLUMN body TEXT NOT NULL DEFAULT '';
 	// modernc.org/sqlite v1.57.0 driver, as v11->v12 already established).
 	`
 ALTER TABLE pr_revision DROP COLUMN reviewed_by_agent_at;
+`,
+	// v16 -> v17: fold the sync engine's per-repo cursor into this store
+	// (pg2-ynhr.8). It previously lived in a separate JSON file
+	// ($XDG_STATE_HOME/pg-pr/repo-state.json, internal/sync's now-removed
+	// loadState/saveState), written independently of every PR upsert this
+	// same sync tick made to THIS database — so a crash between the two
+	// writes could leave the file's cursor and this store's PR rows telling
+	// different stories about what actually completed. Moving the cursor
+	// here doesn't make one sync tick's writes a single transaction (Sync()
+	// still commits each repo's PR rows as it goes and only learns that
+	// repo's final outcome once its whole per-repo pipeline finishes, so the
+	// cursor UPSERT is necessarily its own statement after) — what it buys
+	// is a SINGLE FILE: both facts live in the one store.db, so a reader can
+	// never observe one without the other having also survived whatever
+	// crash it wants to reason about.
+	//
+	// One row per repo, keyed by the config's `remote` string (the same key
+	// the old JSON file's "repos" map used). last_error_code/
+	// last_error_message are empty strings when the most recent attempt
+	// succeeded, matching this file's other TEXT NOT NULL DEFAULT ''
+	// optional-value columns (e.g. v2's kind/size/urgency) rather than NULL,
+	// so RepoSyncStates never needs a nullable Scan target.
+	`
+CREATE TABLE repo_sync_state (
+    repo               TEXT PRIMARY KEY,
+    last_synced_at     TEXT NOT NULL,
+    last_error_code    TEXT NOT NULL DEFAULT '',
+    last_error_message TEXT NOT NULL DEFAULT ''
+);
 `,
 }
 
