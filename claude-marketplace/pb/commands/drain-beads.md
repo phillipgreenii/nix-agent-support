@@ -168,19 +168,42 @@ proceeding on currently loaded text (direct interactive invocation).`)
    arguments" below, `bd update <id> --claim`) still reaches a specific epic
    instance on the rare occasion one is genuinely meant to be claimed directly.
 
-   **Container-note guard — defense in depth for a container that is NOT type
-   `epic`.** After a successful claim, check the claimed bead's `notes` for a
-   container-marker pattern (contains "Do NOT claim this container bead for
-   direct work", or is prefixed `[container note`). A match means this is a
-   dependency-shaped non-issue, not a park: release it in ONE call — `bd update
-<id> --status open --assignee "" --actor "ID"` (B-2/B-3: status and assignee
-   together, no label change) — then re-run the atomic claim above. Bound this to
-   3 consecutive container-note releases within one CLAIM invocation; a 4th
-   container-note hit without making progress means the guard itself isn't
-   resolving the hazard (e.g. a non-epic container slipped through, or every
-   ready bead at this priority is a container) — stop retrying and route to
-   STUCK, reporting the bead id and its note verbatim, rather than looping
-   (P-4: a blocked precondition MUST bound its repeats and name the escalation).
+   **Container guard — defense in depth for a container that is NOT type
+   `epic`.** After a successful claim, run TWO checks, in this order, before
+   treating the claimed bead as workable:
+   1. **Container-note check.** Does the claimed bead's `notes` contain a
+      container-marker pattern (contains "Do NOT claim this container bead for
+      direct work", or is prefixed `[container note`)?
+   2. **Children-existence probe — fallback for a container that was NEVER
+      marked** (provenance: `pg2-59m7i` — a manually-decomposed, non-`epic`
+      parent with no marker was claimed and dispatched for direct
+      implementation while its own blocked leaf child sat untouched). Run this
+      ONLY when check 1 did NOT match:
+
+      ```bash
+      bd list --parent <id> --status all -n 0 --json
+      ```
+
+      (the same query shape `plan-decompose-beads` uses for its own children
+      listing; `--status all` is load-bearing — a closed decompose-plan child
+      still proves this bead was decomposed). A NON-EMPTY `.data` means this
+      bead already has children, regardless of what `notes` says, so it is a
+      container-shaped non-issue exactly like check 1.
+
+   A match on EITHER check means this is a dependency-shaped non-issue, not a
+   park: release it in ONE call — `bd update <id> --status open --assignee ""
+   --actor "ID"` (B-2/B-3: status and assignee together, no label change) —
+   then re-run the atomic claim above. Bound the two checks to a SHARED budget
+   of 3 consecutive container-guard releases (a hit on either check counts)
+   within one CLAIM invocation; a 4th hit without making progress means the
+   guard itself isn't resolving the hazard (e.g. every ready bead at this
+   priority is a container) — stop retrying and route to STUCK, reporting the
+   bead id and whichever check fired (the note verbatim for check 1, the
+   child ids and statuses for check 2), rather than looping (P-4: a blocked
+   precondition MUST bound its repeats and name the escalation). A bead
+   surfaced to STUCK this way is a candidate for having the container-note
+   marker added to its `notes` by whoever resolves it, so the same parent does
+   not need check 2 again on its next claim.
 
 2. **UNDERSTAND** (orchestrator reads the BEAD ONLY): `bd show <id>` to learn the
    target repo(s), whether the work spans repos, and whether any acceptance
