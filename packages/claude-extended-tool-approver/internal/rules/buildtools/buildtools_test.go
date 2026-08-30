@@ -568,13 +568,18 @@ func TestBuildtools_JustVerbScoped_ValueFlagResolvesVerb(t *testing.T) {
 func TestBuildtools_JustVerbScoped_ValueFlagSafety(t *testing.T) {
 	r := New(testPE(), justBuildtoolsConfig())
 	for _, cmd := range []string{
-		// the three cases named in the bead's safety requirement
+		// the three cases named in the bead's safety requirement. deploy and
+		// terraform (among 7 other deploy*/terraform* verbs) were added to
+		// verbScopedApprovals by the 2026-08-30 operator ruling landed in
+		// homelab's ceta/rules.example.json (see that repo's schema.md), so
+		// they no longer belong here; converge-synology and vault-apply were
+		// NOT part of that ruling and stay correctly excluded (tc-p04z).
 		"just -f infrastructure/machines/ansible/justfile converge-synology synfra",
-		"just -f infrastructure/k3s/kinfra/justfile deploy kinfra",
-		"just -d infrastructure/machines/monorepod terraform apply",
+		"just -f infrastructure/k3s/vault/justfile vault-apply",
+		"just -d infrastructure/machines/monorepod bootstrap-synology",
 		// same verbs via the long / glued forms
-		"just --justfile=infrastructure/k3s/kinfra/justfile deploy kinfra",
-		"just --working-directory /repo --justfile /repo/justfile undeploy",
+		"just --justfile=infrastructure/k3s/vault/justfile vault-apply",
+		"just --working-directory /repo --justfile /repo/justfile bootstrap-auth",
 		"just -f /repo/justfile pull-unseal-keys",
 		"just -f /repo/justfile push",
 		`just -f /repo/justfile query "DROP TABLE events"`,
