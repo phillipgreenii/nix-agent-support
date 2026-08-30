@@ -28,6 +28,16 @@ the repo's primary branch; run each from the repo in question.
   or a referent the premise never names precisely enough to probe are all the same case: the
   agent MUST read it as STILL LIVE and MUST NOT call the premise moot. Ambiguity is never
   evidence of mootness.
+- **Exception, not ambiguity**: a non-resolving `tc-*` id cited in a bead's body or comment
+  (`sibling-open?` / `bd show <id>` returning "no issue found") is NOT the ambiguous case above
+  — it is decisive. It means the referenced bead was deleted by a completed-bead prune (the
+  2026-08-08 prune, or a future one), not that the id is mistyped or the reference
+  still-unverified. Operator ruling (`tc-2n1h`, 2026-08-23): if the referenced content mattered,
+  it was quoted inline into the citing bead at prune time, so nothing is lost by treating the id
+  as gone. Read a non-resolving `tc-*` id as PRUNED and stop probing it; do not read it as STILL
+  LIVE and do not re-file or re-derive the sibling. This exception is scoped to `tc-*` bead-id
+  references specifically — it does not extend to other referent kinds (a commit sha, a ticket
+  key, a file path), which remain governed by the general ambiguity rule above.
 - If the premise names NO external referent, the agent MUST record that fact explicitly
   rather than skip the step silently — an unrecorded check is indistinguishable from a
   skipped one.
