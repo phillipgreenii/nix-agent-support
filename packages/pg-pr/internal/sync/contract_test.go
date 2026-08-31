@@ -121,6 +121,28 @@ var (
 // commit-time hook run. Keying on the pid does not touch the shared server's
 // existing "synctest" registration (a separate, orthogonal cleanup) — it just
 // stops this process from colliding with it or with a concurrent one.
+//
+// tc-8ydo (follow-up to tc-8myb): investigated whether the tests below could
+// run under t.Parallel() for more headroom against the 600s default `go test`
+// timeout (475.87s measured on a quiet host, ~21% headroom). Every test here
+// except TestSync_PerRepoWorkspaceIsolation (uses t.Setenv, which Go forbids
+// under t.Parallel()) was made a candidate and tried. Isolation itself checked
+// out: each test's workspace is copyDir'd from this template into its own
+// t.TempDir(), and each copy is a genuinely independent bd embedded-Dolt store
+// (local files under .beads/embeddeddolt, no shared registry writes observed,
+// no listening port opened) — the per-test isolation claim tc-8myb made is
+// real. But a t.Parallel()'d run under real multi-session host contention
+// (the same load-sensitivity this file's -prefix comment above already
+// documents) did not complete within 900s -- 50% more wall-clock than the
+// 600s reference -- with many goroutines parked waiting on concurrent `bd`
+// subprocess I/O; the same contention also made the untouched SERIAL code
+// fail a single test outright (300s+, tripping realBDOpTimeout). Concurrent
+// bd subprocesses compete for the same scarce disk I/O on a loaded host
+// rather than overlapping usefully, so t.Parallel() was reverted (not
+// landed) as unsafe/no-benefit here. The `pg-pr-contract` nix app instead
+// runs this suite with `-timeout=0`, mirroring ccpool-contract/pb-contract,
+// since this is a manual/on-demand suite (not a flake check / not in CI) and
+// a fixed budget is the wrong tool against load variance this large.
 func bdWorkspaceTemplate(t *testing.T) string {
 	t.Helper()
 	bdTemplateOnce.Do(func() {

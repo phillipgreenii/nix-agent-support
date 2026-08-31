@@ -3929,6 +3929,45 @@
                 go test -tags contract -timeout=0 -p 1 ./...
               '';
             };
+            # pg-pr-contract runs pg-pr's on-demand, build-tagged
+            # (//go:build contract) real-bd suites (pkg/beads/contract_test.go,
+            # internal/sync/contract_test.go) that drive the REAL bd CLI
+            # (embedded-Dolt, isolated per test) rather than fakes, and are
+            # deliberately NOT a flake check / not in CI.
+            #
+            # tc-8myb measured internal/sync's suite at ~475.87s on a quiet
+            # host against go test's implicit 600s default -- only ~21%
+            # headroom. tc-8ydo's follow-up investigated raising that headroom
+            # via t.Parallel() and found it does not help: per-test bd
+            # workspaces ARE genuinely isolated (each is a filesystem copy of
+            # a template using bd's embedded-Dolt mode -- local files only, no
+            # shared server), so no data-corruption risk was found, but a real
+            # run under organic multi-session host contention (the exact
+            # "~10x latency variance under load" tc-8myb's own evidence
+            # warned about) showed a single serial test alone taking 300s+
+            # against its 5-minute per-op ceiling, and a t.Parallel()'d run
+            # (tried and reverted, not landed) still had NOT completed after
+            # 900s -- 50% more time than the 600s reference -- with many
+            # goroutines stuck waiting on concurrent bd subprocess I/O.
+            # Concurrent bd subprocesses compete for the same scarce disk I/O
+            # on a loaded host rather than speeding the suite up, so
+            # parallelizing does not buy headroom and risks making contention
+            # worse. Rather than guess a "big enough" fixed timeout, this
+            # mirrors ccpool-contract/pb-contract's own answer to the same
+            # problem: no cap at all (-timeout=0), so a slow-but-working host
+            # doesn't turn a real pass into a false failure.
+            pg-pr-contract = pkgs.writeShellApplication {
+              name = "pg-pr-contract";
+              runtimeInputs = [
+                pkgs.go
+                pkgs.git
+                (pkgs.llm-agentsPkgs.beads or llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.beads)
+              ];
+              text = ''
+                cd "''${1:-packages/pg-pr}"
+                go test -tags contract -timeout=0 -p 1 ./...
+              '';
+            };
           };
 
           # devShells.default is auto-contributed by flakeModules.devshell
