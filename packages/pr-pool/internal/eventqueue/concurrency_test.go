@@ -91,9 +91,17 @@ func TestDispatchReentrantEnqueueNoDeadlock(t *testing.T) {
 
 // TEST B (concurrency, run under -race). Concurrent Enqueue while several
 // Dispatch goroutines run must not deadlock or race, and every enqueued event
-// must be delivered at least once (INV-EVT-1). Duplicate offers under concurrent
-// dispatch are tolerated (idempotent-listener contract, INV-EVT-2); the queue
-// records each acceptance at most once. Guarded by a timeout.
+// must be delivered at least once (INV-EVT-1). Because Dispatch's OFFER phase
+// runs unlocked (see queue.go's locking-discipline note), two concurrent
+// Dispatch passes can snapshot the SAME (listener, event) pair before either
+// records an acceptance, offering that listener the same event concurrently —
+// a latent duplicate-offer race (register row, bead pg2-84o3m.31; fixed in
+// Phase 6 by per-listener outstanding-offer accounting under q.mu). Today the
+// duplicate is merely tolerated by the idempotent-listener contract
+// (INV-EVT-2); the queue still records each acceptance at most once. This
+// test only asserts every enqueued id was delivered at least once — it does
+// not pin the duplicate-offer count either way, so it is unaffected by the
+// eventual Phase 6 fix. Guarded by a timeout.
 func TestConcurrentEnqueueDuringDispatchNoRace(t *testing.T) {
 	q, err := New(NewMemStore()) // real clock; a far-future expiresAt so nothing expires mid-test
 	if err != nil {

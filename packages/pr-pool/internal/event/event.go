@@ -40,11 +40,11 @@ type Event struct {
 }
 
 // FingerprintID derives the stable dedup id for an item-carrying event
-// (Q3). It is stable across passes while a bead remains ready, so a still-ready
-// bead is not re-enqueued while its dispatch is in flight or leased. The design
-// notes a claim-state component as a candidate refinement (deferred to the
-// implementation plan's "Open items"); this first cut keys on (eventType,
-// item.ID), which is sufficient for the in-pass dedup the built-ins need.
+// (Q3). It keys on (eventType, item.ID) — exactly the id the eventqueue's
+// retention set de-duplicates on (INV-EVT-3): a re-emission of the same item
+// under the same event type is dropped as a duplicate for as long as the
+// earlier occurrence is retained, so neither an emitting query nor the queue
+// itself has to track whether the item was already emitted.
 func FingerprintID(eventType, itemID string) string {
 	return eventType + ":" + itemID
 }

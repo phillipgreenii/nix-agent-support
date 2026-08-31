@@ -117,10 +117,11 @@ internal/config's package doc and 'config --print-defaults's header. The XDG-glo
 ($XDG_CONFIG_HOME/pr-pool/config.toml, else ~/.config/pr-pool/config.toml) contributes
 [pool].budget only, beneath the repo-local file and above env; it sets nothing else.
 
-REMOVED (now configured per-role in config.toml, not via env): PR_POOL_MAX_WORKER,
-PR_POOL_MAX_FEEDBACK, PR_POOL_FEEDBACK_ENABLED, PR_POOL_WORKER_ENABLED,
-PR_POOL_SKILL_MD, PR_POOL_WORKER_SKILL_MD. Set role.cap / role.enabled / the role's
-prompt in config.toml instead.`
+REMOVED: PR_POOL_MAX_WORKER, PR_POOL_MAX_FEEDBACK, PR_POOL_FEEDBACK_ENABLED,
+PR_POOL_WORKER_ENABLED, PR_POOL_SKILL_MD, PR_POOL_WORKER_SKILL_MD. Set
+role.enabled / the role's prompt in config.toml instead; the former per-role
+MAX_WORKER/MAX_FEEDBACK cap is not a config knob at all any more (INV-CONC-1)
+— a handler expresses its own capacity limit as a pre-accept busy decline.`
 
 // routeKind enumerates what the program should do after parsing argv. Keeping
 // the decision pure (no I/O, no side effects) is what guarantees a help/version
