@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/pr-pool/internal/backoff"
+	"github.com/phillipgreenii/pr-pool/internal/core"
 	"github.com/phillipgreenii/pr-pool/internal/event"
 	"github.com/phillipgreenii/pr-pool/internal/eventqueue"
 	"github.com/phillipgreenii/pr-pool/internal/item"
@@ -117,7 +118,8 @@ func TestProduce_periodQueriesEnqueueForBoundRoles(t *testing.T) {
 	q.Register(fb)
 	q.Register(wk)
 
-	if err := Produce(context.Background(), query.Env{}, sources, q); err != nil {
+	declared := core.NewBindings("feedback.ready", "work.ready")
+	if _, err := Produce(context.Background(), query.Env{}, sources, q, declared); err != nil {
 		t.Fatal(err)
 	}
 	// Both work.ready events are ENQUEUED by this one Produce call...
@@ -144,22 +146,31 @@ func TestProduce_periodQueriesEnqueueForBoundRoles(t *testing.T) {
 	}
 }
 
-func TestProduce_queryErrorPropagates(t *testing.T) {
+// A query failure (retries exhausted — the zero-value Meta.FB fails fast) is
+// ISOLATED to that source's SourceErrors entry, not returned as Produce's own
+// error (INV-FAIL-3, INV-EVT-1; ADR per Task 0.6 — INV-PREC-1 resolved as
+// never-drop-work). It must still not masquerade as "no ready work" (pg2-qq9v)
+// — it is recorded, just not propagated as a pass-aborting error.
+func TestProduce_queryErrorIsolatedToSourceErrors(t *testing.T) {
 	sentinel := errors.New("bd down")
 	sources := query.SourceSet{
 		{Name: "boom", Query: fakeQuery{Meta: query.Meta{EmitTypes: []string{"x"}}, err: sentinel}},
 	}
-	err := Produce(context.Background(), query.Env{}, sources, newQueue(t))
-	if err == nil || !errors.Is(err, sentinel) {
-		t.Fatalf("a query error must propagate; got %v", err)
+	rpt, err := Produce(context.Background(), query.Env{}, sources, newQueue(t), core.NewBindings("x"))
+	if err != nil {
+		t.Fatalf("a source failure must not abort the pass; got Produce error %v", err)
+	}
+	if rpt.SourceErrors["boom"] == nil || !errors.Is(rpt.SourceErrors["boom"], sentinel) {
+		t.Fatalf("SourceErrors[boom] = %v, want it to wrap %q", rpt.SourceErrors["boom"], sentinel)
 	}
 }
 
 // A query that has NOT opted into a pull-source failure backoff (zero-value
 // Meta.FB, Retries: 0) still fails FAST on the very first error — exactly
 // pg2-qq9v's original behavior, unchanged by pg2-0c8yz's addition. No sleep is
-// ever consulted.
-func TestProduce_queryErrorPropagatesImmediatelyWithoutOptIn(t *testing.T) {
+// ever consulted. The failure is still isolated to SourceErrors, never
+// returned as produce's own error (INV-FAIL-3, INV-EVT-1).
+func TestProduce_queryErrorIsolatedImmediatelyWithoutOptIn(t *testing.T) {
 	calls := 0
 	var waits []time.Duration
 	sources := query.SourceSet{
@@ -169,9 +180,12 @@ func TestProduce_queryErrorPropagatesImmediatelyWithoutOptIn(t *testing.T) {
 			calls:     &calls,
 		}},
 	}
-	err := produce(context.Background(), query.Env{}, sources, newQueue(t), recordingSleep(&waits), nil)
-	if err == nil {
-		t.Fatal("a query error must still propagate without an opt-in")
+	rpt, err := produce(context.Background(), query.Env{}, sources, newQueue(t), core.NewBindings("x"), recordingSleep(&waits), nil)
+	if err != nil {
+		t.Fatalf("a source failure must not abort the pass; got produce error %v", err)
+	}
+	if rpt.SourceErrors["boom"] == nil {
+		t.Fatal("SourceErrors[boom] must be set once the query fails")
 	}
 	if calls != 1 {
 		t.Fatalf("Run was called %d times, want exactly 1 (fail fast, no retry)", calls)
@@ -206,9 +220,12 @@ func TestProduce_pullSourceRetriesThenSucceeds(t *testing.T) {
 	q.Register(wk)
 	obs := &recordingSourceFailureObserver{}
 
-	err := produce(context.Background(), query.Env{}, sources, q, recordingSleep(&waits), obs)
+	rpt, err := produce(context.Background(), query.Env{}, sources, q, core.NewBindings("work.ready"), recordingSleep(&waits), obs)
 	if err != nil {
 		t.Fatalf("failure must NOT propagate once a retry succeeds: %v", err)
+	}
+	if len(rpt.SourceErrors) != 0 {
+		t.Fatalf("SourceErrors = %v, want none once the retry succeeded", rpt.SourceErrors)
 	}
 	if calls != 3 {
 		t.Fatalf("Run was called %d times, want 3 (2 failures + 1 success)", calls)
@@ -228,10 +245,12 @@ func TestProduce_pullSourceRetriesThenSucceeds(t *testing.T) {
 	}
 }
 
-// INV-FAIL-3: once Retries is exhausted the failure STILL propagates — the
-// backoff smooths a transient blip, it does not turn "always down" into
-// "silently idle" (pg2-qq9v).
-func TestProduce_pullSourcePropagatesAfterRetriesExhausted(t *testing.T) {
+// INV-FAIL-3: once Retries is exhausted the failure is recorded (never
+// silently dropped — pg2-qq9v's "must not masquerade as no ready work") but no
+// longer aborts the pass (INV-EVT-1, INV-PREC-1 resolved as never-drop-work,
+// ADR per Task 0.6) — the backoff smooths a transient blip; a source that
+// stays down is isolated, not treated as fatal to the whole tick.
+func TestProduce_pullSourceIsolatedAfterRetriesExhausted(t *testing.T) {
 	calls := 0
 	var waits []time.Duration
 	sentinel := errors.New("source unavailable")
@@ -248,15 +267,108 @@ func TestProduce_pullSourcePropagatesAfterRetriesExhausted(t *testing.T) {
 			calls:     &calls,
 		}},
 	}
-	err := produce(context.Background(), query.Env{}, sources, newQueue(t), recordingSleep(&waits), nil)
-	if err == nil || !strings.Contains(err.Error(), sentinel.Error()) {
-		t.Fatalf("error = %v, want it to wrap %q once retries are exhausted", err, sentinel)
+	rpt, err := produce(context.Background(), query.Env{}, sources, newQueue(t), core.NewBindings("x"), recordingSleep(&waits), nil)
+	if err != nil {
+		t.Fatalf("a source failure must not abort the pass; got produce error %v", err)
+	}
+	if rpt.SourceErrors["down"] == nil || !strings.Contains(rpt.SourceErrors["down"].Error(), sentinel.Error()) {
+		t.Fatalf("SourceErrors[down] = %v, want it to wrap %q once retries are exhausted", rpt.SourceErrors["down"], sentinel)
 	}
 	if calls != 3 {
 		t.Fatalf("Run was called %d times, want 3 (1 initial + 2 retries)", calls)
 	}
 	if !equalDurations(waits, []time.Duration{time.Second, 2 * time.Second}) {
 		t.Fatalf("waits = %v, want [1s 2s]", waits)
+	}
+}
+
+// TestProduceIsolatesSourceFailure is Task 1.1's Step 1(a) red test
+// (INV-FAIL-3, INV-EVT-1; ADR per Task 0.6 — INV-PREC-1 resolved as
+// never-drop-work): with two sources, the FIRST exhausts its retries — but
+// the SECOND still runs, its event still enqueues, and Dispatch/Expire still
+// run over the queue exactly as if nothing had failed. The report carries the
+// failing source's error.
+func TestProduceIsolatesSourceFailure(t *testing.T) {
+	calls := 0
+	sources := query.SourceSet{
+		{Name: "failing", Query: flakyQuery{
+			Meta:      query.Meta{EmitTypes: []string{"x"}},
+			failTimes: 100, // never recovers — retries exhausted (zero-value FB fails fast)
+			calls:     &calls,
+		}},
+		{Name: "healthy", Query: fakeQuery{
+			Meta:   query.Meta{EmitTypes: []string{"work.ready"}, Trig: query.PeriodTrigger{}},
+			events: []event.Event{itemEvt("work.ready", "wk-1")},
+		}},
+	}
+	q := newQueue(t)
+	wk := newTestListener("worker", "work.ready")
+	q.Register(wk)
+
+	rpt, err := Produce(context.Background(), query.Env{}, sources, q, core.NewBindings("work.ready"))
+	if err != nil {
+		t.Fatalf("a failing source must not abort the pass; got Produce error %v", err)
+	}
+	if rpt.SourceErrors["failing"] == nil || !strings.Contains(rpt.SourceErrors["failing"].Error(), "source unavailable") {
+		t.Fatalf("SourceErrors[failing] = %v, want it to wrap the query's error", rpt.SourceErrors["failing"])
+	}
+	if calls != 1 {
+		t.Fatalf("failing source's Run called %d times, want exactly 1 (retries exhausted, no opt-in)", calls)
+	}
+	if depth := q.DepthByType()["work.ready"]; depth != 1 {
+		t.Fatalf("the healthy source's event must still enqueue despite the sibling failure, depth = %d", depth)
+	}
+
+	if accepted := q.Dispatch(); accepted != 1 {
+		t.Fatalf("Dispatch must still deliver the healthy source's event, accepted = %d", accepted)
+	}
+	if len(wk.offered) != 1 || ItemFromPayload(wk.offered[0].Payload).ID != "wk-1" {
+		t.Fatalf("worker listener wrong: %+v", wk.offered)
+	}
+	if dropped := q.Expire(); dropped != 1 {
+		t.Fatalf("Expire must still retire the already-delivered event, dropped = %d", dropped)
+	}
+}
+
+// TestProduce_undeclaredTypeRejected is Task 1.1's Step 1(b) red test
+// (INV-DISP-3; ADR per Task 0.6): an event of a type NO configured role binds
+// to is rejected and counted in Rejected[source], never enqueued — a
+// defense-in-depth check now held on the pull path too, matching what
+// core.Listen already enforces on push. A sibling event of a DECLARED type
+// from another source still enqueues; the rejection is per-event and does
+// not abort the pass or count as a source failure.
+func TestProduce_undeclaredTypeRejected(t *testing.T) {
+	sources := query.SourceSet{
+		{Name: "known", Query: fakeQuery{
+			Meta:   query.Meta{EmitTypes: []string{"known.type"}, Trig: query.PeriodTrigger{}},
+			events: []event.Event{itemEvt("known.type", "k-1")},
+		}},
+		{Name: "unknown", Query: fakeQuery{
+			Meta:   query.Meta{EmitTypes: []string{"unknown.type"}, Trig: query.PeriodTrigger{}},
+			events: []event.Event{itemEvt("unknown.type", "u-1")},
+		}},
+	}
+	q := newQueue(t)
+	declared := core.NewBindings("known.type") // "unknown.type" is NOT declared
+
+	rpt, err := Produce(context.Background(), query.Env{}, sources, q, declared)
+	if err != nil {
+		t.Fatalf("an undeclared-type rejection must not abort the pass; got Produce error %v", err)
+	}
+	if len(rpt.SourceErrors) != 0 {
+		t.Fatalf("SourceErrors = %v, want none — nothing failed, one event was merely rejected", rpt.SourceErrors)
+	}
+	if depth := q.DepthByType()["unknown.type"]; depth != 0 {
+		t.Fatalf("an undeclared-type event must never enqueue, depth = %d", depth)
+	}
+	if got := rpt.Rejected["unknown"]; got != 1 {
+		t.Fatalf("Rejected[unknown] = %d, want 1", got)
+	}
+	if depth := q.DepthByType()["known.type"]; depth != 1 {
+		t.Fatalf("a sibling DECLARED-type event from another source must still enqueue, depth = %d", depth)
+	}
+	if got := rpt.Emitted["known"]; got != 1 {
+		t.Fatalf("Emitted[known] = %d, want 1", got)
 	}
 }
 
@@ -315,7 +427,7 @@ func TestProduce_WithSourceFailureObserverOption(t *testing.T) {
 		}},
 	}
 	obs := &recordingSourceFailureObserver{}
-	err := Produce(context.Background(), query.Env{}, sources, newQueue(t), WithSourceFailureObserver(obs))
+	_, err := Produce(context.Background(), query.Env{}, sources, newQueue(t), core.NewBindings("work.ready"), WithSourceFailureObserver(obs))
 	if err != nil {
 		t.Fatalf("Produce: %v", err)
 	}
@@ -340,9 +452,11 @@ func TestProduce_thresholdFiresOnlyWhenEnough(t *testing.T) {
 		}
 	}
 
+	declared := core.NewBindings("up", "down")
+
 	// Count=1: one "up" is enough — the threshold query fires.
 	q1 := newQueue(t)
-	if err := Produce(context.Background(), query.Env{}, newSources(1), q1); err != nil {
+	if _, err := Produce(context.Background(), query.Env{}, newSources(1), q1, declared); err != nil {
 		t.Fatal(err)
 	}
 	if depth := q1.DepthByType()["down"]; depth != 1 {
@@ -351,7 +465,7 @@ func TestProduce_thresholdFiresOnlyWhenEnough(t *testing.T) {
 
 	// Count=2: one "up" is NOT enough — the threshold query does not fire.
 	q2 := newQueue(t)
-	if err := Produce(context.Background(), query.Env{}, newSources(2), q2); err != nil {
+	if _, err := Produce(context.Background(), query.Env{}, newSources(2), q2, declared); err != nil {
 		t.Fatal(err)
 	}
 	if depth := q2.DepthByType()["down"]; depth != 0 {
@@ -367,7 +481,7 @@ func TestProduce_manualNeverFiresOnTick(t *testing.T) {
 		}},
 	}
 	q := newQueue(t)
-	if err := Produce(context.Background(), query.Env{}, sources, q); err != nil {
+	if _, err := Produce(context.Background(), query.Env{}, sources, q, core.NewBindings("m")); err != nil {
 		t.Fatal(err)
 	}
 	if depth := q.DepthByType()["m"]; depth != 0 {

@@ -32,6 +32,7 @@ import (
 	"github.com/phillipgreenii/pr-pool/internal/beads"
 	"github.com/phillipgreenii/pr-pool/internal/ccpool"
 	"github.com/phillipgreenii/pr-pool/internal/config"
+	"github.com/phillipgreenii/pr-pool/internal/core"
 	"github.com/phillipgreenii/pr-pool/internal/discover"
 	"github.com/phillipgreenii/pr-pool/internal/event"
 	"github.com/phillipgreenii/pr-pool/internal/eventlog"
@@ -67,6 +68,16 @@ type Orchestrator struct {
 	// existing construction site that does not set it; cmd/pr-pool's bootCore
 	// is the one production site that wires a live metrics.Emitter in here.
 	SourceFailureObserver discover.SourceFailureObserver
+	// Bindings is the CONFIGURED role-binding set (core.NewBindings over every
+	// role's Binds, INCLUDING a role disabled for this run — INV-DISP-3's
+	// configuration-wide view). bootCore sets this from the SAME value it passes
+	// to core.Listen's Options.Bindings, so the pull path (ProduceTick's
+	// undeclared-type rejection) and the push path (core's own ingest
+	// validation) can never disagree about which types are declared. A nil
+	// Bindings declares nothing, matching core.Bindings.Declares' own doc
+	// comment — every produced event is then rejected, so a caller that drives
+	// ProduceTick outside bootCore (a test) MUST set this explicitly.
+	Bindings core.Bindings
 }
 
 // attemptStamp returns a fresh per-attempt timestamp token. A unique stamp per
@@ -111,8 +122,15 @@ func (o *Orchestrator) queryEnv() query.Env {
 // SourceFailureObserver (INV-FAIL-3, register gap R21 / bead pg2-00jpn): nil
 // when unset (every construction site that does not assign it), which
 // discover.WithSourceFailureObserver's own doc guarantees is a safe no-op.
-func (o *Orchestrator) ProduceTick(ctx context.Context, q *eventqueue.Queue) error {
-	return discover.Produce(ctx, o.queryEnv(), o.Cfg.Queries, q, discover.WithSourceFailureObserver(o.SourceFailureObserver))
+//
+// It returns discover.Produce's ProduceReport unchanged: source isolation
+// (INV-FAIL-3, INV-EVT-1; ADR per Task 0.6) means a partial produce (one or
+// more SourceErrors) is NOT itself a reason for the caller to abort — cmd/pr-
+// pool's run/run-until-idle loops decide what a partial produce means for
+// their own exit semantics. Only a real failure (ctx cancellation, a durable-
+// queue Enqueue failure) still returns as this method's own error.
+func (o *Orchestrator) ProduceTick(ctx context.Context, q *eventqueue.Queue) (discover.ProduceReport, error) {
+	return discover.Produce(ctx, o.queryEnv(), o.Cfg.Queries, q, o.Bindings, discover.WithSourceFailureObserver(o.SourceFailureObserver))
 }
 
 // RunOne dispatches a single self-contained EVENT through one role and then

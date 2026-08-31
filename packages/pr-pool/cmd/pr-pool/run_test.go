@@ -26,8 +26,9 @@ import (
 	"github.com/phillipgreenii/pr-pool/internal/roles"
 )
 
-// declaredBindTypes must still count a role's Binds even when that role is
-// disabled BY A RUN-SCOPED SELECTOR (applySelectors flips Enabled, never
+// RoleSet.DeclaredBindTypes (moved from this package's own declaredBindTypes to
+// a shared home, Task 1.1) must still count a role's Binds even when that role
+// is disabled BY A RUN-SCOPED SELECTOR (applySelectors flips Enabled, never
 // touches Binds): the "declared but inactive this run" half of INV-DISP-3
 // depends on this — a selector-excluded role must still count as a DECLARED
 // binding, never as if it were never configured at all.
@@ -36,10 +37,10 @@ func TestDeclaredBindTypes_selectorDisabledRoleStillCounts(t *testing.T) {
 		{Name: "r1", Enabled: true, Binds: []string{"t1"}},
 		{Name: "r2", Enabled: false, Binds: []string{"t2"}}, // as applySelectors would leave a --disable'd role
 	}
-	got := declaredBindTypes(rs)
+	got := rs.DeclaredBindTypes()
 	want := []string{"t1", "t2"}
 	if !reflect.DeepEqual(got, want) {
-		t.Errorf("declaredBindTypes = %v, want %v (a run-scoped exclusion must not drop a type from the declared set)", got, want)
+		t.Errorf("DeclaredBindTypes = %v, want %v (a run-scoped exclusion must not drop a type from the declared set)", got, want)
 	}
 }
 
@@ -159,12 +160,16 @@ func TestApplySelectors_queryExcludedNeverProduces(t *testing.T) {
 		t.Fatalf("cfg.Queries = %v, want only q1", queryNames(cfg.Queries))
 	}
 
-	o := &orchestrator.Orchestrator{Cfg: cfg}
+	// t1/t2 declared directly (this test wires no Roles): a real run derives this
+	// set from cfg.Roles.DeclaredBindTypes() (bootCore), but this test's own
+	// concern is selector exclusion, not the undeclared-type rejection Task 1.1
+	// added — so declare both query types to keep that orthogonal.
+	o := &orchestrator.Orchestrator{Cfg: cfg, Bindings: core.NewBindings("t1", "t2")}
 	queue, err := eventqueue.New(eventqueue.NewMemStore())
 	if err != nil {
 		t.Fatalf("eventqueue.New: %v", err)
 	}
-	if err := o.ProduceTick(context.Background(), queue); err != nil {
+	if _, err := o.ProduceTick(context.Background(), queue); err != nil {
 		t.Fatalf("ProduceTick: %v", err)
 	}
 
@@ -275,7 +280,7 @@ func TestBootCore_wiresMetricsEmitterAsProduceTickSourceFailureObserver(t *testi
 	defer func() { _ = storeClose() }()
 	defer func() { _ = svc.Close() }()
 
-	if err := o.ProduceTick(ctx, q); err != nil {
+	if _, err := o.ProduceTick(ctx, q); err != nil {
 		t.Fatalf("ProduceTick: %v", err)
 	}
 	if calls != 2 {

@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/phillipgreenii/pr-pool/internal/core"
 	"github.com/phillipgreenii/pr-pool/internal/event"
 	"github.com/phillipgreenii/pr-pool/internal/eventqueue"
 	"github.com/phillipgreenii/pr-pool/internal/item"
@@ -137,8 +138,7 @@ type SourceFailureObserver interface {
 }
 
 // ProduceOption configures an optional capability on Produce (functional
-// options, so every existing four-argument call site keeps compiling
-// unchanged).
+// options, so every existing call site keeps compiling unchanged).
 type ProduceOption func(*produceOptions)
 
 type produceOptions struct {
@@ -156,20 +156,63 @@ func WithSourceFailureObserver(obs SourceFailureObserver) ProduceOption {
 	return func(o *produceOptions) { o.obs = obs }
 }
 
+// ProduceReport summarizes one Produce pass so a single failing pull source no
+// longer withholds dispatch/expiry for every other source (INV-FAIL-3,
+// INV-EVT-1; ADR per Task 0.6, resolving INV-PREC-1 as never-drop-work): a
+// source's own failure or an undeclared-type event is ISOLATED into this
+// report rather than aborting the whole pass.
+//
+//   - SourceErrors holds, per source name, the error from a pull-source query
+//     whose configured failure backoff's retries were exhausted this pass. A
+//     ctx cancellation observed while waiting out the backoff, or a durable-queue
+//     Enqueue failure (a store failure is not a source failure), still propagate
+//     as Produce's own returned error instead — see runAndEnqueue's doc comment
+//     for the full classification.
+//   - LastTick records, per source name, when this pass fired that source's
+//     query (attempted, regardless of outcome) — the timestamp Task 1.3's
+//     per-source cadence measures period against.
+//   - Emitted counts, per source name, the events this pass actually enqueued.
+//   - Rejected counts, per source name, events this pass discarded because
+//     their type is UNDECLARED — no configured role binds to it (INV-DISP-3's
+//     configuration-wide view, now held on the pull path too, not just push)
+//     — never enqueued.
+type ProduceReport struct {
+	SourceErrors map[string]error
+	LastTick     map[string]time.Time
+	Emitted      map[string]int
+	Rejected     map[string]int
+}
+
+// newProduceReport returns a ProduceReport with every map initialized (never
+// nil), so a caller can index it unconditionally.
+func newProduceReport() ProduceReport {
+	return ProduceReport{
+		SourceErrors: make(map[string]error),
+		LastTick:     make(map[string]time.Time),
+		Emitted:      make(map[string]int),
+		Rejected:     make(map[string]int),
+	}
+}
+
 // Produce fires the query set against the queue for one tick: it runs every
 // PeriodTrigger query (reproducing today's once-per-pass pull), then settles any
 // ThresholdTrigger queries whose upstream now has "enough events" queued.
 // ManualTrigger queries never fire here (only via the smoke harness). Each
-// emitted event is stamped with its source query name (provenance) before it is
-// enqueued. A query failure retries per its configured pull-source failure
-// backoff (INV-FAIL-3, pg2-0c8yz) before it propagates (pg2-qq9v: a query
-// failure must NOT masquerade as "no ready work").
-func Produce(ctx context.Context, env query.Env, sources query.SourceSet, q *eventqueue.Queue, opts ...ProduceOption) error {
+// emitted event is stamped with its source query name (provenance), checked
+// against declared (the configured role-binding set — the SAME core.Bindings
+// core.Listen validates push events against, so the pull and push paths cannot
+// disagree), then enqueued. A query failure retries per its configured
+// pull-source failure backoff (INV-FAIL-3, pg2-0c8yz) before it is ISOLATED into
+// the returned ProduceReport (pg2-qq9v: a query failure must NOT masquerade as
+// "no ready work" — but nor may it withhold delivery for any other source,
+// INV-PREC-1). opts configures optional capabilities (e.g.
+// WithSourceFailureObserver, bead pg2-00jpn) without changing this signature.
+func Produce(ctx context.Context, env query.Env, sources query.SourceSet, q *eventqueue.Queue, declared core.Bindings, opts ...ProduceOption) (ProduceReport, error) {
 	var po produceOptions
 	for _, opt := range opts {
 		opt(&po)
 	}
-	return produce(ctx, env, sources, q, realSleep, po.obs)
+	return produce(ctx, env, sources, q, declared, realSleep, po.obs)
 }
 
 // sleepFunc waits for d, honoring ctx cancellation — the seam produce's
@@ -195,7 +238,8 @@ func realSleep(ctx context.Context, d time.Duration) error {
 // produce is Produce's body, parameterized on the sleep seam so a test can
 // exercise the pull-source failure backoff's retry loop without waiting real
 // time. Produce itself is the production entry point (realSleep).
-func produce(ctx context.Context, env query.Env, sources query.SourceSet, q *eventqueue.Queue, sleep sleepFunc, obs SourceFailureObserver) error {
+func produce(ctx context.Context, env query.Env, sources query.SourceSet, q *eventqueue.Queue, declared core.Bindings, sleep sleepFunc, obs SourceFailureObserver) (ProduceReport, error) {
+	rpt := newProduceReport()
 	fired := make([]bool, len(sources))
 	// Period-driven (and any non-threshold, non-manual) queries fire every pass.
 	for i, s := range sources {
@@ -206,8 +250,8 @@ func produce(ctx context.Context, env query.Env, sources query.SourceSet, q *eve
 		if _, isThreshold := query.Threshold(t); isThreshold {
 			continue
 		}
-		if err := runAndEnqueue(ctx, env, s, q, sleep, obs); err != nil {
-			return err
+		if err := runAndEnqueue(ctx, env, s, q, declared, sleep, obs, &rpt); err != nil {
+			return rpt, err
 		}
 		fired[i] = true
 	}
@@ -232,8 +276,8 @@ func produce(ctx context.Context, env query.Env, sources query.SourceSet, q *eve
 				depth += depthByType[b]
 			}
 			if depth >= tt.Count {
-				if err := runAndEnqueue(ctx, env, s, q, sleep, obs); err != nil {
-					return err
+				if err := runAndEnqueue(ctx, env, s, q, declared, sleep, obs, &rpt); err != nil {
+					return rpt, err
 				}
 				fired[i] = true
 				progressed = true
@@ -243,7 +287,7 @@ func produce(ctx context.Context, env query.Env, sources query.SourceSet, q *eve
 			break
 		}
 	}
-	return nil
+	return rpt, nil
 }
 
 // runAndEnqueue runs one source's query, RETRYING on failure per its
@@ -264,7 +308,24 @@ func produce(ctx context.Context, env query.Env, sources query.SourceSet, q *eve
 // [query.failure_backoff] or the pool-level default — exactly pg2-qq9v's
 // original behavior ("a query failure must NOT masquerade as no ready work"),
 // unchanged for every existing deployment that has not configured this.
-func runAndEnqueue(ctx context.Context, env query.Env, s query.Source, q *eventqueue.Queue, sleep sleepFunc, obs SourceFailureObserver) error {
+//
+// Error classification (INV-FAIL-3, INV-EVT-1; ADR per Task 0.6 — INV-PREC-1
+// resolved as never-drop-work): once Retries is exhausted the failure no
+// longer propagates as an error here — it is recorded in
+// rpt.SourceErrors[s.Name] and runAndEnqueue returns nil, so produce moves on
+// to the next source instead of aborting the whole pass. Only a REAL failure
+// still returns an error: ctx cancellation observed while waiting out the
+// backoff, or a durable-queue Enqueue failure (a store failure is not a source
+// failure).
+//
+// Every emitted event is checked against declared (the CONFIGURED role-binding
+// set, core.Bindings — the same value core.Listen validates push events
+// against, INV-DISP-3): an event whose type no configured role binds to is
+// REJECTED — counted in rpt.Rejected[s.Name], never enqueued — rather than
+// entering the durable queue only to wait, unconsumed, until it expires. A
+// rejection is per-event and does not abort the source's other events.
+func runAndEnqueue(ctx context.Context, env query.Env, s query.Source, q *eventqueue.Queue, declared core.Bindings, sleep sleepFunc, obs SourceFailureObserver, rpt *ProduceReport) error {
+	rpt.LastTick[s.Name] = time.Now()
 	fb := s.Query.FailureBackoff()
 	var evts []event.Event
 	var err error
@@ -274,17 +335,20 @@ func runAndEnqueue(ctx context.Context, env query.Env, s query.Source, q *eventq
 			break
 		}
 		if attempt >= fb.Retries {
-			// Propagate: a query failure must NOT masquerade as "no ready work", or
-			// the pool silently idles on infra failure (pg2-qq9v) — unchanged once
-			// any configured retries are exhausted.
-			return fmt.Errorf("produce %s: %w", s.Name, err)
+			// Isolate: a query failure must NOT masquerade as "no ready work"
+			// (pg2-qq9v), but it also must not withhold dispatch/expiry for any
+			// OTHER source's or any pushed event's already-queued work
+			// (INV-FAIL-3, INV-EVT-1, INV-PREC-1) — record it against this source
+			// only and let produce continue.
+			rpt.SourceErrors[s.Name] = fmt.Errorf("produce %s: %w", s.Name, err)
+			return nil
 		}
 		wait := fb.Policy.Duration(attempt + 1)
 		slog.Warn("pull-source query failed; retrying after backoff (INV-FAIL-3)",
 			"source", s.Name, "attempt", attempt+1, "wait", wait, "err", err)
 		// The metrics half of the log line above (INV-FAIL-3, register gap R21 /
 		// bead pg2-00jpn): every retry notifies the configured observer, same as
-		// the log fires — not the final give-up return above, which the caller
+		// the log fires — not the final give-up return above, which rpt.SourceErrors
 		// surfaces its own way.
 		if obs != nil {
 			obs.OnSourceFailure(s.Name)
@@ -297,9 +361,14 @@ func runAndEnqueue(ctx context.Context, env query.Env, s query.Source, q *eventq
 		if e.Source == "" {
 			e.Source = s.Name
 		}
+		if !declared.Declares(e.Type) {
+			rpt.Rejected[s.Name]++
+			continue
+		}
 		if _, err := q.Enqueue(ToQueueEvent(e)); err != nil {
 			return fmt.Errorf("enqueue %s: %w", s.Name, err)
 		}
+		rpt.Emitted[s.Name]++
 	}
 	return nil
 }

@@ -17,6 +17,28 @@ import (
 // RoleSet is the ordered list of roles a drain dispatches (config order).
 type RoleSet []Role
 
+// DeclaredBindTypes collects every event type SOME role in rs binds to,
+// INCLUDING a role disabled for this run: a configured binding set must answer
+// "does the CONFIGURATION declare this type" (INV-DISP-3 / INV-WORKFLOW-1),
+// never "is some ACTIVE listener bound to it" — that second, narrower question
+// is answered elsewhere (bootCore's per-role Listener registration, which skips
+// a disabled role). The caller typically wraps this in core.NewBindings, which
+// is a set — order is config order and de-duplicated (first occurrence wins),
+// but repetition carries no meaning once wrapped.
+func (rs RoleSet) DeclaredBindTypes() []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, r := range rs {
+		for _, b := range r.Binds {
+			if !seen[b] {
+				seen[b] = true
+				out = append(out, b)
+			}
+		}
+	}
+	return out
+}
+
 type Role struct {
 	Name    string
 	Type    string // "ccpool" | "command"

@@ -115,10 +115,19 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 		}
 		q.Register(o.NewListener(ctx, r))
 	}
+	// Bindings is built ONCE and threaded into both consumers so they can never
+	// disagree about which types are declared (Task 1.1, INV-DISP-3): the same
+	// value goes to core.Listen (validates PUSHED events) and onto the
+	// Orchestrator (ProduceTick threads it into discover.Produce, which now
+	// rejects an undeclared-type PULLED event the same way). declaredBindTypes
+	// itself moved to roles.RoleSet.DeclaredBindTypes — a shared home usable by
+	// anything holding a RoleSet, not just this binary's bootCore.
+	bindings := core.NewBindings(cfg.Roles.DeclaredBindTypes()...)
+	o.Bindings = bindings
 	opts := core.Options{
 		LogDir:         cfg.LogDir,
 		Queue:          q,
-		Bindings:       core.NewBindings(declaredBindTypes(cfg.Roles)...),
+		Bindings:       bindings,
 		Observer:       emitter,
 		MonitorSubsets: monitorSubsetResolverFrom(cfg.MonitorSubsets),
 		// ActivityRing/ConfigPath (Task 3.8): the same ring constructed above
@@ -307,26 +316,6 @@ func (a *activityObserver) OnDeclined(evtType string) {
 
 func (a *activityObserver) OnDispatchFailure(evtType string) {
 	a.ring.Append(activity.Entry{Type: evtType, Outcome: "dispatch_failed"})
-}
-
-// declaredBindTypes collects every event type SOME configured role binds,
-// INCLUDING a role disabled for this run: core.Bindings must answer "does the
-// CONFIGURATION declare this type" (INV-DISP-3 / INV-WORKFLOW-1), never "is
-// some active listener bound to it" — that second, narrower question is what
-// bootCore's per-role Listener registration (skipping disabled roles) answers
-// instead.
-func declaredBindTypes(rs roles.RoleSet) []string {
-	seen := map[string]bool{}
-	var out []string
-	for _, r := range rs {
-		for _, b := range r.Binds {
-			if !seen[b] {
-				seen[b] = true
-				out = append(out, b)
-			}
-		}
-	}
-	return out
 }
 
 // preparedRun is the config/precheck/eventlog setup shared by `run` and
@@ -540,7 +529,8 @@ func runRunUntilIdle(only, disable []string) int {
 		}
 	}()
 
-	if err := pr.o.ProduceTick(ctx, q); err != nil {
+	rpt, err := pr.o.ProduceTick(ctx, q)
+	if err != nil {
 		fmt.Fprintln(os.Stderr, "run-until-idle: discover:", err)
 		return exitGeneric
 	}
@@ -576,6 +566,21 @@ func runRunUntilIdle(only, disable []string) int {
 	// would report nothing (the no-op default has nothing to flush regardless).
 	if err := metrics.Flush(ctx, mp); err != nil {
 		slog.Warn("run-until-idle: metrics flush failed", "err", err)
+	}
+	// Source isolation (INV-FAIL-3, INV-EVT-1; ADR per Task 0.6 — INV-PREC-1
+	// resolved as never-drop-work): the drain above already completed — every
+	// enqueued event (including one pushed in over the socket, unrelated to any
+	// failing pull source) was dispatched or expired — regardless of a partial
+	// produce. Only NOW, after that drain, does a partial produce make this run
+	// exit generic-failure (1): deliberately not a branchable, specific code
+	// (repo's coarse exit-code convention, ADR 0042) — a caller MUST NOT infer
+	// more from it than "something did not fully succeed."
+	if len(rpt.SourceErrors) > 0 {
+		for name, serr := range rpt.SourceErrors {
+			slog.Error("run-until-idle: source failed; other sources still drained", "source", name, "err", serr)
+		}
+		slog.Info("run-until-idle: queue drained (partial produce)")
+		return exitGeneric
 	}
 	slog.Info("run-until-idle: queue drained")
 	return exitOK
@@ -633,9 +638,16 @@ func runRun(only, disable []string) int {
 		svc.ObserveGateFromTick(time.Now(), currentGateFiles(pr.cfg))
 		if pr.o.Gated() {
 			slog.Info("gated; pausing without dispatch")
-		} else if err := pr.o.ProduceTick(ctx, q); err != nil {
+		} else if rpt, err := pr.o.ProduceTick(ctx, q); err != nil {
 			slog.Error("producer tick failed", "err", err)
 		} else {
+			// Source isolation (INV-FAIL-3, INV-EVT-1): a partial produce (one or
+			// more SourceErrors) suspends only THAT source's own production —
+			// Dispatch/Expire still run over the queue for every other source's
+			// and every pushed event's already-queued work.
+			for name, serr := range rpt.SourceErrors {
+				slog.Warn("producer tick: source failed; other sources still produced", "source", name, "err", serr)
+			}
 			q.Dispatch()
 			q.Expire()
 			now := time.Now()

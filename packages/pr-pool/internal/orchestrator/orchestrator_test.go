@@ -10,6 +10,7 @@ import (
 	"github.com/phillipgreenii/pr-pool/internal/beads"
 	"github.com/phillipgreenii/pr-pool/internal/ccpool"
 	"github.com/phillipgreenii/pr-pool/internal/config"
+	"github.com/phillipgreenii/pr-pool/internal/core"
 	"github.com/phillipgreenii/pr-pool/internal/discover"
 	"github.com/phillipgreenii/pr-pool/internal/dtest"
 	"github.com/phillipgreenii/pr-pool/internal/event"
@@ -38,6 +39,10 @@ func newOrch(cc ccpool.Runner, bd *dtest.ScriptBD, cfg config.Config) *Orchestra
 	// here — the queries paired with testRoleSet's built-in roles.
 	cfg.Queries = testQuerySet(cfg)
 	o := &Orchestrator{CC: cc, BD: bd, Reg: testRoleSet(cfg), Cfg: cfg}
+	// Mirrors bootCore's wiring (cmd/pr-pool/run.go): the SAME declared-bind-types
+	// value the production core.Listen would get, so ProduceTick's undeclared-type
+	// rejection (Task 1.1) never rejects a built-in role's own bound types.
+	o.Bindings = core.NewBindings(o.Reg.DeclaredBindTypes()...)
 	clk := &dtest.ManualClock{T: time.Unix(0, 0)}
 	o.now = clk.Now
 	o.tick = clk.TickAdvancing()
@@ -158,7 +163,7 @@ func TestProduceTick_thenDispatch_matchesBuiltinRoles(t *testing.T) {
 	q.Register(o.NewListener(ctx, feedbackRole(o)))
 	q.Register(o.NewListener(ctx, workerRole(o)))
 
-	if err := o.ProduceTick(ctx, q); err != nil {
+	if _, err := o.ProduceTick(ctx, q); err != nil {
 		t.Fatal(err)
 	}
 	q.Dispatch()
