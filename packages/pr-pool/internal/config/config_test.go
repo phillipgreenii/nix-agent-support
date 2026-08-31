@@ -543,6 +543,61 @@ func TestLoad_worktreeDir_envWhenConfigOmitsKey(t *testing.T) {
 	}
 }
 
+// QuotaPaused/CICDDown (INV-LIFE-2, Task 1.2b) layer Default() ("") ->
+// PR_POOL_QUOTA_PAUSED/PR_POOL_CICD_DOWN (env) -> [pool].quota_paused_path/
+// cicd_down_path (config, repo), filled AFTER the repo-TOML layer. Config is
+// the highest priority, mirroring WorktreeDir's own precedence.
+func TestLoad_gatePaths_configWinsOverEnv(t *testing.T) {
+	t.Setenv("PR_POOL_QUOTA_PAUSED", "/env/quota-paused")
+	t.Setenv("PR_POOL_CICD_DOWN", "/env/cicd-down")
+	writeCfg(t, "[pool]\nquota_paused_path = \"/config/quota-paused\"\ncicd_down_path = \"/config/cicd-down\"\n")
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.QuotaPaused != "/config/quota-paused" {
+		t.Errorf("QuotaPaused = %q, want /config/quota-paused ([pool].quota_paused_path must override the env var)", c.QuotaPaused)
+	}
+	if c.CICDDown != "/config/cicd-down" {
+		t.Errorf("CICDDown = %q, want /config/cicd-down ([pool].cicd_down_path must override the env var)", c.CICDDown)
+	}
+}
+
+// A [pool] table that omits the gate keys must NOT clobber the env values.
+func TestLoad_gatePaths_envWhenConfigOmitsKeys(t *testing.T) {
+	t.Setenv("PR_POOL_QUOTA_PAUSED", "/env/quota-paused")
+	t.Setenv("PR_POOL_CICD_DOWN", "/env/cicd-down")
+	writeCfg(t, "[pool]\nself_login = \"someone\"\n")
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.QuotaPaused != "/env/quota-paused" {
+		t.Errorf("QuotaPaused = %q, want /env/quota-paused (absent [pool].quota_paused_path must not override the env var)", c.QuotaPaused)
+	}
+	if c.CICDDown != "/env/cicd-down" {
+		t.Errorf("CICDDown = %q, want /env/cicd-down (absent [pool].cicd_down_path must not override the env var)", c.CICDDown)
+	}
+}
+
+// With neither env nor [pool] key set, both gate paths default to
+// <LogDir>/gates/{quota-paused,cicd-down} — filled AFTER the repo-TOML layer,
+// so PR_POOL_LOG_DIR moves them exactly the way it moves LogDir itself.
+func TestLoad_gatePaths_defaultUnderLogDir(t *testing.T) {
+	absentConfig(t)
+	t.Setenv("PR_POOL_LOG_DIR", "/override/dir")
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "/override/dir/gates/quota-paused"; c.QuotaPaused != want {
+		t.Errorf("QuotaPaused = %q, want %q", c.QuotaPaused, want)
+	}
+	if want := "/override/dir/gates/cicd-down"; c.CICDDown != want {
+		t.Errorf("CICDDown = %q, want %q", c.CICDDown, want)
+	}
+}
+
 // PR_POOL_MAX_WORKER and the other role env vars are dropped (spec C): setting
 // them must have NO effect. Per-role capacity is no longer a declarable concept
 // at all (bead pg2-f3mcb.2, INV-CONC-1) — there is no `cap` left to be a no-op
@@ -994,5 +1049,92 @@ func TestConfig_Meter_returnsConfiguredProvider(t *testing.T) {
 	c := Config{MeterProvider: want}
 	if got := c.Meter(); got != metric.MeterProvider(want) {
 		t.Fatalf("Meter() = %v, want the configured provider %v unchanged", got, want)
+	}
+}
+
+// GatePaths() must resolve the SAME precedence Load() fills the gate paths
+// with — [pool] key > PR_POOL_* env > <LogDir>/gates/... — when the config
+// file parses cleanly.
+func TestGatePaths_agreesWithLoad(t *testing.T) {
+	absentGlobalConfig(t)
+	writeCfg(t, "[pool]\nquota_paused_path = \"/config/quota-paused\"\n")
+	t.Setenv("PR_POOL_CICD_DOWN", "/env/cicd-down")
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	qp, cd := GatePaths()
+	if qp != c.QuotaPaused {
+		t.Errorf("GatePaths quotaPaused = %q, Load = %q, want equal", qp, c.QuotaPaused)
+	}
+	if cd != c.CICDDown {
+		t.Errorf("GatePaths cicdDown = %q, Load = %q, want equal", cd, c.CICDDown)
+	}
+}
+
+// GatePaths() is validation-free: it must resolve even when Load() would
+// hard-fail on an absent backing command (INV-WORKFLOW-1 check 5) — the whole
+// reason `pause`/`resume` call GatePaths() and never Load() (interfaces.md's
+// "Operator pause/resume" MUST: succeed even with no core running, acting on
+// gate-file state directly).
+func TestGatePaths_worksWhenLoadWouldFail(t *testing.T) {
+	writeCfg(t, `
+[[role]]
+name = "r"
+type = "command"
+binds = ["e"]
+[role.command]
+argv = ["absent-handler"]
+
+[[query]]
+name = "s"
+emits = ["e"]
+type = "command"
+[query.command]
+argv = ["present-tool"]
+format = "jsonl"
+`)
+	if _, err := Load(); err == nil {
+		t.Fatal("premise: this config must fail Load() (absent backing command)")
+	}
+	t.Setenv("PR_POOL_LOG_DIR", "/override/dir")
+	qp, cd := GatePaths()
+	if want := "/override/dir/gates/quota-paused"; qp != want {
+		t.Errorf("GatePaths quotaPaused = %q, want %q (must resolve even though Load() fails)", qp, want)
+	}
+	if want := "/override/dir/gates/cicd-down"; cd != want {
+		t.Errorf("GatePaths cicdDown = %q, want %q", cd, want)
+	}
+}
+
+// GatePaths() must also resolve silently when the config file is malformed
+// TOML — Load() hard-errors on that too, but GatePaths() falls back to the
+// env/default resolution (mirrors LogDir()'s own "must not depend on a
+// readable/valid config file" contract).
+func TestGatePaths_worksWhenConfigIsMalformed(t *testing.T) {
+	writeCfg(t, "this is = not valid toml [[[")
+	if _, err := Load(); err == nil {
+		t.Fatal("premise: malformed config must fail Load()")
+	}
+	t.Setenv("PR_POOL_LOG_DIR", "/override/dir")
+	qp, cd := GatePaths()
+	if want := "/override/dir/gates/quota-paused"; qp != want {
+		t.Errorf("GatePaths quotaPaused = %q, want %q", qp, want)
+	}
+	if want := "/override/dir/gates/cicd-down"; cd != want {
+		t.Errorf("GatePaths cicdDown = %q, want %q", cd, want)
+	}
+}
+
+// PR_POOL_LOG_DIR moves both gate defaults, same as LogDir() itself.
+func TestGatePaths_respectsLogDirEnv(t *testing.T) {
+	absentConfig(t)
+	t.Setenv("XDG_STATE_HOME", "/xdg/state")
+	qp, cd := GatePaths()
+	if want := "/xdg/state/pr-pool/gates/quota-paused"; qp != want {
+		t.Errorf("quotaPaused = %q, want %q", qp, want)
+	}
+	if want := "/xdg/state/pr-pool/gates/cicd-down"; cd != want {
+		t.Errorf("cicdDown = %q, want %q", cd, want)
 	}
 }

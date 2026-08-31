@@ -400,13 +400,13 @@ func prepareRun(ctx context.Context, sel runSelectors) (preparedRun, int) {
 	return preparedRun{cfg: cfg, o: o, cleanup: cleanup}, exitOK
 }
 
-// gateQuotaPaused / gateCICDDown are the two file-direct gate names (Task
+// gateTickKeyQuotaPaused / gateTickKeyCICDDown are the two file-direct gate names (Task
 // 1.2b, ADR 0036) this run's config declares — the map keys
 // currentGateFiles/svc.ObserveGateFromTick use, one per
 // config.Config.QuotaPaused/CICDDown gate-file path.
 const (
-	gateQuotaPaused = "quota_paused"
-	gateCICDDown    = "cicd_down"
+	gateTickKeyQuotaPaused = "quota_paused"
+	gateTickKeyCICDDown    = "cicd_down"
 )
 
 // gateFileInfo stats path and reports whether the gate is currently set
@@ -431,8 +431,8 @@ func gateFileInfo(path string) core.GateInfo {
 // same gate-file state).
 func currentGateFiles(cfg config.Config) map[string]core.GateInfo {
 	return map[string]core.GateInfo{
-		gateQuotaPaused: gateFileInfo(cfg.QuotaPaused),
-		gateCICDDown:    gateFileInfo(cfg.CICDDown),
+		gateTickKeyQuotaPaused: gateFileInfo(cfg.QuotaPaused),
+		gateTickKeyCICDDown:    gateFileInfo(cfg.CICDDown),
 	}
 }
 

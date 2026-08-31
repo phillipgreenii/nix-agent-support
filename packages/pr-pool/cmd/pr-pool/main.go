@@ -39,6 +39,10 @@ func main() {
 		os.Exit(runStatus(r.rest))
 	case routeSelfStatus:
 		os.Exit(runSelfStatus(r.rest))
+	case routePause:
+		os.Exit(runPause(r.gate))
+	case routeResume:
+		os.Exit(runResume(r.gate, r.allGates))
 	}
 }
 

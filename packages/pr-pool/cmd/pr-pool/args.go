@@ -3,12 +3,13 @@ package main
 import (
 	"errors"
 	"flag"
+	"fmt"
 	"io"
 	"strings"
 )
 
 // usageLine is the short synopsis printed to stderr on a usage error.
-const usageLine = "usage: pr-pool [--version | --help] [run [--only <selector>]... [--disable <selector>]... | run-until-idle [--only <selector>]... [--disable <selector>]... | run-query <role> | run-role <role> <bead> | config (--print-defaults | --show) | sessions | reconcile | push-inject [--json] [--socket <path>] [--token <tok>] <json> | status [--json] [--socket <path>] [--token <tok>] | ingest-event [--socket <path>] [--token <tok>] | self-status [--socket <path>] [--token <tok>]]"
+const usageLine = "usage: pr-pool [--version | --help] [run [--only <selector>]... [--disable <selector>]... | run-until-idle [--only <selector>]... [--disable <selector>]... | run-query <role> | run-role <role> <bead> | config (--print-defaults | --show) | sessions | reconcile | push-inject [--json] [--socket <path>] [--token <tok>] <json> | pause [<gate>] | resume [<gate> | --all] | status [--json] [--socket <path>] [--token <tok>] | ingest-event [--socket <path>] [--token <tok>] | self-status [--socket <path>] [--token <tok>]]"
 
 // helpText is the full help printed to stdout for --help/help.
 const helpText = usageLine + `
@@ -52,6 +53,19 @@ Subcommands:
                           core via --socket/--token, else PR_POOL_SOCKET/PR_POOL_TOKEN, else
                           discovery under the log dir. It NEVER starts a core: with none running it
                           fails with "no running core" (exit 1).
+  pause [<gate>]          set gate <gate> (default quota-paused) directly on its file-backed state
+                          (INV-LIFE-2): exits 0 even with NO core running, reporting that the change
+                          takes effect at the next start (a currently running "run" picks it up on
+                          its next tick). FILE-DIRECT: unlike every operator subcommand above,
+                          pause/resume NEVER Discover or Dial a core — this deliberately breaks the
+                          verb-named-subcommand-is-a-socket-client symmetry that push-inject/
+                          ingest-event/self-status follow. A socket-level pause/resume verb also
+                          exists (Phase 3) for a client already holding a connection.
+  resume [<gate>] | --all clear gate <gate> (default quota-paused), or every outstanding gate at once
+                          with --all; a bare "resume" clears ONLY the default gate, so an
+                          automation-owned gate (cicd-down) is never cleared by accident.
+                          "resume --all <gate>" (both at once) is a usage error. Same FILE-DIRECT,
+                          no-core-required mechanics as pause.
   version                 print the version and exit
   help                    print this help and exit
 
@@ -87,11 +101,21 @@ Pool-wide settings come from PR_POOL_* environment variables:
   PR_POOL_ALLOWED_TOOLS    claude --allowed-tools allowlist for workers (default: conservative deny-by-default set; empty clears the flag)
   PR_POOL_CONFIG           explicit config.toml path (default <RepoRoot>/.pr-pool/config.toml)
   PR_POOL_ACTIVITY_RING    dispatch-outcome activity ring buffer capacity (default 512)
+  PR_POOL_LOG_DIR          event-log/state directory: gates/, events.jsonl, the discovery record
+                           (default: the XDG state dir, e.g. ~/.local/state/pr-pool)
+  PR_POOL_QUOTA_PAUSED     quota-paused gate file path override (default <PR_POOL_LOG_DIR>/gates/quota-paused)
+  PR_POOL_CICD_DOWN        cicd-down gate file path override (default <PR_POOL_LOG_DIR>/gates/cicd-down)
   PR_POOL_ONLY             run/run-until-idle only: comma-separated run-scoped allow-list,
                            each entry role:<name> or query:<name> (DEC-CLI-1); unioned with
                            any --only flags on the same invocation
   PR_POOL_DISABLE          run/run-until-idle only: comma-separated run-scoped deny-list,
                            same grammar as PR_POOL_ONLY; unioned with any --disable flags
+
+Precedence for every scalar above that a [pool] key can also set (including the two gate
+paths): [pool] wins over PR_POOL_* env, which wins over the built-in default — matching
+internal/config's package doc and 'config --print-defaults's header. The XDG-global config
+($XDG_CONFIG_HOME/pr-pool/config.toml, else ~/.config/pr-pool/config.toml) contributes
+[pool].budget only, beneath the repo-local file and above env; it sets nothing else.
 
 REMOVED (now configured per-role in config.toml, not via env): PR_POOL_MAX_WORKER,
 PR_POOL_MAX_FEEDBACK, PR_POOL_FEEDBACK_ENABLED, PR_POOL_WORKER_ENABLED,
@@ -120,6 +144,8 @@ const (
 	routePushInject                    // operator: inject one event into the running core (.rest)
 	routeStatus                        // operator: inspect the running core (Task 3.8, .rest)
 	routeSelfStatus                    // manager->core callback: push the caller's own self-status to the running core (.rest)
+	routePause                         // file-direct: set gate .gate directly on its file-backed state (INV-LIFE-2); never Discover/Dial
+	routeResume                        // file-direct: clear gate .gate, or every gate with .allGates; never Discover/Dial
 )
 
 type routeResult struct {
@@ -129,6 +155,12 @@ type routeResult struct {
 	role       string   // run-role / run-query role name
 	bead       string   // run-role bead id
 	configMode string   // "print-defaults" | "show" (routeConfig only)
+	// gate / allGates are routePause/routeResume's TYPED fields (Task 1.2b): the
+	// gate name (already validated against the two known gates, defaulted to
+	// quota-paused when omitted) and, for routeResume only, whether --all was
+	// given. Parsed here in route()'s helpers, never re-parsed from .rest.
+	gate     string
+	allGates bool
 	// only / disable carry the raw --only/--disable flag OCCURRENCES for
 	// routeRun/routeRunUntilIdle (STORY-OP-3, DEC-CLI-1) — NOT yet combined
 	// with PR_POOL_ONLY/PR_POOL_DISABLE, since reading the environment is I/O
@@ -202,6 +234,10 @@ func route(argv []string) routeResult {
 		// Same reason as ingest-event: its own --socket/--token flags, parsed in its
 		// own handler, with the same usage exit code (routeUsageErr would produce).
 		return routeResult{kind: routeSelfStatus, rest: args[1:]}
+	case "pause":
+		return parsePauseArgs(args[1:])
+	case "resume":
+		return parseResumeArgs(args[1:])
 	}
 	if strings.HasPrefix(args[0], "-") {
 		return routeResult{kind: routeUsageErr, msg: "unknown flag: " + args[0]}
@@ -297,6 +333,66 @@ func parseConfigArgs(args []string) routeResult {
 		return routeResult{kind: routeConfig, configMode: "show"}
 	}
 	return routeResult{kind: routeUsageErr, msg: "config: unknown flag " + args[0] + " (want --print-defaults or --show)"}
+}
+
+// parsePauseArgs validates `pause [<gate>]` (Task 1.2b, INV-LIFE-2). Pure: no
+// I/O, no config load — the gate identity (quota-paused, cicd-down) is a fixed
+// CLI-level fact, not something config resolves, so validating it here costs
+// nothing config-dependent. An omitted gate defaults to quota-paused
+// (interfaces.md's "Operator pause/resume"); an unknown gate name or a
+// dash-prefixed token is a usage error, matching every other subcommand's
+// fail-fast-on-bad-input contract (pg2-52rn).
+func parsePauseArgs(args []string) routeResult {
+	var gate string
+	for _, a := range args {
+		switch {
+		case strings.HasPrefix(a, "-"):
+			return routeResult{kind: routeUsageErr, msg: "unknown flag: " + a}
+		case gate != "":
+			return routeResult{kind: routeUsageErr, msg: "pause: unexpected argument: " + a}
+		default:
+			gate = a
+		}
+	}
+	if gate == "" {
+		gate = gateQuotaPaused
+	} else if !validGate(gate) {
+		return routeResult{kind: routeUsageErr, msg: fmt.Sprintf("pause: unknown gate %q (want %s or %s)", gate, gateQuotaPaused, gateCICDDown)}
+	}
+	return routeResult{kind: routePause, gate: gate}
+}
+
+// parseResumeArgs validates `resume [<gate>] | --all` (Task 1.2b, INV-LIFE-2).
+// Pure, same fail-fast contract as parsePauseArgs. "resume --all <gate>" (both
+// at once) is a usage error — interfaces.md draws no meaning for that
+// combination, and silently picking one would surprise an operator who typed
+// the other.
+func parseResumeArgs(args []string) routeResult {
+	var gate string
+	allGates := false
+	for _, a := range args {
+		switch {
+		case a == "--all":
+			allGates = true
+		case strings.HasPrefix(a, "-"):
+			return routeResult{kind: routeUsageErr, msg: "unknown flag: " + a}
+		case gate != "":
+			return routeResult{kind: routeUsageErr, msg: "resume: unexpected argument: " + a}
+		default:
+			gate = a
+		}
+	}
+	if allGates && gate != "" {
+		return routeResult{kind: routeUsageErr, msg: "resume: --all takes no gate argument"}
+	}
+	if !allGates {
+		if gate == "" {
+			gate = gateQuotaPaused
+		} else if !validGate(gate) {
+			return routeResult{kind: routeUsageErr, msg: fmt.Sprintf("resume: unknown gate %q (want %s or %s)", gate, gateQuotaPaused, gateCICDDown)}
+		}
+	}
+	return routeResult{kind: routeResume, gate: gate, allGates: allGates}
 }
 
 // firstFlag returns the first dash-prefixed token in args (the offending flag on

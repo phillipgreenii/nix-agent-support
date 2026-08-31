@@ -547,7 +547,7 @@ func TestGateFileInfo_unsetWhenPathEmptyOrAbsent(t *testing.T) {
 
 // TestCurrentGateFiles_namesBothFileDirectGates proves currentGateFiles
 // reports both file-direct gates (Task 1.2b, ADR 0036) under the fixed
-// gateQuotaPaused/gateCICDDown keys svc.ObserveGateFromTick's caller and,
+// gateTickKeyQuotaPaused/gateTickKeyCICDDown keys svc.ObserveGateFromTick's caller and,
 // eventually, Task 3.9's socket verbs must agree on.
 func TestCurrentGateFiles_namesBothFileDirectGates(t *testing.T) {
 	dir := t.TempDir()
@@ -558,11 +558,11 @@ func TestCurrentGateFiles_namesBothFileDirectGates(t *testing.T) {
 	cfg := config.Config{QuotaPaused: quota, CICDDown: dir + "/cicd-down-absent"}
 
 	gates := currentGateFiles(cfg)
-	if got := gates[gateQuotaPaused]; !got.Set {
-		t.Fatalf("gates[%q] = %+v, want Set=true", gateQuotaPaused, got)
+	if got := gates[gateTickKeyQuotaPaused]; !got.Set {
+		t.Fatalf("gates[%q] = %+v, want Set=true", gateTickKeyQuotaPaused, got)
 	}
-	if got := gates[gateCICDDown]; got.Set {
-		t.Fatalf("gates[%q] = %+v, want unset (file absent)", gateCICDDown, got)
+	if got := gates[gateTickKeyCICDDown]; got.Set {
+		t.Fatalf("gates[%q] = %+v, want unset (file absent)", gateTickKeyCICDDown, got)
 	}
 }
 

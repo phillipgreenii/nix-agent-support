@@ -221,3 +221,31 @@ remember this only proves `sh` resolves — anything the pipeline shells out to
 internally needs to be on the real runtime PATH by construction (this flake's
 own wrapper bundles `bd`, `ccpool`, `pg-pr`, and `jq` for exactly this
 reason — see `default.nix`).
+
+## Hazard: gate file paths are now configured by default (Task 1.2b, `INV-LIFE-2`)
+
+Before Task 1.2b, `Config.QuotaPaused`/`Config.CICDDown` defaulted to `""` — no gate could ever
+be set unless an operator explicitly pointed `PR_POOL_QUOTA_PAUSED`/`PR_POOL_CICD_DOWN` (or,
+now, `[pool].quota_paused_path`/`cicd_down_path`) at a real path themselves. As of this change,
+`Config.Load()` fills either still-empty field with `<LogDir>/gates/{quota-paused,cicd-down}`
+(after the repo-TOML layer, so an existing `[pool]`/env override still wins).
+
+**What this means for an existing deployment:** `<LogDir>` (the standard XDG state path, or
+`PR_POOL_LOG_DIR`) is now a live gate location even for a pool that never configured one. A
+**stray file** already sitting at `<LogDir>/gates/quota-paused` or `<LogDir>/gates/cicd-down` —
+left over from an unrelated process, a manual experiment, a copy/paste of another pool's state
+directory — now **gates a pool that previously could not be gated at all**. Check for one before
+upgrading if `<LogDir>` is shared or was ever used for something else:
+
+```bash
+pr-pool config --show   # prints each gate's path and whether it is set
+```
+
+**Gate files are never swept.** `pause`/`resume` (and `Config.Load()`'s defaulting above) create
+directories and files under `<LogDir>/gates/`, but nothing in this codebase ever cleans
+`<LogDir>` — that has always been true (no process here purges old state there) and this change
+does not alter it. A gate file, once created, persists until an explicit `resume` removes it;
+there is no time-based or startup expiry. Keep it that way: `<LogDir>` is also where
+`events.jsonl` and the discovery record live, and neither of those is swept either — introducing
+sweeping for gate files alone would make `<LogDir>`'s cleanup story inconsistent across the
+three, for no invariant that requires it.

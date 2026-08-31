@@ -1,9 +1,11 @@
 // Package config holds pr-pool's runtime configuration. Pool scalars layer
 // Default() -> PR_POOL_* env -> [pool] TOML (the config file wins for the keys it
-// sets: self_login, worktree_dir, budget). Roles come from the [[role]] array in
-// <RepoRoot>/.pr-pool/config.toml (or PR_POOL_CONFIG), or the built-in default set
-// when no config file is present. Role identity lives ONLY in config / built-in
-// defaults — there is no env overlay for role fields (spec C).
+// sets: self_login, worktree_dir, budget, quota_paused_path, cicd_down_path) —
+// [pool] wins over PR_POOL_* env, which wins over the built-in default. Roles
+// come from the [[role]] array in <RepoRoot>/.pr-pool/config.toml (or
+// PR_POOL_CONFIG), or the built-in default set when no config file is present.
+// Role identity lives ONLY in config / built-in defaults — there is no env
+// overlay for role fields (spec C).
 package config
 
 import (
@@ -19,7 +21,7 @@ import (
 
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/metric/noop"
-
+	"github.com/BurntSushi/toml"
 	"github.com/phillipgreenii/pr-pool/internal/backoff"
 	"github.com/phillipgreenii/pr-pool/internal/budget"
 	"github.com/phillipgreenii/pr-pool/internal/query"
@@ -59,6 +61,13 @@ type Config struct {
 	// (the default) marks nothing, so an existing deployment's dispatch is
 	// unchanged.
 	SerializeTypes []string
+	// QuotaPaused / CICDDown are the two named INV-LIFE-2 gate file paths (Gate
+	// identity: quota-paused is ACTOR-OP's own; cicd-down belongs to an
+	// automation actor). Load() fills both with <LogDir>/gates/{quota-paused,
+	// cicd-down} AFTER the repo-TOML layer and only when still empty, so the
+	// precedence is [pool] key (quota_paused_path / cicd_down_path) > PR_POOL_*
+	// env > this default. GatePaths() resolves the identical precedence WITHOUT
+	// calling Load() — see its doc comment for why pause/resume need that.
 	QuotaPaused    string
 	CICDDown       string
 	Effort         string
@@ -315,6 +324,17 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("stat %s: %w", path, statErr)
 	} else {
 		slog.Info("no pr-pool config found; using built-in roles", "path", path)
+	}
+	// Gate file defaults (INV-LIFE-2), filled AFTER the repo-TOML layer above (so
+	// [pool].quota_paused_path / cicd_down_path, if present, already won) and
+	// only when still empty (env, if set, already won over Default()'s "").
+	// GatePaths() below resolves this identical precedence for pause/resume,
+	// which must never call Load() — keep the two in agreement.
+	if c.QuotaPaused == "" {
+		c.QuotaPaused = filepath.Join(c.LogDir, "gates", "quota-paused")
+	}
+	if c.CICDDown == "" {
+		c.CICDDown = filepath.Join(c.LogDir, "gates", "cicd-down")
 	}
 	if c.Roles == nil {
 		bp := roles.BuiltinParams{
@@ -650,6 +670,61 @@ func (c Config) WorkerBudget() budget.Budget {
 // broken. Load() remains the full resolution for everything else.
 func LogDir() string {
 	return envStr("PR_POOL_LOG_DIR", Default().LogDir)
+}
+
+// GatePaths resolves the two INV-LIFE-2 gate file paths (quota-paused,
+// cicd-down) with the SAME precedence Load() fills them with — [pool] key
+// (quota_paused_path / cicd_down_path, read directly from the repo config file
+// when it parses) > PR_POOL_* env > <LogDir>/gates/{quota-paused,cicd-down} —
+// but WITHOUT loading, parsing role/query wiring, or calling Validate().
+//
+// It exists so `pause`/`resume` never call Load(): Validate() hard-fails on an
+// unrunnable backing command (INV-WORKFLOW-1 check 5), and interfaces.md's
+// "Operator pause/resume" requires pause/resume to succeed even with no core
+// running and even against a config that could never itself Load() — the two
+// subcommands act on gate-file state directly and never Discover or Dial a
+// core, so nothing else in the config need be valid.
+//
+// A present-but-malformed config file (or one this process cannot read) falls
+// back to the env/default resolution SILENTLY rather than erroring — mirroring
+// LogDir()'s own "must not be able to fail on unrelated config" contract, which
+// this function is the gate-path sibling of.
+func GatePaths() (quotaPaused, cicdDown string) {
+	// Mirror Default()'s "" -> env overlay exactly (config.go's own Load() does
+	// this in two separate steps too — env first, against a "" base, THEN a
+	// still-empty fill below): envStr treats an env var explicitly SET to ""
+	// the same as unset, since the base is also "", so either reading falls
+	// through to the pool-key overlay and then the LogDir-based fill below.
+	quotaPaused = envStr("PR_POOL_QUOTA_PAUSED", "")
+	cicdDown = envStr("PR_POOL_CICD_DOWN", "")
+
+	cwd, _ := os.Getwd()
+	repoRoot := envStr("PR_POOL_REPO_ROOT", cwd)
+	path := envStr("PR_POOL_CONFIG", filepath.Join(repoRoot, ".pr-pool", "config.toml"))
+	if body, err := os.ReadFile(path); err == nil {
+		var shape fileShape
+		if _, err := toml.Decode(string(body), &shape); err == nil {
+			if shape.Pool.QuotaPausedPath != "" {
+				quotaPaused = shape.Pool.QuotaPausedPath
+			}
+			if shape.Pool.CICDDownPath != "" {
+				cicdDown = shape.Pool.CICDDownPath
+			}
+		}
+		// A malformed file falls through silently (env/default resolution
+		// stands) — this function must never fail.
+	}
+	// A missing/unreadable file falls through silently too (LogDir()'s own
+	// "must not depend on a readable/valid config file" contract).
+
+	logDir := LogDir()
+	if quotaPaused == "" {
+		quotaPaused = filepath.Join(logDir, "gates", "quota-paused")
+	}
+	if cicdDown == "" {
+		cicdDown = filepath.Join(logDir, "gates", "cicd-down")
+	}
+	return quotaPaused, cicdDown
 }
 
 func stateHome() string {

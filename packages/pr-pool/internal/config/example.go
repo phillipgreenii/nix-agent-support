@@ -39,7 +39,17 @@ const exampleHeader = `# pr-pool configuration — repo-local at <RepoRoot>/.pr-
 # Pool-wide scalars (budgets, gates, model, worktree_dir, ...) come from PR_POOL_*
 # env vars and an optional [pool] section; this file defines roles + queries. Where
 # both a PR_POOL_* env var and a [pool] key set the same scalar, [pool] (this file)
-# wins — e.g. [pool].worktree_dir overrides PR_POOL_WORKTREE_DIR.
+# wins — e.g. [pool].worktree_dir overrides PR_POOL_WORKTREE_DIR. In general,
+# [pool] wins over PR_POOL_* env, which wins over the built-in default.
+#
+# Gate file paths (INV-LIFE-2; "pr-pool pause"/"pr-pool resume" act on these
+# directly, file-direct, without a running core) default to
+# <LogDir>/gates/{quota-paused,cicd-down} — run 'pr-pool config --show' to see the
+# actual resolved paths for THIS environment (LogDir varies with XDG_STATE_HOME /
+# PR_POOL_LOG_DIR). Override with [pool].quota_paused_path / cicd_down_path
+# (uncomment and set an absolute path), e.g.:
+# quota_paused_path = "/home/example/.local/state/pr-pool/gates/quota-paused"
+# cicd_down_path = "/home/example/.local/state/pr-pool/gates/cicd-down"
 
 `
 

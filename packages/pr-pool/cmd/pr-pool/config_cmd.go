@@ -60,6 +60,9 @@ func renderConfigShow(w io.Writer, cfg config.Config) {
 		}
 		_, _ = fmt.Fprintf(w, "  - %-14s emits=%v%s\n", s.Name, emits, stub)
 	}
+	_, _ = fmt.Fprintln(w, "gates (INV-LIFE-2):")
+	_, _ = fmt.Fprintf(w, "  quota-paused: %s\n", gateShowLine(cfg.QuotaPaused))
+	_, _ = fmt.Fprintf(w, "  cicd-down:    %s\n", gateShowLine(cfg.CICDDown))
 	_, _ = fmt.Fprintln(w, "dispatch (workers):")
 	_, _ = fmt.Fprintf(w, "  permission-mode: %s\n", cfg.PermissionMode)
 	_, _ = fmt.Fprintf(w, "  allowed-tools:   %s\n", cfg.AllowedTools)
@@ -69,6 +72,18 @@ func renderConfigShow(w io.Writer, cfg config.Config) {
 	_, _ = fmt.Fprintf(w, "  model:           %s\n", orDefault(cfg.Model))
 	_, _ = fmt.Fprintf(w, "  budget:          tokens=%s cost=%s time=%s\n",
 		limitStr(cfg.BudgetTokens), centsStr(cfg.BudgetCost), durStr(cfg.BudgetTime))
+}
+
+// gateShowLine renders one gate's `config --show` row: its path, and — read
+// straight off the file, never from a separately-tracked flag, since file
+// existence is the single source of truth (interfaces.md's "Operator
+// pause/resume") — whether it is set and, if so, since when ("paused since").
+func gateShowLine(path string) string {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return fmt.Sprintf("%s (not paused)", path)
+	}
+	return fmt.Sprintf("%s (paused since %s)", path, fi.ModTime().Format(time.RFC3339))
 }
 
 // limitStr renders a token/count budget: <=0 means unlimited.
