@@ -211,6 +211,15 @@ mechanisms follow:
   that already carries the socket and an **auth token** as arguments. The participant appends its own
   arguments and runs it; it never assembles the socket or the token itself, so no participant holds
   addressing or credential logic and neither can be got wrong on the participant's side.
+- **Protocol-level failure envelope.** A socket verb the core cannot fulfill at the protocol level —
+  an unsupported `schemaVersion`, or a request too malformed to compose that verb's own reply from —
+  gets back `{ "schemaVersion": "1", "error": … }` instead of that verb's own reply, never alongside
+  it; the sequence diagram below's `/ error` branch on the core's reply is exactly this. The
+  obligation to discriminate on it before validating a reply is behavior and is stated there
+  (`interfaces.md`'s `INTF-CLI`, "Protocol-level failure"); this entry records only the field names
+  and that the two shapes never overlap on the wire. The `error` value's own internal shape — a bare
+  string, or a structured object — is not decided here; it belongs to the schema artifact and its
+  conformance suite (`INV-INTF-2`).
 
 ```mermaid
 sequenceDiagram

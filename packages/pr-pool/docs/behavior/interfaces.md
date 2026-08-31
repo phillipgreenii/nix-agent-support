@@ -507,6 +507,18 @@ sequenceDiagram
   (`phillipgreenii-nix-agent-support · packages/pr-pool/docs/decisions · DEC-WIRE-2`). The one
   exception is **pause/resume** ("Operator pause/resume" above): they act on gate-file state directly
   and never attempt to locate a core at all, so this locate-or-fail rule does not apply to them.
+- **Protocol-level failure.** A **socket verb** — any message that reaches the core over its held
+  socket connection, an operator command or a manager callback alike — MAY fail at the **protocol**
+  level before the verb's own reply schema could even be composed: an unsupported `schemaVersion`, a
+  request too malformed to answer with that verb's own shape, or any other rejection short of
+  attempting the requested operation. The core reports that failure through a fixed **failure
+  envelope** — `{ schemaVersion, error }` — carried **instead of** the verb's own reply, never
+  alongside it: the envelope and every verb's own reply schema are **disjoint** shapes on the wire, so
+  a reply is always exactly one or the other, never both. A client **MUST discriminate on the presence
+  of `error` before attempting to validate the reply against the verb's own reply schema** — skip that
+  check and every one of these protocol failures reads as a malformed reply instead of the failure it
+  is. Recorded as a wire-level decision
+  (`phillipgreenii-nix-agent-support · packages/pr-pool/docs/decisions · DEC-WIRE-2`).
 - **Output.** Every operator command emits **human-readable text by default** and a
   **machine-readable form on request**, so an operator and a script read the same state without a
   second surface. A **usage** error is distinct from a **runtime** error: on the default CLI transport
