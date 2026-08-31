@@ -20,7 +20,7 @@ cap, waits for completion, then tears down every `pr-pool-*` tmux session. Bare
 | `run`                               | boot the core and run indefinitely, producing + dispatching on a fixed poll interval, until SIGINT/SIGTERM requests shutdown                                                                |
 | `run-until-idle`                   | boot the core, discover once, drain the queue to idle, then exit (also reachable as `drain`, kept as a deprecated alias)                                                                    |
 | `drain`                            | deprecated alias for `run-until-idle` (see above); no longer the default — bare `pr-pool` (no subcommand) now requires an explicit subcommand                                               |
-| `run-query [--json] <role>`        | run a role's discovery query and print matches (read-only; text, or one JSON object with `--json`)                                                                                          |
+| `run-query [--json] query:<name>` | smoke-test one named source's query once, read-only, and print the matches it would emit (text, or one JSON object with `--json`); the old `run-query <role>` form no longer runs anything — see `MIGRATION.md` |
 | `run-role [--json] <role> <bead>`  | dispatch one bead through a role, then tear down (smoke test; `--json` reports the outcome as one JSON object)                                                                              |
 | `config --print-defaults`          | print the built-in default `config.toml` (a copy-paste start)                                                                                                                                |
 | `config --show [--json]`           | print the resolved config path, role set, and worker dispatch scalars (permission-mode/allowed-tools/budget); text, or one JSON object with `--json`                                        |
@@ -33,7 +33,8 @@ cap, waits for completion, then tears down every `pr-pool-*` tmux session. Bare
 | `version`                          | print the version and exit                                                                                                                                                                  |
 | `help`                             | print help and exit                                                                                                                                                                         |
 
-`<role>` is the role's configured `name`.
+`<role>` is the role's configured `name`; `<name>` in `query:<name>` is a `[[query]]`'s configured
+`name`.
 
 ### `push-inject` — operator event injection
 
@@ -210,6 +211,9 @@ configured via env (use `config.toml`). See `internal/config` for the full set.
 - `PR_POOL_ACTIVITY_RING` — dispatch-outcome activity ring buffer capacity (`internal/activity.Ring`, Task 3.4); default 512
 - `PR_POOL_QUOTA_PAUSED` — `quota-paused` gate file path override (default `<PR_POOL_LOG_DIR>/gates/quota-paused`)
 - `PR_POOL_CICD_DOWN` — `cicd-down` gate file path override (default `<PR_POOL_LOG_DIR>/gates/cicd-down`)
+- `PR_POOL_TEST_MODE` — set to `1` by `run-role`/`run-query` for the duration of that one smoke
+  test, so a participant it dispatches (or a command-backed source it shells out to) knows a test
+  is in flight; advisory only. Not meant to be set by an operator directly.
 
 Precedence for every scalar above that a `[pool]` key can also set (including the two gate
 paths): `[pool]` wins over `PR_POOL_*` env, which wins over the built-in default — matching

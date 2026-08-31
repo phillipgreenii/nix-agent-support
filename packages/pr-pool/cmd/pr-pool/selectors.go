@@ -172,6 +172,38 @@ func selectorActive(name string, only, disable []string) bool {
 	return !slices.Contains(disable, name)
 }
 
+// checkSmokeReachable reports an error when name (a role or query.Source
+// name, per kind — selectorKindRole/selectorKindQuery) is excluded by sel's
+// active --only/--disable selection. This is the "respect --only/--disable"
+// half of Task 1.5c's smoke scoping: interfaces.md's "Run-scoped selectors"
+// states the restriction scopes "which participants that run activates and
+// which a smoke test may reach", so run-role/run-query MUST honor the same
+// exclusion run/run-until-idle already do, even though a smoke test names its
+// one target directly rather than through a --only/--disable flag of its own.
+// Reuses splitByKind (same as applySelectors) so a "role:x" selector never
+// leaks into a query-kind check or vice versa. Pure: sel is already resolved
+// (flags ∪ env — run-role/run-query define no --only/--disable flags of
+// their own, so callers pass resolveSelectors(nil, nil), the environment-only
+// view); callers translate a non-nil error into their own usage-error exit.
+func checkSmokeReachable(kind, name string, sel runSelectors) error {
+	onlyRoles, onlyQueries, err := splitByKind(sel.Only)
+	if err != nil {
+		return err
+	}
+	disableRoles, disableQueries, err := splitByKind(sel.Disable)
+	if err != nil {
+		return err
+	}
+	only, disable := onlyRoles, disableRoles
+	if kind == selectorKindQuery {
+		only, disable = onlyQueries, disableQueries
+	}
+	if selectorActive(name, only, disable) {
+		return nil
+	}
+	return fmt.Errorf("%s %q is excluded by the active selectors (PR_POOL_ONLY/PR_POOL_DISABLE)", kind, name)
+}
+
 // applySelectors returns cfg with its Roles/Queries restricted to the active
 // subset sel computes (STORY-OP-3 / DEC-CLI-1's combination rule), WITHOUT
 // mutating cfg's own Roles/Queries backing arrays — both are copied before

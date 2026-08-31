@@ -9,7 +9,7 @@ import (
 )
 
 // usageLine is the short synopsis printed to stderr on a usage error.
-const usageLine = "usage: pr-pool [--version | --help] [run [--only <selector>]... [--disable <selector>]... | run-until-idle [--only <selector>]... [--disable <selector>]... | run-query [--json] <role> | run-role [--json] <role> <bead> | config (--print-defaults | --show [--json]) | sessions | reconcile | push-inject [--json] [--socket <path>] [--token <tok>] <json> | pause [<gate>] | resume [<gate> | --all] | status [--json] [--socket <path>] [--token <tok>] | ingest-event [--socket <path>] [--token <tok>] | self-status [--socket <path>] [--token <tok>]]"
+const usageLine = "usage: pr-pool [--version | --help] [run [--only <selector>]... [--disable <selector>]... | run-until-idle [--only <selector>]... [--disable <selector>]... | run-query [--json] query:<name> | run-role [--json] <role> <bead> | config (--print-defaults | --show [--json]) | sessions | reconcile | push-inject [--json] [--socket <path>] [--token <tok>] <json> | pause [<gate>] | resume [<gate> | --all] | status [--json] [--socket <path>] [--token <tok>] | ingest-event [--socket <path>] [--token <tok>] | self-status [--socket <path>] [--token <tok>]]"
 
 // helpText is the full help printed to stdout for --help/help.
 const helpText = usageLine + `
@@ -26,10 +26,21 @@ Subcommands:
                           fixed poll interval, until SIGINT/SIGTERM requests shutdown
   run-until-idle          boot the core, discover once, drain the queue to idle, then exit
                           (also reachable as "drain", kept as a deprecated alias)
-  run-query [--json] <role>
-                          run a role's discovery query and print matches (read-only); --json emits
-                          one JSON object ({role, queries, total, matches}) instead of the
-                          tab-separated lines
+  run-query [--json] query:<name>
+                          smoke-test one named source's query once, read-only, and print the
+                          matches it would emit (sets PR_POOL_TEST_MODE=1, below); --json emits
+                          one JSON object ({query, total, matches}) instead of the tab-separated
+                          lines. The old "run-query <role>" form no longer runs anything: it
+                          prints a mapping diagnostic naming a source to try instead (see
+                          MIGRATION.md). Respects --only/--disable (below) even though it takes
+                          no --only/--disable flags of its own: a source excluded by
+                          PR_POOL_ONLY/PR_POOL_DISABLE stays unreachable by this command too.
+  run-role [--json] <role> <bead>
+                          dispatch one bead through a role, then tear down (smoke test); sets
+                          PR_POOL_TEST_MODE=1 (below); --json emits a small JSON report ({role,
+                          bead, accepted}) on success instead of nothing. Respects
+                          --only/--disable the same way run-query does: an excluded role stays
+                          unreachable.
   run/run-until-idle --only <selector> / --disable <selector>
                           run-scoped selectors (STORY-OP-3): restrict which configured
                           sources/handlers this ONE run activates, without editing
@@ -39,11 +50,14 @@ Subcommands:
                           participant from what's left. Env equivalents PR_POOL_ONLY /
                           PR_POOL_DISABLE (comma-separated) are UNIONED with the flags, not
                           overridden by them. A selector naming an unconfigured role/query
-                          is a usage error. See docs/decisions/cli.md's DEC-CLI-1.
-  run-role [--json] <role> <bead>
-                          dispatch one bead through a role, then tear down (smoke test); --json
-                          emits a small JSON report ({role, bead, accepted}) on success instead of
-                          nothing
+                          is a usage error. run-role/run-query also respect these (above),
+                          reading the environment form only (they take no --only/--disable
+                          flags of their own — each already names its ONE target directly).
+                          PR_POOL_ONLY/PR_POOL_DISABLE are PER-INVOCATION selectors and MUST NOT
+                          be exported persistently (e.g. in a shell profile): set that way, they
+                          silently narrow or exclude participants on every subsequent run and
+                          smoke test, not just the one invocation they were meant for. See
+                          docs/decisions/cli.md's DEC-CLI-1.
   config --print-defaults print the built-in default config.toml (copy-paste starting point)
   config --show [--json]  print the resolved config path, role set, and worker dispatch scalars
                           (permission-mode / allowed-tools / autonomous / budget); --json emits the
@@ -113,11 +127,19 @@ Pool-wide settings come from PR_POOL_* environment variables:
                            (default: the XDG state dir, e.g. ~/.local/state/pr-pool)
   PR_POOL_QUOTA_PAUSED     quota-paused gate file path override (default <PR_POOL_LOG_DIR>/gates/quota-paused)
   PR_POOL_CICD_DOWN        cicd-down gate file path override (default <PR_POOL_LOG_DIR>/gates/cicd-down)
-  PR_POOL_ONLY             run/run-until-idle only: comma-separated run-scoped allow-list,
-                           each entry role:<name> or query:<name> (DEC-CLI-1); unioned with
-                           any --only flags on the same invocation
-  PR_POOL_DISABLE          run/run-until-idle only: comma-separated run-scoped deny-list,
-                           same grammar as PR_POOL_ONLY; unioned with any --disable flags
+  PR_POOL_ONLY             comma-separated run-scoped allow-list, each entry role:<name> or
+                           query:<name> (DEC-CLI-1); unioned with any --only flags on
+                           run/run-until-idle; run-role/run-query respect it too (no flags of
+                           their own — PER-INVOCATION, see the warning above; do not export)
+  PR_POOL_DISABLE          comma-separated run-scoped deny-list, same grammar and the same
+                           run-role/run-query reach as PR_POOL_ONLY; unioned with any
+                           --disable flags on run/run-until-idle
+  PR_POOL_TEST_MODE        set to 1 by run-role/run-query for the duration of that one smoke
+                           test, so a participant it dispatches (or a command-backed source it
+                           shells out to) knows a test is in flight; advisory only — a
+                           participant MAY use it to alter its own side-effectful behavior, but
+                           the core neither requires nor inspects how, or whether, it responds.
+                           Not meant to be set by an operator directly.
 
 Precedence for every scalar above that a [pool] key can also set (including the two gate
 paths): [pool] wins over PR_POOL_* env, which wins over the built-in default — matching
@@ -145,7 +167,7 @@ const (
 	routeRun                           // boot the core as a long-running daemon (INV-LIFE-1)
 	routeRunUntilIdle                  // boot the core, discover once, drain to idle, exit (INV-LIFE-1; also "drain")
 	routeRunRole                       // dispatch one bead through a role (.role, .bead)
-	routeRunQuery                      // run a role's discovery query read-only (.role)
+	routeRunQuery                      // smoke one query source read-only (.query), or (Task 1.5c) the deprecated bare-role form (.role)
 	routeConfig                        // print/show config (.configMode)
 	routeSessions                      // list this pool's sessions from metadata (read-only)
 	routeReconcile                     // report stranded self-owned feedback cycles, then run the pg-pr ACL (mutates beads)
@@ -161,7 +183,8 @@ type routeResult struct {
 	kind       routeKind
 	rest       []string // drain subcommand args (routeDrain only)
 	msg        string   // diagnostic for routeUsageErr
-	role       string   // run-role / run-query role name
+	role       string   // run-role's role name; also run-query's DEPRECATED bare-role token (Task 1.5c — mutually exclusive with .query)
+	query      string   // run-query's "query:<name>" source name (Task 1.5c — mutually exclusive with .role)
 	bead       string   // run-role bead id
 	configMode string   // "print-defaults" | "show" (routeConfig only)
 	// gate / allGates are routePause/routeResume's TYPED fields (Task 1.2b): the
@@ -312,16 +335,25 @@ func parseRunRoleArgs(args []string) routeResult {
 	return routeResult{kind: routeRunRole, role: pos[0], bead: pos[1], json: asJSON}
 }
 
-// parseRunQueryArgs validates `run-query [--json] <role>`. Pure, same fail-fast
-// contract (extractJSONFlag pulls --json out first); the role name is validated
-// in the handler after config load.
+// parseRunQueryArgs validates `run-query [--json] (query:<name> | <role>)`.
+// Pure, same fail-fast contract (extractJSONFlag pulls --json out first); a
+// leading "query:" is stripped here (pure string parsing, no I/O) into
+// .query — the Task 1.5c canonical form, smoking one named source. A token
+// with no such prefix is the deprecated pre-1.5c bare-role form, carried as
+// .role: whether it names a real role (⇒ mapping diagnostic) or nothing at
+// all (⇒ usage error) needs the loaded config either way, so that decision
+// stays in the handler (runRunQueryLegacyRole), same as run-role's role-name
+// validation.
 func parseRunQueryArgs(args []string) routeResult {
 	asJSON, pos := extractJSONFlag(args)
 	if len(pos) < 1 || pos[0] == "" || strings.HasPrefix(pos[0], "-") {
-		return routeResult{kind: routeUsageErr, msg: "run-query: missing role (usage: run-query [--json] <role>)"}
+		return routeResult{kind: routeUsageErr, msg: "run-query: missing query (usage: run-query [--json] query:<name>)"}
 	}
 	if len(pos) > 1 {
 		return routeResult{kind: routeUsageErr, msg: "run-query: unexpected argument: " + pos[1]}
+	}
+	if name, ok := strings.CutPrefix(pos[0], "query:"); ok && name != "" {
+		return routeResult{kind: routeRunQuery, query: name, json: asJSON}
 	}
 	return routeResult{kind: routeRunQuery, role: pos[0], json: asJSON}
 }

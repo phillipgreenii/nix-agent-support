@@ -24,7 +24,7 @@ func main() {
 	case routeRunRole:
 		os.Exit(runRunRole(r.role, r.bead, r.json))
 	case routeRunQuery:
-		os.Exit(runRunQuery(r.role, r.json))
+		os.Exit(runRunQuery(r.role, r.query, r.json))
 	case routeConfig:
 		os.Exit(runConfig(r.configMode, r.json))
 	case routeSessions:

@@ -249,3 +249,38 @@ there is no time-based or startup expiry. Keep it that way: `<LogDir>` is also w
 `events.jsonl` and the discovery record live, and neither of those is swept either — introducing
 sweeping for gate files alone would make `<LogDir>`'s cleanup story inconsistent across the
 three, for no invariant that requires it.
+
+## Breaking: `run-query <role>` no longer runs anything (Task 1.5c)
+
+Before Task 1.5c, `run-query <role>` smoked **every source feeding that role's discovery** —
+resolving the role, finding its bound event types, running each source that emitted one of them,
+and printing the combined matches. `run-query` now takes a **source** directly:
+
+```
+pr-pool run-query [--json] query:<name>
+```
+
+`<name>` is a `[[query]]`'s configured `name`, and exactly **one** source is smoked — never a
+role's whole feeding set. This is a deliberate narrowing: `run-query`'s job was always to
+smoke-test a pull source's query (`docs/behavior/interfaces.md`'s "smoke-test one pull source's
+query"), and naming a role could never target a single source's identity when more than one fed
+it.
+
+**What this means for an existing script/alias.** `pr-pool run-query worker` (the old form) no
+longer runs the smoke test — it now exits non-zero and prints a mapping diagnostic instead:
+
+```
+'worker' is a role; run-query now names a source (try: query:<name>)
+```
+
+naming a real source that role used to be fed by, so the diagnostic is something you can
+literally copy and run. Update the invocation to `pr-pool run-query query:<name>`, naming the
+specific source you want to smoke (see `[[query]].name` in your `config.toml`, or
+`pr-pool config --show`).
+
+Both `run-role` and `run-query` now also set `PR_POOL_TEST_MODE=1` for the duration of the smoke
+test (advisory only, `docs/decisions/cli.md`'s `DEC-CLI-2`) and respect the same
+`PR_POOL_ONLY`/`PR_POOL_DISABLE` exclusions `run`/`run-until-idle` do: a role/source you have
+excluded stays unreachable by the matching smoke command too. If you rely on either environment
+variable, remember it is **per-invocation** — set it in your shell profile and it silently narrows
+or excludes participants on every subsequent run, not just the one command you meant it for.

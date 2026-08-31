@@ -445,8 +445,10 @@ func runAndEnqueue(ctx context.Context, env query.Env, s query.Source, q *eventq
 }
 
 // QueriesForRole returns the sources whose emitted event types intersect the
-// role's Binds — the producers that feed this role. Used by the run-query smoke
-// harness (which resolves a role name, then runs the queries wired to it).
+// role's Binds — the producers that feed this role. Since Task 1.5c, run-query
+// no longer smokes a role's whole feeding set (it smokes one named source
+// directly); this now backs only the deprecated `run-query <role>` form's
+// mapping diagnostic, naming one REAL source that role used to be fed by.
 func QueriesForRole(sources query.SourceSet, role roles.Role) query.SourceSet {
 	bindSet := make(map[string]bool, len(role.Binds))
 	for _, b := range role.Binds {

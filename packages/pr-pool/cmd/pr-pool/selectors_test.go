@@ -132,6 +132,37 @@ func TestResolveSelectors_noEnvNoFlags(t *testing.T) {
 	}
 }
 
+// TestCheckSmokeReachable covers Task 1.5c's "respect --only/--disable" smoke
+// scoping: a role/query excluded by the active selectors is reported
+// unreachable; everything else stays reachable, same combination rule
+// applySelectors already implements (selectorActive).
+func TestCheckSmokeReachable(t *testing.T) {
+	disabled := runSelectors{Disable: []string{"role:worker", "query:q2"}}
+	if err := checkSmokeReachable(selectorKindRole, "worker", disabled); err == nil {
+		t.Error("worker is disabled; want a non-nil error")
+	} else if !strings.Contains(err.Error(), "worker") {
+		t.Errorf("error should name worker; got %v", err)
+	}
+	if err := checkSmokeReachable(selectorKindRole, "feedback", disabled); err != nil {
+		t.Errorf("feedback is not disabled; want no error, got %v", err)
+	}
+	if err := checkSmokeReachable(selectorKindQuery, "q2", disabled); err == nil {
+		t.Error("q2 is disabled; want a non-nil error")
+	}
+
+	onlyRole := runSelectors{Only: []string{"role:worker"}}
+	if err := checkSmokeReachable(selectorKindRole, "worker", onlyRole); err != nil {
+		t.Errorf("worker is named by --only; want no error, got %v", err)
+	}
+	if err := checkSmokeReachable(selectorKindRole, "feedback", onlyRole); err == nil {
+		t.Error("feedback is excluded by --only naming only worker; want a non-nil error")
+	}
+
+	if err := checkSmokeReachable(selectorKindRole, "worker", runSelectors{}); err != nil {
+		t.Errorf("no active selectors; want no error, got %v", err)
+	}
+}
+
 // applySelectors' combination rule (DEC-CLI-1): an empty --only leaves every
 // configured participant a candidate.
 func TestApplySelectors_emptyOnlyMeansEveryoneIsACandidate(t *testing.T) {
