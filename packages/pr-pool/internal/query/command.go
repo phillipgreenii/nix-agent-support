@@ -5,8 +5,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os/exec"
+	"time"
 
 	"github.com/phillipgreenii/pr-pool/internal/event"
 	"github.com/phillipgreenii/pr-pool/internal/item"
@@ -37,11 +39,25 @@ func (q CommandQuery) BackingCommand() string {
 	return q.Argv[0]
 }
 
+// rawItem is the per-record shape a command source's stdout decodes into.
+// type keeps its pre-existing meaning (item classification, carried through to
+// item.Item.Type) untouched. at/expiresAt are OPTIONAL RFC3339 timestamp
+// strings, camelCase to match the event wire's own at/expiresAt (Task 1.4);
+// when present they are carried onto the produced event's Attributes (the
+// general "extra, type-specific fields" seam event.Event already declares) —
+// the source-side message boundary that would route them into
+// eventqueue.Event stays Phase 5, out of this task's scope. emit is an
+// OPTIONAL event-type selector: when present it MUST be one of the query's
+// declared Emits() (multi-emit); absent, the record falls back to
+// firstEmit(q) — today's behavior, unchanged.
 type rawItem struct {
-	ID       string         `json:"id"`
-	Type     string         `json:"type"`
-	Title    string         `json:"title"`
-	Metadata map[string]any `json:"metadata"`
+	ID        string         `json:"id"`
+	Type      string         `json:"type"`
+	Title     string         `json:"title"`
+	Metadata  map[string]any `json:"metadata"`
+	At        string         `json:"at,omitempty"`
+	ExpiresAt string         `json:"expiresAt,omitempty"`
+	Emit      string         `json:"emit,omitempty"`
 }
 
 func (q CommandQuery) Run(ctx context.Context, env Env) ([]event.Event, error) {
@@ -80,14 +96,48 @@ func (q CommandQuery) Run(ctx context.Context, env Env) ([]event.Event, error) {
 			return nil, fmt.Errorf("command query: read output: %w", err)
 		}
 	}
-	items := make([]item.Item, 0, len(raws))
+	def := firstEmit(q)
+	events := make([]event.Event, 0, len(raws))
+	var errs []error
 	for _, r := range raws {
 		if r.ID == "" {
 			return nil, fmt.Errorf("command query: record missing required \"id\"")
 		}
-		items = append(items, item.Item{ID: r.ID, Type: r.Type, Title: r.Title, Metadata: r.Metadata})
+		emitType := def
+		if r.Emit != "" {
+			if !declaresEmit(q, r.Emit) {
+				errs = append(errs, fmt.Errorf("command query: record %q: emit %q is not among the declared emits %v", r.ID, r.Emit, q.Emits()))
+				continue
+			}
+			emitType = r.Emit
+		}
+		evt := event.NewItemEvent(emitType, "", item.Item{ID: r.ID, Type: r.Type, Title: r.Title, Metadata: r.Metadata})
+		if r.At != "" || r.ExpiresAt != "" {
+			attrs := make(map[string]any, 2)
+			if r.At != "" {
+				at, perr := time.Parse(time.RFC3339, r.At)
+				if perr != nil {
+					errs = append(errs, fmt.Errorf("command query: record %q: parse \"at\": %w", r.ID, perr))
+					continue
+				}
+				attrs["at"] = at
+			}
+			if r.ExpiresAt != "" {
+				expiresAt, perr := time.Parse(time.RFC3339, r.ExpiresAt)
+				if perr != nil {
+					errs = append(errs, fmt.Errorf("command query: record %q: parse \"expiresAt\": %w", r.ID, perr))
+					continue
+				}
+				attrs["expiresAt"] = expiresAt
+			}
+			evt.Attributes = attrs
+		}
+		events = append(events, evt)
 	}
-	return eventsFromItems(items, firstEmit(q), ""), nil
+	if len(errs) > 0 {
+		return events, errors.Join(errs...)
+	}
+	return events, nil
 }
 
 // OSCommander is the default Commander: shells out via os/exec.

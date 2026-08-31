@@ -156,6 +156,19 @@ func firstEmit(q Query) string {
 	return e[0]
 }
 
+// declaresEmit reports whether emit is among q's declared Emits() — the
+// per-record `emit` selector validation a command source's rawItem uses for
+// multi-emit (Task 1.4): an emit value MUST be one of the query's declared
+// types, never an arbitrary string.
+func declaresEmit(q Query, emit string) bool {
+	for _, e := range q.Emits() {
+		if e == emit {
+			return true
+		}
+	}
+	return false
+}
+
 // IsStub reports whether a query type is a not-yet-implemented stub. No query
 // types are stubs currently; the seam is retained so the drain pre-flight can
 // keep warning if a future type lands as a decode/validate-only stub.
