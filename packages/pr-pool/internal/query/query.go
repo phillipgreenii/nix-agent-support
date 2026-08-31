@@ -136,16 +136,6 @@ func eventsFromIssues(in []beads.Issue, eventType, source string) []event.Event 
 	return out
 }
 
-// eventsFromItems wraps already-built items into events of the given type
-// (command / issue queries build items from their own source).
-func eventsFromItems(in []item.Item, eventType, source string) []event.Event {
-	out := make([]event.Event, 0, len(in))
-	for _, it := range in {
-		out = append(out, event.NewItemEvent(eventType, source, it))
-	}
-	return out
-}
-
 // firstEmit returns the query's primary emit type, or "" if it declares none.
 // The built-in single-emit queries wrap every item under this type.
 func firstEmit(q Query) string {
