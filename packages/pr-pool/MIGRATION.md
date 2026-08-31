@@ -284,3 +284,49 @@ test (advisory only, `docs/decisions/cli.md`'s `DEC-CLI-2`) and respect the same
 excluded stays unreachable by the matching smoke command too. If you rely on either environment
 variable, remember it is **per-invocation** — set it in your shell profile and it silently narrows
 or excludes participants on every subsequent run, not just the one command you meant it for.
+
+## Behavior: a partial produce during `run-until-idle` is a generic failure (Task 1.1)
+
+`run-until-idle` (and its deprecated `drain` alias) always **completes the drain** first — every
+enqueued event, including one pushed in over the socket unrelated to any failing pull source, is
+dispatched or expired regardless of a partial produce (`INV-FAIL-3`/`INV-EVT-1`; source isolation
+never drops work, per the Task 0.6 ADR resolving `INV-PREC-1`). Only **after** that drain
+completes, if one or more sources failed during discovery, does the run exit `1` (generic
+failure, `exitGeneric`) instead of `0`. This is **deliberately not a branchable, specific exit
+code** (the repo's coarse exit-code convention, `docs/adr/0042-coarse-exit-code-convention-busy-is-not-2.md`)
+— a caller MUST NOT infer anything from it beyond "something did not fully succeed"; check the
+run's own logs (`source failed; other sources still drained`) for which source and why.
+
+**What this means for a deployment's own exit-code handling:** a `pr-pool-drain`/`pr-pool-daemon`
+systemd unit (or a hand-rolled cron wrapper) that treated a non-zero `run-until-idle` exit as
+"nothing ran" is wrong — the drain already ran to completion; a `1` here means "ran, but at least
+one source had an error," never "did not run."
+
+## Deployment: HM drain unit moved to `run-until-idle`; new `daemon` submodule + darwin LaunchAgent (Task 1.7)
+
+`home/programs/pr-pool/default.nix`'s `periodicDrain`-driven systemd unit (`pr-pool-drain`) now
+runs `pr-pool run-until-idle` instead of the deprecated `drain` alias — no behavior change (see
+`MIGRATION.md`'s CLI history above: `run-until-idle` and `drain` have been the same code path
+since `pg2-f3mcb.2`), just the unit's own `ExecStart` no longer citing a deprecated name.
+
+A new `daemon` submodule (`enable`, `repoRoot`, `beadsPrefix`, `configText`,
+`gates.{quotaPausedPath,cicdDownPath}`) drives a second, long-running systemd unit
+(`pr-pool-daemon`) running `pr-pool run` — the daemon core, producing and dispatching on a fixed
+poll interval until SIGINT/SIGTERM, as opposed to `periodicDrain`'s timer-triggered one-shot pass.
+**`periodicDrain.enable` and `daemon.enable` are mutually exclusive** and asserted so: both are
+independent pr-pool cores, and running both against the same `PR_POOL_LOG_DIR` would race on
+`events.jsonl`, the discovery record, and the push-ingest socket. Pick one per deployment.
+
+On darwin, the HM module's `systemd.user.services` is a no-op (darwin has no systemd), so
+`darwin/modules/pr-pool/default.nix` mirrors any HM user's `daemon.enable` into a LaunchAgent via
+`phillipgreenii.system.launchdServices.userAgents.pr-pool-daemon` (the same helper/pattern as
+`pa-monitor`'s daemon LaunchAgent). `periodicDrain` has no darwin-side equivalent yet — a
+darwin deployment that wants the timer-driven form still needs its own launchd timer wiring, or
+should use `daemon` instead.
+
+The `daemon` submodule's `gates.quotaPausedPath`/`gates.cicdDownPath` set
+`PR_POOL_QUOTA_PAUSED`/`PR_POOL_CICD_DOWN` for that unit only; leaving them `null` (the default)
+falls back to `Config.Load()`'s own default gate paths under `<PR_POOL_LOG_DIR>/gates/` — see
+"Hazard: gate file paths are now configured by default (Task 1.2b, `INV-LIFE-2`)" above, which
+applies equally to a daemon deployment: a stray file already sitting at that default path now
+gates a daemon that previously could not be gated, and gate files are never swept.

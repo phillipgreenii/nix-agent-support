@@ -1424,6 +1424,235 @@
                 esac
               '';
 
+
+              test-pr-pool-module =
+                let
+                  hmAssertionSubmodule = lib.types.submodule {
+                    options = {
+                      assertion = lib.mkOption { type = lib.types.bool; };
+                      message = lib.mkOption { type = lib.types.str; };
+                    };
+                  };
+
+                  # HM-side eval: stub exactly the options
+                  # home/programs/pr-pool/default.nix reads/writes —
+                  # home.packages, systemd.user.{services,timers}, and the
+                  # home-manager `assertions` list (this bare `lib.evalModules`
+                  # call never imports home-manager's own base modules, which
+                  # is where `assertions` normally comes from).
+                  evalHM =
+                    prPool:
+                    (lib.evalModules {
+                      specialArgs = { inherit pkgs lib; };
+                      modules = [
+                        ./home/programs/pr-pool/default.nix
+                        (
+                          { lib, ... }:
+                          {
+                            options = {
+                              home.packages = lib.mkOption {
+                                type = lib.types.listOf lib.types.package;
+                                default = [ ];
+                              };
+                              systemd.user.services = lib.mkOption {
+                                type = lib.types.attrsOf lib.types.anything;
+                                default = { };
+                              };
+                              systemd.user.timers = lib.mkOption {
+                                type = lib.types.attrsOf lib.types.anything;
+                                default = { };
+                              };
+                              assertions = lib.mkOption {
+                                type = lib.types.listOf hmAssertionSubmodule;
+                                default = [ ];
+                              };
+                            };
+                          }
+                        )
+                        { phillipgreenii.programs.pr-pool = prPool; }
+                      ];
+                    }).config;
+
+                  # darwin-side eval: stub the options
+                  # darwin/modules/pr-pool/default.nix reads/writes —
+                  # phillipgreenii.observability.enable, system.primaryUser,
+                  # phillipgreenii.system.launchdServices.userAgents (the real
+                  # option; see the header comment above), and a MINIMAL
+                  # home-manager.users stub carrying only the daemon fields
+                  # the darwin module actually reads — not the real HM
+                  # module.
+                  userAgentSubmodule = lib.types.submodule {
+                    options = {
+                      label = lib.mkOption {
+                        type = lib.types.str;
+                        default = "";
+                      };
+                      script = lib.mkOption {
+                        type = lib.types.lines;
+                        default = "";
+                      };
+                      runAtLoad = lib.mkOption {
+                        type = lib.types.bool;
+                        default = true;
+                      };
+                      keepAlive = lib.mkOption {
+                        type = lib.types.either lib.types.bool (lib.types.attrsOf lib.types.bool);
+                        default = true;
+                      };
+                      serviceConfig = lib.mkOption {
+                        type = lib.types.attrs;
+                        default = { };
+                      };
+                    };
+                  };
+
+                  evalDarwin =
+                    daemonEnable:
+                    (lib.evalModules {
+                      specialArgs = { inherit pkgs lib; };
+                      modules = [
+                        ./darwin/modules/pr-pool/default.nix
+                        (
+                          { lib, ... }:
+                          {
+                            options = {
+                              phillipgreenii = {
+                                observability = {
+                                  enable = lib.mkOption {
+                                    type = lib.types.bool;
+                                    default = false;
+                                  };
+                                  logSources = lib.mkOption {
+                                    type = lib.types.attrsOf lib.types.anything;
+                                    default = { };
+                                  };
+                                };
+                                system.launchdServices.userAgents = lib.mkOption {
+                                  type = lib.types.attrsOf userAgentSubmodule;
+                                  default = { };
+                                };
+                              };
+                              system.primaryUser = lib.mkOption {
+                                type = lib.types.nullOr lib.types.str;
+                                default = "tester";
+                              };
+                              home-manager.users = lib.mkOption {
+                                type = lib.types.attrsOf (
+                                  lib.types.submodule {
+                                    options.phillipgreenii.programs.pr-pool.daemon = {
+                                      enable = lib.mkOption {
+                                        type = lib.types.bool;
+                                        default = false;
+                                      };
+                                      repoRoot = lib.mkOption {
+                                        type = lib.types.str;
+                                        default = "/repo";
+                                      };
+                                      beadsPrefix = lib.mkOption {
+                                        type = lib.types.nullOr lib.types.str;
+                                        default = null;
+                                      };
+                                      configText = lib.mkOption {
+                                        type = lib.types.lines;
+                                        default = "";
+                                      };
+                                      gates = {
+                                        quotaPausedPath = lib.mkOption {
+                                          type = lib.types.nullOr lib.types.str;
+                                          default = null;
+                                        };
+                                        cicdDownPath = lib.mkOption {
+                                          type = lib.types.nullOr lib.types.str;
+                                          default = null;
+                                        };
+                                      };
+                                    };
+                                  }
+                                );
+                                default = { };
+                              };
+                            };
+                          }
+                        )
+                        { home-manager.users.tester.phillipgreenii.programs.pr-pool.daemon.enable = daemonEnable; }
+                      ];
+                    }).config;
+
+                  baseConfigText = "[[role]]\nname = \"worker\"\n";
+
+                  # Baseline: periodicDrain only, no gate overrides.
+                  drainOnly = evalHM {
+                    enable = true;
+                    periodicDrain = {
+                      enable = true;
+                      repoRoot = "/repo";
+                      configText = baseConfigText;
+                    };
+                    daemon = {
+                      repoRoot = "/repo";
+                      configText = baseConfigText;
+                    };
+                  };
+                  drainService = drainOnly.systemd.user.services.pr-pool-drain.Service;
+
+                  # daemon only, gate paths overridden — proves the daemon
+                  # ExecStart, and that the gate env vars actually surface.
+                  daemonOnly = evalHM {
+                    enable = true;
+                    periodicDrain = {
+                      repoRoot = "/repo";
+                      configText = baseConfigText;
+                    };
+                    daemon = {
+                      enable = true;
+                      repoRoot = "/repo";
+                      configText = baseConfigText;
+                      gates = {
+                        quotaPausedPath = "/state/gates/quota-paused";
+                        cicdDownPath = "/state/gates/cicd-down";
+                      };
+                    };
+                  };
+                  daemonService = daemonOnly.systemd.user.services.pr-pool-daemon.Service;
+
+                  # Both enabled at once — the mutual-exclusion assertion
+                  # must fire (its `assertion` field is false).
+                  bothEnabled = evalHM {
+                    enable = true;
+                    periodicDrain = {
+                      enable = true;
+                      repoRoot = "/repo";
+                      configText = baseConfigText;
+                    };
+                    daemon = {
+                      enable = true;
+                      repoRoot = "/repo";
+                      configText = baseConfigText;
+                    };
+                  };
+                  firedAssertion = lib.findFirst (a: a.assertion == false) null bothEnabled.assertions;
+
+                  darwinWithDaemon = evalDarwin true;
+                  darwinWithoutDaemon = evalDarwin false;
+                in
+                # Drain unit: run-until-idle, never the bare "drain" alias.
+                assert lib.hasInfix "run-until-idle" drainService.ExecStart;
+                assert !lib.hasInfix "drain" drainService.ExecStart;
+                # Daemon unit: the bare "run" subcommand.
+                assert lib.hasSuffix " run" daemonService.ExecStart;
+                # Gate env vars present on the daemon unit when configured.
+                assert lib.elem "PR_POOL_QUOTA_PAUSED=/state/gates/quota-paused" daemonService.Environment;
+                assert lib.elem "PR_POOL_CICD_DOWN=/state/gates/cicd-down" daemonService.Environment;
+                # Mutual-exclusion assertion fires when both are enabled.
+                assert firedAssertion != null;
+                # darwin LaunchAgent mirrors the daemon (pa-monitor pattern),
+                # only when some HM user enabled it.
+                assert darwinWithDaemon.phillipgreenii.system.launchdServices.userAgents ? pr-pool-daemon;
+                assert lib.hasInfix "pr-pool run"
+                  darwinWithDaemon.phillipgreenii.system.launchdServices.userAgents.pr-pool-daemon.script;
+                assert darwinWithoutDaemon.phillipgreenii.system.launchdServices.userAgents == { };
+                pkgs.runCommand "test-pr-pool-module-ok" { } "touch $out";
+
               # INTRA-evaluator mechanical coverage (bead pg2-hvlyj.14, plan
               # item 5.2): drive the behavior-docs-intra-conformance skill's
               # self-checks.sh over inline-status / floor-leakage FAIL & PASS

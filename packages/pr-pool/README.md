@@ -245,3 +245,30 @@ Collection into Loki is pull-based: the darwin module
 is a no-op on machines without the observability stack). No OTel code lives in
 the binary and no `path` override is needed because the file already sits at the
 default glob.
+
+## Deployment (`home/programs/pr-pool`, `darwin/modules/pr-pool`)
+
+`phillipgreenii.programs.pr-pool` (the home-manager module) exposes two **mutually exclusive**
+turnkey deployment modes on top of the `package`/`enable` options — enabling both is a module
+assertion failure, since they are independent pr-pool cores that would race on the same
+`PR_POOL_LOG_DIR` (`events.jsonl`, the discovery record, the push-ingest socket):
+
+| Submodule       | systemd unit(s)                         | Runs                                                                      | Shape                                                                                     |
+| --------------- | --------------------------------------- | ------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `periodicDrain` | `pr-pool-drain` service + timer         | `pr-pool run-until-idle` on a fixed `interval` (default `5m`), then exits | `enable`, `interval`, `repoRoot`, `beadsPrefix`, `configText`                             |
+| `daemon`        | `pr-pool-daemon` service (long-running) | `pr-pool run`, until SIGINT/SIGTERM                                       | `enable`, `repoRoot`, `beadsPrefix`, `configText`, `gates.{quotaPausedPath,cicdDownPath}` |
+
+Both submodules render `configText` into the Nix store and point `PR_POOL_CONFIG` at it — fully
+declarative, no machine-local `.pr-pool/config.toml` bootstrap step. `daemon`'s
+`gates.quotaPausedPath`/`gates.cicdDownPath` set `PR_POOL_QUOTA_PAUSED`/`PR_POOL_CICD_DOWN` for
+that unit only; left `null` (the default), the gate paths fall back to `Config.Load()`'s own
+default (`<PR_POOL_LOG_DIR>/gates/{quota-paused,cicd-down}`) — see `MIGRATION.md`'s gates-default-on
+hazard note.
+
+`systemd.user.services`/`systemd.user.timers` are a **darwin no-op** (darwin has no systemd), so
+`darwin/modules/pr-pool/default.nix` mirrors any home-manager user's `daemon.enable` into a
+LaunchAgent via `phillipgreenii.system.launchdServices.userAgents.pr-pool-daemon` (the same
+helper/pattern as `pa-monitor`'s daemon LaunchAgent — see `phillipgreenii-nix-personal` ADR 0049,
+amended by ADR 0051). `periodicDrain` has no darwin-side LaunchAgent
+equivalent today — a darwin deployment wanting the timer-driven form needs its own launchd timer
+wiring, or should use `daemon` instead.
