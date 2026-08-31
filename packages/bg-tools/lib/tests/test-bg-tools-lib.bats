@@ -1,6 +1,9 @@
 #!/usr/bin/env bats
 # bats file_tags=type:unit
 
+# `run !` (used for the rejection asserts) needs bats >= 1.5.0.
+bats_require_minimum_version 1.5.0
+
 if [[ -n ${TEST_SUPPORT:-} ]]; then
   source "$TEST_SUPPORT/test_helper.bash"
 else
@@ -8,6 +11,7 @@ else
 fi
 
 load_lib() {
+  # shellcheck disable=SC1090 # composed lib path is runtime-resolved (nix check injects LIB_PATH; locally it is the source dir)
   source "$(resolve_lib)"
 }
 
@@ -31,11 +35,11 @@ load_lib() {
   bg_validate_name "flake-check"
   bg_validate_name "build.2"
   bg_validate_name "a_b-c.d"
-  ! bg_validate_name ""
-  ! bg_validate_name ".hidden"
-  ! bg_validate_name "has space"
-  ! bg_validate_name "../escape"
-  ! bg_validate_name "a/b"
+  run ! bg_validate_name ""
+  run ! bg_validate_name ".hidden"
+  run ! bg_validate_name "has space"
+  run ! bg_validate_name "../escape"
+  run ! bg_validate_name "a/b"
 }
 
 @test "path helpers compose state dir and name" {
