@@ -66,6 +66,12 @@ var alwaysSafe = map[string]bool{
 	// break/continue/return/exit (pg2-lpcpn): shell control-flow keywords with
 	// zero filesystem/network side effects of their own, same class as read.
 	"break": true, "continue": true, "return": true, "exit": true,
+	// bgcheck: the bgrun background-job status probe — a read-only wrapper
+	// over `ps` + `tail` designed for blanket approval, the same class as
+	// ps/pgrep above. Unlike bgrun (its launcher sibling, which unwraps at the
+	// cmdparse layer instead of living here — see commandRunnerPrefixes), it
+	// never runs an inner command, so an unconditional Approve is safe.
+	"bgcheck": true,
 }
 
 // browsingCmds list/stat filesystem entries but don't read file contents.

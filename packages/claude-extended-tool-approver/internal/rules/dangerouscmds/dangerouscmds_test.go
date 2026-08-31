@@ -54,6 +54,14 @@ func TestDangerousCommands(t *testing.T) {
 		// (and nohup/stdbuf) so dd is seen and Rejected.
 		{"nice wraps dd", "nice dd if=/dev/zero of=/dev/sda", "Bash", hookio.Reject},
 		{"timeout wraps dd", "timeout 5 dd if=/dev/zero of=/dev/sda", "Bash", hookio.Reject},
+		// bgrun is the same shape: without unwrapping it past its own literal
+		// `--` boundary, `bgrun x -- <anything>` would be a permission-
+		// laundering hole (the leaf's Executable would read "bgrun", not the
+		// wrapped command). A dangerous payload must still Reject through it,
+		// and a safe payload (asserted below, safecmds.go's jurisdiction) must
+		// still resolve safe rather than inheriting bgrun's own denial.
+		{"bgrun wraps dd", "bgrun x -- dd if=/dev/zero of=/dev/sda", "Bash", hookio.Reject},
+		{"bgrun wraps safe command", "bgrun x -- ls -la", "Bash", hookio.NoOpinion},
 		// Not on the denylist / handled elsewhere.
 		{"curl not here (curl rule)", "curl https://x", "Bash", hookio.NoOpinion},
 		{"ssh not here (ssh rule)", "ssh host ls", "Bash", hookio.NoOpinion},

@@ -185,6 +185,54 @@ func TestSafecmds_Cd_Approve(t *testing.T) {
 	}
 }
 
+// TestSafecmds_Bgcheck_Approve pins bgcheck's membership in the alwaysSafe set
+// (safecmds.go): it is a status probe (ps + tail only) designed for blanket
+// approval, the same class as ps/pgrep. Every args shape below Approves
+// because alwaysSafe short-circuits before any argument inspection.
+func TestSafecmds_Bgcheck_Approve(t *testing.T) {
+	pe := patheval.New("/home/user/project")
+	r := New(pe)
+	commands := []string{
+		"bgcheck",
+		"bgcheck -n 20 NAME",
+		"bgcheck --dir /tmp/x NAME",
+	}
+	for _, cmd := range commands {
+		input := &hookio.HookInput{
+			ToolName:  "Bash",
+			CWD:       "/home/user/project",
+			ToolInput: mustJSON(map[string]string{"command": cmd}),
+		}
+		got := hookio.Verdict(r.Evaluate(input))
+		if got.Decision != hookio.Approve {
+			t.Errorf("cmd %q: got %s (%s), want approve (bgcheck is alwaysSafe)", cmd, got.Decision, got.Reason)
+		}
+	}
+}
+
+// TestSafecmds_Bgrun_NotSafe confirms bgrun — the launcher bgcheck probes,
+// which unwraps at the cmdparse layer instead (commandRunnerPrefixes) — is
+// deliberately absent from every map this rule consults. If it were added
+// here, safe-commands would approve `bgrun x -- <payload>` UNCONDITIONALLY
+// before cmdparse's own unwrap of the payload could ever be reached by a
+// downstream rule, which is exactly the permission-laundering hole this file
+// must not open. A bare `bgrun` (no payload, so cmdparse cannot unwrap it —
+// see TestUnwrapCommand_CommandRunnerPrefixes's conservative cases) must fall
+// through to the unknown-command abstain, not Approve.
+func TestSafecmds_Bgrun_NotSafe(t *testing.T) {
+	pe := patheval.New("/home/user/project")
+	r := New(pe)
+	input := &hookio.HookInput{
+		ToolName:  "Bash",
+		CWD:       "/home/user/project",
+		ToolInput: mustJSON(map[string]string{"command": "bgrun name"}),
+	}
+	got := hookio.Verdict(r.Evaluate(input))
+	if got.Decision == hookio.Approve {
+		t.Errorf("cmd %q: got approve, want NOT approve (bgrun must not be in the safe set)", "bgrun name")
+	}
+}
+
 // TestSafecmds_DataLeavesAreNeverJudgedAsCommands is the pg2-0h53n regression
 // guard: cmdparse's emitDataSpan produces DATA leaves (PipelineID -1, no
 // Executable) for a `for` word list, a `case` subject word, and an

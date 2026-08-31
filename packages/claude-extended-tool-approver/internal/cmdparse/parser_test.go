@@ -98,10 +98,10 @@ func TestUnwrapCommand_EnvCleared(t *testing.T) {
 }
 
 func TestUnwrapCommand_CommandRunnerPrefixes(t *testing.T) {
-	// nice/timeout/nohup/stdbuf are command-runner wrappers: they must unwrap to
-	// the inner command so argv[0]-keyed rules (dangerouscmds, buildtools, …) see
-	// the real command (tc-otuid). basename is asserted so a full-path inner
-	// command still matches.
+	// nice/timeout/nohup/stdbuf/bgrun are command-runner wrappers: they must
+	// unwrap to the inner command so argv[0]-keyed rules (dangerouscmds,
+	// buildtools, …) see the real command (tc-otuid). basename is asserted so a
+	// full-path inner command still matches.
 	tests := []struct {
 		in       string
 		wantExec string
@@ -119,6 +119,14 @@ func TestUnwrapCommand_CommandRunnerPrefixes(t *testing.T) {
 		{"nice env dd if=/dev/zero of=x", "dd"},          // nested: nice → env → dd
 		{"timeout 5 nice dd x", "dd"},                    // nested: timeout → nice → dd
 		{"nice ls", "ls"},                                // benign inner command
+		// bgrun: `bgrun [-h|--help] [-v|--version] [-d|--dir DIR] NAME -- COMMAND
+		// [ARGS...]`. The payload begins strictly after the first literal `--`;
+		// everything before it (options, their values, NAME) is bgrun's own
+		// syntax. Without this unwrap `bgrun x -- <anything>` would launder any
+		// inner command past every argv[0]-keyed rule.
+		{"bgrun build -- dd if=/dev/zero of=x", "dd"},
+		{"bgrun -d /tmp/x build -- rm -rf /", "rm"},
+		{"bgrun x -- nohup dd if=/dev/zero of=y", "dd"}, // nested: bgrun → nohup → dd
 	}
 	for _, tt := range tests {
 		got := Parse(tt.in)
@@ -141,6 +149,10 @@ func TestUnwrapCommand_CommandRunnerPrefixes(t *testing.T) {
 		{"nice", "nice"},                         // bare wrapper, no command
 		{"timeout 5", "timeout"},                 // duration but no command → stays timeout, not "5"
 		{"timeout notaduration dd x", "timeout"}, // first bare token isn't a duration → do not unwrap
+		{"bgrun", "bgrun"},                       // bare wrapper, no command
+		{"bgrun name", "bgrun"},                  // NAME only, no "--" → do not unwrap
+		{"bgrun name true", "bgrun"},             // no "--" at all → do not unwrap, even though "true" looks like a command
+		{"bgrun x --", "bgrun"},                  // "--" present but empty payload → do not unwrap
 	}
 	for _, tt := range conservative {
 		got := Parse(tt.in)

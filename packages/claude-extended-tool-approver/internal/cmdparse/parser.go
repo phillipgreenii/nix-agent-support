@@ -1644,6 +1644,17 @@ type commandRunner struct {
 	// hasDuration marks a wrapper (only `timeout`) whose first BARE operand is a
 	// DURATION that precedes the command, not the command itself.
 	hasDuration bool
+	// dashDashOnly marks a wrapper (only `bgrun`) whose payload begins STRICTLY
+	// after the first literal `--` token in Args. `--` is the only boundary the
+	// bgrun CLI contract fixes: everything before it — options, their values,
+	// and the NAME positional — is bgrun's OWN syntax, sharing no grammar with
+	// nice/timeout/stdbuf's flags that the generic option-walk below could
+	// reuse. In particular NAME is a bare, non-`-`-prefixed token, so that walk
+	// would stop there and misidentify it as the inner command. If Args carries
+	// no `--`, or nothing follows the first one, the inner command cannot be
+	// identified at all; guessing would be the unsafe direction, so ok is false
+	// and the leaf is left as-is (the safe abstain default).
+	dashDashOnly bool
 }
 
 // commandRunnerPrefixes are command-runner wrappers that execute an INNER command
@@ -1673,6 +1684,14 @@ var commandRunnerPrefixes = map[string]commandRunner{
 		valueOpts:   map[string]bool{"-s": true, "--signal": true, "-k": true, "--kill-after": true},
 		hasDuration: true,
 	},
+	// bgrun: `bgrun [-h|--help] [-v|--version] [-d|--dir DIR] NAME -- COMMAND
+	// [ARGS...]`. Its own flags/value and the NAME positional share no grammar
+	// with the wrappers above, so it does not get a valueOpts/hasDuration
+	// grammar — the payload boundary is the literal `--` alone (dashDashOnly).
+	// Without this unwrap, `bgrun x -- <anything>` would launder ANY inner
+	// command past every argv[0]-keyed rule (dangerouscmds included): the leaf's
+	// Executable would read "bgrun", not the wrapped command.
+	"bgrun": {dashDashOnly: true},
 }
 
 // timeoutDurationPattern matches a GNU timeout DURATION operand: an integer or
@@ -1690,6 +1709,8 @@ var timeoutDurationPattern = regexp.MustCompile(`^[0-9]+(\.[0-9]+)?[smhd]?$`)
 //     skipped, and the SECOND bare token is the command; but ONLY when the first
 //     bare token actually looks like a duration (timeoutDurationPattern). If it
 //     does not, the command is left un-unwrapped (ok=false).
+//   - for bgrun (dashDashOnly), this generic walk never runs at all — see its
+//     own dedicated branch below for why `--` is the only trustworthy boundary.
 //
 // CONSERVATISM (mirrors unwrapExecPrefix's ok=false path): whenever an inner
 // command cannot be confidently identified — no bare command token, the required
@@ -1699,6 +1720,26 @@ var timeoutDurationPattern = regexp.MustCompile(`^[0-9]+(\.[0-9]+)?[smhd]?$`)
 // SAFE; mis-identifying a benign token as the command is the dangerous direction
 // and never happens here.
 func unwrapCommandRunner(cr commandRunner, args []string) (inner string, innerArgs []string, ok bool) {
+	if cr.dashDashOnly {
+		// The generic option-walk below stops at the first BARE (non-`-`-
+		// prefixed) token, which for bgrun is NAME, not the command — bgrun's
+		// grammar gives that walk nothing trustworthy to stop on. The bgrun CLI
+		// contract itself fixes the payload's start as strictly after the
+		// first literal `--`, and the payload is argv-form (never re-parsed
+		// through a shell), so that token is the only boundary trusted here.
+		// No `--`, or nothing after it, means the inner command cannot be
+		// confidently identified — the same conservatism as the plain-wrapper
+		// path below — so ok is false and the caller leaves the leaf as-is.
+		for i, a := range args {
+			if a == "--" {
+				if i+1 >= len(args) {
+					return "", nil, false
+				}
+				return args[i+1], args[i+2:], true
+			}
+		}
+		return "", nil, false
+	}
 	i := 0
 	for i < len(args) {
 		a := args[i]
@@ -1817,11 +1858,12 @@ func unwrapCommand(pc ParsedCommand) ParsedCommand {
 		// leave as-is; it is a read-only environment query handled by safe-commands.
 		return pc
 	}
-	// Command-runner wrappers (nice/timeout/nohup/stdbuf) run an inner command
-	// after their own options. Recurse like execPrefixes so nested cases —
-	// `nice env dd`, `timeout 5 nice dd` — unwrap all the way to the real command
-	// (tc-otuid). On failure to identify an inner command, leave the leaf as-is
-	// (the safe abstain/defer default).
+	// Command-runner wrappers (nice/timeout/nohup/stdbuf/bgrun) run an inner
+	// command after their own options. Recurse like execPrefixes so nested
+	// cases — `nice env dd`, `timeout 5 nice dd`, `bgrun x -- nohup dd` —
+	// unwrap all the way to the real command (tc-otuid). On failure to
+	// identify an inner command, leave the leaf as-is (the safe abstain/defer
+	// default).
 	if cr, isRunner := commandRunnerPrefixes[base]; isRunner {
 		if inner, innerArgs, ok := unwrapCommandRunner(cr, pc.Args); ok {
 			next := pc
