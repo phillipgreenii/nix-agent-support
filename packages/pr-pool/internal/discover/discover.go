@@ -194,8 +194,32 @@ func newProduceReport() ProduceReport {
 	}
 }
 
+// Cadence is the per-source next-fire substrate Task 1.3 threads into produce:
+// a PeriodTrigger source is skipped (not fired) on a pass where it is not yet
+// due.
+//
+//   - LastTick is fed FORWARD from a PREVIOUS pass's own ProduceReport.LastTick
+//     — production wiring is orchestrator.Orchestrator.ProduceTick, which
+//     persists it across ticks (an Orchestrator outlives one Produce call; a
+//     bare Produce call does not). A source name ABSENT from LastTick has never
+//     fired under this cadence and is due immediately — this is what preserves
+//     Produce's original always-fire-every-pass behavior for a source's very
+//     first pass, and for Produce itself (whose zero Cadence leaves LastTick
+//     nil, so EVERY period source is due on EVERY call — no gating at all).
+//   - PollInterval is the pool-wide fallback period for a PeriodTrigger whose
+//     own Every is the zero value. In practice this only matters for an
+//     unconfigured built-in Go query (query.Meta{}'s default PeriodTrigger{}
+//     leaves Every at zero); a config-declared query's Every is already
+//     resolved to cfg.PollInterval by the config registry's buildTrigger, so a
+//     per-source Every > 0 always wins over this fallback when both are set.
+type Cadence struct {
+	LastTick     map[string]time.Time
+	PollInterval time.Duration
+}
+
 // Produce fires the query set against the queue for one tick: it runs every
-// PeriodTrigger query (reproducing today's once-per-pass pull), then settles any
+// PeriodTrigger query (reproducing today's once-per-pass pull — Produce itself
+// applies no cadence gating; see ProduceWithCadence for that), then settles any
 // ThresholdTrigger queries whose upstream now has "enough events" queued.
 // ManualTrigger queries never fire here (only via the smoke harness). Each
 // emitted event is stamped with its source query name (provenance), checked
@@ -212,7 +236,21 @@ func Produce(ctx context.Context, env query.Env, sources query.SourceSet, q *eve
 	for _, opt := range opts {
 		opt(&po)
 	}
-	return produce(ctx, env, sources, q, declared, realSleep, po.obs)
+	return produce(ctx, env, sources, q, declared, Cadence{}, realSleep, time.Now, po.obs)
+}
+
+// ProduceWithCadence is Produce, additionally honoring cad — the per-source
+// next-fire substrate (Task 1.3; see Cadence's doc comment). Production wiring
+// is orchestrator.Orchestrator.ProduceTick, which persists cad.LastTick across
+// ticks and supplies cad.PollInterval from cfg.PollInterval. opts configures
+// optional capabilities the same way Produce's do (e.g.
+// WithSourceFailureObserver).
+func ProduceWithCadence(ctx context.Context, env query.Env, sources query.SourceSet, q *eventqueue.Queue, declared core.Bindings, cad Cadence, opts ...ProduceOption) (ProduceReport, error) {
+	var po produceOptions
+	for _, opt := range opts {
+		opt(&po)
+	}
+	return produce(ctx, env, sources, q, declared, cad, realSleep, time.Now, po.obs)
 }
 
 // sleepFunc waits for d, honoring ctx cancellation — the seam produce's
@@ -235,13 +273,43 @@ func realSleep(ctx context.Context, d time.Duration) error {
 	}
 }
 
-// produce is Produce's body, parameterized on the sleep seam so a test can
-// exercise the pull-source failure backoff's retry loop without waiting real
-// time. Produce itself is the production entry point (realSleep).
-func produce(ctx context.Context, env query.Env, sources query.SourceSet, q *eventqueue.Queue, declared core.Bindings, sleep sleepFunc, obs SourceFailureObserver) (ProduceReport, error) {
+// cadenceDue reports whether a period-triggered source named name is due to
+// fire at nowT, honoring cad's per-source next-fire substrate (Task 1.3): a
+// source cad.LastTick has no entry for has never fired under this cadence and
+// is due immediately — so Produce's zero Cadence (an empty/nil LastTick)
+// leaves every period source due on every pass, its pre-Task-1.3 behavior
+// unchanged. t is the source's own Trigger(): when it resolves to a
+// PeriodTrigger with a non-zero Every, that PER-SOURCE period wins over
+// cad.PollInterval; a nil Trigger (query.Meta's own documented default) or a
+// PeriodTrigger with Every == 0 falls back to cad.PollInterval, and a Cadence
+// with no PollInterval either (period <= 0, no cadence configured at all)
+// keeps firing every pass rather than gating on nothing.
+func cadenceDue(nowT time.Time, name string, t query.Trigger, cad Cadence) bool {
+	last, everFired := cad.LastTick[name]
+	if !everFired {
+		return true
+	}
+	period := cad.PollInterval
+	if pt, ok := t.(query.PeriodTrigger); ok && pt.Every > 0 {
+		period = pt.Every
+	}
+	if period <= 0 {
+		return true
+	}
+	return !nowT.Before(last.Add(period))
+}
+
+// produce is Produce's/ProduceWithCadence's shared body, parameterized on the
+// sleep seam (so a test can exercise the pull-source failure backoff's retry
+// loop without waiting real time) and the clock seam now (so a cadence test
+// can drive successive passes without waiting real time either). Produce and
+// ProduceWithCadence are the production entry points (realSleep, time.Now).
+func produce(ctx context.Context, env query.Env, sources query.SourceSet, q *eventqueue.Queue, declared core.Bindings, cad Cadence, sleep sleepFunc, now func() time.Time, obs SourceFailureObserver) (ProduceReport, error) {
 	rpt := newProduceReport()
 	fired := make([]bool, len(sources))
-	// Period-driven (and any non-threshold, non-manual) queries fire every pass.
+	nowT := now()
+	// Period-driven (and any non-threshold, non-manual) queries fire every
+	// pass EXCEPT one cad reports not yet due (Task 1.3's per-source cadence).
 	for i, s := range sources {
 		t := s.Query.Trigger()
 		if query.IsManual(t) {
@@ -250,7 +318,10 @@ func produce(ctx context.Context, env query.Env, sources query.SourceSet, q *eve
 		if _, isThreshold := query.Threshold(t); isThreshold {
 			continue
 		}
-		if err := runAndEnqueue(ctx, env, s, q, declared, sleep, obs, &rpt); err != nil {
+		if !cadenceDue(nowT, s.Name, t, cad) {
+			continue
+		}
+		if err := runAndEnqueue(ctx, env, s, q, declared, sleep, obs, &rpt, now); err != nil {
 			return rpt, err
 		}
 		fired[i] = true
@@ -276,7 +347,7 @@ func produce(ctx context.Context, env query.Env, sources query.SourceSet, q *eve
 				depth += depthByType[b]
 			}
 			if depth >= tt.Count {
-				if err := runAndEnqueue(ctx, env, s, q, declared, sleep, obs, &rpt); err != nil {
+				if err := runAndEnqueue(ctx, env, s, q, declared, sleep, obs, &rpt, now); err != nil {
 					return rpt, err
 				}
 				fired[i] = true
@@ -324,8 +395,8 @@ func produce(ctx context.Context, env query.Env, sources query.SourceSet, q *eve
 // REJECTED — counted in rpt.Rejected[s.Name], never enqueued — rather than
 // entering the durable queue only to wait, unconsumed, until it expires. A
 // rejection is per-event and does not abort the source's other events.
-func runAndEnqueue(ctx context.Context, env query.Env, s query.Source, q *eventqueue.Queue, declared core.Bindings, sleep sleepFunc, obs SourceFailureObserver, rpt *ProduceReport) error {
-	rpt.LastTick[s.Name] = time.Now()
+func runAndEnqueue(ctx context.Context, env query.Env, s query.Source, q *eventqueue.Queue, declared core.Bindings, sleep sleepFunc, obs SourceFailureObserver, rpt *ProduceReport, now func() time.Time) error {
+	rpt.LastTick[s.Name] = now()
 	fb := s.Query.FailureBackoff()
 	var evts []event.Event
 	var err error

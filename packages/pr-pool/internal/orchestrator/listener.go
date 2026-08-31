@@ -3,10 +3,17 @@ package orchestrator
 import (
 	"context"
 
+	"github.com/phillipgreenii/pr-pool/internal/backoff"
 	"github.com/phillipgreenii/pr-pool/internal/discover"
 	"github.com/phillipgreenii/pr-pool/internal/eventqueue"
 	"github.com/phillipgreenii/pr-pool/internal/roles"
 )
+
+// roleListener implements eventqueue.BackoffListener (INV-FAIL-2, Task 1.3):
+// a compile-time check that a future signature drift on either interface
+// fails the build here rather than silently degrading a role back to the
+// queue's own WithRetryBackoff default.
+var _ eventqueue.BackoffListener = (*roleListener)(nil)
 
 // roleListener bridges the durable event queue to executor.For(role).Dispatch
 // (INTF-HANDLER, core side) — the queue->executor Listener bridge (bead
@@ -37,18 +44,47 @@ type roleListener struct {
 	// a dispatch responsive to the run's own cancellation (e.g. SIGINT), since
 	// the executor and its watchdog/budget polling already select on it.
 	ctx context.Context
+	// poolDefault is the pool-wide handler retry cadence (cfg.RetryBackoff,
+	// INV-FAIL-2) this listener falls back to when its own role carries the
+	// zero backoff.Policy — Task 1.3. Config decode already merges
+	// [role.retry] onto the pool default for a CONFIG-decoded role (so
+	// role.RetryBackoff is never zero there even absent an override), which
+	// means in practice this fallback matters only for a BUILT-IN role
+	// (roles.BuiltinRoleSet never sets RetryBackoff at all). Captured once at
+	// construction (NewListener) rather than read from o.Cfg live, so a
+	// listener's cadence stays stable for its whole life even if o.Cfg were
+	// ever mutated after boot.
+	poolDefault backoff.Policy
 }
 
 // NewListener returns the eventqueue.Listener for role, run under ctx — the
 // queue->executor bridge a real `run` / `run-until-idle` command path
 // registers on the queue (not just a test double). ctx is retained for the
 // life of the listener; cancel it to make every future Offer observe the
-// cancellation through the executor's own ctx-aware waits.
+// cancellation through the executor's own ctx-aware waits. It is injected
+// with o.Cfg.RetryBackoff (the pool-wide default, RetryBackoff's fallback —
+// Task 1.3) at construction, the same way bootCore threads cfg.RetryBackoff
+// into eventqueue.WithRetryBackoff.
 func (o *Orchestrator) NewListener(ctx context.Context, role roles.Role) eventqueue.Listener {
-	return &roleListener{o: o, role: role, ctx: ctx}
+	return &roleListener{o: o, role: role, ctx: ctx, poolDefault: o.Cfg.RetryBackoff}
 }
 
 func (l *roleListener) ID() string { return l.role.Name }
+
+// RetryBackoff implements eventqueue.BackoffListener (INV-FAIL-2, Task 1.3):
+// a role carrying its OWN non-zero backoff.Policy (a [role.retry] override,
+// already merged onto the pool default at config decode) uses that; a role
+// carrying the zero Policy — every BUILT-IN role, which decodes no retry
+// table at all — uses the pool-wide default (poolDefault) instead of falling
+// through to backoff.Default() via Policy.Duration's own sanitized(). Without
+// this, a built-in role under a customized [pool.retry] would silently keep
+// the package's hardcoded default cadence rather than the operator's own.
+func (l *roleListener) RetryBackoff() backoff.Policy {
+	if l.role.RetryBackoff != (backoff.Policy{}) {
+		return l.role.RetryBackoff
+	}
+	return l.poolDefault
+}
 
 // Matches implements the dispatch flowchart's binding check (INV-DISP-1): the
 // event's type MUST match one of the role's declared Binds.

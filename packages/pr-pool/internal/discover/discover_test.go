@@ -180,7 +180,7 @@ func TestProduce_queryErrorIsolatedImmediatelyWithoutOptIn(t *testing.T) {
 			calls:     &calls,
 		}},
 	}
-	rpt, err := produce(context.Background(), query.Env{}, sources, newQueue(t), core.NewBindings("x"), recordingSleep(&waits), nil)
+	rpt, err := produce(context.Background(), query.Env{}, sources, newQueue(t), core.NewBindings("x"), Cadence{}, recordingSleep(&waits), time.Now, nil)
 	if err != nil {
 		t.Fatalf("a source failure must not abort the pass; got produce error %v", err)
 	}
@@ -220,7 +220,7 @@ func TestProduce_pullSourceRetriesThenSucceeds(t *testing.T) {
 	q.Register(wk)
 	obs := &recordingSourceFailureObserver{}
 
-	rpt, err := produce(context.Background(), query.Env{}, sources, q, core.NewBindings("work.ready"), recordingSleep(&waits), obs)
+	rpt, err := produce(context.Background(), query.Env{}, sources, q, core.NewBindings("work.ready"), Cadence{}, recordingSleep(&waits), time.Now, obs)
 	if err != nil {
 		t.Fatalf("failure must NOT propagate once a retry succeeds: %v", err)
 	}
@@ -267,7 +267,7 @@ func TestProduce_pullSourceIsolatedAfterRetriesExhausted(t *testing.T) {
 			calls:     &calls,
 		}},
 	}
-	rpt, err := produce(context.Background(), query.Env{}, sources, newQueue(t), core.NewBindings("x"), recordingSleep(&waits), nil)
+	rpt, err := produce(context.Background(), query.Env{}, sources, newQueue(t), core.NewBindings("x"), Cadence{}, recordingSleep(&waits), time.Now, nil)
 	if err != nil {
 		t.Fatalf("a source failure must not abort the pass; got produce error %v", err)
 	}
@@ -486,6 +486,118 @@ func TestProduce_manualNeverFiresOnTick(t *testing.T) {
 	}
 	if depth := q.DepthByType()["m"]; depth != 0 {
 		t.Fatalf("manual trigger must not fire on a tick, got depth %d", depth)
+	}
+}
+
+// TestProduceWithCadence_periodSourceSkippedUntilOwnEveryElapsed is Task 1.3's
+// third required RED test: a source with its own PeriodTrigger.Every == 30s
+// must NOT fire on a 10s poll tick until 30s have actually elapsed since it
+// last fired — cad.LastTick (fed forward from each call's own returned
+// ProduceReport.LastTick, exactly as orchestrator.Orchestrator.ProduceTick
+// does across real ticks) is the cadence substrate; the clock is injected so
+// the test drives four simulated 10s ticks without waiting real time.
+func TestProduceWithCadence_periodSourceSkippedUntilOwnEveryElapsed(t *testing.T) {
+	clockT := time.Unix(1_700_000_000, 0)
+	clock := func() time.Time { return clockT }
+
+	var calls int
+	sources := query.SourceSet{
+		{Name: "slow-source", Query: flakyQuery{
+			Meta:      query.Meta{EmitTypes: []string{"slow.ready"}, Trig: query.PeriodTrigger{Every: 30 * time.Second}},
+			failTimes: 0,
+			events:    []event.Event{itemEvt("slow.ready", "sl-1")},
+			calls:     &calls,
+		}},
+	}
+	declared := core.NewBindings("slow.ready")
+	q := newQueue(t)
+	cad := Cadence{PollInterval: 10 * time.Second}
+
+	// Tick @ t0: this cadence has never fired this source before -> due
+	// immediately (preserves the pre-Task-1.3 always-fire-first-pass behavior).
+	rpt, err := produce(context.Background(), query.Env{}, sources, q, declared, cad, realSleep, clock, nil)
+	if err != nil {
+		t.Fatalf("produce (t0): %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("t0: want 1 query run, got %d", calls)
+	}
+	cad.LastTick = rpt.LastTick // fed forward, matching ProduceTick's own threading
+
+	// Tick @ t0+10s (a 10s poll tick): the source's own 30s period is NOT yet
+	// due -> its query must not run at all.
+	clockT = clockT.Add(10 * time.Second)
+	if _, err := produce(context.Background(), query.Env{}, sources, q, declared, cad, realSleep, clock, nil); err != nil {
+		t.Fatalf("produce (t0+10s): %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("t0+10s: want still 1 query run (not due), got %d", calls)
+	}
+
+	// Tick @ t0+20s: still not due (20s < 30s).
+	clockT = clockT.Add(10 * time.Second)
+	if _, err := produce(context.Background(), query.Env{}, sources, q, declared, cad, realSleep, clock, nil); err != nil {
+		t.Fatalf("produce (t0+20s): %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("t0+20s: want still 1 query run (not due), got %d", calls)
+	}
+
+	// Tick @ t0+30s: now due (30s elapsed since the t0 fire) -> runs again.
+	clockT = clockT.Add(10 * time.Second)
+	if _, err := produce(context.Background(), query.Env{}, sources, q, declared, cad, realSleep, clock, nil); err != nil {
+		t.Fatalf("produce (t0+30s): %v", err)
+	}
+	if calls != 2 {
+		t.Fatalf("t0+30s: want 2 query runs (due), got %d", calls)
+	}
+}
+
+// TestProduceWithCadence_zeroEveryFallsBackToPollInterval proves the OTHER
+// half of Task 1.3's Objective — a source whose own PeriodTrigger.Every is
+// the zero value (query.Meta{}'s own documented default, the built-in Go
+// query set's shape when unconfigured) is gated on cad.PollInterval instead,
+// rather than firing every pass unconditionally.
+func TestProduceWithCadence_zeroEveryFallsBackToPollInterval(t *testing.T) {
+	clockT := time.Unix(1_700_000_000, 0)
+	clock := func() time.Time { return clockT }
+
+	var calls int
+	sources := query.SourceSet{
+		{Name: "default-source", Query: flakyQuery{
+			Meta:      query.Meta{EmitTypes: []string{"default.ready"}}, // Trig unset -> PeriodTrigger{Every: 0}
+			failTimes: 0,
+			events:    []event.Event{itemEvt("default.ready", "d1")},
+			calls:     &calls,
+		}},
+	}
+	declared := core.NewBindings("default.ready")
+	q := newQueue(t)
+	cad := Cadence{PollInterval: 20 * time.Second}
+
+	rpt, err := produce(context.Background(), query.Env{}, sources, q, declared, cad, realSleep, clock, nil)
+	if err != nil {
+		t.Fatalf("produce (t0): %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("t0: want 1 query run, got %d", calls)
+	}
+	cad.LastTick = rpt.LastTick
+
+	clockT = clockT.Add(10 * time.Second)
+	if _, err := produce(context.Background(), query.Env{}, sources, q, declared, cad, realSleep, clock, nil); err != nil {
+		t.Fatalf("produce (t0+10s): %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("t0+10s: want still 1 query run (PollInterval=20s not yet elapsed), got %d", calls)
+	}
+
+	clockT = clockT.Add(10 * time.Second)
+	if _, err := produce(context.Background(), query.Env{}, sources, q, declared, cad, realSleep, clock, nil); err != nil {
+		t.Fatalf("produce (t0+20s): %v", err)
+	}
+	if calls != 2 {
+		t.Fatalf("t0+20s: want 2 query runs (PollInterval elapsed), got %d", calls)
 	}
 }
 

@@ -78,6 +78,15 @@ type Orchestrator struct {
 	// comment — every produced event is then rejected, so a caller that drives
 	// ProduceTick outside bootCore (a test) MUST set this explicitly.
 	Bindings core.Bindings
+	// lastTick is the per-source next-fire substrate ProduceTick threads into
+	// discover.ProduceWithCadence (Task 1.3, discover.Cadence.LastTick): an
+	// Orchestrator OUTLIVES a single Produce call across `run`'s whole ticker
+	// loop, so it — not discover.Produce itself, which is stateless per call —
+	// is the natural place to persist each source's last-fired time between
+	// ticks. Starts nil (every source due on the very first tick, matching
+	// discover.Produce's own pre-Task-1.3 behavior) and only ever grows via
+	// ProduceTick's own merge of each pass's returned ProduceReport.LastTick.
+	lastTick map[string]time.Time
 }
 
 // attemptStamp returns a fresh per-attempt timestamp token. A unique stamp per
@@ -129,8 +138,27 @@ func (o *Orchestrator) queryEnv() query.Env {
 // pool's run/run-until-idle loops decide what a partial produce means for
 // their own exit semantics. Only a real failure (ctx cancellation, a durable-
 // queue Enqueue failure) still returns as this method's own error.
+//
+// It drives discover.ProduceWithCadence rather than the plain discover.Produce
+// (Task 1.3): o.lastTick is this Orchestrator's own per-source next-fire
+// history, carried across every tick of `run`'s ticker loop (a bare
+// discover.Produce call is stateless per call and has nowhere to keep this),
+// and o.Cfg.PollInterval is the pool-wide fallback period for a source whose
+// own PeriodTrigger.Every is zero. Every source this pass actually fires
+// (discover.ProduceReport.LastTick) is merged FORWARD into o.lastTick so the
+// NEXT tick's cadence decision sees it — a source cad gated OFF this pass
+// keeps its prior lastTick entry untouched.
 func (o *Orchestrator) ProduceTick(ctx context.Context, q *eventqueue.Queue) (discover.ProduceReport, error) {
-	return discover.Produce(ctx, o.queryEnv(), o.Cfg.Queries, q, o.Bindings, discover.WithSourceFailureObserver(o.SourceFailureObserver))
+	rpt, err := discover.ProduceWithCadence(ctx, o.queryEnv(), o.Cfg.Queries, q, o.Bindings,
+		discover.Cadence{LastTick: o.lastTick, PollInterval: o.Cfg.PollInterval},
+		discover.WithSourceFailureObserver(o.SourceFailureObserver))
+	for name, t := range rpt.LastTick {
+		if o.lastTick == nil {
+			o.lastTick = make(map[string]time.Time, len(rpt.LastTick))
+		}
+		o.lastTick[name] = t
+	}
+	return rpt, err
 }
 
 // RunOne dispatches a single self-contained EVENT through one role and then
