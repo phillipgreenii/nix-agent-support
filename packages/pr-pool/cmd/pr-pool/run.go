@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -486,6 +487,142 @@ func resolvedConfigFor(cfg config.Config, runMode string) core.ResolvedConfig {
 	return rc
 }
 
+// gateNotice returns the operator-facing stderr notice for the currently
+// active gate (INV-LIFE-2's "Gate identity"): which of the two named gates is
+// set (quota-paused, OP's own; cicd-down, an automation actor's — labeled as
+// such because that actor MAY re-assert it on its own initiative, e.g. every
+// failed health check, unlike a human operator's own gate), that gate file's
+// mtime (when it was set), and the remedy to clear it. Returns "" when
+// neither gate file is present — mirrors Orchestrator.gated()'s OR-effective
+// check and its QuotaPaused-then-CICDDown precedence when, unusually, both
+// are set at once (an ordering choice this packet is free to make: the design
+// only requires the report name ONE active gate, not enumerate every set
+// one).
+func gateNotice(cfg config.Config) string {
+	type gate struct {
+		name, path, owner, remedy string
+	}
+	candidates := []gate{
+		{"quota-paused", cfg.QuotaPaused, "operator", "remove the PR_POOL_QUOTA_PAUSED file to resume"},
+		{"cicd-down", cfg.CICDDown, "automation", "the automation actor clears the PR_POOL_CICD_DOWN file once CI/CD is healthy again; it may re-assert it on the next failed health check"},
+	}
+	for _, g := range candidates {
+		if g.path == "" {
+			continue
+		}
+		fi, err := os.Stat(g.path)
+		if err != nil {
+			continue
+		}
+		return fmt.Sprintf("pr-pool: gated by %s (%s-owned; set %s at %s) — %s",
+			g.name, g.owner, fi.ModTime().Format(time.RFC3339), g.path, g.remedy)
+	}
+	return ""
+}
+
+// runOneTick executes one iteration of `run`'s drive loop body (INV-LIFE-2):
+// gated ⇒ suspend production and new dispatch but still let expiry advance
+// (INV-EVT-4's retry-bound clock does not pause with production) — printing
+// the operator notice to stderr exactly on the gate-state TRANSITION (wasGated
+// false → true), which includes "once at startup while gated" since the
+// caller's very first call passes wasGated=false regardless of history;
+// ungated ⇒ ProduceTick + Dispatch + Expire, unchanged. The per-tick
+// slog.Info the gated branch used to emit every tick is demoted to Debug here
+// (the stderr notice is the transition-worthy signal now). Returns the
+// gated-ness of THIS tick, for the caller to pass back in as wasGated on the
+// next call.
+//
+// svc.ObserveGateFromTick runs every pass, gated or not (Task 3.5 Files: the
+// drive loop's own periodic read of gate-file state, so a status read always
+// has a fresh-as-of-this-tick gate view even while dispatch itself is
+// paused), and svc.PublishTick fires only on the successful non-gated produce
+// path, unchanged from before this function existed.
+func runOneTick(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrator, svc *core.Service, q *eventqueue.Queue, wasGated bool, stderr io.Writer) bool {
+	svc.ObserveGateFromTick(time.Now(), currentGateFiles(cfg))
+	if o.Gated() {
+		if !wasGated {
+			if notice := gateNotice(cfg); notice != "" {
+				fmt.Fprintln(stderr, notice)
+			}
+		}
+		slog.Debug("gated; pausing without dispatch")
+		q.Expire()
+		return true
+	}
+	if rpt, err := o.ProduceTick(ctx, q); err != nil {
+		slog.Error("producer tick failed", "err", err)
+	} else {
+		// Source isolation (INV-FAIL-3, INV-EVT-1): a partial produce (one or
+		// more SourceErrors) suspends only THAT source's own production —
+		// Dispatch/Expire still run over the queue for every other source's
+		// and every pushed event's already-queued work.
+		for name, serr := range rpt.SourceErrors {
+			slog.Warn("producer tick: source failed; other sources still produced", "source", name, "err", serr)
+		}
+		q.Dispatch()
+		q.Expire()
+		now := time.Now()
+		svc.PublishTick(core.TickSnapshot{
+			Sources:    sourceReportsFor(cfg.Queries),
+			Config:     resolvedConfigFor(cfg, core.RunModeLongRunning),
+			RunMode:    core.RunModeLongRunning,
+			Version:    version,
+			LastTickAt: now,
+			SnapshotAt: now,
+		})
+	}
+	return false
+}
+
+// runUntilIdleGated realizes `run-until-idle`'s gated drain-and-exit slice of
+// INV-LIFE-2: the core still boots and stays reachable to push participants
+// (INV-LIFE-1 — "in both run modes"), so a concurrent `ingest-event` push
+// during this window still succeeds and is durably enqueued, but it never
+// calls ProduceTick or Dispatch (a gate suspends production and new
+// dispatch) — the reachability window is bounded to ONE idleDrainTick pass
+// rather than looping (the ungated path's RunUntilIdle would otherwise spin
+// forever: a suspended dispatch can never satisfy Idle()). Expiry still runs
+// once (INV-EVT-4's clock does not pause with production) and the final
+// metrics snapshot is still flushed by the caller on every exit path. It MUST
+// NOT report the queue as drained — it never drained anything.
+func runUntilIdleGated(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrator) int {
+	if notice := gateNotice(cfg); notice != "" {
+		fmt.Fprintln(os.Stderr, notice)
+	}
+	svc, q, mp, storeClose, err := bootCore(ctx, cfg, o)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "run-until-idle:", err)
+		return exitGeneric
+	}
+	defer func() { _ = storeClose() }()
+	accepted := make(chan error, 1)
+	go func() { accepted <- svc.Accept(ctx) }()
+
+	defer o.TeardownAll(context.Background())
+	defer func() {
+		_ = svc.Close()
+		if err := <-accepted; err != nil {
+			slog.Warn("core accept loop exited with an error", "err", err)
+		}
+	}()
+	// metrics.Flush on every exit path (Objective: "the daemon deliberately
+	// has no Flush" — this is drain-and-exit only), matching the ungated
+	// path's own deferred flush below.
+	defer func() {
+		if err := metrics.Flush(context.Background(), mp); err != nil {
+			slog.Warn("run-until-idle: metrics flush failed", "err", err)
+		}
+	}()
+
+	q.Expire()
+	select {
+	case <-ctx.Done():
+	case <-time.After(idleDrainTick):
+	}
+	slog.Info("run-until-idle: gated; skipped drain (no dispatch), expiry advanced")
+	return exitOK
+}
+
 // runRunUntilIdle implements `pr-pool run-until-idle` (and the deprecated
 // `drain` alias): boot the core, fire ONE producer tick (matching the single
 // discovery pass a `drain` invocation used to run), drain the durable queue
@@ -508,8 +645,10 @@ func runRunUntilIdle(only, disable []string) int {
 	defer pr.cleanup()
 
 	if pr.o.Gated() {
-		slog.Info("gated; pausing without dispatch")
-		return exitOK // NOTE: gated exit boots no core and tears nothing down (nothing was created)
+		// INV-LIFE-2's gated drain-and-exit slice: still boots the core (stays
+		// reachable, answers ingest-event) but never drains — see
+		// runUntilIdleGated's doc comment.
+		return runUntilIdleGated(ctx, pr.cfg, pr.o)
 	}
 
 	svc, q, mp, storeClose, err := bootCore(ctx, pr.cfg, pr.o)
@@ -526,6 +665,17 @@ func runRunUntilIdle(only, disable []string) int {
 		_ = svc.Close()
 		if err := <-accepted; err != nil {
 			slog.Warn("core accept loop exited with an error", "err", err)
+		}
+	}()
+	// Force a final metrics snapshot before exit, on EVERY exit path below
+	// (a defer, not a single call before the happy-path return): without
+	// this, a short run that starts and finishes between two periodic
+	// collections of a REAL backend would report nothing (the no-op default
+	// has nothing to flush regardless), and a ProduceTick/RunUntilIdle
+	// failure used to skip it entirely.
+	defer func() {
+		if err := metrics.Flush(context.Background(), mp); err != nil {
+			slog.Warn("run-until-idle: metrics flush failed", "err", err)
 		}
 	}()
 
@@ -560,12 +710,6 @@ func runRunUntilIdle(only, disable []string) int {
 			return exitGeneric
 		case <-time.After(idleDrainTick):
 		}
-	}
-	// Force a final metrics snapshot before exit: without this, a short run that
-	// starts and finishes between two periodic collections of a REAL backend
-	// would report nothing (the no-op default has nothing to flush regardless).
-	if err := metrics.Flush(ctx, mp); err != nil {
-		slog.Warn("run-until-idle: metrics flush failed", "err", err)
 	}
 	// Source isolation (INV-FAIL-3, INV-EVT-1; ADR per Task 0.6 — INV-PREC-1
 	// resolved as never-drop-work): the drain above already completed — every
@@ -628,38 +772,9 @@ func runRun(only, disable []string) int {
 	}
 	ticker := time.NewTicker(tick)
 	defer ticker.Stop()
+	wasGated := false
 	for {
-		// ObserveGateFromTick is this drive loop's own periodic read of
-		// gate-file state (Task 3.5 Files: gates_cmd.go's file-direct
-		// pause/resume never touches a running core, so this is the other
-		// half — the loop noticing what the file says). It runs every pass,
-		// gated or not, so a status read always has a fresh-as-of-this-tick
-		// gate view even while dispatch itself is paused.
-		svc.ObserveGateFromTick(time.Now(), currentGateFiles(pr.cfg))
-		if pr.o.Gated() {
-			slog.Info("gated; pausing without dispatch")
-		} else if rpt, err := pr.o.ProduceTick(ctx, q); err != nil {
-			slog.Error("producer tick failed", "err", err)
-		} else {
-			// Source isolation (INV-FAIL-3, INV-EVT-1): a partial produce (one or
-			// more SourceErrors) suspends only THAT source's own production —
-			// Dispatch/Expire still run over the queue for every other source's
-			// and every pushed event's already-queued work.
-			for name, serr := range rpt.SourceErrors {
-				slog.Warn("producer tick: source failed; other sources still produced", "source", name, "err", serr)
-			}
-			q.Dispatch()
-			q.Expire()
-			now := time.Now()
-			svc.PublishTick(core.TickSnapshot{
-				Sources:    sourceReportsFor(pr.cfg.Queries),
-				Config:     resolvedConfigFor(pr.cfg, core.RunModeLongRunning),
-				RunMode:    core.RunModeLongRunning,
-				Version:    version,
-				LastTickAt: now,
-				SnapshotAt: now,
-			})
-		}
+		wasGated = runOneTick(ctx, pr.cfg, pr.o, svc, q, wasGated, os.Stderr)
 		select {
 		case <-ctx.Done():
 			slog.Info("run: shutdown requested")

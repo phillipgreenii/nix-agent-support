@@ -2,16 +2,16 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
+	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
-	"go.opentelemetry.io/otel/attribute"
-	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
-	"go.opentelemetry.io/otel/sdk/metric/metricdata"
-
+	"github.com/phillipgreenii/pr-pool/conformance"
 	"github.com/phillipgreenii/pr-pool/internal/activity"
 	"github.com/phillipgreenii/pr-pool/internal/backoff"
 	"github.com/phillipgreenii/pr-pool/internal/config"
@@ -24,6 +24,9 @@ import (
 	"github.com/phillipgreenii/pr-pool/internal/orchestrator"
 	"github.com/phillipgreenii/pr-pool/internal/query"
 	"github.com/phillipgreenii/pr-pool/internal/roles"
+	"go.opentelemetry.io/otel/attribute"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 )
 
 // RoleSet.DeclaredBindTypes (moved from this package's own declaredBindTypes to
@@ -560,5 +563,154 @@ func TestCurrentGateFiles_namesBothFileDirectGates(t *testing.T) {
 	}
 	if got := gates[gateCICDDown]; got.Set {
 		t.Fatalf("gates[%q] = %+v, want unset (file absent)", gateCICDDown, got)
+	}
+}
+
+// writeGateFile creates a gate sentinel file under its OWN fresh t.TempDir()
+// (deliberately never cfg.LogDir — a gate sentinel is not core state, and
+// mixing the two would leave a stray gates-shaped file in a LogDir fixture)
+// and returns its path.
+func writeGateFile(t *testing.T) string {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), "quota-paused")
+	if err := os.WriteFile(p, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+func TestRunUntilIdleGated_reachableAnswersIngestNoDispatch(t *testing.T) {
+	cmd := &fakeCommander{}
+	logDir := shortDir(t)
+	cfg := config.Config{
+		LogDir:      logDir,
+		QuotaPaused: writeGateFile(t),
+		Roles: roles.RoleSet{
+			{Name: "r1", Enabled: true, Type: "command", Binds: []string{"t1"}, Command: &roles.CommandConfig{Argv: []string{"r1-cmd"}}},
+		},
+	}
+	o := &orchestrator.Orchestrator{Cfg: cfg, Cmd: cmd, BD: &dtest.ScriptBD{}, CC: &dtest.FakeCC{}}
+	if !o.Gated() {
+		t.Fatal("precondition: cfg must be gated (QuotaPaused sentinel present)")
+	}
+
+	done := make(chan int, 1)
+	go func() { done <- runUntilIdleGated(context.Background(), cfg, o) }()
+
+	var ref core.Ref
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if r, err := core.Discover(logDir); err == nil {
+			ref = r
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if ref == (core.Ref{}) {
+		t.Fatal("gated run-until-idle never became discoverable; it must still boot the core (INV-LIFE-1)")
+	}
+
+	var stdout, stderr strings.Builder
+	code := callCore(&stdout, &stderr, ref, core.SubcommandIngestEvent,
+		[]byte(`{"schemaVersion":"1","id":"trk-1","events":[{"id":"e1","type":"t1"}]}`))
+	if code != conformance.ExitOK {
+		t.Fatalf("ingest-event while gated: exit = %d, want 0; stderr=%s", code, stderr.String())
+	}
+	var reply map[string]any
+	if err := json.Unmarshal([]byte(stdout.String()), &reply); err != nil {
+		t.Fatalf("stdout %q is not JSON: %v", stdout.String(), err)
+	}
+	if reply["accepted"] != float64(1) {
+		t.Fatalf("accepted = %v, want 1 — a gated core must still answer ingest-event and durably enqueue", reply["accepted"])
+	}
+
+	exitCode := <-done
+	if exitCode != exitOK {
+		t.Fatalf("runUntilIdleGated exit = %d, want %d", exitCode, exitOK)
+	}
+	if len(cmd.calls) != 0 {
+		t.Fatalf("gated run-until-idle must dispatch nothing; commander calls = %v", cmd.calls)
+	}
+}
+
+// TestRunOneTick_gatedStillExpiresDueEvent proves INV-LIFE-2's "Expiry MUST
+// continue while gated": a gated tick must still run q.Expire(), even though
+// it skips ProduceTick/Dispatch entirely. An orphan event (no listener bound
+// to its type) past its ExpiresAt is retained only until SOME Expire() call
+// evicts it (eventqueue.Queue.Expire's retainedLocked: an unmatched type is
+// vacuously not owed an attempt), so this needs no dispatch/listener setup at
+// all to prove the point. RED against the pre-fix code: the gated branch
+// never called q.Expire() (or anything else) at all.
+func TestRunOneTick_gatedStillExpiresDueEvent(t *testing.T) {
+	svc := &core.Service{}
+	q, err := eventqueue.New(eventqueue.NewMemStore())
+	if err != nil {
+		t.Fatalf("eventqueue.New: %v", err)
+	}
+	past := time.Now().Add(-time.Hour)
+	if _, err := q.Enqueue(eventqueue.Event{ID: "ev1", Type: "orphan", ExpiresAt: past}); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+	if depth := q.DepthByType()["orphan"]; depth != 1 {
+		t.Fatalf("precondition: depth = %d, want 1", depth)
+	}
+
+	cfg := config.Config{QuotaPaused: writeGateFile(t)}
+	o := &orchestrator.Orchestrator{Cfg: cfg}
+	if !o.Gated() {
+		t.Fatal("precondition: must be gated")
+	}
+
+	var stderr strings.Builder
+	runOneTick(context.Background(), cfg, o, svc, q, false, &stderr)
+
+	if depth := q.DepthByType()["orphan"]; depth != 0 {
+		t.Fatalf("gated tick must still run q.Expire(): depth = %d, want 0 (due event expired)", depth)
+	}
+}
+
+// TestRunOneTick_gateNoticeOncePerTransition proves the stderr notice fires
+// exactly on the gate-state TRANSITION — including startup-while-gated,
+// since the very first call passes wasGated=false regardless of history —
+// stays silent across repeat ticks in the SAME gated state, and fires again
+// after a clear-and-reset (an ungated tick, then re-gated). RED against the
+// pre-fix code: runOneTick/gateNotice did not exist (the old gated branch
+// logged an unconditional per-tick slog.Info, never a stderr notice).
+func TestRunOneTick_gateNoticeOncePerTransition(t *testing.T) {
+	svc := &core.Service{}
+	q, err := eventqueue.New(eventqueue.NewMemStore())
+	if err != nil {
+		t.Fatalf("eventqueue.New: %v", err)
+	}
+	gatedCfg := config.Config{QuotaPaused: writeGateFile(t)}
+	gatedO := &orchestrator.Orchestrator{Cfg: gatedCfg}
+	ungatedO := &orchestrator.Orchestrator{}
+
+	const noticeMarker = "pr-pool: gated by"
+	var buf strings.Builder
+	wasGated := false
+	for i := 0; i < 3; i++ {
+		wasGated = runOneTick(context.Background(), gatedCfg, gatedO, svc, q, wasGated, &buf)
+	}
+	if !wasGated {
+		t.Fatal("after 3 gated ticks wasGated must be true")
+	}
+	if n := strings.Count(buf.String(), noticeMarker); n != 1 {
+		t.Fatalf("notice count across 3 gated ticks = %d, want exactly 1; output=%q", n, buf.String())
+	}
+
+	// clear: one ungated tick resets the transition edge.
+	wasGated = runOneTick(context.Background(), config.Config{}, ungatedO, svc, q, wasGated, &buf)
+	if wasGated {
+		t.Fatal("an ungated tick must report wasGated=false")
+	}
+
+	// reset: gate again — a FRESH transition, must notice again.
+	wasGated = runOneTick(context.Background(), gatedCfg, gatedO, svc, q, wasGated, &buf)
+	if !wasGated {
+		t.Fatal("re-gated tick must report wasGated=true")
+	}
+	if n := strings.Count(buf.String(), noticeMarker); n != 2 {
+		t.Fatalf("notice count after clear-and-reset = %d, want exactly 2 total; output=%q", n, buf.String())
 	}
 }
