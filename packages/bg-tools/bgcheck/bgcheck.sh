@@ -51,7 +51,7 @@ while [[ $# -gt 0 ]]; do
     ;;
   -n | --lines)
     [[ $# -ge 2 ]] || die "option $1 requires a value"
-    [[ "$2" =~ ^[0-9]+$ ]] || die "not a line count: $2"
+    [[ $2 =~ ^[0-9]+$ ]] || die "not a line count: $2"
     LINES="$2"
     shift 2
     ;;
@@ -68,20 +68,20 @@ while [[ $# -gt 0 ]]; do
     die "unknown option: $1"
     ;;
   *)
-    [[ -z "$BG_NAME" ]] || die "unexpected argument: $1"
+    [[ -z $BG_NAME ]] || die "unexpected argument: $1"
     BG_NAME="$1"
     shift
     ;;
   esac
 done
 
-if [[ -z "$BG_NAME" ]]; then
+if [[ -z $BG_NAME ]]; then
   FOUND=0
   while IFS= read -r n; do
     FOUND=1
     printf '%s\t%s\n' "$n" "$(bg_status "$n" || true)"
   done < <(bg_list_names)
-  if [[ "$FOUND" -eq 0 ]]; then
+  if [[ $FOUND -eq 0 ]]; then
     echo "bgcheck: no background jobs recorded in $(bg_state_dir)" >&2
   fi
   exit 0
@@ -96,7 +96,7 @@ fi
 echo "$STATUS"
 
 LOG="$(bg_log_path "$BG_NAME")"
-if [[ -f "$LOG" ]]; then
+if [[ -f $LOG ]]; then
   echo "--- last $LINES line(s) of $LOG ---"
   tail -n "$LINES" "$LOG"
 fi

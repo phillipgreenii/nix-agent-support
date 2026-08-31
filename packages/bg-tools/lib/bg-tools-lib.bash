@@ -8,7 +8,7 @@
 # tail proves nothing about exit status.
 
 bg_state_dir() {
-  if [[ -n "${BG_DIR:-}" ]]; then
+  if [[ -n ${BG_DIR:-} ]]; then
     echo "$BG_DIR"
   else
     echo "${TMPDIR:-/tmp}/pg-bg-${USER:-$(id -un)}"
@@ -17,7 +17,7 @@ bg_state_dir() {
 
 # Names become filenames; restrict to a path-safe alphabet.
 bg_validate_name() {
-  [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]
+  [[ $1 =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]
 }
 
 bg_log_path() { echo "$(bg_state_dir)/$1.log"; }
@@ -35,11 +35,11 @@ bg_status() {
   local name="$1" pid etime pid_file exit_file
   pid_file="$(bg_pid_path "$name")"
   exit_file="$(bg_exit_path "$name")"
-  if [[ -f "$exit_file" ]]; then
+  if [[ -f $exit_file ]]; then
     echo "DONE exit=$(<"$exit_file")"
     return 0
   fi
-  if [[ -f "$pid_file" ]]; then
+  if [[ -f $pid_file ]]; then
     pid="$(<"$pid_file")"
     if kill -0 "$pid" 2>/dev/null; then
       etime="$(ps -p "$pid" -o etime= 2>/dev/null | tr -d ' ' || true)"
@@ -57,9 +57,9 @@ bg_status() {
 bg_list_names() {
   local dir f b
   dir="$(bg_state_dir)"
-  [[ -d "$dir" ]] || return 0
+  [[ -d $dir ]] || return 0
   for f in "$dir"/*.pid; do
-    [[ -e "$f" ]] || continue
+    [[ -e $f ]] || continue
     b="$(basename "$f")"
     echo "${b%.pid}"
   done

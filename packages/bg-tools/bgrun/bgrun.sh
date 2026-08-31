@@ -66,7 +66,7 @@ while [[ $# -gt 0 ]]; do
     die "unknown option: $1"
     ;;
   *)
-    if [[ -z "$BG_NAME" ]]; then
+    if [[ -z $BG_NAME ]]; then
       BG_NAME="$1"
       shift
     else
@@ -76,9 +76,9 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-[[ -n "$BG_NAME" ]] || die "missing NAME (usage: bgrun NAME -- COMMAND [ARGS...])"
+[[ -n $BG_NAME ]] || die "missing NAME (usage: bgrun NAME -- COMMAND [ARGS...])"
 bg_validate_name "$BG_NAME" || die "invalid name '$BG_NAME' (allowed: alphanumerics then . _ -)"
-[[ "$SAW_DASHDASH" -eq 1 ]] || die "missing -- separator before COMMAND"
+[[ $SAW_DASHDASH -eq 1 ]] || die "missing -- separator before COMMAND"
 [[ ${#PAYLOAD[@]} -gt 0 ]] || die "missing COMMAND after --"
 
 DIR="$(bg_state_dir)"
