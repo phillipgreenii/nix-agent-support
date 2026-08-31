@@ -84,7 +84,12 @@ requires it; the details are here.
   outcome carried in the reply body**. A participant in a degraded state MAY answer with the coarse
   signal alone and no body, so declining never depends on being able to compose a reply. On the
   default CLI transport those four signals are the exit codes `0` ok, `1` unexpected error, `2`
-  **usage** error, and `9` **`busy`** — a **pre-accept decline** (`INV-CONC-1`). The **low** codes
+  **usage** error, and `9` **`busy`** — a **capacity decline** covering two distinct callers: a
+  **participant's pre-accept decline** on offered work (`INV-CONC-1`), and the **core's own
+  read-refusal** on a saturated **read** verb (`status`, `mon.read`) it is too busy to serve right
+  now — the core declining, not a participant, and nothing was accepted or attempted either way,
+  so the caller simply retries later
+  (`phillipgreenii-nix-agent-support · packages/pr-pool/docs/decisions · DEC-WIRE-1`). The **low** codes
   carry meanings general to any app, which is why `2` is **reserved** for usage and `busy` sits
   outside that band rather than on `2`; a caller reading one as the other would treat a decline as a
   typo, and a typo as "re-offer later"
@@ -109,7 +114,7 @@ requires it; the details are here.
   one interface's own concern.
 - **Registry & lifecycle.** A participant **registers** with the core (joins the **registry**) to
   receive lifecycle signals and to make its callback reachable, and **deregisters** on exit. The
-  lifecycle and its state diagram are the next section.
+  lifecycle, its state diagram, and the registration message itself are the next section.
 - **Conformance suite.** Each interface ships a suite of **positive and negative checks** that
   invoke the subcommands and assert the replies match the JSON Schema, so an implementation can
   verify it adheres _before_ the core is trusted to route through it (`INV-INTF-2`).
@@ -121,6 +126,20 @@ realized as spawn/stop; for a daemon participant that may outlive the core, as r
 The core tolerates participants whose lifetime is shorter or longer than its own; **multiple**
 participants of any kind may exist, and one process MAY implement several interfaces at once (the
 core neither knows nor cares).
+
+**Registering** is one message, common to every kind. The participant names its own chosen **id**
+and its **kind** (`source` | `handler` | `monitor` | `storage`), and MAY carry an initial
+**self-status** value — applied through the very same self-status path the common contract states
+above, the instant registration succeeds, rather than a field the core gives special meaning to
+inline. The reply hands back **two** ready-to-run callback commands (the common contract's
+"Callback", above): an **event-delivery callback**, present only for a **source** — the sole kind
+with an event-delivery callback target (`ingest-event`) — and **empty** for every other kind, a
+**handler** included, because a handler's acceptance already arrives in its dispatch reply and
+there is nothing left for it to call back about there; and a **self-status callback**, which every
+kind gets, because self-status is common to the whole manager contract regardless of kind. The
+message: request `{ schemaVersion, id, kind, self }`, reply
+`{ schemaVersion, accepted, callback, selfStatusCallback }`. **Deregistering** on exit removes the
+participant from the registry; no further message crosses for it.
 
 ```mermaid
 stateDiagram-v2
@@ -397,24 +416,32 @@ sequenceDiagram
     from **unconsumed-expired** above and never a relabelling of it: this one counts an event the core
     **refused** and named as rejected to the caller, that one counts an event the core **accepted** and
     later dropped, so neither member ever stands for both of `INV-DISP-3`'s cases;
+  - **source_failures** — counter, per source: a pull source's **query failure** (`INV-FAIL-3`), so
+    that failure is visible to an observer watching the catalog and not only to a reader of logs;
+  - **deduped** — counter, per `type`: a duplicate `id` the core **accepted** only because
+    de-duplication already covers it (`INV-EVT-3`), never a fresh append. It is a **separate**
+    member from `ingest-event`'s own `accepted` count below, which counts both together and
+    carries no field distinguishing them ("The manager→core callback" below) — this catalog member
+    is where that distinction becomes visible, without changing what `ingest-event`'s reply itself
+    carries;
 
-  and, alongside those four, the catalog also names:
-  - **source-failures** — counter, per pull source: a pull-source query failure, the metrics half of
-    the pull-source failure backoff's own "reported to logs and metrics, never a silently idle pass"
-    (`INV-FAIL-3`);
-  - **deduped** — counter, per `type`: a duplicate event id the core absorbed because de-duplication
-    already covers it (`INV-EVT-3`) — visibility into a re-emit the core silently drops from the
-    delivery path, distinct from a fresh append;
-  - the **throughput**, **backlog**, **liveness** and **dispatch-latency** metrics an observer
-    watches to tell a busy system from a stalled one (`STORY-OBS-1`).
+  and, alongside those six, the **throughput**, **backlog**, **liveness** and **dispatch-latency**
+  metrics an observer watches to tell a busy system from a stalled one (`STORY-OBS-1`).
 
 - **Emission.** Observability covers **metrics and logs** (traces are a later concern). Both the
   **emission transport** and the concrete backend behind it (a scrape target, a log store) are
   deployment bindings the core is unaware of; which transport is the default is a realization decision
   (`phillipgreenii-nix-agent-support · packages/pr-pool/docs/decisions · DEC-OBS-1`).
 - A sink **declares which mode it uses and which subset of the metric catalog it handles**:
-  - **pull** — the sink reads current values from the core on its own schedule;
+  - **pull** — the sink reads current values from the core on its own schedule, over `read`
+    (shown below);
   - **push** — the core sends the named metric updates to the sink as they change.
+- **This declaration is configuration**, resolved before the sink ever calls the common manager
+  contract's `register` — the same way a source's declared event types are the source's own
+  configuration rather than a field on any registration message. `register`'s request is one
+  shape common to every kind (`{ schemaVersion, id, kind, self }`, above); it is what makes a
+  sink's callback reachable, not where its mode or subset travel. Which mode and which catalog
+  subset apply to a given registered id is looked up from that sink's own configured entry.
 - The sink's own external surface (e.g. serving a scrape endpoint, writing a dashboard feed) is
   entirely the sink's concern and invisible to the core.
 
@@ -477,6 +504,10 @@ sequenceDiagram
   (`phillipgreenii-nix-agent-support · packages/pr-pool/docs/decisions · DEC-CLI-2`). _"role"_ is the
   operator-facing name for a configured **event handler** (its concrete kind); the core dispatches it
   as a **handler session**. _"query"_ names one pull **event source**'s query.
+- **`tui` is not a sixth affordance:** it is the **continuous-interactive** realization of exactly
+  two already named above — **inspect** and **pause/resume** — run together in one polling view
+  (concrete spelling: `phillipgreenii-nix-agent-support · packages/pr-pool/docs/decisions ·
+DEC-CLI-2`).
 - **Operator push-inject.** The **push-inject** affordance is the **operator-facing front door to the
   push-ingest path**: it performs the **same core-side enqueue** as the `ingest-event` manager
   callback, but is **operator-initiated** (not invoked through a core-issued callback). The injected
@@ -494,6 +525,12 @@ sequenceDiagram
   for whether the pool is gated, so the socket verb and the file-direct subcommand can never disagree
   about state that outlives the call. (Concrete spelling:
   `phillipgreenii-nix-agent-support · packages/pr-pool/docs/decisions · DEC-CLI-2`.)
+- **Test-mode signal.** The signal "What the operator can do" names above is **advisory only**: it
+  tells a participant that _a test is in flight_, and the participant **MAY** use it to alter its
+  own side-effectful behavior for the duration (e.g. skip a real write) — the core neither requires
+  nor inspects how, or whether, a participant responds to it. Its concrete spelling (an
+  environment variable, and its name) is a realization decision, not restated here:
+  `phillipgreenii-nix-agent-support · packages/pr-pool/docs/decisions · DEC-CLI-2`.
 - **Run-scoped selectors.** The operator MAY restrict the **active** set of sources and handlers for a
   single run — as an allow-list, a deny-list, or both — **without editing the configuration**
   (`STORY-OP-3`). The restriction scopes which participants that run activates and which a smoke test
@@ -566,8 +603,8 @@ already deregistered) is an error — not the "unknown tracking id ⇒ acknowled
 "Event delivery" (above) states, which governs a **correlated** reply to an earlier core-issued call
 rather than a self-report's own identity claim.
 
-**Inspecting a running core** yields three things it **MUST** offer, and nothing else it must offer.
-**Deliveries** are **delivery
+**Inspecting a running core is read-only** and yields three things it **MUST** offer, and nothing
+else it must offer. **Deliveries** are **delivery
 provenance** — which event the core handed to which handler, keyed by that dispatch's tracking id —
 and the core legitimately knows it, because it already marks acceptance per `(event, handler)`
 (`INV-EVT-1`). It is **not** a window into a handler session, so it carries no per-run progress:
@@ -578,6 +615,19 @@ core **MAY** also report **which configured bindings have matched no event this 
 debugging convenience against a path no config-time check can validate today — and, like the three
 above, it is core-side routing knowledge rather than a window into any handler (`INV-DISP-1`,
 `OQ-EVT-CATALOG`, `USECASE-DEBUG-RUN`).
+
+**Deliveries, watched over time, are a bounded activity ring.** A one-shot snapshot is enough for a
+single `status` call, but a client that keeps watching — the `tui` subcommand's basis, above — needs
+to ask for only what is **new** since it last looked, not re-read the whole snapshot each time.
+The same delivery-provenance content above is therefore also offered as a **bounded,
+metadata-only** ring: a request names a **since** cursor (absent or empty on a client's first
+call) and gets back only the entries newer than it, together with a **dropped** count — entries the
+bounded ring evicted before this client's cursor caught up to them, so a gap is visible rather than
+silent — and an **epoch**, bumped whenever the ring itself is reset (a core restart chief among
+causes), so a cursor minted against a prior epoch is recognized as stale rather than silently
+misread against the wrong generation. The ring carries **no more** than the flat form does — the
+same per-dispatch provenance, still no window into a handler session — so this is a **delivery
+mechanism** for the existing MUST, not a fourth thing the core must offer.
 
 ```mermaid
 sequenceDiagram

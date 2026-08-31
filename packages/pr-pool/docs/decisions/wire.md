@@ -39,6 +39,13 @@ its own arguments, but arguments are never the payload channel. Concretely:
   every app — any app can be invoked wrongly, so `2` is reserved for that — while busy means
   something only to a participant on a capacity-bounded transport and therefore lives out in the
   app-specific range (`ADR 0042`).
+  - **`9` now covers two callers, not one.** Until now `9` was only ever a **participant's** own
+    pre-accept busy decline on offered work. It also names the core's own **read-refusal**: the
+    core itself returns `9` for a **read** verb (`status`, `mon.read`) it is too saturated to serve
+    right now, rather than the caller's own decline of work it was offered. Both readings share
+    the code deliberately — a caller that sees `9` always knows "nothing happened, retry later,"
+    whichever side declined — and a reply body, where the participant supplies one, still carries
+    which case applies (`interfaces.md`'s "Coarse outcome, rich reply").
   - **Reconciling against `ADR 0042`.** That ADR's own Decision table still reads `≥3` as one
     undifferentiated **app-specific** band, even though its own Context already quotes
     `drain.go`'s local `exitPrecheck = 3` verbatim and its Consequences names `3` as the value
@@ -63,6 +70,42 @@ invoked wrongly, it is busy right now. Everything else is a field.
 authoritative artifacts are the versioned JSON Schemas each interface's conformance suite checks
 against (`INV-INTF-2`). They are recorded here because they show the intended interaction concretely,
 which the behavior set states as field shape and obligations instead.
+
+**`register`** — the first message any participant sends, common to every kind (`interfaces.md`'s
+"Lifecycle"):
+
+```json
+{
+  "schemaVersion": "1",
+  "id": "review-handler-1",
+  "kind": "handler",
+  "self": "healthy"
+}
+```
+
+Its reply, for a `handler` — `callback` is empty because a handler has no event-delivery callback
+target (`ingestCallbackFor`):
+
+```json
+{
+  "schemaVersion": "1",
+  "accepted": true,
+  "callback": "",
+  "selfStatusCallback": "pr-pool self-status --socket /run/pr-pool.sock --token tok-abc"
+}
+```
+
+For a `source`, `callback` instead carries the `ingest-event` command every source — and only a
+source — gets:
+
+```json
+{
+  "schemaVersion": "1",
+  "accepted": true,
+  "callback": "pr-pool ingest-event --socket /run/pr-pool.sock --token tok-abc",
+  "selfStatusCallback": "pr-pool self-status --socket /run/pr-pool.sock --token tok-abc"
+}
+```
 
 An event, as an event source emits it (`INTF-SOURCE`):
 
