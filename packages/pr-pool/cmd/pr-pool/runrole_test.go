@@ -1,7 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/phillipgreenii/pr-pool/internal/config"
@@ -64,5 +67,114 @@ func TestBuildRunRoleEvent_populatesMetadata(t *testing.T) {
 		if _, ok := ev.Item.Metadata[k]; !ok {
 			t.Errorf("Item.Metadata missing %q; got %#v", k, ev.Item.Metadata)
 		}
+	}
+}
+
+// TestRoute_runRoleJSON covers args.go's parseRunRoleArgs --json handling
+// (Task 1.5b): --json is accepted wherever it occurs relative to the role/bead
+// positionals, and defaults to false when absent.
+func TestRoute_runRoleJSON(t *testing.T) {
+	if r := route([]string{"pr-pool", "run-role", "--json", "worker", "zr-1"}); r.kind != routeRunRole || r.role != "worker" || r.bead != "zr-1" || !r.json {
+		t.Errorf("route(run-role --json worker zr-1) = %+v, want routeRunRole role=worker bead=zr-1 json=true", r)
+	}
+	if r := route([]string{"pr-pool", "run-role", "worker", "zr-1", "--json"}); r.kind != routeRunRole || r.role != "worker" || r.bead != "zr-1" || !r.json {
+		t.Errorf("route(run-role worker zr-1 --json) = %+v, want the same, order-independent", r)
+	}
+	if r := route([]string{"pr-pool", "run-role", "worker", "zr-1"}); r.json {
+		t.Errorf("route(run-role worker zr-1) = %+v, want json=false when --json is absent", r)
+	}
+	for _, want := range []string{"run-role", "--json"} {
+		if !strings.Contains(usageLine, want) {
+			t.Errorf("usageLine does not mention %q", want)
+		}
+	}
+	if !strings.Contains(helpText, "run-role [--json]") {
+		t.Error("helpText does not advertise run-role [--json]")
+	}
+}
+
+// TestRoute_runQueryJSON is TestRoute_runRoleJSON's run-query counterpart.
+func TestRoute_runQueryJSON(t *testing.T) {
+	if r := route([]string{"pr-pool", "run-query", "--json", "worker"}); r.kind != routeRunQuery || r.role != "worker" || !r.json {
+		t.Errorf("route(run-query --json worker) = %+v, want routeRunQuery role=worker json=true", r)
+	}
+	if r := route([]string{"pr-pool", "run-query", "worker", "--json"}); r.kind != routeRunQuery || r.role != "worker" || !r.json {
+		t.Errorf("route(run-query worker --json) = %+v, want the same, order-independent", r)
+	}
+	if r := route([]string{"pr-pool", "run-query", "worker"}); r.json {
+		t.Errorf("route(run-query worker) = %+v, want json=false when --json is absent", r)
+	}
+	if !strings.Contains(helpText, "run-query [--json]") {
+		t.Error("helpText does not advertise run-query [--json]")
+	}
+}
+
+// TestRenderRunRoleJSON covers renderRunRoleJSON's pure output shape: role,
+// bead, and accepted=true, with no schemaVersion field (Task 0.4's
+// unversioned-by-default wire decision, docs/decisions/cli.md's DEC-CLI-1
+// "--json's versioning" note).
+func TestRenderRunRoleJSON(t *testing.T) {
+	var b bytes.Buffer
+	renderRunRoleJSON(&b, "worker", "zr-9")
+
+	var got runRoleReport
+	if err := json.Unmarshal(b.Bytes(), &got); err != nil {
+		t.Fatalf("output is not one JSON object: %v\n%s", err, b.String())
+	}
+	if got.Role != "worker" || got.Bead != "zr-9" || !got.Accepted {
+		t.Errorf("report = %+v, want role=worker bead=zr-9 accepted=true", got)
+	}
+	if bytes.Contains(b.Bytes(), []byte("schemaVersion")) {
+		t.Errorf("run-role --json must not carry a schemaVersion field (unversioned, Task 0.4); got:\n%s", b.String())
+	}
+}
+
+// TestRenderRunQueryJSON / TestRenderRunQueryText cover run-query's two pure
+// output renderers against the SAME matches, so the two forms are proven to
+// report the identical result set.
+func TestRenderRunQueryJSON(t *testing.T) {
+	matches := []runQueryMatch{
+		{ID: "zr-1", Type: "review-pr", Title: "Review PR #1"},
+		{ID: "zr-2", Type: "review-pr", Title: "Review PR #2"},
+	}
+	var b bytes.Buffer
+	renderRunQueryJSON(&b, "worker", 3, matches)
+
+	var got runQueryReport
+	if err := json.Unmarshal(b.Bytes(), &got); err != nil {
+		t.Fatalf("output is not one JSON object: %v\n%s", err, b.String())
+	}
+	if got.Role != "worker" || got.Queries != 3 || got.Total != 2 {
+		t.Errorf("report = %+v, want role=worker queries=3 total=2", got)
+	}
+	if len(got.Matches) != 2 || got.Matches[0] != matches[0] || got.Matches[1] != matches[1] {
+		t.Errorf("matches = %+v, want %+v", got.Matches, matches)
+	}
+	if bytes.Contains(b.Bytes(), []byte("schemaVersion")) {
+		t.Errorf("run-query --json must not carry a schemaVersion field (unversioned, Task 0.4); got:\n%s", b.String())
+	}
+}
+
+func TestRenderRunQueryText(t *testing.T) {
+	matches := []runQueryMatch{{ID: "zr-1", Type: "review-pr", Title: "Review PR #1"}}
+	var b bytes.Buffer
+	renderRunQueryText(&b, "worker", 3, matches)
+	out := b.String()
+	if !strings.Contains(out, "zr-1\treview-pr\tReview PR #1") {
+		t.Errorf("output missing the tab-separated match line; got:\n%s", out)
+	}
+	if !strings.Contains(out, "# 1 worker dispatch(es) from 3 quer(ies)") {
+		t.Errorf("output missing the summary line; got:\n%s", out)
+	}
+}
+
+// TestRenderRunQueryJSON_emptyMatchesIsAnEmptyArray: a role with no matches
+// still gets a valid "matches":[] array on the wire, never a bare `null` a
+// naive consumer would have to special-case.
+func TestRenderRunQueryJSON_emptyMatchesIsAnEmptyArray(t *testing.T) {
+	var b bytes.Buffer
+	renderRunQueryJSON(&b, "worker", 0, []runQueryMatch{})
+	if !strings.Contains(b.String(), `"matches":[]`) {
+		t.Errorf(`output = %s, want "matches":[]`, b.String())
 	}
 }

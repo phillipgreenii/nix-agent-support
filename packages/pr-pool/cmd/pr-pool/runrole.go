@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -38,9 +39,20 @@ func roleNames(rs roles.RoleSet) string {
 	return strings.Join(names, ", ")
 }
 
-// runRunRole dispatches a single item through one role and tears down its session.
-// It does NOT run discovery: the bead is explicit. precheck validates the store/prefix.
-func runRunRole(roleName, beadID string) int {
+// runRunRole dispatches a single item through one role and tears down its
+// session. It does NOT run discovery: the bead is explicit. precheck validates
+// the store/prefix.
+//
+// asJSON (Task 1.5b) governs only the SUCCESS report: on success it prints one
+// JSON object (renderRunRoleJSON) instead of nothing (text mode's existing
+// silent-success behavior, unchanged). Every error path below prints its usual
+// stderr diagnostic regardless of asJSON — unlike push-inject, every failure
+// here happens BEFORE any dispatch outcome exists to report (a config/precheck
+// failure, an unknown role, a bad derived context), so there is no richer
+// "accepted: false" body worth echoing beyond the diagnostic already on
+// stderr; this is a deliberate, narrower choice than push-inject's
+// still-JSON-on-failure convention, not an oversight.
+func runRunRole(roleName, beadID string, asJSON bool) int {
 	ctx := context.Background()
 	cfg, err := config.Load()
 	if err != nil {
@@ -78,7 +90,29 @@ func runRunRole(roleName, beadID string) int {
 		fmt.Fprintln(os.Stderr, "run-role:", err)
 		return exitGeneric
 	}
+	if asJSON {
+		renderRunRoleJSON(os.Stdout, role.Name, beadID)
+	}
 	return exitOK
+}
+
+// runRoleReport is `run-role --json`'s success report: bare identity, echoing
+// back which role/bead this smoke test dispatched. RunOne tears the session
+// down itself and returns no richer per-dispatch result to this caller, so
+// there is nothing beyond identity+outcome worth reporting here (unlike
+// push-inject's queue-durable enqueue, which has a socket/event/core worth
+// echoing). Per Task 0.4's wire decision (docs/decisions/cli.md's DEC-CLI-1
+// "--json's versioning" note): UNVERSIONED, no schemaVersion field, not a
+// schemas/-registered wire shape.
+type runRoleReport struct {
+	Role     string `json:"role"`
+	Bead     string `json:"bead"`
+	Accepted bool   `json:"accepted"`
+}
+
+// renderRunRoleJSON writes run-role's --json success report.
+func renderRunRoleJSON(w io.Writer, role, bead string) {
+	writeJSON(w, runRoleReport{Role: role, Bead: bead, Accepted: true})
 }
 
 // buildRunRoleEvent builds the self-contained event for the direct-bead run-role
@@ -101,8 +135,11 @@ func buildRunRoleEvent(ctx context.Context, br beads.Runner, role roles.Role, be
 }
 
 // runRunQuery runs one role's discovery query read-only and prints the matches
-// (id, type, title) straight from the resolved items.
-func runRunQuery(roleName string) int {
+// (id, type, title) straight from the resolved items. asJSON (Task 1.5b) picks
+// renderRunQueryJSON over the default renderRunQueryText; every error path is
+// unaffected by asJSON (same reasoning as runRunRole's doc comment: a query
+// failure happens before any matches exist to report).
+func runRunQuery(roleName string, asJSON bool) int {
 	ctx := context.Background()
 	cfg, err := config.Load()
 	if err != nil {
@@ -121,11 +158,11 @@ func runRunQuery(roleName string) int {
 	}
 	// A role no longer embeds a query; it binds event types. Resolve the
 	// producers that FEED this role (emit any of its bound types) and run each,
-	// printing the items the emitted events carry — the same read-only smoke view
-	// as before, now through the event model.
+	// collecting the items the emitted events carry — the same read-only smoke
+	// view as before, now through the event model.
 	env := query.Env{BD: br, RepoRoot: cfg.RepoRoot, Cmd: query.OSCommander{}}
 	sources := discover.QueriesForRole(cfg.Queries, role)
-	total := 0
+	matches := make([]runQueryMatch, 0)
 	for _, s := range sources {
 		evts, err := s.Query.Run(ctx, env)
 		if err != nil {
@@ -133,10 +170,46 @@ func runRunQuery(roleName string) int {
 			return exitGeneric
 		}
 		for _, e := range evts {
-			fmt.Printf("%s\t%s\t%s\n", e.Item.ID, e.Item.Type, e.Item.Title)
+			matches = append(matches, runQueryMatch{ID: e.Item.ID, Type: e.Item.Type, Title: e.Item.Title})
 		}
-		total += len(evts)
 	}
-	fmt.Printf("# %d %s dispatch(es) from %d quer(ies)\n", total, role.Name, len(sources))
+	if asJSON {
+		renderRunQueryJSON(os.Stdout, role.Name, len(sources), matches)
+	} else {
+		renderRunQueryText(os.Stdout, role.Name, len(sources), matches)
+	}
 	return exitOK
+}
+
+// runQueryMatch is one resolved item, as both output forms report it.
+type runQueryMatch struct {
+	ID    string `json:"id"`
+	Type  string `json:"type"`
+	Title string `json:"title"`
+}
+
+// runQueryReport is `run-query --json`'s report. Per Task 0.4's wire decision
+// (docs/decisions/cli.md's DEC-CLI-1 "--json's versioning" note): UNVERSIONED,
+// no schemaVersion field, not a schemas/-registered wire shape — same reasoning
+// as configShowReport/runRoleReport.
+type runQueryReport struct {
+	Role    string          `json:"role"`
+	Queries int             `json:"queries"`
+	Total   int             `json:"total"`
+	Matches []runQueryMatch `json:"matches"`
+}
+
+// renderRunQueryText writes run-query's default text form: one tab-separated
+// line per match, then the "# N role dispatch(es) from M quer(ies)" summary —
+// byte-for-byte the same output the pre-Task-1.5b implementation produced.
+func renderRunQueryText(w io.Writer, role string, queryCount int, matches []runQueryMatch) {
+	for _, m := range matches {
+		fmt.Fprintf(w, "%s\t%s\t%s\n", m.ID, m.Type, m.Title)
+	}
+	fmt.Fprintf(w, "# %d %s dispatch(es) from %d quer(ies)\n", len(matches), role, queryCount)
+}
+
+// renderRunQueryJSON writes run-query's --json form: one JSON object.
+func renderRunQueryJSON(w io.Writer, role string, queryCount int, matches []runQueryMatch) {
+	writeJSON(w, runQueryReport{Role: role, Queries: queryCount, Total: len(matches), Matches: matches})
 }

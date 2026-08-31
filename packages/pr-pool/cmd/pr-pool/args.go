@@ -9,7 +9,7 @@ import (
 )
 
 // usageLine is the short synopsis printed to stderr on a usage error.
-const usageLine = "usage: pr-pool [--version | --help] [run [--only <selector>]... [--disable <selector>]... | run-until-idle [--only <selector>]... [--disable <selector>]... | run-query <role> | run-role <role> <bead> | config (--print-defaults | --show) | sessions | reconcile | push-inject [--json] [--socket <path>] [--token <tok>] <json> | pause [<gate>] | resume [<gate> | --all] | status [--json] [--socket <path>] [--token <tok>] | ingest-event [--socket <path>] [--token <tok>] | self-status [--socket <path>] [--token <tok>]]"
+const usageLine = "usage: pr-pool [--version | --help] [run [--only <selector>]... [--disable <selector>]... | run-until-idle [--only <selector>]... [--disable <selector>]... | run-query [--json] <role> | run-role [--json] <role> <bead> | config (--print-defaults | --show [--json]) | sessions | reconcile | push-inject [--json] [--socket <path>] [--token <tok>] <json> | pause [<gate>] | resume [<gate> | --all] | status [--json] [--socket <path>] [--token <tok>] | ingest-event [--socket <path>] [--token <tok>] | self-status [--socket <path>] [--token <tok>]]"
 
 // helpText is the full help printed to stdout for --help/help.
 const helpText = usageLine + `
@@ -26,7 +26,10 @@ Subcommands:
                           fixed poll interval, until SIGINT/SIGTERM requests shutdown
   run-until-idle          boot the core, discover once, drain the queue to idle, then exit
                           (also reachable as "drain", kept as a deprecated alias)
-  run-query <role>        run a role's discovery query and print matches (read-only)
+  run-query [--json] <role>
+                          run a role's discovery query and print matches (read-only); --json emits
+                          one JSON object ({role, queries, total, matches}) instead of the
+                          tab-separated lines
   run/run-until-idle --only <selector> / --disable <selector>
                           run-scoped selectors (STORY-OP-3): restrict which configured
                           sources/handlers this ONE run activates, without editing
@@ -37,9 +40,14 @@ Subcommands:
                           PR_POOL_DISABLE (comma-separated) are UNIONED with the flags, not
                           overridden by them. A selector naming an unconfigured role/query
                           is a usage error. See docs/decisions/cli.md's DEC-CLI-1.
-  run-role <role> <bead>  dispatch one bead through a role, then tear down (smoke test)
+  run-role [--json] <role> <bead>
+                          dispatch one bead through a role, then tear down (smoke test); --json
+                          emits a small JSON report ({role, bead, accepted}) on success instead of
+                          nothing
   config --print-defaults print the built-in default config.toml (copy-paste starting point)
-  config --show           print the resolved config path, role set, and worker dispatch scalars (permission-mode / allowed-tools / autonomous / budget)
+  config --show [--json]  print the resolved config path, role set, and worker dispatch scalars
+                          (permission-mode / allowed-tools / autonomous / budget); --json emits the
+                          same information as one JSON object. --json is valid only with --show.
   sessions                list this pool's sessions (bead/role) from session metadata (read-only)
   reconcile               report stranded self-owned feedback cycles, then run the pg-pr ACL: ensure a review-pr bead per open PR (reads 'pg-pr pr list'; mutates beads; exit-0-on-partial)
   push-inject <json>      inject one operator-supplied event into the RUNNING core (the same core-side
@@ -169,6 +177,13 @@ type routeResult struct {
 	// via resolveSelectors (selectors.go).
 	only    []string
 	disable []string
+	// json is the --json flag (Task 1.5b): config --show / run-query / run-role
+	// only, per DEC-CLI-1's global --json option. Per Task 0.4's wire decision
+	// (recorded in docs/decisions/cli.md's DEC-CLI-1 "--json's versioning"
+	// note), a subcommand's --json output is UNVERSIONED by default — this
+	// field only says whether the flag was given, not anything about the
+	// output shape's versioning.
+	json bool
 }
 
 // route inspects the full argv and decides what to do, without side effects. No
@@ -277,33 +292,38 @@ func parseRunLikeArgs(kind routeKind, args []string) routeResult {
 	return routeResult{kind: kind, only: only.values, disable: disable.values}
 }
 
-// parseRunRoleArgs validates `run-role <role> <bead>`. Pure: it checks only that a
-// role TOKEN and a bead id are present (and no extra args). The role NAME is NOT
-// validated here — that needs the loaded config, so it moves to the handler. A
-// dash-prefixed first token is a missing role (a flag, not a name). (pg2-52rn)
+// parseRunRoleArgs validates `run-role [--json] <role> <bead>`. Pure: it checks
+// only that a role TOKEN and a bead id are present (and no extra args), after
+// pulling out an optional --json occurring anywhere in args (extractJSONFlag).
+// The role NAME is NOT validated here — that needs the loaded config, so it
+// moves to the handler. A dash-prefixed first positional is a missing role (a
+// flag, not a name). (pg2-52rn)
 func parseRunRoleArgs(args []string) routeResult {
-	if len(args) < 1 || args[0] == "" || strings.HasPrefix(args[0], "-") {
-		return routeResult{kind: routeUsageErr, msg: "run-role: missing role (usage: run-role <role> <bead>)"}
+	asJSON, pos := extractJSONFlag(args)
+	if len(pos) < 1 || pos[0] == "" || strings.HasPrefix(pos[0], "-") {
+		return routeResult{kind: routeUsageErr, msg: "run-role: missing role (usage: run-role [--json] <role> <bead>)"}
 	}
-	if len(args) < 2 || args[1] == "" {
+	if len(pos) < 2 || pos[1] == "" {
 		return routeResult{kind: routeUsageErr, msg: "run-role: missing bead id"}
 	}
-	if len(args) > 2 {
-		return routeResult{kind: routeUsageErr, msg: "run-role: unexpected argument: " + args[2]}
+	if len(pos) > 2 {
+		return routeResult{kind: routeUsageErr, msg: "run-role: unexpected argument: " + pos[2]}
 	}
-	return routeResult{kind: routeRunRole, role: args[0], bead: args[1]}
+	return routeResult{kind: routeRunRole, role: pos[0], bead: pos[1], json: asJSON}
 }
 
-// parseRunQueryArgs validates `run-query <role>`. Pure, same fail-fast contract;
-// the role name is validated in the handler after config load.
+// parseRunQueryArgs validates `run-query [--json] <role>`. Pure, same fail-fast
+// contract (extractJSONFlag pulls --json out first); the role name is validated
+// in the handler after config load.
 func parseRunQueryArgs(args []string) routeResult {
-	if len(args) < 1 || args[0] == "" || strings.HasPrefix(args[0], "-") {
-		return routeResult{kind: routeUsageErr, msg: "run-query: missing role (usage: run-query <role>)"}
+	asJSON, pos := extractJSONFlag(args)
+	if len(pos) < 1 || pos[0] == "" || strings.HasPrefix(pos[0], "-") {
+		return routeResult{kind: routeUsageErr, msg: "run-query: missing role (usage: run-query [--json] <role>)"}
 	}
-	if len(args) > 1 {
-		return routeResult{kind: routeUsageErr, msg: "run-query: unexpected argument: " + args[1]}
+	if len(pos) > 1 {
+		return routeResult{kind: routeUsageErr, msg: "run-query: unexpected argument: " + pos[1]}
 	}
-	return routeResult{kind: routeRunQuery, role: args[0]}
+	return routeResult{kind: routeRunQuery, role: pos[0], json: asJSON}
 }
 
 // parseSessionsArgs validates `sessions` (no args; read-only).
@@ -322,18 +342,26 @@ func parseReconcileArgs(args []string) routeResult {
 	return routeResult{kind: routeReconcile}
 }
 
-// parseConfigArgs validates `config (--print-defaults | --show)`.
+// parseConfigArgs validates `config (--print-defaults | --show [--json])`.
+// --json (extracted wherever it appears via extractJSONFlag, so `config --json
+// --show` and `config --show --json` are both accepted) is valid only with
+// --show: --print-defaults' output is the built-in config.toml as TEXT, and
+// Task 1.5b defines no JSON encoding for it.
 func parseConfigArgs(args []string) routeResult {
-	if len(args) != 1 {
-		return routeResult{kind: routeUsageErr, msg: "config: usage: config (--print-defaults | --show)"}
+	asJSON, pos := extractJSONFlag(args)
+	if len(pos) != 1 {
+		return routeResult{kind: routeUsageErr, msg: "config: usage: config (--print-defaults | --show [--json])"}
 	}
-	switch args[0] {
+	switch pos[0] {
 	case "--print-defaults":
+		if asJSON {
+			return routeResult{kind: routeUsageErr, msg: "config: --json is valid only with --show"}
+		}
 		return routeResult{kind: routeConfig, configMode: "print-defaults"}
 	case "--show":
-		return routeResult{kind: routeConfig, configMode: "show"}
+		return routeResult{kind: routeConfig, configMode: "show", json: asJSON}
 	}
-	return routeResult{kind: routeUsageErr, msg: "config: unknown flag " + args[0] + " (want --print-defaults or --show)"}
+	return routeResult{kind: routeUsageErr, msg: "config: unknown flag " + pos[0] + " (want --print-defaults or --show)"}
 }
 
 // parsePauseArgs validates `pause [<gate>]` (Task 1.2b, INV-LIFE-2). Pure: no
@@ -394,6 +422,27 @@ func parseResumeArgs(args []string) routeResult {
 		}
 	}
 	return routeResult{kind: routeResume, gate: gate, allGates: allGates}
+}
+
+// extractJSONFlag pulls a --json flag out of args, wherever it occurs, returning
+// whether it was present and the remaining args in their original relative
+// order. run-query/run-role/config parse their own positionals by hand rather
+// than through flag.FlagSet (run-query/run-role's first positional is a role
+// NAME that must never be mistaken for a flag, and config's "modes" are
+// themselves spelled as flag-shaped tokens) — this lets --json appear anywhere
+// in the invocation (before, after, or between the existing positionals) without
+// disturbing that hand-rolled parsing, matching parseInterspersed's
+// anywhere-in-the-invocation flag placement for run/run-until-idle.
+func extractJSONFlag(args []string) (asJSON bool, rest []string) {
+	rest = make([]string, 0, len(args))
+	for _, a := range args {
+		if a == "--json" {
+			asJSON = true
+			continue
+		}
+		rest = append(rest, a)
+	}
+	return asJSON, rest
 }
 
 // firstFlag returns the first dash-prefixed token in args (the offending flag on
