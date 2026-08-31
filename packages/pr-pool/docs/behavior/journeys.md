@@ -3,7 +3,10 @@
 User stories, one end-to-end journey, the use cases that journey composes, and open questions.
 Stories, the journey, the use cases and the open questions carry IDs so downstream can cite them;
 together they establish the extent, since a set's extent is exactly what its stories, use cases and
-journeys require (`phillipgreenii-nix-agent-support · behavior-docs/docs/behavior · INV-11`). See the
+journeys require (`phillipgreenii-nix-agent-support · behavior-docs/docs/behavior · INV-11`). IDs
+are **topical and stable**; numbering gaps are legal, mirroring `invariants.md`'s own convention —
+one such gap sits between the operator stories above (example only, not a citation: `STORY-OP-10`
+is a deliberate skip, not an omission). See the
 [glossary](glossary.md), [actors](actors.md), [interfaces](interfaces.md), and
 [invariants](invariants.md) — every ID cited below resolves in one of those files. Diagrams are
 illustrative (`GOAL-MIN-1` keeps the core minimal; concrete tools, transports, and tuning constants
@@ -688,8 +691,8 @@ or query that verified it when it was added), `USECASE-VALIDATE-CONFIG`.
 - **Participants** — for each, the **command** the core invokes and its **mode** where the interface
   offers one (a source's **pull** vs **push**).
 - **Event sources** (`INTF-SOURCE`) — each **one invocation** plus the event types it emits, never a
-  per-tool source kind; and, for a pull source, its **query trigger**: a **periodic** tick, which is
-  the core's own when-to-poll decision rather than anything a source dictates.
+  per-tool source kind; and, for a pull source, its **query trigger**: periodic, threshold, or
+  manual, which is the core's own when-to-poll decision rather than anything a source dictates.
 - **Event handlers / roles** (`INTF-HANDLER`) — each with its behavior.
 - **Bindings** — for each handler, the **event-type match** it responds to. `type` MUST match; a
   binding MAY then narrow on a **payload path it names itself**, applied after the type match

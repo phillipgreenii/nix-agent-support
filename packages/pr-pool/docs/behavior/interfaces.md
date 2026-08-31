@@ -203,9 +203,10 @@ the boundary principle in this set's [README](README.md) rules out. So **adding 
 configuration**: name the invocation, the event types it emits, and — for a pull source — its query
 trigger. The core gains nothing.
 
-**Pull mode.** The core invokes `query` on a **query trigger** — a **periodic** tick. The reply
-carries events inline, or defers and delivers them later on the callback (the `ingest-event`
-target).
+**Pull mode.** The core invokes `query` on a **query trigger** — **periodic** (a tick, on that
+source's own configured period), **threshold** (queue-depth back-pressure), or **manual** (the
+smoke affordance only, `USECASE-VERIFY-PARTICIPANT`). The reply carries events inline, or defers
+and delivers them later on the callback (the `ingest-event` target).
 
 **Push mode.** The core never calls `query`; the source invokes the `ingest-event` callback as
 external facts arrive. A push-only source still **registers** so it appears in the registry and its

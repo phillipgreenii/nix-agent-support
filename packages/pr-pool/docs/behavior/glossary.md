@@ -30,9 +30,13 @@ their own terms in a downstream deployment set.
   **narrowing predicate**), applied after the type match, and the core reads only that path. Which
   fields are matchable is the binding's to say, never the source's. A field or path a binding names
   that is absent on an event simply does not match (it is not an error).
-- **Query trigger** — what fires a pull event source's query: a **periodic** tick. It is the **core's**
-  decision about when to poll, taken from the core's own state — never a source's to dictate.
-  (A tick is a query _trigger_, not a dispatched event.)
+- **Query trigger** — what fires a pull event source's query, one of three kinds: **periodic** (a
+  tick, on the source's own configured period), **threshold** (queue-depth back-pressure — the
+  depth of that source's own queued events crossing a bound), or **manual** (the smoke affordance
+  only — `run-query` firing the query once, read-only, under a test-mode signal,
+  `USECASE-VERIFY-PARTICIPANT`). Which kind fires is the **core's** decision about when to poll,
+  taken from the core's own state — never a source's to dictate. (A tick is a query _trigger_, not
+  a dispatched event.)
 - **Retry cadence** — how long the core waits before its next attempt after a failure it itself
   schedules the retry for: a pre-accept decline (the **handler retry cadence**, `INV-FAIL-2`) or a
   failed pull-source query (the **pull-source failure backoff**, `INV-FAIL-3`). Both share one
