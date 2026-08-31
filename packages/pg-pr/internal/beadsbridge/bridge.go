@@ -468,7 +468,8 @@ func renderCycleNote(s *store.FeedbackSummary) string {
 func cascadeCloseFeedbackReason(cycleID, cycleReason string) string {
 	return fmt.Sprintf(
 		"cascade-closed: never individually triaged (parent process-feedback cycle %s closed: %s)",
-		cycleID, cycleReason)
+		cycleID, cycleReason,
+	)
 }
 
 // cascadeClose closes the PR bead and its descendants: resolves the
