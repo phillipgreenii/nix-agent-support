@@ -342,6 +342,31 @@ sequenceDiagram
   `crashing`** signal on sudden shutdown; because `crashing` is best-effort (it MAY be lost), **no
   correctness rule may depend on it** — this signal stays best-effort even though event **data** is now
   durable (`INV-EVT-1`).
+- **`INV-LIFE-2`** <!-- uuid: 376c7af0-95a7-4b24-a0c2-466031352d65 --> — **A pause is a global operator
+  gate.** While a gate is set, the core **MUST suspend event production and new dispatch**: work
+  already **accepted** — per `(event, handler)`, `INV-EVT-1` — **runs to completion**, a gate never
+  cancels work already in flight. Inspection **MUST distinguish** _halted_ (a gate is set) from
+  _quiescent_ (nothing unsettled remains in flight): a gated core MAY still have unsettled work, and a
+  core MAY be quiescent without being gated, so neither reading substitutes for the other. **Expiry
+  MUST continue** while gated — `INV-EVT-4`'s retry-bound clock does not pause with production. The
+  core **remains reachable to its participants in both run modes**, exactly as `INV-LIFE-1` already
+  requires (cited here, not restated). A **gated drain-and-exit run** boots, stays reachable, emits
+  its final observability snapshot, and **exits promptly WITHOUT draining** — it **MUST NOT** report
+  the queue as drained, because without this rule a gated drain-and-exit run would spin forever on an
+  idle predicate a suspended dispatch can never satisfy.
+
+  **Gate identity.** There are exactly **two** named gates, **OR-effective** — the core is halted while
+  **either** is set: `quota-paused`, which is `ACTOR-OP`'s own to set and clear, and `cicd-down`, which
+  belongs to an **automation actor** rather than the human operator. Every surface that reports gate
+  state **MUST label an automation-owned gate as such**, because an automation actor **MAY re-assert**
+  a gate it owns on its own initiative (e.g. on every failed health check) in a way a human operator's
+  own gate never does, and a reader conflating the two would not know which one clearing depends on a
+  human action.
+
+  **A gate is not a run-scoped selector.** A run-scoped selector (`STORY-OP-3`) is scoped to a single
+  run and never outlives it; a gate is **global** and **persists across runs**, taking effect at the
+  next start if none is running when it is set. The two differ in **kind**, not degree, and neither
+  substitutes for the other.
 
 ## Precedence
 

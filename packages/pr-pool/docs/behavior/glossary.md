@@ -9,6 +9,15 @@ their own terms in a downstream deployment set.
   drain-and-exit, and stays reachable to its participants while it runs (`INV-LIFE-1`).
 - **Registry** — the core's roster of participants that have registered with it. A participant
   registers to receive lifecycle signals and to make its callback reachable, and deregisters on exit.
+- **Gate** — a **global, out-of-band** operator control that **persists across runs**, set or cleared
+  by `pause`/`resume` (`INTF-CLI`): while a gate is set the core suspends event production and new
+  dispatch, though accepted work still runs to completion and expiry still advances (`INV-LIFE-2`).
+  Contrast a **run-scoped selector** (`STORY-OP-3`), which selects the **active** subset of
+  sources/handlers for a **single run** and never outlives it — a selector is scoped to one run and
+  changes no persisted state; a gate is scoped to nothing narrower than the whole deployment and
+  outlives every run until explicitly cleared. The two named gates, **OR-effective**, are
+  `quota-paused` (the operator's own) and `cicd-down` (an automation actor's, and labeled as such on
+  every surface).
 
 ## Events and matching
 

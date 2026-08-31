@@ -454,7 +454,9 @@ sequenceDiagram
   `INTF-SOURCE`'s manager-initiated direction and is invoked through the callback the core hands out,
   not by the operator.
 - **What the operator can do.** The boundary offers exactly these affordances: run the core in its
-  **long-running** mode or its **drain-and-exit** mode (`INV-LIFE-1`); **smoke-test one handler**
+  **long-running** mode or its **drain-and-exit** mode (`INV-LIFE-1`); **pause and resume the pool** —
+  set or clear a global **gate** that suspends event production and new dispatch while accepted work
+  finishes and expiry continues (`INV-LIFE-2`); **smoke-test one handler**
   against one explicitly named event, and **smoke-test one pull source's query** once and
   **read-only**, both under a **test-mode signal** so the participant knows a test is in flight and
   neither running any discovery of its own; **inject** an operator-supplied event into the live core;
@@ -473,6 +475,17 @@ sequenceDiagram
   event is durable via the queue and delivered at-least-once and deduped like any push event
   (`INV-EVT-*`); no new delivery semantics. It is **distinct from** `ingest-event` (a manager→core
   callback) and from the one-shot handler smoke test, which tears down.
+- **Operator pause/resume.** `pause [<gate>]` / `resume [<gate>]` set or clear a named **gate**
+  (`INV-LIFE-2`); omitting `<gate>` defaults to `quota-paused`, and clearing **every** outstanding gate
+  requires an explicit `resume --all` — a bare `resume` clears only the default gate, so an
+  automation-owned gate is never cleared by accident. Both act **directly on the gate's file-backed
+  state** and **MUST succeed even with no core running** (exit `0`, reporting that the change takes
+  effect at the next start) — unlike every other operator command, they **never Discover or Dial** a
+  core (contrast "Locating the core" below). A **socket** pause/resume verb also exists so a client
+  already holding a connection can act over it, but **file existence is the single source of truth**
+  for whether the pool is gated, so the socket verb and the file-direct subcommand can never disagree
+  about state that outlives the call. (Concrete spelling:
+  `phillipgreenii-nix-agent-support · packages/pr-pool/docs/decisions · DEC-CLI-2`.)
 - **Run-scoped selectors.** The operator MAY restrict the **active** set of sources and handlers for a
   single run — as an allow-list, a deny-list, or both — **without editing the configuration**
   (`STORY-OP-3`). The restriction scopes which participants that run activates and which a smoke test
@@ -483,7 +496,9 @@ sequenceDiagram
   able to **reach** a core, not merely finding a trace that one once existed — a trace left behind by a
   core that has died is the same outcome as no trace at all. This holds on every locate path: the
   manager callbacks and the operator commands alike
-  (`phillipgreenii-nix-agent-support · packages/pr-pool/docs/decisions · DEC-WIRE-2`).
+  (`phillipgreenii-nix-agent-support · packages/pr-pool/docs/decisions · DEC-WIRE-2`). The one
+  exception is **pause/resume** ("Operator pause/resume" above): they act on gate-file state directly
+  and never attempt to locate a core at all, so this locate-or-fail rule does not apply to them.
 - **Output.** Every operator command emits **human-readable text by default** and a
   **machine-readable form on request**, so an operator and a script read the same state without a
   second surface. A **usage** error is distinct from a **runtime** error: on the default CLI transport

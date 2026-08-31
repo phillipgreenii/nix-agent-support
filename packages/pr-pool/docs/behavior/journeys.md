@@ -132,11 +132,13 @@ The three not-applicable reasons, stated once each:
   function when either is absent or down (`INTF-MON`, `INTF-STORE`) — so the absence of a check here
   is the optionality, not a gap in it.
 
-**Two actions sit outside the grid on purpose, and are elements all the same.** **Running** the core
+**Three actions sit outside the grid on purpose, and are elements all the same.** **Running** the core
 is not crossed with a participant kind: it is one whole-system act with two modes, so it is two
-elements — `USECASE-RUN-DAEMON` and `USECASE-RUN-DRAIN` — rather than eight cells. And the
-end-to-end **arc** is not an action at all but the composition of every element above, which is
-`JOURNEY-FLOW`.
+elements — `USECASE-RUN-DAEMON` and `USECASE-RUN-DRAIN` — rather than eight cells. **Gating** the core
+(pause/resume) is a third: a global, out-of-band operator control orthogonal to which run mode is in
+progress and to any one participant's lifecycle, so it is its own element, `USECASE-GATE-POOL`
+(`INV-LIFE-2`), rather than a ninth column. And the end-to-end **arc** is not an action at all but the
+composition of every element above, which is `JOURNEY-FLOW`.
 
 ## Journey
 
@@ -989,6 +991,57 @@ sequenceDiagram
     Core-->>Op: success, then exit
     deactivate Core
 ```
+
+### `USECASE-GATE-POOL` — pause and resume the pool via a global gate <!-- uuid: a2668c8c-fd26-4849-a7f5-a5068355cb1a -->
+
+**Actor:** `ACTOR-OP` (a human operator for `quota-paused`; an automation actor for `cicd-down`).
+**Level:** user-goal.
+**Preconditions:** none — a gate is file-backed and MAY be set or cleared whether or not a core is
+currently running.
+**Intent:** suspend, then resume, event production and new dispatch across the whole pool without
+touching configuration, so an operator (or an automation signal) can halt the system reversibly
+(`INV-LIFE-2`).
+_Requires:_ `INV-LIFE-2`, `INV-LIFE-1` (reachability in both run modes).
+_Includes:_ `USECASE-DEBUG-RUN` (reading whether a running core is halted or quiescent).
+
+**Flow.** `pause [<gate>]` sets a named gate (default `quota-paused`); `resume [<gate>]` clears one
+gate, and `resume --all` clears every gate outstanding. Setting or clearing succeeds **whether or not
+a core is currently running** — the command acts on the gate's own persisted state, never on a live
+core — so a gate set before the next start is still honoured at that start. While **any** gate is set
+the core suspends event production and new dispatch; work already accepted keeps running to
+completion, and expiry keeps advancing (`INV-LIFE-2`). This differs from a **run-scoped selector**
+(`STORY-OP-3`) in **kind**, not degree: a selector is scoped to one run and never outlives it, while a
+gate is global and persists across runs until explicitly cleared.
+
+**Two gates, OR-effective.** `quota-paused` is the operator's own; `cicd-down` belongs to an
+automation actor, and every surface reporting gate state labels an automation-owned gate as such,
+because it MAY re-assert the gate on its own initiative.
+
+**A gated drain-and-exit run does not drain.** Because new dispatch is suspended, a drain-and-exit run
+(`USECASE-RUN-DRAIN`) started while gated would never see its own queue empty on its own idle
+predicate; `INV-LIFE-2` instead requires it to boot, stay reachable, emit its final snapshot, and exit
+promptly, without reporting the queue as drained.
+
+```mermaid
+stateDiagram-v2
+    [*] --> ungated
+    ungated --> halted: pause a gate - a file write, no core required
+    halted --> halted: pause a second gate - OR-effective
+    halted --> ungated: resume --all - every gate cleared
+    halted --> halted: resume one named gate - others may remain set
+    note right of halted
+      new dispatch and event production suspended
+      accepted work runs to completion, expiry continues (INV-LIFE-2)
+    end note
+```
+
+Extensions:
+
+- A gate is set or cleared while no core is running: `pause`/`resume` still exit `0` and report that
+  the change takes effect at the next start, because the command is a file write, not a call over a
+  socket (contrast `INTF-CLI` "Locating the core").
+- The core is asked to run drain-and-exit while gated: it boots, stays reachable, emits a final
+  snapshot, and exits promptly without draining (`INV-LIFE-2`, `USECASE-RUN-DRAIN`).
 
 ### `USECASE-DEBUG-RUN` — read a run: metrics, injected test events, and run-scoped selectors <!-- uuid: 3c360b41-5a84-4607-88b6-425c02f80474 -->
 
