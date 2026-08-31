@@ -914,6 +914,60 @@
                   touch $out
                 '';
 
+              # Manifest ↔ directory parity for the Claude marketplace. Root
+              # cause this guards against (the beads-lifecycle outage,
+              # 2026-08-26..29): commit 7d4df333 added the plugin DIRECTORY but
+              # not its marketplace.json entry, and mkClaudeMarketplace builds
+              # ONLY listed plugins — so the skill silently never shipped while
+              # the always-on agent rules kept instructing every session to
+              # invoke it (fixed by a01747dd). Both directions MUST hold: every
+              # plugin directory carrying a `.claude-plugin/plugin.json` is
+              # listed in `claude-marketplace/.claude-plugin/marketplace.json`,
+              # and every listed plugin has such a directory.
+              test-claude-marketplace-manifest-parity =
+                let
+                  surface = lib.fileset.toSource {
+                    root = ./.;
+                    fileset = ./claude-marketplace;
+                  };
+                in
+                pkgs.runCommand "test-claude-marketplace-manifest-parity" { nativeBuildInputs = [ pkgs.jq ]; } ''
+                  mkt="${surface}/claude-marketplace"
+                  manifest="$mkt/.claude-plugin/marketplace.json"
+
+                  # Liveness first: an empty or missing scan must not pass as
+                  # parity ("found no difference" cannot double as proof the
+                  # scan ran).
+                  if [ ! -f "$manifest" ]; then
+                    echo "FAIL: $manifest missing -- marketplace manifest moved?" >&2
+                    exit 1
+                  fi
+
+                  jq -r '.plugins[].name' "$manifest" | sort > listed
+                  for d in "$mkt"/*/; do
+                    if [ -f "$d/.claude-plugin/plugin.json" ]; then
+                      basename "$d"
+                    fi
+                  done | sort > present
+
+                  if [ ! -s listed ] || [ ! -s present ]; then
+                    echo "FAIL: empty plugin set (listed=$(wc -l < listed), present=$(wc -l < present)) -- the scan is broken" >&2
+                    exit 1
+                  fi
+
+                  if ! diff -u listed present > parity.diff; then
+                    echo "FAIL: marketplace.json and the plugin directories disagree:" >&2
+                    cat parity.diff >&2
+                    echo "      ('-' = listed with no plugin.json directory; '+' = directory never listed." >&2
+                    echo "      The '+' case is the beads-lifecycle failure mode: mkClaudeMarketplace" >&2
+                    echo "      ships ONLY listed plugins, so an unlisted plugin silently never installs.)" >&2
+                    exit 1
+                  fi
+
+                  echo "ok: $(wc -l < listed | tr -d ' ') plugins -- manifest and directories in parity"
+                  touch $out
+                '';
+
               # ── Full-module Go test gates (bead pg2-adhga; converged onto the
               # fleet builder by bead pg2-spwj9) ────────────────────────────────
               #
