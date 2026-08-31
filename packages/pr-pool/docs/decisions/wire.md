@@ -23,12 +23,29 @@ its own arguments, but arguments are never the payload channel. Concretely:
 - **Deferred replies.** A deferral is the literal reply `{ "deferred": true }`. Whether a deferral
   still owes the core a result, or is itself the acceptance, is per-interface behavior
   (`INTF-SOURCE`'s `query` owes events later; `INTF-HANDLER`'s `dispatch` owes nothing).
+- **Payload normalization.** `payload` stays **optional** in the request schema — it does **not**
+  gain `required: payload` — because an existing push participant may already emit events with no
+  `payload` field at all, and requiring it now would be a wire break for every one of them. What
+  changes instead is on the decode/encode side: the core realizes an absent `payload` as the empty
+  object `{}` at decode, and always emits a `payload` object on the wire from then on — present,
+  never absent — so a handler is never handed nothing in its place. The obligation itself is
+  behavior and is stated there (`interfaces.md`'s "Event shape"); this entry records only what does
+  **not** change in the schema.
 - **Coarse exit codes.** A subcommand's exit code stays coarse: `0` ok, `1` unexpected error, `2`
-  **usage** error, `9` busy, and `≥3` otherwise app-specific. The **rich outcome is in the JSON
-  reply**, so a participant in a degraded state MAY return an exit code only (busy → `9`, no body).
-  The **low** codes are held for meanings general to every app — any app can be invoked wrongly, so
-  `2` is reserved for that — while busy means something only to a participant on a capacity-bounded
-  transport and therefore lives out in the app-specific range (`ADR 0042`).
+  **usage** error, `3` **core-reserved pre-flight** (`drain.go`'s `exitPrecheck` — a config or
+  startup precheck failing before any work begins), `9` busy, and `≥4` otherwise
+  app-specific. The **rich outcome is in the JSON reply**, so a participant in a degraded state MAY
+  return an exit code only (busy → `9`, no body). The **low** codes are held for meanings general to
+  every app — any app can be invoked wrongly, so `2` is reserved for that — while busy means
+  something only to a participant on a capacity-bounded transport and therefore lives out in the
+  app-specific range (`ADR 0042`).
+  - **Reconciling against `ADR 0042`.** That ADR's own Decision table still reads `≥3` as one
+    undifferentiated **app-specific** band, even though its own Context already quotes
+    `drain.go`'s local `exitPrecheck = 3` verbatim and its Consequences names `3` as the value
+    already occupying it. `3` was therefore never actually free for a participant to claim in
+    practice — this decision makes that explicit rather than contradicting `ADR 0042`: `3` is
+    named `exitPrecheck`, reserved by the core for its own pre-flight failure, and the
+    app-specific band `ADR 0042` decided on narrows to start at `4`.
 - **The callback is one `command` string.** When the core needs to be reached back it hands the
   participant a single ready-to-run command; how that command is addressed and authenticated is
   `DEC-WIRE-2`.
@@ -158,6 +175,21 @@ The operator-side `status` reply in its machine-readable form:
   "config": { "sources": 2, "handlers": 3 }
 }
 ```
+
+**`cli.status-reply`'s schema-evolution strategy.** This shape evolves under `schemaVersion "1"`
+rather than bumping the version for every addition: a new field is enumerated in `properties`,
+every object (`config`, each `deliveries[]` entry, each `queues[]` entry) keeps
+`additionalProperties: false`, and every new field is **optional at every nesting level** — no new
+`required` property lands on the top level or on `config`/`deliveries[]`/`queues[]`. `config` keeps
+its `sources`/`handlers` counts as the shape widens around them. The **legacy four-field reply**
+illustrated above (`schemaVersion`, `deliveries`, `queues`, `config`, with no other top-level field)
+keeps validating against every later version of the schema, because nothing it already carries is
+ever removed or made to mean something new.
+
+`deliveries[].id` **is** the dispatch tracking id `interfaces.md` calls out — deliveries are
+"keyed by that dispatch's tracking id" — never a second, distinct id field. The `"hs-771e"` above is
+an illustrative, handler-session-shaped placeholder; the value that actually fills this field is
+the dispatch tracking id's own `dsp-<…>` form, once dispatch itself carries one.
 
 **Not decided here.** Which fields each schema requires, and the schema artifacts themselves, belong
 to the implementation and its conformance suite (`INV-INTF-2`). What each field **means** — that `id`

@@ -88,8 +88,12 @@ requires it; the details are here.
   carry meanings general to any app, which is why `2` is **reserved** for usage and `busy` sits
   outside that band rather than on `2`; a caller reading one as the other would treat a decline as a
   typo, and a typo as "re-offer later"
-  (`phillipgreenii-nix-agent-support · packages/pr-pool/docs/decisions · DEC-WIRE-1`). Codes at or
-  above `3` other than `9` are a
+  (`phillipgreenii-nix-agent-support · packages/pr-pool/docs/decisions · DEC-WIRE-1`). Code `3` is
+  **reserved by the core itself**, never a participant's: it is the **pre-flight** signal
+  (`exitPrecheck`) a subcommand exits with when the core's own config or startup precheck fails
+  **before any work begins** — no event has yet been offered, no dispatch attempted, nothing has
+  crossed a participant boundary at all, so there is nothing here for a participant's own code to
+  mean instead. Codes at or above `4` remain a
   participant's own (`phillipgreenii-nix-agent-support · packages/pr-pool/docs/decisions · DEC-WIRE-1`).
 - **Self-status.** Any participant MAY push its **own** status — `healthy` / `degraded` /
   `unavailable` — independent of any per-item outcome. This is the participant reporting on
@@ -237,9 +241,12 @@ arrives at their values:
   (`INV-EVT-4`). Setting it in the future is how a retry window is requested; nothing computes a
   duration.
 - `payload` — MUST be a JSON **object** (a keyed structure, never a bare scalar/array), so a handler
-  always receives a struct. The core neither reads nor validates it, save for a single path a
-  **binding** names for narrowing (below). Its **shape is not declared anywhere** — see
-  `OQ-EVT-CATALOG`.
+  always receives a struct. `payload` is itself **optional** on the wire — a source MAY omit it
+  entirely — but a handler is never handed nothing in its place: the core **realizes an absent
+  `payload` as the empty object at decode**, and **always emits `payload`** — present, an object —
+  **on the wire**, whether or not the originating event carried one. The core neither reads nor
+  validates it, save for a single path a **binding** names for narrowing (below). Its **shape is
+  not declared anywhere** — see `OQ-EVT-CATALOG`.
 
 **Matching (what a binding may match).** A **binding** matches an event over its **fields**, and
 **matchability is the handler's alone** — a source declares nothing about which of its fields may be
