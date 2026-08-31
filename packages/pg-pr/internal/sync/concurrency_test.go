@@ -130,6 +130,10 @@ func (c *concurrentBeadClient) CloseProcessingCycle(context.Context, string, str
 
 func (c *concurrentBeadClient) CloseFeedback(context.Context, string, string) error { return nil }
 
+func (c *concurrentBeadClient) ListFeedbackChildrenOfCycle(context.Context, string) ([]string, error) {
+	return nil, nil
+}
+
 // compile-time check.
 var _ beadsbridge.BeadClient = (*concurrentBeadClient)(nil)
 

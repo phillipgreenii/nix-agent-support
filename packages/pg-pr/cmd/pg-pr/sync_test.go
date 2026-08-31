@@ -301,6 +301,28 @@ type fakeBridgeBeads struct {
 	// Handle, for the sync CLI exit-code test (bead pg2-4dz88.6.3). nil (the
 	// zero value) preserves every other test's existing behavior.
 	findUncachedErr error
+
+	// children models a parent-child bead tree for cascade-close tests
+	// (pg2-kij93): keyed by parent id (a merge-request or cycle bead),
+	// valued by that parent's direct children. ListChildrenOfPR and
+	// ListFeedbackChildrenOfCycle both read it — they share the same
+	// mechanism in production too. A nil/absent map entry (the zero value)
+	// preserves every pre-existing test's "no children" behavior.
+	children map[string][]string
+
+	// closedFeedback/closedCycles/closedMR RECORD every cascade close call,
+	// in order, so a test can assert exactly what a cascade touched instead
+	// of trusting a stub that silently returns nil (pg2-kij93: this fake
+	// previously implemented CloseFeedback as a pure no-op, which made any
+	// assertion built on it vacuous).
+	closedFeedback []string
+	closedCycles   []string
+	closedMR       []string
+	// closeReasons records the reason each close call above was given,
+	// keyed by bead id — used to assert a feedback grandchild's close reason
+	// is distinguishable from the cycle/PR's own (pg2-kij93's "never
+	// individually triaged" acceptance criterion).
+	closeReasons map[string]string
 }
 
 func (f *fakeBridgeBeads) FindByRepoAndNumberUncached(context.Context, string, int) (*beads.MergeRequest, error) {
@@ -317,9 +339,15 @@ func (f *fakeBridgeBeads) ReconcileMergeRequest(context.Context, *beads.MergeReq
 func (f *fakeBridgeBeads) FindByRepoAndNumber(context.Context, string, int) (*beads.MergeRequest, error) {
 	return nil, nil
 }
-func (f *fakeBridgeBeads) CloseMergeRequest(context.Context, string, string) error { return nil }
-func (f *fakeBridgeBeads) ListChildrenOfPR(context.Context, string) ([]string, error) {
-	return nil, nil
+
+func (f *fakeBridgeBeads) CloseMergeRequest(_ context.Context, id, reason string) error {
+	f.closedMR = append(f.closedMR, id)
+	f.recordReason(id, reason)
+	return nil
+}
+
+func (f *fakeBridgeBeads) ListChildrenOfPR(_ context.Context, id string) ([]string, error) {
+	return append([]string(nil), f.children[id]...), nil
 }
 
 func (f *fakeBridgeBeads) CreateProcessingCycle(context.Context, beads.CreateProcessingCycleInput) (string, error) {
@@ -333,8 +361,32 @@ func (f *fakeBridgeBeads) ResolveProcessingCycle(context.Context, string, string
 func (f *fakeBridgeBeads) AppendProcessingCycleNote(context.Context, string, string, string, []string) error {
 	return nil
 }
-func (f *fakeBridgeBeads) CloseProcessingCycle(context.Context, string, string) error { return nil }
-func (f *fakeBridgeBeads) CloseFeedback(context.Context, string, string) error        { return nil }
+
+func (f *fakeBridgeBeads) CloseProcessingCycle(_ context.Context, id, reason string) error {
+	f.closedCycles = append(f.closedCycles, id)
+	f.recordReason(id, reason)
+	return nil
+}
+
+func (f *fakeBridgeBeads) CloseFeedback(_ context.Context, id, reason string) error {
+	f.closedFeedback = append(f.closedFeedback, id)
+	f.recordReason(id, reason)
+	return nil
+}
+
+// ListFeedbackChildrenOfCycle shares ListChildrenOfPR's tree, matching the
+// real beads.Client (both are the same parent-child dep-list scoped to one
+// bead — see its doc comment).
+func (f *fakeBridgeBeads) ListFeedbackChildrenOfCycle(ctx context.Context, cycleID string) ([]string, error) {
+	return f.ListChildrenOfPR(ctx, cycleID)
+}
+
+func (f *fakeBridgeBeads) recordReason(id, reason string) {
+	if f.closeReasons == nil {
+		f.closeReasons = map[string]string{}
+	}
+	f.closeReasons[id] = reason
+}
 
 // ----------------------------------------------------------------------
 // One-shot `--pr`/`--repo` lock give-up exit-code wiring (bead pg2-4dz88.6.3)

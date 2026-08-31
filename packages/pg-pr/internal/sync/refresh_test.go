@@ -452,6 +452,9 @@ func (f *outboxFakeBeads) AppendProcessingCycleNote(context.Context, string, str
 }
 func (f *outboxFakeBeads) CloseProcessingCycle(context.Context, string, string) error { return nil }
 func (f *outboxFakeBeads) CloseFeedback(context.Context, string, string) error        { return nil }
+func (f *outboxFakeBeads) ListFeedbackChildrenOfCycle(context.Context, string) ([]string, error) {
+	return nil, nil
+}
 
 func (f *outboxFakeBeads) DepTreeUp(_ context.Context, _ string) ([]beads.DepNode, error) {
 	return nil, nil

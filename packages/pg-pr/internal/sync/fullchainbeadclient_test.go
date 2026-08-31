@@ -72,5 +72,9 @@ func (f *fullChainBeadClient) CloseProcessingCycle(_ context.Context, _, _ strin
 
 func (f *fullChainBeadClient) CloseFeedback(_ context.Context, _, _ string) error { return nil }
 
+func (f *fullChainBeadClient) ListFeedbackChildrenOfCycle(_ context.Context, _ string) ([]string, error) {
+	return nil, nil
+}
+
 // compile-time check: fullChainBeadClient satisfies the bridge interface.
 var _ beadsbridge.BeadClient = (*fullChainBeadClient)(nil)

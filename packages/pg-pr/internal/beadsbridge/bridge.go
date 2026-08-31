@@ -17,6 +17,7 @@ package beadsbridge
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -46,6 +47,12 @@ type BeadClient interface {
 	AppendProcessingCycleNote(ctx context.Context, id, note, addLabel string, removeLabels []string) error
 	CloseProcessingCycle(ctx context.Context, id, reason string) error
 	CloseFeedback(ctx context.Context, id, reason string) error
+	// ListFeedbackChildrenOfCycle lists the feedback-bead children of a
+	// process-feedback cycle bead — the parent-scoped query
+	// CascadeCloseMergeRequest needs to close a cycle's feedback
+	// grandchildren without enumerating every feedback bead in the
+	// workspace (pg2-kij93).
+	ListFeedbackChildrenOfCycle(ctx context.Context, cycleID string) ([]string, error)
 }
 
 // Handler is the beads event handler.
@@ -449,7 +456,24 @@ func renderCycleNote(s *store.FeedbackSummary) string {
 	return b.String()
 }
 
-// cascadeClose closes the PR bead and its descendants.
+// cascadeCloseFeedbackReason renders the reason recorded on a feedback bead
+// closed purely because its parent process-feedback cycle reached a terminal
+// state. It is DELIBERATELY distinct from the reason the cycle/PR bead
+// itself closes with (e.g. "pr-closed", "upstream-merged"): the feedback item
+// was never individually read, let alone triaged, and its close reason MUST
+// say so (pg2-kij93's acceptance criteria). Blurring the two is exactly what
+// made the 1,303-bead backlog this bug produced unreadable after the fact —
+// a later reader could not tell "adjudicated non-actionable" from "never
+// looked at".
+func cascadeCloseFeedbackReason(cycleID, cycleReason string) string {
+	return fmt.Sprintf(
+		"cascade-closed: never individually triaged (parent process-feedback cycle %s closed: %s)",
+		cycleID, cycleReason)
+}
+
+// cascadeClose closes the PR bead and its descendants: resolves the
+// merge-request bead and the close reason from the PR payload, then hands
+// off to CascadeCloseMergeRequest for the actual cascade.
 func (h *Handler) cascadeClose(ctx context.Context, p store.PRPayload) error {
 	mr, err := h.client.FindByRepoAndNumber(ctx, p.Repo, p.Number)
 	if err != nil || mr == nil {
@@ -459,14 +483,86 @@ func (h *Handler) cascadeClose(ctx context.Context, p store.PRPayload) error {
 	if p.Merged {
 		reason = "upstream-merged"
 	}
-	children, err := h.client.ListChildrenOfPR(ctx, mr.ID)
+	return h.CascadeCloseMergeRequest(ctx, mr.ID, reason)
+}
+
+// CascadeCloseMergeRequest closes the merge-request bead id and its FULL
+// descendant tree — every process-feedback cycle beneath it, AND every
+// feedback bead beneath EACH of those cycles — with reason.
+//
+// It is exported so every path that closes a merge-request bead, not only
+// the pr.closed/pr.merged event path (cascadeClose above), can run the
+// IDENTICAL cascade. cmd/pg-pr's `pr close` command closes a merge-request
+// bead directly — a synchronous CLI action that bypasses the event/outbox
+// system entirely — and any other close path, present or future, has the
+// same obligation (pg2-kij93 defect 2): a close path that does not cascade
+// leaves cycles, and their feedback, orphaned under a closed PR bead
+// forever, since ensureProcessFeedbackBead's closed-parent guard means
+// nothing will ever revisit them once the PR bead is closed.
+//
+// Two levels are closed, not one (defect 1): ListChildrenOfPR finds the
+// process-feedback cycles (and any other direct child, e.g. an action bead —
+// this method is as type-blind about direct children as the pre-fix code
+// was), and ListFeedbackChildrenOfCycle finds each cycle's feedback
+// grandchildren. A grandchild is closed with cascadeCloseFeedbackReason, NOT
+// the bare reason the cycle/PR bead itself gets.
+//
+// A cycle is closed only once ALL of its feedback children closed
+// successfully. If any feedback close fails, that cycle is deliberately left
+// OPEN rather than closed anyway: an open task-type bead is visible to
+// normal bd sweeps (bd ready included), whereas a closed cycle with orphaned
+// feedback underneath it reproduces the exact invisible defect this bug
+// fixes — feedback beads are `hooked` status, excluded from bd ready. The
+// merge-request bead itself is always attempted regardless of descendant
+// failures, matching the pre-fix behavior of unconditionally closing it.
+//
+// Every failure is collected and SURFACED, not discarded (defect 3): a
+// partial cascade returns a non-nil error naming what did not close, rather
+// than returning nil as if the cascade fully completed.
+//
+// Idempotent: CloseFeedback/CloseProcessingCycle/CloseMergeRequest are each
+// individually idempotent (a no-op on an already-closed bead), so
+// re-running the cascade over an already-closed subtree closes nothing new
+// and returns nil.
+func (h *Handler) CascadeCloseMergeRequest(ctx context.Context, mrID, reason string) error {
+	if mrID == "" {
+		return errors.New("beadsbridge: cascade-close: merge-request id required")
+	}
+	cycles, err := h.client.ListChildrenOfPR(ctx, mrID)
 	if err != nil {
-		return err
+		return fmt.Errorf("beadsbridge: cascade-close %s: list children: %w", mrID, err)
 	}
-	for _, child := range children {
-		_ = h.client.CloseProcessingCycle(ctx, child, reason)
+	var failures []error
+	for _, cycle := range cycles {
+		feedback, ferr := h.client.ListFeedbackChildrenOfCycle(ctx, cycle)
+		if ferr != nil {
+			failures = append(failures, fmt.Errorf("list feedback children of %s: %w", cycle, ferr))
+			continue
+		}
+		feedbackReason := cascadeCloseFeedbackReason(cycle, reason)
+		allFeedbackClosed := true
+		for _, fb := range feedback {
+			if cerr := h.client.CloseFeedback(ctx, fb, feedbackReason); cerr != nil {
+				failures = append(failures, fmt.Errorf("close feedback %s (cycle %s): %w", fb, cycle, cerr))
+				allFeedbackClosed = false
+			}
+		}
+		if !allFeedbackClosed {
+			// Leave the cycle open — see the doc comment above.
+			continue
+		}
+		if cerr := h.client.CloseProcessingCycle(ctx, cycle, reason); cerr != nil {
+			failures = append(failures, fmt.Errorf("close cycle %s: %w", cycle, cerr))
+		}
 	}
-	return h.client.CloseMergeRequest(ctx, mr.ID, reason)
+	if cerr := h.client.CloseMergeRequest(ctx, mrID, reason); cerr != nil {
+		failures = append(failures, fmt.Errorf("close merge-request %s: %w", mrID, cerr))
+	}
+	if len(failures) == 0 {
+		return nil
+	}
+	return fmt.Errorf("beadsbridge: cascade-close %s: %d descendant/self close(s) failed: %w",
+		mrID, len(failures), errors.Join(failures...))
 }
 
 // compile-time check: *beads.Client must satisfy BeadClient.

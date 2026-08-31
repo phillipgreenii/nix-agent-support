@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/beadsbridge"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/prlock"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
@@ -196,6 +197,26 @@ func swapFakes(t *testing.T) (*writeFakeVCS, *fakeBeadsClient) {
 		beadsClientForPR = prevB
 	})
 	return fv, fb
+}
+
+// swapCascadeCloser swaps cascadeCloserForPR — the SEPARATE factory `pr
+// close` uses to run the cascade close (pg2-kij93 defect 2) — with a fresh
+// fakeBridgeBeads, so a test can assert exactly which descendants a cascade
+// touched instead of trusting a real bd shell-out. Reuses fakeBridgeBeads
+// (defined in sync_test.go, same package) rather than a new type: it already
+// satisfies beadsbridge.BeadClient and records every cascade close call.
+//
+// Only tests that exercise `pr close`'s bead-closing branch with a non-nil,
+// non-closed found bead need this — every other swapFakes caller is
+// unaffected, since cascadeCloserForPR is never invoked unless that branch
+// runs.
+func swapCascadeCloser(t *testing.T) *fakeBridgeBeads {
+	t.Helper()
+	fake := &fakeBridgeBeads{}
+	prev := cascadeCloserForPR
+	cascadeCloserForPR = func(string) beadsbridge.BeadClient { return fake }
+	t.Cleanup(func() { cascadeCloserForPR = prev })
+	return fake
 }
 
 func TestPRCreate_DefaultDraft(t *testing.T) {
@@ -477,6 +498,7 @@ func TestPRClose_AlsoClosesBead(t *testing.T) {
 		Type:   beads.TypeMergeRequest,
 		Fields: beads.MergeRequestFields{Repo: "foo/bar", PRNumber: 7},
 	}
+	cascade := swapCascadeCloser(t)
 
 	var stdout, stderr bytes.Buffer
 	rootCmd.SetOut(&stdout)
@@ -491,15 +513,94 @@ func TestPRClose_AlsoClosesBead(t *testing.T) {
 	if fb.findRepo != "foo/bar" || fb.findNumber != 7 {
 		t.Fatalf("FindByRepoAndNumber args: got %q/%d", fb.findRepo, fb.findNumber)
 	}
-	if len(fb.closeCalls) != 1 || fb.closeCalls[0] != "mr-7" {
-		t.Fatalf("CloseMergeRequest not called as expected: %+v", fb.closeCalls)
+	if len(cascade.closedMR) != 1 || cascade.closedMR[0] != "mr-7" {
+		t.Fatalf("cascade CloseMergeRequest not called as expected: %+v", cascade.closedMR)
 	}
-	if len(fb.closeReasonLog) != 1 || !strings.Contains(fb.closeReasonLog[0], "pg-pr pr close") {
-		t.Fatalf("close reason missing 'pg-pr pr close': %+v", fb.closeReasonLog)
+	if got := cascade.closeReasons["mr-7"]; !strings.Contains(got, "pg-pr pr close") {
+		t.Fatalf("close reason missing 'pg-pr pr close': %q", got)
 	}
 	if !strings.Contains(stdout.String(), "Closed merge-request bead mr-7") {
 		t.Errorf("stdout should mention bead close: %q", stdout.String())
 	}
+}
+
+// TestPRClose_CascadesToCyclesAndFeedback is the regression test for pg2-kij93
+// defect 2: `pr close` closes a merge-request bead through a path that
+// bypasses the pr.closed/pr.merged event system entirely (this command calls
+// the bd bead close synchronously, never emitting an event beadsbridge would
+// otherwise pick up), so it must run the IDENTICAL cascade itself or it
+// leaves the PR's process-feedback cycles — and their feedback
+// grandchildren — orphaned exactly like the pre-fix event path did (defect
+// 1). This is the closest concrete instance of "any other path that closes a
+// merge-request bead" this codebase has to the duplicate-reconcile scenario
+// the bug report describes: pg-pr has no other MUTATING close path (the
+// `sync duplicates` audit is read-only by design), so `pr close` is it.
+func TestPRClose_CascadesToCyclesAndFeedback(t *testing.T) {
+	resetPRWriteFlags()
+	_, fb := swapFakes(t)
+	fb.findResult = &beads.MergeRequest{
+		ID:     "mr-8",
+		Status: "open",
+		Type:   beads.TypeMergeRequest,
+		Fields: beads.MergeRequestFields{Repo: "foo/bar", PRNumber: 8},
+	}
+	cascade := swapCascadeCloser(t)
+	cascade.children = map[string][]string{
+		"mr-8":    {"cycle-1", "cycle-2"},
+		"cycle-1": {"fb-1", "fb-2"},
+		"cycle-2": {"fb-3"},
+	}
+
+	rootCmd.SetOut(io_discard)
+	rootCmd.SetErr(io_discard)
+	rootCmd.SetArgs([]string{"pr", "close", "8", "--repo", "foo/bar"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+
+	if len(cascade.closedMR) != 1 || cascade.closedMR[0] != "mr-8" {
+		t.Fatalf("expected mr-8 closed, got %v", cascade.closedMR)
+	}
+	wantCycles := []string{"cycle-1", "cycle-2"}
+	if !sameElements(cascade.closedCycles, wantCycles) {
+		t.Fatalf("closed cycles = %v, want %v", cascade.closedCycles, wantCycles)
+	}
+	wantFeedback := []string{"fb-1", "fb-2", "fb-3"}
+	if !sameElements(cascade.closedFeedback, wantFeedback) {
+		t.Fatalf("closed feedback = %v, want %v", cascade.closedFeedback, wantFeedback)
+	}
+	// Every feedback grandchild's close reason must be DISTINGUISHABLE from
+	// the cycle/PR's own reason — it was never individually triaged.
+	for _, fbID := range wantFeedback {
+		reason := cascade.closeReasons[fbID]
+		if reason == cascade.closeReasons["mr-8"] {
+			t.Fatalf("feedback %s reused the PR's own close reason %q; want a distinguishable never-triaged reason", fbID, reason)
+		}
+		if !strings.Contains(reason, "never") {
+			t.Fatalf("feedback %s close reason %q does not say it was never triaged", fbID, reason)
+		}
+	}
+}
+
+// sameElements reports whether got and want contain the same elements,
+// ignoring order.
+func sameElements(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	seen := map[string]int{}
+	for _, g := range got {
+		seen[g]++
+	}
+	for _, w := range want {
+		seen[w]--
+	}
+	for _, n := range seen {
+		if n != 0 {
+			return false
+		}
+	}
+	return true
 }
 
 func TestPRClose_NoBead_StillSucceeds(t *testing.T) {

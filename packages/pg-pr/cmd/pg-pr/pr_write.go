@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/beadsbridge"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/branch"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/output"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/prlock"
@@ -72,6 +73,25 @@ var prWF prWriteFlags
 // the path via resolveRepoPath; tests typically ignore the argument and
 // return a shared in-memory fake.
 var beadsClientForPR = func(dir string) beadsMergeRequestClient {
+	return beads.NewClientForRepo(dir)
+}
+
+// cascadeCloserForPR constructs the beadsbridge cascade-closer `pr close`
+// uses to close a merge-request bead. It is a SEPARATE factory from
+// beadsClientForPR (a narrower interface that lacks the cascade's
+// descendant-listing/closing methods) rather than a widened
+// beadsMergeRequestClient, so every other beadsClientForPR caller
+// (pr create/update) is unaffected by this path's needs.
+//
+// Routing `pr close`'s bd-bead-close through the SAME cascade the
+// pr.closed/pr.merged event path runs (internal/beadsbridge.Handler.
+// CascadeCloseMergeRequest) is pg2-kij93 defect 2's fix: this command closes
+// a merge-request bead directly, bypassing the event/outbox system
+// entirely, so without this it would leave that PR's process-feedback
+// cycles — and their feedback grandchildren — orphaned forever.
+//
+// Tests MUST override this the same way they override beadsClientForPR.
+var cascadeCloserForPR = func(dir string) beadsbridge.BeadClient {
 	return beads.NewClientForRepo(dir)
 }
 
@@ -590,9 +610,12 @@ var prCloseCmd = &cobra.Command{
 		}
 
 		// Best-effort: close the corresponding merge-request bead. The
-		// cascade rule on close also closes children (processing-cycle /
-		// feedback / action) under that bead. If no bead is found, we
-		// silently skip — the next sync will reconcile.
+		// cascade closes descendants (process-feedback cycles AND their
+		// feedback grandchildren) under that bead too (pg2-kij93 defect 2) —
+		// this command closes the bd bead directly, bypassing the
+		// event/outbox path cascadeClose normally runs on, so it must run
+		// the identical cascade itself or those descendants are orphaned. If
+		// no bead is found, we silently skip — the next sync will reconcile.
 		//
 		// The bd Client is scoped to the repo's monorepo root so the
 		// lookup + close hit the correct .beads/ workspace.
@@ -605,7 +628,8 @@ var prCloseCmd = &cobra.Command{
 					"WARNING: failed to look up merge-request bead for %s#%d: %v\n",
 					repo, num, ferr)
 			} else if mr != nil && mr.Status != "closed" {
-				if cerr := bdc.CloseMergeRequest(ctx, mr.ID,
+				cascade := beadsbridge.New(cascadeCloserForPR(resolveRepoPath(ctx, repo)))
+				if cerr := cascade.CascadeCloseMergeRequest(ctx, mr.ID,
 					"closed via pg-pr pr close"); cerr != nil {
 					_, _ = fmt.Fprintf(cmd.ErrOrStderr(),
 						"WARNING: failed to close merge-request bead %s: %v\n",

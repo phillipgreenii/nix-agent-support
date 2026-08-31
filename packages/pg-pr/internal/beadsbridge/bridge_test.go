@@ -78,6 +78,9 @@ func (noopBeadClient) AppendProcessingCycleNote(context.Context, string, string,
 }
 func (noopBeadClient) CloseProcessingCycle(context.Context, string, string) error { return nil }
 func (noopBeadClient) CloseFeedback(context.Context, string, string) error        { return nil }
+func (noopBeadClient) ListFeedbackChildrenOfCycle(context.Context, string) ([]string, error) {
+	return nil, nil
+}
 
 // errFindClient returns an error from ResolveProcessingCycle; FindByRepoAndNumber
 // returns a stub (open) MR. Used to prove the find-error propagates (NOT swallowed
@@ -491,6 +494,227 @@ func TestPRMergedCascadeClosesChildBead(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("expected child bead to be closed by cascade, closed: %v", closedChildren)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// pg2-kij93: CascadeCloseMergeRequest closes feedback grandchildren too, not
+// just process-feedback cycles, and surfaces (rather than discards) any
+// descendant close failure.
+// ---------------------------------------------------------------------------
+
+// treeBeadClient is an in-memory BeadClient modeling a full merge-request →
+// cycle → feedback tree, so cascade-close tests can assert EXACT counts
+// (the "N cycles × M feedback ⇒ 1+N+N*M closed" acceptance criterion) and
+// idempotency (re-running the cascade over an already-closed subtree closes
+// nothing new and returns nil) — closer to the real bd backend's shape than
+// the single-level fakes above.
+type treeBeadClient struct {
+	noopBeadClient
+	// childrenOf maps a parent bead id (the merge-request, or a cycle) to
+	// its direct children — cycles under the MR, feedback under a cycle.
+	// ListChildrenOfPR and ListFeedbackChildrenOfCycle both read it,
+	// mirroring how they share one mechanism in production.
+	childrenOf map[string][]string
+	// closed tracks which ids have been closed, so a repeat close is not
+	// double-counted below — the same idempotency the real bd close (and
+	// CloseFeedback/CloseProcessingCycle/CloseMergeRequest) provides.
+	closed map[string]bool
+	// closedFeedback/closedCycles record each NEW close, in order.
+	closedFeedback []string
+	closedCycles   []string
+	closedMR       []string
+	// closeReasons records the reason passed on each id's close.
+	closeReasons map[string]string
+}
+
+func newTreeBeadClient(mrID string, cycles, feedbackPerCycle int) *treeBeadClient {
+	c := &treeBeadClient{
+		childrenOf:   map[string][]string{},
+		closed:       map[string]bool{},
+		closeReasons: map[string]string{},
+	}
+	var cycleIDs []string
+	for i := 0; i < cycles; i++ {
+		cycleID := fmt.Sprintf("cycle-%d", i)
+		cycleIDs = append(cycleIDs, cycleID)
+		var fbIDs []string
+		for j := 0; j < feedbackPerCycle; j++ {
+			fbIDs = append(fbIDs, fmt.Sprintf("%s-fb-%d", cycleID, j))
+		}
+		c.childrenOf[cycleID] = fbIDs
+	}
+	c.childrenOf[mrID] = cycleIDs
+	return c
+}
+
+func (c *treeBeadClient) ListChildrenOfPR(_ context.Context, id string) ([]string, error) {
+	return append([]string(nil), c.childrenOf[id]...), nil
+}
+
+func (c *treeBeadClient) ListFeedbackChildrenOfCycle(ctx context.Context, cycleID string) ([]string, error) {
+	return c.ListChildrenOfPR(ctx, cycleID)
+}
+
+func (c *treeBeadClient) CloseFeedback(_ context.Context, id, reason string) error {
+	if !c.closed[id] {
+		c.closedFeedback = append(c.closedFeedback, id)
+	}
+	c.closed[id] = true
+	c.closeReasons[id] = reason
+	return nil
+}
+
+func (c *treeBeadClient) CloseProcessingCycle(_ context.Context, id, reason string) error {
+	if !c.closed[id] {
+		c.closedCycles = append(c.closedCycles, id)
+	}
+	c.closed[id] = true
+	c.closeReasons[id] = reason
+	return nil
+}
+
+func (c *treeBeadClient) CloseMergeRequest(_ context.Context, id, reason string) error {
+	if !c.closed[id] {
+		c.closedMR = append(c.closedMR, id)
+	}
+	c.closed[id] = true
+	c.closeReasons[id] = reason
+	return nil
+}
+
+func (c *treeBeadClient) closedCount() int { return len(c.closed) }
+
+// TestCascadeCloseMergeRequest_ClosesFeedbackGrandchildren is pg2-kij93's
+// primary acceptance criterion: a PR bead with N cycles, each holding M
+// feedback beads, ends with ALL 1+N+N*M beads closed after cascade close —
+// the fix for defect 1 (the cascade used to stop one level short, leaving
+// every feedback bead `hooked` forever).
+func TestCascadeCloseMergeRequest_ClosesFeedbackGrandchildren(t *testing.T) {
+	const n, m = 3, 4 // cycles, feedback beads per cycle
+	client := newTreeBeadClient("mr-1", n, m)
+	h := New(client)
+
+	if err := h.CascadeCloseMergeRequest(context.Background(), "mr-1", "pr-closed"); err != nil {
+		t.Fatalf("CascadeCloseMergeRequest: %v", err)
+	}
+
+	want := 1 + n + n*m
+	if got := client.closedCount(); got != want {
+		t.Fatalf("closed %d bead(s), want %d (1 MR + %d cycles + %d feedback)", got, want, n, n*m)
+	}
+	if len(client.closedCycles) != n {
+		t.Fatalf("closed %d cycle(s), want %d: %v", len(client.closedCycles), n, client.closedCycles)
+	}
+	if len(client.closedFeedback) != n*m {
+		t.Fatalf("closed %d feedback bead(s), want %d: %v", len(client.closedFeedback), n*m, client.closedFeedback)
+	}
+	// Every feedback grandchild's close reason MUST be distinguishable from
+	// the cycle/PR's own reason — it was never individually triaged, only
+	// swept up because its ancestor reached a terminal state.
+	for _, fb := range client.closedFeedback {
+		reason := client.closeReasons[fb]
+		if reason == "pr-closed" {
+			t.Fatalf("feedback %s was closed with the bare PR reason %q; want a distinguishable never-triaged reason", fb, reason)
+		}
+		if !strings.Contains(reason, "never") {
+			t.Fatalf("feedback %s close reason %q does not say it was never triaged", fb, reason)
+		}
+	}
+	for _, cycle := range client.closedCycles {
+		if client.closeReasons[cycle] != "pr-closed" {
+			t.Fatalf("cycle %s closed with reason %q, want the bare PR reason %q", cycle, client.closeReasons[cycle], "pr-closed")
+		}
+	}
+}
+
+// TestCascadeCloseMergeRequest_Idempotent covers the acceptance criterion
+// that re-running the cascade over an already-closed subtree is a no-op, not
+// an error.
+func TestCascadeCloseMergeRequest_Idempotent(t *testing.T) {
+	client := newTreeBeadClient("mr-1", 2, 2)
+	h := New(client)
+	ctx := context.Background()
+
+	if err := h.CascadeCloseMergeRequest(ctx, "mr-1", "pr-closed"); err != nil {
+		t.Fatalf("first cascade: %v", err)
+	}
+	closedAfterFirst := client.closedCount()
+
+	if err := h.CascadeCloseMergeRequest(ctx, "mr-1", "pr-closed"); err != nil {
+		t.Fatalf("second (idempotent) cascade: %v", err)
+	}
+	if got := client.closedCount(); got != closedAfterFirst {
+		t.Fatalf("re-running the cascade over an already-closed subtree changed the closed count: %d -> %d", closedAfterFirst, got)
+	}
+}
+
+// failingFeedbackClient closes every feedback bead except one, whose
+// CloseFeedback call errors — proving defect 3 (a failing child close used
+// to be silently discarded) is fixed: the cascade must surface the failure,
+// and must NOT close the cycle bead above a feedback bead it failed to
+// close. Closing the cycle anyway would recreate the exact orphan this bug
+// fixes, one level up, and just as invisibly (a closed cycle's remaining
+// open feedback is never revisited).
+type failingFeedbackClient struct {
+	noopBeadClient
+	childrenOf   map[string][]string
+	failFeedback string
+	closedFB     []string
+	closedCycle  bool
+	closedMR     bool
+}
+
+func (c *failingFeedbackClient) ListChildrenOfPR(_ context.Context, id string) ([]string, error) {
+	return c.childrenOf[id], nil
+}
+
+func (c *failingFeedbackClient) ListFeedbackChildrenOfCycle(ctx context.Context, id string) ([]string, error) {
+	return c.ListChildrenOfPR(ctx, id)
+}
+
+func (c *failingFeedbackClient) CloseFeedback(_ context.Context, id, _ string) error {
+	if id == c.failFeedback {
+		return errBoom
+	}
+	c.closedFB = append(c.closedFB, id)
+	return nil
+}
+
+func (c *failingFeedbackClient) CloseProcessingCycle(context.Context, string, string) error {
+	c.closedCycle = true
+	return nil
+}
+
+func (c *failingFeedbackClient) CloseMergeRequest(context.Context, string, string) error {
+	c.closedMR = true
+	return nil
+}
+
+func TestCascadeCloseMergeRequest_SurfacesChildFailureAndLeavesCycleOpen(t *testing.T) {
+	client := &failingFeedbackClient{
+		childrenOf: map[string][]string{
+			"mr-1":    {"cycle-1"},
+			"cycle-1": {"fb-1", "fb-2"},
+		},
+		failFeedback: "fb-2",
+	}
+	h := New(client)
+	err := h.CascadeCloseMergeRequest(context.Background(), "mr-1", "pr-closed")
+	if err == nil {
+		t.Fatal("expected the feedback close failure to be surfaced, got nil")
+	}
+	if !strings.Contains(err.Error(), "fb-2") {
+		t.Fatalf("error should name the failed bead fb-2: %v", err)
+	}
+	if client.closedCycle {
+		t.Fatal("cycle must NOT be closed while one of its feedback children failed to close")
+	}
+	if len(client.closedFB) != 1 || client.closedFB[0] != "fb-1" {
+		t.Fatalf("expected fb-1 (the non-failing feedback) to still be closed: %v", client.closedFB)
+	}
+	if !client.closedMR {
+		t.Fatal("the merge-request bead itself must still be closed despite the descendant failure")
 	}
 }
 

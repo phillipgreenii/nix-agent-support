@@ -97,6 +97,29 @@ func (c *Client) ListFeedbackBeadIDs(ctx context.Context) ([]string, error) {
 	return ids, nil
 }
 
+// ListFeedbackChildrenOfCycle returns the IDs of feedback beads (any status)
+// that are children — parent-child dependents — of the given process-feedback
+// cycle bead. It is the PARENT-SCOPED counterpart ListFeedbackBeadIDs lacks
+// (pg2-kij93): that method enumerates every feedback bead in the entire
+// workspace with no way to filter by parent, so it cannot be used to find
+// "the feedback under THIS cycle" without also touching every unrelated
+// feedback bead in the database. cascadeClose (internal/beadsbridge) needs
+// exactly that scoped lookup to close a cycle's feedback grandchildren when
+// its PR reaches a terminal state, without ever enumerating the whole
+// feedback population.
+//
+// It deliberately SHARES its mechanism with ListChildrenOfPR — both are a
+// parent-child "dep list --direction=up" scoped to one bead — rather than
+// re-implementing the same query a second time; the name here documents the
+// caller's intent (find a cycle's feedback children) rather than introducing
+// a second code path.
+func (c *Client) ListFeedbackChildrenOfCycle(ctx context.Context, cycleID string) ([]string, error) {
+	if cycleID == "" {
+		return nil, errors.New("feedback: cycle id required")
+	}
+	return c.ListChildrenOfPR(ctx, cycleID)
+}
+
 // Package-level convenience wrapper using the default Client.
 
 // CloseFeedback closes a feedback bead using the default Client.
