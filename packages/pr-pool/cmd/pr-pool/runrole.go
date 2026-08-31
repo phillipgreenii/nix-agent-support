@@ -32,7 +32,7 @@ const envTestMode = "PR_POOL_TEST_MODE"
 // 1.5c). Exists as its own function so the "smoke commands set
 // PR_POOL_TEST_MODE=1" contract is unit-testable independent of the full
 // config.Load/precheck plumbing runRunRole/runRunQuery need.
-func setTestMode() { os.Setenv(envTestMode, "1") }
+func setTestMode() { _ = os.Setenv(envTestMode, "1") }
 
 // resolveRole finds a configured role by its name. Unknown names are rejected HERE
 // (in the handler, after config load) rather than at arg-parse time, so arg parsing

@@ -214,7 +214,7 @@ func TestRenderRunQueryJSON_emptyMatchesIsAnEmptyArray(t *testing.T) {
 // config.Load/precheck plumbing runRunRole/runRunQuery need.
 func TestSetTestMode(t *testing.T) {
 	t.Setenv(envTestMode, "")
-	os.Unsetenv(envTestMode)
+	_ = os.Unsetenv(envTestMode)
 	setTestMode()
 	if got := os.Getenv(envTestMode); got != "1" {
 		t.Errorf("PR_POOL_TEST_MODE = %q, want %q", got, "1")
