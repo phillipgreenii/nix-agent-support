@@ -1,0 +1,18 @@
+#compdef bgcheck
+
+_bgcheck_names() {
+  local dir="${BG_DIR:-${TMPDIR:-/tmp}/pg-bg-$USER}"
+  local -a names
+  local f
+  for f in "$dir"/*.pid(N); do
+    names+=("${${f:t}%.pid}")
+  done
+  _describe 'job name' names
+}
+
+_arguments \
+  '(-h --help)'{-h,--help}'[Show help message]' \
+  '(-v --version)'{-v,--version}'[Show version information]' \
+  '(-n --lines)'{-n,--lines}'[Log lines to show]:count:' \
+  '(-d --dir)'{-d,--dir}'[State directory]:directory:_files -/' \
+  '1:job name:_bgcheck_names'

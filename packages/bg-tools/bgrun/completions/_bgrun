@@ -1,0 +1,8 @@
+#compdef bgrun
+
+_arguments \
+  '(-h --help)'{-h,--help}'[Show help message]' \
+  '(-v --version)'{-v,--version}'[Show version information]' \
+  '(-d --dir)'{-d,--dir}'[State directory]:directory:_files -/' \
+  '1:job name:' \
+  '*:::command:_normal'

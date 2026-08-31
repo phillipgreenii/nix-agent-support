@@ -207,6 +207,17 @@
               name = "git-tools-0.0.0-${phillipgreenii-nix-base.lib.mkSrcDigest result.packages}";
               paths = result.packages;
             };
+          bg-tools =
+            let
+              result = import ./packages/bg-tools {
+                pkgs = final;
+                inherit bashBuilders;
+              };
+            in
+            final.symlinkJoin {
+              name = "bg-tools-0.0.0-${phillipgreenii-nix-base.lib.mkSrcDigest result.packages}";
+              paths = result.packages;
+            };
           integrate-branch-support =
             let
               result = import ./packages/integrate-branch-support {
@@ -3437,6 +3448,13 @@
             # pg-disk-reclaimer above: without this the suite ran in no gate
             # at all.
             // (import ./packages/git-tools {
+              inherit pkgs;
+              bashBuilders = pkgs._agentSupportBashBuilders;
+            }).checks
+            # test-bg-tools-lib / test-bgrun / test-bgcheck (bead pg2-r17gf).
+            # Same one-line idiom as git-tools above: without this the suite
+            # ran in no gate at all.
+            // (import ./packages/bg-tools {
               inherit pkgs;
               bashBuilders = pkgs._agentSupportBashBuilders;
             }).checks

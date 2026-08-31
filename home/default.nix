@@ -24,6 +24,7 @@
     ./programs/pb
     ./programs/claude-extended-tool-approver
     ./programs/git-tools
+    ./programs/bg-tools
     ./programs/pg-pr
     ./programs/pg-ccaudit
     ./programs/integrate-branch-support
