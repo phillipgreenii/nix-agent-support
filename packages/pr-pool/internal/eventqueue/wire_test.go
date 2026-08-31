@@ -92,6 +92,36 @@ func TestDecodeEvent_RejectionNamesTheField(t *testing.T) {
 	}
 }
 
+// A wire event that omits `payload` entirely decodes to a non-nil, empty map —
+// never nil (Task 1.6, INTF-SOURCE payload normalization) — so a handler is
+// never handed nothing in its place and every downstream reader (a binding's
+// narrowing path, discover's ItemFromPayload) can index Payload unconditionally.
+func TestDecodeEvent_AbsentPayloadNormalizesToNonNilEmptyMap(t *testing.T) {
+	got, err := DecodeEvent([]byte(`{"id":"e","type":"t"}`))
+	if err != nil {
+		t.Fatalf("DecodeEvent: %v", err)
+	}
+	if got.Payload == nil {
+		t.Fatalf("Payload is nil, want a non-nil empty map")
+	}
+	if len(got.Payload) != 0 {
+		t.Fatalf("Payload = %v, want empty", got.Payload)
+	}
+}
+
+// An EXPLICIT `"payload":{}` on the wire decodes the same way as an absent
+// payload — both are the empty object — so a source that already sends `{}`
+// sees no behavior change from the normalization.
+func TestDecodeEvent_ExplicitEmptyPayloadStaysEmpty(t *testing.T) {
+	got, err := DecodeEvent([]byte(`{"id":"e","type":"t","payload":{}}`))
+	if err != nil {
+		t.Fatalf("DecodeEvent: %v", err)
+	}
+	if got.Payload == nil || len(got.Payload) != 0 {
+		t.Fatalf("Payload = %v, want a non-nil empty map", got.Payload)
+	}
+}
+
 func TestDecodeEvent_MalformedJSON(t *testing.T) {
 	if _, err := DecodeEvent([]byte(`"scalar"`)); err == nil {
 		t.Fatal("DecodeEvent accepted a non-object")
@@ -151,17 +181,19 @@ func TestEncodeEvent_RoundTripPreservesSubSecondPrecision(t *testing.T) {
 	}
 }
 
-// The OPTIONAL fields are OMITTED, not emitted empty: event.schema.json closes the
-// object and types `at`/`expiresAt` as strings and `payload` as an object, so
-// `"expiresAt":""` or `"payload":null` would be a malformed event at the receiving
-// core. Omitting an unset instant is also what lets the RECEIVING core apply the
-// defaults against its own clock.
+// The instant/version OPTIONAL fields are OMITTED, not emitted empty:
+// event.schema.json closes the object and types `at`/`expiresAt` as strings, so
+// `"expiresAt":""` would be a malformed event at the receiving core. Omitting an
+// unset instant is also what lets the RECEIVING core apply the defaults against
+// its own clock. `payload` is deliberately EXCLUDED from this list — see
+// TestEncodeEvent_AlwaysEmitsPayload — it is the one optional field that is
+// always present (Task 1.6, INTF-SOURCE payload normalization).
 func TestEncodeEvent_OmitsAbsentOptionalFields(t *testing.T) {
 	wire, err := EncodeEvent(Event{ID: "e", Type: "t"})
 	if err != nil {
 		t.Fatalf("EncodeEvent: %v", err)
 	}
-	for _, field := range []string{"at", "expiresAt", "payload", "schemaVersion"} {
+	for _, field := range []string{"at", "expiresAt", "schemaVersion"} {
 		if strings.Contains(string(wire), `"`+field+`"`) {
 			t.Fatalf("encoded %s carries an absent optional field %q", wire, field)
 		}
@@ -170,6 +202,42 @@ func TestEncodeEvent_OmitsAbsentOptionalFields(t *testing.T) {
 		if !strings.Contains(string(wire), `"`+field+`"`) {
 			t.Fatalf("encoded %s is missing the required field %q", wire, field)
 		}
+	}
+}
+
+// `payload` is the one optional field EncodeEvent ALWAYS emits — present, an
+// object — even for an Event whose Payload is nil (INTF-SOURCE, DEC-WIRE-1's
+// payload normalization): a handler is never handed nothing in its place.
+// Encoding as `null` would fail event.schema.json's own typing of `payload` as
+// an object, so the encoded field must be the literal empty object `{}`.
+func TestEncodeEvent_AlwaysEmitsPayload(t *testing.T) {
+	wire, err := EncodeEvent(Event{ID: "e", Type: "t"})
+	if err != nil {
+		t.Fatalf("EncodeEvent: %v", err)
+	}
+	if !strings.Contains(string(wire), `"payload":{}`) {
+		t.Fatalf("encoded %s does not carry payload as a present empty object", wire)
+	}
+}
+
+// A nil-payload event round-trips to a decoded event whose Payload is a non-nil
+// empty map, never nil (Task 1.6): DecodeEvent normalizes an absent wire
+// `payload` the same way, so every downstream reader can index Payload
+// unconditionally.
+func TestEncodeEvent_NilPayloadRoundTripsToNonNilEmptyMap(t *testing.T) {
+	wire, err := EncodeEvent(Event{ID: "e", Type: "t"})
+	if err != nil {
+		t.Fatalf("EncodeEvent: %v", err)
+	}
+	got, err := DecodeEvent(wire)
+	if err != nil {
+		t.Fatalf("DecodeEvent: %v", err)
+	}
+	if got.Payload == nil {
+		t.Fatalf("decoded Payload is nil, want a non-nil empty map")
+	}
+	if len(got.Payload) != 0 {
+		t.Fatalf("decoded Payload = %v, want empty", got.Payload)
 	}
 }
 

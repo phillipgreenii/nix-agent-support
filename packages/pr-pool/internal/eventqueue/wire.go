@@ -16,20 +16,28 @@ import (
 // interfaces.md illustrates them. `INV-INTF-2`'s conformance suite is where this
 // side and the doc side reconcile.
 //
-// The OPTIONAL fields carry `omitempty` because event.schema.json sets
-// additionalProperties:false and types `at`/`expiresAt` as strings and `payload`
-// as an object: EncodeEvent must OMIT an absent field rather than emit `""` /
-// `null`, neither of which is what a source would have sent. `omitempty` affects
-// marshalling only, so DecodeEvent is unchanged. id/type are deliberately NOT
-// omitempty — they are the only required fields, and EncodeEvent's Validate
-// guarantees them.
+// `at`/`expiresAt`/`schemaVersion` carry `omitempty` because event.schema.json
+// sets additionalProperties:false and types `at`/`expiresAt` as strings:
+// EncodeEvent must OMIT an absent one rather than emit `""` / `null`, neither
+// of which is what a source would have sent. `omitempty` affects marshalling
+// only, so DecodeEvent is unchanged. id/type are deliberately NOT omitempty —
+// they are the only required fields, and EncodeEvent's Validate guarantees
+// them.
+//
+// `payload` is deliberately the ONE optional field WITHOUT `omitempty`
+// (INTF-SOURCE, DEC-WIRE-1's payload normalization): the wire form always
+// carries `payload` as a present JSON object, never omitted and never `null`,
+// so a handler is never handed nothing in its place. EncodeEvent enforces this
+// by never leaving Payload nil before marshalling (see its doc comment);
+// without that, a nil map here would marshal as `null`, which is not an
+// object and would violate event.schema.json's own typing of `payload`.
 type wireEvent struct {
 	SchemaVersion string         `json:"schemaVersion,omitempty"`
 	ID            string         `json:"id"`
 	Type          string         `json:"type"`
 	At            string         `json:"at,omitempty"`
 	ExpiresAt     string         `json:"expiresAt,omitempty"`
-	Payload       map[string]any `json:"payload,omitempty"`
+	Payload       map[string]any `json:"payload"`
 }
 
 // DecodeEvent decodes one wire event (event.schema.json shape) into the in-core
@@ -45,6 +53,11 @@ type wireEvent struct {
 // own clock — the only clock entitled to define "now" for this event. Resolving
 // here would bind the defaults to whichever process happened to parse the bytes,
 // which for a forwarded push-inject is the operator's CLI, not the core.
+//
+// An absent wire `payload` decodes to a non-nil, empty map — never nil
+// (INTF-SOURCE, DEC-WIRE-1's payload normalization) — so every downstream
+// reader (a binding's narrowing path, discover's ItemFromPayload) can index
+// Payload unconditionally without a nil-map special case.
 //
 // DecodeEvent deliberately does NOT validate against the JSON Schema (that is
 // package conformance's job, run at the boundary before decoding) nor against
@@ -75,13 +88,17 @@ func DecodeEvent(data []byte) (Event, error) {
 	if err != nil {
 		return Event{}, err
 	}
+	payload := w.Payload
+	if payload == nil {
+		payload = map[string]any{}
+	}
 	return Event{
 		SchemaVersion: w.SchemaVersion,
 		ID:            w.ID,
 		Type:          w.Type,
 		At:            at,
 		ExpiresAt:     expiresAt,
-		Payload:       w.Payload,
+		Payload:       payload,
 	}, nil
 }
 
@@ -101,6 +118,12 @@ func DecodeEvent(data []byte) (Event, error) {
 // "malformed" rejection instead of reporting it where the fault is. An UNSET
 // instant is NOT a fault — it is the documented default (Event.Resolve) — so it
 // is omitted and the receiving core resolves it against its own clock.
+//
+// `payload`, unlike the instants, is ALWAYS emitted — present, an object — even
+// when evt.Payload is nil or empty (INTF-SOURCE, DEC-WIRE-1's payload
+// normalization): a handler is never handed nothing in its place. w.Payload is
+// therefore never left nil before marshalling, so it renders as `{}` rather
+// than `null`.
 func EncodeEvent(evt Event) ([]byte, error) {
 	if err := evt.Validate(); err != nil {
 		return nil, fmt.Errorf("encode event: %w", err)
@@ -109,15 +132,16 @@ func EncodeEvent(evt Event) ([]byte, error) {
 		SchemaVersion: evt.SchemaVersion,
 		ID:            evt.ID,
 		Type:          evt.Type,
+		Payload:       evt.Payload,
+	}
+	if w.Payload == nil {
+		w.Payload = map[string]any{}
 	}
 	if !evt.At.IsZero() {
 		w.At = formatInstant(evt.At)
 	}
 	if !evt.ExpiresAt.IsZero() {
 		w.ExpiresAt = formatInstant(evt.ExpiresAt)
-	}
-	if len(evt.Payload) > 0 {
-		w.Payload = evt.Payload
 	}
 	data, err := json.Marshal(w)
 	if err != nil {

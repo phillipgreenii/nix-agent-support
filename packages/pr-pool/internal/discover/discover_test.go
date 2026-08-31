@@ -628,6 +628,53 @@ func TestItemFromPayload_absentIsZeroValue(t *testing.T) {
 	}
 }
 
+// A discover-constructed event's payload (ToQueueEvent's item+source
+// convention) survives an EncodeEvent/DecodeEvent wire round trip unchanged —
+// the path a forwarded (cross-process, e.g. socket-relayed) discover event
+// takes — and ItemFromPayload reconstructs the same item on the far side
+// (Task 1.6: wire.go's payload normalization must not disturb a
+// non-empty payload discover.go already builds).
+func TestToQueueEvent_PayloadSurvivesWireRoundTrip(t *testing.T) {
+	qe := ToQueueEvent(itemEvt("work.ready", "zr-9"))
+	wire, err := eventqueue.EncodeEvent(qe)
+	if err != nil {
+		t.Fatalf("EncodeEvent: %v", err)
+	}
+	decoded, err := eventqueue.DecodeEvent(wire)
+	if err != nil {
+		t.Fatalf("DecodeEvent: %v", err)
+	}
+	got := ItemFromPayload(decoded.Payload)
+	if got.ID != "zr-9" || got.Type != "task" {
+		t.Fatalf("ItemFromPayload(round-tripped payload) = %+v, want id=zr-9 type=task", got)
+	}
+}
+
+// An event with NO payload at all (a pushed event a source sent with `payload`
+// omitted, never a discover-produced one) decodes, per Task 1.6's wire
+// normalization, to a non-nil EMPTY map ({}) rather than nil. discover's own
+// consumer of a queue event's payload — ItemFromPayload, and the
+// DeriveContextFromQueueEvent bridge built on it — must handle that
+// wire-normalized {} exactly like the absent-payload case: a non-match, not an
+// error, yielding the zero Item/DispatchContext.
+func TestItemFromPayload_HandlesWireNormalizedEmptyPayload(t *testing.T) {
+	decoded, err := eventqueue.DecodeEvent([]byte(`{"id":"e","type":"t"}`))
+	if err != nil {
+		t.Fatalf("DecodeEvent: %v", err)
+	}
+	if decoded.Payload == nil || len(decoded.Payload) != 0 {
+		t.Fatalf("decoded.Payload = %v, want a non-nil empty map (wire.go's normalization)", decoded.Payload)
+	}
+	if got := ItemFromPayload(decoded.Payload); got.ID != "" || got.Type != "" {
+		t.Fatalf("ItemFromPayload(wire-normalized empty payload) = %+v, want zero Item", got)
+	}
+	role := roles.Role{Name: "worker"}
+	d := DeriveContextFromQueueEvent(role, decoded)
+	if d.Item.ID != "" || d.Item.Type != "" || d.Item.Title != "" || d.Item.Metadata != nil {
+		t.Fatalf("DeriveContextFromQueueEvent(wire-normalized empty payload) item = %+v, want zero Item", d.Item)
+	}
+}
+
 func TestQueriesForRole(t *testing.T) {
 	sources := query.SourceSet{
 		{Name: "a", Query: fakeQuery{Meta: query.Meta{EmitTypes: []string{"feedback.ready"}}}},
