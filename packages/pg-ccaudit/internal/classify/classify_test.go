@@ -139,6 +139,103 @@ func TestCLIBatchesAndReportsCost(t *testing.T) {
 	}
 }
 
+// TestCLIClassifyStreamingReportsEachBatchAsItCompletes is the streaming half
+// of pg2-ohvpk: onBatch must fire once PER BATCH, with the cumulative cost as
+// of that batch, rather than only once after the whole pass returns — that
+// is what lets a caller persist and print a batch's results before paying
+// for the next one.
+func TestCLIClassifyStreamingReportsEachBatchAsItCompletes(t *testing.T) {
+	var cands []candidate.Candidate
+	classes := map[string]string{}
+	for i := 0; i < 6; i++ {
+		c := cand(candidate.TypedTurn, "a.jsonl", int64(i))
+		cands = append(cands, c)
+		classes[CandidateID(c)] = string(ClassNotAMistake)
+	}
+	run, calls := fakeRunner(t, classes, 0.02, nil)
+	cl := &CLI{Command: []string{"fake"}, Batch: 2, Run: run}
+
+	var seenBatches int
+	var cumulativeCalls []int
+	res, err := cl.ClassifyStreaming(context.Background(), cands, func(batch []Classification, cost Cost) error {
+		seenBatches++
+		cumulativeCalls = append(cumulativeCalls, cost.Calls)
+		if len(batch) != 2 {
+			t.Errorf("batch %d has %d classifications, want 2", seenBatches, len(batch))
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("ClassifyStreaming: %v", err)
+	}
+	if seenBatches != 3 {
+		t.Fatalf("onBatch fired %d times, want 3 — one per batch, not once at the end", seenBatches)
+	}
+	for i, c := range cumulativeCalls {
+		if c != i+1 {
+			t.Errorf("onBatch %d saw cumulative calls=%d, want %d — cost must accumulate visibly BEFORE the pass finishes",
+				i, c, i+1)
+		}
+	}
+	if *calls != 3 || len(res.Classifications) != 6 {
+		t.Errorf("calls=%d classifications=%d, want 3 and 6", *calls, len(res.Classifications))
+	}
+}
+
+// TestCLIClassifyStreamingLeavesCompletedBatchesOnACancelMidRun is pg2-ohvpk's
+// testable claim at the classifier layer: killing a run partway through must
+// leave every batch that already completed intact — in the Result AND in
+// everything onBatch already saw — because a caller has already made that
+// much durable (cache entries, a ledger snapshot) by the time the
+// cancellation is observed.
+//
+// The context is cancelled directly from inside onBatch rather than via a
+// real SIGTERM to an OS process: main.go builds this exact ctx with
+// signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM) and threads it
+// down to this call unchanged, so cancelling it here is the precise
+// in-process equivalent of that signal arriving — chosen because spawning
+// the compiled binary and signalling it from `go test` is impractical in
+// this sandbox, exactly the fallback pg2-ohvpk anticipates.
+func TestCLIClassifyStreamingLeavesCompletedBatchesOnACancelMidRun(t *testing.T) {
+	var cands []candidate.Candidate
+	classes := map[string]string{}
+	for i := 0; i < 6; i++ {
+		c := cand(candidate.TypedTurn, "a.jsonl", int64(i))
+		cands = append(cands, c)
+		classes[CandidateID(c)] = string(ClassSelfCaught)
+	}
+	run, _ := fakeRunner(t, classes, 0.03, nil)
+	cl := &CLI{Command: []string{"fake"}, Batch: 2, Run: run}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var streamed []Classification
+	var seenBatches int
+	res, err := cl.ClassifyStreaming(ctx, cands, func(batch []Classification, cost Cost) error {
+		seenBatches++
+		streamed = append(streamed, batch...)
+		if seenBatches == 2 {
+			// The SIGTERM-equivalent: as if it landed right after this
+			// batch's results were already persisted by the caller.
+			cancel()
+		}
+		return nil
+	})
+	if err == nil {
+		t.Fatal("a cancelled context must stop the pass with an error, not finish silently")
+	}
+	if len(streamed) != 4 {
+		t.Fatalf("onBatch saw %d classifications before the cancel was observed, want 4 (2 completed batches)", len(streamed))
+	}
+	if len(res.Classifications) != 4 {
+		t.Errorf("Result carries %d classifications, want 4 — the cancelled pass must not roll back completed batches",
+			len(res.Classifications))
+	}
+	if res.Cost.Calls != 2 {
+		t.Errorf("cost.Calls=%d, want 2 — the cost of the batches that actually ran must not be lost", res.Cost.Calls)
+	}
+}
+
 func TestCLIToleratesAFencedReply(t *testing.T) {
 	c := cand(candidate.Undo, "a.jsonl", 1)
 	run, _ := fakeRunner(t, map[string]string{CandidateID(c): string(ClassSelfCaught)}, 0.01,

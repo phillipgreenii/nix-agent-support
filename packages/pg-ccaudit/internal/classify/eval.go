@@ -2,6 +2,7 @@ package classify
 
 import (
 	"fmt"
+	"io"
 	"sort"
 	"strings"
 
@@ -276,7 +277,12 @@ func Compare(candidateEval, baselineEval Evaluation) Comparison {
 }
 
 // Render writes a comparison as a report section.
-func Render(sb *strings.Builder, c Comparison) {
+//
+// Takes an io.Writer rather than a *strings.Builder specifically so a caller
+// building a report progressively (route.Render — bead pg2-ohvpk) can pass
+// the real output stream directly instead of buffering this section into an
+// intermediate string first.
+func Render(sb io.Writer, c Comparison) {
 	fmt.Fprintf(sb, "Tier 2 evaluation — gold set: %d scored, %d unscored, %d file-channel corrections\n",
 		c.Candidate.Scored, c.Candidate.Unscored, c.Candidate.FileChannel)
 	if len(c.Candidate.Labellers) > 0 {

@@ -63,8 +63,14 @@ nothing consumed.
 
 **Estimate, then the gate, then the run record.** Run
 `pg-ccaudit candidates --since <start> --until <end>` (structural only, no model
-calls) for the candidate count. Per-call cost comes from the previous run record's
-`total $ ÷ calls`; on first run assume $0.02/call and label it an assumption.
+calls) for the candidate count. Per-call cost comes from
+`pg-ccaudit classify status --since <start> --until <end>` — it seeds the same
+`total $ ÷ calls` arithmetic from the persisted cost ledger (`pg-ccaudit cost`),
+which is measured rather than assumed as soon as any prior run has recorded
+spend; on first run (no ledger history yet) fall back to $0.02/call and label
+it an assumption. `classify status` also reports how many of this window's
+candidates are already cached, so a repeated retro over an overlapping window
+does not re-estimate cost for candidates that will not incur a fresh call.
 Estimated calls = `min(candidate count, --max <N>)` — show the min and the
 multiplication. MUST STOP for approval if the estimate exceeds $15 or the window
 exceeds 30 days; if the operator declines, create nothing — no bead, no window

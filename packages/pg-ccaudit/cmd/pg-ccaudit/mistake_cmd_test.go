@@ -58,6 +58,13 @@ func mistakeIndex(t *testing.T) string {
 	t.Setenv("PG_CCAUDIT_DB", dbPath)
 	t.Setenv("PG_CCAUDIT_ROOT", root)
 	t.Setenv("PG_CCAUDIT_GOLD", filepath.Join(base, "goldset.jsonl"))
+	// The classify cache and cost ledger (bead pg2-ohvpk) default beside the
+	// index, under $XDG_DATA_HOME — which without this would resolve to a
+	// REAL location on whatever machine runs the test. Every test using this
+	// fixture gets its own fresh, empty cache/ledger, exactly as it already
+	// gets its own fresh --db and --gold.
+	t.Setenv("PG_CCAUDIT_CLASSIFY_CACHE", filepath.Join(base, "classify-cache.jsonl"))
+	t.Setenv("PG_CCAUDIT_COST_LEDGER", filepath.Join(base, "cost-ledger.jsonl"))
 	return base
 }
 

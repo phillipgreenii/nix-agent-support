@@ -268,10 +268,20 @@ Those corrections are STRUCTURALLY INVISIBLE to a transcript census — no turn 
 to detect — so the transcript-derived correction count below is a LOWER BOUND, short
 by an unknown margin. Never present it as "the correction rate".`
 
-// Render writes the report.
+// Render writes the report DIRECTLY to w, section by section, rather than
+// assembling the whole thing in memory first (bead pg2-ohvpk): a report
+// killed partway through printing must leave whatever it had already
+// written intact on w, not lose it to a buffer that was never flushed.
+//
+// Every Fprint* call below writes straight to w; none of it goes through an
+// intermediate strings.Builder. Errors from individual writes are not
+// checked mid-report — matching this function's existing tolerance, which
+// only ever surfaced a write failure from the (formerly single) final write
+// — because *os.File writes to stdout do not fail in the cases this tool
+// runs in, and the point of this change is durability of what already
+// landed, not new error handling for a failure mode that was never handled
+// before either.
 func Render(w io.Writer, rep Report) error {
-	var sb strings.Builder
-
 	window := "all"
 	if rep.Since != "" || rep.Until != "" {
 		from, to := rep.Since, rep.Until
@@ -283,9 +293,9 @@ func Render(w io.Writer, rep Report) error {
 		}
 		window = "[" + from + "," + to + ")"
 	}
-	fmt.Fprintf(&sb, "# pg-ccaudit mistake census — window=%s\n\n", window)
+	fmt.Fprintf(w, "# pg-ccaudit mistake census — window=%s\n\n", window)
 
-	fmt.Fprintln(&sb, "## Provenance")
+	fmt.Fprintln(w, "## Provenance")
 	keys := make([]string, 0, len(rep.Coverage))
 	for k := range rep.Coverage {
 		keys = append(keys, k)
@@ -295,86 +305,85 @@ func Render(w io.Writer, rep Report) error {
 	for _, k := range keys {
 		parts = append(parts, k+"="+rep.Coverage[k])
 	}
-	fmt.Fprintf(&sb, "coverage: %s\n", strings.Join(parts, " "))
-	fmt.Fprintf(&sb, "classifier: %s (prompt v%d)\n", rep.Classifier, rep.PromptVersion)
-	fmt.Fprintf(&sb, "%s\n", rep.Cost.Line())
-	fmt.Fprintln(&sb, "tier 1 signals:")
+	fmt.Fprintf(w, "coverage: %s\n", strings.Join(parts, " "))
+	fmt.Fprintf(w, "classifier: %s (prompt v%d)\n", rep.Classifier, rep.PromptVersion)
+	fmt.Fprintf(w, "%s\n", rep.Cost.Line())
+	fmt.Fprintln(w, "tier 1 signals:")
 	for _, s := range rep.Sources {
-		fmt.Fprintf(&sb, "  %-18s %-24s v%d  rows=%d\n", s.Signal, s.Query, s.Version, s.Rows)
+		fmt.Fprintf(w, "  %-18s %-24s v%d  rows=%d\n", s.Signal, s.Query, s.Version, s.Rows)
 	}
 	if len(rep.Empty) > 0 {
 		names := make([]string, 0, len(rep.Empty))
 		for _, e := range rep.Empty {
 			names = append(names, string(e))
 		}
-		fmt.Fprintf(&sb, "  EMPTY SIGNALS: %s\n", strings.Join(names, ", "))
-		fmt.Fprintln(&sb, "  An empty detector is NOT evidence that the thing it detects did not happen.")
-		fmt.Fprintln(&sb, "  Check the query's notes before reading a zero as good news.")
+		fmt.Fprintf(w, "  EMPTY SIGNALS: %s\n", strings.Join(names, ", "))
+		fmt.Fprintln(w, "  An empty detector is NOT evidence that the thing it detects did not happen.")
+		fmt.Fprintln(w, "  Check the query's notes before reading a zero as good news.")
 	}
 
-	fmt.Fprintln(&sb, "\n## Undercount — the file channel")
-	fmt.Fprintln(&sb, FileChannelNote)
-	fmt.Fprintf(&sb, "file-channel corrections found: %d\n", rep.FileChannel)
+	fmt.Fprintln(w, "\n## Undercount — the file channel")
+	fmt.Fprintln(w, FileChannelNote)
+	fmt.Fprintf(w, "file-channel corrections found: %d\n", rep.FileChannel)
 	for _, p := range rep.FileChannelPaths {
-		fmt.Fprintf(&sb, "  %s\n", p)
+		fmt.Fprintf(w, "  %s\n", p)
 	}
 
-	fmt.Fprintln(&sb, "\n## Ranked findings — mistakes AND command failures, one list")
-	fmt.Fprintln(&sb, "score = occurrences x (1 + cost_ms/1000) x preventability(route)")
-	fmt.Fprintln(&sb, "cost_ms is MEASURED wall time (transcript timestamps), never estimated; 0 means no")
-	fmt.Fprintln(&sb, "span was measurable, not that it was free. preventability: hook 1.00,")
-	fmt.Fprintln(&sb, "permission-config 0.90, global-rule / subagent-prompt-template 0.60, workspace-rule")
-	fmt.Fprintln(&sb, "0.50, skill / slash-command 0.40, not-actionable 0.00.")
-	fmt.Fprintln(&sb)
+	fmt.Fprintln(w, "\n## Ranked findings — mistakes AND command failures, one list")
+	fmt.Fprintln(w, "score = occurrences x (1 + cost_ms/1000) x preventability(route)")
+	fmt.Fprintln(w, "cost_ms is MEASURED wall time (transcript timestamps), never estimated; 0 means no")
+	fmt.Fprintln(w, "span was measurable, not that it was free. preventability: hook 1.00,")
+	fmt.Fprintln(w, "permission-config 0.90, global-rule / subagent-prompt-template 0.60, workspace-rule")
+	fmt.Fprintln(w, "0.50, skill / slash-command 0.40, not-actionable 0.00.")
+	fmt.Fprintln(w)
 
 	for i, f := range rep.Findings {
-		fmt.Fprintf(&sb, "%d. [%s] %s\n", i+1, f.Route, f.Signature)
-		fmt.Fprintf(&sb, "   kind=%s", f.Kind)
+		fmt.Fprintf(w, "%d. [%s] %s\n", i+1, f.Route, f.Signature)
+		fmt.Fprintf(w, "   kind=%s", f.Kind)
 		if f.Class != "" {
-			fmt.Fprintf(&sb, " class=%s", f.Class)
+			fmt.Fprintf(w, " class=%s", f.Class)
 		}
 		if f.Signal != "" {
-			fmt.Fprintf(&sb, " signal=%s", f.Signal)
+			fmt.Fprintf(w, " signal=%s", f.Signal)
 		}
-		fmt.Fprintf(&sb, " score=%.1f\n", f.Score)
-		fmt.Fprintf(&sb, "   occurrences=%d sessions=%d worst_session=%d main_loop=%d subagent=%d cost_ms=%d\n",
+		fmt.Fprintf(w, " score=%.1f\n", f.Score)
+		fmt.Fprintf(w, "   occurrences=%d sessions=%d worst_session=%d main_loop=%d subagent=%d cost_ms=%d\n",
 			f.Occurrences, f.Sessions, f.WorstSession, f.MainLoop, f.Subagent, f.CostMS)
-		fmt.Fprintf(&sb, "   first_seen=%s last_seen=%s\n", dash(f.FirstSeen), dash(f.LastSeen))
+		fmt.Fprintf(w, "   first_seen=%s last_seen=%s\n", dash(f.FirstSeen), dash(f.LastSeen))
 		if f.WorstSession > 1 && f.Sessions > 0 && f.WorstSession*2 >= f.Occurrences {
-			fmt.Fprintf(&sb, "   RUNAWAY DISCOUNT: %d of %d occurrences are one session — weight this down\n",
+			fmt.Fprintf(w, "   RUNAWAY DISCOUNT: %d of %d occurrences are one session — weight this down\n",
 				f.WorstSession, f.Occurrences)
 		}
 		if f.Prevention != "" {
-			fmt.Fprintf(&sb, "   prevention: %s\n", f.Prevention)
+			fmt.Fprintf(w, "   prevention: %s\n", f.Prevention)
 		}
 		if f.AlsoNote != "" {
-			fmt.Fprintf(&sb, "   also: %s\n", f.AlsoNote)
+			fmt.Fprintf(w, "   also: %s\n", f.AlsoNote)
 		}
 		if f.RouteHint != "" && Route(f.RouteHint) != f.Route {
-			fmt.Fprintf(&sb, "   route hint was %q; the routing table chose %s\n", f.RouteHint, f.Route)
+			fmt.Fprintf(w, "   route hint was %q; the routing table chose %s\n", f.RouteHint, f.Route)
 		}
 		if f.Evidence != "" {
-			fmt.Fprintf(&sb, "   evidence: %s\n", oneLine(f.Evidence, 200))
+			fmt.Fprintf(w, "   evidence: %s\n", oneLine(f.Evidence, 200))
 		}
-		fmt.Fprintln(&sb)
+		fmt.Fprintln(w)
 	}
 
 	byRoute := map[Route]int{}
 	for _, f := range rep.Findings {
 		byRoute[f.Route]++
 	}
-	fmt.Fprintln(&sb, "## Routing totals — every finding carries exactly one route")
+	fmt.Fprintln(w, "## Routing totals — every finding carries exactly one route")
 	for _, r := range Routes {
-		fmt.Fprintf(&sb, "  %-26s %d\n", r, byRoute[r])
+		fmt.Fprintf(w, "  %-26s %d\n", r, byRoute[r])
 	}
 
 	if rep.Evaluation != nil {
-		fmt.Fprintln(&sb, "\n## Tier 2 evaluation")
-		classify.Render(&sb, *rep.Evaluation)
+		fmt.Fprintln(w, "\n## Tier 2 evaluation")
+		classify.Render(w, *rep.Evaluation)
 	}
 
-	_, err := io.WriteString(w, sb.String())
-	return err
+	return nil
 }
 
 // RenderJSON writes the report as JSON, for a consumer that wants to re-rank or

@@ -36,11 +36,18 @@ COMMANDS
   version     print the version
 
 MISTAKE CENSUS (read-only; the three tiers, in order)
-  candidates  Tier 1: structural mistake candidates, SQL only, no model calls
-  classify    Tier 2: decide which candidates are real, with a reported run cost
-  report      Tier 3: ONE ranked report, mistakes AND command failures, each routed
-  evaluate    score a classifier against the gold set and against the naive baseline
-  gold        maintain the gold set (seed the file channel, sample for labelling)
+  candidates       Tier 1: structural mistake candidates, SQL only, no model calls
+  classify         Tier 2: decide which candidates are real, with a reported run cost
+                   classify status: cached-vs-pending candidates and projected cost,
+                   before any model call
+  report           Tier 3: ONE ranked report, mistakes AND command failures, each
+                   routed. ALWAYS streams — a killed run leaves a readable partial
+                   report, never zero bytes
+  evaluate         score a classifier against the gold set and against the naive
+                   baseline
+  gold             maintain the gold set (seed the file channel, sample for labelling)
+  cost             the persisted classifier cost ledger, written as each run
+                   progressed — a killed run's spend is still accounted for
 
 COMMON FLAGS
   --db PATH     database path (default $PG_CCAUDIT_DB, else $XDG_DATA_HOME/pg-ccaudit/transcripts.db)
@@ -124,6 +131,8 @@ func run(ctx context.Context, args []string, stdout, stderr *os.File) error {
 		return cmdReport(ctx, args[1:], stdout, stderr)
 	case "gold":
 		return cmdGold(ctx, args[1:], stdout, stderr)
+	case "cost":
+		return cmdCost(ctx, args[1:], stdout, stderr)
 	case "version", "--version", "-V":
 		fmt.Fprintf(stdout, "pg-ccaudit %s\n", Version)
 		return nil

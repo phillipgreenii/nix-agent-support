@@ -6,13 +6,18 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"sort"
 	"strings"
+	"sync/atomic"
+	"time"
 
+	"github.com/phillipgreenii/pg-ccaudit/internal/cache"
 	"github.com/phillipgreenii/pg-ccaudit/internal/candidate"
 	"github.com/phillipgreenii/pg-ccaudit/internal/classify"
 	"github.com/phillipgreenii/pg-ccaudit/internal/gold"
+	"github.com/phillipgreenii/pg-ccaudit/internal/ledger"
 	"github.com/phillipgreenii/pg-ccaudit/internal/route"
 	"github.com/phillipgreenii/pg-ccaudit/internal/store"
 )
@@ -191,10 +196,13 @@ func cmdClassify(ctx context.Context, args []string, stdout, stderr *os.File) er
 	fs.SetOutput(stderr)
 	cf := addCensusFlags(fs)
 	fs.Usage = func() {
-		fmt.Fprintf(stderr, `pg-ccaudit classify — Tier 2: decide which candidates are real, and why
+		fmt.Fprintf(stderr, `pg-ccaudit classify [status] — Tier 2: decide which candidates are real, and why
 
-Reports the run cost on stderr whether or not it succeeded, because an
-unbounded classification pass over a growing corpus is how this stops being run.
+Mistakes stream to stdout as they are produced — always; there is no buffered
+mode — and every classified candidate is cached durably by (id, classifier,
+prompt version), so a killed run's completed work is not repeated. Reports the
+run cost on stderr whether or not it succeeded, because an unbounded
+classification pass over a growing corpus is how this stops being run.
 
   --classifier baseline   the rule the semantic classifier must BEAT:
                           "every typed turn following a tool call is a correction".
@@ -202,13 +210,28 @@ unbounded classification pass over a growing corpus is how this stops being run.
   --classifier cli        the semantic pass, via %s
                           (override with $%s)
 
+  classify status --since … --until …
+                          report how many of the window's candidates are
+                          already cached vs pending, and the projected call
+                          count and $ cost, BEFORE any model call is made.
+
 FLAGS
 `, strings.Join(classify.DefaultCommand(), " "), classify.EnvCommand)
 		fs.PrintDefaults()
 	}
-	if err := fs.Parse(args); err != nil {
-		return errUsage
+	rest, err := parseInterspersed(fs, args)
+	if err != nil {
+		return err
 	}
+	if len(rest) > 0 {
+		if rest[0] != "status" {
+			fmt.Fprintf(stderr, "pg-ccaudit classify: unknown subcommand %q (want status)\n\n", rest[0])
+			fs.Usage()
+			return errUsage
+		}
+		return cmdClassifyStatus(ctx, cf, stdout, stderr)
+	}
+
 	db, _, err := openIndex(*cf.db)
 	if err != nil {
 		return err
@@ -223,7 +246,16 @@ FLAGS
 	if err != nil {
 		return err
 	}
-	res, cerr := runClassifier(ctx, cl, set, *cf.max)
+
+	streamOut := io.Writer(stdout)
+	if *cf.format == "json" {
+		// A single well-formed JSON document cannot be streamed half-finished
+		// in any form a consumer could parse, so JSON output keeps its
+		// existing one-shot-at-the-end shape; only the human-readable format
+		// carries the streaming guarantee this bead requires.
+		streamOut = io.Discard
+	}
+	res, cerr := runClassifierStreaming(ctx, cl, set, *cf.max, "classify", streamOut)
 	fmt.Fprintln(stderr, res.Cost.Line())
 	if cerr != nil {
 		return cerr
@@ -233,17 +265,108 @@ FLAGS
 		enc.SetIndent("", "  ")
 		return enc.Encode(res)
 	}
-	for _, c := range res.Classifications {
-		if !c.Class.IsMistake() {
-			continue
+	return nil
+}
+
+// cmdClassifyStatus reports, for the window, how many Tier 1 candidates
+// already have a cached Tier 2 verdict under this classifier and prompt
+// version, and how many are still pending — plus the projected call count
+// and $ cost of classifying the pending ones, BEFORE any model call is made
+// (bead pg2-ohvpk requirement 2). The $ projection is seeded from the
+// persisted cost ledger's measured $-per-call average for this classifier;
+// with no ledger history yet it is reported as unknown rather than guessed —
+// exactly the arithmetic the bead's own problem statement says "cannot be
+// seeded while spend is unmeasurable".
+func cmdClassifyStatus(ctx context.Context, cf *censusFlags, stdout, _ *os.File) error {
+	db, _, err := openIndex(*cf.db)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = db.Close() }()
+
+	set, err := extract(ctx, db, cf)
+	if err != nil {
+		return err
+	}
+	cands := set.Candidates
+	truncated := false
+	if *cf.max > 0 && len(cands) > *cf.max {
+		cands = cands[:*cf.max]
+		truncated = true
+	}
+
+	cl, err := newClassifier(cf)
+	if err != nil {
+		return err
+	}
+	classifierName := cl.Name()
+
+	cachePath, err := cache.DefaultPath()
+	if err != nil {
+		return err
+	}
+	cached, err := cache.Load(cachePath)
+	if err != nil && !os.IsNotExist(unwrapPathErr(err)) {
+		return err
+	}
+
+	cachedN, pendingN := 0, 0
+	for _, c := range cands {
+		key := cache.Key{ID: classify.CandidateID(c), Classifier: classifierName, PromptVersion: classify.PromptVersion}
+		if _, ok := cached[key]; ok {
+			cachedN++
+		} else {
+			pendingN++
 		}
-		fmt.Fprintf(stdout, "%s\t%s\tconfidence=%s\n", classify.CandidateID(c.Candidate), c.Class, c.Confidence)
-		if c.What != "" {
-			fmt.Fprintf(stdout, "\twhat: %s\n", c.What)
+	}
+
+	batch := *cf.batch
+	if batch <= 0 {
+		batch = classify.DefaultBatch
+	}
+	projectedCalls := 0
+	if pendingN > 0 {
+		projectedCalls = (pendingN + batch - 1) / batch
+	}
+
+	ledgerPath, err := ledger.DefaultPath()
+	if err != nil {
+		return err
+	}
+	entries, err := ledger.Load(ledgerPath)
+	if err != nil && !os.IsNotExist(unwrapPathErr(err)) {
+		return err
+	}
+	avgUSD, histCalls, haveHistory := ledger.AverageCostPerCall(entries, classifierName)
+	projectedUSD := avgUSD * float64(projectedCalls)
+
+	if *cf.format == "json" {
+		payload := map[string]any{
+			"since": *cf.since, "until": *cf.until,
+			"classifier": classifierName, "prompt_version": classify.PromptVersion,
+			"candidates_total": len(cands), "cached": cachedN, "pending": pendingN, "truncated": truncated,
+			"batch": batch, "projected_calls": projectedCalls,
+			"projected_usd": projectedUSD, "cost_history_calls": histCalls, "cost_history_available": haveHistory,
 		}
-		if c.Prevention != "" {
-			fmt.Fprintf(stdout, "\tprevention: %s\n", c.Prevention)
-		}
+		enc := json.NewEncoder(stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(payload)
+	}
+
+	fmt.Fprintf(stdout, "classify status window=%s classifier=%s (prompt v%d)\n",
+		windowLabel(*cf.since, *cf.until), classifierName, classify.PromptVersion)
+	fmt.Fprintf(stdout, "  candidates: %d total, %d cached, %d pending", len(cands), cachedN, pendingN)
+	if truncated {
+		fmt.Fprintf(stdout, " (truncated to --max %d)", *cf.max)
+	}
+	fmt.Fprintln(stdout)
+	fmt.Fprintf(stdout, "  projected: %d call(s) at batch=%d", projectedCalls, batch)
+	if haveHistory {
+		fmt.Fprintf(stdout, ", $%.4f (seeded from %d historical call(s) averaging $%.4f/call — see `pg-ccaudit cost`)\n",
+			projectedUSD, histCalls, avgUSD)
+	} else {
+		fmt.Fprintln(stdout, ", $ cost unknown — no prior run recorded in the cost ledger yet; "+
+			"the first classification pass seeds it (see `pg-ccaudit cost`)")
 	}
 	return nil
 }
@@ -349,7 +472,17 @@ func cmdReport(ctx context.Context, args []string, stdout, stderr *os.File) erro
 	fs.Usage = func() {
 		fmt.Fprintf(stderr, `pg-ccaudit report — Tier 3: ONE ranked report, mistakes and command failures together
 
-Every finding carries exactly one route. Ranked by
+Findings stream to stdout as they are produced. This is the ONLY behavior —
+there is no --stream flag and no buffered mode: the provenance header and
+every command-failure finding print immediately (no model call needed for
+those), and every classified mistake prints the moment its batch completes.
+A run killed or timed out mid-classification therefore still leaves a
+readable report on stdout instead of nothing (bead pg2-ohvpk). The run's
+cost is also persisted to a ledger AS IT PROGRESSES (see `+"`pg-ccaudit cost`"+`),
+and every classified candidate is cached so a re-run does not pay twice.
+
+Every finding carries exactly one route. The FINAL section is the complete
+ranked report once the whole pass finishes, ranked by
   score = occurrences x (1 + cost_ms/1000) x preventability(route)
 with cost MEASURED from transcript timestamps, never estimated.
 
@@ -374,11 +507,6 @@ FLAGS
 	if err != nil {
 		return err
 	}
-	res, cerr := runClassifier(ctx, cl, set, *cf.max)
-	fmt.Fprintln(stderr, res.Cost.Line())
-	if cerr != nil {
-		return cerr
-	}
 
 	cov, err := route.Coverage(ctx, db)
 	if err != nil {
@@ -388,6 +516,33 @@ FLAGS
 	if err != nil {
 		return err
 	}
+
+	// Everything above needed no model call, so it is known and printed
+	// BEFORE the classification pass starts. A JSON consumer gets the
+	// existing one-shot-at-the-end document instead: a half-finished JSON
+	// array is not a document anything can parse mid-stream, so JSON output
+	// keeps its old shape and only pays the streaming cost in cache/ledger
+	// durability, not in stdout shape.
+	streamOut := io.Writer(stdout)
+	if *cf.format == "json" {
+		streamOut = io.Discard
+	} else {
+		fmt.Fprintf(stdout, "# pg-ccaudit mistake census — window=%s (streaming; final ranked report follows)\n\n",
+			windowLabel(*cf.since, *cf.until))
+		fmt.Fprintln(stdout, "## Command failures — ready immediately, no model call needed")
+		for _, f := range route.Rank(failures) {
+			fmt.Fprintf(stdout, "  [%s] %s (occurrences=%d, score=%.1f)\n", f.Route, f.Signature, f.Occurrences, f.Score)
+		}
+		fmt.Fprintln(stdout)
+		fmt.Fprintf(stdout, "## Mistakes — streamed as %s classifies them\n", cl.Name())
+	}
+
+	res, cerr := runClassifierStreaming(ctx, cl, set, *cf.max, "report", streamOut)
+	fmt.Fprintln(stderr, res.Cost.Line())
+	if cerr != nil {
+		return cerr
+	}
+
 	findings := route.Rank(append(route.FromClassifications(res.Classifications), failures...))
 
 	rep := route.Report{
@@ -431,7 +586,150 @@ FLAGS
 	if *cf.format == "json" {
 		return route.RenderJSON(stdout, rep)
 	}
+	fmt.Fprintln(stdout, "\n## FINAL — ranked findings (mistakes AND command failures, one list)")
 	return route.Render(stdout, rep)
+}
+
+// runClassifierStreaming classifies set (bounded by max, exactly as
+// runClassifier does for evaluate) but, for *classify.CLI, persists a
+// classification cache and a cost ledger AS THE PASS PROGRESSES — not only
+// once it returns — and prints every mistake to w the moment it is produced
+// (bead pg2-ohvpk). This is what lets a killed run leave real content on w
+// and a real record in the cache/ledger instead of nothing.
+//
+// Only *classify.CLI gets that treatment: it is the only classifier that
+// makes model calls, so it is the only one a kill can hurt. Baseline is
+// free and deterministic — by the time anything could kill it, Classify has
+// already returned — so it runs exactly as it always has; its mistakes are
+// still streamed to w in the same pass, just in one shot rather than one
+// batch at a time.
+func runClassifierStreaming(ctx context.Context, cl classify.Classifier, set candidate.Set, max int, command string, w io.Writer) (classify.Result, error) {
+	cands := set.Candidates
+	truncated := false
+	if max > 0 && len(cands) > max {
+		cands = cands[:max]
+		truncated = true
+	}
+
+	printMistake := func(c classify.Classification) {
+		if !c.Class.IsMistake() {
+			return
+		}
+		fmt.Fprintf(w, "%s\t%s\tconfidence=%s\n", classify.CandidateID(c.Candidate), c.Class, c.Confidence)
+		if c.What != "" {
+			fmt.Fprintf(w, "\twhat: %s\n", c.What)
+		}
+		if c.Prevention != "" {
+			fmt.Fprintf(w, "\tprevention: %s\n", c.Prevention)
+		}
+	}
+
+	cliCl, isCLI := cl.(*classify.CLI)
+	if !isCLI {
+		res, err := cl.Classify(ctx, cands)
+		res.Cost.Truncated = truncated
+		for _, c := range res.Classifications {
+			printMistake(c)
+		}
+		return res, err
+	}
+
+	cachePath, err := cache.DefaultPath()
+	if err != nil {
+		return classify.Result{}, err
+	}
+	cached, err := cache.Load(cachePath)
+	if err != nil && !os.IsNotExist(unwrapPathErr(err)) {
+		return classify.Result{}, err
+	}
+
+	var pending []candidate.Candidate
+	var fromCache []classify.Classification
+	for _, c := range cands {
+		key := cache.Key{ID: classify.CandidateID(c), Classifier: cl.Name(), PromptVersion: classify.PromptVersion}
+		if e, ok := cached[key]; ok {
+			fromCache = append(fromCache, cacheEntryToClassification(c, e))
+			continue
+		}
+		pending = append(pending, c)
+	}
+	// Cached mistakes need no model call, so there is no reason to withhold
+	// them until the pending batches finish.
+	for _, c := range fromCache {
+		printMistake(c)
+	}
+
+	ledgerPath, err := ledger.DefaultPath()
+	if err != nil {
+		return classify.Result{}, err
+	}
+	runID := newRunID()
+	started := time.Now().UTC()
+	writeLedger := func(cost classify.Cost, done bool) error {
+		return ledger.Append(ledgerPath, ledger.Entry{
+			RunID: runID, Command: command, Classifier: cl.Name(),
+			Since: set.Since, Until: set.Until,
+			StartedAt: started, UpdatedAt: time.Now().UTC(),
+			CandidatesIn: len(cands), Calls: cost.Calls, Batches: cost.Batches,
+			USD: cost.USD, InputTokens: cost.InputTokens, OutputTokens: cost.OutputTokens,
+			CacheReadTokens: cost.CacheReadTokens, CacheCreationTokens: cost.CacheCreationTokens,
+			Done: done,
+		})
+	}
+
+	onBatch := func(batch []classify.Classification, cost classify.Cost) error {
+		now := time.Now().UTC()
+		entries := make([]cache.Entry, 0, len(batch))
+		for _, c := range batch {
+			entries = append(entries, cache.Entry{
+				ID: classify.CandidateID(c.Candidate), Classifier: cl.Name(), PromptVersion: classify.PromptVersion,
+				Class: string(c.Class), Confidence: c.Confidence, What: c.What, Prevention: c.Prevention,
+				RouteHint: c.RouteHint, RunID: runID, ClassifiedAt: now,
+			})
+		}
+		if err := cache.Append(cachePath, entries); err != nil {
+			return err
+		}
+		if err := writeLedger(cost, false); err != nil {
+			return err
+		}
+		for _, c := range batch {
+			printMistake(c)
+		}
+		return nil
+	}
+
+	res, cerr := cliCl.ClassifyStreaming(ctx, pending, onBatch)
+	res.Cost.Truncated = truncated
+	res.Cost.CandidatesIn = len(cands)
+	res.Classifications = append(res.Classifications, fromCache...)
+	res.Cost.ClassificationsOut = len(res.Classifications)
+
+	if lerr := writeLedger(res.Cost, cerr == nil); lerr != nil && cerr == nil {
+		cerr = lerr
+	}
+	return res, cerr
+}
+
+// cacheEntryToClassification reconstructs a Classification from a cached
+// verdict so a cache hit and a fresh model call merge into one Result shape.
+func cacheEntryToClassification(c candidate.Candidate, e cache.Entry) classify.Classification {
+	return classify.Classification{
+		Candidate: c, Class: classify.Class(e.Class), Confidence: e.Confidence,
+		What: e.What, Prevention: e.Prevention, RouteHint: e.RouteHint,
+	}
+}
+
+var runIDSeq atomic.Uint64
+
+// newRunID identifies one classification pass in the cache and the cost
+// ledger. It need not be globally unique, only unique enough that two runs
+// in the same process (as happens in this package's own tests) never
+// collide: a timestamp plus the pid plus a per-process counter satisfies
+// that without pulling in a UUID dependency this tool does not otherwise
+// need.
+func newRunID() string {
+	return fmt.Sprintf("%s-%d-%d", time.Now().UTC().Format("20060102T150405.000000000Z"), os.Getpid(), runIDSeq.Add(1))
 }
 
 func cmdGold(ctx context.Context, args []string, stdout, stderr *os.File) error {

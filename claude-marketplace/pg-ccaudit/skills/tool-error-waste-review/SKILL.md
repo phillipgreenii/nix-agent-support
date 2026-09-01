@@ -258,13 +258,24 @@ pg-ccaudit classify --classifier cli --since … --until … --max 100
 
 `--classifier cli` makes model calls and **reports what the run cost**. Bound it with
 `--since`/`--until` or `--max`, and if the run was truncated say so — every rate
-downstream is over the truncated set.
+downstream is over the truncated set. Before the first model call, run
+`pg-ccaudit classify status --since … --until …` to see how many candidates in
+the window are already cached versus pending, and the projected call count and
+$ cost — sizing the run instead of guessing at it.
 
 ### 6. The one ranked, routed report
 
 ```bash
 pg-ccaudit report --classifier cli --since … --until … --max 100
 ```
+
+`report` **always streams**: the provenance header and every command-failure
+finding print immediately (no model call needed for those), and every
+classified mistake prints the moment its batch completes — there is no
+buffered mode and no flag to select one. A run killed or timed out mid-pass
+therefore leaves a readable partial report on stdout instead of nothing, and
+`pg-ccaudit cost` shows that run's calls and $ afterward even so, because the
+cost ledger is written as the run progresses, not only once it finishes.
 
 Every finding carries **exactly one** route: `global-rule`, `workspace-rule`, `skill`,
 `slash-command`, `subagent-prompt-template`, `hook`, `permission-config`, or an

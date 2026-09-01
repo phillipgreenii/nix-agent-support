@@ -347,8 +347,35 @@ func CandidateID(c candidate.Candidate) string {
 	return fmt.Sprintf("%s:%s#%d", c.Signal, c.Path, c.Seq)
 }
 
+// BatchFunc receives one batch's newly produced classifications and the
+// cumulative cost as of that batch, BEFORE the whole pass completes. It
+// exists so a caller can persist (a cache entry, a cost-ledger snapshot) and
+// print a batch's results before the NEXT batch's model call even starts —
+// the fix for pg2-ohvpk: a pass killed mid-run must leave everything a
+// BatchFunc has already seen durable, not just whatever the pass had
+// accumulated in memory.
+//
+// A returned error aborts the pass. The Result returned to the ORIGINAL
+// caller still carries every classification produced by every batch that
+// completed before the error, exactly as an error from the classifier
+// itself does.
+type BatchFunc func(batch []Classification, cost Cost) error
+
 // Classify implements Classifier.
 func (c *CLI) Classify(ctx context.Context, cands []candidate.Candidate) (Result, error) {
+	return c.classify(ctx, cands, nil)
+}
+
+// ClassifyStreaming is Classify with a per-batch callback. `report` and
+// `classify` use it so that a batch's results are persisted and streamed to
+// the operator before the pass's NEXT model call even starts, rather than
+// only after the whole pass returns — which is what let a killed run vanish
+// with zero bytes emitted (bead pg2-ohvpk).
+func (c *CLI) ClassifyStreaming(ctx context.Context, cands []candidate.Candidate, onBatch BatchFunc) (Result, error) {
+	return c.classify(ctx, cands, onBatch)
+}
+
+func (c *CLI) classify(ctx context.Context, cands []candidate.Candidate, onBatch BatchFunc) (Result, error) {
 	start := time.Now()
 	batch := c.Batch
 	if batch <= 0 {
@@ -362,6 +389,14 @@ func (c *CLI) Classify(ctx context.Context, cands []candidate.Candidate) (Result
 
 	var out []Classification
 	for i := 0; i < len(cands); i += batch {
+		// A context cancelled BETWEEN batches — the SIGTERM case: main.go
+		// wires a real SIGTERM into exactly this ctx via signal.NotifyContext
+		// — must stop the pass before it pays for another call, not only
+		// fail loudly once one is already in flight.
+		if err := ctx.Err(); err != nil {
+			cost.Elapsed = time.Since(start)
+			return Result{Classifications: out, Cost: cost}, err
+		}
 		end := i + batch
 		if end > len(cands) {
 			end = len(cands)
@@ -371,15 +406,18 @@ func (c *CLI) Classify(ctx context.Context, cands []candidate.Candidate) (Result
 
 		prompt, err := renderPrompt(chunk)
 		if err != nil {
-			return Result{}, err
+			cost.Elapsed = time.Since(start)
+			return Result{Classifications: out, Cost: cost}, err
 		}
 		raw, err := c.Run(ctx, c.Command, prompt)
 		cost.Calls++
 		if err != nil {
+			cost.Elapsed = time.Since(start)
 			return Result{Classifications: out, Cost: cost}, fmt.Errorf("classifier call %d: %w", cost.Calls, err)
 		}
 		var env envelope
 		if err := json.Unmarshal(raw, &env); err != nil {
+			cost.Elapsed = time.Since(start)
 			return Result{Classifications: out, Cost: cost},
 				fmt.Errorf("classifier call %d: decode envelope: %w", cost.Calls, err)
 		}
@@ -389,15 +427,18 @@ func (c *CLI) Classify(ctx context.Context, cands []candidate.Candidate) (Result
 		cost.CacheReadTokens += env.Usage.CacheReadInputTokens
 		cost.CacheCreationTokens += env.Usage.CacheCreationInputTokens
 		if env.IsError {
+			cost.Elapsed = time.Since(start)
 			return Result{Classifications: out, Cost: cost},
 				fmt.Errorf("classifier call %d reported an error: %s", cost.Calls, excerpt(env.Result))
 		}
 
 		verdicts, err := parseVerdicts(env.Result)
 		if err != nil {
+			cost.Elapsed = time.Since(start)
 			return Result{Classifications: out, Cost: cost},
 				fmt.Errorf("classifier call %d: %w", cost.Calls, err)
 		}
+		var batchOut []Classification
 		for _, v := range verdicts {
 			cd, ok := byID[v.ID]
 			if !ok {
@@ -406,19 +447,28 @@ func (c *CLI) Classify(ctx context.Context, cands []candidate.Candidate) (Result
 				// corrupt precision and recall in a way nothing downstream could see.
 				continue
 			}
-			cl, err := ParseClass(v.Class)
+			parsedClass, err := ParseClass(v.Class)
 			if err != nil {
+				cost.Elapsed = time.Since(start)
 				return Result{Classifications: out, Cost: cost},
 					fmt.Errorf("classifier call %d, candidate %s: %w", cost.Calls, v.ID, err)
 			}
-			out = append(out, Classification{
+			batchOut = append(batchOut, Classification{
 				Candidate:  cd,
-				Class:      cl,
+				Class:      parsedClass,
 				Confidence: normalizeConfidence(v.Confidence),
 				What:       strings.TrimSpace(v.What),
 				Prevention: strings.TrimSpace(v.Prevention),
 				RouteHint:  strings.TrimSpace(v.Route),
 			})
+		}
+		out = append(out, batchOut...)
+		cost.ClassificationsOut = len(out)
+		cost.Elapsed = time.Since(start)
+		if onBatch != nil {
+			if err := onBatch(batchOut, cost); err != nil {
+				return Result{Classifications: out, Cost: cost}, fmt.Errorf("batch callback: %w", err)
+			}
 		}
 	}
 	cost.ClassificationsOut = len(out)
