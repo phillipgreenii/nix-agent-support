@@ -234,6 +234,33 @@ ever removed or made to mean something new.
 an illustrative, handler-session-shaped placeholder; the value that actually fills this field is
 the dispatch tracking id's own `dsp-<…>` form, once dispatch itself carries one.
 
+**The reply widens under the same strategy.** `interfaces.md`'s "Inspecting a running core" now
+names a much larger **MUST** set — the core's own identity/lifecycle facts, per-gate state and
+owner, per-listener and per-source health facts, delivery-side counters, and the registry — on top
+of the four fields illustrated above. Every one of them lands the same way the legacy four already
+illustrate: a new top-level or nested property, `additionalProperties: false` preserved at every
+level, and **no** new `required` entry anywhere, top level or nested — so the legacy four-field
+reply above keeps validating against the widened schema exactly as it always has. The
+per-participant-kind breakdown under the resolved-configuration field is the one addition whose own
+shape is deliberately left unenumerated (role/kind-specific, optional at every level); no other
+addition's shape is left open.
+
+**Version pair and `ADR 0027`.** The core's own `version` field (part of the identity facts above)
+is what a continuously-polling client uses to show a version pair — `pr-pool <v> · core <v>` — and
+raise a hint on mismatch. `phillipgreenii-nix-agent-support` `ADR 0027` (pa-monitor's
+self-restart-on-version-skew decision) is the precedent for that mismatch case, and pr-pool
+**deviates from it**: rather than re-executing itself on a detected skew, as pa-monitor's separate
+daemon/client binaries do, pr-pool's client shows a hint and relies on the operator to restart. That
+deviation is recorded here because it bears on what this field is _for_ on the wire: the reply
+carries the raw version string and nothing else — no re-exec instruction, no skew flag — because the
+deviation is a client-side rendering choice, not a protocol one. The same binary serves both the
+daemon and any such client in pr-pool (unlike pa-monitor's separate binaries), so a version mismatch
+after an upgrade is inherently rarer and shorter-lived here: the client process was just rebuilt with
+the daemon, and only a still-running **old** daemon process can disagree. Wiring a real (non-`"dev"`)
+value into this field is unbuilt (a packaging change, mirroring
+`packages/pa-monitor/default.nix`'s ldflag precedent) — until then the field legitimately reads
+`"dev"` on both sides and no mismatch hint ever fires.
+
 **Not decided here.** Which fields each schema requires, and the schema artifacts themselves, belong
 to the implementation and its conformance suite (`INV-INTF-2`). What each field **means** — that `id`
 is the de-duplication key, `type` the primary matcher, `payload` a JSON object, `at`/`expiresAt`

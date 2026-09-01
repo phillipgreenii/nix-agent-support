@@ -603,17 +603,62 @@ already deregistered) is an error — not the "unknown tracking id ⇒ acknowled
 "Event delivery" (above) states, which governs a **correlated** reply to an earlier core-issued call
 rather than a self-report's own identity claim.
 
-**Inspecting a running core is read-only** and yields three things it **MUST** offer, and nothing
-else it must offer. **Deliveries** are **delivery
+**Inspecting a running core is read-only.** Three readings were this contract's original closed
+**MUST** set — **deliveries**, **queue depths**, and **resolved configuration** — and this section
+has since **widened** that set, never narrowing or removing any of the three; a field discovered
+after this widening is itself an additive schema change requiring the same explicit operator note
+this widening carries. **Deliveries** are **delivery
 provenance** — which event the core handed to which handler, keyed by that dispatch's tracking id —
 and the core legitimately knows it, because it already marks acceptance per `(event, handler)`
 (`INV-EVT-1`). It is **not** a window into a handler session, so it carries no per-run progress:
 that is the accepting handler's own, on the handler's own surface. The **queue depths** are the
 per-`type` depth `INV-OBS-1` obliges, and the **resolved configuration** is pr-pool's own
-source/handler count. A **fourth** reading is a **MAY** and is deliberately not one of the three: a
-core **MAY** also report **which configured bindings have matched no event this run**, which is a
-debugging convenience against a path no config-time check can validate today — and, like the three
-above, it is core-side routing knowledge rather than a window into any handler (`INV-DISP-1`,
+source/handler count, together with an **opaque, per-participant-kind breakdown** whose shape is
+role/kind-specific and deliberately not enumerated here — each kind's own fields are optional and
+MAY narrow as extraction proceeds, without this contract itself changing shape.
+
+Inspection's **MUST** set has widened to also offer:
+
+- The core's own **identity and lifecycle facts**: its own lifecycle **state** (the state diagram
+  above), its run **mode** (**long-running** or **drain-and-exit**, `INV-LIFE-1`), its **build
+  version**, its process id, when it **started**, and its resolved **configuration path**. Carrying
+  **mode** alongside **state** is what makes `INV-LIFE-1`'s two run modes — and a non-started,
+  non-failing lifecycle state such as a drain-and-exit run winding toward exit — observable from
+  outside the process, rather than indistinguishable from a poll failure (see the glossary's
+  **quiescing** entry).
+- Each configured **gate**'s own name, whether it is **active**, **since** it last changed, and its
+  **owner** — the human operator for a gate it set itself, or an automation actor for one it owns
+  (`INV-LIFE-2`'s gate identity) — plus the instants the rest of this reading is current **as of**.
+  Naming **owner** per gate is what finally lets inspection show which gate a human can clear
+  unilaterally and which an automation actor may re-assert on its own initiative, the labelling
+  `INV-LIFE-2` already requires and no inspection surface carried before now. Together with the
+  lifecycle facts above, **owner** is also part of what lets inspection **distinguish** _halted_
+  (some gate active) from _quiescent_ (nothing unsettled remains in flight) — the distinction
+  `INV-LIFE-2` already requires of inspection and, until this widening, no inspection surface
+  carried at all.
+- Every configured **listener**'s own role, its binds, **enabled** and **excluded** as two
+  **independent** booleans computed over the **full configured participant set** — before any
+  **run-scoped selector** (`STORY-OP-3`) narrows it, never from the already-filtered active set,
+  which is what makes a selector-excluded participant observable at all — its delivered and declined
+  counts, and its backoff state (or absent, when none is running). See the glossary's **excluded**
+  vs **disabled** entry for the distinction the two booleans draw.
+- Every configured **source**'s own name and type, the same independent enabled/excluded booleans
+  over the same full configured set, its mode (**pull** or **push**), its last tick, and its failure
+  state (or absent).
+- The core's own **delivery-side counters**, per `type` — the unconsumed-expired count, the
+  unknown-type-rejected count, and the deduped count — the same members `INTF-MON`'s metric catalog
+  declares (`INV-OBS-1`); inspection offers them as a **point-in-time reading of the same facts** the
+  catalog exposes continuously, never a second, divergently-counted set, and this widening adds
+  **no** member to that catalog.
+- The **registry**: every registered participant's own id, kind, lifecycle state, last self-reported
+  status, and when it registered and was last updated — the same registry the common manager
+  contract's "Registry & lifecycle" describes above, now readable through inspection; usually empty,
+  since production participants do not yet self-report through it.
+
+A **fourth** reading beyond this now-wider **MUST** set is still a **MAY**: a core **MAY** also
+report **which configured bindings have matched no event this run**, which is a debugging
+convenience against a path no config-time check can validate today — and, like the MUSTs above, it
+is core-side routing knowledge rather than a window into any handler (`INV-DISP-1`,
 `OQ-EVT-CATALOG`, `USECASE-DEBUG-RUN`).
 
 **Deliveries, watched over time, are a bounded activity ring.** A one-shot snapshot is enough for a

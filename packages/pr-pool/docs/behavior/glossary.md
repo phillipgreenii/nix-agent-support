@@ -18,6 +18,18 @@ their own terms in a downstream deployment set.
   outlives every run until explicitly cleared. The two named gates, **OR-effective**, are
   `quota-paused` (the operator's own) and `cicd-down` (an automation actor's, and labeled as such on
   every surface).
+- **Gate owner** — the field that carries that labeling per gate: `"operator"` for `quota-paused` or
+  `"automation"` for `cicd-down`. Realizes `INV-LIFE-2`'s requirement that every surface reporting
+  gate state label an automation-owned gate as such, because it MAY re-assert itself on its own
+  initiative in a way the human-owned gate never does.
+- **Quiescing** — the reading a client gives an inspected core whose own lifecycle state (the
+  `starting → started → stopping → stopped` diagram, `INV-LIFE-1`) has left `started` for `stopping`
+  while it is not failing — the orderly-shutdown leg of that lifecycle, most visibly a
+  **drain-and-exit** run winding toward its own exit predicate. It is a **distinct** fact from
+  **quiescent** (`INV-LIFE-2`: nothing unsettled remains in flight): a core MAY be `stopping` with
+  work still draining, and a long-running daemon MAY be quiescent while its state stays `started`
+  throughout, so the two readings are never substituted for one another — both are informational,
+  never failures.
 
 ## Events and matching
 
@@ -79,6 +91,19 @@ their own terms in a downstream deployment set.
 - **Storage** — an optional key/value scratch a participant provides for core state; never backs
   delivery.
 - **Callback** — a command the core hands a participant so the participant can push back to the core.
+- **Excluded** — a **run-scoped selector**'s exclusion of a configured participant from the
+  **active** set for a single run (`STORY-OP-3`); it ends with the run and edits no persisted state.
+  This is the same fact `INV-DISP-3` describes in prose as a binding merely "disabled for this run"
+  — the two texts name one condition. Inspecting a running core (`interfaces.md`) reports it as its
+  own **independent boolean**, per listener/source, computed over the full configured set before any
+  selector narrows it.
+- **Disabled** — a **configuration**-level fact about a participant, independent of any run-scoped
+  selector and outlasting the run — contrast **excluded** above, which is scoped to a single
+  invocation and edits nothing persisted. Inspection reports it as the negated boolean `enabled`,
+  independent of `excluded`, because a participant may carry either fact, both, or neither. Today's
+  configuration schema has no such toggle yet (`OQ-CONFIG`), so `enabled` reads `true` for every
+  configured participant until one exists — the boolean is carried now so the reply shape is correct
+  once it does.
 - **Push-inject** (the operator command source) — the operator subcommand (`push-inject`) that
   injects an arbitrary operator-supplied event into the **live** core — the front door to the
   push-ingest path,

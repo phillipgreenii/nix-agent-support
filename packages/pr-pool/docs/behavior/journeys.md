@@ -1038,6 +1038,18 @@ stateDiagram-v2
     end note
 ```
 
+**Reading halted apart from quiescent.** `INV-LIFE-2` requires inspection to **distinguish** these —
+a gated core MAY still have unsettled work in flight, and a core MAY be quiescent (nothing unsettled
+remains) without any gate active at all, so neither reading substitutes for the other. That
+distinction is read the same way any other run state is read, through `USECASE-DEBUG-RUN`'s
+inspection: the core's own lifecycle state and run mode name whether it is winding toward exit on its
+own account (a drain-and-exit run with nothing left to offer, independent of any gate — see the
+glossary's **quiescing** entry), and each gate's active/owner fields name whether dispatch is halted
+and by whom. A client that watches continuously renders these as two visibly different states rather
+than one generic "not dispatching": a **halted** pool still shows every participant's own health,
+because the participants themselves are not the ones stopped; a **quiescent**, ungated run is
+winding down toward `USECASE-RUN-DRAIN`'s own exit and is not an error condition at all.
+
 Extensions:
 
 - A gate is set or cleared while no core is running: `pause`/`resume` still exit `0` and report that
@@ -1045,6 +1057,9 @@ Extensions:
   socket (contrast `INTF-CLI` "Locating the core").
 - The core is asked to run drain-and-exit while gated: it boots, stays reachable, emits a final
   snapshot, and exits promptly without draining (`INV-LIFE-2`, `USECASE-RUN-DRAIN`).
+- Inspecting a running core while it is gated and/or winding toward a drain-and-exit: lifecycle
+  state/mode and each gate's active/owner together let the reading distinguish halted from
+  quiescent, per `INV-LIFE-2` (`USECASE-DEBUG-RUN`).
 
 ### `USECASE-DEBUG-RUN` — read a run: metrics, injected test events, and run-scoped selectors <!-- uuid: 3c360b41-5a84-4607-88b6-425c02f80474 -->
 
@@ -1054,8 +1069,8 @@ Extensions:
 observability snapshot to read.
 **Intent:** see what a run is doing, and narrow it until a cause is visible — the metric catalog
 through a sink, an injected test event, and the run-scoped selectors.
-_Requires:_ `INV-DISP-1`, `INV-DISP-3`, `INV-EVT-1`, `INV-EVT-3`, `INV-FAIL-1`, `INV-OBS-1`,
-`GOAL-MIN-1`.
+_Requires:_ `INV-DISP-1`, `INV-DISP-3`, `INV-EVT-1`, `INV-EVT-3`, `INV-FAIL-1`, `INV-LIFE-1`,
+`INV-LIFE-2`, `INV-OBS-1`, `GOAL-MIN-1`.
 
 **Flow — the metric catalog (steady-state reading).** The core **owns the metric catalog** — a
 declared set of metrics, each with `name`, `kind` (counter / gauge / histogram), `unit`, and label
@@ -1080,6 +1095,15 @@ delivery semantics come with it. It is **distinct** from `ingest-event`, and dis
 one-shot smoke test (`USECASE-VERIFY-PARTICIPANT`), which tears down instead of feeding the live
 queue. Injecting is how an operator reproduces a routing question on a running system rather than
 waiting for a source to emit the event again.
+
+**Flow — halted vs quiescent.** A running core's own lifecycle state and run mode, together with
+each gate's active and owner fields, let a reader tell **halted** (`USECASE-GATE-POOL`'s gate, set
+by an operator or an automation actor) apart from **quiescent** (nothing unsettled remains in
+flight, per `INV-LIFE-2`) — two readings that never substitute for one another, because a gated core
+MAY still have unsettled work and an ungated core MAY be quiescent on its own account (a
+drain-and-exit run with nothing left to offer; see the glossary's **quiescing** entry for the
+lifecycle-state reading that names this). Reading them together is what keeps a coherent, non-error
+resting state visually distinct from an actual poll failure.
 
 **Flow — run-scoped selectors.** The operator MAY restrict the **active** set of sources and handlers
 for a single run — as an allow-list, a deny-list, or both — **without editing the configuration**
