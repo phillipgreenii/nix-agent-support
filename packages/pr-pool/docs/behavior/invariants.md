@@ -204,7 +204,12 @@ sequenceDiagram
   it is unexpired** (`INV-EVT-4`), **at the cadence `INV-FAIL-2` defines**, to the same handler once
   the ceiling lifts or to another bound handler. **The failure reason does not change the
   cadence**: `busy` and `unavailable` share exactly one retry cadence — there is no per-reason
-  knob (`INV-FAIL-2`). **Post-accept
+  knob (`INV-FAIL-2`). A **dispatch failure** — the core's own attempt to hand the event over
+  failing outright, rather than reaching a handler reply at all (`INV-OBS-1`'s second
+  delivery-side class) — is likewise **pre-accept** and gets the identical treatment: the
+  core re-offers it while it is unexpired, at the same `INV-FAIL-2` cadence, exactly as a
+  `busy`/`unavailable` decline would be. Only the **metric class** distinguishes it from a
+  busy/unavailable decline (`INV-OBS-1`); the retry mechanics do not. **Post-accept
   outcomes** — `retryable`, `resource-limit`, or `critical`, reported by a handler that has
   **already accepted** the event — are the **handler's** own (once it accepts, the handler owns
   persistence/resume/retry); the core does **not** re-offer post-accept work, and does **not**

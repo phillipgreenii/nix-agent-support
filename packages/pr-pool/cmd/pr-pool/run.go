@@ -139,6 +139,11 @@ func (f fanOutObserver) OnDeclined(evtType string) {
 	f.b.OnDeclined(evtType)
 }
 
+func (f fanOutObserver) OnDispatchFailure(evtType string) {
+	f.a.OnDispatchFailure(evtType)
+	f.b.OnDispatchFailure(evtType)
+}
+
 // activityPendingTypesCap bounds activityObserver's eventID->Type
 // correlation map (see its doc for why the map exists at all). It is
 // independent of the activity.Ring's own capacity: many more events can be
@@ -161,11 +166,14 @@ const activityPendingTypesCap = 4096
 // consciously separate task) rather than done here — this task's Files
 // section names only eventqueue.Observer and cmd/pr-pool/run.go, not
 // core.IngestObserver or a new roleListener.Offer hook. So this adapter
-// covers exactly the three outcomes eventqueue.Observer alone carries:
+// covers exactly the four outcomes eventqueue.Observer alone carries (a
+// fourth, dispatch_failed, joined the other three at bead pg2-icm3u once
+// OnDispatchFailure existed to source it from):
 //
-//	delivered ≈ OnAccept
-//	missed    ≈ OnUnconsumedExpired
-//	declined  ≈ OnDeclined
+//	delivered      ≈ OnAccept
+//	missed         ≈ OnUnconsumedExpired
+//	declined       ≈ OnDeclined
+//	dispatch_failed ≈ OnDispatchFailure
 //
 // OnAccept(eventID, listenerID string) carries no event TYPE — queue.go's
 // own Dispatch has it at the call site (p.evt.Type) but does not thread it
@@ -217,6 +225,10 @@ func (a *activityObserver) OnUnconsumedExpired(evtType string) {
 
 func (a *activityObserver) OnDeclined(evtType string) {
 	a.ring.Append(activity.Entry{Type: evtType, Outcome: "declined"})
+}
+
+func (a *activityObserver) OnDispatchFailure(evtType string) {
+	a.ring.Append(activity.Entry{Type: evtType, Outcome: "dispatch_failed"})
 }
 
 // declaredBindTypes collects every event type SOME configured role binds,

@@ -3,6 +3,7 @@ package eventqueue
 import (
 	"context"
 	"log/slog"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -40,15 +41,26 @@ type Observer interface {
 	OnAccept(eventID, listenerID string)
 	OnUnconsumedExpired(evtType string)
 	// OnDeclined fires on a PRE-ACCEPT decline — Listener.Offer returning false
-	// (INV-FAIL-1) — the one delivery-side failure signal pr-pool measures
-	// (operator scope-cut 2026-07-28: everything post-accept is permanently out
-	// of scope). It fires on EVERY declined offer for evtType, not only the
-	// terminal (INV-EVT-4 last-attempt) one: a single Offer()==false is the only
-	// place both a graceful busy decline and an outright dispatch failure funnel
-	// through, and the Observer boundary carries no way to tell them apart, so
-	// under-counting a chronically busy handler's backlog until its final,
-	// expiry-bound attempt would hide the very signal this hook exists for.
+	// without panicking (INV-FAIL-1): a graceful `busy` or `unavailable` reply.
+	// It fires on EVERY declined offer for evtType, not only the terminal
+	// (INV-EVT-4 last-attempt) one, so a chronically busy handler's backlog is
+	// never under-counted until its final, expiry-bound attempt.
+	//
+	// (operator scope-cut 2026-07-28: everything post-accept stays permanently
+	// out of scope.)
 	OnDeclined(evtType string)
+	// OnDispatchFailure fires on the OTHER delivery-side failure class
+	// (INV-OBS-1): an outright dispatch failure where the core's own attempt to
+	// hand the event to a listener broke outright rather than returning a
+	// graceful accept/decline reply — currently, a recovered panic from
+	// Listener.Offer (see offerSafely). It is distinct from OnDeclined: a
+	// single Offer()==false used to be the only signal at this boundary,
+	// covering both a graceful busy decline and an outright dispatch failure
+	// with no way to tell them apart; this hook is what makes them separable
+	// (bead pg2-icm3u). Like OnDeclined it fires on EVERY occurrence and
+	// follows the identical settlement/retry mechanics (INV-FAIL-1 / INV-EVT-4)
+	// — only the failure-rate metric class differs.
+	OnDispatchFailure(evtType string)
 }
 
 type noopObserver struct{}
@@ -57,6 +69,7 @@ func (noopObserver) OnEnqueue(Event)            {}
 func (noopObserver) OnAccept(string, string)    {}
 func (noopObserver) OnUnconsumedExpired(string) {}
 func (noopObserver) OnDeclined(string)          {}
+func (noopObserver) OnDispatchFailure(string)   {}
 
 // EnqueueResult reports whether an enqueue added a new event or was dropped as
 // a duplicate of a still-retained id (INV-EVT-3).
@@ -515,14 +528,46 @@ type pendingOffer struct {
 	lastAttempt bool
 	// accepted is what Offer returned (filled in by the offer phase).
 	accepted bool
+	// dispatchFailed is true when the offer phase never got a graceful
+	// accept/decline reply out of Offer at all — currently, a recovered panic
+	// (see offerSafely). It is meaningless when accepted is true. This is what
+	// lets the record phase tell INV-OBS-1's two delivery-side failure classes
+	// apart even though both currently share the same accepted==false shape.
+	dispatchFailed bool
+}
+
+// offerSafely calls l.Offer(evt), recovering a panic from the listener's own
+// implementation so that one bad handler cannot take down the whole Dispatch
+// pass — and, transitively, every OTHER registered listener's delivery this
+// pass (INV-PREC-1: safety/isolation ranks above continuity, which ranks
+// above efficiency). A recovered panic is reported as a genuine dispatch
+// failure (INV-OBS-1's "the core could not hand the event over at all") —
+// this IS a case of that: the offer never produced a reply at all, graceful
+// or otherwise. The panic value and a stack trace are logged with the
+// listener and event ids so the underlying bug stays diagnosable; Dispatch's
+// RECORD phase then settles the pair exactly as it would a graceful decline
+// (see Dispatch's own doc), just under the other metric class.
+func offerSafely(l Listener, evt Event) (accepted, dispatchFailed bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("eventqueue: listener Offer panicked; treating as a dispatch failure (INV-OBS-1)",
+				"listenerId", l.ID(), "eventId", evt.ID, "eventType", evt.Type,
+				"panic", r, "stack", string(debug.Stack()))
+			accepted, dispatchFailed = false, true
+		}
+	}()
+	return l.Offer(evt), false
 }
 
 // Dispatch offers each listener its head deliverable event once, in
 // registration order, and returns how many events were accepted this pass. A
-// pre-accept decline on an UNEXPIRED event leaves the head in place for a later
-// pass (re-offer, INV-FAIL-1 / INV-CONC-1); a decline on an ALREADY-EXPIRED one
-// was that listener's last attempt (INV-EVT-4), so the pair is settled and the
-// head advances.
+// pre-accept decline OR a recovered dispatch-failure panic (offerSafely) on an
+// UNEXPIRED event leaves the head in place for a later pass (re-offer,
+// INV-FAIL-1 / INV-CONC-1); either one on an ALREADY-EXPIRED event was that
+// listener's last attempt (INV-EVT-4), so the pair is settled and the head
+// advances. The two are handled identically here and differ only in which
+// Observer hook — and so which INV-OBS-1 failure-rate class — records them
+// (bead pg2-icm3u).
 //
 // Locking discipline (bead pg2-56186). The pass is three phases and the queue
 // lock is held only in phases 1 and 3, NEVER across the listener callback:
@@ -530,15 +575,17 @@ type pendingOffer struct {
 //  1. SNAPSHOT (locked): compute each listener's head deliverable event, capture
 //     the (listener, event) pairs and the INV-EVT-4 expiry verdict for each. No
 //     Offer, no store write here.
-//  2. OFFER (UNLOCKED): call Listener.Offer for each pair. Releasing the lock is
-//     what makes a synchronous listener's accept path free to re-enter the queue
+//  2. OFFER (UNLOCKED): call Listener.Offer for each pair, via offerSafely so a
+//     panicking listener implementation cannot abort the pass (INV-PREC-1;
+//     see offerSafely's own doc). Releasing the lock is what makes a
+//     synchronous listener's accept path free to re-enter the queue
 //     (Enqueue / push-inject a follow-on event) without self-deadlocking on the
 //     non-reentrant q.mu, and stops all ingest from serializing behind an
 //     in-flight (possibly long) handler offer.
 //  3. RECORD (locked): for each outcome, re-validate against CURRENT state then
 //     settle the pair — marking acceptance, appending the durable opAccept
-//     record, notifying the observer and maybe-evicting, or (for a final decline)
-//     recording nothing but the terminal marker.
+//     record, notifying the observer and maybe-evicting, or (for a final decline
+//     or dispatch failure) recording nothing but the terminal marker.
 //
 // Between phases 2 and 3 the queue can change (concurrent Enqueue / Expire /
 // Dispatch, or a re-entrant call from inside Offer), so RECORD looks the entry
@@ -583,9 +630,11 @@ func (q *Queue) Dispatch() (accepted int) {
 	}
 
 	// Phase 2 — OFFER (UNLOCKED). ls.l is set once at Register and never mutated,
-	// so reading it here without the lock is safe.
+	// so reading it here without the lock is safe. offerSafely recovers a
+	// panicking Offer so one listener's bug cannot abort the rest of this
+	// pass's offers (see its own doc).
 	for i := range pending {
-		pending[i].accepted = pending[i].ls.l.Offer(pending[i].evt)
+		pending[i].accepted, pending[i].dispatchFailed = offerSafely(pending[i].ls.l, pending[i].evt)
 	}
 
 	// Phase 3 — RECORD (locked), re-validating each outcome against current state
@@ -600,19 +649,26 @@ func (q *Queue) Dispatch() (accepted int) {
 			continue // entry left the queue mid-dispatch (retired/evicted): skip
 		}
 		if !p.accepted {
-			// A PRE-ACCEPT decline. Nothing DURABLE about the attempt is recorded —
-			// no counter, nothing on disk (DEC-EVENT-1: the core keeps no attempt
-			// history) — but it IS a delivery-side failure signal (INV-OBS-1 /
-			// INV-FAIL-1), so the observer sees every occurrence regardless of
-			// lastAttempt (see OnDeclined's doc). The single expiry comparison
+			// A PRE-ACCEPT decline OR a dispatch failure (offerSafely recovered a
+			// panic) — INV-OBS-1's two delivery-side classes. Nothing DURABLE about
+			// the attempt is recorded — no counter, nothing on disk (DEC-EVENT-1:
+			// the core keeps no attempt history) — but it IS a delivery-side
+			// failure signal (INV-OBS-1 / INV-FAIL-1), so the observer sees every
+			// occurrence regardless of lastAttempt (see OnDeclined's doc). Both
+			// classes settle IDENTICALLY from here: the single expiry comparison
 			// already made in phase 1 is the whole retention decision: past
 			// `expiresAt` that attempt was the last one this listener is owed
 			// (INV-EVT-4), so settle the pair and let its head advance; before it,
-			// the decline is simply a re-offer condition (INV-FAIL-1), and the
+			// the failure is simply a re-offer condition (INV-FAIL-1), and the
 			// IN-MEMORY (transient, unpersisted) retry-cadence bookkeeping advances
 			// so the next offer waits at least INV-FAIL-2's cadence rather than the
-			// very next Dispatch pass.
-			q.obs.OnDeclined(p.evt.Type)
+			// very next Dispatch pass. Only which Observer hook fires — and so
+			// which failure-rate metric class counts it — differs.
+			if p.dispatchFailed {
+				q.obs.OnDispatchFailure(p.evt.Type)
+			} else {
+				q.obs.OnDeclined(p.evt.Type)
+			}
 			if p.lastAttempt {
 				e.settled[lid] = true
 				p.ls.resetBackoff() // nothing left to back off from once settled

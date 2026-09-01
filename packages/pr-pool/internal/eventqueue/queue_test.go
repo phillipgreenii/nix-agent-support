@@ -43,15 +43,18 @@ func (c *mockClock) after(d time.Duration) <-chan time.Time {
 }
 
 // fakeListener records every offer and can be configured to decline (busy) a
-// given number of times per event id before accepting, or to never bind / never
-// accept — enough to drive every INV-CONC-1 / INV-FAIL-1 / INV-EVT-4 branch.
+// given number of times per event id before accepting, to PANIC a given
+// number of times per event id first (bead pg2-icm3u — the dispatch-failure
+// path, offerSafely), or to never bind / never accept — enough to drive every
+// INV-CONC-1 / INV-FAIL-1 / INV-EVT-4 branch.
 type fakeListener struct {
-	id            string
-	binds         map[string]bool // event types this listener binds (INV-DISP-1)
-	offered       []string        // event ids offered, in order (incl. re-offers)
-	accepted      []string        // event ids accepted, in order
-	busyRemaining map[string]int  // per-id busy declines before accepting
-	neverAccept   bool
+	id             string
+	binds          map[string]bool // event types this listener binds (INV-DISP-1)
+	offered        []string        // event ids offered, in order (incl. re-offers)
+	accepted       []string        // event ids accepted, in order
+	busyRemaining  map[string]int  // per-id busy declines before accepting
+	panicRemaining map[string]int  // per-id Offer panics before falling through
+	neverAccept    bool
 }
 
 func newListener(id string, types ...string) *fakeListener {
@@ -59,13 +62,17 @@ func newListener(id string, types ...string) *fakeListener {
 	for _, t := range types {
 		b[t] = true
 	}
-	return &fakeListener{id: id, binds: b, busyRemaining: map[string]int{}}
+	return &fakeListener{id: id, binds: b, busyRemaining: map[string]int{}, panicRemaining: map[string]int{}}
 }
 
 func (f *fakeListener) ID() string           { return f.id }
 func (f *fakeListener) Matches(e Event) bool { return f.binds[e.Type] }
 func (f *fakeListener) Offer(e Event) bool {
 	f.offered = append(f.offered, e.ID)
+	if n := f.panicRemaining[e.ID]; n > 0 {
+		f.panicRemaining[e.ID] = n - 1
+		panic("fakeListener: simulated Offer panic (dispatch failure)")
+	}
 	if f.neverAccept {
 		return false
 	}
@@ -83,6 +90,7 @@ type recordingObserver struct {
 	accepted          []string
 	unconsumedExpired []string
 	declined          []string
+	dispatchFailed    []string
 }
 
 func (o *recordingObserver) OnEnqueue(e Event)       { o.enqueued = append(o.enqueued, e.ID) }
@@ -91,6 +99,9 @@ func (o *recordingObserver) OnUnconsumedExpired(t string) {
 	o.unconsumedExpired = append(o.unconsumedExpired, t)
 }
 func (o *recordingObserver) OnDeclined(t string) { o.declined = append(o.declined, t) }
+func (o *recordingObserver) OnDispatchFailure(t string) {
+	o.dispatchFailed = append(o.dispatchFailed, t)
+}
 
 // evt builds a DEFAULT event: neither `at` nor `expiresAt` set. The core resolves
 // both to its own ingest-now, so the event is BORN EXPIRED (INV-EVT-4) — offered
@@ -230,6 +241,53 @@ func TestBornExpiredDefaultOfferedOnceThenDropped(t *testing.T) {
 	}
 	if !equal(obs.unconsumedExpired, []string{"T"}) {
 		t.Fatalf("unconsumed-expired = %v, want [T] — a genuine miss (INV-DISP-3)", obs.unconsumedExpired)
+	}
+}
+
+// bead pg2-icm3u: a Listener.Offer implementation that PANICS is a genuine
+// dispatch failure (INV-OBS-1's second delivery-side class, "the core could
+// not hand the event over at all") — distinct from a graceful pre-accept
+// decline, and Dispatch MUST recover it (offerSafely) rather than let it
+// abort the pass or crash the process. Settlement mechanics are otherwise
+// identical to TestBornExpiredDefaultOfferedOnceThenDropped's decline case:
+// the born-expired event's one owed attempt is also its last, so the panic
+// settles the pair and the event is then dropped unconsumed-expired.
+func TestDispatchOfferPanicRecoveredAsDispatchFailure(t *testing.T) {
+	clk := newClock()
+	obs := &recordingObserver{}
+	q := newQueue(t, clk, WithObserver(obs))
+	l := newListener("h", "T")
+	l.panicRemaining["e1"] = 1 // panics on its one owed attempt
+	q.Register(l)
+	mustEnqueue(t, q, evt("e1", "T"))
+
+	if n := q.Dispatch(); n != 0 {
+		t.Fatalf("accepted = %d, want 0 — the offer panicked", n)
+	}
+	if !equal(l.offered, []string{"e1"}) {
+		t.Fatalf("offers = %v, want exactly one offer of e1 (the one owed attempt)", l.offered)
+	}
+	// The dispatch failure MUST be counted under OnDispatchFailure, NEVER
+	// OnDeclined — the two are now separable (see Observer's doc).
+	if !equal(obs.dispatchFailed, []string{"T"}) {
+		t.Fatalf("dispatchFailed = %v, want [T]", obs.dispatchFailed)
+	}
+	if len(obs.declined) != 0 {
+		t.Fatalf("declined = %v, want none — a panic is a dispatch failure, not a decline", obs.declined)
+	}
+	// That attempt was the last one owed (INV-EVT-4), so nothing is re-offered...
+	q.Dispatch()
+	if !equal(l.offered, []string{"e1"}) {
+		t.Fatalf("offers = %v, want NO re-offer after the final (post-expiry) attempt", l.offered)
+	}
+	// ...and with nothing further owed and never accepted, the event is a
+	// genuine unconsumed-expired miss (INV-DISP-3) exactly as a terminal
+	// decline would produce.
+	if n := q.Expire(); n != 1 {
+		t.Fatalf("expire dropped %d, want 1", n)
+	}
+	if !equal(obs.unconsumedExpired, []string{"T"}) {
+		t.Fatalf("unconsumed-expired = %v, want [T]", obs.unconsumedExpired)
 	}
 }
 
@@ -465,6 +523,37 @@ func TestPreAcceptBusyReoffer(t *testing.T) {
 	// third offer is an ACCEPT, so it must not appear here.
 	if !equal(obs.declined, []string{"T", "T"}) {
 		t.Fatalf("declined = %v, want [T T] — one per pre-accept decline, none for the eventual accept", obs.declined)
+	}
+}
+
+// bead pg2-icm3u: a dispatch failure (a recovered Offer panic) follows the
+// IDENTICAL re-offer/cadence mechanics as a pre-accept decline
+// (INV-FAIL-1) — it is re-offered at the INV-FAIL-2 cadence while the event
+// remains unexpired, and only the failure-rate metric class differs from
+// TestPreAcceptBusyReoffer's graceful-decline case.
+func TestDispatchOfferPanicReofferedLikeADecline(t *testing.T) {
+	clk := newClock()
+	obs := &recordingObserver{}
+	q := newQueue(t, clk, WithObserver(obs), WithRetryBackoff(backoff.Policy{Initial: time.Second, Factor: 2, Max: time.Minute}))
+	l := newListener("h", "T")
+	l.panicRemaining["e1"] = 2 // panic twice, accept on the third offer
+	q.Register(l)
+	mustEnqueue(t, q, evtUntil("e1", "T", clk.in(time.Hour)))
+	for _, wait := range []time.Duration{0, time.Second, 2 * time.Second} {
+		clk.advance(wait)
+		q.Dispatch()
+	}
+	if !equal(l.offered, []string{"e1", "e1", "e1"}) {
+		t.Fatalf("offers = %v, want e1 re-offered 3x", l.offered)
+	}
+	if !equal(l.accepted, []string{"e1"}) {
+		t.Fatalf("accepted = %v, want [e1]", l.accepted)
+	}
+	if !equal(obs.dispatchFailed, []string{"T", "T"}) {
+		t.Fatalf("dispatchFailed = %v, want [T T] — one per recovered panic, none for the eventual accept", obs.dispatchFailed)
+	}
+	if len(obs.declined) != 0 {
+		t.Fatalf("declined = %v, want none — every non-accept here was a panic, not a graceful decline", obs.declined)
 	}
 }
 

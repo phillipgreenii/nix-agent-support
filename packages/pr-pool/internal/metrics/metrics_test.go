@@ -339,9 +339,9 @@ func TestRecordDispatchLatency_HistogramWithBuckets(t *testing.T) {
 	}
 }
 
-// RecordFailure accepts both FailureClassDeclined and the new
-// FailureClassDispatchFail — see FailureClassDispatchFail's own doc for why
-// no production call site feeds the latter yet.
+// RecordFailure accepts both FailureClassDeclined and FailureClassDispatchFail
+// — see FailureClassDispatchFail's own doc for its production call site
+// (eventqueue.Observer.OnDispatchFailure).
 func TestRecordFailure_AcceptsBothClasses(t *testing.T) {
 	h := newHarness(t)
 	h.emitter.RecordFailure(FailureClassDeclined)
@@ -477,6 +477,44 @@ func TestDeclineThroughQueueFeedsFailuresCounter(t *testing.T) {
 	}
 }
 
+// OnDispatchFailure — the queue's OTHER delivery-side failure signal
+// (eventqueue.Observer, INV-OBS-1) — feeds the SAME pr_pool.failures counter
+// RecordFailure does, labeled with FailureClassDispatchFail.
+func TestOnDispatchFailureFeedsFailuresCounter(t *testing.T) {
+	h := newHarness(t)
+	h.emitter.OnDispatchFailure("review-requested")
+	h.emitter.OnDispatchFailure("review-requested")
+	h.emitter.OnDispatchFailure("push-requested")
+
+	m := findMetric(t, h.collect(t), MetricFailures)
+	if got := sumFor(m, "class", FailureClassDispatchFail); got != 3 {
+		t.Fatalf("failures[%s] = %d, want 3 (evtType is not part of the label set)", FailureClassDispatchFail, got)
+	}
+}
+
+// Integration through the queue: a real dispatch failure (a listener's Offer
+// panicking, recovered by eventqueue.Queue's offerSafely) reaches the
+// failures counter via OnDispatchFailure — proving the production call site
+// bead pg2-icm3u adds, not just the method in isolation, and proving it lands
+// under the OTHER class from a graceful decline (TestDeclineThroughQueue...
+// above).
+func TestDispatchFailureThroughQueueFeedsFailuresCounter(t *testing.T) {
+	h := newHarness(t)
+	l := &panickingListener{typ: "review-requested"}
+	h.q.Register(l)
+	h.enqueue(t, "e1", "review-requested", 10*time.Minute)
+
+	h.q.Dispatch() // Offer panics; offerSafely recovers it as a dispatch failure
+
+	m := findMetric(t, h.collect(t), MetricFailures)
+	if got := sumFor(m, "class", FailureClassDispatchFail); got != 1 {
+		t.Fatalf("failures[%s] = %d, want 1 after one Dispatch-path panic", FailureClassDispatchFail, got)
+	}
+	if got := sumFor(m, "class", FailureClassDeclined); got != -1 {
+		t.Fatalf("failures[%s] = %d, want none recorded — a panic is not a graceful decline", FailureClassDeclined, got)
+	}
+}
+
 // decliningListener is a minimal eventqueue.Listener that always declines
 // (pre-accept, busy) events of its bound type — enough to drive Dispatch's
 // Offer()==false branch without pulling in eventqueue's own test doubles
@@ -499,6 +537,22 @@ func (l acceptingListener) Matches(e eventqueue.Event) bool {
 	return e.Type == l.typ
 }
 func (acceptingListener) Offer(eventqueue.Event) bool { return true }
+
+// panickingListener is a minimal eventqueue.Listener whose Offer always
+// PANICS for events of its bound type — bead pg2-icm3u's dispatch-failure
+// path: eventqueue.Queue's offerSafely recovers the panic and Dispatch
+// reports it via OnDispatchFailure rather than OnDeclined (decliningListener
+// above stays the graceful-decline test double).
+type panickingListener struct{ typ string }
+
+func (panickingListener) ID() string { return "panicking" }
+func (l panickingListener) Matches(e eventqueue.Event) bool {
+	return e.Type == l.typ
+}
+
+func (panickingListener) Offer(eventqueue.Event) bool {
+	panic("panickingListener: simulated Offer panic (dispatch failure)")
+}
 
 // New surfaces an instrument-registration error rather than panicking.
 func TestNewInstrumentError(t *testing.T) {

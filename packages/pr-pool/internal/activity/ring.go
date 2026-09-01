@@ -48,11 +48,11 @@ type Entry struct {
 	Type string
 	// Outcome is an opaque verb sourced from report today, carrying no UI-
 	// chrome vocabulary (ADR 0026): "delivered", "missed", "rejected",
-	// "declined", "deduped", "needs_input", "budget_escalation". This
-	// package places no constraint on the value — which of these a given
-	// production wiring can actually PRODUCE is that wiring's own call-site
-	// decision (see cmd/pr-pool/run.go's activityObserver for Task 3.4's own
-	// choice here).
+	// "declined", "dispatch_failed", "deduped", "needs_input",
+	// "budget_escalation". This package places no constraint on the value —
+	// which of these a given production wiring can actually PRODUCE is that
+	// wiring's own call-site decision (see cmd/pr-pool/run.go's
+	// activityObserver for Task 3.4's own choice here).
 	Outcome string
 }
 

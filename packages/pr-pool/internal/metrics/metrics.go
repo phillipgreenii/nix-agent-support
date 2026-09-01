@@ -20,8 +20,10 @@
 // The Emitter implements eventqueue.Observer, so the queue drives the metrics
 // end to end: unconsumed-expired fires from the queue's expiry-sweep path, the
 // depth and backlog gauges read the queue's live per-type depth on collect, and
-// failure rate fires from the queue's Dispatch path (OnDeclined, fed from a
-// pre-accept decline — see RecordFailure/FailureClassDeclined). It also
+// failure rate fires from the queue's Dispatch path — OnDeclined for a
+// pre-accept decline, OnDispatchFailure for the queue's OTHER delivery-side
+// failure class (a recovered panic from a listener's Offer, bead pg2-icm3u) —
+// see RecordFailure/FailureClassDeclined/FailureClassDispatchFail. It also
 // implements core.IngestObserver, so the core's ingest path drives
 // unknown-type-rejected and deduped, and discover.SourceFailureObserver, so
 // discover's pull-source retry path drives source-failures.
@@ -113,19 +115,12 @@ const FailureClassDeclined = "declined"
 // FailureClassDispatchFail is the catalog's second delivery-side failure
 // class (INV-OBS-1): an outright dispatch failure where pr-pool could not
 // hand the event over at all, distinct from a graceful pre-accept decline
-// (FailureClassDeclined). RecordFailure accepts it like any other class, but
-// — recorded here rather than guessed at — no production call site feeds it
-// as of this task: the Task 3.3 binding decision says to feed it from
-// "Dispatch's error return", but eventqueue.Queue.Dispatch returns only
-// `(accepted int)` and eventqueue.Listener.Offer returns only `bool` — no
-// error-returning path exists anywhere in Dispatch's offer/accept flow today.
-// Wiring a real call site needs an eventqueue-level interface change (adding
-// an error-returning outcome Dispatch or Offer could surface), which is
-// outside this task's Files scope (internal/eventqueue/queue.go is not
-// listed) and outside a Task-3.3-sized change generally. Docket design
-// (2026-09-01) carries the same gap at its Task 3.3 Step 4, so this is a
-// design-level gap, not something this packet can resolve by guessing across
-// the eventqueue.Observer contract seam.
+// (FailureClassDeclined). Its production call site is
+// eventqueue.Observer.OnDispatchFailure, fed from eventqueue.Queue.Dispatch's
+// offerSafely: a panic recovered from a Listener's own Offer implementation
+// is the concrete "the core could not hand the event over at all" condition
+// (bead pg2-icm3u — the original Task 3.3 binding decision named "Dispatch's
+// error return", a shape that never existed; this is the resolved design).
 const FailureClassDispatchFail = "dispatch-failure"
 
 // Emitter emits the core's declared metric catalog over an OTel meter. It
@@ -303,13 +298,26 @@ func (e *Emitter) OnUnconsumedExpired(evtType string) {
 }
 
 // OnDeclined feeds the failure-rate counter from the queue's Dispatch path
-// (eventqueue.Observer): a pre-accept decline or a dispatch failure, the
-// delivery-side cases INV-FAIL-1 covers. evtType is accepted for interface
-// symmetry with the queue's other per-type hooks but is not itself part of the
-// failure-rate label set — the counter's "class" dimension is
-// FailureClassDeclined, the one class knowable at this call site (see its doc).
+// (eventqueue.Observer): a graceful pre-accept decline, one of the two
+// delivery-side cases INV-FAIL-1 covers (the other, OnDispatchFailure below,
+// fires from the same Dispatch pass for the OTHER class). evtType is accepted
+// for interface symmetry with the queue's other per-type hooks but is not
+// itself part of the failure-rate label set — the counter's "class" dimension
+// is FailureClassDeclined.
 func (e *Emitter) OnDeclined(_ string) {
 	e.RecordFailure(FailureClassDeclined)
+}
+
+// OnDispatchFailure feeds the SAME failure-rate counter as OnDeclined, from
+// the SAME queue Dispatch path (eventqueue.Observer), but labeled with the
+// OTHER delivery-side class (INV-OBS-1): an outright dispatch failure where
+// the core could not hand the event over at all — currently, a panic
+// recovered from a Listener's Offer implementation (see
+// eventqueue.Queue's offerSafely). evtType is accepted for the same interface-
+// symmetry reason OnDeclined's doc gives and is likewise not part of the
+// label set; the class dimension is FailureClassDispatchFail.
+func (e *Emitter) OnDispatchFailure(_ string) {
+	e.RecordFailure(FailureClassDispatchFail)
 }
 
 // OnUnknownTypeRejected increments the unknown-type counter for the rejected

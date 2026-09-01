@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/pr-pool/internal/activity"
 	"github.com/phillipgreenii/pr-pool/internal/config"
 	"github.com/phillipgreenii/pr-pool/internal/dtest"
 	"github.com/phillipgreenii/pr-pool/internal/event"
@@ -170,5 +171,56 @@ func TestApplySelectors_queryExcludedNeverProduces(t *testing.T) {
 	}
 	if depth["t2"] != 0 {
 		t.Errorf("depth[t2] = %d, want 0 (q2 excluded, never produced)", depth["t2"])
+	}
+}
+
+// recordingDispatchFailureObserver is a minimal eventqueue.Observer that only
+// records OnDispatchFailure calls — enough to prove fanOutObserver.
+// OnDispatchFailure (bead pg2-icm3u) reaches both fanned-out observers.
+type recordingDispatchFailureObserver struct{ dispatchFailed []string }
+
+func (*recordingDispatchFailureObserver) OnEnqueue(eventqueue.Event) {}
+func (*recordingDispatchFailureObserver) OnAccept(string, string)    {}
+func (*recordingDispatchFailureObserver) OnUnconsumedExpired(string) {}
+func (*recordingDispatchFailureObserver) OnDeclined(string)          {}
+func (r *recordingDispatchFailureObserver) OnDispatchFailure(t string) {
+	r.dispatchFailed = append(r.dispatchFailed, t)
+}
+
+// fanOutObserver.OnDispatchFailure must call BOTH fanned-out observers, in
+// order — exactly like its siblings OnEnqueue/OnAccept/OnUnconsumedExpired/
+// OnDeclined already do (bootCore's one construction site relies on this to
+// feed the metrics.Emitter and the activity.Ring from the same queue hook).
+func TestFanOutObserver_OnDispatchFailureCallsBoth(t *testing.T) {
+	a := &recordingDispatchFailureObserver{}
+	b := &recordingDispatchFailureObserver{}
+	f := fanOutObserver{a, b}
+
+	f.OnDispatchFailure("review-requested")
+
+	if !reflect.DeepEqual(a.dispatchFailed, []string{"review-requested"}) {
+		t.Fatalf("a.dispatchFailed = %v, want [review-requested]", a.dispatchFailed)
+	}
+	if !reflect.DeepEqual(b.dispatchFailed, []string{"review-requested"}) {
+		t.Fatalf("b.dispatchFailed = %v, want [review-requested]", b.dispatchFailed)
+	}
+}
+
+// activityObserver.OnDispatchFailure (bead pg2-icm3u) must append a
+// "dispatch_failed" Entry to the ring — the fourth outcome its own doc
+// comment now enumerates, alongside delivered/missed/declined.
+func TestActivityObserver_OnDispatchFailureAppendsEntry(t *testing.T) {
+	ring := activity.New(4)
+	a := newActivityObserver(ring)
+
+	a.OnDispatchFailure("review-requested")
+
+	buf := make([]activity.Entry, 4)
+	n, _ := ring.Read(0, buf)
+	if n != 1 {
+		t.Fatalf("ring entries = %d, want 1", n)
+	}
+	if buf[0].Type != "review-requested" || buf[0].Outcome != "dispatch_failed" {
+		t.Fatalf("entry = %+v, want {Type: review-requested, Outcome: dispatch_failed}", buf[0])
 	}
 }
