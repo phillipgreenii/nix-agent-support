@@ -265,6 +265,23 @@
   single check at a delay matched to how fast that state actually changes — never a `sleep`-then-check
   pair.
 
+#### Subagent Fork Dispatch
+
+> Observed in the improvement retro for 2026-08-17→08-31 (bead `pg2-yeh5f`): "Fork is not
+> available inside a forked worker" fired 47 times across 6 sessions (worst 18), 0 main-loop / 47
+> subagent. The rejecting condition is being ALREADY a dispatched subagent, not being specifically
+> a `fork`-type one — `general-purpose` workers hit the same rejection when they themselves tried
+> `subagent_type: "fork"`. 77 retry chains (70 FAILED retries) show workers re-issuing the
+> identical rejected call instead of adapting.
+
+- **FK-1** If you are running as a dispatched subagent — of ANY `subagent_type`, fork or
+  general-purpose or otherwise — and you face independent sub-tasks, you MUST NOT call the Agent
+  tool with `subagent_type: "fork"`. Forking is unavailable from inside any already-dispatched
+  subagent and the harness rejects it. Do the sub-tasks directly (yourself, in sequence, with your
+  own tools), or dispatch a non-fork agent type (e.g. `general-purpose`) instead.
+- **FK-2** A rejected `Fork is not available inside a forked worker` result MUST NOT be re-issued
+  unchanged — the identical call fails again every time. Adapt per FK-1 instead.
+
 #### Numeric Data
 
 - **CRITICAL**: NEVER include calculated numbers without showing calculation method
