@@ -12,6 +12,7 @@ import (
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/configrules"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/curl"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/dangerouscmds"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/deniedroots"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/docker"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/envvars"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/gh"
@@ -144,6 +145,16 @@ func RuleChain(eng *engine.Engine, pe *patheval.PathEvaluator, cfg *configrules.
 
 	return []hookio.RuleModule{
 		configrules.NewFromConfig(cfg),
+		// denied-roots runs FIRST among the generic security validators (pg2-fxu7k):
+		// a fabricated-absolute-root reference (a machine-configured root known not
+		// to exist here — see home/programs/claude-extended-tool-approver's
+		// denyRoots option) is a "this cannot be right" signal independent of every
+		// other check below, so it should Reject before gitdir/dangerouscmds/secrets
+		// spend any effort classifying a path that was never real to begin with.
+		// first-match-wins makes ordering the override; a machine with an empty
+		// denyRoots list (the default) makes this rule a no-op ErrNotApplicable on
+		// every call, so ordering it first costs nothing where it is unconfigured.
+		deniedroots.New(pe),
 		// Generic security validators run in an early band — after the consumer
 		// configrules (so an explicit consumer decision still wins) but before the
 		// generic path/command approvers, so a `.git`/dangerous command is never

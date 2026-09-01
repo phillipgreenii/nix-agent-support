@@ -901,3 +901,67 @@ func TestInGitRepo_IgnoresMONOREPO_ROOT(t *testing.T) {
 		t.Errorf("DetectProjectRoot = %q, want %q (MONOREPO_ROOT still applies there)", got, plain)
 	}
 }
+
+// TestMatchedDeniedRoot pins pg2-fxu7k's fabricated-absolute-root guard: a path
+// under a machine-configured CETA_DENIED_ROOTS entry is matched, its own
+// boundary holds (no substring bleed past a component), a sibling outside every
+// denied root is not matched, and an unconfigured evaluator (no env var at all —
+// every OTHER machine, and every test that does not opt in) never matches
+// anything.
+func TestMatchedDeniedRoot(t *testing.T) {
+	t.Setenv("CETA_DENIED_ROOTS", "/home:/mnt:/repo")
+	pe := New("/Users/testuser/project")
+
+	tests := []struct {
+		name     string
+		path     string
+		wantRoot string
+		wantOK   bool
+	}{
+		{"exact root", "/home", "/home", true},
+		{"nested under first root", "/home/user/repo/file.go", "/home", true},
+		{"nested under a later colon-separated root", "/repo/sub/dir", "/repo", true},
+		{"nested under middle root", "/mnt/data/x", "/mnt", true},
+		// Boundary: a look-alike sibling directory must not match — pathContains
+		// requires a "/" boundary, not a bare string prefix.
+		{"look-alike sibling not matched", "/homefoo/bar", "", false},
+		{"unrelated absolute path not matched", "/Users/testuser/project/foo.go", "", false},
+		{"relative path resolves under project root, not matched", "foo.go", "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root, ok := pe.MatchedDeniedRoot(tt.path)
+			if ok != tt.wantOK || root != tt.wantRoot {
+				t.Errorf("MatchedDeniedRoot(%q) = (%q, %v), want (%q, %v)", tt.path, root, ok, tt.wantRoot, tt.wantOK)
+			}
+		})
+	}
+}
+
+// TestMatchedDeniedRoot_Unconfigured is the false-positive-on-this-machine
+// guarantee at the evaluator level: with CETA_DENIED_ROOTS unset (this
+// package's tests never set it except the one test above, which uses
+// t.Setenv and is therefore restored), a path that WOULD match if the env var
+// were set (e.g. "/home/x") must not be flagged. This is what makes every
+// other test in this file, and every test elsewhere in the module, safe to go
+// on using "/home/..." fixtures unaffected by this bead's change.
+func TestMatchedDeniedRoot_Unconfigured(t *testing.T) {
+	pe := New("/Users/testuser/project")
+	if root, ok := pe.MatchedDeniedRoot("/home/user/project/foo.go"); ok {
+		t.Errorf("MatchedDeniedRoot with no CETA_DENIED_ROOTS configured = (%q, true), want (_, false)", root)
+	}
+}
+
+// TestMatchedDeniedRoot_SurvivesWithCWD mirrors
+// fabricated_root_zone_test.go's TestGuardSurvivesWithCWD for the SAME reason:
+// internal/rules/safecmds builds its per-command evaluator via WithCWD, which
+// constructs a NEW struct field by field, and a field silently omitted there
+// stays zero — for deniedRoots that would mean the guard is OFF for every
+// safe-commands Bash decision while every New()-based test above stays green.
+func TestMatchedDeniedRoot_SurvivesWithCWD(t *testing.T) {
+	t.Setenv("CETA_DENIED_ROOTS", "/repo")
+	pe := New("/Users/testuser/project").WithCWD("/Users/testuser/project/sub")
+	if root, ok := pe.MatchedDeniedRoot("/repo/x"); !ok || root != "/repo" {
+		t.Errorf("WithCWD-derived evaluator: MatchedDeniedRoot(/repo/x) = (%q, %v), want (/repo, true)", root, ok)
+	}
+}

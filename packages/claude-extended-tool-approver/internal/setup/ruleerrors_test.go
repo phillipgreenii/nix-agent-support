@@ -106,6 +106,7 @@ func TestBashErrorSitesReportGenuineFailure(t *testing.T) {
 	// restatement of the chain.
 	wantGenuineError := map[string]bool{
 		"config-rules":       true,
+		"denied-roots":       true,
 		"git-directory":      true,
 		"dangerous-commands": true,
 		"secrets":            true,
@@ -166,7 +167,7 @@ func TestFileAndSearchErrorSitesReportGenuineFailure(t *testing.T) {
 		tool string
 		want map[string]bool
 	}{
-		{"Read", map[string]bool{"git-directory": true, "secrets": true, "path-safety": true}},
+		{"Read", map[string]bool{"denied-roots": true, "git-directory": true, "secrets": true, "path-safety": true}},
 		{"Write", map[string]bool{"git-directory": true, "secrets": true, "path-safety": true}},
 		{"Grep", map[string]bool{"git-directory": true, "secrets": true, "path-safety": true}},
 		{"Glob", map[string]bool{"git-directory": true, "secrets": true, "path-safety": true}},

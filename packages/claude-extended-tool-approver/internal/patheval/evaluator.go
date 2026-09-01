@@ -66,6 +66,42 @@ type PathEvaluator struct {
 	// built-in zone (see Evaluate).
 	extraReadWrite []string
 	extraReadOnly  []string
+	// deniedRoots are absolute roots configured via the CETA_DENIED_ROOTS env
+	// var (":"-separated), machine-specific and KNOWN NOT TO EXIST on the
+	// machine that configured them (pg2-fxu7k). They exist to catch a
+	// fabricated-absolute-root path: a model inventing a Linux-flavored root
+	// (e.g. /home, /mnt, /repo) instead of resolving a repo-relative path
+	// against the session cwd. See MatchedDeniedRoot — this is a SIDECAR check,
+	// consulted by rules explicitly (mirroring IsDenyRead/IsDenyWrite), not
+	// folded into the Evaluate/classify zone ladder: a denied root is a hard
+	// "this cannot be right" signal independent of, and checked before, zone
+	// membership.
+	//
+	// LEXICALLY CLEANED ONLY, deliberately NOT symlink-resolved like
+	// extraReadWrite/extraReadOnly: a denied root is by definition absent from
+	// this machine's filesystem, so there is nothing for filepath.EvalSymlinks
+	// to find, and MatchedDeniedRoot cleans its query path the same
+	// (unresolved) way — see that method's doc for why the two sides must
+	// match.
+	deniedRoots []string
+}
+
+// resolveDeniedRoots reads a ":"-separated list of absolute paths from
+// CETA_DENIED_ROOTS, drops empties, and lexically cleans each (filepath.Clean
+// only — no symlink resolution; see the deniedRoots field's doc for why).
+func resolveDeniedRoots() []string {
+	raw := os.Getenv("CETA_DENIED_ROOTS")
+	if raw == "" {
+		return nil
+	}
+	var roots []string
+	for _, p := range strings.Split(raw, ":") {
+		if p == "" {
+			continue
+		}
+		roots = append(roots, filepath.Clean(p))
+	}
+	return roots
 }
 
 // resolveExtraRoots reads a ":"-separated list of absolute paths from the named
@@ -171,6 +207,7 @@ func New(projectRoot string) *PathEvaluator {
 		tmpRoot:               tmpRoot,
 		extraReadWrite:        resolveExtraRoots("CETA_EXTRA_READWRITE_ROOTS"),
 		extraReadOnly:         resolveExtraRoots("CETA_EXTRA_READONLY_ROOTS"),
+		deniedRoots:           resolveDeniedRoots(),
 	}
 }
 
@@ -212,6 +249,7 @@ func NewWithCWD(projectRoot, cwd string) *PathEvaluator {
 		tmpRoot:               tmpRoot,
 		extraReadWrite:        resolveExtraRoots("CETA_EXTRA_READWRITE_ROOTS"),
 		extraReadOnly:         resolveExtraRoots("CETA_EXTRA_READONLY_ROOTS"),
+		deniedRoots:           resolveDeniedRoots(),
 	}
 }
 
@@ -254,6 +292,7 @@ func (pe *PathEvaluator) WithCWD(cwd string) *PathEvaluator {
 		inContainer:           pe.inContainer,
 		extraReadWrite:        pe.extraReadWrite,
 		extraReadOnly:         pe.extraReadOnly,
+		deniedRoots:           pe.deniedRoots,
 	}
 }
 
@@ -709,6 +748,54 @@ func (pe *PathEvaluator) IsDenyWrite(path string) bool {
 		}
 	}
 	return false
+}
+
+// MatchedDeniedRoot reports whether path's absolute form lies at or under one
+// of the machine-configured denied roots (CETA_DENIED_ROOTS — see
+// home/programs/claude-extended-tool-approver's denyRoots option), returning
+// the matched root string for use in a rule's redirect message.
+//
+// A denied root is a root a MACHINE declares it knows does not exist there
+// (e.g. "/home", "/mnt", "/repo" on a macOS box that keeps user directories
+// under /Users and has no such mounts) — configured per machine, never
+// hardcoded here, because the identical root legitimately exists on other
+// machines (a Linux box genuinely has /home). This exists to catch the
+// fabricated-absolute-root defect (pg2-fxu7k): a model invents a
+// Linux-flavored absolute root instead of resolving a repo-relative path
+// against the session cwd, and burns a whole round trip discovering the
+// invented root does not exist. Denying it up front, with a message naming
+// the real fix, converts that wasted round trip into an immediate redirect.
+//
+// This is checked with the CLEANED form only (env/`~`/cwd-relative expansion,
+// no symlink resolution) — deliberately, unlike IsDenyRead/IsDenyWrite. A
+// denied root by definition does not exist on this machine, so there is
+// nothing on disk to resolve; requiring resolution would only add a filesystem
+// walk that can never find anything the root itself lacks. A RELATIVE path is
+// never denied here even if joining it against the cwd happens to land under a
+// denied root's string form — see cleanPath — because the whole defect this
+// guards against is inventing an ABSOLUTE root; the cwd of a real session on a
+// machine that configured, say, "/repo" as denied can never itself resolve
+// under "/repo" (if it could, the operator would not have configured "/repo"
+// as denied), so that coincidence does not arise in practice.
+//
+// It is a SIDECAR check, exactly like IsDenyRead/IsDenyWrite: callers consult
+// it explicitly, before or independent of Evaluate's zone ladder, rather than
+// it being folded into classify. A denied root is a hard "this path cannot be
+// real" signal, unrelated to zone membership.
+func (pe *PathEvaluator) MatchedDeniedRoot(path string) (root string, matched bool) {
+	if len(pe.deniedRoots) == 0 {
+		return "", false
+	}
+	cleaned := pe.cleanPath(path)
+	if cleaned == "" {
+		return "", false
+	}
+	for _, r := range pe.deniedRoots {
+		if pathContains(r, cleaned) {
+			return r, true
+		}
+	}
+	return "", false
 }
 
 // DetectProjectRoot returns the project root to attribute cwd to: MONOREPO_ROOT when

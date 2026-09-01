@@ -9,6 +9,20 @@ let
   cfg = config.phillipgreenii.programs.claude-extended-tool-approver;
   pkg = cfg.package;
 
+  # knownAbsentRoots (pg2-fxu7k) is DELIBERATELY the SAME nix option that
+  # home/programs/agent-rules already renders into the prose Absolute-Path
+  # Provenance rule (A-1): `config.phillipgreenii.programs.claude-code.
+  # knownAbsentRoots`, a Darwin-conditional `[ "/home" "/mnt" "/repo" ]` /
+  # empty-on-Linux default. That prose rule is the retro's own measured
+  # evidence that a MONTH of asking the model to self-check did not move the
+  # failed-Read/Bash-call rate (pg2-5q1xj); this module feeds the identical
+  # list into a MECHANICAL deny instead of inventing a second, parallel
+  # "roots that don't exist on this machine" option that could drift from the
+  # one A-1 already renders. A machine that needs a different list still
+  # configures ONE option (knownAbsentRoots) to change both the prose
+  # sentence and this mechanical guard together.
+  knownAbsentRoots = config.phillipgreenii.programs.claude-code.knownAbsentRoots;
+
   # wrapProgram flags, contributed only by the settings that are active. The
   # binary is wrapped iff at least one flag is present; otherwise the unwrapped
   # package is used directly.
@@ -19,7 +33,10 @@ let
     ) ''--set CETA_EXTRA_READWRITE_ROOTS "${lib.concatStringsSep ":" cfg.extraReadWriteRoots}"''
     ++ lib.optional (
       cfg.extraReadOnlyRoots != [ ]
-    ) ''--set CETA_EXTRA_READONLY_ROOTS "${lib.concatStringsSep ":" cfg.extraReadOnlyRoots}"'';
+    ) ''--set CETA_EXTRA_READONLY_ROOTS "${lib.concatStringsSep ":" cfg.extraReadOnlyRoots}"''
+    ++ lib.optional (
+      knownAbsentRoots != [ ]
+    ) ''--set CETA_DENIED_ROOTS "${lib.concatStringsSep ":" knownAbsentRoots}"'';
 
   hookPkg =
     if wrapArgs == [ ] then
