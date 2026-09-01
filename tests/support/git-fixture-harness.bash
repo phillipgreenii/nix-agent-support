@@ -111,11 +111,27 @@ _gfh_allow_exact=(
 )
 
 # Rebuild the exported environment from the allowlist above. Idempotent and
-# safe to call more than once. `compgen -e` enumerates only EXPORTED shell
-# variables -- shell functions and unexported locals are untouched.
+# safe to call more than once. Enumerates EXPORTED shell variables by parsing
+# `export -p` (a plain POSIX builtin, unconditionally present) rather than
+# `compgen -e`: compgen is a bash programmable-completion builtin that some
+# minimal bash builds -- notably nixpkgs' non-interactive `bash` package, as
+# used inside a `nix build` sandbox -- do not compile in at all. There
+# `compgen -e` fails with "command not found", `$(...)` silently expands to
+# nothing, and the whole scrub becomes a no-op -- discovered via pg2-31f13's
+# own regression-guard test, which caught the resulting leaked-GIT_DIR
+# exactly because it built under `nix build`, not a plain interactive shell.
+# Shell functions and unexported locals are never matched by `export -p`.
 gfh_reset_env() {
-  local var keep allowed
-  for var in $(compgen -e); do
+  local line var keep allowed
+  while IFS= read -r line; do
+    # bash's `export -p` prints lines like `declare -x NAME=value`,
+    # `declare -ax NAME=(...)` (exported array), or a bare `declare -x NAME`
+    # for an exported-but-unset variable. Match any `-*x*` flag combination.
+    if [[ $line =~ ^declare\ -[a-zA-Z]*x[a-zA-Z]*\ ([A-Za-z_][A-Za-z0-9_]*)(=|$) ]]; then
+      var="${BASH_REMATCH[1]}"
+    else
+      continue
+    fi
     case "$var" in
     BATS_* | GFH_*) continue ;;
     esac
@@ -129,7 +145,7 @@ gfh_reset_env() {
     if [[ $keep -eq 0 ]]; then
       unset "$var"
     fi
-  done
+  done < <(export -p)
 }
 
 # Print the EMAIL half of the per-suite fixture identity.
