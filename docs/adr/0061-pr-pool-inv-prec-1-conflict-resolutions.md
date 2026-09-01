@@ -100,9 +100,11 @@ the code. The shipped in-process shortcut (an `Offer` method call standing in fo
 `handler.dispatch`, `query.Run` standing in for a source query message, no tracking id anywhere) is
 **consciously kept for now** and treated as **settled-but-unreached intent**, exactly as the
 realization-gap register already records it — the register rows for `INTF-HANDLER`
-(bead `pg2-q6tqg`), `INTF-SOURCE` (beads `pg2-nr1xm`, `pg2-u7rzl`), `INV-LIFE-1` (bead `pg2-jr90c`),
+(bead `pg2-q6tqg`), `INTF-SOURCE` (beads `pg2-nr1xm`, `pg2-u7rzl`),
 `INTF-STORE` (bead `pg2-ev34a`), `INTF-MON` (bead `pg2-ov09n`), `INV-OBS-1` (bead `pg2-zqpxj`), and
 `INV-CONC-1` (bead `pg2-wwtwk`) already state this correctly and need no correction by this ADR.
+(`INV-LIFE-1`'s row, formerly tracked by bead `pg2-jr90c`, was deleted by Task 2.1/2.4 — in-process
+registration and lifecycle promotion are now built, so it no longer belongs in this list.)
 
 Concretely: this docket's Phases 0-4 build out the queue-core half of the plan against the
 in-process shape (a Go method call is an acceptable stand-in for a message while no seam has yet
