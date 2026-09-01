@@ -6,8 +6,13 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/pr-pool/internal/backoff"
+	"github.com/phillipgreenii/pr-pool/internal/ccpool"
 	"github.com/phillipgreenii/pr-pool/internal/config"
+	"github.com/phillipgreenii/pr-pool/internal/discover"
+	"github.com/phillipgreenii/pr-pool/internal/dtest"
+	"github.com/phillipgreenii/pr-pool/internal/event"
 	"github.com/phillipgreenii/pr-pool/internal/eventqueue"
+	"github.com/phillipgreenii/pr-pool/internal/item"
 	"github.com/phillipgreenii/pr-pool/internal/roles"
 )
 
@@ -55,5 +60,33 @@ func TestRoleListener_RetryBackoff_builtinKeepsPoolCadence(t *testing.T) {
 	}
 	if got := bl.RetryBackoff(); got != pool {
 		t.Fatalf("RetryBackoff() = %+v, want the injected pool default %+v", got, pool)
+	}
+}
+
+// TestRoleListener_OfferAlwaysAccepts is Task 2.2's required RED test for the
+// production roleListener's Offer rewrite: today (this task) it always
+// reports OfferResult{Accepted: true, Decline: eventqueue.DeclineNone} — the
+// same "always accepts" behavior as before Task 2.2, just through the new
+// Offering/OfferResult signature. Task 2.3 is what adds a genuine decline.
+func TestRoleListener_OfferAlwaysAccepts(t *testing.T) {
+	cfg := fastCfg()
+	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-w1": {"closed"}}}
+	ext1 := "pr-pool-worker-zr-w1-" + dtest.TestStamp
+	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{
+		{ExternalID: ext1, Live: true, State: ccpool.StateWorking},
+	}}}
+	o := newOrch(cc, bd, cfg)
+	ctx := context.Background()
+	l := o.NewListener(ctx, workerRole(o))
+
+	evt := discover.ToQueueEvent(event.NewItemEvent(roles.EventWorkReady, "t", item.Item{ID: "zr-w1"}))
+	got := l.Offer(eventqueue.Offering{ID: "dsp-000000000000", Event: evt})
+
+	want := eventqueue.OfferResult{Accepted: true, Decline: eventqueue.DeclineNone}
+	if got != want {
+		t.Fatalf("Offer() = %+v, want %+v", got, want)
+	}
+	if len(cc.Sent) != 1 || cc.Sent[0] != ext1 {
+		t.Fatalf("Offer did not dispatch the worker session; sent=%v", cc.Sent)
 	}
 }

@@ -525,7 +525,10 @@ func (decliningListener) ID() string { return "declining" }
 func (l decliningListener) Matches(e eventqueue.Event) bool {
 	return e.Type == l.typ
 }
-func (decliningListener) Offer(eventqueue.Event) bool { return false }
+
+func (decliningListener) Offer(eventqueue.Offering) eventqueue.OfferResult {
+	return eventqueue.OfferResult{Accepted: false, Decline: eventqueue.DeclineBusy}
+}
 
 // acceptingListener is a minimal eventqueue.Listener that always ACCEPTS
 // events of its bound type — a real accept path (as opposed to
@@ -536,7 +539,10 @@ func (acceptingListener) ID() string { return "accepting" }
 func (l acceptingListener) Matches(e eventqueue.Event) bool {
 	return e.Type == l.typ
 }
-func (acceptingListener) Offer(eventqueue.Event) bool { return true }
+
+func (acceptingListener) Offer(eventqueue.Offering) eventqueue.OfferResult {
+	return eventqueue.OfferResult{Accepted: true, Decline: eventqueue.DeclineNone}
+}
 
 // panickingListener is a minimal eventqueue.Listener whose Offer always
 // PANICS for events of its bound type — bead pg2-icm3u's dispatch-failure
@@ -550,7 +556,7 @@ func (l panickingListener) Matches(e eventqueue.Event) bool {
 	return e.Type == l.typ
 }
 
-func (panickingListener) Offer(eventqueue.Event) bool {
+func (panickingListener) Offer(eventqueue.Offering) eventqueue.OfferResult {
 	panic("panickingListener: simulated Offer panic (dispatch failure)")
 }
 

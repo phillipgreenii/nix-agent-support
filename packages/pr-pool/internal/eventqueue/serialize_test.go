@@ -170,9 +170,9 @@ type idFilterListener struct {
 
 func (l *idFilterListener) ID() string           { return l.id }
 func (l *idFilterListener) Matches(e Event) bool { return e.Type == l.typ && e.ID != l.excludeID }
-func (l *idFilterListener) Offer(e Event) bool {
-	l.accepted = append(l.accepted, e.ID)
-	return true
+func (l *idFilterListener) Offer(o Offering) OfferResult {
+	l.accepted = append(l.accepted, o.Event.ID)
+	return OfferResult{Accepted: true, Decline: DeclineNone}
 }
 
 // TestSerializeMarkOrphanEntryIsVacuouslyReleased confirms an orphan entry of

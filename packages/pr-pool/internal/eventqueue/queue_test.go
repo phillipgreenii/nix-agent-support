@@ -10,6 +10,7 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -57,6 +58,7 @@ type fakeListener struct {
 	busyRemaining  map[string]int  // per-id busy declines before accepting
 	panicRemaining map[string]int  // per-id Offer panics before falling through
 	neverAccept    bool
+	gotIDs         []string // dispatch tracking ids (Task 2.2) captured per Offer call
 }
 
 func newListener(id string, types ...string) *fakeListener {
@@ -69,21 +71,23 @@ func newListener(id string, types ...string) *fakeListener {
 
 func (f *fakeListener) ID() string           { return f.id }
 func (f *fakeListener) Matches(e Event) bool { return f.binds[e.Type] }
-func (f *fakeListener) Offer(e Event) bool {
+func (f *fakeListener) Offer(o Offering) OfferResult {
+	e := o.Event
+	f.gotIDs = append(f.gotIDs, o.ID)
 	f.offered = append(f.offered, e.ID)
 	if n := f.panicRemaining[e.ID]; n > 0 {
 		f.panicRemaining[e.ID] = n - 1
 		panic("fakeListener: simulated Offer panic (dispatch failure)")
 	}
 	if f.neverAccept {
-		return false
+		return OfferResult{Accepted: false, Decline: DeclineBusy}
 	}
 	if n := f.busyRemaining[e.ID]; n > 0 {
 		f.busyRemaining[e.ID] = n - 1
-		return false
+		return OfferResult{Accepted: false, Decline: DeclineBusy}
 	}
 	f.accepted = append(f.accepted, e.ID)
-	return true
+	return OfferResult{Accepted: true, Decline: DeclineNone}
 }
 
 // recordingObserver captures Observer callbacks for assertions.
@@ -887,7 +891,10 @@ type capturingListener struct{ got map[string]Event }
 
 func (c *capturingListener) ID() string         { return "cap" }
 func (c *capturingListener) Matches(Event) bool { return true }
-func (c *capturingListener) Offer(e Event) bool { c.got[e.ID] = e; return true }
+func (c *capturingListener) Offer(o Offering) OfferResult {
+	c.got[o.Event.ID] = o.Event
+	return OfferResult{Accepted: true, Decline: DeclineNone}
+}
 
 // Enqueue RESOLVES the optional instants against the core's own clock, and the
 // queue stores and OFFERS the resolved event — so a handler is handed concrete
@@ -1474,6 +1481,30 @@ func TestUnmatchedBindings(t *testing.T) {
 	}
 	if got := q.UnmatchedBindings(nil); len(got) != 0 {
 		t.Fatalf("UnmatchedBindings(nil) = %v, want empty", got)
+	}
+}
+
+// Task 2.2's dispatch tracking id: dsp-<12 hex from crypto/rand>, minted
+// before q.mu is taken for the pass (Dispatch's doc comment) and handed to
+// Listener.Offer via Offering.ID. This pins the id's SHAPE; the pin test in
+// concurrency_test.go (TestDispatch_CustodyPinnedDuringBlockingOffer) covers
+// the custody bookkeeping the id drives.
+var dispatchIDPattern = regexp.MustCompile(`^dsp-[0-9a-f]{12}$`)
+
+func TestDispatch_MintsIDBeforeLock(t *testing.T) {
+	clk := newClock()
+	q := newQueue(t, clk)
+	l := newListener("h", "T")
+	q.Register(l)
+	mustEnqueue(t, q, evtUntil("e1", "T", clk.in(time.Hour)))
+
+	q.Dispatch()
+
+	if len(l.gotIDs) != 1 {
+		t.Fatalf("gotIDs = %v, want exactly one dispatch id captured", l.gotIDs)
+	}
+	if id := l.gotIDs[0]; !dispatchIDPattern.MatchString(id) {
+		t.Fatalf("dispatch id %q does not match %s", id, dispatchIDPattern)
 	}
 }
 

@@ -20,8 +20,8 @@ var _ eventqueue.BackoffListener = (*roleListener)(nil)
 // pg2-f3mcb.2, queue-as-universal-intermediary). ID/Matches close over the
 // configured role; Offer runs the dispatch INLINE and reports an INLINE
 // completion (interfaces.md "Reply (sync)"): the offer call itself IS the
-// handler session, so by the time Offer returns, the event has been fully
-// worked, never merely accepted.
+// handler session, so by the time Offer returns an ACCEPTED OfferResult, the
+// event has been fully worked, never merely accepted.
 //
 // *** It deliberately tracks NO count of its own — no in-flight tally, no busy
 // threshold. *** INV-CONC-1 forbids the core (and this adapter is core-side)
@@ -29,11 +29,13 @@ var _ eventqueue.BackoffListener = (*roleListener)(nil)
 // ONLY concurrency control here is structural and comes free from
 // eventqueue.Queue.Dispatch itself — one outstanding offer per registered
 // Listener per pass (the per-handler serial FIFO, ADR 0031 / DEC-EVENT-2) — so
-// this type MUST NOT grow an inflight/busy field. It always accepts: a
-// synchronous handler that can always take custody has no legitimate reason to
-// pre-accept decline, and declining here would only reintroduce a core-tracked
-// capacity signal by another name — exactly what this bead's convergence
-// removes (the former `n := r.Cap - bus.Inflight(r.Name)`).
+// this type MUST NOT grow an inflight/busy field. Today (Task 2.2) it always
+// reports OfferResult{Accepted: true, Decline: eventqueue.DeclineNone}: a
+// synchronous handler that can always take custody has, as yet, no signal to
+// decline on. Task 2.3 wires a genuine DeclineBusy through this SAME method,
+// but from an OBSERVED command-exit signal (executor.ErrBusy), never from a
+// core-tracked capacity number — the boundary this bead's convergence
+// established (the former `n := r.Cap - bus.Inflight(r.Name)`) stays intact.
 type roleListener struct {
 	o    *Orchestrator
 	role roles.Role
@@ -106,17 +108,21 @@ func (l *roleListener) Matches(evt eventqueue.Event) bool {
 	return false
 }
 
-// Offer dispatches the event through this role's executor and ALWAYS reports
-// acceptance: the call is synchronous end-to-end (ensure -> send -> wait for a
-// ccpool role, or run-to-completion for a command role), so "accepted" and
+// Offer dispatches the event through this role's executor. The call is
+// synchronous end-to-end (ensure -> send -> wait for a ccpool role, or
+// run-to-completion for a command role), so an ACCEPTED OfferResult and
 // "worked to completion" coincide here — there is no deferred/async form on
 // this bridge. The dispatch's own report.Result (created/closed/handed-back)
 // is logged/emitted exactly as it was under the retired drain()/DrainOnce
-// path, via the SAME Orchestrator helpers.
-func (l *roleListener) Offer(evt eventqueue.Event) bool {
+// path, via the SAME Orchestrator helpers. Task 2.2 widens the signature to
+// Offering/OfferResult (a dispatch tracking id in, an Accepted/DeclineReason
+// pair out); this method itself still always accepts — Task 2.3 adds the one
+// decline path (a busy command exit).
+func (l *roleListener) Offer(o eventqueue.Offering) eventqueue.OfferResult {
+	evt := o.Event
 	d := discover.DeriveContextFromQueueEvent(l.role, evt)
 	pre, preOK := l.o.snapshotIDs(l.ctx)
 	res, err := l.o.workOne(l.ctx, d)
 	l.o.emitResult(l.ctx, l.role, d.Item.ID, l.o.buildResult(l.ctx, l.role, d, pre, preOK, res, err))
-	return true
+	return eventqueue.OfferResult{Accepted: true, Decline: eventqueue.DeclineNone}
 }

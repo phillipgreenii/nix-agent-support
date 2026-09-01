@@ -87,9 +87,9 @@ func newTestListener(id string, binds ...string) *testListener {
 
 func (l *testListener) ID() string                        { return l.id }
 func (l *testListener) Matches(evt eventqueue.Event) bool { return l.binds[evt.Type] }
-func (l *testListener) Offer(evt eventqueue.Event) bool {
-	l.offered = append(l.offered, evt)
-	return true
+func (l *testListener) Offer(o eventqueue.Offering) eventqueue.OfferResult {
+	l.offered = append(l.offered, o.Event)
+	return eventqueue.OfferResult{Accepted: true, Decline: eventqueue.DeclineNone}
 }
 
 func newQueue(t *testing.T) *eventqueue.Queue {

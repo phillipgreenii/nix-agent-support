@@ -64,9 +64,9 @@ func (o *ringObserver) OnDispatchFailure(evtType string) {
 // variant of TestDispatchOverheadUnderRingReader's setup).
 type statelessAcceptListener struct{ id, typ string }
 
-func (l *statelessAcceptListener) ID() string           { return l.id }
-func (l *statelessAcceptListener) Matches(e Event) bool { return e.Type == l.typ }
-func (l *statelessAcceptListener) Offer(Event) bool     { return true }
+func (l *statelessAcceptListener) ID() string                 { return l.id }
+func (l *statelessAcceptListener) Matches(e Event) bool       { return e.Type == l.typ }
+func (l *statelessAcceptListener) Offer(Offering) OfferResult { return OfferResult{Accepted: true} }
 
 // --- Step 1: TestEnqueueAllocBudget / TestDispatchAllocBudget --------------
 //

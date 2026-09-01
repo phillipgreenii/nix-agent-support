@@ -23,13 +23,14 @@ type callbackListener struct {
 
 func (l *callbackListener) ID() string           { return l.id }
 func (l *callbackListener) Matches(e Event) bool { return l.binds[e.Type] }
-func (l *callbackListener) Offer(e Event) bool {
+func (l *callbackListener) Offer(o Offering) OfferResult {
+	e := o.Event
 	l.offered = append(l.offered, e.ID)
 	if l.onOffer != nil {
 		l.onOffer(e)
 	}
 	l.accepted = append(l.accepted, e.ID)
-	return true
+	return OfferResult{Accepted: true, Decline: DeclineNone}
 }
 
 // concurrentListener is a mutex-guarded listener safe to Offer from several
@@ -42,11 +43,11 @@ type concurrentListener struct {
 
 func (l *concurrentListener) ID() string           { return l.id }
 func (l *concurrentListener) Matches(e Event) bool { return true } // binds all
-func (l *concurrentListener) Offer(e Event) bool {
+func (l *concurrentListener) Offer(o Offering) OfferResult {
 	l.mu.Lock()
-	l.got[e.ID]++
+	l.got[o.Event.ID]++
 	l.mu.Unlock()
-	return true
+	return OfferResult{Accepted: true, Decline: DeclineNone}
 }
 
 // --- pg2-56186: lock released across Offer + accept write -----------------
@@ -227,4 +228,111 @@ func TestDispatchReentrantDispatchAtMostOnceAccept(t *testing.T) {
 	if len(obs.accepted) != 1 {
 		t.Fatalf("recorded acceptances = %v, want exactly one e1/h (at-most-once)", obs.accepted)
 	}
+}
+
+// --- Task 2.2: custody pin -------------------------------------------------
+
+// blockingListener blocks inside Offer until told to proceed, closing
+// `entered` the instant it starts blocking — the design's own pinned
+// acceptance test for Task 2.2 needs an offer that is PROVABLY still
+// outstanding in phase 2 while the test reads status-shaped state.
+type blockingListener struct {
+	id      string
+	binds   map[string]bool
+	proceed chan struct{}
+	entered chan struct{}
+}
+
+func (l *blockingListener) ID() string           { return l.id }
+func (l *blockingListener) Matches(e Event) bool { return l.binds[e.Type] }
+func (l *blockingListener) Offer(Offering) OfferResult {
+	close(l.entered)
+	<-l.proceed
+	return OfferResult{Accepted: true, Decline: DeclineNone}
+}
+
+// TestDispatch_CustodyPinnedDuringBlockingOffer is Task 2.2's own pinned
+// acceptance test: a listener double that blocks inside Offer while the test
+// issues a status-shaped read asserts SessionsInFlight() == 1 and
+// len(custody) == 1 — custody is read LIVE under q.mu, never cached in a
+// tickSnapshot, so it must reflect the offer that is still outstanding right
+// now. Once the offer is unblocked and the pass concludes, both drop back to
+// zero (custody deleted in phase 3, "accept is not settle" notwithstanding —
+// THIS pass's offer is over either way).
+func TestDispatch_CustodyPinnedDuringBlockingOffer(t *testing.T) {
+	clk := newClock()
+	q := newQueue(t, clk)
+	l := &blockingListener{id: "h", binds: map[string]bool{"T": true}, proceed: make(chan struct{}), entered: make(chan struct{})}
+	q.Register(l)
+	mustEnqueue(t, q, evtUntil("e1", "T", clk.in(time.Hour)))
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		q.Dispatch()
+	}()
+
+	select {
+	case <-l.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Offer never entered its blocking wait (timeout)")
+	}
+
+	if got := q.SessionsInFlight(); got != 1 {
+		t.Fatalf("SessionsInFlight() = %d while an offer is still blocked mid-pass, want 1", got)
+	}
+	q.mu.Lock()
+	gotCustody := len(q.custody)
+	q.mu.Unlock()
+	if gotCustody != 1 {
+		t.Fatalf("len(custody) = %d while an offer is still blocked mid-pass, want 1", gotCustody)
+	}
+
+	close(l.proceed)
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Dispatch did not return after Offer unblocked (timeout)")
+	}
+
+	if got := q.SessionsInFlight(); got != 0 {
+		t.Fatalf("SessionsInFlight() = %d after Dispatch returned, want 0 (custody deleted in phase 3)", got)
+	}
+}
+
+// boundedCustodyListener declines (busy) every offer and, from INSIDE its own
+// Offer call, asserts that custody never exceeds the registered listener
+// count — a pass-boundary read would see it vacuously at 0 (before the pass)
+// or at the pass's full size (after phase 1, before phase 3), so the bound
+// only means something asserted from mid-phase-2, exactly like this.
+type boundedCustodyListener struct {
+	id string
+	q  *Queue
+	t  *testing.T
+	n  int // len(q.listeners) at test-setup time
+}
+
+func (l *boundedCustodyListener) ID() string           { return l.id }
+func (l *boundedCustodyListener) Matches(e Event) bool { return true }
+func (l *boundedCustodyListener) Offer(Offering) OfferResult {
+	if got := l.q.SessionsInFlight(); got > l.n {
+		l.t.Fatalf("custody size %d exceeded listener count %d mid-phase-2", got, l.n)
+	}
+	return OfferResult{Accepted: false, Decline: DeclineBusy}
+}
+
+// TestDispatch_CustodyBoundedByListenerCountUnderDeclineHeavyLoad proves the
+// <= len(q.listeners) custody bound under a fully decline-heavy pass (every
+// registered listener declines busy), asserted from INSIDE phase 2 for every
+// one of them.
+func TestDispatch_CustodyBoundedByListenerCountUnderDeclineHeavyLoad(t *testing.T) {
+	clk := newClock()
+	q := newQueue(t, clk)
+	const n = 5
+	for i := 0; i < n; i++ {
+		q.Register(&boundedCustodyListener{id: fmt.Sprintf("h%d", i), q: q, t: t, n: n})
+	}
+	mustEnqueue(t, q, evtUntil("e1", "T", clk.in(time.Hour)))
+
+	q.Dispatch()
 }

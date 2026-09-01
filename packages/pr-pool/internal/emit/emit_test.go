@@ -24,7 +24,10 @@ type acceptListener struct{ got []string }
 
 func (a *acceptListener) ID() string                    { return "h" }
 func (a *acceptListener) Matches(eventqueue.Event) bool { return true }
-func (a *acceptListener) Offer(e eventqueue.Event) bool { a.got = append(a.got, e.ID); return true }
+func (a *acceptListener) Offer(o eventqueue.Offering) eventqueue.OfferResult {
+	a.got = append(a.got, o.Event.ID)
+	return eventqueue.OfferResult{Accepted: true, Decline: eventqueue.DeclineNone}
+}
 
 func newQueue(t *testing.T) *eventqueue.Queue {
 	t.Helper()

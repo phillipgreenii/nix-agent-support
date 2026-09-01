@@ -2,6 +2,9 @@ package eventqueue
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"fmt"
 	"log/slog"
 	"runtime/debug"
 	"sync"
@@ -13,17 +16,62 @@ import (
 
 // Listener is a bound event handler as the queue sees it (INTF-HANDLER, core
 // side). It declares which events it binds (Matches, INV-DISP-1) and accepts or
-// declines an offer (Offer). A return of accepted=false is a PRE-ACCEPT decline
-// (busy / unavailable, INV-CONC-1 / INV-FAIL-1): the core re-offers the event
-// while it is unexpired, at the cadence INV-FAIL-2 defines (WithRetryBackoff, or
-// a per-listener override via BackoffListener). Once Offer returns true the
-// event is ACCEPTED and the core's delivery responsibility ends (INV-EVT-1);
-// post-accept retry/resume is the handler's.
+// declines an offer (Offer). Offer takes an Offering — this attempt's dispatch
+// tracking id (Task 2.2, dsp-<12 hex>, minted before q.mu is taken for the
+// pass) plus the event — and returns an OfferResult. An OfferResult with
+// Accepted=false is a PRE-ACCEPT decline (busy / unavailable, INV-CONC-1 /
+// INV-FAIL-1, classified by DeclineReason): the core re-offers the event while
+// it is unexpired, at the cadence INV-FAIL-2 defines (WithRetryBackoff, or a
+// per-listener override via BackoffListener). Once Offer returns
+// Accepted=true the event is ACCEPTED and the core's delivery responsibility
+// ends (INV-EVT-1); post-accept retry/resume is the handler's. "Accept is not
+// settle": ACCEPTANCE is this method returning true; SETTLEMENT is Dispatch's
+// phase-3 bookkeeping for the (event, listener) pair — a distinction the
+// deferred form (Phase 5) widens further, once acceptance and completion can
+// happen in different calls entirely.
 type Listener interface {
 	ID() string
 	Matches(evt Event) bool
-	Offer(evt Event) (accepted bool)
+	Offer(o Offering) OfferResult
 }
+
+// Offering is one dispatch attempt handed to Listener.Offer: the tracking id
+// minted for this attempt (Task 2.2) plus the event being offered. ID fills
+// deliveries[].id (Task 0.4) once dispatch surfaces through status (Task 3.0).
+type Offering struct {
+	ID    string
+	Event Event
+}
+
+// OfferResult is what Listener.Offer reports back for one Offering: whether
+// the offer was accepted, and if not, why (DeclineReason).
+type OfferResult struct {
+	Accepted bool
+	Decline  DeclineReason
+}
+
+// DeclineReason classifies a pre-accept decline (an OfferResult with
+// Accepted=false). The queue's re-offer/backoff behavior (INV-FAIL-1 /
+// INV-FAIL-2) is IDENTICAL for every reason — DeclineNone re-offers exactly
+// like DeclineBusy; the classification exists purely for observability
+// (Task 2.3's Observer widening), never for queue control flow.
+type DeclineReason int
+
+const (
+	// DeclineNone is the catch-all: a decline that is neither a graceful busy
+	// signal nor an unavailable participant. Every in-tree Listener
+	// implementation Task 2.2 lands always accepts (none has a reason to
+	// decline yet), so this is also what an implementation with no more
+	// specific reason to offer would report; Task 2.3 wires the first
+	// genuine non-None reasons.
+	DeclineNone DeclineReason = iota
+	// DeclineBusy is a graceful "not right now" decline (INV-CONC-1): the
+	// handler could take this event, just not yet.
+	DeclineBusy
+	// DeclineUnavailable is a decline because the handler itself is not
+	// currently reachable/ready (its registered lifecycle state, Task 2.1).
+	DeclineUnavailable
+)
 
 // BackoffListener is a Listener that declares its OWN handler retry cadence
 // (INV-FAIL-2), overriding the queue's default (WithRetryBackoff) for just this
@@ -195,6 +243,13 @@ type Queue struct {
 	order   []string          // enqueue order (event ids) — the FIFO spine
 
 	listeners []*listenerState // registration order; stable per-listener cursors
+	// listenerCount mirrors len(listeners) and is updated (under q.mu) every
+	// time Register appends. Dispatch reads it WITHOUT q.mu, atomically, to
+	// size the batch of dispatch ids it mints before taking the phase-1 lock
+	// (Task 2.2) — len(listeners) itself cannot be read safely outside q.mu
+	// (the slice header mutates on append), so this lock-free mirror is what
+	// makes "minted before q.mu is taken" possible without guessing.
+	listenerCount atomic.Int64
 
 	// evictWhenAllAccept is the opt-in early-eviction switch (ADR 0031). Default
 	// off: keep every event until its retention ends. On: evict once all
@@ -211,7 +266,33 @@ type Queue struct {
 	// RELEASED (releasedLocked). nil/empty (the default) leaves every type's
 	// dispatch completely unaffected.
 	serializeTypes map[string]bool
+
+	// custody holds exactly the offers OUTSTANDING in phase 2 of the CURRENT
+	// dispatch pass (Task 2.2): recorded (under q.mu) the moment each offer's
+	// dispatch id is assigned in phase 1, deleted (under q.mu) in phase 3 once
+	// that offer's outcome is known — WHATEVER that outcome is (accept, a
+	// final decline that settles the pair, a decline that simply re-offers
+	// next pass, or the underlying entry vanishing mid-offer and never
+	// settling at all — retireLocked's return covers that last case reaching
+	// phase 3 the same way). "Accept is not settle": a custody entry's
+	// removal in phase 3 means only that THIS PASS's offer has concluded,
+	// never that the (event, listener) pair itself is done — a re-offer next
+	// pass mints an entirely fresh dispatch id and a fresh custody entry.
+	// SessionsInFlight reads this map LIVE under q.mu at call time; it is
+	// NEVER cached in any periodic snapshot. Before Phase 5's deferred-settle
+	// form, len(custody) is always 0 or 1, since Dispatch's phase 2 offers one
+	// listener at a time, synchronously, within a single goroutine.
+	custody map[string]custody
 }
+
+// custody is one outstanding-offer record in Queue.custody. It carries no
+// payload today — Task 2.2 needs only presence/cardinality (SessionsInFlight,
+// the custody-pin test) — but is a NAMED type per the design ("a custody
+// map[string]custody"), not a bare map[string]struct{}, so a later task can
+// widen it (e.g. the listener/event a given dispatch id belongs to) without
+// changing Queue.custody's declared shape. See that field's doc for the full
+// lifecycle.
+type custody struct{}
 
 // Option configures a Queue.
 type Option func(*Queue)
@@ -287,6 +368,7 @@ func New(store Store, opts ...Option) (*Queue, error) {
 		obs:          noopObserver{},
 		retryBackoff: backoff.Default(),
 		entries:      map[string]*entry{},
+		custody:      map[string]custody{},
 	}
 	q.cell.Store(&depthCell{depth: map[string]int{}, everSeen: map[string]struct{}{}})
 	for _, opt := range opts {
@@ -350,6 +432,7 @@ func (q *Queue) Register(l Listener) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	q.listeners = append(q.listeners, &listenerState{l: l})
+	q.listenerCount.Store(int64(len(q.listeners)))
 }
 
 // Enqueue durably appends an event (INV-EVT-1). A malformed event is rejected
@@ -543,6 +626,11 @@ func (q *Queue) headFor(l Listener) *entry {
 type pendingOffer struct {
 	ls  *listenerState
 	evt Event // value copy: Offer never sees queue-internal state
+	// id is this attempt's dispatch tracking id (Task 2.2): dsp-<12 hex>,
+	// minted before q.mu was taken for this pass (see Dispatch). It is the
+	// Offering.ID handed to Listener.Offer and the Queue.custody key for the
+	// pass's phase 2.
+	id string
 	// lastAttempt is the INV-EVT-4 decision for THIS attempt: the event was
 	// already expired when the attempt was made, so accept or decline, the core
 	// never offers it to this listener again. It is evaluated once, from the
@@ -550,17 +638,33 @@ type pendingOffer struct {
 	// forward rather than recomputed, so one attempt cannot be judged against two
 	// different "now"s.
 	lastAttempt bool
-	// accepted is what Offer returned (filled in by the offer phase).
-	accepted bool
+	// result is what Offer returned (filled in by the offer phase).
+	result OfferResult
 	// dispatchFailed is true when the offer phase never got a graceful
 	// accept/decline reply out of Offer at all — currently, a recovered panic
-	// (see offerSafely). It is meaningless when accepted is true. This is what
-	// lets the record phase tell INV-OBS-1's two delivery-side failure classes
-	// apart even though both currently share the same accepted==false shape.
+	// (see offerSafely). It is meaningless when result.Accepted is true. This
+	// is what lets the record phase tell INV-OBS-1's two delivery-side
+	// failure classes apart even though both currently share the same
+	// result.Accepted==false shape.
 	dispatchFailed bool
 }
 
-// offerSafely calls l.Offer(evt), recovering a panic from the listener's own
+// newDispatchID mints a fresh dispatch tracking id: "dsp-" followed by 12 hex
+// characters of crypto/rand entropy — the same token-minting pattern
+// internal/core/socket.go's newToken uses (crypto/rand + encoding/hex), at a
+// shorter length: nothing here needs socket.go's full 32-byte auth-token
+// entropy budget, since a dispatch id only has to be practically unique for
+// the life of one in-flight offer, never secret. These values fill
+// deliveries[].id (Task 0.4) once dispatch surfaces through status.
+func newDispatchID() (string, error) {
+	b := make([]byte, 6) // 6 bytes -> 12 hex chars
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("eventqueue: mint dispatch id: %w", err)
+	}
+	return "dsp-" + hex.EncodeToString(b), nil
+}
+
+// offerSafely calls l.Offer(o), recovering a panic from the listener's own
 // implementation so that one bad handler cannot take down the whole Dispatch
 // pass — and, transitively, every OTHER registered listener's delivery this
 // pass (INV-PREC-1: safety/isolation ranks above continuity, which ranks
@@ -571,16 +675,16 @@ type pendingOffer struct {
 // listener and event ids so the underlying bug stays diagnosable; Dispatch's
 // RECORD phase then settles the pair exactly as it would a graceful decline
 // (see Dispatch's own doc), just under the other metric class.
-func offerSafely(l Listener, evt Event) (accepted, dispatchFailed bool) {
+func offerSafely(l Listener, o Offering) (result OfferResult, dispatchFailed bool) {
 	defer func() {
 		if r := recover(); r != nil {
 			slog.Error("eventqueue: listener Offer panicked; treating as a dispatch failure (INV-OBS-1)",
-				"listenerId", l.ID(), "eventId", evt.ID, "eventType", evt.Type,
+				"listenerId", l.ID(), "eventId", o.Event.ID, "eventType", o.Event.Type,
 				"panic", r, "stack", string(debug.Stack()))
-			accepted, dispatchFailed = false, true
+			result, dispatchFailed = OfferResult{Accepted: false}, true
 		}
 	}()
-	return l.Offer(evt), false
+	return l.Offer(o), false
 }
 
 // Dispatch offers each listener its head deliverable event once, in
@@ -593,23 +697,36 @@ func offerSafely(l Listener, evt Event) (accepted, dispatchFailed bool) {
 // Observer hook — and so which INV-OBS-1 failure-rate class — records them
 // (bead pg2-icm3u).
 //
+// Dispatch ids (Task 2.2) are minted BEFORE q.mu is taken for the pass: a pass
+// offers each registered listener at most once, so listenerCount — a lock-free
+// atomic mirror of len(q.listeners), maintained by Register — is always a
+// sufficient supply. Minting the whole batch up front keeps every crypto/rand
+// call outside every lock this function takes; the one fallback below (for a
+// listener registered in the narrow window between the mint and phase 1's
+// lock) mints on the spot but is, itself, still outside q.mu.
+//
 // Locking discipline (bead pg2-56186). The pass is three phases and the queue
 // lock is held only in phases 1 and 3, NEVER across the listener callback:
 //
 //  1. SNAPSHOT (locked): compute each listener's head deliverable event, capture
-//     the (listener, event) pairs and the INV-EVT-4 expiry verdict for each. No
-//     Offer, no store write here.
-//  2. OFFER (UNLOCKED): call Listener.Offer for each pair, via offerSafely so a
-//     panicking listener implementation cannot abort the pass (INV-PREC-1;
-//     see offerSafely's own doc). Releasing the lock is what makes a
-//     synchronous listener's accept path free to re-enter the queue
-//     (Enqueue / push-inject a follow-on event) without self-deadlocking on the
-//     non-reentrant q.mu, and stops all ingest from serializing behind an
-//     in-flight (possibly long) handler offer.
-//  3. RECORD (locked): for each outcome, re-validate against CURRENT state then
-//     settle the pair — marking acceptance, appending the durable opAccept
-//     record, notifying the observer and maybe-evicting, or (for a final decline
-//     or dispatch failure) recording nothing but the terminal marker.
+//     the (listener, event) pairs and the INV-EVT-4 expiry verdict for each,
+//     assign each one its pre-minted dispatch id, and record a custody entry
+//     for it (Task 2.2) — the offer is now OUTSTANDING. No Offer, no store
+//     write here.
+//  2. OFFER (UNLOCKED): call Listener.Offer for each pair, passing its dispatch
+//     id, via offerSafely so a panicking listener implementation cannot abort
+//     the pass (INV-PREC-1; see offerSafely's own doc). Releasing the lock is
+//     what makes a synchronous listener's accept path free to re-enter the
+//     queue (Enqueue / push-inject a follow-on event) without self-deadlocking
+//     on the non-reentrant q.mu, and stops all ingest from serializing behind
+//     an in-flight (possibly long) handler offer.
+//  3. RECORD (locked): delete each pair's custody entry FIRST — the offer is no
+//     longer outstanding whatever its outcome, including one whose underlying
+//     entry vanished mid-offer and so never reaches the settle logic below at
+//     all — then re-validate against CURRENT state and settle the pair:
+//     marking acceptance, appending the durable opAccept record, notifying the
+//     observer and maybe-evicting, or (for a final decline or dispatch
+//     failure) recording nothing but the terminal marker.
 //
 // Between phases 2 and 3 the queue can change (concurrent Enqueue / Expire /
 // Dispatch, or a re-entrant call from inside Offer), so RECORD looks the entry
@@ -618,7 +735,7 @@ func offerSafely(l Listener, evt Event) (accepted, dispatchFailed bool) {
 //     has legitimately left the queue, so there is nothing to record and
 //     nothing to redeliver; drop the acceptance record (a stray opAccept for a
 //     gone id is a no-op on replay anyway). Delivery is unaffected — the listener
-//     already took responsibility when Offer returned true (INV-EVT-1).
+//     already took responsibility when Offer returned Accepted=true (INV-EVT-1).
 //   - already accepted by this listener (a concurrent/re-entrant Dispatch offered
 //     the same head and recorded first): skip, preserving at-most-once acceptance
 //     per (event, listener) binding — the duplicate Offer is absorbed by the
@@ -634,6 +751,35 @@ func offerSafely(l Listener, evt Event) (accepted, dispatchFailed bool) {
 // persisted once, after the loop, via a single AppendBatch call — one fsync for
 // the whole pass's evictions rather than one per evicted id.
 func (q *Queue) Dispatch() (accepted int) {
+	// Dispatch ids minted BEFORE q.mu is taken (see doc above): a batch sized
+	// to the current listener count, read without a lock.
+	ids := make([]string, q.listenerCount.Load())
+	for i := range ids {
+		id, err := newDispatchID()
+		if err != nil {
+			// crypto/rand failure is unrecoverable in line; degrade the same
+			// way a swallowed durable write does elsewhere in this file (log
+			// and continue) rather than panicking a whole dispatch pass.
+			slog.Error("eventqueue: mint dispatch id failed", "err", err)
+		}
+		ids[i] = id
+	}
+	nextID := 0
+	takeID := func() string {
+		if nextID < len(ids) {
+			id := ids[nextID]
+			nextID++
+			return id
+		}
+		// A listener registered in the narrow window between the mint above
+		// and phase 1's lock below. Minting here is still outside q.mu.
+		id, err := newDispatchID()
+		if err != nil {
+			slog.Error("eventqueue: mint dispatch id failed", "err", err)
+		}
+		return id
+	}
+
 	// Phase 1 — SNAPSHOT (locked).
 	q.mu.Lock()
 	now := q.now()
@@ -646,7 +792,9 @@ func (q *Queue) Dispatch() (accepted int) {
 		if !ls.eligibleNow(e.evt.ID, now) {
 			continue // still cooling down from a prior pre-accept decline (INV-FAIL-2)
 		}
-		pending = append(pending, pendingOffer{ls: ls, evt: e.evt, lastAttempt: e.evt.Expired(now)})
+		id := takeID()
+		q.custody[id] = custody{}
+		pending = append(pending, pendingOffer{ls: ls, evt: e.evt, id: id, lastAttempt: e.evt.Expired(now)})
 	}
 	q.mu.Unlock()
 	if len(pending) == 0 {
@@ -658,7 +806,7 @@ func (q *Queue) Dispatch() (accepted int) {
 	// panicking Offer so one listener's bug cannot abort the rest of this
 	// pass's offers (see its own doc).
 	for i := range pending {
-		pending[i].accepted, pending[i].dispatchFailed = offerSafely(pending[i].ls.l, pending[i].evt)
+		pending[i].result, pending[i].dispatchFailed = offerSafely(pending[i].ls.l, Offering{ID: pending[i].id, Event: pending[i].evt})
 	}
 
 	// Phase 3 — RECORD (locked), re-validating each outcome against current state
@@ -667,23 +815,29 @@ func (q *Queue) Dispatch() (accepted int) {
 	defer q.mu.Unlock()
 	var evicts []Record
 	for _, p := range pending {
+		// The pass's phase 2 for this offer has concluded either way — delete
+		// custody FIRST, before any of the skip/settle branches below, so an
+		// entry that never reaches settlement (e.g. gone by the time this
+		// loop reaches it) still leaves custody accurately empty.
+		delete(q.custody, p.id)
 		lid := p.ls.l.ID()
 		e, ok := q.entries[p.evt.ID]
 		if !ok {
 			continue // entry left the queue mid-dispatch (retired/evicted): skip
 		}
-		if !p.accepted {
+		if !p.result.Accepted {
 			// A PRE-ACCEPT decline OR a dispatch failure (offerSafely recovered a
 			// panic) — INV-OBS-1's two delivery-side classes. Nothing DURABLE about
 			// the attempt is recorded — no counter, nothing on disk (DEC-EVENT-1:
 			// the core keeps no attempt history) — but it IS a delivery-side
 			// failure signal (INV-OBS-1 / INV-FAIL-1), so the observer sees every
-			// occurrence regardless of lastAttempt (see OnDeclined's doc). Both
-			// classes settle IDENTICALLY from here: the single expiry comparison
-			// already made in phase 1 is the whole retention decision: past
-			// `expiresAt` that attempt was the last one this listener is owed
-			// (INV-EVT-4), so settle the pair and let its head advance; before it,
-			// the failure is simply a re-offer condition (INV-FAIL-1), and the
+			// occurrence regardless of lastAttempt (see OnDeclined's doc), whatever
+			// the DeclineReason. Both classes settle IDENTICALLY from here: the
+			// single expiry comparison already made in phase 1 is the whole
+			// retention decision: past `expiresAt` that attempt was the last one
+			// this listener is owed (INV-EVT-4), so settle the pair and let its
+			// head advance; before it, the failure is simply a re-offer condition
+			// (INV-FAIL-1) — every DeclineReason re-offers identically — and the
 			// IN-MEMORY (transient, unpersisted) retry-cadence bookkeeping advances
 			// so the next offer waits at least INV-FAIL-2's cadence rather than the
 			// very next Dispatch pass. Only which Observer hook fires — and so
@@ -771,24 +925,31 @@ func (q *Queue) maybeEvict(e *entry) (Record, bool) {
 	return rec, true
 }
 
-// retireLocked removes an entry whose RETENTION IS OVER from q.entries: it counts
-// the miss when no listener ever accepted it (unconsumed-expired, INV-DISP-3 /
-// INV-OBS-1), removes it, and returns the durable opEvict Record so a replay does
-// not resurrect it. Persisting the record is the CALLER's responsibility, batched
-// with the rest of the current pass into one AppendBatch call (one fsync per
-// pass instead of one per record) — this function itself makes no Store call.
-// The caller fixes up the FIFO spine — Expire rebuilds the whole spine in one
-// pass, Enqueue drops the single stale id — so this does not touch q.order.
+// retireLocked removes an entry whose RETENTION IS OVER from q.entries and
+// returns the durable opEvict Record so a replay does not resurrect it, along
+// with whether it was an unconsumed-expired MISS (no listener ever accepted
+// it, INV-DISP-3 / INV-OBS-1) — a signal a never-settled custody entry (Task
+// 2.2) also funnels through, since an entry retired mid-offer never reaches
+// Dispatch's own settle logic. Persisting the record and firing the observer
+// hook are both the CALLER's responsibility: persistence is batched with the
+// rest of the current pass into one AppendBatch call (one fsync per pass
+// instead of one per record), and the observer fires from the returned
+// signal, still synchronously and still under the SAME lock as before
+// (today's timing is unchanged) — preparatory plumbing (Task 2.2) so a future
+// caller can instead collect the signal into a pass-local list and fan it out
+// AFTER releasing q.mu (Task 2.3's panic-safe-unlock restructuring) without
+// retireLocked's own signature changing again. This function itself makes no
+// Store call. The caller fixes up the FIFO spine — Expire rebuilds the whole
+// spine in one pass, Enqueue drops the single stale id — so this does not
+// touch q.order.
 //
 // Caller holds q.mu.
-func (q *Queue) retireLocked(e *entry) Record {
-	if len(e.accepted) == 0 {
-		q.obs.OnUnconsumedExpired(e.evt.Type)
-	}
-	rec := q.recordEvictLocked(e.evt.ID)
+func (q *Queue) retireLocked(e *entry) (rec Record, unconsumedExpired bool) {
+	unconsumedExpired = len(e.accepted) == 0
+	rec = q.recordEvictLocked(e.evt.ID)
 	delete(q.entries, e.evt.ID)
 	q.publishCellLocked(e.evt.Type, "", "")
-	return rec
+	return rec, unconsumedExpired
 }
 
 // recordEvictLocked returns the durable opEvict Record marking id as gone from
@@ -876,7 +1037,11 @@ func (q *Queue) Expire() (dropped int) {
 			kept = append(kept, id)
 			continue
 		}
-		evicts = append(evicts, q.retireLocked(e))
+		rec, unconsumedExpired := q.retireLocked(e)
+		evicts = append(evicts, rec)
+		if unconsumedExpired {
+			q.obs.OnUnconsumedExpired(e.evt.Type)
+		}
 		dropped++
 	}
 	q.order = kept
@@ -951,6 +1116,21 @@ func (q *Queue) UnmatchedBindings(declared []string) []string {
 		}
 	}
 	return unmatched
+}
+
+// SessionsInFlight reports how many offers are currently outstanding in phase
+// 2 of a dispatch pass (custody, Task 2.2) — the eventual "N in flight" the
+// status banner surfaces (Task 3.0). It is read LIVE under q.mu at call time,
+// the same as DepthByType, and is NEVER cached in a periodic snapshot:
+// querying it while a listener's Offer call is blocked mid-pass must observe
+// that offer. Before Phase 5's deferred-settle form this is always 0 or 1,
+// since Dispatch offers one listener at a time, synchronously, within a
+// single goroutine; a later deferred form is what lets it grow past 1. Caller
+// must NOT hold q.mu.
+func (q *Queue) SessionsInFlight() int {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return len(q.custody)
 }
 
 // RunUntilIdle dispatches and expires on a fixed tick until the queue is idle

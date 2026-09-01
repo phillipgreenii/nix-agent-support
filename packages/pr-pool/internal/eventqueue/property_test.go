@@ -44,7 +44,8 @@ func (l *trackingListener) Matches(e Event) bool {
 	return l.binds[e.Type]
 }
 
-func (l *trackingListener) Offer(e Event) bool {
+func (l *trackingListener) Offer(o Offering) OfferResult {
+	e := o.Event
 	// INV-EVT-4: the final attempt is FINAL. Once an attempt has been made on an
 	// expired event, that (event, listener) pair is settled and the core must never
 	// offer it again — a fresh event reusing the id clears this in the harness.
@@ -60,7 +61,7 @@ func (l *trackingListener) Offer(e Event) bool {
 	// consume it (no FIFO advance, not marked seen).
 	if n := l.busy[e.ID]; n > 0 {
 		l.busy[e.ID] = n - 1
-		return false
+		return OfferResult{Accepted: false, Decline: DeclineBusy}
 	}
 	// Invariant: never accept the same id twice (within one retention window; a
 	// fresh event reusing a retired id clears seen in the harness).
@@ -74,7 +75,7 @@ func (l *trackingListener) Offer(e Event) bool {
 	}
 	l.lastIdx = idx
 	l.seen[e.ID] = true
-	return true
+	return OfferResult{Accepted: true, Decline: DeclineNone}
 }
 
 // checkSpineInvariant asserts the FIFO spine (q.order) is tombstone-free and

@@ -484,7 +484,9 @@ type alwaysAcceptListener struct{ id, typ string }
 
 func (l *alwaysAcceptListener) ID() string                        { return l.id }
 func (l *alwaysAcceptListener) Matches(evt eventqueue.Event) bool { return evt.Type == l.typ }
-func (l *alwaysAcceptListener) Offer(eventqueue.Event) bool       { return true }
+func (l *alwaysAcceptListener) Offer(eventqueue.Offering) eventqueue.OfferResult {
+	return eventqueue.OfferResult{Accepted: true}
+}
 
 // TestServeStatus_InterleavedReadOnlyInvariance proves `status` is read-only:
 // a burst of concurrent status reads interleaved around a queue mutation
