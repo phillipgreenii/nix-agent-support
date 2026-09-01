@@ -2,12 +2,14 @@ package main
 
 import (
 	"context"
+	"os"
 	"reflect"
 	"testing"
 	"time"
 
 	"github.com/phillipgreenii/pr-pool/internal/activity"
 	"github.com/phillipgreenii/pr-pool/internal/config"
+	"github.com/phillipgreenii/pr-pool/internal/core"
 	"github.com/phillipgreenii/pr-pool/internal/dtest"
 	"github.com/phillipgreenii/pr-pool/internal/event"
 	"github.com/phillipgreenii/pr-pool/internal/eventqueue"
@@ -222,5 +224,116 @@ func TestActivityObserver_OnDispatchFailureAppendsEntry(t *testing.T) {
 	}
 	if buf[0].Type != "review-requested" || buf[0].Outcome != "dispatch_failed" {
 		t.Fatalf("entry = %+v, want {Type: review-requested, Outcome: dispatch_failed}", buf[0])
+	}
+}
+
+// TestResolvedConfigFor_drainAndExitOmitsPollInterval is the run-mode gating
+// test [design: Task 3.5 Step 7]: "drain-and-exit" omits PollInterval
+// (Task 3.8's eventual tickIntervalMs) from the composed view entirely — a
+// nil pointer, not a zero duration — while "long-running" carries it.
+func TestResolvedConfigFor_drainAndExitOmitsPollInterval(t *testing.T) {
+	cfg := config.Config{PollInterval: 7 * time.Second}
+
+	drain := resolvedConfigFor(cfg, core.RunModeDrainAndExit)
+	if drain.PollInterval != nil {
+		t.Fatalf("PollInterval = %v, want nil (omitted) in drain-and-exit mode", *drain.PollInterval)
+	}
+
+	long := resolvedConfigFor(cfg, core.RunModeLongRunning)
+	if long.PollInterval == nil || *long.PollInterval != cfg.PollInterval {
+		t.Fatalf("PollInterval = %v, want %v in long-running mode", long.PollInterval, cfg.PollInterval)
+	}
+}
+
+// TestResolvedConfigFor_countsActiveRolesAndQueries proves the other
+// ResolvedConfig fields reflect the post-selector active set, not the
+// configuration's full declared set.
+func TestResolvedConfigFor_countsActiveRolesAndQueries(t *testing.T) {
+	cfg := config.Config{
+		RepoRoot:    "/repo",
+		BeadsPrefix: "pfx",
+		Roles: roles.RoleSet{
+			{Name: "r1", Enabled: true},
+			{Name: "r2", Enabled: false}, // as applySelectors would leave a --disable'd role
+		},
+		Queries: query.SourceSet{{Name: "q1"}},
+	}
+
+	rc := resolvedConfigFor(cfg, core.RunModeLongRunning)
+	if rc.RepoRoot != "/repo" || rc.BeadsPrefix != "pfx" {
+		t.Fatalf("RepoRoot/BeadsPrefix = %q/%q, want /repo / pfx", rc.RepoRoot, rc.BeadsPrefix)
+	}
+	if rc.ActiveRoles != 1 {
+		t.Fatalf("ActiveRoles = %d, want 1 (only the enabled role)", rc.ActiveRoles)
+	}
+	if rc.ActiveQueries != 1 {
+		t.Fatalf("ActiveQueries = %d, want 1", rc.ActiveQueries)
+	}
+}
+
+// TestSourceReportsFor_oneReportPerActiveSource proves sourceReportsFor
+// reflects cfg.Queries verbatim — the already-post-selector active subset —
+// and that an empty set produces nil, not an empty non-nil slice.
+func TestSourceReportsFor_oneReportPerActiveSource(t *testing.T) {
+	got := sourceReportsFor(query.SourceSet{{Name: "beads-ready"}, {Name: "e2e-source"}})
+	want := []core.SourceReport{{Name: "beads-ready"}, {Name: "e2e-source"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("sourceReportsFor = %+v, want %+v", got, want)
+	}
+
+	if got := sourceReportsFor(nil); got != nil {
+		t.Fatalf("sourceReportsFor(nil) = %+v, want nil", got)
+	}
+}
+
+// TestGateFileInfo_unsetWhenPathEmptyOrAbsent matches
+// orchestrator.gated()'s own "" ⇒ never-gated short-circuit, and reports the
+// file's mtime when it does exist.
+func TestGateFileInfo_unsetWhenPathEmptyOrAbsent(t *testing.T) {
+	if got := gateFileInfo(""); got.Set {
+		t.Fatalf("gateFileInfo(\"\") = %+v, want unset", got)
+	}
+
+	dir := t.TempDir()
+	missing := dir + "/no-such-gate"
+	if got := gateFileInfo(missing); got.Set {
+		t.Fatalf("gateFileInfo(%q) = %+v, want unset (file absent)", missing, got)
+	}
+
+	present := dir + "/quota-paused"
+	if err := os.WriteFile(present, nil, 0o644); err != nil {
+		t.Fatalf("write gate file: %v", err)
+	}
+	got := gateFileInfo(present)
+	if !got.Set {
+		t.Fatalf("gateFileInfo(%q) = %+v, want Set=true", present, got)
+	}
+	fi, err := os.Stat(present)
+	if err != nil {
+		t.Fatalf("stat gate file: %v", err)
+	}
+	if !got.Mtime.Equal(fi.ModTime()) {
+		t.Fatalf("Mtime = %v, want %v", got.Mtime, fi.ModTime())
+	}
+}
+
+// TestCurrentGateFiles_namesBothFileDirectGates proves currentGateFiles
+// reports both file-direct gates (Task 1.2b, ADR 0036) under the fixed
+// gateQuotaPaused/gateCICDDown keys svc.ObserveGateFromTick's caller and,
+// eventually, Task 3.9's socket verbs must agree on.
+func TestCurrentGateFiles_namesBothFileDirectGates(t *testing.T) {
+	dir := t.TempDir()
+	quota := dir + "/quota-paused"
+	if err := os.WriteFile(quota, nil, 0o644); err != nil {
+		t.Fatalf("write gate file: %v", err)
+	}
+	cfg := config.Config{QuotaPaused: quota, CICDDown: dir + "/cicd-down-absent"}
+
+	gates := currentGateFiles(cfg)
+	if got := gates[gateQuotaPaused]; !got.Set {
+		t.Fatalf("gates[%q] = %+v, want Set=true", gateQuotaPaused, got)
+	}
+	if got := gates[gateCICDDown]; got.Set {
+		t.Fatalf("gates[%q] = %+v, want unset (file absent)", gateCICDDown, got)
 	}
 }

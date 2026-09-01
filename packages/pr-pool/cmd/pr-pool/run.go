@@ -22,16 +22,21 @@ import (
 	"github.com/phillipgreenii/pr-pool/internal/eventqueue"
 	"github.com/phillipgreenii/pr-pool/internal/metrics"
 	"github.com/phillipgreenii/pr-pool/internal/orchestrator"
+	"github.com/phillipgreenii/pr-pool/internal/query"
 	"github.com/phillipgreenii/pr-pool/internal/roles"
 )
 
-// idleDrainTick is the between-pass wait eventqueue.Queue.RunUntilIdle blocks
-// on while draining (`run-until-idle`). It is deliberately short and unrelated
-// to PollInterval, which paces the PRODUCER's re-query cadence, not how fast
-// the queue moves from one already-enqueued head to the next: every Listener
-// this binary registers (orchestrator.NewListener) always accepts synchronously
-// (INV-CONC-1 — no busy decline), so nothing here is waiting ON a handler; the
-// wait only paces how quickly a role's next already-queued head gets its turn.
+// idleDrainTick is the between-pass wait runRunUntilIdle's own drive loop
+// blocks on while draining (Binding Decision 1: it drives
+// eventqueue.Queue.Dispatch/Expire/Idle directly rather than calling
+// eventqueue.Queue.RunUntilIdle, so this wait is a plain time.After rather
+// than RunUntilIdle's injectable `after` seam). It is deliberately short and
+// unrelated to PollInterval, which paces the PRODUCER's re-query cadence, not
+// how fast the queue moves from one already-enqueued head to the next: every
+// Listener this binary registers (orchestrator.NewListener) always accepts
+// synchronously (INV-CONC-1 — no busy decline), so nothing here is waiting ON
+// a handler; the wait only paces how quickly a role's next already-queued
+// head gets its turn.
 const idleDrainTick = 500 * time.Millisecond
 
 // bootCore loads the durable queue, registers a queue->executor Listener
@@ -332,6 +337,93 @@ func prepareRun(ctx context.Context, sel runSelectors) (preparedRun, int) {
 	return preparedRun{cfg: cfg, o: o, cleanup: cleanup}, exitOK
 }
 
+// gateQuotaPaused / gateCICDDown are the two file-direct gate names (Task
+// 1.2b, ADR 0036) this run's config declares — the map keys
+// currentGateFiles/svc.ObserveGateFromTick use, one per
+// config.Config.QuotaPaused/CICDDown gate-file path.
+const (
+	gateQuotaPaused = "quota_paused"
+	gateCICDDown    = "cicd_down"
+)
+
+// gateFileInfo stats path and reports whether the gate is currently set
+// (the file exists) and, if so, its mtime. An empty path — the gate
+// unconfigured for this deployment — reads as unset, matching
+// orchestrator.gated()'s own "" ⇒ never gated short-circuit.
+func gateFileInfo(path string) core.GateInfo {
+	if path == "" {
+		return core.GateInfo{}
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		return core.GateInfo{}
+	}
+	return core.GateInfo{Set: true, Mtime: fi.ModTime()}
+}
+
+// currentGateFiles reads both file-direct gates cfg declares — the drive
+// loop's periodic input to svc.ObserveGateFromTick (Task 3.5 Files: gates_cmd.go
+// itself needs no code change, since file-direct pause/resume never touches a
+// running core; this is the OTHER half — the drive loop's own read of that
+// same gate-file state).
+func currentGateFiles(cfg config.Config) map[string]core.GateInfo {
+	return map[string]core.GateInfo{
+		gateQuotaPaused: gateFileInfo(cfg.QuotaPaused),
+		gateCICDDown:    gateFileInfo(cfg.CICDDown),
+	}
+}
+
+// countEnabledRoles counts roles active this run (Role.Enabled — selectors.go
+// flips this rather than removing entries, so a disabled role's Binds still
+// count toward declaredBindTypes, but not toward this active count).
+func countEnabledRoles(rs roles.RoleSet) int {
+	n := 0
+	for _, r := range rs {
+		if r.Enabled {
+			n++
+		}
+	}
+	return n
+}
+
+// sourceReportsFor builds one core.SourceReport per source in sources —
+// cfg.Queries, the post-selector (--only/--disable) active-this-run subset:
+// applySelectors already removed any excluded query from the slice, so every
+// entry here fired (or was scheduled to fire) this pass. See
+// core.TickSnapshot.Sources for the Rejected freedom-boundary note.
+func sourceReportsFor(sources query.SourceSet) []core.SourceReport {
+	if len(sources) == 0 {
+		return nil
+	}
+	out := make([]core.SourceReport, len(sources))
+	for i, s := range sources {
+		out[i] = core.SourceReport{Name: s.Name}
+	}
+	return out
+}
+
+// resolvedConfigFor builds the small resolved-config snapshot
+// core.TickSnapshot.Config carries this pass (Task 3.5 Contract; the field
+// list itself is this task's own choice — see core.ResolvedConfig's doc).
+//
+// PollInterval is left nil (omitted) in RunModeDrainAndExit: a one-shot
+// drain-to-idle pass has no polling cadence to report, and Task 3.8's status
+// IA suppresses tick-derived staleness signals in that mode using this same
+// signal [design: Task 3.5 Step 7].
+func resolvedConfigFor(cfg config.Config, runMode string) core.ResolvedConfig {
+	rc := core.ResolvedConfig{
+		RepoRoot:      cfg.RepoRoot,
+		BeadsPrefix:   cfg.BeadsPrefix,
+		ActiveRoles:   countEnabledRoles(cfg.Roles),
+		ActiveQueries: len(cfg.Queries),
+	}
+	if runMode == core.RunModeLongRunning {
+		pi := cfg.PollInterval
+		rc.PollInterval = &pi
+	}
+	return rc
+}
+
 // runRunUntilIdle implements `pr-pool run-until-idle` (and the deprecated
 // `drain` alias): boot the core, fire ONE producer tick (matching the single
 // discovery pass a `drain` invocation used to run), drain the durable queue
@@ -379,9 +471,32 @@ func runRunUntilIdle(only, disable []string) int {
 		fmt.Fprintln(os.Stderr, "run-until-idle: discover:", err)
 		return exitGeneric
 	}
-	if err := q.RunUntilIdle(ctx, idleDrainTick); err != nil {
-		fmt.Fprintln(os.Stderr, "run-until-idle:", err)
-		return exitGeneric
+	// Binding Decision 1: drive Dispatch/Expire/Idle directly rather than
+	// calling eventqueue.Queue.RunUntilIdle, so a tick snapshot can be
+	// published after every pass. RunUntilIdle itself (queue.go) is left
+	// completely unmodified — its own doc comment explains why dispatch runs
+	// before expire, which this loop preserves.
+	for {
+		q.Dispatch()
+		q.Expire()
+		now := time.Now()
+		svc.PublishTick(core.TickSnapshot{
+			Sources:    sourceReportsFor(pr.cfg.Queries),
+			Config:     resolvedConfigFor(pr.cfg, core.RunModeDrainAndExit),
+			RunMode:    core.RunModeDrainAndExit,
+			Version:    version,
+			LastTickAt: now,
+			SnapshotAt: now,
+		})
+		if q.Idle() {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			fmt.Fprintln(os.Stderr, "run-until-idle:", ctx.Err())
+			return exitGeneric
+		case <-time.After(idleDrainTick):
+		}
 	}
 	// Force a final metrics snapshot before exit: without this, a short run that
 	// starts and finishes between two periodic collections of a REAL backend
@@ -436,6 +551,13 @@ func runRun(only, disable []string) int {
 	ticker := time.NewTicker(tick)
 	defer ticker.Stop()
 	for {
+		// ObserveGateFromTick is this drive loop's own periodic read of
+		// gate-file state (Task 3.5 Files: gates_cmd.go's file-direct
+		// pause/resume never touches a running core, so this is the other
+		// half — the loop noticing what the file says). It runs every pass,
+		// gated or not, so a status read always has a fresh-as-of-this-tick
+		// gate view even while dispatch itself is paused.
+		svc.ObserveGateFromTick(time.Now(), currentGateFiles(pr.cfg))
 		if pr.o.Gated() {
 			slog.Info("gated; pausing without dispatch")
 		} else if err := pr.o.ProduceTick(ctx, q); err != nil {
@@ -443,6 +565,15 @@ func runRun(only, disable []string) int {
 		} else {
 			q.Dispatch()
 			q.Expire()
+			now := time.Now()
+			svc.PublishTick(core.TickSnapshot{
+				Sources:    sourceReportsFor(pr.cfg.Queries),
+				Config:     resolvedConfigFor(pr.cfg, core.RunModeLongRunning),
+				RunMode:    core.RunModeLongRunning,
+				Version:    version,
+				LastTickAt: now,
+				SnapshotAt: now,
+			})
 		}
 		select {
 		case <-ctx.Done():

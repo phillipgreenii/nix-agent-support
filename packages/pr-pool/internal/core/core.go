@@ -60,6 +60,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/phillipgreenii/pr-pool/conformance"
@@ -116,6 +117,14 @@ type Service struct {
 	logDir   string
 	command  string
 	inflight sync.WaitGroup
+
+	// tick and gates are the two published-state cells Serve's handlers (this
+	// package) read with no cross-package import (Task 3.5 Objective):
+	// tick is written by PublishTick (status.go) and gates is written by
+	// ObserveGateFromTick/ObserveGateFromSocketVerb (status.go, its own small
+	// mutex — never mu above).
+	tick  atomic.Pointer[TickSnapshot]
+	gates gateState
 }
 
 // IngestObserver receives the ingest-time conditions the core records to METRICS,
