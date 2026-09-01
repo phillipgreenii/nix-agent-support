@@ -241,14 +241,31 @@ func TestCannedQueriesAgainstFixtureCorpus(t *testing.T) {
 		// transcript records a top-level durationMs only on `system` events, never
 		// on the user event carrying a tool_result. elapsed_ms is the real
 		// measurement, taken between the tool_use line's ts and its result's ts:
-		//   sleep:   A4 1000 + B1 31000 + B2 31000 = 63000 (mean 21000)
-		//   rtk:     A1 2000 + A2  5000            =  7000 (mean  3500)
-		//   missing: C1 1000                       =  1000 (mean  1000)
+		//   sleep:   A4 1000 + B1 31000 + B2 31000 = 63000 (mean 21000, p50 31000, max 31000)
+		//   rtk:     A1 2000 + A2  5000            =  7000 (mean  3500, p50  3500, max  5000)
+		//   missing: C1 1000                       =  1000 (mean  1000, p50  1000, max  1000)
+		// None of these elapsed times reach the default 900000ms idle threshold, so
+		// idle_calls/idle_ms_sum are 0 for every row at the default.
 		_, rows := runNamed(t, db, root, "cost-by-signature", nil, "", "")
 		assertRows(t, "cost-by-signature", rows, [][]string{
-			{sigSleep, "3", "0", "63000", "21000"},
-			{sigRTK, "2", "0", "7000", "3500"},
-			{sigMissing, "1", "0", "1000", "1000"},
+			{sigSleep, "3", "0", "63000", "21000", "31000", "31000", "0", "0"},
+			{sigRTK, "2", "0", "7000", "3500", "3500", "5000", "0", "0"},
+			{sigMissing, "1", "0", "1000", "1000", "1000", "1000", "0", "0"},
+		})
+	})
+
+	t.Run("cost-by-signature flags idle intervals past the threshold", func(t *testing.T) {
+		// At idle_threshold_ms=10000, the sleep signature's two 31000ms calls (B1,
+		// B2) are flagged idle/human-wait and excluded from the sum/mean/p50/max,
+		// leaving only A4's 1000ms as "active". rtk (2000, 5000) and missing (1000)
+		// are untouched since both stay below 10000.
+		// Ordered by elapsed_ms_sum DESC, then errors DESC: rtk's 7000 leads; sleep
+		// and missing tie at 1000, and sleep's 3 errors outrank missing's 1.
+		_, rows := runNamed(t, db, root, "cost-by-signature", []string{"10000"}, "", "")
+		assertRows(t, "cost-by-signature idle-flagged", rows, [][]string{
+			{sigRTK, "2", "0", "7000", "3500", "3500", "5000", "0", "0"},
+			{sigSleep, "3", "0", "1000", "1000", "1000", "1000", "2", "62000"},
+			{sigMissing, "1", "0", "1000", "1000", "1000", "1000", "0", "0"},
 		})
 	})
 
@@ -393,13 +410,19 @@ func TestRegistryVersionsArePinned(t *testing.T) {
 		"bash-by-lead-cmd":      1,
 		"session-concentration": 1,
 		"retry-chains":          1,
-		"error-then-narration":  1,
-		"sidechain-split":       1,
-		"cost-by-signature":     1,
-		"hook-rejections":       1,
-		"first-seen":            1,
-		"last-seen":             1,
-		"coverage":              1,
+		// pg2-z38lk item 4: the +1 line adjacency broke on intervening `system`
+		// (harness-injected) lines, which happen far more often in a main-loop
+		// transcript than a sidechain one; v2 skips over them.
+		"error-then-narration": 2,
+		"sidechain-split":      1,
+		// pg2-z38lk items 5 and 6: idle/human-wait time flagged out of
+		// elapsed_ms_sum/mean (idle_calls/idle_ms_sum added), plus p50/max beside
+		// the existing sum/mean.
+		"cost-by-signature": 2,
+		"hook-rejections":   1,
+		"first-seen":        1,
+		"last-seen":         1,
+		"coverage":          1,
 		// pg2-oisvb: the mistake census. Tier 1's eight structural detectors plus the
 		// per-signature runaway discount the ranked report applies to every finding.
 		"concentration-by-signature": 1,
@@ -420,6 +443,15 @@ func TestRegistryVersionsArePinned(t *testing.T) {
 		// because T-6 collapses every path to 'PATH' by design. Reads input_json
 		// directly, alongside the normalizer, rather than weakening it.
 		"failed-reads-by-root": 1,
+		// pg2-z38lk item 1: first/last occurrence keyed on the extracted root
+		// (failed-reads-by-root's own extraction, shared via rootExtraction)
+		// instead of the signature — datable even though top-signatures collapses
+		// every root to the same 'PATH'.
+		"root-first-last-seen": 1,
+		// pg2-z38lk item 2: bash-by-lead-cmd's own denominator hidden behind a
+		// leading `cd DIR &&`, peeled at QUERY time so bash-by-lead-cmd's stored
+		// meaning stays untouched.
+		"bash-by-effective-cmd": 1,
 	}
 	got := map[string]int{}
 	for _, q := range All() {

@@ -30,6 +30,33 @@ var (
 	sigBead       = regexp.MustCompile(`\bpg2-[a-z0-9.]+`)
 	sigPath       = regexp.MustCompile(`/[\w.@+-]+(?:/[\w.@+-]+)+`)
 	sigNumber     = regexp.MustCompile(`\b\d[\d,.]*\b`)
+
+	// sigInputEcho is pg2-z38lk item 3: an InputValidationError body echoes the
+	// malformed tool-input PAYLOAD back verbatim ("You sent (first N of N
+	// bytes): <payload>"), and the payload differs on every call by
+	// construction — different byte counts, different echoed JSON. Measured in
+	// the 2026-08-31 baseline census, one systemic malformed-tool-input class
+	// fragmented across >=15 findings (ranks 144, 190, 219, 260, 393, 643-645,
+	// 1226, 1241, 1242, 1253, 1257, 1258, 1265) because the generic
+	// number/path/hash collapses above cannot touch arbitrary echoed JSON
+	// tokens, so no single row ever ranked and the class stayed invisible.
+	//
+	// This MUST run BEFORE truncateRunes, not after: SignatureWindow keeps only
+	// the first 600 runes, and the echoed payload can push the "You sent"
+	// marker itself — and everything after it — past that cut, leaving a
+	// half-echoed, still-variable tail in the signature. Cutting on the full
+	// body first means the marker is found and collapsed wherever it falls,
+	// then truncation (and the collapses below) operate on an already-short,
+	// deterministic string.
+	//
+	// The byte counts collapse to the literal N (not re-derived from sigNumber,
+	// which would also fire on the SAME text — being explicit here is what
+	// makes the placeholder "N of N" readable as the two counts it replaces,
+	// rather than an accidental side effect of an unrelated rule). Text BEFORE
+	// the marker — the specific validation failure, e.g. which tool/field was
+	// wrong — is left untouched, so two DIFFERENT error kinds still produce two
+	// different signatures; only the volatile echo collapses.
+	sigInputEcho = regexp.MustCompile(`(?s)You sent \(first \d+ of \d+ bytes\):.*`)
 )
 
 // Signature collapses an error body into a comparable grouping key. It is
@@ -38,7 +65,8 @@ var (
 // at query time would silently regroup history the moment the normalizer
 // changed.
 func Signature(body string) string {
-	s := truncateRunes(body, SignatureWindow)
+	s := sigInputEcho.ReplaceAllString(body, "You sent (first N of N bytes): ECHO")
+	s = truncateRunes(s, SignatureWindow)
 	s = sigWhitespace.ReplaceAllString(s, " ")
 	s = sigHash.ReplaceAllString(s, "HASH")
 	s = sigToolID.ReplaceAllString(s, "TOOLID")

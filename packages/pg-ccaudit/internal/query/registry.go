@@ -76,6 +76,84 @@ prev_lines AS (
   GROUP BY c.path, c.seq
 )`
 
+// rootExtraction is the "which absolute ROOT did this failing call reference"
+// CTE chain shared by failed-reads-by-root and root-first-last-seen (pg2-z38lk
+// item 1): targets pulls the candidate path per tool (a Read/Edit/Write
+// file_path, or the first '/'-leading shell word for Bash), bounded cuts it at
+// the first character that cannot appear inside a shell word adjacent to a
+// path, and roots keeps only the first path SEGMENT. See failed-reads-by-root's
+// own Notes for the full extraction rationale (the bounding guard, the
+// Bash-vs-Read/Edit/Write split, the known miss on a flag-glued path) — this
+// comment does not repeat it. Sharing the CTE (rather than two independent
+// copies) is what guarantees the two queries can never disagree about what a
+// call's root IS.
+const rootExtraction = `
+targets AS (
+  SELECT c.tool_use_id                                                        AS tool_use_id,
+         c.path                                                               AS path,
+         c.seq                                                                AS seq,
+         c.tool_name                                                          AS tool_name,
+         CASE
+           WHEN c.tool_name IN ('Read', 'Edit', 'Write')
+             THEN json_extract(c.input_json, '$.file_path')
+           WHEN c.tool_name = 'Bash' THEN (
+             -- The first shell WORD starting with '/': prepend a space so a path at
+             -- position 1 of the command is found the same way as one preceded by
+             -- whitespace, then cut at the first ' /' boundary.
+             CASE WHEN instr(' ' || json_extract(c.input_json, '$.command'), ' /') > 0
+               THEN substr(' ' || json_extract(c.input_json, '$.command'),
+                           instr(' ' || json_extract(c.input_json, '$.command'), ' /') + 1)
+               ELSE NULL
+             END
+           )
+           ELSE NULL
+         END                                                                  AS candidate
+  FROM tool_calls c
+  WHERE c.tool_name IN ('Read', 'Edit', 'Write', 'Bash')
+),
+bounded AS (
+  -- BOUND the candidate at the first character that cannot appear inside a shell
+  -- word adjacent to a path -- whitespace or a shell metacharacter -- or end of
+  -- string, whichever is nearest. Without this a second, UNRELATED '/' anywhere
+  -- later in a multi-line command (a heredoc body, an unrelated glob) gets read as
+  -- if it continued the SAME path, corrupting the extracted root itself, not just
+  -- the cosmetic sample. file_path values are already clean, so this is a no-op
+  -- for Read/Edit/Write and a real guard only for Bash.
+  SELECT tool_use_id, path, seq, tool_name,
+         CASE WHEN candidate IS NULL THEN NULL ELSE
+           substr(candidate, 1,
+             MIN(
+               CASE WHEN instr(candidate, ' ')      > 0 THEN instr(candidate, ' ')      ELSE 1000000000 END,
+               CASE WHEN instr(candidate, char(9))  > 0 THEN instr(candidate, char(9))  ELSE 1000000000 END,
+               CASE WHEN instr(candidate, char(10)) > 0 THEN instr(candidate, char(10)) ELSE 1000000000 END,
+               CASE WHEN instr(candidate, char(13)) > 0 THEN instr(candidate, char(13)) ELSE 1000000000 END,
+               CASE WHEN instr(candidate, ';')       > 0 THEN instr(candidate, ';')       ELSE 1000000000 END,
+               CASE WHEN instr(candidate, '(')       > 0 THEN instr(candidate, '(')       ELSE 1000000000 END,
+               CASE WHEN instr(candidate, ')')       > 0 THEN instr(candidate, ')')       ELSE 1000000000 END,
+               CASE WHEN instr(candidate, '|')       > 0 THEN instr(candidate, '|')       ELSE 1000000000 END,
+               CASE WHEN instr(candidate, '&')       > 0 THEN instr(candidate, '&')       ELSE 1000000000 END,
+               CASE WHEN instr(candidate, '<')       > 0 THEN instr(candidate, '<')       ELSE 1000000000 END,
+               CASE WHEN instr(candidate, '>')       > 0 THEN instr(candidate, '>')       ELSE 1000000000 END,
+               CASE WHEN instr(candidate, char(34))  > 0 THEN instr(candidate, char(34))  ELSE 1000000000 END,
+               CASE WHEN instr(candidate, char(39))  > 0 THEN instr(candidate, char(39))  ELSE 1000000000 END,
+               CASE WHEN instr(candidate, char(96))  > 0 THEN instr(candidate, char(96))  ELSE 1000000000 END,
+               CASE WHEN instr(candidate, '$')       > 0 THEN instr(candidate, '$')       ELSE 1000000000 END,
+               length(candidate) + 1
+             ) - 1)
+         END                                                                  AS raw_path
+  FROM targets
+),
+roots AS (
+  SELECT tool_use_id, path, seq, tool_name, raw_path,
+         CASE WHEN raw_path LIKE '/%' THEN
+           '/' || CASE WHEN instr(substr(raw_path, 2), '/') > 0
+                       THEN substr(substr(raw_path, 2), 1, instr(substr(raw_path, 2), '/') - 1)
+                       ELSE substr(raw_path, 2)
+                  END
+         ELSE NULL END                                                        AS root
+  FROM bounded
+)`
+
 // registry is the canned-query set. Every row of the bead's query table is
 // present; `coverage` is an addition that makes T-2's provable coverage a query
 // rather than a manual SELECT.
@@ -142,6 +220,130 @@ GROUP BY c.lead_cmd
 ORDER BY errors DESC, calls DESC, lead_cmd`,
 		},
 		{
+			Name:    "bash-by-effective-cmd",
+			Version: 1,
+			Doc:     "Per-EFFECTIVE-command Bash call and error rates, peeling a leading `cd DIR &&`/`cd DIR;` chain.",
+			Notes: "pg2-z38lk item 2, ALONGSIDE bash-by-lead-cmd, not a replacement for it: bash-by-lead-cmd " +
+				"keeps its existing meaning (lead_cmd is peeled at INGEST, T-3) so every historical " +
+				"comparison against it stays valid. This query does the SAME kind of peeling bash-by-lead-cmd " +
+				"already does for sudo/nice/VAR= (leadcmd.go), but for a leading `cd <dir> &&`/`cd <dir>;` " +
+				"chain, and does it at QUERY TIME via a bounded recursive CTE rather than touching the " +
+				"stored lead_cmd column. Evidence: measured corpus-wide, 28,206 of 63,295 Bash calls (45%) " +
+				"lead with cd, so bash-by-lead-cmd's own denominator hides the command that actually ran -- " +
+				"the retro's cited example is jq (133 errors vs a visible 527-call/37-error lead-cmd " +
+				"denominator, because most of those calls are really `cd DIR && jq ...`).\n" +
+				"MECHANISM. Starting from the RAW `.command` string (not the already-peeled lead_cmd), the " +
+				"recursive CTE strips one `cd <dir> &&`/`cd <dir>;` segment per step -- handling a CHAIN " +
+				"(`cd a && cd b && jq ...`) the same way lead_cmd's own peel loop handles stacked sudo/nice " +
+				"wrappers -- capped at 8 steps as a safety bound (retry-chains and escaping-retries bound " +
+				"their own seq gaps the same way). Only rows whose stored lead_cmd is exactly 'cd' go " +
+				"through this at all; every other row's effective_cmd is lead_cmd UNCHANGED, so the two " +
+				"queries agree everywhere except the cd-led 45%.\n" +
+				"THE KNOWN MISS, DELIBERATE: if the raw command does not literally START with the token " +
+				"`cd` (e.g. `sudo cd /tmp && jq ...` -- sudo peeled first at ingest, which is why its " +
+				"lead_cmd still reads 'cd' -- or a bare `cd /tmp` with nothing chained after it), the CTE " +
+				"never fires and effective_cmd falls back to lead_cmd ('cd') UNCHANGED rather than risking " +
+				"a wrong extraction. Re-deriving ingest's full sudo/nice/VAR=/export peel loop in SQL was " +
+				"judged not worth it for a pattern this rare -- those wrappers do not meaningfully apply to " +
+				"the `cd` builtin in the first place. The fallback is SAFE (never a wrong answer, only a " +
+				"less-peeled one), the same posture failed-reads-by-root documents for its own glued-flag " +
+				"miss.\n" +
+				"An OTHER row means the chain WAS peeled but nothing recognizable as a command word " +
+				"remained (an empty or purely-symbolic remainder) -- distinct from bash-by-lead-cmd's OTHER, " +
+				"which is a different, rarer condition on the raw command's very first token.",
+			Window: true,
+			SQL: `
+WITH RECURSIVE bashcmds AS (
+  SELECT c.tool_use_id                                                        AS tool_use_id,
+         c.path                                                               AS path,
+         c.seq                                                                AS seq,
+         c.lead_cmd                                                           AS lead_cmd,
+         json_extract(c.input_json, '$.command')                             AS raw_cmd
+  FROM tool_calls c
+  WHERE c.tool_name = 'Bash'
+),
+peel(tool_use_id, path, seq, lead_cmd, s, depth) AS (
+  SELECT tool_use_id, path, seq, lead_cmd,
+         ltrim(raw_cmd, ' ' || char(9) || char(10) || char(13)), 0
+  FROM bashcmds
+  UNION ALL
+  SELECT p.tool_use_id, p.path, p.seq, p.lead_cmd,
+         ltrim(
+           CASE
+             WHEN instr(p.s, '&&') > 0 AND (instr(p.s, ';') = 0 OR instr(p.s, '&&') < instr(p.s, ';'))
+               THEN substr(p.s, instr(p.s, '&&') + 2)
+             ELSE substr(p.s, instr(p.s, ';') + 1)
+           END,
+           ' ' || char(9) || char(10) || char(13)),
+         p.depth + 1
+  FROM peel p
+  WHERE p.depth < 8
+    AND p.s LIKE 'cd %'
+    AND (instr(p.s, '&&') > 0 OR instr(p.s, ';') > 0)
+),
+final AS (
+  SELECT p.tool_use_id AS tool_use_id, p.path AS path, p.seq AS seq,
+         p.lead_cmd AS lead_cmd, p.s AS s, p.depth AS depth
+  FROM peel p
+  WHERE p.depth = (SELECT MAX(p2.depth) FROM peel p2 WHERE p2.tool_use_id = p.tool_use_id)
+),
+tok AS (
+  SELECT tool_use_id, path, seq,
+         CASE
+           WHEN lead_cmd <> 'cd' THEN lead_cmd
+           WHEN depth = 0 THEN lead_cmd
+           WHEN substr(s, 1, MIN(
+                  CASE WHEN instr(s, ' ')      > 0 THEN instr(s, ' ')      ELSE 1000000000 END,
+                  CASE WHEN instr(s, char(9))  > 0 THEN instr(s, char(9))  ELSE 1000000000 END,
+                  CASE WHEN instr(s, char(10)) > 0 THEN instr(s, char(10)) ELSE 1000000000 END,
+                  CASE WHEN instr(s, char(13)) > 0 THEN instr(s, char(13)) ELSE 1000000000 END,
+                  CASE WHEN instr(s, ';')       > 0 THEN instr(s, ';')       ELSE 1000000000 END,
+                  CASE WHEN instr(s, '(')       > 0 THEN instr(s, '(')       ELSE 1000000000 END,
+                  CASE WHEN instr(s, ')')       > 0 THEN instr(s, ')')       ELSE 1000000000 END,
+                  CASE WHEN instr(s, '|')       > 0 THEN instr(s, '|')       ELSE 1000000000 END,
+                  CASE WHEN instr(s, '&')       > 0 THEN instr(s, '&')       ELSE 1000000000 END,
+                  CASE WHEN instr(s, '<')       > 0 THEN instr(s, '<')       ELSE 1000000000 END,
+                  CASE WHEN instr(s, '>')       > 0 THEN instr(s, '>')       ELSE 1000000000 END,
+                  CASE WHEN instr(s, char(34))  > 0 THEN instr(s, char(34))  ELSE 1000000000 END,
+                  CASE WHEN instr(s, char(39))  > 0 THEN instr(s, char(39))  ELSE 1000000000 END,
+                  CASE WHEN instr(s, char(96))  > 0 THEN instr(s, char(96))  ELSE 1000000000 END,
+                  CASE WHEN instr(s, '$')       > 0 THEN instr(s, '$')       ELSE 1000000000 END,
+                  length(s) + 1
+                ) - 1) = ''
+             THEN 'OTHER'
+           ELSE substr(s, 1, MIN(
+                  CASE WHEN instr(s, ' ')      > 0 THEN instr(s, ' ')      ELSE 1000000000 END,
+                  CASE WHEN instr(s, char(9))  > 0 THEN instr(s, char(9))  ELSE 1000000000 END,
+                  CASE WHEN instr(s, char(10)) > 0 THEN instr(s, char(10)) ELSE 1000000000 END,
+                  CASE WHEN instr(s, char(13)) > 0 THEN instr(s, char(13)) ELSE 1000000000 END,
+                  CASE WHEN instr(s, ';')       > 0 THEN instr(s, ';')       ELSE 1000000000 END,
+                  CASE WHEN instr(s, '(')       > 0 THEN instr(s, '(')       ELSE 1000000000 END,
+                  CASE WHEN instr(s, ')')       > 0 THEN instr(s, ')')       ELSE 1000000000 END,
+                  CASE WHEN instr(s, '|')       > 0 THEN instr(s, '|')       ELSE 1000000000 END,
+                  CASE WHEN instr(s, '&')       > 0 THEN instr(s, '&')       ELSE 1000000000 END,
+                  CASE WHEN instr(s, '<')       > 0 THEN instr(s, '<')       ELSE 1000000000 END,
+                  CASE WHEN instr(s, '>')       > 0 THEN instr(s, '>')       ELSE 1000000000 END,
+                  CASE WHEN instr(s, char(34))  > 0 THEN instr(s, char(34))  ELSE 1000000000 END,
+                  CASE WHEN instr(s, char(39))  > 0 THEN instr(s, char(39))  ELSE 1000000000 END,
+                  CASE WHEN instr(s, char(96))  > 0 THEN instr(s, char(96))  ELSE 1000000000 END,
+                  CASE WHEN instr(s, '$')       > 0 THEN instr(s, '$')       ELSE 1000000000 END,
+                  length(s) + 1
+                ) - 1)
+         END                                                                  AS effective_cmd
+  FROM final
+)
+SELECT t.effective_cmd                                                        AS effective_cmd,
+       COUNT(*)                                                               AS calls,
+       SUM(CASE WHEN r.is_error = 1 THEN 1 ELSE 0 END)                        AS errors,
+       ROUND(100.0 * SUM(CASE WHEN r.is_error = 1 THEN 1 ELSE 0 END) / COUNT(*), 3) AS error_pct
+FROM tok t
+JOIN events e ON e.path = t.path AND e.seq = t.seq
+LEFT JOIN tool_results r ON r.tool_use_id = t.tool_use_id
+WHERE ` + win("e") + `
+GROUP BY t.effective_cmd
+ORDER BY errors DESC, calls DESC, t.effective_cmd`,
+		},
+		{
 			Name:    "session-concentration",
 			Version: 1,
 			Doc:     "The runaway discount for one signature: total / distinct sessions / worst session.",
@@ -201,10 +403,28 @@ ORDER BY fc.path, fc.seq, nc.seq`,
 		},
 		{
 			Name:    "error-then-narration",
-			Version: 1,
-			Doc:     "Assistant prose written on the line immediately after a failed tool result.",
+			Version: 2,
+			Doc:     "Assistant prose written on the line immediately after a failed tool result, skipping intervening harness bookkeeping.",
 			Notes: "This is what an agent rediscovers the hard way and says out loud. The join is " +
-				"assistant_text at seq + 1, which is adjacency by line ordinal, not by turn.",
+				"assistant_text at the NEXT non-system-type line, which is adjacency by line ordinal " +
+				"(not by turn) with one correction.\n" +
+				"pg2-z38lk item 4 (v1 -> v2): investigated why a 2026-08-31 retro window returned 64/64 " +
+				"sidechain rows and 0 main-loop here. Ingest itself does NOT treat main-loop and sidechain " +
+				"narration differently -- ingest.go's appendLine records an assistant_text row for EVERY " +
+				"`type == \"assistant\"` line regardless of is_sidechain, so the gap is not a capture defect. " +
+				"The cause is the literal `a.seq = r.seq + 1` bet: this package's OWN comments elsewhere " +
+				"(prevToolAgg, typed-turn-candidates) already document that Claude Code interleaves " +
+				"HARNESS-INJECTED `system`-type lines (hook-summary events) between a tool result and the " +
+				"assistant's next line, and that this happens for a MAIN-LOOP turn far more often than for " +
+				"a subagent one -- a sidechain transcript's hook pipeline is thinner, so its tool_result is " +
+				"much more often followed immediately, with nothing between, by the assistant's own next " +
+				"line. v1's exact +1 adjacency broke on any intervening system line, which silently zeroed " +
+				"out the main-loop side of this query while leaving the sidechain side intact -- exactly " +
+				"the 64/64-vs-0 shape observed. v2 keeps the SAME intent (the assistant's IMMEDIATE next " +
+				"line, not eventually-later prose: if that next non-system line is another tool_use rather " +
+				"than narration, this still correctly returns nothing) while skipping over any number of " +
+				"consecutive `system`-type lines in between, which are harness bookkeeping the assistant " +
+				"itself did not write.",
 			Window: true,
 			SQL: `
 SELECT e.session_id                    AS session_id,
@@ -215,7 +435,11 @@ SELECT e.session_id                    AS session_id,
        a.text                          AS narration
 FROM tool_results r
 JOIN events e ON e.path = r.path AND e.seq = r.seq
-JOIN assistant_text a ON a.path = r.path AND a.seq = r.seq + 1
+JOIN assistant_text a ON a.path = r.path
+                     AND a.seq = (
+                       SELECT MIN(e2.seq) FROM events e2
+                       WHERE e2.path = r.path AND e2.seq > r.seq AND e2.type <> 'system'
+                     )
 WHERE r.is_error = 1 AND ` + win("e") + `
 ORDER BY r.path, r.seq`,
 		},
@@ -242,8 +466,8 @@ ORDER BY total DESC, signature`,
 		},
 		{
 			Name:    "cost-by-signature",
-			Version: 1,
-			Doc:     "Measured cost per error signature.",
+			Version: 2,
+			Doc:     "Measured cost per error signature, with idle/human-wait time flagged out and the spread (p50/max) beside the sum.",
 			Notes: "READ THIS BEFORE QUOTING A NUMBER. Two cost columns are reported because the " +
 				"corpus does NOT carry a per-tool-call duration. Claude Code writes a top-level " +
 				"durationMs only on `system` events (turn/hook summaries), never on the user event " +
@@ -253,21 +477,72 @@ ORDER BY total DESC, signature`,
 				"tool_use line's timestamp and its tool_result line's timestamp, both recorded in the " +
 				"transcript. It is still MEASURED, not estimated. For a batch of parallel sibling " +
 				"calls the per-call elapsed values overlap, so treat the sum as an upper bound on " +
-				"serial cost.",
+				"serial cost.\n" +
+				"pg2-z38lk items 5 and 6 (v1 -> v2). Item 5: a call's own elapsed time can be dominated " +
+				"by a HUMAN sitting on a permission prompt, or a session left idle, between its tool_use " +
+				"and tool_result timestamps -- time the AGENT did not spend computing anything, which " +
+				"v1 nonetheless credited in full to that signature's cost. Evidence: the 2026-08-31 " +
+				"census's ranks 1-2 carried 85M ms combined this way and topped the cost table unmarked. " +
+				"The schema has no literal SessionEnd/human-action marker on an interval (events carries " +
+				"no such column), so :idle_threshold_ms is a THRESHOLD PROXY: any one call's elapsed time " +
+				"at or above it is flagged idle and EXCLUDED from elapsed_ms_sum/elapsed_ms_mean -- " +
+				"following hook-rejections's own 'filter, don't silently drop' convention, the exclusion " +
+				"is never invisible: idle_calls and idle_ms_sum report exactly what was pulled out, per " +
+				"signature, rather than just quietly shrinking the sum. The default, 900000 (15 minutes), " +
+				"reuses this MODULE's own existing quiescence constant (ingest.DefaultFinalAfter, T-15) " +
+				"rather than inventing a new arbitrary number: a call the ingester itself would call " +
+				"'gone quiet' is a principled floor for 'this was not active computation'.\n" +
+				"Item 6: elapsed_ms_p50 and elapsed_ms_max, computed over the SAME active (non-idle) " +
+				"per-call population as elapsed_ms_sum/mean, make a single-occurrence outlier visible " +
+				"without a second query -- max close to the sum, or p50 far below the mean, both say " +
+				"'one long call, not a pattern' the way the census's own top-25 table needed by hand " +
+				"(8 of 25 rows were exactly this). p50 uses the standard ROW_NUMBER median trick (average " +
+				"of the middle one or two ranks), so it is exact, not approximated.",
+			Params: []Param{
+				{Name: "idle_threshold_ms", Doc: "a call's own elapsed_ms at or above this is flagged idle/human-wait and excluded from elapsed_ms_sum/mean/p50/max", Default: "900000", Numeric: true},
+			},
 			Window: true,
 			SQL: `
-SELECT r.signature                                                              AS signature,
-       COUNT(*)                                                                 AS errors,
-       SUM(COALESCE(re.duration_ms, 0))                                         AS duration_ms_sum,
-       CAST(ROUND(SUM(COALESCE((julianday(re.ts) - julianday(ce.ts)) * 86400000.0, 0))) AS INTEGER) AS elapsed_ms_sum,
-       CAST(ROUND(AVG(COALESCE((julianday(re.ts) - julianday(ce.ts)) * 86400000.0, 0))) AS INTEGER) AS elapsed_ms_mean
-FROM tool_results r
-JOIN events re ON re.path = r.path AND re.seq = r.seq
-JOIN tool_calls c ON c.tool_use_id = r.tool_use_id
-JOIN events ce ON ce.path = c.path AND ce.seq = c.seq
-WHERE r.is_error = 1 AND ` + win("re") + `
-GROUP BY r.signature
-ORDER BY elapsed_ms_sum DESC, errors DESC, signature`,
+WITH per_call AS (
+  SELECT r.signature                                                                     AS signature,
+         COALESCE(re.duration_ms, 0)                                                     AS duration_ms,
+         CAST(ROUND(COALESCE((julianday(re.ts) - julianday(ce.ts)) * 86400000.0, 0)) AS INTEGER) AS elapsed_ms
+  FROM tool_results r
+  JOIN events re ON re.path = r.path AND re.seq = r.seq
+  JOIN tool_calls c ON c.tool_use_id = r.tool_use_id
+  JOIN events ce ON ce.path = c.path AND ce.seq = c.seq
+  WHERE r.is_error = 1 AND ` + win("re") + `
+),
+active AS (
+  SELECT signature, elapsed_ms,
+         ROW_NUMBER() OVER (PARTITION BY signature ORDER BY elapsed_ms) AS rn,
+         COUNT(*)     OVER (PARTITION BY signature)                    AS cnt
+  FROM per_call
+  WHERE elapsed_ms < :idle_threshold_ms
+),
+p50 AS (
+  -- Standard median-by-rank trick: for a population of size cnt, the median
+  -- rank(s) are (cnt+1)/2 and (cnt+2)/2 under INTEGER division -- the same rank
+  -- twice for an odd cnt (averaging one value with itself), the two middle ranks
+  -- for an even cnt.
+  SELECT signature, AVG(elapsed_ms) AS elapsed_ms_p50
+  FROM active
+  WHERE rn IN ((cnt + 1) / 2, (cnt + 2) / 2)
+  GROUP BY signature
+)
+SELECT pc.signature                                                                        AS signature,
+       COUNT(*)                                                                            AS errors,
+       SUM(pc.duration_ms)                                                                 AS duration_ms_sum,
+       SUM(CASE WHEN pc.elapsed_ms < :idle_threshold_ms THEN pc.elapsed_ms ELSE 0 END)      AS elapsed_ms_sum,
+       CAST(ROUND(AVG(CASE WHEN pc.elapsed_ms < :idle_threshold_ms THEN pc.elapsed_ms END)) AS INTEGER) AS elapsed_ms_mean,
+       CAST(ROUND(MAX(p50.elapsed_ms_p50)) AS INTEGER)                                     AS elapsed_ms_p50,
+       MAX(CASE WHEN pc.elapsed_ms < :idle_threshold_ms THEN pc.elapsed_ms END)             AS elapsed_ms_max,
+       SUM(CASE WHEN pc.elapsed_ms >= :idle_threshold_ms THEN 1 ELSE 0 END)                 AS idle_calls,
+       SUM(CASE WHEN pc.elapsed_ms >= :idle_threshold_ms THEN pc.elapsed_ms ELSE 0 END)     AS idle_ms_sum
+FROM per_call pc
+LEFT JOIN p50 ON p50.signature = pc.signature
+GROUP BY pc.signature
+ORDER BY elapsed_ms_sum DESC, errors DESC, pc.signature`,
 		},
 		{
 			Name:    "hook-rejections",
@@ -764,71 +1039,7 @@ ORDER BY f.path, f.seq`,
 			},
 			Window: true,
 			SQL: `
-WITH targets AS (
-  SELECT c.tool_use_id                                                        AS tool_use_id,
-         c.path                                                               AS path,
-         c.seq                                                                AS seq,
-         c.tool_name                                                          AS tool_name,
-         CASE
-           WHEN c.tool_name IN ('Read', 'Edit', 'Write')
-             THEN json_extract(c.input_json, '$.file_path')
-           WHEN c.tool_name = 'Bash' THEN (
-             -- The first shell WORD starting with '/': prepend a space so a path at
-             -- position 1 of the command is found the same way as one preceded by
-             -- whitespace, then cut at the first ' /' boundary.
-             CASE WHEN instr(' ' || json_extract(c.input_json, '$.command'), ' /') > 0
-               THEN substr(' ' || json_extract(c.input_json, '$.command'),
-                           instr(' ' || json_extract(c.input_json, '$.command'), ' /') + 1)
-               ELSE NULL
-             END
-           )
-           ELSE NULL
-         END                                                                  AS candidate
-  FROM tool_calls c
-  WHERE c.tool_name IN ('Read', 'Edit', 'Write', 'Bash')
-),
-bounded AS (
-  -- BOUND the candidate at the first character that cannot appear inside a shell
-  -- word adjacent to a path -- whitespace or a shell metacharacter -- or end of
-  -- string, whichever is nearest. Without this a second, UNRELATED '/' anywhere
-  -- later in a multi-line command (a heredoc body, an unrelated glob) gets read as
-  -- if it continued the SAME path, corrupting the extracted root itself, not just
-  -- the cosmetic sample. file_path values are already clean, so this is a no-op
-  -- for Read/Edit/Write and a real guard only for Bash.
-  SELECT tool_use_id, path, seq, tool_name,
-         CASE WHEN candidate IS NULL THEN NULL ELSE
-           substr(candidate, 1,
-             MIN(
-               CASE WHEN instr(candidate, ' ')      > 0 THEN instr(candidate, ' ')      ELSE 1000000000 END,
-               CASE WHEN instr(candidate, char(9))  > 0 THEN instr(candidate, char(9))  ELSE 1000000000 END,
-               CASE WHEN instr(candidate, char(10)) > 0 THEN instr(candidate, char(10)) ELSE 1000000000 END,
-               CASE WHEN instr(candidate, char(13)) > 0 THEN instr(candidate, char(13)) ELSE 1000000000 END,
-               CASE WHEN instr(candidate, ';')       > 0 THEN instr(candidate, ';')       ELSE 1000000000 END,
-               CASE WHEN instr(candidate, '(')       > 0 THEN instr(candidate, '(')       ELSE 1000000000 END,
-               CASE WHEN instr(candidate, ')')       > 0 THEN instr(candidate, ')')       ELSE 1000000000 END,
-               CASE WHEN instr(candidate, '|')       > 0 THEN instr(candidate, '|')       ELSE 1000000000 END,
-               CASE WHEN instr(candidate, '&')       > 0 THEN instr(candidate, '&')       ELSE 1000000000 END,
-               CASE WHEN instr(candidate, '<')       > 0 THEN instr(candidate, '<')       ELSE 1000000000 END,
-               CASE WHEN instr(candidate, '>')       > 0 THEN instr(candidate, '>')       ELSE 1000000000 END,
-               CASE WHEN instr(candidate, char(34))  > 0 THEN instr(candidate, char(34))  ELSE 1000000000 END,
-               CASE WHEN instr(candidate, char(39))  > 0 THEN instr(candidate, char(39))  ELSE 1000000000 END,
-               CASE WHEN instr(candidate, char(96))  > 0 THEN instr(candidate, char(96))  ELSE 1000000000 END,
-               CASE WHEN instr(candidate, '$')       > 0 THEN instr(candidate, '$')       ELSE 1000000000 END,
-               length(candidate) + 1
-             ) - 1)
-         END                                                                  AS raw_path
-  FROM targets
-),
-roots AS (
-  SELECT tool_use_id, path, seq, tool_name, raw_path,
-         CASE WHEN raw_path LIKE '/%' THEN
-           '/' || CASE WHEN instr(substr(raw_path, 2), '/') > 0
-                       THEN substr(substr(raw_path, 2), 1, instr(substr(raw_path, 2), '/') - 1)
-                       ELSE substr(raw_path, 2)
-                  END
-         ELSE NULL END                                                        AS root
-  FROM bounded
-),
+WITH ` + rootExtraction + `,
 agg AS (
   SELECT ro.root                                                              AS root,
          CASE WHEN ro.root IS NULL THEN NULL
@@ -857,6 +1068,43 @@ SELECT COALESCE(root, '(no absolute path)')                                  AS 
 FROM agg
 ORDER BY CASE WHEN known_root = 0 THEN 0 WHEN known_root = 1 THEN 1 ELSE 2 END,
          calls DESC, root`,
+		},
+		{
+			Name:    "root-first-last-seen",
+			Version: 1,
+			Doc:     "Earliest and latest occurrence of a failing call's extracted ROOT, ranked by first occurrence.",
+			Notes: "pg2-z38lk item 1. Same columns as first-seen/last-seen (root instead of signature) -- " +
+				"the direct answer to \"did the fabricated-root class actually stop recurring?\" that " +
+				"top-signatures cannot give, because T-6 collapses every absolute path to the literal " +
+				"'PATH' regardless of which root it came from (see failed-reads-by-root's own Notes). " +
+				"Shares failed-reads-by-root's root EXTRACTION (the rootExtraction CTE chain), so the two " +
+				"queries can never disagree about what a call's root IS -- only about how it is ranked and " +
+				"reported: failed-reads-by-root classifies known vs fabricated for one window, this one " +
+				"dates the FIRST and LAST time a given root appears, the way first-seen/last-seen already " +
+				"do for a signature.\n" +
+				"Pass a specific root (e.g. /home) as :root to isolate one class; the default '%' returns " +
+				"every root INCLUDING a bare '/' (a whole-filesystem sweep, see failed-reads-by-root's own " +
+				"Notes on that bucket) but EXCLUDING the '(no absolute path)' bucket -- unlike " +
+				"failed-reads-by-root, dating the first/last occurrence of \"no absolute path was found\" " +
+				"is not a meaningful trend line, so a NULL root never matches the LIKE filter and is " +
+				"dropped here.",
+			Params: []Param{
+				{Name: "root", Doc: "root prefix (SQL LIKE pattern; a plain string like /home matches exactly)", Default: "%"},
+			},
+			Window: true,
+			SQL: `
+WITH ` + rootExtraction + `
+SELECT ro.root                          AS root,
+       MIN(e.ts)                       AS first_seen,
+       MAX(e.ts)                       AS last_seen,
+       COUNT(*)                        AS occurrences,
+       COUNT(DISTINCT e.session_id)    AS sessions
+FROM roots ro
+JOIN tool_results r ON r.tool_use_id = ro.tool_use_id AND r.is_error = 1
+JOIN events e ON e.path = ro.path AND e.seq = ro.seq
+WHERE ro.root LIKE :root AND ` + win("e") + `
+GROUP BY ro.root
+ORDER BY first_seen ASC, root`,
 		},
 		{
 			Name:    "undo-signatures",

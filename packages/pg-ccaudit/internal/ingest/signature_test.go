@@ -86,6 +86,37 @@ func TestSignatureNormalization(t *testing.T) {
 	}
 }
 
+// pg2-z38lk item 3: an InputValidationError echoes the malformed payload back
+// verbatim, and the byte counts and echoed JSON differ on every call by
+// construction. Without collapsing the echo, the generic number/path
+// normalization above cannot touch arbitrary JSON tokens, so this class
+// fragments across many distinct signatures instead of ranking as one.
+func TestSignatureCollapsesInputValidationEcho(t *testing.T) {
+	a := Signature("InputValidationError: Bash.command must be a string.\n" +
+		`You sent (first 128 of 4521 bytes): {"command": 123, "foo": "bar"}`)
+	b := Signature("InputValidationError: Bash.command must be a string.\n" +
+		`You sent (first 55 of 998 bytes): {"totally": "different", "payload": true, "nested": {"x": [1,2,3]}}`)
+	if a != b {
+		t.Fatalf("two malformed-payload echoes with different byte counts and different JSON did not collapse:\n a = %q\n b = %q", a, b)
+	}
+	want := "InputValidationError: Bash.command must be a string. You sent (first N of N bytes): ECHO"
+	if a != want {
+		t.Errorf("Signature(...) = %q, want %q", a, want)
+	}
+}
+
+// The error KIND — whatever precedes the echo — MUST still distinguish two
+// genuinely different validation failures; only the volatile echo collapses.
+func TestSignatureInputValidationEchoKeepsTheErrorKind(t *testing.T) {
+	a := Signature("InputValidationError: Bash.command must be a string.\n" +
+		`You sent (first 10 of 20 bytes): {}`)
+	b := Signature("InputValidationError: Read.file_path is required.\n" +
+		`You sent (first 10 of 20 bytes): {}`)
+	if a == b {
+		t.Fatalf("two different validation-failure kinds collapsed to one signature: %q", a)
+	}
+}
+
 // Two bodies differing only in their volatile parts MUST land on one key —
 // otherwise a GROUP BY over signatures counts one recurring problem as many
 // unrelated ones, which is exactly the miscount the precomputed column prevents.

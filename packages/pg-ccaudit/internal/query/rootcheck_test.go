@@ -106,3 +106,62 @@ func TestFailedReadsByRootAgainstFixtureCorpus(t *testing.T) {
 		}
 	})
 }
+
+// TestRootFirstLastSeenAgainstFixtureCorpus is pg2-z38lk item 1: first/last
+// occurrence keyed on the extracted ROOT instead of the signature, over the
+// SAME rootcheck fixture (and the SAME extraction) as failed-reads-by-root, so
+// the two queries are proven to agree about what a call's root is.
+//
+// Each root in the fixture occurs exactly once, at the tool_use line's own
+// timestamp (root-first-last-seen, like failed-reads-by-root, dates from the
+// CALL's event, not the result's): /home at seq 0 (00:00:00), /Users at seq 2
+// (00:00:02), /nix at seq 4 (00:00:04). The "(no absolute path)" bucket (seq 6)
+// is excluded outright — dating the first/last occurrence of "nothing was
+// found" is not a meaningful trend line.
+func TestRootFirstLastSeenAgainstFixtureCorpus(t *testing.T) {
+	root, db := buildIndexFrom(t, "rootcheck")
+
+	t.Run("every real root is dated, the no-path bucket is not", func(t *testing.T) {
+		cols, rows := runNamed(t, db, root, "root-first-last-seen", nil, "", "")
+		idx := colIndex(t, cols)
+		if len(rows) != 3 {
+			t.Fatalf("root-first-last-seen returned %d rows, want 3:\n%v", len(rows), rows)
+		}
+		want := []struct{ root, ts, occurrences, sessions string }{
+			{"/home", "2026-08-01T00:00:00.000Z", "1", "1"},
+			{"/Users", "2026-08-01T00:00:02.000Z", "1", "1"},
+			{"/nix", "2026-08-01T00:00:04.000Z", "1", "1"},
+		}
+		for i, w := range want {
+			got := rows[i]
+			if got[idx["root"]] != w.root ||
+				got[idx["first_seen"]] != w.ts || got[idx["last_seen"]] != w.ts ||
+				got[idx["occurrences"]] != w.occurrences || got[idx["sessions"]] != w.sessions {
+				t.Errorf("row %d = %v, want %+v", i, got, w)
+			}
+		}
+		for _, r := range rows {
+			if r[idx["root"]] == "(no absolute path)" {
+				t.Errorf("the no-absolute-path bucket must not be dated: %v", r)
+			}
+		}
+	})
+
+	t.Run("root is a real filter, isolating one class", func(t *testing.T) {
+		_, rows := runNamed(t, db, root, "root-first-last-seen", []string{"/home"}, "", "")
+		assertRows(t, "root-first-last-seen /home", rows, [][]string{
+			{"/home", "2026-08-01T00:00:00.000Z", "2026-08-01T00:00:00.000Z", "1", "1"},
+		})
+	})
+
+	t.Run("the window is honoured", func(t *testing.T) {
+		_, all := runNamed(t, db, root, "root-first-last-seen", nil, "", "")
+		_, before := runNamed(t, db, root, "root-first-last-seen", nil, "2020-01-01", "2020-02-01")
+		if len(all) != 3 {
+			t.Errorf("unwindowed rows = %d, want 3", len(all))
+		}
+		if len(before) != 0 {
+			t.Errorf("a window before the corpus returned %d rows, want 0", len(before))
+		}
+	})
+}
