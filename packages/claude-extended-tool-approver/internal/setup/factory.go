@@ -147,13 +147,17 @@ func RuleChain(eng *engine.Engine, pe *patheval.PathEvaluator, cfg *configrules.
 		configrules.NewFromConfig(cfg),
 		// denied-roots runs FIRST among the generic security validators (pg2-fxu7k):
 		// a fabricated-absolute-root reference (a machine-configured root known not
-		// to exist here — see home/programs/claude-extended-tool-approver's
-		// denyRoots option) is a "this cannot be right" signal independent of every
-		// other check below, so it should Reject before gitdir/dangerouscmds/secrets
-		// spend any effort classifying a path that was never real to begin with.
-		// first-match-wins makes ordering the override; a machine with an empty
-		// denyRoots list (the default) makes this rule a no-op ErrNotApplicable on
-		// every call, so ordering it first costs nothing where it is unconfigured.
+		// to exist here — CETA_DENIED_ROOTS, populated by the
+		// claude-extended-tool-approver home-manager module from
+		// phillipgreenii.programs.claude-code.knownAbsentRoots, the same option
+		// home/programs/agent-rules already renders into the A-1 prose rule) is a
+		// "this cannot be right" signal independent of every other check below, so
+		// it should Reject before gitdir/dangerouscmds/secrets spend any effort
+		// classifying a path that was never real to begin with. first-match-wins
+		// makes ordering the override; a machine with an empty knownAbsentRoots
+		// list (the Linux/NixOS default) makes this rule a no-op ErrNotApplicable
+		// on every call, so ordering it first costs nothing where it is
+		// unconfigured.
 		deniedroots.New(pe),
 		// Generic security validators run in an early band — after the consumer
 		// configrules (so an explicit consumer decision still wins) but before the

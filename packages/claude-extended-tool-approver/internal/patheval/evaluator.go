@@ -751,9 +751,10 @@ func (pe *PathEvaluator) IsDenyWrite(path string) bool {
 }
 
 // MatchedDeniedRoot reports whether path's absolute form lies at or under one
-// of the machine-configured denied roots (CETA_DENIED_ROOTS — see
-// home/programs/claude-extended-tool-approver's denyRoots option), returning
-// the matched root string for use in a rule's redirect message.
+// of the machine-configured denied roots (CETA_DENIED_ROOTS — populated by
+// home/programs/claude-extended-tool-approver from
+// phillipgreenii.programs.claude-code.knownAbsentRoots), returning the
+// matched root string for use in a rule's redirect message.
 //
 // A denied root is a root a MACHINE declares it knows does not exist there
 // (e.g. "/home", "/mnt", "/repo" on a macOS box that keeps user directories

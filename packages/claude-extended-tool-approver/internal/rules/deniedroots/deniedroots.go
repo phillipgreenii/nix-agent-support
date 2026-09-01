@@ -14,9 +14,12 @@
 //
 // The denied-root list MUST NOT be hard-coded here — Phillip, 2026-08-31,
 // verbatim: "on a Linux machine these paths legitimately exist." Each machine
-// configures its own list via a nix option (home/programs/claude-extended-tool-
-// approver's denyRoots), which the home-manager module threads through to the
-// CETA_DENIED_ROOTS env var (mirroring the established
+// configures its own list via a nix option:
+// phillipgreenii.programs.claude-code.knownAbsentRoots — the SAME option
+// home/programs/agent-rules already renders into the prose A-1 rule, reused
+// rather than duplicated (see home/programs/claude-extended-tool-approver's
+// default.nix) — which the claude-extended-tool-approver home-manager module
+// threads through to the CETA_DENIED_ROOTS env var (mirroring the established
 // extraReadWriteRoots/extraReadOnlyRoots -> CETA_EXTRA_*_ROOTS pattern) that
 // patheval.PathEvaluator.MatchedDeniedRoot reads. This rule contains no root
 // literal of its own; the list lives entirely in machine config.
