@@ -390,8 +390,15 @@ sequenceDiagram
     **refused** and named as rejected to the caller, that one counts an event the core **accepted** and
     later dropped, so neither member ever stands for both of `INV-DISP-3`'s cases;
 
-  and, alongside those four, the **throughput**, **backlog**, **liveness** and **dispatch-latency**
-  metrics an observer watches to tell a busy system from a stalled one (`STORY-OBS-1`).
+  and, alongside those four, the catalog also names:
+  - **source-failures** — counter, per pull source: a pull-source query failure, the metrics half of
+    the pull-source failure backoff's own "reported to logs and metrics, never a silently idle pass"
+    (`INV-FAIL-3`);
+  - **deduped** — counter, per `type`: a duplicate event id the core absorbed because de-duplication
+    already covers it (`INV-EVT-3`) — visibility into a re-emit the core silently drops from the
+    delivery path, distinct from a fresh append;
+  - the **throughput**, **backlog**, **liveness** and **dispatch-latency** metrics an observer
+    watches to tell a busy system from a stalled one (`STORY-OBS-1`).
 
 - **Emission.** Observability covers **metrics and logs** (traces are a later concern). Both the
   **emission transport** and the concrete backend behind it (a scrape target, a log store) are
