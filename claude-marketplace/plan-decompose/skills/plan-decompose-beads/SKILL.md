@@ -26,9 +26,11 @@ Epic bead, label `docket`; design of record VERBATIM in the DESIGN field (`--des
 Field cap: description/design cap at 65,535 bytes (previously verified in this workspace); a
 larger design chunks into `bd comment --file` parts with the DESIGN field holding the header
 plus a numbered index (`part <n>/<m>: comment <id>`) that `read-docket-design` follows in
-order. Put a container note in the description: "do not claim this container bead for direct
-work". Drain's `--exclude-type epic` keeps epics out of its queue — that exclusion lives in
-drain, NOT in bd (`bd ready` itself returns epics).
+order. Produce the chunk files with the `plan-decomposer` agent's `scripts/chunk-for-bd-field.sh`
+(one call over the whole design) rather than computing byte offsets by hand. Put a container
+note in the description: "do not claim this container bead for direct work". Drain's
+`--exclude-type epic` keeps epics out of its queue — that exclusion lives in drain, NOT in bd
+(`bd ready` itself returns epics).
 
 ## `create-packet`
 
