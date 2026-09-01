@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"runtime/debug"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/phillipgreenii/pr-pool/internal/backoff"
@@ -155,11 +156,25 @@ func (ls *listenerState) resetBackoff() {
 	ls.nextEligible = time.Time{}
 }
 
+// depthCell is the immutable snapshot published under q.mu after every
+// mutation to q.entries/q.order (Task 3.2's four mutation sites: Enqueue's
+// add, retireLocked, maybeEvict, replay's opEnqueue/opEvict handling).
+// DepthByType and UnmatchedBindings read it lock-free (cell.Load()) instead of
+// scanning q.entries under q.mu. Never mutated in place once stored — a
+// mutation site builds a NEW depthCell (copy-on-write) and Stores it, so a
+// concurrent lock-free reader always sees either the pre- or the fully
+// post-mutation state, never a half-applied one.
+type depthCell struct {
+	depth    map[string]int      // per-type retained count
+	everSeen map[string]struct{} // per-type "enqueued at least once this run" (add-only)
+}
+
 // Queue is the durable, ordered, de-duped, retention-bounded event queue
 // (ADR 0031, expiry bound amended by DEC-EVENT-1). It is safe for concurrent use.
 type Queue struct {
-	mu  sync.Mutex
-	now func() time.Time
+	mu   sync.Mutex
+	cell atomic.Pointer[depthCell]
+	now  func() time.Time
 	// after is the wait seam RunUntilIdle blocks on between passes (default
 	// time.After). It is paired with the `now` clock seam so a mock clock can
 	// drive BOTH coherently: a mock `after` advances virtual time by the tick and
@@ -273,6 +288,7 @@ func New(store Store, opts ...Option) (*Queue, error) {
 		retryBackoff: backoff.Default(),
 		entries:      map[string]*entry{},
 	}
+	q.cell.Store(&depthCell{depth: map[string]int{}, everSeen: map[string]struct{}{}})
 	for _, opt := range opts {
 		opt(q)
 	}
@@ -306,6 +322,9 @@ func (q *Queue) replay() error {
 			e := newEntry(r.event())
 			if _, seen := q.entries[e.evt.ID]; !seen {
 				q.order = append(q.order, e.evt.ID)
+				// A genuinely new retained entry (the `!seen` branch, mirrored from
+				// everSeen's own doc): count it and mark its type ever-enqueued.
+				q.publishCellLocked("", e.evt.Type, e.evt.Type)
 			}
 			q.entries[e.evt.ID] = e
 		case opAccept:
@@ -314,6 +333,9 @@ func (q *Queue) replay() error {
 				e.settled[r.ListenerID] = true
 			}
 		case opEvict:
+			if e, ok := q.entries[r.EventID]; ok {
+				q.publishCellLocked(e.evt.Type, "", "")
+			}
 			delete(q.entries, r.EventID)
 			q.dropFromOrder(r.EventID) // no tombstone: a re-emit must re-append fresh
 		}
@@ -369,6 +391,7 @@ func (q *Queue) Enqueue(evt Event) (EnqueueResult, error) {
 			q.obs.OnUnconsumedExpired(e.evt.Type)
 		}
 		delete(q.entries, e.evt.ID)
+		q.publishCellLocked(e.evt.Type, evt.Type, evt.Type)
 		q.dropFromOrder(evt.ID)
 		q.entries[evt.ID] = newEntry(evt)
 		q.order = append(q.order, evt.ID)
@@ -380,6 +403,7 @@ func (q *Queue) Enqueue(evt Event) (EnqueueResult, error) {
 	}
 	q.entries[evt.ID] = newEntry(evt)
 	q.order = append(q.order, evt.ID)
+	q.publishCellLocked("", evt.Type, evt.Type)
 	q.obs.OnEnqueue(evt)
 	return Enqueued, nil
 }
@@ -737,6 +761,7 @@ func (q *Queue) maybeEvict(e *entry) (Record, bool) {
 	}
 	rec := q.recordEvictLocked(e.evt.ID)
 	delete(q.entries, e.evt.ID)
+	q.publishCellLocked(e.evt.Type, "", "")
 	// Drop the evicted id from the FIFO spine too. Leaving it as a tombstone lets
 	// a re-emit BEFORE the next Expire() append a SECOND spine entry (the stale-
 	// removal branch in Enqueue only fires while q.entries still holds the id),
@@ -762,6 +787,7 @@ func (q *Queue) retireLocked(e *entry) Record {
 	}
 	rec := q.recordEvictLocked(e.evt.ID)
 	delete(q.entries, e.evt.ID)
+	q.publishCellLocked(e.evt.Type, "", "")
 	return rec
 }
 
@@ -773,6 +799,52 @@ func (q *Queue) retireLocked(e *entry) Record {
 // Enqueue) rather than one Append per record. Caller holds q.mu.
 func (q *Queue) recordEvictLocked(id string) Record {
 	return Record{Op: opEvict, EventID: id}
+}
+
+// publishCellLocked atomically publishes a new depthCell derived from the one
+// currently published: decType's retained count -1 (if non-empty, deleting
+// the key rather than leaving a zero so DepthByType agrees with a fresh
+// per-type scan that would never produce a zero-count entry), incType's count
+// +1 (if non-empty), and seenType added to everSeen (if non-empty and not
+// already present — add-only, INV: nothing ever deletes from everSeen). It
+// never mutates the maps of the cell currently published (copy-on-write), so
+// a concurrent lock-free DepthByType/UnmatchedBindings reader never observes
+// a half-applied update — only ever the pre- or the fully post-mutation
+// state. Passing decType == incType (a stale-retire re-emit of the same type)
+// nets to no depth change, exactly as a full recompute would show. Caller
+// holds q.mu.
+func (q *Queue) publishCellLocked(decType, incType, seenType string) {
+	cur := q.cell.Load()
+	depth := cur.depth
+	if decType != "" || incType != "" {
+		next := make(map[string]int, len(cur.depth))
+		for k, v := range cur.depth {
+			next[k] = v
+		}
+		if decType != "" {
+			if next[decType] <= 1 {
+				delete(next, decType)
+			} else {
+				next[decType]--
+			}
+		}
+		if incType != "" {
+			next[incType]++
+		}
+		depth = next
+	}
+	everSeen := cur.everSeen
+	if seenType != "" {
+		if _, ok := cur.everSeen[seenType]; !ok {
+			next := make(map[string]struct{}, len(cur.everSeen)+1)
+			for k := range cur.everSeen {
+				next[k] = struct{}{}
+			}
+			next[seenType] = struct{}{}
+			everSeen = next
+		}
+	}
+	q.cell.Store(&depthCell{depth: depth, everSeen: everSeen})
 }
 
 // Expire drops every event whose retention is over and returns how many were
@@ -847,17 +919,38 @@ func (q *Queue) Idle() bool {
 // because under INV-EVT-4 "expired" no longer means "gone": a past-expiry event
 // is still held, and still owed an attempt, until every matching handler has had
 // one. Excluding those would hide real backlog — including, under the
-// born-expired default, essentially all of it. Caller must NOT hold q.mu.
+// born-expired default, essentially all of it.
+//
+// Lock-free (Task 3.2): reads the depthCell published under q.mu at each of
+// the four mutation sites (Enqueue's add, retireLocked, maybeEvict, replay's
+// opEnqueue/opEvict handling) instead of scanning q.entries under lock. This
+// is why internal/discover.produce's threshold-cascade fixpoint and
+// cmd/pr-pool/run.go's metrics gauge closure — both existing callers — can
+// call it as often as they like without contending on q.mu, and cannot
+// self-deadlock even if a future caller reached it while already holding
+// q.mu. The returned map is the cell's own map, immutable by convention —
+// callers MUST NOT mutate it. Caller must NOT hold q.mu (though, per the
+// above, holding it would no longer be harmful either).
 func (q *Queue) DepthByType() map[string]int {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	depth := map[string]int{}
-	for _, id := range q.order {
-		if e, ok := q.entries[id]; ok {
-			depth[e.evt.Type]++
+	return q.cell.Load().depth
+}
+
+// UnmatchedBindings returns every type in declared that this run's queue has
+// NEVER enqueued — a lock-free read of the cell's everSeen set (add-only:
+// eviction/expiry never un-sees a type once it has been enqueued at least
+// once). declared is the caller's own declared-types list (e.g.
+// core.Bindings); this method does not resolve where that list comes from —
+// see Binding Decision 2. Order follows declared, not everSeen's own
+// (unordered) iteration. Caller must NOT hold q.mu.
+func (q *Queue) UnmatchedBindings(declared []string) []string {
+	seen := q.cell.Load().everSeen
+	var unmatched []string
+	for _, t := range declared {
+		if _, ok := seen[t]; !ok {
+			unmatched = append(unmatched, t)
 		}
 	}
-	return depth
+	return unmatched
 }
 
 // RunUntilIdle dispatches and expires on a fixed tick until the queue is idle

@@ -5,7 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"slices"
@@ -1308,6 +1310,170 @@ func TestFileStoreAppendBatchReplayEquivalence(t *testing.T) {
 		if string(gotJSON) != string(wantJSON) {
 			t.Fatalf("record %d = %s, want %s", i, gotJSON, wantJSON)
 		}
+	}
+}
+
+// --- Task 3.2: O(1) depth cell + unmatchedBindings -----------------------
+
+// depthOracle recomputes per-type retained counts by scanning q.entries/
+// q.order directly — the O(n)-under-lock approach DepthByType() used before
+// Task 3.2. It is the property test's ground truth: the incrementally
+// published depthCell must always agree with a full recompute, so a bug in
+// any of the four mutation sites' delta bookkeeping shows up here rather than
+// silently drifting. White-box (same package): reaches q.mu/q.entries/q.order
+// directly.
+func depthOracle(t *testing.T, q *Queue) map[string]int {
+	t.Helper()
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	depth := map[string]int{}
+	for _, id := range q.order {
+		if e, ok := q.entries[id]; ok {
+			depth[e.evt.Type]++
+		}
+	}
+	return depth
+}
+
+func mapsEqual(a, b map[string]int) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if b[k] != v {
+			return false
+		}
+	}
+	return true
+}
+
+// TestDepthCellMatchesRecompute (Task 3.2 Step 1/8): after a long randomized
+// sequence of Enqueue/Dispatch/Expire operations — exercising Enqueue's plain
+// add, its stale-retire evict+add, Dispatch's early-eviction (maybeEvict),
+// and Expire's retireLocked — the incrementally-published depthCell must
+// always agree with a full O(n) recompute over q.entries/q.order, the
+// invariant the O(1) depth cell replaces the old under-lock scan with. The
+// sequence ends with a replay (a fresh Queue reconstructed from the same
+// durable log) to exercise replay's own opEnqueue/opEvict cell bookkeeping
+// too. RED before depthCell/Queue.cell exist (Step 1): this file fails to
+// compile without them, which is the "expect FAIL" red-first gate.
+func TestDepthCellMatchesRecompute(t *testing.T) {
+	rng := rand.New(rand.NewSource(7))
+	clk := newClock()
+	store := NewMemStore()
+	q, err := New(store, WithClock(clk.now), WithEarlyEviction())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Two listeners with OVERLAPPING but non-identical bindings: a "B" event
+	// needs both to accept before maybeEvict's early eviction fires, so the
+	// partial-acceptance (no cell change yet) branch gets exercised too.
+	q.Register(newListener("a", "A", "B"))
+	q.Register(newListener("c", "B", "C"))
+
+	types := []string{"A", "B", "C"}
+	assertMatch := func(q *Queue, step string) {
+		t.Helper()
+		if got, want := q.DepthByType(), depthOracle(t, q); !mapsEqual(got, want) {
+			t.Fatalf("after %s: DepthByType() = %v, want %v (O(n) recompute)", step, got, want)
+		}
+	}
+	assertMatch(q, "init")
+	for i := 0; i < 400; i++ {
+		switch rng.Intn(3) {
+		case 0:
+			// A bounded id pool (not a fresh id every time) so re-emits routinely
+			// hit Enqueue's Dedup and stale-retire branches, not just plain adds.
+			id := fmt.Sprintf("e%d", rng.Intn(40))
+			typ := types[rng.Intn(len(types))]
+			if _, err := q.Enqueue(evtUntil(id, typ, clk.in(time.Duration(rng.Intn(20)+1)*time.Minute))); err != nil {
+				t.Fatalf("Enqueue: %v", err)
+			}
+		case 1:
+			q.Dispatch()
+		case 2:
+			clk.advance(time.Duration(rng.Intn(10)+1) * time.Minute)
+			q.Expire()
+		}
+		assertMatch(q, fmt.Sprintf("op %d", i))
+	}
+
+	q2, err := New(store, WithClock(clk.now), WithEarlyEviction())
+	if err != nil {
+		t.Fatalf("replay New: %v", err)
+	}
+	assertMatch(q2, "replay")
+}
+
+// Regression (Task 3.2 Step 2): dropFromOrder MUST NOT itself touch the depth
+// cell — each of its 3 callers (Enqueue's stale-retire branch, maybeEvict,
+// replay's opEvict) already decrements the evicted type's count before
+// calling it. A future "fix" that also decremented inside dropFromOrder would
+// double-decrement: evicting ONE of two same-type entries would drop depth by
+// 2 instead of 1.
+func TestDropFromOrderDoesNotDoubleDecrementDepthCell(t *testing.T) {
+	clk := newClock()
+	q := newQueue(t, clk, WithEarlyEviction())
+	l := newListener("h", "T")
+	q.Register(l)
+	mustEnqueue(t, q, evtUntil("e1", "T", clk.in(time.Hour)))
+	mustEnqueue(t, q, evtUntil("e2", "T", clk.in(time.Hour)))
+	if d := q.DepthByType()["T"]; d != 2 {
+		t.Fatalf("depth[T] before eviction = %d, want 2", d)
+	}
+	q.Dispatch() // offers e1 (head); l accepts; early eviction retires it via maybeEvict -> dropFromOrder
+	if d := q.DepthByType()["T"]; d != 1 {
+		t.Fatalf("depth[T] after evicting one of two same-type entries = %d, want exactly 1 (a double-decrement would give 0)", d)
+	}
+}
+
+// Regression (Task 3.2 Step 7): DepthByType is lock-free (cell.Load(), never
+// q.mu), so calling it while THIS goroutine already holds q.mu can never
+// self-deadlock — the property internal/discover.produce's threshold-cascade
+// fixpoint (calls it in a tight loop) and cmd/pr-pool/run.go's metrics gauge
+// closure (calls it from an arbitrary point in the program) both rely on.
+// Neither call site can reach q.mu directly (private, cross-package), so this
+// white-box test constructs the worst case directly instead: hold q.mu, then
+// call DepthByType from the same goroutine. Before Task 3.2, DepthByType
+// locked internally and this would hang.
+func TestDepthByTypeNeverAcquiresQMu(t *testing.T) {
+	clk := newClock()
+	q := newQueue(t, clk)
+	mustEnqueue(t, q, evt("e1", "T"))
+
+	q.mu.Lock()
+	got := q.DepthByType()
+	q.mu.Unlock()
+	if got["T"] != 1 {
+		t.Fatalf("DepthByType() = %v while q.mu held by this goroutine, want T:1", got)
+	}
+}
+
+// UnmatchedBindings (Binding Decision 2): declared types absent from the
+// per-type "ever enqueued this run" set (add-only — an eviction/expiry never
+// un-sees a type once it has been enqueued at least once).
+func TestUnmatchedBindings(t *testing.T) {
+	clk := newClock()
+	q := newQueue(t, clk)
+	mustEnqueue(t, q, evt("e1", "A"))
+	if got := q.UnmatchedBindings([]string{"A", "B", "C"}); !equal(got, []string{"B", "C"}) {
+		t.Fatalf("UnmatchedBindings = %v, want [B C]", got)
+	}
+	// Expiry/eviction never un-sees a type: A stays matched even once its only
+	// event is gone.
+	if n := q.Expire(); n != 1 {
+		t.Fatalf("expire dropped %d, want 1", n)
+	}
+	if got := q.UnmatchedBindings([]string{"A", "B", "C"}); !equal(got, []string{"B", "C"}) {
+		t.Fatalf("UnmatchedBindings after expiry = %v, want [B C] (everSeen is add-only)", got)
+	}
+	// Declared types are returned in the CALLER's given order, regardless of
+	// everSeen's own (unordered) internal iteration.
+	if got := q.UnmatchedBindings([]string{"C", "B"}); !equal(got, []string{"C", "B"}) {
+		t.Fatalf("UnmatchedBindings order = %v, want [C B] (declared order preserved)", got)
+	}
+	if got := q.UnmatchedBindings(nil); len(got) != 0 {
+		t.Fatalf("UnmatchedBindings(nil) = %v, want empty", got)
 	}
 }
 
