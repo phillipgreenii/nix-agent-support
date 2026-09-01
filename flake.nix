@@ -1394,13 +1394,19 @@
               # Regression guard that the pr-pool binary's version string is
               # actually stamped by the build-time ldflag (versionPath =
               # "main.version" in packages/pr-pool/default.nix) — the same
-              # gap and fix as test-pa-monitor-version-stamped above.
+              # gap and fix as test-pa-monitor-version-stamped above. Unlike
+              # pa-monitor, pr-pool's cmd/pr-pool/main.go prints the bare
+              # version with no program-name prefix — the repo-wide
+              # convention per phillipg-nix-repo-base's using-mkGoBuilders.md
+              # "Version format" (ADR 0006): `0.0.0-<srcdigest8>`, no prefix.
+              # pa-monitor's "pa-monitor "-prefixed output is that tool's own
+              # one-off choice, not the convention this check should mirror.
               test-pr-pool-version-stamped = pkgs.runCommand "pr-pool-version-stamped" { } ''
                 v=$(${pkgs.pr-pool}/bin/pr-pool --version)
                 case "$v" in
-                  "pr-pool 0.0.0-"????????) touch "$out" ;;
+                  "0.0.0-"????????) touch "$out" ;;
                   *)
-                    echo "pr-pool version not stamped (got: '$v', want 'pr-pool 0.0.0-<8hex>')" >&2
+                    echo "pr-pool version not stamped (got: '$v', want '0.0.0-<8hex>')" >&2
                     exit 1
                     ;;
                 esac
