@@ -186,11 +186,11 @@ schema = 3
     hash = 'sha256-22nHcolG87qSPahT2Ey8S5iGlCLAglE9ObYXO6XZ3ZY='
 
   [mod.'google.golang.org/genproto/googleapis/api']
-    version = 'v0.0.0-20260825221802-da73d73af1c5'
-    hash = 'sha256-mjfRw214kbDuWXXwM8tziSXsFoThznP1IdNk5X/GSG8='
+    version = 'v0.0.0-20260831171406-18b4a7587f8a'
+    hash = 'sha256-HsiQRzrEh75fqhA8zb+eKHj6HH9du/qgGOMAZpdVTkM='
 
   [mod.'google.golang.org/genproto/googleapis/rpc']
-    version = 'v0.0.0-20260825221802-da73d73af1c5'
+    version = 'v0.0.0-20260831171406-18b4a7587f8a'
     hash = 'sha256-CQdjYGIrgAnEDfWW3DIJF9Orf7oJdhx3G9rGg6fow88='
 
   [mod.'google.golang.org/grpc']
