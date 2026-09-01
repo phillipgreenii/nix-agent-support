@@ -58,6 +58,15 @@ type Orchestrator struct {
 	usageReader usage.Reader                               // default usage.NewTranscriptReader()
 	git         watchdog.GitRunner                         // watchdog's hard-stop reset/clean seam (nil ⇒ executor's OSGit{}); tests inject a fake so they never touch the real repo
 	gitOpener   worktree.Opener                            // per-bead worktree creation seam (nil ⇒ executor's gitclient.New{} default); tests inject a fake so they never touch the real repo
+
+	// SourceFailureObserver is notified of every pull-source query retry
+	// ProduceTick's discover.Produce call makes (INV-FAIL-3, register gap
+	// R21 / bead pg2-00jpn) — the metrics half of the log-only Warn line
+	// discover.go's runAndEnqueue already writes at that same point. Left nil
+	// (a safe no-op per discover.WithSourceFailureObserver's doc) by every
+	// existing construction site that does not set it; cmd/pr-pool's bootCore
+	// is the one production site that wires a live metrics.Emitter in here.
+	SourceFailureObserver discover.SourceFailureObserver
 }
 
 // attemptStamp returns a fresh per-attempt timestamp token. A unique stamp per
@@ -97,8 +106,13 @@ func (o *Orchestrator) queryEnv() query.Env {
 // convergence (bead pg2-f3mcb.2): every event, pull or push, goes into the
 // SAME durable queue a Listener bridge (NewListener) is registered on. This
 // replaces the retired per-pass internal/eventbus producer→bus→lease drive.
+//
+// o.SourceFailureObserver rides along as discover.Produce's optional
+// SourceFailureObserver (INV-FAIL-3, register gap R21 / bead pg2-00jpn): nil
+// when unset (every construction site that does not assign it), which
+// discover.WithSourceFailureObserver's own doc guarantees is a safe no-op.
 func (o *Orchestrator) ProduceTick(ctx context.Context, q *eventqueue.Queue) error {
-	return discover.Produce(ctx, o.queryEnv(), o.Cfg.Queries, q)
+	return discover.Produce(ctx, o.queryEnv(), o.Cfg.Queries, q, discover.WithSourceFailureObserver(o.SourceFailureObserver))
 }
 
 // RunOne dispatches a single self-contained EVENT through one role and then

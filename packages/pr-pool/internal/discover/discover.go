@@ -146,12 +146,12 @@ type produceOptions struct {
 }
 
 // WithSourceFailureObserver registers obs to be notified of every pull-source
-// failure retry Produce's runAndEnqueue makes (INV-FAIL-3). Wiring a live
-// Emitter into this from cmd/pr-pool's boot path is a small follow-on this
-// task does not make: bootCore does not currently return its constructed
-// Emitter, and threading it through internal/orchestrator's ProduceTick would
-// touch orchestrator.go and cmd/pr-pool/run_test.go, both outside this
-// task's Files scope. This option is the seam that follow-on wires into.
+// failure retry Produce's runAndEnqueue makes (INV-FAIL-3). The production
+// call site is cmd/pr-pool's bootCore (run.go), which assigns its constructed
+// metrics.Emitter to orchestrator.Orchestrator.SourceFailureObserver;
+// Orchestrator.ProduceTick then passes it to this option on every
+// discover.Produce call (bead pg2-00jpn) — closing the gap where source
+// failures were recorded to logs only in the running binary.
 func WithSourceFailureObserver(obs SourceFailureObserver) ProduceOption {
 	return func(o *produceOptions) { o.obs = obs }
 }

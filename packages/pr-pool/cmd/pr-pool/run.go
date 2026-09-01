@@ -46,17 +46,22 @@ const idleDrainTick = 500 * time.Millisecond
 // Listen+Accept; production `drain` ran the retired internal/eventbus +
 // internal/orchestrator.DrainOnce path instead.
 //
-// It also wires ONE metrics.Emitter into both production seams that can drive
-// it — eventqueue.WithObserver at queue construction and core.Options.Observer
-// at Listen — so a single emitter answers both eventqueue.Observer and
-// core.IngestObserver, matching internal/metrics/metrics_test.go's newHarness
-// circular-construction pattern: q is declared (as this function's named
-// return) before New(mp, depthFn) closes over it, then constructed for real
-// with WithObserver(emitter). mp is resolved from cfg.Meter(), which defaults
-// to the OTel no-op provider when cfg.MeterProvider is unset (INV-OBS-1: core
-// stays unaware of any concrete monitoring backend; binding a real one is a
-// deployment concern this function does not take on — it is chosen by
-// CONFIG, not hardcoded here, per Task 3.3's binding decision).
+// It also wires ONE metrics.Emitter into every production seam that can drive
+// it — eventqueue.WithObserver at queue construction, core.Options.Observer
+// at Listen, and o.SourceFailureObserver for ProduceTick's discover.Produce
+// call — so a single emitter answers eventqueue.Observer, core.IngestObserver,
+// and discover.SourceFailureObserver alike (INV-FAIL-3, register gap R21 /
+// bead pg2-00jpn: before this assignment, source failures were recorded to
+// logs only in the running binary — discover.WithSourceFailureObserver's seam
+// existed but no production call site ever passed it a live observer).
+// Matches internal/metrics/metrics_test.go's newHarness circular-construction
+// pattern: q is declared (as this function's named return) before New(mp,
+// depthFn) closes over it, then constructed for real with WithObserver(emitter).
+// mp is resolved from cfg.Meter(), which defaults to the OTel no-op provider
+// when cfg.MeterProvider is unset (INV-OBS-1: core stays unaware of any
+// concrete monitoring backend; binding a real one is a deployment concern
+// this function does not take on — it is chosen by CONFIG, not hardcoded
+// here, per Task 3.3's binding decision).
 //
 // The returned storeClose MUST be deferred by the caller: eventqueue.Queue owns
 // no Close of its own (Store is an injected seam), so the file handle beneath it
@@ -78,6 +83,10 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 		_ = store.Close()
 		return nil, nil, nil, nil, fmt.Errorf("construct metrics emitter: %w", err)
 	}
+	// Wire the same emitter into ProduceTick's pull-source failure retry hook
+	// (INV-FAIL-3, register gap R21 / bead pg2-00jpn) — the remaining seam
+	// discover.WithSourceFailureObserver's doc left for a follow-on to close.
+	o.SourceFailureObserver = emitter
 	// ring is the dispatch-outcome activity buffer (Task 3.4): a SECOND
 	// eventqueue.Observer, fanned out alongside emitter at this one
 	// construction site rather than folded into a new composite-observer

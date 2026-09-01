@@ -2,18 +2,25 @@ package main
 
 import (
 	"context"
+	"errors"
 	"os"
 	"reflect"
 	"testing"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
+
 	"github.com/phillipgreenii/pr-pool/internal/activity"
+	"github.com/phillipgreenii/pr-pool/internal/backoff"
 	"github.com/phillipgreenii/pr-pool/internal/config"
 	"github.com/phillipgreenii/pr-pool/internal/core"
 	"github.com/phillipgreenii/pr-pool/internal/dtest"
 	"github.com/phillipgreenii/pr-pool/internal/event"
 	"github.com/phillipgreenii/pr-pool/internal/eventqueue"
 	"github.com/phillipgreenii/pr-pool/internal/item"
+	"github.com/phillipgreenii/pr-pool/internal/metrics"
 	"github.com/phillipgreenii/pr-pool/internal/orchestrator"
 	"github.com/phillipgreenii/pr-pool/internal/query"
 	"github.com/phillipgreenii/pr-pool/internal/roles"
@@ -205,6 +212,99 @@ func TestFanOutObserver_OnDispatchFailureCallsBoth(t *testing.T) {
 	}
 	if !reflect.DeepEqual(b.dispatchFailed, []string{"review-requested"}) {
 		t.Fatalf("b.dispatchFailed = %v, want [review-requested]", b.dispatchFailed)
+	}
+}
+
+// flakySourceQuery is a minimal pull-source query.Query stand-in (mirrors
+// internal/discover's own unexported flakyQuery, copied here since that one is
+// package-private, the same convention selTestQuery above already follows):
+// it fails its first failTimes Run calls, then succeeds. calls counts every
+// Run invocation via a shared pointer so it survives Source.Query's by-value
+// interface storage.
+type flakySourceQuery struct {
+	query.Meta
+	failTimes int
+	calls     *int
+}
+
+func (f flakySourceQuery) Validate() error        { return nil }
+func (f flakySourceQuery) BackingCommand() string { return "" }
+func (f flakySourceQuery) Run(context.Context, query.Env) ([]event.Event, error) {
+	*f.calls++
+	if *f.calls <= f.failTimes {
+		return nil, errors.New("source unavailable")
+	}
+	return nil, nil
+}
+
+// TestBootCore_wiresMetricsEmitterAsProduceTickSourceFailureObserver proves
+// the production wiring bootCore now performs (INV-FAIL-3, register gap R21 /
+// bead pg2-00jpn): a pull-source query that fails and retries drives the SAME
+// metrics.Emitter bootCore constructs, via o.SourceFailureObserver threaded
+// through Orchestrator.ProduceTick's discover.Produce call — so
+// MetricSourceFailures actually increments in the running binary, closing the
+// gap where source failures were recorded to logs only (discover.go's
+// runAndEnqueue Warn line existed; nothing fed its metrics half).
+func TestBootCore_wiresMetricsEmitterAsProduceTickSourceFailureObserver(t *testing.T) {
+	reader := sdkmetric.NewManualReader()
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	calls := 0
+	cfg := config.Config{
+		LogDir:        shortDir(t), // AF_UNIX path length cap; see shortDir's doc (ingest_event_test.go)
+		MeterProvider: mp,
+		Queries: query.SourceSet{
+			{Name: "flaky-src", Query: flakySourceQuery{
+				Meta: query.Meta{
+					EmitTypes: []string{"t1"},
+					FB: query.FailureBackoff{
+						Policy:  backoff.Policy{Initial: time.Millisecond, Factor: 2, Max: time.Millisecond},
+						Retries: 1,
+					},
+				},
+				failTimes: 1, // fails once, succeeds on the 2nd Run
+				calls:     &calls,
+			}},
+		},
+	}
+	o := &orchestrator.Orchestrator{Cfg: cfg}
+	ctx := context.Background()
+	svc, q, _, storeClose, err := bootCore(ctx, cfg, o)
+	if err != nil {
+		t.Fatalf("bootCore: %v", err)
+	}
+	defer func() { _ = storeClose() }()
+	defer func() { _ = svc.Close() }()
+
+	if err := o.ProduceTick(ctx, q); err != nil {
+		t.Fatalf("ProduceTick: %v", err)
+	}
+	if calls != 2 {
+		t.Fatalf("Run was called %d times, want 2 (1 failure + 1 success)", calls)
+	}
+
+	var rm metricdata.ResourceMetrics
+	if err := reader.Collect(ctx, &rm); err != nil {
+		t.Fatalf("collect: %v", err)
+	}
+	got := int64(-1)
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			if m.Name != metrics.MetricSourceFailures {
+				continue
+			}
+			s, ok := m.Data.(metricdata.Sum[int64])
+			if !ok {
+				continue
+			}
+			for _, dp := range s.DataPoints {
+				if v, present := dp.Attributes.Value(attribute.Key("source")); present && v.AsString() == "flaky-src" {
+					got = dp.Value
+				}
+			}
+		}
+	}
+	if got != 1 {
+		t.Fatalf("%s{source=flaky-src} = %d, want 1 (bootCore must wire the emitter as o.SourceFailureObserver so ProduceTick's retry reaches it)", metrics.MetricSourceFailures, got)
 	}
 }
 
