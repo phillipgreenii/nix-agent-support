@@ -89,17 +89,26 @@ add_worktree() {
 }
 
 @test "default run: prints the same facts-block shape integrate-branch-support prints" {
-  run bash "$BIN" pg2-abcde
+  # NOTE: captured via command substitution (stdout only), not bats' `run`
+  # -- `run` merges stdout+stderr into $output, and wtnew.sh deliberately
+  # writes its own progress/diagnostic notes to stderr (git worktree add's
+  # chatter, the pre-commit-config link status) so stdout carries ONLY the
+  # facts-block JSON, exactly like integrate-branch-support itself. Mixing
+  # stderr back in here would break the JSON parse.
+  stdout="$(bash "$BIN" pg2-abcde 2>/dev/null)"
+  status=$?
   [ "$status" -eq 0 ]
-  echo "$output" | jq -e 'has("strategy") and has("reason") and has("primary_branch") and has("canonical") and has("remote") and has("open_pr") and has("mr_bead")'
-  echo "$output" | jq -e '.primary_branch == "main"'
+  echo "$stdout" | jq -e 'has("strategy") and has("reason") and has("primary_branch") and has("canonical") and has("remote") and has("open_pr") and has("mr_bead")'
+  echo "$stdout" | jq -e '.primary_branch == "main"'
 }
 
 @test "facts block matches running integrate-branch-support directly inside the new worktree" {
-  run bash "$BIN" pg2-abcde
+  # Same stdout-only capture rationale as the previous test.
+  stdout="$(bash "$BIN" pg2-abcde 2>/dev/null)"
+  status=$?
   [ "$status" -eq 0 ]
   direct="$(cd "$TEST_DIR/.worktrees/pg2-abcde" && integrate-branch-support)"
-  [ "$output" = "$direct" ]
+  [ "$stdout" = "$direct" ]
 }
 
 @test "--branch overrides the default branch name" {
