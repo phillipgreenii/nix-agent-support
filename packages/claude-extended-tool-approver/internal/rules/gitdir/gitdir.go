@@ -280,7 +280,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		} else {
 			rootLeaves = cmdparse.RootLeavesOf(input)
 		}
-		if dir, matched, credentialCopyOut := bashAccessLeaves(leaves, scope, rootLeaves); matched {
+		if dir, matched, credentialCopyOut, envVarRedirect := bashAccessLeaves(leaves, scope, rootLeaves); matched {
 			if dir == dirWrite && tempFixtureCarveOutApplies(leaves, input.CWD) {
 				// pg2-yoqsr R1-R6: every repo-locating operand this leaf carries
 				// resolves under a temporary root, so this is the disposable-
@@ -290,7 +290,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 				// after it decide, unchanged from today's non-.git traffic.
 				return hookio.NotApplicable()
 			}
-			return r.verdict(dir, credentialCopyOut)
+			return r.verdict(dir, credentialCopyOut, envVarRedirect)
 		}
 	case "Read":
 		path, err := input.FilePath()
@@ -298,7 +298,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 			return hookio.RuleResult{}, fmt.Errorf("git-directory: read file_path: %w", err)
 		}
 		if isGitMetadataPath(path) {
-			return r.verdict(dirRead, false)
+			return r.verdict(dirRead, false, false)
 		}
 	case "Write", "Edit", "MultiEdit", "Delete":
 		path, err := input.FilePath()
@@ -312,7 +312,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 				// root is a disposable fixture, not a real repository.
 				return hookio.NotApplicable()
 			}
-			return r.verdict(dirWrite, false)
+			return r.verdict(dirWrite, false, false)
 		}
 	case "Glob", "Grep":
 		path, err := input.SearchPath()
@@ -320,7 +320,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 			return hookio.RuleResult{}, fmt.Errorf("git-directory: read search path: %w", err)
 		}
 		if isGitMetadataPath(path) {
-			return r.verdict(dirRead, false)
+			return r.verdict(dirRead, false, false)
 		}
 	}
 	// No .git path anywhere in this call: not this rule's business, and the generic
@@ -343,15 +343,44 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 // that pass dirRead/dirWrite pass a constant false since neither of those
 // branches reads it. See isCredentialBearingGitPath's doc for what counts as
 // credential-bearing.
-func (r *Rule) verdict(d direction, credentialCopyOut bool) (hookio.RuleResult, error) {
+//
+// envVarRedirect (pg2-uejmb, identify-hook-misses census 2026-08-17..08-31)
+// is consulted ONLY in the dirWrite case, to pick a MORE SPECIFIC reason for
+// one sub-shape of it: a leaf that bound one of the five canonical
+// repo-locating env vars (GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE/
+// GIT_COMMON_DIR/GIT_OBJECT_DIRECTORY) to a bare-repo-shaped value — see
+// bashAccessLeaves' CanonicalRepoLocatingEnvVars branch. The DECISION is
+// unchanged either way (still a hard Reject, still relaxed only by
+// tempFixtureCarveOutApplies) — this affects ONLY the Reason text. It matters
+// because the generic write-refusal reason below ("modify it through git
+// commands only") is actively MISLEADING for this shape: 17 corpus rows
+// measured over the census window were ALL a `git` command already —
+// `GIT_WORK_TREE=<repo> git -C <repo> worktree list`,
+// `GIT_DIR=... git rev-parse --git-dir`, `git config --get core.worktree`,
+// `git status --porcelain` — every one read-only, every one ground-truth
+// `approved`, telling the caller to do the ONE thing it was already doing.
+// The four callers that pass dirRead/dirCopyOut/the Read/Write/Glob/Grep
+// dirWrite case pass a constant false since none of them can reach this
+// shape (it is Bash-only: the env var binding is a shell construct).
+func (r *Rule) verdict(d direction, credentialCopyOut bool, envVarRedirect bool) (hookio.RuleResult, error) {
 	switch d {
 	case dirWrite:
+		reason := "refusing to write git metadata under .git/ directly — modify it through git commands only " +
+			"(permitted only when the effective git directory resolves under a temporary root — see " +
+			"docs/adr/0059-ceta-temp-repo-carve-out.md in phillipgreenii-nix-agent-support)"
+		if envVarRedirect {
+			reason = "refusing to redirect git's effective repository via GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE/" +
+				"GIT_COMMON_DIR/GIT_OBJECT_DIRECTORY — refused regardless of the git subcommand that follows, " +
+				"even a read like `git status`, `git worktree list` or `git config --get` " +
+				"(permitted only when the effective git directory resolves under a temporary root — see " +
+				"docs/adr/0059-ceta-temp-repo-carve-out.md in phillipgreenii-nix-agent-support); " +
+				"to point git at a specific directory without tripping this guard, use `git -C <path> <subcommand>` " +
+				"instead of the env-var redirect"
+		}
 		return hookio.RuleResult{
 			Decision: hookio.Reject,
-			Reason: "refusing to write git metadata under .git/ directly — modify it through git commands only " +
-				"(permitted only when the effective git directory resolves under a temporary root — see " +
-				"docs/adr/0059-ceta-temp-repo-carve-out.md in phillipgreenii-nix-agent-support)",
-			Module: r.Name(),
+			Reason:   reason,
+			Module:   r.Name(),
 		}, nil
 	case dirCopyOut:
 		if !credentialCopyOut {
@@ -379,13 +408,13 @@ func (r *Rule) verdict(d direction, credentialCopyOut bool) (hookio.RuleResult, 
 // pipeScope fall back to lazily parsing scopeText on first use — exactly this
 // function's behaviour before ADR 0039 step 3.
 //
-// The third value bashAccessLeaves returns (credentialCopyOut, pg2-pcm1m) is
-// deliberately dropped here: every existing caller of bashAccess wants only
-// the direction/matched pair, and Evaluate — the one caller that needs the
-// credential flag to pick verdict()'s dirCopyOut branch — calls
-// bashAccessLeaves directly instead.
+// The third and fourth values bashAccessLeaves returns (credentialCopyOut,
+// pg2-pcm1m; envVarRedirect, pg2-uejmb) are deliberately dropped here: every
+// existing caller of bashAccess wants only the direction/matched pair, and
+// Evaluate — the one caller that needs either flag to pick verdict()'s
+// dirCopyOut/dirWrite reason — calls bashAccessLeaves directly instead.
 func bashAccess(leafText, scopeText string) (direction, bool) {
-	dir, matched, _ := bashAccessLeaves(cmdparse.Parse(leafText), scopeText, nil)
+	dir, matched, _, _ := bashAccessLeaves(cmdparse.Parse(leafText), scopeText, nil)
 	return dir, matched
 }
 
@@ -407,8 +436,15 @@ func bashAccess(leafText, scopeText string) (direction, bool) {
 // (credentialCopyOut is true from the `.git/config` match), and a leaf that
 // copies out only non-credential paths correctly carries credentialCopyOut
 // false through to verdict().
-func bashAccessLeaves(leaves []cmdparse.ParsedCommand, scopeText string, rootLeaves []cmdparse.ParsedCommand) (direction, bool, bool) {
-	dir, matched, credentialCopyOut := dirRead, false, false
+//
+// The fourth return, envVarRedirect (pg2-uejmb), is true iff at least one
+// EnvVars match reached this function's CanonicalRepoLocatingEnvVars case
+// below (a bare-repo-shaped GIT_DIR/GIT_WORK_TREE/… binding). It exists only
+// to let verdict() choose a more specific dirWrite reason for that shape —
+// see verdict's own doc — and does not affect dir/matched/credentialCopyOut
+// at all.
+func bashAccessLeaves(leaves []cmdparse.ParsedCommand, scopeText string, rootLeaves []cmdparse.ParsedCommand) (direction, bool, bool, bool) {
+	dir, matched, credentialCopyOut, envVarRedirect := dirRead, false, false, false
 	note := func(d direction, path string) {
 		dir = worse(dir, d)
 		matched = true
@@ -477,11 +513,12 @@ func bashAccessLeaves(leaves []cmdparse.ParsedCommand, scopeText string, rootLea
 				// binding — see Evaluate's carve-out check (temproot.Under) for
 				// the ONLY thing that relaxes this: every repo-locating operand
 				// on this leaf resolving under a temporary root.
+				envVarRedirect = true
 				note(dirWrite, "")
 			}
 		}
 	}
-	return dir, matched, credentialCopyOut
+	return dir, matched, credentialCopyOut, envVarRedirect
 }
 
 // tempFixtureCarveOutApplies implements pg2-yoqsr's R1-R6 temp-root
