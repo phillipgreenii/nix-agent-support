@@ -53,6 +53,22 @@ var alwaysSafe = map[string]bool{
 	"env": true, "printenv": true, "id": true, "whoami": true,
 	"date": true, "uname": true, "hostname": true, "uptime": true, "pwd": true, "cd": true,
 	"sw_vers": true,
+	// set (pg2-uejmb): toggles shell OPTIONS (-e/-u/-o pipefail/-x/+H/…) or
+	// positional parameters (`set -- a b c`) — zero filesystem/network access,
+	// same class as read/break/continue below. NOT the same risk family as
+	// `declare`/`typeset` (deliberately excluded above, pg2-c2non): those are
+	// NAME=VALUE assignment builtins whose assignments stay in Args rather
+	// than being lifted to EnvVars, bypassing the env-var injector guard.
+	// Bash's `set` has no such NAME=VALUE assignment form at all (that is a
+	// csh-ism, not bash/POSIX sh) — there is no assignment for the injector
+	// guard to miss. Bare `set` (no args) lists all shell vars/functions,
+	// exactly the same exposure `env`/`printenv` above already carry
+	// unconditionally, so this does not raise the bar those two already set.
+	// Root cause of a real corpus row (pg2-uejmb, identify-hook-misses Step 5,
+	// asks.db row 453778): a `set -e` preamble leaf had no rule claim it,
+	// dragging the whole compound command to abstain and on to an auto-mode
+	// classifier denial for an otherwise-safe `bd ready --claim` call.
+	"set": true,
 	// macOS system tools (read-only inspection)
 	"sfltool": true, "plutil": true, "system_profiler": true, "launchctl": true,
 	"claude-extended-tool-approver": true, "claude-pretool-hook": true,

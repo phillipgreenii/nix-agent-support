@@ -210,6 +210,38 @@ func TestSafecmds_Bgcheck_Approve(t *testing.T) {
 	}
 }
 
+// TestSafecmds_Set_Approve pins `set`'s membership in the alwaysSafe set
+// (pg2-uejmb, root-caused from a real corpus row where a `set -e` preamble
+// leaf had no rule claim it, dragging an otherwise-safe compound command to
+// abstain and on to an auto-mode classifier denial). Unlike declare/typeset
+// (deliberately excluded, pg2-c2non), bash's `set` has no NAME=VALUE
+// assignment form, so there is no env-var-injector-guard bypass to reopen.
+func TestSafecmds_Set_Approve(t *testing.T) {
+	pe := patheval.New("/home/user/project")
+	r := New(pe)
+	commands := []string{
+		"set",
+		"set -e",
+		"set -eu",
+		"set -euo pipefail",
+		"set -x",
+		"set +H",
+		"set --",
+		"set -- a b c",
+	}
+	for _, cmd := range commands {
+		input := &hookio.HookInput{
+			ToolName:  "Bash",
+			CWD:       "/home/user/project",
+			ToolInput: mustJSON(map[string]string{"command": cmd}),
+		}
+		got := hookio.Verdict(r.Evaluate(input))
+		if got.Decision != hookio.Approve {
+			t.Errorf("cmd %q: got %s (%s), want approve (set is alwaysSafe)", cmd, got.Decision, got.Reason)
+		}
+	}
+}
+
 // TestSafecmds_Bgrun_NotSafe confirms bgrun — the launcher bgcheck probes,
 // which unwraps at the cmdparse layer instead (commandRunnerPrefixes) — is
 // deliberately absent from every map this rule consults. If it were added
