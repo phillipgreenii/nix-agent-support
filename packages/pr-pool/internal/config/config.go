@@ -17,6 +17,9 @@ import (
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/metric/noop"
+
 	"github.com/phillipgreenii/pr-pool/internal/backoff"
 	"github.com/phillipgreenii/pr-pool/internal/budget"
 	"github.com/phillipgreenii/pr-pool/internal/query"
@@ -115,6 +118,28 @@ type Config struct {
 	// it exists so the probe is substitutable, since a unit test must not depend on
 	// which binaries the machine running it happens to have installed.
 	Locator CommandLocator
+
+	// MeterProvider is the OTel MeterProvider binding seam (INV-OBS-1: the core
+	// stays unaware of any concrete monitoring backend — a deployment binds a
+	// real one here). nil selects the package default: the OTel no-op provider,
+	// CHOSEN BY CONFIG rather than hardcoded in code (Task 3.3 binding
+	// decision). It is NOT a config-file key, the same posture Locator already
+	// takes for the backing-command probe: which monitoring backend to use is a
+	// deployment/runtime binding decision, not something declared in
+	// .pr-pool/config.toml.
+	MeterProvider metric.MeterProvider
+}
+
+// Meter returns the Config's MeterProvider, defaulting to the OTel no-op
+// provider when unset (mirrors locator()'s pattern for CommandLocator).
+// Exported — unlike locator() — because cmd/pr-pool's bootCore (a different
+// package) is where the seam is actually resolved into the provider `New`
+// wires into the metrics Emitter and the queue/core observer.
+func (c Config) Meter() metric.MeterProvider {
+	if c.MeterProvider != nil {
+		return c.MeterProvider
+	}
+	return noop.NewMeterProvider()
 }
 
 // CCPoolCommand is the ccpool binary a ccpool-type handler runs through

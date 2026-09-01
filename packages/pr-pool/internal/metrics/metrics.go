@@ -1,22 +1,37 @@
 // Package metrics emits these members of the core's declared metric catalog
 // (INV-OBS-1), each named by INTF-MON, the interface that carries the catalog:
 // queue depth (gauge, per type), failure rate (counter, per DELIVERY-SIDE
-// failure class only — see RecordFailure), unconsumed-expired (counter, per
+// failure class — see RecordFailure), unconsumed-expired (counter, per
 // type — the "no event misses" signal, INV-DISP-3's
-// declared-but-inactive-this-run case), and unknown-type-rejected (counter,
+// declared-but-inactive-this-run case), unknown-type-rejected (counter,
 // per type — INV-DISP-3's unknown-to-the-configuration case, which that
-// invariant requires be recorded to logs AND metrics). OTel is the default
-// emission transport for metrics only (a neutral standard, not a mandated
-// backend — GOAL-MIN-1); the concrete sink is a deployment binding via
-// INTF-MON.
+// invariant requires be recorded to logs AND metrics), throughput (counter,
+// per type — events dispatched and accepted), backlog (gauge — a scalar
+// sum across all types, distinct from the per-type queue-depth gauge),
+// liveness (gauge, daemon-mode only — see WithLiveness), dispatch-latency
+// (the catalog's one histogram), source-failures (counter, per source —
+// INV-FAIL-3's pull-source failure backoff, the metrics half of a log-only
+// path), and deduped (counter, per type — INV-EVT-3's duplicate-id
+// visibility). Ten members total (Task 3.3, register gaps R6/pg2-zqpxj,
+// R21/pg2-00jpn, and pg2-cz31d). OTel is the default emission transport for
+// metrics only (a neutral standard, not a mandated backend — GOAL-MIN-1);
+// the concrete sink is a deployment binding via INTF-MON.
 //
 // The Emitter implements eventqueue.Observer, so the queue drives the metrics
 // end to end: unconsumed-expired fires from the queue's expiry-sweep path, the
-// depth gauge reads the queue's live per-type depth on collect, and failure
-// rate fires from the queue's Dispatch path (OnDeclined, fed from a pre-accept
-// decline or a dispatch failure — the two delivery-side cases INV-FAIL-1
-// covers). It also implements core.IngestObserver, so the core's ingest path
-// drives unknown-type-rejected.
+// depth and backlog gauges read the queue's live per-type depth on collect, and
+// failure rate fires from the queue's Dispatch path (OnDeclined, fed from a
+// pre-accept decline — see RecordFailure/FailureClassDeclined). It also
+// implements core.IngestObserver, so the core's ingest path drives
+// unknown-type-rejected and deduped, and discover.SourceFailureObserver, so
+// discover's pull-source retry path drives source-failures.
+//
+// Throughput, dispatch-latency, and liveness are BUILT and EXPOSED by this
+// task (registered on the catalog, with an exported Record method / option)
+// but a live production call site for each is a LATER task's concern — see
+// RecordThroughput's doc for why. That is this task's own stated scope: build
+// and expose the catalog; consuming or further wiring it is for the sibling
+// tasks that read this Emitter's exported counters.
 //
 // Operator scope-cut (2026-07-28): pr-pool measures delivery-side failures
 // ONLY. Everything post-accept (retryable / resource-limit / critical, and
@@ -25,8 +40,9 @@
 // internal/core's package doc) and pr-pool builds no replacement for it.
 //
 // This is bead pg2-hvlyj.18 (plan item 5.6), extended by pg2-f3mcb.4 (the
-// delivery-side failure wiring above). Its statement coverage is gated at
-// >=80% by the `pr-pool-go-tests` flake check (bead pg2-hvlyj.19).
+// delivery-side failure wiring above) and by Task 3.3 (the six new catalog
+// members and the second failure class above). Its statement coverage is
+// gated at >=80% by the `pr-pool-go-tests` flake check (bead pg2-hvlyj.19).
 package metrics
 
 import (
@@ -38,7 +54,7 @@ import (
 	"github.com/phillipgreenii/pr-pool/internal/eventqueue"
 )
 
-// Metric names (the declared catalog, INV-OBS-1).
+// Metric names (the declared catalog, INV-OBS-1; ten members, Task 3.3).
 const (
 	MetricQueueDepth        = "pr_pool.queue_depth"
 	MetricFailures          = "pr_pool.failures"
@@ -51,36 +67,113 @@ const (
 	// MetricUnconsumedExpired, which carries the OTHER case (a binding declared but
 	// merely inactive this run) plus the ordinary miss.
 	MetricUnknownTypeRejected = "pr_pool.unknown_type_rejected"
+	// MetricThroughput counts events dispatched and accepted, per type
+	// (STORY-OBS-1's "tell a busy system from a stalled one"). See
+	// RecordThroughput's doc for why this task builds and exposes it without
+	// also wiring a live production call site.
+	MetricThroughput = "pr_pool.throughput"
+	// MetricBacklog is a scalar sum(DepthByType()) across every type — distinct
+	// from the existing per-type MetricQueueDepth gauge (Task 3.3 binding
+	// decision).
+	MetricBacklog = "pr_pool.backlog"
+	// MetricLiveness reports 1 while the daemon's last tick is within its
+	// liveness window, else 0. Registered ONLY when New is given WithLiveness
+	// (daemon-mode only — Task 3.3 binding decision: drain-and-exit never
+	// registers this observable at all, not merely never observes it true).
+	MetricLiveness = "pr_pool.liveness"
+	// MetricDispatchLatency is the catalog's one Histogram: the time from an
+	// event's enqueue to a settling dispatch outcome, in milliseconds. See
+	// RecordDispatchLatency's doc for why this task builds and exposes it
+	// without also wiring a live production call site.
+	MetricDispatchLatency = "pr_pool.dispatch_latency"
+	// MetricSourceFailures counts a pull-source query failure, per source —
+	// the metrics half of INV-FAIL-3's "reported to logs and metrics, never a
+	// silently idle pass" (register gap R21, bead pg2-00jpn). Fed by
+	// OnSourceFailure, which discover.go's runAndEnqueue calls (via the
+	// SourceFailureObserver seam) on every retry after a pull-source failure,
+	// alongside the log-only Warn that already existed there.
+	MetricSourceFailures = "pr_pool.source_failures"
+	// MetricDeduped counts a duplicate event id the core absorbed because
+	// de-duplication already covers it (INV-EVT-3, bead pg2-cz31d), per type.
+	// It is a BRAND-NEW counter (not a promotion of any pre-existing field —
+	// no such field exists in this repo). Fed by OnDeduped, which
+	// internal/core/ingest.go's handleIngestEvent calls (via the extended
+	// core.IngestObserver contract) on its existing res == eventqueue.Deduped
+	// branch, alongside the Debug log that already existed there.
+	MetricDeduped = "pr_pool.deduped"
 )
 
-// FailureClassDeclined is the only failure class this Emitter emits today: a
-// PRE-ACCEPT decline or an outright dispatch failure — the two delivery-side
-// cases INV-FAIL-1 covers, both surfaced through eventqueue.Observer.OnDeclined
-// (eventqueue.Queue.Dispatch's Offer()==false branch). The Observer boundary
-// does not carry enough information to tell a graceful "busy" decline apart
-// from an outright error, so this ONE class is deliberately what is knowable
-// there — inventing a finer-grained split the interface cannot support would
-// misrepresent the signal, not sharpen it.
+// FailureClassDeclined is fed from eventqueue.Observer.OnDeclined
+// (eventqueue.Queue.Dispatch's Offer()==false branch): a pre-accept decline —
+// a graceful "busy" decline or an unavailable self-report — the one
+// delivery-side class the Observer boundary can currently tell apart from an
+// outright dispatch failure (INV-FAIL-1).
 const FailureClassDeclined = "declined"
 
+// FailureClassDispatchFail is the catalog's second delivery-side failure
+// class (INV-OBS-1): an outright dispatch failure where pr-pool could not
+// hand the event over at all, distinct from a graceful pre-accept decline
+// (FailureClassDeclined). RecordFailure accepts it like any other class, but
+// — recorded here rather than guessed at — no production call site feeds it
+// as of this task: the Task 3.3 binding decision says to feed it from
+// "Dispatch's error return", but eventqueue.Queue.Dispatch returns only
+// `(accepted int)` and eventqueue.Listener.Offer returns only `bool` — no
+// error-returning path exists anywhere in Dispatch's offer/accept flow today.
+// Wiring a real call site needs an eventqueue-level interface change (adding
+// an error-returning outcome Dispatch or Offer could surface), which is
+// outside this task's Files scope (internal/eventqueue/queue.go is not
+// listed) and outside a Task-3.3-sized change generally. Docket design
+// (2026-09-01) carries the same gap at its Task 3.3 Step 4, so this is a
+// design-level gap, not something this packet can resolve by guessing across
+// the eventqueue.Observer contract seam.
+const FailureClassDispatchFail = "dispatch-failure"
+
 // Emitter emits the core's declared metric catalog over an OTel meter. It
-// implements eventqueue.Observer (the queue's own hooks) and core.IngestObserver
-// (the ingest-time conditions), so the two paths that produce metrics both drive
-// one emitter.
+// implements eventqueue.Observer (the queue's own hooks), core.IngestObserver
+// (the ingest-time conditions), and discover.SourceFailureObserver (the
+// pull-source retry hook), so every path that produces metrics drives one
+// emitter.
 type Emitter struct {
-	failures    metric.Int64Counter
-	unconsumed  metric.Int64Counter
-	unknownType metric.Int64Counter
+	failures        metric.Int64Counter
+	unconsumed      metric.Int64Counter
+	unknownType     metric.Int64Counter
+	throughput      metric.Int64Counter
+	sourceFailures  metric.Int64Counter
+	deduped         metric.Int64Counter
+	dispatchLatency metric.Float64Histogram
 }
 
 // Ensure the queue can drive it.
 var _ eventqueue.Observer = (*Emitter)(nil)
 
+// Option configures an optional catalog member at construction time
+// (functional options, so New's existing two-argument call sites need no
+// change).
+type Option func(*options)
+
+type options struct {
+	isLive func() bool
+}
+
+// WithLiveness registers MetricLiveness, an ObservableGauge reporting 1 while
+// isLive returns true, else 0. Per the Task 3.3 binding decision,
+// MetricLiveness is DAEMON-MODE ONLY: a drain-and-exit caller MUST NOT pass
+// this option, so New never registers the instrument there at all — skipping
+// registration, not merely never observing true, is the letter of that
+// decision.
+func WithLiveness(isLive func() bool) Option {
+	return func(o *options) { o.isLive = isLive }
+}
+
 // New registers the instruments above on a meter from mp and returns an Emitter.
 // depthFn supplies the current per-type queue depth (typically queue.DepthByType)
 // — the observable gauge reads it on each collect, so the gauge tracks
 // enqueue/accept/expire without the queue pushing updates.
-func New(mp metric.MeterProvider, depthFn func() map[string]int) (*Emitter, error) {
+func New(mp metric.MeterProvider, depthFn func() map[string]int, opts ...Option) (*Emitter, error) {
+	var cfg options
+	for _, opt := range opts {
+		opt(&cfg)
+	}
 	m := mp.Meter("github.com/phillipgreenii/pr-pool")
 
 	failures, err := m.Int64Counter(
@@ -107,6 +200,39 @@ func New(mp metric.MeterProvider, depthFn func() map[string]int) (*Emitter, erro
 	if err != nil {
 		return nil, err
 	}
+	throughput, err := m.Int64Counter(
+		MetricThroughput,
+		metric.WithUnit("{event}"),
+		metric.WithDescription("events dispatched and accepted, per type (STORY-OBS-1)"),
+	)
+	if err != nil {
+		return nil, err
+	}
+	sourceFailures, err := m.Int64Counter(
+		MetricSourceFailures,
+		metric.WithUnit("{failure}"),
+		metric.WithDescription("pull-source query failures reported to logs and metrics, per source (INV-FAIL-3)"),
+	)
+	if err != nil {
+		return nil, err
+	}
+	deduped, err := m.Int64Counter(
+		MetricDeduped,
+		metric.WithUnit("{event}"),
+		metric.WithDescription("duplicate event ids the core absorbed because de-duplication already covers them, per type (INV-EVT-3)"),
+	)
+	if err != nil {
+		return nil, err
+	}
+	dispatchLatency, err := m.Float64Histogram(
+		MetricDispatchLatency,
+		metric.WithUnit("ms"),
+		metric.WithDescription("time from an event's enqueue to a settling dispatch outcome, in milliseconds (STORY-OBS-1)"),
+		metric.WithExplicitBucketBoundaries(1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000),
+	)
+	if err != nil {
+		return nil, err
+	}
 	if _, err := m.Int64ObservableGauge(
 		MetricQueueDepth,
 		metric.WithUnit("{event}"),
@@ -120,8 +246,48 @@ func New(mp metric.MeterProvider, depthFn func() map[string]int) (*Emitter, erro
 	); err != nil {
 		return nil, err
 	}
+	if _, err := m.Int64ObservableGauge(
+		MetricBacklog,
+		metric.WithUnit("{event}"),
+		metric.WithDescription("retained non-expired events across every type, a scalar distinct from the per-type MetricQueueDepth (STORY-OBS-1)"),
+		metric.WithInt64Callback(func(_ context.Context, o metric.Int64Observer) error {
+			total := 0
+			for _, depth := range depthFn() {
+				total += depth
+			}
+			o.Observe(int64(total))
+			return nil
+		}),
+	); err != nil {
+		return nil, err
+	}
+	if cfg.isLive != nil {
+		if _, err := m.Int64ObservableGauge(
+			MetricLiveness,
+			metric.WithUnit("{liveness}"),
+			metric.WithDescription("1 while the daemon's last tick is within its liveness window, else 0; daemon-mode only — drain-and-exit never registers this observable (STORY-OBS-1)"),
+			metric.WithInt64Callback(func(_ context.Context, o metric.Int64Observer) error {
+				v := int64(0)
+				if cfg.isLive() {
+					v = 1
+				}
+				o.Observe(v)
+				return nil
+			}),
+		); err != nil {
+			return nil, err
+		}
+	}
 
-	return &Emitter{failures: failures, unconsumed: unconsumed, unknownType: unknownType}, nil
+	return &Emitter{
+		failures:        failures,
+		unconsumed:      unconsumed,
+		unknownType:     unknownType,
+		throughput:      throughput,
+		sourceFailures:  sourceFailures,
+		deduped:         deduped,
+		dispatchLatency: dispatchLatency,
+	}, nil
 }
 
 // OnEnqueue / OnAccept are no-ops: queue depth is observed via the gauge
@@ -174,6 +340,52 @@ func (e *Emitter) OnUnknownTypeRejected(evtType string) {
 // post-accept outcome.
 func (e *Emitter) RecordFailure(class string) {
 	e.failures.Add(context.Background(), 1, metric.WithAttributes(attribute.String("class", class)))
+}
+
+// OnSourceFailure implements discover.SourceFailureObserver (the interface is
+// defined in internal/discover to keep the dependency direction the queue's
+// own Observer already uses: the producer side declares the hook, metrics
+// implements it). It increments the source-failures counter for a pull
+// source whose query failed and is about to retry after backoff
+// (INV-FAIL-3, register gap R21 / bead pg2-00jpn) — the metrics half of the
+// log-only Warn line discover.go's runAndEnqueue already writes at that same
+// retry point.
+func (e *Emitter) OnSourceFailure(source string) {
+	e.sourceFailures.Add(context.Background(), 1, metric.WithAttributes(attribute.String("source", source)))
+}
+
+// OnDeduped implements the extended core.IngestObserver contract. It
+// increments the deduped counter, per type, when ingest-event absorbs a
+// duplicate id still retained in the queue (INV-EVT-3, bead pg2-cz31d) — the
+// metrics half of the Debug log line internal/core/ingest.go's
+// handleIngestEvent already writes at that same res == eventqueue.Deduped
+// branch.
+func (e *Emitter) OnDeduped(evtType string) {
+	e.deduped.Add(context.Background(), 1, metric.WithAttributes(attribute.String("type", evtType)))
+}
+
+// RecordThroughput increments the throughput counter, per type, for an event
+// dispatched and accepted (STORY-OBS-1). Exported for direct/test use:
+// eventqueue.Observer.OnAccept's signature carries (eventID, listenerID)
+// only, not the event's type, so wiring this directly into that hook would
+// require changing the Observer interface — outside this task's Files scope.
+// This task's own stated scope is to build and expose the catalog; a live
+// call site (fed with the type from wherever it is actually known, e.g. once
+// a future task threads it through) is left to that later task, the same way
+// Task 3.5 is documented to read this Emitter's exported counters.
+func (e *Emitter) RecordThroughput(evtType string) {
+	e.throughput.Add(context.Background(), 1, metric.WithAttributes(attribute.String("type", evtType)))
+}
+
+// RecordDispatchLatency records the elapsed time, in milliseconds, from an
+// event's enqueue to a settling dispatch outcome (STORY-OBS-1) — the
+// catalog's one histogram. Exported for direct/test use; see
+// RecordThroughput's doc for why this task stops at building and exposing
+// the instrument rather than also wiring a live dispatch-timing call site
+// (measuring it would need per-event enqueue-time bookkeeping that is its
+// own design decision, not a byproduct of this task's Files).
+func (e *Emitter) RecordDispatchLatency(ms float64) {
+	e.dispatchLatency.Record(context.Background(), ms)
 }
 
 // Flush forces every metric reader registered on mp to collect and export

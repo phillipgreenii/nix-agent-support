@@ -49,10 +49,17 @@ func testBindings() Bindings {
 
 // recordingObserver captures the ingest conditions the core reports to metrics, so
 // a test can assert the condition was recorded and not merely logged.
-type recordingObserver struct{ unknownTypes []string }
+type recordingObserver struct {
+	unknownTypes []string
+	dedupedTypes []string
+}
 
 func (o *recordingObserver) OnUnknownTypeRejected(eventType string) {
 	o.unknownTypes = append(o.unknownTypes, eventType)
+}
+
+func (o *recordingObserver) OnDeduped(eventType string) {
+	o.dedupedTypes = append(o.dedupedTypes, eventType)
 }
 
 // startedService returns a service already in `started` WITHOUT a socket, so the
@@ -160,6 +167,43 @@ func TestIngestEvent_RejectsATypeNoConfiguredBindingDeclares(t *testing.T) {
 	}
 	if len(obs.unknownTypes) != 1 || obs.unknownTypes[0] != "nobody-declares-this" {
 		t.Fatalf("observed unknown types = %v, want the condition recorded once for nobody-declares-this", obs.unknownTypes)
+	}
+}
+
+// INV-EVT-3 (register gap bead pg2-cz31d): a re-emitted event id still
+// retained in the queue is absorbed as a duplicate — accepted (it is not an
+// error), but NOT a fresh append — and the observer is notified once, per
+// type, alongside the existing Debug log at that branch. Reuses oneEventRequest
+// (not a hand-rolled request): its expiresAt sits far in the future, which is
+// what keeps the event genuinely RETAINED (eventqueue.retainedLocked) for the
+// second send to actually hit the Deduped path rather than a born-expired
+// event's retire-and-re-append (which looks identical from the reply alone).
+// The first send is a fresh append (no OnDeduped call); the second, identical
+// id is the dedup this test asserts on.
+func TestIngestEvent_DedupedEventNotifiesObserver(t *testing.T) {
+	obs := &recordingObserver{}
+	svc := startedServiceWith(t, testBindings(), obs)
+
+	reply, code := serveIngest(t, svc, oneEventRequest)
+	if code != conformance.ExitOK {
+		t.Fatalf("first send: exit = %d, want %d; reply=%v", code, conformance.ExitOK, reply)
+	}
+	if len(obs.dedupedTypes) != 0 {
+		t.Fatalf("first (fresh) send must NOT notify OnDeduped: %v", obs.dedupedTypes)
+	}
+
+	reply, code = serveIngest(t, svc, oneEventRequest)
+	if code != conformance.ExitOK {
+		t.Fatalf("duplicate send: exit = %d, want %d (a duplicate is accepted, not an error); reply=%v", code, conformance.ExitOK, reply)
+	}
+	if reply["accepted"] != float64(1) {
+		t.Fatalf("duplicate send: accepted = %v, want 1", reply["accepted"])
+	}
+	if len(obs.dedupedTypes) != 1 || obs.dedupedTypes[0] != "review-requested" {
+		t.Fatalf("observed deduped types = %v, want exactly one call for review-requested", obs.dedupedTypes)
+	}
+	if depth := svc.Queue().DepthByType()["review-requested"]; depth != 1 {
+		t.Fatalf("depth = %d, want 1 (the duplicate must NOT double-append)", depth)
 	}
 }
 

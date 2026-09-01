@@ -169,7 +169,7 @@ func TestProduce_queryErrorPropagatesImmediatelyWithoutOptIn(t *testing.T) {
 			calls:     &calls,
 		}},
 	}
-	err := produce(context.Background(), query.Env{}, sources, newQueue(t), recordingSleep(&waits))
+	err := produce(context.Background(), query.Env{}, sources, newQueue(t), recordingSleep(&waits), nil)
 	if err == nil {
 		t.Fatal("a query error must still propagate without an opt-in")
 	}
@@ -204,8 +204,9 @@ func TestProduce_pullSourceRetriesThenSucceeds(t *testing.T) {
 	q := newQueue(t)
 	wk := newTestListener("worker", "work.ready")
 	q.Register(wk)
+	obs := &recordingSourceFailureObserver{}
 
-	err := produce(context.Background(), query.Env{}, sources, q, recordingSleep(&waits))
+	err := produce(context.Background(), query.Env{}, sources, q, recordingSleep(&waits), obs)
 	if err != nil {
 		t.Fatalf("failure must NOT propagate once a retry succeeds: %v", err)
 	}
@@ -214,6 +215,12 @@ func TestProduce_pullSourceRetriesThenSucceeds(t *testing.T) {
 	}
 	if !equalDurations(waits, []time.Duration{time.Second, 2 * time.Second}) {
 		t.Fatalf("waits = %v, want [1s 2s] (the configured backoff, growing per consecutive failure)", waits)
+	}
+	// MetricSourceFailures's feed point (register gap R21 / bead pg2-00jpn,
+	// INV-FAIL-3): the observer is notified once per retry attempt, alongside
+	// the existing log-only Warn — same cadence as `waits` above.
+	if want := []string{"flaky", "flaky"}; !equalStrings(obs.sources, want) {
+		t.Fatalf("observer.sources = %v, want %v (one OnSourceFailure call per retry attempt)", obs.sources, want)
 	}
 	q.Dispatch()
 	if len(wk.offered) != 1 || ItemFromPayload(wk.offered[0].Payload).ID != "wk-1" {
@@ -241,7 +248,7 @@ func TestProduce_pullSourcePropagatesAfterRetriesExhausted(t *testing.T) {
 			calls:     &calls,
 		}},
 	}
-	err := produce(context.Background(), query.Env{}, sources, newQueue(t), recordingSleep(&waits))
+	err := produce(context.Background(), query.Env{}, sources, newQueue(t), recordingSleep(&waits), nil)
 	if err == nil || !strings.Contains(err.Error(), sentinel.Error()) {
 		t.Fatalf("error = %v, want it to wrap %q once retries are exhausted", err, sentinel)
 	}
@@ -263,6 +270,58 @@ func equalDurations(a, b []time.Duration) bool {
 		}
 	}
 	return true
+}
+
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// recordingSourceFailureObserver is a SourceFailureObserver test double: it
+// records every source name OnSourceFailure was called with, in call order.
+type recordingSourceFailureObserver struct {
+	sources []string
+}
+
+func (r *recordingSourceFailureObserver) OnSourceFailure(source string) {
+	r.sources = append(r.sources, source)
+}
+
+// TestProduce_WithSourceFailureObserverOption proves the exported Produce
+// entry point (not just the private produce helper above) threads
+// WithSourceFailureObserver through end to end — existing 4-arg callers keep
+// compiling unchanged, and a caller that opts in gets notified.
+func TestProduce_WithSourceFailureObserverOption(t *testing.T) {
+	calls := 0
+	sources := query.SourceSet{
+		{Name: "flaky", Query: flakyQuery{
+			Meta: query.Meta{
+				EmitTypes: []string{"work.ready"},
+				FB: query.FailureBackoff{
+					Policy:  backoff.Policy{Initial: time.Millisecond, Factor: 1, Max: time.Millisecond},
+					Retries: 1,
+				},
+			},
+			failTimes: 1,
+			events:    []event.Event{itemEvt("work.ready", "wk-1")},
+			calls:     &calls,
+		}},
+	}
+	obs := &recordingSourceFailureObserver{}
+	err := Produce(context.Background(), query.Env{}, sources, newQueue(t), WithSourceFailureObserver(obs))
+	if err != nil {
+		t.Fatalf("Produce: %v", err)
+	}
+	if want := []string{"flaky"}; !equalStrings(obs.sources, want) {
+		t.Fatalf("observer.sources = %v, want %v", obs.sources, want)
+	}
 }
 
 func TestProduce_thresholdFiresOnlyWhenEnough(t *testing.T) {

@@ -8,6 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/metric/noop"
+
 	"github.com/phillipgreenii/pr-pool/internal/query"
 	"github.com/phillipgreenii/pr-pool/internal/roles"
 )
@@ -941,5 +944,35 @@ func TestLogDir_resolvesWithoutLoadingConfig(t *testing.T) {
 	}
 	if got, want := LogDir(), "/override/dir"; got != want {
 		t.Errorf("LogDir() with a broken config = %q, want %q", got, want)
+	}
+}
+
+// stubMeterProvider is a distinguishable MeterProvider double: it is not the
+// real no-op provider, so a test can prove Config.Meter() returned exactly
+// the value the deployment configured (mirrors locator()'s own defaulting
+// test posture for CommandLocator).
+type stubMeterProvider struct{ noop.MeterProvider }
+
+// Task 3.3 binding decision: the MeterProvider config default is unset =>
+// noop.NewMeterProvider(), CHOSEN BY CONFIG, not hardcoded in cmd/pr-pool.
+func TestConfig_Meter_defaultsToNoop(t *testing.T) {
+	var c Config
+	mp := c.Meter()
+	if mp == nil {
+		t.Fatal("Meter() = nil, want the package default (noop) provider")
+	}
+	// noop.NewMeterProvider()'s Meter() always returns the same embedded no-op
+	// meter type regardless of scope name — proving the default is actually the
+	// no-op provider, not merely non-nil.
+	if _, ok := mp.Meter("any").(noop.Meter); !ok {
+		t.Fatalf("Meter() default = %T, want the OTel no-op provider", mp)
+	}
+}
+
+func TestConfig_Meter_returnsConfiguredProvider(t *testing.T) {
+	want := stubMeterProvider{}
+	c := Config{MeterProvider: want}
+	if got := c.Meter(); got != metric.MeterProvider(want) {
+		t.Fatalf("Meter() = %v, want the configured provider %v unchanged", got, want)
 	}
 }

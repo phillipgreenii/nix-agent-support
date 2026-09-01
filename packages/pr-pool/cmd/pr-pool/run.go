@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"go.opentelemetry.io/otel/metric"
-	"go.opentelemetry.io/otel/metric/noop"
 
 	"github.com/phillipgreenii/pr-pool/internal/beads"
 	"github.com/phillipgreenii/pr-pool/internal/ccpool"
@@ -46,9 +45,11 @@ const idleDrainTick = 500 * time.Millisecond
 // core.IngestObserver, matching internal/metrics/metrics_test.go's newHarness
 // circular-construction pattern: q is declared (as this function's named
 // return) before New(mp, depthFn) closes over it, then constructed for real
-// with WithObserver(emitter). mp defaults to the OTel no-op provider
-// (INV-OBS-1: core stays unaware of any concrete monitoring backend; binding a
-// real one is a deployment concern this function does not take on).
+// with WithObserver(emitter). mp is resolved from cfg.Meter(), which defaults
+// to the OTel no-op provider when cfg.MeterProvider is unset (INV-OBS-1: core
+// stays unaware of any concrete monitoring backend; binding a real one is a
+// deployment concern this function does not take on — it is chosen by
+// CONFIG, not hardcoded here, per Task 3.3's binding decision).
 //
 // The returned storeClose MUST be deferred by the caller: eventqueue.Queue owns
 // no Close of its own (Store is an injected seam), so the file handle beneath it
@@ -64,7 +65,7 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("open event queue: %w", err)
 	}
-	mp = noop.NewMeterProvider()
+	mp = cfg.Meter()
 	emitter, err := metrics.New(mp, func() map[string]int { return q.DepthByType() })
 	if err != nil {
 		_ = store.Close()

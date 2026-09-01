@@ -128,6 +128,11 @@ type IngestObserver interface {
 	// binding declares its `type` — INV-DISP-3's first case, which is an error to
 	// report and never a silent drop.
 	OnUnknownTypeRejected(eventType string)
+	// OnDeduped fires once per event id ingest-event absorbed as a duplicate
+	// still retained in the queue (INV-EVT-3, register gap bead pg2-cz31d) —
+	// the metrics half of the Debug log line handleIngestEvent already writes
+	// at that same res == eventqueue.Deduped branch.
+	OnDeduped(eventType string)
 }
 
 // noopObserver is what a Service without an Observer uses, so the ingest path
@@ -135,6 +140,7 @@ type IngestObserver interface {
 type noopObserver struct{}
 
 func (noopObserver) OnUnknownTypeRejected(string) {}
+func (noopObserver) OnDeduped(string)             {}
 
 // observer returns the Service's IngestObserver, defaulting to the no-op.
 func (s *Service) observer() IngestObserver {

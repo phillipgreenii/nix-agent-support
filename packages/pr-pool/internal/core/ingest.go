@@ -155,6 +155,7 @@ func (s *Service) handleIngestEvent(stdin io.Reader, stdout io.Writer) int {
 		}
 		if res == eventqueue.Deduped {
 			slog.Debug("core: ingest-event absorbed a duplicate event id", "trackingId", req.ID, "eventId", evt.ID)
+			s.observer().OnDeduped(evt.Type)
 		}
 		reply.Accepted++
 	}

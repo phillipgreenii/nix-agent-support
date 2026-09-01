@@ -3,6 +3,7 @@ package metrics
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 
 	"github.com/phillipgreenii/pr-pool/internal/core"
+	"github.com/phillipgreenii/pr-pool/internal/discover"
 	"github.com/phillipgreenii/pr-pool/internal/eventqueue"
 )
 
@@ -136,6 +138,224 @@ func TestInstrumentsRegistered(t *testing.T) {
 	// registration indirectly through the dedicated expiry test below.
 }
 
+// TestCatalogHasTenMembers is Task 3.3's red-first test (register gaps
+// R6/pg2-zqpxj, R21/pg2-00jpn, and pg2-cz31d): the catalog grows from 4 to 10
+// members. WithLiveness is supplied here to prove MetricLiveness CAN
+// register (the daemon-mode half of its binding decision) — see
+// TestLivenessNotRegisteredWithoutOption below for the drain-mode half.
+func TestCatalogHasTenMembers(t *testing.T) {
+	reader := sdkmetric.NewManualReader()
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	var q *eventqueue.Queue
+	emitter, err := New(mp, func() map[string]int { return q.DepthByType() }, WithLiveness(func() bool { return true }))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	q, err = eventqueue.New(eventqueue.NewMemStore(), eventqueue.WithObserver(emitter))
+	if err != nil {
+		t.Fatalf("eventqueue.New: %v", err)
+	}
+
+	// Drive one of each so every member has a recorded/observed data point —
+	// an unincremented counter or an ObservableGauge whose callback never
+	// calls Observe is ABSENT from Collect, not zero (see gaugeVal's doc).
+	emitter.RecordFailure(FailureClassDeclined)
+	emitter.RecordFailure(FailureClassDispatchFail)
+	emitter.OnUnconsumedExpired("t")
+	emitter.OnUnknownTypeRejected("t")
+	emitter.RecordThroughput("t")
+	emitter.OnSourceFailure("src")
+	emitter.OnDeduped("t")
+	emitter.RecordDispatchLatency(12.5)
+	if _, err := q.Enqueue(eventqueue.Event{ID: "e1", Type: "t", ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+
+	var rm metricdata.ResourceMetrics
+	if err := reader.Collect(context.Background(), &rm); err != nil {
+		t.Fatalf("collect: %v", err)
+	}
+
+	want := []string{
+		MetricQueueDepth, MetricFailures, MetricUnconsumedExpired, MetricUnknownTypeRejected,
+		MetricThroughput, MetricBacklog, MetricLiveness, MetricDispatchLatency,
+		MetricSourceFailures, MetricDeduped,
+	}
+	if len(want) != 10 {
+		t.Fatalf("test bug: want has %d entries, not 10", len(want))
+	}
+	for _, name := range want {
+		found := false
+		for _, sm := range rm.ScopeMetrics {
+			for _, m := range sm.Metrics {
+				if m.Name == name {
+					found = true
+				}
+			}
+		}
+		if !found {
+			t.Errorf("catalog member %q did not register on the test MeterProvider", name)
+		}
+	}
+
+	// RecordFailure accepts both classes, distinguished by the "class" label.
+	m := findMetric(t, rm, MetricFailures)
+	if got := sumFor(m, "class", FailureClassDeclined); got != 1 {
+		t.Errorf("failures[%s] = %d, want 1", FailureClassDeclined, got)
+	}
+	if got := sumFor(m, "class", FailureClassDispatchFail); got != 1 {
+		t.Errorf("failures[%s] = %d, want 1", FailureClassDispatchFail, got)
+	}
+}
+
+// MetricLiveness is registered ONLY when WithLiveness is supplied — the Task
+// 3.3 binding decision's drain-mode half: drain-and-exit never registers this
+// observable AT ALL, not merely never observes it live.
+func TestLivenessNotRegisteredWithoutOption(t *testing.T) {
+	h := newHarness(t) // no WithLiveness
+	h.emitter.OnDeclined("t")
+	rm := h.collect(t)
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			if m.Name == MetricLiveness {
+				t.Fatalf("MetricLiveness registered without WithLiveness; want it absent entirely")
+			}
+		}
+	}
+}
+
+// MetricLiveness reports 1 while isLive() is true, else 0 — a single scalar
+// datapoint per collect, re-evaluated live on each callback invocation.
+func TestLivenessReflectsIsLive(t *testing.T) {
+	live := true
+	reader := sdkmetric.NewManualReader()
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	if _, err := New(mp, func() map[string]int { return nil }, WithLiveness(func() bool { return live })); err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	var rm metricdata.ResourceMetrics
+	if err := reader.Collect(context.Background(), &rm); err != nil {
+		t.Fatalf("collect: %v", err)
+	}
+	m := findMetric(t, rm, MetricLiveness)
+	g, ok := m.Data.(metricdata.Gauge[int64])
+	if !ok || len(g.DataPoints) != 1 || g.DataPoints[0].Value != 1 {
+		t.Fatalf("liveness = %+v, want a single datapoint = 1 while isLive() is true", m.Data)
+	}
+
+	live = false
+	if err := reader.Collect(context.Background(), &rm); err != nil {
+		t.Fatalf("collect: %v", err)
+	}
+	m = findMetric(t, rm, MetricLiveness)
+	g, ok = m.Data.(metricdata.Gauge[int64])
+	if !ok || len(g.DataPoints) != 1 || g.DataPoints[0].Value != 0 {
+		t.Fatalf("liveness = %+v, want a single datapoint = 0 once isLive() is false", m.Data)
+	}
+}
+
+// MetricBacklog is a scalar sum(DepthByType()) — distinct from the existing
+// per-type MetricQueueDepth gauge.
+func TestBacklogIsScalarSum(t *testing.T) {
+	h := newHarness(t)
+	h.enqueue(t, "e1", "review-requested", 10*time.Minute)
+	h.enqueue(t, "e2", "push-requested", 10*time.Minute)
+	rm := h.collect(t)
+	m := findMetric(t, rm, MetricBacklog)
+	g, ok := m.Data.(metricdata.Gauge[int64])
+	if !ok || len(g.DataPoints) != 1 || g.DataPoints[0].Value != 2 {
+		t.Fatalf("backlog = %+v, want a single scalar datapoint = 2 (sum across types)", m.Data)
+	}
+	if got := gaugeVal(rm, MetricQueueDepth, "type", "review-requested"); got != 1 {
+		t.Fatalf("queue_depth[review-requested] = %d, want 1 (per-type, unaffected by backlog's scalar)", got)
+	}
+}
+
+// OnSourceFailure (Task 3.3, register gap R21 / bead pg2-00jpn, INV-FAIL-3)
+// increments the source-failures counter, per source.
+func TestOnSourceFailurePerSource(t *testing.T) {
+	h := newHarness(t)
+	h.emitter.OnSourceFailure("github-pulls")
+	h.emitter.OnSourceFailure("github-pulls")
+	h.emitter.OnSourceFailure("jira-issues")
+	m := findMetric(t, h.collect(t), MetricSourceFailures)
+	if got := sumFor(m, "source", "github-pulls"); got != 2 {
+		t.Fatalf("source_failures[github-pulls] = %d, want 2", got)
+	}
+	if got := sumFor(m, "source", "jira-issues"); got != 1 {
+		t.Fatalf("source_failures[jira-issues] = %d, want 1", got)
+	}
+}
+
+// OnDeduped (INV-EVT-3, bead pg2-cz31d) increments the deduped counter, per
+// type.
+func TestOnDedupedPerType(t *testing.T) {
+	h := newHarness(t)
+	h.emitter.OnDeduped("review-requested")
+	h.emitter.OnDeduped("review-requested")
+	h.emitter.OnDeduped("push-requested")
+	m := findMetric(t, h.collect(t), MetricDeduped)
+	if got := sumFor(m, "type", "review-requested"); got != 2 {
+		t.Fatalf("deduped[review-requested] = %d, want 2", got)
+	}
+	if got := sumFor(m, "type", "push-requested"); got != 1 {
+		t.Fatalf("deduped[push-requested] = %d, want 1", got)
+	}
+}
+
+// RecordThroughput increments the throughput counter, per type. Exported for
+// direct/test use — see its doc for why no production call site feeds it yet.
+func TestRecordThroughputPerType(t *testing.T) {
+	h := newHarness(t)
+	h.emitter.RecordThroughput("review-requested")
+	h.emitter.RecordThroughput("review-requested")
+	m := findMetric(t, h.collect(t), MetricThroughput)
+	if got := sumFor(m, "type", "review-requested"); got != 2 {
+		t.Fatalf("throughput[review-requested] = %d, want 2", got)
+	}
+}
+
+// MetricDispatchLatency is the catalog's one Histogram, registered with
+// WithUnit("ms") and the exact explicit bucket boundaries the Task 3.3
+// binding decision specifies.
+func TestRecordDispatchLatency_HistogramWithBuckets(t *testing.T) {
+	h := newHarness(t)
+	h.emitter.RecordDispatchLatency(42)
+	m := findMetric(t, h.collect(t), MetricDispatchLatency)
+	if m.Unit != "ms" {
+		t.Fatalf("dispatch_latency unit = %q, want ms", m.Unit)
+	}
+	hist, ok := m.Data.(metricdata.Histogram[float64])
+	if !ok {
+		t.Fatalf("dispatch_latency is not a histogram: %T", m.Data)
+	}
+	if len(hist.DataPoints) != 1 || hist.DataPoints[0].Count != 1 {
+		t.Fatalf("dispatch_latency datapoints = %+v, want exactly one recorded value", hist.DataPoints)
+	}
+	wantBounds := []float64{1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000}
+	if !reflect.DeepEqual(hist.DataPoints[0].Bounds, wantBounds) {
+		t.Fatalf("dispatch_latency bucket bounds = %v, want %v", hist.DataPoints[0].Bounds, wantBounds)
+	}
+}
+
+// RecordFailure accepts both FailureClassDeclined and the new
+// FailureClassDispatchFail — see FailureClassDispatchFail's own doc for why
+// no production call site feeds the latter yet.
+func TestRecordFailure_AcceptsBothClasses(t *testing.T) {
+	h := newHarness(t)
+	h.emitter.RecordFailure(FailureClassDeclined)
+	h.emitter.RecordFailure(FailureClassDispatchFail)
+	h.emitter.RecordFailure(FailureClassDispatchFail)
+	m := findMetric(t, h.collect(t), MetricFailures)
+	if got := sumFor(m, "class", FailureClassDeclined); got != 1 {
+		t.Fatalf("failures[%s] = %d, want 1", FailureClassDeclined, got)
+	}
+	if got := sumFor(m, "class", FailureClassDispatchFail); got != 2 {
+		t.Fatalf("failures[%s] = %d, want 2", FailureClassDispatchFail, got)
+	}
+}
+
 // queue depth tracks enqueue/accept: it reflects the live retained set per type.
 func TestQueueDepthTracksEnqueue(t *testing.T) {
 	h := newHarness(t)
@@ -188,6 +408,12 @@ func TestFailureRatePerClass(t *testing.T) {
 // The assertion lives in the test so the production import DAG keeps pointing one
 // way — core never depends on metrics, and metrics never depends on core.
 var _ core.IngestObserver = (*Emitter)(nil)
+
+// The Emitter is discover's pull-source-failure observer too (Task 3.3,
+// register gap R21 / bead pg2-00jpn). Same posture as core.IngestObserver
+// above: the assertion lives in the test, not in metrics.go, so metrics.go's
+// own production import list stays exactly what it needs and no more.
+var _ discover.SourceFailureObserver = (*Emitter)(nil)
 
 // unknown-type-rejected increments per event type: the metric half of INV-DISP-3's
 // "the condition is recorded to logs and metrics".

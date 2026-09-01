@@ -126,6 +126,36 @@ func DeriveContextFromQueueEvent(role roles.Role, evt eventqueue.Event) Dispatch
 	return DispatchContext{Role: role, Item: ItemFromPayload(evt.Payload)}
 }
 
+// SourceFailureObserver is notified when a pull-source query exhausts a
+// retry attempt and is about to back off before trying again (INV-FAIL-3,
+// register gap R21 / bead pg2-00jpn) — the metrics half of the log-only Warn
+// line runAndEnqueue already writes at that same point (metrics.Emitter
+// implements this via OnSourceFailure). A nil Observer (Produce's default
+// when no option is given) is a safe no-op.
+type SourceFailureObserver interface {
+	OnSourceFailure(source string)
+}
+
+// ProduceOption configures an optional capability on Produce (functional
+// options, so every existing four-argument call site keeps compiling
+// unchanged).
+type ProduceOption func(*produceOptions)
+
+type produceOptions struct {
+	obs SourceFailureObserver
+}
+
+// WithSourceFailureObserver registers obs to be notified of every pull-source
+// failure retry Produce's runAndEnqueue makes (INV-FAIL-3). Wiring a live
+// Emitter into this from cmd/pr-pool's boot path is a small follow-on this
+// task does not make: bootCore does not currently return its constructed
+// Emitter, and threading it through internal/orchestrator's ProduceTick would
+// touch orchestrator.go and cmd/pr-pool/run_test.go, both outside this
+// task's Files scope. This option is the seam that follow-on wires into.
+func WithSourceFailureObserver(obs SourceFailureObserver) ProduceOption {
+	return func(o *produceOptions) { o.obs = obs }
+}
+
 // Produce fires the query set against the queue for one tick: it runs every
 // PeriodTrigger query (reproducing today's once-per-pass pull), then settles any
 // ThresholdTrigger queries whose upstream now has "enough events" queued.
@@ -134,8 +164,12 @@ func DeriveContextFromQueueEvent(role roles.Role, evt eventqueue.Event) Dispatch
 // enqueued. A query failure retries per its configured pull-source failure
 // backoff (INV-FAIL-3, pg2-0c8yz) before it propagates (pg2-qq9v: a query
 // failure must NOT masquerade as "no ready work").
-func Produce(ctx context.Context, env query.Env, sources query.SourceSet, q *eventqueue.Queue) error {
-	return produce(ctx, env, sources, q, realSleep)
+func Produce(ctx context.Context, env query.Env, sources query.SourceSet, q *eventqueue.Queue, opts ...ProduceOption) error {
+	var po produceOptions
+	for _, opt := range opts {
+		opt(&po)
+	}
+	return produce(ctx, env, sources, q, realSleep, po.obs)
 }
 
 // sleepFunc waits for d, honoring ctx cancellation — the seam produce's
@@ -161,7 +195,7 @@ func realSleep(ctx context.Context, d time.Duration) error {
 // produce is Produce's body, parameterized on the sleep seam so a test can
 // exercise the pull-source failure backoff's retry loop without waiting real
 // time. Produce itself is the production entry point (realSleep).
-func produce(ctx context.Context, env query.Env, sources query.SourceSet, q *eventqueue.Queue, sleep sleepFunc) error {
+func produce(ctx context.Context, env query.Env, sources query.SourceSet, q *eventqueue.Queue, sleep sleepFunc, obs SourceFailureObserver) error {
 	fired := make([]bool, len(sources))
 	// Period-driven (and any non-threshold, non-manual) queries fire every pass.
 	for i, s := range sources {
@@ -172,7 +206,7 @@ func produce(ctx context.Context, env query.Env, sources query.SourceSet, q *eve
 		if _, isThreshold := query.Threshold(t); isThreshold {
 			continue
 		}
-		if err := runAndEnqueue(ctx, env, s, q, sleep); err != nil {
+		if err := runAndEnqueue(ctx, env, s, q, sleep, obs); err != nil {
 			return err
 		}
 		fired[i] = true
@@ -198,7 +232,7 @@ func produce(ctx context.Context, env query.Env, sources query.SourceSet, q *eve
 				depth += depthByType[b]
 			}
 			if depth >= tt.Count {
-				if err := runAndEnqueue(ctx, env, s, q, sleep); err != nil {
+				if err := runAndEnqueue(ctx, env, s, q, sleep, obs); err != nil {
 					return err
 				}
 				fired[i] = true
@@ -230,7 +264,7 @@ func produce(ctx context.Context, env query.Env, sources query.SourceSet, q *eve
 // [query.failure_backoff] or the pool-level default — exactly pg2-qq9v's
 // original behavior ("a query failure must NOT masquerade as no ready work"),
 // unchanged for every existing deployment that has not configured this.
-func runAndEnqueue(ctx context.Context, env query.Env, s query.Source, q *eventqueue.Queue, sleep sleepFunc) error {
+func runAndEnqueue(ctx context.Context, env query.Env, s query.Source, q *eventqueue.Queue, sleep sleepFunc, obs SourceFailureObserver) error {
 	fb := s.Query.FailureBackoff()
 	var evts []event.Event
 	var err error
@@ -248,6 +282,13 @@ func runAndEnqueue(ctx context.Context, env query.Env, s query.Source, q *eventq
 		wait := fb.Policy.Duration(attempt + 1)
 		slog.Warn("pull-source query failed; retrying after backoff (INV-FAIL-3)",
 			"source", s.Name, "attempt", attempt+1, "wait", wait, "err", err)
+		// The metrics half of the log line above (INV-FAIL-3, register gap R21 /
+		// bead pg2-00jpn): every retry notifies the configured observer, same as
+		// the log fires — not the final give-up return above, which the caller
+		// surfaces its own way.
+		if obs != nil {
+			obs.OnSourceFailure(s.Name)
+		}
 		if serr := sleep(ctx, wait); serr != nil {
 			return fmt.Errorf("produce %s: %w", s.Name, serr)
 		}
