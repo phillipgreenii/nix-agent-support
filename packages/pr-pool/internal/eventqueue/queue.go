@@ -322,7 +322,12 @@ func (q *Queue) Register(l Listener) {
 // clock, because ingest is where INV-EVT-1 says the defaults come from. A re-emit
 // of an id still RETAINED is dropped as a duplicate (INV-EVT-3). The enqueue
 // record is persisted BEFORE the in-memory add, so an accepted-then-crashed event
-// is never lost.
+// is never lost. A re-emit of an id whose retention is OVER (the stale-retire
+// branch below) batches the old entry's evict record with the new enqueue record
+// into one AppendBatch call, still persisted before either entry's in-memory
+// mutation: a batch failure returns the error with NEITHER the stale entry
+// retired NOR the re-emit admitted, exactly as a plain single-append failure
+// already left the re-emit un-admitted.
 func (q *Queue) Enqueue(evt Event) (EnqueueResult, error) {
 	if err := evt.Validate(); err != nil {
 		return Enqueued, err
@@ -331,6 +336,7 @@ func (q *Queue) Enqueue(evt Event) (EnqueueResult, error) {
 	defer q.mu.Unlock()
 	now := q.now()
 	evt = evt.Resolve(now)
+	enqueueRecord := recordFromEvent(evt, now)
 	if e, ok := q.entries[evt.ID]; ok {
 		if q.retainedLocked(e, now) {
 			return Deduped, nil // still-retained duplicate id (INV-EVT-3)
@@ -340,10 +346,23 @@ func (q *Queue) Enqueue(evt Event) (EnqueueResult, error) {
 		// stale position — so retire the stale entry first, on exactly the terms
 		// Expire would have retired it on (same miss accounting, same durable
 		// record), so which of the two removes it cannot change what is observed.
-		q.retireLocked(e)
+		// The evict half is built (recordEvictLocked) but not yet applied to
+		// q.entries/q.order — both mutations wait until the batch below succeeds.
+		evictRecord := q.recordEvictLocked(e.evt.ID)
+		if err := q.store.AppendBatch([]Record{evictRecord, enqueueRecord}); err != nil {
+			return Enqueued, err
+		}
+		if len(e.accepted) == 0 {
+			q.obs.OnUnconsumedExpired(e.evt.Type)
+		}
+		delete(q.entries, e.evt.ID)
 		q.dropFromOrder(evt.ID)
+		q.entries[evt.ID] = newEntry(evt)
+		q.order = append(q.order, evt.ID)
+		q.obs.OnEnqueue(evt)
+		return Enqueued, nil
 	}
-	if err := q.store.Append(recordFromEvent(evt, now)); err != nil {
+	if err := q.store.Append(enqueueRecord); err != nil {
 		return Enqueued, err
 	}
 	q.entries[evt.ID] = newEntry(evt)
@@ -534,11 +553,15 @@ type pendingOffer struct {
 //     per (event, listener) binding — the duplicate Offer is absorbed by the
 //     idempotent-listener contract (INV-EVT-2).
 //
-// The store append stays under q.mu in phase 3 on purpose: the Store is not
+// The store append(s) stay under q.mu in phase 3 on purpose: the Store is not
 // internally synchronized (its writes are serialized solely by q.mu), so moving
-// it out would introduce a data race. Phase 3 is short and calls no listener
+// them out would introduce a data race. Phase 3 is short and calls no listener
 // code, unlike the original monolithic pass that held the lock across every
-// Offer.
+// Offer. Every accept record still persists via its own Append call (delivery
+// depends on that ordering, see below); every early-eviction record this pass
+// produces (maybeEvict, opt-in via WithEarlyEviction) is instead collected and
+// persisted once, after the loop, via a single AppendBatch call — one fsync for
+// the whole pass's evictions rather than one per evicted id.
 func (q *Queue) Dispatch() (accepted int) {
 	// Phase 1 — SNAPSHOT (locked).
 	q.mu.Lock()
@@ -569,6 +592,7 @@ func (q *Queue) Dispatch() (accepted int) {
 	// (see the locking-discipline note above).
 	q.mu.Lock()
 	defer q.mu.Unlock()
+	var evicts []Record
 	for _, p := range pending {
 		lid := p.ls.l.ID()
 		e, ok := q.entries[p.evt.ID]
@@ -623,23 +647,39 @@ func (q *Queue) Dispatch() (accepted int) {
 		}
 		q.obs.OnAccept(p.evt.ID, lid)
 		accepted++
-		q.maybeEvict(e)
+		if rec, evicted := q.maybeEvict(e); evicted {
+			evicts = append(evicts, rec)
+		}
+	}
+	if len(evicts) > 0 {
+		if err := q.store.AppendBatch(evicts); err != nil {
+			// Matching the accept-append precedent above: the in-memory eviction(s)
+			// already happened and delivery is unaffected, but a swallowed
+			// evict-append is a durability degradation — the evicted id(s) replay as
+			// retained and are re-offered after a restart until the write succeeds.
+			slog.Error("eventqueue: evict-append failed; the event(s) will replay as retained and be re-offered after a restart",
+				"count", len(evicts), "err", err)
+		}
 	}
 	return accepted
 }
 
 // maybeEvict evicts an event early when opted-in and every currently-bound
-// listener has accepted it (ADR 0031). Caller holds q.mu.
-func (q *Queue) maybeEvict(e *entry) {
+// listener has accepted it (ADR 0031). Returns the durable evict Record and true
+// when an eviction happened, so the caller (Dispatch's phase 3) can collect it
+// into that pass's single AppendBatch call instead of persisting here — matching
+// Expire's per-pass batching (one fsync per pass instead of one per record).
+// Caller holds q.mu.
+func (q *Queue) maybeEvict(e *entry) (Record, bool) {
 	if !q.evictWhenAllAccept {
-		return
+		return Record{}, false
 	}
 	for _, ls := range q.listeners {
 		if ls.l.Matches(e.evt) && !e.accepted[ls.l.ID()] {
-			return // a bound listener has not accepted yet
+			return Record{}, false // a bound listener has not accepted yet
 		}
 	}
-	q.recordEvictLocked(e.evt.ID)
+	rec := q.recordEvictLocked(e.evt.ID)
 	delete(q.entries, e.evt.ID)
 	// Drop the evicted id from the FIFO spine too. Leaving it as a tombstone lets
 	// a re-emit BEFORE the next Expire() append a SECOND spine entry (the stale-
@@ -647,33 +687,36 @@ func (q *Queue) maybeEvict(e *entry) {
 	// which double-counts the id (INV-OBS-1) and reorders delivery (ADR-0031
 	// req 1). Bead pg2-f8btt.
 	q.dropFromOrder(e.evt.ID)
+	return rec, true
 }
 
 // retireLocked removes an entry whose RETENTION IS OVER from q.entries: it counts
 // the miss when no listener ever accepted it (unconsumed-expired, INV-DISP-3 /
-// INV-OBS-1) and records the removal durably so a replay does not resurrect it.
+// INV-OBS-1), removes it, and returns the durable opEvict Record so a replay does
+// not resurrect it. Persisting the record is the CALLER's responsibility, batched
+// with the rest of the current pass into one AppendBatch call (one fsync per
+// pass instead of one per record) — this function itself makes no Store call.
 // The caller fixes up the FIFO spine — Expire rebuilds the whole spine in one
 // pass, Enqueue drops the single stale id — so this does not touch q.order.
 //
 // Caller holds q.mu.
-func (q *Queue) retireLocked(e *entry) {
+func (q *Queue) retireLocked(e *entry) Record {
 	if len(e.accepted) == 0 {
 		q.obs.OnUnconsumedExpired(e.evt.Type)
 	}
-	q.recordEvictLocked(e.evt.ID)
+	rec := q.recordEvictLocked(e.evt.ID)
 	delete(q.entries, e.evt.ID)
+	return rec
 }
 
-// recordEvictLocked appends the durable opEvict record marking an id as gone from
-// the queue. A failure here is not recoverable in line — the event has already
-// left in memory — but it IS a durability degradation (the id resurrects on the
-// next replay and is offered again), so it is surfaced the same way Dispatch
-// surfaces a failed accept-append rather than discarded. Caller holds q.mu.
-func (q *Queue) recordEvictLocked(id string) {
-	if err := q.store.Append(Record{Op: opEvict, EventID: id}); err != nil {
-		slog.Error("eventqueue: evict-append failed; the event will replay as retained and be re-offered after a restart",
-			"eventId", id, "err", err)
-	}
+// recordEvictLocked returns the durable opEvict Record marking id as gone from
+// the queue. It has no side effect on q.entries/q.order and makes no Store call:
+// persisting the record — and, on Enqueue's stale-retire path, removing id from
+// q.entries — is the caller's responsibility, since persistence is now batched
+// (one AppendBatch call per pass in Dispatch/Expire, or per stale re-emit in
+// Enqueue) rather than one Append per record. Caller holds q.mu.
+func (q *Queue) recordEvictLocked(id string) Record {
+	return Record{Op: opEvict, EventID: id}
 }
 
 // Expire drops every event whose retention is over and returns how many were
@@ -684,11 +727,18 @@ func (q *Queue) recordEvictLocked(id string) {
 // artifact. Retention is independent of consumer HEALTH: an event is never
 // dropped merely because a consumer is down or disabled — such a consumer just
 // leaves its events to expire unconsumed.
+//
+// Every eviction this pass produces persists as one AppendBatch call after the
+// loop, rather than one Append (one fsync) per record. A batch failure is
+// logged — matching the accept-append precedent in Dispatch — and does not
+// block or roll back the pass: the in-memory drops already happened, same as an
+// individual evict-append failure was already swallowed before this task.
 func (q *Queue) Expire() (dropped int) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	now := q.now()
 	kept := q.order[:0:0]
+	var evicts []Record
 	for _, id := range q.order {
 		e, ok := q.entries[id]
 		if !ok {
@@ -698,10 +748,16 @@ func (q *Queue) Expire() (dropped int) {
 			kept = append(kept, id)
 			continue
 		}
-		q.retireLocked(e)
+		evicts = append(evicts, q.retireLocked(e))
 		dropped++
 	}
 	q.order = kept
+	if len(evicts) > 0 {
+		if err := q.store.AppendBatch(evicts); err != nil {
+			slog.Error("eventqueue: evict-append failed; the event(s) will replay as retained and be re-offered after a restart",
+				"count", len(evicts), "err", err)
+		}
+	}
 	return dropped
 }
 

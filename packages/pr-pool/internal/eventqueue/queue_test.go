@@ -3,8 +3,11 @@ package eventqueue
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -1020,6 +1023,10 @@ func TestExpireSurfacesEvictAppendError(t *testing.T) {
 }
 
 // failEvictStore errors on the durable evict write, persisting every other op.
+// AppendBatch filters PER RECORD within the batch — Dispatch/Expire's per-pass
+// evict batching means a batch this double sees may hold several records, and a
+// double that treated the whole batch as one opaque unit would go vacuous on
+// exactly the evict-append failure it exists to test.
 type failEvictStore struct{ inner Store }
 
 func (s *failEvictStore) Append(r Record) error {
@@ -1028,8 +1035,192 @@ func (s *failEvictStore) Append(r Record) error {
 	}
 	return s.inner.Append(r)
 }
+
+func (s *failEvictStore) AppendBatch(recs []Record) error {
+	for _, r := range recs {
+		if r.Op == opEvict {
+			return errors.New("evict-append boom")
+		}
+	}
+	return s.inner.AppendBatch(recs)
+}
 func (s *failEvictStore) Replay() ([]Record, error) { return s.inner.Replay() }
 func (s *failEvictStore) Close() error              { return s.inner.Close() }
+
+// failBatchStore fails every AppendBatch call while forwarding every other Store
+// method to inner — used to prove a batch failure blocks visibility without
+// otherwise disturbing Append-based persistence.
+type failBatchStore struct{ inner Store }
+
+func (s *failBatchStore) Append(r Record) error      { return s.inner.Append(r) }
+func (s *failBatchStore) AppendBatch([]Record) error { return errors.New("append-batch boom") }
+func (s *failBatchStore) Replay() ([]Record, error)  { return s.inner.Replay() }
+func (s *failBatchStore) Close() error               { return s.inner.Close() }
+
+// TestEnqueueDurableBeforeVisible: Enqueue's stale-retire branch persists the
+// old entry's evict record and the new enqueue record in ONE AppendBatch call
+// before either mutates memory. A batch failure blocks the re-emit's visibility
+// exactly like a plain single-append failure already did — and, since nothing
+// durable recorded the stale entry's eviction either, that entry is left exactly
+// as retained as it was before the re-emit was offered (no half-evicted state).
+func TestEnqueueDurableBeforeVisible(t *testing.T) {
+	clk := newClock()
+	store := &failBatchStore{inner: NewMemStore()}
+	q, err := New(store, WithClock(clk.now))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// No listener binds it, so its retention is over the moment it expires — the
+	// next Enqueue of the same id takes the stale-retire branch.
+	mustEnqueue(t, q, evtUntil("x", "T", clk.in(time.Minute)))
+	clk.advance(2 * time.Minute)
+
+	if _, err := q.Enqueue(evtUntil("x", "T", clk.in(time.Minute))); err == nil {
+		t.Fatal("stale-retire re-emit succeeded despite a failing AppendBatch")
+	}
+	if d := q.DepthByType()["T"]; d != 1 {
+		t.Fatalf("depth[T] = %d, want 1: a batch failure must neither evict the stale entry nor admit the re-emit", d)
+	}
+}
+
+// TestFileStoreCrashMidBatchTornWrite: a crash mid-AppendBatch that durably
+// persists the evict half of a stale-retire's {evict, enqueue} batch but tears
+// the enqueue half (as one Write call interrupted partway through the combined
+// buffer would leave it) must not resurrect the retired id (no lost retirement)
+// and must not admit a phantom half-written re-enqueue — Replay already stops at
+// the first undecodable line for a single torn Append; this proves the same
+// holds when the torn line is the SECOND record of a batch.
+func TestFileStoreCrashMidBatchTornWrite(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "queue.wal")
+
+	s1, err := NewFileStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	if err := s1.Append(recordFromEvent(evtUntil("x", "T", now.Add(time.Hour)), now)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s1.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate the torn batch directly: the evict half (retiring "x") writes
+	// intact, the enqueue half (re-emitting "x") is cut off mid-write.
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	evictLine, err := json.Marshal(Record{Op: opEvict, EventID: "x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Write(append(evictLine, '\n')); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString(`{"op":"enqueue","eventId":"x","typ`); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	s2, err := NewFileStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s2.Close() }()
+	q2, err := New(s2)
+	if err != nil {
+		t.Fatalf("replay did not tolerate a torn batch: %v", err)
+	}
+	if d := q2.DepthByType()["T"]; d != 0 {
+		t.Fatalf("depth[T] = %d, want 0: the retirement must not be lost, and the torn re-enqueue must not resurrect as a phantom", d)
+	}
+}
+
+// TestFileStoreAppendBatchReplayEquivalence: a WAL written via one AppendBatch
+// call is byte-for-byte identical to the same records written via one Append
+// call each, and replays into the same records in the same order — batching
+// changes only the number of Write/Sync syscalls (one for the whole batch
+// instead of one per record), never what a replay reconstructs.
+func TestFileStoreAppendBatchReplayEquivalence(t *testing.T) {
+	now := time.Now()
+	recs := []Record{
+		{Op: opEvict, EventID: "old"},
+		recordFromEvent(evtUntil("x", "T", now.Add(time.Hour)), now),
+		{Op: opAccept, EventID: "x", ListenerID: "h"},
+	}
+
+	batchedPath := filepath.Join(t.TempDir(), "batched.wal")
+	bs, err := NewFileStore(batchedPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := bs.AppendBatch(recs); err != nil {
+		t.Fatal(err)
+	}
+	if err := bs.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	seqPath := filepath.Join(t.TempDir(), "sequential.wal")
+	ss, err := NewFileStore(seqPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range recs {
+		if err := ss.Append(r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := ss.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	batchedBytes, err := os.ReadFile(batchedPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seqBytes, err := os.ReadFile(seqPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(batchedBytes) != string(seqBytes) {
+		t.Fatalf("AppendBatch wrote a different WAL than sequential Append calls:\nbatched: %s\nsequential: %s", batchedBytes, seqBytes)
+	}
+
+	bs2, err := NewFileStore(batchedPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = bs2.Close() }()
+	got, err := bs2.Replay()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != len(recs) {
+		t.Fatalf("replay length = %d, want %d", len(got), len(recs))
+	}
+	for i := range got {
+		// Compare via the JSON wire shape, not reflect.DeepEqual on the Go struct:
+		// recs[i]'s time.Time fields carry an in-process monotonic reading that a
+		// JSON round-trip (what Replay always does) strips, so DeepEqual would
+		// report a spurious mismatch unrelated to anything AppendBatch changed.
+		gotJSON, err := json.Marshal(got[i])
+		if err != nil {
+			t.Fatal(err)
+		}
+		wantJSON, err := json.Marshal(recs[i])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(gotJSON) != string(wantJSON) {
+			t.Fatalf("record %d = %s, want %s", i, gotJSON, wantJSON)
+		}
+	}
+}
 
 // --- small helpers --------------------------------------------------------
 

@@ -53,10 +53,23 @@ type Record struct {
 // records and replays them on startup. It is an interface so tests can inject a
 // fault-injecting fake (crash-window simulation) and an in-memory double, per
 // ADR 0031's "storage mechanism is a realization choice".
+//
+// Store is not internally synchronized: every call is serialized solely by the
+// queue's own mutex (q.mu), never by the Store itself. AppendBatch's caller
+// chooses the batch's contents, and the BATCH — not the individual Record — is
+// the caller's atomicity unit: either every record in one AppendBatch call is
+// durable before it returns, or a caller MUST NOT treat any of them as durable.
 type Store interface {
 	// Append durably records one operation. It MUST return only after the record
 	// is persisted (the queue's crash-window semantics depend on this ordering).
 	Append(rec Record) error
+	// AppendBatch durably records every rec in recs as one atomic unit — one
+	// underlying write and one fsync, not one per record — so a caller with
+	// several records to persist together (e.g. an evict paired with the
+	// re-enqueue that displaced it, or a pass's worth of evictions) pays a single
+	// fsync instead of len(recs). It MUST return only after every record in recs
+	// is persisted, or persist none of them.
+	AppendBatch(recs []Record) error
 	// Replay returns every persisted record in append order.
 	Replay() ([]Record, error)
 	// Close releases the underlying resource.
@@ -94,8 +107,9 @@ func (r Record) event() Event {
 }
 
 // FileStore is a JSONL write-ahead log on disk — the default durable Store.
-// Each line is one Record. Appends are line-atomic (one Write per record) and
-// fsync'd so a persisted record survives a crash.
+// Each line is one Record. Append writes and fsyncs one line; AppendBatch writes
+// every line of the batch in one Write call and fsyncs once for the whole batch.
+// Either way a persisted line survives a crash.
 type FileStore struct {
 	f *os.File
 }
@@ -120,6 +134,29 @@ func (s *FileStore) Append(rec Record) error {
 	}
 	b = append(b, '\n')
 	if _, err := s.f.Write(b); err != nil {
+		return err
+	}
+	return s.f.Sync()
+}
+
+// AppendBatch marshals every record in recs as its own line — the same per-line
+// shape Append produces, so Replay's line-based parsing is unchanged — but
+// performs exactly one Write and one Sync for the whole slice, collapsing what
+// would otherwise be len(recs) fsyncs (one per Append call) into one.
+func (s *FileStore) AppendBatch(recs []Record) error {
+	if len(recs) == 0 {
+		return nil
+	}
+	var buf []byte
+	for _, rec := range recs {
+		b, err := json.Marshal(rec)
+		if err != nil {
+			return err
+		}
+		buf = append(buf, b...)
+		buf = append(buf, '\n')
+	}
+	if _, err := s.f.Write(buf); err != nil {
 		return err
 	}
 	return s.f.Sync()
@@ -175,6 +212,12 @@ func NewMemStore() *MemStore { return &MemStore{} }
 // Append records one operation in memory.
 func (m *MemStore) Append(rec Record) error {
 	m.recs = append(m.recs, rec)
+	return nil
+}
+
+// AppendBatch records every rec in recs in memory, in order, as one operation.
+func (m *MemStore) AppendBatch(recs []Record) error {
+	m.recs = append(m.recs, recs...)
 	return nil
 }
 

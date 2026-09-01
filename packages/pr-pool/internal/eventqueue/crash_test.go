@@ -24,6 +24,23 @@ func (d *dropAcceptStore) Append(r Record) error {
 	}
 	return d.inner.Append(r)
 }
+
+// AppendBatch filters PER RECORD, dropping only the opAccept records in recs —
+// an unmodified pass-through would silently persist an accept record that
+// belongs in the crash window, going vacuous on the fault this double exists to
+// inject.
+func (d *dropAcceptStore) AppendBatch(recs []Record) error {
+	kept := recs[:0:0]
+	for _, r := range recs {
+		if r.Op != opAccept {
+			kept = append(kept, r)
+		}
+	}
+	if len(kept) == 0 {
+		return nil
+	}
+	return d.inner.AppendBatch(kept)
+}
 func (d *dropAcceptStore) Replay() ([]Record, error) { return d.inner.Replay() }
 func (d *dropAcceptStore) Close() error              { return d.inner.Close() }
 
@@ -37,6 +54,16 @@ func (s *failAcceptStore) Append(r Record) error {
 		return errors.New("accept-append boom")
 	}
 	return s.inner.Append(r)
+}
+
+// AppendBatch filters PER RECORD within the batch, same as Append.
+func (s *failAcceptStore) AppendBatch(recs []Record) error {
+	for _, r := range recs {
+		if r.Op == opAccept {
+			return errors.New("accept-append boom")
+		}
+	}
+	return s.inner.AppendBatch(recs)
 }
 func (s *failAcceptStore) Replay() ([]Record, error) { return s.inner.Replay() }
 func (s *failAcceptStore) Close() error              { return s.inner.Close() }

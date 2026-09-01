@@ -99,3 +99,66 @@ func TestMemStoreAppendReplay(t *testing.T) {
 		t.Fatalf("close: %v", err)
 	}
 }
+
+func TestMemStoreAppendBatch(t *testing.T) {
+	m := NewMemStore()
+	if err := m.AppendBatch(nil); err != nil {
+		t.Fatalf("AppendBatch(nil): %v", err)
+	}
+	if err := m.AppendBatch([]Record{
+		{Op: opEnqueue, EventID: "a"},
+		{Op: opAccept, EventID: "a", ListenerID: "h"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	recs, err := m.Replay()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(recs) != 2 || recs[0].EventID != "a" || recs[1].Op != opAccept {
+		t.Fatalf("replay = %+v", recs)
+	}
+}
+
+// TestFaultDoublesFilterPerRecordWithinBatch: each fault-injection double must
+// examine every record in an AppendBatch call individually, not treat the whole
+// batch as one opaque unit — a batch mixing a guarded op with an unguarded one
+// must still trigger (or drop) exactly the guarded op's fault, and must leave an
+// unguarded batch untouched.
+func TestFaultDoublesFilterPerRecordWithinBatch(t *testing.T) {
+	mixed := []Record{
+		{Op: opEnqueue, EventID: "e1"},
+		{Op: opEvict, EventID: "e1"},
+	}
+	acceptOnly := []Record{{Op: opAccept, EventID: "e1", ListenerID: "h"}}
+
+	fe := &failEvictStore{inner: NewMemStore()}
+	if err := fe.AppendBatch(mixed); err == nil {
+		t.Fatal("failEvictStore.AppendBatch did not fail a batch containing an opEvict record")
+	}
+	if err := fe.AppendBatch(acceptOnly); err != nil {
+		t.Fatalf("failEvictStore.AppendBatch failed a batch with no opEvict record: %v", err)
+	}
+
+	fa := &failAcceptStore{inner: NewMemStore()}
+	if err := fa.AppendBatch(mixed); err != nil {
+		t.Fatalf("failAcceptStore.AppendBatch failed a batch with no opAccept record: %v", err)
+	}
+	if err := fa.AppendBatch(acceptOnly); err == nil {
+		t.Fatal("failAcceptStore.AppendBatch did not fail a batch containing an opAccept record")
+	}
+
+	da := &dropAcceptStore{inner: NewMemStore()}
+	if err := da.AppendBatch(mixed); err != nil {
+		t.Fatalf("dropAcceptStore.AppendBatch(mixed): %v", err)
+	}
+	if recs, _ := da.inner.Replay(); len(recs) != len(mixed) {
+		t.Fatalf("dropAcceptStore.AppendBatch dropped a non-accept record: %+v", recs)
+	}
+	if err := da.AppendBatch(acceptOnly); err != nil {
+		t.Fatalf("dropAcceptStore.AppendBatch(acceptOnly): %v", err)
+	}
+	if recs, _ := da.inner.Replay(); len(recs) != len(mixed) {
+		t.Fatalf("dropAcceptStore.AppendBatch did not drop the accept-only batch: %+v", recs)
+	}
+}

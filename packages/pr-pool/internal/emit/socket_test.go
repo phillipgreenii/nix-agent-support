@@ -180,10 +180,15 @@ func TestSocketEnqueuer_BadTokenIsRefused(t *testing.T) {
 
 // failingStore makes the core's durable append fail, so the core replies with a
 // real per-event `rejected` entry. The injection must surface as an error: the
-// event is NOT in the queue.
-type failingStore struct{ eventqueue.Store }
+// event is NOT in the queue. It holds an eventqueue.Store in a NAMED field
+// rather than an anonymous embed: embedding a nil eventqueue.Store would
+// silently "inherit" AppendBatch (and any future Store method) from the nil
+// interface value and nil-panic on first call, instead of failing the way every
+// other method here does.
+type failingStore struct{}
 
-func (failingStore) Append(eventqueue.Record) error { return errors.New("disk on fire") }
+func (failingStore) Append(eventqueue.Record) error        { return errors.New("disk on fire") }
+func (failingStore) AppendBatch([]eventqueue.Record) error { return errors.New("disk on fire") }
 func (failingStore) Replay() ([]eventqueue.Record, error) {
 	return nil, nil
 }

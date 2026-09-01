@@ -477,14 +477,18 @@ func TestIngestEvent_EnqueueFailureIsReported(t *testing.T) {
 	}
 }
 
-// failingStore is a Store whose durable append always fails.
+// failingStore is a Store whose durable append always fails. It implements
+// AppendBatch explicitly (not via an embedded/promoted method) so the same
+// failure applies uniformly regardless of which persistence path is exercised —
+// eventqueue.Store's AppendBatch is a required method, not an optional one.
 type failingStore struct{}
 
 var errStoreDown = errors.New("store is down")
 
-func (failingStore) Append(eventqueue.Record) error       { return errStoreDown }
-func (failingStore) Replay() ([]eventqueue.Record, error) { return nil, nil }
-func (failingStore) Close() error                         { return nil }
+func (failingStore) Append(eventqueue.Record) error        { return errStoreDown }
+func (failingStore) AppendBatch([]eventqueue.Record) error { return errStoreDown }
+func (failingStore) Replay() ([]eventqueue.Record, error)  { return nil, nil }
+func (failingStore) Close() error                          { return nil }
 
 // The reply's schemaVersion is the one the core declares, not a literal.
 func TestIngestEvent_ReplyCarriesTheCoreSchemaVersion(t *testing.T) {
