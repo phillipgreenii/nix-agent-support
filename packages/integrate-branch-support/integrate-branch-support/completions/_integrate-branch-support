@@ -2,4 +2,5 @@
 
 _arguments \
   '(-h --help)'{-h,--help}'[Show help message]' \
-  '(-v --version)'{-v,--version}'[Show version information]'
+  '(-v --version)'{-v,--version}'[Show version information]' \
+  '--facts[Print orientation facts as a KEY=value block]'

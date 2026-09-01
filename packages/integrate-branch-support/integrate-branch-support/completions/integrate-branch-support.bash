@@ -4,10 +4,10 @@ _integrate_branch_support() {
   local cur
   _init_completion || return
 
-  # No positional arguments or custom flags -- only the framework-injected
-  # --help/--version.
+  # No positional arguments -- --facts is the only custom flag; the rest are
+  # the framework-injected --help/--version.
   if [[ $cur == -* ]]; then
-    mapfile -t COMPREPLY < <(compgen -W "--help -h --version -v" -- "$cur")
+    mapfile -t COMPREPLY < <(compgen -W "--facts --help -h --version -v" -- "$cur")
   fi
 }
 

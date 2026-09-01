@@ -154,6 +154,92 @@ detect_mr_bead() {
 #      `ff-merge-to-main`.
 #   4. else an open PR or an open merge-request bead -> `pull-request`.
 #   5. else the tool cannot infer -> null (empty line 1).
+# current_worktree_root: print the absolute path to the top level of the
+# CURRENT worktree -- i.e. wherever this tool is invoked from, resolved to
+# its worktree root even when invoked from a flake subdirectory. Contrast
+# canonical_root, which always resolves to the MAIN worktree regardless of
+# where the tool runs; this one tracks the caller's own location instead, so
+# it equals canonical_root exactly when the caller is standing in the
+# canonical clone. `git rev-parse --show-toplevel` (not a bare `pwd`) is
+# deliberate: a hand-rolled `WT="$(pwd)"` preamble is only correct when the
+# caller happens to be at the worktree's root already, and silently wrong
+# from a subdirectory -- the same subdirectory-anchoring pitfall
+# detect_remote's doc comment already describes for remote resolution.
+current_worktree_root() {
+  git rev-parse --show-toplevel
+}
+
+# current_branch: print the branch checked out in the CURRENT worktree
+# (wherever this tool is invoked from). Contrast canonical_branch, which
+# always reports the MAIN worktree's branch regardless of where the tool
+# runs.
+current_branch() {
+  git symbolic-ref --short -q HEAD || echo "(detached)"
+}
+
+# current_dirty_yesno: print "yes"/"no" for whether the CURRENT worktree
+# (wherever this tool is invoked from) has uncommitted changes (tracked or
+# untracked). Contrast canonical_dirty, which always reports the MAIN
+# worktree's dirty state and prints "true"/"false" for the JSON mode; this
+# one is the plain-text form the --facts KEY=value block uses.
+current_dirty_yesno() {
+  if [ -n "$(git status --porcelain)" ]; then
+    echo yes
+  else
+    echo no
+  fi
+}
+
+# ahead_behind_primary <primary_branch>: print exactly two lines -- (1) AHEAD
+# (commits reachable from HEAD but not from the primary branch), (2) BEHIND
+# (commits reachable from the primary branch but not from HEAD). Two lines
+# for the same subshell-survival reason as detect_remote/resolve_strategy
+# (this runs inside a `< <(...)` process substitution).
+#
+# Resolves the primary branch NAME to a ref: prefers the local branch
+# refs/heads/<primary> (the common case -- local branches are shared across
+# every worktree of the same repo, so this resolves even from a linked
+# worktree whose own checked-out branch differs); falls back to the
+# remote-tracking ref refs/remotes/origin/<primary> (relevant right after a
+# fresh clone, before any local branch of that name exists). Prints "0" for
+# both when NEITHER ref resolves, or when HEAD itself is unborn -- this tool
+# never fails outright over an optional/best-effort fact (the same
+# graceful-degradation philosophy as detect_open_pr/detect_mr_bead).
+ahead_behind_primary() {
+  local primary="$1" ref
+  if git rev-parse --verify -q "refs/heads/$primary" >/dev/null 2>&1; then
+    ref="refs/heads/$primary"
+  elif git rev-parse --verify -q "refs/remotes/origin/$primary" >/dev/null 2>&1; then
+    ref="refs/remotes/origin/$primary"
+  else
+    printf '0\n0\n'
+    return
+  fi
+  printf '%s\n' "$(git rev-list --count "$ref"..HEAD 2>/dev/null || echo 0)"
+  printf '%s\n' "$(git rev-list --count HEAD.."$ref" 2>/dev/null || echo 0)"
+}
+
+# precommit_state <worktree root>: print "symlink", "real", or "missing" for
+# the on-disk state of <worktree root>/.pre-commit-config.yaml. This repo's
+# own CLAUDE.md ("prek / pre-commit in Fresh Worktrees") documents why this
+# matters: the canonical clone's copy is a gitignored, nix-generated symlink
+# into /nix/store, which a fresh `git worktree add` worktree does not get for
+# free -- commits there fail with "config file not found" until one is
+# created. `-L` is checked before `-e` so a broken symlink (nix store path
+# no longer present) is still reported as "symlink", not "missing" -- the two
+# have different fixes (re-link vs. rebuild) and collapsing them would send
+# an agent down the wrong one.
+precommit_state() {
+  local path="$1/.pre-commit-config.yaml"
+  if [ -L "$path" ]; then
+    printf 'symlink'
+  elif [ -e "$path" ]; then
+    printf 'real'
+  else
+    printf 'missing'
+  fi
+}
+
 resolve_strategy() {
   local declared="$1" remote="$2" remote_reason="$3" open_pr_json="$4" mr_bead="$5"
 

@@ -29,30 +29,39 @@ independently.
 ## Step 0 — Re-derive context from git
 
 Do not assume `<WT>`, `<FB>`, `<CC>`, or the primary branch were passed in —
-compute them fresh:
+compute them fresh by running `integrate-branch-support --facts` (it is on
+`PATH`) and parsing its stable `KEY=value` block:
 
 ```bash
-WT="$(pwd)"                                   # the current working tree
-FB="$(git rev-parse --abbrev-ref HEAD)"        # the feature branch
-CC="$(cd "$(git rev-parse --git-common-dir)/.." && pwd)"   # canonical clone (main worktree)
-# primary branch — same resolution integrate-branch-support uses (declared → origin/HEAD → main)
-PRIMARY="$(git config --get pgii-integrate-branch.primaryBranch \
-  || git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null \
-  || echo origin/main)"
-PRIMARY="${PRIMARY#origin/}"                    # strip the remote prefix if it came from origin/HEAD
+while IFS='=' read -r key value; do
+  case "$key" in
+  WT) WT="$value" ;;
+  FB) FB="$value" ;;
+  CC) CC="$value" ;;
+  PRIMARY) PRIMARY="$value" ;;
+  DIRTY) DIRTY="$value" ;;
+  AHEAD) AHEAD="$value" ;;
+  BEHIND) BEHIND="$value" ;;
+  PRECOMMIT) PRECOMMIT="$value" ;;
+  esac
+done < <(integrate-branch-support --facts)
 ```
 
-- **`<WT>`** = the current working tree — wherever this handler is running.
-- **`<FB>`** = the current branch. If `git rev-parse --abbrev-ref HEAD` prints
-  `HEAD` (detached), there is no feature branch to integrate — **halt and report**
-  "nothing to integrate: detached HEAD," and stop here.
+- **`<WT>`** = the current working tree's worktree root — wherever this handler
+  is running.
+- **`<FB>`** = the current branch. If it reads `(detached)`, there is no feature
+  branch to integrate — **halt and report** "nothing to integrate: detached
+  HEAD," and stop here.
 - **`<CC>`** = the canonical clone, i.e. the **main working tree** of the common
-  git dir (`git rev-parse --git-common-dir` resolved to its parent directory). This
-  is true whether or not `<WT>` and `<CC>` are the same directory.
-- **primary branch** = the shared resolution (same one `integrate-branch-support`
-  uses, so they agree): `git config --get pgii-integrate-branch.primaryBranch` →
-  else `git symbolic-ref refs/remotes/origin/HEAD` (strip the `refs/remotes/origin/`
-  prefix) → else `main`.
+  git dir. This is true whether or not `<WT>` and `<CC>` are the same directory.
+- **primary branch** (`<PRIMARY>`) = the shared resolution (the same one every
+  caller of `integrate-branch-support` uses, so they all agree): `git config
+--get pgii-integrate-branch.primaryBranch` → else `git symbolic-ref
+refs/remotes/origin/HEAD` (stripped of the `refs/remotes/origin/` prefix) →
+  else `main`.
+- `DIRTY`, `AHEAD`, `BEHIND`, and `PRECOMMIT` are also available from this same
+  call — FF-0b below uses `DIRTY` instead of re-running `git status --porcelain`
+  itself.
 
 ## FF-0 — Precondition: canonical steady-state, and `<WT>` actually rebasable
 
@@ -81,8 +90,12 @@ forbids. Report the anomaly and stop; this handler goes no further.
 **before** FF-1 runs:
 
 ```bash
-git -C "$WT" status --porcelain            # MUST be empty
+[ "$DIRTY" = no ]                          # from Step 0's integrate-branch-support --facts call; MUST be "no"
 ```
+
+Reusing `$DIRTY` here (rather than re-running `git -C "$WT" status --porcelain`)
+is safe: nothing between Step 0 and FF-0b performs any action that could dirty
+`<WT>`, so the fact captured at Step 0 is still current.
 
 ```bash
 # MUST print nothing: no rebase already in progress in <WT>. Both git backends.
@@ -96,9 +109,10 @@ done
 Each failure is its **own** halt, because each has its own disposition and FF-0 is
 the last point at which they are still distinguishable:
 
-- **`<WT>` dirty** → **halt and report** `stopped:worktree-dirty` with the absolute
-  path of `<WT>` and the `status --porcelain` output. The operator commits or
-  stashes in `<WT>`, then re-invokes `integrate-branch`.
+- **`<WT>` dirty** (`$DIRTY = yes`) → **halt and report** `stopped:worktree-dirty`
+  with the absolute path of `<WT>` and, for the diagnostic detail `$DIRTY` alone
+  doesn't carry, `git -C "$WT" status --porcelain`'s output. The operator commits
+  or stashes in `<WT>`, then re-invokes `integrate-branch`.
 - **rebase already in progress in `<WT>`** → **halt and report**
   `stopped:rebase-in-progress` with the state directory the probe found. The
   operator finishes that rebase (`git -C "$WT" rebase --continue`) or abandons it

@@ -55,15 +55,26 @@ determine," surface that, and fall back to asking. On success you get:
 
 ## Step 2 — Nothing to integrate?
 
-Before anything else, check whether there is actually work to land. Report and
-**stop** — do not run a handler — when any of these hold:
+Before anything else, check whether there is actually work to land. Run
+`integrate-branch-support --facts` — the same stable `KEY=value` orientation-facts
+contract every handler in this plugin uses — and parse the fields this check
+needs:
 
-- Your current branch **is** `primary_branch` (compare `git rev-parse --abbrev-ref
-HEAD` to the report's `primary_branch`).
-- `HEAD` is **detached** (`git rev-parse --abbrev-ref HEAD` prints `HEAD`) — there is
-  no feature branch to integrate.
-- You have **0 commits ahead** of `primary_branch`
-  (`git rev-list --count <primary_branch>..HEAD` is `0`).
+```bash
+while IFS='=' read -r key value; do
+  case "$key" in
+  FB) FB="$value" ;;
+  AHEAD) AHEAD="$value" ;;
+  esac
+done < <(integrate-branch-support --facts)
+```
+
+Report and **stop** — do not run a handler — when any of these hold:
+
+- Your current branch **is** `primary_branch` (compare `$FB` to Step 1's report's
+  `primary_branch`).
+- `$FB` reads `(detached)` — there is no feature branch to integrate.
+- `$AHEAD` is `0` — no commits ahead of `primary_branch`.
 
 Report this plainly ("already on `main`", "nothing to land — 0 commits ahead of
 `main`") and end here. Do not invoke a handler for a no-op.

@@ -335,6 +335,134 @@ EOF
   echo "$output" | jq -e '.strategy == "pull-request" and (.reason | test("infeasible"; "i"))'
 }
 
+@test "facts: unrecognized argument is a usage error" {
+  run bash "$BIN" --bogus
+  [ "$status" -ne 0 ]
+}
+
+@test "facts: --facts prints the documented KEY=value block" {
+  run bash "$BIN" --facts
+  [ "$status" -eq 0 ]
+  for key in WT FB CC PRIMARY DIRTY AHEAD BEHIND PRECOMMIT; do
+    echo "$output" | grep -qE "^${key}=" || {
+      echo "missing key: $key" >&2
+      return 1
+    }
+  done
+}
+
+@test "facts: WT/CC both resolve to the real (symlink-free) repo path from the main worktree" {
+  local real_test_dir
+  real_test_dir="$(cd "$TEST_DIR" && pwd -P)"
+  run bash "$BIN" --facts
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qF "WT=$real_test_dir"
+  echo "$output" | grep -qF "CC=$real_test_dir"
+}
+
+@test "facts: WT is the linked worktree and CC is the main worktree, from inside a linked worktree" {
+  git -c user.email=t@t -c user.name=t commit -q --allow-empty -m base
+  local real_test_dir
+  real_test_dir="$(cd "$TEST_DIR" && pwd -P)"
+  add_worktree feat
+  local real_wt_dir
+  real_wt_dir="$(pwd -P)"
+  run bash "$BIN" --facts
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qF "WT=$real_wt_dir"
+  echo "$output" | grep -qF "CC=$real_test_dir"
+}
+
+@test "facts: FB reports the current branch, distinct from the canonical clone's branch" {
+  git -c user.email=t@t -c user.name=t commit -q --allow-empty -m base
+  add_worktree feat
+  run bash "$BIN" --facts
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "^FB=feat$"
+}
+
+@test "facts: FB reports (detached) on a detached HEAD" {
+  git -c user.email=t@t -c user.name=t commit -q --allow-empty -m base
+  git checkout -q --detach HEAD
+  run bash "$BIN" --facts
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "^FB=(detached)$"
+}
+
+@test "facts: DIRTY reflects the CURRENT worktree, not the canonical clone" {
+  git -c user.email=t@t -c user.name=t commit -q --allow-empty -m base
+  add_worktree feat
+  run bash "$BIN" --facts
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "^DIRTY=no$"
+  echo x >f
+  run bash "$BIN" --facts
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "^DIRTY=yes$"
+}
+
+@test "facts: AHEAD/BEHIND count commits relative to the primary branch" {
+  git -c user.email=t@t -c user.name=t commit -q --allow-empty -m base
+  add_worktree feat
+  run bash "$BIN" --facts
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "^AHEAD=0$"
+  echo "$output" | grep -q "^BEHIND=0$"
+
+  git -c user.email=t@t -c user.name=t commit -q --allow-empty -m "feat commit"
+  git -C "$TEST_DIR" -c user.email=t@t -c user.name=t commit -q --allow-empty -m "main commit"
+  run bash "$BIN" --facts
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "^AHEAD=1$"
+  echo "$output" | grep -q "^BEHIND=1$"
+}
+
+@test "facts: AHEAD/BEHIND degrade to 0/0 when the primary branch cannot be resolved" {
+  git config pgii-integrate-branch.primaryBranch does-not-exist
+  run bash "$BIN" --facts
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "^PRIMARY=does-not-exist$"
+  echo "$output" | grep -q "^AHEAD=0$"
+  echo "$output" | grep -q "^BEHIND=0$"
+}
+
+@test "facts: PRECOMMIT reports missing when .pre-commit-config.yaml is absent" {
+  run bash "$BIN" --facts
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "^PRECOMMIT=missing$"
+}
+
+@test "facts: PRECOMMIT reports real for a plain file" {
+  echo "repos: []" >.pre-commit-config.yaml
+  run bash "$BIN" --facts
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "^PRECOMMIT=real$"
+}
+
+@test "facts: PRECOMMIT reports symlink, even a broken one" {
+  ln -s /nix/store/does-not-exist/.pre-commit-config.yaml .pre-commit-config.yaml
+  run bash "$BIN" --facts
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "^PRECOMMIT=symlink$"
+}
+
+@test "facts: PRIMARY resolution matches the JSON mode's (config -> origin/HEAD -> main)" {
+  git symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/develop
+  run bash "$BIN" --facts
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "^PRIMARY=develop$"
+}
+
+@test "fail-safe: --facts exits nonzero when run outside a git repository" {
+  local nogit_dir
+  nogit_dir="$(mktemp -d)"
+  cd "$nogit_dir" || return 1
+  run bash "$BIN" --facts
+  cd "$TEST_DIR" || true
+  rm -rf "$nogit_dir"
+  [ "$status" -ne 0 ]
+}
+
 @test "fail-safe: exits nonzero when run outside a git repository" {
   local nogit_dir
   nogit_dir="$(mktemp -d)"
