@@ -15,10 +15,22 @@ import (
 // baseApprovedTools are the generic, non-consumer-specific build tools approved
 // unconditionally. Consumer tools (e.g. a consumer's Perl runners prove/yath,
 // project scripts) are NOT here — they arrive via BuildtoolsConfig (ADR 0033).
+//
+// gogate (phillipg-nix-repo-base, bead pg2-i1hwk) belongs here rather than in a
+// consumer's verbScopedApprovals: unlike `just` (deliberately excluded — see
+// TestBuildtools_EmptyConfig_JustAbstains — because a recipe dispatcher's
+// behavior is defined per-repo), gogate's behavior is FIXED across every
+// consumer: a sequential `gofmt -l` / `go build` / `go vet` / `go test` gate
+// with exactly two flags (`--pkg <pattern>`, `--quick`) plus a `--` passthrough
+// to `go test`. It is not read-only (it writes the Go build cache, bead
+// pg2-waxh7) — but neither is the already-unconditionally-approved `go` entry
+// above, and gogate's surface is strictly narrower than bare `go` (no
+// `go run`/`go generate`/arbitrary subcommand), so approving it here is no
+// more permissive than the existing `go` entry.
 var baseApprovedTools = map[string]bool{
 	"go":     true,
 	"gradle": true, "gradlew": true, "pre-commit": true, "prek": true, "bats": true, "bd": true,
-	"tilt": true,
+	"tilt": true, "gogate": true,
 }
 
 type Rule struct {

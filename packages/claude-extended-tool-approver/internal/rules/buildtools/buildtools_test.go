@@ -125,6 +125,33 @@ func TestBuildtools_DevboxSearch_Approve(t *testing.T) {
 	}
 }
 
+func TestBuildtools_Gogate_Approve(t *testing.T) {
+	// pg2-waxh7: gogate (phillipg-nix-repo-base) is not read-only — it writes
+	// the Go build cache — so it needs its own base-tool approval rather than
+	// falling into a blanket read-only allowlist. Covers the bare invocation
+	// and every documented flag (gogate.md): --pkg, --quick, and the --
+	// passthrough to `go test`.
+	r := New(testPE(), zrBuildtoolsConfig(t))
+	commands := []string{
+		"gogate",
+		"gogate --pkg ./...",
+		"gogate --pkg ./internal/collect",
+		"gogate --quick",
+		"gogate -- -run TestFoo -count=1",
+		"gogate --pkg ./... -- -run TestFoo",
+	}
+	for _, cmd := range commands {
+		input := &hookio.HookInput{
+			ToolName:  "Bash",
+			ToolInput: mustJSON(map[string]string{"command": cmd}),
+		}
+		got := hookio.Verdict(r.Evaluate(input))
+		if got.Decision != hookio.Approve {
+			t.Errorf("cmd %q: got %s, want approve", cmd, got.Decision)
+		}
+	}
+}
+
 func TestBuildtools_Npm_Abstain(t *testing.T) {
 	r := New(testPE(), zrBuildtoolsConfig(t))
 	input := &hookio.HookInput{
@@ -963,6 +990,7 @@ func TestBuildtools_EmptyConfig_BaseGenericApproves(t *testing.T) {
 		"go build ./...", "gradle build", "./gradlew test", "pre-commit run",
 		"prek run", "bats tests/", "bd ready", "tilt up",
 		"devbox search x", "cue vet ./x", "jar xf /tmp/a.jar",
+		"gogate", "gogate --pkg ./...", "gogate --quick", "gogate -- -run TestFoo",
 	} {
 		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
 		if got := hookio.Verdict(r.Evaluate(input)); got.Decision != hookio.Approve {
