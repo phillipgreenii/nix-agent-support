@@ -2,30 +2,60 @@
 # bats file_tags=type:unit
 
 setup() {
-  # SCRIPTS_DIR: injected by nix check (raw src dir), or computed relative to
-  # this test file for a local `bats tests/` run. MUST honor an already-set
-  # env var -- the nix check harness copies tests/* flat into a bare $TMPDIR,
-  # so recomputing unconditionally from BATS_TEST_FILENAME would resolve to
-  # the wrong directory there.
-  if [[ -z ${SCRIPTS_DIR:-} ]]; then
-    SCRIPTS_DIR="$(cd "$(dirname "${BATS_TEST_FILENAME}")/.." && pwd)"
+  # SCRIPTS_DIR/TEST_SUPPORT: injected by nix check (raw src dir / vendored
+  # harness path), or computed relative to this test file for a local
+  # `bats tests/` run. MUST honor an already-set env var -- the nix check
+  # harness copies tests/* flat into a bare $TMPDIR (so recomputing
+  # unconditionally from BATS_TEST_FILENAME would resolve to the wrong
+  # directory there), and gfh_setup below scrubs every exported var not on
+  # its allowlist -- both are captured into plain locals BEFORE it runs and
+  # re-exported after (pg2-31f13).
+  local scripts_dir_saved="${SCRIPTS_DIR:-}"
+  local test_support_saved="${TEST_SUPPORT:-}"
+
+  if [[ -n $test_support_saved ]]; then
+    # shellcheck disable=SC1091
+    source "$test_support_saved/git-fixture-harness.bash"
+  else
+    # shellcheck disable=SC1091
+    source "$(cd "$(dirname "${BATS_TEST_FILENAME}")/../../test-support" && pwd)/git-fixture-harness.bash"
   fi
-  LIB="${SCRIPTS_DIR}/wtnew.bash"
+
+  if [[ -z $scripts_dir_saved ]]; then
+    scripts_dir_saved="$(cd "$(dirname "${BATS_TEST_FILENAME}")/.." && pwd)"
+  fi
+  LIB="${scripts_dir_saved}/wtnew.bash"
   # shellcheck disable=SC1090  # runtime-computed path, by design
   source "$LIB"
-  TEST_DIR="$(mktemp -d)"
+
+  # Hermetic-by-construction git fixture (GIT_CEILING_DIRECTORIES + env
+  # allowlist reset + fresh HOME + hooks disabled): see pg2-31f13/pg2-gucfd.
+  # This suite's own `add_worktree` helper creates a REAL linked worktree --
+  # exactly the operation pg2-67h4y's write-up shows targeting the CANONICAL
+  # clone when GIT_DIR leaks from a commit-hook environment.
+  gfh_setup "wtnew"
+
+  export SCRIPTS_DIR="$scripts_dir_saved"
+
+  # Re-export TEST_SUPPORT too (also scrubbed by gfh_setup above) -- a later
+  # test resolving the harness path again would otherwise lose it.
+  if [[ -n $test_support_saved ]]; then
+    export TEST_SUPPORT="$test_support_saved"
+  fi
+
+  TEST_DIR="$GFH_REPO"
   # STUB_BIN: dir for fake `integrate-branch-support` placed on PATH.
   # Deliberately OUTSIDE the fixture repo ($TEST_DIR) -- creating it inside
   # would leave the bin dir as untracked content and falsely dirty the repo
   # under test.
   STUB_BIN="$(mktemp -d)"
   cd "$TEST_DIR" || return 1
-  git init -q --initial-branch=main
-  git -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
 }
 
 teardown() {
-  rm -rf "$TEST_DIR"
+  # gfh_teardown removes GFH_ROOT, which contains TEST_DIR ($GFH_REPO) -- no
+  # separate rm -rf "$TEST_DIR" needed.
+  gfh_teardown
   [ -n "${STUB_BIN:-}" ] && rm -rf "$STUB_BIN"
   if [ -n "${WT_DIR:-}" ]; then
     rm -rf "$WT_DIR"

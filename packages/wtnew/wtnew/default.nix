@@ -2,6 +2,7 @@
   mkBashScript,
   pkgs,
   integrate-branch-support,
+  testSupport ? null,
 }:
 mkBashScript {
   name = "wtnew";
@@ -17,4 +18,5 @@ mkBashScript {
     pkgs.jq
     integrate-branch-support
   ];
+  inherit testSupport;
 }
