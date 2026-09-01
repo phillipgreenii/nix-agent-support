@@ -15,6 +15,7 @@ import (
 	"go.opentelemetry.io/otel/metric"
 
 	"github.com/phillipgreenii/pr-pool/internal/activity"
+	"github.com/phillipgreenii/pr-pool/conformance"
 	"github.com/phillipgreenii/pr-pool/internal/beads"
 	"github.com/phillipgreenii/pr-pool/internal/ccpool"
 	"github.com/phillipgreenii/pr-pool/internal/config"
@@ -105,17 +106,6 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 		_ = store.Close()
 		return nil, nil, nil, nil, fmt.Errorf("construct event queue: %w", err)
 	}
-	for _, r := range cfg.Roles {
-		if !r.Enabled {
-			// Declared but inactive this run: its bindings still count for
-			// Bindings.Declares below (INV-DISP-3's configuration-wide view), but
-			// no Listener is registered, so its events wait, are offered to
-			// nobody, and expire unconsumed (INV-EVT-1, INV-EVT-4).
-			slog.Info("role disabled; not registering a listener", "role", r.Name)
-			continue
-		}
-		q.Register(o.NewListener(ctx, r))
-	}
 	// Bindings is built ONCE and threaded into both consumers so they can never
 	// disagree about which types are declared (Task 1.1, INV-DISP-3): the same
 	// value goes to core.Listen (validates PUSHED events) and onto the
@@ -151,6 +141,33 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 	if err != nil {
 		_ = store.Close()
 		return nil, nil, nil, nil, fmt.Errorf("start core: %w", err)
+	}
+	// Registration happens AFTER Listen (svc must exist) but is otherwise
+	// independent of Accept: an in-process participant never dials the
+	// socket, so there is no handshake to wait on. Task 2.1: register every
+	// ENABLED role's listener into the registry with an in-process callback
+	// marker (never Service.Register's socket-baked string —
+	// core.Registry.RegisterInProcess), then promote it straight to `started`
+	// (Register hard-codes `starting`; without this promotion Task 2.3's
+	// availability check blocks ALL dispatch to every in-process handler).
+	for _, r := range cfg.Roles {
+		if !r.Enabled {
+			// Declared but inactive this run: its bindings still count for
+			// Bindings.Declares below (INV-DISP-3's configuration-wide view), but
+			// no Listener is registered, so its events wait, are offered to
+			// nobody, and expire unconsumed (INV-EVT-1, INV-EVT-4).
+			slog.Info("role disabled; not registering a listener", "role", r.Name)
+			continue
+		}
+		q.Register(o.NewListener(ctx, r))
+		if _, err := svc.Registry().RegisterInProcess(r.Name, core.KindHandler); err != nil {
+			_ = store.Close()
+			return nil, nil, nil, nil, fmt.Errorf("register role %s: %w", r.Name, err)
+		}
+		if err := svc.Registry().SetLifecycle(r.Name, conformance.Started); err != nil {
+			_ = store.Close()
+			return nil, nil, nil, nil, fmt.Errorf("promote role %s to started: %w", r.Name, err)
+		}
 	}
 	return svc, q, mp, store.Close, nil
 }

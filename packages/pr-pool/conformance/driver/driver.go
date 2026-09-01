@@ -228,6 +228,17 @@ var negativeMatrix = map[string][]negativeCase{
 		{"missing accepted", `{"schemaVersion":"1","id":"t"}`},
 		{"accepted wrong type", `{"schemaVersion":"1","id":"t","accepted":"yes"}`},
 	},
+	"cli.register": {
+		{"missing id", `{"schemaVersion":"1","kind":"handler"}`},
+		{"missing kind", `{"schemaVersion":"1","id":"role-triage"}`},
+		{"kind out of enum", `{"schemaVersion":"1","id":"role-triage","kind":"orchestrator"}`},
+		{"self out of enum", `{"schemaVersion":"1","id":"role-triage","kind":"handler","self":"mostly-fine"}`},
+	},
+	"cli.register-reply": {
+		{"missing accepted", `{"schemaVersion":"1","callback":"","selfStatusCallback":"c"}`},
+		{"accepted wrong type", `{"schemaVersion":"1","accepted":"yes","callback":"","selfStatusCallback":"c"}`},
+		{"missing selfStatusCallback", `{"schemaVersion":"1","accepted":true,"callback":""}`},
+	},
 }
 
 // invokeMonRead runs the mon.read (INTF-MON pull direction, Task 3.6)

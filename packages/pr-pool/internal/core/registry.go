@@ -157,6 +157,27 @@ func (r *Registry) Register(id string, kind Kind, callback string, selfStatusCal
 	return *reg, nil
 }
 
+// InProcessCallback is the callback marker recorded for a participant that
+// lives in the SAME process as the core — a role's roleListener, registered
+// directly onto the queue by bootCore's own loop — and is therefore never
+// reached over the socket at all. It stands in for BOTH callback fields
+// (Registry.Register below) wherever Service.Register would otherwise mint a
+// real socket-baked command string (CallbackCommand): an in-process
+// participant has no socket to dial back into, so handing it one would be
+// actively wrong, not merely unused. It is distinct from the ordinary empty
+// string a kind with no event-delivery target gets (ingestCallbackFor), so a
+// registry view can always tell "no real command, by design" apart from
+// "this kind gets none of this callback".
+const InProcessCallback = "in-process"
+
+// RegisterInProcess registers a participant that lives in the SAME process
+// as the core, using InProcessCallback for both callback fields rather than
+// a socket-baked command. bootCore's per-role loop calls this — never
+// Service.Register — for exactly the reason InProcessCallback's doc explains.
+func (r *Registry) RegisterInProcess(id string, kind Kind) (Registration, error) {
+	return r.Register(id, kind, InProcessCallback, InProcessCallback)
+}
+
 // Deregister removes a participant (its orderly exit). It reports whether an
 // entry was present, so a double-deregister is a no-op rather than an error —
 // `stopped` and `crashing` can both reach here for the same participant.

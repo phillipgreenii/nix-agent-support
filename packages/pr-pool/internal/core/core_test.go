@@ -13,6 +13,65 @@ import (
 	"github.com/phillipgreenii/pr-pool/internal/eventqueue"
 )
 
+// Serve dispatches the `register` subcommand (Task 2.1): a participant
+// registering over the boundary gets back a cli.register-reply-shaped reply —
+// accepted, an empty callback for a handler kind (ingestCallbackFor has no
+// target for it), and a non-empty selfStatusCallback (every kind gets one,
+// interfaces.md "Self-status").
+func TestServe_RegisterSubcommand(t *testing.T) {
+	svc := startedService(t)
+	var out strings.Builder
+	req := `{"schemaVersion":"1","id":"role-triage","kind":"handler"}`
+	code := svc.Serve(SubcommandRegister, strings.NewReader(req), &out)
+	if code != conformance.ExitOK {
+		t.Fatalf("exit = %d, want %d; body=%s", code, conformance.ExitOK, out.String())
+	}
+	var reply map[string]any
+	if err := json.Unmarshal([]byte(out.String()), &reply); err != nil {
+		t.Fatalf("reply %q is not JSON: %v", out.String(), err)
+	}
+	if err := conformance.Check(RegisterReplySchema, reply); err != nil {
+		t.Fatalf("reply failed cli.register-reply schema: %v", err)
+	}
+	if reply["accepted"] != true {
+		t.Fatalf("accepted = %v, want true", reply["accepted"])
+	}
+	if reply["callback"] != "" {
+		t.Fatalf("callback = %v, want empty for a handler kind", reply["callback"])
+	}
+	if cb, _ := reply["selfStatusCallback"].(string); cb == "" {
+		t.Fatal("selfStatusCallback is empty, want a minted command every kind gets")
+	}
+}
+
+// Close must propagate stopping/stopped to every registered participant
+// (Task 2.1 Step 2.1.6) — the same orderly-shutdown signal interfaces.md's
+// lifecycle diagram declares for the core's own state, but Close previously
+// never touched s.reg at all, so a registered participant's Registration
+// stayed `started` forever after the core it belonged to had gone away.
+func TestClose_PropagatesStoppingStoppedToRegistry(t *testing.T) {
+	svc, _ := startService(t, shortDir(t))
+	reg, err := svc.Register("p1", KindHandler)
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	if err := svc.Registry().SetLifecycle(reg.ID, conformance.Started); err != nil {
+		t.Fatalf("SetLifecycle(started): %v", err)
+	}
+
+	if err := svc.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	got, ok := svc.Registry().Get("p1")
+	if !ok {
+		t.Fatal("participant p1 missing from registry after Close")
+	}
+	if got.State != conformance.Stopped {
+		t.Fatalf("State after Close = %v, want %v", got.State, conformance.Stopped)
+	}
+}
+
 // End to end over the REAL socket: a caller with the core's Ref delivers events
 // and they land in the durable queue.
 func TestSocketRoundTrip_IngestEvent(t *testing.T) {

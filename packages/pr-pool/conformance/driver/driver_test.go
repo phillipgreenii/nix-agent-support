@@ -193,6 +193,22 @@ func findResult(t *testing.T, results []Result, name string) Result {
 	return Result{}
 }
 
+// TestNegativeMatrixCompleteness gates the schema-change mechanics rule
+// (Global Constraints): adding/renaming a schemas/*.schema.json name requires
+// >=1 negative row in the SAME commit. It checks every registered message
+// type (schemas.Names(), via conformance.MessageTypes()) has at least one
+// negativeMatrix row here, so a new schema landing with no negative case at
+// all is caught rather than silently passing every other conformance case
+// (Task 2.1 Step 2.1.3; negativeMatrix moved here from package conformance's
+// own tests by the Task 3.13 extraction).
+func TestNegativeMatrixCompleteness(t *testing.T) {
+	for _, mt := range conformance.MessageTypes() {
+		if len(negativeMatrix[mt]) == 0 {
+			t.Errorf("%s has no negative-matrix row", mt)
+		}
+	}
+}
+
 // TestResult_ErrorIsNilOnPass documents Result's zero value as the passing
 // shape (no Err, not Skipped) — the same convention Run's static cases rely on.
 func TestResult_ErrorIsNilOnPass(t *testing.T) {

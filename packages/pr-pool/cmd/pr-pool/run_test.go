@@ -125,6 +125,33 @@ func TestBootCore_selectorExcludedRoleNotRegisteredAsListener(t *testing.T) {
 	}
 }
 
+// TestBootCore_InProcessParticipantAvailableImmediately proves Task 2.1's own
+// named acceptance test: a registered in-process handler (a role's
+// roleListener, registered onto the queue AND the registry by bootCore's own
+// loop) is Available IMMEDIATELY after bootCore returns — before Accept ever
+// runs, before any register verb crosses the wire at all. RED against the
+// pre-fix code: bootCore never touched svc.Registry() (only q.Register), so
+// Available was false for every role.
+func TestBootCore_InProcessParticipantAvailableImmediately(t *testing.T) {
+	cfg := config.Config{
+		LogDir: shortDir(t),
+		Roles: roles.RoleSet{
+			{Name: "r1", Enabled: true, Type: "command", Binds: []string{"t1"}, Command: &roles.CommandConfig{Argv: []string{"r1-cmd"}}},
+		},
+	}
+	o := &orchestrator.Orchestrator{Cfg: cfg, Cmd: &fakeCommander{}, BD: &dtest.ScriptBD{}}
+	svc, _, _, storeClose, err := bootCore(context.Background(), cfg, o)
+	if err != nil {
+		t.Fatalf("bootCore: %v", err)
+	}
+	defer func() { _ = storeClose() }()
+	defer func() { _ = svc.Close() }()
+
+	if !svc.Registry().Available("r1") {
+		t.Fatal("registered in-process handler r1 must be Available immediately after bootCore")
+	}
+}
+
 // selTestQuery is a minimal query.Query stand-in (mirrors internal/discover's
 // own unexported fakeQuery, copied here since that one is package-private):
 // it records whether Run was ever called and returns one canned event of its

@@ -1,0 +1,13 @@
+{
+  "$id": "cli.register-reply",
+  "title": "INTF-CLI participant registration reply",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "accepted", "callback", "selfStatusCallback"],
+  "properties": {
+    "schemaVersion": { "const": "1" },
+    "accepted": { "type": "boolean" },
+    "callback": { "type": "string" },
+    "selfStatusCallback": { "type": "string" }
+  }
+}

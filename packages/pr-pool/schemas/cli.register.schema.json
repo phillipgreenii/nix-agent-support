@@ -1,0 +1,16 @@
+{
+  "$id": "cli.register",
+  "title": "INTF-CLI participant registration (any participant -> core)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "id", "kind"],
+  "properties": {
+    "schemaVersion": { "const": "1" },
+    "id": { "type": "string" },
+    "kind": {
+      "type": "string",
+      "enum": ["source", "handler", "monitor", "storage"]
+    },
+    "self": { "type": "string", "enum": ["healthy", "degraded", "unavailable"] }
+  }
+}

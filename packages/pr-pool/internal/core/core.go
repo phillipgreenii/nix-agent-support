@@ -457,6 +457,16 @@ func (s *Service) Close() error {
 	s.state = conformance.Stopping
 	s.mu.Unlock()
 
+	// Propagate the orderly-shutdown signal to every registered participant
+	// (Task 2.1 Step 2.1.6) — the same lifecycle diagram interfaces.md declares
+	// for the core's own state, now driven onto the registry too: stopping (no
+	// new requests), then stopped (drained). Best-effort — SetLifecycle only
+	// fails for an id already gone from the registry, which Close does not
+	// treat as a shutdown error.
+	for _, reg := range s.reg.List() {
+		_ = s.reg.SetLifecycle(reg.ID, conformance.Stopping)
+	}
+
 	// Unpublish BEFORE closing the listener: a CLI that reads the record must not
 	// be handed a socket that is about to vanish.
 	var errs []error
@@ -469,6 +479,9 @@ func (s *Service) Close() error {
 	// Go's unix listener unlinks the socket on Close; tolerate it being gone.
 	if err := os.Remove(s.ref.Socket); err != nil && !os.IsNotExist(err) {
 		errs = append(errs, fmt.Errorf("core: remove socket: %w", err))
+	}
+	for _, reg := range s.reg.List() {
+		_ = s.reg.SetLifecycle(reg.ID, conformance.Stopped)
 	}
 	return errors.Join(errs...)
 }
@@ -560,6 +573,8 @@ func (s *Service) Serve(subcommand string, stdin io.Reader, stdout io.Writer) in
 		return s.handleMonRead(stdin, stdout)
 	case SubcommandStatus:
 		return s.handleStatus(stdin, stdout)
+	case SubcommandRegister:
+		return s.handleRegister(stdin, stdout)
 	default:
 		// `session-status` deliberately lands HERE, as an unknown subcommand. It was
 		// dropped 2026-07-28: pr-pool consumes no post-accept session outcome, so the
