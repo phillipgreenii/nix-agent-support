@@ -34,6 +34,9 @@ Merge State
 Ownership
   ownership: mine
 
+WIP
+  wip: yes
+
 Enrichment
   kind: feature
   size: M

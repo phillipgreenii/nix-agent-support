@@ -28,11 +28,13 @@ var prViewNow = func() time.Time { return time.Now().UTC() }
 // not an oversight.
 var prViewCmd = &cobra.Command{
 	Use:   "view <pr>",
-	Short: "Show the consolidated view of a PR: identity, ownership, enrichment, CI, merge state, feedback, revisions, links",
+	Short: "Show the consolidated view of a PR: identity, ownership, WIP state, enrichment, CI, merge state, feedback, revisions, links",
 	Long: `Show everything pg-pr knows about one PR: identity and state, ownership,
-enrichment (kind/size/languages/urgency), CI rollup, merge/conflict state,
-feedback, revision history, linked tickets and bead links — carrying an
-as-of time and a staleness verdict for the whole view.
+WIP state (the "wip" field: true/false/null, mirroring "pr wip on"/"pr wip
+off" -- null only when no store row exists yet for this PR), enrichment
+(kind/size/languages/urgency), CI rollup, merge/conflict state, feedback,
+revision history, linked tickets and bead links — carrying an as-of time
+and a staleness verdict for the whole view.
 
 Reads from the local store by default and makes no network call (matching
 'pr list'); a missing store is not an error, it just means less is known

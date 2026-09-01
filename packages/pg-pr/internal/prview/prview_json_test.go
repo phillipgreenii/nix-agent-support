@@ -56,7 +56,7 @@ var fullView = Assemble(PRViewInput{
 		AutoMergeEnabled: false,
 	},
 	Store: &store.PullRequest{
-		Repo: "o/r", Number: 42, Ownership: "mine",
+		Repo: "o/r", Number: 42, Ownership: "mine", WIP: true,
 		Kind: "feature", Size: "M", Languages: []string{"Go", "Nix"},
 		Urgency: "high", UrgencyScore: 7, UrgencyReasons: []string{"label:p0", "incident-linked"},
 		LastSyncedAt: fixedNow.Add(-30 * time.Second).Format(time.RFC3339),
@@ -223,6 +223,21 @@ func TestMarshalView_Full_EnrichmentFieldsPresent(t *testing.T) {
 	}
 }
 
+// TestMarshalView_Full_WIPFieldPresent pins pg2-gyjx9's WIP-readback field:
+// fullView's Store row sets WIP: true, and that value MUST surface as the
+// marshaled "wip" key with no live provider round-trip involved (Assemble
+// takes no such call to begin with — this test only pins the wire value).
+func TestMarshalView_Full_WIPFieldPresent(t *testing.T) {
+	got := mustMarshalView(t, fullView)
+	var doc map[string]any
+	if err := json.Unmarshal(got, &doc); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+	if doc["wip"] != true {
+		t.Errorf(`doc["wip"] = %v, want true`, doc["wip"])
+	}
+}
+
 // ---------------------------------------------------------------------------
 // 4. An axis with no data present — a not-yet-existing axis (Approvals) and
 //    an existing-axis genuine absence (nil Ownership, no store row) — MUST
@@ -241,7 +256,7 @@ func TestMarshalView_Empty_AbsentAxesAreExplicitNullsNotOmittedKeys(t *testing.T
 
 	// Existing axes with a genuine absence this call: nil pointers -> explicit
 	// JSON null, key present.
-	for _, key := range []string{"ownership", "enrichment"} {
+	for _, key := range []string{"ownership", "wip", "enrichment"} {
 		v, present := doc[key]
 		if !present {
 			t.Errorf("key %q is OMITTED from the marshaled output, want present with value null", key)

@@ -188,6 +188,57 @@ func TestPRView_NoNetworkCall(t *testing.T) {
 	}
 }
 
+// TestPRView_JSONShowsWIPImmediatelyAfterWipOn is pg2-gyjx9's acceptance-
+// criterion test: `pr wip on <n>` followed immediately by `pr view <n>
+// --json` (no --force-reload) MUST report the WIP pin as on, sourced from
+// the store column db.SetWIP writes — not the provider-synced draft column,
+// and with no live provider round-trip needed for the `pr view` step
+// itself. `pr wip on` legitimately calls the provider once (an existing,
+// unrelated contract — it fetches the live PR to decide whether an
+// upstream draft conversion is needed, per runPRWipOn's own doc comment);
+// this test pins that the SECOND command, `pr view --json`, adds no further
+// GetPR call on top of that one.
+func TestPRView_JSONShowsWIPImmediatelyAfterWipOn(t *testing.T) {
+	resetPRWriteFlags()
+	resetPRFlags()
+	fv, _ := swapFakes(t)
+	setListStateHome(t)
+	seedListStore(t, store.PullRequest{Repo: "foo/bar", Number: 50, Ownership: "mine", State: "open"})
+	fv.getPRResult = &api.PR{State: "open", Draft: false}
+
+	var wipStdout, wipStderr bytes.Buffer
+	rootCmd.SetOut(&wipStdout)
+	rootCmd.SetErr(&wipStderr)
+	rootCmd.SetArgs([]string{"pr", "wip", "on", "50", "--repo", "foo/bar"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("pr wip on: %v (stderr=%s)", err, wipStderr.String())
+	}
+	if fv.getPRCalls != 1 {
+		t.Fatalf("pr wip on: expected exactly 1 GetPR call, got %d", fv.getPRCalls)
+	}
+
+	var viewStdout, viewStderr bytes.Buffer
+	rootCmd.SetOut(&viewStdout)
+	rootCmd.SetErr(&viewStderr)
+	rootCmd.SetArgs([]string{"pr", "view", "50", "--repo", "foo/bar", "--json"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("pr view --json: %v (stderr=%s)", err, viewStderr.String())
+	}
+
+	// The view step must not have made any further live provider call.
+	if fv.getPRCalls != 1 {
+		t.Fatalf("pr view --json: expected no additional GetPR call (still 1 total), got %d", fv.getPRCalls)
+	}
+
+	var doc map[string]any
+	if err := json.Unmarshal(viewStdout.Bytes(), &doc); err != nil {
+		t.Fatalf("pr view --json output is not valid JSON: %v\noutput:\n%s", err, viewStdout.String())
+	}
+	if doc["wip"] != true {
+		t.Errorf(`doc["wip"] = %v, want true immediately after "pr wip on", with no --force-reload`, doc["wip"])
+	}
+}
+
 func TestPRView_InvalidNumber(t *testing.T) {
 	resetPRFlags()
 	var stdout, stderr bytes.Buffer

@@ -101,6 +101,11 @@ func TestRenderHuman_Empty_UsesDistinctMarkersPerAxis(t *testing.T) {
 		t.Errorf("Ownership section = %+v, want a single field carrying sectionrender.Unknown (no store row)", own)
 	}
 
+	wip := byHeading["WIP"]
+	if len(wip.Fields) != 1 || wip.Fields[0].Value != sectionrender.Unknown {
+		t.Errorf("WIP section = %+v, want a single field carrying sectionrender.Unknown (no store row)", wip)
+	}
+
 	enrich := byHeading["Enrichment"]
 	for _, f := range enrich.Fields {
 		if f.Value != sectionrender.Unknown {

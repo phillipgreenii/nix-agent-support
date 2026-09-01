@@ -22,6 +22,7 @@
     "labels": null
   },
   "ownership": null,
+  "wip": null,
   "enrichment": null,
   "ci": {
     "state": "none",

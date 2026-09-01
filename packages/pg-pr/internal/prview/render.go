@@ -56,6 +56,7 @@ func sections(v View) []sectionrender.Section {
 		ciSection(v.CI),
 		mergeStateSection(v.MergeState),
 		ownershipSection(v.Ownership),
+		wipSection(v.WIP),
 		enrichmentSection(v.Enrichment),
 		feedbackSection(v.Feedback),
 		revisionsSection(v.Revisions),
@@ -161,6 +162,24 @@ func ownershipSection(o *string) sectionrender.Section {
 		Heading: "Ownership",
 		Fields: []sectionrender.Field{
 			{Label: "ownership", Value: sectionrender.OrUnknown(v)},
+		},
+	}
+}
+
+// wipSection covers View.WIP (*bool), the pg2-gyjx9 WIP-readback field. A
+// nil pointer means "no store row exists yet" and renders
+// sectionrender.Unknown, mirroring ownershipSection's nil-vs-known
+// convention above; a non-nil value renders via yesNo, matching how
+// identitySection already renders Identity.Draft.
+func wipSection(w *bool) sectionrender.Section {
+	v := sectionrender.Unknown
+	if w != nil {
+		v = yesNo(*w)
+	}
+	return sectionrender.Section{
+		Heading: "WIP",
+		Fields: []sectionrender.Field{
+			{Label: "wip", Value: v},
 		},
 	}
 }

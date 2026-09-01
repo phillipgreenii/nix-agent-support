@@ -50,6 +50,15 @@
 // (never derived from any input), so Assemble never errors or panics for
 // lack of a real data source, and a later, separate change can replace the
 // marker with real data once it lands.
+//
+// NOTE (pg2-gyjx9): the "hide/WIP state" axis above (View.HideWIP) is a
+// DIFFERENT, still-unimplemented concept — a combined hide+WIP DISPLAY axis
+// owned by that separate sibling epic — from View.WIP below, which is the
+// real, already-persisted `pr wip on`/`pr wip off` boolean
+// (internal/store.PullRequest.WIP). That column has been written by SetWIP
+// since pg2-4dz88.4.2, but nothing read it back out through `pr view` until
+// this bead added View.WIP; HideWIP's ALWAYS-unavailable behavior is
+// unaffected and stays pinned by TestAssemble_HideWIPAxisAlwaysUnavailable.
 package prview
 
 import (
@@ -341,11 +350,23 @@ type View struct {
 	// never re-derived by a consumer (INV-ASOF-2).
 	Stale bool `json:"stale"`
 
-	Identity   IdentityState `json:"identity"`
-	Ownership  *string       `json:"ownership"`
-	Enrichment *Enrichment   `json:"enrichment"`
-	CI         CIRollup      `json:"ci"`
-	MergeState MergeState    `json:"merge_state"`
+	Identity  IdentityState `json:"identity"`
+	Ownership *string       `json:"ownership"`
+	// WIP is the store-authoritative WIP flag persisted by `pr wip on` /
+	// `pr wip off` (internal/store.PullRequest.WIP, written via the store's
+	// SetWIP setter — cmd/pg-pr/pr_write.go's runPRWipOn/runPRWipOff). nil
+	// when no store row exists yet for this PR (same store-read-default
+	// nil-vs-known convention as Ownership above); a non-nil value is the
+	// row's raw WIP bit, read directly from the store with no live provider
+	// round-trip — so a caller of `pr wip on` sees the pin take immediately
+	// via a plain `pr view --json` (pg2-gyjx9), with no --force-reload
+	// needed. Deliberately a DIFFERENT field from the still-not-yet-existing
+	// HideWIP marker below — see the package doc's "Not-yet-existing axes"
+	// NOTE.
+	WIP        *bool       `json:"wip"`
+	Enrichment *Enrichment `json:"enrichment"`
+	CI         CIRollup    `json:"ci"`
+	MergeState MergeState  `json:"merge_state"`
 
 	Feedback         []FeedbackItem `json:"feedback"`
 	Revisions        []RevisionItem `json:"revisions"`
@@ -398,6 +419,7 @@ func Assemble(in PRViewInput) View {
 			Labels:       in.PR.Labels,
 		},
 		Ownership:  ownershipAxis(in.Store),
+		WIP:        wipAxis(in.Store),
 		Enrichment: enrichmentAxis(in.Store),
 		CI:         rollup,
 		MergeState: MergeState{
@@ -426,6 +448,21 @@ func ownershipAxis(row *store.PullRequest) *string {
 		return nil
 	}
 	v := row.Ownership
+	return &v
+}
+
+// wipAxis returns the store-read-default WIP marker: nil when no store row
+// exists yet, else a pointer to the row's raw WIP bit
+// (internal/store.PullRequest.WIP) — read directly from the store, never
+// derived from a live provider round-trip. This is pg2-gyjx9's WIP-readback
+// field: `pr wip on`/`pr wip off` (cmd/pg-pr/pr_write.go) already wrote this
+// column via the store's own SetWIP setter; this is the first read path that
+// surfaces it back out through `pr view`.
+func wipAxis(row *store.PullRequest) *bool {
+	if row == nil {
+		return nil
+	}
+	v := row.WIP
 	return &v
 }
 

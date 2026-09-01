@@ -88,6 +88,29 @@ func TestAssemble_Ownership_Absent(t *testing.T) {
 	}
 }
 
+// TestAssemble_WIP_Populated pins pg2-gyjx9's WIP-readback field: a store
+// row with WIP=true maps onto View.WIP directly, mirroring
+// TestAssemble_Ownership_Populated above.
+func TestAssemble_WIP_Populated(t *testing.T) {
+	in := PRViewInput{
+		Store: &store.PullRequest{Repo: "o/r", Number: 42, WIP: true},
+		Now:   fixedNow,
+	}
+	got := Assemble(in).WIP
+	if got == nil || !*got {
+		t.Fatalf("WIP = %v, want pointer to true", got)
+	}
+}
+
+// TestAssemble_WIP_Absent mirrors TestAssemble_Ownership_Absent: no store
+// row means WIP is unknown (nil), not "known false".
+func TestAssemble_WIP_Absent(t *testing.T) {
+	got := Assemble(PRViewInput{Now: fixedNow}).WIP
+	if got != nil {
+		t.Fatalf("WIP = %v, want nil (no store row)", *got)
+	}
+}
+
 func TestAssemble_Enrichment_Populated(t *testing.T) {
 	in := PRViewInput{
 		Store: &store.PullRequest{
@@ -419,6 +442,9 @@ func TestAssemble_ZeroValueInputDoesNotPanic(t *testing.T) {
 	if got.Ownership != nil {
 		t.Errorf("Ownership = %v, want nil", *got.Ownership)
 	}
+	if got.WIP != nil {
+		t.Errorf("WIP = %v, want nil", *got.WIP)
+	}
 	if got.Enrichment != nil {
 		t.Errorf("Enrichment = %+v, want nil", *got.Enrichment)
 	}
@@ -486,6 +512,9 @@ func TestAssemble_NoStoreRow_BuildsFromProviderInputAlone(t *testing.T) {
 	if got.Ownership != nil {
 		t.Errorf("Ownership = %v, want nil", *got.Ownership)
 	}
+	if got.WIP != nil {
+		t.Errorf("WIP = %v, want nil", *got.WIP)
+	}
 	if got.Enrichment != nil {
 		t.Errorf("Enrichment = %+v, want nil", *got.Enrichment)
 	}
@@ -516,6 +545,12 @@ func TestAssemble_StoreRowWithEmptyOptionalColumns_NoSectionDropped(t *testing.T
 	}
 	if *got.Ownership != "" {
 		t.Errorf("Ownership = %q, want empty string (store row's own zero value)", *got.Ownership)
+	}
+	if got.WIP == nil {
+		t.Fatalf("WIP = nil, want a non-nil pointer (store row is present, even if empty)")
+	}
+	if *got.WIP {
+		t.Errorf("WIP = true, want false (store row's own zero value)")
 	}
 	if got.Enrichment == nil {
 		t.Fatalf("Enrichment = nil, want a non-nil pointer (store row is present, even if empty)")
