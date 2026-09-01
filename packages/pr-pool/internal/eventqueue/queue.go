@@ -73,6 +73,20 @@ const (
 	DeclineUnavailable
 )
 
+// String renders d for the Observer's OnDeclined `reason` argument (Task
+// 2.3): observability text only, never consulted by the queue's own control
+// flow (every DeclineReason re-offers identically, per this type's own doc).
+func (d DeclineReason) String() string {
+	switch d {
+	case DeclineBusy:
+		return "busy"
+	case DeclineUnavailable:
+		return "unavailable"
+	default:
+		return "none"
+	}
+}
+
 // BackoffListener is a Listener that declares its OWN handler retry cadence
 // (INV-FAIL-2), overriding the queue's default (WithRetryBackoff) for just this
 // handler. Handlers differ in how long they typically stay busy, so the cadence
@@ -97,7 +111,14 @@ type Observer interface {
 	//
 	// (operator scope-cut 2026-07-28: everything post-accept stays permanently
 	// out of scope.)
-	OnDeclined(evtType string)
+	//
+	// Task 2.3 widens the signature with listenerID (which handler declined)
+	// and reason (DeclineReason.String(), observability text only — the
+	// queue's own re-offer/backoff treatment stays IDENTICAL for every
+	// DeclineReason, per that type's doc). This is purely additive data for a
+	// consumer (Task 3.0's activity ring/metrics) — it does not change WHEN
+	// or how often OnDeclined fires.
+	OnDeclined(evtType, listenerID, reason string)
 	// OnDispatchFailure fires on the OTHER delivery-side failure class
 	// (INV-OBS-1): an outright dispatch failure where the core's own attempt to
 	// hand the event to a listener broke outright rather than returning a
@@ -110,15 +131,21 @@ type Observer interface {
 	// follows the identical settlement/retry mechanics (INV-FAIL-1 / INV-EVT-4)
 	// — only the failure-rate metric class differs.
 	OnDispatchFailure(evtType string)
+	// OnDeduped fires when Enqueue drops a re-emit of a still-RETAINED id
+	// (INV-EVT-3, the Deduped EnqueueResult) — a signal that, before Task
+	// 2.3, had no observer hook at all (the review digest's corr-5 gap:
+	// "Nonexistent data: ... `deduped` hook").
+	OnDeduped(evtType string)
 }
 
 type noopObserver struct{}
 
-func (noopObserver) OnEnqueue(Event)            {}
-func (noopObserver) OnAccept(string, string)    {}
-func (noopObserver) OnUnconsumedExpired(string) {}
-func (noopObserver) OnDeclined(string)          {}
-func (noopObserver) OnDispatchFailure(string)   {}
+func (noopObserver) OnEnqueue(Event)                   {}
+func (noopObserver) OnAccept(string, string)           {}
+func (noopObserver) OnUnconsumedExpired(string)        {}
+func (noopObserver) OnDeclined(string, string, string) {}
+func (noopObserver) OnDeduped(string)                  {}
+func (noopObserver) OnDispatchFailure(string)          {}
 
 // EnqueueResult reports whether an enqueue added a new event or was dropped as
 // a duplicate of a still-retained id (INV-EVT-3).
@@ -168,6 +195,16 @@ type listenerState struct {
 	declineEventID string
 	declineStreak  int
 	nextEligible   time.Time
+
+	// delivered/declined are Task 2.3's per-listener delivery counters (Step
+	// 2.3.6), incremented inside Dispatch's phase 3 ONLY — under the
+	// ALREADY-HELD q.mu, never from an observer hook (those fire unlocked,
+	// Step 2.3.5) and never behind a separate mutex. Plain ints are safe
+	// here precisely because every access is under q.mu; Queue's own
+	// pool-wide delivered/declined below are atomic because THOSE are read
+	// without q.mu (a future status surface, Task 3.0).
+	delivered int
+	declined  int
 }
 
 // eligibleNow reports whether ls's retry-cadence cool-down (if any) for head
@@ -220,6 +257,21 @@ type depthCell struct {
 // Queue is the durable, ordered, de-duped, retention-bounded event queue
 // (ADR 0031, expiry bound amended by DEC-EVENT-1). It is safe for concurrent use.
 type Queue struct {
+	// mu guards every mutable field below.
+	//
+	// LOCK-ORDER INVARIANT (Task 2.3, pg2-84o3m.22; review-digest perf-F11):
+	// q.mu is a LEAF w.r.t. internal/core's Registry.mu and the (future,
+	// Task 3.0) activity ring — no code path may acquire q.mu while holding
+	// either of those, in either order. This is why the registry-aware
+	// unavailable check lives in internal/orchestrator's Offer, consulted in
+	// Dispatch's UNLOCKED phase 2, and never in Matches/ID (which run under
+	// q.mu via headFor): a check reachable from headFor would need to take
+	// Registry.mu WHILE q.mu is held, an AB/BA deadlock risk the moment
+	// anything else ever takes q.mu while holding Registry.mu. It is also
+	// why Task 2.3's observer hooks (Step 2.3.5) fire strictly AFTER q.mu is
+	// released — a ring with its own mutex, or an OTel gauge callback that
+	// reads back into the queue (DepthByType), must never be called while
+	// q.mu is held, for the identical reason.
 	mu   sync.Mutex
 	cell atomic.Pointer[depthCell]
 	now  func() time.Time
@@ -283,6 +335,16 @@ type Queue struct {
 	// form, len(custody) is always 0 or 1, since Dispatch's phase 2 offers one
 	// listener at a time, synchronously, within a single goroutine.
 	custody map[string]custody
+
+	// delivered/declined are Task 2.3's POOL-WIDE delivery counters (Step
+	// 2.3.6) — the aggregate counterpart to each listenerState's own
+	// per-listener tally above. Written from Dispatch's phase 3, which
+	// already holds q.mu (same discipline as listenerCount's write side);
+	// atomic.Int64 because they are meant to be READ WITHOUT q.mu (a future
+	// status surface, Task 3.0) — the same read-without-the-lock rationale
+	// listenerCount already documents.
+	delivered atomic.Int64
+	declined  atomic.Int64
 }
 
 // custody is one outstanding-offer record in Queue.custody. It carries no
@@ -356,6 +418,21 @@ func (q *Queue) retryBackoffFor(l Listener) backoff.Policy {
 		return bl.RetryBackoff()
 	}
 	return q.retryBackoff
+}
+
+// unlockOnce returns a function that unlocks q.mu exactly once, no matter how
+// many times it is called (Task 2.3, Step 2.3.5's panic-safe-unlock
+// pattern). A caller that needs to fire an observer hook AFTER releasing
+// q.mu — never while it is held, per the lock-order invariant on q.mu's own
+// doc — calls the returned function explicitly at that point, while ALSO
+// deferring it as usual: a panic anywhere between Lock and the explicit call
+// (e.g. a panicking Store double) still releases the lock exactly once,
+// because the explicit call and the deferred fallback share the same
+// sync.Once. A raw q.mu.Unlock() call is forbidden in any function using
+// this pattern — it would defeat exactly the panic safety this exists for.
+func (q *Queue) unlockOnce() func() {
+	var once sync.Once
+	return func() { once.Do(q.mu.Unlock) }
 }
 
 // New constructs a Queue over store, replaying any prior durable state so
@@ -446,17 +523,29 @@ func (q *Queue) Register(l Listener) {
 // mutation: a batch failure returns the error with NEITHER the stale entry
 // retired NOR the re-emit admitted, exactly as a plain single-append failure
 // already left the re-emit un-admitted.
+//
+// Task 2.3 (Step 2.3.5): every observer hook below fires AFTER q.mu is
+// released, via the panic-safe unlockOnce helper — never synchronously while
+// locked (the lock-order invariant on q.mu's own doc). Because the
+// stale-retire branch's evict+enqueue is now ONE atomic AppendBatch call
+// (above), a batch failure leaves NOTHING changed — neither the stale entry
+// retired nor the re-emit admitted — so, unlike an unbatched retire, that
+// failure return owes no hook at all; only the Deduped return and the two
+// success returns do.
 func (q *Queue) Enqueue(evt Event) (EnqueueResult, error) {
 	if err := evt.Validate(); err != nil {
 		return Enqueued, err
 	}
 	q.mu.Lock()
-	defer q.mu.Unlock()
+	unlock := q.unlockOnce()
+	defer unlock()
 	now := q.now()
 	evt = evt.Resolve(now)
 	enqueueRecord := recordFromEvent(evt, now)
 	if e, ok := q.entries[evt.ID]; ok {
 		if q.retainedLocked(e, now) {
+			unlock()
+			q.obs.OnDeduped(evt.Type)
 			return Deduped, nil // still-retained duplicate id (INV-EVT-3)
 		}
 		// The id exists but its retention is over and the sweep has not run yet. A
@@ -470,14 +559,16 @@ func (q *Queue) Enqueue(evt Event) (EnqueueResult, error) {
 		if err := q.store.AppendBatch([]Record{evictRecord, enqueueRecord}); err != nil {
 			return Enqueued, err
 		}
-		if len(e.accepted) == 0 {
-			q.obs.OnUnconsumedExpired(e.evt.Type)
-		}
+		staleMiss := len(e.accepted) == 0
 		delete(q.entries, e.evt.ID)
 		q.publishCellLocked(e.evt.Type, evt.Type, evt.Type)
 		q.dropFromOrder(evt.ID)
 		q.entries[evt.ID] = newEntry(evt)
 		q.order = append(q.order, evt.ID)
+		unlock()
+		if staleMiss {
+			q.obs.OnUnconsumedExpired(e.evt.Type)
+		}
 		q.obs.OnEnqueue(evt)
 		return Enqueued, nil
 	}
@@ -487,6 +578,7 @@ func (q *Queue) Enqueue(evt Event) (EnqueueResult, error) {
 	q.entries[evt.ID] = newEntry(evt)
 	q.order = append(q.order, evt.ID)
 	q.publishCellLocked("", evt.Type, evt.Type)
+	unlock()
 	q.obs.OnEnqueue(evt)
 	return Enqueued, nil
 }
@@ -647,6 +739,52 @@ type pendingOffer struct {
 	// failure classes apart even though both currently share the same
 	// result.Accepted==false shape.
 	dispatchFailed bool
+}
+
+// signalKind classifies one dispatchSignal (Task 2.3, Step 2.3.5). Dispatch's
+// phase 3 is the only producer today — Enqueue and Expire each fire their
+// own (single-kind) OnDeduped/OnUnconsumedExpired signal directly after their
+// own unlock, since neither ever needs to mix signal kinds within one pass.
+type signalKind int
+
+const (
+	signalAccept signalKind = iota
+	signalDeclined
+	// signalDispatchFailure carries offerSafely's recovered-panic class
+	// (INV-OBS-1's OTHER delivery-side failure, bead pg2-icm3u) — distinct
+	// from signalDeclined so it fans out via OnDispatchFailure, never
+	// OnDeclined, and never touches the declined counters (Task 2.3, Step
+	// 2.3.6): a dispatch failure is not a graceful decline.
+	signalDispatchFailure
+)
+
+// dispatchSignal is one observer notification Dispatch's phase 3 queues while
+// q.mu is held and fans out AFTER releasing it (Task 2.3, Step 2.3.5) —
+// never synchronously while locked, per the lock-order invariant on q.mu's
+// own doc. It is pass-local: built fresh by each Dispatch call, never
+// retained across calls.
+type dispatchSignal struct {
+	kind     signalKind
+	evtType  string
+	eventID  string
+	listener string
+	reason   DeclineReason
+}
+
+// fanOut delivers each queued signal to q.obs, in the order phase 3 recorded
+// them. Callers MUST call this only AFTER releasing q.mu — the whole point
+// of collecting signals into sigs in the first place.
+func (q *Queue) fanOut(sigs []dispatchSignal) {
+	for _, s := range sigs {
+		switch s.kind {
+		case signalAccept:
+			q.obs.OnAccept(s.eventID, s.listener)
+		case signalDeclined:
+			q.obs.OnDeclined(s.evtType, s.listener, s.reason.String())
+		case signalDispatchFailure:
+			q.obs.OnDispatchFailure(s.evtType)
+		}
+	}
 }
 
 // newDispatchID mints a fresh dispatch tracking id: "dsp-" followed by 12 hex
@@ -811,9 +949,23 @@ func (q *Queue) Dispatch() (accepted int) {
 
 	// Phase 3 — RECORD (locked), re-validating each outcome against current state
 	// (see the locking-discipline note above).
+	//
+	// Task 2.3 (Steps 2.3.5 + 2.3.6) adds two things to this phase, both
+	// staying strictly under the ALREADY-HELD q.mu:
+	//   - per-listener delivered/declined counters (p.ls.delivered/declined)
+	//     and the pool-wide atomic counterparts (q.delivered/q.declined) —
+	//     incremented HERE, never from an observer hook, never behind a
+	//     separate mutex;
+	//   - every OnAccept/OnDeclined observer notification is queued into
+	//     `signals` instead of firing inline, and fanned out ONLY after q.mu
+	//     is released below (panic-safe unlockOnce) — the lock-order
+	//     invariant on q.mu's own doc forbids calling into an observer
+	//     while holding it.
 	q.mu.Lock()
-	defer q.mu.Unlock()
+	unlock := q.unlockOnce()
+	defer unlock()
 	var evicts []Record
+	var signals []dispatchSignal
 	for _, p := range pending {
 		// The pass's phase 2 for this offer has concluded either way — delete
 		// custody FIRST, before any of the skip/settle branches below, so an
@@ -843,9 +995,11 @@ func (q *Queue) Dispatch() (accepted int) {
 			// very next Dispatch pass. Only which Observer hook fires — and so
 			// which failure-rate metric class counts it — differs.
 			if p.dispatchFailed {
-				q.obs.OnDispatchFailure(p.evt.Type)
+				signals = append(signals, dispatchSignal{kind: signalDispatchFailure, evtType: p.evt.Type})
 			} else {
-				q.obs.OnDeclined(p.evt.Type)
+				p.ls.declined++
+				q.declined.Add(1)
+				signals = append(signals, dispatchSignal{kind: signalDeclined, evtType: p.evt.Type, listener: lid, reason: p.result.Decline})
 			}
 			if p.lastAttempt {
 				e.settled[lid] = true
@@ -879,7 +1033,9 @@ func (q *Queue) Dispatch() (accepted int) {
 			slog.Error("eventqueue: accept-append failed; event will redeliver on restart until the write succeeds",
 				"eventId", p.evt.ID, "listenerId", lid, "err", err)
 		}
-		q.obs.OnAccept(p.evt.ID, lid)
+		p.ls.delivered++
+		q.delivered.Add(1)
+		signals = append(signals, dispatchSignal{kind: signalAccept, eventID: p.evt.ID, listener: lid})
 		accepted++
 		if rec, evicted := q.maybeEvict(e); evicted {
 			evicts = append(evicts, rec)
@@ -895,6 +1051,8 @@ func (q *Queue) Dispatch() (accepted int) {
 				"count", len(evicts), "err", err)
 		}
 	}
+	unlock()
+	q.fanOut(signals)
 	return accepted
 }
 
@@ -1022,12 +1180,19 @@ func (q *Queue) publishCellLocked(decType, incType, seenType string) {
 // logged — matching the accept-append precedent in Dispatch — and does not
 // block or roll back the pass: the in-memory drops already happened, same as an
 // individual evict-append failure was already swallowed before this task.
+//
+// Task 2.3 (Step 2.3.5): every OnUnconsumedExpired signal this sweep finds is
+// collected into a pass-local slice and fanned out AFTER q.mu is released
+// (panic-safe unlockOnce), never synchronously while locked — the mirror of
+// Enqueue's own stale-retire handling and Dispatch phase 3's fan-out below.
 func (q *Queue) Expire() (dropped int) {
 	q.mu.Lock()
-	defer q.mu.Unlock()
+	unlock := q.unlockOnce()
+	defer unlock()
 	now := q.now()
 	kept := q.order[:0:0]
 	var evicts []Record
+	var misses []string // evt types of unconsumed-expired misses this sweep found
 	for _, id := range q.order {
 		e, ok := q.entries[id]
 		if !ok {
@@ -1040,7 +1205,7 @@ func (q *Queue) Expire() (dropped int) {
 		rec, unconsumedExpired := q.retireLocked(e)
 		evicts = append(evicts, rec)
 		if unconsumedExpired {
-			q.obs.OnUnconsumedExpired(e.evt.Type)
+			misses = append(misses, e.evt.Type)
 		}
 		dropped++
 	}
@@ -1050,6 +1215,10 @@ func (q *Queue) Expire() (dropped int) {
 			slog.Error("eventqueue: evict-append failed; the event(s) will replay as retained and be re-offered after a restart",
 				"count", len(evicts), "err", err)
 		}
+	}
+	unlock()
+	for _, t := range misses {
+		q.obs.OnUnconsumedExpired(t)
 	}
 	return dropped
 }

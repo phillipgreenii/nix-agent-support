@@ -14,8 +14,8 @@ import (
 
 	"go.opentelemetry.io/otel/metric"
 
-	"github.com/phillipgreenii/pr-pool/internal/activity"
 	"github.com/phillipgreenii/pr-pool/conformance"
+	"github.com/phillipgreenii/pr-pool/internal/activity"
 	"github.com/phillipgreenii/pr-pool/internal/beads"
 	"github.com/phillipgreenii/pr-pool/internal/ccpool"
 	"github.com/phillipgreenii/pr-pool/internal/config"
@@ -142,6 +142,13 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 		_ = store.Close()
 		return nil, nil, nil, nil, fmt.Errorf("start core: %w", err)
 	}
+	// o.Registry (Task 2.3, pg2-84o3m.22) is set BEFORE the loop below so every
+	// o.NewListener(ctx, r) call captures the SAME live *core.Registry onto its
+	// roleListener — Offer reads it live at each future Offer call, so it does
+	// not matter that this role's own RegisterInProcess/SetLifecycle promotion
+	// (a few lines down, same iteration) hasn't happened yet at the moment
+	// NewListener itself runs.
+	o.Registry = svc.Registry()
 	// Registration happens AFTER Listen (svc must exist) but is otherwise
 	// independent of Accept: an in-process participant never dials the
 	// socket, so there is no handshake to wait on. Task 2.1: register every
@@ -239,14 +246,28 @@ func (f fanOutObserver) OnUnconsumedExpired(evtType string) {
 	f.b.OnUnconsumedExpired(evtType)
 }
 
-func (f fanOutObserver) OnDeclined(evtType string) {
-	f.a.OnDeclined(evtType)
-	f.b.OnDeclined(evtType)
+func (f fanOutObserver) OnDeclined(evtType, listenerID, reason string) {
+	f.a.OnDeclined(evtType, listenerID, reason)
+	f.b.OnDeclined(evtType, listenerID, reason)
 }
 
 func (f fanOutObserver) OnDispatchFailure(evtType string) {
 	f.a.OnDispatchFailure(evtType)
 	f.b.OnDispatchFailure(evtType)
+}
+
+// OnDeduped (Task 2.3, pg2-84o3m.22) deliberately fans out to the activity
+// ring ONLY (f.b), never to the metrics emitter (f.a): emitter's own
+// OnDeduped is already fed from core.IngestObserver's ingest-only path
+// (internal/core/ingest.go, ONE emitter answering both interfaces per this
+// function's own doc above) for the exact same event, so also calling it
+// here would double-count every ingest-driven dedup in MetricDeduped. This
+// queue-level hook additionally covers discover.go's pull path and
+// emit.go's push-inject path, which core.IngestObserver's hook never sees at
+// all — but that broader coverage stays confined to the activity ring for
+// now; widening MetricDeduped's own scope to match is a separate decision.
+func (f fanOutObserver) OnDeduped(evtType string) {
+	f.b.OnDeduped(evtType)
 }
 
 // activityPendingTypesCap bounds activityObserver's eventID->Type
@@ -328,12 +349,19 @@ func (a *activityObserver) OnUnconsumedExpired(evtType string) {
 	a.ring.Append(activity.Entry{Type: evtType, Outcome: "missed"})
 }
 
-func (a *activityObserver) OnDeclined(evtType string) {
+func (a *activityObserver) OnDeclined(evtType, _, _ string) {
 	a.ring.Append(activity.Entry{Type: evtType, Outcome: "declined"})
 }
 
 func (a *activityObserver) OnDispatchFailure(evtType string) {
 	a.ring.Append(activity.Entry{Type: evtType, Outcome: "dispatch_failed"})
+}
+
+// OnDeduped (Task 2.3, pg2-84o3m.22) closes the "deduped" gap this type's
+// own doc above flagged: eventqueue.Observer now carries the signal
+// directly, so it needs no eventID->Type lookup the way OnAccept does.
+func (a *activityObserver) OnDeduped(evtType string) {
+	a.ring.Append(activity.Entry{Type: evtType, Outcome: "deduped"})
 }
 
 // preparedRun is the config/precheck/eventlog setup shared by `run` and

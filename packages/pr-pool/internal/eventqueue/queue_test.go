@@ -97,6 +97,7 @@ type recordingObserver struct {
 	unconsumedExpired []string
 	declined          []string
 	dispatchFailed    []string
+	duped             []string
 }
 
 func (o *recordingObserver) OnEnqueue(e Event)       { o.enqueued = append(o.enqueued, e.ID) }
@@ -104,10 +105,17 @@ func (o *recordingObserver) OnAccept(id, lid string) { o.accepted = append(o.acc
 func (o *recordingObserver) OnUnconsumedExpired(t string) {
 	o.unconsumedExpired = append(o.unconsumedExpired, t)
 }
-func (o *recordingObserver) OnDeclined(t string) { o.declined = append(o.declined, t) }
+
+// OnDeclined records only evtType (Task 2.3 widened the signature with
+// listenerID/reason, but every existing assertion against o.declined checks
+// evtType alone, so this keeps their meaning unchanged).
+func (o *recordingObserver) OnDeclined(t, _, _ string) { o.declined = append(o.declined, t) }
 func (o *recordingObserver) OnDispatchFailure(t string) {
 	o.dispatchFailed = append(o.dispatchFailed, t)
 }
+
+// OnDeduped is Task 2.3's new Observer method.
+func (o *recordingObserver) OnDeduped(t string) { o.duped = append(o.duped, t) }
 
 // evt builds a DEFAULT event: neither `at` nor `expiresAt` set. The core resolves
 // both to its own ingest-now, so the event is BORN EXPIRED (INV-EVT-4) — offered
@@ -185,6 +193,62 @@ func TestDedupWhileRetained(t *testing.T) {
 	}
 	if len(l.accepted) != 1 {
 		t.Fatalf("accepted %d times, want exactly 1 (dedup)", len(l.accepted))
+	}
+}
+
+// TestEnqueue_DedupedFiresOnDeduped is Task 2.3's required RED test (Step
+// 2.3.4): the Deduped exit — a re-emit of a still-RETAINED id — now fans out
+// OnDeduped. Before Task 2.3 this exit fired NO observer hook at all (the
+// review digest's corr-5 gap: "Nonexistent data: ... `deduped` hook").
+func TestEnqueue_DedupedFiresOnDeduped(t *testing.T) {
+	clk := newClock()
+	obs := &recordingObserver{}
+	q := newQueue(t, clk, WithObserver(obs))
+	l := newListener("h", "T")
+	q.Register(l)
+	mustEnqueue(t, q, evtUntil("dup", "T", clk.in(time.Hour)))
+	if r := mustEnqueue(t, q, evtUntil("dup", "T", clk.in(time.Hour))); r != Deduped {
+		t.Fatalf("re-enqueue before accept = %v, want Deduped", r)
+	}
+	if !equal(obs.duped, []string{"T"}) {
+		t.Fatalf("duped = %v, want [T]", obs.duped)
+	}
+}
+
+// TestDispatch_PerListenerCountersIncrementUnderExistingLock is Task 2.3's
+// required RED test (Step 2.3.6): per-listener delivered/declined counters
+// and the pool-wide atomic counterparts increment in Dispatch's phase 3,
+// under the already-held q.mu.
+func TestDispatch_PerListenerCountersIncrementUnderExistingLock(t *testing.T) {
+	clk := newClock()
+	q := newQueue(t, clk)
+	accepting := newListener("h1", "T")
+	q.Register(accepting)
+	mustEnqueue(t, q, evtUntil("e1", "T", clk.in(time.Hour)))
+	q.Dispatch() // e1 accepted by "h1"
+
+	q.mu.Lock()
+	delivered, declined := q.listeners[0].delivered, q.listeners[0].declined
+	q.mu.Unlock()
+	if delivered != 1 || declined != 0 {
+		t.Fatalf("h1 counters = delivered=%d declined=%d, want delivered=1 declined=0", delivered, declined)
+	}
+
+	declining := newListener("h2", "U")
+	declining.neverAccept = true
+	q.Register(declining)
+	mustEnqueue(t, q, evt("orphan", "U")) // born expired: h2's decline settles it (lastAttempt)
+	q.Dispatch()
+
+	q.mu.Lock()
+	d2, decl2 := q.listeners[1].delivered, q.listeners[1].declined
+	gotDelivered, gotDeclined := q.delivered.Load(), q.declined.Load()
+	q.mu.Unlock()
+	if d2 != 0 || decl2 != 1 {
+		t.Fatalf("h2 counters = delivered=%d declined=%d, want delivered=0 declined=1", d2, decl2)
+	}
+	if gotDelivered != 1 || gotDeclined != 1 {
+		t.Fatalf("pool-wide counters = delivered=%d declined=%d, want delivered=1 declined=1", gotDelivered, gotDeclined)
 	}
 }
 

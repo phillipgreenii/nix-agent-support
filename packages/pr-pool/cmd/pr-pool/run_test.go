@@ -223,10 +223,11 @@ func TestApplySelectors_queryExcludedNeverProduces(t *testing.T) {
 // OnDispatchFailure (bead pg2-icm3u) reaches both fanned-out observers.
 type recordingDispatchFailureObserver struct{ dispatchFailed []string }
 
-func (*recordingDispatchFailureObserver) OnEnqueue(eventqueue.Event) {}
-func (*recordingDispatchFailureObserver) OnAccept(string, string)    {}
-func (*recordingDispatchFailureObserver) OnUnconsumedExpired(string) {}
-func (*recordingDispatchFailureObserver) OnDeclined(string)          {}
+func (*recordingDispatchFailureObserver) OnEnqueue(eventqueue.Event)        {}
+func (*recordingDispatchFailureObserver) OnAccept(string, string)           {}
+func (*recordingDispatchFailureObserver) OnUnconsumedExpired(string)        {}
+func (*recordingDispatchFailureObserver) OnDeclined(string, string, string) {}
+func (*recordingDispatchFailureObserver) OnDeduped(string)                  {}
 func (r *recordingDispatchFailureObserver) OnDispatchFailure(t string) {
 	r.dispatchFailed = append(r.dispatchFailed, t)
 }

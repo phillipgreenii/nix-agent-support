@@ -2,12 +2,17 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"os/exec"
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/pr-pool/conformance"
 	"github.com/phillipgreenii/pr-pool/internal/backoff"
 	"github.com/phillipgreenii/pr-pool/internal/ccpool"
 	"github.com/phillipgreenii/pr-pool/internal/config"
+	"github.com/phillipgreenii/pr-pool/internal/core"
 	"github.com/phillipgreenii/pr-pool/internal/discover"
 	"github.com/phillipgreenii/pr-pool/internal/dtest"
 	"github.com/phillipgreenii/pr-pool/internal/event"
@@ -88,5 +93,91 @@ func TestRoleListener_OfferAlwaysAccepts(t *testing.T) {
 	}
 	if len(cc.Sent) != 1 || cc.Sent[0] != ext1 {
 		t.Fatalf("Offer did not dispatch the worker session; sent=%v", cc.Sent)
+	}
+}
+
+// fakeExitCommander is a query.Commander test double returning a fixed error
+// from every call — used to hand a command role's backing command a
+// fabricated *exec.ExitError (Task 2.3, pg2-84o3m.22's "test doubles
+// fabricate an *exec.ExitError").
+type fakeExitCommander struct{ err error }
+
+func (f fakeExitCommander) Run(_ context.Context, _ []string) ([]byte, error) { return nil, f.err }
+
+// fabricateExitError runs a trivial subprocess that exits with code so the
+// test gets back a REAL *exec.ExitError — os/exec.ExitError has no exported
+// constructor, so a genuine short-lived process is the only portable way to
+// produce one.
+func fabricateExitError(t *testing.T, code int) error {
+	t.Helper()
+	err := exec.Command("/bin/sh", "-c", fmt.Sprintf("exit %d", code)).Run()
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("fabricateExitError(%d): did not produce *exec.ExitError; err=%v", code, err)
+	}
+	return exitErr
+}
+
+// TestListenerOffer_CommandExitBusyMapsToDeclineBusy is Task 2.3's required
+// RED test (Step 2.3.2): a command role whose backing command exits busy
+// (code 9, executor.ErrBusy) must make Offer report a pre-accept DeclineBusy
+// rather than treating the dispatch as completed.
+func TestListenerOffer_CommandExitBusyMapsToDeclineBusy(t *testing.T) {
+	cfg := fastCfg()
+	bd := &dtest.ScriptBD{}
+	cc := &dtest.FakeCC{}
+	o := newOrch(cc, bd, cfg)
+	o.Cmd = fakeExitCommander{err: fabricateExitError(t, 9)}
+	role := roles.Role{
+		Name: "cmdrole", Type: "command", Binds: []string{"work-ready"},
+		Command: &roles.CommandConfig{Argv: []string{"noop"}},
+	}
+	ctx := context.Background()
+	l := o.NewListener(ctx, role)
+
+	evt := discover.ToQueueEvent(event.NewItemEvent("work-ready", "t", item.Item{ID: "zr-w1"}))
+	got := l.Offer(eventqueue.Offering{ID: "dsp-000000000000", Event: evt})
+
+	want := eventqueue.OfferResult{Accepted: false, Decline: eventqueue.DeclineBusy}
+	if got != want {
+		t.Fatalf("Offer() = %+v, want %+v", got, want)
+	}
+}
+
+// TestListenerOffer_UnavailableSelfStatusDeclines is Task 2.3's required RED
+// test (Step 2.3.3): a role whose registry entry self-reports `unavailable`
+// must make Offer decline BEFORE doing any dispatch work at all (no session
+// sent), never reaching the executor.
+func TestListenerOffer_UnavailableSelfStatusDeclines(t *testing.T) {
+	cfg := fastCfg()
+	bd := &dtest.ScriptBD{}
+	cc := &dtest.FakeCC{}
+	o := newOrch(cc, bd, cfg)
+	role := workerRole(o)
+
+	reg := core.NewRegistry(nil)
+	if _, err := reg.RegisterInProcess(role.Name, core.KindHandler); err != nil {
+		t.Fatalf("RegisterInProcess: %v", err)
+	}
+	if err := reg.SetLifecycle(role.Name, conformance.Started); err != nil {
+		t.Fatalf("SetLifecycle: %v", err)
+	}
+	if err := reg.SetSelfStatus(role.Name, core.SelfUnavailable); err != nil {
+		t.Fatalf("SetSelfStatus: %v", err)
+	}
+	o.Registry = reg
+
+	ctx := context.Background()
+	l := o.NewListener(ctx, role)
+
+	evt := discover.ToQueueEvent(event.NewItemEvent(roles.EventWorkReady, "t", item.Item{ID: "zr-w1"}))
+	got := l.Offer(eventqueue.Offering{ID: "dsp-000000000000", Event: evt})
+
+	want := eventqueue.OfferResult{Accepted: false, Decline: eventqueue.DeclineUnavailable}
+	if got != want {
+		t.Fatalf("Offer() = %+v, want %+v", got, want)
+	}
+	if len(cc.Sent) != 0 {
+		t.Fatalf("Offer must not dispatch while self-status is unavailable; sent=%v", cc.Sent)
 	}
 }

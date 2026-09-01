@@ -2,10 +2,13 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 
 	"github.com/phillipgreenii/pr-pool/internal/backoff"
+	"github.com/phillipgreenii/pr-pool/internal/core"
 	"github.com/phillipgreenii/pr-pool/internal/discover"
 	"github.com/phillipgreenii/pr-pool/internal/eventqueue"
+	"github.com/phillipgreenii/pr-pool/internal/executor"
 	"github.com/phillipgreenii/pr-pool/internal/roles"
 )
 
@@ -57,6 +60,13 @@ type roleListener struct {
 	// listener's cadence stays stable for its whole life even if o.Cfg were
 	// ever mutated after boot.
 	poolDefault backoff.Policy
+	// reg is the core.Registry Offer consults for this role's self-status /
+	// lifecycle availability (Task 2.3, pg2-84o3m.22 Step 2.3.3) — captured
+	// once at construction from o.Registry, the same capture-at-construction
+	// pattern poolDefault uses. nil (o.Registry unset, every pre-Task-2.3
+	// test) disables the check: Offer never consults it and behaves exactly
+	// as before this field existed.
+	reg *core.Registry
 }
 
 // NewListener returns the eventqueue.Listener for role, run under ctx — the
@@ -66,9 +76,10 @@ type roleListener struct {
 // cancellation through the executor's own ctx-aware waits. It is injected
 // with o.Cfg.RetryBackoff (the pool-wide default, RetryBackoff's fallback —
 // Task 1.3) at construction, the same way bootCore threads cfg.RetryBackoff
-// into eventqueue.WithRetryBackoff.
+// into eventqueue.WithRetryBackoff. o.Registry (Task 2.3) is captured the
+// same way: a nil o.Registry disables the availability check entirely.
 func (o *Orchestrator) NewListener(ctx context.Context, role roles.Role) eventqueue.Listener {
-	return &roleListener{o: o, role: role, ctx: ctx, poolDefault: o.Cfg.RetryBackoff}
+	return &roleListener{o: o, role: role, ctx: ctx, poolDefault: o.Cfg.RetryBackoff, reg: o.Registry}
 }
 
 func (l *roleListener) ID() string { return l.role.Name }
@@ -114,15 +125,35 @@ func (l *roleListener) Matches(evt eventqueue.Event) bool {
 // "worked to completion" coincide here — there is no deferred/async form on
 // this bridge. The dispatch's own report.Result (created/closed/handed-back)
 // is logged/emitted exactly as it was under the retired drain()/DrainOnce
-// path, via the SAME Orchestrator helpers. Task 2.2 widens the signature to
+// path, via the SAME Orchestrator helpers. Task 2.2 widened the signature to
 // Offering/OfferResult (a dispatch tracking id in, an Accepted/DeclineReason
-// pair out); this method itself still always accepts — Task 2.3 adds the one
-// decline path (a busy command exit).
+// pair out); before Task 2.3 this method always accepted.
+//
+// Task 2.3 (pg2-84o3m.22) adds the two genuine pre-accept decline paths, both
+// checked here in Dispatch's UNLOCKED phase 2 — never in Matches/ID, which
+// run under q.mu via headFor (perf-F11's lock-order pin):
+//
+//  1. Unavailable self-status / lifecycle: l.reg (nil unless o.Registry is
+//     set) is consulted FIRST, before any actual dispatch work, so a
+//     currently-unavailable participant costs nothing beyond the registry
+//     lookup.
+//  2. A busy command exit: workOne's error, when it resolves to
+//     executor.ErrBusy through the existing %w chain (errors.Is), means the
+//     dispatch attempt itself signaled "not right now" rather than
+//     completing — so it is reported as a decline, not run through the
+//     normal buildResult/emitResult completed-dispatch accounting (nothing
+//     meaningful happened to the bead for the caller to record).
 func (l *roleListener) Offer(o eventqueue.Offering) eventqueue.OfferResult {
+	if l.reg != nil && !l.reg.Available(l.role.Name) {
+		return eventqueue.OfferResult{Accepted: false, Decline: eventqueue.DeclineUnavailable}
+	}
 	evt := o.Event
 	d := discover.DeriveContextFromQueueEvent(l.role, evt)
 	pre, preOK := l.o.snapshotIDs(l.ctx)
 	res, err := l.o.workOne(l.ctx, d)
+	if errors.Is(err, executor.ErrBusy) {
+		return eventqueue.OfferResult{Accepted: false, Decline: eventqueue.DeclineBusy}
+	}
 	l.o.emitResult(l.ctx, l.role, d.Item.ID, l.o.buildResult(l.ctx, l.role, d, pre, preOK, res, err))
 	return eventqueue.OfferResult{Accepted: true, Decline: eventqueue.DeclineNone}
 }

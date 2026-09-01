@@ -309,11 +309,14 @@ func (e *Emitter) OnUnconsumedExpired(evtType string) {
 // OnDeclined feeds the failure-rate counter from the queue's Dispatch path
 // (eventqueue.Observer): a graceful pre-accept decline, one of the two
 // delivery-side cases INV-FAIL-1 covers (the other, OnDispatchFailure below,
-// fires from the same Dispatch pass for the OTHER class). evtType is accepted
-// for interface symmetry with the queue's other per-type hooks but is not
-// itself part of the failure-rate label set — the counter's "class" dimension
-// is FailureClassDeclined.
-func (e *Emitter) OnDeclined(_ string) {
+// fires from the same Dispatch pass for the OTHER class). evtType/listenerID/
+// reason (the latter two widened in Task 2.3) are accepted for interface
+// symmetry with the queue's other per-type hooks but are not themselves part
+// of the failure-rate label set — the counter's "class" dimension is
+// FailureClassDeclined, the one class knowable at this call site. Adding
+// listenerID/reason as new labels would be metrics-catalog growth, out of
+// this task's scope (Task 3.0's packet).
+func (e *Emitter) OnDeclined(_, _, _ string) {
 	e.RecordFailure(FailureClassDeclined)
 }
 
@@ -327,6 +330,22 @@ func (e *Emitter) OnDeclined(_ string) {
 // label set; the class dimension is FailureClassDispatchFail.
 func (e *Emitter) OnDispatchFailure(_ string) {
 	e.RecordFailure(FailureClassDispatchFail)
+}
+
+// OnDeduped implements both the extended core.IngestObserver contract AND
+// (Task 2.3, pg2-84o3m.22) eventqueue.Observer's identically-named
+// `OnDeduped(evtType string)` — one method necessarily answers both, since
+// Go resolves interface satisfaction structurally. It increments the deduped
+// counter, per type, when a duplicate id still retained in the queue
+// (INV-EVT-3, bead pg2-cz31d) is absorbed — the metrics half of the Debug
+// log line internal/core/ingest.go's handleIngestEvent already writes at
+// that same res == eventqueue.Deduped branch. eventqueue.Queue.Enqueue's OWN
+// OnDeduped call (fired for every producer, not just core's ingest path) is
+// deliberately NOT ALSO routed here for an ingest-driven dedup — see
+// cmd/pr-pool/run.go's fanOutObserver.OnDeduped — so this counter is not
+// double-incremented for the one event both hooks can see.
+func (e *Emitter) OnDeduped(evtType string) {
+	e.deduped.Add(context.Background(), 1, metric.WithAttributes(attribute.String("type", evtType)))
 }
 
 // OnUnknownTypeRejected increments the unknown-type counter for the rejected
@@ -369,16 +388,6 @@ func (e *Emitter) RecordFailure(class string) {
 // retry point.
 func (e *Emitter) OnSourceFailure(source string) {
 	e.sourceFailures.Add(context.Background(), 1, metric.WithAttributes(attribute.String("source", source)))
-}
-
-// OnDeduped implements the extended core.IngestObserver contract. It
-// increments the deduped counter, per type, when ingest-event absorbs a
-// duplicate id still retained in the queue (INV-EVT-3, bead pg2-cz31d) — the
-// metrics half of the Debug log line internal/core/ingest.go's
-// handleIngestEvent already writes at that same res == eventqueue.Deduped
-// branch.
-func (e *Emitter) OnDeduped(evtType string) {
-	e.deduped.Add(context.Background(), 1, metric.WithAttributes(attribute.String("type", evtType)))
 }
 
 // RecordThroughput increments the throughput counter, per type, for an event

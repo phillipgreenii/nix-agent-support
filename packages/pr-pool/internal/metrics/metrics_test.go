@@ -213,7 +213,7 @@ func TestCatalogHasTenMembers(t *testing.T) {
 // observable AT ALL, not merely never observes it live.
 func TestLivenessNotRegisteredWithoutOption(t *testing.T) {
 	h := newHarness(t) // no WithLiveness
-	h.emitter.OnDeclined("t")
+	h.emitter.OnDeclined("t", "h", "busy")
 	rm := h.collect(t)
 	for _, sm := range rm.ScopeMetrics {
 		for _, m := range sm.Metrics {
@@ -448,15 +448,35 @@ func TestNoopHooks(t *testing.T) {
 // OnDeclined — the queue's pre-accept-decline / dispatch-failure signal
 // (eventqueue.Observer, INV-FAIL-1) — feeds the SAME pr_pool.failures counter
 // RecordFailure does, labeled with the one class knowable at that call site.
+// Task 2.3 widened the signature to 3 args (evtType, listenerID, reason);
+// none of the three is part of the failure-rate label set.
 func TestOnDeclinedFeedsFailuresCounter(t *testing.T) {
 	h := newHarness(t)
-	h.emitter.OnDeclined("review-requested")
-	h.emitter.OnDeclined("review-requested")
-	h.emitter.OnDeclined("push-requested")
+	h.emitter.OnDeclined("review-requested", "h1", "busy")
+	h.emitter.OnDeclined("review-requested", "h1", "busy")
+	h.emitter.OnDeclined("push-requested", "h2", "unavailable")
 
 	m := findMetric(t, h.collect(t), MetricFailures)
 	if got := sumFor(m, "class", FailureClassDeclined); got != 3 {
-		t.Fatalf("failures[%s] = %d, want 3 (evtType is not part of the label set)", FailureClassDeclined, got)
+		t.Fatalf("failures[%s] = %d, want 3 (evtType/listenerID/reason are not part of the label set)", FailureClassDeclined, got)
+	}
+}
+
+// OnDeduped is Task 2.3's new eventqueue.Observer method. Task 3.3 (landed
+// independently, ahead of this task on main) already promoted MetricDeduped
+// to a real OTel catalog member fed from core.IngestObserver's OnDeduped —
+// the SAME Emitter method eventqueue.Observer's OnDeduped now also satisfies
+// (both interfaces name an identical `OnDeduped(evtType string)`), so this
+// proves it increments that real counter rather than a second, redundant
+// in-process one.
+func TestEmitter_OnDedupedIncrementsCounter(t *testing.T) {
+	h := newHarness(t)
+	h.emitter.OnDeduped("review-requested")
+	h.emitter.OnDeduped("review-requested")
+
+	m := findMetric(t, h.collect(t), MetricDeduped)
+	if got := sumFor(m, "type", "review-requested"); got != 2 {
+		t.Fatalf("deduped[%s] = %d, want 2", "review-requested", got)
 	}
 }
 

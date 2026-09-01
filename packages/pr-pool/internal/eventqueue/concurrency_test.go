@@ -3,6 +3,7 @@ package eventqueue
 import (
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -335,4 +336,178 @@ func TestDispatch_CustodyBoundedByListenerCountUnderDeclineHeavyLoad(t *testing.
 	mustEnqueue(t, q, evtUntil("e1", "T", clk.in(time.Hour)))
 
 	q.Dispatch()
+}
+
+// --- Task 2.3, Step 2.3.5: hooks fire with NO queue lock held --------------
+
+// reentrantHookObserver is the proof instrument for Step 2.3.5: EVERY hook
+// re-enters the queue (q.DepthByType() + q.Enqueue(...)) exactly once. Under
+// the OLD code (a hook firing while q.mu is still held) this self-deadlocks
+// on the very first hook call, since sync.Mutex is not reentrant — a
+// deadlock/timeout, not a clean assertion failure, is the documented RED for
+// this test. depth bounds the re-entry to ONE level: the nested Enqueue's
+// own hook call would otherwise refire this same re-entry forever. The
+// strict-leaf rule this proves (no queue re-entry from a hook, synchronously
+// or via any registered callback) binds the PRODUCTION composite
+// (metrics.Emitter) only — this double is deliberately the opposite, on
+// purpose, as the instrument that proves the lock really is released.
+type reentrantHookObserver struct {
+	q     *Queue
+	depth int32
+
+	mu    sync.Mutex
+	fired map[string]int
+}
+
+func (o *reentrantHookObserver) record(name string) {
+	o.mu.Lock()
+	o.fired[name]++
+	o.mu.Unlock()
+}
+
+func (o *reentrantHookObserver) reenter() {
+	if atomic.AddInt32(&o.depth, 1) > 1 {
+		atomic.AddInt32(&o.depth, -1)
+		return
+	}
+	defer atomic.AddInt32(&o.depth, -1)
+	_ = o.q.DepthByType()
+	_, _ = o.q.Enqueue(evtUntil("reentrant-probe", "T", time.Now().Add(time.Hour)))
+}
+
+func (o *reentrantHookObserver) OnEnqueue(Event) {
+	o.record("enqueue")
+	o.reenter()
+}
+
+func (o *reentrantHookObserver) OnAccept(string, string) {
+	o.record("accept")
+	o.reenter()
+}
+
+func (o *reentrantHookObserver) OnUnconsumedExpired(string) {
+	o.record("expired")
+	o.reenter()
+}
+
+func (o *reentrantHookObserver) OnDeclined(string, string, string) {
+	o.record("declined")
+	o.reenter()
+}
+
+func (o *reentrantHookObserver) OnDeduped(string) {
+	o.record("deduped")
+	o.reenter()
+}
+
+func (o *reentrantHookObserver) OnDispatchFailure(string) {
+	o.record("dispatch_failed")
+	o.reenter()
+}
+
+// TestObserverHooksFireWithQueueUnlocked is Task 2.3's required RED test
+// (Step 2.3.5), modeled on TestDispatchReentrantEnqueueNoDeadlock above: a
+// TEST-ONLY observer whose every hook calls q.DepthByType() and
+// q.Enqueue(...) must complete under timeout with -race, driving a sequence
+// that hits every one of the four digest:perf-F1 sites — Enqueue's OnEnqueue
+// exit, Enqueue's Deduped exit, Enqueue's own stale-retire exit, Dispatch
+// phase 3 (both OnAccept and OnDeclined), and Expire's sweep.
+func TestObserverHooksFireWithQueueUnlocked(t *testing.T) {
+	obs := &reentrantHookObserver{fired: map[string]int{}}
+	q, err := New(NewMemStore(), WithObserver(obs)) // real clock: reenter() uses time.Now()
+	if err != nil {
+		t.Fatal(err)
+	}
+	obs.q = q
+	accepting := newListener("h1", "T")
+	q.Register(accepting)
+	declining := newListener("h2", "U")
+	declining.neverAccept = true
+	q.Register(declining)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		future := time.Now().Add(time.Hour)
+		if _, err := q.Enqueue(evtUntil("e1", "T", future)); err != nil { // OnEnqueue
+			t.Errorf("Enqueue e1: %v", err)
+		}
+		if _, err := q.Enqueue(evtUntil("e1", "T", future)); err != nil { // dup -> OnDeduped
+			t.Errorf("Enqueue e1 dup: %v", err)
+		}
+		if _, err := q.Enqueue(evt("orphan", "U")); err != nil { // born expired -> OnEnqueue
+			t.Errorf("Enqueue orphan: %v", err)
+		}
+		q.Dispatch() // e1 -> accept (OnAccept); orphan -> terminal decline (OnDeclined), settles
+		// Re-emit the now-settled-but-not-yet-swept "orphan" id BEFORE Expire
+		// runs: Enqueue's OWN stale-retire path (distinct from Expire's sweep
+		// below) fires OnUnconsumedExpired too.
+		if _, err := q.Enqueue(evt("orphan", "U")); err != nil {
+			t.Errorf("Enqueue orphan re-emit: %v", err)
+		}
+		q.Expire() // sweeps the freshly re-emitted, still-unconsumed "orphan" -> OnUnconsumedExpired
+	}()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("observer hook re-entry deadlocked with q.mu still held (timeout)")
+	}
+
+	obs.mu.Lock()
+	defer obs.mu.Unlock()
+	for _, hook := range []string{"enqueue", "deduped", "declined", "accept", "expired"} {
+		if obs.fired[hook] == 0 {
+			t.Errorf("hook %q never fired during the sequence; fired=%v", hook, obs.fired)
+		}
+	}
+}
+
+// --- Task 2.3, Step 2.3.6: global delivery counters -------------------------
+
+// TestGlobalCounters_ConcurrentIncrementNoRace is Task 2.3's required RED
+// test (Step 2.3.6): the pool-wide atomic delivered counter, read WITHOUT
+// q.mu, must survive concurrent Dispatch passes under -race and end up
+// exactly right — every enqueued event is accepted EXACTLY ONCE (INV-EVT-2),
+// even though the concurrent-dispatch duplicate-offer race (documented on
+// TestConcurrentEnqueueDuringDispatchNoRace above) can offer the same head to
+// two goroutines before either records it.
+func TestGlobalCounters_ConcurrentIncrementNoRace(t *testing.T) {
+	q, err := New(NewMemStore()) // real clock; far-future expiresAt so nothing expires mid-test
+	if err != nil {
+		t.Fatal(err)
+	}
+	l := &concurrentListener{id: "h", got: map[string]int{}}
+	q.Register(l)
+
+	const n = 200
+	for i := 0; i < n; i++ {
+		if _, err := q.Enqueue(evtUntil(fmt.Sprintf("g%d", i), "T", time.Now().Add(time.Hour))); err != nil {
+			t.Fatalf("Enqueue: %v", err)
+		}
+	}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		var wg sync.WaitGroup
+		for d := 0; d < 4; d++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for i := 0; i < n; i++ {
+					q.Dispatch()
+				}
+			}()
+		}
+		wg.Wait()
+	}()
+	select {
+	case <-done:
+	case <-time.After(30 * time.Second):
+		t.Fatal("concurrent Dispatch deadlocked (timeout)")
+	}
+
+	if got := q.delivered.Load(); got != int64(n) {
+		t.Fatalf("global delivered = %d, want %d (each event accepted exactly once, INV-EVT-2)", got, n)
+	}
 }

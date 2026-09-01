@@ -78,6 +78,19 @@ type Orchestrator struct {
 	// comment — every produced event is then rejected, so a caller that drives
 	// ProduceTick outside bootCore (a test) MUST set this explicitly.
 	Bindings core.Bindings
+	// Registry is the core's participant registry (Task 2.3, pg2-84o3m.22):
+	// when set, NewListener captures it onto each roleListener so Offer can
+	// consult self-status/lifecycle availability (core.Registry.Available,
+	// perf-F11's "availability checks live in Offer") BEFORE dispatching a
+	// pre-accept decline never previously possible. nil (the default, and
+	// every pre-Task-2.3 test) disables the check entirely: Offer accepts
+	// unconditionally, matching this package's behavior before this field
+	// existed. bootCore sets this from svc.Registry() BEFORE registering any
+	// role's listener — a role's own promotion to `started` (Task 2.1,
+	// Registry.SetLifecycle) still has to land for Available to ever return
+	// true; NewListener merely captures the *reference*, read live at each
+	// Offer call, not a snapshot taken at construction time.
+	Registry *core.Registry
 	// lastTick is the per-source next-fire substrate ProduceTick threads into
 	// discover.ProduceWithCadence (Task 1.3, discover.Cadence.LastTick): an
 	// Orchestrator OUTLIVES a single Produce call across `run`'s whole ticker

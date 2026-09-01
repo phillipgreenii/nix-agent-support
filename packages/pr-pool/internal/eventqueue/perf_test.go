@@ -48,12 +48,16 @@ func (o *ringObserver) OnUnconsumedExpired(evtType string) {
 	o.ring.Append(activity.Entry{Type: evtType, Outcome: "missed"})
 }
 
-func (o *ringObserver) OnDeclined(evtType string) {
+func (o *ringObserver) OnDeclined(evtType, _, _ string) {
 	o.ring.Append(activity.Entry{Type: evtType, Outcome: "declined"})
 }
 
 func (o *ringObserver) OnDispatchFailure(evtType string) {
 	o.ring.Append(activity.Entry{Type: evtType, Outcome: "dispatch_failed"})
+}
+
+func (o *ringObserver) OnDeduped(evtType string) {
+	o.ring.Append(activity.Entry{Type: evtType, Outcome: "deduped"})
 }
 
 // statelessAcceptListener is a Listener with no mutable state of its own —

@@ -2,12 +2,28 @@ package executor
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os/exec"
 
 	"github.com/phillipgreenii/pr-pool/internal/discover"
 	"github.com/phillipgreenii/pr-pool/internal/prompt"
 	"github.com/phillipgreenii/pr-pool/internal/report"
 )
+
+// ErrBusy is the sentinel a command role's exit code 9 maps to (Task 2.3,
+// pg2-84o3m.22): commandRun.run classifies an *exec.ExitError with
+// ExitCode()==9 and wraps it into the error returned through
+// Executor.Dispatch, so errors.Is on that error resolves to this sentinel
+// through the existing %w chain — no production interface change.
+// roleListener.Offer maps it to eventqueue.DeclineBusy: a graceful "not right
+// now" PRE-ACCEPT decline (INV-CONC-1), never a delivery failure.
+var ErrBusy = errors.New("executor: command exited busy (exit code 9)")
+
+// busyExitCode is the command role's operator-facing "I am busy, retry me"
+// signal (perf-F2 in the review digest independently proposes the core reply
+// exit 9 on its OWN accept semaphore — the same code, the same meaning).
+const busyExitCode = 9
 
 type commandExecutor struct{}
 
@@ -27,6 +43,10 @@ func (r *commandRun) run(ctx context.Context, d discover.DispatchContext) error 
 		return fmt.Errorf("command role %q: render argv: %w", d.Role.Name, err)
 	}
 	if _, err := r.deps.commander().Run(ctx, argv); err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && exitErr.ExitCode() == busyExitCode {
+			return fmt.Errorf("command role %q item %s: %w: %w", d.Role.Name, d.Item.ID, ErrBusy, err)
+		}
 		return fmt.Errorf("command role %q item %s: %w", d.Role.Name, d.Item.ID, err)
 	}
 	return nil
