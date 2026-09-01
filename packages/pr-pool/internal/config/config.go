@@ -128,6 +128,15 @@ type Config struct {
 	// deployment/runtime binding decision, not something declared in
 	// .pr-pool/config.toml.
 	MeterProvider metric.MeterProvider
+
+	// ActivityRingSize is the dispatch-outcome ring buffer's capacity
+	// (internal/activity.Ring, Task 3.4), from PR_POOL_ACTIVITY_RING. 0 (the
+	// zero value, and Default()'s own default) selects internal/activity's
+	// own package default (currently 512) — the same nil/zero-means-package-
+	// default idiom Locator and MeterProvider already use above, so this
+	// package does not need to import internal/activity just to duplicate
+	// its constant.
+	ActivityRingSize int
 }
 
 // Meter returns the Config's MeterProvider, defaulting to the OTel no-op
@@ -256,6 +265,7 @@ func Load() (Config, error) {
 	c.BudgetTime = envSecs("PR_POOL_BUDGET_TIME", c.BudgetTime)
 	c.ConfirmIngest = envSecs("PR_POOL_CONFIRM_INGEST", c.ConfirmIngest)
 	c.LogDir = envStr("PR_POOL_LOG_DIR", c.LogDir)
+	c.ActivityRingSize = envInt("PR_POOL_ACTIVITY_RING", c.ActivityRingSize)
 
 	// XDG-global budget layer: sits BENEATH the repo-local file but ABOVE env.
 	// Contributes [pool].budget only; absent/empty file = no change. The path is

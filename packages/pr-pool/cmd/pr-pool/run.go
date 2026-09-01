@@ -7,11 +7,13 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sync"
 	"syscall"
 	"time"
 
 	"go.opentelemetry.io/otel/metric"
 
+	"github.com/phillipgreenii/pr-pool/internal/activity"
 	"github.com/phillipgreenii/pr-pool/internal/beads"
 	"github.com/phillipgreenii/pr-pool/internal/ccpool"
 	"github.com/phillipgreenii/pr-pool/internal/config"
@@ -71,7 +73,14 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 		_ = store.Close()
 		return nil, nil, nil, nil, fmt.Errorf("construct metrics emitter: %w", err)
 	}
-	q, err = eventqueue.New(store, eventqueue.WithRetryBackoff(cfg.RetryBackoff), eventqueue.WithObserver(emitter), eventqueue.WithSerializeTypes(cfg.SerializeTypes...))
+	// ring is the dispatch-outcome activity buffer (Task 3.4): a SECOND
+	// eventqueue.Observer, fanned out alongside emitter at this one
+	// construction site rather than folded into a new composite-observer
+	// abstraction. Task 3.5 is what embeds *ring in the daemon's assembled
+	// state for Task 3.8's status verb to read live and directly; this
+	// function's own job stops at constructing it and keeping it fed.
+	ring := activity.New(cfg.ActivityRingSize)
+	q, err = eventqueue.New(store, eventqueue.WithRetryBackoff(cfg.RetryBackoff), eventqueue.WithObserver(fanOutObserver{emitter, newActivityObserver(ring)}), eventqueue.WithSerializeTypes(cfg.SerializeTypes...))
 	if err != nil {
 		_ = store.Close()
 		return nil, nil, nil, nil, fmt.Errorf("construct event queue: %w", err)
@@ -98,6 +107,116 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 		return nil, nil, nil, nil, fmt.Errorf("start core: %w", err)
 	}
 	return svc, q, mp, store.Close, nil
+}
+
+// fanOutObserver calls two eventqueue.Observers for every hook, in order
+// (a first, then b). It exists ONLY to compose emitter and the activity
+// ring at bootCore's one construction site (eventqueue.WithObserver keeps
+// only the LAST value it's given, so two separate WithObserver calls would
+// silently drop the first) — a plain, unexported, task-scoped fan-out, not a
+// new reusable composite-observer abstraction (Task 3.4 Files).
+type fanOutObserver struct {
+	a, b eventqueue.Observer
+}
+
+func (f fanOutObserver) OnEnqueue(evt eventqueue.Event) {
+	f.a.OnEnqueue(evt)
+	f.b.OnEnqueue(evt)
+}
+
+func (f fanOutObserver) OnAccept(eventID, listenerID string) {
+	f.a.OnAccept(eventID, listenerID)
+	f.b.OnAccept(eventID, listenerID)
+}
+
+func (f fanOutObserver) OnUnconsumedExpired(evtType string) {
+	f.a.OnUnconsumedExpired(evtType)
+	f.b.OnUnconsumedExpired(evtType)
+}
+
+func (f fanOutObserver) OnDeclined(evtType string) {
+	f.a.OnDeclined(evtType)
+	f.b.OnDeclined(evtType)
+}
+
+// activityPendingTypesCap bounds activityObserver's eventID->Type
+// correlation map (see its doc for why the map exists at all). It is
+// independent of the activity.Ring's own capacity: many more events can be
+// enqueued-but-not-yet-settled at once than the ring retains outcomes for.
+const activityPendingTypesCap = 4096
+
+// activityObserver implements eventqueue.Observer by translating queue
+// lifecycle signals into activity.Entry records on a *activity.Ring (Task
+// 3.4).
+//
+// Repo-verified discrepancy (this task's curation flag): Entry.Outcome's
+// declared vocabulary ("delivered"|"missed"|"rejected"|"declined"|"deduped"|
+// "needs_input"|"budget_escalation") is wider than what eventqueue.Observer
+// alone can produce. "rejected" comes only from
+// core.IngestObserver.OnUnknownTypeRejected; "needs_input" and
+// "budget_escalation" would come from roleListener.Offer's internal report,
+// which exposes no such hook on any interface today; "deduped" is returned
+// directly from Enqueue's caller, never through an Observer callback. Wiring
+// those additional hooks is explicitly left to a later phase (or a
+// consciously separate task) rather than done here — this task's Files
+// section names only eventqueue.Observer and cmd/pr-pool/run.go, not
+// core.IngestObserver or a new roleListener.Offer hook. So this adapter
+// covers exactly the three outcomes eventqueue.Observer alone carries:
+//
+//	delivered ≈ OnAccept
+//	missed    ≈ OnUnconsumedExpired
+//	declined  ≈ OnDeclined
+//
+// OnAccept(eventID, listenerID string) carries no event TYPE — queue.go's
+// own Dispatch has it at the call site (p.evt.Type) but does not thread it
+// through the Observer interface; internal/metrics.Emitter hits this exact
+// same gap (see its RecordThroughput doc) and defers fixing it the same way.
+// Changing eventqueue.Observer's signature is outside this task's Files, so
+// this adapter recovers the type itself: OnEnqueue records eventID->Type in
+// a small bounded map, and OnAccept consults it. The map is capped at
+// activityPendingTypesCap, evicting the oldest insertion once full, so an
+// event that is only ever declined-then-expired (retireLocked's
+// OnUnconsumedExpired call carries Type directly and needs no lookup, but
+// never removes this map's entry either) cannot grow it without bound.
+type activityObserver struct {
+	ring *activity.Ring
+
+	mu      sync.Mutex
+	pending map[string]string // eventID -> Type
+	order   []string          // insertion order, for FIFO eviction
+}
+
+func newActivityObserver(ring *activity.Ring) *activityObserver {
+	return &activityObserver{ring: ring, pending: make(map[string]string)}
+}
+
+func (a *activityObserver) OnEnqueue(evt eventqueue.Event) {
+	a.mu.Lock()
+	if _, exists := a.pending[evt.ID]; !exists {
+		if len(a.order) >= activityPendingTypesCap {
+			oldest := a.order[0]
+			a.order = a.order[1:]
+			delete(a.pending, oldest)
+		}
+		a.pending[evt.ID] = evt.Type
+		a.order = append(a.order, evt.ID)
+	}
+	a.mu.Unlock()
+}
+
+func (a *activityObserver) OnAccept(eventID, _ string) {
+	a.mu.Lock()
+	t := a.pending[eventID]
+	a.mu.Unlock()
+	a.ring.Append(activity.Entry{Type: t, Outcome: "delivered"})
+}
+
+func (a *activityObserver) OnUnconsumedExpired(evtType string) {
+	a.ring.Append(activity.Entry{Type: evtType, Outcome: "missed"})
+}
+
+func (a *activityObserver) OnDeclined(evtType string) {
+	a.ring.Append(activity.Entry{Type: evtType, Outcome: "declined"})
 }
 
 // declaredBindTypes collects every event type SOME configured role binds,

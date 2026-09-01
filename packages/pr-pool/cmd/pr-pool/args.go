@@ -80,6 +80,7 @@ Pool-wide settings come from PR_POOL_* environment variables:
   PR_POOL_PERMISSION_MODE  claude --permission-mode for workers (default dontAsk; bypassPermissions is the opt-in escape)
   PR_POOL_ALLOWED_TOOLS    claude --allowed-tools allowlist for workers (default: conservative deny-by-default set; empty clears the flag)
   PR_POOL_CONFIG           explicit config.toml path (default <RepoRoot>/.pr-pool/config.toml)
+  PR_POOL_ACTIVITY_RING    dispatch-outcome activity ring buffer capacity (default 512)
   PR_POOL_ONLY             run/run-until-idle only: comma-separated run-scoped allow-list,
                            each entry role:<name> or query:<name> (DEC-CLI-1); unioned with
                            any --only flags on the same invocation

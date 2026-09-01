@@ -143,6 +143,7 @@ configured via env (use `config.toml`). See `internal/config` for the full set.
 - `PR_POOL_ALLOWED_TOOLS` — claude `--allowed-tools` allowlist for workers (default: a conservative set; `git push` excluded. Empty clears the flag)
 - `PR_POOL_AUTONOMOUS` — block AskUserQuestion so human-less workers never stall on the picker (default `true`)
 - `PR_POOL_LOG_DIR` — override the event-log directory (default: the standard path below)
+- `PR_POOL_ACTIVITY_RING` — dispatch-outcome activity ring buffer capacity (`internal/activity.Ring`, Task 3.4); default 512
 
 **Removed** (now per-role in `config.toml`, not env): `PR_POOL_MAX_WORKER`,
 `PR_POOL_MAX_FEEDBACK`, `PR_POOL_FEEDBACK_ENABLED`, `PR_POOL_WORKER_ENABLED`,

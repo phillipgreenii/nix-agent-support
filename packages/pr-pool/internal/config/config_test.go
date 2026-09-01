@@ -560,6 +560,26 @@ func TestLoad_roleEnvVarsAreNoOps(t *testing.T) {
 	}
 }
 
+// Default() carries no opinion on the ring size (0 = "let internal/activity
+// pick its own default"); PR_POOL_ACTIVITY_RING overlays it (Task 3.4).
+func TestDefault_activityRingSizeIsUnset(t *testing.T) {
+	if Default().ActivityRingSize != 0 {
+		t.Errorf("ActivityRingSize default = %d, want 0 (package-default sentinel)", Default().ActivityRingSize)
+	}
+}
+
+func TestLoad_activityRingSizeEnvOverride(t *testing.T) {
+	absentConfig(t)
+	t.Setenv("PR_POOL_ACTIVITY_RING", "128")
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.ActivityRingSize != 128 {
+		t.Errorf("ActivityRingSize = %d, want 128 (PR_POOL_ACTIVITY_RING overlay)", c.ActivityRingSize)
+	}
+}
+
 func TestLoad_badIntFallsBackToDefault(t *testing.T) {
 	absentConfig(t)
 	t.Setenv("PR_POOL_MAX_WAIT", "notanint")

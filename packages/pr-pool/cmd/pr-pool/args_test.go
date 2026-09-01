@@ -4,6 +4,7 @@ import (
 	"errors"
 	"flag"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -234,5 +235,15 @@ func TestRoute_runAndRunUntilIdleAcceptSelectorFlags(t *testing.T) {
 				t.Errorf("route(%v).only is empty, want it to carry --only", tc.argv)
 			}
 		})
+	}
+}
+
+// helpText-mentions test (operator-command-surface rule; pattern:
+// push_inject_test.go's TestRoute_pushInject). PR_POOL_ACTIVITY_RING
+// (internal/activity's ring buffer capacity, Task 3.4) is new operator-
+// facing surface — helpText MUST advertise it.
+func TestHelpText_MentionsActivityRingEnvVar(t *testing.T) {
+	if !strings.Contains(helpText, "PR_POOL_ACTIVITY_RING") {
+		t.Fatal("helpText does not mention PR_POOL_ACTIVITY_RING")
 	}
 }
