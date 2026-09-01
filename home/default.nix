@@ -41,5 +41,6 @@
     ./programs/perles
     ./programs/rtk
     ./programs/pg-disk-reclaimer
+    ./programs/wtnew
   ];
 }

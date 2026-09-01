@@ -1,0 +1,8 @@
+#compdef wtnew
+
+_arguments \
+  '(-h --help)'{-h,--help}'[Show help message]' \
+  '(-v --version)'{-v,--version}'[Show version information]' \
+  '--base[Base ref to branch from]:ref:' \
+  '--branch[Branch name for the new worktree]:name:' \
+  '1:bead-or-name:'

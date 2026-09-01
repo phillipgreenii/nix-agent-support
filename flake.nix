@@ -269,6 +269,19 @@
               pkgs = final;
               inherit bashBuilders;
             }).pg-disk-reclaimer.script;
+          # wtnew (bead pg2-jhv50): fresh-worktree setup helper filling the
+          # MANUAL/non-drain gap next to integrate-branch-support (`pb drain
+          # isolate` owns the automated /drain-beads path). Single
+          # mkBashScript tool, so -- same rationale as pg-disk-reclaimer /
+          # pw-reset-agents / pw-agent-activity above -- it takes
+          # `result.wtnew.script` directly rather than symlinkJoin-ing
+          # `result.packages`.
+          wtnew =
+            (import ./packages/wtnew {
+              pkgs = final;
+              inherit bashBuilders;
+              inherit (final) integrate-branch-support;
+            }).wtnew.script;
         }
         // prev.lib.optionalAttrs (basePkgs ? pnwf) { inherit (basePkgs) pnwf; }
         // prev.lib.optionalAttrs (basePkgs ? wsplan) { inherit (basePkgs) wsplan; };
@@ -3443,6 +3456,14 @@
               inherit pkgs;
               bashBuilders = pkgs._agentSupportBashBuilders;
             }).checks
+            # test-wtnew (bead pg2-jhv50). Same one-line idiom as
+            # pg-disk-reclaimer above: without this the suite would run in
+            # no gate at all.
+            // (import ./packages/wtnew {
+              inherit pkgs;
+              bashBuilders = pkgs._agentSupportBashBuilders;
+              inherit (pkgs) integrate-branch-support;
+            }).checks
             # test-git-branch-maintenance / test-git-branch-status /
             # test-git-choose-branch (bead pg2-ly46t). Same one-line idiom as
             # pg-disk-reclaimer above: without this the suite ran in no gate
@@ -3505,6 +3526,11 @@
             # re-exported for the same reason, so `nix build
             # .#pg-disk-reclaimer` resolves via flake.packages.<system>.
             inherit (pkgs) pg-disk-reclaimer;
+            # wtnew is likewise an overlay-only attr (single mkBashScript
+            # tool holding just the script derivation) -- re-exported for
+            # the same reason, so `nix build .#wtnew` resolves via
+            # flake.packages.<system>.
+            inherit (pkgs) wtnew;
             # codeburn is a manual-bump npm package (not Go/nix-update); re-exported so
             # `nix build .#codeburn` resolves it via flake.packages.<system>.
             inherit (pkgs) codeburn;
