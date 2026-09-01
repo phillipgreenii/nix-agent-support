@@ -627,12 +627,13 @@ Inspection's **MUST** set has widened to also offer:
   outside the process, rather than indistinguishable from a poll failure (see the glossary's
   **quiescing** entry).
 - Each configured **gate**'s own name, whether it is **active**, **since** it last changed, and its
-  **owner** — the human operator for a gate it set itself, or an automation actor for one it owns
-  (`INV-LIFE-2`'s gate identity) — plus the instants the rest of this reading is current **as of**.
-  Naming **owner** per gate is what finally lets inspection show which gate a human can clear
-  unilaterally and which an automation actor may re-assert on its own initiative, the labelling
-  `INV-LIFE-2` already requires and no inspection surface carried before now. Together with the
-  lifecycle facts above, **owner** is also part of what lets inspection **distinguish** _halted_
+  **gate owner** — the human operator for a gate it set itself, or an automation actor for one it
+  owns (`INV-LIFE-2`'s gate identity) — plus the instants the rest of this reading is current
+  **as of**. Naming the **gate owner** per gate is what finally lets inspection show which gate a
+  human can clear unilaterally and which an automation actor may re-assert on its own initiative,
+  the labelling `INV-LIFE-2` already requires and no inspection surface carried before now.
+  Together with the lifecycle facts above, the gate owner is also part of what lets inspection
+  **distinguish** _halted_
   (some gate active) from _quiescent_ (nothing unsettled remains in flight) — the distinction
   `INV-LIFE-2` already requires of inspection and, until this widening, no inspection surface
   carried at all.

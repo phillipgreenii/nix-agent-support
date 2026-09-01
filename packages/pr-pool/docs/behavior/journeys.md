@@ -1044,8 +1044,8 @@ remains) without any gate active at all, so neither reading substitutes for the 
 distinction is read the same way any other run state is read, through `USECASE-DEBUG-RUN`'s
 inspection: the core's own lifecycle state and run mode name whether it is winding toward exit on its
 own account (a drain-and-exit run with nothing left to offer, independent of any gate — see the
-glossary's **quiescing** entry), and each gate's active/owner fields name whether dispatch is halted
-and by whom. A client that watches continuously renders these as two visibly different states rather
+glossary's **quiescing** entry), and each gate's active flag and gate owner name whether dispatch is
+halted and by whom. A client that watches continuously renders these as two visibly different states rather
 than one generic "not dispatching": a **halted** pool still shows every participant's own health,
 because the participants themselves are not the ones stopped; a **quiescent**, ungated run is
 winding down toward `USECASE-RUN-DRAIN`'s own exit and is not an error condition at all.
