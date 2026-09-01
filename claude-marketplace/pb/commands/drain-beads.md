@@ -45,8 +45,11 @@ resume step then won't find an earlier-claimed bead.)
 You are DONE only when a SUCCESSFUL query returns no agent-workable beads:
 
 ```bash
-bd ready --exclude-label human --json -n 10
+bd ready --exclude-label human,refactor-campaign --json -n 10
 ```
+
+zr-refactor campaign beads carry their own protocol; excluded here by design (zr-
+refactor spec §3).
 
 If that command SUCCEEDS (exit 0) and is empty, STOP (see "Unpushed commits when
 you STOP"). If it ERRORS (a bd/dolt blip), that is NOT "empty" → back off briefly
@@ -141,15 +144,19 @@ proceeding on currently loaded text (direct interactive invocation).`)
        content is stale and the session should be restarted fresh.
 
    ```bash
-   bd ready --claim --exclude-label human --exclude-type epic --actor "ID" --json
+   bd ready --claim --exclude-label human,refactor-campaign --exclude-type epic --actor "ID" --json
    ```
+
+   zr-refactor campaign beads carry their own protocol; excluded here by design (zr-
+   refactor spec §3).
 
    Atomically claims the highest-priority ready bead (assignee=ID,
    status=in_progress) and returns it. No other session can get the same bead. A
    SUCCESSFUL empty result → Goal met → STOP. A transient error → retry. If the
    invocation supplied `$ARGUMENTS`, apply them as additional NARROWING filters here
-   (see "Optional scope arguments"); they never remove `--exclude-label human`, the
-   `--exclude-type epic` exclusion, or the deferred exclusion.
+   (see "Optional scope arguments"); they never remove `--exclude-label human` (nor
+   its campaign counterpart in the CLAIM query above), the `--exclude-type epic`
+   exclusion, or the deferred exclusion.
 
    **`--exclude-type epic` is load-bearing, not cosmetic** (provenance: bead
    `pg2-xcw7u`). In this workspace's convention every epic — sampled across all
@@ -589,14 +596,18 @@ further **restricts** the work it claims — e.g. an extra label, a
 priority, a parent/epic, a type, a specific bead id, or a one-bead /
 N-bead limit ("just one"). Apply it as extra `bd ready` filters on the
 CLAIM query. Honor a specific bead id via the safe path: confirm the id
-appears in `bd ready --exclude-label human [scope] --json` (ready,
-in-scope, not deferred, not `human`), then claim it with
+appears in `bd ready --exclude-label human,refactor-campaign [scope] --json`
+(ready, in-scope, not deferred, not `human`), then claim it with
 `bd update <id> --claim --actor "ID"` (`bd ready --claim` cannot target a
 chosen id — it claims the first filter match).
 
+zr-refactor campaign beads carry their own protocol; excluded here by design (zr-
+refactor spec §3).
+
 Arguments may only NARROW the query. They MUST NOT broaden scope and MUST
-NOT remove the safety filters — `--exclude-label human`, `--exclude-type
-epic`, and the default deferred-exclusion always remain. A `--type epic`
+NOT remove the safety filters — `--exclude-label human` (nor its campaign
+counterpart above), `--exclude-type epic`, and the default deferred-exclusion
+always remain. A `--type epic`
 argument would contradict the standing `--exclude-type epic` exclusion and
 yield nothing through this path; to work one specific epic instance
 deliberately, use the id-targeted safe path above instead. With no
@@ -710,7 +721,9 @@ Open N Claude Code sessions, each with its working directory inside this
 pn-workspace, and run `/drain-beads` in each. Every session self-assigns a
 distinct actor id; the atomic `bd ready --claim` guarantees no two sessions ever
 get the same bead. Each session stops on its own when a successful
-`bd ready --exclude-label human -n 10` is empty. A parked (`human`-labeled) bead,
+`bd ready --exclude-label human,refactor-campaign -n 10` is empty (zr-refactor
+campaign beads carry their own protocol; excluded here by design (zr-refactor spec
+§3)). A parked (`human`-labeled) bead,
 or a stale-converted gate, stays out of the queue until a human reviews it. A bead
 whose blockers were converted to dependencies (via `pb:drain-stuck`) is different
 in kind: it needs NO review, and re-enters this queue by itself as soon as its

@@ -60,8 +60,11 @@ not by a guard.
 You are DONE when a SUCCESSFUL claim returns no ready `human` bead in scope:
 
 ```bash
-bd ready --claim --label human --actor "ID" --json
+bd ready --claim --label human --exclude-label refactor-campaign --actor "ID" --json
 ```
+
+zr-refactor campaign beads carry their own protocol; excluded here by design (zr-
+refactor spec §3).
 
 If that SUCCEEDS (exit 0) and is empty, STOP. If a claim ever returns a bead whose id is
 already in your session **skip-set**, also STOP: a correctly DEFERred bead cannot reappear
@@ -92,8 +95,11 @@ exit on an error.
 1. **CLAIM** (atomic, race-safe — the ONLY claim path; do NOT list-then-claim):
 
    ```bash
-   bd ready --claim --label human --actor "ID" --json
+   bd ready --claim --label human --exclude-label refactor-campaign --actor "ID" --json
    ```
+
+   zr-refactor campaign beads carry their own protocol; excluded here by design (zr-
+   refactor spec §3).
 
    Atomically claims the highest-priority ready `human` bead (assignee=ID,
    status=`in_progress`) and returns it; no other session can get the same bead. A
@@ -824,20 +830,26 @@ This command MAY be invoked with additional context (`$ARGUMENTS`) that further
 **restricts** the work it claims — e.g. an extra label, a priority, a parent/epic, a type,
 a specific bead id, or a one-bead / N-bead limit ("just one"). Apply it as extra `bd ready`
 filters on the CLAIM query. Honor a specific bead id via the safe path: first confirm the
-id appears in `bd ready --label human [scope] --json` (ready, in-scope, `human`, not
-deferred), then claim it with `bd update <id> --claim --actor "ID"` (the single-id claim —
-`bd ready --claim` cannot target a chosen id, it claims the first filter match).
+id appears in `bd ready --label human --exclude-label refactor-campaign [scope] --json`
+(ready, in-scope, `human`, not deferred), then claim it with
+`bd update <id> --claim --actor "ID"` (the single-id claim — `bd ready --claim` cannot
+target a chosen id, it claims the first filter match).
+
+zr-refactor campaign beads carry their own protocol; excluded here by design (zr-refactor
+spec §3).
 
 Arguments may only NARROW the query. They MUST NOT broaden scope and MUST NOT remove the
-safety filters — `--label human` and the default deferred-exclusion always remain. With no
-arguments, drain the whole ready `human` queue.
+safety filters — `--label human` (nor its campaign exclusion above) and the default
+deferred-exclusion always remain. With no arguments, drain the whole ready `human` queue.
 
 ## Rules (RFC 2119)
 
-- **Sourcing.** Work MUST be claimed only via `bd ready --claim --label human` (plus
-  narrowing `$ARGUMENTS`); MUST NOT use `bd list --label human` as a work source; MUST NOT
-  pass `--include-deferred`. A specific-id claim MUST first confirm the id is in the
-  `bd ready --label human` set.
+- **Sourcing.** Work MUST be claimed only via
+  `bd ready --claim --label human --exclude-label refactor-campaign` (plus narrowing
+  `$ARGUMENTS`); MUST NOT use `bd list --label human` as a work source; MUST NOT pass
+  `--include-deferred`. zr-refactor campaign beads carry their own protocol; excluded
+  here by design (zr-refactor spec §3). A specific-id claim MUST first confirm the id is
+  in the `bd ready --label human` set (also carrying the campaign exclusion above).
 - **Minimality + stop predicate.** MUST stop and RELEASE the instant the bead no longer
   needs a human to proceed as ordinary drain work; MUST NOT drive the bead to completion
   (except the substrate carve-out), land, merge, or push. A commit made while unblocking
