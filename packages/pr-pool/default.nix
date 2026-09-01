@@ -36,6 +36,15 @@ mkGoApp {
   # only third-party deps; ccpool/claude-transcript are intentionally absent from it.
   gomod2nixToml = ./gomod2nix.toml;
 
+  # cmd/pr-pool/main.go declares the version global in LOWERCASE
+  # (`var version = "dev"`), but mkGoApp's default ldflag target is capital-V
+  # `main.Version` (go-builders.nix, matching the fleet `var Version`
+  # convention). Without this override `-X main.Version=` targets a symbol the
+  # code never declares, the linker silently drops it, and pr-pool --version
+  # always reports the "dev" fallback. Guarded by the
+  # `test-pr-pool-version-stamped` flake check.
+  versionPath = "main.version";
+
   nativeBuildInputs = [ makeWrapper ];
 
   # This list MUST carry the backing command of EVERY source and handler kind

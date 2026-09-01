@@ -1391,6 +1391,21 @@
                   touch $out
                 '';
 
+              # Regression guard that the pr-pool binary's version string is
+              # actually stamped by the build-time ldflag (versionPath =
+              # "main.version" in packages/pr-pool/default.nix) — the same
+              # gap and fix as test-pa-monitor-version-stamped above.
+              test-pr-pool-version-stamped = pkgs.runCommand "pr-pool-version-stamped" { } ''
+                v=$(${pkgs.pr-pool}/bin/pr-pool --version)
+                case "$v" in
+                  "pr-pool 0.0.0-"????????) touch "$out" ;;
+                  *)
+                    echo "pr-pool version not stamped (got: '$v', want 'pr-pool 0.0.0-<8hex>')" >&2
+                    exit 1
+                    ;;
+                esac
+              '';
+
               # INTRA-evaluator mechanical coverage (bead pg2-hvlyj.14, plan
               # item 5.2): drive the behavior-docs-intra-conformance skill's
               # self-checks.sh over inline-status / floor-leakage FAIL & PASS
