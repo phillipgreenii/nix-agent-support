@@ -282,6 +282,18 @@
               inherit bashBuilders;
               inherit (final) integrate-branch-support;
             }).wtnew.script;
+          # wtdone (bead pg2-hpurf): guarded worktree teardown, the paired
+          # counterpart to wtnew above -- lsof liveness guard, fsmonitor
+          # stop, worktree remove, plain branch -d, prune. Single
+          # mkBashScript tool, so -- same rationale as wtnew/pg-disk-
+          # reclaimer/pw-reset-agents/pw-agent-activity above -- it takes
+          # `result.wtdone.script` directly rather than symlinkJoin-ing
+          # `result.packages`.
+          wtdone =
+            (import ./packages/wtdone {
+              pkgs = final;
+              inherit bashBuilders;
+            }).wtdone.script;
         }
         // prev.lib.optionalAttrs (basePkgs ? pnwf) { inherit (basePkgs) pnwf; }
         // prev.lib.optionalAttrs (basePkgs ? wsplan) { inherit (basePkgs) wsplan; };
@@ -3500,6 +3512,13 @@
               bashBuilders = pkgs._agentSupportBashBuilders;
               inherit (pkgs) integrate-branch-support;
             }).checks
+            # test-wtdone (bead pg2-hpurf). Same one-line idiom as wtnew
+            # above: without this the suite (incl. the refuse-when-anchored
+            # and refuse-unmerged bats tests) would run in no gate at all.
+            // (import ./packages/wtdone {
+              inherit pkgs;
+              bashBuilders = pkgs._agentSupportBashBuilders;
+            }).checks
             # test-git-branch-maintenance / test-git-branch-status /
             # test-git-choose-branch (bead pg2-ly46t). Same one-line idiom as
             # pg-disk-reclaimer above: without this the suite ran in no gate
@@ -3567,6 +3586,11 @@
             # the same reason, so `nix build .#wtnew` resolves via
             # flake.packages.<system>.
             inherit (pkgs) wtnew;
+            # wtdone is likewise an overlay-only attr (single mkBashScript
+            # tool holding just the script derivation) -- re-exported for
+            # the same reason, so `nix build .#wtdone` resolves via
+            # flake.packages.<system>.
+            inherit (pkgs) wtdone;
             # codeburn is a manual-bump npm package (not Go/nix-update); re-exported so
             # `nix build .#codeburn` resolves it via flake.packages.<system>.
             inherit (pkgs) codeburn;

@@ -1,0 +1,7 @@
+#compdef wtdone
+
+_arguments \
+  '(-h --help)'{-h,--help}'[Show help message]' \
+  '(-v --version)'{-v,--version}'[Show version information]' \
+  '--cc[Canonical clone to operate against]:directory:_files -/' \
+  '1:bead-or-branch:'

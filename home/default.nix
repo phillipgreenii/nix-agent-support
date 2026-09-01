@@ -42,5 +42,6 @@
     ./programs/rtk
     ./programs/pg-disk-reclaimer
     ./programs/wtnew
+    ./programs/wtdone
   ];
 }

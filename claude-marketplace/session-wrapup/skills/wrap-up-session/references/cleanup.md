@@ -43,7 +43,11 @@ A `landed` ff-merge already retired that repo's worktree and merged branch (via
 leftover admin: run `pn workspace workforest prune`, and
 `pn workspace workforest remove <branch>` if the set is still listed. Only if a per-repo
 branch was somehow left behind (it shouldn't be) delete it defensively with
-`git branch -d <branch>` — don't undo or second-guess `integrate-branch`'s retirement.
+`wtdone <branch> --cc <that repo's canonical clone>` (bead `pg2-hpurf`) rather than a
+bare `git branch -d` — it gets the same plain `-d` (never `-D`) refusal, plus a
+liveness guard and worktree/prune handling for free if a worktree somehow still
+exists too; it is a no-op past the branch delete when none does. Don't undo or
+second-guess `integrate-branch`'s retirement.
 
 ## Stashes
 

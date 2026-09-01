@@ -305,22 +305,28 @@ first appears on a retry is therefore reported the same way, by FF-1.
 ## FF-4 — Cleanup
 
 Only reached after FF-2 succeeds (FF-2a's check, when it applies, and FF-2b's
-merge). Run every command against `<CC>`, and **relocate
-the shell out of `<WT>` first** — removing the worktree you are currently standing
-in breaks every subsequent command in that shell. Also **stop `<WT>`'s fsmonitor
-daemon before removing the worktree** (best-effort): the daemon is keyed by
-worktree path and `git worktree remove` does NOT stop it, so it orphans and
-lingers. It may be absent (fsmonitor off / never started), so ignore its failure:
+merge). Delegate to `wtdone` (bead `pg2-hpurf`) rather than hand-rolling the
+fsmonitor-stop / worktree-remove / branch-delete / prune sequence: it folds in
+a liveness guard this handler did not previously have. **Relocate the shell
+out of `<WT>` into `<CC>` first** — removing the worktree you are currently
+standing in breaks every subsequent command in that shell, and `wtdone`'s
+liveness probe cannot protect the caller from itself (it can only see OTHER
+processes anchored inside `<WT>`, never the shell issuing the call):
 
 ```bash
-cd "$CC"                                          # leave <WT> before removing it
-git -C "$WT" fsmonitor--daemon stop 2>/dev/null || true  # best-effort: stop the per-worktree daemon (else it orphans)
-git -C "$CC" worktree remove "$WT"
-git -C "$CC" branch -d "$FB"
-git -C "$CC" worktree prune
+cd "$CC"                # leave <WT> before tearing it down
+wtdone "$FB" --cc "$CC"
 ```
 
-`git worktree remove` refuses to remove the **main** working tree, so even if
+`wtdone` refuses (non-zero exit, naming the offending PIDs) if any live
+process is still anchored inside `<WT>` — most likely this handler's own
+shell if step 0 was skipped, or a peer session that isolated the same
+worktree — leaving `<WT>` and `<FB>` untouched. Otherwise it stops `<WT>`'s
+fsmonitor daemon (best-effort — it may be absent), removes `<WT>`, deletes
+`<FB>` with a plain `git branch -d` (never `-D` — an unmerged branch is
+refused, never force-discarded), prunes worktree admin, and prints the landed
+sha plus `<CC>`'s remaining worktrees. `git worktree remove` (which `wtdone`
+calls, never forced) refuses to remove the **main** working tree, so even if
 something upstream got `<WT>` and `<CC>` confused, the canonical clone is
 inherently protected from this step.
 
@@ -346,7 +352,7 @@ flowchart TD
     F2A -->|"fails"| S11["STOP: stopped:flake-check-failed — operator fixes it"]
     F2A -->|"passes, or repo not in scope"| G["FF-2b: git -C CC merge --ff-only FB"]
     G --> H{"ff-only ok?"}
-    H -->|Yes| I["FF-4: worktree remove + branch -d + prune"]
+    H -->|Yes| I["FF-4: cd to CC, then wtdone FB --cc CC"]
     H -->|"No: attempts++"| J{"attempts < 2?"}
     J -->|Yes| B
     J -->|No| S2["STOP: ask"]
@@ -439,11 +445,16 @@ exist, and prescribes a `git rebase --continue` that exits 128.
 - The handler MUST bound its fast-forward retry loop and stop-and-ask after the
   second consecutive non-fast-forward failure (R-7) rather than retry
   indefinitely.
-- FF-4 MUST relocate the shell out of `<WT>` before removing it, and MUST run the
-  removal, branch deletion, and prune from `<CC>`.
-- FF-4 MUST stop `<WT>`'s `git fsmonitor--daemon` (best-effort, ignoring failure)
-  immediately before `git worktree remove "$WT"` — the daemon is keyed by worktree
-  path and is NOT torn down by the removal, so skipping this orphans it. It MAY be
-  absent (fsmonitor off / never started), so its non-zero exit MUST be ignored.
+- FF-4 MUST relocate the shell out of `<WT>` into `<CC>` before invoking `wtdone`
+  — `wtdone`'s own liveness guard cannot see the calling shell's process, only
+  other processes anchored inside `<WT>`, so removing this shell's own presence
+  is on the handler, not the guard.
+- FF-4 MUST delegate the removal, branch deletion, and prune to `wtdone "$FB"
+--cc "$CC"` rather than hand-rolling `git worktree remove` / `git branch -d` /
+  `git worktree prune` — it folds in the liveness guard (refuse if a live
+  process is anchored inside `<WT>`), stops `<WT>`'s `git fsmonitor--daemon`
+  best-effort immediately before removal (the daemon is keyed by worktree path
+  and is NOT torn down by the removal itself, so skipping this orphans it), and
+  never escalates an unmerged branch's `-d` to `-D`.
 - The handler MUST NOT remove, reset, or otherwise mutate `<CC>` beyond the
-  fast-forward merge and the FF-4 cleanup steps.
+  fast-forward merge and the FF-4 cleanup step.

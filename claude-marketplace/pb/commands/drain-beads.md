@@ -477,6 +477,17 @@ state,isDraft` must show OPEN and draft (cwd cannot be assumed); record
    work is pushed, not merged, so review feedback still needs that worktree, and
    whoever merges the PR retires them.
 
+   Both retirement paths this step relies on — `ff-merge-to-main`'s FF-4 for a
+   single repo, `pn-workspace-rules:cleanup-workforest` for a set — now teardown
+   through the guarded `wtdone` script (bead `pg2-hpurf`) rather than a bare
+   `git worktree remove`/`branch -d`. This is a NEW failure mode this command must
+   recognize: teardown can now refuse (non-zero, naming PIDs) if a live process is
+   still anchored inside the isolation worktree — e.g. this session's own shell
+   left standing in it, or a peer session's — not only for the pre-existing
+   dirty/unmerged reasons. Treat that refusal the same as any other CLEANUP
+   failure: do not force it; leave the worktree/branch in place and, if it recurs,
+   route to STUCK.
+
    ORDER IS LOAD-BEARING for a workforest SET: every member repo MUST have LANDED
    (step 6) BEFORE the set is retired, and the bead MUST NOT be closed while any
    member is un-landed. `pn-workspace-rules:cleanup-workforest` is safe by default —
