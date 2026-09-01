@@ -30,3 +30,4 @@ internal/emit 85
 internal/metrics 80
 internal/core 85
 internal/activity 90
+internal/textsafe 95
