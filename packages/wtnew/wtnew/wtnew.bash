@@ -66,9 +66,16 @@ wtnew_resolve_base() {
 # later `nix run .#install-pre-commit-hooks` in the canonical clone
 # propagates to the worktree instead of pinning a stale hook generation.
 # This function does NOT get that benefit -- it resolves the target, as
-# this bead's spec and the CLAUDE.md fix both literally prescribe. Whether
-# to reconcile the two tools onto the symlink-to-symlink form is flagged
-# for a human decision rather than decided here.
+# this bead's spec and the CLAUDE.md fix both literally prescribe.
+#
+# RULED (operator, 2026-09-01, bead pg2-t9g3t): keep this literal
+# resolve-through form; do NOT reconcile onto pb drain isolate's
+# symlink-to-symlink form. The two tools are intentionally different --
+# wtnew worktrees are for manual, short-lived work (re-running wtnew after
+# a hook regen is an acceptable cost, and this form matches this repo's
+# own documented CLAUDE.md fix verbatim), while pb drain isolate's
+# worktrees are long-lived unattended drain isolation that must survive
+# regens.
 wtnew_link_precommit_config() {
   local src="$1" dst="$2"
   if [ -L "$src" ]; then
