@@ -1,6 +1,7 @@
 {
   mkBashScript,
   pkgs,
+  testSupport ? null,
 }:
 
 mkBashScript {
@@ -12,4 +13,5 @@ mkBashScript {
     pkgs.fzf
   ];
   testDeps = [ pkgs.git ];
+  inherit testSupport;
 }

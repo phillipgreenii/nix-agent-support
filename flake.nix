@@ -1459,6 +1459,13 @@
                   ''
                     export PATH="${selfChecks}/bin:${traceExtract}/bin:${capturePrefix}/bin:${relocationCheck}/bin:$PATH"
                     export CORPUS_INTRA_DIR="${./claude-marketplace/behavior-docs-conformance/skills/behavior-docs-intra-conformance/corpus/intra}"
+                    # GFH_LIB: shared hermetic-by-construction git-fixture harness
+                    # (pg2-31f13/pg2-gucfd) -- the capture-prefix-snapshots tests
+                    # in this file build real git fixtures and need it. A single
+                    # store-path interpolation of the .bats file (below) has no
+                    # sibling tests/support/ directory, so this env var is the
+                    # only way this check's copy resolves it.
+                    export GFH_LIB="${./tests/support/git-fixture-harness.bash}"
                     bats ${./tests/behavior-docs-intra-conformance.bats}
                     touch $out
                   '';
@@ -1511,6 +1518,14 @@
                   ''
                     export PATH="${resolveImports}/bin:${reconcileImports}/bin:${nameCollisions}/bin:${resolveLinks}/bin:$PATH"
                     export CORPUS_INTER_DIR="${./claude-marketplace/behavior-docs-conformance/skills/behavior-docs-inter-conformance/corpus/inter}"
+                    # GFH_LIB: shared hermetic-by-construction git-fixture harness
+                    # (pg2-31f13/pg2-gucfd) -- behavior-docs-resolve-links.bats
+                    # builds real git fixtures and needs it (inter-conformance.bats
+                    # itself makes no real git calls). A single store-path
+                    # interpolation of either .bats file has no sibling
+                    # tests/support/ directory, so this env var is the only way
+                    # this check's copy resolves it.
+                    export GFH_LIB="${./tests/support/git-fixture-harness.bash}"
                     bats ${./tests/behavior-docs-inter-conformance.bats}
                     bats ${./tests/behavior-docs-resolve-links.bats}
                     touch $out

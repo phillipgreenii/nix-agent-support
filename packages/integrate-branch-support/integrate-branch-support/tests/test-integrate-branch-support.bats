@@ -6,23 +6,51 @@ setup() {
   # this test file for a local `bats tests/` run. MUST honor an already-set
   # env var — the nix check harness copies tests/* flat into a bare $TMPDIR,
   # so recomputing unconditionally from BATS_TEST_FILENAME would resolve to
-  # the wrong directory there.
-  if [[ -z ${SCRIPTS_DIR:-} ]]; then
-    SCRIPTS_DIR="$(cd "$(dirname "${BATS_TEST_FILENAME}")/.." && pwd)"
+  # the wrong directory there. Captured into a plain local BEFORE gfh_setup
+  # runs, since it scrubs every exported var not on its allowlist — SCRIPTS_DIR
+  # is exported by the nix check, so it would otherwise be wiped (pg2-31f13).
+  local scripts_dir_saved="${SCRIPTS_DIR:-}"
+  local test_support_saved="${TEST_SUPPORT:-}"
+
+  if [[ -n $test_support_saved ]]; then
+    # shellcheck disable=SC1091
+    source "$test_support_saved/git-fixture-harness.bash"
+  else
+    # shellcheck disable=SC1091
+    source "$(cd "$(dirname "${BATS_TEST_FILENAME}")/../../test-support" && pwd)/git-fixture-harness.bash"
   fi
+
+  # Hermetic-by-construction git fixture (GIT_CEILING_DIRECTORIES + env
+  # allowlist reset + fresh HOME + hooks disabled): see pg2-31f13/pg2-gucfd.
+  # This suite's own `add_worktree` helper creates a REAL linked worktree —
+  # exactly the operation pg2-67h4y's write-up shows targeting the CANONICAL
+  # clone when GIT_DIR leaks from a commit-hook environment.
+  gfh_setup "integrate-branch-support"
+
+  if [[ -z $scripts_dir_saved ]]; then
+    scripts_dir_saved="$(cd "$(dirname "${BATS_TEST_FILENAME}")/.." && pwd)"
+  fi
+  export SCRIPTS_DIR="$scripts_dir_saved"
+
+  # Re-export TEST_SUPPORT too (also scrubbed by gfh_setup above) -- the
+  # regression-guard test below needs it to resolve the harness path again.
+  if [[ -n $test_support_saved ]]; then
+    export TEST_SUPPORT="$test_support_saved"
+  fi
+
   BIN="${SCRIPTS_DIR}/integrate-branch-support.sh"
-  TEST_DIR="$(mktemp -d)"
+  TEST_DIR="$GFH_REPO"
   # STUB_BIN: dir for fake gh/bd executables placed on PATH. Deliberately
   # OUTSIDE the fixture repo ($TEST_DIR) — creating it inside would leave the
   # bin dir as untracked content and falsely dirty the repo under test.
   STUB_BIN="$(mktemp -d)"
   cd "$TEST_DIR" || return 1
-  git init -q --initial-branch=main
-  git -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
 }
 
 teardown() {
-  rm -rf "$TEST_DIR"
+  # gfh_teardown removes GFH_ROOT, which contains TEST_DIR ($GFH_REPO) — no
+  # separate rm -rf "$TEST_DIR" needed.
+  gfh_teardown
   [ -n "${STUB_BIN:-}" ] && rm -rf "$STUB_BIN"
   # WT_DIR: set only by tests that create a linked worktree (see add_worktree
   # below); cleaned up here so it doesn't leak into the shared temp area.
@@ -315,4 +343,35 @@ EOF
   cd "$TEST_DIR" || true
   rm -rf "$nogit_dir"
   [ "$status" -ne 0 ]
+}
+
+@test "regression: a GIT_DIR/GIT_INDEX_FILE leaked into the parent shell before setup is scrubbed, not honored" {
+  # Simulates the pg2-67h4y hook-environment leak: GIT_DIR/GIT_INDEX_FILE
+  # pointed at a bogus path BEFORE the harness's own setup runs. If the
+  # scrub (gfh_reset_env, called by gfh_setup) did not take effect, the
+  # add_worktree helper's `git worktree add` -- the exact operation pg2-67h4y
+  # documents targeting a real canonical clone -- would operate against the
+  # bogus path instead of this test's own fixture repo.
+  local bogus_parent bogus harness_path
+  bogus_parent="$(mktemp -d)"
+  bogus="$bogus_parent/leaked-gitdir"
+  if [[ -n ${TEST_SUPPORT:-} ]]; then
+    harness_path="$TEST_SUPPORT/git-fixture-harness.bash"
+  else
+    harness_path="$(cd "$(dirname "${BATS_TEST_FILENAME}")/../../test-support" && pwd)/git-fixture-harness.bash"
+  fi
+
+  run env GIT_DIR="$bogus" GIT_INDEX_FILE="$bogus/index" HARNESS_PATH="$harness_path" bash -c '
+    source "$HARNESS_PATH"
+    gfh_setup "integrate-branch-support-regression"
+    command git -C "$GFH_REPO" rev-parse --git-dir
+  '
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"leaked-gitdir"* ]]
+
+  # The bogus path must never have been created -- proves the scrub took
+  # effect rather than the leaked vars silently being honored.
+  [ ! -e "$bogus" ]
+
+  rm -rf "$bogus_parent"
 }

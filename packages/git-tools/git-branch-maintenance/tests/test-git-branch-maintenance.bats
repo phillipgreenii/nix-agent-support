@@ -5,21 +5,45 @@
 # Tests key functionality without modifying the real repository
 
 setup() {
-    if [[ -z ${SCRIPTS_DIR:-} ]]; then
-        SCRIPTS_DIR="$(cd "$(dirname "${BATS_TEST_FILENAME}")/.." && pwd)"
+    # SCRIPTS_DIR may already be exported (nix check: `export SCRIPTS_DIR=
+    # "${src}"`), and gfh_setup below scrubs every exported var not on its
+    # allowlist -- capture it into a plain local FIRST, before that scrub
+    # runs, then re-export it after (pg2-31f13).
+    local scripts_dir_saved="${SCRIPTS_DIR:-}"
+    local test_support_saved="${TEST_SUPPORT:-}"
+
+    if [[ -n $test_support_saved ]]; then
+        # shellcheck disable=SC1091
+        source "$test_support_saved/git-fixture-harness.bash"
+    else
+        # shellcheck disable=SC1091
+        source "$(cd "$(dirname "${BATS_TEST_FILENAME}")/../../test-support" && pwd)/git-fixture-harness.bash"
+    fi
+
+    # Hermetic-by-construction git fixture (GIT_CEILING_DIRECTORIES + env
+    # allowlist reset + fresh HOME + hooks disabled): see pg2-31f13/pg2-gucfd.
+    # This replaces the old bare `git init`/`git config` in a plain mktemp
+    # dir, which had no protection at all against a leaked GIT_DIR family env
+    # var from a linked-worktree commit hook (pg2-67h4y).
+    gfh_setup "git-branch-maintenance"
+
+    if [[ -z $scripts_dir_saved ]]; then
+        scripts_dir_saved="$(cd "$(dirname "${BATS_TEST_FILENAME}")/.." && pwd)"
+    fi
+    export SCRIPTS_DIR="$scripts_dir_saved"
+
+    # Re-export TEST_SUPPORT too (also scrubbed by gfh_setup above) -- the
+    # regression-guard test below needs it to resolve the harness path again.
+    if [[ -n $test_support_saved ]]; then
+        export TEST_SUPPORT="$test_support_saved"
     fi
 
     # Create a separate directory for mock scripts (not in the git repo)
     export MOCK_DIR
     MOCK_DIR=$(mktemp -d)
 
-    # Create a temporary git repository
-    export TEST_DIR
-    TEST_DIR=$(mktemp -d)
+    export TEST_DIR="$GFH_REPO"
     cd "$TEST_DIR" || return 1
-    git init --initial-branch=main
-    git config user.email "test@example.com"
-    git config user.name "Test User"
 
     # Create .gitignore to ignore external directories that might be created
     # (e.g., .cursor/ from Cursor IDE, CLAUDE.md symlinks, or other system files)
@@ -100,9 +124,10 @@ EOF
 }
 
 teardown() {
-    # Clean up temporary directories
-    rm -rf "$TEST_DIR"
+    # Clean up temporary directories. gfh_teardown removes GFH_ROOT, which
+    # contains TEST_DIR ($GFH_REPO) -- no separate rm -rf "$TEST_DIR" needed.
     rm -rf "$MOCK_DIR"
+    gfh_teardown
 }
 
 run_git_branch_maintenance() {
@@ -408,4 +433,35 @@ EOF
 
     # Cleanup with the real git, bypassing the failing mock.
     "$REAL_GIT" worktree remove "$fail_wt" --force 2>/dev/null || rm -rf "$fail_wt"
+}
+
+@test "regression: a GIT_DIR/GIT_INDEX_FILE leaked into the parent shell before setup is scrubbed, not honored" {
+    # Simulates the pg2-67h4y hook-environment leak: GIT_DIR/GIT_INDEX_FILE
+    # pointed at a bogus path BEFORE the harness's own setup runs. If the
+    # scrub (gfh_reset_env, called by gfh_setup) did not take effect, git
+    # would try to operate against/create the bogus path instead of the
+    # fixture's own repo.
+    local bogus_parent bogus harness_path
+    bogus_parent="$(mktemp -d)"
+    bogus="$bogus_parent/leaked-gitdir"
+    if [[ -n ${TEST_SUPPORT:-} ]]; then
+        harness_path="$TEST_SUPPORT/git-fixture-harness.bash"
+    else
+        harness_path="$(cd "$(dirname "${BATS_TEST_FILENAME}")/../../test-support" && pwd)/git-fixture-harness.bash"
+    fi
+
+    run env GIT_DIR="$bogus" GIT_INDEX_FILE="$bogus/index" HARNESS_PATH="$harness_path" bash -c '
+        source "$HARNESS_PATH"
+        gfh_setup "git-branch-maintenance-regression"
+        command git -C "$GFH_REPO" rev-parse --git-dir
+    '
+    [ "$status" -eq 0 ]
+    # The reported git-dir must be the fixture'"'"'s own .git, never the leaked path.
+    [[ "$output" != *"leaked-gitdir"* ]]
+
+    # The bogus path must never have been created -- proves the scrub took
+    # effect rather than the leaked vars silently being honored.
+    [ ! -e "$bogus" ]
+
+    rm -rf "$bogus_parent"
 }

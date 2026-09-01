@@ -5,20 +5,44 @@
 # Tests that the script can be invoked and handles basic scenarios
 
 setup() {
-    if [[ -z ${SCRIPTS_DIR:-} ]]; then
-        SCRIPTS_DIR="$(cd "$(dirname "${BATS_TEST_FILENAME}")/.." && pwd)"
+    # SCRIPTS_DIR may already be exported (nix check: `export SCRIPTS_DIR=
+    # "${src}"`), and gfh_setup below scrubs every exported var not on its
+    # allowlist -- capture it into a plain local FIRST, before that scrub
+    # runs, then re-export it after (pg2-31f13).
+    local scripts_dir_saved="${SCRIPTS_DIR:-}"
+    local test_support_saved="${TEST_SUPPORT:-}"
+
+    if [[ -n $test_support_saved ]]; then
+        # shellcheck disable=SC1091
+        source "$test_support_saved/git-fixture-harness.bash"
+    else
+        # shellcheck disable=SC1091
+        source "$(cd "$(dirname "${BATS_TEST_FILENAME}")/../../test-support" && pwd)/git-fixture-harness.bash"
     fi
 
-    # Create a temporary git repository
-    export TEST_DIR
-    TEST_DIR=$(mktemp -d)
+    # Hermetic-by-construction git fixture (GIT_CEILING_DIRECTORIES + env
+    # allowlist reset + fresh HOME + hooks disabled): see pg2-31f13/pg2-gucfd.
+    # gfh_setup already leaves an initial commit on main, so there is no
+    # need to repeat it here.
+    gfh_setup "git-choose-branch"
+
+    if [[ -z $scripts_dir_saved ]]; then
+        scripts_dir_saved="$(cd "$(dirname "${BATS_TEST_FILENAME}")/.." && pwd)"
+    fi
+    export SCRIPTS_DIR="$scripts_dir_saved"
+
+    # Re-export TEST_SUPPORT too (also scrubbed by gfh_setup above) -- the
+    # regression-guard test below needs it to resolve the harness path again.
+    if [[ -n $test_support_saved ]]; then
+        export TEST_SUPPORT="$test_support_saved"
+    fi
+
+    # Separate directory for mock scripts -- kept out of the git repo itself.
+    export MOCK_DIR
+    MOCK_DIR=$(mktemp -d)
+
+    export TEST_DIR="$GFH_REPO"
     cd "$TEST_DIR" || return 1
-    git init --initial-branch=main
-    git config user.email "test@example.com"
-    git config user.name "Test User"
-    echo "test" > test.txt
-    git add test.txt
-    git commit -m "Initial commit"
     git checkout -b test-branch
     git checkout main
 
@@ -29,7 +53,7 @@ setup() {
 create_mock_gui_tools() {
     # Mock fzf - return first line of input (non-interactive)
     # If no input, exit with code 1 (simulates cancellation)
-    cat > "$TEST_DIR/fzf" <<'EOF'
+    cat > "$MOCK_DIR/fzf" <<'EOF'
 #!/usr/bin/env bash
 # Mock fzf for testing - returns first line of input or exits if no input
 # Read first line with timeout, if empty exit 1 (cancelled)
@@ -39,9 +63,9 @@ if [ -z "$first_line" ]; then
 fi
 echo "$first_line"
 EOF
-    chmod +x "$TEST_DIR/fzf"
+    chmod +x "$MOCK_DIR/fzf"
 
-    # Resolve the real column BEFORE $TEST_DIR goes on PATH, so the mock
+    # Resolve the real column BEFORE $MOCK_DIR goes on PATH, so the mock
     # below execs a fixed absolute path instead of doing a PATH lookup at
     # run time that would resolve to itself and recurse forever.
     local real_column
@@ -49,27 +73,29 @@ EOF
 
     # Mock column - pass through to real column if available, otherwise just cat
     if [[ -n "$real_column" ]]; then
-        cat > "$TEST_DIR/column" <<EOF
+        cat > "$MOCK_DIR/column" <<EOF
 #!/usr/bin/env bash
 # Mock column for testing
 exec "$real_column" "\$@"
 EOF
     else
-        cat > "$TEST_DIR/column" <<'EOF'
+        cat > "$MOCK_DIR/column" <<'EOF'
 #!/usr/bin/env bash
 # Mock column for testing
 cat
 EOF
     fi
-    chmod +x "$TEST_DIR/column"
+    chmod +x "$MOCK_DIR/column"
 
     # Add mocks to PATH
-    export PATH="$TEST_DIR:$PATH"
+    export PATH="$MOCK_DIR:$PATH"
 }
 
 teardown() {
-    # Clean up temporary directory
-    rm -rf "$TEST_DIR"
+    # Clean up temporary directories. gfh_teardown removes GFH_ROOT, which
+    # contains TEST_DIR ($GFH_REPO) -- no separate rm -rf "$TEST_DIR" needed.
+    rm -rf "$MOCK_DIR"
+    gfh_teardown
 }
 
 @test "git-choose-branch help/validation works" {
@@ -91,4 +117,34 @@ teardown() {
     run bash -euo pipefail "$SCRIPTS_DIR/git-choose-branch.sh" || true
     # Just verify the script file exists and is readable
     [ -f "$SCRIPTS_DIR/git-choose-branch.sh" ]
+}
+
+@test "regression: a GIT_DIR/GIT_INDEX_FILE leaked into the parent shell before setup is scrubbed, not honored" {
+    # Simulates the pg2-67h4y hook-environment leak: GIT_DIR/GIT_INDEX_FILE
+    # pointed at a bogus path BEFORE the harness's own setup runs. If the
+    # scrub (gfh_reset_env, called by gfh_setup) did not take effect, git
+    # would try to operate against/create the bogus path instead of the
+    # fixture's own repo.
+    local bogus_parent bogus harness_path
+    bogus_parent="$(mktemp -d)"
+    bogus="$bogus_parent/leaked-gitdir"
+    if [[ -n ${TEST_SUPPORT:-} ]]; then
+        harness_path="$TEST_SUPPORT/git-fixture-harness.bash"
+    else
+        harness_path="$(cd "$(dirname "${BATS_TEST_FILENAME}")/../../test-support" && pwd)/git-fixture-harness.bash"
+    fi
+
+    run env GIT_DIR="$bogus" GIT_INDEX_FILE="$bogus/index" HARNESS_PATH="$harness_path" bash -c '
+        source "$HARNESS_PATH"
+        gfh_setup "git-choose-branch-regression"
+        command git -C "$GFH_REPO" rev-parse --git-dir
+    '
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"leaked-gitdir"* ]]
+
+    # The bogus path must never have been created -- proves the scrub took
+    # effect rather than the leaked vars silently being honored.
+    [ ! -e "$bogus" ]
+
+    rm -rf "$bogus_parent"
 }

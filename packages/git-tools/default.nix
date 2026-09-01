@@ -3,17 +3,23 @@
   bashBuilders,
 }:
 let
+  # Shared hermetic-by-construction bats git-fixture harness (pg2-31f13; design
+  # pg2-gucfd; vendored pending pg2-ljn47.1's cross-repo nix packaging -- see
+  # test-support/git-fixture-harness.bash's own header). One copy, shared by
+  # all three sub-tools' bats suites, per pg2-gucfd's shared-harness decision.
+  testSupport = ./test-support;
+
   git-branch-maintenance = pkgs.callPackage ./git-branch-maintenance {
     inherit (bashBuilders) mkBashScript;
-    inherit pkgs;
+    inherit pkgs testSupport;
   };
   git-branch-status = pkgs.callPackage ./git-branch-status {
     inherit (bashBuilders) mkBashScript;
-    inherit pkgs;
+    inherit pkgs testSupport;
   };
   git-choose-branch = pkgs.callPackage ./git-choose-branch {
     inherit (bashBuilders) mkBashScript;
-    inherit pkgs;
+    inherit pkgs testSupport;
   };
 in
 {

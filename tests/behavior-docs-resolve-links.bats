@@ -8,9 +8,33 @@
 # resolve-links.sh's own header for the Q1/Q2 rulings and for why this check
 # is deliberately separate from tests/behavior-docs-real-corpus.sh.
 
+if [[ -n ${GFH_LIB:-} ]]; then
+  # shellcheck disable=SC1090
+  source "$GFH_LIB"
+else
+  # shellcheck disable=SC1090
+  source "$(cd "$BATS_TEST_DIRNAME/support" && pwd)/git-fixture-harness.bash"
+fi
+
 setup() {
+  # Hermetic-by-construction git-fixture scrub (pg2-31f13/pg2-gucfd): the
+  # impl_repo/d5_table fixtures below `git -C` init real repos under $WS,
+  # exactly the pattern pg2-67h4y shows losing to a leaked GIT_DIR-family env
+  # var from a linked-worktree commit-hook environment. gfh_reset_env alone
+  # (not the full gfh_setup, which also creates its OWN separate repo this
+  # file does not need) is the right-sized primitive here.
+  gfh_reset_env
+
   WS="$BATS_TEST_TMPDIR/ws"
   mkdir -p "$WS"
+
+  GIT_CEILING_DIRECTORIES="$(cd "$WS" && pwd -P)"
+  export GIT_CEILING_DIRECTORIES
+  GIT_CONFIG_SYSTEM=/dev/null
+  export GIT_CONFIG_SYSTEM
+  HOME="$WS/home"
+  mkdir -p "$HOME"
+  export HOME
 }
 
 # impl_repo <org/repo> -- sets IMPL to a freshly git-init'd repo with that
@@ -257,4 +281,41 @@ MD
   env LC_ALL=C resolve-links "$IMPL" >"$a" 2>&1 || true
   env LC_ALL=en_US.UTF-8 LC_COLLATE=en_US.UTF-8 resolve-links "$IMPL" >"$b" 2>&1 || true
   diff "$a" "$b"
+}
+
+@test "regression: a GIT_DIR/GIT_INDEX_FILE leaked into the parent shell before setup is scrubbed, not honored" {
+  # Simulates the pg2-67h4y hook-environment leak: GIT_DIR/GIT_INDEX_FILE
+  # pointed at a bogus path BEFORE the harness's own scrub runs. If
+  # gfh_reset_env did not take effect, `git -C "$real_dir" init` (the exact
+  # shape impl_repo above uses) would operate against/create the bogus path
+  # instead of the fixture's own repo.
+  local bogus_parent bogus harness_path real_dir
+  bogus_parent="$(mktemp -d)"
+  bogus="$bogus_parent/leaked-gitdir"
+  real_dir="$WS/regression-repo"
+  mkdir -p "$real_dir"
+  if [[ -n ${GFH_LIB:-} ]]; then
+    harness_path="$GFH_LIB"
+  else
+    harness_path="$(cd "$BATS_TEST_DIRNAME/support" && pwd)/git-fixture-harness.bash"
+  fi
+
+  run env GIT_DIR="$bogus" GIT_INDEX_FILE="$bogus/index" HARNESS_PATH="$harness_path" REAL_DIR="$real_dir" bash -c '
+    # Capture REAL_DIR into a plain (non-exported) local BEFORE gfh_reset_env
+    # runs -- it scrubs every EXPORTED var not on its allowlist, and REAL_DIR
+    # arrived via `env`, so it is exported and would otherwise be wiped too.
+    real_dir_local="$REAL_DIR"
+    source "$HARNESS_PATH"
+    gfh_reset_env
+    command git -C "$real_dir_local" init -q
+    command git -C "$real_dir_local" rev-parse --git-dir
+  '
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"leaked-gitdir"* ]]
+
+  # The bogus path must never have been created -- proves the scrub took
+  # effect rather than the leaked vars silently being honored.
+  [ ! -e "$bogus" ]
+
+  rm -rf "$bogus_parent"
 }

@@ -12,9 +12,35 @@
 # silences the BW02 warning the bare usage emits.
 bats_require_minimum_version 1.5.0
 
+if [[ -n ${GFH_LIB:-} ]]; then
+  # shellcheck disable=SC1090
+  source "$GFH_LIB"
+else
+  # shellcheck disable=SC1090
+  source "$(cd "$BATS_TEST_DIRNAME/support" && pwd)/git-fixture-harness.bash"
+fi
+
 setup() {
   SET="$BATS_TEST_TMPDIR/set"
   mkdir -p "$SET"
+}
+
+# _gfh_protect_fixture <suite-label>: hermetic-by-construction scrub
+# (pg2-31f13/pg2-gucfd) for the capture-prefix-snapshots fixtures below,
+# which git-init real repos directly under $BATS_TEST_TMPDIR -- exactly the
+# pattern pg2-67h4y shows losing to a leaked GIT_DIR-family env var from a
+# linked-worktree commit-hook environment. Uses gfh_reset_env + gfh_init_repo
+# rather than the full gfh_setup (which creates its OWN separate repo these
+# tests do not need -- they build their own fixture layout under $repo).
+_gfh_protect_fixture() {
+  gfh_reset_env
+  GIT_CEILING_DIRECTORIES="$(cd "$BATS_TEST_TMPDIR" && pwd -P)"
+  export GIT_CEILING_DIRECTORIES
+  GIT_CONFIG_SYSTEM=/dev/null
+  export GIT_CONFIG_SYSTEM
+  HOME="$BATS_TEST_TMPDIR/home-$1"
+  mkdir -p "$HOME"
+  export HOME
 }
 
 # section <name> extracts the named self-checks section body from the output.
@@ -765,10 +791,9 @@ MD
 @test "capture-prefix-snapshots: captures the PRE-FIX revision, not the current one" {
   repo="$BATS_TEST_TMPDIR/repo"
   mkdir -p "$repo/behavior-docs/docs/behavior" "$repo/packages/pr-pool/docs/behavior"
+  _gfh_protect_fixture "capture-prefix-1"
+  gfh_init_repo "$repo" "capture-prefix-1"
   cd "$repo"
-  git init -q .
-  git config user.email t@example.com
-  git config user.name t
   echo "PRE-FIX: unmet by the current implementation" >behavior-docs/docs/behavior/invariants.md
   echo "PRE-FIX pr-pool" >packages/pr-pool/docs/behavior/invariants.md
   git add -A
@@ -796,10 +821,9 @@ MD
 @test "capture-prefix-snapshots: an unknown rev and a non-repo are reported, not silently empty" {
   repo="$BATS_TEST_TMPDIR/repo2"
   mkdir -p "$repo/behavior-docs/docs/behavior"
+  _gfh_protect_fixture "capture-prefix-2"
+  gfh_init_repo "$repo" "capture-prefix-2"
   cd "$repo"
-  git init -q .
-  git config user.email t@example.com
-  git config user.name t
   echo x >behavior-docs/docs/behavior/invariants.md
   git add -A
   git commit -qm one
@@ -1088,4 +1112,42 @@ MD
   echo "$output" | grep -q 'FAIL tombstone note left in behavior doc'
   run relocation-check "$C/relocation-tombstone/pass"
   [ "$status" -eq 0 ]
+}
+
+@test "regression: a GIT_DIR/GIT_INDEX_FILE leaked into the parent shell before the capture-prefix-snapshots fixture is scrubbed, not honored" {
+  # Simulates the pg2-67h4y hook-environment leak: GIT_DIR/GIT_INDEX_FILE
+  # pointed at a bogus path BEFORE the fixture's own scrub runs. If
+  # gfh_reset_env did not take effect, `git -C "$real_dir" init` (the exact
+  # shape gfh_init_repo -- and, before this fix, the raw `git init .` this
+  # file used -- issues) would operate against/create the bogus path instead
+  # of the fixture's own repo.
+  local bogus_parent bogus harness_path real_dir
+  bogus_parent="$(mktemp -d)"
+  bogus="$bogus_parent/leaked-gitdir"
+  real_dir="$BATS_TEST_TMPDIR/regression-repo"
+  mkdir -p "$real_dir"
+  if [[ -n ${GFH_LIB:-} ]]; then
+    harness_path="$GFH_LIB"
+  else
+    harness_path="$(cd "$BATS_TEST_DIRNAME/support" && pwd)/git-fixture-harness.bash"
+  fi
+
+  run env GIT_DIR="$bogus" GIT_INDEX_FILE="$bogus/index" HARNESS_PATH="$harness_path" REAL_DIR="$real_dir" bash -c '
+    # Capture REAL_DIR into a plain (non-exported) local BEFORE gfh_reset_env
+    # runs -- it scrubs every EXPORTED var not on its allowlist, and REAL_DIR
+    # arrived via `env`, so it is exported and would otherwise be wiped too.
+    real_dir_local="$REAL_DIR"
+    source "$HARNESS_PATH"
+    gfh_reset_env
+    gfh_init_repo "$real_dir_local" "intra-regression"
+    command git -C "$real_dir_local" rev-parse --git-dir
+  '
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"leaked-gitdir"* ]]
+
+  # The bogus path must never have been created -- proves the scrub took
+  # effect rather than the leaked vars silently being honored.
+  [ ! -e "$bogus" ]
+
+  rm -rf "$bogus_parent"
 }

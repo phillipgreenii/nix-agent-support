@@ -1,6 +1,7 @@
 {
   mkBashScript,
   pkgs,
+  testSupport ? null,
 }:
 mkBashScript {
   name = "integrate-branch-support";
@@ -14,4 +15,5 @@ mkBashScript {
     pkgs.git
     pkgs.jq
   ];
+  inherit testSupport;
 }
