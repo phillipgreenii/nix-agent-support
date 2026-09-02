@@ -17,22 +17,18 @@ const helpText = usageLine + `
 pr-pool routes typed events from configured sources through a durable queue to
 configured handler roles (INTF-SOURCE -> queue -> INTF-HANDLER). "run" boots the
 core as a long-running daemon; "run-until-idle" boots it, fires one discovery
-pass, drains the queue to idle, then exits (a one-shot pass equivalent to the
-former "drain"). Bare "pr-pool" (no subcommand) prints usage and exits non-zero
-— an explicit subcommand is REQUIRED.
+pass, and drains the queue to idle before exiting. Bare "pr-pool" (no subcommand)
+prints usage and exits non-zero — an explicit subcommand is REQUIRED.
 
 Subcommands:
   run                     boot the core and run indefinitely, producing + dispatching on a
                           fixed poll interval, until SIGINT/SIGTERM requests shutdown
   run-until-idle          boot the core, discover once, drain the queue to idle, then exit
-                          (also reachable as "drain", kept as a deprecated alias)
   run-query [--json] query:<name>
                           smoke-test one named source's query once, read-only, and print the
                           matches it would emit (sets PR_POOL_TEST_MODE=1, below); --json emits
                           one JSON object ({query, total, matches}) instead of the tab-separated
-                          lines. The old "run-query <role>" form no longer runs anything: it
-                          prints a mapping diagnostic naming a source to try instead (see
-                          MIGRATION.md). Respects --only/--disable (below) even though it takes
+                          lines. Respects --only/--disable (below) even though it takes
                           no --only/--disable flags of its own: a source excluded by
                           PR_POOL_ONLY/PR_POOL_DISABLE stays unreachable by this command too.
   run-role [--json] <role> <bead>
@@ -165,9 +161,9 @@ const (
 	routeHelp                          // print usage and exit 0
 	routeUsageErr                      // print .msg + usage to stderr and exit 2
 	routeRun                           // boot the core as a long-running daemon (INV-LIFE-1)
-	routeRunUntilIdle                  // boot the core, discover once, drain to idle, exit (INV-LIFE-1; also "drain")
+	routeRunUntilIdle                  // boot the core, discover once, drain to idle, exit (INV-LIFE-1)
 	routeRunRole                       // dispatch one bead through a role (.role, .bead)
-	routeRunQuery                      // smoke one query source read-only (.query), or (Task 1.5c) the deprecated bare-role form (.role)
+	routeRunQuery                      // smoke one named query source read-only (.query)
 	routeConfig                        // print/show config (.configMode)
 	routeSessions                      // list this pool's sessions from metadata (read-only)
 	routeReconcile                     // report stranded self-owned feedback cycles, then run the pg-pr ACL (mutates beads)
@@ -183,8 +179,8 @@ type routeResult struct {
 	kind       routeKind
 	rest       []string // drain subcommand args (routeDrain only)
 	msg        string   // diagnostic for routeUsageErr
-	role       string   // run-role's role name; also run-query's DEPRECATED bare-role token (Task 1.5c — mutually exclusive with .query)
-	query      string   // run-query's "query:<name>" source name (Task 1.5c — mutually exclusive with .role)
+	role       string   // run-role's role name
+	query      string   // run-query's "query:<name>" source name (Task 1.5c)
 	bead       string   // run-role bead id
 	configMode string   // "print-defaults" | "show" (routeConfig only)
 	// gate / allGates are routePause/routeResume's TYPED fields (Task 1.2b): the
@@ -238,12 +234,6 @@ func route(argv []string) routeResult {
 		return parseRunLikeArgs(routeRun, args[1:])
 	case "run-until-idle":
 		return parseRunLikeArgs(routeRunUntilIdle, args[1:])
-	case "drain":
-		// Deprecated alias for run-until-idle (bead pg2-f3mcb.2): the pre-
-		// convergence internal/orchestrator + internal/eventbus "drain" path is
-		// retired; every caller that still says "pr-pool drain" gets the exact
-		// same queue-driven one-shot pass run-until-idle runs.
-		return parseRunLikeArgs(routeRunUntilIdle, args[1:])
 	case "run-role":
 		return parseRunRoleArgs(args[1:])
 	case "run-query":
@@ -285,10 +275,10 @@ func route(argv []string) routeResult {
 }
 
 // parseRunLikeArgs validates a subcommand that takes only the run-scoped
-// selector flags (--only/--disable, STORY-OP-3) and no positionals — run,
-// run-until-idle, and the deprecated drain alias for run-until-idle. It stays
-// pure aside from collecting those flag occurrences (no environment read, no
-// config I/O): it reports a routeKind and never boots a core itself, so the
+// selector flags (--only/--disable, STORY-OP-3) and no positionals — run and
+// run-until-idle. It stays pure aside from collecting those flag occurrences
+// (no environment read, no config I/O): it reports a routeKind and never
+// boots a core itself, so the
 // caller can refuse to touch config/precheck/the queue on a parse error or
 // help request (pg2-52rn's "no fall-through to a real dispatch on bad input"
 // guarantee, carried over from the retired parseDrainArgs). A help flag
@@ -335,15 +325,13 @@ func parseRunRoleArgs(args []string) routeResult {
 	return routeResult{kind: routeRunRole, role: pos[0], bead: pos[1], json: asJSON}
 }
 
-// parseRunQueryArgs validates `run-query [--json] (query:<name> | <role>)`.
-// Pure, same fail-fast contract (extractJSONFlag pulls --json out first); a
-// leading "query:" is stripped here (pure string parsing, no I/O) into
-// .query — the Task 1.5c canonical form, smoking one named source. A token
-// with no such prefix is the deprecated pre-1.5c bare-role form, carried as
-// .role: whether it names a real role (⇒ mapping diagnostic) or nothing at
-// all (⇒ usage error) needs the loaded config either way, so that decision
-// stays in the handler (runRunQueryLegacyRole), same as run-role's role-name
-// validation.
+// parseRunQueryArgs validates `run-query [--json] query:<name>`. Pure, same
+// fail-fast contract as the other operator subcommands (extractJSONFlag pulls
+// --json out first); a leading "query:" is stripped here (pure string
+// parsing, no I/O) into .query, naming exactly one configured source. Any
+// token with no such prefix — including the pre-Task-1.5c bare-role
+// form — is an ordinary usage error; there is no live consumer of that form
+// to carry a mapping diagnostic for (operator ruling, 2026-09-02).
 func parseRunQueryArgs(args []string) routeResult {
 	asJSON, pos := extractJSONFlag(args)
 	if len(pos) < 1 || pos[0] == "" || strings.HasPrefix(pos[0], "-") {
@@ -352,10 +340,11 @@ func parseRunQueryArgs(args []string) routeResult {
 	if len(pos) > 1 {
 		return routeResult{kind: routeUsageErr, msg: "run-query: unexpected argument: " + pos[1]}
 	}
-	if name, ok := strings.CutPrefix(pos[0], "query:"); ok && name != "" {
-		return routeResult{kind: routeRunQuery, query: name, json: asJSON}
+	name, ok := strings.CutPrefix(pos[0], "query:")
+	if !ok || name == "" {
+		return routeResult{kind: routeUsageErr, msg: "run-query: not a query (usage: run-query [--json] query:<name>): " + pos[0]}
 	}
-	return routeResult{kind: routeRunQuery, role: pos[0], json: asJSON}
+	return routeResult{kind: routeRunQuery, query: name, json: asJSON}
 }
 
 // parseSessionsArgs validates `sessions` (no args; read-only).

@@ -129,13 +129,15 @@ func TestHelpText_mentionsTestModeAndPerInvocationWarning(t *testing.T) {
 	}
 }
 
-// TestRoute_runQueryLegacyRoleForm covers the deprecated bare-role form
-// (Task 1.5c): a token with no "query:" prefix parses into .role, not
-// .query, leaving the mapping-diagnostic decision to the handler.
-func TestRoute_runQueryLegacyRoleForm(t *testing.T) {
+// TestRoute_runQueryBareRoleFormIsUsageError covers the retired pre-Task-1.5c
+// bare-role form: it is no longer a special-cased diagnostic path (operator
+// ruling, 2026-09-02 — no live consumer to migrate), so a token with no
+// "query:" prefix is an ordinary usage error like any other malformed
+// argument.
+func TestRoute_runQueryBareRoleFormIsUsageError(t *testing.T) {
 	r := route([]string{"pr-pool", "run-query", "worker"})
-	if r.kind != routeRunQuery || r.role != "worker" || r.query != "" {
-		t.Errorf("route(run-query worker) = %+v, want routeRunQuery role=worker query=\"\"", r)
+	if r.kind != routeUsageErr {
+		t.Errorf("route(run-query worker) = %+v, want routeUsageErr", r)
 	}
 }
 
@@ -237,32 +239,5 @@ func TestSourceNames(t *testing.T) {
 	ss := query.SourceSet{{Name: "feedback-ready"}, {Name: "worker-ready"}}
 	if got := sourceNames(ss); got != "feedback-ready, worker-ready" {
 		t.Errorf("sourceNames = %q, want %q", got, "feedback-ready, worker-ready")
-	}
-}
-
-// TestMappingDiagnostic reproduces the Task 1.5c "Produces" contract's exact
-// diagnostic text shape ('worker' is a role; run-query now names a source
-// (try: query:feedback-ready)) for a role fed by a source of that name, and
-// checks the fallback placeholder when the role has no feeding source at all.
-func TestMappingDiagnostic(t *testing.T) {
-	cfg := config.Config{
-		Roles: roles.RoleSet{{Name: "worker", Binds: []string{"work.ready"}}},
-		Queries: query.SourceSet{{Name: "feedback-ready", Query: query.CommandQuery{
-			Meta: query.Meta{EmitTypes: []string{"work.ready"}},
-		}}},
-	}
-	role, ok := resolveRole(cfg.Roles, "worker")
-	if !ok {
-		t.Fatal("worker should resolve")
-	}
-	want := "'worker' is a role; run-query now names a source (try: query:feedback-ready)"
-	if got := mappingDiagnostic(cfg, role); got != want {
-		t.Errorf("mappingDiagnostic = %q, want %q", got, want)
-	}
-
-	unfed := roles.Role{Name: "lonely", Binds: []string{"nothing.feeds.this"}}
-	want2 := "'lonely' is a role; run-query now names a source (try: query:<name>)"
-	if got := mappingDiagnostic(cfg, unfed); got != want2 {
-		t.Errorf("mappingDiagnostic(unfed) = %q, want %q", got, want2)
 	}
 }

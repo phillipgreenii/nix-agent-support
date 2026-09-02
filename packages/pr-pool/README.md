@@ -1,10 +1,11 @@
 # pr-pool
 
-`pr-pool` runs one drain pass over a monorepo: it discovers ready beads,
+`pr-pool` routes typed events from configured sources to configured handler
+roles over a durable queue. `run-until-idle` boots the core, discovers once,
 dispatches a session per configured role (in config order) up to each role's
-cap, waits for completion, then tears down every `pr-pool-*` tmux session. Bare
-`pr-pool` (no subcommand) now requires an explicit subcommand; see
-`run-until-idle` below for the single-pass drain behavior this used to default to.
+cap, and drains the queue to idle before tearing every `pr-pool-*` tmux
+session down and exiting; `run` boots the same core as a long-running daemon
+instead. Bare `pr-pool` (no subcommand) requires an explicit subcommand.
 
 > **Behavior:** how pr-pool should behave as an **orchestrator** — the drain, roles &
 > queries from config, and the agent-runner / query-source contracts — lives in the
@@ -15,23 +16,22 @@ cap, waits for completion, then tears down every `pr-pool-*` tmux session. Bare
 
 ## Subcommands
 
-| Command                           | Description                                                                                                                                                                                                     |
-| --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `run`                             | boot the core and run indefinitely, producing + dispatching on a fixed poll interval, until SIGINT/SIGTERM requests shutdown                                                                                    |
-| `run-until-idle`                  | boot the core, discover once, drain the queue to idle, then exit (also reachable as `drain`, kept as a deprecated alias)                                                                                        |
-| `drain`                           | deprecated alias for `run-until-idle` (see above); no longer the default — bare `pr-pool` (no subcommand) now requires an explicit subcommand                                                                   |
-| `run-query [--json] query:<name>` | smoke-test one named source's query once, read-only, and print the matches it would emit (text, or one JSON object with `--json`); the old `run-query <role>` form no longer runs anything — see `MIGRATION.md` |
-| `run-role [--json] <role> <bead>` | dispatch one bead through a role, then tear down (smoke test; `--json` reports the outcome as one JSON object)                                                                                                  |
-| `config --print-defaults`         | print the built-in default `config.toml` (a copy-paste start)                                                                                                                                                   |
-| `config --show [--json]`          | print the resolved config path, role set, and worker dispatch scalars (permission-mode/allowed-tools/budget); text, or one JSON object with `--json`                                                            |
-| `sessions`                        | list this pool's sessions (bead/role) from session metadata                                                                                                                                                     |
-| `reconcile`                       | report stranded self-owned feedback cycles, then run the pg-pr ACL: ensure a review-pr bead per open PR (reads `pg-pr pr list`; mutates beads; exit-0-on-partial)                                               |
-| `push-inject <json>`              | inject one operator-supplied event into the **running** core (text, or JSON with `--json`)                                                                                                                      |
-| `status`                          | inspect the **running** core: resolved config, live deliveries, per-`type` queue depths, plus gates/mode/listeners/sources/unmatched bindings/recent activity (text, or JSON with `--json`)                     |
-| `pause [<gate>]`                  | set gate `<gate>` (default `quota-paused`) directly on its file-backed state (`INV-LIFE-2`) — see [below](#pause--resume--operator-gate-control)                                                                |
-| `resume [<gate>] \| --all`        | clear gate `<gate>` (default `quota-paused`), or every outstanding gate with `--all` — see [below](#pause--resume--operator-gate-control)                                                                       |
-| `version`                         | print the version and exit                                                                                                                                                                                      |
-| `help`                            | print help and exit                                                                                                                                                                                             |
+| Command                           | Description                                                                                                                                                                                 |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `run`                             | boot the core and run indefinitely, producing + dispatching on a fixed poll interval, until SIGINT/SIGTERM requests shutdown                                                                |
+| `run-until-idle`                  | boot the core, discover once, drain the queue to idle, then exit                                                                                                                            |
+| `run-query [--json] query:<name>` | smoke-test one named source's query once, read-only, and print the matches it would emit (text, or one JSON object with `--json`)                                                           |
+| `run-role [--json] <role> <bead>` | dispatch one bead through a role, then tear down (smoke test; `--json` reports the outcome as one JSON object)                                                                              |
+| `config --print-defaults`         | print the built-in default `config.toml` (a copy-paste start)                                                                                                                               |
+| `config --show [--json]`          | print the resolved config path, role set, and worker dispatch scalars (permission-mode/allowed-tools/budget); text, or one JSON object with `--json`                                        |
+| `sessions`                        | list this pool's sessions (bead/role) from session metadata                                                                                                                                 |
+| `reconcile`                       | report stranded self-owned feedback cycles, then run the pg-pr ACL: ensure a review-pr bead per open PR (reads `pg-pr pr list`; mutates beads; exit-0-on-partial)                           |
+| `push-inject <json>`              | inject one operator-supplied event into the **running** core (text, or JSON with `--json`)                                                                                                  |
+| `status`                          | inspect the **running** core: resolved config, live deliveries, per-`type` queue depths, plus gates/mode/listeners/sources/unmatched bindings/recent activity (text, or JSON with `--json`) |
+| `pause [<gate>]`                  | set gate `<gate>` (default `quota-paused`) directly on its file-backed state (`INV-LIFE-2`) — see [below](#pause--resume--operator-gate-control)                                            |
+| `resume [<gate>] \| --all`        | clear gate `<gate>` (default `quota-paused`), or every outstanding gate with `--all` — see [below](#pause--resume--operator-gate-control)                                                   |
+| `version`                         | print the version and exit                                                                                                                                                                  |
+| `help`                            | print help and exit                                                                                                                                                                         |
 
 `<role>` is the role's configured `name`; `<name>` in `query:<name>` is a `[[query]]`'s configured
 `name`.
@@ -185,8 +185,8 @@ dir) — exactly one.
 
 > **Monorepo config hygiene:** add `.pr-pool/` to your monorepo's
 > `.git/info/exclude` so a repo-local pr-pool config (and its prompts) is never
-> committed there. `pr-pool drain` warns at pre-flight if `.pr-pool/config.toml`
-> is git-tracked.
+> committed there. `pr-pool run-until-idle` warns at pre-flight if
+> `.pr-pool/config.toml` is git-tracked.
 
 ## Configuration (pool-wide env)
 
@@ -224,7 +224,7 @@ paths): `[pool]` wins over `PR_POOL_*` env, which wins over the built-in default
 **Removed** (now per-role in `config.toml`, not env): `PR_POOL_MAX_WORKER`,
 `PR_POOL_MAX_FEEDBACK`, `PR_POOL_FEEDBACK_ENABLED`, `PR_POOL_WORKER_ENABLED`,
 `PR_POOL_SKILL_MD`, `PR_POOL_WORKER_SKILL_MD`. Set `role.cap` / `role.enabled` /
-the role's prompt in `config.toml` instead; `drain` warns if any are still set.
+the role's prompt in `config.toml` instead; pr-pool warns if any are still set.
 
 ## Observability
 

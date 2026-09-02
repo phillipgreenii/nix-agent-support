@@ -37,9 +37,9 @@ in
   options.phillipgreenii.programs.pr-pool = {
     enable = lib.mkEnableOption ''
       pr-pool (PR-feedback orchestrator: a `pr-pool run-until-idle` pass discovers
-      ready beads and dispatches feedback-processor / worker sessions via ccpool;
-      `drain` is a deprecated alias for the same pass). See `periodicDrain`
-      (timer-driven run-until-idle) and `daemon` (long-running `run`) below for
+      ready beads and dispatches feedback-processor / worker sessions via ccpool).
+      See `periodicDrain` (timer-driven run-until-idle) and `daemon` (long-running
+      `run`) below for
       turnkey systemd deployment — the two are mutually exclusive.
       Runtime-depends on `ccpool` and `bd` being on PATH.
     '';

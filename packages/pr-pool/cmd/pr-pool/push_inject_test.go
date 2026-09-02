@@ -338,6 +338,19 @@ func TestHelpText_DoesNotAdvertisePrPoolEmit(t *testing.T) {
 	}
 }
 
+// Operator ruling (2026-09-02): pr-pool has no live consumers, so it carries
+// no migration-only CLI surfaces. The `drain` deprecated alias and the
+// bare-role `run-query` mapping diagnostic were both retired outright
+// (Task R.1) — helpText/usageLine MUST NOT mention either.
+func TestHelpText_DoesNotAdvertiseRetiredMigrationSurfaces(t *testing.T) {
+	if strings.Contains(usageLine, "\"drain\"") || strings.Contains(helpText, "reachable as \"drain\"") {
+		t.Error("usageLine/helpText still advertises the retired `drain` alias (the bare word \"drain\" legitimately survives elsewhere, as the queue-draining verb)")
+	}
+	if strings.Contains(helpText, "is a role; run-query now names a source") {
+		t.Error("helpText still mentions the retired bare-role run-query mapping diagnostic")
+	}
+}
+
 // injectedRef is the shared injected-core precedence: flags win, else env, and
 // PR_POOL_TOKEN is consulted only when the socket also came from the environment.
 func TestInjectedRef_Precedence(t *testing.T) {

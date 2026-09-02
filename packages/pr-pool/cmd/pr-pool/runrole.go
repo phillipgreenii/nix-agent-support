@@ -160,15 +160,11 @@ func buildRunRoleEvent(ctx context.Context, br beads.Runner, role roles.Role, be
 	return event.NewItemEvent(eventType, "run-role", query.FromIssue(iss)), nil
 }
 
-// runRunQuery is `run-query`'s entry point. Task 1.5c splits it into two forms
-// on the SAME subcommand: queryArg carries the "query:<name>" form (smoke
-// exactly ONE named source, the new canonical grammar — args.go's
-// parseRunQueryArgs strips the "query:" prefix), while roleArg carries a bare
-// token — the deprecated pre-1.5c "run-query <role>" form, which no longer
-// runs anything; it reports the mapping diagnostic instead
-// (runRunQueryLegacyRole). Exactly one of the two is non-empty (args.go's
-// contract).
-func runRunQuery(roleArg, queryArg string, asJSON bool) int {
+// runRunQuery is `run-query`'s entry point: it smokes exactly ONE named
+// source (queryArg, the "query:<name>" form — args.go's parseRunQueryArgs
+// strips the "query:" prefix and rejects anything else as a usage error, so
+// queryArg is always non-empty here).
+func runRunQuery(queryArg string, asJSON bool) int {
 	setTestMode()
 	ctx := context.Background()
 	cfg, err := config.Load()
@@ -181,40 +177,7 @@ func runRunQuery(roleArg, queryArg string, asJSON bool) int {
 		fmt.Fprintln(os.Stderr, "precheck:", err)
 		return exitPrecheck
 	}
-	if queryArg == "" {
-		return runRunQueryLegacyRole(cfg, roleArg)
-	}
 	return runRunQuerySource(ctx, cfg, br, queryArg, asJSON)
-}
-
-// runRunQueryLegacyRole handles the deprecated `run-query <role>` form
-// (pre-Task-1.5c: run-query took a ROLE and smoked every source feeding it).
-// It runs nothing — printing the mapping diagnostic naming a REAL source the
-// role used to be fed by (mappingDiagnostic) is strictly more useful than
-// silently reinterpreting the bare token as a (very likely wrong) source
-// name. A token that is neither a configured role nor a configured source is
-// reported as a plain unknown-source usage error.
-func runRunQueryLegacyRole(cfg config.Config, roleArg string) int {
-	role, ok := resolveRole(cfg.Roles, roleArg)
-	if !ok {
-		printUsageErr(fmt.Sprintf("run-query: %q is not a source (usage: run-query [--json] query:<name>; configured: %s)", roleArg, sourceNames(cfg.Queries)))
-		return exitUsage
-	}
-	fmt.Fprintln(os.Stderr, mappingDiagnostic(cfg, role))
-	return exitUsage
-}
-
-// mappingDiagnostic renders Task 1.5c's mapping diagnostic for the deprecated
-// run-query <role> form. It names a source discover.QueriesForRole would have
-// fed role's discovery under the pre-1.5c behavior, so the "try: query:<name>"
-// hint is something the operator can literally copy and run rather than a
-// fabricated example.
-func mappingDiagnostic(cfg config.Config, role roles.Role) string {
-	example := "<name>"
-	if sources := discover.QueriesForRole(cfg.Queries, role); len(sources) > 0 {
-		example = sources[0].Name
-	}
-	return fmt.Sprintf("'%s' is a role; run-query now names a source (try: query:%s)", role.Name, example)
 }
 
 // runRunQuerySource smokes exactly ONE named query source, read-only: the

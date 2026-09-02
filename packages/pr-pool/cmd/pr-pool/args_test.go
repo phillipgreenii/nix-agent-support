@@ -68,7 +68,7 @@ func TestRoute(t *testing.T) {
 		want routeKind
 	}{
 		{"no-args-is-usage-error", []string{"pr-pool"}, routeUsageErr},
-		{"drain-subcommand-is-deprecated-alias", []string{"pr-pool", "drain"}, routeRunUntilIdle},
+		{"drain-subcommand-is-retired", []string{"pr-pool", "drain"}, routeUsageErr},
 		{"run-subcommand", []string{"pr-pool", "run"}, routeRun},
 		{"run-until-idle-subcommand", []string{"pr-pool", "run-until-idle"}, routeRunUntilIdle},
 		{"version-subcommand", []string{"pr-pool", "version"}, routeVersion},
@@ -168,10 +168,10 @@ func TestRoute_runSubcommands(t *testing.T) {
 		{"run-role-unknown-name-parses", []string{"pr-pool", "run-role", "bogus", "zr-1"}, routeRunRole},
 		{"run-role-flag-as-role", []string{"pr-pool", "run-role", "--x", "zr-1"}, routeUsageErr},
 		{"run-role-extra-arg", []string{"pr-pool", "run-role", "feedback", "zr-1", "x"}, routeUsageErr},
-		{"run-query-ok", []string{"pr-pool", "run-query", "worker"}, routeRunQuery},
-		{"run-query-missing-role", []string{"pr-pool", "run-query"}, routeUsageErr},
-		{"run-query-unknown-name-parses", []string{"pr-pool", "run-query", "bogus"}, routeRunQuery},
-		{"run-query-extra-arg", []string{"pr-pool", "run-query", "worker", "extra"}, routeUsageErr},
+		{"run-query-ok", []string{"pr-pool", "run-query", "query:worker"}, routeRunQuery},
+		{"run-query-missing-query", []string{"pr-pool", "run-query"}, routeUsageErr},
+		{"run-query-bare-role-form-is-usage-error", []string{"pr-pool", "run-query", "worker"}, routeUsageErr},
+		{"run-query-extra-arg", []string{"pr-pool", "run-query", "query:worker", "extra"}, routeUsageErr},
 		{"config-print-defaults", []string{"pr-pool", "config", "--print-defaults"}, routeConfig},
 		{"config-show", []string{"pr-pool", "config", "--show"}, routeConfig},
 		{"config-no-flag", []string{"pr-pool", "config"}, routeUsageErr},
@@ -193,10 +193,20 @@ func TestParseRunRoleArgs_carriesRoleAndBead(t *testing.T) {
 	}
 }
 
-func TestParseRunQueryArgs_carriesRole(t *testing.T) {
+func TestParseRunQueryArgs_carriesQuery(t *testing.T) {
+	r := parseRunQueryArgs([]string{"query:feedback"})
+	if r.kind != routeRunQuery || r.query != "feedback" || r.role != "" {
+		t.Errorf("parseRunQueryArgs = %+v, want routeRunQuery query=feedback role empty", r)
+	}
+}
+
+// Operator ruling (2026-09-02): the pre-Task-1.5c bare-role form is retired
+// outright, with no mapping-diagnostic special case — a token with no
+// "query:" prefix is an ordinary usage error like any other.
+func TestParseRunQueryArgs_bareRoleFormIsUsageError(t *testing.T) {
 	r := parseRunQueryArgs([]string{"feedback"})
-	if r.kind != routeRunQuery || r.role != "feedback" || r.bead != "" {
-		t.Errorf("parseRunQueryArgs = %+v, want routeRunQuery role=feedback bead empty", r)
+	if r.kind != routeUsageErr {
+		t.Errorf("parseRunQueryArgs(feedback) = %+v, want routeUsageErr", r)
 	}
 }
 
