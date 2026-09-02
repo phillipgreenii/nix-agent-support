@@ -1,11 +1,15 @@
 package core
 
 import (
+	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 
 	"github.com/phillipgreenii/pr-pool/conformance"
 )
@@ -125,11 +129,38 @@ func TestRegistry_UnknownParticipant(t *testing.T) {
 	if err := r.SetSelfStatus("nope", SelfHealthy); !errors.Is(err, ErrUnknownParticipant) {
 		t.Fatalf("SetSelfStatus err = %v, want ErrUnknownParticipant", err)
 	}
+	if err := r.SetSubset("nope", []string{"queue_depth"}); !errors.Is(err, ErrUnknownParticipant) {
+		t.Fatalf("SetSubset err = %v, want ErrUnknownParticipant", err)
+	}
 	if _, ok := r.Get("nope"); ok {
 		t.Fatal("Get returned an entry for an unregistered id")
 	}
 	if r.Available("nope") {
 		t.Fatal("Available = true for an unregistered id")
+	}
+}
+
+// SetSubset (Task 3.6-prereq) is a plain follow-up field update, the same
+// shape as SetLifecycle/SetSelfStatus: it records the metric catalog subset
+// a kind=monitor registration may read via mon.read, without disturbing the
+// rest of the entry.
+func TestRegistry_SetSubset(t *testing.T) {
+	r := NewRegistry(nil)
+	if _, err := r.Register("m1", KindMonitor, "", "self-cb"); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	if err := r.SetSubset("m1", []string{"queue_depth", "unconsumed_expired"}); err != nil {
+		t.Fatalf("SetSubset: %v", err)
+	}
+	got, ok := r.Get("m1")
+	if !ok {
+		t.Fatal("registration vanished")
+	}
+	if !reflect.DeepEqual(got.Subset, []string{"queue_depth", "unconsumed_expired"}) {
+		t.Fatalf("Subset = %v, want [queue_depth unconsumed_expired]", got.Subset)
+	}
+	if got.SelfStatusCallback != "self-cb" {
+		t.Fatalf("SetSubset disturbed an unrelated field: SelfStatusCallback = %q", got.SelfStatusCallback)
 	}
 }
 
@@ -260,4 +291,92 @@ func TestService_RegisterHandsOutTheCallback(t *testing.T) {
 	if svc.Registry().Len() != 4 {
 		t.Fatalf("registry len = %d, want 4", svc.Registry().Len())
 	}
+}
+
+// Registering as kind=monitor resolves the caller's metric catalog subset
+// from the configured MonitorSubsetResolver and records it on the
+// Registration BEFORE Register returns (Task 3.6-prereq / Task 3.6 Binding
+// decisions: "resolved BEFORE it ever calls register... looked up from
+// config by registration id, not carried on the mon.read request itself").
+// Every OTHER kind's Subset stays empty even though the resolver would
+// return something for its id too — the resolver is consulted ONLY for
+// KindMonitor.
+func TestService_RegisterResolvesMonitorSubsetForMonitorKindOnly(t *testing.T) {
+	resolver := MonitorSubsetResolver(func(id string) []string {
+		return map[string][]string{
+			"mon-1": {"queue_depth", "unconsumed_expired"},
+			"h1":    {"should-never-be-consulted"},
+		}[id]
+	})
+	svc := &Service{
+		state:          conformance.Started,
+		reg:            NewRegistry(nil),
+		command:        "pr-pool",
+		ref:            Ref{Socket: "/s/core.sock", Token: "tok"},
+		monitorSubsets: resolver,
+	}
+
+	mon, err := svc.Register("mon-1", KindMonitor)
+	if err != nil {
+		t.Fatalf("Register monitor: %v", err)
+	}
+	if !reflect.DeepEqual(mon.Subset, []string{"queue_depth", "unconsumed_expired"}) {
+		t.Fatalf("monitor Subset = %v, want [queue_depth unconsumed_expired]", mon.Subset)
+	}
+
+	handler, err := svc.Register("h1", KindHandler)
+	if err != nil {
+		t.Fatalf("Register handler: %v", err)
+	}
+	if handler.Subset != nil {
+		t.Fatalf("handler Subset = %v, want nil (resolver must not be consulted for a non-monitor kind)", handler.Subset)
+	}
+
+	// Get agrees with what Register returned — the subset actually landed in
+	// the registry, not just in Register's return value.
+	got, ok := svc.Registry().Get("mon-1")
+	if !ok || !reflect.DeepEqual(got.Subset, mon.Subset) {
+		t.Fatalf("Registry().Get(mon-1).Subset = %v, ok=%v; want %v, true", got.Subset, ok, mon.Subset)
+	}
+}
+
+// A Service with no MonitorSubsetResolver configured (the production
+// default when Config.MonitorSubsets is unset) must resolve every
+// kind=monitor registration to an empty subset, not panic.
+func TestService_RegisterMonitorSubsetDefaultsToEmptyWithNoResolver(t *testing.T) {
+	svc := &Service{
+		state:   conformance.Started,
+		reg:     NewRegistry(nil),
+		command: "pr-pool",
+		ref:     Ref{Socket: "/s/core.sock", Token: "tok"},
+	}
+	mon, err := svc.Register("mon-1", KindMonitor)
+	if err != nil {
+		t.Fatalf("Register monitor: %v", err)
+	}
+	if mon.Subset != nil {
+		t.Fatalf("Subset = %v, want nil with no MonitorSubsetResolver configured", mon.Subset)
+	}
+}
+
+// Service.MetricsReader (Task 3.6-prereq) returns exactly the handle Options
+// wired in at Listen, and nil when none was configured — the "no read-back
+// capability wired" case documented on Options.MetricsReader.
+func TestService_MetricsReader(t *testing.T) {
+	stub := stubMetricsReader{}
+	withReader := &Service{metricsReader: stub}
+	if got := withReader.MetricsReader(); got != stub {
+		t.Fatalf("MetricsReader() = %v, want the configured stub", got)
+	}
+
+	withoutReader := &Service{}
+	if got := withoutReader.MetricsReader(); got != nil {
+		t.Fatalf("MetricsReader() = %v, want nil when none configured", got)
+	}
+}
+
+type stubMetricsReader struct{}
+
+func (stubMetricsReader) Snapshot(context.Context) (metricdata.ResourceMetrics, error) {
+	return metricdata.ResourceMetrics{}, nil
 }

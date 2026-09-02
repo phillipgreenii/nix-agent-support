@@ -137,6 +137,22 @@ type Config struct {
 	// package does not need to import internal/activity just to duplicate
 	// its constant.
 	ActivityRingSize int
+
+	// MonitorSubsets resolves a `mon.read` registration id (INTF-MON,
+	// registry.KindMonitor) to the metric catalog subset it may read — by
+	// metric NAME, not this package's concern to define the vocabulary of
+	// (Task 3.6-prereq: "resolved BEFORE a mon.read caller ever calls
+	// register... looked up from config by registration id, not carried on
+	// the mon.read request itself"). nil/absent (the default, and every
+	// production caller today) resolves every id to no subset — the same
+	// nil-means-package-default idiom MeterProvider/Locator/ActivityRingSize
+	// above already use. Not a config-file key today: no [[monitor]] TOML
+	// surface exists yet, and this field's job stops at making the
+	// config-driven lookup MECHANISM available for cmd/pr-pool's bootCore to
+	// thread into internal/core.Options.MonitorSubsets — what populates this
+	// map (a future TOML table, an env var, a flag) is Task 3.6's or a later
+	// task's concern, not this one's.
+	MonitorSubsets map[string][]string
 }
 
 // Meter returns the Config's MeterProvider, defaulting to the OTel no-op

@@ -606,6 +606,46 @@ func TestFlushRealProviderReportsNonEmptyDepth(t *testing.T) {
 	}
 }
 
+// NewReadableProvider's MeterProvider must actually back live instruments —
+// an Emitter constructed on it and driven records a value the paired
+// Reader's Snapshot can read back (Task 3.6-prereq's value-read-back
+// acceptance criterion). Unlike newHarness's own reader (which the TEST
+// constructs and owns directly), this proves the PRODUCTION constructor
+// bootCore is expected to call wires the two together correctly on its own.
+func TestNewReadableProvider_SnapshotReadsBackRecordedValue(t *testing.T) {
+	mp, reader := NewReadableProvider()
+	emitter, err := New(mp, func() map[string]int { return nil })
+	if err != nil {
+		t.Fatalf("New emitter: %v", err)
+	}
+
+	emitter.OnUnconsumedExpired("review-requested")
+
+	rm, err := reader.Snapshot(context.Background())
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	m := findMetric(t, rm, MetricUnconsumedExpired)
+	if got := sumFor(m, "type", "review-requested"); got != 1 {
+		t.Fatalf("%s{type=review-requested} = %d, want 1", MetricUnconsumedExpired, got)
+	}
+}
+
+// A Reader with nothing recorded yet must still Snapshot cleanly (no
+// instruments driven at all is not an error condition — the same "absence
+// means zero" posture gaugeVal's own doc already states for an observable
+// gauge).
+func TestNewReadableProvider_SnapshotBeforeAnyRecordingIsNotAnError(t *testing.T) {
+	mp, reader := NewReadableProvider()
+	if _, err := New(mp, func() map[string]int { return nil }); err != nil {
+		t.Fatalf("New emitter: %v", err)
+	}
+
+	if _, err := reader.Snapshot(context.Background()); err != nil {
+		t.Fatalf("Snapshot before any recording = %v, want nil", err)
+	}
+}
+
 // --- helpers --------------------------------------------------------------
 
 // enqueue appends an event with an explicit absolute `expiresAt`, computed off the

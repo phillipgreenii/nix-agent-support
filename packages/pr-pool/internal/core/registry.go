@@ -88,8 +88,13 @@ type Registration struct {
 	// participant MAY push its own status … over a callback the core hands it."
 	// Unlike Callback it is never empty for a valid registration.
 	SelfStatusCallback string
-	RegisteredAt       time.Time
-	UpdatedAt          time.Time
+	// Subset is the metric catalog subset (by INTF-MON name) a kind=monitor
+	// participant may read via `mon.read` (Task 3.6-prereq), resolved from
+	// config at registration time by Service.Register and recorded here via
+	// SetSubset. Always empty for every OTHER kind.
+	Subset       []string
+	RegisteredAt time.Time
+	UpdatedAt    time.Time
 }
 
 // Registry is the core's participant registry (interfaces.md "Registry &
@@ -173,6 +178,23 @@ func (r *Registry) SetLifecycle(id string, state conformance.Lifecycle) error {
 		return fmt.Errorf("%w: %s", ErrUnknownParticipant, id)
 	}
 	reg.State = state
+	reg.UpdatedAt = r.now()
+	return nil
+}
+
+// SetSubset records a kind=monitor participant's resolved metric catalog
+// subset (Task 3.6-prereq) — a plain field update, the same shape as
+// SetLifecycle/SetSelfStatus, called by Service.Register right after
+// Register itself so the caller never observes a registration missing its
+// subset.
+func (r *Registry) SetSubset(id string, subset []string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	reg, ok := r.byID[id]
+	if !ok {
+		return fmt.Errorf("%w: %s", ErrUnknownParticipant, id)
+	}
+	reg.Subset = subset
 	reg.UpdatedAt = r.now()
 	return nil
 }

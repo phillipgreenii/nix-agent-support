@@ -45,6 +45,13 @@
 // delivery-side failure wiring above) and by Task 3.3 (the six new catalog
 // members and the second failure class above). Its statement coverage is
 // gated at >=80% by the `pr-pool-go-tests` flake check (bead pg2-hvlyj.19).
+//
+// Reader (Task 3.6-prereq) adds the value-READ-BACK half INTF-MON's pull
+// direction (`mon.read`, Task 3.6) needs: NewReadableProvider builds an OTel
+// MeterProvider with a ManualReader already wired in, and Reader.Snapshot
+// collects the catalog's current values from it. Emitter itself stays
+// write-only — see Reader's own doc for why the read side is a sibling type
+// rather than a method on Emitter.
 package metrics
 
 import (
@@ -52,6 +59,8 @@ import (
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 
 	"github.com/phillipgreenii/pr-pool/internal/eventqueue"
 )
@@ -394,6 +403,58 @@ func (e *Emitter) RecordThroughput(evtType string) {
 // own design decision, not a byproduct of this task's Files).
 func (e *Emitter) RecordDispatchLatency(ms float64) {
 	e.dispatchLatency.Record(context.Background(), ms)
+}
+
+// Reader is a value-read-back handle over the catalog's current counter
+// values (INTF-MON pull; Task 3.6-prereq). It wraps an OTel
+// sdkmetric.ManualReader — a sibling of Emitter, not a method on it, because
+// the read side needs a handle bound at MeterProvider CONSTRUCTION time (an
+// OTel reader is fixed into a MeterProvider's option list when the provider
+// is built, and Emitter is constructed AFTER the MeterProvider already
+// exists, from an mp it merely calls Meter() on). See NewReadableProvider,
+// which builds both together.
+type Reader struct {
+	reader *sdkmetric.ManualReader
+}
+
+// NewReadableProvider returns a fresh OTel SDK MeterProvider with a
+// ManualReader wired in, plus the Reader handle that collects from it. Any
+// instrument created via Meter() on the returned MeterProvider (e.g. by
+// passing it to New) can have its current value read back through the
+// returned Reader's Snapshot — this is what lets core.Service answer
+// mon.read (Task 3.6) without the metrics package depending on
+// internal/core, or internal/core depending on the OTel SDK's concrete
+// exporter types.
+//
+// This is a DIFFERENT default from Config.Meter()'s own documented default
+// (the no-op provider, INV-OBS-1 / Task 3.3 binding decision: "core stays
+// unaware of any concrete monitoring backend"): a no-op provider's
+// instruments never record anything, so it can never answer a read-back
+// query. cmd/pr-pool's bootCore is expected to call this ONLY when no
+// deployment-bound MeterProvider is configured (cfg.MeterProvider unset) —
+// see its resolveMeterProvider — never as a second reader retrofitted onto
+// an already-constructed external provider, which the OTel SDK does not
+// support.
+func NewReadableProvider() (metric.MeterProvider, *Reader) {
+	reader := sdkmetric.NewManualReader()
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	return mp, &Reader{reader: reader}
+}
+
+// Snapshot collects the catalog's current values from every instrument
+// registered on the MeterProvider NewReadableProvider returned alongside
+// this Reader. It returns OTel's own neutral snapshot type
+// (metricdata.ResourceMetrics — see the package doc's "a neutral standard,
+// not a mandated backend") rather than a pr-pool-specific shape: filtering
+// it down to one sink's configured subset and translating it into the
+// mon.read-reply wire shape is Task 3.6's job, not this prereq's (Task 3.6
+// Binding decisions).
+func (r *Reader) Snapshot(ctx context.Context) (metricdata.ResourceMetrics, error) {
+	var rm metricdata.ResourceMetrics
+	if err := r.reader.Collect(ctx, &rm); err != nil {
+		return metricdata.ResourceMetrics{}, err
+	}
+	return rm, nil
 }
 
 // Flush forces every metric reader registered on mp to collect and export

@@ -57,12 +57,17 @@ const idleDrainTick = 500 * time.Millisecond
 // Matches internal/metrics/metrics_test.go's newHarness circular-construction
 // pattern: q is declared (as this function's named return) before New(mp,
 // depthFn) closes over it, then constructed for real with WithObserver(emitter).
-// mp is resolved from cfg.Meter(), which defaults to the OTel no-op provider
-// when cfg.MeterProvider is unset (INV-OBS-1: core stays unaware of any
+// mp is resolved by resolveMeterProvider, which defers to cfg.MeterProvider
+// when the deployment has bound one (INV-OBS-1: core stays unaware of any
 // concrete monitoring backend; binding a real one is a deployment concern
 // this function does not take on — it is chosen by CONFIG, not hardcoded
-// here, per Task 3.3's binding decision).
+// here, per Task 3.3's binding decision) and otherwise builds a real
+// SDK-backed provider with a ManualReader — see resolveMeterProvider's own
+// doc for why that, not the plain OTel no-op, is now this function's
+// default: `mon.read` (Task 3.6-prereq / Task 3.6) needs SOME live value to
+// read back, which the wiring also exposes through core.Options.MetricsReader.
 //
+
 // The returned storeClose MUST be deferred by the caller: eventqueue.Queue owns
 // no Close of its own (Store is an injected seam), so the file handle beneath it
 // is this function's caller's to release.
@@ -77,7 +82,7 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("open event queue: %w", err)
 	}
-	mp = cfg.Meter()
+	mp, metricsReader := resolveMeterProvider(cfg)
 	emitter, err := metrics.New(mp, func() map[string]int { return q.DepthByType() })
 	if err != nil {
 		_ = store.Close()
@@ -110,17 +115,70 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 		}
 		q.Register(o.NewListener(ctx, r))
 	}
-	svc, err = core.Listen(core.Options{
-		LogDir:   cfg.LogDir,
-		Queue:    q,
-		Bindings: core.NewBindings(declaredBindTypes(cfg.Roles)...),
-		Observer: emitter,
-	})
+	opts := core.Options{
+		LogDir:         cfg.LogDir,
+		Queue:          q,
+		Bindings:       core.NewBindings(declaredBindTypes(cfg.Roles)...),
+		Observer:       emitter,
+		MonitorSubsets: monitorSubsetResolverFrom(cfg.MonitorSubsets),
+	}
+	if metricsReader != nil {
+		// Assigned only when non-nil: metricsReader is a typed *metrics.Reader,
+		// and boxing a nil one into the core.MetricsReader interface field
+		// unconditionally would make Options.MetricsReader != nil hold true even
+		// then (a non-nil interface can wrap a nil pointer) — this guard is what
+		// keeps Service.MetricsReader() genuinely nil when resolveMeterProvider
+		// returned none (Config.MeterProvider set to an external provider).
+		opts.MetricsReader = metricsReader
+	}
+	svc, err = core.Listen(opts)
 	if err != nil {
 		_ = store.Close()
 		return nil, nil, nil, nil, fmt.Errorf("start core: %w", err)
 	}
 	return svc, q, mp, store.Close, nil
+}
+
+// resolveMeterProvider decides the MeterProvider metrics.New registers the
+// catalog's instruments on, and — when possible — the metrics.Reader handle
+// that can read their current values back for INTF-MON's pull half
+// (`mon.read`, Task 3.6-prereq).
+//
+// Config.Meter()'s own documented default (INV-OBS-1 / Task 3.3 binding
+// decision) is the OTel no-op provider: "core stays unaware of any concrete
+// monitoring backend". A no-op provider's instruments never record
+// anything, so it can never answer a read-back query — read-back needs a
+// REAL SDK-backed provider under the hood. Rather than relitigate Task
+// 3.3's binding decision, this function keeps its semantics (no
+// deployment-bound backend still selects a package default, chosen by
+// config rather than hardcoded here) while making that default a real
+// SDK-backed MeterProvider with a ManualReader instead of a plain no-op —
+// nothing regresses, since the no-op could never be read back either way.
+//
+// When cfg.MeterProvider IS set (a deployment-bound external backend, e.g.
+// an OTLP exporter — unused by any production caller today, verified
+// against the live worktree), that provider owns its own reader set fixed
+// at its own construction; the OTel SDK has no way to retrofit a second
+// reader onto it here, so metricsReader is nil in that case — a documented,
+// structural degradation, not an oversight.
+func resolveMeterProvider(cfg config.Config) (mp metric.MeterProvider, metricsReader *metrics.Reader) {
+	if cfg.MeterProvider != nil {
+		return cfg.MeterProvider, nil
+	}
+	return metrics.NewReadableProvider()
+}
+
+// monitorSubsetResolverFrom adapts cfg.MonitorSubsets (a plain map, Task
+// 3.6-prereq) into the core.MonitorSubsetResolver function core.Options
+// wants — the same config->core.Options adaptation bootCore already
+// performs for Bindings above (declaredBindTypes(cfg.Roles) ->
+// core.NewBindings(...)). nil input yields a nil resolver so
+// Service.monitorSubsetResolver's own nil-default applies unchanged.
+func monitorSubsetResolverFrom(subsets map[string][]string) core.MonitorSubsetResolver {
+	if len(subsets) == 0 {
+		return nil
+	}
+	return func(id string) []string { return subsets[id] }
 }
 
 // fanOutObserver calls two eventqueue.Observers for every hook, in order

@@ -308,6 +308,126 @@ func TestBootCore_wiresMetricsEmitterAsProduceTickSourceFailureObserver(t *testi
 	}
 }
 
+// TestBootCore_DefaultMeterProviderWiresReadableMetricsReader proves the
+// Task 3.6-prereq value-read-back acceptance criterion end to end at the
+// production wiring site: when Config.MeterProvider is unset (the default —
+// nothing sets it in production today), bootCore must give the returned
+// core.Service a NON-NIL MetricsReader whose Snapshot actually reflects a
+// live queue mutation, not the plain no-op provider Config.Meter() itself
+// still defaults to (that provider can never be read back — see
+// resolveMeterProvider's doc for why bootCore stopped calling cfg.Meter()
+// directly).
+func TestBootCore_DefaultMeterProviderWiresReadableMetricsReader(t *testing.T) {
+	cfg := config.Config{LogDir: shortDir(t)}
+	o := &orchestrator.Orchestrator{Cfg: cfg}
+	ctx := context.Background()
+	svc, q, _, storeClose, err := bootCore(ctx, cfg, o)
+	if err != nil {
+		t.Fatalf("bootCore: %v", err)
+	}
+	defer func() { _ = storeClose() }()
+	defer func() { _ = svc.Close() }()
+
+	reader := svc.MetricsReader()
+	if reader == nil {
+		t.Fatal("MetricsReader() = nil, want a wired read-back handle when Config.MeterProvider is unset")
+	}
+
+	future := time.Now().Add(time.Hour)
+	if _, err := q.Enqueue(eventqueue.Event{ID: "ev-1", Type: "review-requested", ExpiresAt: future}); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+
+	rm, err := reader.Snapshot(ctx)
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	got := int64(-1)
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			if m.Name != metrics.MetricQueueDepth {
+				continue
+			}
+			g, ok := m.Data.(metricdata.Gauge[int64])
+			if !ok {
+				continue
+			}
+			for _, dp := range g.DataPoints {
+				if v, present := dp.Attributes.Value(attribute.Key("type")); present && v.AsString() == "review-requested" {
+					got = dp.Value
+				}
+			}
+		}
+	}
+	if got != 1 {
+		t.Fatalf("%s{type=review-requested} via svc.MetricsReader().Snapshot() = %d, want 1 (bootCore's default MeterProvider must be read-back-capable)", metrics.MetricQueueDepth, got)
+	}
+}
+
+// TestBootCore_ExternalMeterProviderLeavesMetricsReaderNil proves the
+// documented degradation: when a deployment binds its OWN external
+// MeterProvider (Config.MeterProvider, Task 3.3's binding decision), bootCore
+// must use it as-is (unchanged from Task 3.3) and MUST NOT report a
+// MetricsReader — the OTel SDK provides no way to retrofit a second reader
+// onto an already-constructed provider this function does not own.
+func TestBootCore_ExternalMeterProviderLeavesMetricsReaderNil(t *testing.T) {
+	reader := sdkmetric.NewManualReader()
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	cfg := config.Config{LogDir: shortDir(t), MeterProvider: mp}
+	o := &orchestrator.Orchestrator{Cfg: cfg}
+	ctx := context.Background()
+	svc, _, gotMP, storeClose, err := bootCore(ctx, cfg, o)
+	if err != nil {
+		t.Fatalf("bootCore: %v", err)
+	}
+	defer func() { _ = storeClose() }()
+	defer func() { _ = svc.Close() }()
+
+	if gotMP != mp {
+		t.Fatalf("bootCore's returned MeterProvider changed identity; want the exact configured one back unmodified")
+	}
+	if got := svc.MetricsReader(); got != nil {
+		t.Fatalf("MetricsReader() = %v, want nil when Config.MeterProvider is externally set", got)
+	}
+}
+
+// TestBootCore_ThreadsMonitorSubsetsIntoCoreOptions proves Task 3.6-prereq's
+// second acceptance criterion end to end: Config.MonitorSubsets (resolved
+// from config, BEFORE any mon.read caller ever calls register) actually
+// reaches core.Service.Register's resolution, through bootCore's
+// monitorSubsetResolverFrom adaptation — the full path Task 3.6's mon.read
+// handler will rely on.
+func TestBootCore_ThreadsMonitorSubsetsIntoCoreOptions(t *testing.T) {
+	cfg := config.Config{
+		LogDir:         shortDir(t),
+		MonitorSubsets: map[string][]string{"mon-1": {"queue_depth", "unconsumed_expired"}},
+	}
+	o := &orchestrator.Orchestrator{Cfg: cfg}
+	ctx := context.Background()
+	svc, _, _, storeClose, err := bootCore(ctx, cfg, o)
+	if err != nil {
+		t.Fatalf("bootCore: %v", err)
+	}
+	defer func() { _ = storeClose() }()
+	defer func() { _ = svc.Close() }()
+
+	reg, err := svc.Register("mon-1", core.KindMonitor)
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	if !reflect.DeepEqual(reg.Subset, []string{"queue_depth", "unconsumed_expired"}) {
+		t.Fatalf("Subset = %v, want [queue_depth unconsumed_expired] (from Config.MonitorSubsets)", reg.Subset)
+	}
+
+	unconfigured, err := svc.Register("mon-2", core.KindMonitor)
+	if err != nil {
+		t.Fatalf("Register mon-2: %v", err)
+	}
+	if unconfigured.Subset != nil {
+		t.Fatalf("Subset = %v, want nil for an id absent from Config.MonitorSubsets", unconfigured.Subset)
+	}
+}
+
 // activityObserver.OnDispatchFailure (bead pg2-icm3u) must append a
 // "dispatch_failed" Entry to the ring — the fourth outcome its own doc
 // comment now enumerates, alongside delivered/missed/declined.

@@ -63,6 +63,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
+
 	"github.com/phillipgreenii/pr-pool/conformance"
 	"github.com/phillipgreenii/pr-pool/internal/eventqueue"
 )
@@ -94,6 +96,22 @@ type Options struct {
 	// Observer receives the ingest-time conditions the core records to metrics
 	// (INV-OBS-1 / INTF-MON). Optional: nil means the conditions are logged only.
 	Observer IngestObserver
+	// MetricsReader is the value-read-back handle Task 3.6's `mon.read`
+	// composes its replies from (INTF-MON pull, Task 3.6-prereq). Optional:
+	// nil means no read-back capability is wired — e.g. when the deployment
+	// configured its own external MeterProvider (Config.MeterProvider),
+	// which owns its own reader set fixed at its own construction and
+	// cannot have a second reader retrofitted here (see
+	// internal/metrics.NewReadableProvider's doc). cmd/pr-pool's bootCore is
+	// the production wiring site.
+	MetricsReader MetricsReader
+	// MonitorSubsets resolves a kind=monitor registration id to the metric
+	// catalog subset (by INTF-MON name) it may read, looked up BEFORE the
+	// caller ever calls register (Task 3.6 Binding decisions: "resolved...
+	// looked up from config by registration id, not carried on the mon.read
+	// request itself"). Optional: nil resolves every id to an empty subset —
+	// no production caller sets this yet.
+	MonitorSubsets MonitorSubsetResolver
 	// Command is the program name baked into the callback strings handed to
 	// participants (default DefaultCommand). Injectable so a test — or a
 	// deployment that installs the binary under another name — hands out a command
@@ -117,6 +135,13 @@ type Service struct {
 	logDir   string
 	command  string
 	inflight sync.WaitGroup
+
+	// metricsReader and monitorSubsets are the two Task 3.6-prereq seams:
+	// the value-read-back handle and the config-resolved
+	// registration-id->subset lookup mon.read's Serve handler (Task 3.6)
+	// composes its replies from. Both optional; see Options' docs.
+	metricsReader  MetricsReader
+	monitorSubsets MonitorSubsetResolver
 
 	// tick and gates are the two published-state cells Serve's handlers (this
 	// package) read with no cross-package import (Task 3.5 Objective):
@@ -143,6 +168,27 @@ type IngestObserver interface {
 	// at that same res == eventqueue.Deduped branch.
 	OnDeduped(eventType string)
 }
+
+// MetricsReader is a value-read-back handle over the metric catalog's
+// current counter values (INTF-MON pull; Task 3.6-prereq) — the read-side
+// counterpart to IngestObserver's write side, kept as a narrow interface for
+// the same reason: this package states only OTel's own neutral snapshot
+// shape (metricdata.ResourceMetrics — see internal/metrics's package doc,
+// "a neutral standard, not a mandated backend"), never a concrete
+// monitoring backend. internal/metrics.Reader is the production
+// implementation (see its NewReadableProvider).
+type MetricsReader interface {
+	// Snapshot returns the catalog's current values. Task 3.6's mon.read
+	// handler filters the result to the caller's registered subset; this
+	// method itself returns everything the underlying MeterProvider has
+	// collected.
+	Snapshot(ctx context.Context) (metricdata.ResourceMetrics, error)
+}
+
+// MonitorSubsetResolver resolves a kind=monitor registration id to the
+// metric catalog subset (by INTF-MON name) it may read via mon.read — see
+// Options.MonitorSubsets.
+type MonitorSubsetResolver func(id string) []string
 
 // noopObserver is what a Service without an Observer uses, so the ingest path
 // never branches on nil.
@@ -218,15 +264,17 @@ func Listen(opts Options) (*Service, error) {
 		return nil, err
 	}
 	return &Service{
-		state:    conformance.Starting,
-		q:        opts.Queue,
-		bindings: opts.Bindings,
-		obs:      opts.Observer,
-		reg:      NewRegistry(now),
-		ln:       ln,
-		ref:      ref,
-		logDir:   opts.LogDir,
-		command:  command,
+		state:          conformance.Starting,
+		q:              opts.Queue,
+		bindings:       opts.Bindings,
+		obs:            opts.Observer,
+		reg:            NewRegistry(now),
+		ln:             ln,
+		ref:            ref,
+		logDir:         opts.LogDir,
+		command:        command,
+		metricsReader:  opts.MetricsReader,
+		monitorSubsets: opts.MonitorSubsets,
 	}, nil
 }
 
@@ -259,6 +307,20 @@ func (s *Service) Queue() *eventqueue.Queue { return s.q }
 // Registry returns the participant registry.
 func (s *Service) Registry() *Registry { return s.reg }
 
+// MetricsReader returns the Service's value-read-back handle (Task
+// 3.6-prereq), or nil when none is wired — see Options.MetricsReader.
+func (s *Service) MetricsReader() MetricsReader { return s.metricsReader }
+
+// monitorSubsetResolver returns the Service's MonitorSubsetResolver,
+// defaulting to one that resolves every id to an empty subset, so Register
+// never branches on nil (the same idiom observer() already uses for obs).
+func (s *Service) monitorSubsetResolver() MonitorSubsetResolver {
+	if s.monitorSubsets == nil {
+		return func(string) []string { return nil }
+	}
+	return s.monitorSubsets
+}
+
 // State returns the core's own lifecycle state.
 func (s *Service) State() conformance.Lifecycle {
 	s.mu.Lock()
@@ -280,8 +342,26 @@ func (s *Service) CallbackCommand(subcommand string) string {
 // reachable") — its kind-specific callback (ingestCallbackFor), and the
 // self-status callback every kind gets (interfaces.md "Self-status": "Any
 // participant MAY push its own status").
+//
+// For kind == KindMonitor, it also resolves and records the caller's metric
+// catalog subset from the configured MonitorSubsetResolver (Task 3.6 Binding
+// decisions: "resolved BEFORE it ever calls register... looked up from
+// config by registration id, not carried on the mon.read request itself") —
+// a plain follow-up field update via Registry.SetSubset, the same shape
+// SetLifecycle/SetSelfStatus already use, rather than a Register argument
+// every OTHER kind would have to pass as empty.
 func (s *Service) Register(id string, kind Kind) (Registration, error) {
-	return s.reg.Register(id, kind, s.ingestCallbackFor(kind), s.CallbackCommand(SubcommandSelfStatus))
+	reg, err := s.reg.Register(id, kind, s.ingestCallbackFor(kind), s.CallbackCommand(SubcommandSelfStatus))
+	if err != nil {
+		return Registration{}, err
+	}
+	if kind == KindMonitor {
+		if err := s.reg.SetSubset(id, s.monitorSubsetResolver()(id)); err != nil {
+			return Registration{}, err
+		}
+		reg, _ = s.reg.Get(id) // re-fetch: SetSubset just updated it
+	}
+	return reg, nil
 }
 
 // ingestCallbackFor returns the ONE event-delivery callback command a
