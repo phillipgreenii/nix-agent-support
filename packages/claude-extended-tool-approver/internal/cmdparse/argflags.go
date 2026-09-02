@@ -899,3 +899,66 @@ func SkipBBProseArgs(args []string) []string {
 	}
 	return result
 }
+
+// pgCcauditQueryArgIndex returns the index of pg-ccaudit's query PARAMETER
+// positional for the `query <name> <param>` PREFIX FORM, or -1 when args are
+// not that form (pg2-21tke).
+//
+// `pg-ccaudit query <name> [args…]` runs a named, versioned canned query
+// (packages/pg-ccaudit/internal/query/registry.go, query.All()) against a
+// read-only SQLite index. Every registered query's positional parameter is
+// either a bare number (limit/n/idle_threshold_ms/head) or a SQL LIKE pattern
+// over an indexed column (sig/root) — checked against the full registry,
+// 2026-09-02: none is a filesystem path pg-ccaudit itself opens. The db path
+// is the SEPARATE `--db` flag, which this table does not touch and which
+// still gets tested as an ordinary token by bashMatch's own loop. So `/home`
+// in `pg-ccaudit query root-first-last-seen /home` is a LIKE pattern matched
+// against the index's recorded root column, not a path reference — treating
+// it as one produced the false-positive Reject this fixes ("/home does not
+// exist on this machine" for a command that never touches /home on disk at
+// all).
+//
+// Matched STRICTLY, the same reason bdCommentBodyIndex/bbProseIndex are:
+// args[0] is "query" and args[1] (the query name) carries no leading "-", so
+// an interspersed global flag (`query --format json <name> <param>`) or any
+// other unrecognized shape keeps today's behaviour — a false positive for
+// that arrangement, never a bypass.
+//
+// Every query in the current registry takes AT MOST ONE positional param, so
+// returning a single index (like bdCommentBodyIndex/bbProseIndex do) is
+// exhaustive today. A future multi-param query would still have its second
+// param screened as an ordinary token — fail-closed, not a widened carve-out.
+func pgCcauditQueryArgIndex(args []string) int {
+	if len(args) < 3 || args[0] != "query" {
+		return -1
+	}
+	if strings.HasPrefix(args[1], "-") || strings.HasPrefix(args[2], "-") {
+		return -1
+	}
+	return 2
+}
+
+// SkipPgCcauditQueryArgs returns pg-ccaudit's args with the query parameter
+// positional removed (see pgCcauditQueryArgIndex), so denied-root path
+// checking is not handed a SQL LIKE pattern and told it names a fabricated
+// filesystem root. It is pg-ccaudit's counterpart to SkipBBProseArgs: a bare
+// POSITIONAL rather than a named flag's value, so it cannot share
+// SkipMessageArgs either.
+//
+// Scanning stops at a bare "--" implicitly: the strict shape match in
+// pgCcauditQueryArgIndex already requires the parameter be the exact third
+// token, so no token after a "--" can ever be mistaken for it.
+func SkipPgCcauditQueryArgs(args []string) []string {
+	idx := pgCcauditQueryArgIndex(args)
+	if idx < 0 {
+		return args
+	}
+	result := make([]string, 0, len(args)-1)
+	for i, a := range args {
+		if i == idx {
+			continue
+		}
+		result = append(result, a)
+	}
+	return result
+}

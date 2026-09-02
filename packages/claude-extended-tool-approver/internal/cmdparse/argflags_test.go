@@ -321,6 +321,68 @@ func TestSkipBBProseArgs(t *testing.T) {
 	}
 }
 
+// TestSkipPgCcauditQueryArgs pins pg2-21tke's fix: pg-ccaudit's query
+// parameter positional (a SQL LIKE pattern or bare number) is dropped for the
+// exact `query <name> <param>` shape, while every other shape — an
+// interspersed flag, a different subcommand, an unrelated executable, or a
+// genuine path argument such as --db's value — keeps its tokens intact.
+func TestSkipPgCcauditQueryArgs(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want []string
+	}{
+		{
+			name: "query root-first-last-seen positional root pattern dropped",
+			args: []string{"query", "root-first-last-seen", "/home"},
+			want: []string{"query", "root-first-last-seen"},
+		},
+		{
+			name: "query sig pattern positional dropped",
+			args: []string{"query", "session-concentration", "%denied-roots%"},
+			want: []string{"query", "session-concentration"},
+		},
+		{
+			name: "query with trailing flags keeps them, drops only the param",
+			args: []string{"query", "root-first-last-seen", "/home", "--format", "json"},
+			want: []string{"query", "root-first-last-seen", "--format", "json"},
+		},
+		{
+			name: "query with no param positional is unchanged (too short)",
+			args: []string{"query", "top-signatures"},
+			want: []string{"query", "top-signatures"},
+		},
+		{
+			name: "an interspersed global flag before the query name is not the strict shape",
+			args: []string{"query", "--no-staleness", "root-first-last-seen", "/home"},
+			want: []string{"query", "--no-staleness", "root-first-last-seen", "/home"},
+		},
+		{
+			name: "a flag in the param slot is not the strict shape",
+			args: []string{"query", "root-first-last-seen", "--format", "json"},
+			want: []string{"query", "root-first-last-seen", "--format", "json"},
+		},
+		{
+			name: "a non-query subcommand drops nothing",
+			args: []string{"queries", "root-first-last-seen", "/home"},
+			want: []string{"queries", "root-first-last-seen", "/home"},
+		},
+		{
+			name: "the --db value is untouched — it is a real path pg-ccaudit opens",
+			args: []string{"query", "root-first-last-seen", "/home", "--db", "/home/x.db"},
+			want: []string{"query", "root-first-last-seen", "--db", "/home/x.db"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := SkipPgCcauditQueryArgs(tt.args)
+			if strings.Join(got, "\x00") != strings.Join(tt.want, "\x00") {
+				t.Errorf("SkipPgCcauditQueryArgs(%q) = %q, want %q", tt.args, got, tt.want)
+			}
+		})
+	}
+}
+
 // TestGluedFlagValue pins the pg2-52eod centralization: GluedFlagValue returns the
 // value half of a `--flag=value` token with ONE matched pair of surrounding shell
 // quotes already removed, and reports malformed whenever UnwrapGluedQuotes DECLINES

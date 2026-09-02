@@ -162,6 +162,69 @@ func TestBash_MessageArgCarveOut(t *testing.T) {
 	}
 }
 
+// TestBash_PgCcauditQueryArgCarveOut pins pg2-21tke: pg-ccaudit query's
+// positional parameter is a SQL LIKE-pattern query argument over an indexed
+// column, not a filesystem path, so a denied-root-shaped value there must not
+// be rejected — the exact false positive the bead reports
+// ("pg-ccaudit query root-first-last-seen /home" denied for naming a
+// fabricated /home root, even though the command never touches /home on
+// disk).
+func TestBash_PgCcauditQueryArgCarveOut(t *testing.T) {
+	pe := newTestEvaluator(t, "/home:/mnt:/repo")
+	r := New(pe)
+	tests := []struct {
+		name    string
+		command string
+	}{
+		{"the bead's literal false positive", "pg-ccaudit query root-first-last-seen /home"},
+		{"a different denied root as the LIKE pattern", "pg-ccaudit query root-first-last-seen /repo"},
+		{"a sig-parameter query", `pg-ccaudit query session-concentration "/home%"`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := &hookio.HookInput{
+				ToolName:  "Bash",
+				ToolInput: mustJSON(hookio.BashToolInput{Command: tt.command}),
+				CWD:       "/Users/testuser/project",
+			}
+			got := hookio.Verdict(r.Evaluate(input))
+			if got.Decision == hookio.Reject {
+				t.Errorf("%q: got reject (reason=%q), want not-applicable", tt.command, got.Reason)
+			}
+		})
+	}
+}
+
+// TestBash_PgCcauditOtherArgs_StillRejected proves the carve-out is narrow:
+// pg-ccaudit's --db flag names a REAL database path pg-ccaudit opens, and a
+// fabricated-root value there must still be rejected exactly like any other
+// command's path argument — the carve-out removes only the one positional
+// pgCcauditQueryArgIndex identifies, never the whole command line.
+func TestBash_PgCcauditOtherArgs_StillRejected(t *testing.T) {
+	pe := newTestEvaluator(t, "/home:/mnt:/repo")
+	r := New(pe)
+	tests := []struct {
+		name    string
+		command string
+	}{
+		{"--db value is a real path, still checked", "pg-ccaudit query root-first-last-seen /home --db /home/index.db"},
+		{"an unrecognized subcommand keeps the old (safe) scan", "pg-ccaudit ingest /home/transcripts"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := &hookio.HookInput{
+				ToolName:  "Bash",
+				ToolInput: mustJSON(hookio.BashToolInput{Command: tt.command}),
+				CWD:       "/Users/testuser/project",
+			}
+			got := hookio.Verdict(r.Evaluate(input))
+			if got.Decision != hookio.Reject {
+				t.Errorf("%q: got %s, want reject (reason=%q)", tt.command, got.Decision, got.Reason)
+			}
+		})
+	}
+}
+
 // TestBash_Unconfigured_NeverRejects mirrors TestRead_Unconfigured_NeverRejects
 // for Bash: no CETA_DENIED_ROOTS configured means this rule is a no-op on every
 // Bash call, including one shaped exactly like the measured defect.

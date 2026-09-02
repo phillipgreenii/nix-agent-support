@@ -51,6 +51,17 @@
 // carve-out internal/rules/secrets applies to its own Bash scan and for the
 // identical reason: prose that happens to MENTION a path is not a path
 // reference, and it is a no-op for any command not in its enumerated table.
+//
+// cmdparse.SkipPgCcauditQueryArgs (pg2-21tke) applies the identical principle
+// to a different shape: `pg-ccaudit query <name> <param>`'s positional
+// parameter is a SQL LIKE-pattern query argument over an indexed column
+// (root/sig) or a bare number, never a filesystem path pg-ccaudit itself
+// opens — so `pg-ccaudit query root-first-last-seen /home` must not be
+// rejected for "/home does not exist on this machine" the way `cat /home/x`
+// correctly is. It is a no-op for every command other than pg-ccaudit, and
+// for pg-ccaudit itself only removes the one positional the strict shape
+// match identifies — a genuine path argument elsewhere on the same command
+// line (e.g. `--db /home/x.db`) is still scanned normally.
 package deniedroots
 
 import (
@@ -145,6 +156,12 @@ func bashMatch(leaves []cmdparse.ParsedCommand, eval *patheval.PathEvaluator) (r
 		}
 		basename := filepath.Base(pc.Executable)
 		args := cmdparse.SkipMessageArgs(basename, pc.Args)
+		if basename == "pg-ccaudit" {
+			// See the package doc's cmdparse.SkipPgCcauditQueryArgs paragraph
+			// (pg2-21tke): `query <name> <param>`'s positional param is a SQL
+			// LIKE pattern, never a path.
+			args = cmdparse.SkipPgCcauditQueryArgs(args)
+		}
 		for _, a := range args {
 			candidate := a
 			if value, glued, malformed := cmdparse.GluedFlagValue(a); glued {
