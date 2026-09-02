@@ -31,3 +31,4 @@ internal/metrics 80
 internal/core 85
 internal/activity 90
 internal/textsafe 95
+conformance/driver 85

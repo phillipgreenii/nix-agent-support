@@ -14,12 +14,34 @@
 package conformance
 
 import (
+	"embed"
 	"encoding/json"
 	"errors"
 	"fmt"
 
 	"github.com/phillipgreenii/pr-pool/schemas"
 )
+
+//go:embed testdata/golden/*.json
+var goldenFS embed.FS
+
+// Golden loads and decodes the golden fixture for message type mt
+// (testdata/golden/<mt>.json) as a JSON object. This is the one golden-loading
+// implementation: it stays here (not in the extracted conformance/driver
+// package, Task 3.13 Binding decisions) so package conformance's own tests and
+// driver — which imports conformance for schema access — never carry two
+// copies of the embedded fixture set.
+func Golden(mt string) (map[string]any, error) {
+	b, err := goldenFS.ReadFile("testdata/golden/" + mt + ".json")
+	if err != nil {
+		return nil, err
+	}
+	var v map[string]any
+	if err := json.Unmarshal(b, &v); err != nil {
+		return nil, err
+	}
+	return v, nil
+}
 
 // Check validates a decoded JSON message against its named schema AND the
 // cross-field rules that a structural schema cannot express. It is the single

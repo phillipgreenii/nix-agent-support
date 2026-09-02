@@ -10,164 +10,21 @@ import (
 	"github.com/phillipgreenii/pr-pool/schemas"
 )
 
-//go:embed testdata/golden/*.json
-var golden embed.FS
-
 //go:embed testdata/compat/*.json
 var compatGolden embed.FS
 
+// loadGolden wraps the shared Golden loader (conformance.go) with a
+// t.Fatalf-on-error signature for the tests below — the golden-loading
+// implementation itself lives once in conformance.go so package conformance's
+// own tests and the extracted conformance/driver package (Task 3.13) never
+// carry two copies of it.
 func loadGolden(t *testing.T, name string) map[string]any {
 	t.Helper()
-	b, err := golden.ReadFile("testdata/golden/" + name + ".json")
+	v, err := Golden(name)
 	if err != nil {
 		t.Fatalf("read golden %s: %v", name, err)
 	}
-	var v map[string]any
-	if err := json.Unmarshal(b, &v); err != nil {
-		t.Fatalf("decode golden %s: %v", name, err)
-	}
 	return v
-}
-
-// GOAL-7: every message type has a golden example that validates against its
-// schema — turns interfaces.md's illustrative samples into golden fixtures.
-func TestGoldenFixturesValidate(t *testing.T) {
-	for _, mt := range MessageTypes() {
-		t.Run(mt, func(t *testing.T) {
-			g := loadGolden(t, mt)
-			if err := Check(mt, g); err != nil {
-				t.Fatalf("golden %s failed its own schema: %v", mt, err)
-			}
-		})
-	}
-}
-
-// Generic negatives applied to EVERY message type via its golden: an extra field
-// (additionalProperties) is rejected, and — for a message carrying a const
-// schemaVersion — an unknown version is rejected at the schema layer.
-func TestNegative_Generic(t *testing.T) {
-	for _, mt := range MessageTypes() {
-		t.Run(mt+"/additionalProperties", func(t *testing.T) {
-			g := loadGolden(t, mt)
-			// oneOf/top-level-object: an undeclared field must be rejected.
-			g["totallyUnexpectedField"] = "x"
-			if err := Check(mt, g); err == nil {
-				t.Fatalf("%s accepted an additional property", mt)
-			}
-		})
-	}
-}
-
-// Per-message-type negative matrix: each independently-violable constraint has a
-// rejecting case (required-field-missing, wrong-type, enum-out-of-range).
-func TestNegative_Matrix(t *testing.T) {
-	type nc struct {
-		desc string
-		json string
-	}
-	matrix := map[string][]nc{
-		"event": {
-			{"missing id", `{"schemaVersion":"1","type":"t"}`},
-			{"missing type", `{"schemaVersion":"1","id":"e"}`},
-			{"wrong-type payload", `{"id":"e","type":"t","payload":"notobj"}`},
-			{"wrong-type expiresAt", `{"id":"e","type":"t","expiresAt":900}`},
-			// The duration-valued field is GONE from the event (DEC-EVENT-1), and
-			// additionalProperties:false is what makes that a REJECTION rather than a
-			// silently-ignored leftover — the one check that would have caught the
-			// doc-side deletion never reaching the code (bead pg2-85dv2).
-			{"legacy duration field", `{"id":"e","type":"t","ttl":"5m"}`},
-		},
-		"source.query": {
-			{"missing callback", `{"schemaVersion":"1","id":"q"}`},
-			{"schemaVersion const mismatch", `{"schemaVersion":"9","id":"q","callback":"c"}`},
-			{"wrong-type id", `{"schemaVersion":"1","id":5,"callback":"c"}`},
-		},
-		"source.query-reply": {
-			{"neither branch", `{"schemaVersion":"1","id":"q"}`},
-			{"deferred wrong const", `{"schemaVersion":"1","id":"q","deferred":false}`},
-		},
-		"handler.dispatch": {
-			{"missing event", `{"schemaVersion":"1","id":"h"}`},
-			{"event missing type", `{"schemaVersion":"1","id":"h","event":{"id":"e"}}`},
-			{"event carries the legacy duration field", `{"schemaVersion":"1","id":"h","event":{"id":"e","type":"t","ttl":"5m"}}`},
-		},
-		"handler.dispatch-reply": {
-			{"neither branch", `{"schemaVersion":"1","id":"h"}`},
-		},
-		"mon.read": {
-			{"missing metrics", `{"schemaVersion":"1","id":"m"}`},
-			{"metrics wrong item type", `{"schemaVersion":"1","id":"m","metrics":[1,2]}`},
-		},
-		"mon.read-reply": {
-			{"value wrong type", `{"schemaVersion":"1","id":"m","values":[{"name":"x","value":"y"}]}`},
-		},
-		"mon.update": {
-			{"missing value", `{"schemaVersion":"1","id":"m","name":"x"}`},
-		},
-		"mon.update-reply": {
-			{"missing accepted", `{"schemaVersion":"1","id":"m"}`},
-		},
-		"store.request": {
-			{"enum op out of range", `{"schemaVersion":"1","id":"s","op":"purge","key":"k"}`},
-			{"missing key", `{"schemaVersion":"1","id":"s","op":"get"}`},
-		},
-		"store.reply": {
-			{"wrong-type ok", `{"schemaVersion":"1","id":"s","ok":"yes"}`},
-		},
-		"cli.ingest-event": {
-			{"missing events", `{"schemaVersion":"1","id":"t"}`},
-			{"empty events (minItems)", `{"schemaVersion":"1","id":"t","events":[]}`},
-			{"event missing id", `{"schemaVersion":"1","id":"t","events":[{"type":"t"}]}`},
-		},
-		"cli.ingest-event-reply": {
-			{"accepted wrong type", `{"schemaVersion":"1","id":"t","accepted":"1","rejected":[]}`},
-			{"rejected item missing reason", `{"schemaVersion":"1","id":"t","accepted":0,"rejected":[{"id":"e"}]}`},
-		},
-		"cli.push-inject": {
-			{"missing type (event ref)", `{"schemaVersion":"1","id":"e"}`},
-			{"legacy duration field (event ref)", `{"schemaVersion":"1","id":"e","type":"t","ttl":"5m"}`},
-		},
-		"cli.status-reply": {
-			{"delivery missing handler", `{"schemaVersion":"1","deliveries":[{"id":"h","event":"e"}],"queues":[],"config":{"sources":0,"handlers":0}}`},
-			{"delivery carries the removed state field", `{"schemaVersion":"1","deliveries":[{"id":"h","handler":"r","event":"e","state":"running"}],"queues":[],"config":{"sources":0,"handlers":0}}`},
-			{"queue depth wrong type", `{"schemaVersion":"1","deliveries":[],"queues":[{"type":"t","depth":"3"}],"config":{"sources":0,"handlers":0}}`},
-			{"core carries an unknown field", `{"schemaVersion":"1","deliveries":[],"queues":[],"config":{"sources":0,"handlers":0},"core":{"state":"started","pid":1,"extra":"x"}}`},
-			{"gate missing set", `{"schemaVersion":"1","deliveries":[],"queues":[],"config":{"sources":0,"handlers":0},"gates":[{"name":"quota_paused"}]}`},
-			{"activity entry missing outcome", `{"schemaVersion":"1","deliveries":[],"queues":[],"config":{"sources":0,"handlers":0},"activity":[{"seq":1,"startedAt":"2026-09-01T00:00:00Z","type":"t"}]}`},
-		},
-		"cli.status": {
-			{"schemaVersion const mismatch", `{"schemaVersion":"9"}`},
-			{"since wrong type", `{"schemaVersion":"1","since":"5"}`},
-			{"since negative-shaped (not an integer)", `{"schemaVersion":"1","since":-1.5}`},
-		},
-		"cli.error": {
-			{"missing error", `{"schemaVersion":"1"}`},
-			{"error wrong type", `{"schemaVersion":"1","error":5}`},
-		},
-		"cli.self-status": {
-			{"missing participantId", `{"schemaVersion":"1","id":"t","self":"healthy"}`},
-			{"missing self", `{"schemaVersion":"1","id":"t","participantId":"p"}`},
-			{"self out of enum", `{"schemaVersion":"1","id":"t","participantId":"p","self":"mostly-fine"}`},
-		},
-		"cli.self-status-reply": {
-			{"missing accepted", `{"schemaVersion":"1","id":"t"}`},
-			{"accepted wrong type", `{"schemaVersion":"1","id":"t","accepted":"yes"}`},
-		},
-	}
-
-	for mt, cases := range matrix {
-		for _, c := range cases {
-			t.Run(mt+"/"+c.desc, func(t *testing.T) {
-				var v any
-				if err := json.Unmarshal([]byte(c.json), &v); err != nil {
-					t.Fatalf("bad test json: %v", err)
-				}
-				if err := Check(mt, v); err == nil {
-					t.Fatalf("%s: %s was ACCEPTED but should be rejected", mt, c.desc)
-				}
-			})
-		}
-	}
 }
 
 // TestBackwardCompat_LegacyGoldens proves the WIDENED cli.status-reply schema
