@@ -50,6 +50,14 @@ const exampleHeader = `# pr-pool configuration — repo-local at <RepoRoot>/.pr-
 # (uncomment and set an absolute path), e.g.:
 # quota_paused_path = "/home/example/.local/state/pr-pool/gates/quota-paused"
 # cicd_down_path = "/home/example/.local/state/pr-pool/gates/cicd-down"
+#
+# Monitoring sinks (INTF-MON, optional; no built-in default): a [[monitor]]
+# entry resolves the "id" a kind=monitor sink registers with over the common
+# register verb to the metric-catalog "subset" (names) it may then read via
+# mon.read. An id absent from every [[monitor]] resolves to no subset. e.g.:
+# [[monitor]]
+# id = "example-sink"
+# subset = ["queue_depth", "unconsumed_expired"]
 
 `
 

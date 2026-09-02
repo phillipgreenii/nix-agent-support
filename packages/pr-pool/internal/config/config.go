@@ -153,14 +153,16 @@ type Config struct {
 	// (Task 3.6-prereq: "resolved BEFORE a mon.read caller ever calls
 	// register... looked up from config by registration id, not carried on
 	// the mon.read request itself"). nil/absent (the default, and every
-	// production caller today) resolves every id to no subset — the same
-	// nil-means-package-default idiom MeterProvider/Locator/ActivityRingSize
-	// above already use. Not a config-file key today: no [[monitor]] TOML
-	// surface exists yet, and this field's job stops at making the
-	// config-driven lookup MECHANISM available for cmd/pr-pool's bootCore to
-	// thread into internal/core.Options.MonitorSubsets — what populates this
-	// map (a future TOML table, an env var, a flag) is Task 3.6's or a later
-	// task's concern, not this one's.
+	// deployment that declares no [[monitor]] entry) resolves every id to no
+	// subset — the same nil-means-package-default idiom
+	// MeterProvider/Locator/ActivityRingSize above already use.
+	//
+	// Populated from the [[monitor]] TOML array (pg2-nhvdo): each entry's
+	// `id` becomes a map key and its `subset` (a list of metric names) the
+	// value, mirroring how [[role]]/[[query]] populate Roles/Queries. Like
+	// role identity, there is no env overlay — this is a config-file-only
+	// key. cmd/pr-pool's bootCore threads the resulting map into
+	// internal/core.Options.MonitorSubsets via monitorSubsetResolverFrom.
 	MonitorSubsets map[string][]string
 }
 

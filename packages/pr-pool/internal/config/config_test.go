@@ -1138,3 +1138,112 @@ func TestGatePaths_respectsLogDirEnv(t *testing.T) {
 		t.Errorf("cicdDown = %q, want %q", cd, want)
 	}
 }
+
+// TestDefault_monitorSubsetsIsUnset proves the built-in default (no [[monitor]]
+// declared) leaves MonitorSubsets nil, matching every other nil-means-package-
+// default field (Locator, MeterProvider, ActivityRingSize's own zero) — an
+// unconfigured deployment resolves every mon.read id to no subset, unchanged
+// from before pg2-nhvdo.
+func TestDefault_monitorSubsetsIsUnset(t *testing.T) {
+	if d := Default(); d.MonitorSubsets != nil {
+		t.Errorf("MonitorSubsets = %v, want nil", d.MonitorSubsets)
+	}
+}
+
+// TestLoad_monitorSubsets_decodes is pg2-nhvdo's core acceptance: a [[monitor]]
+// array in config.toml populates Config.MonitorSubsets by id -> subset,
+// mirroring how [[role]]/[[query]] populate Roles/Queries.
+func TestLoad_monitorSubsets_decodes(t *testing.T) {
+	writeCfg(t, `
+[[monitor]]
+id = "mon-1"
+subset = ["queue_depth", "unconsumed_expired"]
+
+[[monitor]]
+id = "mon-2"
+subset = ["source_failures"]
+`)
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.MonitorSubsets) != 2 {
+		t.Fatalf("MonitorSubsets = %v, want 2 entries", c.MonitorSubsets)
+	}
+	if got := c.MonitorSubsets["mon-1"]; len(got) != 2 || got[0] != "queue_depth" || got[1] != "unconsumed_expired" {
+		t.Errorf("MonitorSubsets[mon-1] = %v, want [queue_depth unconsumed_expired]", got)
+	}
+	if got := c.MonitorSubsets["mon-2"]; len(got) != 1 || got[0] != "source_failures" {
+		t.Errorf("MonitorSubsets[mon-2] = %v, want [source_failures]", got)
+	}
+	if _, ok := c.MonitorSubsets["unconfigured-id"]; ok {
+		t.Errorf("MonitorSubsets must not carry an id nobody declared")
+	}
+}
+
+// TestLoad_monitorSubsets_appliesWithoutRolesOrQueries proves [[monitor]] is a
+// pool-level key like [pool].worktree_dir/quota_paused_path — it applies even
+// when the file declares no [[role]]/[[query]], which otherwise makes Load()
+// fall back to the built-in role+query set entirely (decodeRoleSet's "pool-only
+// / empty => built-ins" early return). MonitorSubsets must NOT be swallowed by
+// that fallback.
+func TestLoad_monitorSubsets_appliesWithoutRolesOrQueries(t *testing.T) {
+	writeCfg(t, `
+[[monitor]]
+id = "mon-1"
+subset = ["queue_depth"]
+`)
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Roles) != 3 || c.Roles[0].Name != "feedback" {
+		t.Fatalf("a monitor-only config must still fall back to built-in roles: %+v", c.Roles)
+	}
+	if got := c.MonitorSubsets["mon-1"]; len(got) != 1 || got[0] != "queue_depth" {
+		t.Errorf("MonitorSubsets[mon-1] = %v, want [queue_depth] even with no [[role]]/[[query]]", got)
+	}
+}
+
+// A [[monitor]] entry with no id is rejected — mirroring buildQueries'/
+// buildRole's own required-field checks (name is required).
+func TestLoad_monitorSubsets_emptyIdIsError(t *testing.T) {
+	writeCfg(t, `
+[[monitor]]
+subset = ["queue_depth"]
+`)
+	if _, err := Load(); err == nil {
+		t.Fatal("a [[monitor]] entry with no id must error")
+	}
+}
+
+// Two [[monitor]] entries sharing an id are rejected — mirroring buildRole's/
+// buildQueries' own duplicate-name checks.
+func TestLoad_monitorSubsets_duplicateIdIsError(t *testing.T) {
+	writeCfg(t, `
+[[monitor]]
+id = "mon-1"
+subset = ["queue_depth"]
+
+[[monitor]]
+id = "mon-1"
+subset = ["source_failures"]
+`)
+	if _, err := Load(); err == nil {
+		t.Fatal("duplicate [[monitor]] id must error")
+	}
+}
+
+// No [[monitor]] declared at all leaves MonitorSubsets nil, same as Default() —
+// a config file that only sets other pool keys must not spuriously initialize
+// an empty (non-nil) map.
+func TestLoad_monitorSubsets_absentLeavesNil(t *testing.T) {
+	writeCfg(t, "[pool]\nself_login = \"someone\"\n")
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.MonitorSubsets != nil {
+		t.Errorf("MonitorSubsets = %v, want nil when no [[monitor]] is declared", c.MonitorSubsets)
+	}
+}

@@ -32,9 +32,10 @@ func (d *duration) UnmarshalText(text []byte) error {
 // (the classic `[[role]]` typo) makes toml.Decode fail with a table-vs-array type
 // mismatch, which surfaces as a hard error — no special detection needed.
 type fileShape struct {
-	Pool    poolTOML    `toml:"pool"`
-	Roles   []roleTOML  `toml:"role"`
-	Queries []queryTOML `toml:"query"`
+	Pool     poolTOML      `toml:"pool"`
+	Roles    []roleTOML    `toml:"role"`
+	Queries  []queryTOML   `toml:"query"`
+	Monitors []monitorTOML `toml:"monitor"`
 }
 
 type poolTOML struct {
@@ -173,6 +174,21 @@ type commandTOML struct {
 	Argv []string `toml:"argv"`
 }
 
+// monitorTOML is one top-level [[monitor]] entry (pg2-nhvdo, INTF-MON): the
+// TOML surface for Config.MonitorSubsets, the `id -> subset` map
+// `Service.Register` consults at register-time and `mon.read` filters
+// against. id is the sink's own `register` id (INTF-MON: "the sink's own
+// configured entry"); subset is the metric NAMEs that id may read — this
+// package does not validate metric names against the catalog, mirroring how
+// a role's `binds`/a query's `emits` event-type strings are opaque tokens to
+// this layer too. There is no mode field: the push direction stays
+// deliberately unrealized (bead `pg2-ov09n`, closed), so every declared
+// sink is implicitly pull-only.
+type monitorTOML struct {
+	ID     string   `toml:"id"`
+	Subset []string `toml:"subset"`
+}
+
 // Registry decodes a config file's roles and queries. It is instance-scoped (no
 // package-level init() globals) — matching the codebase's constructor-injection
 // convention. Adding a query type is one line in query.NewQueryFactories; adding a
@@ -236,6 +252,18 @@ func (r *Registry) decodeRoleSet(path, configDir string, c *Config) (roles.RoleS
 		return nil, fmt.Errorf("pool.pull_failure_backoff: %w", err)
 	}
 	c.PullFailureBackoff, c.PullFailureRetries = pfb.Policy, pfb.Retries
+	// [[monitor]] resolves Config.MonitorSubsets (INTF-MON, pg2-nhvdo) — a
+	// pool-level key like the overlays above, so it applies whether or not
+	// [[role]]/[[query]] are declared (built before the roles-empty early
+	// return below, unlike Roles/Queries themselves which the built-in
+	// fallback owns when absent).
+	if len(shape.Monitors) > 0 {
+		subsets, err := buildMonitorSubsets(shape.Monitors)
+		if err != nil {
+			return nil, fmt.Errorf("monitor: %w", err)
+		}
+		c.MonitorSubsets = subsets
+	}
 	if len(shape.Roles) == 0 {
 		return nil, nil // pool-only / empty => built-ins
 	}
@@ -291,6 +319,31 @@ func (r *Registry) buildQueries(md toml.MetaData, qts []queryTOML, c Config) (qu
 		out = append(out, query.Source{Name: qt.Name, Query: q})
 	}
 	return out, errs
+}
+
+// buildMonitorSubsets decodes every [[monitor]] entry into the `id ->
+// subset` map Config.MonitorSubsets carries (INTF-MON, pg2-nhvdo), mirroring
+// buildQueries'/decodeRoleSet's own required-field + duplicate-name
+// aggregation (an empty id or a repeated one is every entry's error,
+// collected together rather than stopping at the first).
+func buildMonitorSubsets(mts []monitorTOML) (map[string][]string, error) {
+	out := map[string][]string{}
+	var errs []error
+	for i, mt := range mts {
+		if mt.ID == "" {
+			errs = append(errs, fmt.Errorf("monitor[%d]: id is required", i))
+			continue
+		}
+		if _, ok := out[mt.ID]; ok {
+			errs = append(errs, fmt.Errorf("duplicate monitor id %q", mt.ID))
+			continue
+		}
+		out[mt.ID] = mt.Subset
+	}
+	if len(errs) > 0 {
+		return nil, errors.Join(errs...)
+	}
+	return out, nil
 }
 
 // decodeGlobalBudget reads the XDG-global config file and applies ONLY its
