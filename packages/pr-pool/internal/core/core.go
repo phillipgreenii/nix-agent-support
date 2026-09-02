@@ -58,6 +58,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -66,7 +67,9 @@ import (
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 
 	"github.com/phillipgreenii/pr-pool/conformance"
+	"github.com/phillipgreenii/pr-pool/internal/activity"
 	"github.com/phillipgreenii/pr-pool/internal/eventqueue"
+	"github.com/phillipgreenii/pr-pool/schemas"
 )
 
 // Service is a running core: the socket listener plus the state behind it.
@@ -112,6 +115,19 @@ type Options struct {
 	// request itself"). Optional: nil resolves every id to an empty subset —
 	// no production caller sets this yet.
 	MonitorSubsets MonitorSubsetResolver
+	// ActivityRing is the dispatch-outcome ring buffer (Task 3.4,
+	// internal/activity) the `status` verb reads LIVE and directly (Task
+	// 3.8) — the ring package's own doc: "meant to be read live and
+	// directly by the status verb's handler, not embedded in any periodic
+	// snapshot". Optional: nil means the `activity` field of a status reply
+	// is always empty, the same nil-means-absent idiom MetricsReader uses.
+	// cmd/pr-pool's bootCore is the production wiring site.
+	ActivityRing *activity.Ring
+	// ConfigPath is the resolved config file path (internal/config.Config.
+	// ConfigPath) the `status` verb echoes back under its `core.configPath`
+	// field (Task 3.8) — informational only; the core itself never reads
+	// the file at this path. Optional: "" means the field is empty.
+	ConfigPath string
 	// Command is the program name baked into the callback strings handed to
 	// participants (default DefaultCommand). Injectable so a test — or a
 	// deployment that installs the binary under another name — hands out a command
@@ -142,6 +158,17 @@ type Service struct {
 	// composes its replies from. Both optional; see Options' docs.
 	metricsReader  MetricsReader
 	monitorSubsets MonitorSubsetResolver
+
+	// activityRing is the Task 3.4 dispatch-outcome ring the `status` verb
+	// (Task 3.8) reads live via handleStatus; nil when Options.ActivityRing
+	// was not set. configPath and startedAt are two more Task 3.8 status
+	// fields with no other reader today: the resolved config path handed in
+	// at Listen, and this Service's own construction time (its own `now`
+	// seam, not time.Now, so a test can control it the same way NewRegistry
+	// already does).
+	activityRing *activity.Ring
+	configPath   string
+	startedAt    time.Time
 
 	// tick and gates are the two published-state cells Serve's handlers (this
 	// package) read with no cross-package import (Task 3.5 Objective):
@@ -275,6 +302,9 @@ func Listen(opts Options) (*Service, error) {
 		command:        command,
 		metricsReader:  opts.MetricsReader,
 		monitorSubsets: opts.MonitorSubsets,
+		activityRing:   opts.ActivityRing,
+		configPath:     opts.ConfigPath,
+		startedAt:      now(),
 	}, nil
 }
 
@@ -528,6 +558,8 @@ func (s *Service) Serve(subcommand string, stdin io.Reader, stdout io.Writer) in
 		return s.handleSelfStatus(stdin, stdout)
 	case SubcommandMonRead:
 		return s.handleMonRead(stdin, stdout)
+	case SubcommandStatus:
+		return s.handleStatus(stdin, stdout)
 	default:
 		// `session-status` deliberately lands HERE, as an unknown subcommand. It was
 		// dropped 2026-07-28: pr-pool consumes no post-accept session outcome, so the
@@ -547,6 +579,269 @@ func writeBody(w io.Writer, body []byte) {
 	if _, err := w.Write(body); err != nil {
 		slog.Warn("core: write reply body failed", "err", err)
 	}
+}
+
+// SubcommandStatus is the INTF-CLI verb (Task 3.8) an operator (`pr-pool
+// status`) — or, later, Task 4.0's TUI via its `since` long-poll affordance —
+// uses to inspect a running core: its resolved configuration, live
+// deliveries, and per-type queue depths (interfaces.md "Inspecting a running
+// core"; register row bead pg2-xa44k).
+const SubcommandStatus = "status"
+
+// The message types backing this subcommand (schemas/, checked via package
+// conformance — INV-INTF-2).
+const (
+	StatusRequestSchema = "cli.status"
+	StatusReplySchema   = "cli.status-reply"
+)
+
+// ErrorReplySchema is errorReply's own protocol-level failure envelope shape
+// (`{schemaVersion, error}`) given a schema artifact, so a CLI-facing client
+// can discriminate it from the verb's own reply schema BEFORE trusting
+// either (register row bead pg2-o9r6a; Task 3.8 Binding decisions, Step 7:
+// "creating the cli.error schema alone does not close it" — every
+// CLI-facing client that reads a core reply must apply the discrimination
+// itself, which is what cmd/pr-pool's discriminateReply does with this
+// constant).
+const ErrorReplySchema = "cli.error"
+
+// activityReadWindow bounds one status reply's activity[] slice. It matches
+// the ring's own DefaultSize (Task 3.4) rather than its smaller
+// defaultReadWindow: a caller-supplied `since` can legitimately ask for more
+// than the newest-min(64,held) default returns, and Ring.Read itself
+// truncates to whichever of (requested window, buffer length) is smaller, so
+// sizing the buffer to the ring's full capacity is what lets a since-scoped
+// request actually get everything the ring still holds.
+const activityReadWindow = activity.DefaultSize
+
+// handleStatus runs the `status` verb (Task 3.8): it composes the
+// cli.status-reply body — resolved configuration, live deliveries, and
+// per-type queue depths (the three INTF-CLI inspection MUSTs, register row
+// bead pg2-xa44k) plus the additive Task 3.8 field set — strictly from what
+// is already published on this Service, with no cross-package reach (Task
+// 3.8 Files).
+//
+// `deliveries` stays the legacy shape but is always empty: nothing this
+// docket phase's Contract lists as consumed (Task 3.2/3.4/3.5/3.6/3.7,
+// Registry.List()) produces a per-(event,handler) delivery record keyed by a
+// dispatch tracking id. That is core-internal accepted-map state
+// (eventqueue's entry.accepted, unexported, no public accessor), and adding
+// one is outside this task's Files — a documented realization gap, not a
+// silent guess. The resolved-configuration and per-type-queue-depth MUSTs
+// are fully realized below.
+func (s *Service) handleStatus(stdin io.Reader, stdout io.Writer) int {
+	data, err := io.ReadAll(stdin)
+	if err != nil {
+		writeBody(stdout, errorReply("status: read request: "+err.Error()))
+		return conformance.ExitError
+	}
+	if err := conformance.CheckBytes(StatusRequestSchema, data); err != nil {
+		writeBody(stdout, errorReply("status: "+err.Error()))
+		return conformance.ExitError
+	}
+	var req struct {
+		Since uint64 `json:"since"`
+	}
+	if err := json.Unmarshal(data, &req); err != nil {
+		// Unreachable once CheckBytes has passed — see mon.go's identical note.
+		writeBody(stdout, errorReply("status: malformed request: "+err.Error()))
+		return conformance.ExitError
+	}
+
+	body, err := json.Marshal(s.composeStatusReply(req.Since))
+	if err != nil { // unreachable: composeStatusReply holds only JSON-safe scalars/slices/maps
+		writeBody(stdout, errorReply("status: marshal reply: "+err.Error()))
+		return conformance.ExitError
+	}
+	writeBody(stdout, body)
+	return conformance.ExitOK
+}
+
+// composeStatusReply builds the cli.status-reply body. Lock ordering (Task
+// 3.8 Binding decisions, Step 8): DepthByType/UnmatchedBindings are already
+// lock-free reads of eventqueue's own published depthCell (Task 3.2), so no
+// q.mu is ever taken here — Registry.List() (its own mutex) and
+// s.activityRing.Read (the ring's own mutex) each run independently, with no
+// lock held across either call.
+//
+// tick may be nil (the boot window, before the drive loop's first
+// PublishTick) — every tick-derived field is simply omitted from the reply
+// rather than guessed at, and nothing here panics on that nil (Task 3.8
+// Acceptance).
+func (s *Service) composeStatusReply(since uint64) map[string]any {
+	regs := s.reg.List()
+	tick := s.CurrentTick()
+	gates, gatesObservedAt := s.GateSnapshot()
+
+	legacySources, legacyHandlers := 0, 0
+	if tick != nil {
+		legacySources = tick.Config.ActiveQueries
+		legacyHandlers = tick.Config.ActiveRoles
+	}
+
+	reply := map[string]any{
+		"schemaVersion": schemas.SchemaVersion,
+		"deliveries":    []any{}, // see handleStatus's doc: no tracking-id source this docket phase
+		"queues":        statusQueues(s.q.DepthByType()),
+		"config":        map[string]any{"sources": legacySources, "handlers": legacyHandlers},
+		"core": map[string]any{
+			"state":      s.State().String(),
+			"pid":        os.Getpid(),
+			"startedAt":  s.startedAt.UTC().Format(time.RFC3339Nano),
+			"configPath": s.configPath,
+		},
+		"registry":  statusRegistrations(regs),
+		"listeners": statusRegistrationsOfKind(regs, KindHandler),
+		"gates":     statusGates(gates),
+		"asOf":      time.Now().UTC().Format(time.RFC3339Nano),
+		"sources":   []any{},
+		"activity":  []any{},
+	}
+	if unmatched := s.q.UnmatchedBindings(s.declaredTypesSorted()); len(unmatched) > 0 {
+		reply["unmatchedBindings"] = unmatched
+	} else {
+		reply["unmatchedBindings"] = []any{}
+	}
+	if !gatesObservedAt.IsZero() {
+		reply["gatesObservedAt"] = gatesObservedAt.UTC().Format(time.RFC3339Nano)
+	}
+	if s.activityRing != nil {
+		buf := make([]activity.Entry, activityReadWindow)
+		n, _ := s.activityRing.Read(since, buf)
+		reply["activity"] = statusActivity(buf[:n])
+	}
+	if tick != nil {
+		core := reply["core"].(map[string]any)
+		core["version"] = tick.Version
+		reply["mode"] = tick.RunMode
+		reply["resolvedConfig"] = statusResolvedConfig(tick.Config)
+		reply["sources"] = statusSources(tick.Sources)
+		reply["lastTickAt"] = tick.LastTickAt.UTC().Format(time.RFC3339Nano)
+		reply["snapshotAt"] = tick.SnapshotAt.UTC().Format(time.RFC3339Nano)
+		if tick.Config.PollInterval != nil {
+			reply["tickIntervalMs"] = tick.Config.PollInterval.Milliseconds()
+		}
+	}
+	return reply
+}
+
+// statusQueues renders DepthByType's map as the legacy `queues` array,
+// sorted by type for a deterministic reply.
+func statusQueues(depth map[string]int) []map[string]any {
+	types := make([]string, 0, len(depth))
+	for t := range depth {
+		types = append(types, t)
+	}
+	sort.Strings(types)
+	out := make([]map[string]any, 0, len(types))
+	for _, t := range types {
+		out = append(out, map[string]any{"type": t, "depth": depth[t]})
+	}
+	return out
+}
+
+// statusGates renders GateSnapshot's map as the `gates` array, sorted by
+// name; `mtime`/`owner` are omitted per-entry when the gate carries none
+// (an unset gate has no mtime, and no writer here ever sets Owner today).
+func statusGates(gates map[string]GateInfo) []map[string]any {
+	names := make([]string, 0, len(gates))
+	for n := range gates {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	out := make([]map[string]any, 0, len(names))
+	for _, n := range names {
+		g := gates[n]
+		entry := map[string]any{"name": n, "set": g.Set}
+		if !g.Mtime.IsZero() {
+			entry["mtime"] = g.Mtime.UTC().Format(time.RFC3339Nano)
+		}
+		if g.Owner != "" {
+			entry["owner"] = g.Owner
+		}
+		out = append(out, entry)
+	}
+	return out
+}
+
+// statusRegistrations renders Registry.List() entries as the `registry`
+// array's shape — also reused, filtered, for `listeners`.
+func statusRegistrations(regs []Registration) []map[string]any {
+	out := make([]map[string]any, 0, len(regs))
+	for _, r := range regs {
+		out = append(out, map[string]any{
+			"id":    r.ID,
+			"kind":  string(r.Kind),
+			"state": r.State.String(),
+			"self":  string(r.Self),
+		})
+	}
+	return out
+}
+
+// statusRegistrationsOfKind filters regs to one Kind before rendering —
+// `listeners` is the Kind==KindHandler subset of the full `registry` dump
+// (interfaces.md: a handler is the participant that "listens" for dispatch).
+func statusRegistrationsOfKind(regs []Registration, kind Kind) []map[string]any {
+	var filtered []Registration
+	for _, r := range regs {
+		if r.Kind == kind {
+			filtered = append(filtered, r)
+		}
+	}
+	return statusRegistrations(filtered)
+}
+
+// statusSources renders a TickSnapshot's Sources as the `sources` array.
+func statusSources(sources []SourceReport) []map[string]any {
+	out := make([]map[string]any, 0, len(sources))
+	for _, sr := range sources {
+		out = append(out, map[string]any{"name": sr.Name, "rejected": sr.Rejected})
+	}
+	return out
+}
+
+// statusActivity renders Ring.Read's output as the `activity` array, oldest
+// first (Ring.Read's own return order).
+func statusActivity(entries []activity.Entry) []map[string]any {
+	out := make([]map[string]any, 0, len(entries))
+	for _, e := range entries {
+		out = append(out, map[string]any{
+			"seq":       e.Seq,
+			"startedAt": e.StartedAt.UTC().Format(time.RFC3339Nano),
+			"type":      e.Type,
+			"outcome":   e.Outcome,
+		})
+	}
+	return out
+}
+
+// statusResolvedConfig renders a TickSnapshot's ResolvedConfig as the
+// `resolvedConfig` object; `pollIntervalMs` is omitted when PollInterval is
+// nil (drain-and-exit mode has no polling cadence to report — Task 3.5
+// Step 7).
+func statusResolvedConfig(cfg ResolvedConfig) map[string]any {
+	out := map[string]any{
+		"repoRoot":      cfg.RepoRoot,
+		"beadsPrefix":   cfg.BeadsPrefix,
+		"activeRoles":   cfg.ActiveRoles,
+		"activeQueries": cfg.ActiveQueries,
+	}
+	if cfg.PollInterval != nil {
+		out["pollIntervalMs"] = cfg.PollInterval.Milliseconds()
+	}
+	return out
+}
+
+// declaredTypesSorted returns every type SOME configured binding declares
+// (s.bindings' own keys), sorted, for UnmatchedBindings' `declared` argument.
+func (s *Service) declaredTypesSorted() []string {
+	out := make([]string, 0, len(s.bindings))
+	for t := range s.bindings {
+		out = append(out, t)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // shellQuote single-quotes a value for the callback command string, so a socket

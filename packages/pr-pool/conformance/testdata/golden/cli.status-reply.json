@@ -8,5 +8,50 @@
     }
   ],
   "queues": [{ "type": "review-requested", "depth": 3 }],
-  "config": { "sources": 2, "handlers": 3 }
+  "config": { "sources": 2, "handlers": 3 },
+  "core": {
+    "state": "started",
+    "version": "26.09.01.abcdef12",
+    "pid": 4242,
+    "startedAt": "2026-09-01T00:00:00Z",
+    "configPath": "/repo/.pr-pool/config.toml"
+  },
+  "mode": "long-running",
+  "resolvedConfig": {
+    "repoRoot": "/repo",
+    "beadsPrefix": "zr",
+    "pollIntervalMs": 10000,
+    "activeRoles": 3,
+    "activeQueries": 2
+  },
+  "gates": [
+    { "name": "quota_paused", "set": false },
+    {
+      "name": "cicd_down",
+      "set": true,
+      "mtime": "2026-09-01T00:05:00Z",
+      "owner": "ops"
+    }
+  ],
+  "gatesObservedAt": "2026-09-01T00:05:30Z",
+  "listeners": [
+    { "id": "review", "kind": "handler", "state": "started", "self": "healthy" }
+  ],
+  "registry": [
+    { "id": "review", "kind": "handler", "state": "started", "self": "healthy" }
+  ],
+  "sources": [{ "name": "feedback-ready", "rejected": 0 }],
+  "unmatchedBindings": ["declared-but-inactive-this-run"],
+  "activity": [
+    {
+      "seq": 1,
+      "startedAt": "2026-09-01T00:00:00Z",
+      "type": "review-requested",
+      "outcome": "delivered"
+    }
+  ],
+  "asOf": "2026-09-01T00:05:31Z",
+  "lastTickAt": "2026-09-01T00:05:00Z",
+  "snapshotAt": "2026-09-01T00:05:00Z",
+  "tickIntervalMs": 10000
 }

@@ -1,0 +1,12 @@
+{
+  "schemaVersion": "1",
+  "deliveries": [
+    {
+      "id": "hs-771e",
+      "handler": "review",
+      "event": "evt-abc123"
+    }
+  ],
+  "queues": [{ "type": "review-requested", "depth": 3 }],
+  "config": { "sources": 2, "handlers": 3 }
+}

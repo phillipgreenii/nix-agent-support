@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -84,7 +85,19 @@ func locateCore(socket, token string) (core.Ref, error) {
 }
 
 // callCore forwards one request to the core and relays the reply verbatim, so the
-// caller sees exactly the JSON the core produced plus its coarse exit code.
+// caller sees exactly the JSON the core produced plus its coarse exit code — the
+// manager-callback wire contract (interfaces.md), which this function never
+// alters.
+//
+// It ALSO discriminates the reply (register row bead pg2-o9r6a; Task 3.8
+// Binding decisions, Step 7): before this, ingest-event and self-status
+// relayed whatever bytes came back with NO validation against the protocol
+// error envelope at all, so a caller reading only the exit code could not
+// tell a genuine protocol-level refusal (bad token, core not `started`) from
+// the verb's own outcome schema. discriminateReply's warning is
+// OBSERVABILITY only — it changes neither the relayed stdout body nor the
+// exit code, since a manager callback's contract is exactly those two
+// things.
 func callCore(stdout, stderr io.Writer, ref core.Ref, subcommand string, request []byte) int {
 	client, err := core.Dial(ref)
 	if err != nil {
@@ -97,10 +110,66 @@ func callCore(stdout, stderr io.Writer, ref core.Ref, subcommand string, request
 		fmt.Fprintf(stderr, "%s: %v\n", subcommand, err)
 		return conformance.ExitError
 	}
+	if diagErr := discriminateReply(reply, replySchemaFor(subcommand), nil); diagErr != nil {
+		fmt.Fprintf(stderr, "%s: %v\n", subcommand, diagErr)
+	}
 	if len(reply) > 0 {
 		fmt.Fprintln(stdout, string(reply))
 	}
 	return code
+}
+
+// replySchemaFor maps a manager-callback subcommand to the reply schema
+// discriminateReply validates a NON-error reply against.
+func replySchemaFor(subcommand string) string {
+	switch subcommand {
+	case core.SubcommandIngestEvent:
+		return core.IngestReplySchema
+	case core.SubcommandSelfStatus:
+		return core.SelfStatusReplySchema
+	case core.SubcommandStatus:
+		return core.StatusReplySchema
+	default:
+		return ""
+	}
+}
+
+// discriminateReply checks reply against the protocol-level error envelope
+// (cli.error) BEFORE validating it against the verb's own reply schema —
+// register row bead pg2-o9r6a's actual content (Task 3.8 Binding decisions,
+// Step 7): creating the cli.error schema alone does not close the gap, since
+// every CLI-facing client that reads a core reply must apply this ordering
+// itself, not merely have the schema artifact available.
+//
+// A body-less reply (the legal busy shape, exit 9) is not discriminated at
+// all — there is nothing to check. When out is non-nil and reply matches
+// neither shape as an error, reply is decoded into it (the caller's typed
+// reply value); a nil out is for a caller that only wants the validation
+// (callCore's raw relay never decodes the reply itself).
+func discriminateReply(reply []byte, replySchema string, out any) error {
+	if len(reply) == 0 {
+		return nil
+	}
+	if conformance.CheckBytes(core.ErrorReplySchema, reply) == nil {
+		var errBody struct {
+			Error string `json:"error"`
+		}
+		if err := json.Unmarshal(reply, &errBody); err == nil {
+			return fmt.Errorf("core refused: %s", errBody.Error)
+		}
+	}
+	if replySchema == "" {
+		return nil
+	}
+	if err := conformance.CheckBytes(replySchema, reply); err != nil {
+		return fmt.Errorf("core reply is not a valid %s: %w", replySchema, err)
+	}
+	if out != nil {
+		if err := json.Unmarshal(reply, out); err != nil {
+			return fmt.Errorf("decode %s reply: %w", replySchema, err)
+		}
+	}
+	return nil
 }
 
 // reportNoCore renders a failure from any subcommand that has to reach the core,

@@ -15,20 +15,21 @@ cap, waits for completion, then tears down every `pr-pool-*` tmux session. Bare
 
 ## Subcommands
 
-| Command                   | Description                                                                                                                                                       |
-| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `run`                     | boot the core and run indefinitely, producing + dispatching on a fixed poll interval, until SIGINT/SIGTERM requests shutdown                                      |
-| `run-until-idle`          | boot the core, discover once, drain the queue to idle, then exit (also reachable as `drain`, kept as a deprecated alias)                                          |
-| `drain`                   | deprecated alias for `run-until-idle` (see above); no longer the default — bare `pr-pool` (no subcommand) now requires an explicit subcommand                     |
-| `run-query <role>`        | run a role's discovery query and print matches (read-only)                                                                                                        |
-| `run-role <role> <bead>`  | dispatch one bead through a role, then tear down (smoke test)                                                                                                     |
-| `config --print-defaults` | print the built-in default `config.toml` (a copy-paste start)                                                                                                     |
-| `config --show`           | print the resolved config path, role set, and worker dispatch scalars (permission-mode/allowed-tools/budget)                                                      |
-| `sessions`                | list this pool's sessions (bead/role) from session metadata                                                                                                       |
-| `reconcile`               | report stranded self-owned feedback cycles, then run the pg-pr ACL: ensure a review-pr bead per open PR (reads `pg-pr pr list`; mutates beads; exit-0-on-partial) |
-| `push-inject <json>`      | inject one operator-supplied event into the **running** core (text, or JSON with `--json`)                                                                        |
-| `version`                 | print the version and exit                                                                                                                                        |
-| `help`                    | print help and exit                                                                                                                                               |
+| Command                   | Description                                                                                                                                                                                 |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `run`                     | boot the core and run indefinitely, producing + dispatching on a fixed poll interval, until SIGINT/SIGTERM requests shutdown                                                                |
+| `run-until-idle`          | boot the core, discover once, drain the queue to idle, then exit (also reachable as `drain`, kept as a deprecated alias)                                                                    |
+| `drain`                   | deprecated alias for `run-until-idle` (see above); no longer the default — bare `pr-pool` (no subcommand) now requires an explicit subcommand                                               |
+| `run-query <role>`        | run a role's discovery query and print matches (read-only)                                                                                                                                  |
+| `run-role <role> <bead>`  | dispatch one bead through a role, then tear down (smoke test)                                                                                                                               |
+| `config --print-defaults` | print the built-in default `config.toml` (a copy-paste start)                                                                                                                               |
+| `config --show`           | print the resolved config path, role set, and worker dispatch scalars (permission-mode/allowed-tools/budget)                                                                                |
+| `sessions`                | list this pool's sessions (bead/role) from session metadata                                                                                                                                 |
+| `reconcile`               | report stranded self-owned feedback cycles, then run the pg-pr ACL: ensure a review-pr bead per open PR (reads `pg-pr pr list`; mutates beads; exit-0-on-partial)                           |
+| `push-inject <json>`      | inject one operator-supplied event into the **running** core (text, or JSON with `--json`)                                                                                                  |
+| `status`                  | inspect the **running** core: resolved config, live deliveries, per-`type` queue depths, plus gates/mode/listeners/sources/unmatched bindings/recent activity (text, or JSON with `--json`) |
+| `version`                 | print the version and exit                                                                                                                                                                  |
+| `help`                    | print help and exit                                                                                                                                                                         |
 
 `<role>` is the role's configured `name`.
 
@@ -61,6 +62,31 @@ it exits `1`.
 The success report says the core **accepted** the event, never "enqueued": a still-retained
 duplicate id is also accepted (`INV-EVT-3`) and the reply has no field that separates a fresh
 append from an absorbed re-emit. The auth **token is never printed**, in either output mode.
+
+### `status` — inspect a running core
+
+```
+pr-pool status [--json] [--socket <path>] [--token <tok>]
+```
+
+`status` is the operator-facing INTF-CLI inspection verb: resolved configuration,
+live deliveries, and per-`type` queue depths — the three inspection MUSTs
+interfaces.md's "Inspecting a running core" declares — plus the current gate
+state, run mode, registered listeners/sources, unmatched bindings, and recent
+dispatch-outcome activity (`internal/activity.Ring`, Task 3.4). It locates the
+core the same way `push-inject` does (`--socket`/`--token`, else
+`PR_POOL_SOCKET`/`PR_POOL_TOKEN`, else discovery under the log dir) and **never
+starts one** ([ADR 0036](../../docs/adr/0036-pr-pool-cli-never-auto-starts-a-core.md)).
+
+The human-output form orders its sections for incident scanning — header
+(core/socket/config/gates/mode), then `QUEUES`, `DELIVERIES (live)`,
+`ACTIVITY (last 10)`, `LISTENERS`, `SOURCES`, `UNMATCHED BINDINGS` — and never
+omits a section silently: an empty one renders an explicit `(none)` marker
+instead. `--json` emits the `cli.status-reply` wire schema verbatim.
+
+Exit codes match every other operator subcommand: `0` ok, `2` usage, `1`
+everything else (`9` is reserved for the pre-accept busy decline, which this
+read-only verb never returns).
 
 ### Manager → core callback subcommands
 

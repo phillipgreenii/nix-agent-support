@@ -8,7 +8,7 @@ import (
 )
 
 // usageLine is the short synopsis printed to stderr on a usage error.
-const usageLine = "usage: pr-pool [--version | --help] [run [--only <selector>]... [--disable <selector>]... | run-until-idle [--only <selector>]... [--disable <selector>]... | run-query <role> | run-role <role> <bead> | config (--print-defaults | --show) | sessions | reconcile | push-inject [--json] [--socket <path>] [--token <tok>] <json> | ingest-event [--socket <path>] [--token <tok>] | self-status [--socket <path>] [--token <tok>]]"
+const usageLine = "usage: pr-pool [--version | --help] [run [--only <selector>]... [--disable <selector>]... | run-until-idle [--only <selector>]... [--disable <selector>]... | run-query <role> | run-role <role> <bead> | config (--print-defaults | --show) | sessions | reconcile | push-inject [--json] [--socket <path>] [--token <tok>] <json> | status [--json] [--socket <path>] [--token <tok>] | ingest-event [--socket <path>] [--token <tok>] | self-status [--socket <path>] [--token <tok>]]"
 
 // helpText is the full help printed to stdout for --help/help.
 const helpText = usageLine + `
@@ -46,6 +46,12 @@ Subcommands:
                           JSON with --json. Locates the core via --socket/--token, else
                           PR_POOL_SOCKET/PR_POOL_TOKEN, else discovery under the log dir. It NEVER
                           starts a core: with none running it fails with "no running core" (exit 1).
+  status                  inspect the RUNNING core: resolved configuration, live deliveries, and
+                          per-type queue depths, plus gates/mode/listeners/sources/unmatched
+                          bindings/recent activity. Text by default, JSON with --json. Locates the
+                          core via --socket/--token, else PR_POOL_SOCKET/PR_POOL_TOKEN, else
+                          discovery under the log dir. It NEVER starts a core: with none running it
+                          fails with "no running core" (exit 1).
   version                 print the version and exit
   help                    print this help and exit
 
@@ -112,6 +118,7 @@ const (
 	routeReconcile                     // report stranded self-owned feedback cycles, then run the pg-pr ACL (mutates beads)
 	routeIngestEvent                   // manager->core callback: forward events on stdin to the running core (.rest)
 	routePushInject                    // operator: inject one event into the running core (.rest)
+	routeStatus                        // operator: inspect the running core (Task 3.8, .rest)
 	routeSelfStatus                    // manager->core callback: push the caller's own self-status to the running core (.rest)
 )
 
@@ -187,6 +194,10 @@ func route(argv []string) routeResult {
 		// Same reason as ingest-event: its own flags, its own diagnostic (including
 		// the "quote the event JSON" hint), and the same usage exit code.
 		return routeResult{kind: routePushInject, rest: args[1:]}
+	case "status":
+		// Task 3.8: its own --json/--socket/--token flags, parsed in its own
+		// handler, with the same usage exit code every operator subcommand uses.
+		return routeResult{kind: routeStatus, rest: args[1:]}
 	case "self-status":
 		// Same reason as ingest-event: its own --socket/--token flags, parsed in its
 		// own handler, with the same usage exit code (routeUsageErr would produce).

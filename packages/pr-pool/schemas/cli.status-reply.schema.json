@@ -39,6 +39,106 @@
         "sources": { "type": "integer", "minimum": 0 },
         "handlers": { "type": "integer", "minimum": 0 }
       }
-    }
+    },
+    "core": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "state": { "type": "string" },
+        "version": { "type": "string" },
+        "pid": { "type": "integer", "minimum": 0 },
+        "startedAt": { "type": "string" },
+        "configPath": { "type": "string" }
+      }
+    },
+    "mode": { "type": "string" },
+    "resolvedConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "repoRoot": { "type": "string" },
+        "beadsPrefix": { "type": "string" },
+        "pollIntervalMs": { "type": "integer", "minimum": 0 },
+        "activeRoles": { "type": "integer", "minimum": 0 },
+        "activeQueries": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "gates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "set"],
+        "properties": {
+          "name": { "type": "string" },
+          "set": { "type": "boolean" },
+          "mtime": { "type": "string" },
+          "owner": { "type": "string" }
+        }
+      }
+    },
+    "gatesObservedAt": { "type": "string" },
+    "listeners": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "kind", "state", "self"],
+        "properties": {
+          "id": { "type": "string" },
+          "kind": { "type": "string" },
+          "state": { "type": "string" },
+          "self": { "type": "string" }
+        }
+      }
+    },
+    "registry": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "kind", "state", "self"],
+        "properties": {
+          "id": { "type": "string" },
+          "kind": { "type": "string" },
+          "state": { "type": "string" },
+          "self": { "type": "string" }
+        }
+      }
+    },
+    "sources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "rejected"],
+        "properties": {
+          "name": { "type": "string" },
+          "rejected": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "unmatchedBindings": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "activity": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["seq", "startedAt", "type", "outcome"],
+        "properties": {
+          "seq": { "type": "integer", "minimum": 0 },
+          "startedAt": { "type": "string" },
+          "type": { "type": "string" },
+          "outcome": { "type": "string" }
+        }
+      }
+    },
+    "asOf": { "type": "string" },
+    "lastTickAt": { "type": "string" },
+    "snapshotAt": { "type": "string" },
+    "tickIntervalMs": { "type": "integer", "minimum": 0 }
   }
 }

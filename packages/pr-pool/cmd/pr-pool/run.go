@@ -121,6 +121,12 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 		Bindings:       core.NewBindings(declaredBindTypes(cfg.Roles)...),
 		Observer:       emitter,
 		MonitorSubsets: monitorSubsetResolverFrom(cfg.MonitorSubsets),
+		// ActivityRing/ConfigPath (Task 3.8): the same ring constructed above
+		// (already fed by fanOutObserver) handed to the `status` verb to read
+		// live, and the resolved config path the verb echoes back informationally
+		// under its `core.configPath` field.
+		ActivityRing: ring,
+		ConfigPath:   cfg.ConfigPath,
 	}
 	if metricsReader != nil {
 		// Assigned only when non-nil: metricsReader is a typed *metrics.Reader,

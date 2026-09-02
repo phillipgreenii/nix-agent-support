@@ -240,6 +240,30 @@ func TestPushInject_RejectsMalformedEvent(t *testing.T) {
 	}
 }
 
+// TestPushInject_DiscriminatesErrorBeforeReplySchema proves the push-inject
+// client path (register row bead pg2-o9r6a; Task 3.8 Binding decisions, Step
+// 7) reports a protocol-level refusal (bad token) distinctly, via the
+// cli.error SCHEMA now backing SocketEnqueuer's discrimination
+// (internal/emit/socket.go's interpretIngestReply) rather than the ad hoc
+// struct check Task 3.8 replaced — the actual content of the register row,
+// not merely the existence of the cli.error schema artifact.
+func TestPushInject_DiscriminatesErrorBeforeReplySchema(t *testing.T) {
+	dir := shortDir(t)
+	svc := startCore(t, dir)
+
+	var stdout, stderr strings.Builder
+	code := pushInject(&stdout, &stderr, false, injectedLocator(svc.Ref().Socket, "wrong-token"), emit.SocketEnqueuer{}, testPushEvent)
+	if code != conformance.ExitError {
+		t.Fatalf("exit = %d, want %d", code, conformance.ExitError)
+	}
+	if !strings.Contains(stderr.String(), "unauthorized") {
+		t.Fatalf("stderr = %q, want the discriminated protocol refusal named", stderr.String())
+	}
+	if strings.Contains(stdout.String(), "accepted") {
+		t.Fatalf("stdout = %q, want no success report for a refused injection", stdout.String())
+	}
+}
+
 // The trap, guarded at the SUBCOMMAND boundary: wiring push-inject through
 // QueueEnqueuer against a located core must FAIL LOUDLY rather than report a
 // successful injection into a queue that dies with this process.

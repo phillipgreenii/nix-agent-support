@@ -146,7 +146,11 @@ type ingestReplyBody struct {
 // The ORDER matters: the protocol error envelope is checked before the reply
 // schema, because a refusal (bad token, core not started) is not an
 // ingest-event-reply at all and reporting it as a schema violation would hide the
-// actual cause.
+// actual cause. The check itself is now against the cli.error SCHEMA ARTIFACT
+// (register row bead pg2-o9r6a; Task 3.8 Binding decisions, Step 7) rather than
+// an ad hoc "does it have a non-empty `error` field" decode — this was, until
+// Task 3.8, the ONE client that discriminated the envelope at all, and
+// push-inject is the front door that reuses it (Task 3.8 Files).
 func interpretIngestReply(eventID string, reply []byte, code int) (eventqueue.EnqueueResult, error) {
 	if code == conformance.ExitBusy {
 		// The core's ingest-event never declines: the durable queue does not turn
@@ -158,9 +162,11 @@ func interpretIngestReply(eventID string, reply []byte, code int) (eventqueue.En
 	if len(reply) == 0 {
 		return eventqueue.Enqueued, fmt.Errorf("emit: core returned exit %d with no reply body", code)
 	}
-	var perr protocolError
-	if err := json.Unmarshal(reply, &perr); err == nil && perr.Error != "" {
-		return eventqueue.Enqueued, fmt.Errorf("emit: core refused the injection: %s", perr.Error)
+	if conformance.CheckBytes(core.ErrorReplySchema, reply) == nil {
+		var perr protocolError
+		if err := json.Unmarshal(reply, &perr); err == nil {
+			return eventqueue.Enqueued, fmt.Errorf("emit: core refused the injection: %s", perr.Error)
+		}
 	}
 	if err := conformance.CheckBytes(core.IngestReplySchema, reply); err != nil {
 		return eventqueue.Enqueued, fmt.Errorf("emit: core reply is not a valid %s: %w", core.IngestReplySchema, err)

@@ -13,6 +13,9 @@ import (
 //go:embed testdata/golden/*.json
 var golden embed.FS
 
+//go:embed testdata/compat/*.json
+var compatGolden embed.FS
+
 func loadGolden(t *testing.T, name string) map[string]any {
 	t.Helper()
 	b, err := golden.ReadFile("testdata/golden/" + name + ".json")
@@ -128,6 +131,18 @@ func TestNegative_Matrix(t *testing.T) {
 			{"delivery missing handler", `{"schemaVersion":"1","deliveries":[{"id":"h","event":"e"}],"queues":[],"config":{"sources":0,"handlers":0}}`},
 			{"delivery carries the removed state field", `{"schemaVersion":"1","deliveries":[{"id":"h","handler":"r","event":"e","state":"running"}],"queues":[],"config":{"sources":0,"handlers":0}}`},
 			{"queue depth wrong type", `{"schemaVersion":"1","deliveries":[],"queues":[{"type":"t","depth":"3"}],"config":{"sources":0,"handlers":0}}`},
+			{"core carries an unknown field", `{"schemaVersion":"1","deliveries":[],"queues":[],"config":{"sources":0,"handlers":0},"core":{"state":"started","pid":1,"extra":"x"}}`},
+			{"gate missing set", `{"schemaVersion":"1","deliveries":[],"queues":[],"config":{"sources":0,"handlers":0},"gates":[{"name":"quota_paused"}]}`},
+			{"activity entry missing outcome", `{"schemaVersion":"1","deliveries":[],"queues":[],"config":{"sources":0,"handlers":0},"activity":[{"seq":1,"startedAt":"2026-09-01T00:00:00Z","type":"t"}]}`},
+		},
+		"cli.status": {
+			{"schemaVersion const mismatch", `{"schemaVersion":"9"}`},
+			{"since wrong type", `{"schemaVersion":"1","since":"5"}`},
+			{"since negative-shaped (not an integer)", `{"schemaVersion":"1","since":-1.5}`},
+		},
+		"cli.error": {
+			{"missing error", `{"schemaVersion":"1"}`},
+			{"error wrong type", `{"schemaVersion":"1","error":5}`},
 		},
 		"cli.self-status": {
 			{"missing participantId", `{"schemaVersion":"1","id":"t","self":"healthy"}`},
@@ -152,6 +167,28 @@ func TestNegative_Matrix(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// TestBackwardCompat_LegacyGoldens proves the WIDENED cli.status-reply schema
+// (Task 3.8) still accepts the OLD legacy-shaped reply — the pre-Task-3.8
+// 4-field {schemaVersion, deliveries, queues, config} shape the core used to
+// send. Go's own encoding/json ignoring unrecognized fields on unmarshal into
+// a fixed struct is a SEPARATE, unrelated guarantee about an old CLIENT
+// reading a NEW reply (Task 3.8 Binding decisions); this instead proves the
+// schema itself has not tightened in a way that would reject the OLD reply
+// shape the widening is supposed to preserve as a subset.
+func TestBackwardCompat_LegacyGoldens(t *testing.T) {
+	b, err := compatGolden.ReadFile("testdata/compat/cli.status-reply.json")
+	if err != nil {
+		t.Fatalf("read compat golden: %v", err)
+	}
+	var v map[string]any
+	if err := json.Unmarshal(b, &v); err != nil {
+		t.Fatalf("decode compat golden: %v", err)
+	}
+	if err := Check("cli.status-reply", v); err != nil {
+		t.Fatalf("widened cli.status-reply schema rejected the legacy golden: %v", err)
 	}
 }
 

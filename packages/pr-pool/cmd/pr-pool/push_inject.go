@@ -88,6 +88,14 @@ func runPushInject(args []string) int {
 // not there". Claiming usage for the whole set would mislabel the runtime cases —
 // and "no running core exits non-zero" is the contract an operator scripts
 // against (interfaces.md "Locating the core", ADR 0036), not a usage signal.
+//
+// A protocol-level refusal (bad token, core not `started`) reaches this
+// function already discriminated from a normal enqueue failure: SocketEnqueuer
+// (internal/emit/socket.go's interpretIngestReply) checks the reply against the
+// cli.error SCHEMA before validating it against cli.ingest-event-reply (register
+// row bead pg2-o9r6a; Task 3.8 Binding decisions, Step 7) — err.Error() below
+// already names the refusal distinctly (see
+// TestPushInject_DiscriminatesErrorBeforeReplySchema).
 func pushInject(stdout, stderr io.Writer, asJSON bool, loc emit.Locator, enq emit.Enqueuer, eventJSON string) int {
 	res, err := emit.Emit([]byte(eventJSON), loc, enq)
 	if err != nil {

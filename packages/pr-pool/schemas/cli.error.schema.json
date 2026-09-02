@@ -1,0 +1,11 @@
+{
+  "$id": "cli.error",
+  "title": "INTF-CLI protocol error envelope",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "error"],
+  "properties": {
+    "schemaVersion": { "const": "1" },
+    "error": { "type": "string" }
+  }
+}

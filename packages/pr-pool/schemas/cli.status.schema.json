@@ -1,0 +1,11 @@
+{
+  "$id": "cli.status",
+  "title": "INTF-CLI status request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion"],
+  "properties": {
+    "schemaVersion": { "const": "1" },
+    "since": { "type": "integer", "minimum": 0 }
+  }
+}

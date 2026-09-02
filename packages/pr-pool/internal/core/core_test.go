@@ -2,11 +2,15 @@ package core
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/phillipgreenii/pr-pool/conformance"
+	"github.com/phillipgreenii/pr-pool/internal/activity"
+	"github.com/phillipgreenii/pr-pool/internal/eventqueue"
 )
 
 // End to end over the REAL socket: a caller with the core's Ref delivers events
@@ -153,5 +157,278 @@ func TestRespond_BodylessReplyIsNull(t *testing.T) {
 	}
 	if string(resp.Reply) != "null" {
 		t.Fatalf("reply = %s, want null for a body-less response", resp.Reply)
+	}
+}
+
+// --- Task 3.8: the `status` verb -------------------------------------------
+
+// statusRequest is a minimal, schema-valid status request: since omitted.
+const statusRequest = `{"schemaVersion":"1"}`
+
+// startedServiceForStatus returns a started service carrying the extra Task
+// 3.8 seams a status reply composes from (activityRing, configPath,
+// startedAt) — the same startedServiceWith/startedServiceWithMonitoring
+// literal-construction pattern, since these fields have no Options-level
+// test constructor of their own.
+func startedServiceForStatus(t *testing.T, ring *activity.Ring) *Service {
+	t.Helper()
+	return &Service{
+		state:        conformance.Started,
+		q:            newQueue(t),
+		bindings:     testBindings(),
+		reg:          NewRegistry(nil),
+		command:      "pr-pool",
+		activityRing: ring,
+		configPath:   "/repo/.pr-pool/config.toml",
+		startedAt:    time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC),
+	}
+}
+
+// serveStatus runs the `status` subcommand IN PROCESS through the
+// participant boundary, matching serveIngest/serveMonRead's shape. It must
+// only be called from the test's own goroutine (it may call t.Fatalf) — see
+// TestServeStatus_InterleavedReadOnlyInvariance and
+// TestServeStatus_ThreeWayConcurrency for the plain svc.Serve calls their
+// worker goroutines use instead.
+func serveStatus(t *testing.T, svc *Service, request string) (map[string]any, int) {
+	t.Helper()
+	var out strings.Builder
+	code := svc.Serve(SubcommandStatus, strings.NewReader(request), &out)
+	var reply map[string]any
+	if err := json.Unmarshal([]byte(out.String()), &reply); err != nil {
+		t.Fatalf("reply %q is not JSON: %v", out.String(), err)
+	}
+	return reply, code
+}
+
+// TestServeStatus_LifecycleTable proves `status` obeys the SAME INV-INTF-1
+// lifecycle gate (Serve's own State() check) every other subcommand does:
+// messages cross only in `started`; every other lifecycle state is refused
+// with the protocol error envelope (Task 3.8 Acceptance).
+func TestServeStatus_LifecycleTable(t *testing.T) {
+	cases := []struct {
+		state    conformance.Lifecycle
+		wantCode int
+	}{
+		{conformance.Starting, conformance.ExitError},
+		{conformance.Started, conformance.ExitOK},
+		{conformance.Stopping, conformance.ExitError},
+		{conformance.Stopped, conformance.ExitError},
+	}
+	for _, tc := range cases {
+		t.Run(tc.state.String(), func(t *testing.T) {
+			svc := startedServiceForStatus(t, nil)
+			svc.state = tc.state
+			reply, code := serveStatus(t, svc, statusRequest)
+			if code != tc.wantCode {
+				t.Fatalf("state=%s: exit = %d, want %d; reply=%v", tc.state, code, tc.wantCode, reply)
+			}
+			if tc.wantCode == conformance.ExitOK {
+				if err := conformance.Check(StatusReplySchema, reply); err != nil {
+					t.Fatalf("reply failed its own schema: %v", err)
+				}
+				return
+			}
+			if err := conformance.Check(ErrorReplySchema, reply); err != nil {
+				t.Fatalf("out-of-lifecycle reply failed the error-envelope schema: %v", err)
+			}
+		})
+	}
+}
+
+// TestServeStatus_NilTickBootWindow proves the boot window (no PublishTick
+// call yet — CurrentTick() == nil) composes a schema-valid reply with every
+// tick-derived field simply OMITTED rather than guessed at, and never
+// panics (Task 3.8 Acceptance: "nil-tick boot window handled without
+// panic").
+func TestServeStatus_NilTickBootWindow(t *testing.T) {
+	svc := startedServiceForStatus(t, nil)
+	reply, code := serveStatus(t, svc, statusRequest)
+	if code != conformance.ExitOK {
+		t.Fatalf("exit = %d, want 0; reply=%v", code, reply)
+	}
+	if err := conformance.Check(StatusReplySchema, reply); err != nil {
+		t.Fatalf("reply failed its own schema: %v", err)
+	}
+	for _, absent := range []string{"mode", "resolvedConfig", "lastTickAt", "snapshotAt", "tickIntervalMs"} {
+		if v, present := reply[absent]; present {
+			t.Fatalf("reply[%q] = %v, want omitted before the first PublishTick", absent, v)
+		}
+	}
+	if got, ok := reply["sources"].([]any); !ok || len(got) != 0 {
+		t.Fatalf("sources = %v, want an empty array before the first tick", reply["sources"])
+	}
+	cfg, ok := reply["config"].(map[string]any)
+	if !ok || cfg["sources"] != float64(0) || cfg["handlers"] != float64(0) {
+		t.Fatalf("legacy config = %v, want zero counts pre-tick", reply["config"])
+	}
+	core, ok := reply["core"].(map[string]any)
+	if !ok || core["state"] != "started" {
+		t.Fatalf("core = %v, want state=started even pre-tick (Listen-time state, not tick-derived)", reply["core"])
+	}
+}
+
+// TestServeStatus_ComposesLiveState proves the reply actually reflects live
+// state from every seam Task 3.8's Contract names: queue depths (Task 3.2),
+// the activity ring (Task 3.4), the gate cell (Task 3.5, via the SAME
+// ObserveGateFromSocketVerb method Task 3.9's own verb will call), the
+// registry (existing Registry.List()), and a published tick.
+func TestServeStatus_ComposesLiveState(t *testing.T) {
+	ring := activity.New(4)
+	ring.Append(activity.Entry{Type: "review-requested", Outcome: "delivered"})
+	svc := startedServiceForStatus(t, ring)
+
+	if _, err := svc.q.Enqueue(eventqueue.Event{ID: "e1", Type: "review-requested", ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+	if _, err := svc.Register("review", KindHandler); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	svc.ObserveGateFromSocketVerb(time.Now(), "quota_paused", GateInfo{Set: true, Owner: "ops"})
+	now := time.Now()
+	svc.PublishTick(TickSnapshot{
+		RunMode:    RunModeLongRunning,
+		Version:    "test-version",
+		Config:     ResolvedConfig{RepoRoot: "/repo", ActiveRoles: 1, ActiveQueries: 1},
+		Sources:    []SourceReport{{Name: "feedback-ready"}},
+		LastTickAt: now,
+		SnapshotAt: now,
+	})
+
+	reply, code := serveStatus(t, svc, statusRequest)
+	if code != conformance.ExitOK {
+		t.Fatalf("exit = %d, want 0; reply=%v", code, reply)
+	}
+	if err := conformance.Check(StatusReplySchema, reply); err != nil {
+		t.Fatalf("reply failed its own schema: %v", err)
+	}
+
+	queues, _ := reply["queues"].([]any)
+	if len(queues) != 1 || queues[0].(map[string]any)["type"] != "review-requested" {
+		t.Fatalf("queues = %v, want the one enqueued type (Task 3.2 DepthByType)", queues)
+	}
+	gates, _ := reply["gates"].([]any)
+	foundGate := false
+	for _, g := range gates {
+		gm := g.(map[string]any)
+		if gm["name"] == "quota_paused" && gm["set"] == true && gm["owner"] == "ops" {
+			foundGate = true
+		}
+	}
+	if !foundGate {
+		t.Fatalf("gates = %v, want quota_paused set by ObserveGateFromSocketVerb", gates)
+	}
+	listeners, _ := reply["listeners"].([]any)
+	if len(listeners) != 1 || listeners[0].(map[string]any)["id"] != "review" {
+		t.Fatalf("listeners = %v, want the registered handler (Registry.List())", listeners)
+	}
+	activityEntries, _ := reply["activity"].([]any)
+	if len(activityEntries) != 1 || activityEntries[0].(map[string]any)["outcome"] != "delivered" {
+		t.Fatalf("activity = %v, want the ring's one entry (Task 3.4 Ring.Read)", activityEntries)
+	}
+	if reply["mode"] != RunModeLongRunning {
+		t.Fatalf("mode = %v, want %s", reply["mode"], RunModeLongRunning)
+	}
+	sources, _ := reply["sources"].([]any)
+	if len(sources) != 1 || sources[0].(map[string]any)["name"] != "feedback-ready" {
+		t.Fatalf("sources = %v, want the published tick's one source", sources)
+	}
+}
+
+// alwaysAcceptListener accepts every event of the given type — the minimal
+// eventqueue.Listener stub TestServeStatus_ThreeWayConcurrency needs to
+// drive real Dispatch() acceptances; core_test.go otherwise never needs a
+// Listener implementation of its own.
+type alwaysAcceptListener struct{ id, typ string }
+
+func (l *alwaysAcceptListener) ID() string                        { return l.id }
+func (l *alwaysAcceptListener) Matches(evt eventqueue.Event) bool { return evt.Type == l.typ }
+func (l *alwaysAcceptListener) Offer(eventqueue.Event) bool       { return true }
+
+// TestServeStatus_InterleavedReadOnlyInvariance proves `status` is read-only:
+// a burst of concurrent status reads interleaved around a queue mutation
+// must never itself change the queue depth or the registry size — the
+// invariant the whole composition rests on (composeStatusReply's doc:
+// "no q.mu is ever taken here", Task 3.8 Binding decisions Step 8).
+func TestServeStatus_InterleavedReadOnlyInvariance(t *testing.T) {
+	svc := startedServiceForStatus(t, activity.New(8))
+	if _, err := svc.q.Enqueue(eventqueue.Event{ID: "e1", Type: "review-requested", ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+	if _, err := svc.Register("m-1", KindMonitor); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	beforeDepth := svc.q.DepthByType()["review-requested"]
+	beforeLen := svc.reg.Len()
+
+	var wg sync.WaitGroup
+	for i := 0; i < 50; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			var out strings.Builder
+			svc.Serve(SubcommandStatus, strings.NewReader(statusRequest), &out)
+		}()
+	}
+	wg.Wait()
+
+	afterDepth := svc.q.DepthByType()["review-requested"]
+	afterLen := svc.reg.Len()
+	if afterDepth != beforeDepth {
+		t.Fatalf("queue depth changed from %d to %d across interleaved status reads — status must be read-only", beforeDepth, afterDepth)
+	}
+	if afterLen != beforeLen {
+		t.Fatalf("registry length changed from %d to %d across interleaved status reads", beforeLen, afterLen)
+	}
+}
+
+// TestServeStatus_ThreeWayConcurrency runs three independent actors
+// concurrently — status reads, live Enqueue/Dispatch/Expire churn, and the
+// gate-cell write a future socket pause/resume verb (Task 3.9, out of scope
+// here per this task's own Out-of-scope note) will call — and proves neither
+// a data race (run with -race) nor a deadlock results, and that a status
+// call made after every actor settles still composes a schema-valid reply.
+func TestServeStatus_ThreeWayConcurrency(t *testing.T) {
+	svc := startedServiceForStatus(t, activity.New(16))
+	svc.q.Register(&alwaysAcceptListener{id: "h1", typ: "t"})
+
+	var wg sync.WaitGroup
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 100; i++ {
+			var out strings.Builder
+			svc.Serve(SubcommandStatus, strings.NewReader(statusRequest), &out)
+		}
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 100; i++ {
+			id := fmt.Sprintf("e%d", i)
+			_, _ = svc.q.Enqueue(eventqueue.Event{ID: id, Type: "t", ExpiresAt: time.Now().Add(time.Hour)})
+			svc.q.Dispatch()
+			svc.q.Expire()
+		}
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 100; i++ {
+			svc.ObserveGateFromSocketVerb(time.Now(), "quota_paused", GateInfo{Set: i%2 == 0})
+		}
+	}()
+
+	wg.Wait()
+
+	reply, code := serveStatus(t, svc, statusRequest)
+	if code != conformance.ExitOK {
+		t.Fatalf("final status exit = %d, want 0; reply=%v", code, reply)
+	}
+	if err := conformance.Check(StatusReplySchema, reply); err != nil {
+		t.Fatalf("final status reply failed its own schema: %v", err)
 	}
 }
