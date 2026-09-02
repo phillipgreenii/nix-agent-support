@@ -1,0 +1,39 @@
+# q.mu hold-time p99 baseline (Task 3.11 Step 5). UNGATED — this file is an
+# informational record, not a threshold enforced by any check (unlike
+# coverage-thresholds.txt alongside it, which coverage-gate.sh DOES enforce).
+# Nothing reads this file mechanically today.
+#
+# These numbers are RE-MEASURED as an acceptance step of Tasks 5.0/6.0 — the
+# perf/observability plan's own later checkpoints — not maintained here on an
+# ongoing basis. Treat a stale-looking figure here as expected until that
+# re-measurement happens, not as a regression to chase now.
+#
+# Method: internal/eventqueue/bench_test.go's
+# BenchmarkDispatchQmuHoldTimeP99AtTenK and BenchmarkExpireQmuHoldTimeP99AtTenK,
+# run manually via:
+#
+#   go test ./internal/eventqueue/... -run '^$' -bench 'QmuHoldTimeP99AtTenK' \
+#     -benchmem -benchtime 2000x
+#
+# Each benchmark drives its call with a 10,000-entry queue and reports a
+# custom `p99-ns/op` metric (computed by hand across per-call samples, since
+# the standard `ns/op` a Go benchmark reports on its own is a MEAN, not a
+# tail figure, and ADR 0031's concern here is the tail). Dispatch's own
+# benchmark keeps a persistent queue and one always-accepting listener, so
+# phase 2 (unlocked Offer) does negligible work and each call's wall time is
+# dominated by phases 1 ("SNAPSHOT", locked) and 3 ("RECORD", locked)
+# together; there is no public seam to split those two further without
+# instrumenting q.mu itself (out of this packet's Files). Expire's benchmark
+# is a single q.mu critical section end to end, so its wall time already IS
+# the lock hold time, not merely a proxy for it — but note its own `ns/op`
+# column also includes the per-iteration 10k-entry setup this benchmark must
+# redo every call (Expire consumes/depletes what it retires), so only the
+# `p99-ns/op` figure below is the one that isolates the call itself.
+#
+# Measured 2026-09-02, Task 3.11, against Tasks 3.1 (AppendBatch)/3.2 (O(1)
+# depth cell)/3.4 (activity ring)/3.8 (status verb) as landed at that
+# revision, on: darwin/arm64 (Apple M3 Pro), go1.25.9.
+#
+#   metric                                          value
+dispatch_phases1and3_p99_at_10k_entries_ns          551917
+expire_p99_at_10k_entries_ns                        6522583
