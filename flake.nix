@@ -1424,7 +1424,6 @@
                 esac
               '';
 
-
               test-pr-pool-module =
                 let
                   hmAssertionSubmodule = lib.types.submodule {
