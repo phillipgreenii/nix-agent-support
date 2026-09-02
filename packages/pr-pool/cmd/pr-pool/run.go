@@ -214,6 +214,23 @@ func resolveMeterProvider(cfg config.Config) (mp metric.MeterProvider, metricsRe
 // performs for Bindings above (declaredBindTypes(cfg.Roles) ->
 // core.NewBindings(...)). nil input yields a nil resolver so
 // Service.monitorSubsetResolver's own nil-default applies unchanged.
+//
+// Deliberately NO accompanying registration loop (bead pg2-bncv6): unlike
+// the per-role loop below, which pre-registers each ENABLED role in-process
+// because a role's Listener genuinely lives inside this same binary, a
+// kind=monitor sink is a real OUT-OF-PROCESS participant with nothing here
+// to pre-register on its behalf. Per docs/behavior/interfaces.md's
+// `INTF-MON` section, the subset "declaration is configuration, resolved
+// before the sink ever calls... register" — the sink itself calls the
+// common `register` wire verb (internal/core/register.go, Task 2.1,
+// pg2-84o3m.20) when it connects, and Service.Register resolves its Subset
+// from THIS SAME map at that moment (register.go's handleRegister is
+// already Service.Register's real production caller, for every kind
+// including monitor). Pre-registering an id here instead (e.g. via
+// RegisterInProcess, the role loop's own mechanism) would misuse the
+// InProcessCallback marker on a genuinely external participant and
+// fabricate a `started` lifecycle before any real connection exists —
+// solving a problem the design does not pose.
 func monitorSubsetResolverFrom(subsets map[string][]string) core.MonitorSubsetResolver {
 	if len(subsets) == 0 {
 		return nil
