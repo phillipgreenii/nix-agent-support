@@ -39,15 +39,19 @@ type ringObserver struct{ ring *activity.Ring }
 func (o *ringObserver) OnEnqueue(evt Event) {
 	o.ring.Append(activity.Entry{Type: evt.Type, Outcome: "enqueued"})
 }
+
 func (o *ringObserver) OnAccept(eventID, _ string) {
 	o.ring.Append(activity.Entry{Type: eventID, Outcome: "delivered"})
 }
+
 func (o *ringObserver) OnUnconsumedExpired(evtType string) {
 	o.ring.Append(activity.Entry{Type: evtType, Outcome: "missed"})
 }
+
 func (o *ringObserver) OnDeclined(evtType string) {
 	o.ring.Append(activity.Entry{Type: evtType, Outcome: "declined"})
 }
+
 func (o *ringObserver) OnDispatchFailure(evtType string) {
 	o.ring.Append(activity.Entry{Type: evtType, Outcome: "dispatch_failed"})
 }
