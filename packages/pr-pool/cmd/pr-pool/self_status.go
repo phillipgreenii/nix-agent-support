@@ -32,6 +32,13 @@ import (
 //
 // When no core can be located it FAILS with a "no running core" diagnostic and
 // exits 1. It never starts one (ADR 0036 / core.ErrNoRunningCore).
+//
+// The reply callCore relays here is discriminated against the protocol
+// error envelope BEFORE the verb's own reply schema (register row bead
+// pg2-o9r6a; Task 3.8 Binding decisions, Step 7) — callCore's own doc
+// explains why that check lives at its ONE call site rather than being
+// duplicated in every caller
+// (see TestCallCore_SelfStatus_DiscriminatesErrorBeforeReplySchema).
 func runSelfStatus(args []string) int {
 	fs := flag.NewFlagSet("self-status", flag.ContinueOnError)
 	fs.SetOutput(io.Discard) // we render usage/errors ourselves
