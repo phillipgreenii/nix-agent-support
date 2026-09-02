@@ -177,6 +177,76 @@ type Service struct {
 	// mutex — never mu above).
 	tick  atomic.Pointer[TickSnapshot]
 	gates gateState
+
+	// readSem is the verb-classed admission semaphore (Task 3.10 Step 4): a
+	// non-blocking counting semaphore over exactly the {status, mon.read} read
+	// verbs, gated in handleConn AFTER frame decode (the verb lives inside the
+	// frame, so it can never sit around Accept). Every other verb — write/
+	// lifecycle verbs, unknown verbs, and any pre-Serve outcome (malformed
+	// frame, bad token, liveness probe) — never touches this semaphore.
+	readSem chan struct{}
+}
+
+// readSemCapacity bounds how many concurrent status/mon.read calls the core
+// admits at once. The design fixes the BEHAVIOR (an immediate exit-9 decline
+// when saturated, never block-then-succeed) and the allowlist membership, not
+// this number or the synchronization primitive (Task 3.10 Binding decisions,
+// "Freedom boundary") — 8 is a generous ceiling for a read-only inspection verb:
+// large enough that a legitimate burst (an operator's `status`, Task 4.0's
+// future poller, a monitoring sink's `mon.read`) never collides in practice,
+// small enough that a runaway caller cannot pin unbounded goroutines open.
+const readSemCapacity = 8
+
+// readRefusalMessage is the human-readable text the admission semaphore's
+// refusal carries in the cli.error envelope (Task 3.10 Binding decisions,
+// Step 5) — the manual-CLI rendering an operator sees is never a bare exit
+// code with no message.
+const readRefusalMessage = "too many concurrent status/mon.read calls in flight; retry"
+
+// PollerBackoffCap documents (Task 3.10 Step 6) the poller-side contract a
+// caller of the {status, mon.read} verbs MUST honor on seeing exit 9 from the
+// admission semaphore above: a 9 advances that caller's own backoff ladder,
+// capped at this duration, but SUPPRESSES the poll-error zone — it is routine
+// admission control, never a fault, so staleness surfaces only through the
+// reply's own asOf age (exactly as the boot window, before the first tick,
+// already does today). The poller ITSELF — its ladder shape, its own
+// single-in-flight enforcement — is Task 4.0's TUI, out of this task's Files;
+// this constant exists only so the contract this task's admission control
+// creates has one citable, testable home instead of living solely in a design
+// doc.
+const PollerBackoffCap = 5 * time.Second
+
+// isReadVerb reports whether subcommand is one of the two admission-controlled
+// read verbs — exactly {status, mon.read}, never register (Task 3.10 Binding
+// decisions: register is a same-process Go method, unreachable via handleConn's
+// switch, so it is vacuous to name here) and never a write/lifecycle verb.
+func isReadVerb(subcommand string) bool {
+	switch subcommand {
+	case SubcommandStatus, SubcommandMonRead:
+		return true
+	default:
+		return false
+	}
+}
+
+// acquireReadSlot tries to admit one more concurrent read-verb call,
+// returning false immediately (never blocking) when readSemCapacity calls are
+// already in flight — the (N+1)th caller is refused with exit 9 AT ONCE, not
+// after waiting for a slot to free, which is the entire point of admission
+// control (Task 3.10 Binding decisions, Step 2): a poller's backoff ladder
+// depends on a prompt refusal signal, not a delayed success.
+func (s *Service) acquireReadSlot() bool {
+	select {
+	case s.readSem <- struct{}{}:
+		return true
+	default:
+		return false
+	}
+}
+
+// releaseReadSlot returns one admitted slot.
+func (s *Service) releaseReadSlot() {
+	<-s.readSem
 }
 
 // IngestObserver receives the ingest-time conditions the core records to METRICS,
@@ -305,6 +375,7 @@ func Listen(opts Options) (*Service, error) {
 		activityRing:   opts.ActivityRing,
 		configPath:     opts.ConfigPath,
 		startedAt:      now(),
+		readSem:        make(chan struct{}, readSemCapacity),
 	}, nil
 }
 
@@ -318,7 +389,7 @@ func clearStaleSocket(sock string) error {
 		}
 		return fmt.Errorf("core: stat socket %s: %w", sock, err)
 	}
-	if err := probe(sock); err == nil {
+	if err := probe(sock, DefaultProbeTimeout); err == nil {
 		return fmt.Errorf("%w: %s", ErrAlreadyRunning, sock)
 	}
 	if err := os.Remove(sock); err != nil {
@@ -503,14 +574,23 @@ func (s *Service) isClosing() bool {
 	return s.closing
 }
 
-// handleConn serves one transport frame: authenticate, run the subcommand through
-// the participant boundary, return the reply and coarse exit code.
+// serverCallDeadline is the core's OWN accept-to-response deadline in
+// handleConn — a SEPARATE, server-side constant, independent of a client's
+// CallOptions (Task 3.10 Interfaces): nothing on the wire carries a client's
+// chosen timeout to the server process, so both sides simply default to the
+// same duration (DefaultCallTimeout in socket.go) by CONVENTION, not by
+// propagation.
+const serverCallDeadline = DefaultCallTimeout
+
+// handleConn serves one transport frame: authenticate, admission-control the
+// two read verbs, run the subcommand through the participant boundary, return
+// the reply and coarse exit code.
 func (s *Service) handleConn(conn net.Conn) {
 	defer func() { _ = conn.Close() }()
 	// A socket deadline is WALL-clock, so it deliberately uses time.Now rather than
 	// the injectable clock seam (which stamps domain timestamps): a mock clock must
 	// not be able to make a real connection hang forever.
-	if err := conn.SetDeadline(time.Now().Add(callTimeout)); err != nil {
+	if err := conn.SetDeadline(time.Now().Add(serverCallDeadline)); err != nil {
 		slog.Warn("core: set connection deadline failed", "err", err)
 		return
 	}
@@ -534,6 +614,22 @@ func (s *Service) handleConn(conn net.Conn) {
 		slog.Warn("core: rejected socket request with a bad token", "subcommand", req.Subcommand)
 		s.respond(conn, conformance.ExitError, errorReply("unauthorized"))
 		return
+	}
+	// Verb-classed admission control (Task 3.10 Step 4), positioned HERE —
+	// after frame decode AND after the token check — so a malformed frame or a
+	// bad token is NEVER refused by this semaphore (it is a pre-Serve outcome,
+	// not a read-verb admission decision): only a genuinely authorized
+	// {status, mon.read} call can be declined this way, and it is declined
+	// IMMEDIATELY (never blocked until a slot frees, Step 2) with a
+	// human-readable cli.error envelope (Step 5) at exit 9 — the exact signal
+	// Task 4.0's poller backs off on (PollerBackoffCap's doc).
+	if isReadVerb(req.Subcommand) {
+		if !s.acquireReadSlot() {
+			slog.Debug("core: read semaphore saturated, refusing", "subcommand", req.Subcommand)
+			s.respond(conn, conformance.ExitBusy, errorReply(readRefusalMessage))
+			return
+		}
+		defer s.releaseReadSlot()
 	}
 	var out bytes.Buffer
 	code := s.Serve(req.Subcommand, bytes.NewReader(req.Payload), &out)

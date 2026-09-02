@@ -8,7 +8,9 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -245,10 +247,10 @@ func TestDiscover_NoRunningCore(t *testing.T) {
 }
 
 func TestDial_NoSocketIsNoRunningCore(t *testing.T) {
-	if _, err := Dial(Ref{}); !errors.Is(err, ErrNoRunningCore) {
+	if _, err := Dial(Ref{}, DefaultProbeTimeout); !errors.Is(err, ErrNoRunningCore) {
 		t.Fatalf("Dial with an empty ref = %v, want ErrNoRunningCore", err)
 	}
-	if _, err := Dial(Ref{Socket: filepath.Join(shortDir(t), "nope.sock")}); !errors.Is(err, ErrNoRunningCore) {
+	if _, err := Dial(Ref{Socket: filepath.Join(shortDir(t), "nope.sock")}, DefaultProbeTimeout); !errors.Is(err, ErrNoRunningCore) {
 		t.Fatalf("Dial at a dead socket = %v, want ErrNoRunningCore", err)
 	}
 }
@@ -258,12 +260,12 @@ func TestServe_RejectsABadToken(t *testing.T) {
 	dir := shortDir(t)
 	svc, ref := startService(t, dir)
 
-	client, err := Dial(Ref{Socket: ref.Socket, Token: "not-the-token"})
+	client, err := Dial(Ref{Socket: ref.Socket, Token: "not-the-token"}, DefaultProbeTimeout)
 	if err != nil {
 		t.Fatalf("Dial: %v", err)
 	}
 	defer func() { _ = client.Close() }()
-	reply, code, err := client.Call(SubcommandIngestEvent, []byte(oneEventRequest))
+	reply, code, err := client.Call(context.Background(), SubcommandIngestEvent, []byte(oneEventRequest), CallOptions{})
 	if err != nil {
 		t.Fatalf("Call: %v", err)
 	}
@@ -321,12 +323,12 @@ func TestServe_UnknownSubcommand(t *testing.T) {
 	dir := shortDir(t)
 	_, ref := startService(t, dir)
 
-	client, err := Dial(ref)
+	client, err := Dial(ref, DefaultProbeTimeout)
 	if err != nil {
 		t.Fatalf("Dial: %v", err)
 	}
 	defer func() { _ = client.Close() }()
-	reply, code, err := client.Call("session-status", []byte(`{"schemaVersion":"1","id":"hs-1","state":"running"}`))
+	reply, code, err := client.Call(context.Background(), "session-status", []byte(`{"schemaVersion":"1","id":"hs-1","state":"running"}`), CallOptions{})
 	if err != nil {
 		t.Fatalf("Call: %v", err)
 	}
@@ -447,14 +449,14 @@ func TestReadRecord_DistinguishesIOFailureFromAbsence(t *testing.T) {
 func TestCall_OnAClosedConnection(t *testing.T) {
 	dir := shortDir(t)
 	_, ref := startService(t, dir)
-	client, err := Dial(ref)
+	client, err := Dial(ref, DefaultProbeTimeout)
 	if err != nil {
 		t.Fatalf("Dial: %v", err)
 	}
 	if err := client.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
-	if _, _, err := client.Call(SubcommandIngestEvent, []byte(oneEventRequest)); err == nil {
+	if _, _, err := client.Call(context.Background(), SubcommandIngestEvent, []byte(oneEventRequest), CallOptions{}); err == nil {
 		t.Fatal("Call on a closed connection succeeded, want an error")
 	}
 }
@@ -480,12 +482,12 @@ func TestCall_NullReplyIsNoBody(t *testing.T) {
 		_ = json.NewEncoder(conn).Encode(wireResponse{ExitCode: conformance.ExitBusy, Reply: jsonNull})
 	}()
 
-	client, err := Dial(Ref{Socket: sock, Token: "t"})
+	client, err := Dial(Ref{Socket: sock, Token: "t"}, DefaultProbeTimeout)
 	if err != nil {
 		t.Fatalf("Dial: %v", err)
 	}
 	defer func() { _ = client.Close() }()
-	reply, code, err := client.Call(SubcommandIngestEvent, nil)
+	reply, code, err := client.Call(context.Background(), SubcommandIngestEvent, nil, CallOptions{})
 	if err != nil {
 		t.Fatalf("Call: %v", err)
 	}
@@ -510,7 +512,7 @@ func TestHandleConn_LivenessProbeIsSilent(t *testing.T) {
 	t.Cleanup(func() { slog.SetDefault(prev) })
 
 	for i := 0; i < 3; i++ {
-		if err := probe(ref.Socket); err != nil {
+		if err := probe(ref.Socket, DefaultProbeTimeout); err != nil {
 			t.Fatalf("probe: %v", err)
 		}
 	}
@@ -521,5 +523,218 @@ func TestHandleConn_LivenessProbeIsSilent(t *testing.T) {
 	}
 	if buf.Len() != 0 {
 		t.Fatalf("a liveness probe logged at WARN or above:\n%s", buf.String())
+	}
+}
+
+// acquireNReadSlots drives the read-admission semaphore directly (bypassing
+// the wire) so a test can put it into a known saturated state without racing
+// real concurrent socket calls. Returns a release func.
+func acquireNReadSlots(t *testing.T, svc *Service, n int) func() {
+	t.Helper()
+	for i := 0; i < n; i++ {
+		if !svc.acquireReadSlot() {
+			t.Fatalf("acquireReadSlot failed acquiring slot %d/%d", i+1, n)
+		}
+	}
+	return func() {
+		for i := 0; i < n; i++ {
+			svc.releaseReadSlot()
+		}
+	}
+}
+
+// With the read semaphore fully saturated, a concurrent ingest-event (a
+// write/lifecycle verb, never admission-gated per the allowlist) must still
+// succeed — Task 3.10 Step 4's "every path other than {status, mon.read} ...
+// is NEVER refused with exit 9 by this semaphore".
+func TestSaturatedReadSemaphoreAllowsIngest(t *testing.T) {
+	dir := shortDir(t)
+	svc, ref := startService(t, dir)
+	release := acquireNReadSlots(t, svc, readSemCapacity)
+	defer release()
+
+	client, err := Dial(ref, DefaultProbeTimeout)
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	defer func() { _ = client.Close() }()
+	reply, code, err := client.Call(context.Background(), SubcommandIngestEvent, []byte(oneEventRequest), CallOptions{})
+	if err != nil {
+		t.Fatalf("Call: %v", err)
+	}
+	if code != conformance.ExitOK {
+		t.Fatalf("ingest-event with the read semaphore fully saturated: exit = %d, want %d", code, conformance.ExitOK)
+	}
+	if !strings.Contains(string(reply), `"accepted"`) {
+		t.Fatalf("reply = %s, want an accepted ingest-event-reply", reply)
+	}
+}
+
+// An (N+1)th status/mon.read call is refused with exit 9 IMMEDIATELY, not
+// after blocking for a slot to free (Task 3.10 Step 2 / Binding decisions):
+// a block-then-succeed implementation would defeat admission control's whole
+// point, since a poller's backoff ladder depends on a prompt refusal signal.
+// The refusal also carries a human-readable message (Step 5), never a bare
+// exit code.
+func TestSaturatedReadRefusesPromptly(t *testing.T) {
+	dir := shortDir(t)
+	svc, ref := startService(t, dir)
+	release := acquireNReadSlots(t, svc, readSemCapacity)
+	defer release()
+
+	client, err := Dial(ref, DefaultProbeTimeout)
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	defer func() { _ = client.Close() }()
+
+	start := time.Now()
+	reply, code, err := client.Call(context.Background(), SubcommandStatus, []byte(`{"schemaVersion":"1"}`), CallOptions{})
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatalf("Call: %v", err)
+	}
+	if code != conformance.ExitBusy {
+		t.Fatalf("exit = %d, want %d (busy) for a saturated read call", code, conformance.ExitBusy)
+	}
+	if elapsed > 500*time.Millisecond {
+		t.Fatalf("refusal took %s, want an IMMEDIATE decline (no slot was ever released during this call)", elapsed)
+	}
+	if !strings.Contains(string(reply), "too many concurrent") {
+		t.Fatalf("reply = %s, want the human-readable refusal message", reply)
+	}
+}
+
+// mon.read is admission-controlled exactly like status -- the allowlist is
+// {status, mon.read}, not status alone.
+func TestSaturatedReadSemaphoreRefusesMonRead(t *testing.T) {
+	dir := shortDir(t)
+	svc, ref := startService(t, dir)
+	if _, err := svc.Register("sink-1", KindMonitor); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	release := acquireNReadSlots(t, svc, readSemCapacity)
+	defer release()
+
+	client, err := Dial(ref, DefaultProbeTimeout)
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	defer func() { _ = client.Close() }()
+	reply, code, err := client.Call(context.Background(), SubcommandMonRead,
+		[]byte(`{"schemaVersion":"1","id":"sink-1","metrics":[]}`), CallOptions{})
+	if err != nil {
+		t.Fatalf("Call: %v", err)
+	}
+	if code != conformance.ExitBusy {
+		t.Fatalf("exit = %d, want %d (busy) for a saturated mon.read call", code, conformance.ExitBusy)
+	}
+	if !strings.Contains(string(reply), "too many concurrent") {
+		t.Fatalf("reply = %s, want the human-readable refusal message", reply)
+	}
+}
+
+// TestExitBusy_IsThePollerBackoffSignal documents+tests Task 3.10's
+// poller-side contract (Step 6; the poller itself is Task 4.0's, out of
+// scope here): a saturated status/mon.read call returns exit 9 -- the exact
+// signal a poller's own backoff ladder (capped at PollerBackoffCap) advances
+// on -- carrying a cli.error envelope rather than the body-less shape a
+// participant's own pre-accept busy decline uses, so a poller (or, today,
+// the manual CLI) can render WHY, not just that it was declined.
+func TestExitBusy_IsThePollerBackoffSignal(t *testing.T) {
+	if PollerBackoffCap <= 0 {
+		t.Fatalf("PollerBackoffCap = %s, want a positive cap", PollerBackoffCap)
+	}
+	dir := shortDir(t)
+	svc, ref := startService(t, dir)
+	release := acquireNReadSlots(t, svc, readSemCapacity)
+	defer release()
+
+	client, err := Dial(ref, DefaultProbeTimeout)
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	defer func() { _ = client.Close() }()
+	reply, code, err := client.Call(context.Background(), SubcommandStatus, []byte(`{"schemaVersion":"1"}`), CallOptions{})
+	if err != nil {
+		t.Fatalf("Call: %v", err)
+	}
+	if code != conformance.ExitBusy {
+		t.Fatalf("exit = %d, want %d -- this IS the signal a poller backs off on", code, conformance.ExitBusy)
+	}
+	var errBody struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(reply, &errBody); err != nil || errBody.Error == "" {
+		t.Fatalf("reply = %s, want a cli.error envelope (never the body-less busy shape) so a poller/CLI can render why", reply)
+	}
+}
+
+// No goroutine leak: after a burst of concurrent (including refused) read
+// calls AND one ABANDONED call -- a client that cancels its ctx and is never
+// Closed, simulating a caller that vanished mid-call -- goroutine counts
+// return to baseline within a bounded window (Task 3.10 Step 7: plain
+// runtime.NumGoroutine() diffing; this repo has no goleak-style tooling and
+// none is added).
+func TestNoGoroutineLeak_ConcurrentAndAbandonedCalls(t *testing.T) {
+	dir := shortDir(t)
+	svc, ref := startService(t, dir)
+	_ = svc
+
+	runtime.GC()
+	baseline := runtime.NumGoroutine()
+
+	const n = readSemCapacity * 3
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			client, err := Dial(ref, DefaultProbeTimeout)
+			if err != nil {
+				return
+			}
+			defer func() { _ = client.Close() }()
+			_, _, _ = client.Call(context.Background(), SubcommandStatus, []byte(`{"schemaVersion":"1"}`), CallOptions{})
+		}()
+	}
+	wg.Wait()
+
+	// abandoned-mid-call scenario #1 (client side): an already-cancelled ctx
+	// means Call must return immediately without ever blocking, and its
+	// watcher goroutine must not linger after Call returns.
+	abandoned, err := Dial(ref, DefaultProbeTimeout)
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	cancelledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, _, err := abandoned.Call(cancelledCtx, SubcommandStatus, []byte(`{"schemaVersion":"1"}`), CallOptions{}); err == nil {
+		t.Fatal("Call with an already-cancelled ctx succeeded, want an error")
+	}
+	_ = abandoned.Close()
+
+	// abandoned-mid-call scenario #2 (server side): a raw connection that
+	// sends NOTHING and is never closed by this test -- a caller that
+	// vanished before ever completing its request frame. The server's own
+	// handleConn goroutine has no ctx to watch here; it can only be bounded
+	// by serverCallDeadline, so this is what actually proves that bound
+	// works rather than trivially passing because nothing was ever stuck.
+	stalled, err := net.Dial("unix", ref.Socket)
+	if err != nil {
+		t.Fatalf("dial stalled conn: %v", err)
+	}
+	t.Cleanup(func() { _ = stalled.Close() })
+
+	deadline := time.Now().Add(serverCallDeadline + 3*time.Second)
+	for {
+		runtime.GC()
+		if n := runtime.NumGoroutine(); n <= baseline {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("goroutines = %d after the bounded window, want <= baseline %d", runtime.NumGoroutine(), baseline)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }

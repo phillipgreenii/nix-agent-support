@@ -1,6 +1,7 @@
 package emit
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 
@@ -75,12 +76,12 @@ func (SocketEnqueuer) Enqueue(c CoreRef, evt eventqueue.Event) (eventqueue.Enque
 	if err != nil {
 		return eventqueue.Enqueued, err
 	}
-	client, err := core.Dial(core.Ref{Socket: c.Socket, Token: c.Token})
+	client, err := core.Dial(core.Ref{Socket: c.Socket, Token: c.Token}, core.DefaultProbeTimeout)
 	if err != nil {
 		return eventqueue.Enqueued, err
 	}
 	defer func() { _ = client.Close() }()
-	reply, code, err := client.Call(core.SubcommandIngestEvent, request)
+	reply, code, err := client.Call(context.Background(), core.SubcommandIngestEvent, request, core.CallOptions{})
 	if err != nil {
 		return eventqueue.Enqueued, err
 	}

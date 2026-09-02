@@ -1,6 +1,8 @@
 package main
 
 import (
+	"encoding/json"
+	"net"
 	"strings"
 	"testing"
 	"time"
@@ -86,6 +88,51 @@ func TestStatus_DiscriminatesErrorBeforeReplySchema(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "unauthorized") {
 		t.Fatalf("stderr = %q, want the discriminated protocol refusal named", stderr.String())
+	}
+}
+
+// TestStatus_RefusedBySaturatedReadSemaphore proves the CLI relays the
+// core's own admission-control refusal (Task 3.10) as a human-readable
+// stderr message AND preserves exit 9 -- never swallowed into a generic
+// exit 1. Saturating the REAL semaphore is an internal/core-package-only
+// concern with no seam exposed to this package, so this fakes the core's
+// wire reply directly, mirroring internal/core's own
+// TestCall_NullReplyIsNoBody.
+func TestStatus_RefusedBySaturatedReadSemaphore(t *testing.T) {
+	dir := shortDir(t)
+	sock := dir + "/busy.sock"
+	ln, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer func() { _ = ln.Close() }()
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer func() { _ = conn.Close() }()
+		var req json.RawMessage
+		_ = json.NewDecoder(conn).Decode(&req)
+		_ = json.NewEncoder(conn).Encode(map[string]any{
+			"exitCode": conformance.ExitBusy,
+			"reply": map[string]any{
+				"schemaVersion": "1",
+				"error":         "too many concurrent status/mon.read calls in flight; retry",
+			},
+		})
+	}()
+
+	var stdout, stderr strings.Builder
+	code := status(&stdout, &stderr, false, core.Ref{Socket: sock, Token: "t"})
+	if code != conformance.ExitBusy {
+		t.Fatalf("exit = %d, want %d", code, conformance.ExitBusy)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want nothing rendered for a busy refusal", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "too many concurrent status/mon.read calls in flight; retry") {
+		t.Fatalf("stderr = %q, want the human-readable refusal message, not a bare exit code", stderr.String())
 	}
 }
 

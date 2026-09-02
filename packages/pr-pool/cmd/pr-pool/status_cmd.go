@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -58,7 +60,7 @@ func runStatus(args []string) int {
 // outcome rendering is testable without the process's real stdout/stderr or
 // flags.
 func status(stdout, stderr io.Writer, asJSON bool, ref core.Ref) int {
-	client, err := core.Dial(ref)
+	client, err := core.Dial(ref, core.DefaultProbeTimeout)
 	if err != nil {
 		reportNoCore(stderr, core.SubcommandStatus, err)
 		return conformance.ExitError
@@ -66,10 +68,22 @@ func status(stdout, stderr io.Writer, asJSON bool, ref core.Ref) int {
 	defer func() { _ = client.Close() }()
 
 	request := []byte(`{"schemaVersion":"` + schemas.SchemaVersion + `"}`)
-	reply, code, err := client.Call(core.SubcommandStatus, request)
+	reply, code, err := client.Call(context.Background(), core.SubcommandStatus, request, core.CallOptions{})
 	if err != nil {
 		fmt.Fprintf(stderr, "status: %v\n", err)
 		return conformance.ExitError
+	}
+	if code == conformance.ExitBusy {
+		// The core's own admission-control refusal (Task 3.10): a saturated
+		// read semaphore declines a status/mon.read call immediately rather
+		// than blocking. Unlike a participant's own pre-accept busy decline
+		// (a body-less reply), this refusal always carries a human-readable
+		// cli.error envelope — render it and preserve the wire's own exit
+		// code, rather than falling into discriminateReply's generic
+		// "core refused" -> exit 1 mapping below, which would otherwise
+		// swallow this call's true exit 9.
+		fmt.Fprintf(stderr, "status: %s\n", busyRefusalMessage(reply))
+		return code
 	}
 
 	var st statusReply
@@ -83,6 +97,25 @@ func status(stdout, stderr io.Writer, asJSON bool, ref core.Ref) int {
 		renderStatusText(stdout, ref.Socket, st)
 	}
 	return code
+}
+
+// busyRefusalMessage extracts the human-readable text from the core's
+// cli.error envelope on an exit-9 admission refusal (Task 3.10 Binding
+// decisions, Step 5), falling back to a generic message if the reply is
+// somehow empty or not that shape — defensive; the core always sends the
+// envelope for this refusal.
+func busyRefusalMessage(reply []byte) string {
+	const fallback = "too many concurrent status/mon.read calls in flight; retry"
+	if len(reply) == 0 {
+		return fallback
+	}
+	var errBody struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(reply, &errBody); err != nil || errBody.Error == "" {
+		return fallback
+	}
+	return errBody.Error
 }
 
 // statusReply is the cli.status-reply shape, as a CONSUMER (the human

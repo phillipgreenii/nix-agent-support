@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -99,13 +100,13 @@ func locateCore(socket, token string) (core.Ref, error) {
 // exit code, since a manager callback's contract is exactly those two
 // things.
 func callCore(stdout, stderr io.Writer, ref core.Ref, subcommand string, request []byte) int {
-	client, err := core.Dial(ref)
+	client, err := core.Dial(ref, core.DefaultProbeTimeout)
 	if err != nil {
 		reportNoCore(stderr, subcommand, err)
 		return conformance.ExitError
 	}
 	defer func() { _ = client.Close() }()
-	reply, code, err := client.Call(subcommand, request)
+	reply, code, err := client.Call(context.Background(), subcommand, request, core.CallOptions{})
 	if err != nil {
 		fmt.Fprintf(stderr, "%s: %v\n", subcommand, err)
 		return conformance.ExitError

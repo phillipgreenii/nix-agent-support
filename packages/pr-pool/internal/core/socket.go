@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/hex"
@@ -10,6 +11,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"time"
 
 	"github.com/phillipgreenii/pr-pool/schemas"
@@ -26,11 +28,21 @@ const (
 	RecordName = "core.json"
 )
 
-// callTimeout bounds one socket round-trip in BOTH directions (a client waiting
-// for a reply, and the core reading a request). It stops a hung peer from pinning
+// DefaultProbeTimeout bounds a liveness probe (probe) and Dial's own connect
+// attempt (Task 3.10 Interfaces: "probe <= 1s") — a local unix-domain socket
+// connect is effectively instantaneous, so both stay well under
+// DefaultCallTimeout: connecting is not itself a call, and a hung/absent peer
+// must be reported quickly rather than pinning a caller for a full call budget.
+const DefaultProbeTimeout = 1 * time.Second
+
+// DefaultCallTimeout bounds one Client.Call round-trip (a client waiting for a
+// reply) when CallOptions.CallTimeout is zero. It stops a hung peer from pinning
 // a connection or a goroutine forever. An enqueue is a local, durable append —
-// milliseconds — so this is a generous ceiling, not a latency budget.
-const callTimeout = 30 * time.Second
+// milliseconds — so this is a generous ceiling, not a latency budget. Task 4.0's
+// poller defaults to the same duration (Task 3.10 Interfaces), by convention, not
+// by propagation — see serverCallDeadline in core.go for the server-side half of
+// that convention.
+const DefaultCallTimeout = 5 * time.Second
 
 // maxSocketPathLen guards the platform limit on a unix socket path
 // (sockaddr_un.sun_path is 104 bytes on darwin, 108 on Linux). net.Listen reports
@@ -145,16 +157,16 @@ func Discover(logDir string) (Ref, error) {
 	if err != nil {
 		return Ref{}, err
 	}
-	if err := probe(r.Socket); err != nil {
+	if err := probe(r.Socket, DefaultProbeTimeout); err != nil {
 		return Ref{}, err
 	}
 	return Ref{Socket: r.Socket, Token: r.Token}, nil
 }
 
-// probe reports whether something is accepting connections on socket, mapping a
-// dead/stale socket to ErrNoRunningCore.
-func probe(socket string) error {
-	conn, err := net.DialTimeout("unix", socket, callTimeout)
+// probe reports whether something is accepting connections on socket within
+// timeout, mapping a dead/stale socket to ErrNoRunningCore.
+func probe(socket string, timeout time.Duration) error {
+	conn, err := net.DialTimeout("unix", socket, timeout)
 	if err != nil {
 		return fmt.Errorf("%w: socket %s is not accepting connections: %v", ErrNoRunningCore, socket, err)
 	}
@@ -194,16 +206,30 @@ var jsonNull = json.RawMessage("null")
 type Client struct {
 	conn  net.Conn
 	token string
+
+	// inFlight guards ErrCallInFlight (Task 3.10 Binding decisions): Client is
+	// single-use in every production caller today, so this is near-vacuous
+	// defense-in-depth for a future multi-use client, not a load-bearing guard —
+	// the load-bearing single-in-flight enforcement is Task 4.0's poller, out of
+	// scope here.
+	inFlight int32
 }
 
-// Dial connects to the core named by ref. A dial failure is ErrNoRunningCore: an
-// injected socket that nothing answers on is indistinguishable, to the caller,
-// from no core at all — and the answer is the same (report it, never spawn).
-func Dial(ref Ref) (*Client, error) {
+// Dial connects to the core named by ref, bounding the connect attempt itself at
+// probeTimeout (Task 3.10 Interfaces: a local unix-domain socket connect is
+// effectively instantaneous, so it stays in the same short budget as probe's own
+// liveness check, distinct from a Call's longer CallOptions.CallTimeout). A dial
+// failure is ErrNoRunningCore: an injected socket that nothing answers on is
+// indistinguishable, to the caller, from no core at all — and the answer is the
+// same (report it, never spawn).
+func Dial(ref Ref, probeTimeout time.Duration) (*Client, error) {
 	if ref.Socket == "" {
 		return nil, fmt.Errorf("%w: no socket to dial", ErrNoRunningCore)
 	}
-	conn, err := net.DialTimeout("unix", ref.Socket, callTimeout)
+	if probeTimeout <= 0 {
+		probeTimeout = DefaultProbeTimeout
+	}
+	conn, err := net.DialTimeout("unix", ref.Socket, probeTimeout)
 	if err != nil {
 		return nil, fmt.Errorf("%w: cannot reach socket %s: %v", ErrNoRunningCore, ref.Socket, err)
 	}
@@ -213,23 +239,73 @@ func Dial(ref Ref) (*Client, error) {
 // Close releases the connection.
 func (c *Client) Close() error { return c.conn.Close() }
 
+// CallOptions configures one Client.Call. It is its own type — not the
+// unrelated Options Listen already declares (internal/core/core.go) — because
+// reusing that name for Call's parameter would be a same-package duplicate-type
+// compile error, not a style choice (Task 3.10 Interfaces).
+type CallOptions struct {
+	// CallTimeout bounds one round trip (send the request, read the reply).
+	// Zero means DefaultCallTimeout.
+	CallTimeout time.Duration
+}
+
+// ErrCallInFlight is returned when Call is invoked while a previous Call on the
+// SAME Client has not yet returned. See the inFlight field's doc on Client: this
+// guard is documented defense-in-depth for a future multi-use client, since every
+// production Client today is single-use (one Dial, one Call, Close).
+var ErrCallInFlight = errors.New("core: a call is already in flight on this client")
+
 // Call sends one subcommand request and returns the reply body and the coarse
 // exit code (0 ok / 1 error / 2 usage / 9 busy). The payload is the subcommand's
 // JSON request — the same bytes the stdin/stdout transport would carry.
-func (c *Client) Call(subcommand string, payload []byte) (reply []byte, exitCode int, err error) {
-	if err := c.conn.SetDeadline(time.Now().Add(callTimeout)); err != nil {
+//
+// ctx is not decorative (Task 3.10 Interfaces): Call's blocking operations (the
+// connection read/write) select on ctx.Done() as well as the deadline derived
+// from opts.CallTimeout, so an external cancellation (e.g. the CLI's own signal
+// handling) unblocks promptly instead of waiting out the full timeout. There is
+// no ctx-aware net.Conn API, so a watcher goroutine collapses the connection
+// deadline to "now" the instant ctx is done, which aborts any in-flight
+// read/write with an immediate timeout error instead.
+func (c *Client) Call(ctx context.Context, subcommand string, payload []byte, opts CallOptions) (reply []byte, exitCode int, err error) {
+	if !atomic.CompareAndSwapInt32(&c.inFlight, 0, 1) {
+		return nil, 0, fmt.Errorf("%w: %s", ErrCallInFlight, subcommand)
+	}
+	defer atomic.StoreInt32(&c.inFlight, 0)
+
+	timeout := opts.CallTimeout
+	if timeout <= 0 {
+		timeout = DefaultCallTimeout
+	}
+	if err := c.conn.SetDeadline(time.Now().Add(timeout)); err != nil {
 		return nil, 0, fmt.Errorf("core: set deadline: %w", err)
 	}
+
+	watchDone := make(chan struct{})
+	defer close(watchDone)
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = c.conn.SetDeadline(time.Now()) // abort any in-flight read/write immediately
+		case <-watchDone:
+		}
+	}()
+
 	body := json.RawMessage(payload)
 	if len(body) == 0 {
 		body = jsonNull
 	}
 	req := wireRequest{Token: c.token, Subcommand: subcommand, Payload: body}
 	if err := json.NewEncoder(c.conn).Encode(req); err != nil {
+		if ctx.Err() != nil {
+			return nil, 0, fmt.Errorf("core: send %s request: %w", subcommand, ctx.Err())
+		}
 		return nil, 0, fmt.Errorf("core: send %s request: %w", subcommand, err)
 	}
 	var resp wireResponse
 	if err := json.NewDecoder(c.conn).Decode(&resp); err != nil {
+		if ctx.Err() != nil {
+			return nil, 0, fmt.Errorf("core: read %s reply: %w", subcommand, ctx.Err())
+		}
 		return nil, 0, fmt.Errorf("core: read %s reply: %w", subcommand, err)
 	}
 	if string(resp.Reply) == "null" {

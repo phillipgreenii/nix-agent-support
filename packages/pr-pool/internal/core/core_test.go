@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -78,13 +79,13 @@ func TestSocketRoundTrip_IngestEvent(t *testing.T) {
 	dir := shortDir(t)
 	svc, ref := startService(t, dir)
 
-	client, err := Dial(ref)
+	client, err := Dial(ref, DefaultProbeTimeout)
 	if err != nil {
 		t.Fatalf("Dial: %v", err)
 	}
 	defer func() { _ = client.Close() }()
 
-	reply, code, err := client.Call(SubcommandIngestEvent, []byte(oneEventRequest))
+	reply, code, err := client.Call(context.Background(), SubcommandIngestEvent, []byte(oneEventRequest), CallOptions{})
 	if err != nil {
 		t.Fatalf("Call: %v", err)
 	}
@@ -126,12 +127,12 @@ func TestSocketAndInProcessTransportsAgree(t *testing.T) {
 
 			// Over the socket, against a fresh core with the same empty queue.
 			_, ref := startService(t, shortDir(t))
-			client, err := Dial(ref)
+			client, err := Dial(ref, DefaultProbeTimeout)
 			if err != nil {
 				t.Fatalf("Dial: %v", err)
 			}
 			defer func() { _ = client.Close() }()
-			gotReply, gotCode, err := client.Call(SubcommandIngestEvent, []byte(req))
+			gotReply, gotCode, err := client.Call(context.Background(), SubcommandIngestEvent, []byte(req), CallOptions{})
 			if err != nil {
 				t.Fatalf("Call: %v", err)
 			}
@@ -176,14 +177,14 @@ func TestSocket_ConcurrentCallers(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			client, err := Dial(ref)
+			client, err := Dial(ref, DefaultProbeTimeout)
 			if err != nil {
 				t.Errorf("Dial: %v", err)
 				return
 			}
 			defer func() { _ = client.Close() }()
 			req := `{"schemaVersion":"1","id":"trk-` + string(rune('a'+i)) + `","events":[{"id":"e` + string(rune('a'+i)) + `","type":"t"}]}`
-			_, code, err := client.Call(SubcommandIngestEvent, []byte(req))
+			_, code, err := client.Call(context.Background(), SubcommandIngestEvent, []byte(req), CallOptions{})
 			if err != nil {
 				t.Errorf("Call: %v", err)
 				return
