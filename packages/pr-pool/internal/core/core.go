@@ -526,6 +526,8 @@ func (s *Service) Serve(subcommand string, stdin io.Reader, stdout io.Writer) in
 		return s.handleIngestEvent(stdin, stdout)
 	case SubcommandSelfStatus:
 		return s.handleSelfStatus(stdin, stdout)
+	case SubcommandMonRead:
+		return s.handleMonRead(stdin, stdout)
 	default:
 		// `session-status` deliberately lands HERE, as an unknown subcommand. It was
 		// dropped 2026-07-28: pr-pool consumes no post-accept session outcome, so the
