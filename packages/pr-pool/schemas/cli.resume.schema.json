@@ -1,0 +1,11 @@
+{
+  "$id": "cli.resume",
+  "title": "INTF-CLI socket resume verb (INV-LIFE-2, Task 3.9): the pause counterpart — a caller that already holds a connection to a running core resumes one of the two named gates without ever causing a core to start (ADR 0036). Omitting `gate` defaults to quota_paused, the same default cmd/pr-pool's file-direct `resume [<gate>]` subcommand uses.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion"],
+  "properties": {
+    "schemaVersion": { "const": "1" },
+    "gate": { "type": "string", "enum": ["quota_paused", "cicd_down"] }
+  }
+}

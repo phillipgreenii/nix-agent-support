@@ -575,6 +575,10 @@ func (s *Service) Serve(subcommand string, stdin io.Reader, stdout io.Writer) in
 		return s.handleStatus(stdin, stdout)
 	case SubcommandRegister:
 		return s.handleRegister(stdin, stdout)
+	case SubcommandPause:
+		return s.handlePause(stdin, stdout)
+	case SubcommandResume:
+		return s.handleResume(stdin, stdout)
 	default:
 		// `session-status` deliberately lands HERE, as an unknown subcommand. It was
 		// dropped 2026-07-28: pr-pool consumes no post-accept session outcome, so the
@@ -619,6 +623,143 @@ const (
 // itself, which is what cmd/pr-pool's discriminateReply does with this
 // constant).
 const ErrorReplySchema = "cli.error"
+
+// SubcommandPause / SubcommandResume are the INTF-CLI socket verbs (Task
+// 3.9) a caller that ALREADY holds a connection to a running core uses to
+// pause or resume one of the two INV-LIFE-2 named gates. They are the
+// socket-verb counterpart to cmd/pr-pool's file-direct `pr-pool pause` /
+// `pr-pool resume` subcommands (Task 1.2b, ADR 0036): those write the gate
+// FILE directly and never touch a running core; these instead update the
+// SAME core's own published gate-observation cell (ObserveGateFromSocketVerb,
+// Task 3.5, status.go) — the cell the `status` verb (Task 3.8) already
+// reads live. Per ADR 0036, neither verb ever causes a core to start, and
+// neither writes the gate FILE itself: the drive loop's own periodic file
+// read (ObserveGateFromTick, cmd/pr-pool's run.go) is what still governs
+// Orchestrator.Gated()'s actual dispatch-suspending effect — wiring a
+// socket-verb write through to that file, and any client-side admission
+// control over these verbs, is the client transport's concern (Task 3.10),
+// out of this task's Files.
+const (
+	SubcommandPause  = "pause"
+	SubcommandResume = "resume"
+)
+
+// The message types backing the pause/resume subcommands.
+const (
+	PauseRequestSchema  = "cli.pause"
+	PauseReplySchema    = "cli.pause-reply"
+	ResumeRequestSchema = "cli.resume"
+	ResumeReplySchema   = "cli.resume-reply"
+)
+
+// GateQuotaPaused / GateCICDDown are the two named gates INV-LIFE-2 defines,
+// spelled to match the wire-level vocabulary the drive loop's own gate
+// observation already uses (cmd/pr-pool's gateTickKeyQuotaPaused /
+// gateTickKeyCICDDown, and this package's own status_test.go literal
+// "quota_paused") — the SAME two gates cmd/pr-pool/gates_cmd.go's
+// file-direct pause/resume subcommands manage under their own,
+// differently-spelled CLI vocabulary (gateQuotaPaused = "quota-paused" /
+// gateCICDDown = "cicd-down"). This package never imports that one (no
+// cross-package reach, Task 3.5 Contract), so the two vocabularies are kept
+// in sync by convention and tests, not a shared constant.
+const (
+	GateQuotaPaused = "quota_paused"
+	GateCICDDown    = "cicd_down"
+)
+
+// defaultGate is the gate a pause/resume request names when it omits
+// "gate" — the SAME default cmd/pr-pool's file-direct `pause [<gate>]` /
+// `resume [<gate>]` subcommands use (gates_cmd.go: "Omitting a gate name...
+// defaults to quota-paused").
+const defaultGate = GateQuotaPaused
+
+// handlePause runs the `pause` socket verb (Task 3.9): idempotent — pausing
+// an already-paused gate is a no-op SUCCESS that MUST NOT rewrite the
+// gate's recorded mtime (Task 3.9 Binding decisions: mtime is the
+// operator-visible "since" a gate has been set, so a spurious rewrite on
+// re-pause is a real regression). It reuses Task 1.2b's pauseGate/
+// resumeGate BEHAVIOR — idempotent, mtime-preserving on re-toggle — over
+// the SAME published gate cell Task 3.5 built (ObserveGateFromSocketVerb),
+// rather than calling those functions directly: they are unexported in
+// cmd/pr-pool (package main), which depends on this package, never the
+// reverse.
+func (s *Service) handlePause(stdin io.Reader, stdout io.Writer) int {
+	return s.handleGateToggle(stdin, stdout, true, PauseRequestSchema, "pause")
+}
+
+// handleResume runs the `resume` socket verb (Task 3.9): pause's
+// counterpart — clearing gate is idempotent the same way.
+func (s *Service) handleResume(stdin io.Reader, stdout io.Writer) int {
+	return s.handleGateToggle(stdin, stdout, false, ResumeRequestSchema, "resume")
+}
+
+// handleGateToggle is pause/resume's shared body: decode+validate the
+// request, resolve which named gate it targets (defaultGate when omitted —
+// the request schema's own enum already rejects anything else), and record
+// the idempotent target state via ObserveGateFromSocketVerb — which per its
+// own doc always wins for the ONE gate it names over an older-timestamped
+// concurrent drive-loop tick observation
+// (TestGateDeletedExternallyDuringToggle, TestThreeWayGateRace): the
+// two-cell design (Task 3.5) this concurrency test matrix proves
+// load-bearing. The composed reply's own shape is enforced by
+// PauseReplySchema/ResumeReplySchema at the CALLER (test) side, the same
+// way handleStatus's composeStatusReply is never self-checked against
+// StatusReplySchema in production either.
+func (s *Service) handleGateToggle(stdin io.Reader, stdout io.Writer, pause bool, requestSchema, verb string) int {
+	data, err := io.ReadAll(stdin)
+	if err != nil {
+		writeBody(stdout, errorReply(verb+": read request: "+err.Error()))
+		return conformance.ExitError
+	}
+	if err := conformance.CheckBytes(requestSchema, data); err != nil {
+		writeBody(stdout, errorReply(verb+": "+err.Error()))
+		return conformance.ExitError
+	}
+	var req struct {
+		Gate string `json:"gate"`
+	}
+	if err := json.Unmarshal(data, &req); err != nil {
+		// Unreachable once CheckBytes has passed — see handleStatus's identical note.
+		writeBody(stdout, errorReply(verb+": malformed request: "+err.Error()))
+		return conformance.ExitError
+	}
+	gate := req.Gate
+	if gate == "" {
+		gate = defaultGate
+	}
+
+	now := time.Now()
+	gates, _ := s.GateSnapshot()
+	existing := gates[gate]
+	var info GateInfo
+	switch {
+	case pause && existing.Set:
+		info = existing // already paused: no-op, preserve the original mtime/owner
+	case pause:
+		info = GateInfo{Set: true, Mtime: now}
+	case !existing.Set:
+		info = existing // already resumed: no-op
+	default:
+		info = GateInfo{} // resumed: cleared
+	}
+	s.ObserveGateFromSocketVerb(now, gate, info)
+
+	reply := map[string]any{
+		"schemaVersion": schemas.SchemaVersion,
+		"gate":          gate,
+		"set":           info.Set,
+	}
+	if !info.Mtime.IsZero() {
+		reply["mtime"] = info.Mtime.UTC().Format(time.RFC3339Nano)
+	}
+	body, err := json.Marshal(reply)
+	if err != nil { // unreachable: reply holds only JSON-safe scalars
+		writeBody(stdout, errorReply(verb+": marshal reply: "+err.Error()))
+		return conformance.ExitError
+	}
+	writeBody(stdout, body)
+	return conformance.ExitOK
+}
 
 // activityReadWindow bounds one status reply's activity[] slice. It matches
 // the ring's own DefaultSize (Task 3.4) rather than its smaller

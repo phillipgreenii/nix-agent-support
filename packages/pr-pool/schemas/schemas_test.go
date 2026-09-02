@@ -283,6 +283,7 @@ func TestRegistryLoadsAllInterfaces(t *testing.T) {
 		"store.request", "store.reply",
 		"cli.ingest-event", "cli.ingest-event-reply", "cli.push-inject", "cli.status", "cli.status-reply",
 		"cli.self-status", "cli.self-status-reply", "cli.error", "cli.register", "cli.register-reply",
+		"cli.pause", "cli.pause-reply", "cli.resume", "cli.resume-reply",
 	}
 	for _, name := range want {
 		if !Has(name) {

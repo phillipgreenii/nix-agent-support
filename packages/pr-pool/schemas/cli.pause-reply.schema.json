@@ -1,0 +1,13 @@
+{
+  "$id": "cli.pause-reply",
+  "title": "INTF-CLI socket pause verb reply: the resolved gate and its state after the call — idempotent, so a re-pause reports the SAME mtime as the first pause, never a rewritten one.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "gate", "set"],
+  "properties": {
+    "schemaVersion": { "const": "1" },
+    "gate": { "type": "string", "enum": ["quota_paused", "cicd_down"] },
+    "set": { "type": "boolean" },
+    "mtime": { "type": "string" }
+  }
+}

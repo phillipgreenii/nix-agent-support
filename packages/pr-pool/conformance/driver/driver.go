@@ -239,6 +239,26 @@ var negativeMatrix = map[string][]negativeCase{
 		{"accepted wrong type", `{"schemaVersion":"1","accepted":"yes","callback":"","selfStatusCallback":"c"}`},
 		{"missing selfStatusCallback", `{"schemaVersion":"1","accepted":true,"callback":""}`},
 	},
+	"cli.pause": {
+		{"schemaVersion const mismatch", `{"schemaVersion":"9"}`},
+		{"gate out of enum", `{"schemaVersion":"1","gate":"bogus-gate"}`},
+		{"gate wrong type", `{"schemaVersion":"1","gate":5}`},
+	},
+	"cli.pause-reply": {
+		{"missing set", `{"schemaVersion":"1","gate":"quota_paused"}`},
+		{"set wrong type", `{"schemaVersion":"1","gate":"quota_paused","set":"yes"}`},
+		{"gate out of enum", `{"schemaVersion":"1","gate":"bogus-gate","set":true}`},
+	},
+	"cli.resume": {
+		{"schemaVersion const mismatch", `{"schemaVersion":"9"}`},
+		{"gate out of enum", `{"schemaVersion":"1","gate":"bogus-gate"}`},
+		{"gate wrong type", `{"schemaVersion":"1","gate":5}`},
+	},
+	"cli.resume-reply": {
+		{"missing set", `{"schemaVersion":"1","gate":"quota_paused"}`},
+		{"set wrong type", `{"schemaVersion":"1","gate":"quota_paused","set":"no"}`},
+		{"gate out of enum", `{"schemaVersion":"1","gate":"bogus-gate","set":false}`},
+	},
 }
 
 // invokeMonRead runs the mon.read (INTF-MON pull direction, Task 3.6)
