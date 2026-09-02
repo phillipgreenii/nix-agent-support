@@ -131,6 +131,40 @@ func TestRoute_status(t *testing.T) {
 	}
 }
 
+// renderStatusText's ACTIVITY header carries a dropped-entries note iff the
+// reply's activityDropped is true — mirroring the GATES staleSuffix pattern,
+// tested directly against a hand-built statusReply the way TestGatesAreStale
+// does (bead pg2-vtuou).
+func TestRenderStatusText_ActivityDroppedNote(t *testing.T) {
+	base := statusReply{
+		Activity: []struct {
+			Seq       uint64 `json:"seq"`
+			StartedAt string `json:"startedAt"`
+			Type      string `json:"type"`
+			Outcome   string `json:"outcome"`
+		}{{Seq: 4, Type: "review-requested", Outcome: "delivered"}},
+	}
+	cases := []struct {
+		name    string
+		dropped bool
+		want    string
+	}{
+		{"not dropped", false, "ACTIVITY (last 10):\n"},
+		{"dropped", true, "ACTIVITY (last 10) (dropped: entries evicted since your last read):\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			st := base
+			st.ActivityDropped = tc.dropped
+			var out strings.Builder
+			renderStatusText(&out, "/s", st)
+			if !strings.Contains(out.String(), tc.want) {
+				t.Fatalf("stdout = %q, want it to contain %q", out.String(), tc.want)
+			}
+		})
+	}
+}
+
 // gatesAreStale: the marker fires only when a tick interval is known AND
 // gatesObservedAt genuinely predates lastTickAt by more than it.
 func TestGatesAreStale(t *testing.T) {

@@ -132,8 +132,16 @@ type statusReply struct {
 		Type      string `json:"type"`
 		Outcome   string `json:"outcome"`
 	} `json:"activity"`
-	LastTickAt     string `json:"lastTickAt"`
-	TickIntervalMs int    `json:"tickIntervalMs"`
+	// ActivityDropped reports whether entries strictly between the request's
+	// `since` cursor and what the ring now retains were already evicted
+	// before this read (internal/activity.Ring.Read's own doc; bead
+	// pg2-vtuou). This subcommand never sends a nonzero `since` (see
+	// runStatus's doc), so it is always false through this CLI today — the
+	// field exists for a future since-cursor caller (Task 4.0's TUI) and for
+	// parity with the wire contract.
+	ActivityDropped bool   `json:"activityDropped"`
+	LastTickAt      string `json:"lastTickAt"`
+	TickIntervalMs  int    `json:"tickIntervalMs"`
 }
 
 type registrationView struct {
@@ -220,7 +228,11 @@ func renderStatusText(w io.Writer, socket string, st statusReply) {
 		}
 	})
 
-	renderSection(w, "ACTIVITY (last 10)", len(st.Activity), func() {
+	activityHeader := "ACTIVITY (last 10)"
+	if st.ActivityDropped {
+		activityHeader += " (dropped: entries evicted since your last read)"
+	}
+	renderSection(w, activityHeader, len(st.Activity), func() {
 		start := 0
 		if n := len(st.Activity); n > activityRenderLimit {
 			start = n - activityRenderLimit

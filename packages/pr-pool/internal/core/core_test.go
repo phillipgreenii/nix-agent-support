@@ -335,6 +335,88 @@ func TestServeStatus_ComposesLiveState(t *testing.T) {
 	}
 }
 
+// TestServeStatus_ActivityDroppedFalseWhenNothingEvicted proves the reply's
+// activityDropped field is false whenever the ring has not yet been asked
+// to skip past anything it discarded — the since==0 (omitted-cursor) case
+// Ring.Read documents as "always false", and the ordinary case where a
+// non-zero since still names an entry the ring still retains.
+func TestServeStatus_ActivityDroppedFalseWhenNothingEvicted(t *testing.T) {
+	ring := activity.New(8)
+	ring.Append(activity.Entry{Type: "review-requested", Outcome: "delivered"}) // seq=1
+	svc := startedServiceForStatus(t, ring)
+
+	// since omitted (statusRequest): the zero-value/no-cursor case.
+	reply, code := serveStatus(t, svc, statusRequest)
+	if code != conformance.ExitOK {
+		t.Fatalf("exit = %d, want 0; reply=%v", code, reply)
+	}
+	if err := conformance.Check(StatusReplySchema, reply); err != nil {
+		t.Fatalf("reply failed its own schema: %v", err)
+	}
+	if reply["activityDropped"] != false {
+		t.Fatalf("activityDropped = %v, want false (since omitted, nothing to have dropped)", reply["activityDropped"])
+	}
+
+	// since=1 names the one retained entry itself — nothing between since and
+	// what's retained was ever evicted.
+	reply, code = serveStatus(t, svc, `{"schemaVersion":"1","since":1}`)
+	if code != conformance.ExitOK {
+		t.Fatalf("exit = %d, want 0; reply=%v", code, reply)
+	}
+	if reply["activityDropped"] != false {
+		t.Fatalf("activityDropped = %v, want false (since names a still-retained entry)", reply["activityDropped"])
+	}
+}
+
+// TestServeStatus_ActivityDroppedFalseWithNoRing proves activityDropped
+// defaults to false (present, not merely absent) when the service carries no
+// activity ring at all — mirroring how the `activity` array itself defaults
+// to empty rather than being omitted.
+func TestServeStatus_ActivityDroppedFalseWithNoRing(t *testing.T) {
+	svc := startedServiceForStatus(t, nil)
+	reply, code := serveStatus(t, svc, statusRequest)
+	if code != conformance.ExitOK {
+		t.Fatalf("exit = %d, want 0; reply=%v", code, reply)
+	}
+	if err := conformance.Check(StatusReplySchema, reply); err != nil {
+		t.Fatalf("reply failed its own schema: %v", err)
+	}
+	if reply["activityDropped"] != false {
+		t.Fatalf("activityDropped = %v, want false with no ring configured", reply["activityDropped"])
+	}
+	if activityEntries, _ := reply["activity"].([]any); len(activityEntries) != 0 {
+		t.Fatalf("activity = %v, want empty with no ring configured", reply["activity"])
+	}
+}
+
+// TestServeStatus_ActivityDroppedTrueAfterEviction proves the eviction
+// signal actually crosses the wire: a ring whose capacity is exceeded, read
+// with a since cursor older than the oldest entry it still retains, reports
+// activityDropped=true (Ring.Read's "since < oldest-retained" case).
+func TestServeStatus_ActivityDroppedTrueAfterEviction(t *testing.T) {
+	ring := activity.New(2) // tiny capacity: easy to overrun
+	for i := 0; i < 5; i++ {
+		ring.Append(activity.Entry{Type: "review-requested", Outcome: "delivered"})
+	}
+	// Capacity 2, 5 appends (seq 1..5): only seq 4 and 5 are still retained.
+	svc := startedServiceForStatus(t, ring)
+
+	reply, code := serveStatus(t, svc, `{"schemaVersion":"1","since":1}`)
+	if code != conformance.ExitOK {
+		t.Fatalf("exit = %d, want 0; reply=%v", code, reply)
+	}
+	if err := conformance.Check(StatusReplySchema, reply); err != nil {
+		t.Fatalf("reply failed its own schema: %v", err)
+	}
+	if reply["activityDropped"] != true {
+		t.Fatalf("activityDropped = %v, want true (since=1 predates the oldest retained seq=4)", reply["activityDropped"])
+	}
+	activityEntries, _ := reply["activity"].([]any)
+	if len(activityEntries) != 2 {
+		t.Fatalf("activity = %v, want exactly the 2 still-retained entries", reply["activity"])
+	}
+}
+
 // alwaysAcceptListener accepts every event of the given type — the minimal
 // eventqueue.Listener stub TestServeStatus_ThreeWayConcurrency needs to
 // drive real Dispatch() acceptances; core_test.go otherwise never needs a

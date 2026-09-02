@@ -696,6 +696,10 @@ func (s *Service) composeStatusReply(since uint64) map[string]any {
 		"asOf":      time.Now().UTC().Format(time.RFC3339Nano),
 		"sources":   []any{},
 		"activity":  []any{},
+		// activityDropped defaults false (no ring, or since==0's "no cursor, no
+		// gap to report" case per Ring.Read's own doc) and is set true below
+		// only when the ring itself reports a gap (bead pg2-vtuou).
+		"activityDropped": false,
 	}
 	if unmatched := s.q.UnmatchedBindings(s.declaredTypesSorted()); len(unmatched) > 0 {
 		reply["unmatchedBindings"] = unmatched
@@ -707,8 +711,9 @@ func (s *Service) composeStatusReply(since uint64) map[string]any {
 	}
 	if s.activityRing != nil {
 		buf := make([]activity.Entry, activityReadWindow)
-		n, _ := s.activityRing.Read(since, buf)
+		n, dropped := s.activityRing.Read(since, buf)
 		reply["activity"] = statusActivity(buf[:n])
+		reply["activityDropped"] = dropped
 	}
 	if tick != nil {
 		core := reply["core"].(map[string]any)

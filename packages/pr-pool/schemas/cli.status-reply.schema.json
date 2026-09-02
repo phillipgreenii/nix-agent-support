@@ -136,6 +136,7 @@
         }
       }
     },
+    "activityDropped": { "type": "boolean" },
     "asOf": { "type": "string" },
     "lastTickAt": { "type": "string" },
     "snapshotAt": { "type": "string" },

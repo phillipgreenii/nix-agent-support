@@ -50,6 +50,7 @@
       "outcome": "delivered"
     }
   ],
+  "activityDropped": false,
   "asOf": "2026-09-01T00:05:31Z",
   "lastTickAt": "2026-09-01T00:05:00Z",
   "snapshotAt": "2026-09-01T00:05:00Z",

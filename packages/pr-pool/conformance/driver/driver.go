@@ -208,6 +208,7 @@ var negativeMatrix = map[string][]negativeCase{
 		{"core carries an unknown field", `{"schemaVersion":"1","deliveries":[],"queues":[],"config":{"sources":0,"handlers":0},"core":{"state":"started","pid":1,"extra":"x"}}`},
 		{"gate missing set", `{"schemaVersion":"1","deliveries":[],"queues":[],"config":{"sources":0,"handlers":0},"gates":[{"name":"quota_paused"}]}`},
 		{"activity entry missing outcome", `{"schemaVersion":"1","deliveries":[],"queues":[],"config":{"sources":0,"handlers":0},"activity":[{"seq":1,"startedAt":"2026-09-01T00:00:00Z","type":"t"}]}`},
+		{"activityDropped wrong type", `{"schemaVersion":"1","deliveries":[],"queues":[],"config":{"sources":0,"handlers":0},"activityDropped":"yes"}`},
 	},
 	"cli.status": {
 		{"schemaVersion const mismatch", `{"schemaVersion":"9"}`},
