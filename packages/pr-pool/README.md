@@ -82,7 +82,13 @@ The human-output form orders its sections for incident scanning — header
 (core/socket/config/gates/mode), then `QUEUES`, `DELIVERIES (live)`,
 `ACTIVITY (last 10)`, `LISTENERS`, `SOURCES`, `UNMATCHED BINDINGS` — and never
 omits a section silently: an empty one renders an explicit `(none)` marker
-instead. `--json` emits the `cli.status-reply` wire schema verbatim.
+instead. `--json` emits the `cli.status-reply` wire schema verbatim, which now
+also carries `activityDropped`: true iff a `since`-cursor request named a
+cursor older than what the ring still retains, i.e. some activity entries in
+that gap were already evicted (`internal/activity.Ring.Read`). This CLI's own
+`status` call never sends `since` (see `runStatus`'s doc), so `activityDropped`
+is always `false` through this subcommand today — the field exists for a
+future since-cursor caller (Task 4.0's TUI).
 
 Exit codes match every other operator subcommand: `0` ok, `2` usage, `1`
 everything else (`9` is reserved for the pre-accept busy decline, which this
