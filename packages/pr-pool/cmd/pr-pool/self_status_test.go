@@ -67,6 +67,30 @@ func TestCallCore_SelfStatus_RelaysUnknownParticipant(t *testing.T) {
 	}
 }
 
+// TestCallCore_SelfStatus_DiscriminatesErrorBeforeReplySchema proves the
+// self-status client path (register row bead pg2-o9r6a; Task 3.8 Binding
+// decisions, Step 7) recognizes a protocol-level refusal (bad token) as the
+// error envelope BEFORE attempting to validate the raw reply against
+// cli.self-status-reply — matching ingest-event's identical proof, since
+// both share callCore's one discrimination call site.
+func TestCallCore_SelfStatus_DiscriminatesErrorBeforeReplySchema(t *testing.T) {
+	dir := shortDir(t)
+	svc := startCore(t, dir)
+	badRef := core.Ref{Socket: svc.Ref().Socket, Token: "wrong-token"}
+
+	var stdout, stderr strings.Builder
+	code := callCore(&stdout, &stderr, badRef, core.SubcommandSelfStatus, []byte(testSelfStatusRequest))
+	if code != conformance.ExitError {
+		t.Fatalf("exit = %d, want %d", code, conformance.ExitError)
+	}
+	if !strings.Contains(stdout.String(), `"error"`) {
+		t.Fatalf("stdout = %q, want the relayed error envelope (the wire contract is unchanged)", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "unauthorized") {
+		t.Fatalf("stderr = %q, want the discriminated protocol refusal named", stderr.String())
+	}
+}
+
 // A usage error on the callback subcommand exits 2, never BUSY (ADR 0042's
 // Decision) — the same guarantee ingest-event carries.
 func TestRunSelfStatus_UsageErrorExitsUsageNotBusy(t *testing.T) {

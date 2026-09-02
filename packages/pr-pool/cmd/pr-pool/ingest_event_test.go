@@ -107,6 +107,31 @@ func TestCallCore_RelaysRejection(t *testing.T) {
 	}
 }
 
+// TestCallCore_IngestEvent_DiscriminatesErrorBeforeReplySchema proves the
+// ingest-event client path (register row bead pg2-o9r6a; Task 3.8 Binding
+// decisions, Step 7) recognizes a protocol-level refusal (bad token) as the
+// error envelope BEFORE attempting to validate the raw reply against
+// cli.ingest-event-reply — callCore's relayed stdout/exit code (the
+// manager-callback wire contract) are unchanged; the discrimination surfaces
+// as an ADDITIONAL stderr diagnostic naming the refusal distinctly.
+func TestCallCore_IngestEvent_DiscriminatesErrorBeforeReplySchema(t *testing.T) {
+	dir := shortDir(t)
+	svc := startCore(t, dir)
+	badRef := core.Ref{Socket: svc.Ref().Socket, Token: "wrong-token"}
+
+	var stdout, stderr strings.Builder
+	code := callCore(&stdout, &stderr, badRef, core.SubcommandIngestEvent, []byte(testIngestRequest))
+	if code != conformance.ExitError {
+		t.Fatalf("exit = %d, want %d", code, conformance.ExitError)
+	}
+	if !strings.Contains(stdout.String(), `"error"`) {
+		t.Fatalf("stdout = %q, want the relayed error envelope (the wire contract is unchanged)", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "unauthorized") {
+		t.Fatalf("stderr = %q, want the discriminated protocol refusal named", stderr.String())
+	}
+}
+
 // With no core running, the CLI FAILS with a "no running core" diagnostic and a
 // remedy — it never starts one (ADR 0036).
 func TestCallCore_NoRunningCoreIsAnError(t *testing.T) {
