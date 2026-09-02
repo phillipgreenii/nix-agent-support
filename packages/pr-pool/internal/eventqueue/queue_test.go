@@ -110,6 +110,7 @@ func (o *recordingObserver) OnUnconsumedExpired(t string) {
 // listenerID/reason, but every existing assertion against o.declined checks
 // evtType alone, so this keeps their meaning unchanged).
 func (o *recordingObserver) OnDeclined(t, _, _ string) { o.declined = append(o.declined, t) }
+
 func (o *recordingObserver) OnDispatchFailure(t string) {
 	o.dispatchFailed = append(o.dispatchFailed, t)
 }
