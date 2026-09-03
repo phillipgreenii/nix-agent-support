@@ -24,8 +24,14 @@ otherwise.
    `--set-metadata`, comment one line on the docket that a reconcile is owed, and stop.
 3. **Read the packet content once** (`bd show <packet>`). Work from it. Read the files it
    names and anything under `Expected additional reads:`; that is planned, not escalation.
-4. **Implement**, then run the packet's Validation commands exactly (respect their stated
-   timeouts). Count your validation retries.
+4. **Implement**, then run the packet's Validation commands exactly. A command that fits its
+   stated timeout runs in foreground Bash with that timeout. A command that legitimately
+   outlives one turn runs via `run_in_background`, never `Monitor` — `Monitor` delivers a
+   separate notification per output line and cannot block a turn, so it cannot satisfy "wait
+   until this one thing finishes." If you must end your turn before a backgrounded validation
+   resolves, the report is NEVER a bare status line ("waiting", "still running") with no other
+   content: it MUST include everything already committed (the commit SHA) plus the exact
+   pending command and how to check its result. Count your validation retries.
 5. **When stuck**, in order: (a) re-read your packet — is it actually answered?; (b) re-check
    `pd_stale` (a reconcile may be pending), then read the docket design and RECORD that you
    did (it is the `escalation-reads` count — each one is a curation-defect signal, not a

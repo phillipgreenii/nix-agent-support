@@ -271,8 +271,11 @@ proceeding on currently loaded text (direct interactive invocation).`)
 
    Its own agent file explicitly leaves isolation/landing/cleanup/claim-hygiene "environment
    conventions" to whoever dispatches it, so the brief ALSO carries the UNCURATED PATH's
-   "standing constraints" bullet unchanged (timeouts / `run_in_background` for builds only,
-   never for git commits; commit-then-gate ordering; report fully in ONE turn).
+   commit-then-gate ordering constraint unchanged (timeouts / `run_in_background` for builds
+   only, never for git commits; commit BEFORE running any standalone gate). Do NOT also
+   paraphrase report-content requirements into the brief — its own procedure (step 4) already
+   states directly how to run a validation command that outlives a turn and what its report
+   must contain if it ends before that resolves.
 
    **UNCURATED PATH.** The brief is a POINTER, not a payload. It MUST contain exactly:
    - the bead id, with the instruction to run `bd show <id>` ITSELF for the full
