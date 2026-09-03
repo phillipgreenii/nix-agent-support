@@ -289,6 +289,208 @@ func TestPRCreate_NoDraftFlag(t *testing.T) {
 	}
 }
 
+// ----------------------------------------------------------------------
+// --wip (pg2-4dz88.8.6)
+// ----------------------------------------------------------------------
+
+// TestPRCreate_WIP_ForcesDraft pins the acceptance criterion: `pg-pr pr
+// create --wip` forces the created PR into draft state
+// (fv.createCalls[0].draft == true). This assertion is NOT gated on the
+// pg2-4dz88.8.2 persistence ruling -- it's a pure flag-to-provider-call
+// wire, testable regardless of what (if anything) gets persisted.
+func TestPRCreate_WIP_ForcesDraft(t *testing.T) {
+	resetPRWriteFlags()
+	fv, _ := swapFakes(t)
+	setListStateHome(t)
+
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{
+		"pr", "create",
+		"--repo", "foo/bar",
+		"--title", "WIP PR",
+		"--head", "feat/wip",
+		"--body", "hello",
+		"--wip",
+	})
+
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("execute: %v (stderr=%s)", err, stderr.String())
+	}
+	if len(fv.createCalls) != 1 || !fv.createCalls[0].draft {
+		t.Fatalf("expected draft=true with --wip; got %+v", fv.createCalls)
+	}
+}
+
+// TestPRCreate_WIP_With_NoDraft pins the resolution this leaf's own design
+// settled: --wip wins over --no-draft when both are passed -- an explicit
+// --wip request is a stronger, more specific signal than the general
+// --no-draft escape hatch. The ONE outcome is draft=true, never an error and
+// never draft=false.
+func TestPRCreate_WIP_With_NoDraft(t *testing.T) {
+	resetPRWriteFlags()
+	fv, _ := swapFakes(t)
+	setListStateHome(t)
+
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{
+		"pr", "create",
+		"--repo", "foo/bar",
+		"--title", "WIP PR",
+		"--head", "feat/wip",
+		"--body", "hello",
+		"--wip",
+		"--no-draft",
+	})
+
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("execute: %v (stderr=%s)", err, stderr.String())
+	}
+	if len(fv.createCalls) != 1 || !fv.createCalls[0].draft {
+		t.Fatalf("expected --wip to win over --no-draft (draft=true); got %+v", fv.createCalls)
+	}
+}
+
+// TestPRCreate_NoWIP_StillDefaultsDraft is the regression guard: passing
+// neither --wip nor --no-draft still defaults to draft, unperturbed by this
+// leaf's change. Mirrors TestPRCreate_DefaultDraft's assertion but is kept
+// as its own named test per this leaf's testing plan.
+func TestPRCreate_NoWIP_StillDefaultsDraft(t *testing.T) {
+	resetPRWriteFlags()
+	fv, _ := swapFakes(t)
+
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{
+		"pr", "create",
+		"--repo", "foo/bar",
+		"--title", "Plain PR",
+		"--head", "feat/plain",
+		"--body", "hello",
+	})
+
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("execute: %v (stderr=%s)", err, stderr.String())
+	}
+	if len(fv.createCalls) != 1 || !fv.createCalls[0].draft {
+		t.Fatalf("expected draft=true with neither flag; got %+v", fv.createCalls)
+	}
+}
+
+// TestPRCreate_WIP_Persisted pins the pg2-4dz88.8.2 ruling's persistence
+// path: `pr create --wip` results in a pull_request row existing (via
+// UpsertPR) with wip=true immediately after creation, with no error, before
+// any sync tick runs. It also documents the accepted gap (not a bug): the
+// enrichment fields on that row stay zero-valued until the next sync tick
+// overwrites them.
+func TestPRCreate_WIP_Persisted(t *testing.T) {
+	resetPRWriteFlags()
+	fv, _ := swapFakes(t)
+	setListStateHome(t)
+	fv.createPR = &api.PR{
+		Number: 5,
+		URL:    "https://example/pr/5",
+		Branch: "feat/wip",
+		Base:   "main",
+		Author: "alice",
+		State:  "open",
+		Body:   "wip body",
+	}
+
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{
+		"pr", "create",
+		"--repo", "foo/bar",
+		"--title", "WIP PR",
+		"--head", "feat/wip",
+		"--body", "wip body",
+		"--wip",
+	})
+
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("execute: %v (stderr=%s)", err, stderr.String())
+	}
+
+	db, err := store.Open(store.DefaultPath())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	row, err := db.GetPR(context.Background(), "foo/bar", 5)
+	if err != nil {
+		t.Fatalf("GetPR: %v", err)
+	}
+	if row == nil {
+		t.Fatal("expected a pull_request row to exist for foo/bar#5 immediately after `pr create --wip`")
+	}
+	if !row.WIP {
+		t.Errorf("expected wip=true; got %v", row.WIP)
+	}
+	if row.Author != "alice" || row.Branch != "feat/wip" || row.Base != "main" ||
+		row.URL != "https://example/pr/5" || row.State != "open" || row.Body != "wip body" {
+		t.Errorf("row does not carry the creation-time fields: %+v", row)
+	}
+	// Ownership is deliberately NOT zero-valued despite the ruling grouping
+	// it with the other enrichment fields -- see persistWIPAtCreation's doc
+	// comment: the column's NOT NULL CHECK constraint has no valid empty
+	// value, and "mine" is the actually-correct value for a PR the CLI
+	// operator just created.
+	if row.Ownership != "mine" {
+		t.Errorf("expected ownership=mine; got %q", row.Ownership)
+	}
+	// Regression: enrichment fields are zero-valued until the next sync
+	// tick recomputes them -- an accepted gap per the ruling, not a bug.
+	if row.Kind != "" || row.Languages != nil || row.Size != "" || row.Urgency != "" ||
+		row.UrgencyScore != 0 || row.UrgencyReasons != nil {
+		t.Errorf("expected zero-valued enrichment fields immediately after creation; got %+v", row)
+	}
+}
+
+// TestPRCreate_WIP_And_GenerateTitle pins --wip working together with
+// --generate-title (pg2-4dz88.8.4, landed): both flags combined generate the
+// title AND force draft=true.
+func TestPRCreate_WIP_And_GenerateTitle(t *testing.T) {
+	resetPRWriteFlags()
+	fv, _ := swapFakes(t)
+	setListStateHome(t)
+	skill := writeStubSkill(t)
+	stubGenerateTitle(t, "Generated Title", nil)
+
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{
+		"pr", "create",
+		"--repo", "foo/bar",
+		"--head", "feat/wip-title",
+		"--body", "b",
+		"--wip",
+		"--generate-title",
+		"--agent-cli", "/usr/bin/fake-agent",
+		"--skill-path", skill,
+	})
+
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("execute: %v (stderr=%s)", err, stderr.String())
+	}
+	if len(fv.createCalls) != 1 {
+		t.Fatalf("createCalls: %+v", fv.createCalls)
+	}
+	got := fv.createCalls[0]
+	if got.title != "Generated Title" {
+		t.Errorf("title: got %q want %q", got.title, "Generated Title")
+	}
+	if !got.draft {
+		t.Errorf("expected draft=true with --wip; got draft=false")
+	}
+}
+
 func TestPRCreate_ReviewersAndLabels_PushedToVCS(t *testing.T) {
 	resetPRWriteFlags()
 	fv, fb := swapFakes(t)

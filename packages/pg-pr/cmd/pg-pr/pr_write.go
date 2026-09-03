@@ -14,9 +14,11 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/beadsbridge"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/branch"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/output"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/ownership"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/prlock"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/sync"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/beads"
 	"github.com/spf13/cobra"
 )
@@ -37,6 +39,18 @@ type prWriteFlags struct {
 	reviewers string
 	labels    string
 	noDraft   bool
+
+	// wip forces the created PR into draft state regardless of --no-draft
+	// (pg2-4dz88.8.6) and, per the operator ruling propagated from
+	// pg2-4dz88.8.2 (2026-09-03, Phillip Green II), persists that WIP intent
+	// immediately: after provider.CreatePR succeeds, `pr create` opens the
+	// store itself -- a NEW store-write path this command never had before --
+	// constructs a store.PullRequest from the fields creation actually has,
+	// zero-value enrichment fields included, UpsertPRs it, then calls
+	// SetWIP(true). --wip wins over --no-draft when both are passed: an
+	// explicit --wip request is a stronger, more specific signal than the
+	// general --no-draft escape hatch.
+	wip bool
 
 	// body sources (shared by create + update).
 	body      string
@@ -409,7 +423,9 @@ var prCreateCmd = &cobra.Command{
 	Long: `Open a new pull request via the configured VCS provider.
 
 The PR is created in DRAFT state by default. Pass --no-draft to open a
-ready-for-review PR directly. The PR body may be supplied via --body,
+ready-for-review PR directly, or --wip to force draft and immediately record
+the WIP flag in the store (--wip wins if both are passed). The PR body may be
+supplied via --body,
 --body-file <path> (use - for stdin), --body-stdin, or
 --generate-description (LLM-driven via the pg-pr-write-pr-description
 SKILL; shells out to an agent CLI such as zr-agent). The PR title may be
@@ -476,13 +492,26 @@ func runPRCreate(cmd *cobra.Command, _ []string) error {
 	// gh expects a bare branch name for --base; trim the origin/ prefix.
 	base = strings.TrimPrefix(base, "origin/")
 
+	// --wip wins over --no-draft (see prWriteFlags.wip's doc comment): an
+	// explicit --wip request is a stronger, more specific signal than the
+	// general --no-draft escape hatch. Passing neither still defaults to
+	// draft, unchanged.
 	draft := !prWF.noDraft
+	if prWF.wip {
+		draft = true
+	}
 	reviewers := splitCSV(prWF.reviewers)
 	labels := splitCSV(prWF.labels)
 	provider := vcsProviderFor(repo)
 	pr, err := provider.CreatePR(ctx, repo, draft, title, body, headBranch, base, reviewers, labels)
 	if err != nil {
 		return err
+	}
+
+	if prWF.wip {
+		if werr := persistWIPAtCreation(ctx, repo, pr); werr != nil {
+			return fmt.Errorf("pr create: persist --wip: %w", werr)
+		}
 	}
 
 	// Best-effort: record the merge-request bead. An ORDINARY bd failure here
@@ -542,6 +571,60 @@ func runPRCreate(cmd *cobra.Command, _ []string) error {
 		return werr
 	}
 	return lockErr
+}
+
+// persistWIPAtCreation implements `pr create --wip`'s persistence path, per
+// the operator ruling propagated from pg2-4dz88.8.2 (2026-09-03, Phillip
+// Green II): after provider.CreatePR succeeds, construct a
+// store.PullRequest with the fields creation actually has (repo, number,
+// author, branch, base, URL, state, body) and zero-value enrichment fields
+// (Kind, Languages, Size, Urgency, UrgencyScore, UrgencyReasons), call
+// UpsertPR, then SetWIP(true). This is a NEW store-write path in `pr
+// create` -- it never opened the store before this leaf -- not a new
+// schema/table.
+//
+// Ownership is the ONE field this deliberately does NOT zero-value, despite
+// the ruling grouping it with the other enrichment fields: the
+// pull_request.ownership column is `NOT NULL CHECK (ownership IN ('mine',
+// 'co-owned', 'team'))` (internal/store/migrate.go) with no valid empty
+// value, and that schema predates this leaf and is out of scope to change
+// (the ruling is explicit: "NOT a new schema/table"). Recording
+// ownership.Mine here is also the ACTUALLY CORRECT value, not merely a
+// constraint workaround: `pr create`'s actor is always the operator
+// creating their own new PR (ACTOR-PGPR-OP, per journeys.md's
+// USECASE-PGPR-CREATE) -- there is no scenario where pg-pr's own CLI
+// invocation is opening a PR it should classify as someone else's. Like
+// every other field here, the next sync tick still re-derives Ownership via
+// ownership.Classify and may correct it if that assumption is ever wrong.
+//
+// The resulting row reads enrichment-incomplete (empty Kind/Languages/Size/
+// Urgency) until the next `pg-pr sync` tick recomputes those fields. That
+// gap is accepted by the ruling, not a bug -- see the regression test
+// TestPRCreate_WIP_Persisted's zero-value assertions.
+func persistWIPAtCreation(ctx context.Context, repo string, pr *api.PR) error {
+	db, err := store.Open(store.DefaultPath())
+	if err != nil {
+		return fmt.Errorf("open store: %w", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	if _, err := db.UpsertPR(ctx, store.PullRequest{
+		Repo:      repo,
+		Number:    pr.Number,
+		Ownership: ownership.Mine.String(),
+		Author:    pr.Author,
+		Branch:    pr.Branch,
+		Base:      pr.Base,
+		URL:       pr.URL,
+		State:     pr.State,
+		Body:      pr.Body,
+	}); err != nil {
+		return fmt.Errorf("upsert pr row: %w", err)
+	}
+	if err := db.SetWIP(ctx, repo, pr.Number, true); err != nil {
+		return fmt.Errorf("set wip: %w", err)
+	}
+	return nil
 }
 
 // ----------------------------------------------------------------------
@@ -1116,6 +1199,7 @@ func init() {
 	prCreateCmd.Flags().StringVar(&prWF.reviewers, "reviewers", "", "Comma-separated list of reviewers to assign on the GitHub PR")
 	prCreateCmd.Flags().StringVar(&prWF.labels, "labels", "", "Comma-separated list of labels to apply on the GitHub PR")
 	prCreateCmd.Flags().BoolVar(&prWF.noDraft, "no-draft", false, "Open the PR ready-for-review instead of as a draft")
+	prCreateCmd.Flags().BoolVar(&prWF.wip, "wip", false, "Force the PR into draft state (wins over --no-draft) and persist WIP=true immediately in the store")
 	addRepoFlag(prCreateCmd)
 	addBodyFlags(prCreateCmd)
 	addGenerateDescriptionFlags(prCreateCmd)

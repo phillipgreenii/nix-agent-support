@@ -114,6 +114,10 @@ Extensions:
   not part of this use case — it happens the next time `USECASE-PGPR-SYNC` runs and finds WIP
   false, CI green (configured check-interpreters excluded), no bot disapproval, and no merge
   conflict.
+- 1b. The operator marks the PR work-in-progress at creation time: the PR opens as a draft
+  regardless of any ready-state request, and pg-pr records that WIP intent immediately so it
+  reads back before the next `USECASE-PGPR-SYNC` tick — rather than requiring a separate,
+  after-the-fact WIP toggle.
 
 ### `USECASE-PGPR-SYNC` — sync PR facts from the code host <!-- uuid: 17c96eaf-5307-44c0-bc4f-ed5de759269a -->
 
