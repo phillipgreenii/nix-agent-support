@@ -58,25 +58,47 @@ func TestScreen_String(t *testing.T) {
 	}
 }
 
-// TestView_MainDrillDownModalShareThePlaceholder documents this packet's
-// own out-of-scope boundary (section 8): the zone ladder/banner/dashboard
-// panes that give screenMain its FINAL rendering, plus all drill-down and
-// modal content, are the sibling packets covering Tasks 4.6-4.8. Until
-// then all three render the same minimal placeholder.
-func TestView_MainDrillDownModalShareThePlaceholder(t *testing.T) {
+// TestView_MainDrillDownSharePlaceholder documents this packet's own
+// out-of-scope boundary (section 8): the zone ladder/banner/dashboard
+// panes that give screenMain its FINAL rendering, plus the drill-down
+// screen's own content, are the sibling packets covering Tasks 4.6/4.7.
+// Until then both render the same minimal placeholder. screenModal is
+// deliberately excluded here -- Task 4.8 (this packet) supersedes its own
+// pre-4.8 placeholder with real content; see
+// TestView_ScreenModalRoutesToRenderModal below.
+func TestView_MainDrillDownSharePlaceholder(t *testing.T) {
 	m := newTestModel(nil)
 	m.width, m.height = 80, 24
 
-	var got [3]string
-	for i, s := range []screen{screenMain, screenDrillDown, screenModal} {
+	var got [2]string
+	for i, s := range []screen{screenMain, screenDrillDown} {
 		m.screen = s
 		got[i] = m.View()
 	}
-	if got[0] != got[1] || got[1] != got[2] {
-		t.Fatalf("main/drill-down/modal placeholders differ: %q, %q, %q", got[0], got[1], got[2])
+	if got[0] != got[1] {
+		t.Fatalf("main/drill-down placeholders differ: %q, %q", got[0], got[1])
 	}
 	if got[0] == "" || got[0] == "loading…" {
 		t.Fatalf("main placeholder = %q, want a non-empty, non-loading placeholder", got[0])
+	}
+}
+
+// TestView_ScreenModalRoutesToRenderModal is Task 4.8's own supersession
+// of the pre-4.8 placeholder: screenModal now renders real content
+// (help.go's renderModal), distinct from the main/drill-down placeholder
+// above, driven by whichever ModalKind is active.
+func TestView_ScreenModalRoutesToRenderModal(t *testing.T) {
+	m := newTestModel(nil)
+	m.width, m.height = 80, 24
+	m.screen = screenModal
+	m.activeModal = ModalHelp
+
+	got := m.View()
+	if got == "" || got == "pr-pool: main" {
+		t.Fatalf("screenModal/ModalHelp rendered the old placeholder %q, want real help-modal content", got)
+	}
+	if !strings.Contains(got, "Help") {
+		t.Errorf("screenModal/ModalHelp View() should route through render.HelpModal; got:\n%s", got)
 	}
 }
 

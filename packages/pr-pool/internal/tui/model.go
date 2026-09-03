@@ -29,6 +29,20 @@ import (
 // poll error [design: Task 4.5 Step 1].
 const coreStateStarted = "started"
 
+// ModalKind selects which full-screen modal is currently open while
+// m.screen == screenModal (Task 4.5's screen enum names the coarse
+// "a modal is open" state; ModalKind, Task 4.8's own addition, says WHICH
+// one). Mirrors pa-monitor's own ModalKind (packages/pa-monitor/internal/
+// tui/model.go), with ModalGates added for this package's gates modal.
+type ModalKind int
+
+const (
+	ModalNone ModalKind = iota
+	ModalHelp
+	ModalLegend
+	ModalGates
+)
+
 // Options configures Run, the exported entry point cmd/pr-pool/tui_cmd.go
 // hands off to [design: Task 4.5 Interfaces].
 type Options struct {
@@ -49,6 +63,12 @@ type Options struct {
 	// plain *bytes.Buffer makes Run fail fast on theme detection rather
 	// than starting a program nothing could ever drive to completion.
 	Out io.Writer
+	// Version is this TUI binary's own build identifier (cmd/pr-pool's
+	// `version` var, main.go), named alongside the core's own reported
+	// CoreInfo.Version in the [?] help modal's version pair (Task 4.8,
+	// help.go). Empty falls back to "dev" -- mirrors pa-monitor's own
+	// Options.Version precedent (packages/pa-monitor/internal/tui/model.go).
+	Version string
 }
 
 // Model implements tea.Model: pr-pool's own health grammar rendered over
@@ -89,20 +109,69 @@ type Model struct {
 	// covering Task 4.6 renders. It never changes which screen is showing
 	// [design: Task 4.5 Step 3].
 	pollErrFlagged bool
+
+	// -- Task 4.8: keybindings, gate toggle, modals, flash, error log --
+
+	activeModal       ModalKind
+	modalScrollOffset int
+	// preModalScreen is the screen active before a g/?/l keypress opened a
+	// modal (openModal, keybindings.go), restored by esc. Modal is a peer
+	// screen (screen.go's table), not nested under main -- esc must return
+	// to wherever the operator actually was.
+	preModalScreen screen
+
+	// gateTogglePending is true from the moment P/R fires a ToggleGate RPC
+	// until its gateToggleResultMsg (success or failure) arrives -- the
+	// pending indicator, and the reason no rendered gate state changes
+	// before then (no optimistic flip, ever) [design: Task 4.8 Step 1].
+	gateTogglePending bool
+	// gateToggleStartedAt stamps when the in-flight (or most recently
+	// settled) toggle began. It is the asOf race guard's own threshold: a
+	// pollResultMsg whose reply.AsOf predates it is discarded outright
+	// rather than overwriting the pending/just-toggled gate state [design:
+	// Task 4.8 Step 5]. Zero (its initial value) disables the guard.
+	gateToggleStartedAt time.Time
+
+	// flash / flashLevel / flashUntil back setFlash's TTL flash line
+	// (flash.go): flashUntil is always armed to `now + flashTTL`, so a
+	// later setFlash call can only ever push it further out, never earlier
+	// [design: Task 4.8 Step 4].
+	flash      string
+	flashLevel FlashLevel
+	flashUntil time.Time
+
+	// errorLogger is Task 4.8's ErrorLogger (errorlog.go), lazily
+	// constructed from m.cacheDir the same way pa-monitor's NewModel does.
+	// nil when Options.CacheDir was empty; LogString is nil-safe either
+	// way.
+	errorLogger *ErrorLogger
+
+	// clientVersion is this TUI binary's own build identifier (from
+	// Options.Version, defaulting to "dev"), shown in the [?] modal's
+	// version pair alongside the core's own reported CoreInfo.Version.
+	clientVersion string
 }
 
 // NewModel constructs a Model in its pre-first-poll state (screenLoading).
 // theme is resolved by the caller: Run detects it against the real output;
 // a test may hand in any render.Theme directly.
 func NewModel(opts Options, theme render.Theme) *Model {
-	return &Model{
+	m := &Model{
 		poller:        opts.Poller,
 		pollInterval:  opts.PollInterval,
 		cacheDir:      opts.CacheDir,
 		theme:         theme,
 		discoveryPath: core.RecordPath(config.LogDir()),
 		screen:        screenLoading,
+		clientVersion: opts.Version,
 	}
+	if m.clientVersion == "" {
+		m.clientVersion = "dev"
+	}
+	if opts.CacheDir != "" {
+		m.errorLogger = &ErrorLogger{CacheDir: opts.CacheDir, FileName: "tui-errors.log"}
+	}
+	return m
 }
 
 // Run is internal/tui's exported entry point: cmd/pr-pool/tui_cmd.go's
@@ -139,13 +208,26 @@ func (m *Model) Init() tea.Cmd {
 	return tea.Batch(m.pollNow(), tickCmd(m.pollInterval))
 }
 
-// Update implements tea.Model. This packet reacts only to the poll cycle
-// (pollTickMsg/pollResultMsg/pollErrMsg) and tea.WindowSizeMsg -- every
-// other message (including all keypresses) falls through as a no-op; the
-// sibling packets covering Tasks 4.6-4.8 add the keybindings that extend
-// this switch.
+// Update implements tea.Model. Task 4.5 reacted only to the poll cycle
+// (pollTickMsg/pollResultMsg/pollErrMsg) and tea.WindowSizeMsg; Task 4.8
+// (this packet) adds the keypress dispatch (via keybindings.go's Bindings
+// table) plus the gate-toggle and flash-clear messages its own handlers
+// produce.
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		s := msg.String()
+		for _, b := range Bindings {
+			for _, k := range b.Keys {
+				if k == s {
+					if cmd := b.Handle(m); cmd != nil {
+						return m, cmd
+					}
+					return m, nil
+				}
+			}
+		}
+		// No matching binding -- no-op fall-through.
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -161,6 +243,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case pollErrMsg:
 		m.polling = false
 		m.applyPollErr(msg.err)
+	case gateToggleResultMsg:
+		return m, m.applyGateToggleResult(msg)
+	case flashClearMsg:
+		m.applyFlashClear()
 	}
 	return m, nil
 }
@@ -170,11 +256,30 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // first one, and including one that exits screenNoCore -- lands on
 // screenMain when the core reports "started", screenQuiescing otherwise
 // [design: Task 4.5 (Screen transition table); Task 4.5 Step 1].
+//
+// Task 4.8 adds two refinements on top of that Task 4.5 contract:
+//
+//   - The asOf race guard [design: Task 4.8 Step 5]: while
+//     m.gateToggleStartedAt is armed (a gate toggle is in flight, or has
+//     just settled), a reply whose AsOf predates it is stale relative to
+//     that toggle and is discarded OUTRIGHT -- applying it would silently
+//     overwrite the pending/just-toggled gate state with pre-toggle data.
+//     The next poll will have caught up.
+//   - A keyboard-driven screen (modal or drill-down) survives the poll
+//     cycle: only the underlying reply data refreshes; the screen itself
+//     is left exactly where the operator put it, never yanked back to
+//     main/quiescing by the NEXT tick landing mid-interaction.
 func (m *Model) applyPollResult(reply StatusReply) {
+	if !m.gateToggleStartedAt.IsZero() && reply.AsOf.Before(m.gateToggleStartedAt) {
+		return
+	}
 	m.reply = reply
 	m.lastErr = nil
 	m.pollErrFlagged = false
 	m.advanceSinceCursor(reply)
+	if m.screen == screenModal || m.screen == screenDrillDown {
+		return
+	}
 	if reply.Core.State == coreStateStarted {
 		m.screen = screenMain
 		return
@@ -211,9 +316,11 @@ func (m *Model) applyPollErr(err error) {
 // View implements tea.Model. The width==0 guard reuses pa-monitor's own
 // pre-first-WindowSizeMsg contract (packages/pa-monitor/internal/tui/
 // view.go); screenLoading renders the same literal regardless of width
-// [design: Task 4.5 Step 4]. screenMain/screenDrillDown/screenModal share a
-// minimal placeholder -- the full zone ladder/banner/dashboard panes, and
-// all drill-down/modal content, are out of scope here (section 8).
+// [design: Task 4.5 Step 4]. screenMain/screenDrillDown still share a
+// minimal placeholder -- the full zone ladder/banner/dashboard panes
+// (Task 4.6) and the drill-down screen's own content (Task 4.7) are out of
+// scope here (section 8). screenModal now routes to real content
+// (help.go's renderModal): Task 4.8's own modals are in scope.
 func (m *Model) View() string {
 	if m.width == 0 || m.screen == screenLoading {
 		return "loading…"
@@ -223,7 +330,9 @@ func (m *Model) View() string {
 		return noCoreMessage(m.discoveryPath, m.lastErr, m.theme)
 	case screenQuiescing:
 		return "pr-pool: quiescing (core.state != \"started\")"
-	case screenMain, screenDrillDown, screenModal:
+	case screenModal:
+		return m.renderModal()
+	case screenMain, screenDrillDown:
 		return "pr-pool: main"
 	default:
 		return "loading…"
