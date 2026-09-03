@@ -176,15 +176,21 @@ deduplication.
    byte-identical across ALL packets that step 3 did not fold raises a hoisting flag
    (advisory, reported, never blocking). Failures loop to step 3.
 6. **Cold-read check** (one cheap-model agent per packet, read-only): input is the packet
-   content ONLY; output `executable: yes|no` + `missing:` list. Any packet EDITED after its
-   cold-read MUST be cold-read again AND re-sized — an editor holding the full design cannot
-   certify self-containment.
+   content ONLY; output `executable: yes|no` + `missing:` list, plus any assumption the
+   reader had to make about a sibling packet's Consumes/Produces shape that is not pinned by
+   the design or a predecessor's Produces. Dispatch one round's cold-reads as multiple Agent
+   tool_use blocks in a SINGLE turn — never one dispatch-and-wait per turn. Any packet EDITED
+   after its cold-read MUST be cold-read again AND re-sized — an editor holding the full
+   design cannot certify self-containment.
 7. **Semantic post-check** (one mid-model fresh-eyes agent, read-only; the one role that
    reads the full design AND all packets): (a) coverage both directions — every design
    element lands in a packet or is recorded via `write-report` as deliberately not
    decomposed; every citation resolves to design text that supports its clause; (b) seam
    consistency — every Consumes supplied by a planned predecessor's Produces or existing
-   code, signatures matching. Findings loop to step 3.
+   code, signatures matching. Round 1 reads the full design and the full packet set; each
+   fix-loop re-check after round 1 SCOPES to the packets the prior round's findings touched
+   plus their direct planned-ordering neighbors — mirroring reconcile step 4 — never the full
+   design and full packet set again. Findings loop to step 3.
 8. **Loop bounds** (no loop is unbounded): a finding recurring on the same packet for the
    same check against the same evidence target a SECOND time ⇒ treat as a gap — halt that
    packet (continue the rest only if no seam depends on it, else abort). The full fix loop
