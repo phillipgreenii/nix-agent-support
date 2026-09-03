@@ -20,7 +20,7 @@ symmetric, same interface, multiple simultaneously-active instances), **Thread**
 unlike the other five, it has no remote entity to sync). Person and Repository are not separate
 connectors — they are attributes on the above. **Feedback item** (a review comment thread with
 its own open/will-fix/wont-fix/no-action disposition) is not a seventh type either — it is a
-categorization-style component (§7.1) working from a PR and its comments.
+categorization-style component (§6.1) working from a PR and its comments.
 
 No connector mirrors entity state into a shared store (§8 explains why) and no connector widens
 its own scope to survey more than what's asked for.
@@ -82,15 +82,21 @@ that backend's own environment/config, not in this registry — the registry onl
 ### 4.2 Wire protocol
 
 One-shot exec-per-call scriptout: JSON on stdin (`{"op": "...", "args": {...}}`), JSON on stdout
-(`{"result": ...}` on success, `{"error": {...}}` on failure), coarse exit codes. This is carried
-over unchanged from pg-pr's existing `pkg/plugin/scriptout` — the envelope, the driver loop, and
-the `auth_status` convention are already fully generic.
+(`{"result": ...}` on success, `{"error": {...}}` on failure), coarse exit codes. The driver loop
+and the `auth_status` convention carry over unchanged from pg-pr's existing `pkg/plugin/scriptout`
+— they are already fully generic. The error field itself is not carried over as-is: today it is a
+bare string; this design widens it to the structured object described below.
 
-The `{"error": ...}` payload is a structured object, `{"code": "...", "message": "..."}`, with
-`code` drawn from a closed set (at least `not_found`, `unauthenticated`, `unavailable`,
+The `{"error": ...}` payload becomes a structured object, `{"code": "...", "message": "..."}`,
+with `code` drawn from a closed set (at least `not_found`, `unauthenticated`, `unavailable`,
 `unknown_op`, `version_mismatch`) — enough for the fan-out layer to classify degraded-vs-broken
 without substring-matching. Exit codes at the wire level stay 0/1; classification lives in the
-JSON body, matching scriptout's existing "only stdout JSON is the contract" convention.
+JSON body, matching scriptout's existing "only stdout JSON is the contract" convention. On the Go
+consuming side, the wire boundary translates each `code` into one of a small set of exported
+sentinel errors in `pkg/schema` (`ErrNotFound`, `ErrUnauthenticated`, `ErrUnavailable`,
+`ErrUnknownOp`, `ErrVersionMismatch`), wrapped as `fmt.Errorf("%w: %s", sentinel, message)` — the
+same pattern `vcs.ErrAuthInvalid` already establishes — so callers use `errors.Is` instead of
+substring-matching the message.
 
 ### 4.3 Versioning and capability discovery
 
@@ -278,8 +284,7 @@ mechanically derived rather than picked freely.
 
 ZR-specificity is encoded consistently inside the `<backend>` slot for every such binary, generic
 or not, so no binary's org-specificity is a guess from its name — including
-`pg-connector-ci-captains-log`, renamed from its ZR-specific predecessor to carry that marker
-(exact spelling is a decompose-time detail).
+`pg-connector-ci-zr-captains-log`, renamed from its ZR-specific predecessor to carry that marker.
 
 The umbrella's own name, `pg-connector`, was chosen over `pg`/`pg-sync`/`pg-gateway`/`pg-bridge`/
 `pg-relay` — a bare `pg` would collide with this workspace's existing personal-tool `pg-` prefix
@@ -522,6 +527,12 @@ IDs, so multi-backend fan-out would work without a separate correlation step —
 is wrong when this is actually built, it needs the same external-ref correlation pattern used
 everywhere else in this design.
 
+**Acceptance criteria**
+
+- `pg-connector-ci-zr-captains-log` keeps working, PATH-wired and unchanged, through the entire
+  transition.
+- `connector.ci` does not list it until this phase is explicitly started.
+
 ---
 
 ## Appendix A: known gaps and open items (not blocking, but not yet resolved)
@@ -578,11 +589,75 @@ before the area it touches is actually done.
 
 **Design details left unpinned**
 
-- The exact ZR-specificity marker spelling inside the `<backend>` naming slot (§5.1) is not pinned
-  down — a decompose-time detail, but every Tier-2 binary name depends on it.
 - Whether an existing backend's computed urgency/priority signal (used as the illustrative example
   for `severity` in §4.4) is an actual requirement for that backend, or just an example, is not
   confirmed.
+
+**Found by a six-dimension review pass (correctness/completeness/UX/test-coverage/Go-practices/
+architecture) against the committed spec, 2026-09-03 — genuinely new, not already covered above**
+
+- **Search has no specified result shape at all (§4.4).** Attention's item shape is fully pinned;
+  search only ever gets a negative property ("no score field") — no field list (title/url/
+  snippet/source-id/etc.). Neither df-search nor any search backend implementer has anything
+  concrete to build against. Blocking for that capability specifically.
+- **Thread and Note have no field-level schema content anywhere, and no identified consumer
+  (§2, §5.2, §9.1).** PR/Issue/CI can be inferred from pg-pr's existing provider shapes; Thread
+  (Slack) and Note (Notion) have no prior art in this codebase, no sketch of a field set, and
+  no current tool that needs either — they read as speculative placeholders rounding out "six
+  types" rather than types earning their place. Worth deciding whether to specify them properly
+  or drop them until a real consumer exists.
+- **df-feedback's write-back operation has no stated verb, unlike its stated-symmetric partner
+  df-categorize (§6.1).** df-categorize writes via a named call
+  (`pg-connector pr update <id> --label <category>`); df-feedback is only said to write "into the
+  feedback-disposition store," with no op name or args shape.
+- **The attention merge algorithm (§4.4) is underspecified for the golden test its own AC
+  implies:** no rule for which source's `summary`/`severity` wins when two sources disagree on
+  the same `{type,id}`; no stated cap value or config key; the final tiebreak (each source's own
+  item order) doesn't say whose order applies once an item is merged from multiple sources.
+- **Standalone attention/search-only plugins may reintroduce the multi-capability, no-shared-
+  shape interface §3 explicitly rejects, just relocated (§3, §4.4).** §4.4's own motivating case
+  — a rule spanning a PR's linked issue and its review-comment count — needs two capabilities'
+  data at once. Undecided whether such a plugin gets that by composing pg-connector's own verbs
+  (capability-scoped, consistent with §3) or by talking to backend systems directly to synthesize
+  the judgment (exactly the per-system interface §3 rejects, under a different binary shape).
+- **PR's single-valued registry cardinality (§4.1) is in tension with §9's "eventually a second,
+  interchangeable backend" promise.** `issue`/`ci` are explicitly list-valued for exactly this
+  kind of multi-backend case; `pr` is not. If "interchangeable" ever means a concurrent/migratory
+  dual-backend period (e.g. a GitHub→Forgejo cutover), the registry schema as specified can't
+  express it.
+- **The retirement transition period (§9) has no coexistence architecture, only a checklist.**
+  Given the unresolved items already listed under "Retirement completeness" above, pg-pr and
+  pg-connector will necessarily run in parallel for an extended period — nothing describes how
+  (a shim, a routing layer, dual-write, or ad hoc caller-by-caller migration).
+- **The pr-pool↔pg-connector dispatch adapter (§6.1) has no assigned owner** — no repo, package,
+  or binary name is stated for it, unlike every other component in the design.
+- **`pkg/schema` holding both wire shapes and every capability's Go interface (§5.2) is a
+  coupling regression from this repo's own existing split** (today, JSON shapes and the three
+  provider interfaces live in separate packages) and sits in tension with §3's own "scoped by
+  capability, not by system" principle applied at the package level — it becomes a mandatory
+  import for every one of 8 binaries plus any external consumer (e.g. Captain's Log).
+- **A single global `schemaVersion` (§4.3) couples all capabilities' compatibility together** —
+  a breaking change to, say, the Thread schema bumps the same integer an unrelated CI-only
+  consumer checks, which bites hardest exactly where §5.3 introduces an independently-built
+  cross-repo consumer.
+- **No optional-sub-interface story for partial backend support (§3, §5.2).** `vcs.Provider`
+  already has a pattern for this (small, separately-asserted optional interfaces like
+  `AuthChecker`); undecided whether Slack/Notion backends get the same escape hatch for verbs
+  they can't fully support.
+- **Several stated acceptance criteria are aspirational rather than checkable** — e.g. §8's "no
+  cross-connector entity store... verified by its absence," §3's "no interface is scoped by
+  system," and §4.4's "no coupling to any daily-planning ritual" all restate the section's thesis
+  without naming an operational condition a test could actually assert.
+- **pg-connector's needed conformance harness is new construction, not a port of pr-pool's
+  existing one** — pr-pool's conformance suite tests in-process Go structs against an interface;
+  pg-connector's Tier-2 backends are out-of-process binaries speaking only JSON over stdin/stdout,
+  which is a materially different, unbuilt harness shape.
+- **Exit code 0 on partial fan-out failure (§4.5) is a scripting trap** — a cron job or script
+  gating on exit status alone cannot tell that some backends are down; it must always parse the
+  `sources[]` body, and nothing in the design flags this for automation authors.
+- **Stateless attention with no `hide`/`unhide` equivalent (§4.4, §7.3) means a triaged item
+  resurfaces indefinitely** — the single biggest daily-friction gap this review round
+  surfaced, compounding the existing "pr hide has no stated home" gap above.
 
 **Explicitly deferred by design, not oversights**
 
