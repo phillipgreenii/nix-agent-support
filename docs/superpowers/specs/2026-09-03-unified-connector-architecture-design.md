@@ -275,9 +275,12 @@ true` + `total_before_cap: N` — a truncation is always a manifest marker, neve
 message}` from the closed enum; every backend answers `capabilities`; `config validate` fans out
   `auth_status` + `capabilities` across every backend.
 - `pg-connector attention list` / `pg-connector search <query>` exist as real Tier-1 verbs.
-- An attention item is exactly `{type, id, summary}` + optional `severity`. A search result
-  carries the core `{type, id, title, url, source}` set plus any type-/implementation-declared
-  extensions the query requested; it carries no score field.
+- A single source's own `list_attention` response carries an item that is exactly `{type, id,
+summary}` + optional `severity`; Tier 1's aggregated `attention list` output is a strict
+  superset (adds `via`, and `truncated`/`total_before_cap` at the envelope level), never a
+  violation of that per-source shape. A search result carries the core `{type, id, title, url,
+source}` set plus any type-/implementation-declared extensions the query requested; it carries
+  no score field.
 - A search query MAY request specific fields; an unrecognized field produces a warning in the
   response envelope (never stderr), never an error; a backend silently omits fields it doesn't
   recognize.
@@ -315,7 +318,8 @@ response to whoever invoked it.
 Exit codes distinguish outcomes, not just pass/fail, and split into two schemes depending on
 whether the invoked op is a FAN-OUT (queries every registered source of a type/capability:
 `attention list`, `search`, or a list-type op against a list-valued connector type) or a TARGETED
-op (`show`/`update` by a specific id, resolving to exactly one backend):
+op by a specific id, resolving to exactly one backend (e.g. `show`, `categorize`,
+`feedback_set`, `transition`):
 
 - **Fan-out ops** — this both fixes the earlier "exit 0 on partial failure" scripting trap
   (automation gating on exit status alone could not previously tell that some backends were down)
@@ -593,10 +597,16 @@ parent — no bespoke restricted allowlist, per this workspace's existing ruling
 subagents share the parent's permissions rather than a per-role least-privilege split.
 
 **Exit codes.** Both handlers report back to pr-pool via pr-pool's own existing command-role
-contract, unchanged by this design: `0` on success, any other nonzero on failure. pr-pool already
-retries a failed command-role call on its own, so neither handler needs a special "decline, try
-later" signal of its own — if the handler's own targeted `pg-connector` call succeeded, it exits
-`0`; if it didn't, it exits nonzero and lets pr-pool's existing retry behavior handle it.
+contract, unchanged by this design: `0` on success, any other nonzero on failure. Each handler
+makes more than one targeted `pg-connector` call (df-categorize: `show` then `categorize`;
+df-feedback: `show` then one `feedback-set` per comment needing a disposition) — a `not_found`
+(exit `4`, §4.5) from ANY of them, including df-feedback's own "comment id no longer exists" case,
+is NOT a failure by pg-connector's own taxonomy, and the handler MUST NOT treat it as one: it
+means "nothing to do for that item," so the handler skips it and continues, still exiting `0`
+overall if nothing else went wrong. Only a genuine error (`unauthenticated`/`unavailable`/
+`unknown_op`/`version_mismatch`, or a CLI-level failure) causes the handler to exit nonzero.
+pr-pool already retries a failed command-role call on its own, so neither handler needs a special
+"decline, try later" signal of its own beyond this.
 
 **Acceptance criteria**
 
