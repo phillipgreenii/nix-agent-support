@@ -135,7 +135,7 @@ func TestNoCoreMessage_SanitizesBeforeComposing(t *testing.T) {
 	dirtyErr := errors.New("dial unix \x1b[31msocket\x1b[0m: connection refused")
 	dirtyPath := "/tmp/\x1b[1mpr-pool\x1b[0m/discovery.json"
 
-	got := noCoreMessage(dirtyPath, dirtyErr, render.NewTheme(false))
+	got := noCoreMessage(dirtyPath, dirtyErr, render.NewTheme(false), 80)
 
 	if strings.Contains(got, "\x1b") {
 		t.Fatalf("noCoreMessage output still contains a raw ESC byte: %q", got)
@@ -154,7 +154,7 @@ func TestNoCoreMessage_SanitizesBeforeComposing(t *testing.T) {
 // systemd/launchd detection), the auto-reconnect note, and a press-q line.
 func TestNoCoreMessage_ShapeMatchesDaemonOfflinePrecedent(t *testing.T) {
 	err := fmt.Errorf("tui: poll: %w", core.ErrNoRunningCore)
-	got := noCoreMessage("/var/pr-pool/discovery.json", err, render.NewTheme(false))
+	got := noCoreMessage("/var/pr-pool/discovery.json", err, render.NewTheme(false), 80)
 
 	for _, want := range []string{
 		"No core running",

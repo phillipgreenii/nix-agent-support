@@ -19,7 +19,14 @@ import (
 // are run through textsafe.Sanitize BEFORE they are woven into the message,
 // never after -- a later packet's width measurement (Tasks 4.6/4.9) must
 // never see a raw control sequence hiding in either value.
-func noCoreMessage(discoveryPath string, err error, theme render.Theme) string {
+//
+// Width clipping (pg2-wp7k6): the composed message is run through
+// render.Block/render.EffectiveWidth before returning, matching the pattern
+// every other tui render/pane file already uses (e.g. banner.go's
+// renderHeader) -- the remedy line ("or supervise it as a long-running
+// daemon (the pr-pool-daemon service, if configured).", 85 columns)
+// otherwise exceeds narrow widths unconditionally.
+func noCoreMessage(discoveryPath string, err error, theme render.Theme, width int) string {
 	errText := "(no error recorded)"
 	if err != nil {
 		errText = err.Error()
@@ -46,5 +53,5 @@ func noCoreMessage(discoveryPath string, err error, theme render.Theme) string {
 		"",
 		"Press q to quit.",
 	}
-	return strings.Join(lines, "\n")
+	return render.Block(strings.Join(lines, "\n"), render.EffectiveWidth(width))
 }

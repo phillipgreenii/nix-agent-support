@@ -129,18 +129,16 @@ func TestSixScreenBanner_At80x24AndHeight10(t *testing.T) {
 		{"quiescing", sixScreenQuiescingFixture, true},
 	}
 
-	// widthUnclipped names the screens whose own composition applies NO
-	// width clipping at all -- discovered, not invented: nocore.go's
-	// noCoreMessage (Task 4.5) and drilldown.go's renderDrillDown (Task 4.7)
-	// each join a handful of fixed-text lines with no render.Block/Line
-	// call anywhere in the path, so a line longer than 80 columns (e.g.
-	// noCoreMessage's "or supervise it as a long-running daemon (the
-	// pr-pool-daemon service, if configured)." at 85 columns) renders
-	// verbatim regardless of terminal width. This is a pre-existing gap in
-	// those two already-frozen sibling packets; fixing it is a re-opening
-	// of Task 4.5/4.7, out of this packet's own scope (Contract §8, "Out of
-	// scope") -- documented here rather than silently asserted past.
-	widthUnclipped := map[string]bool{"no-core": true, "drill-down": true}
+	// nocore.go's noCoreMessage (Task 4.5) and drilldown.go's
+	// renderDrillDown (Task 4.7) previously applied NO width clipping at
+	// all -- a line longer than 80 columns (e.g. noCoreMessage's "or
+	// supervise it as a long-running daemon (the pr-pool-daemon service,
+	// if configured)." at 85 columns) rendered verbatim regardless of
+	// terminal width. Fixed by pg2-wp7k6 (both now run their composed
+	// output through render.Block/render.EffectiveWidth, matching the
+	// pattern every other tui render/pane file already uses), so every
+	// screen's output is asserted <= 80 columns uniformly below, with no
+	// exemption.
 
 	for _, fx := range fixtures {
 		for _, h := range []int{24, 10} {
@@ -151,11 +149,9 @@ func TestSixScreenBanner_At80x24AndHeight10(t *testing.T) {
 				if out == "" {
 					t.Fatalf("View() returned empty output")
 				}
-				if !widthUnclipped[fx.name] {
-					for i, line := range strings.Split(out, "\n") {
-						if got := lipgloss.Width(line); got > 80 {
-							t.Errorf("line %d width = %d, want <= 80: %q", i, got, line)
-						}
+				for i, line := range strings.Split(out, "\n") {
+					if got := lipgloss.Width(line); got > 80 {
+						t.Errorf("line %d width = %d, want <= 80: %q", i, got, line)
 					}
 				}
 				if got := strings.Contains(out, "pr-pool"); got != fx.wantsPrPool {
@@ -313,24 +309,14 @@ func TestViewLineWidthInvariant(t *testing.T) {
 						return
 					}
 
-					if fx.name == "drill-down open" {
-						// Discovered, documented exception: renderDrillDown
-						// (drilldown.go, Task 4.7) never calls render.Block/
-						// render.Line anywhere in its own composition --
-						// unlike every other screen, its output carries NO
-						// width clipping at all. renderConfigSection's own
-						// fixed line ("  perParticipant: {} (no per-kind
-						// whitelist producer yet)", 57 display columns) is
-						// therefore present verbatim regardless of terminal
-						// width, and exceeds width=30 unconditionally (no
-						// choice of fixture data avoids it). This is a
-						// pre-existing gap in Task 4.7's own file; fixing it
-						// is a re-opening of that packet, out of this
-						// packet's scope (Contract §8, "Out of scope") --
-						// this exemption documents the finding rather than
-						// hiding it.
-						return
-					}
+					// renderDrillDown (drilldown.go, Task 4.7) previously
+					// carried NO width clipping at all -- renderConfigSection's
+					// own fixed "perParticipant" line (57 display columns)
+					// exceeded width=30 unconditionally. Fixed by pg2-wp7k6
+					// (renderDrillDown now runs its output through
+					// render.Block/render.EffectiveWidth), so "drill-down
+					// open" is asserted below like every other fixture, with
+					// no exemption.
 
 					ew := render.EffectiveWidth(w)
 					for i, line := range strings.Split(out, "\n") {

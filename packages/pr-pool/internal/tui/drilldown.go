@@ -157,6 +157,12 @@ func (m *Model) drillBreadcrumb() string {
 // breadcrumb, the drilled row's own fields, and the Config section
 // (resolvedConfig's legacy-scalar fields, Step 4) [design: Task 4.7 Files;
 // Task 4.7 Step 4].
+//
+// Width clipping (pg2-wp7k6): the composed output is run through
+// render.Block/render.EffectiveWidth before returning, matching the pattern
+// every other tui render/pane file already uses (e.g. banner.go's
+// renderHeader) -- the Config section's "perParticipant" line (57 columns)
+// otherwise exceeds narrow widths unconditionally.
 func (m *Model) renderDrillDown() string {
 	var b strings.Builder
 	b.WriteString(m.drillBreadcrumb())
@@ -164,7 +170,7 @@ func (m *Model) renderDrillDown() string {
 	b.WriteString(m.drillDetail())
 	b.WriteString("\n")
 	b.WriteString(renderConfigSection(resolvedConfigView{}))
-	return b.String()
+	return render.Block(b.String(), render.EffectiveWidth(m.width))
 }
 
 // drillDetail renders the currently drilled row's own fields -- reusing
