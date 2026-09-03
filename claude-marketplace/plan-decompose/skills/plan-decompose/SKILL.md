@@ -10,10 +10,11 @@ description: >-
   this plan into implementation issues"; "create the epic and children from this design";
   "reconcile docket <id>"; "report on docket <id>'s metrics" / "what's the escalation rate for
   docket <id>?". Do NOT use for: designs that would yield fewer than 3 packets (below the
-  floor — file the beads directly); improving EXISTING issues (that is bead-grooming); finding
-  or working ready issues (that is bd ready / the drain queue); writing the design itself
-  (brainstorming/writing-plans); a workspace-wide metrics rollup (this mode is always scoped to
-  one docket).
+  floor — file the beads directly); sizing one already-scoped bead/task into a handful of
+  children with no design document to cite (that is `pg-pr-break-down-work`); improving
+  EXISTING issues (that is bead-grooming); finding or working ready issues (that is bd ready /
+  the drain queue); writing the design itself (brainstorming/writing-plans); a workspace-wide
+  metrics rollup (this mode is always scoped to one docket).
 ---
 
 # plan-decompose — curated, self-contained work packets from an approved design
@@ -23,6 +24,11 @@ output is a **docket** (parent issue holding the design of record) plus **work p
 (children an implementer can execute from one read). Design of record for this skill:
 `docs/superpowers/specs/2026-08-27-plan-decompose-design.md` in `phillipgreenii-nix-agent-support`
 (provenance only — this skill stands alone).
+
+**Boundary with `pg-pr-break-down-work`:** that skill sizes one already-scoped bead/task into
+a handful of children — no design document, no citation requirement, no QA-agent pipeline.
+This skill requires an APPROVED design/plan document to cite and has a 3-packet floor; below
+that floor, or with no design document at all, use `pg-pr-break-down-work` instead.
 
 ## Concepts
 

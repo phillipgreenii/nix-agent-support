@@ -1,6 +1,6 @@
 ---
 name: pg-pr-break-down-work
-description: Break a unit of work into correctly-sized child beads that one agent can each finish in a single context, then arm the leaf beads for the consuming agent. Use whenever work needs splitting before it can be dispatched — a bead is too big to finish in one context, a feature/cycle/epic needs decomposing into child tasks, a prior agent ran out of context on a task, or you're about to hand work to worker agents and need to size + label it first. Triggers on "break this down", "split into beads/tasks", "this is too big for one agent", "decompose this work", "size this for a worker". The producer decides WHAT work exists; this skill owns HOW to split it.
+description: Break a unit of work into correctly-sized child beads that one agent can each finish in a single context, then arm the leaf beads for the consuming agent. Use whenever work needs splitting before it can be dispatched — a bead is too big to finish in one context, a feature/cycle/epic needs decomposing into child tasks, a prior agent ran out of context on a task, or you're about to hand work to worker agents and need to size + label it first. Triggers on "break this down", "split into beads/tasks", "this is too big for one agent", "decompose this work", "size this for a worker". The producer decides WHAT work exists; this skill owns HOW to split it. Do NOT use this for decomposing a whole APPROVED design/plan document into an epic plus curated, design-cited work packets — that is `plan-decompose:plan-decompose`; this skill has no design-citation, budget-sizing, or QA-agent apparatus and is for sizing one already-scoped bead/task into a handful of children.
 ---
 
 # pg-pr break down work
@@ -15,6 +15,18 @@ one pass.
 This skill is **consumer-agnostic**: the work might be PR feedback handed to
 `worker` agents, ccpool enhancements handed to a ccpool specialist, or any other
 backlog. The PR-specific details below are **one example**, not a requirement.
+
+**Boundary with `plan-decompose:plan-decompose`:** both skills split work into
+beads, but at different altitudes. This skill takes one already-scoped parent
+bead/task and sizes it into a handful of children with no design source — it has
+no citation-to-design requirement, no sizing budget/percentage math, and no
+agent-dispatched QA (cold-read / semantic-post-check) passes. `plan-decompose`
+takes a whole **approved design document** and produces a docket + curated,
+design-cited work packets, with a floor of 3 packets and its own QA/reconcile/
+metrics pipeline — below that floor, `plan-decompose` itself says "file the
+beads directly", which is this skill's job. If you have a design doc to
+decompose, use `plan-decompose`; if you have one bead/task that's too big for a
+single agent context, use this skill.
 
 ## Roles (do only your part)
 
