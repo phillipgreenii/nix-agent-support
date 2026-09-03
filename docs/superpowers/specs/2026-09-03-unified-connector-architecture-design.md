@@ -107,7 +107,7 @@ with `code` drawn from a closed set (at least `not_found`, `unauthenticated`, `u
 without substring-matching. Exit codes at the wire level stay 0/1; classification lives in the
 JSON body, matching scriptout's existing "only stdout JSON is the contract" convention. On the Go
 consuming side, the wire boundary translates each `code` into one of a small set of exported
-sentinel errors in `pkg/schema` (`ErrNotFound`, `ErrUnauthenticated`, `ErrUnavailable`,
+sentinel errors in `pkg/scriptout` (`ErrNotFound`, `ErrUnauthenticated`, `ErrUnavailable`,
 `ErrUnknownOp`, `ErrVersionMismatch`), wrapped as `fmt.Errorf("%w: %s", sentinel, message)` — the
 same pattern `vcs.ErrAuthInvalid` already establishes — so callers use `errors.Is` instead of
 substring-matching the message.
@@ -187,7 +187,11 @@ An attention item is exactly `{type, id, summary}` plus optional `severity` (clo
 medium | high | critical`, canonical rank `low < medium < high < critical`, defined once in the
 shared schema package). A source with no opinion omits `severity`; each source maps its own
 internal signal into the enum itself (e.g. a PR backend could expose an existing computed urgency
-level directly).
+level directly). This shape is what a single SOURCE's own `list_attention` response carries per
+item. Tier 1's aggregated `pg-connector attention list` output is a strict superset of it, not a
+violation: the merge step below adds `via: [source, ...]` to a merged item, and the response
+envelope as a whole adds `truncated`/`total_before_cap` when a cap applies — neither exists on a
+single source's own per-item shape.
 
 **Search result shape** (previously unspecified — this was blocking for the capability). Every
 search result carries a small core set of attributes, `{type, id, title, url, source}`, defined
@@ -200,10 +204,13 @@ once in the shared schema package, plus:
   type's set, the same way §4.3's `vocabulary` is declared: dynamically, in that backend's own
   `capabilities` response (e.g. a specific Jira instance's custom-field values).
 - A search query MAY specify which attributes it wants returned (`{"query": "...", "fields":
-[...]}`). `pg-connector search` itself — not each backend — validates the requested field list
-  against the union of the core set, the queried type(s)' schema-declared attributes, and each
-  queried backend's own capabilities-declared attributes; a field matching none of those produces
-  a warning in the response envelope (never a stderr line, per §4.5's convention), not an error.
+[...]}`). There is no type-filter parameter on a search query — every call queries every
+  registered `search.sources` entry — so "the queried type(s)" is simply the union of every type
+  any of those registered sources can return. `pg-connector search` itself — not each backend —
+  validates the requested field list against the union of the core set, those types'
+  schema-declared attributes, and each queried backend's own capabilities-declared attributes; a
+  field matching none of those produces a warning in the response envelope (never a stderr line,
+  per §4.5's convention), not an error.
 - Each backend implementation, for its part, silently ignores any requested attribute it doesn't
   itself recognize or support — no error, no warning from the backend. The validation-and-warning
   responsibility sits entirely at the aggregation layer described above, not duplicated in every
@@ -292,24 +299,49 @@ queried, regardless of merge strategy: `{"source": <name>, "status": "succeeded"
 "disabled", "count": N, "reason": <string|null>}`. This applies uniformly to every fan-out in this
 design — `attention.sources`, `search.sources`, `connector.issue`, `connector.ci`,
 `connector.pr` — and is never collapsed into one pass/fail signal. Outcome rows live in the JSON
-body, never as a stderr `WARNING:` line.
+body, never as a stderr `WARNING:` line. For a fan-out whose merge stage dedups across sources
+(attention's `{type, id}` dedup, §4.4), each source's own `count` is that source's raw, pre-merge
+item count exactly as it returned it — independent of how many of those items survive
+deduplication in the merged output. A single logical item counted by two sources appears in both
+rows' counts; that's expected, since `count` measures per-source health, not final output
+cardinality.
 
-Exit codes distinguish three outcomes, not two — this both fixes the earlier "exit 0 on partial
-failure" scripting trap (automation gating on exit status alone could not previously tell that
-some backends were down) and satisfies this workspace's own convention that a branchable meaning
-uses a distinct exit code rather than overloading 0/1:
+**These are pg-connector's own CLI exit codes — a different layer entirely from §4.2's
+per-backend wire-level exec exit codes**, which stay a plain 0/1 with classification living in the
+JSON body a Tier-2 backend author writes. A Tier-2 backend's own process exit code MUST NOT be
+built against the scheme below; that scheme belongs solely to the `pg-connector` binary's own
+response to whoever invoked it.
 
-- **`0`** — every queried source succeeded; no degraded/disabled rows in `sources[]`.
-- **`2`** — degraded/partial: at least one source succeeded and at least one did not.
-- **`3`** — total failure: every source failed or was disabled; zero usable results.
-- **`1`** is deliberately reserved and never emitted for a fan-out outcome — it stays available
-  for the CLI's own generic/unexpected-failure path (bad arguments, a panic, a framework-level
-  error unrelated to fan-out semantics), matching the common convention that 1 is the default,
-  catch-all failure code so many tools already assume.
+Exit codes distinguish outcomes, not just pass/fail, and split into two schemes depending on
+whether the invoked op is a FAN-OUT (queries every registered source of a type/capability:
+`attention list`, `search`, or a list-type op against a list-valued connector type) or a TARGETED
+op (`show`/`update` by a specific id, resolving to exactly one backend):
+
+- **Fan-out ops** — this both fixes the earlier "exit 0 on partial failure" scripting trap
+  (automation gating on exit status alone could not previously tell that some backends were down)
+  and satisfies this workspace's own convention that a branchable meaning uses a distinct exit
+  code rather than overloading 0/1:
+  - **`0`** — every queried source succeeded; no degraded/disabled rows in `sources[]`.
+  - **`2`** — degraded/partial: at least one source succeeded and at least one did not.
+  - **`3`** — total failure: every source failed or was disabled; zero usable results.
+- **Targeted ops** — a well-formed negative answer is not a system failure, so it gets its own
+  code rather than sharing the fan-out scheme's failure codes:
+  - **`0`** — the operation completed and produced a well-formed response (including a
+    successful write).
+  - **`4`** — `not_found`: the operation completed correctly; the specific entity genuinely
+    doesn't exist. A healthy backend giving a definitive negative answer MUST NOT share a code
+    with an actual failure.
+  - **`1`** — any other error (`unauthenticated`/`unavailable`/`unknown_op`/`version_mismatch`,
+    or a CLI-level failure before a well-formed response was produced at all: bad arguments, an
+    unreachable/non-executable backend, a panic).
+- **`1`** is otherwise deliberately reserved and never emitted for a fan-out outcome — it stays
+  available for the CLI's own generic/unexpected-failure path, matching the common convention
+  that 1 is the default, catch-all failure code so many tools already assume.
 
 An automation author who only checks `$?` for zero-vs-nonzero still gets a correct pass/fail
-signal; one who wants to distinguish "some backends are down" from "everything is broken" now can,
-without parsing `sources[]` — though parsing it remains necessary to know _which_ sources.
+signal from either scheme; one who wants finer detail (which sources are down, or whether a
+targeted miss was a real "not found" versus a break) now can, without parsing `sources[]`/the
+error body — though parsing it remains necessary to know _which_ sources or _why_.
 
 Each list-valued type/operation states its own merge strategy explicitly (concat-with-per-source-
 outcome, or first-wins) rather than assuming one universal rule — the existing CI fan-out already
@@ -319,11 +351,15 @@ makes that choice explicit per type/op rather than implicit.
 **Acceptance criteria**
 
 - Every multi-source response carries a `sources` array with one row per source queried, never
-  collapsed.
-- Exit code is `0` (all succeeded), `2` (degraded/partial), or `3` (total failure); `1` is never
-  emitted for a fan-out outcome and is reserved for generic/unexpected CLI failures.
+  collapsed; a source's `count` is its own raw pre-merge count, unaffected by later dedup.
+- Fan-out exit code is `0` (all succeeded), `2` (degraded/partial), or `3` (total failure).
+  Targeted-op exit code is `0` (success) or `4` (`not_found` — a well-formed negative answer, not
+  a failure); `1` is never emitted by either scheme for an in-taxonomy outcome and is reserved for
+  a generic/unexpected CLI failure.
 - No degraded/failure signal is emitted as a stderr `WARNING:` line.
 - Every list-valued type/operation states its merge strategy explicitly.
+- pg-connector's own CLI exit codes are never confused with, or built from, §4.2's per-backend
+  wire-level exec exit codes.
 
 ### 4.6 Credentials
 
@@ -356,9 +392,10 @@ status`, reusing the outcome-reporting envelope from §4.5 verbatim.
 - `pg-connector auth status` fans out the existing `auth_status` op across every registered
   backend via the sources envelope.
 
-### 4.7 SCM — a sixth connector type, local-only, no remote entity
+### 4.7 SCM — local-only, no remote entity
 
-Unlike the five entity types, which sync remote state, `scm` manages local git state — worktrees
+Unlike the other three entity types (pr/issue/ci), which sync remote state, `scm` manages local
+git state — worktrees
 and cwd→branch resolution — and has no "sync" concept. It is registered, versioned, and dispatched
 through the exact same mechanism as every other type (config-driven registry, scriptout protocol,
 `schemaVersion`/`capabilities`), just backed by local git commands: `connector.scm =
@@ -432,7 +469,9 @@ packages/pg-connector/
     schema/       <- public: shared JSON wire shapes only (per-type + attention/search + core search fields)
     provider/     <- public: the per-capability Go interfaces (pr.Provider, issue.Provider, ...),
                        including optional sub-interfaces like AuthChecker (§4.6)
-    scriptout/    <- public: the wire protocol (envelope, protocolVersion/schemaVersion, capabilities/auth_status)
+    scriptout/    <- public: the wire protocol (envelope, protocolVersion/schemaVersion,
+                       capabilities/auth_status, and the exported sentinel errors mapped
+                       from the error taxonomy's closed code set, §4.2)
   cmd/
     pg-connector/                       <- umbrella; imports pkg/schema + pkg/provider + pkg/scriptout only
     pg-connector-pr-github/internal/    <- backend-private; importable by nothing outside this dir
@@ -518,14 +557,20 @@ pg-connector's convention (§4.2).
   current state via `pg-connector <type> show <id>` (wire request `{"op": "show", "args": {"id":
 "<id>"}}`, response `{"result": {...entity fields per that type's schema...}}`), applies its own
   ranking logic (a different algorithm from df-survey's — different situations want different
-  rankings, even within ZR) to compute a category label, then writes back via `pg-connector pr
-update <id> --label <category>` (wire request `{"op": "update", "args": {"id": "<id>", "label":
-"<category>"}}`, response `{"result": {"id": "<id>", "label": "<category>", ...}}` on success or
-  `{"error": {"code": "...", "message": "..."}}` per §4.2's taxonomy on failure). The label
-  vocabulary itself is backend-declared, the same way an issue backend declares its transition
-  vocabulary (§4.3) — the PR backend's own `capabilities` response lists its valid category
-  labels, so df-categorize's algorithm and the backend's accepted vocabulary can be checked
-  against each other rather than assumed compatible.
+  rankings, even within ZR) to compute a category, then writes it back via a dedicated `pr`
+  capability op: `pg-connector pr categorize <id> --category <category>` (wire request `{"op":
+  "categorize", "args": {"id": "<id>", "category": "<category>"}}`, response `{"result": {"id":
+  "<id>", "category": "<category>"}}` on success, `{"error": {"code": "...", "message": "..."}}`
+  per §4.2's taxonomy on failure). **Categorization is used only for focus/filtering (`pg-connector
+  pr open`-style tooling and Grafana dashboards) — never for anything a human needs to see on
+  github.com itself — so it does not live in a GitHub label.** It's a single-valued field in the
+  same per-backend local store as feedback disposition (§9), new state this design introduces
+  rather than a migration of anything pg-pr's existing SQLite store already has. Because it's a
+  dedicated field rather than a member of a shared label namespace, the write is a plain
+  set/overwrite — no add/remove/toggle ambiguity. The backend's own `capabilities` response still
+  declares its valid category vocabulary, the same pattern §4.3 already establishes for issue-
+  transition vocabulary, so df-categorize's algorithm output can be checked against accepted
+  values rather than assumed compatible.
 - **df-feedback**, invoked as `df-feedback pr <pr-id>` for a PR+comment/review-thread event,
   fetches the PR's full current state via `pg-connector pr show <pr-id>` — which includes its
   comments/review threads, each with its own id and current disposition — rather than trusting
@@ -540,12 +585,18 @@ feedback-set <pr-id> <comment-id> --disposition <status>` (wire request `{"op":
   `not_found` if the comment id no longer exists). `disposition` is the closed enum already stated
   in §2: `open | will-fix | wont-fix | no-action`. This op lives under the `pr` capability (not as
   a separate top-level verb) because the feedback-disposition store itself moves under the PR
-  GitHub backend per §9.1 — this is the concrete mechanism for the Feedback item gap first named
-  in §2.
+  GitHub backend (§9's own migration disposition for pg-pr's SQLite store) — this is the concrete
+  mechanism for the Feedback item gap first named in §2.
 
 **Permissions.** df-categorize and df-feedback run with permissions uniform to their pr-pool
 parent — no bespoke restricted allowlist, per this workspace's existing ruling that pr-pool
 subagents share the parent's permissions rather than a per-role least-privilege split.
+
+**Exit codes.** Both handlers report back to pr-pool via pr-pool's own existing command-role
+contract, unchanged by this design: `0` on success, any other nonzero on failure. pr-pool already
+retries a failed command-role call on its own, so neither handler needs a special "decline, try
+later" signal of its own — if the handler's own targeted `pg-connector` call succeeded, it exits
+`0`; if it didn't, it exits nonzero and lets pr-pool's existing retry behavior handle it.
 
 **Acceptance criteria**
 
@@ -553,10 +604,12 @@ subagents share the parent's permissions rather than a per-role least-privilege 
 - Both handlers are invoked with `type`/`id` as plain positional argv, with no adapter/shim binary
   and no stdin-JSON path on the pr-pool-to-handler boundary; both then speak pg-connector's own
   stdin-JSON scriptout protocol outbound to fetch/write state.
-- df-categorize writes back via `pg-connector pr update <id> --label <category>` against a
-  backend-declared label vocabulary; df-feedback writes back via `pg-connector pr feedback-set
-<pr-id> <comment-id> --disposition <status>` with `disposition` drawn from
-  open/will-fix/wont-fix/no-action.
+- df-categorize writes back via `pg-connector pr categorize <id> --category <category>` into a
+  dedicated local-store field (not a GitHub label), checked against a backend-declared category
+  vocabulary; df-feedback writes back via `pg-connector pr feedback-set <pr-id> <comment-id>
+--disposition <status>` with `disposition` drawn from open/will-fix/wont-fix/no-action.
+- Both handlers exit `0` on success and nonzero on failure, per pr-pool's own existing
+  command-role contract; neither uses a special "retry later" code of its own.
 - df-feedback re-fetches and re-evaluates the PR's full current comment list on every trigger
   rather than acting on a single embedded comment id.
 - Both run with permissions uniform to their pr-pool parent.
@@ -570,8 +623,11 @@ Explicitly not generic, and not bundled into one binary.
 
 - **df-attention** is a pure TUI client of `pg-connector attention list` — it performs no direct
   exec of any attention source itself; the fan-out, dedup, ranking, and cap all happen inside
-  pg-connector (§4.4). It may surface human-labeled beads read-only, per §4.4, with no claim/ack
-  mutation of its own.
+  pg-connector (§4.4). Since the wire default is deliberately uncapped (§4.4), df-attention passes
+  its own default `--cap 50` unless the user overrides it — the daily-use TUI stays usable out of
+  the box while a script calling `pg-connector attention list` directly still gets everything by
+  default. It may surface human-labeled beads read-only, per §4.4, with no claim/ack mutation of
+  its own.
 - **df-search** is a pure CLI/TUI client of `pg-connector search <query>`, same relationship, same
   no-direct-exec rule. Unlike df-attention, its merge is grouped by source, never interleaved.
 
@@ -603,6 +659,8 @@ duties of their own and belong alongside the other ZR-specific Tier-2 backends i
 
 - df-attention/df-search are pure clients of the two Tier-1 verbs, performing no direct exec of
   any source.
+- df-attention passes its own default `--cap 50` unless the user overrides it; the wire default
+  itself stays uncapped.
 - The four Tier-3 tools ship in `modules/daily-focus/` using its existing packaging/test pattern;
   standalone attention/search-only plugins do not.
 
@@ -618,10 +676,12 @@ closure is really only a beads dependency-chain thing, and beads's own dependenc
 provides that natively. The only unavoidable persistence: a reference pointing outside the initial
 broad query's scope needs one bounded, batched targeted lookup — never unbounded recursion.
 
-Categorization (§6.1) satisfies "downstream of events, not computed at query time" by writing back
-into the owning system (a label, a field) instead of building a separate index — reading it back
-later is just a filtered live query. Search, attention, and daily-focus all do live fan-out plus
-in-memory correlation on demand, on the same principle.
+Categorization and feedback disposition (§6.1) satisfy "downstream of events, not computed at
+query time" by writing back into a store scoped to the PR GitHub backend — feedback disposition
+into the owning system's own migrated store, categorization into a dedicated local field — instead
+of building a separate cross-connector index; reading either back later is just a filtered live
+query through that backend. Search, attention, and daily-focus all do live fan-out plus in-memory
+correlation on demand, on the same principle.
 
 **Acceptance criteria**
 
@@ -691,7 +751,7 @@ slash-commands invoked directly is explicitly not a requirement this design need
 - No shim, dual-write, or routing-layer coexistence mechanism is built; the transition is
   build-test-cutover per pg-pr command group, per the verb→destination table.
 - pg-connector's own `docs/behavior/` set is authored as its own first work packet, before any
-  code-producing packet, so later packets have real behavior-IDs to cite from day one. The three
+  code-producing packet, so later packets have real behavior-IDs to cite from day one. The four
   existing implicated behavior-docs sets (pg-pr's, pr-pool's, ZR's daily-focus/pr-pool config,
   work-report's) update in the same change as whatever packet touches them, per this repo's
   existing documentation rule.
