@@ -33,3 +33,4 @@ internal/activity 90
 internal/textsafe 95
 conformance/driver 85
 internal/tui/render 90
+internal/tui 70
