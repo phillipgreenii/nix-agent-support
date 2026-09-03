@@ -9,7 +9,7 @@ import (
 )
 
 // usageLine is the short synopsis printed to stderr on a usage error.
-const usageLine = "usage: pr-pool [--version | --help] [run [--only <selector>]... [--disable <selector>]... | run-until-idle [--only <selector>]... [--disable <selector>]... | run-query [--json] query:<name> | run-role [--json] <role> <bead> | config (--print-defaults | --show [--json]) | sessions | reconcile | push-inject [--json] [--socket <path>] [--token <tok>] <json> | pause [<gate>] | resume [<gate> | --all] | status [--json] [--socket <path>] [--token <tok>] | ingest-event [--socket <path>] [--token <tok>] | self-status [--socket <path>] [--token <tok>]]"
+const usageLine = "usage: pr-pool [--version | --help] [run [--only <selector>]... [--disable <selector>]... | run-until-idle [--only <selector>]... [--disable <selector>]... | run-query [--json] query:<name> | run-role [--json] <role> <bead> | config (--print-defaults | --show [--json]) | sessions | reconcile | push-inject [--json] [--socket <path>] [--token <tok>] <json> | pause [<gate>] | resume [<gate> | --all] | status [--json] [--socket <path>] [--token <tok>] | tui [--socket <path>] [--token <tok>] | ingest-event [--socket <path>] [--token <tok>] | self-status [--socket <path>] [--token <tok>]]"
 
 // helpText is the full help printed to stdout for --help/help.
 const helpText = usageLine + `
@@ -71,6 +71,13 @@ Subcommands:
                           core via --socket/--token, else PR_POOL_SOCKET/PR_POOL_TOKEN, else
                           discovery under the log dir. It NEVER starts a core: with none running it
                           fails with "no running core" (exit 1).
+  tui                     continuous-interactive view: polls status's activity ring and offers
+                          pause/resume from the same screen (never a third affordance). No --json
+                          (it is a terminal UI, not a scriptable reply). Locates the core via
+                          --socket/--token, else PR_POOL_SOCKET/PR_POOL_TOKEN, else discovery under
+                          the log dir, on the interval PR_POOL_TUI_INTERVAL sets (below). Unlike
+                          every other operator subcommand, it NEVER fails on "no running core": it
+                          renders a no-core screen and keeps polling instead (ADR 0036).
   pause [<gate>]          set gate <gate> (default quota-paused) directly on its file-backed state
                           (INV-LIFE-2): exits 0 even with NO core running, reporting that the change
                           takes effect at the next start (a currently running "run" picks it up on
@@ -119,6 +126,9 @@ Pool-wide settings come from PR_POOL_* environment variables:
   PR_POOL_ALLOWED_TOOLS    claude --allowed-tools allowlist for workers (default: conservative deny-by-default set; empty clears the flag)
   PR_POOL_CONFIG           explicit config.toml path (default <RepoRoot>/.pr-pool/config.toml)
   PR_POOL_ACTIVITY_RING    dispatch-outcome activity ring buffer capacity (default 512)
+  PR_POOL_TUI_INTERVAL     tui's poll interval; floor-clamped to 250ms (default 1s). CLI flag >
+                           PR_POOL_TUI_INTERVAL env > built-in default; a value that fails to
+                           parse as a duration is a usage error naming the bad value.
   PR_POOL_LOG_DIR          event-log/state directory: gates/, events.jsonl, the discovery record
                            (default: the XDG state dir, e.g. ~/.local/state/pr-pool)
   PR_POOL_QUOTA_PAUSED     quota-paused gate file path override (default <PR_POOL_LOG_DIR>/gates/quota-paused)
@@ -170,6 +180,7 @@ const (
 	routeIngestEvent                   // manager->core callback: forward events on stdin to the running core (.rest)
 	routePushInject                    // operator: inject one event into the running core (.rest)
 	routeStatus                        // operator: inspect the running core (Task 3.8, .rest)
+	routeTUI                           // operator: continuous-interactive view over status/pause/resume (Task 4.2, .rest); never fails on "no running core" (ADR 0036)
 	routeSelfStatus                    // manager->core callback: push the caller's own self-status to the running core (.rest)
 	routePause                         // file-direct: set gate .gate directly on its file-backed state (INV-LIFE-2); never Discover/Dial
 	routeResume                        // file-direct: clear gate .gate, or every gate with .allGates; never Discover/Dial
@@ -259,6 +270,12 @@ func route(argv []string) routeResult {
 		// Task 3.8: its own --json/--socket/--token flags, parsed in its own
 		// handler, with the same usage exit code every operator subcommand uses.
 		return routeResult{kind: routeStatus, rest: args[1:]}
+	case "tui":
+		// Task 4.2: its own --socket/--token flags (no --json — it is a
+		// terminal UI), parsed in its own handler. Unlike every other
+		// operator subcommand it never fails on "no running core" (ADR
+		// 0036); that divergence lives in runTUI, not in routing.
+		return routeResult{kind: routeTUI, rest: args[1:]}
 	case "self-status":
 		// Same reason as ingest-event: its own --socket/--token flags, parsed in its
 		// own handler, with the same usage exit code (routeUsageErr would produce).
