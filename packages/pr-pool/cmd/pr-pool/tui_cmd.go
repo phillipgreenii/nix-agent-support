@@ -8,19 +8,18 @@ import (
 	"os"
 	"time"
 
-	// Blank-imported (Task 4.2): this packet's job is to add these three
-	// pinned deps to go.mod/gomod2nix.toml before any real consumer exists —
-	// Task 4.3 (internal/tui/render) is the first consumer of
-	// lipgloss/colorprofile, Task 4.5 (internal/tui) of bubbletea. With
-	// nothing importing them yet, a plain `go mod tidy` (Global Constraints'
-	// "New Go deps" step, run as part of this packet's own validation) would
-	// immediately prune them again; a blank import pins the exact version
-	// without pretending this stub consumes it.
-	_ "github.com/charmbracelet/bubbletea"
+	// Blank-imported (Task 4.2): colorprofile/lipgloss have no direct
+	// consumer in this file -- internal/tui/render (Task 4.3) and
+	// internal/tui (Task 4.5, below) use them -- but this file is what
+	// go.mod/gomod2nix.toml first pinned them from, so the blank import
+	// stays to document that provenance rather than implying this file
+	// itself needs them.
 	_ "github.com/charmbracelet/colorprofile"
 	_ "github.com/charmbracelet/lipgloss"
 
 	"github.com/phillipgreenii/pr-pool/conformance"
+	"github.com/phillipgreenii/pr-pool/internal/config"
+	"github.com/phillipgreenii/pr-pool/internal/tui"
 )
 
 // envTUIInterval is PR_POOL_TUI_INTERVAL, spelled out as its own constant
@@ -40,6 +39,13 @@ const tuiIntervalDefault = 1 * time.Second
 // rejected as a usage error.
 const tuiIntervalFloor = 250 * time.Millisecond
 
+// tuiRun is the internal/tui hand-off point, held as a package var (rather
+// than called directly) so a test can override it: the real tui.Run starts
+// an actual bubbletea program and blocks until the operator quits it, which
+// needs a real terminal and has no place in a `go test` run. Production
+// never reassigns this — it stays tui.Run.
+var tuiRun = tui.Run
+
 // runTUI implements `pr-pool tui [--socket ...] [--token ...]` (Task 4.2):
 // the operator front door onto the continuous-interactive view
 // interfaces.md's "tui is not a sixth affordance" describes — polling the
@@ -52,11 +58,9 @@ const tuiIntervalFloor = 250 * time.Millisecond
 // located (ADR 0036). With none discoverable, internal/tui renders its own
 // dedicated no-core screen and keeps polling — the poller decides when/
 // whether a core is up, not this route — so locateCore's error is
-// intentionally left unchecked here.
-//
-// Since internal/tui does not exist yet (the sibling packet covering Task
-// 4.5 builds it), the hand-off to tui.Run is stubbed with a TODO and this
-// always returns success once argument/interval parsing succeeds.
+// intentionally left unchecked here; ref's zero value (Ref{}) is exactly
+// what tui.NewSocketPoller expects when nothing has been discovered yet, and
+// SocketPoller performs its own Discover+Dial cycle on the first poll.
 func runTUI(args []string) int {
 	fs := flag.NewFlagSet("tui", flag.ContinueOnError)
 	fs.SetOutput(io.Discard) // we render usage/errors ourselves
@@ -87,13 +91,11 @@ func runTUI(args []string) int {
 	// unremarkable input to the poller, not a CLI failure.
 	ref, _ := locateCore(*socket, *token)
 
-	// TODO(Task 4.5): construct the poller from ref/interval and hand off to
-	// tui.Run (internal/tui), which renders the loading/no-core/quiescing/
-	// main screens and keeps polling on ErrNoRunningCore (ADR 0036) instead
-	// of exiting. internal/tui does not exist yet, so this is a stub that
-	// always succeeds.
-	_ = ref
-	_ = interval
+	poller := tui.NewSocketPoller(config.LogDir(), ref)
+	if err := tuiRun(tui.Options{Poller: poller, PollInterval: interval}); err != nil {
+		fmt.Fprintln(os.Stderr, "tui:", err)
+		return conformance.ExitError
+	}
 	return exitOK
 }
 
