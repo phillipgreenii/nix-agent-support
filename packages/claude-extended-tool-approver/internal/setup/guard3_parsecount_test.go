@@ -214,10 +214,17 @@ var guard3Fixtures = []string{
 	`kubectl exec pod1 -- bash -c "ls -la && echo done"`,
 	// kubectl exec with no shell at all (the quoteArgsAsLiteralWords path).
 	`kubectl exec pod1 -- /bin/true --flag "a;b"`,
-	// nix develop -c. UNLIKE docker/kubectl/safecmds, nix.go's
-	// innerCommandStructure deliberately hands EvaluateStructure a WRAPPED
-	// "bash -c <script>" leaf rather than unwrapping it (pg2-m132k's own
-	// reasoned design) -- so this row DOES hit the secrets residual above.
+	// nix develop -c. Before pg2-ipn7w, nix.go's innerCommandStructure handed
+	// EvaluateStructure a WRAPPED "bash -c <script>" leaf rather than
+	// unwrapping it (pg2-m132k's own reasoned design at the time), which is
+	// what made this row hit the secrets residual above. pg2-ipn7w gave
+	// nix.go the same unwrap-before-delegating step docker/kubectl/safecmds
+	// already had (cmdparse.UnwrapShellDashC, looped so a CHAIN of nested
+	// wrappers resolves too) — chiefly to close a real env-var-bypass gap
+	// (`nix develop -c bash -c "HOME=... cmd"` abstaining where `--command`
+	// caught it), but as a side effect this row is now clean like its
+	// siblings: no rule ever sees a leaf shaped like "bash -c <script>", so
+	// secrets.go's three-pass descent never fires on it either.
 	`nix develop -c bash -c "echo one; echo two"`,
 	// nix-shell --run. singleArgAfterFlag's single-token path parses the
 	// script directly with no wrapping "sh -c" leaf, so no residual here.

@@ -425,12 +425,49 @@ func singleArgAfterFlag(args []string, flag string) (string, bool) {
 // though — as I7 anticipates for the permanent text entry point — that text
 // exists nowhere in the ORIGINAL raw command (it is a safely-requoted
 // reconstruction of already-decoded values, not a substring of it).
+//
+// # pg2-ipn7w — NESTED bash -c / sh -c IS UNWRAPPED TOO
+//
+// The single leaf the steps above produce can ITSELF be `bash -c <script>` /
+// `sh -c <script>` — nix's `-c`/`--command` hands the rest of argv to execve
+// directly (this file's own package doc), so `nix develop -c bash -c
+// "HOME=... cmd"` really does start a SECOND, nested shell on <script>, not
+// an opaque leaf this rule chain should stop at. Before this bead, that
+// second layer was never unwrapped here: the resulting leaf (Executable
+// "bash", Args ["-c", "HOME=... cmd"]) was handed to EvaluateStructure
+// as-is, so an env-var rule that inspects a leaf's OWN leading assignment
+// (HOME, PATH, ...) never got a chance to see the assignment buried inside
+// the script argument at all — it abstained, even though the equivalent
+// `nix develop --command bash -c "HOME=... cmd"` was (coincidentally: see
+// argsAfterFlag's own doc on why `-c` is tried before `--command`) already
+// caught.
+//
+// The loop below unwraps repeatedly via cmdparse.UnwrapShellDashC (docker.go's
+// `scriptArg` check, generalized — see that function's own doc), so a CHAIN
+// of nested `bash -c 'bash -c "..."'` wrappers is fully resolved too. It
+// keeps I12 intact at every step: `source` and `leaves` are reassigned
+// together, so `leaves` is always genuinely `cmdparse.Parse(source)` for
+// whichever `source` the loop last settled on. It stops the first time the
+// leaf set is no longer EXACTLY one bash/sh -c-shaped leaf — either the
+// wrapping ends (an ordinary command) or the script itself splits into more
+// than one leaf (`bash -c "echo hi; echo bye"` becomes the two leaves `echo
+// hi` and `echo bye`, each now independently visible to the rest of the
+// rule chain instead of hiding inside one opaque argument).
 func innerCommandStructure(rest []string) ([]cmdparse.ParsedCommand, string) {
 	source := rest[0]
 	if len(rest) > 1 {
 		source = quoteJoin(rest)
 	}
-	return cmdparse.Parse(source), source
+	leaves := cmdparse.Parse(source)
+	for len(leaves) == 1 {
+		script, ok := cmdparse.UnwrapShellDashC(leaves[0])
+		if !ok {
+			break
+		}
+		source = script
+		leaves = cmdparse.Parse(source)
+	}
+	return leaves, source
 }
 
 // quoteJoin renders args as a shell command line that reparses back to
