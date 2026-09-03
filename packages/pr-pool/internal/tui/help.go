@@ -44,11 +44,11 @@ func (m *Model) renderModal() string {
 	}
 }
 
-// helpFooter is spec §6's "? ... footer carries the version pair +
-// error-log path": this TUI client's own build identifier alongside the
-// core's last-reported CoreInfo.Version, plus where the ErrorLogger is
-// writing. An empty cacheDir renders no error-log line -- there is
-// nowhere to point to (Options.CacheDir unset).
+// helpFooter carries the version pair + error-log path [design: Task 4.8
+// Files]: this TUI client's own build identifier alongside the core's
+// last-reported CoreInfo.Version, plus where the ErrorLogger is writing.
+// An empty cacheDir renders no error-log line -- there is nowhere to
+// point to (Options.CacheDir unset).
 func (m *Model) helpFooter() string {
 	coreVersion := m.reply.Core.Version
 	if coreVersion == "" {

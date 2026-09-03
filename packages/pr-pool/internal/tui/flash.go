@@ -50,9 +50,10 @@ func (m *Model) flashClearCmd() tea.Cmd {
 // Interfaces]. Because flashUntil is always `now + flashTTL` and `now`
 // only ever advances between calls, a later call can never produce an
 // EARLIER flashUntil than a still-active earlier call -- the TTL can only
-// ever extend, never shorten, exactly spec §7's "a flash set at t0 is
-// gone by t0+5s+eps; a second flash set at t0+3s EXTENDS (never shortens)
-// the visible window past what the first alone would have given."
+// ever extend, never shorten [design: Task 4.8 Step 4]: a flash set at t0
+// is gone by t0+5s+eps; a second flash set at t0+3s extends (never
+// shortens) the visible window past what the first alone would have
+// given.
 func (m *Model) setFlash(msg string, level FlashLevel) {
 	m.flash = msg
 	m.flashLevel = level

@@ -8,8 +8,8 @@ import (
 )
 
 // TestBindingsToHelpRows_ListsEveryBinding: the [?] modal is generated
-// FROM the Bindings table (spec §6's own "generated from the Bindings
-// table" phrase) -- every row, in the same order, keys " | "-joined.
+// FROM the Bindings table -- every row, in the same order, keys
+// " | "-joined.
 func TestBindingsToHelpRows_ListsEveryBinding(t *testing.T) {
 	rows := bindingsToHelpRows()
 	if len(rows) != len(Bindings) {

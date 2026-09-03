@@ -139,7 +139,7 @@ func TestGateToggle_FailureFlash(t *testing.T) {
 	}
 }
 
-// TestGateToggle_SuccessFlashNamesEffectiveAggregate is spec §6's own
+// TestGateToggle_SuccessFlashNamesEffectiveAggregate is the design's own
 // worked example: clearing quota_paused while cicd_down remains set must
 // flash that the pool is STILL paused, not imply it resumed.
 func TestGateToggle_SuccessFlashNamesEffectiveAggregate(t *testing.T) {
@@ -170,8 +170,8 @@ func TestGateToggle_SuccessFlashNamesEffectiveAggregate(t *testing.T) {
 }
 
 // TestResumeAllGates_NoopOutsideGatesModal: R only means anything inside
-// the open Gates modal (spec §6's own g-row text) -- everywhere else it
-// must be a true no-op, never an accidental resume.
+// the open Gates modal (the design's own g-row text) -- everywhere else
+// it must be a true no-op, never an accidental resume.
 func TestResumeAllGates_NoopOutsideGatesModal(t *testing.T) {
 	called := false
 	m := newTestModel(&stubPoller{

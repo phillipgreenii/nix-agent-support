@@ -49,9 +49,9 @@ func (m *Model) handleToggleQuotaGate() tea.Cmd {
 	return m.startGateToggle(verb)
 }
 
-// handleResumeAllGates implements spec §6's "R = resume-all inside the
-// [gates] modal" sub-binding: a no-op everywhere except while the Gates
-// modal is open. "All" is bounded by what Poller.ToggleGate can actually
+// handleResumeAllGates implements the "R = resume-all inside the Gates
+// modal" sub-binding [design: Task 4.8 Files]: a no-op everywhere except
+// while the Gates modal is open. "All" is bounded by what Poller.ToggleGate can actually
 // reach (Task 4.4 Interfaces, internal/core/core.go's handleGateToggle):
 // the socket resume verb's request carries no "gate" field at all, so it
 // always targets the DEFAULT gate (quota_paused) -- cicd_down is
@@ -96,9 +96,9 @@ func (m *Model) startGateToggle(verb string) tea.Cmd {
 // state (the no-optimistic-flip contract's other half) -- it applies
 // `effective` to the quota_paused gate locally so the operator sees the
 // new state immediately rather than waiting for the next poll tick, and
-// flashes the resulting EFFECTIVE aggregate, not just the toggled gate
-// (spec §6's own worked example: clearing quota_paused while cicd_down
-// remains set must not imply the pool resumed).
+// flashes the resulting EFFECTIVE aggregate, not just the toggled gate:
+// clearing quota_paused while cicd_down remains set must not imply the
+// pool resumed [design: Task 4.8 (worked flash example)].
 func (m *Model) applyGateToggleResult(msg gateToggleResultMsg) tea.Cmd {
 	m.gateTogglePending = false
 	if msg.err != nil {
@@ -112,10 +112,10 @@ func (m *Model) applyGateToggleResult(msg gateToggleResultMsg) tea.Cmd {
 }
 
 // quotaGateFlashText names the resulting EFFECTIVE aggregate, not just the
-// toggled gate [design: spec §6]: clearing quota_paused while cicd_down
-// remains set still leaves the pool paused overall (INV-LIFE-2's
-// OR-effective semantics), and the flash says so rather than implying the
-// pool resumed.
+// toggled gate [design: Task 4.8 (worked flash example)]: clearing
+// quota_paused while cicd_down remains set still leaves the pool paused
+// overall (INV-LIFE-2's OR-effective semantics), and the flash says so
+// rather than implying the pool resumed.
 func (m *Model) quotaGateFlashText(effective string) string {
 	if effective == "paused" {
 		return "quota gate paused — pool now PAUSED"

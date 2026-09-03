@@ -6,8 +6,9 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// specKeys are every key spec §6's table names -- this packet's own Files
-// entry for keybindings.go: "covering every key in spec §6's table".
+// specKeys are every key the design's key table names -- this packet's
+// own Files entry for keybindings.go: "covering every key in [the]
+// table" [design: Task 4.8 Files].
 var specKeys = []string{"P", "g", "l", "?", "tab", "shift+tab", "enter", "[", "]", "esc", "q"}
 
 func TestBindings_CoverEverySpecKey(t *testing.T) {
@@ -21,15 +22,15 @@ func TestBindings_CoverEverySpecKey(t *testing.T) {
 			}
 		}
 		if !found {
-			t.Errorf("Bindings has no entry for key %q (spec §6's table)", want)
+			t.Errorf("Bindings has no entry for key %q (the design's key table)", want)
 		}
 	}
 }
 
-// TestQuit_WorksEvenInsideAModal is spec §6's own q row, literally: q
-// quits even while a modal is open (ux-8) -- Bindings dispatch
-// (model.go's Update) must reach the quit Binding regardless of
-// activeModal/screen state.
+// TestQuit_WorksEvenInsideAModal is the design's own q row, literally: q
+// quits even while a modal is open -- Bindings dispatch (model.go's
+// Update) must reach the quit Binding regardless of activeModal/screen
+// state.
 func TestQuit_WorksEvenInsideAModal(t *testing.T) {
 	m := newTestModel(nil)
 	m.activeModal = ModalHelp
@@ -108,8 +109,8 @@ func TestEsc_ClosesModalAndRestoresPriorScreen(t *testing.T) {
 	}
 }
 
-// TestEsc_NoopAtRoot: with no modal open, esc is a no-op (ux-8 -- never
-// quits at root; this packet builds no drill-down screen to back out of).
+// TestEsc_NoopAtRoot: with no modal open, esc is a no-op (never quits at
+// root; this packet builds no drill-down screen to back out of).
 func TestEsc_NoopAtRoot(t *testing.T) {
 	m := newTestModel(nil)
 	m.screen = screenMain

@@ -25,7 +25,7 @@ func TestFlash_SetArmsTTL(t *testing.T) {
 	}
 }
 
-// TestFlash_ExtendNeverShortens is spec §7's own invariant, generalized
+// TestFlash_ExtendNeverShortens is the design's own invariant, generalized
 // beyond the literal t0/t0+3s illustration: setFlash's flashUntil is
 // always `now + flashTTL`, and `now` only ever advances between two
 // calls, so a SECOND call's flashUntil can never be earlier than a first
@@ -49,8 +49,8 @@ func TestFlash_ExtendNeverShortens(t *testing.T) {
 	}
 }
 
-// TestFlash_ExtendPastWhatFirstAloneWouldHaveGiven reproduces spec §7's
-// literal worked example directly: a flash set at t0 is gone by
+// TestFlash_ExtendPastWhatFirstAloneWouldHaveGiven reproduces the
+// design's literal worked example directly: a flash set at t0 is gone by
 // t0+5s+eps; a second flash set at t0+3s (i.e. 2s before the first would
 // have expired) extends the visible window to (t0+3s)+5s = t0+8s, PAST
 // what the first alone would have given (t0+5s).

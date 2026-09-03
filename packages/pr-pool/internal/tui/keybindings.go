@@ -1,8 +1,8 @@
 // Package tui implements pr-pool's operator-facing terminal UI. This file
-// (Task 4.8) carries the keybinding table: every key spec §6's table names
-// (P, g, l, ?, tab/shift+tab, enter, [/], esc, q), plus the "R" sub-binding
-// spec §6's own g-row documents ("R = resume-all inside the modal").
-// Mirrors pa-monitor's own keybindings.go (packages/pa-monitor/internal/
+// (Task 4.8) carries the keybinding table: every key the design names
+// (P, g, l, ?, tab/shift+tab, enter, [/], esc, q), plus the "R"
+// sub-binding documented alongside g ("R = resume-all inside the
+// modal") [design: Task 4.8 Files]. Mirrors pa-monitor's own keybindings.go (packages/pa-monitor/internal/
 // tui/keybindings.go) shape exactly: a Binding table drives both Update's
 // keypress dispatch (model.go) and the [?] help modal (help.go's
 // bindingsToHelpRows) from one source of truth.
@@ -28,9 +28,9 @@ type Binding struct {
 // Handlers for keys whose target screen does not exist yet in this
 // packet's scope (tab/shift+tab -- Task 4.6's panes; enter/[/] -- Task
 // 4.7's drill-down) are deliberate no-op placeholders: the KEY is fully
-// covered here (spec §6's own acceptance bar), but there is nothing for it
-// to DO yet. The sibling packets that build those screens give the same
-// Binding rows real behavior; the row itself does not move.
+// covered here (this packet's own acceptance bar), but there is nothing
+// for it to DO yet. The sibling packets that build those screens give the
+// same Binding rows real behavior; the row itself does not move.
 var Bindings = []Binding{
 	{Keys: []string{"P"}, Description: "Toggle the quota gate (no optimistic flip)", Handle: (*Model).handleToggleQuotaGate},
 	{Keys: []string{"g"}, Description: "Gates modal", Handle: handleOpenGatesModal},
@@ -77,25 +77,25 @@ func handleOpenHelp(m *Model) tea.Cmd {
 	return nil
 }
 
-// handleFocusNext / handleFocusPrev step the pane focus cycle (spec §6's
+// handleFocusNext / handleFocusPrev step the pane focus cycle (the design's
 // tab/shift+tab row). Task 4.6 has not yet defined any focusable panes;
 // today these are no-op placeholders -- see the Bindings doc comment.
 func handleFocusNext(m *Model) tea.Cmd { return nil }
 func handleFocusPrev(m *Model) tea.Cmd { return nil }
 
-// handleEnterDrillDown mirrors handleFocusNext for spec §6's enter row --
-// Task 4.7's own concern (out of scope here, section 8).
+// handleEnterDrillDown mirrors handleFocusNext for the design's enter
+// row -- Task 4.7's own concern (out of scope here, section 8).
 func handleEnterDrillDown(m *Model) tea.Cmd { return nil }
 
-// handlePrevSibling / handleNextSibling mirror handleFocusNext for spec
-// §6's "[" / "]" row -- also Task 4.7's own concern.
+// handlePrevSibling / handleNextSibling mirror handleFocusNext for the
+// design's "[" / "]" row -- also Task 4.7's own concern.
 func handlePrevSibling(m *Model) tea.Cmd { return nil }
 func handleNextSibling(m *Model) tea.Cmd { return nil }
 
 // handleEsc closes an open modal, restoring the screen that was active
 // before it opened. With no modal open, esc is a no-op: this packet builds
-// no drill-down screen to back out of (Task 4.7's concern), and per ux-8
-// esc must never quit at root regardless.
+// no drill-down screen to back out of (Task 4.7's concern), and esc must
+// never quit at root regardless [design: Task 4.8 Files].
 func handleEsc(m *Model) tea.Cmd {
 	if m.activeModal != ModalNone {
 		m.activeModal = ModalNone
@@ -106,10 +106,10 @@ func handleEsc(m *Model) tea.Cmd {
 	return nil
 }
 
-// handleQuit implements spec §6's q row: quits unconditionally, even
-// inside a modal (ux-8) -- Bindings dispatch (model.go's Update) reaches
-// this Binding regardless of m.screen/m.activeModal, so no special-casing
-// is needed here to satisfy that.
+// handleQuit implements the design's q row: quits unconditionally, even
+// inside a modal -- Bindings dispatch (model.go's Update) reaches this
+// Binding regardless of m.screen/m.activeModal, so no special-casing is
+// needed here to satisfy that.
 func handleQuit(m *Model) tea.Cmd {
 	return tea.Quit
 }
