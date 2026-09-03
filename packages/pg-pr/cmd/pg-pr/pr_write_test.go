@@ -452,6 +452,43 @@ func TestPRCreate_WIP_Persisted(t *testing.T) {
 	}
 }
 
+// TestPRCreate_WIP_PersistFailure_Propagates proves persistWIPAtCreation's
+// error path is not swallowed: when the store cannot be opened (here, by
+// making store.DefaultPath() a directory instead of a file -- the same
+// technique store's own tests use to force store.Open to fail), `pr create
+// --wip` surfaces that failure as its own command error, even though the
+// upstream PR has already been created (a partial-success state the caller
+// must be told about, unlike the best-effort merge-request-bead path below
+// it in runPRCreate).
+func TestPRCreate_WIP_PersistFailure_Propagates(t *testing.T) {
+	resetPRWriteFlags()
+	_, _ = swapFakes(t)
+	setListStateHome(t)
+	if err := os.MkdirAll(store.DefaultPath(), 0o755); err != nil {
+		t.Fatalf("mkdir store path as a directory: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{
+		"pr", "create",
+		"--repo", "foo/bar",
+		"--title", "WIP PR",
+		"--head", "feat/wip",
+		"--body", "hello",
+		"--wip",
+	})
+
+	err := rootCmd.Execute()
+	if err == nil {
+		t.Fatal("expected the store-open failure to surface as a command error")
+	}
+	if !strings.Contains(err.Error(), "persist --wip") {
+		t.Errorf("expected the error to name the --wip persistence step; got %q", err.Error())
+	}
+}
+
 // TestPRCreate_WIP_And_GenerateTitle pins --wip working together with
 // --generate-title (pg2-4dz88.8.4, landed): both flags combined generate the
 // title AND force draft=true.
