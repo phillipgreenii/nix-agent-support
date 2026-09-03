@@ -110,15 +110,22 @@ var injectorAskVars = map[string]bool{
 //   - a value that PRESERVES the caller's own value and only prepends/appends
 //     STATIC ABSOLUTE path components is affirmatively safe → Approve;
 //   - anything else — a REPLACEMENT, or a component behind an expansion we cannot
-//     classify — is escalated to Ask (the user decides).
+//     classify — is escalated to Ask (the user decides) for PATH, or Reject for
+//     HOME specifically (pg2-sir2l, once the freshness-idiom reliefs above have
+//     all failed to clear it — see evaluateAssignment's own `case ev.Name ==
+//     "HOME":` for the reason text and the pg2-kxmpe-shaped rationale).
 //
-// The fallback is Ask and MUST NOT be softened to Abstain. Abstain cannot enforce
-// "never auto-approve": the safe-commands rule approves a bare `export`, and
-// first-match-wins would let that win, so only a decisive Ask/Reject actually
-// prevents auto-approval (pg2-gkd5e/fbbf3ade). Re-verified on this tree — with the
-// fallback demoted to Abstain, `export PATH=/replaced`, `PATH=/replaced echo hi`,
-// `export HOME=/tmp/fakehome`, `PATH=$(mktemp -d) echo hi` and
-// `PATH=$(bd create x) echo hi` all silently return `allow`.
+// The fallback is Ask (PATH) / Reject (HOME) and MUST NOT be softened to Abstain
+// for either. Abstain cannot enforce "never auto-approve": the safe-commands rule
+// approves a bare `export`, and first-match-wins would let that win, so only a
+// decisive Ask/Reject actually prevents auto-approval (pg2-gkd5e/fbbf3ade).
+// Re-verified on this tree — with the fallback demoted to Abstain,
+// `export PATH=/replaced`, `PATH=/replaced echo hi`, `export HOME=/tmp/fakehome`,
+// `PATH=$(mktemp -d) echo hi` and `PATH=$(bd create x) echo hi` all silently
+// return `allow`. pg2-sir2l's HOME->Reject tightening is a STRICTER move than
+// this invariant guards against (Reject is more restrictive than Ask), so it
+// does not conflict with "MUST NOT be softened to Abstain" — that phrase rules
+// out loosening, not tightening.
 //
 // # OPERATOR RULING 2026-07-30 (pg2-553z3): KEEP STRICT
 //
@@ -228,7 +235,9 @@ var askVars = map[string]bool{
 //     adds only static absolute path components — pg2-0q99a/pg2-qhhil), or
 //     isHermeticEnvReplacement (a static, reasonable REPLACEMENT under `env -i` —
 //     pg2-d71my), or, for HOME only, isHermeticHomeReplacement (a REPLACEMENT
-//     grounded in a `mktemp -d` fresh temp dir — pg2-d71my); and
+//     grounded in a directory this command proves is fresh: a `mktemp -d` fresh
+//     temp dir — pg2-d71my — or an earlier "&&"-chained `rm -rf && mkdir -p` /
+//     bare `mkdir` on the same directory — pg2-sir2l); and
 //  3. the assignment IS the whole leaf (assignmentIsWholeLeaf) — a command-less
 //     leaf or one of the `export`/`env`/`command` assignment builtins.
 //
@@ -658,33 +667,56 @@ func isHermeticEnvReplacement(ev cmdparse.EnvAssignment) bool {
 }
 
 // isHermeticHomeReplacement reports whether a HOME REPLACEMENT value is grounded
-// in a `mktemp -d` fresh temporary directory this SAME command created — either
-// DIRECTLY (`HOME=$(mktemp -d)`, cmdparse.IsFreshTempDirAssignment) or via a
-// variable the command bound to one EARLIER (`T=$(mktemp -d); … HOME="$T/h"`),
-// composed here with cmdparse.ExpandInCommand exactly the way
-// preservesCallerValue composes it against the in-command-assigned $VAR middle
-// option pg2-qhhil wired in — the identical seam, reused rather than
-// re-derived, gated here on tempDirVars (cmdparse.InCommandTempDirVars via
-// primarycommit.LeafTempDirVars) instead of on vars.
+// in a directory this SAME command proves is fresh, by ONE of three idioms:
+//
+//  1. a `mktemp -d` fresh temporary directory, either DIRECTLY
+//     (`HOME=$(mktemp -d)`, cmdparse.IsFreshTempDirAssignment) or via a
+//     variable the command bound to one EARLIER (`T=$(mktemp -d); …
+//     HOME="$T/h"`), composed here with cmdparse.ExpandInCommand exactly the
+//     way preservesCallerValue composes it against the in-command-assigned
+//     $VAR middle option pg2-qhhil wired in — the identical seam, reused
+//     rather than re-derived, gated here on tempDirVars
+//     (cmdparse.InCommandTempDirVars via primarycommit.LeafTempDirVars)
+//     instead of on vars (pg2-d71my, below);
+//  2. pg2-sir2l's widening: `rm -rf "$D" && mkdir -p "$D"` or a bare
+//     `mkdir "$D"`, "&&"-chained earlier in this SAME command — see
+//     isFreshlyEmptiedDirRelief's own doc for the full argument.
 //
 // # OPERATOR RULING 2026-08-17 (pg2-d71my, decided together with pg2-qhhil)
 //
-// Authorizes this relief: a `mktemp -d` directory is freshly created and
-// session-unique, so nothing — attacker or otherwise — could have pre-staged
-// content there in advance, which is precisely what makes a HOME replacement
-// pointed at one NOT the PATH-hijack shape the decisive Ask otherwise exists to
-// catch. It is scoped to HOME only (the caller checks ev.Name == "HOME" before
-// calling this) — PATH's own replacement relief is isHermeticEnvReplacement's
-// `env -i` shape, a deliberately different and narrower gate, not this one.
+// Authorizes the mktemp -d relief: a `mktemp -d` directory is freshly created
+// and session-unique, so nothing — attacker or otherwise — could have
+// pre-staged content there in advance, which is precisely what makes a HOME
+// replacement pointed at one NOT the PATH-hijack shape the decisive Ask
+// otherwise exists to catch. It is scoped to HOME only (the caller checks
+// ev.Name == "HOME" before calling this) — PATH's own replacement relief is
+// isHermeticEnvReplacement's `env -i` shape, a deliberately different and
+// narrower gate, not this one. pg2-sir2l's rm+mkdir/bare-mkdir widening below
+// gives the SAME "provably empty at the moment HOME is set to it" guarantee
+// through a different, more common shell idiom and is scoped identically.
 //
 // tempDirVars nil is the ordinary case (no qualifying earlier mktemp -d
 // assignment): the direct-value check still runs (it needs no vars at all), and
 // the var-ref composition below correctly reports false via ExpandInCommand's
-// own `len(vars) == 0` fail-safe.
-func isHermeticHomeReplacement(ev cmdparse.EnvAssignment, tempDirVars map[string]string) bool {
+// own `len(vars) == 0` fail-safe. rootLeaves/at (pg2-sir2l) are the caller's own
+// envvarsRootScope result for the leaf this assignment belongs to — the same
+// expression-root recovery mechanism 2 (downstreamConsumerExists) already
+// uses, now also needed here since idiom 2 above must scan EARLIER leaves of
+// the same root expression, not merely this rule's own (possibly partial)
+// reparse.
+func isHermeticHomeReplacement(ev cmdparse.EnvAssignment, tempDirVars map[string]string, rootLeaves []cmdparse.ParsedCommand, at int) bool {
 	if cmdparse.IsFreshTempDirAssignment(ev) {
 		return true
 	}
+	// This ExpansionVarRef gate is shared by BOTH idiom 2's checks below (the
+	// pre-existing tempDirVars one and pg2-sir2l's isFreshlyEmptiedDirRelief):
+	// a value with no `$` reference at all (cmdparse.ExpansionNone, e.g. a bare
+	// literal `HOME=/tmp/testhome`) never reaches either, even if an identical
+	// literal path were rm+mkdir'd earlier — narrower than strictly necessary
+	// (a literal-repeated-path variant is not recognized), but every sampled
+	// corpus row and the bead's own worked examples are variable-based, so
+	// this is not a widening this bead's evidence calls for; relaxable later
+	// if measurement calls for it.
 	if ev.Expansion != cmdparse.ExpansionVarRef {
 		return false
 	}
@@ -692,8 +724,195 @@ func isHermeticHomeReplacement(ev cmdparse.EnvAssignment, tempDirVars map[string
 	if !ok {
 		return false
 	}
-	_, expanded := cmdparse.ExpandInCommand(value, tempDirVars)
-	return expanded
+	if _, expanded := cmdparse.ExpandInCommand(value, tempDirVars); expanded {
+		return true
+	}
+	return isFreshlyEmptiedDirRelief(value, rootLeaves, at)
+}
+
+// ==================== pg2-sir2l: RM+MKDIR / BARE-MKDIR FRESHNESS WIDENING ====================
+//
+// isHermeticHomeReplacement recognized exactly ONE freshness idiom (`mktemp
+// -d`) until this bead. The real-world corpus this bead measured (97 sampled
+// HOME-ask rows, 72 categorized miss-uncaught) sets HOME to an obviously
+// scratch/test-scoped value with NO mktemp call at all — `$TMPDIR`,
+// `$SCRATCH/home`, a bats `"$TMPDIR/bats-home-$$"` idiom, and similar — as
+// part of testing THIS RULE MODULE ITSELF. None of those qualify for the
+// mktemp relief, but two OTHER shell idioms give the identical structural
+// guarantee (the directory is provably empty at the moment HOME is set to
+// it), and both are recognized below:
+//
+//  1. `rm -rf "$D" && mkdir -p "$D"` — rm's exit status GATES mkdir via "&&",
+//     so mkdir only ever runs once rm has fully succeeded in clearing $D. A
+//     `;`-separated `rm -rf "$D"; mkdir -p "$D"` does NOT prove freshness and
+//     is deliberately NOT recognized: rm's exit status never gates mkdir, so
+//     a partial failure (permission error, immutable file, busy mount — real
+//     cases `-f` is designed to swallow rather than fail loudly on) leaves
+//     mkdir -p a silent no-op over stale content.
+//  2. a bare `mkdir "$D"` (no `-p`/`--parents`) on its own — if $D already
+//     existed, a plain mkdir fails and the chain halts, so a SUCCESSFUL
+//     continuation past it already proves $D did not pre-exist.
+//
+// Both MUST be "&&"-chained to the leaf being judged, never ";"-separated —
+// exactly the existing cmdparse.ParsedCommand.AndChainID distinction
+// internal/rules/primarycommit's selfCreatedDir/selfCreatedTempDir already use
+// for the identical existence-vs-freshness argument (that field's own doc
+// comment, parser.go, has the full "&&"-vs-";" reasoning: `mkdir -p "$D" && cd
+// "$D" && git commit` is safe to relax because mkdir's success is REQUIRED for
+// the commit to run at all, while `mkdir -p "$D"; cd "$D" && git commit` is
+// NOT — a failed, non-aborting mkdir there leaves the rest free to run
+// regardless). This bead reuses that exact mechanism rather than re-deriving
+// an equivalent one for HOME.
+//
+// Matching is by RAW TOKEN TEXT (cmdparse.LiteralAssignmentValueText), not by
+// resolving a variable to its literal value: $D is very often a genuinely
+// AMBIENT variable this command never assigns ($TMPDIR, $SCRATCH, ...), and the
+// freshness guarantee holds regardless of what $D actually resolves to — only
+// "the rm/mkdir target and the HOME reference name the identical directory"
+// matters, which comparing the `$D`/literal spelling establishes without
+// needing to resolve it at all.
+//
+// # RECOMMENDED WORKFLOW IDIOMS FOR A FUTURE TEST/REPRO AUTHOR (pg2-sir2l)
+//
+// Redirecting HOME to a scratch/test directory (Go tests for this package,
+// bats tests, ad hoc `env -i HOME="$SCRATCH/..." bash -c '...'` repro
+// commands) is common and legitimate. Two shapes are auto-approved by this
+// bead and one is not, in order of preference:
+//
+//   - Shell-level, direct: `HOME=$(mktemp -d) ...` — the original pg2-d71my
+//     relief, still the simplest choice when a fresh directory (not a
+//     specific pre-chosen path) is all that is needed.
+//   - Shell-level, a pre-chosen path: `rm -rf "$D" 2>/dev/null && mkdir -p
+//     "$D" && HOME="$D" ...`, or a bare `mkdir "$D" && HOME="$D" ...` when
+//     $D is known not to exist yet — this bead's widening, for when the
+//     test/repro genuinely needs a STABLE, repeatable path rather than a
+//     fresh mktemp -d one. "&&" throughout is load-bearing (see this
+//     section's own doc above) — a ";"-separated `rm -rf "$D"; mkdir -p
+//     "$D"` does NOT qualify and stays denied.
+//   - For a Go TEST specifically, prefer `t.Setenv("HOME", dir)` (dir from
+//     `t.TempDir()` or similar) over a shell-level `HOME=` assignment in the
+//     test's own Bash invocation: it sets HOME for the Go PROCESS directly
+//     and never appears in any Bash command string this rule (or the CETA
+//     hook generally) ever inspects, so there is nothing to approve or deny
+//     in the first place — strictly simpler than satisfying either idiom
+//     above, for the subset of the corpus (HOME=... go test ... shaped
+//     commands) that has this option available.
+//
+// A bare scratch-path assignment with NO freshness step
+// (`HOME="$SCRATCH/home" ...`, `HOME=$TMPDIR ...`) has none of these
+// properties and is denied by evaluateAssignment's HOME fallback (see that
+// function's `case ev.Name == "HOME":`) — restructure to one of the idioms
+// above rather than retrying variations of the same unguarded shape.
+
+// soleMkdirTarget reports the SOLE non-flag argument of an `mkdir` leaf, and
+// whether `-p`/`--parents` was also given. Mirrors primarycommit.mkdirTarget's
+// own "exactly one non-flag argument" narrowness deliberately: a multi-target
+// `mkdir a b` is left unrecognized (found != 1) rather than guessed at.
+func soleMkdirTarget(leaf cmdparse.ParsedCommand) (target string, hasP bool, ok bool) {
+	if filepath.Base(leaf.Executable) != "mkdir" {
+		return "", false, false
+	}
+	found := 0
+	for _, a := range leaf.Args {
+		if a == "-p" || a == "--parents" {
+			hasP = true
+			continue
+		}
+		if strings.HasPrefix(a, "-") {
+			continue
+		}
+		found++
+		target = a
+	}
+	if found != 1 {
+		return "", false, false
+	}
+	return target, hasP, true
+}
+
+// soleRmRfTarget reports the SOLE non-flag argument of an `rm` leaf that
+// carries BOTH a recursive (-r/-R/--recursive) and a force (-f/--force) flag —
+// the one spelling guaranteed to either fully remove the target or exit
+// nonzero, never silently leave stale content behind (the load-bearing
+// property this idiom's "&&" depends on). Bundled short flags (`-rf`, `-fr`)
+// and split short flags (`-r -f`, `-f -r`) are both recognized; a bare `-r` or
+// a bare `-f` alone is not (an interactive prompt or a refusal-on-nonempty are
+// exactly the silent-survival failure modes this idiom exists to rule out).
+func soleRmRfTarget(leaf cmdparse.ParsedCommand) (target string, ok bool) {
+	if filepath.Base(leaf.Executable) != "rm" {
+		return "", false
+	}
+	var recursive, force bool
+	found := 0
+	for _, a := range leaf.Args {
+		switch {
+		case a == "--recursive":
+			recursive = true
+		case a == "--force":
+			force = true
+		case strings.HasPrefix(a, "--"):
+			// some other long flag: neither recursive nor force, not a target.
+		case strings.HasPrefix(a, "-") && len(a) > 1:
+			for _, c := range a[1:] {
+				switch c {
+				case 'r', 'R':
+					recursive = true
+				case 'f':
+					force = true
+				}
+			}
+		default:
+			found++
+			target = a
+		}
+	}
+	if found != 1 || !recursive || !force {
+		return "", false
+	}
+	return target, true
+}
+
+// isFreshlyEmptiedDirRelief reports whether value — ev's HOME value, already
+// resolved to its LiteralAssignmentValueText by the caller (isHermeticHomeReplacement,
+// which needs that same text for its own var-ref/tempDirVars composition, so a
+// second, redundant call here is avoided) — is grounded in a directory an
+// EARLIER leaf, "&&"-chained to rootLeaves[at] (cmdparse.ParsedCommand.AndChainID),
+// proves is now definitely empty: see this section's own doc comment above for
+// the two recognized idioms and why "&&" (never ";") is load-bearing.
+//
+// value == "" (LiteralAssignmentValueText's failure sentinel, reused here by the
+// caller rather than threading a separate ok bool) never matches any rm/mkdir
+// target, so an unparseable value safely returns false with no separate check.
+func isFreshlyEmptiedDirRelief(value string, rootLeaves []cmdparse.ParsedCommand, at int) bool {
+	if value == "" || at < 0 || at >= len(rootLeaves) {
+		return false
+	}
+	chainID := rootLeaves[at].AndChainID
+	if chainID == 0 {
+		return false
+	}
+	rmCleared := map[string]bool{}
+	for i := 0; i < at; i++ {
+		leaf := rootLeaves[i]
+		if leaf.AndChainID != chainID {
+			continue
+		}
+		if t, ok := soleRmRfTarget(leaf); ok {
+			rmCleared[t] = true
+			continue
+		}
+		t, hasP, ok := soleMkdirTarget(leaf)
+		if !ok {
+			continue
+		}
+		if value != t && !strings.HasPrefix(value, t+"/") {
+			continue
+		}
+		if !hasP || rmCleared[t] {
+			return true
+		}
+	}
+	return false
 }
 
 // ==================== pg2-7sqk8: CONSUMPTION-SCOPED RELIEF ====================
@@ -1023,6 +1242,14 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		// seam per the operator ruling). Same base/local fallback reasoning as vars
 		// above.
 		tempDirVars := primarycommit.LeafTempDirVars(input.InCommandTempDirVars, parsed, i)
+		// rootLeaves/at (pg2-sir2l): the SAME expression-root recovery mechanism 2
+		// (below) already needed, now computed UNCONDITIONALLY — the rm+mkdir/
+		// bare-mkdir freshness widening (isHermeticHomeReplacement's new third
+		// branch, via isFreshlyEmptiedDirRelief) needs it for EVERY leaf's HOME
+		// assignment, not only a wholeLeaf one: a leading/scoped `HOME="$D" cmd`
+		// must qualify too, since the freshness proof is about an EARLIER leaf in
+		// the same "&&" chain, independent of whether THIS leaf is the whole leaf.
+		rootLeaves, at := envvarsRootScope(input, parsed, i)
 		// pg2-7sqk8 mechanism 2: computed ONCE per leaf, not per assignment — it
 		// depends only on the leaf's own position in the root expression, never on
 		// which variable's value is being judged, and only wholeLeaf leaves can ever
@@ -1030,11 +1257,10 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		// skipped entirely for a leaf beside a real command.
 		var hasDownstreamConsumer bool
 		if wholeLeaf {
-			rootLeaves, at := envvarsRootScope(input, parsed, i)
 			hasDownstreamConsumer = downstreamConsumerExists(rootLeaves, at)
 		}
 		for _, ev := range pc.EnvVars {
-			sub, subRefused := r.evaluateAssignment(ev, input, vars, tempDirVars, pc.EnvCleared, wholeLeaf, hasDownstreamConsumer, pc.Executable)
+			sub, subRefused := r.evaluateAssignment(ev, input, vars, tempDirVars, pc.EnvCleared, wholeLeaf, hasDownstreamConsumer, pc.Executable, rootLeaves, at)
 			refused = refused || subRefused
 			if sub.Decision == hookio.Approve {
 				if wholeLeaf && held == nil {
@@ -1121,8 +1347,14 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 // is pc.Executable, consulted by commandDoesNotDelegate only on the !wholeLeaf path.
 // All three reproduce the exact pre-pg2-7sqk8 behaviour when the leaf's own
 // command delegates (or there is a downstream consumer): neither new case matches
-// and the switch falls through to the pre-existing decisive Ask.
-func (r *Rule) evaluateAssignment(ev cmdparse.EnvAssignment, input *hookio.HookInput, vars, tempDirVars map[string]string, envCleared, wholeLeaf, hasDownstreamConsumer bool, leafExecutable string) (result hookio.RuleResult, refused bool) {
+// and the switch falls through to the pre-existing decisive Ask/Reject fallback.
+//
+// rootLeaves/at (pg2-sir2l) are the caller's own envvarsRootScope result for the
+// leaf this assignment belongs to — the identical expression-root recovery
+// hasDownstreamConsumer's own computation already uses, forwarded here so
+// isHermeticHomeReplacement's rm+mkdir/bare-mkdir widening can scan EARLIER
+// leaves of the same root expression for a qualifying freshness idiom.
+func (r *Rule) evaluateAssignment(ev cmdparse.EnvAssignment, input *hookio.HookInput, vars, tempDirVars map[string]string, envCleared, wholeLeaf, hasDownstreamConsumer bool, leafExecutable string, rootLeaves []cmdparse.ParsedCommand, at int) (result hookio.RuleResult, refused bool) {
 	name := r.Name()
 
 	// Base verdict from the variable NAME.
@@ -1177,10 +1409,10 @@ func (r *Rule) evaluateAssignment(ev cmdparse.EnvAssignment, input *hookio.HookI
 				Reason:   "sensitive env var is a static replacement under a hermetic env -i invocation: " + sanitizeReasonName(ev.Name),
 				Module:   name,
 			}
-		case ev.Name == "HOME" && isHermeticHomeReplacement(ev, tempDirVars):
+		case ev.Name == "HOME" && isHermeticHomeReplacement(ev, tempDirVars, rootLeaves, at):
 			result = hookio.RuleResult{
 				Decision: hookio.Approve,
-				Reason:   "HOME replacement is grounded in a fresh mktemp -d temporary directory: " + sanitizeReasonName(ev.Name),
+				Reason:   "HOME replacement is grounded in a directory this command proves is fresh (mktemp -d, or an earlier rm -rf && mkdir -p / bare mkdir): " + sanitizeReasonName(ev.Name),
 				Module:   name,
 			}
 		// pg2-7sqk8 mechanism 1 (consumption-scoped, NOT value-based — see this
@@ -1222,6 +1454,33 @@ func (r *Rule) evaluateAssignment(ev cmdparse.EnvAssignment, input *hookio.HookI
 				Decision: hookio.NoOpinion,
 				Reason:   "sensitive env var change has no consumer in the remainder of this expression: " + sanitizeReasonName(ev.Name),
 				Module:   name,
+			}
+		// pg2-sir2l: for HOME specifically, the remaining unclassified case flips
+		// from Ask to Reject — matching the pattern pg2-kxmpe already applied to
+		// the engine/envvars "genuinely unclassifiable" fallback elsewhere ("a
+		// deliberate stop, not a temporary one"). This is a strictly STRICTER
+		// change (Reject is more restrictive than Ask), so it does not conflict
+		// with the askVars doc comment's "fallback is Ask and MUST NOT be softened
+		// to Abstain" invariant — that invariant rules out loosening toward
+		// Abstain, not tightening toward Reject. PATH is deliberately UNCHANGED
+		// (stays Ask via the shared branch below): this bead's own operator
+		// decision is scoped to HOME only, and PATH's own replacement relief
+		// (isHermeticEnvReplacement's `env -i` shape) is a different, narrower
+		// gate the bead did not revisit.
+		case ev.Name == "HOME":
+			result = hookio.RuleResult{
+				Decision: hookio.Reject,
+				// pg2-kxmpe's required reason shape, reapplied here: (1) state
+				// plainly this cannot be verified and will not become approvable by
+				// retrying variations of the same shape; (2) name the concrete
+				// alternative; (3) say explicitly to restructure-and-retry ONCE, or
+				// stop — not keep retrying.
+				Reason: "HOME replacement cannot be verified safe, and retrying the same shape will not " +
+					"change that (a deliberate stop, not a temporary one — pg2-sir2l). Ground it in a " +
+					"freshness proof instead: HOME=$(mktemp -d), or rm -rf \"$D\" && mkdir -p \"$D\" (or a " +
+					"bare mkdir \"$D\") && HOME=\"$D\" — && only, never ;. Restructure once; otherwise stop " +
+					"and tell the user rather than retry variations: " + sanitizeReasonName(ev.Name),
+				Module: name,
 			}
 		default:
 			result = hookio.RuleResult{
