@@ -1236,6 +1236,88 @@ func TestClassifySubstitutionBody_Pg2IuapnSafeCommandsSync(t *testing.T) {
 	}
 }
 
+// TestClassifySubstitutionBody_Pg2Giq2vPsPgrepAdditions pins pg2-giq2v's addition of
+// `ps` to safeCmdSubstitutions and `pgrep` to fileReaderSubstitutions — the standard
+// idioms for checking whether a background job/daemon is still running (this
+// workspace's own bgrun/bgcheck conventions), which were denied inside a $(...)
+// command substitution purely because neither command was on either static list,
+// despite both being trusted unconditionally at command position by
+// `internal/rules/safecmds`' alwaysSafe.
+//
+// The two commands are NOT interchangeable for substitution-allowlist purposes and
+// this test pins why: `ps` has no man-page spelling, on any of the three man pages
+// checked (GNU/Linux procps-ng, BSD, macOS — the macOS/BSD one verified directly on
+// this machine, 2026-09-03), that introduces a file-path operand, so it is
+// unconditionally SubstitutionCleared like `tr`/`seq`. `pgrep` DOES have one —
+// `-F pidfile` — so it is dispositioned through readerArgsClearance like
+// `cut`/`paste`/`sort`: a deny-listed secret operand REFUSES, and any other
+// path-shaped operand (including a bare `-f PATTERN`, which LooksLikePath's
+// pg2-ujuda bare-relative-token widening treats as path-shaped too) DELEGATES
+// rather than being blanket-cleared.
+func TestClassifySubstitutionBody_Pg2Giq2vPsPgrepAdditions(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want SubstitutionClearance
+	}{
+		// --- ps: unconditionally cleared, every spelling checked has no file-path
+		//     operand (matches the bead's own reproduce-query samples). ---
+		{"ps -p PID -o etime= (bgcheck's own idiom)", "ps -p 87134 -o etime=", SubstitutionCleared},
+		{"ps -p PID --no-headers -o comm (GNU/Linux procps-ng spelling)", "ps -p 81421 --no-headers -o comm", SubstitutionCleared},
+		{"ps -p comma-list -o pid= (multiple PIDs, GNU spelling)", "ps -p 31464,73449,73463 -o pid=", SubstitutionCleared},
+		{"ps aux (BSD/macOS combined-flags spelling)", "ps aux", SubstitutionCleared},
+		{"ps -ef (Unix98/GNU spelling)", "ps -ef", SubstitutionCleared},
+		{"ps -eo pid,etime,comm (GNU -o keyword-list spelling)", "ps -eo pid,etime,comm", SubstitutionCleared},
+		// Even a CONTRIVED path-shaped argument stays cleared: no ps flag on any
+		// checked man page ever attributes an operand to a file, so there is no
+		// file read for this seam to have missed (the same proof pattern as `tr`'s
+		// own pinned row above).
+		{"ps holding a path-shaped argument still clears (no file operand exists on any spelling)", "ps /etc/shadow", SubstitutionCleared},
+		{"ps's own write-flag screen is a no-op (no MutatingFlags entry) and does not disqualify it", "ps -p 123 -o pid=", SubstitutionCleared},
+
+		// --- pgrep: dispositioned via readerArgsClearance, not blanket-cleared. ---
+		{"bare pgrep -f with no operand at all is cleared (reads only the process table)", "pgrep -f", SubstitutionCleared},
+		{"bare pgrep with no operands at all is cleared", "pgrep", SubstitutionCleared},
+		// The bead's own sampled idioms: a SEARCH PATTERN (not a path) as a
+		// separate token. LooksLikePath's pg2-ujuda bare-relative-token widening
+		// treats any non-flag, non-"$"/backtick token as path-shaped regardless of
+		// content, so these DELEGATE rather than blanket-clear — the same
+		// disposition a `grep` search pattern gets (see
+		// TestClassifySubstitutionBody_PathReadabilityIsDelegated's "grep pattern
+		// with quoted operator delegates" row) — and recursion's own model
+		// (`internal/rules/safecmds`' alwaysSafe) is what actually resolves this to
+		// `allow`, unconditionally, once delegated: this floor no longer forces a
+		// refusal for asking the question.
+		{"pgrep -f 'nix flake check' (bgcheck idiom) delegates, not blanket-cleared", "pgrep -f 'nix flake check'", SubstitutionDelegated},
+		{"pgrep -fl 'dolt sql-server' delegates, not blanket-cleared", "pgrep -fl 'dolt sql-server'", SubstitutionDelegated},
+		// A glued flag+pattern (`-fPATTERN`, no space, no "=") carries no separate
+		// operand token at all, exactly like `cut -f1` above — cleared, matching
+		// the "with no operand is cleared" pattern for the other dispositioned
+		// readers.
+		{"pgrep -fpattern (glued, no separate operand token) is cleared", "pgrep -fpattern", SubstitutionCleared},
+		// -F PIDFILE: a genuine file-path operand. A deny-listed secret REFUSES —
+		// this is the exact gap the bead exists to close: an unscreened admission
+		// would have converted this from "no rule knew pgrep" straight to Approve.
+		{"pgrep -F <secret path> is refused by readerArgsClearance's IsSecret screen", "pgrep -F ~/.ssh/id_rsa", SubstitutionRefused},
+		{"pgrep -F <deny-listed dotenv pidfile> is refused", "pgrep -F .env", SubstitutionRefused},
+		// -F with an ordinary (non-secret) path-shaped operand DELEGATES —
+		// dispositioned, not blanket-cleared, exactly like cut/paste/sort's own
+		// path-holding rows above.
+		{"pgrep -F <ordinary path> delegates, not blanket-cleared", "pgrep -F /var/run/mydaemon.pid", SubstitutionDelegated},
+		// pgrep has no write spelling at all (neither man page documents one, and
+		// it carries no MutatingFlags/substitutionWriteFlags entry), so this stays
+		// a pure reader.
+		{"pgrep -l firefox (long-output query, no path operand) delegates on the bare pattern token", "pgrep -l firefox", SubstitutionDelegated},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ClassifySubstitutionBody(tt.body); got != tt.want {
+				t.Errorf("ClassifySubstitutionBody(%q) = %v, want %v", tt.body, got, tt.want)
+			}
+		})
+	}
+}
+
 // TestStripGitDashC pins stripGitDashC's contract directly (pg2-jq8tn): which leading
 // `-C <path>` pairs it consumes, what it collects, and the one fail-closed case.
 func TestStripGitDashC(t *testing.T) {

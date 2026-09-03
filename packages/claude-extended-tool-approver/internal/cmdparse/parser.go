@@ -304,6 +304,24 @@ var safeCmdSubstitutions = map[string]bool{
 	// paths. So, exactly like `seq` above, no argument spelling can ever name a path
 	// this seam could have missed — there is no file read to disposition.
 	"tr": true,
+	// pg2-giq2v addition. `ps` is trusted UNCONDITIONALLY by
+	// `internal/rules/safecmds`' alwaysSafe (line 16) and belongs HERE, not on the
+	// dispositioned fileReaderSubstitutions list below, because — like `tr`/`seq`
+	// above — NO SPELLING of it has a file-path operand at all. Checked directly
+	// against the macOS/BSD ps(1) man page (this repo's own dev machine,
+	// 2026-09-03: every flag — `-A -a -C -c -d -E -e -f -G -g -h -j -L -l -M -m -O
+	// -o -p -t -U -u -w -X -x`, `-O fmt`/`-o fmt`, `-G gid[,gid...]`, `-g
+	// grp[,grp...]`, `-u uid[,uid...]`, `-p pid[,pid...]`, `-t tty[,tty...]`, `-U
+	// user[,user...]` — takes only numeric/name IDs, comma-lists of them, or a
+	// keyword/format string; none names a filesystem path) and against GNU/Linux
+	// procps-ng ps(1) (BSD-style, GNU-style and Unix98-style option sets: `aux`,
+	// `-ef`, `-eo pid,etime`, `--sort`, `-q pid[,pid...]`, …), whose option
+	// vocabulary is the same shape — PIDs, UIDs, GIDs, TTYs, and format/sort
+	// keyword strings, never a FILE. So — exactly like `tr`/`seq` above — no
+	// argument spelling can ever name a path this seam could have missed; see
+	// TestClassifySubstitutionBody_Pg2Giq2vPsPgrepAdditions for the pinned
+	// spellings from all three man pages.
+	"ps": true,
 }
 
 // fileReaderSubstitutions: read-only commands whose PATH ARGS are DISPOSITIONED rather
@@ -416,6 +434,27 @@ var fileReaderSubstitutions = map[string]bool{
 	// than assumed: `comm`, `join`, `column`. This seam must not trust a verb
 	// safe-commands itself does not.
 	"cut": true, "paste": true, "sort": true,
+	// pg2-giq2v addition. `pgrep` is trusted UNCONDITIONALLY at command position by
+	// `internal/rules/safecmds`' alwaysSafe (line 16) — but, UNLIKE `tr`/`seq`/`ps`
+	// above, it belongs HERE rather than in safeCmdSubstitutions, because it HAS a
+	// path-naming flag: `-F pidfile` (`--pidfile` on GNU/Linux procps-ng; confirmed
+	// directly against this machine's macOS/BSD pgrep(1)/pkill(1) man page,
+	// 2026-09-03 — "Restrict matches to a process whose PID is stored in the
+	// pidfile file", with the man page's own example `pgrep -F /tmp/.X0-lock`).
+	// `-F`'s operand is a SEPARATE argv token (no `=` form documented on either
+	// man page), which is exactly the shape readerArgsClearance already handles
+	// with zero extra code — see its own doc's "SEPARATE-TOKEN flag operand"
+	// note — so admitting `pgrep` here needs no new logic, only membership.
+	//
+	// pgrep never WRITES a file (no entry in MutatingFlags/substitutionWriteFlags,
+	// and neither man page documents an output-file flag), so it is a pure reader
+	// exactly like cut/paste/sort immediately above, and the same disposition rule
+	// applies: a deny-listed secret operand (e.g. `-F ~/.ssh/id_rsa`) REFUSES via
+	// secretpath.IsSecret, and any other path-shaped operand (including a bare
+	// `-f pattern` search term, which LooksLikePath's pg2-ujuda bare-relative-token
+	// widening treats as path-shaped too, conservatively) DELEGATES rather than
+	// being blanket-cleared — see TestClassifySubstitutionBody_Pg2Giq2vPsPgrepAdditions.
+	"pgrep": true,
 }
 
 // substitutionWriteFlags SUPPLEMENTS the shared MutatingFlags vocabulary
