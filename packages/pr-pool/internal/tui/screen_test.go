@@ -85,17 +85,25 @@ func TestView_ScreenMainRoutesToRenderMain(t *testing.T) {
 	}
 }
 
-// TestView_DrillDownStillPlaceholder pins Task 4.7's own remaining
-// out-of-scope boundary: screenDrillDown still renders the pre-4.6 minimal
-// placeholder until the sibling packet covering Task 4.7 builds its real
-// content.
-func TestView_DrillDownStillPlaceholder(t *testing.T) {
+// TestView_ScreenDrillDownRoutesToRenderDrillDown is Task 4.7's own
+// supersession of the pre-4.7 placeholder: screenDrillDown now renders the
+// real full-screen detail view + breadcrumb (drilldown.go's
+// renderDrillDown), distinct from the main/modal placeholders, driven by
+// whichever row m.drillKind/m.drillIndex currently select.
+func TestView_ScreenDrillDownRoutesToRenderDrillDown(t *testing.T) {
 	m := newTestModel(nil)
 	m.width, m.height = 80, 24
 	m.screen = screenDrillDown
+	m.drillKind = rowListener
+	m.reply = StatusReply{Listeners: []Listener{{Role: "reviewer"}}}
 
-	if got := m.View(); got != "pr-pool: main" {
-		t.Fatalf("screenDrillDown View() = %q, want the unchanged placeholder %q", got, "pr-pool: main")
+	got := m.View()
+
+	if !strings.Contains(got, "reviewer") {
+		t.Fatalf("screenDrillDown View() = %q, want it to name the drilled listener (reviewer)", got)
+	}
+	if !strings.Contains(got, "Config") {
+		t.Fatalf("screenDrillDown View() = %q, want it to include the Config section", got)
 	}
 }
 

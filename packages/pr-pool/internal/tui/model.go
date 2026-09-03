@@ -151,6 +151,24 @@ type Model struct {
 	// version pair alongside the core's own reported CoreInfo.Version.
 	clientVersion string
 
+	// -- Task 4.7: drill-down screens + sibling stepping --
+
+	// drillKind / drillIndex select which row screenDrillDown is currently
+	// showing: drillKind picks the Listeners or Sources slice, drillIndex
+	// is the position within it. Set by enterDrillDown (drilldown.go),
+	// moved by stepSibling ([ / ]); survives a poll refresh the same way
+	// the screen itself does (applyPollResult's own screenDrillDown guard,
+	// below) -- only the underlying reply data changes out from under it.
+	//
+	// Task 4.6 delivered only PANE-level focus (focusedPane, below), never
+	// a row-level cursor within a pane -- there is no keybinding anywhere
+	// in this package that moves a cursor up/down inside a pane's rows.
+	// Absent that, enterDrillDown always targets index 0 of the focused
+	// pane's kind: the freedom-boundary call this packet makes for an
+	// otherwise-undecided point [design: Task 4.7 (Binding decisions)].
+	drillKind  focusableRowKind
+	drillIndex int
+
 	// focusedPane selects which of the Listeners/Queues/Sources/Registry
 	// panes is the zone ladder's one FILL zone (zones.go's drop-order
 	// table: "Fill (the focused pane)") -- the other three are non-fill,
@@ -336,12 +354,11 @@ func (m *Model) applyPollErr(err error) {
 // View implements tea.Model. The width==0 guard reuses pa-monitor's own
 // pre-first-WindowSizeMsg contract (packages/pa-monitor/internal/tui/
 // view.go); screenLoading renders the same literal regardless of width
-// [design: Task 4.5 Step 4]. screenMain now renders the real pinned zone
-// ladder/banner/dashboard panes (Task 4.6, this packet) via renderMain;
-// screenDrillDown still shares the OLD minimal placeholder -- the
-// drill-down screen's own content is the sibling packet covering Task 4.7
-// (out of scope here, section 8). screenModal routes to real content
-// (help.go's renderModal): Task 4.8's own modals are in scope.
+// [design: Task 4.5 Step 4]. screenMain renders the real pinned zone
+// ladder/banner/dashboard panes (Task 4.6) via renderMain; screenDrillDown
+// renders the full-screen detail view + breadcrumb (Task 4.7's own
+// renderDrillDown). screenModal routes to real content (help.go's
+// renderModal): Task 4.8's own modals.
 func (m *Model) View() string {
 	if m.width == 0 || m.screen == screenLoading {
 		return "loading…"
@@ -356,7 +373,7 @@ func (m *Model) View() string {
 	case screenMain:
 		return m.renderMain()
 	case screenDrillDown:
-		return "pr-pool: main"
+		return m.renderDrillDown()
 	default:
 		return "loading…"
 	}

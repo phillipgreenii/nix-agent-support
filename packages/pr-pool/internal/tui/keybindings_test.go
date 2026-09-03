@@ -109,8 +109,8 @@ func TestEsc_ClosesModalAndRestoresPriorScreen(t *testing.T) {
 	}
 }
 
-// TestEsc_NoopAtRoot: with no modal open, esc is a no-op (never quits at
-// root; this packet builds no drill-down screen to back out of).
+// TestEsc_NoopAtRoot: with no modal open and no drill-down open, esc is a
+// no-op -- it never quits at root.
 func TestEsc_NoopAtRoot(t *testing.T) {
 	m := newTestModel(nil)
 	m.screen = screenMain
@@ -121,6 +121,26 @@ func TestEsc_NoopAtRoot(t *testing.T) {
 	}
 	if mm.screen != screenMain {
 		t.Errorf("screen = %v after esc at root, want unchanged screenMain", mm.screen)
+	}
+}
+
+// TestEsc_ExitsDrillDownToMain covers the design's own screen transition
+// table: drill-down is "Exited by: esc" -- Task 4.7's own acceptance
+// criterion [design: Task 4.7].
+func TestEsc_ExitsDrillDownToMain(t *testing.T) {
+	m := newTestModel(nil)
+	m.screen = screenDrillDown
+	m.drillKind = rowListener
+	m.drillIndex = 2
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	mm := updated.(*Model)
+
+	if cmd != nil {
+		t.Error("esc from drill-down returned a non-nil cmd, want nil")
+	}
+	if mm.screen != screenMain {
+		t.Errorf("screen = %v after esc from drill-down, want screenMain", mm.screen)
 	}
 }
 

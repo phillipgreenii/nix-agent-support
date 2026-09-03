@@ -25,12 +25,12 @@ type Binding struct {
 // Bindings is the canonical, ordered keybinding list. Order matters: first
 // match wins in dispatch, and rows render in this order in the help modal.
 //
-// Handlers for keys whose target screen does not exist yet in this
-// packet's scope (tab/shift+tab -- Task 4.6's panes; enter/[/] -- Task
-// 4.7's drill-down) are deliberate no-op placeholders: the KEY is fully
-// covered here (this packet's own acceptance bar), but there is nothing
-// for it to DO yet. The sibling packets that build those screens give the
-// same Binding rows real behavior; the row itself does not move.
+// tab/shift+tab remain deliberate no-op placeholders: Task 4.6 delivered
+// only the RENDERING side of pane focus (Model.focusedPane), not the
+// keybinding that moves it -- that wiring is a later packet's concern. The
+// KEY is fully covered here (this packet's own acceptance bar), but there
+// is nothing for it to DO yet. enter/[/] now delegate to drilldown.go's
+// Model.enterDrillDown/stepSibling (Task 4.7).
 var Bindings = []Binding{
 	{Keys: []string{"P"}, Description: "Toggle the quota gate (no optimistic flip)", Handle: (*Model).handleToggleQuotaGate},
 	{Keys: []string{"g"}, Description: "Gates modal", Handle: handleOpenGatesModal},
@@ -83,24 +83,32 @@ func handleOpenHelp(m *Model) tea.Cmd {
 func handleFocusNext(m *Model) tea.Cmd { return nil }
 func handleFocusPrev(m *Model) tea.Cmd { return nil }
 
-// handleEnterDrillDown mirrors handleFocusNext for the design's enter
-// row -- Task 4.7's own concern (out of scope here, section 8).
-func handleEnterDrillDown(m *Model) tea.Cmd { return nil }
+// handleEnterDrillDown implements the design's enter row: delegates to
+// Model.enterDrillDown (drilldown.go, Task 4.7), which itself no-ops
+// outside screenMain or on a non-focusable row (comp-6).
+func handleEnterDrillDown(m *Model) tea.Cmd { return m.enterDrillDown() }
 
-// handlePrevSibling / handleNextSibling mirror handleFocusNext for the
-// design's "[" / "]" row -- also Task 4.7's own concern.
-func handlePrevSibling(m *Model) tea.Cmd { return nil }
-func handleNextSibling(m *Model) tea.Cmd { return nil }
+// handlePrevSibling / handleNextSibling implement the design's "[" / "]"
+// row: delegate to Model.stepSibling (drilldown.go, Task 4.7), which
+// itself no-ops outside screenDrillDown.
+func handlePrevSibling(m *Model) tea.Cmd { return m.stepSibling(-1) }
+func handleNextSibling(m *Model) tea.Cmd { return m.stepSibling(1) }
 
-// handleEsc closes an open modal, restoring the screen that was active
-// before it opened. With no modal open, esc is a no-op: this packet builds
-// no drill-down screen to back out of (Task 4.7's concern), and esc must
-// never quit at root regardless [design: Task 4.8 Files].
+// handleEsc closes an open modal (restoring the screen that was active
+// before it opened) or, with no modal open, exits drill-down back to
+// screenMain (Task 4.7's own row in the design's screen transition table:
+// "drill-down ... Exited by: esc"). With neither a modal nor drill-down
+// open, esc is a no-op -- it must never quit at root [design: Task 4.8
+// Files; Task 4.7].
 func handleEsc(m *Model) tea.Cmd {
 	if m.activeModal != ModalNone {
 		m.activeModal = ModalNone
 		m.modalScrollOffset = 0
 		m.screen = m.preModalScreen
+		return nil
+	}
+	if m.screen == screenDrillDown {
+		m.screen = screenMain
 		return nil
 	}
 	return nil
