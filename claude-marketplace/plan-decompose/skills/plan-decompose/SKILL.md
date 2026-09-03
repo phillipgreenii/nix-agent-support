@@ -84,6 +84,13 @@ Retargeting a decomposition is one docket metadata edit; a dispatcher MAY overri
 sub-agent tiers in its brief. A malformed/missing value is treated as absent (falls through)
 and MUST be flagged in the next report. `pd_rev` starts at `1` when the docket is created.
 
+**Tuning review** (bead `pg2-oupz5`, 2026-09-03): `pd_read_target=25` and the decomposition
+floor used by mode `check` (below) were reviewed against 3 real dockets that have run the
+full `decompose` pipeline — 32 `pd_metrics` closeout records in all — and CONFIRMED
+unchanged: no packet has ever triggered a sizing deviation against the 25% ceiling, and no
+real docket has yet sketched anywhere near the floor's 3-4 marginal band. Full rationale is
+in the design of record's Open items section.
+
 **Metric record** (append-only, single line, fixed key order — emitted by implementers at
 closeout): `pd_metrics outcome=<done|blocked|released> escalation-reads=<n> validation-retries=<n> tokens=<k>`
 

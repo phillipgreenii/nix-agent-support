@@ -587,4 +587,22 @@ contract operations above are sufficient for it to be added without changing v1 
   by the binder when serving content; Jira) — explicitly YAGNI until a consumer exists.
 - Whether `/drain-beads` should prefer `packet-implementer` when a claimed bead carries
   curation metadata — a later `pb` change, deliberately out of scope (D1 keeps it optional).
-- Tuning `pd_read_target` (25 starting default) and the §9.2 floor against gathered metrics.
+- ~~Tuning `pd_read_target` (25 starting default) and the §9.2 floor against gathered
+  metrics.~~ Reviewed (bead `pg2-oupz5`, 2026-09-03) against every docket that has run the
+  full `decompose` pipeline to date — `pg2-dvdhj` (14 packets), `pg2-pbgw6` (16 packets),
+  `pg2-is8jr` (10 packets), 32 `pd_metrics` closeout records across the three. Both values
+  CONFIRMED, no change. `pd_read_target=25` has never once been the binding constraint: every
+  decomposition report recorded zero sizing deviations, and the closest any packet came to
+  the 62,500-token ceiling (25% of the 250k default budget) was `pg2-pbgw6`'s largest packet
+  at ~23k tokens — about 37% of the ceiling, still comfortably clear; the escalation-reads
+  signal (3 of 32 records) never cited an undersized read budget as the cause, every
+  escalation instead being a curation-content gap (a missing implementation mechanism, a
+  missing citation) orthogonal to this ceiling — nothing in the data pushes the value in
+  either direction. The floor is confirmed on weaker footing: all three real dockets sketched
+  far above the 3-4 marginal band (10-16 packets each), so none of them ever exercised the
+  boundary this value actually gates — it is carried forward because nothing contradicts it,
+  not because three dockets' worth of data confirms it AT the boundary (N=0 dockets have
+  tested the boundary itself). One secondary signal fell out of the same data but sits outside
+  this item's scope: validation-retries was nonzero on roughly half the 32 records (one packet
+  needed 8), a validation-section-quality signal per §13's table, worth its own look in a
+  future bead rather than folded into this one.
