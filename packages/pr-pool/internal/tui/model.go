@@ -150,7 +150,27 @@ type Model struct {
 	// Options.Version, defaulting to "dev"), shown in the [?] modal's
 	// version pair alongside the core's own reported CoreInfo.Version.
 	clientVersion string
+
+	// focusedPane selects which of the Listeners/Queues/Sources/Registry
+	// panes is the zone ladder's one FILL zone (zones.go's drop-order
+	// table: "Fill (the focused pane)") -- the other three are non-fill,
+	// non-pinned "unfocused panes" zones. Its zero value (paneListeners)
+	// is a deliberate default: keybindings.go's tab/shift+tab handlers are
+	// still no-op placeholders (Task 4.8's own doc there), so this field
+	// is not yet mutated by any keypress -- that wiring is a later
+	// packet's concern; Task 4.6's own scope is making the RENDERING side
+	// of "there is a focused pane" real [design: Task 4.6 Interfaces].
+	focusedPane int
 }
+
+// Pane identifies one of the four zone-ladder panes this packet renders --
+// see Model.focusedPane's doc.
+const (
+	paneListeners int = iota
+	paneQueues
+	paneSources
+	paneRegistry
+)
 
 // NewModel constructs a Model in its pre-first-poll state (screenLoading).
 // theme is resolved by the caller: Run detects it against the real output;
@@ -316,10 +336,11 @@ func (m *Model) applyPollErr(err error) {
 // View implements tea.Model. The width==0 guard reuses pa-monitor's own
 // pre-first-WindowSizeMsg contract (packages/pa-monitor/internal/tui/
 // view.go); screenLoading renders the same literal regardless of width
-// [design: Task 4.5 Step 4]. screenMain/screenDrillDown still share a
-// minimal placeholder -- the full zone ladder/banner/dashboard panes
-// (Task 4.6) and the drill-down screen's own content (Task 4.7) are out of
-// scope here (section 8). screenModal now routes to real content
+// [design: Task 4.5 Step 4]. screenMain now renders the real pinned zone
+// ladder/banner/dashboard panes (Task 4.6, this packet) via renderMain;
+// screenDrillDown still shares the OLD minimal placeholder -- the
+// drill-down screen's own content is the sibling packet covering Task 4.7
+// (out of scope here, section 8). screenModal routes to real content
 // (help.go's renderModal): Task 4.8's own modals are in scope.
 func (m *Model) View() string {
 	if m.width == 0 || m.screen == screenLoading {
@@ -332,9 +353,175 @@ func (m *Model) View() string {
 		return "pr-pool: quiescing (core.state != \"started\")"
 	case screenModal:
 		return m.renderModal()
-	case screenMain, screenDrillDown:
+	case screenMain:
+		return m.renderMain()
+	case screenDrillDown:
 		return "pr-pool: main"
 	default:
 		return "loading…"
 	}
+}
+
+// renderMain composes screenMain's full pinned zone ladder: the top zone
+// (header or PAUSED banner), the droppable attention/poll-error zones, the
+// full-width Activity row, the four Listeners/Queues/Sources/Registry
+// panes (one of them the fill zone, per m.focusedPane), and the pinned
+// footer -- all through layoutZones, so the SAME drop-order/pinned rules
+// zones_test.go exercises directly also govern the real screen [design:
+// Task 4.6 Step 8; Task 4.6 Interfaces].
+func (m *Model) renderMain() string {
+	now := time.Now()
+	gated := anyGateSet(m.reply.Gates)
+
+	top := renderTopZone(topZoneData{
+		clientVersion: m.clientVersion,
+		reply:         m.reply,
+		quiescing:     m.screen == screenQuiescing,
+		width:         m.width,
+		theme:         m.theme,
+	})
+	footer := m.renderFooter(now)
+
+	zones := []zoneSpec{
+		{name: "top", content: top, pinned: true},
+	}
+	if a := attentionLine(m.reply, m.clientVersion, m.theme); a != "" {
+		zones = append(zones, zoneSpec{name: "attention", content: a, dropOrder: 1})
+	}
+	if p := pollErrorZone(m.pollErrFlagged, m.lastErr, m.theme); p != "" {
+		zones = append(zones, zoneSpec{name: "poll-error", content: p, dropOrder: 2})
+	}
+	zones = append(zones, zoneSpec{
+		name:      "activity",
+		content:   m.renderActivityZoneContent(gated),
+		dropOrder: 3,
+	})
+
+	for _, p := range []int{paneListeners, paneQueues, paneSources, paneRegistry} {
+		// The Registry pane is omitted entirely (not shown as an empty
+		// box) when the registry has no entries -- v1's own carried
+		// decision (§3), restated for Narrow at §4.3 -- UNLESS it is the
+		// currently-focused pane, in which case it stays as the ladder's
+		// one required fill zone.
+		if p == paneRegistry && len(m.reply.Registry) == 0 && p != m.focusedPane {
+			continue
+		}
+		content := m.renderPaneContent(p, gated, now)
+		if p == m.focusedPane {
+			zones = append(zones, zoneSpec{
+				name:       paneName(p),
+				fill:       true,
+				renderFill: func(int) string { return content },
+			})
+			continue
+		}
+		zones = append(zones, zoneSpec{name: paneName(p), content: content, dropOrder: unfocusedPaneDropOrder(p)})
+	}
+
+	zones = append(zones, zoneSpec{name: "footer", content: footer, pinned: true})
+
+	return layoutZones(zones, render.EffectiveWidth(m.width), m.height)
+}
+
+// renderActivityZoneContent applies the three-way empty-state precedence to
+// the Activity pane: suppressed while gated (dispatch halted), "No activity
+// yet." otherwise when empty [design: Task 4.6 Step 6].
+func (m *Model) renderActivityZoneContent(gated bool) string {
+	es := resolveEmptyState(false, gated, len(m.reply.Activity) == 0)
+	return renderActivityPane(m.reply.Activity, m.reply.ActivityDropped, emptyStateText(es, "No activity yet."))
+}
+
+// renderPaneContent renders one of the four Listeners/Queues/Sources/
+// Registry panes' content. Listeners/Sources/Registry are config-derived:
+// never suppressed, only dimmed while gated (dimIfPaused). Queues is
+// activity-adjacent (a depth is meaningless while dispatch is halted) and
+// IS suppressed while gated, per resolveEmptyState's own doc [design: Task
+// 4.6 Step 6; §5 Derived health].
+func (m *Model) renderPaneContent(p int, gated bool, now time.Time) string {
+	tier := render.Tier(m.width)
+	title := paneTitle(p)
+	if p == m.focusedPane {
+		title += " (focused)"
+	}
+	switch p {
+	case paneListeners:
+		es := resolveEmptyState(false, false, len(m.reply.Listeners) == 0)
+		content := renderListenersPane(m.reply.Listeners, tier, m.theme, emptyStateText(es, "(no listeners configured)"), title)
+		return dimIfPaused(content, gated, m.theme)
+	case paneQueues:
+		es := resolveEmptyState(false, gated, len(m.reply.Queues) == 0)
+		return renderQueuesPane(m.reply.Queues, emptyStateText(es, "No events queued."), title)
+	case paneSources:
+		es := resolveEmptyState(false, false, len(m.reply.Sources) == 0)
+		content := renderSourcesPane(m.reply.Sources, m.reply.TickIntervalMs, now, m.theme, emptyStateText(es, "(no sources configured)"), title)
+		return dimIfPaused(content, gated, m.theme)
+	case paneRegistry:
+		es := resolveEmptyState(false, false, len(m.reply.Registry) == 0)
+		content := renderRegistryPane(m.reply.Registry, emptyStateText(es, "(no participants registered)"), title)
+		return dimIfPaused(content, gated, m.theme)
+	default:
+		return ""
+	}
+}
+
+// paneName/paneTitle name a pane zone for the zone ladder / its rendered
+// box title respectively.
+func paneName(p int) string {
+	switch p {
+	case paneListeners:
+		return "listeners"
+	case paneQueues:
+		return "queues"
+	case paneSources:
+		return "sources"
+	case paneRegistry:
+		return "registry"
+	default:
+		return "pane"
+	}
+}
+
+func paneTitle(p int) string {
+	switch p {
+	case paneListeners:
+		return "Listeners"
+	case paneQueues:
+		return "Queues"
+	case paneSources:
+		return "Sources"
+	case paneRegistry:
+		return "Registry"
+	default:
+		return ""
+	}
+}
+
+// unfocusedPaneDropOrder gives the zone ladder's "Unfocused panes | 4-5"
+// range a concrete, deterministic split: Registry and Queues (typically
+// the emptiest/least critical panes) drop first; Listeners/Sources drop
+// last among the four. A disambiguation this packet is free to make -- the
+// design names two priority buckets without saying which pane occupies
+// which [design: Task 4.6 Interfaces (zone ladder table)].
+func unfocusedPaneDropOrder(p int) int {
+	switch p {
+	case paneRegistry, paneQueues:
+		return 4
+	default:
+		return 5
+	}
+}
+
+// renderFooter composes the pinned footer's keybinding hints (left) and
+// the liveness readout -- last-poll clock + connection dot (right),
+// matching the design's own mockups. An active flash (flash.go) replaces
+// the keybinding hints on the left, same as the hint/flash precedence
+// model.go's sibling files already establish for the footer's left column.
+func (m *Model) renderFooter(now time.Time) string {
+	w := render.EffectiveWidth(m.width)
+	left := " [tab] pane  [enter] details  [g] gates  [l] legend  [?] help  [q] quit"
+	if flash := m.flashText(w); flash != "" {
+		left = " " + flash
+	}
+	right := lastPollClock(m.reply.AsOf, now) + " " + connectionDot(m.reply.AsOf, now, m.pollInterval, m.theme) + " "
+	return justifyFooter(left, right, w)
 }

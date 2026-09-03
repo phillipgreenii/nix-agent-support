@@ -58,28 +58,44 @@ func TestScreen_String(t *testing.T) {
 	}
 }
 
-// TestView_MainDrillDownSharePlaceholder documents this packet's own
-// out-of-scope boundary (section 8): the zone ladder/banner/dashboard
-// panes that give screenMain its FINAL rendering, plus the drill-down
-// screen's own content, are the sibling packets covering Tasks 4.6/4.7.
-// Until then both render the same minimal placeholder. screenModal is
-// deliberately excluded here -- Task 4.8 (this packet) supersedes its own
-// pre-4.8 placeholder with real content; see
-// TestView_ScreenModalRoutesToRenderModal below.
-func TestView_MainDrillDownSharePlaceholder(t *testing.T) {
+// TestView_ScreenMainRoutesToRenderMain is the sibling packet covering
+// Task 4.6's own supersession of the pre-4.6 shared placeholder:
+// screenMain now renders the real zone ladder (renderMain, model.go) --
+// distinct from screenDrillDown's still-unbuilt placeholder (Task 4.7's
+// own concern, out of scope here, section 8). Mirrors
+// TestView_ScreenModalRoutesToRenderModal's own precedent (Task 4.8's
+// analogous supersession of the modal placeholder).
+func TestView_ScreenMainRoutesToRenderMain(t *testing.T) {
 	m := newTestModel(nil)
 	m.width, m.height = 80, 24
+	m.screen = screenMain
 
-	var got [2]string
-	for i, s := range []screen{screenMain, screenDrillDown} {
-		m.screen = s
-		got[i] = m.View()
+	got := m.View()
+	if got == "" || got == "loading…" || got == "pr-pool: main" {
+		t.Fatalf("screenMain rendered the old placeholder %q, want the real zone ladder", got)
 	}
-	if got[0] != got[1] {
-		t.Fatalf("main/drill-down placeholders differ: %q, %q", got[0], got[1])
+	// Registry is deliberately excluded from this list: it is omitted
+	// entirely when empty (panes_test.go's own
+	// TestRenderRegistryPane_OmittedEntirelyWhenEmpty), which is exactly
+	// the state of this zero-value StatusReply.
+	for _, want := range []string{"Listeners", "Queues", "Sources", "Activity"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("screenMain View() missing pane %q; got:\n%s", want, got)
+		}
 	}
-	if got[0] == "" || got[0] == "loading…" {
-		t.Fatalf("main placeholder = %q, want a non-empty, non-loading placeholder", got[0])
+}
+
+// TestView_DrillDownStillPlaceholder pins Task 4.7's own remaining
+// out-of-scope boundary: screenDrillDown still renders the pre-4.6 minimal
+// placeholder until the sibling packet covering Task 4.7 builds its real
+// content.
+func TestView_DrillDownStillPlaceholder(t *testing.T) {
+	m := newTestModel(nil)
+	m.width, m.height = 80, 24
+	m.screen = screenDrillDown
+
+	if got := m.View(); got != "pr-pool: main" {
+		t.Fatalf("screenDrillDown View() = %q, want the unchanged placeholder %q", got, "pr-pool: main")
 	}
 }
 
