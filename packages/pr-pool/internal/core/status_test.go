@@ -178,6 +178,9 @@ func TestGateSnapshot_returnsIndependentCopy(t *testing.T) {
 // (enabled=false, never selector-excluded) and a selector-excluded role
 // (enabled=true, excluded=true) must render distinctly.
 func TestStatusListeners_RoleBindsEnabledExcluded(t *testing.T) {
+	reviewCounts := &ListenerCounts{}
+	reviewCounts.Delivered.Store(5)
+	reviewCounts.Declined.Store(2)
 	svc := &Service{
 		q:        newQueue(t),
 		bindings: testBindings(),
@@ -187,7 +190,8 @@ func TestStatusListeners_RoleBindsEnabledExcluded(t *testing.T) {
 			{Name: "worker", Binds: []string{"work-ready"}, Enabled: true},
 			{Name: "feedback", Binds: []string{"feedback-ready"}, Enabled: false},
 		},
-		excludedRoles: []string{"worker"},
+		excludedRoles:  []string{"worker"},
+		listenerCounts: map[string]*ListenerCounts{"review": reviewCounts},
 	}
 	reply := svc.composeStatusReply(0)
 	listeners, ok := reply["listeners"].([]map[string]any)
@@ -213,8 +217,11 @@ func TestStatusListeners_RoleBindsEnabledExcluded(t *testing.T) {
 	if byRole["review"]["backoff"] != nil {
 		t.Fatalf("review.backoff = %v, want null (no live roleListener reference reaches core)", byRole["review"]["backoff"])
 	}
-	if byRole["review"]["delivered"] != int64(0) || byRole["review"]["declined"] != int64(0) {
-		t.Fatalf("review delivered/declined = %v/%v, want 0/0 (no ListenerCounts wired)", byRole["review"]["delivered"], byRole["review"]["declined"])
+	if byRole["review"]["delivered"] != int64(5) || byRole["review"]["declined"] != int64(2) {
+		t.Fatalf("review delivered/declined = %v/%v, want 5/2 (from ListenerCounts)", byRole["review"]["delivered"], byRole["review"]["declined"])
+	}
+	if byRole["worker"]["delivered"] != int64(0) || byRole["worker"]["declined"] != int64(0) {
+		t.Fatalf("worker delivered/declined = %v/%v, want 0/0 (no ListenerCounts entry for it)", byRole["worker"]["delivered"], byRole["worker"]["declined"])
 	}
 }
 
@@ -294,6 +301,20 @@ func TestStatusResolvedConfig_PerParticipantPresentButEmpty(t *testing.T) {
 	m, ok := pp.(map[string]any)
 	if !ok || len(m) != 0 {
 		t.Fatalf("perParticipant = %#v, want an empty, non-nil map[string]any{}", pp)
+	}
+	if _, present := got["pollIntervalMs"]; present {
+		t.Fatalf("pollIntervalMs = %v, want omitted when PollInterval is nil", got["pollIntervalMs"])
+	}
+
+	// A non-nil PollInterval is echoed back as pollIntervalMs (Task 3.5 Step
+	// 7's pre-existing branch, unchanged by this widening) — carries perParticipant too.
+	pi := 10 * time.Second
+	got2 := statusResolvedConfig(ResolvedConfig{RepoRoot: "/repo", PollInterval: &pi})
+	if got2["pollIntervalMs"] != int64(10000) {
+		t.Fatalf("pollIntervalMs = %v, want 10000", got2["pollIntervalMs"])
+	}
+	if _, ok := got2["perParticipant"].(map[string]any); !ok {
+		t.Fatalf("perParticipant = %#v, want present alongside pollIntervalMs too", got2["perParticipant"])
 	}
 }
 

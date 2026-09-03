@@ -418,6 +418,60 @@ func TestErrorReply_IsTheProtocolEnvelope(t *testing.T) {
 	}
 }
 
+// TestDiscriminateReply covers DiscriminateReply's own branches directly
+// (Task 4.1, Binding Decision 2: promoted from cmd/pr-pool's private
+// discriminateReply, previously only exercised indirectly through
+// cmd/pr-pool's own integration tests — which no longer counts toward THIS
+// package's coverage now that the logic lives here).
+func TestDiscriminateReply(t *testing.T) {
+	t.Run("empty reply is nil (nothing to check)", func(t *testing.T) {
+		if err := DiscriminateReply(nil, StatusReplySchema, nil); err != nil {
+			t.Fatalf("DiscriminateReply(empty) = %v, want nil", err)
+		}
+	})
+
+	t.Run("error envelope detected BEFORE replySchema", func(t *testing.T) {
+		reply := []byte(`{"schemaVersion":"1","error":"unauthorized"}`)
+		err := DiscriminateReply(reply, StatusReplySchema, nil)
+		if err == nil || !strings.Contains(err.Error(), "unauthorized") {
+			t.Fatalf("DiscriminateReply(error envelope) = %v, want it to name the refusal", err)
+		}
+	})
+
+	t.Run("empty replySchema skips validation entirely", func(t *testing.T) {
+		if err := DiscriminateReply([]byte(`{"anything":"goes"}`), "", nil); err != nil {
+			t.Fatalf("DiscriminateReply(no replySchema) = %v, want nil", err)
+		}
+	})
+
+	t.Run("malformed against replySchema is reported", func(t *testing.T) {
+		reply := []byte(`{"schemaVersion":"9"}`) // const mismatch
+		err := DiscriminateReply(reply, StatusRequestSchema, nil)
+		if err == nil {
+			t.Fatal("DiscriminateReply(schema mismatch) = nil, want an error")
+		}
+	})
+
+	t.Run("valid reply decodes into out", func(t *testing.T) {
+		reply := []byte(`{"schemaVersion":"1"}`)
+		var out struct {
+			SchemaVersion string `json:"schemaVersion"`
+		}
+		if err := DiscriminateReply(reply, StatusRequestSchema, &out); err != nil {
+			t.Fatalf("DiscriminateReply(valid): %v", err)
+		}
+		if out.SchemaVersion != "1" {
+			t.Fatalf("out.SchemaVersion = %q, want 1 (decoded)", out.SchemaVersion)
+		}
+	})
+
+	t.Run("valid reply with nil out just validates", func(t *testing.T) {
+		if err := DiscriminateReply([]byte(`{"schemaVersion":"1"}`), StatusRequestSchema, nil); err != nil {
+			t.Fatalf("DiscriminateReply(valid, nil out): %v", err)
+		}
+	})
+}
+
 // An unpublishable discovery record is a hard Listen failure, not a core that
 // binds a socket nobody can find.
 func TestWriteRecord_ReportsAnUnwritablePath(t *testing.T) {
