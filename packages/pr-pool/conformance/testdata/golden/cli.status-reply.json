@@ -22,7 +22,13 @@
     "beadsPrefix": "zr",
     "pollIntervalMs": 10000,
     "activeRoles": 3,
-    "activeQueries": 2
+    "activeQueries": 2,
+    "perParticipant": {}
+  },
+  "counters": {
+    "unconsumedExpired": { "review-requested": 2 },
+    "unknownTypeRejected": { "unknown-type": 1 },
+    "deduped": { "review-requested": 1 }
   },
   "gates": [
     { "name": "quota_paused", "set": false },
@@ -35,12 +41,47 @@
   ],
   "gatesObservedAt": "2026-09-01T00:05:30Z",
   "listeners": [
-    { "id": "review", "kind": "handler", "state": "started", "self": "healthy" }
+    {
+      "role": "review",
+      "binds": ["review-requested"],
+      "enabled": true,
+      "excluded": false,
+      "delivered": 5,
+      "declined": 1,
+      "backoff": null
+    },
+    {
+      "role": "worker",
+      "binds": ["work-ready"],
+      "enabled": true,
+      "excluded": true,
+      "delivered": 0,
+      "declined": 0,
+      "backoff": null
+    }
   ],
   "registry": [
     { "id": "review", "kind": "handler", "state": "started", "self": "healthy" }
   ],
-  "sources": [{ "name": "feedback-ready", "rejected": 0 }],
+  "sources": [
+    {
+      "name": "feedback-ready",
+      "type": "pull",
+      "enabled": true,
+      "excluded": false,
+      "mode": "pull",
+      "lastTick": "2026-09-01T00:05:00Z",
+      "failure": null
+    },
+    {
+      "name": "urgent-ready",
+      "type": "pull",
+      "enabled": true,
+      "excluded": true,
+      "mode": "pull",
+      "failure": null
+    }
+  ],
   "unmatchedBindings": ["declared-but-inactive-this-run"],
   "activity": [
     {

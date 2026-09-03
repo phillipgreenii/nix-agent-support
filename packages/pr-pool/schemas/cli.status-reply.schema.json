@@ -60,7 +60,18 @@
         "beadsPrefix": { "type": "string" },
         "pollIntervalMs": { "type": "integer", "minimum": 0 },
         "activeRoles": { "type": "integer", "minimum": 0 },
-        "activeQueries": { "type": "integer", "minimum": 0 }
+        "activeQueries": { "type": "integer", "minimum": 0 },
+        "perParticipant": { "type": "object" }
+      }
+    },
+    "counters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["unconsumedExpired", "unknownTypeRejected", "deduped"],
+      "properties": {
+        "unconsumedExpired": { "type": "object" },
+        "unknownTypeRejected": { "type": "object" },
+        "deduped": { "type": "object" }
       }
     },
     "gates": {
@@ -83,12 +94,36 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "kind", "state", "self"],
+        "required": [
+          "role",
+          "binds",
+          "enabled",
+          "excluded",
+          "delivered",
+          "declined",
+          "backoff"
+        ],
         "properties": {
-          "id": { "type": "string" },
-          "kind": { "type": "string" },
-          "state": { "type": "string" },
-          "self": { "type": "string" }
+          "role": { "type": "string" },
+          "binds": { "type": "array", "items": { "type": "string" } },
+          "enabled": { "type": "boolean" },
+          "excluded": { "type": "boolean" },
+          "delivered": { "type": "integer", "minimum": 0 },
+          "declined": { "type": "integer", "minimum": 0 },
+          "backoff": {
+            "oneOf": [
+              { "enum": [null] },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["streak", "nextEligible"],
+                "properties": {
+                  "streak": { "type": "integer", "minimum": 0 },
+                  "nextEligible": { "type": "string" }
+                }
+              }
+            ]
+          }
         }
       }
     },
@@ -111,10 +146,28 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["name", "rejected"],
+        "required": ["name", "type", "enabled", "excluded", "mode", "failure"],
         "properties": {
           "name": { "type": "string" },
-          "rejected": { "type": "integer", "minimum": 0 }
+          "type": { "enum": ["pull", "push"] },
+          "enabled": { "type": "boolean" },
+          "excluded": { "type": "boolean" },
+          "mode": { "enum": ["pull", "push"] },
+          "lastTick": { "type": "string" },
+          "failure": {
+            "oneOf": [
+              { "enum": [null] },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["count", "nextEligible"],
+                "properties": {
+                  "count": { "type": "integer", "minimum": 0 },
+                  "nextEligible": { "type": "string" }
+                }
+              }
+            ]
+          }
         }
       }
     },

@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/phillipgreenii/pr-pool/internal/backoff"
 	"github.com/phillipgreenii/pr-pool/internal/core"
@@ -97,6 +98,24 @@ func (l *roleListener) RetryBackoff() backoff.Policy {
 		return l.role.RetryBackoff
 	}
 	return l.poolDefault
+}
+
+// BackoffState exposes this listener's live backoff streak/next-eligible
+// state as a queryable (streak int, nextEligible time.Time, ok bool) —
+// Task 4.1's schema-generality requirement for listeners[].backoff (spec
+// §5): the plumbing must exist even though ok is always false in the
+// shipped production listener today. RetryBackoff above names only the
+// retry POLICY (the schedule to use IF a streak were ever accruing); it is
+// eventqueue.Queue's own Dispatch loop — not this type — that would own
+// any actual running streak, since Queue is what schedules a listener's
+// re-offer after a decline (see queue.go's lock-order/backoff doc). This
+// roleListener never tracks such a streak itself, so ok is unconditionally
+// false: there is nothing live to report, corr-6's stated conclusion for
+// the shipped production listener, which today either accepts outright or
+// declines instantaneously (busy/unavailable) rather than ever entering an
+// observable backoff wait of its own.
+func (l *roleListener) BackoffState() (streak int, nextEligible time.Time, ok bool) {
+	return 0, time.Time{}, false
 }
 
 // Matches implements the dispatch flowchart's binding check (INV-DISP-1): the

@@ -167,7 +167,7 @@ func TestCheckSmokeReachable(t *testing.T) {
 // configured participant a candidate.
 func TestApplySelectors_emptyOnlyMeansEveryoneIsACandidate(t *testing.T) {
 	cfg := selTestCfg()
-	got, err := applySelectors(cfg, runSelectors{})
+	got, _, err := applySelectors(cfg, runSelectors{})
 	if err != nil {
 		t.Fatalf("applySelectors: %v", err)
 	}
@@ -182,7 +182,7 @@ func TestApplySelectors_emptyOnlyMeansEveryoneIsACandidate(t *testing.T) {
 // --disable alone excludes just the named participant, leaving the rest active.
 func TestApplySelectors_disableAloneExcludesOnlyNamed(t *testing.T) {
 	cfg := selTestCfg()
-	got, err := applySelectors(cfg, runSelectors{Disable: []string{"role:r2", "query:q2"}})
+	got, _, err := applySelectors(cfg, runSelectors{Disable: []string{"role:r2", "query:q2"}})
 	if err != nil {
 		t.Fatalf("applySelectors: %v", err)
 	}
@@ -200,7 +200,7 @@ func TestApplySelectors_disableAloneExcludesOnlyNamed(t *testing.T) {
 // --only alone narrows to just the named participant.
 func TestApplySelectors_onlyAloneNarrows(t *testing.T) {
 	cfg := selTestCfg()
-	got, err := applySelectors(cfg, runSelectors{Only: []string{"role:r1", "query:q1"}})
+	got, _, err := applySelectors(cfg, runSelectors{Only: []string{"role:r1", "query:q1"}})
 	if err != nil {
 		t.Fatalf("applySelectors: %v", err)
 	}
@@ -230,7 +230,7 @@ func TestApplySelectors_bothFlagsNarrowThenExclude(t *testing.T) {
 	// --only r1,r2 narrows the candidates to {r1, r2}; --disable r2 then removes
 	// r2 from that narrowed set, leaving only r1 active. r3 was never a
 	// candidate at all (excluded by --only, independent of --disable).
-	got, err := applySelectors(cfg, runSelectors{
+	got, _, err := applySelectors(cfg, runSelectors{
 		Only:    []string{"role:r1", "role:r2"},
 		Disable: []string{"role:r2"},
 	})
@@ -257,7 +257,7 @@ func TestApplySelectors_alreadyDisabledRoleStaysDisabled(t *testing.T) {
 			{Name: "r1", Enabled: false, Binds: []string{"t1"}},
 		},
 	}
-	got, err := applySelectors(cfg, runSelectors{Only: []string{"role:r1"}})
+	got, _, err := applySelectors(cfg, runSelectors{Only: []string{"role:r1"}})
 	if err != nil {
 		t.Fatalf("applySelectors: %v", err)
 	}
@@ -278,7 +278,7 @@ func TestApplySelectors_unknownNameIsAnError(t *testing.T) {
 		{Disable: []string{"query:nope"}},
 	}
 	for _, sel := range cases {
-		if _, err := applySelectors(cfg, sel); err == nil {
+		if _, _, err := applySelectors(cfg, sel); err == nil {
 			t.Errorf("applySelectors(%+v) = nil error, want an error naming the unknown selector", sel)
 		} else if !strings.Contains(err.Error(), "nope") {
 			t.Errorf("applySelectors(%+v) error = %v, want it to name the unknown selector", sel, err)
@@ -290,7 +290,7 @@ func TestApplySelectors_unknownNameIsAnError(t *testing.T) {
 // as an unknown name.
 func TestApplySelectors_malformedSelectorIsAnError(t *testing.T) {
 	cfg := selTestCfg()
-	if _, err := applySelectors(cfg, runSelectors{Only: []string{"bogus"}}); err == nil {
+	if _, _, err := applySelectors(cfg, runSelectors{Only: []string{"bogus"}}); err == nil {
 		t.Error("applySelectors with a malformed selector should error")
 	}
 }
@@ -303,7 +303,7 @@ func TestApplySelectors_doesNotMutateCallersConfig(t *testing.T) {
 	originalRoles := cfg.Roles // same slice header / backing array
 	originalQueries := cfg.Queries
 
-	if _, err := applySelectors(cfg, runSelectors{Disable: []string{"role:r2", "query:q2"}}); err != nil {
+	if _, _, err := applySelectors(cfg, runSelectors{Disable: []string{"role:r2", "query:q2"}}); err != nil {
 		t.Fatalf("applySelectors: %v", err)
 	}
 
@@ -312,5 +312,47 @@ func TestApplySelectors_doesNotMutateCallersConfig(t *testing.T) {
 	}
 	if want := []string{"q1", "q2"}; !reflect.DeepEqual(queryNames(originalQueries), want) {
 		t.Errorf("applySelectors mutated the caller's own Queries slice: %v", queryNames(originalQueries))
+	}
+}
+
+// TestApplySelectors_ReportsExcludedThisRun is Task 4.1 Step 2's red-first
+// test (Binding Decision 4): PR_POOL_DISABLE-equivalent --disable selectors
+// exclude the named role/query from the active set AND appear in the
+// returned runExclusions — captured at applySelectors' own decision point,
+// never re-derived from the post-selector Role.Enabled (which cannot tell
+// "config-disabled" from "selector-excluded" apart once this call returns).
+func TestApplySelectors_ReportsExcludedThisRun(t *testing.T) {
+	cfg := selTestCfg()
+	got, excluded, err := applySelectors(cfg, runSelectors{Disable: []string{"role:r2", "query:q2"}})
+	if err != nil {
+		t.Fatalf("applySelectors: %v", err)
+	}
+	if roleEnabled(got.Roles, "r2") {
+		t.Errorf("r2 should be excluded from the active set")
+	}
+	if want := []string{"r2"}; !reflect.DeepEqual(excluded.Roles, want) {
+		t.Errorf("excluded.Roles = %v, want %v", excluded.Roles, want)
+	}
+	if want := []string{"q2"}; !reflect.DeepEqual(excluded.Sources, want) {
+		t.Errorf("excluded.Sources = %v, want %v", excluded.Sources, want)
+	}
+	// r1/q1 were never excluded, so they must not appear in either list.
+	if len(excluded.Roles) != 1 || len(excluded.Sources) != 1 {
+		t.Errorf("excluded = %+v, want exactly the one excluded role and one excluded source", excluded)
+	}
+}
+
+// TestApplySelectors_ReportsExcludedThisRun_noneExcluded proves an empty
+// selector set reports an empty runExclusions rather than nil-vs-empty
+// ambiguity mattering to a caller that only ranges over it (bootCore's own
+// consumption via core.Options.ExcludedRoles/ExcludedSources).
+func TestApplySelectors_ReportsExcludedThisRun_noneExcluded(t *testing.T) {
+	cfg := selTestCfg()
+	_, excluded, err := applySelectors(cfg, runSelectors{})
+	if err != nil {
+		t.Fatalf("applySelectors: %v", err)
+	}
+	if len(excluded.Roles) != 0 || len(excluded.Sources) != 0 {
+		t.Errorf("excluded = %+v, want both empty with no active selectors", excluded)
 	}
 }

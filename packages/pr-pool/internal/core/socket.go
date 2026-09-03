@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/phillipgreenii/pr-pool/conformance"
 	"github.com/phillipgreenii/pr-pool/schemas"
 )
 
@@ -333,4 +334,43 @@ func errorReply(msg string) []byte {
 		return []byte(`{"schemaVersion":"1","error":"internal marshal failure"}`)
 	}
 	return b
+}
+
+// DiscriminateReply checks reply against the protocol-level error envelope
+// (cli.error) BEFORE validating it against the verb's own reply schema
+// (Binding Decision 2, Task 4.1: promoted from cmd/pr-pool's private
+// discriminateReply — test-12's exact requirement is this ordering). A
+// body-less reply (the legal busy shape, exit 9) is not discriminated at
+// all — there is nothing to check. When out is non-nil and reply matches
+// neither shape as an error, reply is decoded into it; a nil out is for a
+// caller that only wants the validation (e.g. a manager callback's raw
+// relay).
+//
+// Zero behavior change for the existing callers this promotion moves onto
+// it (cmd/pr-pool's status/ingest-event/self-status paths); its new caller
+// is Task 4.4's Poller.
+func DiscriminateReply(reply []byte, replySchema string, out any) error {
+	if len(reply) == 0 {
+		return nil
+	}
+	if conformance.CheckBytes(ErrorReplySchema, reply) == nil {
+		var errBody struct {
+			Error string `json:"error"`
+		}
+		if err := json.Unmarshal(reply, &errBody); err == nil {
+			return fmt.Errorf("core refused: %s", errBody.Error)
+		}
+	}
+	if replySchema == "" {
+		return nil
+	}
+	if err := conformance.CheckBytes(replySchema, reply); err != nil {
+		return fmt.Errorf("core reply is not a valid %s: %w", replySchema, err)
+	}
+	if out != nil {
+		if err := json.Unmarshal(reply, out); err != nil {
+			return fmt.Errorf("decode %s reply: %w", replySchema, err)
+		}
+	}
+	return nil
 }

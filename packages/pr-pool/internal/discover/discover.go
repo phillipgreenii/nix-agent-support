@@ -176,11 +176,42 @@ func WithSourceFailureObserver(obs SourceFailureObserver) ProduceOption {
 //     their type is UNDECLARED — no configured role binds to it (INV-DISP-3's
 //     configuration-wide view, now held on the pull path too, not just push)
 //     — never enqueued.
+//   - Failure carries, per source name, THIS pass's pull-source
+//     failure-backoff state (INV-FAIL-3, Task 4.1) — present only for a
+//     source whose retry budget this pass exhausted (an entry in
+//     SourceErrors too); absent for a source that succeeded, was not due
+//     to fire (Task 1.3's cadence gating), or was never attempted. Fed
+//     from the SAME give-up point runAndEnqueue already records
+//     SourceErrors at — never a second, independently-tracked failure
+//     state.
 type ProduceReport struct {
 	SourceErrors map[string]error
 	LastTick     map[string]time.Time
 	Emitted      map[string]int
 	Rejected     map[string]int
+	Failure      map[string]FailureInfo
+}
+
+// FailureInfo is one source's pull-source failure-backoff state at the end
+// of a produce pass (INV-FAIL-3) — a discover-package twin of
+// core.FailureInfo (Count, NextEligible): discover does not import core
+// (the dependency already runs the other way), so cmd/pr-pool's
+// sourceReportsFor is what translates one into the other; both name the
+// same two fields so that translation is a plain field copy.
+type FailureInfo struct {
+	// Count is the number of consecutive attempts this pass made before
+	// giving up (fb.Retries+1 for a source that exhausted its retry
+	// budget).
+	Count int
+	// NextEligible is when the NEXT attempt would become eligible: the
+	// backoff wait computed for the attempt that was about to run when the
+	// retry budget was exhausted, added to now. For a fail-fast query
+	// (Retries == 0, the default — no [query.failure_backoff] configured),
+	// no wait is ever computed before giving up on the first attempt, so
+	// this is simply now — "eligible immediately" is the honest signal
+	// there (the query's own Trigger/cadence, not this backoff, decides
+	// when it is actually retried).
+	NextEligible time.Time
 }
 
 // newProduceReport returns a ProduceReport with every map initialized (never
@@ -191,6 +222,7 @@ func newProduceReport() ProduceReport {
 		LastTick:     make(map[string]time.Time),
 		Emitted:      make(map[string]int),
 		Rejected:     make(map[string]int),
+		Failure:      make(map[string]FailureInfo),
 	}
 }
 
@@ -400,6 +432,7 @@ func runAndEnqueue(ctx context.Context, env query.Env, s query.Source, q *eventq
 	fb := s.Query.FailureBackoff()
 	var evts []event.Event
 	var err error
+	var lastWait time.Duration // zero for a fail-fast query's single, wait-less attempt
 	for attempt := 0; ; attempt++ {
 		evts, err = s.Query.Run(ctx, env)
 		if err == nil {
@@ -412,9 +445,14 @@ func runAndEnqueue(ctx context.Context, env query.Env, s query.Source, q *eventq
 			// (INV-FAIL-3, INV-EVT-1, INV-PREC-1) — record it against this source
 			// only and let produce continue.
 			rpt.SourceErrors[s.Name] = fmt.Errorf("produce %s: %w", s.Name, err)
+			// Failure (Task 4.1): the SAME give-up point, recorded alongside
+			// SourceErrors above — see FailureInfo's own doc for why
+			// NextEligible is simply `now` for a fail-fast (Retries==0) query.
+			rpt.Failure[s.Name] = FailureInfo{Count: attempt + 1, NextEligible: now().Add(lastWait)}
 			return nil
 		}
 		wait := fb.Policy.Duration(attempt + 1)
+		lastWait = wait
 		slog.Warn("pull-source query failed; retrying after backoff (INV-FAIL-3)",
 			"source", s.Name, "attempt", attempt+1, "wait", wait, "err", err)
 		// The metrics half of the log line above (INV-FAIL-3, register gap R21 /

@@ -242,14 +242,35 @@ func checkSmokeReachable(kind, name string, sel runSelectors) error {
 // INV-DISP-3's "declared" view — an excluded query still exists in the
 // CONFIGURATION this Cfg was loaded from; it simply does not fire THIS run,
 // which is exactly "declared but inactive" from the source side.
-func applySelectors(cfg config.Config, sel runSelectors) (config.Config, error) {
+//
+// Its second return value (Task 4.1, Binding Decision 4) is the
+// runExclusions this call itself computed, captured at the SAME
+// decision point as the Enabled-flip/slice-removal above (never a second,
+// re-derived pass) — see runExclusions' own doc.
+
+// runExclusions is applySelectors' own record of which configured roles/
+// queries it excluded THIS RUN (Task 4.1, Binding Decision 4) — captured at
+// the exact moment each exclusion decision is made, BEFORE Role.Enabled is
+// flipped or a query.Source is dropped: once those mutations run, the
+// post-selector config can no longer distinguish "config-disabled" from
+// "selector-excluded" (both look like Enabled==false), and an excluded
+// query.Source has already vanished from the slice entirely. Consumed by
+// cmd/pr-pool's bootCore, which threads it into
+// core.Options.ExcludedRoles/ExcludedSources so composeStatusReply's
+// listeners[]/sources[] can report `excluded` independently of `enabled`.
+type runExclusions struct {
+	Roles   []string
+	Sources []string
+}
+
+func applySelectors(cfg config.Config, sel runSelectors) (config.Config, runExclusions, error) {
 	onlyRoles, onlyQueries, err := splitByKind(sel.Only)
 	if err != nil {
-		return config.Config{}, err
+		return config.Config{}, runExclusions{}, err
 	}
 	disableRoles, disableQueries, err := splitByKind(sel.Disable)
 	if err != nil {
-		return config.Config{}, err
+		return config.Config{}, runExclusions{}, err
 	}
 
 	knownRoles := make(map[string]bool, len(cfg.Roles))
@@ -261,17 +282,20 @@ func applySelectors(cfg config.Config, sel runSelectors) (config.Config, error) 
 		knownQueries[s.Name] = true
 	}
 	if err := checkKnownSelectors("role", knownRoles, onlyRoles, disableRoles); err != nil {
-		return config.Config{}, err
+		return config.Config{}, runExclusions{}, err
 	}
 	if err := checkKnownSelectors("query", knownQueries, onlyQueries, disableQueries); err != nil {
-		return config.Config{}, err
+		return config.Config{}, runExclusions{}, err
 	}
+
+	var excluded runExclusions
 
 	newRoles := make(roles.RoleSet, len(cfg.Roles))
 	copy(newRoles, cfg.Roles)
 	for i, r := range newRoles {
 		if !selectorActive(r.Name, onlyRoles, disableRoles) {
 			newRoles[i].Enabled = false
+			excluded.Roles = append(excluded.Roles, r.Name)
 		}
 	}
 	cfg.Roles = newRoles
@@ -280,9 +304,11 @@ func applySelectors(cfg config.Config, sel runSelectors) (config.Config, error) 
 	for _, s := range cfg.Queries {
 		if selectorActive(s.Name, onlyQueries, disableQueries) {
 			newQueries = append(newQueries, s)
+		} else {
+			excluded.Sources = append(excluded.Sources, s.Name)
 		}
 	}
 	cfg.Queries = newQueries
 
-	return cfg, nil
+	return cfg, excluded, nil
 }

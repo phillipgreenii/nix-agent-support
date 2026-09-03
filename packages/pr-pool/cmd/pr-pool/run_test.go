@@ -16,6 +16,7 @@ import (
 	"github.com/phillipgreenii/pr-pool/internal/backoff"
 	"github.com/phillipgreenii/pr-pool/internal/config"
 	"github.com/phillipgreenii/pr-pool/internal/core"
+	"github.com/phillipgreenii/pr-pool/internal/discover"
 	"github.com/phillipgreenii/pr-pool/internal/dtest"
 	"github.com/phillipgreenii/pr-pool/internal/event"
 	"github.com/phillipgreenii/pr-pool/internal/eventqueue"
@@ -77,7 +78,8 @@ func TestBootCore_selectorExcludedRoleNotRegisteredAsListener(t *testing.T) {
 			{Name: "r2", Enabled: true, Type: "command", Binds: []string{"t2"}, Command: &roles.CommandConfig{Argv: []string{"r2-cmd"}}},
 		},
 	}
-	cfg, err := applySelectors(cfg, runSelectors{Disable: []string{"role:r2"}})
+	declaredRoles := cfg.Roles
+	cfg, excluded, err := applySelectors(cfg, runSelectors{Disable: []string{"role:r2"}})
 	if err != nil {
 		t.Fatalf("applySelectors: %v", err)
 	}
@@ -96,7 +98,7 @@ func TestBootCore_selectorExcludedRoleNotRegisteredAsListener(t *testing.T) {
 	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"bd-t1": {"open"}}}
 	o := &orchestrator.Orchestrator{Cfg: cfg, Cmd: cmd, BD: bd}
 	ctx := context.Background()
-	svc, q, _, storeClose, err := bootCore(ctx, cfg, o)
+	svc, q, _, storeClose, err := bootCore(ctx, cfg, o, declaredRoles, excluded)
 	if err != nil {
 		t.Fatalf("bootCore: %v", err)
 	}
@@ -140,7 +142,7 @@ func TestBootCore_InProcessParticipantAvailableImmediately(t *testing.T) {
 		},
 	}
 	o := &orchestrator.Orchestrator{Cfg: cfg, Cmd: &fakeCommander{}, BD: &dtest.ScriptBD{}}
-	svc, _, _, storeClose, err := bootCore(context.Background(), cfg, o)
+	svc, _, _, storeClose, err := bootCore(context.Background(), cfg, o, cfg.Roles, runExclusions{})
 	if err != nil {
 		t.Fatalf("bootCore: %v", err)
 	}
@@ -182,7 +184,7 @@ func TestApplySelectors_queryExcludedNeverProduces(t *testing.T) {
 			{Name: "q2", Query: selTestQuery{Meta: query.Meta{EmitTypes: []string{"t2"}}, ran: &q2Ran, typ: "t2"}},
 		},
 	}
-	cfg, err := applySelectors(cfg, runSelectors{Disable: []string{"query:q2"}})
+	cfg, _, err := applySelectors(cfg, runSelectors{Disable: []string{"query:q2"}})
 	if err != nil {
 		t.Fatalf("applySelectors: %v", err)
 	}
@@ -304,7 +306,7 @@ func TestBootCore_wiresMetricsEmitterAsProduceTickSourceFailureObserver(t *testi
 	}
 	o := &orchestrator.Orchestrator{Cfg: cfg}
 	ctx := context.Background()
-	svc, q, _, storeClose, err := bootCore(ctx, cfg, o)
+	svc, q, _, storeClose, err := bootCore(ctx, cfg, o, cfg.Roles, runExclusions{})
 	if err != nil {
 		t.Fatalf("bootCore: %v", err)
 	}
@@ -357,7 +359,7 @@ func TestBootCore_DefaultMeterProviderWiresReadableMetricsReader(t *testing.T) {
 	cfg := config.Config{LogDir: shortDir(t)}
 	o := &orchestrator.Orchestrator{Cfg: cfg}
 	ctx := context.Background()
-	svc, q, _, storeClose, err := bootCore(ctx, cfg, o)
+	svc, q, _, storeClose, err := bootCore(ctx, cfg, o, cfg.Roles, runExclusions{})
 	if err != nil {
 		t.Fatalf("bootCore: %v", err)
 	}
@@ -412,7 +414,7 @@ func TestBootCore_ExternalMeterProviderLeavesMetricsReaderNil(t *testing.T) {
 	cfg := config.Config{LogDir: shortDir(t), MeterProvider: mp}
 	o := &orchestrator.Orchestrator{Cfg: cfg}
 	ctx := context.Background()
-	svc, _, gotMP, storeClose, err := bootCore(ctx, cfg, o)
+	svc, _, gotMP, storeClose, err := bootCore(ctx, cfg, o, cfg.Roles, runExclusions{})
 	if err != nil {
 		t.Fatalf("bootCore: %v", err)
 	}
@@ -440,7 +442,7 @@ func TestBootCore_ThreadsMonitorSubsetsIntoCoreOptions(t *testing.T) {
 	}
 	o := &orchestrator.Orchestrator{Cfg: cfg}
 	ctx := context.Background()
-	svc, _, _, storeClose, err := bootCore(ctx, cfg, o)
+	svc, _, _, storeClose, err := bootCore(ctx, cfg, o, cfg.Roles, runExclusions{})
 	if err != nil {
 		t.Fatalf("bootCore: %v", err)
 	}
@@ -529,15 +531,25 @@ func TestResolvedConfigFor_countsActiveRolesAndQueries(t *testing.T) {
 
 // TestSourceReportsFor_oneReportPerActiveSource proves sourceReportsFor
 // reflects cfg.Queries verbatim — the already-post-selector active subset —
-// and that an empty set produces nil, not an empty non-nil slice.
+// and that an empty set produces nil, not an empty non-nil slice. Task 4.1
+// widens the assertion to cover Type (always "pull") and the per-pass
+// LastTick/Failure threading from the caller's own discover.ProduceReport.
 func TestSourceReportsFor_oneReportPerActiveSource(t *testing.T) {
-	got := sourceReportsFor(query.SourceSet{{Name: "beads-ready"}, {Name: "e2e-source"}})
-	want := []core.SourceReport{{Name: "beads-ready"}, {Name: "e2e-source"}}
+	now := time.Date(2026, 9, 1, 0, 5, 0, 0, time.UTC)
+	rpt := discover.ProduceReport{
+		LastTick: map[string]time.Time{"beads-ready": now},
+		Failure:  map[string]discover.FailureInfo{"e2e-source": {Count: 2, NextEligible: now}},
+	}
+	got := sourceReportsFor(query.SourceSet{{Name: "beads-ready"}, {Name: "e2e-source"}}, rpt)
+	want := []core.SourceReport{
+		{Name: "beads-ready", Type: "pull", LastTick: now},
+		{Name: "e2e-source", Type: "pull", Failure: &core.FailureInfo{Count: 2, NextEligible: now}},
+	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("sourceReportsFor = %+v, want %+v", got, want)
 	}
 
-	if got := sourceReportsFor(nil); got != nil {
+	if got := sourceReportsFor(nil, discover.ProduceReport{}); got != nil {
 		t.Fatalf("sourceReportsFor(nil) = %+v, want nil", got)
 	}
 }
@@ -623,7 +635,7 @@ func TestRunUntilIdleGated_reachableAnswersIngestNoDispatch(t *testing.T) {
 	}
 
 	done := make(chan int, 1)
-	go func() { done <- runUntilIdleGated(context.Background(), cfg, o) }()
+	go func() { done <- runUntilIdleGated(context.Background(), cfg, o, cfg.Roles, runExclusions{}) }()
 
 	var ref core.Ref
 	deadline := time.Now().Add(2 * time.Second)

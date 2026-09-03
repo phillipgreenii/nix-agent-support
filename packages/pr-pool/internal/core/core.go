@@ -69,6 +69,8 @@ import (
 	"github.com/phillipgreenii/pr-pool/conformance"
 	"github.com/phillipgreenii/pr-pool/internal/activity"
 	"github.com/phillipgreenii/pr-pool/internal/eventqueue"
+	"github.com/phillipgreenii/pr-pool/internal/metrics"
+	"github.com/phillipgreenii/pr-pool/internal/roles"
 	"github.com/phillipgreenii/pr-pool/schemas"
 )
 
@@ -135,6 +137,48 @@ type Options struct {
 	Command string
 	// Now is the clock seam for the registry and the discovery record.
 	Now func() time.Time
+
+	// DeclaredRoles is the FULL, pre-selector configured role list
+	// (roles.Role{Name, Binds, Enabled} — Enabled here is the CONFIG-level
+	// flag, never a run-scoped selector's flip) — Task 4.1's listeners[]
+	// renders one row per entry, over the "full configured participant
+	// set" interfaces.md's widening requires (never the already-filtered
+	// active set — that is exactly what makes a selector-excluded
+	// participant observable at all). cmd/pr-pool's bootCore captures this
+	// BEFORE applySelectors runs, since applySelectors flips Role.Enabled
+	// for a selector-excluded role too (Binding Decision 4) — the
+	// post-selector value can no longer distinguish "config-disabled" from
+	// "selector-excluded". Optional: nil renders an empty listeners[].
+	DeclaredRoles []roles.Role
+	// ExcludedRoles/ExcludedSources are the role/source names
+	// applySelectors excluded THIS RUN (Binding Decision 4, Task 4.1) —
+	// captured at applySelectors' own call site, before it mutates
+	// Role.Enabled or removes a query.Source from the active set, so
+	// listeners[]/sources[] can report `excluded` independently of
+	// `enabled`. Optional: nil means nothing was selector-excluded this
+	// run.
+	ExcludedRoles   []string
+	ExcludedSources []string
+	// ListenerCounts is delivered/declined per role name (Task 4.1 Step 5):
+	// bumped by the deployment's own eventqueue.Observer wiring, at the
+	// SAME (event, handler) acceptance/decline sites INV-EVT-1 already
+	// records (cmd/pr-pool's fanOutObserver, bootCore) — never a second,
+	// independently-tracked count. Zero-lock-cost (perf-F4's pattern,
+	// mirroring eventqueue.Queue's own depthCell atomic.Pointer): the SAME
+	// *ListenerCounts value is shared between the observer that writes it
+	// and this Service, which only ever reads it, so composeStatusReply
+	// needs no lock of its own. Optional: nil (or a missing role-name key)
+	// reads as delivered=0/declined=0.
+	ListenerCounts map[string]*ListenerCounts
+}
+
+// ListenerCounts is one role's delivered/declined tally (Task 4.1 Step 5),
+// atomic so a writer (the deployment's eventqueue.Observer wiring) and a
+// reader (composeStatusReply, on a different goroutine) never race without
+// either taking a lock. The zero value is a valid, freshly-zeroed counter.
+type ListenerCounts struct {
+	Delivered atomic.Int64
+	Declined  atomic.Int64
 }
 
 // Service holds the core's live state.
@@ -169,6 +213,16 @@ type Service struct {
 	activityRing *activity.Ring
 	configPath   string
 	startedAt    time.Time
+
+	// declaredRoles, excludedRoles, excludedSources and listenerCounts are
+	// Task 4.1's listeners[]/sources[] widening seams — see Options'
+	// matching fields for what each carries and why. All four are set once
+	// at Listen and never mutated afterward, so composeStatusReply reads
+	// them with no lock of Service's own mu.
+	declaredRoles   []roles.Role
+	excludedRoles   []string
+	excludedSources []string
+	listenerCounts  map[string]*ListenerCounts
 
 	// tick and gates are the two published-state cells Serve's handlers (this
 	// package) read with no cross-package import (Task 3.5 Objective):
@@ -361,21 +415,25 @@ func Listen(opts Options) (*Service, error) {
 		return nil, err
 	}
 	return &Service{
-		state:          conformance.Starting,
-		q:              opts.Queue,
-		bindings:       opts.Bindings,
-		obs:            opts.Observer,
-		reg:            NewRegistry(now),
-		ln:             ln,
-		ref:            ref,
-		logDir:         opts.LogDir,
-		command:        command,
-		metricsReader:  opts.MetricsReader,
-		monitorSubsets: opts.MonitorSubsets,
-		activityRing:   opts.ActivityRing,
-		configPath:     opts.ConfigPath,
-		startedAt:      now(),
-		readSem:        make(chan struct{}, readSemCapacity),
+		state:           conformance.Starting,
+		q:               opts.Queue,
+		bindings:        opts.Bindings,
+		obs:             opts.Observer,
+		reg:             NewRegistry(now),
+		ln:              ln,
+		ref:             ref,
+		logDir:          opts.LogDir,
+		command:         command,
+		metricsReader:   opts.MetricsReader,
+		monitorSubsets:  opts.MonitorSubsets,
+		activityRing:    opts.ActivityRing,
+		configPath:      opts.ConfigPath,
+		startedAt:       now(),
+		readSem:         make(chan struct{}, readSemCapacity),
+		declaredRoles:   opts.DeclaredRoles,
+		excludedRoles:   opts.ExcludedRoles,
+		excludedSources: opts.ExcludedSources,
+		listenerCounts:  opts.ListenerCounts,
 	}, nil
 }
 
@@ -943,10 +1001,10 @@ func (s *Service) composeStatusReply(since uint64) map[string]any {
 			"configPath": s.configPath,
 		},
 		"registry":  statusRegistrations(regs),
-		"listeners": statusRegistrationsOfKind(regs, KindHandler),
+		"listeners": statusListeners(s.declaredRoles, s.excludedRoles, s.listenerCounts),
 		"gates":     statusGates(gates),
 		"asOf":      time.Now().UTC().Format(time.RFC3339Nano),
-		"sources":   []any{},
+		"sources":   statusSources(nil, s.excludedSources),
 		"activity":  []any{},
 		// activityDropped defaults false (no ring, or since==0's "no cursor, no
 		// gap to report" case per Ring.Read's own doc) and is set true below
@@ -972,11 +1030,26 @@ func (s *Service) composeStatusReply(since uint64) map[string]any {
 		core["version"] = tick.Version
 		reply["mode"] = tick.RunMode
 		reply["resolvedConfig"] = statusResolvedConfig(tick.Config)
-		reply["sources"] = statusSources(tick.Sources)
+		reply["sources"] = statusSources(tick.Sources, s.excludedSources)
 		reply["lastTickAt"] = tick.LastTickAt.UTC().Format(time.RFC3339Nano)
 		reply["snapshotAt"] = tick.SnapshotAt.UTC().Format(time.RFC3339Nano)
 		if tick.Config.PollInterval != nil {
 			reply["tickIntervalMs"] = tick.Config.PollInterval.Milliseconds()
+		}
+	}
+	// counters (Binding Decision 7, Task 4.1's operator-widened scope):
+	// read back VERBATIM from the already-landed
+	// internal/metrics.Emitter/MetricsReader mechanism (Task 3.6's mon.read
+	// path) — never a second, independently-incremented counter
+	// (interfaces.md:649-653). A nil MetricsReader omits the key entirely
+	// (matches resolvedConfig's own tick-nil omission above); a Snapshot
+	// error ALSO omits the key rather than failing the whole status call —
+	// status is the TUI's every-tick poll dependency (Task 4.4), so it must
+	// never fail outright over a metrics-snapshot hiccup, deliberately NOT
+	// mon.read's own error-surfacing posture.
+	if s.metricsReader != nil {
+		if rm, err := s.metricsReader.Snapshot(context.Background()); err == nil {
+			reply["counters"] = statusCounters(rm)
 		}
 	}
 	return reply
@@ -1036,24 +1109,149 @@ func statusRegistrations(regs []Registration) []map[string]any {
 	return out
 }
 
-// statusRegistrationsOfKind filters regs to one Kind before rendering —
-// `listeners` is the Kind==KindHandler subset of the full `registry` dump
-// (interfaces.md: a handler is the participant that "listens" for dispatch).
-func statusRegistrationsOfKind(regs []Registration, kind Kind) []map[string]any {
-	var filtered []Registration
-	for _, r := range regs {
-		if r.Kind == kind {
-			filtered = append(filtered, r)
-		}
+// statusListeners renders `listeners` — Task 4.1's own per-role view
+// (operator-widened scope), REPLACING the prior reuse of
+// statusRegistrationsOfKind's Kind==KindHandler filter over the registry
+// dump: `registry` above keeps using statusRegistrations for its own,
+// distinct, self-reported-participant purpose, untouched by this widening.
+//
+// declared is Options.DeclaredRoles — the FULL, pre-selector configured
+// role list — so a selector-excluded role's own role/binds/config-level
+// `enabled` still renders (interfaces.md's "full configured participant
+// set", never the already-filtered active set: that is what makes a
+// selector-excluded participant observable at all). excludedRoles is
+// Options.ExcludedRoles (Binding Decision 4): captured at applySelectors'
+// own call site, before it flips Role.Enabled for a selector-excluded
+// role too — the post-selector Enabled value alone cannot distinguish
+// "config-disabled" from "selector-excluded", so `excluded` is computed
+// from this independent signal instead of re-derived from `enabled`.
+// counts is Options.ListenerCounts (Task 4.1 Step 5); a role absent from
+// it (or a nil map) reads as delivered=0/declined=0.
+//
+// `backoff` is always null: nothing here holds a live reference to any
+// orchestrator.roleListener — core does not import orchestrator (the
+// dependency already runs the other way) — and the shipped production
+// listener never accrues a running backoff streak in the first place
+// (roleListener.RetryBackoff() names only the retry POLICY, never a live
+// streak; see orchestrator/listener.go's BackoffState for the identical
+// conclusion from that side, added for schema generality per spec §5 but
+// left unconnected for exactly this reason).
+func statusListeners(declared []roles.Role, excludedRoles []string, counts map[string]*ListenerCounts) []map[string]any {
+	excluded := make(map[string]bool, len(excludedRoles))
+	for _, n := range excludedRoles {
+		excluded[n] = true
 	}
-	return statusRegistrations(filtered)
+	out := make([]map[string]any, 0, len(declared))
+	for _, r := range declared {
+		binds := make([]string, len(r.Binds))
+		copy(binds, r.Binds)
+		var delivered, declined int64
+		if c := counts[r.Name]; c != nil {
+			delivered = c.Delivered.Load()
+			declined = c.Declined.Load()
+		}
+		out = append(out, map[string]any{
+			"role":      r.Name,
+			"binds":     binds,
+			"enabled":   r.Enabled,
+			"excluded":  excluded[r.Name],
+			"delivered": delivered,
+			"declined":  declined,
+			"backoff":   nil,
+		})
+	}
+	return out
 }
 
-// statusSources renders a TickSnapshot's Sources as the `sources` array.
-func statusSources(sources []SourceReport) []map[string]any {
-	out := make([]map[string]any, 0, len(sources))
-	for _, sr := range sources {
-		out = append(out, map[string]any{"name": sr.Name, "rejected": sr.Rejected})
+// statusSources renders `sources` — Task 4.1's widening: type/enabled/
+// excluded/mode/lastTick/failure, over the FULL configured source set
+// (Binding Decision 4 applied to sources: active, THIS pass's
+// TickSnapshot.Sources, UNION excludedSources — Options.ExcludedSources,
+// the selector-excluded names applySelectors captured before removing the
+// query.Source from cfg.Queries entirely, so there is nothing else left to
+// report for it here beyond its bare name).
+//
+// type/mode are always "pull": no push query type exists in this codebase
+// today (see SourceReport.Type's doc) — the fields exist for schema
+// generality (spec §5's corr-6 precedent), not because any source here is
+// ever push. `enabled` is always true for a source: unlike a role, a query
+// carries no config-level enable/disable flag — the only way a configured
+// source is inactive this run is selector exclusion, `excluded` alone.
+// `lastTick`/`failure` are per-pass (THIS pass's ProduceReport only, the
+// same scope LastTick's own doc already states) — a cadence-gated-off pass
+// simply omits them rather than replaying stale history.
+//
+// `rejected` (the prior, unused field) is REMOVED per the schema-change
+// note — it was never part of the frozen tree and nothing rendered it.
+func statusSources(active []SourceReport, excludedSources []string) []map[string]any {
+	out := make([]map[string]any, 0, len(active)+len(excludedSources))
+	for _, sr := range active {
+		row := map[string]any{
+			"name":     sr.Name,
+			"type":     "pull",
+			"enabled":  true,
+			"excluded": false,
+			"mode":     "pull",
+			"failure":  nil,
+		}
+		if !sr.LastTick.IsZero() {
+			row["lastTick"] = sr.LastTick.UTC().Format(time.RFC3339Nano)
+		}
+		if sr.Failure != nil {
+			row["failure"] = map[string]any{
+				"count":        sr.Failure.Count,
+				"nextEligible": sr.Failure.NextEligible.UTC().Format(time.RFC3339Nano),
+			}
+		}
+		out = append(out, row)
+	}
+	for _, name := range excludedSources {
+		out = append(out, map[string]any{
+			"name":     name,
+			"type":     "pull",
+			"enabled":  true,
+			"excluded": true,
+			"mode":     "pull",
+			"failure":  nil,
+		})
+	}
+	return out
+}
+
+// statusCounters folds the metric catalog's THREE delivery-side counters
+// (Binding Decision 7: "the same members INTF-MON's metric catalog
+// declares... never a second, divergently-counted set", interfaces.md:649-
+// 653) into the status reply's `counters` shape, keyed by event type —
+// reusing mon.go's own monReadDataPoints flattening (the same lookup shape
+// mon.read already performs over the identical rm) rather than a second,
+// parallel folding routine.
+func statusCounters(rm metricdata.ResourceMetrics) map[string]any {
+	keyFor := map[string]string{
+		metrics.MetricUnconsumedExpired:   "unconsumedExpired",
+		metrics.MetricUnknownTypeRejected: "unknownTypeRejected",
+		metrics.MetricDeduped:             "deduped",
+	}
+	perType := map[string]map[string]int64{
+		"unconsumedExpired":   {},
+		"unknownTypeRejected": {},
+		"deduped":             {},
+	}
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			key, ok := keyFor[m.Name]
+			if !ok {
+				continue
+			}
+			for _, v := range monReadDataPoints(m) {
+				if t, ok := v.Labels["type"].(string); ok {
+					perType[key][t] = int64(v.Value)
+				}
+			}
+		}
+	}
+	out := make(map[string]any, len(perType))
+	for key, m := range perType {
+		out[key] = m
 	}
 	return out
 }
@@ -1077,12 +1275,23 @@ func statusActivity(entries []activity.Entry) []map[string]any {
 // `resolvedConfig` object; `pollIntervalMs` is omitted when PollInterval is
 // nil (drain-and-exit mode has no polling cadence to report — Task 3.5
 // Step 7).
+//
+// perParticipant (Task 4.1, Binding Decision 7, operator-widened scope) is
+// ALWAYS present — an honestly-empty {} object, never omitted or nil: spec
+// §12's own comp-4 calls this field "opaque, per-kind... NOT enumerated
+// here", and no per-kind whitelist producer exists anywhere in this
+// codebase yet, so an empty object is a spec-compliant instance of that
+// opaque shape, not a placeholder standing in for missing work. Do NOT
+// invent a fabricated per-kind shape here — a real producer is out of
+// scope for this whole docket (spec §12's own "MAY narrow at extraction
+// (Phase 5)" framing).
 func statusResolvedConfig(cfg ResolvedConfig) map[string]any {
 	out := map[string]any{
-		"repoRoot":      cfg.RepoRoot,
-		"beadsPrefix":   cfg.BeadsPrefix,
-		"activeRoles":   cfg.ActiveRoles,
-		"activeQueries": cfg.ActiveQueries,
+		"repoRoot":       cfg.RepoRoot,
+		"beadsPrefix":    cfg.BeadsPrefix,
+		"activeRoles":    cfg.ActiveRoles,
+		"activeQueries":  cfg.ActiveQueries,
+		"perParticipant": map[string]any{},
 	}
 	if cfg.PollInterval != nil {
 		out["pollIntervalMs"] = cfg.PollInterval.Milliseconds()

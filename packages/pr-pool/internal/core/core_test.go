@@ -12,6 +12,7 @@ import (
 	"github.com/phillipgreenii/pr-pool/conformance"
 	"github.com/phillipgreenii/pr-pool/internal/activity"
 	"github.com/phillipgreenii/pr-pool/internal/eventqueue"
+	"github.com/phillipgreenii/pr-pool/internal/roles"
 )
 
 // Serve dispatches the `register` subcommand (Task 2.1): a participant
@@ -337,6 +338,11 @@ func TestServeStatus_ComposesLiveState(t *testing.T) {
 	ring := activity.New(4)
 	ring.Append(activity.Entry{Type: "review-requested", Outcome: "delivered"})
 	svc := startedServiceForStatus(t, ring)
+	// Task 4.1: listeners[] now renders declaredRoles (the full configured
+	// role list), not a Registry.List() filter — set it directly here so
+	// this test's "the registered handler" assertion below still holds
+	// under the widened shape.
+	svc.declaredRoles = []roles.Role{{Name: "review", Binds: []string{"review-requested"}, Enabled: true}}
 
 	if _, err := svc.q.Enqueue(eventqueue.Event{ID: "e1", Type: "review-requested", ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
 		t.Fatalf("enqueue: %v", err)
@@ -379,8 +385,8 @@ func TestServeStatus_ComposesLiveState(t *testing.T) {
 		t.Fatalf("gates = %v, want quota_paused set by ObserveGateFromSocketVerb", gates)
 	}
 	listeners, _ := reply["listeners"].([]any)
-	if len(listeners) != 1 || listeners[0].(map[string]any)["id"] != "review" {
-		t.Fatalf("listeners = %v, want the registered handler (Registry.List())", listeners)
+	if len(listeners) != 1 || listeners[0].(map[string]any)["role"] != "review" {
+		t.Fatalf("listeners = %v, want the one declared role (Task 4.1: Options.DeclaredRoles, not Registry.List())", listeners)
 	}
 	activityEntries, _ := reply["activity"].([]any)
 	if len(activityEntries) != 1 || activityEntries[0].(map[string]any)["outcome"] != "delivered" {

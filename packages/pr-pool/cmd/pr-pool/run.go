@@ -20,6 +20,7 @@ import (
 	"github.com/phillipgreenii/pr-pool/internal/ccpool"
 	"github.com/phillipgreenii/pr-pool/internal/config"
 	"github.com/phillipgreenii/pr-pool/internal/core"
+	"github.com/phillipgreenii/pr-pool/internal/discover"
 	"github.com/phillipgreenii/pr-pool/internal/eventlog"
 	"github.com/phillipgreenii/pr-pool/internal/eventqueue"
 	"github.com/phillipgreenii/pr-pool/internal/metrics"
@@ -79,7 +80,14 @@ const idleDrainTick = 500 * time.Millisecond
 // threads through as WithRetryBackoff — this is the ONE production seam that
 // resolves the config-level mark into the queue's dispatch-time occupancy gate;
 // an empty/absent [pool].serialize_types leaves every type unaffected.
-func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrator) (svc *core.Service, q *eventqueue.Queue, mp metric.MeterProvider, storeClose func() error, err error) {
+// declaredRoles is the FULL, pre-selector role list (prepareRun captures it
+// before applySelectors runs — Task 4.1, Binding Decision 4) and excluded
+// is that same call's runExclusions; both flow straight onto core.Options
+// so composeStatusReply's listeners[]/sources[] can render the full
+// configured participant set with `excluded` computed independently of
+// `enabled` (see core.Options' own docs on DeclaredRoles/ExcludedRoles/
+// ExcludedSources).
+func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrator, declaredRoles roles.RoleSet, excluded runExclusions) (svc *core.Service, q *eventqueue.Queue, mp metric.MeterProvider, storeClose func() error, err error) {
 	store, err := eventqueue.NewFileStore(filepath.Join(cfg.LogDir, "queue.jsonl"))
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("open event queue: %w", err)
@@ -101,7 +109,18 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 	// state for Task 3.8's status verb to read live and directly; this
 	// function's own job stops at constructing it and keeping it fed.
 	ring := activity.New(cfg.ActivityRingSize)
-	q, err = eventqueue.New(store, eventqueue.WithRetryBackoff(cfg.RetryBackoff), eventqueue.WithObserver(fanOutObserver{emitter, newActivityObserver(ring)}), eventqueue.WithSerializeTypes(cfg.SerializeTypes...))
+	// listenerCounts is Task 4.1 Step 5's per-role delivered/declined tally
+	// (core.ListenerCounts): pre-populated for every DECLARED role (not
+	// only the enabled ones) so a lookup in statusListeners always hits,
+	// and bumped by listenerCountObserver at the SAME (event, handler)
+	// acceptance/decline sites eventqueue.Dispatch already reports via
+	// OnAccept/OnDeclined (INV-EVT-1) — never a second, independently-
+	// tracked count.
+	listenerCounts := make(map[string]*core.ListenerCounts, len(declaredRoles))
+	for _, r := range declaredRoles {
+		listenerCounts[r.Name] = &core.ListenerCounts{}
+	}
+	q, err = eventqueue.New(store, eventqueue.WithRetryBackoff(cfg.RetryBackoff), eventqueue.WithObserver(fanOutObserver{emitter, fanOutObserver{newActivityObserver(ring), newListenerCountObserver(listenerCounts)}}), eventqueue.WithSerializeTypes(cfg.SerializeTypes...))
 	if err != nil {
 		_ = store.Close()
 		return nil, nil, nil, nil, fmt.Errorf("construct event queue: %w", err)
@@ -127,6 +146,12 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 		// under its `core.configPath` field.
 		ActivityRing: ring,
 		ConfigPath:   cfg.ConfigPath,
+		// DeclaredRoles/ExcludedRoles/ExcludedSources/ListenerCounts
+		// (Task 4.1): see this function's own doc comment above.
+		DeclaredRoles:   declaredRoles,
+		ExcludedRoles:   excluded.Roles,
+		ExcludedSources: excluded.Sources,
+		ListenerCounts:  listenerCounts,
 	}
 	if metricsReader != nil {
 		// Assigned only when non-nil: metricsReader is a typed *metrics.Reader,
@@ -381,6 +406,43 @@ func (a *activityObserver) OnDeduped(evtType string) {
 	a.ring.Append(activity.Entry{Type: evtType, Outcome: "deduped"})
 }
 
+// listenerCountObserver implements eventqueue.Observer to bump a per-role
+// delivered/declined tally (Task 4.1 Step 5): the SAME (event, handler)
+// acceptance/decline sites INV-EVT-1 already reports via OnAccept/
+// OnDeclined — listenerID is the role name (roleListener.ID() returns
+// l.role.Name) — fanned into composeStatusReply's listeners[] via
+// core.Options.ListenerCounts, the identical *core.ListenerCounts values
+// this type writes into. counts is pre-populated (bootCore) for every
+// DECLARED role, so a lookup miss (a listenerID this deployment never
+// declared) is simply dropped rather than panicking.
+type listenerCountObserver struct {
+	counts map[string]*core.ListenerCounts
+}
+
+func newListenerCountObserver(counts map[string]*core.ListenerCounts) *listenerCountObserver {
+	return &listenerCountObserver{counts: counts}
+}
+
+func (l *listenerCountObserver) OnEnqueue(eventqueue.Event) {}
+
+func (l *listenerCountObserver) OnAccept(_, listenerID string) {
+	if c := l.counts[listenerID]; c != nil {
+		c.Delivered.Add(1)
+	}
+}
+
+func (l *listenerCountObserver) OnUnconsumedExpired(string) {}
+
+func (l *listenerCountObserver) OnDeclined(_, listenerID, _ string) {
+	if c := l.counts[listenerID]; c != nil {
+		c.Declined.Add(1)
+	}
+}
+
+func (l *listenerCountObserver) OnDispatchFailure(string) {}
+
+func (l *listenerCountObserver) OnDeduped(string) {}
+
 // preparedRun is the config/precheck/eventlog setup shared by `run` and
 // `run-until-idle` — the same setup runDrain used to do before this bead
 // retired it.
@@ -388,6 +450,12 @@ type preparedRun struct {
 	cfg     config.Config
 	o       *orchestrator.Orchestrator
 	cleanup func() // closes the eventlog writer, if one was opened
+	// declaredRoles/excluded are Task 4.1's own captures (Binding Decision
+	// 4): the FULL, pre-selector role list and the run-scoped exclusions
+	// applySelectors computed at its own decision point — both threaded
+	// into bootCore's core.Options wiring by every call site below.
+	declaredRoles roles.RoleSet
+	excluded      runExclusions
 }
 
 // prepareRun loads config, warns on stale env / tracked config / stub queries /
@@ -421,7 +489,13 @@ func prepareRun(ctx context.Context, sel runSelectors) (preparedRun, int) {
 	}
 	slog.Info("precheck ok", "prefix", cfg.BeadsPrefix)
 
-	cfg, err = applySelectors(cfg, sel)
+	// declaredRoles captures the FULL, pre-selector role list (Task 4.1,
+	// Binding Decision 4) BEFORE applySelectors runs: applySelectors
+	// copies cfg.Roles into a fresh backing array before flipping Enabled
+	// on any excluded entry, so this slice header stays valid and
+	// unmutated by that later call.
+	declaredRoles := cfg.Roles
+	cfg, excluded, err := applySelectors(cfg, sel)
 	if err != nil {
 		printUsageErr(fmt.Sprintf("selector: %v", err))
 		return preparedRun{}, exitUsage
@@ -459,7 +533,7 @@ func prepareRun(ctx context.Context, sel runSelectors) (preparedRun, int) {
 		o.Log = lw
 		cleanup = func() { _ = lw.Close() }
 	}
-	return preparedRun{cfg: cfg, o: o, cleanup: cleanup}, exitOK
+	return preparedRun{cfg: cfg, o: o, cleanup: cleanup, declaredRoles: declaredRoles, excluded: excluded}, exitOK
 }
 
 // gateTickKeyQuotaPaused / gateTickKeyCICDDown are the two file-direct gate names (Task
@@ -516,13 +590,29 @@ func countEnabledRoles(rs roles.RoleSet) int {
 // applySelectors already removed any excluded query from the slice, so every
 // entry here fired (or was scheduled to fire) this pass. See
 // core.TickSnapshot.Sources for the Rejected freedom-boundary note.
-func sourceReportsFor(sources query.SourceSet) []core.SourceReport {
+//
+// rpt is THIS pass's own discover.ProduceReport (Task 4.1):
+// LastTick/Failure both carry the SAME per-pass scope — present only for a
+// source this pass actually attempted, so a source Task 1.3's cadence
+// gating skipped this pass simply carries neither field this call, rather
+// than replaying stale history (the identical limitation LastTick's own
+// doc already states, extended consistently to Failure). Every source
+// here is "pull" (Type/Mode, statusSources' own doc): no push query type
+// exists in this codebase today.
+func sourceReportsFor(sources query.SourceSet, rpt discover.ProduceReport) []core.SourceReport {
 	if len(sources) == 0 {
 		return nil
 	}
 	out := make([]core.SourceReport, len(sources))
 	for i, s := range sources {
-		out[i] = core.SourceReport{Name: s.Name}
+		sr := core.SourceReport{Name: s.Name, Type: "pull"}
+		if lt, ok := rpt.LastTick[s.Name]; ok {
+			sr.LastTick = lt
+		}
+		if f, ok := rpt.Failure[s.Name]; ok {
+			sr.Failure = &core.FailureInfo{Count: f.Count, NextEligible: f.NextEligible}
+		}
+		out[i] = sr
 	}
 	return out
 }
@@ -625,7 +715,7 @@ func runOneTick(ctx context.Context, cfg config.Config, o *orchestrator.Orchestr
 		q.Expire()
 		now := time.Now()
 		svc.PublishTick(core.TickSnapshot{
-			Sources:    sourceReportsFor(cfg.Queries),
+			Sources:    sourceReportsFor(cfg.Queries, rpt),
 			Config:     resolvedConfigFor(cfg, core.RunModeLongRunning),
 			RunMode:    core.RunModeLongRunning,
 			Version:    version,
@@ -647,11 +737,11 @@ func runOneTick(ctx context.Context, cfg config.Config, o *orchestrator.Orchestr
 // once (INV-EVT-4's clock does not pause with production) and the final
 // metrics snapshot is still flushed by the caller on every exit path. It MUST
 // NOT report the queue as drained — it never drained anything.
-func runUntilIdleGated(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrator) int {
+func runUntilIdleGated(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrator, declaredRoles roles.RoleSet, excluded runExclusions) int {
 	if notice := gateNotice(cfg); notice != "" {
 		fmt.Fprintln(os.Stderr, notice)
 	}
-	svc, q, mp, storeClose, err := bootCore(ctx, cfg, o)
+	svc, q, mp, storeClose, err := bootCore(ctx, cfg, o, declaredRoles, excluded)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "run-until-idle:", err)
 		return exitGeneric
@@ -710,10 +800,10 @@ func runRunUntilIdle(only, disable []string) int {
 		// INV-LIFE-2's gated drain-and-exit slice: still boots the core (stays
 		// reachable, answers ingest-event) but never drains — see
 		// runUntilIdleGated's doc comment.
-		return runUntilIdleGated(ctx, pr.cfg, pr.o)
+		return runUntilIdleGated(ctx, pr.cfg, pr.o, pr.declaredRoles, pr.excluded)
 	}
 
-	svc, q, mp, storeClose, err := bootCore(ctx, pr.cfg, pr.o)
+	svc, q, mp, storeClose, err := bootCore(ctx, pr.cfg, pr.o, pr.declaredRoles, pr.excluded)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "run-until-idle:", err)
 		return exitGeneric
@@ -756,7 +846,7 @@ func runRunUntilIdle(only, disable []string) int {
 		q.Expire()
 		now := time.Now()
 		svc.PublishTick(core.TickSnapshot{
-			Sources:    sourceReportsFor(pr.cfg.Queries),
+			Sources:    sourceReportsFor(pr.cfg.Queries, rpt),
 			Config:     resolvedConfigFor(pr.cfg, core.RunModeDrainAndExit),
 			RunMode:    core.RunModeDrainAndExit,
 			Version:    version,
@@ -811,7 +901,7 @@ func runRun(only, disable []string) int {
 	}
 	defer pr.cleanup()
 
-	svc, q, _, storeClose, err := bootCore(ctx, pr.cfg, pr.o)
+	svc, q, _, storeClose, err := bootCore(ctx, pr.cfg, pr.o, pr.declaredRoles, pr.excluded)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "run:", err)
 		return exitGeneric

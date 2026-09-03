@@ -241,3 +241,47 @@ func TestGatesAreStale(t *testing.T) {
 		})
 	}
 }
+
+// TestStatusCmd_RendersWidenedListenersSources proves the plain-text
+// LISTENERS/SOURCES sections render the Task 4.1 widened fields
+// (role/binds/enabled/excluded/delivered/declined/backoff and
+// name/type/enabled/excluded/mode/lastTick/failure) rather than the prior
+// {id,kind,state,self}/{name,rejected} shapes — closing the "no test would
+// catch this" risk the gap this packet found against the live repo (Task
+// 4.1 Files: status_cmd.go's own decode/render was not in the original
+// Files list; left unmodified, `pr-pool status`'s text output would
+// silently render blank/wrong LISTENERS and SOURCES sections after this
+// packet's wire-shape change ships).
+func TestStatusCmd_RendersWidenedListenersSources(t *testing.T) {
+	st := statusReply{
+		Listeners: []listenerView{
+			{Role: "review", Binds: []string{"review-requested"}, Enabled: true, Excluded: false, Delivered: 3, Declined: 1},
+		},
+		Sources: []sourceView{
+			{Name: "feedback-ready", Type: "pull", Enabled: true, Excluded: false, Mode: "pull", LastTick: "2026-09-01T00:05:00Z"},
+			{
+				Name: "urgent-ready", Type: "pull", Enabled: true, Excluded: true, Mode: "pull",
+				Failure: &failureView{Count: 2, NextEligible: "2026-09-01T00:06:00Z"},
+			},
+		},
+	}
+	var out strings.Builder
+	renderStatusText(&out, "/tmp/core.sock", st)
+	text := out.String()
+
+	wantListenerRow := "  review: binds=[review-requested] enabled=true excluded=false delivered=3 declined=1 backoff=-\n"
+	if !strings.Contains(text, wantListenerRow) {
+		t.Fatalf("stdout = %q, want the widened LISTENERS row %q", text, wantListenerRow)
+	}
+	wantSourceRow1 := "  feedback-ready: type=pull enabled=true excluded=false mode=pull lastTick=2026-09-01T00:05:00Z failure=-\n"
+	if !strings.Contains(text, wantSourceRow1) {
+		t.Fatalf("stdout = %q, want the widened SOURCES row %q", text, wantSourceRow1)
+	}
+	wantSourceRow2 := "  urgent-ready: type=pull enabled=true excluded=true mode=pull lastTick=- failure=count=2 nextEligible=2026-09-01T00:06:00Z\n"
+	if !strings.Contains(text, wantSourceRow2) {
+		t.Fatalf("stdout = %q, want the excluded/failing SOURCES row %q", text, wantSourceRow2)
+	}
+	if strings.Contains(text, "rejected=") {
+		t.Fatalf("stdout = %q, want the removed `rejected` field never rendered", text)
+	}
+}

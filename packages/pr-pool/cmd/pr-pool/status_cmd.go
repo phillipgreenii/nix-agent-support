@@ -79,7 +79,7 @@ func status(stdout, stderr io.Writer, asJSON bool, ref core.Ref) int {
 		// than blocking. Unlike a participant's own pre-accept busy decline
 		// (a body-less reply), this refusal always carries a human-readable
 		// cli.error envelope — render it and preserve the wire's own exit
-		// code, rather than falling into discriminateReply's generic
+		// code, rather than falling into core.DiscriminateReply's generic
 		// "core refused" -> exit 1 mapping below, which would otherwise
 		// swallow this call's true exit 9.
 		fmt.Fprintf(stderr, "status: %s\n", busyRefusalMessage(reply))
@@ -87,7 +87,7 @@ func status(stdout, stderr io.Writer, asJSON bool, ref core.Ref) int {
 	}
 
 	var st statusReply
-	if diagErr := discriminateReply(reply, core.StatusReplySchema, &st); diagErr != nil {
+	if diagErr := core.DiscriminateReply(reply, core.StatusReplySchema, &st); diagErr != nil {
 		fmt.Fprintf(stderr, "status: %v\n", diagErr)
 		return conformance.ExitError
 	}
@@ -152,13 +152,21 @@ type statusReply struct {
 		Mtime string `json:"mtime"`
 		Owner string `json:"owner"`
 	} `json:"gates"`
-	GatesObservedAt string             `json:"gatesObservedAt"`
-	Listeners       []registrationView `json:"listeners"`
-	Sources         []struct {
-		Name     string `json:"name"`
-		Rejected int    `json:"rejected"`
-	} `json:"sources"`
-	UnmatchedBindings []string `json:"unmatchedBindings"`
+	GatesObservedAt string `json:"gatesObservedAt"`
+	// Listeners is listeners[]'s WIDENED per-role shape (Task 4.1,
+	// operator-widened scope) — a dedicated decode target. Task 4.1 also
+	// removed the prior {id,kind,state,self} decode this array shared with
+	// registry[] (neither this CLI's statusReply nor its renderer ever
+	// decoded registry[] itself, so no replacement decode target is needed
+	// for it here): the two arrays diverged on the wire, and reusing one
+	// type for both would silently mix them up again.
+	Listeners []listenerView `json:"listeners"`
+	// Sources is sources[]'s WIDENED shape (Task 4.1): the prior
+	// {name, rejected} decode target is gone along with the wire field it
+	// named — `rejected` was never part of the frozen tree and nothing
+	// rendered it.
+	Sources           []sourceView `json:"sources"`
+	UnmatchedBindings []string     `json:"unmatchedBindings"`
 	Activity          []struct {
 		Seq       uint64 `json:"seq"`
 		StartedAt string `json:"startedAt"`
@@ -177,11 +185,45 @@ type statusReply struct {
 	TickIntervalMs  int    `json:"tickIntervalMs"`
 }
 
-type registrationView struct {
-	ID    string `json:"id"`
-	Kind  string `json:"kind"`
-	State string `json:"state"`
-	Self  string `json:"self"`
+// backoffView is listeners[].backoff's / sources[].failure's shared
+// {streak|count, nextEligible} shape — nil (the JSON `null` decode target,
+// via a pointer) whenever nothing is currently backing off.
+type backoffView struct {
+	Streak       int    `json:"streak"`
+	NextEligible string `json:"nextEligible"`
+}
+
+// failureView is sources[].failure's shape — {count, nextEligible} —
+// distinct from backoffView only in its first field's name (the wire
+// vocabulary Task 4.1's schema uses for each array), not its meaning.
+type failureView struct {
+	Count        int    `json:"count"`
+	NextEligible string `json:"nextEligible"`
+}
+
+// listenerView is listeners[]'s widened per-role item shape (Task 4.1,
+// operator-widened scope): role/binds/enabled/excluded/delivered/declined/
+// backoff.
+type listenerView struct {
+	Role      string       `json:"role"`
+	Binds     []string     `json:"binds"`
+	Enabled   bool         `json:"enabled"`
+	Excluded  bool         `json:"excluded"`
+	Delivered int          `json:"delivered"`
+	Declined  int          `json:"declined"`
+	Backoff   *backoffView `json:"backoff"`
+}
+
+// sourceView is sources[]'s widened item shape (Task 4.1): name/type/
+// enabled/excluded/mode/lastTick/failure.
+type sourceView struct {
+	Name     string       `json:"name"`
+	Type     string       `json:"type"`
+	Enabled  bool         `json:"enabled"`
+	Excluded bool         `json:"excluded"`
+	Mode     string       `json:"mode"`
+	LastTick string       `json:"lastTick"`
+	Failure  *failureView `json:"failure"`
 }
 
 // activityRenderLimit is the human-form "ACTIVITY (last 10)" cap (Task 3.8
@@ -277,13 +319,23 @@ func renderStatusText(w io.Writer, socket string, st statusReply) {
 
 	renderSection(w, "LISTENERS", len(st.Listeners), func() {
 		for _, l := range st.Listeners {
-			fmt.Fprintf(w, "  %s: state=%s self=%s\n", dash(l.ID), dash(l.State), dash(l.Self))
+			backoff := "-"
+			if l.Backoff != nil {
+				backoff = fmt.Sprintf("streak=%d nextEligible=%s", l.Backoff.Streak, dash(l.Backoff.NextEligible))
+			}
+			fmt.Fprintf(w, "  %s: binds=%v enabled=%t excluded=%t delivered=%d declined=%d backoff=%s\n",
+				dash(l.Role), l.Binds, l.Enabled, l.Excluded, l.Delivered, l.Declined, backoff)
 		}
 	})
 
 	renderSection(w, "SOURCES", len(st.Sources), func() {
 		for _, s := range st.Sources {
-			fmt.Fprintf(w, "  %s: rejected=%d\n", dash(s.Name), s.Rejected)
+			failure := "-"
+			if s.Failure != nil {
+				failure = fmt.Sprintf("count=%d nextEligible=%s", s.Failure.Count, dash(s.Failure.NextEligible))
+			}
+			fmt.Fprintf(w, "  %s: type=%s enabled=%t excluded=%t mode=%s lastTick=%s failure=%s\n",
+				dash(s.Name), dash(s.Type), s.Enabled, s.Excluded, dash(s.Mode), dash(s.LastTick), failure)
 		}
 	})
 

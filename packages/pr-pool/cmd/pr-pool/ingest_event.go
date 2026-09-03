@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -111,7 +110,7 @@ func callCore(stdout, stderr io.Writer, ref core.Ref, subcommand string, request
 		fmt.Fprintf(stderr, "%s: %v\n", subcommand, err)
 		return conformance.ExitError
 	}
-	if diagErr := discriminateReply(reply, replySchemaFor(subcommand), nil); diagErr != nil {
+	if diagErr := core.DiscriminateReply(reply, replySchemaFor(subcommand), nil); diagErr != nil {
 		fmt.Fprintf(stderr, "%s: %v\n", subcommand, diagErr)
 	}
 	if len(reply) > 0 {
@@ -133,44 +132,6 @@ func replySchemaFor(subcommand string) string {
 	default:
 		return ""
 	}
-}
-
-// discriminateReply checks reply against the protocol-level error envelope
-// (cli.error) BEFORE validating it against the verb's own reply schema —
-// register row bead pg2-o9r6a's actual content (Task 3.8 Binding decisions,
-// Step 7): creating the cli.error schema alone does not close the gap, since
-// every CLI-facing client that reads a core reply must apply this ordering
-// itself, not merely have the schema artifact available.
-//
-// A body-less reply (the legal busy shape, exit 9) is not discriminated at
-// all — there is nothing to check. When out is non-nil and reply matches
-// neither shape as an error, reply is decoded into it (the caller's typed
-// reply value); a nil out is for a caller that only wants the validation
-// (callCore's raw relay never decodes the reply itself).
-func discriminateReply(reply []byte, replySchema string, out any) error {
-	if len(reply) == 0 {
-		return nil
-	}
-	if conformance.CheckBytes(core.ErrorReplySchema, reply) == nil {
-		var errBody struct {
-			Error string `json:"error"`
-		}
-		if err := json.Unmarshal(reply, &errBody); err == nil {
-			return fmt.Errorf("core refused: %s", errBody.Error)
-		}
-	}
-	if replySchema == "" {
-		return nil
-	}
-	if err := conformance.CheckBytes(replySchema, reply); err != nil {
-		return fmt.Errorf("core reply is not a valid %s: %w", replySchema, err)
-	}
-	if out != nil {
-		if err := json.Unmarshal(reply, out); err != nil {
-			return fmt.Errorf("decode %s reply: %w", replySchema, err)
-		}
-	}
-	return nil
 }
 
 // reportNoCore renders a failure from any subcommand that has to reach the core,

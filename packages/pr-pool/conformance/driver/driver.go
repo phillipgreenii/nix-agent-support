@@ -209,6 +209,15 @@ var negativeMatrix = map[string][]negativeCase{
 		{"gate missing set", `{"schemaVersion":"1","deliveries":[],"queues":[],"config":{"sources":0,"handlers":0},"gates":[{"name":"quota_paused"}]}`},
 		{"activity entry missing outcome", `{"schemaVersion":"1","deliveries":[],"queues":[],"config":{"sources":0,"handlers":0},"activity":[{"seq":1,"startedAt":"2026-09-01T00:00:00Z","type":"t"}]}`},
 		{"activityDropped wrong type", `{"schemaVersion":"1","deliveries":[],"queues":[],"config":{"sources":0,"handlers":0},"activityDropped":"yes"}`},
+		// Task 4.1 (operator-widened scope): the new listeners[].backoff shape
+		// (a bare string satisfies neither the {enum:[null]} nor the
+		// {streak,nextEligible} oneOf branch — schemas/validate.go's own
+		// documented keyword subset has no "type":"null", so backoff's
+		// nullability is expressed via {"enum":[null]} instead; see the
+		// schema file's own comment-free JSON for why).
+		{"listeners backoff malformed (neither null nor {streak,nextEligible})", `{"schemaVersion":"1","deliveries":[],"queues":[],"config":{"sources":0,"handlers":0},"listeners":[{"role":"r","binds":[],"enabled":true,"excluded":false,"delivered":0,"declined":0,"backoff":"soon"}]}`},
+		{"counters.unconsumedExpired wrong type (not an object)", `{"schemaVersion":"1","deliveries":[],"queues":[],"config":{"sources":0,"handlers":0},"counters":{"unconsumedExpired":"oops","unknownTypeRejected":{},"deduped":{}}}`},
+		{"resolvedConfig.perParticipant wrong type (not an object)", `{"schemaVersion":"1","deliveries":[],"queues":[],"config":{"sources":0,"handlers":0},"resolvedConfig":{"repoRoot":"/r","beadsPrefix":"p","activeRoles":0,"activeQueries":0,"perParticipant":"oops"}}`},
 	},
 	"cli.status": {
 		{"schemaVersion const mismatch", `{"schemaVersion":"9"}`},

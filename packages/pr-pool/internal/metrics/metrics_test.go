@@ -13,8 +13,6 @@ import (
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 
-	"github.com/phillipgreenii/pr-pool/internal/core"
-	"github.com/phillipgreenii/pr-pool/internal/discover"
 	"github.com/phillipgreenii/pr-pool/internal/eventqueue"
 )
 
@@ -404,16 +402,26 @@ func TestFailureRatePerClass(t *testing.T) {
 }
 
 // The Emitter is the core's ingest observer too, so the ingest-time condition
-// INV-DISP-3 requires in metrics can actually be wired to it (core.Options.Observer).
-// The assertion lives in the test so the production import DAG keeps pointing one
-// way — core never depends on metrics, and metrics never depends on core.
-var _ core.IngestObserver = (*Emitter)(nil)
+// INV-DISP-3 requires in metrics can actually be wired to it
+// (core.Options.Observer). As of Task 4.1, internal/core's own production
+// code (core.go) now imports internal/metrics (for the counter NAME
+// constants statusCounters folds — Binding Decision 7), so the assertion
+// can no longer live in THIS (internal) test file without creating an
+// import cycle: core -> metrics (production) vs. this file -> core
+// (test-only) would cycle through the single package "metrics" the test
+// binary builds. It now lives in metrics_core_external_test.go instead, an
+// external (package metrics_test) test file — the cycle only existed
+// because an INTERNAL test file and core.go would otherwise both need to
+// resolve inside the same "metrics" package compilation; an external test
+// package is a separate compilation unit that may import both metrics and
+// core without looping back.
 
 // The Emitter is discover's pull-source-failure observer too (Task 3.3,
-// register gap R21 / bead pg2-00jpn). Same posture as core.IngestObserver
-// above: the assertion lives in the test, not in metrics.go, so metrics.go's
-// own production import list stays exactly what it needs and no more.
-var _ discover.SourceFailureObserver = (*Emitter)(nil)
+// register gap R21 / bead pg2-00jpn) — moved to metrics_core_external_test.go
+// alongside the core.IngestObserver assertion above: discover.go itself
+// imports internal/core, so this internal test file importing discover
+// would ALSO now cycle back through core -> metrics (Task 4.1) the same
+// way the core.IngestObserver assertion did.
 
 // unknown-type-rejected increments per event type: the metric half of INV-DISP-3's
 // "the condition is recorded to logs and metrics".

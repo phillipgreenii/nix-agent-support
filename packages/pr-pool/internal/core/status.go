@@ -57,6 +57,35 @@ type SourceReport struct {
 	Name string
 	// Rejected is always 0 today; see TickSnapshot.Sources.
 	Rejected int
+	// Type is "pull" or "push" (Task 4.1, operator-widened scope): every
+	// existing source is "pull" today — no query type in this codebase
+	// fires from anything but the drive loop's own Trigger, so there is no
+	// live "push" query. The field exists for schema generality (spec §5's
+	// corr-6 precedent), not because this run ever produces one.
+	Type string
+	// LastTick is when THIS pass fired this source's query (cmd/pr-pool's
+	// sourceReportsFor threads it in from discover.ProduceReport.LastTick).
+	// The zero value means this pass did not fire it (never attempted, or
+	// Task 1.3's cadence gating skipped it) — statusSources omits the wire
+	// field entirely rather than rendering a zero-value instant.
+	LastTick time.Time
+	// Failure is this pass's pull-source failure-backoff state (INV-FAIL-3),
+	// or nil when this pass did not observe a failure for this source
+	// (succeeded, not due, or never attempted). Same per-pass scope as
+	// LastTick above.
+	Failure *FailureInfo
+}
+
+// FailureInfo is one source's pull-source failure-backoff state at the end
+// of a produce pass (INV-FAIL-3): Count is the number of consecutive
+// attempts that pass made before giving up, and NextEligible is when the
+// next attempt would become eligible (the backoff wait computed for the
+// attempt that was about to run when the retry budget was exhausted; the
+// zero Duration for a fail-fast, unconfigured query, whose single attempt
+// carries no scheduled cooldown at all — see discover.go's runAndEnqueue).
+type FailureInfo struct {
+	Count        int
+	NextEligible time.Time
 }
 
 // ResolvedConfig is the small resolved-configuration snapshot embedded in a

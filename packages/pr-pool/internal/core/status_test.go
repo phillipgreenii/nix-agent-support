@@ -1,8 +1,12 @@
 package core
 
 import (
+	"reflect"
 	"testing"
 	"time"
+
+	"github.com/phillipgreenii/pr-pool/internal/metrics"
+	"github.com/phillipgreenii/pr-pool/internal/roles"
 )
 
 // TestGateStateNewerObservationWins is the red-first test for Task 3.5 Step 1's
@@ -163,5 +167,185 @@ func TestGateSnapshot_returnsIndependentCopy(t *testing.T) {
 	gates2, _ := svc.GateSnapshot()
 	if got := gates2["quota_paused"]; !got.Set {
 		t.Fatalf("quota_paused = %+v, want the caller's mutation of the returned map to not affect the cache", got)
+	}
+}
+
+// TestStatusListeners_RoleBindsEnabledExcluded is Task 4.1 Step 1's
+// red-first test: composeStatusReply's listeners[] carries the FULL
+// declared role set (Options.DeclaredRoles), with `enabled` reflecting the
+// CONFIG-level flag and `excluded` computed independently from
+// Options.ExcludedRoles (Binding Decision 4) — a config-disabled role
+// (enabled=false, never selector-excluded) and a selector-excluded role
+// (enabled=true, excluded=true) must render distinctly.
+func TestStatusListeners_RoleBindsEnabledExcluded(t *testing.T) {
+	svc := &Service{
+		q:        newQueue(t),
+		bindings: testBindings(),
+		reg:      NewRegistry(nil),
+		declaredRoles: []roles.Role{
+			{Name: "review", Binds: []string{"review-requested"}, Enabled: true},
+			{Name: "worker", Binds: []string{"work-ready"}, Enabled: true},
+			{Name: "feedback", Binds: []string{"feedback-ready"}, Enabled: false},
+		},
+		excludedRoles: []string{"worker"},
+	}
+	reply := svc.composeStatusReply(0)
+	listeners, ok := reply["listeners"].([]map[string]any)
+	if !ok || len(listeners) != 3 {
+		t.Fatalf("listeners = %v, want 3 entries (the full declared set)", reply["listeners"])
+	}
+	byRole := make(map[string]map[string]any, len(listeners))
+	for _, l := range listeners {
+		byRole[l["role"].(string)] = l
+	}
+	if got := byRole["review"]; got["enabled"] != true || got["excluded"] != false {
+		t.Fatalf("review = %+v, want enabled=true excluded=false", got)
+	}
+	if got := byRole["worker"]; got["enabled"] != true || got["excluded"] != true {
+		t.Fatalf("worker = %+v, want enabled=true excluded=true (selector-excluded)", got)
+	}
+	if got := byRole["feedback"]; got["enabled"] != false || got["excluded"] != false {
+		t.Fatalf("feedback = %+v, want enabled=false excluded=false (config-disabled, never selector-excluded)", got)
+	}
+	if got, ok := byRole["review"]["binds"].([]string); !ok || !reflect.DeepEqual(got, []string{"review-requested"}) {
+		t.Fatalf("review.binds = %v, want [review-requested]", byRole["review"]["binds"])
+	}
+	if byRole["review"]["backoff"] != nil {
+		t.Fatalf("review.backoff = %v, want null (no live roleListener reference reaches core)", byRole["review"]["backoff"])
+	}
+	if byRole["review"]["delivered"] != int64(0) || byRole["review"]["declined"] != int64(0) {
+		t.Fatalf("review delivered/declined = %v/%v, want 0/0 (no ListenerCounts wired)", byRole["review"]["delivered"], byRole["review"]["declined"])
+	}
+}
+
+// TestStatusSources_TypeModeLastTickFailure is Task 4.1 Step 7's red-first
+// test: composeStatusReply's sources[] carries type/mode ("pull", always —
+// no push query type exists), lastTick (present only for a source THIS
+// pass's TickSnapshot.Sources actually fired), and failure (present only
+// for a source that failed this pass) — over the full configured set,
+// UNION Options.ExcludedSources for a selector-excluded source that has
+// already vanished from TickSnapshot.Sources entirely.
+func TestStatusSources_TypeModeLastTickFailure(t *testing.T) {
+	svc := &Service{
+		q:               newQueue(t),
+		bindings:        testBindings(),
+		reg:             NewRegistry(nil),
+		excludedSources: []string{"disabled-src"},
+	}
+	now := time.Date(2026, 9, 1, 0, 5, 0, 0, time.UTC)
+	svc.PublishTick(TickSnapshot{
+		Sources: []SourceReport{
+			{Name: "active-src", Type: "pull", LastTick: now},
+			{Name: "failing-src", Type: "pull", Failure: &FailureInfo{Count: 2, NextEligible: now}},
+		},
+	})
+	reply := svc.composeStatusReply(0)
+	sources, ok := reply["sources"].([]map[string]any)
+	if !ok || len(sources) != 3 {
+		t.Fatalf("sources = %v, want 3 entries (2 active + 1 selector-excluded)", reply["sources"])
+	}
+	byName := make(map[string]map[string]any, len(sources))
+	for _, s := range sources {
+		byName[s["name"].(string)] = s
+	}
+
+	active := byName["active-src"]
+	if active["type"] != "pull" || active["mode"] != "pull" || active["enabled"] != true || active["excluded"] != false {
+		t.Fatalf("active-src = %+v, want type/mode=pull enabled=true excluded=false", active)
+	}
+	if want := now.UTC().Format(time.RFC3339Nano); active["lastTick"] != want {
+		t.Fatalf("active-src.lastTick = %v, want %v", active["lastTick"], want)
+	}
+	if active["failure"] != nil {
+		t.Fatalf("active-src.failure = %v, want nil (no failure this pass)", active["failure"])
+	}
+
+	failing := byName["failing-src"]
+	failureMap, ok := failing["failure"].(map[string]any)
+	if !ok || failureMap["count"] != 2 {
+		t.Fatalf("failing-src.failure = %v, want {count:2, nextEligible:...}", failing["failure"])
+	}
+	if _, present := failing["lastTick"]; present {
+		t.Fatalf("failing-src.lastTick = %v, want omitted (never fired this pass)", failing["lastTick"])
+	}
+
+	excluded := byName["disabled-src"]
+	if excluded["enabled"] != true || excluded["excluded"] != true {
+		t.Fatalf("disabled-src = %+v, want enabled=true excluded=true", excluded)
+	}
+	if _, present := excluded["lastTick"]; present {
+		t.Fatalf("disabled-src.lastTick = %v, want omitted (selector-excluded; never fired)", excluded["lastTick"])
+	}
+	if excluded["failure"] != nil {
+		t.Fatalf("disabled-src.failure = %v, want nil", excluded["failure"])
+	}
+}
+
+// TestStatusResolvedConfig_PerParticipantPresentButEmpty is Task 4.1 Step
+// 11's red-first test (operator-widened scope, Binding Decision 7):
+// statusResolvedConfig's output always carries a perParticipant key
+// holding map[string]any{} — present and empty, never omitted or nil.
+func TestStatusResolvedConfig_PerParticipantPresentButEmpty(t *testing.T) {
+	got := statusResolvedConfig(ResolvedConfig{RepoRoot: "/repo", ActiveRoles: 1, ActiveQueries: 1})
+	pp, ok := got["perParticipant"]
+	if !ok {
+		t.Fatal("perParticipant key absent, want always present")
+	}
+	m, ok := pp.(map[string]any)
+	if !ok || len(m) != 0 {
+		t.Fatalf("perParticipant = %#v, want an empty, non-nil map[string]any{}", pp)
+	}
+}
+
+// TestStatusCounters_MirrorsMetricCatalogVerbatim is Task 4.1 Step 13's
+// red-first test (Binding Decision 7): counters reads back VERBATIM from
+// the already-landed internal/metrics.Emitter/MetricsReader mechanism —
+// the exact values mon.read would independently report for
+// pr_pool.unconsumed_expired/unknown_type_rejected/deduped — proving
+// "never a second, divergently-counted set" by construction.
+func TestStatusCounters_MirrorsMetricCatalogVerbatim(t *testing.T) {
+	mp, reader := metrics.NewReadableProvider()
+	emitter, err := metrics.New(mp, func() map[string]int { return nil })
+	if err != nil {
+		t.Fatalf("metrics.New: %v", err)
+	}
+	emitter.OnUnconsumedExpired("t1")
+	emitter.OnUnknownTypeRejected("t2")
+	emitter.OnDeduped("t3")
+
+	svc := &Service{
+		q:             newQueue(t),
+		bindings:      testBindings(),
+		reg:           NewRegistry(nil),
+		metricsReader: reader,
+	}
+	reply := svc.composeStatusReply(0)
+	counters, ok := reply["counters"].(map[string]any)
+	if !ok {
+		t.Fatalf("counters absent = %v, want present when MetricsReader != nil", reply["counters"])
+	}
+	want := map[string]any{
+		"unconsumedExpired":   map[string]int64{"t1": 1},
+		"unknownTypeRejected": map[string]int64{"t2": 1},
+		"deduped":             map[string]int64{"t3": 1},
+	}
+	if !reflect.DeepEqual(counters, want) {
+		t.Fatalf("counters = %+v, want %+v", counters, want)
+	}
+}
+
+// TestStatusCounters_NilMetricsReaderOmitsKey is Task 4.1 Step 14's
+// red-first test: a Service built with MetricsReader left nil never sets
+// the `counters` key at all — not nil, not {}, absent — matching
+// resolvedConfig's own tick-nil omission idiom.
+func TestStatusCounters_NilMetricsReaderOmitsKey(t *testing.T) {
+	svc := &Service{
+		q:        newQueue(t),
+		bindings: testBindings(),
+		reg:      NewRegistry(nil),
+	}
+	reply := svc.composeStatusReply(0)
+	if _, present := reply["counters"]; present {
+		t.Fatalf("counters = %v, want omitted entirely when MetricsReader is nil", reply["counters"])
 	}
 }
