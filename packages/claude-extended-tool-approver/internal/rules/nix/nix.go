@@ -438,9 +438,14 @@ func singleArgAfterFlag(args []string, flag string) (string, bool) {
 // as-is, so an env-var rule that inspects a leaf's OWN leading assignment
 // (HOME, PATH, ...) never got a chance to see the assignment buried inside
 // the script argument at all — it abstained, even though the equivalent
-// `nix develop --command bash -c "HOME=... cmd"` was (coincidentally: see
-// argsAfterFlag's own doc on why `-c` is tried before `--command`) already
-// caught.
+// `nix develop --command bash -c "HOME=... cmd"` was already caught. That
+// was itself a coincidence, not by design: argsAfterFlag(args, "-c") is
+// tried BEFORE argsAfterFlag(args, "--command") just above, and it matches
+// the FIRST literal "-c" token anywhere in args — for a `--command bash -c`
+// spelling that is bash's OWN "-c", not nix's, so `rest` there ends up as
+// the single already-unwrapped script string (innerCommandStructure's
+// len(rest)==1 branch), never a wrapping "bash -c" leaf in the first place.
+// A real `--command` (no nested bash -c at all) is unaffected either way.
 //
 // The loop below unwraps repeatedly via cmdparse.UnwrapShellDashC (docker.go's
 // `scriptArg` check, generalized — see that function's own doc), so a CHAIN
