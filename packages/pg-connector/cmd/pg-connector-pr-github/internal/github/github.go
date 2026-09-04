@@ -896,9 +896,10 @@ func (p *Provider) PostReview(ctx context.Context, repo string, number int, comm
 }
 
 // ghReviewEntry is the JSON shape of each element in the `reviews` array
-// returned by `gh pr view --json reviews`.
+// returned by `gh pr view --json reviews`. id is a GraphQL node-id string
+// (e.g. "PRR_kwDOKtdWE88AAAABL3blsA"), never a bare integer.
 type ghReviewEntry struct {
-	ID     int64 `json:"id"`
+	ID     string `json:"id"`
 	Author struct {
 		Login string `json:"login"`
 	} `json:"author"`
@@ -934,7 +935,7 @@ func (p *Provider) ListReviews(ctx context.Context, repo string, number int) ([]
 	out := make([]api.Review, 0, len(envelope.Reviews))
 	for _, r := range envelope.Reviews {
 		out = append(out, api.Review{
-			ID:     fmt.Sprintf("%d", r.ID),
+			ID:     r.ID,
 			Author: r.Author.Login,
 			State:  r.State,
 			Body:   r.Body,

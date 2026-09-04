@@ -970,13 +970,13 @@ func TestListComments_EmptyArrays(t *testing.T) {
 const sampleReviews = `{
   "reviews": [
     {
-      "id": 12345,
+      "id": "PRR_kwDOKtdWE88AAAABL3blsA",
       "author": {"login": "alice"},
       "state": "APPROVED",
       "body": ""
     },
     {
-      "id": 67890,
+      "id": "PRR_kwDOKtdWE88AAAABL3bmtB",
       "author": {"login": "claude[bot]"},
       "state": "COMMENTED",
       "body": "Verdict: approve — looks good"
@@ -1008,8 +1008,8 @@ func TestListReviews_ParsesAndConverts(t *testing.T) {
 	if !strings.Contains(got[1].Body, "Verdict: approve") {
 		t.Fatalf("got[1].Body should contain %q, got %q", "Verdict: approve", got[1].Body)
 	}
-	if got[0].ID != "12345" {
-		t.Fatalf("got[0].ID: got %q want %q (numeric id should be stringified)", got[0].ID, "12345")
+	if got[0].ID != "PRR_kwDOKtdWE88AAAABL3blsA" {
+		t.Fatalf("got[0].ID: got %q want %q (GraphQL node-id string should pass through unchanged)", got[0].ID, "PRR_kwDOKtdWE88AAAABL3blsA")
 	}
 	// Verify the gh args included --json reviews.
 	last := gh.calls[len(gh.calls)-1]
