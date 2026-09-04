@@ -16,21 +16,32 @@ var ghExecRE = regexp.MustCompile(`exec\.Command(?:Context)?\(\s*(?:[\w.]+\s*,\s
 
 // TestGHExecChokePoint is the module-wide half of bead pg2-ilzq9's guarantee:
 // the four sites fixed there were fixed one at a time, and nothing stopped a
-// fifth from appearing. It asserts that `gh` is spawned from exactly two files:
+// fifth from appearing. It asserts that `gh` is spawned from exactly the
+// choke-point file pairs below, one pair per backend that ports this
+// mechanism:
 //
 //   - ghexec.go — the token-protected choke point (resolve, then exec).
 //   - token.go  — the token RESOLVER, the one sanctioned exception; routing it
 //     through the preflight would be circular.
 //
-// Every other package reaches gh through github.CLI (Run/RunStdin, or Command
-// for sites that wire up their own stdout/stderr/dir), so a new direct exec
-// here means an unauthenticated gh became reachable again — which is what
-// popped interactive auth screens under the launchd sync agent.
+// The pg-connector-ci-github-actions pair was added when that backend
+// carried over this same mechanism into its own cmd/<binary>/internal/github
+// tree [bead pg2-2j5ac.10; design: §4.6, §5.2] — Go's internal/ visibility
+// rule makes each backend's copy independent, so each backend's own
+// ghexec.go/token.go pair is allowlisted separately rather than shared.
+//
+// Every other package reaches gh through a backend's own github.CLI
+// (Run/RunStdin, or Command for sites that wire up their own
+// stdout/stderr/dir), so a new direct exec here means an unauthenticated gh
+// became reachable again — which is what popped interactive auth screens
+// under the launchd sync agent.
 func TestGHExecChokePoint(t *testing.T) {
 	root := moduleRoot(t)
 	allowed := map[string]bool{
-		filepath.Join("cmd", "pg-connector-pr-github", "internal", "github", "ghexec.go"): true,
-		filepath.Join("cmd", "pg-connector-pr-github", "internal", "github", "token.go"):  true,
+		filepath.Join("cmd", "pg-connector-pr-github", "internal", "github", "ghexec.go"):         true,
+		filepath.Join("cmd", "pg-connector-pr-github", "internal", "github", "token.go"):          true,
+		filepath.Join("cmd", "pg-connector-ci-github-actions", "internal", "github", "ghexec.go"): true,
+		filepath.Join("cmd", "pg-connector-ci-github-actions", "internal", "github", "token.go"):  true,
 	}
 
 	var offenders []string

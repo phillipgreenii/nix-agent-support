@@ -1,0 +1,233 @@
+// provider.go: Backend implements pkg/provider/ci.Provider against GitHub
+// Actions by carrying over
+// packages/pg-pr/pkg/provider/cicd/ghactions's existing ListRuns/GetLogs/
+// RerunFailed GitHub calls unchanged, adapted to ci.Provider's id-only
+// signatures and schema.CIRun result type [contract: carry-over basis;
+// design: §2, §5.1, §5.2]. Backend also implements pkg/provider.AuthChecker
+// via the same env-then-gh-auth-token chain the pg-connector-pr-github
+// backend already uses, since both are GitHub-backed [design: §4.6].
+package internal
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strings"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-ci-github-actions/internal/github"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/ci"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
+)
+
+// ProviderName tags every CIRun this backend returns, carried over
+// unchanged from packages/pg-pr/pkg/provider/cicd/ghactions.ProviderName.
+const ProviderName = "github-actions"
+
+// ghRunner abstracts the gh CLI for tests — the same seam
+// packages/pg-pr/pkg/provider/cicd/ghactions.Provider uses, now satisfied
+// directly by *internal/github.CLI (whose Run method already performs the
+// token-first choke point and auth-failure classification), rather than by
+// a second wrapping type the way ghactions.go's own cliGHRunner did
+// [carry-over basis, adapted].
+type ghRunner interface {
+	Run(ctx context.Context, args ...string) ([]byte, error)
+}
+
+// Backend is pg-connector-ci-github-actions's concrete ci.Provider
+// implementation. Unlike the sibling pg-connector-pr-github backend,
+// Backend keeps no local store: every field on schema.CIRun is read
+// straight from GitHub, with no categorize/feedback_set-style write-back
+// this capability needs to persist [design: §2].
+type Backend struct {
+	gh ghRunner
+	pr PRResolver
+}
+
+// New returns a Backend wired for production: the token-protected gh CLI
+// gateway (internal/github.NewCLI) plus the PRResolver that composes
+// pg-connector's own "pr show" verb (resolver.go).
+func New() *Backend {
+	return &Backend{gh: github.NewCLI(), pr: newExecPRResolver()}
+}
+
+// NewWithDeps constructs a Backend with injected dependencies — used by
+// tests to avoid spawning real `gh`/`pg-connector` subprocesses.
+func NewWithDeps(gh ghRunner, pr PRResolver) *Backend {
+	return &Backend{gh: gh, pr: pr}
+}
+
+// Compile-time checks that Backend satisfies both the ci capability's
+// Provider interface and pg-connector's optional AuthChecker capability.
+var (
+	_ ci.Provider          = (*Backend)(nil)
+	_ provider.AuthChecker = (*Backend)(nil)
+)
+
+// ghRun is the JSON shape returned by `gh run list --json …`, carried over
+// unchanged from ghactions.go.
+type ghRun struct {
+	DatabaseID int64  `json:"databaseId"`
+	Name       string `json:"name"`
+	Status     string `json:"status"`
+	Conclusion string `json:"conclusion"`
+	URL        string `json:"url"`
+	HeadBranch string `json:"headBranch"`
+	HeadSHA    string `json:"headSha"`
+}
+
+// toSchema converts one gh run into this capability's wire shape, setting
+// PRID so every returned CIRun is self-describing [design: §2] — the one
+// addition ghactions.go's own toAPI never needed, since its caller supplied
+// prNumber out of band via a separate argument.
+func (r ghRun) toSchema(prID string) schema.CIRun {
+	return schema.CIRun{
+		ID:         fmt.Sprintf("%d", r.DatabaseID),
+		Name:       r.Name,
+		Status:     strings.ToLower(r.Status),
+		Conclusion: strings.ToLower(r.Conclusion),
+		URL:        r.URL,
+		Provider:   ProviderName,
+		HeadSHA:    r.HeadSHA,
+		PRID:       prID,
+	}
+}
+
+// runListFields is the JSON projection requested from gh, carried over
+// unchanged from ghactions.go.
+const runListFields = "databaseId,name,status,conclusion,url,headBranch,headSha"
+
+// ListRuns implements ci.Provider.ListRuns: resolves prID's repo and head
+// branch via pr (resolver.go), then enumerates workflow runs for that
+// branch — gh's `run list` filters by branch, not PR, exactly as
+// ghactions.go's own ListRuns already handled via its injectable
+// PRResolver hook [carry-over basis]. Every returned CIRun carries prID as
+// PRID [design: §2].
+func (b *Backend) ListRuns(ctx context.Context, prID string) ([]schema.CIRun, error) {
+	if strings.TrimSpace(prID) == "" {
+		return nil, scriptout.WrapError(scriptout.ErrUnavailable, "pg-connector-ci-github-actions: pr id is required")
+	}
+	repo, branch, err := b.pr.Resolve(ctx, prID)
+	if err != nil {
+		// err already carries a scriptout sentinel (resolver.go's
+		// sentinelForWireCode) or is a plain exec/decode failure that
+		// scriptout's own codeForError fallback classifies as
+		// "unavailable" — nothing further to translate here.
+		return nil, err
+	}
+	return b.listRunsByBranch(ctx, prID, repo, branch)
+}
+
+// listRunsByBranch is ghactions.go's own ListRunsByBranch, carried over
+// unchanged in its gh call shape, adapted to this capability's schema and
+// to stamp prID onto every result.
+func (b *Backend) listRunsByBranch(ctx context.Context, prID, repo, branch string) ([]schema.CIRun, error) {
+	if err := validateRepo(repo); err != nil {
+		return nil, scriptout.WrapError(scriptout.ErrUnavailable, err.Error())
+	}
+	if strings.TrimSpace(branch) == "" {
+		return nil, scriptout.WrapError(scriptout.ErrUnavailable, "pg-connector-ci-github-actions: branch is required")
+	}
+	raw, err := b.gh.Run(
+		ctx,
+		"run", "list",
+		"--repo", repo,
+		"--branch", branch,
+		"--json", runListFields,
+		"--limit", "100",
+	)
+	if err != nil {
+		return nil, classifyGHError(err)
+	}
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return nil, nil
+	}
+	var runs []ghRun
+	if err := json.Unmarshal(raw, &runs); err != nil {
+		return nil, scriptout.WrapError(scriptout.ErrUnavailable, fmt.Sprintf("pg-connector-ci-github-actions: parse runs JSON: %v", err))
+	}
+	out := make([]schema.CIRun, 0, len(runs))
+	for _, r := range runs {
+		out = append(out, r.toSchema(prID))
+	}
+	return out, nil
+}
+
+// GetLogs implements ci.Provider.GetLogs, carried over unchanged from
+// ghactions.go: no repo/PR context is needed or added, matching that
+// packet's own behavior exactly — this packet's contract requires "no
+// behavioral drift on the ported operations."
+func (b *Backend) GetLogs(ctx context.Context, runID string) ([]byte, error) {
+	if strings.TrimSpace(runID) == "" {
+		return nil, scriptout.WrapError(scriptout.ErrUnavailable, "pg-connector-ci-github-actions: run ID is required")
+	}
+	raw, err := b.gh.Run(ctx, "run", "view", runID, "--log")
+	if err != nil {
+		return nil, classifyGHError(err)
+	}
+	return raw, nil
+}
+
+// RerunFailed implements ci.Provider.RerunFailed, carried over unchanged
+// from ghactions.go's own "pick the most recent failed run, `gh run rerun
+// <id> --failed`" logic, adapted to resolve via prID instead of a separate
+// repo+prNumber pair.
+func (b *Backend) RerunFailed(ctx context.Context, prID string) error {
+	runs, err := b.ListRuns(ctx, prID)
+	if err != nil {
+		return err
+	}
+	// ListRuns is most-recent-first per gh's default ordering.
+	var target string
+	for _, r := range runs {
+		if r.Conclusion == "failure" {
+			target = r.ID
+			break
+		}
+	}
+	if target == "" {
+		return scriptout.WrapError(scriptout.ErrNotFound, fmt.Sprintf("pg-connector-ci-github-actions: no failed runs to rerun for %s", prID))
+	}
+	if _, err := b.gh.Run(ctx, "run", "rerun", target, "--failed"); err != nil {
+		return classifyGHError(err)
+	}
+	return nil
+}
+
+// CheckAuth implements pkg/provider.AuthChecker via one cheap authenticated
+// GraphQL call, carried over from the sibling pg-connector-pr-github
+// backend's own internal/github.Provider.CheckAuth convention
+// [design: §4.6].
+func (b *Backend) CheckAuth(ctx context.Context) error {
+	_, err := b.gh.Run(ctx, "api", "graphql", "-f", "query={ viewer { login } }")
+	return err
+}
+
+// classifyGHError maps a ported gh-call error onto scriptout's closed error
+// taxonomy: an auth failure becomes unauthenticated; everything else
+// passes through unwrapped to scriptout's own codeForError fallback
+// ("unavailable") — mirroring the sibling pg-connector-pr-github backend's
+// own classifyGHError [freedom boundary, part 4].
+func classifyGHError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, github.ErrGHAuthInvalid) {
+		return scriptout.WrapError(scriptout.ErrUnauthenticated, err.Error())
+	}
+	return err
+}
+
+// validateRepo is carried over unchanged from ghactions.go.
+func validateRepo(repo string) error {
+	if repo == "" {
+		return errors.New("pg-connector-ci-github-actions: repo is required")
+	}
+	if !strings.Contains(repo, "/") {
+		return fmt.Errorf("pg-connector-ci-github-actions: repo %q is not in owner/name form", repo)
+	}
+	return nil
+}

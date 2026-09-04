@@ -143,6 +143,18 @@
           pg-connector-pr-github = final.callPackage ./packages/pg-connector/pg-connector-pr-github.nix {
             inherit (goBuilders) mkGoApp;
           };
+          # pg-connector-ci-github-actions: the ci capability's Tier-2
+          # GitHub Actions backend (bead pg2-2j5ac.10) — a third mkGoApp
+          # call over the SAME packages/pg-connector module (shared src +
+          # gomod2nixToml) as the pg-connector/pg-connector-pr-github
+          # entries immediately above, building the standalone
+          # scriptout-only binary from
+          # packages/pg-connector/pg-connector-ci-github-actions.nix.
+          pg-connector-ci-github-actions =
+            final.callPackage ./packages/pg-connector/pg-connector-ci-github-actions.nix
+              {
+                inherit (goBuilders) mkGoApp;
+              };
           claude-extended-tool-approver = final.callPackage ./packages/claude-extended-tool-approver {
             inherit (goBuilders) mkGoApp;
           };
@@ -3826,6 +3838,7 @@
               pg-pr
               pg-connector
               pg-connector-pr-github
+              pg-connector-ci-github-actions
               pg-ccaudit
               integrate-branch-support
               ;
