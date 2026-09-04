@@ -126,6 +126,15 @@
           pg-pr = final.callPackage ./packages/pg-pr {
             inherit (goBuilders) mkGoApp;
           };
+          # pg-connector: the Tier-1 umbrella binary for the unified pluggable
+          # connector architecture (bead pg2-2j5ac.1). Mirrors pg-pr's own
+          # mkGoApp shape immediately above — separate Go module (its own
+          # go.mod/gomod2nix.toml), shared-src/gomod2nixToml convention for
+          # the sibling Tier-2 backend binaries a later packet adds under
+          # this same module.
+          pg-connector = final.callPackage ./packages/pg-connector {
+            inherit (goBuilders) mkGoApp;
+          };
           claude-extended-tool-approver = final.callPackage ./packages/claude-extended-tool-approver {
             inherit (goBuilders) mkGoApp;
           };
@@ -1254,6 +1263,22 @@
                 src = ./packages/pg-pr; # matches default.nix (raw ./., no cleanSource)
                 gomod2nixToml = ./packages/pg-pr/gomod2nix.toml;
                 testDeps = [ pkgs.git ];
+              };
+
+              # pg-connector — the Tier-1 umbrella module's own suite: the
+              # envelope round trip, the sentinel-error mapping, the registry
+              # loader's list-vs-single-valued parsing, and the
+              # outcome-reporting helper's exit-code table for both schemes
+              # (bead pg2-2j5ac.1). Several tests exec a small fake-backend
+              # shell script (via pkg/scriptout's Invoke) to exercise the
+              # dispatcher/fan-out helpers against a real subprocess, so `sh`
+              # needs to be reachable — testDeps puts bash's `sh` on PATH,
+              # matching pg-pr-go-tests' own testDeps = [ pkgs.git ] pattern.
+              pg-connector-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
+                pname = "pg-connector-go-tests";
+                src = ./packages/pg-connector; # matches default.nix (raw ./., no cleanSource)
+                gomod2nixToml = ./packages/pg-connector/gomod2nix.toml;
+                testDeps = [ pkgs.bash ];
               };
 
               # pa-monitor — the largest suite (bead pg2-ymi3l, fast-follow to
@@ -3791,6 +3816,7 @@
               pa-monitor
               pa-monitor-decorator-scope
               pg-pr
+              pg-connector
               pg-ccaudit
               integrate-branch-support
               ;
