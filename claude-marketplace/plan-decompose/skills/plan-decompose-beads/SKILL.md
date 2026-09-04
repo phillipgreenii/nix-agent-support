@@ -20,6 +20,11 @@ bd 1.0.x on this workspace (commands shown); re-verify on a bd major bump.
 against the design source. `-n 0` and `--status all` are load-bearing: the default caps at 50
 rows AND hides closed beads.
 
+Deliberately partial decomposition (a design phased across multiple dockets) needs no branch
+in the "`released` + unchanged text ⇒ nothing to do" rule above: `epic-decompose` mints a
+distinct `pd_source` per phase (the synthetic `<program-epic>#phase<n>` form), so this lookup
+never again sees one literal source invoked for two different intended scopes.
+
 ## `create-docket`
 
 Epic bead, label `docket`; design of record VERBATIM in the DESIGN field (`--design-file`).
@@ -31,6 +36,14 @@ order. Produce the chunk files with the `plan-decomposer` agent's `scripts/chunk
 note in the description: "do not claim this container bead for direct work". Drain's
 `--exclude-type epic` keeps epics out of its queue — that exclusion lives in drain, NOT in bd
 (`bd ready` itself returns epics).
+
+**Phase-bead usage** (epic-decompose/phase-decompose): epic-decomposer reuses this same
+operation AS-IS to create each phase bead — with the full field set plan-decompose's own step 2
+sets on a freshly-created docket (`pd_rev=1`, `pd_phase` set explicitly to `precheck`, never
+left absent; `pd_source` set to the synthetic `<program-epic>#phase<n>` form; sizing-policy
+metadata), plus `--no-inherit-labels` and an explicit `--label docket,phase`. There is no
+separate "adopt an existing bead as a docket" operation — the phase bead is a docket from the
+moment it is created.
 
 ## `create-packet`
 
@@ -45,6 +58,12 @@ breaks `find-docket`. HELD = `bd defer` (status-based, indefinite; probed 2026-0
 deferred issues are absent from `bd ready` and `bd undefer` restores `open`). Do NOT use
 `--defer <date>` — that is a TIMER that expires whether or not curation finished. The
 create-then-defer window is one command wide; acceptable, noted.
+
+**Label convention** (epic-decompose/phase-decompose): the same `--parent`-label-inheritance
+hazard this note already flags applies to phase and trigger beads too — phase beads carry both
+`docket` and `phase` labels; trigger beads carry `phase-trigger`. Which label(s) land on a bead
+is controlled by the explicit `--label`/`--no-inherit-labels` flags passed at creation, never by
+the parent's own labels.
 
 ## `wire-ordering`
 

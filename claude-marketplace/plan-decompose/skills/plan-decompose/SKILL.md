@@ -14,7 +14,9 @@ description: >-
   children with no design document to cite (that is `pg-pr-break-down-work`); improving
   EXISTING issues (that is bead-grooming); finding or working ready issues (that is bd ready /
   the drain queue); writing the design itself (brainstorming/writing-plans); a workspace-wide
-  metrics rollup (this mode is always scoped to one docket).
+  metrics rollup (this mode is always scoped to one docket); a design too large to decompose in
+  one pass — that is `epic-decompose`'s job, not repeated `plan-decompose` invocations against
+  the same source.
 ---
 
 # plan-decompose — curated, self-contained work packets from an approved design
@@ -157,10 +159,17 @@ deduplication.
 
 ## Mode `decompose`
 
+- **0a.** Invoke `plan-decompose:plan-sanity-check` inline via the Skill tool, at level `plan`,
+  before mode `check` runs — the same shared pre-gate `epic-decompose` and `phase-decompose`
+  invoke at their own levels (`raw-epic` and `phase` respectively). On `good_enough: no`, halt
+  and surface `reasons`, subject to the same explicit-operator-override as step 0's below-floor
+  halt.
+
 0. Resolve the binding; resolve sizing policy (the brief's values, else the Metadata-keys
    fallback defaults); run mode `check`. Halt on gaps or below-floor unless the dispatching
    conversation/brief carries an explicit operator override. This is the primary sanctioned
    halt: decomposing around a gap creates packets whose neighbors do not exist.
+
 1. `find-docket(design-source)`: an existing docket for this source ⇒ MUST NOT create a
    second. Routing rule: `pd_phase=released` and the design text matches the stored design ⇒
    nothing to do (report the existing docket); `released` and the text differs ⇒ mode
