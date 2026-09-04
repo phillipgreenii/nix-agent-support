@@ -135,6 +135,14 @@
           pg-connector = final.callPackage ./packages/pg-connector {
             inherit (goBuilders) mkGoApp;
           };
+          # pg-connector-pr-github: the pr capability's Tier-2 GitHub backend
+          # (bead pg2-2j5ac.4) — a second mkGoApp call over the SAME
+          # packages/pg-connector module (shared src + gomod2nixToml) as the
+          # pg-connector entry immediately above, building the standalone
+          # scriptout-only binary from packages/pg-connector/pg-connector-pr-github.nix.
+          pg-connector-pr-github = final.callPackage ./packages/pg-connector/pg-connector-pr-github.nix {
+            inherit (goBuilders) mkGoApp;
+          };
           claude-extended-tool-approver = final.callPackage ./packages/claude-extended-tool-approver {
             inherit (goBuilders) mkGoApp;
           };
@@ -3817,6 +3825,7 @@
               pa-monitor-decorator-scope
               pg-pr
               pg-connector
+              pg-connector-pr-github
               pg-ccaudit
               integrate-branch-support
               ;

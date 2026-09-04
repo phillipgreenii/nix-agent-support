@@ -1,0 +1,99 @@
+package api
+
+// PR is one PR's live-provider-shaped identity/state, fed into
+// internal/prview.PRViewInput.PR and threaded through to `pg-pr pr view`'s
+// assembled internal/prview.View output (Identity field) — it is not itself
+// marshaled as a command's top-level JSON shape.
+type PR struct {
+	Repo   string `json:"repo"`
+	Number int    `json:"number"`
+	Title  string `json:"title"`
+	State  string `json:"state"`
+	Branch string `json:"branch"`
+	Base   string `json:"base"`
+	Author string `json:"author"`
+	URL    string `json:"url"`
+	Draft  bool   `json:"draft"`
+	Merged bool   `json:"merged"`
+	// MergedAt is the merge timestamp (RFC3339), populated only when Merged
+	// is true; empty on an open/draft/closed-without-merge PR. Carried
+	// (rather than reduced to the Merged bool alone) so the snapshot layer
+	// can compute how long ago a PR merged — its dashboard-retention window
+	// is measured from this instant, not from when the daemon noticed the
+	// merge (pg2-ew4kf).
+	MergedAt     string `json:"merged_at,omitempty"`
+	Additions    int    `json:"additions,omitempty"`
+	Deletions    int    `json:"deletions,omitempty"`
+	ChangedFiles int    `json:"changed_files,omitempty"`
+	// HeadSHA is the OID of the PR's current head commit. Used to write
+	// store.PullRequest.HeadSHA and to drive ReconcileStaleness.
+	HeadSHA string `json:"head_sha,omitempty"`
+	// BaseSHA is the OID of the PR's base commit. Populated by the GitHub GraphQL
+	// path; empty on the REST fallback path. The revision row stores it.
+	BaseSHA string `json:"base_sha,omitempty"`
+	// Body is the PR description text. Added for urgency keyword scanning;
+	// fully populated in Task 8.
+	Body string `json:"body,omitempty"`
+	// Labels are the PR's label names. Used by enrichment's urgency signal.
+	Labels []string `json:"labels,omitempty"`
+	// RequestedReviewers are the login names of accounts (users, bots, mannequins)
+	// requested to review the PR — teams, which have no login, are excluded.
+	// Populated from `gh pr view --json reviewRequests`; the sync layer derives
+	// ReviewRequestedOfMe from this against the configured SelfLogin.
+	RequestedReviewers []string `json:"requested_reviewers,omitempty"`
+	// Assignees are the login names of accounts assigned to the PR. Populated
+	// from `gh pr view --json assignees` (REST path) and the GraphQL enrich
+	// path's assignees connection. The sync layer derives an "assigned to me"
+	// signal from this against the configured SelfLogin, mirroring how
+	// ReviewRequestedOfMe is derived from RequestedReviewers.
+	Assignees []string `json:"assignees,omitempty"`
+	// ReviewRequestedOfMe is true when the configured self login is among
+	// RequestedReviewers. Set by the sync layer (which knows self); consumed by the
+	// dashboard's "PRs to Review" match reason (pg2-ynhr.13 B2).
+	ReviewRequestedOfMe bool `json:"review_requested_of_me,omitempty"`
+	// AssignedToMe is true when the configured self login is among Assignees.
+	// Set by the sync layer (which knows self, via assignedToSelf) mirroring
+	// how ReviewRequestedOfMe is derived; consumed by the dashboard's "PRs to
+	// Review" match reason (pg2-4dz88.11.4).
+	AssignedToMe bool `json:"assigned_to_me,omitempty"`
+	// Mergeable is GitHub's merge-conflict signal: MERGEABLE | CONFLICTING |
+	// UNKNOWN. Populated by the GraphQL enrich path; empty on REST fallback.
+	Mergeable string `json:"mergeable,omitempty"`
+	// MergeStateStatus is GitHub's authoritative merge-readiness: CLEAN |
+	// BLOCKED | BEHIND | DIRTY | UNSTABLE | DRAFT | HAS_HOOKS | UNKNOWN. It
+	// reflects branch protection (approvals, required checks, policy-bot) and is
+	// the source of truth for "can I merge now" — distinct from the CI-health
+	// rollup. Empty on REST fallback.
+	MergeStateStatus string `json:"merge_state_status,omitempty"`
+	// AutoMergeEnabled is true when GitHub auto-merge is armed on the PR.
+	AutoMergeEnabled bool `json:"auto_merge_enabled,omitempty"`
+	// StackID identifies the native GitHub stack this PR belongs to
+	// (PullRequestStack.id, via PullRequestStackEntry.stack.id). Populated by
+	// the GraphQL enrich path only when GitHub's native stacked-PR fields
+	// (private preview) are present and non-null for this PR; empty when the
+	// PR isn't stacked, the fields are null/absent from the response (older
+	// schema, or the preview withdrawn), or on the REST fallback path.
+	StackID string `json:"stack_id,omitempty"`
+	// StackPosition is this PR's 1-based position within its native stack
+	// (PullRequestStackEntry.position). Zero when not stacked.
+	StackPosition int `json:"stack_position,omitempty"`
+	// StackSize is the total number of PRs in this PR's native stack
+	// (PullRequestStack.size). Zero when not stacked.
+	StackSize int `json:"stack_size,omitempty"`
+	// StackUpstreamHeadRefName is the head ref of the stack entry immediately
+	// upstream of this PR (StackPosition-1) — the branch this PR is stacked
+	// on. Empty when this PR is the bottommost stacked entry or not stacked.
+	StackUpstreamHeadRefName string `json:"stack_upstream_head_ref_name,omitempty"`
+	// StackDownstreamHeadRefName is the head ref of the stack entry
+	// immediately downstream of this PR (StackPosition+1) — the next PR
+	// stacked on top of this one. Empty when this PR is the topmost stacked
+	// entry or not stacked.
+	StackDownstreamHeadRefName string `json:"stack_downstream_head_ref_name,omitempty"`
+}
+
+// HasConflict reports whether GitHub signals a merge conflict on this PR, via
+// either the mergeability enum (CONFLICTING) or the merge-state status (DIRTY).
+// UNKNOWN (GitHub still computing) is deliberately NOT a conflict.
+func (pr PR) HasConflict() bool {
+	return pr.Mergeable == "CONFLICTING" || pr.MergeStateStatus == "DIRTY"
+}

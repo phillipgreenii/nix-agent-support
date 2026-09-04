@@ -1,0 +1,101 @@
+// Package api is a trimmed, local copy of pg-pr's pkg/api types — just the
+// shapes internal/github's ported GitHub logic needs (Comment, Review,
+// CIRun; PR lives in pr.go). Copied rather than imported because
+// packages/pg-connector's go.mod MUST NOT depend on packages/pg-pr
+// [design: §9, §5.2]. This is an internal representation only:
+// internal (the backend's pr.Provider glue) maps it to pkg/schema.PR at the
+// Show boundary — pg-pr's own api.Issue/api.BranchInfo are out of scope
+// here since nothing in this backend's ported logic uses them.
+package api
+
+// Comment is the JSON shape for a PR comment.
+type Comment struct {
+	ID         string `json:"id"`
+	Author     string `json:"author"`
+	AuthorRole string `json:"author_role"`
+	Body       string `json:"body"`
+	Path       string `json:"path,omitempty"`
+	Line       int    `json:"line,omitempty"`
+	ThreadID   string `json:"thread_id,omitempty"`
+	Resolved   bool   `json:"resolved"`
+
+	// StartLine is the FIRST line of a multi-line anchor, of which Line is then
+	// the LAST — GitHub's review-comment `start_line`/`line` pair (pg2-3c8mo).
+	//
+	// Zero means single-line, which is the only value a single-line finding can
+	// carry, so `omitempty` keeps a single-line comment's wire payload
+	// byte-identical to the pre-multi-line one. Write path only: GitHub's read
+	// paths (ListComments, the enrich GraphQL query) do not report it, so a
+	// comment read back from upstream always has StartLine == 0.
+	StartLine int `json:"start_line,omitempty"`
+
+	// CreatedAt is the comment's creation timestamp (GraphQL createdAt,
+	// RFC3339). Empty when the provider does not supply one. Flows through
+	// ingestion into code_comment_message.posted_at for message ordering.
+	CreatedAt string `json:"created_at,omitempty"`
+
+	// UpdatedAt is the comment's last-edit timestamp (GraphQL updatedAt,
+	// RFC3339). Empty when the provider does not supply one (e.g. an
+	// older-shaped cached payload recorded before this field was fetched).
+	UpdatedAt string `json:"updated_at,omitempty"`
+
+	// Review-thread staleness fields (populated for inline thread comments only).
+	//
+	// ThreadIsOutdated mirrors PullRequestReviewThread.isOutdated: true when
+	// the thread's diff context has been pushed past (the thread is "stale").
+	//
+	// IsMinimized / MinimizedReason reflect the per-comment collapse state
+	// GitHub exposes as "marked as outdated". MinimizedReason is an uppercase
+	// string (e.g. "OUTDATED", "RESOLVED", "OFF_TOPIC").
+	//
+	// OriginalCommitOID is the OID of the commit the comment was originally
+	// posted against — used as subject_sha when writing feedback-store entries.
+	ThreadIsOutdated  bool   `json:"thread_is_outdated,omitempty"`
+	IsMinimized       bool   `json:"is_minimized,omitempty"`
+	MinimizedReason   string `json:"minimized_reason,omitempty"`
+	OriginalCommitOID string `json:"original_commit_oid,omitempty"`
+
+	// ReviewID is the owning review's id (REST-numeric, matching Review.ID's
+	// own fmt.Sprintf("%d", ...) format below) for an inline/review-thread
+	// comment; empty for a top-level (issue) comment. Populated from GitHub's
+	// pulls-comments endpoint's pull_request_review_id field — added here
+	// (internal/github's own call-site adaptation, not present on pg-pr's
+	// upstream api.Comment) so this backend's Show can nest a review-thread
+	// comment under its owning PRReview.Comments rather than only ever
+	// flattening it into PR.Comments [design: §2, §6.1].
+	ReviewID string `json:"review_id,omitempty"`
+}
+
+// Review is the JSON shape for a PR review summary.
+type Review struct {
+	ID       string    `json:"id"`
+	Author   string    `json:"author"`
+	State    string    `json:"state"`
+	Body     string    `json:"body"`
+	Comments []Comment `json:"comments,omitempty"`
+	// CommitOID is the SHA of the commit the review was submitted against.
+	// Populated by the GitHub GraphQL path; empty otherwise.
+	CommitOID string `json:"commit_oid,omitempty"`
+	// SubmittedAt is the RFC3339 timestamp when the review was submitted.
+	SubmittedAt string `json:"submitted_at,omitempty"`
+}
+
+// CIRun is the JSON shape for a CI workflow run.
+type CIRun struct {
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	Status     string `json:"status"`
+	Conclusion string `json:"conclusion"`
+	URL        string `json:"url"`
+	Provider   string `json:"provider"`
+	// HeadSHA is the commit SHA the run was triggered against. Used as
+	// subject_sha in the feedback store so ci-failure rows are per-revision.
+	HeadSHA string `json:"head_sha,omitempty"`
+	// Description is the free-text status description GitHub's commit-status
+	// API (StatusContext) attaches to a context — e.g. a branch-protection
+	// rule's rendered summary. CheckRun nodes have no equivalent GraphQL
+	// field and always leave this empty. Fetch-and-carry only: nothing yet
+	// parses this into a state (see bead pg2-4dz88.2.4, the check-interpreter
+	// leaf, for that).
+	Description string `json:"description,omitempty"`
+}
