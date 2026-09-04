@@ -164,6 +164,15 @@
           pg-connector-issue-beads = final.callPackage ./packages/pg-connector/pg-connector-issue-beads.nix {
             inherit (goBuilders) mkGoApp;
           };
+          # pg-connector-scm-git: the scm capability's local-git Tier-2
+          # backend (bead pg2-2j5ac.6) — a third mkGoApp call over the SAME
+          # packages/pg-connector module (shared src + gomod2nixToml) as the
+          # pg-connector and pg-connector-pr-github entries immediately
+          # above, building the standalone scriptout-only binary from
+          # packages/pg-connector/pg-connector-scm-git.nix.
+          pg-connector-scm-git = final.callPackage ./packages/pg-connector/pg-connector-scm-git.nix {
+            inherit (goBuilders) mkGoApp;
+          };
           claude-extended-tool-approver = final.callPackage ./packages/claude-extended-tool-approver {
             inherit (goBuilders) mkGoApp;
           };
@@ -1301,13 +1310,21 @@
               # (bead pg2-2j5ac.1). Several tests exec a small fake-backend
               # shell script (via pkg/scriptout's Invoke) to exercise the
               # dispatcher/fan-out helpers against a real subprocess, so `sh`
-              # needs to be reachable — testDeps puts bash's `sh` on PATH,
-              # matching pg-pr-go-tests' own testDeps = [ pkgs.git ] pattern.
+              # needs to be reachable — testDeps puts bash's `sh` on PATH.
+              # pg-connector-scm-git's own tests (bead pg2-2j5ac.6) also need
+              # a real `git` binary on PATH: its fakeRunner-backed unit tests
+              # don't, but its packet-required real-git-checkout test
+              # (internal/provider_realgit_test.go) execs real git worktree/
+              # branch commands against a throwaway fixture repo — matching
+              # pg-pr-go-tests' own testDeps = [ pkgs.git ] pattern.
               pg-connector-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
                 pname = "pg-connector-go-tests";
                 src = ./packages/pg-connector; # matches default.nix (raw ./., no cleanSource)
                 gomod2nixToml = ./packages/pg-connector/gomod2nix.toml;
-                testDeps = [ pkgs.bash ];
+                testDeps = [
+                  pkgs.bash
+                  pkgs.git
+                ];
               };
 
               # pa-monitor — the largest suite (bead pg2-ymi3l, fast-follow to
@@ -3849,6 +3866,7 @@
               pg-connector-pr-github
               pg-connector-ci-github-actions
               pg-connector-issue-beads
+              pg-connector-scm-git
               pg-ccaudit
               integrate-branch-support
               ;
