@@ -155,6 +155,15 @@
               {
                 inherit (goBuilders) mkGoApp;
               };
+          # pg-connector-issue-beads: the issue capability's Tier-2 backend
+          # for this workspace's own bd tracker (bead pg2-2j5ac.8) — a
+          # further mkGoApp call over the SAME packages/pg-connector module
+          # (shared src + gomod2nixToml) as pg-connector/pg-connector-pr-github
+          # above, building the standalone scriptout-only binary from
+          # packages/pg-connector/pg-connector-issue-beads.nix.
+          pg-connector-issue-beads = final.callPackage ./packages/pg-connector/pg-connector-issue-beads.nix {
+            inherit (goBuilders) mkGoApp;
+          };
           claude-extended-tool-approver = final.callPackage ./packages/claude-extended-tool-approver {
             inherit (goBuilders) mkGoApp;
           };
@@ -3839,6 +3848,7 @@
               pg-connector
               pg-connector-pr-github
               pg-connector-ci-github-actions
+              pg-connector-issue-beads
               pg-ccaudit
               integrate-branch-support
               ;
