@@ -1,6 +1,6 @@
 ---
 name: semantic-post-checker
-description: Fresh-eyes, read-only audit of a plan-decompose packet set against the full design and the live repo. Dispatch with the full design text, every packet's content, the planned ordering (blocked-by pairs), and the repo root(s) to verify against.
+description: Fresh-eyes, read-only audit of a plan-decompose packet set against the design and the live repo. Round 1 is dispatched with the full design text and every packet's content; round 2+ is dispatched with only the design sections and packets the prior round's findings touched, plus their direct planned-ordering neighbors. Every round also gets the planned ordering (blocked-by pairs) and the repo root(s) to verify against.
 tools: Read, Grep, Glob
 ---
 
@@ -18,6 +18,15 @@ actually supports its clause.
 by existing code (verify presence in the repo roots given), signatures matching exactly;
 contradictory sibling contracts are findings.
 
-Output one finding per line: `packet(s) | check: coverage|seam | evidence | proposed-fix`. No
+Rate every finding's severity: `blocking` = a silent behavior gap, a missing producer for a
+contract the packet set already commits to, or a seam that would misroute or lose data;
+`minor` = everything else — a clarity gap, a redundant or currently-vacuous check, or a
+citation that's off-target but doesn't change the clause's correctness. When in doubt, prefer
+`minor`: packets don't need to be perfect, and Sonnet-tier implementers can absorb small
+imperfections — reserve `blocking` for what would actually break or silently misbehave if
+shipped as-is.
+
+Output one finding per line:
+`packet(s) | check: coverage|seam | severity: blocking|minor | evidence | proposed-fix`. No
 style comments. Report fully in this one turn — you have no Monitor or further-dispatch tools,
 and none are needed for this task.

@@ -170,7 +170,7 @@ flowchart TD
     E -->|"pass"| F["semantic post-check (fresh eyes)"]
     F -->|"findings"| D2
     D2 --> P
-    D2 -->|"same finding twice, or round 4"| X["abort path 8.7: packets stay deferred, pd_phase failed, failure report"]
+    D2 -->|"same blocking finding twice, or semantic-post-check round 3"| X["abort path 8.7: packets stay deferred, pd_phase failed, failure report"]
     F -->|"clean"| H["wire ordering edges + read-backs + cycle check"]
     H --> I["release set + decomposition report on docket"]
     I --> J["consumers: drain queue / packet-implementer / interactive"]
@@ -178,6 +178,10 @@ flowchart TD
     R -.-> L
     L --> P
 ```
+
+The round counter on the `D2` → `X` edge above counts SEMANTIC-POST-CHECK dispatches only.
+Pre-filter (`P`) and cold-read (`E`) share the `D2` re-curation node in this diagram but do NOT
+share this counter — each has its own bound (§8.10).
 
 ## 6. Work-packet content anatomy
 
@@ -210,7 +214,7 @@ and the criteria land. Every part obeys the provenance rule (D4).
 
 ### 6.1 Citation syntax
 
-Every substantive clause in parts 2, 3, and 5 MUST end with a fixed inline marker:
+Every substantive clause in parts 2, 3, 5, and 7 MUST end with a fixed inline marker:
 `[design: <section number or heading>]` (e.g. `[design: §4.4]`). The marker is what makes D4
 mechanically checkable: the pre-filter greps for uncited clauses, and the semantic post-check
 resolves markers against the design text instead of judging provenance from prose. Parts 1
@@ -293,9 +297,35 @@ own cost scales with Σ packet fixed-reads, so the target also bounds check cost
 ### 8.4 Mechanical pre-filter, then cold-read check
 
 **Pre-filter (scripted or trivial-model, near-zero cost, runs first and gates):** uncited
-clauses (grep for §6.1 markers); file-overlap collisions across packets' Files parts without a
-connecting ordering edge; out-of-scope pointers whose target packet lacks the pointed-at
-concern; byte-identity of shared preambles; metadata completeness (stamps, policy, `pd_rev`).
+clauses (grep for §6.1 markers, now covering parts 2, 3, 5, and 7); file-overlap collisions
+across packets' Files parts without a connecting ordering edge; out-of-scope pointers whose
+target packet lacks the pointed-at concern; byte-identity of shared preambles; metadata
+completeness (stamps, policy, `pd_rev`).
+
+Five further mechanical checks, added to close gaps a real run (`pg2-2j5ac`) surfaced:
+citation-target existence, checking that every `[design: <section>]` marker's target actually
+exists in the design text (narrower than a full fix — it catches a citation to a nonexistent
+section, never a citation to a real section that doesn't actually support the clause; that
+reading-comprehension judgment call stays the semantic post-check's, per §8.5); a whole-set
+coverage scan that names every design section cited by at least one packet across the full
+set — a section cited by zero packets is **reported, never a pre-filter failure**, and this
+check cross-checks the in-flight decomposition-report draft's not-decomposed list (the
+decomposer's working state during §8.2, not the persisted `write-report` record, which does
+not exist yet on a first `decompose` run — a `reconcile` run MAY additionally read the prior
+release's persisted report); a ported-file-list check diffing each packet's named
+source-to-port files against `git ls-files <source-dir>`, where a named path absent from the
+source is a blocking pre-filter failure and a real source file never named by any packet is
+advisory; a forbidden-cross-module-import check grepping cited import paths for any
+`/internal/` segment and flagging any citing packet whose destination file is not itself
+nested under the directory containing that segment (Go's actual visibility rule, zero
+judgment required); and an AC-to-Validation cross-reference that matches on the **BASE
+command name, not the full backtick-quoted string** — an Acceptance-criteria bullet naming a
+command in general terms and a Validation bullet naming the exact invocation with flags and
+paths are meant to match, so exact-string matching would false-positive on that legitimate
+variance — reading both the medium's dedicated acceptance field and the Validation part, and
+flagging blocking only when the base command name never appears anywhere in that packet's
+Validation part at all.
+
 Failures loop to §8.2 without spending a single agent dispatch.
 
 **Cold-read check (per packet, cheap model):** an agent reads ONLY the packet content and
@@ -317,6 +347,15 @@ verifies the two properties that need judgment:
    existing code (verified present), signatures matching; contradictory sibling contracts are
    findings. Predecessor/successor means the PLANNED ordering recorded during curation
    (§8.2) — actual edges are wired only later, in §8.6.
+
+> `blocking` = a silent behavior gap, a missing producer for a contract the packet set already
+> commits to, or a seam that would misroute or lose data; `minor` = everything else — a
+> clarity gap, a redundant or currently-vacuous check, or a citation that's off-target but
+> doesn't change the clause's correctness.
+
+Every finding is rated against this rubric. All findings get fixed regardless of severity;
+whether a further round is dispatched, and what happens at the cap, is governed solely by
+§8.10 — this section states the rubric, not the gate.
 
 Graph checks (cycles, parent-blocked-by-child, at-least-one-workable — the last applies only
 when the packet count is ≥ 1) run in §8.6 against the medium after wiring; the pre-filter
@@ -365,14 +404,27 @@ and MUST be reported, not stolen or force-released.
 
 No loop in this pipeline is unbounded:
 
-- A finding (cold-read or post-check) recurring on the SAME packet a SECOND time after a fix
-  attempt ⇒ treat as a Phase-0-style gap: HALT that packet's curation, include it in a gap
-  report, and continue the rest of the set only if it is separable (no seam depends on the
-  halted packet); otherwise halt the decomposition with the abort path (§8.7).
-- The full re-curation loop (§8.5 → §8.2) runs at most 3 rounds; on the 4th, non-convergence
-  IS the finding: abort path + a "did not converge" report naming the oscillating findings.
-- Phase-0 gaps, recurring findings, and non-convergence are the three sanctioned halts; sizing
-  never halts (D3).
+- A cold-read finding recurring on the SAME packet a SECOND time after a fix attempt ⇒ treat
+  as a Phase-0-style gap: HALT that packet's curation, include it in a gap report, and
+  continue the rest of the set only if it is separable (no seam depends on the halted
+  packet); otherwise halt the decomposition with the abort path (§8.7). Cold-read carries no
+  severity rating, so this halt is unaffected by the rubric below.
+- A semantic-post-check finding recurring on the SAME packet a SECOND time is scoped to
+  `blocking` findings ONLY — a recurring `minor` finding halts nothing. A recurring `blocking`
+  finding is treated exactly as the cold-read halt above.
+
+> The semantic post-check's fix loop dispatches a further round ONLY when the PRIOR round
+> produced at least one `blocking` finding; a round whose findings are all `minor` is fixed
+> and the set proceeds straight to release with no further dispatch. The blocking-gated loop
+> runs at most 2 rounds. At the cap: if every outstanding `blocking` finding has a stated,
+> applied fix and only re-verification is missing, the set RELEASES, with a residual-risk
+> entry in the decomposition report naming each unverified fix. Only an UNRESOLVED or
+> oscillating `blocking` finding at the cap takes the abort path ("did not converge", naming
+> it). Cold-read's own bound (same finding twice on a packet ⇒ gap) is UNCHANGED and
+> unaffected by any of this.
+
+- Phase-0 gaps, recurring findings, and non-convergence at the cap are the three sanctioned
+  halts; sizing never halts (D3).
 
 ### 8.11 Mode `reconcile`
 
@@ -391,6 +443,16 @@ re-curated packets, and their direct graph neighbors (seam consistency only) —
 semantic check is for initial release and deliberate audits, not every amendment. Packets
 untouched by the amendment keep their stamps.
 
+This pass gets §8.10's severity-gating and 2-round cap too, by reference (not restated here).
+Its scope is narrower than `decompose`'s (seam consistency only, not full coverage), so most
+findings here will legitimately be `blocking` — severity-gating buys RECONCILE fewer skipped
+rounds than it buys `decompose`. Its abort semantics also differ from `decompose`'s: unlike a
+fresh decomposition (where an abort is clean because nothing was ever released), this pass
+runs on OPEN, UNCLAIMED packets that step 3 already re-curated and RESTAMPED. An abort at the
+cap MUST re-DEFER those re-curated packets, set `pd_stale=<new-rev>` on them, leave
+`pd_phase=reconciling:<new-rev>` (so §8.9's dedup/resume logic treats it as an interrupted
+reconcile), and `write-report` — it MUST NOT restore `released` on an aborted reconcile.
+
 **Claimed packets:** RECONCILE MUST NOT rewrite a packet that is actively claimed. It sets
 `pd_stale=reconcile-pending` on it instead; the implementer's escalation ladder and closeout
 both check `pd_stale` (§10.2), so the change is caught at the packet's next natural
@@ -406,13 +468,13 @@ docket failure/report channel tells the operator a reconcile is owed.
 
 ### 9.1 What the cure costs (N packets, design ≈ Dk tokens, packet ≈ Pk tokens)
 
-| Stage                                                  | Cost                                 | Model tier | Frequency                    |
-| ------------------------------------------------------ | ------------------------------------ | ---------- | ---------------------------- |
-| Decomposer: read design + repo context, sketch, curate | D + repo reads + N·P output          | capable    | once                         |
-| Mechanical pre-filter                                  | ≈ 0 (scripted/trivial)               | —          | per round                    |
-| Cold-reads                                             | N · (P + dispatch overhead ~1k)      | cheap      | once + per edited packet     |
-| Semantic post-check                                    | D + N·P per pass                     | mid        | once + per §8.10 round (≤ 3) |
-| RECONCILE                                              | amendment-scoped subset of the above | mixed      | per amendment                |
+| Stage                                                  | Cost                                                                                          | Model tier | Frequency                    |
+| ------------------------------------------------------ | --------------------------------------------------------------------------------------------- | ---------- | ---------------------------- |
+| Decomposer: read design + repo context, sketch, curate | D + repo reads + N·P output                                                                   | capable    | once                         |
+| Mechanical pre-filter                                  | ≈ 0 (scripted/trivial)                                                                        | —          | per round                    |
+| Cold-reads                                             | N · (P + dispatch overhead ~1k)                                                               | cheap      | once + per edited packet     |
+| Semantic post-check                                    | D + N·P per pass; a round dispatches only when the PRIOR round had a blocking finding (§8.10) | mid        | once + per §8.10 round (≤ 2) |
+| RECONCILE                                              | amendment-scoped subset of the above                                                          | mixed      | per amendment                |
 
 For the svfbb reference shape (N=8, D≈10k, P≈2–3k): decomposition-side ≈ 60–100k tokens
 including one fix round — of the same order as the ~80k the implementers would otherwise burn
@@ -606,3 +668,41 @@ contract operations above are sufficient for it to be added without changing v1 
   this item's scope: validation-retries was nonzero on roughly half the 32 records (one packet
   needed 8), a validation-section-quality signal per §13's table, worth its own look in a
   future bead rather than folded into this one.
+- **Severity-gated rounds + mechanical pre-filter widening** (bead `pg2-50vbv`, 2026-09-04):
+  the `pg2-2j5ac` docket (3 packets) took 80.6 minutes / 555K tokens and still ABORTED without
+  releasing anything, hitting the then-3-round semantic-post-check cap on round 4. Its actual
+  shape: 6 round-1 findings, all fixed cleanly in one pass; rounds 2-4 were **one seam
+  unraveling deeper each round, not three independent findings or oscillation** — a real,
+  silent write-then-read round-trip gap (packet 2's `pr show` needing to merge back
+  persisted `category`/`disposition` that no packet committed to reading), correctly caught
+  by the loop but too expensive to converge on under the old 3-round, no-severity cap.
+  Decision: severity-gated rounds (§8.5's `blocking`/`minor` rubric) capped at 2 rounds
+  (§8.10), with a release-at-cap policy when every outstanding `blocking` finding has a
+  stated, applied fix and only re-verification is missing (rather than discarding correct
+  work) — applied to both `decompose` and `reconcile`, with `reconcile`'s own abort semantics
+  (§8.11). Model tier was explicitly reviewed and left UNCHANGED: `sonnet` stays the
+  semantic-post-check's tier (it is the one role holding the full design and exercising
+  judgment — exactly what a cheaper tier would most likely miss) and `haiku` stays
+  cold-read's (already the cheapest tier available); the savings come from round count and
+  severity-gating, not model tier. Five new mechanical pre-filter checks were added (§8.4):
+  citation-target existence, a whole-set coverage scan (advisory), a ported-file-list diff, a
+  forbidden-cross-module-`internal/`-import check, and an AC-to-Validation base-command-name
+  cross-reference — two of them advisory rather than blocking, and two (the coverage scan and
+  the AC-to-Validation check) using narrower/safer matching than first drafted to avoid false
+  positives on legitimate partial decompositions and phrasing variance. These stay inline
+  shell-tool checks, not shipped scripts, by explicit ruling — each is decomposer-internal,
+  single-purpose, and small enough to specify precisely inline, unlike the plugin's shipped
+  `chunk-for-bd-field.sh` script (the precedent for shipping a script: it is called from
+  multiple places across the skill and its bindings and has real edge cases — byte-safe
+  chunking). Two
+  adherence bugs found in the same transcript analysis were also addressed: cold-read's
+  single-turn batching instruction was already maximally explicit (execution drift, not a
+  wording defect — no file change); the semantic-post-check's round-2+ scoping bug needed
+  fixes in THREE files, not just this skill's core steps — the `semantic-post-checker` agent's
+  own dispatch description and the `plan-decomposer` agent's fixed sub-dispatch template both
+  affirmatively told the dispatcher to resend everything every round, and both are now fixed
+  to send only the current round's scoped subset. A separate triage subagent to decide
+  severity independently is a **deferred fallback, deliberately NOT built now** — severity
+  self-rating by the existing semantic-post-checker is free (a schema field, no new dispatch)
+  and there is no evidence yet that self-rating is unreliable; reach for the separate-agent
+  fallback only if that assumption proves wrong in practice.

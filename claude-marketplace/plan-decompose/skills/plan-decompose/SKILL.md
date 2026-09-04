@@ -102,7 +102,7 @@ closeout): `pd_metrics outcome=<done|blocked|released> escalation-reads=<n> vali
 
 ## Work-packet content anatomy
 
-Nine parts, in this order. EVERY substantive clause in parts 2, 3, and 5 MUST end with the
+Nine parts, in this order. EVERY substantive clause in parts 2, 3, 5, and 7 MUST end with the
 citation marker `[design: <section number or heading>]` — content with no citable design
 source is invention and MUST NOT be written (state the gap instead). Verbatim-copied blocks
 cite their source section once for the block.
@@ -185,9 +185,27 @@ deduplication.
    file-overlap collisions (extract each packet's Files paths, intersect, require a planned
    edge between any two packets sharing a path); out-of-scope pointer validity (each "that is
    packet X" claim checked against X's Objective); shared-preamble byte-identity (diff the
-   part-1 blocks); metadata completeness (stamps, policy, `pd_rev`). A block found
-   byte-identical across ALL packets that step 3 did not fold raises a hoisting flag
-   (advisory, reported, never blocking). Failures loop to step 3.
+   part-1 blocks); metadata completeness (stamps, policy, `pd_rev`); citation-target
+   existence (every `[design: <section>]` marker's target actually exists in the design
+   text — this catches a citation to a NONEXISTENT section, never a citation to a real
+   section that doesn't support the clause, which stays the semantic post-check's call);
+   whole-set coverage scan, ADVISORY ONLY (every design section/heading is named by at least
+   one citation somewhere across the full packet set; a section cited by zero packets is
+   reported, never a pre-filter failure — cross-check the in-flight decomposition-report
+   draft's not-decomposed list, updated at the moment step 3 excludes a section, not deferred
+   to report time); ported-file-list check (diff each packet's named source-to-port files
+   against `git ls-files <source-dir>`; a named path absent from the source is blocking, a
+   real source file never named by any packet is advisory); forbidden cross-module import
+   (grep cited import paths for any `/internal/` segment; flag any citing packet whose
+   destination file path is not itself nested under the directory containing that segment);
+   AC-to-Validation cross-reference (match on the BASE command name, not the full
+   backtick-quoted string, reading both the `--acceptance` field and the Validation part;
+   flag blocking only when the base command name never appears anywhere in that packet's
+   Validation part at all). The uncited-clause check above also covers part 7 now (§6.1's
+   citation parts widened to include Acceptance criteria) — that widening is this list's
+   conceptual sixth item, not a new clause of its own. A block found byte-identical across ALL
+   packets that step 3 did not fold raises a hoisting flag (advisory, reported, never
+   blocking). Failures loop to step 3.
 6. **Cold-read check** (one cheap-model agent per packet, read-only): input is the packet
    content ONLY; output `executable: yes|no` + `missing:` list, plus any assumption the
    reader had to make about a sibling packet's Consumes/Produces shape that is not pinned by
@@ -200,15 +218,39 @@ deduplication.
    element lands in a packet or is recorded via `write-report` as deliberately not
    decomposed; every citation resolves to design text that supports its clause; (b) seam
    consistency — every Consumes supplied by a planned predecessor's Produces or existing
-   code, signatures matching. Round 1 reads the full design and the full packet set; each
-   fix-loop re-check after round 1 SCOPES to the packets the prior round's findings touched
-   plus their direct planned-ordering neighbors — mirroring reconcile step 4 — never the full
-   design and full packet set again. Findings loop to step 3.
-8. **Loop bounds** (no loop is unbounded): a finding recurring on the same packet for the
-   same check against the same evidence target a SECOND time ⇒ treat as a gap — halt that
-   packet (continue the rest only if no seam depends on it, else abort). The full fix loop
-   runs at most 3 rounds; the 4th IS the finding: abort with a "did not converge" report
-   naming the oscillating findings.
+   code, signatures matching.
+
+   Severity rubric — `blocking` = a silent behavior gap, a missing producer for a contract
+   the packet set already commits to, or a seam that would misroute or lose data; `minor` =
+   everything else — a clarity gap, a redundant or currently-vacuous check, or a citation
+   that's off-target but doesn't change the clause's correctness.
+
+   Round 1 reads the full design and the full packet set; each fix-loop re-check after round 1
+   SCOPES to the packets the prior round's findings touched plus their direct planned-ordering
+   neighbors — mirroring reconcile step 4 — never the full design and full packet set again.
+   State the round's total prompt byte-length in the decomposition report (step 10) so a
+   non-scoped round is visible immediately. Findings loop to step 3. All findings get fixed
+   regardless of severity; whether a further round is dispatched, and what happens at the cap,
+   is governed by step 8's rule.
+
+8. **Loop bounds** (no loop is unbounded): a `blocking` finding recurring on the same packet
+   for the same check against the same evidence target a SECOND time ⇒ treat as a gap — halt
+   that packet (continue the rest only if no seam depends on it, else abort). A recurring
+   `minor` finding halts nothing.
+
+   **Canonical gate-and-cap rule** (this is the ONE literal copy; every other mention —
+   step 7's cross-reference, design §8.10, §9.1's table cell, `plan-decomposer.md`'s
+   charter — says "per step 8," never restates it): the semantic post-check's fix loop
+   dispatches a further round ONLY when the PRIOR round produced at least one `blocking`
+   finding; a round whose findings are all `minor` is fixed and the set proceeds straight to
+   release with no further dispatch. The blocking-gated loop runs at most 2 rounds. At the
+   cap: if every outstanding `blocking` finding has a stated, applied fix and only
+   re-verification is missing, the set RELEASES, with a residual-risk entry in the
+   decomposition report naming each unverified fix. Only an UNRESOLVED or oscillating
+   `blocking` finding at the cap takes the abort path ("did not converge", naming it).
+   Cold-read's own bound (same finding twice on a packet ⇒ gap) is UNCHANGED and unaffected
+   by any of this.
+
 9. **Wire** the planned ordering (blocked-by direction verified by read-back on EVERY edge; a
    failed read-back retried once then treated per step 8; cycle check after bulk wiring,
    output filtered to this docket's packets). At least one packet must be immediately
@@ -216,9 +258,9 @@ deduplication.
    edges, which is legitimate: report it, do not treat it as a failure.
 10. **Release** the set (`pd_phase=releasing:<n>/<m>` as the sweep proceeds, then `released`)
     and `write-report` the decomposition report: packet index, per-packet fixed-read
-    estimates and QA dispatch counts (cold-reads per packet, post-check rounds), sizing
-    deviations, check outcomes, hoisting flags, not-decomposed records, and an explicit "no
-    uncited content" assertion.
+    estimates and QA dispatch counts (cold-reads per packet, post-check rounds), each
+    semantic post-check round's prompt byte-length, sizing deviations, check outcomes,
+    hoisting flags, not-decomposed records, and an explicit "no uncited content" assertion.
 
 **Abort path (any early exit):** leave all packets DEFERRED — NEVER release an unverified
 set — set `pd_phase=failed:<phase>`, and `write-report` what was completed. The decomposer
@@ -245,7 +287,18 @@ as-is) before anything is written to the docket. Order is load-bearing:
    checkpoints catch it.
 4. Re-run the pre-filter + cold-read on re-curated packets and a semantic pass SCOPED to the
    amended sections, the re-curated packets, and their direct planned-ordering neighbors.
-   The full-set semantic check is for initial release and deliberate audits only.
+   The full-set semantic check is for initial release and deliberate audits only. This pass
+   gets the severity-gating and 2-round cap too (step 8's canonical gate-and-cap rule, by
+   reference — not restated here), but reconcile's OWN abort semantics apply, not
+   `decompose`'s: unlike a fresh decomposition, this pass runs on OPEN, UNCLAIMED packets
+   that step 3 already re-curated and RESTAMPED — nothing here was ever left un-released. An
+   abort at the cap MUST re-DEFER the re-curated packets, set `pd_stale=<new-rev>` on them,
+   leave `pd_phase=reconciling:<new-rev>` (so step 9's dedup/resume logic treats it as an
+   interrupted reconcile), and `write-report` — it MUST NOT restore `released` on an aborted
+   reconcile. Note also that this pass's scope is narrower than `decompose`'s (seam
+   consistency only, not full coverage), so most findings here will legitimately be
+   `blocking` — severity-gating buys this mode fewer skipped rounds than it buys
+   `decompose`.
 
 **Stamp-mismatch releases** (a consumer found rotted curation first): the release MUST
 re-DEFER the packet and set `pd_stale=<found-rev>` — never return it to the open pool, or

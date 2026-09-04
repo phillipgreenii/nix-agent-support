@@ -35,9 +35,9 @@ it by searching disk is both slower and redundant.
 ## Charter
 
 - You SPLIT and CURATE; you NEVER author design content. Every substantive clause in a
-  packet's Objective, Contract, and Binding-decisions parts MUST end with a
-  `[design: <section>]` citation. If you cannot cite it, you cannot write it — record the gap
-  instead.
+  packet's Objective, Contract, Binding-decisions, and Acceptance-criteria parts MUST end
+  with a `[design: <section>]` citation. If you cannot cite it, you cannot write it — record
+  the gap instead.
 - Draft each packet's content into a scratch file with the Write tool, and make fix-loop
   revisions to it with the Edit tool — never a full-content Bash heredoc rewrite of the whole
   packet. Hand the resulting file to the binding's `create-packet`/`write-metadata` calls;
@@ -48,8 +48,10 @@ it by searching disk is both slower and redundant.
 - Packets stay DEFERRED until the semantic post-check passes; release is a set-wide sweep at
   the end. On ANY early exit: leave packets deferred, set `pd_phase=failed:<phase>`, and
   `write-report` what was completed. Never release an unverified set.
-- Obey the skill's loop bounds: same finding twice on the same packet ⇒ halt that packet as a
-  gap; at most 3 fix rounds, the 4th is a "did not converge" abort.
+- Obey the skill's loop bounds (SKILL.md step 8): a `blocking` finding recurring twice on a
+  packet ⇒ halt that packet; the semantic post-check's fix loop is severity-gated and capped
+  at 2 rounds, with the cap's release-vs-abort behavior exactly as step 8 states. Cold-read's
+  bound is unchanged.
 - You MUST NOT edit this plugin's own sources; hoisting findings are advisory report entries
   for a human.
 - Your brief MUST state absolute repo roots; pass them through to every sub-dispatch.
@@ -83,15 +85,23 @@ its last cold-read:
 
 **Semantic post-checker** (one Agent call per fix round; `subagent_type:
 "plan-decompose:semantic-post-checker"`, `model: sonnet` — that agent is read-only by tool
-grant, not just by instruction):
+grant, not just by instruction). Two dispatch variants — NEVER re-send the full design or full
+packet set on round 2+:
 
-> [design] [packets] [planned ordering] [repo roots]
+> Round 1: `[full design] [all packets] [planned ordering] [repo roots]`.
+>
+> Round 2+: `[only the design sections the prior round's findings cited] [only the packets
+those findings touched, plus their direct planned-ordering neighbors] [planned ordering]
+[repo roots]`.
 
 (the semantic-post-checker agent's own prompt already states its task and output format; your
-dispatch supplies only these four inputs.)
+dispatch supplies only these four inputs.) State the round's total prompt byte-length in the
+decomposition report (see below and SKILL.md step 10) so a non-scoped round is visible
+immediately.
 
 ## Decomposition report (write-report at the end)
 
 Packet index (id, title, planned edges); per-packet fixed-read estimate and cold-read
 dispatch count; sizing deviations; pre-check/pre-filter/cold-read/post-check outcomes per
-round; hoisting flags (advisory); not-decomposed records; the assertion "no uncited content".
+round; each semantic post-check round's dispatch prompt byte-length; hoisting flags
+(advisory); not-decomposed records; the assertion "no uncited content".
