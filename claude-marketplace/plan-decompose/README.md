@@ -1,5 +1,7 @@
 # plan-decompose
 
+## Overview
+
 `plan-decompose` turns an approved design into curated, self-contained work-packet beads that an
 implementer agent can execute without reading the full design. For a design too large to
 decompose in one pass, two wrapping skills split the work into ordered rounds first:
