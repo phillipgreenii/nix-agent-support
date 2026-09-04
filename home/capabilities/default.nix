@@ -57,6 +57,17 @@
         name = "rtk";
         features = [ "rtk" ];
       }
+      # Git-worktree drain-beads workflow helpers. wtdone is a hard dependency
+      # of the ff-merge-to-main landing handler's cleanup step (used by every
+      # agent-support account doing drain-beads-style work), so it rides in
+      # the agent-support bundle below rather than a standalone opt-in leaf.
+      {
+        name = "worktree-tools";
+        features = [
+          "wtnew"
+          "wtdone"
+        ];
+      }
       # PR/git helper CLIs — human PR work.
       {
         name = "pr-tools";
@@ -93,6 +104,7 @@
         capabilities = [
           "claude-code"
           "beads"
+          "worktree-tools"
         ];
       }
       {

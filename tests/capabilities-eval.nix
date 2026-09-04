@@ -62,6 +62,8 @@ let
     cc_ceta_default_on = (p cCC).claude-extended-tool-approver.enable == true;
     cc_ccusage_stays_off = ((p cCC).ccusage.enable or false) == false;
     bundle_enables_beads = (p cBundleHuman).beads.enable == true;
+    bundle_enables_wtnew = (p cBundleHuman).wtnew.enable == true;
+    bundle_enables_wtdone = (p cBundleHuman).wtdone.enable == true;
     beads_human_gets_perles = (p cBundleHuman).perles.enable == true;
     beads_agent_no_perles = ((p cBundleAgent).perles.enable or false) == false;
     veto_beads_off = ((p cVeto).beads.enable or false) == false;
