@@ -22,6 +22,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"strings"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
@@ -99,15 +101,9 @@ func newCiListCmd() *cobra.Command {
 				return err
 			}
 			outcome := fanOutCIList(cmd.Context(), backends, args[0])
-			enc := json.NewEncoder(cmd.OutOrStdout())
-			enc.SetEscapeHTML(false)
-			if err := enc.Encode(outcome); err != nil {
-				return err
-			}
-			if code := outcome.exitCode(); code != 0 {
-				return &exitError{code: code}
-			}
-			return nil
+			return writeFanOutResult(cmd, outcome, outcome.exitCode(), func() string {
+				return humanizeCiList(outcome)
+			})
 		},
 	}
 }
@@ -123,7 +119,7 @@ func newCiLogsCmd() *cobra.Command {
 				return err
 			}
 			resp, dispatchErr := Dispatch(cmd.Context(), reg, "ci", "get_logs", map[string]string{"run_id": args[0]})
-			return reportCiTargetedOutcome(cmd, resp, dispatchErr)
+			return reportCiTargetedOutcome(cmd, resp, dispatchErr, humanizeCiLogs)
 		},
 	}
 }
@@ -139,32 +135,56 @@ func newCiRerunFailedCmd() *cobra.Command {
 				return err
 			}
 			resp, dispatchErr := Dispatch(cmd.Context(), reg, "ci", "rerun_failed", map[string]string{"pr_id": args[0]})
-			return reportCiTargetedOutcome(cmd, resp, dispatchErr)
+			return reportCiTargetedOutcome(cmd, resp, dispatchErr, func(json.RawMessage) (string, error) {
+				return fmt.Sprintf("CI rerun triggered for PR %s", args[0]), nil
+			})
 		},
 	}
 }
 
-// reportCiTargetedOutcome writes resp's wire envelope (its "result" on
-// success, or its "error" body per the taxonomy on failure) to stdout —
-// matching the wire protocol's own "only stdout JSON is the contract"
-// convention — and translates err into pg-connector's own targeted-op exit
-// code via outcome.go's TargetedExitCode, never deciding the exit code
-// itself [design: §4.5]. Mirrors pr.go's reportPrTargetedOutcome. A nil
-// resp is a CLI-level failure before any well-formed wire response was
-// produced (e.g. no backend registered, or an ambiguous multi-backend
+// reportCiTargetedOutcome writes resp's outcome to stdout — in the
+// default OutputJSON mode, its wire envelope verbatim, matching the wire
+// protocol's own "only stdout JSON is the contract" convention; in
+// OutputHuman mode, humanize's formatted rendering instead
+// [bead pg2-ox1k6] — see output.go's writeTargetedResult, which this
+// delegates to (mirrors pr.go's reportPrTargetedOutcome). It translates
+// err into pg-connector's own targeted-op exit code via outcome.go's
+// TargetedExitCode, never deciding the exit code itself [design: §4.5]. A
+// nil resp is a CLI-level failure before any well-formed wire response
+// was produced (e.g. no backend registered, or an ambiguous multi-backend
 // registration) — that case is returned as a plain error instead, so
 // main's run() reports it on stderr rather than fabricating a JSON body.
-func reportCiTargetedOutcome(cmd *cobra.Command, resp *scriptout.Response, err error) error {
-	if resp == nil {
-		return err
+func reportCiTargetedOutcome(cmd *cobra.Command, resp *scriptout.Response, err error, humanize humanizeResult) error {
+	return writeTargetedResult(cmd, resp, err, humanize)
+}
+
+// humanizeCiList formats a "ci list" fan-out outcome (its concatenated
+// Runs plus its per-backend Sources rows) for human display — the fan-out
+// outcome envelope's own compact rendering this bead names explicitly.
+func humanizeCiList(o ciListOutcome) string {
+	var b strings.Builder
+	if len(o.Runs) == 0 {
+		b.WriteString("ci runs: (none)\n")
+	} else {
+		fmt.Fprintf(&b, "ci runs (%d):\n", len(o.Runs))
+		for _, r := range o.Runs {
+			fmt.Fprintf(&b, "  [%s] %s: %s/%s (%s) sha=%s pr=%s\n", r.ID, r.Name, r.Status, r.Conclusion, r.Provider, r.HeadSHA, r.PRID)
+		}
 	}
-	enc := json.NewEncoder(cmd.OutOrStdout())
-	enc.SetEscapeHTML(false)
-	if encErr := enc.Encode(resp); encErr != nil {
-		return encErr
+	b.WriteString("sources:\n")
+	b.WriteString(formatSourcesTable(o.Sources))
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// humanizeCiLogs formats a "ci logs" result: GetLogs' raw log bytes
+// (wire-encoded as a base64 JSON string, decoded here via the same
+// scriptout.Decode every other targeted op uses) printed as plain text —
+// the logs are already human-readable content, so "human" rendering here
+// is exactly the decoded bytes with no further reformatting.
+func humanizeCiLogs(raw json.RawMessage) (string, error) {
+	var logs []byte
+	if err := scriptout.Decode(raw, &logs); err != nil {
+		return "", err
 	}
-	if code := TargetedExitCode(err); code != 0 {
-		return &exitError{code: code}
-	}
-	return nil
+	return string(logs), nil
 }

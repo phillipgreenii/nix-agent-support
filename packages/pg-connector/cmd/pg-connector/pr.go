@@ -14,6 +14,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
@@ -42,7 +43,7 @@ func newPrShowCmd() *cobra.Command {
 				return err
 			}
 			resp, dispatchErr := Dispatch(cmd.Context(), reg, "pr", "show", map[string]string{"id": args[0]})
-			return reportPrTargetedOutcome(cmd, resp, dispatchErr)
+			return reportPrTargetedOutcome(cmd, resp, dispatchErr, humanizePRShow)
 		},
 	}
 }
@@ -62,7 +63,7 @@ func newPrCategorizeCmd() *cobra.Command {
 				"id":       args[0],
 				"category": category,
 			})
-			return reportPrTargetedOutcome(cmd, resp, dispatchErr)
+			return reportPrTargetedOutcome(cmd, resp, dispatchErr, humanizePRCategorize)
 		},
 	}
 	cmd.Flags().StringVar(&category, "category", "", "category to set (required); a backend's own capabilities response declares its accepted vocabulary")
@@ -90,7 +91,7 @@ func newPrFeedbackSetCmd() *cobra.Command {
 				"comment_id":  args[1],
 				"disposition": string(d),
 			})
-			return reportPrTargetedOutcome(cmd, resp, dispatchErr)
+			return reportPrTargetedOutcome(cmd, resp, dispatchErr, humanizePRFeedbackSet)
 		},
 	}
 	cmd.Flags().StringVar(&disposition, "disposition", "", "one of open|will-fix|wont-fix|no-action (required)")
@@ -98,27 +99,95 @@ func newPrFeedbackSetCmd() *cobra.Command {
 	return cmd
 }
 
-// reportPrTargetedOutcome writes resp's wire envelope (its "result" on
-// success, or its "error" body per the taxonomy on failure) to stdout —
-// matching the wire protocol's own "only stdout JSON is the contract"
-// convention — and translates err into pg-connector's own targeted-op exit
-// code via outcome.go's TargetedExitCode, never deciding the exit code
-// itself [design: §4.5]. A nil resp is a CLI-level failure before any
+// reportPrTargetedOutcome writes resp's outcome to stdout — in the
+// default OutputJSON mode, its wire envelope ("result" on success, or
+// "error" per the taxonomy on failure) verbatim, matching the wire
+// protocol's own "only stdout JSON is the contract" convention; in
+// OutputHuman mode, humanize's formatted rendering instead
+// [bead pg2-ox1k6] — see output.go's writeTargetedResult, which this
+// delegates to. It translates err into pg-connector's own targeted-op
+// exit code via outcome.go's TargetedExitCode, never deciding the exit
+// code itself [design: §4.5]. A nil resp is a CLI-level failure before any
 // well-formed wire response was produced (e.g. no backend registered,
 // or an ambiguous multi-backend registration) — that case is returned as a
 // plain error instead, so main's run() reports it on stderr rather than
 // fabricating a JSON body.
-func reportPrTargetedOutcome(cmd *cobra.Command, resp *scriptout.Response, err error) error {
-	if resp == nil {
-		return err
+func reportPrTargetedOutcome(cmd *cobra.Command, resp *scriptout.Response, err error, humanize humanizeResult) error {
+	return writeTargetedResult(cmd, resp, err, humanize)
+}
+
+// humanizePRShow formats a `pr show` result (schema.PR) for human display.
+func humanizePRShow(raw json.RawMessage) (string, error) {
+	var pr schema.PR
+	if err := scriptout.Decode(raw, &pr); err != nil {
+		return "", err
 	}
-	enc := json.NewEncoder(cmd.OutOrStdout())
-	enc.SetEscapeHTML(false)
-	if encErr := enc.Encode(resp); encErr != nil {
-		return encErr
+	return formatPR(pr), nil
+}
+
+// formatPR renders pr's identity, review/feedback state, and the two
+// dedicated write fields (category, disposition) as human-readable text.
+func formatPR(pr schema.PR) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "PR %s: %s#%d %q [%s]\n", pr.ID, pr.Repo, pr.Number, pr.Title, pr.State)
+	fmt.Fprintf(&b, "  branch: %s -> %s\n", pr.Branch, pr.Base)
+	fmt.Fprintf(&b, "  author: %s\n", pr.Author)
+	fmt.Fprintf(&b, "  url: %s\n", pr.URL)
+	fmt.Fprintf(&b, "  draft: %t  merged: %t\n", pr.Draft, pr.Merged)
+	if pr.Category != "" {
+		fmt.Fprintf(&b, "  category: %s\n", pr.Category)
 	}
-	if code := TargetedExitCode(err); code != 0 {
-		return &exitError{code: code}
+	if len(pr.Labels) > 0 {
+		fmt.Fprintf(&b, "  labels: %s\n", strings.Join(pr.Labels, ", "))
 	}
-	return nil
+	if len(pr.Comments) > 0 {
+		fmt.Fprintf(&b, "  comments (%d):\n", len(pr.Comments))
+		for _, c := range pr.Comments {
+			fmt.Fprintf(&b, "    - [%s] %s (%s): %s\n", c.ID, c.Author, prCommentStatus(c), c.Body)
+		}
+	}
+	if len(pr.Reviews) > 0 {
+		fmt.Fprintf(&b, "  reviews (%d):\n", len(pr.Reviews))
+		for _, r := range pr.Reviews {
+			fmt.Fprintf(&b, "    - [%s] %s: %s\n", r.ID, r.Author, r.State)
+			for _, c := range r.Comments {
+				fmt.Fprintf(&b, "        - [%s] %s (%s): %s\n", c.ID, c.Author, prCommentStatus(c), c.Body)
+			}
+		}
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// prCommentStatus reports a PR comment/review-thread entry's current
+// disposition, or its plain resolved/open state when no disposition has
+// been set yet (Disposition is only ever populated once feedback_set has
+// been called on it — see schema.PRComment).
+func prCommentStatus(c schema.PRComment) string {
+	if c.Disposition != "" {
+		return string(c.Disposition)
+	}
+	if c.Resolved {
+		return "resolved"
+	}
+	return "open"
+}
+
+// humanizePRCategorize formats a `pr categorize` result
+// (schema.CategorizeResult) for human display.
+func humanizePRCategorize(raw json.RawMessage) (string, error) {
+	var r schema.CategorizeResult
+	if err := scriptout.Decode(raw, &r); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("PR %s: category set to %q", r.ID, r.Category), nil
+}
+
+// humanizePRFeedbackSet formats a `pr feedback-set` result
+// (schema.FeedbackSetResult) for human display.
+func humanizePRFeedbackSet(raw json.RawMessage) (string, error) {
+	var r schema.FeedbackSetResult
+	if err := scriptout.Decode(raw, &r); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("PR %s: comment %s disposition set to %q", r.ID, r.CommentID, r.Disposition), nil
 }

@@ -210,6 +210,57 @@ func TestRun_CiRerunFailed_NotFound_Exit4(t *testing.T) {
 	}
 }
 
+func TestRun_CiList_HumanOutput(t *testing.T) {
+	writeOpAwareFakeBackend(t, "backend-ci-list-human", map[string]string{
+		"list_runs": `{"protocolVersion":1,"schemaVersion":1,"result":[{"id":"run-1","name":"build","status":"completed","conclusion":"success","url":"u","provider":"github-actions","head_sha":"deadbeef","pr_id":"pr-1"}]}`,
+	}, `{}`)
+	writeCiConfigFor(t, "backend-ci-list-human")
+
+	stdout, code := executePr(t, []string{"--output", "human", "ci", "list", "pr-1"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
+	}
+	if strings.Contains(stdout, "{") {
+		t.Fatalf("human output must not contain raw JSON; stdout=%s", stdout)
+	}
+	for _, want := range []string{"ci runs (1)", "run-1", "build", "completed/success", "backend-ci-list-human: succeeded"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("human output missing %q; stdout=%s", want, stdout)
+		}
+	}
+}
+
+func TestRun_CiLogs_HumanOutput(t *testing.T) {
+	encoded := base64.StdEncoding.EncodeToString([]byte("log output"))
+	writeOpAwareFakeBackend(t, "backend-ci-logs-human", map[string]string{
+		"get_logs": `{"protocolVersion":1,"schemaVersion":1,"result":"` + encoded + `"}`,
+	}, `{}`)
+	writeCiConfigFor(t, "backend-ci-logs-human")
+
+	stdout, code := executePr(t, []string{"--output", "human", "ci", "logs", "run-1"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
+	}
+	if strings.TrimSpace(stdout) != "log output" {
+		t.Fatalf("human logs output = %q, want the decoded log text verbatim", stdout)
+	}
+}
+
+func TestRun_CiRerunFailed_HumanOutput(t *testing.T) {
+	writeOpAwareFakeBackend(t, "backend-ci-rerun-human", map[string]string{
+		"rerun_failed": `{"protocolVersion":1,"schemaVersion":1,"result":null}`,
+	}, `{}`)
+	writeCiConfigFor(t, "backend-ci-rerun-human")
+
+	stdout, code := executePr(t, []string{"--output", "human", "ci", "rerun-failed", "pr-1"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
+	}
+	if !strings.Contains(stdout, "CI rerun triggered for PR pr-1") {
+		t.Fatalf("human output = %q", stdout)
+	}
+}
+
 func TestRun_CiLogs_AmbiguousMultipleBackends_IsGenericFailure(t *testing.T) {
 	// Targeted-op backend resolution needs exactly one registered backend
 	// (mirroring Dispatch's own convention for connector.pr) — with two

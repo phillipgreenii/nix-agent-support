@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
@@ -153,6 +154,91 @@ func TestRun_PrFeedbackSet_InvalidDisposition_IsGenericFailure(t *testing.T) {
 	_, code := executePr(t, []string{"pr", "feedback-set", "pr-1", "c1", "--disposition", "bogus"})
 	if code != 1 {
 		t.Fatalf("exit code = %d, want 1", code)
+	}
+}
+
+func TestRun_PrShow_HumanOutput(t *testing.T) {
+	writeOpAwareFakeBackend(t, "backend-show-human", map[string]string{
+		"show": `{"protocolVersion":1,"schemaVersion":1,"result":{"id":"pr-1","repo":"o/r","number":1,"title":"t","state":"open","branch":"b","base":"main","author":"a","url":"u","draft":false,"merged":false,"category":"focus","labels":["x","y"],"comments":[{"id":"c1","author":"a","body":"body","resolved":false,"disposition":"open"}],"reviews":[{"id":"r1","author":"rev","state":"CHANGES_REQUESTED","comments":[{"id":"c2","author":"rev","body":"fix","thread_id":"th1","disposition":"will-fix"}]}]}}`,
+	}, `{}`)
+	writeConfigFor(t, "backend-show-human")
+
+	stdout, code := executePr(t, []string{"--output", "human", "pr", "show", "pr-1"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
+	}
+	if strings.Contains(stdout, "{") {
+		t.Fatalf("human output must not contain raw JSON; stdout=%s", stdout)
+	}
+	for _, want := range []string{"PR pr-1", "o/r#1", "\"t\"", "[open]", "branch: b -> main", "category: focus", "labels: x, y", "c1", "will-fix"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("human output missing %q; stdout=%s", want, stdout)
+		}
+	}
+}
+
+func TestRun_PrCategorize_HumanOutput(t *testing.T) {
+	writeOpAwareFakeBackend(t, "backend-categorize-human", map[string]string{
+		"categorize": `{"protocolVersion":1,"schemaVersion":1,"result":{"id":"pr-1","category":"focus"}}`,
+	}, `{}`)
+	writeConfigFor(t, "backend-categorize-human")
+
+	stdout, code := executePr(t, []string{"--output", "human", "pr", "categorize", "pr-1", "--category", "focus"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
+	}
+	if !strings.Contains(stdout, "PR pr-1: category set to \"focus\"") {
+		t.Fatalf("human output = %q", stdout)
+	}
+}
+
+func TestRun_PrFeedbackSet_HumanOutput(t *testing.T) {
+	writeOpAwareFakeBackend(t, "backend-feedback-human", map[string]string{
+		"feedback_set": `{"protocolVersion":1,"schemaVersion":1,"result":{"id":"pr-1","comment_id":"c1","disposition":"wont-fix"}}`,
+	}, `{}`)
+	writeConfigFor(t, "backend-feedback-human")
+
+	stdout, code := executePr(t, []string{"--output", "human", "pr", "feedback-set", "pr-1", "c1", "--disposition", "wont-fix"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
+	}
+	if !strings.Contains(stdout, "PR pr-1: comment c1 disposition set to \"wont-fix\"") {
+		t.Fatalf("human output = %q", stdout)
+	}
+}
+
+func TestRun_PrFeedbackSet_HumanOutput_NotFoundPrintsErrorLineNotJSON(t *testing.T) {
+	// A wire-level error must still render as human text in human mode —
+	// never the raw JSON error envelope.
+	writeOpAwareFakeBackend(t, "backend-feedback-human-notfound", map[string]string{
+		"feedback_set": `{"protocolVersion":1,"schemaVersion":1,"error":{"code":"not_found","message":"comment c1 not found"}}`,
+	}, `{}`)
+	writeConfigFor(t, "backend-feedback-human-notfound")
+
+	stdout, code := executePr(t, []string{"--output", "human", "pr", "feedback-set", "pr-1", "c1", "--disposition", "open"})
+	if code != 4 {
+		t.Fatalf("exit code = %d, want 4; stdout=%s", code, stdout)
+	}
+	if strings.Contains(stdout, "{") {
+		t.Fatalf("human output must not contain raw JSON; stdout=%s", stdout)
+	}
+	if !strings.Contains(stdout, "not_found") || !strings.Contains(stdout, "comment c1 not found") {
+		t.Fatalf("human error output = %q", stdout)
+	}
+}
+
+func TestRun_PrShow_JSONOutput_DefaultUnchangedWithOutputFlagExplicit(t *testing.T) {
+	// --output json must be byte-identical to the pre-existing (no flag)
+	// default behavior [bead pg2-ox1k6's backward-compatibility requirement].
+	writeOpAwareFakeBackend(t, "backend-show-json-explicit", map[string]string{
+		"show": `{"protocolVersion":1,"schemaVersion":1,"result":{"id":"pr-1","repo":"o/r","number":1,"title":"t","state":"open","branch":"b","base":"main","author":"a","url":"u","draft":false,"merged":false}}`,
+	}, `{}`)
+	writeConfigFor(t, "backend-show-json-explicit")
+
+	stdoutDefault, codeDefault := executePr(t, []string{"pr", "show", "pr-1"})
+	stdoutExplicit, codeExplicit := executePr(t, []string{"--output", "json", "pr", "show", "pr-1"})
+	if codeDefault != codeExplicit || stdoutDefault != stdoutExplicit {
+		t.Fatalf("default and --output json diverge: default=(%d,%q) explicit=(%d,%q)", codeDefault, stdoutDefault, codeExplicit, stdoutExplicit)
 	}
 }
 

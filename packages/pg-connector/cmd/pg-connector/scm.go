@@ -23,7 +23,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 	"github.com/spf13/cobra"
 )
@@ -60,7 +62,7 @@ func newScmWorktreeAddCmd() *cobra.Command {
 				return err
 			}
 			resp, dispatchErr := dispatchScm(cmd.Context(), reg, "worktree_add", map[string]string{"branch_or_ref": args[0]})
-			return reportScmTargetedOutcome(cmd, resp, dispatchErr)
+			return reportScmTargetedOutcome(cmd, resp, dispatchErr, humanizeWorktreeInfo)
 		},
 	}
 }
@@ -76,7 +78,9 @@ func newScmWorktreeRemoveCmd() *cobra.Command {
 				return err
 			}
 			resp, dispatchErr := dispatchScm(cmd.Context(), reg, "worktree_remove", map[string]string{"path": args[0]})
-			return reportScmTargetedOutcome(cmd, resp, dispatchErr)
+			return reportScmTargetedOutcome(cmd, resp, dispatchErr, func(json.RawMessage) (string, error) {
+				return fmt.Sprintf("Worktree removed: %s", args[0]), nil
+			})
 		},
 	}
 }
@@ -96,7 +100,7 @@ func newScmWorktreeListCmd() *cobra.Command {
 			// always resolves to exactly one backend [design: §4.1, §4.5,
 			// §4.7].
 			resp, dispatchErr := dispatchScm(cmd.Context(), reg, "worktree_list", nil)
-			return reportScmTargetedOutcome(cmd, resp, dispatchErr)
+			return reportScmTargetedOutcome(cmd, resp, dispatchErr, humanizeWorktreeList)
 		},
 	}
 }
@@ -131,7 +135,7 @@ func newScmBranchDetectCmd() *cobra.Command {
 				return err
 			}
 			resp, dispatchErr := dispatchScm(cmd.Context(), reg, "branch_detect", map[string]string{"cwd": cwd})
-			return reportScmTargetedOutcome(cmd, resp, dispatchErr)
+			return reportScmTargetedOutcome(cmd, resp, dispatchErr, humanizeBranchInfo)
 		},
 	}
 }
@@ -155,26 +159,64 @@ func dispatchScm(ctx context.Context, reg *Registry, op string, args any) (*scri
 	return scriptout.Invoke(ctx, backend, op, args)
 }
 
-// reportScmTargetedOutcome writes resp's wire envelope (its "result" on
-// success, or its "error" body per the taxonomy on failure) to stdout —
-// matching the wire protocol's own "only stdout JSON is the contract"
-// convention — and translates err into pg-connector's own targeted-op exit
-// code via outcome.go's TargetedExitCode, never deciding the exit code
-// itself [design: §4.5]. A nil resp is a CLI-level failure before any
-// well-formed wire response was produced (e.g. no backend registered) —
-// that case is returned as a plain error instead, so main's run() reports
-// it on stderr rather than fabricating a JSON body.
-func reportScmTargetedOutcome(cmd *cobra.Command, resp *scriptout.Response, err error) error {
-	if resp == nil {
-		return err
+// reportScmTargetedOutcome writes resp's outcome to stdout — in the
+// default OutputJSON mode, its wire envelope verbatim, matching the wire
+// protocol's own "only stdout JSON is the contract" convention; in
+// OutputHuman mode, humanize's formatted rendering instead
+// [bead pg2-ox1k6] — see output.go's writeTargetedResult, which this
+// delegates to. It translates err into pg-connector's own targeted-op
+// exit code via outcome.go's TargetedExitCode, never deciding the exit
+// code itself [design: §4.5]. A nil resp is a CLI-level failure before
+// any well-formed wire response was produced (e.g. no backend
+// registered) — that case is returned as a plain error instead, so
+// main's run() reports it on stderr rather than fabricating a JSON body.
+func reportScmTargetedOutcome(cmd *cobra.Command, resp *scriptout.Response, err error, humanize humanizeResult) error {
+	return writeTargetedResult(cmd, resp, err, humanize)
+}
+
+// formatWorktreeInfo renders one local git worktree's path/branch/ref as
+// human-readable text.
+func formatWorktreeInfo(w schema.WorktreeInfo) string {
+	return fmt.Sprintf("worktree: %s\n  branch: %s\n  ref: %s", w.Path, w.Branch, w.Ref)
+}
+
+// humanizeWorktreeInfo formats a `scm worktree add` result
+// (schema.WorktreeInfo) for human display.
+func humanizeWorktreeInfo(raw json.RawMessage) (string, error) {
+	var w schema.WorktreeInfo
+	if err := scriptout.Decode(raw, &w); err != nil {
+		return "", err
 	}
-	enc := json.NewEncoder(cmd.OutOrStdout())
-	enc.SetEscapeHTML(false)
-	if encErr := enc.Encode(resp); encErr != nil {
-		return encErr
+	return formatWorktreeInfo(w), nil
+}
+
+// humanizeWorktreeList formats a `scm worktree list` result
+// ([]schema.WorktreeInfo) for human display.
+func humanizeWorktreeList(raw json.RawMessage) (string, error) {
+	var list []schema.WorktreeInfo
+	if err := scriptout.Decode(raw, &list); err != nil {
+		return "", err
 	}
-	if code := TargetedExitCode(err); code != 0 {
-		return &exitError{code: code}
+	if len(list) == 0 {
+		return "worktrees: (none)", nil
 	}
-	return nil
+	var b strings.Builder
+	fmt.Fprintf(&b, "worktrees (%d):\n", len(list))
+	for i, w := range list {
+		if i > 0 {
+			b.WriteByte('\n')
+		}
+		fmt.Fprintf(&b, "  %s (branch=%s, ref=%s)", w.Path, w.Branch, w.Ref)
+	}
+	return b.String(), nil
+}
+
+// humanizeBranchInfo formats a `scm branch detect` result
+// (schema.BranchInfo) for human display.
+func humanizeBranchInfo(raw json.RawMessage) (string, error) {
+	var info schema.BranchInfo
+	if err := scriptout.Decode(raw, &info); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("repo: %s\nbranch: %s", info.Repo, info.Branch), nil
 }

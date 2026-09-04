@@ -5,6 +5,12 @@
 // root. pg-connector remains the single binary and the single user-facing
 // CLI surface that pr/ci/issue/scm are verb groups of, never a separate
 // binary of its own.
+//
+// The persistent --output flag (registered here via output.go's
+// addOutputFlag, so every verb group inherits it without redeclaring it
+// itself) selects pg-connector's own CLI presentation mode
+// [bead pg2-ox1k6] — see output.go's header comment for the json-default
+// design rationale.
 package main
 
 import "github.com/spf13/cobra"
@@ -26,5 +32,6 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newCiCmd())
 	root.AddCommand(newIssueCmd())
 	root.AddCommand(newScmCmd())
+	addOutputFlag(root)
 	return root
 }

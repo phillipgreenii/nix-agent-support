@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
@@ -197,6 +198,73 @@ func TestRun_ScmBranchDetect_DefaultsToProcessCwd(t *testing.T) {
 	}
 	if echoed.Args.Cwd != realDir {
 		t.Fatalf("echoed cwd = %q, want %q", echoed.Args.Cwd, realDir)
+	}
+}
+
+func TestRun_ScmWorktreeAdd_HumanOutput(t *testing.T) {
+	writeOpAwareFakeBackend(t, "backend-worktree-add-human", map[string]string{
+		"worktree_add": `{"protocolVersion":1,"schemaVersion":1,"result":{"path":"/w/feature","branch":"feature","ref":"feature"}}`,
+	}, `{}`)
+	writeScmConfigFor(t, "backend-worktree-add-human")
+
+	stdout, code := executePr(t, []string{"--output", "human", "scm", "worktree", "add", "feature"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
+	}
+	if strings.Contains(stdout, "{") {
+		t.Fatalf("human output must not contain raw JSON; stdout=%s", stdout)
+	}
+	for _, want := range []string{"worktree: /w/feature", "branch: feature", "ref: feature"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("human output missing %q; stdout=%s", want, stdout)
+		}
+	}
+}
+
+func TestRun_ScmWorktreeRemove_HumanOutput(t *testing.T) {
+	writeOpAwareFakeBackend(t, "backend-worktree-remove-human", map[string]string{
+		"worktree_remove": `{"protocolVersion":1,"schemaVersion":1,"result":null}`,
+	}, `{}`)
+	writeScmConfigFor(t, "backend-worktree-remove-human")
+
+	stdout, code := executePr(t, []string{"--output", "human", "scm", "worktree", "remove", "/w/feature"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
+	}
+	if !strings.Contains(stdout, "Worktree removed: /w/feature") {
+		t.Fatalf("human output = %q", stdout)
+	}
+}
+
+func TestRun_ScmWorktreeList_HumanOutput(t *testing.T) {
+	writeOpAwareFakeBackend(t, "backend-worktree-list-human", map[string]string{
+		"worktree_list": `{"protocolVersion":1,"schemaVersion":1,"result":[{"path":"/w/a","branch":"a","ref":"a"},{"path":"/w/b","branch":"b","ref":"b"}]}`,
+	}, `{}`)
+	writeScmConfigFor(t, "backend-worktree-list-human")
+
+	stdout, code := executePr(t, []string{"--output", "human", "scm", "worktree", "list"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
+	}
+	for _, want := range []string{"worktrees (2)", "/w/a (branch=a, ref=a)", "/w/b (branch=b, ref=b)"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("human output missing %q; stdout=%s", want, stdout)
+		}
+	}
+}
+
+func TestRun_ScmBranchDetect_HumanOutput(t *testing.T) {
+	writeOpAwareFakeBackend(t, "backend-branch-detect-human", map[string]string{
+		"branch_detect": `{"protocolVersion":1,"schemaVersion":1,"result":{"repo":"owner/repo","branch":"feature"}}`,
+	}, `{}`)
+	writeScmConfigFor(t, "backend-branch-detect-human")
+
+	stdout, code := executePr(t, []string{"--output", "human", "scm", "branch", "detect", "/home/u/repo"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
+	}
+	if !strings.Contains(stdout, "repo: owner/repo") || !strings.Contains(stdout, "branch: feature") {
+		t.Fatalf("human output = %q", stdout)
 	}
 }
 

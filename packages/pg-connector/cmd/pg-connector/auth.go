@@ -12,7 +12,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
@@ -75,15 +74,9 @@ func newAuthStatusCmd() *cobra.Command {
 				return err
 			}
 			outcome := FanOutAuthStatus(cmd.Context(), backends)
-			enc := json.NewEncoder(cmd.OutOrStdout())
-			enc.SetEscapeHTML(false)
-			if err := enc.Encode(outcome); err != nil {
-				return err
-			}
-			if code := outcome.ExitCode(); code != 0 {
-				return &exitError{code: code}
-			}
-			return nil
+			return writeFanOutResult(cmd, outcome, outcome.ExitCode(), func() string {
+				return "auth status:\n" + formatSourcesTable(outcome.Sources)
+			})
 		},
 	}
 }

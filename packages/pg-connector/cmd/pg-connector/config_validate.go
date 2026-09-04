@@ -7,7 +7,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"strings"
 
@@ -74,15 +73,9 @@ func newConfigValidateCmd() *cobra.Command {
 				return err
 			}
 			outcome := FanOutConfigValidate(cmd.Context(), backends)
-			enc := json.NewEncoder(cmd.OutOrStdout())
-			enc.SetEscapeHTML(false)
-			if err := enc.Encode(outcome); err != nil {
-				return err
-			}
-			if code := outcome.ExitCode(); code != 0 {
-				return &exitError{code: code}
-			}
-			return nil
+			return writeFanOutResult(cmd, outcome, outcome.ExitCode(), func() string {
+				return "config validate:\n" + formatSourcesTable(outcome.Sources)
+			})
 		},
 	}
 }

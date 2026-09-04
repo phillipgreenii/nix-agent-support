@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
@@ -175,6 +176,71 @@ func TestRun_IssueTransition_VocabularyMismatch_PassesToBackendAndIsGenericFailu
 	}
 	if resp.Error == nil || resp.Error.Code == "not_found" {
 		t.Fatalf("resp.Error = %+v, want a non-not_found error", resp.Error)
+	}
+}
+
+func TestRun_IssueShow_HumanOutput(t *testing.T) {
+	writeOpAwareFakeBackend(t, "backend-issue-show-human", map[string]string{
+		"show": `{"protocolVersion":1,"schemaVersion":1,"result":{"id":"issue-1","title":"t","state":"open","url":"u","priority":"High","labels":["a","b"],"issue_type":"Bug"}}`,
+	}, `{}`)
+	writeIssueConfigFor(t, "backend-issue-show-human")
+
+	stdout, code := executePr(t, []string{"--output", "human", "issue", "show", "issue-1"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
+	}
+	if strings.Contains(stdout, "{") {
+		t.Fatalf("human output must not contain raw JSON; stdout=%s", stdout)
+	}
+	for _, want := range []string{"issue issue-1", "[open]", "priority: High", "type: Bug", "labels: a, b"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("human output missing %q; stdout=%s", want, stdout)
+		}
+	}
+}
+
+func TestRun_IssueCreate_HumanOutput(t *testing.T) {
+	writeOpAwareFakeBackend(t, "backend-issue-create-human", map[string]string{
+		"create": `{"protocolVersion":1,"schemaVersion":1,"result":{"id":"issue-2","title":"new issue","state":"open"}}`,
+	}, `{}`)
+	writeIssueConfigFor(t, "backend-issue-create-human")
+
+	stdout, code := executePr(t, []string{"--output", "human", "issue", "create", "--title", "new issue"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
+	}
+	if !strings.Contains(stdout, "created issue issue-2") {
+		t.Fatalf("human output = %q", stdout)
+	}
+}
+
+func TestRun_IssueComment_HumanOutput(t *testing.T) {
+	writeOpAwareFakeBackend(t, "backend-issue-comment-human", map[string]string{
+		"comment": `{"protocolVersion":1,"schemaVersion":1,"result":null}`,
+	}, `{}`)
+	writeIssueConfigFor(t, "backend-issue-comment-human")
+
+	stdout, code := executePr(t, []string{"--output", "human", "issue", "comment", "issue-1", "--body", "a comment"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
+	}
+	if !strings.Contains(stdout, "Comment added to issue issue-1") {
+		t.Fatalf("human output = %q", stdout)
+	}
+}
+
+func TestRun_IssueTransition_HumanOutput(t *testing.T) {
+	writeOpAwareFakeBackend(t, "backend-issue-transition-human", map[string]string{
+		"transition": `{"protocolVersion":1,"schemaVersion":1,"result":null}`,
+	}, `{}`)
+	writeIssueConfigFor(t, "backend-issue-transition-human")
+
+	stdout, code := executePr(t, []string{"--output", "human", "issue", "transition", "issue-1", "--state", "Done"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
+	}
+	if !strings.Contains(stdout, "Issue issue-1 transitioned to Done") {
+		t.Fatalf("human output = %q", stdout)
 	}
 }
 
