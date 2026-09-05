@@ -1372,6 +1372,97 @@ func TestParse_CloudflaredAccessNoInnerCmd(t *testing.T) {
 	}
 }
 
+// TestParse_FloxActivateDashDash is the tc-h8gd fix: `flox activate -- CMD`
+// unwraps to CMD, the same way `bgrun NAME -- CMD` already does for
+// commandRunnerPrefixes, so downstream argv[0]-keyed rules (buildtools'
+// just verb-scoping included) see the real command instead of "flox".
+func TestParse_FloxActivateDashDash(t *testing.T) {
+	got := Parse("flox activate -- just deploy-manual kprod")
+	if len(got) != 1 {
+		t.Fatalf("len(Parse) = %d, want 1", len(got))
+	}
+	if got[0].Executable != "just" {
+		t.Errorf("Executable = %q, want just (flox activate -- unwrapped)", got[0].Executable)
+	}
+	want := []string{"deploy-manual", "kprod"}
+	if !reflect.DeepEqual(got[0].Args, want) {
+		t.Errorf("Args = %v, want %v", got[0].Args, want)
+	}
+}
+
+// TestParse_FloxActivateFlagsBeforeDashDash proves the `--` boundary is found
+// by scanning, not assumed at a fixed offset: flox's own flags (-d/-e/…) may
+// sit between `activate` and `--`.
+func TestParse_FloxActivateFlagsBeforeDashDash(t *testing.T) {
+	got := Parse("flox activate -d /repo -e default -- just check")
+	if len(got) != 1 {
+		t.Fatalf("len(Parse) = %d, want 1", len(got))
+	}
+	if got[0].Executable != "just" {
+		t.Errorf("Executable = %q, want just", got[0].Executable)
+	}
+	want := []string{"check"}
+	if !reflect.DeepEqual(got[0].Args, want) {
+		t.Errorf("Args = %v, want %v", got[0].Args, want)
+	}
+}
+
+// TestParse_FloxActivateNoDashDash is the conservative default: a bare
+// `flox activate` (interactive shell, no inner command) has no `--` boundary
+// to trust, so it is left as-is rather than guessed at.
+func TestParse_FloxActivateNoDashDash(t *testing.T) {
+	got := Parse("flox activate")
+	if len(got) != 1 {
+		t.Fatalf("len(Parse) = %d, want 1", len(got))
+	}
+	if got[0].Executable != "flox" {
+		t.Errorf("Executable = %q, want flox (no -- boundary to unwrap)", got[0].Executable)
+	}
+}
+
+// TestParse_FloxActivateDashDashNoInnerCmd: `--` with nothing after it is the
+// same "no inner command" shape as bgrun's — leave the leaf as-is.
+func TestParse_FloxActivateDashDashNoInnerCmd(t *testing.T) {
+	got := Parse("flox activate --")
+	if len(got) != 1 {
+		t.Fatalf("len(Parse) = %d, want 1", len(got))
+	}
+	if got[0].Executable != "flox" {
+		t.Errorf("Executable = %q, want flox (nothing follows --)", got[0].Executable)
+	}
+}
+
+// TestParse_FloxNonActivate: only `activate` is a transparent wrapper; other
+// flox subcommands (search, install, …) are not, even if they happen to carry
+// a `--`.
+func TestParse_FloxNonActivate(t *testing.T) {
+	got := Parse("flox search -- ripgrep")
+	if len(got) != 1 {
+		t.Fatalf("len(Parse) = %d, want 1", len(got))
+	}
+	if got[0].Executable != "flox" {
+		t.Errorf("Executable = %q, want flox (search is not a wrapper subcommand)", got[0].Executable)
+	}
+}
+
+// TestParse_FloxActivateDashDashNested proves the unwrap recurses: the inner
+// command found after `flox activate --` is itself run back through
+// unwrapCommand, so a further wrapper (env/nice/timeout/…) still resolves to
+// the real command.
+func TestParse_FloxActivateDashDashNested(t *testing.T) {
+	got := Parse("flox activate -- env FOO=bar just check")
+	if len(got) != 1 {
+		t.Fatalf("len(Parse) = %d, want 1", len(got))
+	}
+	if got[0].Executable != "just" {
+		t.Errorf("Executable = %q, want just (env prefix inside flox activate -- also unwrapped)", got[0].Executable)
+	}
+	want := []string{"check"}
+	if !reflect.DeepEqual(got[0].Args, want) {
+		t.Errorf("Args = %v, want %v", got[0].Args, want)
+	}
+}
+
 // TestCommandComment replaces TestExtractComment: `ExtractComment`'s byte scan is
 // deleted in ADR 0039 step 2 and `CommandComment` is its seam-side successor. Every
 // expectation is UNCHANGED — a comment is now a parser fact rather than a scan

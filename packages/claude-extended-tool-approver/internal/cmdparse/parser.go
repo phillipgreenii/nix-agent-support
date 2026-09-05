@@ -1546,11 +1546,22 @@ type SubstitutionScan struct {
 // wrapperPrefixes lists (executable, subcommand) pairs that act as transparent
 // wrappers. A command matching one of these is unwrapped so downstream rules
 // evaluate the inner command instead.
+//
+// dashDash marks a wrapper whose inner command follows a literal `--` token
+// somewhere after the subcommand, rather than sitting immediately after it
+// (cloudflared's `access CMD` has no such boundary; flox's `activate -- CMD`
+// does, and may have arbitrary flags — `-d DIR`, `-e ENV`, … — between the
+// subcommand and the `--`). Without this unwrap, `flox activate -- just
+// deploy-manual kprod` parses to Executable "flox", which matches no rule
+// (buildtools' just verb-scoping included) and Abstains — even though `just
+// deploy-manual` is itself an approved verb (tc-h8gd).
 var wrapperPrefixes = []struct {
 	executable string
 	subcommand string
+	dashDash   bool
 }{
-	{"cloudflared", "access"},
+	{"cloudflared", "access", false},
+	{"flox", "activate", true},
 }
 
 // execPrefixes run an inner command after their own flags / NAME=VALUE
@@ -1917,8 +1928,34 @@ func unwrapCommand(pc ParsedCommand) ParsedCommand {
 		if base != wp.executable {
 			continue
 		}
+		if len(pc.Args) == 0 || pc.Args[0] != wp.subcommand {
+			continue
+		}
+		if wp.dashDash {
+			// The subcommand may carry its own flags (`flox activate -d DIR
+			// -e ENV -- CMD`) before the `--` boundary, so scan for the
+			// literal token rather than assuming a fixed offset. No `--`, or
+			// nothing after it, means there is no inner command to run (e.g.
+			// a bare `flox activate` that starts an interactive shell) —
+			// conservatively leave the leaf as-is, matching
+			// unwrapCommandRunner's dashDashOnly conservatism above.
+			for i := 1; i < len(pc.Args); i++ {
+				if pc.Args[i] != "--" {
+					continue
+				}
+				if i+1 >= len(pc.Args) {
+					return pc
+				}
+				next := pc
+				next.Executable = pc.Args[i+1]
+				next.Args = pc.Args[i+2:]
+				next.ArgLiveExpansion = argLiveSuffix(pc.ArgLiveExpansion, i+2)
+				return unwrapCommand(next)
+			}
+			return pc
+		}
 		// Args must be: [subcommand, innerExec, ...]
-		if len(pc.Args) < 2 || pc.Args[0] != wp.subcommand {
+		if len(pc.Args) < 2 {
 			continue
 		}
 		next := pc
