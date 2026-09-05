@@ -139,7 +139,7 @@ When adding any AI agent, LLM tool, or coding assistant, use this lookup order:
 **Before claiming any change is complete:**
 
 - If `.pre-commit-config.yaml` exists: the pre-commit hooks MUST pass on the changed files. The `git commit` hook run (on staged files) is the gate; validate beforehand with `prek run --files <changed files>` (or `pre-commit run --files …`). Do NOT rely on `--all-files` as the per-change gate — it duplicates the commit run, forces the slow bats/nix hooks on unrelated diffs, and can false-block on a pre-existing violation elsewhere; reserve it for a deliberate full-repo sweep.
-- If `flake.nix` exists: `nix flake check` MUST pass
+- If `flake.nix` exists: `nix flake check` MUST pass once before landing — `ff-merge-to-main`'s FF-2a already runs it for this repo at land time (this repo has no external CI, so that land-time run is the whole-repo gate). Do NOT also run a full `nix flake check` after each individual change; validate incrementally with the pre-commit bullet above instead.
 
 ## File Locations
 

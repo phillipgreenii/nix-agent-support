@@ -31,3 +31,14 @@ per-change completion gate: it re-runs every hook over the whole repo — duplic
 run, forcing the slow always-on hooks (bats, nix, …) even for an unrelated diff, and
 **false-blocking** a clean change on a pre-existing violation in a file it never touched. Reserve
 `--all-files` for a deliberate full-repo sweep, not per-change validation.
+
+## `nix flake check` is a land-time gate, not a per-change gate
+
+Reserve a full `nix flake check` for once before the branch lands (or the repo's own
+CI/land-time mechanism), not after every individual edit or bead. Many `flake.nix` repos wire
+`pre-commit-hooks.nix`'s hook set into a `checks.pre-commit` derivation, so `nix flake check`
+re-runs the exact same hooks the commit's own `prek`/`pre-commit` run (see the `--all-files`
+prohibition above) already ran on the staged files — paying for the whole hook set twice per
+change, on top of whatever CI already re-checks on push. Running it once per branch, right
+before landing, still satisfies the core rule's `nix flake check` MUST-pass obligation without
+multiplying that cost by however many changes land on the branch.
