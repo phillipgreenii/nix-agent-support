@@ -129,7 +129,19 @@ func (g *CLIGitClient) FetchPR(ctx context.Context, dir string, pr int) error {
 	// source side) and then fails to recreate it — see CLIPRFetcher.FetchPRHead
 	// in internal/sync/prefetch.go, whose refspec this mirrors exactly.
 	refspec := fmt.Sprintf("+pull/%d/head:refs/remotes/origin/pr/%d", pr, pr)
-	return client.Fetch(ctx, gitclient.FetchOptions{Remote: "origin", Refspec: refspec})
+	// Fetch now streams (x/gitclient bead pg2-f1cq7): it returns a *Handle
+	// for an already-started invocation rather than blocking. This package
+	// has no live-progress UI to attach, so it just waits for completion —
+	// the same buffered shape x's own migrated consumers and tests use
+	// (see gitclient_test.waitHandle): h, err := Fetch(...); if err == nil
+	// { err = h.Wait() }. The Handle is otherwise safe to drop: per its doc
+	// comment it self-reaps its process unconditionally, whether or not
+	// Wait is ever called.
+	h, err := client.Fetch(ctx, gitclient.FetchOptions{Remote: "origin", Refspec: refspec})
+	if err != nil {
+		return err
+	}
+	return h.Wait()
 }
 
 func (g *CLIGitClient) RefExists(ctx context.Context, dir, ref string) (bool, error) {
@@ -152,7 +164,15 @@ func (g *CLIGitClient) CreateWorktree(ctx context.Context, dir, target, branch, 
 	if err != nil {
 		return err
 	}
-	return client.CreateWorktree(ctx, target, branch, gitclient.CreateWorktreeOptions{StartPoint: startPoint})
+	// CreateWorktree streams for the same reason Fetch does (x/gitclient
+	// bead pg2-f1cq7); same buffered wait-and-discard shape as FetchPR
+	// above — no live-progress UI here, and the Handle self-reaps on its
+	// own regardless.
+	h, err := client.CreateWorktree(ctx, target, branch, gitclient.CreateWorktreeOptions{StartPoint: startPoint})
+	if err != nil {
+		return err
+	}
+	return h.Wait()
 }
 
 func (g *CLIGitClient) RemoveWorktree(ctx context.Context, dir, target string, force bool) error {

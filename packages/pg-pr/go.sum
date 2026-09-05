@@ -47,8 +47,8 @@ github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 h1:C3w9PqII01/Oq
 github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822/go.mod h1:+n7T8mK8HuQTcFwEeznm/DIxMOiR9yIdICNftLE1DvQ=
 github.com/ncruces/go-strftime v1.0.0 h1:HMFp8mLCTPp341M/ZnA4qaf7ZlsbTc+miZjCLOFAw7w=
 github.com/ncruces/go-strftime v1.0.0/go.mod h1:Fwc5htZGVVkseilnfgOVb9mKy6w1naJmn9CehxcKcls=
-github.com/phillipgreenii/x v0.0.0-20260828074718-387984c818b9 h1:WuPjxt3nr4iV/b3pZqwMdEyKu5B/oyjpOWZLMQRcynk=
-github.com/phillipgreenii/x v0.0.0-20260828074718-387984c818b9/go.mod h1:uHj9lca/7K2DDU2ezlrGxlXMsmzQ9ZuidUGRNjgd60o=
+github.com/phillipgreenii/x v0.0.0-20260903063345-1f37a8dfe05a h1:Cu5UI7NDgYJDaQ58/NlcYJzgcvLgeos/sK4upqSFrOA=
+github.com/phillipgreenii/x v0.0.0-20260903063345-1f37a8dfe05a/go.mod h1:uHj9lca/7K2DDU2ezlrGxlXMsmzQ9ZuidUGRNjgd60o=
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/prometheus/client_golang v1.24.1 h1:JnJkREXzWxUdCuPFpIWZiPispT9xVV59uiuyR2bPlnU=
 github.com/prometheus/client_golang v1.24.1/go.mod h1:F+oSRECHg4sse5ucfYpYDeIv/hu68Zo0uoHKetWnzcE=
