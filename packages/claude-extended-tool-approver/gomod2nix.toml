@@ -22,8 +22,8 @@ schema = 3
     hash = 'sha256-GYIwYDONuv/yTE0AEugCHQbtV3oiBaco93xUNYFcVBQ='
 
   [mod.'github.com/phillipgreenii/x']
-    version = 'v0.0.0-20260828074718-387984c818b9'
-    hash = 'sha256-UOk08N2LDr7O5je7OnZdcY6YsNnmozYQSAV4EAY9r2M='
+    version = 'v0.0.0-20260903063345-1f37a8dfe05a'
+    hash = 'sha256-crJAQzMth6pTLAzRqVwsW9RtDhwwGK8D6PDmJf8cMmA='
 
   [mod.'github.com/remyoudompheng/bigfft']
     version = 'v0.0.0-20230129092748-24d4a6f8daec'
@@ -42,8 +42,8 @@ schema = 3
     hash = 'sha256-TpbRyWWqHjddP6QzUgAbaLd2EE0S+GYNRUIDJd18r98='
 
   [mod.'modernc.org/libc']
-    version = 'v1.75.6'
-    hash = 'sha256-ezkLVTbqvmsAQYph/UiI+3cublDzPL38HUqk197WWXI='
+    version = 'v1.75.7'
+    hash = 'sha256-Iq3Pcr3RrbhC82RWDM1I4gyKh3V/HI1gVQzoGR+0YYo='
 
   [mod.'modernc.org/mathutil']
     version = 'v1.7.1'
@@ -54,8 +54,8 @@ schema = 3
     hash = 'sha256-Y/kW9/A5uF+Y66kDbxrh4muFgE3CEee6YzSl2FMPcRg='
 
   [mod.'modernc.org/sqlite']
-    version = 'v1.57.0'
-    hash = 'sha256-2qJE5zMzeodvjZ37oLfx4J/u/SpBC3/Wi6rb1Ehx0t4='
+    version = 'v1.58.0'
+    hash = 'sha256-cO1uE6/DGc1+jJ22bmqjQFqGPyFt3mTK1cmHRQXBTqk='
 
   [mod.'mvdan.cc/sh/v3']
     version = 'v3.14.0'
