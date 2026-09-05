@@ -90,8 +90,8 @@ schema = 3
     hash = 'sha256-JlWckeGaWG+bXK8l8WEdZqmSiTwCA8b1qbmBKa/Fj3E='
 
   [mod.'github.com/mattn/go-runewidth']
-    version = 'v0.0.28'
-    hash = 'sha256-8Bwg2XAEB7MJs5bxEtWMtkycx80i2S/yI8fj77/YfmM='
+    version = 'v0.0.29'
+    hash = 'sha256-AZ+wSUPj0+ZukidTuqnNogxkBKpfZ+I2LOdQ2P0ajaI='
 
   [mod.'github.com/muesli/ansi']
     version = 'v0.0.0-20230316100256-276c6243b2f6'
@@ -110,8 +110,8 @@ schema = 3
     hash = 'sha256-GYIwYDONuv/yTE0AEugCHQbtV3oiBaco93xUNYFcVBQ='
 
   [mod.'github.com/phillipgreenii/x']
-    version = 'v0.0.0-20260828074718-387984c818b9'
-    hash = 'sha256-UOk08N2LDr7O5je7OnZdcY6YsNnmozYQSAV4EAY9r2M='
+    version = 'v0.0.0-20260903063345-1f37a8dfe05a'
+    hash = 'sha256-crJAQzMth6pTLAzRqVwsW9RtDhwwGK8D6PDmJf8cMmA='
 
   [mod.'github.com/remyoudompheng/bigfft']
     version = 'v0.0.0-20230129092748-24d4a6f8daec'
@@ -186,11 +186,11 @@ schema = 3
     hash = 'sha256-22nHcolG87qSPahT2Ey8S5iGlCLAglE9ObYXO6XZ3ZY='
 
   [mod.'google.golang.org/genproto/googleapis/api']
-    version = 'v0.0.0-20260831171406-18b4a7587f8a'
-    hash = 'sha256-HsiQRzrEh75fqhA8zb+eKHj6HH9du/qgGOMAZpdVTkM='
+    version = 'v0.0.0-20260904194346-d0f1323225a4'
+    hash = 'sha256-NdWeSHN01GD0hGfHtIgXxyTSU3ZANLE286wmOnTM6ZI='
 
   [mod.'google.golang.org/genproto/googleapis/rpc']
-    version = 'v0.0.0-20260831171406-18b4a7587f8a'
+    version = 'v0.0.0-20260904194346-d0f1323225a4'
     hash = 'sha256-CQdjYGIrgAnEDfWW3DIJF9Orf7oJdhx3G9rGg6fow88='
 
   [mod.'google.golang.org/grpc']
@@ -202,8 +202,8 @@ schema = 3
     hash = 'sha256-MKd0AdkWEe2A79mGPzOY5I76nMqTsGJKQNPJOKyOwkQ='
 
   [mod.'modernc.org/libc']
-    version = 'v1.75.6'
-    hash = 'sha256-ezkLVTbqvmsAQYph/UiI+3cublDzPL38HUqk197WWXI='
+    version = 'v1.75.7'
+    hash = 'sha256-Iq3Pcr3RrbhC82RWDM1I4gyKh3V/HI1gVQzoGR+0YYo='
 
   [mod.'modernc.org/mathutil']
     version = 'v1.7.1'
@@ -214,5 +214,5 @@ schema = 3
     hash = 'sha256-Y/kW9/A5uF+Y66kDbxrh4muFgE3CEee6YzSl2FMPcRg='
 
   [mod.'modernc.org/sqlite']
-    version = 'v1.57.0'
-    hash = 'sha256-2qJE5zMzeodvjZ37oLfx4J/u/SpBC3/Wi6rb1Ehx0t4='
+    version = 'v1.58.0'
+    hash = 'sha256-cO1uE6/DGc1+jJ22bmqjQFqGPyFt3mTK1cmHRQXBTqk='
