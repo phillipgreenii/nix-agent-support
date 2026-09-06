@@ -18,7 +18,17 @@ package schema
 // (pkg/provider/issue.NewDispatchTable) — independent of pr's own
 // SchemaVersion (each entity type/capability versions its own schema
 // separately) and of pkg/scriptout.ProtocolVersion.
-const IssueSchemaVersion = 1
+//
+// Bumped 1 -> 2 by bead pg2-1q9c0 (design review finding A9), which added
+// the Tracker field below — per §4.3, schemaVersion "versions that
+// capability's own field shape," and this is the first field-shape change
+// since the capability's initial version. No existing consumer exists yet
+// (the issue capability has one Tier-2 backend, pg-connector-issue-beads;
+// Phase 2's issue-jira has not landed), so the bump has no live compat
+// impact today — it is here so a future consumer's version_mismatch
+// handling is exercised against a real precedent rather than a hypothetical
+// one.
+const IssueSchemaVersion = 2
 
 // Issue is the issue capability's shared JSON wire shape, returned by the
 // issue capability's "show" and "create" ops and carried by
@@ -46,4 +56,13 @@ type Issue struct {
 	// "Bug", "Story", "Incident"). Empty when the backend does not supply
 	// one — carried over from api.Issue.IssueType.
 	IssueType string `json:"issue_type,omitempty"`
+
+	// Tracker identifies which backend-specific tracker/workspace actually
+	// answered this request (e.g. a bd workspace directory, a Jira base
+	// URL, a GitHub host) — added by bead pg2-1q9c0 (design review finding
+	// A9) so a caller can verify which tracker was hit rather than having
+	// to assume it matches whatever it intended. Empty when a backend does
+	// not (yet) supply one; a backend with only one possible tracker (no
+	// ambient-selection hazard) MAY leave this empty.
+	Tracker string `json:"tracker,omitempty"`
 }

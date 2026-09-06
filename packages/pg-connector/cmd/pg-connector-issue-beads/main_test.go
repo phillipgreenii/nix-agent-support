@@ -21,6 +21,13 @@ func (f *fakeRunner) Run(_ context.Context, args ...string) (string, error) {
 	return f.handle(args)
 }
 
+// Workspace reports a fixed test value — these wiring tests care about
+// dispatch-table plumbing, not workspace resolution (that is covered in
+// internal/runner_test.go and internal/backend_test.go).
+func (f *fakeRunner) Workspace() (string, error) {
+	return "/fake/workspace", nil
+}
+
 func newTestBackend() *internal.Backend {
 	return internal.New(&fakeRunner{handle: func(args []string) (string, error) {
 		if args[0] == "show" {
@@ -60,6 +67,24 @@ func TestNewDispatchTable_CapabilitiesVocabularyNonEmpty(t *testing.T) {
 		if op == scriptout.OpAuthStatus {
 			t.Fatalf("ops must not claim %q: Backend does not implement provider.AuthChecker", scriptout.OpAuthStatus)
 		}
+	}
+}
+
+// TestNewDispatchTable_CapabilitiesAdvertisesWorkspaceDir is the packet's
+// AC2 test for the capabilities-side half of "surfaced through
+// schema.Issue/capabilities" (bead pg2-1q9c0): capabilities must echo back
+// the resolved bd workspace directory so `config validate`'s fan-out can
+// show which tracker each issue-beads instance targets.
+func TestNewDispatchTable_CapabilitiesAdvertisesWorkspaceDir(t *testing.T) {
+	table := newDispatchTable(newTestBackend())
+	entry := table[scriptout.OpCapabilities]
+	result, err := entry.Handle(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	resp := result.(scriptout.CapabilitiesResponse)
+	if got := resp.Vocabulary["workspace_dir"]; got != "/fake/workspace" {
+		t.Fatalf("vocabulary.workspace_dir = %#v, want /fake/workspace", got)
 	}
 }
 

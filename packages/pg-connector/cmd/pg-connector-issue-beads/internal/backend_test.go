@@ -15,9 +15,14 @@ import (
 // fakeRunner is a minimal double for Runner, so this file's unit tests
 // never spawn a real `bd` subprocess. handle computes (stdout, err) for a
 // given invocation; calls records every invocation for assertions.
+// workspace/workspaceErr back Workspace(), defaulting to a fixed
+// non-empty test value so toSchemaIssue's Tracker field has something to
+// assert against.
 type fakeRunner struct {
-	calls  [][]string
-	handle func(args []string) (string, error)
+	calls        [][]string
+	handle       func(args []string) (string, error)
+	workspace    string
+	workspaceErr error
 }
 
 func (f *fakeRunner) Run(_ context.Context, args ...string) (string, error) {
@@ -26,6 +31,16 @@ func (f *fakeRunner) Run(_ context.Context, args ...string) (string, error) {
 		return f.handle(args)
 	}
 	return "", nil
+}
+
+func (f *fakeRunner) Workspace() (string, error) {
+	if f.workspaceErr != nil {
+		return "", f.workspaceErr
+	}
+	if f.workspace != "" {
+		return f.workspace, nil
+	}
+	return "/fake/workspace", nil
 }
 
 func containsArg(args []string, want string) bool {
@@ -68,6 +83,31 @@ func TestBackend_Show_Success(t *testing.T) {
 	}
 	if got.URL != "" {
 		t.Fatalf("URL = %q, want empty (bd has no hosted URL convention)", got.URL)
+	}
+	if got.Tracker != "/fake/workspace" {
+		t.Fatalf("Tracker = %q, want /fake/workspace (bead pg2-1q9c0, AC2)", got.Tracker)
+	}
+	if !containsArg(fr.calls[0], "--readonly") {
+		t.Fatalf("expected --readonly in Show's bd invocation (bead pg2-1q9c0, AC3), got %v", fr.calls[0])
+	}
+}
+
+// TestBackend_Show_WorkspaceNotConfigured locks in bead pg2-1q9c0's AC1: a
+// Runner that cannot resolve a workspace (CLIRunner.Run's own behavior when
+// neither $PG_CONNECTOR_ISSUE_BEADS_DIR nor $BEADS_DIR is set) must surface
+// as a well-formed scriptout.ErrUnavailable through Backend.Show, not a
+// silent success against whatever tracker happened to be ambient.
+func TestBackend_Show_WorkspaceNotConfigured(t *testing.T) {
+	fr := &fakeRunner{handle: func(args []string) (string, error) {
+		return "", ErrWorkspaceNotConfigured
+	}}
+	b := New(fr)
+	_, err := b.Show(context.Background(), "tp-1")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !errors.Is(err, scriptout.ErrUnavailable) {
+		t.Fatalf("err = %v, want wrapping ErrUnavailable", err)
 	}
 }
 
@@ -149,6 +189,9 @@ func TestBackend_Create_Success(t *testing.T) {
 	}
 	if got.ID != "tp-2" || got.State != "open" || got.Priority != "P2" {
 		t.Fatalf("got %+v", got)
+	}
+	if got.Tracker != "/fake/workspace" {
+		t.Fatalf("Tracker = %q, want /fake/workspace (bead pg2-1q9c0, AC2)", got.Tracker)
 	}
 }
 

@@ -54,7 +54,7 @@ func newDispatchTable(backend *internal.Backend) scriptout.DispatchTable {
 	table[scriptout.OpCapabilities] = scriptout.OpHandler{
 		SchemaVersion: schema.IssueSchemaVersion,
 		Handle: func(ctx context.Context, _ json.RawMessage) (any, error) {
-			return capabilitiesResponse(), nil
+			return capabilitiesResponse(backend), nil
 		},
 	}
 	return table
@@ -62,14 +62,26 @@ func newDispatchTable(backend *internal.Backend) scriptout.DispatchTable {
 
 // capabilitiesResponse declares this backend's schemaVersions, the ops it
 // answers, and its non-empty state vocabulary (bd's actual accepted
-// --status values) [design: §4.3, §4.3 AC].
-func capabilitiesResponse() scriptout.CapabilitiesResponse {
+// --status values) [design: §4.3, §4.3 AC]. It also advertises the
+// resolved bd workspace directory (bead pg2-1q9c0, AC2) when one is
+// configured, so `pg-connector config validate`'s capabilities fan-out can
+// surface which tracker each issue-beads instance targets without needing
+// to run a real op first. capabilities must always answer regardless of
+// workspace configuration (Backend.Workspace's error is deliberately
+// swallowed here, not surfaced as a capabilities failure) — an
+// unconfigured workspace is a Show/Create/Comment/Transition-time error,
+// not a health-check failure.
+func capabilitiesResponse(backend *internal.Backend) scriptout.CapabilitiesResponse {
+	vocabulary := map[string]any{
+		"state": internal.Vocabulary,
+	}
+	if dir, err := backend.Workspace(); err == nil && dir != "" {
+		vocabulary["workspace_dir"] = dir
+	}
 	return scriptout.CapabilitiesResponse{
 		ProtocolVersion: scriptout.ProtocolVersion,
 		SchemaVersions:  map[string]int{"issue": schema.IssueSchemaVersion},
 		Ops:             []string{"show", "create", "comment", "transition", scriptout.OpCapabilities},
-		Vocabulary: map[string]any{
-			"state": internal.Vocabulary,
-		},
+		Vocabulary:      vocabulary,
 	}
 }

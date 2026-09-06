@@ -45,6 +45,15 @@ func New(r Runner) *Backend {
 // Provider interface.
 var _ issue.Provider = (*Backend)(nil)
 
+// Workspace reports the bd workspace directory this Backend's Runner is
+// (or would be) pinned to, without invoking bd — main.go's capabilities
+// handler uses this to advertise which tracker this backend instance
+// targets [bead: pg2-1q9c0, AC2], alongside schema.Issue.Tracker on actual
+// Show/Create responses.
+func (b *Backend) Workspace() (string, error) {
+	return b.runner.Workspace()
+}
+
 // Vocabulary is this backend's declared, non-empty state vocabulary — the
 // concrete backing for the sibling "generic issue entity/capability"
 // packet's vocabulary.state check [design: §4.3 AC]. These are bd's own
@@ -103,8 +112,11 @@ func formatPriority(p int) string {
 // wire shape. URL is left empty: bd is a local CLI tool with no bd-native
 // hosted web URL convention in this workspace (unlike a GitHub/Jira issue),
 // and schema.Issue's own doc already treats an empty URL as: "empty when
-// the backend does not supply one."
-func toSchemaIssue(iss *bdIssue) *schema.Issue {
+// the backend does not supply one." Tracker carries the resolved bd
+// workspace directory this particular call actually hit [bead: pg2-1q9c0,
+// AC2] — populated by the caller (Show/Create) from Backend.tracker, not
+// derived from iss itself.
+func toSchemaIssue(iss *bdIssue, tracker string) *schema.Issue {
 	return &schema.Issue{
 		ID:        iss.ID,
 		Title:     iss.Title,
@@ -112,15 +124,37 @@ func toSchemaIssue(iss *bdIssue) *schema.Issue {
 		Priority:  formatPriority(iss.Priority),
 		Labels:    iss.Labels,
 		IssueType: iss.IssueType,
+		Tracker:   tracker,
 	}
 }
 
-// Show implements issue.Provider.Show via `bd show <id> --json`.
+// tracker returns the resolved bd workspace directory the Runner is
+// pinned to, for toSchemaIssue's Tracker field. Empty on resolution
+// failure rather than propagating the error: by construction this is only
+// called after a b.run call has already succeeded, which itself requires
+// the same resolution to have succeeded first — so an error here would
+// indicate a Runner implementation that answers Run and Workspace
+// inconsistently, not a real failure mode of CLIRunner. A defensive empty
+// string keeps that inconsistency from taking down an otherwise-successful
+// response.
+func (b *Backend) tracker() string {
+	dir, err := b.runner.Workspace()
+	if err != nil {
+		return ""
+	}
+	return dir
+}
+
+// Show implements issue.Provider.Show via `bd show <id> --json`. --readonly
+// is passed explicitly [bead: pg2-1q9c0, AC3]: Show never writes, so this
+// costs nothing on the happy path and blocks any write bd itself is willing
+// to perform under this op (defense in depth, not a behavior change for a
+// correctly-behaving `bd show`).
 func (b *Backend) Show(ctx context.Context, id string) (*schema.Issue, error) {
 	if strings.TrimSpace(id) == "" {
 		return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, "issue: id required")
 	}
-	data, err := b.run(ctx, "show", id, "--json")
+	data, err := b.run(ctx, "show", id, "--readonly", "--json")
 	if err != nil {
 		return nil, err
 	}
@@ -128,7 +162,7 @@ func (b *Backend) Show(ctx context.Context, id string) (*schema.Issue, error) {
 	if err != nil {
 		return nil, err
 	}
-	return toSchemaIssue(iss), nil
+	return toSchemaIssue(iss, b.tracker()), nil
 }
 
 // Create implements issue.Provider.Create via `bd create ... --json`. It
@@ -159,7 +193,7 @@ func (b *Backend) Create(ctx context.Context, input issue.IssueInput) (*schema.I
 	if err != nil {
 		return nil, err
 	}
-	return toSchemaIssue(iss), nil
+	return toSchemaIssue(iss, b.tracker()), nil
 }
 
 // Comment implements issue.Provider.Comment via `bd comment <id> <body>
