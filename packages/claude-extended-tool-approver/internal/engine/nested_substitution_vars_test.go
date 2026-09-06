@@ -263,3 +263,62 @@ func TestIntegration_NestedSubstitutionResolvedButUnsafeStillRefuses(t *testing.
 		t.Errorf("%q got Approve (%s: %s); the write guard must stay unaffected by this bead, nested or not", writeCmd, writeGot.Module, writeGot.Reason)
 	}
 }
+
+// TestIntegration_NestedSubstitutionRedirectionTargetResolves is tc-4i7h's fix, for the
+// gap tc-5h6e's own fix left OUTSIDE its scope: `SP=<literal>; echo "$(wc -l <
+// $SP/bdprof.tsv)"` abstained even after tc-5h6e landed, because $SP here names an
+// INPUT REDIRECTION TARGET (`< $SP/...`) rather than an argv path — and
+// engine.go's evaluateRedirections never accepted a vars parameter at all, so
+// isDynamicRedirectTarget's "contains $ or a backtick" test was the WHOLE story for
+// every redirection target, at every nesting depth, never offered the SAME
+// cmdparse.ExpandInCommand in-command-literal seam readPathIssue already applies to an
+// argument-position path. $SP is exactly as literal-in-this-command here as it is in
+// the already-relieved `$(cat $SP/full.start)` argument-position shape one leaf over
+// in the SAME compound this bead's own report captured.
+func TestIntegration_NestedSubstitutionRedirectionTargetResolves(t *testing.T) {
+	t.Setenv("WORKSPACE_ROOT", "/Users/testuser/workspace")
+	projectRoot := "/Users/testuser/workspace/my-project"
+	cwd := projectRoot
+	eng := buildFullEngine(projectRoot, cwd)
+
+	cmd := `SP=` + projectRoot + `; echo "$(wc -l < $SP/bdprof.tsv)"`
+	got := eng.EvaluateHook(&hookio.HookInput{ToolName: "Bash", CWD: cwd, ToolInput: makeBashJSON(cmd)})
+	if got.Decision != hookio.Approve {
+		t.Errorf("%q got %v (%s: %s); want Approve — the nested `<` redirection target's own $SP should now resolve against the earlier sibling assignment, exactly as an argument-position $SP already does",
+			cmd, got.Decision, got.Module, got.Reason)
+	}
+
+	// A TOP-LEVEL (non-nested) redirection target must resolve the identical way —
+	// this bead's fix is in evaluateRedirections itself, not something special about
+	// substitution recursion, so the top-level case was never a materially different
+	// code path and must not regress.
+	topLevelCmd := `SP=` + projectRoot + `; wc -l < $SP/bdprof.tsv`
+	topLevelGot := eng.EvaluateHook(&hookio.HookInput{ToolName: "Bash", CWD: cwd, ToolInput: makeBashJSON(topLevelCmd)})
+	if topLevelGot.Decision != hookio.Approve {
+		t.Errorf("%q got %v (%s: %s); want Approve at top level too", topLevelCmd, topLevelGot.Decision, topLevelGot.Module, topLevelGot.Reason)
+	}
+
+	// NEGATIVE CONTROL: an unresolvable variable in the identical redirection-target
+	// shape must keep abstaining — proving the fix is compositional (it resolves a
+	// value ExpandInCommand already proves literal) rather than shape-based rubber-
+	// stamping of anything textually shaped like "$VAR/path" used as a redirect target.
+	unresolvedCmd := `echo "$(wc -l < $UNBOUND_VAR/bdprof.tsv)"`
+	unresolvedGot := eng.EvaluateHook(&hookio.HookInput{ToolName: "Bash", CWD: cwd, ToolInput: makeBashJSON(unresolvedCmd)})
+	if unresolvedGot.Decision == hookio.Approve {
+		t.Errorf("%q got Approve (%s: %s); an unresolvable variable in a redirection target MUST NOT resolve just because it sits inside a nested substitution",
+			unresolvedCmd, unresolvedGot.Module, unresolvedGot.Reason)
+	}
+	if !strings.Contains(unresolvedGot.Reason, "dynamically-expanded target") {
+		t.Errorf("%q got %v (%s: %s); want the SAME dynamically-expanded-target refusal the top-level idiom already gives, not some other reason",
+			unresolvedCmd, unresolvedGot.Decision, unresolvedGot.Module, unresolvedGot.Reason)
+	}
+
+	// A resolved-but-actually-unsafe redirection target must still reach the same
+	// refusal a literally-spelled unsafe target would (parity with the argument-
+	// position case's TestIntegration_NestedSubstitutionResolvedButUnsafeStillRefuses).
+	unsafeCmd := `V=/etc; echo "$(wc -l < $V/shadow)"`
+	unsafeGot := eng.EvaluateHook(&hookio.HookInput{ToolName: "Bash", CWD: cwd, ToolInput: makeBashJSON(unsafeCmd)})
+	if unsafeGot.Decision == hookio.Approve {
+		t.Errorf("%q got Approve (%s: %s); a resolved-but-unsafe redirection target must not be approved", unsafeCmd, unsafeGot.Module, unsafeGot.Reason)
+	}
+}

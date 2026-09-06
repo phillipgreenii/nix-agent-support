@@ -552,7 +552,7 @@ func (e *Engine) evaluateParsed(expr string, sp cmdparse.ShellParse, normalized 
 			// trailing "> /etc/passwd" of a subshell) that MUST still be evaluated —
 			// otherwise the injection, or the write to a protected path, is silently
 			// approved.
-			leafResult := e.evaluateRedirections(pc.Redirections, currentPathEval)
+			leafResult := e.evaluateRedirections(pc.Redirections, currentPathEval, inCommandVars)
 			if len(pc.Redirections) > 0 {
 				judgedLeaf = true
 			}
@@ -661,7 +661,7 @@ func (e *Engine) evaluateParsed(expr string, sp cmdparse.ShellParse, normalized 
 		// (Approve < NoOpinion < Ask < Reject) a plain most-restrictive-wins
 		// comparison correctly lets an unknown redirection path (NoOpinion) demote
 		// an otherwise-approved command — no special case needed.
-		redirResult := e.evaluateRedirections(pc.Redirections, currentPathEval)
+		redirResult := e.evaluateRedirections(pc.Redirections, currentPathEval, inCommandVars)
 		cmdResult = hookio.MostRestrictive(cmdResult, redirResult)
 
 		// Substitution-body recursion (pg2-1q5i3). Every top-level $(...) / `...` /
@@ -1745,7 +1745,7 @@ func parsedLeafFor(pc cmdparse.ParsedCommand) []cmdparse.ParsedCommand {
 // fields' doc and cmdparse.LeavesOf/RootLeavesOf, the rule-side accessors that
 // replace `cmdStr, _ := input.BashCommand(); cmdparse.Parse(cmdStr)`.
 
-func (e *Engine) evaluateRedirections(redirs []hookio.Redirection, override *patheval.PathEvaluator) hookio.RuleResult {
+func (e *Engine) evaluateRedirections(redirs []hookio.Redirection, override *patheval.PathEvaluator, vars map[string]string) hookio.RuleResult {
 	// No redirections = no opinion (neutral)
 	if len(redirs) == 0 {
 		return hookio.RuleResult{Decision: hookio.Approve, Reason: "no redirections to evaluate", Module: "engine"}
@@ -1764,10 +1764,13 @@ func (e *Engine) evaluateRedirections(redirs []hookio.Redirection, override *pat
 	// produces its Reject instead of being masked by this NoOpinion.
 	var dynamic *hookio.RuleResult
 	for _, r := range redirs {
+		// path is the target actually evaluated below — r.Path unless the
+		// tc-4i7h resolution just below pins it to a literal.
+		path := r.Path
 		// Standard special device files are always-safe redirect targets; skip
 		// them before consulting the PathEvaluator, which would otherwise report
 		// PathUnknown and wrongly demote/reject the command (pg2-9ctmb).
-		if isSafeRedirectTarget(r.Path) {
+		if isSafeRedirectTarget(path) {
 			continue
 		}
 		// A dynamically-expanded target is unresolvable here and MUST NOT be
@@ -1776,24 +1779,44 @@ func (e *Engine) evaluateRedirections(redirs []hookio.Redirection, override *pat
 		// direction (`<`) too — an unresolvable source is no more knowable than
 		// an unresolvable sink — and before the PathEvaluator so no verdict is
 		// ever derived from the collapsed path.
-		if isDynamicRedirectTarget(r.Path) {
-			if dynamic == nil {
-				dynamic = &hookio.RuleResult{
-					Decision: hookio.NoOpinion,
-					Reason:   "redirection: dynamically-expanded target " + r.Path + " (deferred to claude-code)",
-					Module:   "engine",
+		if isDynamicRedirectTarget(path) {
+			// tc-4i7h: before deferring, offer the target to the SAME
+			// pg2-yeli3/tc-5h6e in-command-literal seam
+			// safecmds.readPathIssue already applies to an argument-position
+			// path — cmdparse.ExpandInCommand(path, vars), where vars is this
+			// leaf's own InCommandVars/outerVars overlay (an EARLIER LEAF of
+			// THIS SAME command, or an enclosing substitution's own outer
+			// scope, literally assigning the variable). A redirection target
+			// is exactly as resolvable as an argv path in that situation —
+			// `SP=/tmp/x; echo "$(wc -l < $SP/bdprof.tsv)"` is no less
+			// pinned-to-a-literal than `SP=/tmp/x; echo "$(cat $SP/f)"`,
+			// which the argument-position seam already resolves. ok=false for
+			// everything ExpandInCommand cannot prove literal (an ambient
+			// variable, an unresolvable name, an embedded $(...), a revoked
+			// binding — see cmdparse.InCommandVars' own revocation rule) falls
+			// straight through to the unchanged NoOpinion below, so nothing
+			// here widens WHICH values can resolve.
+			if resolved, ok := cmdparse.ExpandInCommand(path, vars); ok {
+				path = resolved
+			} else {
+				if dynamic == nil {
+					dynamic = &hookio.RuleResult{
+						Decision: hookio.NoOpinion,
+						Reason:   "redirection: dynamically-expanded target " + r.Path + " (deferred to claude-code)",
+						Module:   "engine",
+					}
 				}
+				continue
 			}
-			continue
 		}
-		access := pe.Evaluate(r.Path)
+		access := pe.Evaluate(path)
 		// Kind.IsWrite is the fail-closed test: everything that is not the pure
 		// read `<` is checked for WRITABILITY, so a redirection kind added later
 		// (tc-xs8x added two) lands on the write branch by default rather than
 		// silently becoming read-only here.
 		if !r.Kind.IsWrite() {
 			if !access.CanRead() {
-				return hookio.RuleResult{Decision: hookio.NoOpinion, Reason: "redirection: stdin from non-readable path " + r.Path, Module: "engine"}
+				return hookio.RuleResult{Decision: hookio.NoOpinion, Reason: "redirection: stdin from non-readable path " + path, Module: "engine"}
 			}
 			continue
 		}
@@ -1848,8 +1871,8 @@ func (e *Engine) evaluateRedirections(redirs []hookio.Redirection, override *pat
 			// (non-sandboxed) verdict today, where `~/.ssh` was never under
 			// tmpRoot/$TMPDIR at all and reached NoOpinion by the same
 			// `!CanWrite()` branch — this change does not touch that outcome.
-			if !temproot.Under(pe.ResolvePath(r.Path)) {
-				return hookio.RuleResult{Decision: hookio.Reject, Reason: "redirection: write to read-only path " + r.Path, Module: "engine"}
+			if !temproot.Under(pe.ResolvePath(path)) {
+				return hookio.RuleResult{Decision: hookio.Reject, Reason: "redirection: write to read-only path " + path, Module: "engine"}
 			}
 			// Falls through to the CanWrite() check below rather than
 			// continuing past it -- access is still PathReadOnly there, so
@@ -1857,7 +1880,7 @@ func (e *Engine) evaluateRedirections(redirs []hookio.Redirection, override *pat
 			// for the relaxed case (see the comment above).
 		}
 		if !access.CanWrite() {
-			return hookio.RuleResult{Decision: hookio.NoOpinion, Reason: "redirection: write to non-writable path " + r.Path, Module: "engine"}
+			return hookio.RuleResult{Decision: hookio.NoOpinion, Reason: "redirection: write to non-writable path " + path, Module: "engine"}
 		}
 	}
 	if dynamic != nil {
