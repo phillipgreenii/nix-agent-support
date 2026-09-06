@@ -22,7 +22,7 @@ package schema
 // lives with the capability (which owns its schema)"].
 //
 // Bumped 1 -> 2 by bead pg2-681xo, which added the AsOf/Stale fields below.
-// Per §4.3, schemaVersion "versions that capability's own field shape" —
+// schemaVersion versions a capability's own field shape, full stop —
 // IssueSchemaVersion's own 1 -> 2 bump (bead pg2-1q9c0, for adding the
 // Tracker field) already established this repo's precedent that ANY
 // field-shape change bumps the version, additive or not, so a
@@ -31,7 +31,7 @@ package schema
 // schema.PR since the capability's initial version, and it is made now —
 // before any additional PR consumer (df-categorize, df-feedback, more
 // Tier-3 tools) lands against the pre-freshness shape — precisely to avoid
-// the "expensive schema bump" scenario a later addition would otherwise
+// an even more expensive schema bump a later addition would otherwise
 // force.
 const SchemaVersion = 2
 
