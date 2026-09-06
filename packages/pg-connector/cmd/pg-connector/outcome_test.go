@@ -26,23 +26,54 @@ func TestFanOutOutcome_ExitCode_Degraded(t *testing.T) {
 	}
 }
 
-func TestFanOutOutcome_ExitCode_Disabled_StillCountsAsNotSucceeded(t *testing.T) {
+func TestFanOutOutcome_ExitCode_Disabled_CountsAsHealthy(t *testing.T) {
+	// Per design §4.6, a no-credential backend answering "disabled" is a
+	// well-formed negative, not a degraded state — it must not hold the
+	// exit code at 2 forever on an otherwise fully healthy machine
+	// [bug A2].
 	o := FanOutOutcome{Sources: []SourceResult{
 		{Source: "a", Status: SourceSucceeded},
 		{Source: "b", Status: SourceDisabled},
 	}}
-	if code := o.ExitCode(); code != 2 {
-		t.Fatalf("ExitCode = %d, want 2", code)
+	if code := o.ExitCode(); code != 0 {
+		t.Fatalf("ExitCode = %d, want 0", code)
+	}
+}
+
+func TestFanOutOutcome_ExitCode_AllDisabled_Healthy(t *testing.T) {
+	// The exact regression this bug caused: every registered backend is a
+	// correctly-configured no-credential backend (e.g. scm-git,
+	// issue-beads answering auth_status), so the whole fan-out must be
+	// exit 0, not a standing partial outage [bug A2].
+	o := FanOutOutcome{Sources: []SourceResult{
+		{Source: "a", Status: SourceDisabled},
+		{Source: "b", Status: SourceDisabled},
+	}}
+	if code := o.ExitCode(); code != 0 {
+		t.Fatalf("ExitCode = %d, want 0", code)
 	}
 }
 
 func TestFanOutOutcome_ExitCode_TotalFailure(t *testing.T) {
 	o := FanOutOutcome{Sources: []SourceResult{
 		{Source: "a", Status: SourceDegraded},
-		{Source: "b", Status: SourceDisabled},
+		{Source: "b", Status: SourceDegraded},
 	}}
 	if code := o.ExitCode(); code != 3 {
 		t.Fatalf("ExitCode = %d, want 3", code)
+	}
+}
+
+func TestFanOutOutcome_ExitCode_DegradedPlusDisabled_IsPartialNotTotalFailure(t *testing.T) {
+	// One degraded (real failure) plus one disabled (healthy, per A2) is
+	// a partial degradation, not a total failure: at least one source is
+	// healthy.
+	o := FanOutOutcome{Sources: []SourceResult{
+		{Source: "a", Status: SourceDegraded},
+		{Source: "b", Status: SourceDisabled},
+	}}
+	if code := o.ExitCode(); code != 2 {
+		t.Fatalf("ExitCode = %d, want 2", code)
 	}
 }
 

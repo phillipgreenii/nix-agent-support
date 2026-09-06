@@ -53,7 +53,14 @@ func (o ciListOutcome) exitCode() int {
 // reported as disabled with reason "not applicable" rather than a
 // forced/meaningless answer.
 func fanOutCIList(ctx context.Context, backends []string, prID string) ciListOutcome {
-	var out ciListOutcome
+	// Runs and Sources both start as non-nil empty slices so a
+	// zero-backend (misconfigured host) result, or a backend that
+	// answers with zero runs, still marshals runs[]/sources[] as []
+	// rather than null [bug A15].
+	out := ciListOutcome{
+		Runs:    make([]schema.CIRun, 0),
+		Sources: make([]SourceResult, 0, len(backends)),
+	}
 	for _, b := range backends {
 		resp, err := scriptout.Invoke(ctx, b, "list_runs", map[string]string{"pr_id": prID})
 		if err != nil {

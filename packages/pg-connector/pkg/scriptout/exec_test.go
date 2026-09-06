@@ -74,6 +74,25 @@ func helperMain() {
 	case "stderr_only":
 		fmt.Fprintln(os.Stderr, "boom")
 		os.Exit(2)
+	case "empty_envelope":
+		// Neither result nor error is set — a protocol violation, not a
+		// success [bug A7].
+		_ = json.NewEncoder(os.Stdout).Encode(Response{
+			ProtocolVersion: ProtocolVersion,
+			SchemaVersion:   1,
+		})
+		os.Exit(0)
+	case "explicit_null_result":
+		// A deliberate no-payload success: "result" is present but null,
+		// which decodes to a non-empty RawMessage ("null") — distinct
+		// from the omitted-field case above and MUST still be treated as
+		// success [bug A7].
+		_ = json.NewEncoder(os.Stdout).Encode(Response{
+			ProtocolVersion: ProtocolVersion,
+			SchemaVersion:   1,
+			Result:          json.RawMessage("null"),
+		})
+		os.Exit(0)
 	default:
 		fmt.Fprintln(os.Stderr, "unknown GO_HELPER_BEHAVIOR")
 		os.Exit(99)
@@ -182,6 +201,36 @@ func TestInvoke_ArgsRoundTrip(t *testing.T) {
 	}
 }
 
+func TestInvoke_EmptyEnvelope_IsProtocolViolationNotSuccess(t *testing.T) {
+	// A response with neither result nor error currently returned success
+	// — this must be a protocol-violation error instead [bug A7].
+	withFactory(t, "empty_envelope")
+	resp, err := Invoke(context.Background(), "fake-binary", "get_pr", nil)
+	if err == nil {
+		t.Fatalf("expected error, got resp=%+v", resp)
+	}
+	if resp != nil {
+		t.Fatalf("expected nil resp on protocol violation, got %+v", resp)
+	}
+	if !strings.Contains(err.Error(), "protocol violation") {
+		t.Fatalf("expected protocol violation error, got %v", err)
+	}
+}
+
+func TestInvoke_ExplicitNullResult_IsSuccessNotViolation(t *testing.T) {
+	// A deliberate no-payload success ("result":null, present but null)
+	// MUST remain success, distinct from the omitted-field violation above
+	// [bug A7].
+	withFactory(t, "explicit_null_result")
+	resp, err := Invoke(context.Background(), "fake-binary", "rerun_failed", nil)
+	if err != nil {
+		t.Fatalf("Invoke: %v", err)
+	}
+	if resp == nil {
+		t.Fatal("expected non-nil resp")
+	}
+}
+
 // --------------------------------------------------------------------
 // InvokeCapabilities tests
 // --------------------------------------------------------------------
@@ -205,5 +254,34 @@ func TestInvokeCapabilities_NonJSON(t *testing.T) {
 	_, err := InvokeCapabilities(context.Background(), "fake-binary")
 	if err == nil || !strings.Contains(err.Error(), "invalid capabilities response") {
 		t.Fatalf("expected invalid capabilities response error, got %v", err)
+	}
+}
+
+func TestInvokeCapabilities_ErrorEnvelope_NotSilentSuccess(t *testing.T) {
+	// Before the fix, an error envelope decoded straight into
+	// CapabilitiesResponse (which has no error field) as a zero-value
+	// success, silently passing the one designed health gate [bug A6].
+	withFactory(t, "not_found")
+	resp, err := InvokeCapabilities(context.Background(), "fake-binary")
+	if err == nil {
+		t.Fatalf("expected error, got resp=%+v", resp)
+	}
+	if resp != nil {
+		t.Fatalf("expected nil resp on error envelope, got %+v", resp)
+	}
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected errors.Is(err, ErrNotFound), got %v", err)
+	}
+}
+
+func TestInvokeCapabilities_UnknownOp_WrapsSentinel(t *testing.T) {
+	// config_validate.go excuses ErrUnknownOp from a capabilities call (a
+	// backend that doesn't implement the op at all isn't itself a
+	// failure) — that excusal only works once InvokeCapabilities actually
+	// surfaces the wire error instead of swallowing it [bug A6].
+	withFactory(t, "unknown_op")
+	_, err := InvokeCapabilities(context.Background(), "fake-binary")
+	if err == nil || !errors.Is(err, ErrUnknownOp) {
+		t.Fatalf("expected errors.Is(err, ErrUnknownOp), got %v", err)
 	}
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 )
 
@@ -36,6 +37,21 @@ func TestFanOutAuthStatus_DisabledNotApplicable(t *testing.T) {
 	got := outcome.Sources[0]
 	if got.Status != SourceDisabled || got.Reason != "not applicable" {
 		t.Fatalf("source = %+v, want disabled/not applicable", got)
+	}
+}
+
+func TestFanOutAuthStatus_NoBackends_SourcesIsEmptyArrayNotNull(t *testing.T) {
+	// A misconfigured host with zero backends registered must still
+	// marshal sources as [] — a nil slice marshals as null, which makes
+	// `jq '.sources[]'` exit 5 exactly on the host that's misconfigured
+	// [bug A15].
+	outcome := FanOutAuthStatus(context.Background(), nil)
+	raw, err := json.Marshal(outcome)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if got := string(raw); got != `{"sources":[]}` {
+		t.Fatalf("json = %s, want sources to marshal as [] not null", got)
 	}
 }
 

@@ -52,24 +52,31 @@ type FanOutOutcome struct {
 }
 
 // ExitCode returns this outcome's pg-connector CLI exit code: 0 (all
-// succeeded), 2 (degraded/partial — at least one source did not succeed,
-// but at least one did), or 3 (total failure — no source succeeded,
-// including the case of zero sources queried). 1 is never returned here —
-// it is reserved for the CLI's own generic/unexpected-failure path outside
-// this helper.
+// healthy — succeeded or disabled), 2 (degraded/partial — at least one
+// source is degraded, but at least one is healthy), or 3 (total failure —
+// no healthy source, including the case of zero sources queried). 1 is
+// never returned here — it is reserved for the CLI's own
+// generic/unexpected-failure path outside this helper.
+//
+// Disabled counts as healthy, not as a failure: per design §4.6, a
+// no-credential backend that correctly answers "not applicable" is a
+// well-formed negative, not a degraded state. Counting it against the
+// outcome would make a fully correct, fully-configured machine (where
+// some backends are legitimately no-credential) report a standing
+// partial outage forever [bug A2].
 func (o FanOutOutcome) ExitCode() int {
-	succeeded, other := 0, 0
+	healthy, failed := 0, 0
 	for _, s := range o.Sources {
-		if s.Status == SourceSucceeded {
-			succeeded++
+		if s.Status == SourceDegraded {
+			failed++
 		} else {
-			other++
+			healthy++
 		}
 	}
 	switch {
-	case other == 0 && succeeded > 0:
+	case failed == 0 && healthy > 0:
 		return 0
-	case succeeded == 0:
+	case healthy == 0:
 		return 3
 	default:
 		return 2

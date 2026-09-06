@@ -8,7 +8,10 @@
 //  3. Write the request to stdin and close it.
 //  4. Wait for the binary, capture stdout, decode the response.
 //  5. If the response's error is set, surface it as a sentinel-wrapped Go error.
-//  6. Otherwise return the decoded envelope so the caller can further
+//  6. If neither error nor result is set, the envelope is a protocol
+//     violation (not a success) — a deliberate no-payload success MUST
+//     send "result":null explicitly, never omit result.
+//  7. Otherwise return the decoded envelope so the caller can further
 //     unmarshal Result into its own typed shape via Decode.
 //
 // Stderr is captured and folded into the error message if the binary
@@ -96,20 +99,54 @@ func Invoke(ctx context.Context, binary, op string, args any) (*Response, error)
 	if resp.Error != nil {
 		return &resp, WrapError(sentinelForCode(resp.Error.Code), fmt.Sprintf("%s: %s", binary, resp.Error.Message))
 	}
+	if len(resp.Result) == 0 {
+		// Neither result nor error is set: the backend produced a
+		// well-formed-looking envelope that answers nothing at all. This
+		// is a protocol violation, not success — an explicit no-payload
+		// success MUST send "result":null (a present-but-null field,
+		// which decodes to a non-empty RawMessage), not omit result
+		// entirely [bug A7]. Returning a nil *Response here matches this
+		// package's existing convention (see the invalid-JSON branches
+		// above): a nil resp is a CLI-level failure before any
+		// well-formed wire response was produced.
+		return nil, fmt.Errorf("scriptout: %s: protocol violation: response has neither result nor error", binary)
+	}
 	return &resp, nil
+}
+
+// capabilitiesWireShape is InvokeCapabilities' own unmarshal target: the
+// bespoke CapabilitiesResponse fields plus an Error field, so a single
+// decode can tell an error envelope apart from a real capabilities
+// response. A backend that fails the capabilities op (unknown_op, or any
+// handler error) still speaks the ordinary Response{Error: ...} envelope
+// via serve.go's writeErrorResponse — CapabilitiesResponse's bespoke
+// top-level shape is written only on success. Without this check, an
+// error envelope has no "protocolVersion"/"schemaVersions"/"ops" fields
+// CapabilitiesResponse recognizes, so it silently decoded as a
+// zero-value success [bug A6].
+type capabilitiesWireShape struct {
+	CapabilitiesResponse
+	Error *Error `json:"error,omitempty"`
 }
 
 // InvokeCapabilities runs the capabilities op against binary and decodes
 // its bespoke CapabilitiesResponse shape (see CapabilitiesResponse) — the
 // one op whose response Invoke's normal Response envelope cannot decode.
+// It checks for an error envelope first (see capabilitiesWireShape) so a
+// failed capabilities call surfaces as an error instead of a zero-value
+// success [bug A6].
 func InvokeCapabilities(ctx context.Context, binary string) (*CapabilitiesResponse, error) {
 	out, err := runInvoke(ctx, binary, Request{Op: OpCapabilities})
 	if err != nil {
 		return nil, err
 	}
-	var resp CapabilitiesResponse
-	if err := json.Unmarshal(out, &resp); err != nil {
+	var wire capabilitiesWireShape
+	if err := json.Unmarshal(out, &wire); err != nil {
 		return nil, fmt.Errorf("scriptout: %s: invalid capabilities response: %w (stdout=%q)", binary, err, out)
 	}
+	if wire.Error != nil {
+		return nil, WrapError(sentinelForCode(wire.Error.Code), fmt.Sprintf("%s: %s", binary, wire.Error.Message))
+	}
+	resp := wire.CapabilitiesResponse
 	return &resp, nil
 }

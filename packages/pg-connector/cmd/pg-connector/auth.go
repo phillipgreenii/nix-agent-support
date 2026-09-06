@@ -19,9 +19,13 @@ import (
 )
 
 // FanOutAuthStatus fans the auth_status op out across every backend in
-// backends, building the sources[] envelope.
+// backends, building the sources[] envelope. Sources starts as a non-nil
+// empty slice so a zero-backend (misconfigured host) result still
+// marshals its sources[] field as [] rather than null [bug A15] — a
+// nil slice would make `jq '.sources[]'` exit 5 on exactly the host
+// that's misconfigured.
 func FanOutAuthStatus(ctx context.Context, backends []string) FanOutOutcome {
-	var out FanOutOutcome
+	out := FanOutOutcome{Sources: make([]SourceResult, 0, len(backends))}
 	for _, b := range backends {
 		out.Sources = append(out.Sources, authStatusOne(ctx, b))
 	}

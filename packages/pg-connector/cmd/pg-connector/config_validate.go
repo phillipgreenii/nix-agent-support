@@ -20,7 +20,10 @@ import (
 // across backends, but the two checks ARE combined per-backend since both
 // exist to answer the single question "is this backend usable."
 func FanOutConfigValidate(ctx context.Context, backends []string) FanOutOutcome {
-	var out FanOutOutcome
+	// Sources starts as a non-nil empty slice so a zero-backend
+	// (misconfigured host) result still marshals its sources[] field as
+	// [] rather than null [bug A15].
+	out := FanOutOutcome{Sources: make([]SourceResult, 0, len(backends))}
 	for _, b := range backends {
 		out.Sources = append(out.Sources, configValidateOne(ctx, b))
 	}

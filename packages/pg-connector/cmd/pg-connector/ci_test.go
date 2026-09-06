@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"os"
@@ -125,6 +126,28 @@ func TestRun_CiList_FanOut_NoBackendsRegistered_Exit3(t *testing.T) {
 	}
 	if len(outcome.Sources) != 0 || len(outcome.Runs) != 0 {
 		t.Fatalf("outcome = %+v, want an empty-but-well-formed envelope", outcome)
+	}
+	// The Go-level len()==0 check above passes whether the wire bytes said
+	// [] or null — round-tripping through json.Unmarshal loses that
+	// distinction. Check the raw bytes directly: runs/sources MUST be []
+	// so `jq '.sources[]'`/`jq '.runs[]'` don't exit 5 on exactly the host
+	// that's misconfigured [bug A15].
+	if want := `"runs":[]`; !strings.Contains(stdout, want) {
+		t.Fatalf("stdout = %s, want it to contain %s (not runs:null)", stdout, want)
+	}
+	if want := `"sources":[]`; !strings.Contains(stdout, want) {
+		t.Fatalf("stdout = %s, want it to contain %s (not sources:null)", stdout, want)
+	}
+}
+
+func TestFanOutCIList_NoBackends_RunsAndSourcesAreEmptyArraysNotNull(t *testing.T) {
+	outcome := fanOutCIList(context.Background(), nil, "pr-1")
+	raw, err := json.Marshal(outcome)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if got := string(raw); got != `{"runs":[],"sources":[]}` {
+		t.Fatalf("json = %s, want runs/sources to marshal as [] not null", got)
 	}
 }
 
