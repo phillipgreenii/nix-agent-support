@@ -31,6 +31,11 @@ it by searching disk is both slower and redundant.
   packet body, a report) instead of computing byte lengths and slicing text yourself by hand —
   every chunking step in this skill and its bindings means "run this script," not ad hoc
   `wc -c`/`sed`.
+- `scripts/create-packet.sh` — this IS the `create-packet` operation for the `beads` binding
+  (see `plan-decompose-beads/SKILL.md`'s `create-packet` section): never hand-type a
+  `bd create`/`bd defer` pair for a packet yourself. It bakes `--no-inherit-labels` in as the
+  default so the flag can no longer be dropped by accident (`--allow-inherit-labels` opts back
+  in explicitly).
 - `scripts/audit-docket-label-leak.sh` — read-only; run it once after each batch of
   `create-packet` calls, before `release-set`. It calls
   `bd list --label docket --status all -n 0 --json` and flags every returned bead whose

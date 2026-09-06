@@ -73,27 +73,39 @@ moment it is created.
 
 ## `create-packet`
 
+Run the helper script — do NOT hand-type a `bd create`/`bd defer` pair for a packet:
+
 ```bash
-bd create "<title>" -t task --parent <epic> --no-inherit-labels \
-  -d "<content>" --acceptance "<criteria>" --metadata '<json>'
-bd defer <new-id>   # immediately — HELD is status-based
+claude-marketplace/plan-decompose/scripts/create-packet.sh \
+  --parent <epic> --title "<title>" --body-file <content-file> \
+  --acceptance "<criteria>" --metadata '<json>'
 ```
 
-`--no-inherit-labels` is REQUIRED — without it every packet inherits the `docket` label and
-breaks `find-docket`. HELD = `bd defer` (status-based, indefinite; probed 2026-08-27:
-deferred issues are absent from `bd ready` and `bd undefer` restores `open`). Do NOT use
-`--defer <date>` — that is a TIMER that expires whether or not curation finished. The
-create-then-defer window is one command wide; acceptable, noted.
+`--no-inherit-labels` is baked into this script as its DEFAULT — it is not a flag typed at
+the call site, so it cannot be dropped by accident. Without it, a packet would inherit the
+`docket` label (or a `human` label, on a `human`-labeled parent) and break `find-docket`'s
+label-based epic scan; the script's `--allow-inherit-labels` flag is the only way to opt back
+in, and it must be named explicitly — omission can no longer produce the leak. The script
+also runs the `bd defer <new-id>` step immediately after create — HELD is status-based
+(probed 2026-08-27: deferred issues are absent from `bd ready` and `bd undefer` restores
+`open`). Do NOT use `--defer <date>` — that is a TIMER that expires whether or not curation
+finished. The create-then-defer window is one script call wide, not a two-command sequence a
+caller has to remember to chain.
 
-**This flag has been omitted in practice more than once** (`pg2-oc52e`: fixed by hand on
-`pg2-2j5ac`'s children, then independently recurred on `pg2-84o3m.31`), so do not rely on
-having read this paragraph carefully enough — after any batch of `create-packet` calls (or
-periodically, e.g. during a grooming pass), run
-`claude-marketplace/plan-decompose/scripts/audit-docket-label-leak.sh` (read-only; calls
-`bd list --label docket --status all -n 0 --json` and flags every returned bead whose
-`issue_type` is not `epic` — a docket epic or phase bead is always `epic`-typed, so anything
-else carrying `docket` inherited the label from an omitted `--no-inherit-labels`). Fix a flagged
-bead with `bd label remove <id> docket` (never re-run `create-packet` for it).
+**Why a script and not a documented command** (`pg2-oc52e`/`pg2-b439c`): a raw `bd create`
+command shown here as prose — even with `--no-inherit-labels` written directly into the
+example — was still omitted from hand-typed invocations more than once (`pg2-2j5ac`'s
+children `.5`-`.10`, then independently `pg2-84o3m.31`): a caller retyping the command from
+memory can drop a flag partway through regardless of how clearly the example reads. Routing
+packet creation through this script removes the flag from the call site's typing surface
+entirely, rather than relying on the doc being read carefully enough one more time. Still run
+`claude-marketplace/plan-decompose/scripts/audit-docket-label-leak.sh` after any batch of
+`create-packet` calls anyway (read-only; calls `bd list --label docket --status all -n 0
+--json` and flags every returned bead whose `issue_type` is not `epic`) — it is a second,
+independent net that also catches a leak from a DIFFERENT operation that still calls `bd
+create` directly (`create-docket`'s own phase-bead usage below, which this script does not
+cover). Fix a flagged bead with `bd label remove <id> docket` (never re-run `create-packet`
+for it).
 
 **Label convention** (epic-decompose/phase-decompose): the same `--parent`-label-inheritance
 hazard this note already flags applies to phase and trigger beads too — phase beads carry both

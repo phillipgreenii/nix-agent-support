@@ -48,6 +48,12 @@ the rest of the run; never `find` or `glob` the filesystem for a script by name.
   and prints the chunk paths, one per line. You will not usually need this directly (it is
   `phase-plan-verifier`'s own tool for its direct-edit outcome), but reach for it rather than
   hand-slicing text yourself if you ever need to write an oversized field.
+- `scripts/create-packet.sh` — this IS the `create-packet` operation for the `beads` binding
+  (see `plan-decompose-beads/SKILL.md`'s `create-packet` section): never hand-type a
+  `bd create`/`bd defer` pair for a packet yourself once your handoff reaches
+  `plan-decompose`'s own `decompose` steps. It bakes `--no-inherit-labels` in as the default so
+  the flag can no longer be dropped by accident (`--allow-inherit-labels` opts back in
+  explicitly).
 - `scripts/audit-docket-label-leak.sh` — read-only; once your handoff continues into
   `plan-decompose`'s own `decompose` steps and you start calling `create-packet`, run this once
   after each batch, before `release-set`. It calls

@@ -189,9 +189,29 @@ deduplication.
    `pd_phase` comparison MUST be an exact-string match, never a substring/prefix test —
    `released:partial` contains `released` as a substring and a prefix-matching routing check
    would silently mis-route a partial release into the "nothing to do" branch.
+
+   **RESUME dedup** (`pg2-b439c`): a RESUME back into step 3 MUST NOT re-run curation blind.
+   Step 0 unconditionally re-runs mode `check` and produces a fresh boundary sketch every
+   time `decompose` is invoked, including on a RESUME — so an interrupted attempt's sketch and
+   the RESUME's freshly re-generated sketch cover the same design but are not guaranteed
+   byte-identical in title wording. Before calling `create-packet` for any planned packet,
+   list the docket's current children (the same lightweight id/title/metadata read
+   `read-metrics`'s children-list step already uses) and, for each existing child, check its
+   content's `[design: <section>]` citation footprint against the planned packet's scope —
+   MATCH ON CITED DESIGN SECTIONS, never on title text: sections are the design-derived
+   identity a slice keeps across re-sketches, titles are not. A planned packet whose scope
+   already has a matching existing child (any status — open, deferred, or closed) MUST NOT be
+   created again; treat it as already curated (mode `reconcile`'s re-curation path handles it
+   if the design changed since, never a fresh `create-packet`). Only slices with no existing
+   match get created. This check applies on EVERY entry into step 3, not only a first pass —
+   it is what stops an interrupted `curating`/`failed:curating` run from producing duplicate
+   packets for the same design slice once it resumes.
+
 2. Create the docket (design VERBATIM + `pd_rev` + policy + `pd_source`); set `pd_phase` at
    every transition from here on.
-3. **Curate** each packet per the anatomy, packets created HELD. Record the PLANNED ORDERING
+3. **Curate** each packet per the anatomy, packets created HELD — but run step 1's RESUME
+   dedup check FIRST, on every entry into this step, not only a first pass: a slice already
+   covered by an existing child is not re-created. Record the PLANNED ORDERING
    (blocked-by pairs implied by Consumes/Produces) in the decomposition-report draft as you
    go — the draft is your working state (in-context or a scratch file); it becomes durable
    only via `write-report`, and the abort path writes its current content. Boundary rule:
