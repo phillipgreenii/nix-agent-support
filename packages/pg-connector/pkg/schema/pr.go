@@ -20,7 +20,20 @@ package schema
 // dispatch-table entries (pkg/provider/pr.NewDispatchTable) — independent
 // of pkg/scriptout.ProtocolVersion [design: §4.2 — "that classification
 // lives with the capability (which owns its schema)"].
-const SchemaVersion = 1
+//
+// Bumped 1 -> 2 by bead pg2-681xo, which added the AsOf/Stale fields below.
+// Per §4.3, schemaVersion "versions that capability's own field shape" —
+// IssueSchemaVersion's own 1 -> 2 bump (bead pg2-1q9c0, for adding the
+// Tracker field) already established this repo's precedent that ANY
+// field-shape change bumps the version, additive or not, so a
+// version_mismatch check can catch build skew on an additive change too,
+// not only a breaking one. This is the first field-shape change to
+// schema.PR since the capability's initial version, and it is made now —
+// before any additional PR consumer (df-categorize, df-feedback, more
+// Tier-3 tools) lands against the pre-freshness shape — precisely to avoid
+// the "expensive schema bump" scenario a later addition would otherwise
+// force.
+const SchemaVersion = 2
 
 // PR is the pr capability's shared JSON wire shape, returned by the pr
 // capability's "show" op and carried by pkg/provider/pr.Provider.Show
@@ -47,6 +60,43 @@ type PR struct {
 	// field, written only via the dedicated categorize op — never a GitHub
 	// label [design: §6.1, §4.3].
 	Category string `json:"category,omitempty"`
+
+	// AsOf is this read's own as-of time (RFC3339, UTC) — added by bead
+	// pg2-681xo, mirroring the pair pg-pr's own read seams already publish
+	// under packages/pg-pr/docs/behavior/invariants.md's INV-ASOF-1
+	// ("every acted-on read seam MUST carry its own as-of time ... an item
+	// or payload with no usable as-of time MUST be reported stale").
+	// Empty only when a backend has no usable as-of time for this read,
+	// which MUST pair with Stale true rather than a plausible-looking but
+	// meaningless timestamp.
+	//
+	// This is a fact about a successful read's own payload, deliberately
+	// kept separate from pg-connector's outcome/error taxonomy (the CLI
+	// exit-code scheme and the wire Error.Code enum both classify whether
+	// a CALL succeeded; AsOf/Stale classify whether a successful call's
+	// DATA is current) — a targeted `show` that returns stale data is
+	// still exit 0, never folded into a sixth error/exit code.
+	AsOf string `json:"as_of"`
+	// Stale is this backend's own as-of/stale determination for this read
+	// (INV-ASOF-2: the backend that answers a read is the sole computer of
+	// its own staleness; a consumer MUST NOT re-derive one from AsOf
+	// itself). Always populated (not omitempty), matching PR's other plain
+	// boolean facts (Draft, Merged) — false is itself informative.
+	//
+	// The current GitHub backend (cmd/pg-connector-pr-github) always
+	// performs a live GitHub read for every PR fact on every Show call —
+	// its own local Store holds only this backend's category/disposition
+	// writes, never a cached copy of GitHub's PR facts — so it always
+	// reports Stale false with AsOf set to that live read's own call time.
+	// A future backend that DOES serve PR facts from a local cache/store is
+	// the one expected to ever report Stale true. The ci/issue/scm
+	// sibling schemas do not carry this pair today: none of their current
+	// backends caches the remote fact data they return either (investigated
+	// at the time this field was added), so there is no live-called-vs-cached
+	// distinction yet to expose for them — a future backend that adds such a
+	// cache for any of them should adopt this same AsOf/Stale pair rather
+	// than inventing a parallel convention.
+	Stale bool `json:"stale"`
 
 	// Comments are the PR's own top-level (non-review-thread) comments.
 	Comments []PRComment `json:"comments,omitempty"`

@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/api"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/github"
@@ -86,7 +87,9 @@ func parsePRID(id string) (repo string, number int, err error) {
 // (metadata, comments, reviews) via the ported GitHub logic, then merges in
 // this backend's own persisted category/dispositions so a caller sees the
 // current state of any prior categorize/feedback_set write [design: §2,
-// §6.1].
+// §6.1]. Every call is a fresh, uncached GitHub read, so the response's
+// schema.PR.AsOf is always this call's own completion time and
+// schema.PR.Stale is always false (bead pg2-681xo) — see toSchemaPR.
 func (b *Backend) Show(ctx context.Context, id string) (*schema.PR, error) {
 	repo, number, err := parsePRID(id)
 	if err != nil {
@@ -108,7 +111,7 @@ func (b *Backend) Show(ctx context.Context, id string) (*schema.PR, error) {
 	if err != nil {
 		return nil, scriptout.WrapError(scriptout.ErrUnavailable, err.Error())
 	}
-	return toSchemaPR(id, ghPR, comments, reviews, state), nil
+	return toSchemaPR(id, ghPR, comments, reviews, state, time.Now().UTC()), nil
 }
 
 // Categorize implements pr.Provider.Categorize: a plain set/overwrite into
@@ -210,7 +213,13 @@ func isGHNotFound(err error) bool {
 // owning PRReview.Comments via api.Comment.ReviewID (falling back to
 // PR.Comments when GitHub's response left ReviewID unpopulated, so no
 // comment is ever silently dropped).
-func toSchemaPR(id string, in *api.PR, comments []api.Comment, reviews []api.Review, state PRState) *schema.PR {
+//
+// asOf is the freshness timestamp for this assembled read (bead pg2-681xo)
+// — the caller's own call-completion time, since every field above except
+// Category/dispositions came from a live GitHub read performed just before
+// this call. Stale is therefore always false: this backend has no local
+// cache of GitHub's PR facts to ever serve a stale copy of.
+func toSchemaPR(id string, in *api.PR, comments []api.Comment, reviews []api.Review, state PRState, asOf time.Time) *schema.PR {
 	out := &schema.PR{
 		ID:       id,
 		Repo:     in.Repo,
@@ -226,6 +235,8 @@ func toSchemaPR(id string, in *api.PR, comments []api.Comment, reviews []api.Rev
 		Body:     in.Body,
 		Labels:   in.Labels,
 		Category: state.Category,
+		AsOf:     asOf.Format(time.RFC3339),
+		Stale:    false,
 	}
 
 	byReview := make(map[string][]schema.PRComment, len(reviews))

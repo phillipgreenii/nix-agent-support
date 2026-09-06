@@ -55,6 +55,31 @@ func TestPR_JSONRoundTrip(t *testing.T) {
 	}
 }
 
+func TestPR_AsOfAndStale_AlwaysPresentInJSON(t *testing.T) {
+	// AsOf/Stale (bead pg2-681xo) are not omitempty — Stale in particular
+	// must always be present, since false is itself informative (matching
+	// PR's other plain-bool facts, Draft/Merged), and a consumer must be
+	// able to distinguish "explicitly not stale" from "field absent."
+	raw, err := json.Marshal(PR{ID: "pr-1", AsOf: "2026-09-06T00:00:00Z", Stale: false})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if _, ok := out["as_of"]; !ok {
+		t.Fatalf("as_of missing from %s", raw)
+	}
+	staleVal, ok := out["stale"]
+	if !ok {
+		t.Fatalf("stale missing from %s", raw)
+	}
+	if staleVal != false {
+		t.Fatalf("stale = %v, want false", staleVal)
+	}
+}
+
 func TestPR_CommentIDAndCommentIDAreStrings(t *testing.T) {
 	// PR.ID and PRComment.ID (used as feedback_set's comment_id) must be
 	// strings, carried over as-is from pg-pr's api.Comment.ID string field

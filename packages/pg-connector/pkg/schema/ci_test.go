@@ -59,8 +59,10 @@ func TestCIRun_IDAndPRIDAreStrings(t *testing.T) {
 func TestCISchemaVersion_IndependentOfPRSchemaVersion(t *testing.T) {
 	// schemaVersion is one integer per schema-bearing capability, never a
 	// single global counter shared across capabilities [design: §4.3] — the
-	// two constants must be independently named/addressable even though
-	// they currently share the same value.
+	// two constants must be independently named/addressable regardless of
+	// whether their values happen to match (they diverged, 1 vs 2, once
+	// bead pg2-681xo bumped SchemaVersion for the PR-only AsOf/Stale
+	// fields — this test's own point is that nothing here couples them).
 	_ = CISchemaVersion
 	_ = SchemaVersion
 }

@@ -26,7 +26,14 @@ import (
 type Provider interface {
 	// Show returns id's current full state, including comments/
 	// review-thread entries each with their own id and current
-	// disposition [design: §6.1].
+	// disposition [design: §6.1]. The returned schema.PR MUST carry its
+	// own AsOf/Stale pair (bead pg2-681xo): AsOf is this read's own as-of
+	// time, and Stale is this Provider's own as-of/stale determination —
+	// true only when this read served (rather than freshly fetched) a
+	// cached copy of the underlying PR facts that has aged past this
+	// Provider's own staleness bound. A Provider with no such cache (every
+	// current implementation) always returns Stale false with AsOf set to
+	// the read's own call time.
 	Show(ctx context.Context, id string) (*schema.PR, error)
 
 	// Categorize sets id's category to category, a plain set/overwrite

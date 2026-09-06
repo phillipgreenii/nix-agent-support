@@ -5,6 +5,7 @@ import (
 	"errors"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/api"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/github"
@@ -92,6 +93,38 @@ func TestBackend_Show_MapsGHDataToSchemaPR(t *testing.T) {
 	// Never-written dispositions default to "open".
 	if got.Comments[0].Disposition != schema.DispositionOpen || got.Reviews[0].Comments[0].Disposition != schema.DispositionOpen {
 		t.Fatalf("default disposition should be open: %+v / %+v", got.Comments[0], got.Reviews[0].Comments[0])
+	}
+}
+
+// TestBackend_Show_PopulatesFreshAsOfAndNeverStale proves Show's response
+// carries a usable as-of/stale pair (bead pg2-681xo, INV-ASOF-1/2 parity):
+// AsOf is a parseable RFC3339 timestamp taken at (or after) the call, and
+// Stale is false — this backend never serves a cached copy of GitHub's PR
+// facts, so every read is fresh by construction.
+func TestBackend_Show_PopulatesFreshAsOfAndNeverStale(t *testing.T) {
+	before := time.Now().UTC()
+	gh := &fakeGH{
+		pr: &api.PR{Repo: "owner/repo", Number: 1, Title: "T", State: "open"},
+	}
+	b := newTestBackend(t, gh)
+
+	got, err := b.Show(context.Background(), "owner/repo#1")
+	if err != nil {
+		t.Fatalf("Show: %v", err)
+	}
+	after := time.Now().UTC()
+
+	if got.Stale {
+		t.Fatalf("Stale = true, want false: this backend has no local cache of GitHub PR facts")
+	}
+	asOf, err := time.Parse(time.RFC3339, got.AsOf)
+	if err != nil {
+		t.Fatalf("AsOf %q is not a valid RFC3339 timestamp: %v", got.AsOf, err)
+	}
+	// time.RFC3339 truncates to whole seconds, so asOf can read up to ~1s
+	// earlier than the sub-second "before" captured just before the call.
+	if asOf.Before(before.Truncate(time.Second)) || asOf.After(after) {
+		t.Fatalf("AsOf = %v, want it between %v and %v (the call's own window)", asOf, before, after)
 	}
 }
 

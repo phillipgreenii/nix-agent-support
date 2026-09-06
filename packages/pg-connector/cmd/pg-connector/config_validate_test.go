@@ -3,16 +3,24 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
 
 func TestFanOutConfigValidate_Succeeded(t *testing.T) {
+	// The fixture's declared "pr" schemaVersion is interpolated from
+	// schema.SchemaVersion itself (not a hardcoded literal) so this
+	// "matching, healthy backend" scenario cannot silently start exercising
+	// TestFanOutConfigValidate_DegradedOnSchemaVersionMismatch's path
+	// instead the next time schema.SchemaVersion is bumped (as bead
+	// pg2-681xo's 1 -> 2 bump for AsOf/Stale already did once).
 	writeOpAwareFakeBackend(t, "backend-ok", map[string]string{
 		"auth_status":  `{"protocolVersion":1,"schemaVersion":1,"result":{"state":"OK"}}`,
-		"capabilities": `{"protocolVersion":1,"schemaVersions":{"pr":1},"ops":["get_pr","auth_status","capabilities"]}`,
+		"capabilities": fmt.Sprintf(`{"protocolVersion":1,"schemaVersions":{"pr":%d},"ops":["get_pr","auth_status","capabilities"]}`, schema.SchemaVersion),
 	}, `{"protocolVersion":1,"error":{"code":"unknown_op","message":"unknown op"}}`)
 	outcome := FanOutConfigValidate(context.Background(), []string{"backend-ok"})
 	if len(outcome.Sources) != 1 {
@@ -53,9 +61,9 @@ func TestFanOutConfigValidate_DegradedOnSchemaVersionMismatch(t *testing.T) {
 	// returned *CapabilitiesResponse entirely — even a backend openly
 	// declaring a schemaVersion this build doesn't recognize passed as
 	// "succeeded" [bug pg2-p2z7o]. schema.CurrentSchemaVersions expects
-	// "pr" at schema.SchemaVersion (1 today); this fake backend declares
-	// 999 for it, simulating a Tier-2 backend built at a stale/newer
-	// commit than the umbrella.
+	// "pr" at schema.SchemaVersion (2 as of bead pg2-681xo's AsOf/Stale
+	// addition); this fake backend declares 999 for it, simulating a
+	// Tier-2 backend built at a stale/newer commit than the umbrella.
 	writeOpAwareFakeBackend(t, "backend-schema-skew", map[string]string{
 		"auth_status":  `{"protocolVersion":1,"schemaVersion":1,"result":{"state":"OK"}}`,
 		"capabilities": `{"protocolVersion":1,"schemaVersions":{"pr":999},"ops":["get_pr","auth_status","capabilities"]}`,
