@@ -74,8 +74,20 @@
         humanFeatures = [
           "git-tools"
           "pg-pr"
-          "pb"
         ];
+      }
+      # pb (phillip-beads: writes/resolves pn:applied gates that hold beads
+      # work packets until dependent changes are live-verified) is drain-beads
+      # infrastructure used by every agent-support account doing drain-beads-
+      # style work, not human-only PR tooling — it was previously misfiled
+      # under the `pr-tools` humanFeatures above, but `pr-tools` is an orphaned
+      # capability with no `mkBundle` consumer, so no machine ever enabled it
+      # and `pb` was missing from agent/subagent PATH (tc-9fea). Mirrors the
+      # worktree-tools rationale below: it rides in the agent-support bundle
+      # rather than a standalone opt-in leaf.
+      {
+        name = "pb";
+        features = [ "pb" ];
       }
       # tuicr — (H) code-review TUI (Plan 5 §5 catalog). Human-only, so its
       # feature flag is set only for human accounts.
@@ -105,6 +117,7 @@
           "claude-code"
           "beads"
           "worktree-tools"
+          "pb"
         ];
       }
       {
