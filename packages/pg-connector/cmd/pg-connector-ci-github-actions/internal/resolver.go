@@ -47,6 +47,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
 
 // PRResolver resolves a PR id to the repo and head branch GitHub Actions
@@ -105,11 +107,16 @@ type ghPRView struct {
 // Resolve implements PRResolver against real GitHub. classifyGHError
 // (provider.go) is reused unchanged for error classification — no separate
 // wire-error-code-to-sentinel map is needed here, since this resolver
-// never decodes a pg-connector scriptout envelope any more.
+// never decodes a pg-connector scriptout envelope any more. A prID that
+// doesn't even parse into this backend's own "<owner>/<repo>#<number>" id
+// shape is a caller-input-validation failure, not a backend-health one, so
+// it is wrapped ErrInvalidArgument rather than left unwrapped (previously
+// fell through to scriptout's own "unavailable" fallback — the same defect
+// class as classifyGHError's not_found gap [bug pg2-r9iok]).
 func (r *ghPRResolver) Resolve(ctx context.Context, prID string) (string, string, error) {
 	repo, number, err := parsePRID(prID)
 	if err != nil {
-		return "", "", err
+		return "", "", scriptout.WrapError(scriptout.ErrInvalidArgument, err.Error())
 	}
 	raw, err := r.gh.Run(ctx, "pr", "view", strconv.Itoa(number), "--repo", repo, "--json", "headRefName")
 	if err != nil {

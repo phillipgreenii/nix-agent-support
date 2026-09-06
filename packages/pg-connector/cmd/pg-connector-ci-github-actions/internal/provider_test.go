@@ -143,11 +143,50 @@ func TestListRuns_PRIDPopulated(t *testing.T) {
 
 func TestListRuns_ValidatesEmptyID(t *testing.T) {
 	p := NewWithDeps(newFakeGH(), &fakePR{repo: "a/b", branch: "x"})
-	if _, err := p.ListRuns(context.Background(), ""); err == nil {
+	_, err := p.ListRuns(context.Background(), "")
+	if err == nil {
 		t.Fatalf("expected error for empty pr id")
 	}
-	if _, err := p.ListRuns(context.Background(), "   "); err == nil {
-		t.Fatalf("expected error for whitespace-only pr id")
+	// An empty required field is the CALLER's mistake, not this backend
+	// being unhealthy [design: §4.2, bug pg2-r9iok].
+	if !errors.Is(err, scriptout.ErrInvalidArgument) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrInvalidArgument)", err)
+	}
+	if _, err := p.ListRuns(context.Background(), "   "); !errors.Is(err, scriptout.ErrInvalidArgument) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrInvalidArgument) for whitespace-only pr id", err)
+	}
+}
+
+// TestListRuns_ResolverInvalidID_IsInvalidArgument proves a prID that
+// doesn't parse into this backend's own "<owner>/<repo>#<number>" id shape
+// — the real (non-fakePR) resolver path — is now classified as
+// ErrInvalidArgument, not left unwrapped to fall through to
+// codeForError's "unavailable" fallback [bug pg2-r9iok].
+func TestListRuns_ResolverInvalidID_IsInvalidArgument(t *testing.T) {
+	p := New() // production wiring: real ghPRResolver, no fakePR
+	_, err := p.ListRuns(context.Background(), "not-a-valid-id")
+	if !errors.Is(err, scriptout.ErrInvalidArgument) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrInvalidArgument)", err)
+	}
+}
+
+// TestListRuns_NonexistentPR_NotFound proves the GraphQL "could not
+// resolve" phrasing gh returns for a nonexistent PR number (verified
+// empirically against real `gh` 2.99.0 — see provider.go's isGHNotFound
+// doc comment) is reachable as not_found through the real resolver path,
+// not misreported as this backend being unhealthy [design: §4.5, bug
+// pg2-r9iok].
+func TestListRuns_NonexistentPR_NotFound(t *testing.T) {
+	gh := newFakeGH()
+	gh.errs["pr view"] = errors.New("gh pr view 999999999: exit status 1: GraphQL: Could not resolve to a PullRequest with the number of 999999999. (repository.pullRequest)")
+	p := NewWithDeps(gh, newGHPRResolver(gh))
+
+	_, err := p.ListRuns(context.Background(), "foo/bar#999999999")
+	if !errors.Is(err, scriptout.ErrNotFound) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrNotFound)", err)
+	}
+	if errors.Is(err, scriptout.ErrUnavailable) {
+		t.Fatalf("err = %v, must NOT also be ErrUnavailable — a not_found answer must not share a code with a failure", err)
 	}
 }
 
@@ -213,8 +252,53 @@ func TestGetLogs_ReturnsRawBytes(t *testing.T) {
 
 func TestGetLogs_ValidatesEmpty(t *testing.T) {
 	p := NewWithDeps(newFakeGH(), nil)
-	if _, err := p.GetLogs(context.Background(), ""); err == nil {
+	_, err := p.GetLogs(context.Background(), "")
+	if err == nil {
 		t.Fatalf("expected error for empty run id")
+	}
+	// An empty required field is the CALLER's mistake, not this backend
+	// being unhealthy [design: §4.2, bug pg2-r9iok].
+	if !errors.Is(err, scriptout.ErrInvalidArgument) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrInvalidArgument)", err)
+	}
+}
+
+// TestGetLogs_NonexistentRun_NotFound proves the REST-404 phrasing gh
+// returns for a nonexistent run id (verified empirically against real `gh`
+// 2.99.0: `gh run view <id> --log` prints "failed to get run: HTTP 404: Not
+// Found (...)" on stderr, exit 1 — see provider.go's isGHNotFound doc
+// comment) is now reachable as not_found, not misreported as this backend
+// being unhealthy [design: §4.5, bug pg2-r9iok].
+func TestGetLogs_NonexistentRun_NotFound(t *testing.T) {
+	gh := newFakeGH()
+	gh.errs["run view"] = errors.New("failed to get run: HTTP 404: Not Found (https://api.github.com/repos/foo/bar/actions/runs/999999999999?exclude_pull_requests=true)")
+	p := NewWithDeps(gh, nil)
+
+	_, err := p.GetLogs(context.Background(), "999999999999")
+	if !errors.Is(err, scriptout.ErrNotFound) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrNotFound)", err)
+	}
+	if errors.Is(err, scriptout.ErrUnavailable) {
+		t.Fatalf("err = %v, must NOT also be ErrUnavailable — a not_found answer must not share a code with a failure", err)
+	}
+}
+
+// TestGetLogs_GenuineGHFailure_PassesThroughUnclassified proves a real gh
+// failure unrelated to auth or not-found still propagates unwrapped
+// (classifyGHError's "everything else" case, matching the sibling
+// pg-connector-pr-github backend's own contract).
+func TestGetLogs_GenuineGHFailure_PassesThroughUnclassified(t *testing.T) {
+	gh := newFakeGH()
+	wantErr := errors.New(`run view: exec: "gh": executable file not found in $PATH`)
+	gh.errs["run view"] = wantErr
+	p := NewWithDeps(gh, nil)
+
+	_, err := p.GetLogs(context.Background(), "1001")
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("err = %v, want errors.Is(err, wantErr)", err)
+	}
+	if errors.Is(err, scriptout.ErrNotFound) {
+		t.Fatalf("err = %v, must NOT be classified as ErrNotFound", err)
 	}
 }
 

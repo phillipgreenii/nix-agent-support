@@ -53,7 +53,7 @@ type Request struct {
 }
 
 // Error is the wire shape of a failure response. Code MUST be one of the
-// closed five-value taxonomy named by the Err* sentinels in errors.go.
+// closed six-value taxonomy named by the Err* sentinels in errors.go.
 type Error struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`

@@ -56,12 +56,38 @@ func New(runner Runner) *Provider {
 // gets the one true repo root — e.g. a new worktree_add lands under the
 // MAIN repo's own .worktrees/, never nested under whichever worktree
 // happened to be dir at the time.
+// repoRootFor classifies a `rev-parse --git-common-dir` failure as
+// not_found when it's a definitive "there is no repository here" answer —
+// dir doesn't exist at all (`fatal: cannot change to '<dir>': No such file
+// or directory`) or dir exists but isn't inside any git repo (`fatal: not
+// a git repository (or any of the parent directories): .git`), both
+// verified empirically against real git 2.54 — rather than the previous
+// unconditional ErrUnavailable, which conflated "no such repo" with a
+// genuine backend health problem [design: §4.5, bug pg2-r9iok].
 func (p *Provider) repoRootFor(ctx context.Context, dir string) (string, error) {
 	commonDir, err := p.runner.Run(ctx, dir, "rev-parse", "--path-format=absolute", "--git-common-dir")
 	if err != nil {
+		if isGitNotFound(err) {
+			return "", scriptout.WrapError(scriptout.ErrNotFound, "resolve git repository: "+err.Error())
+		}
 		return "", scriptout.WrapError(scriptout.ErrUnavailable, "resolve git repository: "+err.Error())
 	}
 	return filepath.Dir(commonDir), nil
+}
+
+// isGitNotFound reports whether err's message carries one of the two error
+// phrasings verified empirically against real git 2.54 for "there is no
+// such repository/ref here" (as opposed to a genuine backend/exec
+// failure): a missing directory (`fatal: cannot change to '<dir>': No such
+// file or directory`), a directory that exists but isn't a git repo
+// (`fatal: not a git repository (or any of the parent directories):
+// .git`), or an unresolvable ref/branch passed to `git worktree add`
+// (`fatal: invalid reference: <ref>`) [bug pg2-r9iok].
+func isGitNotFound(err error) bool {
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "no such file or directory") ||
+		strings.Contains(msg, "not a git repository") ||
+		strings.Contains(msg, "invalid reference")
 }
 
 // currentRepoRoot is repoRootFor with an empty dir — this backend
@@ -80,7 +106,7 @@ func (p *Provider) currentRepoRoot(ctx context.Context) (string, error) {
 // other tool's own worktree-path convention [design: §4.7]).
 func (p *Provider) WorktreeAdd(ctx context.Context, branchOrRef string) (*schema.WorktreeInfo, error) {
 	if branchOrRef == "" {
-		return nil, scriptout.WrapError(scriptout.ErrUnavailable, "worktree_add: branch_or_ref is required")
+		return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, "worktree_add: branch_or_ref is required")
 	}
 	repoRoot, err := p.currentRepoRoot(ctx)
 	if err != nil {
@@ -88,6 +114,14 @@ func (p *Provider) WorktreeAdd(ctx context.Context, branchOrRef string) (*schema
 	}
 	path := filepath.Join(repoRoot, ".worktrees", branchOrRef)
 	if _, err := p.runner.Run(ctx, repoRoot, "worktree", "add", path, branchOrRef); err != nil {
+		// branchOrRef not resolving to any real ref/branch/commit (`fatal:
+		// invalid reference: ...`) is a well-formed not_found answer, not a
+		// broken call [design: §4.5, §4.7, bug pg2-r9iok] — the same
+		// distinction WorktreeRemove already draws below for a path that
+		// isn't a known worktree.
+		if isGitNotFound(err) {
+			return nil, scriptout.WrapError(scriptout.ErrNotFound, "git worktree add: "+err.Error())
+		}
 		return nil, scriptout.WrapError(scriptout.ErrUnavailable, "git worktree add: "+err.Error())
 	}
 	// Best-effort: a branch-or-ref that resolves to a detached HEAD (a
@@ -106,7 +140,7 @@ func (p *Provider) WorktreeAdd(ctx context.Context, branchOrRef string) (*schema
 // `git worktree remove` invocation.
 func (p *Provider) WorktreeRemove(ctx context.Context, path string) error {
 	if path == "" {
-		return scriptout.WrapError(scriptout.ErrUnavailable, "worktree_remove: path is required")
+		return scriptout.WrapError(scriptout.ErrInvalidArgument, "worktree_remove: path is required")
 	}
 	repoRoot, err := p.currentRepoRoot(ctx)
 	if err != nil {
@@ -210,7 +244,7 @@ func parseWorktreePorcelain(out string) []schema.WorktreeInfo {
 // remote-awareness this capability is designed without.
 func (p *Provider) BranchDetect(ctx context.Context, cwd string) (*schema.BranchInfo, error) {
 	if cwd == "" {
-		return nil, scriptout.WrapError(scriptout.ErrUnavailable, "branch_detect: cwd is required")
+		return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, "branch_detect: cwd is required")
 	}
 	root, err := p.repoRootFor(ctx, cwd)
 	if err != nil {

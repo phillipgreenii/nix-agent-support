@@ -79,8 +79,29 @@ func TestGHPRResolver_ResolvesRepoFromIDAndBranchFromGH(t *testing.T) {
 
 func TestGHPRResolver_InvalidID(t *testing.T) {
 	r := newGHPRResolver(newFakeGH())
-	if _, _, err := r.Resolve(context.Background(), "not-a-valid-id"); err == nil {
+	_, _, err := r.Resolve(context.Background(), "not-a-valid-id")
+	if err == nil {
 		t.Fatal("expected error for malformed pr id")
+	}
+	// A malformed id is the CALLER's mistake, not this backend being
+	// unhealthy [design: §4.2, bug pg2-r9iok] — previously this fell
+	// through unwrapped to codeForError's "unavailable" fallback.
+	if !errors.Is(err, scriptout.ErrInvalidArgument) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrInvalidArgument)", err)
+	}
+}
+
+// TestGHPRResolver_NonexistentPR_NotFound proves the GraphQL "could not
+// resolve" phrasing gh returns for a nonexistent PR number is classified
+// as not_found through classifyGHError, not left to fall through to
+// "unavailable" [design: §4.5, bug pg2-r9iok].
+func TestGHPRResolver_NonexistentPR_NotFound(t *testing.T) {
+	gh := newFakeGH()
+	gh.errs["pr view"] = errors.New("gh pr view 999999999: exit status 1: GraphQL: Could not resolve to a PullRequest with the number of 999999999. (repository.pullRequest)")
+	r := newGHPRResolver(gh)
+	_, _, err := r.Resolve(context.Background(), "foo/bar#999999999")
+	if !errors.Is(err, scriptout.ErrNotFound) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrNotFound)", err)
 	}
 }
 

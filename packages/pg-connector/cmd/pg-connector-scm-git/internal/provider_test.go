@@ -85,12 +85,27 @@ func TestProvider_WorktreeAdd_DetachedRef_EmptyBranch(t *testing.T) {
 
 func TestProvider_WorktreeAdd_EmptyBranchOrRef_Rejected(t *testing.T) {
 	p := New(newFakeRunner(t, nil))
-	if _, err := p.WorktreeAdd(context.Background(), ""); err == nil {
+	_, err := p.WorktreeAdd(context.Background(), "")
+	if err == nil {
 		t.Fatal("WorktreeAdd(\"\") = nil error, want a rejection with no git invocation")
+	}
+	// An empty required field is the CALLER's mistake, not this backend
+	// being unhealthy [design: §4.2, bug pg2-r9iok] — it must not share
+	// ErrUnavailable's "this backend cannot currently be used" meaning.
+	if !errors.Is(err, scriptout.ErrInvalidArgument) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrInvalidArgument)", err)
 	}
 }
 
-func TestProvider_WorktreeAdd_GitFailure_WrapsUnavailable(t *testing.T) {
+// TestProvider_WorktreeAdd_BadRef_NotFound proves a branchOrRef that
+// doesn't resolve to any real git ref/branch/commit — `git worktree add`
+// failing with "fatal: invalid reference: ..." — is now reachable as a
+// well-formed not_found response [design: §4.5, §4.7, bug pg2-r9iok],
+// rather than being misreported as this backend being unhealthy
+// (ErrUnavailable). Before the fix, this exact scenario was the codebase's
+// own TestProvider_WorktreeAdd_GitFailure_WrapsUnavailable, which asserted
+// the buggy behavior as correct.
+func TestProvider_WorktreeAdd_BadRef_NotFound(t *testing.T) {
 	r := newFakeRunner(t, map[string]fakeAnswer{
 		"rev-parse --path-format=absolute --git-common-dir": {out: "/repo/.git"},
 		"worktree add /repo/.worktrees/bad bad":             {err: errors.New("fatal: invalid reference: bad")},
@@ -98,6 +113,27 @@ func TestProvider_WorktreeAdd_GitFailure_WrapsUnavailable(t *testing.T) {
 	p := New(r)
 
 	_, err := p.WorktreeAdd(context.Background(), "bad")
+	if !errors.Is(err, scriptout.ErrNotFound) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrNotFound)", err)
+	}
+	if errors.Is(err, scriptout.ErrUnavailable) {
+		t.Fatalf("err = %v, must NOT also be ErrUnavailable — a not_found answer must not share a code with a failure", err)
+	}
+}
+
+// TestProvider_WorktreeAdd_GenuineGitFailure_StaysUnavailable proves a real
+// git-exec failure unrelated to a bad ref (nothing in its message matches
+// isGitNotFound's patterns) still classifies as ErrUnavailable — the fix
+// narrows the not_found detection to genuine "no such ref" phrasing, it
+// does not turn every `git worktree add` failure into not_found.
+func TestProvider_WorktreeAdd_GenuineGitFailure_StaysUnavailable(t *testing.T) {
+	r := newFakeRunner(t, map[string]fakeAnswer{
+		"rev-parse --path-format=absolute --git-common-dir": {out: "/repo/.git"},
+		"worktree add /repo/.worktrees/feature feature":     {err: errors.New("fatal: unable to write new_index file")},
+	})
+	p := New(r)
+
+	_, err := p.WorktreeAdd(context.Background(), "feature")
 	if !errors.Is(err, scriptout.ErrUnavailable) {
 		t.Fatalf("err = %v, want errors.Is(err, ErrUnavailable)", err)
 	}
@@ -181,6 +217,14 @@ func TestProvider_WorktreeRemove_UnknownPath_NotFound(t *testing.T) {
 	}
 }
 
+func TestProvider_WorktreeRemove_EmptyPath_Rejected(t *testing.T) {
+	p := New(newFakeRunner(t, nil))
+	err := p.WorktreeRemove(context.Background(), "")
+	if !errors.Is(err, scriptout.ErrInvalidArgument) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrInvalidArgument)", err)
+	}
+}
+
 func TestProvider_BranchDetect_Success(t *testing.T) {
 	r := newFakeRunner(t, map[string]fakeAnswer{
 		"rev-parse --path-format=absolute --git-common-dir": {out: "/home/u/repo/.git"},
@@ -202,18 +246,67 @@ func TestProvider_BranchDetect_Success(t *testing.T) {
 
 func TestProvider_BranchDetect_EmptyCwd_Rejected(t *testing.T) {
 	p := New(newFakeRunner(t, nil))
-	if _, err := p.BranchDetect(context.Background(), ""); err == nil {
+	_, err := p.BranchDetect(context.Background(), "")
+	if err == nil {
 		t.Fatal("BranchDetect(\"\") = nil error, want a rejection with no git invocation")
+	}
+	// An empty required field is the CALLER's mistake, not this backend
+	// being unhealthy [design: §4.2, bug pg2-r9iok].
+	if !errors.Is(err, scriptout.ErrInvalidArgument) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrInvalidArgument)", err)
 	}
 }
 
-func TestProvider_BranchDetect_NotAGitRepo_WrapsUnavailable(t *testing.T) {
+// TestProvider_BranchDetect_NotAGitRepo_NotFound proves cwd resolving to no
+// git repository at all ("fatal: not a git repository (or any of the
+// parent directories): .git") is now reachable as a well-formed not_found
+// response [design: §4.5, §4.7, bug pg2-r9iok] rather than being
+// misreported as this backend being unhealthy. Before the fix, this exact
+// scenario was the codebase's own
+// TestProvider_BranchDetect_NotAGitRepo_WrapsUnavailable, which asserted
+// the buggy behavior as correct.
+func TestProvider_BranchDetect_NotAGitRepo_NotFound(t *testing.T) {
 	r := newFakeRunner(t, map[string]fakeAnswer{
-		"rev-parse --path-format=absolute --git-common-dir": {err: errors.New("fatal: not a git repository")},
+		"rev-parse --path-format=absolute --git-common-dir": {err: errors.New("fatal: not a git repository (or any of the parent directories): .git")},
 	})
 	p := New(r)
 
 	_, err := p.BranchDetect(context.Background(), "/tmp/not-a-repo")
+	if !errors.Is(err, scriptout.ErrNotFound) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrNotFound)", err)
+	}
+	if errors.Is(err, scriptout.ErrUnavailable) {
+		t.Fatalf("err = %v, must NOT also be ErrUnavailable — a not_found answer must not share a code with a failure", err)
+	}
+}
+
+// TestProvider_BranchDetect_MissingDir_NotFound covers the sibling
+// isGitNotFound phrasing (a cwd that doesn't exist as a directory at all —
+// "fatal: cannot change to '<dir>': No such file or directory") through
+// the same repoRootFor path BranchDetect shares with
+// WorktreeAdd/Remove/List.
+func TestProvider_BranchDetect_MissingDir_NotFound(t *testing.T) {
+	r := newFakeRunner(t, map[string]fakeAnswer{
+		"rev-parse --path-format=absolute --git-common-dir": {err: errors.New("fatal: cannot change to '/nonexistent/path': No such file or directory")},
+	})
+	p := New(r)
+
+	_, err := p.BranchDetect(context.Background(), "/nonexistent/path")
+	if !errors.Is(err, scriptout.ErrNotFound) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrNotFound)", err)
+	}
+}
+
+// TestProvider_BranchDetect_GenuineGitFailure_StaysUnavailable proves a
+// real git-exec failure whose message matches neither isGitNotFound
+// pattern still classifies as ErrUnavailable.
+func TestProvider_BranchDetect_GenuineGitFailure_StaysUnavailable(t *testing.T) {
+	r := newFakeRunner(t, map[string]fakeAnswer{
+		"rev-parse --path-format=absolute --git-common-dir": {err: errors.New("fatal: unable to read current working directory: Permission denied")},
+	})
+	p := New(r)
+
+	_, err := p.BranchDetect(context.Background(), "/tmp/some-repo")
 	if !errors.Is(err, scriptout.ErrUnavailable) {
 		t.Fatalf("err = %v, want errors.Is(err, ErrUnavailable)", err)
 	}

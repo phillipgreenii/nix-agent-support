@@ -118,7 +118,7 @@ func toSchemaIssue(iss *bdIssue) *schema.Issue {
 // Show implements issue.Provider.Show via `bd show <id> --json`.
 func (b *Backend) Show(ctx context.Context, id string) (*schema.Issue, error) {
 	if strings.TrimSpace(id) == "" {
-		return nil, scriptout.WrapError(scriptout.ErrUnavailable, "issue: id required")
+		return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, "issue: id required")
 	}
 	data, err := b.run(ctx, "show", id, "--json")
 	if err != nil {
@@ -139,7 +139,7 @@ func (b *Backend) Show(ctx context.Context, id string) (*schema.Issue, error) {
 // over.
 func (b *Backend) Create(ctx context.Context, input issue.IssueInput) (*schema.Issue, error) {
 	if strings.TrimSpace(input.Title) == "" {
-		return nil, scriptout.WrapError(scriptout.ErrUnavailable, "issue: title required")
+		return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, "issue: title required")
 	}
 	args := []string{"create", "--title", input.Title, "--json"}
 	if input.Priority != "" {
@@ -168,10 +168,10 @@ func (b *Backend) Create(ctx context.Context, input issue.IssueInput) (*schema.I
 // only.
 func (b *Backend) Comment(ctx context.Context, id, body string) error {
 	if strings.TrimSpace(id) == "" {
-		return scriptout.WrapError(scriptout.ErrUnavailable, "issue: id required")
+		return scriptout.WrapError(scriptout.ErrInvalidArgument, "issue: id required")
 	}
 	if strings.TrimSpace(body) == "" {
-		return scriptout.WrapError(scriptout.ErrUnavailable, "issue: comment body required")
+		return scriptout.WrapError(scriptout.ErrInvalidArgument, "issue: comment body required")
 	}
 	_, err := b.run(ctx, "comment", id, body, "--json")
 	return err
@@ -187,10 +187,10 @@ func (b *Backend) Comment(ctx context.Context, id, body string) error {
 // own doc comment, not this method's job to pre-validate).
 func (b *Backend) Transition(ctx context.Context, id, targetState string) error {
 	if strings.TrimSpace(id) == "" {
-		return scriptout.WrapError(scriptout.ErrUnavailable, "issue: id required")
+		return scriptout.WrapError(scriptout.ErrInvalidArgument, "issue: id required")
 	}
 	if strings.TrimSpace(targetState) == "" {
-		return scriptout.WrapError(scriptout.ErrUnavailable, "issue: target_state required")
+		return scriptout.WrapError(scriptout.ErrInvalidArgument, "issue: target_state required")
 	}
 	_, err := b.run(ctx, "update", id, "--status", targetState, "--json")
 	return err

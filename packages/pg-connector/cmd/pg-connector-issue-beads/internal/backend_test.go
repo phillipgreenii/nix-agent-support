@@ -92,11 +92,24 @@ func TestBackend_Show_NotFound_ViaJSONErrorEnvelope(t *testing.T) {
 func TestBackend_Show_EmptyID(t *testing.T) {
 	fr := &fakeRunner{}
 	b := New(fr)
-	if _, err := b.Show(context.Background(), "  "); err == nil {
+	_, err := b.Show(context.Background(), "  ")
+	if err == nil {
 		t.Fatal("expected error for empty id")
 	}
 	if len(fr.calls) != 0 {
 		t.Fatalf("expected no bd invocation for an invalid call, got %v", fr.calls)
+	}
+	// An empty id is the CALLER's mistake, not this backend being
+	// unhealthy [design: §4.2, bug pg2-r9iok] — it must not share
+	// ErrUnavailable's "this backend cannot currently be used" meaning,
+	// and must not be confused with ErrNotFound (a well-formed id that
+	// genuinely doesn't exist) either — an empty id was never even a
+	// candidate for lookup.
+	if !errors.Is(err, scriptout.ErrInvalidArgument) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrInvalidArgument)", err)
+	}
+	if errors.Is(err, scriptout.ErrNotFound) || errors.Is(err, scriptout.ErrUnavailable) {
+		t.Fatalf("err = %v, must not also be ErrNotFound/ErrUnavailable", err)
 	}
 }
 
@@ -142,11 +155,15 @@ func TestBackend_Create_Success(t *testing.T) {
 func TestBackend_Create_MissingTitle(t *testing.T) {
 	fr := &fakeRunner{}
 	b := New(fr)
-	if _, err := b.Create(context.Background(), issue.IssueInput{}); err == nil {
+	_, err := b.Create(context.Background(), issue.IssueInput{})
+	if err == nil {
 		t.Fatal("expected error for empty title")
 	}
 	if len(fr.calls) != 0 {
 		t.Fatalf("expected no bd invocation for an invalid call, got %v", fr.calls)
+	}
+	if !errors.Is(err, scriptout.ErrInvalidArgument) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrInvalidArgument)", err)
 	}
 }
 
@@ -200,11 +217,27 @@ func TestBackend_Comment_NotFound_ViaStderrOnlyFailure(t *testing.T) {
 func TestBackend_Comment_EmptyBody(t *testing.T) {
 	fr := &fakeRunner{}
 	b := New(fr)
-	if err := b.Comment(context.Background(), "tp-1", ""); err == nil {
+	err := b.Comment(context.Background(), "tp-1", "")
+	if err == nil {
 		t.Fatal("expected error for empty body")
 	}
 	if len(fr.calls) != 0 {
 		t.Fatalf("expected no bd invocation for an invalid call, got %v", fr.calls)
+	}
+	if !errors.Is(err, scriptout.ErrInvalidArgument) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrInvalidArgument)", err)
+	}
+}
+
+func TestBackend_Comment_EmptyID(t *testing.T) {
+	fr := &fakeRunner{}
+	b := New(fr)
+	err := b.Comment(context.Background(), "  ", "hello")
+	if len(fr.calls) != 0 {
+		t.Fatalf("expected no bd invocation for an invalid call, got %v", fr.calls)
+	}
+	if !errors.Is(err, scriptout.ErrInvalidArgument) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrInvalidArgument)", err)
 	}
 }
 
@@ -290,11 +323,27 @@ func TestBackend_Run_PathMissing_IsNotMisclassifiedAsNotFound(t *testing.T) {
 func TestBackend_Transition_EmptyTargetState(t *testing.T) {
 	fr := &fakeRunner{}
 	b := New(fr)
-	if err := b.Transition(context.Background(), "tp-1", ""); err == nil {
+	err := b.Transition(context.Background(), "tp-1", "")
+	if err == nil {
 		t.Fatal("expected error for empty target state")
 	}
 	if len(fr.calls) != 0 {
 		t.Fatalf("expected no bd invocation for an invalid call, got %v", fr.calls)
+	}
+	if !errors.Is(err, scriptout.ErrInvalidArgument) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrInvalidArgument)", err)
+	}
+}
+
+func TestBackend_Transition_EmptyID(t *testing.T) {
+	fr := &fakeRunner{}
+	b := New(fr)
+	err := b.Transition(context.Background(), "  ", "closed")
+	if len(fr.calls) != 0 {
+		t.Fatalf("expected no bd invocation for an invalid call, got %v", fr.calls)
+	}
+	if !errors.Is(err, scriptout.ErrInvalidArgument) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrInvalidArgument)", err)
 	}
 }
 

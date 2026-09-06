@@ -111,7 +111,7 @@ const runListFields = "databaseId,name,status,conclusion,url,headBranch,headSha"
 // PRID [design: §2].
 func (b *Backend) ListRuns(ctx context.Context, prID string) ([]schema.CIRun, error) {
 	if strings.TrimSpace(prID) == "" {
-		return nil, scriptout.WrapError(scriptout.ErrUnavailable, "pg-connector-ci-github-actions: pr id is required")
+		return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, "pg-connector-ci-github-actions: pr id is required")
 	}
 	repo, branch, err := b.pr.Resolve(ctx, prID)
 	if err != nil {
@@ -165,7 +165,7 @@ func (b *Backend) listRunsByBranch(ctx context.Context, prID, repo, branch strin
 // behavioral drift on the ported operations."
 func (b *Backend) GetLogs(ctx context.Context, runID string) ([]byte, error) {
 	if strings.TrimSpace(runID) == "" {
-		return nil, scriptout.WrapError(scriptout.ErrUnavailable, "pg-connector-ci-github-actions: run ID is required")
+		return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, "pg-connector-ci-github-actions: run ID is required")
 	}
 	raw, err := b.gh.Run(ctx, "run", "view", runID, "--log")
 	if err != nil {
@@ -210,10 +210,12 @@ func (b *Backend) CheckAuth(ctx context.Context) error {
 }
 
 // classifyGHError maps a ported gh-call error onto scriptout's closed error
-// taxonomy: an auth failure becomes unauthenticated; everything else
-// passes through unwrapped to scriptout's own codeForError fallback
-// ("unavailable") — mirroring the sibling pg-connector-pr-github backend's
-// own classifyGHError [freedom boundary, part 4].
+// taxonomy: an auth failure becomes unauthenticated; a genuine "the PR/run
+// genuinely doesn't exist" response from GitHub becomes not_found [design:
+// §4.5, bug pg2-r9iok]; everything else passes through unwrapped to
+// scriptout's own codeForError fallback ("unavailable") — mirroring the
+// sibling pg-connector-pr-github backend's own classifyGHError [freedom
+// boundary, part 4].
 func classifyGHError(err error) error {
 	if err == nil {
 		return nil
@@ -221,7 +223,25 @@ func classifyGHError(err error) error {
 	if errors.Is(err, github.ErrGHAuthInvalid) {
 		return scriptout.WrapError(scriptout.ErrUnauthenticated, err.Error())
 	}
+	if isGHNotFound(err) {
+		return scriptout.WrapError(scriptout.ErrNotFound, err.Error())
+	}
 	return err
+}
+
+// isGHNotFound reports whether err's message carries one of the two error
+// phrasings verified empirically against real `gh` 2.99.0 for "the entity
+// genuinely doesn't exist": a GraphQL unresolved-node error from an
+// id-based op like `gh pr view <number>` (used by resolver.go's own
+// Resolve to translate a PR id into a head branch — `GraphQL: Could not
+// resolve to a PullRequest with the number of 999999999.
+// (repository.pullRequest)`, exit 1), or a REST 404 from a path-based op
+// like `gh run view <id> --log`/`gh run rerun <id>` (stderr `failed to get
+// run: HTTP 404: Not Found (...)`, exit 1) — mirroring the sibling
+// pg-connector-pr-github backend's own isGHNotFound [bug pg2-r9iok].
+func isGHNotFound(err error) bool {
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "could not resolve to a") || strings.Contains(msg, "http 404")
 }
 
 // validateRepo is carried over unchanged from ghactions.go.

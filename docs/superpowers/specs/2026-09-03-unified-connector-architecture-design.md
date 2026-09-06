@@ -102,15 +102,34 @@ and the `auth_status` convention carry over unchanged from pg-pr's existing `pkg
 bare string; this design widens it to the structured object described below.
 
 The `{"error": ...}` payload becomes a structured object, `{"code": "...", "message": "..."}`,
-with `code` drawn from a closed set (at least `not_found`, `unauthenticated`, `unavailable`,
-`unknown_op`, `version_mismatch`) — enough for the fan-out layer to classify degraded-vs-broken
-without substring-matching. Exit codes at the wire level stay 0/1; classification lives in the
-JSON body, matching scriptout's existing "only stdout JSON is the contract" convention. On the Go
-consuming side, the wire boundary translates each `code` into one of a small set of exported
-sentinel errors in `pkg/scriptout` (`ErrNotFound`, `ErrUnauthenticated`, `ErrUnavailable`,
-`ErrUnknownOp`, `ErrVersionMismatch`), wrapped as `fmt.Errorf("%w: %s", sentinel, message)` — the
-same pattern `vcs.ErrAuthInvalid` already establishes — so callers use `errors.Is` instead of
-substring-matching the message.
+with `code` drawn from a closed set: `not_found`, `unauthenticated`, `unavailable`, `unknown_op`,
+`version_mismatch`, `invalid_argument` — enough for the fan-out layer to classify
+degraded-vs-broken without substring-matching. Exit codes at the wire level stay 0/1;
+classification lives in the JSON body, matching scriptout's existing "only stdout JSON is the
+contract" convention. On the Go consuming side, the wire boundary translates each `code` into one
+of a small set of exported sentinel errors in `pkg/scriptout` (`ErrNotFound`, `ErrUnauthenticated`,
+`ErrUnavailable`, `ErrUnknownOp`, `ErrVersionMismatch`, `ErrInvalidArgument`), wrapped as
+`fmt.Errorf("%w: %s", sentinel, message)` — the same pattern `vcs.ErrAuthInvalid` already
+establishes — so callers use `errors.Is` instead of substring-matching the message.
+
+**`invalid_argument` (resolved, not left open — bead `pg2-r9iok`, 2026-09-06):** this section's
+earlier draft scoped the closed set as "at least" five codes, deliberately leaving room to extend
+it; that room is exercised here to close a real gap found across four Tier-2 backends
+(`pg-connector-pr-github`, `pg-connector-ci-github-actions`, `pg-connector-scm-git`,
+`pg-connector-issue-beads`). A caller-input-validation failure — an empty required field, an id
+that doesn't even parse into this backend's own id shape — was falling through to
+`unavailable`, whose own doc comment defines that code as "this backend cannot currently be
+used." That is actively misleading: the backend is fine, the _caller's request_ was malformed,
+and a health-reporting/alerting consumer of the fan-out layer's `sources[]` (§4.5) has no way to
+tell those two situations apart without substring-matching the free-text `message`, exactly what
+this structured taxonomy exists to avoid. `invalid_argument` is the sixth code, reserved
+specifically for that case — never for "the specific entity doesn't exist" (that stays
+`not_found`, whether the "entity" is a PR, a CI run, or a git ref/branch: a caller supplying a
+well-formed but nonexistent id is a `not_found` case exactly like today, not `invalid_argument`).
+This changes nothing about §4.5's CLI exit-code scheme: a targeted op still exits `1` for
+`invalid_argument`, identically to every other non-`not_found` code — §4.5 already named "bad
+arguments" explicitly as one of the CLI-level failures folded into that `1`. Only the wire body's
+`error.code` (and the Go sentinel a caller can `errors.Is` against) gains the extra precision.
 
 ### 4.3 Versioning and capability discovery
 
@@ -368,9 +387,13 @@ op by a specific id, resolving to exactly one backend (e.g. `show`, `categorize`
   - **`4`** — `not_found`: the operation completed correctly; the specific entity genuinely
     doesn't exist. A healthy backend giving a definitive negative answer MUST NOT share a code
     with an actual failure.
-  - **`1`** — any other error (`unauthenticated`/`unavailable`/`unknown_op`/`version_mismatch`,
-    or a CLI-level failure before a well-formed response was produced at all: bad arguments, an
-    unreachable/non-executable backend, a panic).
+  - **`1`** — any other error
+    (`unauthenticated`/`unavailable`/`unknown_op`/`version_mismatch`/`invalid_argument`, or a
+    CLI-level failure before a well-formed response was produced at all: bad arguments, an
+    unreachable/non-executable backend, a panic). `invalid_argument` (§4.2) exits `1` here
+    identically to every other code in this bucket — it sharpens the wire body's `error.code` for
+    a caller-input-validation failure, not the CLI exit-code scheme, which already folded "bad
+    arguments" into `1` before that code existed.
 - **`1`** is otherwise deliberately reserved and never emitted for a fan-out outcome — it stays
   available for the CLI's own generic/unexpected-failure path, matching the common convention
   that 1 is the default, catch-all failure code so many tools already assume.

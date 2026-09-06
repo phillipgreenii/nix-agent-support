@@ -90,7 +90,7 @@ func parsePRID(id string) (repo string, number int, err error) {
 func (b *Backend) Show(ctx context.Context, id string) (*schema.PR, error) {
 	repo, number, err := parsePRID(id)
 	if err != nil {
-		return nil, scriptout.WrapError(scriptout.ErrUnavailable, err.Error())
+		return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, err.Error())
 	}
 	ghPR, err := b.gh.GetPR(ctx, repo, number)
 	if err != nil {
@@ -116,7 +116,7 @@ func (b *Backend) Show(ctx context.Context, id string) (*schema.PR, error) {
 // call is made — category has no GitHub-side representation.
 func (b *Backend) Categorize(ctx context.Context, id, category string) (*schema.CategorizeResult, error) {
 	if _, _, err := parsePRID(id); err != nil {
-		return nil, scriptout.WrapError(scriptout.ErrUnavailable, err.Error())
+		return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, err.Error())
 	}
 	if err := b.store.SetCategory(id, category); err != nil {
 		return nil, scriptout.WrapError(scriptout.ErrUnavailable, err.Error())
@@ -131,12 +131,12 @@ func (b *Backend) Categorize(ctx context.Context, id, category string) (*schema.
 // than trusting the caller's commentID blindly.
 func (b *Backend) FeedbackSet(ctx context.Context, id, commentID string, disposition schema.Disposition) (*schema.FeedbackSetResult, error) {
 	if !disposition.IsValid() {
-		return nil, scriptout.WrapError(scriptout.ErrUnavailable,
+		return nil, scriptout.WrapError(scriptout.ErrInvalidArgument,
 			fmt.Sprintf("pg-connector-pr-github: disposition %q is not one of %v", disposition, schema.ValidDispositions))
 	}
 	repo, number, err := parsePRID(id)
 	if err != nil {
-		return nil, scriptout.WrapError(scriptout.ErrUnavailable, err.Error())
+		return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, err.Error())
 	}
 	comments, err := b.gh.ListComments(ctx, repo, number)
 	if err != nil {
@@ -167,9 +167,11 @@ func (b *Backend) CheckAuth(ctx context.Context) error {
 }
 
 // classifyGHError maps a ported GitHub-provider error onto scriptout's
-// closed error taxonomy: an auth failure becomes unauthenticated;
-// everything else passes through unwrapped to scriptout's own
-// codeForError fallback ("unavailable") [freedom boundary, part 4].
+// closed error taxonomy: an auth failure becomes unauthenticated; a
+// genuine "the PR/comment/review genuinely doesn't exist" response from
+// GitHub becomes not_found [design: §4.5, bug pg2-r9iok]; everything else
+// passes through unwrapped to scriptout's own codeForError fallback
+// ("unavailable") [freedom boundary, part 4].
 func classifyGHError(err error) error {
 	if err == nil {
 		return nil
@@ -177,7 +179,28 @@ func classifyGHError(err error) error {
 	if errors.Is(err, github.ErrGHAuthInvalid) {
 		return scriptout.WrapError(scriptout.ErrUnauthenticated, err.Error())
 	}
+	if isGHNotFound(err) {
+		return scriptout.WrapError(scriptout.ErrNotFound, err.Error())
+	}
 	return err
+}
+
+// isGHNotFound reports whether err's message carries one of the two error
+// phrasings verified empirically against real `gh` 2.99.0 for "the entity
+// genuinely doesn't exist" (as opposed to an auth/rate-limit/transport
+// failure): a GraphQL unresolved-node error from an id-based op like `gh pr
+// view <number>` (`GraphQL: Could not resolve to a PullRequest with the
+// number of 999999999. (repository.pullRequest)`, exit 1), or a REST 404
+// from a path-based op like `gh api repos/<repo>/issues/<n>/comments`
+// (stderr `gh: Not Found (HTTP 404)`, exit 1). Matched by substring on the
+// already-stderr-inclusive error message (ghexec.go/RunStdin folds gh's
+// stderr into the returned error), the same style token.go's own
+// isAuthFailure uses for auth classification, deliberately not by exit
+// code: gh does not use a distinct exit code for "not found" the way it
+// does (4) for "no credential" [bug pg2-r9iok].
+func isGHNotFound(err error) bool {
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "could not resolve to a") || strings.Contains(msg, "http 404")
 }
 
 // toSchemaPR assembles the pr capability's wire shape from the ported

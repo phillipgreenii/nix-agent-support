@@ -15,7 +15,7 @@ func TestWrapError_ErrorsIs(t *testing.T) {
 	}
 }
 
-func TestCodeForError_AllFiveSentinels(t *testing.T) {
+func TestCodeForError_AllSixSentinels(t *testing.T) {
 	cases := []struct {
 		sentinel error
 		code     string
@@ -25,6 +25,7 @@ func TestCodeForError_AllFiveSentinels(t *testing.T) {
 		{ErrUnavailable, "unavailable"},
 		{ErrUnknownOp, "unknown_op"},
 		{ErrVersionMismatch, "version_mismatch"},
+		{ErrInvalidArgument, "invalid_argument"},
 	}
 	for _, c := range cases {
 		wrapped := WrapError(c.sentinel, "detail")
@@ -41,7 +42,7 @@ func TestCodeForError_UnwrappedFallsBackToUnavailable(t *testing.T) {
 }
 
 func TestSentinelForCode_RoundTrip(t *testing.T) {
-	codes := []string{"not_found", "unauthenticated", "unavailable", "unknown_op", "version_mismatch"}
+	codes := []string{"not_found", "unauthenticated", "unavailable", "unknown_op", "version_mismatch", "invalid_argument"}
 	for _, code := range codes {
 		sentinel := sentinelForCode(code)
 		if codeForError(sentinel) != code {
