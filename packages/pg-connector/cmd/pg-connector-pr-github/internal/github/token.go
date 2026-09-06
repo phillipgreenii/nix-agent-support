@@ -2,6 +2,7 @@ package github
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -52,9 +53,21 @@ func ghAuthTokenCommand(ctx context.Context) *exec.Cmd {
 	return cmd
 }
 
+// Token execs `gh auth token` and returns its stdout. On failure it surfaces
+// the subprocess's actual stderr (via *exec.Cmd.Output's ExitError.Stderr,
+// populated automatically because cmd.Stderr is left nil) instead of the
+// bare "exit status N" .Output() would otherwise leave callers with — every
+// credential failure used to collapse to a generic "run gh auth login"
+// message regardless of the real cause (bead pg2-y23d4 #32).
 func (ghCLITokenSource) Token(ctx context.Context) (string, error) {
 	out, err := ghAuthTokenCommand(ctx).Output()
 	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			if st := strings.TrimSpace(string(exitErr.Stderr)); st != "" {
+				return "", fmt.Errorf("gh auth token: %s: %w", st, err)
+			}
+		}
 		return "", fmt.Errorf("gh auth token: %w", err)
 	}
 	return strings.TrimSpace(string(out)), nil
@@ -90,16 +103,57 @@ func defaultTokenSource() TokenSource {
 	}}
 }
 
-// envWithoutGHToken returns env with any GH_TOKEN/GITHUB_TOKEN entries removed.
+// ghEnvVarsToStrip enumerates every gh CLI environment variable this
+// package strips from a child gh process (bead pg2-y23d4 #21):
+//
+//   - GH_TOKEN / GITHUB_TOKEN: the credential this package itself resolves
+//     and re-injects (via envWithGHToken) or reads (ghAuthTokenCommand) —
+//     an ambient value must not survive, or `gh auth token` just echoes it
+//     back instead of reading the stored credential.
+//   - GH_ENTERPRISE_TOKEN / GITHUB_ENTERPRISE_TOKEN: the enterprise-host
+//     token pair gh prefers over GH_TOKEN whenever GH_HOST names an
+//     enterprise host. Leaving these in place lets an ambient enterprise
+//     credential silently outrank the token this package resolved.
+//   - GH_HOST: which host gh talks to.
+//   - GH_REPO: which repository gh targets — an inherited value would
+//     override an explicit --repo a caller passes (the ci backend always
+//     passes one).
+//   - GH_CONFIG_DIR: which config/credential store gh reads.
+//
+// gitenv.Hermetic (applied alongside this) only filters the GIT_*-prefixed
+// family and does not help here — these are gh's own variables, not git's.
+var ghEnvVarsToStrip = []string{
+	"GH_TOKEN",
+	"GITHUB_TOKEN",
+	"GH_ENTERPRISE_TOKEN",
+	"GITHUB_ENTERPRISE_TOKEN",
+	"GH_HOST",
+	"GH_REPO",
+	"GH_CONFIG_DIR",
+}
+
+// envWithoutGHToken returns env with every entry in ghEnvVarsToStrip
+// removed.
 func envWithoutGHToken(env []string) []string {
 	out := env[:0:0]
 	for _, kv := range env {
-		if strings.HasPrefix(kv, "GH_TOKEN=") || strings.HasPrefix(kv, "GITHUB_TOKEN=") {
+		if hasStrippedGHEnvPrefix(kv) {
 			continue
 		}
 		out = append(out, kv)
 	}
 	return out
+}
+
+// hasStrippedGHEnvPrefix reports whether kv (a "NAME=value" environment
+// entry) names one of ghEnvVarsToStrip.
+func hasStrippedGHEnvPrefix(kv string) bool {
+	for _, name := range ghEnvVarsToStrip {
+		if strings.HasPrefix(kv, name+"=") {
+			return true
+		}
+	}
+	return false
 }
 
 // envWithGHToken returns env with GH_TOKEN/GITHUB_TOKEN stripped and a single

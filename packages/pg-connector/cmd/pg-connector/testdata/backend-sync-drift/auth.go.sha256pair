@@ -1,2 +1,2 @@
-4def6c13258efb5714109e773df2bf1e1eca1a4c9b67c2d258d8669464ca840b  pg-connector-pr-github/auth.go
-fcd37c7e17e19483cb56f827fc780d4066ef3a8d5fa111625c8fd9dc559d07d6  pg-connector-ci-github-actions/auth.go
+544bcdb88dd7ddddb0b6773cf43af036e0c5b5c12b872e4e7895483e4e889b5c  pg-connector-pr-github/auth.go
+684eedf8e32194cc9b0950866e38f3e788680fe9991563f3cdcce7bf52fc2fa3  pg-connector-ci-github-actions/auth.go

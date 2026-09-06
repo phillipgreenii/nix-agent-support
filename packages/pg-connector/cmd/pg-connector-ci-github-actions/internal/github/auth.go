@@ -29,10 +29,23 @@ import (
 var ErrGHAuthInvalid = errors.New("pg-connector-ci-github-actions: github auth invalid")
 
 // IsAuthFailure classifies a gh failure as an auth problem from its exit
-// code and stderr, ported unchanged from the sibling backend's copy. gh
-// surfaces: exit 4 + "gh auth login" (no token); exit 1 + "Bad credentials
+// code and stderr, ported from the sibling backend's copy. gh surfaces:
+// exit 4 + "gh auth login" (no token); exit 1 + "Bad credentials
 // (HTTP 401)" (invalid token); "Requires authentication (HTTP 401)"
-// (unauthenticated request). Match defensively.
+// (unauthenticated request).
+//
+// A token that authenticates but can no longer act — an expired/
+// un-reauthorized SSO session, or a token missing required OAuth scopes —
+// surfaces as HTTP 403 rather than 401: "Resource protected by organization
+// SAML enforcement. You must grant your personal access token access to
+// this organization." (SSO), "Resource not accessible by integration"
+// (insufficient scopes for an App-style token), or a GraphQL "...has not
+// been granted the required scopes..." message. gh formats all of these the
+// same way the 401 messages above are formatted, with a trailing
+// "(HTTP 403)" — the bare "http 403" check below already covers them, and
+// the specific phrases are matched too, redundantly, in case gh ever omits
+// the HTTP-code suffix (bead pg2-y23d4 #32; these previously fell through to
+// a generic/unavailable classification instead of auth). Match defensively.
 func IsAuthFailure(exitCode int, stderr string) bool {
 	if exitCode == 4 {
 		return true
@@ -40,5 +53,9 @@ func IsAuthFailure(exitCode int, stderr string) bool {
 	s := strings.ToLower(stderr)
 	return strings.Contains(s, "http 401") ||
 		strings.Contains(s, "bad credentials") ||
-		strings.Contains(s, "requires authentication")
+		strings.Contains(s, "requires authentication") ||
+		strings.Contains(s, "http 403") ||
+		strings.Contains(s, "saml enforcement") ||
+		strings.Contains(s, "not accessible by integration") ||
+		strings.Contains(s, "required scopes")
 }
