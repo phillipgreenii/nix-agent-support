@@ -99,6 +99,21 @@ func Invoke(ctx context.Context, binary, op string, args any) (*Response, error)
 	if resp.Error != nil {
 		return &resp, WrapError(sentinelForCode(resp.Error.Code), fmt.Sprintf("%s: %s", binary, resp.Error.Message))
 	}
+	// A protocolVersion mismatch is checked before anything else on the
+	// success path: the umbrella (this process) and binary are each built
+	// from a separate, independently-versioned/deployed nix derivation
+	// [design: §4.3], so skew between them is the ordinary case, not an
+	// edge case. Every well-formed response carries the wire envelope's
+	// own protocolVersion; a binary built from a commit whose envelope
+	// shape has since changed reports that here even though its Result
+	// otherwise looks well-formed — trusting Result under a mismatched
+	// envelope version would be trusting a shape this process cannot
+	// actually verify.
+	if resp.ProtocolVersion != ProtocolVersion {
+		return nil, WrapError(ErrVersionMismatch, fmt.Sprintf(
+			"%s: protocolVersion %d != %d", binary, resp.ProtocolVersion, ProtocolVersion,
+		))
+	}
 	if len(resp.Result) == 0 {
 		// Neither result nor error is set: the backend produced a
 		// well-formed-looking envelope that answers nothing at all. This
@@ -148,5 +163,20 @@ func InvokeCapabilities(ctx context.Context, binary string) (*CapabilitiesRespon
 		return nil, WrapError(sentinelForCode(wire.Error.Code), fmt.Sprintf("%s: %s", binary, wire.Error.Message))
 	}
 	resp := wire.CapabilitiesResponse
+	// Same protocolVersion check Invoke applies to every other op's
+	// success path (see its own comment) — capabilities is not exempt
+	// just because its shape is bespoke. Per-capability schemaVersion
+	// skew (the other half of §4.3's mechanism) is deliberately NOT
+	// checked here: this package is capability-agnostic by design (see
+	// this file's package doc comment) and has no notion of which
+	// schema-bearing capabilities exist or what their current versions
+	// are — that comparison is cmd/pg-connector's job against resp's own
+	// SchemaVersions map (see config_validate.go), the one caller that
+	// actually knows both sides.
+	if resp.ProtocolVersion != ProtocolVersion {
+		return nil, WrapError(ErrVersionMismatch, fmt.Sprintf(
+			"%s: protocolVersion %d != %d", binary, resp.ProtocolVersion, ProtocolVersion,
+		))
+	}
 	return &resp, nil
 }

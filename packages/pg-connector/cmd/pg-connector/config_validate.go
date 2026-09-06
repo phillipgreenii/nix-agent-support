@@ -8,8 +8,11 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
+	"sort"
 	"strings"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 	"github.com/spf13/cobra"
 )
@@ -40,7 +43,17 @@ func configValidateOne(ctx context.Context, backend string) SourceResult {
 	}
 
 	capsOK := true
-	if _, err := scriptout.InvokeCapabilities(ctx, backend); err != nil {
+	capsResp, err := scriptout.InvokeCapabilities(ctx, backend)
+	if err == nil {
+		// InvokeCapabilities already checked protocolVersion (see its own
+		// doc comment); schemaVersion is per-capability, so it is checked
+		// here against capsResp's own self-declared SchemaVersions map —
+		// the payload this call used to discard entirely (bug pg2-p2z7o),
+		// even though it is the one place a backend's schema version
+		// actually travels [design: §4.3].
+		err = checkSchemaVersions(capsResp)
+	}
+	if err != nil {
 		if !errors.Is(err, scriptout.ErrUnknownOp) {
 			capsOK = false
 			reasons = append(reasons, "capabilities: "+err.Error())
@@ -51,6 +64,42 @@ func configValidateOne(ctx context.Context, backend string) SourceResult {
 		return SourceResult{Source: backend, Status: SourceSucceeded, Count: 0}
 	}
 	return SourceResult{Source: backend, Status: SourceDegraded, Count: 0, Reason: strings.Join(reasons, "; ")}
+}
+
+// checkSchemaVersions compares resp's self-declared per-capability schema
+// versions against schema.CurrentSchemaVersions (this build's own current
+// expectations), returning a version_mismatch-wrapped error naming the
+// first disagreement found, or nil if every capability resp declares
+// matches [design: §4.3]. Keys are walked in sorted order so a genuine
+// multi-capability mismatch always reports the same one first, rather than
+// depending on Go's randomized map iteration order.
+//
+// A capability key resp declares that schema.CurrentSchemaVersions doesn't
+// recognize (e.g. a future attention/search-only backend this build
+// doesn't yet know about) is skipped, not treated as a mismatch — this
+// build simply has no opinion on a capability it doesn't itself know
+// about.
+func checkSchemaVersions(resp *scriptout.CapabilitiesResponse) error {
+	if resp == nil {
+		return nil
+	}
+	names := make([]string, 0, len(resp.SchemaVersions))
+	for name := range resp.SchemaVersions {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		got := resp.SchemaVersions[name]
+		want, known := schema.CurrentSchemaVersions[name]
+		if !known {
+			continue
+		}
+		if got != want {
+			return scriptout.WrapError(scriptout.ErrVersionMismatch,
+				fmt.Sprintf("capability %q schemaVersion %d != %d", name, got, want))
+		}
+	}
+	return nil
 }
 
 func newConfigCmd() *cobra.Command {

@@ -60,6 +60,26 @@ func helperMain() {
 			Ops:             []string{"get_pr", OpAuthStatus, OpCapabilities},
 		})
 		os.Exit(0)
+	case "protocol_mismatch":
+		// A well-formed, otherwise-successful envelope from a binary built
+		// against a different (here: newer) wire-envelope protocolVersion
+		// than this process expects — the ordinary-op half of the
+		// umbrella/backend skew this docket exists to catch.
+		_ = json.NewEncoder(os.Stdout).Encode(Response{
+			ProtocolVersion: ProtocolVersion + 1,
+			SchemaVersion:   1,
+			Result:          json.RawMessage(`{"state":"OK"}`),
+		})
+		os.Exit(0)
+	case "capabilities_protocol_mismatch":
+		// Same skew, surfaced through the bespoke capabilities shape
+		// instead of the ordinary Response envelope.
+		_ = json.NewEncoder(os.Stdout).Encode(CapabilitiesResponse{
+			ProtocolVersion: ProtocolVersion + 1,
+			SchemaVersions:  map[string]int{"pr": 1},
+			Ops:             []string{"get_pr", OpAuthStatus, OpCapabilities},
+		})
+		os.Exit(0)
 	case "echo_op":
 		var req Request
 		if err := json.Unmarshal(stdin, &req); err != nil {
@@ -201,6 +221,27 @@ func TestInvoke_ArgsRoundTrip(t *testing.T) {
 	}
 }
 
+func TestInvoke_ProtocolVersionMismatch_IsVersionMismatchNotSilentSuccess(t *testing.T) {
+	// Before this fix, Invoke decoded a well-formed, otherwise-successful
+	// response whose protocolVersion disagreed with this process's own
+	// ProtocolVersion constant as a plain success — a genuine
+	// umbrella/backend version skew (the ordinary case, since the
+	// umbrella and each backend are separate, independently-deployed nix
+	// derivations [design: §4.3]) passed silently instead of surfacing
+	// version_mismatch.
+	withFactory(t, "protocol_mismatch")
+	resp, err := Invoke(context.Background(), "fake-binary", "get_pr", nil)
+	if err == nil {
+		t.Fatalf("expected version_mismatch error, got success resp=%+v", resp)
+	}
+	if resp != nil {
+		t.Fatalf("expected nil resp on version mismatch, got %+v", resp)
+	}
+	if !errors.Is(err, ErrVersionMismatch) {
+		t.Fatalf("expected errors.Is(err, ErrVersionMismatch), got %v", err)
+	}
+}
+
 func TestInvoke_EmptyEnvelope_IsProtocolViolationNotSuccess(t *testing.T) {
 	// A response with neither result nor error currently returned success
 	// — this must be a protocol-violation error instead [bug A7].
@@ -271,6 +312,23 @@ func TestInvokeCapabilities_ErrorEnvelope_NotSilentSuccess(t *testing.T) {
 	}
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("expected errors.Is(err, ErrNotFound), got %v", err)
+	}
+}
+
+func TestInvokeCapabilities_ProtocolVersionMismatch_IsVersionMismatchNotSilentSuccess(t *testing.T) {
+	// Same skew as TestInvoke_ProtocolVersionMismatch_..., surfaced
+	// through the bespoke CapabilitiesResponse shape — capabilities is
+	// not exempt from the check just because its envelope is bespoke.
+	withFactory(t, "capabilities_protocol_mismatch")
+	resp, err := InvokeCapabilities(context.Background(), "fake-binary")
+	if err == nil {
+		t.Fatalf("expected version_mismatch error, got success resp=%+v", resp)
+	}
+	if resp != nil {
+		t.Fatalf("expected nil resp on version mismatch, got %+v", resp)
+	}
+	if !errors.Is(err, ErrVersionMismatch) {
+		t.Fatalf("expected errors.Is(err, ErrVersionMismatch), got %v", err)
 	}
 }
 
