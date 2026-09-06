@@ -18,6 +18,7 @@ import (
 	"strings"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-scm-git/internal/gitenv"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
 
 // Runner is the seam every Provider method in this package runs its git
@@ -51,7 +52,8 @@ func (execRunner) Run(ctx context.Context, dir string, args ...string) (string, 
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		if stderrTxt := strings.TrimSpace(stderr.String()); stderrTxt != "" {
+		// Capped [bead pg2-332z8 #26]: see scriptout.TruncateForFold.
+		if stderrTxt := scriptout.TruncateForFold(stderr.Bytes()); stderrTxt != "" {
 			return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, stderrTxt)
 		}
 		return "", fmt.Errorf("git %s: %w", strings.Join(args, " "), err)

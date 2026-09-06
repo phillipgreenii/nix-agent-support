@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-ci-github-actions/internal/gitenv"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
 
 // TokenSource retrieves a GitHub auth token. The default reads gh's own
@@ -42,6 +43,8 @@ type ghCLITokenSource struct{}
 func ghAuthTokenCommand(ctx context.Context) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, "gh", "auth", "token")
 	cmd.Env = envWithoutGHToken(gitenv.Hermetic(os.Environ()))
+	// See scriptout.DefaultWaitDelay's doc comment [bead pg2-332z8 #13].
+	cmd.WaitDelay = scriptout.DefaultWaitDelay
 	return cmd
 }
 
@@ -57,7 +60,8 @@ func (ghCLITokenSource) Token(ctx context.Context) (string, error) {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
 			if st := strings.TrimSpace(string(exitErr.Stderr)); st != "" {
-				return "", fmt.Errorf("gh auth token: %s: %w", st, err)
+				// Capped [bead pg2-332z8 #26]: see scriptout.TruncateForFold.
+				return "", fmt.Errorf("gh auth token: %s: %w", scriptout.TruncateForFold(exitErr.Stderr), err)
 			}
 		}
 		return "", fmt.Errorf("gh auth token: %w", err)

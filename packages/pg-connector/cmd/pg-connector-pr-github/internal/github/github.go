@@ -47,6 +47,7 @@ import (
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/api"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/vcs"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
 
 // Provider is the builtin GitHub VCS provider.
@@ -121,12 +122,17 @@ func (r *cliGHRunner) RunStdin(ctx context.Context, stdin []byte, args ...string
 	if err := cmd.Run(); err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
+			// st (untruncated) drives isAuthFailure's classification; only
+			// the copy folded into the returned error message itself is
+			// capped, so a verbose gh failure cannot inflate an error
+			// string without bound [bead pg2-332z8 #26].
 			st := strings.TrimSpace(stderr.String())
+			folded := scriptout.TruncateForFold(stderr.Bytes())
 			if isAuthFailure(exitErr.ExitCode(), st) {
 				return stdout.Bytes(), fmt.Errorf("gh %s: %s: run `gh auth login`: %w",
-					strings.Join(args, " "), st, ErrGHAuthInvalid)
+					strings.Join(args, " "), folded, ErrGHAuthInvalid)
 			}
-			return stdout.Bytes(), fmt.Errorf("gh %s: %w: %s", strings.Join(args, " "), err, st)
+			return stdout.Bytes(), fmt.Errorf("gh %s: %w: %s", strings.Join(args, " "), err, folded)
 		}
 		return stdout.Bytes(), fmt.Errorf("gh %s: %w (is gh on PATH?)", strings.Join(args, " "), err)
 	}

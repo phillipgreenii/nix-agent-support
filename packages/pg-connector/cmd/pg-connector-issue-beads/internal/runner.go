@@ -30,6 +30,8 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
 
 // Runner shells out to `bd`. Production code uses CLIRunner; tests inject a
@@ -148,6 +150,26 @@ func (r *CLIRunner) Workspace() (string, error) {
 	return r.resolveDir()
 }
 
+// command builds the `bd -C dir <args...>` *exec.Cmd Run below actually
+// executes, split out (mirroring the sibling gh/git backends' own
+// Command/command choke points) so a test can assert on WaitDelay/Env
+// directly without spawning a real bd process.
+func (r *CLIRunner) command(ctx context.Context, dir string, args []string) *exec.Cmd {
+	fullArgs := append([]string{"-C", dir}, args...)
+	cmd := exec.CommandContext(ctx, "bd", fullArgs...)
+	cmd.Dir = dir
+	if r.Env != nil {
+		cmd.Env = r.Env
+	}
+	// See scriptout.DefaultWaitDelay's doc comment for why this is needed
+	// even though ctx already carries a deadline (a `bd` blocked on a
+	// wedged dolt server is exactly the hang this bounds): it bounds
+	// Cmd.Wait's own residual wait for the stdout/stderr pipes to close,
+	// independent of killing the direct bd child [bead pg2-332z8 #13].
+	cmd.WaitDelay = scriptout.DefaultWaitDelay
+	return cmd
+}
+
 // Run shells out to `bd`, explicitly pinned via `-C` to a resolved
 // workspace directory (see resolveDir) rather than the exec'd process's
 // ambient cwd.
@@ -157,19 +179,16 @@ func (r *CLIRunner) Run(ctx context.Context, args ...string) (string, error) {
 		return "", err
 	}
 	fullArgs := append([]string{"-C", dir}, args...)
-	cmd := exec.CommandContext(ctx, "bd", fullArgs...)
-	cmd.Dir = dir
-	if r.Env != nil {
-		cmd.Env = r.Env
-	}
+	cmd := r.command(ctx, dir, args)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
+			// Capped [bead pg2-332z8 #26]: see scriptout.TruncateForFold.
 			return stdout.String(), fmt.Errorf("bd %s: %w: %s",
-				strings.Join(fullArgs, " "), err, strings.TrimSpace(stderr.String()))
+				strings.Join(fullArgs, " "), err, scriptout.TruncateForFold(stderr.Bytes()))
 		}
 		return stdout.String(), fmt.Errorf("bd %s: %w (is bd on PATH?)",
 			strings.Join(fullArgs, " "), err)

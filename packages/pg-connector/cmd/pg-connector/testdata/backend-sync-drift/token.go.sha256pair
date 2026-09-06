@@ -1,2 +1,2 @@
-80ba9bd6b7bf176c617edc1b59483fee6dcfc6fd18a5638fd5e19b68f4779cc4  pg-connector-pr-github/token.go
-1077e3164488e3d9307313bfea1fd3d85abfbd4bf490fdb7205ff73832a1b26b  pg-connector-ci-github-actions/token.go
+4ac70e3cc10d9efa98cad9b230ff6125ad8efd64c34f5e2256b87d565a73e03d  pg-connector-pr-github/token.go
+05575dd52f5ea4cf1a8d0e912daf45075f4b74bdda8b0743d4a6ae4c071af955  pg-connector-ci-github-actions/token.go

@@ -5,6 +5,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
 
 // leakedByAGitHookCommit is the GIT_* set a `git commit` FROM A LINKED
@@ -146,6 +148,19 @@ func TestCommandEnvExcludesLeakedGitDir(t *testing.T) {
 				t.Errorf("cmd.Env carries %q into the git child", k)
 			}
 		}
+	}
+}
+
+// TestCommandSetsWaitDelay is the regression test for bead pg2-332z8 #13's
+// per-Cmd half: Command must set WaitDelay, independent of whatever
+// deadline ctx itself carries — WaitDelay bounds Cmd.Wait's own residual
+// wait for the stdout/stderr pipes to close (e.g. a grandchild inheriting
+// one and holding it open), which a context deadline alone does not
+// cover.
+func TestCommandSetsWaitDelay(t *testing.T) {
+	cmd := Command(context.Background(), "/some/target/dir", "rev-parse", "--show-toplevel")
+	if cmd.WaitDelay != scriptout.DefaultWaitDelay {
+		t.Fatalf("cmd.WaitDelay = %v, want %v", cmd.WaitDelay, scriptout.DefaultWaitDelay)
 	}
 }
 

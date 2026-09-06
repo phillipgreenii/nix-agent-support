@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
 
 // fakeTokenSource is a TokenSource stub for chain/CLI tests; it records
@@ -48,6 +50,44 @@ var enterpriseAndTargetVars = []string{
 	"GH_HOST=github.example.com",
 	"GH_REPO=leaked/repo",
 	"GH_CONFIG_DIR=/leaked/gh-config",
+}
+
+// TestCLICommand_SetsWaitDelay is the regression test for bead pg2-332z8
+// #13's per-Cmd half: command() (this module's own choke point for every
+// gh invocation) must set WaitDelay, independent of whatever deadline ctx
+// itself carries — WaitDelay bounds Cmd.Wait's own residual wait for the
+// stdout/stderr pipes to close (e.g. a grandchild inheriting one and
+// holding it open), which a context deadline alone does not cover.
+func TestCLICommand_SetsWaitDelay(t *testing.T) {
+	cli := NewCLIWithTokenSource(&fakeTokenSource{tok: "resolved-tok"})
+	cmd, err := cli.Command(context.Background(), "run", "list")
+	if err != nil {
+		t.Fatalf("Command: %v", err)
+	}
+	if cmd.WaitDelay != scriptout.DefaultWaitDelay {
+		t.Fatalf("cmd.WaitDelay = %v, want %v", cmd.WaitDelay, scriptout.DefaultWaitDelay)
+	}
+}
+
+// TestCLIRun_ErrorMessage_CapsStderr is the regression test for bead
+// pg2-332z8 #26: before TruncateForFold, RunStdin folded gh's ENTIRE
+// captured stderr into the returned error with no bound — a runaway or
+// unexpectedly verbose gh failure could produce an unbounded error string.
+func TestCLIRun_ErrorMessage_CapsStderr(t *testing.T) {
+	huge := strings.Repeat("e", scriptout.MaxFoldedOutputBytes*3)
+	ghStubExitingWithStderr(t, 1, huge)
+
+	cli := NewCLIWithTokenSource(&fakeTokenSource{tok: "resolved-tok"})
+	_, err := cli.Run(context.Background(), "run", "list")
+	if err == nil {
+		t.Fatal("expected error from the failing gh stub")
+	}
+	if got := len(err.Error()); got > scriptout.MaxFoldedOutputBytes+256 {
+		t.Fatalf("error message is %d bytes; stderr fold was not capped", got)
+	}
+	if !strings.Contains(err.Error(), "truncated") {
+		t.Fatalf("expected a truncation marker in the error, got a %d-byte message", len(err.Error()))
+	}
 }
 
 // TestCLICommand_ExcludesEnterpriseAndTargetVars is the CLI.Command half of

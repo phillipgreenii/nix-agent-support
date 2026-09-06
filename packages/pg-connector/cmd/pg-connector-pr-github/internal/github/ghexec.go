@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/gitenv"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
 
 // CLI is the token-protected gateway through which pg-pr invokes the `gh`
@@ -88,5 +89,10 @@ func (r *cliGHRunner) command(ctx context.Context, args ...string) (*exec.Cmd, e
 	}
 	cmd := exec.CommandContext(ctx, "gh", args...)
 	cmd.Env = envWithGHToken(gitenv.Hermetic(os.Environ()), tok)
+	// See scriptout.DefaultWaitDelay's doc comment for why this is needed
+	// even though ctx already carries a deadline: it bounds Cmd.Wait's own
+	// residual wait for the stdout/stderr pipes to close, independent of
+	// killing the direct gh child [bead pg2-332z8 #13].
+	cmd.WaitDelay = scriptout.DefaultWaitDelay
 	return cmd, nil
 }

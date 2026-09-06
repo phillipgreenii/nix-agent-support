@@ -34,6 +34,8 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
 
 // gitVarPrefix is the namespace this package filters. Everything OUTSIDE
@@ -118,5 +120,10 @@ func Command(ctx context.Context, dir string, args ...string) *exec.Cmd {
 
 	cmd := exec.CommandContext(ctx, "git", full...)
 	cmd.Env = Environ()
+	// See scriptout.DefaultWaitDelay's doc comment for why this is needed
+	// even though ctx already carries a deadline: it bounds Cmd.Wait's own
+	// residual wait for the stdout/stderr pipes to close, independent of
+	// killing the direct git child [bead pg2-332z8 #13].
+	cmd.WaitDelay = scriptout.DefaultWaitDelay
 	return cmd
 }

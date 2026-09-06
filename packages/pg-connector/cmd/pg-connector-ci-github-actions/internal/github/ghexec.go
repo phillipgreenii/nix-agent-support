@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-ci-github-actions/internal/gitenv"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
 
 // CLI is the token-protected gateway through which this backend invokes the
@@ -96,6 +97,11 @@ func (r *cliGHRunner) command(ctx context.Context, args ...string) (*exec.Cmd, e
 	}
 	cmd := exec.CommandContext(ctx, "gh", args...)
 	cmd.Env = envWithGHToken(gitenv.Hermetic(os.Environ()), tok)
+	// See scriptout.DefaultWaitDelay's doc comment for why this is needed
+	// even though ctx already carries a deadline: it bounds Cmd.Wait's own
+	// residual wait for the stdout/stderr pipes to close, independent of
+	// killing the direct gh child [bead pg2-332z8 #13].
+	cmd.WaitDelay = scriptout.DefaultWaitDelay
 	return cmd, nil
 }
 
@@ -116,12 +122,17 @@ func (r *cliGHRunner) RunStdin(ctx context.Context, stdin []byte, args ...string
 	if err := cmd.Run(); err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
+			// st (untruncated) drives IsAuthFailure's classification; only
+			// the copy folded into the returned error message itself is
+			// capped, so a verbose gh failure cannot inflate an error
+			// string without bound [bead pg2-332z8 #26].
 			st := strings.TrimSpace(stderr.String())
+			folded := scriptout.TruncateForFold(stderr.Bytes())
 			if IsAuthFailure(exitErr.ExitCode(), st) {
 				return stdout.Bytes(), fmt.Errorf("gh %s: %s: run `gh auth login`: %w",
-					strings.Join(args, " "), st, ErrGHAuthInvalid)
+					strings.Join(args, " "), folded, ErrGHAuthInvalid)
 			}
-			return stdout.Bytes(), fmt.Errorf("gh %s: %w: %s", strings.Join(args, " "), err, st)
+			return stdout.Bytes(), fmt.Errorf("gh %s: %w: %s", strings.Join(args, " "), err, folded)
 		}
 		return stdout.Bytes(), fmt.Errorf("gh %s: %w (is gh on PATH?)", strings.Join(args, " "), err)
 	}

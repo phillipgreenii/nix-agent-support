@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+	"time"
 )
 
 // --------------------------------------------------------------------
@@ -94,6 +95,28 @@ func helperMain() {
 	case "stderr_only":
 		fmt.Fprintln(os.Stderr, "boom")
 		os.Exit(2)
+	case "hang":
+		// Blocks for far longer than any test-scoped deadline, writing
+		// nothing to stdout/stderr — simulates a hung gh/bd/backend the
+		// DefaultExecTimeout+WaitDelay pairing exists to bound
+		// [bead pg2-332z8 #13]. Deliberately a bounded sleep (not a true
+		// `select{}` infinite block): if the parent's kill mechanism ever
+		// regresses, this process still self-terminates instead of
+		// leaking an unkillable orphan.
+		time.Sleep(30 * time.Second)
+		os.Exit(0)
+	case "big_stderr":
+		// Writes far more than MaxFoldedOutputBytes to stderr and nothing
+		// to stdout, exercising runInvoke's stderr-fold path
+		// [bead pg2-332z8 #26].
+		fmt.Fprint(os.Stderr, strings.Repeat("e", MaxFoldedOutputBytes*3))
+		os.Exit(1)
+	case "big_nonjson_stdout":
+		// Writes far more than MaxFoldedOutputBytes of non-JSON text to
+		// stdout, exercising Invoke's invalid-JSON stdout-fold path
+		// [bead pg2-332z8 #26].
+		fmt.Fprint(os.Stdout, strings.Repeat("o", MaxFoldedOutputBytes*3))
+		os.Exit(0)
 	case "empty_envelope":
 		// Neither result nor error is set — a protocol violation, not a
 		// success [bug A7].
@@ -341,5 +364,84 @@ func TestInvokeCapabilities_UnknownOp_WrapsSentinel(t *testing.T) {
 	_, err := InvokeCapabilities(context.Background(), "fake-binary")
 	if err == nil || !errors.Is(err, ErrUnknownOp) {
 		t.Fatalf("expected errors.Is(err, ErrUnknownOp), got %v", err)
+	}
+}
+
+// --------------------------------------------------------------------
+// bead pg2-332z8: timeout/WaitDelay and output-cap regressions
+// --------------------------------------------------------------------
+
+// TestInvoke_HungChild_KilledAtDeadlineNotHungForever is the core
+// regression proof for bead #13's umbrella-side half: before runInvoke
+// applied any context deadline of its own, a backend binary that never
+// exits (a hung gh, a bd blocked on a wedged dolt server) would hang this
+// call for as long as the CALLER's own ctx stayed alive — and in
+// production, cmd/pg-connector's root command never supplies one at all
+// (cobra's root.Execute() with no ExecuteContext leaves cmd.Context() at a
+// bare context.Background(), so nothing upstream of runInvoke ever
+// imposed a deadline). This test therefore deliberately calls Invoke with
+// context.Background() too — mirroring that real caller exactly — and
+// relies SOLELY on runInvoke's own internal execTimeout wrapping to bound
+// it; a caller-supplied deadline is not involved, so this fails to
+// discriminate the fix only if the internal wrapping itself is missing.
+// execTimeout is overridden to a short value (mirroring exec.go's own
+// execCmdFactory swap pattern) so the test stays fast rather than waiting
+// out the real 30s DefaultExecTimeout.
+func TestInvoke_HungChild_KilledAtDeadlineNotHungForever(t *testing.T) {
+	withFactory(t, "hang")
+	origTimeout := execTimeout
+	execTimeout = 150 * time.Millisecond
+	t.Cleanup(func() { execTimeout = origTimeout })
+
+	start := time.Now()
+	_, err := Invoke(context.Background(), "fake-binary", "x", nil)
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("expected an error from a killed hung child, got nil")
+	}
+	// Generous relative to the 150ms execTimeout override, but far below
+	// the helper's own 30s self-terminating sleep — proves the child was
+	// actually killed by runInvoke's own deadline rather than merely
+	// outliving it.
+	if elapsed > 5*time.Second {
+		t.Fatalf("Invoke took %v to return with execTimeout=150ms; hung child was not killed promptly", elapsed)
+	}
+}
+
+// TestInvoke_StderrFoldIsCapped is the umbrella-side regression proof for
+// bead #26: before TruncateForFold existed, runInvoke's stderr-fold branch
+// (used when the backend binary produced no stdout at all) interpolated
+// the ENTIRE captured stderr into the returned error with no bound.
+func TestInvoke_StderrFoldIsCapped(t *testing.T) {
+	withFactory(t, "big_stderr")
+	_, err := Invoke(context.Background(), "fake-binary", "x", nil)
+	if err == nil {
+		t.Fatal("expected error from the big_stderr helper")
+	}
+	if got := len(err.Error()); got > MaxFoldedOutputBytes+256 {
+		t.Fatalf("error message is %d bytes; stderr fold was not capped (helper wrote %d bytes of stderr)",
+			got, MaxFoldedOutputBytes*3)
+	}
+	if !strings.Contains(err.Error(), "truncated") {
+		t.Fatalf("expected a truncation marker in the error, got a %d-byte message", len(err.Error()))
+	}
+}
+
+// TestInvoke_NonJSONStdoutFoldIsCapped is the umbrella-side regression
+// proof for bead #26's other exec.go fold site: Invoke's invalid-JSON
+// branch, which used to interpolate the full captured stdout via
+// "stdout=%q" with no bound.
+func TestInvoke_NonJSONStdoutFoldIsCapped(t *testing.T) {
+	withFactory(t, "big_nonjson_stdout")
+	_, err := Invoke(context.Background(), "fake-binary", "x", nil)
+	if err == nil {
+		t.Fatal("expected invalid-JSON error from the big_nonjson_stdout helper")
+	}
+	if got := len(err.Error()); got > MaxFoldedOutputBytes+256 {
+		t.Fatalf("error message is %d bytes; stdout fold was not capped", got)
+	}
+	if !strings.Contains(err.Error(), "truncated") {
+		t.Fatalf("expected a truncation marker in the error, got a %d-byte message", len(err.Error()))
 	}
 }

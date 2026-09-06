@@ -3,9 +3,11 @@ package scriptout
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"testing"
+	"time"
 )
 
 func runServeLoop(t *testing.T, table DispatchTable, requestJSON string) (int, map[string]any) {
@@ -217,6 +219,112 @@ func TestServeLoop_CapabilitiesBespokeShape(t *testing.T) {
 	}
 	if _, ok := resp["schemaVersions"]; !ok {
 		t.Fatalf("expected top-level schemaVersions, got %v", resp)
+	}
+}
+
+// --------------------------------------------------------------------
+// bead pg2-332z8: timeout and []byte-result-streaming regressions
+// --------------------------------------------------------------------
+
+// TestServeLoop_HandlerGetsDeadline_DoesNotHangForever is the core
+// regression proof for bead #13's backend-side half: before serveLoop
+// applied any deadline, every handler received a bare context.Background()
+// with NO way to ever observe ctx.Done() — a handler that (like every real
+// Provider method in this design) shells out via exec.CommandContext(ctx,
+// ...) and blocks on that child would hang this whole backend process
+// forever. execTimeout is overridden to a short value (mirroring exec.go's
+// own execCmdFactory swap pattern in exec_test.go) so this stays fast
+// instead of waiting out the real 30s DefaultExecTimeout.
+func TestServeLoop_HandlerGetsDeadline_DoesNotHangForever(t *testing.T) {
+	origTimeout := execTimeout
+	execTimeout = 150 * time.Millisecond
+	t.Cleanup(func() { execTimeout = origTimeout })
+
+	table := DispatchTable{
+		"slow_op": {
+			SchemaVersion: 1,
+			Handle: func(ctx context.Context, _ json.RawMessage) (any, error) {
+				<-ctx.Done()
+				return nil, ctx.Err()
+			},
+		},
+	}
+
+	start := time.Now()
+	code, resp := runServeLoop(t, table, `{"op":"slow_op","args":{}}`)
+	elapsed := time.Since(start)
+
+	if elapsed > 5*time.Second {
+		t.Fatalf("serveLoop took %v to return with execTimeout=150ms; handler's ctx never got a deadline", elapsed)
+	}
+	if code == 0 {
+		t.Fatalf("expected a non-zero exit code for a deadline-exceeded handler, got 0 (resp=%v)", resp)
+	}
+}
+
+// TestServeLoop_BytesResult_MatchesGenericEnvelopeShape proves the
+// streaming writeBytesResult path (used for a []byte result — today, ci
+// get_logs's raw log bytes — to avoid holding the payload three times
+// over; see serveLoop's own comment) produces the exact same
+// protocolVersion/schemaVersion/result shape the generic
+// json.Marshal(result)+writeJSON(Response{...}) path produces for any
+// other result type, so this is a genuine drop-in rather than a
+// wire-format change [bead #26].
+func TestServeLoop_BytesResult_MatchesGenericEnvelopeShape(t *testing.T) {
+	payload := []byte("hello CI log output\nwith multiple lines\n")
+	table := DispatchTable{
+		"get_logs": {
+			SchemaVersion: 3,
+			Handle: func(ctx context.Context, _ json.RawMessage) (any, error) {
+				return payload, nil
+			},
+		},
+	}
+	code, resp := runServeLoop(t, table, `{"op":"get_logs","args":{}}`)
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0", code)
+	}
+	if resp["protocolVersion"] != float64(ProtocolVersion) {
+		t.Fatalf("protocolVersion = %v", resp["protocolVersion"])
+	}
+	if resp["schemaVersion"] != float64(3) {
+		t.Fatalf("schemaVersion = %v", resp["schemaVersion"])
+	}
+	resultStr, ok := resp["result"].(string)
+	if !ok {
+		t.Fatalf("result = %v (%T), want a base64 string", resp["result"], resp["result"])
+	}
+	decoded, err := base64.StdEncoding.DecodeString(resultStr)
+	if err != nil {
+		t.Fatalf("decode result base64: %v", err)
+	}
+	if string(decoded) != string(payload) {
+		t.Fatalf("decoded result = %q, want %q", decoded, payload)
+	}
+}
+
+// TestServeLoop_BytesResult_EmptyPayload proves an empty []byte result
+// (a CI run with an empty log) still round-trips as an empty string, not
+// an omitted/null result field — matching how the generic path already
+// treats "present but empty" for any other result type.
+func TestServeLoop_BytesResult_EmptyPayload(t *testing.T) {
+	table := DispatchTable{
+		"get_logs": {
+			Handle: func(ctx context.Context, _ json.RawMessage) (any, error) {
+				return []byte{}, nil
+			},
+		},
+	}
+	code, resp := runServeLoop(t, table, `{"op":"get_logs","args":{}}`)
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0", code)
+	}
+	resultStr, ok := resp["result"].(string)
+	if !ok {
+		t.Fatalf("result = %v (%T), want a string", resp["result"], resp["result"])
+	}
+	if resultStr != "" {
+		t.Fatalf("result = %q, want empty", resultStr)
 	}
 }
 

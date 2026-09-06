@@ -38,6 +38,16 @@ var execCmdFactory = exec.CommandContext
 // runInvoke marshals req, execs binary with it on stdin, and returns the
 // raw stdout bytes (or an error folding in stderr/exit status). Shared by
 // Invoke and InvokeCapabilities.
+//
+// ctx is wrapped in a DefaultExecTimeout deadline (via the swappable
+// execTimeout var) and the *exec.Cmd's WaitDelay is set to
+// DefaultWaitDelay, so a hung backend binary — or one whose own grandchild
+// holds its stdout pipe open — is killed and reaped within a bounded time
+// rather than hanging this call (and, since pg-connector's own fan-outs
+// dispatch serially, every backend queued behind it) forever [bead #13].
+// Folded stderr is capped via TruncateForFold, so a runaway or unexpectedly
+// verbose backend binary cannot inflate the returned error without bound
+// [bead #26].
 func runInvoke(ctx context.Context, binary string, req Request) ([]byte, error) {
 	if binary == "" {
 		return nil, errors.New("scriptout: empty backend binary name")
@@ -47,7 +57,11 @@ func runInvoke(ctx context.Context, binary string, req Request) ([]byte, error) 
 		return nil, fmt.Errorf("scriptout: marshal request: %w", err)
 	}
 
+	ctx, cancel := context.WithTimeout(ctx, execTimeout)
+	defer cancel()
+
 	cmd := execCmdFactory(ctx, binary)
+	cmd.WaitDelay = DefaultWaitDelay
 	cmd.Stdin = bytes.NewReader(payload)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -60,7 +74,7 @@ func runInvoke(ctx context.Context, binary string, req Request) ([]byte, error) 
 		if runErr != nil {
 			if stderr.Len() > 0 {
 				return nil, fmt.Errorf("scriptout: %s: %w (stderr: %s)",
-					binary, runErr, bytes.TrimSpace(stderr.Bytes()))
+					binary, runErr, TruncateForFold(stderr.Bytes()))
 			}
 			return nil, fmt.Errorf("scriptout: %s: %w", binary, runErr)
 		}
@@ -92,7 +106,7 @@ func Invoke(ctx context.Context, binary, op string, args any) (*Response, error)
 	var resp Response
 	if err := json.Unmarshal(out, &resp); err != nil {
 		if len(out) > 0 {
-			return nil, fmt.Errorf("scriptout: %s: invalid JSON response: %w (stdout=%q)", binary, err, out)
+			return nil, fmt.Errorf("scriptout: %s: invalid JSON response: %w (stdout=%q)", binary, err, TruncateForFold(out))
 		}
 		return nil, fmt.Errorf("scriptout: %s: invalid JSON response: %w", binary, err)
 	}
@@ -157,7 +171,7 @@ func InvokeCapabilities(ctx context.Context, binary string) (*CapabilitiesRespon
 	}
 	var wire capabilitiesWireShape
 	if err := json.Unmarshal(out, &wire); err != nil {
-		return nil, fmt.Errorf("scriptout: %s: invalid capabilities response: %w (stdout=%q)", binary, err, out)
+		return nil, fmt.Errorf("scriptout: %s: invalid capabilities response: %w (stdout=%q)", binary, err, TruncateForFold(out))
 	}
 	if wire.Error != nil {
 		return nil, WrapError(sentinelForCode(wire.Error.Code), fmt.Sprintf("%s: %s", binary, wire.Error.Message))
