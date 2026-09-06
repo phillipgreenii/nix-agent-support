@@ -1384,14 +1384,19 @@
                   };
                   pairs = [
                     (pair "github.go" prGithub connGithub)
-                    (pair "enrich.go" prGithub connGithub)
-                    (pair "fingerprint.go" prGithub connGithub)
-                    (pair "pending.go" prGithub connGithub)
                     (pair "auth.go" prGithub connGithub)
                     (pair "ghexec.go" prGithub connGithub)
                     (pair "token.go" prGithub connGithub)
                     (pair "gitenv.go" prGitenv connGitenv)
                   ];
+                  # enrich.go/fingerprint.go/pending.go were dropped from this
+                  # pairing (bead pg2-lh3c4): pg-connector-pr-github's copies were
+                  # dead surface (only their own `var _ vcs.*Provider` compile
+                  # checks kept them alive; no design-cited future pg-connector
+                  # verb needs them — see internal/vcs/iface.go's doc comment) and
+                  # were deleted outright rather than carried forward, so there is
+                  # no longer a "conn" side for this check to compare against.
+                  # pg-pr's own originals are untouched and keep working unchanged.
                   # golden format: two lines, "<sha256>  <label>" each (the familiar
                   # sha256sum output shape, for a human skimming a diff of the
                   # baseline file — but compared here by hash value alone, not by

@@ -1,4 +1,4 @@
-package github
+package main
 
 import (
 	"fmt"
@@ -10,8 +10,43 @@ import (
 	"testing"
 )
 
+// Relocated from cmd/pg-connector-pr-github/internal/github/chokepoint_test.go
+// (bead pg2-lh3c4, design §9.1's acceptance criteria): TestGHExecChokePoint
+// and its sibling TestNoGHStackMutatingArgv (stack_readonly_test.go, same
+// package) already walked the WHOLE module from inside one backend's own
+// test package — so deleting or restructuring pr-github ahead of this move
+// would have silently dropped the module's only cross-backend `gh`
+// choke-point and stack-mutation guards. This umbrella package
+// (cmd/pg-connector) already hosts every other module-wide mechanical/
+// convention check (naming_convention_test.go, layout_convention_test.go,
+// dependency_direction_test.go, backend_internal_sync_test.go) — none of
+// them tied to any single backend's own lifecycle — so it is this guard's
+// new home too. moduleRoot(t) is unchanged from the original: it walks up
+// from the test's own working directory to the nearest go.mod, so it needs
+// no adjustment for this package's different depth.
+
 // ghExecRE matches an `exec.Command`/`exec.CommandContext` whose BINARY is the
 // literal "gh" — i.e. a direct gh subprocess, bypassing the token preflight.
+//
+// Judgment call (bead pg2-lh3c4): this stays scoped to "gh" alone rather
+// than generalizing to "git" or other per-backend binaries. The defect
+// class this guard exists for is specific to gh: an unauthenticated `gh`
+// invocation pops an INTERACTIVE auth prompt under a headless daemon (the
+// launchd sync agent) — a failure mode tied to gh's own OAuth/token
+// preflight, which ghexec.go's choke point exists to intercept before any
+// `gh` subprocess runs. `git` has no analogous interactive-auth-prompt
+// failure mode to gate here; its own hermeticity concern (environment
+// leakage via GIT_DIR/GIT_WORK_TREE et al., not authentication) is a
+// different problem with its own dedicated guard (the gitenv package plus
+// TestBackendInternalGitenvAndGithubHelpersSync's content-hash pinning in
+// backend_internal_sync_test.go, same package) — folding "git" into this
+// regex would conflate two unrelated concerns behind one name. Other
+// per-backend binaries (dolt, bd) have no auth-preflight of this shape
+// either. A future backend that shells to `gh` still needs its own
+// ghexec.go/token.go pair added to the allowed map below — Go's internal/
+// visibility rule makes each backend's copy independent — which is the
+// existing, working extension point for this guard; scm-git and
+// issue-beads correctly have no entry today because neither shells to gh.
 var ghExecRE = regexp.MustCompile(`exec\.Command(?:Context)?\(\s*(?:[\w.]+\s*,\s*)?"gh"`)
 
 // TestGHExecChokePoint is the module-wide half of bead pg2-ilzq9's guarantee:
@@ -90,7 +125,8 @@ func TestGHExecChokePoint(t *testing.T) {
 }
 
 // moduleRoot walks up from the test's working directory to the directory holding
-// go.mod.
+// go.mod. Shared by TestGHExecChokePoint above and TestNoGHStackMutatingArgv
+// (stack_readonly_test.go, same package).
 func moduleRoot(t *testing.T) string {
 	t.Helper()
 	dir, err := os.Getwd()

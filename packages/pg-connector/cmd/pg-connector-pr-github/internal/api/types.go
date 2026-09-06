@@ -1,11 +1,15 @@
 // Package api is a trimmed, local copy of pg-pr's pkg/api types — just the
-// shapes internal/github's ported GitHub logic needs (Comment, Review,
-// CIRun; PR lives in pr.go). Copied rather than imported because
-// packages/pg-connector's go.mod MUST NOT depend on packages/pg-pr
-// [design: §9, §5.2]. This is an internal representation only:
-// internal (the backend's pr.Provider glue) maps it to pkg/schema.PR at the
-// Show boundary — pg-pr's own api.Issue/api.BranchInfo are out of scope
-// here since nothing in this backend's ported logic uses them.
+// shapes internal/github's ported GitHub logic needs (Comment, Review; PR
+// lives in pr.go). Copied rather than imported because packages/pg-connector's
+// go.mod MUST NOT depend on packages/pg-pr [design: §9, §5.2]. This is an
+// internal representation only: internal (the backend's pr.Provider glue)
+// maps it to pkg/schema.PR at the Show boundary — pg-pr's own
+// api.Issue/api.BranchInfo are out of scope here since nothing in this
+// backend's ported logic uses them. CIRun (pg-pr's CI-run shape, used only
+// by this backend's own now-deleted EnrichedPR bulk-fetch optimization) was
+// removed as dead surface alongside it [bead pg2-lh3c4] — this backend has
+// no CI-run consumer; pg-connector's `ci` capability has its own
+// pkg/schema.CIRun wire shape, unrelated to this one.
 package api
 
 // Comment is the JSON shape for a PR comment.
@@ -92,24 +96,4 @@ type Review struct {
 	CommitOID string `json:"commit_oid,omitempty"`
 	// SubmittedAt is the RFC3339 timestamp when the review was submitted.
 	SubmittedAt string `json:"submitted_at,omitempty"`
-}
-
-// CIRun is the JSON shape for a CI workflow run.
-type CIRun struct {
-	ID         string `json:"id"`
-	Name       string `json:"name"`
-	Status     string `json:"status"`
-	Conclusion string `json:"conclusion"`
-	URL        string `json:"url"`
-	Provider   string `json:"provider"`
-	// HeadSHA is the commit SHA the run was triggered against. Used as
-	// subject_sha in the feedback store so ci-failure rows are per-revision.
-	HeadSHA string `json:"head_sha,omitempty"`
-	// Description is the free-text status description GitHub's commit-status
-	// API (StatusContext) attaches to a context — e.g. a branch-protection
-	// rule's rendered summary. CheckRun nodes have no equivalent GraphQL
-	// field and always leave this empty. Fetch-and-carry only: nothing yet
-	// parses this into a state (see bead pg2-4dz88.2.4, the check-interpreter
-	// leaf, for that).
-	Description string `json:"description,omitempty"`
 }

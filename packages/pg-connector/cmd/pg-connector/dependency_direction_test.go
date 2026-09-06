@@ -14,9 +14,10 @@ import (
 // whose BINARY argument is a string literal starting with "pg-connector" —
 // i.e. a Tier-2 backend (or the Tier-1 umbrella itself) shelling out to
 // pg-connector or to another pg-connector-<type>-<backend> binary. Modeled
-// directly on this module's existing chokepoint-test convention (see
-// cmd/pg-connector-pr-github/internal/github/chokepoint_test.go's
-// ghExecRE) — same line-based scanning, same "binary is a string literal in
+// directly on this module's existing chokepoint-test convention (see this
+// same package's chokepoint_test.go, relocated here from
+// cmd/pg-connector-pr-github/internal/github by bead pg2-lh3c4 — ghExecRE)
+// — same line-based scanning, same "binary is a string literal in
 // the call" shape. Like that precedent, this is line-based: a call whose
 // arguments span multiple source lines would not be matched. Every actual
 // call site in this module today is single-line.

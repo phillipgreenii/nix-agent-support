@@ -56,79 +56,19 @@ type AuthChecker interface {
 	CheckAuth(ctx context.Context) error
 }
 
-// EnrichedPR bundles a PR with everything the sync snapshot loop reads
-// per-PR. Providers that can fetch this data in one round-trip (e.g.
-// GitHub via a single GraphQL search) implement EnrichedPRsProvider;
-// the sync engine uses it to collapse per-PR REST fan-out into one
-// per-repo call.
-type EnrichedPR struct {
-	PR       api.PR
-	Reviews  []api.Review
-	Comments []api.Comment
-	CIRuns   []api.CIRun
-	// Files are the changed-file paths (for language detection). Empty when
-	// not fetched (REST fallback) or truncated on a very large PR.
-	Files []string
-	// Commits are the PR's commit messages (for kind/urgency). Empty on the
-	// REST fallback path.
-	Commits []string
-	// CommitAuthors are the PR's per-commit GitHub author logins
-	// (author.user.login). Commits with no linked user contribute no entry.
-	// Empty on the REST fallback path. Used to classify co-owned ownership.
-	CommitAuthors []string
-
-	// Truncated reports the embedded connections whose pagination cap was
-	// hit during the bulk fetch (so the caller can decide whether to fall
-	// back to per-PR REST methods for full data). Empty when nothing was
-	// truncated.
-	Truncated []string
-}
-
-// EnrichedPRsProvider is an optional capability for VCS providers that
-// can bulk-fetch enriched PR data in one round-trip. Sync uses this when
-// available to replace ListMyPRs+ListTeamPRs+per-PR ListReviews/
-// ListComments/ListRuns with a single per-repo query.
-//
-// searchQuery is a provider-native query string (for GitHub: the search
-// syntax, e.g. `is:pr is:open repo:owner/name author:a author:b`).
-type EnrichedPRsProvider interface {
-	EnrichedPRs(ctx context.Context, repo string, searchQuery string) ([]EnrichedPR, error)
-}
-
-// PRFingerprint is the change-detection signature for one open PR, fetched
-// by FingerprintProvider. It is intentionally small: just enough to decide
-// "did this PR change since last tick?" without any node bodies.
-type PRFingerprint struct {
-	Repo              string
-	Number            int
-	Author            string // canonical login (bot suffix normalized)
-	IsDraft           bool
-	State             string // lowercased: open/closed/merged
-	UpdatedAt         string
-	HeadOID           string // last commit oid — catches pushes updated_at misses
-	StatusRollup      string // statusCheckRollup.state, "" when none
-	ReviewCount       int
-	CommentCount      int
-	ReviewThreadCount int
-}
-
-// FingerprintResult bundles one fingerprint query's PRs with pagination and
-// rate-limit telemetry. Truncated is true when a hard page cap was hit before
-// pagination completed — the caller MUST treat the roster as incomplete (do
-// not infer "disappeared" from a truncated result).
-type FingerprintResult struct {
-	PRs       []PRFingerprint
-	Truncated bool
-	RateCost  int    // rateLimit.cost from the GraphQL envelope
-	RateLeft  int    // rateLimit.remaining
-	ResetAt   string // rateLimit.resetAt (RFC3339; window-reset timestamp)
-}
-
-// FingerprintProvider is an optional capability for VCS providers that can
-// cheaply fetch per-PR change signatures via one (paginated) search. No repo
-// arg: the search may span repos and each node carries its own repo. (The
-// EnrichedPRsProvider keeps its repo arg for error context; this one does not
-// — keep the asymmetry.)
-type FingerprintProvider interface {
-	FingerprintPRs(ctx context.Context, searchQuery string) (FingerprintResult, error)
-}
+// EnrichedPR/EnrichedPRsProvider and PRFingerprint/FingerprintResult/
+// FingerprintProvider (pg-pr's bulk-fetch optimizations for its own sync
+// snapshot loop) were carried over into this file but never implemented by
+// anything but internal/github's now-deleted enrich.go/fingerprint.go, and
+// never consumed by anything in pg-connector — this backend's Show always
+// performs a live, uncached, per-PR read (provider.go's own doc comment).
+// Design §9.1's verb→destination table retires pg-pr's `sync` command group
+// "without a rewrite target" (pr-pool polls the beads connector directly
+// instead), and no design section names either optional capability as a
+// future pg-connector need, so both were removed as dead surface rather
+// than carried forward speculatively [bead pg2-lh3c4]. If a future
+// `pg-connector pr list` (design Appendix A: still unresolved — live call
+// vs. backend-local store) turns out to need bulk fan-out, re-derive the
+// shape fresh against that verb's actual requirements rather than
+// resurrecting this file: the original was tuned for pg-pr's polling
+// daemon, a different consumer shape than a one-shot CLI verb.

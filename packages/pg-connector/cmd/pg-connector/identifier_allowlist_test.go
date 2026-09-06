@@ -39,10 +39,18 @@ import (
 // layout_convention_test.go — so this file lives alongside it.
 //
 // packages/pg-connector/cmd/pg-connector-pr-github/internal/github/testdata/
-// carries fixtures ported over from packages/pg-pr's own testdata/ (bead
-// pg2-2j5ac, the pg-pr → pg-connector migration) — including the same
+// carried fixtures ported over from packages/pg-pr's own testdata/ (bead
+// pg2-2j5ac, the pg-pr → pg-connector migration), including the same
 // pg2-wb9yb-scrubbed placeholders ("teammate", "review-bot") pg-pr's own
-// allowlist documents. This guard exists so that carryover, and anything
+// allowlist documents. That fixture (enriched-prs-single.json) and its
+// sibling native-stack-fields.json were deleted as dead surface (bead
+// pg2-lh3c4: they backed this backend's own EnrichedPRsProvider
+// implementation, which had no design-cited pg-connector consumer) — the
+// two placeholders stay allowlisted regardless, since this file's own
+// self-tests below (TestIdentifierAllowlistGuardCatchesDeliberateRegression,
+// TestIdentifierAllowlistGuardAllowsKnownSafeIdentifiers) use them as this
+// module's generic-placeholder convention independent of that one deleted
+// fixture. This guard exists so that any future carryover, or anything
 // pasted into this module's testdata/ afterward (the concrete near-miss:
 // bead pg2-6hkl5's body carries a real ZR repo/PR pair one paste away from
 // becoming a fixture here), is checked by something. Like pg-pr-go-tests,
@@ -73,9 +81,14 @@ var allowlistedIdentifiers = map[string]struct{}{
 	"phillipgreenii":            {},
 	"phillipg@ziprecruiter.com": {},
 	// generic placeholder test identities carried over from pg-pr's own
-	// pg2-wb9yb scrub (see that file's doc comment) — this module's
-	// cmd/pg-connector-pr-github/internal/github/testdata/enriched-prs-single.json
-	// is the same fixture, reusing both placeholders.
+	// pg2-wb9yb scrub (see that file's doc comment). The production fixture
+	// that originally motivated these two (enriched-prs-single.json) was
+	// deleted as dead surface (bead pg2-lh3c4), but
+	// TestIdentifierAllowlistGuardCatchesDeliberateRegression and
+	// TestIdentifierAllowlistGuardAllowsKnownSafeIdentifiers below still
+	// exercise them as this module's own generic-placeholder convention —
+	// removing them here would just move the "regression" fixture value
+	// those self-tests use, not eliminate a real dependency.
 	"teammate":   {},
 	"review-bot": {},
 }
@@ -224,12 +237,12 @@ func pgConnectorModuleRoot(t *testing.T) string {
 //
 // Guarded scope, ratchet status and known limitation are identical to
 // pg-pr's own TestIdentifierAllowlistGuard — see that file's doc comment for
-// the full rationale. This copy currently covers the one testdata/ directory
-// that exists under packages/pg-connector today
-// (cmd/pg-connector-pr-github/internal/github/testdata/); widening to any
-// future testdata/ elsewhere in this module needs no code change (the walk
-// already reaches anywhere under root), only re-verifying the allowlist
-// still covers what is found.
+// the full rationale. This copy's walk reaches every testdata/ directory
+// under packages/pg-connector, whichever backend or package it lives under
+// (cmd/pg-connector-pr-github/internal/github/testdata/,
+// cmd/pg-connector/testdata/, pkg/scriptout/conformance/testdata/, and any
+// future one) with no code change needed as new ones appear — only
+// re-verifying the allowlist still covers what is found.
 func TestIdentifierAllowlistGuard(t *testing.T) {
 	root := pgConnectorModuleRoot(t)
 
@@ -244,9 +257,14 @@ func TestIdentifierAllowlistGuard(t *testing.T) {
 	// — a rename that moved one out from under the walk, or a future
 	// narrowing of underTestdataDir, must FAIL loudly rather than silently
 	// reduce coverage to nothing.
+	// enriched-prs-single.json/native-stack-fields.json (this guard's
+	// original canaries) were deleted as dead surface alongside
+	// EnrichedPRsProvider (bead pg2-lh3c4) — these two go:embed'd
+	// conformance goldens are real, durable fixtures under testdata/ that
+	// take over the liveness-canary role.
 	wantFixtures := []string{
-		filepath.Join("cmd", "pg-connector-pr-github", "internal", "github", "testdata", "enriched-prs-single.json"),
-		filepath.Join("cmd", "pg-connector-pr-github", "internal", "github", "testdata", "native-stack-fields.json"),
+		filepath.Join("pkg", "scriptout", "conformance", "testdata", "golden", "response-success.json"),
+		filepath.Join("pkg", "scriptout", "conformance", "testdata", "golden", "error.json"),
 	}
 	for _, want := range wantFixtures {
 		if _, statErr := os.Stat(filepath.Join(root, want)); statErr != nil {

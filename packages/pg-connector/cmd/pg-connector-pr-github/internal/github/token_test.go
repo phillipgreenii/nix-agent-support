@@ -287,6 +287,24 @@ func TestChainTokenSource(t *testing.T) {
 	})
 }
 
+// fakeStdinRunner is a ghRunner test double whose Run/RunStdin both return
+// the same canned (out, err) pair regardless of arguments. Moved here from
+// the now-deleted enrich_test.go (bead pg2-lh3c4: enrich.go's
+// EnrichedPRsProvider was dead surface, so its own test file went with it)
+// — this is the only surviving user.
+type fakeStdinRunner struct {
+	out []byte
+	err error
+}
+
+func (f *fakeStdinRunner) Run(_ context.Context, _ ...string) ([]byte, error) {
+	return f.out, f.err
+}
+
+func (f *fakeStdinRunner) RunStdin(_ context.Context, _ []byte, _ ...string) ([]byte, error) {
+	return f.out, f.err
+}
+
 func TestCheckAuth(t *testing.T) {
 	t.Run("authenticated returns nil", func(t *testing.T) {
 		p := NewWithRunner(&fakeStdinRunner{out: []byte(`{"data":{"viewer":{"login":"me"}}}`)})

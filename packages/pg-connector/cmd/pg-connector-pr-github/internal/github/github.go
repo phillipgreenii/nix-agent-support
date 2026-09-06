@@ -7,11 +7,32 @@
 // tree).
 //
 // It implements the read paths pkg/provider/pr's Provider needs (GetPR,
-// ListComments, ListReviews) plus the write/enrichment/fingerprint surface
-// carried over alongside it for full parity with pg-pr's own behavior. All
-// shell out to the `gh` CLI for its authentication and rate-limit handling.
-// The CLI invocation layer is abstracted by ghRunner so tests can inject
-// canned JSON without spawning real subprocesses.
+// ListComments, ListReviews, CheckAuth — see internal/provider.go's
+// ghProvider seam) plus the twelve write methods below (ListMyPRs,
+// ListTeamPRs, CreatePR, UpdatePR, SetDraft, SetAutomerge, Merge, Close,
+// AddComment, ReplyToThread, ResolveThread, PostReview), carried over
+// alongside the read paths for parity with pg-pr's own vcs.Provider shape.
+// None of the twelve is called by anything in pg-connector today — only
+// `var _ vcs.Provider = (*Provider)(nil)` below keeps them reachable — but
+// unlike this package's former enrich.go/fingerprint.go/pending.go (deleted
+// as dead surface with no design citation, bead pg2-lh3c4), every one of
+// these twelve has a design-stated future pg-connector destination, so they
+// were kept rather than deleted:
+//   - ListMyPRs/ListTeamPRs -> a future `pg-connector pr list` (design §9.1's
+//     verb→destination table; Appendix A tracks live-vs-cache as the one
+//     still-open question about HOW it's implemented, not WHETHER it exists).
+//   - CreatePR/UpdatePR/SetDraft/SetAutomerge/Merge/Close -> `pg-connector pr
+//     create`/`update`/`draft`/`automerge`/`merge`/`close` (§9.1's table,
+//     "the rest of this list does not yet [ship]").
+//   - AddComment/ReplyToThread/ResolveThread -> `pg-connector pr comment
+//     add`/`resolve` (§9.1's table: "new write verbs ... mirroring the shape
+//     categorize/feedback-set already establish").
+//   - PostReview -> `pg-connector pr review draft`/`post`/`submit` (same
+//     table entry, same rationale).
+//
+// All shell out to the `gh` CLI for its authentication and rate-limit
+// handling. The CLI invocation layer is abstracted by ghRunner so tests can
+// inject canned JSON without spawning real subprocesses.
 package github
 
 import (

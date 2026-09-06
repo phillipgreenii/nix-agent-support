@@ -1353,17 +1353,19 @@ condition-based rather than dated.
   window has a stated end condition, not just a stated start.
 - A rollout/cutover sequencing rule for the downstream call-site rewrite exists (§9.3), and a
   deprecation timeline stated as a dependency order rather than a calendar date exists (§9.4).
-- `TestGHExecChokePoint` and `TestNoGHStackMutatingArgv`
-  (`packages/pg-connector/cmd/pg-connector-pr-github/internal/github/chokepoint_test.go` and
-  `.../stack_readonly_test.go`) MUST be relocated out of the pr-github backend's own test package,
-  into a location whose lifecycle is independent of any single backend, **before** any retirement
-  packet removes, deletes, or substantially restructures that backend's package. This is a
-  prerequisite of retirement completing, not cleanup that can trail it: both tests walk the whole
-  `pg-connector` module from inside one backend's package today (via a shared `moduleRoot(t)`
-  helper that finds `packages/pg-connector/go.mod`), so deleting or restructuring that package
-  first — as pr-github's own surface shrinks while pg-pr's GitHub logic is carried over — would
-  silently delete the module's only cross-backend `gh` choke-point guard and its only stack-mutation
-  guard.
+- **Resolved, not left open (bead `pg2-lh3c4`, 2026-09-06):** `TestGHExecChokePoint` and
+  `TestNoGHStackMutatingArgv` have been relocated out of the pr-github backend's own test
+  package into `packages/pg-connector/cmd/pg-connector/{chokepoint_test.go,
+stack_readonly_test.go}` — the umbrella Tier-1 package that already hosts every other
+  module-wide mechanical/convention check (`naming_convention_test.go`,
+  `layout_convention_test.go`, `dependency_direction_test.go`,
+  `backend_internal_sync_test.go`), none of them tied to any single backend's own lifecycle.
+  Both tests still walk the whole `pg-connector` module via the same `moduleRoot(t)` helper
+  (unchanged; it finds `packages/pg-connector/go.mod` regardless of the caller's own depth), so
+  deleting or restructuring pr-github's package no longer risks silently dropping the module's
+  only cross-backend `gh` choke-point guard or its only stack-mutation guard — this was a
+  prerequisite of retirement completing, not cleanup that could trail it, and it is now done
+  ahead of any retirement packet touching pr-github's package.
 - pg-pr's local SQLite store gets a stated per-table disposition (migrate / drop / move under the
   PR GitHub backend) before any retirement packet lands.
 - No shim, dual-write, or routing-layer coexistence mechanism is built; the transition is
