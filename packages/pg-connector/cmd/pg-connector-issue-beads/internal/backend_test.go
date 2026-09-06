@@ -52,6 +52,23 @@ func containsArg(args []string, want string) bool {
 	return false
 }
 
+// argsEndWith reports whether args ends with exactly the given tail, in
+// order — used to assert that every caller-supplied id/body positional was
+// placed after a literal "--" terminator [bead: pg2-usu5b], since bd's
+// cobra/pflag layer stops treating anything past "--" as a flag.
+func argsEndWith(args []string, tail ...string) bool {
+	if len(tail) > len(args) {
+		return false
+	}
+	start := len(args) - len(tail)
+	for i, want := range tail {
+		if args[start+i] != want {
+			return false
+		}
+	}
+	return true
+}
+
 // ----------------------------------------------------------------------
 // Show
 // ----------------------------------------------------------------------
@@ -89,6 +106,32 @@ func TestBackend_Show_Success(t *testing.T) {
 	}
 	if !containsArg(fr.calls[0], "--readonly") {
 		t.Fatalf("expected --readonly in Show's bd invocation (bead pg2-1q9c0, AC3), got %v", fr.calls[0])
+	}
+	if !argsEndWith(fr.calls[0], "--", "tp-1") {
+		t.Fatalf("expected id as a literal positional after a \"--\" terminator (bead pg2-usu5b), got %v", fr.calls[0])
+	}
+}
+
+// TestBackend_Show_IDLooksLikeBDFlag locks in the pg2-usu5b fix: an id that
+// is itself a valid bd flag string (e.g. "--current", which really does
+// mean "show the last-touched issue" per `bd show --help`) must not be
+// interpretable as a flag by bd's own cobra/pflag layer — it must be sent
+// as a literal positional, after a "--" terminator [review:
+// 2026-09-05-pg-connector-deep-review.md §A finding 8]. Verified live
+// against real bd v1.2.2 that the unescaped shape actually redirects to an
+// unrelated issue and the escaped shape correctly reports not-found.
+func TestBackend_Show_IDLooksLikeBDFlag(t *testing.T) {
+	fr := &fakeRunner{handle: func(args []string) (string, error) {
+		if !argsEndWith(args, "--", "--current") {
+			t.Fatalf("expected \"--current\" escaped as a literal positional after \"--\", got %v", args)
+		}
+		out := `{"data":{"error":"no issues found matching the provided IDs"},"schema_version":1}`
+		return out, errors.New(`bd show --readonly --json -- --current: exit status 1: Error fetching --current: no issue found matching "--current"`)
+	}}
+	b := New(fr)
+	_, err := b.Show(context.Background(), "--current")
+	if !errors.Is(err, scriptout.ErrNotFound) {
+		t.Fatalf("err = %v, want wrapping ErrNotFound (bd treated \"--current\" as a literal, nonexistent id)", err)
 	}
 }
 
@@ -231,14 +274,37 @@ func TestBackend_Create_OmitsOptionalFlagsWhenUnset(t *testing.T) {
 
 func TestBackend_Comment_Success(t *testing.T) {
 	fr := &fakeRunner{handle: func(args []string) (string, error) {
-		if args[0] != "comment" || args[1] != "tp-1" || args[2] != "hello there" {
-			t.Fatalf("unexpected args: %v", args)
+		if args[0] != "comment" {
+			t.Fatalf("unexpected op: %v", args)
+		}
+		if !argsEndWith(args, "--", "tp-1", "hello there") {
+			t.Fatalf("expected id/body positionals after a \"--\" terminator, got %v", args)
 		}
 		return `{"data":{"id":"c1","issue_id":"tp-1","text":"hello there"},"schema_version":1}`, nil
 	}}
 	b := New(fr)
 	if err := b.Comment(context.Background(), "tp-1", "hello there"); err != nil {
 		t.Fatalf("Comment: %v", err)
+	}
+}
+
+// TestBackend_Comment_IDLooksLikeBDFlag locks in the pg2-usu5b fix: an id
+// that is itself a valid bd flag string (e.g. "--claim") must not be
+// interpretable as a flag by bd's own cobra/pflag layer — it must be sent
+// as a literal positional, after a "--" terminator, exactly like any other
+// id [review: 2026-09-05-pg-connector-deep-review.md §A finding 8].
+func TestBackend_Comment_IDLooksLikeBDFlag(t *testing.T) {
+	fr := &fakeRunner{handle: func(args []string) (string, error) {
+		if !argsEndWith(args, "--", "--claim", "hijack attempt") {
+			t.Fatalf("expected \"--claim\" escaped as a literal positional after \"--\", got %v", args)
+		}
+		return `{"data":{"error":"resolving --claim: no issue found matching \"--claim\""},"schema_version":1}`,
+			errors.New("bd comment --json -- --claim \"hijack attempt\": exit status 1")
+	}}
+	b := New(fr)
+	err := b.Comment(context.Background(), "--claim", "hijack attempt")
+	if !errors.Is(err, scriptout.ErrNotFound) {
+		t.Fatalf("err = %v, want wrapping ErrNotFound (bd treated \"--claim\" as a literal, nonexistent id)", err)
 	}
 }
 
@@ -290,17 +356,43 @@ func TestBackend_Comment_EmptyID(t *testing.T) {
 
 func TestBackend_Transition_Success(t *testing.T) {
 	fr := &fakeRunner{handle: func(args []string) (string, error) {
-		if args[0] != "update" || args[1] != "tp-1" {
-			t.Fatalf("unexpected args: %v", args)
+		if args[0] != "update" {
+			t.Fatalf("unexpected op: %v", args)
 		}
 		if !containsArg(args, "--status") || !containsArg(args, "in_progress") {
 			t.Fatalf("expected --status in_progress in args, got %v", args)
+		}
+		if !argsEndWith(args, "--", "tp-1") {
+			t.Fatalf("expected id as a literal positional after a \"--\" terminator (bead pg2-usu5b), got %v", args)
 		}
 		return `{"data":[{"id":"tp-1","title":"probe","status":"in_progress","priority":2,"issue_type":"task"}],"schema_version":1}`, nil
 	}}
 	b := New(fr)
 	if err := b.Transition(context.Background(), "tp-1", "in_progress"); err != nil {
 		t.Fatalf("Transition: %v", err)
+	}
+}
+
+// TestBackend_Transition_IDLooksLikeBDFlag locks in the pg2-usu5b fix: an
+// id that is itself a valid bd flag string (e.g. "--claim") must not be
+// interpretable as a flag by bd's own cobra/pflag layer — it must be sent
+// as a literal positional, after a "--" terminator [review:
+// 2026-09-05-pg-connector-deep-review.md §A finding 8]. Verified live
+// against real bd v1.2.2 that the unescaped shape
+// (`bd update --claim --status closed --json`) actually claims AND closes
+// bd's workspace-wide "last touched" issue — an unrelated bead — while the
+// escaped shape correctly reports not-found for the literal id.
+func TestBackend_Transition_IDLooksLikeBDFlag(t *testing.T) {
+	fr := &fakeRunner{handle: func(args []string) (string, error) {
+		if !argsEndWith(args, "--", "--claim") {
+			t.Fatalf("expected \"--claim\" escaped as a literal positional after \"--\", got %v", args)
+		}
+		return "", errors.New(`bd update --status closed --json -- --claim: exit status 1: Error resolving --claim: no issue found matching "--claim"`)
+	}}
+	b := New(fr)
+	err := b.Transition(context.Background(), "--claim", "closed")
+	if !errors.Is(err, scriptout.ErrNotFound) {
+		t.Fatalf("err = %v, want wrapping ErrNotFound (bd treated \"--claim\" as a literal, nonexistent id)", err)
 	}
 }
 

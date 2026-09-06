@@ -150,11 +150,23 @@ func (b *Backend) tracker() string {
 // costs nothing on the happy path and blocks any write bd itself is willing
 // to perform under this op (defense in depth, not a behavior change for a
 // correctly-behaving `bd show`).
+//
+// id is placed AFTER a literal "--" terminator, ahead of every one of this
+// call's own flags [bead: pg2-usu5b; review: 2026-09-05-pg-connector-deep-
+// review.md §A finding 8]. Without it, a caller-supplied id equal to a real
+// bd flag (e.g. "--current") is parsed by bd's own cobra/pflag layer as
+// that flag rather than as a positional id — verified live against bd
+// v1.2.2: `bd show --current --readonly --json` (the old unescaped shape,
+// with id="--current") returns bd's workspace-wide "last touched" issue
+// instead of erroring, silently substituting an unrelated bead for the one
+// the caller named. `--` forces everything after it to be treated as a
+// literal positional, so the same id now correctly resolves to "no issue
+// found" instead of hijacking the call.
 func (b *Backend) Show(ctx context.Context, id string) (*schema.Issue, error) {
 	if strings.TrimSpace(id) == "" {
 		return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, "issue: id required")
 	}
-	data, err := b.run(ctx, "show", id, "--readonly", "--json")
+	data, err := b.run(ctx, "show", "--readonly", "--json", "--", id)
 	if err != nil {
 		return nil, err
 	}
@@ -200,6 +212,13 @@ func (b *Backend) Create(ctx context.Context, input issue.IssueInput) (*schema.I
 // --json`. New code (no existing pg-pr wrapper to port), using
 // action.go/mergerequest.go's exec-and-parse pattern as its style precedent
 // only.
+//
+// Both id and body are caller-supplied and are placed AFTER a literal "--"
+// terminator, ahead of this call's own --json flag [bead: pg2-usu5b;
+// review: 2026-09-05-pg-connector-deep-review.md §A finding 8] — see
+// Show's doc comment for why: an unescaped id/body equal to a real bd flag
+// (e.g. "--claim") would otherwise be parsed as that flag by bd's own
+// cobra/pflag layer instead of as a literal comment argument.
 func (b *Backend) Comment(ctx context.Context, id, body string) error {
 	if strings.TrimSpace(id) == "" {
 		return scriptout.WrapError(scriptout.ErrInvalidArgument, "issue: id required")
@@ -207,7 +226,7 @@ func (b *Backend) Comment(ctx context.Context, id, body string) error {
 	if strings.TrimSpace(body) == "" {
 		return scriptout.WrapError(scriptout.ErrInvalidArgument, "issue: comment body required")
 	}
-	_, err := b.run(ctx, "comment", id, body, "--json")
+	_, err := b.run(ctx, "comment", "--json", "--", id, body)
 	return err
 }
 
@@ -219,6 +238,22 @@ func (b *Backend) Comment(ctx context.Context, id, body string) error {
 // generically as ErrUnavailable by classifyBDErrorMessage — a well-formed
 // rejection of an unrecognized target state per issue.Provider.Transition's
 // own doc comment, not this method's job to pre-validate).
+//
+// id is caller-supplied and is placed AFTER a literal "--" terminator,
+// ahead of this call's own --status/--json flags [bead: pg2-usu5b; review:
+// 2026-09-05-pg-connector-deep-review.md §A finding 8]. targetState is
+// passed as --status's flag VALUE (space-separated, not positional) —
+// pflag consumes the very next token unconditionally as that flag's value
+// regardless of its shape, so it needs no escaping. Without the "--"
+// before id, a caller-supplied id equal to a real bd flag (e.g. "--claim")
+// is parsed as that flag instead of a positional id — verified live
+// against bd v1.2.2: `bd update --claim --status closed --json` (the old
+// unescaped shape, with id="--claim" and targetState="closed") claims AND
+// closes bd's workspace-wide "last touched" issue — an unrelated bead the
+// caller never named, not the one it asked to transition. `--` forces
+// everything after it to be treated as a literal positional, so the same
+// id now correctly resolves to "no issue found" instead of hijacking the
+// call.
 func (b *Backend) Transition(ctx context.Context, id, targetState string) error {
 	if strings.TrimSpace(id) == "" {
 		return scriptout.WrapError(scriptout.ErrInvalidArgument, "issue: id required")
@@ -226,6 +261,6 @@ func (b *Backend) Transition(ctx context.Context, id, targetState string) error 
 	if strings.TrimSpace(targetState) == "" {
 		return scriptout.WrapError(scriptout.ErrInvalidArgument, "issue: target_state required")
 	}
-	_, err := b.run(ctx, "update", id, "--status", targetState, "--json")
+	_, err := b.run(ctx, "update", "--status", targetState, "--json", "--", id)
 	return err
 }
