@@ -232,7 +232,7 @@ fast-forward merge itself, unchanged for every other repo this handler lands.
 
 ### FF-2a — Repo-scoped `nix flake check` (blocking)
 
-`nix-agent-support` and `phillipg-nix-ziprecruiter` have no
+`phillipgreenii-nix-agent-support` and `phillipg-nix-ziprecruiter` have no
 external CI system — their pre-commit/pre-push hooks have historically been the
 only automated, whole-repo check they get, and a separate design is narrowing
 those hooks (moving heavyweight test hooks out of pre-commit). For **these two
@@ -242,7 +242,7 @@ leave a landing with no automated check at all:
 
 ```bash
 case "$(basename "$CC")" in
-nix-agent-support | phillipg-nix-ziprecruiter)
+phillipgreenii-nix-agent-support | phillipg-nix-ziprecruiter)
   (cd "$WT" && nix flake check)
   ;;
 esac
@@ -410,7 +410,7 @@ exist, and prescribes a `git rebase --continue` that exits 128.
 - The handler MUST rebase (`<WT>` onto primary) before attempting the fast-forward
   merge — this is the rebase-first requirement; it MUST NOT fall back to a plain
   non-fast-forward merge.
-- When the repo being landed is `nix-agent-support` or
+- When the repo being landed is `phillipgreenii-nix-agent-support` or
   `phillipg-nix-ziprecruiter` (identified by `basename "$CC"`), FF-2a MUST run a
   full `nix flake check` against the rebased `<WT>` and MUST halt and report
   `stopped:flake-check-failed` on any non-zero exit, rather than proceed to
