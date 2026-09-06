@@ -1,6 +1,9 @@
 package main
 
 import (
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
 	"strings"
@@ -106,5 +109,62 @@ func TestFormatSourcesTable_RendersEveryRow(t *testing.T) {
 	}
 	if !strings.Contains(got, "backend-b: degraded (bad token)") {
 		t.Fatalf("formatSourcesTable = %q, missing degraded row with reason", got)
+	}
+}
+
+// TestReportTargetedOutcomeDocCommentsSync guards the four near-identical
+// report*TargetedOutcome wrappers (pr.go, issue.go, ci.go, scm.go) — each a
+// one-line delegate to writeTargetedResult above, per its own doc comment
+// ("the shared write path behind every verb group's own report*
+// TargetedOutcome wrapper") — against drifting apart (bead pg2-sxfwd: found
+// with issue.go's copy missing the [design: §4.5] tag, ci.go's carrying an
+// extra aside, and scm.go's dropping the "or an ambiguous multi-backend
+// registration" clause the other three keep). Each doc comment's own first
+// word is its function's name (required Go doc convention), so that one
+// word is stripped before comparing — the remaining text is otherwise
+// compared verbatim, no hand-maintained golden text needed.
+func TestReportTargetedOutcomeDocCommentsSync(t *testing.T) {
+	wrapperFile := map[string]string{
+		"reportPrTargetedOutcome":    "pr.go",
+		"reportIssueTargetedOutcome": "issue.go",
+		"reportCiTargetedOutcome":    "ci.go",
+		"reportScmTargetedOutcome":   "scm.go",
+	}
+
+	docFor := func(funcName, file string) string {
+		fset := token.NewFileSet()
+		astFile, err := parser.ParseFile(fset, file, nil, parser.ParseComments)
+		if err != nil {
+			t.Fatalf("parse %s: %v", file, err)
+		}
+		for _, decl := range astFile.Decls {
+			fd, ok := decl.(*ast.FuncDecl)
+			if !ok || fd.Name.Name != funcName {
+				continue
+			}
+			if fd.Doc == nil {
+				t.Fatalf("%s: %s has no doc comment", file, funcName)
+			}
+			text := fd.Doc.Text()
+			if !strings.HasPrefix(text, funcName) {
+				t.Fatalf("%s: %s's doc comment does not start with its own name, got %q", file, funcName, text)
+			}
+			return strings.TrimPrefix(text, funcName)
+		}
+		t.Fatalf("%s: could not find func %s", file, funcName)
+		return ""
+	}
+
+	const canonicalFunc = "reportPrTargetedOutcome"
+	want := docFor(canonicalFunc, wrapperFile[canonicalFunc])
+	for funcName, file := range wrapperFile {
+		if funcName == canonicalFunc {
+			continue
+		}
+		if got := docFor(funcName, file); got != want {
+			t.Errorf("%s's doc comment (%s) has drifted from %s's (%s):\n--- %s ---\n%s\n--- %s ---\n%s",
+				funcName, file, canonicalFunc, wrapperFile[canonicalFunc],
+				canonicalFunc, want, funcName, got)
+		}
 	}
 }

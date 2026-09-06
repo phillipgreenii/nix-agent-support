@@ -136,17 +136,18 @@ func newIssueTransitionCmd() *cobra.Command {
 }
 
 // reportIssueTargetedOutcome writes resp's outcome to stdout — in the
-// default OutputJSON mode, its wire envelope verbatim, matching the wire
+// default OutputJSON mode, its wire envelope ("result" on success, or
+// "error" per the taxonomy on failure) verbatim, matching the wire
 // protocol's own "only stdout JSON is the contract" convention; in
 // OutputHuman mode, humanize's formatted rendering instead
 // [bead pg2-ox1k6] — see output.go's writeTargetedResult, which this
 // delegates to. It translates err into pg-connector's own targeted-op
 // exit code via outcome.go's TargetedExitCode, never deciding the exit
-// code itself. A nil resp is a CLI-level failure before any well-formed
-// wire response was produced (e.g. no backend registered, or an ambiguous
-// multi-backend registration) — that case is returned as a plain error
-// instead, so main's run() reports it on stderr rather than fabricating a
-// JSON body.
+// code itself [design: §4.5]. A nil resp is a CLI-level failure before any
+// well-formed wire response was produced (e.g. no backend registered,
+// or an ambiguous multi-backend registration) — that case is returned as a
+// plain error instead, so main's run() reports it on stderr rather than
+// fabricating a JSON body.
 func reportIssueTargetedOutcome(cmd *cobra.Command, resp *scriptout.Response, err error, humanize humanizeResult) error {
 	return writeTargetedResult(cmd, resp, err, humanize)
 }
