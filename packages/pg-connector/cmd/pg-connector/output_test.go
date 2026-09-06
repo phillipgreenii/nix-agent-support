@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -56,6 +58,34 @@ func TestRun_InvalidOutputFlag_IsGenericFailure(t *testing.T) {
 	_, code := executePr(t, []string{"--output", "yaml", "pr", "show", "pr-1"})
 	if code != 1 {
 		t.Fatalf("exit code = %d, want 1", code)
+	}
+}
+
+func TestRun_InvalidOutputFlag_WriteOp_NoSideEffect(t *testing.T) {
+	// The regression this bead fixes [bug A4]: a typo'd --output on a
+	// WRITE op (pr categorize mutates state) must be rejected with zero
+	// side effects, not after the backend has already run. The fake
+	// backend touches sideEffect on every invocation regardless of op —
+	// if root's PersistentPreRunE did not catch the bad --output value
+	// before Dispatch, this backend would run and the marker file would
+	// exist.
+	dir := t.TempDir()
+	sideEffect := filepath.Join(dir, "backend-was-invoked")
+	backendDir := t.TempDir()
+	script := filepath.Join(backendDir, "backend-side-effecting")
+	content := "#!/bin/sh\ncat >/dev/null\ntouch " + sideEffect + "\ncat <<'FAKE_BACKEND_EOF'\n{\"protocolVersion\":1,\"schemaVersion\":1,\"result\":{\"id\":\"pr-1\",\"category\":\"focus\"}}\nFAKE_BACKEND_EOF\n"
+	if err := os.WriteFile(script, []byte(content), 0o755); err != nil {
+		t.Fatalf("write fake backend: %v", err)
+	}
+	t.Setenv("PATH", backendDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	writeConfigFor(t, "backend-side-effecting")
+
+	_, code := executePr(t, []string{"--output", "yaml", "pr", "categorize", "pr-1", "--category", "focus"})
+	if code != 1 {
+		t.Fatalf("exit code = %d, want 1", code)
+	}
+	if _, err := os.Stat(sideEffect); !os.IsNotExist(err) {
+		t.Fatalf("backend was invoked despite invalid --output (side-effect marker exists, stat err=%v)", err)
 	}
 }
 

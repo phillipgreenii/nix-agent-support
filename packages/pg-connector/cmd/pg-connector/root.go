@@ -11,6 +11,18 @@
 // itself) selects pg-connector's own CLI presentation mode
 // [bead pg2-ox1k6] — see output.go's header comment for the json-default
 // design rationale.
+//
+// root's PersistentPreRunE below is what makes --output validation
+// genuinely pre-dispatch [bug A4, bead pg2-zc3b4]: cobra runs the nearest
+// ancestor's PersistentPreRunE before the invoked (leaf) command's own
+// RunE, and no verb-group command in this package defines its own
+// PersistentPreRunE to shadow it — so this fires, for every verb, strictly
+// before that verb's RunE calls Dispatch/fanOut*. Without it, an invalid
+// --output value was only ever caught inside output.go's
+// writeTargetedResult/writeFanOutResult, both of which run AFTER the
+// backend has already executed (and, for a write op, already mutated
+// state) — see output.go's own header on outputModeFor for the full
+// story.
 package main
 
 import "github.com/spf13/cobra"
@@ -25,6 +37,13 @@ func newRootCmd() *cobra.Command {
 		Version:       Version,
 		SilenceUsage:  true,
 		SilenceErrors: true,
+		// Validates --output before any subcommand's RunE runs, so a
+		// bad value is caught with zero side effects — see this file's
+		// header comment and output.go's outputModeFor.
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			_, err := outputModeFor(cmd)
+			return err
+		},
 	}
 	root.AddCommand(newAuthCmd())
 	root.AddCommand(newConfigCmd())

@@ -71,8 +71,20 @@ func addOutputFlag(root *cobra.Command) {
 
 // outputModeFor reads cmd's --output flag (inherited from root). An
 // unrecognized value is reported as pg-connector's own generic CLI
-// failure (exit 1) before any backend is ever dispatched — mirroring
-// pr.go's own --disposition client-side validation.
+// failure (exit 1) — mirroring pr.go's own --disposition client-side
+// validation.
+//
+// This function itself only reads and validates the flag; it does not by
+// itself guarantee pre-dispatch timing. What makes an unrecognized value
+// caught before any backend is ever dispatched is root.go's
+// PersistentPreRunE, which calls outputModeFor and runs before every
+// verb's own RunE (and therefore before that RunE's call to
+// Dispatch/fanOut*) [bug A4, bead pg2-zc3b4]. writeTargetedResult and
+// writeFanOutResult below also call outputModeFor, but only to look up
+// the already-validated mode for rendering — by the time either runs,
+// root's PersistentPreRunE has already rejected an invalid value with
+// zero side effects, so their own call to outputModeFor cannot itself be
+// where an invalid value's error path is reached in practice.
 func outputModeFor(cmd *cobra.Command) (OutputMode, error) {
 	raw, err := cmd.Flags().GetString(outputFlagName)
 	if err != nil {
