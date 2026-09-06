@@ -74,15 +74,15 @@ fall back to ad-hoc files or a different tracker.
 
 Keys use underscores (`pd_`), never hyphens. Values compare as strings.
 
-| Key                                                       | On     | Meaning                                                                                                                                                                               |
-| --------------------------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `pd_rev`                                                  | docket | Design revision; bumped by RECONCILE                                                                                                                                                  |
-| `pd_model`, `pd_budget`, `pd_read_target`                 | docket | Sizing policy for this decomposition                                                                                                                                                  |
-| `pd_phase`                                                | docket | `precheck` / `curating` / `prefilter` / `coldread` / `postcheck` / `wiring` / `releasing:<n>/<m>` / `released` / `reconciling:<rev>` / `failed:<phase>` — written at EVERY transition |
-| `pd_source`                                               | docket | Design-source identifier (path or issue id) for dedup                                                                                                                                 |
-| `pd_model`, `pd_budget`                                   | packet | Deviation ONLY; absent = docket policy                                                                                                                                                |
-| `pd_curated_rev`, `pd_curated_date`, `pd_curated_session` | packet | Curation stamp (session = the decomposer's session id)                                                                                                                                |
-| `pd_stale`                                                | packet | Set by a stamp-mismatch release or by RECONCILE on a claimed packet; cleared by re-curation                                                                                           |
+| Key                                                       | On     | Meaning                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| --------------------------------------------------------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pd_rev`                                                  | docket | Design revision; bumped by RECONCILE                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `pd_model`, `pd_budget`, `pd_read_target`                 | docket | Sizing policy for this decomposition                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `pd_phase`                                                | docket | `precheck` / `curating` / `prefilter` / `coldread` / `postcheck` / `wiring` / `releasing:<n>/<m>` / `released` / `released:partial` / `reconciling:<rev>` / `failed:<phase>` — written at EVERY transition. `released:partial` is a DISTINCT literal from `released`, not a sub-case of it: it marks a release whose decomposition report's not-decomposed list (tracked live since step 3/5) was non-empty AT RELEASE — this docket's OWN scope is fully covered, but it deliberately left named design elements to a later decomposition. See mode `decompose` step 1 (routing) and step 10 (which literal gets written). |
+| `pd_source`                                               | docket | Design-source identifier (path or issue id) for dedup                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `pd_model`, `pd_budget`                                   | packet | Deviation ONLY; absent = docket policy                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `pd_curated_rev`, `pd_curated_date`, `pd_curated_session` | packet | Curation stamp (session = the decomposer's session id)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `pd_stale`                                                | packet | Set by a stamp-mismatch release or by RECONCILE on a claimed packet; cleared by re-curation                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 
 **Sizing resolution:** packet metadata → docket metadata → the fallback defaults. The
 fallback defaults — the ONLY place models or budgets are hardcoded — are: implementer
@@ -171,10 +171,24 @@ deduplication.
    halt: decomposing around a gap creates packets whose neighbors do not exist.
 
 1. `find-docket(design-source)`: an existing docket for this source ⇒ MUST NOT create a
-   second. Routing rule: `pd_phase=released` and the design text matches the stored design ⇒
-   nothing to do (report the existing docket); `released` and the text differs ⇒ mode
-   `reconcile`; any other `pd_phase` ⇒ RESUME from that phase — and if the design ALSO
+   second. Routing rule: `pd_phase=released` (full coverage, literal match — see below) and
+   the design text matches the stored design ⇒ nothing to do (report the existing docket);
+   `pd_phase=released:partial` and the text matches ⇒ this is NOT "nothing to do" — read the
+   docket's not-decomposed list (its most recent `write-report` decomposition report) and
+   report it to the caller as still-open scope; direct the caller to decompose it under a
+   NEW, scope-qualified `pd_source` — `<design-source>#remainder<n>` (query existing dockets'
+   `pd_source` values for the next unused `<n>` on this prefix) — never by re-invoking against
+   the unqualified `design-source`, which loops back to this same branch, and never by writing
+   into THIS docket, which is already fully released for its own scope. Mirrors
+   `epic-decompose`'s `<program-epic>#phase<n>` minting, scoped to one docket's leftover slice
+   instead of a whole program epic's phase split. Either `released` or `released:partial`,
+   with the text DIFFERING from the stored design ⇒ mode `reconcile` (reconcile step 2
+   re-evaluates and may change which of the two literals the docket ends up at — see step 4's
+   note there); any other `pd_phase` ⇒ RESUME from that phase — and if the design ALSO
    changed since, re-run the pre-check on the new text first and resume curation against it.
+   `pd_phase` comparison MUST be an exact-string match, never a substring/prefix test —
+   `released:partial` contains `released` as a substring and a prefix-matching routing check
+   would silently mis-route a partial release into the "nothing to do" branch.
 2. Create the docket (design VERBATIM + `pd_rev` + policy + `pd_source`); set `pd_phase` at
    every transition from here on.
 3. **Curate** each packet per the anatomy, packets created HELD. Record the PLANNED ORDERING
@@ -225,7 +239,9 @@ deduplication.
 7. **Semantic post-check** (one mid-model fresh-eyes agent, read-only; the one role that
    reads the full design AND all packets): (a) coverage both directions — every design
    element lands in a packet or is recorded via `write-report` as deliberately not
-   decomposed; every citation resolves to design text that supports its clause; (b) seam
+   decomposed (this is the list step 10 checks to decide `released` vs `released:partial`,
+   and step 1 later surfaces to a `find-docket` caller — get it right here, not just at report
+   time); every citation resolves to design text that supports its clause; (b) seam
    consistency — every Consumes supplied by a planned predecessor's Produces or existing
    code, signatures matching.
 
@@ -265,11 +281,15 @@ deduplication.
    output filtered to this docket's packets). At least one packet must be immediately
    workable when the count is ≥ 1 — unless the only blockers are EXTERNAL (cross-docket)
    edges, which is legitimate: report it, do not treat it as a failure.
-10. **Release** the set (`pd_phase=releasing:<n>/<m>` as the sweep proceeds, then `released`)
-    and `write-report` the decomposition report: packet index, per-packet fixed-read
-    estimates and QA dispatch counts (cold-reads per packet, post-check rounds), each
-    semantic post-check round's prompt byte-length, sizing deviations, check outcomes,
-    hoisting flags, not-decomposed records, and an explicit "no uncited content" assertion.
+10. **Release** the set (`pd_phase=releasing:<n>/<m>` as the sweep proceeds, then `released`
+    if the not-decomposed list is empty at this moment, else `released:partial`) and
+    `write-report` the decomposition report: packet index, per-packet fixed-read estimates
+    and QA dispatch counts (cold-reads per packet, post-check rounds), each semantic
+    post-check round's prompt byte-length, sizing deviations, check outcomes, hoisting flags,
+    not-decomposed records, and an explicit "no uncited content" assertion. Get the
+    not-decomposed list right here — it is both what step 1's routing rule reports back to a
+    later `find-docket` caller and what decides which of the two `pd_phase` literals gets
+    written.
 
 **Abort path (any early exit):** leave all packets DEFERRED — NEVER release an unverified
 set — set `pd_phase=failed:<phase>`, and `write-report` what was completed. The decomposer
@@ -288,7 +308,9 @@ as-is) before anything is written to the docket. Order is load-bearing:
    Resolve step, not yet committed to the docket. Gaps ⇒ gap report, no amendment applied.
 2. `amend-design`'s Commit step (bump `pd_rev`; superseded text struck/rewritten, ruling
    recorded — never two live instructions). Set `pd_phase=reconciling:<new-rev>`; restore
-   `released` when done.
+   `released` or `released:partial` when done — whichever the not-decomposed list is
+   currently at (step 3's re-curation may add to it or resolve entries from it; never assume
+   the pre-reconcile literal still holds without re-checking the list).
 3. Re-curate affected OPEN, UNCLAIMED packets; restamp (`pd_curated_rev`); clear `pd_stale`.
    "Affected" is determined by the citation markers: a packet is affected iff any of its
    `[design: <section>]` citations points into an amended section. A packet actively CLAIMED
@@ -303,8 +325,9 @@ as-is) before anything is written to the docket. Order is load-bearing:
    that step 3 already re-curated and RESTAMPED — nothing here was ever left un-released. An
    abort at the cap MUST re-DEFER the re-curated packets, set `pd_stale=<new-rev>` on them,
    leave `pd_phase=reconciling:<new-rev>` (so step 9's dedup/resume logic treats it as an
-   interrupted reconcile), and `write-report` — it MUST NOT restore `released` on an aborted
-   reconcile. Note also that this pass's scope is narrower than `decompose`'s (seam
+   interrupted reconcile), and `write-report` — it MUST NOT restore `released` OR
+   `released:partial` on an aborted reconcile; both are terminal-release literals and this
+   path is not a release. Note also that this pass's scope is narrower than `decompose`'s (seam
    consistency only, not full coverage), so most findings here will legitimately be
    `blocking` — severity-gating buys this mode fewer skipped rounds than it buys
    `decompose`.

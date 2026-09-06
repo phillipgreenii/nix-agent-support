@@ -20,10 +20,36 @@ bd 1.0.x on this workspace (commands shown); re-verify on a bd major bump.
 against the design source. `-n 0` and `--status all` are load-bearing: the default caps at 50
 rows AND hides closed beads.
 
-Deliberately partial decomposition (a design phased across multiple dockets) needs no branch
-in the "`released` + unchanged text ⇒ nothing to do" rule above: `epic-decompose` mints a
-distinct `pd_source` per phase (the synthetic `<program-epic>#phase<n>` form), so this lookup
-never again sees one literal source invoked for two different intended scopes.
+**`pd_phase` comparison is EXACT-STRING, never substring/prefix** (`pg2-2sk88`):
+`released:partial` contains `released` as a literal substring, so a `jq` filter or shell test
+written as `pd_phase | contains("released")` (or a bare prefix check) would match BOTH
+literals and silently route a partial release into the core skill's "nothing to do" branch.
+Compare the full string — `.metadata.pd_phase == "released"` vs `== "released:partial"` — as
+two distinct cases.
+
+**Correction of an earlier claim in this section** (`pg2-2sk88`): a prior revision of this
+binding asserted that deliberately-partial decomposition "needs no branch" here, reasoning
+that `epic-decompose` always mints a distinct `pd_source` per phase (the synthetic
+`<program-epic>#phase<n>` form) before any decomposition runs, so one literal source could
+never be invoked twice for two different intended scopes. That reasoning covers ONLY phasing
+decided UPFRONT through `epic-decompose`. It does NOT cover a `plan-decompose` docket that,
+mid-decomposition (core skill step 3/5), sanctioned leaving some design elements out of that
+round's packets on its own initiative (core skill step 7(a)'s "or is recorded via
+`write-report` as deliberately not decomposed") — that docket keeps its ORIGINAL, unqualified
+`pd_source`; no `epic-decompose` phase-split ever ran; yet its decomposition report's
+not-decomposed list is non-empty at release. The core skill's step 1 routing rule DOES need,
+and now has, a branch for that: it keys on the docket's `pd_phase` literal
+(`released` vs `released:partial`, written by step 10), never on whether `epic-decompose` was
+ever invoked.
+
+**Minting `<design-source>#remainder<n>`** (core skill step 1, when a `released:partial` hit
+has unchanged design text): `bd list --label docket --status all -n 0 --json`, filter
+`.metadata.pd_source` for the prefix `<design-source>#remainder`, and take the next unused
+integer suffix — the same minting discipline `epic-decompose` uses for
+`<program-epic>#phase<n>`, just scoped to one docket's leftover slice instead of a whole
+program epic's phase split. `create-docket` then runs normally against that new `pd_source`,
+with the deferred design slice (read from the partial docket's not-decomposed list / report)
+as the new docket's design text.
 
 ## `create-docket`
 
@@ -93,8 +119,12 @@ current-value state in notes — notes are append-only narrative and cannot supe
 ## `release-set`
 
 Per packet: `bd undefer <id>`, updating docket `pd_phase` to `releasing:<n>/<m>` as the
-sweep proceeds, then `released`. Assignee-based holding DOES NOT WORK: `bd ready` has no
-assignee filter (`-u` is opt-in), so an open-but-assigned bead is claimable.
+sweep proceeds, then `released` — or `released:partial` when the decomposition report's
+not-decomposed list is non-empty at that moment (core skill step 10) — via
+`bd update <docket-id> --set-metadata pd_phase=released:partial`, the same generic
+`write-metadata` mapping as any other `pd_phase` transition; no new bd mechanics, just a new
+literal value. Assignee-based holding DOES NOT WORK: `bd ready` has no assignee filter (`-u`
+is opt-in), so an open-but-assigned bead is claimable.
 
 ## `write-report`
 
