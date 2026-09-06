@@ -179,6 +179,31 @@ registered backend, reported through the same outcome-reporting envelope as §4.
 
 ### 4.4 Cross-cutting capabilities: attention and search
 
+> **Implementation status: DEFERRED, not started (bead `pg2-2j5ac.11`, 2026-09-06).** This
+> section has zero landed code today — no subcommands, schemas, registry keys, severity enum,
+> merge/tiebreak logic, or dependency-direction check exist anywhere in `packages/pg-connector/`.
+> Every other section of this design that has landed code got there one of two ways: as a real
+> `plan-decompose` phase (§2's Issue/CI/SCM entity types, docket bead `pg2-oih8h`), or through
+> ad hoc gap-discovery against code that ALREADY EXISTS (deep-review findings on landed sections,
+> each filed as its own bug/task bead and fixed — e.g. `pg2-p2z7o`, `pg2-r9iok`, `pg2-6hrx6`).
+> Neither mechanism fits this section: there is no code here to find gaps in, and this section's
+> own scope — two new Go capability interfaces, a wire op each, a merge/tiebreak algorithm, a
+> severity enum, a dependency-direction CI check, two new CLI verbs, and a naming convention for
+> standalone plugins — is comparable in size to a full implementation phase, not something a
+> single design-doc-reconciliation bead can responsibly plan in one pass. `pg2-2j5ac`'s own
+> epic-decompose round already reached that same conclusion independently: it sketched this exact
+> scope as a dedicated "Phase 1," whose adversarial review returned no findings on the boundary,
+> then stopped at the operator-approval gate before any phase or trigger bead was created (see
+> `pg2-4g0dd`'s round-1 report, 2026-09-04). That sketch is the real decomposition mechanism for
+> this section — it was never a missing plan, only an unresumed one, and inventing a second,
+> parallel plan here would fork that effort rather than complete it.
+>
+> **Revisit trigger:** before §7.1's `df-attention`/`df-search` are built — they are pure clients
+> of the two verbs this section defines and are non-functional without them — or before any
+> Tier-2 backend attempts to implement `list_attention`/`search`, whichever comes first: resume
+> `epic-decompose` against `pg2-2j5ac` (or run `plan-decompose` directly against this section) to
+> produce the real phase/packet breakdown, rather than re-deriving scope ad hoc at that point.
+
 Two optional, generic capabilities, defined alongside (not as one of) the four entity-type
 schemas: `attention.Source` and `search.Source`, each with one op (`list_attention`/`search`) over
 the same wire protocol. Attention is a continuous "does this need my eyes" signal; it is
@@ -316,6 +341,9 @@ true` + `total_before_cap: N` — a truncation is always a manifest marker, neve
 
 **Acceptance criteria**
 
+- **Implementation of this section is DEFERRED (see the status note above); the mechanical ACs
+  below are the specification for whenever work resumes, not a claim that any of them hold
+  today.**
 - `connector.<type>` is flat and type-keyed at the top level; `issue`/`ci`/`pr` are list-valued,
   `scm` is single-valued; no `exec:` prefix exists anywhere in the registry.
 - Every envelope carries `protocolVersion` and `schemaVersion` (per §4.3); `error` is `{code,
@@ -815,6 +843,26 @@ df-categorize, df-feedback, df-attention, and df-search ship as new siblings in 
 and bats-testing pattern. Standalone `pg-connector-attention-<backend>`/`pg-connector-search-
 <backend>` plugins do **not** live there — despite being ZR-specific, they have no connector
 duties of their own and belong alongside the other ZR-specific Tier-2 backends instead.
+
+> **Cross-reference (bead `pg2-2j5ac.11`, 2026-09-06): relationship to `phillipg-nix-ziprecruiter`'s
+> daily-focus v2 design.** `phillipg-nix-ziprecruiter`'s
+> `docs/superpowers/specs/2026-09-02-daily-focus-v2-design.md` (one day older than this design)
+> is a separate design that also claims `modules/daily-focus/` — its own §3 Architecture overview
+> and §12 Implementation decomposition sketch add `df-survey`, `df-deferred`, `df-wire`, and
+> `df-pull` as new siblings there. **Relationship: COMPLEMENTARY, not superseding and not
+> conflicting.** That design's `df-survey` queries `gh`/`pjira`/`bd` directly for its own
+> planning-synthesis purpose (the morning ritual named in §7.3 above) and is never routed through
+> `pg-connector attention list`/`search` — exactly the disjoint-mechanism split §7.3 already
+> anticipates. This section's four tools are pure `pg-connector` clients (`df-attention`/
+> `df-search`) or pr-pool roles (`df-categorize`/`df-feedback`, §6.1) with no code overlap with
+> `df-survey`'s planning logic. The one real coordination point neither design states on its own:
+> both add new `df-*`-named siblings to the SAME hand-enumerated nix lists (that design's §12
+> names them explicitly — `modules/daily-focus/scripts.nix`'s `callPackage` block/`allScripts`/
+> `checks`/aggregate check, plus `default.nix`'s per-script `.script` append). Whichever design's
+> packets land second MUST merge into those lists rather than overwrite the first design's
+> additions, and MUST pick names that don't collide with the other's existing `df-*` set (no
+> collision exists today between `df-survey`/`df-deferred`/`df-wire`/`df-pull` and
+> `df-attention`/`df-search`/`df-categorize`/`df-feedback`).
 
 **Acceptance criteria**
 
