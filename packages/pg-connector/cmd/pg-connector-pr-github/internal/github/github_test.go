@@ -462,6 +462,88 @@ func TestListComments_PopulatesCreatedAt(t *testing.T) {
 	}
 }
 
+// TestListComments_JoinsReviewIDToGraphQLNodeID is bug pg2-flaes: the
+// pulls-comments endpoint's pull_request_review_id is a REST decimal id,
+// but api.Review.ID (as sourced by ListReviews/PostReview) is always the
+// review's GraphQL node id — so ListComments must translate
+// PullRequestReviewID via the reviews-list endpoint
+// (repos/<repo>/pulls/<number>/reviews) before setting Comment.ReviewID, or
+// the two ids never match and provider.go's join silently drops the
+// comment. This uses a realistic non-numeric-string GraphQL id, not a
+// hand-typed decimal that happens to look compatible on both sides.
+func TestListComments_JoinsReviewIDToGraphQLNodeID(t *testing.T) {
+	const reviewComment = `[
+	  {
+	    "node_id": "RC_kwDO_join",
+	    "body": "please fix",
+	    "user": {"login": "alice"},
+	    "path": "main.go",
+	    "line": 5,
+	    "pull_request_review_id": 80123456,
+	    "author_association": "MEMBER"
+	  }
+	]`
+	const reviewsList = `[
+	  {"id": 80123456, "node_id": "PRR_kwDOKtdWE88AAAABL3blsA"}
+	]`
+	p := NewWithRunner(&pathFakeGH{
+		responses: map[string][]byte{
+			"repos/foo/bar/issues/42/comments": []byte(`[]`),
+			"repos/foo/bar/pulls/42/comments":  []byte(reviewComment),
+			"repos/foo/bar/pulls/42/reviews":   []byte(reviewsList),
+		},
+	})
+
+	cs, err := p.ListComments(context.Background(), "foo/bar", 42)
+	if err != nil {
+		t.Fatalf("ListComments: %v", err)
+	}
+	if len(cs) != 1 {
+		t.Fatalf("expected 1 comment, got %d: %+v", len(cs), cs)
+	}
+	if cs[0].ReviewID != "PRR_kwDOKtdWE88AAAABL3blsA" {
+		t.Fatalf("ReviewID must be translated to the review's GraphQL node id, got %q", cs[0].ReviewID)
+	}
+}
+
+// TestListComments_UnresolvedReviewIDFallsBackEmpty: when the decimal
+// pull_request_review_id has no matching entry in the reviews-list response
+// (e.g. a stale/paginated-away review), ReviewID must come back empty (the
+// documented top-level fallback in provider.go), never the raw untranslated
+// decimal string — a leaked decimal would silently re-create bug pg2-flaes
+// by never matching any real api.Review.ID.
+func TestListComments_UnresolvedReviewIDFallsBackEmpty(t *testing.T) {
+	const reviewComment = `[
+	  {
+	    "node_id": "RC_kwDO_orphan",
+	    "body": "orphaned",
+	    "user": {"login": "alice"},
+	    "path": "main.go",
+	    "line": 5,
+	    "pull_request_review_id": 999,
+	    "author_association": "MEMBER"
+	  }
+	]`
+	p := NewWithRunner(&pathFakeGH{
+		responses: map[string][]byte{
+			"repos/foo/bar/issues/42/comments": []byte(`[]`),
+			"repos/foo/bar/pulls/42/comments":  []byte(reviewComment),
+			"repos/foo/bar/pulls/42/reviews":   []byte(`[]`),
+		},
+	})
+
+	cs, err := p.ListComments(context.Background(), "foo/bar", 42)
+	if err != nil {
+		t.Fatalf("ListComments: %v", err)
+	}
+	if len(cs) != 1 {
+		t.Fatalf("expected 1 comment, got %d", len(cs))
+	}
+	if cs[0].ReviewID != "" {
+		t.Fatalf("an unresolved review id must fall back to empty (top-level), not a bogus decimal string; got %q", cs[0].ReviewID)
+	}
+}
+
 func TestListComments_ValidatesInput(t *testing.T) {
 	p := NewWithRunner(newFakeGH())
 	if _, err := p.ListComments(context.Background(), "", 1); err == nil {

@@ -55,19 +55,33 @@ type Comment struct {
 	MinimizedReason   string `json:"minimized_reason,omitempty"`
 	OriginalCommitOID string `json:"original_commit_oid,omitempty"`
 
-	// ReviewID is the owning review's id (REST-numeric, matching Review.ID's
-	// own fmt.Sprintf("%d", ...) format below) for an inline/review-thread
-	// comment; empty for a top-level (issue) comment. Populated from GitHub's
-	// pulls-comments endpoint's pull_request_review_id field — added here
-	// (internal/github's own call-site adaptation, not present on pg-pr's
-	// upstream api.Comment) so this backend's Show can nest a review-thread
-	// comment under its owning PRReview.Comments rather than only ever
-	// flattening it into PR.Comments [design: §2, §6.1].
+	// ReviewID is the owning review's id for an inline/review-thread comment;
+	// empty for a top-level (issue) comment. Added here (internal/github's
+	// own call-site adaptation, not present on pg-pr's upstream api.Comment)
+	// so this backend's Show can nest a review-thread comment under its
+	// owning PRReview.Comments rather than only ever flattening it into
+	// PR.Comments [design: §2, §6.1].
+	//
+	// MUST be in the SAME id space as Review.ID below: both are GitHub's
+	// GraphQL node-id string (e.g. "PRR_kwDOKtdWE88AAAABL3blsA"), never the
+	// REST decimal id. GitHub's pulls-comments endpoint (this field's
+	// upstream source) only ever exposes the REST decimal
+	// pull_request_review_id, so internal/github's ListComments translates
+	// it to the matching review's GraphQL node id (via
+	// reviewNodeIDsByDatabaseID) before populating this field. Earlier, this
+	// field carried the untranslated decimal id while Review.ID carried the
+	// GraphQL node id (post the 2b93d895/pg2-6hkl5 crash fix) — the two
+	// never matched, so provider.go's join silently dropped every inline
+	// review comment instead of nesting it or falling back to PR.Comments
+	// [bug pg2-flaes].
 	ReviewID string `json:"review_id,omitempty"`
 }
 
 // Review is the JSON shape for a PR review summary.
 type Review struct {
+	// ID is GitHub's GraphQL node-id string (e.g. "PRR_..."), matching
+	// Comment.ReviewID's id space above [bug pg2-flaes] — not the REST
+	// decimal id GitHub also exposes for reviews.
 	ID       string    `json:"id"`
 	Author   string    `json:"author"`
 	State    string    `json:"state"`

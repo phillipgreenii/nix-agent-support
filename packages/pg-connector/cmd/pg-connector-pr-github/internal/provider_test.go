@@ -64,10 +64,14 @@ func TestBackend_Show_MapsGHDataToSchemaPR(t *testing.T) {
 		},
 		comments: []api.Comment{
 			{ID: "c1", Author: "alice", Body: "top-level"},
-			{ID: "c2", Author: "bob", Body: "inline", Path: "main.go", Line: 10, ThreadID: "t2", ReviewID: "99"},
+			// ReviewID is a realistic GraphQL node-id string (not a hand-typed
+			// decimal like "99"), matching Review.ID below exactly — proving the
+			// join key types actually agree rather than accidentally overlapping
+			// [bug pg2-flaes].
+			{ID: "c2", Author: "bob", Body: "inline", Path: "main.go", Line: 10, ThreadID: "t2", ReviewID: "PRR_kwDOKtdWE88AAAABL3blsA"},
 		},
 		reviews: []api.Review{
-			{ID: "99", Author: "bob", State: "CHANGES_REQUESTED", Body: "please fix"},
+			{ID: "PRR_kwDOKtdWE88AAAABL3blsA", Author: "bob", State: "CHANGES_REQUESTED", Body: "please fix"},
 		},
 	}
 	b := newTestBackend(t, gh)

@@ -520,7 +520,10 @@ type ghIssueComment struct {
 }
 
 // ghReviewComment is the JSON shape returned by the pulls comments endpoint
-// (review-thread / inline file comments).
+// (review-thread / inline file comments). PullRequestReviewID below is the
+// owning review's REST decimal id, NOT its GraphQL node id — ListComments
+// translates it via reviewNodeIDsByDatabaseID before setting
+// api.Comment.ReviewID [bug pg2-flaes].
 type ghReviewComment struct {
 	NodeID string `json:"node_id"`
 	Body   string `json:"body"`
@@ -590,6 +593,12 @@ func (p *Provider) ListComments(ctx context.Context, repo string, number int) ([
 		if err := json.Unmarshal(reviewRaw, &rcs); err != nil {
 			return nil, fmt.Errorf("github: parse review-comments JSON: %w", err)
 		}
+		// reviewNodeIDs maps each review's REST decimal id (pull_request_review_id,
+		// below) to its GraphQL node id. Lazily fetched at most once, and only
+		// when a comment actually needs it, via reviewNodeIDsByDatabaseID — see
+		// that function's doc comment for why this translation exists
+		// [bug pg2-flaes].
+		var reviewNodeIDs map[int64]string
 		for _, c := range rcs {
 			line := c.Line
 			if line == 0 {
@@ -601,7 +610,13 @@ func (p *Provider) ListComments(ctx context.Context, repo string, number int) ([
 			// requires the actual review_thread node id.
 			var reviewID string
 			if c.PullRequestReviewID != 0 {
-				reviewID = fmt.Sprintf("%d", c.PullRequestReviewID)
+				if reviewNodeIDs == nil {
+					reviewNodeIDs, err = p.reviewNodeIDsByDatabaseID(ctx, repo, number)
+					if err != nil {
+						return nil, err
+					}
+				}
+				reviewID = reviewNodeIDs[c.PullRequestReviewID]
 			}
 			out = append(out, api.Comment{
 				ID:         c.NodeID,
@@ -617,6 +632,46 @@ func (p *Provider) ListComments(ctx context.Context, repo string, number int) ([
 		}
 	}
 
+	return out, nil
+}
+
+// reviewNodeIDsByDatabaseID maps each of the PR's reviews' REST decimal id
+// (aka GitHub's "database id", the same value ghReviewComment.PullRequestReviewID
+// carries) to that review's GraphQL node id (e.g. "PRR_kwDOKtdWE88AAAABL3blsA") —
+// the id space ListReviews/PostReview already put on api.Review.ID (from `gh pr
+// view --json reviews` and the POST reviews response's node_id, respectively).
+//
+// The pulls-comments endpoint (ListComments' review-comment source) only ever
+// exposes the decimal pull_request_review_id, never a node id for the owning
+// review, so ListComments calls this to translate before setting
+// api.Comment.ReviewID — otherwise the two ids never match and
+// provider.go's join silently drops every inline review comment
+// [bug pg2-flaes]. The `repos/<repo>/pulls/<number>/reviews` REST endpoint is
+// the one GitHub response that carries both id shapes for a review at once.
+func (p *Provider) reviewNodeIDsByDatabaseID(ctx context.Context, repo string, number int) (map[int64]string, error) {
+	raw, err := p.gh.Run(
+		ctx,
+		"api",
+		fmt.Sprintf("repos/%s/pulls/%d/reviews", repo, number),
+		"--paginate",
+	)
+	if err != nil {
+		return nil, fmt.Errorf("github: list reviews for comment join: %w", err)
+	}
+	out := map[int64]string{}
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return out, nil
+	}
+	var entries []struct {
+		ID     int64  `json:"id"`
+		NodeID string `json:"node_id"`
+	}
+	if err := json.Unmarshal(raw, &entries); err != nil {
+		return nil, fmt.Errorf("github: parse reviews JSON for comment join: %w", err)
+	}
+	for _, e := range entries {
+		out[e.ID] = e.NodeID
+	}
 	return out, nil
 }
 
