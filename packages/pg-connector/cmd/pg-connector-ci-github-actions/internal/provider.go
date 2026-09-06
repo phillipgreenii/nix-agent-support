@@ -174,10 +174,48 @@ func (b *Backend) GetLogs(ctx context.Context, runID string) ([]byte, error) {
 	return raw, nil
 }
 
-// RerunFailed implements ci.Provider.RerunFailed, carried over unchanged
-// from ghactions.go's own "pick the most recent failed run, `gh run rerun
-// <id> --failed`" logic, adapted to resolve via prID instead of a separate
-// repo+prNumber pair.
+// rerunnableConclusions is the set of ghRun.Conclusion values RerunFailed
+// treats as "this run needs a rerun." ghactions.go's original logic (and
+// this backend's own port of it, unchanged until now) matched only
+// "failure", so a run that ended "timed_out", "startup_failure", or
+// "cancelled" was invisible to the loop below and RerunFailed answered
+// not_found even though `gh run rerun <id> --failed` would have worked fine
+// on that run [bug pg2-mzymd]. The widened set covers every terminal
+// conclusion GitHub Actions reports for a run that did not complete
+// successfully through no fault of its own correctness: "failure" (a job
+// genuinely failed), "timed_out" (a job hit its timeout), "startup_failure"
+// (the run failed before any job could execute — e.g. a bad workflow file
+// or a runner provisioning failure), and "cancelled" (the run was stopped
+// mid-flight, by a user, a concurrency-group supersede, or GitHub itself).
+// Deliberately excluded: "success" (nothing to rerun), "skipped"/"neutral"/
+// "stale" (the run never attempted work, so rerunning is meaningless), and
+// "action_required" (the run is paused pending manual approval — approving
+// it, not rerunning it, is the correct next action).
+var rerunnableConclusions = map[string]bool{
+	"failure":         true,
+	"timed_out":       true,
+	"startup_failure": true,
+	"cancelled":       true,
+}
+
+// RerunFailed implements ci.Provider.RerunFailed, carried over from
+// ghactions.go's own "pick the most recent failed run, `gh run rerun <id>
+// --failed`" logic, adapted to resolve via prID instead of a separate
+// repo+prNumber pair, and widened to match rerunnableConclusions rather
+// than the literal string "failure" [bug pg2-mzymd].
+//
+// Rerunning only the single newest matching run (never every matching run)
+// is preserved unchanged from ghactions.go: that was this operation's
+// original, documented behavior ("rer-uns the latest failed workflow run
+// for a PR"), TestRerunFailed_PicksLatestFailedRun already pins it, and
+// ci.Provider's own doc comment ("re-runs the failed portion of the CI
+// run(s) for the PR") is acknowledging that a PR can have multiple runs at
+// all, not mandating that RerunFailed act on every one of them — nothing in
+// the interface doc, this capability's fan-out/targeted split (ListRuns is
+// fan-out-shaped; GetLogs/RerunFailed are targeted, resolving to the one
+// backend that owns the id [design: §4.5]), or the existing test suite
+// implies "rerun every matching run" was ever the intended contract, so
+// pg2-mzymd's fix stops at widening the conclusion match.
 func (b *Backend) RerunFailed(ctx context.Context, prID string) error {
 	runs, err := b.ListRuns(ctx, prID)
 	if err != nil {
@@ -186,7 +224,7 @@ func (b *Backend) RerunFailed(ctx context.Context, prID string) error {
 	// ListRuns is most-recent-first per gh's default ordering.
 	var target string
 	for _, r := range runs {
-		if r.Conclusion == "failure" {
+		if rerunnableConclusions[r.Conclusion] {
 			target = r.ID
 			break
 		}

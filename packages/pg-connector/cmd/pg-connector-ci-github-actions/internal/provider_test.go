@@ -13,6 +13,7 @@ package internal
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -328,6 +329,113 @@ func TestRerunFailed_NoFailedRuns(t *testing.T) {
 	}
 	if !errors.Is(err, scriptout.ErrNotFound) {
 		t.Errorf("expected ErrNotFound, got %v", err)
+	}
+}
+
+// TestRerunFailed_MatchesTimedOut, TestRerunFailed_MatchesStartupFailure and
+// TestRerunFailed_MatchesCancelled each pin one conclusion pg-mzymd added to
+// rerunnableConclusions: before the fix, a run ending in any of these three
+// states returned ErrNotFound instead of being rerun.
+func TestRerunFailed_MatchesTimedOut(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["run list"] = []byte(
+		`[{"databaseId":2001,"status":"completed","conclusion":"timed_out","headBranch":"feat/x"}]`,
+	)
+	p := NewWithDeps(gh, &fakePR{repo: "foo/bar", branch: "feat/x"})
+	if err := p.RerunFailed(context.Background(), "foo/bar#42"); err != nil {
+		t.Fatalf("RerunFailed: %v", err)
+	}
+	last := gh.calls[len(gh.calls)-1]
+	joined := strings.Join(last, " ")
+	if !strings.Contains(joined, "run rerun 2001 --failed") {
+		t.Fatalf("expected rerun 2001: %v", last)
+	}
+}
+
+func TestRerunFailed_MatchesStartupFailure(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["run list"] = []byte(
+		`[{"databaseId":2002,"status":"completed","conclusion":"startup_failure","headBranch":"feat/x"}]`,
+	)
+	p := NewWithDeps(gh, &fakePR{repo: "foo/bar", branch: "feat/x"})
+	if err := p.RerunFailed(context.Background(), "foo/bar#42"); err != nil {
+		t.Fatalf("RerunFailed: %v", err)
+	}
+	last := gh.calls[len(gh.calls)-1]
+	joined := strings.Join(last, " ")
+	if !strings.Contains(joined, "run rerun 2002 --failed") {
+		t.Fatalf("expected rerun 2002: %v", last)
+	}
+}
+
+func TestRerunFailed_MatchesCancelled(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["run list"] = []byte(
+		`[{"databaseId":2003,"status":"completed","conclusion":"cancelled","headBranch":"feat/x"}]`,
+	)
+	p := NewWithDeps(gh, &fakePR{repo: "foo/bar", branch: "feat/x"})
+	if err := p.RerunFailed(context.Background(), "foo/bar#42"); err != nil {
+		t.Fatalf("RerunFailed: %v", err)
+	}
+	last := gh.calls[len(gh.calls)-1]
+	joined := strings.Join(last, " ")
+	if !strings.Contains(joined, "run rerun 2003 --failed") {
+		t.Fatalf("expected rerun 2003: %v", last)
+	}
+}
+
+// TestRerunFailed_ExcludedConclusionsStayNotFound proves rerunnableConclusions'
+// deliberate exclusions ("action_required", "skipped", "neutral", "stale")
+// keep answering ErrNotFound rather than being swept in by the pg2-mzymd
+// widening — the widening is targeted at the three genuinely-failed
+// conclusions, not "anything that isn't success".
+func TestRerunFailed_ExcludedConclusionsStayNotFound(t *testing.T) {
+	for _, conclusion := range []string{"action_required", "skipped", "neutral", "stale"} {
+		gh := newFakeGH()
+		gh.responses["run list"] = []byte(
+			fmt.Sprintf(`[{"databaseId":3001,"status":"completed","conclusion":%q,"headBranch":"f"}]`, conclusion),
+		)
+		p := NewWithDeps(gh, &fakePR{repo: "foo/bar", branch: "feat/x"})
+		err := p.RerunFailed(context.Background(), "foo/bar#42")
+		if err == nil {
+			t.Fatalf("conclusion %q: expected error, got nil", conclusion)
+		}
+		if !errors.Is(err, scriptout.ErrNotFound) {
+			t.Errorf("conclusion %q: expected ErrNotFound, got %v", conclusion, err)
+		}
+	}
+}
+
+// TestRerunFailed_OnlyRerunsNewestMatch pins the other half of pg2-mzymd's
+// decision: RerunFailed reruns only the single newest matching run, never
+// every matching run, even though two different rerunnable conclusions are
+// both present. This is unchanged, deliberate behavior carried over from
+// ghactions.go (see RerunFailed's doc comment) — this test exists so a
+// future change to "rerun every match" is a conscious decision, not an
+// accidental regression.
+func TestRerunFailed_OnlyRerunsNewestMatch(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["run list"] = []byte(`[
+		{"databaseId":4002,"status":"completed","conclusion":"timed_out","headBranch":"feat/x"},
+		{"databaseId":4001,"status":"completed","conclusion":"failure","headBranch":"feat/x"}
+	]`)
+	p := NewWithDeps(gh, &fakePR{repo: "foo/bar", branch: "feat/x"})
+	if err := p.RerunFailed(context.Background(), "foo/bar#42"); err != nil {
+		t.Fatalf("RerunFailed: %v", err)
+	}
+	rerunCalls := 0
+	for _, call := range gh.calls {
+		if len(call) >= 2 && call[0] == "run" && call[1] == "rerun" {
+			rerunCalls++
+		}
+	}
+	if rerunCalls != 1 {
+		t.Fatalf("expected exactly 1 rerun call (newest match only), got %d: %v", rerunCalls, gh.calls)
+	}
+	last := gh.calls[len(gh.calls)-1]
+	joined := strings.Join(last, " ")
+	if !strings.Contains(joined, "run rerun 4002 --failed") {
+		t.Fatalf("expected rerun of newest match 4002, not the older match 4001: %v", last)
 	}
 }
 
