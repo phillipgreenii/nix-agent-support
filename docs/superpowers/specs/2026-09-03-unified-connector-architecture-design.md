@@ -542,22 +542,56 @@ new deterministic handlers below.
 
 ### 6.1 df-categorize and df-feedback — new pr-pool roles
 
+> Rewritten end-to-end (bead `pg2-2j5ac.12`, 2026-09-06) against pr-pool's REAL command-role
+> contract. The prior draft of this section claimed pr-pool's command-role exit contract was
+> "`0` on success, any nonzero on failure" and that "pr-pool already retries a failed command-role
+> call on its own" — both false. See "Exit codes" below for the real, four-signal contract and
+> citations. This revision also fixes df-categorize's argv (its `<type>` field could never be
+> populated — see the invocation paragraph) and resolves the `pg-connector pr open` rationale
+> against Appendix B (see the categorization bullet).
+
 Two new, deterministic ("command"-kind) pr-pool roles, bound by event type, requiring zero pr-pool
 core changes beyond registering them in ZR's own config. pr-pool's command-role executor is
 argv-only — it renders `Role.Command.Argv` through a Go template against scalar event fields
 (`Item.ID`, `Item.Type`, …) and execs the result; it has no stdin-payload path at all, and adding
 one would itself be a pr-pool core change, which is exactly what these two roles are designed to
-avoid. So **both handlers are invoked with `type` and `id` as two plain positional arguments** —
-matching pr-pool's only real transport exactly, with no intermediate adapter/shim binary and no
-stdin-JSON hop on this inbound side. (There is no existing pr-pool config or code precedent for
-this shape today — confirmed by inspection of `packages/pr-pool`'s executor and ZR's current
-`modules/zm` config, which has zero command-kind roles yet, only command-kind query/source blocks
-and three unrelated `ccpool`/LLM-backed roles.) Once invoked, both handlers turn around and speak
-pg-connector's own stdin-JSON scriptout protocol _outbound_ — a completely separate, unrelated
-boundary from how pr-pool dispatched them, and the one where JSON-over-stdin is actually
-pg-connector's convention (§4.2).
+avoid. **Neither handler's `type` argument is templated from an event field — both bake it in as a
+literal, per-role argv constant instead**, matching df-feedback's own pattern below (there is no
+existing pr-pool config or code precedent for this argv shape today — confirmed by inspection of
+`packages/pr-pool`'s executor and ZR's current `modules/zm` config, which has zero command-kind
+roles yet, only command-kind query/source blocks and three unrelated `ccpool`/LLM-backed roles).
+Once invoked, both handlers turn around and speak pg-connector's own stdin-JSON scriptout protocol
+_outbound_ — a completely separate, unrelated boundary from how pr-pool dispatched them, and the
+one where JSON-over-stdin is actually pg-connector's convention (§4.2).
 
-- **df-categorize**, invoked as `df-categorize <type> <id>` for a PR/CI/Issue event, fetches
+**Why `type` cannot be templated.** pr-pool's argv template has exactly one scalar field that
+could plausibly carry a connector type, `{{.Item.Type}}`, and it never carries one for either
+handler's use case: `packages/pr-pool/internal/item/item.go:9-14` defines `Item.Type` as whatever
+the triggering _query_ stamps on it, and every one of ZR's three live query sources
+(`modules/zm/default.nix:123,149`, the `feedback-source`/`worker-source`/`review-source` blocks)
+maps it from a bd issue's own `issue_type`, filtered to the literal string `"task"` — a
+beads-domain concept, structurally unrelated to a pg-connector connector type (`pr`/`issue`/`ci`)
+and incapable of ever equaling one. Nor is there another field to fall back on: neither
+`discover.DispatchContext` (`packages/pr-pool/internal/discover/discover.go:35-38`, carrying only
+`Role` and `Item`) nor the argv-rendering `prompt.Context`
+(`packages/pr-pool/internal/prompt/prompt.go:61-66`, carrying only `Item`/`WorktreeDir`/
+`SelfLogin`/`RepoRoot`) exposes the _triggering event's own_ binding-level `type` (the field a
+role's `Binds` matches on, e.g. `feedback.ready`) to templating at all — that field is discarded
+once the dispatch context is derived from the event. So no templated argv field, today, can ever
+resolve to a real connector type for either handler.
+
+- **df-categorize** is registered as **one pr-pool role per connector type** —
+  `df-categorize-pr`, `df-categorize-issue`, `df-categorize-ci` — each with its own single-type
+  `Binds` entry (a role's `Binds` may name several event types and respond to any of them,
+  `packages/pr-pool/internal/roles/roles.go:44-56`, but a role has exactly one `Command.Argv`
+  shared across all of them, so one shared role bound to all three connector event types could
+  never carry a per-event `type` either way) and its own `Command.Argv` with `type` as a literal
+  string, e.g. `argv: ["df-categorize", "pr", "{{.Item.ID}}"]`,
+  `["df-categorize", "issue", "{{.Item.ID}}"]`, `["df-categorize", "ci", "{{.Item.ID}}"]`. This
+  needs zero pr-pool core change (three near-identical role stanzas in ZR's config instead of one)
+  and mirrors df-feedback's own argv below, which already hardcodes `pr` as a literal rather than
+  templating a type and was never affected by this bug. Each role's backing script, invoked for a
+  PR/CI/Issue event as `df-categorize <type> <id>` with `<type>` fixed per role, fetches
   current state via `pg-connector <type> show <id>` (wire request `{"op": "show", "args": {"id":
 "<id>"}}`, response `{"result": {...entity fields per that type's schema...}}`), applies its own
   ranking logic (a different algorithm from df-survey's — different situations want different
@@ -565,17 +599,23 @@ pg-connector's convention (§4.2).
   capability op: `pg-connector pr categorize <id> --category <category>` (wire request `{"op":
   "categorize", "args": {"id": "<id>", "category": "<category>"}}`, response `{"result": {"id":
   "<id>", "category": "<category>"}}` on success, `{"error": {"code": "...", "message": "..."}}`
-  per §4.2's taxonomy on failure). **Categorization is used only for focus/filtering (`pg-connector
-  pr open`-style tooling and Grafana dashboards) — never for anything a human needs to see on
-  github.com itself — so it does not live in a GitHub label.** It's a single-valued field in the
-  same per-backend local store as feedback disposition (§9), new state this design introduces
-  rather than a migration of anything pg-pr's existing SQLite store already has. Because it's a
-  dedicated field rather than a member of a shared label namespace, the write is a plain
-  set/overwrite — no add/remove/toggle ambiguity. The backend's own `capabilities` response still
-  declares its valid category vocabulary, the same pattern §4.3 already establishes for issue-
-  transition vocabulary, so df-categorize's algorithm output can be checked against accepted
-  values rather than assumed compatible.
-- **df-feedback**, invoked as `df-feedback pr <pr-id>` for a PR+comment/review-thread event,
+  per §4.2's taxonomy on failure). **Categorization is used only for focus/filtering — never for
+  anything a human needs to see on github.com itself — so it does not live in a GitHub label.**
+  Its confirmed consumer is Grafana dashboards. A CLI focus tool in the shape of a `pg-connector pr
+  open`-equivalent is **not** a confirmed consumer: Appendix B records `pg-pr open`'s own
+  disposition as still unanswered — whether the operator keeps using it manually with no stated
+  replacement, or it drops entirely — so this design does not rely on that tool existing, and the
+  category field's rationale rests on the dashboard consumer alone until Appendix B's question is
+  resolved. It's a single-valued field in the same per-backend local store as feedback disposition
+  (§9), new state this design introduces rather than a migration of anything pg-pr's existing
+  SQLite store already has. Because it's a dedicated field rather than a member of a shared label
+  namespace, the write is a plain set/overwrite — no add/remove/toggle ambiguity. The backend's own
+  `capabilities` response still declares its valid category vocabulary, the same pattern §4.3
+  already establishes for issue-transition vocabulary, so df-categorize's algorithm output can be
+  checked against accepted values rather than assumed compatible.
+- **df-feedback**, invoked as `df-feedback pr <pr-id>` for a PR+comment/review-thread event — `pr`
+  here is already the same kind of literal argv constant df-categorize's split now uses, not a
+  templated field, which is why df-feedback was never exposed to the `{{.Item.Type}}` bug above —
   fetches the PR's full current state via `pg-connector pr show <pr-id>` — which includes its
   comments/review threads, each with its own id and current disposition — rather than trusting
   whatever specific comment triggered the event (consistent with the live-recompute philosophy in
@@ -597,29 +637,84 @@ parent — no bespoke restricted allowlist, per this workspace's existing ruling
 subagents share the parent's permissions rather than a per-role least-privilege split.
 
 **Exit codes.** Both handlers report back to pr-pool via pr-pool's own existing command-role
-contract, unchanged by this design: `0` on success, any other nonzero on failure. Each handler
-makes more than one targeted `pg-connector` call (df-categorize: `show` then `categorize`;
-df-feedback: `show` then one `feedback-set` per comment needing a disposition) — a `not_found`
-(exit `4`, §4.5) from ANY of them, including df-feedback's own "comment id no longer exists" case,
-is NOT a failure by pg-connector's own taxonomy, and the handler MUST NOT treat it as one: it
-means "nothing to do for that item," so the handler skips it and continues, still exiting `0`
-overall if nothing else went wrong. Only a genuine error (`unauthenticated`/`unavailable`/
-`unknown_op`/`version_mismatch`, or a CLI-level failure) causes the handler to exit nonzero.
-pr-pool already retries a failed command-role call on its own, so neither handler needs a special
-"decline, try later" signal of its own beyond this.
+contract for a `"command"`-kind role. That contract has four live signals, per pr-pool's own
+source of truth (`packages/pr-pool/docs/behavior/interfaces.md:84-100`'s "Coarse outcome, rich
+reply", `INV-FAIL-1`, `INV-CONC-1`, realized concretely by
+`phillipgreenii-nix-agent-support · packages/pr-pool/docs/decisions · DEC-WIRE-1` and implemented
+in `packages/pr-pool/internal/executor/command.go:14-53` /
+`packages/pr-pool/internal/orchestrator/listener.go:165-178`) — **not** the "`0` on success, any
+nonzero on failure, and pr-pool retries" scheme a prior draft of this section claimed:
+
+- **`0`** — success. Recorded as a completed dispatch; no retry needed.
+- **`9`** — `busy`, the one and only pre-accept decline a command role can signal
+  (`executor.ErrBusy` -> `eventqueue.DeclineBusy`): pr-pool re-offers the event to this role (or
+  another bound one) while it remains unexpired, at `INV-FAIL-2`'s cadence. Neither handler emits
+  this — df-categorize and df-feedback have no notion of their own capacity.
+- **Every other exit code — `1`, `2`, `3`, `4`, anything** — is treated identically by
+  `roleListener.Offer`: `Accepted: true`, `Decline: DeclineNone`. pr-pool does not distinguish "the
+  command ran and failed" from "the command could not be invoked at all"; neither is retried. **The
+  event is consumed the moment the command exits anything but `9` — pr-pool does not retry a failed
+  command-role call on its own**, correcting the prior draft's claim. A handler that wants its own
+  failure retried (a fresh event, an alert, a follow-up bead — anything) owns that entirely itself.
+- **`2` and `3` are separately reserved, ecosystem-wide, by `DEC-WIRE-1`'s coarse-exit-code
+  convention** — `2` for a generic usage error, `3` for the core's own pre-flight failure
+  (`exitPrecheck`) — even though `commandRun.run` itself special-cases only `9` today. This matters
+  because **pg-connector defines its own, unrelated meaning for exit codes `2` and `3`** (§4.5):
+  for a fan-out op, pg-connector exits `2` for "degraded/partial" and `3` for "total failure",
+  while `DEC-WIRE-1` reserves those same two integers for "usage error" and "core pre-flight"
+  respectively — two unrelated taxonomies sharing the same two codes. Both handlers' calls today
+  (`show`, `categorize`, `feedback_set`) are all §4.5 _targeted_ ops, which only ever produce
+  pg-connector exit `0`, `1`, or `4` — so no call _currently_ specified in this section can itself
+  produce a raw `2` or `3` — but that is an accident of today's op set, not a guarantee, and
+  **neither handler may rely on it**: **neither handler may ever exit with the raw exit code a
+  `pg-connector` subprocess returned.** Blindly propagating a subprocess's exit code (e.g.
+  `os.Exit(cmd.ProcessState.ExitCode())`) is exactly the trap this collision sets — the day either
+  handler grows a fan-out-shaped call, a pg-connector `2`/`3` would leak through as the handler's
+  own exit code to pr-pool and be misread against `DEC-WIRE-1`'s meaning instead of pg-connector's.
+  **Both handlers MUST translate every outcome into pr-pool's own four-signal set above — exit `0`
+  for success (including a skipped `not_found`, below) and a plain `1` for every other failure —
+  and MUST NOT re-emit whatever exit code the `pg-connector` subprocess itself returned.**
+- Each handler makes more than one targeted `pg-connector` call (df-categorize: `show` then
+  `categorize`; df-feedback: `show` then one `feedback-set` per comment needing a disposition) — a
+  `not_found` (pg-connector exit `4`, §4.5) from ANY of them, including df-feedback's own "comment
+  id no longer exists" case, is NOT a failure by pg-connector's own taxonomy, and the handler MUST
+  NOT treat it as one: it means "nothing to do for that item," so the handler skips it and
+  continues, still exiting `0` to pr-pool overall if nothing else went wrong. Only a genuine
+  pg-connector error (`unauthenticated`/`unavailable`/`unknown_op`/`version_mismatch`, or a
+  CLI-level failure) causes the handler to exit `1` to pr-pool — translated per the rule above,
+  never pg-connector's own raw code.
 
 **Acceptance criteria**
 
 - pr-pool's core requires zero Go changes for these two roles beyond config registration.
-- Both handlers are invoked with `type`/`id` as plain positional argv, with no adapter/shim binary
-  and no stdin-JSON path on the pr-pool-to-handler boundary; both then speak pg-connector's own
-  stdin-JSON scriptout protocol outbound to fetch/write state.
+- df-categorize is registered as one pr-pool role per connector type (`df-categorize-pr`,
+  `df-categorize-issue`, `df-categorize-ci`), each bound to its own connector-specific event type,
+  with `type` baked into that role's own argv as a literal — never templated from
+  `{{.Item.Type}}`, which pr-pool's live queries always populate with the beads issue-type
+  `"task"`, never a connector type (`packages/pr-pool/internal/item/item.go:9-14`,
+  `modules/zm/default.nix:123,149`). df-feedback needs no such split — it already hardcodes the
+  literal `pr` in its own argv and was never affected by this bug.
+- Both handlers are invoked with `id` as a plain positional argv element, plus their `type`
+  (df-categorize: per-role literal; df-feedback: the existing hardcoded `pr`), with no
+  adapter/shim binary and no stdin-JSON path on the pr-pool-to-handler boundary; both then speak
+  pg-connector's own stdin-JSON scriptout protocol outbound to fetch/write state.
 - df-categorize writes back via `pg-connector pr categorize <id> --category <category>` into a
   dedicated local-store field (not a GitHub label), checked against a backend-declared category
   vocabulary; df-feedback writes back via `pg-connector pr feedback-set <pr-id> <comment-id>
---disposition <status>` with `disposition` drawn from open/will-fix/wont-fix/no-action.
-- Both handlers exit `0` on success and nonzero on failure, per pr-pool's own existing
-  command-role contract; neither uses a special "retry later" code of its own.
+--disposition <status>` with `disposition` drawn from open/will-fix/wont-fix/no-action. The
+  category field's rationale cites only its confirmed consumer (Grafana dashboards); a
+  `pg-connector pr open`-equivalent CLI consumer is not assumed, per Appendix B's open question
+  about `pg-pr open`'s own disposition.
+- Both handlers report to pr-pool using only pr-pool's real four-signal command-role contract
+  (`0` success, `9` busy/pre-accept-decline/retried, every other code `Accepted: true`/no retry,
+  `2`/`3` reserved ecosystem-wide by `DEC-WIRE-1` and never emitted by either handler): both exit
+  `0` on success and a plain `1` on any other failure, never `9` (neither has a capacity concept),
+  and never a raw pg-connector exit code passed through unchanged — pg-connector's own fan-out
+  codes `2`/`3` (§4.5) collide with `DEC-WIRE-1`'s reservation of those same two codes, so every
+  outcome is translated, never re-emitted verbatim.
+- Neither handler assumes pr-pool retries a failed command-role call: pr-pool retries only an
+  exit-`9` pre-accept decline, so each handler's own failure handling/surfacing (alerting, a
+  follow-up bead, a fresh event) is entirely its own responsibility.
 - df-feedback re-fetches and re-evaluates the PR's full current comment list on every trigger
   rather than acting on a single embedded comment id.
 - Both run with permissions uniform to their pr-pool parent.
