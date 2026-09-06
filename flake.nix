@@ -1327,6 +1327,87 @@
                 ];
               };
 
+              # Sync guard for the pg-pr <-> pg-connector-pr-github GitHub-provider
+              # duplication during the migration window (bead pg2-sxfwd, citing the
+              # operator's pg2-rihc3 framing ruling: the duplication itself is
+              # sanctioned — pg-pr is being migrated into pg-connector on purpose —
+              # only the LACK OF A SYNC GUARD is the defect). 2b93d895 already paid
+              # the cost of fixing both copies once by hand; the pg2-flaes
+              # ReviewID-join fix landed on pg-connector's copy with no pg-pr
+              # counterpart to catch the asymmetry.
+              #
+              # This is a snapshot-diff guard, not a byte-identity one: the two
+              # copies already, legitimately, differ forever (re-homed import
+              # paths, a "ported from pg-pr" package doc comment, and
+              # pg-connector-only additions like the ReviewID join). So each pair's
+              # `diff -u` is compared against a checked-in baseline under
+              # testdata/pg-pr-drift/ rather than required to be empty. A future
+              # change that touches either side and shifts the diff away from that
+              # baseline fails here — same "recorded reason" pattern as this repo's
+              # ratchet checks elsewhere: if the new drift is intentional, update the
+              # baseline file in the SAME change (that update IS the review of the
+              # drift); if it isn't, the fix landed on only one side and needs
+              # porting to the other.
+              #
+              # A Go test cannot do this: pg-connector-go-tests above is sandboxed
+              # to ./packages/pg-connector alone (this repo's CLAUDE.md "Go test
+              # gate"; the operator ruling recorded on test-pg-pr-shared-reference-docs
+              # below is the same structural point) and never sees pg-pr's source.
+              # So, like test-pg-pr-review-input-assets/test-pg-pr-shared-reference-docs
+              # above, this is a repo-root pkgs.runCommand check that names both
+              # sides' real committed files as explicit nix inputs.
+              test-pg-connector-pr-github-pg-pr-sync =
+                let
+                  prGithub = ./packages/pg-pr/pkg/provider/vcs/github;
+                  prGitenv = ./packages/pg-pr/internal/gitenv;
+                  connGithub = ./packages/pg-connector/cmd/pg-connector-pr-github/internal/github;
+                  connGitenv = ./packages/pg-connector/cmd/pg-connector-pr-github/internal/gitenv;
+                  baseline = ./packages/pg-connector/cmd/pg-connector-pr-github/internal/github/testdata/pg-pr-drift;
+                  pair = name: pgPrDir: connDir: {
+                    inherit name;
+                    pgPr = "${pgPrDir}/${name}";
+                    conn = "${connDir}/${name}";
+                    golden = "${baseline}/${name}.diff";
+                  };
+                  pairs = [
+                    (pair "github.go" prGithub connGithub)
+                    (pair "enrich.go" prGithub connGithub)
+                    (pair "fingerprint.go" prGithub connGithub)
+                    (pair "pending.go" prGithub connGithub)
+                    (pair "auth.go" prGithub connGithub)
+                    (pair "ghexec.go" prGithub connGithub)
+                    (pair "token.go" prGithub connGithub)
+                    (pair "gitenv.go" prGitenv connGitenv)
+                  ];
+                  # Both sides are normalized by stripping trailing whitespace per
+                  # line: the pre-commit trailing-whitespace hook already does this
+                  # to the committed baseline file on every commit (a unified diff's
+                  # blank context line is otherwise a single trailing space), so the
+                  # live diff computed at build time must be normalized the same way
+                  # or a clean baseline would never compare equal to itself.
+                  checkPairScript = p: ''
+                    actual="$(diff -u --label "pg-pr/${p.name}" --label "pg-connector-pr-github/${p.name}" ${p.pgPr} ${p.conn} | sed -E 's/[[:space:]]+$//' || true)"
+                    expected="$(sed -E 's/[[:space:]]+$//' ${p.golden})"
+                    if [ "$actual" != "$expected" ]; then
+                      echo "FAIL: ${p.name} has drifted from its recorded pg-pr <-> pg-connector-pr-github baseline diff (testdata/pg-pr-drift/${p.name}.diff)." >&2
+                      echo "  If this drift is a deliberate, reviewed change: update that baseline file in this SAME change to match — that update is the recorded reason." >&2
+                      echo "  If it is not deliberate: the fix landed on only one side and must be ported to the other." >&2
+                      echo "--- recorded baseline ---" >&2
+                      echo "$expected" >&2
+                      echo "--- actual diff ---" >&2
+                      echo "$actual" >&2
+                      fail=1
+                    fi
+                  '';
+                in
+                pkgs.runCommand "test-pg-connector-pr-github-pg-pr-sync" { } ''
+                  fail=0
+                  ${lib.concatMapStringsSep "\n" checkPairScript pairs}
+                  [ "$fail" -eq 0 ] || exit 1
+                  echo "ok: pg-pr <-> pg-connector-pr-github GitHub-provider copies match their recorded baseline diff"
+                  touch $out
+                '';
+
               # pa-monitor — the largest suite (bead pg2-ymi3l, fast-follow to
               # pg2-adhga / ADR 0021). Pattern-B module (local replace
               # ../claude-transcript), so root the fileset at packages/ and pass

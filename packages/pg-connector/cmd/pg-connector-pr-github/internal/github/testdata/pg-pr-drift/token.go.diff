@@ -1,0 +1,11 @@
+--- pg-pr/token.go
++++ pg-connector-pr-github/token.go
+@@ -7,7 +7,7 @@
+ 	"os/exec"
+ 	"strings"
+
+-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/gitenv"
++	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/gitenv"
+ )
+
+ // TokenSource retrieves a GitHub auth token. The default reads gh's own auth;

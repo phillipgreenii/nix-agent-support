@@ -1,0 +1,11 @@
+--- pg-pr/ghexec.go
++++ pg-connector-pr-github/ghexec.go
+@@ -8,7 +8,7 @@
+ 	"os/exec"
+ 	"strings"
+
+-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/gitenv"
++	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/gitenv"
+ )
+
+ // CLI is the token-protected gateway through which pg-pr invokes the `gh`
