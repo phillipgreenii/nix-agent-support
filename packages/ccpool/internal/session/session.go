@@ -6,6 +6,7 @@ package session
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"path/filepath"
@@ -19,6 +20,24 @@ import (
 	"github.com/phillipgreenii/ccpool/internal/store"
 	"github.com/phillipgreenii/ccpool/internal/wait"
 )
+
+// ErrNoPluginDir means Deps.PluginDir is empty. launch.go's BuildNew/BuildResume
+// ALWAYS append `--plugin-dir <PluginDir>` (see its package doc: "without it
+// hooks don't load, the store goes stale, and the waiter hangs"); an empty value
+// makes that `--plugin-dir ""`, which never registers the ccpool-plugin's
+// SessionStart hook (`ccpool hook start`) — the ONLY thing that transitions a row
+// from `starting` to `ready`. Without this fail-fast check the caller gets no
+// signal at all: tmux and the launched claude process start and stay alive
+// (`state=starting live=true`), any OTHER globally-enabled plugin's own hooks
+// (e.g. a `bd prime` SessionStart hook) still fire normally, but the row can
+// never advance past `starting` — so every dispatch silently eats the full Wait
+// timeout (default 10m) before failing with the opaque "did not reach ready
+// before timeout" error (tc-24qs: this reproduced on every attempt because the
+// consuming deployment enabled `programs.pr-pool` without also enabling
+// `programs.ccpool`, so `claude.plugin_dir` was never rendered into
+// config.toml — a misconfiguration this check turns into an immediate,
+// diagnosable error instead of a 10-minute hang).
+var ErrNoPluginDir = errors.New("ccpool: no plugin dir configured (claude.plugin_dir is empty) — the ccpool-plugin SessionStart hook would never register, so the session could never reach ready; set claude.plugin_dir in config.toml (nix: enable phillipgreenii.programs.ccpool alongside any consumer that launches ccpool sessions)")
 
 type Tmux interface {
 	HasSession(name string) bool
@@ -272,6 +291,17 @@ func (s *Service) ensureLocked(ctx context.Context, externalID, cwd, model strin
 			ExternalID: externalID, ClaudeSessionID: row.ClaudeSessionID, Name: row.Name,
 			TmuxSession: tmuxName, State: row.State,
 		}, nil
+	}
+
+	// Every path below this point launches or resumes a claude session (steps
+	// 3-5), which always funnels through launchAndWait's own PluginDir guard.
+	// Fail fast HERE too — before Insert/Transition mutate the row, before
+	// EnsureTrusted/mcpconsent touch the filesystem — so a misconfigured
+	// PluginDir (tc-24qs) never leaves a phantom `starting` row behind; the
+	// caller gets ErrNoPluginDir immediately instead of a row it must clean up
+	// after a 10-minute timeout.
+	if s.d.PluginDir == "" {
+		return Handle{}, ErrNoPluginDir
 	}
 
 	// 2. Canonicalize the cwd so the trust key matches what Claude records (it

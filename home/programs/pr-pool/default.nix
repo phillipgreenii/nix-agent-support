@@ -158,6 +158,35 @@ in
           state. Enable exactly one.
         '';
       }
+      {
+        # tc-24qs: pr-pool's own enable doc says "Runtime-depends on `ccpool`
+        # ... being on PATH", but that dependency was never enforced, so a
+        # consumer enabling only `programs.pr-pool` evaluates cleanly and then
+        # fails at RUNTIME on every single dispatch — not loudly, either: the
+        # tmux session and `claude` process start and stay alive
+        # (`state=starting live=true`), so it presents as a silent 10-minute
+        # hang per attempt ("did not reach ready before timeout"), not an
+        # error. Root cause: `programs.ccpool`'s module is the only thing that
+        # renders `claude.plugin_dir` into ccpool's config.toml; without it
+        # ccpool falls back to its own empty-string default, the
+        # ccpool-plugin's SessionStart hook (`ccpool hook start`) never
+        # registers, and no session can ever reach `ready` (see
+        # packages/ccpool's session.ErrNoPluginDir, which now fails the
+        # underlying `ccpool new`/`reply` call immediately instead of hanging
+        # — this assertion catches the same misconfiguration earlier, at
+        # eval/build time, before any dispatch is even attempted).
+        assertion = config.phillipgreenii.programs.ccpool.enable;
+        message = ''
+          phillipgreenii.programs.pr-pool.enable requires
+          phillipgreenii.programs.ccpool.enable = true (or the "claude-fleet"
+          capability, which enables both together) — pr-pool dispatches every
+          role via a launched `ccpool` session, and only the ccpool module
+          renders claude.plugin_dir into ccpool's config.toml. Without it,
+          the ccpool-plugin's SessionStart hook never registers and every
+          dispatch would silently hang for the full Wait timeout before
+          failing with "did not reach ready before timeout" (tc-24qs).
+        '';
+      }
     ];
 
     systemd = {

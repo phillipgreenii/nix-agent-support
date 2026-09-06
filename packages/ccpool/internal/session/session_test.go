@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -92,6 +93,39 @@ func TestEnsure_sanitizesDottedExternalIDInTmuxName(t *testing.T) {
 	}
 	if got := ft.newCalls[0].name; got != "cc-pr-pool-worker-zr-fy5j5_1-stamp" {
 		t.Errorf("tmux session name = %q, want sanitized cc-pr-pool-worker-zr-fy5j5_1-stamp", got)
+	}
+}
+
+// TestEnsure_errorsWhenNoPluginDir is the tc-24qs regression: an empty
+// Deps.PluginDir must fail Ensure IMMEDIATELY, before touching tmux/store, rather
+// than launching a claude session whose ccpool-plugin SessionStart hook can never
+// register (--plugin-dir "") and then burning the full Wait timeout before
+// reporting "did not reach ready before timeout". No tmux session should be
+// created and no row should be inserted.
+func TestEnsure_errorsWhenNoPluginDir(t *testing.T) {
+	ctx := context.Background()
+	st := newMemStore(t)
+	ft := &fakeTmux{live: map[string]bool{}}
+	s := New(Deps{
+		Tmux: ft, Trust: &fakeTrust{}, Store: st,
+		Wait: waitFunc(func(_ context.Context, _ string, _ int64) (wait.Outcome, error) {
+			t.Fatal("Wait must not be reached when PluginDir is empty")
+			return wait.Outcome{}, nil
+		}),
+		Socket: "ccpool", Prefix: "cc-", PluginDir: "", ClaudeBin: "claude",
+		NewUUID: func() string { return "csid-1" },
+		Now:     func() time.Time { return time.Unix(100, 0) },
+	})
+
+	_, err := s.Ensure(ctx, "ext-no-plugin-dir", "/tmp/proj", "", EnsureOpts{})
+	if !errors.Is(err, ErrNoPluginDir) {
+		t.Fatalf("Ensure err = %v, want ErrNoPluginDir", err)
+	}
+	if len(ft.newCalls) != 0 {
+		t.Errorf("NewSession calls = %d, want 0 (must fail before launching)", len(ft.newCalls))
+	}
+	if _, ok, _ := st.GetByExternalID(ctx, "ext-no-plugin-dir"); ok {
+		t.Error("row was inserted; Ensure should have failed before Insert")
 	}
 }
 
