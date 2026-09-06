@@ -78,6 +78,22 @@ operate under strict rules.
 4. **Create or reuse a CLEAN isolated git worktree** for the head branch.
    (`$WORKSPACE_ROOT` is the monorepo root, pinned into your session.)
 
+   **Worktree convention — deliberate exception, not a gap.** This path is
+   keyed on `PR_POOL_WORKTREE_DIR` (a first-class `pr-pool` config key —
+   `packages/pr-pool/internal/config/config.go` — layered `pr-pool` config >
+   env var > default), independent of both `pg-pr worktree add`'s own
+   PR-review worktree convention and `pg-connector`'s generic
+   `scm worktree add` (which places worktrees under the target repo's own
+   `.worktrees/<branch>`). It has to diverge: unlike those single-shot,
+   throwaway review worktrees, this one is **resumed across separate
+   dispatches of the same bead**, including recovery after a crashed run
+   (see the reuse branch below), so it needs a stable location `pr-pool`
+   itself owns end to end rather than a path another tool's add/remove pair
+   could also touch or clean up out from under a still-in-progress worker.
+   Do not migrate this to `pg-pr worktree add` or `pg-connector scm worktree
+add` — neither offers reuse-on-crash semantics, and both are scoped to a
+   single review session, not a resumable worker checkout.
+
    ```bash
    WT="${PR_POOL_WORKTREE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/pr-pool/worktrees}/<repo-slug>-pr<pr_number>"
    git -C "$WORKSPACE_ROOT" fetch origin "<branch>"

@@ -21,12 +21,15 @@ the final post decision after inspecting the draft.
 
 ## Workflow
 
-1. `pg-pr worktree add <PR>` and `cd` into it.
-2. Spawn `pg-pr-review-orchestrator` via the Task tool (max-mode
-   required). The orchestrator already stages findings as a draft.
-3. After the orchestrator returns, surface the staged-draft path and
+1. Spawn `pg-pr-review-orchestrator` via the Task tool (max-mode
+   required), passing the PR identifier. The orchestrator owns the
+   whole worktree lifecycle itself (`pg-pr worktree add` before
+   reviewing, `pg-pr worktree remove` after staging the draft) and
+   already stages findings as a draft — do **not** `pg-pr worktree
+add`/`remove` here yourself; doing so would double-manage the same
+   PR's worktree around the orchestrator's own add/remove.
+2. After the orchestrator returns, surface the staged-draft path and
    summary to the user.
-4. `pg-pr worktree remove <PR>` when done.
 
 ## Boundaries
 
