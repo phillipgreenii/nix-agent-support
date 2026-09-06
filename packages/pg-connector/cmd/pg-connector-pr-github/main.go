@@ -14,8 +14,6 @@
 package main
 
 import (
-	"context"
-	"encoding/json"
 	"os"
 
 	internal "github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal"
@@ -44,31 +42,20 @@ func run() int {
 // newDispatchTable builds the pr capability's table (show/categorize/
 // feedback_set, plus auth_status via backend's AuthChecker) via the
 // sibling "generic pr entity/capability" packet's NewDispatchTable, then
-// adds this backend's own capabilities entry — the concrete backing for
-// that sibling packet's vocabulary check, which cites this backend's
-// capabilities response but does not itself populate it [design: §4.3,
-// §6.1].
+// adds this backend's own capabilities entry via scriptout.AddCapabilities
+// — the concrete backing for that sibling packet's vocabulary check, which
+// cites this backend's capabilities response but does not itself populate
+// it [design: §4.3, §6.1]. AddCapabilities computes capabilities.ops
+// straight from this table's own registered op names, so this backend
+// never hand-types a second, separately maintained ops list that could
+// drift from what the table actually dispatches (bead pg2-fh2vh).
 func newDispatchTable(backend *internal.Backend) scriptout.DispatchTable {
 	table := pr.NewDispatchTable(backend)
-	table[scriptout.OpCapabilities] = scriptout.OpHandler{
-		SchemaVersion: schema.SchemaVersion,
-		Handle: func(ctx context.Context, _ json.RawMessage) (any, error) {
-			return capabilitiesResponse(), nil
-		},
-	}
-	return table
-}
-
-// capabilitiesResponse declares this backend's schemaVersions, the ops it
-// answers, and its non-empty category vocabulary (the actual accepted
-// categorize values) [design: §4.3, §6.1].
-func capabilitiesResponse() scriptout.CapabilitiesResponse {
-	return scriptout.CapabilitiesResponse{
+	return scriptout.AddCapabilities(table, schema.SchemaVersion, scriptout.CapabilitiesResponse{
 		ProtocolVersion: scriptout.ProtocolVersion,
 		SchemaVersions:  map[string]int{"pr": schema.SchemaVersion},
-		Ops:             []string{"show", "categorize", "feedback_set", scriptout.OpAuthStatus, scriptout.OpCapabilities},
 		Vocabulary: map[string]any{
 			"category": internal.Vocabulary,
 		},
-	}
+	})
 }

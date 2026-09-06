@@ -16,8 +16,6 @@
 package main
 
 import (
-	"context"
-	"encoding/json"
 	"os"
 
 	internal "github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-ci-github-actions/internal"
@@ -45,24 +43,15 @@ func run() int {
 // newDispatchTable builds the ci capability's table (list_runs/get_logs/
 // rerun_failed, plus auth_status via backend's AuthChecker) via the
 // sibling "generic ci entity/capability" packet's ci.NewDispatchTable, then
-// adds this backend's own capabilities entry [design: §4.3].
+// adds this backend's own capabilities entry via scriptout.AddCapabilities
+// [design: §4.3]. AddCapabilities computes capabilities.ops straight from
+// this table's own registered op names, so this backend never hand-types a
+// second, separately maintained ops list that could drift from what the
+// table actually dispatches (bead pg2-fh2vh).
 func newDispatchTable(backend *internal.Backend) scriptout.DispatchTable {
 	table := ci.NewDispatchTable(backend)
-	table[scriptout.OpCapabilities] = scriptout.OpHandler{
-		SchemaVersion: schema.CISchemaVersion,
-		Handle: func(ctx context.Context, _ json.RawMessage) (any, error) {
-			return capabilitiesResponse(), nil
-		},
-	}
-	return table
-}
-
-// capabilitiesResponse declares this backend's schemaVersions and the ops
-// it answers [design: §4.3].
-func capabilitiesResponse() scriptout.CapabilitiesResponse {
-	return scriptout.CapabilitiesResponse{
+	return scriptout.AddCapabilities(table, schema.CISchemaVersion, scriptout.CapabilitiesResponse{
 		ProtocolVersion: scriptout.ProtocolVersion,
 		SchemaVersions:  map[string]int{"ci": schema.CISchemaVersion},
-		Ops:             []string{"list_runs", "get_logs", "rerun_failed", scriptout.OpAuthStatus, scriptout.OpCapabilities},
-	}
+	})
 }

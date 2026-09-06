@@ -10,14 +10,15 @@
 // generic serve-loop entry point — it is the binary that actually calls
 // ServeLoop, unlike either sibling packet [design: §4.2]. It does NOT add
 // an auth_status entry: internal.Backend does not implement
-// pkg/provider.AuthChecker (see backend.go's doc comment for why), so the
-// Ops list below omits scriptout.OpAuthStatus rather than claiming an op
-// this binary would answer with unknown_op.
+// pkg/provider.AuthChecker (see backend.go's doc comment for why), so this
+// table never gains a scriptout.OpAuthStatus key. capabilities.ops (see
+// newDispatchTable's scriptout.AddCapabilities call) is computed straight
+// from this table's own registered keys, so it automatically never claims
+// scriptout.OpAuthStatus either, rather than this binary claiming an op it
+// would actually answer with unknown_op.
 package main
 
 import (
-	"context"
-	"encoding/json"
 	"os"
 
 	internal "github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-beads/internal"
@@ -46,32 +47,31 @@ func run() int {
 // newDispatchTable builds the issue capability's table (show/create/
 // comment/transition) via the sibling "generic issue entity/capability"
 // packet's NewDispatchTable, then adds this backend's own capabilities
-// entry — the concrete backing for that sibling packet's vocabulary.state
-// check, which cites this backend's capabilities response but does not
-// itself populate it [design: §4.3, §4.3 AC].
+// entry via scriptout.AddCapabilities — the concrete backing for that
+// sibling packet's vocabulary.state check, which cites this backend's
+// capabilities response but does not itself populate it [design: §4.3,
+// §4.3 AC]. AddCapabilities computes capabilities.ops straight from this
+// table's own registered op names, so this backend never hand-types a
+// second, separately maintained ops list that could drift from what the
+// table actually dispatches (bead pg2-fh2vh).
 func newDispatchTable(backend *internal.Backend) scriptout.DispatchTable {
 	table := issue.NewDispatchTable(backend)
-	table[scriptout.OpCapabilities] = scriptout.OpHandler{
-		SchemaVersion: schema.IssueSchemaVersion,
-		Handle: func(ctx context.Context, _ json.RawMessage) (any, error) {
-			return capabilitiesResponse(backend), nil
-		},
-	}
-	return table
+	return scriptout.AddCapabilities(table, schema.IssueSchemaVersion, capabilitiesBase(backend))
 }
 
-// capabilitiesResponse declares this backend's schemaVersions, the ops it
-// answers, and its non-empty state vocabulary (bd's actual accepted
-// --status values) [design: §4.3, §4.3 AC]. It also advertises the
-// resolved bd workspace directory (bead pg2-1q9c0, AC2) when one is
-// configured, so `pg-connector config validate`'s capabilities fan-out can
-// surface which tracker each issue-beads instance targets without needing
-// to run a real op first. capabilities must always answer regardless of
-// workspace configuration (Backend.Workspace's error is deliberately
-// swallowed here, not surfaced as a capabilities failure) — an
-// unconfigured workspace is a Show/Create/Comment/Transition-time error,
-// not a health-check failure.
-func capabilitiesResponse(backend *internal.Backend) scriptout.CapabilitiesResponse {
+// capabilitiesBase declares this backend's schemaVersions and its
+// non-empty state vocabulary (bd's actual accepted --status values)
+// [design: §4.3, §4.3 AC] — everything AddCapabilities needs except Ops,
+// which it deliberately leaves unset for AddCapabilities to compute. It
+// also advertises the resolved bd workspace directory (bead pg2-1q9c0,
+// AC2) when one is configured, so `pg-connector config validate`'s
+// capabilities fan-out can surface which tracker each issue-beads instance
+// targets without needing to run a real op first. capabilities must always
+// answer regardless of workspace configuration (Backend.Workspace's error
+// is deliberately swallowed here, not surfaced as a capabilities failure)
+// — an unconfigured workspace is a Show/Create/Comment/Transition-time
+// error, not a health-check failure.
+func capabilitiesBase(backend *internal.Backend) scriptout.CapabilitiesResponse {
 	vocabulary := map[string]any{
 		"state": internal.Vocabulary,
 	}
@@ -81,7 +81,6 @@ func capabilitiesResponse(backend *internal.Backend) scriptout.CapabilitiesRespo
 	return scriptout.CapabilitiesResponse{
 		ProtocolVersion: scriptout.ProtocolVersion,
 		SchemaVersions:  map[string]int{"issue": schema.IssueSchemaVersion},
-		Ops:             []string{"show", "create", "comment", "transition", scriptout.OpCapabilities},
 		Vocabulary:      vocabulary,
 	}
 }

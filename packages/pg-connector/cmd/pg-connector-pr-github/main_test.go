@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"reflect"
 	"testing"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal"
@@ -56,6 +57,33 @@ func TestNewDispatchTable_CapabilitiesVocabularyNonEmpty(t *testing.T) {
 	cats, ok := resp.Vocabulary["category"].([]string)
 	if !ok || len(cats) == 0 {
 		t.Fatalf("vocabulary.category = %#v, want a non-empty []string", resp.Vocabulary["category"])
+	}
+}
+
+// TestNewDispatchTable_CapabilitiesOpsMatchesTableKeys is bead pg2-fh2vh's
+// per-backend regression proof: this binary no longer hand-types a
+// capabilities.ops literal (see newDispatchTable), so Ops MUST always be
+// exactly the dispatch table's own registered keys. If a future change
+// here ever reintroduced a hand-typed Ops slice, or added/removed an op
+// from pr.NewDispatchTable's own table without this binary's Ops
+// following automatically, this test would catch the divergence.
+func TestNewDispatchTable_CapabilitiesOpsMatchesTableKeys(t *testing.T) {
+	table := newDispatchTable(newTestBackend(t))
+	entry, ok := table[scriptout.OpCapabilities]
+	if !ok {
+		t.Fatal("capabilities entry missing from this binary's own dispatch table")
+	}
+	result, err := entry.Handle(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	resp, ok := result.(scriptout.CapabilitiesResponse)
+	if !ok {
+		t.Fatalf("result type = %T, want scriptout.CapabilitiesResponse", result)
+	}
+	want := table.Ops()
+	if !reflect.DeepEqual(resp.Ops, want) {
+		t.Fatalf("Ops = %v, want exactly the dispatch table's own registered keys %v: capabilities.ops must be mechanically derived from the table, never a separately maintained literal", resp.Ops, want)
 	}
 }
 

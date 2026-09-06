@@ -22,8 +22,6 @@
 package main
 
 import (
-	"context"
-	"encoding/json"
 	"os"
 
 	internal "github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-scm-git/internal"
@@ -52,25 +50,16 @@ func run() int {
 // worktree_remove/worktree_list/branch_detect — no auth_status, since
 // backend implements no AuthChecker) via the sibling "generic scm
 // entity/capability" packet's NewDispatchTable, then adds this backend's
-// own capabilities entry.
+// own capabilities entry via scriptout.AddCapabilities. AddCapabilities
+// computes capabilities.ops straight from this table's own registered op
+// names (so the deliberate absence of auth_status above is automatically
+// reflected, not separately restated) — this backend never hand-types a
+// second, separately maintained ops list that could drift from what the
+// table actually dispatches (bead pg2-fh2vh).
 func newDispatchTable(backend *internal.Provider) scriptout.DispatchTable {
 	table := scm.NewDispatchTable(backend)
-	table[scriptout.OpCapabilities] = scriptout.OpHandler{
-		SchemaVersion: schema.ScmSchemaVersion,
-		Handle: func(ctx context.Context, _ json.RawMessage) (any, error) {
-			return capabilitiesResponse(), nil
-		},
-	}
-	return table
-}
-
-// capabilitiesResponse declares this backend's schemaVersions and the ops
-// it answers. auth_status is deliberately absent: this backend has no
-// remote credentials concept at all [design: §4.6, §4.7].
-func capabilitiesResponse() scriptout.CapabilitiesResponse {
-	return scriptout.CapabilitiesResponse{
+	return scriptout.AddCapabilities(table, schema.ScmSchemaVersion, scriptout.CapabilitiesResponse{
 		ProtocolVersion: scriptout.ProtocolVersion,
 		SchemaVersions:  map[string]int{"scm": schema.ScmSchemaVersion},
-		Ops:             []string{"worktree_add", "worktree_remove", "worktree_list", "branch_detect", scriptout.OpCapabilities},
-	}
+	})
 }
