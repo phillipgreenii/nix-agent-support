@@ -27,12 +27,15 @@ mkGoApp {
   # output to generate a man page from and no subcommands to complete
   # [design: §5 preamble; freedom boundary, part 4].
   #
-  # No wrapProgram for `gh`/`pg-connector`: this backend execs both on PATH
-  # at runtime — `gh` carried over unchanged from the ported GitHub Actions
-  # client, and `pg-connector` composed for its own PRResolver (resolver.go)
-  # — provisioned once, separately, wherever this workspace's home-manager
-  # profile installs them, matching pg-connector-pr-github.nix's own choice
-  # not to wrap `gh` [design: §9].
+  # No wrapProgram for `gh`: this backend execs it on PATH at runtime,
+  # carried over unchanged from the ported GitHub Actions client —
+  # provisioned once, separately, wherever this workspace's home-manager
+  # profile installs it, matching pg-connector-pr-github.nix's own choice
+  # not to wrap `gh` [design: §9]. This backend does NOT exec `pg-connector`
+  # itself: its own PRResolver (resolver.go) resolves a PR id directly
+  # against GitHub over the same `gh` gateway, never by shelling back into
+  # the Tier-1 umbrella that dispatches it [design: §4.4 composition
+  # boundary; bug fix].
 
   meta = with lib; {
     description = "pg-connector's ci capability Tier-2 backend for GitHub Actions — a scriptout-only binary with no independent CLI identity";

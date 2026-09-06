@@ -237,6 +237,34 @@ view`, …) rather than talking to backend systems (GitHub, Jira, …) directly.
   `<type>` token used for every Tier-2 binary (§5.1), since they already have real verbs on the
   Tier-1 umbrella.
 
+**This authorization is scoped to those two implementer kinds only, and does not extend to an
+ordinary Tier-2 backend needing data owned by a _different_ capability's backend (resolved and
+tightened here, not left to per-packet analogy, after a Tier-2 backend was found composing
+`pg-connector pr show` for exactly this reason).** A Tier-2 backend sits on the opposite side of
+this boundary from a standalone attention/search plugin: it is itself one of the things
+`pg-connector`'s own verbs compose, so a Tier-2 backend that shells out to `pg-connector` (or execs
+a sibling backend binary directly) to satisfy its own op is not "using the umbrella's verbs" in the
+sense this section authorizes — it is calling back into its own caller, producing an undeclared
+runtime dependency on `pg-connector` itself (plus, transitively, on whichever backend the registry
+currently resolves for that capability) and a needless multi-process chain per call. §5.2's
+compiler-enforced backend isolation (independent `internal/` trees per backend, with only
+`pkg/schema`/`pkg/provider`/`pkg/scriptout` shared) already forecloses the alternative of importing
+a sibling backend's own concrete implementation in-process — that isolation is deliberate, not an
+oversight to route around via a subprocess.
+
+A Tier-2 backend needing data that another capability's backend would otherwise supply MUST
+instead resolve it using its own direct, already-declared system access — never by exec'ing
+`pg-connector` or any other backend binary. This is usually available because a Tier-2 backend's
+system dependency commonly spans more than one capability already: `pg-connector-ci-github-actions`
+needs a PR's head branch (data the `pr` capability's `show` op also returns) purely to filter `gh
+run list`, and it already holds its own GitHub credentials/`gh` gateway for its own ops — resolving
+the branch with one more direct `gh pr view` call, alongside its existing `run list`/`run view`/
+`run rerun` calls, is no new dependency and no new trust boundary, just one more read against a
+system it already talks to. Where a backend genuinely has no independent path to the data it needs
+(the data is only obtainable through another capability's own backend-specific credentials or
+store), that is a real design gap — it MUST be raised as an open question here, not papered over
+with a subprocess shortcut.
+
 Registration is two always-list-valued keys, independent of `connector.<type>`:
 
 ```
@@ -289,6 +317,11 @@ source}` set plus any type-/implementation-declared extensions the query request
 - Standalone attention/search-only plugins are named `pg-connector-attention-<backend>` /
   `pg-connector-search-<backend>` and compose pg-connector's own verbs internally — never a direct
   backend-system client of their own.
+- A Tier-2 backend never execs `pg-connector` or another Tier-2 backend binary to satisfy its own
+  op; a cross-capability data need is resolved via that backend's own direct system access instead
+  (composition-boundary text above) — a mechanical grep for `exec.Command`/`os/exec` naming
+  `pg-connector` or another `pg-connector-<type>-<backend>` binary outside a backend's own tests
+  would catch a regression.
 - A beads attention source, if built, performs no claim/ack/exit mutation.
 - Attention aggregation is stateless: `pkg/schema`'s `attention.Source` shape and its
   implementations have zero imports of, or references to, any daily-focus/df-survey package or

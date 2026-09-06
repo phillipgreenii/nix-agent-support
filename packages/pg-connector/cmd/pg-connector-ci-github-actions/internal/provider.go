@@ -48,10 +48,13 @@ type Backend struct {
 }
 
 // New returns a Backend wired for production: the token-protected gh CLI
-// gateway (internal/github.NewCLI) plus the PRResolver that composes
-// pg-connector's own "pr show" verb (resolver.go).
+// gateway (internal/github.NewCLI), shared between run-list/logs/rerun and
+// the PRResolver (resolver.go), which resolves a PR id directly against
+// GitHub — never by shelling out to pg-connector or any other backend
+// binary [design: §4.4].
 func New() *Backend {
-	return &Backend{gh: github.NewCLI(), pr: newExecPRResolver()}
+	gh := github.NewCLI()
+	return &Backend{gh: gh, pr: newGHPRResolver(gh)}
 }
 
 // NewWithDeps constructs a Backend with injected dependencies — used by
