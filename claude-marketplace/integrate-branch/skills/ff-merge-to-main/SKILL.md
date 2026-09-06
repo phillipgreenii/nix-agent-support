@@ -224,6 +224,43 @@ rebase --abort` to restore the pre-rebase state, keep the branch and worktree
   MUST NOT assert either recovery above — which one applies is exactly what could
   not be determined, and a confident wrong answer is worse than an honest unknown.
 
+## FF-1b — Consolidated `prek` check across the whole branch diff
+
+Every commit on `<FB>` already had its own hooks run against its own staged
+diff at commit time — but that only ever validates one commit in isolation.
+Nothing before this step has checked the **union** of every file any commit on
+the branch touched, together, in one pass. This step closes that gap, and it
+applies to **every repo that has a `.pre-commit-config.yaml`** — not just the
+two repos FF-2a special-cases:
+
+```bash
+if [ -f "$WT/.pre-commit-config.yaml" ]; then
+  (cd "$WT" && prek run --from-ref "$PRIMARY" --to-ref "$FB")
+fi
+```
+
+No `.pre-commit-config.yaml` → skip silently; nothing to run. `prek`'s
+`--from-ref`/`--to-ref` diff-expression form resolves exactly the file set
+`git diff --name-only "$PRIMARY"...` would, so this scopes to files the branch
+actually touched, not the whole repo (`--all-files` MUST NOT be used here for
+the same reason it MUST NOT be used as a per-commit gate — it forces every
+hook over the whole tree and can false-block on a pre-existing violation the
+branch never touched). `<FB>` already reflects FF-1's rebase, so this runs
+against the freshly-rebased tree, at the default `pre-commit` hook stage —
+the same stage every individual commit already ran, just scoped to the whole
+branch's diff instead of one commit's.
+
+This is **distinct from, and runs before,** FF-2a below: FF-1b checks the
+`.pre-commit-config.yaml` hook set (fast, prek-cached, every repo); FF-2a
+checks the heavier `checks.*` derivations under `nix flake check` (slow,
+repo-scoped to the two repos with no external CI). Neither substitutes for
+the other — FF-1b passing does not mean FF-2a can be skipped, and FF-2a
+passing does not mean FF-1b can be skipped.
+
+A non-zero exit here — **halt and report** `stopped:precommit-branch-diff-failed`
+with the repo name, the failing hook(s), and `prek`'s own output. Do not
+attempt to fix the violation yourself; that decision belongs to the operator.
+
 ## FF-2 — Precondition: repo-scoped `nix flake check`, then fast-forward-only merge
 
 FF-2 splits into two parts, the same way FF-0 does: FF-2a is a **blocking
@@ -289,9 +326,10 @@ possible to fast-forward." Handle it as a bounded retry, not a one-shot failure:
 
 - `attempts = 0`.
 - If FF-2b fails as non-fast-forward: `attempts++`, then **retry from FF-1**
-  (rebase `<WT>` onto the now-advanced primary again, then re-attempt FF-2 — for
-  the two named repos this re-runs FF-2a's `nix flake check` too, against the
-  freshly rebased tree, before FF-2b's merge is retried).
+  (rebase `<WT>` onto the now-advanced primary again, then re-attempt FF-1b and
+  FF-2 — this re-runs FF-1b's consolidated `prek` check for every repo, and for
+  the two named repos also FF-2a's `nix flake check`, both against the freshly
+  rebased tree, before FF-2b's merge is retried).
 - When `attempts` reaches **2** (the second consecutive non-ff failure), **stop
   and ask** the user rather than retry indefinitely — a persistent ff-race
   warrants attention (R-7).
@@ -304,8 +342,9 @@ first appears on a retry is therefore reported the same way, by FF-1.
 
 ## FF-4 — Cleanup
 
-Only reached after FF-2 succeeds (FF-2a's check, when it applies, and FF-2b's
-merge). Delegate to `wtdone` (bead `pg2-hpurf`) rather than hand-rolling the
+Only reached after FF-1b (when a `.pre-commit-config.yaml` exists) and FF-2
+succeed (FF-2a's check, when it applies, and FF-2b's merge). Delegate to
+`wtdone` (bead `pg2-hpurf`) rather than hand-rolling the
 fsmonitor-stop / worktree-remove / branch-delete / prune sequence: it folds in
 a liveness guard this handler did not previously have. **Relocate the shell
 out of `<WT>` into `<CC>` first** — removing the worktree you are currently
@@ -342,13 +381,15 @@ flowchart TD
     F0B -->|Yes| INIT["attempts = 0"]
     INIT --> B["FF-1: git -C WT rebase primary"]
     B --> C{"exit 0?"}
-    C -->|Yes| F2A{"FF-2a: repo is agent-support or ziprecruiter? run nix flake check"}
+    C -->|Yes| F1B{"FF-1b: .pre-commit-config.yaml exists? run prek --from-ref PRIMARY --to-ref FB"}
     C -->|No| P{"rebase in progress in WT? (--git-path probe)"}
     P -->|"unreadable"| S4["STOP: stopped:rebase-indeterminate — assert neither recovery"]
     P -->|"No — refused, never started"| S5["STOP: stopped:rebase-refused — relay git's message, NO abort/continue"]
     P -->|"Yes — conflict"| C2{"confident in the resolution?"}
-    C2 -->|Yes| D["resolve + continue + summarize"] --> F2A
+    C2 -->|Yes| D["resolve + continue + summarize"] --> F1B
     C2 -->|No| S1["STOP: stopped:rebase-conflict — abort, keep branch"]
+    F1B -->|"fails"| S12["STOP: stopped:precommit-branch-diff-failed — operator fixes it"]
+    F1B -->|"passes, or no config"| F2A{"FF-2a: repo is agent-support or ziprecruiter? run nix flake check"}
     F2A -->|"fails"| S11["STOP: stopped:flake-check-failed — operator fixes it"]
     F2A -->|"passes, or repo not in scope"| G["FF-2b: git -C CC merge --ff-only FB"]
     G --> H{"ff-only ok?"}
@@ -374,6 +415,7 @@ values, and the disposition each one asks of the operator:
 | `rebase-conflict`              | FF-1      | resolve the conflict, then re-invoke                                         |
 | `rebase-refused`               | FF-1      | disposition whatever git's message names, then re-invoke                     |
 | `rebase-indeterminate`         | FF-1      | inspect `<WT>`; the handler asserts no recovery                              |
+| `precommit-branch-diff-failed` | FF-1b     | fix the hook violation (every repo with prek configured), then re-invoke     |
 | `flake-check-failed`           | FF-2a     | fix the flake (repo-scoped; only agent-support/ziprecruiter), then re-invoke |
 | ff-race retry limit hit        | FF-3      | re-run once concurrent landings settle                                       |
 
@@ -410,6 +452,17 @@ exist, and prescribes a `git rebase --continue` that exits 128.
 - The handler MUST rebase (`<WT>` onto primary) before attempting the fast-forward
   merge — this is the rebase-first requirement; it MUST NOT fall back to a plain
   non-fast-forward merge.
+- When `<WT>` has a `.pre-commit-config.yaml`, FF-1b MUST run
+  `prek run --from-ref <PRIMARY> --to-ref <FB>` against the rebased `<WT>`
+  before FF-2, and MUST halt and report `stopped:precommit-branch-diff-failed`
+  on any non-zero exit rather than proceed to FF-2 — this check is universal
+  (every repo with prek configured, not just agent-support/ziprecruiter): a
+  per-commit hook run only ever validated ONE commit's own diff, never the
+  union of every commit's changes across the whole branch. The handler MUST
+  NOT use `--all-files` here (same false-block risk as a per-commit
+  `--all-files` run), and MUST NOT skip it on the reasoning that FF-2a will
+  also run for the two named repos — FF-1b's hook set and FF-2a's `checks.*`
+  derivations check different things, and neither substitutes for the other.
 - When the repo being landed is `phillipgreenii-nix-agent-support` or
   `phillipg-nix-ziprecruiter` (identified by `basename "$CC"`), FF-2a MUST run a
   full `nix flake check` against the rebased `<WT>` and MUST halt and report

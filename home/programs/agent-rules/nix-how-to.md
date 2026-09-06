@@ -32,6 +32,27 @@ run, forcing the slow always-on hooks (bats, nix, …) even for an unrelated dif
 **false-blocking** a clean change on a pre-existing violation in a file it never touched. Reserve
 `--all-files` for a deliberate full-repo sweep, not per-change validation.
 
+## Scoping a `prek`/`pre-commit` run to a commit RANGE, not just a file list
+
+`--files <list>` (above) is right when you know exactly which files one change touched. It is the
+wrong tool for checking everything a whole BRANCH touched across several commits — hand-listing
+files across multiple commits is easy to get wrong (miss one, or include a file a later commit on
+the branch reverted). For a commit-range check, use `prek`'s diff-expression form instead:
+
+```bash
+prek run --from-ref <base> --to-ref <tip>     # every file changed between the two refs
+prek run --last-commit                        # shorthand for --from-ref HEAD~1 --to-ref HEAD
+```
+
+This still only touches files the range actually changed (same cost profile as `--files`, not
+`--all-files`) — it just computes the file list from git instead of you enumerating it. This is
+what `ff-merge-to-main`'s FF-1b step now runs automatically at land time, for every repo with a
+`.pre-commit-config.yaml`: `prek run --from-ref <primary> --to-ref <branch>`, verifying the
+branch's cumulative diff in one pass rather than trusting that each commit's own per-commit run
+summed to the same thing. Reach for the same form yourself whenever you need to validate more
+than one commit's combined changes ad hoc (e.g. after an interactive rebase, or before manually
+handing a multi-commit branch off).
+
 ## `nix flake check` is a land-time gate, not a per-change gate
 
 Reserve a full `nix flake check` for once before the branch lands (or the repo's own
@@ -43,7 +64,11 @@ change, on top of whatever CI already re-checks on push. Running it once per bra
 before landing, still satisfies the core rule's `nix flake check` MUST-pass obligation without
 multiplying that cost by however many changes land on the branch.
 
-**Do not assume a land-time mechanism exists without checking.** `ff-merge-to-main`'s FF-2a step
-only runs `nix flake check` for `nix-agent-support`/`phillipg-nix-ziprecruiter` (the two repos
-with no external CI) — it skips every other repo it lands. In a repo with neither external CI
-nor that scoping, there is no land-time gate at all unless you run one yourself before landing.
+**Every repo gets a prek-level land-time check; only two get the full flake check.**
+`ff-merge-to-main`'s FF-1b step runs the commit-range `prek` check above for every repo it lands
+that has a `.pre-commit-config.yaml` — that part is universal, not repo-scoped. FF-2a's full
+`nix flake check`, by contrast, only runs for `nix-agent-support`/`phillipg-nix-ziprecruiter`
+(the two repos with no external CI) — it skips every other repo. So do not assume a repo without
+that FF-2a scoping has NO land-time gate at all: it still gets FF-1b's prek check; it just does
+not get the heavier `checks.*` derivations FF-2a covers unless you run `nix flake check` yourself
+before landing.
