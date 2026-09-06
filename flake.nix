@@ -1324,6 +1324,11 @@
                 testDeps = [
                   pkgs.bash
                   pkgs.git
+                  # cmd/pg-connector's TestBackendInternalGitenvAndGithubHelpersSync /
+                  # TestClassifyGHErrorSync (bead pg2-sxfwd) shell out to `diff -u`
+                  # to compare backends' internal/ copies against a checked-in
+                  # baseline.
+                  pkgs.diffutils
                 ];
               };
 
@@ -1336,18 +1341,26 @@
               # ReviewID-join fix landed on pg-connector's copy with no pg-pr
               # counterpart to catch the asymmetry.
               #
-              # This is a snapshot-diff guard, not a byte-identity one: the two
-              # copies already, legitimately, differ forever (re-homed import
+              # This is a content-hash-pinning guard, not a byte-identity one: the
+              # two copies already, legitimately, differ forever (re-homed import
               # paths, a "ported from pg-pr" package doc comment, and
-              # pg-connector-only additions like the ReviewID join). So each pair's
-              # `diff -u` is compared against a checked-in baseline under
-              # testdata/pg-pr-drift/ rather than required to be empty. A future
-              # change that touches either side and shifts the diff away from that
-              # baseline fails here — same "recorded reason" pattern as this repo's
-              # ratchet checks elsewhere: if the new drift is intentional, update the
-              # baseline file in the SAME change (that update IS the review of the
-              # drift); if it isn't, the fix landed on only one side and needs
-              # porting to the other.
+              # pg-connector-only additions like the ReviewID join). So each side's
+              # sha256 is pinned in a checked-in baseline under testdata/pg-pr-drift/
+              # rather than requiring the two files to be identical. A future change
+              # to EITHER side shifts that side's hash away from its pinned value and
+              # fails here — same "recorded reason" pattern as this repo's ratchet
+              # checks elsewhere: review whether the OTHER side needs the same
+              # change, then re-pin both hashes in the SAME change (that re-pin IS
+              # the recorded reason); if the other side needed the fix too and didn't
+              # get it, port it before re-pinning.
+              #
+              # A whole-file `diff -u` snapshot was tried first and discarded: GNU
+              # diffutils (this check's sandbox) and BSD diff (a plain macOS shell)
+              # pick different, EQUALLY VALID line orderings for a heavily-rewritten
+              # file with an ambiguous common anchor line, so a baseline generated
+              # on one disagreed with the other's live diff though neither file had
+              # actually changed — a false positive baked into the tool choice, not
+              # the content. Hashing each side's raw bytes has no such ambiguity.
               #
               # A Go test cannot do this: pg-connector-go-tests above is sandboxed
               # to ./packages/pg-connector alone (this repo's CLAUDE.md "Go test
@@ -1367,7 +1380,7 @@
                     inherit name;
                     pgPr = "${pgPrDir}/${name}";
                     conn = "${connDir}/${name}";
-                    golden = "${baseline}/${name}.diff";
+                    golden = "${baseline}/${name}.sha256pair";
                   };
                   pairs = [
                     (pair "github.go" prGithub connGithub)
@@ -1379,34 +1392,45 @@
                     (pair "token.go" prGithub connGithub)
                     (pair "gitenv.go" prGitenv connGitenv)
                   ];
-                  # Both sides are normalized by stripping trailing whitespace per
-                  # line: the pre-commit trailing-whitespace hook already does this
-                  # to the committed baseline file on every commit (a unified diff's
-                  # blank context line is otherwise a single trailing space), so the
-                  # live diff computed at build time must be normalized the same way
-                  # or a clean baseline would never compare equal to itself.
+                  # golden format: two lines, "<sha256>  <label>" each (the familiar
+                  # sha256sum output shape, for a human skimming a diff of the
+                  # baseline file — but compared here by hash value alone, not by
+                  # the label, so a nix store path in the label never matters).
                   checkPairScript = p: ''
-                    actual="$(diff -u --label "pg-pr/${p.name}" --label "pg-connector-pr-github/${p.name}" ${p.pgPr} ${p.conn} | sed -E 's/[[:space:]]+$//' || true)"
-                    expected="$(sed -E 's/[[:space:]]+$//' ${p.golden})"
-                    if [ "$actual" != "$expected" ]; then
-                      echo "FAIL: ${p.name} has drifted from its recorded pg-pr <-> pg-connector-pr-github baseline diff (testdata/pg-pr-drift/${p.name}.diff)." >&2
-                      echo "  If this drift is a deliberate, reviewed change: update that baseline file in this SAME change to match — that update is the recorded reason." >&2
-                      echo "  If it is not deliberate: the fix landed on only one side and must be ported to the other." >&2
-                      echo "--- recorded baseline ---" >&2
-                      echo "$expected" >&2
-                      echo "--- actual diff ---" >&2
-                      echo "$actual" >&2
+                    hashA="$(sha256sum ${p.pgPr} | cut -d' ' -f1)"
+                    hashB="$(sha256sum ${p.conn} | cut -d' ' -f1)"
+                    recordedA="$(sed -n '1{s/ .*//;p}' ${p.golden})"
+                    recordedB="$(sed -n '2{s/ .*//;p}' ${p.golden})"
+                    if [ "$hashA" != "$recordedA" ] || [ "$hashB" != "$recordedB" ]; then
+                      echo "FAIL: ${p.name} has drifted from its recorded pg-pr <-> pg-connector-pr-github baseline hashes (testdata/pg-pr-drift/${p.name}.sha256pair)." >&2
+                      echo "  Review whether the OTHER side needs the same change; if it does and doesn't have it, port it first." >&2
+                      echo "  Then re-pin both hashes in this SAME change (that re-pin is the recorded reason):" >&2
+                      echo "    sha256sum ${p.pgPr} ${p.conn}" >&2
+                      echo "  recorded: A=$recordedA B=$recordedB" >&2
+                      echo "  actual:   A=$hashA B=$hashB" >&2
+                      diff -u ${p.pgPr} ${p.conn} >&2 || true
                       fail=1
                     fi
                   '';
                 in
-                pkgs.runCommand "test-pg-connector-pr-github-pg-pr-sync" { } ''
-                  fail=0
-                  ${lib.concatMapStringsSep "\n" checkPairScript pairs}
-                  [ "$fail" -eq 0 ] || exit 1
-                  echo "ok: pg-pr <-> pg-connector-pr-github GitHub-provider copies match their recorded baseline diff"
-                  touch $out
-                '';
+                pkgs.runCommand "test-pg-connector-pr-github-pg-pr-sync"
+                  {
+                    # diffutils is diagnostic only (the FAIL message's best-effort
+                    # `diff -u ... || true`) — the pass/fail decision above is the
+                    # sha256 comparison alone, so a diff-tool-version difference here
+                    # can never flip this check's result.
+                    nativeBuildInputs = [
+                      pkgs.coreutils
+                      pkgs.diffutils
+                    ];
+                  }
+                  ''
+                    fail=0
+                    ${lib.concatMapStringsSep "\n" checkPairScript pairs}
+                    [ "$fail" -eq 0 ] || exit 1
+                    echo "ok: pg-pr <-> pg-connector-pr-github GitHub-provider copies match their recorded baseline hashes"
+                    touch $out
+                  '';
 
               # pa-monitor — the largest suite (bead pg2-ymi3l, fast-follow to
               # pg2-adhga / ADR 0021). Pattern-B module (local replace
