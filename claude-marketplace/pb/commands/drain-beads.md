@@ -356,6 +356,36 @@ proceeding on currently loaded text (direct interactive invocation).`)
      handled by amending that commit or parking the bead, never by having
      withheld the commit — bead `tc-xhq6`); report fully in ONE turn (no
      waiting/monitoring across turns).
+   - **if it backgrounds a command, IT must stay in its own execution — keep
+     calling tools — until that command resolves, using a `Monitor` call with
+     an until-loop to detect completion; it MUST NOT send a final response
+     that stops short of that and says something like "I'll wait for the
+     Monitor notification to arrive."** A dispatched (non-top-level) agent's
+     own invocation is a bounded request/response: the moment it stops calling
+     tools and returns final text, that invocation is OVER, permanently — there
+     is no later resumption, unlike the top-level orchestrating session, whose
+     own turn genuinely does end and get resumed by a task-notification. A
+     `Monitor` call with an until-loop returns an immediate "started, you'll be
+     notified" acknowledgment (it does NOT hand back the result inline) — the
+     notification lands as a later event WITHIN this same still-running
+     invocation, so the fix is to keep the invocation alive (do not send a
+     terminal response) rather than expect anything to reach it afterward.
+     Ending the turn early this way is a NO-OP that leaves the work unfinished
+     — observed 3× in one session, each requiring the orchestrator to notice
+     the stall and resend this exact correction (bead `tc-wklt`). A
+     restatement of the rule alone has already failed to prevent recurrence,
+     so use this pattern verbatim:
+
+     ```
+     Bash({ command: "prek run --files a.go b.go > /tmp/prek.log 2>&1; echo DONE >> /tmp/prek.log",
+            run_in_background: true })
+     Monitor({ command: "until grep -q '^DONE' /tmp/prek.log; do sleep 2; done; tail -c 4000 /tmp/prek.log",
+               description: "wait for prek", timeout_ms: 600000 })
+     # Monitor's tool result comes back immediately as "started" — that is NOT
+     # completion. Do not send a final response yet. The completion event
+     # (with the tailed log) arrives later as a notification INTO this same
+     # invocation, as long as you keep it open — never end your turn here.
+     ```
 
    The brief MUST NOT transcribe the bead description, doc content, or plan
    steps — if you are pasting more than paths and ids, you are doing the
@@ -479,6 +509,12 @@ build` for nix repos, and the repo's tests, including a slow full suite
      the reason;
    - MUST NOT merge any PR, MUST NOT push any primary branch, MUST NOT use
      `run_in_background` for git operations, and MUST report fully in ONE turn;
+   - the lander is itself a dispatched (non-top-level) subagent, so if any step
+     it invokes backgrounds a command (e.g. `ff-merge-to-main`'s FF-2a
+     `nix flake check`), IT must block on that command itself in THIS SAME
+     turn via a `Monitor` until-loop call, exactly the pattern given in the
+     DELEGATE step above — there is no external notification for its own
+     backgrounded work either;
    - return a structured report: `outcome` (`landed` | `pr-opened` |
      `pr-updated` | `stopped:<reason>`), the landed/pushed SHA per repo (tip
      of `drain/<id>`, never a re-read of primary), and PR number + URL.
@@ -701,7 +737,12 @@ arguments, behavior is otherwise unchanged.
 - Subagent dispatch (step 4/6) is ASYNC. Do NOT call `ScheduleWakeup` to wait
   on it — end the turn instead; the task notification resumes you
   automatically. `ScheduleWakeup` is `/loop`-only and needs a `prompt` this
-  command never has.
+  command never has. This is orthogonal to, and MUST NOT be confused with, a
+  DISPATCHED subagent's own backgrounded Bash/Monitor calls (e.g. a lander's
+  `nix flake check`) — the notification-resumes-you mechanism applies only to
+  YOU, the top-level orchestrator, waiting on your own Agent-tool dispatch;
+  a subagent gets no such notification for its own child and MUST block on it
+  itself via `Monitor` in the same turn (see step 4's worked example).
 - All changes start in a worktree/workforest keyed to the bead id — never a
   primary branch.
 - A claimed bead that genuinely IS type `epic` with decomposed children — reachable

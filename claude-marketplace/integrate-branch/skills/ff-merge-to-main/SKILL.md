@@ -297,9 +297,32 @@ step entirely — they either already have external CI or have not been evaluate
 for this gap, and this handler MUST NOT widen the check to them without a
 separate decision.
 
-`nix flake check` can run long. Give it an explicit generous timeout, or run it
-in the background and wait for it to finish, per this workspace's guidance on
-long-running nix commands — do not skip or truncate it for expediency.
+`nix flake check` can run long. Give it an explicit generous timeout, or
+background it and wait for it to finish — but "wait" means STAY IN THIS SAME
+INVOCATION (keep calling tools) until it resolves, never send a final response
+expecting a later notification to resume you. This handler is usually
+executing inside a dispatched (non-top-level) subagent's own invocation — e.g.
+the lander subagent `/pb:drain-beads`' LAND step dispatches — and such an
+invocation is a bounded request/response: the moment it stops calling tools
+and returns final text, that invocation is OVER, permanently, unlike the
+top-level orchestrating session's turn, which genuinely can be resumed later
+by a task-notification. Ending the turn with something like "I'll wait for the
+Monitor notification to arrive" is a no-op that leaves the land unfinished
+(observed live: bead `tc-wklt`). Use this pattern verbatim:
+
+```
+Bash({ command: "nix flake check > /tmp/flake-check.log 2>&1; echo DONE >> /tmp/flake-check.log",
+       run_in_background: true })
+Monitor({ command: "until grep -q '^DONE' /tmp/flake-check.log; do sleep 2; done; tail -c 4000 /tmp/flake-check.log",
+          description: "wait for nix flake check", timeout_ms: 1200000 })
+# Monitor's tool result comes back immediately as "started" — that is NOT
+# completion. Do not send a final response yet. The completion event (with the
+# tailed log) arrives later as a notification INTO this same invocation, as
+# long as you keep it open — never end your turn here; continue FF-2a/FF-2b
+# once that event lands.
+```
+
+Do not skip or truncate the check for expediency.
 
 A non-zero exit here is a **new**, repo-scoped precondition failure — distinct
 from every rebase/merge reason below. **Halt and report** `stopped:flake-check-failed`
