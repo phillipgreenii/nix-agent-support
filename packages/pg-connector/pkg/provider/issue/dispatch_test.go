@@ -199,6 +199,26 @@ func TestNewDispatchTable_Transition_UnrecognizedTargetStateIsProviderError(t *t
 	}
 }
 
+func TestNewDispatchTable_Show_DecodeFailureIsInvalidArgument(t *testing.T) {
+	// A malformed args payload fails scriptout.Decode -- a caller mistake,
+	// not backend ill-health -- so NewDispatchTable must classify it as
+	// invalid_argument, not unavailable [design: §4.2, bug pg2-vmfzp].
+	p := &fakeProvider{
+		showFn: func(ctx context.Context, id string) (*schema.Issue, error) {
+			t.Fatal("Show must not be invoked when args fail to decode")
+			return nil, nil
+		},
+	}
+	table := NewDispatchTable(p)
+	_, err := table["show"].Handle(context.Background(), json.RawMessage(`{not valid json`))
+	if !errors.Is(err, scriptout.ErrInvalidArgument) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrInvalidArgument)", err)
+	}
+	if errors.Is(err, scriptout.ErrUnavailable) {
+		t.Fatal("a decode failure must not be reported as unavailable")
+	}
+}
+
 func TestNewDispatchTable_AuthStatusAbsentWithoutAuthChecker(t *testing.T) {
 	table := NewDispatchTable(&fakeProvider{})
 	if _, ok := table[scriptout.OpAuthStatus]; ok {

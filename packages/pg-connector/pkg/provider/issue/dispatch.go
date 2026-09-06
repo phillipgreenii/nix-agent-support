@@ -38,7 +38,7 @@ func NewDispatchTable(p Provider) scriptout.DispatchTable {
 					ID string `json:"id"`
 				}
 				if err := scriptout.Decode(args, &a); err != nil {
-					return nil, scriptout.WrapError(scriptout.ErrUnavailable, "decode show args: "+err.Error())
+					return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, "decode show args: "+err.Error())
 				}
 				return p.Show(ctx, a.ID)
 			},
@@ -48,7 +48,7 @@ func NewDispatchTable(p Provider) scriptout.DispatchTable {
 			Handle: func(ctx context.Context, args json.RawMessage) (any, error) {
 				var input IssueInput
 				if err := scriptout.Decode(args, &input); err != nil {
-					return nil, scriptout.WrapError(scriptout.ErrUnavailable, "decode create args: "+err.Error())
+					return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, "decode create args: "+err.Error())
 				}
 				return p.Create(ctx, input)
 			},
@@ -61,7 +61,7 @@ func NewDispatchTable(p Provider) scriptout.DispatchTable {
 					Body string `json:"body"`
 				}
 				if err := scriptout.Decode(args, &a); err != nil {
-					return nil, scriptout.WrapError(scriptout.ErrUnavailable, "decode comment args: "+err.Error())
+					return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, "decode comment args: "+err.Error())
 				}
 				if err := p.Comment(ctx, a.ID, a.Body); err != nil {
 					return nil, err
@@ -77,7 +77,7 @@ func NewDispatchTable(p Provider) scriptout.DispatchTable {
 					TargetState string `json:"target_state"`
 				}
 				if err := scriptout.Decode(args, &a); err != nil {
-					return nil, scriptout.WrapError(scriptout.ErrUnavailable, "decode transition args: "+err.Error())
+					return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, "decode transition args: "+err.Error())
 				}
 				if err := p.Transition(ctx, a.ID, a.TargetState); err != nil {
 					return nil, err

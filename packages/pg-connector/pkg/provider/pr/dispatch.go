@@ -33,7 +33,7 @@ func NewDispatchTable(p Provider) scriptout.DispatchTable {
 					ID string `json:"id"`
 				}
 				if err := scriptout.Decode(args, &a); err != nil {
-					return nil, scriptout.WrapError(scriptout.ErrUnavailable, "decode show args: "+err.Error())
+					return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, "decode show args: "+err.Error())
 				}
 				return p.Show(ctx, a.ID)
 			},
@@ -46,7 +46,7 @@ func NewDispatchTable(p Provider) scriptout.DispatchTable {
 					Category string `json:"category"`
 				}
 				if err := scriptout.Decode(args, &a); err != nil {
-					return nil, scriptout.WrapError(scriptout.ErrUnavailable, "decode categorize args: "+err.Error())
+					return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, "decode categorize args: "+err.Error())
 				}
 				return p.Categorize(ctx, a.ID, a.Category)
 			},
@@ -60,7 +60,7 @@ func NewDispatchTable(p Provider) scriptout.DispatchTable {
 					Disposition schema.Disposition `json:"disposition"`
 				}
 				if err := scriptout.Decode(args, &a); err != nil {
-					return nil, scriptout.WrapError(scriptout.ErrUnavailable, "decode feedback_set args: "+err.Error())
+					return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, "decode feedback_set args: "+err.Error())
 				}
 				return p.FeedbackSet(ctx, a.ID, a.CommentID, a.Disposition)
 			},

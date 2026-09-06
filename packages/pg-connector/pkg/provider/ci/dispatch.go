@@ -33,7 +33,7 @@ func NewDispatchTable(p Provider) scriptout.DispatchTable {
 					PRID string `json:"pr_id"`
 				}
 				if err := scriptout.Decode(args, &a); err != nil {
-					return nil, scriptout.WrapError(scriptout.ErrUnavailable, "decode list_runs args: "+err.Error())
+					return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, "decode list_runs args: "+err.Error())
 				}
 				return p.ListRuns(ctx, a.PRID)
 			},
@@ -45,7 +45,7 @@ func NewDispatchTable(p Provider) scriptout.DispatchTable {
 					RunID string `json:"run_id"`
 				}
 				if err := scriptout.Decode(args, &a); err != nil {
-					return nil, scriptout.WrapError(scriptout.ErrUnavailable, "decode get_logs args: "+err.Error())
+					return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, "decode get_logs args: "+err.Error())
 				}
 				return p.GetLogs(ctx, a.RunID)
 			},
@@ -57,7 +57,7 @@ func NewDispatchTable(p Provider) scriptout.DispatchTable {
 					PRID string `json:"pr_id"`
 				}
 				if err := scriptout.Decode(args, &a); err != nil {
-					return nil, scriptout.WrapError(scriptout.ErrUnavailable, "decode rerun_failed args: "+err.Error())
+					return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, "decode rerun_failed args: "+err.Error())
 				}
 				return nil, p.RerunFailed(ctx, a.PRID)
 			},

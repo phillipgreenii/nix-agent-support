@@ -156,6 +156,26 @@ func TestNewDispatchTable_BranchDetect(t *testing.T) {
 	}
 }
 
+func TestNewDispatchTable_WorktreeAdd_DecodeFailureIsInvalidArgument(t *testing.T) {
+	// A malformed args payload fails scriptout.Decode -- a caller mistake,
+	// not backend ill-health -- so NewDispatchTable must classify it as
+	// invalid_argument, not unavailable [design: §4.2, bug pg2-vmfzp].
+	p := &fakeProvider{
+		worktreeAddFn: func(ctx context.Context, branchOrRef string) (*schema.WorktreeInfo, error) {
+			t.Fatal("WorktreeAdd must not be invoked when args fail to decode")
+			return nil, nil
+		},
+	}
+	table := NewDispatchTable(p)
+	_, err := table["worktree_add"].Handle(context.Background(), json.RawMessage(`{not valid json`))
+	if !errors.Is(err, scriptout.ErrInvalidArgument) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrInvalidArgument)", err)
+	}
+	if errors.Is(err, scriptout.ErrUnavailable) {
+		t.Fatal("a decode failure must not be reported as unavailable")
+	}
+}
+
 func TestNewDispatchTable_AuthStatusAbsentWithoutAuthChecker(t *testing.T) {
 	table := NewDispatchTable(&fakeProvider{})
 	if _, ok := table[scriptout.OpAuthStatus]; ok {

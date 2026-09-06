@@ -35,7 +35,7 @@ func NewDispatchTable(p Provider) scriptout.DispatchTable {
 					BranchOrRef string `json:"branch_or_ref"`
 				}
 				if err := scriptout.Decode(args, &a); err != nil {
-					return nil, scriptout.WrapError(scriptout.ErrUnavailable, "decode worktree_add args: "+err.Error())
+					return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, "decode worktree_add args: "+err.Error())
 				}
 				return p.WorktreeAdd(ctx, a.BranchOrRef)
 			},
@@ -47,7 +47,7 @@ func NewDispatchTable(p Provider) scriptout.DispatchTable {
 					Path string `json:"path"`
 				}
 				if err := scriptout.Decode(args, &a); err != nil {
-					return nil, scriptout.WrapError(scriptout.ErrUnavailable, "decode worktree_remove args: "+err.Error())
+					return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, "decode worktree_remove args: "+err.Error())
 				}
 				// WorktreeRemove has no success payload of its own (its Go
 				// signature returns only error) — a nil result marshals to
@@ -72,7 +72,7 @@ func NewDispatchTable(p Provider) scriptout.DispatchTable {
 					Cwd string `json:"cwd"`
 				}
 				if err := scriptout.Decode(args, &a); err != nil {
-					return nil, scriptout.WrapError(scriptout.ErrUnavailable, "decode branch_detect args: "+err.Error())
+					return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, "decode branch_detect args: "+err.Error())
 				}
 				return p.BranchDetect(ctx, a.Cwd)
 			},
