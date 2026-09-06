@@ -1,0 +1,6 @@
+{
+  "protocolVersion": 1,
+  "schemaVersions": { "pr": 1 },
+  "ops": ["show", "auth_status", "capabilities"],
+  "vocabulary": { "category": ["bug", "feature"] }
+}

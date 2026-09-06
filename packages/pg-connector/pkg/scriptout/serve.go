@@ -33,17 +33,27 @@ type dispatchEnv struct {
 	out io.Writer
 }
 
-func defaultEnv() dispatchEnv {
-	return dispatchEnv{in: os.Stdin, out: os.Stdout}
-}
-
 // ServeLoop reads exactly one JSON request from stdin, dispatches it
 // through table, and writes exactly one JSON response to stdout. It
-// returns the process exit code main() should use — a plain 0/1 at this
-// wire level; classification of what went wrong lives in the JSON error
-// body's Code field only.
+// returns the process exit code main() should use: 0 on success, or on
+// failure the taxonomy-specific code ExitCodeForError computes (2-7),
+// falling back to the generic 1 only for a wire-level failure with no
+// classifiable error at all (e.g. a failure to write the response itself)
+// [bead pg2-7vgn5]. The JSON error body's Code field always carries the
+// same classification — the exit code is an additional, parse-free signal,
+// not a replacement for the JSON body as the primary source of truth.
 func ServeLoop(table DispatchTable) int {
-	return serveLoop(defaultEnv(), table)
+	return ServeOne(table, os.Stdin, os.Stdout)
+}
+
+// ServeOne is ServeLoop's logic against caller-supplied in/out instead of
+// the real process's os.Stdin/os.Stdout — the same one-request/one-response
+// round trip, exported so a caller (e.g. pkg/scriptout/conformance's
+// in-process Backend double) can drive an in-process DispatchTable without
+// redirecting real process stdio. ServeLoop itself is exactly
+// ServeOne(table, os.Stdin, os.Stdout).
+func ServeOne(table DispatchTable, in io.Reader, out io.Writer) int {
+	return serveLoop(dispatchEnv{in: in, out: out}, table)
 }
 
 func serveLoop(env dispatchEnv, table DispatchTable) int {
@@ -111,8 +121,11 @@ func writeJSON(w io.Writer, v any) error {
 }
 
 // writeErrorResponse writes a Response carrying a wire-taxonomy error
-// derived from err, and returns exit code 1 (the plain wire-level failure
-// code; classification lives in the JSON body only).
+// derived from err, and returns the matching backend-process exit code via
+// ExitCodeForError (2-7, one per wire-taxonomy code — see errors.go;
+// bead pg2-7vgn5). The returned exit code and the JSON body's error.code
+// always agree, since both derive from the same codeForError
+// classification.
 func writeErrorResponse(w io.Writer, schemaVersion int, err error) int {
 	_ = writeJSON(w, Response{
 		ProtocolVersion: ProtocolVersion,
@@ -122,5 +135,5 @@ func writeErrorResponse(w io.Writer, schemaVersion int, err error) int {
 			Message: err.Error(),
 		},
 	})
-	return 1
+	return ExitCodeForError(err)
 }

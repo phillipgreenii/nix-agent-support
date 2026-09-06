@@ -23,6 +23,13 @@ import (
 // 1 for invalid_argument, the same as every other non-not_found code — only
 // the wire body's error.code (and the Go sentinel a caller can errors.Is
 // against) gains the extra precision.
+//
+// ExitCodeForError/ExitCodeForCode (bead pg2-7vgn5) are the separate,
+// lower-layer widening: the backend PROCESS's own exit code (serve.go's
+// writeErrorResponse) now also carries this same six-way classification,
+// rather than a plain 1 for every failure. See ExitCodeForError's own doc
+// comment for why this is layered on top of — not a replacement for — the
+// wire body's error.code.
 var (
 	ErrNotFound        = errors.New("scriptout: not found")
 	ErrUnauthenticated = errors.New("scriptout: unauthenticated")
@@ -77,4 +84,60 @@ func sentinelForCode(code string) error {
 		return s
 	}
 	return ErrUnavailable
+}
+
+// exitCodeForCode maps each wire-taxonomy code to the backend process's own
+// exit code (bead pg2-7vgn5). Values start at 2, per this workspace's
+// code-file-standards exit-code convention: exit 1 is the
+// generic/catch-all failure and MUST NOT be given a specific branchable
+// meaning, so every code that DOES carry one here is >=2. The specific
+// assignment (not_found=2 .. invalid_argument=7) follows codeToSentinel's
+// own declared order — there is no severity ranking among the six wire
+// codes to assign by, so the order is simply "the one place the taxonomy
+// is already enumerated," keeping this table and codeToSentinel trivially
+// comparable.
+var exitCodeForCode = map[string]int{
+	"not_found":        2,
+	"unauthenticated":  3,
+	"unavailable":      4,
+	"unknown_op":       5,
+	"version_mismatch": 6,
+	"invalid_argument": 7,
+}
+
+// ExitCodeForError returns the backend-process-level exit code
+// writeErrorResponse (serve.go) uses for err: the code from exitCodeForCode
+// matching err's wire-taxonomy classification, computed through the exact
+// same codeForError walk the JSON error body's Code field uses — so a
+// response's process exit code and its wire error.code can never disagree.
+// codeForError is total (every error, wrapped or not, resolves to one of
+// the six known codes via its own "unavailable" fallback), so this lookup
+// always succeeds.
+//
+// This is what widens scriptout's backend-process exit code past the
+// historical plain 0/1 to satisfy this workspace's code-file-standards
+// exit-code convention (bead pg2-7vgn5): a caller that wants to branch on
+// the failure category without parsing stdout JSON now can. Nothing
+// requires a caller to do so — pkg/scriptout's own exec.go deliberately
+// continues to treat only the JSON body as the contract (see its package
+// doc comment) — this only widens what the exit code ITSELF is capable of
+// expressing.
+//
+// A wire-level failure with no classifiable error at all (serve.go's own
+// response-write failure, where there is no err to classify) does not go
+// through this function and stays at the generic exit 1.
+func ExitCodeForError(err error) int {
+	return ExitCodeForCode(codeForError(err))
+}
+
+// ExitCodeForCode returns the backend-process exit code for a bare wire
+// taxonomy code string (one of codeToSentinel's six keys) — the same
+// mapping ExitCodeForError uses, exported so a caller holding only the
+// JSON error body's Code field (e.g. pkg/scriptout/conformance, checking a
+// live backend's reply with no Go error value to classify) can compute the
+// expected exit code without one. An unrecognized code (should not happen
+// against a well-behaved backend) returns 0 — the zero value, distinguishable
+// from every real assignment (1-7) a well-formed error response can produce.
+func ExitCodeForCode(code string) int {
+	return exitCodeForCode[code]
 }

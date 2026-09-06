@@ -1,0 +1,12 @@
+{
+  "$id": "response-success",
+  "title": "scriptout wire response: success branch (stdout, exit 0)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocolVersion", "result"],
+  "properties": {
+    "protocolVersion": { "type": "integer" },
+    "schemaVersion": { "type": "integer" },
+    "result": {}
+  }
+}

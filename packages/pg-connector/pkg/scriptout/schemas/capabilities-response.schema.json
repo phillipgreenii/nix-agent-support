@@ -1,0 +1,13 @@
+{
+  "$id": "capabilities-response",
+  "title": "scriptout capabilities op's bespoke response shape (stdout, exit 0, no result/error wrapper)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocolVersion", "schemaVersions", "ops"],
+  "properties": {
+    "protocolVersion": { "type": "integer" },
+    "schemaVersions": { "type": "object" },
+    "ops": { "type": "array", "items": { "type": "string" } },
+    "vocabulary": { "type": "object" }
+  }
+}

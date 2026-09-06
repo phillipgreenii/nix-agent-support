@@ -1,0 +1,11 @@
+{
+  "$id": "request",
+  "title": "scriptout wire request (umbrella -> backend, on stdin)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["op"],
+  "properties": {
+    "op": { "type": "string" },
+    "args": {}
+  }
+}

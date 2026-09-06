@@ -168,8 +168,12 @@ func TestServeLoop_AuthStatusIsUnknownOp(t *testing.T) {
 		t.Fatalf("read response: %v", err)
 	}
 
-	if code != 1 {
-		t.Fatalf("exit code = %d, want 1 (wire-level failure; classification lives in the JSON body); stdout=%s", code, raw)
+	// unknown_op now gets its own branchable exit code rather than the old
+	// flat 1 (bead pg2-7vgn5); computed via scriptout.ExitCodeForCode
+	// rather than hardcoded, so this test tracks the mapping table instead
+	// of asserting an unrelated magic number.
+	if want := scriptout.ExitCodeForCode("unknown_op"); code != want {
+		t.Fatalf("exit code = %d, want %d (unknown_op); stdout=%s", code, want, raw)
 	}
 	var resp scriptout.Response
 	if err := json.Unmarshal(raw, &resp); err != nil {

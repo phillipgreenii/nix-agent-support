@@ -13,18 +13,35 @@
 //
 //	stdin:  {"op": "<name>", "args": {...}}
 //	stdout: {"protocolVersion": N, "schemaVersion": M, "result": ...}                    on success (exit 0)
-//	stdout: {"protocolVersion": N, "schemaVersion": M, "error": {"code": "...", "message": "..."}}  on failure (exit 1)
+//	stdout: {"protocolVersion": N, "schemaVersion": M, "error": {"code": "...", "message": "..."}}  on failure (exit 1, or 2-7 -- see below)
 //
 // The capabilities op is the one exception to this shape: its response is
 // the bespoke CapabilitiesResponse object, not the Result/Error envelope
 // above — see CapabilitiesResponse's doc comment.
 //
-// Exit codes at THIS wire level stay a plain 0/1; classification lives in
-// the JSON error body's Code field only, matching scriptout's existing
-// "only stdout JSON is the contract" convention. This is a different, lower
-// layer than pg-connector's own CLI exit codes (built by cmd/pg-connector's
-// outcome-reporting helper), and the two MUST NOT be confused with, or
-// built from, one another.
+// This wire level's own exit code is 0 on success. On failure it is
+// errors.go's ExitCodeForError(err): one of 2 (not_found), 3
+// (unauthenticated), 4 (unavailable), 5 (unknown_op), 6 (version_mismatch),
+// or 7 (invalid_argument) — the same classification the JSON error body's
+// Code field carries — or a plain 1 for the rare wire-level failure that
+// never reached a classifiable error at all (e.g. a failure to write the
+// response itself). Per this workspace's code-file-standards exit-code
+// convention, 1 stays the generic/catch-all code and MUST NOT be given a
+// specific branchable meaning; every code that does carry one here is >=2
+// (bead pg2-7vgn5). This numbering is a different, lower layer than
+// pg-connector's own CLI exit codes (built by cmd/pg-connector's
+// outcome-reporting helper) — the two ranges happen to overlap (2-7 here
+// vs. 0-4 there) but classify entirely different things, and MUST NOT be
+// confused with, or built from, one another.
+//
+// pkg/scriptout/schemas and pkg/scriptout/conformance (bead pg2-7vgn5) are
+// this wire level's schemas/goldens/conformance suite: JSON Schema
+// documents for the shapes on this page, golden fixtures, and a driver
+// (conformance.Run) any backend implementation — a real compiled binary or
+// an in-process DispatchTable double — can be run against to prove it
+// actually speaks this protocol, closing the gap where a backend's own
+// unit tests could otherwise all pass against a fake shape no real
+// backend implements [design: Appendix A "Wire protocol and testing"].
 package scriptout
 
 import "encoding/json"
