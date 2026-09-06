@@ -212,6 +212,69 @@ proceeding on currently loaded text (direct interactive invocation).`)
    marker added to its `notes` by whoever resolves it, so the same parent does
    not need check 2 again on its next claim.
 
+   **Epic drill-down — when the CLAIMED bead genuinely IS type `epic` with
+   open children** (provenance: `tc-b02v`, live instance `tc-soml9`). The
+   atomic claim above already carries `--exclude-type epic`, so this path is
+   reached only when an epic ends up claimed on purpose — the id-targeted safe
+   path in "Optional scope arguments" below, or Startup/resume recovering a
+   bead this actor id already held `in_progress` from an earlier turn. Every
+   epic in this workspace is a container with no deliverable of its own (see
+   "`--exclude-type epic` is load-bearing" above), and **D-9** (`beads-lifecycle`
+   skill) forbids expressing "this epic still has open work" as a
+   `--blocked-by` edge onto its own child or as a `--defer` on the epic — both
+   would hide the whole subtree from `bd ready`, the epic and its descendants
+   alike. So a claimed epic MUST NOT be dispatched for direct implementation,
+   and it MUST NOT simply be released and re-claimed forever either — a
+   container epic that outranks its own children on priority would just win
+   that race again next pass, starving them exactly as this bead reported:
+   1. Reuse the Container guard's children-existence probe, unchanged, to see
+      whether this epic has ever been decomposed at all:
+      `bd list --parent <id> --status all -n 0 --json`. An EMPTY `.data` means
+      this epic was never decomposed — it is the rare, deliberately-reached
+      exception the id-targeted safe path exists for (see
+      "`--exclude-type epic` is load-bearing" above), not a container instance
+      — proceed to UNDERSTAND and work it directly, exactly like any other
+      claimed bead. A NON-EMPTY `.data` means it genuinely is a container with
+      decomposed children: continue to step 2.
+   2. Find the first claimable descendant in ONE atomic call — this reuses
+      `bd ready`'s own priority-sorted, blocker-aware descendant search
+      instead of hand-rolling a walk. `--parent` is TRANSITIVE (verified
+      against `bd` 1.0.4: it returns descendants at every depth, not only
+      direct children), so a NESTED epic-with-no-deliverable is skipped over
+      on its own — `bd ready` recurses past it to whichever of ITS OWN
+      descendants is actually workable, never surfacing the nested epic
+      itself for direct claim (`--exclude-type epic` again):
+
+      ```bash
+      bd ready --parent <id> --exclude-type epic --exclude-label human,refactor-campaign --claim --actor "ID" --json
+      ```
+
+      Apply the SAME label filters this session's own atomic CLAIM query
+      above uses (drain's `--exclude-label human,refactor-campaign`; a sibling
+      command sourcing work the same way, e.g. `/unblock-human-beads`,
+      substitutes its own mirrored filters here instead — see the bead's
+      DESIRED BEHAVIOR for the mapping).
+
+   3. NON-EMPTY result → a descendant is now claimed under ID. Release the
+      epic in the SAME call shape the Container guard uses
+      (`bd update <id> --status open --assignee "" --actor "ID"`, B-2/B-3 —
+      status and assignee together, no label change), then continue the Main
+      loop on the NEWLY claimed descendant from UNDERSTAND (step 2) below —
+      do NOT re-run the top-level atomic claim, which would just pull
+      whatever else is next in queue and abandon this one.
+   4. EMPTY result → every descendant under this epic is
+      blocked/deferred/`in_progress`/closed: there is nothing claimable here
+      right now. Release the epic plainly — the SAME
+      `bd update <id> --status open --assignee "" --actor "ID"` call — and
+      move to the next ready item. Do NOT loop on the same epic again within
+      this pass; a re-claim of the SAME epic id belongs to a later pass, once
+      something under it has changed.
+
+   This is a PROCEDURAL fix to the CLAIM step only, never a graph edge:
+   nothing here wires the epic `--blocked-by` its own child or defers it
+   (D-9), and the epic's own status/assignee never leaves open/unassigned for
+   longer than this one drill-down attempt.
+
 2. **UNDERSTAND** (orchestrator reads the BEAD ONLY): `bd show <id>` to learn the
    target repo(s), whether the work spans repos, and whether any acceptance
    criterion can only be confirmed once the change is LIVE. You MUST NOT Read any
@@ -641,6 +704,17 @@ arguments, behavior is otherwise unchanged.
   command never has.
 - All changes start in a worktree/workforest keyed to the bead id — never a
   primary branch.
+- A claimed bead that genuinely IS type `epic` with decomposed children — reachable
+  only via the id-targeted safe path or a resumed `in_progress` claim, since the
+  atomic CLAIM query already carries `--exclude-type epic` — is never dispatched for
+  direct implementation and never just released-and-reclaimed forever. CLAIM's "Epic
+  drill-down" step finds and claims its first ready non-`epic` descendant (via
+  `bd ready --parent`, which is transitive and skips past any nested container
+  epic on its own), releases the epic in the same call shape the Container guard
+  uses (B-2/B-3), and continues the loop on that descendant; no claimable
+  descendant releases the epic plainly and moves on. This is a PROCEDURAL
+  claim-step fix only — **D-9** still forbids wiring the epic `--blocked-by` its
+  own child or deferring it while children remain open.
 - Land-then-teardown is ORDERED for a workforest set: every member repo MUST land
   before the set is retired, and the bead MUST NOT be closed while any member is
   un-landed. `pn-workspace-rules:cleanup-workforest` keeps un-landed members by
