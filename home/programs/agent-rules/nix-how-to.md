@@ -42,3 +42,8 @@ prohibition above) already ran on the staged files — paying for the whole hook
 change, on top of whatever CI already re-checks on push. Running it once per branch, right
 before landing, still satisfies the core rule's `nix flake check` MUST-pass obligation without
 multiplying that cost by however many changes land on the branch.
+
+**Do not assume a land-time mechanism exists without checking.** `ff-merge-to-main`'s FF-2a step
+only runs `nix flake check` for `nix-agent-support`/`phillipg-nix-ziprecruiter` (the two repos
+with no external CI) — it skips every other repo it lands. In a repo with neither external CI
+nor that scoping, there is no land-time gate at all unless you run one yourself before landing.
