@@ -31,6 +31,13 @@ it by searching disk is both slower and redundant.
   packet body, a report) instead of computing byte lengths and slicing text yourself by hand —
   every chunking step in this skill and its bindings means "run this script," not ad hoc
   `wc -c`/`sed`.
+- `scripts/audit-docket-label-leak.sh` — read-only; run it once after each batch of
+  `create-packet` calls, before `release-set`. It calls
+  `bd list --label docket --status all -n 0 --json` and flags every returned bead whose
+  `issue_type` is not `epic` — a packet that inherited the docket epic's `docket` label because
+  its `create-packet` call omitted `--no-inherit-labels` (this has happened more than once;
+  `bd label remove <id> docket` fixes a flagged bead). Exit 3 means it found leaks; exit 0 means
+  clean.
 
 ## Charter
 

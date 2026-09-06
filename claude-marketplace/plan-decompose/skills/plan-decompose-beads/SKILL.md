@@ -85,6 +85,16 @@ deferred issues are absent from `bd ready` and `bd undefer` restores `open`). Do
 `--defer <date>` — that is a TIMER that expires whether or not curation finished. The
 create-then-defer window is one command wide; acceptable, noted.
 
+**This flag has been omitted in practice more than once** (`pg2-oc52e`: fixed by hand on
+`pg2-2j5ac`'s children, then independently recurred on `pg2-84o3m.31`), so do not rely on
+having read this paragraph carefully enough — after any batch of `create-packet` calls (or
+periodically, e.g. during a grooming pass), run
+`claude-marketplace/plan-decompose/scripts/audit-docket-label-leak.sh` (read-only; calls
+`bd list --label docket --status all -n 0 --json` and flags every returned bead whose
+`issue_type` is not `epic` — a docket epic or phase bead is always `epic`-typed, so anything
+else carrying `docket` inherited the label from an omitted `--no-inherit-labels`). Fix a flagged
+bead with `bd label remove <id> docket` (never re-run `create-packet` for it).
+
 **Label convention** (epic-decompose/phase-decompose): the same `--parent`-label-inheritance
 hazard this note already flags applies to phase and trigger beads too — phase beads carry both
 `docket` and `phase` labels; trigger beads carry `phase-trigger`. Which label(s) land on a bead

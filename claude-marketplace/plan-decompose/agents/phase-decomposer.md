@@ -48,6 +48,14 @@ the rest of the run; never `find` or `glob` the filesystem for a script by name.
   and prints the chunk paths, one per line. You will not usually need this directly (it is
   `phase-plan-verifier`'s own tool for its direct-edit outcome), but reach for it rather than
   hand-slicing text yourself if you ever need to write an oversized field.
+- `scripts/audit-docket-label-leak.sh` — read-only; once your handoff continues into
+  `plan-decompose`'s own `decompose` steps and you start calling `create-packet`, run this once
+  after each batch, before `release-set`. It calls
+  `bd list --label docket --status all -n 0 --json` and flags every returned bead whose
+  `issue_type` is not `epic` — a packet that inherited the docket epic's `docket` label because
+  its `create-packet` call omitted `--no-inherit-labels` (this has happened more than once;
+  `bd label remove <id> docket` fixes a flagged bead). Exit 3 means it found leaks; exit 0 means
+  clean.
 
 ## Fixed sub-dispatch templates
 
