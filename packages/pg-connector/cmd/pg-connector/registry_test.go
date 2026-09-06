@@ -142,6 +142,140 @@ func TestRegistry_MissingEntityType_ReturnsEmpty(t *testing.T) {
 	}
 }
 
+func TestParseRegistry_RejectsUnknownKeyUnderConnector(t *testing.T) {
+	// A typo'd entity-type key (e.g. "prs" for "pr") under connector: must
+	// be rejected outright rather than silently ignored — left silent, it
+	// decodes to zero backends for that type and AllBackends/config
+	// validate report exit 3 ("all backends down"), indistinguishable
+	// from a genuinely all-down host [bug A16].
+	_, err := parseRegistry([]byte(`
+connector:
+  prs:
+    - pg-connector-pr-github
+`), "test.yaml")
+	if err == nil {
+		t.Fatal("expected an error for an unrecognized key under connector:")
+	}
+	if !strings.Contains(err.Error(), "prs") {
+		t.Fatalf("error = %v, want it to name the unrecognized key", err)
+	}
+}
+
+func TestParseRegistry_KnownKeysUnderConnectorAreAccepted(t *testing.T) {
+	// Every entityTypes key, together, must still parse cleanly — the new
+	// unknown-key check must not become over-strict and reject the
+	// legitimate keys it exists to allow.
+	_, err := parseRegistry([]byte(`
+connector:
+  pr:
+    - a
+  issue:
+    - b
+  ci:
+    - c
+  scm: d
+`), "test.yaml")
+	if err != nil {
+		t.Fatalf("parseRegistry: %v", err)
+	}
+}
+
+func TestRegistry_List_RejectsEmptyList(t *testing.T) {
+	reg, err := parseRegistry([]byte(`
+connector:
+  pr: []
+`), "test.yaml")
+	if err != nil {
+		t.Fatalf("parseRegistry: %v", err)
+	}
+	if _, err := reg.List("pr"); err == nil {
+		t.Fatal("expected an error for an explicit empty list")
+	}
+}
+
+func TestRegistry_List_RejectsDuplicateBackendName(t *testing.T) {
+	reg, err := parseRegistry([]byte(`
+connector:
+  pr:
+    - pg-connector-pr-github
+    - pg-connector-pr-github
+`), "test.yaml")
+	if err != nil {
+		t.Fatalf("parseRegistry: %v", err)
+	}
+	if _, err := reg.List("pr"); err == nil {
+		t.Fatal("expected an error for a duplicate backend name in one list")
+	}
+}
+
+func TestRegistry_List_RejectsPathSeparatorInName(t *testing.T) {
+	reg, err := parseRegistry([]byte(`
+connector:
+  pr:
+    - ../evil
+`), "test.yaml")
+	if err != nil {
+		t.Fatalf("parseRegistry: %v", err)
+	}
+	if _, err := reg.List("pr"); err == nil {
+		t.Fatal("expected an error for a backend name containing a path separator")
+	}
+}
+
+func TestRegistry_Single_RejectsPathSeparatorInName(t *testing.T) {
+	reg, err := parseRegistry([]byte(`
+connector:
+  scm: sub/dir-backend
+`), "test.yaml")
+	if err != nil {
+		t.Fatalf("parseRegistry: %v", err)
+	}
+	if _, err := reg.Single("scm"); err == nil {
+		t.Fatal("expected an error for a backend name containing a path separator")
+	}
+}
+
+func TestRegistry_Single_RejectsEmptyScalar(t *testing.T) {
+	reg, err := parseRegistry([]byte(`
+connector:
+  scm: ""
+`), "test.yaml")
+	if err != nil {
+		t.Fatalf("parseRegistry: %v", err)
+	}
+	if _, err := reg.Single("scm"); err == nil {
+		t.Fatal("expected an error for an explicit empty scalar")
+	}
+}
+
+func TestRegistry_AllBackends_DedupesBackendRegisteredUnderMultipleTypes(t *testing.T) {
+	// A single binary implementing more than one capability — mandatory
+	// per design §4.4's multi-capability backends — is registered under
+	// each type it supports. AllBackends must report it once, not once
+	// per type it's registered under [bug A27].
+	reg, err := parseRegistry([]byte(`
+connector:
+  pr:
+    - shared-backend
+  issue:
+    - shared-backend
+    - only-issue-backend
+`), "test.yaml")
+	if err != nil {
+		t.Fatalf("parseRegistry: %v", err)
+	}
+	all, err := reg.AllBackends()
+	if err != nil {
+		t.Fatalf("AllBackends: %v", err)
+	}
+	if len(all) != 2 {
+		t.Fatalf("all = %+v, want exactly [shared-backend, only-issue-backend]", all)
+	}
+	if all[0] != "shared-backend" || all[1] != "only-issue-backend" {
+		t.Fatalf("all = %+v, want shared-backend first (pr, its first registered type) then only-issue-backend", all)
+	}
+}
+
 func TestRegistry_AllBackends_MixesListAndScalar(t *testing.T) {
 	reg, err := parseRegistry([]byte(`
 connector:

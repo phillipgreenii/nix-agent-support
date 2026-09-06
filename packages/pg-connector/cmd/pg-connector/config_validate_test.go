@@ -41,6 +41,54 @@ func TestFanOutConfigValidate_DegradedOnAuthFailure(t *testing.T) {
 	}
 }
 
+func TestFanOutConfigValidate_CountReflectsChecksPassed(t *testing.T) {
+	// Count must be the number of this source's two checks (auth_status,
+	// capabilities) that actually came back healthy — not the hardcoded 0
+	// that made a fully-degraded backend indistinguishable from one that
+	// failed only one of its two checks [bug A16].
+	t.Run("both checks healthy -> 2", func(t *testing.T) {
+		writeOpAwareFakeBackend(t, "backend-both-ok", map[string]string{
+			"auth_status":  `{"protocolVersion":1,"schemaVersion":1,"result":{"state":"OK"}}`,
+			"capabilities": fmt.Sprintf(`{"protocolVersion":1,"schemaVersions":{"pr":%d},"ops":["get_pr","auth_status","capabilities"]}`, schema.SchemaVersion),
+		}, `{"protocolVersion":1,"error":{"code":"unknown_op","message":"unknown op"}}`)
+		outcome := FanOutConfigValidate(context.Background(), []string{"backend-both-ok"})
+		got := outcome.Sources[0]
+		if got.Status != SourceSucceeded {
+			t.Fatalf("source = %+v, want succeeded", got)
+		}
+		if got.Count != 2 {
+			t.Fatalf("count = %d, want 2 (both checks healthy)", got.Count)
+		}
+	})
+
+	t.Run("auth fails, capabilities healthy -> 1", func(t *testing.T) {
+		writeOpAwareFakeBackend(t, "backend-auth-only-fails", map[string]string{
+			"auth_status":  `{"protocolVersion":1,"error":{"code":"unauthenticated","message":"bad token"}}`,
+			"capabilities": fmt.Sprintf(`{"protocolVersion":1,"schemaVersions":{"pr":%d},"ops":["get_pr","auth_status","capabilities"]}`, schema.SchemaVersion),
+		}, `{"protocolVersion":1,"error":{"code":"unknown_op","message":"unknown op"}}`)
+		outcome := FanOutConfigValidate(context.Background(), []string{"backend-auth-only-fails"})
+		got := outcome.Sources[0]
+		if got.Status != SourceDegraded {
+			t.Fatalf("source = %+v, want degraded", got)
+		}
+		if got.Count != 1 {
+			t.Fatalf("count = %d, want 1 (capabilities healthy, auth_status failed)", got.Count)
+		}
+	})
+
+	t.Run("both checks fail -> 0", func(t *testing.T) {
+		writeFakeBackend(t, "backend-both-fail", `{"protocolVersion":1,"error":{"code":"unauthenticated","message":"bad token"}}`)
+		outcome := FanOutConfigValidate(context.Background(), []string{"backend-both-fail"})
+		got := outcome.Sources[0]
+		if got.Status != SourceDegraded {
+			t.Fatalf("source = %+v, want degraded", got)
+		}
+		if got.Count != 0 {
+			t.Fatalf("count = %d, want 0 (both checks failed)", got.Count)
+		}
+	})
+}
+
 func TestFanOutConfigValidate_NoBackends_SourcesIsEmptyArrayNotNull(t *testing.T) {
 	// A misconfigured host with zero backends registered must still
 	// marshal sources as [] — a nil slice marshals as null, which makes

@@ -16,6 +16,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -105,11 +106,63 @@ func loadRegistryFile(path string) (*Registry, error) {
 func parseRegistry(data []byte, path string) (*Registry, error) {
 	var doc registryDoc
 	dec := yaml.NewDecoder(strings.NewReader(string(data)))
+	// KnownFields stays false at THIS (top) level deliberately — see the
+	// file header comment: pg-connector and pg-pr can share one
+	// config.yaml, and everything outside the connector: key belongs to
+	// pg-pr, not to us. It would be wrong to reject pg-pr's own keys here.
 	dec.KnownFields(false)
 	if err := dec.Decode(&doc); err != nil {
 		return nil, fmt.Errorf("registry: parse %s: %w", path, err)
 	}
+	// Unlike the top level, keys UNDER connector: belong entirely to us —
+	// there is no sibling tool whose keys could legitimately land there —
+	// so an unrecognized one (a typo'd entity type, e.g. "prs" for "pr")
+	// is rejected rather than silently ignored [bug A16]. Without this, a
+	// typo'd key decodes to zero backends for that type and
+	// AllBackends/config validate report exit 3 ("all backends down"),
+	// indistinguishable from a genuinely all-down host.
+	if err := validateConnectorKeys(doc.Connector); err != nil {
+		return nil, fmt.Errorf("registry: parse %s: %w", path, err)
+	}
 	return &Registry{raw: doc.Connector}, nil
+}
+
+// validateConnectorKeys rejects any key under connector: that is not one
+// of entityTypes.
+func validateConnectorKeys(connector map[string]yaml.Node) error {
+	known := make(map[string]bool, len(entityTypes))
+	for _, t := range entityTypes {
+		known[t] = true
+	}
+	var unknown []string
+	for k := range connector {
+		if !known[k] {
+			unknown = append(unknown, k)
+		}
+	}
+	if len(unknown) == 0 {
+		return nil
+	}
+	sort.Strings(unknown)
+	return fmt.Errorf("connector.%s: unknown key(s) under connector: — must be one of %s",
+		strings.Join(unknown, ", "), strings.Join(entityTypes, ", "))
+}
+
+// validateBackendName rejects a registered backend name that cannot be a
+// bare binary name: empty, or containing a path separator. Every registry
+// value is resolved as a bare binary name via PATH lookup (see this file's
+// header comment) — an empty name is a config mistake, and a name
+// containing a separator ("/" on every OS this repo targets, plus the
+// platform's own filepath.Separator) is either that same mistake or an
+// attempt to smuggle a path into what must stay a name.
+func validateBackendName(entityType, name string) error {
+	if name == "" {
+		return fmt.Errorf("registry: connector.%s: backend name must not be empty", entityType)
+	}
+	if strings.ContainsRune(name, '/') || strings.ContainsRune(name, filepath.Separator) {
+		return fmt.Errorf("registry: connector.%s: backend name %q must be a bare binary name, not a path", entityType, name)
+	}
+	return nil
 }
 
 func nodeKindName(k yaml.Kind) string {
@@ -143,6 +196,19 @@ func (r *Registry) List(entityType string) ([]string, error) {
 	if err := node.Decode(&out); err != nil {
 		return nil, fmt.Errorf("registry: connector.%s: %w", entityType, err)
 	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("registry: connector.%s is an empty list; omit the key entirely if no backend should be registered for %s", entityType, entityType)
+	}
+	seen := make(map[string]bool, len(out))
+	for _, name := range out {
+		if err := validateBackendName(entityType, name); err != nil {
+			return nil, err
+		}
+		if seen[name] {
+			return nil, fmt.Errorf("registry: connector.%s: duplicate backend name %q", entityType, name)
+		}
+		seen[name] = true
+	}
 	return out, nil
 }
 
@@ -164,6 +230,9 @@ func (r *Registry) Single(entityType string) (string, error) {
 	if err := node.Decode(&out); err != nil {
 		return "", fmt.Errorf("registry: connector.%s: %w", entityType, err)
 	}
+	if err := validateBackendName(entityType, out); err != nil {
+		return "", err
+	}
 	return out, nil
 }
 
@@ -175,30 +244,44 @@ var entityTypes = []string{"pr", "issue", "ci", "scm"}
 
 // AllBackends returns every backend binary name registered under any
 // connector.<type> entry, across both list-valued and single-valued types.
+// A binary registered under more than one type — a multi-capability
+// backend, mandatory per design §4.4 — is deduplicated to exactly one
+// entry, in first-occurrence order (entityTypes' fixed pr/issue/ci/scm
+// order), rather than producing one sources[] row per type it appears
+// under [bug A27].
 func (r *Registry) AllBackends() ([]string, error) {
 	var out []string
+	seen := make(map[string]bool)
 	for _, t := range entityTypes {
 		node, ok := r.raw[t]
 		if !ok {
 			continue
 		}
+		var names []string
 		switch node.Kind {
 		case yaml.SequenceNode:
 			list, err := r.List(t)
 			if err != nil {
 				return nil, err
 			}
-			out = append(out, list...)
+			names = list
 		case yaml.ScalarNode:
 			single, err := r.Single(t)
 			if err != nil {
 				return nil, err
 			}
 			if single != "" {
-				out = append(out, single)
+				names = []string{single}
 			}
 		default:
 			return nil, fmt.Errorf("registry: connector.%s must be a list or a single backend binary name, got %s", t, nodeKindName(node.Kind))
+		}
+		for _, name := range names {
+			if seen[name] {
+				continue
+			}
+			seen[name] = true
+			out = append(out, name)
 		}
 	}
 	return out, nil

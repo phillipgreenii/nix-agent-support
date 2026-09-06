@@ -60,10 +60,23 @@ func configValidateOne(ctx context.Context, backend string) SourceResult {
 		}
 	}
 
-	if authOK && capsOK {
-		return SourceResult{Source: backend, Status: SourceSucceeded, Count: 0}
+	// Count is the number of this source's two checks (auth_status,
+	// capabilities) that actually came back healthy — its own raw
+	// pre-merge count (outcome.go's SourceResult doc comment), rather than
+	// the hardcoded 0 that made a fully-degraded backend indistinguishable
+	// from one that failed only one of the two checks [bug A16].
+	count := 0
+	if authOK {
+		count++
 	}
-	return SourceResult{Source: backend, Status: SourceDegraded, Count: 0, Reason: strings.Join(reasons, "; ")}
+	if capsOK {
+		count++
+	}
+
+	if authOK && capsOK {
+		return SourceResult{Source: backend, Status: SourceSucceeded, Count: count}
+	}
+	return SourceResult{Source: backend, Status: SourceDegraded, Count: count, Reason: strings.Join(reasons, "; ")}
 }
 
 // checkSchemaVersions compares resp's self-declared per-capability schema
