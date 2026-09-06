@@ -3,6 +3,7 @@ package github
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -32,6 +33,20 @@ func ghStubOnPath(t *testing.T) string {
 	// leaving other tools (git) reachable.
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	return marker
+}
+
+// ghStubExitingWithStderr puts an executable named `gh` on PATH that writes
+// stderrMsg to its standard error and exits with exitCode, so a real gh
+// invocation surfaces exactly the message a test hands it — no other error
+// text is manufactured.
+func ghStubExitingWithStderr(t *testing.T, exitCode int, stderrMsg string) {
+	t.Helper()
+	dir := t.TempDir()
+	script := "#!/bin/sh\ncat <<'GHSTUBEOF' >&2\n" + stderrMsg + "\nGHSTUBEOF\nexit " + fmt.Sprint(exitCode) + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "gh"), []byte(script), 0o700); err != nil {
+		t.Fatalf("write gh stub: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
 // assertGHNotExecuted fails when the ghStubOnPath marker exists.
@@ -108,6 +123,57 @@ func TestCLICommand_ExcludesLeakedGitDirFamily(t *testing.T) {
 	}
 
 	assertNoLeakedGitDirFamily(t, cmd.Env)
+}
+
+// enterpriseAndTargetVars is bead pg2-y23d4 #21's acceptance criteria
+// (ported from pg-connector-pr-github): none of these may reach a gh child
+// either, alongside leakedGitDirFamily above. Under an enterprise GH_HOST,
+// gh prefers GH_ENTERPRISE_TOKEN/GITHUB_ENTERPRISE_TOKEN over the resolved
+// GH_TOKEN this gateway injects, so an ambient enterprise credential would
+// otherwise silently win; GH_REPO would override an explicit --repo a
+// caller passes.
+var enterpriseAndTargetVars = []string{
+	"GH_ENTERPRISE_TOKEN=ent-secret",
+	"GITHUB_ENTERPRISE_TOKEN=ent-other",
+	"GH_HOST=github.example.com",
+	"GH_REPO=leaked/repo",
+	"GH_CONFIG_DIR=/leaked/gh-config",
+}
+
+// assertNoEnterpriseOrTargetVars fails for every key in
+// enterpriseAndTargetVars that is present in env.
+func assertNoEnterpriseOrTargetVars(t *testing.T, env []string) {
+	t.Helper()
+	present := envKeySet(env)
+	for _, kv := range enterpriseAndTargetVars {
+		k, _, _ := strings.Cut(kv, "=")
+		if present[k] {
+			t.Errorf("cmd.Env carries leaked %q into the gh child", k)
+		}
+	}
+}
+
+// TestCLICommand_ExcludesEnterpriseAndTargetVars is the CLI.Command half of
+// bead pg2-y23d4 #21's regression (ported from pg-connector-pr-github):
+// this is the choke point every real `gh <args>` invocation in this module
+// goes through (the token resolver's own exec is covered separately by
+// TestGHAuthTokenCommand_ExcludesEnterpriseAndTargetVars in token_test.go),
+// and under an enterprise GH_HOST an ambient GH_ENTERPRISE_TOKEN/
+// GITHUB_ENTERPRISE_TOKEN would otherwise outrank the resolved token this
+// gateway just injected.
+func TestCLICommand_ExcludesEnterpriseAndTargetVars(t *testing.T) {
+	for _, kv := range enterpriseAndTargetVars {
+		k, v, _ := strings.Cut(kv, "=")
+		t.Setenv(k, v)
+	}
+
+	cli := NewCLIWithTokenSource(&fakeTokenSource{tok: "resolved-tok"})
+	cmd, err := cli.Command(context.Background(), "pr", "view", "1")
+	if err != nil {
+		t.Fatalf("Command: %v", err)
+	}
+
+	assertNoEnterpriseOrTargetVars(t, cmd.Env)
 }
 
 // countTokenEntries returns how many GH_TOKEN / GITHUB_TOKEN entries env holds
