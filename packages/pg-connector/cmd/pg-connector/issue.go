@@ -48,7 +48,7 @@ func newIssueShowCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			reg, err := LoadRegistry()
 			if err != nil {
-				return err
+				return reportIssueTargetedOutcome(cmd, nil, err, humanizeIssueShow)
 			}
 			resp, dispatchErr := Dispatch(cmd.Context(), reg, "issue", "show", map[string]string{"id": args[0]})
 			return reportIssueTargetedOutcome(cmd, resp, dispatchErr, humanizeIssueShow)
@@ -66,7 +66,7 @@ func newIssueCreateCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			reg, err := LoadRegistry()
 			if err != nil {
-				return err
+				return reportIssueTargetedOutcome(cmd, nil, err, humanizeIssueCreate)
 			}
 			resp, dispatchErr := Dispatch(cmd.Context(), reg, "issue", "create", map[string]any{
 				"title":      title,
@@ -92,17 +92,18 @@ func newIssueCommentCmd() *cobra.Command {
 		Short: "Add a comment to an issue",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			humanize := func(json.RawMessage) (string, error) {
+				return fmt.Sprintf("Comment added to issue %s", args[0]), nil
+			}
 			reg, err := LoadRegistry()
 			if err != nil {
-				return err
+				return reportIssueTargetedOutcome(cmd, nil, err, humanize)
 			}
 			resp, dispatchErr := Dispatch(cmd.Context(), reg, "issue", "comment", map[string]string{
 				"id":   args[0],
 				"body": body,
 			})
-			return reportIssueTargetedOutcome(cmd, resp, dispatchErr, func(json.RawMessage) (string, error) {
-				return fmt.Sprintf("Comment added to issue %s", args[0]), nil
-			})
+			return reportIssueTargetedOutcome(cmd, resp, dispatchErr, humanize)
 		},
 	}
 	cmd.Flags().StringVar(&body, "body", "", "comment body (required)")
@@ -117,17 +118,18 @@ func newIssueTransitionCmd() *cobra.Command {
 		Short: "Transition an issue to a backend-declared target state",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			humanize := func(json.RawMessage) (string, error) {
+				return fmt.Sprintf("Issue %s transitioned to %s", args[0], state), nil
+			}
 			reg, err := LoadRegistry()
 			if err != nil {
-				return err
+				return reportIssueTargetedOutcome(cmd, nil, err, humanize)
 			}
 			resp, dispatchErr := Dispatch(cmd.Context(), reg, "issue", "transition", map[string]string{
 				"id":           args[0],
 				"target_state": state,
 			})
-			return reportIssueTargetedOutcome(cmd, resp, dispatchErr, func(json.RawMessage) (string, error) {
-				return fmt.Sprintf("Issue %s transitioned to %s", args[0], state), nil
-			})
+			return reportIssueTargetedOutcome(cmd, resp, dispatchErr, humanize)
 		},
 	}
 	cmd.Flags().StringVar(&state, "state", "", "target state (required); a backend's own capabilities response declares its accepted vocabulary")
@@ -143,11 +145,13 @@ func newIssueTransitionCmd() *cobra.Command {
 // [bead pg2-ox1k6] — see output.go's writeTargetedResult, which this
 // delegates to. It translates err into pg-connector's own targeted-op
 // exit code via outcome.go's TargetedExitCode, never deciding the exit
-// code itself [design: §4.5]. A nil resp is a CLI-level failure before any
-// well-formed wire response was produced (e.g. no backend registered,
-// or an ambiguous multi-backend registration) — that case is returned as a
-// plain error instead, so main's run() reports it on stderr rather than
-// fabricating a JSON body.
+// code itself [design: §4.5]. A nil resp is a Tier-1 CLI-level failure
+// before any well-formed wire response was produced (e.g. no backend
+// registered, or an ambiguous multi-backend registration) — rather than
+// returning a plain error, writeTargetedResult now builds a synthetic
+// error envelope for it via scriptout.ErrorResponse and reports it
+// through stdout exactly like a backend-reported failure
+// [bug pg2-njx27].
 func reportIssueTargetedOutcome(cmd *cobra.Command, resp *scriptout.Response, err error, humanize humanizeResult) error {
 	return writeTargetedResult(cmd, resp, err, humanize)
 }

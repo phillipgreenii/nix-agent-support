@@ -250,8 +250,77 @@ func TestRun_PrShow_NoBackendRegistered_IsGenericFailure(t *testing.T) {
 	}
 	t.Setenv("PG_PR_CONFIG", cfg)
 
-	_, code := executePr(t, []string{"pr", "show", "pr-1"})
+	stdout, code := executePr(t, []string{"pr", "show", "pr-1"})
 	if code != 1 {
 		t.Fatalf("exit code = %d, want 1", code)
+	}
+	// Regression for bug pg2-njx27: this Tier-1 "no backend registered"
+	// failure (the umbrella's own Dispatch, before ever reaching a
+	// backend) must still produce a JSON error envelope on stdout — the
+	// same shape a backend-reported failure already uses — not an empty
+	// stdout with the message only as stderr prose.
+	var resp scriptout.Response
+	if err := json.Unmarshal([]byte(stdout), &resp); err != nil {
+		t.Fatalf("stdout is not a JSON envelope: %v; stdout=%q", err, stdout)
+	}
+	if resp.Error == nil || !strings.Contains(resp.Error.Message, "no backend registered") {
+		t.Fatalf("resp.Error = %+v, want a message naming the no-backend-registered failure", resp.Error)
+	}
+}
+
+func TestRun_PrShow_ConfigFileDoesNotExist_EmitsJSONEnvelope(t *testing.T) {
+	// Regression for bug pg2-njx27's "missing config" case: $PG_PR_CONFIG
+	// pointing at a file that doesn't exist fails inside LoadRegistry,
+	// before Dispatch is ever reached — a different code path from
+	// TestRun_PrShow_NoBackendRegistered_IsGenericFailure above (which
+	// exercises Dispatch's own "no backend registered" branch against a
+	// config file that DOES exist but registers nothing). Both must emit
+	// the same JSON-envelope-on-stdout shape.
+	t.Setenv("PG_PR_CONFIG", t.TempDir()+"/does-not-exist.yaml")
+
+	stdout, code := executePr(t, []string{"pr", "show", "pr-1"})
+	if code != 1 {
+		t.Fatalf("exit code = %d, want 1; stdout=%s", code, stdout)
+	}
+	var resp scriptout.Response
+	if err := json.Unmarshal([]byte(stdout), &resp); err != nil {
+		t.Fatalf("stdout is not a JSON envelope: %v; stdout=%q", err, stdout)
+	}
+	if resp.Error == nil || !strings.Contains(resp.Error.Message, "does not exist") {
+		t.Fatalf("resp.Error = %+v, want a message naming the missing config file", resp.Error)
+	}
+}
+
+func TestRun_PrShow_NonExecutableBackendBinary_EmitsJSONEnvelope(t *testing.T) {
+	// Regression for bug pg2-njx27's "non-executable backend binary"
+	// case: the registered backend is an absolute path (scriptout's exec
+	// helper accepts a bare $PATH name or an absolute path) to a file that
+	// exists but lacks the executable bit, so exec fails with a
+	// permission error before the backend process ever runs — a Tier-1
+	// failure the umbrella detects around dispatch, not a backend-
+	// reported error envelope.
+	dir := t.TempDir()
+	backend := dir + "/backend-not-executable"
+	if err := os.WriteFile(backend, []byte("#!/bin/sh\necho unreachable\n"), 0o644); err != nil {
+		t.Fatalf("write non-executable backend: %v", err)
+	}
+
+	cfgDir := t.TempDir()
+	cfg := cfgDir + "/config.yaml"
+	if err := os.WriteFile(cfg, []byte("connector:\n  pr:\n    - "+backend+"\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	t.Setenv("PG_PR_CONFIG", cfg)
+
+	stdout, code := executePr(t, []string{"pr", "show", "pr-1"})
+	if code != 1 {
+		t.Fatalf("exit code = %d, want 1; stdout=%s", code, stdout)
+	}
+	var resp scriptout.Response
+	if err := json.Unmarshal([]byte(stdout), &resp); err != nil {
+		t.Fatalf("stdout is not a JSON envelope: %v; stdout=%q", err, stdout)
+	}
+	if resp.Error == nil || resp.Error.Message == "" {
+		t.Fatalf("resp.Error = %+v, want a populated error for a non-executable backend binary", resp.Error)
 	}
 }

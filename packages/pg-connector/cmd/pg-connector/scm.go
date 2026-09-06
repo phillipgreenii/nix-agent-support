@@ -59,7 +59,7 @@ func newScmWorktreeAddCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			reg, err := LoadRegistry()
 			if err != nil {
-				return err
+				return reportScmTargetedOutcome(cmd, nil, err, humanizeWorktreeInfo)
 			}
 			resp, dispatchErr := dispatchScm(cmd.Context(), reg, "worktree_add", map[string]string{"branch_or_ref": args[0]})
 			return reportScmTargetedOutcome(cmd, resp, dispatchErr, humanizeWorktreeInfo)
@@ -73,14 +73,15 @@ func newScmWorktreeRemoveCmd() *cobra.Command {
 		Short: "Remove a local git worktree by path",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			humanize := func(json.RawMessage) (string, error) {
+				return fmt.Sprintf("Worktree removed: %s", args[0]), nil
+			}
 			reg, err := LoadRegistry()
 			if err != nil {
-				return err
+				return reportScmTargetedOutcome(cmd, nil, err, humanize)
 			}
 			resp, dispatchErr := dispatchScm(cmd.Context(), reg, "worktree_remove", map[string]string{"path": args[0]})
-			return reportScmTargetedOutcome(cmd, resp, dispatchErr, func(json.RawMessage) (string, error) {
-				return fmt.Sprintf("Worktree removed: %s", args[0]), nil
-			})
+			return reportScmTargetedOutcome(cmd, resp, dispatchErr, humanize)
 		},
 	}
 }
@@ -93,7 +94,7 @@ func newScmWorktreeListCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			reg, err := LoadRegistry()
 			if err != nil {
-				return err
+				return reportScmTargetedOutcome(cmd, nil, err, humanizeWorktreeList)
 			}
 			// worktree_list is a TARGETED op, not a fan-out: connector.scm
 			// is single-valued (unlike issue/ci/pr's list-type ops), so it
@@ -132,7 +133,7 @@ func newScmBranchDetectCmd() *cobra.Command {
 			}
 			reg, err := LoadRegistry()
 			if err != nil {
-				return err
+				return reportScmTargetedOutcome(cmd, nil, err, humanizeBranchInfo)
 			}
 			resp, dispatchErr := dispatchScm(cmd.Context(), reg, "branch_detect", map[string]string{"cwd": cwd})
 			return reportScmTargetedOutcome(cmd, resp, dispatchErr, humanizeBranchInfo)
@@ -167,11 +168,13 @@ func dispatchScm(ctx context.Context, reg *Registry, op string, args any) (*scri
 // [bead pg2-ox1k6] — see output.go's writeTargetedResult, which this
 // delegates to. It translates err into pg-connector's own targeted-op
 // exit code via outcome.go's TargetedExitCode, never deciding the exit
-// code itself [design: §4.5]. A nil resp is a CLI-level failure before any
-// well-formed wire response was produced (e.g. no backend registered,
-// or an ambiguous multi-backend registration) — that case is returned as a
-// plain error instead, so main's run() reports it on stderr rather than
-// fabricating a JSON body.
+// code itself [design: §4.5]. A nil resp is a Tier-1 CLI-level failure
+// before any well-formed wire response was produced (e.g. no backend
+// registered, or an ambiguous multi-backend registration) — rather than
+// returning a plain error, writeTargetedResult now builds a synthetic
+// error envelope for it via scriptout.ErrorResponse and reports it
+// through stdout exactly like a backend-reported failure
+// [bug pg2-njx27].
 func reportScmTargetedOutcome(cmd *cobra.Command, resp *scriptout.Response, err error, humanize humanizeResult) error {
 	return writeTargetedResult(cmd, resp, err, humanize)
 }

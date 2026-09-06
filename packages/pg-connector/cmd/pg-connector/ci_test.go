@@ -292,8 +292,20 @@ func TestRun_CiLogs_AmbiguousMultipleBackends_IsGenericFailure(t *testing.T) {
 	// failure path, never one of the targeted-op taxonomy codes.
 	writeCiConfigFor(t, "backend-ci-a", "backend-ci-b")
 
-	_, code := executePr(t, []string{"ci", "logs", "run-1"})
+	stdout, code := executePr(t, []string{"ci", "logs", "run-1"})
 	if code != 1 {
 		t.Fatalf("exit code = %d, want 1", code)
+	}
+	// Regression for bug pg2-njx27's "ambiguous registry resolution"
+	// case: this Tier-1 failure (Dispatch's own disambiguation, before
+	// ever reaching a backend) must still produce a JSON error envelope
+	// on stdout, not an empty stdout with the message only as stderr
+	// prose.
+	var resp scriptout.Response
+	if err := json.Unmarshal([]byte(stdout), &resp); err != nil {
+		t.Fatalf("stdout is not a JSON envelope: %v; stdout=%q", err, stdout)
+	}
+	if resp.Error == nil || !strings.Contains(resp.Error.Message, "backends registered") {
+		t.Fatalf("resp.Error = %+v, want a message naming the ambiguous-registration failure", resp.Error)
 	}
 }

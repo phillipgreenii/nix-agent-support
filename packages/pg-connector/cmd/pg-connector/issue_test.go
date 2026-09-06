@@ -252,8 +252,18 @@ func TestRun_IssueShow_NoBackendRegistered_IsGenericFailure(t *testing.T) {
 	}
 	t.Setenv("PG_PR_CONFIG", cfg)
 
-	_, code := executePr(t, []string{"issue", "show", "issue-1"})
+	stdout, code := executePr(t, []string{"issue", "show", "issue-1"})
 	if code != 1 {
 		t.Fatalf("exit code = %d, want 1", code)
+	}
+	// Regression for bug pg2-njx27: a Tier-1 "no backend registered"
+	// failure must still produce a JSON error envelope on stdout, not an
+	// empty stdout with the message only as stderr prose.
+	var resp scriptout.Response
+	if err := json.Unmarshal([]byte(stdout), &resp); err != nil {
+		t.Fatalf("stdout is not a JSON envelope: %v; stdout=%q", err, stdout)
+	}
+	if resp.Error == nil || !strings.Contains(resp.Error.Message, "no backend registered") {
+		t.Fatalf("resp.Error = %+v, want a message naming the no-backend-registered failure", resp.Error)
 	}
 }

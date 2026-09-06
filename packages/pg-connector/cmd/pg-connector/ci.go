@@ -123,7 +123,7 @@ func newCiLogsCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			reg, err := LoadRegistry()
 			if err != nil {
-				return err
+				return reportCiTargetedOutcome(cmd, nil, err, humanizeCiLogs)
 			}
 			resp, dispatchErr := Dispatch(cmd.Context(), reg, "ci", "get_logs", map[string]string{"run_id": args[0]})
 			return reportCiTargetedOutcome(cmd, resp, dispatchErr, humanizeCiLogs)
@@ -137,14 +137,15 @@ func newCiRerunFailedCmd() *cobra.Command {
 		Short: "Rerun a PR's failed CI runs (targeted; resolves to the one registered ci backend)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			humanize := func(json.RawMessage) (string, error) {
+				return fmt.Sprintf("CI rerun triggered for PR %s", args[0]), nil
+			}
 			reg, err := LoadRegistry()
 			if err != nil {
-				return err
+				return reportCiTargetedOutcome(cmd, nil, err, humanize)
 			}
 			resp, dispatchErr := Dispatch(cmd.Context(), reg, "ci", "rerun_failed", map[string]string{"pr_id": args[0]})
-			return reportCiTargetedOutcome(cmd, resp, dispatchErr, func(json.RawMessage) (string, error) {
-				return fmt.Sprintf("CI rerun triggered for PR %s", args[0]), nil
-			})
+			return reportCiTargetedOutcome(cmd, resp, dispatchErr, humanize)
 		},
 	}
 }
@@ -157,11 +158,13 @@ func newCiRerunFailedCmd() *cobra.Command {
 // [bead pg2-ox1k6] — see output.go's writeTargetedResult, which this
 // delegates to. It translates err into pg-connector's own targeted-op
 // exit code via outcome.go's TargetedExitCode, never deciding the exit
-// code itself [design: §4.5]. A nil resp is a CLI-level failure before any
-// well-formed wire response was produced (e.g. no backend registered,
-// or an ambiguous multi-backend registration) — that case is returned as a
-// plain error instead, so main's run() reports it on stderr rather than
-// fabricating a JSON body.
+// code itself [design: §4.5]. A nil resp is a Tier-1 CLI-level failure
+// before any well-formed wire response was produced (e.g. no backend
+// registered, or an ambiguous multi-backend registration) — rather than
+// returning a plain error, writeTargetedResult now builds a synthetic
+// error envelope for it via scriptout.ErrorResponse and reports it
+// through stdout exactly like a backend-reported failure
+// [bug pg2-njx27].
 func reportCiTargetedOutcome(cmd *cobra.Command, resp *scriptout.Response, err error, humanize humanizeResult) error {
 	return writeTargetedResult(cmd, resp, err, humanize)
 }

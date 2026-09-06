@@ -86,6 +86,28 @@ func sentinelForCode(code string) error {
 	return ErrUnavailable
 }
 
+// ErrorResponse builds a Response carrying a wire-taxonomy error envelope
+// derived from err, using the exact same codeForError classification
+// writeErrorResponse (serve.go) applies when a Tier-2 backend's own handler
+// fails. It exists so cmd/pg-connector can report a Tier-1 CLI-level
+// failure it detects itself before ever dispatching to a backend — missing
+// config, no backend registered, an ambiguous multi-backend registration,
+// or a non-executable backend binary — through the SAME JSON envelope
+// shape a backend-reported failure already uses on stdout, rather than
+// falling back to a bare prose message on stderr with an empty stdout
+// [bug pg2-njx27]. SchemaVersion is left at its zero value: a Tier-1
+// failure happens before any backend (and therefore any per-capability
+// schema) was ever reached, so there is no schema version to report.
+func ErrorResponse(err error) *Response {
+	return &Response{
+		ProtocolVersion: ProtocolVersion,
+		Error: &Error{
+			Code:    codeForError(err),
+			Message: err.Error(),
+		},
+	}
+}
+
 // exitCodeForCode maps each wire-taxonomy code to the backend process's own
 // exit code (bead pg2-7vgn5). Values start at 2, per this workspace's
 // code-file-standards exit-code convention: exit 1 is the

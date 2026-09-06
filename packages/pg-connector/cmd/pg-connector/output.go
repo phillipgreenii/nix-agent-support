@@ -114,12 +114,25 @@ type humanizeResult func(result json.RawMessage) (string, error)
 // both in the same invocation (see this file's header comment). Either
 // way it translates err into pg-connector's own targeted-op exit code via
 // outcome.go's TargetedExitCode exactly as before; this function never
-// decides the exit code itself. A nil resp is a CLI-level failure before
-// any well-formed wire response was produced — returned as a plain error,
-// unaffected by output mode, matching the pre-existing convention.
+// decides the exit code itself.
+//
+// A nil resp is a Tier-1 CLI-level failure the umbrella detected itself
+// before ever dispatching to a backend (missing config, no backend
+// registered, an ambiguous multi-backend registration, or a
+// non-executable backend binary) — rather than returning err as a plain
+// error (which used to reach main's run() and get printed as prose on
+// stderr with an empty stdout), this now builds a synthetic wire envelope
+// via scriptout.ErrorResponse(err) and reports it through the exact same
+// OutputJSON/OutputHuman branches below a backend-reported failure already
+// uses [bug pg2-njx27]. The exit code is unaffected by this change — it is
+// still computed by TargetedExitCode(err) exactly as before; only where
+// the failure gets reported changes.
 func writeTargetedResult(cmd *cobra.Command, resp *scriptout.Response, err error, humanize humanizeResult) error {
 	if resp == nil {
-		return err
+		if err == nil {
+			return nil
+		}
+		resp = scriptout.ErrorResponse(err)
 	}
 	mode, modeErr := outputModeFor(cmd)
 	if modeErr != nil {
