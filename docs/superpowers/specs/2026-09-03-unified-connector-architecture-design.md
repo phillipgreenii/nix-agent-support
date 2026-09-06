@@ -54,7 +54,7 @@ exactly what this avoids. The Issue capability widens from read-only (`GetIssue`
 - A naming/convention check over `pkg/provider` (§5.2) confirms every exported interface's name
   and method set corresponds to exactly one capability (pr/issue/ci/scm/attention/search) and
   names no backend/system (github/jira/slack/…) — the mechanical form of "scoped by capability,
-  not by system."
+  not by system." **Implemented, not just claimed:** `naming_convention_test.go` (`pg2-nvm80`).
 
 ## 4. Tier 1 — pg-connector
 
@@ -92,6 +92,45 @@ over unchanged from pg-pr's existing config machinery.
 
 Each backend's own settings (e.g. Captain's Log's `CAPTAINS_LOG_URL` + cloudflared login) live in
 that backend's own environment/config, not in this registry — the registry only names the binary.
+
+**Config schema versioning, migration, and validation (resolved here, not left as "carries over
+unchanged" implies).** "Carries over unchanged" above is true of the _format_, but the `connector:`
+key itself has no version marker of its own — a different thing from §4.3's `protocolVersion`/
+`schemaVersion`, which version the wire _envelope_, not the config _file_. Decision: add a
+config-schema version field now, the same reasoning `pg2-681xo` already applied to `schema.PR`'s
+freshness field — cheap while the shape is still this simple, expensive once real config files
+exist in the wild that a later format change would need to migrate. Concretely: a top-level
+`configSchemaVersion` integer key, defaulting to `1` when absent (so every config file written
+before this decision, including the operator's own, keeps parsing unchanged — no forced migration
+for the one install that exists today), checked by `pg-connector config validate`; an unrecognized
+value is an explicit validation error, never silently ignored, matching this design's
+document-loudly theme elsewhere (§4.2's structured error codes, §4.5's manifest markers). No
+migration _tool_ is designed here — there is exactly one config file in the wild and no external
+consumer — only the version _field_, so a future format change has somewhere to branch from
+instead of needing a `schema.PR`-style retrofit a second time.
+
+Today's registry loader is validation-light by design intent (bare pass-through, no `exec:`-prefix
+parsing to get wrong), but that intent doesn't cover gaps a fresh review already found in the
+_code_: unknown keys under `connector:` are silently ignored, an empty list/duplicate binary
+name/path-separator-containing entry is not rejected, and `config validate`'s fan-out count is not
+computed from the real backend list. These are real, already-filed code defects, not a design gap
+— `pg2-qnyzz` tracks tightening `registry.go`'s `AllBackends`/`config validate` path to reject
+unknown keys, validate the empty-list/duplicate/path-separator cases, and dedupe a backend
+registered under multiple types. This design's own position is that config validation SHOULD be
+strict (reject the unrecognized rather than silently accept it), consistent with the
+`configSchemaVersion` decision above; `pg2-qnyzz` is where that gets implemented.
+
+**Registry file naming — an explicit "don't fix it," not an oversight.** `registry.go`'s own doc
+comment already states the deliberate carry-over: the registry reads the SAME
+`~/.config/pg-pr/config.yaml` (a directory literally named `pg-pr`) that pg-pr itself reads,
+unrenamed, so a host running both tools shares one file. That's fine while pg-pr still exists
+(§9's build-test-cutover transition), but nothing shims, renames, or migrates `~/.config/pg-pr/`
+to a `pg-connector`-named path once `packages/pg-pr` is finally deleted, and §9.1's removal
+criterion says nothing about it. Decision: leave it, for the same reason the `$PG_PR_CONFIG` env
+var above is also deliberately not renamed — there is exactly one operator, one machine, one file;
+renaming buys nothing a one-line manual edit couldn't do whenever it's actually inconvenient, and
+it would just compete for space in an already-long retirement criterion list for no real benefit.
+Recorded here so a future reader doesn't reintroduce this as a surprise gap.
 
 ### 4.2 Wire protocol
 
@@ -348,7 +387,14 @@ true` + `total_before_cap: N` — a truncation is always a manifest marker, neve
   `scm` is single-valued; no `exec:` prefix exists anywhere in the registry.
 - Every envelope carries `protocolVersion` and `schemaVersion` (per §4.3); `error` is `{code,
 message}` from the closed enum; every backend answers `capabilities`; `config validate` fans out
-  `auth_status` + `capabilities` across every backend.
+  `auth_status` + `capabilities` across every backend. **This bullet restates §4.1-§4.3's own
+  mechanism, not new scope this section's own DEFERRED status covers — unlike every other bullet
+  in this list, it is independently true today, not waiting on this section's attention/search
+  work landing:** `protocolVersion`/`schemaVersion` comparison and the `version_mismatch` outcome
+  are implemented end-to-end, including `config validate` actually consuming the capabilities
+  payload it used to discard (`pg2-p2z7o`); every one of the four shipped backends answers
+  `capabilities` via a dispatch-table-derived handler, not a hand-typed op list
+  (`pg2-fh2vh`).
 - `pg-connector attention list` / `pg-connector search <query>` exist as real Tier-1 verbs.
 - A single source's own `list_attention` response carries an item that is exactly `{type, id,
 summary}` + optional `severity`; Tier 1's aggregated `attention list` output is a strict
@@ -368,7 +414,9 @@ source}` set plus any type-/implementation-declared extensions the query request
   op; a cross-capability data need is resolved via that backend's own direct system access instead
   (composition-boundary text above) — a mechanical grep for `exec.Command`/`os/exec` naming
   `pg-connector` or another `pg-connector-<type>-<backend>` binary outside a backend's own tests
-  would catch a regression.
+  would catch a regression. **Implemented, not just claimed** (and independent of this section's
+  own deferred attention/search work — this check already guards the four existing backends
+  today): `pg2-nvm80`, a module-wide regression guard for an earlier violation `pg2-0vwcc` fixed.
 - A beads attention source, if built, performs no claim/ack/exit mutation.
 - Attention aggregation is stateless: `pkg/schema`'s `attention.Source` shape and its
   implementations have zero imports of, or references to, any daily-focus/df-survey package or
@@ -520,7 +568,168 @@ opt-in), not the contents.
 **Acceptance criteria**
 
 - The two-tier convention is documented; no functional AC beyond the convention existing (contents
-  are deferred by design, not an oversight).
+  are deferred by design, not an oversight). **This AC is self-satisfied by this section's own
+  text** — there is no code to check it against, so "done" and "documented" are the same fact
+  here.
+
+### 4.9 Security model: exec-time backend resolution
+
+Every registered backend is resolved and invoked the same way, and that mechanism is this design's
+whole security posture for Tier-2 dispatch — there is no sandboxing, allowlisting, or signature
+check anywhere in the call path beyond it. Stated explicitly, verified against the current code
+(`cmd/pg-connector/registry.go`, `pkg/scriptout/exec.go`):
+
+- **Resolution is bare-name, at exec time, via the OS.** A registry entry with no path separator
+  (the normal case, e.g. `pg-connector-pr-github`) is resolved by `$PATH` lookup the moment it is
+  execed — not validated, canonicalized, or cached at config-load time. A value containing a path
+  separator resolves relative to `pg-connector`'s own current working directory at call time, not
+  any fixed or config-relative root — Go's `os/exec` contract, not a choice made here.
+- **`exec:` is not a prefix pg-connector recognizes.** Unlike pg-pr's own historical `exec:`
+  selector, pg-connector performs no prefix parsing on a registry value at all — a string like
+  `exec:something` passes through unchanged as a literal binary name
+  (`registry_test.go`'s `TestRegistry_NoExecPrefixDistinction` locks this in) and would simply be
+  looked up on `$PATH` under that literal, almost certainly nonexistent, name.
+- **The full environment is inherited.** `exec.go`'s `runInvoke` never sets `cmd.Env`, so per Go's
+  own `os/exec` contract the child process receives the entirety of `pg-connector`'s own
+  environment — every credential a Tier-2 backend resolves via env (§4.6's GitHub token chain
+  included) is reachable by construction, and so is anything else present that a backend has no
+  business seeing.
+- **The caller's privileges are the backend's privileges.** A backend execed this way runs under
+  whatever process invoked `pg-connector` — in the pr-pool-driven case (§6.1), pr-pool's own
+  subagent permissions, already ruled uniform-to-parent with no per-role restriction. There is no
+  intermediate boundary anywhere between a config-file entry and a process holding live GitHub
+  credentials.
+
+**Accepted risk, not hardened — with justification.** This is a real widening of what a malformed
+or malicious registry entry could do (an arbitrary `$PATH`-resolved or cwd-relative binary, with
+every currently-in-scope credential, under the caller's own permissions), but this design accepts
+it rather than proposing a mitigation, for the same reason §9 gives for skipping a coexistence
+architecture: **Phillip is currently the sole author of every config file `pg-connector` reads**,
+on machines only he administers. The registry lives in the same single-user
+`~/.config/pg-pr/config.yaml` pg-pr's own config already reads unchanged (§4.1) — this is not a
+new externally-reachable surface, it is the same "who can edit this machine's own config" boundary
+pg-pr's and pr-pool's existing subprocess-exec call sites already draw, continued under a new
+binary name. Nothing in this design's stated scope is multi-tenant, network-facing, or
+third-party-config-accepting for that boundary to matter against. If that scope ever changes — a
+second operator, a shared/remote config, a plugin registry accepting third-party binary names —
+this acceptance MUST be revisited; nothing here should be read as "safe in general," only
+"accepted for this build's actual, single-operator threat model." `pg2-qnyzz` (registry validation
+tightening — rejecting unknown keys, empty/duplicate/malformed entries) narrows the
+accidental-misconfiguration case as a side effect, but it is not a security fix and isn't cited
+here as one.
+
+**Acceptance criteria**
+
+- This section states the security model explicitly (bare-name PATH/cwd-relative resolution, no
+  `exec:` handling, full env inheritance, caller-privilege inheritance) rather than leaving it
+  unstated.
+- The risk is either mitigated by a concrete hardening design or explicitly accepted with stated
+  justification — this section accepts it, scoped to the single-operator threat model described
+  above.
+
+### 4.10 Concurrency
+
+pg-connector's own process is one-shot and stateless per invocation, matching its wire protocol's
+own exec-per-call model (§4.2) — there is no persistent daemon holding cross-call state, so there
+is no pg-connector-level lock or mutex to design. Two concerns this doesn't erase, both pushed to
+whoever actually owns the state:
+
+- **A Tier-2 backend's own local store** (feedback disposition, category — §6.1/§8) can be hit by
+  two concurrent `pg-connector` invocations (e.g. two `df-feedback` runs racing on the same PR).
+  Concurrency safety for that store is that backend's own responsibility, exactly as it already was
+  for pg-pr's existing SQLite store — this design adds no new requirement here, it inherits the
+  existing one unchanged.
+- **A fan-out op** (§4.4/§4.5) execs one process per registered source for a single logical call.
+  Whether those execs run sequentially or concurrently is left as an implementation freedom — the
+  `sources[]` outcome shape (§4.5) is identical either way, so nothing here depends on the answer.
+
+No cross-backend locking or coordination is needed anywhere in this design, because backends never
+share mutable state in the first place (§8's rejected-shared-store decision).
+
+### 4.11 Timeouts and retries
+
+pg-connector's own dispatch path (`Dispatch`/`scriptout.Invoke`) enforces no timeout of its own
+beyond whatever `context.Context` its caller supplies — there is no default deadline anywhere in
+`pkg/scriptout`. Timeout policy is entirely the caller's concern: for the pr-pool-driven case
+(§6.1), that's pr-pool's own executor, out of scope here.
+
+Retries follow the same pattern. pg-connector performs no retry of a failed backend exec on its
+own — one exec is one attempt, once, full stop. The only retry mechanism anywhere in this design is
+pr-pool's own exit-`9`/`busy` pre-accept decline (§6.1's exit-code analysis), and that belongs to
+pr-pool, not to pg-connector or either handler. A Tier-2 backend's own retry behavior against its
+upstream system (e.g. backing off a `gh` rate limit) is invisible at the wire protocol level either
+way — the wire only ever sees that backend's final answer, never a mid-flight retry in progress.
+
+### 4.12 Observability and correlation
+
+No correlation/trace-id concept exists anywhere in this design's wire envelope (§4.2's envelope
+carries only `op`/`args`/`result`/`error` plus the two version fields) — a multi-hop call
+(pr-pool → a handler → `pg-connector` → a Tier-2 backend → its upstream system) has no identifier
+threading those hops together across process boundaries. This is an accepted gap for this build,
+not a considered-and-rejected one: today's fan-outs are exactly one hop deep (pg-connector directly
+to a Tier-2 backend), and pr-pool already logs its own role/item identifiers independently on its
+side of the boundary, so nothing in the current scope actually needs cross-process correlation
+yet. If a future consumer needs to tie a handler's own logs to the specific pg-connector/backend
+calls it made, the natural mechanism — an opaque request id, or reusing pr-pool's own event/item id
+as an extra field on the request envelope — is not designed here and stays an open question until
+that need materializes.
+
+### 4.13 Multi-instance targeted-op resolution
+
+§2 describes Issue as symmetric with "multiple simultaneously-active instances," and §4.1
+registers `connector.issue`/`connector.ci`/`connector.pr` as list-valued specifically so a second
+backend can be added later — but a _targeted_ op (`show <id>`, `categorize`, `feedback_set`, …)
+resolves to exactly one backend, and nothing before this section says how that resolution works
+once more than one is actually registered. Today's code (`cmd/pg-connector/dispatch.go`'s
+`Dispatch`) simply refuses: it errors out if more than one backend is registered for the type a
+targeted op addresses, deferring the question rather than answering it.
+
+**Resolution policy (decided here, not deferred further):** for a targeted op against a
+list-valued type with N > 1 registered backends, `Dispatch` tries each registered backend **in
+registration order**, stopping at the first one whose answer is not `not_found`. A `not_found`
+answer means "try the next backend" (mirroring §4.5's existing first-wins merge-strategy precedent,
+already used by the CI capability's own `logs` op — "tries each until one succeeds"); any other
+error (`unauthenticated`, `unavailable`, `unknown_op`, `version_mismatch`, `invalid_argument`, or a
+CLI-level failure) short-circuits immediately and is returned as-is, **never** swallowed to fall
+through to the next backend — a real auth/availability failure on the first-tried backend must
+never be silently misreported as a `not_found` just because a second backend also lacks the id. If
+every registered backend answers `not_found`, the aggregate targeted-op result is `not_found`. This
+keeps id-shape disambiguation entirely out of pg-connector's own logic (a Jira key and a beads id
+never collide in practice, so trying both cheaply is safe) rather than requiring a caller to
+pre-select a source — consistent with §2's "symmetric, same interface" framing: a caller of
+`pg-connector issue show <id>` shouldn't need to know which backend actually holds that id.
+
+**Acceptance criteria**
+
+- A targeted op against a list-valued type with more than one registered backend tries each in
+  registration order, stopping at the first non-`not_found` answer; any non-`not_found` error
+  short-circuits without trying the remaining backends; an all-`not_found` result is the aggregate
+  `not_found` answer.
+- This is stated as a resolution policy, not left as the "future concern" the current code comment
+  defers it as.
+
+### 4.14 Reentrancy and layering
+
+§4.4 already forbids a Tier-2 backend or a standalone attention/search plugin from execing
+`pg-connector` or a sibling Tier-2 binary, scoped to that section's own two capabilities. That rule
+generalizes to the whole architecture, not just attention/search: call direction is strictly
+downward — Tier 3 → Tier 1 (`pg-connector`) → exactly one Tier-2 backend → that backend's own
+upstream system — and nothing calls back up a level (a backend execing `pg-connector`) or sideways
+(one backend execing another, or a standalone plugin execing a specific backend binary directly
+instead of composing `pg-connector`'s own verbs). §4.4's mechanical grep-based regression guard
+(scoped today to attention/search's own composition boundary) is the concrete precedent for
+enforcing this; widening it to cover every capability, not just those two, is straightforward but
+not itself specified here.
+
+Because the call graph never loops back on itself, there is no true reentrancy anywhere in this
+design either — `pg-connector`'s own process is always a leaf exec once invoked; no path in this
+architecture ever needs it to shell out to a live copy of itself.
+
+**Acceptance criteria**
+
+- The downward-only call-direction rule is stated as a general architectural principle, not scoped
+  to attention/search alone.
+- No component in this design ever execs a live copy of its own binary or calls back up a tier.
 
 ## 5. Tier 2 — backend implementation binaries
 
@@ -932,7 +1141,8 @@ correlation on demand, on the same principle.
 
 - A CI/convention check confirms no package under `packages/pg-connector/` (outside a single
   backend's own `internal/`) defines a persistent store keyed by more than one entity type's IDs
-  together — the mechanical form of "no cross-connector entity store."
+  together — the mechanical form of "no cross-connector entity store." **Implemented, not just
+  claimed:** `entity_store_test.go`'s AST scan (`pg2-nvm80`).
 - Any reference resolution outside a query's initial scope uses one bounded, batched lookup, never
   unbounded recursion.
 
@@ -1012,6 +1222,49 @@ registered as its own top-level command (`rootCmd.AddCommand(reviewCmd, commentC
 `review.go`), not nested under `review` — it was missing from Appendix A's named list of remaining
 groups, which is corrected there.
 
+**Migration-window policy: sync obligation, per-table disposition, and end condition.** Cited for
+the PROCESS side (execution risk while both trees are live — carried-over dead surface, internal
+duplication, guard fragility): `pg2-lh3c4`, which tracks the pr-github backend's own carried-over
+surface and the module-wide `gh`-choke-point/stack-mutation guards this section's own removal
+criterion (item 5, below) already depends on relocating. What follows is this design's own
+decision, which that bead executes against, not a restatement of it.
+
+- **Sync obligation while both trees are live.** For every command group with a stated
+  pg-connector destination other than feedback (pr/issue/ci/scm/auth/config), there is no real
+  drift risk during the overlap: both binaries read and write the SAME remote system state
+  directly — pg-connector's PR backend performs a live GitHub read on every call rather than
+  caching (the `AsOf`/`Stale` pair's own doc comment confirms this for the shipped backend,
+  Appendix A) — so pg-pr and pg-connector are never holding two independently-writable copies of
+  that data. **The one exception is feedback disposition**, which is durable _local_ state that
+  changes OWNERSHIP rather than being re-derived from GitHub each call (§6.1: it "moves under the
+  PR GitHub backend"). While pg-pr's own `feedback` command group and pg-connector's
+  `pr feedback-set`/`pr show` are BOTH reachable, a write through one binary and a read through
+  the other would silently diverge. The obligation this creates: **the disposition-store
+  migration and the deletion of pg-pr's own `feedback` command group MUST land in the same
+  cutover step, never split across two** — there is no window in which both binaries hold their
+  own independently-writable copy. This generalizes: for any table whose disposition (below) is
+  "migrate under a Tier-2 backend's own store" rather than "drop" or "no store, always re-read
+  live," the migration step and the retirement of pg-pr's own reader/writer for that data are the
+  same atomic step, by the same reasoning.
+- **Per-table SQLite disposition.** The removal criterion (item 3, below) already requires a
+  stated disposition for every table pg-pr's SQLite store holds, not just feedback — this decides
+  the remaining ones by the same rule rather than leaving them open indefinitely: a table's
+  disposition follows the stated destination of the pg-pr command group that owns it (the table
+  above). Applied to Appendix A's named tables: **outbox+leases** and **repo_sync_state** back the
+  `sync` daemon and `changes` machinery, both of which "retire without a rewrite target" per the
+  table above — they DROP with no data carried over, same as the code they back. **user_state** is
+  where pg-pr's `hide`/`unhide` state lives; per §4.4, that suppression is a client/dashboard-layer
+  concept, never a pg-connector wire concept — so it does not migrate under any Tier-2 backend's
+  own store; it moves (if at all) to whatever Tier-3/client tool ends up owning that suppression, a
+  question this design doesn't otherwise resolve. **PR rows** and **approver data** are genuinely
+  blocked, not decided here: both underpin the local dashboard/`pg-pr open` question Appendix B
+  already leaves open, and inventing a disposition for them ahead of that question's own
+  resolution would be answering a question this design has explicitly deferred to Appendix B, not
+  resolving it.
+- **End condition.** Already stated below: the six-point removal criterion is the migration
+  window's end condition — it ends exactly when all six are independently true, not on a
+  schedule.
+
 **Removal criterion — pg-pr is removed when:** `pg-pr` as a standalone binary MUST NOT be deleted
 until every one of the following holds, with no coexistence period required in between (per this
 section's own no-shim/no-dual-write decision):
@@ -1049,6 +1302,48 @@ than primarily by a human running a slash command directly — that redesign, an
 exact home once it lands, are deferred to a future design pass. Preserving today's skills/agents/
 slash-commands invoked directly is explicitly not a requirement this design needs to satisfy.
 
+### 9.3 Rollout and cutover sequencing
+
+§9.1's table gives the WHAT (destination per command group); this states the HOW/WHEN for the
+roughly 133 downstream literal `pg-pr <verb>` invocations Appendix A inventories (skills, review
+subagents, slash commands, a PreToolUse hook, pinned flake checks, a tldr page, a
+capabilities-list entry, a cross-plugin reference).
+
+**Sequencing rule:** rewrite a command group's call sites only AFTER that group's pg-connector
+destination has landed and passed its own tests (removal criterion item 1, above) — never
+speculatively ahead of the destination existing, and never batched into one rewrite pass at the
+end, which would recreate exactly the kind of big-bang cutover §9's no-shim/no-dual-write decision
+exists to avoid. Practically: as each "Status today" cell in §9.1's table flips from "does not
+yet" to "ships," the call sites for that verb group become rewritable, and get rewritten in the
+same packet or a closely-following one — not deferred to a single terminal "rewrite everything"
+phase.
+
+**Verification:** removal criterion item 2, above, already states the mechanical completeness
+proof (a repo-wide grep for a literal `pg-pr` invocation, excluding this design doc/ADRs/other
+historical prose, returns zero hits). This subsection adds the ordering discipline that gets there
+incrementally, not a second completeness check.
+
+**No rollback mechanism is designed**, consistent with §9's no-shim/no-dual-write decision: a
+rewritten call site that breaks is fixed forward (revert or patch the one packet that rewrote it),
+never rolled back to calling the old `pg-pr` binary — pg-pr's own command group for that verb is
+deleted in the same cutover step, not kept alive as a fallback.
+
+### 9.4 Deprecation timeline
+
+This design deliberately states no calendar timeline, only condition-based gates — the removal
+criterion above already establishes that ("not a calendar date... independently checkable at any
+time"). What this subsection adds is the expected ORDER those conditions become checkable in,
+derived from this design's own phase-shaped scope (the same shape sketched, not yet approved, for
+`pg2-2j5ac`'s own decomposition, corrected per this bead's own fix to that sketch below): the
+cross-cutting attention/search capability plus the mechanical convention checks; a second Issue
+backend; the two new pr-pool roles plus the one already-decided SQLite table migration; the
+Tier-3 on-demand tools; and last, the pg-pr-retirement PRECONDITIONS (the verb→destination table,
+the remaining SQLite table dispositions, and `docs/behavior/` authoring). No step in that order is
+itself a cutover step — cutover (the §9.3 rewrite plus deleting `packages/pg-pr`) starts only once
+every one of the six removal-criterion conditions above is independently true. This is a
+dependency ORDER, not a schedule, for the same reason the removal criterion itself is
+condition-based rather than dated.
+
 **Acceptance criteria**
 
 - A full verb→destination table for every pg-pr command group exists before any retirement packet
@@ -1056,6 +1351,8 @@ slash-commands invoked directly is explicitly not a requirement this design need
 - An explicit "pg-pr is removed when X" criterion exists and MUST be re-checked before the
   `packages/pg-pr` module is deleted (§9.1's removal criterion, above) — the dual-maintenance
   window has a stated end condition, not just a stated start.
+- A rollout/cutover sequencing rule for the downstream call-site rewrite exists (§9.3), and a
+  deprecation timeline stated as a dependency order rather than a calendar date exists (§9.4).
 - `TestGHExecChokePoint` and `TestNoGHStackMutatingArgv`
   (`packages/pg-connector/cmd/pg-connector-pr-github/internal/github/chokepoint_test.go` and
   `.../stack_readonly_test.go`) MUST be relocated out of the pr-github backend's own test package,
@@ -1117,6 +1414,31 @@ record/replay) that no existing pattern in either repo currently covers.
 - Thread and Note are not implemented, registered, or referenced as live types anywhere in the
   initial build; this section is their only mention.
 
+## 11. Testing strategy
+
+This states the overall STRATEGY across the tiers, not just an inventory of what exists — the
+inventory alone would just restate Appendix A's own "Wire protocol and testing" gaps.
+
+- **Per-backend unit tests** against a fake `Runner`/`gh`-client with hand-typed JSON fixtures are
+  the existing convention, one per Tier-2 backend today. This is the correctness gate for a
+  backend's OWN logic — it does not, and is not meant to, prove that logic against what the real
+  upstream system actually returns.
+- **Module-wide mechanical/convention checks** (§3's naming check, §4.4's dependency-direction
+  check, §8's cross-entity-store check, all `pg2-nvm80`; §4.3's version-negotiation check,
+  `pg2-p2z7o`) are the architecture gate — they keep this design's own principles (capability
+  scoping, layering, no shared store, version skew detection) true as code, not just as prose, and
+  catch a regression a unit test wouldn't notice.
+- **An e2e/contract suite against the real `gh`/`bd` CLIs** — not hand-typed fixtures — is
+  deliberately a separate, credential-gated layer, kept out of the default `nix flake check`
+  sandbox so a missing-credential CI environment doesn't block on it. This is the "does this
+  actually work against the real world" gate, and it does not exist yet: `pg2-qp50z` (open) tracks
+  building it, motivated concretely by a bug (a `ListReviews` id shape mismatch) that every
+  existing hand-fixtured unit test missed.
+- **Not committed to yet, and not invented here:** a scriptout schema/goldens/conformance suite an
+  external implementer could run against any candidate backend, and a test-harness extension for
+  the pr-pool↔df-categorize/df-feedback integration seam (§6.1) — both remain real, named gaps in
+  Appendix A below, not silently dropped by this section's existence.
+
 ---
 
 ## Appendix A: known gaps and open items (not blocking, but not yet resolved)
@@ -1136,26 +1458,49 @@ add`/`resolve`) is its own top-level command, not nested under `review`, so the 
   destination verb; both are blocked on Appendix B's still-open `pg-pr open` disposition question,
   not on missing analysis here. §9's acceptance criteria now also state an explicit "pg-pr is
   removed when X" removal criterion, closing the second half of this finding.
-- No coordinated rewrite plan exists for the roughly 133 downstream literal `pg-pr <verb>`
-  invocations across agent-support's Claude Code plugin assets (skills, review subagents, slash
-  commands, a PreToolUse hook, pinned flake checks, a tldr page, a capabilities-list entry, and a
-  cross-plugin reference from another skill) — per §9's now-settled build-test-cutover approach
-  (no shim, no dual-write), these need direct one-by-one rewriting to call `pg-connector <verb>`
-  instead, sequenced by the verb→destination table (§9.1). The table now exists; the ~133+
-  call-site rewrite itself is still not scheduled or done.
+- A rewrite sequencing policy now exists (§9.3): rewrite a command group's call sites only after
+  its pg-connector destination has shipped and passed its own tests, incrementally per group,
+  never as one batched pass at the end. What §9.3 does not do is execute that policy — the
+  roughly 133 downstream literal `pg-pr <verb>` invocations across agent-support's Claude Code
+  plugin assets (skills, review subagents, slash commands, a PreToolUse hook, pinned flake checks,
+  a tldr page, a capabilities-list entry, and a cross-plugin reference from another skill) are
+  still unrewritten today; the sequencing rule and the verb→destination table (§9.1) together are
+  the plan, not a claim that any rewriting has happened.
 - pg-pr's local SQLite store (feedback dispositions, PR rows, outbox+leases, user_state,
-  repo_sync_state, approver data) has a migration disposition for exactly one table (feedback
-  disposition); the rest are unaddressed.
+  repo_sync_state, approver data) now has a stated disposition for four of six tables (§9's new
+  "Migration-window policy" block, above): feedback dispositions migrate under the PR GitHub
+  backend (unchanged from before); outbox+leases and repo_sync_state drop with the `sync`/
+  `changes` machinery they back; user_state's hide/unhide portion moves to the client/dashboard
+  layer, never a pg-connector store. **PR rows and approver data remain genuinely unaddressed** —
+  both are blocked on Appendix B's still-open `pg-pr open`/local-dashboard question, not decided
+  here, since either answer to Appendix B would determine theirs.
 - pr-pool's own hardcoded `pg-pr` call sites (two literal `exec.CommandContext` sites, a nix
   `wrapProgram`/`callPackage` reference, and a compiled-in default `AllowedTools` string) are
   already tracked in pr-pool's own gap register but not sequenced into this design.
+- A proposed 5-phase implementation-decomposition table exists in `pg2-2j5ac`'s own
+  epic-decompose round-1 report (bd comment, 2026-09-04 19:40) — a planning artifact, not part of
+  this document, and not yet operator-approved. Three corrections to it (a missing phase for
+  §5.3's flake-output/repoint step and behavior-docs/ADR/README coverage; Phase 5 wrongly listing
+  no dependencies on Phases 1-4 despite retirement-precondition work needing to know what they
+  actually shipped; Phase 1 bundling §4.4's attention/search capability, §3's naming check, and
+  §4.8's dashboard convention into one unrelated slice) are recorded as a follow-up comment on
+  that same bead, not duplicated into this design doc.
 
 **Data freshness and existing guarantees**
 
-- pg-pr today guarantees every fact carries its own as-of time and stale flag, and that a consumer
-  must not re-derive its own staleness policy. This design doesn't yet say whether
-  `pg-connector pr list` becomes a live network call (a latency change from today's read path) or
-  a backend-local store persists — and if the latter, how staleness is represented in the schema.
+- **Resolved, not left open (bead `pg2-681xo`, 2026-09-06):** `schema.PR` now carries `AsOf`/
+  `Stale` fields (`SchemaVersion` bumped 1 -> 2), mirroring pg-pr's own `INV-ASOF-1`/`INV-ASOF-2`
+  guarantee that every acted-on read carries its own as-of time and a backend-computed stale flag
+  a consumer must not re-derive. The shipped GitHub PR backend always performs a live read and so
+  always reports `Stale: false`; the pattern is documented for any future backend that DOES
+  cache — that backend is expected to adopt the same pair rather than invent a parallel
+  convention. The `ci`/`issue`/`scm` sibling schemas do not carry this pair yet, because none of
+  their current backends caches remote data either — there is nothing to represent staleness of
+  yet, not an oversight. What remains genuinely open, and is NOT resolved by the field's
+  existence: whether a future `pg-connector pr list` (not yet shipped, §9.1) becomes a live
+  network call or a backend-local store persists, and, if a store, whether/when it would ever
+  report `Stale: true`. The schema mechanism to represent that answer already exists either way —
+  this is a live-vs-cache design question for whenever `list` is built, not a schema gap.
 
 **Wire protocol and testing**
 
