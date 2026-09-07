@@ -142,6 +142,7 @@ var negativeMatrix = map[string][]negativeCase{
 		{"missing schemaVersions", `{"protocolVersion":1,"ops":[]}`},
 		{"missing ops", `{"protocolVersion":1,"schemaVersions":{}}`},
 		{"ops wrong item type", `{"protocolVersion":1,"schemaVersions":{},"ops":[5]}`},
+		{"version wrong type", `{"protocolVersion":1,"schemaVersions":{},"ops":[],"version":1}`},
 	},
 }
 

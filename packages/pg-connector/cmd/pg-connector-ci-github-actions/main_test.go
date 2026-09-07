@@ -67,6 +67,34 @@ func TestNewDispatchTable_CapabilitiesDeclaresCISchemaVersion(t *testing.T) {
 	}
 }
 
+// TestNewDispatchTable_CapabilitiesDeclaresVersion is bead pg2-a8uf2's
+// per-backend regression proof: this binary's own build-time-stamped
+// Version var (ldflags-set, "dev" unstamped) must actually reach the
+// capabilities response, not just sit unread the way it did before this
+// bead — there was previously no way to ask a running backend what
+// version it was.
+func TestNewDispatchTable_CapabilitiesDeclaresVersion(t *testing.T) {
+	table := newDispatchTable(newTestBackend())
+	entry, ok := table[scriptout.OpCapabilities]
+	if !ok {
+		t.Fatal("capabilities entry missing from this binary's own dispatch table")
+	}
+	result, err := entry.Handle(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	resp, ok := result.(scriptout.CapabilitiesResponse)
+	if !ok {
+		t.Fatalf("result type = %T, want scriptout.CapabilitiesResponse", result)
+	}
+	if resp.Version != Version {
+		t.Fatalf("capabilities.version = %q, want this binary's own Version var %q", resp.Version, Version)
+	}
+	if resp.Version == "" {
+		t.Fatal("capabilities.version is empty — Version defaults to \"dev\" even unstamped, never empty")
+	}
+}
+
 // TestNewDispatchTable_CapabilitiesOpsMatchesTableKeys is bead pg2-fh2vh's
 // per-backend regression proof: this binary no longer hand-types a
 // capabilities.ops literal (see newDispatchTable), so Ops MUST always be

@@ -47,11 +47,15 @@ func run() int {
 // (INV-VER-1). AddCapabilities computes capabilities.ops straight from
 // this table's own registered op names, so this backend never hand-types a
 // second, separately maintained ops list that could drift from what the
-// table actually dispatches (bead pg2-fh2vh).
+// table actually dispatches (bead pg2-fh2vh). Version is set to this
+// binary's own ldflags-stamped build var, so capabilities is now the wire
+// exposure for the version this binary otherwise had no way to report
+// (bead pg2-a8uf2).
 func newDispatchTable(backend *internal.Backend) scriptout.DispatchTable {
 	table := ci.NewDispatchTable(backend)
 	return scriptout.AddCapabilities(table, schema.CISchemaVersion, scriptout.CapabilitiesResponse{
 		ProtocolVersion: scriptout.ProtocolVersion,
 		SchemaVersions:  map[string]int{"ci": schema.CISchemaVersion},
+		Version:         Version,
 	})
 }

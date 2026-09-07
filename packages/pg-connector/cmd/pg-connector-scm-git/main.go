@@ -55,11 +55,15 @@ func run() int {
 // names (so the deliberate absence of auth_status above is automatically
 // reflected, not separately restated) — this backend never hand-types a
 // second, separately maintained ops list that could drift from what the
-// table actually dispatches (bead pg2-fh2vh).
+// table actually dispatches (bead pg2-fh2vh). Version is set to this
+// binary's own ldflags-stamped build var, so capabilities is now the wire
+// exposure for the version this binary otherwise had no way to report
+// (bead pg2-a8uf2).
 func newDispatchTable(backend *internal.Provider) scriptout.DispatchTable {
 	table := scm.NewDispatchTable(backend)
 	return scriptout.AddCapabilities(table, schema.ScmSchemaVersion, scriptout.CapabilitiesResponse{
 		ProtocolVersion: scriptout.ProtocolVersion,
 		SchemaVersions:  map[string]int{"scm": schema.ScmSchemaVersion},
+		Version:         Version,
 	})
 }

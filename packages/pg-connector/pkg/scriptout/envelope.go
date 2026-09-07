@@ -93,13 +93,28 @@ type Response struct {
 // capabilities op. Unlike every other op, it does NOT nest inside a
 // Result/Error envelope — its own protocolVersion sits alongside a
 // schemaVersions map (one entry per schema-bearing capability the backend
-// implements), an ops list, and a vocabulary object whose shape is
-// per-entity-type/per-backend rather than universal.
+// implements), an ops list, a vocabulary object whose shape is
+// per-entity-type/per-backend rather than universal, and an optional
+// version string.
+//
+// Version carries this backend binary's own build-time-stamped version
+// (mkGoApp's default versionPath, `main.Version` — the same ldflags
+// convention cmd/pg-connector's root command uses for its cobra
+// `--version` flag). It is the wire-level fix for "var Version = "dev" is
+// set by ldflags but never read or exposed" (bead pg2-a8uf2): a Tier-2
+// backend has no independent human-facing CLI identity of its own
+// (actors.md's ACTOR-BACKEND speaks only INTF-WIRE), so its own build
+// version travels over the one interface it does have — the capabilities
+// op every backend already answers — rather than a `--version` flag this
+// binary would otherwise have no argument parser to host. Omitted
+// (omitempty) when a backend leaves it unset, so an older backend's
+// capabilities reply stays byte-for-byte unchanged.
 type CapabilitiesResponse struct {
 	ProtocolVersion int            `json:"protocolVersion"`
 	SchemaVersions  map[string]int `json:"schemaVersions"`
 	Ops             []string       `json:"ops"`
 	Vocabulary      map[string]any `json:"vocabulary,omitempty"`
+	Version         string         `json:"version,omitempty"`
 }
 
 // Decode decodes raw into v. A nil/empty/"null" raw is treated as a

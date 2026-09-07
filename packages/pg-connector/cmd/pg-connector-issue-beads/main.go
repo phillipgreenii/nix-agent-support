@@ -72,7 +72,9 @@ func newDispatchTable(backend *internal.Backend) scriptout.DispatchTable {
 // regardless of workspace configuration (Backend.Workspace's error is
 // deliberately swallowed here, not surfaced as a capabilities failure) —
 // an unconfigured workspace is a Show/Create/Comment/Transition-time
-// error, not a health-check failure.
+// error, not a health-check failure. Version carries this binary's own
+// ldflags-stamped build var, so capabilities is now the wire exposure for
+// the version this binary otherwise had no way to report (bead pg2-a8uf2).
 func capabilitiesBase(backend *internal.Backend) scriptout.CapabilitiesResponse {
 	vocabulary := map[string]any{
 		"state":    internal.Vocabulary,
@@ -85,5 +87,6 @@ func capabilitiesBase(backend *internal.Backend) scriptout.CapabilitiesResponse 
 		ProtocolVersion: scriptout.ProtocolVersion,
 		SchemaVersions:  map[string]int{"issue": schema.IssueSchemaVersion},
 		Vocabulary:      vocabulary,
+		Version:         Version,
 	}
 }
