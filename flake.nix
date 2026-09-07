@@ -594,6 +594,7 @@
                 "pa-monitor-decorator-scope"
                 "claude-transcript"
                 "pg-ccaudit"
+                "pg-connector"
               ];
 
               # Pattern B (local `replace => ../sibling`): root the fileset at
@@ -3943,9 +3944,9 @@
               inherit pkgs;
               bashBuilders = pkgs._agentSupportBashBuilders;
             }).checks
-            # Nine offline golangci-lint gates, one per Go module (pg2-2cuzv):
-            # <module>-golangci for each of the six Pattern-A modules plus the
-            # three Pattern-B (local-replace) modules.
+            # Ten offline golangci-lint gates, one per Go module (pg2-2cuzv):
+            # <module>-golangci for each of the seven Pattern-A modules plus
+            # the three Pattern-B (local-replace) modules.
             // lib.listToAttrs (map (module: goLint { inherit module; }) simpleGoLintModules)
             // lib.listToAttrs patternBGoLints;
 
