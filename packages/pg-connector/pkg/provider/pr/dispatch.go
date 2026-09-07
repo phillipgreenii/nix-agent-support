@@ -27,7 +27,7 @@ import (
 func NewDispatchTable(p Provider) scriptout.DispatchTable {
 	table := scriptout.DispatchTable{
 		"show": {
-			SchemaVersion: schema.SchemaVersion,
+			SchemaVersion: schema.PRSchemaVersion,
 			Handle: func(ctx context.Context, args json.RawMessage) (any, error) {
 				var a struct {
 					ID string `json:"id"`
@@ -39,7 +39,7 @@ func NewDispatchTable(p Provider) scriptout.DispatchTable {
 			},
 		},
 		"categorize": {
-			SchemaVersion: schema.SchemaVersion,
+			SchemaVersion: schema.PRSchemaVersion,
 			Handle: func(ctx context.Context, args json.RawMessage) (any, error) {
 				var a struct {
 					ID       string `json:"id"`
@@ -52,7 +52,7 @@ func NewDispatchTable(p Provider) scriptout.DispatchTable {
 			},
 		},
 		"feedback_set": {
-			SchemaVersion: schema.SchemaVersion,
+			SchemaVersion: schema.PRSchemaVersion,
 			Handle: func(ctx context.Context, args json.RawMessage) (any, error) {
 				var a struct {
 					ID          string             `json:"id"`
@@ -74,7 +74,7 @@ func NewDispatchTable(p Provider) scriptout.DispatchTable {
 	// reports as "disabled: not applicable" (INV-AUTH-1).
 	if ac, ok := p.(provider.AuthChecker); ok {
 		table[scriptout.OpAuthStatus] = scriptout.OpHandler{
-			SchemaVersion: schema.SchemaVersion,
+			SchemaVersion: schema.PRSchemaVersion,
 			Handle: func(ctx context.Context, _ json.RawMessage) (any, error) {
 				// auth_status always answers with a well-formed result
 				// (never a wire-level error) — the AuthStatus.State field

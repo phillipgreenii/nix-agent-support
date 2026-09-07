@@ -61,8 +61,8 @@ func TestCISchemaVersion_IndependentOfPRSchemaVersion(t *testing.T) {
 	// single global counter shared across capabilities (INV-VER-1) — the
 	// two constants must be independently named/addressable regardless of
 	// whether their values happen to match (they diverged, 1 vs 2, once
-	// bead pg2-681xo bumped SchemaVersion for the PR-only AsOf/Stale
+	// bead pg2-681xo bumped PRSchemaVersion for the PR-only AsOf/Stale
 	// fields — this test's own point is that nothing here couples them).
 	_ = CISchemaVersion
-	_ = SchemaVersion
+	_ = PRSchemaVersion
 }

@@ -1462,12 +1462,18 @@
               # (`versionPath = "main.Version"` in default.nix), since a
               # linker/ldflag regression here is otherwise invisible to the
               # Go unit tests the same way it was for pa-monitor.
+              # The trailing "*" (added for bead pg2-gprc3/finding A30) tolerates
+              # --version's now-multi-line output (a "protocolVersion: N" line
+              # follows the stamped version line, per root.go's
+              # SetVersionTemplate) without loosening what this check actually
+              # asserts: the first line must still be exactly
+              # "pg-connector version 0.0.0-<8hex>".
               test-pg-connector-version-stamped = pkgs.runCommand "pg-connector-version-stamped" { } ''
                 v=$(${pkgs.pg-connector}/bin/pg-connector --version)
                 case "$v" in
-                  "pg-connector version 0.0.0-"????????) touch "$out" ;;
+                  "pg-connector version 0.0.0-"????????*) touch "$out" ;;
                   *)
-                    echo "pg-connector version not stamped (got: '$v', want 'pg-connector version 0.0.0-<8hex>')" >&2
+                    echo "pg-connector version not stamped (got: '$v', want 'pg-connector version 0.0.0-<8hex>...')" >&2
                     exit 1
                     ;;
                 esac

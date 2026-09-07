@@ -121,6 +121,7 @@ func newConfigCmd() *cobra.Command {
 		Short: "Config-related commands",
 	}
 	configCmd.AddCommand(newConfigValidateCmd())
+	configCmd.AddCommand(newConfigShowCmd())
 	return configCmd
 }
 

@@ -17,12 +17,15 @@ package schema
 // into the wire envelope's schemaVersion field by each of the scm
 // capability's dispatch-table entries (pkg/provider/scm.NewDispatchTable) —
 // independent of pkg/scriptout.ProtocolVersion and of the pr capability's
-// own SchemaVersion (INV-VER-1). Named ScmSchemaVersion rather than a second bare
-// SchemaVersion because this package holds every capability's schema types
-// together (layout_convention_test.go's "public: shared JSON wire shapes"
-// package) and a second
-// top-level SchemaVersion constant in the same package would collide with
-// pr.go's.
+// own PRSchemaVersion (INV-VER-1). Named ScmSchemaVersion (with the
+// entity-type prefix), matching CISchemaVersion/IssueSchemaVersion/
+// PRSchemaVersion, because this package holds every capability's schema
+// types together (layout_convention_test.go's "public: shared JSON wire
+// shapes" package): a bare SchemaVersion here would both collide across
+// capabilities and read as inconsistent with the other three entities'
+// naming — pr.go's constant used to be a bare SchemaVersion for exactly
+// this reason, until it was renamed to PRSchemaVersion to match
+// [finding A29].
 const ScmSchemaVersion = 1
 
 // WorktreeInfo is the scm capability's shared JSON wire shape describing

@@ -20,7 +20,7 @@ package schema
 // the wire envelope's schemaVersion field by each of the ci capability's
 // dispatch-table entries (pkg/provider/ci.NewDispatchTable) — independent
 // of both pkg/scriptout.ProtocolVersion and the pr capability's own
-// SchemaVersion: schemaVersion is one integer per schema-bearing capability,
+// PRSchemaVersion: schemaVersion is one integer per schema-bearing capability,
 // never a single global counter shared across capabilities
 // (INV-VER-1).
 const CISchemaVersion = 1

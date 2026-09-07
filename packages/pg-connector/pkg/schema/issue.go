@@ -16,7 +16,7 @@ package schema
 // populated into the wire envelope's schemaVersion field by each of the
 // issue capability's dispatch-table entries
 // (pkg/provider/issue.NewDispatchTable) — independent of pr's own
-// SchemaVersion (each entity type/capability versions its own schema
+// PRSchemaVersion (each entity type/capability versions its own schema
 // separately) and of pkg/scriptout.ProtocolVersion.
 //
 // Bumped 1 -> 2 by bead pg2-1q9c0 (design review finding A9), which added

@@ -13,14 +13,14 @@ import (
 
 func TestFanOutConfigValidate_Succeeded(t *testing.T) {
 	// The fixture's declared "pr" schemaVersion is interpolated from
-	// schema.SchemaVersion itself (not a hardcoded literal) so this
+	// schema.PRSchemaVersion itself (not a hardcoded literal) so this
 	// "matching, healthy backend" scenario cannot silently start exercising
 	// TestFanOutConfigValidate_DegradedOnSchemaVersionMismatch's path
-	// instead the next time schema.SchemaVersion is bumped (as bead
+	// instead the next time schema.PRSchemaVersion is bumped (as bead
 	// pg2-681xo's 1 -> 2 bump for AsOf/Stale already did once).
 	writeOpAwareFakeBackend(t, "backend-ok", map[string]string{
 		"auth_status":  `{"protocolVersion":1,"schemaVersion":1,"result":{"state":"OK"}}`,
-		"capabilities": fmt.Sprintf(`{"protocolVersion":1,"schemaVersions":{"pr":%d},"ops":["get_pr","auth_status","capabilities"]}`, schema.SchemaVersion),
+		"capabilities": fmt.Sprintf(`{"protocolVersion":1,"schemaVersions":{"pr":%d},"ops":["get_pr","auth_status","capabilities"]}`, schema.PRSchemaVersion),
 	}, `{"protocolVersion":1,"error":{"code":"unknown_op","message":"unknown op"}}`)
 	outcome := FanOutConfigValidate(context.Background(), []string{"backend-ok"})
 	if len(outcome.Sources) != 1 {
@@ -49,7 +49,7 @@ func TestFanOutConfigValidate_CountReflectsChecksPassed(t *testing.T) {
 	t.Run("both checks healthy -> 2", func(t *testing.T) {
 		writeOpAwareFakeBackend(t, "backend-both-ok", map[string]string{
 			"auth_status":  `{"protocolVersion":1,"schemaVersion":1,"result":{"state":"OK"}}`,
-			"capabilities": fmt.Sprintf(`{"protocolVersion":1,"schemaVersions":{"pr":%d},"ops":["get_pr","auth_status","capabilities"]}`, schema.SchemaVersion),
+			"capabilities": fmt.Sprintf(`{"protocolVersion":1,"schemaVersions":{"pr":%d},"ops":["get_pr","auth_status","capabilities"]}`, schema.PRSchemaVersion),
 		}, `{"protocolVersion":1,"error":{"code":"unknown_op","message":"unknown op"}}`)
 		outcome := FanOutConfigValidate(context.Background(), []string{"backend-both-ok"})
 		got := outcome.Sources[0]
@@ -64,7 +64,7 @@ func TestFanOutConfigValidate_CountReflectsChecksPassed(t *testing.T) {
 	t.Run("auth fails, capabilities healthy -> 1", func(t *testing.T) {
 		writeOpAwareFakeBackend(t, "backend-auth-only-fails", map[string]string{
 			"auth_status":  `{"protocolVersion":1,"error":{"code":"unauthenticated","message":"bad token"}}`,
-			"capabilities": fmt.Sprintf(`{"protocolVersion":1,"schemaVersions":{"pr":%d},"ops":["get_pr","auth_status","capabilities"]}`, schema.SchemaVersion),
+			"capabilities": fmt.Sprintf(`{"protocolVersion":1,"schemaVersions":{"pr":%d},"ops":["get_pr","auth_status","capabilities"]}`, schema.PRSchemaVersion),
 		}, `{"protocolVersion":1,"error":{"code":"unknown_op","message":"unknown op"}}`)
 		outcome := FanOutConfigValidate(context.Background(), []string{"backend-auth-only-fails"})
 		got := outcome.Sources[0]
@@ -109,7 +109,7 @@ func TestFanOutConfigValidate_DegradedOnSchemaVersionMismatch(t *testing.T) {
 	// returned *CapabilitiesResponse entirely — even a backend openly
 	// declaring a schemaVersion this build doesn't recognize passed as
 	// "succeeded" [bug pg2-p2z7o]. schema.CurrentSchemaVersions expects
-	// "pr" at schema.SchemaVersion (2 as of bead pg2-681xo's AsOf/Stale
+	// "pr" at schema.PRSchemaVersion (2 as of bead pg2-681xo's AsOf/Stale
 	// addition); this fake backend declares 999 for it, simulating a
 	// Tier-2 backend built at a stale/newer commit than the umbrella.
 	writeOpAwareFakeBackend(t, "backend-schema-skew", map[string]string{

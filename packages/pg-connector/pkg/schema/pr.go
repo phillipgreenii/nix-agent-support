@@ -15,10 +15,14 @@
 // are out of scope here [freedom boundary].
 package schema
 
-// SchemaVersion is the pr capability's own schema version, populated into
+// PRSchemaVersion is the pr capability's own schema version, populated into
 // the wire envelope's schemaVersion field by each of the pr capability's
 // dispatch-table entries (pkg/provider/pr.NewDispatchTable) — independent
-// of pkg/scriptout.ProtocolVersion (INV-VER-1).
+// of pkg/scriptout.ProtocolVersion (INV-VER-1). Named PRSchemaVersion
+// (not a bare SchemaVersion) to match the other three entities'
+// <Entity>SchemaVersion convention (CISchemaVersion, IssueSchemaVersion,
+// ScmSchemaVersion) — see scm.go's doc comment for why a bare
+// SchemaVersion in this shared package was inconsistent [finding A29].
 //
 // Bumped 1 -> 2 by bead pg2-681xo, which added the AsOf/Stale fields below.
 // schemaVersion versions a capability's own field shape, full stop —
@@ -32,7 +36,7 @@ package schema
 // Tier-3 tools) lands against the pre-freshness shape — precisely to avoid
 // an even more expensive schema bump a later addition would otherwise
 // force.
-const SchemaVersion = 2
+const PRSchemaVersion = 2
 
 // PR is the pr capability's shared JSON wire shape, returned by the pr
 // capability's "show" op and carried by pkg/provider/pr.Provider.Show

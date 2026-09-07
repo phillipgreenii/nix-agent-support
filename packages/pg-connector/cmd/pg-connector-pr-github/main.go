@@ -64,9 +64,9 @@ func run() int {
 // drift from what the table actually dispatches (bead pg2-fh2vh).
 func newDispatchTable(backend *internal.Backend) scriptout.DispatchTable {
 	table := pr.NewDispatchTable(backend)
-	return scriptout.AddCapabilities(table, schema.SchemaVersion, scriptout.CapabilitiesResponse{
+	return scriptout.AddCapabilities(table, schema.PRSchemaVersion, scriptout.CapabilitiesResponse{
 		ProtocolVersion: scriptout.ProtocolVersion,
-		SchemaVersions:  map[string]int{"pr": schema.SchemaVersion},
+		SchemaVersions:  map[string]int{"pr": schema.PRSchemaVersion},
 		Vocabulary: map[string]any{
 			"category": internal.Vocabulary,
 		},

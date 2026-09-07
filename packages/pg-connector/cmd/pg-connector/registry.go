@@ -57,26 +57,45 @@ func LoadRegistry() (*Registry, error) {
 	return loadRegistryFromEnv(osEnv{})
 }
 
+// ResolveConfigPath resolves which config file LoadRegistry would read,
+// via the same $PG_PR_CONFIG -> XDG -> ~/.config resolution order, without
+// parsing it — used by "config show" (config_show.go) to report the
+// resolved path even before/regardless of whether its contents parse.
+func ResolveConfigPath() (string, error) {
+	return resolveConfigPath(osEnv{})
+}
+
 func loadRegistryFromEnv(env envSource) (*Registry, error) {
+	path, err := resolveConfigPath(env)
+	if err != nil {
+		return nil, err
+	}
+	return loadRegistryFile(path)
+}
+
+// resolveConfigPath is loadRegistryFromEnv's own path-resolution step,
+// factored out so "config show" can report which config file was resolved
+// without also parsing it — the exact same $PG_PR_CONFIG -> XDG ->
+// ~/.config resolution order lives in exactly this one place.
+func resolveConfigPath(env envSource) (string, error) {
 	if explicit := env.Getenv("PG_PR_CONFIG"); explicit != "" {
-		reg, err := loadRegistryFile(explicit)
-		if err != nil {
+		if _, err := os.Stat(explicit); err != nil {
 			if errors.Is(err, fs.ErrNotExist) {
-				return nil, fmt.Errorf("registry: $PG_PR_CONFIG=%s does not exist", explicit)
+				return "", fmt.Errorf("registry: $PG_PR_CONFIG=%s does not exist", explicit)
 			}
-			return nil, err
+			return "", err
 		}
-		return reg, nil
+		return explicit, nil
 	}
 
 	candidates := registryCandidates(env)
 	for _, p := range candidates {
 		if _, err := os.Stat(p); err == nil {
-			return loadRegistryFile(p)
+			return p, nil
 		}
 	}
 
-	return nil, fmt.Errorf("%w: looked in %s; create one or set $PG_PR_CONFIG",
+	return "", fmt.Errorf("%w: looked in %s; create one or set $PG_PR_CONFIG",
 		ErrNoConfig, strings.Join(candidates, ", "))
 }
 
