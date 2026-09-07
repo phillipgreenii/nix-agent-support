@@ -60,4 +60,8 @@ ul_run_step "update-deps-pa-monitor" \
   "update-locks: update pa-monitor Go deps + gomod2nix.toml" \
   bash -c 'cd packages/pa-monitor && go get -u ./... && ./update-deps.sh'
 
+ul_run_step "update-deps-pg-connector" \
+  "update-locks: update pg-connector Go deps + gomod2nix.toml" \
+  bash -c 'cd packages/pg-connector && go get -u ./... && ./update-deps.sh'
+
 ul_finalize
