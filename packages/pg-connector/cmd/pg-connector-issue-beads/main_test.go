@@ -71,6 +71,28 @@ func TestNewDispatchTable_CapabilitiesVocabularyNonEmpty(t *testing.T) {
 	}
 }
 
+// TestNewDispatchTable_CapabilitiesVocabularyPriority locks in finding 33's
+// fix: capabilities.vocabulary must declare a non-empty "priority" entry
+// matching internal.PriorityVocabulary (bd's real accepted priority
+// values), since it previously omitted priority entirely [review:
+// 2026-09-05-pg-connector-deep-review.md §A finding 33].
+func TestNewDispatchTable_CapabilitiesVocabularyPriority(t *testing.T) {
+	table := newDispatchTable(newTestBackend())
+	entry := table[scriptout.OpCapabilities]
+	result, err := entry.Handle(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	resp := result.(scriptout.CapabilitiesResponse)
+	priorities, ok := resp.Vocabulary["priority"].([]string)
+	if !ok || len(priorities) == 0 {
+		t.Fatalf("vocabulary.priority = %#v, want a non-empty []string", resp.Vocabulary["priority"])
+	}
+	if !reflect.DeepEqual(priorities, internal.PriorityVocabulary) {
+		t.Fatalf("vocabulary.priority = %v, want exactly internal.PriorityVocabulary %v", priorities, internal.PriorityVocabulary)
+	}
+}
+
 // TestNewDispatchTable_CapabilitiesAdvertisesWorkspaceDir is the packet's
 // AC2 test for the capabilities-side half of "surfaced through
 // schema.Issue/capabilities" (bead pg2-1q9c0): capabilities must echo back

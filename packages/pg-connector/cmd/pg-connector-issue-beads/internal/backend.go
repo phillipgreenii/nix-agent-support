@@ -76,14 +76,49 @@ var Vocabulary = []string{
 	"hooked",
 }
 
+// PriorityVocabulary is this backend's declared, non-empty priority
+// vocabulary — bd's own real accepted `-p`/`--priority` values ("Priority
+// (0-4 or P0-P4, 0=highest)", read directly from `bd create --help`, bd
+// v1.2.2), rendered in the "P<n>" form formatPriority itself emits: a
+// faithful, round-trippable rendering of bd's actual model, not the
+// invented "High"/"Medium"/"Low" scale schema.Issue.Priority's doc comment
+// used to (wrongly) advertise as if it were universal [review:
+// 2026-09-05-pg-connector-deep-review.md §A finding 33]. Wired into this
+// backend's capabilities response as vocabulary.priority by
+// cmd/pg-connector-issue-beads/main.go's capabilitiesBase.
+var PriorityVocabulary = []string{"P0", "P1", "P2", "P3", "P4"}
+
 // run execs `bd args... --json` and returns the decoded payload, or a
-// scriptout-taxonomy error. It handles bd's two observed failure shapes
-// uniformly (see bd.go's doc comment): a well-formed
-// {"data":{"error":...}} envelope still written on a non-zero exit, and a
-// stderr-only failure with empty stdout (falls back to classifying the
-// wrapped exec error's own message, which still carries bd's stderr tail).
+// scriptout-taxonomy error. It handles bd's three observed shapes uniformly
+// (see bd.go's doc comment): a well-formed {"data":{"error":...}} envelope
+// still written on a non-zero exit, a stderr-only failure with empty
+// stdout (falls back to classifying the wrapped exec error's own message,
+// which still carries bd's stderr tail), and a genuinely successful exit 0
+// with empty stdout.
+//
+// That third case is deliberately NOT folded into "empty stdout means
+// failure": write-success is decided from bd's own exit code (runErr),
+// never from whether stdout happened to be non-empty [fix direction,
+// review 2026-09-05-pg-connector-deep-review.md §A finding 24]. Every op
+// this backend calls with `--json` today always echoes a JSON envelope on
+// success, so this path is not reachable against the real bd v1.2.2 this
+// backend was verified against — but Comment and Transition already
+// discard whatever payload b.run returns (see their callers below), so a
+// future bd version that stops echoing JSON on those ops would otherwise
+// turn an actually-landed write into a reported scriptout.ErrUnavailable
+// with no way to tell the two cases apart from this backend's own output.
+// Show and Create still fail distinctly under that same hypothetical
+// future change: they pass the (nil) data on to bdIssueFromArray /
+// bdIssueFromObject, which reject nil input as a decode failure rather than
+// silently succeeding with a zero-value issue.
 func (b *Backend) run(ctx context.Context, args ...string) (jsonData []byte, err error) {
 	out, runErr := b.runner.Run(ctx, args...)
+	if strings.TrimSpace(out) == "" {
+		if runErr != nil {
+			return nil, classifyBDErrorMessage(runErr.Error())
+		}
+		return nil, nil
+	}
 	data, bdErrMsg, parseErr := decodeBDEnvelope(out)
 	if parseErr != nil {
 		if runErr != nil {
@@ -115,16 +150,27 @@ func formatPriority(p int) string {
 // the backend does not supply one." Tracker carries the resolved bd
 // workspace directory this particular call actually hit [bead: pg2-1q9c0,
 // AC2] — populated by the caller (Show/Create) from Backend.tracker, not
-// derived from iss itself.
+// derived from iss itself. Description/Assignee/Parent/Deps are carried
+// straight through from bdIssue's own fields, added by bead pg2-akfw5
+// (review 2026-09-05-pg-connector-deep-review.md §A finding 33: this
+// mapping previously dropped all four).
 func toSchemaIssue(iss *bdIssue, tracker string) *schema.Issue {
+	var deps []schema.IssueDependency
+	for _, d := range iss.Dependencies {
+		deps = append(deps, schema.IssueDependency{ID: d.ID, Type: d.DependencyType})
+	}
 	return &schema.Issue{
-		ID:        iss.ID,
-		Title:     iss.Title,
-		State:     iss.Status,
-		Priority:  formatPriority(iss.Priority),
-		Labels:    iss.Labels,
-		IssueType: iss.IssueType,
-		Tracker:   tracker,
+		ID:          iss.ID,
+		Title:       iss.Title,
+		State:       iss.Status,
+		Priority:    formatPriority(iss.Priority),
+		Labels:      iss.Labels,
+		IssueType:   iss.IssueType,
+		Tracker:     tracker,
+		Description: iss.Description,
+		Assignee:    iss.Assignee,
+		Parent:      iss.Parent,
+		Deps:        deps,
 	}
 }
 
@@ -182,7 +228,9 @@ func (b *Backend) Show(ctx context.Context, id string) (*schema.Issue, error) {
 // returned id" plumbing [bead: Carry-over basis], adapted to a plain bd
 // issue with none of CreateAction's parent-child/discovered-from wiring —
 // that wiring is specific to pg-pr's review workflow and does not carry
-// over.
+// over. --description was added by bead pg2-akfw5 (review
+// 2026-09-05-pg-connector-deep-review.md §A finding 33: Create previously
+// had no way to set one at all).
 func (b *Backend) Create(ctx context.Context, input issue.IssueInput) (*schema.Issue, error) {
 	if strings.TrimSpace(input.Title) == "" {
 		return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, "issue: title required")
@@ -194,8 +242,19 @@ func (b *Backend) Create(ctx context.Context, input issue.IssueInput) (*schema.I
 	if input.IssueType != "" {
 		args = append(args, "--type", input.IssueType)
 	}
+	if input.Description != "" {
+		args = append(args, "--description", input.Description)
+	}
 	if len(input.Labels) > 0 {
-		args = append(args, "--labels", strings.Join(input.Labels, ","))
+		// CSV-quoted, not a bare "," join: bd's own `--labels` flag is a
+		// pflag StringSlice, which decodes its value via encoding/csv —
+		// see joinBDLabels's doc comment [review:
+		// 2026-09-05-pg-connector-deep-review.md §A finding 33].
+		joined, joinErr := joinBDLabels(input.Labels)
+		if joinErr != nil {
+			return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, "issue: encode labels: "+joinErr.Error())
+		}
+		args = append(args, "--labels", joined)
 	}
 	data, err := b.run(ctx, args...)
 	if err != nil {

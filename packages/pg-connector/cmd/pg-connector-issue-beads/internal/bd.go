@@ -23,6 +23,8 @@
 package internal
 
 import (
+	"bytes"
+	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -32,15 +34,58 @@ import (
 )
 
 // bdIssue is the subset of bd's `--json` issue shape this backend needs —
-// deliberately small: no metadata map, no dependencies, no comments (this
-// backend has no use for them, unlike packages/pg-pr/pkg/beads.bdIssue).
+// deliberately small: no metadata map, no comments (this backend has no
+// use for them, unlike packages/pg-pr/pkg/beads.bdIssue). Description,
+// Assignee, Parent, and Dependencies were added by bead pg2-akfw5 (review
+// 2026-09-05-pg-connector-deep-review.md §A finding 33: Show previously
+// dropped all four), verified live against a real `bd show --json` on a
+// child issue with a parent and description/assignee set, not assumed from
+// memory.
 type bdIssue struct {
-	ID        string   `json:"id"`
-	Title     string   `json:"title"`
-	Status    string   `json:"status"`
-	Priority  int      `json:"priority"`
-	IssueType string   `json:"issue_type"`
-	Labels    []string `json:"labels,omitempty"`
+	ID           string         `json:"id"`
+	Title        string         `json:"title"`
+	Description  string         `json:"description,omitempty"`
+	Status       string         `json:"status"`
+	Priority     int            `json:"priority"`
+	IssueType    string         `json:"issue_type"`
+	Labels       []string       `json:"labels,omitempty"`
+	Assignee     string         `json:"assignee,omitempty"`
+	Parent       string         `json:"parent,omitempty"`
+	Dependencies []bdDependency `json:"dependencies,omitempty"`
+}
+
+// bdDependency is one entry of bd's `dependencies` array on a `show`
+// response — a nested issue summary in real bd output, of which this
+// backend keeps only the two fields toSchemaIssue maps onto
+// schema.IssueDependency (id, dependency_type); the rest (title, status,
+// ...) is redundant with what a caller would get from Show-ing that id
+// directly, so json.Unmarshal simply ignores those extra keys.
+type bdDependency struct {
+	ID             string `json:"id"`
+	DependencyType string `json:"dependency_type"`
+}
+
+// joinBDLabels renders labels as the ONE `--labels` flag value bd's own
+// pflag StringSlice flag decodes correctly — that flag type parses its
+// value via encoding/csv (pflag's stringSlice.go readAsCSV/writeAsCSV), so
+// a label containing a literal comma or quote needs CSV quoting, not the
+// bare "," separator this used to join with [review:
+// 2026-09-05-pg-connector-deep-review.md §A finding 33]. Verified live
+// against a real bd v1.2.2: `bd create --labels '"foo,bar",baz' --json`
+// decodes back to exactly two labels, "foo,bar" and "baz" — the same
+// encoding this function produces — confirming this matches bd's actual
+// flag-parsing behavior rather than an assumption about pflag internals.
+func joinBDLabels(labels []string) (string, error) {
+	var buf bytes.Buffer
+	w := csv.NewWriter(&buf)
+	if err := w.Write(labels); err != nil {
+		return "", fmt.Errorf("bd: encode --labels value: %w", err)
+	}
+	w.Flush()
+	if err := w.Error(); err != nil {
+		return "", fmt.Errorf("bd: encode --labels value: %w", err)
+	}
+	return strings.TrimSuffix(buf.String(), "\n"), nil
 }
 
 // decodeBDEnvelope peeks bd's `--json` envelope apart into either a

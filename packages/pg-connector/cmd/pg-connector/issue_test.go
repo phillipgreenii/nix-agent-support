@@ -93,6 +93,33 @@ func TestRun_IssueCreate_Success(t *testing.T) {
 	}
 }
 
+// TestRun_IssueCreate_WithDescription_Success locks in the CLI half of
+// finding 33's fix: `pg-connector issue create` must accept a
+// --description flag at all (it previously had none), reaching exit 0
+// [review: 2026-09-05-pg-connector-deep-review.md §A finding 33].
+func TestRun_IssueCreate_WithDescription_Success(t *testing.T) {
+	writeOpAwareFakeBackend(t, "backend-issue-create-desc", map[string]string{
+		"create": `{"protocolVersion":1,"schemaVersion":1,"result":{"id":"issue-2","title":"new issue","state":"open","description":"a desc"}}`,
+	}, `{}`)
+	writeIssueConfigFor(t, "backend-issue-create-desc")
+
+	stdout, code := executePr(t, []string{"issue", "create", "--title", "new issue", "--description", "a desc"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
+	}
+	var resp scriptout.Response
+	if err := json.Unmarshal([]byte(stdout), &resp); err != nil {
+		t.Fatalf("decode response: %v (stdout=%s)", err, stdout)
+	}
+	var issue schema.Issue
+	if err := scriptout.Decode(resp.Result, &issue); err != nil {
+		t.Fatalf("decode Issue: %v", err)
+	}
+	if issue.Description != "a desc" {
+		t.Fatalf("issue.Description = %q, want %q", issue.Description, "a desc")
+	}
+}
+
 func TestRun_IssueComment_Success(t *testing.T) {
 	writeOpAwareFakeBackend(t, "backend-issue-comment", map[string]string{
 		"comment": `{"protocolVersion":1,"schemaVersion":1,"result":null}`,
@@ -193,6 +220,37 @@ func TestRun_IssueShow_HumanOutput(t *testing.T) {
 		t.Fatalf("human output must not contain raw JSON; stdout=%s", stdout)
 	}
 	for _, want := range []string{"issue issue-1", "[open]", "priority: High", "type: Bug", "labels: a, b"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("human output missing %q; stdout=%s", want, stdout)
+		}
+	}
+}
+
+// TestRun_IssueShow_HumanOutput_IncludesDescriptionAssigneeParentDeps locks
+// in the CLI-rendering half of finding 33's fix: once Show's response
+// carries description/assignee/parent/deps (schema.Issue side, verified in
+// pkg/schema and cmd/pg-connector-issue-beads/internal), formatIssue must
+// actually display them in human mode rather than silently dropping them
+// again at this last rendering step [review:
+// 2026-09-05-pg-connector-deep-review.md §A finding 33].
+func TestRun_IssueShow_HumanOutput_IncludesDescriptionAssigneeParentDeps(t *testing.T) {
+	writeOpAwareFakeBackend(t, "backend-issue-show-human-fields", map[string]string{
+		"show": `{"protocolVersion":1,"schemaVersion":1,"result":{"id":"issue-1","title":"t","state":"open",` +
+			`"priority":"P1","assignee":"someone@example.com","parent":"issue-0",` +
+			`"deps":[{"id":"issue-0","type":"parent-child"}],"description":"a desc"}}`,
+	}, `{}`)
+	writeIssueConfigFor(t, "backend-issue-show-human-fields")
+
+	stdout, code := executePr(t, []string{"--output", "human", "issue", "show", "issue-1"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
+	}
+	for _, want := range []string{
+		"assignee: someone@example.com",
+		"parent: issue-0",
+		"deps: issue-0 (parent-child)",
+		"description: a desc",
+	} {
 		if !strings.Contains(stdout, want) {
 			t.Fatalf("human output missing %q; stdout=%s", want, stdout)
 		}

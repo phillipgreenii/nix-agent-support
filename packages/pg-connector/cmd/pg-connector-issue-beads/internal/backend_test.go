@@ -172,6 +172,62 @@ func TestBackend_Show_NotFound_ViaJSONErrorEnvelope(t *testing.T) {
 	}
 }
 
+// TestBackend_Show_EmptyStdoutOnSuccess_FailsAtDecodeNotAvailability locks
+// in finding 24's fix at the OTHER pole from
+// TestBackend_Comment_SuccessWithEmptyStdout below: for an op that DOES
+// need the payload (Show), an exit-0-with-empty-stdout call must still
+// fail — but as a decode failure (ErrUnavailable via bdIssueFromArray),
+// never silently succeeding with a zero-value issue, and never confused
+// with ErrNotFound [review: 2026-09-05-pg-connector-deep-review.md §A
+// finding 24].
+func TestBackend_Show_EmptyStdoutOnSuccess_FailsAtDecodeNotAvailability(t *testing.T) {
+	fr := &fakeRunner{handle: func(args []string) (string, error) {
+		return "", nil
+	}}
+	b := New(fr)
+	_, err := b.Show(context.Background(), "tp-1")
+	if err == nil {
+		t.Fatal("expected an error decoding a nil/empty payload")
+	}
+	if errors.Is(err, scriptout.ErrNotFound) {
+		t.Fatalf("err = %v, must not be classified as ErrNotFound", err)
+	}
+	if !errors.Is(err, scriptout.ErrUnavailable) {
+		t.Fatalf("err = %v, want wrapping ErrUnavailable", err)
+	}
+}
+
+// TestBackend_Show_IncludesDescriptionAssigneeParentDeps locks in the fix
+// for finding 33's "Show drops description/assignee/parent/deps from its
+// response" [review: 2026-09-05-pg-connector-deep-review.md §A finding 33].
+func TestBackend_Show_IncludesDescriptionAssigneeParentDeps(t *testing.T) {
+	fr := &fakeRunner{handle: func(args []string) (string, error) {
+		return `{"data":[{"id":"tp-1.1","title":"child","description":"a desc",` +
+			`"status":"open","priority":1,"issue_type":"task",` +
+			`"assignee":"someone@example.com","parent":"tp-1",` +
+			`"dependencies":[{"id":"tp-1","title":"parent","status":"open",` +
+			`"priority":1,"issue_type":"task","dependency_type":"parent-child"}]}],` +
+			`"schema_version":1}`, nil
+	}}
+	b := New(fr)
+	got, err := b.Show(context.Background(), "tp-1.1")
+	if err != nil {
+		t.Fatalf("Show: %v", err)
+	}
+	if got.Description != "a desc" {
+		t.Fatalf("Description = %q, want %q", got.Description, "a desc")
+	}
+	if got.Assignee != "someone@example.com" {
+		t.Fatalf("Assignee = %q, want %q", got.Assignee, "someone@example.com")
+	}
+	if got.Parent != "tp-1" {
+		t.Fatalf("Parent = %q, want %q", got.Parent, "tp-1")
+	}
+	if len(got.Deps) != 1 || got.Deps[0].ID != "tp-1" || got.Deps[0].Type != "parent-child" {
+		t.Fatalf("Deps = %+v, want one dependency {ID:tp-1 Type:parent-child}", got.Deps)
+	}
+}
+
 func TestBackend_Show_EmptyID(t *testing.T) {
 	fr := &fakeRunner{}
 	b := New(fr)
@@ -255,7 +311,7 @@ func TestBackend_Create_MissingTitle(t *testing.T) {
 
 func TestBackend_Create_OmitsOptionalFlagsWhenUnset(t *testing.T) {
 	fr := &fakeRunner{handle: func(args []string) (string, error) {
-		for _, flag := range []string{"-p", "--type", "--labels"} {
+		for _, flag := range []string{"-p", "--type", "--labels", "--description"} {
 			if containsArg(args, flag) {
 				t.Fatalf("did not expect %s in args when unset, got %v", flag, args)
 			}
@@ -265,6 +321,65 @@ func TestBackend_Create_OmitsOptionalFlagsWhenUnset(t *testing.T) {
 	b := New(fr)
 	if _, err := b.Create(context.Background(), issue.IssueInput{Title: "bare"}); err != nil {
 		t.Fatalf("Create: %v", err)
+	}
+}
+
+// TestBackend_Create_CommaBearingLabelRoundTrips locks in finding 33's fix
+// for "--labels values are joined with a bare ',' ... which splits any
+// label that itself contains a comma" [review:
+// 2026-09-05-pg-connector-deep-review.md §A finding 33]. The expected
+// --labels value is CSV-quoted exactly the way bd's own pflag StringSlice
+// flag decodes it (verified live against a real bd v1.2.2 in this bead's
+// investigation).
+func TestBackend_Create_CommaBearingLabelRoundTrips(t *testing.T) {
+	fr := &fakeRunner{handle: func(args []string) (string, error) {
+		idx := -1
+		for i, a := range args {
+			if a == "--labels" {
+				idx = i
+				break
+			}
+		}
+		if idx == -1 || idx+1 >= len(args) {
+			t.Fatalf("expected --labels <value> in args, got %v", args)
+		}
+		got := args[idx+1]
+		want := `"foo,bar",baz`
+		if got != want {
+			t.Fatalf("--labels value = %q, want %q (CSV-quoted so bd decodes the embedded comma as part of one label)", got, want)
+		}
+		return `{"data":{"id":"tp-9","title":"t","status":"open","priority":2,"issue_type":"task","labels":["foo,bar","baz"]},"schema_version":1}`, nil
+	}}
+	b := New(fr)
+	got, err := b.Create(context.Background(), issue.IssueInput{
+		Title:  "t",
+		Labels: []string{"foo,bar", "baz"},
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if len(got.Labels) != 2 || got.Labels[0] != "foo,bar" || got.Labels[1] != "baz" {
+		t.Fatalf(`Labels = %v, want ["foo,bar" "baz"] (a comma-bearing label must round-trip intact)`, got.Labels)
+	}
+}
+
+// TestBackend_Create_SetsDescription locks in finding 33's fix for
+// "Create has no way to set a description at all" [review:
+// 2026-09-05-pg-connector-deep-review.md §A finding 33].
+func TestBackend_Create_SetsDescription(t *testing.T) {
+	fr := &fakeRunner{handle: func(args []string) (string, error) {
+		if !containsArg(args, "--description") || !containsArg(args, "a desc") {
+			t.Fatalf(`expected --description "a desc" in args, got %v`, args)
+		}
+		return `{"data":{"id":"tp-9","title":"t","description":"a desc","status":"open","priority":2,"issue_type":"task"},"schema_version":1}`, nil
+	}}
+	b := New(fr)
+	got, err := b.Create(context.Background(), issue.IssueInput{Title: "t", Description: "a desc"})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if got.Description != "a desc" {
+		t.Fatalf("Description = %q, want %q", got.Description, "a desc")
 	}
 }
 
@@ -320,6 +435,22 @@ func TestBackend_Comment_NotFound_ViaStderrOnlyFailure(t *testing.T) {
 	err := b.Comment(context.Background(), "tp-zzz", "hi")
 	if !errors.Is(err, scriptout.ErrNotFound) {
 		t.Fatalf("err = %v, want wrapping ErrNotFound", err)
+	}
+}
+
+// TestBackend_Comment_SuccessWithEmptyStdout locks in finding 24's fix: an
+// exit-0 bd invocation with genuinely empty stdout must be treated as a
+// real, payload-less success, not backend ill-health [review:
+// 2026-09-05-pg-connector-deep-review.md §A finding 24] — Comment already
+// discards whatever payload b.run returns, so this exercises the
+// hypothetical future bd version that stops echoing JSON on this op.
+func TestBackend_Comment_SuccessWithEmptyStdout(t *testing.T) {
+	fr := &fakeRunner{handle: func(args []string) (string, error) {
+		return "", nil // exit 0, no stdout
+	}}
+	b := New(fr)
+	if err := b.Comment(context.Background(), "tp-1", "hello"); err != nil {
+		t.Fatalf("Comment: %v, want success (exit 0 + empty stdout is a real success, not ErrUnavailable)", err)
 	}
 }
 
@@ -409,6 +540,21 @@ func TestBackend_Transition_NotFound_ViaStderrOnlyFailure(t *testing.T) {
 	err := b.Transition(context.Background(), "tp-zzz", "closed")
 	if !errors.Is(err, scriptout.ErrNotFound) {
 		t.Fatalf("err = %v, want wrapping ErrNotFound", err)
+	}
+}
+
+// TestBackend_Transition_SuccessWithEmptyStdout locks in finding 24's fix,
+// mirroring TestBackend_Comment_SuccessWithEmptyStdout above: an exit-0
+// `bd update ... --json` with empty stdout is a real success (Transition
+// already discards the payload), not backend ill-health [review:
+// 2026-09-05-pg-connector-deep-review.md §A finding 24].
+func TestBackend_Transition_SuccessWithEmptyStdout(t *testing.T) {
+	fr := &fakeRunner{handle: func(args []string) (string, error) {
+		return "", nil
+	}}
+	b := New(fr)
+	if err := b.Transition(context.Background(), "tp-1", "in_progress"); err != nil {
+		t.Fatalf("Transition: %v, want success (exit 0 + empty stdout is a real success, not ErrUnavailable)", err)
 	}
 }
 
@@ -517,6 +663,33 @@ func TestVocabulary_NonEmptyAndMatchesRealBDStatuses(t *testing.T) {
 	for g := range got {
 		if !want[g] {
 			t.Errorf("Vocabulary has unexpected entry %q not among bd's built-in statuses", g)
+		}
+	}
+}
+
+// TestPriorityVocabulary_NonEmptyAndMatchesRealBDPriorities locks in
+// finding 33's fix: capabilities.vocabulary must declare a priority
+// vocabulary matching what bd's own `-p`/`--priority` flag actually
+// accepts ("0-4 or P0-P4"), not the invented "High"/"Medium"/"Low" scale
+// schema.Issue.Priority's doc comment used to advertise [review:
+// 2026-09-05-pg-connector-deep-review.md §A finding 33].
+func TestPriorityVocabulary_NonEmptyAndMatchesRealBDPriorities(t *testing.T) {
+	if len(PriorityVocabulary) == 0 {
+		t.Fatal("PriorityVocabulary must be non-empty")
+	}
+	want := map[string]bool{"P0": true, "P1": true, "P2": true, "P3": true, "P4": true}
+	got := map[string]bool{}
+	for _, v := range PriorityVocabulary {
+		got[v] = true
+	}
+	for w := range want {
+		if !got[w] {
+			t.Errorf("PriorityVocabulary missing bd priority %q", w)
+		}
+	}
+	for g := range got {
+		if !want[g] {
+			t.Errorf("PriorityVocabulary has unexpected entry %q not among bd's real priority values", g)
 		}
 	}
 }

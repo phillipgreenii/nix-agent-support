@@ -60,20 +60,24 @@ func newDispatchTable(backend *internal.Backend) scriptout.DispatchTable {
 }
 
 // capabilitiesBase declares this backend's schemaVersions and its
-// non-empty state vocabulary (bd's actual accepted --status values)
-// [design: §4.3, §4.3 AC] — everything AddCapabilities needs except Ops,
-// which it deliberately leaves unset for AddCapabilities to compute. It
-// also advertises the resolved bd workspace directory (bead pg2-1q9c0,
-// AC2) when one is configured, so `pg-connector config validate`'s
-// capabilities fan-out can surface which tracker each issue-beads instance
-// targets without needing to run a real op first. capabilities must always
-// answer regardless of workspace configuration (Backend.Workspace's error
-// is deliberately swallowed here, not surfaced as a capabilities failure)
-// — an unconfigured workspace is a Show/Create/Comment/Transition-time
+// non-empty state and priority vocabularies (bd's actual accepted --status
+// and --priority values) [design: §4.3, §4.3 AC] — everything
+// AddCapabilities needs except Ops, which it deliberately leaves unset for
+// AddCapabilities to compute. vocabulary.priority was added by bead
+// pg2-akfw5 (review 2026-09-05-pg-connector-deep-review.md §A finding 33:
+// capabilities.vocabulary previously omitted priority entirely). It also
+// advertises the resolved bd workspace directory (bead pg2-1q9c0, AC2)
+// when one is configured, so `pg-connector config validate`'s capabilities
+// fan-out can surface which tracker each issue-beads instance targets
+// without needing to run a real op first. capabilities must always answer
+// regardless of workspace configuration (Backend.Workspace's error is
+// deliberately swallowed here, not surfaced as a capabilities failure) —
+// an unconfigured workspace is a Show/Create/Comment/Transition-time
 // error, not a health-check failure.
 func capabilitiesBase(backend *internal.Backend) scriptout.CapabilitiesResponse {
 	vocabulary := map[string]any{
-		"state": internal.Vocabulary,
+		"state":    internal.Vocabulary,
+		"priority": internal.PriorityVocabulary,
 	}
 	if dir, err := backend.Workspace(); err == nil && dir != "" {
 		vocabulary["workspace_dir"] = dir

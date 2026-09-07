@@ -28,12 +28,16 @@ import (
 // IssueInput is the caller-supplied field set for Create. It is
 // deliberately narrower than schema.Issue: ID, URL, and State are
 // backend-assigned outputs of a successful create, never inputs a caller
-// supplies.
+// supplies. Description was added by bead pg2-akfw5 (review
+// 2026-09-05-pg-connector-deep-review.md §A finding 33: Create previously
+// had no way to set one at all); Assignee/Parent/Deps stay out of scope for
+// that bead's fix — it names only "give Create a description parameter."
 type IssueInput struct {
-	Title     string   `json:"title"`
-	Priority  string   `json:"priority,omitempty"`
-	Labels    []string `json:"labels,omitempty"`
-	IssueType string   `json:"issue_type,omitempty"`
+	Title       string   `json:"title"`
+	Priority    string   `json:"priority,omitempty"`
+	Labels      []string `json:"labels,omitempty"`
+	IssueType   string   `json:"issue_type,omitempty"`
+	Description string   `json:"description,omitempty"`
 }
 
 // Provider is the issue capability's provider interface. A concrete

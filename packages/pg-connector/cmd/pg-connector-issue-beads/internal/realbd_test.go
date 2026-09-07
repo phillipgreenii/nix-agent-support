@@ -75,10 +75,11 @@ func TestBackend_RoundTrip_RealBD(t *testing.T) {
 	defer cancelCtx()
 
 	created, err := b.Create(ctx, issue.IssueInput{
-		Title:     "round-trip probe",
-		Priority:  "P1",
-		IssueType: "task",
-		Labels:    []string{"probe"},
+		Title:       "round-trip probe",
+		Priority:    "P1",
+		IssueType:   "task",
+		Labels:      []string{"probe", "foo,bar"},
+		Description: "a round-trip description",
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -88,6 +89,21 @@ func TestBackend_RoundTrip_RealBD(t *testing.T) {
 	}
 	if created.State != "open" {
 		t.Fatalf("Create: State = %q, want open", created.State)
+	}
+	// Verified live against real bd v1.2.2, not a fake: a comma-bearing
+	// label must round-trip as ONE label, not split at the embedded comma
+	// [review: 2026-09-05-pg-connector-deep-review.md §A finding 33].
+	wantLabels := map[string]bool{"probe": true, "foo,bar": true}
+	if len(created.Labels) != len(wantLabels) {
+		t.Fatalf("Create: Labels = %v, want exactly %v", created.Labels, wantLabels)
+	}
+	for _, l := range created.Labels {
+		if !wantLabels[l] {
+			t.Fatalf("Create: unexpected label %q in %v", l, created.Labels)
+		}
+	}
+	if created.Description != "a round-trip description" {
+		t.Fatalf("Create: Description = %q, want %q (bead pg2-akfw5, finding 33)", created.Description, "a round-trip description")
 	}
 
 	if err := b.Comment(ctx, created.ID, "commenting from the round-trip test"); err != nil {
@@ -107,6 +123,9 @@ func TestBackend_RoundTrip_RealBD(t *testing.T) {
 	}
 	if shown.ID != created.ID || shown.Title != created.Title {
 		t.Fatalf("Show identity mismatch: got %+v, want id/title matching %+v", shown, created)
+	}
+	if shown.Description != "a round-trip description" {
+		t.Fatalf("Show: Description = %q, want %q (bead pg2-akfw5, finding 33: Show previously dropped this)", shown.Description, "a round-trip description")
 	}
 
 	// A genuinely unknown id must round-trip as a well-formed ErrNotFound,
