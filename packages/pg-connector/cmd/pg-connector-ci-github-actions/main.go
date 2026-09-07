@@ -32,9 +32,12 @@ func main() {
 	os.Exit(run())
 }
 
-// run builds this backend's Provider (ported GitHub Actions logic, no
-// local store) and its op-dispatch table, then hands the table to the
-// Tier-1 core's generic serve loop.
+// run builds this backend's Provider (ported GitHub Actions logic, plus
+// this backend's own small run_id->repo correlation store — internal/
+// run_store.go — that GetLogs needs to resolve gh's `--repo`
+// [operator ruling, Phillip, 2026-09-06, on pg2-f327j; supersedes this
+// comment's prior "no local store" claim]) and its op-dispatch table, then
+// hands the table to the Tier-1 core's generic serve loop.
 func run() int {
 	backend := internal.New()
 	return scriptout.ServeLoop(newDispatchTable(backend))

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 
@@ -28,8 +29,10 @@ func (fakePR) Resolve(_ context.Context, _ string) (string, string, error) {
 	return "owner/repo", "feat/x", nil
 }
 
-func newTestBackend() *internal.Backend {
-	return internal.NewWithDeps(fakeGH{}, fakePR{})
+func newTestBackend(t *testing.T) *internal.Backend {
+	t.Helper()
+	runs := internal.NewRunStore(filepath.Join(t.TempDir(), "run-repo.json"))
+	return internal.NewWithDeps(fakeGH{}, fakePR{}, runs)
 }
 
 // TestNewDispatchTable_CapabilitiesDeclaresCISchemaVersion is the packet's
@@ -38,7 +41,7 @@ func newTestBackend() *internal.Backend {
 // is actually exercised rather than only asserted in prose
 // (INV-VER-1).
 func TestNewDispatchTable_CapabilitiesDeclaresCISchemaVersion(t *testing.T) {
-	table := newDispatchTable(newTestBackend())
+	table := newDispatchTable(newTestBackend(t))
 	entry, ok := table[scriptout.OpCapabilities]
 	if !ok {
 		t.Fatal("capabilities entry missing from this binary's own dispatch table")
@@ -103,7 +106,7 @@ func TestNewDispatchTable_CapabilitiesDeclaresVersion(t *testing.T) {
 // from ci.NewDispatchTable's own table without this binary's Ops following
 // automatically, this test would catch the divergence.
 func TestNewDispatchTable_CapabilitiesOpsMatchesTableKeys(t *testing.T) {
-	table := newDispatchTable(newTestBackend())
+	table := newDispatchTable(newTestBackend(t))
 	entry, ok := table[scriptout.OpCapabilities]
 	if !ok {
 		t.Fatal("capabilities entry missing from this binary's own dispatch table")
@@ -149,7 +152,7 @@ func TestServeLoop_ListRunsRoundTripsThroughStdinStdout(t *testing.T) {
 		t.Fatalf("close stdin writer: %v", err)
 	}
 
-	code := scriptout.ServeLoop(newDispatchTable(newTestBackend()))
+	code := scriptout.ServeLoop(newDispatchTable(newTestBackend(t)))
 
 	if err := outW.Close(); err != nil {
 		t.Fatalf("close stdout writer: %v", err)

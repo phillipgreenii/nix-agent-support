@@ -106,7 +106,7 @@ func TestGHCLI_NoToken_DoesNotExecGH(t *testing.T) {
 		t.Errorf("error does not name `gh auth login`: %v", err)
 	}
 
-	p := NewWithDeps(cli, &fakePR{repo: "foo/bar", branch: "feat/x"})
+	p := NewWithDeps(cli, &fakePR{repo: "foo/bar", branch: "feat/x"}, newTestRunStore(t))
 	if _, err := p.ListRuns(context.Background(), "foo/bar#42"); err == nil {
 		t.Fatal("ListRuns = nil error with no resolvable token")
 	} else if !errors.Is(err, scriptout.ErrUnauthenticated) {

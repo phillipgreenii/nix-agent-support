@@ -1,10 +1,14 @@
 // provider.go: Backend implements pkg/provider/ci.Provider against GitHub
 // Actions by carrying over
 // packages/pg-pr/pkg/provider/cicd/ghactions's existing ListRuns/GetLogs/
-// RerunFailed GitHub calls unchanged, adapted to ci.Provider's id-only
-// signatures and schema.CIRun result type [contract: carry-over basis]. Backend also implements pkg/provider.AuthChecker
-// via the same env-then-gh-auth-token chain the pg-connector-pr-github
-// backend already uses, since both are GitHub-backed (INV-AUTH-1).
+// RerunFailed GitHub calls, adapted to ci.Provider's id-only signatures and
+// schema.CIRun result type [contract: carry-over basis]. GetLogs' own gh
+// call is the one exception to "unchanged": it now passes `--repo`,
+// resolved via this backend's own run_id->repo store (run_store.go,
+// GetLogs' doc comment below) [operator ruling, Phillip, 2026-09-06, on
+// pg2-f327j]. Backend also implements pkg/provider.AuthChecker via the same
+// env-then-gh-auth-token chain the pg-connector-pr-github backend already
+// uses, since both are GitHub-backed (INV-AUTH-1).
 package internal
 
 import (
@@ -37,29 +41,40 @@ type ghRunner interface {
 }
 
 // Backend is pg-connector-ci-github-actions's concrete ci.Provider
-// implementation. Unlike the sibling pg-connector-pr-github backend,
-// Backend keeps no local store: every field on schema.CIRun is read
-// straight from GitHub, with no categorize/feedback_set-style write-back
-// this capability needs to persist (interfaces.md's op catalog).
+// implementation. Every field on schema.CIRun is read straight from
+// GitHub, with no categorize/feedback_set-style write-back this capability
+// needs to persist (interfaces.md's op catalog) — but Backend is NOT
+// store-free: it keeps its own small backend-local store (run_store.go),
+// recording which repo owns each CI run ID, purely so GetLogs can resolve
+// the `--repo` gh's `run view --log` call needs without widening
+// ci.Provider's id-only signature [operator ruling, Phillip, 2026-09-06, on
+// pg2-f327j; supersedes this comment's and GetLogs' own prior "no local
+// store"/"no repo/PR context is needed" claims]. This is a backend-private
+// correlation cache, not an entity mirror or a cross-connector store —
+// same category as the sibling pg-connector-pr-github backend's own
+// store.go.
 type Backend struct {
-	gh ghRunner
-	pr PRResolver
+	gh   ghRunner
+	pr   PRResolver
+	runs *RunStore
 }
 
 // New returns a Backend wired for production: the token-protected gh CLI
 // gateway (internal/github.NewCLI), shared between run-list/logs/rerun and
 // the PRResolver (resolver.go), which resolves a PR id directly against
 // GitHub — never by shelling out to pg-connector or any other backend
-// binary (INV-REG-1).
+// binary (INV-REG-1) — plus this backend's own run_id->repo correlation
+// store (run_store.go) at its default, XDG_STATE_HOME-honouring path.
 func New() *Backend {
 	gh := github.NewCLI()
-	return &Backend{gh: gh, pr: newGHPRResolver(gh)}
+	return &Backend{gh: gh, pr: newGHPRResolver(gh), runs: NewRunStore(DefaultRunStorePath())}
 }
 
 // NewWithDeps constructs a Backend with injected dependencies — used by
-// tests to avoid spawning real `gh`/`pg-connector` subprocesses.
-func NewWithDeps(gh ghRunner, pr PRResolver) *Backend {
-	return &Backend{gh: gh, pr: pr}
+// tests to avoid spawning real `gh`/`pg-connector` subprocesses and to
+// control the run_id->repo store's contents directly.
+func NewWithDeps(gh ghRunner, pr PRResolver, runs *RunStore) *Backend {
+	return &Backend{gh: gh, pr: pr, runs: runs}
 }
 
 // Compile-time checks that Backend satisfies both the ci capability's
@@ -124,8 +139,11 @@ func (b *Backend) ListRuns(ctx context.Context, prID string) ([]schema.CIRun, er
 }
 
 // listRunsByBranch is ghactions.go's own ListRunsByBranch, carried over
-// unchanged in its gh call shape, adapted to this capability's schema and
-// to stamp prID onto every result.
+// unchanged in its gh call shape, adapted to this capability's schema, to
+// stamp prID onto every result, and to record each returned run's repo in
+// this backend's own run_id->repo store (run_store.go) so a later GetLogs
+// call for one of these run IDs can resolve the `--repo` gh's `run view
+// --log` needs [operator ruling, Phillip, 2026-09-06, on pg2-f327j].
 func (b *Backend) listRunsByBranch(ctx context.Context, prID, repo, branch string) ([]schema.CIRun, error) {
 	if err := validateRepo(repo); err != nil {
 		return nil, scriptout.WrapError(scriptout.ErrUnavailable, err.Error())
@@ -153,39 +171,58 @@ func (b *Backend) listRunsByBranch(ctx context.Context, prID, repo, branch strin
 	}
 	out := make([]schema.CIRun, 0, len(runs))
 	for _, r := range runs {
-		out = append(out, r.toSchema(prID))
+		cr := r.toSchema(prID)
+		if err := b.runs.SetRepo(cr.ID, repo); err != nil {
+			return nil, scriptout.WrapError(scriptout.ErrUnavailable, fmt.Sprintf("pg-connector-ci-github-actions: persist run %s's repo: %v", cr.ID, err))
+		}
+		out = append(out, cr)
 	}
 	return out, nil
 }
 
-// GetLogs implements ci.Provider.GetLogs, carried over from ghactions.go: no
-// repo/PR context is needed or added, matching that packet's own behavior
-// exactly — this packet's contract requires "no behavioral drift on the
-// ported operations." The one deliberate deviation from a literal carry-
-// over is the "--" terminator placed ahead of runID [bead: pg2-uziwu],
+// GetLogs implements ci.Provider.GetLogs. Unlike ghactions.go's own
+// GetLogs (this packet's original carry-over basis), this now passes
+// `--repo` to gh — matching ListRuns/listRunsByBranch above — resolved via
+// this backend's own run_id->repo store (run_store.go) rather than by
+// widening GetLogs' id-only signature: gh/GitHub's REST API has no
+// repo-agnostic "look up a run by id" call (every run endpoint is scoped
+// under /repos/{owner}/{repo}/…), and ci.Provider.GetLogs stays id-only per
+// operator ruling [Phillip, 2026-09-06, on pg2-f327j; supersedes this
+// doc comment's prior "carried over unchanged... no repo/PR context is
+// needed or added" claim — the process-boundary change the port itself
+// introduced, cwd no longer guaranteed to be the target repo, is exactly
+// what made that claim stop holding]. A run ID this store has never seen —
+// e.g. GetLogs called for a run whose PR was never listed via ListRuns/
+// "ci list" in this environment — is a well-formed not_found, not a
+// silent or confusing failure.
+//
+// The final gh call also carries the "--" terminator fix [bead: pg2-uziwu],
 // mirroring the pg-connector-scm-git worktree add/remove fix [bead:
 // pg2-jn22x] and the pg-connector-issue-beads backend fix [bead: pg2-usu5b]:
 // without it, a caller-supplied runID equal to a real `gh run view` flag
 // (e.g. "--repo") is parsed by gh's own cobra/pflag layer as that flag
-// instead of as a positional run id — verified live against real gh v2.99.0:
-// `gh run view --repo --log` (the old unescaped shape, with runID="--repo"
-// positioned where a flag can consume it) has "--repo" consume "--log" as
-// its value, losing the run id AND the --log flag entirely ("run or job ID
-// required when not running interactively"). `--` forces "--repo" to be
-// treated as a literal positional instead, correctly reaching
-// ".../actions/runs/--repo" as the requested (nonexistent) run.
-//
-// Unlike the trivial 1-line insertions in those two sibling fixes, --log
-// cannot simply move after the terminator: `gh run view`, like bd, treats
-// everything after "--" as positional, so --log MUST stay BEFORE it to keep
-// parsing as a flag rather than becoming a second (rejected) positional
-// argument. Hence "run", "view", "--log", "--", runID — flags first, then
-// the terminator, then the caller-controlled positional.
+// instead of as a positional run id — verified live against real gh v2.99.0.
+// Both `--log` and `--repo <repo>` MUST stay BEFORE the "--" terminator
+// (`gh run view`, like bd, treats everything after "--" as positional, so
+// neither flag can move after it without becoming a second, rejected
+// positional), with runID as the sole caller-controlled positional after
+// it: "run", "view", "--log", "--repo", repo, "--", runID — flags first,
+// then the terminator, then the caller-controlled positional.
 func (b *Backend) GetLogs(ctx context.Context, runID string) ([]byte, error) {
 	if strings.TrimSpace(runID) == "" {
 		return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, "pg-connector-ci-github-actions: run ID is required")
 	}
-	raw, err := b.gh.Run(ctx, "run", "view", "--log", "--", runID)
+	repo, ok, err := b.runs.GetRepo(runID)
+	if err != nil {
+		return nil, scriptout.WrapError(scriptout.ErrUnavailable, err.Error())
+	}
+	if !ok {
+		return nil, scriptout.WrapError(scriptout.ErrNotFound, fmt.Sprintf(
+			"pg-connector-ci-github-actions: run %s has no known repo in this environment — run \"ci list\" for its PR first",
+			runID,
+		))
+	}
+	raw, err := b.gh.Run(ctx, "run", "view", "--log", "--repo", repo, "--", runID)
 	if err != nil {
 		return nil, classifyGHError(err)
 	}

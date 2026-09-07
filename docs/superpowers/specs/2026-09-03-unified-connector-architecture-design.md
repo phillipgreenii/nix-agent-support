@@ -32,6 +32,14 @@ nothing to the four shipped here.
 No connector mirrors entity state into a shared store (§8 explains why) and no connector widens
 its own scope to survey more than what's asked for.
 
+**Note (operator ruling, Phillip, 2026-09-06, on `pg2-f327j`):** this rules out a
+_shared/cross-connector_ store, not a backend-local one. The CI GitHub Actions backend
+(`pg-connector-ci-github-actions`) keeps a small backend-private run_id->repo correlation cache
+so its `GetLogs` can resolve the `--repo` gh's `run view --log` needs without widening
+`ci.Provider.GetLogs`'s id-only signature — the same category of backend-local store the PR
+GitHub backend's own categorize/feedback-disposition store already is (§8). Neither is an
+exception to this line.
+
 **Acceptance criteria**
 
 - The shared schema package defines exactly four connector types (pr, issue, ci, scm); Person and
