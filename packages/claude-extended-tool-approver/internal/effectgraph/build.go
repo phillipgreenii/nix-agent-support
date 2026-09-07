@@ -35,6 +35,7 @@ func BuildStructural(sp cmdparse.ShellParse) Graph {
 // Marks other than insufficient stay MarkUnjudged for the policy fold.
 func BuildInterpreted(sp cmdparse.ShellParse, reg cmddesc.Registry, ctx cmddesc.Context) Graph {
 	b := newBuilder()
+	b.baseCWD = ctx.CWD
 	b.leaves(sp.Leaves, "")
 	b.interpretRange(0, len(b.g.Nodes), reg, ctx, nil)
 	b.deriveFlows()
@@ -58,6 +59,21 @@ type builder struct {
 	// outside cmddesc that distinguishes the two child shapes, and it keys on
 	// the dialect data, never on a command name.
 	execDialect map[string]string
+	// baseCWD is the request's working directory. A leaf whose effective
+	// CWD (after a preceding cd in its list, slice 3o) differs from it has
+	// its relative path effects re-based to absolute paths, so the policies'
+	// single request-CWD evaluator judges the right file; a leaf at the base
+	// CWD keeps its paths as written.
+	baseCWD string
+}
+
+// cwdState is the working directory in force for one (scope, subshell)
+// position of a list, as threaded by interpretRange: cwd, or unknown when a
+// preceding cd's target was a runtime value (reason says which).
+type cwdState struct {
+	cwd     string
+	unknown bool
+	reason  string
 }
 
 func newBuilder() *builder {
@@ -179,20 +195,103 @@ func substitutionLabel(s cmdparse.Substitution) string {
 // child invocation appends its nodes beyond end and interprets them itself,
 // so the range never sees a node twice. chain is the normalized program text
 // of every enclosing child invocation, outermost first.
+//
+// WORKING-DIRECTORY THREADING (slice 3o, tc-q9ak item 3 "cd"): a leaf that
+// emits an EffectChdir changes the working directory of every LATER leaf in
+// the same list, and the builder — not any policy, and never by command
+// name — is where that is modeled. The state is kept per (scope, subshell
+// path): a leaf reads the innermost state defined for its own
+// cmdparse.SubshellScope chain (its own subshell, then each enclosing one,
+// then the list's base), so a cd inside `( ... )` reaches the subshell's
+// later leaves but never the enclosing list's, while an enclosing list's cd
+// reaches into a later subshell. A cd that is one stage of a multi-stage
+// pipeline runs in its own subshell (bash's default) and changes nothing.
+// A cd whose target is a runtime value (`cd "$D"`, `cd -`) puts the
+// position into the UNKNOWN state: every later leaf there is marked
+// insufficient and its relative path effects are made Dynamic, so no policy
+// can reach a verdict against the wrong directory. A `bash -c` child starts
+// at its parent leaf's effective CWD (ctx is passed through). Known
+// limitation: leaves inside a command substitution ($(...)) are a separate
+// scope keyed independently and start from the LIST's base CWD, not from
+// the CWD at the substitution's position.
 func (b *builder) interpretRange(start, end int, reg cmddesc.Registry, ctx cmddesc.Context, chain []string) {
+	states := map[string]cwdState{}
+	stages := map[string]int{} // scope + "\x00" + PipelineID -> stage count
 	for i := start; i < end; i++ {
-		if b.g.Nodes[i].Kind != NodeCommand {
+		n := b.g.Nodes[i]
+		if n.Kind == NodeCommand && n.Leaf != nil && n.Leaf.PipelineID >= 0 {
+			stages[n.Scope+"\x00"+fmt.Sprint(n.Leaf.PipelineID)]++
+		}
+	}
+	for i := start; i < end; i++ {
+		n := b.g.Nodes[i]
+		if n.Kind != NodeCommand {
 			continue
 		}
-		b.interpret(i, reg, ctx, chain)
+		key := n.Scope + "\x00" + subshellKey(n.Leaf.SubshellScope)
+		state := lookupCWD(states, n.Scope, n.Leaf.SubshellScope, ctx.CWD)
+		nodeCtx := ctx
+		nodeCtx.CWD = state.cwd
+		chdir := b.interpret(i, reg, nodeCtx, chain, state)
+		if chdir == nil {
+			continue
+		}
+		if n.Leaf.PipelineID >= 0 && stages[n.Scope+"\x00"+fmt.Sprint(n.Leaf.PipelineID)] > 1 {
+			continue // a pipeline stage's cd is confined to that stage's subshell
+		}
+		if state.unknown {
+			continue // still unknown; a cd cannot recover a lost base
+		}
+		if chdir.Dynamic {
+			why := "working directory unknown after " + n.Label
+			if chdir.Detail != "" {
+				why += " (" + chdir.Detail + ")"
+			}
+			states[key] = cwdState{unknown: true, reason: why}
+			continue
+		}
+		states[key] = cwdState{cwd: rebase(state.cwd, chdir.Path)}
 	}
+}
+
+// subshellKey renders a cmdparse.SubshellScope path as a map key ("" for a
+// top-level leaf).
+func subshellKey(path []int) string {
+	parts := make([]string, len(path))
+	for i, p := range path {
+		parts[i] = fmt.Sprint(p)
+	}
+	return strings.Join(parts, "/")
+}
+
+// lookupCWD finds the innermost cwdState for a leaf at subshell path within
+// scope: its own subshell, then each enclosing one, then the base.
+func lookupCWD(states map[string]cwdState, scope string, path []int, base string) cwdState {
+	for n := len(path); n >= 0; n-- {
+		if s, ok := states[scope+"\x00"+subshellKey(path[:n])]; ok {
+			return s
+		}
+	}
+	return cwdState{cwd: base}
+}
+
+// rebase resolves a path against cwd the way the shell would for a cd or a
+// relative operand: an absolute path, a `~`-prefixed path, or an empty cwd
+// leaves the path as written; anything else is joined and cleaned.
+func rebase(cwd, p string) string {
+	if p == "" || strings.HasPrefix(p, "/") || strings.HasPrefix(p, "~") || cwd == "" {
+		return p
+	}
+	return path.Join(cwd, p)
 }
 
 // interpret attaches effects and the builder-level insufficiency mark to the
 // Command node at index i and recurses into its child invocations. It works
 // on locals and writes the node back by index at the end, because recursion
-// appends nodes and would invalidate a pointer taken up front.
-func (b *builder) interpret(i int, reg cmddesc.Registry, ctx cmddesc.Context, chain []string) {
+// appends nodes and would invalidate a pointer taken up front. It returns
+// the node's EffectChdir, if it emitted one, for interpretRange's
+// working-directory threading; cwd is the state the node was judged under.
+func (b *builder) interpret(i int, reg cmddesc.Registry, ctx cmddesc.Context, chain []string, cwd cwdState) *cmddesc.Effect {
 	id, scope, leaf := b.g.Nodes[i].ID, b.g.Nodes[i].Scope, *b.g.Nodes[i].Leaf
 	mark, markReason := MarkUnjudged, ""
 	insufficient := func(reason string) {
@@ -239,6 +338,33 @@ func (b *builder) interpret(i int, reg cmddesc.Registry, ctx cmddesc.Context, ch
 		effects = append(effects, redirectionEffect(r.Path, r.Operator, r.Kind.IsWrite(), r.Kind.IsReadWrite(), r.LiveExpansion, r.Append))
 	}
 
+	// Working-directory threading (see interpretRange): re-base relative
+	// path effects against this leaf's effective CWD when it differs from
+	// the request's, or make them Dynamic when that CWD is unknown.
+	var chdir *cmddesc.Effect
+	for j := range effects {
+		e := &effects[j]
+		if e.Kind == cmddesc.EffectChdir && chdir == nil {
+			c := *e
+			chdir = &c
+		}
+		if e.Kind != cmddesc.EffectPath || e.Dynamic {
+			continue
+		}
+		switch {
+		case cwd.unknown:
+			if rebase("<cwd>", e.Path) != e.Path { // relative: depends on the lost cwd
+				e.Dynamic = true
+				e.Detail = "working directory unknown"
+			}
+		case cwd.cwd != b.baseCWD:
+			e.Path = rebase(cwd.cwd, e.Path)
+		}
+	}
+	if cwd.unknown {
+		insufficient(cwd.reason)
+	}
+
 	for _, e := range effects {
 		if e.Kind != cmddesc.EffectPath {
 			continue
@@ -266,6 +392,7 @@ func (b *builder) interpret(i int, reg cmddesc.Registry, ctx cmddesc.Context, ch
 
 	n := &b.g.Nodes[i]
 	n.Effects, n.Mark, n.MarkReason = effects, mark, markReason
+	return chdir
 }
 
 // child turns one child invocation into nodes in a new scope labelled by its

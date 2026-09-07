@@ -141,6 +141,41 @@ func bdNested(name string, verbs map[string]string) CommandSchema {
 	}
 }
 
+// ---- cd (slice 3o) -----------------------------------------------------------
+
+// cdSchema: the shell builtin that changes the working directory of every
+// LATER command in the same list — the single most common unregistered
+// basename in the corpus (26,763 rows). Its one optional positional is a
+// KindChdir operand (a metadata read of the directory plus an EffectChdir
+// the graph builder threads through the rest of the list); with no operand
+// the target is `~` (an implicit KindChdir of "~"). A second positional is
+// bash's `cd OLD NEW` string-substitution form, whose target depends on the
+// current directory's text — Unmodeled, so it abstains. `-` (the previous
+// directory) is Dynamic. Flags are the four bash accepts, all inert
+// (`-L`/`-P` symlink handling, `-e` exit status, `-@` extended attributes).
+// pushd/popd are deliberately NOT registered (a directory stack is runtime
+// state this slice does not model). Verified against this host's
+// `help cd` (bash 5.x).
+var cdSchema = CommandSchema{
+	Name:       "cd",
+	Provenance: "bash builtin, help cd",
+	Flags: map[string]FlagSpec{
+		"-L": inert, "-P": inert, "-e": inert, "-@": inert,
+	},
+	Positionals: PositionalSpec{
+		Leading:         []OperandRole{Chdir},
+		LeadingOptional: true,
+		Rest:            Unmodeled,
+	},
+	ImplicitEffects: []ImplicitEffect{
+		{Role: Chdir, Target: "~", WhenNoPositionals: true},
+	},
+	Stdin:        StdinNever,
+	Stdout:       StdoutNone,
+	UnknownFlag:  UnknownFlagInsufficient,
+	EndOfOptions: true,
+}
+
 // ---- trivial inert commands ------------------------------------------------
 
 // sleepSchema: the only operands are durations. No flags besides

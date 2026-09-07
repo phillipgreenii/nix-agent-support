@@ -426,6 +426,30 @@ var knownSpikeLooser = map[string]spikeLooserEntry{
 			"spike lets through; it is a command production never modeled. Recorded as looser " +
 			"because it IS a write production would have deferred to Claude Code.",
 	},
+	"cd_nix_store_subshell_mkdir": {
+		Class: "looser-than-abstain",
+		Cause: "internal/engine/engine.go's per-leaf loop threads currentCWD LINEARLY across " +
+			"every leaf of the expression: on a `cd`/`pushd` leaf with one non-`-`, non-`~` " +
+			"argument it sets currentCWD (and currentPathEval = basePE.WithCWD) for ALL later " +
+			"leaves, without consulting cmdparse's SubshellScope — so `(cd /nix/store) && " +
+			"mkdir -p x` is judged with the mkdir at /nix/store, whose x is a read-only-zone " +
+			"write safecmds defers (NoOpinion). The shell runs the parenthesised cd in a " +
+			"SUBSHELL, so the real mkdir happens in the original directory. The spike's builder " +
+			"(effectgraph/build.go interpretRange, slice 3o) keys its CWD state by the parser's " +
+			"SubshellScope path and a subshell's cd never reaches the enclosing list, so mkdir " +
+			"is judged at the base CWD — writable — and Approves. The spike is the more precise " +
+			"engine here (it reads the parser's scope fact production's loop ignores); the " +
+			"production-side fix would be to thread currentCWD per SubshellScope.",
+	},
+	"cd_nix_store_pipeline_mkdir": {
+		Class: "looser-than-abstain",
+		Cause: "same root cause as cd_nix_store_subshell_mkdir: engine.go's linear currentCWD " +
+			"threading also ignores PipelineID, so a cd that is one stage of a multi-stage " +
+			"pipeline (`cd /nix/store | cat`) — which bash runs in that stage's own subshell — " +
+			"is applied to every later leaf, and `mkdir -p x` is judged at /nix/store and " +
+			"deferred. The spike confines a pipeline stage's cd to that stage (interpretRange " +
+			"counts stages per PipelineID) and judges mkdir at the base CWD: Approve.",
+	},
 	"cat_redirect_single_quoted_literal": {
 		Class: "looser-than-abstain",
 		Cause: "internal/engine/engine.go's isDynamicRedirectTarget is a RAW-TEXT heuristic " +

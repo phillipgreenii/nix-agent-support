@@ -26,6 +26,12 @@ const (
 	// local filesystem and is reached BY NAME (a git remote today; a k8s
 	// context or a cloud bucket later).
 	EffectRemote
+	// EffectChdir is a change of the SHELL's working directory (cd, slice
+	// 3o): Path is the target as written, Dynamic when it is a runtime value.
+	// It is a graph-level effect — the builder re-bases later leaves in the
+	// same list against it — and a policy judges only whether the target is
+	// statically known.
+	EffectChdir
 )
 
 // String returns the deterministic kind name.
@@ -45,6 +51,8 @@ func (k EffectKind) String() string {
 		return "stdio"
 	case EffectRemote:
 		return "remote"
+	case EffectChdir:
+		return "chdir"
 	default:
 		return "effect-invalid"
 	}
@@ -232,6 +240,14 @@ func (e Effect) String() string {
 		}
 	case EffectRemote:
 		fmt.Fprintf(&b, ":%s %s", e.Operation, e.Resource)
+		if e.Dynamic {
+			b.WriteString(" (dynamic)")
+		}
+		if e.Source != "" {
+			fmt.Fprintf(&b, " [%s]", e.Source)
+		}
+	case EffectChdir:
+		fmt.Fprintf(&b, " %s", e.Path)
 		if e.Dynamic {
 			b.WriteString(" (dynamic)")
 		}

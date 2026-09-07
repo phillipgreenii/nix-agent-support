@@ -68,6 +68,14 @@ const (
 	// ref; `git config NAME VALUE` writes) — see gitBranchSchema/
 	// gitConfigSchema for the worked cases.
 	KindUnmodeled
+	// KindChdir is an operand naming the directory the SHELL changes into
+	// (cd's operand, slice 3o). It emits two effects: a metadata PathRead of
+	// the directory (the interpreter's ordinary path effect) and an
+	// EffectChdir the graph builder consumes to re-base every LATER leaf in
+	// the same list against the new working directory — see
+	// effectgraph's builder for the scoping rules. `-` (the previous
+	// directory) is a runtime value and is emitted Dynamic.
+	KindChdir
 )
 
 // String returns the deterministic role name used in labels and reasons.
@@ -97,6 +105,8 @@ func (k RoleKind) String() string {
 		return "env-assign"
 	case KindUnmodeled:
 		return "unmodeled"
+	case KindChdir:
+		return "chdir"
 	default:
 		return "role-invalid"
 	}
@@ -126,6 +136,7 @@ var (
 	DataOrAtFile = OperandRole{Kind: KindDataOrAtFile}
 	EnvAssign    = OperandRole{Kind: KindEnvAssign}
 	Unmodeled    = OperandRole{Kind: KindUnmodeled}
+	Chdir        = OperandRole{Kind: KindChdir}
 )
 
 // Program returns the operand role for program text in the named dialect.

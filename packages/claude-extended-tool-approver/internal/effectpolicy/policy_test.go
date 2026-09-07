@@ -133,6 +133,23 @@ func TestProgramInterpretedPolicy(t *testing.T) {
 	}
 }
 
+// TestChdirScopedPolicy: a static cd target is Permitted, a dynamic one (a
+// live expansion, or `-`) is Unknown; a non-chdir effect does not apply.
+func TestChdirScopedPolicy(t *testing.T) {
+	if f, applies := (ChdirScoped{}).Judge(cmddesc.Effect{Kind: cmddesc.EffectChdir, Path: "sub"}, PolicyContext{}); !applies || f.Verdict != Permitted {
+		t.Errorf("static: applies=%v verdict=%s", applies, f.Verdict)
+	}
+	if f, applies := (ChdirScoped{}).Judge(cmddesc.Effect{Kind: cmddesc.EffectChdir, Path: "$D", Dynamic: true}, PolicyContext{}); !applies || f.Verdict != Unknown {
+		t.Errorf("dynamic: applies=%v verdict=%s", applies, f.Verdict)
+	}
+	if f, applies := (ChdirScoped{}).Judge(cmddesc.Effect{Kind: cmddesc.EffectChdir, Path: "-", Dynamic: true, Detail: "previous directory"}, PolicyContext{}); !applies || f.Verdict != Unknown || f.Reason == "" {
+		t.Errorf("previous dir: applies=%v verdict=%s reason=%q", applies, f.Verdict, f.Reason)
+	}
+	if _, applies := (ChdirScoped{}).Judge(cmddesc.Effect{Kind: cmddesc.EffectPath, Path: "x"}, PolicyContext{}); applies {
+		t.Error("applied to a path effect")
+	}
+}
+
 // TestEnvAssignmentPolicy: reads are always Permitted; a dynamic NAME is
 // Unknown; an injector name is Forbidden; an injector-ask/ask name is
 // Unknown; any other static name is Permitted. It never returns Forbidden

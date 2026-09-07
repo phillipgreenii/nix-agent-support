@@ -11,7 +11,7 @@ import (
 // dispatch) is what runs it — no command name reaches any code path.
 func TestBreadthSchemasAreRegistryOnly(t *testing.T) {
 	reg := DefaultRegistry()
-	for _, name := range []string{"bd", "sleep", "which", "pgrep", "ps", "jq", "yq", "gofmt"} {
+	for _, name := range []string{"bd", "sleep", "which", "pgrep", "ps", "jq", "yq", "gofmt", "cd"} {
 		s, ok := reg.Lookup(name)
 		if !ok {
 			t.Errorf("%s not registered", name)
@@ -39,6 +39,42 @@ func TestBreadthSchemasAreRegistryOnly(t *testing.T) {
 	}
 	bd, _ := reg.Lookup("bd")
 	walk("bd", bd)
+}
+
+// TestCdInterpretation (slice 3o): `cd DIR` emits a metadata read of DIR
+// and an EffectChdir; bare `cd` targets `~`; `cd -` and a live expansion
+// are Dynamic; `cd OLD NEW` is insufficient (Unmodeled second positional).
+func TestCdInterpretation(t *testing.T) {
+	schema, _ := DefaultRegistry().Lookup("cd")
+	run := func(cmd string) Interpretation {
+		return GenericInterpreter{}.Interpret(leaf(t, cmd), schema, Context{})
+	}
+	find := func(in Interpretation) (chdir *Effect) {
+		for i := range in.Effects {
+			if in.Effects[i].Kind == EffectChdir {
+				return &in.Effects[i]
+			}
+		}
+		return nil
+	}
+	if in := run("cd sub"); !in.Sufficient || find(in) == nil || find(in).Path != "sub" || find(in).Dynamic {
+		t.Errorf("cd sub: %+v (%s)", in.Effects, in.Insufficiency)
+	}
+	if in := run("cd"); !in.Sufficient || find(in) == nil || find(in).Path != "~" {
+		t.Errorf("bare cd: %+v (%s)", in.Effects, in.Insufficiency)
+	}
+	if in := run("cd -"); !in.Sufficient || find(in) == nil || !find(in).Dynamic || find(in).Detail != "previous directory" {
+		t.Errorf("cd -: %+v (%s)", in.Effects, in.Insufficiency)
+	}
+	if in := run(`cd "$D"`); !in.Sufficient || find(in) == nil || !find(in).Dynamic {
+		t.Errorf("cd $D: %+v (%s)", in.Effects, in.Insufficiency)
+	}
+	if in := run("cd a b"); in.Sufficient {
+		t.Error("cd OLD NEW must be insufficient")
+	}
+	if in := run("cd -P sub"); !in.Sufficient || find(in) == nil || find(in).Path != "sub" {
+		t.Errorf("cd -P sub: %+v (%s)", in.Effects, in.Insufficiency)
+	}
 }
 
 // TestArityN: an ArityN flag consumes exactly len(Operands) separate tokens,

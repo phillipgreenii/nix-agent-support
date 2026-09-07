@@ -49,6 +49,8 @@ func DefaultRegistry() Registry {
 		// JSON/YAML processors, gofmt.
 		bdSchema, sleepSchema, whichSchema, pgrepSchema, psSchema,
 		jqSchema, yqSchema, gofmtSchema,
+		// slice 3o: cd (graph-level CWD threading in effectgraph).
+		cdSchema,
 	)
 }
 

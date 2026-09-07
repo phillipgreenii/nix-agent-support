@@ -273,12 +273,32 @@ func (st *interpState) operand(op pendingOp, role OperandRole) {
 		st.effects = append(st.effects, Effect{Kind: EffectRemote, Resource: op.tok, Operation: role.Operation, Dynamic: live, Source: source})
 	case role.Kind == KindEnvAssign:
 		st.envAssign(op, source, live)
+	case role.Kind == KindChdir:
+		st.chdir(op.tok, live, source)
 	case role.Kind == KindLiteral, role.Kind == KindMessage:
 		// Inert: no effect. A live expansion in a literal slot is still inert —
 		// its value cannot change what the command touches.
 	default:
 		st.fail("unmodeled operand role %d at %s", role.Kind, source)
 	}
+}
+
+// chdir emits the two effects a KindChdir operand stands for: a metadata read
+// of the target directory (judged like any read) and the EffectChdir the
+// graph builder consumes. `-` is the shell's previous directory — a value
+// only the runtime knows — so it is Dynamic with a Detail saying why; a live
+// expansion is Dynamic the ordinary way.
+func (st *interpState) chdir(target string, live bool, source string) {
+	dynamic := live
+	detail := ""
+	if !live && target == "-" {
+		dynamic, detail = true, "previous directory"
+	}
+	st.effects = append(
+		st.effects,
+		Effect{Kind: EffectPath, Path: target, Access: AccessRead, Dynamic: dynamic, Source: source, Detail: detail},
+		Effect{Kind: EffectChdir, Path: target, Dynamic: dynamic, Source: source, Detail: detail},
+	)
 }
 
 // dataOrAtFile applies the `@` convention: `@-` consumes stdin, `@path` reads
@@ -502,6 +522,8 @@ func (st *interpState) emitImplicit(ie ImplicitEffect) {
 			Dynamic:   ie.Dynamic,
 			Source:    "implicit",
 		})
+	case ie.Role.Kind == KindChdir:
+		st.chdir(ie.Target, ie.Dynamic, "implicit")
 	default:
 		st.fail("unmodeled implicit effect role %d", ie.Role.Kind)
 	}

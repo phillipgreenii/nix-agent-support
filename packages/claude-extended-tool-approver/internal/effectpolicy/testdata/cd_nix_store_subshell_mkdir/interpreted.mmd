@@ -1,0 +1,7 @@
+flowchart LR
+    n0["command: cd /nix/store<br/>- path:read /nix/store [arg 0]<br/>- chdir /nix/store [arg 0]<br/>mark=permitted"]
+    n1["command: mkdir -p x<br/>- path:create x [arg 1]<br/>mark=permitted"]
+    n2[/"file: /nix/store"/]
+    n3[/"file: x"/]
+    n0 -->|"reads: read"| n2
+    n1 -->|"writes: create"| n3

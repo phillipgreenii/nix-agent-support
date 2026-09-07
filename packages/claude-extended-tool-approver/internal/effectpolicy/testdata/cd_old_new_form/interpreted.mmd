@@ -1,0 +1,4 @@
+flowchart LR
+    n0["command: cd sub sub2<br/>- path:read sub [arg 0]<br/>- chdir sub [arg 0]<br/>mark=insufficient: unmodeled operand role 11 at arg 1"]
+    n1[/"file: sub"/]
+    n0 -->|"reads: read"| n1

@@ -1,0 +1,6 @@
+flowchart LR
+    n0["command: cd ~/.ssh<br/>- path:read ~/.ssh [arg 0]<br/>- chdir ~/.ssh [arg 0]<br/>mark=forbidden: path:read ~/.ssh [arg 0]: no-read-of-secret-path (secret path)"]
+    n1["command: ls<br/>- path:read ~/.ssh [implicit]<br/>- stdio:stdout metadata<br/>mark=forbidden: path:read ~/.ssh [implicit]: no-read-of-secret-path (secret path)"]
+    n2[/"file: ~/.ssh"/]
+    n0 -->|"reads: read"| n2
+    n1 -->|"reads: read"| n2

@@ -108,7 +108,39 @@ func DefaultPolicies() []Policy {
 		StdioIsLocal{},
 		ProgramInterpreted{},
 		EnvAssignment{},
+		ChdirScoped{},
 	}
+}
+
+// ChdirScoped judges every EffectChdir effect (cd, slice 3o). A statically
+// known target is Permitted: the directory change itself is not a hazard —
+// what it CHANGES is the working directory every later leaf in the same
+// list resolves its relative paths against, and the graph builder has
+// already re-based those leaves' path effects before any policy sees them
+// (effectgraph's builder threads the CWD per list and subshell; a leaf
+// downstream of a cd whose target is a runtime value is marked
+// insufficient there, with its relative paths Dynamic). The metadata read
+// of the target directory rides as an ordinary EffectPath and is judged by
+// the read policies. A Dynamic target is Unknown here as well, so the cd
+// node itself abstains, not just its successors.
+type ChdirScoped struct{}
+
+// Name implements Policy.
+func (ChdirScoped) Name() string { return "chdir-scoped" }
+
+// Judge implements Policy.
+func (ChdirScoped) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, bool) {
+	if e.Kind != cmddesc.EffectChdir {
+		return Finding{}, false
+	}
+	if e.Dynamic {
+		reason := "cd target is a runtime value; later commands' working directory is unknown"
+		if e.Detail != "" {
+			reason = "cd target is the " + e.Detail + "; later commands' working directory is unknown"
+		}
+		return Finding{Verdict: Unknown, Reason: reason}, true
+	}
+	return Finding{Verdict: Permitted, Reason: "later commands in this list are judged against the new working directory"}, true
 }
 
 // StdioIsLocal judges every EffectStdio effect: always Permitted. A standard

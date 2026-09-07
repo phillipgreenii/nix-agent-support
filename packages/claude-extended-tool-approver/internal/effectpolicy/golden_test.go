@@ -500,6 +500,23 @@ var goldenCases = []goldenCase{
 	{"yq_system_operator", "yq --security-enable-system-operator '.a' README.md", evalcontract.Abstain, nil},
 	{"yq_stdin", "cat README.md | yq '.a'", evalcontract.Approve, nil},
 
+	// slice 3o: cd re-bases later leaves in the same list (and nested
+	// subshells / bash -c children) against the new working directory; a
+	// subshell's cd or a pipeline stage's cd does not leak out; a dynamic
+	// target (or `-`) makes every later leaf insufficient with its relative
+	// paths Dynamic; a bare `cd` goes to ~.
+	{"cd_sub_cat_parent_readme", "cd sub && cat ../README.md", evalcontract.Approve, nil},
+	{"cd_nix_store_mkdir", "cd /nix/store && mkdir -p x", evalcontract.Reject, nil},
+	{"cd_nix_store_subshell_mkdir", "(cd /nix/store) && mkdir -p x", evalcontract.Approve, nil},
+	{"cd_nix_store_pipeline_mkdir", "cd /nix/store | cat; mkdir -p x", evalcontract.Approve, nil},
+	{"cd_subshell_inner_mkdir", "(cd /nix/store && mkdir -p x)", evalcontract.Reject, nil},
+	{"cd_dynamic_then_cat", `cd "$D" && cat README.md`, evalcontract.Abstain, nil},
+	{"cd_dash_then_cat", "cd - && cat README.md", evalcontract.Abstain, nil},
+	{"cd_home_cat", "cd && cat README.md", evalcontract.Approve, nil},
+	{"cd_bash_c_child", "cd /nix/store && bash -c 'mkdir -p x'", evalcontract.Reject, nil},
+	{"cd_old_new_form", "cd sub sub2", evalcontract.Abstain, nil},
+	{"cd_secret_dir_ls", "cd ~/.ssh && ls", evalcontract.Reject, nil},
+
 	// gofmt: -l lists, -w rewrites in place, stdin when no path.
 	{"gofmt_l_dot", "gofmt -l .", evalcontract.Approve, nil},
 	{"gofmt_w_readme", "gofmt -w README.md", evalcontract.Approve, nil},

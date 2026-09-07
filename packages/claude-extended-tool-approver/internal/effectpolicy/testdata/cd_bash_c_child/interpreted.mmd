@@ -1,0 +1,11 @@
+flowchart LR
+    n0["command: cd /nix/store<br/>- path:read /nix/store [arg 0]<br/>- chdir /nix/store [arg 0]<br/>mark=permitted"]
+    n1["command: bash -c 'mkdir -p x'<br/>- program:shell #quot;mkdir -p x#quot;<br/>mark=permitted"]
+    n2[/"file: /nix/store"/]
+    subgraph sg_s0["bash -c"]
+        n3["command: mkdir -p x<br/>- path:create /nix/store/x [arg 1]<br/>mark=forbidden: path:create /nix/store/x [arg 1]: no-write-to-read-only-path (write to read-only zone)"]
+        n4[/"file: /nix/store/x"/]
+    end
+    n0 -->|"reads: read"| n2
+    n3 -->|"writes: create"| n4
+    n3 -->|"executes: bash -c"| n1
