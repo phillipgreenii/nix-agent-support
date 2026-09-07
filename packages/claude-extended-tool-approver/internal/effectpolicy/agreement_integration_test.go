@@ -460,7 +460,7 @@ var knownSpikeLooser = map[string]spikeLooserEntry{
 			"an unbound name) and falls through to a NoOpinion (\"redirection: dynamically-expanded " +
 			"target $literal (deferred to claude-code)\"). The spike's redirectionEffect " +
 			"(effectgraph/build.go) instead classifies by the PARSER'S OWN fact, " +
-			"hookio.Redirection.LiveExpansion — set by cmdparse's shell AST walk " +
+			"hooktypes.Redirection.LiveExpansion — set by cmdparse's shell AST walk " +
 			"(wordHasLiveExpansion), which sees that the target word is single-quoted and contains " +
 			"no live expansion — so Dynamic=false and the target is evaluated as the static path " +
 			"`$literal` against the read-write project root: Approve. The spike is the more precise " +

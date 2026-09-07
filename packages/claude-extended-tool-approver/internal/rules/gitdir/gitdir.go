@@ -1534,7 +1534,7 @@ func commandDirection(pc cmdparse.ParsedCommand, target func(string) bool, pipes
 // captures none of the file, and `ls -la .git/hooks 2>/dev/null` is a routine
 // inspection that must not be promoted. A target that captures nothing —
 // /dev/null, the tty, an inherited fd — is likewise not a capture
-// (hookio.IsSafeRedirectTarget).
+// (hooktypes.IsSafeRedirectTarget).
 //
 // A PIPE to a writing sink (`cat .git/config | tee /tmp/backup`) is the same
 // exfiltration by a third spelling and is classified here too (tc-vul7), via

@@ -37,7 +37,7 @@ import (
 
 	"mvdan.cc/sh/v3/syntax"
 
-	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hooktypes"
 )
 
 // ShellParse is the seam's result. It is a FIRST-CLASS value rather than an
@@ -1426,7 +1426,7 @@ func (lw *lowering) attachRedir(r *syntax.Redirect, leaf *ParsedCommand) {
 		appendArg(leaf, target, wordHasLiveExpansion(r.Word))
 		return
 	}
-	leaf.Redirections = append(leaf.Redirections, hookio.Redirection{
+	leaf.Redirections = append(leaf.Redirections, hooktypes.Redirection{
 		Operator:      fd + core,
 		Path:          target,
 		Kind:          redirectionKind(fd, core),
@@ -1436,7 +1436,7 @@ func (lw *lowering) attachRedir(r *syntax.Redirect, leaf *ParsedCommand) {
 }
 
 // redirCore maps a parser redirection operator onto the operator TEXT the
-// outgoing redirectionCore produced, so hookio.Redirection.Operator and the Kind
+// outgoing redirectionCore produced, so hooktypes.Redirection.Operator and the Kind
 // derived from it are unchanged.
 func redirCore(op syntax.RedirOperator) string {
 	switch op {

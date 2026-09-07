@@ -4,9 +4,13 @@
 // schema). It renders both to Mermaid deterministically. Policies live
 // elsewhere; this package only records their marks.
 //
-// Known import cycle to fix later: cmdparse.ParsedCommand embeds
-// hookio.Redirection, so hookio is reached transitively through cmdparse. This
-// package does not import internal/hookio directly.
+// Known import cycle to fix later: cmdparse imports internal/hookio for
+// *hookio.HookInput (LeavesOf/RootLeavesOf's parameter), so hookio is reached
+// transitively through cmdparse. This package does not import internal/hookio
+// directly, and — since the effect-graph spike's slice 3r moved Redirection out
+// of hookio into the zero-dependency internal/hooktypes — it no longer reaches
+// hookio for any TYPE it names either; the HookInput edge above is what remains,
+// a separate follow-up from the any-typed HookInput.ParsedLeaf/ParsedRoot fields.
 package effectgraph
 
 import (

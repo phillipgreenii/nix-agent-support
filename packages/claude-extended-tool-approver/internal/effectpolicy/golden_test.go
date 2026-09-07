@@ -115,7 +115,7 @@ var goldenCases = []goldenCase{
 	{"cat_unknown_flag", "cat --weird-flag README.md", evalcontract.Abstain, nil},
 	{"cat_dynamic", `cat "$F"`, evalcontract.Abstain, nil},
 
-	// Redirection facts (hookio.Redirection.LiveExpansion / .Append), read
+	// Redirection facts (hooktypes.Redirection.LiveExpansion / .Append), read
 	// by redirectionEffect instead of a `$`/backtick or ">>"/"<>" text
 	// heuristic: a single-quoted target is a LITERAL filename (static,
 	// even though its bytes contain `$`), a double-quoted one is a real

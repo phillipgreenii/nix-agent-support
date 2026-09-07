@@ -30,6 +30,7 @@ import (
 	"strings"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hooktypes"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/secretpath"
 )
 
@@ -1408,7 +1409,7 @@ func HeredocReaderCleared(leaf ParsedCommand) bool {
 //
 // TWO CONDITIONS, and the FIRST is the security one:
 //
-//  1. NO WRITE DIRECTION. The test is hookio.RedirectionKind.IsWrite, which is `!=
+//  1. NO WRITE DIRECTION. The test is hooktypes.RedirectionKind.IsWrite, which is `!=
 //     RedirectStdin` — so `>`, `>>`, `>|`, `2>`, `9>`, `&>`, `>& FILE` and bash's `<>`
 //     read-write open are ALL refused, and a kind added to that enum later is refused
 //     until someone deliberately classifies it. This is what keeps
@@ -1463,7 +1464,7 @@ func HeredocReaderCleared(leaf ParsedCommand) bool {
 // either model cannot silently invert it: the `<` spelling is never LESS restrictive than
 // the argv spelling of the same read, and neither is ever less restrictive than the BARE
 // command spelling.
-func redirectClearance(redirs []hookio.Redirection) SubstitutionClearance {
+func redirectClearance(redirs []hooktypes.Redirection) SubstitutionClearance {
 	clearance := SubstitutionCleared
 	for _, rd := range redirs {
 		if rd.Kind.IsWrite() || secretpath.IsSecret(rd.Path) {
@@ -2146,7 +2147,7 @@ type ParsedCommand struct {
 	// reasonable" instead of "does it preserve the caller's value", because
 	// under `env -i` there IS no caller value left to preserve.
 	EnvCleared           bool
-	Redirections         []hookio.Redirection
+	Redirections         []hooktypes.Redirection
 	ProcessSubstitutions []string // inner commands from <(cmd) and >(cmd)
 	HasHeredoc           bool
 	// Heredocs are this leaf's heredoc EXTENTS: delimiter, quoting, and the body
@@ -2600,29 +2601,29 @@ func isAllDigits(s string) bool {
 // consumers can ask what STREAM is affected without re-parsing operator text:
 // only stdout-bearing kinds capture a command's payload (cmdparse.CapturesStdout),
 // while every non-stdin kind is a write for the engine's path check.
-func redirectionKind(fd, core string) hookio.RedirectionKind {
+func redirectionKind(fd, core string) hooktypes.RedirectionKind {
 	switch core {
 	case "<":
-		return hookio.RedirectStdin
+		return hooktypes.RedirectStdin
 	case "<>":
-		return hookio.RedirectReadWrite
+		return hooktypes.RedirectReadWrite
 	case "&>", "&>>":
-		return hookio.RedirectAll
+		return hooktypes.RedirectAll
 	case ">&":
 		// `>& FILE` with NO descriptor is bash's both-streams form. With an
 		// explicit descriptor the construct is ambiguous in bash; fall through to
 		// the descriptor's own classification, which is the conservative reading.
 		if fd == "" {
-			return hookio.RedirectAll
+			return hooktypes.RedirectAll
 		}
 	}
 	switch fd {
 	case "", "1":
-		return hookio.RedirectStdout
+		return hooktypes.RedirectStdout
 	case "2":
-		return hookio.RedirectStderr
+		return hooktypes.RedirectStderr
 	}
-	return hookio.RedirectOtherFD
+	return hooktypes.RedirectOtherFD
 }
 
 // DELETED, and the deletion is a coverage claim: `extractRedirections` and

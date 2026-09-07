@@ -3,8 +3,8 @@ package hookio
 import (
 	"encoding/json"
 	"errors"
-	"regexp"
 
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hooktypes"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/patheval"
 )
 
@@ -563,9 +563,12 @@ type HookInput struct {
 	// unmarshalling ToolInput, just made ONCE and shared.
 	//
 	// It is `any` rather than `[]cmdparse.ParsedCommand` because `cmdparse`
-	// imports this package (for the Redirection type used by
-	// ParsedCommand.Redirections), so this package importing `cmdparse` back
-	// would cycle. `cmdparse.LeavesOf` is the ONE place that performs the type
+	// imports this package (for `*HookInput` itself, the parameter of
+	// `LeavesOf`/`RootLeavesOf`), so this package importing `cmdparse` back
+	// would cycle. (Redirection used to be the reason too, before it moved to
+	// internal/hooktypes — slice 3r of the effect-graph spike — but the
+	// HookInput edge remains, so the cycle concern still holds.)
+	// `cmdparse.LeavesOf` is the ONE place that performs the type
 	// assertion, so a rule never asserts the type itself — mirroring how
 	// `RuleErrorSink` and `Evaluator` above decouple the engine from a
 	// concrete type without an import cycle.
@@ -673,110 +676,31 @@ type StackFrame struct {
 	Expression string // the normalized inner expression being evaluated
 }
 
-// RedirectionKind classifies the type of I/O redirection.
-type RedirectionKind int
-
-const (
-	RedirectStdin  RedirectionKind = iota // <
-	RedirectStdout                        // >, >>, >|, 1>, 1>>, 1>|
-	RedirectStderr                        // 2>, 2>>, 2>|
-	RedirectAll                           // &>, &>>, >& FILE
-	// RedirectOtherFD is a write to a PATH on a descriptor that is neither stdout
-	// nor stderr: `9> f`, `3>> f`, `{fd}> f`. It is a file write like any other —
-	// every write-direction consumer must treat it as one — but it captures no
-	// stdout, so cmdparse.CapturesStdout deliberately does NOT count it.
-	RedirectOtherFD
-	// RedirectReadWrite is bash's `<>` open: the target is opened for reading AND
-	// writing, and may be created. It is classified as a WRITE (it is checked for
-	// writability, not readability) because creating/modifying the target is the
-	// direction that matters to a permission gate.
-	RedirectReadWrite
+// Redirection, RedirectionKind (and its constants) and IsSafeRedirectTarget
+// used to be defined here. They moved to internal/hooktypes (slice 3r of the
+// effect-graph spike, tc-lc8f) — a pure value type plus a pure predicate that
+// this package never constructs or inspects, kept here only so cmdparse (and,
+// through it, the effect-graph spike) had somewhere to name them without
+// importing hookio for anything OTHER than `*HookInput`. These are
+// COMPATIBILITY ALIASES for existing `hookio.Redirect*`/`hookio.Redirection`
+// call sites; new code should import internal/hooktypes directly.
+type (
+	Redirection     = hooktypes.Redirection
+	RedirectionKind = hooktypes.RedirectionKind
 )
 
-// IsWrite reports whether the redirection can CREATE OR MODIFY its target.
-// Everything that is not a pure read (`<`) is a write, so a kind added later
-// fails closed rather than silently becoming read-only.
-func (k RedirectionKind) IsWrite() bool { return k != RedirectStdin }
+const (
+	RedirectStdin     = hooktypes.RedirectStdin
+	RedirectStdout    = hooktypes.RedirectStdout
+	RedirectStderr    = hooktypes.RedirectStderr
+	RedirectAll       = hooktypes.RedirectAll
+	RedirectOtherFD   = hooktypes.RedirectOtherFD
+	RedirectReadWrite = hooktypes.RedirectReadWrite
+)
 
-// IsReadWrite reports whether the redirection opens its target for BOTH
-// reading and writing (bash's `<>`), as opposed to a pure read or a pure
-// write. It exists so a consumer that needs to test for this one kind (e.g.
-// effectgraph's redirectionEffect, deciding Modify vs Truncate) can do so
-// without importing this package's constants directly — a plain `==
-// RedirectReadWrite` comparison needs the package name in scope, which
-// internal/effectpolicy's import guard forbids for the spike packages.
-func (k RedirectionKind) IsReadWrite() bool { return k == RedirectReadWrite }
-
-// Redirection represents a parsed I/O redirection.
-type Redirection struct {
-	// Operator is the operator text AS WRITTEN, including any file-descriptor
-	// prefix: "<", ">", ">>", ">|", ">&", "<>", "1>", "2>>", "9>", "{fd}>", "&>",
-	// "&>>". A consumer MUST classify by Kind, never by matching this string.
-	Operator string
-	Path     string          // target file path
-	Kind     RedirectionKind // classification
-
-	// LiveExpansion reports whether Path contains a shell expansion the
-	// runtime would actually evaluate — a parameter expansion, command or
-	// process substitution, or arithmetic expansion, OUTSIDE single quotes —
-	// computed by cmdparse's wordHasLiveExpansion over the SAME target word
-	// ParsedCommand.ArgLiveExpansion uses for ordinary arguments (pg2-pui5w),
-	// so a redirect target and an argument can never drift on what counts as
-	// "live". A consumer that needs "is this target dynamic" MUST read this
-	// field rather than re-deriving it with a `$`/backtick substring test:
-	// that heuristic is wrong in both directions — a target that is ONLY a
-	// process substitution (`>(cmd)`) contains neither byte and is a false
-	// NEGATIVE, while a single-quoted `'$x'` or a backslash-escaped `\$x`
-	// contains the byte but bash never expands it, a false POSITIVE.
-	//
-	// Heredocs and herestrings (`<<`, `<<-`, `<<<`) never populate a
-	// Redirection at all — see attachRedir in shellparse.go — so this field
-	// says nothing about a heredoc BODY's own liveness; a here-string's body
-	// can be live (`<<< "$x"`) with no path target to judge here.
-	LiveExpansion bool
-
-	// Append reports whether the redirection operator is one of bash's
-	// APPEND forms — `>>`, `&>>`, `n>>`, `{fd}>>` — as opposed to a
-	// truncating write (`>`, `>|`, `n>`, `&>`). It is populated from the
-	// PARSER'S OWN OPERATOR ENUM (syntax.AppOut / syntax.AppAll), never from
-	// matching Operator's text, for the same reason Kind is: a consumer MUST
-	// NOT re-derive a parser fact from the rendered string. Meaningless (and
-	// always false) for a non-write Kind (RedirectStdin) and for
-	// RedirectReadWrite (`<>` has no append form).
-	Append bool
-}
-
-// devFdPattern matches /dev/fd/<n> for any file-descriptor number.
-var devFdPattern = regexp.MustCompile(`^/dev/fd/[0-9]+$`)
-
-// IsSafeRedirectTarget reports whether path is one of the standard special device
-// files that are always safe as an I/O redirection target — for reading (stdin)
-// and writing (stdout/stderr) alike: /dev/null, /dev/stdout, /dev/stderr,
-// /dev/tty, and /dev/fd/<n>.
-//
-// TWO callers, for two different reasons, which is why it lives beside the
-// Redirection type rather than inside either of them (the same relocation
-// cmdparse.SkipGrepPattern got when a rule needed to share it):
-//
-//   - the engine's redirection evaluation, where the PathEvaluator does not model
-//     these pseudo-files (it classifies them PathUnknown) and without the
-//     short-circuit a redirect to one would demote an otherwise-approved command
-//     to NoOpinion (pg2-9ctmb);
-//   - the gitdir rule's copy-out detection, where an output redirection is what
-//     turns a read of git metadata into a capture of it — but writing to a
-//     terminal or discarding to /dev/null captures nothing, so `ls .git/hooks
-//     2>/dev/null` must stay a plain read (tc-403c).
-//
-// Being a redirect-TARGET predicate is the whole of its meaning: it does NOT make
-// these paths writable to the rest of the ruleset (e.g. `rm /dev/null` is
-// unaffected).
-func IsSafeRedirectTarget(path string) bool {
-	switch path {
-	case "/dev/null", "/dev/stdout", "/dev/stderr", "/dev/tty":
-		return true
-	}
-	return devFdPattern.MatchString(path)
-}
+// IsSafeRedirectTarget is hooktypes.IsSafeRedirectTarget under a compatibility
+// alias; see that function's doc for the two callers and the full rationale.
+var IsSafeRedirectTarget = hooktypes.IsSafeRedirectTarget
 
 // Evaluator allows rules to recursively evaluate inner expressions
 // through the full rule chain.
@@ -814,8 +738,8 @@ type Evaluator interface {
 	// leaves is the caller's already-lowered subtree — the SAME kind of value
 	// HookInput.ParsedLeaf/ParsedRoot carry, and typed `any` here for the
 	// IDENTICAL import-direction reason those two fields are (see ParsedLeaf's
-	// doc): cmdparse.ParsedCommand embeds Redirection from this package, so
-	// cmdparse imports hookio, and hookio importing cmdparse back would cycle.
+	// doc): cmdparse imports hookio for `*HookInput` itself, so hookio
+	// importing cmdparse back would cycle.
 	// A caller builds this value from its own cmdparse import — e.g. a
 	// cmdparse.Substitution's own Leaves field, or a []cmdparse.ParsedCommand
 	// slice taken from ParsedRoot — never a re-parse and never text; the

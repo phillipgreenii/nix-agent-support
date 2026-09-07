@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hooktypes"
 )
 
 func TestUnwrapCommand_ExecPrefixes(t *testing.T) {
@@ -1580,27 +1580,27 @@ func TestParse_Redirections(t *testing.T) {
 		command    string
 		wantExec   string
 		wantArgs   []string
-		wantRedirs []hookio.Redirection
+		wantRedirs []hooktypes.Redirection
 	}{
 		{
 			name: "stdin redirect", command: "docker load < /nix/store/image.tar.gz",
 			wantExec: "docker", wantArgs: []string{"load"},
-			wantRedirs: []hookio.Redirection{{Operator: "<", Path: "/nix/store/image.tar.gz", Kind: hookio.RedirectStdin}},
+			wantRedirs: []hooktypes.Redirection{{Operator: "<", Path: "/nix/store/image.tar.gz", Kind: hooktypes.RedirectStdin}},
 		},
 		{
 			name: "stdout redirect", command: "echo hello > /tmp/out.txt",
 			wantExec: "echo", wantArgs: []string{"hello"},
-			wantRedirs: []hookio.Redirection{{Operator: ">", Path: "/tmp/out.txt", Kind: hookio.RedirectStdout}},
+			wantRedirs: []hooktypes.Redirection{{Operator: ">", Path: "/tmp/out.txt", Kind: hooktypes.RedirectStdout}},
 		},
 		{
 			name: "stderr redirect", command: "cmd 2>/dev/null",
 			wantExec: "cmd", wantArgs: []string{},
-			wantRedirs: []hookio.Redirection{{Operator: "2>", Path: "/dev/null", Kind: hookio.RedirectStderr}},
+			wantRedirs: []hooktypes.Redirection{{Operator: "2>", Path: "/dev/null", Kind: hooktypes.RedirectStderr}},
 		},
 		{
 			name: "append redirect", command: "echo line >> /tmp/log.txt",
 			wantExec: "echo", wantArgs: []string{"line"},
-			wantRedirs: []hookio.Redirection{{Operator: ">>", Path: "/tmp/log.txt", Kind: hookio.RedirectStdout, Append: true}},
+			wantRedirs: []hooktypes.Redirection{{Operator: ">>", Path: "/tmp/log.txt", Kind: hooktypes.RedirectStdout, Append: true}},
 		},
 		{
 			name: "fd duplication ignored", command: "cmd 2>&1",
@@ -1610,15 +1610,15 @@ func TestParse_Redirections(t *testing.T) {
 		{
 			name: "all redirect", command: "cmd &>/tmp/all.log",
 			wantExec: "cmd", wantArgs: []string{},
-			wantRedirs: []hookio.Redirection{{Operator: "&>", Path: "/tmp/all.log", Kind: hookio.RedirectAll}},
+			wantRedirs: []hooktypes.Redirection{{Operator: "&>", Path: "/tmp/all.log", Kind: hooktypes.RedirectAll}},
 		},
 		{
 			name: "multiple redirections", command: "cmd < /tmp/in.txt > /tmp/out.txt 2>/tmp/err.txt",
 			wantExec: "cmd", wantArgs: []string{},
-			wantRedirs: []hookio.Redirection{
-				{Operator: "<", Path: "/tmp/in.txt", Kind: hookio.RedirectStdin},
-				{Operator: ">", Path: "/tmp/out.txt", Kind: hookio.RedirectStdout},
-				{Operator: "2>", Path: "/tmp/err.txt", Kind: hookio.RedirectStderr},
+			wantRedirs: []hooktypes.Redirection{
+				{Operator: "<", Path: "/tmp/in.txt", Kind: hooktypes.RedirectStdin},
+				{Operator: ">", Path: "/tmp/out.txt", Kind: hooktypes.RedirectStdout},
+				{Operator: "2>", Path: "/tmp/err.txt", Kind: hooktypes.RedirectStderr},
 			},
 		},
 		{
@@ -1671,7 +1671,7 @@ func TestParse_Redirections(t *testing.T) {
 			// is unaffected, so a quoted `>` is no way to smuggle a real one past.
 			name: "quoted gt beside a real redirect", command: "grep '>' f > /tmp/out",
 			wantExec: "grep", wantArgs: []string{">", "f"},
-			wantRedirs: []hookio.Redirection{{Operator: ">", Path: "/tmp/out", Kind: hookio.RedirectStdout}},
+			wantRedirs: []hooktypes.Redirection{{Operator: ">", Path: "/tmp/out", Kind: hooktypes.RedirectStdout}},
 		},
 		{
 			// Liveness is per BYTE, not "the raw token starts with a quote": the
@@ -1681,7 +1681,7 @@ func TestParse_Redirections(t *testing.T) {
 			// anything. The outgoing tokenizer glued the operator and the target into
 			// ONE token (`>'/tmp/out'`), which `unquote` then declined to touch because
 			// the token was not WHOLLY wrapped, so the quotes rode into
-			// hookio.Redirection.Path. patheval.cleanPath sees a leading `'` as a
+			// hooktypes.Redirection.Path. patheval.cleanPath sees a leading `'` as a
 			// RELATIVE path and joins it to the cwd — so `echo pwned >'/etc/passwd'`
 			// resolved INSIDE the project root and was classified PathReadWrite, i.e.
 			// APPROVED, while the spaced spelling `> '/etc/passwd'` was correctly
@@ -1692,7 +1692,7 @@ func TestParse_Redirections(t *testing.T) {
 			// form-dependence is gone and the direction is MORE restrictive.
 			name: "partially quoted target still redirects", command: "echo x >'/tmp/out'",
 			wantExec: "echo", wantArgs: []string{"x"},
-			wantRedirs: []hookio.Redirection{{Operator: ">", Path: "/tmp/out", Kind: hookio.RedirectStdout}},
+			wantRedirs: []hooktypes.Redirection{{Operator: ">", Path: "/tmp/out", Kind: hooktypes.RedirectStdout}},
 		},
 
 		// tc-xs8x: the operator table modelled only `>`, `>>`, `2>`, `2>>`, `&>`
@@ -1704,27 +1704,27 @@ func TestParse_Redirections(t *testing.T) {
 		{
 			name: "fd 1 is stdout", command: "echo pwned 1> /etc/passwd",
 			wantExec: "echo", wantArgs: []string{"pwned"},
-			wantRedirs: []hookio.Redirection{{Operator: "1>", Path: "/etc/passwd", Kind: hookio.RedirectStdout}},
+			wantRedirs: []hooktypes.Redirection{{Operator: "1>", Path: "/etc/passwd", Kind: hooktypes.RedirectStdout}},
 		},
 		{
 			name: "fd 1 glued", command: "echo pwned 1>/etc/passwd",
 			wantExec: "echo", wantArgs: []string{"pwned"},
-			wantRedirs: []hookio.Redirection{{Operator: "1>", Path: "/etc/passwd", Kind: hookio.RedirectStdout}},
+			wantRedirs: []hooktypes.Redirection{{Operator: "1>", Path: "/etc/passwd", Kind: hooktypes.RedirectStdout}},
 		},
 		{
 			name: "high fd is a path write on its own descriptor", command: "echo pwned 9> /etc/passwd",
 			wantExec: "echo", wantArgs: []string{"pwned"},
-			wantRedirs: []hookio.Redirection{{Operator: "9>", Path: "/etc/passwd", Kind: hookio.RedirectOtherFD}},
+			wantRedirs: []hooktypes.Redirection{{Operator: "9>", Path: "/etc/passwd", Kind: hooktypes.RedirectOtherFD}},
 		},
 		{
 			name: "high fd append", command: "echo pwned 3>> /etc/passwd",
 			wantExec: "echo", wantArgs: []string{"pwned"},
-			wantRedirs: []hookio.Redirection{{Operator: "3>>", Path: "/etc/passwd", Kind: hookio.RedirectOtherFD, Append: true}},
+			wantRedirs: []hooktypes.Redirection{{Operator: "3>>", Path: "/etc/passwd", Kind: hooktypes.RedirectOtherFD, Append: true}},
 		},
 		{
 			name: "stderr append keeps its kind", command: "echo pwned 2>> /tmp/err",
 			wantExec: "echo", wantArgs: []string{"pwned"},
-			wantRedirs: []hookio.Redirection{{Operator: "2>>", Path: "/tmp/err", Kind: hookio.RedirectStderr, Append: true}},
+			wantRedirs: []hooktypes.Redirection{{Operator: "2>>", Path: "/tmp/err", Kind: hooktypes.RedirectStderr, Append: true}},
 		},
 		{
 			// `<>` opens the target for reading AND WRITING and may create it, so it
@@ -1732,12 +1732,12 @@ func TestParse_Redirections(t *testing.T) {
 			// leaving /etc/passwd as an argument to echo.
 			name: "read-write open is a write", command: "echo pwned <> /etc/passwd",
 			wantExec: "echo", wantArgs: []string{"pwned"},
-			wantRedirs: []hookio.Redirection{{Operator: "<>", Path: "/etc/passwd", Kind: hookio.RedirectReadWrite}},
+			wantRedirs: []hooktypes.Redirection{{Operator: "<>", Path: "/etc/passwd", Kind: hooktypes.RedirectReadWrite}},
 		},
 		{
 			name: "read-write open glued", command: "echo pwned <>/etc/passwd",
 			wantExec: "echo", wantArgs: []string{"pwned"},
-			wantRedirs: []hookio.Redirection{{Operator: "<>", Path: "/etc/passwd", Kind: hookio.RedirectReadWrite}},
+			wantRedirs: []hooktypes.Redirection{{Operator: "<>", Path: "/etc/passwd", Kind: hooktypes.RedirectReadWrite}},
 		},
 		{
 			// `>|` also had to stop being SPLIT: splitCompound consumed the `|` as a
@@ -1745,31 +1745,31 @@ func TestParse_Redirections(t *testing.T) {
 			// the target into a bogus executable of its own leaf.
 			name: "clobber operator is one redirection", command: "echo pwned >| /etc/passwd",
 			wantExec: "echo", wantArgs: []string{"pwned"},
-			wantRedirs: []hookio.Redirection{{Operator: ">|", Path: "/etc/passwd", Kind: hookio.RedirectStdout}},
+			wantRedirs: []hooktypes.Redirection{{Operator: ">|", Path: "/etc/passwd", Kind: hooktypes.RedirectStdout}},
 		},
 		{
 			name: "clobber operator glued", command: "echo pwned >|/etc/passwd",
 			wantExec: "echo", wantArgs: []string{"pwned"},
-			wantRedirs: []hookio.Redirection{{Operator: ">|", Path: "/etc/passwd", Kind: hookio.RedirectStdout}},
+			wantRedirs: []hooktypes.Redirection{{Operator: ">|", Path: "/etc/passwd", Kind: hooktypes.RedirectStdout}},
 		},
 		{
 			// `>& WORD` is a file target when WORD is neither a descriptor number
 			// nor `-`; bash sends BOTH streams there, hence RedirectAll.
 			name: "ampersand form with a file target", command: "echo pwned >& /etc/passwd",
 			wantExec: "echo", wantArgs: []string{"pwned"},
-			wantRedirs: []hookio.Redirection{{Operator: ">&", Path: "/etc/passwd", Kind: hookio.RedirectAll}},
+			wantRedirs: []hooktypes.Redirection{{Operator: ">&", Path: "/etc/passwd", Kind: hooktypes.RedirectAll}},
 		},
 		{
 			name: "both-streams append", command: "echo pwned &>> /tmp/all.log",
 			wantExec: "echo", wantArgs: []string{"pwned"},
-			wantRedirs: []hookio.Redirection{{Operator: "&>>", Path: "/tmp/all.log", Kind: hookio.RedirectAll, Append: true}},
+			wantRedirs: []hooktypes.Redirection{{Operator: "&>>", Path: "/tmp/all.log", Kind: hooktypes.RedirectAll, Append: true}},
 		},
 		{
 			// bash's open-and-assign form: it CREATES the file and stores the new
 			// descriptor in $fd, so it writes a path exactly as `>` does.
 			name: "varname fd open-and-assign", command: "echo pwned {fd}> /etc/passwd",
 			wantExec: "echo", wantArgs: []string{"pwned"},
-			wantRedirs: []hookio.Redirection{{Operator: "{fd}>", Path: "/etc/passwd", Kind: hookio.RedirectOtherFD}},
+			wantRedirs: []hooktypes.Redirection{{Operator: "{fd}>", Path: "/etc/passwd", Kind: hooktypes.RedirectOtherFD}},
 		},
 
 		// --- tc-xs8x NEGATIVES: things that must NOT become path writes ---
@@ -1832,7 +1832,7 @@ func TestParse_Redirections(t *testing.T) {
 			// be an unexamined operand.
 			name: "brace expansion is not a descriptor", command: "cmd {a,b}>x",
 			wantExec: "cmd", wantArgs: []string{"{a,b}"},
-			wantRedirs: []hookio.Redirection{{Operator: ">", Path: "x", Kind: hookio.RedirectStdout}},
+			wantRedirs: []hooktypes.Redirection{{Operator: ">", Path: "x", Kind: hooktypes.RedirectStdout}},
 		},
 	}
 	for _, tt := range tests {

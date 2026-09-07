@@ -429,7 +429,7 @@ func TestFlip_ArithmeticSubshellFallbackIsUnparseable(t *testing.T) {
 //
 // CHOICE: keep the fabricated `/dev/fd/63`, exactly as `tokenize` produced it.
 // Reason: it is the only option that is neither a behaviour change nor a loss. The
-// source text is not a path, so `hookio.IsSafeRedirectTarget` fails and
+// source text is not a path, so `hooktypes.IsSafeRedirectTarget` fails and
 // patheval collapses it — mass new abstains on `diff <(a) <(b)`, a benign and very
 // common idiom. Emitting nothing changes the ARGUMENT COUNT, which several rules key
 // on (a leaf's operand position decides what a path-bearing rule inspects). The

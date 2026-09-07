@@ -7,9 +7,15 @@
 // registry entry.
 //
 // Known import cycle to fix later: this package imports internal/cmdparse for
-// ParsedCommand, and cmdparse embeds hookio.Redirection, so hookio is reached
-// TRANSITIVELY. No package in the spike imports internal/hookio directly (a
-// guard test in internal/effectpolicy enforces that).
+// ParsedCommand, and cmdparse imports internal/hookio for *hookio.HookInput (the
+// parameter of LeavesOf/RootLeavesOf), so hookio is reached TRANSITIVELY. No
+// package in the spike imports internal/hookio directly (a guard test in
+// internal/effectpolicy enforces that). This package no longer reaches hookio
+// for any TYPE it names — ParsedCommand.Redirections is
+// []internal/hooktypes.Redirection, a zero-dependency leaf package, as of the
+// effect-graph spike's slice 3r — so the only remaining edge is cmdparse's
+// HookInput parameter, a separate follow-up (the any-typed HookInput fields
+// ParsedLeaf/ParsedRoot/Evaluator.EvaluateStructure's leaves).
 package cmddesc
 
 import "fmt"

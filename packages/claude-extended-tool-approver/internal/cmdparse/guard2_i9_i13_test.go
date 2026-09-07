@@ -20,8 +20,10 @@ package cmdparse
 //     `string`").
 //  2. hookio.Evaluator's interface (the seam through which every rule reaches
 //     the engine) lives in package `hookio`, which cmdparse already imports
-//     (`ParsedCommand` embeds `hookio.Redirection`) — so hookio CANNOT import
-//     cmdparse back without a cycle. That is the EXACT reason
+//     (for `*hookio.HookInput`, `LeavesOf`/`RootLeavesOf`'s parameter — no
+//     longer for `Redirection`, which moved to the zero-dependency
+//     `internal/hooktypes` in the effect-graph spike's slice 3r) — so hookio
+//     CANNOT import cmdparse back without a cycle. That is the EXACT reason
 //     `EvaluateStructure`'s own `leaves` parameter is typed `any` rather than
 //     `[]cmdparse.ParsedCommand` (see that method's doc, pg2-m1i6r). The same
 //     constraint blocks giving EvaluateExpression's `expr` parameter a

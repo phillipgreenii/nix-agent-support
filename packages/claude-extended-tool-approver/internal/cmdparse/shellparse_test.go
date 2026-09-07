@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hooktypes"
 )
 
 // seamFile is the ONE file allowed to import the parser (I6).
@@ -676,7 +676,7 @@ func TestShellParse_ResolveLoopsReplacementSemantics(t *testing.T) {
 		var redirLeaves int
 		for _, leaf := range sp.Leaves {
 			for _, r := range leaf.Redirections {
-				if r.Path == "/etc/passwd" && r.Kind == hookio.RedirectStdout {
+				if r.Path == "/etc/passwd" && r.Kind == hooktypes.RedirectStdout {
 					redirLeaves++
 				}
 			}
@@ -940,20 +940,20 @@ func TestShellParse_RedirectionGrammar(t *testing.T) {
 		src      string
 		operator string
 		path     string
-		kind     hookio.RedirectionKind
+		kind     hooktypes.RedirectionKind
 	}{
-		{"echo x > f", ">", "f", hookio.RedirectStdout},
-		{"echo x >> f", ">>", "f", hookio.RedirectStdout},
-		{"echo pwned 1> /etc/passwd", "1>", "/etc/passwd", hookio.RedirectStdout},
-		{"echo x 2> f", "2>", "f", hookio.RedirectStderr},
-		{"echo x 9> f", "9>", "f", hookio.RedirectOtherFD},
-		{"echo x >| f", ">|", "f", hookio.RedirectStdout},
-		{"echo x <> f", "<>", "f", hookio.RedirectReadWrite},
-		{"echo x &> f", "&>", "f", hookio.RedirectAll},
-		{"echo x &>> f", "&>>", "f", hookio.RedirectAll},
-		{"echo x >& f", ">&", "f", hookio.RedirectAll},
-		{"echo x {fd}> f", "{fd}>", "f", hookio.RedirectOtherFD},
-		{"cat < f", "<", "f", hookio.RedirectStdin},
+		{"echo x > f", ">", "f", hooktypes.RedirectStdout},
+		{"echo x >> f", ">>", "f", hooktypes.RedirectStdout},
+		{"echo pwned 1> /etc/passwd", "1>", "/etc/passwd", hooktypes.RedirectStdout},
+		{"echo x 2> f", "2>", "f", hooktypes.RedirectStderr},
+		{"echo x 9> f", "9>", "f", hooktypes.RedirectOtherFD},
+		{"echo x >| f", ">|", "f", hooktypes.RedirectStdout},
+		{"echo x <> f", "<>", "f", hooktypes.RedirectReadWrite},
+		{"echo x &> f", "&>", "f", hooktypes.RedirectAll},
+		{"echo x &>> f", "&>>", "f", hooktypes.RedirectAll},
+		{"echo x >& f", ">&", "f", hooktypes.RedirectAll},
+		{"echo x {fd}> f", "{fd}>", "f", hooktypes.RedirectOtherFD},
+		{"cat < f", "<", "f", hooktypes.RedirectStdin},
 	}
 	for _, tc := range cases {
 		t.Run(tc.src, func(t *testing.T) {
@@ -961,7 +961,7 @@ func TestShellParse_RedirectionGrammar(t *testing.T) {
 			if len(sp.Leaves) == 0 {
 				t.Fatalf("no leaves")
 			}
-			var got []hookio.Redirection
+			var got []hooktypes.Redirection
 			for _, leaf := range sp.Leaves {
 				got = append(got, leaf.Redirections...)
 			}
@@ -998,30 +998,30 @@ func TestShellParse_RedirectionLiveExpansionAndAppend(t *testing.T) {
 		src       string
 		operator  string
 		path      string
-		kind      hookio.RedirectionKind
+		kind      hooktypes.RedirectionKind
 		wantLive  bool
 		wantAppnd bool
 	}{
-		{`echo x > "$f"`, ">", "$f", hookio.RedirectStdout, true, false},
-		{"echo x > $f", ">", "$f", hookio.RedirectStdout, true, false},
-		{"echo x > '$f'", ">", "$f", hookio.RedirectStdout, false, false},
-		{"echo x > out$(id)", ">", "out$(id)", hookio.RedirectStdout, true, false},
-		{`echo x 2>>"${LOG}"`, "2>>", "${LOG}", hookio.RedirectStderr, true, true},
-		{"cat < file", "<", "file", hookio.RedirectStdin, false, false},
-		{`echo x <> "$f"`, "<>", "$f", hookio.RedirectReadWrite, true, false},
+		{`echo x > "$f"`, ">", "$f", hooktypes.RedirectStdout, true, false},
+		{"echo x > $f", ">", "$f", hooktypes.RedirectStdout, true, false},
+		{"echo x > '$f'", ">", "$f", hooktypes.RedirectStdout, false, false},
+		{"echo x > out$(id)", ">", "out$(id)", hooktypes.RedirectStdout, true, false},
+		{`echo x 2>>"${LOG}"`, "2>>", "${LOG}", hooktypes.RedirectStderr, true, true},
+		{"cat < file", "<", "file", hooktypes.RedirectStdin, false, false},
+		{`echo x <> "$f"`, "<>", "$f", hooktypes.RedirectReadWrite, true, false},
 
 		// Gap B: append is the operator ENUM, not a ">>" substring match.
-		{"echo x >> f", ">>", "f", hookio.RedirectStdout, false, true},
-		{"echo x 2>> f", "2>>", "f", hookio.RedirectStderr, false, true},
-		{"echo x &>> f", "&>>", "f", hookio.RedirectAll, false, true},
-		{"echo x >| f", ">|", "f", hookio.RedirectStdout, false, false},
-		{"echo x > f", ">", "f", hookio.RedirectStdout, false, false},
-		{"echo x <> f", "<>", "f", hookio.RedirectReadWrite, false, false},
+		{"echo x >> f", ">>", "f", hooktypes.RedirectStdout, false, true},
+		{"echo x 2>> f", "2>>", "f", hooktypes.RedirectStderr, false, true},
+		{"echo x &>> f", "&>>", "f", hooktypes.RedirectAll, false, true},
+		{"echo x >| f", ">|", "f", hooktypes.RedirectStdout, false, false},
+		{"echo x > f", ">", "f", hooktypes.RedirectStdout, false, false},
+		{"echo x <> f", "<>", "f", hooktypes.RedirectReadWrite, false, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.src, func(t *testing.T) {
 			sp := ParseShell(tc.src)
-			var got []hookio.Redirection
+			var got []hooktypes.Redirection
 			for _, leaf := range sp.Leaves {
 				got = append(got, leaf.Redirections...)
 			}
@@ -1058,7 +1058,7 @@ func TestShellParse_RedirectionLiveExpansionAndAppend(t *testing.T) {
 			t.Fatalf("inner Redirections = %v, want exactly 1", inner.Redirections)
 		}
 		r := inner.Redirections[0]
-		if r.Path != "$f" || r.Kind != hookio.RedirectStdout {
+		if r.Path != "$f" || r.Kind != hooktypes.RedirectStdout {
 			t.Fatalf("got %+v, want path=$f kind=RedirectStdout", r)
 		}
 		if !r.LiveExpansion {

@@ -4,7 +4,11 @@
 // internal/hookio; Decision is a new type, not an alias of the hook's.
 //
 // Known import cycle to fix later: effectgraph reaches internal/hookio
-// transitively through cmdparse (ParsedCommand embeds hookio.Redirection).
+// transitively through cmdparse, which imports hookio for *hookio.HookInput
+// (LeavesOf/RootLeavesOf's parameter) — not, as of the effect-graph spike's
+// slice 3r, for any type this package or effectgraph names: Redirection moved
+// out of hookio into the zero-dependency internal/hooktypes. The HookInput edge
+// is a separate follow-up, tied to HookInput.ParsedLeaf/ParsedRoot being `any`.
 package evalcontract
 
 import "github.com/phillipgreenii/claude-extended-tool-approver/internal/effectgraph"

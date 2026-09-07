@@ -3,8 +3,8 @@
 package cmdparse_test
 
 // TestRedirectionCensus is the ADR 0039 replay-discipline verification for the
-// redirection-seam slice (Gap A: hookio.Redirection.LiveExpansion, Gap B:
-// hookio.Redirection.Append). It walks a frozen, READ-ONLY snapshot of the
+// redirection-seam slice (Gap A: hooktypes.Redirection.LiveExpansion, Gap B:
+// hooktypes.Redirection.Append). It walks a frozen, READ-ONLY snapshot of the
 // real ask-log corpus, parses every distinct Bash `.command` value, and for
 // every redirection found — including one inside a `$( )`/backtick
 // substitution leaf — compares the two new parser-fact fields against the

@@ -9,17 +9,19 @@ import (
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmdparse"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hooktypes"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/metrics"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/patheval"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/temproot"
 )
 
-// isSafeRedirectTarget is hookio.IsSafeRedirectTarget, kept as a local alias so
-// this file's call sites and comments read unchanged. The predicate moved to
-// hookio when the gitdir rule needed the same "this target captures nothing"
-// answer for its copy-out detection (tc-403c); hookio owns the Redirection type,
-// so it is the one place both an engine and a rule can reach.
-func isSafeRedirectTarget(path string) bool { return hookio.IsSafeRedirectTarget(path) }
+// isSafeRedirectTarget is hooktypes.IsSafeRedirectTarget, kept as a local alias
+// so this file's call sites and comments read unchanged. The predicate moved to
+// (what is now) hooktypes when the gitdir rule needed the same "this target
+// captures nothing" answer for its copy-out detection (tc-403c); hooktypes owns
+// the Redirection type, so it is the one place both an engine and a rule can
+// reach without depending on each other.
+func isSafeRedirectTarget(path string) bool { return hooktypes.IsSafeRedirectTarget(path) }
 
 // isDynamicRedirectTarget reports whether a redirection target contains a shell
 // expansion ($VAR, ${VAR}, $(...), backtick) that resolves only at runtime,
@@ -958,7 +960,7 @@ func unparseableExpressionFloor(sp cmdparse.ShellParse) hookio.RuleResult {
 // pg2-u65fu's own pairing.
 //
 // NOT MODELLED, and stated as a known, accepted limitation rather than silently
-// skipped: this codebase's cmdparse.Heredoc / hookio.Redirection types record no
+// skipped: this codebase's cmdparse.Heredoc / hooktypes.Redirection types record no
 // target FILE DESCRIPTOR at all (no representation of `3<<EOF` vs a plain `<<EOF`),
 // so there is nothing here to check that the heredoc actually lands on fd 0 — the
 // allowlisted-sink + explicit-flag pair is the whole of what this floor can verify,
@@ -1195,7 +1197,7 @@ var heredocStdinSinkFlags = map[string]map[string]bool{
 // was added defensively before yq actually needed one (pipesink.go's own doc).
 //
 // NOT CHECKED, and deliberately: which file descriptor the heredoc targets.
-// cmdparse.Heredoc / hookio.Redirection record no target fd at all (no
+// cmdparse.Heredoc / hooktypes.Redirection record no target fd at all (no
 // representation of `3<<EOF` vs a plain `<<EOF`), so this function has nothing to
 // test there — see heredocFloor's own "NOT MODELLED" paragraph.
 func messageSinkStdinHeredocCleared(pc cmdparse.ParsedCommand) bool {
@@ -1749,7 +1751,7 @@ func parsedLeafFor(pc cmdparse.ParsedCommand) []cmdparse.ParsedCommand {
 // fields' doc and cmdparse.LeavesOf/RootLeavesOf, the rule-side accessors that
 // replace `cmdStr, _ := input.BashCommand(); cmdparse.Parse(cmdStr)`.
 
-func (e *Engine) evaluateRedirections(redirs []hookio.Redirection, override *patheval.PathEvaluator, vars map[string]string) hookio.RuleResult {
+func (e *Engine) evaluateRedirections(redirs []hooktypes.Redirection, override *patheval.PathEvaluator, vars map[string]string) hookio.RuleResult {
 	// No redirections = no opinion (neutral)
 	if len(redirs) == 0 {
 		return hookio.RuleResult{Decision: hookio.Approve, Reason: "no redirections to evaluate", Module: "engine"}

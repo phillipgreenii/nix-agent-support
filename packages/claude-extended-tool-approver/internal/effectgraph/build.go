@@ -563,7 +563,7 @@ func (b *builder) deriveFlows() {
 
 // redirectionEffect classifies a redirection into a path effect from the
 // SEAM's own parser facts — never by re-deriving them from rendered text, per
-// hookio.Redirection's own doc ("A consumer MUST classify by Kind, never by
+// hooktypes.Redirection's own doc ("A consumer MUST classify by Kind, never by
 // matching this string"):
 //
 //   - Read vs write comes from Kind.IsWrite().
@@ -571,7 +571,7 @@ func (b *builder) deriveFlows() {
 //     bash's `<>`) and appnd (the operator's own ENUM, `>>`/`&>>`/`n>>`/
 //     `{fd}>>`) — either one is a Modify; a plain write with neither is a
 //     Truncate (`>`, `>|`, `&>`, `n>`).
-//   - Dynamic comes from live (hookio.Redirection.LiveExpansion), the same
+//   - Dynamic comes from live (hooktypes.Redirection.LiveExpansion), the same
 //     AST-level expansion check ordinary arguments use, not a `$`/backtick
 //     substring test on the target text — see LiveExpansion's own doc for
 //     the two shapes that heuristic gets wrong (a quoted/escaped `$`/“ ` “

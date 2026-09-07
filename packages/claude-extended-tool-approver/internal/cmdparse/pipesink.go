@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hooktypes"
 )
 
 // This file holds the SINK CLASSIFICATION half of the pipeline relation: given a
@@ -28,7 +28,7 @@ import (
 // answer about an ssh REMOTE command's pipeline, and a rule must not import
 // another rule's package — so the choice was to duplicate the tables or relocate
 // them. This is exactly the relocation cmdparse.SkipGrepPattern got (see
-// argflags.go's header) and that hookio.IsSafeRedirectTarget got, for the same
+// argflags.go's header) and that hooktypes.IsSafeRedirectTarget got, for the same
 // reason, and it is the same MECHANISM/POLICY split tc-vul7 itself applied when
 // it put the pipeline RELATION here and left gitdir's copy-out POLICY in gitdir:
 //
@@ -173,13 +173,13 @@ func HasAnyFlag(args []string, flags map[string]bool) bool {
 // that keeps the bytes. Only the STDOUT-bearing kinds count: `2>/dev/null`
 // discards diagnostics and captures none of the payload, and a target that
 // captures nothing — /dev/null, the tty, an inherited fd — is likewise not a
-// capture (hookio.IsSafeRedirectTarget).
+// capture (hooktypes.IsSafeRedirectTarget).
 func CapturesStdout(pc ParsedCommand) bool {
 	for _, rd := range pc.Redirections {
-		if rd.Kind != hookio.RedirectStdout && rd.Kind != hookio.RedirectAll {
+		if rd.Kind != hooktypes.RedirectStdout && rd.Kind != hooktypes.RedirectAll {
 			continue
 		}
-		if !hookio.IsSafeRedirectTarget(rd.Path) {
+		if !hooktypes.IsSafeRedirectTarget(rd.Path) {
 			return true
 		}
 	}
