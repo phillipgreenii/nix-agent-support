@@ -127,8 +127,14 @@ func TestGit_ConfigFlagAllowlist_GluedQuoteParity(t *testing.T) {
 
 // TestGit_ConfigFlagAllowlist_NonBooleanValueAbstains is the security half: for the
 // allowlisted KEY, a value that is not a boolean literal is a PATHNAME GIT EXECUTES,
-// and it must still abstain. These rows are what a key-only allowlist would have
+// and it must still be refused. These rows are what a key-only allowlist would have
 // cleared.
+//
+// THE LEVEL IS REJECT, NOT ABSTAIN, SINCE pg2-3zgcf (2026-09-07): core.fsmonitor is one
+// of the nine keys that operator ruling escalated on this route (hasGitConfigInjection)
+// in lockstep with the porcelain route. The rename from "Abstains" to the REJECT level
+// is the change; what this test still guards — a key-only allowlist would have cleared
+// these — is unchanged.
 func TestGit_ConfigFlagAllowlist_NonBooleanValueAbstains(t *testing.T) {
 	values := []string{
 		"/tmp/evil.sh",       // the measured exec case
@@ -144,8 +150,8 @@ func TestGit_ConfigFlagAllowlist_NonBooleanValueAbstains(t *testing.T) {
 	for _, value := range values {
 		for _, sub := range readOnlySubcommandsUnderTest {
 			cmd := dashC("core.fsmonitor", value, sub)
-			if got := evalCmd(t, cmd); got.Decision != hookio.NoOpinion {
-				t.Errorf("cmd %q: got %s (%s), want abstain — `core.fsmonitor` holds the PATHNAME of the fsmonitor hook whenever the value is not a boolean literal, and `git -c core.fsmonitor=<script> status` was MEASURED executing it (pg2-arfw6 S-2)", cmd, got.Decision, got.Reason)
+			if got := evalCmd(t, cmd); got.Decision != hookio.Reject {
+				t.Errorf("cmd %q: got %s (%s), want REJECT — `core.fsmonitor` holds the PATHNAME of the fsmonitor hook whenever the value is not a boolean literal, `git -c core.fsmonitor=<script> status` was MEASURED executing it (pg2-arfw6 S-2), and this key is one of pg2-3zgcf's nine escalated keys (2026-09-07)", cmd, got.Decision, got.Reason)
 			}
 		}
 	}
@@ -169,26 +175,29 @@ func TestGit_ConfigFlagAllowlist_IsClosed(t *testing.T) {
 		// much narrower predicate. Their closedness is asserted in
 		// TestGit_EditorCarveOut_NearMissesDoNotClear, which checks the VALUE boundary
 		// they actually have. Everything below is still cleared by nothing at all.
-		"core.pager", "core.hooksPath", "core.sshCommand",
+		//
+		// `core.pager`, `core.hooksPath`, `core.sshCommand`, `diff.external` and
+		// `diff.mydriver.textconv` moved OUT of this list to escalatedKeys below
+		// (pg2-3zgcf, 2026-09-07) — they are still closed by the SAME mechanism, but
+		// the verdict for an uncleared pair is now Reject, not this loop's Abstain.
 		"core.askPass", "core.gitProxy", "gpg.program",
-		"diff.external", "diff.mydriver.command", "diff.mydriver.textconv",
+		"diff.mydriver.command",
 		"merge.mydriver.driver", "mergetool.mine.cmd", "difftool.mine.cmd",
 		"filter.mine.clean", "filter.mine.smudge", "filter.mine.process",
 		"credential.helper", "uploadpack.packObjectsHook",
 		"remote.origin.uploadpack", "remote.origin.receivepack",
 		"init.templateDir", "pager.log", "web.browser", "help.browser",
 		"man.mine.cmd", "alias.x", "include.path", "includeIf.gitdir:/x/.path",
-		// Interlocks and redirects.
-		"http.sslVerify", "clean.requireForce", "receive.denyCurrentBranch",
+		// Redirects — the -c ROUTE for these is a PRE-EXISTING, separately tracked
+		// gap unaffected by pg2-3zgcf, which scoped its Reject escalation to the
+		// sink/interlock classes only: the porcelain form is already Reject
+		// (configRedirect) but the -c injection form here still only Abstains.
 		"url.https://evil/.insteadOf", "remote.origin.url",
 		// NOT sinks — the point being that closedness does not depend on danger.
 		"user.name", "branch.main.remote", "core.autocrlf",
 		"future.key.nobodyhasheardof",
-		// A SUBSECTIONED spelling of the allowlisted key. It is a DIFFERENT key to git
-		// (`core` has no subsections), so collapsing it onto the entry would clear a
-		// token the allowlist never named.
-		"core.sneaky.fsmonitor",
-		// A near-miss on the key itself.
+		// A near-miss on the key itself. These do NOT normalize (via configKeyID) to
+		// any gated identity at all, so they stay ungated and Abstain either way.
 		"core.fsmonitorx", "corefsmonitor", "core.fsmonitor.extra",
 	}
 	for _, key := range keys {
@@ -202,30 +211,76 @@ func TestGit_ConfigFlagAllowlist_IsClosed(t *testing.T) {
 			}
 		}
 	}
+	// ESCALATED KEYS (pg2-3zgcf, 2026-09-07): the nine sink/interlock keys the
+	// operator ruling raised from Ask to Reject on BOTH the porcelain (`git
+	// config`) and this `-c`/`--config-env` injection route. Still closed by the
+	// SAME mechanism — configFlagPairCleared never clears any of these — but the
+	// verdict for an uncleared pair is now Reject rather than the pre-pg2-3zgcf
+	// Abstain. Kept as a separate loop rather than folded into the one above
+	// because the two now assert DIFFERENT decisions.
+	escalatedKeys := []string{
+		"core.pager", "core.hooksPath", "core.sshCommand",
+		"diff.external", "diff.mydriver.textconv",
+		"http.sslVerify", "clean.requireForce", "receive.denyCurrentBranch",
+		// A SUBSECTIONED spelling of the allowlisted key. `core` has no real
+		// subsections to git, so this is a DIFFERENT variable in truth — but
+		// configKeyID's deliberate, safe-direction over-approximation (dropping
+		// the middle segment) is shared by the escalation check
+		// (configFlagKeyEscalatedToReject), so it gates the same way the
+		// porcelain route (gatedConfigKey) already does for this spelling.
+		"core.sneaky.fsmonitor",
+	}
+	for _, key := range escalatedKeys {
+		for _, cmd := range []string{
+			dashC(key, "false", "log"),
+			dashC(key, "true", "status"),
+			dashCBare(key, "log"),
+		} {
+			if got := evalCmd(t, cmd); got.Decision != hookio.Reject {
+				t.Errorf("cmd %q: got %s (%s), want REJECT — %q is one of the nine keys pg2-3zgcf escalated on both routes, so an uncleared `-c` must be refused outright, not merely abstained", cmd, got.Decision, got.Reason, key)
+			}
+		}
+	}
 }
 
-// TestGit_ConfigFlagAllowlist_AllOrNothing pins S-6: one non-cleared `-c` abstains the
-// WHOLE command, in either order and with any number of cleared pairs around it. And
-// the verdict is Abstain, never Reject — that is the level this guard has always had.
+// TestGit_ConfigFlagAllowlist_AllOrNothing pins S-6: one non-cleared `-c` decides the
+// WHOLE command, in either order and with any number of cleared pairs around it.
+//
+// THE VERDICT SPLITS IN TWO SINCE pg2-3zgcf (2026-09-07): a non-cleared `-c` naming one
+// of the nine escalated sink/interlock keys now Rejects the whole command (the SAME
+// all-or-nothing rule, at the escalated level); a non-cleared `-c` naming anything else
+// still Abstains, exactly as S-6 originally described. "Raising it to a decisive
+// refusal needs its own ruling" — that ruling was made, for these nine keys only.
 func TestGit_ConfigFlagAllowlist_AllOrNothing(t *testing.T) {
-	cmds := []string{
-		"git -c core.fsmonitor=false -c core.pager=EVIL log",
-		"git -c core.pager=EVIL -c core.fsmonitor=false log",
-		"git -c core.fsmonitor=false -c core.fsmonitor=/tmp/evil.sh log",
+	// Every uncleared pair here is a non-escalated key (user.name, x=y) or the
+	// trailing bare `-c` with no pair to inspect, so the whole command still
+	// Abstains at S-6's original level.
+	abstainCmds := []string{
 		"git -c core.fsmonitor=false -c core.fsmonitor=false -c core.editor=EVIL log",
-		"git -c core.fsmonitor=false -C /repo -c core.pager=EVIL log",
-		"git -c core.fsmonitor=false --config-env=core.pager=X log",
-		// A trailing `-c` has no pair to inspect: fail closed.
 		"git -c",
 		"git -c core.fsmonitor=false -c",
 	}
-	for _, cmd := range cmds {
+	for _, cmd := range abstainCmds {
 		got := evalCmd(t, cmd)
 		if got.Decision != hookio.NoOpinion {
-			t.Errorf("cmd %q: got %s (%s), want abstain — EVERY `-c` in the pre-subcommand span must clear, and one that does not abstains the whole command (pg2-arfw6 S-6)", cmd, got.Decision, got.Reason)
+			t.Errorf("cmd %q: got %s (%s), want abstain — EVERY `-c` in the pre-subcommand span must clear, and one that does not (and does not name a pg2-3zgcf-escalated key) abstains the whole command (pg2-arfw6 S-6)", cmd, got.Decision, got.Reason)
 		}
-		if got.Decision == hookio.Reject {
-			t.Errorf("cmd %q: got REJECT — a non-cleared `-c` stays Abstain; raising it to a decisive refusal needs its own ruling (pg2-arfw6 S-6)", cmd)
+	}
+	// EVERY OCCURRENCE STILL MUST CLEAR (S-6), but when the uncleared occurrence
+	// names one of pg2-3zgcf's nine escalated keys the whole command is now
+	// REJECTED rather than merely abstained — the escalation applies regardless of
+	// how many OTHER pairs in the same command are cleared or ordered around it.
+	rejectCmds := []string{
+		"git -c core.fsmonitor=false -c core.pager=EVIL log",
+		"git -c core.pager=EVIL -c core.fsmonitor=false log",
+		"git -c core.fsmonitor=false -c core.fsmonitor=/tmp/evil.sh log",
+		"git -c core.fsmonitor=false -C /repo -c core.pager=EVIL log",
+		"git -c core.fsmonitor=false --config-env=core.pager=X log",
+	}
+	for _, cmd := range rejectCmds {
+		got := evalCmd(t, cmd)
+		if got.Decision != hookio.Reject {
+			t.Errorf("cmd %q: got %s (%s), want REJECT — an uncleared occurrence of a pg2-3zgcf-escalated key rejects the whole command even when other `-c`/`-C` occurrences around it clear or are unrelated", cmd, got.Decision, got.Reason)
 		}
 	}
 }
@@ -235,7 +290,12 @@ func TestGit_ConfigFlagAllowlist_AllOrNothing(t *testing.T) {
 // value predicate to evaluate — including when the key is the allowlisted one, which is
 // the row a naive shared code path would clear.
 func TestGit_ConfigFlagAllowlist_ConfigEnvStaysUnconditional(t *testing.T) {
-	cmds := []string{
+	// pg2-3zgcf (2026-09-07): --config-env still can never CLEAR (S-5 is unchanged —
+	// the value is an env var NAME, never text a predicate can evaluate), but the
+	// SEVERITY of "not cleared" now depends on the key: core.fsmonitor and
+	// core.pager are two of the nine keys that ruling escalated to Reject on this
+	// route, so their rows moved from Abstain to Reject.
+	rejectCmds := []string{
 		"git --config-env=core.fsmonitor=SOMEVAR log",
 		"git --config-env core.fsmonitor=SOMEVAR log",
 		"git --config-env=core.fsmonitor=SOMEVAR status",
@@ -243,9 +303,21 @@ func TestGit_ConfigFlagAllowlist_ConfigEnvStaysUnconditional(t *testing.T) {
 		"git --config-env core.pager=SOMEVAR log",
 		"git -C /repo --config-env=core.fsmonitor=SOMEVAR log",
 	}
-	for _, cmd := range cmds {
+	for _, cmd := range rejectCmds {
+		if got := evalCmd(t, cmd); got.Decision != hookio.Reject {
+			t.Errorf("cmd %q: got %s (%s), want REJECT — `--config-env` never clears (S-5: its value is an ENVIRONMENT VARIABLE NAME, so no value predicate can run against the command text) and the KEY here is one pg2-3zgcf escalated (2026-09-07), so the unconditional non-clear is now a Reject rather than the pre-3zgcf Abstain", cmd, got.Decision, got.Reason)
+		}
+	}
+	// core.editor is NOT one of the nine escalated keys, so its unconditional
+	// non-clear stays at the pre-existing Abstain level — the control that proves
+	// this is a per-key change, not a blanket one.
+	abstainCmds := []string{
+		"git --config-env=core.editor=SOMEVAR log",
+		"git --config-env core.editor=SOMEVAR log",
+	}
+	for _, cmd := range abstainCmds {
 		if got := evalCmd(t, cmd); got.Decision != hookio.NoOpinion {
-			t.Errorf("cmd %q: got %s (%s), want abstain — `--config-env` names an ENVIRONMENT VARIABLE, so no value predicate can be evaluated against the command text (pg2-arfw6 S-5)", cmd, got.Decision, got.Reason)
+			t.Errorf("cmd %q: got %s (%s), want abstain — `core.editor` is NOT one of pg2-3zgcf's nine escalated keys, so its unconditional non-clear stays at the pre-existing Abstain level (pg2-arfw6 S-5)", cmd, got.Decision, got.Reason)
 		}
 	}
 }

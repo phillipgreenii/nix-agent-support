@@ -72,8 +72,12 @@ func TestGit_ProgramEnvVar_TwinIsAConfigSinkInTheRealTable(t *testing.T) {
 			t.Errorf("%s: twin %q (id %q) is NOT in gatedConfigKeys — either the table entry was removed (then this variable's justification is gone) or a NEW twin is missing, which needs its own ruling and its own `git config` replay the way `core.askPass` got one (pg2-h1ori); an exception map here is what pg2-h1ori deleted and MUST NOT be reintroduced", name, twin, id)
 			continue
 		}
-		if class != configSink {
-			t.Errorf("%s: twin %q (id %q) is class %d, not configSink — this screen exists because git EXECUTES the value; a twin in another class needs its own ruling", name, twin, id, class)
+		// configSinkReject is accepted alongside configSink (pg2-3zgcf, 2026-09-07):
+		// SAME mechanism, escalated verdict for the specific keys the operator
+		// ruling named — diff.external and core.sshCommand's twins are exactly how
+		// this class shows up here.
+		if class != configSink && class != configSinkReject {
+			t.Errorf("%s: twin %q (id %q) is class %d, not configSink (or its pg2-3zgcf-escalated sibling configSinkReject) — this screen exists because git EXECUTES the value; a twin in another class needs its own ruling", name, twin, id, class)
 		}
 	}
 }
@@ -86,6 +90,18 @@ func TestGit_ProgramEnvVar_TwinIsAConfigSinkInTheRealTable(t *testing.T) {
 // Approve and satisfy equality while leaving the hole open.
 func TestGit_ProgramEnvVar_MatchesTheDashCRoute(t *testing.T) {
 	for name, twin := range gitProgramEnvVars {
+		// ESCALATED TWINS EXCLUDED (pg2-3zgcf, 2026-09-07): diff.external,
+		// core.sshCommand and core.pager are three of the nine sink/interlock keys
+		// that ruling raised to Reject on the -c/--config-env route ONLY
+		// (hasGitConfigInjection) — this file's own GIT_* program-naming env route
+		// (pg2-6c85x) was not part of that ruling and still only demotes an
+		// Approve. So for their env twins (GIT_EXTERNAL_DIFF, GIT_SSH_COMMAND,
+		// GIT_SSH, GIT_PAGER) the two routes now deliberately diverge — see
+		// TestGit_ProgramEnvVar_EscalatedTwinsMayNowBeStricterViaDashC for that
+		// relation.
+		if configFlagKeyEscalatedToReject(twin) {
+			continue
+		}
 		for _, sub := range approveClassSubcommands {
 			envCmd := envProg(name, "/tmp/evil", sub)
 			argvCmd := dashC(twin, "/tmp/evil", sub)
@@ -125,12 +141,45 @@ func TestGit_ProgramEnvVar_IsNeverLessRestrictiveThanDashC(t *testing.T) {
 		"bisect start",
 	}, approveClassSubcommands...)
 	for name, twin := range gitProgramEnvVars {
+		// ESCALATED TWINS EXCLUDED (pg2-3zgcf, 2026-09-07) — see the identical note
+		// in TestGit_ProgramEnvVar_MatchesTheDashCRoute; the -c route for these
+		// twins is now stricter than the env route BY DESIGN, so "env never less
+		// restrictive" no longer holds for them.
+		if configFlagKeyEscalatedToReject(twin) {
+			continue
+		}
 		for _, sub := range subs {
 			envGot := evalCmd(t, envProg(name, "/tmp/evil", sub))
 			argvGot := evalCmd(t, dashC(twin, "/tmp/evil", sub))
 			if envGot.Decision < argvGot.Decision {
 				t.Errorf("%s, `git %s`: env spelling got %s (%s), which is LESS restrictive than the -c %s spelling's %s (%s) — the env route must never be the cheaper way around the same guard (pg2-6c85x)",
 					name, sub, envGot.Decision, envGot.Reason, twin, argvGot.Decision, argvGot.Reason)
+			}
+		}
+	}
+}
+
+// TestGit_ProgramEnvVar_EscalatedTwinsMayNowBeStricterViaDashC documents and pins the
+// gap pg2-3zgcf's 2026-09-07 ruling opened for diff.external, core.sshCommand and
+// core.pager: it escalated ONLY the -c/--config-env route (hasGitConfigInjection) to
+// Reject for these keys, not their GIT_* env twins (GIT_EXTERNAL_DIFF, GIT_SSH_COMMAND,
+// GIT_SSH, GIT_PAGER — pg2-6c85x's route), so the two are no longer required to match
+// or to keep the env route at-least-as-strict. Nothing here makes the env route weaker
+// than before — it keeps its pre-existing Approve-only demotion — the -c route is
+// simply now the stricter of the two for these twins specifically.
+func TestGit_ProgramEnvVar_EscalatedTwinsMayNowBeStricterViaDashC(t *testing.T) {
+	for name, twin := range gitProgramEnvVars {
+		if !configFlagKeyEscalatedToReject(twin) {
+			continue
+		}
+		for _, sub := range approveClassSubcommands {
+			argvGot := evalCmd(t, dashC(twin, "/tmp/evil", sub))
+			if argvGot.Decision != hookio.Reject {
+				t.Errorf("%s twin %q, `git %s`: -c spelling got %s (%s), want REJECT — pg2-3zgcf escalated this key", name, twin, sub, argvGot.Decision, argvGot.Reason)
+			}
+			envGot := evalCmd(t, envProg(name, "/tmp/evil", sub))
+			if envGot.Decision == hookio.Approve {
+				t.Errorf("%s, `git %s`: env spelling got APPROVE — the pg2-6c85x demotion must still withdraw the approval even though this twin's -c route is now stricter", name, sub)
 			}
 		}
 	}
@@ -224,8 +273,8 @@ func TestGit_ProgramEnvVar_DoesNotWeakenADecisiveVerdict(t *testing.T) {
 		{"push -f origin main", hookio.Reject, "same, short spelling"},
 		{"remote add upstream https://example.invalid/x.git", hookio.Reject, "a remote mutation is an exfiltration vector"},
 		{"config remote.origin.url https://evil.invalid/x.git", hookio.Reject, "the config spelling of `git remote set-url`"},
-		{"config core.hooksPath /tmp/h", hookio.Ask, "a configSink porcelain write asks"},
-		{"config clean.requireForce false", hookio.Ask, "a configInterlock porcelain write asks"},
+		{"config core.hooksPath /tmp/h", hookio.Reject, "a configSinkReject porcelain write rejects (escalated by pg2-3zgcf, 2026-09-07)"},
+		{"config clean.requireForce false", hookio.Reject, "a configInterlockReject porcelain write rejects (escalated by pg2-3zgcf, 2026-09-07)"},
 	}
 	for name := range gitProgramEnvVars {
 		for _, row := range rows {

@@ -76,6 +76,19 @@ func (r *Rule) refuse(reason string) (hookio.RuleResult, error) {
 	return hookio.Refused(r.Name(), reason)
 }
 
+// configFlagInjectionResult turns a NON-CLEARED configFlagInjectionVerdict (the caller
+// must not invoke this with injectionCleared) into its RuleResult — a decisive Reject
+// for pg2-3zgcf's nine escalated sink/interlock keys, the pre-existing Abstain
+// (r.refuse) for every other uncleared -c/--config-env pair. Factored out once so the
+// three call sites in Evaluate that used to share one `r.refuse(configFlagInjectionReason)`
+// literal stay in lockstep rather than drifting into three copies of the same switch.
+func (r *Rule) configFlagInjectionResult(v configFlagInjectionVerdict) (hookio.RuleResult, error) {
+	if v == injectionReject {
+		return hookio.RuleResult{Decision: hookio.Reject, Reason: configFlagInjectionRejectReason, Module: r.Name()}, nil
+	}
+	return r.refuse(configFlagInjectionReason)
+}
+
 func (r *Rule) Name() string {
 	return "git"
 }
@@ -189,8 +202,8 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 			// No subcommand to classify, so there is no verdict for the floor to sit
 			// under: a bare `git -c k=v` keeps the refusal it has always had rather than
 			// becoming a leaf no rule examined.
-			if configFlagInjection {
-				return r.refuse(configFlagInjectionReason)
+			if configFlagInjection != injectionCleared {
+				return r.configFlagInjectionResult(configFlagInjection)
 			}
 			return hookio.NotApplicable()
 		}
@@ -207,26 +220,41 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 			// not-applicable or a genuine failure `res` is the zero value, so the
 			// pre-ADR-0044 `return RuleResult{}, err` is unchanged for both.
 			//
-			// THE `-c` FLOOR APPLIES HERE TOO, and only in the not-applicable case
-			// (pg2-6f4q9). classify's own REFUSAL is already a NoOpinion floor — the same
-			// level this screen contributes — so it keeps its more specific reason (`git
-			// clean` says why it is a clean). A NOT-APPLICABLE contributes nothing, so
-			// without this branch a `-c` would go UNSCREENED on every subcommand this rule
-			// does not classify, and `git -c core.pager=EVIL clean --help` would reach the
-			// safecmds man-page Approve. errors.Is distinguishes the two despite ErrRefused
-			// deliberately matching ErrNotApplicable in the other direction (hookio's
-			// refusalError.Is), so the test must be against ErrRefused, never against
-			// ErrNotApplicable.
-			if configFlagInjection && !errors.Is(err, hookio.ErrRefused) {
-				return r.refuse(configFlagInjectionReason)
+			// THE `-c` FLOOR APPLIES HERE TOO, and — for the pre-existing injectionAbstain
+			// severity — only in the not-applicable case (pg2-6f4q9). classify's own
+			// REFUSAL is already a NoOpinion floor — the SAME level injectionAbstain
+			// contributes — so it keeps its more specific reason (`git clean` says why it
+			// is a clean). A NOT-APPLICABLE contributes nothing, so without this branch a
+			// `-c` would go UNSCREENED on every subcommand this rule does not classify,
+			// and `git -c core.pager=EVIL clean --help` would reach the safecmds man-page
+			// Approve. errors.Is distinguishes the two despite ErrRefused deliberately
+			// matching ErrNotApplicable in the other direction (hookio's refusalError.Is),
+			// so the test must be against ErrRefused, never against ErrNotApplicable.
+			//
+			// injectionReject IS APPLIED UNCONDITIONALLY HERE, EVEN OVER classify's OWN
+			// REFUSAL (pg2-3zgcf, 2026-09-07). Unlike injectionAbstain, Reject is STRICTLY
+			// MORE restrictive than any NoOpinion-level refusal classify can produce, so
+			// preserving classify's own reason the way injectionAbstain does would
+			// silently DROP the escalation — measured: `git -c clean.requireForce=false
+			// clean` reached classify's own uniform `clean` Abstain (pg2-u0e0c) instead of
+			// the Reject this ruling requires, because clean.requireForce IS one of the
+			// nine escalated keys and `clean` is a subcommand this rule always refuses on
+			// its own account. hookio.MostRestrictive's own rule — the more restrictive
+			// verdict always wins — is what this branch applies locally, exactly as the
+			// Approve arm below already does for the SAME severity.
+			if configFlagInjection == injectionReject {
+				return r.configFlagInjectionResult(configFlagInjection)
+			}
+			if configFlagInjection == injectionAbstain && !errors.Is(err, hookio.ErrRefused) {
+				return r.configFlagInjectionResult(configFlagInjection)
 			}
 			return res, err
 		}
 		// The `-c` floor's Approve arm. Written as a sibling of the env demotions below
 		// rather than fused with them because it rests on its own ruling and its own
 		// measurement — see the call-site comment above hasGitConfigInjection's read.
-		if res.Decision == hookio.Approve && configFlagInjection {
-			return r.refuse(configFlagInjectionReason)
+		if res.Decision == hookio.Approve && configFlagInjection != injectionCleared {
+			return r.configFlagInjectionResult(configFlagInjection)
 		}
 		// THE ENV SPELLING OF THE `-c` INJECTION ABOVE (pg2-a12rl). A
 		// `GIT_CONFIG_*` assignment on this leaf hands git configuration of the
@@ -836,6 +864,20 @@ const (
 	// configRedirect — the value REPOINTS a remote at another host, so a later,
 	// entirely ordinary `git push origin main` sends elsewhere.
 	configRedirect
+	// configSinkReject / configInterlockReject — pg2-3zgcf, operator ruling
+	// 2026-09-07. SAME mechanism as configSink / configInterlock respectively (git
+	// EXECUTES the value / the value disables a default refusal), but the SPECIFIC
+	// keys carrying one of these two classes are REJECTED outright rather than
+	// merely asked, because that specific key was named in the ruling's list. Kept
+	// as siblings of configSink/configInterlock rather than folded into their
+	// verdict (configGateResult still answers Ask for plain configSink/
+	// configInterlock) so a key the ruling did NOT name — core.editor,
+	// credential.helper, the alternate-transport family, protocol.allow, … — keeps
+	// its pre-existing Ask, completely unaffected. See gatedConfigKeys' "ESCALATED
+	// TO REJECT" note below the survey table for the ruling text and the exact key
+	// list, and configGateResult for the verdict each class produces.
+	configSinkReject
+	configInterlockReject
 )
 
 // gatedConfigKeys is the `git config` key set whose WRITE is gated, keyed on
@@ -847,32 +889,53 @@ const (
 // MECHANISM, and the verdict follows the mechanism:
 //
 //	KEY                        MECHANISM  VERDICT  RATIONALE
-//	clean.requireForce         interlock  Ask      git's refusal to delete untracked files without an explicit force flag. `false` removes it, and nothing at the `git clean` site shows that it is gone, so this write is the only place the loss is visible. (When pg2-szadj weighed the key, `git clean` still ASKED and the write left THAT prompt unchanged — the operator answering under a belief already falsified was the defect it named. pg2-u0e0c has since moved the `clean` arm to a uniform Abstain, which retires the misleading prompt; it does NOT retire this gate.)
-//	core.hooksPath             sink       Ask      points hook execution at a caller-chosen directory: arbitrary code on the NEXT git operation, whatever that operation is.
-//	core.pager                 sink       Ask      git spawns the value on nearly every read command; it is the same sink the pre-subcommand `-c core.pager=…` guard already defers.
-//	core.fsmonitor             sink       Ask      the value MAY be a hook program git runs on every index refresh. Over-approximate: the harmless `true`/`false` spelling is gated too (see the OVER-APPROXIMATIONS note).
-//	core.sshCommand            sink       Ask      replaces the ssh binary for every fetch and push.
-//	diff.<driver>.textconv     sink       Ask      the enumerated `*.textconv`: git runs it to render a blob, selected by .gitattributes rather than by the command line.
-//	diff.external              sink       Ask      replaces the diff program for every `git diff`.
-//	receive.denyCurrentBranch  interlock  Ask      git's refusal to let a push update the branch checked out in a non-bare repo. `false`/`updateInstead` lets a push rewrite a live worktree's HEAD.
-//	http.sslVerify             interlock  Ask      certificate verification for every https fetch/push. `false` makes an interception invisible.
+//	clean.requireForce         interlock  REJECT   git's refusal to delete untracked files without an explicit force flag. `false` removes it, and nothing at the `git clean` site shows that it is gone, so this write is the only place the loss is visible. (When pg2-szadj weighed the key, `git clean` still ASKED and the write left THAT prompt unchanged — the operator answering under a belief already falsified was the defect it named. pg2-u0e0c has since moved the `clean` arm to a uniform Abstain, which retires the misleading prompt; it does NOT retire this gate. VERDICT escalated Ask -> Reject by pg2-3zgcf, 2026-09-07 — see below; this caveat and the pg2-u0e0c cross-reference stay live and are NOT affected by that escalation.)
+//	core.hooksPath             sink       REJECT   points hook execution at a caller-chosen directory: arbitrary code on the NEXT git operation, whatever that operation is. (escalated by pg2-3zgcf, 2026-09-07)
+//	core.pager                 sink       REJECT   git spawns the value on nearly every read command; it is the same sink the pre-subcommand `-c core.pager=…` guard now REJECTS too (escalated by pg2-3zgcf, 2026-09-07 — see below).
+//	core.fsmonitor             sink       REJECT   the value MAY be a hook program git runs on every index refresh. Over-approximate: the harmless `true`/`false` spelling is gated too (see the OVER-APPROXIMATIONS note). (escalated by pg2-3zgcf, 2026-09-07)
+//	core.sshCommand            sink       REJECT   replaces the ssh binary for every fetch and push. (escalated by pg2-3zgcf, 2026-09-07)
+//	diff.<driver>.textconv     sink       REJECT   the enumerated `*.textconv`: git runs it to render a blob, selected by .gitattributes rather than by the command line. (escalated by pg2-3zgcf, 2026-09-07)
+//	diff.external              sink       REJECT   replaces the diff program for every `git diff`. (escalated by pg2-3zgcf, 2026-09-07)
+//	receive.denyCurrentBranch  interlock  REJECT   git's refusal to let a push update the branch checked out in a non-bare repo. `false`/`updateInstead` lets a push rewrite a live worktree's HEAD. (escalated by pg2-3zgcf, 2026-09-07)
+//	http.sslVerify             interlock  REJECT   certificate verification for every https fetch/push. `false` makes an interception invisible. (escalated by pg2-3zgcf, 2026-09-07)
 //	url.<base>.insteadOf       redirect   REJECT   rewrites every matching URL, so `git push origin main` goes to another host with NO `git remote` change to show for it.
 //
 // NONE OF THE TEN IS LEFT APPROVED: each is either a program git executes or a
 // refusal git makes, and the bead pre-authorized the ruling.
 //
-// WHY THE INTERLOCK AND SINK CLASSES ARE ASK, NOT REJECT — the weaker verdict is
-// the CONSISTENT one. The identical vector by the other route, a pre-subcommand
-// `git -c core.pager=EVIL log`, is already handled by hasGitConfigInjection as an
-// ABSTAIN that defers to Claude's prompt. A decisive Ask is strictly stricter than
-// that Abstain, so this gate sits at or above the control it mirrors, which is the
-// relative-stringency test pushVerdict's network-URL Reject was argued from. Going
-// further to Reject would make the porcelain route stricter than the injection
-// route for the SAME sink, an inversion with no operator ruling behind it — and
-// unlike force-push or `git remote`, no ruling exists here. An Ask is also what
-// actually REPAIRS this defect: the harm is that the operator answers a later
-// prompt under a stale belief, and a prompt AT THE MOMENT THE BELIEF CHANGES is
-// exactly the remedy. Raising either class to Reject needs an operator ruling.
+// WHY THE INTERLOCK AND SINK CLASSES WERE ASK, NOT REJECT, FROM pg2-szadj (2026-07-30)
+// UNTIL pg2-3zgcf (2026-09-07) — SUPERSEDED, kept for history rather than deleted so a
+// reader who arrives via an old citation sees the outcome instead of re-opening the
+// question. The original reasoning: the weaker verdict was the CONSISTENT one, because
+// the identical vector by the other route, a pre-subcommand `git -c core.pager=EVIL
+// log`, was handled by hasGitConfigInjection as an ABSTAIN that deferred to Claude's
+// prompt, so a decisive Ask sat at or above the control it mirrored. Going further to
+// Reject would have made the porcelain route stricter than the injection route for the
+// SAME sink, an inversion with no operator ruling behind it. THAT RULING WAS MADE — see
+// "ESCALATED TO REJECT" immediately below — and it moved both routes together, so the
+// inversion this reasoning warned against does not reopen.
+//
+// ESCALATED TO REJECT (pg2-3zgcf, operator ruling 2026-09-07, via /unblock-human-beads).
+// The nine sink/interlock rows in the table above (every row except the already-REJECT
+// `url.<base>.insteadOf`) move from Ask to Reject, under the SAME "unverifiable ->
+// deny" philosophy pg2-2hwvl applied to the engine/env-vars cohorts — accepted EVEN
+// THOUGH every sampled recent live trigger for this specific cohort was the operator's
+// own guard self-test (a throwaway scratchpad script pointed at by `core.hooksPath`),
+// never a real attacker-supplied program. The operator explicitly accepts that this
+// also blocks a future self-test of the guard with no in-the-moment override.
+//
+// IN THE SAME CHANGE — required, not optional, per the very inversion argument the
+// superseded reasoning above made — hasGitConfigInjection's Abstain for a `-c`/
+// `--config-env` pair naming one of these same nine keys moves to Reject too (see
+// configFlagKeyEscalatedToReject and the "ESCALATED SEVERITY" note on
+// hasGitConfigInjection below). Without that second move, the porcelain route would be
+// STRICTER than the injection route for the identical sink — exactly the bypass the
+// superseded reasoning existed to prevent, just shifted one ruling later instead of
+// closed. Every OTHER Ask in this file — core.editor, sequence.editor, core.askPass,
+// credential.helper, init.templateDir, include.path, includeIf.<cond>.path, the whole
+// alternate-transport family, protocol.<n>.allow — was NOT named by this ruling and
+// keeps its Ask on both routes, unaffected; raising any of THOSE needs its own ruling,
+// exactly as this one needed its own.
 //
 // WHY THE REDIRECT CLASS IS REJECT — relative stringency in the other direction.
 // `git remote set-url` is a hard Reject (remoteVerdict, operator ruling
@@ -1022,21 +1085,27 @@ const (
 //     resolve — see 1.
 var gatedConfigKeys = map[string]configGateClass{
 	// Execution sinks — git runs the value, or something under it.
-	"core.hookspath":    configSink,
-	"core.pager":        configSink,
+	//
+	// FIVE OF THESE ARE configSinkReject, NOT configSink (pg2-3zgcf, 2026-09-07): a
+	// sibling class with the identical mechanism but a Reject verdict, because the
+	// operator ruling named these five keys specifically. See the enum's own doc and
+	// the survey table's "ESCALATED TO REJECT" note above for which keys and why;
+	// every OTHER configSink row below is untouched.
+	"core.hookspath":    configSinkReject,
+	"core.pager":        configSinkReject,
 	"core.editor":       configSink,
 	"sequence.editor":   configSink,
-	"core.sshcommand":   configSink,
+	"core.sshcommand":   configSinkReject,
 	"core.askpass":      configSink, // pg2-h1ori; the env twin GIT_ASKPASS was already screened
-	"core.fsmonitor":    configSink,
-	"diff.external":     configSink,
-	"diff.textconv":     configSink, // diff.<driver>.textconv
-	"diff.command":      configSink, // diff.<driver>.command
-	"merge.driver":      configSink, // merge.<driver>.driver
-	"filter.clean":      configSink, // filter.<driver>.clean
-	"filter.smudge":     configSink, // filter.<driver>.smudge
-	"filter.process":    configSink, // filter.<driver>.process
-	"credential.helper": configSink, // also credential.<url>.helper
+	"core.fsmonitor":    configSinkReject,
+	"diff.external":     configSinkReject,
+	"diff.textconv":     configSinkReject, // diff.<driver>.textconv
+	"diff.command":      configSink,       // diff.<driver>.command
+	"merge.driver":      configSink,       // merge.<driver>.driver
+	"filter.clean":      configSink,       // filter.<driver>.clean
+	"filter.smudge":     configSink,       // filter.<driver>.smudge
+	"filter.process":    configSink,       // filter.<driver>.process
+	"credential.helper": configSink,       // also credential.<url>.helper
 	"init.templatedir":  configSink,
 	"include.path":      configSink,
 	"includeif.path":    configSink, // includeIf.<condition>.path
@@ -1050,9 +1119,15 @@ var gatedConfigKeys = map[string]configGateClass{
 	"uploadpack.packobjectshook": configSink, // reachable from GLOBAL/SYSTEM config, which is what `--global` writes
 
 	// Disabled safety interlocks — a refusal git makes by default.
-	"clean.requireforce":        configInterlock,
-	"http.sslverify":            configInterlock, // also http.<url>.sslVerify
-	"receive.denycurrentbranch": configInterlock,
+	//
+	// ALL THREE OF THESE ARE configInterlockReject, NOT configInterlock (pg2-3zgcf,
+	// 2026-09-07) — named by the same operator ruling as the five sinks above.
+	// `protocol.allow` below is the one configInterlock member the ruling did NOT
+	// name (it is the alternate-transport family, settled separately by pg2-qi1jo)
+	// and keeps its plain Ask.
+	"clean.requireforce":        configInterlockReject,
+	"http.sslverify":            configInterlockReject, // also http.<url>.sslVerify
+	"receive.denycurrentbranch": configInterlockReject,
 	// protocol.<n>.allow (pg2-qi1jo) — git REFUSES the `ext::` transport by default, and
 	// `always` removes that refusal. MEASURED: `ls-remote 'ext::<marker> %S'` ran the
 	// marker as `git-upload-pack` WITH the loosening and not without it, so this one key
@@ -1510,6 +1585,28 @@ func (r *Rule) configGateResult(key string, class configGateClass) hookio.RuleRe
 				"this is intended, or hand it to the operator",
 			Module: r.Name(),
 		}
+	case configInterlockReject:
+		return hookio.RuleResult{
+			Decision: hookio.Reject,
+			Reason: "git: writing `" + key + "` is prohibited — it disables a safety interlock git makes by DEFAULT, so " +
+				"a later command that looks unchanged stops refusing what it used to, and any prompt on that later " +
+				"command would then be answered under a belief that is no longer true (pg2-szadj, 2026-07-30; escalated " +
+				"from Ask to Reject by pg2-3zgcf, 2026-09-07). Retrying this write with a different --global/--local/" +
+				"--system/--type/`git config set`/--unset spelling will not change the verdict — every spelling is " +
+				"refused. Ask the operator to run it by hand, or leave the interlock alone",
+			Module: r.Name(),
+		}
+	case configSinkReject:
+		return hookio.RuleResult{
+			Decision: hookio.Reject,
+			Reason: "git: writing `" + key + "` is prohibited — it points git at a program of the caller's choosing, " +
+				"which git then runs during an ordinary git operation, with nothing at that later command to show for " +
+				"it (pg2-szadj, 2026-07-30; escalated from Ask to Reject by pg2-3zgcf, 2026-09-07). Retrying this write " +
+				"with a different --global/--local/--system/--type/`git config set`/--unset spelling will not change " +
+				"the verdict — every spelling is refused. Ask the operator to run it by hand, or drop this config " +
+				"write and let the command run without it",
+			Module: r.Name(),
+		}
 	default: // configSink, and any class added without a verdict of its own
 		return hookio.RuleResult{
 			Decision: hookio.Ask,
@@ -1800,12 +1897,115 @@ func configFlagPairCleared(tok string) bool {
 	return listed && predicate(value)
 }
 
+// configFlagPairKey returns the KEY half of a `-c <key>[=<value>]` token — the same
+// split configFlagPairCleared performs, duplicated here rather than shared because the
+// two callers ask different questions of it (a value-predicate lookup there, a
+// key-only escalation test here) and coupling them would tie an unrelated future
+// change to both.
+func configFlagPairKey(tok string) string {
+	if eq := strings.IndexByte(tok, '='); eq >= 0 {
+		return tok[:eq]
+	}
+	return tok
+}
+
+// configFlagKeyEscalatedToReject reports whether key normalizes, via configKeyID, to
+// one of the nine sink/interlock identities pg2-3zgcf's 2026-09-07 operator ruling
+// escalated from Ask to Reject in gatedConfigKeys (configSinkReject /
+// configInterlockReject). It is deliberately KEY-ONLY, never reading a value: the
+// escalated porcelain verdicts (configGateResult) are themselves unconditional on
+// value, so `-c core.pager=EVIL log` and `git config core.pager EVIL` are the SAME sink
+// reached two ways, and this function is what keeps the two routes from inverting. A
+// key not gated at all, or gated at plain configSink/configInterlock/configRedirect,
+// answers false — those keep their pre-existing Abstain on this route, unaffected by
+// this ruling.
+func configFlagKeyEscalatedToReject(key string) bool {
+	_, id, ok := configKeyID(key)
+	if !ok {
+		return false
+	}
+	switch gatedConfigKeys[id] {
+	case configSinkReject, configInterlockReject:
+		return true
+	default:
+		return false
+	}
+}
+
+// configEnvFlagKey extracts the `<key>` half of a `--config-env=<key>=<envvar>` (or
+// separated `--config-env <key>=<envvar>`) argument at args[i], for the SOLE purpose
+// of testing it against configFlagKeyEscalatedToReject — never for clearing it, since
+// the value half names an ENVIRONMENT VARIABLE, not a value, and hasGitConfigInjection's
+// own doc (S-5) is why no predicate may run against it. Returns "" when the token is
+// malformed (no key=value shape) or the separated form's argument is missing, which the
+// caller treats as "cannot identify the key" and folds into the pre-existing
+// unconditional injectionAbstain.
+func configEnvFlagKey(args []string, i int) string {
+	var pair string
+	if strings.HasPrefix(args[i], "--config-env=") {
+		pair = strings.TrimPrefix(args[i], "--config-env=")
+	} else if i+1 < len(args) {
+		pair = args[i+1]
+	} else {
+		return ""
+	}
+	eq := strings.IndexByte(pair, '=')
+	if eq < 0 {
+		return ""
+	}
+	return pair[:eq]
+}
+
 // configFlagInjectionReason is the ONE reason string the `-c` / `--config-env` floor
-// reports, named rather than repeated because pg2-6f4q9 gave the screen three arms (the
-// no-subcommand case, the not-applicable case, and the Approve demotion) and three
-// literals would drift. The text is UNCHANGED from the pre-pg2-6f4q9 short-circuit, so
-// the reason a reader sees for an already-`{}` row is exactly the one they saw before.
+// reports for the Abstain outcome, named rather than repeated because pg2-6f4q9 gave
+// the screen three arms (the no-subcommand case, the not-applicable case, and the
+// Approve demotion) and three literals would drift. The text is UNCHANGED from the
+// pre-pg2-6f4q9 short-circuit, so the reason a reader sees for an already-`{}` row is
+// exactly the one they saw before.
 const configFlagInjectionReason = "git: -c/--config-env injects config; deferring to prompt"
+
+// configFlagInjectionRejectReason is the ONE reason string the floor reports for the
+// pg2-3zgcf (2026-09-07) Reject outcome — an uncleared `-c`/`--config-env` pair naming
+// one of the nine sink/interlock keys the same ruling escalated on the porcelain route.
+// Named for the same drift reason configFlagInjectionReason is. Per this workspace's
+// no-stuck-agent convention (pg2-2hwvl's AC): it states plainly that retrying a
+// different spelling of the same key will not change the verdict, and names the
+// concrete alternative (drop the flag, or ask the operator).
+const configFlagInjectionRejectReason = "git: -c/--config-env is prohibited here — it targets a config key " +
+	"(core.hooksPath, core.fsmonitor, core.pager, core.sshCommand, diff.*.textconv, diff.external, " +
+	"clean.requireForce, receive.denyCurrentBranch, or http.sslVerify) that is REJECTED outright when written " +
+	"via `git config`, and the porcelain and injection routes to the SAME sink must agree (pg2-3zgcf, " +
+	"2026-09-07) or the injection spelling becomes the easier bypass around the porcelain Reject. Retrying this " +
+	"key through a different -c/--config-env spelling will not change the verdict. Drop the flag and let the " +
+	"command run without overriding this key, or ask the operator to run it by hand"
+
+// configFlagInjectionVerdict is what an uncleared `-c`/`--config-env` pair should do to
+// the leaf's verdict. Two non-cleared levels, because pg2-3zgcf's 2026-09-07 operator
+// ruling escalated ONLY the nine sink/interlock keys gatedConfigKeys' own survey table
+// just moved from Ask to Reject (configSinkReject / configInterlockReject, tested by
+// configFlagKeyEscalatedToReject) — every other key this route has always deferred on
+// (ordinary config, core.editor's non-inert values, credential.helper, the
+// alternate-transport family, an unrecognised key…) keeps its pre-existing
+// injectionAbstain, unaffected. See hasGitConfigInjection for where each level is
+// decided.
+type configFlagInjectionVerdict int
+
+const (
+	// injectionCleared — every -c/--config-env pair present (there may be none at
+	// all) is cleared by clearedConfigFlagPairs; the leaf's own verdict stands.
+	injectionCleared configFlagInjectionVerdict = iota
+	// injectionAbstain — at least one uncleared pair is present and none of them
+	// names one of pg2-3zgcf's nine escalated keys; the pre-existing behavior
+	// (defer to Claude's prompt, configFlagInjectionReason) is unchanged.
+	injectionAbstain
+	// injectionReject — at least one uncleared pair names one of the nine
+	// escalated sink/interlock keys; hard-refuse rather than defer, matching the
+	// porcelain route's own Reject for the SAME key so the two routes cannot
+	// invert (pg2-3zgcf, 2026-09-07). Wins over injectionAbstain when a command
+	// carries a mix of the two, since Reject is the more restrictive of the two
+	// non-cleared outcomes.
+	injectionReject
+)
 
 // hasGitConfigInjection reports whether a pre-subcommand `-c` or `--config-env` flag
 // injects config this rule will not clear. It scans only the option span before the
@@ -1873,25 +2073,68 @@ const configFlagInjectionReason = "git: -c/--config-env injects config; deferrin
 // abstain-never-Reject, relaxation-only and the unconditional `--config-env` are
 // statements about THIS predicate, not about where its answer is consumed. See the read
 // of `configFlagInjection` in Evaluate for the ruling and the four measured shapes.
-func hasGitConfigInjection(args []string) bool {
+// ESCALATED SEVERITY, IN THE SAME CHANGE AS gatedConfigKeys' (pg2-3zgcf, 2026-09-07).
+// This function used to be a plain bool ("is there an uncleared -c/--config-env in the
+// pre-subcommand span"), and EVERY uncleared pair answered Abstain regardless of key —
+// key-blind by design (S-6's own doc: "-c is key-BLIND... it screens `user.name` too").
+// It now returns a configFlagInjectionVerdict instead: an uncleared pair whose key
+// normalizes to one of the nine keys gatedConfigKeys' survey table just escalated to
+// Reject (configFlagKeyEscalatedToReject) raises injectionReject; every OTHER uncleared
+// pair — including every key this route has always been blind to the danger of —
+// raises the pre-existing injectionAbstain exactly as before. THE SCAN NO LONGER
+// RETURNS ON THE FIRST UNCLEARED PAIR: with two non-cleared severities instead of one,
+// a LATER pair naming an escalated key must still be seen even if an EARLIER pair in
+// the same command was merely non-escalated-uncleared (S-6's all-or-nothing rule is
+// preserved — one non-cleared pair is enough to leave injectionCleared — but the
+// SEVERITY is now the max across every pair scanned, matching hookio.MostRestrictive's
+// own most-restrictive-wins rule applied locally here).
+func hasGitConfigInjection(args []string) configFlagInjectionVerdict {
+	verdict := injectionCleared
+	raise := func(v configFlagInjectionVerdict) {
+		if v > verdict {
+			verdict = v
+		}
+	}
 	i := 0
 	for i < len(args) {
 		a := args[i]
 		if a == "-c" {
 			// git's `-c` takes the NEXT token as `<name>=<value>`; there is no glued
 			// spelling (measured above). A trailing `-c` with nothing after it has no
-			// pair to inspect, so it fails closed.
+			// pair to inspect, so it fails closed to injectionAbstain — the level this
+			// case has always had, since there is no key here to test for escalation.
 			if i+1 >= len(args) {
-				return true
+				raise(injectionAbstain)
+				break
 			}
-			if !configFlagPairCleared(args[i+1]) {
-				return true
+			pair := args[i+1]
+			if !configFlagPairCleared(pair) {
+				if configFlagKeyEscalatedToReject(configFlagPairKey(pair)) {
+					raise(injectionReject)
+				} else {
+					raise(injectionAbstain)
+				}
 			}
 			i += 2
 			continue
 		}
 		if a == "--config-env" || strings.HasPrefix(a, "--config-env=") {
-			return true
+			// `--config-env` never clears (S-5: its value is an ENVIRONMENT VARIABLE
+			// NAME, so no value predicate can run against the command text) — that is
+			// unconditional and unchanged. What is NEW is that the KEY half IS visible
+			// in the command text even though the value is not, so it can still be
+			// tested for escalation the same way an uncleared `-c` pair's key is.
+			if name := configEnvFlagKey(args, i); name != "" && configFlagKeyEscalatedToReject(name) {
+				raise(injectionReject)
+			} else {
+				raise(injectionAbstain)
+			}
+			if a == "--config-env" {
+				i += 2
+			} else {
+				i++
+			}
+			continue
 		}
 		switch a {
 		case "-C", "--git-dir", "--work-tree", "--namespace":
@@ -1902,10 +2145,10 @@ func hasGitConfigInjection(args []string) bool {
 				i++
 				continue
 			}
-			return false // first non-flag token is the subcommand
+			return verdict // first non-flag token is the subcommand
 		}
 	}
-	return false
+	return verdict
 }
 
 func hasFlag(args []string, flag string) bool {

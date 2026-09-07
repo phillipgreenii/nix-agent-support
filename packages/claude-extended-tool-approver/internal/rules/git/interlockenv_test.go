@@ -92,8 +92,12 @@ func TestGit_InterlockEnvVar_TwinIsAConfigInterlockInTheRealTable(t *testing.T) 
 			t.Errorf("%s: twin %q (id %q) is NOT in gatedConfigKeys — either that entry was removed (then this variable's justification is gone) or a new interlock twin needs its own ruling and its own replay", name, twin, id)
 			continue
 		}
-		if class != configInterlock {
-			t.Errorf("%s: twin %q (id %q) is class %d, not configInterlock — a program-NAMING twin belongs in gitProgramEnvVars, whose own check enforces configSink; mixing the classes is what made this screen necessary in the first place", name, twin, id, class)
+		// configInterlockReject is accepted alongside configInterlock (pg2-3zgcf,
+		// 2026-09-07): SAME mechanism, escalated verdict for the specific keys the
+		// operator ruling named — http.sslVerify's twin GIT_SSL_NO_VERIFY is exactly
+		// how this class shows up here.
+		if class != configInterlock && class != configInterlockReject {
+			t.Errorf("%s: twin %q (id %q) is class %d, not configInterlock (or its pg2-3zgcf-escalated sibling configInterlockReject) — a program-NAMING twin belongs in gitProgramEnvVars, whose own check enforces configSink; mixing the classes is what made this screen necessary in the first place", name, twin, id, class)
 		}
 	}
 	// NO VARIABLE MAY SIT IN BOTH TABLES. The two screens return different reasons and
@@ -124,6 +128,18 @@ func TestGit_InterlockEnvVar_IsNeverLooserThanTheConfigSpelling(t *testing.T) {
 		"submodule update --init",
 	}, approveClassSubcommands...)
 	for name, twin := range gitInterlockEnvVars {
+		// GIT_SSL_NO_VERIFY / http.sslVerify EXCLUDED (pg2-3zgcf, 2026-09-07): the -c
+		// route for http.sslVerify is now escalated to Reject (one of the nine
+		// sink/interlock keys that ruling raised), while this GIT_SSL_NO_VERIFY env
+		// twin was NOT part of that ruling and stays its pre-existing bare
+		// Approve-only demotion (pg2-nd6i3) — so the "env never looser than -c"
+		// relation no longer holds for THIS pair, by design. Nothing here makes the
+		// env route weaker than it already was; the -c route is simply now the
+		// stricter of the two. See TestGit_InterlockEnvVar_SslVerifyDashCIsNowStricter
+		// for the relation that replaces this one for it.
+		if configFlagKeyEscalatedToReject(twin) {
+			continue
+		}
 		for _, sub := range subs {
 			envCmd := interlockEnvValue(name)
 			envGot := evalCmd(t, name+"="+envCmd+" git "+sub)
@@ -132,6 +148,27 @@ func TestGit_InterlockEnvVar_IsNeverLooserThanTheConfigSpelling(t *testing.T) {
 				t.Errorf("%s, `git %s`: env spelling got %s (%s), which is LESS restrictive than the -c %s spelling's %s (%s) — the env route must never be the cheaper way around the same interlock",
 					name, sub, envGot.Decision, envGot.Reason, twin, argvGot.Decision, argvGot.Reason)
 			}
+		}
+	}
+}
+
+// TestGit_InterlockEnvVar_SslVerifyDashCIsNowStricter documents and pins the gap
+// pg2-3zgcf's 2026-09-07 ruling opened for http.sslVerify specifically: it escalated
+// ONLY the -c/--config-env route (hasGitConfigInjection) to Reject for this key, not
+// GIT_SSL_NO_VERIFY (pg2-nd6i3's env twin) — so the two are no longer required to
+// match or to keep the env route at-least-as-strict. Nothing here makes the env route
+// weaker than before — it keeps its pre-existing Approve-only demotion — the -c route
+// is simply now the stricter of the two. See the excluding note in
+// TestGit_InterlockEnvVar_IsNeverLooserThanTheConfigSpelling for the full rationale.
+func TestGit_InterlockEnvVar_SslVerifyDashCIsNowStricter(t *testing.T) {
+	for _, sub := range approveClassSubcommands {
+		argvGot := evalCmd(t, interlockDashC("http.sslVerify", sub))
+		if argvGot.Decision != hookio.Reject {
+			t.Errorf("`git -c http.sslVerify=false %s`: got %s (%s), want REJECT — pg2-3zgcf escalated this key on the -c route", sub, argvGot.Decision, argvGot.Reason)
+		}
+		envGot := evalCmd(t, "GIT_SSL_NO_VERIFY=1 git "+sub)
+		if envGot.Decision == hookio.Approve {
+			t.Errorf("`GIT_SSL_NO_VERIFY=1 git %s`: got APPROVE — the pg2-nd6i3 demotion must still withdraw the approval even though this twin's -c route is now stricter", sub)
 		}
 	}
 }

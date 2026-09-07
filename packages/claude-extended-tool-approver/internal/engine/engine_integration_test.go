@@ -3967,8 +3967,6 @@ func TestIntegration_GitConfigEnvInjection_EmitsEmptyObject(t *testing.T) {
 		// so an approving sibling must not lift the expression back to allow.
 		{"compound with an approving sibling", "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.fsmonitor GIT_CONFIG_VALUE_0=/tmp/evil git status && echo done"},
 		{"approving sibling first", "echo start && GIT_CONFIG_GLOBAL=/tmp/evil.cfg git status"},
-		// The argv route, unchanged — the control this bead was measured against.
-		{"the -c route it now matches", "git -c core.fsmonitor=/tmp/evil status"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			out := emit(tt.command)
@@ -3980,6 +3978,18 @@ func TestIntegration_GitConfigEnvInjection_EmitsEmptyObject(t *testing.T) {
 			}
 		})
 	}
+
+	// THE ARGV ROUTE NO LONGER MATCHES (pg2-3zgcf, 2026-09-07): core.fsmonitor is one
+	// of the nine keys that ruling escalated to Reject on the -c route specifically
+	// (hasGitConfigInjection), while this file's own GIT_CONFIG_* env route
+	// (pg2-a12rl, asserted in the loop above) was not part of that ruling and still
+	// only demotes to {}. The former control row moved here, at its new level.
+	t.Run("the -c route no longer matches (pg2-3zgcf)", func(t *testing.T) {
+		out := emit("git -c core.fsmonitor=/tmp/evil status")
+		if !strings.Contains(out, `"deny"`) {
+			t.Errorf(`command "git -c core.fsmonitor=/tmp/evil status" emitted %s, want a deny — pg2-3zgcf escalated this key's -c route to Reject`, out)
+		}
+	})
 
 	// NOT WIDENED. An ordinary assignment prefix, and a lowercase spelling git's own
 	// getenv does not read (measured 2026-08-13: it did NOT run the marker), keep their
@@ -4049,8 +4059,6 @@ func TestIntegration_GitProgramEnvVar_EmitsEmptyObject(t *testing.T) {
 		// so an approving sibling must not lift the expression back to allow.
 		{"compound with an approving sibling", "GIT_PAGER=/tmp/evil git log && echo done"},
 		{"approving sibling first", "echo start && GIT_EXTERNAL_DIFF=/tmp/evil git diff"},
-		// The argv route, unchanged — the control this bead was measured against.
-		{"the -c route it now matches", "git -c diff.external=/tmp/evil diff"},
 		// THE ALTERNATE-TRANSPORT FAMILY, moved up from the allow table by pg2-qi1jo's
 		// ruling. pg2-6c85x had DECLINED `GIT_PROXY_COMMAND` pending a family-wide
 		// decision on which keys `core.gitProxy` belongs with; that decision is now made
@@ -4072,7 +4080,6 @@ func TestIntegration_GitProgramEnvVar_EmitsEmptyObject(t *testing.T) {
 		{"interlock: the ext transport unlocked", "GIT_ALLOW_PROTOCOL=ext git ls-remote origin"},
 		{"interlock: the user-protocol flag", "GIT_PROTOCOL_FROM_USER=1 git ls-remote origin"},
 		{"interlock: TLS verification disabled", "GIT_SSL_NO_VERIFY=1 git fetch origin"},
-		{"interlock: its argv twin, which it agrees with", "git -c http.sslVerify=false fetch origin"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			out := emit(tt.command)
@@ -4081,6 +4088,24 @@ func TestIntegration_GitProgramEnvVar_EmitsEmptyObject(t *testing.T) {
 			}
 			if strings.Contains(out, `"allow"`) {
 				t.Errorf("command %q emitted %s, which carries an allow decision", tt.command, out)
+			}
+		})
+	}
+
+	// THE ARGV ROUTES NO LONGER MATCH (pg2-3zgcf, 2026-09-07): diff.external and
+	// http.sslVerify are two of the nine keys that ruling escalated to Reject on
+	// the -c route specifically (hasGitConfigInjection), while these GIT_* env
+	// routes (pg2-6c85x, pg2-nd6i3, asserted in the loop above) were not part of
+	// that ruling and still only demote to {}. The former control rows moved here,
+	// at their new level.
+	for _, tt := range []struct{ name, command string }{
+		{"the -c route no longer matches (pg2-3zgcf)", "git -c diff.external=/tmp/evil diff"},
+		{"interlock -c route no longer matches (pg2-3zgcf)", "git -c http.sslVerify=false fetch origin"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			out := emit(tt.command)
+			if !strings.Contains(out, `"deny"`) {
+				t.Errorf("command %q emitted %s, want a deny — pg2-3zgcf escalated this key's -c route to Reject", tt.command, out)
 			}
 		})
 	}

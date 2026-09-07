@@ -53,6 +53,24 @@ var unclearedConfigFlagKeys = []string{
 	"core.fsmonitor=/tmp/evil.sh", // an allowlisted KEY whose VALUE does not clear
 }
 
+// escalatedConfigFlagKeys is the subset of unclearedConfigFlagKeys whose KEY is one of
+// the nine sink/interlock keys pg2-3zgcf's 2026-09-07 operator ruling raised from Ask to
+// Reject on the porcelain route — and, in the SAME change, from Abstain to Reject on
+// this injection route too, so the two cannot invert. See configFlagKeyEscalatedToReject.
+var escalatedConfigFlagKeys = []string{
+	"core.pager=EVIL",
+	"core.hooksPath=/tmp/h",
+	"core.fsmonitor=/tmp/evil.sh",
+}
+
+// nonEscalatedUnclearedConfigFlagKeys is unclearedConfigFlagKeys' complement: uncleared
+// keys the pg2-3zgcf ruling did NOT touch, which still Abstain (defer to Claude's
+// prompt) exactly as before.
+var nonEscalatedUnclearedConfigFlagKeys = []string{
+	"user.name=x",
+	"x=y",
+}
+
 // decisiveSubcommands are invocations whose base verdict is decisive (Ask or Reject) —
 // the ones the short-circuit erased. The list is not asserted to BE decisive: the tests
 // read the bare verdict and act on what they find, so a later ruling that moves one of
@@ -151,7 +169,7 @@ func TestGit_ConfigFlagFloor_ApproveIsStillWithdrawn(t *testing.T) {
 // man-page Approve with the caller's pager named. The rule must refuse instead — which
 // also floors the leaf, so the later safecmds Approve cannot lift it (hookio.MostRestrictive).
 func TestGit_ConfigFlagFloor_NotApplicableStaysScreened(t *testing.T) {
-	for _, key := range unclearedConfigFlagKeys {
+	for _, key := range nonEscalatedUnclearedConfigFlagKeys {
 		for _, sub := range notClassifiedSubcommands {
 			cmd := "git -c " + key + " " + sub
 			got := evalCmd(t, cmd)
@@ -163,15 +181,42 @@ func TestGit_ConfigFlagFloor_NotApplicableStaysScreened(t *testing.T) {
 			}
 		}
 	}
+	// ESCALATED KEYS EMIT A DENY HERE, NOT {} (pg2-3zgcf, 2026-09-07). classify does
+	// not own these subcommands either, so the `-c` screen is still the only thing
+	// standing between the caller's config and an approval — but for one of the
+	// nine escalated keys that screen's own answer is now a decisive Reject rather
+	// than the {}-emitting Abstain, so the OUTPUT correctly changes too.
+	for _, key := range escalatedConfigFlagKeys {
+		for _, sub := range notClassifiedSubcommands {
+			cmd := "git -c " + key + " " + sub
+			got := evalCmd(t, cmd)
+			if got.Decision != hookio.Reject {
+				t.Errorf("cmd %q: got %s (%s), want REJECT — %q is one of pg2-3zgcf's nine escalated keys", cmd, got.Decision, got.Reason, key)
+			}
+			if out := string(hookio.FormatOutput(got, nil)); !strings.Contains(out, `"deny"`) {
+				t.Errorf("cmd %q: emitted %s, want a deny — pg2-3zgcf escalated this key's -c route to Reject even on a subcommand classify does not own", cmd, out)
+			}
+		}
+	}
 	// A bare `git -c k=v` with NO subcommand at all: there is no verdict for the floor to
-	// sit under, so the refusal stands rather than the leaf becoming one no rule examined.
-	for _, cmd := range []string{"git -c x=y", "git -c core.pager=EVIL", "git --config-env=core.pager=X"} {
+	// sit under, so the refusal (or, for an escalated key, the Reject) stands rather than
+	// the leaf becoming one no rule examined.
+	for _, cmd := range []string{"git -c x=y"} {
 		got := evalCmd(t, cmd)
 		if got.Decision == hookio.Approve {
 			t.Errorf("cmd %q: got APPROVE (%s) — a `-c` with no subcommand must not be approved", cmd, got.Reason)
 		}
 		if out := string(hookio.FormatOutput(got, nil)); out != "{}" {
 			t.Errorf("cmd %q: emitted %s, want {} (unchanged from before pg2-6f4q9)", cmd, out)
+		}
+	}
+	for _, cmd := range []string{"git -c core.pager=EVIL", "git --config-env=core.pager=X"} {
+		got := evalCmd(t, cmd)
+		if got.Decision != hookio.Reject {
+			t.Errorf("cmd %q: got %s (%s), want REJECT — core.pager is one of pg2-3zgcf's nine escalated keys, and a `-c`/`--config-env` with no subcommand still carries that escalation", cmd, got.Decision, got.Reason)
+		}
+		if out := string(hookio.FormatOutput(got, nil)); !strings.Contains(out, `"deny"`) {
+			t.Errorf("cmd %q: emitted %s, want a deny (pg2-3zgcf, 2026-09-07)", cmd, out)
 		}
 	}
 }
@@ -186,7 +231,6 @@ func TestGit_ConfigFlagFloor_NotApplicableStaysScreened(t *testing.T) {
 // silently vanishing into `{}`.
 func TestGit_ConfigFlagFloor_EmitsExpectedHookOutput(t *testing.T) {
 	for _, cmd := range []string{
-		"git -c core.pager=EVIL log",
 		"git -c user.name=x status",
 		"git -c x=y bisect start",
 	} {
@@ -203,10 +247,15 @@ func TestGit_ConfigFlagFloor_EmitsExpectedHookOutput(t *testing.T) {
 		"git -c user.name=x push --force origin main",
 		"git -c x=y remote add upstream https://example.invalid/x.git",
 		"git -c x=y config remote.origin.url https://evil.invalid/x.git",
+		// core.pager is one of pg2-3zgcf's nine escalated keys (2026-09-07): `log` is
+		// an Approve-class subcommand, so before that ruling this row sat in the {}
+		// list above (the floor withdrawing an Approve to a bare Abstain); it now
+		// denies outright, exactly like the four force-push/tag/remote shapes above.
+		"git -c core.pager=EVIL log",
 	} {
 		out := string(hookio.FormatOutput(evalCmd(t, cmd), nil))
 		if !strings.Contains(out, `"deny"`) {
-			t.Errorf("cmd %q: emitted %s, want a deny — this is one of the four shapes pg2-6f4q9 measured emitting `{}` while the same command without the `-c` was `deny`", cmd, out)
+			t.Errorf("cmd %q: emitted %s, want a deny — this is one of the shapes measured emitting `{}` (or, since pg2-3zgcf, now denying) while the same command without the `-c` behaves differently", cmd, out)
 		}
 	}
 }

@@ -348,8 +348,8 @@ func TestGit_EditorCarveOut_DoesNotWeakenADecisiveVerdict(t *testing.T) {
 		{"push -f origin main", hookio.Reject, "same, short spelling"},
 		{"remote add upstream https://example.invalid/x.git", hookio.Reject, "a remote mutation is an exfiltration vector"},
 		{"config remote.origin.url https://evil.invalid/x.git", hookio.Reject, "the config spelling of `git remote set-url`"},
-		{"config core.hooksPath /tmp/h", hookio.Ask, "a configSink porcelain write asks"},
-		{"config clean.requireForce false", hookio.Ask, "a configInterlock porcelain write asks"},
+		{"config core.hooksPath /tmp/h", hookio.Reject, "a configSinkReject porcelain write rejects (escalated by pg2-3zgcf, 2026-09-07)"},
+		{"config clean.requireForce false", hookio.Reject, "a configInterlockReject porcelain write rejects (escalated by pg2-3zgcf, 2026-09-07)"},
 	}
 	for _, row := range rows {
 		for _, cmd := range []string{

@@ -127,18 +127,33 @@ func TestGit_SymbolicRef_TextIsNotAnOperation(t *testing.T) {
 	}
 }
 
-// TestGit_SymbolicRefConfigInjection_StillAbstains confirms the pre-subcommand
-// `-c`/`--config-env` RCE screen (hasGitConfigInjection) still fires ahead of the
-// new symbolic-ref arm, exactly as it does for every other subcommand in this file.
-func TestGit_SymbolicRefConfigInjection_StillAbstains(t *testing.T) {
-	abstain := []string{
+// TestGit_SymbolicRefConfigInjection_StillFires confirms the pre-subcommand
+// `-c`/`--config-env` RCE screen (hasGitConfigInjection) still fires ahead of the new
+// symbolic-ref arm, exactly as it does for every other subcommand in this file.
+//
+// THE LEVEL IS REJECT, NOT ABSTAIN, SINCE pg2-3zgcf (2026-09-07): core.pager is one of
+// the nine keys that operator ruling escalated on this route. The rename from
+// "StillAbstains" is the change; what this test guards — the screen still fires ahead
+// of symbolic-ref — is unchanged. A non-escalated key (credential.helper) is kept
+// alongside to prove the screen still merely Abstains where the ruling did not touch it.
+func TestGit_SymbolicRefConfigInjection_StillFires(t *testing.T) {
+	reject := []string{
 		`git -c core.pager="touch /tmp/pwned" symbolic-ref HEAD`,
 		"git -c core.pager=EVIL symbolic-ref --short HEAD",
+	}
+	for _, cmd := range reject {
+		got := evalCmd(t, cmd)
+		if got.Decision != hookio.Reject {
+			t.Errorf("cmd %q: got %s (%s), want REJECT (pg2-3zgcf escalated core.pager on the pre-subcommand config injection screen)", cmd, got.Decision, got.Reason)
+		}
+	}
+	abstain := []string{
+		`git -c credential.helper="touch /tmp/pwned" symbolic-ref HEAD`,
 	}
 	for _, cmd := range abstain {
 		got := evalCmd(t, cmd)
 		if got.Decision != hookio.NoOpinion {
-			t.Errorf("cmd %q: got %s (%s), want abstain (pre-subcommand config injection screen)", cmd, got.Decision, got.Reason)
+			t.Errorf("cmd %q: got %s (%s), want abstain (pre-subcommand config injection screen, non-escalated key)", cmd, got.Decision, got.Reason)
 		}
 	}
 }

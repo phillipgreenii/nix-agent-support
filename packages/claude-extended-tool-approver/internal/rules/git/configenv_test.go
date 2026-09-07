@@ -75,17 +75,27 @@ func TestGit_ConfigEnvInjection_MatchesTheDashCRoute(t *testing.T) {
 	// env route must be key-blind for the same reason (a `GIT_CONFIG_GLOBAL` file's
 	// keys are not knowable from argv at all). A future key-aware rewrite of either
 	// route breaks this row first.
+	//
+	// ESCALATED KEYS EXCLUDED (pg2-3zgcf, 2026-09-07): core.fsmonitor, core.pager,
+	// diff.external, clean.requireForce (and CORE.FSMonitor, its case-variant) are
+	// four of the nine sink/interlock keys whose -c/--config-env ROUTE (only)
+	// pg2-3zgcf escalated to Reject; the GIT_CONFIG_* env route (this file's own
+	// subject, pg2-a12rl) was NOT part of that ruling and stays an Approve-only
+	// demotion. So for these keys the two routes now deliberately DIVERGE rather
+	// than match — see TestGit_ConfigEnvInjection_EscalatedKeysMayNowBeStricterViaDashC
+	// for the relation that replaces this one for them. Every OTHER key below is
+	// untouched by that ruling and still must match exactly, which is what this
+	// loop continues to pin — including one non-escalated case-insensitivity check
+	// (CORE.Editor) and a non-escalated configInterlock member (protocol.allow, the
+	// alternate-transport family) to keep those two class shapes covered.
 	keys := []string{
-		"core.fsmonitor", // configSink — the measured hole
-		"core.pager",     // configSink
-		"diff.external",  // configSink
-		"merge.mergiraf.driver",
-		"clean.requireForce", // configInterlock
-		"remote.origin.url",  // configRedirect
-		"pager.log",          // a gated SECTION
-		"CORE.FSMonitor",     // config keys are case-INSENSITIVE to git (measured)
-		"user.name",          // gated by NO table
-		"branch.main.remote", // gated by NO table
+		"merge.mergiraf.driver", // configSink, NOT escalated
+		"CORE.Editor",           // case-insensitivity check, on a NOT-escalated configSink key
+		"protocol.allow",        // configInterlock, NOT escalated (pg2-qi1jo's alternate-transport family)
+		"remote.origin.url",     // configRedirect
+		"pager.log",             // a gated SECTION
+		"user.name",             // gated by NO table
+		"branch.main.remote",    // gated by NO table
 	}
 	for _, key := range keys {
 		for _, sub := range approveClassSubcommands {
@@ -120,6 +130,14 @@ func TestGit_ConfigEnvInjection_MatchesTheDashCRoute(t *testing.T) {
 // This test states the invariant that survives either fixing that defect or leaving it:
 // the env route is never the weaker of the two. It uses no literal verdict, so it holds
 // whichever way a later bead rules.
+//
+// THE SAMPLE KEY IS merge.mergiraf.driver, NOT core.fsmonitor (pg2-3zgcf, 2026-09-07).
+// core.fsmonitor is now one of the nine keys whose -c route this ruling escalated to
+// Reject while its GIT_CONFIG_* env twin was not touched, so the single-key relation
+// this test asserts no longer holds for it BY DESIGN — see
+// TestGit_ConfigEnvInjection_EscalatedKeysMayNowBeStricterViaDashC for that key's own,
+// narrower relation. merge.mergiraf.driver is a configSink pg2-3zgcf did not touch, so
+// it keeps this test honestly covering a still-true invariant.
 func TestGit_ConfigEnvInjection_IsNeverLessRestrictiveThanDashC(t *testing.T) {
 	subs := append([]string{
 		"tag v1",
@@ -134,11 +152,41 @@ func TestGit_ConfigEnvInjection_IsNeverLessRestrictiveThanDashC(t *testing.T) {
 		"bisect start",
 	}, approveClassSubcommands...)
 	for _, sub := range subs {
-		envGot := evalCmd(t, envTriple("core.fsmonitor", "/tmp/evil", sub))
-		argvGot := evalCmd(t, dashC("core.fsmonitor", "/tmp/evil", sub))
+		envGot := evalCmd(t, envTriple("merge.mergiraf.driver", "/tmp/evil", sub))
+		argvGot := evalCmd(t, dashC("merge.mergiraf.driver", "/tmp/evil", sub))
 		if envGot.Decision < argvGot.Decision {
 			t.Errorf("`git %s`: env spelling got %s (%s), which is LESS restrictive than the -c spelling's %s (%s) — the env route must never be the cheaper way around the same guard (pg2-a12rl)",
 				sub, envGot.Decision, envGot.Reason, argvGot.Decision, argvGot.Reason)
+		}
+	}
+}
+
+// TestGit_ConfigEnvInjection_EscalatedKeysMayNowBeStricterViaDashC documents a GAP
+// pg2-3zgcf's 2026-09-07 operator ruling deliberately opened rather than closed: the
+// ruling raised ONLY the -c/--config-env argv route (hasGitConfigInjection,
+// configFlagInjectionReason) from Abstain to Reject for the nine escalated
+// sink/interlock keys — it did NOT touch the separate GIT_CONFIG_* env route
+// (hasGitConfigEnvInjection, pg2-a12rl), which stays a bare Approve-only demotion. So
+// for these keys the pre-existing "env route is never looser than -c" relation
+// (TestGit_ConfigEnvInjection_IsNeverLessRestrictiveThanDashC,
+// TestGit_ConfigEnvInjection_MatchesTheDashCRoute) no longer holds — the argv route is
+// now the STRICTER of the two, an inversion of the OLD relation rather than a new
+// vulnerability (nothing here makes the env route itself any weaker than it already
+// was). Closing this new gap needs its own operator ruling, the same way pg2-3zgcf's
+// own gap was carved out of pg2-2hwvl rather than folded into it silently. This test
+// pins the current, honest state so a reader does not mistake the silence for parity.
+func TestGit_ConfigEnvInjection_EscalatedKeysMayNowBeStricterViaDashC(t *testing.T) {
+	escalated := []string{"core.fsmonitor", "core.pager", "diff.external", "clean.requireForce"}
+	for _, key := range escalated {
+		for _, sub := range approveClassSubcommands {
+			argvGot := evalCmd(t, dashC(key, "/tmp/evil", sub))
+			if argvGot.Decision != hookio.Reject {
+				t.Errorf("key %q, `git %s`: -c spelling got %s (%s), want Reject — pg2-3zgcf escalated this key's -c route", key, sub, argvGot.Decision, argvGot.Reason)
+			}
+			envGot := evalCmd(t, envTriple(key, "/tmp/evil", sub))
+			if envGot.Decision == hookio.Approve {
+				t.Errorf("key %q, `git %s`: env spelling got APPROVE — the pg2-a12rl demotion must still withdraw the approval even though this key's -c route is now stricter", key, sub)
+			}
 		}
 	}
 }
@@ -260,8 +308,8 @@ func TestGit_ConfigEnvInjection_DoesNotWeakenADecisiveVerdict(t *testing.T) {
 		{"push -f origin main", hookio.Reject, "same, short spelling"},
 		{"remote add upstream https://example.invalid/x.git", hookio.Reject, "a remote mutation is an exfiltration vector"},
 		{"config remote.origin.url https://evil.invalid/x.git", hookio.Reject, "the config spelling of `git remote set-url`"},
-		{"config core.hooksPath /tmp/h", hookio.Ask, "a configSink porcelain write asks"},
-		{"config clean.requireForce false", hookio.Ask, "a configInterlock porcelain write asks"},
+		{"config core.hooksPath /tmp/h", hookio.Reject, "a configSinkReject porcelain write rejects (escalated by pg2-3zgcf, 2026-09-07)"},
+		{"config clean.requireForce false", hookio.Reject, "a configInterlockReject porcelain write rejects (escalated by pg2-3zgcf, 2026-09-07)"},
 	}
 	for _, row := range rows {
 		for _, cmd := range []string{

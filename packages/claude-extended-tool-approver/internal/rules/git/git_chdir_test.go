@@ -202,10 +202,18 @@ func TestGit_Chdir_NonApproveVerdicts_Unaffected(t *testing.T) {
 	r := newWithProject(t)
 	// THE ASK WITNESS. `git clean -fd` used to be it, but pg2-u0e0c made every `clean`
 	// spelling an Abstain, and Abstain IS the demotion target — so it can no longer
-	// distinguish "left alone" from "demoted". `git config core.hooksPath` is an Ask
-	// that no pg2-4yy4r ruling touched, so it carries the claim now.
-	if got := hookio.Verdict(r.Evaluate(chdirInput("git -C /etc config core.hooksPath /tmp/h", projectCWD))); got.Decision != hookio.Ask {
-		t.Errorf("git -C /etc config core.hooksPath: got %s, want ask (an unsafe -C dir must not demote an Ask)", got.Decision)
+	// distinguish "left alone" from "demoted". `git config core.hooksPath` carried the
+	// claim next, but pg2-3zgcf (2026-09-07) escalated it to Reject, so
+	// `git config credential.helper` — a configSink that ruling did NOT touch — is the
+	// witness now.
+	if got := hookio.Verdict(r.Evaluate(chdirInput("git -C /etc config credential.helper /tmp/ch", projectCWD))); got.Decision != hookio.Ask {
+		t.Errorf("git -C /etc config credential.helper: got %s, want ask (an unsafe -C dir must not demote an Ask)", got.Decision)
+	}
+	// core.hooksPath itself is asserted too, at its NEW level: an unsafe -C dir must
+	// not demote a Reject either, and this is the one pg2-3zgcf escalation this file
+	// otherwise would not exercise.
+	if got := hookio.Verdict(r.Evaluate(chdirInput("git -C /etc config core.hooksPath /tmp/h", projectCWD))); got.Decision != hookio.Reject {
+		t.Errorf("git -C /etc config core.hooksPath: got %s, want reject (pg2-3zgcf; an unsafe -C dir must not demote a Reject)", got.Decision)
 	}
 	// `clean` is asserted anyway, for the same reason `reset --hard` is below: the -C
 	// gate must not turn an already-abstaining verdict into anything ELSE.
@@ -261,11 +269,18 @@ func TestGit_Chdir_NilEvaluator_Legacy_Approve(t *testing.T) {
 	}
 }
 
-// RCE guard regression: a pre-subcommand -c still Abstains, even with a safe -C
-// dir and a configured evaluator (the guard fires before the -C path logic).
+// RCE guard regression: a pre-subcommand -c still Abstains (for a non-escalated key)
+// or Rejects (for one of pg2-3zgcf's escalated keys), even with a safe -C dir and a
+// configured evaluator (the guard fires before the -C path logic either way).
 func TestGit_Chdir_ConfigInjection_StillAbstains(t *testing.T) {
 	r := newWithProject(t)
-	if got := hookio.Verdict(r.Evaluate(chdirInput(`git -C /home/user/project -c core.pager="touch /tmp/pwned" log`, projectCWD))); got.Decision != hookio.NoOpinion {
-		t.Errorf("git -C <rw> -c core.pager=EVIL log: got %s, want abstain (RCE guard)", got.Decision)
+	if got := hookio.Verdict(r.Evaluate(chdirInput(`git -C /home/user/project -c credential.helper="touch /tmp/pwned" log`, projectCWD))); got.Decision != hookio.NoOpinion {
+		t.Errorf("git -C <rw> -c credential.helper=EVIL log: got %s, want abstain (RCE guard)", got.Decision)
+	}
+	// core.pager is one of pg2-3zgcf's nine escalated keys (2026-09-07): its -c route
+	// rejects outright rather than abstaining, and that decisive verdict must
+	// likewise survive an otherwise-safe -C directory.
+	if got := hookio.Verdict(r.Evaluate(chdirInput(`git -C /home/user/project -c core.pager="touch /tmp/pwned" log`, projectCWD))); got.Decision != hookio.Reject {
+		t.Errorf("git -C <rw> -c core.pager=EVIL log: got %s, want reject (RCE guard, escalated per pg2-3zgcf)", got.Decision)
 	}
 }

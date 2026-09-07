@@ -13,22 +13,42 @@ func mustJSON(v any) json.RawMessage {
 	return b
 }
 
+// TestGit_ConfigInjection_Abstain pins the pre-subcommand -c/--config-env RCE screen
+// (pg2-t4uyx). THE LEVEL FOR THE core.pager ROWS IS REJECT, NOT ABSTAIN, SINCE
+// pg2-3zgcf (2026-09-07): core.pager is one of the nine keys that operator ruling
+// escalated on this route. The function name is kept — every OTHER key the screen
+// still merely defers on, which the credential.helper rows below pin.
 func TestGit_ConfigInjection_Abstain(t *testing.T) {
 	r := New(nil)
 	// A pre-subcommand -c / --config-env injects config that runs on a read-only
-	// subcommand (RCE class) — must Abstain (pg2-t4uyx).
-	abstain := []string{
+	// subcommand (RCE class) — core.pager is escalated, so this now Rejects outright
+	// rather than merely Abstaining (pg2-t4uyx; escalated by pg2-3zgcf, 2026-09-07).
+	reject := []string{
 		`git -c core.pager="touch /tmp/pwned" log`,
 		"git -c core.pager=EVIL log",
 		"git --config-env=core.pager=X log",
 		"git --config-env core.pager=X log",
 		"git -C /repo -c core.pager=EVIL log", // still fires after a -C option
 	}
+	for _, cmd := range reject {
+		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
+		got := hookio.Verdict(r.Evaluate(input))
+		if got.Decision != hookio.Reject {
+			t.Errorf("cmd %q: got %s, want reject (config injection, pg2-3zgcf-escalated key)", cmd, got.Decision)
+		}
+	}
+
+	// A key the pg2-3zgcf ruling did NOT touch still Abstains, exactly as every key
+	// did before that ruling — the control that proves the change is per-key.
+	abstain := []string{
+		`git -c credential.helper="touch /tmp/pwned" log`,
+		"git -C /repo -c credential.helper=EVIL log",
+	}
 	for _, cmd := range abstain {
 		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
 		got := hookio.Verdict(r.Evaluate(input))
 		if got.Decision != hookio.NoOpinion {
-			t.Errorf("cmd %q: got %s, want abstain (config injection)", cmd, got.Decision)
+			t.Errorf("cmd %q: got %s, want abstain (config injection, non-escalated key)", cmd, got.Decision)
 		}
 	}
 
@@ -977,7 +997,49 @@ func TestGit_BranchForceDelete_NeverApproves(t *testing.T) {
 // future edit reintroduce a fixed-index key lookup with everything else green.
 func TestGit_ConfigSafetyKeyWrite_Ask(t *testing.T) {
 	ask := []string{
-		// The four measured holes.
+		// Anti-bypass siblings: the same mechanism one word away. NONE of these were
+		// named by pg2-3zgcf's 2026-09-07 escalation (see TestGit_ConfigEscalatedKeyWrite_Reject
+		// for the nine keys that WERE), so they keep their pre-existing Ask.
+		"git config pager.log /tmp/p",
+		"git config core.editor /tmp/e",
+		"git config sequence.editor /tmp/e",
+		"git config diff.mine.command /tmp/c",
+		"git config merge.mine.driver /tmp/m",
+		"git config filter.mine.clean /tmp/c",
+		"git config filter.mine.smudge /tmp/s",
+		"git config filter.mine.process /tmp/p",
+		"git config credential.helper /tmp/ch",
+		"git config init.templateDir /tmp/tpl",
+		"git config include.path /tmp/evil.cfg",
+		"git config includeIf.gitdir:/x/.path /tmp/evil.cfg",
+	}
+	r := New(nil)
+	for _, cmd := range ask {
+		input := &hookio.HookInput{
+			ToolName:  "Bash",
+			ToolInput: mustJSON(map[string]string{"command": cmd}),
+		}
+		got := hookio.Verdict(r.Evaluate(input))
+		if got.Decision == hookio.Approve {
+			t.Fatalf("cmd %q: got APPROVE (%s) — the config key was not seen at this operand position; the pg2-szadj defect", cmd, got.Reason)
+		}
+		if got.Decision != hookio.Ask {
+			t.Errorf("cmd %q: got %s (%s), want ask (safety-interlock / execution-sink config write)", cmd, got.Decision, got.Reason)
+		}
+	}
+}
+
+// TestGit_ConfigEscalatedKeyWrite_Reject pins the nine sink/interlock keys pg2-3zgcf's
+// 2026-09-07 operator ruling raised from Ask to Reject in gatedConfigKeys —
+// core.hooksPath, core.fsmonitor, core.pager, core.sshCommand, diff.*.textconv,
+// diff.external, clean.requireForce, receive.denyCurrentBranch and http.sslVerify.
+// These rows used to live in TestGit_ConfigSafetyKeyWrite_Ask, at Ask; they moved here,
+// at Reject, rather than being edited in place, so a reader who arrives via an old
+// citation to "the Ask test" sees why the rows are gone rather than a silently
+// retargeted assertion.
+func TestGit_ConfigEscalatedKeyWrite_Reject(t *testing.T) {
+	reject := []string{
+		// The four measured holes pg2-szadj first gated.
 		"git config clean.requireForce false",
 		"git config --global clean.requireForce false",
 		"git config --type=bool clean.requireForce false",
@@ -1012,34 +1074,51 @@ func TestGit_ConfigSafetyKeyWrite_Ask(t *testing.T) {
 		"git config receive.denyCurrentBranch false",
 		"git config http.sslVerify false",
 		"git config http.https://host/.sslVerify false",
-		// Anti-bypass siblings: the same mechanism one word away.
-		"git config pager.log /tmp/p",
-		"git config core.editor /tmp/e",
-		"git config sequence.editor /tmp/e",
-		"git config diff.mine.command /tmp/c",
-		"git config merge.mine.driver /tmp/m",
-		"git config filter.mine.clean /tmp/c",
-		"git config filter.mine.smudge /tmp/s",
-		"git config filter.mine.process /tmp/p",
-		"git config credential.helper /tmp/ch",
-		"git config init.templateDir /tmp/tpl",
-		"git config include.path /tmp/evil.cfg",
-		"git config includeIf.gitdir:/x/.path /tmp/evil.cfg",
 		// A pre-subcommand -C does not displace the key either.
 		"git -C /tmp/repo config core.hooksPath /tmp/h",
 	}
 	r := New(nil)
-	for _, cmd := range ask {
+	for _, cmd := range reject {
 		input := &hookio.HookInput{
 			ToolName:  "Bash",
 			ToolInput: mustJSON(map[string]string{"command": cmd}),
 		}
 		got := hookio.Verdict(r.Evaluate(input))
-		if got.Decision == hookio.Approve {
-			t.Fatalf("cmd %q: got APPROVE (%s) — the config key was not seen at this operand position; the pg2-szadj defect", cmd, got.Reason)
+		if got.Decision != hookio.Reject {
+			t.Errorf("cmd %q: got %s (%s), want reject (pg2-3zgcf, 2026-09-07: sink/interlock write escalated from Ask)", cmd, got.Decision, got.Reason)
 		}
-		if got.Decision != hookio.Ask {
-			t.Errorf("cmd %q: got %s (%s), want ask (safety-interlock / execution-sink config write)", cmd, got.Decision, got.Reason)
+	}
+}
+
+// TestGit_EscalatedConfigKeys_AllAgreeAndAreReject is the self-maintaining twin of
+// askpass_test.go's TestGit_AskPass_EveryConfigSinkWriteAgrees, over the CLASSES
+// pg2-3zgcf's 2026-09-07 ruling introduced (configSinkReject / configInterlockReject)
+// rather than a hand-picked literal list. It reads the REAL gatedConfigKeys table, so a
+// key added to (or removed from) either class extends (or shrinks) this test with no
+// edit here — the failure mode TestGit_ConfigEscalatedKeyWrite_Reject's own literal
+// list cannot catch on its own.
+func TestGit_EscalatedConfigKeys_AllAgreeAndAreReject(t *testing.T) {
+	var escalated []string
+	for id, class := range gatedConfigKeys {
+		if class == configSinkReject || class == configInterlockReject {
+			escalated = append(escalated, id)
+		}
+	}
+	if len(escalated) < 2 {
+		t.Fatalf("gatedConfigKeys holds %d configSinkReject/configInterlockReject keys — too few for the agreement relation to mean anything", len(escalated))
+	}
+	for _, id := range escalated {
+		porcelain := evalCmd(t, "git config "+id+" /tmp/evil")
+		if porcelain.Decision != hookio.Reject {
+			t.Errorf("`git config %s /tmp/evil`: got %s (%s), want REJECT — every configSinkReject/configInterlockReject key must answer identically, since configGateResult derives the verdict from the CLASS (pg2-3zgcf, 2026-09-07)", id, porcelain.Decision, porcelain.Reason)
+		}
+		// The -c injection route must agree with the porcelain route for the SAME
+		// key, using a value that does NOT clear (clearedConfigFlagPairs has no
+		// entry for any of these nine keys) — the inversion pg2-3zgcf's ruling
+		// exists to close.
+		argv := evalCmd(t, "git -c "+id+"=/tmp/evil status")
+		if argv.Decision != hookio.Reject {
+			t.Errorf("`git -c %s=/tmp/evil status`: got %s (%s), want REJECT — the -c route must match the porcelain route for the same escalated key (pg2-3zgcf, 2026-09-07)", id, argv.Decision, argv.Reason)
 		}
 	}
 }
@@ -1221,17 +1300,36 @@ func TestGit_ConfigWrite_TextIsNotAnOperation(t *testing.T) {
 	}
 }
 
-// TestGit_ConfigInjectionRoute_StillAbstains is the pg2-szadj REGRESSION GUARD on
-// the OTHER route to the same sinks. hasGitConfigInjection owns the pre-subcommand
-// `-c k=v` / `--config-env` form, and pg2-szadj gates only the PORCELAIN form; the
+// TestGit_ConfigInjectionRoute_StillFires is the pg2-szadj REGRESSION GUARD on the
+// OTHER route to the same sinks. hasGitConfigInjection owns the pre-subcommand
+// `-c k=v` / `--config-env` form, and pg2-szadj gated only the PORCELAIN form; the
 // two are separate controls and adding one must not weaken the other. (pg2-arfw6
 // rewrites hasGitConfigInjection and has not landed — nothing here anticipates it.)
-func TestGit_ConfigInjectionRoute_StillAbstains(t *testing.T) {
+//
+// RENAMED FROM "_StillAbstains" (pg2-3zgcf, 2026-09-07): all three of this test's
+// original rows name keys that ruling escalated on THIS route too
+// (clean.requireForce, core.hooksPath, core.pager), so they now Reject rather than
+// Abstain. A non-escalated row (credential.helper) is added so the test still proves
+// the injection guard fires at ALL for a key the ruling did not touch.
+func TestGit_ConfigInjectionRoute_StillFires(t *testing.T) {
 	r := New(nil)
-	abstain := []string{
+	reject := []string{
 		"git -c clean.requireForce=false clean",
 		"git -c core.hooksPath=/tmp/h status",
 		"git --config-env=core.pager=X log",
+	}
+	for _, cmd := range reject {
+		input := &hookio.HookInput{
+			ToolName:  "Bash",
+			ToolInput: mustJSON(map[string]string{"command": cmd}),
+		}
+		got := hookio.Verdict(r.Evaluate(input))
+		if got.Decision != hookio.Reject {
+			t.Errorf("cmd %q: got %s (%s), want reject (the -c injection guard, escalated by pg2-3zgcf)", cmd, got.Decision, got.Reason)
+		}
+	}
+	abstain := []string{
+		"git -c credential.helper=/tmp/evil status",
 	}
 	for _, cmd := range abstain {
 		input := &hookio.HookInput{
@@ -1240,7 +1338,7 @@ func TestGit_ConfigInjectionRoute_StillAbstains(t *testing.T) {
 		}
 		got := hookio.Verdict(r.Evaluate(input))
 		if got.Decision != hookio.NoOpinion {
-			t.Errorf("cmd %q: got %s (%s), want abstain (the -c injection guard must not be regressed by pg2-szadj)", cmd, got.Decision, got.Reason)
+			t.Errorf("cmd %q: got %s (%s), want abstain (the -c injection guard must not be regressed by pg2-szadj, and this key is NOT one pg2-3zgcf escalated)", cmd, got.Decision, got.Reason)
 		}
 	}
 }
@@ -1264,7 +1362,7 @@ func TestGit_ConfigRedirectedContext(t *testing.T) {
 		{"GIT_DIR=/other git config --get user.email", hookio.Approve, "a READ under a redirect matches the read-only policy"},
 		{"GIT_DIR=/other git config user.email a@b.c", hookio.Ask, "a WRITE under a redirect keeps the redirect Ask"},
 		{"GIT_WORK_TREE=/other git config user.email a@b.c", hookio.Ask, "same for GIT_WORK_TREE"},
-		{"GIT_DIR=/other git config core.hooksPath /tmp/h", hookio.Ask, "a gated key is gated regardless of the redirect"},
+		{"GIT_DIR=/other git config core.hooksPath /tmp/h", hookio.Reject, "a gated key is gated regardless of the redirect (escalated by pg2-3zgcf, 2026-09-07)"},
 		{"GIT_DIR=/other git config remote.origin.url https://evil.invalid/x.git", hookio.Reject, "a redirect must not soften the redirect-class Reject"},
 	}
 	for _, tc := range cases {
@@ -1307,12 +1405,12 @@ func TestGit_ConfigSeparatedFlagValue(t *testing.T) {
 		{"git config --file /repo/.git/config --get core.hooksPath", hookio.Approve, "same, long spelling"},
 		{"git config --type bool --get clean.requireForce", hookio.Approve, "same, separated --type value"},
 		// SOUNDNESS: a write stays a write.
-		{"git config --comment --get core.hooksPath /tmp/h", hookio.Ask, "git gives --comment the next argv, so the --get is its VALUE and this really writes"},
-		{"git config -f .git/config core.hooksPath /tmp/h", hookio.Ask, "eliding -f's value must still leave key and value as operands"},
-		{"git config --type bool clean.requireForce false", hookio.Ask, "separated --type value must not hide the key"},
-		{"git config --default X core.hooksPath /tmp/h", hookio.Ask, "same for --default"},
+		{"git config --comment --get core.hooksPath /tmp/h", hookio.Reject, "git gives --comment the next argv, so the --get is its VALUE and this really writes (escalated by pg2-3zgcf, 2026-09-07)"},
+		{"git config -f .git/config core.hooksPath /tmp/h", hookio.Reject, "eliding -f's value must still leave key and value as operands (escalated by pg2-3zgcf, 2026-09-07)"},
+		{"git config --type bool clean.requireForce false", hookio.Reject, "separated --type value must not hide the key (escalated by pg2-3zgcf, 2026-09-07)"},
+		{"git config --default X core.hooksPath /tmp/h", hookio.Reject, "same for --default (escalated by pg2-3zgcf, 2026-09-07)"},
 		// A glued value is part of its own token: nothing to elide.
-		{"git config --type=bool clean.requireForce false", hookio.Ask, "glued --type=bool"},
+		{"git config --type=bool clean.requireForce false", hookio.Reject, "glued --type=bool (escalated by pg2-3zgcf, 2026-09-07)"},
 	}
 	for _, tc := range cases {
 		input := &hookio.HookInput{

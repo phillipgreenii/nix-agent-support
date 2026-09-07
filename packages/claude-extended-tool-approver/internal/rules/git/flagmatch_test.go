@@ -316,13 +316,17 @@ func TestGit_SiblingBeadVerdicts_Unchanged(t *testing.T) {
 		{"pg2-abb65 --repo=<url>", "git push --repo=https://example.invalid/x.git main", hookio.Reject},
 		{"pg2-8imjo git remote -v add", "git remote -v add upstream https://example.invalid/x.git", hookio.Reject},
 		{"pg2-8imjo read-only git remote", "git remote -v", hookio.Approve},
-		{"pg2-szadj core.hooksPath write", "git config core.hooksPath /tmp/h", hookio.Ask},
+		// The three rows below moved Ask -> Reject under pg2-3zgcf's 2026-09-07
+		// escalation; the pg2-szadj label stays because that bead is still what put
+		// the KEY in gatedConfigKeys in the first place, and this row's job is
+		// unchanged — pin that the long-flag matchers do not move this verdict.
+		{"pg2-szadj core.hooksPath write", "git config core.hooksPath /tmp/h", hookio.Reject},
 		{"pg2-szadj remote.origin.url write", "git config remote.origin.url https://evil.invalid/x.git", hookio.Reject},
 		{"pg2-szadj config read", "git config --get user.email", hookio.Approve},
 		{"pg2-szadj ordinary config write", "git config x y", hookio.Approve},
 		{"pg2-szadj config read behind -f", "git config -f .git/config --get core.fsmonitor", hookio.Approve},
-		{"pg2-szadj --unset of a gated key", "git config --unset clean.requireForce", hookio.Ask},
-		{"pg2-szadj git config set form", "git config set core.hooksPath /tmp/h", hookio.Ask},
+		{"pg2-szadj --unset of a gated key", "git config --unset clean.requireForce", hookio.Reject},
+		{"pg2-szadj git config set form", "git config set core.hooksPath /tmp/h", hookio.Reject},
 		// These three were pinned as Ask when the `clean` arm was one, and they keep
 		// their PURPOSE at the new level: the arm is FLAG-BLIND, so all three must
 		// agree. `--f` is the abbreviation row — if it ever diverges from bare `git
@@ -696,7 +700,7 @@ func TestGit_BranchScope_OtherSubcommandsUnchanged(t *testing.T) {
 		{"git rebase --interactiv", hookio.NoOpinion},
 		{"git remote -v add upstream https://example.invalid/x.git", hookio.Reject},
 		{"git remote -v", hookio.Approve},
-		{"git config core.hooksPath /tmp/h", hookio.Ask},
+		{"git config core.hooksPath /tmp/h", hookio.Reject},
 		{"git config --get user.email", hookio.Approve},
 		{"git tag v1", hookio.Reject},
 		{"git log --oneline -5", hookio.Approve},
@@ -772,6 +776,15 @@ var exactTokenExemptions = []exactTokenExemption{
 			"`git --git=<dir> log`, `git --work-tre=<dir> log`, `git --namespac=<ns> log` and " +
 			"`git --config-en=X=Y log` each answered `unknown option: …` while every full spelling " +
 			"worked, so the exact-token test IS git's own parse and there is no bypass to close",
+	},
+	{
+		fn:        "configEnvFlagKey",
+		mechanism: "*",
+		reason: "the SAME measurement as hasGitConfigInjection's own --config-env= exemption above " +
+			"(pg2-3zgcf, 2026-09-07): this helper only extracts the KEY half of a pre-subcommand " +
+			"--config-env argument that hasGitConfigInjection has already exact-token-matched, so an " +
+			"abbreviated spelling never reaches it in the first place — git's handle_options() accepts " +
+			"no abbreviation here either",
 	},
 }
 
