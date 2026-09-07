@@ -257,8 +257,9 @@ func (r *Registry) Single(entityType string) (string, error) {
 
 // entityTypes enumerates every connector.<type> key this docket's design
 // names, so a fan-out can walk "every registered backend regardless of
-// capability." This docket only ever populates pr, but the registry stays
-// generic over the full set.
+// capability." This docket now populates all four — pr, issue, ci, and
+// scm — via their own Tier-2 backends, and the registry stays generic
+// over the full set.
 var entityTypes = []string{"pr", "issue", "ci", "scm"}
 
 // AllBackends returns every backend binary name registered under any

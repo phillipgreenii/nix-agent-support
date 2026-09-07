@@ -144,7 +144,7 @@
             inherit (goBuilders) mkGoApp;
           };
           # pg-connector-ci-github-actions: the ci capability's Tier-2
-          # GitHub Actions backend (bead pg2-2j5ac.10) — a third mkGoApp
+          # GitHub Actions backend (bead pg2-2j5ac.10) — another mkGoApp
           # call over the SAME packages/pg-connector module (shared src +
           # gomod2nixToml) as the pg-connector/pg-connector-pr-github
           # entries immediately above, building the standalone
@@ -165,10 +165,11 @@
             inherit (goBuilders) mkGoApp;
           };
           # pg-connector-scm-git: the scm capability's local-git Tier-2
-          # backend (bead pg2-2j5ac.6) — a third mkGoApp call over the SAME
+          # backend (bead pg2-2j5ac.6) — another mkGoApp call over the SAME
           # packages/pg-connector module (shared src + gomod2nixToml) as the
-          # pg-connector and pg-connector-pr-github entries immediately
-          # above, building the standalone scriptout-only binary from
+          # pg-connector, pg-connector-pr-github, pg-connector-ci-github-actions,
+          # and pg-connector-issue-beads entries above, building the
+          # standalone scriptout-only binary from
           # packages/pg-connector/pg-connector-scm-git.nix.
           pg-connector-scm-git = final.callPackage ./packages/pg-connector/pg-connector-scm-git.nix {
             inherit (goBuilders) mkGoApp;

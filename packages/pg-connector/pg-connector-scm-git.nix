@@ -9,8 +9,8 @@ mkGoApp {
 
   # Shares the SAME Go module as ./default.nix's cmd/pg-connector build and
   # ./pg-connector-pr-github.nix's cmd/pg-connector-pr-github build — one
-  # go.mod, one gomod2nix.toml, a third mkGoApp call building a third
-  # binary out of it; this packet does not create a second Go module
+  # go.mod, one gomod2nix.toml, N mkGoApp calls building N different
+  # binaries out of it; this packet does not create a second Go module
   # (layout_convention_test.go).
   #
   # Filtered src (pg2-p5at3): `go list -deps`/`-test -deps` against
