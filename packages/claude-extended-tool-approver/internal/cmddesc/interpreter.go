@@ -380,13 +380,24 @@ func (st *interpState) flag(tok string, i int) (int, bool) {
 	}
 	// --flag=value
 	if strings.HasPrefix(tok, "--") {
-		if eq := strings.IndexByte(tok, '='); eq > 0 {
-			name, val := tok[:eq], tok[eq+1:]
-			if spec, ok := st.schema.Flags[name]; ok && spec.Arity != ArityNone {
-				return st.applyFlag(name, spec, i, val, true)
-			}
+		if spec, name, val, ok := st.gluedFlag(tok); ok {
+			return st.applyFlag(name, spec, i, val, true)
 		}
 		return st.unknownFlag(tok)
+	}
+	// -flag=value (slice 3x): the SAME glued convention as --flag=value, but
+	// under a SINGLE leading dash — go's own CLI style (`go test -count=1`,
+	// `go build -cpuprofile=prof.out`; `go help testflag`'s own worked
+	// example uses exactly this spelling: "-cpuprofile=prof.out"), distinct
+	// from getopt's single-dash SHORT-flag bundling just below (whose glued
+	// values never contain "="). Checked only when the text before "=" is a
+	// REGISTERED, value-taking flag NAME (gluedFlag requires an exact match
+	// on the whole pre-"=" substring), so an ordinary short bundle can never
+	// be misread as this form: no existing schema's bundled glued value (a
+	// sed -i backup suffix, a pgrep -d delimiter, ...) is itself a
+	// registered multi-character flag NAME followed by "=".
+	if spec, name, val, ok := st.gluedFlag(tok); ok {
+		return st.applyFlag(name, spec, i, val, true)
 	}
 	// Short bundle: -abc, -n5 (arity-1 short flag with glued value), or -i.bak
 	// (optional-glued short flag: the rest of the bundle is its value, even
@@ -409,6 +420,27 @@ func (st *interpState) flag(tok string, i int) (int, bool) {
 		return st.applyFlag(name, spec, i, glued, true)
 	}
 	return 0, true
+}
+
+// gluedFlag splits tok at its first "=" and reports the flag spec, its name
+// and the glued value when the text BEFORE "=" is an EXACT, registered flag
+// name whose arity takes a value — the one check shared by both
+// "--flag=value" (GNU long options) and "-flag=value" (go's own single-dash
+// convention, slice 3x). ok is false when tok has no "=", or the pre-"="
+// text is not a registered flag, or that flag takes no value (ArityNone) —
+// every one of those falls through to the caller's existing handling
+// unchanged.
+func (st *interpState) gluedFlag(tok string) (FlagSpec, string, string, bool) {
+	eq := strings.IndexByte(tok, '=')
+	if eq <= 0 {
+		return FlagSpec{}, "", "", false
+	}
+	name, val := tok[:eq], tok[eq+1:]
+	spec, ok := st.schema.Flags[name]
+	if !ok || spec.Arity == ArityNone {
+		return FlagSpec{}, "", "", false
+	}
+	return spec, name, val, true
 }
 
 // applyFlag records a modeled flag (spelling seen, transform) and its operand
@@ -525,6 +557,12 @@ func (st *interpState) emitImplicit(ie ImplicitEffect) {
 		})
 	case ie.Role.Kind == KindChdir:
 		st.chdir(ie.Target, ie.Dynamic, "implicit")
+	case ie.Role.Kind == KindExec:
+		st.effects = append(st.effects, Effect{
+			Kind:   EffectExec,
+			Detail: "trusted checkout code",
+			Source: ie.Target,
+		})
 	default:
 		st.fail("unmodeled implicit effect role %d", ie.Role.Kind)
 	}

@@ -56,6 +56,9 @@ func DefaultRegistry() Registry {
 		// slice 3q: find interpreter (starting points, expression walk,
 		// -delete/-exec/-fprint).
 		findSchema,
+		// slice 3x: go subcommand schema (test/generate/run/build/vet/fmt/
+		// list/env/version/mod/clean/install/get) and TrustedCheckoutExec.
+		goSchema,
 	)
 }
 

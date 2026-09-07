@@ -1,0 +1,4 @@
+flowchart LR
+    n0["command: go generate ./...<br/>- path:read ./... [arg 0]<br/>- exec: go generate (trusted checkout code)<br/>- stdio:stdout metadata<br/>mark=permitted"]
+    n1[/"file: ./..."/]
+    n0 -->|"reads: read"| n1

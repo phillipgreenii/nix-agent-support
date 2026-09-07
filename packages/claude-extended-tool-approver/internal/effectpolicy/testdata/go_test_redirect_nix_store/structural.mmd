@@ -1,0 +1,4 @@
+flowchart LR
+    n0["command: go test ./... #gt; /nix/store/x"]
+    n1[/"file: /nix/store/x"/]
+    n0 -->|"redirect-out: #gt;"| n1

@@ -443,6 +443,41 @@ func rootKind(k Kind, cat Category) Kind {
 	return Kind{Name: k.Name, Classify: func(string, string, string, bool) Category { return cat }}
 }
 
+// InsideMarkerWorkspace reports whether abs lies at or under an ancestor
+// directory holding one of the NAMED kinds' Markers — a MARKER-PRESENCE
+// question, deliberately independent of what that kind's Classify/Rules
+// would say about the path (Resolve/Classify answer a DIFFERENT question,
+// deletability, and goKind in particular is Silent over its own module tree:
+// its Rules are empty and its Classify is unset, so categorize's rel=="."
+// fast path and its empty Rules loop both return CatSilent for every path
+// under a go.mod root — Resolve would never surface "go" as the deciding
+// kind for an ordinary source file). This is the effectpolicy package's
+// TrustedCheckoutExec policy's "am I inside a recognised git/go checkout"
+// check (slice 3x, tc-lc8f item 4e) — a plain existence test over the same
+// Markers data every Kind already declares, reusing hasMarker rather than
+// re-walking ancestors with a second implementation.
+func InsideMarkerWorkspace(kinds []Kind, names []string, abs string) bool {
+	abs = filepath.Clean(abs)
+	want := make(map[string]bool, len(names))
+	for _, n := range names {
+		want[n] = true
+	}
+	for _, k := range kinds {
+		if len(k.Markers) == 0 || !want[k.Name] {
+			continue
+		}
+		for dir := abs; ; dir = filepath.Dir(dir) {
+			if hasMarker(dir, k.Markers) {
+				return true
+			}
+			if filepath.Dir(dir) == dir {
+				break
+			}
+		}
+	}
+	return false
+}
+
 // hasMarker reports whether any marker exists directly under dir.
 func hasMarker(dir string, markers []string) bool {
 	for _, m := range markers {

@@ -568,3 +568,530 @@ var findSchema = CommandSchema{
 	Stdout:       StdoutMetadata,
 	EndOfOptions: false,
 }
+
+// ---- go (slice 3x: tc-lc8f item 4e, tc-vn5z item 1) -------------------------
+
+// goSchema: `go <command> [arguments]` — subcommand dispatch, exactly like
+// gitSchema/bdSchema; `go help`'s own synopsis has no global flag before the
+// subcommand, so Flags is empty here (verified on this host, `go version
+// go1.26.6 linux/amd64`, `go help`, 2026-09-07).
+//
+// Operator ruling (Phillip, 2026-09-07, verbatim, recorded on tc-vn5z item
+// 1): "go test and go generate are fine. go run is trickier. i would like
+// it to be parsed, but i dont think there will be a definitition of the
+// gonrun for the spexifox situatikn. so abstoan on it." Normalized: `go
+// test`/`go generate` execute the checkout's OWN code — a PERMITTED class,
+// citing `docs/adr/0053-ceta-threat-model.md`'s "2. What is trusted vs.
+// what is screened" (the CWD/project tree is trusted state) and matching
+// what production already approves today (internal/rules/buildtools.go's
+// baseApprovedTools unconditionally lists "go", line ~31) — judged by
+// TrustedCheckoutExec (internal/effectpolicy/policy.go), never by command
+// name. `go run` is PARSED (goRunSchema below models its flags and target
+// operand, visible in the interpreted graph) but its target's role is
+// KindUnmodeled, so it always Abstains regardless of what the target or its
+// arguments are — "no definition of what a go run target does exists for
+// the specific situation" (goRunSchema's own doc comment records this).
+// Everything else is the ORIGINAL proposal this ruling did not revise:
+// build/vet/fmt/list/env/version/mod are reads plus build-cache writes
+// (also EffectExec, since both classes reduce to the SAME question — is
+// this CWD a recognised checkout — see effect.go's EffectExec doc comment);
+// install/get are Unknown (never Permitted: they write GOBIN/GOPATH/bin or
+// fetch modules over the network); clean's -cache/-modcache are ordinary
+// PathDelete effects judged by the EXISTING DeleteAccess policy against the
+// SAME cache roots goKind (internal/deletable/workspace.go) already
+// declares deletable.
+//
+// `doc`, `tool`, `work` are DELIBERATELY ABSENT from Subcommands: the
+// simplest correct model for all three (per the brief) is "insufficient",
+// which an absent key already gives for free via interpretSubcommand's own
+// "unmodeled subcommand" fallback — exactly gitWorktreeSchema's add/remove/
+// prune precedent, no schema needed. `go tool vet`/`go tool cover`/`go tool
+// pprof` reading files is a real, narrower exception `go help tool` alone
+// cannot resolve without parsing the wrapped tool's OWN argv (out of scope
+// here); omitting `tool` entirely fails closed for it too.
+var goSchema = CommandSchema{
+	Name:         "go",
+	Provenance:   "go version go1.26.6 linux/amd64 (`go version`), go help / go help <command>, this host 2026-09-07",
+	Flags:        map[string]FlagSpec{},
+	UnknownFlag:  UnknownFlagInsufficient,
+	EndOfOptions: true,
+	Subcommands: map[string]CommandSchema{
+		"test":     goTestSchema,
+		"generate": goGenerateSchema,
+		"run":      goRunSchema,
+		"build":    goBuildSchema,
+		"vet":      goVetSchema,
+		"fmt":      goFmtVerbSchema,
+		"list":     goListSchema,
+		"env":      goEnvSchema,
+		"version":  goVersionSchema,
+		"mod":      goModSchema,
+		"clean":    goCleanSchema,
+		"install":  goInstallSchema,
+		"get":      goGetSchema,
+	},
+}
+
+// mergeFlags returns a new map combining base with overrides layered on top
+// (overrides win on key collision) — lets a `go` subcommand's OWN flags
+// (go test's -run) sit alongside the shared "build flags" table
+// (goBuildFlags) without repeating the shared set literally at every call
+// site, the same "one schema borrows another's table" shape yqEvalSchema's
+// yqFlags already uses, generalised to allow additions.
+func mergeFlags(base map[string]FlagSpec, overrides map[string]FlagSpec) map[string]FlagSpec {
+	m := make(map[string]FlagSpec, len(base)+len(overrides))
+	for k, v := range base {
+		m[k] = v
+	}
+	for k, v := range overrides {
+		m[k] = v
+	}
+	return m
+}
+
+// goBuildFlags: the subset of "go help build"'s shared build-flag table this
+// slice models — go help build's own words: "The build flags are shared by
+// the build, clean, get, install, list, run, and test commands" (go vet and
+// go generate accept most of the same set too, per their own usage lines).
+// Every one modeled here is inert or a single literal value; NONE of them
+// names a filesystem path this schema tracks (the tool's own writes land in
+// its build cache, represented separately as an EffectExec, not a path
+// effect — see goTestSchema's ImplicitEffects). Verified against this
+// host's `go help build` (go1.26.6, 2026-09-07).
+//
+// DELIBERATELY ABSENT (fails closed to Insufficient rather than silently
+// inert), each a distinct trust boundary this slice's ruling does not
+// cover:
+//   - -C dir: changes CWD before the rest of argv runs — the same shape as
+//     bd's -C/--directory (bdSchema's own comment) and cd's KindChdir role;
+//     unmodeled here, not silently ignored.
+//   - -toolexec 'cmd args': wraps EVERY toolchain step (compile/link/vet/
+//     asm) in an arbitrary external program named verbatim on the command
+//     line — an unvetted execution wrapper, the same shape as go test's
+//     -exec (goTestSchema's own comment) and go vet's -vettool
+//     (goVetSchema's own comment).
+//   - -overlay file: a JSON mapping that can transparently substitute the
+//     CONTENT of any disk path during the build — mirrors yqSchema's
+//     omission of --security-enable-system-operator.
+var goBuildFlags = map[string]FlagSpec{
+	"-a": inert, "-n": inert, "-x": inert, "-v": inert, "-work": inert,
+	"-p":    literal1,
+	"-race": inert, "-msan": inert, "-asan": inert,
+	"-cover": inert, "-covermode": literal1, "-coverpkg": literal1,
+	"-asmflags": literal1, "-buildmode": literal1, "-buildvcs": literal1,
+	"-compiler": literal1, "-gccgoflags": literal1, "-gcflags": literal1,
+	"-installsuffix": literal1, "-json": inert,
+	"-ldflags": literal1, "-linkshared": inert,
+	"-mod": literal1, "-modcacherw": inert, "-modfile": literal1,
+	"-pgo": literal1, "-pkgdir": literal1,
+	"-tags": literal1, "-trimpath": inert,
+}
+
+// goTestSchema: `go test [build/test flags] [packages]`. Every invocation
+// emits an EffectExec ("go test") judged by TrustedCheckoutExec — the
+// compiled test binary runs the package's OWN code, the ruling's "go test
+// ... are fine" — plus a PathRead for each package/file operand (./...,
+// ./internal/x, a bare .go file). Flags with values are modeled per the
+// brief's named list: -run/-bench/-count/-timeout/-cpu/-shuffle are
+// inert-value (they select/repeat/seed, never touch a path); -coverprofile
+// writes a coverage profile FILE (PathTruncate — the one flag whose value
+// can name an arbitrary path, hence Reject-capable, exactly like
+// gofmtSchema's -cpuprofile); -short/-failfast are boolean.
+//
+// -exec CMD is DELIBERATELY ABSENT: it wraps the compiled test BINARY's own
+// execution in an external program name taken verbatim off the command
+// line — verified LIVE on this host: `go test -exec frobnicate ./...`
+// attempts to exec "frobnicate" and fails only because it is not on PATH
+// (`exec: "frobnicate": executable file not found in $PATH`), confirming
+// -exec is a real, accepted go test flag despite not being itself listed in
+// `go help testflag`'s own flag table (it is documented under `go help
+// run`, which go test's flag parser shares). An unvetted execution wrapper,
+// so its presence is Insufficient (Abstain), never silently inert or
+// rejected.
+//
+// Verified against this host's `go help testflag` (go1.26.6, 2026-09-07).
+var goTestSchema = CommandSchema{
+	Name:       "test",
+	Provenance: "go help testflag, go help test (go1.26.6, this host 2026-09-07)",
+	Flags: mergeFlags(goBuildFlags, map[string]FlagSpec{
+		"-run": literal1, "-bench": literal1, "-count": literal1, "-timeout": literal1,
+		"-cpu": literal1, "-shuffle": literal1,
+		"-short": inert, "-failfast": inert,
+		"-coverprofile": {Arity: ArityOne, Operand: PathTruncate},
+	}),
+	Positionals:     PositionalSpec{Rest: PathRead},
+	ImplicitEffects: []ImplicitEffect{{Role: Exec, Target: "go test"}},
+	Stdin:           StdinNever,
+	Stdout:          StdoutMetadata,
+	UnknownFlag:     UnknownFlagInsufficient,
+	EndOfOptions:    true,
+}
+
+// goGenerateSchema: `go generate [-run regexp] [-n] [-v] [-x] [build flags]
+// [file.go... | packages]`. Every //go:generate directive in the matched
+// files runs an ARBITRARY local executable — the ruling's own "go
+// generate ... are fine", the same EffectExec as go test. Verified against
+// this host's `go help generate` (go1.26.6, 2026-09-07).
+var goGenerateSchema = CommandSchema{
+	Name:       "generate",
+	Provenance: "go help generate (go1.26.6, this host 2026-09-07)",
+	Flags: map[string]FlagSpec{
+		"-run": literal1, "-n": inert, "-v": inert, "-x": inert,
+	},
+	Positionals:     PositionalSpec{Rest: PathRead},
+	ImplicitEffects: []ImplicitEffect{{Role: Exec, Target: "go generate"}},
+	Stdin:           StdinNever,
+	Stdout:          StdoutMetadata,
+	UnknownFlag:     UnknownFlagInsufficient,
+	EndOfOptions:    true,
+}
+
+// goRunSchema: `go run [build flags] [-exec xprog] package [arguments...]`.
+// Operator ruling (Phillip, 2026-09-07, verbatim, recorded on tc-vn5z item
+// 1): "go run is trickier. i would like it to be parsed, but i dont think
+// there will be a definitition of the gonrun for the spexifox situatikn. so
+// abstoan on it." Normalized: flags and the package/file TARGET are parsed
+// (visible in the interpreted graph — PositionalsEndOptions stops flag
+// scanning at the target, exactly like a shell handing every LATER `-x` to
+// the program it runs rather than to itself: the same convention
+// CommandSchema.PositionalsEndOptions's own doc comment already names for
+// xargs), but the target's role is KindUnmodeled, which fails the
+// interpretation closed (builder-level Insufficient => Abstain, NEVER
+// Reject — no policy ever runs on an Unmodeled-role operand) regardless of
+// what the target or its trailing arguments are. "No definition of what a
+// go run target does exists for the specific situation" is recorded HERE,
+// in the schema's own doc comment, per this spike's established convention
+// for a deliberately-unmodeled positional (gitBranchSchema/gitConfigSchema
+// put the SAME kind of "why" in prose while the RUNTIME Insufficiency text
+// stays the generic "unmodeled operand role" message — see operand()'s
+// default case, interpreter.go).
+//
+// Verified against this host's `go help run` (go1.26.6, 2026-09-07).
+var goRunSchema = CommandSchema{
+	Name:       "run",
+	Provenance: "go help run (go1.26.6, this host 2026-09-07)",
+	Flags: mergeFlags(goBuildFlags, map[string]FlagSpec{
+		"-exec": literal1,
+	}),
+	Positionals: PositionalSpec{
+		Leading: []OperandRole{Unmodeled},
+		Rest:    Unmodeled,
+	},
+	PositionalsEndOptions: true,
+	Stdin:                 StdinNever,
+	Stdout:                StdoutMetadata,
+	UnknownFlag:           UnknownFlagInsufficient,
+	EndOfOptions:          true,
+}
+
+// goBuildSchema: `go build [-o output] [build flags] [packages]`. Reads
+// package operands plus ordinary build-cache traffic (EffectExec), per the
+// operator's original proposal ("build/vet/fmt/mod tidy/list/env/version
+// are reads plus build-cache writes"); -o writes the compiled binary/object
+// to an EXPLICIT path (PathTruncate — the one build-family path this slice
+// tracks by name, exactly like gofmtSchema's -cpuprofile). Verified against
+// this host's `go help build` (go1.26.6, 2026-09-07).
+var goBuildSchema = CommandSchema{
+	Name:       "build",
+	Provenance: "go help build (go1.26.6, this host 2026-09-07)",
+	Flags: mergeFlags(goBuildFlags, map[string]FlagSpec{
+		"-o": {Arity: ArityOne, Operand: PathTruncate},
+	}),
+	Positionals:     PositionalSpec{Rest: PathRead},
+	ImplicitEffects: []ImplicitEffect{{Role: Exec, Target: "go build"}},
+	Stdin:           StdinNever,
+	Stdout:          StdoutMetadata,
+	UnknownFlag:     UnknownFlagInsufficient,
+	EndOfOptions:    true,
+}
+
+// goVetSchema: `go vet [build flags] [-vettool prog] [vet flags]
+// [packages]`. -vettool names an ALTERNATE analysis tool binary go vet
+// execs in place of its own — the same unvetted-execution-wrapper shape as
+// go test's -exec/go build's -toolexec — and -fix/-diff (cmd/vet's own
+// flags, `go help vet`) apply the tool's suggested fixes DIRECTLY to source
+// files, a real in-place write this slice does not track; all three are
+// DELIBERATELY ABSENT so their presence fails closed to Insufficient.
+// Verified against this host's `go help vet` (go1.26.6, 2026-09-07).
+var goVetSchema = CommandSchema{
+	Name:       "vet",
+	Provenance: "go help vet (go1.26.6, this host 2026-09-07)",
+	Flags: mergeFlags(goBuildFlags, map[string]FlagSpec{
+		"-c": literal1,
+	}),
+	Positionals:     PositionalSpec{Rest: PathRead},
+	ImplicitEffects: []ImplicitEffect{{Role: Exec, Target: "go vet"}},
+	Stdin:           StdinNever,
+	Stdout:          StdoutMetadata,
+	UnknownFlag:     UnknownFlagInsufficient,
+	EndOfOptions:    true,
+}
+
+// goFmtVerbSchema: `go fmt [-n] [-x] [packages]` — the `go fmt` SUBCOMMAND
+// (distinct from the standalone `gofmt` binary already registered as
+// gofmtSchema above). It runs `gofmt -l -w` UNCONDITIONALLY (`go help
+// fmt`'s own words: "Fmt runs the command 'gofmt -l -w'"), so every package
+// operand is a real in-place rewrite regardless of flags (PathModify, not
+// PathRead — unlike every other verb in this family). -n/-x only change
+// what is PRINTED (dry-run/echo), not whether the rewrite happens, so they
+// stay inert. Verified against this host's `go help fmt` (go1.26.6,
+// 2026-09-07).
+var goFmtVerbSchema = CommandSchema{
+	Name:       "fmt",
+	Provenance: "go help fmt (go1.26.6, this host 2026-09-07)",
+	Flags: map[string]FlagSpec{
+		"-n": inert, "-x": inert, "-mod": literal1,
+	},
+	Positionals: PositionalSpec{Rest: PathModify},
+	ImplicitEffects: []ImplicitEffect{
+		{Role: PathModify, Target: ".", WhenNoPositionals: true},
+		{Role: Exec, Target: "go fmt"},
+	},
+	Stdin:        StdinNever,
+	Stdout:       StdoutMetadata,
+	UnknownFlag:  UnknownFlagInsufficient,
+	EndOfOptions: true,
+}
+
+// goListSchema: `go list [-f format] [-json] [-m] [list flags] [build
+// flags] [packages]` — a read-only report (StdoutContent: the caller may
+// pipe it into a template/JSON consumer). Verified against this host's
+// `go help list` (go1.26.6, 2026-09-07).
+var goListSchema = CommandSchema{
+	Name:       "list",
+	Provenance: "go help list (go1.26.6, this host 2026-09-07)",
+	Flags: mergeFlags(goBuildFlags, map[string]FlagSpec{
+		"-m": inert, "-f": literal1, "-e": inert, "-deps": inert,
+	}),
+	Positionals:     PositionalSpec{Rest: PathRead},
+	ImplicitEffects: []ImplicitEffect{{Role: Exec, Target: "go list"}},
+	Stdin:           StdinNever,
+	Stdout:          StdoutContent,
+	UnknownFlag:     UnknownFlagInsufficient,
+	EndOfOptions:    true,
+}
+
+// goEnvSchema: `go env [-json] [-changed] [-u] [-w] [var ...]`. A bare read
+// (`go env GOPATH`) prints an environment VALUE and is always safe (Literal
+// positionals — an env var NAME is inert, not a path). -w/-u are
+// DELIBERATELY ABSENT: they PERSIST a change to $GOENV (typically
+// ~/.config/go/env), a real write to a config file outside every root this
+// slice declares deletable — a distinct trust boundary from a plain read,
+// so their presence fails closed to Insufficient rather than being modeled
+// as just another inert flag. Verified against this host's `go help env`
+// (go1.26.6, 2026-09-07).
+var goEnvSchema = CommandSchema{
+	Name:       "env",
+	Provenance: "go help env (go1.26.6, this host 2026-09-07)",
+	Flags: map[string]FlagSpec{
+		"-json": inert, "-changed": inert,
+	},
+	Positionals:     PositionalSpec{Rest: Literal},
+	ImplicitEffects: []ImplicitEffect{{Role: Exec, Target: "go env"}},
+	Stdin:           StdinNever,
+	Stdout:          StdoutMetadata,
+	UnknownFlag:     UnknownFlagInsufficient,
+	EndOfOptions:    true,
+}
+
+// goVersionSchema: `go version [-m] [-v] [-json] [file ...]`. With zero
+// file operands (this slice's only golden, bare `go version`) it reports
+// the go TOOL's own version; file operands are read for their embedded
+// build-info, hence PathRead. Verified against this host's `go help
+// version` (go1.26.6, 2026-09-07).
+var goVersionSchema = CommandSchema{
+	Name:       "version",
+	Provenance: "go help version (go1.26.6, this host 2026-09-07)",
+	Flags: map[string]FlagSpec{
+		"-m": inert, "-v": inert, "-json": inert,
+	},
+	Positionals:     PositionalSpec{Rest: PathRead},
+	ImplicitEffects: []ImplicitEffect{{Role: Exec, Target: "go version"}},
+	Stdin:           StdinNever,
+	Stdout:          StdoutMetadata,
+	UnknownFlag:     UnknownFlagInsufficient,
+	EndOfOptions:    true,
+}
+
+// goModSchema: `go mod <command> [arguments]` — a second, nested
+// Subcommands dispatch (interpretSubcommand recurses on the same code path
+// at any depth, exactly like git's `worktree`/bd's `dep`/`label`/`dolt`).
+// Every registered verb (tidy/download/verify/why/graph/vendor/edit) is
+// part of the operator's original proposal's "reads plus build-cache
+// writes" approved class; `edit` additionally writes go.mod DIRECTLY (`go
+// help mod edit`), which is fine — go.mod sits inside the project's own RW
+// zone, judged like any other project file, no different from `go fmt`
+// rewriting a source file. Verified against this host's `go help mod`
+// (go1.26.6, 2026-09-07).
+var goModSchema = CommandSchema{
+	Name:         "mod",
+	Provenance:   "go help mod (go1.26.6, this host 2026-09-07)",
+	Flags:        map[string]FlagSpec{},
+	UnknownFlag:  UnknownFlagInsufficient,
+	EndOfOptions: true,
+	Subcommands: map[string]CommandSchema{
+		"tidy": goModVerbSchema("tidy", map[string]FlagSpec{
+			"-e": inert, "-v": inert, "-x": inert, "-diff": inert, "-go": literal1, "-compat": literal1,
+		}),
+		"download": goModVerbSchema("download", map[string]FlagSpec{
+			"-x": inert, "-json": inert, "-reuse": literal1,
+		}),
+		"verify": goModVerbSchema("verify", map[string]FlagSpec{}),
+		"why": goModVerbSchema("why", map[string]FlagSpec{
+			"-m": inert, "-vendor": inert,
+		}),
+		"graph": goModVerbSchema("graph", map[string]FlagSpec{
+			"-go": literal1, "-x": inert,
+		}),
+		"vendor": goModVerbSchema("vendor", map[string]FlagSpec{
+			"-e": inert, "-v": inert, "-o": literal1,
+		}),
+		"edit": goModEditSchema,
+	},
+}
+
+// goModVerbSchema builds one `go mod <verb>` schema: package/module pattern
+// positionals are Literal (verify/tidy take none; why/download take
+// patterns; the pattern text itself is inert), and every verb emits the
+// same EffectExec ("go mod <verb>") judged by TrustedCheckoutExec.
+func goModVerbSchema(verb string, flags map[string]FlagSpec) CommandSchema {
+	return CommandSchema{
+		Name:            verb,
+		Provenance:      "go help mod " + verb + " (go1.26.6, this host 2026-09-07)",
+		Flags:           flags,
+		Positionals:     PositionalSpec{Rest: Literal},
+		ImplicitEffects: []ImplicitEffect{{Role: Exec, Target: "go mod " + verb}},
+		Stdin:           StdinNever,
+		Stdout:          StdoutMetadata,
+		UnknownFlag:     UnknownFlagInsufficient,
+		EndOfOptions:    true,
+	}
+}
+
+// goModEditSchema: `go mod edit [editing flags] [-fmt|-print|-json]
+// [go.mod]` writes go.mod directly for every editing flag (-module,
+// -require, -godebug, ...; a full enumeration of go help mod edit's many
+// editing flags is out of scope for this slice) — modeled as an
+// UNCONDITIONAL implicit PathModify of "go.mod" (its own default target
+// file, same shape as goFmtVerbSchema's rewrite) rather than per-flag,
+// since every editing flag shares the identical write target. -print/-json
+// (read-only, print the result instead of writing) are an accepted
+// over-approximation: this schema still reports the write, which merely
+// costs an unnecessary (but harmless, since the write lands inside the
+// project's own RW zone) PathModify finding.
+var goModEditSchema = CommandSchema{
+	Name:       "edit",
+	Provenance: "go help mod edit (go1.26.6, this host 2026-09-07)",
+	Flags: map[string]FlagSpec{
+		"-fmt": inert, "-print": inert, "-json": inert,
+		"-module": literal1, "-go": literal1, "-toolchain": literal1,
+		"-require": literal1, "-droprequire": literal1,
+		"-replace": literal1, "-dropreplace": literal1,
+		"-exclude": literal1, "-dropexclude": literal1,
+		"-retract": literal1, "-dropretract": literal1,
+		"-godebug": literal1, "-dropgodebug": literal1,
+	},
+	Positionals: PositionalSpec{Rest: PathRead},
+	ImplicitEffects: []ImplicitEffect{
+		{Role: PathModify, Target: "go.mod"},
+		{Role: Exec, Target: "go mod edit"},
+	},
+	Stdin:        StdinNever,
+	Stdout:       StdoutContent,
+	UnknownFlag:  UnknownFlagInsufficient,
+	EndOfOptions: true,
+}
+
+// goCleanSchema: `go clean [-i] [-r] [-cache] [-testcache] [-modcache]
+// [-fuzzcache] [build flags] [packages]`. -cache/-modcache each delete an
+// ENTIRE cache root goKind (internal/deletable/workspace.go) already
+// declares Deletable — DeleteAccess judges the resulting PathDelete exactly
+// like `rm -rf` would (tc-z806's own DeleteAccess ladder), so this schema
+// need not special-case go clean's verdict: whatever DeleteAccess concludes
+// for that root today is what this slice's golden RECORDS (its own case
+// comment says so explicitly — this slice does not force an expected
+// verdict for either flag). -testcache/-fuzzcache remove narrower SUBSETS
+// of the SAME GOCACHE tree with no separate root of their own — left
+// unmodeled (Insufficient) rather than mapped onto the whole-cache delete,
+// which would over-report. -i (also removes the installed binary from
+// GOBIN) and a bare `go clean` with no cache flag (removes stray object
+// files INSIDE the package source directories themselves, per `go help
+// clean`) are also left unmodeled — real but narrow gaps, accepted for this
+// slice.
+//
+// Verified against this host's `go help clean` (go1.26.6, 2026-09-07); the
+// literal cache roots below match this host's actual `go env
+// GOCACHE`/`GOMODCACHE` (linux default derivation, no GOCACHE/GOMODCACHE/
+// GOPATH override set on this host) — see goKind's own doc comment for the
+// documented XDG_CACHE_HOME/GOPATH override gap this schema inherits rather
+// than re-solves (a host with either variable set to something outside
+// $HOME would see DeleteAccess's verdict for these two paths diverge from
+// goKind's actual declared root, exactly as goKind's own GOMODCACHE/
+// patheval zone-conflict gap is already documented, not re-litigated here).
+var goCleanSchema = CommandSchema{
+	Name:       "clean",
+	Provenance: "go help clean (go1.26.6, this host 2026-09-07)",
+	Flags: map[string]FlagSpec{
+		"-i": inert, "-r": inert, "-cache": inert, "-testcache": inert,
+		"-modcache": inert, "-fuzzcache": inert,
+		"-n": inert, "-x": inert, "-v": inert,
+	},
+	Positionals: PositionalSpec{Rest: Literal},
+	ImplicitEffects: []ImplicitEffect{
+		{Role: PathDelete, Target: "~/.cache/go-build", WhenFlags: []string{"-cache"}},
+		{Role: PathDelete, Target: "~/go/pkg/mod", WhenFlags: []string{"-modcache"}},
+	},
+	Stdin:        StdinNever,
+	Stdout:       StdoutMetadata,
+	UnknownFlag:  UnknownFlagInsufficient,
+	EndOfOptions: true,
+}
+
+// goInstallSchema / goGetSchema: `go install [build flags] [packages]` /
+// `go get [-t] [-u] [-tool] [build flags] [packages]`. Both are Unknown
+// (insufficient), NEVER Permitted, per the brief: install compiles AND
+// WRITES an executable into GOBIN/GOPATH/bin (outside every root this slice
+// declares deletable or otherwise vouches for); get downloads arbitrary
+// remote module CODE over the network and rewrites go.mod/go.sum to
+// require it — a network-reached, unreviewed write, not a build-cache
+// write. The unconditional ImplicitEffect below (Role: Unmodeled, no
+// WhenNoPositionals/WhenFlags condition) forces every invocation
+// insufficient regardless of flags or operand count — including the
+// zero-positional `go install`/`go get` forms no golden here exercises —
+// via emitImplicit's own fail-closed default case (interpreter.go), the
+// same mechanism gitBranchSchema/gitConfigSchema use for an unmodeled
+// POSITIONAL, applied here to the WHOLE invocation instead of one operand.
+// Package/module operands are still modeled as Literal (visible in the
+// graph) even though they cannot change the (always-Abstain) verdict.
+//
+// Verified against this host's `go help install` / `go help get` (go1.26.6,
+// 2026-09-07).
+var goInstallSchema = CommandSchema{
+	Name:        "install",
+	Provenance:  "go help install (go1.26.6, this host 2026-09-07)",
+	Flags:       goBuildFlags,
+	Positionals: PositionalSpec{Rest: Literal},
+	ImplicitEffects: []ImplicitEffect{
+		{Role: Unmodeled, Target: "go install writes GOBIN/GOPATH/bin; not modeled"},
+	},
+	Stdin:        StdinNever,
+	Stdout:       StdoutMetadata,
+	UnknownFlag:  UnknownFlagInsufficient,
+	EndOfOptions: true,
+}
+
+var goGetSchema = CommandSchema{
+	Name:       "get",
+	Provenance: "go help get (go1.26.6, this host 2026-09-07)",
+	Flags: mergeFlags(goBuildFlags, map[string]FlagSpec{
+		"-t": inert, "-u": inert, "-tool": inert,
+	}),
+	Positionals: PositionalSpec{Rest: Literal},
+	ImplicitEffects: []ImplicitEffect{
+		{Role: Unmodeled, Target: "go get downloads modules and rewrites go.mod/go.sum; not modeled"},
+	},
+	Stdin:        StdinNever,
+	Stdout:       StdoutMetadata,
+	UnknownFlag:  UnknownFlagInsufficient,
+	EndOfOptions: true,
+}

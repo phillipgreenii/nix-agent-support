@@ -1,0 +1,4 @@
+flowchart LR
+    n0["command: go list -m all<br/>- path:read all [arg 1]<br/>- exec: go list (trusted checkout code)<br/>- stdio:stdout content<br/>mark=permitted"]
+    n1[/"file: all"/]
+    n0 -->|"reads: read"| n1

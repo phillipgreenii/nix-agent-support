@@ -1,0 +1,6 @@
+flowchart LR
+    n0["command: go test -coverprofile /nix/store/x ./...<br/>- path:truncate /nix/store/x [arg 1]<br/>- path:read ./... [arg 2]<br/>- exec: go test (trusted checkout code)<br/>- stdio:stdout metadata<br/>mark=forbidden: path:truncate /nix/store/x [arg 1]: no-write-to-read-only-path (write to read-only zone)"]
+    n1[/"file: /nix/store/x"/]
+    n2[/"file: ./..."/]
+    n0 -->|"reads: read"| n2
+    n0 -->|"writes: truncate"| n1

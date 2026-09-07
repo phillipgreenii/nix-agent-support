@@ -119,6 +119,7 @@ func DefaultPolicies() []Policy {
 		ProgramInterpreted{},
 		EnvAssignment{},
 		ChdirScoped{},
+		TrustedCheckoutExec{},
 	}
 }
 
@@ -699,4 +700,55 @@ func (NoReadOfUnreadablePath) Judge(e cmddesc.Effect, ctx PolicyContext) (Findin
 	default:
 		return Finding{Verdict: Unknown, Reason: "zone " + access.String()}, true
 	}
+}
+
+// TrustedCheckoutExec judges every EffectExec effect (slice 3x, tc-lc8f item
+// 4e; tc-vn5z item 1) — the go tool's own registry schema (cmddesc/
+// registry_breadth.go's goTestSchema and siblings) is this effect's only
+// producer today. Operator ruling (Phillip, 2026-09-07, verbatim, recorded
+// on tc-vn5z item 1): "go test and go generate are fine. go run is trickier.
+// i would like it to be parsed, but i dont think there will be a
+// definitition of the gonrun for the spexifox situatikn. so abstoan on it."
+// Normalized: executing the checkout's own test/generate code, and the go
+// toolchain's ordinary build-cache traffic (build/vet/fmt/list/env/version/
+// mod), are a PERMITTED class of "executing trusted checkout code" — citing
+// this repo's `docs/adr/0053-ceta-threat-model.md`'s "2. What is trusted vs.
+// what is screened" (the CWD / project tree is TRUSTED state, "not fenced
+// off as untrusted"), and matching what production already approves today
+// (internal/rules/buildtools's baseApprovedTools unconditionally lists
+// "go") — but ONLY when the
+// invocation is actually running inside a checkout this machine recognises,
+// never unconditionally by command name: this policy's only question is
+// "is CWD inside a declared git/go workspace" (deletable.
+// InsideMarkerWorkspace over deletable.DefaultKinds' git/go Markers —
+// internal/deletable/workspace.go's gitKind/goKind), Permitted when so,
+// Unknown otherwise (a go tool running against some OTHER directory this
+// machine has no workspace declaration for is not vouched for merely by
+// being the `go` binary). `go run` is deliberately NOT judged by this policy
+// at all: goRunSchema's own positional role is KindUnmodeled, which fails
+// the interpretation closed (builder-level Insufficient, never Forbidden)
+// before any policy sees an effect — "parsed" (its flags and target are
+// visible in the interpreted graph) but always Abstain, exactly per the
+// ruling's "abstain on it", regardless of what this policy would say.
+type TrustedCheckoutExec struct{}
+
+// Name implements Policy.
+func (TrustedCheckoutExec) Name() string { return "trusted-checkout-exec" }
+
+// Judge implements Policy.
+func (TrustedCheckoutExec) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, bool) {
+	if e.Kind != cmddesc.EffectExec {
+		return Finding{}, false
+	}
+	if ctx.CWD == "" {
+		return Finding{Verdict: Unknown, Reason: "no working directory to locate a checkout from"}, true
+	}
+	abs := patheval.ResolveRealPath(ctx.CWD)
+	if abs == "" {
+		return Finding{Verdict: Unknown, Reason: "working directory does not resolve"}, true
+	}
+	if deletable.InsideMarkerWorkspace(deletable.DefaultKinds(), []string{"git", "go"}, abs) {
+		return Finding{Verdict: Permitted, Reason: "CWD is inside a recognised git/go workspace (ADR 0053's \"executing trusted checkout code\")"}, true
+	}
+	return Finding{Verdict: Unknown, Reason: "CWD is not inside any recognised git/go workspace"}, true
 }

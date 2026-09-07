@@ -36,6 +36,18 @@ func fixture(t *testing.T) (root, home string) {
 	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("hi\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// go.mod (slice 3x, tc-lc8f item 4e): the fixture is ALSO a go module —
+	// TrustedCheckoutExec's own workspace check (deletable.
+	// InsideMarkerWorkspace over git/go Markers) already finds this root via
+	// its `.git` directory above, so go.mod's presence here is not
+	// load-bearing for any golden's verdict; it is added so `cat go.mod`
+	// (bash_c_approve_two_reads) and `find . -newer go.mod -print`
+	// (find_newer_gomod_print) name a REAL file rather than a merely-zoned
+	// nonexistent one, and so the fixture honestly reflects what a `go`
+	// golden's CWD represents.
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module fixture\n\ngo 1.26\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	// `/build/` is ANCHORED so that gradleproj/build below is NOT gitignored
 	// and its deletability comes from the gradle declaration alone.
 	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte("*.log\n/build/\n.env\n"), 0o644); err != nil {
@@ -719,6 +731,53 @@ var goldenCases = []goldenCase{
 	{"find_bare", "find", evalcontract.Approve, nil},
 	{"find_newer_gomod_print", "find . -newer go.mod -print", evalcontract.Approve, nil},
 	{"find_paren_or_name", `find . \( -name '*.go' -o -name '*.md' \)`, evalcontract.Approve, nil},
+
+	// go (slice 3x, tc-lc8f item 4e; tc-vn5z item 1): operator ruling
+	// (Phillip, 2026-09-07, verbatim) "go test and go generate are fine. go
+	// run is trickier. i would like it to be parsed, but i dont think there
+	// will be a definitition of the gonrun for the spexifox situatikn. so
+	// abstoan on it." go_test_coverprofile_nix_store and
+	// go_build_o_nix_store use -coverprofile/-o's PathTruncate to Reject a
+	// write into /nix/store, exactly like every other write-family golden
+	// in this file; go_test_exec_frobnicate and go_run_* Abstain (Insufficient,
+	// never Reject) per the ruling.
+	//
+	// go_clean_cache/go_clean_modcache RECORD whatever DeleteAccess concludes
+	// for goKind's declared cache roots (registry_breadth.go's goCleanSchema
+	// doc comment) rather than force an expectation — and what it concludes
+	// HERE is Approve for both, because fixture()'s own HOME is a
+	// t.TempDir() (itself under a temp root): patheval's zone classifier
+	// checks `/tmp/**` (PathReadWrite) BEFORE its `~/go/pkg` read-only
+	// special-case, so the fixture never reaches that special-case at all —
+	// deletable.Classify then finds "~/.cache/go-build" Deletable via
+	// homeKind's own ".cache/" rule and "~/go/pkg/mod" Deletable via
+	// goKind's OWN declared GOMODCACHE root (an exact-match, deepest
+	// candidate). On a REAL host whose HOME is NOT under a temp root (e.g.
+	// this repo's own dev machine), `go clean -modcache` would instead be
+	// Forbidden/Reject: the SAME "~/go/pkg read-only zone" conflict goKind's
+	// own doc comment already documents for `rm -rf ~/go/pkg/mod`, unchanged
+	// by this slice.
+	{"go_test_dotdotdot", "go test ./...", evalcontract.Approve, nil},
+	{"go_test_race_count_glob", "go test -race -count=1 ./internal/...", evalcontract.Approve, nil},
+	{"go_test_run_v_dot", "go test -run TestX -v .", evalcontract.Approve, nil},
+	{"go_test_coverprofile_nix_store", "go test -coverprofile /nix/store/x ./...", evalcontract.Reject, nil},
+	{"go_test_exec_frobnicate", "go test -exec frobnicate ./...", evalcontract.Abstain, nil},
+	{"go_generate_dotdotdot", "go generate ./...", evalcontract.Approve, nil},
+	{"go_run_cmd_tool", "go run ./cmd/tool", evalcontract.Abstain, nil},
+	{"go_run_main_flag", "go run main.go --flag", evalcontract.Abstain, nil},
+	{"go_build_dotdotdot", "go build ./...", evalcontract.Approve, nil},
+	{"go_build_o_nix_store", "go build -o /nix/store/x .", evalcontract.Reject, nil},
+	{"go_vet_dotdotdot", "go vet ./...", evalcontract.Approve, nil},
+	{"go_mod_tidy", "go mod tidy", evalcontract.Approve, nil},
+	{"go_list_m_all", "go list -m all", evalcontract.Approve, nil},
+	{"go_env_gopath", "go env GOPATH", evalcontract.Approve, nil},
+	{"go_version_bare", "go version", evalcontract.Approve, nil},
+	{"go_install_cmd_x", "go install ./cmd/x", evalcontract.Abstain, nil},
+	{"go_get_example_m", "go get example.com/m@v1", evalcontract.Abstain, nil},
+	{"go_clean_cache", "go clean -cache", evalcontract.Approve, nil},
+	{"go_clean_modcache", "go clean -modcache", evalcontract.Approve, nil},
+	{"go_frobnicate", "go frobnicate", evalcontract.Abstain, nil},
+	{"go_test_redirect_nix_store", "go test ./... > /nix/store/x", evalcontract.Reject, nil},
 }
 
 func TestGolden(t *testing.T) {

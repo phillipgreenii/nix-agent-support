@@ -105,6 +105,35 @@ func TestGradleKind(t *testing.T) {
 	}
 }
 
+// TestInsideMarkerWorkspace (slice 3x, tc-lc8f item 4e): a plain existence
+// check over a kind's Markers, independent of what Resolve/Classify's
+// CATEGORY machinery would say about the SAME path — the go module tree
+// itself is Silent under goKind's own Rules-based categorize (TestGoKind
+// above proves this), so Resolve alone could never confirm "this is a go
+// workspace" for an ordinary source file; InsideMarkerWorkspace answers a
+// different, narrower question (does a go.mod/.git ancestor exist at all).
+func TestInsideMarkerWorkspace(t *testing.T) {
+	root := scratchOutsideTemp(t)
+	mkdirs(t, root, "mod/internal")
+	touch(t, root, "mod/go.mod", "mod/internal/a.go")
+
+	if !InsideMarkerWorkspace(DefaultKinds(), []string{"git", "go"}, filepath.Join(root, "mod", "internal", "a.go")) {
+		t.Error("a source file under go.mod should be inside a go workspace")
+	}
+	if InsideMarkerWorkspace(DefaultKinds(), []string{"git", "go"}, root) {
+		t.Error("root itself (no go.mod/.git ancestor) should NOT be inside a workspace")
+	}
+	// Naming only "git" excludes the go.mod match.
+	if InsideMarkerWorkspace(DefaultKinds(), []string{"git"}, filepath.Join(root, "mod", "internal", "a.go")) {
+		t.Error("naming only \"git\" must not match a go.mod-only tree")
+	}
+	// A .git sibling is found the same way.
+	touch(t, root, "repo/.git")
+	if !InsideMarkerWorkspace(DefaultKinds(), []string{"git", "go"}, filepath.Join(root, "repo")) {
+		t.Error("a directory holding .git should be inside a git workspace")
+	}
+}
+
 // TestGoKind: the module tree declares nothing; GOCACHE (env) and its
 // XDG / $HOME defaults are Deletable roots; GOMODCACHE likewise.
 func TestGoKind(t *testing.T) {

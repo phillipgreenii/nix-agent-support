@@ -1,0 +1,4 @@
+flowchart LR
+    n0["command: go test -run TestX -v .<br/>- path:read . [arg 3]<br/>- exec: go test (trusted checkout code)<br/>- stdio:stdout metadata<br/>mark=permitted"]
+    n1[/"file: ."/]
+    n0 -->|"reads: read"| n1

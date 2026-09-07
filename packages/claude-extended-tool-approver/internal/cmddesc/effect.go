@@ -32,6 +32,21 @@ const (
 	// same list against it — and a policy judges only whether the target is
 	// statically known.
 	EffectChdir
+	// EffectExec is a build/test TOOL operating ON or WITHIN a trusted
+	// checkout (slice 3x; tc-lc8f item 4e, tc-vn5z item 1): either running
+	// the checkout's own code (go test's compiled test binary, go
+	// generate's //go:generate directives) or writing to the tool's own
+	// declared, disposable build cache (go build/vet/fmt/list/env/version/
+	// mod's GOCACHE/GOMODCACHE traffic — internal/deletable/workspace.go's
+	// goKind). Deliberately NOT EffectProgram: that kind's own policy
+	// (ProgramInterpreted) is unconditionally Permitted once the dialect
+	// interpreter has vouched for the text, which is wrong here — this
+	// effect is conditional on the invocation running inside a recognised
+	// checkout, judged by TrustedCheckoutExec
+	// (internal/effectpolicy/policy.go). Detail and Source (Effect's shared
+	// free-text fields) carry the human-readable explanation; no new struct
+	// field was needed.
+	EffectExec
 )
 
 // String returns the deterministic kind name.
@@ -53,6 +68,8 @@ func (k EffectKind) String() string {
 		return "remote"
 	case EffectChdir:
 		return "chdir"
+	case EffectExec:
+		return "exec"
 	default:
 		return "effect-invalid"
 	}
@@ -270,6 +287,10 @@ func (e Effect) String() string {
 		}
 		if e.Source != "" {
 			fmt.Fprintf(&b, " [%s]", e.Source)
+		}
+	case EffectExec:
+		if e.Source != "" {
+			fmt.Fprintf(&b, ": %s", e.Source)
 		}
 	}
 	if e.Detail != "" {

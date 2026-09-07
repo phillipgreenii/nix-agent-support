@@ -82,6 +82,19 @@ const (
 	// effectgraph's builder for the scoping rules. `-` (the previous
 	// directory) is a runtime value and is emitted Dynamic.
 	KindChdir
+	// KindExec is IMPLICIT-ONLY (slice 3x, tc-lc8f item 4e; tc-vn5z item 1):
+	// it names no operand text at all — a schema declares it via
+	// ImplicitEffect, never via a Positionals/FlagSpec Operand role, so
+	// operand()'s switch has no case for it and would fail closed like any
+	// other unmodeled role if one were ever routed through it. It marks "the
+	// build tool is operating ON or WITHIN a trusted checkout" — running the
+	// checkout's own code (go test/go generate) or writing to the tool's own
+	// declared build cache (go build/vet/fmt/list/env/version/mod) — a
+	// single fact TrustedCheckoutExec (internal/effectpolicy/policy.go)
+	// judges by checking whether the invocation's CWD is inside a recognised
+	// git/go workspace, never by command name. See registry_breadth.go's
+	// goTestSchema/goBuildSchema for the worked case.
+	KindExec
 )
 
 // String returns the deterministic role name used in labels and reasons.
@@ -113,6 +126,8 @@ func (k RoleKind) String() string {
 		return "unmodeled"
 	case KindChdir:
 		return "chdir"
+	case KindExec:
+		return "exec"
 	default:
 		return "role-invalid"
 	}
@@ -143,6 +158,7 @@ var (
 	EnvAssign    = OperandRole{Kind: KindEnvAssign}
 	Unmodeled    = OperandRole{Kind: KindUnmodeled}
 	Chdir        = OperandRole{Kind: KindChdir}
+	Exec         = OperandRole{Kind: KindExec}
 )
 
 // Program returns the operand role for program text in the named dialect.
@@ -445,7 +461,9 @@ const (
 // from the mere presence (or absence) of positionals, not from consuming argv
 // text. Role's Kind picks the effect shape (a path role emits an EffectPath
 // at Target; KindRemote emits an EffectRemote naming Target as the Resource,
-// with Role.Operation as the Operation). WhenNoPositionals restricts emission
+// with Role.Operation as the Operation; KindExec emits an EffectExec naming
+// Target as its Source — e.g. "go test" — with no path/resource semantics at
+// all, slice 3x, tc-lc8f item 4e). WhenNoPositionals restricts emission
 // to invocations with ZERO resolved positionals (a pathspec-less `git clean`,
 // a remote-less `git push`); false means "always", regardless of what
 // positionals were also given (`git status`'s implicit read of the working

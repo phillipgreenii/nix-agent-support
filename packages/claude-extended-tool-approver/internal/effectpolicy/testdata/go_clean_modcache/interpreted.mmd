@@ -1,0 +1,4 @@
+flowchart LR
+    n0["command: go clean -modcache<br/>- path:delete ~/go/pkg/mod [implicit]<br/>- stdio:stdout metadata<br/>mark=permitted"]
+    n1[/"file: ~/go/pkg/mod"/]
+    n0 -->|"writes: delete"| n1

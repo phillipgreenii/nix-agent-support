@@ -191,3 +191,25 @@ func TestEnvAssignmentPolicy(t *testing.T) {
 		t.Error("applied to a path effect")
 	}
 }
+
+// TestTrustedCheckoutExecPolicy (slice 3x, tc-lc8f item 4e): CWD inside the
+// shared fixture (a declared git workspace) is Permitted; CWD in a bare
+// temp directory with no git/go marker is Unknown; a non-exec effect does
+// not apply.
+func TestTrustedCheckoutExecPolicy(t *testing.T) {
+	root, _ := fixture(t)
+	exec := cmddesc.Effect{Kind: cmddesc.EffectExec, Detail: "trusted checkout code", Source: "go test"}
+
+	if f, applies := (TrustedCheckoutExec{}).Judge(exec, PolicyContext{CWD: root}); !applies || f.Verdict != Permitted {
+		t.Errorf("inside git workspace: applies=%v verdict=%s (%s)", applies, f.Verdict, f.Reason)
+	}
+	if f, applies := (TrustedCheckoutExec{}).Judge(exec, PolicyContext{CWD: t.TempDir()}); !applies || f.Verdict != Unknown {
+		t.Errorf("outside any declared workspace: applies=%v verdict=%s (%s)", applies, f.Verdict, f.Reason)
+	}
+	if f, applies := (TrustedCheckoutExec{}).Judge(exec, PolicyContext{}); !applies || f.Verdict != Unknown {
+		t.Errorf("no CWD: applies=%v verdict=%s", applies, f.Verdict)
+	}
+	if _, applies := (TrustedCheckoutExec{}).Judge(cmddesc.Effect{Kind: cmddesc.EffectPath, Path: "x"}, PolicyContext{CWD: root}); applies {
+		t.Error("applied to a path effect")
+	}
+}
