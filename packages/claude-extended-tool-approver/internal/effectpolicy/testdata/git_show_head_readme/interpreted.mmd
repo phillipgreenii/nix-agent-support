@@ -1,0 +1,4 @@
+flowchart LR
+    n0["command: git show HEAD:README.md<br/>- path:read . [implicit]<br/>- stdio:stdout content<br/>mark=permitted"]
+    n1[/"file: ."/]
+    n0 -->|"reads: read"| n1

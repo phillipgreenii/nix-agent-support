@@ -1,0 +1,5 @@
+flowchart LR
+    n0["command: echo hi #gt; copy.md<br/>- stdio:stdout content<br/>- path:truncate copy.md [redirect #gt;]<br/>mark=permitted"]
+    n1[/"file: copy.md"/]
+    n0 -->|"redirect-out: #gt;"| n1
+    n0 -->|"writes: truncate"| n1

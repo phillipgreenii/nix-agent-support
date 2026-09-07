@@ -271,6 +271,8 @@ func (st *interpState) operand(op pendingOp, role OperandRole) {
 		st.dataOrAtFile(op, source, live)
 	case role.Kind == KindRemote:
 		st.effects = append(st.effects, Effect{Kind: EffectRemote, Resource: op.tok, Operation: role.Operation, Dynamic: live, Source: source})
+	case role.Kind == KindEnvAssign:
+		st.envAssign(op, source, live)
 	case role.Kind == KindLiteral, role.Kind == KindMessage:
 		// Inert: no effect. A live expansion in a literal slot is still inert —
 		// its value cannot change what the command touches.
@@ -294,6 +296,24 @@ func (st *interpState) dataOrAtFile(op pendingOp, source string, live bool) {
 	case live:
 		st.effects = append(st.effects, Effect{Kind: EffectPath, Path: op.tok, Access: AccessRead, Dynamic: true, Source: source, FromPositional: op.positional, Detail: "may expand to @file"})
 	}
+}
+
+// envAssign emits an EffectEnv SET for an operand under KindEnvAssign: the
+// NAME left of the first `=` (or the whole token, for a bare NAME that only
+// marks an existing variable exported). A live expansion anywhere in the
+// token might change WHICH variable gets set — there is no per-substring
+// liveness signal to isolate a static NAME prefix from a dynamic VALUE
+// suffix — so it fails closed rather than guessing.
+func (st *interpState) envAssign(op pendingOp, source string, live bool) {
+	if live {
+		st.fail("env assignment at %s is a runtime expansion", source)
+		return
+	}
+	name := op.tok
+	if eq := strings.IndexByte(op.tok, '='); eq >= 0 {
+		name = op.tok[:eq]
+	}
+	st.effects = append(st.effects, Effect{Kind: EffectEnv, EnvName: name, EnvSet: true, Source: source})
 }
 
 // program emits the Program effect for an operand and folds in the dialect
@@ -424,6 +444,9 @@ func (st *interpState) implicit() {
 	n := len(st.positionals())
 	for _, ie := range st.schema.ImplicitEffects {
 		if ie.WhenNoPositionals && n > 0 {
+			continue
+		}
+		if len(ie.WhenFlags) > 0 && !st.anyFlagSeen(ie.WhenFlags...) {
 			continue
 		}
 		st.emitImplicit(ie)

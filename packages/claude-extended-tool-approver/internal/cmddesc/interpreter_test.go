@@ -93,6 +93,45 @@ func TestRmIsRegistryOnly(t *testing.T) {
 	}
 }
 
+// TestMkdirIsRegistryOnly: the same proof as TestHeadIsRegistryOnly/
+// TestRmIsRegistryOnly for slice 3e's new top-level command mkdir — a plain
+// schema value, the generic interpreter, and a result that does not depend
+// on schema.Name.
+func TestMkdirIsRegistryOnly(t *testing.T) {
+	reg := DefaultRegistry()
+	schema, ok := reg.Lookup("mkdir")
+	if !ok {
+		t.Fatal("mkdir not registered")
+	}
+	if schema.Interpreter != "" {
+		t.Fatalf("mkdir names interpreter %q; must be generic", schema.Interpreter)
+	}
+	in, ok := LookupInterpreter(schema.Interpreter)
+	if !ok {
+		t.Fatal("no interpreter for the empty name")
+	}
+	if _, isGeneric := in.(GenericInterpreter); !isGeneric {
+		t.Fatalf("resolved %T, want GenericInterpreter", in)
+	}
+	if schema.Provenance == "" || len(schema.Flags) == 0 || schema.Positionals.Rest != PathCreate {
+		t.Errorf("mkdir schema is not a complete value: %+v", schema)
+	}
+
+	l := leaf(t, "mkdir -p a")
+	got := in.Interpret(l, schema, Context{})
+	renamed := schema
+	renamed.Name = "not-mkdir"
+	if again := in.Interpret(l, renamed, Context{}); !reflect.DeepEqual(got, again) {
+		t.Errorf("interpreter result depends on schema.Name:\n%+v\n%+v", got, again)
+	}
+	want := []Effect{
+		{Kind: EffectPath, Path: "a", Access: AccessCreate, Source: "arg 1", FromPositional: true},
+	}
+	if !got.Sufficient || !reflect.DeepEqual(got.Effects, want) {
+		t.Errorf("got %+v, want effects %+v", got, want)
+	}
+}
+
 func TestGenericInterpreter(t *testing.T) {
 	reg := DefaultRegistry()
 	cat, _ := reg.Lookup("cat")
@@ -188,8 +227,13 @@ func TestUnknownTransformFailsClosed(t *testing.T) {
 }
 
 func TestRegistryNames(t *testing.T) {
-	if got := DefaultRegistry().Names(); !reflect.DeepEqual(got, []string{"bash", "cat", "cp", "curl", "git", "head", "rm", "sed", "sh", "tee", "xargs"}) {
-		t.Errorf("names = %v", got)
+	want := []string{
+		"[", "bash", "cat", "cp", "curl", "echo", "export", "false", "git", "grep",
+		"head", "ls", "mkdir", "printf", "rm", "sed", "sh", "sort", "tail", "tee",
+		"test", "true", "wc", "xargs",
+	}
+	if got := DefaultRegistry().Names(); !reflect.DeepEqual(got, want) {
+		t.Errorf("names = %v, want %v", got, want)
 	}
 	if _, ok := DefaultRegistry().Lookup("frobnicate"); ok {
 		t.Error("frobnicate must not be registered")

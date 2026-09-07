@@ -1,0 +1,6 @@
+flowchart LR
+    n0["command: echo hi #gt; #quot;$OUT#quot;<br/>- stdio:stdout content<br/>- path:truncate $OUT (dynamic) [redirect #gt;]<br/>mark=insufficient: path:truncate $OUT (dynamic) [redirect #gt;]: no-write-to-read-only-path (path is a runtime expansion)"]
+    n1[/"file: $OUT"/]
+    n2[/"file: $OUT (dynamic)"/]
+    n0 -->|"redirect-out: #gt;"| n1
+    n0 -->|"writes: truncate"| n2

@@ -1,0 +1,4 @@
+flowchart LR
+    n0["command: git commit -m x<br/>- path:modify .git [implicit]<br/>- stdio:stdout metadata<br/>mark=permitted"]
+    n1[/"file: .git"/]
+    n0 -->|"writes: modify"| n1

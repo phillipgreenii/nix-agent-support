@@ -47,6 +47,26 @@ const (
 	// the resource is subjected to (e.g. "push"); a transform may rewrite it
 	// generically by effect shape (TransformForce, TransformDeleteRef).
 	KindRemote
+	// KindEnvAssign is an operand that ASSIGNS an environment variable: either
+	// `NAME=VALUE` (a new value) or a bare `NAME` (marks an existing shell
+	// variable exported — `export`'s own semantics for a bare name). Both
+	// forms are modeled as an EffectEnv SET of NAME; this slice does not
+	// distinguish them further (no policy yet judges EffectEnv by value, and
+	// `export -n NAME`'s actual UNexport semantics is a known, harmless
+	// imprecision documented on exportSchema).
+	KindEnvAssign
+	// KindUnmodeled marks a positional slot the schema author has
+	// DELIBERATELY left without a role. Unlike an absent Positionals spec
+	// (whose zero-value Rest defaults to KindLiteral, i.e. inert), a role of
+	// this kind makes ANY operand that resolves to it insufficient: none of
+	// the generic interpreter's operand() cases recognise it, so it falls
+	// into the existing fail-closed default — a purely DATA addition, adding
+	// no new code path. It exists for a command whose flag-only invocations
+	// this slice understands but whose bare-positional form changes the
+	// command's meaning in a way not modeled here (`git branch foo` creates a
+	// ref; `git config NAME VALUE` writes) — see gitBranchSchema/
+	// gitConfigSchema for the worked cases.
+	KindUnmodeled
 )
 
 // String returns the deterministic role name used in labels and reasons.
@@ -72,6 +92,10 @@ func (k RoleKind) String() string {
 		return "data-or-at-file"
 	case KindRemote:
 		return "remote"
+	case KindEnvAssign:
+		return "env-assign"
+	case KindUnmodeled:
+		return "unmodeled"
 	default:
 		return "role-invalid"
 	}
@@ -99,6 +123,8 @@ var (
 	PathTruncate = OperandRole{Kind: KindPathTruncate}
 	Message      = OperandRole{Kind: KindMessage}
 	DataOrAtFile = OperandRole{Kind: KindDataOrAtFile}
+	EnvAssign    = OperandRole{Kind: KindEnvAssign}
+	Unmodeled    = OperandRole{Kind: KindUnmodeled}
 )
 
 // Program returns the operand role for program text in the named dialect.
@@ -352,11 +378,22 @@ const (
 // remote git push resolves from config at runtime) — this is the SAME
 // Dynamic semantics as an operand effect's, just supplied by the schema
 // instead of discovered from the argv text.
+// WhenFlags further restricts emission to invocations where at least one of
+// the named flag spellings was seen (grep's implicit recursive-from-"."
+// read, which only makes sense under -r/-R). Empty means no flag condition;
+// when both WhenNoPositionals and WhenFlags are set, both must hold (AND).
+// grep's positional layout always consumes a Leading pattern slot unless
+// -e/-f supplied one, so "no positionals resolved" recognises only the
+// -e/-f-pattern spelling, not a bare positional pattern (`grep -r TODO`) —
+// a documented imprecision on grepSchema, not a gap this field tries to
+// close (that would need a "count only Rest-role positionals" condition,
+// which no case here requires).
 type ImplicitEffect struct {
 	Role              OperandRole
 	Target            string
 	Dynamic           bool
 	WhenNoPositionals bool
+	WhenFlags         []string
 }
 
 // CommandSchema is the schema VALUE for one command. Provenance records the

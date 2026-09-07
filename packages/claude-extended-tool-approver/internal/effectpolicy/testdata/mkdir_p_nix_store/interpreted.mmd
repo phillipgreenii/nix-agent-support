@@ -1,0 +1,4 @@
+flowchart LR
+    n0["command: mkdir -p /nix/store/x<br/>- path:create /nix/store/x [arg 1]<br/>mark=forbidden: path:create /nix/store/x [arg 1]: no-write-to-read-only-path (write to read-only zone)"]
+    n1[/"file: /nix/store/x"/]
+    n0 -->|"writes: create"| n1

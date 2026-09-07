@@ -46,6 +46,43 @@ func TestSubcommandDispatchIsRegistryOnly(t *testing.T) {
 	}
 }
 
+// TestGitLogIsRegistryOnlySubcommand: the same proof, for slice 3e's new git
+// subcommand `log` — nested under gitSchema.Subcommands, resolved through the
+// SAME interpretSubcommand code path as status/clean/push, with no branch on
+// the name "log" anywhere. Renaming the parent schema does not change the
+// result, exactly like TestHeadIsRegistryOnly/TestRmIsRegistryOnly prove for
+// a flat (non-subcommand) schema.
+func TestGitLogIsRegistryOnlySubcommand(t *testing.T) {
+	reg := DefaultRegistry()
+	gitSchema, ok := reg.Lookup("git")
+	if !ok {
+		t.Fatal("git not registered")
+	}
+	logSchema, ok := gitSchema.Subcommands["log"]
+	if !ok {
+		t.Fatal("git log not registered as a subcommand")
+	}
+	if logSchema.Interpreter != "" {
+		t.Fatalf("git log names interpreter %q; must be generic", logSchema.Interpreter)
+	}
+
+	in := GenericInterpreter{}
+	l := leaf(t, "git log")
+	got := in.Interpret(l, gitSchema, Context{})
+	renamed := gitSchema
+	renamed.Name = "not-git"
+	if again := in.Interpret(l, renamed, Context{}); !reflect.DeepEqual(got, again) {
+		t.Errorf("interpreter result depends on schema.Name:\n%+v\n%+v", got, again)
+	}
+	want := []Effect{
+		{Kind: EffectPath, Path: ".git", Access: AccessRead, Source: "implicit"},
+		{Kind: EffectStdio, Stream: StreamStdout, Metadata: true},
+	}
+	if !got.Sufficient || !reflect.DeepEqual(got.Effects, want) {
+		t.Errorf("got %+v, want effects %+v", got, want)
+	}
+}
+
 // TestSubcommandDispatch: known/unknown/missing/dynamic subcommand tokens,
 // a global flag preceding the subcommand, and one level of nesting.
 func TestSubcommandDispatch(t *testing.T) {

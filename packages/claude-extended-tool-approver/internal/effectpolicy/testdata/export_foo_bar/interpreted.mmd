@@ -1,0 +1,4 @@
+flowchart LR
+    n0["command: export FOO=bar<br/>- env:set FOO<br/>mark=permitted"]
+    n1{{"env: FOO"}}
+    n0 -->|"assign: FOO=bar"| n1

