@@ -343,9 +343,16 @@ func (NoWriteToReadOnlyPath) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding
 //  3. sandbox denyWrite or denyRead entry   -> Forbidden
 //  4. secret path (raw or resolved)         -> Forbidden
 //  5. zone reject or read-only              -> Forbidden (not writable)
-//  6. zone unknown                          -> Unknown   (not known writable)
-//  7. writable, deletable.Classify says
-//     Deletable (gitignored / temp root)    -> Permitted
+//  6. deletable.Classify (workspace
+//     declarations, tc-z806.3):
+//     Protected (.git, .worktrees, a pn
+//     workforest set, ~/.ssh)               -> Forbidden
+//     Deletable (gitignored, build/ of a
+//     gradle project, ~/.cache, go's build
+//     cache, a temp root)                   -> Permitted, even where the
+//     zone is unknown: a declaration that a path is disposable vouches for
+//     removing it
+//  7. zone unknown, no declaration          -> Unknown   (not known writable)
 //  8. writable, not deletable              -> Unknown   ("needs consent")
 //
 // Step 3 includes denyRead deliberately: the ruling says protections above
@@ -353,7 +360,9 @@ func (NoWriteToReadOnlyPath) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding
 // whether or not it is also marked unwritable — refusing to remove it is the
 // fail-safe reading. Step 4 uses the same secretRead helper the read-side
 // policies use, so a secret is named the same way whichever access class
-// touches it.
+// touches it. Step 5 runs BEFORE step 6, so a declared-deletable cache that
+// sits in a read-only zone (go's module cache under patheval's `~/go/pkg`)
+// is still Forbidden — the zone is the older, narrower decision and wins.
 //
 // "By default" in the ruling means a consumer rule ABOVE this policy may
 // widen (a project that declares its build/ disposable) or narrow; this
@@ -386,17 +395,20 @@ func (DeleteAccess) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, bool) {
 		return Finding{Verdict: Forbidden, Reason: reason + " (protected paths are never deletable)"}, true
 	}
 	access := ctx.PathEval.Evaluate(e.Path)
-	switch {
-	case access == patheval.PathUnknown:
-		return Finding{Verdict: Unknown, Reason: "zone " + access.String()}, true
-	case !access.CanWrite():
+	if access == patheval.PathReject || access == patheval.PathReadOnly {
 		return Finding{Verdict: Forbidden, Reason: "delete of " + access.String() + " zone"}, true
 	}
 	class, why := deletable.Classify(ctx.PathEval, e.Path)
-	if class == deletable.Deletable {
-		return Finding{Verdict: Permitted, Reason: "deletable: " + why}, true
+	switch class {
+	case deletable.Protected:
+		return Finding{Verdict: Forbidden, Reason: why}, true
+	case deletable.Deletable:
+		return Finding{Verdict: Permitted, Reason: why}, true
+	case deletable.Writable:
+		return Finding{Verdict: Unknown, Reason: "delete of a writable path needs consent (" + why + ")"}, true
+	default:
+		return Finding{Verdict: Unknown, Reason: why}, true
 	}
-	return Finding{Verdict: Unknown, Reason: "delete of a writable path needs consent (" + why + ")"}, true
 }
 
 // NoReadOfSecretPath has one concern: a read of a SECRET path (secretpath,

@@ -54,7 +54,9 @@ func TestClassifyInRepo(t *testing.T) {
 		{"sub", Writable},
 		{"sub/new.log", Deletable}, // not on disk; basename pattern still matches
 		{".env", Deletable},        // the gitignore source says yes; the POLICY's secret check must win above it
-		{".git", Writable},
+		{".git", Protected},
+		{".git/HEAD", Protected},
+		{".worktrees/x", Protected},
 		{root, Writable},
 		{"/nix/store/x", NotWritable},
 	}
@@ -101,8 +103,15 @@ func TestClassifyRepoUnderTempPrefersRepo(t *testing.T) {
 	if got, reason := Classify(pe, "README.md"); got != Writable {
 		t.Errorf("tracked file in a repo under a temp root: got %s (%s), want writable", got, reason)
 	}
-	if got, reason := Classify(pe, "ignored.log"); got != Deletable || reason != "gitignored in "+root {
-		t.Errorf("ignored file: got %s (%s), want deletable via gitignore", got, reason)
+	if got, reason := Classify(pe, "ignored.log"); got != Deletable || reason != "deletable per git workspace at "+root {
+		t.Errorf("ignored file: got %s (%s), want deletable via the git kind", got, reason)
+	}
+}
+
+// TestClassString pins the names policies embed in reasons.
+func TestClassStringProtected(t *testing.T) {
+	if got := Protected.String(); got != "protected" {
+		t.Fatalf("got %q", got)
 	}
 }
 

@@ -47,6 +47,14 @@ func TestDeleteAccessPolicy(t *testing.T) {
 		{"gitignored file permitted", del("ignored.log", false), ctx, Permitted},
 		{"gitignored dir permitted", del("build", false), ctx, Permitted},
 		{"un-ignored dir needs consent", del("newsub", false), ctx, Unknown},
+		// Workspace declarations (tc-z806.3).
+		{"gradle build dir permitted by declaration", del("gradleproj/build", false), ctx, Permitted},
+		{"gradle src kept by git", del("gradleproj/src", false), ctx, Unknown},
+		{".git protected", del(".git", false), ctx, Forbidden},
+		{"home cache deletable though unzoned", del(filepath.Join(home, ".cache", "x"), false), ctx, Permitted},
+		// (an unzoned, undeclared path cannot be isolated in this fixture —
+		// its HOME sits under a temp root on this machine — so that ladder
+		// step is pinned by internal/deletable's TestClassifyDeletableImpliesWritable)
 	}
 	for _, tc := range cases {
 		f, applies := DeleteAccess{}.Judge(tc.e, tc.ctx)

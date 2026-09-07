@@ -34,7 +34,19 @@ func fixture(t *testing.T) (root, home string) {
 	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("hi\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte("*.log\nbuild/\n.env\n"), 0o644); err != nil {
+	// `/build/` is ANCHORED so that gradleproj/build below is NOT gitignored
+	// and its deletability comes from the gradle declaration alone.
+	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte("*.log\n/build/\n.env\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Workspace declarations (tc-z806.3): a gradle project inside the git
+	// tree, with a build/ output dir and a src/ dir.
+	for _, d := range []string{"gradleproj/build", "gradleproj/src"} {
+		if err := os.MkdirAll(filepath.Join(root, d), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(root, "gradleproj", "settings.gradle"), []byte("rootProject.name = 'x'\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(root, "ignored.log"), []byte("x\n"), 0o644); err != nil {
@@ -152,6 +164,15 @@ var goldenCases = []goldenCase{
 	// yes) but secretpath classifies `.env` WellKnownSecret, and DeleteAccess
 	// checks protections before deletability: Reject, not Approve.
 	{"rm_dotenv_gitignored", "rm .env", evalcontract.Reject, nil},
+	// Workspace declarations (tc-z806.3): gradleproj/build is NOT gitignored
+	// (the fixture anchors `/build/`), so its Approve comes from the gradle
+	// kind alone; gradleproj/src is gradle-silent and git says Keep; .git is
+	// git-Protected; ~/.cache/x is home-Deletable even though ~/.cache is
+	// not a writable zone (deletable implies writable by declaration).
+	{"rm_rf_gradle_build", "rm -rf gradleproj/build", evalcontract.Approve, nil},
+	{"rm_rf_gradle_src", "rm -rf gradleproj/src", evalcontract.Abstain, nil},
+	{"rm_rf_dot_git", "rm -rf .git", evalcontract.Reject, nil},
+	{"rm_rf_home_cache_x", "rm -rf ~/.cache/x", evalcontract.Approve, nil},
 
 	// cp: trailing destination, -n, -t, secret source, too few operands.
 	{"cp_readme_copy", "cp README.md copy.md", evalcontract.Approve, nil},

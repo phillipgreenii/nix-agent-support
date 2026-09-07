@@ -1,0 +1,4 @@
+flowchart LR
+    n0["command: rm -rf gradleproj/src<br/>- path:delete gradleproj/src [arg 1]<br/>mark=insufficient: path:delete gradleproj/src [arg 1]: delete-access (delete of a writable path needs consent (kept by git workspace at <ROOT>))"]
+    n1[/"file: gradleproj/src"/]
+    n0 -->|"writes: delete"| n1

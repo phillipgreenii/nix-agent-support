@@ -1,0 +1,4 @@
+flowchart LR
+    n0["command: rm -rf ~/.cache/x<br/>- path:delete ~/.cache/x [arg 1]<br/>mark=permitted"]
+    n1[/"file: ~/.cache/x"/]
+    n0 -->|"writes: delete"| n1
