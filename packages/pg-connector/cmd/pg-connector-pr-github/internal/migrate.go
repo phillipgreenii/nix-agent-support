@@ -1,11 +1,12 @@
 // migrate.go: the one-shot pg-pr -> pg-connector-pr-github disposition
-// import (finding A19; ADR 0063 records the full decision). Design §6.1/
-// §9.1 already decided WHAT moves ("the feedback-disposition store itself
-// moves under the PR GitHub backend") and WHEN ("the disposition-store
-// migration and the deletion of pg-pr's own feedback command group MUST
-// land in the same cutover step, never split across two"); this file is
-// the HOW: the concrete field mapping and the Go entry point a one-shot
-// migration invocation calls at that cutover step.
+// import (finding A19; ADR 0063 records the full decision). ADR 0063's
+// own Context already decided WHAT moves ("the feedback-disposition
+// store itself moves under the PR GitHub backend") and WHEN ("the
+// disposition-store migration and the deletion of pg-pr's own feedback
+// command group MUST land in the same cutover step, never split across
+// two"); this file is the HOW: the concrete field mapping and the Go
+// entry point a one-shot migration invocation calls at that cutover
+// step.
 //
 // This deliberately does NOT open pg-pr's SQLite store directly — that
 // would recreate exactly the FK/module dependency store.go's own top

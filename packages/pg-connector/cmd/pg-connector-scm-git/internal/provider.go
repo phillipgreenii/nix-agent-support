@@ -64,8 +64,8 @@ func New(runner Runner) *Provider {
 // `--separate-git-dir` does NOT have that layout at all — commonDir is
 // either the bare repo's own directory (any name) or an unrelated
 // relocated path — so Dir(commonDir) silently computed the wrong root for
-// both [bug: this bead, review 2026-09-05-pg-connector-deep-review.md §A
-// finding 22/34]. Both are handled by repoRootForNonStandardLayout, which
+// both [bug: this bead, review finding 22/34]. Both are handled by
+// repoRootForNonStandardLayout, which
 // is reached only for that rarer layout so the extra git round-trips are
 // never paid on the common path.
 //
@@ -463,7 +463,7 @@ func parseWorktreePorcelain(out string) []schema.WorktreeInfo {
 // an empty Branch is the well-formed, honest answer — "there is no
 // current branch" — not an error, exactly as WorktreeInfo.Branch is left
 // empty for a detached worktree rather than failing the call over it
-// [design: §4.5, bug: this bead, review finding 34]. Unlike WorktreeInfo,
+// [bug: this bead, review finding 34]. Unlike WorktreeInfo,
 // schema.BranchInfo carries no secondary Ref-style field to record WHICH
 // commit/ref is checked out when Branch is empty, and neither the
 // interface doc (`branch_detect`: `{cwd}` → `{repo, branch}`) nor any
