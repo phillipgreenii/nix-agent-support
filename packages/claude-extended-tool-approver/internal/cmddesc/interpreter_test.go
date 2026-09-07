@@ -47,8 +47,46 @@ func TestHeadIsRegistryOnly(t *testing.T) {
 		t.Errorf("interpreter result depends on schema.Name:\n%+v\n%+v", got, again)
 	}
 	want := []Effect{
-		{Kind: EffectPath, Path: "README.md", Access: AccessRead, Source: "arg 2"},
+		{Kind: EffectPath, Path: "README.md", Access: AccessRead, Source: "arg 2", FromPositional: true},
 		{Kind: EffectStdio, Stream: StreamStdout},
+	}
+	if !got.Sufficient || !reflect.DeepEqual(got.Effects, want) {
+		t.Errorf("got %+v, want effects %+v", got, want)
+	}
+}
+
+// TestRmIsRegistryOnly: the same proof for rm — a plain schema value, the
+// generic interpreter, and a result that does not depend on schema.Name.
+func TestRmIsRegistryOnly(t *testing.T) {
+	reg := DefaultRegistry()
+	schema, ok := reg.Lookup("rm")
+	if !ok {
+		t.Fatal("rm not registered")
+	}
+	if schema.Interpreter != "" {
+		t.Fatalf("rm names interpreter %q; must be generic", schema.Interpreter)
+	}
+	in, ok := LookupInterpreter(schema.Interpreter)
+	if !ok {
+		t.Fatal("no interpreter for the empty name")
+	}
+	if _, isGeneric := in.(GenericInterpreter); !isGeneric {
+		t.Fatalf("resolved %T, want GenericInterpreter", in)
+	}
+	if schema.Provenance == "" || len(schema.Flags) == 0 || schema.Positionals.Rest != PathDelete {
+		t.Errorf("rm schema is not a complete value: %+v", schema)
+	}
+
+	l := leaf(t, "rm -rf a -- -b")
+	got := in.Interpret(l, schema, Context{})
+	renamed := schema
+	renamed.Name = "not-rm"
+	if again := in.Interpret(l, renamed, Context{}); !reflect.DeepEqual(got, again) {
+		t.Errorf("interpreter result depends on schema.Name:\n%+v\n%+v", got, again)
+	}
+	want := []Effect{
+		{Kind: EffectPath, Path: "a", Access: AccessDelete, Source: "arg 1", FromPositional: true},
+		{Kind: EffectPath, Path: "-b", Access: AccessDelete, Source: "arg 3", FromPositional: true},
 	}
 	if !got.Sufficient || !reflect.DeepEqual(got.Effects, want) {
 		t.Errorf("got %+v, want effects %+v", got, want)
@@ -79,28 +117,28 @@ func TestGenericInterpreter(t *testing.T) {
 		{
 			"bundled short flags", cat, "cat -nb a b", true,
 			[]Effect{
-				{Kind: EffectPath, Path: "a", Access: AccessRead, Source: "arg 1"},
-				{Kind: EffectPath, Path: "b", Access: AccessRead, Source: "arg 2"},
+				{Kind: EffectPath, Path: "a", Access: AccessRead, Source: "arg 1", FromPositional: true},
+				{Kind: EffectPath, Path: "b", Access: AccessRead, Source: "arg 2", FromPositional: true},
 				{Kind: EffectStdio, Stream: StreamStdout},
 			},
 		},
 		{
 			"end of options", cat, "cat -- --number", true,
-			[]Effect{{Kind: EffectPath, Path: "--number", Access: AccessRead, Source: "arg 1"}, {Kind: EffectStdio, Stream: StreamStdout}},
+			[]Effect{{Kind: EffectPath, Path: "--number", Access: AccessRead, Source: "arg 1", FromPositional: true}, {Kind: EffectStdio, Stream: StreamStdout}},
 		},
 		{"unknown long flag", cat, "cat --weird a", false, nil},
 		{"unknown short in bundle", cat, "cat -nz a", false, nil},
 		{
 			"live expansion is dynamic", cat, `cat "$F"`, true,
-			[]Effect{{Kind: EffectPath, Path: "$F", Access: AccessRead, Dynamic: true, Source: "arg 0"}, {Kind: EffectStdio, Stream: StreamStdout}},
+			[]Effect{{Kind: EffectPath, Path: "$F", Access: AccessRead, Dynamic: true, Source: "arg 0", FromPositional: true}, {Kind: EffectStdio, Stream: StreamStdout}},
 		},
 		{
 			"glued long value", head, "head --lines=3 a", true,
-			[]Effect{{Kind: EffectPath, Path: "a", Access: AccessRead, Source: "arg 1"}, {Kind: EffectStdio, Stream: StreamStdout}},
+			[]Effect{{Kind: EffectPath, Path: "a", Access: AccessRead, Source: "arg 1", FromPositional: true}, {Kind: EffectStdio, Stream: StreamStdout}},
 		},
 		{
 			"glued short value", head, "head -n5 a", true,
-			[]Effect{{Kind: EffectPath, Path: "a", Access: AccessRead, Source: "arg 1"}, {Kind: EffectStdio, Stream: StreamStdout}},
+			[]Effect{{Kind: EffectPath, Path: "a", Access: AccessRead, Source: "arg 1", FromPositional: true}, {Kind: EffectStdio, Stream: StreamStdout}},
 		},
 		{
 			"separate value is not a path", head, "head -n README.md", true,
@@ -140,7 +178,7 @@ func TestUnknownFlagInert(t *testing.T) {
 func TestUnknownTransformFailsClosed(t *testing.T) {
 	s := CommandSchema{
 		Name:        "x",
-		Flags:       map[string]FlagSpec{"-z": {Transform: EffectTransform(99)}},
+		Flags:       map[string]FlagSpec{"-z": {Transform: EffectTransform{Kind: TransformKind(99)}}},
 		Positionals: PositionalSpec{Rest: PathRead},
 	}
 	got := GenericInterpreter{}.Interpret(leaf(t, "x -z a"), s, Context{})
@@ -150,7 +188,7 @@ func TestUnknownTransformFailsClosed(t *testing.T) {
 }
 
 func TestRegistryNames(t *testing.T) {
-	if got := DefaultRegistry().Names(); !reflect.DeepEqual(got, []string{"cat", "head"}) {
+	if got := DefaultRegistry().Names(); !reflect.DeepEqual(got, []string{"cat", "cp", "head", "rm", "sed"}) {
 		t.Errorf("names = %v", got)
 	}
 	if _, ok := DefaultRegistry().Lookup("frobnicate"); ok {

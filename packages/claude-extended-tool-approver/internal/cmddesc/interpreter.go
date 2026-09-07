@@ -58,23 +58,30 @@ func LookupInterpreter(name string) (Interpreter, bool) {
 
 // GenericInterpreter is the flag-table-driven interpreter. It honours `--`
 // (when the schema says so), `--flag=value`, POSIX short-flag bundling
-// (`-nb`) and short-glued values (`-n5`), per-flag arity, the unknown-flag
-// policy, positional roles, the stdin token, and cmdparse's live-expansion
-// signal (a dynamic path effect). It never inspects schema.Name.
+// (`-nb`), short-glued values (`-n5`), the three arities, per-flag
+// transforms (applied in flag order), the unknown-flag policy, the
+// Leading/Rest/Trailing positional layout with its skipped-by-flags
+// switches, the stdin token, program operands via the dialect seam, and
+// cmdparse's live-expansion signal (a dynamic path effect). It never
+// inspects schema.Name.
+//
+// It runs in two passes: the scan collects flags (recording which spellings
+// appeared) and defers every operand, and the resolve pass assigns positional
+// roles once the whole argv is known — so Trailing can see the end — and
+// emits effects in argument order.
 type GenericInterpreter struct{}
 
 // Interpret implements Interpreter.
-func (GenericInterpreter) Interpret(leaf cmdparse.ParsedCommand, schema CommandSchema, _ Context) Interpretation {
-	st := &interpState{schema: schema, leaf: leaf}
+func (GenericInterpreter) Interpret(leaf cmdparse.ParsedCommand, schema CommandSchema, ctx Context) Interpretation {
+	st := &interpState{schema: schema, leaf: leaf, ctx: ctx, flagsSeen: map[string]bool{}}
 	args := leaf.Args
-	positional := 0
 	optionsEnded := false
+	scanned := true
 	for i := 0; i < len(args); i++ {
 		tok := args[i]
 		isFlag := !optionsEnded && strings.HasPrefix(tok, "-") && tok != "-" && tok != schema.Positionals.StdinToken
 		if !isFlag {
-			st.operand(schema.Positionals.roleAt(positional), tok, i)
-			positional++
+			st.ops = append(st.ops, pendingOp{tok: tok, idx: i, positional: true})
 			continue
 		}
 		if tok == "--" && schema.EndOfOptions {
@@ -83,12 +90,25 @@ func (GenericInterpreter) Interpret(leaf cmdparse.ParsedCommand, schema CommandS
 		}
 		consumed, ok := st.flag(tok, i)
 		if !ok {
-			return st.result()
+			scanned = false
+			break
 		}
 		i += consumed
 	}
-	st.stdio()
+	st.resolve()
+	if scanned {
+		st.stdio()
+	}
 	return st.result()
+}
+
+// pendingOp is one deferred operand: a positional (role assigned at resolve
+// time) or a flag value (role known at scan time).
+type pendingOp struct {
+	tok        string
+	idx        int
+	positional bool
+	role       OperandRole
 }
 
 // interpState accumulates one interpretation. Insufficiency is recorded at
@@ -96,7 +116,11 @@ func (GenericInterpreter) Interpret(leaf cmdparse.ParsedCommand, schema CommandS
 type interpState struct {
 	schema     CommandSchema
 	leaf       cmdparse.ParsedCommand
+	ctx        Context
+	ops        []pendingOp
+	flagsSeen  map[string]bool
 	effects    []Effect
+	children   []ChildInvocation
 	transforms []EffectTransform
 	pathOps    int
 	stdinToken bool
@@ -109,35 +133,85 @@ func (st *interpState) fail(format string, a ...any) {
 	}
 }
 
-// operand emits the effect for a positional or flag-valued operand of the given
-// role at arg index i.
-func (st *interpState) operand(role OperandRole, tok string, i int) {
+// resolve assigns roles to the deferred positionals and emits every operand's
+// effects in argument order.
+func (st *interpState) resolve() {
+	n := 0
+	for _, op := range st.ops {
+		if op.positional {
+			n++
+		}
+	}
+	roles, reason, ok := st.schema.Positionals.resolveRoles(n, st.flagsSeen)
+	if !ok {
+		st.fail("%s", reason)
+	}
+	pos := 0
+	for _, op := range st.ops {
+		role := op.role
+		if op.positional {
+			if !ok {
+				continue
+			}
+			role = roles[pos]
+			pos++
+		}
+		st.operand(role, op.tok, op.idx, op.positional)
+	}
+}
+
+// operand emits the effect for one operand of the given role at arg index i.
+func (st *interpState) operand(role OperandRole, tok string, i int, positional bool) {
 	source := fmt.Sprintf("arg %d", i)
 	switch {
 	case role.IsPath():
-		if st.schema.Positionals.StdinToken != "" && tok == st.schema.Positionals.StdinToken && !st.leaf.ArgIsLiveExpansion(i) {
+		if positional && st.schema.Positionals.StdinToken != "" && tok == st.schema.Positionals.StdinToken && !st.leaf.ArgIsLiveExpansion(i) {
 			st.stdinToken = true
 			return
 		}
 		st.pathOps++
 		st.effects = append(st.effects, Effect{
-			Kind:    EffectPath,
-			Path:    tok,
-			Access:  role.pathAccess(),
-			Dynamic: st.leaf.ArgIsLiveExpansion(i),
-			Source:  source,
+			Kind:           EffectPath,
+			Path:           tok,
+			Access:         role.pathAccess(),
+			Dynamic:        st.leaf.ArgIsLiveExpansion(i),
+			Source:         source,
+			FromPositional: positional,
 		})
 	case role.Kind == KindProgram:
-		if st.leaf.ArgIsLiveExpansion(i) {
-			st.fail("program operand at %s is a runtime expansion", source)
-			return
-		}
-		st.effects = append(st.effects, Effect{Kind: EffectProgram, Program: tok, Dialect: role.Dialect, Source: source})
+		st.program(role.Dialect, tok, i, source)
 	case role.Kind == KindLiteral, role.Kind == KindMessage:
 		// Inert: no effect. A live expansion in a literal slot is still inert —
 		// its value cannot change what the command touches.
 	default:
 		st.fail("unmodeled operand role %d at %s", role.Kind, source)
+	}
+}
+
+// program emits the Program effect for an operand and folds in the dialect
+// interpreter's classification. The Program effect always stays (the graph
+// records that a program ran); sufficiency comes from the dialect: a live
+// expansion or an unknown dialect is insufficient, and a known dialect's own
+// insufficiency propagates.
+func (st *interpState) program(dialect, tok string, i int, source string) {
+	st.effects = append(st.effects, Effect{Kind: EffectProgram, Program: tok, Dialect: dialect, Source: source})
+	if st.leaf.ArgIsLiveExpansion(i) {
+		st.fail("program operand at %s is a runtime expansion", source)
+		return
+	}
+	d, ok := LookupDialect(dialect)
+	if !ok {
+		st.fail("no interpreter for dialect %s", dialect)
+		return
+	}
+	// A path the program names (sed's `r x`) is NOT a path operand: the
+	// command's own stdin rule still keys on operands only, so pathOps is left
+	// alone here.
+	res := d.InterpretProgram(tok, st.ctx)
+	st.effects = append(st.effects, res.Effects...)
+	st.children = append(st.children, res.Children...)
+	if !res.Sufficient {
+		st.fail("%s program at %s: %s", dialect, source, res.Insufficiency)
 	}
 }
 
@@ -152,13 +226,15 @@ func (st *interpState) flag(tok string, i int) (int, bool) {
 	if strings.HasPrefix(tok, "--") {
 		if eq := strings.IndexByte(tok, '='); eq > 0 {
 			name, val := tok[:eq], tok[eq+1:]
-			if spec, ok := st.schema.Flags[name]; ok && spec.Arity == 1 {
+			if spec, ok := st.schema.Flags[name]; ok && spec.Arity != ArityNone {
 				return st.applyFlag(name, spec, i, val, true)
 			}
 		}
 		return st.unknownFlag(tok)
 	}
-	// Short bundle: -abc, or -n5 (arity-1 short flag with glued value).
+	// Short bundle: -abc, -n5 (arity-1 short flag with glued value), or -i.bak
+	// (optional-glued short flag: the rest of the bundle is its value, even
+	// when empty).
 	rest := tok[1:]
 	for pos := 0; pos < len(rest); pos++ {
 		name := "-" + string(rest[pos])
@@ -166,12 +242,12 @@ func (st *interpState) flag(tok string, i int) (int, bool) {
 		if !ok {
 			return st.unknownFlag(tok)
 		}
-		if spec.Arity == 0 {
-			st.transforms = append(st.transforms, spec.Transform)
+		if spec.Arity == ArityNone {
+			st.applyFlag(name, spec, i, "", false)
 			continue
 		}
 		glued := rest[pos+1:]
-		if glued == "" {
+		if glued == "" && spec.Arity == ArityOne {
 			return st.applyFlag(name, spec, i, "", false)
 		}
 		return st.applyFlag(name, spec, i, glued, true)
@@ -179,28 +255,34 @@ func (st *interpState) flag(tok string, i int) (int, bool) {
 	return 0, true
 }
 
-// applyFlag records a modeled flag's transform and, for arity 1, its operand —
-// either the glued value or the next arg.
+// applyFlag records a modeled flag (spelling seen, transform) and its operand
+// per arity — the glued value, the next arg, or none.
 func (st *interpState) applyFlag(name string, spec FlagSpec, i int, glued string, hasGlued bool) (int, bool) {
+	st.flagsSeen[name] = true
 	st.transforms = append(st.transforms, spec.Transform)
 	switch spec.Arity {
-	case 0:
+	case ArityNone:
 		if hasGlued {
 			st.fail("flag %s takes no value", name)
 			return 0, false
 		}
 		return 0, true
-	case 1:
+	case ArityOne:
 		if hasGlued {
-			st.operand(spec.Operand, glued, i)
+			st.ops = append(st.ops, pendingOp{tok: glued, idx: i, role: spec.Operand})
 			return 0, true
 		}
 		if i+1 >= len(st.leaf.Args) {
 			st.fail("flag %s is missing its value", name)
 			return 0, false
 		}
-		st.operand(spec.Operand, st.leaf.Args[i+1], i+1)
+		st.ops = append(st.ops, pendingOp{tok: st.leaf.Args[i+1], idx: i + 1, role: spec.Operand})
 		return 1, true
+	case ArityOptionalGlued:
+		if hasGlued && glued != "" {
+			st.ops = append(st.ops, pendingOp{tok: glued, idx: i, role: spec.Operand})
+		}
+		return 0, true
 	default:
 		st.fail("flag %s has unsupported arity %d", name, spec.Arity)
 		return 0, false
@@ -239,32 +321,22 @@ func (st *interpState) stdio() {
 	}
 }
 
-// result applies the collected transforms generically and packages the
-// interpretation.
+// result applies the collected transforms generically, in flag order, and
+// packages the interpretation.
 func (st *interpState) result() Interpretation {
 	effects := st.effects
 	for _, t := range st.transforms {
 		var ok bool
 		effects, ok = applyTransform(t, effects)
 		if !ok {
-			st.fail("unrecognised effect transform %d", t)
+			st.fail("unrecognised effect transform %d", t.Kind)
 			break
 		}
 	}
 	return Interpretation{
 		Effects:       effects,
+		Children:      st.children,
 		Sufficient:    st.insuff == "",
 		Insufficiency: st.insuff,
-	}
-}
-
-// applyTransform rewrites effects under t. Only TransformNone is defined in
-// this slice; any other value reports false so the caller fails closed.
-func applyTransform(t EffectTransform, effects []Effect) ([]Effect, bool) {
-	switch t {
-	case TransformNone:
-		return effects, true
-	default:
-		return effects, false
 	}
 }

@@ -26,6 +26,12 @@ func fixture(t *testing.T) (root, home string) {
 	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("hi\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(root, "script.sed"), []byte("s/a/b/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(root, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	home = t.TempDir()
 	t.Setenv("HOME", home)
 	for _, v := range []string{"WORKSPACE_ROOT", "CETA_EXTRA_READWRITE_ROOTS", "CETA_EXTRA_READONLY_ROOTS", "CETA_DENIED_ROOTS", "XDG_DATA_HOME"} {
@@ -59,6 +65,34 @@ func TestGolden(t *testing.T) {
 		{"head_n_readme", "head -n 5 README.md", evalcontract.Approve},
 		{"frobnicate_readme", "frobnicate README.md", evalcontract.Abstain},
 		{"cat_pipe_frobnicate", "cat README.md | frobnicate", evalcontract.Abstain},
+
+		// sed: program via positional, -e, -f; -i (with and without suffix)
+		// upgrades the file operand to modify; the sed dialect classifier
+		// surfaces w/e inside the script.
+		{"sed_subst_readme", "sed 's/a/b/' README.md", evalcontract.Approve},
+		{"sed_n_print_readme", "sed -n '1p' README.md", evalcontract.Approve},
+		{"sed_e_readme", "sed -e 's/a/b/' README.md", evalcontract.Approve},
+		{"sed_inplace_readme", "sed -i 's/a/b/' README.md", evalcontract.Approve},
+		{"sed_inplace_suffix_readme", "sed -i.bak 's/a/b/' README.md", evalcontract.Approve},
+		{"sed_inplace_nix_store", "sed -i 's/a/b/' /nix/store/x", evalcontract.Reject},
+		{"sed_w_nix_store", "sed 'w /nix/store/out' README.md", evalcontract.Reject},
+		{"sed_subst_w_nix_store", "sed 's/a/b/w /nix/store/out' README.md", evalcontract.Reject},
+		{"sed_e_exec", "sed 'e ls' README.md", evalcontract.Abstain},
+		{"sed_f_script", "sed -f script.sed README.md", evalcontract.Approve},
+
+		// rm: delete is a write class.
+		{"rm_readme", "rm README.md", evalcontract.Approve},
+		{"rm_rf_nix_store", "rm -rf /nix/store/x", evalcontract.Reject},
+		{"rm_rf_dynamic", `rm -rf "$D"`, evalcontract.Abstain},
+		{"rm_end_of_options", "rm -- -weird-name", evalcontract.Approve},
+
+		// cp: trailing destination, -n, -t, secret source, too few operands.
+		{"cp_readme_copy", "cp README.md copy.md", evalcontract.Approve},
+		{"cp_n_readme_copy", "cp -n README.md copy.md", evalcontract.Approve},
+		{"cp_readme_nix_store", "cp README.md /nix/store/x", evalcontract.Reject},
+		{"cp_t_sub_readme", "cp -t sub README.md", evalcontract.Approve},
+		{"cp_ssh_key", "cp ~/.ssh/id_rsa copy", evalcontract.Reject},
+		{"cp_too_few", "cp README.md", evalcontract.Abstain},
 	}
 	root, home := fixture(t)
 	reg := cmddesc.DefaultRegistry()

@@ -137,11 +137,16 @@ type Effect struct {
 
 	// EffectPath fields. Dynamic is true when the path text contains a runtime
 	// expansion and so is NOT statically known; policies must treat it as
-	// unknown.
-	Path    string
-	Access  PathAccess
-	Dynamic bool
-	Source  string
+	// unknown. FromPositional is true when the path came from a POSITIONAL
+	// operand (as opposed to a flag's value, a redirection, or a program's
+	// dialect interpretation); TransformInPlace keys on it. It is provenance,
+	// not identity, so String() does not render it — Source already names the
+	// argument index.
+	Path           string
+	Access         PathAccess
+	Dynamic        bool
+	Source         string
+	FromPositional bool
 
 	// EffectProgram fields.
 	Program string

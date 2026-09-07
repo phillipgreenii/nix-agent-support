@@ -1,0 +1,4 @@
+flowchart LR
+    n0["command: sed 'e ls' README.md<br/>- program:sed #quot;e ls#quot;<br/>- program:shell #quot;ls#quot;<br/>- path:read README.md [arg 1]<br/>- stdio:stdout content<br/>mark=insufficient: sed program at arg 0: `e` executes a shell command (not recursed in this slice)"]
+    n1[/"file: README.md"/]
+    n0 -->|"reads: read"| n1

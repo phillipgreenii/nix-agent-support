@@ -1,0 +1,4 @@
+flowchart LR
+    n0["command: sed -n '1p' README.md<br/>- program:sed #quot;1p#quot;<br/>- path:read README.md [arg 2]<br/>- stdio:stdout content<br/>mark=permitted"]
+    n1[/"file: README.md"/]
+    n0 -->|"reads: read"| n1

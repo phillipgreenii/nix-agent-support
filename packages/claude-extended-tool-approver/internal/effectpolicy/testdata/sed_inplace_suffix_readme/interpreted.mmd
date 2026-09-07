@@ -1,0 +1,4 @@
+flowchart LR
+    n0["command: sed -i.bak 's/a/b/' README.md<br/>- program:sed #quot;s/a/b/#quot;<br/>- path:modify README.md [arg 2]<br/>- stdio:stdout content<br/>mark=permitted"]
+    n1[/"file: README.md"/]
+    n0 -->|"writes: modify"| n1

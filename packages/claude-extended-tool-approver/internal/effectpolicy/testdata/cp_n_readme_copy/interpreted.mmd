@@ -1,0 +1,6 @@
+flowchart LR
+    n0["command: cp -n README.md copy.md<br/>- path:read README.md [arg 1]<br/>- path:create copy.md [arg 2]<br/>mark=permitted"]
+    n1[/"file: README.md"/]
+    n2[/"file: copy.md"/]
+    n0 -->|"reads: read"| n1
+    n0 -->|"writes: create"| n2

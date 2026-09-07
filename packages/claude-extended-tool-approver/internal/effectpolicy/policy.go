@@ -60,15 +60,17 @@ type Policy interface {
 	Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, bool)
 }
 
-// DefaultPolicies returns the spike's policy set.
+// DefaultPolicies returns the spike's policy set. Each policy has exactly one
+// concern; the read side is split so a secret-path hit and an unreadable-zone
+// hit are distinguishable reasons.
 func DefaultPolicies() []Policy {
-	return []Policy{NoWriteToReadOnlyPath{}, NoReadOfSecretPath{}}
+	return []Policy{NoWriteToReadOnlyPath{}, NoReadOfSecretPath{}, NoReadOfUnreadablePath{}}
 }
 
-// NoWriteToReadOnlyPath applies to every write-class path effect, whatever
-// command produced it: Forbidden when patheval's zone (or a sandbox denyWrite
-// entry) forbids writing, Unknown when the path is dynamic or unzoned,
-// Permitted otherwise.
+// NoWriteToReadOnlyPath applies to every write-class path effect (create,
+// modify, delete, truncate — PathAccess.IsWrite), whatever command produced
+// it: Forbidden when patheval's zone (or a sandbox denyWrite entry) forbids
+// writing, Unknown when the path is dynamic or unzoned, Permitted otherwise.
 type NoWriteToReadOnlyPath struct{}
 
 // Name implements Policy.
@@ -99,9 +101,11 @@ func (NoWriteToReadOnlyPath) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding
 	}
 }
 
-// NoReadOfSecretPath applies to every read path effect: Forbidden when the raw
-// or resolved path is a secret (secretpath) or patheval rejects/denies reading
-// it, Unknown when dynamic or unzoned, Permitted otherwise.
+// NoReadOfSecretPath has one concern: a read of a SECRET path (secretpath,
+// on the raw or the resolved path) is Forbidden. A dynamic path is Unknown
+// (it might resolve to a secret). Any other read is outside this policy's
+// concern — it does not apply, and readability is NoReadOfUnreadablePath's
+// job.
 type NoReadOfSecretPath struct{}
 
 // Name implements Policy.
@@ -118,11 +122,33 @@ func (NoReadOfSecretPath) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, b
 	if secretpath.IsSecret(e.Path) {
 		return Finding{Verdict: Forbidden, Reason: "secret path"}, true
 	}
+	if ctx.PathEval != nil {
+		if resolved := ctx.PathEval.ResolvePath(e.Path); resolved != "" && secretpath.IsSecret(resolved) {
+			return Finding{Verdict: Forbidden, Reason: "secret path (resolved)"}, true
+		}
+	}
+	return Finding{}, false
+}
+
+// NoReadOfUnreadablePath has one concern: patheval READABILITY of a read path
+// effect. Forbidden when the zone is reject or a sandbox denyRead entry
+// matches, Unknown when the path is dynamic or unzoned (or there is no
+// evaluator), Permitted when the zone can be read.
+type NoReadOfUnreadablePath struct{}
+
+// Name implements Policy.
+func (NoReadOfUnreadablePath) Name() string { return "no-read-of-unreadable-path" }
+
+// Judge implements Policy.
+func (NoReadOfUnreadablePath) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, bool) {
+	if e.Kind != cmddesc.EffectPath || e.Access != cmddesc.AccessRead {
+		return Finding{}, false
+	}
+	if e.Dynamic {
+		return Finding{Verdict: Unknown, Reason: "path is a runtime expansion"}, true
+	}
 	if ctx.PathEval == nil {
 		return Finding{Verdict: Unknown, Reason: "no path evaluator"}, true
-	}
-	if resolved := ctx.PathEval.ResolvePath(e.Path); resolved != "" && secretpath.IsSecret(resolved) {
-		return Finding{Verdict: Forbidden, Reason: "secret path (resolved)"}, true
 	}
 	if ctx.PathEval.IsDenyRead(e.Path) {
 		return Finding{Verdict: Forbidden, Reason: "path is denyRead"}, true

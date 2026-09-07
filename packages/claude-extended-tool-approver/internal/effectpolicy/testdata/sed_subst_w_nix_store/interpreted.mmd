@@ -1,0 +1,6 @@
+flowchart LR
+    n0["command: sed 's/a/b/w /nix/store/out' README.md<br/>- program:sed #quot;s/a/b/w /nix/store/out#quot;<br/>- path:truncate /nix/store/out [sed s///w]<br/>- path:read README.md [arg 1]<br/>- stdio:stdout content<br/>mark=forbidden: path:truncate /nix/store/out [sed s///w]: no-write-to-read-only-path (write to read-only zone)"]
+    n1[/"file: /nix/store/out"/]
+    n2[/"file: README.md"/]
+    n0 -->|"reads: read"| n2
+    n0 -->|"writes: truncate"| n1
