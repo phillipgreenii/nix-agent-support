@@ -1320,7 +1320,12 @@
               # pg-pr-go-tests' own testDeps = [ pkgs.git ] pattern.
               pg-connector-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
                 pname = "pg-connector-go-tests";
-                src = ./packages/pg-connector; # matches default.nix (raw ./., no cleanSource)
+                # Deliberately the raw, unfiltered package dir (not default.nix's own
+                # filtered fileset src, pg2-p5at3): this is the whole-module `go test
+                # ./...` gate (package-versioning.md's "Go test gate"), so it needs
+                # every cmd/pg-connector-*/ tree and pkg/* present regardless of any
+                # one derivation's own build+test dependency scope.
+                src = ./packages/pg-connector;
                 gomod2nixToml = ./packages/pg-connector/gomod2nix.toml;
                 testDeps = [
                   pkgs.bash

@@ -12,7 +12,45 @@ mkGoApp {
   # binaries out of it (this is the ci capability's Tier-2 GitHub Actions
   # backend, sibling to pg-connector-pr-github.nix); this packet does not
   # create a second Go module (layout_convention_test.go).
-  src = ./.;
+  #
+  # Filtered src (pg2-p5at3): `go list -deps`/`-test -deps` against
+  # ./cmd/pg-connector-ci-github-actions confirms its ENTIRE build+test
+  # dependency graph is go.mod/go.sum/gomod2nix.toml, pkg/schema, pkg/scriptout's
+  # top-level package (not its schemas/ or conformance/ subpackages — those are
+  # pulled in only by pg-connector's own Tier-1 conformance suite and
+  # pkg/scriptout's own tests, not by this binary), pkg/provider's root iface.go
+  # plus its own pkg/provider/ci capability subpackage, and its own
+  # cmd/pg-connector-ci-github-actions/ tree (main.go, internal/** — including
+  # internal/gitenv, internal/github and their _test.go files). None of the
+  # other 3 backends' cmd/pg-connector-*/ trees are reachable from here (verified:
+  # no cross-backend import, no filesystem reference to a sibling backend's path
+  # — the sha256-pinned drift guards comparing this backend's gitenv.go/
+  # github/*.go against pg-connector-pr-github's copies live in cmd/pg-connector's
+  # OWN test suite, not here) — scoping src to exactly this set means editing
+  # pg-connector-scm-git/-issue-beads/-pr-github's own files no longer touches
+  # this derivation's content hash. Technique: `lib.fileset.toSource`/`unions`/
+  # `difference`, the same fileset idiom `phillipg-nix-repo-base`'s `mkGoApp`
+  # Pattern B and this repo's own `packages/pr-pool/default.nix` already use,
+  # adapted here for per-binary isolation within one shared go.mod rather than a
+  # local module replace.
+  src = lib.fileset.toSource {
+    root = ./.;
+    fileset = lib.fileset.unions [
+      ./go.mod
+      ./go.sum
+      ./gomod2nix.toml
+      ./pkg/schema
+      (lib.fileset.difference ./pkg/scriptout (
+        lib.fileset.unions [
+          ./pkg/scriptout/schemas
+          ./pkg/scriptout/conformance
+        ]
+      ))
+      ./pkg/provider/iface.go
+      ./pkg/provider/ci
+      ./cmd/pg-connector-ci-github-actions
+    ];
+  };
   gomod2nixToml = ./gomod2nix.toml;
 
   subPackages = [ "cmd/pg-connector-ci-github-actions" ];
