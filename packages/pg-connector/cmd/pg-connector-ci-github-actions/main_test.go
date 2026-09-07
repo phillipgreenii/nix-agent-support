@@ -77,7 +77,7 @@ func TestNewDispatchTable_CapabilitiesDeclaresCISchemaVersion(t *testing.T) {
 // bead — there was previously no way to ask a running backend what
 // version it was.
 func TestNewDispatchTable_CapabilitiesDeclaresVersion(t *testing.T) {
-	table := newDispatchTable(newTestBackend())
+	table := newDispatchTable(newTestBackend(t))
 	entry, ok := table[scriptout.OpCapabilities]
 	if !ok {
 		t.Fatal("capabilities entry missing from this binary's own dispatch table")
