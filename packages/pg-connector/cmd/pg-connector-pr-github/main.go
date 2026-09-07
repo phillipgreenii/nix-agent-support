@@ -14,6 +14,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 
 	internal "github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal"
@@ -34,8 +35,20 @@ func main() {
 // run builds this backend's Provider (ported GitHub logic + a fresh local
 // store) and its op-dispatch table, then hands the table to the Tier-1
 // core's generic serve loop.
+//
+// DefaultStorePath now reports a missing/unresolvable $HOME rather than
+// silently falling back to a cwd-relative store path (finding A18); a
+// failure here means this backend cannot even locate its own store, so it
+// fails loudly on stderr with a generic exit(1) before ever entering
+// ServeLoop's wire protocol — there is no wire response to carry this in,
+// since no request has been read yet.
 func run() int {
-	backend := internal.New(github.New(), internal.NewStore(internal.DefaultStorePath()))
+	storePath, err := internal.DefaultStorePath()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "pg-connector-pr-github: %v\n", err)
+		return 1
+	}
+	backend := internal.New(github.New(), internal.NewStore(storePath))
 	return scriptout.ServeLoop(newDispatchTable(backend))
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -317,6 +318,66 @@ func TestParsePRID_RejectsMalformed(t *testing.T) {
 	for _, id := range []string{"", "no-hash", "owner-only#1", "owner/repo#", "owner/repo#abc", "owner/repo#0"} {
 		if _, _, err := parsePRID(id); err == nil {
 			t.Errorf("parsePRID(%q) should have failed", id)
+		}
+	}
+}
+
+// TestBackend_Categorize_RejectsValueOutsideVocabulary is finding A20's
+// required proof: Categorize previously accepted any string unvalidated.
+func TestBackend_Categorize_RejectsValueOutsideVocabulary(t *testing.T) {
+	b := newTestBackend(t, &fakeGH{})
+	_, err := b.Categorize(context.Background(), "owner/repo#1", "not-a-real-category")
+	if !errors.Is(err, scriptout.ErrInvalidArgument) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrInvalidArgument)", err)
+	}
+	// And the rejected write must not have landed in the store.
+	st, getErr := b.store.Get("owner/repo#1")
+	if getErr != nil {
+		t.Fatalf("Get: %v", getErr)
+	}
+	if st.Category != "" {
+		t.Fatalf("Category = %q, want empty — a rejected categorize must not partially write", st.Category)
+	}
+}
+
+// TestBackend_Categorize_EmptyCategoryIsDistinctNonSilentError proves an
+// empty category is rejected with its own error rather than either (a)
+// silently succeeding as a store.SetCategory "delete" (the pre-fix
+// behavior — store.go's `omitempty` JSON tag makes an empty category
+// indistinguishable on disk from "never categorized") or (b) merely
+// reusing the generic vocabulary-membership error message.
+func TestBackend_Categorize_EmptyCategoryIsDistinctNonSilentError(t *testing.T) {
+	b := newTestBackend(t, &fakeGH{})
+	// First set a real category...
+	if _, err := b.Categorize(context.Background(), "owner/repo#1", "focus"); err != nil {
+		t.Fatalf("Categorize(focus): %v", err)
+	}
+	// ...then attempt to clear it via an empty string.
+	_, err := b.Categorize(context.Background(), "owner/repo#1", "")
+	if !errors.Is(err, scriptout.ErrInvalidArgument) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrInvalidArgument)", err)
+	}
+	if !strings.Contains(err.Error(), "empty") {
+		t.Fatalf("err = %v, want a message distinctly about the empty category, not just the generic vocabulary-membership message", err)
+	}
+	// The earlier valid write must survive the rejected empty-category call.
+	st, getErr := b.store.Get("owner/repo#1")
+	if getErr != nil {
+		t.Fatalf("Get: %v", getErr)
+	}
+	if st.Category != "focus" {
+		t.Fatalf("Category = %q, want focus — an empty-category call must not silently delete the existing category", st.Category)
+	}
+}
+
+// TestBackend_Categorize_AcceptsEveryVocabularyValue is the positive
+// counterpart: every declared Vocabulary value must be accepted (a
+// too-strict validator would be exactly as broken as no validator).
+func TestBackend_Categorize_AcceptsEveryVocabularyValue(t *testing.T) {
+	for _, cat := range Vocabulary {
+		b := newTestBackend(t, &fakeGH{})
+		if _, err := b.Categorize(context.Background(), "owner/repo#1", cat); err != nil {
+			t.Fatalf("Categorize(%q): %v", cat, err)
 		}
 	}
 }

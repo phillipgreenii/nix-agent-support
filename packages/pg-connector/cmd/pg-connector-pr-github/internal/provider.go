@@ -117,14 +117,41 @@ func (b *Backend) Show(ctx context.Context, id string) (*schema.PR, error) {
 // Categorize implements pr.Provider.Categorize: a plain set/overwrite into
 // this backend's own store, never a GitHub label [design: §6.1]. No GitHub
 // call is made — category has no GitHub-side representation.
+//
+// category MUST be one of Vocabulary (finding A20: the previous version
+// accepted any string, unvalidated, while the sibling FeedbackSet already
+// validates its own enum). An empty category is rejected with its own
+// distinct message rather than falling through to the vocabulary-membership
+// error: store.SetCategory's JSON field carries `omitempty`, so writing an
+// empty category is indistinguishable on disk from never having categorized
+// the PR at all — a silent delete, not a value the vocabulary check alone
+// would explain clearly to a caller that passed "" by mistake.
 func (b *Backend) Categorize(ctx context.Context, id, category string) (*schema.CategorizeResult, error) {
 	if _, _, err := parsePRID(id); err != nil {
 		return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, err.Error())
+	}
+	if category == "" {
+		return nil, scriptout.WrapError(scriptout.ErrInvalidArgument,
+			"pg-connector-pr-github: category must not be empty — an empty category would silently clear any previously-set category rather than erroring")
+	}
+	if !isValidCategory(category) {
+		return nil, scriptout.WrapError(scriptout.ErrInvalidArgument,
+			fmt.Sprintf("pg-connector-pr-github: category %q is not one of %v", category, Vocabulary))
 	}
 	if err := b.store.SetCategory(id, category); err != nil {
 		return nil, scriptout.WrapError(scriptout.ErrUnavailable, err.Error())
 	}
 	return &schema.CategorizeResult{ID: id, Category: category}, nil
+}
+
+// isValidCategory reports whether category is a member of Vocabulary.
+func isValidCategory(category string) bool {
+	for _, v := range Vocabulary {
+		if category == v {
+			return true
+		}
+	}
+	return false
 }
 
 // FeedbackSet implements pr.Provider.FeedbackSet. A commentID that no
