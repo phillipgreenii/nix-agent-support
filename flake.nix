@@ -4232,17 +4232,38 @@
               '';
             };
             # pg-connector-contract runs pg-connector's on-demand, build-tagged
-            # (//go:build contract) real-bd round-trip suite
-            # (cmd/pg-connector-issue-beads/internal/realbd_test.go), which
-            # drives the REAL `bd` CLI rather than fakes and is deliberately
-            # NOT a flake check / not in CI -- mirroring
+            # (//go:build contract) real e2e/contract suite (bead pg2-qp50z),
+            # which drives the REAL pg-connector binary and REAL Tier-2 backend
+            # binaries -- not hand-mocked fakes -- and is deliberately NOT a
+            # flake check / not in CI -- mirroring
             # ccpool-contract/pb-contract/pg-pr-contract's own answer to the
             # same "real external system, driven deliberately and off the
             # sandboxed default" shape (bead pg2-kqft7).
             #
-            # Per the test file's own doc comment, `bd`'s dolt-server
-            # auto-detection means a run of this CAN land on this machine's
-            # SHARED per-user dolt server (org.nixos.beads-dolt-server,
+            # Widened by bead pg2-qp50z from its original scope (just
+            # cmd/pg-connector-issue-beads/internal/realbd_test.go's real-bd
+            # round trip) to cmd/pg-connector/e2e_contract_test.go's full suite:
+            # it builds all five real binaries (the pg-connector umbrella plus
+            # its four Tier-2 backends) and execs the real umbrella exactly as
+            # an operator would, covering every op each backend's own
+            # capabilities response declares plus `config validate`/
+            # `auth status` fan-out and a completion-script (bash/zsh/fish)
+            # regression check. Each case skips gracefully when the real tool
+            # it needs (bd/git/gh) is genuinely absent from PATH.
+            #
+            # The pr-github/ci-github-actions cases need a real, caller-chosen
+            # GitHub PR/repo to target -- there is no fixed one (2026-09-07
+            # operator ruling on pg2-qp50z: no default, no real value ever
+            # committed to this public repo) -- so invoking this with `gh` on
+            # PATH but $PG_CONNECTOR_E2E_REPO/$PG_CONNECTOR_E2E_PR unset FAILS
+            # LOUDLY with a message naming both vars, rather than skipping
+            # quietly: e.g.
+            #   PG_CONNECTOR_E2E_REPO=owner/repo PG_CONNECTOR_E2E_PR=1234 \
+            #     nix run .#pg-connector-contract
+            #
+            # Per the issue-beads test file's own doc comment, `bd`'s
+            # dolt-server auto-detection means a run of this CAN land on this
+            # machine's SHARED per-user dolt server (org.nixos.beads-dolt-server,
             # 127.0.0.1:25252) whenever one is already up, rather than a
             # private embedded engine -- unlike pg-pr-contract's workspaces,
             # which stay isolated in practice (pg2-5ek6b's one observed
@@ -4256,6 +4277,8 @@
               name = "pg-connector-contract";
               runtimeInputs = [
                 pkgs.go
+                pkgs.git
+                pkgs.gh
                 (pkgs.llm-agentsPkgs.beads or llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.beads)
               ];
               text = ''
