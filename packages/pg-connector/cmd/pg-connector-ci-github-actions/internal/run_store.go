@@ -110,7 +110,7 @@ func (s *RunStore) save(data runStoreFile) error {
 		return fmt.Errorf("run store: create temp file: %w", err)
 	}
 	tmpPath := tmp.Name()
-	defer os.Remove(tmpPath) // no-op once the rename below succeeds
+	defer func() { _ = os.Remove(tmpPath) }() // no-op once the rename below succeeds
 	if _, err := tmp.Write(raw); err != nil {
 		_ = tmp.Close()
 		return fmt.Errorf("run store: write temp file: %w", err)
