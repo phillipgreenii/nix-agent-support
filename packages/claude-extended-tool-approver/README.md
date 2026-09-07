@@ -6,6 +6,8 @@ Claude Code extended tool approval with rule-based permission evaluation and dec
 
 Evaluates tool invocations against an ordered chain of rule modules (envvars, git, pathsafety, etc.), returning APPROVE, ASK, DENY, or NO-OPINION (serialized as `abstain`, and emitted as `{}` so Claude Code decides). Logs all ASK and DENY decisions plus their outcomes to a SQLite database.
 
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the design patterns behind the engine, the full lifecycle of one decision, and the two ways to extend policy (a new rule module vs. a `rules.json` data change). This README is the operational reference; that document is the architectural one.
+
 ## Hook Events
 
 | Event             | Purpose                                                       |
