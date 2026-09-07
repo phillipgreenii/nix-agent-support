@@ -1,0 +1,4 @@
+flowchart LR
+    n0["command: find ~/.ssh -name id_rsa<br/>- path:read ~/.ssh [arg 0]<br/>mark=forbidden: path:read ~/.ssh [arg 0]: no-read-of-secret-path (secret path)"]
+    n1[/"file: ~/.ssh"/]
+    n0 -->|"reads: read"| n1

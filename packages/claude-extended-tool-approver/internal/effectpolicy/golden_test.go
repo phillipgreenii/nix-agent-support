@@ -553,6 +553,46 @@ var goldenCases = []goldenCase{
 	{"awk_e_flag", "awk -e '{print}' README.md", evalcontract.Approve, nil},
 	{"awk_at_load", `awk '@load "foo"'`, evalcontract.Abstain, nil},
 	{"awk_two_way_pipe", `awk '{print |& "cmd"}' README.md`, evalcontract.Abstain, nil},
+
+	// slice 3q: find interpreter (internal/cmddesc/interpreter_find.go).
+	// Starting points are PathRead; the expression's tests are inert
+	// (literal/no-arg); -delete is a PathDelete of every starting point,
+	// judged by DeleteAccess exactly like rm (writable-not-deletable
+	// abstains, gitignored approves, a read-only/reject zone rejects);
+	// -exec/-execdir become an "argv" ChildInvocation with `{}` dynamic,
+	// recursed exactly like xargs's child; -ok/-okdir are insufficient
+	// (interactive); -fprint/-fprint0/-fls/-fprintf truncate a FILE operand.
+	{"find_name_go", "find . -name '*.go'", evalcontract.Approve, nil},
+	{"find_sub_type_f_print0", "find sub -type f -print0", evalcontract.Approve, nil},
+	{"find_ssh_name_id_rsa", "find ~/.ssh -name id_rsa", evalcontract.Reject, nil},
+	// find_delete_log_dot: "." is writable but not deletable (the project
+	// root itself is a tracked git working tree) — Abstain, same as
+	// rm_readme.
+	{"find_delete_log_dot", "find . -name '*.log' -delete", evalcontract.Abstain, nil},
+	// find_delete_build: build/ is gitignored in the fixture — Approve, same
+	// as rm_rf_build_gitignored.
+	{"find_delete_build", "find build -delete", evalcontract.Approve, nil},
+	// find_delete_nix_store: /nix/store is a read-only zone — Reject, same
+	// as rm_rf_nix_store.
+	{"find_delete_nix_store", "find /nix/store -delete", evalcontract.Reject, nil},
+	// find_exec_rm_semicolon: the {} token is Dynamic, so the recursed rm's
+	// delete of it is a delete of a runtime expansion — Abstain (DeleteAccess:
+	// "path is a runtime expansion"), not the Reject the brief guessed for a
+	// naive reading of "rm of an unknown path": DeleteAccess treats a dynamic
+	// path as Unknown, same as every other dynamic-path policy in this spike
+	// (e.g. rm_rf_dynamic).
+	{"find_exec_rm_semicolon", `find . -exec rm {} \;`, evalcontract.Abstain, nil},
+	// find_exec_cat_plus: the {} token is Dynamic, so cat's read of it is
+	// Unknown (NoReadOfUnreadablePath: "path is a runtime expansion") —
+	// Abstain, confirming the brief's own guess ("cat of a dynamic path
+	// likely => Abstain").
+	{"find_exec_cat_plus", "find . -exec cat {} +", evalcontract.Abstain, nil},
+	{"find_ok_rm_semicolon", `find . -ok rm {} \;`, evalcontract.Abstain, nil},
+	{"find_fprint_nix_store", "find . -fprint /nix/store/x", evalcontract.Reject, nil},
+	{"find_frobnicate", "find . -frobnicate", evalcontract.Abstain, nil},
+	{"find_bare", "find", evalcontract.Approve, nil},
+	{"find_newer_gomod_print", "find . -newer go.mod -print", evalcontract.Approve, nil},
+	{"find_paren_or_name", `find . \( -name '*.go' -o -name '*.md' \)`, evalcontract.Approve, nil},
 }
 
 func TestGolden(t *testing.T) {

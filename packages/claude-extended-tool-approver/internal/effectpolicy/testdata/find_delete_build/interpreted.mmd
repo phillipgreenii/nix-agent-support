@@ -1,0 +1,5 @@
+flowchart LR
+    n0["command: find build -delete<br/>- path:read build [arg 0]<br/>- path:delete build [arg 0] (find -delete)<br/>mark=permitted"]
+    n1[/"file: build"/]
+    n0 -->|"reads: read"| n1
+    n0 -->|"writes: delete"| n1

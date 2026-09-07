@@ -1,0 +1,4 @@
+flowchart LR
+    n0["command: find sub -type f -print0<br/>- path:read sub [arg 0]<br/>mark=permitted"]
+    n1[/"file: sub"/]
+    n0 -->|"reads: read"| n1

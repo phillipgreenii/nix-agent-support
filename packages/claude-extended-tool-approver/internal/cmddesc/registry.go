@@ -53,6 +53,9 @@ func DefaultRegistry() Registry {
 		cdSchema,
 		// slice 3p: awk/gawk dialect classifier and schema.
 		awkSchema, renamed(awkSchema, "gawk"),
+		// slice 3q: find interpreter (starting points, expression walk,
+		// -delete/-exec/-fprint).
+		findSchema,
 	)
 }
 

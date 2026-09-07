@@ -259,7 +259,7 @@ func TestExportNUnexportUnknownFlag(t *testing.T) {
 
 func TestRegistryNames(t *testing.T) {
 	want := []string{
-		"[", "awk", "bash", "bd", "cat", "cd", "cp", "curl", "echo", "export", "false", "gawk", "git", "gofmt", "grep",
+		"[", "awk", "bash", "bd", "cat", "cd", "cp", "curl", "echo", "export", "false", "find", "gawk", "git", "gofmt", "grep",
 		"head", "jq", "ls", "mkdir", "pgrep", "printf", "ps", "rm", "sed", "sh", "sleep", "sort", "tail", "tee",
 		"test", "true", "wc", "which", "xargs", "yq",
 	}

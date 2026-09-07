@@ -1,0 +1,11 @@
+flowchart LR
+    n0["command: find . -exec cat {} +<br/>- path:read . [arg 0]<br/>mark=permitted"]
+    n1[/"file: ."/]
+    subgraph sg_s0["find -exec"]
+        n2["command: cat {}<br/>- path:read {} (dynamic) [arg 0]<br/>- stdio:stdout content<br/>mark=insufficient: path:read {} (dynamic) [arg 0]: no-read-of-secret-path (path is a runtime expansion)"]
+        n3[/"file: {} (dynamic)"/]
+    end
+    n0 -->|"reads: read"| n1
+    n2 -->|"reads: read"| n3
+    n2 -->|"executes: find -exec"| n0
+    n2 -->|"flow: child stdout-#gt;stdout"| n0

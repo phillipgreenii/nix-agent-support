@@ -1,0 +1,6 @@
+flowchart LR
+    n0["command: find . -newer go.mod -print<br/>- path:read . [arg 0]<br/>- path:read go.mod [arg 2]<br/>mark=permitted"]
+    n1[/"file: ."/]
+    n2[/"file: go.mod"/]
+    n0 -->|"reads: read"| n1
+    n0 -->|"reads: read"| n2

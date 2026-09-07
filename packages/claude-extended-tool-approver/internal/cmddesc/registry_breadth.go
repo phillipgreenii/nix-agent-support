@@ -520,3 +520,40 @@ var gofmtSchema = CommandSchema{
 	UnknownFlag:  UnknownFlagInsufficient,
 	EndOfOptions: false,
 }
+
+// ---- find (slice 3q) ---------------------------------------------------------
+
+// findSchema: interpreter-dispatched to findInterpreter (interpreter_find.go),
+// since find's grammar (leading options, then starting-point operands, then
+// an expression of tests/actions that mixes `-`-prefixed primaries with bare
+// grouping tokens `(`/`)`/`!`) does not fit the Flags/Positionals table — see
+// findInterpreter's doc comment for why. Flags/Positionals/ImplicitEffects
+// below are therefore UNUSED (the interpreter does not call scan()); they are
+// left at their zero value rather than populated with something the
+// interpreter would ignore.
+//
+// On this host `find` is a shell FUNCTION (`type find`) wrapping Claude
+// Code's bundled bfs, invoked as `exec -a bfs "$CC" -S dfs
+// -regextype findutils-default "$@"` — so the hook sees the typed `find ...`
+// verbatim, and `bfs --version` (2026-09-07) reports "bfs 4.1.1". bfs bills
+// itself as findutils-compatible, so the primary vocabulary modeled here
+// (interpreter_find.go's arity tables) is the GNU findutils spelling; the two
+// flags Claude Code's wrapper injects (-S, -regextype) are bfs-only search-
+// strategy/regex-dialect switches with no effect on the schema's vocabulary
+// and are not modeled (an unrecognised leading `-S`/`-regextype` would only
+// ever be typed by the wrapper, never by a modeled invocation this schema is
+// asked to judge, since the hook sees the post-wrapper argv either way).
+//
+// Stdout: find's own output (bare `-print`, or the default when no action is
+// named) is PATH NAMES ONLY, never file content — the same shape as ls, so
+// StdoutMetadata; -ls/-printf/-fprintf format additional metadata (sizes,
+// permissions) but still never file content. -fprint/-fprint0/-fls truncate
+// a FILE (PathTruncate, findTruncateArgPrimaries) instead of using stdout.
+var findSchema = CommandSchema{
+	Name:         "find",
+	Provenance:   "bfs 4.1.1 via Claude Code's find shell function (`type find`; `bfs --version`), GNU findutils-compatible primaries, this host 2026-09-07",
+	Interpreter:  "find",
+	Stdin:        StdinNever,
+	Stdout:       StdoutMetadata,
+	EndOfOptions: false,
+}

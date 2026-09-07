@@ -1,0 +1,10 @@
+flowchart LR
+    n0["command: find . -exec rm {} \;<br/>- path:read . [arg 0]<br/>mark=permitted"]
+    n1[/"file: ."/]
+    subgraph sg_s0["find -exec"]
+        n2["command: rm {}<br/>- path:delete {} (dynamic) [arg 0]<br/>mark=insufficient: path:delete {} (dynamic) [arg 0]: delete-access (path is a runtime expansion)"]
+        n3[/"file: {} (dynamic)"/]
+    end
+    n0 -->|"reads: read"| n1
+    n2 -->|"writes: delete"| n3
+    n2 -->|"executes: find -exec"| n0

@@ -58,6 +58,7 @@ var interpreters = map[string]Interpreter{
 	"":      GenericInterpreter{},
 	"xargs": xargsInterpreter{},
 	"curl":  curlInterpreter{},
+	"find":  findInterpreter{},
 }
 
 // LookupInterpreter resolves a schema's Interpreter name. The empty name

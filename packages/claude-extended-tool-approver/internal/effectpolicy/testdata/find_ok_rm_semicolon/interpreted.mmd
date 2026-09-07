@@ -1,0 +1,4 @@
+flowchart LR
+    n0["command: find . -ok rm {} \;<br/>- path:read . [arg 0]<br/>mark=insufficient: -ok is interactive: its per-item confirmation is not statically knowable"]
+    n1[/"file: ."/]
+    n0 -->|"reads: read"| n1
