@@ -15,13 +15,17 @@ import (
 // into a mark, apply the graph-level policies, and fold marks into a
 // Decision.
 //
-// Node fold: any Forbidden finding -> MarkForbidden; else any Unknown finding,
-// any EffectOpaque, or a node the builder already marked insufficient ->
-// MarkInsufficient; else MarkPermitted. Graph findings fold into the named
-// node with the same precedence. Graph fold: any Forbidden -> Reject; else
-// any Insufficient -> Abstain; else Approve. Reason names the first deciding
-// node and effect in slice order, prefixed by the node's scope path so a
-// verdict inside `bash -c` reads as such.
+// Node fold: any Forbidden finding -> MarkForbidden; else any Unknown
+// finding, any EffectOpaque, an effect NO policy applies to, or a node the
+// builder already marked insufficient -> MarkInsufficient; else
+// MarkPermitted. The spike's rule is "Approve only when every node is fully
+// understood and every effect permitted" (slice 3f) — an effect no policy
+// has an opinion on is not permitted, so it can no longer pass silently; see
+// judgeNode. Graph findings fold into the named node with the same
+// precedence. Graph fold: any Forbidden -> Reject; else any Insufficient ->
+// Abstain; else Approve. Reason names the first deciding node and effect in
+// slice order, prefixed by the node's scope path so a verdict inside
+// `bash -c` reads as such.
 func Evaluate(req evalcontract.Request, reg cmddesc.Registry, policies []Policy, graphPolicies []GraphPolicy) evalcontract.Response {
 	sp := cmdparse.ParseShell(req.Command)
 	if sp.Unparseable {
@@ -99,17 +103,43 @@ func Evaluate(req evalcontract.Request, reg cmddesc.Registry, policies []Policy,
 // judgeNode folds the policies over one Command node's effects and sets its
 // mark. A builder-set MarkInsufficient survives unless a Forbidden finding
 // outranks it.
+//
+// Fail-closed fold (slice 3f): an EffectOpaque effect is always unjudged (no
+// policy is ever asked, since none ever applies to it — see the doc comment
+// on cmddesc.EffectOpaque). For every OTHER effect, if no policy in the
+// given slice applies to it (Judge's second return is false for every one),
+// the effect is likewise unjudged and reads as "<effect>: no policy judges
+// this effect" — the same fail-closed text an EffectOpaque already got.
+// Before this slice an unjudged effect contributed NOTHING to the fold, so a
+// node whose every effect fell in this gap folded to MarkPermitted exactly
+// like a node with zero effects; slice 3e's `export FOO=bar` (an EffectEnv
+// no policy in DefaultPolicies judged) is the case that proved the hole. The
+// fix does not special-case EffectEnv: it closes the gap for every effect
+// kind uniformly, which is also why DefaultPolicies (policy.go) now carries
+// StdioIsLocal, ProgramInterpreted and EnvAssignment — kinds that used to
+// ride on the same hole and would otherwise regress from Approve to Abstain.
+//
+// Precedence within one node is unchanged: the first Forbidden finding in
+// slice order wins outright; failing that, a builder-set MarkInsufficient
+// survives; failing that, the first Unknown-or-unjudged effect in slice
+// order sets Insufficient; only when none of those fire does the node land
+// Permitted.
 func judgeNode(n *effectgraph.Node, policies []Policy, pctx PolicyContext) {
 	var forbidden, unknown string
 	for _, e := range n.Effects {
-		if e.Kind == cmddesc.EffectOpaque && unknown == "" {
-			unknown = e.String()
+		if e.Kind == cmddesc.EffectOpaque {
+			if unknown == "" {
+				unknown = e.String()
+			}
+			continue
 		}
+		applied := false
 		for _, p := range policies {
 			f, applies := p.Judge(e, pctx)
 			if !applies {
 				continue
 			}
+			applied = true
 			switch f.Verdict {
 			case Forbidden:
 				if forbidden == "" {
@@ -120,6 +150,9 @@ func judgeNode(n *effectgraph.Node, policies []Policy, pctx PolicyContext) {
 					unknown = fmt.Sprintf("%s: %s (%s)", e, p.Name(), f.Reason)
 				}
 			}
+		}
+		if !applied && unknown == "" {
+			unknown = fmt.Sprintf("%s: no policy judges this effect", e)
 		}
 	}
 	switch {

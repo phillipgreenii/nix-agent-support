@@ -1,0 +1,6 @@
+flowchart LR
+    n0["command: HOME=/tmp/h cat README.md<br/>- env:set HOME<br/>- path:read README.md [arg 0]<br/>- stdio:stdout content<br/>mark=insufficient: env:set HOME: env-assignment (ask variable; live rule's verdict depends on value, which this slice does not model)"]
+    n1{{"env: HOME"}}
+    n2[/"file: README.md"/]
+    n0 -->|"assign: HOME=/tmp/h"| n1
+    n0 -->|"reads: read"| n2

@@ -1,0 +1,4 @@
+flowchart LR
+    n0["command: export LD_PRELOAD=/tmp/x.so"]
+    n1{{"env: LD_PRELOAD"}}
+    n0 -->|"assign: LD_PRELOAD=/tmp/x.so"| n1

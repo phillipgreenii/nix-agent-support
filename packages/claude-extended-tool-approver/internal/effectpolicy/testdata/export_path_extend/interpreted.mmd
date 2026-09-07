@@ -1,0 +1,4 @@
+flowchart LR
+    n0["command: export PATH=/tmp/bin:$PATH<br/>- env:set PATH<br/>mark=insufficient: env:set PATH: env-assignment (ask variable; live rule's verdict depends on value, which this slice does not model)"]
+    n1{{"env: PATH"}}
+    n0 -->|"assign: PATH=/tmp/bin:$PATH"| n1

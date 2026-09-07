@@ -1,0 +1,6 @@
+flowchart LR
+    n0["command: LD_PRELOAD=/tmp/x.so cat README.md<br/>- env:set LD_PRELOAD<br/>- path:read README.md [arg 0]<br/>- stdio:stdout content<br/>mark=forbidden: env:set LD_PRELOAD: env-assignment (injector variable (loader/exec hijack))"]
+    n1{{"env: LD_PRELOAD"}}
+    n2[/"file: README.md"/]
+    n0 -->|"assign: LD_PRELOAD=/tmp/x.so"| n1
+    n0 -->|"reads: read"| n2

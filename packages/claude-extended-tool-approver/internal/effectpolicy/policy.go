@@ -91,9 +91,190 @@ type Policy interface {
 
 // DefaultPolicies returns the spike's policy set. Each policy has exactly one
 // concern; the read side is split so a secret-path hit and an unreadable-zone
-// hit are distinguishable reasons.
+// hit are distinguishable reasons. StdioIsLocal, ProgramInterpreted and
+// EnvAssignment (slice 3f) were added so EffectStdio/EffectProgram/EffectEnv
+// are no longer effect kinds "no policy judges" — see judgeNode's fail-closed
+// fold in evaluate.go for why an unjudged effect can no longer ride to
+// MarkPermitted for free.
 func DefaultPolicies() []Policy {
-	return []Policy{NoWriteToReadOnlyPath{}, NoReadOfSecretPath{}, NoReadOfUnreadablePath{}, NetworkAccess{}, RemoteMutation{}}
+	return []Policy{
+		NoWriteToReadOnlyPath{},
+		NoReadOfSecretPath{},
+		NoReadOfUnreadablePath{},
+		NetworkAccess{},
+		RemoteMutation{},
+		StdioIsLocal{},
+		ProgramInterpreted{},
+		EnvAssignment{},
+	}
+}
+
+// StdioIsLocal judges every EffectStdio effect: always Permitted. A standard
+// stream carries no destination by itself — consuming or producing stdin/
+// stdout/stderr is not, on its own, a hazard. WHERE that content actually
+// FLOWS (into a file via a redirect, out to the network, into another
+// command via a pipe) is judged by the effects those other actions
+// themselves emit and by the graph-level policies that walk Flow edges
+// (NoContentFlowToUnvettedNetwork in graphpolicy.go) — never by this policy.
+// Before slice 3f, EffectStdio was simply an effect kind no policy judged,
+// which worked out to the same Permitted-by-omission outcome for the many
+// ordinary commands that read/write a stream (`cat README.md`'s stdout, for
+// instance); this policy makes that outcome an explicit, named finding
+// instead of a silent gap in the fold.
+type StdioIsLocal struct{}
+
+// Name implements Policy.
+func (StdioIsLocal) Name() string { return "stdio-is-local" }
+
+// Judge implements Policy.
+func (StdioIsLocal) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, bool) {
+	if e.Kind != cmddesc.EffectStdio {
+		return Finding{}, false
+	}
+	return Finding{Verdict: Permitted, Reason: "stream flow is judged by graph-level policies, not here"}, true
+}
+
+// ProgramInterpreted judges every EffectProgram effect: always Permitted.
+// This relies on an invariant enforced upstream, in
+// cmddesc.interpState.program (internal/cmddesc/interpreter.go): a Program
+// effect whose text is a live expansion, or whose dialect is unrecognised,
+// or whose dialect interpretation itself came back insufficient, already
+// marks the node's builder-level result insufficient — and judgeNode's
+// switch in evaluate.go preserves a builder-set MarkInsufficient ahead of
+// any node-level policy finding (Forbidden aside). So a Program effect that
+// reaches THIS policy's Judge on a node that is not already insufficient is,
+// by construction, one the interpreter understood well enough to model.
+// Judging it Permitted here records that the effect is accounted for; it
+// does not itself vouch for arbitrary program text — that vouching already
+// happened, or the node would not still be eligible for Permitted at all.
+type ProgramInterpreted struct{}
+
+// Name implements Policy.
+func (ProgramInterpreted) Name() string { return "program-interpreted" }
+
+// Judge implements Policy.
+func (ProgramInterpreted) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, bool) {
+	if e.Kind != cmddesc.EffectProgram {
+		return Finding{}, false
+	}
+	return Finding{Verdict: Permitted, Reason: "dialect interpretation already vouched for this program (see cmddesc.interpState.program)"}, true
+}
+
+// envInjectorVars, envInjectorAskVars and envAskVars are copied — name and
+// one-line rationale per class — from internal/rules/envvars.go's
+// injectorVars / injectorAskVars / askVars (the LIVE engine's env-var
+// guard), not imported: a policy here never sees a command name or a
+// cmdparse.ParsedCommand, so it cannot reuse a rule built around either, and
+// this package's own doc comment already forbids reaching into
+// internal/hookio's transitive closure that internal/rules/envvars sits in.
+// A later migration that lets a policy consult the live rule tables directly
+// should delete ONE of these two copies rather than let them diverge
+// silently — see envvars.go's own doc comments for the full measured
+// history behind each entry; only the one-line summary is repeated here.
+var (
+	// envInjectorVars: assignment is GUARANTEED to be a code-injection /
+	// library-preload vector regardless of value (hijacks the dynamic
+	// linker or a shell's startup before the "safe-looking" executable
+	// ever runs) — envvars.go's injectorVars.
+	envInjectorVars = map[string]bool{
+		"LD_PRELOAD":            true,
+		"DYLD_INSERT_LIBRARIES": true,
+		"LD_LIBRARY_PATH":       true,
+		"DYLD_LIBRARY_PATH":     true,
+		"BASH_ENV":              true,
+		"ZDOTDIR":               true,
+	}
+	// envInjectorAskVars: same injection family as envInjectorVars, but the
+	// NAME also collides with everyday project-variable traffic, so the
+	// live rule downgrades a name-only Reject to a user-overridable Ask —
+	// envvars.go's injectorAskVars.
+	envInjectorAskVars = map[string]bool{
+		"ENV": true,
+	}
+	// envAskVars: dangerous but not guaranteed-unsafe for every value (a
+	// legitimate PATH extension, a HOME override); the live rule's verdict
+	// depends on the VALUE (preservesCallerValue / the hermetic-HOME
+	// relief) and asks a human when it cannot prove the value safe —
+	// envvars.go's askVars.
+	envAskVars = map[string]bool{
+		"PATH": true,
+		"HOME": true,
+	}
+)
+
+// EnvAssignment judges every EffectEnv effect. A read (EnvSet == false) is
+// always Permitted: reading a variable's current value cannot itself change
+// what the command touches. A set is Unknown when the effect records the
+// NAME as a runtime expansion (Dynamic) — the policy cannot tell which
+// variable is actually affected; investigated for this slice and found to
+// be reachable only in theory today (see the EnvAssignment doc trailer
+// below), but checked defensively since Effect already carries the field.
+// Otherwise a set is classified by its statically known NAME against the
+// three data sets above: an injector name is Forbidden; an injector-ask or
+// ask name is Unknown, because the live rule's answer for these names
+// depends on a VALUE judgement (preservesCallerValue, the hermetic-HOME
+// relief) this slice does not model at all — Unknown/Abstain is the honest
+// mapping for "the live rule would ask a human here", not a guess in either
+// direction; any other static name is outside this slice's vocabulary of
+// known-bad names and is Permitted.
+//
+// Accepted gap, explicit by design: VALUES are not modeled. Every Set of an
+// ask-class NAME (PATH, HOME) is Unknown regardless of value, even the
+// extend-shaped value (`PATH="$PATH:/nix/store/…/bin"`) the live rule would
+// Approve after inspecting it — the live rule's relief is strictly more
+// permissive here, which makes this an accepted spike-stricter divergence
+// (see testdata/agreement.txt), never a safety gap: this policy never
+// silently Approves an ask/injector-ask name.
+//
+// Investigated-and-not-built note on Dynamic NAMEs: a NAME effect.Dynamic
+// bit is not populated anywhere today (internal/cmddesc/effect.go's Dynamic
+// field is shared across Path/Net/Remote/Env but no Env-effect construction
+// site sets it — internal/effectgraph/build.go's leaf.EnvVars loop and
+// internal/cmddesc/interpreter.go's envAssign both leave it false). That
+// was confirmed not to be a live gap rather than left unnoticed: the two
+// production paths that ever produce an EffectEnv Set both guarantee a
+// static NAME by construction — a leading `NAME=VALUE` or `export
+// NAME=VALUE` assignment word is recognised by cmdparse's SHELL GRAMMAR
+// (identifier "=" word), which cannot itself contain an expansion, so
+// internal/cmdparse's EnvAssignment.Name is never dynamic on that path; the
+// other path (export's own KindEnvAssign operand role, for a token the
+// grammar-level lift did not recognise as a plain assignment word, e.g. a
+// quoted `"$NAME"=x`) already fails the WHOLE NODE closed in
+// interpreter.go's envAssign — `st.fail("env assignment ... is a runtime
+// expansion")` — before an Effect is even built, verified empirically
+// against `export "$NAME"=x` before this slice's changes (Abstain, node
+// insufficient, not Approve). So wiring a NAME-dynamic bit through
+// build.go/interpreter.go was deliberately NOT done for this slice — it
+// would touch files outside internal/effectpolicy for a case that cannot
+// currently occur — and the `e.Dynamic` check below is retained purely as a
+// forward-compatible guard against a future EffectEnv producer that does
+// not share this invariant.
+type EnvAssignment struct{}
+
+// Name implements Policy.
+func (EnvAssignment) Name() string { return "env-assignment" }
+
+// Judge implements Policy.
+func (EnvAssignment) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, bool) {
+	if e.Kind != cmddesc.EffectEnv {
+		return Finding{}, false
+	}
+	if !e.EnvSet {
+		return Finding{Verdict: Permitted, Reason: "env read"}, true
+	}
+	if e.Dynamic {
+		return Finding{Verdict: Unknown, Reason: "env NAME is a runtime expansion"}, true
+	}
+	switch {
+	case envInjectorVars[e.EnvName]:
+		return Finding{Verdict: Forbidden, Reason: "injector variable (loader/exec hijack)"}, true
+	case envInjectorAskVars[e.EnvName]:
+		return Finding{Verdict: Unknown, Reason: "injector-ask variable; live rule's verdict depends on value, which this slice does not model"}, true
+	case envAskVars[e.EnvName]:
+		return Finding{Verdict: Unknown, Reason: "ask variable; live rule's verdict depends on value, which this slice does not model"}, true
+	default:
+		return Finding{Verdict: Permitted, Reason: "static name outside the known-bad vocabulary"}, true
+	}
 }
 
 // NoWriteToReadOnlyPath applies to every write-class path effect (create,

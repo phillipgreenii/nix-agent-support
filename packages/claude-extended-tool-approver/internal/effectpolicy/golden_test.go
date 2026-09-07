@@ -241,13 +241,41 @@ var goldenCases = []goldenCase{
 	{"mkdir_p_nix_store", "mkdir -p /nix/store/x", evalcontract.Reject, nil},
 
 	// export: a positional NAME=VALUE (or bare NAME) is an EffectEnv set of
-	// NAME; DefaultPolicies has no policy that judges EffectEnv at all, so
-	// judgeNode's default (no forbidden, no unknown finding) falls through
-	// to MarkPermitted — the same "no applicable policy" fallback any other
-	// unjudged effect gets, not a special case for env. `-f` (functions, not
-	// variables) is deliberately unmodeled.
+	// NAME, judged by policy.go's EnvAssignment policy (slice 3f): a benign
+	// static name is Permitted, so `export FOO=bar` still Approves exactly
+	// as it did when EffectEnv rode the (now closed) unjudged-effect hole.
+	// `-f` (functions, not variables) is deliberately unmodeled.
 	{"export_foo_bar", "export FOO=bar", evalcontract.Approve, nil},
 	{"export_f_unmodeled", "export -f myfunc", evalcontract.Abstain, nil},
+
+	// slice 3f: EnvAssignment policy — closes the fail-open hole slice 3e's
+	// export_foo_bar comment documented (an EffectEnv no policy judged fell
+	// through to Permitted). Names are classified against the three data
+	// sets copied from internal/rules/envvars.go (policy.go's EnvAssignment
+	// doc comment carries the full provenance): an injector name (LD_PRELOAD
+	// et al.) is Forbidden regardless of position (export or a leading
+	// prefix assignment); an ask name (PATH, HOME) is Unknown, since the
+	// live rule's Approve for these depends on a value judgement this slice
+	// does not model; any other static name stays Permitted. Values are not
+	// modeled at all — `export PATH=/tmp/bin:$PATH` is a benign PATH
+	// extension the live rule would likely Approve, but the spike Abstains
+	// on the NAME alone, an accepted spike-stricter divergence.
+	{"export_path_extend", "export PATH=/tmp/bin:$PATH", evalcontract.Abstain, nil},
+	{"export_ld_preload", "export LD_PRELOAD=/tmp/x.so", evalcontract.Reject, nil},
+	{"ld_preload_prefix_cat_readme", "LD_PRELOAD=/tmp/x.so cat README.md", evalcontract.Reject, nil},
+	{"home_prefix_cat_readme", "HOME=/tmp/h cat README.md", evalcontract.Abstain, nil},
+	{"foo_prefix_cat_readme", "FOO=bar cat README.md", evalcontract.Approve, nil},
+	// `export "$NAME"=x`: the double-quoted `"$NAME"` is a live expansion of
+	// the ASSIGNMENT'S NAME half, so cmdparse does not lift it into the
+	// leaf's EnvVars (that lift only recognises a literal `identifier=value`
+	// assignment word); it instead reaches export's own KindEnvAssign
+	// operand role, whose envAssign (internal/cmddesc/interpreter.go) already
+	// fails the whole node closed on a live-expansion NAME — pre-existing
+	// behaviour, unchanged by this slice, verified empirically before this
+	// slice's changes (Abstain, node insufficient) and unaffected by the new
+	// EnvAssignment policy (the node never reaches Permitted for this policy
+	// to have an opinion on).
+	{"export_dynamic_name", `export "$NAME"=x`, evalcontract.Abstain, nil},
 
 	// git log/rev-parse/rev-list: read-only history/plumbing; implicit
 	// PathRead of ".git" (metadata).
