@@ -3,10 +3,10 @@ package cmddesc
 // remoteMutationOps is the vocabulary of EffectRemote Operations that MUTATE
 // the remote (as opposed to a future read-only operation, not yet needed by
 // any schema). It is what TransformDryRun consults to know which remote
-// effects a dry run removes, and it is open: a future Operation spelling that
-// mutates must be added here, or dry-run will fail OPEN and leave it in —
-// which is why every Operation this slice's schemas can produce ("push",
-// "force-push", "delete-ref") is listed.
+// effects a dry run marks, and it is open: a future Operation spelling that
+// mutates must be added here, or dry-run will fail OPEN and leave it
+// unmarked — which is why every Operation this slice's schemas can produce
+// ("push", "force-push", "delete-ref") is listed.
 var remoteMutationOps = map[string]bool{"push": true, "force-push": true, "delete-ref": true}
 
 // applyTransform rewrites effects under t by effect shape alone. It reports
@@ -17,13 +17,43 @@ func applyTransform(t EffectTransform, effects []Effect) ([]Effect, bool) {
 	case TransformNone:
 		return effects, true
 	case TransformDryRun:
+		// Path writes are still DROPPED outright: a dry run of a local write
+		// (e.g. `sed -i -n`-shaped tooling, were it ever schema'd that way)
+		// genuinely touches no file, and no schema here has a FORBIDDEN class
+		// of path write that a dry run must not silently clear — unlike
+		// EffectRemote below, there is nothing to preserve.
+		//
+		// EffectRemote mutations are MARKED, never dropped — operator ruling
+		// (Phillip, 2026-09-07, verbatim, recorded on tc-ife3/tc-vn5z): "git
+		// push force shiuld be abstain with -n as nothong happens." A dry run
+		// of an ordinary "push" still resolves to Approve (RemoteMutation
+		// treats DryRun-marked "push" as Permitted, same net effect as the
+		// old removal), but a dry run of a FORBIDDEN-class operation
+		// (force-push, delete-ref) must not silently vanish into an
+		// unconditional Approve either — nothing happens, so Reject is wrong,
+		// but auto-approving a forbidden mutation's dry run is wrong too, so
+		// RemoteMutation abstains (Unknown) for that case. See its doc
+		// comment for the per-Operation verdicts.
+		//
+		// Marking rather than deleting also makes this ORDER-INDEPENDENT
+		// under the interpreter's flag-order application (result() applies
+		// each flag's transform in the order it appeared on the command
+		// line): retargetRemote (TransformForce/TransformDeleteRef) rewrites
+		// only Operation, never DryRun, so `--force -n` (retarget then mark)
+		// and `-n --force` (mark then retarget) both end at the same final
+		// (Operation="force-push", DryRun=true) pair. Deleting the effect
+		// instead — as slice 1 originally did — would have made `-n --force`
+		// strip the effect while it was still plain "push" (not yet
+		// forbidden-class), leaving nothing behind for the later --force to
+		// retarget, silently approving the forbidden dry run in exactly the
+		// flag order the brief calls out.
 		out := make([]Effect, 0, len(effects))
 		for _, e := range effects {
 			if e.Kind == EffectPath && e.Access.IsWrite() {
 				continue
 			}
 			if e.Kind == EffectRemote && remoteMutationOps[e.Operation] {
-				continue
+				e.DryRun = true
 			}
 			out = append(out, e)
 		}

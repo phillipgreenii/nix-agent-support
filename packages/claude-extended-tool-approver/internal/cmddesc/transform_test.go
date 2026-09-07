@@ -19,6 +19,7 @@ func TestApplyTransform(t *testing.T) {
 
 	with := func(e Effect, a PathAccess) Effect { e.Access = a; return e }
 	withOp := func(e Effect, op string) Effect { e.Operation = op; return e }
+	withDryRun := func(e Effect) Effect { e.DryRun = true; return e }
 
 	cases := []struct {
 		name string
@@ -27,7 +28,7 @@ func TestApplyTransform(t *testing.T) {
 		ok   bool
 	}{
 		{"none is identity", TransformNone, all, true},
-		{"dry-run drops every write class and every remote mutation, keeps reads and non-paths", TransformDryRun, []Effect{posRead, flagRead, stdout, prog}, true},
+		{"dry-run drops every write class, marks (not drops) every remote mutation, keeps reads and non-paths", TransformDryRun, []Effect{posRead, flagRead, stdout, prog, withDryRun(push)}, true},
 		{"in-place upgrades positional reads only", TransformInPlace, []Effect{with(posRead, AccessModify), flagRead, trunc, del, stdout, prog, push}, true},
 		{"no-clobber turns truncate into create", TransformNoClobber, []Effect{posRead, flagRead, with(trunc, AccessCreate), del, stdout, prog, push}, true},
 		{"force rewrites push to force-push", TransformForce, []Effect{posRead, flagRead, trunc, del, stdout, prog, withOp(push, "force-push")}, true},
@@ -47,11 +48,14 @@ func TestApplyTransform(t *testing.T) {
 	}
 }
 
-// TestDryRunDropsEveryRemoteMutation: TransformDryRun removes force-push and
+// TestDryRunMarksEveryRemoteMutation: TransformDryRun marks force-push and
 // delete-ref too, not just a plain push — the vocabulary check is by
 // Operation value, not by whether TransformForce/TransformDeleteRef already
-// ran.
-func TestDryRunDropsEveryRemoteMutation(t *testing.T) {
+// ran. Slice 3w (tc-lc8f item 4d; tc-ife3 item 2): these effects used to be
+// REMOVED; they now survive, DryRun-marked, so RemoteMutation can judge a
+// dry run of a forbidden-class operation as Unknown instead of it silently
+// vanishing into an automatic Approve.
+func TestDryRunMarksEveryRemoteMutation(t *testing.T) {
 	forcePush := Effect{Kind: EffectRemote, Resource: "origin", Operation: "force-push"}
 	deleteRef := Effect{Kind: EffectRemote, Resource: "origin", Operation: "delete-ref"}
 	read := Effect{Kind: EffectPath, Path: "a", Access: AccessRead}
@@ -59,8 +63,13 @@ func TestDryRunDropsEveryRemoteMutation(t *testing.T) {
 	if !ok {
 		t.Fatal("dry-run reported not ok")
 	}
-	if !reflect.DeepEqual(got, []Effect{read}) {
-		t.Errorf("got %+v, want only the read to survive", got)
+	wantForcePush := forcePush
+	wantForcePush.DryRun = true
+	wantDeleteRef := deleteRef
+	wantDeleteRef.DryRun = true
+	want := []Effect{wantForcePush, wantDeleteRef, read}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got  %+v\nwant %+v", got, want)
 	}
 }
 

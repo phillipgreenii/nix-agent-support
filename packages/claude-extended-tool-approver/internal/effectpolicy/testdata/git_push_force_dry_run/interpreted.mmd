@@ -1,2 +1,2 @@
 flowchart LR
-    n0["command: git push --force -n origin main<br/>mark=permitted"]
+    n0["command: git push --force -n origin main<br/>- remote:force-push origin (dry-run) [arg 2]<br/>mark=insufficient: remote:force-push origin (dry-run) [arg 2]: remote-mutation (dry run of a force-push mutates nothing, but a forbidden mutation's dry run is not auto-approved either (operator ruling, Phillip 2026-09-07, tc-ife3/tc-vn5z))"]

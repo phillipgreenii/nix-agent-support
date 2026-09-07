@@ -575,10 +575,35 @@ func (NetworkAccess) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, bool) 
 //   - "read": a read of a named remote resource (bd list/show/ready, slice
 //     3n) — Permitted. Reading is not a mutation; the resource's content
 //     flowing somewhere dangerous is the flow policies' concern.
+//
 //   - "push", "mutate": a write needing explicit consent — Unknown, never
 //     Permitted here ("mutate" is bd's issue-writing verbs, slice 3n).
+//     EXCEPTION: a DryRun-marked "push" (TransformDryRun, cmddesc/
+//     transform.go) is Permitted — see the DryRun paragraph below.
+//
 //   - "force-push", "delete-ref": known-bad, unreviewable rewrites of a
-//     shared ref — Forbidden.
+//     shared ref — Forbidden. EXCEPTION: DryRun-marked, see below.
+//
+//   - DryRun (slice 3w; tc-lc8f item 4d, tc-ife3 item 2): operator ruling
+//     (Phillip, 2026-09-07, verbatim, recorded on tc-ife3/tc-vn5z): "git
+//     push force shiuld be abstain with -n as nothong happens." Normalized:
+//     a dry run (`-n`/`--dry-run`, any flag order, with `-f`/`--force`/
+//     `--force-with-lease`/`-d`/`--delete` in any order) of what would
+//     otherwise be a FORBIDDEN mutation (force-push, delete-ref) is neither
+//     production's unconditional Reject (wrong — nothing happens) nor an
+//     automatic Approve (also wrong — a dry run of a forbidden mutation is
+//     not something to auto-clear) — it is Unknown. A dry run of the
+//     ORDINARY "push" operation is unaffected by this ruling and stays
+//     Permitted, matching its pre-existing behavior (the effect used to be
+//     REMOVED by TransformDryRun before it ever reached this policy; now it
+//     survives, marked, and this policy judges it Permitted directly — same
+//     net verdict, more explicit representation). This is expressed purely
+//     as data: e.Operation (already a small open vocabulary) crossed with
+//     e.DryRun (cmddesc.Effect's new field) — nothing here or in
+//     TransformDryRun branches on a command name, so any future schema
+//     whose Operation lands in the forbidden class gets the same treatment
+//     automatically.
+//
 //   - "dolt-server": starting, stopping or killing a Dolt SQL server (bd
 //     dolt start/stop/killall, slice 3n). REVISED by slice 3u per an
 //     operator ruling (Phillip, 2026-09-07, verbatim, recorded on tc-vn5z):
@@ -597,6 +622,7 @@ func (NetworkAccess) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, bool) 
 //     policy fact; that machine invariant is now expressed as the
 //     OPERATOR'S OWN configured value, supplied by the caller, not baked
 //     into this policy.
+//
 //   - anything else is outside this vocabulary and fails closed to Unknown.
 type RemoteMutation struct{}
 
@@ -615,12 +641,21 @@ func (RemoteMutation) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, bool)
 	case "read":
 		return Finding{Verdict: Permitted, Reason: "read of a named remote resource"}, true
 	case "push":
+		if e.DryRun {
+			return Finding{Verdict: Permitted, Reason: "dry run of an ordinary push mutates nothing"}, true
+		}
 		return Finding{Verdict: Unknown, Reason: "remote ref update requires consent"}, true
 	case "mutate":
 		return Finding{Verdict: Unknown, Reason: "remote resource mutation requires consent"}, true
 	case "force-push":
+		if e.DryRun {
+			return Finding{Verdict: Unknown, Reason: "dry run of a force-push mutates nothing, but a forbidden mutation's dry run is not auto-approved either (operator ruling, Phillip 2026-09-07, tc-ife3/tc-vn5z)"}, true
+		}
 		return Finding{Verdict: Forbidden, Reason: "force-push rewrites a shared ref"}, true
 	case "delete-ref":
+		if e.DryRun {
+			return Finding{Verdict: Unknown, Reason: "dry run of a delete-ref mutates nothing, but a forbidden mutation's dry run is not auto-approved either (operator ruling, Phillip 2026-09-07, tc-ife3/tc-vn5z)"}, true
+		}
 		return Finding{Verdict: Forbidden, Reason: "delete-ref removes a shared ref"}, true
 	case "dolt-server":
 		if ctx.RemoteLifecycleClass(e.Resource) == "reject" {

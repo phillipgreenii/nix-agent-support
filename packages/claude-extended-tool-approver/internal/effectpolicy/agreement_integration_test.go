@@ -373,38 +373,27 @@ var knownSpikeLooser = map[string]spikeLooserEntry{
 			"this all-Approve row is looser, and only because it is, at bottom, still an unregistered " +
 			"bare `bash -c` — the worst-of fold this slice verifies did not change that.",
 	},
-	"git_push_force_dry_run": {
-		Class: "looser-than-reject",
-		Cause: "internal/rules/git/git.go's pushVerdict rejects on `--force`/`-f` (HasLongFlagPrefix/" +
-			"HasShortFlag) UNCONDITIONALLY — it never looks for `-n`/`--dry-run` at all, so " +
-			"`git push --force -n origin main` is refused exactly like a real force-push. The " +
-			"spike's gitPushSchema instead models `-n`/`--dry-run` as a real TransformDryRun " +
-			"(cmddesc/transform.go) that strips EVERY EffectRemote whose Operation is in " +
-			"remoteMutationOps ({push, force-push, delete-ref}) — applied generically, in flag " +
-			"order (interpreter.go's result()), over whatever the OTHER flags on the same leaf " +
-			"already produced. `-f`/`--force` retargets the effect's Operation from \"push\" to " +
-			"\"force-push\" (TransformForce) BEFORE the dry-run transform runs, but force-push is " +
-			"still a member of remoteMutationOps, so the dry-run strips it anyway; the EffectRemote " +
-			"never reaches DefaultPolicies' RemoteMutation policy (policy.go), which only judges " +
-			"EffectRemote effects — with none left, nothing is Forbidden and the leaf Approves. " +
-			"The live rule is the more precise one here: it correctly treats `--dry-run` as " +
-			"irrelevant to whether the FORCE OPERATION ITSELF is prohibited (a dry-run still " +
-			"reports what a force-push would do, and the operator ruling in pushVerdict's doc " +
-			"comment is about the operation being typed at all, not about its network effect). " +
-			"The spike's dry-run transform models real git semantics (a dry run genuinely mutates " +
-			"nothing) but does not know this codebase's operator-specific ruling that even a " +
-			"dry-run SPELLING of a forbidden push should not be auto-cleared.",
-	},
-	"git_push_dry_run_force": {
-		Class: "looser-than-reject",
-		Cause: "same root cause as git_push_force_dry_run, flags in the other order: " +
-			"remoteMutationOps already includes both \"push\" and \"force-push\", so the dry-run " +
-			"transform strips the EffectRemote whichever transform (TransformDryRun or " +
-			"TransformForce) runs first — `-n --force` strips the plain \"push\" effect before " +
-			"TransformForce's retarget finds anything left to retarget, a no-op. The result is " +
-			"identical to git_push_force_dry_run: no EffectRemote survives to reach RemoteMutation, " +
-			"so the spike Approves while pushVerdict's unconditional force check Rejects.",
-	},
+	// git_push_force_dry_run / git_push_dry_run_force were registered here
+	// (looser-than-reject: live=Reject, spike=Approve) because
+	// TransformDryRun used to STRIP every EffectRemote in remoteMutationOps
+	// unconditionally, whichever flag order applied it, so no EffectRemote
+	// ever reached RemoteMutation and the leaf Approved outright. Slice 3w
+	// (tc-lc8f item 4d; tc-ife3 item 2) resolves this per an operator ruling
+	// (Phillip, 2026-09-07, verbatim, recorded on tc-ife3/tc-vn5z): "git push
+	// force shiuld be abstain with -n as nothong happens." TransformDryRun
+	// now MARKS (DryRun=true) a forbidden-class EffectRemote instead of
+	// stripping it, and RemoteMutation judges a DryRun-marked force-push/
+	// delete-ref as Unknown — so both rows (and the new flag-order/spelling
+	// variants git_push_dry_run_f_short, git_push_f_lease_dry_run,
+	// git_push_delete_dry_run) now classify spike=Abstain against
+	// live=Reject, which is classify()'s "spike-underinformed" class (case 7
+	// above), NOT looser-than-reject: Abstain never approves, so it is SAFE
+	// and reported without assertion. Their entries are deleted — same
+	// housekeeping slice 3i's git_clean_n/git_clean_nd removal already
+	// established: the register must not carry a row the harness no longer
+	// classifies as looser, since a stale entry for a non-looser row would
+	// otherwise sit here silently (TestAgreement's Class-mismatch check only
+	// fires for rows that ARE STILL looser-than-reject/looser-than-abstain).
 	// git_clean_n / git_clean_nd were registered here (slice 3d) as
 	// looser-than-abstain: the spike's gitCleanSchema modeled `-n`/`--dry-run`
 	// as a TransformDryRun that stripped the implicit `PathDelete "."`, so the

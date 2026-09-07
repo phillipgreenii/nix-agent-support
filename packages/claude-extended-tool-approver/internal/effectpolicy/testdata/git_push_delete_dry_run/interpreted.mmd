@@ -1,0 +1,2 @@
+flowchart LR
+    n0["command: git push --delete -n origin branch<br/>- remote:delete-ref origin (dry-run) [arg 2]<br/>mark=insufficient: remote:delete-ref origin (dry-run) [arg 2]: remote-mutation (dry run of a delete-ref mutates nothing, but a forbidden mutation's dry run is not auto-approved either (operator ruling, Phillip 2026-09-07, tc-ife3/tc-vn5z))"]

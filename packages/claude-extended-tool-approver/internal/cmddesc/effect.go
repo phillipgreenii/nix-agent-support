@@ -190,9 +190,23 @@ type Effect struct {
 	// "force-push", "delete-ref" today) naming what happens to it. Dynamic
 	// (shared with the path/net fields) is true when the resource is not
 	// statically known (an implicit default remote, resolved from config at
-	// runtime).
+	// runtime). DryRun is true when a dry-run flag (TransformDryRun) applied
+	// to this effect — slice 3w (tc-lc8f item 4d; tc-ife3 item 2): a dry run
+	// no longer ERASES a remote-mutation effect, it MARKS it, so a
+	// forbidden-class operation (force-push, delete-ref) survives to
+	// RemoteMutation's policy as a distinct, judgeable state instead of
+	// vanishing into an automatic Approve. Marking (rather than deleting)
+	// also makes the mark ORDER-INDEPENDENT: retargetRemote (TransformForce/
+	// TransformDeleteRef) rewrites only Operation, so DryRun set before a
+	// force/delete retarget survives it unchanged, and DryRun set after one
+	// still lands on the already-retargeted Operation — either flag order on
+	// the command line reaches the same final (Operation, DryRun) pair. It
+	// is field-general (not remote-specific in name) in case a future
+	// dry-runnable effect kind needs the same marker, though only
+	// EffectRemote sets it today.
 	Resource  string
 	Operation string
+	DryRun    bool
 
 	// EffectOpaque detail (and free text for any kind).
 	Detail string
@@ -242,6 +256,9 @@ func (e Effect) String() string {
 		fmt.Fprintf(&b, ":%s %s", e.Operation, e.Resource)
 		if e.Dynamic {
 			b.WriteString(" (dynamic)")
+		}
+		if e.DryRun {
+			b.WriteString(" (dry-run)")
 		}
 		if e.Source != "" {
 			fmt.Fprintf(&b, " [%s]", e.Source)

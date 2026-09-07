@@ -483,15 +483,22 @@ var gitCleanSchema = CommandSchema{
 // Operation is "push"; -f/--force/--force-with-lease upgrade that to
 // "force-push", -d/--delete to "delete-ref" (TransformForce/
 // TransformDeleteRef, applied generically by effect shape); -n/--dry-run
-// removes it entirely via the extended TransformDryRun. With NO positional
-// at all, an implicit effect stands in for the default remote, marked
-// Dynamic because which remote that is comes from git config at runtime, not
-// from argv. Deliberately left unmodeled (abstain): --no-verify (skips the
-// pre-push hook — a materially different trust boundary), --mirror (mirrors
-// ALL refs, not just what a modeled refspec would name), --signed[=] (changes
-// what the push cryptographically asserts), --recurse-submodules (recurses
-// into repositories this schema knows nothing about). Flags verified against
-// this host's `git push -h`.
+// MARKS it via TransformDryRun (cmddesc/transform.go) rather than removing
+// it — slice 3w (tc-lc8f item 4d; tc-ife3 item 2): a dry run of an ordinary
+// push still nets Approve (effectpolicy's RemoteMutation treats a
+// DryRun-marked "push" as Permitted), but a dry run of what would otherwise
+// be a FORBIDDEN operation (force-push, delete-ref) abstains instead of
+// silently auto-approving, per an operator ruling recorded on RemoteMutation
+// and TransformDryRun's own doc comments — this holds regardless of whether
+// -n or the force/delete flag appears first on the command line. With NO
+// positional at all, an implicit effect stands in for the default remote,
+// marked Dynamic because which remote that is comes from git config at
+// runtime, not from argv. Deliberately left unmodeled (abstain): --no-verify
+// (skips the pre-push hook — a materially different trust boundary),
+// --mirror (mirrors ALL refs, not just what a modeled refspec would name),
+// --signed[=] (changes what the push cryptographically asserts),
+// --recurse-submodules (recurses into repositories this schema knows
+// nothing about). Flags verified against this host's `git push -h`.
 var gitPushSchema = CommandSchema{
 	Name:       "push",
 	Provenance: "git version 2.54.0, git push -h",

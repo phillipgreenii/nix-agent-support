@@ -384,9 +384,24 @@ var goldenCases = []goldenCase{
 	{"git_push_force", "git push --force origin feature", evalcontract.Reject, nil},
 	{"git_push_f_lease", "git push --force-with-lease origin feature", evalcontract.Reject, nil},
 	{"git_push_delete", "git push origin --delete feature", evalcontract.Reject, nil},
+	// A dry run of the ORDINARY push stays Approve — TransformDryRun marks
+	// (rather than removes) the EffectRemote, and RemoteMutation treats a
+	// DryRun-marked "push" as Permitted, same net verdict as before slice 3w.
 	{"git_push_dry_run", "git push -n origin main", evalcontract.Approve, nil},
-	{"git_push_force_dry_run", "git push --force -n origin main", evalcontract.Approve, nil},
-	{"git_push_dry_run_force", "git push -n --force origin main", evalcontract.Approve, nil},
+	// A dry run of what would otherwise be a FORBIDDEN mutation (force-push,
+	// delete-ref) abstains instead — operator ruling (Phillip, 2026-09-07,
+	// verbatim, recorded on tc-ife3/tc-vn5z): "git push force shiuld be
+	// abstain with -n as nothong happens." Slice 3w (tc-lc8f item 4d; tc-ife3
+	// item 2). These four flip Approve -> Abstain and exercise every flag
+	// order/spelling the ruling names; every one lands on Abstain regardless
+	// of whether -n/--dry-run precedes or follows the force/delete flag,
+	// because DryRun (cmddesc.Effect) survives an Operation retarget either
+	// way (see transform.go's TransformDryRun doc comment).
+	{"git_push_force_dry_run", "git push --force -n origin main", evalcontract.Abstain, nil},
+	{"git_push_dry_run_force", "git push -n --force origin main", evalcontract.Abstain, nil},
+	{"git_push_dry_run_f_short", "git push --dry-run -f origin main", evalcontract.Abstain, nil},
+	{"git_push_f_lease_dry_run", "git push --force-with-lease -n origin main", evalcontract.Abstain, nil},
+	{"git_push_delete_dry_run", "git push --delete -n origin branch", evalcontract.Abstain, nil},
 	{"git_push_no_verify", "git push --no-verify origin main", evalcontract.Abstain, nil},
 	{"git_C_status", "git -C sub status", evalcontract.Abstain, nil},
 	{"git_c_config_status", "git -c core.pager=cat status", evalcontract.Abstain, nil},
