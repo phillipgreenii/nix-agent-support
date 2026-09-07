@@ -18,18 +18,34 @@ mkGoApp {
   # cannot be scoped down to only cmd/pg-connector's own dependency graph without
   # breaking those tests — they exist specifically to inspect the OTHER backends'
   # trees. `./cmd` and `./pkg` are therefore included whole (every backend and every
-  # shared package), which is exactly what those tests need and nothing more: the only
-  # things excluded are `./docs` (prose behavior docs, read by no test or build) and
-  # the five `*.nix` derivation files themselves (irrelevant to `go build`/`go test`).
-  # This still means an edit to ANY backend's Go source legitimately re-digests this
-  # derivation — that is correct, not a bug: TestBackendLayoutConvention etc. must
-  # re-verify the invariant over the new content. What this DOES fix (the bead's own
-  # motivating example) is that a comment edit to a `.nix` file no longer touches any
-  # of the 5 derivations' hashes at all, and each Tier-2 backend below is now isolated
-  # from its siblings. Technique: `lib.fileset.toSource`/`unions`, the same fileset
-  # idiom `phillipg-nix-repo-base`'s `mkGoApp` Pattern B and this repo's own
-  # `packages/pr-pool/default.nix` (excluding `./docs`) already use — adapted here for
-  # per-binary isolation within one shared go.mod rather than a local module replace.
+  # shared package), and the only thing excluded is `./docs` (prose behavior docs,
+  # read by no test or build).
+  #
+  # The five `*.nix` derivation files ARE included too (pg2-p5at3 fast-follow,
+  # not the original cut here): spec_citations_test.go's
+  # TestNoSectionSignCitationsUnderPgConnector — one of this same whole-module
+  # suite, and itself part of `./cmd` above — deliberately scans "every file
+  # type, not just Go" for forbidden section-sign citations, and its own
+  # wantNixFiles self-check (`t.Errorf("guard never scanned %s ...")`) fails
+  # loudly if any of the 5 `*.nix` files is absent from the tree it walks
+  # (pgConnectorModuleRoot, rooted at wherever go.mod lands in THIS src).
+  # Excluding them was this fix's original premise ("irrelevant to go
+  # build/go test") — that premise is false for this one Tier-1 derivation,
+  # caught only once f44fa5d0 (landed on main after this fix's first attempt)
+  # added test-pg-connector-version-stamped's dependency on `pkgs.pg-connector`,
+  # which forces THIS derivation itself to build under `nix flake check` and
+  # therefore actually run doCheck's `go test ./...` against this filtered
+  # src for the first time. This still means an edit to ANY backend's Go
+  # source, or to any of the 5 `*.nix` files, legitimately re-digests this
+  # ONE derivation — that is correct, not a bug: the guard must re-verify the
+  # invariant over the new content. Each Tier-2 backend below stays isolated
+  # from its siblings AND from these `*.nix` files (their own filtered `src`
+  # never includes `./cmd/pg-connector`, so this test isn't even compiled
+  # there). Technique: `lib.fileset.toSource`/`unions`, the same fileset idiom
+  # `phillipg-nix-repo-base`'s `mkGoApp` Pattern B and this repo's own
+  # `packages/pr-pool/default.nix` (excluding `./docs`) already use — adapted
+  # here for per-binary isolation within one shared go.mod rather than a
+  # local module replace.
   src = lib.fileset.toSource {
     root = ./.;
     fileset = lib.fileset.unions [
@@ -38,6 +54,11 @@ mkGoApp {
       ./gomod2nix.toml
       ./cmd
       ./pkg
+      ./default.nix
+      ./pg-connector-pr-github.nix
+      ./pg-connector-ci-github-actions.nix
+      ./pg-connector-issue-beads.nix
+      ./pg-connector-scm-git.nix
     ];
   };
 
