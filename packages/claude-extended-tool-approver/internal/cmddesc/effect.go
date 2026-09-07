@@ -1,0 +1,203 @@
+package cmddesc
+
+import (
+	"fmt"
+	"strings"
+)
+
+// EffectKind enumerates the effect vocabulary a policy can judge.
+type EffectKind int
+
+const (
+	// EffectOpaque is "something happens that the model cannot describe" — a
+	// leaf with no schema. It can never be permitted.
+	EffectOpaque EffectKind = iota
+	// EffectPath is a filesystem access of some class on a path.
+	EffectPath
+	// EffectProgram is execution of program text in a dialect.
+	EffectProgram
+	// EffectEnv is a read or set of an environment variable.
+	EffectEnv
+	// EffectNet is network traffic to/from a host.
+	EffectNet
+	// EffectStdio is consumption or production of a standard stream.
+	EffectStdio
+)
+
+// String returns the deterministic kind name.
+func (k EffectKind) String() string {
+	switch k {
+	case EffectOpaque:
+		return "opaque"
+	case EffectPath:
+		return "path"
+	case EffectProgram:
+		return "program"
+	case EffectEnv:
+		return "env"
+	case EffectNet:
+		return "net"
+	case EffectStdio:
+		return "stdio"
+	default:
+		return "effect-invalid"
+	}
+}
+
+// PathAccess is the access class of a path effect. It is the EFFECT-level
+// vocabulary (what the command does), distinct from patheval's zone
+// classification (what the environment allows) which the policies consult.
+type PathAccess int
+
+const (
+	// AccessRead reads content.
+	AccessRead PathAccess = iota
+	// AccessCreate creates a new file.
+	AccessCreate
+	// AccessModify changes an existing file in place (append, edit).
+	AccessModify
+	// AccessDelete removes a file.
+	AccessDelete
+	// AccessTruncate truncates and rewrites a file.
+	AccessTruncate
+)
+
+// String returns the deterministic access name.
+func (a PathAccess) String() string {
+	switch a {
+	case AccessRead:
+		return "read"
+	case AccessCreate:
+		return "create"
+	case AccessModify:
+		return "modify"
+	case AccessDelete:
+		return "delete"
+	case AccessTruncate:
+		return "truncate"
+	default:
+		return "access-invalid"
+	}
+}
+
+// IsWrite reports whether the access class changes the filesystem. Anything
+// that is not a pure read is a write, so a class added later fails closed.
+func (a PathAccess) IsWrite() bool { return a != AccessRead }
+
+// NetDirection is the direction of a network effect.
+type NetDirection int
+
+const (
+	// NetOutbound connects out to Host.
+	NetOutbound NetDirection = iota
+	// NetInbound listens for connections.
+	NetInbound
+)
+
+// String returns the deterministic direction name.
+func (d NetDirection) String() string {
+	if d == NetInbound {
+		return "inbound"
+	}
+	return "outbound"
+}
+
+// StdioStream names a standard stream.
+type StdioStream int
+
+const (
+	// StreamStdin is standard input.
+	StreamStdin StdioStream = iota
+	// StreamStdout is standard output.
+	StreamStdout
+	// StreamStderr is standard error.
+	StreamStderr
+)
+
+// String returns the deterministic stream name.
+func (s StdioStream) String() string {
+	switch s {
+	case StreamStdin:
+		return "stdin"
+	case StreamStdout:
+		return "stdout"
+	case StreamStderr:
+		return "stderr"
+	default:
+		return "stream-invalid"
+	}
+}
+
+// Effect is one typed, judgeable consequence of running a leaf. Kind selects
+// which field group is meaningful; the others stay zero. Source records where a
+// path effect came from ("arg <i>", "redirect", "stdin") so a reason can point
+// at it.
+type Effect struct {
+	Kind EffectKind
+
+	// EffectPath fields. Dynamic is true when the path text contains a runtime
+	// expansion and so is NOT statically known; policies must treat it as
+	// unknown.
+	Path    string
+	Access  PathAccess
+	Dynamic bool
+	Source  string
+
+	// EffectProgram fields.
+	Program string
+	Dialect string
+
+	// EffectEnv fields. EnvSet is true for an assignment, false for a read.
+	EnvName string
+	EnvSet  bool
+
+	// EffectNet fields.
+	Host      string
+	Direction NetDirection
+
+	// EffectStdio fields. Metadata is true when only metadata (not content)
+	// flows on the stream.
+	Stream   StdioStream
+	Metadata bool
+
+	// EffectOpaque detail (and free text for any kind).
+	Detail string
+}
+
+// String renders the effect deterministically; it is the text used in Mermaid
+// labels and decision reasons, so it must depend only on the effect's fields.
+func (e Effect) String() string {
+	var b strings.Builder
+	b.WriteString(e.Kind.String())
+	switch e.Kind {
+	case EffectPath:
+		fmt.Fprintf(&b, ":%s %s", e.Access, e.Path)
+		if e.Dynamic {
+			b.WriteString(" (dynamic)")
+		}
+		if e.Source != "" {
+			fmt.Fprintf(&b, " [%s]", e.Source)
+		}
+	case EffectProgram:
+		fmt.Fprintf(&b, ":%s %q", e.Dialect, e.Program)
+	case EffectEnv:
+		if e.EnvSet {
+			fmt.Fprintf(&b, ":set %s", e.EnvName)
+		} else {
+			fmt.Fprintf(&b, ":read %s", e.EnvName)
+		}
+	case EffectNet:
+		fmt.Fprintf(&b, ":%s %s", e.Direction, e.Host)
+	case EffectStdio:
+		fmt.Fprintf(&b, ":%s", e.Stream)
+		if e.Metadata {
+			b.WriteString(" metadata")
+		} else {
+			b.WriteString(" content")
+		}
+	}
+	if e.Detail != "" {
+		fmt.Fprintf(&b, " (%s)", e.Detail)
+	}
+	return b.String()
+}

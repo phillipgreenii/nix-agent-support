@@ -1,0 +1,6 @@
+flowchart LR
+    n0["command: cat README.md<br/>- path:read README.md [arg 0]<br/>- stdio:stdout content<br/>mark=permitted"]
+    n1["command: frobnicate<br/>- opaque (no schema for frobnicate)<br/>mark=insufficient: no schema for frobnicate"]
+    n2[/"file: README.md"/]
+    n0 -->|"pipe"| n1
+    n0 -->|"reads: read"| n2
