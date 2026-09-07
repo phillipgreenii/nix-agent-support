@@ -246,8 +246,31 @@ func TestGetLogs_ReturnsRawBytes(t *testing.T) {
 		t.Fatalf("logs: %q", raw)
 	}
 	last := gh.calls[len(gh.calls)-1]
-	if last[0] != "run" || last[1] != "view" || last[2] != "1001" || last[3] != "--log" {
-		t.Fatalf("expected run view 1001 --log: %v", last)
+	if last[0] != "run" || last[1] != "view" || last[2] != "--log" || last[3] != "--" || last[4] != "1001" {
+		t.Fatalf("expected run view --log -- 1001: %v", last)
+	}
+}
+
+// TestGetLogs_RunIDLooksLikeGHFlag locks in the pg2-uziwu fix: a runID that
+// is itself a valid `gh run view` flag string (e.g. "--repo") must not be
+// interpretable as a flag by gh's own cobra/pflag layer — it must be sent
+// as a literal positional, after a "--" terminator, with the existing
+// --log flag still positioned BEFORE that terminator so it keeps parsing
+// as a flag rather than becoming a second positional [bead: pg2-uziwu].
+// Verified live against real gh v2.99.0 (see GetLogs's doc comment) that
+// the unescaped shape loses both the run id and --log to flag-value
+// consumption, while the escaped shape correctly reaches
+// ".../actions/runs/--repo" as the literal (nonexistent) run id.
+func TestGetLogs_RunIDLooksLikeGHFlag(t *testing.T) {
+	gh := newFakeGH()
+	p := NewWithDeps(gh, nil)
+
+	if _, err := p.GetLogs(context.Background(), "--repo"); err != nil {
+		t.Fatalf("GetLogs: %v", err)
+	}
+	last := gh.calls[len(gh.calls)-1]
+	if last[0] != "run" || last[1] != "view" || last[2] != "--log" || last[3] != "--" || last[4] != "--repo" {
+		t.Fatalf("expected \"--repo\" escaped as a literal positional after \"--\", with --log kept before it, got %v", last)
 	}
 }
 

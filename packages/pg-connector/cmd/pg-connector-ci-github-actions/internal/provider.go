@@ -159,15 +159,34 @@ func (b *Backend) listRunsByBranch(ctx context.Context, prID, repo, branch strin
 	return out, nil
 }
 
-// GetLogs implements ci.Provider.GetLogs, carried over unchanged from
-// ghactions.go: no repo/PR context is needed or added, matching that
-// packet's own behavior exactly — this packet's contract requires "no
-// behavioral drift on the ported operations."
+// GetLogs implements ci.Provider.GetLogs, carried over from ghactions.go: no
+// repo/PR context is needed or added, matching that packet's own behavior
+// exactly — this packet's contract requires "no behavioral drift on the
+// ported operations." The one deliberate deviation from a literal carry-
+// over is the "--" terminator placed ahead of runID [bead: pg2-uziwu],
+// mirroring the pg-connector-scm-git worktree add/remove fix [bead:
+// pg2-jn22x] and the pg-connector-issue-beads backend fix [bead: pg2-usu5b]:
+// without it, a caller-supplied runID equal to a real `gh run view` flag
+// (e.g. "--repo") is parsed by gh's own cobra/pflag layer as that flag
+// instead of as a positional run id — verified live against real gh v2.99.0:
+// `gh run view --repo --log` (the old unescaped shape, with runID="--repo"
+// positioned where a flag can consume it) has "--repo" consume "--log" as
+// its value, losing the run id AND the --log flag entirely ("run or job ID
+// required when not running interactively"). `--` forces "--repo" to be
+// treated as a literal positional instead, correctly reaching
+// ".../actions/runs/--repo" as the requested (nonexistent) run.
+//
+// Unlike the trivial 1-line insertions in those two sibling fixes, --log
+// cannot simply move after the terminator: `gh run view`, like bd, treats
+// everything after "--" as positional, so --log MUST stay BEFORE it to keep
+// parsing as a flag rather than becoming a second (rejected) positional
+// argument. Hence "run", "view", "--log", "--", runID — flags first, then
+// the terminator, then the caller-controlled positional.
 func (b *Backend) GetLogs(ctx context.Context, runID string) ([]byte, error) {
 	if strings.TrimSpace(runID) == "" {
 		return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, "pg-connector-ci-github-actions: run ID is required")
 	}
-	raw, err := b.gh.Run(ctx, "run", "view", runID, "--log")
+	raw, err := b.gh.Run(ctx, "run", "view", "--log", "--", runID)
 	if err != nil {
 		return nil, classifyGHError(err)
 	}
