@@ -32,7 +32,7 @@ func writeMultiEntityConfigFor(t *testing.T) string {
 func TestConfigShow_JSON_ReportsResolvedPathAndBackends(t *testing.T) {
 	cfg := writeMultiEntityConfigFor(t)
 
-	stdout, code := executePr(t, []string{"config", "show"})
+	stdout, _, code := executePr(t, []string{"config", "show"})
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
 	}
@@ -61,7 +61,7 @@ func TestConfigShow_JSON_ReportsResolvedPathAndBackends(t *testing.T) {
 func TestConfigShow_Human_ReportsResolvedPathAndBackends(t *testing.T) {
 	cfg := writeMultiEntityConfigFor(t)
 
-	stdout, code := executePr(t, []string{"config", "show", "--output", "human"})
+	stdout, _, code := executePr(t, []string{"config", "show", "--output", "human"})
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
 	}
@@ -104,7 +104,7 @@ func TestConfigShow_MissingEntry_ReportsEmptyNotError(t *testing.T) {
 	}
 	t.Setenv("PG_PR_CONFIG", cfg)
 
-	stdout, code := executePr(t, []string{"config", "show"})
+	stdout, _, code := executePr(t, []string{"config", "show"})
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
 	}
