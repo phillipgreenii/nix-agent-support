@@ -228,7 +228,7 @@ func (b *builder) interpret(i int, reg cmddesc.Registry, ctx cmddesc.Context, ch
 	}
 
 	for _, r := range leaf.Redirections {
-		effects = append(effects, redirectionEffect(r.Path, r.Operator, r.Kind.IsWrite()))
+		effects = append(effects, redirectionEffect(r.Path, r.Operator, r.Kind.IsWrite(), r.Kind.IsReadWrite(), r.LiveExpansion, r.Append))
 	}
 
 	for _, e := range effects {
@@ -366,17 +366,30 @@ func (b *builder) deriveFlows() {
 	}
 }
 
-// redirectionEffect classifies a redirection into a path effect. Read vs write
-// comes from the parser's Kind (IsWrite), never the operator text; the
-// operator is consulted only for the write SUB-class the Kind does not carry:
-// `>>`/`&>>` append (modify) and `<>` opens read+write (modify), while
-// `>`/`>|`/`&>`/`n>` truncate. A target containing an unexpanded `$` or a
-// backtick is not statically known and is marked Dynamic (fail-closed).
-func redirectionEffect(target, operator string, isWrite bool) cmddesc.Effect {
+// redirectionEffect classifies a redirection into a path effect from the
+// SEAM's own parser facts — never by re-deriving them from rendered text, per
+// hookio.Redirection's own doc ("A consumer MUST classify by Kind, never by
+// matching this string"):
+//
+//   - Read vs write comes from Kind.IsWrite().
+//   - The write SUB-class comes from isReadWrite (Kind == RedirectReadWrite,
+//     bash's `<>`) and appnd (the operator's own ENUM, `>>`/`&>>`/`n>>`/
+//     `{fd}>>`) — either one is a Modify; a plain write with neither is a
+//     Truncate (`>`, `>|`, `&>`, `n>`).
+//   - Dynamic comes from live (hookio.Redirection.LiveExpansion), the same
+//     AST-level expansion check ordinary arguments use, not a `$`/backtick
+//     substring test on the target text — see LiveExpansion's own doc for
+//     the two shapes that heuristic gets wrong (a quoted/escaped `$`/“ ` “
+//     that is not live, and a live process substitution `<(...)`/`>(...)`
+//     that carries neither byte).
+//
+// operator is used ONLY for the Source label, which is descriptive text for
+// a human/diagram reader, not a classification input.
+func redirectionEffect(target, operator string, isWrite, isReadWrite, live, appnd bool) cmddesc.Effect {
 	access := cmddesc.AccessRead
 	if isWrite {
 		switch {
-		case strings.Contains(operator, ">>"), strings.Contains(operator, "<>"):
+		case appnd, isReadWrite:
 			access = cmddesc.AccessModify
 		default:
 			access = cmddesc.AccessTruncate
@@ -386,7 +399,7 @@ func redirectionEffect(target, operator string, isWrite bool) cmddesc.Effect {
 		Kind:    cmddesc.EffectPath,
 		Path:    target,
 		Access:  access,
-		Dynamic: strings.ContainsAny(target, "$`"),
+		Dynamic: live,
 		Source:  "redirect " + operator,
 	}
 }

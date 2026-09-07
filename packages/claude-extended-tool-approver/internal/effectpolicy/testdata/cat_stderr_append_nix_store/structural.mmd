@@ -1,0 +1,4 @@
+flowchart LR
+    n0["command: cat README.md 2#gt;#gt;/nix/store/log"]
+    n1[/"file: /nix/store/log"/]
+    n0 -->|"redirect-out: 2#gt;#gt;"| n1

@@ -1,0 +1,7 @@
+flowchart LR
+    n0["command: cat README.md 2#gt;#gt;/nix/store/log<br/>- path:read README.md [arg 0]<br/>- stdio:stdout content<br/>- path:modify /nix/store/log [redirect 2#gt;#gt;]<br/>mark=forbidden: path:modify /nix/store/log [redirect 2#gt;#gt;]: no-write-to-read-only-path (write to read-only zone)"]
+    n1[/"file: /nix/store/log"/]
+    n2[/"file: README.md"/]
+    n0 -->|"redirect-out: 2#gt;#gt;"| n1
+    n0 -->|"reads: read"| n2
+    n0 -->|"writes: modify"| n1

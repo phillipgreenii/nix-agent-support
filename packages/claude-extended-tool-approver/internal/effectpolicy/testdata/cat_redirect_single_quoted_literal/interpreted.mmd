@@ -1,0 +1,7 @@
+flowchart LR
+    n0["command: cat README.md #gt; '$literal'<br/>- path:read README.md [arg 0]<br/>- stdio:stdout content<br/>- path:truncate $literal [redirect #gt;]<br/>mark=permitted"]
+    n1[/"file: $literal"/]
+    n2[/"file: README.md"/]
+    n0 -->|"redirect-out: #gt;"| n1
+    n0 -->|"reads: read"| n2
+    n0 -->|"writes: truncate"| n1

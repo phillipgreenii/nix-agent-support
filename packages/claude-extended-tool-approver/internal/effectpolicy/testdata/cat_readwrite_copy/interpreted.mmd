@@ -1,0 +1,7 @@
+flowchart LR
+    n0["command: cat README.md #lt;#gt; copy.md<br/>- path:read README.md [arg 0]<br/>- stdio:stdout content<br/>- path:modify copy.md [redirect #lt;#gt;]<br/>mark=permitted"]
+    n1[/"file: copy.md"/]
+    n2[/"file: README.md"/]
+    n0 -->|"redirect-out: #lt;#gt;"| n1
+    n0 -->|"reads: read"| n2
+    n0 -->|"writes: modify"| n1

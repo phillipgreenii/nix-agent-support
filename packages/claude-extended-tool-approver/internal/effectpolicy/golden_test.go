@@ -69,6 +69,23 @@ func TestGolden(t *testing.T) {
 		{"cat_ssh_key", "cat ~/.ssh/id_rsa", evalcontract.Reject, nil},
 		{"cat_unknown_flag", "cat --weird-flag README.md", evalcontract.Abstain, nil},
 		{"cat_dynamic", `cat "$F"`, evalcontract.Abstain, nil},
+
+		// Redirection facts (hookio.Redirection.LiveExpansion / .Append), read
+		// by redirectionEffect instead of a `$`/backtick or ">>"/"<>" text
+		// heuristic: a single-quoted target is a LITERAL filename (static,
+		// even though its bytes contain `$`), a double-quoted one is a real
+		// runtime expansion (dynamic -> Unknown -> Abstain), `>>` truncate
+		// becomes Modify against a writable target and Forbidden against a
+		// read-only one exactly like a plain `>` would, and `<>` (read-write
+		// open) is classified Modify too — cat never writes through it, but
+		// the descriptor is opened for writing, which is what a permission
+		// gate cares about.
+		{"cat_redirect_single_quoted_literal", "cat README.md > '$literal'", evalcontract.Approve, nil},
+		{"cat_redirect_dynamic_target", `cat README.md > "$OUT"`, evalcontract.Abstain, nil},
+		{"cat_append_copy", "cat README.md >> copy.md", evalcontract.Approve, nil},
+		{"cat_stderr_append_nix_store", "cat README.md 2>>/nix/store/log", evalcontract.Reject, nil},
+		{"cat_readwrite_copy", "cat README.md <> copy.md", evalcontract.Approve, nil},
+
 		{"head_n_readme", "head -n 5 README.md", evalcontract.Approve, nil},
 		{"frobnicate_readme", "frobnicate README.md", evalcontract.Abstain, nil},
 		{"cat_pipe_frobnicate", "cat README.md | frobnicate", evalcontract.Abstain, nil},
