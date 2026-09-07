@@ -12,9 +12,9 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
 
-// CLI is the token-protected gateway through which pg-pr invokes the `gh`
-// binary. Every invocation resolves a GitHub token FIRST and injects it as the
-// child's single GH_TOKEN, which buys two guarantees (bead pg2-ilzq9):
+// CLI is the token-protected gateway through which this backend invokes the
+// `gh` binary. Every invocation resolves a GitHub token FIRST and injects it
+// as the child's single GH_TOKEN, which buys two guarantees (bead pg2-ilzq9):
 //
 //   - `gh` is NEVER executed without a resolved token. An unauthenticated gh
 //     starts its own interactive login — the observed symptom was repeated auth
@@ -27,11 +27,12 @@ import (
 //     GH_TOKEN.
 //
 // Callers reach it two ways. Run/RunStdin hand the whole invocation over
-// (stdout bytes plus gh-auth classification). Command returns the prepared
-// *exec.Cmd for sites that must wire it up themselves — a working directory
-// (internal/branch), separately captured stderr (internal/auth,
-// internal/worktree, pkg/provider/cicd/ghactions). Those sites declare a
-// one-method interface over Command so tests can inject a fake.
+// (stdout bytes plus gh-auth classification) and are what every production
+// call site in this package (github.go's Provider methods) actually uses.
+// Command returns the prepared *exec.Cmd for a caller that must wire it up
+// itself — no in-module production site does today, but the tests exercise
+// it directly (ghexec_test.go) to assert on the constructed cmd.Env/Args
+// without spawning a real gh.
 //
 // The `gh auth token` exec in token.go is the ONE gh invocation that does not
 // go through here, and must stay that way: it is how the token is obtained, so

@@ -15,7 +15,7 @@ import (
 )
 
 // ErrNotImplemented is returned by stub methods during Phase 0.
-var ErrNotImplemented = errors.New("pg-pr: not implemented in this phase")
+var ErrNotImplemented = errors.New("vcs: not implemented in this phase")
 
 // ErrAuthInvalid is the provider-agnostic auth-invalid sentinel. A provider's
 // CheckAuth / poll methods wrap this (so errors.Is(err, ErrAuthInvalid) holds)

@@ -106,9 +106,8 @@ func assertNoLeakedGitDirFamily(t *testing.T, env []string) {
 // TestCLICommand_ExcludesLeakedGitDirFamily is the regression test for bead
 // pg2-5xn2j: ghexec.go's command() is the choke point every gh invocation in
 // this module (except the token resolver) goes through, so proving it here
-// covers every caller — including internal/branch's PRForBranch and
-// internal/worktree's PRExists, which both set cmd.Dir/--repo on the
-// *exec.Cmd this method returns and would otherwise silently lose to an
+// covers every caller — including a future one that sets cmd.Dir/--repo on
+// the *exec.Cmd this method returns and would otherwise silently lose to an
 // inherited GIT_DIR (git's repo discovery consults the environment before
 // -C/--repo).
 func TestCLICommand_ExcludesLeakedGitDirFamily(t *testing.T) {

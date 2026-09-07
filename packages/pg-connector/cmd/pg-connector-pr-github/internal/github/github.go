@@ -139,13 +139,6 @@ func (r *cliGHRunner) RunStdin(ctx context.Context, stdin []byte, args ...string
 	return stdout.Bytes(), nil
 }
 
-// errStub marks methods that are not implemented in Phase 1.
-//
-// Phase 3 retired this — all Provider methods are now wired. Kept here as a
-// sentinel so old tests asserting against it still compile until they are
-// rewritten.
-var errStub = errors.New("github vcs: not implemented")
-
 // Common JSON field set requested from gh for PR-list endpoints.
 var prListFields = "number,title,headRefName,headRefOid,baseRefName,url,author,isDraft,state,mergedAt,closedAt,additions,deletions,changedFiles,body,labels,reviewRequests,assignees"
 

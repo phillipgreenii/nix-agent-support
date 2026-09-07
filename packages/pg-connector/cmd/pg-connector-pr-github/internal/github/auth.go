@@ -14,13 +14,14 @@ import (
 // for any error wrapping ErrGHAuthInvalid).
 var ErrGHAuthInvalid = vcs.ErrAuthInvalid
 
-// IsAuthFailure is the exported form of isAuthFailure, for the sites that build
-// their own gh command via CLI.Command and therefore classify the exit
-// themselves (internal/auth, internal/branch, internal/worktree,
-// pkg/provider/cicd/ghactions). Sharing the classifier keeps
-// errors.Is(err, vcs.ErrAuthInvalid) true for the same gh failures everywhere,
-// which is what the daemon's fail-fast preflight and poll-side escalation key
-// on.
+// IsAuthFailure is the exported form of isAuthFailure, for a caller outside
+// this package that builds its own gh command via CLI.Command and therefore
+// must classify the exit itself — no in-module production site does today
+// (RunStdin classifies internally via the unexported isAuthFailure); this
+// stays exported so a future call site, or a sibling backend, can share the
+// same classifier and keep errors.Is(err, vcs.ErrAuthInvalid) true for the
+// same gh failures everywhere, which is what the daemon's fail-fast preflight
+// and poll-side escalation key on.
 func IsAuthFailure(exitCode int, stderr string) bool { return isAuthFailure(exitCode, stderr) }
 
 // isAuthFailure classifies a gh failure as an auth problem from its exit code

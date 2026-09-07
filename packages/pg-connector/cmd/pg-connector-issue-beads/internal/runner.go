@@ -3,7 +3,7 @@
 // the concrete precedent this packet's bead cites for a bd-CLI-wrapper
 // carry-over — with no behavior change: still shell out to `bd`, still
 // return stdout plus a wrapped error (with a trimmed stderr tail) on
-// failure. This backend's own client.go/backend.go build on top of it
+// failure. This backend's own bd.go/backend.go build on top of it
 // rather than importing packages/pg-pr, which packages/pg-connector's go.mod
 // does not depend on at all (layout_convention_test.go).
 //

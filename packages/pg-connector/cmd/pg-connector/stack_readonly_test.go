@@ -29,9 +29,9 @@ import (
 // remote-first and API-driven: "link" needs no local tracking state at all
 // (its own heading is "no local tracking"), and "unstack <number>" is
 // explicitly "a remote-first API wrapper ... safe for non-interactive use ...
-// from anywhere in the repo, tracked locally or not". So a headless pg-pr
-// daemon reaching either one is not a hypothetical this guard hedges
-// against for no reason -- "we cannot reach the CLI headlessly" is
+// from anywhere in the repo, tracked locally or not". So a headless
+// pg-connector daemon reaching either one is not a hypothetical this guard
+// hedges against for no reason -- "we cannot reach the CLI headlessly" is
 // specifically NOT a safety argument for them, which is exactly why bead
 // pg2-4dz88.3 (the umbrella this leaf implements) names both explicitly
 // rather than leaving "no stack authoring" as an unenforced intention.
@@ -40,10 +40,12 @@ var stackMutatingVerbs = map[string]bool{
 	"unstack": true,
 }
 
-// TestNoGHStackMutatingArgv is the mechanical half of pg-pr's read-only
-// promise for stacked-PR identification (bead pg2-4dz88.3.8): pg-pr may
-// IDENTIFY a native GitHub stack (internal/prdeps, fed from PR.StackEntry /
-// PR.NativeUpstreamHead) but must never author, link, or unstack one. It
+// TestNoGHStackMutatingArgv is the mechanical half of pg-connector's
+// read-only promise for stacked-PR identification (bead pg2-4dz88.3.8):
+// pg-connector may IDENTIFY a native GitHub stack (cmd/pg-connector-pr-github's
+// internal/api.PR StackID/StackPosition/StackSize/StackUpstreamHeadRefName/
+// StackDownstreamHeadRefName fields) but must never author, link, or unstack
+// one. It
 // copies TestGHExecChokePoint's enforcement STYLE exactly -- walk the module
 // from moduleRoot(t), skip .git/vendor/testdata, fail with the offending
 // file:line -- applied to a different pattern set: a `gh stack <verb>`
@@ -165,8 +167,9 @@ func TestNoGHStackMutatingArgv(t *testing.T) {
 		t.Fatalf("walk module: %v", walkErr)
 	}
 	if len(offenders) > 0 {
-		t.Fatalf("pg-pr must never author, link, or unstack a native GitHub stack "+
-			"(it may only IDENTIFY one -- see internal/prdeps), but found:\n  %s\n\n"+
+		t.Fatalf("pg-connector must never author, link, or unstack a native GitHub stack "+
+			"(it may only IDENTIFY one -- see cmd/pg-connector-pr-github/internal/api.PR's "+
+			"Stack* fields), but found:\n  %s\n\n"+
 			"Both `gh stack link` and `gh stack unstack <number>` are remote-first, "+
 			"API-driven verbs the vendored gh-stack skill documents as reachable "+
 			"without a local checkout, so there is no headless-CLI argument for "+

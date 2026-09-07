@@ -12,8 +12,8 @@ import (
 // leakedByAGitHookCommit is the GIT_* set a `git commit` FROM A LINKED
 // WORKTREE actually exports into the hook environment (captured 2026-08-27,
 // git 2.54.0; pg2-lx41y). Every descendant of the hook — including a `go test`
-// or a `pg-pr` launched from it — inherits these, and `-C dir` does not
-// override any of them.
+// or this backend's own binary launched from it — inherits these, and
+// `-C dir` does not override any of them.
 var leakedByAGitHookCommit = []string{
 	"GIT_DIR=/canonical/.git/worktrees/wt",
 	"GIT_INDEX_FILE=/canonical/.git/worktrees/wt/index",

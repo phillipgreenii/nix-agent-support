@@ -14,9 +14,10 @@
 // That asymmetry — real git-dir, fake work-tree — is `core.worktree`
 // semantics, and it is how the leak gets in: `git commit` FROM A LINKED
 // WORKTREE exports GIT_DIR and GIT_INDEX_FILE into the hook environment, and
-// every descendant process inherits them. So any pg-pr process launched from
-// a git hook (or under `git rebase`, `git bisect run`, or any tool that was
-// itself launched from a hook) runs with the leak, and a mutating verb —
+// every descendant process inherits them. So any process built on this
+// package — including this backend's own binary — launched from a git hook
+// (or under `git rebase`, `git bisect run`, or any tool that was itself
+// launched from a hook) runs with the leak, and a mutating verb —
 // `worktree add`, `worktree remove`, `fetch`, `config` — then acts on the
 // leaked repository instead of the directory the caller asked for. In a
 // linked worktree `git config` writes to $GIT_COMMON_DIR/config, i.e. the
@@ -25,11 +26,6 @@
 // pg2-5ek6b). A plain-clone commit hook exports GIT_INDEX_FILE but NOT
 // GIT_DIR, which is why a standalone `prek run` never reproduces this and
 // only worktree commits do.
-//
-// The TestMain scrubs added by f04c2389 (see internal/worktree/main_test.go)
-// fixed only the TEST side: they stop the test binaries from poisoning a real
-// clone, and do nothing for pg-pr running for real in a GIT_DIR-bearing
-// environment.
 //
 // Every `git` child in this module MUST therefore be built by [Command],
 // which owns the child environment. A bare
