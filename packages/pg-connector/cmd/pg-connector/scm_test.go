@@ -46,7 +46,7 @@ func TestRun_ScmWorktreeAdd_Success(t *testing.T) {
 	}, `{}`)
 	writeScmConfigFor(t, "backend-worktree-add")
 
-	stdout, code := executePr(t, []string{"scm", "worktree", "add", "feature"})
+	stdout, _, code := executePr(t, []string{"scm", "worktree", "add", "feature"})
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
 	}
@@ -70,7 +70,7 @@ func TestRun_ScmWorktreeRemove_Success(t *testing.T) {
 	}, `{}`)
 	writeScmConfigFor(t, "backend-worktree-remove-ok")
 
-	stdout, code := executePr(t, []string{"scm", "worktree", "remove", "/w/feature"})
+	stdout, _, code := executePr(t, []string{"scm", "worktree", "remove", "/w/feature"})
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
 	}
@@ -93,7 +93,7 @@ func TestRun_ScmWorktreeRemove_NotFound_Exit4(t *testing.T) {
 	}, `{}`)
 	writeScmConfigFor(t, "backend-worktree-remove-notfound")
 
-	stdout, code := executePr(t, []string{"scm", "worktree", "remove", "/w/missing"})
+	stdout, _, code := executePr(t, []string{"scm", "worktree", "remove", "/w/missing"})
 	if code != 4 {
 		t.Fatalf("exit code = %d, want 4; stdout=%s", code, stdout)
 	}
@@ -113,7 +113,7 @@ func TestRun_ScmWorktreeList_Success(t *testing.T) {
 	}, `{}`)
 	writeScmConfigFor(t, "backend-worktree-list")
 
-	stdout, code := executePr(t, []string{"scm", "worktree", "list"})
+	stdout, _, code := executePr(t, []string{"scm", "worktree", "list"})
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
 	}
@@ -137,7 +137,7 @@ func TestRun_ScmBranchDetect_ExplicitCwd_Success(t *testing.T) {
 	}, `{}`)
 	writeScmConfigFor(t, "backend-branch-detect")
 
-	stdout, code := executePr(t, []string{"scm", "branch", "detect", "/home/u/repo"})
+	stdout, _, code := executePr(t, []string{"scm", "branch", "detect", "/home/u/repo"})
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
 	}
@@ -179,7 +179,7 @@ func TestRun_ScmBranchDetect_DefaultsToProcessCwd(t *testing.T) {
 	writeCwdEchoingBackend(t, "backend-branch-detect-default")
 	writeScmConfigFor(t, "backend-branch-detect-default")
 
-	stdout, code := executePr(t, []string{"scm", "branch", "detect"})
+	stdout, _, code := executePr(t, []string{"scm", "branch", "detect"})
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
 	}
@@ -207,7 +207,7 @@ func TestRun_ScmWorktreeAdd_HumanOutput(t *testing.T) {
 	}, `{}`)
 	writeScmConfigFor(t, "backend-worktree-add-human")
 
-	stdout, code := executePr(t, []string{"--output", "human", "scm", "worktree", "add", "feature"})
+	stdout, _, code := executePr(t, []string{"--output", "human", "scm", "worktree", "add", "feature"})
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
 	}
@@ -227,7 +227,7 @@ func TestRun_ScmWorktreeRemove_HumanOutput(t *testing.T) {
 	}, `{}`)
 	writeScmConfigFor(t, "backend-worktree-remove-human")
 
-	stdout, code := executePr(t, []string{"--output", "human", "scm", "worktree", "remove", "/w/feature"})
+	stdout, _, code := executePr(t, []string{"--output", "human", "scm", "worktree", "remove", "/w/feature"})
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
 	}
@@ -242,7 +242,7 @@ func TestRun_ScmWorktreeList_HumanOutput(t *testing.T) {
 	}, `{}`)
 	writeScmConfigFor(t, "backend-worktree-list-human")
 
-	stdout, code := executePr(t, []string{"--output", "human", "scm", "worktree", "list"})
+	stdout, _, code := executePr(t, []string{"--output", "human", "scm", "worktree", "list"})
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
 	}
@@ -259,7 +259,7 @@ func TestRun_ScmBranchDetect_HumanOutput(t *testing.T) {
 	}, `{}`)
 	writeScmConfigFor(t, "backend-branch-detect-human")
 
-	stdout, code := executePr(t, []string{"--output", "human", "scm", "branch", "detect", "/home/u/repo"})
+	stdout, _, code := executePr(t, []string{"--output", "human", "scm", "branch", "detect", "/home/u/repo"})
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
 	}
@@ -276,7 +276,7 @@ func TestRun_ScmWorktreeAdd_NoBackendRegistered_IsGenericFailure(t *testing.T) {
 	}
 	t.Setenv("PG_PR_CONFIG", cfg)
 
-	stdout, code := executePr(t, []string{"scm", "worktree", "add", "feature"})
+	stdout, _, code := executePr(t, []string{"scm", "worktree", "add", "feature"})
 	if code != 1 {
 		t.Fatalf("exit code = %d, want 1", code)
 	}

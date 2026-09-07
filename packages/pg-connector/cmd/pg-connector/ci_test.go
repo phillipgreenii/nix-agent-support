@@ -36,7 +36,7 @@ func TestRun_CiList_Success_SingleBackend(t *testing.T) {
 	}, `{}`)
 	writeCiConfigFor(t, "backend-ci-list")
 
-	stdout, code := executePr(t, []string{"ci", "list", "pr-1"})
+	stdout, _, code := executePr(t, []string{"ci", "list", "pr-1"})
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
 	}
@@ -65,7 +65,7 @@ func TestRun_CiList_FanOut_ConcatenatesAcrossBackends(t *testing.T) {
 	}, `{}`)
 	writeCiConfigFor(t, "backend-ci-a", "backend-ci-b")
 
-	stdout, code := executePr(t, []string{"ci", "list", "pr-1"})
+	stdout, _, code := executePr(t, []string{"ci", "list", "pr-1"})
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
 	}
@@ -89,7 +89,7 @@ func TestRun_CiList_FanOut_PartialFailure_Exit2(t *testing.T) {
 	writeFakeBackend(t, "backend-ci-down", `{"protocolVersion":1,"error":{"code":"unauthenticated","message":"bad token"}}`)
 	writeCiConfigFor(t, "backend-ci-ok", "backend-ci-down")
 
-	stdout, code := executePr(t, []string{"ci", "list", "pr-1"})
+	stdout, _, code := executePr(t, []string{"ci", "list", "pr-1"})
 	if code != 2 {
 		t.Fatalf("exit code = %d, want 2 (degraded/partial); stdout=%s", code, stdout)
 	}
@@ -116,7 +116,7 @@ func TestRun_CiList_FanOut_NoBackendsRegistered_Exit3(t *testing.T) {
 	}
 	t.Setenv("PG_PR_CONFIG", cfg)
 
-	stdout, code := executePr(t, []string{"ci", "list", "pr-1"})
+	stdout, _, code := executePr(t, []string{"ci", "list", "pr-1"})
 	if code != 3 {
 		t.Fatalf("exit code = %d, want 3; stdout=%s", code, stdout)
 	}
@@ -158,7 +158,7 @@ func TestRun_CiLogs_Success(t *testing.T) {
 	}, `{}`)
 	writeCiConfigFor(t, "backend-ci-logs")
 
-	stdout, code := executePr(t, []string{"ci", "logs", "run-1"})
+	stdout, _, code := executePr(t, []string{"ci", "logs", "run-1"})
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
 	}
@@ -185,7 +185,7 @@ func TestRun_CiLogs_NotFound_Exit4(t *testing.T) {
 	}, `{}`)
 	writeCiConfigFor(t, "backend-ci-logs-notfound")
 
-	stdout, code := executePr(t, []string{"ci", "logs", "run-1"})
+	stdout, _, code := executePr(t, []string{"ci", "logs", "run-1"})
 	if code != 4 {
 		t.Fatalf("exit code = %d, want 4; stdout=%s", code, stdout)
 	}
@@ -204,7 +204,7 @@ func TestRun_CiRerunFailed_Success(t *testing.T) {
 	}, `{}`)
 	writeCiConfigFor(t, "backend-ci-rerun")
 
-	stdout, code := executePr(t, []string{"ci", "rerun-failed", "pr-1"})
+	stdout, _, code := executePr(t, []string{"ci", "rerun-failed", "pr-1"})
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
 	}
@@ -220,7 +220,7 @@ func TestRun_CiRerunFailed_NotFound_Exit4(t *testing.T) {
 	}, `{}`)
 	writeCiConfigFor(t, "backend-ci-rerun-notfound")
 
-	stdout, code := executePr(t, []string{"ci", "rerun-failed", "pr-1"})
+	stdout, _, code := executePr(t, []string{"ci", "rerun-failed", "pr-1"})
 	if code != 4 {
 		t.Fatalf("exit code = %d, want 4; stdout=%s", code, stdout)
 	}
@@ -239,7 +239,7 @@ func TestRun_CiList_HumanOutput(t *testing.T) {
 	}, `{}`)
 	writeCiConfigFor(t, "backend-ci-list-human")
 
-	stdout, code := executePr(t, []string{"--output", "human", "ci", "list", "pr-1"})
+	stdout, _, code := executePr(t, []string{"--output", "human", "ci", "list", "pr-1"})
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
 	}
@@ -260,7 +260,7 @@ func TestRun_CiLogs_HumanOutput(t *testing.T) {
 	}, `{}`)
 	writeCiConfigFor(t, "backend-ci-logs-human")
 
-	stdout, code := executePr(t, []string{"--output", "human", "ci", "logs", "run-1"})
+	stdout, _, code := executePr(t, []string{"--output", "human", "ci", "logs", "run-1"})
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
 	}
@@ -275,7 +275,7 @@ func TestRun_CiRerunFailed_HumanOutput(t *testing.T) {
 	}, `{}`)
 	writeCiConfigFor(t, "backend-ci-rerun-human")
 
-	stdout, code := executePr(t, []string{"--output", "human", "ci", "rerun-failed", "pr-1"})
+	stdout, _, code := executePr(t, []string{"--output", "human", "ci", "rerun-failed", "pr-1"})
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
 	}
@@ -292,7 +292,7 @@ func TestRun_CiLogs_AmbiguousMultipleBackends_IsGenericFailure(t *testing.T) {
 	// failure path, never one of the targeted-op taxonomy codes.
 	writeCiConfigFor(t, "backend-ci-a", "backend-ci-b")
 
-	stdout, code := executePr(t, []string{"ci", "logs", "run-1"})
+	stdout, _, code := executePr(t, []string{"ci", "logs", "run-1"})
 	if code != 1 {
 		t.Fatalf("exit code = %d, want 1", code)
 	}

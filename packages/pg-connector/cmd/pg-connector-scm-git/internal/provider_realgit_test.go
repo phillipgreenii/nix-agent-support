@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-scm-git/internal/gitenv"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
 
@@ -20,8 +21,27 @@ import (
 // read or write the real developer/CI environment's own git config
 // (mirrors packages/pg-pr/internal/gitfixture's already-established
 // pattern in this repo — a different Go module, so not importable here).
+//
+// It also applies that same sandbox to THIS PROCESS's own ambient
+// environment via t.Setenv (auto-restored at test/subtest cleanup) — not
+// just to the []string this function returns. The provider under test in
+// this file (New(NewExecRunner())) never receives that returned slice: its
+// Runner (gitexec.go's execRunner) builds every child git process through
+// gitenv.Command -> gitenv.Environ(), which reads this process's ambient
+// os.Environ(). Without the t.Setenv calls below, the provider under test
+// inherited the real developer/CI ~/.gitconfig even though every fixture
+// command setupGit runs was already sandboxed away from it [review finding
+// 35]. HOME is set fresh here rather than reusing a HOME from an earlier
+// call in the same test — harmless, since only "a value that is not the
+// real one" matters, never a specific path.
 func setupEnv(t *testing.T) []string {
 	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
+
 	ambient := map[string]string{}
 	for _, kv := range os.Environ() {
 		if k, v, ok := strings.Cut(kv, "="); ok {
@@ -29,7 +49,7 @@ func setupEnv(t *testing.T) []string {
 		}
 	}
 	env := []string{
-		"HOME=" + t.TempDir(),
+		"HOME=" + home,
 		"GIT_CONFIG_NOSYSTEM=1",
 		"GIT_CONFIG_GLOBAL=/dev/null",
 		"GIT_CONFIG_SYSTEM=/dev/null",
@@ -70,6 +90,37 @@ func newRealGitFixture(t *testing.T) string {
 	setupGit(t, resolved, "init", "-b", "main")
 	setupGit(t, resolved, "commit", "--allow-empty", "-m", "initial")
 	return resolved
+}
+
+// TestProvider_RealGit_AmbientEnvironmentSharesFixtureSandbox is the
+// regression test for review finding 35: setupEnv previously sandboxed
+// HOME (and the global/system git config) only for the []string its own
+// callers (setupGit, i.e. this file's fixture setup) pass explicitly to
+// exec.Command. The provider under test throughout this file is built via
+// New(NewExecRunner()), whose Runner (gitexec.go's execRunner) builds
+// every child git process through gitenv.Command -> gitenv.Environ(),
+// which reads THIS PROCESS's own ambient os.Environ() — a value that
+// []string never touched, so the provider under test still inherited the
+// real developer/CI ~/.gitconfig.
+//
+// This test poisons the real HOME with a global git config value no
+// fixture ever sets, runs fixture setup (which must now re-sandbox the
+// ambient HOME/config away from the poisoned one), and then runs a git
+// command through the EXACT seam the provider's Runner uses
+// (gitenv.Command, never setupGit's own separate env slice) to assert the
+// poisoned value is unreachable.
+func TestProvider_RealGit_AmbientEnvironmentSharesFixtureSandbox(t *testing.T) {
+	poisonedHome := t.TempDir()
+	if err := os.WriteFile(filepath.Join(poisonedHome, ".gitconfig"), []byte("[user]\n\temail = poisoned@example.com\n"), 0o644); err != nil {
+		t.Fatalf("write poisoned gitconfig: %v", err)
+	}
+	t.Setenv("HOME", poisonedHome)
+
+	repo := newRealGitFixture(t)
+
+	if out, err := gitenv.Command(context.Background(), repo, "config", "--global", "--get", "user.email").Output(); err == nil {
+		t.Fatalf("git config --global --get user.email = %q, want an error: global config must resolve to /dev/null (this file's sandbox), never the poisoned real HOME's ~/.gitconfig — the exact leak the provider under test was exposed to before this fix", strings.TrimSpace(string(out)))
+	}
 }
 
 // TestProvider_RealGit_WorktreeAddListRemoveAndBranchDetect is the

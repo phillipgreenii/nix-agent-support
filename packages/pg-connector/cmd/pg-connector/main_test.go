@@ -118,7 +118,7 @@ func TestRun_AuthStatus_HumanOutput(t *testing.T) {
 	}
 	t.Setenv("PG_PR_CONFIG", cfg)
 
-	stdout, code := executePr(t, []string{"--output", "human", "auth", "status"})
+	stdout, _, code := executePr(t, []string{"--output", "human", "auth", "status"})
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
 	}
@@ -140,7 +140,7 @@ func TestRun_ConfigValidate_HumanOutput(t *testing.T) {
 	}
 	t.Setenv("PG_PR_CONFIG", cfg)
 
-	stdout, code := executePr(t, []string{"--output", "human", "config", "validate"})
+	stdout, _, code := executePr(t, []string{"--output", "human", "config", "validate"})
 	if code != 3 {
 		t.Fatalf("exit code = %d, want 3; stdout=%s", code, stdout)
 	}

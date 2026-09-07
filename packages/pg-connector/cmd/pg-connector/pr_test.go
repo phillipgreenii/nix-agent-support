@@ -12,27 +12,32 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
 
-// executePr runs the root command with args, capturing stdout/stderr in a
-// buffer (unlike run(), which writes to the real os.Stdout/os.Stderr) so
-// tests can assert on the wire-response body pg-connector printed, not just
-// the process exit code.
-func executePr(t *testing.T, args []string) (stdout string, exitCode int) {
+// executePr runs the root command with args, capturing stdout and stderr in
+// SEPARATE buffers (unlike run(), which writes to the real
+// os.Stdout/os.Stderr) so tests can assert on the wire-response body
+// pg-connector printed, not just the process exit code — and so a
+// stream-discipline violation (prose landing on the wrong stream) is
+// actually observable [review finding 31]. A single shared buffer would
+// let stray stderr prose silently show up inside a test's "stdout" string
+// (or vice versa), so no test in this package could ever catch that class
+// of bug.
+func executePr(t *testing.T, args []string) (stdout string, stderr string, exitCode int) {
 	t.Helper()
 	root := newRootCmd()
-	var buf bytes.Buffer
-	root.SetOut(&buf)
-	root.SetErr(&buf)
+	var outBuf, errBuf bytes.Buffer
+	root.SetOut(&outBuf)
+	root.SetErr(&errBuf)
 	root.SetArgs(args)
 
 	err := root.Execute()
 	if err == nil {
-		return buf.String(), 0
+		return outBuf.String(), errBuf.String(), 0
 	}
 	var ee *exitError
 	if errors.As(err, &ee) {
-		return buf.String(), ee.code
+		return outBuf.String(), errBuf.String(), ee.code
 	}
-	return buf.String(), 1
+	return outBuf.String(), errBuf.String(), 1
 }
 
 func writeConfigFor(t *testing.T, backend string) {
@@ -51,7 +56,7 @@ func TestRun_PrShow_Success(t *testing.T) {
 	}, `{}`)
 	writeConfigFor(t, "backend-show")
 
-	stdout, code := executePr(t, []string{"pr", "show", "pr-1"})
+	stdout, _, code := executePr(t, []string{"pr", "show", "pr-1"})
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
 	}
@@ -76,13 +81,36 @@ func TestRun_PrShow_Success(t *testing.T) {
 	}
 }
 
+func TestRun_PrShow_Success_EmitsNoStderr(t *testing.T) {
+	// Regression for the test-harness fix [review finding 31]: with
+	// executePr's stdout/stderr now captured in separate buffers, this
+	// asserts directly on the stream-discipline invariant the wire
+	// protocol requires — a successful op's ONLY output is the JSON
+	// envelope on stdout, nothing on stderr. Before the fix this could not
+	// even be expressed: stderr content silently landed inside "stdout"
+	// (or vice versa), so no test in this package could tell the two
+	// streams apart.
+	writeOpAwareFakeBackend(t, "backend-show-clean-stderr", map[string]string{
+		"show": `{"protocolVersion":1,"schemaVersion":1,"result":{"id":"pr-1","repo":"o/r","number":1,"title":"t","state":"open","branch":"b","base":"main","author":"a","url":"u","draft":false,"merged":false}}`,
+	}, `{}`)
+	writeConfigFor(t, "backend-show-clean-stderr")
+
+	_, stderr, code := executePr(t, []string{"pr", "show", "pr-1"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0", code)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q, want empty on a successful op", stderr)
+	}
+}
+
 func TestRun_PrCategorize_Success(t *testing.T) {
 	writeOpAwareFakeBackend(t, "backend-categorize", map[string]string{
 		"categorize": `{"protocolVersion":1,"schemaVersion":1,"result":{"id":"pr-1","category":"focus"}}`,
 	}, `{}`)
 	writeConfigFor(t, "backend-categorize")
 
-	stdout, code := executePr(t, []string{"pr", "categorize", "pr-1", "--category", "focus"})
+	stdout, _, code := executePr(t, []string{"pr", "categorize", "pr-1", "--category", "focus"})
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
 	}
@@ -106,7 +134,7 @@ func TestRun_PrFeedbackSet_Success(t *testing.T) {
 	}, `{}`)
 	writeConfigFor(t, "backend-feedback-ok")
 
-	stdout, code := executePr(t, []string{"pr", "feedback-set", "pr-1", "c1", "--disposition", "wont-fix"})
+	stdout, _, code := executePr(t, []string{"pr", "feedback-set", "pr-1", "c1", "--disposition", "wont-fix"})
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
 	}
@@ -133,7 +161,7 @@ func TestRun_PrFeedbackSet_NotFound_Exit4(t *testing.T) {
 	}, `{}`)
 	writeConfigFor(t, "backend-feedback-notfound")
 
-	stdout, code := executePr(t, []string{"pr", "feedback-set", "pr-1", "c1", "--disposition", "open"})
+	stdout, _, code := executePr(t, []string{"pr", "feedback-set", "pr-1", "c1", "--disposition", "open"})
 	if code != 4 {
 		t.Fatalf("exit code = %d, want 4; stdout=%s", code, stdout)
 	}
@@ -151,7 +179,7 @@ func TestRun_PrFeedbackSet_InvalidDisposition_IsGenericFailure(t *testing.T) {
 	// An invalid --disposition is caught before ever dispatching to a
 	// backend, so no config/backend is needed; it is the generic exit-1
 	// CLI failure path, never one of the targeted-op taxonomy codes.
-	_, code := executePr(t, []string{"pr", "feedback-set", "pr-1", "c1", "--disposition", "bogus"})
+	_, _, code := executePr(t, []string{"pr", "feedback-set", "pr-1", "c1", "--disposition", "bogus"})
 	if code != 1 {
 		t.Fatalf("exit code = %d, want 1", code)
 	}
@@ -163,7 +191,7 @@ func TestRun_PrShow_HumanOutput(t *testing.T) {
 	}, `{}`)
 	writeConfigFor(t, "backend-show-human")
 
-	stdout, code := executePr(t, []string{"--output", "human", "pr", "show", "pr-1"})
+	stdout, _, code := executePr(t, []string{"--output", "human", "pr", "show", "pr-1"})
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
 	}
@@ -183,7 +211,7 @@ func TestRun_PrCategorize_HumanOutput(t *testing.T) {
 	}, `{}`)
 	writeConfigFor(t, "backend-categorize-human")
 
-	stdout, code := executePr(t, []string{"--output", "human", "pr", "categorize", "pr-1", "--category", "focus"})
+	stdout, _, code := executePr(t, []string{"--output", "human", "pr", "categorize", "pr-1", "--category", "focus"})
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
 	}
@@ -198,7 +226,7 @@ func TestRun_PrFeedbackSet_HumanOutput(t *testing.T) {
 	}, `{}`)
 	writeConfigFor(t, "backend-feedback-human")
 
-	stdout, code := executePr(t, []string{"--output", "human", "pr", "feedback-set", "pr-1", "c1", "--disposition", "wont-fix"})
+	stdout, _, code := executePr(t, []string{"--output", "human", "pr", "feedback-set", "pr-1", "c1", "--disposition", "wont-fix"})
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
 	}
@@ -215,7 +243,7 @@ func TestRun_PrFeedbackSet_HumanOutput_NotFoundPrintsErrorLineNotJSON(t *testing
 	}, `{}`)
 	writeConfigFor(t, "backend-feedback-human-notfound")
 
-	stdout, code := executePr(t, []string{"--output", "human", "pr", "feedback-set", "pr-1", "c1", "--disposition", "open"})
+	stdout, _, code := executePr(t, []string{"--output", "human", "pr", "feedback-set", "pr-1", "c1", "--disposition", "open"})
 	if code != 4 {
 		t.Fatalf("exit code = %d, want 4; stdout=%s", code, stdout)
 	}
@@ -235,8 +263,8 @@ func TestRun_PrShow_JSONOutput_DefaultUnchangedWithOutputFlagExplicit(t *testing
 	}, `{}`)
 	writeConfigFor(t, "backend-show-json-explicit")
 
-	stdoutDefault, codeDefault := executePr(t, []string{"pr", "show", "pr-1"})
-	stdoutExplicit, codeExplicit := executePr(t, []string{"--output", "json", "pr", "show", "pr-1"})
+	stdoutDefault, _, codeDefault := executePr(t, []string{"pr", "show", "pr-1"})
+	stdoutExplicit, _, codeExplicit := executePr(t, []string{"--output", "json", "pr", "show", "pr-1"})
 	if codeDefault != codeExplicit || stdoutDefault != stdoutExplicit {
 		t.Fatalf("default and --output json diverge: default=(%d,%q) explicit=(%d,%q)", codeDefault, stdoutDefault, codeExplicit, stdoutExplicit)
 	}
@@ -250,7 +278,7 @@ func TestRun_PrShow_NoBackendRegistered_IsGenericFailure(t *testing.T) {
 	}
 	t.Setenv("PG_PR_CONFIG", cfg)
 
-	stdout, code := executePr(t, []string{"pr", "show", "pr-1"})
+	stdout, _, code := executePr(t, []string{"pr", "show", "pr-1"})
 	if code != 1 {
 		t.Fatalf("exit code = %d, want 1", code)
 	}
@@ -278,7 +306,7 @@ func TestRun_PrShow_ConfigFileDoesNotExist_EmitsJSONEnvelope(t *testing.T) {
 	// the same JSON-envelope-on-stdout shape.
 	t.Setenv("PG_PR_CONFIG", t.TempDir()+"/does-not-exist.yaml")
 
-	stdout, code := executePr(t, []string{"pr", "show", "pr-1"})
+	stdout, _, code := executePr(t, []string{"pr", "show", "pr-1"})
 	if code != 1 {
 		t.Fatalf("exit code = %d, want 1; stdout=%s", code, stdout)
 	}
@@ -312,7 +340,7 @@ func TestRun_PrShow_NonExecutableBackendBinary_EmitsJSONEnvelope(t *testing.T) {
 	}
 	t.Setenv("PG_PR_CONFIG", cfg)
 
-	stdout, code := executePr(t, []string{"pr", "show", "pr-1"})
+	stdout, _, code := executePr(t, []string{"pr", "show", "pr-1"})
 	if code != 1 {
 		t.Fatalf("exit code = %d, want 1; stdout=%s", code, stdout)
 	}

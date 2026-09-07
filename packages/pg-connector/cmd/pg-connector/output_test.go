@@ -58,7 +58,7 @@ func TestRun_InvalidOutputFlag_IsGenericFailure(t *testing.T) {
 	// convention.
 	writeConfigFor(t, "backend-unused")
 
-	_, code := executePr(t, []string{"--output", "yaml", "pr", "show", "pr-1"})
+	_, _, code := executePr(t, []string{"--output", "yaml", "pr", "show", "pr-1"})
 	if code != 1 {
 		t.Fatalf("exit code = %d, want 1", code)
 	}
@@ -83,7 +83,7 @@ func TestRun_InvalidOutputFlag_WriteOp_NoSideEffect(t *testing.T) {
 	t.Setenv("PATH", backendDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	writeConfigFor(t, "backend-side-effecting")
 
-	_, code := executePr(t, []string{"--output", "yaml", "pr", "categorize", "pr-1", "--category", "focus"})
+	_, _, code := executePr(t, []string{"--output", "yaml", "pr", "categorize", "pr-1", "--category", "focus"})
 	if code != 1 {
 		t.Fatalf("exit code = %d, want 1", code)
 	}

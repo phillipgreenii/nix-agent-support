@@ -30,7 +30,7 @@ func TestRun_IssueShow_Success(t *testing.T) {
 	}, `{}`)
 	writeIssueConfigFor(t, "backend-issue-show")
 
-	stdout, code := executePr(t, []string{"issue", "show", "issue-1"})
+	stdout, _, code := executePr(t, []string{"issue", "show", "issue-1"})
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
 	}
@@ -57,7 +57,7 @@ func TestRun_IssueShow_NotFound_Exit4(t *testing.T) {
 	}, `{}`)
 	writeIssueConfigFor(t, "backend-issue-show-notfound")
 
-	stdout, code := executePr(t, []string{"issue", "show", "issue-404"})
+	stdout, _, code := executePr(t, []string{"issue", "show", "issue-404"})
 	if code != 4 {
 		t.Fatalf("exit code = %d, want 4; stdout=%s", code, stdout)
 	}
@@ -76,7 +76,7 @@ func TestRun_IssueCreate_Success(t *testing.T) {
 	}, `{}`)
 	writeIssueConfigFor(t, "backend-issue-create")
 
-	stdout, code := executePr(t, []string{"issue", "create", "--title", "new issue"})
+	stdout, _, code := executePr(t, []string{"issue", "create", "--title", "new issue"})
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
 	}
@@ -103,7 +103,7 @@ func TestRun_IssueCreate_WithDescription_Success(t *testing.T) {
 	}, `{}`)
 	writeIssueConfigFor(t, "backend-issue-create-desc")
 
-	stdout, code := executePr(t, []string{"issue", "create", "--title", "new issue", "--description", "a desc"})
+	stdout, _, code := executePr(t, []string{"issue", "create", "--title", "new issue", "--description", "a desc"})
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
 	}
@@ -126,7 +126,7 @@ func TestRun_IssueComment_Success(t *testing.T) {
 	}, `{}`)
 	writeIssueConfigFor(t, "backend-issue-comment")
 
-	stdout, code := executePr(t, []string{"issue", "comment", "issue-1", "--body", "a comment"})
+	stdout, _, code := executePr(t, []string{"issue", "comment", "issue-1", "--body", "a comment"})
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
 	}
@@ -145,7 +145,7 @@ func TestRun_IssueTransition_Success(t *testing.T) {
 	}, `{}`)
 	writeIssueConfigFor(t, "backend-issue-transition")
 
-	stdout, code := executePr(t, []string{"issue", "transition", "issue-1", "--state", "Done"})
+	stdout, _, code := executePr(t, []string{"issue", "transition", "issue-1", "--state", "Done"})
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
 	}
@@ -166,7 +166,7 @@ func TestRun_IssueTransition_NotFound_Exit4(t *testing.T) {
 	}, `{}`)
 	writeIssueConfigFor(t, "backend-issue-transition-notfound")
 
-	stdout, code := executePr(t, []string{"issue", "transition", "issue-404", "--state", "Done"})
+	stdout, _, code := executePr(t, []string{"issue", "transition", "issue-404", "--state", "Done"})
 	if code != 4 {
 		t.Fatalf("exit code = %d, want 4; stdout=%s", code, stdout)
 	}
@@ -193,7 +193,7 @@ func TestRun_IssueTransition_VocabularyMismatch_PassesToBackendAndIsGenericFailu
 	}, `{}`)
 	writeIssueConfigFor(t, "backend-issue-transition-vocab")
 
-	stdout, code := executePr(t, []string{"issue", "transition", "issue-1", "--state", "bogus"})
+	stdout, _, code := executePr(t, []string{"issue", "transition", "issue-1", "--state", "bogus"})
 	if code != 1 {
 		t.Fatalf("exit code = %d, want 1; stdout=%s", code, stdout)
 	}
@@ -212,7 +212,7 @@ func TestRun_IssueShow_HumanOutput(t *testing.T) {
 	}, `{}`)
 	writeIssueConfigFor(t, "backend-issue-show-human")
 
-	stdout, code := executePr(t, []string{"--output", "human", "issue", "show", "issue-1"})
+	stdout, _, code := executePr(t, []string{"--output", "human", "issue", "show", "issue-1"})
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
 	}
@@ -240,7 +240,7 @@ func TestRun_IssueShow_HumanOutput_IncludesDescriptionAssigneeParentDeps(t *test
 	}, `{}`)
 	writeIssueConfigFor(t, "backend-issue-show-human-fields")
 
-	stdout, code := executePr(t, []string{"--output", "human", "issue", "show", "issue-1"})
+	stdout, _, code := executePr(t, []string{"--output", "human", "issue", "show", "issue-1"})
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
 	}
@@ -262,7 +262,7 @@ func TestRun_IssueCreate_HumanOutput(t *testing.T) {
 	}, `{}`)
 	writeIssueConfigFor(t, "backend-issue-create-human")
 
-	stdout, code := executePr(t, []string{"--output", "human", "issue", "create", "--title", "new issue"})
+	stdout, _, code := executePr(t, []string{"--output", "human", "issue", "create", "--title", "new issue"})
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
 	}
@@ -277,7 +277,7 @@ func TestRun_IssueComment_HumanOutput(t *testing.T) {
 	}, `{}`)
 	writeIssueConfigFor(t, "backend-issue-comment-human")
 
-	stdout, code := executePr(t, []string{"--output", "human", "issue", "comment", "issue-1", "--body", "a comment"})
+	stdout, _, code := executePr(t, []string{"--output", "human", "issue", "comment", "issue-1", "--body", "a comment"})
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
 	}
@@ -292,7 +292,7 @@ func TestRun_IssueTransition_HumanOutput(t *testing.T) {
 	}, `{}`)
 	writeIssueConfigFor(t, "backend-issue-transition-human")
 
-	stdout, code := executePr(t, []string{"--output", "human", "issue", "transition", "issue-1", "--state", "Done"})
+	stdout, _, code := executePr(t, []string{"--output", "human", "issue", "transition", "issue-1", "--state", "Done"})
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
 	}
@@ -309,7 +309,7 @@ func TestRun_IssueShow_NoBackendRegistered_IsGenericFailure(t *testing.T) {
 	}
 	t.Setenv("PG_PR_CONFIG", cfg)
 
-	stdout, code := executePr(t, []string{"issue", "show", "issue-1"})
+	stdout, _, code := executePr(t, []string{"issue", "show", "issue-1"})
 	if code != 1 {
 		t.Fatalf("exit code = %d, want 1", code)
 	}
