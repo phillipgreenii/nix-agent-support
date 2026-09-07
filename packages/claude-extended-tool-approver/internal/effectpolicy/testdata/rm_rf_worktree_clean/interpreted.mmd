@@ -1,0 +1,4 @@
+flowchart LR
+    n0["command: rm -rf .worktrees/clean<br/>- path:delete .worktrees/clean [arg 1]<br/>mark=permitted"]
+    n1[/"file: .worktrees/clean"/]
+    n0 -->|"writes: delete"| n1

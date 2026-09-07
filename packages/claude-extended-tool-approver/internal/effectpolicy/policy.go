@@ -375,7 +375,12 @@ func (NoWriteToReadOnlyPath) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding
 //  3. sandbox denyWrite or denyRead entry   -> Forbidden
 //  4. secret path (raw or resolved)         -> Forbidden
 //  5. zone reject or read-only              -> Forbidden (not writable)
-//  6. deletable.Classify (workspace
+//  6. the path IS a worktree root
+//     (deletable.AtWorktreeRoot, tc-lc8f
+//     item 4a — see below)                  -> judged by worktree STATE, not
+//     the Protected category: clean -> Permitted, dirty -> Forbidden, clean
+//     but ignored files present -> Unknown, state undeterminable -> Unknown
+//  7. deletable.Classify (workspace
 //     declarations, tc-z806.3):
 //     Protected (.git, .worktrees, a pn
 //     workforest set, ~/.ssh)               -> Forbidden
@@ -384,17 +389,32 @@ func (NoWriteToReadOnlyPath) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding
 //     cache, a temp root)                   -> Permitted, even where the
 //     zone is unknown: a declaration that a path is disposable vouches for
 //     removing it
-//  7. zone unknown, no declaration          -> Unknown   (not known writable)
-//  8. writable, not deletable              -> Unknown   ("needs consent")
+//  8. zone unknown, no declaration          -> Unknown   (not known writable)
+//  9. writable, not deletable              -> Unknown   ("needs consent")
 //
 // Step 3 includes denyRead deliberately: the ruling says protections above
 // this rule win, and a path the operator has marked unreadable is protected
 // whether or not it is also marked unwritable — refusing to remove it is the
 // fail-safe reading. Step 4 uses the same secretRead helper the read-side
 // policies use, so a secret is named the same way whichever access class
-// touches it. Step 5 runs BEFORE step 6, so a declared-deletable cache that
-// sits in a read-only zone (go's module cache under patheval's `~/go/pkg`)
-// is still Forbidden — the zone is the older, narrower decision and wins.
+// touches it. Step 5 runs BEFORE steps 6/7, so a declared-deletable cache
+// that sits in a read-only zone (go's module cache under patheval's
+// `~/go/pkg`) is still Forbidden — the zone is the older, narrower decision
+// and wins, and a worktree sitting in a read-only zone is never approved
+// merely for being clean.
+//
+// Step 6 (worktree state) — operator ruling (Phillip, 2026-09-07, verbatim,
+// recorded on bead tc-vn5z): "removing a worktree is fine, assuming it osnt
+// dirty. well, a completely clean one can be approved. use rejext if there
+// are dirtt workspace. abstain for if clean but ignored files exist." This
+// SUPERSEDES slice 3l's unconditional Protected on a `.worktrees` entry (git
+// kind) and a pn workspace's workforests_dir entry (pn kind) — but ONLY for
+// the worktree ROOT ITSELF, as a unit: `.git/` (always a directory for the
+// primary/canonical clone) stays Protected via step 7 exactly as before, and
+// so does any path INSIDE a worktree that is not the worktree's own root
+// (deletable.AtWorktreeRoot's doc comment). Step 6 runs BEFORE step 7 so a
+// worktree root's fate is decided by its state, never by the blanket
+// category deletable.Classify would otherwise assign it.
 //
 // "By default" in the ruling means a consumer rule ABOVE this policy may
 // widen (a project that declares its build/ disposable) or narrow; this
@@ -430,6 +450,9 @@ func (DeleteAccess) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, bool) {
 	if access == patheval.PathReject || access == patheval.PathReadOnly {
 		return Finding{Verdict: Forbidden, Reason: "delete of " + access.String() + " zone"}, true
 	}
+	if abs := ctx.PathEval.ResolvePath(e.Path); abs != "" && deletable.AtWorktreeRoot(abs) {
+		return worktreeRemovalFinding(abs)
+	}
 	class, why := deletable.Classify(ctx.PathEval, e.Path)
 	switch class {
 	case deletable.Protected:
@@ -440,6 +463,30 @@ func (DeleteAccess) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, bool) {
 		return Finding{Verdict: Unknown, Reason: "delete of a writable path needs consent (" + why + ")"}, true
 	default:
 		return Finding{Verdict: Unknown, Reason: why}, true
+	}
+}
+
+// worktreeRemovalFinding maps deletable.ProbeWorktreeState(abs) to a Finding
+// per the operator ruling recorded on DeleteAccess's own doc comment (step
+// 6): clean -> Permitted, dirty -> Forbidden, clean-but-ignored -> Unknown,
+// undeterminable -> Unknown (the probe's error, when there is one, is folded
+// into the reason so a caller can tell "not actually a git repository"
+// apart from "clean").
+func worktreeRemovalFinding(abs string) (Finding, bool) {
+	state, err := deletable.ProbeWorktreeState(abs)
+	switch state {
+	case deletable.WorktreeClean:
+		return Finding{Verdict: Permitted, Reason: "worktree root is clean (no tracked modifications, no untracked or ignored files): " + abs}, true
+	case deletable.WorktreeDirty:
+		return Finding{Verdict: Forbidden, Reason: "worktree root is dirty (tracked modifications, staged changes, or untracked files): " + abs}, true
+	case deletable.WorktreeCleanIgnored:
+		return Finding{Verdict: Unknown, Reason: "worktree root is clean but has ignored files: " + abs}, true
+	default:
+		reason := "worktree state could not be determined: " + abs
+		if err != nil {
+			reason += " (" + err.Error() + ")"
+		}
+		return Finding{Verdict: Unknown, Reason: reason}, true
 	}
 }
 

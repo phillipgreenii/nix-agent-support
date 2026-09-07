@@ -2,12 +2,14 @@ package effectpolicy
 
 import (
 	"flag"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmddesc"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/deletable"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/effectgraph"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/evalcontract"
 )
@@ -76,6 +78,38 @@ func fixture(t *testing.T) (root, home string) {
 	if err := os.Mkdir(filepath.Join(root, "sub"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	// Worktree-state coverage (tc-lc8f item 4a): four SLOTS directly under a
+	// `.worktrees` dir (the git kind's convention) — clean/dirty/ignored-only/
+	// notaworktree — plus a pn workspace with two more slots under its
+	// (default) workforests_dir. None of these directories are real git
+	// worktrees (the fixture's own `.git` is a plain directory, not a real
+	// repository, so there is nothing for `git worktree add` to attach to
+	// here) — deletable.SetWorktreeStateProbe below substitutes a fake keyed
+	// on the slot's basename, so this fixture (and every test that calls it)
+	// never starts a real git process for these paths. internal/deletable's
+	// own worktree_test.go covers the real git behaviour these fakes stand in
+	// for, against real throwaway repositories.
+	for _, d := range []string{".worktrees/clean", ".worktrees/dirty", ".worktrees/ignored-only", ".worktrees/notaworktree", ".workforests/clean", ".workforests/dirty"} {
+		if err := os.MkdirAll(filepath.Join(root, filepath.FromSlash(d)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(root, "pn-workspace.toml"), []byte(""), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	restoreWorktreeProbe := deletable.SetWorktreeStateProbe(func(slotRoot string) (deletable.WorktreeState, error) {
+		switch filepath.Base(slotRoot) {
+		case "clean":
+			return deletable.WorktreeClean, nil
+		case "dirty":
+			return deletable.WorktreeDirty, nil
+		case "ignored-only":
+			return deletable.WorktreeCleanIgnored, nil
+		default:
+			return deletable.WorktreeUnknown, fmt.Errorf("fixture fake: %s is not a real git repository", slotRoot)
+		}
+	})
+	t.Cleanup(restoreWorktreeProbe)
 	home = t.TempDir()
 	t.Setenv("HOME", home)
 	for _, v := range []string{"WORKSPACE_ROOT", "CETA_EXTRA_READWRITE_ROOTS", "CETA_EXTRA_READONLY_ROOTS", "CETA_DENIED_ROOTS", "XDG_DATA_HOME"} {
@@ -176,6 +210,28 @@ var goldenCases = []goldenCase{
 	{"rm_rf_gradle_src", "rm -rf gradleproj/src", evalcontract.Abstain, nil},
 	{"rm_rf_dot_git", "rm -rf .git", evalcontract.Reject, nil},
 	{"rm_rf_home_cache_x", "rm -rf ~/.cache/x", evalcontract.Approve, nil},
+
+	// Worktree-removal-by-state (tc-lc8f item 4a; operator ruling, Phillip,
+	// 2026-09-07, verbatim on tc-vn5z): a worktree ROOT — a direct child of
+	// `.worktrees` (or, below, a pn workforests_dir) — is judged by
+	// deletable.ProbeWorktreeState (faked by fixture()'s
+	// SetWorktreeStateProbe keyed on basename), superseding slice 3l's
+	// blanket Protected for the root itself only. `.git` stays Protected
+	// (rm_rf_dot_git above), unaffected.
+	{"rm_rf_worktree_clean", "rm -rf .worktrees/clean", evalcontract.Approve, nil},
+	{"rm_rf_worktree_dirty", "rm -rf .worktrees/dirty", evalcontract.Reject, nil},
+	{"rm_rf_worktree_ignored_only", "rm -rf .worktrees/ignored-only", evalcontract.Abstain, nil},
+	// notaworktree is a declared SLOT (a direct child of .worktrees) with no
+	// `.git` at all — the fake probe reports it exactly as real git would
+	// (WorktreeUnknown, "not a real git repository"), which is Unknown/
+	// Abstain, not a reversion to the old blanket Protected/Reject. Recorded
+	// per this slice's brief: the verdict differs from a plain-directory
+	// guess, because the LOCATION signal alone (being a `.worktrees` child)
+	// is enough to route through worktree-state judgment even without the
+	// `.git` FILE marker.
+	{"rm_rf_worktree_notaworktree", "rm -rf .worktrees/notaworktree", evalcontract.Abstain, nil},
+	{"rm_rf_workforests_clean", "rm -rf .workforests/clean", evalcontract.Approve, nil},
+	{"rm_rf_workforests_dirty", "rm -rf .workforests/dirty", evalcontract.Reject, nil},
 
 	// cp: trailing destination, -n, -t, secret source, too few operands.
 	{"cp_readme_copy", "cp README.md copy.md", evalcontract.Approve, nil},

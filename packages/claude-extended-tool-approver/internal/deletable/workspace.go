@@ -192,10 +192,21 @@ var homeKind = Kind{
 // gitKind: a working tree (a `.git` directory OR file — a worktree checkout
 // has a file, and counts). `.git` itself, and this workspace's `.worktrees`
 // convention (git worktrees whose removal by rm orphans git's admin
-// entries; integrate-branch removes them properly), are Protected. Every
-// other path is judged by the repository's ignore rules: ignored ->
-// Deletable, else Keep — never Silent, so the tree's content is held
-// against an outer temp root.
+// entries; integrate-branch removes them properly), are declared Protected
+// here. Every other path is judged by the repository's ignore rules:
+// ignored -> Deletable, else Keep — never Silent, so the tree's content is
+// held against an outer temp root.
+//
+// SUPERSEDED for one specific path shape (tc-lc8f item 4a; operator ruling,
+// Phillip, 2026-09-07, verbatim on tc-vn5z: "removing a worktree is fine,
+// assuming it osnt dirty..."): a worktree ROOT ITSELF — a direct child of
+// `.worktrees` (this Classify's `.worktrees/`-prefix match still fires for
+// it as written below) — is intercepted BEFORE effectpolicy's DeleteAccess
+// policy ever calls Classify, and judged by deletable.AtWorktreeRoot /
+// ProbeWorktreeState instead (internal/deletable/worktree.go). The
+// Protected declaration below therefore still governs `.worktrees` itself
+// and any path NESTED inside a worktree (not its root) — only the root
+// entry's OWN Protected opinion is bypassed, at the policy layer, not here.
 var gitKind = Kind{
 	Name:    "git",
 	Markers: []string{".git"},
@@ -281,6 +292,14 @@ var gradleKind = Kind{
 // removing one with rm orphans each repo's worktree admin entry, so the
 // directory is Protected — `pn workspace workforest remove` is the tool
 // (pn-workspace-rules' "How a set is laid out"). Silent on everything else.
+//
+// SUPERSEDED for a direct child of workforests_dir (a coordinated set's own
+// root, e.g. `.workforests/<set-name>`) by the same tc-lc8f item 4a ruling
+// gitKind's doc comment quotes: effectpolicy's DeleteAccess policy
+// intercepts that exact path (deletable.IsDeclaredWorktreeSlot) before ever
+// calling Classify, and judges it by ProbeWorktreeState instead. A path
+// NESTED inside a set (a per-repo worktree admin entry two or more levels
+// down) is unaffected and stays governed by the Protected declaration below.
 var pnKind = Kind{
 	Name:    "pn",
 	Markers: []string{"pn-workspace.toml"},

@@ -1,0 +1,4 @@
+flowchart LR
+    n0["command: rm -rf .worktrees/notaworktree<br/>- path:delete .worktrees/notaworktree [arg 1]<br/>mark=insufficient: path:delete .worktrees/notaworktree [arg 1]: delete-access (worktree state could not be determined: <ROOT>/.worktrees/notaworktree (fixture fake: <ROOT>/.worktrees/notaworktree is not a real git repository))"]
+    n1[/"file: .worktrees/notaworktree"/]
+    n0 -->|"writes: delete"| n1
