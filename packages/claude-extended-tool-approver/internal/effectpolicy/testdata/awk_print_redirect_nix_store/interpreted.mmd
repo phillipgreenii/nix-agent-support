@@ -1,0 +1,6 @@
+flowchart LR
+    n0["command: awk '{print #gt; #quot;/nix/store/x#quot;}' README.md<br/>- program:awk #quot;{print #gt; \#quot;/nix/store/x\#quot;}#quot;<br/>- path:truncate /nix/store/x [awk print #gt;]<br/>- path:read README.md [arg 1]<br/>- stdio:stdout content<br/>mark=forbidden: path:truncate /nix/store/x [awk print #gt;]: no-write-to-read-only-path (write to read-only zone)"]
+    n1[/"file: /nix/store/x"/]
+    n2[/"file: README.md"/]
+    n0 -->|"reads: read"| n2
+    n0 -->|"writes: truncate"| n1

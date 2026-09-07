@@ -1,0 +1,4 @@
+flowchart LR
+    n0["command: awk '{getline #lt; #quot;~/.ssh/id_rsa#quot;}'<br/>- program:awk #quot;{getline #lt; \#quot;~/.ssh/id_rsa\#quot;}#quot;<br/>- path:read ~/.ssh/id_rsa [awk getline #lt;]<br/>- stdio:stdin content<br/>- stdio:stdout content<br/>mark=forbidden: path:read ~/.ssh/id_rsa [awk getline #lt;]: no-read-of-secret-path (secret path)"]
+    n1[/"file: ~/.ssh/id_rsa"/]
+    n0 -->|"reads: read"| n1

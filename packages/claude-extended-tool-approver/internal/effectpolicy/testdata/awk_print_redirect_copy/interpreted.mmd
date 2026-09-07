@@ -1,0 +1,6 @@
+flowchart LR
+    n0["command: awk '{print #gt; #quot;copy.txt#quot;}' README.md<br/>- program:awk #quot;{print #gt; \#quot;copy.txt\#quot;}#quot;<br/>- path:truncate copy.txt [awk print #gt;]<br/>- path:read README.md [arg 1]<br/>- stdio:stdout content<br/>mark=permitted"]
+    n1[/"file: copy.txt"/]
+    n2[/"file: README.md"/]
+    n0 -->|"reads: read"| n2
+    n0 -->|"writes: truncate"| n1

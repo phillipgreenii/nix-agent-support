@@ -1,0 +1,10 @@
+flowchart LR
+    n0["command: awk '{print | #quot;sort#quot;}' README.md<br/>- program:awk #quot;{print | \#quot;sort\#quot;}#quot;<br/>- path:read README.md [arg 1]<br/>- stdio:stdout content<br/>mark=permitted"]
+    n1[/"file: README.md"/]
+    subgraph sg_s0["awk arg 0"]
+        n2["command: sort<br/>- stdio:stdin content<br/>- stdio:stdout content<br/>mark=permitted"]
+    end
+    n0 -->|"reads: read"| n1
+    n2 -->|"executes: awk arg 0"| n0
+    n0 -->|"flow: stdin-#gt;child stdin"| n2
+    n2 -->|"flow: child stdout-#gt;stdout"| n0

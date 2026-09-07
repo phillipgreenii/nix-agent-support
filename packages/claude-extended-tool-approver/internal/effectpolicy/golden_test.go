@@ -67,6 +67,9 @@ func fixture(t *testing.T) (root, home string) {
 	if err := os.WriteFile(filepath.Join(root, "script.sh"), []byte("echo hi\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(root, "script.awk"), []byte("{print}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(root, "list.txt"), []byte("README.md\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -522,6 +525,34 @@ var goldenCases = []goldenCase{
 	{"gofmt_w_readme", "gofmt -w README.md", evalcontract.Approve, nil},
 	{"gofmt_w_nix_store", "gofmt -w /nix/store/x", evalcontract.Reject, nil},
 	{"gofmt_stdin", "cat README.md | gofmt", evalcontract.Approve, nil},
+
+	// slice 3p: awk/gawk dialect classifier (internal/cmddesc/dialect_awk.go)
+	// and schema (registry_breadth.go's awkSchema/gawkSchema). Ordinary field
+	// references, comparisons, division and regex constants are inert; a
+	// print/printf redirection or pipe with a LITERAL target is a real
+	// path/child effect, a non-literal one is insufficient; system()/
+	// "cmd" | getline with a literal argument recurse as a shell child;
+	// getline's `< "file"` form is a real path read; @load and the gawk
+	// two-way `|&` coprocess pipe are deliberately unmodeled.
+	{"awk_print_field", "awk '{print $1}' README.md", evalcontract.Approve, nil},
+	{"awk_field_sep", "awk -F: '{print $1}' README.md", evalcontract.Approve, nil},
+	{"awk_stdin_pipe", "cat README.md | awk '{print $1}'", evalcontract.Approve, nil},
+	{"awk_print_redirect_nix_store", `awk '{print > "/nix/store/x"}' README.md`, evalcontract.Reject, nil},
+	{"awk_print_redirect_copy", `awk '{print > "copy.txt"}' README.md`, evalcontract.Approve, nil},
+	{"awk_print_append_field_target", "awk '{print $1 >> $2}' README.md", evalcontract.Abstain, nil},
+	{"awk_system_literal", `awk 'BEGIN{system("cat README.md")}'`, evalcontract.Approve, nil},
+	{"awk_system_field", "awk '{system($1)}' README.md", evalcontract.Abstain, nil},
+	{"awk_print_pipe_sort", `awk '{print | "sort"}' README.md`, evalcontract.Approve, nil},
+	{"awk_getline_readme", `awk '{getline < "README.md"}'`, evalcontract.Approve, nil},
+	{"awk_getline_ssh_key", `awk '{getline < "~/.ssh/id_rsa"}'`, evalcontract.Reject, nil},
+	{"awk_comparison", "awk '$1 > 5 {print}' README.md", evalcontract.Approve, nil},
+	{"awk_regex_escaped_slash", `awk '$0 ~ /a\/b/ {print}' README.md`, evalcontract.Approve, nil},
+	{"awk_division", "awk '{print $1/2}' README.md", evalcontract.Approve, nil},
+	{"awk_gawk_i_inplace", "gawk -i inplace '{print}' README.md", evalcontract.Abstain, nil},
+	{"awk_f_script", "awk -f script.awk README.md", evalcontract.Approve, nil},
+	{"awk_e_flag", "awk -e '{print}' README.md", evalcontract.Approve, nil},
+	{"awk_at_load", `awk '@load "foo"'`, evalcontract.Abstain, nil},
+	{"awk_two_way_pipe", `awk '{print |& "cmd"}' README.md`, evalcontract.Abstain, nil},
 }
 
 func TestGolden(t *testing.T) {

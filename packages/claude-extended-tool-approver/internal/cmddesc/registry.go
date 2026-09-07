@@ -51,6 +51,8 @@ func DefaultRegistry() Registry {
 		jqSchema, yqSchema, gofmtSchema,
 		// slice 3o: cd (graph-level CWD threading in effectgraph).
 		cdSchema,
+		// slice 3p: awk/gawk dialect classifier and schema.
+		awkSchema, renamed(awkSchema, "gawk"),
 	)
 }
 

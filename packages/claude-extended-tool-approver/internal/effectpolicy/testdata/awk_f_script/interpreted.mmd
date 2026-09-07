@@ -1,0 +1,6 @@
+flowchart LR
+    n0["command: awk -f script.awk README.md<br/>- path:read script.awk [arg 1]<br/>- path:read README.md [arg 2]<br/>- stdio:stdout content<br/>mark=permitted"]
+    n1[/"file: script.awk"/]
+    n2[/"file: README.md"/]
+    n0 -->|"reads: read"| n1
+    n0 -->|"reads: read"| n2

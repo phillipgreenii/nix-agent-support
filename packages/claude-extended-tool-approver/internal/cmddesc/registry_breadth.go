@@ -427,6 +427,74 @@ var yqFlags = map[string]FlagSpec{
 	"--yaml-fix-merge-anchor-to-spec": inert,
 }
 
+// ---- awk / gawk (slice 3p) --------------------------------------------------
+
+// awkSchema: the program text is a Leading positional unless -f/-e/-E
+// supplied it via a flag (mirrors sedSchema's LeadingSkippedByFlags); the
+// program text itself is classified by dialect_awk.go, registered as
+// dialect "awk" regardless of which BINARY (awk, gawk) ran it — gawkSchema
+// below is a plain rename of this value, exactly like head/rm/tee prove a
+// registry entry is data. Verified against GNU Awk 5.4.1 on this host
+// (`gawk --version`, `gawk --help`).
+//
+// -f/--file and -E/--exec both read a FILE that HOLDS the program (PathRead,
+// exactly like sed's -f); -e/--source supplies program TEXT on the command
+// line (Program("awk"), like sed's -e). -F/--field-separator and -v/--assign
+// each take one inert value; -L/--lint takes an optional glued value
+// ([fatal|invalid|no-ext]). Every other flag `gawk --help` lists is a
+// boolean mode switch that cannot itself read, write, or execute anything
+// (traditional/posix/optimize/lint-old/csv/bignum/trace/... toggles, plus
+// --version/--help/--copyright), so all are inert.
+//
+// DELIBERATELY UNMODELED — left OUT of Flags entirely, so an unrecognised
+// spelling abstains via UnknownFlagInsufficient rather than being silently
+// approved: -d/-D/-o/-p (--dump-variables/--debug/--pretty-print/--profile)
+// each write a dump or profile file named by an optional glued argument;
+// -i/--include loads a gawk extension library BY NAME — and the "inplace"
+// extension is exactly how `gawk -i inplace '{...}' file` rewrites its file
+// operands in place, so modeling -i as an ordinary path read would be
+// fail-open (it would hide a write inside what looks like a read); -l/--load
+// loads a native (compiled) extension. This host's `gawk --help` output is
+// itself the provenance for the flag set below.
+var awkSchema = CommandSchema{
+	Name:       "awk",
+	Provenance: "GNU Awk 5.4.1 (gawk --version, gawk --help), this host 2026-09-07",
+	Flags: map[string]FlagSpec{
+		"-f": {Arity: ArityOne, Operand: PathRead}, "--file": {Arity: ArityOne, Operand: PathRead},
+		"-E": {Arity: ArityOne, Operand: PathRead}, "--exec": {Arity: ArityOne, Operand: PathRead},
+		"-e": {Arity: ArityOne, Operand: Program("awk")}, "--source": {Arity: ArityOne, Operand: Program("awk")},
+		"-F": literal1, "--field-separator": literal1,
+		"-v": literal1, "--assign": literal1,
+		"-L": literalOpt, "--lint": literalOpt,
+		"-b": inert, "--characters-as-bytes": inert,
+		"-c": inert, "--traditional": inert,
+		"-C": inert, "--copyright": inert,
+		"-g": inert, "--gen-pot": inert,
+		"-h": inert, "--help": inert,
+		"-I": inert, "--trace": inert,
+		"-k": inert, "--csv": inert,
+		"-M": inert, "--bignum": inert,
+		"-N": inert, "--use-lc-numeric": inert,
+		"-n": inert, "--non-decimal-data": inert,
+		"-O": inert, "--optimize": inert,
+		"-P": inert, "--posix": inert,
+		"-r": inert, "--re-interval": inert,
+		"-s": inert, "--no-optimize": inert,
+		"-S": inert, "--sandbox": inert,
+		"-t": inert, "--lint-old": inert,
+		"-V": inert, "--version": inert,
+	},
+	Positionals: PositionalSpec{
+		Leading:               []OperandRole{Program("awk")},
+		LeadingSkippedByFlags: []string{"-f", "--file", "-e", "--source", "-E", "--exec"},
+		Rest:                  PathRead,
+	},
+	Stdin:        StdinWhenNoPathOperands,
+	Stdout:       StdoutContent,
+	UnknownFlag:  UnknownFlagInsufficient,
+	EndOfOptions: true,
+}
+
 // ---- formatters --------------------------------------------------------------
 
 // gofmtSchema: `-w` rewrites each path operand in place (TransformInPlace);

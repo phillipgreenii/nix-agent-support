@@ -1,0 +1,4 @@
+flowchart LR
+    n0["command: awk '$1 #gt; 5 {print}' README.md<br/>- program:awk #quot;$1 #gt; 5 {print}#quot;<br/>- path:read README.md [arg 1]<br/>- stdio:stdout content<br/>mark=permitted"]
+    n1[/"file: README.md"/]
+    n0 -->|"reads: read"| n1

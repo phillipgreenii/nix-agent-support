@@ -27,6 +27,7 @@ type DialectInterpreter interface {
 // is handed back as a child for the graph builder to parse and recurse into.
 var dialects = map[string]DialectInterpreter{
 	"sed":   sedDialect{},
+	"awk":   awkDialect{},
 	"shell": shellDialect{},
 	"bash":  shellDialect{},
 }

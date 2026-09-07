@@ -1,0 +1,4 @@
+flowchart LR
+    n0["command: awk '{print $1 #gt;#gt; $2}' README.md<br/>- program:awk #quot;{print $1 #gt;#gt; $2}#quot;<br/>- path:read README.md [arg 1]<br/>- stdio:stdout content<br/>mark=insufficient: awk program at arg 0: print redirect target is not a string literal"]
+    n1[/"file: README.md"/]
+    n0 -->|"reads: read"| n1

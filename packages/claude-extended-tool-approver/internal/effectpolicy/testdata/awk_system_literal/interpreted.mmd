@@ -1,0 +1,9 @@
+flowchart LR
+    n0["command: awk 'BEGIN{system(#quot;cat README.md#quot;)}'<br/>- program:awk #quot;BEGIN{system(\#quot;cat README.md\#quot;)}#quot;<br/>- stdio:stdin content<br/>- stdio:stdout content<br/>mark=permitted"]
+    subgraph sg_s0["awk arg 0"]
+        n1["command: cat README.md<br/>- path:read README.md [arg 0]<br/>- stdio:stdout content<br/>mark=permitted"]
+        n2[/"file: README.md"/]
+    end
+    n1 -->|"reads: read"| n2
+    n1 -->|"executes: awk arg 0"| n0
+    n1 -->|"flow: child stdout-#gt;stdout"| n0

@@ -1,0 +1,4 @@
+flowchart LR
+    n0["command: awk '{print |#amp; #quot;cmd#quot;}' README.md<br/>- program:awk #quot;{print |#amp; \#quot;cmd\#quot;}#quot;<br/>- path:read README.md [arg 1]<br/>- stdio:stdout content<br/>mark=insufficient: awk program at arg 0: `print |#amp;` two-way pipe is not modeled"]
+    n1[/"file: README.md"/]
+    n0 -->|"reads: read"| n1
