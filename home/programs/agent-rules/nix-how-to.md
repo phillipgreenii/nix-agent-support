@@ -67,8 +67,12 @@ multiplying that cost by however many changes land on the branch.
 **Every repo gets a prek-level land-time check; only two get the full flake check.**
 `ff-merge-to-main`'s FF-1b step runs the commit-range `prek` check above for every repo it lands
 that has a `.pre-commit-config.yaml` — that part is universal, not repo-scoped. FF-2a's full
-`nix flake check`, by contrast, only runs for `nix-agent-support`/`phillipg-nix-ziprecruiter`
-(the two repos with no external CI) — it skips every other repo. So do not assume a repo without
-that FF-2a scoping has NO land-time gate at all: it still gets FF-1b's prek check; it just does
-not get the heavier `checks.*` derivations FF-2a covers unless you run `nix flake check` yourself
-before landing.
+`nix flake check`, by contrast, only runs for `phillipgreenii-nix-agent-support`/
+`phillipg-nix-ziprecruiter` (the two repos with no external CI) — it skips every other repo. The
+match is on the canonical clone's full directory `basename`, never a shorthand: this repo is
+casually called `nix-agent-support` in plenty of prose (dropping the `phillipgreenii-` prefix) —
+that shorthand is **not** the match value FF-2a's own `case` statement uses, and restating it here
+has previously caused a lander agent to believe the gate didn't apply when it did (bead
+`pg2-5hww2`). So do not assume a repo without that FF-2a scoping has NO land-time gate at all: it
+still gets FF-1b's prek check; it just does not get the heavier `checks.*` derivations FF-2a covers
+unless you run `nix flake check` yourself before landing.

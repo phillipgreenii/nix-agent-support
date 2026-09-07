@@ -275,7 +275,12 @@ only automated, whole-repo check they get, and a separate design is narrowing
 those hooks (moving heavyweight test hooks out of pre-commit). For **these two
 repos only**, this handler runs a full `nix flake check` against the just-rebased
 `<WT>` before it moves `<CC>`'s primary branch, so trimming those hooks does not
-leave a landing with no automated check at all:
+leave a landing with no automated check at all.
+
+**Run this exact block; do not eyeball the match or reconstruct the pattern from
+memory.** `basename "$CC"` is a real, cheap command — actually run it (this block
+is meant to be executed verbatim, not paraphrased) and let the shell's own `case`
+decide:
 
 ```bash
 case "$(basename "$CC")" in
@@ -285,11 +290,29 @@ phillipgreenii-nix-agent-support | phillipg-nix-ziprecruiter)
 esac
 ```
 
+**Known trap — a shorter shorthand is not the match value.** Plenty of prose
+elsewhere (ADR titles, plan docs, even this workspace's own agent-rules text)
+casually calls the first repo `nix-agent-support`, dropping the
+`phillipgreenii-` prefix. That shorthand is **not** what `basename "$CC"`
+prints for that repo and **MUST NOT** be substituted for the literal pattern
+above. Bead `pg2-5hww2` recorded exactly this failure: a lander agent recalled
+the pattern as `nix-agent-support`, "concluded" the repo's real basename
+(`phillipgreenii-nix-agent-support`) didn't match, and silently skipped this
+MUST-run gate — even though the two quoted literals in the `case` above are
+correct and always have been. If your own reasoning about whether this repo
+"matches" produces any string other than a verbatim copy of one of the two
+`case` literals above, that reasoning is wrong; re-read the block above rather
+than trust recollection, or just run it and observe which branch (if any)
+executes.
+
 Match on `basename "$CC"` — the canonical clone's directory name, the same
 identifier this workspace's own `pn-workspace.toml` and root `CLAUDE.md` repo-label
 table key on — not on the git remote: for at least one of these two repos
 (`phillipg-nix-ziprecruiter`, remote `phillipg_mbp.git`) the remote's repo name
-does not match the conventional workspace name.
+does not match the conventional workspace name. The root `CLAUDE.md` repo-label
+table's **short label column** (e.g. `agent-support`) is a different, shorter
+identifier still — it is the label used on beads, never the `case` match value
+either.
 
 Every other repo this handler lands (every other repo in this workspace's
 `pn-workspace.toml`, all of which also resolve to `ff-merge-to-main`) skips this
