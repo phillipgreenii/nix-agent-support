@@ -36,8 +36,8 @@ func captureRealStdio(t *testing.T, f func() int) (stdout, stderr string, code i
 
 	code = f()
 
-	outW.Close()
-	errW.Close()
+	_ = outW.Close()
+	_ = errW.Close()
 	var outBuf, errBuf bytes.Buffer
 	if _, err := io.Copy(&outBuf, outR); err != nil {
 		t.Fatalf("read stdout pipe: %v", err)

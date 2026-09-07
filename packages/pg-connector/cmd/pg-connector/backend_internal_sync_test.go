@@ -215,15 +215,15 @@ func TestClassifyGHErrorSync(t *testing.T) {
 		// purpose only (never used for the pass/fail decision above).
 		prFile, ferr := os.CreateTemp("", "classifygherror-pr-*.go")
 		if ferr == nil {
-			defer os.Remove(prFile.Name())
+			defer func() { _ = os.Remove(prFile.Name()) }()
 			_, _ = prFile.WriteString(prExcerpt)
-			prFile.Close()
+			_ = prFile.Close()
 		}
 		ciFile, ferr := os.CreateTemp("", "classifygherror-ci-*.go")
 		if ferr == nil {
-			defer os.Remove(ciFile.Name())
+			defer func() { _ = os.Remove(ciFile.Name()) }()
 			_, _ = ciFile.WriteString(ciExcerpt)
-			ciFile.Close()
+			_ = ciFile.Close()
 		}
 		diagnostic := "(diagnostic diff unavailable)"
 		if prFile != nil && ciFile != nil {

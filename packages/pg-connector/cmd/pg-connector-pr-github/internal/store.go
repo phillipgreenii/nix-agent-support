@@ -274,7 +274,7 @@ func (s *Store) save(data storeFile) error {
 		return fmt.Errorf("store: create temp file: %w", err)
 	}
 	tmpPath := tmp.Name()
-	defer os.Remove(tmpPath) // no-op once the rename below succeeds
+	defer func() { _ = os.Remove(tmpPath) }() // no-op once the rename below succeeds
 	if _, err := tmp.Write(raw); err != nil {
 		_ = tmp.Close()
 		return fmt.Errorf("store: write temp file: %w", err)
@@ -365,7 +365,7 @@ func (s *Store) Get(prID string) (PRState, error) {
 			return err
 		}
 		st := data.PRs[prID]
-		out = PRState{Category: st.Category, Dispositions: st.Dispositions}
+		out = PRState(st)
 		return nil
 	})
 	return out, err

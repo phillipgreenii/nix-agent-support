@@ -55,5 +55,5 @@ func TestIssue_IDIsString(t *testing.T) {
 	// Issue.ID must be a string, carried over as-is from pg-pr's existing
 	// api.Issue.ID string field — a compile-time assertion that this field
 	// is string-typed, not numeric.
-	var _ string = Issue{}.ID
+	var _ string = Issue{}.ID //nolint:staticcheck // QF1011: explicit type IS the assertion; omitting it would infer from the field and defeat the check.
 }

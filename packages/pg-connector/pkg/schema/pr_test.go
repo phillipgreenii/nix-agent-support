@@ -85,9 +85,9 @@ func TestPR_CommentIDAndCommentIDAreStrings(t *testing.T) {
 	// strings, carried over as-is from pg-pr's api.Comment.ID string field —
 	// a compile-time assertion that these fields are
 	// string-typed, not numeric.
-	var _ string = PR{}.ID
-	var _ string = PRComment{}.ID
-	var _ string = FeedbackSetResult{}.CommentID
+	var _ string = PR{}.ID                       //nolint:staticcheck // QF1011: explicit type IS the assertion; omitting it would infer from the field and defeat the check.
+	var _ string = PRComment{}.ID                //nolint:staticcheck // QF1011: same as above.
+	var _ string = FeedbackSetResult{}.CommentID //nolint:staticcheck // QF1011: same as above.
 }
 
 func TestDisposition_IsValid(t *testing.T) {

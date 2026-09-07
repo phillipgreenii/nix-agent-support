@@ -52,8 +52,8 @@ func TestCIRun_IDAndPRIDAreStrings(t *testing.T) {
 	// pg-pr's existing api.CIRun.ID string field — a
 	// compile-time assertion that these fields are string-typed, not
 	// numeric.
-	var _ string = CIRun{}.ID
-	var _ string = CIRun{}.PRID
+	var _ string = CIRun{}.ID   //nolint:staticcheck // QF1011: explicit type IS the assertion; omitting it would infer from the field and defeat the check.
+	var _ string = CIRun{}.PRID //nolint:staticcheck // QF1011: same as above.
 }
 
 func TestCISchemaVersion_IndependentOfPRSchemaVersion(t *testing.T) {
