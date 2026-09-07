@@ -92,7 +92,7 @@ func TestBackend_RoundTrip_RealBD(t *testing.T) {
 	}
 	// Verified live against real bd v1.2.2, not a fake: a comma-bearing
 	// label must round-trip as ONE label, not split at the embedded comma
-	// [review: 2026-09-05-pg-connector-deep-review.md §A finding 33].
+	// [review finding A-33].
 	wantLabels := map[string]bool{"probe": true, "foo,bar": true}
 	if len(created.Labels) != len(wantLabels) {
 		t.Fatalf("Create: Labels = %v, want exactly %v", created.Labels, wantLabels)

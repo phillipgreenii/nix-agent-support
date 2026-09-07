@@ -82,8 +82,7 @@ func newIssueCreateCmd() *cobra.Command {
 	cmd.Flags().StringVar(&priority, "priority", "", "issue priority")
 	cmd.Flags().StringSliceVar(&labels, "labels", nil, "comma-separated labels")
 	cmd.Flags().StringVar(&issueType, "issue-type", "", "issue type")
-	// --description was added by bead pg2-akfw5 (review
-	// 2026-09-05-pg-connector-deep-review.md §A finding 33: Create
+	// --description was added by bead pg2-akfw5 (review finding A-33: Create
 	// previously had no way to set one at all).
 	cmd.Flags().StringVar(&description, "description", "", "issue description")
 	_ = cmd.MarkFlagRequired("title")
@@ -164,7 +163,7 @@ func reportIssueTargetedOutcome(cmd *cobra.Command, resp *scriptout.Response, er
 // formatIssue renders issue's identity/state (prefixed to distinguish a
 // freshly created issue from one merely shown) as human-readable text.
 // description/assignee/parent/deps rendering was added by bead pg2-akfw5
-// (review 2026-09-05-pg-connector-deep-review.md §A finding 33) alongside
+// (review finding A-33) alongside
 // the schema.Issue fields it displays.
 func formatIssue(prefix string, issue schema.Issue) string {
 	var b strings.Builder

@@ -82,8 +82,7 @@ var Vocabulary = []string{
 // v1.2.2), rendered in the "P<n>" form formatPriority itself emits: a
 // faithful, round-trippable rendering of bd's actual model, not the
 // invented "High"/"Medium"/"Low" scale schema.Issue.Priority's doc comment
-// used to (wrongly) advertise as if it were universal [review:
-// 2026-09-05-pg-connector-deep-review.md §A finding 33]. Wired into this
+// used to (wrongly) advertise as if it were universal [review finding A-33]. Wired into this
 // backend's capabilities response as vocabulary.priority by
 // cmd/pg-connector-issue-beads/main.go's capabilitiesBase.
 var PriorityVocabulary = []string{"P0", "P1", "P2", "P3", "P4"}
@@ -99,7 +98,7 @@ var PriorityVocabulary = []string{"P0", "P1", "P2", "P3", "P4"}
 // That third case is deliberately NOT folded into "empty stdout means
 // failure": write-success is decided from bd's own exit code (runErr),
 // never from whether stdout happened to be non-empty [fix direction,
-// review 2026-09-05-pg-connector-deep-review.md §A finding 24]. Every op
+// review finding A-24]. Every op
 // this backend calls with `--json` today always echoes a JSON envelope on
 // success, so this path is not reachable against the real bd v1.2.2 this
 // backend was verified against — but Comment and Transition already
@@ -152,7 +151,7 @@ func formatPriority(p int) string {
 // AC2] — populated by the caller (Show/Create) from Backend.tracker, not
 // derived from iss itself. Description/Assignee/Parent/Deps are carried
 // straight through from bdIssue's own fields, added by bead pg2-akfw5
-// (review 2026-09-05-pg-connector-deep-review.md §A finding 33: this
+// (review finding A-33: this
 // mapping previously dropped all four).
 func toSchemaIssue(iss *bdIssue, tracker string) *schema.Issue {
 	var deps []schema.IssueDependency
@@ -198,8 +197,8 @@ func (b *Backend) tracker() string {
 // correctly-behaving `bd show`).
 //
 // id is placed AFTER a literal "--" terminator, ahead of every one of this
-// call's own flags [bead: pg2-usu5b; review: 2026-09-05-pg-connector-deep-
-// review.md §A finding 8]. Without it, a caller-supplied id equal to a real
+// call's own flags [bead: pg2-usu5b; review finding A-8]. Without it, a
+// caller-supplied id equal to a real
 // bd flag (e.g. "--current") is parsed by bd's own cobra/pflag layer as
 // that flag rather than as a positional id — verified live against bd
 // v1.2.2: `bd show --current --readonly --json` (the old unescaped shape,
@@ -228,8 +227,7 @@ func (b *Backend) Show(ctx context.Context, id string) (*schema.Issue, error) {
 // returned id" plumbing [bead: Carry-over basis], adapted to a plain bd
 // issue with none of CreateAction's parent-child/discovered-from wiring —
 // that wiring is specific to pg-pr's review workflow and does not carry
-// over. --description was added by bead pg2-akfw5 (review
-// 2026-09-05-pg-connector-deep-review.md §A finding 33: Create previously
+// over. --description was added by bead pg2-akfw5 (review finding A-33: Create previously
 // had no way to set one at all).
 func (b *Backend) Create(ctx context.Context, input issue.IssueInput) (*schema.Issue, error) {
 	if strings.TrimSpace(input.Title) == "" {
@@ -248,8 +246,7 @@ func (b *Backend) Create(ctx context.Context, input issue.IssueInput) (*schema.I
 	if len(input.Labels) > 0 {
 		// CSV-quoted, not a bare "," join: bd's own `--labels` flag is a
 		// pflag StringSlice, which decodes its value via encoding/csv —
-		// see joinBDLabels's doc comment [review:
-		// 2026-09-05-pg-connector-deep-review.md §A finding 33].
+		// see joinBDLabels's doc comment [review finding A-33].
 		joined, joinErr := joinBDLabels(input.Labels)
 		if joinErr != nil {
 			return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, "issue: encode labels: "+joinErr.Error())
@@ -274,7 +271,7 @@ func (b *Backend) Create(ctx context.Context, input issue.IssueInput) (*schema.I
 //
 // Both id and body are caller-supplied and are placed AFTER a literal "--"
 // terminator, ahead of this call's own --json flag [bead: pg2-usu5b;
-// review: 2026-09-05-pg-connector-deep-review.md §A finding 8] — see
+// review finding A-8] — see
 // Show's doc comment for why: an unescaped id/body equal to a real bd flag
 // (e.g. "--claim") would otherwise be parsed as that flag by bd's own
 // cobra/pflag layer instead of as a literal comment argument.
@@ -299,8 +296,7 @@ func (b *Backend) Comment(ctx context.Context, id, body string) error {
 // own doc comment, not this method's job to pre-validate).
 //
 // id is caller-supplied and is placed AFTER a literal "--" terminator,
-// ahead of this call's own --status/--json flags [bead: pg2-usu5b; review:
-// 2026-09-05-pg-connector-deep-review.md §A finding 8]. targetState is
+// ahead of this call's own --status/--json flags [bead: pg2-usu5b; review finding A-8]. targetState is
 // passed as --status's flag VALUE (space-separated, not positional) —
 // pflag consumes the very next token unconditionally as that flag's value
 // regardless of its shape, so it needs no escaping. Without the "--"

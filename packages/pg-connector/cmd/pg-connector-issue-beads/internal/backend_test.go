@@ -116,8 +116,7 @@ func TestBackend_Show_Success(t *testing.T) {
 // is itself a valid bd flag string (e.g. "--current", which really does
 // mean "show the last-touched issue" per `bd show --help`) must not be
 // interpretable as a flag by bd's own cobra/pflag layer — it must be sent
-// as a literal positional, after a "--" terminator [review:
-// 2026-09-05-pg-connector-deep-review.md §A finding 8]. Verified live
+// as a literal positional, after a "--" terminator [review finding A-8]. Verified live
 // against real bd v1.2.2 that the unescaped shape actually redirects to an
 // unrelated issue and the escaped shape correctly reports not-found.
 func TestBackend_Show_IDLooksLikeBDFlag(t *testing.T) {
@@ -178,8 +177,7 @@ func TestBackend_Show_NotFound_ViaJSONErrorEnvelope(t *testing.T) {
 // need the payload (Show), an exit-0-with-empty-stdout call must still
 // fail — but as a decode failure (ErrUnavailable via bdIssueFromArray),
 // never silently succeeding with a zero-value issue, and never confused
-// with ErrNotFound [review: 2026-09-05-pg-connector-deep-review.md §A
-// finding 24].
+// with ErrNotFound [review finding A-24].
 func TestBackend_Show_EmptyStdoutOnSuccess_FailsAtDecodeNotAvailability(t *testing.T) {
 	fr := &fakeRunner{handle: func(args []string) (string, error) {
 		return "", nil
@@ -199,7 +197,7 @@ func TestBackend_Show_EmptyStdoutOnSuccess_FailsAtDecodeNotAvailability(t *testi
 
 // TestBackend_Show_IncludesDescriptionAssigneeParentDeps locks in the fix
 // for finding 33's "Show drops description/assignee/parent/deps from its
-// response" [review: 2026-09-05-pg-connector-deep-review.md §A finding 33].
+// response" [review finding A-33].
 func TestBackend_Show_IncludesDescriptionAssigneeParentDeps(t *testing.T) {
 	fr := &fakeRunner{handle: func(args []string) (string, error) {
 		return `{"data":[{"id":"tp-1.1","title":"child","description":"a desc",` +
@@ -326,8 +324,7 @@ func TestBackend_Create_OmitsOptionalFlagsWhenUnset(t *testing.T) {
 
 // TestBackend_Create_CommaBearingLabelRoundTrips locks in finding 33's fix
 // for "--labels values are joined with a bare ',' ... which splits any
-// label that itself contains a comma" [review:
-// 2026-09-05-pg-connector-deep-review.md §A finding 33]. The expected
+// label that itself contains a comma" [review finding A-33]. The expected
 // --labels value is CSV-quoted exactly the way bd's own pflag StringSlice
 // flag decodes it (verified live against a real bd v1.2.2 in this bead's
 // investigation).
@@ -364,8 +361,7 @@ func TestBackend_Create_CommaBearingLabelRoundTrips(t *testing.T) {
 }
 
 // TestBackend_Create_SetsDescription locks in finding 33's fix for
-// "Create has no way to set a description at all" [review:
-// 2026-09-05-pg-connector-deep-review.md §A finding 33].
+// "Create has no way to set a description at all" [review finding A-33].
 func TestBackend_Create_SetsDescription(t *testing.T) {
 	fr := &fakeRunner{handle: func(args []string) (string, error) {
 		if !containsArg(args, "--description") || !containsArg(args, "a desc") {
@@ -407,7 +403,7 @@ func TestBackend_Comment_Success(t *testing.T) {
 // that is itself a valid bd flag string (e.g. "--claim") must not be
 // interpretable as a flag by bd's own cobra/pflag layer — it must be sent
 // as a literal positional, after a "--" terminator, exactly like any other
-// id [review: 2026-09-05-pg-connector-deep-review.md §A finding 8].
+// id [review finding A-8].
 func TestBackend_Comment_IDLooksLikeBDFlag(t *testing.T) {
 	fr := &fakeRunner{handle: func(args []string) (string, error) {
 		if !argsEndWith(args, "--", "--claim", "hijack attempt") {
@@ -440,8 +436,7 @@ func TestBackend_Comment_NotFound_ViaStderrOnlyFailure(t *testing.T) {
 
 // TestBackend_Comment_SuccessWithEmptyStdout locks in finding 24's fix: an
 // exit-0 bd invocation with genuinely empty stdout must be treated as a
-// real, payload-less success, not backend ill-health [review:
-// 2026-09-05-pg-connector-deep-review.md §A finding 24] — Comment already
+// real, payload-less success, not backend ill-health [review finding A-24] — Comment already
 // discards whatever payload b.run returns, so this exercises the
 // hypothetical future bd version that stops echoing JSON on this op.
 func TestBackend_Comment_SuccessWithEmptyStdout(t *testing.T) {
@@ -507,8 +502,7 @@ func TestBackend_Transition_Success(t *testing.T) {
 // TestBackend_Transition_IDLooksLikeBDFlag locks in the pg2-usu5b fix: an
 // id that is itself a valid bd flag string (e.g. "--claim") must not be
 // interpretable as a flag by bd's own cobra/pflag layer — it must be sent
-// as a literal positional, after a "--" terminator [review:
-// 2026-09-05-pg-connector-deep-review.md §A finding 8]. Verified live
+// as a literal positional, after a "--" terminator [review finding A-8]. Verified live
 // against real bd v1.2.2 that the unescaped shape
 // (`bd update --claim --status closed --json`) actually claims AND closes
 // bd's workspace-wide "last touched" issue — an unrelated bead — while the
@@ -546,8 +540,7 @@ func TestBackend_Transition_NotFound_ViaStderrOnlyFailure(t *testing.T) {
 // TestBackend_Transition_SuccessWithEmptyStdout locks in finding 24's fix,
 // mirroring TestBackend_Comment_SuccessWithEmptyStdout above: an exit-0
 // `bd update ... --json` with empty stdout is a real success (Transition
-// already discards the payload), not backend ill-health [review:
-// 2026-09-05-pg-connector-deep-review.md §A finding 24].
+// already discards the payload), not backend ill-health [review finding A-24].
 func TestBackend_Transition_SuccessWithEmptyStdout(t *testing.T) {
 	fr := &fakeRunner{handle: func(args []string) (string, error) {
 		return "", nil
@@ -671,8 +664,7 @@ func TestVocabulary_NonEmptyAndMatchesRealBDStatuses(t *testing.T) {
 // finding 33's fix: capabilities.vocabulary must declare a priority
 // vocabulary matching what bd's own `-p`/`--priority` flag actually
 // accepts ("0-4 or P0-P4"), not the invented "High"/"Medium"/"Low" scale
-// schema.Issue.Priority's doc comment used to advertise [review:
-// 2026-09-05-pg-connector-deep-review.md §A finding 33].
+// schema.Issue.Priority's doc comment used to advertise [review finding A-33].
 func TestPriorityVocabulary_NonEmptyAndMatchesRealBDPriorities(t *testing.T) {
 	if len(PriorityVocabulary) == 0 {
 		t.Fatal("PriorityVocabulary must be non-empty")

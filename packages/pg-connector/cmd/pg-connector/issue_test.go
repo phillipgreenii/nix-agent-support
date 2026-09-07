@@ -96,7 +96,7 @@ func TestRun_IssueCreate_Success(t *testing.T) {
 // TestRun_IssueCreate_WithDescription_Success locks in the CLI half of
 // finding 33's fix: `pg-connector issue create` must accept a
 // --description flag at all (it previously had none), reaching exit 0
-// [review: 2026-09-05-pg-connector-deep-review.md §A finding 33].
+// [review finding A-33].
 func TestRun_IssueCreate_WithDescription_Success(t *testing.T) {
 	writeOpAwareFakeBackend(t, "backend-issue-create-desc", map[string]string{
 		"create": `{"protocolVersion":1,"schemaVersion":1,"result":{"id":"issue-2","title":"new issue","state":"open","description":"a desc"}}`,
@@ -231,8 +231,7 @@ func TestRun_IssueShow_HumanOutput(t *testing.T) {
 // carries description/assignee/parent/deps (schema.Issue side, verified in
 // pkg/schema and cmd/pg-connector-issue-beads/internal), formatIssue must
 // actually display them in human mode rather than silently dropping them
-// again at this last rendering step [review:
-// 2026-09-05-pg-connector-deep-review.md §A finding 33].
+// again at this last rendering step [review finding A-33].
 func TestRun_IssueShow_HumanOutput_IncludesDescriptionAssigneeParentDeps(t *testing.T) {
 	writeOpAwareFakeBackend(t, "backend-issue-show-human-fields", map[string]string{
 		"show": `{"protocolVersion":1,"schemaVersion":1,"result":{"id":"issue-1","title":"t","state":"open",` +

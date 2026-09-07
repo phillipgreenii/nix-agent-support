@@ -36,8 +36,7 @@ import (
 // bdIssue is the subset of bd's `--json` issue shape this backend needs —
 // deliberately small: no metadata map, no comments (this backend has no
 // use for them, unlike packages/pg-pr/pkg/beads.bdIssue). Description,
-// Assignee, Parent, and Dependencies were added by bead pg2-akfw5 (review
-// 2026-09-05-pg-connector-deep-review.md §A finding 33: Show previously
+// Assignee, Parent, and Dependencies were added by bead pg2-akfw5 (review finding A-33: Show previously
 // dropped all four), verified live against a real `bd show --json` on a
 // child issue with a parent and description/assignee set, not assumed from
 // memory.
@@ -69,8 +68,7 @@ type bdDependency struct {
 // pflag StringSlice flag decodes correctly — that flag type parses its
 // value via encoding/csv (pflag's stringSlice.go readAsCSV/writeAsCSV), so
 // a label containing a literal comma or quote needs CSV quoting, not the
-// bare "," separator this used to join with [review:
-// 2026-09-05-pg-connector-deep-review.md §A finding 33]. Verified live
+// bare "," separator this used to join with [review finding A-33]. Verified live
 // against a real bd v1.2.2: `bd create --labels '"foo,bar",baz' --json`
 // decodes back to exactly two labels, "foo,bar" and "baz" — the same
 // encoding this function produces — confirming this matches bd's actual

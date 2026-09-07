@@ -29,8 +29,8 @@ package schema
 // handling is exercised against a real precedent rather than a hypothetical
 // one.
 //
-// Bumped 2 -> 3 by bead pg2-akfw5 (review 2026-09-05-pg-connector-deep-
-// review.md §A finding 33), which added Description/Assignee/Parent/Deps
+// Bumped 2 -> 3 by bead pg2-akfw5 (review finding A-33), which added
+// Description/Assignee/Parent/Deps
 // below — same "any field-shape change bumps the version" precedent as the
 // 1 -> 2 bump.
 const IssueSchemaVersion = 3
@@ -51,8 +51,7 @@ type Issue struct {
 	// represents it — e.g. bd's "P0".."P4", not a fixed cross-backend
 	// "High"/"Medium"/"Low" scale (an earlier revision of this comment
 	// advertised that scale as if it were universal; bd itself rejects
-	// those values, per review 2026-09-05-pg-connector-deep-review.md §A
-	// finding 33). Each backend renders its own tracker-native form and
+	// those values, per review finding A-33). Each backend renders its own tracker-native form and
 	// declares the values it actually accepts via its capabilities
 	// response's vocabulary.priority (see e.g. issue-beads'
 	// PriorityVocabulary) — this field does not pin one scale for every
@@ -81,37 +80,32 @@ type Issue struct {
 
 	// Description is the issue's free-text description/body. Empty when
 	// the backend does not supply one, or the issue has none — added by
-	// bead pg2-akfw5 (review 2026-09-05-pg-connector-deep-review.md §A
-	// finding 33: Show previously dropped this entirely).
+	// bead pg2-akfw5 (review finding A-33: Show previously dropped this entirely).
 	Description string `json:"description,omitempty"`
 
 	// Assignee is the issue's current assignee, in whatever identity form
 	// its own tracker uses (a bd actor string, a Jira/GitHub login, ...).
 	// Empty when unassigned or the backend does not supply one — added by
-	// bead pg2-akfw5 (review 2026-09-05-pg-connector-deep-review.md §A
-	// finding 33).
+	// bead pg2-akfw5 (review finding A-33).
 	Assignee string `json:"assignee,omitempty"`
 
 	// Parent is the id of this issue's parent in a hierarchical tracker
 	// (e.g. one of bd's dot-suffixed child ids). Empty when the issue has
 	// no parent or the backend does not supply one — added by bead
-	// pg2-akfw5 (review 2026-09-05-pg-connector-deep-review.md §A finding
-	// 33).
+	// pg2-akfw5 (review finding A-33).
 	Parent string `json:"parent,omitempty"`
 
 	// Deps lists this issue's own dependency edges — both hierarchical
 	// parent-child links and typed edges (e.g. bd's "blocks",
 	// "discovered-from") — in whatever the tracker itself calls the
 	// relationship. Empty when the backend does not supply this or the
-	// issue has none — added by bead pg2-akfw5 (review
-	// 2026-09-05-pg-connector-deep-review.md §A finding 33).
+	// issue has none — added by bead pg2-akfw5 (review finding A-33).
 	Deps []IssueDependency `json:"deps,omitempty"`
 }
 
 // IssueDependency is one edge in Issue.Deps: another issue's id, plus this
 // tracker's own name for the relationship (e.g. bd's "parent-child" or
-// "blocks" `dependency_type`) — added by bead pg2-akfw5 (review
-// 2026-09-05-pg-connector-deep-review.md §A finding 33).
+// "blocks" `dependency_type`) — added by bead pg2-akfw5 (review finding A-33).
 type IssueDependency struct {
 	ID   string `json:"id"`
 	Type string `json:"type"`

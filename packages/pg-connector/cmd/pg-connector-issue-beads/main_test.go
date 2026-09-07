@@ -74,8 +74,7 @@ func TestNewDispatchTable_CapabilitiesVocabularyNonEmpty(t *testing.T) {
 // TestNewDispatchTable_CapabilitiesVocabularyPriority locks in finding 33's
 // fix: capabilities.vocabulary must declare a non-empty "priority" entry
 // matching internal.PriorityVocabulary (bd's real accepted priority
-// values), since it previously omitted priority entirely [review:
-// 2026-09-05-pg-connector-deep-review.md §A finding 33].
+// values), since it previously omitted priority entirely [review finding A-33].
 func TestNewDispatchTable_CapabilitiesVocabularyPriority(t *testing.T) {
 	table := newDispatchTable(newTestBackend())
 	entry := table[scriptout.OpCapabilities]

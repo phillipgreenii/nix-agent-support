@@ -64,7 +64,7 @@ func newDispatchTable(backend *internal.Backend) scriptout.DispatchTable {
 // and --priority values) [design: §4.3, §4.3 AC] — everything
 // AddCapabilities needs except Ops, which it deliberately leaves unset for
 // AddCapabilities to compute. vocabulary.priority was added by bead
-// pg2-akfw5 (review 2026-09-05-pg-connector-deep-review.md §A finding 33:
+// pg2-akfw5 (review finding A-33:
 // capabilities.vocabulary previously omitted priority entirely). It also
 // advertises the resolved bd workspace directory (bead pg2-1q9c0, AC2)
 // when one is configured, so `pg-connector config validate`'s capabilities
