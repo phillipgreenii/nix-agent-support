@@ -1438,6 +1438,112 @@
                     touch $out
                   '';
 
+              # Build-forcing guard for pg-connector's own Tier-1 umbrella
+              # binary (bead pg2-z28y9): `nix flake check` only realizes
+              # checks.*, not packages.* (this repo's CLAUDE.md "Go test
+              # gate" section / bead pg2-3nb2t), so nothing previously
+              # forced `packages.pg-connector` (or its 4 Tier-2 backends
+              # immediately below) to actually build as part of the
+              # automated gate — `nix build .#pg-connector` succeeding was a
+              # manual, easy-to-forget step. One check per derivation
+              # (5 total here), matching the bead's own framing rather than
+              # test-pg-pr-review-input-assets' single-package shape: the 5
+              # pg-connector derivations are independently buildable, unrelated
+              # binaries (one umbrella CLI + 4 standalone Tier-2 backends), so
+              # a shared check would conflate which of the 5 broke, whereas
+              # pg-pr/pa-monitor each guard exactly one package. Mirrors
+              # test-pa-monitor-version-stamped's own pattern exactly: probe
+              # --version and assert the mkSrcDigest-stamped format
+              # (`versionPath = "main.Version"` in default.nix), since a
+              # linker/ldflag regression here is otherwise invisible to the
+              # Go unit tests the same way it was for pa-monitor.
+              test-pg-connector-version-stamped = pkgs.runCommand "pg-connector-version-stamped" { } ''
+                v=$(${pkgs.pg-connector}/bin/pg-connector --version)
+                case "$v" in
+                  "pg-connector version 0.0.0-"????????) touch "$out" ;;
+                  *)
+                    echo "pg-connector version not stamped (got: '$v', want 'pg-connector version 0.0.0-<8hex>')" >&2
+                    exit 1
+                    ;;
+                esac
+              '';
+
+              # Build-forcing guards for pg-connector's 4 Tier-2 backend
+              # binaries (bead pg2-z28y9), one per derivation like
+              # test-pg-connector-version-stamped above. Every backend
+              # speaks ONLY the scriptout wire protocol on stdin/stdout —
+              # os.Args is never inspected (see e.g.
+              # cmd/pg-connector-scm-git/main.go's own doc comment: "no
+              # independent human-facing CLI identity"), so --version/--help
+              # cannot probe them the way it probes the umbrella binary
+              # above. The one op every backend answers
+              # (pkg/scriptout.AddCapabilities wires it into every dispatch
+              # table unconditionally) is `capabilities`, so that is the
+              # universal, side-effect-free smoke op each of these sends —
+              # asserting protocolVersion, a numeric per-capability
+              # schemaVersions entry, and that "capabilities" itself is
+              # listed in ops (proving the dispatch table actually built and
+              # registered handlers, not just that the process didn't crash).
+              test-pg-connector-pr-github-capabilities =
+                pkgs.runCommand "pg-connector-pr-github-capabilities" { nativeBuildInputs = [ pkgs.jq ]; }
+                  ''
+                    resp=$(echo '{"op":"capabilities"}' | ${pkgs.pg-connector-pr-github}/bin/pg-connector-pr-github)
+                    echo "$resp" | jq -e '
+                      .protocolVersion == 1
+                      and (.schemaVersions.pr | type) == "number"
+                      and (.ops | index("capabilities")) != null
+                    ' >/dev/null || {
+                      echo "FAIL: pg-connector-pr-github capabilities response malformed: $resp" >&2
+                      exit 1
+                    }
+                    touch $out
+                  '';
+
+              test-pg-connector-ci-github-actions-capabilities =
+                pkgs.runCommand "pg-connector-ci-github-actions-capabilities" { nativeBuildInputs = [ pkgs.jq ]; }
+                  ''
+                    resp=$(echo '{"op":"capabilities"}' | ${pkgs.pg-connector-ci-github-actions}/bin/pg-connector-ci-github-actions)
+                    echo "$resp" | jq -e '
+                      .protocolVersion == 1
+                      and (.schemaVersions.ci | type) == "number"
+                      and (.ops | index("capabilities")) != null
+                    ' >/dev/null || {
+                      echo "FAIL: pg-connector-ci-github-actions capabilities response malformed: $resp" >&2
+                      exit 1
+                    }
+                    touch $out
+                  '';
+
+              test-pg-connector-issue-beads-capabilities =
+                pkgs.runCommand "pg-connector-issue-beads-capabilities" { nativeBuildInputs = [ pkgs.jq ]; }
+                  ''
+                    resp=$(echo '{"op":"capabilities"}' | ${pkgs.pg-connector-issue-beads}/bin/pg-connector-issue-beads)
+                    echo "$resp" | jq -e '
+                      .protocolVersion == 1
+                      and (.schemaVersions.issue | type) == "number"
+                      and (.ops | index("capabilities")) != null
+                    ' >/dev/null || {
+                      echo "FAIL: pg-connector-issue-beads capabilities response malformed: $resp" >&2
+                      exit 1
+                    }
+                    touch $out
+                  '';
+
+              test-pg-connector-scm-git-capabilities =
+                pkgs.runCommand "pg-connector-scm-git-capabilities" { nativeBuildInputs = [ pkgs.jq ]; }
+                  ''
+                    resp=$(echo '{"op":"capabilities"}' | ${pkgs.pg-connector-scm-git}/bin/pg-connector-scm-git)
+                    echo "$resp" | jq -e '
+                      .protocolVersion == 1
+                      and (.schemaVersions.scm | type) == "number"
+                      and (.ops | index("capabilities")) != null
+                    ' >/dev/null || {
+                      echo "FAIL: pg-connector-scm-git capabilities response malformed: $resp" >&2
+                      exit 1
+                    }
+                    touch $out
+                  '';
+
               # pa-monitor — the largest suite (bead pg2-ymi3l, fast-follow to
               # pg2-adhga / ADR 0021). Pattern-B module (local replace
               # ../claude-transcript), so root the fileset at packages/ and pass

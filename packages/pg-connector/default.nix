@@ -22,19 +22,30 @@ mkGoApp {
 
   nativeBuildInputs = [ pkgs.help2man ];
 
+  # Hard failures, no `|| true` (bead pg2-z28y9): the previous `|| true` on
+  # each of these 4 generators swallowed any failure, so a cobra/help2man
+  # regression could ship an empty or stale man page/completion with
+  # nothing asserting non-empty output — and nothing in `nix flake check`
+  # forced this package to build at all until the pg-connector-* checks
+  # added alongside this fix started referencing it. Matches the
+  # established convention in this repo's OTHER postInstall shell-completion
+  # generation (packages/claude-extended-tool-approver/default.nix has no
+  # `|| true`/`2>/dev/null` guard on its own completion generators) —
+  # pg-pr/default.nix still carries the old guarded form and is out of this
+  # bead's scope, but is the same latent defect.
   postInstall = ''
     # Generate man page
     mkdir -p $out/share/man/man1
     help2man --no-info --no-discard-stderr $out/bin/pg-connector \
-      > $out/share/man/man1/pg-connector.1 || true
+      > $out/share/man/man1/pg-connector.1
 
     # Generate shell completions
     mkdir -p $out/share/bash-completion/completions
     mkdir -p $out/share/zsh/site-functions
     mkdir -p $out/share/fish/vendor_completions.d
-    $out/bin/pg-connector completion bash > $out/share/bash-completion/completions/pg-connector 2>/dev/null || true
-    $out/bin/pg-connector completion zsh > $out/share/zsh/site-functions/_pg-connector 2>/dev/null || true
-    $out/bin/pg-connector completion fish > $out/share/fish/vendor_completions.d/pg-connector.fish 2>/dev/null || true
+    $out/bin/pg-connector completion bash > $out/share/bash-completion/completions/pg-connector
+    $out/bin/pg-connector completion zsh > $out/share/zsh/site-functions/_pg-connector
+    $out/bin/pg-connector completion fish > $out/share/fish/vendor_completions.d/pg-connector.fish
   '';
 
   meta = with lib; {
