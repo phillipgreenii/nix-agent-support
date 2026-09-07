@@ -1,0 +1,4 @@
+flowchart LR
+    n0["command: grep -r TODO ~/.ssh<br/>- path:read ~/.ssh [arg 2]<br/>- stdio:stdout content<br/>mark=forbidden: path:read ~/.ssh [arg 2]: no-read-of-secret-path (secret path)"]
+    n1[/"file: ~/.ssh"/]
+    n0 -->|"reads: read"| n1

@@ -315,17 +315,7 @@ type RestOverride struct {
 // spellings that appeared. It reports false with a reason when the layout
 // cannot be satisfied.
 func (p PositionalSpec) resolveRoles(n int, flagsSeen map[string]bool) ([]OperandRole, string, bool) {
-	leading := p.Leading
-	if anySeen(p.LeadingSkippedByFlags, flagsSeen) {
-		leading = nil
-	}
-	if p.LeadingOptional && n == 0 {
-		leading = nil
-	}
-	trailing := p.Trailing
-	if anySeen(p.TrailingSkippedByFlags, flagsSeen) {
-		trailing = nil
-	}
+	leading, trailing := p.layout(n, flagsSeen)
 	need := len(leading) + len(trailing) + p.MinRest
 	if n < need {
 		return nil, fmt.Sprintf("too few positionals: %d given, need at least %d", n, need), false
@@ -346,6 +336,38 @@ func (p PositionalSpec) resolveRoles(n int, flagsSeen map[string]bool) ([]Operan
 		}
 	}
 	return roles, "", true
+}
+
+// layout is the ONE place the effective Leading and Trailing slots for an
+// invocation of n positionals are computed (the skip-by-flag and
+// LeadingOptional rules), shared by resolveRoles and restCount so the two
+// can never disagree about which positionals are Rest.
+func (p PositionalSpec) layout(n int, flagsSeen map[string]bool) (leading, trailing []OperandRole) {
+	leading = p.Leading
+	if anySeen(p.LeadingSkippedByFlags, flagsSeen) {
+		leading = nil
+	}
+	if p.LeadingOptional && n == 0 {
+		leading = nil
+	}
+	trailing = p.Trailing
+	if anySeen(p.TrailingSkippedByFlags, flagsSeen) {
+		trailing = nil
+	}
+	return leading, trailing
+}
+
+// restCount reports how many of n positionals resolve to the Rest role —
+// the ones left after the Leading and Trailing slots are filled — for
+// ImplicitEffect.WhenNoRestPositionals. Never negative: an invocation too
+// short to fill its slots has zero Rest positionals (and resolveRoles has
+// already failed it).
+func (p PositionalSpec) restCount(n int, flagsSeen map[string]bool) int {
+	leading, trailing := p.layout(n, flagsSeen)
+	if c := n - len(leading) - len(trailing); c > 0 {
+		return c
+	}
+	return 0
 }
 
 func anySeen(names []string, seen map[string]bool) bool {
@@ -410,19 +432,29 @@ const (
 // WhenFlags further restricts emission to invocations where at least one of
 // the named flag spellings was seen (grep's implicit recursive-from-"."
 // read, which only makes sense under -r/-R). Empty means no flag condition;
-// when both WhenNoPositionals and WhenFlags are set, both must hold (AND).
-// grep's positional layout always consumes a Leading pattern slot unless
-// -e/-f supplied one, so "no positionals resolved" recognises only the
-// -e/-f-pattern spelling, not a bare positional pattern (`grep -r TODO`) —
-// a documented imprecision on grepSchema, not a gap this field tries to
-// close (that would need a "count only Rest-role positionals" condition,
-// which no case here requires).
+// every condition set must hold (AND).
+//
+// WhenNoRestPositionals restricts emission to invocations where zero
+// positionals resolved to the REST role — positionals consumed by a
+// Leading or Trailing slot do not count. It exists for grep: the pattern
+// occupies the sole Leading slot unless -e/-f supplied it, so under
+// WhenNoPositionals a bare positional pattern (`grep -r TODO`) counted as
+// "a positional was given" and the implicit recursive read never fired —
+// grep fell through to a stdin read instead of the honest "reads
+// everything under ." (tc-q9ak item 2; before that, a documented
+// imprecision on grepSchema). Counting only Rest positionals is the
+// condition grep's semantics actually express: it searches "." when no
+// FILE operand was given, whatever supplied the pattern.
+//
+// The restCount is computed by PositionalSpec.restCount from the same
+// layout resolveRoles uses, so the two cannot disagree.
 type ImplicitEffect struct {
-	Role              OperandRole
-	Target            string
-	Dynamic           bool
-	WhenNoPositionals bool
-	WhenFlags         []string
+	Role                  OperandRole
+	Target                string
+	Dynamic               bool
+	WhenNoPositionals     bool
+	WhenNoRestPositionals bool
+	WhenFlags             []string
 }
 
 // CommandSchema is the schema VALUE for one command. Provenance records the

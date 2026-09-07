@@ -57,6 +57,95 @@ func TestResolveRoles(t *testing.T) {
 	}
 }
 
+// TestRestCount: restCount counts only positionals left for the Rest role
+// after the Leading/Trailing slots (honouring the same skip-by-flag rules
+// resolveRoles applies), and never goes negative.
+func TestRestCount(t *testing.T) {
+	spec := PositionalSpec{
+		Leading:                []OperandRole{Literal},
+		LeadingSkippedByFlags:  []string{"-e"},
+		Rest:                   PathRead,
+		Trailing:               []OperandRole{PathTruncate},
+		TrailingSkippedByFlags: []string{"-t"},
+	}
+	seen := func(names ...string) map[string]bool {
+		m := map[string]bool{}
+		for _, n := range names {
+			m[n] = true
+		}
+		return m
+	}
+	cases := []struct {
+		name  string
+		n     int
+		flags map[string]bool
+		want  int
+	}{
+		{"zero positionals", 0, seen(), 0},
+		{"only the leading slot filled", 1, seen(), 0},
+		{"leading and trailing, no rest", 2, seen(), 0},
+		{"one rest", 3, seen(), 1},
+		{"leading skipped: one positional is rest", 1, seen("-e"), 0}, // it fills the trailing slot
+		{"leading and trailing skipped: all rest", 2, seen("-e", "-t"), 2},
+		{"never negative", 0, seen("-e"), 0},
+	}
+	for _, tc := range cases {
+		if got := spec.restCount(tc.n, tc.flags); got != tc.want {
+			t.Errorf("%s: restCount(%d) = %d, want %d", tc.name, tc.n, got, tc.want)
+		}
+	}
+}
+
+// TestImplicitWhenNoRestPositionals: a WhenNoRestPositionals implicit read
+// fires when the only positional filled a Leading slot, is suppressed by a
+// Rest positional, and (unlike WhenNoPositionals) counts as a path operand
+// for the stdin rule — on a synthetic grep-shaped schema.
+func TestImplicitWhenNoRestPositionals(t *testing.T) {
+	schema := CommandSchema{
+		Name: "g",
+		Flags: map[string]FlagSpec{
+			"-r": inert,
+			"-e": literal1,
+		},
+		Positionals: PositionalSpec{
+			Leading:               []OperandRole{Literal},
+			LeadingSkippedByFlags: []string{"-e"},
+			Rest:                  PathRead,
+		},
+		ImplicitEffects: []ImplicitEffect{
+			{Role: PathRead, Target: ".", WhenNoRestPositionals: true, WhenFlags: []string{"-r"}},
+		},
+		Stdin:  StdinWhenNoPathOperands,
+		Stdout: StdoutContent,
+	}
+	run := func(command string) Interpretation {
+		return GenericInterpreter{}.Interpret(leaf(t, command), schema, Context{})
+	}
+	has := func(in Interpretation, want string) bool {
+		for _, e := range in.Effects {
+			if e.String() == want {
+				return true
+			}
+		}
+		return false
+	}
+	implicitRead := "path:read . [implicit]"
+	stdinRead := "stdio:stdin content"
+
+	if in := run("g -r TODO"); !has(in, implicitRead) || has(in, stdinRead) {
+		t.Errorf("bare positional pattern with -r: effects %v — want the implicit read and no stdin read", in.Effects)
+	}
+	if in := run("g -r -e TODO"); !has(in, implicitRead) || has(in, stdinRead) {
+		t.Errorf("-e pattern with -r: effects %v — want the implicit read and no stdin read", in.Effects)
+	}
+	if in := run("g -r TODO f.txt"); has(in, implicitRead) || has(in, stdinRead) {
+		t.Errorf("rest positional given: effects %v — want neither the implicit read nor a stdin read", in.Effects)
+	}
+	if in := run("g TODO"); has(in, implicitRead) || !has(in, stdinRead) {
+		t.Errorf("no -r: effects %v — want no implicit read and a stdin read", in.Effects)
+	}
+}
+
 // TestResolveRolesRestOverride: RestOverride swaps Rest to a different role
 // when one of its flags was seen, and leaves Leading/Trailing untouched —
 // the mechanism gitBranchSchema/gitConfigSchema use (registry.go) to

@@ -436,7 +436,8 @@ func (st *interpState) unknownFlag(tok string) (int, bool) {
 
 // implicit appends the effects the schema declares WITHOUT an operand (see
 // ImplicitEffect): each fires either always, or only when the invocation
-// resolved zero positionals. It runs before stdio() and, like every other
+// resolved zero positionals (WhenNoPositionals) or zero REST positionals
+// (WhenNoRestPositionals). It runs before stdio() and, like every other
 // effect collected here, is subject to the flag transforms applied in
 // result() — a dry-run flag strips an implicit delete exactly like an
 // explicit one.
@@ -444,6 +445,9 @@ func (st *interpState) implicit() {
 	n := len(st.positionals())
 	for _, ie := range st.schema.ImplicitEffects {
 		if ie.WhenNoPositionals && n > 0 {
+			continue
+		}
+		if ie.WhenNoRestPositionals && st.schema.Positionals.restCount(n, st.flagsSeen) > 0 {
 			continue
 		}
 		if len(ie.WhenFlags) > 0 && !st.anyFlagSeen(ie.WhenFlags...) {
@@ -455,6 +459,14 @@ func (st *interpState) implicit() {
 
 // emitImplicit builds the one effect an ImplicitEffect describes. An
 // unmodeled role kind fails closed rather than silently doing nothing.
+//
+// An implicit path READ that stands in for the missing file operands
+// (WhenNoRestPositionals — grep's recursive search of ".") counts as a
+// path operand for the stdin rule: grep -r with no FILE searches the tree
+// and does not read stdin, so pathOps is bumped exactly as an explicit
+// operand would bump it. Every other implicit path effect (git status's
+// always-on read of ".", git clean's delete of ".") leaves pathOps alone,
+// as before — those schemas are StdinNever anyway.
 func (st *interpState) emitImplicit(ie ImplicitEffect) {
 	switch {
 	case ie.Role.IsPath():
@@ -465,6 +477,9 @@ func (st *interpState) emitImplicit(ie ImplicitEffect) {
 			Dynamic: ie.Dynamic,
 			Source:  "implicit",
 		})
+		if ie.WhenNoRestPositionals && ie.Role.pathAccess() == AccessRead {
+			st.pathOps++
+		}
 	case ie.Role.Kind == KindRemote:
 		st.effects = append(st.effects, Effect{
 			Kind:      EffectRemote,

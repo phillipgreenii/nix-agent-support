@@ -1094,15 +1094,13 @@ var tailSchema = CommandSchema{
 // skipped by -e/--regexp/-f/--file (mirroring sedSchema's program-operand
 // shape); the rest are PathRead. `-f`/`--file` reads a PATTERNS file
 // (PathRead — a real read, not a data flag). The implicit recursive-from-"."
-// read only fires under -r/-R AND when the invocation resolved zero
-// positionals at all — which, because the Leading pattern slot always
-// consumes one positional unless -e/-f supplied it, means `grep -r TODO`
-// (pattern given positionally) does NOT trigger it, only `grep -r -e TODO`
-// does. This is the WhenFlags condition's documented imprecision (see
-// ImplicitEffect's doc comment) — a bare positional pattern with -r produces
-// no path effect at all (grep still reads stdin per StdinWhenNoPathOperands,
-// which is not itself dangerous) rather than the honest "reads everything
-// under .".
+// read fires under -r/-R AND when zero positionals resolved to the REST
+// (FILE) role — WhenNoRestPositionals, which does not count the Leading
+// pattern slot — so `grep -r TODO` and `grep -r -e TODO` both read "."
+// (and neither reads stdin: the implicit read stands in for the missing
+// FILE operands, see emitImplicit), while `grep -r TODO README.md` reads
+// README.md only. Before tc-q9ak item 2 this used WhenNoPositionals and the
+// bare-positional spelling under-reported as a stdin read.
 var grepSchema = CommandSchema{
 	Name:       "grep",
 	Provenance: "ugrep 7.8.4 (GNU-grep-compatible CLI), grep --help",
@@ -1143,7 +1141,7 @@ var grepSchema = CommandSchema{
 		Rest:                  PathRead,
 	},
 	ImplicitEffects: []ImplicitEffect{
-		{Role: PathRead, Target: ".", WhenNoPositionals: true, WhenFlags: []string{"-r", "-R", "--recursive", "--dereference-recursive"}},
+		{Role: PathRead, Target: ".", WhenNoRestPositionals: true, WhenFlags: []string{"-r", "-R", "--recursive", "--dereference-recursive"}},
 	},
 	Stdin:        StdinWhenNoPathOperands,
 	Stdout:       StdoutContent,

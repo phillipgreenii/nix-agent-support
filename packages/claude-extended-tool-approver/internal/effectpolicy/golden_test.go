@@ -335,13 +335,15 @@ var goldenCases = []goldenCase{
 
 	// grep (this host: ugrep): pattern is a Leading Literal skipped by
 	// -e/-f; -f reads a patterns FILE (a real PathRead); the implicit
-	// recursive-from-"." read needs -r/-R AND zero resolved positionals —
-	// which a bare positional pattern (grep_r_todo) does NOT satisfy, since
-	// the pattern itself occupies the sole Leading slot (see grepSchema's
-	// doc comment) — so it reads stdin instead (no policy judges that),
-	// and approves.
+	// recursive-from-"." read fires under -r/-R when zero positionals
+	// resolved to the Rest (FILE) role (WhenNoRestPositionals, tc-q9ak item
+	// 2) — so grep_r_todo and grep_r_e_todo both read "." (and not stdin),
+	// while grep_r_todo_readme reads README.md only.
 	{"grep_todo_readme", "grep TODO README.md", evalcontract.Approve, nil},
 	{"grep_r_todo", "grep -r TODO", evalcontract.Approve, nil},
+	{"grep_r_e_todo", "grep -r -e TODO", evalcontract.Approve, nil},
+	{"grep_r_todo_readme", "grep -r TODO README.md", evalcontract.Approve, nil},
+	{"grep_r_todo_ssh_dir", "grep -r TODO ~/.ssh", evalcontract.Reject, nil},
 	{"grep_f_ssh_key", "grep -f ~/.ssh/id_rsa README.md", evalcontract.Reject, nil},
 
 	// mkdir: positionals are PathCreate.

@@ -1,2 +1,4 @@
 flowchart LR
-    n0["command: grep -r TODO<br/>- stdio:stdin content<br/>- stdio:stdout content<br/>mark=permitted"]
+    n0["command: grep -r TODO<br/>- path:read . [implicit]<br/>- stdio:stdout content<br/>mark=permitted"]
+    n1[/"file: ."/]
+    n0 -->|"reads: read"| n1
