@@ -57,6 +57,46 @@ func TestResolveRoles(t *testing.T) {
 	}
 }
 
+// TestResolveRolesRestOverride: RestOverride swaps Rest to a different role
+// when one of its flags was seen, and leaves Leading/Trailing untouched —
+// the mechanism gitBranchSchema/gitConfigSchema use (registry.go) to
+// disambiguate a safe listing/filter pattern from a write.
+func TestResolveRolesRestOverride(t *testing.T) {
+	spec := PositionalSpec{
+		Rest:         Unmodeled,
+		RestOverride: RestOverride{Flags: []string{"-l", "--list"}, Role: Literal},
+	}
+	seen := func(names ...string) map[string]bool {
+		m := map[string]bool{}
+		for _, n := range names {
+			m[n] = true
+		}
+		return m
+	}
+	cases := []struct {
+		name  string
+		n     int
+		flags map[string]bool
+		want  []OperandRole
+	}{
+		{"no override flag: Unmodeled", 1, seen(), []OperandRole{Unmodeled}},
+		{"override flag (short spelling): Literal", 1, seen("-l"), []OperandRole{Literal}},
+		{"override flag (long spelling): Literal", 2, seen("--list"), []OperandRole{Literal, Literal}},
+		{"unrelated flag does not trigger override", 1, seen("-a"), []OperandRole{Unmodeled}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, reason, ok := spec.resolveRoles(tc.n, tc.flags)
+			if !ok {
+				t.Fatalf("resolveRoles failed: %s", reason)
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("roles = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 // TestPositionalLayoutThroughInterpreter: the same layout end to end,
 // including that Trailing is resolved from the END of argv and that a
 // positional-derived effect carries FromPositional.

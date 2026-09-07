@@ -340,19 +340,25 @@ var goldenCases = []goldenCase{
 	{"git_diff_basic", "git diff", evalcontract.Approve, nil},
 	{"git_diff_output_nix_store", "git diff --output=/nix/store/x", evalcontract.Reject, nil},
 
-	// git branch: every positional is Unmodeled (see gitBranchSchema's doc
-	// comment for why a flag-conditioned positional role was not added).
+	// git branch: every positional is Unmodeled UNLESS -l/--list appeared
+	// (see gitBranchSchema's doc comment for the RestOverride that
+	// disambiguates a listing pattern from a branch-creation name).
 	{"git_branch_list", "git branch -a", evalcontract.Approve, nil},
 	{"git_branch_foo", "git branch foo", evalcontract.Abstain, nil},
+	{"git_branch_list_pattern", "git branch --list maint-1", evalcontract.Approve, nil},
 
 	// git worktree: nested Subcommands — only "list" is modeled.
 	{"git_worktree_list", "git worktree list", evalcontract.Approve, nil},
 	{"git_worktree_add", "git worktree add ../x", evalcontract.Abstain, nil},
 
 	// git config: --get* reads (its key is a flag value, not a positional);
-	// any bare positional is Unmodeled (a write).
+	// any bare positional is Unmodeled (a write) UNLESS --get/--get-all/
+	// --get-regexp appeared, in which case a further positional is a
+	// value-pattern filter (RestOverride — see gitConfigSchema's doc
+	// comment).
 	{"git_config_get_user_name", "git config --get user.name", evalcontract.Approve, nil},
 	{"git_config_user_name_x", "git config user.name x", evalcontract.Abstain, nil},
+	{"git_config_get_value_pattern", "git config --get user.name foo", evalcontract.Approve, nil},
 
 	// git add: pathspecs are PathRead; implicit PathModify of ".git" always
 	// fires (staging always writes the index).

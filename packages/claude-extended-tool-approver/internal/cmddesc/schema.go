@@ -272,6 +272,21 @@ type FlagSpec struct {
 // instead; `git push origin main` still requires the full layout once ANY
 // positional is present).
 //
+// RestOverride is the swap-A-ROLE-IN counterpart to LeadingSkippedByFlags/
+// TrailingSkippedByFlags, which only ever REMOVE a role: when any of
+// RestOverride.Flags appeared, EVERY Rest positional takes RestOverride.Role
+// instead of Rest. It exists for a command whose Rest positionals mean one
+// thing ordinarily and something else, SAFE, under a specific flag —
+// `git branch <pattern>` creates a ref (Rest: Unmodeled) but `git branch
+// --list <pattern>` filters a listing (RestOverride: {Flags: ["-l",
+// "--list"], Role: Literal}); `git config <key> <value>` writes (Rest:
+// Unmodeled) but `git config --get <key> <value-pattern>` filters which
+// existing value is printed (RestOverride keyed on --get/--get-all/
+// --get-regexp). Leading and Trailing have no analogous override: no schema
+// in this registry needs one on those ends, so it stays scoped to Rest rather
+// than growing three overrides speculatively. Zero value (empty Flags) is a
+// no-op.
+//
 // StdinToken is the schema-level spelling of "read standard input instead of
 // a file" (`-` for the coreutils family): a positional token equal to it in a
 // path-role slot is a stdin effect, not a path effect. Empty means the
@@ -281,10 +296,19 @@ type PositionalSpec struct {
 	LeadingSkippedByFlags  []string
 	LeadingOptional        bool
 	Rest                   OperandRole
+	RestOverride           RestOverride
 	MinRest                int
 	Trailing               []OperandRole
 	TrailingSkippedByFlags []string
 	StdinToken             string
+}
+
+// RestOverride names the flag spellings that, when any appeared, replace
+// PositionalSpec.Rest with Role for every Rest positional — see
+// PositionalSpec.RestOverride's doc comment for the worked cases.
+type RestOverride struct {
+	Flags []string
+	Role  OperandRole
 }
 
 // resolveRoles assigns a role to each of n positionals given the set of flag
@@ -306,6 +330,10 @@ func (p PositionalSpec) resolveRoles(n int, flagsSeen map[string]bool) ([]Operan
 	if n < need {
 		return nil, fmt.Sprintf("too few positionals: %d given, need at least %d", n, need), false
 	}
+	rest := p.Rest
+	if anySeen(p.RestOverride.Flags, flagsSeen) {
+		rest = p.RestOverride.Role
+	}
 	roles := make([]OperandRole, n)
 	for i := range roles {
 		switch {
@@ -314,7 +342,7 @@ func (p PositionalSpec) resolveRoles(n int, flagsSeen map[string]bool) ([]Operan
 		case i >= n-len(trailing):
 			roles[i] = trailing[i-(n-len(trailing))]
 		default:
-			roles[i] = p.Rest
+			roles[i] = rest
 		}
 	}
 	return roles, "", true

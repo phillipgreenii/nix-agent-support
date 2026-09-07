@@ -627,25 +627,27 @@ var gitRevListSchema = CommandSchema{
 	EndOfOptions: true,
 }
 
-// gitBranchSchema: THE VERDICT IS BY POSITIONAL SHAPE, NOT BY FLAG. Real
-// `git branch` overloads one verb across list/create/delete/rename/copy —
-// `--list`/`--contains`/`--merged`/etc. name a LIST filter (safe), while a
-// bare trailing positional CREATES a ref. Distinguishing "this positional is
-// safe because --list/--show-current was also given" would need a
-// conditional role (Rest role A under flag X, role B otherwise), which
-// PositionalSpec cannot express — Leading/TrailingSkippedByFlags only ever
-// REMOVE a role, never SWAP one in. Rather than add that generic capability
-// for one command, this schema takes the documented, safe fallback: EVERY
-// positional resolves to Unmodeled (KindUnmodeled — already fail-closed via
-// operand()'s existing default case, no new interpreter code), so `git
-// branch foo` and `git branch --list 'maint-*'` both abstain even though the
-// second is actually a safe, read-only listing filter. Over-abstaining a
-// safe listing filter is the accepted cost of not inventing a new generic
-// mechanism for one command's overload.
+// gitBranchSchema: THE VERDICT IS BY POSITIONAL SHAPE, DISAMBIGUATED BY ONE
+// FLAG. Real `git branch` overloads one verb across list/create/delete/
+// rename/copy — a bare trailing positional CREATES a ref, so every Rest
+// positional defaults to Unmodeled (KindUnmodeled — already fail-closed via
+// operand()'s existing default case). `-l`/`--list` is the one flag git's own
+// docs single out as the disambiguator (`git branch -h`'s DESCRIPTION: "Note
+// that when providing a <pattern>, you must use --list; otherwise the command
+// may be interpreted as branch creation" — verified on this host's git
+// 2.54.0), so RestOverride swaps Rest to Literal (inert: a wildcard pattern
+// touches no filesystem/network/env effect) exactly when `-l`/`--list`
+// appeared: `git branch --list 'maint-*'` now resolves its positional as a
+// safe listing filter and is Sufficient, while a bare `git branch foo` still
+// resolves Unmodeled and abstains. `-a`/`-r`/`--remotes` are NOT included in
+// RestOverride.Flags even though they can also accompany a listing, because
+// git's own docs name only `--list` as what makes a positional
+// UNAMBIGUOUSLY a pattern — widening to `-a`/`-r` is left for a case that
+// needs it.
 //
 // `--contains`/`--merged`/`--no-merged`/`--format` all take their argument
-// as a FLAG VALUE, not a positional, so they do not interact with the
-// Unmodeled fallback at all. Deliberately left unmodeled (abstain, per the
+// as a FLAG VALUE, not a positional, so they do not interact with
+// RestOverride at all. Deliberately left unmodeled (abstain, per the
 // brief): -d/-D/-m/-M/-c/-C/-u/--set-upstream-to/--unset-upstream/
 // --edit-description — every one of these mutates or targets a specific ref
 // by name in a way this schema does not model.
@@ -662,7 +664,10 @@ var gitBranchSchema = CommandSchema{
 		"--merged":       literalOpt, "--no-merged": literalOpt,
 		"--format": literal1,
 	},
-	Positionals:  PositionalSpec{Rest: Unmodeled},
+	Positionals: PositionalSpec{
+		Rest:         Unmodeled,
+		RestOverride: RestOverride{Flags: []string{"-l", "--list"}, Role: Literal},
+	},
 	Stdin:        StdinNever,
 	Stdout:       StdoutMetadata,
 	UnknownFlag:  UnknownFlagInsufficient,
@@ -701,13 +706,33 @@ var gitWorktreeSchema = CommandSchema{
 }
 
 // gitConfigSchema: read forms only, via the SAME Unmodeled-positional
-// fallback gitBranchSchema uses. `--get`/`--get-all`/`--get-regexp` take the
-// config KEY as a FLAG VALUE (Literal — a key name is inert, not a path), so
-// `git config --get user.name` resolves ZERO positionals and is Sufficient.
-// A bare `git config NAME VALUE` (or any positional beyond a --get* flag's
-// own value) resolves to Unmodeled and abstains, per the brief: "ANY
-// positional beyond the key under `--get*` is a WRITE => unmodeled". Flags
-// verified against this host's `git config -h`.
+// fallback gitBranchSchema uses, now with the SAME RestOverride
+// disambiguator. `--get`/`--get-all`/`--get-regexp` take the config KEY as a
+// FLAG VALUE (Literal — a key name is inert, not a path), so `git config
+// --get user.name` resolves ZERO positionals and is Sufficient.
+//
+// A bare `git config NAME VALUE` (no --get*-family flag) still resolves to
+// Unmodeled and abstains — real git's own DEPRECATED-MODES table (`git help
+// config`, verified on this host's git 2.54.0) confirms `git config <name>
+// <value> [<value-pattern>]` is the write form (`git config set`). But
+// `--get`/`--get-all` name an OPTIONAL SECOND positional too: `--get <name>
+// [<value-pattern>]` (same DEPRECATED-MODES table), a REGULAR-EXPRESSION
+// filter over which of several same-key values is printed — a read
+// refinement, not a write, and `--get-regexp` is included alongside them on
+// the same rationale even though its own synopsis names no second
+// positional (an extra one there is a real-git usage error either way, and
+// Literal is still the fail-closed-safe reading: an error performs no
+// write). The previous version of this schema mischaracterized that second
+// positional as "a WRITE" and abstained on it; RestOverride now swaps Rest to
+// Literal when any of --get/--get-all/--get-regexp appeared, so `git config
+// --get user.name '^foo'` is Sufficient. The bare-NAME single-positional read
+// form (`git config user.name`, the deprecated-but-supported equivalent of
+// `git config get user.name`) is a SEPARATE, still-open gap: it needs a
+// positional-COUNT distinguisher (exactly one Rest positional with no
+// --get*-family flag is a read; two or more is a write), which is not a flag
+// presence/absence and RestOverride does not express it — left unmodeled
+// here rather than folded into this fix. Flags verified against this host's
+// `git config -h` / `git help config`.
 var gitConfigSchema = CommandSchema{
 	Name:       "config",
 	Provenance: "git version 2.54.0, git config -h",
@@ -716,7 +741,10 @@ var gitConfigSchema = CommandSchema{
 		"-l": inert, "--list": inert,
 		"--show-origin": inert,
 	},
-	Positionals:  PositionalSpec{Rest: Unmodeled},
+	Positionals: PositionalSpec{
+		Rest:         Unmodeled,
+		RestOverride: RestOverride{Flags: []string{"--get", "--get-all", "--get-regexp"}, Role: Literal},
+	},
 	Stdin:        StdinNever,
 	Stdout:       StdoutMetadata,
 	UnknownFlag:  UnknownFlagInsufficient,

@@ -132,10 +132,12 @@ git_diff_basic                      git diff                                    
 git_diff_output_nix_store           git diff --output=/nix/store/x                                 approve/git              reject   spike-stricter       node n0 (git diff --output=/nix/store/x): path:truncate /nix/store/x [arg 0]: no-write-to-read-only-path (write to read-only zone)
 git_branch_list                     git branch -a                                                  approve/git              approve  agree                all 1 command nodes permitted
 git_branch_foo                      git branch foo                                                 approve/git              abstain  spike-stricter       node n0 (git branch foo): unmodeled operand role 11 at arg 0
+git_branch_list_pattern             git branch --list maint-1                                      approve/git              approve  agree                all 1 command nodes permitted
 git_worktree_list                   git worktree list                                              approve/git              approve  agree                all 1 command nodes permitted
 git_worktree_add                    git worktree add ../x                                          approve/git              abstain  spike-stricter       node n0 (git worktree add ../x): unmodeled subcommand add
 git_config_get_user_name            git config --get user.name                                     approve/git              approve  agree                all 1 command nodes permitted
 git_config_user_name_x              git config user.name x                                         approve/git              abstain  spike-stricter       node n0 (git config user.name x): unmodeled operand role 11 at arg 0
+git_config_get_value_pattern        git config --get user.name foo                                 approve/git              approve  agree                all 1 command nodes permitted
 git_add_readme                      git add README.md                                              approve/git              approve  agree                all 1 command nodes permitted
 git_add_unknown_flag                git add --refresh                                              approve/git              abstain  spike-stricter       node n0 (git add --refresh): unknown flag --refresh
 git_commit_m                        git commit -m x                                                approve/git              approve  agree                all 1 command nodes permitted
