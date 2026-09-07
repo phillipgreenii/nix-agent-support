@@ -18,15 +18,26 @@ package cmddesc
 // EffectRemote{Resource: "beads"} whose Operation is "read" for the
 // listing/showing verbs (Permitted by RemoteMutation's data), "mutate" for
 // anything that writes an issue (Unknown: needs consent, exactly like a git
-// push), and "dolt-server" for the Dolt server lifecycle verbs, which are
-// Forbidden: this machine forbids starting or stopping a Dolt server
-// (~/.claude/CLAUDE.md "Beads / Dolt: no rogue auto-start"; the
-// beads-remote-server rule's "Never run bd dolt start"). `bd dolt show /
-// status / test` are READS of the connection configuration — the
-// beads-remote-server rule itself tells an agent to run `bd dolt show` when
-// a connection fails — so they are "read", not "dolt-server"; the resume
-// bead's shorthand "dolt * => Forbidden" is refined to the lifecycle verbs
-// only and that refinement is flagged on tc-q9ak.
+// push), and "dolt-server" for the Dolt server lifecycle verbs (start/stop/
+// killall; Resource is "dolt", not "beads", for these three — see bdRemote).
+// `bd dolt show / status / test` are READS of the connection configuration —
+// the beads-remote-server rule itself tells an agent to run `bd dolt show`
+// when a connection fails — so they are "read", not "dolt-server"; the
+// resume bead's shorthand "dolt * => Forbidden" is refined to the lifecycle
+// verbs only and that refinement is flagged on tc-q9ak.
+//
+// Slice 3n originally made "dolt-server" unconditionally Forbidden. Slice 3u
+// REVISED this per an operator ruling (Phillip, 2026-09-07, verbatim,
+// recorded on tc-vn5z): "for bd dolt, the default foe stsrt/stop/killall
+// should be to abstain, but my persoanl confog on this would be yo reject."
+// (typos corrected, meaning unambiguous from context: default Abstain/
+// Unknown, with Reject available as the operator's OWN configuration, not a
+// hard-coded default). The schema here is UNCHANGED by that ruling — "dolt"
+// is still the right effect vocabulary target and "dolt-server" the right
+// operation; only RemoteMutation's POLICY handling of "dolt-server" changed
+// (see internal/effectpolicy/policy.go's RemoteMutation doc comment and
+// evalcontract.Request.RemoteLifecycle for where the operator's
+// configuration now lives, as DATA rather than a hard-coded verdict).
 //
 // Read subcommands use UnknownFlagInert: their flags are filters and output
 // formats (--json, --status, --label, -n) and cannot add an effect. Mutation

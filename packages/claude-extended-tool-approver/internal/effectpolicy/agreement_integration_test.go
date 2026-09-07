@@ -502,6 +502,12 @@ func TestAgreement(t *testing.T) {
 	for _, tc := range cases {
 		spikeResp := Evaluate(evalcontract.Request{
 			Command: tc.command, CWD: root, ProjectRoot: root, VettedHosts: tc.vetted,
+			// goldenRemoteLifecycle (golden_test.go, slice 3u) is read by
+			// case NAME here too, so a golden case's configured-Reject
+			// request (bd_dolt_*_reject_configured) is exercised
+			// identically in both harnesses without a second field on
+			// agreementCase to keep in sync.
+			RemoteLifecycle: goldenRemoteLifecycle[tc.name],
 		}, reg, DefaultPolicies(), DefaultGraphPolicies())
 		liveResult := evaluateLive(live, root, tc.command)
 

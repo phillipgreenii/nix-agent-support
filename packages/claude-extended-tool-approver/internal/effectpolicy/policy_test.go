@@ -74,8 +74,11 @@ func TestDeleteAccessPolicy(t *testing.T) {
 }
 
 // TestRemoteMutationPolicy: dynamic is Unknown, "push" is Unknown (consent),
-// "force-push" and "delete-ref" are Forbidden, and an unrecognised Operation
-// fails closed to Unknown rather than guessing. It never returns Permitted.
+// "force-push" and "delete-ref" are Forbidden, "dolt-server" defaults to
+// Unknown and is Forbidden only when PolicyContext.RemoteLifecycle configures
+// the effect's Resource ("dolt") as "reject" (slice 3u, operator ruling on
+// tc-vn5z), and an unrecognised Operation fails closed to Unknown rather than
+// guessing. It never returns Permitted.
 func TestRemoteMutationPolicy(t *testing.T) {
 	remote := func(op string, dynamic bool) cmddesc.Effect {
 		return cmddesc.Effect{Kind: cmddesc.EffectRemote, Resource: "origin", Operation: op, Dynamic: dynamic}
@@ -83,20 +86,23 @@ func TestRemoteMutationPolicy(t *testing.T) {
 	cases := []struct {
 		name    string
 		e       cmddesc.Effect
+		ctx     PolicyContext
 		verdict FindingVerdict
 	}{
-		{"dynamic resource", remote("push", true), Unknown},
-		{"dynamic read is still unknown", remote("read", true), Unknown},
-		{"read permitted", remote("read", false), Permitted},
-		{"push needs consent", remote("push", false), Unknown},
-		{"mutate needs consent", remote("mutate", false), Unknown},
-		{"force-push forbidden", remote("force-push", false), Forbidden},
-		{"delete-ref forbidden", remote("delete-ref", false), Forbidden},
-		{"dolt-server forbidden", remote("dolt-server", false), Forbidden},
-		{"unrecognised operation fails closed", remote("mirror", false), Unknown},
+		{"dynamic resource", remote("push", true), PolicyContext{}, Unknown},
+		{"dynamic read is still unknown", remote("read", true), PolicyContext{}, Unknown},
+		{"read permitted", remote("read", false), PolicyContext{}, Permitted},
+		{"push needs consent", remote("push", false), PolicyContext{}, Unknown},
+		{"mutate needs consent", remote("mutate", false), PolicyContext{}, Unknown},
+		{"force-push forbidden", remote("force-push", false), PolicyContext{}, Forbidden},
+		{"delete-ref forbidden", remote("delete-ref", false), PolicyContext{}, Forbidden},
+		{"dolt-server abstains by default", remote("dolt-server", false), PolicyContext{}, Unknown},
+		{"dolt-server unaffected by an unrelated target's configuration", remote("dolt-server", false), PolicyContext{RemoteLifecycle: map[string]string{"other": "reject"}}, Unknown},
+		{"dolt-server forbidden when the operator configures reject", remote("dolt-server", false), PolicyContext{RemoteLifecycle: map[string]string{"origin": "reject"}}, Forbidden},
+		{"unrecognised operation fails closed", remote("mirror", false), PolicyContext{}, Unknown},
 	}
 	for _, tc := range cases {
-		f, applies := RemoteMutation{}.Judge(tc.e, PolicyContext{})
+		f, applies := RemoteMutation{}.Judge(tc.e, tc.ctx)
 		if !applies || f.Verdict != tc.verdict {
 			t.Errorf("%s: applies=%v verdict=%s (%s), want %s", tc.name, applies, f.Verdict, f.Reason, tc.verdict)
 		}

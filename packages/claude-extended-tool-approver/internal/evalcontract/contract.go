@@ -19,13 +19,23 @@ import "github.com/phillipgreenii/claude-extended-tool-approver/internal/effectg
 // VettedHosts are the network hosts the caller trusts, as domain suffixes
 // (`example.com` covers the apex and subdomains, `.internal.example`
 // subdomains only); nil vets nothing.
+//
+// RemoteLifecycle is OPERATOR CONFIGURATION for an EffectRemote target's
+// lifecycle-verb class, keyed by target ("dolt") with a verdict class value
+// ("reject" is the only class recognised today). It is this spike's stand-in
+// for a future rules.json binding (the production rules.json wiring is a
+// follow-up, not this slice) — kept generic (target + class) rather than a
+// dolt-specific boolean, since the same shape can carry a future target's
+// lifecycle preference without a new field. nil configures nothing, so the
+// policy's own default governs (see effectpolicy.RemoteMutation).
 type Request struct {
-	Command     string
-	Dialect     string
-	CWD         string
-	ProjectRoot string
-	Env         map[string]string
-	VettedHosts []string
+	Command         string
+	Dialect         string
+	CWD             string
+	ProjectRoot     string
+	Env             map[string]string
+	VettedHosts     []string
+	RemoteLifecycle map[string]string
 }
 
 // Decision is the verdict vocabulary. Ask exists in the vocabulary but nothing

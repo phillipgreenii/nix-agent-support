@@ -54,11 +54,21 @@ type Finding struct {
 // VettedHosts are the hosts the caller trusts, with domain-suffix semantics:
 // `example.com` matches the apex and its subdomains, `.internal.example`
 // matches subdomains only (the leading dot is what stops `notexample.com`
-// from matching `example.com`).
+// from matching `example.com`). RemoteLifecycle is operator configuration for
+// an EffectRemote target's lifecycle-verb class (see evalcontract.Request's
+// doc comment); RemoteMutation is its only reader.
 type PolicyContext struct {
-	PathEval    *patheval.PathEvaluator
-	CWD         string
-	VettedHosts []string
+	PathEval        *patheval.PathEvaluator
+	CWD             string
+	VettedHosts     []string
+	RemoteLifecycle map[string]string
+}
+
+// RemoteLifecycleClass returns the operator-configured verdict class for a
+// remote lifecycle target ("dolt"), or "" when the operator has configured
+// nothing for it (RemoteLifecycle nil or the target absent).
+func (c PolicyContext) RemoteLifecycleClass(target string) string {
+	return c.RemoteLifecycle[target]
 }
 
 // HostVetted reports whether host matches any VettedHosts entry under the
@@ -570,11 +580,23 @@ func (NetworkAccess) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, bool) 
 //   - "force-push", "delete-ref": known-bad, unreviewable rewrites of a
 //     shared ref — Forbidden.
 //   - "dolt-server": starting, stopping or killing a Dolt SQL server (bd
-//     dolt start/stop/killall, slice 3n) — Forbidden. This machine forbids
-//     it outright: ~/.claude/CLAUDE.md "Beads / Dolt: no rogue auto-start"
-//     (BEADS_DOLT_AUTO_START=0; "You MUST NOT start a dolt server on your
-//     own initiative") and .claude/rules/beads-remote-server.md ("Never
-//     run bd dolt start — the Dolt server is a remote k3s service").
+//     dolt start/stop/killall, slice 3n). REVISED by slice 3u per an
+//     operator ruling (Phillip, 2026-09-07, verbatim, recorded on tc-vn5z):
+//     "for bd dolt, the default foe stsrt/stop/killall should be to
+//     abstain, but my persoanl confog on this would be yo reject."
+//     (typos corrected, meaning unambiguous from context: bd dolt
+//     start/stop/killall default to Abstain/Unknown; Reject is the
+//     OPERATOR'S PERSONAL CONFIGURATION, not a hard-coded default). This
+//     SUPERSEDES slice 3n's unconditional Forbidden for "dolt-server":
+//     the default is now Unknown ("needs consent, exactly like a git
+//     push"), and Forbidden only when PolicyContext.RemoteLifecycleClass
+//     for the effect's Target (Resource) is "reject" — data on the
+//     request (evalcontract.Request.RemoteLifecycle), this spike's
+//     stand-in for a future rules.json binding. Nothing here still names
+//     BEADS_DOLT_AUTO_START or "no rogue auto-start" as a hard-coded
+//     policy fact; that machine invariant is now expressed as the
+//     OPERATOR'S OWN configured value, supplied by the caller, not baked
+//     into this policy.
 //   - anything else is outside this vocabulary and fails closed to Unknown.
 type RemoteMutation struct{}
 
@@ -601,7 +623,10 @@ func (RemoteMutation) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, bool)
 	case "delete-ref":
 		return Finding{Verdict: Forbidden, Reason: "delete-ref removes a shared ref"}, true
 	case "dolt-server":
-		return Finding{Verdict: Forbidden, Reason: "this machine never starts or stops a Dolt server (CLAUDE.md: no rogue auto-start; beads-remote-server rule)"}, true
+		if ctx.RemoteLifecycleClass(e.Resource) == "reject" {
+			return Finding{Verdict: Forbidden, Reason: "operator configuration rejects Dolt server lifecycle changes to " + e.Resource + " (tc-vn5z)"}, true
+		}
+		return Finding{Verdict: Unknown, Reason: "Dolt server lifecycle change requires consent (default; operator MAY configure rejection, tc-vn5z)"}, true
 	default:
 		return Finding{Verdict: Unknown, Reason: "unrecognised remote operation " + e.Operation}, true
 	}
