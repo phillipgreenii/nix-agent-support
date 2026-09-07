@@ -26,6 +26,7 @@
     ./programs/git-tools
     ./programs/bg-tools
     ./programs/pg-pr
+    ./programs/pg-connector
     ./programs/pg-ccaudit
     ./programs/integrate-branch-support
     ./programs/pnwf
