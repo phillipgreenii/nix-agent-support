@@ -245,7 +245,7 @@ var entityTypes = []string{"pr", "issue", "ci", "scm"}
 // AllBackends returns every backend binary name registered under any
 // connector.<type> entry, across both list-valued and single-valued types.
 // A binary registered under more than one type — a multi-capability
-// backend, mandatory per design §4.4 — is deduplicated to exactly one
+// backend, mandatory per INV-REG-1 — is deduplicated to exactly one
 // entry, in first-occurrence order (entityTypes' fixed pr/issue/ci/scm
 // order), rather than producing one sources[] row per type it appears
 // under [bug A27].

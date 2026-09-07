@@ -36,7 +36,7 @@ func newTestBackend() *internal.Backend {
 // required test asserting the capabilities op declares this backend's own
 // schemaVersions.ci entry and its ops list, proving the wiring in main.go
 // is actually exercised rather than only asserted in prose
-// [design: §4.3].
+// (INV-VER-1).
 func TestNewDispatchTable_CapabilitiesDeclaresCISchemaVersion(t *testing.T) {
 	table := newDispatchTable(newTestBackend())
 	entry, ok := table[scriptout.OpCapabilities]

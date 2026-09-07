@@ -14,7 +14,7 @@ import (
 
 // Relocated from
 // cmd/pg-connector-pr-github/internal/github/stack_readonly_test.go (bead
-// pg2-lh3c4, design §9.1's acceptance criteria) alongside its sibling
+// pg2-lh3c4's acceptance criteria) alongside its sibling
 // TestGHExecChokePoint (chokepoint_test.go, same package, same reason: both
 // walked the whole module from inside one backend's own test package,
 // which would have silently dropped this guard had pr-github been deleted

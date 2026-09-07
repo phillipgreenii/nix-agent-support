@@ -2,13 +2,13 @@
 // entity/capability" packet on top of the Tier-1 core's registry/dispatcher
 // and outcome-reporting helper. pg-connector remains the only user-facing
 // CLI surface — pr is one of its verb groups, never a separate binary
-// [design: §4, §6.1].
+// (interfaces.md's INTF-CLI).
 //
 // Each of these three verbs is a targeted op (resolves to the one backend
 // registered under connector.pr) and uses the Tier-1 targeted-op exit-code
 // scheme (0/4/1) via outcome.go's TargetedExitCode — this file calls the
 // dispatcher and hands TargetedExitCode the raw per-call result/error it
-// got back; it never decides the exit code itself [design: §4.5].
+// got back; it never decides the exit code itself (INV-EXIT-1).
 package main
 
 import (
@@ -107,7 +107,7 @@ func newPrFeedbackSetCmd() *cobra.Command {
 // [bead pg2-ox1k6] — see output.go's writeTargetedResult, which this
 // delegates to. It translates err into pg-connector's own targeted-op
 // exit code via outcome.go's TargetedExitCode, never deciding the exit
-// code itself [design: §4.5]. A nil resp is a Tier-1 CLI-level failure
+// code itself (INV-EXIT-1). A nil resp is a Tier-1 CLI-level failure
 // before any well-formed wire response was produced (e.g. no backend
 // registered, or an ambiguous multi-backend registration) — rather than
 // returning a plain error, writeTargetedResult now builds a synthetic

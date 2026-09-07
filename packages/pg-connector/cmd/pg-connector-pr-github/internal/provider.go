@@ -1,10 +1,11 @@
 // provider.go: Backend implements pkg/provider/pr.Provider against GitHub,
-// gluing together internal/github's ported GitHub logic (§9's "carries over
-// pg-pr's existing GitHub logic unchanged" decision) with this backend's
+// gluing together internal/github's ported GitHub logic ("carries over
+// pg-pr's existing GitHub logic unchanged" — bead pg2-2j5ac's carry-over
+// decision) with this backend's
 // own fresh local Store (store.go) for the categorize/feedback_set writes
-// GitHub itself never sees [design: §6.1, §9]. Backend also implements
+// GitHub itself never sees (interfaces.md's pr op catalog). Backend also implements
 // pkg/provider.AuthChecker via internal/github.Provider.CheckAuth, carried
-// over from pg-pr's existing env-then-gh auth token chain [design: §4.6].
+// over from pg-pr's existing env-then-gh auth token chain (INV-AUTH-1).
 package internal
 
 import (
@@ -54,7 +55,7 @@ var (
 
 // Vocabulary is this backend's declared, non-empty category vocabulary —
 // the concrete backing for the sibling "generic pr entity/capability"
-// packet's vocabulary check [design: §4.3, §6.1]. A plain, backend-declared
+// packet's vocabulary check (interfaces.md's vocabulary note). A plain, backend-declared
 // set (not GitHub labels): callers choose one of these values when calling
 // categorize.
 var Vocabulary = []string{"focus", "later", "blocked", "done"}
@@ -86,8 +87,7 @@ func parsePRID(id string) (repo string, number int, err error) {
 // Show implements pr.Provider.Show: fetches the PR's live GitHub state
 // (metadata, comments, reviews) via the ported GitHub logic, then merges in
 // this backend's own persisted category/dispositions so a caller sees the
-// current state of any prior categorize/feedback_set write [design: §2,
-// §6.1]. Every call is a fresh, uncached GitHub read, so the response's
+// current state of any prior categorize/feedback_set write (interfaces.md's pr op catalog). Every call is a fresh, uncached GitHub read, so the response's
 // schema.PR.AsOf is always this call's own completion time and
 // schema.PR.Stale is always false (bead pg2-681xo) — see toSchemaPR.
 func (b *Backend) Show(ctx context.Context, id string) (*schema.PR, error) {
@@ -115,7 +115,7 @@ func (b *Backend) Show(ctx context.Context, id string) (*schema.PR, error) {
 }
 
 // Categorize implements pr.Provider.Categorize: a plain set/overwrite into
-// this backend's own store, never a GitHub label [design: §6.1]. No GitHub
+// this backend's own store, never a GitHub label (interfaces.md's pr op catalog). No GitHub
 // call is made — category has no GitHub-side representation.
 //
 // category MUST be one of Vocabulary (finding A20: the previous version
@@ -156,7 +156,7 @@ func isValidCategory(category string) bool {
 
 // FeedbackSet implements pr.Provider.FeedbackSet. A commentID that no
 // longer exists on the PR (e.g. deleted upstream) is a well-formed
-// not_found response, not a broken call [design: §4.5, §6.1] — checked here
+// not_found response, not a broken call (INV-ERR-2) — checked here
 // by re-fetching the PR's live comments (the same read Show uses) rather
 // than trusting the caller's commentID blindly.
 func (b *Backend) FeedbackSet(ctx context.Context, id, commentID string, disposition schema.Disposition) (*schema.FeedbackSetResult, error) {
@@ -191,7 +191,7 @@ func (b *Backend) FeedbackSet(ctx context.Context, id, commentID string, disposi
 
 // CheckAuth implements pkg/provider.AuthChecker via internal/github's
 // ported CheckAuth — GitHub's existing env-then-gh auth token chain
-// [design: §4.6, §9].
+// (INV-AUTH-1).
 func (b *Backend) CheckAuth(ctx context.Context) error {
 	return b.gh.CheckAuth(ctx)
 }
@@ -199,7 +199,7 @@ func (b *Backend) CheckAuth(ctx context.Context) error {
 // classifyGHError maps a ported GitHub-provider error onto scriptout's
 // closed error taxonomy: an auth failure becomes unauthenticated; a
 // genuine "the PR/comment/review genuinely doesn't exist" response from
-// GitHub becomes not_found [design: §4.5, bug pg2-r9iok]; everything else
+// GitHub becomes not_found (INV-ERR-2; bug pg2-r9iok); everything else
 // passes through unwrapped to scriptout's own codeForError fallback
 // ("unavailable") [freedom boundary, part 4].
 func classifyGHError(err error) error {

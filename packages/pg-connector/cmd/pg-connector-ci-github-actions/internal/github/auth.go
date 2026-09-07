@@ -3,11 +3,11 @@
 // cmd/pg-connector-pr-github/internal/github's auth.go/token.go/ghexec.go
 // trio, carried over per this packet's "same env-then-gh auth token chain
 // the pg-connector-pr-github backend already uses, since both are
-// GitHub-backed" binding decision [design: §4.6]. It is duplicated rather
+// GitHub-backed" binding decision (INV-AUTH-1). It is duplicated rather
 // than imported because Go's internal/ visibility rule makes the sibling
 // backend's copy unreachable from here, and because
 // packages/pg-connector/go.mod MUST NOT depend on packages/pg-pr — the
-// original source of both copies [design: §5.2].
+// original source of both copies (layout_convention_test.go).
 //
 // Only the slice pg-connector-ci-github-actions.Provider actually needs is
 // ported: the token-first `gh` exec choke point (CLI/Command/Run/RunStdin)

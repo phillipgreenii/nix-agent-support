@@ -1,17 +1,16 @@
 // backend.go: Backend implements pkg/provider/issue.Provider against this
-// workspace's own bd tracker — the first Tier-2 Issue backend [design: §2,
-// §5.1]. Show's read side and Create's write side follow the concrete
+// workspace's own bd tracker — the first Tier-2 Issue backend (interfaces.md's op catalog). Show's read side and Create's write side follow the concrete
 // bd-CLI-wrapper precedent packages/pg-pr/pkg/beads/mergerequest.go and
 // action.go already establish (exec bd, parse `--json`/parse the returned
 // id); Comment and Transition are new code with no existing pg-pr wrapper
 // to port, using that same exec-and-parse STYLE as their only precedent
 // [bead: Carry-over basis].
 //
-// AuthChecker (pkg/provider.AuthChecker, §4.6) is deliberately NOT
+// AuthChecker (pkg/provider.AuthChecker, INV-AUTH-1) is deliberately NOT
 // implemented: this workspace's bd/dolt setup is a local embedded or
 // shared-launchd-agent Dolt server with no remote, per-caller credential
 // concept — there is no token/session for CheckAuth to validate, the same
-// reasoning §4.6 gives for pg-connector-scm-git's local git backend.
+// reasoning INV-AUTH-1 gives for pg-connector-scm-git's local git backend.
 // pg-connector's own auth_status fan-out (cmd/pg-connector/auth.go)
 // already recognizes a provider with no auth_status dispatch-table entry
 // generically (via the wire-level unknown_op sentinel) and reports it as
@@ -56,7 +55,7 @@ func (b *Backend) Workspace() (string, error) {
 
 // Vocabulary is this backend's declared, non-empty state vocabulary — the
 // concrete backing for the sibling "generic issue entity/capability"
-// packet's vocabulary.state check [design: §4.3 AC]. These are bd's own
+// packet's vocabulary.state check (INV-VER-1). These are bd's own
 // BUILT-IN statuses, read directly from `bd statuses --json` (bd v1.2.2) —
 // open/in_progress/blocked/deferred/closed/pinned/hooked — rather than
 // guessed from memory of how bd is used elsewhere [bead: Produces]. A

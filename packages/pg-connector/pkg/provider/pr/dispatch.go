@@ -3,7 +3,7 @@
 // (pkg/scriptout.ServeLoop) is capability-agnostic; the sibling
 // "pg-connector-pr-github" backend's own main() calls NewDispatchTable and
 // hands the result to ServeLoop — this package builds no binary of its own
-// [design: §4.2].
+// (INV-WIRE-1).
 package pr
 
 import (
@@ -18,7 +18,7 @@ import (
 // NewDispatchTable builds the pr capability's op-dispatch table for p:
 // show, categorize, and feedback_set always; auth_status only when p also
 // implements pkg/provider.AuthChecker, asserted via a type-check rather
-// than folded into the Provider interface [design: §4.6]. Every handler
+// than folded into the Provider interface (INV-AUTH-1). Every handler
 // passes p's returned error straight through unwrapped — a well-behaved
 // Provider implementation (built by the Tier-2 backend packet) is
 // responsible for wrapping its own errors with the matching
@@ -71,7 +71,7 @@ func NewDispatchTable(p Provider) scriptout.DispatchTable {
 	// forced/meaningless answer: the auth_status entry is simply omitted,
 	// which pg-connector's own fan-out (cmd/pg-connector/auth.go) already
 	// recognizes generically via the wire-level unknown_op sentinel and
-	// reports as "disabled: not applicable" [design: §4.6].
+	// reports as "disabled: not applicable" (INV-AUTH-1).
 	if ac, ok := p.(provider.AuthChecker); ok {
 		table[scriptout.OpAuthStatus] = scriptout.OpHandler{
 			SchemaVersion: schema.SchemaVersion,

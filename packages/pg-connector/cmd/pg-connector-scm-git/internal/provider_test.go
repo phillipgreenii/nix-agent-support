@@ -98,7 +98,7 @@ func TestProvider_WorktreeAdd_EmptyBranchOrRef_Rejected(t *testing.T) {
 		t.Fatal("WorktreeAdd(\"\") = nil error, want a rejection with no git invocation")
 	}
 	// An empty required field is the CALLER's mistake, not this backend
-	// being unhealthy [design: §4.2, bug pg2-r9iok] — it must not share
+	// being unhealthy (INV-ERR-2; bug pg2-r9iok) — it must not share
 	// ErrUnavailable's "this backend cannot currently be used" meaning.
 	if !errors.Is(err, scriptout.ErrInvalidArgument) {
 		t.Fatalf("err = %v, want errors.Is(err, ErrInvalidArgument)", err)
@@ -154,7 +154,7 @@ func TestProvider_WorktreeAdd_DotDotRef_Rejected(t *testing.T) {
 // TestProvider_WorktreeAdd_BadRef_NotFound proves a branchOrRef that
 // doesn't resolve to any real git ref/branch/commit — `git worktree add`
 // failing with "fatal: invalid reference: ..." — is now reachable as a
-// well-formed not_found response [design: §4.5, §4.7, bug pg2-r9iok],
+// well-formed not_found response (INV-ERR-2; bug pg2-r9iok),
 // rather than being misreported as this backend being unhealthy
 // (ErrUnavailable). Before the fix, this exact scenario was the codebase's
 // own TestProvider_WorktreeAdd_GitFailure_WrapsUnavailable, which asserted
@@ -363,7 +363,7 @@ func TestProvider_WorktreeRemove_Success(t *testing.T) {
 
 func TestProvider_WorktreeRemove_UnknownPath_NotFound(t *testing.T) {
 	// A path that isn't a known worktree is a well-formed negative answer
-	// [design: §4.5, §4.7] — checked before ever attempting `git worktree
+	// (INV-ERR-2) — checked before ever attempting `git worktree
 	// remove`, so no such invocation should occur.
 	backendPath := wtPath("feature")
 	r := newFakeRunner(t, map[string]fakeAnswer{
@@ -434,7 +434,7 @@ func TestProvider_BranchDetect_EmptyCwd_Rejected(t *testing.T) {
 		t.Fatal("BranchDetect(\"\") = nil error, want a rejection with no git invocation")
 	}
 	// An empty required field is the CALLER's mistake, not this backend
-	// being unhealthy [design: §4.2, bug pg2-r9iok].
+	// being unhealthy (INV-ERR-2; bug pg2-r9iok).
 	if !errors.Is(err, scriptout.ErrInvalidArgument) {
 		t.Fatalf("err = %v, want errors.Is(err, ErrInvalidArgument)", err)
 	}
@@ -443,7 +443,7 @@ func TestProvider_BranchDetect_EmptyCwd_Rejected(t *testing.T) {
 // TestProvider_BranchDetect_NotAGitRepo_NotFound proves cwd resolving to no
 // git repository at all ("fatal: not a git repository (or any of the
 // parent directories): .git") is now reachable as a well-formed not_found
-// response [design: §4.5, §4.7, bug pg2-r9iok] rather than being
+// response (INV-ERR-2; bug pg2-r9iok) rather than being
 // misreported as this backend being unhealthy. Before the fix, this exact
 // scenario was the codebase's own
 // TestProvider_BranchDetect_NotAGitRepo_WrapsUnavailable, which asserted

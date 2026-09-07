@@ -40,8 +40,7 @@ func newTestBackend() *internal.Provider {
 // TestNewDispatchTable_CapabilitiesDeclaresScmSchemaVersionAndNoAuthStatus
 // is the packet's required test asserting this binary's own capabilities
 // response — schemaVersions.scm populated, and auth_status deliberately
-// absent from Ops since this backend implements no AuthChecker [design:
-// §4.6, §4.7].
+// absent from Ops since this backend implements no AuthChecker (INV-AUTH-1).
 func TestNewDispatchTable_CapabilitiesDeclaresScmSchemaVersionAndNoAuthStatus(t *testing.T) {
 	table := newDispatchTable(newTestBackend())
 	entry, ok := table[scriptout.OpCapabilities]
@@ -61,7 +60,7 @@ func TestNewDispatchTable_CapabilitiesDeclaresScmSchemaVersionAndNoAuthStatus(t 
 	}
 	for _, op := range resp.Ops {
 		if op == scriptout.OpAuthStatus {
-			t.Fatalf("Ops = %v, must not include auth_status: this backend implements no AuthChecker [design: §4.6, §4.7]", resp.Ops)
+			t.Fatalf("Ops = %v, must not include auth_status: this backend implements no AuthChecker (INV-AUTH-1)", resp.Ops)
 		}
 	}
 }
@@ -167,7 +166,7 @@ func TestServeLoop_WorktreeListRoundTripsThroughStdinStdout(t *testing.T) {
 // binary's own dispatch table entirely, and a raw request for it comes
 // back as the wire-level unknown_op sentinel — which pg-connector's own
 // `auth status` fan-out (cmd/pg-connector/auth.go, a sibling packet's own
-// suite) already reports as "disabled: not applicable" [design: §4.6].
+// suite) already reports as "disabled: not applicable" (INV-AUTH-1).
 func TestServeLoop_AuthStatusIsUnknownOp(t *testing.T) {
 	origStdin, origStdout := os.Stdin, os.Stdout
 	defer func() { os.Stdin, os.Stdout = origStdin, origStdout }()

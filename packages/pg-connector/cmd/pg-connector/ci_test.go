@@ -13,7 +13,7 @@ import (
 
 // writeCiConfigFor writes a connector.ci registry listing backends (in
 // order) and points $PG_PR_CONFIG at it. connector.ci is list-valued
-// [design: §4.1], so this always writes a YAML list even for a single
+// (INV-REG-1), so this always writes a YAML list even for a single
 // backend, mirroring writeConfigFor's own convention for connector.pr.
 func writeCiConfigFor(t *testing.T, backends ...string) {
 	t.Helper()
@@ -54,7 +54,7 @@ func TestRun_CiList_Success_SingleBackend(t *testing.T) {
 }
 
 func TestRun_CiList_FanOut_ConcatenatesAcrossBackends(t *testing.T) {
-	// The design's own "runs concatenates" merge strategy [design: §4.5]:
+	// The design's own "runs concatenates" merge strategy (INV-OUT-1):
 	// every backend's runs land in one Runs slice, one sources[] row per
 	// backend, never collapsed.
 	writeOpAwareFakeBackend(t, "backend-ci-a", map[string]string{
@@ -104,7 +104,7 @@ func TestRun_CiList_FanOut_PartialFailure_Exit2(t *testing.T) {
 }
 
 func TestRun_CiList_FanOut_NoBackendsRegistered_Exit3(t *testing.T) {
-	// Zero sources queried is the total-failure case [design: §4.5] — a
+	// Zero sources queried is the total-failure case (INV-EXIT-1) — a
 	// fan-out op with nothing registered under connector.ci is not the
 	// generic CLI-level failure a targeted op with no backend hits (see
 	// pr_test.go's TestRun_PrShow_NoBackendRegistered_IsGenericFailure); it
@@ -179,7 +179,7 @@ func TestRun_CiLogs_Success(t *testing.T) {
 func TestRun_CiLogs_NotFound_Exit4(t *testing.T) {
 	// A not_found response (e.g. the run id no longer exists) is a
 	// well-formed negative answer under the targeted-op scheme (CLI exit
-	// 4), not a broken call [design: §4.5].
+	// 4), not a broken call (INV-ERR-2).
 	writeOpAwareFakeBackend(t, "backend-ci-logs-notfound", map[string]string{
 		"get_logs": `{"protocolVersion":1,"schemaVersion":1,"error":{"code":"not_found","message":"run run-1 not found"}}`,
 	}, `{}`)

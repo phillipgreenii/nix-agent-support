@@ -11,7 +11,7 @@ import (
 )
 
 // Relocated from cmd/pg-connector-pr-github/internal/github/chokepoint_test.go
-// (bead pg2-lh3c4, design §9.1's acceptance criteria): TestGHExecChokePoint
+// (bead pg2-lh3c4's acceptance criteria): TestGHExecChokePoint
 // and its sibling TestNoGHStackMutatingArgv (stack_readonly_test.go, same
 // package) already walked the WHOLE module from inside one backend's own
 // test package — so deleting or restructuring pr-github ahead of this move
@@ -61,7 +61,7 @@ var ghExecRE = regexp.MustCompile(`exec\.Command(?:Context)?\(\s*(?:[\w.]+\s*,\s
 //
 // The pg-connector-ci-github-actions pair was added when that backend
 // carried over this same mechanism into its own cmd/<binary>/internal/github
-// tree [bead pg2-2j5ac.10; design: §4.6, §5.2] — Go's internal/ visibility
+// tree [bead pg2-2j5ac.10; INV-AUTH-1] — Go's internal/ visibility
 // rule makes each backend's copy independent, so each backend's own
 // ghexec.go/token.go pair is allowlisted separately rather than shared.
 //

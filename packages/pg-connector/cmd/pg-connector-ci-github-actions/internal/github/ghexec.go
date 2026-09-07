@@ -17,7 +17,7 @@ import (
 // CLI is the token-protected gateway through which this backend invokes the
 // `gh` binary, ported unchanged (structure and behavior) from the sibling
 // backend's cliGHRunner/CLI split across its auth.go/github.go
-// [design: §4.6]. Every invocation resolves a GitHub token FIRST and
+// (INV-AUTH-1). Every invocation resolves a GitHub token FIRST and
 // injects it as the child's single GH_TOKEN:
 //
 //   - `gh` is NEVER executed without a resolved token — Command/Run return

@@ -2,7 +2,7 @@
 // concrete Provider. The Tier-1 core's generic serve-loop entry point
 // (pkg/scriptout.ServeLoop) is capability-agnostic; a sibling Tier-2 CI
 // backend's own main() calls NewDispatchTable and hands the result to
-// ServeLoop — this package builds no binary of its own [design: §4.2],
+// ServeLoop — this package builds no binary of its own (INV-WIRE-1),
 // mirroring pkg/provider/pr.NewDispatchTable's own convention.
 package ci
 
@@ -18,7 +18,7 @@ import (
 // NewDispatchTable builds the ci capability's op-dispatch table for p:
 // list_runs, get_logs, and rerun_failed always; auth_status only when p
 // also implements pkg/provider.AuthChecker, asserted via a type-check
-// rather than folded into the Provider interface [design: §4.6]. Every
+// rather than folded into the Provider interface (INV-AUTH-1). Every
 // handler passes p's returned error straight through unwrapped — a
 // well-behaved Provider implementation (built by the Tier-2 CI backend
 // packet) is responsible for wrapping its own errors with the matching
@@ -68,7 +68,7 @@ func NewDispatchTable(p Provider) scriptout.DispatchTable {
 	// forced/meaningless answer: the auth_status entry is simply omitted,
 	// which pg-connector's own fan-out (cmd/pg-connector/auth.go) already
 	// recognizes generically via the wire-level unknown_op sentinel and
-	// reports as "disabled: not applicable" [design: §4.6].
+	// reports as "disabled: not applicable" (INV-AUTH-1).
 	if ac, ok := p.(provider.AuthChecker); ok {
 		table[scriptout.OpAuthStatus] = scriptout.OpHandler{
 			SchemaVersion: schema.CISchemaVersion,

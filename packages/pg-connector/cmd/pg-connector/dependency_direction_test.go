@@ -27,7 +27,7 @@ var pgConnectorExecRE = regexp.MustCompile(`exec\.Command(?:Context)?\(\s*(?:[\w
 // string per non-test .go file that execs "pg-connector" or any
 // "pg-connector-<type>-<backend>" binary.
 //
-// This mechanizes design §4.4's composition-boundary rule: "A Tier-2
+// This mechanizes the composition boundary (INV-COMP-1): "A Tier-2
 // backend never execs pg-connector or another Tier-2 backend binary to
 // satisfy its own op; a cross-capability data need is resolved via that
 // backend's own direct system access instead" — the doc's own suggested
@@ -72,7 +72,7 @@ func evaluateCompositionBoundary(moduleRoot string) ([]string, error) {
 		for i, line := range strings.Split(string(src), "\n") {
 			if m := pgConnectorExecRE.FindStringSubmatch(line); m != nil {
 				violations = append(violations, fmt.Sprintf(
-					"%s:%d: execs %q — a Tier-2 backend MUST resolve a cross-capability data need via its own direct system access, never by shelling out to pg-connector or a sibling backend binary [design: §4.4]: %s",
+					"%s:%d: execs %q — a Tier-2 backend MUST resolve a cross-capability data need via its own direct system access, never by shelling out to pg-connector or a sibling backend binary (INV-REG-1): %s",
 					rel, i+1, m[1], strings.TrimSpace(line),
 				))
 			}
@@ -85,8 +85,9 @@ func evaluateCompositionBoundary(moduleRoot string) ([]string, error) {
 	return violations, nil
 }
 
-// TestCompositionBoundaryNoBackendExecsPgConnector is design §4.4's
-// dependency-direction check: no backend's own (non-test) source execs
+// TestCompositionBoundaryNoBackendExecsPgConnector is the composition
+// boundary's (INV-COMP-1) dependency-direction check: no backend's own
+// (non-test) source execs
 // pg-connector itself, or another pg-connector-<type>-<backend> binary.
 func TestCompositionBoundaryNoBackendExecsPgConnector(t *testing.T) {
 	moduleRoot, err := filepath.Abs("../..")
@@ -106,7 +107,7 @@ func TestCompositionBoundaryNoBackendExecsPgConnector(t *testing.T) {
 // TestCompositionBoundary_DetectsSiblingBackendExec are test-of-a-test
 // proofs: bead pg2-0vwcc already fixed the one known violation, so the real
 // tree has nothing left to reject — these prove evaluateCompositionBoundary
-// actually rejects the two shapes design §4.4 names ("pg-connector or
+// actually rejects the two shapes INV-COMP-1 names ("pg-connector or
 // another Tier-2 backend binary") rather than only ever passing vacuously.
 // Both write a synthetic, never-committed source file to a temp directory.
 func TestCompositionBoundary_DetectsUmbrellaExec(t *testing.T) {

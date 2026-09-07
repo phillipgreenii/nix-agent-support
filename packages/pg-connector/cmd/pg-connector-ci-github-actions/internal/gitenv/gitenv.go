@@ -7,7 +7,7 @@
 // here, and packages/pg-connector's own layout convention
 // (cmd/pg-connector/layout_convention_test.go) requires each backend's code
 // to live under its own cmd/<binary>/internal/ tree rather than exporting a
-// shared non-pkg package [design: §5.2]. The mechanism and rationale are
+// shared non-pkg package (layout_convention_test.go). The mechanism and rationale are
 // identical to the sibling copy's own doc comment: a git/gh invocation that
 // names its target directory (`git -C <dir> ...`, `gh --repo <owner/name>`,
 // exec.Cmd.Dir) is NOT scoped to that directory, because git resolves

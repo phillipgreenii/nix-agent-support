@@ -11,8 +11,8 @@ import (
 
 // allowedSharedLayout is the module's shared-surface allowlist: only
 // pkg/schema, pkg/provider (including its per-capability subpackages, e.g.
-// pkg/provider/pr — the small-per-capability-interface convention named by
-// design §3), and pkg/scriptout (including its own schemas/conformance
+// pkg/provider/pr — the small-per-capability-interface convention INV-CAP-1
+// names), and pkg/scriptout (including its own schemas/conformance
 // subpackages, bead pg2-7vgn5 — see below) may be shared across backend
 // boundaries — every backend's own code must live in main or under its own
 // cmd/<binary>/internal/.
@@ -41,8 +41,7 @@ var allowedSharedLayoutPrefixes = []string{"pkg/provider/", "pkg/scriptout/"}
 // backend regardless of what it exports, since nothing outside this module
 // ever imports a package main; or (b) nested under a cmd/<binary>/internal/
 // tree at any depth — Go's internal/ visibility rule is compiler-enforced
-// per import-path text [design: §5.2's "cross-backend isolation is
-// compiler-enforced via independent internal/ trees"].
+// per import-path text (layout_convention_test.go).
 //
 // Any OTHER non-internal subdirectory under a backend's own cmd/<binary>/ —
 // e.g. cmd/pg-connector-pr-github/util/ — is a real gap: Go's internal/

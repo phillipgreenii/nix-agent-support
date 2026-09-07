@@ -12,9 +12,10 @@ import (
 )
 
 // entityKindTokens is the fixed set of entity-kind names this design
-// currently has (pkg/schema's PR/Issue/CIRun/WorktreeInfo/BranchInfo —
-// design §2's entity model). "worktree" and "branch" are both scm-capability
-// entities [design: §4.7]; "cirun"/"ci" both mean the ci capability's run
+// currently has (pkg/schema's PR/Issue/CIRun/WorktreeInfo/BranchInfo — see
+// interfaces.md's op catalog). "worktree" and "branch" are both
+// scm-capability entities (GOAL-MIN-1: scm has no remote-sync concept);
+// "cirun"/"ci" both mean the ci capability's run
 // entity — either spelling is accepted so a field/type named either
 // "CIRuns" or "Runs" (of a "ciRun"-ish value type) is recognized.
 var entityKindTokens = map[string]string{
@@ -34,9 +35,9 @@ var entityKindTokens = map[string]string{
 // ("", false) when the identifier does not name a recognized entity kind.
 //
 // This is deliberately a NAME heuristic, not a type-identity check (no
-// go/types resolution against pkg/schema's actual declarations): design
-// §8's acceptance criterion — "no package ... defines a persistent store
-// keyed by more than one entity type's IDs together" — has no single
+// go/types resolution against pkg/schema's actual declarations): this
+// file's own acceptance criterion — "no package ... defines a persistent
+// store keyed by more than one entity type's IDs together" — has no single
 // canonical marker in the language (no interface, no annotation) for "this
 // map field represents one entity kind's keyed collection," so a full
 // type-checker pass would still bottom out in a name-based judgment call
@@ -92,8 +93,8 @@ func mapValueTypeName(expr ast.Expr) string {
 // internal/ tree) and returns one violation string per struct type that
 // defines two or more JSON-tagged map fields whose field name or map-value
 // type name resolve (via entityKindOf) to two or more DISTINCT entity
-// kinds — the mechanical form of design §8's "no package ... defines a
-// persistent store keyed by more than one entity type's IDs together."
+// kinds — the mechanical form of "no package ... defines a persistent
+// store keyed by more than one entity type's IDs together."
 func evaluateEntityStoreIsolation(dir string) ([]string, error) {
 	entries, err := filepath.Glob(filepath.Join(dir, "*.go"))
 	if err != nil {
@@ -151,7 +152,7 @@ func evaluateEntityStoreIsolation(dir string) ([]string, error) {
 						parts = append(parts, fmt.Sprintf("%s (%s)", kind, strings.Join(fields, ",")))
 					}
 					violations = append(violations, fmt.Sprintf(
-						"%s: type %q is a persistent store combining %d distinct entity kinds in one struct — %s — split into one store per entity type [design: §8]",
+						"%s: type %q is a persistent store combining %d distinct entity kinds in one struct — %s — split into one store per entity type (entity_store_test.go)",
 						rel, ts.Name.Name, len(kinds), strings.Join(parts, "; "),
 					))
 				}
@@ -165,7 +166,7 @@ func evaluateEntityStoreIsolation(dir string) ([]string, error) {
 // (outside any single backend's own internal/) — pkg/schema, pkg/provider
 // and its subpackages, pkg/scriptout and its subpackages, plus every
 // cmd/<binary>/ TOP-LEVEL directory itself (not recursed into internal/,
-// which design §8's own acceptance criterion explicitly exempts: "outside
+// which this file's own acceptance criterion explicitly exempts: "outside
 // a single backend's own internal/").
 func entityStoreScanDirs(moduleRoot string) ([]string, error) {
 	var dirs []string
@@ -208,8 +209,9 @@ func entityStoreScanDirs(moduleRoot string) ([]string, error) {
 			segments := strings.Split(rel, "/")
 			if len(segments) == 2 {
 				// cmd/<binary> itself: the binary's own top-level
-				// package. In scope (design §8 exempts only "a single
-				// backend's own internal/", not its top-level package).
+				// package. In scope (this file's own exemption covers only
+				// "a single backend's own internal/", not its top-level
+				// package).
 				add(rel)
 			}
 			// Do not descend into a backend's own subdirectories at
@@ -234,8 +236,8 @@ func hasGoFiles(dir string) bool {
 	return err == nil && len(matches) > 0
 }
 
-// TestNoCrossConnectorEntityStore is design §8's cross-entity-store check:
-// no package outside a single backend's own internal/ defines a persistent
+// TestNoCrossConnectorEntityStore is the cross-entity-store check: no
+// package outside a single backend's own internal/ defines a persistent
 // store keyed by more than one entity type's IDs together.
 func TestNoCrossConnectorEntityStore(t *testing.T) {
 	moduleRoot, err := filepath.Abs("../..")
@@ -261,7 +263,8 @@ func TestNoCrossConnectorEntityStore(t *testing.T) {
 }
 
 // TestNoCrossConnectorEntityStore_DetectsCombinedStore is a test-of-a-test:
-// design §8 has nothing to reject in the current, already-compliant tree
+// TestNoCrossConnectorEntityStore has nothing to reject in the current,
+// already-compliant tree
 // (its one real persistent store, cmd/pg-connector-pr-github/internal/
 // store.go's storeFile, is correctly scoped to PR ids only AND lives inside
 // a backend's own internal/, so it is out of this check's scope for two

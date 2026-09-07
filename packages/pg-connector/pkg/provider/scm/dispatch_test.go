@@ -96,7 +96,7 @@ func TestNewDispatchTable_WorktreeRemove_Success(t *testing.T) {
 
 func TestNewDispatchTable_WorktreeRemove_NotFoundPassesThroughUnwrapped(t *testing.T) {
 	// A not_found response (path is not a known worktree) is a well-formed
-	// negative answer, not a broken call [design: §4.5, §4.7] —
+	// negative answer, not a broken call (INV-ERR-2) —
 	// NewDispatchTable must pass the provider's own ErrNotFound-wrapped
 	// error through unchanged, not translate it.
 	sentinelErr := scriptout.WrapError(scriptout.ErrNotFound, "worktree /w/missing not found")
@@ -159,7 +159,7 @@ func TestNewDispatchTable_BranchDetect(t *testing.T) {
 func TestNewDispatchTable_WorktreeAdd_DecodeFailureIsInvalidArgument(t *testing.T) {
 	// A malformed args payload fails scriptout.Decode -- a caller mistake,
 	// not backend ill-health -- so NewDispatchTable must classify it as
-	// invalid_argument, not unavailable [design: §4.2, bug pg2-vmfzp].
+	// invalid_argument, not unavailable (INV-ERR-2; bug pg2-vmfzp).
 	p := &fakeProvider{
 		worktreeAddFn: func(ctx context.Context, branchOrRef string) (*schema.WorktreeInfo, error) {
 			t.Fatal("WorktreeAdd must not be invoked when args fail to decode")

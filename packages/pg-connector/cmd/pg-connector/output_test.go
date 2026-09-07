@@ -117,8 +117,8 @@ func TestFormatSourcesTable_RendersEveryRow(t *testing.T) {
 // one-line delegate to writeTargetedResult above, per its own doc comment
 // ("the shared write path behind every verb group's own report*
 // TargetedOutcome wrapper") — against drifting apart (bead pg2-sxfwd: found
-// with issue.go's copy missing the [design: §4.5] tag, ci.go's carrying an
-// extra aside, and scm.go's dropping the "or an ambiguous multi-backend
+// with issue.go's copy missing the "(INV-EXIT-1)" citation, ci.go's carrying
+// an extra aside, and scm.go's dropping the "or an ambiguous multi-backend
 // registration" clause the other three keep). Each doc comment's own first
 // word is its function's name (required Go doc convention), so that one
 // word is stripped before comparing — the remaining text is otherwise

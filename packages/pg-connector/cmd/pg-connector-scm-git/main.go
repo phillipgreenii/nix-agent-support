@@ -1,13 +1,13 @@
 // pg-connector-scm-git is the scm capability's local-git Tier-2 backend: a
 // thin, standalone, single-instance executable speaking only the
 // scriptout wire protocol (pkg/scriptout.ServeLoop), with no independent
-// human-facing CLI identity [design: §5 preamble]. It implements
+// human-facing CLI identity (actors.md's ACTOR-BACKEND). It implements
 // pkg/provider/scm.Provider (this backend's own internal.Provider) against
 // real local git plumbing — worktrees and cwd->branch resolution, no
-// remote sync concept [design: §4.7].
+// remote sync concept (GOAL-MIN-1).
 //
 // It implements no pkg/provider.AuthChecker: local git has no remote
-// credentials concept at all [design: §4.6, §4.7]. This binary's
+// credentials concept at all (INV-AUTH-1). This binary's
 // dispatch table therefore carries no auth_status entry (see
 // pkg/provider/scm.NewDispatchTable), which pg-connector's own generic
 // `auth status` fan-out (cmd/pg-connector/auth.go) already recognizes via
@@ -18,7 +18,7 @@
 // worktree_add/worktree_remove/worktree_list/branch_detect entries, plus
 // its own capabilities entry) and hands it to the Tier-1 core's generic
 // serve-loop entry point — it is the binary that actually calls
-// ServeLoop, unlike either sibling packet [design: §4.2].
+// ServeLoop, unlike either sibling packet (INV-WIRE-1).
 package main
 
 import (

@@ -116,7 +116,7 @@ func Invoke(ctx context.Context, binary, op string, args any) (*Response, error)
 	// A protocolVersion mismatch is checked before anything else on the
 	// success path: the umbrella (this process) and binary are each built
 	// from a separate, independently-versioned/deployed nix derivation
-	// [design: §4.3], so skew between them is the ordinary case, not an
+	// (INV-VER-1), so skew between them is the ordinary case, not an
 	// edge case. Every well-formed response carries the wire envelope's
 	// own protocolVersion; a binary built from a commit whose envelope
 	// shape has since changed reports that here even though its Result
@@ -180,7 +180,7 @@ func InvokeCapabilities(ctx context.Context, binary string) (*CapabilitiesRespon
 	// Same protocolVersion check Invoke applies to every other op's
 	// success path (see its own comment) — capabilities is not exempt
 	// just because its shape is bespoke. Per-capability schemaVersion
-	// skew (the other half of §4.3's mechanism) is deliberately NOT
+	// skew (the other half of INV-VER-1's mechanism) is deliberately NOT
 	// checked here: this package is capability-agnostic by design (see
 	// this file's package doc comment) and has no notion of which
 	// schema-bearing capabilities exist or what their current versions

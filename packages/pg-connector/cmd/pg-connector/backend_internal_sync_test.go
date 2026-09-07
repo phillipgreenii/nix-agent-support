@@ -65,7 +65,8 @@ func bestEffortDiff(labelA, fileA, labelB, fileB string) string {
 // pg-connector itself" duplication bd pg2-sxfwd's Section-B-bullet-5 finding
 // names: three gitenv.go copies (pr-github, ci-github-actions, scm-git) and
 // two github/{auth,ghexec,token}.go copies (pr-github, ci-github-actions).
-// Design §5.2's compiler-enforced backend isolation (independent internal/
+// The module's layout convention (layout_convention_test.go)'s
+// compiler-enforced backend isolation (independent internal/
 // trees per backend — see e.g. cmd/pg-connector-ci-github-actions/internal/
 // resolver.go's own doc comment) is why these are copies rather than a
 // shared package: only pkg/schema, pkg/provider, and pkg/scriptout are the

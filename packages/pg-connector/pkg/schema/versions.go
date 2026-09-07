@@ -6,7 +6,7 @@
 // {"schemaVersions": {"<capability>": N, ...}} — one entry per
 // schema-bearing capability it implements, keyed by the same capability
 // name used in scriptout.CapabilitiesResponse.SchemaVersions
-// [design: §4.3]. Because the umbrella (cmd/pg-connector) and each Tier-2
+// (INV-VER-1). Because the umbrella (cmd/pg-connector) and each Tier-2
 // backend are separate nix derivations, versioned and deployed
 // independently, the version this build currently expects for a given
 // capability can differ from what a backend built at another commit

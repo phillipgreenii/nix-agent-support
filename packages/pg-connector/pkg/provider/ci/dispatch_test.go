@@ -93,7 +93,7 @@ func TestNewDispatchTable_GetLogs(t *testing.T) {
 func TestNewDispatchTable_GetLogs_NotFoundPassesThroughUnwrapped(t *testing.T) {
 	// A not_found response from get_logs (e.g. the run id no longer exists)
 	// is a well-formed negative answer, not a broken call
-	// [design: §4.5] — NewDispatchTable must pass the provider's own
+	// (INV-ERR-2) — NewDispatchTable must pass the provider's own
 	// ErrNotFound-wrapped error through unchanged, not translate it.
 	sentinelErr := scriptout.WrapError(scriptout.ErrNotFound, "run run-1 not found")
 	p := &fakeProvider{
@@ -145,7 +145,7 @@ func TestNewDispatchTable_RerunFailed_NotFoundPassesThroughUnwrapped(t *testing.
 func TestNewDispatchTable_ListRuns_DecodeFailureIsInvalidArgument(t *testing.T) {
 	// A malformed args payload fails scriptout.Decode -- a caller mistake,
 	// not backend ill-health -- so NewDispatchTable must classify it as
-	// invalid_argument, not unavailable [design: §4.2, bug pg2-vmfzp].
+	// invalid_argument, not unavailable (INV-ERR-2; bug pg2-vmfzp).
 	p := &fakeProvider{
 		listRunsFn: func(ctx context.Context, prID string) ([]schema.CIRun, error) {
 			t.Fatal("ListRuns must not be invoked when args fail to decode")
@@ -201,7 +201,7 @@ func TestNewDispatchTable_AuthStatusPresentWithAuthChecker_Failure(t *testing.T)
 
 func TestNewDispatchTable_SchemaVersionIsCISchemaVersion(t *testing.T) {
 	// Every ci-capability dispatch-table entry must carry the ci
-	// capability's own schema version, never pr's [design: §4.3].
+	// capability's own schema version, never pr's (INV-VER-1).
 	p := &fakeProvider{
 		listRunsFn:    func(ctx context.Context, prID string) ([]schema.CIRun, error) { return nil, nil },
 		getLogsFn:     func(ctx context.Context, runID string) ([]byte, error) { return nil, nil },

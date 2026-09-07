@@ -1,6 +1,6 @@
 // Package vcs is a local copy of pg-pr's pkg/provider/vcs interface —
 // carried over so internal/github's ported Provider still type-checks
-// against the same interface shape it always has [design: §9], without
+// against the same interface shape it always has , without
 // packages/pg-connector's go.mod depending on packages/pg-pr. Nothing
 // outside cmd/pg-connector-pr-github ever sees this package: the backend's
 // own pr.Provider glue (internal/provider.go) talks to internal/github's
@@ -62,7 +62,7 @@ type AuthChecker interface {
 // anything but internal/github's now-deleted enrich.go/fingerprint.go, and
 // never consumed by anything in pg-connector — this backend's Show always
 // performs a live, uncached, per-PR read (provider.go's own doc comment).
-// Design §9.1's verb→destination table retires pg-pr's `sync` command group
+// The design's verb->destination table retires pg-pr's `sync` command group
 // "without a rewrite target" (pr-pool polls the beads connector directly
 // instead), and no design section names either optional capability as a
 // future pg-connector need, so both were removed as dead surface rather

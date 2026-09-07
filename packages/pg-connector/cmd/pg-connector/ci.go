@@ -2,18 +2,18 @@
 // entity/capability" packet on top of the Tier-1 core's registry/dispatcher
 // and outcome-reporting helper. pg-connector remains the only user-facing
 // CLI surface — ci is one of its verb groups, never a separate binary
-// [design: §4, §6.1].
+// (interfaces.md's INTF-CLI).
 //
 // connector.ci is list-valued (multiple simultaneously-registered CI
-// backends, matching pr/issue) [design: §4.1]. "ci list" is therefore a
+// backends, matching pr/issue) (INV-REG-1). "ci list" is therefore a
 // FAN-OUT op — it queries every registered ci backend and concatenates
 // their runs (the design's explicit "runs concatenates" merge strategy for
-// the CI fan-out [design: §4.5]) — and uses the fan-out exit-code scheme
+// the CI fan-out (INV-OUT-1)) — and uses the fan-out exit-code scheme
 // (0/2/3) via outcome.go's FanOutOutcome.ExitCode. "ci logs" and
 // "ci rerun-failed" are TARGETED ops (resolve to the one backend registered
 // under connector.ci, mirroring pr.go's own targeted-op dispatch) and use
 // the targeted exit-code scheme (0/4/1) via outcome.go's TargetedExitCode
-// [design: §4.1, §4.5]. This file calls the dispatcher/fan-out helpers and
+// (INV-EXIT-1). This file calls the dispatcher/fan-out helpers and
 // hands their raw per-call result/error to outcome.go; it never decides the
 // exit code itself.
 package main
@@ -33,7 +33,7 @@ import (
 // ciListOutcome is "ci list"'s wire response: every registered ci backend's
 // runs concatenated into Runs, with each backend's own health as one row in
 // Sources — never collapsed, matching the sources[] convention every
-// fan-out in this design uses [design: §4.5].
+// fan-out uses (INV-OUT-1).
 type ciListOutcome struct {
 	Runs    []schema.CIRun `json:"runs"`
 	Sources []SourceResult `json:"sources"`
@@ -158,7 +158,7 @@ func newCiRerunFailedCmd() *cobra.Command {
 // [bead pg2-ox1k6] — see output.go's writeTargetedResult, which this
 // delegates to. It translates err into pg-connector's own targeted-op
 // exit code via outcome.go's TargetedExitCode, never deciding the exit
-// code itself [design: §4.5]. A nil resp is a Tier-1 CLI-level failure
+// code itself (INV-EXIT-1). A nil resp is a Tier-1 CLI-level failure
 // before any well-formed wire response was produced (e.g. no backend
 // registered, or an ambiguous multi-backend registration) — rather than
 // returning a plain error, writeTargetedResult now builds a synthetic

@@ -127,7 +127,7 @@ func TestRun_PrFeedbackSet_Success(t *testing.T) {
 func TestRun_PrFeedbackSet_NotFound_Exit4(t *testing.T) {
 	// A not_found response (e.g. the comment id no longer exists) is a
 	// well-formed negative answer under the targeted-op scheme (CLI exit
-	// 4), not a broken call [design: §4.5, §6.1].
+	// 4), not a broken call (INV-ERR-2).
 	writeOpAwareFakeBackend(t, "backend-feedback-notfound", map[string]string{
 		"feedback_set": `{"protocolVersion":1,"schemaVersion":1,"error":{"code":"not_found","message":"comment c1 not found"}}`,
 	}, `{}`)

@@ -83,7 +83,7 @@ func TestProvider_RealGit_WorktreeAddListRemoveAndBranchDetect(t *testing.T) {
 	setupGit(t, repo, "branch", "feature")
 
 	// WorktreeAdd/WorktreeRemove/WorktreeList carry no repo/cwd wire
-	// argument of their own [design: §4.7] — they resolve "the current
+	// argument of their own (interfaces.md's scm op catalog) — they resolve "the current
 	// repository" from this process's own working directory, exactly as a
 	// real pg-connector-scm-git process would (its cwd is whatever the
 	// caller invoked it from). t.Chdir scopes that to this test and
@@ -136,7 +136,7 @@ func TestProvider_RealGit_WorktreeAddListRemoveAndBranchDetect(t *testing.T) {
 
 	// A second removal of the now-gone path is a well-formed not_found
 	// answer against a REAL repo, not just the fakeRunner's canned
-	// response [design: §4.5, §4.7].
+	// response (INV-ERR-2).
 	if err := p.WorktreeRemove(ctx, added.Path); err == nil {
 		t.Fatal("WorktreeRemove of an already-removed path = nil error, want ErrNotFound")
 	}

@@ -11,7 +11,7 @@ import (
 	"testing"
 )
 
-// capabilityPackages is the exact capability-token list design §3's
+// capabilityPackages is the exact capability-token list INV-CAP-1's
 // acceptance criteria names: "every exported interface's name and method
 // set corresponds to exactly one capability (pr/issue/ci/scm/attention/
 // search)". attention/search do not exist as pkg/provider subpackages yet
@@ -21,13 +21,14 @@ import (
 var capabilityPackages = []string{"pr", "issue", "ci", "scm", "attention", "search"}
 
 // systemNamingTokens is the "names no backend/system (github/jira/slack/…)"
-// half of design §3's acceptance criteria. It is deliberately a curated
+// half of INV-CAP-1's acceptance criteria. It is deliberately a curated
 // list, not derived from this module's own cmd/ directory names: deriving
 // it from on-disk backends would only catch a system name AFTER a backend
 // for it already exists, which is exactly backwards for a naming-convention
 // guard meant to catch the mistake at review time, before or independent of
-// any concrete backend landing. The three names are the design doc's own
-// literal examples (§3's "github/jira/slack"); "beads" and "gitlab" are
+// any concrete backend landing. The three names ("github", "jira", "slack")
+// are this check's own long-standing literal examples of a backend/system
+// name; "beads" and "gitlab" are
 // added because they are, respectively, an actual backend in this module
 // (pg-connector-issue-beads) and a common enough system name that a future
 // SCM/issue backend is plausible. Every entry here is matched as a
@@ -67,7 +68,7 @@ func containsSystemToken(ident string) (string, bool) {
 // own name, or any of whose method names, names a backend/system per
 // containsSystemToken.
 //
-// This mechanizes the "names no backend/system" half of design §3's
+// This mechanizes the "names no backend/system" half of INV-CAP-1's
 // acceptance criteria. The "corresponds to exactly one capability" half is
 // enforced structurally rather than by this function: each capability gets
 // exactly one Go package (one directory, one Provider interface) by
@@ -75,8 +76,8 @@ func containsSystemToken(ident string) (string, bool) {
 // "Provider" declarations in the same package — so there is no separate
 // mechanical check for it beyond "this function found a capability
 // package to look at" (TestCapabilityNamingConvention below iterates the
-// fixed §3 capability list precisely to keep that structural fact visible
-// in the test, not just true by accident of the directory layout).
+// fixed capabilityPackages list precisely to keep that structural fact
+// visible in the test, not just true by accident of the directory layout).
 func evaluateCapabilityNaming(dir, capability string) ([]string, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -109,7 +110,7 @@ func evaluateCapabilityNaming(dir, capability string) ([]string, error) {
 				}
 				if tok, bad := containsSystemToken(ts.Name.Name); bad {
 					violations = append(violations, fmt.Sprintf(
-						"%s: capability %q interface %q names a backend/system (%q) — capability interfaces MUST be scoped by capability, never by system [design: §3]",
+						"%s: capability %q interface %q names a backend/system (%q) — capability interfaces MUST be scoped by capability, never by system (INV-CAP-1)",
 						entry.Name(), capability, ts.Name.Name, tok,
 					))
 				}
@@ -120,7 +121,7 @@ func evaluateCapabilityNaming(dir, capability string) ([]string, error) {
 					for _, name := range m.Names {
 						if tok, bad := containsSystemToken(name.Name); bad {
 							violations = append(violations, fmt.Sprintf(
-								"%s: capability %q interface %q method %q names a backend/system (%q) — capability interfaces MUST be scoped by capability, never by system [design: §3]",
+								"%s: capability %q interface %q method %q names a backend/system (%q) — capability interfaces MUST be scoped by capability, never by system (INV-CAP-1)",
 								entry.Name(), capability, ts.Name.Name, name.Name, tok,
 							))
 						}
@@ -132,7 +133,7 @@ func evaluateCapabilityNaming(dir, capability string) ([]string, error) {
 	return violations, nil
 }
 
-// TestCapabilityNamingConvention is design §3's naming/convention check: it
+// TestCapabilityNamingConvention is INV-CAP-1's naming/convention check: it
 // confirms every exported interface under pkg/provider/<capability> (for
 // each of the fixed capability tokens pr/issue/ci/scm/attention/search)
 // names no backend/system.
@@ -164,7 +165,7 @@ func TestCapabilityNamingConvention(t *testing.T) {
 }
 
 // TestCapabilityNamingConvention_DetectsSystemNamedMethod is a
-// test-of-a-test: design §3's naming check has never had anything to
+// test-of-a-test: INV-CAP-1's naming check has never had anything to
 // reject in the current, already-compliant tree, so this proves
 // evaluateCapabilityNaming actually flags a violation rather than only
 // ever passing vacuously. It writes a synthetic capability package to a

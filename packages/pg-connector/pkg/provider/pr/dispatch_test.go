@@ -114,7 +114,7 @@ func TestNewDispatchTable_FeedbackSet(t *testing.T) {
 func TestNewDispatchTable_FeedbackSet_NotFoundPassesThroughUnwrapped(t *testing.T) {
 	// A not_found response from feedback_set (e.g. the comment id no longer
 	// exists) is a well-formed negative answer, not a broken call
-	// [design: §4.5, §6.1] — NewDispatchTable must pass the provider's own
+	// (INV-ERR-2) — NewDispatchTable must pass the provider's own
 	// ErrNotFound-wrapped error through unchanged, not translate it.
 	sentinelErr := scriptout.WrapError(scriptout.ErrNotFound, "comment c1 not found")
 	p := &fakeProvider{
@@ -132,7 +132,7 @@ func TestNewDispatchTable_FeedbackSet_NotFoundPassesThroughUnwrapped(t *testing.
 func TestNewDispatchTable_Show_DecodeFailureIsInvalidArgument(t *testing.T) {
 	// A malformed args payload fails scriptout.Decode -- a caller mistake,
 	// not backend ill-health -- so NewDispatchTable must classify it as
-	// invalid_argument, not unavailable [design: §4.2, bug pg2-vmfzp].
+	// invalid_argument, not unavailable (INV-ERR-2; bug pg2-vmfzp).
 	p := &fakeProvider{
 		showFn: func(ctx context.Context, id string) (*schema.PR, error) {
 			t.Fatal("Show must not be invoked when args fail to decode")

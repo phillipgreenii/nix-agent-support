@@ -20,7 +20,7 @@ package schema
 // separately) and of pkg/scriptout.ProtocolVersion.
 //
 // Bumped 1 -> 2 by bead pg2-1q9c0 (design review finding A9), which added
-// the Tracker field below — per §4.3, schemaVersion "versions that
+// the Tracker field below — per INV-VER-1, schemaVersion "versions that
 // capability's own field shape," and this is the first field-shape change
 // since the capability's initial version. No existing consumer exists yet
 // (the issue capability has one Tier-2 backend, pg-connector-issue-beads;

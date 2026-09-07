@@ -249,7 +249,7 @@ func invokingMalformedStdin(ctx context.Context, backend Backend) Result {
 // "capabilities-response" schema with exit 0 [design's bug A6: an error
 // envelope must never silently decode as a zero-value capabilities
 // success]. A backend that answers unknown_op for capabilities (design
-// [design: §4.2] makes this op optional) reports the case Skipped rather
+// (INV-WIRE-1) makes this op optional) reports the case Skipped rather
 // than a synthetic failure.
 func invokingCapabilities(ctx context.Context, backend Backend) Result {
 	name := "invoking/capabilities"

@@ -27,7 +27,7 @@ func TestFanOutOutcome_ExitCode_Degraded(t *testing.T) {
 }
 
 func TestFanOutOutcome_ExitCode_Disabled_CountsAsHealthy(t *testing.T) {
-	// Per design §4.6, a no-credential backend answering "disabled" is a
+	// Per INV-EXIT-2, a no-credential backend answering "disabled" is a
 	// well-formed negative, not a degraded state — it must not hold the
 	// exit code at 2 forever on an otherwise fully healthy machine
 	// [bug A2].

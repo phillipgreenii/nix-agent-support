@@ -4,7 +4,7 @@
 // for this module, applied to plain `git` instead of `gh`. Unlike that
 // GitHub wrapper, this one resolves and injects no credential: local git
 // plumbing has no remote credentials concept at all, so there is nothing
-// to inject [design: §4.6, §4.7]. It still owns the child's environment,
+// to inject (INV-AUTH-1). It still owns the child's environment,
 // via this package's own internal/gitenv (a leaked GIT_DIR/GIT_WORK_TREE
 // would otherwise silently redirect `worktree add`/`worktree remove` onto
 // the wrong repository regardless of `-C`/cmd.Dir — see that package's
@@ -32,8 +32,9 @@ type Runner interface {
 	// empty dir inherits this process's own cwd — how WorktreeAdd/
 	// WorktreeRemove/WorktreeList resolve "the current repository", since
 	// none of those three ops carry a repo/cwd wire argument of their own
-	// [design: §4.7]; BranchDetect is the one op that instead receives an
-	// explicit cwd over the wire and passes it straight through as dir).
+	// (interfaces.md's scm op catalog); BranchDetect is the one op that
+	// instead receives an explicit cwd over the wire and passes it
+	// straight through as dir).
 	// It returns git's trimmed stdout, or an error folding in stderr.
 	Run(ctx context.Context, dir string, args ...string) (string, error)
 }

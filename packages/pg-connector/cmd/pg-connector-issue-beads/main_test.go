@@ -41,8 +41,7 @@ func newTestBackend() *internal.Backend {
 // TestNewDispatchTable_CapabilitiesVocabularyNonEmpty is the packet's
 // required test asserting the capabilities op's vocabulary.state list is
 // non-empty and reflects bd's real status values, proving the vocabulary
-// is actually declared and not just committed to in prose [design: §4.3,
-// §4.3 AC].
+// is actually declared and not just committed to in prose (interfaces.md's vocabulary note).
 func TestNewDispatchTable_CapabilitiesVocabularyNonEmpty(t *testing.T) {
 	table := newDispatchTable(newTestBackend())
 	entry, ok := table[scriptout.OpCapabilities]

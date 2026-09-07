@@ -202,7 +202,7 @@ func TestNewDispatchTable_Transition_UnrecognizedTargetStateIsProviderError(t *t
 func TestNewDispatchTable_Show_DecodeFailureIsInvalidArgument(t *testing.T) {
 	// A malformed args payload fails scriptout.Decode -- a caller mistake,
 	// not backend ill-health -- so NewDispatchTable must classify it as
-	// invalid_argument, not unavailable [design: §4.2, bug pg2-vmfzp].
+	// invalid_argument, not unavailable (INV-ERR-2; bug pg2-vmfzp).
 	p := &fakeProvider{
 		showFn: func(ctx context.Context, id string) (*schema.Issue, error) {
 			t.Fatal("Show must not be invoked when args fail to decode")

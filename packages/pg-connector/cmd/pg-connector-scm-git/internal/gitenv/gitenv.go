@@ -21,7 +21,7 @@
 // within cmd/pg-connector-pr-github/... — this backend's own
 // cmd/pg-connector-scm-git/internal/gitenv is the independent,
 // compiler-enforced boundary the design's own layout convention expects
-// each backend to have [design: §5.2].
+// each backend to have (layout_convention_test.go).
 //
 // Every `git` child this backend spawns MUST therefore be built by
 // [Command], which owns the child environment. A bare

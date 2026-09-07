@@ -87,7 +87,7 @@ func TestRun_ScmWorktreeRemove_Success(t *testing.T) {
 func TestRun_ScmWorktreeRemove_NotFound_Exit4(t *testing.T) {
 	// A not_found response (path is not a known worktree) is a well-formed
 	// negative answer under the targeted-op scheme (CLI exit 4), not a
-	// broken call [design: §4.5, §4.7].
+	// broken call (INV-ERR-2).
 	writeOpAwareFakeBackend(t, "backend-worktree-remove-notfound", map[string]string{
 		"worktree_remove": `{"protocolVersion":1,"schemaVersion":1,"error":{"code":"not_found","message":"worktree /w/missing not found"}}`,
 	}, `{}`)

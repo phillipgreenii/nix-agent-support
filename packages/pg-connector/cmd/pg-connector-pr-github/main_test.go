@@ -39,7 +39,7 @@ func newTestBackend(t *testing.T) *internal.Backend {
 // TestNewDispatchTable_CapabilitiesVocabularyNonEmpty is the packet's
 // required test asserting the capabilities op's vocabulary.category list is
 // non-empty, proving the vocabulary is actually declared and not just
-// committed to in prose [design: §4.3, §6.1].
+// committed to in prose (interfaces.md's vocabulary note).
 func TestNewDispatchTable_CapabilitiesVocabularyNonEmpty(t *testing.T) {
 	table := newDispatchTable(newTestBackend(t))
 	entry, ok := table[scriptout.OpCapabilities]

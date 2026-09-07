@@ -8,15 +8,15 @@
 // pg-connector-pr-github backend. That is a Tier-2 backend (this one)
 // calling back into the Tier-1 caller that dispatches it — a shape the
 // design's composition-authorization for process composition never covered:
-// that authorization (design §4.4) is scoped to standalone attention/search
-// plugins, a fundamentally different position in the call graph (a leaf
-// composing pg-connector's verbs, not one of the things being composed
-// calling back into its own composer). See design §4.4's now-explicit
-// "This authorization is scoped to those two implementer kinds only..."
-// paragraph, added to close exactly this gap.
+// that authorization is scoped to standalone attention/search plugins, a
+// fundamentally different position in the call graph (a leaf composing
+// pg-connector's verbs, not one of the things being composed calling back
+// into its own composer) — never to a Tier-2 backend like this one
+// (INV-COMP-1; interfaces.md's "The composition boundary").
 //
-// §5.2's compiler-enforced backend isolation (independent internal/ trees
-// per backend) also forecloses the alternative of importing the
+// The module's own layout convention (layout_convention_test.go)'s
+// compiler-enforced backend isolation (independent internal/ trees per
+// backend) also forecloses the alternative of importing the
 // pg-connector-pr-github backend's own concrete Provider in-process: its
 // construction lives under a different backend's private internal/ tree,
 // which this backend cannot import even if it wanted to — only
@@ -33,7 +33,8 @@
 // fallback ("a minimal direct GitHub branch lookup"): parse repo+number out
 // of the id itself — recognizing the same "<owner>/<repo>#<number>"
 // convention independently (not by importing pg-connector-pr-github's
-// private parsePRID, which §5.2 forbids anyway) because it is the natural,
+// private parsePRID, which the module's layout convention
+// (layout_convention_test.go) forbids anyway) because it is the natural,
 // minimum-information encoding of a GitHub PR's identity, not a private
 // implementation detail — then resolve the head branch with one direct `gh
 // pr view` call over the SAME ghRunner gateway (provider.go) this backend
@@ -77,8 +78,10 @@ func newGHPRResolver(gh ghRunner) *ghPRResolver {
 
 // parsePRID parses this system's "<owner>/<repo>#<number>" GitHub PR id
 // convention — independently recognized here (not imported from the
-// pg-connector-pr-github backend's own parsePRID, which §5.2's backend
-// isolation makes impossible to import) because it's the natural,
+// pg-connector-pr-github backend's own parsePRID, which the module's
+// layout convention's compiler-enforced backend isolation
+// (layout_convention_test.go) makes impossible to import) because it's the
+// natural,
 // minimum-information encoding of a GitHub PR's identity: an owner/repo
 // pair plus a PR number, the same shape pg-connector-pr-github's own
 // formatPRID mints and parsePRID round-trips.

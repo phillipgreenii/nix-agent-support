@@ -237,7 +237,7 @@ func TestBackend_Show_EmptyID(t *testing.T) {
 		t.Fatalf("expected no bd invocation for an invalid call, got %v", fr.calls)
 	}
 	// An empty id is the CALLER's mistake, not this backend being
-	// unhealthy [design: §4.2, bug pg2-r9iok] — it must not share
+	// unhealthy (INV-ERR-2; bug pg2-r9iok) — it must not share
 	// ErrUnavailable's "this backend cannot currently be used" meaning,
 	// and must not be confused with ErrNotFound (a well-formed id that
 	// genuinely doesn't exist) either — an empty id was never even a

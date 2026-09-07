@@ -33,7 +33,7 @@ func TestCIRun_JSONRoundTrip(t *testing.T) {
 }
 
 func TestCIRun_PRIDIsAlwaysPresentOnTheWire(t *testing.T) {
-	// PRID links a run to its PR [design: §2] and must not be omitempty: a
+	// PRID links a run to its PR (interfaces.md's op catalog) and must not be omitempty: a
 	// well-behaved provider always populates it, and it must survive
 	// round-tripping a zero-value struct too (an empty string, not an
 	// absent field, though either decodes back to "").
@@ -49,7 +49,7 @@ func TestCIRun_PRIDIsAlwaysPresentOnTheWire(t *testing.T) {
 
 func TestCIRun_IDAndPRIDAreStrings(t *testing.T) {
 	// CIRun.ID and CIRun.PRID must be strings, carried over as-is from
-	// pg-pr's existing api.CIRun.ID string field [design: §9, §5.3] — a
+	// pg-pr's existing api.CIRun.ID string field — a
 	// compile-time assertion that these fields are string-typed, not
 	// numeric.
 	var _ string = CIRun{}.ID
@@ -58,7 +58,7 @@ func TestCIRun_IDAndPRIDAreStrings(t *testing.T) {
 
 func TestCISchemaVersion_IndependentOfPRSchemaVersion(t *testing.T) {
 	// schemaVersion is one integer per schema-bearing capability, never a
-	// single global counter shared across capabilities [design: §4.3] — the
+	// single global counter shared across capabilities (INV-VER-1) — the
 	// two constants must be independently named/addressable regardless of
 	// whether their values happen to match (they diverged, 1 vs 2, once
 	// bead pg2-681xo bumped SchemaVersion for the PR-only AsOf/Stale

@@ -1,14 +1,14 @@
 // pg-connector-issue-beads is the issue capability's beads Tier-2 backend: a
 // thin, standalone executable speaking only the scriptout wire protocol
 // (pkg/scriptout.ServeLoop), with no independent human-facing CLI identity
-// [design: §5 preamble]. It implements pkg/provider/issue.Provider against
+// (actors.md's ACTOR-BACKEND). It implements pkg/provider/issue.Provider against
 // this workspace's own bd tracker by shelling out to the `bd` CLI
-// (internal), the first Tier-2 Issue backend built [design: §2, §5.1].
+// (internal), the first Tier-2 Issue backend built (interfaces.md's op catalog).
 //
 // This binary builds its own op-dispatch table (pkg/provider/issue's
 // show/create/comment/transition entries) and hands it to the Tier-1 core's
 // generic serve-loop entry point — it is the binary that actually calls
-// ServeLoop, unlike either sibling packet [design: §4.2]. It does NOT add
+// ServeLoop, unlike either sibling packet (INV-WIRE-1). It does NOT add
 // an auth_status entry: internal.Backend does not implement
 // pkg/provider.AuthChecker (see backend.go's doc comment for why), so this
 // table never gains a scriptout.OpAuthStatus key. capabilities.ops (see
@@ -49,8 +49,7 @@ func run() int {
 // packet's NewDispatchTable, then adds this backend's own capabilities
 // entry via scriptout.AddCapabilities — the concrete backing for that
 // sibling packet's vocabulary.state check, which cites this backend's
-// capabilities response but does not itself populate it [design: §4.3,
-// §4.3 AC]. AddCapabilities computes capabilities.ops straight from this
+// capabilities response but does not itself populate it (interfaces.md's vocabulary note). AddCapabilities computes capabilities.ops straight from this
 // table's own registered op names, so this backend never hand-types a
 // second, separately maintained ops list that could drift from what the
 // table actually dispatches (bead pg2-fh2vh).
@@ -61,7 +60,7 @@ func newDispatchTable(backend *internal.Backend) scriptout.DispatchTable {
 
 // capabilitiesBase declares this backend's schemaVersions and its
 // non-empty state and priority vocabularies (bd's actual accepted --status
-// and --priority values) [design: §4.3, §4.3 AC] — everything
+// and --priority values) (INV-VER-1) — everything
 // AddCapabilities needs except Ops, which it deliberately leaves unset for
 // AddCapabilities to compute. vocabulary.priority was added by bead
 // pg2-akfw5 (review finding A-33:

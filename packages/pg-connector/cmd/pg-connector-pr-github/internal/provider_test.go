@@ -136,7 +136,7 @@ func TestBackend_Show_InvalidID(t *testing.T) {
 		t.Fatal("expected an error for a malformed id")
 	}
 	// A malformed id is the CALLER's mistake, not this backend being
-	// unhealthy [design: §4.2, bug pg2-r9iok] — it must not share
+	// unhealthy (INV-ERR-2; bug pg2-r9iok) — it must not share
 	// ErrUnavailable's "this backend cannot currently be used" meaning.
 	if !errors.Is(err, scriptout.ErrInvalidArgument) {
 		t.Fatalf("err = %v, want errors.Is(err, ErrInvalidArgument)", err)
@@ -158,8 +158,7 @@ func TestBackend_Show_AuthFailureMapsToUnauthenticated(t *testing.T) {
 // --repo octocat/Hello-World` prints "GraphQL: Could not resolve to a
 // PullRequest with the number of 999999999. (repository.pullRequest)",
 // exit 1) is now reachable as not_found through classifyGHError, rather
-// than falling through to codeForError's "unavailable" fallback [design:
-// §4.5, bug pg2-r9iok].
+// than falling through to codeForError's "unavailable" fallback (INV-ERR-2; bug pg2-r9iok).
 func TestBackend_Show_NonexistentPR_NotFound(t *testing.T) {
 	gh := &fakeGH{getPRErr: errors.New("gh pr view 999999999: exit status 1: GraphQL: Could not resolve to a PullRequest with the number of 999999999. (repository.pullRequest)")}
 	b := newTestBackend(t, gh)
@@ -219,7 +218,7 @@ func TestBackend_Show_GenuineGHFailure_PassesThroughUnclassified(t *testing.T) {
 func TestBackend_RoundTrip_CategorizeAndFeedbackSetThenShow(t *testing.T) {
 	// This is the packet's required round-trip test: write a category via
 	// categorize and a disposition via feedback_set, then call show, and
-	// assert both values round-trip into the response [design: §2, §6.1] —
+	// assert both values round-trip into the response (interfaces.md's pr op catalog) —
 	// proving the store-and-merge behavior, not just that the store accepts
 	// writes.
 	gh := &fakeGH{
@@ -267,7 +266,7 @@ func TestBackend_FeedbackSet_UnknownDispositionRejected(t *testing.T) {
 		t.Fatal("expected an error for an invalid disposition")
 	}
 	// An invalid disposition value is the CALLER's mistake, not this
-	// backend being unhealthy [design: §4.2, bug pg2-r9iok].
+	// backend being unhealthy (INV-ERR-2; bug pg2-r9iok).
 	if !errors.Is(err, scriptout.ErrInvalidArgument) {
 		t.Fatalf("err = %v, want errors.Is(err, ErrInvalidArgument)", err)
 	}
@@ -275,7 +274,7 @@ func TestBackend_FeedbackSet_UnknownDispositionRejected(t *testing.T) {
 
 func TestBackend_FeedbackSet_UnknownCommentIsNotFound(t *testing.T) {
 	// A commentID that no longer exists on the PR is a well-formed
-	// not_found response, not a broken call [design: §4.5, §6.1].
+	// not_found response, not a broken call (INV-ERR-2).
 	gh := &fakeGH{comments: []api.Comment{{ID: "c1"}}}
 	b := newTestBackend(t, gh)
 	_, err := b.FeedbackSet(context.Background(), "owner/repo#1", "does-not-exist", schema.DispositionOpen)
@@ -384,6 +383,6 @@ func TestBackend_Categorize_AcceptsEveryVocabularyValue(t *testing.T) {
 
 func TestVocabulary_NonEmpty(t *testing.T) {
 	if len(Vocabulary) == 0 {
-		t.Fatal("Vocabulary must be non-empty — it backs the capabilities op's declared category vocabulary [design: §4.3, §6.1]")
+		t.Fatal("Vocabulary must be non-empty — it backs the capabilities op's declared category vocabulary (interfaces.md's vocabulary note)")
 	}
 }

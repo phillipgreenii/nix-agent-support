@@ -58,7 +58,7 @@ type FanOutOutcome struct {
 // never returned here — it is reserved for the CLI's own
 // generic/unexpected-failure path outside this helper.
 //
-// Disabled counts as healthy, not as a failure: per design §4.6, a
+// Disabled counts as healthy, not as a failure: per INV-EXIT-2, a
 // no-credential backend that correctly answers "not applicable" is a
 // well-formed negative, not a degraded state. Counting it against the
 // outcome would make a fully correct, fully-configured machine (where

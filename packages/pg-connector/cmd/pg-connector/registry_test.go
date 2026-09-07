@@ -250,7 +250,7 @@ connector:
 
 func TestRegistry_AllBackends_DedupesBackendRegisteredUnderMultipleTypes(t *testing.T) {
 	// A single binary implementing more than one capability — mandatory
-	// per design §4.4's multi-capability backends — is registered under
+	// per INV-REG-1's multi-capability backends — is registered under
 	// each type it supports. AllBackends must report it once, not once
 	// per type it's registered under [bug A27].
 	reg, err := parseRegistry([]byte(`

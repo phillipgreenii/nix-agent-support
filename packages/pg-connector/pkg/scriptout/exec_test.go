@@ -250,7 +250,7 @@ func TestInvoke_ProtocolVersionMismatch_IsVersionMismatchNotSilentSuccess(t *tes
 	// ProtocolVersion constant as a plain success — a genuine
 	// umbrella/backend version skew (the ordinary case, since the
 	// umbrella and each backend are separate, independently-deployed nix
-	// derivations [design: §4.3]) passed silently instead of surfacing
+	// derivations (INV-VER-1)) passed silently instead of surfacing
 	// version_mismatch.
 	withFactory(t, "protocol_mismatch")
 	resp, err := Invoke(context.Background(), "fake-binary", "get_pr", nil)

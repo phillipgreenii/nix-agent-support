@@ -1,7 +1,7 @@
 // Package api is a trimmed, local copy of pg-pr's pkg/api types — just the
 // shapes internal/github's ported GitHub logic needs (Comment, Review; PR
 // lives in pr.go). Copied rather than imported because packages/pg-connector's
-// go.mod MUST NOT depend on packages/pg-pr [design: §9, §5.2]. This is an
+// go.mod MUST NOT depend on packages/pg-pr (layout_convention_test.go). This is an
 // internal representation only: internal (the backend's pr.Provider glue)
 // maps it to pkg/schema.PR at the Show boundary — pg-pr's own
 // api.Issue/api.BranchInfo are out of scope here since nothing in this
@@ -64,7 +64,7 @@ type Comment struct {
 	// own call-site adaptation, not present on pg-pr's upstream api.Comment)
 	// so this backend's Show can nest a review-thread comment under its
 	// owning PRReview.Comments rather than only ever flattening it into
-	// PR.Comments [design: §2, §6.1].
+	// PR.Comments (interfaces.md's pr op catalog).
 	//
 	// MUST be in the SAME id space as Review.ID below: both are GitHub's
 	// GraphQL node-id string (e.g. "PRR_kwDOKtdWE88AAAABL3blsA"), never the

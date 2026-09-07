@@ -50,7 +50,7 @@ func configValidateOne(ctx context.Context, backend string) SourceResult {
 		// here against capsResp's own self-declared SchemaVersions map —
 		// the payload this call used to discard entirely (bug pg2-p2z7o),
 		// even though it is the one place a backend's schema version
-		// actually travels [design: §4.3].
+		// actually travels (INV-VER-1).
 		err = checkSchemaVersions(capsResp)
 	}
 	if err != nil {
@@ -83,7 +83,7 @@ func configValidateOne(ctx context.Context, backend string) SourceResult {
 // versions against schema.CurrentSchemaVersions (this build's own current
 // expectations), returning a version_mismatch-wrapped error naming the
 // first disagreement found, or nil if every capability resp declares
-// matches [design: §4.3]. Keys are walked in sorted order so a genuine
+// matches (INV-VER-1). Keys are walked in sorted order so a genuine
 // multi-capability mismatch always reports the same one first, rather than
 // depending on Go's randomized map iteration order.
 //

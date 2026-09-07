@@ -11,7 +11,7 @@ mkGoApp {
   # one go.mod, one gomod2nix.toml, N mkGoApp calls building N different
   # binaries out of it (this is the ci capability's Tier-2 GitHub Actions
   # backend, sibling to pg-connector-pr-github.nix); this packet does not
-  # create a second Go module [design: §5.2, §5.3].
+  # create a second Go module (layout_convention_test.go).
   src = ./.;
   gomod2nixToml = ./gomod2nix.toml;
 
@@ -25,17 +25,16 @@ mkGoApp {
   # build): this binary speaks only the scriptout wire protocol and has no
   # independent CLI identity a human types directly, so there is no --help
   # output to generate a man page from and no subcommands to complete
-  # [design: §5 preamble; freedom boundary, part 4].
+  # (actors.md's ACTOR-BACKEND; freedom boundary, part 4).
   #
   # No wrapProgram for `gh`: this backend execs it on PATH at runtime,
   # carried over unchanged from the ported GitHub Actions client —
   # provisioned once, separately, wherever this workspace's home-manager
   # profile installs it, matching pg-connector-pr-github.nix's own choice
-  # not to wrap `gh` [design: §9]. This backend does NOT exec `pg-connector`
+  # not to wrap `gh`. This backend does NOT exec `pg-connector`
   # itself: its own PRResolver (resolver.go) resolves a PR id directly
   # against GitHub over the same `gh` gateway, never by shelling back into
-  # the Tier-1 umbrella that dispatches it [design: §4.4 composition
-  # boundary; bug fix].
+  # the Tier-1 umbrella that dispatches it (INV-COMP-1; bug fix).
 
   meta = with lib; {
     description = "pg-connector's ci capability Tier-2 backend for GitHub Actions — a scriptout-only binary with no independent CLI identity";

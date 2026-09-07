@@ -2,10 +2,10 @@
 // entity/capability" packet on top of the Tier-1 core's registry/dispatcher
 // and outcome-reporting helper. pg-connector remains the only user-facing
 // CLI surface — scm is one of its verb groups, never a separate binary
-// [design: §4, §4.7].
+// (interfaces.md's INTF-CLI).
 //
 // Unlike pr/issue/ci, connector.scm is a SINGLE-VALUED registry entry
-// [design: §4.1, §4.7] — dispatchScm below resolves it via registry.go's
+// (INV-REG-1) — dispatchScm below resolves it via registry.go's
 // Single accessor, rather than reusing dispatch.go's list-oriented Dispatch
 // helper (whose job is disambiguating among 0..N registered backends,
 // something a single-valued entry never needs).
@@ -15,7 +15,7 @@
 // exit-code scheme (0/4/1) via outcome.go's TargetedExitCode — this file
 // calls the dispatcher and hands TargetedExitCode the raw per-call
 // result/error it got back; it never decides the exit code itself
-// [design: §4.5].
+// (INV-EXIT-1).
 package main
 
 import (
@@ -98,8 +98,7 @@ func newScmWorktreeListCmd() *cobra.Command {
 			}
 			// worktree_list is a TARGETED op, not a fan-out: connector.scm
 			// is single-valued (unlike issue/ci/pr's list-type ops), so it
-			// always resolves to exactly one backend [design: §4.1, §4.5,
-			// §4.7].
+			// always resolves to exactly one backend (INV-REG-1; INV-EXIT-1).
 			resp, dispatchErr := dispatchScm(cmd.Context(), reg, "worktree_list", nil)
 			return reportScmTargetedOutcome(cmd, resp, dispatchErr, humanizeWorktreeList)
 		},
@@ -168,7 +167,7 @@ func dispatchScm(ctx context.Context, reg *Registry, op string, args any) (*scri
 // [bead pg2-ox1k6] — see output.go's writeTargetedResult, which this
 // delegates to. It translates err into pg-connector's own targeted-op
 // exit code via outcome.go's TargetedExitCode, never deciding the exit
-// code itself [design: §4.5]. A nil resp is a Tier-1 CLI-level failure
+// code itself (INV-EXIT-1). A nil resp is a Tier-1 CLI-level failure
 // before any well-formed wire response was produced (e.g. no backend
 // registered, or an ambiguous multi-backend registration) — rather than
 // returning a plain error, writeTargetedResult now builds a synthetic

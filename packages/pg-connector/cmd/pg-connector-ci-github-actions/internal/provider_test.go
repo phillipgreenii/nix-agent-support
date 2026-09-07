@@ -122,7 +122,7 @@ func TestListRuns_ResolvesRepoAndBranchAndFilters(t *testing.T) {
 }
 
 // TestListRuns_PRIDPopulated is this packet's required test: every
-// returned CIRun carries a non-empty PRID [contract; design: §2 AC].
+// returned CIRun carries a non-empty PRID (contract; interfaces.md's op catalog).
 func TestListRuns_PRIDPopulated(t *testing.T) {
 	gh := newFakeGH()
 	gh.responses["run list"] = []byte(sampleRunList)
@@ -149,7 +149,7 @@ func TestListRuns_ValidatesEmptyID(t *testing.T) {
 		t.Fatalf("expected error for empty pr id")
 	}
 	// An empty required field is the CALLER's mistake, not this backend
-	// being unhealthy [design: §4.2, bug pg2-r9iok].
+	// being unhealthy (INV-ERR-2; bug pg2-r9iok).
 	if !errors.Is(err, scriptout.ErrInvalidArgument) {
 		t.Fatalf("err = %v, want errors.Is(err, ErrInvalidArgument)", err)
 	}
@@ -175,8 +175,7 @@ func TestListRuns_ResolverInvalidID_IsInvalidArgument(t *testing.T) {
 // resolve" phrasing gh returns for a nonexistent PR number (verified
 // empirically against real `gh` 2.99.0 — see provider.go's isGHNotFound
 // doc comment) is reachable as not_found through the real resolver path,
-// not misreported as this backend being unhealthy [design: §4.5, bug
-// pg2-r9iok].
+// not misreported as this backend being unhealthy (INV-ERR-2; bug pg2-r9iok).
 func TestListRuns_NonexistentPR_NotFound(t *testing.T) {
 	gh := newFakeGH()
 	gh.errs["pr view"] = errors.New("gh pr view 999999999: exit status 1: GraphQL: Could not resolve to a PullRequest with the number of 999999999. (repository.pullRequest)")
@@ -281,7 +280,7 @@ func TestGetLogs_ValidatesEmpty(t *testing.T) {
 		t.Fatalf("expected error for empty run id")
 	}
 	// An empty required field is the CALLER's mistake, not this backend
-	// being unhealthy [design: §4.2, bug pg2-r9iok].
+	// being unhealthy (INV-ERR-2; bug pg2-r9iok).
 	if !errors.Is(err, scriptout.ErrInvalidArgument) {
 		t.Fatalf("err = %v, want errors.Is(err, ErrInvalidArgument)", err)
 	}
@@ -292,7 +291,7 @@ func TestGetLogs_ValidatesEmpty(t *testing.T) {
 // 2.99.0: `gh run view <id> --log` prints "failed to get run: HTTP 404: Not
 // Found (...)" on stderr, exit 1 — see provider.go's isGHNotFound doc
 // comment) is now reachable as not_found, not misreported as this backend
-// being unhealthy [design: §4.5, bug pg2-r9iok].
+// being unhealthy (INV-ERR-2; bug pg2-r9iok).
 func TestGetLogs_NonexistentRun_NotFound(t *testing.T) {
 	gh := newFakeGH()
 	gh.errs["run view"] = errors.New("failed to get run: HTTP 404: Not Found (https://api.github.com/repos/foo/bar/actions/runs/999999999999?exclude_pull_requests=true)")

@@ -1,18 +1,18 @@
 // pg-connector-ci-github-actions is the ci capability's GitHub Actions
 // Tier-2 backend: a thin, standalone executable speaking only the
 // scriptout wire protocol (pkg/scriptout.ServeLoop), with no independent
-// human-facing CLI identity [design: §5 preamble]. It implements
+// human-facing CLI identity (actors.md's ACTOR-BACKEND). It implements
 // pkg/provider/ci.Provider against GitHub Actions by carrying over
 // packages/pg-pr/pkg/provider/cicd/ghactions's existing client
 // (ListRuns/GetLogs/RerunFailed) unchanged in its underlying GitHub calls
 // [contract: carry-over basis], and adds its own AuthChecker via GitHub's
-// existing env-then-gh-auth-token credential chain [design: §5.1, §4.6].
+// existing env-then-gh-auth-token credential chain (INV-AUTH-1).
 //
 // This binary builds its own op-dispatch table (pkg/provider/ci's
 // list_runs/get_logs/rerun_failed/auth_status entries, plus its own
 // capabilities entry) and hands it to the Tier-1 core's generic serve-loop
 // entry point, mirroring pg-connector-pr-github/main.go's own convention
-// [design: §4.2].
+// (INV-WIRE-1).
 package main
 
 import (
@@ -44,7 +44,7 @@ func run() int {
 // rerun_failed, plus auth_status via backend's AuthChecker) via the
 // sibling "generic ci entity/capability" packet's ci.NewDispatchTable, then
 // adds this backend's own capabilities entry via scriptout.AddCapabilities
-// [design: §4.3]. AddCapabilities computes capabilities.ops straight from
+// (INV-VER-1). AddCapabilities computes capabilities.ops straight from
 // this table's own registered op names, so this backend never hand-types a
 // second, separately maintained ops list that could drift from what the
 // table actually dispatches (bead pg2-fh2vh).

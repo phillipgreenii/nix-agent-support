@@ -2,10 +2,9 @@
 // Actions by carrying over
 // packages/pg-pr/pkg/provider/cicd/ghactions's existing ListRuns/GetLogs/
 // RerunFailed GitHub calls unchanged, adapted to ci.Provider's id-only
-// signatures and schema.CIRun result type [contract: carry-over basis;
-// design: §2, §5.1, §5.2]. Backend also implements pkg/provider.AuthChecker
+// signatures and schema.CIRun result type [contract: carry-over basis]. Backend also implements pkg/provider.AuthChecker
 // via the same env-then-gh-auth-token chain the pg-connector-pr-github
-// backend already uses, since both are GitHub-backed [design: §4.6].
+// backend already uses, since both are GitHub-backed (INV-AUTH-1).
 package internal
 
 import (
@@ -41,7 +40,7 @@ type ghRunner interface {
 // implementation. Unlike the sibling pg-connector-pr-github backend,
 // Backend keeps no local store: every field on schema.CIRun is read
 // straight from GitHub, with no categorize/feedback_set-style write-back
-// this capability needs to persist [design: §2].
+// this capability needs to persist (interfaces.md's op catalog).
 type Backend struct {
 	gh ghRunner
 	pr PRResolver
@@ -51,7 +50,7 @@ type Backend struct {
 // gateway (internal/github.NewCLI), shared between run-list/logs/rerun and
 // the PRResolver (resolver.go), which resolves a PR id directly against
 // GitHub — never by shelling out to pg-connector or any other backend
-// binary [design: §4.4].
+// binary (INV-REG-1).
 func New() *Backend {
 	gh := github.NewCLI()
 	return &Backend{gh: gh, pr: newGHPRResolver(gh)}
@@ -83,7 +82,7 @@ type ghRun struct {
 }
 
 // toSchema converts one gh run into this capability's wire shape, setting
-// PRID so every returned CIRun is self-describing [design: §2] — the one
+// PRID so every returned CIRun is self-describing (interfaces.md's op catalog) — the one
 // addition ghactions.go's own toAPI never needed, since its caller supplied
 // prNumber out of band via a separate argument.
 func (r ghRun) toSchema(prID string) schema.CIRun {
@@ -108,7 +107,7 @@ const runListFields = "databaseId,name,status,conclusion,url,headBranch,headSha"
 // branch — gh's `run list` filters by branch, not PR, exactly as
 // ghactions.go's own ListRuns already handled via its injectable
 // PRResolver hook [carry-over basis]. Every returned CIRun carries prID as
-// PRID [design: §2].
+// PRID (interfaces.md's op catalog).
 func (b *Backend) ListRuns(ctx context.Context, prID string) ([]schema.CIRun, error) {
 	if strings.TrimSpace(prID) == "" {
 		return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, "pg-connector-ci-github-actions: pr id is required")
@@ -232,7 +231,7 @@ var rerunnableConclusions = map[string]bool{
 // all, not mandating that RerunFailed act on every one of them — nothing in
 // the interface doc, this capability's fan-out/targeted split (ListRuns is
 // fan-out-shaped; GetLogs/RerunFailed are targeted, resolving to the one
-// backend that owns the id [design: §4.5]), or the existing test suite
+// backend that owns the id (INV-EXIT-1)), or the existing test suite
 // implies "rerun every matching run" was ever the intended contract, so
 // pg2-mzymd's fix stops at widening the conclusion match.
 func (b *Backend) RerunFailed(ctx context.Context, prID string) error {
@@ -260,7 +259,7 @@ func (b *Backend) RerunFailed(ctx context.Context, prID string) error {
 // CheckAuth implements pkg/provider.AuthChecker via one cheap authenticated
 // GraphQL call, carried over from the sibling pg-connector-pr-github
 // backend's own internal/github.Provider.CheckAuth convention
-// [design: §4.6].
+// (INV-AUTH-1).
 func (b *Backend) CheckAuth(ctx context.Context) error {
 	_, err := b.gh.Run(ctx, "api", "graphql", "-f", "query={ viewer { login } }")
 	return err
@@ -268,8 +267,7 @@ func (b *Backend) CheckAuth(ctx context.Context) error {
 
 // classifyGHError maps a ported gh-call error onto scriptout's closed error
 // taxonomy: an auth failure becomes unauthenticated; a genuine "the PR/run
-// genuinely doesn't exist" response from GitHub becomes not_found [design:
-// §4.5, bug pg2-r9iok]; everything else passes through unwrapped to
+// genuinely doesn't exist" response from GitHub becomes not_found (INV-ERR-2; bug pg2-r9iok); everything else passes through unwrapped to
 // scriptout's own codeForError fallback ("unavailable") — mirroring the
 // sibling pg-connector-pr-github backend's own classifyGHError [freedom
 // boundary, part 4].

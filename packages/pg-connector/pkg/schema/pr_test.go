@@ -82,8 +82,8 @@ func TestPR_AsOfAndStale_AlwaysPresentInJSON(t *testing.T) {
 
 func TestPR_CommentIDAndCommentIDAreStrings(t *testing.T) {
 	// PR.ID and PRComment.ID (used as feedback_set's comment_id) must be
-	// strings, carried over as-is from pg-pr's api.Comment.ID string field
-	// [design: §9, §5.3] — a compile-time assertion that these fields are
+	// strings, carried over as-is from pg-pr's api.Comment.ID string field —
+	// a compile-time assertion that these fields are
 	// string-typed, not numeric.
 	var _ string = PR{}.ID
 	var _ string = PRComment{}.ID

@@ -11,7 +11,7 @@ mkGoApp {
   # ./pg-connector-pr-github.nix's cmd/pg-connector-pr-github build — one
   # go.mod, one gomod2nix.toml, a third mkGoApp call building a third
   # binary out of it; this packet does not create a second Go module
-  # [design: §5.2, §5.3].
+  # (layout_convention_test.go).
   src = ./.;
   gomod2nixToml = ./gomod2nix.toml;
 
@@ -26,7 +26,7 @@ mkGoApp {
   # build): this binary speaks only the scriptout wire protocol and has no
   # independent CLI identity a human types directly, so there is no --help
   # output to generate a man page from and no subcommands to complete
-  # [design: §5 preamble].
+  # (actors.md's ACTOR-BACKEND).
   #
   # No wrapProgram for `git`: this backend execs `git` on PATH at runtime —
   # `git` is provisioned once, separately, wherever this workspace's

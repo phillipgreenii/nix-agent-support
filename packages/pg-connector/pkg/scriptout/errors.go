@@ -12,14 +12,15 @@ import (
 // substring-matching, the same pattern vcs.ErrAuthInvalid already
 // establishes in packages/pg-pr.
 //
-// ErrInvalidArgument was added (bead pg2-r9iok, design §4.2) to close a real
-// gap: without it, a caller-input-validation failure (an empty required
-// field, a malformed id) had nowhere to route except ErrUnavailable, whose
-// own doc comment below defines it as "this backend cannot currently be
-// used" — actively misleading for a problem that is the CALLER's fault, not
-// the backend's health. §4.2 already scoped its wire-code set as "at least"
-// these five, leaving room for exactly this addition. It does not touch
-// pg-connector's own CLI exit-code scheme (§4.5): a targeted op still exits
+// ErrInvalidArgument was added (bead pg2-r9iok) to close a real gap: without
+// it, a caller-input-validation failure (an empty required field, a
+// malformed id) had nowhere to route except ErrUnavailable, whose own doc
+// comment below defines it as "this backend cannot currently be used" —
+// actively misleading for a problem that is the CALLER's fault, not the
+// backend's health. The design's original wire-code set was already scoped
+// as "at least" five, leaving room for exactly this addition — INV-ERR-1
+// now records the resulting closed six-value taxonomy. It does not touch
+// pg-connector's own CLI exit-code scheme (INV-EXIT-1): a targeted op still exits
 // 1 for invalid_argument, the same as every other non-not_found code — only
 // the wire body's error.code (and the Go sentinel a caller can errors.Is
 // against) gains the extra precision.

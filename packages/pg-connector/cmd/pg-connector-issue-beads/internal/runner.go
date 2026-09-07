@@ -5,7 +5,7 @@
 // return stdout plus a wrapped error (with a trimmed stderr tail) on
 // failure. This backend's own client.go/backend.go build on top of it
 // rather than importing packages/pg-pr, which packages/pg-connector's go.mod
-// does not depend on at all [design: §5.2].
+// does not depend on at all (layout_convention_test.go).
 //
 // Workspace resolution is NOT part of that carry-over and was revisited by
 // bead pg2-1q9c0 (design review finding A9): the original binding decision

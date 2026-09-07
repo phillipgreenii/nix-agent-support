@@ -15,7 +15,7 @@ import (
 // TokenSource retrieves a GitHub auth token. The default reads gh's own
 // auth; alternative sources (env, file, GitHub App) can be swapped in
 // without touching callers. Ported unchanged from the sibling backend's
-// copy [design: §4.6].
+// copy (INV-AUTH-1).
 type TokenSource interface {
 	Token(ctx context.Context) (string, error)
 }

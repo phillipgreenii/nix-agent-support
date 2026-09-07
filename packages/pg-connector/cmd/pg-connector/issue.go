@@ -149,7 +149,7 @@ func newIssueTransitionCmd() *cobra.Command {
 // [bead pg2-ox1k6] — see output.go's writeTargetedResult, which this
 // delegates to. It translates err into pg-connector's own targeted-op
 // exit code via outcome.go's TargetedExitCode, never deciding the exit
-// code itself [design: §4.5]. A nil resp is a Tier-1 CLI-level failure
+// code itself (INV-EXIT-1). A nil resp is a Tier-1 CLI-level failure
 // before any well-formed wire response was produced (e.g. no backend
 // registered, or an ambiguous multi-backend registration) — rather than
 // returning a plain error, writeTargetedResult now builds a synthetic

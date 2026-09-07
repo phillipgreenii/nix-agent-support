@@ -1,8 +1,8 @@
 // provider.go: Provider implements pkg/provider/scm.Provider against real
 // local git plumbing — worktrees and cwd->branch resolution, no remote
-// sync concept [design: §4.7]. It deliberately does NOT implement
+// sync concept (GOAL-MIN-1). It deliberately does NOT implement
 // pkg/provider.AuthChecker: local git has no remote credentials concept at
-// all [design: §4.6, §4.7] — see this backend's own main.go for how that
+// all (INV-AUTH-1) — see this backend's own main.go for how that
 // absence surfaces as "disabled: not applicable" through pg-connector's
 // generic auth_status fan-out, with no special-casing needed here.
 //
@@ -10,7 +10,7 @@
 // this module's own layout convention (cmd/pg-connector's
 // TestBackendLayoutConvention), a backend's own code lives in main or its
 // own internal/ — nothing it exports is importable by any other backend
-// [design: §5.2].
+// (layout_convention_test.go).
 package internal
 
 import (
@@ -76,7 +76,7 @@ func New(runner Runner) *Provider {
 // a git repository (or any of the parent directories): .git`), both
 // verified empirically against real git 2.54 — rather than the previous
 // unconditional ErrUnavailable, which conflated "no such repo" with a
-// genuine backend health problem [design: §4.5, bug pg2-r9iok].
+// genuine backend health problem (INV-ERR-2; bug pg2-r9iok).
 func (p *Provider) repoRootFor(ctx context.Context, dir string) (string, error) {
 	commonDir, err := p.runner.Run(ctx, dir, "rev-parse", "--path-format=absolute", "--git-common-dir")
 	if err != nil {
@@ -243,7 +243,7 @@ func sanitizeWorktreeDirName(branchOrRef string) (string, error) {
 // repo's `.worktrees/` directory — the exact path choice beneath
 // `.worktrees/` is a stated freedom boundary for this packet — it does
 // not need to match, and is not required to match, any other tool's own
-// worktree-path convention [design: §4.7]). The `--` terminator guards
+// worktree-path convention). The `--` terminator guards
 // against a branchOrRef that happens to look like a git flag (e.g.
 // "--upload-pack=...") being parsed as one instead of as a literal ref
 // [bug: this bead, review finding 22 — mirrors the sibling
@@ -269,7 +269,7 @@ func (p *Provider) WorktreeAdd(ctx context.Context, branchOrRef string) (*schema
 	if _, err := p.runner.Run(ctx, repoRoot, "worktree", "add", "--", path, branchOrRef); err != nil {
 		// branchOrRef not resolving to any real ref/branch/commit (`fatal:
 		// invalid reference: ...`) is a well-formed not_found answer, not a
-		// broken call [design: §4.5, §4.7, bug pg2-r9iok] — the same
+		// broken call (INV-ERR-2; bug pg2-r9iok) — the same
 		// distinction WorktreeRemove already draws below for a path that
 		// isn't a known worktree.
 		if isGitNotFound(err) {
@@ -289,9 +289,9 @@ func (p *Provider) WorktreeAdd(ctx context.Context, branchOrRef string) (*schema
 // WorktreeRemove execs `git worktree remove -- <path>`. Two independent
 // conditions must hold before this ever calls real git, and BOTH answers
 // are reported to the caller as the SAME well-formed not_found response
-// (this op's own established "not a known worktree" shape [design: §4.5,
-// §4.7]) rather than a new caller-visible distinction outside
-// pkg/scriptout's closed six-value taxonomy:
+// (this op's own established "not a known worktree" shape; INV-ERR-2)
+// rather than a new caller-visible distinction outside pkg/scriptout's
+// closed six-value taxonomy:
 //   - path must be a worktree git itself currently knows about (the
 //     original check) — compared via resolvePathForCompare, not raw
 //     string equality, so a caller-supplied path that differs from git's
@@ -439,7 +439,7 @@ func parseWorktreePorcelain(out string) []schema.WorktreeInfo {
 }
 
 // BranchDetect resolves cwd to its repo and currently checked-out branch
-// [design: §4.7]. Unlike WorktreeAdd/Remove/List, it receives cwd as an
+// (interfaces.md's scm op catalog). Unlike WorktreeAdd/Remove/List, it receives cwd as an
 // explicit wire argument rather than resolving it from this process's own
 // working directory.
 //
@@ -447,7 +447,7 @@ func parseWorktreePorcelain(out string) []schema.WorktreeInfo {
 // value regardless of which one of the repo's own worktrees cwd happens
 // to sit inside) — purely local git state, with no assumption of any
 // particular remote/hosting convention: scm has no remote-sync concept at
-// all [design: §4.7], so deriving Repo from a remote's URL (as pg-pr's
+// all (GOAL-MIN-1), so deriving Repo from a remote's URL (as pg-pr's
 // own GitHub-flavored `branch detect` does) would reintroduce exactly the
 // remote-awareness this capability is designed without. Base(root) is
 // correct for bare and --separate-git-dir repos too, now that repoRootFor

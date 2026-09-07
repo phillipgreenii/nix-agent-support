@@ -1,12 +1,12 @@
 // store.go: pg-connector-pr-github's fresh, backend-local persistent store,
 // keyed by PR id and (nested) by comment/review-thread id, backing the
-// categorize and feedback_set writes [design: §6.1, §8, §9]. It is NOT a
+// categorize and feedback_set writes (interfaces.md's pr op catalog; entity_store_test.go). It is NOT a
 // port of pg-pr's SQLite internal/store.Feedback table — that table is
 // FK-required against pg-pr's own pull_request table, a dependency this
-// backend's self-contained module forbids (§9, §5.2) — so this is a fresh
-// design with no pg-pr precedent to carry over. The pg-pr feedback data
-// that DOES need to reach this store crosses over via a one-shot import,
-// not a shared table — see migrate.go and ADR 0063.
+// backend's self-contained module forbids (layout_convention_test.go) — so
+// this is a fresh design with no pg-pr precedent to carry over. The pg-pr
+// feedback data that DOES need to reach this store crosses over via a
+// one-shot import, not a shared table — see migrate.go and ADR 0063.
 //
 // The scriptout wire protocol execs a NEW PROCESS per call ("one request,
 // one response, one process per call" — pkg/scriptout's own doc comment), so
@@ -309,7 +309,7 @@ func fsyncDir(dir string) error {
 }
 
 // SetCategory sets prID's category — a plain set/overwrite into a dedicated
-// field, never a GitHub label [design: §6.1].
+// field, never a GitHub label (interfaces.md's pr op catalog).
 func (s *Store) SetCategory(prID, category string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -346,7 +346,7 @@ func (s *Store) SetDisposition(prID, commentID string, disposition schema.Dispos
 
 // PRState is a read-only snapshot of prID's persisted state, used by Show
 // to merge the current category/dispositions into the freshly-fetched
-// PR-schema response [design: §2, §6.1]. A PR with no persisted writes yet
+// PR-schema response (interfaces.md's pr op catalog). A PR with no persisted writes yet
 // returns a zero-value PRState (empty category, nil Dispositions) rather
 // than an error — "never written yet" is not a failure.
 type PRState struct {

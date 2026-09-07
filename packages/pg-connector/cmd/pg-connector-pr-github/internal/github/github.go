@@ -1,5 +1,5 @@
 // Package github is pg-connector-pr-github's GitHub VCS provider — ported
-// unchanged from packages/pg-pr/pkg/provider/vcs/github (the design's §9
+// unchanged from packages/pg-pr/pkg/provider/vcs/github (bead pg2-2j5ac's
 // "carries over pg-pr's existing GitHub logic unchanged" decision), re-homed
 // here so packages/pg-connector's go.mod need not depend on packages/pg-pr.
 // This package is compiler-enforced invisible outside
@@ -18,15 +18,15 @@
 // as dead surface with no design citation, bead pg2-lh3c4), every one of
 // these twelve has a design-stated future pg-connector destination, so they
 // were kept rather than deleted:
-//   - ListMyPRs/ListTeamPRs -> a future `pg-connector pr list` (design §9.1's
-//     verb→destination table; Appendix A tracks live-vs-cache as the one
-//     still-open question about HOW it's implemented, not WHETHER it exists).
+//   - ListMyPRs/ListTeamPRs -> a future `pg-connector pr list` (the design's
+//     verb->destination table; live-vs-cache is the one still-open question
+//     about HOW it's implemented, not WHETHER it exists).
 //   - CreatePR/UpdatePR/SetDraft/SetAutomerge/Merge/Close -> `pg-connector pr
-//     create`/`update`/`draft`/`automerge`/`merge`/`close` (§9.1's table,
-//     "the rest of this list does not yet [ship]").
+//     create`/`update`/`draft`/`automerge`/`merge`/`close` (the design's
+//     table: "the rest of this list does not yet [ship]").
 //   - AddComment/ReplyToThread/ResolveThread -> `pg-connector pr comment
-//     add`/`resolve` (§9.1's table: "new write verbs ... mirroring the shape
-//     categorize/feedback-set already establish").
+//     add`/`resolve` (the design's table: "new write verbs ... mirroring the
+//     shape categorize/feedback-set already establish").
 //   - PostReview -> `pg-connector pr review draft`/`post`/`submit` (same
 //     table entry, same rationale).
 //
