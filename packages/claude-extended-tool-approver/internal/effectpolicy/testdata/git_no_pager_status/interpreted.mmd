@@ -1,0 +1,4 @@
+flowchart LR
+    n0["command: git --no-pager status<br/>- path:read . [implicit]<br/>- stdio:stdout metadata<br/>mark=permitted"]
+    n1[/"file: ."/]
+    n0 -->|"reads: read"| n1

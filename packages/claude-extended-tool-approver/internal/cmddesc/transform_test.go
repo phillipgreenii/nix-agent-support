@@ -14,9 +14,11 @@ func TestApplyTransform(t *testing.T) {
 	del := Effect{Kind: EffectPath, Path: "x", Access: AccessDelete, Source: "arg 3", FromPositional: true}
 	stdout := Effect{Kind: EffectStdio, Stream: StreamStdout}
 	prog := Effect{Kind: EffectProgram, Program: "p", Dialect: "sed"}
-	all := []Effect{posRead, flagRead, trunc, del, stdout, prog}
+	push := Effect{Kind: EffectRemote, Resource: "origin", Operation: "push", Source: "arg 0"}
+	all := []Effect{posRead, flagRead, trunc, del, stdout, prog, push}
 
 	with := func(e Effect, a PathAccess) Effect { e.Access = a; return e }
+	withOp := func(e Effect, op string) Effect { e.Operation = op; return e }
 
 	cases := []struct {
 		name string
@@ -25,9 +27,11 @@ func TestApplyTransform(t *testing.T) {
 		ok   bool
 	}{
 		{"none is identity", TransformNone, all, true},
-		{"dry-run drops every write class, keeps reads and non-paths", TransformDryRun, []Effect{posRead, flagRead, stdout, prog}, true},
-		{"in-place upgrades positional reads only", TransformInPlace, []Effect{with(posRead, AccessModify), flagRead, trunc, del, stdout, prog}, true},
-		{"no-clobber turns truncate into create", TransformNoClobber, []Effect{posRead, flagRead, with(trunc, AccessCreate), del, stdout, prog}, true},
+		{"dry-run drops every write class and every remote mutation, keeps reads and non-paths", TransformDryRun, []Effect{posRead, flagRead, stdout, prog}, true},
+		{"in-place upgrades positional reads only", TransformInPlace, []Effect{with(posRead, AccessModify), flagRead, trunc, del, stdout, prog, push}, true},
+		{"no-clobber turns truncate into create", TransformNoClobber, []Effect{posRead, flagRead, with(trunc, AccessCreate), del, stdout, prog, push}, true},
+		{"force rewrites push to force-push", TransformForce, []Effect{posRead, flagRead, trunc, del, stdout, prog, withOp(push, "force-push")}, true},
+		{"delete-ref rewrites push to delete-ref", TransformDeleteRef, []Effect{posRead, flagRead, trunc, del, stdout, prog, withOp(push, "delete-ref")}, true},
 		{"unknown kind fails closed", TransformKind(99), all, false},
 	}
 	for _, tc := range cases {
@@ -40,6 +44,23 @@ func TestApplyTransform(t *testing.T) {
 				t.Errorf("got  %+v\nwant %+v", got, tc.want)
 			}
 		})
+	}
+}
+
+// TestDryRunDropsEveryRemoteMutation: TransformDryRun removes force-push and
+// delete-ref too, not just a plain push — the vocabulary check is by
+// Operation value, not by whether TransformForce/TransformDeleteRef already
+// ran.
+func TestDryRunDropsEveryRemoteMutation(t *testing.T) {
+	forcePush := Effect{Kind: EffectRemote, Resource: "origin", Operation: "force-push"}
+	deleteRef := Effect{Kind: EffectRemote, Resource: "origin", Operation: "delete-ref"}
+	read := Effect{Kind: EffectPath, Path: "a", Access: AccessRead}
+	got, ok := applyTransform(EffectTransform{Kind: TransformDryRun}, []Effect{forcePush, deleteRef, read})
+	if !ok {
+		t.Fatal("dry-run reported not ok")
+	}
+	if !reflect.DeepEqual(got, []Effect{read}) {
+		t.Errorf("got %+v, want only the read to survive", got)
 	}
 }
 

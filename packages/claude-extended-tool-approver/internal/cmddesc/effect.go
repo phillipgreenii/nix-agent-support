@@ -22,6 +22,10 @@ const (
 	EffectNet
 	// EffectStdio is consumption or production of a standard stream.
 	EffectStdio
+	// EffectRemote is a read or mutation of a resource that lives outside the
+	// local filesystem and is reached BY NAME (a git remote today; a k8s
+	// context or a cloud bucket later).
+	EffectRemote
 )
 
 // String returns the deterministic kind name.
@@ -39,6 +43,8 @@ func (k EffectKind) String() string {
 		return "net"
 	case EffectStdio:
 		return "stdio"
+	case EffectRemote:
+		return "remote"
 	default:
 		return "effect-invalid"
 	}
@@ -171,6 +177,15 @@ type Effect struct {
 	Stream   StdioStream
 	Metadata bool
 
+	// EffectRemote fields. Resource is the token as given (a remote name like
+	// "origin", or a URL); Operation is a small OPEN vocabulary ("push",
+	// "force-push", "delete-ref" today) naming what happens to it. Dynamic
+	// (shared with the path/net fields) is true when the resource is not
+	// statically known (an implicit default remote, resolved from config at
+	// runtime).
+	Resource  string
+	Operation string
+
 	// EffectOpaque detail (and free text for any kind).
 	Detail string
 }
@@ -214,6 +229,14 @@ func (e Effect) String() string {
 			b.WriteString(" metadata")
 		} else {
 			b.WriteString(" content")
+		}
+	case EffectRemote:
+		fmt.Fprintf(&b, ":%s %s", e.Operation, e.Resource)
+		if e.Dynamic {
+			b.WriteString(" (dynamic)")
+		}
+		if e.Source != "" {
+			fmt.Fprintf(&b, " [%s]", e.Source)
 		}
 	}
 	if e.Detail != "" {

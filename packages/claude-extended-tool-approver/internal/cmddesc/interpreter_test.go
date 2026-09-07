@@ -188,7 +188,7 @@ func TestUnknownTransformFailsClosed(t *testing.T) {
 }
 
 func TestRegistryNames(t *testing.T) {
-	if got := DefaultRegistry().Names(); !reflect.DeepEqual(got, []string{"bash", "cat", "cp", "curl", "head", "rm", "sed", "sh", "tee", "xargs"}) {
+	if got := DefaultRegistry().Names(); !reflect.DeepEqual(got, []string{"bash", "cat", "cp", "curl", "git", "head", "rm", "sed", "sh", "tee", "xargs"}) {
 		t.Errorf("names = %v", got)
 	}
 	if _, ok := DefaultRegistry().Lookup("frobnicate"); ok {

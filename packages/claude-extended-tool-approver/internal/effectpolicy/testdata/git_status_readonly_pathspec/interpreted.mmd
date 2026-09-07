@@ -1,0 +1,6 @@
+flowchart LR
+    n0["command: git status /nix/store/x<br/>- path:read /nix/store/x [arg 0]<br/>- path:read . [implicit]<br/>- stdio:stdout metadata<br/>mark=permitted"]
+    n1[/"file: /nix/store/x"/]
+    n2[/"file: ."/]
+    n0 -->|"reads: read"| n1
+    n0 -->|"reads: read"| n2

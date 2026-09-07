@@ -1,0 +1,6 @@
+flowchart LR
+    n0["command: bash -c 'git push -f origin x'<br/>- program:shell #quot;git push -f origin x#quot;<br/>mark=permitted"]
+    subgraph sg_s0["bash -c"]
+        n1["command: git push -f origin x<br/>- remote:force-push origin [arg 1]<br/>mark=forbidden: remote:force-push origin [arg 1]: remote-mutation (force-push rewrites a shared ref)"]
+    end
+    n1 -->|"executes: bash -c"| n0

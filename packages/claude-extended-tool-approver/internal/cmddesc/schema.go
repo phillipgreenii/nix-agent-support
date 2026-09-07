@@ -41,6 +41,12 @@ const (
 	// stdin and `@path` reads path. This is the generic "data or @file"
 	// convention (curl's -d/-F use it) and the generic interpreter handles it.
 	KindDataOrAtFile
+	// KindRemote is an operand naming a RESOURCE that lives outside the local
+	// filesystem, reached BY NAME (a git remote today; a k8s context or a
+	// cloud bucket later). The role's Operation carries the default operation
+	// the resource is subjected to (e.g. "push"); a transform may rewrite it
+	// generically by effect shape (TransformForce, TransformDeleteRef).
+	KindRemote
 )
 
 // String returns the deterministic role name used in labels and reasons.
@@ -64,17 +70,22 @@ func (k RoleKind) String() string {
 		return "message"
 	case KindDataOrAtFile:
 		return "data-or-at-file"
+	case KindRemote:
+		return "remote"
 	default:
 		return "role-invalid"
 	}
 }
 
 // OperandRole is the schema's description of one operand slot. Program roles
-// carry the Dialect the program text is written in; every other kind leaves it
-// empty.
+// carry the Dialect the program text is written in; a Remote role carries the
+// default Operation instead (a generic string, not overloading Dialect —
+// Dialect names a PROGRAM LANGUAGE, Operation names a REMOTE VERB); every
+// other kind leaves both empty.
 type OperandRole struct {
-	Kind    RoleKind
-	Dialect string
+	Kind      RoleKind
+	Dialect   string
+	Operation string
 }
 
 // Schema-author shorthands for the common roles. Program(dialect) builds the
@@ -93,6 +104,12 @@ var (
 // Program returns the operand role for program text in the named dialect.
 func Program(dialect string) OperandRole {
 	return OperandRole{Kind: KindProgram, Dialect: dialect}
+}
+
+// Remote returns the operand role for a remote-resource operand whose default
+// operation is operation (e.g. "push").
+func Remote(operation string) OperandRole {
+	return OperandRole{Kind: KindRemote, Operation: operation}
 }
 
 // IsPath reports whether the role denotes a filesystem path of any access class.
@@ -144,6 +161,13 @@ const (
 	// TransformAppend downgrades every truncate path effect to modify (tee -a
 	// appends to its file operands instead of rewriting them).
 	TransformAppend
+	// TransformForce rewrites every EffectRemote whose Operation is "push" to
+	// "force-push", generically by effect shape (git push -f/--force/
+	// --force-with-lease).
+	TransformForce
+	// TransformDeleteRef rewrites every EffectRemote whose Operation is "push"
+	// to "delete-ref", generically by effect shape (git push -d/--delete).
+	TransformDeleteRef
 )
 
 // String returns the deterministic kind name.
@@ -159,6 +183,10 @@ func (k TransformKind) String() string {
 		return "no-clobber"
 	case TransformAppend:
 		return "append"
+	case TransformForce:
+		return "force"
+	case TransformDeleteRef:
+		return "delete-ref"
 	default:
 		return "transform-invalid"
 	}
@@ -210,7 +238,12 @@ type FlagSpec struct {
 // destination unless -t supplied it). Roles are resolved after the whole argv
 // is scanned, so Trailing can see the end. Fewer positionals than the active
 // Leading+Trailing need, or fewer Rest positionals than MinRest, make the
-// interpretation insufficient (fail closed).
+// interpretation insufficient (fail closed) — UNLESS LeadingOptional is set
+// and there are ZERO positionals at all, in which case Leading is satisfied
+// vacuously (git push's optional leading remote: `git push` alone has no
+// remote operand and no refspecs either, which an implicit effect covers
+// instead; `git push origin main` still requires the full layout once ANY
+// positional is present).
 //
 // StdinToken is the schema-level spelling of "read standard input instead of
 // a file" (`-` for the coreutils family): a positional token equal to it in a
@@ -219,6 +252,7 @@ type FlagSpec struct {
 type PositionalSpec struct {
 	Leading                []OperandRole
 	LeadingSkippedByFlags  []string
+	LeadingOptional        bool
 	Rest                   OperandRole
 	MinRest                int
 	Trailing               []OperandRole
@@ -232,6 +266,9 @@ type PositionalSpec struct {
 func (p PositionalSpec) resolveRoles(n int, flagsSeen map[string]bool) ([]OperandRole, string, bool) {
 	leading := p.Leading
 	if anySeen(p.LeadingSkippedByFlags, flagsSeen) {
+		leading = nil
+	}
+	if p.LeadingOptional && n == 0 {
 		leading = nil
 	}
 	trailing := p.Trailing
@@ -303,6 +340,25 @@ const (
 	UnknownFlagInert
 )
 
+// ImplicitEffect is an effect a schema declares WITHOUT an operand: it fires
+// from the mere presence (or absence) of positionals, not from consuming argv
+// text. Role's Kind picks the effect shape (a path role emits an EffectPath
+// at Target; KindRemote emits an EffectRemote naming Target as the Resource,
+// with Role.Operation as the Operation). WhenNoPositionals restricts emission
+// to invocations with ZERO resolved positionals (a pathspec-less `git clean`,
+// a remote-less `git push`); false means "always", regardless of what
+// positionals were also given (`git status`'s implicit read of the working
+// tree). Dynamic marks a target that is not statically known (the default
+// remote git push resolves from config at runtime) — this is the SAME
+// Dynamic semantics as an operand effect's, just supplied by the schema
+// instead of discovered from the argv text.
+type ImplicitEffect struct {
+	Role              OperandRole
+	Target            string
+	Dynamic           bool
+	WhenNoPositionals bool
+}
+
 // CommandSchema is the schema VALUE for one command. Provenance records the
 // tool/version the entry was verified against. Flags is keyed by every
 // spelling (`-n` and `--number` are separate keys). EndOfOptions says whether
@@ -311,15 +367,28 @@ const (
 // such as xargs or a shell hands every later `-x` to the command it runs, not
 // to itself). Interpreter names a non-generic interpreter; empty means
 // GenericInterpreter.
+//
+// Subcommands is the subcommand-dispatch shape: when non-empty, Flags is the
+// GLOBAL-option table (scanned until the first positional, which becomes the
+// subcommand key), and Positionals/Stdin/Stdout/ImplicitEffects belong to the
+// SUBCOMMAND schemas instead — the parent's own copies of those fields are
+// unused. See interpretSubcommand for the dispatch semantics; it recurses on
+// the same code path, so a Subcommands value MAY itself have Subcommands.
+//
+// ImplicitEffects lists effects the schema emits without an operand (see
+// ImplicitEffect); the generic interpreter emits them like any other effect,
+// so transforms and policies apply to them identically.
 type CommandSchema struct {
 	Name                  string
 	Provenance            string
 	Flags                 map[string]FlagSpec
 	Positionals           PositionalSpec
+	ImplicitEffects       []ImplicitEffect
 	Stdin                 StdinSpec
 	Stdout                StdoutKind
 	UnknownFlag           UnknownFlagPolicy
 	EndOfOptions          bool
 	PositionalsEndOptions bool
 	Interpreter           string
+	Subcommands           map[string]CommandSchema
 }

@@ -93,7 +93,7 @@ type Policy interface {
 // concern; the read side is split so a secret-path hit and an unreadable-zone
 // hit are distinguishable reasons.
 func DefaultPolicies() []Policy {
-	return []Policy{NoWriteToReadOnlyPath{}, NoReadOfSecretPath{}, NoReadOfUnreadablePath{}, NetworkAccess{}}
+	return []Policy{NoWriteToReadOnlyPath{}, NoReadOfSecretPath{}, NoReadOfUnreadablePath{}, NetworkAccess{}, RemoteMutation{}}
 }
 
 // NoWriteToReadOnlyPath applies to every write-class path effect (create,
@@ -195,6 +195,40 @@ func (NetworkAccess) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, bool) 
 		return Finding{Verdict: Unknown, Reason: "upload to a vetted host requires consent"}, true
 	}
 	return Finding{Verdict: Permitted, Reason: "vetted host"}, true
+}
+
+// RemoteMutation judges EffectRemote effects only. A dynamic resource
+// (its target is only known at runtime — the default remote a bare `git
+// push` would use) is Unknown, since the policy cannot tell what it names. A
+// plain "push" mirrors an upload: it is Unknown, needing explicit consent,
+// never Permitted here. "force-push" and "delete-ref" are known-bad —
+// unreviewable rewrites of a shared ref — and Forbidden. Any other Operation
+// is outside this slice's vocabulary and fails closed to Unknown rather than
+// guessing. This policy never returns Permitted: a remote mutation always
+// needs a human, one way or another.
+type RemoteMutation struct{}
+
+// Name implements Policy.
+func (RemoteMutation) Name() string { return "remote-mutation" }
+
+// Judge implements Policy.
+func (RemoteMutation) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, bool) {
+	if e.Kind != cmddesc.EffectRemote {
+		return Finding{}, false
+	}
+	if e.Dynamic {
+		return Finding{Verdict: Unknown, Reason: "remote resource is a runtime expansion"}, true
+	}
+	switch e.Operation {
+	case "push":
+		return Finding{Verdict: Unknown, Reason: "remote ref update requires consent"}, true
+	case "force-push":
+		return Finding{Verdict: Forbidden, Reason: "force-push rewrites a shared ref"}, true
+	case "delete-ref":
+		return Finding{Verdict: Forbidden, Reason: "delete-ref removes a shared ref"}, true
+	default:
+		return Finding{Verdict: Unknown, Reason: "unrecognised remote operation " + e.Operation}, true
+	}
 }
 
 // NoReadOfUnreadablePath has one concern: patheval READABILITY of a read path

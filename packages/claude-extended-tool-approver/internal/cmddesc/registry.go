@@ -41,6 +41,7 @@ func DefaultRegistry() Registry {
 		catSchema, headSchema, sedSchema, rmSchema, cpSchema, teeSchema,
 		bashSchema, renamed(bashSchema, "sh"),
 		xargsSchema, curlSchema,
+		gitSchema,
 	)
 }
 
@@ -334,4 +335,156 @@ var curlSchema = CommandSchema{
 	Stdout:       StdoutContent,
 	UnknownFlag:  UnknownFlagInsufficient,
 	EndOfOptions: false,
+}
+
+// gitSchema: subcommand dispatch (CommandSchema.Subcommands). Flags is the
+// GLOBAL-option table, scanned by interpretSubcommand until the first
+// positional (the subcommand key); Positionals/Stdin/Stdout/ImplicitEffects
+// on THIS value are unused. Modeled inert (they cannot change what a
+// subcommand sees or does): --no-pager/-P, --paginate/-p (pager selection),
+// --no-optional-locks, --literal-pathspecs/--glob-pathspecs/
+// --noglob-pathspecs/--icase-pathspecs (pathspec magic — the subcommand's own
+// pathspec text is unaffected either way, only how *later* magic characters
+// in it are interpreted, which this slice does not model any command
+// consuming), --no-replace-objects. Deliberately LEFT UNMODELED (abstain),
+// because each changes WHERE or HOW the subcommand acts: `-C <dir>` and
+// `--work-tree=`/`--git-dir=` change the working tree/repo location a
+// pathspec resolves against, `-c <k=v>` and `--config-env=` can override any
+// config the subcommand consults (including remote URLs), `--exec-path=`
+// changes which git-* helper binaries run, `--namespace=` changes which refs
+// a ref name resolves to, and `--super-prefix=` (an internal, undocumented
+// flag on this host — still excluded on the same rationale) changes the
+// effective path prefix for submodule recursion. `--bare` is also left
+// unmodeled per the brief.
+var gitSchema = CommandSchema{
+	Name:       "git",
+	Provenance: "git version 2.54.0, git --help / git help git",
+	Flags: map[string]FlagSpec{
+		"--no-pager": inert, "-P": inert,
+		"--paginate": inert, "-p": inert,
+		"--no-optional-locks":  inert,
+		"--literal-pathspecs":  inert,
+		"--glob-pathspecs":     inert,
+		"--noglob-pathspecs":   inert,
+		"--icase-pathspecs":    inert,
+		"--no-replace-objects": inert,
+	},
+	UnknownFlag:  UnknownFlagInsufficient,
+	EndOfOptions: true,
+	Subcommands: map[string]CommandSchema{
+		"status": gitStatusSchema,
+		"clean":  gitCleanSchema,
+		"push":   gitPushSchema,
+	},
+}
+
+// gitStatusSchema: an implicit PathRead of "." ALWAYS fires (git status
+// always reports on the working tree even with no pathspec); each pathspec
+// positional is an additional PathRead. Flags verified against this host's
+// `git status -h`; every modeled spelling is inert (output formatting only).
+var gitStatusSchema = CommandSchema{
+	Name:       "status",
+	Provenance: "git version 2.54.0, git status -h",
+	Flags: map[string]FlagSpec{
+		"-s": inert, "--short": inert,
+		"--long": inert,
+		"-b":     inert, "--branch": inert,
+		"--show-stash": inert,
+		"--porcelain":  literalOpt,
+		"-z":           inert,
+		"-v":           inert, "--verbose": inert,
+		"-u": literalOpt, "--untracked-files": literalOpt,
+		"--ignored":      literalOpt,
+		"--ahead-behind": inert, "--no-ahead-behind": inert,
+		"--renames": inert, "--no-renames": inert,
+		"--column": literalOpt, "--no-column": inert,
+		"--no-lock-index":     inert,
+		"--ignore-submodules": literalOpt,
+	},
+	Positionals: PositionalSpec{Rest: PathRead},
+	ImplicitEffects: []ImplicitEffect{
+		{Role: PathRead, Target: "."},
+	},
+	Stdin:        StdinNever,
+	Stdout:       StdoutMetadata,
+	UnknownFlag:  UnknownFlagInsufficient,
+	EndOfOptions: true,
+}
+
+// gitCleanSchema: -n/--dry-run is a real TransformDryRun (not just an inert
+// flag git happens to also model): without it every pathspec is a
+// PathDelete, and an implicit PathDelete of "." fires when NO pathspec is
+// given. `-i`/`--interactive` is deliberately left unmodeled (its prompts
+// make the actual deletions data-dependent, not statically knowable).
+// Flags verified against this host's `git clean -h`.
+var gitCleanSchema = CommandSchema{
+	Name:       "clean",
+	Provenance: "git version 2.54.0, git clean -h",
+	Flags: map[string]FlagSpec{
+		"-n": {Transform: EffectTransform{Kind: TransformDryRun}}, "--dry-run": {Transform: EffectTransform{Kind: TransformDryRun}},
+		"-f": inert, "--force": inert,
+		"-d": inert,
+		"-x": inert, "-X": inert,
+		"-q": inert, "--quiet": inert,
+		"-e": literal1, "--exclude": literal1,
+	},
+	Positionals: PositionalSpec{Rest: PathDelete},
+	ImplicitEffects: []ImplicitEffect{
+		{Role: PathDelete, Target: ".", WhenNoPositionals: true},
+	},
+	Stdin: StdinNever,
+	// clean always explains what it removed (or would remove, under -n) —
+	// filenames only, so metadata rather than content.
+	Stdout:       StdoutMetadata,
+	UnknownFlag:  UnknownFlagInsufficient,
+	EndOfOptions: true,
+}
+
+// gitPushSchema: the leading positional (when any positional is given at
+// all — LeadingOptional) names the remote, a KindRemote operand whose default
+// Operation is "push"; -f/--force/--force-with-lease upgrade that to
+// "force-push", -d/--delete to "delete-ref" (TransformForce/
+// TransformDeleteRef, applied generically by effect shape); -n/--dry-run
+// removes it entirely via the extended TransformDryRun. With NO positional
+// at all, an implicit effect stands in for the default remote, marked
+// Dynamic because which remote that is comes from git config at runtime, not
+// from argv. Deliberately left unmodeled (abstain): --no-verify (skips the
+// pre-push hook — a materially different trust boundary), --mirror (mirrors
+// ALL refs, not just what a modeled refspec would name), --signed[=] (changes
+// what the push cryptographically asserts), --recurse-submodules (recurses
+// into repositories this schema knows nothing about). Flags verified against
+// this host's `git push -h`.
+var gitPushSchema = CommandSchema{
+	Name:       "push",
+	Provenance: "git version 2.54.0, git push -h",
+	Flags: map[string]FlagSpec{
+		"-n": {Transform: EffectTransform{Kind: TransformDryRun}}, "--dry-run": {Transform: EffectTransform{Kind: TransformDryRun}},
+		"-f": {Transform: EffectTransform{Kind: TransformForce}}, "--force": {Transform: EffectTransform{Kind: TransformForce}},
+		"--force-with-lease": {Arity: ArityOptionalGlued, Operand: Literal, Transform: EffectTransform{Kind: TransformForce}},
+		"-d":                 {Transform: EffectTransform{Kind: TransformDeleteRef}}, "--delete": {Transform: EffectTransform{Kind: TransformDeleteRef}},
+		"-v": inert, "--verbose": inert,
+		"-q": inert, "--quiet": inert,
+		"--porcelain": inert,
+		"--progress":  inert, "--no-progress": inert,
+		"-u": inert, "--set-upstream": inert,
+		"--tags": inert, "--follow-tags": inert,
+		"--all": inert, "--branches": inert,
+		"--prune":  inert,
+		"--atomic": inert, "--no-atomic": inert,
+		"--thin": inert, "--no-thin": inert,
+		"-o": literal1, "--push-option": literal1,
+		"--receive-pack": literal1, "--exec": literal1,
+	},
+	Positionals: PositionalSpec{
+		Leading:         []OperandRole{Remote("push")},
+		LeadingOptional: true,
+		Rest:            Literal,
+	},
+	ImplicitEffects: []ImplicitEffect{
+		{Role: Remote("push"), Target: "<default-remote>", Dynamic: true, WhenNoPositionals: true},
+	},
+	Stdin:        StdinNever,
+	Stdout:       StdoutNone,
+	UnknownFlag:  UnknownFlagInsufficient,
+	EndOfOptions: true,
 }

@@ -94,6 +94,9 @@ type GenericInterpreter struct{}
 
 // Interpret implements Interpreter.
 func (GenericInterpreter) Interpret(leaf cmdparse.ParsedCommand, schema CommandSchema, ctx Context) Interpretation {
+	if len(schema.Subcommands) > 0 {
+		return interpretSubcommand(leaf, schema, ctx)
+	}
 	st := scan(leaf, schema, ctx)
 	st.finish()
 	return st.result()
@@ -161,10 +164,11 @@ func scan(leaf cmdparse.ParsedCommand, schema CommandSchema, ctx Context) *inter
 }
 
 // finish is the resolve pass: positional roles, operand effects, and — when
-// the scan completed — the schema's stdio effects.
+// the scan completed — the schema's implicit and stdio effects.
 func (st *interpState) finish() {
 	st.resolve()
 	if st.scanned {
+		st.implicit()
 		st.stdio()
 	}
 }
@@ -265,6 +269,8 @@ func (st *interpState) operand(op pendingOp, role OperandRole) {
 		st.program(role.Dialect, op, source)
 	case role.Kind == KindDataOrAtFile:
 		st.dataOrAtFile(op, source, live)
+	case role.Kind == KindRemote:
+		st.effects = append(st.effects, Effect{Kind: EffectRemote, Resource: op.tok, Operation: role.Operation, Dynamic: live, Source: source})
 	case role.Kind == KindLiteral, role.Kind == KindMessage:
 		// Inert: no effect. A live expansion in a literal slot is still inert —
 		// its value cannot change what the command touches.
@@ -405,6 +411,47 @@ func (st *interpState) unknownFlag(tok string) (int, bool) {
 	default:
 		st.fail("unknown flag %s", tok)
 		return 0, false
+	}
+}
+
+// implicit appends the effects the schema declares WITHOUT an operand (see
+// ImplicitEffect): each fires either always, or only when the invocation
+// resolved zero positionals. It runs before stdio() and, like every other
+// effect collected here, is subject to the flag transforms applied in
+// result() — a dry-run flag strips an implicit delete exactly like an
+// explicit one.
+func (st *interpState) implicit() {
+	n := len(st.positionals())
+	for _, ie := range st.schema.ImplicitEffects {
+		if ie.WhenNoPositionals && n > 0 {
+			continue
+		}
+		st.emitImplicit(ie)
+	}
+}
+
+// emitImplicit builds the one effect an ImplicitEffect describes. An
+// unmodeled role kind fails closed rather than silently doing nothing.
+func (st *interpState) emitImplicit(ie ImplicitEffect) {
+	switch {
+	case ie.Role.IsPath():
+		st.effects = append(st.effects, Effect{
+			Kind:    EffectPath,
+			Path:    ie.Target,
+			Access:  ie.Role.pathAccess(),
+			Dynamic: ie.Dynamic,
+			Source:  "implicit",
+		})
+	case ie.Role.Kind == KindRemote:
+		st.effects = append(st.effects, Effect{
+			Kind:      EffectRemote,
+			Resource:  ie.Target,
+			Operation: ie.Role.Operation,
+			Dynamic:   ie.Dynamic,
+			Source:    "implicit",
+		})
+	default:
+		st.fail("unmodeled implicit effect role %d", ie.Role.Kind)
 	}
 }
 
