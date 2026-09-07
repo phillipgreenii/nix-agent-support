@@ -4119,6 +4119,38 @@
                 go test -tags contract -timeout=0 -p 1 ./...
               '';
             };
+            # pg-connector-contract runs pg-connector's on-demand, build-tagged
+            # (//go:build contract) real-bd round-trip suite
+            # (cmd/pg-connector-issue-beads/internal/realbd_test.go), which
+            # drives the REAL `bd` CLI rather than fakes and is deliberately
+            # NOT a flake check / not in CI -- mirroring
+            # ccpool-contract/pb-contract/pg-pr-contract's own answer to the
+            # same "real external system, driven deliberately and off the
+            # sandboxed default" shape (bead pg2-kqft7).
+            #
+            # Per the test file's own doc comment, `bd`'s dolt-server
+            # auto-detection means a run of this CAN land on this machine's
+            # SHARED per-user dolt server (org.nixos.beads-dolt-server,
+            # 127.0.0.1:25252) whenever one is already up, rather than a
+            # private embedded engine -- unlike pg-pr-contract's workspaces,
+            # which stay isolated in practice (pg2-5ek6b's one observed
+            # exception aside). That is acceptable ONLY because this
+            # derivation is never part of `nix flake check`'s sandboxed set,
+            # exactly like its three siblings above: nothing SANDBOXED points
+            # at the shared server, and invoking this one at all is the
+            # developer's own deliberate, manual `nix run .#pg-connector-contract`
+            # action, same as ccpool-contract/pb-contract/pg-pr-contract.
+            pg-connector-contract = pkgs.writeShellApplication {
+              name = "pg-connector-contract";
+              runtimeInputs = [
+                pkgs.go
+                (pkgs.llm-agentsPkgs.beads or llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.beads)
+              ];
+              text = ''
+                cd "''${1:-packages/pg-connector}"
+                go test -tags contract -timeout=0 -p 1 ./...
+              '';
+            };
           };
 
           # devShells.default is auto-contributed by flakeModules.devshell
