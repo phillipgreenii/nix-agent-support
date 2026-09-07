@@ -31,7 +31,16 @@ func interpretSubcommand(leaf cmdparse.ParsedCommand, schema CommandSchema, ctx 
 		return st.result()
 	}
 	name := leaf.Args[subIdx]
+	start := subIdx + 1 // first arg handed to the subcommand
 	subSchema, ok := schema.Subcommands[name]
+	if !ok && schema.DefaultSubcommand != "" {
+		// The first positional is not a subcommand key: it is the default
+		// subcommand's own first positional (yq's bare `yq '.a' f.yaml` is
+		// `yq eval '.a' f.yaml`), so it is handed down, not consumed.
+		name = schema.DefaultSubcommand
+		subSchema, ok = schema.Subcommands[name]
+		start = subIdx
+	}
 	if !ok {
 		st.fail("unmodeled subcommand %s", name)
 		return st.result()
@@ -42,10 +51,10 @@ func interpretSubcommand(leaf cmdparse.ParsedCommand, schema CommandSchema, ctx 
 		return st.result()
 	}
 
-	childArgs := append([]string(nil), leaf.Args[subIdx+1:]...)
+	childArgs := append([]string(nil), leaf.Args[start:]...)
 	childLive := make([]bool, len(childArgs))
 	for i := range childArgs {
-		childLive[i] = leaf.ArgIsLiveExpansion(subIdx + 1 + i)
+		childLive[i] = leaf.ArgIsLiveExpansion(start + i)
 	}
 	childLeaf := cmdparse.ParsedCommand{
 		Executable:       name,

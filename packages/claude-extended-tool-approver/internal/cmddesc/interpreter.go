@@ -418,6 +418,20 @@ func (st *interpState) applyFlag(name string, spec FlagSpec, i int, glued string
 			st.ops = append(st.ops, pendingOp{tok: glued, idx: i, flag: name, role: spec.Operand})
 		}
 		return 0, true
+	case ArityN:
+		if hasGlued {
+			st.fail("flag %s takes %d separate values, not a glued one", name, len(spec.Operands))
+			return 0, false
+		}
+		n := len(spec.Operands)
+		if i+n >= len(st.leaf.Args) {
+			st.fail("flag %s is missing its values (needs %d)", name, n)
+			return 0, false
+		}
+		for k, role := range spec.Operands {
+			st.ops = append(st.ops, pendingOp{tok: st.leaf.Args[i+1+k], idx: i + 1 + k, flag: name, role: role})
+		}
+		return n, true
 	default:
 		st.fail("flag %s has unsupported arity %d", name, spec.Arity)
 		return 0, false

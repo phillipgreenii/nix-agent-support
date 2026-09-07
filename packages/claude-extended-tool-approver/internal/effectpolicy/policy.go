@@ -480,13 +480,23 @@ func (NetworkAccess) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, bool) 
 
 // RemoteMutation judges EffectRemote effects only. A dynamic resource
 // (its target is only known at runtime — the default remote a bare `git
-// push` would use) is Unknown, since the policy cannot tell what it names. A
-// plain "push" mirrors an upload: it is Unknown, needing explicit consent,
-// never Permitted here. "force-push" and "delete-ref" are known-bad —
-// unreviewable rewrites of a shared ref — and Forbidden. Any other Operation
-// is outside this slice's vocabulary and fails closed to Unknown rather than
-// guessing. This policy never returns Permitted: a remote mutation always
-// needs a human, one way or another.
+// push` would use) is Unknown, since the policy cannot tell what it names.
+// The Operation vocabulary (data, not command names):
+//
+//   - "read": a read of a named remote resource (bd list/show/ready, slice
+//     3n) — Permitted. Reading is not a mutation; the resource's content
+//     flowing somewhere dangerous is the flow policies' concern.
+//   - "push", "mutate": a write needing explicit consent — Unknown, never
+//     Permitted here ("mutate" is bd's issue-writing verbs, slice 3n).
+//   - "force-push", "delete-ref": known-bad, unreviewable rewrites of a
+//     shared ref — Forbidden.
+//   - "dolt-server": starting, stopping or killing a Dolt SQL server (bd
+//     dolt start/stop/killall, slice 3n) — Forbidden. This machine forbids
+//     it outright: ~/.claude/CLAUDE.md "Beads / Dolt: no rogue auto-start"
+//     (BEADS_DOLT_AUTO_START=0; "You MUST NOT start a dolt server on your
+//     own initiative") and .claude/rules/beads-remote-server.md ("Never
+//     run bd dolt start — the Dolt server is a remote k3s service").
+//   - anything else is outside this vocabulary and fails closed to Unknown.
 type RemoteMutation struct{}
 
 // Name implements Policy.
@@ -501,12 +511,18 @@ func (RemoteMutation) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, bool)
 		return Finding{Verdict: Unknown, Reason: "remote resource is a runtime expansion"}, true
 	}
 	switch e.Operation {
+	case "read":
+		return Finding{Verdict: Permitted, Reason: "read of a named remote resource"}, true
 	case "push":
 		return Finding{Verdict: Unknown, Reason: "remote ref update requires consent"}, true
+	case "mutate":
+		return Finding{Verdict: Unknown, Reason: "remote resource mutation requires consent"}, true
 	case "force-push":
 		return Finding{Verdict: Forbidden, Reason: "force-push rewrites a shared ref"}, true
 	case "delete-ref":
 		return Finding{Verdict: Forbidden, Reason: "delete-ref removes a shared ref"}, true
+	case "dolt-server":
+		return Finding{Verdict: Forbidden, Reason: "this machine never starts or stops a Dolt server (CLAUDE.md: no rogue auto-start; beads-remote-server rule)"}, true
 	default:
 		return Finding{Verdict: Unknown, Reason: "unrecognised remote operation " + e.Operation}, true
 	}

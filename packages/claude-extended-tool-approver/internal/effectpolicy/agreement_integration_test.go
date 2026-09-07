@@ -396,6 +396,36 @@ var knownSpikeLooser = map[string]spikeLooserEntry{
 	// default. tc-z806.1's DeleteAccess policy implements it, both rows are
 	// now both-undecided, and their entries are deleted here (the register
 	// must not carry rows the harness no longer classifies as looser).
+	"jq_args": {
+		Class: "looser-than-abstain",
+		Cause: "internal/rules/safecmds/safecmds.go's jq branch calls programOperand(\"jq\", " +
+			"fileArgs, nil) with live=nil — fileArgs is the SkipJqValueFlags-filtered slice, not " +
+			"index-aligned with pc.ArgLiveExpansion, so operandLive is the fully conservative " +
+			"`true` (programOperand's doc: \"the historical, fully-conservative reading\"). The " +
+			"filter operand `$ARGS` is then a program that is ITSELF a bare `$`-expansion-looking " +
+			"token, which programOperand's doc says is \"indistinguishable from a path and is " +
+			"refused\" — live NoOpinion, even though the single quotes mean the shell never " +
+			"expands it and jq's `$ARGS` is jq's own named-arguments object. The spike reads the " +
+			"parser's fact instead (cmdparse's ArgLiveExpansion is false for a single-quoted " +
+			"word), so the Leading Literal filter is static and, with `--args` turning the " +
+			"remaining positionals into Literal strings (RestOverride), no path effect exists and " +
+			"the leaf Approves. Same family as cat_redirect_single_quoted_literal (slice 3c): the " +
+			"spike is the more precise engine here; production's jq branch could be given the " +
+			"aligned live slice, which is a production-side fix, not a spike relaxation.",
+	},
+	"gofmt_w_readme": {
+		Class: "looser-than-abstain",
+		Cause: "production has NO gofmt rule at all: gofmt is not in safecmds' safeReadCmds (it " +
+			"is not a read-only command) and no other module in setup.RuleChain names it, so " +
+			"`gofmt -w README.md` reaches chain exhaustion — the live column carries no module. " +
+			"The spike's gofmtSchema (slice 3n) models `-w` as TransformInPlace, the identical " +
+			"shape sedSchema gives `sed -i` — a modify of each path operand — and README.md is a " +
+			"writable project file, so DeleteAccess is not involved and NoWriteToReadOnlyPath " +
+			"Permits it. Production approves the sed -i spelling of the same write " +
+			"(sed_inplace_readme classifies agree), so this row is not a new class of write the " +
+			"spike lets through; it is a command production never modeled. Recorded as looser " +
+			"because it IS a write production would have deferred to Claude Code.",
+	},
 	"cat_redirect_single_quoted_literal": {
 		Class: "looser-than-abstain",
 		Cause: "internal/engine/engine.go's isDynamicRedirectTarget is a RAW-TEXT heuristic " +

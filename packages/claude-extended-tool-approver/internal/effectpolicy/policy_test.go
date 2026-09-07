@@ -86,9 +86,13 @@ func TestRemoteMutationPolicy(t *testing.T) {
 		verdict FindingVerdict
 	}{
 		{"dynamic resource", remote("push", true), Unknown},
+		{"dynamic read is still unknown", remote("read", true), Unknown},
+		{"read permitted", remote("read", false), Permitted},
 		{"push needs consent", remote("push", false), Unknown},
+		{"mutate needs consent", remote("mutate", false), Unknown},
 		{"force-push forbidden", remote("force-push", false), Forbidden},
 		{"delete-ref forbidden", remote("delete-ref", false), Forbidden},
+		{"dolt-server forbidden", remote("dolt-server", false), Forbidden},
 		{"unrecognised operation fails closed", remote("mirror", false), Unknown},
 	}
 	for _, tc := range cases {
@@ -96,8 +100,8 @@ func TestRemoteMutationPolicy(t *testing.T) {
 		if !applies || f.Verdict != tc.verdict {
 			t.Errorf("%s: applies=%v verdict=%s (%s), want %s", tc.name, applies, f.Verdict, f.Reason, tc.verdict)
 		}
-		if f.Verdict == Permitted {
-			t.Errorf("%s: remote-mutation must never permit", tc.name)
+		if f.Verdict == Permitted && tc.e.Operation != "read" {
+			t.Errorf("%s: remote-mutation must never permit a non-read operation", tc.name)
 		}
 	}
 	if _, applies := (RemoteMutation{}).Judge(cmddesc.Effect{Kind: cmddesc.EffectPath, Path: "x"}, PolicyContext{}); applies {

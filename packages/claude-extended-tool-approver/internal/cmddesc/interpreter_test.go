@@ -259,9 +259,9 @@ func TestExportNUnexportUnknownFlag(t *testing.T) {
 
 func TestRegistryNames(t *testing.T) {
 	want := []string{
-		"[", "bash", "cat", "cp", "curl", "echo", "export", "false", "git", "grep",
-		"head", "ls", "mkdir", "printf", "rm", "sed", "sh", "sort", "tail", "tee",
-		"test", "true", "wc", "xargs",
+		"[", "bash", "bd", "cat", "cp", "curl", "echo", "export", "false", "git", "gofmt", "grep",
+		"head", "jq", "ls", "mkdir", "pgrep", "printf", "ps", "rm", "sed", "sh", "sleep", "sort", "tail", "tee",
+		"test", "true", "wc", "which", "xargs", "yq",
 	}
 	if got := DefaultRegistry().Names(); !reflect.DeepEqual(got, want) {
 		t.Errorf("names = %v, want %v", got, want)

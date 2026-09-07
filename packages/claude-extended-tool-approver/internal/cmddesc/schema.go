@@ -245,14 +245,21 @@ const (
 	// `--in-place=.bak`); a following separate token is NOT the value. This is
 	// the GNU `[SUFFIX]` / `[=SUFFIX]` shape.
 	ArityOptionalGlued
+	// ArityN: exactly len(FlagSpec.Operands) values, each the next separate
+	// token, each with its OWN role from Operands in order (jq's `--arg NAME
+	// VALUE`, `--rawfile NAME FILE`). A glued value is an error, as is
+	// running out of argv before every operand is supplied (slice 3n).
+	ArityN
 )
 
 // FlagSpec is the schema entry for one flag spelling. Operand is the role of
-// the flag's value when Arity gives it one. Transform is applied generically
-// once the flag is seen.
+// the flag's value when Arity gives it one; Operands is the per-position
+// role list an ArityN flag consumes instead (and its length is that arity).
+// Transform is applied generically once the flag is seen.
 type FlagSpec struct {
 	Arity     Arity
 	Operand   OperandRole
+	Operands  []OperandRole
 	Transform EffectTransform
 }
 
@@ -489,4 +496,10 @@ type CommandSchema struct {
 	PositionalsEndOptions bool
 	Interpreter           string
 	Subcommands           map[string]CommandSchema
+	// DefaultSubcommand names the Subcommands entry to dispatch to when the
+	// first positional is NOT a subcommand key; that positional is then
+	// handed to the default subcommand as its own first positional rather
+	// than consumed (yq's implicit `eval`, slice 3n). Empty means an
+	// unknown key is an unmodeled subcommand (git's shape).
+	DefaultSubcommand string
 }
