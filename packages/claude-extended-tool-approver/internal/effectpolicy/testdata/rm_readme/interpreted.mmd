@@ -1,4 +1,4 @@
 flowchart LR
-    n0["command: rm README.md<br/>- path:delete README.md [arg 0]<br/>mark=permitted"]
+    n0["command: rm README.md<br/>- path:delete README.md [arg 0]<br/>mark=insufficient: path:delete README.md [arg 0]: delete-access (delete of a writable path needs consent (not gitignored in <ROOT>))"]
     n1[/"file: README.md"/]
     n0 -->|"writes: delete"| n1

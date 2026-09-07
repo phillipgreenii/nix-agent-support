@@ -938,24 +938,37 @@ func InGitRepo(path string) bool {
 	return ok
 }
 
-// GitRoot exposes gitRoot: the nearest ancestor of dir (dir itself included)
+// GitRoot exposes gitRoot: the nearest ancestor of path (path itself included)
 // holding a `.git` entry (file or directory — a linked worktree's `.git` is a
 // FILE holding a `gitdir:` pointer, and this counts, exactly as InGitRepo's
 // own doc explains). Returns ("", false) when the walk reaches the
-// filesystem root without finding one.
+// filesystem root without finding one, and — MUST be branched on rather than
+// the returned string — also for an empty path, matching InGitRepo's own
+// empty-input guard.
 //
-// Exported for internal/rules/gitdir's tc-uelj current-repo-root carve-out
-// (`git worktree add`), which needs the RAW walk result — never
-// DetectProjectRoot's MONOREPO_ROOT-overridden answer — to ask "is this path
-// under the SPECIFIC repository the invocation is already running against",
-// not "what project should this cwd be attributed to". DetectProjectRoot's
-// own doc names exactly this ambiguity (pg2-byh62) as the reason a caller
-// needing a yes/no repo-root answer must not read its fallback as a repo;
-// GitRoot's explicit `found` return is that answer, mirroring InGitRepo's own
-// predicate shape but handing back the root string a carve-out needs to
-// compare against, rather than only the boolean.
-func GitRoot(dir string) (string, bool) {
-	return gitRoot(filepath.Clean(dir))
+// It is the ROOT-returning companion to InGitRepo's yes/no. Two callers
+// depend on that shape:
+//
+//   - internal/rules/gitdir's tc-uelj current-repo-root carve-out (`git
+//     worktree add`), which needs the RAW walk result — never
+//     DetectProjectRoot's MONOREPO_ROOT-overridden answer — to ask "is this
+//     path under the SPECIFIC repository the invocation is already running
+//     against", not "what project should this cwd be attributed to".
+//     DetectProjectRoot's own doc names exactly this ambiguity (pg2-byh62) as
+//     the reason a caller needing a yes/no repo-root answer must not read its
+//     fallback as a repo; GitRoot's explicit `found` return is that answer.
+//   - internal/deletable's gitignore source (tc-z806.1), which needs the
+//     repository root as a base to evaluate paths relative to.
+//
+// Like InGitRepo, GitRoot deliberately ignores MONOREPO_ROOT and never falls
+// back to its argument, which is exactly what makes it usable where
+// DetectProjectRoot's ambiguous return is not. path SHOULD be absolute and
+// lexically cleaned.
+func GitRoot(path string) (string, bool) {
+	if path == "" {
+		return "", false
+	}
+	return gitRoot(filepath.Clean(path))
 }
 
 // gitRoot walks up from dir — dir itself included — and returns the first

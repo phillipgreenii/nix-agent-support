@@ -386,28 +386,16 @@ var knownSpikeLooser = map[string]spikeLooserEntry{
 	// looser (TestAgreement would flag a Class mismatch only for rows that
 	// ARE looser; a stale entry for a non-looser row would otherwise sit
 	// here silently).
-	"git_clean_f": {
-		Class: "looser-than-abstain",
-		Cause: "live abstains uniformly on `git clean` per the pg2-u0e0c ruling (no flag " +
-			"inspection, `-f` included). The spike's gitCleanSchema treats `-f` as `inert` (no " +
-			"transform) and emits the implicit `PathDelete \".\"` (no positional given), which " +
-			"NoWriteToReadOnlyPath judges against the fixture project root — a read-write zone — " +
-			"and Approves. This is a genuine, unresolved POLICY QUESTION for the operator, not a " +
-			"model imprecision on either side: `git clean -f` really does irreversibly delete " +
-			"untracked files under the CWD, and the spike's registry+policy pair auto-approves " +
-			"that whenever the CWD is a read-write zone, while production's ruling treats the " +
-			"whole subcommand as needing a human every time specifically because deletion of " +
-			"untracked files (uncommitted work, un-ignored secrets) is irreversible and the " +
-			"read-write-zone test alone does not capture that risk. Recorded here for the " +
-			"operator to decide, not resolved by this harness.",
-	},
-	"git_clean_fd_pathspec": {
-		Class: "looser-than-abstain",
-		Cause: "same policy question as git_clean_f, with an explicit pathspec (`sub`) instead of " +
-			"the implicit \".\": gitCleanSchema's `Positionals: PathDelete` emits an explicit " +
-			"PathDelete for `sub`, which resolves under the same read-write project root and " +
-			"Approves, while live's uniform ruling abstains regardless of pathspec.",
-	},
+	// git_clean_f / git_clean_fd_pathspec were registered (slice 3d) as
+	// looser-than-abstain and recorded as an open POLICY QUESTION: the spike
+	// auto-approved `git clean -f` whenever the CWD was a read-write zone,
+	// while production's uniform ruling (pg2-u0e0c) abstains because deleting
+	// untracked files is irreversible and the zone test alone does not
+	// capture that. The operator answered that question on tc-z806
+	// (2026-09-07): a delete of a writable-but-not-deletable path abstains by
+	// default. tc-z806.1's DeleteAccess policy implements it, both rows are
+	// now both-undecided, and their entries are deleted here (the register
+	// must not carry rows the harness no longer classifies as looser).
 	"cat_redirect_single_quoted_literal": {
 		Class: "looser-than-abstain",
 		Cause: "internal/engine/engine.go's isDynamicRedirectTarget is a RAW-TEXT heuristic " +

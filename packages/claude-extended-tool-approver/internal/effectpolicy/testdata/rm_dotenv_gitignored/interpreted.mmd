@@ -1,0 +1,4 @@
+flowchart LR
+    n0["command: rm .env<br/>- path:delete .env [arg 0]<br/>mark=forbidden: path:delete .env [arg 0]: delete-access (secret path (protected paths are never deletable))"]
+    n1[/"file: .env"/]
+    n0 -->|"writes: delete"| n1

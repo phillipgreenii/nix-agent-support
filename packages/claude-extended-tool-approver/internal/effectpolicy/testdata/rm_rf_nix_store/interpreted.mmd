@@ -1,4 +1,4 @@
 flowchart LR
-    n0["command: rm -rf /nix/store/x<br/>- path:delete /nix/store/x [arg 1]<br/>mark=forbidden: path:delete /nix/store/x [arg 1]: no-write-to-read-only-path (write to read-only zone)"]
+    n0["command: rm -rf /nix/store/x<br/>- path:delete /nix/store/x [arg 1]<br/>mark=forbidden: path:delete /nix/store/x [arg 1]: delete-access (delete of read-only zone)"]
     n1[/"file: /nix/store/x"/]
     n0 -->|"writes: delete"| n1

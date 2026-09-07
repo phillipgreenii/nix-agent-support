@@ -1,0 +1,4 @@
+flowchart LR
+    n0["command: rm /tmp/x<br/>- path:delete /tmp/x [arg 0]<br/>mark=permitted"]
+    n1[/"file: /tmp/x"/]
+    n0 -->|"writes: delete"| n1

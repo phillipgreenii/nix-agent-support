@@ -1,4 +1,4 @@
 flowchart LR
-    n0["command: git clean -f<br/>- path:delete . [implicit]<br/>- stdio:stdout metadata<br/>mark=permitted"]
+    n0["command: git clean -f<br/>- path:delete . [implicit]<br/>- stdio:stdout metadata<br/>mark=insufficient: path:delete . [implicit]: delete-access (delete of a writable path needs consent (not gitignored in <ROOT>))"]
     n1[/"file: ."/]
     n0 -->|"writes: delete"| n1

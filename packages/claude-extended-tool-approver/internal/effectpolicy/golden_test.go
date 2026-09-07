@@ -17,6 +17,14 @@ var update = flag.Bool("update", false, "regenerate golden .mmd files")
 // fixture builds a throwaway project root (with .git and README.md) and a
 // separate HOME, returning both realpath-resolved so substitution matches what
 // patheval resolves.
+//
+// Deletable-class coverage (tc-z806.1): the root carries a .gitignore naming
+// `*.log`, `build/` and `.env`, an ignored ignored.log, an ignored build/
+// directory, and an ignored .env (which the secret protection must still
+// refuse); README.md and sub/ are NOT ignored. The fixture lives under
+// t.TempDir(), which on this machine is under a temp root — deliberately
+// irrelevant, because internal/deletable lets the innermost workspace (the
+// git tree) decide, so a tracked file here is writable-not-deletable.
 func fixture(t *testing.T) (root, home string) {
 	t.Helper()
 	root = t.TempDir()
@@ -24,6 +32,21 @@ func fixture(t *testing.T) (root, home string) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("hi\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte("*.log\nbuild/\n.env\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "ignored.log"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".env"), []byte("S=1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(root, "build"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "build", "out"), []byte("x\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(root, "script.sed"), []byte("s/a/b/\n"), 0o644); err != nil {
@@ -111,11 +134,24 @@ var goldenCases = []goldenCase{
 	{"sed_e_exec", "sed 'e ls' README.md", evalcontract.Abstain, nil},
 	{"sed_f_script", "sed -f script.sed README.md", evalcontract.Approve, nil},
 
-	// rm: delete is a write class.
-	{"rm_readme", "rm README.md", evalcontract.Approve, nil},
+	// rm: delete is judged by DeleteAccess (tc-z806.1, operator ruling on
+	// tc-z806): not writable => Reject; writable but not deletable =>
+	// Abstain (consent); deletable (gitignored, or under a temp root outside
+	// any repo) => Approve; protections (secret, deny lists) win first.
+	// Breadth (-r) is not a factor.
+	{"rm_readme", "rm README.md", evalcontract.Abstain, nil},
 	{"rm_rf_nix_store", "rm -rf /nix/store/x", evalcontract.Reject, nil},
 	{"rm_rf_dynamic", `rm -rf "$D"`, evalcontract.Abstain, nil},
-	{"rm_end_of_options", "rm -- -weird-name", evalcontract.Approve, nil},
+	{"rm_end_of_options", "rm -- -weird-name", evalcontract.Abstain, nil},
+	{"rm_ignored_log", "rm ignored.log", evalcontract.Approve, nil},
+	{"rm_rf_build_gitignored", "rm -rf build", evalcontract.Approve, nil},
+	{"rm_rf_sub_not_ignored", "rm -rf sub", evalcontract.Abstain, nil},
+	{"rm_tmp_x", "rm /tmp/x", evalcontract.Approve, nil},
+	{"rm_ssh_key", "rm ~/.ssh/id_rsa", evalcontract.Reject, nil},
+	// .env is gitignored in the fixture (so the deletable source would say
+	// yes) but secretpath classifies `.env` WellKnownSecret, and DeleteAccess
+	// checks protections before deletability: Reject, not Approve.
+	{"rm_dotenv_gitignored", "rm .env", evalcontract.Reject, nil},
 
 	// cp: trailing destination, -n, -t, secret source, too few operands.
 	{"cp_readme_copy", "cp README.md copy.md", evalcontract.Approve, nil},
@@ -210,8 +246,13 @@ var goldenCases = []goldenCase{
 	// schema's doc comment; tc-z806.4.
 	{"git_clean_n", "git clean -n", evalcontract.Abstain, nil},
 	{"git_clean_nd", "git clean -nd", evalcontract.Abstain, nil},
-	{"git_clean_f", "git clean -f", evalcontract.Approve, nil},
-	{"git_clean_fd_pathspec", "git clean -fd sub", evalcontract.Approve, nil},
+	// git clean -f / -fd sub: the implicit (or explicit) PathDelete now
+	// reaches DeleteAccess (tc-z806.1): the project root / sub are writable
+	// but not deletable, so the delete needs consent — Abstain. This also
+	// closes the git_clean_f / git_clean_fd_pathspec looser rows the
+	// agreement register carried as an open policy question.
+	{"git_clean_f", "git clean -f", evalcontract.Abstain, nil},
+	{"git_clean_fd_pathspec", "git clean -fd sub", evalcontract.Abstain, nil},
 	{"git_clean_f_nix_store", "git clean -f /nix/store/x", evalcontract.Reject, nil},
 	{"git_clean_interactive", "git clean -i", evalcontract.Abstain, nil},
 	{"git_push", "git push origin main", evalcontract.Abstain, nil},

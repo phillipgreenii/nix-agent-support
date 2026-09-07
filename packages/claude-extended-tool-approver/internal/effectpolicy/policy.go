@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmddesc"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/deletable"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/patheval"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/secretpath"
 )
@@ -99,6 +100,7 @@ type Policy interface {
 func DefaultPolicies() []Policy {
 	return []Policy{
 		NoWriteToReadOnlyPath{},
+		DeleteAccess{},
 		NoReadOfSecretPath{},
 		NoReadOfUnreadablePath{},
 		NetworkAccess{},
@@ -277,10 +279,24 @@ func (EnvAssignment) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, bool) 
 	}
 }
 
-// NoWriteToReadOnlyPath applies to every write-class path effect (create,
-// modify, delete, truncate — PathAccess.IsWrite), whatever command produced
-// it: Forbidden when patheval's zone (or a sandbox denyWrite entry) forbids
-// writing, Unknown when the path is dynamic or unzoned, Permitted otherwise.
+// NoWriteToReadOnlyPath applies to every write-class path effect EXCEPT
+// delete (create, modify, truncate — PathAccess.IsWrite minus
+// AccessDelete), whatever command produced it: Forbidden when patheval's
+// zone (or a sandbox denyWrite entry) forbids writing, Unknown when the
+// path is dynamic or unzoned, Permitted otherwise.
+//
+// Deletes are carved out (tc-z806.1) so that a delete effect gets EXACTLY
+// ONE finding, from DeleteAccess below, which re-implements this policy's
+// zone/denyWrite checks as its own protection ladder and then goes further
+// (writable is not enough to delete). Had this policy kept judging deletes
+// too, a writable-but-not-deletable path would carry a Permitted finding
+// from here and an Unknown one from DeleteAccess; the fold's outcome would
+// be the same (Unknown wins), but the reason text would name whichever
+// policy happened to run first and the two policies would silently
+// disagree about the same effect. With the carve-out, a policy set that
+// omits DeleteAccess leaves deletes UNJUDGED, which judgeNode's fail-closed
+// fold turns into Insufficient — never Permitted — so the carve-out cannot
+// widen anything.
 type NoWriteToReadOnlyPath struct{}
 
 // Name implements Policy.
@@ -288,7 +304,7 @@ func (NoWriteToReadOnlyPath) Name() string { return "no-write-to-read-only-path"
 
 // Judge implements Policy.
 func (NoWriteToReadOnlyPath) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, bool) {
-	if e.Kind != cmddesc.EffectPath || !e.Access.IsWrite() {
+	if e.Kind != cmddesc.EffectPath || !e.Access.IsWrite() || e.Access == cmddesc.AccessDelete {
 		return Finding{}, false
 	}
 	if e.Dynamic {
@@ -309,6 +325,78 @@ func (NoWriteToReadOnlyPath) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding
 	default:
 		return Finding{Verdict: Forbidden, Reason: "write to " + access.String() + " zone"}, true
 	}
+}
+
+// DeleteAccess has one concern: EffectPath effects with Access ==
+// AccessDelete. It is the policy half of the operator-ruled delete model
+// (Phillip, 2026-09-07, design bead tc-z806 — verbatim there and in
+// internal/deletable's package doc): "rm would be rejected for paths which
+// aren't at least writable. for writable it should abstain (by default) and
+// if deletable, then it can approve (by default). in both cases, there could
+// be other rules which change the default."
+//
+// Ladder, protections first, so a gitignored `.env` or a `~/.ssh` key is
+// Forbidden before deletability is ever a question:
+//
+//  1. dynamic path                          -> Unknown
+//  2. no evaluator                          -> Unknown
+//  3. sandbox denyWrite or denyRead entry   -> Forbidden
+//  4. secret path (raw or resolved)         -> Forbidden
+//  5. zone reject or read-only              -> Forbidden (not writable)
+//  6. zone unknown                          -> Unknown   (not known writable)
+//  7. writable, deletable.Classify says
+//     Deletable (gitignored / temp root)    -> Permitted
+//  8. writable, not deletable              -> Unknown   ("needs consent")
+//
+// Step 3 includes denyRead deliberately: the ruling says protections above
+// this rule win, and a path the operator has marked unreadable is protected
+// whether or not it is also marked unwritable — refusing to remove it is the
+// fail-safe reading. Step 4 uses the same secretRead helper the read-side
+// policies use, so a secret is named the same way whichever access class
+// touches it.
+//
+// "By default" in the ruling means a consumer rule ABOVE this policy may
+// widen (a project that declares its build/ disposable) or narrow; this
+// policy never sees a command name and never decides more than the effect
+// in front of it. Breadth (`-r`, a whole tree vs one file) is NOT a factor,
+// by the same ruling: the class is per path.
+type DeleteAccess struct{}
+
+// Name implements Policy.
+func (DeleteAccess) Name() string { return "delete-access" }
+
+// Judge implements Policy.
+func (DeleteAccess) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, bool) {
+	if e.Kind != cmddesc.EffectPath || e.Access != cmddesc.AccessDelete {
+		return Finding{}, false
+	}
+	if e.Dynamic {
+		return Finding{Verdict: Unknown, Reason: "path is a runtime expansion"}, true
+	}
+	if ctx.PathEval == nil {
+		return Finding{Verdict: Unknown, Reason: "no path evaluator"}, true
+	}
+	if ctx.PathEval.IsDenyWrite(e.Path) {
+		return Finding{Verdict: Forbidden, Reason: "path is denyWrite"}, true
+	}
+	if ctx.PathEval.IsDenyRead(e.Path) {
+		return Finding{Verdict: Forbidden, Reason: "path is denyRead (protected paths are never deletable)"}, true
+	}
+	if reason, secret := secretRead(e.Path, ctx); secret {
+		return Finding{Verdict: Forbidden, Reason: reason + " (protected paths are never deletable)"}, true
+	}
+	access := ctx.PathEval.Evaluate(e.Path)
+	switch {
+	case access == patheval.PathUnknown:
+		return Finding{Verdict: Unknown, Reason: "zone " + access.String()}, true
+	case !access.CanWrite():
+		return Finding{Verdict: Forbidden, Reason: "delete of " + access.String() + " zone"}, true
+	}
+	class, why := deletable.Classify(ctx.PathEval, e.Path)
+	if class == deletable.Deletable {
+		return Finding{Verdict: Permitted, Reason: "deletable: " + why}, true
+	}
+	return Finding{Verdict: Unknown, Reason: "delete of a writable path needs consent (" + why + ")"}, true
 }
 
 // NoReadOfSecretPath has one concern: a read of a SECRET path (secretpath,

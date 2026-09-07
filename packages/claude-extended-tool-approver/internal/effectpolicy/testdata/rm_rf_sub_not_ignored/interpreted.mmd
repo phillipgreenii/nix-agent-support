@@ -1,0 +1,4 @@
+flowchart LR
+    n0["command: rm -rf sub<br/>- path:delete sub [arg 1]<br/>mark=insufficient: path:delete sub [arg 1]: delete-access (delete of a writable path needs consent (not gitignored in <ROOT>))"]
+    n1[/"file: sub"/]
+    n0 -->|"writes: delete"| n1
