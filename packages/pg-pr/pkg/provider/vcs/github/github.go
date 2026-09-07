@@ -19,10 +19,41 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"unicode/utf8"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/provider/vcs"
 )
+
+// maxFoldedOutputBytes caps how much of a gh child's captured stderr is
+// folded verbatim into an error message (RunStdin below, and token.go's
+// Token). 64KiB: comfortably larger than any real gh error message, while
+// still bounding the worst case for an unexpectedly verbose child to a
+// small, fixed amount rather than the unbounded amount it actually
+// produced. Mirrors pg-connector's pkg/scriptout.MaxFoldedOutputBytes;
+// duplicated locally (see defaultWaitDelay's doc comment in ghexec.go for
+// why) rather than imported [bead pg2-332z8 #26].
+const maxFoldedOutputBytes = 64 * 1024
+
+// truncateForFold trims leading/trailing whitespace from b (matching this
+// file's existing strings.TrimSpace convention at every fold call site, so
+// the cap is spent on content rather than incidental newlines) and returns
+// it as a string capped to at most maxFoldedOutputBytes, with a trailing
+// marker noting how many bytes were dropped when truncation occurred. The
+// cut point is backed off to the nearest rune boundary so a multi-byte
+// UTF-8 sequence split by the byte cap never produces an invalid/mangled
+// tail. Mirrors pg-connector's pkg/scriptout.TruncateForFold.
+func truncateForFold(b []byte) string {
+	s := strings.TrimSpace(string(b))
+	if len(s) <= maxFoldedOutputBytes {
+		return s
+	}
+	cut := maxFoldedOutputBytes
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return fmt.Sprintf("%s... [truncated %d of %d bytes]", s[:cut], len(s)-cut, len(s))
+}
 
 // Provider is the builtin GitHub VCS provider.
 type Provider struct {
@@ -96,12 +127,17 @@ func (r *cliGHRunner) RunStdin(ctx context.Context, stdin []byte, args ...string
 	if err := cmd.Run(); err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
+			// st (untruncated) drives isAuthFailure's classification; only
+			// the copy folded into the returned error message itself is
+			// capped, so a verbose gh failure cannot inflate an error
+			// string without bound [bead pg2-332z8 #26].
 			st := strings.TrimSpace(stderr.String())
+			folded := truncateForFold(stderr.Bytes())
 			if isAuthFailure(exitErr.ExitCode(), st) {
 				return stdout.Bytes(), fmt.Errorf("gh %s: %s: run `gh auth login`: %w",
-					strings.Join(args, " "), st, ErrGHAuthInvalid)
+					strings.Join(args, " "), folded, ErrGHAuthInvalid)
 			}
-			return stdout.Bytes(), fmt.Errorf("gh %s: %w: %s", strings.Join(args, " "), err, st)
+			return stdout.Bytes(), fmt.Errorf("gh %s: %w: %s", strings.Join(args, " "), err, folded)
 		}
 		return stdout.Bytes(), fmt.Errorf("gh %s: %w (is gh on PATH?)", strings.Join(args, " "), err)
 	}

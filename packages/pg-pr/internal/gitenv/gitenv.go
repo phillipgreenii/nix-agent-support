@@ -43,7 +43,26 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 )
+
+// defaultWaitDelay bounds Cmd.Wait's own residual wait for the child's
+// stdout/stderr pipes to close, independent of killing the direct git child
+// via ctx cancellation: ctx cancellation only asks the OS to kill the direct
+// child (exec.CommandContext's default Cancel behavior), but a grandchild
+// process that inherited the same pipe file descriptors can keep the WRITE
+// end open after the direct child has already been killed, and without
+// WaitDelay, Wait() then blocks forever waiting for an EOF that will never
+// come. 5s is short — deliberately much shorter than a normal exec
+// timeout — because by the time this clock starts the command has already
+// exited or been killed; it only needs to cover ordinary pipe-flush latency
+// for a well-behaved child (mirrors pg-connector's
+// pkg/scriptout.DefaultWaitDelay; kept as a local, unexported constant here
+// rather than an import because packages/pg-pr and packages/pg-connector are
+// separate Go modules and pg-pr's own convention — see internal/prlock and
+// internal/dashboard — is a small per-package constant rather than a shared
+// module [bead pg2-332z8 #13]).
+const defaultWaitDelay = 5 * time.Second
 
 // gitVarPrefix is the namespace this package filters. Everything OUTSIDE it
 // is passed through untouched: production git needs PATH, HOME,
@@ -138,5 +157,10 @@ func Command(ctx context.Context, dir string, args ...string) *exec.Cmd {
 
 	cmd := exec.CommandContext(ctx, "git", full...)
 	cmd.Env = Environ()
+	// See defaultWaitDelay's doc comment for why this is needed even though
+	// ctx may already carry a deadline: it bounds Cmd.Wait's own residual
+	// wait for the stdout/stderr pipes to close, independent of killing the
+	// direct git child [bead pg2-332z8 #13].
+	cmd.WaitDelay = defaultWaitDelay
 	return cmd
 }

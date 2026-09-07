@@ -7,9 +7,21 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/gitenv"
 )
+
+// defaultWaitDelay bounds Cmd.Wait's own residual wait for a gh child's
+// stdout/stderr pipes to close, independent of killing the direct gh child
+// via ctx cancellation — see internal/gitenv's defaultWaitDelay doc comment
+// for the full mechanism (a grandchild inheriting the pipe fds can keep the
+// write end open after the direct child is killed). Duplicated locally
+// rather than imported from gitenv or pg-connector's pkg/scriptout: this
+// package already has its own local-constant convention (see token.go's
+// ghEnvVarsToStrip), and packages/pg-pr and packages/pg-connector are
+// separate Go modules [bead pg2-332z8 #13].
+const defaultWaitDelay = 5 * time.Second
 
 // CLI is the token-protected gateway through which pg-pr invokes the `gh`
 // binary. Every invocation resolves a GitHub token FIRST and injects it as the
@@ -88,5 +100,10 @@ func (r *cliGHRunner) command(ctx context.Context, args ...string) (*exec.Cmd, e
 	}
 	cmd := exec.CommandContext(ctx, "gh", args...)
 	cmd.Env = envWithGHToken(gitenv.Hermetic(os.Environ()), tok)
+	// See defaultWaitDelay's doc comment for why this is needed even though
+	// ctx may already carry a deadline: it bounds Cmd.Wait's own residual
+	// wait for the stdout/stderr pipes to close, independent of killing the
+	// direct gh child [bead pg2-332z8 #13].
+	cmd.WaitDelay = defaultWaitDelay
 	return cmd, nil
 }

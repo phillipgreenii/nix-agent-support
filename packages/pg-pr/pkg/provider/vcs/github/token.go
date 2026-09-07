@@ -50,6 +50,8 @@ type ghCLITokenSource struct{}
 func ghAuthTokenCommand(ctx context.Context) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, "gh", "auth", "token")
 	cmd.Env = envWithoutGHToken(gitenv.Hermetic(os.Environ()))
+	// See defaultWaitDelay's doc comment (ghexec.go) [bead pg2-332z8 #13].
+	cmd.WaitDelay = defaultWaitDelay
 	return cmd
 }
 
@@ -66,7 +68,8 @@ func (ghCLITokenSource) Token(ctx context.Context) (string, error) {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
 			if st := strings.TrimSpace(string(exitErr.Stderr)); st != "" {
-				return "", fmt.Errorf("gh auth token: %s: %w", st, err)
+				// Capped [bead pg2-332z8 #26]: see truncateForFold (github.go).
+				return "", fmt.Errorf("gh auth token: %s: %w", truncateForFold(exitErr.Stderr), err)
 			}
 		}
 		return "", fmt.Errorf("gh auth token: %w", err)
