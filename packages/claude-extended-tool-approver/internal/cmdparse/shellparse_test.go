@@ -987,6 +987,113 @@ func TestShellParse_RedirectionGrammar(t *testing.T) {
 	})
 }
 
+// TestShellParse_RedirectionLiveExpansionAndAppend pins Redirection's two
+// parser-fact fields (Gap A/B of the redirection-seam slice): LiveExpansion,
+// computed by the SAME wordHasLiveExpansion predicate ArgLiveExpansion uses
+// so a redirect target and an ordinary argument can never classify "live"
+// differently; and Append, read off the parser's own operator ENUM
+// (syntax.AppOut/AppAll), never off Operator's text.
+func TestShellParse_RedirectionLiveExpansionAndAppend(t *testing.T) {
+	cases := []struct {
+		src       string
+		operator  string
+		path      string
+		kind      hookio.RedirectionKind
+		wantLive  bool
+		wantAppnd bool
+	}{
+		{`echo x > "$f"`, ">", "$f", hookio.RedirectStdout, true, false},
+		{"echo x > $f", ">", "$f", hookio.RedirectStdout, true, false},
+		{"echo x > '$f'", ">", "$f", hookio.RedirectStdout, false, false},
+		{"echo x > out$(id)", ">", "out$(id)", hookio.RedirectStdout, true, false},
+		{`echo x 2>>"${LOG}"`, "2>>", "${LOG}", hookio.RedirectStderr, true, true},
+		{"cat < file", "<", "file", hookio.RedirectStdin, false, false},
+		{`echo x <> "$f"`, "<>", "$f", hookio.RedirectReadWrite, true, false},
+
+		// Gap B: append is the operator ENUM, not a ">>" substring match.
+		{"echo x >> f", ">>", "f", hookio.RedirectStdout, false, true},
+		{"echo x 2>> f", "2>>", "f", hookio.RedirectStderr, false, true},
+		{"echo x &>> f", "&>>", "f", hookio.RedirectAll, false, true},
+		{"echo x >| f", ">|", "f", hookio.RedirectStdout, false, false},
+		{"echo x > f", ">", "f", hookio.RedirectStdout, false, false},
+		{"echo x <> f", "<>", "f", hookio.RedirectReadWrite, false, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.src, func(t *testing.T) {
+			sp := ParseShell(tc.src)
+			var got []hookio.Redirection
+			for _, leaf := range sp.Leaves {
+				got = append(got, leaf.Redirections...)
+			}
+			if len(got) != 1 {
+				t.Fatalf("redirections = %v, want exactly 1", got)
+			}
+			r := got[0]
+			if r.Operator != tc.operator || r.Path != tc.path || r.Kind != tc.kind {
+				t.Fatalf("got %+v, want operator=%q path=%q kind=%v", r, tc.operator, tc.path, tc.kind)
+			}
+			if r.LiveExpansion != tc.wantLive {
+				t.Errorf("LiveExpansion = %v, want %v", r.LiveExpansion, tc.wantLive)
+			}
+			if r.Append != tc.wantAppnd {
+				t.Errorf("Append = %v, want %v", r.Append, tc.wantAppnd)
+			}
+		})
+	}
+
+	// A redirection inside a `$( )` substitution leaf gets the same treatment
+	// as a top-level one: the substitution's own pre-lowered leaf carries its
+	// own Redirections, populated by the identical attachRedir code path.
+	t.Run("redirection inside a command substitution leaf", func(t *testing.T) {
+		sp := ParseShell(`echo $(cat > "$f")`)
+		if len(sp.Leaves) != 1 {
+			t.Fatalf("want 1 leaf, got %d", len(sp.Leaves))
+		}
+		subs := sp.Leaves[0].Substitutions
+		if len(subs) != 1 || len(subs[0].Leaves) != 1 {
+			t.Fatalf("Substitutions = %+v, want exactly one substitution with one leaf", subs)
+		}
+		inner := subs[0].Leaves[0]
+		if len(inner.Redirections) != 1 {
+			t.Fatalf("inner Redirections = %v, want exactly 1", inner.Redirections)
+		}
+		r := inner.Redirections[0]
+		if r.Path != "$f" || r.Kind != hookio.RedirectStdout {
+			t.Fatalf("got %+v, want path=$f kind=RedirectStdout", r)
+		}
+		if !r.LiveExpansion {
+			t.Error("LiveExpansion = false, want true (target is \"$f\")")
+		}
+		if r.Append {
+			t.Error("Append = true, want false")
+		}
+	})
+
+	// Heredocs and herestrings never produce a Redirection at all (attachRedir
+	// returns early for Hdoc/DashHdoc/WordHdoc), so LiveExpansion/Append never
+	// apply to them — a here-string's LIVE BODY (`<<< "$x"`) has no path
+	// target to judge here. This is documented behavior, pinned so a future
+	// change does not silently start fabricating a Redirection for one.
+	t.Run("heredoc and herestring produce no Redirection", func(t *testing.T) {
+		for _, src := range []string{
+			"cat <<EOF\n$x\nEOF\n",
+			`cat <<< "$x"`,
+		} {
+			sp := ParseShell(src)
+			if len(sp.Leaves) != 1 {
+				t.Fatalf("%q: want 1 leaf, got %d", src, len(sp.Leaves))
+			}
+			leaf := sp.Leaves[0]
+			if !leaf.HasHeredoc {
+				t.Errorf("%q: HasHeredoc = false, want true", src)
+			}
+			if len(leaf.Redirections) != 0 {
+				t.Errorf("%q: Redirections = %v, want none", src, leaf.Redirections)
+			}
+		}
+	})
+}
+
 // TestShellParse_UnparseableIsFirstClass pins I1b/I10: a whole-command parse
 // failure is a first-class value that yields NO leaves, so no caller can read the
 // empty list as "this command contains nothing".

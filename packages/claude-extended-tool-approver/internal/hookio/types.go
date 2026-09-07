@@ -698,6 +698,15 @@ const (
 // fails closed rather than silently becoming read-only.
 func (k RedirectionKind) IsWrite() bool { return k != RedirectStdin }
 
+// IsReadWrite reports whether the redirection opens its target for BOTH
+// reading and writing (bash's `<>`), as opposed to a pure read or a pure
+// write. It exists so a consumer that needs to test for this one kind (e.g.
+// effectgraph's redirectionEffect, deciding Modify vs Truncate) can do so
+// without importing this package's constants directly — a plain `==
+// RedirectReadWrite` comparison needs the package name in scope, which
+// internal/effectpolicy's import guard forbids for the spike packages.
+func (k RedirectionKind) IsReadWrite() bool { return k == RedirectReadWrite }
+
 // Redirection represents a parsed I/O redirection.
 type Redirection struct {
 	// Operator is the operator text AS WRITTEN, including any file-descriptor
@@ -706,6 +715,35 @@ type Redirection struct {
 	Operator string
 	Path     string          // target file path
 	Kind     RedirectionKind // classification
+
+	// LiveExpansion reports whether Path contains a shell expansion the
+	// runtime would actually evaluate — a parameter expansion, command or
+	// process substitution, or arithmetic expansion, OUTSIDE single quotes —
+	// computed by cmdparse's wordHasLiveExpansion over the SAME target word
+	// ParsedCommand.ArgLiveExpansion uses for ordinary arguments (pg2-pui5w),
+	// so a redirect target and an argument can never drift on what counts as
+	// "live". A consumer that needs "is this target dynamic" MUST read this
+	// field rather than re-deriving it with a `$`/backtick substring test:
+	// that heuristic is wrong in both directions — a target that is ONLY a
+	// process substitution (`>(cmd)`) contains neither byte and is a false
+	// NEGATIVE, while a single-quoted `'$x'` or a backslash-escaped `\$x`
+	// contains the byte but bash never expands it, a false POSITIVE.
+	//
+	// Heredocs and herestrings (`<<`, `<<-`, `<<<`) never populate a
+	// Redirection at all — see attachRedir in shellparse.go — so this field
+	// says nothing about a heredoc BODY's own liveness; a here-string's body
+	// can be live (`<<< "$x"`) with no path target to judge here.
+	LiveExpansion bool
+
+	// Append reports whether the redirection operator is one of bash's
+	// APPEND forms — `>>`, `&>>`, `n>>`, `{fd}>>` — as opposed to a
+	// truncating write (`>`, `>|`, `n>`, `&>`). It is populated from the
+	// PARSER'S OWN OPERATOR ENUM (syntax.AppOut / syntax.AppAll), never from
+	// matching Operator's text, for the same reason Kind is: a consumer MUST
+	// NOT re-derive a parser fact from the rendered string. Meaningless (and
+	// always false) for a non-write Kind (RedirectStdin) and for
+	// RedirectReadWrite (`<>` has no append form).
+	Append bool
 }
 
 // devFdPattern matches /dev/fd/<n> for any file-descriptor number.

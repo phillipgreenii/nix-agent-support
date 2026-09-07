@@ -1600,7 +1600,7 @@ func TestParse_Redirections(t *testing.T) {
 		{
 			name: "append redirect", command: "echo line >> /tmp/log.txt",
 			wantExec: "echo", wantArgs: []string{"line"},
-			wantRedirs: []hookio.Redirection{{Operator: ">>", Path: "/tmp/log.txt", Kind: hookio.RedirectStdout}},
+			wantRedirs: []hookio.Redirection{{Operator: ">>", Path: "/tmp/log.txt", Kind: hookio.RedirectStdout, Append: true}},
 		},
 		{
 			name: "fd duplication ignored", command: "cmd 2>&1",
@@ -1719,12 +1719,12 @@ func TestParse_Redirections(t *testing.T) {
 		{
 			name: "high fd append", command: "echo pwned 3>> /etc/passwd",
 			wantExec: "echo", wantArgs: []string{"pwned"},
-			wantRedirs: []hookio.Redirection{{Operator: "3>>", Path: "/etc/passwd", Kind: hookio.RedirectOtherFD}},
+			wantRedirs: []hookio.Redirection{{Operator: "3>>", Path: "/etc/passwd", Kind: hookio.RedirectOtherFD, Append: true}},
 		},
 		{
 			name: "stderr append keeps its kind", command: "echo pwned 2>> /tmp/err",
 			wantExec: "echo", wantArgs: []string{"pwned"},
-			wantRedirs: []hookio.Redirection{{Operator: "2>>", Path: "/tmp/err", Kind: hookio.RedirectStderr}},
+			wantRedirs: []hookio.Redirection{{Operator: "2>>", Path: "/tmp/err", Kind: hookio.RedirectStderr, Append: true}},
 		},
 		{
 			// `<>` opens the target for reading AND WRITING and may create it, so it
@@ -1762,7 +1762,7 @@ func TestParse_Redirections(t *testing.T) {
 		{
 			name: "both-streams append", command: "echo pwned &>> /tmp/all.log",
 			wantExec: "echo", wantArgs: []string{"pwned"},
-			wantRedirs: []hookio.Redirection{{Operator: "&>>", Path: "/tmp/all.log", Kind: hookio.RedirectAll}},
+			wantRedirs: []hookio.Redirection{{Operator: "&>>", Path: "/tmp/all.log", Kind: hookio.RedirectAll, Append: true}},
 		},
 		{
 			// bash's open-and-assign form: it CREATES the file and stores the new

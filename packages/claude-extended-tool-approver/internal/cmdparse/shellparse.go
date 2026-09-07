@@ -1427,9 +1427,11 @@ func (lw *lowering) attachRedir(r *syntax.Redirect, leaf *ParsedCommand) {
 		return
 	}
 	leaf.Redirections = append(leaf.Redirections, hookio.Redirection{
-		Operator: fd + core,
-		Path:     target,
-		Kind:     redirectionKind(fd, core),
+		Operator:      fd + core,
+		Path:          target,
+		Kind:          redirectionKind(fd, core),
+		LiveExpansion: wordHasLiveExpansion(r.Word),
+		Append:        r.Op == syntax.AppOut || r.Op == syntax.AppAll,
 	})
 }
 
