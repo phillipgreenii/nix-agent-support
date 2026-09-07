@@ -10,6 +10,8 @@
 package effectgraph
 
 import (
+	"strings"
+
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmddesc"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmdparse"
 )
@@ -69,6 +71,14 @@ const (
 	EdgeReads
 	// EdgeWrites: From (command) has a write-class effect on To (file).
 	EdgeWrites
+	// EdgeExecutes: From (a child command) is executed by To (the command whose
+	// operand carried it — a `bash -c` program, an xargs argv).
+	EdgeExecutes
+	// EdgeFlow: CONTENT flows from From to To, derived from structure plus
+	// effects (a pipe whose left side emits content and whose right side reads
+	// stdin, a redirect-in, a substitution's output, a heredoc). These are the
+	// edges a graph-level policy walks.
+	EdgeFlow
 )
 
 // String returns the deterministic kind name.
@@ -90,6 +100,10 @@ func (k EdgeKind) String() string {
 		return "reads"
 	case EdgeWrites:
 		return "writes"
+	case EdgeExecutes:
+		return "executes"
+	case EdgeFlow:
+		return "flow"
 	default:
 		return "edge-invalid"
 	}
@@ -128,17 +142,21 @@ func (m Mark) String() string {
 }
 
 // Node is one graph vertex. Leaf is set for NodeCommand only. Scope is the
-// substitution scope the node lives in ("" at top level, "s0", "s0/s1", ...)
-// and drives Mermaid subgraph nesting.
+// substitution or child-invocation scope the node lives in ("" at top level,
+// "s0", "s0/s1", ...) and drives Mermaid subgraph nesting. GraphFindings are
+// the graph-level policy findings recorded against the node, rendered so a
+// flow finding is visible even when the node-level mark already says the
+// same thing.
 type Node struct {
-	ID         string
-	Kind       NodeKind
-	Label      string
-	Scope      string
-	Leaf       *cmdparse.ParsedCommand
-	Effects    []cmddesc.Effect
-	Mark       Mark
-	MarkReason string
+	ID            string
+	Kind          NodeKind
+	Label         string
+	Scope         string
+	Leaf          *cmdparse.ParsedCommand
+	Effects       []cmddesc.Effect
+	Mark          Mark
+	MarkReason    string
+	GraphFindings []string
 }
 
 // Edge is one directed relation between two node IDs.
@@ -173,4 +191,46 @@ func (g *Graph) Node(id string) *Node {
 		}
 	}
 	return nil
+}
+
+// ScopePath renders the labels of a scope and its ancestors, outermost first,
+// joined by " > " ("" for the top level). A reason naming a node inside
+// `bash -c` prefixes this so the nesting is visible in text, not only in the
+// diagram.
+func (g *Graph) ScopePath(scopeID string) string {
+	if scopeID == "" {
+		return ""
+	}
+	labels := map[string]string{}
+	for _, s := range g.Scopes {
+		labels[s.ID] = s.Label
+	}
+	parts := strings.Split(scopeID, "/")
+	out := make([]string, 0, len(parts))
+	for i := range parts {
+		out = append(out, labels[strings.Join(parts[:i+1], "/")])
+	}
+	return strings.Join(out, " > ")
+}
+
+// UpstreamVia returns the IDs of every node from which a chain of edges of
+// the given kind reaches id (transitively, excluding id itself), in
+// deterministic breadth-first discovery order.
+func (g *Graph) UpstreamVia(id string, kind EdgeKind) []string {
+	seen := map[string]bool{id: true}
+	var out []string
+	queue := []string{id}
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+		for _, e := range g.Edges {
+			if e.Kind != kind || e.To != cur || seen[e.From] {
+				continue
+			}
+			seen[e.From] = true
+			out = append(out, e.From)
+			queue = append(queue, e.From)
+		}
+	}
+	return out
 }

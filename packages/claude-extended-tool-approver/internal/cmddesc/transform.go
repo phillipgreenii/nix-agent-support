@@ -26,15 +26,23 @@ func applyTransform(t EffectTransform, effects []Effect) ([]Effect, bool) {
 		}
 		return out, true
 	case TransformNoClobber:
-		out := make([]Effect, len(effects))
-		for i, e := range effects {
-			if e.Kind == EffectPath && e.Access == AccessTruncate {
-				e.Access = AccessCreate
-			}
-			out[i] = e
-		}
-		return out, true
+		return retarget(effects, AccessTruncate, AccessCreate), true
+	case TransformAppend:
+		return retarget(effects, AccessTruncate, AccessModify), true
 	default:
 		return effects, false
 	}
+}
+
+// retarget copies effects, rewriting every path effect of access class from
+// to class to.
+func retarget(effects []Effect, from, to PathAccess) []Effect {
+	out := make([]Effect, len(effects))
+	for i, e := range effects {
+		if e.Kind == EffectPath && e.Access == from {
+			e.Access = to
+		}
+		out[i] = e
+	}
+	return out
 }

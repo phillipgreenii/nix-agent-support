@@ -12,12 +12,16 @@ import "github.com/phillipgreenii/claude-extended-tool-approver/internal/effectg
 // Request is what the caller knows about the command. ProjectRoot may be left
 // empty; the evaluator then detects it from CWD. Dialect is the shell the
 // command is written in (informational in this slice; parsing is bash).
+// VettedHosts are the network hosts the caller trusts, as domain suffixes
+// (`example.com` covers the apex and subdomains, `.internal.example`
+// subdomains only); nil vets nothing.
 type Request struct {
 	Command     string
 	Dialect     string
 	CWD         string
 	ProjectRoot string
 	Env         map[string]string
+	VettedHosts []string
 }
 
 // Decision is the verdict vocabulary. Ask exists in the vocabulary but nothing

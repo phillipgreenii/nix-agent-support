@@ -2,6 +2,7 @@ package cmddesc
 
 import (
 	"fmt"
+	"path"
 	"strings"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmdparse"
@@ -16,12 +17,18 @@ type Context struct {
 }
 
 // ChildInvocation is a nested command an interpreter found inside an operand
-// (a `sh -c` program, an `xargs` tail) that the graph builder should recurse
-// into. Unused by cat/head; the type exists so the interface is complete.
+// that the graph builder recurses into. It carries EITHER program TEXT in a
+// shell dialect (Dialect "shell", Program) OR an already-split argument vector
+// (Dialect "argv", Argv, with ArgvDynamic marking the operands whose value is
+// only known at runtime — an xargs item, a replaced token). Source names the
+// flag or operand that produced it (`bash -c`, `xargs`) and becomes the label
+// of the scope the child is judged in.
 type ChildInvocation struct {
-	Dialect string
-	Program string
-	Source  string
+	Dialect     string
+	Program     string
+	Argv        []string
+	ArgvDynamic []bool
+	Source      string
 }
 
 // Interpretation is what an Interpreter produces for one leaf: its effects,
@@ -43,9 +50,14 @@ type Interpreter interface {
 }
 
 // interpreters is the lookup table for CommandSchema.Interpreter. The empty
-// name is the generic, flag-table-driven interpreter.
+// name is the generic, flag-table-driven interpreter; the other keys are the
+// only place outside registry data where a command's own argument semantics
+// are named — each entry exists because the generic table cannot express how
+// that command gives its operands meaning.
 var interpreters = map[string]Interpreter{
-	"": GenericInterpreter{},
+	"":      GenericInterpreter{},
+	"xargs": xargsInterpreter{},
+	"curl":  curlInterpreter{},
 }
 
 // LookupInterpreter resolves a schema's Interpreter name. The empty name
@@ -56,58 +68,45 @@ func LookupInterpreter(name string) (Interpreter, bool) {
 	return in, ok
 }
 
+// RegisterInterpreter adds (or replaces) a command-level interpreter under
+// name. It exists for tests and extension; it is not safe to call
+// concurrently with interpretation.
+func RegisterInterpreter(name string, in Interpreter) {
+	interpreters[name] = in
+}
+
 // GenericInterpreter is the flag-table-driven interpreter. It honours `--`
 // (when the schema says so), `--flag=value`, POSIX short-flag bundling
 // (`-nb`), short-glued values (`-n5`), the three arities, per-flag
 // transforms (applied in flag order), the unknown-flag policy, the
 // Leading/Rest/Trailing positional layout with its skipped-by-flags
-// switches, the stdin token, program operands via the dialect seam, and
-// cmdparse's live-expansion signal (a dynamic path effect). It never
-// inspects schema.Name.
+// switches, the stdin token, the data-or-@file convention, program operands
+// via the dialect seam, and cmdparse's live-expansion signal (a dynamic path
+// effect). It never inspects schema.Name.
 //
 // It runs in two passes: the scan collects flags (recording which spellings
 // appeared) and defers every operand, and the resolve pass assigns positional
 // roles once the whole argv is known — so Trailing can see the end — and
-// emits effects in argument order.
+// emits effects in argument order. Both passes are shared with the
+// command-level interpreters, which run them and then add what the table
+// cannot say.
 type GenericInterpreter struct{}
 
 // Interpret implements Interpreter.
 func (GenericInterpreter) Interpret(leaf cmdparse.ParsedCommand, schema CommandSchema, ctx Context) Interpretation {
-	st := &interpState{schema: schema, leaf: leaf, ctx: ctx, flagsSeen: map[string]bool{}}
-	args := leaf.Args
-	optionsEnded := false
-	scanned := true
-	for i := 0; i < len(args); i++ {
-		tok := args[i]
-		isFlag := !optionsEnded && strings.HasPrefix(tok, "-") && tok != "-" && tok != schema.Positionals.StdinToken
-		if !isFlag {
-			st.ops = append(st.ops, pendingOp{tok: tok, idx: i, positional: true})
-			continue
-		}
-		if tok == "--" && schema.EndOfOptions {
-			optionsEnded = true
-			continue
-		}
-		consumed, ok := st.flag(tok, i)
-		if !ok {
-			scanned = false
-			break
-		}
-		i += consumed
-	}
-	st.resolve()
-	if scanned {
-		st.stdio()
-	}
+	st := scan(leaf, schema, ctx)
+	st.finish()
 	return st.result()
 }
 
 // pendingOp is one deferred operand: a positional (role assigned at resolve
-// time) or a flag value (role known at scan time).
+// time) or a flag value (role known at scan time, flag naming the spelling
+// that carried it).
 type pendingOp struct {
 	tok        string
 	idx        int
 	positional bool
+	flag       string
 	role       OperandRole
 }
 
@@ -124,7 +123,50 @@ type interpState struct {
 	transforms []EffectTransform
 	pathOps    int
 	stdinToken bool
+	scanned    bool
 	insuff     string
+}
+
+// scan is the flag pass: it walks the argv, records every modeled flag and
+// defers every operand. scanned is false when a token stopped the scan (an
+// unknown flag, a missing value), in which case the operands seen so far are
+// still resolved but no stdio effects are added and the state is already
+// insufficient.
+func scan(leaf cmdparse.ParsedCommand, schema CommandSchema, ctx Context) *interpState {
+	st := &interpState{schema: schema, leaf: leaf, ctx: ctx, flagsSeen: map[string]bool{}, scanned: true}
+	args := leaf.Args
+	optionsEnded := false
+	for i := 0; i < len(args); i++ {
+		tok := args[i]
+		isFlag := !optionsEnded && strings.HasPrefix(tok, "-") && tok != "-" && tok != schema.Positionals.StdinToken
+		if !isFlag {
+			st.ops = append(st.ops, pendingOp{tok: tok, idx: i, positional: true})
+			if schema.PositionalsEndOptions {
+				optionsEnded = true
+			}
+			continue
+		}
+		if tok == "--" && schema.EndOfOptions {
+			optionsEnded = true
+			continue
+		}
+		consumed, ok := st.flag(tok, i)
+		if !ok {
+			st.scanned = false
+			break
+		}
+		i += consumed
+	}
+	return st
+}
+
+// finish is the resolve pass: positional roles, operand effects, and — when
+// the scan completed — the schema's stdio effects.
+func (st *interpState) finish() {
+	st.resolve()
+	if st.scanned {
+		st.stdio()
+	}
 }
 
 func (st *interpState) fail(format string, a ...any) {
@@ -133,15 +175,55 @@ func (st *interpState) fail(format string, a ...any) {
 	}
 }
 
+// positionals returns the deferred positional operands in argument order.
+func (st *interpState) positionals() []pendingOp {
+	var out []pendingOp
+	for _, op := range st.ops {
+		if op.positional {
+			out = append(out, op)
+		}
+	}
+	return out
+}
+
+// flagValues returns the values carried by any of the named flag spellings,
+// in argument order.
+func (st *interpState) flagValues(names ...string) []pendingOp {
+	var out []pendingOp
+	for _, op := range st.ops {
+		if op.positional {
+			continue
+		}
+		for _, n := range names {
+			if op.flag == n {
+				out = append(out, op)
+				break
+			}
+		}
+	}
+	return out
+}
+
+// anyFlagSeen reports whether any of the named spellings appeared.
+func (st *interpState) anyFlagSeen(names ...string) bool { return anySeen(names, st.flagsSeen) }
+
+// baseName is the leaf's executable basename, used only to LABEL child
+// invocations (`bash -c`); nothing branches on it.
+func (st *interpState) baseName() string { return path.Base(st.leaf.Executable) }
+
+// childSource labels a child invocation by the leaf's basename and the flag
+// (or positional index) that carried it: `bash -c`, `sh arg 0`.
+func (st *interpState) childSource(op pendingOp) string {
+	if op.flag != "" {
+		return st.baseName() + " " + op.flag
+	}
+	return fmt.Sprintf("%s arg %d", st.baseName(), op.idx)
+}
+
 // resolve assigns roles to the deferred positionals and emits every operand's
 // effects in argument order.
 func (st *interpState) resolve() {
-	n := 0
-	for _, op := range st.ops {
-		if op.positional {
-			n++
-		}
-	}
+	n := len(st.positionals())
 	roles, reason, ok := st.schema.Positionals.resolveRoles(n, st.flagsSeen)
 	if !ok {
 		st.fail("%s", reason)
@@ -156,30 +238,33 @@ func (st *interpState) resolve() {
 			role = roles[pos]
 			pos++
 		}
-		st.operand(role, op.tok, op.idx, op.positional)
+		st.operand(op, role)
 	}
 }
 
-// operand emits the effect for one operand of the given role at arg index i.
-func (st *interpState) operand(role OperandRole, tok string, i int, positional bool) {
-	source := fmt.Sprintf("arg %d", i)
+// operand emits the effect for one operand under the given role.
+func (st *interpState) operand(op pendingOp, role OperandRole) {
+	source := fmt.Sprintf("arg %d", op.idx)
+	live := st.leaf.ArgIsLiveExpansion(op.idx)
 	switch {
 	case role.IsPath():
-		if positional && st.schema.Positionals.StdinToken != "" && tok == st.schema.Positionals.StdinToken && !st.leaf.ArgIsLiveExpansion(i) {
+		if op.positional && st.schema.Positionals.StdinToken != "" && op.tok == st.schema.Positionals.StdinToken && !live {
 			st.stdinToken = true
 			return
 		}
 		st.pathOps++
 		st.effects = append(st.effects, Effect{
 			Kind:           EffectPath,
-			Path:           tok,
+			Path:           op.tok,
 			Access:         role.pathAccess(),
-			Dynamic:        st.leaf.ArgIsLiveExpansion(i),
+			Dynamic:        live,
 			Source:         source,
-			FromPositional: positional,
+			FromPositional: op.positional,
 		})
 	case role.Kind == KindProgram:
-		st.program(role.Dialect, tok, i, source)
+		st.program(role.Dialect, op, source)
+	case role.Kind == KindDataOrAtFile:
+		st.dataOrAtFile(op, source, live)
 	case role.Kind == KindLiteral, role.Kind == KindMessage:
 		// Inert: no effect. A live expansion in a literal slot is still inert —
 		// its value cannot change what the command touches.
@@ -188,14 +273,33 @@ func (st *interpState) operand(role OperandRole, tok string, i int, positional b
 	}
 }
 
+// dataOrAtFile applies the `@` convention: `@-` consumes stdin, `@path` reads
+// path, anything else is inert data. A live expansion that does not visibly
+// start with `@` MIGHT still expand to one, so it is recorded as a dynamic
+// read (fail-closed) rather than as inert data. A `@path` read is not a path
+// OPERAND for the stdin rule (pathOps is left alone): the convention rides on
+// data flags, not on the positional layout.
+func (st *interpState) dataOrAtFile(op pendingOp, source string, live bool) {
+	switch {
+	case !live && op.tok == "@-":
+		st.stdinToken = true
+	case strings.HasPrefix(op.tok, "@"):
+		st.effects = append(st.effects, Effect{Kind: EffectPath, Path: op.tok[1:], Access: AccessRead, Dynamic: live, Source: source, FromPositional: op.positional})
+	case live:
+		st.effects = append(st.effects, Effect{Kind: EffectPath, Path: op.tok, Access: AccessRead, Dynamic: true, Source: source, FromPositional: op.positional, Detail: "may expand to @file"})
+	}
+}
+
 // program emits the Program effect for an operand and folds in the dialect
 // interpreter's classification. The Program effect always stays (the graph
 // records that a program ran); sufficiency comes from the dialect: a live
 // expansion or an unknown dialect is insufficient, and a known dialect's own
-// insufficiency propagates.
-func (st *interpState) program(dialect, tok string, i int, source string) {
+// insufficiency propagates. A child the dialect returns without a Source is
+// labelled by the flag or operand that carried the program.
+func (st *interpState) program(dialect string, op pendingOp, source string) {
+	tok := op.tok
 	st.effects = append(st.effects, Effect{Kind: EffectProgram, Program: tok, Dialect: dialect, Source: source})
-	if st.leaf.ArgIsLiveExpansion(i) {
+	if st.leaf.ArgIsLiveExpansion(op.idx) {
 		st.fail("program operand at %s is a runtime expansion", source)
 		return
 	}
@@ -209,7 +313,12 @@ func (st *interpState) program(dialect, tok string, i int, source string) {
 	// alone here.
 	res := d.InterpretProgram(tok, st.ctx)
 	st.effects = append(st.effects, res.Effects...)
-	st.children = append(st.children, res.Children...)
+	for _, c := range res.Children {
+		if c.Source == "" {
+			c.Source = st.childSource(op)
+		}
+		st.children = append(st.children, c)
+	}
 	if !res.Sufficient {
 		st.fail("%s program at %s: %s", dialect, source, res.Insufficiency)
 	}
@@ -269,18 +378,18 @@ func (st *interpState) applyFlag(name string, spec FlagSpec, i int, glued string
 		return 0, true
 	case ArityOne:
 		if hasGlued {
-			st.ops = append(st.ops, pendingOp{tok: glued, idx: i, role: spec.Operand})
+			st.ops = append(st.ops, pendingOp{tok: glued, idx: i, flag: name, role: spec.Operand})
 			return 0, true
 		}
 		if i+1 >= len(st.leaf.Args) {
 			st.fail("flag %s is missing its value", name)
 			return 0, false
 		}
-		st.ops = append(st.ops, pendingOp{tok: st.leaf.Args[i+1], idx: i + 1, role: spec.Operand})
+		st.ops = append(st.ops, pendingOp{tok: st.leaf.Args[i+1], idx: i + 1, flag: name, role: spec.Operand})
 		return 1, true
 	case ArityOptionalGlued:
 		if hasGlued && glued != "" {
-			st.ops = append(st.ops, pendingOp{tok: glued, idx: i, role: spec.Operand})
+			st.ops = append(st.ops, pendingOp{tok: glued, idx: i, flag: name, role: spec.Operand})
 		}
 		return 0, true
 	default:

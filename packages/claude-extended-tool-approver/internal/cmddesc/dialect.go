@@ -23,9 +23,12 @@ type DialectInterpreter interface {
 }
 
 // dialects is the lookup table keyed by dialect name. Adding a dialect is
-// adding an entry.
+// adding an entry. "shell" and "bash" name the same interpreter: the program
+// is handed back as a child for the graph builder to parse and recurse into.
 var dialects = map[string]DialectInterpreter{
-	"sed": sedDialect{},
+	"sed":   sedDialect{},
+	"shell": shellDialect{},
+	"bash":  shellDialect{},
 }
 
 // LookupDialect resolves a dialect name. An unknown name reports false so the
@@ -33,4 +36,11 @@ var dialects = map[string]DialectInterpreter{
 func LookupDialect(name string) (DialectInterpreter, bool) {
 	d, ok := dialects[name]
 	return d, ok
+}
+
+// RegisterDialect adds (or replaces) a dialect interpreter under name. It
+// exists for tests and extension; it is not safe to call concurrently with
+// interpretation.
+func RegisterDialect(name string, d DialectInterpreter) {
+	dialects[name] = d
 }

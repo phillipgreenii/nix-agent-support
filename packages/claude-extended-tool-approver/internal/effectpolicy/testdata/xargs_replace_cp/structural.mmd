@@ -1,0 +1,4 @@
+flowchart LR
+    n0["command: cat list.txt"]
+    n1["command: xargs -I{} cp {} sub"]
+    n0 -->|"pipe"| n1

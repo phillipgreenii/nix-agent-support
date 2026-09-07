@@ -1,0 +1,13 @@
+flowchart LR
+    n0["command: cat list.txt<br/>- path:read list.txt [arg 0]<br/>- stdio:stdout content<br/>mark=permitted"]
+    n1["command: xargs rm -f<br/>- stdio:stdin content<br/>mark=permitted"]
+    n2[/"file: list.txt"/]
+    subgraph sg_s0["xargs"]
+        n3["command: rm -f #lt;stdin-item#gt;<br/>- path:delete #lt;stdin-item#gt; (dynamic) [arg 1]<br/>mark=insufficient: path:delete #lt;stdin-item#gt; (dynamic) [arg 1]: no-write-to-read-only-path (path is a runtime expansion)"]
+        n4[/"file: #lt;stdin-item#gt; (dynamic)"/]
+    end
+    n0 -->|"pipe"| n1
+    n0 -->|"reads: read"| n2
+    n3 -->|"writes: delete"| n4
+    n3 -->|"executes: xargs"| n1
+    n0 -->|"flow: stdout-#gt;stdin"| n1

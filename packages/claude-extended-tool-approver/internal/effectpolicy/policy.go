@@ -9,6 +9,8 @@
 package effectpolicy
 
 import (
+	"strings"
+
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmddesc"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/patheval"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/secretpath"
@@ -48,9 +50,36 @@ type Finding struct {
 }
 
 // PolicyContext is what a policy may consult besides the effect itself.
+// VettedHosts are the hosts the caller trusts, with domain-suffix semantics:
+// `example.com` matches the apex and its subdomains, `.internal.example`
+// matches subdomains only (the leading dot is what stops `notexample.com`
+// from matching `example.com`).
 type PolicyContext struct {
-	PathEval *patheval.PathEvaluator
-	CWD      string
+	PathEval    *patheval.PathEvaluator
+	CWD         string
+	VettedHosts []string
+}
+
+// HostVetted reports whether host matches any VettedHosts entry under the
+// domain-suffix semantics above. An empty host never matches.
+func (c PolicyContext) HostVetted(host string) bool {
+	host = strings.ToLower(host)
+	if host == "" {
+		return false
+	}
+	for _, entry := range c.VettedHosts {
+		entry = strings.ToLower(entry)
+		switch {
+		case entry == "":
+		case strings.HasPrefix(entry, "."):
+			if strings.HasSuffix(host, entry) {
+				return true
+			}
+		case host == entry || strings.HasSuffix(host, "."+entry):
+			return true
+		}
+	}
+	return false
 }
 
 // Policy judges effects. Judge reports (finding, true) when the policy applies
@@ -64,7 +93,7 @@ type Policy interface {
 // concern; the read side is split so a secret-path hit and an unreadable-zone
 // hit are distinguishable reasons.
 func DefaultPolicies() []Policy {
-	return []Policy{NoWriteToReadOnlyPath{}, NoReadOfSecretPath{}, NoReadOfUnreadablePath{}}
+	return []Policy{NoWriteToReadOnlyPath{}, NoReadOfSecretPath{}, NoReadOfUnreadablePath{}, NetworkAccess{}}
 }
 
 // NoWriteToReadOnlyPath applies to every write-class path effect (create,
@@ -119,15 +148,53 @@ func (NoReadOfSecretPath) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, b
 	if e.Dynamic {
 		return Finding{Verdict: Unknown, Reason: "path is a runtime expansion"}, true
 	}
-	if secretpath.IsSecret(e.Path) {
-		return Finding{Verdict: Forbidden, Reason: "secret path"}, true
-	}
-	if ctx.PathEval != nil {
-		if resolved := ctx.PathEval.ResolvePath(e.Path); resolved != "" && secretpath.IsSecret(resolved) {
-			return Finding{Verdict: Forbidden, Reason: "secret path (resolved)"}, true
-		}
+	if reason, secret := secretRead(e.Path, ctx); secret {
+		return Finding{Verdict: Forbidden, Reason: reason}, true
 	}
 	return Finding{}, false
+}
+
+// secretRead reports whether a statically known path is a secret path, on
+// the raw text or on patheval's resolution of it. It is shared by the
+// node-level secret policy and the graph-level flow policy so both name a
+// secret the same way.
+func secretRead(p string, ctx PolicyContext) (string, bool) {
+	if secretpath.IsSecret(p) {
+		return "secret path", true
+	}
+	if ctx.PathEval != nil {
+		if resolved := ctx.PathEval.ResolvePath(p); resolved != "" && secretpath.IsSecret(resolved) {
+			return "secret path (resolved)", true
+		}
+	}
+	return "", false
+}
+
+// NetworkAccess judges net effects against the vetted-host list: a dynamic
+// host is Unknown; content flowing IN from a vetted host is Permitted;
+// content flowing OUT is Unknown even to a vetted host (an upload needs
+// explicit consent in this slice); an unvetted host is Unknown. It never
+// returns Forbidden — an unvetted host is not known-bad.
+type NetworkAccess struct{}
+
+// Name implements Policy.
+func (NetworkAccess) Name() string { return "network-access" }
+
+// Judge implements Policy.
+func (NetworkAccess) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, bool) {
+	if e.Kind != cmddesc.EffectNet {
+		return Finding{}, false
+	}
+	if e.Dynamic {
+		return Finding{Verdict: Unknown, Reason: "host is a runtime expansion"}, true
+	}
+	if !ctx.HostVetted(e.Host) {
+		return Finding{Verdict: Unknown, Reason: "host is not vetted"}, true
+	}
+	if e.Direction == cmddesc.NetOutbound {
+		return Finding{Verdict: Unknown, Reason: "upload to a vetted host requires consent"}, true
+	}
+	return Finding{Verdict: Permitted, Reason: "vetted host"}, true
 }
 
 // NoReadOfUnreadablePath has one concern: patheval READABILITY of a read path

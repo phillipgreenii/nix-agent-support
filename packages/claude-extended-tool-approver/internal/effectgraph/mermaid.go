@@ -112,6 +112,9 @@ func nodeLabel(n Node) string {
 		}
 		lines = append(lines, escape(m))
 	}
+	for _, f := range n.GraphFindings {
+		lines = append(lines, "graph: "+escape(f))
+	}
 	return strings.Join(lines, "<br/>")
 }
 

@@ -33,10 +33,22 @@ func (r Registry) Names() []string {
 	return names
 }
 
-// DefaultRegistry returns the spike's registry as plain values. head and rm
-// are the proof that another command is ONLY a registry entry.
+// DefaultRegistry returns the spike's registry as plain values. head, rm and
+// tee are the proof that another command is ONLY a registry entry; sh is the
+// proof that a second NAME for the same semantics is only a second key.
 func DefaultRegistry() Registry {
-	return NewRegistry(catSchema, headSchema, sedSchema, rmSchema, cpSchema)
+	return NewRegistry(
+		catSchema, headSchema, sedSchema, rmSchema, cpSchema, teeSchema,
+		bashSchema, renamed(bashSchema, "sh"),
+		xargsSchema, curlSchema,
+	)
+}
+
+// renamed returns a copy of s registered under another basename. The Flags
+// map is shared, which is fine: schemas are read-only values.
+func renamed(s CommandSchema, name string) CommandSchema {
+	s.Name = name
+	return s
 }
 
 // Schema-author shorthands for the common flag shapes.
@@ -182,4 +194,144 @@ var cpSchema = CommandSchema{
 	Stdout:       StdoutNone,
 	UnknownFlag:  UnknownFlagInsufficient,
 	EndOfOptions: true,
+}
+
+// teeSchema: stdin is copied to stdout and to every file operand, which is
+// truncated — or appended to (modify) under -a.
+var teeSchema = CommandSchema{
+	Name:       "tee",
+	Provenance: "tee (GNU coreutils) 9.11, tee --help",
+	Flags: map[string]FlagSpec{
+		"-a": {Transform: EffectTransform{Kind: TransformAppend}}, "--append": {Transform: EffectTransform{Kind: TransformAppend}},
+		"-i": inert, "--ignore-interrupts": inert,
+		"-p":             inert,
+		"--output-error": literalOpt,
+	},
+	Positionals:  PositionalSpec{Rest: PathTruncate},
+	Stdin:        StdinAlways,
+	Stdout:       StdoutContent,
+	UnknownFlag:  UnknownFlagInsufficient,
+	EndOfOptions: true,
+}
+
+// bashSchema (also registered as sh): `-c` carries a shell program that the
+// shell dialect hands back for recursion; the positionals after it are $0,
+// $1... (inert). WITHOUT `-c` the first positional is a SCRIPT FILE that will
+// be executed — role Program("shell-file"), a dialect with no interpreter, so
+// it is insufficient: we cannot read the file, and Abstain is the honest
+// answer. Options end at the first positional (a later `-x` belongs to the
+// script). Stdin is StdinNever for the modeled forms; the no-`-c`, no-file
+// form reads a script from stdin, which resolveRoles already makes
+// insufficient (too few positionals) — an accepted gap, not a modeled stdin
+// read. `-n` (noexec) is deliberately left out so it abstains. `+O` is listed
+// for completeness but the generic scanner only recognises `-`-prefixed
+// tokens, so it currently lands as a positional (inert under -c; the
+// script-file slot otherwise — insufficient either way).
+var bashSchema = CommandSchema{
+	Name:       "bash",
+	Provenance: "GNU bash 5.3.9, bash --help / help set",
+	Flags: map[string]FlagSpec{
+		"-c": {Arity: ArityOne, Operand: Program("shell")},
+		"-x": inert, "-e": inert, "-u": inert, "-v": inert,
+		"-l": inert, "--login": inert,
+		"-i":          inert,
+		"--norc":      inert,
+		"--noprofile": inert,
+		"--posix":     inert,
+		"-o":          literal1,
+		"-O":          literal1, "+O": literal1,
+	},
+	Positionals: PositionalSpec{
+		Leading:               []OperandRole{Program("shell-file")},
+		LeadingSkippedByFlags: []string{"-c"},
+		Rest:                  Literal,
+	},
+	Stdin:                 StdinNever,
+	Stdout:                StdoutNone,
+	UnknownFlag:           UnknownFlagInsufficient,
+	EndOfOptions:          true,
+	PositionalsEndOptions: true,
+}
+
+// xargsSchema: the positionals are the argv of the command xargs runs, which
+// only the xargs interpreter can give meaning to (Rest is Literal for the
+// generic layer). Options end at the first positional (GNU getopt `+`: a
+// later `-f` belongs to the child). Stdin is Always even under `-a FILE`,
+// which actually replaces it — an over-report in the fail-closed direction.
+// `-p`/`--interactive` and `--process-slot-var` are left out (abstain). Host
+// spellings differ from the brief: `-E END` is short-only and `-e`/`--eof`
+// take an OPTIONAL glued value.
+var xargsSchema = CommandSchema{
+	Name:        "xargs",
+	Provenance:  "xargs (GNU findutils) 4.10.0, xargs --help",
+	Interpreter: "xargs",
+	Flags: map[string]FlagSpec{
+		"-0": inert, "--null": inert,
+		"-r": inert, "--no-run-if-empty": inert,
+		"-t": inert, "--verbose": inert,
+		"-x": inert, "--exit": inert,
+		"-o": inert, "--open-tty": inert,
+		"-n": literal1, "--max-args": literal1,
+		"-L": literal1, "--max-lines": literal1,
+		"-l": literalOpt,
+		"-P": literal1, "--max-procs": literal1,
+		"-s": literal1, "--max-chars": literal1,
+		"-d": literal1, "--delimiter": literal1,
+		"-E": literal1,
+		"-e": literalOpt, "--eof": literalOpt,
+		"-I": literal1,
+		"-i": literalOpt, "--replace": literalOpt,
+		"-a": {Arity: ArityOne, Operand: PathRead}, "--arg-file": {Arity: ArityOne, Operand: PathRead},
+	},
+	Positionals:           PositionalSpec{Rest: Literal},
+	Stdin:                 StdinAlways,
+	Stdout:                StdoutNone,
+	UnknownFlag:           UnknownFlagInsufficient,
+	EndOfOptions:          true,
+	PositionalsEndOptions: true,
+}
+
+// curlSchema: URLs are positionals (or --url values) that the curl
+// interpreter turns into net effects; the data flags use the generic
+// data-or-@file convention; -o truncates, -T reads. Deliberately left out so
+// they abstain: -k/--insecure, -u/--user, -O/--remote-name, -b/-c cookies,
+// -K/--config, -x/--proxy, and -H's own `@file` form (modeled as a literal).
+// `--include` is the pre-8.10 spelling of `--show-headers`; this host still
+// accepts it.
+var curlSchema = CommandSchema{
+	Name:        "curl",
+	Provenance:  "curl 8.21.0, curl --help all",
+	Interpreter: "curl",
+	Flags: map[string]FlagSpec{
+		"-s": inert, "--silent": inert,
+		"-S": inert, "--show-error": inert,
+		"-L": inert, "--location": inert,
+		"-f": inert, "--fail": inert,
+		"-i": inert, "--include": inert, "--show-headers": inert,
+		"-I": inert, "--head": inert,
+		"-v": inert, "--verbose": inert,
+		"-G": inert, "--get": inert,
+		"--compressed": inert,
+		"-N":           inert, "--no-buffer": inert,
+		"-o": {Arity: ArityOne, Operand: PathTruncate}, "--output": {Arity: ArityOne, Operand: PathTruncate},
+		"-H": literal1, "--header": literal1,
+		"-A": literal1, "--user-agent": literal1,
+		"-X": literal1, "--request": literal1,
+		"-m": literal1, "--max-time": literal1,
+		"--connect-timeout": literal1,
+		"--retry":           literal1,
+		"-w":                literal1, "--write-out": literal1,
+		"-d": {Arity: ArityOne, Operand: DataOrAtFile}, "--data": {Arity: ArityOne, Operand: DataOrAtFile},
+		"--data-binary":    {Arity: ArityOne, Operand: DataOrAtFile},
+		"--data-raw":       {Arity: ArityOne, Operand: DataOrAtFile},
+		"--data-urlencode": {Arity: ArityOne, Operand: DataOrAtFile},
+		"-F":               {Arity: ArityOne, Operand: DataOrAtFile}, "--form": {Arity: ArityOne, Operand: DataOrAtFile},
+		"-T": {Arity: ArityOne, Operand: PathRead}, "--upload-file": {Arity: ArityOne, Operand: PathRead},
+		"--url": literal1,
+	},
+	Positionals:  PositionalSpec{Rest: Literal},
+	Stdin:        StdinNever,
+	Stdout:       StdoutContent,
+	UnknownFlag:  UnknownFlagInsufficient,
+	EndOfOptions: false,
 }

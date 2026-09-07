@@ -1,0 +1,7 @@
+flowchart LR
+    n0["command: cat list.txt<br/>- path:read list.txt [arg 0]<br/>- stdio:stdout content<br/>mark=permitted"]
+    n1["command: xargs -n1<br/>- stdio:stdin content<br/>mark=insufficient: no command operand: xargs would run its default command, which is not modeled"]
+    n2[/"file: list.txt"/]
+    n0 -->|"pipe"| n1
+    n0 -->|"reads: read"| n2
+    n0 -->|"flow: stdout-#gt;stdin"| n1

@@ -1,0 +1,11 @@
+flowchart LR
+    n0["command: bash -c 'cat README.md | frobnicate'<br/>- program:shell #quot;cat README.md | frobnicate#quot;<br/>mark=permitted"]
+    subgraph sg_s0["bash -c"]
+        n1["command: cat README.md<br/>- path:read README.md [arg 0]<br/>- stdio:stdout content<br/>mark=permitted"]
+        n2["command: frobnicate<br/>- opaque (no schema for frobnicate)<br/>mark=insufficient: no schema for frobnicate"]
+        n3[/"file: README.md"/]
+    end
+    n1 -->|"pipe"| n2
+    n1 -->|"reads: read"| n3
+    n1 -->|"executes: bash -c"| n0
+    n2 -->|"executes: bash -c"| n0

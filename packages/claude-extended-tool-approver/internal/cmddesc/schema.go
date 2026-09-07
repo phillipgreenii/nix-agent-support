@@ -37,6 +37,10 @@ const (
 	KindProgram
 	// KindMessage is free text the command emits or records (a commit message).
 	KindMessage
+	// KindDataOrAtFile is a literal UNLESS it starts with `@`: `@-` consumes
+	// stdin and `@path` reads path. This is the generic "data or @file"
+	// convention (curl's -d/-F use it) and the generic interpreter handles it.
+	KindDataOrAtFile
 )
 
 // String returns the deterministic role name used in labels and reasons.
@@ -58,6 +62,8 @@ func (k RoleKind) String() string {
 		return "program"
 	case KindMessage:
 		return "message"
+	case KindDataOrAtFile:
+		return "data-or-at-file"
 	default:
 		return "role-invalid"
 	}
@@ -81,6 +87,7 @@ var (
 	PathDelete   = OperandRole{Kind: KindPathDelete}
 	PathTruncate = OperandRole{Kind: KindPathTruncate}
 	Message      = OperandRole{Kind: KindMessage}
+	DataOrAtFile = OperandRole{Kind: KindDataOrAtFile}
 )
 
 // Program returns the operand role for program text in the named dialect.
@@ -134,6 +141,9 @@ const (
 	// TransformNoClobber downgrades every truncate path effect to create (cp -n
 	// never overwrites an existing destination).
 	TransformNoClobber
+	// TransformAppend downgrades every truncate path effect to modify (tee -a
+	// appends to its file operands instead of rewriting them).
+	TransformAppend
 )
 
 // String returns the deterministic kind name.
@@ -147,6 +157,8 @@ func (k TransformKind) String() string {
 		return "in-place"
 	case TransformNoClobber:
 		return "no-clobber"
+	case TransformAppend:
+		return "append"
 	default:
 		return "transform-invalid"
 	}
@@ -294,16 +306,20 @@ const (
 // CommandSchema is the schema VALUE for one command. Provenance records the
 // tool/version the entry was verified against. Flags is keyed by every
 // spelling (`-n` and `--number` are separate keys). EndOfOptions says whether
-// `--` ends flag parsing. Interpreter names a non-generic interpreter; empty
-// means GenericInterpreter.
+// `--` ends flag parsing. PositionalsEndOptions says that the FIRST positional
+// ends flag parsing too (the getopt `+`/POSIXLY_CORRECT convention: a wrapper
+// such as xargs or a shell hands every later `-x` to the command it runs, not
+// to itself). Interpreter names a non-generic interpreter; empty means
+// GenericInterpreter.
 type CommandSchema struct {
-	Name         string
-	Provenance   string
-	Flags        map[string]FlagSpec
-	Positionals  PositionalSpec
-	Stdin        StdinSpec
-	Stdout       StdoutKind
-	UnknownFlag  UnknownFlagPolicy
-	EndOfOptions bool
-	Interpreter  string
+	Name                  string
+	Provenance            string
+	Flags                 map[string]FlagSpec
+	Positionals           PositionalSpec
+	Stdin                 StdinSpec
+	Stdout                StdoutKind
+	UnknownFlag           UnknownFlagPolicy
+	EndOfOptions          bool
+	PositionalsEndOptions bool
+	Interpreter           string
 }

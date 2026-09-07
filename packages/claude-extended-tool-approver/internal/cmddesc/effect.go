@@ -84,13 +84,16 @@ func (a PathAccess) String() string {
 // that is not a pure read is a write, so a class added later fails closed.
 func (a PathAccess) IsWrite() bool { return a != AccessRead }
 
-// NetDirection is the direction of a network effect.
+// NetDirection is the direction CONTENT flows in a network effect: outbound
+// means local content leaves for Host (an upload, a POST body), inbound means
+// content arrives from Host (a fetch). Both are the local side connecting out;
+// listening for connections is not modeled in this slice.
 type NetDirection int
 
 const (
-	// NetOutbound connects out to Host.
+	// NetOutbound: local content flows out to Host.
 	NetOutbound NetDirection = iota
-	// NetInbound listens for connections.
+	// NetInbound: content flows in from Host.
 	NetInbound
 )
 
@@ -156,9 +159,12 @@ type Effect struct {
 	EnvName string
 	EnvSet  bool
 
-	// EffectNet fields.
+	// EffectNet fields. Dynamic (shared with the path fields) is true when the
+	// URL is a runtime expansion, in which case Host holds the raw text. Method
+	// is the request method when the protocol has one ("" otherwise).
 	Host      string
 	Direction NetDirection
+	Method    string
 
 	// EffectStdio fields. Metadata is true when only metadata (not content)
 	// flows on the stream.
@@ -193,6 +199,15 @@ func (e Effect) String() string {
 		}
 	case EffectNet:
 		fmt.Fprintf(&b, ":%s %s", e.Direction, e.Host)
+		if e.Method != "" {
+			b.WriteString(" " + e.Method)
+		}
+		if e.Dynamic {
+			b.WriteString(" (dynamic)")
+		}
+		if e.Source != "" {
+			fmt.Fprintf(&b, " [%s]", e.Source)
+		}
 	case EffectStdio:
 		fmt.Fprintf(&b, ":%s", e.Stream)
 		if e.Metadata {

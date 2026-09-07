@@ -27,19 +27,23 @@ func BuildStructural(sp cmdparse.ShellParse) Graph {
 // interpretation's effects, and redirections (from the parse — the schema does
 // not know about redirections; the builder does). A leaf without a schema
 // gets one EffectOpaque and MarkInsufficient. Every path effect also becomes a
-// File node with a Reads/Writes edge. Marks other than insufficient stay
-// MarkUnjudged for the policy fold.
+// File node with a Reads/Writes edge. Every child invocation the
+// interpretation returns is parsed (or synthesized from its argv) into a new
+// scope labelled by its Source, its leaves interpreted recursively with the
+// same registry, and each of its Command nodes wired to the parent by an
+// Executes edge. Finally Flow edges are derived from structure plus effects.
+// Marks other than insufficient stay MarkUnjudged for the policy fold.
 func BuildInterpreted(sp cmdparse.ShellParse, reg cmddesc.Registry, ctx cmddesc.Context) Graph {
 	b := newBuilder()
 	b.leaves(sp.Leaves, "")
-	for i := range b.g.Nodes {
-		if b.g.Nodes[i].Kind != NodeCommand {
-			continue
-		}
-		b.interpret(i, reg, ctx)
-	}
+	b.interpretRange(0, len(b.g.Nodes), reg, ctx, nil)
+	b.deriveFlows()
 	return b.g
 }
+
+// maxChildDepth bounds child-invocation nesting: a chain of more than this
+// many nested programs marks the parent insufficient.
+const maxChildDepth = 8
 
 type builder struct {
 	g        Graph
@@ -163,19 +167,34 @@ func substitutionLabel(s cmdparse.Substitution) string {
 	}
 }
 
+// interpretRange interprets the Command nodes at indexes [start, end). A
+// child invocation appends its nodes beyond end and interprets them itself,
+// so the range never sees a node twice. chain is the normalized program text
+// of every enclosing child invocation, outermost first.
+func (b *builder) interpretRange(start, end int, reg cmddesc.Registry, ctx cmddesc.Context, chain []string) {
+	for i := start; i < end; i++ {
+		if b.g.Nodes[i].Kind != NodeCommand {
+			continue
+		}
+		b.interpret(i, reg, ctx, chain)
+	}
+}
+
 // interpret attaches effects and the builder-level insufficiency mark to the
-// Command node at index i.
-func (b *builder) interpret(i int, reg cmddesc.Registry, ctx cmddesc.Context) {
-	n := &b.g.Nodes[i]
-	leaf := *n.Leaf
+// Command node at index i and recurses into its child invocations. It works
+// on locals and writes the node back by index at the end, because recursion
+// appends nodes and would invalidate a pointer taken up front.
+func (b *builder) interpret(i int, reg cmddesc.Registry, ctx cmddesc.Context, chain []string) {
+	id, scope, leaf := b.g.Nodes[i].ID, b.g.Nodes[i].Scope, *b.g.Nodes[i].Leaf
+	mark, markReason := MarkUnjudged, ""
 	insufficient := func(reason string) {
-		if n.Mark != MarkInsufficient {
-			n.Mark = MarkInsufficient
-			n.MarkReason = reason
+		if mark != MarkInsufficient {
+			mark, markReason = MarkInsufficient, reason
 		}
 	}
 
 	var effects []cmddesc.Effect
+	var children []cmddesc.ChildInvocation
 	for _, e := range leaf.EnvVars {
 		effects = append(effects, cmddesc.Effect{Kind: cmddesc.EffectEnv, EnvName: e.Name, EnvSet: true})
 	}
@@ -202,18 +221,15 @@ func (b *builder) interpret(i int, reg cmddesc.Registry, ctx cmddesc.Context) {
 		}
 		res := in.Interpret(leaf, schema, ctx)
 		effects = append(effects, res.Effects...)
+		children = res.Children
 		if !res.Sufficient {
 			insufficient(res.Insufficiency)
-		}
-		if len(res.Children) > 0 {
-			insufficient("child invocation not recursed in this slice")
 		}
 	}
 
 	for _, r := range leaf.Redirections {
 		effects = append(effects, redirectionEffect(r.Path, r.Operator, r.Kind.IsWrite()))
 	}
-	n.Effects = effects
 
 	for _, e := range effects {
 		if e.Kind != cmddesc.EffectPath {
@@ -223,11 +239,129 @@ func (b *builder) interpret(i int, reg cmddesc.Registry, ctx cmddesc.Context) {
 		if e.Dynamic {
 			label += " (dynamic)"
 		}
-		f := b.file(n.Scope, label)
+		f := b.file(scope, label)
 		if e.Access.IsWrite() {
-			b.edge(n.ID, f, EdgeWrites, e.Access.String())
+			b.edge(id, f, EdgeWrites, e.Access.String())
 		} else {
-			b.edge(n.ID, f, EdgeReads, e.Access.String())
+			b.edge(id, f, EdgeReads, e.Access.String())
+		}
+	}
+
+	// The parent's own effects are judged as usual; the children are separate
+	// nodes the verdict fold iterates. Only a child the builder cannot turn
+	// into nodes (unparseable, too deep, cyclic) reflects on the parent.
+	for _, c := range children {
+		if reason := b.child(id, scope, c, reg, ctx, chain); reason != "" {
+			insufficient(reason)
+		}
+	}
+
+	n := &b.g.Nodes[i]
+	n.Effects, n.Mark, n.MarkReason = effects, mark, markReason
+}
+
+// child turns one child invocation into nodes in a new scope labelled by its
+// Source, wires each of its Command nodes to the parent with an Executes
+// edge, and interprets them recursively. It returns a non-empty reason when
+// the child cannot be modeled, for the parent to record.
+func (b *builder) child(parentID, parentScope string, c cmddesc.ChildInvocation, reg cmddesc.Registry, ctx cmddesc.Context, chain []string) string {
+	var leaves []cmdparse.ParsedCommand
+	var text string
+	switch c.Dialect {
+	case "shell":
+		sp := cmdparse.ParseShell(c.Program)
+		if sp.Unparseable {
+			reason := "child program unparseable"
+			if sp.Reason != "" {
+				reason += ": " + sp.Reason
+			}
+			return reason
+		}
+		leaves, text = sp.Leaves, normalizeProgram(c.Program)
+	case "argv":
+		if len(c.Argv) == 0 {
+			return "child invocation has an empty argv"
+		}
+		dynamic := make([]bool, len(c.Argv))
+		copy(dynamic, c.ArgvDynamic)
+		raw := strings.Join(c.Argv, " ")
+		leaves = []cmdparse.ParsedCommand{{Executable: c.Argv[0], Args: c.Argv[1:], ArgLiveExpansion: dynamic[1:], Raw: raw}}
+		text = normalizeProgram(raw)
+	default:
+		return "child invocation in unmodeled dialect " + c.Dialect
+	}
+	if len(chain) >= maxChildDepth {
+		return fmt.Sprintf("child invocation nested deeper than %d", maxChildDepth)
+	}
+	for _, prev := range chain {
+		if prev == text {
+			return "child invocation repeats an enclosing program: " + text
+		}
+	}
+
+	scope := b.newScope(parentScope, c.Source)
+	start := len(b.g.Nodes)
+	b.leaves(leaves, scope)
+	end := len(b.g.Nodes)
+	for j := start; j < end; j++ {
+		if b.g.Nodes[j].Kind == NodeCommand && b.g.Nodes[j].Scope == scope {
+			b.edge(b.g.Nodes[j].ID, parentID, EdgeExecutes, c.Source)
+		}
+	}
+	next := make([]string, 0, len(chain)+1)
+	next = append(append(next, chain...), text)
+	b.interpretRange(start, end, reg, ctx, next)
+	return ""
+}
+
+// normalizeProgram collapses whitespace so the cycle check compares program
+// text, not its spacing.
+func normalizeProgram(s string) string {
+	return strings.Join(strings.Fields(s), " ")
+}
+
+// deriveFlows adds Flow edges from structure plus effects: a Pipe whose left
+// side emits stdout CONTENT and whose right side consumes stdin, a RedirectIn
+// into a stdin consumer, a Substitution whose leaf emits content (into the
+// containing leaf's argv), and a Heredoc into a stdin consumer. A Command
+// node's stdout is only what its own effects say — a `bash -c` parent does
+// not inherit its child's stdout, which is a known gap that errs towards
+// fewer flow edges but never towards approval (the child is judged on its
+// own, and an unvetted sink is Unknown regardless).
+func (b *builder) deriveFlows() {
+	stdout, stdin := map[string]bool{}, map[string]bool{}
+	for _, n := range b.g.Nodes {
+		for _, e := range n.Effects {
+			if e.Kind != cmddesc.EffectStdio {
+				continue
+			}
+			switch {
+			case e.Stream == cmddesc.StreamStdout && !e.Metadata:
+				stdout[n.ID] = true
+			case e.Stream == cmddesc.StreamStdin:
+				stdin[n.ID] = true
+			}
+		}
+	}
+	structural := append([]Edge(nil), b.g.Edges...)
+	for _, e := range structural {
+		switch e.Kind {
+		case EdgePipe:
+			if stdout[e.From] && stdin[e.To] {
+				b.edge(e.From, e.To, EdgeFlow, "stdout->stdin")
+			}
+		case EdgeRedirectIn:
+			if stdin[e.To] {
+				b.edge(e.From, e.To, EdgeFlow, "file->stdin")
+			}
+		case EdgeSubstitution:
+			if stdout[e.From] {
+				b.edge(e.From, e.To, EdgeFlow, "stdout->argv")
+			}
+		case EdgeHeredoc:
+			if stdin[e.To] {
+				b.edge(e.From, e.To, EdgeFlow, "heredoc->stdin")
+			}
 		}
 	}
 }

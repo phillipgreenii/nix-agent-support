@@ -1,0 +1,4 @@
+flowchart LR
+    n0["command: curl -o out.json https://example.com/x<br/>- path:truncate out.json [arg 1]<br/>- stdio:stdout content<br/>- net:inbound example.com GET [arg 2]<br/>mark=permitted"]
+    n1[/"file: out.json"/]
+    n0 -->|"writes: truncate"| n1

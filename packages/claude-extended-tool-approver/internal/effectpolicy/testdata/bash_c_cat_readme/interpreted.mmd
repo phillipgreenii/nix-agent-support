@@ -1,0 +1,8 @@
+flowchart LR
+    n0["command: bash -c 'cat README.md'<br/>- program:shell #quot;cat README.md#quot;<br/>mark=permitted"]
+    subgraph sg_s0["bash -c"]
+        n1["command: cat README.md<br/>- path:read README.md [arg 0]<br/>- stdio:stdout content<br/>mark=permitted"]
+        n2[/"file: README.md"/]
+    end
+    n1 -->|"reads: read"| n2
+    n1 -->|"executes: bash -c"| n0
