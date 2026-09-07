@@ -425,17 +425,29 @@ var gitStatusSchema = CommandSchema{
 	EndOfOptions: true,
 }
 
-// gitCleanSchema: -n/--dry-run is a real TransformDryRun (not just an inert
-// flag git happens to also model): without it every pathspec is a
-// PathDelete, and an implicit PathDelete of "." fires when NO pathspec is
-// given. `-i`/`--interactive` is deliberately left unmodeled (its prompts
-// make the actual deletions data-dependent, not statically knowable).
-// Flags verified against this host's `git clean -h`.
+// gitCleanSchema: every pathspec is a PathDelete, and an implicit PathDelete
+// of "." fires when NO pathspec is given.
+//
+// `-n`/`--dry-run` are DELIBERATELY ABSENT from Flags, so they are unknown
+// flags => insufficient => Abstain. Operator ruling pg2-4yy4r item 3
+// (2026-07-30, implemented in production by pg2-u0e0c; reaffirmed on
+// tc-z806.4, 2026-09-07): `git clean` abstains in EVERY spelling, dry-run
+// included, with no flag inspection — the flag-aware split (approve
+// -n/--dry-run, abstain -f) was refuted because the flag test itself is the
+// bug surface (`-fdx` is one token; git accepts any unambiguous long-option
+// prefix). Slice 3a had modeled -n/--dry-run as a real TransformDryRun here,
+// which auto-approved `git clean -n`; that re-litigated the ruling and is
+// undone as data. TransformDryRun itself is unaffected (git push -n is a
+// separate pending decision, tc-ife3 item 2). Raising clean to Reject would
+// need a NEW ruling (production's clean arm asks for one).
+//
+// `-i`/`--interactive` is likewise left unmodeled (its prompts make the
+// actual deletions data-dependent, not statically knowable). Flags verified
+// against this host's `git clean -h`.
 var gitCleanSchema = CommandSchema{
 	Name:       "clean",
 	Provenance: "git version 2.54.0, git clean -h",
 	Flags: map[string]FlagSpec{
-		"-n": {Transform: EffectTransform{Kind: TransformDryRun}}, "--dry-run": {Transform: EffectTransform{Kind: TransformDryRun}},
 		"-f": inert, "--force": inert,
 		"-d": inert,
 		"-x": inert, "-X": inert,

@@ -66,8 +66,8 @@ git_status                          git status                                  
 git_status_porcelain                git status --porcelain=v2 -b                                   approve/git              approve  agree                all 1 command nodes permitted
 git_status_pathspec                 git status -- README.md                                        approve/git              approve  agree                all 1 command nodes permitted
 git_status_readonly_pathspec        git status /nix/store/x                                        approve/git              approve  agree                all 1 command nodes permitted
-git_clean_n                         git clean -n                                                   noopinion/git            approve  looser-than-abstain  all 1 command nodes permitted
-git_clean_nd                        git clean -nd                                                  noopinion/git            approve  looser-than-abstain  all 1 command nodes permitted
+git_clean_n                         git clean -n                                                   noopinion/git            abstain  both-undecided       node n0 (git clean -n): unknown flag -n
+git_clean_nd                        git clean -nd                                                  noopinion/git            abstain  both-undecided       node n0 (git clean -nd): unknown flag -nd
 git_clean_f                         git clean -f                                                   noopinion/git            approve  looser-than-abstain  all 1 command nodes permitted
 git_clean_fd_pathspec               git clean -fd sub                                              noopinion/git            approve  looser-than-abstain  all 1 command nodes permitted
 git_clean_f_nix_store               git clean -f /nix/store/x                                      noopinion/git            reject   spike-stricter       node n0 (git clean -f /nix/store/x): path:delete /nix/store/x [arg 1]: no-write-to-read-only-path (write to read-only zone)

@@ -204,8 +204,12 @@ var goldenCases = []goldenCase{
 	{"git_status_porcelain", "git status --porcelain=v2 -b", evalcontract.Approve, nil},
 	{"git_status_pathspec", "git status -- README.md", evalcontract.Approve, nil},
 	{"git_status_readonly_pathspec", "git status /nix/store/x", evalcontract.Approve, nil},
-	{"git_clean_n", "git clean -n", evalcontract.Approve, nil},
-	{"git_clean_nd", "git clean -nd", evalcontract.Approve, nil},
+	// git clean -n / -nd: Abstain by operator ruling pg2-4yy4r item 3 (git
+	// clean abstains in every spelling, dry-run included) — gitCleanSchema
+	// deliberately omits -n/--dry-run so they are unknown flags. See the
+	// schema's doc comment; tc-z806.4.
+	{"git_clean_n", "git clean -n", evalcontract.Abstain, nil},
+	{"git_clean_nd", "git clean -nd", evalcontract.Abstain, nil},
 	{"git_clean_f", "git clean -f", evalcontract.Approve, nil},
 	{"git_clean_fd_pathspec", "git clean -fd sub", evalcontract.Approve, nil},
 	{"git_clean_f_nix_store", "git clean -f /nix/store/x", evalcontract.Reject, nil},

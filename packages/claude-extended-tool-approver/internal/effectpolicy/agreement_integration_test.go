@@ -375,31 +375,20 @@ var knownSpikeLooser = map[string]spikeLooserEntry{
 			"identical to git_push_force_dry_run: no EffectRemote survives to reach RemoteMutation, " +
 			"so the spike Approves while pushVerdict's unconditional force check Rejects.",
 	},
-	"git_clean_n": {
-		Class: "looser-than-abstain",
-		Cause: "internal/rules/git/git.go's `clean` arm is a deliberate, operator-ruled (2026-07-30, " +
-			"pg2-u0e0c) UNIFORM Abstain for every spelling of `git clean` — including `-n`/" +
-			"`--dry-run` — with NO flag inspection at all (the doc comment there records the ruling " +
-			"explicitly REJECTED a flag-aware design). So live abstains (NoOpinion) on a dry-run " +
-			"clean exactly like every other spelling. The spike's gitCleanSchema instead models " +
-			"`-n`/`--dry-run` as a real TransformDryRun: it strips every write-access EffectPath " +
-			"(registry.go's gitCleanSchema comment), which removes the implicit `PathDelete \".\"` " +
-			"this leaf would otherwise emit (no positional given), leaving no effect for any policy " +
-			"to forbid — the spike Approves. This is not a bug in either engine's modeling of git " +
-			"itself (a real `-n` clean truly deletes nothing); it is that production's ruling is " +
-			"deliberately more conservative than git's own semantics for this whole subcommand, " +
-			"and the spike's schema has no way to represent \"treat this subcommand as opaque\" " +
-			"short of leaving it unregistered.",
-	},
-	"git_clean_nd": {
-		Class: "looser-than-abstain",
-		Cause: "same root cause as git_clean_n (the uniform operator-ruled Abstain covers `-nd` " +
-			"exactly like `-n`); the spike's TransformDryRun strips the implicit delete the same way " +
-			"regardless of the accompanying `-d`, since `-d` is modeled `inert` in gitCleanSchema.",
-	},
+	// git_clean_n / git_clean_nd were registered here (slice 3d) as
+	// looser-than-abstain: the spike's gitCleanSchema modeled `-n`/`--dry-run`
+	// as a TransformDryRun that stripped the implicit `PathDelete "."`, so the
+	// spike Approved where production's uniform operator-ruled Abstain
+	// (pg2-4yy4r item 3, pg2-u0e0c) had no opinion. tc-z806.4 removed those
+	// two flags from gitCleanSchema (unknown flag => insufficient => Abstain),
+	// so both rows are now both-undecided and their entries are deleted —
+	// the register must not carry rows the harness no longer classifies as
+	// looser (TestAgreement would flag a Class mismatch only for rows that
+	// ARE looser; a stale entry for a non-looser row would otherwise sit
+	// here silently).
 	"git_clean_f": {
 		Class: "looser-than-abstain",
-		Cause: "live abstains uniformly on `git clean` per the same pg2-u0e0c ruling (no flag " +
+		Cause: "live abstains uniformly on `git clean` per the pg2-u0e0c ruling (no flag " +
 			"inspection, `-f` included). The spike's gitCleanSchema treats `-f` as `inert` (no " +
 			"transform) and emits the implicit `PathDelete \".\"` (no positional given), which " +
 			"NoWriteToReadOnlyPath judges against the fixture project root — a read-write zone — " +
