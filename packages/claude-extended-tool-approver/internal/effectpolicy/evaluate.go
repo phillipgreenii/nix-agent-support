@@ -26,6 +26,32 @@ import (
 // Abstain; else Approve. Reason names the first deciding node and effect in
 // slice order, prefixed by the node's scope path so a verdict inside
 // `bash -c` reads as such.
+//
+// bash -c / sh -c recursion folds to the WORST child verdict (slice 3v,
+// tc-lc8f item 4c; tc-ife3 item 1). Operator ruling (Phillip, 2026-09-07,
+// verbatim, recorded on tc-ife3 and tc-vn5z): "bash -c should recurse and
+// return worst. ie any rejextion rejects." Normalized: the spike's
+// recursion into a bare top-level `bash -c '<script>'` (build.go's
+// builder.child, "shell" dialect) is correct and stays; the fold over the
+// recursed children must be worst-of — any Forbidden anywhere in the child
+// graph -> Reject; else any Insufficient/Unknown -> Abstain; else
+// Permitted -> Approve. This is already exactly what the graph fold above
+// does, unconditionally, for EVERY Command node regardless of scope: the
+// loop over g.Nodes below never filters by scope or nesting depth, so a
+// child node produced by recursing into a `bash -c` script folds into the
+// SAME forbidden/insufficient/approve variables a top-level node would,
+// with no special-casing by dialect or command name. Verified empirically
+// (golden_test.go's bash_c_reject_* / bash_c_abstain_* / bash_c_approve_*
+// cases, slice 3v): a Reject-producing child wins the fold regardless of
+// its position — first, middle, or last statement in a `;` list, inside
+// `||`/`&&`, inside a pipeline stage, inside a subshell `( ... )`, or
+// nested inside another `bash -c` — and Forbidden always outranks a
+// sibling Insufficient. No code change was required for this slice; the
+// ruling resolves tc-ife3 item 1 in the spike's favour, and production
+// (internal/rules/safecmds) is taught later, not here — see
+// agreement_integration_test.go's knownSpikeLooser entries for the bash -c
+// rows, which still register against production's current, unrelated gap
+// (no rule for a bare top-level `bash -c` at all).
 func Evaluate(req evalcontract.Request, reg cmddesc.Registry, policies []Policy, graphPolicies []GraphPolicy) evalcontract.Response {
 	sp := cmdparse.ParseShell(req.Command)
 	if sp.Unparseable {

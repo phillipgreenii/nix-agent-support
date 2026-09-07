@@ -1,0 +1,12 @@
+flowchart LR
+    n0["command: bash -c 'bash -c #quot;rm -rf /nix/store/x#quot;'<br/>- program:shell #quot;bash -c \#quot;rm -rf /nix/store/x\#quot;#quot;<br/>mark=permitted"]
+    subgraph sg_s0["bash -c"]
+        n1["command: bash -c #quot;rm -rf /nix/store/x#quot;<br/>- program:shell #quot;rm -rf /nix/store/x#quot;<br/>mark=permitted"]
+        subgraph sg_s0_s1["bash -c"]
+            n2["command: rm -rf /nix/store/x<br/>- path:delete /nix/store/x [arg 1]<br/>mark=forbidden: path:delete /nix/store/x [arg 1]: delete-access (delete of read-only zone)"]
+            n3[/"file: /nix/store/x"/]
+        end
+    end
+    n2 -->|"writes: delete"| n3
+    n1 -->|"executes: bash -c"| n0
+    n2 -->|"executes: bash -c"| n1

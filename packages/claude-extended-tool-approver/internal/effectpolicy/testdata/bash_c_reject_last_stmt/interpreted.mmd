@@ -1,0 +1,13 @@
+flowchart LR
+    n0["command: bash -c 'cat README.md; rm -rf /nix/store/x'<br/>- program:shell #quot;cat README.md; rm -rf /nix/store/x#quot;<br/>mark=permitted"]
+    subgraph sg_s0["bash -c"]
+        n1["command: cat README.md<br/>- path:read README.md [arg 0]<br/>- stdio:stdout content<br/>mark=permitted"]
+        n2["command: rm -rf /nix/store/x<br/>- path:delete /nix/store/x [arg 1]<br/>mark=forbidden: path:delete /nix/store/x [arg 1]: delete-access (delete of read-only zone)"]
+        n3[/"file: README.md"/]
+        n4[/"file: /nix/store/x"/]
+    end
+    n1 -->|"reads: read"| n3
+    n2 -->|"writes: delete"| n4
+    n1 -->|"executes: bash -c"| n0
+    n2 -->|"executes: bash -c"| n0
+    n1 -->|"flow: child stdout-#gt;stdout"| n0

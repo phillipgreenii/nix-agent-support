@@ -268,6 +268,33 @@ var goldenCases = []goldenCase{
 	{"bash_script_file", "bash script.sh", evalcontract.Abstain, nil},
 	{"bash_c_unparseable_child", `bash -c "cat 'unterminated"`, evalcontract.Abstain, nil},
 
+	// slice 3v (tc-lc8f item 4c; tc-ife3 item 1): operator ruling (Phillip,
+	// 2026-09-07, verbatim, recorded on tc-ife3 and tc-vn5z) — "bash -c should
+	// recurse and return worst. ie any rejextion rejects." The recursed
+	// children's fold must be worst-of over the WHOLE child graph: any
+	// Forbidden anywhere -> Reject; else any Insufficient/Unknown anywhere ->
+	// Abstain; else Approve. Verified: Evaluate's node-fold (evaluate.go) is
+	// already a single flat loop over every Command node in g.Nodes,
+	// regardless of scope, so a Forbidden/Insufficient mark on a recursed
+	// child node already wins the SAME way it would on a top-level node — no
+	// code change was needed; these goldens exist to pin the property so a
+	// future change cannot silently regress it. Every position the ruling
+	// names is covered: first/middle/last statement in a `;` list, inside
+	// `||`/`&&`, inside a pipeline stage, inside a nested `bash -c` within a
+	// `bash -c`, inside a subshell `( ... )`, and Forbidden beating a sibling
+	// Insufficient.
+	{"bash_c_reject_first_stmt", "bash -c 'rm -rf /nix/store/x; cat README.md'", evalcontract.Reject, nil},
+	{"bash_c_reject_last_stmt", "bash -c 'cat README.md; rm -rf /nix/store/x'", evalcontract.Reject, nil},
+	{"bash_c_reject_or_true", "bash -c 'rm -rf /nix/store/x || true'", evalcontract.Reject, nil},
+	{"bash_c_reject_and_true", "bash -c 'true && rm -rf /nix/store/x'", evalcontract.Reject, nil},
+	{"bash_c_reject_pipe_tee", "bash -c 'cat README.md | tee /nix/store/x'", evalcontract.Reject, nil},
+	{"bash_c_reject_nested_bash_c", `bash -c 'bash -c "rm -rf /nix/store/x"'`, evalcontract.Reject, nil},
+	{"bash_c_reject_subshell", "bash -c '(rm -rf /nix/store/x)'", evalcontract.Reject, nil},
+	{"bash_c_reject_beats_insufficient", "bash -c 'rm -rf /nix/store/x; frobnicate'", evalcontract.Reject, nil},
+	{"bash_c_abstain_insufficient_sibling", "bash -c 'cat README.md; frobnicate'", evalcontract.Abstain, nil},
+	{"bash_c_approve_two_reads", "bash -c 'cat README.md; cat go.mod'", evalcontract.Approve, nil},
+	{"sh_c_reject_rm_nix_store", "sh -c 'rm -rf /nix/store/x'", evalcontract.Reject, nil},
+
 	// slice 3g: stdio flow through a nested scope (build.go's deriveFlows) —
 	// a `bash -c` child shares the parent's stdin AND stdout file
 	// descriptors, so content crossing the parent's stdin/stdout now reaches

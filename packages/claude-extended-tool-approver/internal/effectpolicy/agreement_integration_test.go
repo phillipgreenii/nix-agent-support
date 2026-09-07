@@ -316,13 +316,23 @@ var knownSpikeLooser = map[string]spikeLooserEntry{
 		Cause: "spike recurses into a bare top-level `bash -c` and approves once the " +
 			"recursed leaf is permitted; production's safecmds only auto-clears sh|bash -c " +
 			"reached through xargs or under -n, so a bare `bash -c 'cat README.md'` reaches " +
-			"chain exhaustion (NoOpinion) in production today.",
+			"chain exhaustion (NoOpinion) in production today. Slice 3v (tc-lc8f item 4c; " +
+			"tc-ife3 item 1) ratifies the recursion itself and its worst-of fold as CORRECT " +
+			"per the operator ruling (Phillip, 2026-09-07, verbatim, recorded on tc-ife3/" +
+			"tc-vn5z): \"bash -c should recurse and return worst. ie any rejextion rejects.\" " +
+			"This row's looseness is a SEPARATE, unaddressed gap — production has no rule at " +
+			"all for a bare top-level `bash -c`, independent of how the spike folds whatever " +
+			"it finds inside — and stays registered under the same cause until production is " +
+			"taught (not in this slice).",
 	},
 	"bash_c_bash_c_cat_readme": {
 		Class: "looser-than-abstain",
 		Cause: "same root cause as bash_c_cat_readme, one recursion level deeper " +
 			"(bash -c wrapping another bash -c): the spike's recursion is depth-general " +
-			"(up to maxChildDepth); production has no top-level bash -c rule at any depth.",
+			"(up to maxChildDepth); production has no top-level bash -c rule at any depth. " +
+			"Slice 3v's operator ruling (see bash_c_cat_readme's Cause, cited verbatim there) " +
+			"ratifies this depth-general recursion and its worst-of fold; the looseness here is " +
+			"the same unaddressed production gap, unchanged by that ruling.",
 	},
 	"bash_c_cat_readme_pipe_tee": {
 		Class: "looser-than-abstain",
@@ -334,14 +344,34 @@ var knownSpikeLooser = map[string]spikeLooserEntry{
 			"correctly (there is no network sink here, so that policy has nothing to say either " +
 			"way) — the looser verdict was already present on the un-piped bash_c_cat_readme case " +
 			"and piping the (still-bare) `bash -c` into `tee` does not engage any production rule " +
-			"that would have caught it.",
+			"that would have caught it. Slice 3v's operator ruling (see bash_c_cat_readme's Cause) " +
+			"ratifies the recursion/worst-of fold this row also exercises; the looseness is the " +
+			"same unaddressed production gap, unchanged by that ruling.",
 	},
 	"bash_c_bash_c_cat_readme_pipe_tee": {
 		Class: "looser-than-abstain",
 		Cause: "same root cause as bash_c_bash_c_cat_readme (two recursion levels, no production " +
 			"rule for a bare top-level bash -c at any depth), piped into `tee` for the same reason " +
 			"bash_c_cat_readme_pipe_tee is registered rather than a new cause: slice 3g's flow " +
-			"edges make the graph correctly see the pipe, they do not add a production rule.",
+			"edges make the graph correctly see the pipe, they do not add a production rule. " +
+			"Slice 3v's operator ruling (see bash_c_cat_readme's Cause) ratifies the recursion/" +
+			"worst-of fold; the looseness is the same unaddressed production gap.",
+	},
+	"bash_c_approve_two_reads": {
+		Class: "looser-than-abstain",
+		Cause: "same root cause as bash_c_cat_readme (a bare top-level `bash -c` matches no " +
+			"production rule and reaches chain exhaustion, NoOpinion), now pinned as a two-statement " +
+			"`;`-list case by slice 3v (tc-lc8f item 4c; tc-ife3 item 1) per the operator ruling " +
+			"(Phillip, 2026-09-07, verbatim, recorded on tc-ife3/tc-vn5z): \"bash -c should recurse " +
+			"and return worst. ie any rejextion rejects.\" The ruling governs the FOLD over recursed " +
+			"children (worst-of), not whether production has a bare-bash-c rule at all — that gap is " +
+			"unchanged from slice 3b/3g and stays registered under the same cause. Every REJECT-shaped " +
+			"sibling this slice added (bash_c_reject_first_stmt, _last_stmt, _or_true, _and_true, " +
+			"_pipe_tee, _nested_bash_c, _subshell, _beats_insufficient, and sh_c_reject_rm_nix_store) " +
+			"classifies spike-stricter (live=NoOpinion, spike=Reject) and needs no register entry; " +
+			"bash_c_abstain_insufficient_sibling classifies both-undecided for the same reason. Only " +
+			"this all-Approve row is looser, and only because it is, at bottom, still an unregistered " +
+			"bare `bash -c` — the worst-of fold this slice verifies did not change that.",
 	},
 	"git_push_force_dry_run": {
 		Class: "looser-than-reject",
