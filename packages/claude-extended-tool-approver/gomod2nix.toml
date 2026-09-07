@@ -58,5 +58,5 @@ schema = 3
     hash = 'sha256-cO1uE6/DGc1+jJ22bmqjQFqGPyFt3mTK1cmHRQXBTqk='
 
   [mod.'mvdan.cc/sh/v3']
-    version = 'v3.14.0'
-    hash = 'sha256-0KnQEHupKCh9c/09t5q8DOy2PMvcjctq9QwjZ4Xztsk='
+    version = 'v3.14.1'
+    hash = 'sha256-+739dk4UfUQAJZd4uwOJ3LjBcuUG2v/wB81wmWB2Stk='

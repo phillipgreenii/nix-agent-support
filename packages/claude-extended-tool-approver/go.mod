@@ -6,7 +6,7 @@ require (
 	github.com/phillipgreenii/x v0.0.0-20260903063345-1f37a8dfe05a
 	github.com/spf13/cobra v1.10.2
 	modernc.org/sqlite v1.58.0
-	mvdan.cc/sh/v3 v3.14.0
+	mvdan.cc/sh/v3 v3.14.1
 )
 
 require (
