@@ -374,10 +374,18 @@ var goldenCases = []goldenCase{
 	{"git_commit_m", "git commit -m x", evalcontract.Approve, nil},
 	{"git_commit_no_verify", "git commit --no-verify -m x", evalcontract.Abstain, nil},
 
-	// git rm: positionals are PathDelete (a write class, unlike add/commit's
-	// PathRead pathspecs), so a /nix/store target genuinely rejects.
+	// git rm / git mv: positionals are PathMODIFY, not PathDelete — operator
+	// ruling tc-z806 (2026-09-07): git rm "can be consider the same as edit
+	// because the value can be retrieved from the git history". Still a write
+	// class, so a /nix/store target genuinely rejects; -r and --cached do not
+	// change the class (no breadth concept in this design).
 	{"git_rm_readme", "git rm README.md", evalcontract.Approve, nil},
 	{"git_rm_nix_store", "git rm /nix/store/x", evalcontract.Reject, nil},
+	{"git_rm_r_sub", "git rm -r sub", evalcontract.Approve, nil},
+	{"git_rm_cached_readme", "git rm --cached README.md", evalcontract.Approve, nil},
+	{"git_mv_readme_other", "git mv README.md other.md", evalcontract.Approve, nil},
+	{"git_mv_readme_nix_store", "git mv README.md /nix/store/x", evalcontract.Reject, nil},
+	{"git_mv_too_few", "git mv README.md", evalcontract.Abstain, nil},
 }
 
 func TestGolden(t *testing.T) {

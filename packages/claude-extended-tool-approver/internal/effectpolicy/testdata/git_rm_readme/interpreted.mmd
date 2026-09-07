@@ -1,6 +1,6 @@
 flowchart LR
-    n0["command: git rm README.md<br/>- path:delete README.md [arg 0]<br/>- path:modify .git [implicit]<br/>- stdio:stdout metadata<br/>mark=permitted"]
+    n0["command: git rm README.md<br/>- path:modify README.md [arg 0]<br/>- path:modify .git [implicit]<br/>- stdio:stdout metadata<br/>mark=permitted"]
     n1[/"file: README.md"/]
     n2[/"file: .git"/]
-    n0 -->|"writes: delete"| n1
+    n0 -->|"writes: modify"| n1
     n0 -->|"writes: modify"| n2

@@ -389,6 +389,7 @@ var gitSchema = CommandSchema{
 		"add":       gitAddSchema,
 		"commit":    gitCommitSchema,
 		"rm":        gitRmSchema,
+		"mv":        gitMvSchema,
 	},
 }
 
@@ -828,9 +829,19 @@ var gitCommitSchema = CommandSchema{
 	EndOfOptions: true,
 }
 
-// gitRmSchema: every positional is deleted from the working tree (and the
-// index — the implicit PathModify of ".git" always fires). `-n`/`--dry-run`
-// is a real TransformDryRun. Flags verified against this host's `git rm -h`.
+// gitRmSchema: every positional is a PathMODIFY, not a PathDelete, even
+// though git rm removes it from the working tree. Operator ruling (Phillip,
+// 2026-09-07, design bead tc-z806, verbatim): "rm is different from git rm.
+// git rm can be consider the same as edit because the value can be retrieved
+// from the git history." A tracked path's content survives in history, so
+// the effect is the same access class as an edit; `--cached` (index only,
+// working tree untouched) is a modify for the same reason. The implicit
+// PathModify of ".git" always fires (the index is written). `-r` is inert:
+// the class is per-path and there is no breadth concept in this design.
+// `-n`/`--dry-run` is a real TransformDryRun (not covered by the git clean
+// ruling, which is specific to that subcommand). Flags verified against this
+// host's `git rm -h`; `--sparse`, `--pathspec-from-file`, and
+// `--pathspec-file-nul` are left unmodeled (Abstain).
 var gitRmSchema = CommandSchema{
 	Name:       "rm",
 	Provenance: "git version 2.54.0, git rm -h",
@@ -839,14 +850,47 @@ var gitRmSchema = CommandSchema{
 		"-r":       inert,
 		"-f":       inert, "--force": inert,
 		"-q": inert, "--quiet": inert,
-		"-n": {Transform: EffectTransform{Kind: TransformDryRun}}, "--dry-run": {Transform: EffectTransform{Kind: TransformDryRun}},
+		"--ignore-unmatch": inert,
+		"-n":               {Transform: EffectTransform{Kind: TransformDryRun}}, "--dry-run": {Transform: EffectTransform{Kind: TransformDryRun}},
 	},
-	Positionals: PositionalSpec{Rest: PathDelete},
+	Positionals: PositionalSpec{Rest: PathModify},
 	ImplicitEffects: []ImplicitEffect{
 		{Role: PathModify, Target: ".git"},
 	},
 	Stdin:        StdinNever,
 	Stdout:       StdoutMetadata,
+	UnknownFlag:  UnknownFlagInsufficient,
+	EndOfOptions: true,
+}
+
+// gitMvSchema: `git mv SOURCE... DESTINATION` renames tracked paths. Every
+// positional — each source and the trailing destination — is a PathModify,
+// by the same tc-z806 ruling as gitRmSchema (the old name's content is
+// recoverable from history; the move is an edit of the tree, not a
+// delete-plus-create). The implicit PathModify of ".git" always fires (the
+// index is rewritten). `-n`/`--dry-run` is a real TransformDryRun. `-k`
+// (skip errors) and `-f` (overwrite an existing target) do not change the
+// access class of any operand. `--sparse` is left unmodeled. Flags verified
+// against this host's `git mv -h`.
+var gitMvSchema = CommandSchema{
+	Name:       "mv",
+	Provenance: "git version 2.54.0, git mv -h",
+	Flags: map[string]FlagSpec{
+		"-v": inert, "--verbose": inert,
+		"-f": inert, "--force": inert,
+		"-k": inert,
+		"-n": {Transform: EffectTransform{Kind: TransformDryRun}}, "--dry-run": {Transform: EffectTransform{Kind: TransformDryRun}},
+	},
+	Positionals: PositionalSpec{
+		Rest:     PathModify,
+		MinRest:  1,
+		Trailing: []OperandRole{PathModify},
+	},
+	ImplicitEffects: []ImplicitEffect{
+		{Role: PathModify, Target: ".git"},
+	},
+	Stdin:        StdinNever,
+	Stdout:       StdoutNone,
 	UnknownFlag:  UnknownFlagInsufficient,
 	EndOfOptions: true,
 }
