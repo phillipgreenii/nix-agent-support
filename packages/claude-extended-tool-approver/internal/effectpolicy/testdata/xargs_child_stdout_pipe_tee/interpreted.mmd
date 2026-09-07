@@ -1,0 +1,19 @@
+flowchart LR
+    n0["command: cat list.txt<br/>- path:read list.txt [arg 0]<br/>- stdio:stdout content<br/>mark=permitted"]
+    n1["command: xargs head<br/>- stdio:stdin content<br/>mark=permitted"]
+    n2["command: tee copy.md<br/>- path:truncate copy.md [arg 0]<br/>- stdio:stdin content<br/>- stdio:stdout content<br/>mark=permitted"]
+    n3[/"file: list.txt"/]
+    n6[/"file: copy.md"/]
+    subgraph sg_s0["xargs"]
+        n4["command: head #lt;stdin-item#gt;<br/>- path:read #lt;stdin-item#gt; (dynamic) [arg 0]<br/>- stdio:stdout content<br/>mark=insufficient: path:read #lt;stdin-item#gt; (dynamic) [arg 0]: no-read-of-secret-path (path is a runtime expansion)"]
+        n5[/"file: #lt;stdin-item#gt; (dynamic)"/]
+    end
+    n0 -->|"pipe"| n1
+    n1 -->|"pipe"| n2
+    n0 -->|"reads: read"| n3
+    n4 -->|"reads: read"| n5
+    n2 -->|"writes: truncate"| n6
+    n4 -->|"executes: xargs"| n1
+    n0 -->|"flow: stdout-#gt;stdin"| n1
+    n1 -->|"flow: stdout-#gt;stdin"| n2
+    n4 -->|"flow: child stdout-#gt;stdout"| n1

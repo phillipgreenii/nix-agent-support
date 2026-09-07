@@ -1086,21 +1086,27 @@ var mkdirSchema = CommandSchema{
 
 // exportSchema: each positional is an env assignment (KindEnvAssign) — a
 // `NAME=VALUE` token, or a bare `NAME` marking an already-set shell variable
-// exported. `-n` (unexport) and `-p` (list) are modeled inert; `-n`'s
-// positional is still routed through the same EnvAssign role even though
-// its real effect is an UNexport, not a set — a documented imprecision,
-// harmless today because DefaultPolicies has no policy that judges
-// EffectEnv at all (see judgeNode: an effect no policy applies to falls
-// through to the default MarkPermitted, exactly like an effect kind no
-// policy has ever heard of). `-f` (refer to shell FUNCTIONS, not variables —
-// a materially different form) is deliberately absent from Flags so it hits
-// the generic unknown-flag Insufficient path and abstains. Verified against
-// this host's `help export`.
+// exported. `-p` (list) is modeled inert.
+//
+// `-n` (unexport) is deliberately ABSENT from Flags, unlike `-p`. It used to
+// be modeled inert too, with its positional routed through the same
+// EnvAssign role as a plain `export NAME=VALUE` — the schema's own comment
+// called that harmless because nothing judged EffectEnv. That stopped being
+// true once slice 3f's EnvAssignment policy started judging every
+// EffectEnv: `-n`'s real effect is UNexporting NAME, the opposite of
+// setting it, so routing it through EnvAssign would judge
+// `export -n LD_PRELOAD` as if it SET LD_PRELOAD and wrongly Forbid it.
+// Unexporting is rare enough that a dedicated Unset env-effect is not worth
+// adding for this spike; leaving `-n` out of Flags instead sends it through
+// the generic unknown-flag path (UnknownFlagInsufficient below), so it
+// Abstains rather than being mischaracterized. `-f` (refer to shell
+// FUNCTIONS, not variables — a materially different form) is absent for the
+// same generic-unknown-flag reason. Verified against this host's
+// `help export`.
 var exportSchema = CommandSchema{
 	Name:       "export",
 	Provenance: "bash 5.3.9 builtin export, help export",
 	Flags: map[string]FlagSpec{
-		"-n": inert,
 		"-p": inert,
 	},
 	Positionals:  PositionalSpec{Rest: EnvAssign},

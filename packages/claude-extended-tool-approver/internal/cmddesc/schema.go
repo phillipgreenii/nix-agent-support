@@ -51,9 +51,10 @@ const (
 	// `NAME=VALUE` (a new value) or a bare `NAME` (marks an existing shell
 	// variable exported — `export`'s own semantics for a bare name). Both
 	// forms are modeled as an EffectEnv SET of NAME; this slice does not
-	// distinguish them further (no policy yet judges EffectEnv by value, and
-	// `export -n NAME`'s actual UNexport semantics is a known, harmless
-	// imprecision documented on exportSchema).
+	// distinguish them further (no policy yet judges EffectEnv by value).
+	// `export -n NAME`'s UNexport semantics is the OPPOSITE of a set, so its
+	// positional is deliberately NOT routed through this role at all — see
+	// exportSchema's doc comment for why `-n` is left unmodeled instead.
 	KindEnvAssign
 	// KindUnmodeled marks a positional slot the schema author has
 	// DELIBERATELY left without a role. Unlike an absent Positionals spec

@@ -10,3 +10,5 @@ flowchart LR
     n2 -->|"reads: read"| n3
     n1 -->|"executes: bash -c"| n0
     n2 -->|"executes: bash -c"| n1
+    n1 -->|"flow: child stdout-#gt;stdout"| n0
+    n2 -->|"flow: child stdout-#gt;stdout"| n1

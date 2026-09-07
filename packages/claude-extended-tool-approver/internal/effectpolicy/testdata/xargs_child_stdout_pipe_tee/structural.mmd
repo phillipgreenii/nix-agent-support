@@ -1,0 +1,6 @@
+flowchart LR
+    n0["command: cat list.txt"]
+    n1["command: xargs head"]
+    n2["command: tee copy.md"]
+    n0 -->|"pipe"| n1
+    n1 -->|"pipe"| n2

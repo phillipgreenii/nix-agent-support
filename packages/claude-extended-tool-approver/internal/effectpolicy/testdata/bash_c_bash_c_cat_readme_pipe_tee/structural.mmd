@@ -1,0 +1,4 @@
+flowchart LR
+    n0["command: bash -c 'bash -c #quot;cat README.md#quot;'"]
+    n1["command: tee copy.md"]
+    n0 -->|"pipe"| n1

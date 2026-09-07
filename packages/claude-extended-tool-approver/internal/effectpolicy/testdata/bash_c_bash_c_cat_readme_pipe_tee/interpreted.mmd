@@ -1,0 +1,19 @@
+flowchart LR
+    n0["command: bash -c 'bash -c #quot;cat README.md#quot;'<br/>- program:shell #quot;bash -c \#quot;cat README.md\#quot;#quot;<br/>mark=permitted"]
+    n1["command: tee copy.md<br/>- path:truncate copy.md [arg 0]<br/>- stdio:stdin content<br/>- stdio:stdout content<br/>mark=permitted"]
+    n5[/"file: copy.md"/]
+    subgraph sg_s0["bash -c"]
+        n2["command: bash -c #quot;cat README.md#quot;<br/>- program:shell #quot;cat README.md#quot;<br/>mark=permitted"]
+        subgraph sg_s0_s1["bash -c"]
+            n3["command: cat README.md<br/>- path:read README.md [arg 0]<br/>- stdio:stdout content<br/>mark=permitted"]
+            n4[/"file: README.md"/]
+        end
+    end
+    n0 -->|"pipe"| n1
+    n3 -->|"reads: read"| n4
+    n1 -->|"writes: truncate"| n5
+    n2 -->|"executes: bash -c"| n0
+    n3 -->|"executes: bash -c"| n2
+    n0 -->|"flow: stdout-#gt;stdin"| n1
+    n2 -->|"flow: child stdout-#gt;stdout"| n0
+    n3 -->|"flow: child stdout-#gt;stdout"| n2

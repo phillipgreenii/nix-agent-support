@@ -226,6 +226,37 @@ func TestUnknownTransformFailsClosed(t *testing.T) {
 	}
 }
 
+// TestExportNUnexportUnknownFlag: slice 3g — `-n` (unexport) is removed
+// from exportSchema's Flags entirely, so it is an unknown flag: the whole
+// interpretation is insufficient and FOO's positional is never routed
+// through EnvAssign at all. This replaces the old (incorrect) modeling that
+// treated `export -n FOO` as if `-n` were inert and FOO were a plain SET of
+// FOO, which would have wrongly reached the EnvAssignment policy as
+// EffectEnv{EnvSet: true} for a name that is actually being un-exported.
+func TestExportNUnexportUnknownFlag(t *testing.T) {
+	reg := DefaultRegistry()
+	schema, ok := reg.Lookup("export")
+	if !ok {
+		t.Fatal("export not registered")
+	}
+	in, ok := LookupInterpreter(schema.Interpreter)
+	if !ok {
+		t.Fatal("no interpreter for export")
+	}
+	got := in.Interpret(leaf(t, "export -n FOO"), schema, Context{})
+	if got.Sufficient {
+		t.Errorf("export -n FOO: sufficient = true, want false (unknown flag)")
+	}
+	if got.Insufficiency == "" {
+		t.Error("insufficient without a reason")
+	}
+	for _, e := range got.Effects {
+		if e.Kind == EffectEnv {
+			t.Errorf("export -n FOO: unexpected EffectEnv %+v — -n must not route FOO through EnvAssign", e)
+		}
+	}
+}
+
 func TestRegistryNames(t *testing.T) {
 	want := []string{
 		"[", "bash", "cat", "cp", "curl", "echo", "export", "false", "git", "grep",

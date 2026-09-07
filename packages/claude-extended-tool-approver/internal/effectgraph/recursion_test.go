@@ -191,6 +191,94 @@ func TestFlowEdges(t *testing.T) {
 	}
 }
 
+// TestStdioInheritanceShellChild: a `bash -c` child shares the parent's
+// stdin AND stdout, so a pipe feeding the parent's stdin reaches a child
+// that consumes stdin, and a pipe reading the parent's stdout is fed by a
+// child that emits stdout content — both represented as explicit EdgeFlow
+// edges crossing the EdgeExecutes scope boundary (build.go's deriveFlows).
+func TestStdioInheritanceShellChild(t *testing.T) {
+	reg := cmddesc.DefaultRegistry()
+
+	t.Run("parent stdin flows into a stdin-consuming child", func(t *testing.T) {
+		// tee inside bash -c consumes stdin; the outer pipe feeds the
+		// parent's stdin, which must now reach the child.
+		g := BuildInterpreted(cmdparse.ParseShell("cat a | bash -c 'tee b'"), reg, cmddesc.Context{})
+		cmds := commandNodes(g)
+		cat, parent, tee := cmds[0], cmds[1], cmds[2]
+		flow := edgesOf(g, EdgeFlow)
+		mustHave(t, flow, cat.ID, parent.ID, "stdout->stdin")
+		mustHave(t, flow, parent.ID, tee.ID, "stdin->child stdin")
+	})
+
+	t.Run("child stdout flows out to the parent", func(t *testing.T) {
+		// cat inside bash -c emits stdout content; the outer pipe reads the
+		// parent's stdout, which must now be fed by the child.
+		g := BuildInterpreted(cmdparse.ParseShell("bash -c 'cat a' | tee b"), reg, cmddesc.Context{})
+		cmds := commandNodes(g)
+		parent, tee, cat := cmds[0], cmds[1], cmds[2]
+		flow := edgesOf(g, EdgeFlow)
+		mustHave(t, flow, cat.ID, parent.ID, "child stdout->stdout")
+		mustHave(t, flow, parent.ID, tee.ID, "stdout->stdin")
+	})
+
+	t.Run("fixpoint: two nested bash -c levels", func(t *testing.T) {
+		// The innermost cat's stdout must reach all the way out to the
+		// outermost parent — a single non-iterative pass over EdgeExecutes
+		// would only propagate one level.
+		g := BuildInterpreted(cmdparse.ParseShell(`bash -c 'bash -c "cat a"' | tee b`), reg, cmddesc.Context{})
+		cmds := commandNodes(g)
+		outer, tee, inner, cat := cmds[0], cmds[1], cmds[2], cmds[3]
+		flow := edgesOf(g, EdgeFlow)
+		mustHave(t, flow, cat.ID, inner.ID, "child stdout->stdout")
+		mustHave(t, flow, inner.ID, outer.ID, "child stdout->stdout")
+		mustHave(t, flow, outer.ID, tee.ID, "stdout->stdin")
+		if up := g.UpstreamVia(tee.ID, EdgeFlow); strings.Join(up, ",") != outer.ID+","+inner.ID+","+cat.ID {
+			t.Errorf("upstream from tee = %v, want [%s %s %s]", up, outer.ID, inner.ID, cat.ID)
+		}
+	})
+}
+
+// TestStdioInheritanceXargsChild: an xargs (argv-dialect) child inherits the
+// parent's stdout but NOT its stdin — xargs itself declares StdinAlways and
+// consumes stdin to build the item list the child's argv is populated from,
+// so the child's own reads are not fed by whatever fed xargs's stdin. Only
+// the child-stdout->parent edge is added; no stdin->child-stdin edge is.
+func TestStdioInheritanceXargsChild(t *testing.T) {
+	reg := cmddesc.DefaultRegistry()
+	g := BuildInterpreted(cmdparse.ParseShell("cat list | xargs head | tee copy"), reg, cmddesc.Context{})
+	cmds := commandNodes(g)
+	if len(cmds) != 4 {
+		t.Fatalf("command nodes = %d, want 4: %+v", len(cmds), g.Nodes)
+	}
+	catList, xargsParent, tee, headChild := cmds[0], cmds[1], cmds[2], cmds[3]
+	if headChild.Scope == "" {
+		t.Fatalf("head child not in a nested scope: %+v", headChild)
+	}
+
+	flow := edgesOf(g, EdgeFlow)
+	mustHave(t, flow, catList.ID, xargsParent.ID, "stdout->stdin")
+	mustHave(t, flow, headChild.ID, xargsParent.ID, "child stdout->stdout")
+	mustHave(t, flow, xargsParent.ID, tee.ID, "stdout->stdin")
+
+	for _, e := range flow {
+		if e.Label == "stdin->child stdin" {
+			t.Errorf("xargs child must not inherit stdin, but got edge %+v", e)
+		}
+	}
+}
+
+// mustHave fails the test unless edges contains one edge exactly matching
+// (from, to, label).
+func mustHave(t *testing.T, edges []Edge, from, to, label string) {
+	t.Helper()
+	for _, e := range edges {
+		if e.From == from && e.To == to && e.Label == label {
+			return
+		}
+	}
+	t.Errorf("missing edge %s -[%s]-> %s in %+v", from, label, to, edges)
+}
+
 // TestUpstreamVia: the transitive walk follows only the requested kind and
 // never revisits a node.
 func TestUpstreamVia(t *testing.T) {

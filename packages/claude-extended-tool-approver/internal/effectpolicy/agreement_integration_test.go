@@ -324,6 +324,25 @@ var knownSpikeLooser = map[string]spikeLooserEntry{
 			"(bash -c wrapping another bash -c): the spike's recursion is depth-general " +
 			"(up to maxChildDepth); production has no top-level bash -c rule at any depth.",
 	},
+	"bash_c_cat_readme_pipe_tee": {
+		Class: "looser-than-abstain",
+		Cause: "same root cause as bash_c_cat_readme: a bare top-level `bash -c 'cat README.md'` " +
+			"matches no production rule (safecmds only auto-clears sh|bash -c reached through " +
+			"xargs or under -n) and reaches chain exhaustion (NoOpinion). Slice 3g's new " +
+			"child-stdout->parent-stdout flow edge (build.go's deriveFlows) does not change this " +
+			"row's class: it only lets the graph-level content-flow policy see the pipe to `tee` " +
+			"correctly (there is no network sink here, so that policy has nothing to say either " +
+			"way) — the looser verdict was already present on the un-piped bash_c_cat_readme case " +
+			"and piping the (still-bare) `bash -c` into `tee` does not engage any production rule " +
+			"that would have caught it.",
+	},
+	"bash_c_bash_c_cat_readme_pipe_tee": {
+		Class: "looser-than-abstain",
+		Cause: "same root cause as bash_c_bash_c_cat_readme (two recursion levels, no production " +
+			"rule for a bare top-level bash -c at any depth), piped into `tee` for the same reason " +
+			"bash_c_cat_readme_pipe_tee is registered rather than a new cause: slice 3g's flow " +
+			"edges make the graph correctly see the pipe, they do not add a production rule.",
+	},
 	"git_push_force_dry_run": {
 		Class: "looser-than-reject",
 		Cause: "internal/rules/git/git.go's pushVerdict rejects on `--force`/`-f` (HasLongFlagPrefix/" +

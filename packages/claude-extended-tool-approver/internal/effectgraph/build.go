@@ -50,10 +50,18 @@ type builder struct {
 	files    map[string]string // scope + "\x00" + path -> node ID
 	envs     map[string]string // scope + "\x00" + name -> node ID
 	scopeSeq int
+	// execDialect records, per child Command node ID (the From of an
+	// EdgeExecutes edge), the ChildInvocation.Dialect that produced it
+	// ("shell" for a `bash -c`/`sh -c` program, "argv" for an xargs-style
+	// argument vector). deriveFlows reads this to decide whether the child
+	// shares the parent's stdin (see its doc comment) — it is the only place
+	// outside cmddesc that distinguishes the two child shapes, and it keys on
+	// the dialect data, never on a command name.
+	execDialect map[string]string
 }
 
 func newBuilder() *builder {
-	return &builder{files: map[string]string{}, envs: map[string]string{}}
+	return &builder{files: map[string]string{}, envs: map[string]string{}, execDialect: map[string]string{}}
 }
 
 func (b *builder) add(n Node) string {
@@ -306,6 +314,7 @@ func (b *builder) child(parentID, parentScope string, c cmddesc.ChildInvocation,
 	for j := start; j < end; j++ {
 		if b.g.Nodes[j].Kind == NodeCommand && b.g.Nodes[j].Scope == scope {
 			b.edge(b.g.Nodes[j].ID, parentID, EdgeExecutes, c.Source)
+			b.execDialect[b.g.Nodes[j].ID] = c.Dialect
 		}
 	}
 	next := make([]string, 0, len(chain)+1)
@@ -323,14 +332,41 @@ func normalizeProgram(s string) string {
 // deriveFlows adds Flow edges from structure plus effects: a Pipe whose left
 // side emits stdout CONTENT and whose right side consumes stdin, a RedirectIn
 // into a stdin consumer, a Substitution whose leaf emits content (into the
-// containing leaf's argv), and a Heredoc into a stdin consumer. A Command
-// node's stdout is only what its own effects say — a `bash -c` parent does
-// not inherit its child's stdout, which is a known gap that errs towards
-// fewer flow edges but never towards approval (the child is judged on its
-// own, and an unvetted sink is Unknown regardless).
+// containing leaf's argv), and a Heredoc into a stdin consumer.
+//
+// It also accounts for the standard streams a nested scope SHARES with its
+// parent, rather than treating a Command node's stdout/stdin as only what
+// its own effects say. A child invocation carried in the "shell" dialect
+// (`bash -c PROGRAM`, `sh -c PROGRAM`) runs PROGRAM with the parent's own
+// stdin and stdout file descriptors: a child that consumes stdin is
+// therefore fed by whatever feeds the PARENT's stdin, so the parent counts
+// as a stdin consumer too; and a child that emits stdout content is writing
+// to the same descriptor the parent's own stdout would go to, so the parent
+// counts as emitting stdout content too. An "argv" dialect child (xargs's
+// reconstructed argv) shares only the stdout half: xargs itself declares
+// StdinAlways and consumes stdin to build the item list the child's argv is
+// populated from, so the child's argv does NOT come from whatever fed
+// xargs's own stdin — but the child still inherits and writes to xargs's
+// stdout descriptor. This distinction is read from ChildInvocation.Dialect
+// (via builder.execDialect, recorded when the EdgeExecutes edge was added),
+// never from a command name.
+//
+// The attribution is computed to a FIXPOINT over the EdgeExecutes edges
+// before either flow-edge pass runs below, so it propagates through more
+// than one level of nesting (a `bash -c` inside a `bash -c`). It is then
+// represented explicitly as new EdgeFlow edges — parent->child labelled
+// "stdin->child stdin" for every child that consumes stdin (shell dialect
+// only), and child->parent labelled "child stdout->stdout" for every child
+// that emits stdout content (either dialect) — so an upstream walk from a
+// sink fed by the parent's stdout crosses the scope boundary into the
+// child's own reads, and a walk from a sink inside the child crosses out to
+// whatever feeds the parent's stdin.
 func (b *builder) deriveFlows() {
 	stdout, stdin := map[string]bool{}, map[string]bool{}
 	for _, n := range b.g.Nodes {
+		if n.Kind != NodeCommand {
+			continue
+		}
 		for _, e := range n.Effects {
 			if e.Kind != cmddesc.EffectStdio {
 				continue
@@ -343,6 +379,29 @@ func (b *builder) deriveFlows() {
 			}
 		}
 	}
+
+	type execEdge struct{ child, parent, dialect string }
+	var execEdges []execEdge
+	for _, e := range b.g.Edges {
+		if e.Kind != EdgeExecutes {
+			continue
+		}
+		execEdges = append(execEdges, execEdge{child: e.From, parent: e.To, dialect: b.execDialect[e.From]})
+	}
+	for changed := true; changed; {
+		changed = false
+		for _, ee := range execEdges {
+			if ee.dialect == "shell" && stdin[ee.child] && !stdin[ee.parent] {
+				stdin[ee.parent] = true
+				changed = true
+			}
+			if stdout[ee.child] && !stdout[ee.parent] {
+				stdout[ee.parent] = true
+				changed = true
+			}
+		}
+	}
+
 	structural := append([]Edge(nil), b.g.Edges...)
 	for _, e := range structural {
 		switch e.Kind {
@@ -362,6 +421,15 @@ func (b *builder) deriveFlows() {
 			if stdin[e.To] {
 				b.edge(e.From, e.To, EdgeFlow, "heredoc->stdin")
 			}
+		}
+	}
+
+	for _, ee := range execEdges {
+		if ee.dialect == "shell" && stdin[ee.child] {
+			b.edge(ee.parent, ee.child, EdgeFlow, "stdin->child stdin")
+		}
+		if stdout[ee.child] {
+			b.edge(ee.child, ee.parent, EdgeFlow, "child stdout->stdout")
 		}
 	}
 }
