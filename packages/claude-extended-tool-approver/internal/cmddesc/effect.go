@@ -225,6 +225,24 @@ type Effect struct {
 	Operation string
 	DryRun    bool
 
+	// Family marks WHICH remote-effect FAMILY produced this EffectRemote
+	// (slice 3y, tc-lc8f item 4f; tc-vn5z item 3): empty (the zero value,
+	// used by every pre-existing producer — git's remote positional, bd's
+	// implicit "beads"/"dolt" effects) keeps the ORIGINAL routing, judged
+	// unconditionally by effectpolicy.RemoteMutation's fixed Operation
+	// vocabulary ("read"/"mutate"/"push"/... always mean the same verdict).
+	// "kubectl" (cmddesc/registry_breadth.go's kubectl schema family) routes
+	// instead to effectpolicy.KubeContextPolicy, which RemoteMutation
+	// explicitly excludes (see its own doc comment) — kubectl's Operation
+	// vocabulary ("read"/"mutation"/"exec") is judged PER KUBE CONTEXT
+	// (Resource, for a Family=="kubectl" effect, holds the context NAME —
+	// see cmddesc's kubectlInterpreter for how it gets there), not by a
+	// fixed table, which RemoteMutation's unconditional cases cannot
+	// express. Kept as a generic string (not a bool) so a future
+	// context-bearing remote family can reuse the same routing without a
+	// new field.
+	Family string
+
 	// EffectOpaque detail (and free text for any kind).
 	Detail string
 }
@@ -271,6 +289,9 @@ func (e Effect) String() string {
 		}
 	case EffectRemote:
 		fmt.Fprintf(&b, ":%s %s", e.Operation, e.Resource)
+		if e.Family != "" {
+			fmt.Fprintf(&b, " {%s}", e.Family)
+		}
 		if e.Dynamic {
 			b.WriteString(" (dynamic)")
 		}

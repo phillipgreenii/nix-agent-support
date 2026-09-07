@@ -59,6 +59,12 @@ var interpreters = map[string]Interpreter{
 	"xargs": xargsInterpreter{},
 	"curl":  curlInterpreter{},
 	"find":  findInterpreter{},
+	// slice 3y (tc-lc8f item 4f; tc-vn5z item 3): kubectl's own bespoke
+	// dispatch (context capture), the `-f -` stdin special case, and cp's
+	// local/remote positional split — see interpreter_kubectl.go.
+	"kubectl":          kubectlInterpreter{},
+	"kubectl-manifest": kubectlManifestInterpreter{},
+	"kubectl-cp":       kubectlCpInterpreter{},
 }
 
 // LookupInterpreter resolves a schema's Interpreter name. The empty name
@@ -553,6 +559,7 @@ func (st *interpState) emitImplicit(ie ImplicitEffect) {
 			Resource:  ie.Target,
 			Operation: ie.Role.Operation,
 			Dynamic:   ie.Dynamic,
+			Family:    ie.RemoteFamily,
 			Source:    "implicit",
 		})
 	case ie.Role.Kind == KindChdir:

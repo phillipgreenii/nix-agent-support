@@ -488,6 +488,46 @@ var knownSpikeLooser = map[string]spikeLooserEntry{
 			"spike's OWN redirect handling; production's engine.go still carries the heuristic " +
 			"slice 3c only removed from the spike side.",
 	},
+	"kubectl_dev_apply": {
+		Class: "looser-than-abstain",
+		Cause: "production's internal/rules/kubectl.go has NO per-context configuration for a " +
+			"MUTATING verb at all (only the exec family has ExecReadOnlyClusters/" +
+			"ExecMutableClusters, configrules.KubectlConfig — see classifyExecTarget); every " +
+			"other mutating operation (apply, delete, ...) unconditionally hits r.refuse(\"kubectl: " +
+			"modifying kubectl command (defer)\") in Rule.Evaluate regardless of --context, and " +
+			"this harness's live engine (buildLiveEngine) constructs the rule with a ZERO " +
+			"KubectlConfig, so there is no live configuration path that could ever turn `apply` " +
+			"into an Approve for any --context value. The spike's KubeContextPolicy " +
+			"(effectpolicy/policy.go) implements EXACTLY the operator's ruling (Phillip, " +
+			"2026-09-07, tc-vn5z: kubectl should vary per context, a dev cluster allowing most " +
+			"anything) as genuinely NEW configurable behavior production has no equivalent of — " +
+			"not a gap in an existing production rule, a capability production's kubectl rule " +
+			"does not have a knob for at all.",
+	},
+	"kubectl_dev_delete": {
+		Class: "looser-than-abstain",
+		Cause: "same root cause as kubectl_dev_apply: `delete` is likewise an ordinary mutating " +
+			"verb with no per-context configuration path in production's kubectl.go, so it " +
+			"refuses (NoOpinion) unconditionally regardless of --context; the spike's per-context " +
+			"operator configuration is new behavior, not a production gap.",
+	},
+	"kubectl_prod_apply_dry_run_client": {
+		Class: "looser-than-abstain",
+		Cause: "same root cause as kubectl_dev_apply, plus: production's kubectl.go has NO " +
+			"awareness of --dry-run at all (extractOperation/baseValueFlags never inspect it), so " +
+			"`apply --dry-run=client` refuses identically to a real `apply` — the spike's " +
+			"DryRun-as-read treatment (slice 3w's precedent, extended here) is additional new " +
+			"behavior layered on top of the same new per-context configuration.",
+	},
+	"kubectl_dev_apply_nix_store": {
+		Class: "looser-than-abstain",
+		Cause: "same root cause as kubectl_dev_apply: production's kubectl.go classifies `apply` " +
+			"as a mutating verb and refuses regardless of --context OR the -f operand's path, so " +
+			"it never even reaches the question of whether /nix/store is readable; the spike " +
+			"reads that operand only after KubeContextPolicy has already permitted the mutation " +
+			"class for \"dev\" — the same new per-context configuration, not a production gap in " +
+			"path handling.",
+	},
 }
 
 // TestAgreement drives every case in goldenAgreementCases and
@@ -525,8 +565,10 @@ func TestAgreement(t *testing.T) {
 			// case NAME here too, so a golden case's configured-Reject
 			// request (bd_dolt_*_reject_configured) is exercised
 			// identically in both harnesses without a second field on
-			// agreementCase to keep in sync.
+			// agreementCase to keep in sync. goldenKubeContexts (slice 3y)
+			// is the same pattern for kubectl's per-context configuration.
 			RemoteLifecycle: goldenRemoteLifecycle[tc.name],
+			KubeContexts:    goldenKubeContexts[tc.name],
 		}, reg, DefaultPolicies(), DefaultGraphPolicies())
 		liveResult := evaluateLive(live, root, tc.command)
 

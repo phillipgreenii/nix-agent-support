@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmddesc"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/evalcontract"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/patheval"
 )
 
@@ -111,6 +112,62 @@ func TestRemoteMutationPolicy(t *testing.T) {
 		}
 	}
 	if _, applies := (RemoteMutation{}).Judge(cmddesc.Effect{Kind: cmddesc.EffectPath, Path: "x"}, PolicyContext{}); applies {
+		t.Error("applied to a path effect")
+	}
+	// slice 3y (tc-lc8f item 4f; tc-vn5z item 3): a Family!="" EffectRemote
+	// (kubectl's own) is excluded — KubeContextPolicy owns it instead.
+	if _, applies := (RemoteMutation{}).Judge(cmddesc.Effect{Kind: cmddesc.EffectRemote, Operation: "read", Resource: "dev", Family: "kubectl"}, PolicyContext{}); applies {
+		t.Error("RemoteMutation applied to a Family==\"kubectl\" effect; KubeContextPolicy must own it alone")
+	}
+}
+
+// TestKubeContextPolicy exercises KubeContextPolicy's own ladder (slice 3y,
+// tc-lc8f item 4f; tc-vn5z item 3): a dynamic or unnamed context is Unknown;
+// a listed context permits only its own Allow classes and Forbids anything
+// else; an unlisted context falls back to KubeContextDefaultAllow (Unknown
+// when that default is empty); a DryRun-marked "mutation" is judged as a
+// "read". A non-kubectl (Family=="") EffectRemote, and any non-EffectRemote
+// effect, does not apply.
+func TestKubeContextPolicy(t *testing.T) {
+	kube := func(op, context string, dryRun, dynamic bool) cmddesc.Effect {
+		return cmddesc.Effect{Kind: cmddesc.EffectRemote, Operation: op, Resource: context, Family: "kubectl", DryRun: dryRun, Dynamic: dynamic}
+	}
+	ctx := PolicyContext{
+		KubeContexts: map[string]evalcontract.KubeContextRule{
+			"dev":  {Allow: []string{"read", "mutation", "exec"}},
+			"prod": {Allow: []string{"read"}},
+		},
+	}
+	cases := []struct {
+		name    string
+		e       cmddesc.Effect
+		ctx     PolicyContext
+		verdict FindingVerdict
+	}{
+		{"dynamic context", kube("read", "dev", false, true), ctx, Unknown},
+		{"no context (empty Resource)", kube("read", "", false, false), ctx, Unknown},
+		{"dev read permitted", kube("read", "dev", false, false), ctx, Permitted},
+		{"dev mutation permitted", kube("mutation", "dev", false, false), ctx, Permitted},
+		{"dev exec permitted", kube("exec", "dev", false, false), ctx, Permitted},
+		{"prod read permitted", kube("read", "prod", false, false), ctx, Permitted},
+		{"prod mutation forbidden", kube("mutation", "prod", false, false), ctx, Forbidden},
+		{"prod exec forbidden", kube("exec", "prod", false, false), ctx, Forbidden},
+		{"unlisted context abstains by default", kube("read", "staging", false, false), ctx, Unknown},
+		{"unlisted context, unrelated default configured", kube("read", "staging", false, false), PolicyContext{KubeContextDefaultAllow: []string{"exec"}}, Unknown},
+		{"unlisted context, matching default configured", kube("read", "staging", false, false), PolicyContext{KubeContextDefaultAllow: []string{"read"}}, Permitted},
+		{"prod dry-run mutation judged as read: permitted", kube("mutation", "prod", true, false), ctx, Permitted},
+		{"dev dry-run mutation judged as read: still permitted", kube("mutation", "dev", true, false), ctx, Permitted},
+	}
+	for _, tc := range cases {
+		f, applies := KubeContextPolicy{}.Judge(tc.e, tc.ctx)
+		if !applies || f.Verdict != tc.verdict {
+			t.Errorf("%s: applies=%v verdict=%s (%s), want %s", tc.name, applies, f.Verdict, f.Reason, tc.verdict)
+		}
+	}
+	if _, applies := (KubeContextPolicy{}).Judge(cmddesc.Effect{Kind: cmddesc.EffectRemote, Operation: "read", Resource: "origin"}, ctx); applies {
+		t.Error("applied to a Family==\"\" (non-kubectl) remote effect")
+	}
+	if _, applies := (KubeContextPolicy{}).Judge(cmddesc.Effect{Kind: cmddesc.EffectPath, Path: "x"}, ctx); applies {
 		t.Error("applied to a path effect")
 	}
 }

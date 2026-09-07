@@ -1095,3 +1095,299 @@ var goGetSchema = CommandSchema{
 	UnknownFlag:  UnknownFlagInsufficient,
 	EndOfOptions: true,
 }
+
+// ---- kubectl (slice 3y, tc-lc8f item 4f; tc-vn5z item 3) ------------------
+//
+// Operator ruling (Phillip, 2026-09-07, verbatim, recorded on bead tc-vn5z):
+// "kubectl should be configured to vary per context. ie, there could be a
+// "dev" cluster which would allow most anythkng vs a "prod" which could be
+// more restricted." Normalized: kubectl reads are NOT permitted
+// unconditionally (unlike bd's own "read" Operation, which IS — see
+// bdSchema's doc comment); the verdict for every EffectRemote a kubectl
+// invocation produces depends on BOTH the kube CONTEXT (`--context NAME`,
+// captured by kubectlInterpreter — see interpreter_kubectl.go) and an
+// Operation CLASS this schema assigns per subcommand: "read" (get/describe/
+// logs/top/explain/version/api-resources/api-versions/cluster-info/diff/
+// `config view|get-contexts|get-clusters|get-users|current-context`),
+// "mutation" (apply/create/delete/patch/edit/replace/scale/rollout's every
+// sub-verb/label/annotate/set/expose/run/cordon/uncordon/drain/taint/`config
+// use-context|set-context|set-cluster|set-credentials|set|unset|delete-
+// context|delete-cluster|delete-user|rename-context`), or "exec" (exec/
+// port-forward/attach/debug/proxy/cp — see kubectlExecClassVerb and
+// interpreter_kubectl.go's kubectlCpInterpreter for why this whole class
+// stays unconditionally insufficient regardless of context/class). The
+// per-context, per-class verdict itself is effectpolicy.KubeContextPolicy's
+// job (internal/effectpolicy/policy.go); this schema's only responsibility
+// is producing an EffectRemote{Operation: class, Family: "kubectl"} per
+// invocation for that policy to judge — nothing here computes a verdict.
+//
+// `doc`/`kuberc`/`plugin`/`certificate`/`autoscale`/`wait`/`events`/`auth`/
+// `kustomize`/`completion` are deliberately ABSENT: an unmodeled subcommand
+// already Abstains for free via interpretSubcommand's own fallback (no
+// schema needed, gitWorktreeSchema's add/remove/prune precedent, go's own
+// doc/tool/work precedent).
+//
+// Verified against this host's `kubectl --help` / `kubectl <verb> --help` /
+// `kubectl options` (Client Version v1.36.3, this host 2026-09-07).
+const kubectlProvenance = "kubectl v1.36.3 (client), kubectl --help / kubectl <verb> --help / kubectl options, this host 2026-09-07"
+
+// kubectlSchema: subcommand dispatch via a BESPOKE interpreter (kubectlInterpreter,
+// interpreter_kubectl.go) rather than the plain generic one — see that type's
+// doc comment for why: the per-context policy needs the ACTUAL --context
+// VALUE, which is a global flag captured here and threaded onto every
+// Family=="kubectl" EffectRemote the chosen subcommand produces, however deep
+// (`config X` nests one further level through the ordinary interpretSubcommand
+// recursion kubectlInterpreter delegates to for the subcommand itself).
+//
+// Global flags: `--context` is captured (see interpreter_kubectl.go's
+// kubectlContextValue), never itself emitting an effect (Literal — its VALUE
+// is read directly off the scanned pendingOp, not through the operand()
+// path). `--kubeconfig FILE` is a genuine PathRead (kubectlInterpreter calls
+// resolve() on the parent scan specifically so this flag's operand effect is
+// not silently dropped — see that type's own doc comment for why a
+// Subcommands-shaped schema's global flags do not normally get this). Every
+// other global flag (-n/--namespace, -o/--output, --as/--as-group/--as-uid,
+// --server/-s, --cluster, --token/--user/--username/--password, -v/--v) is
+// inert to this model: `--server`/`--cluster` naming the cluster SOME OTHER
+// way than `--context` do not make the context "known" under some other
+// name — they simply leave `--context` absent, which is already Unknown by
+// construction (kubectlContextValue never reads their values), matching the
+// ruling's "treat --server/--cluster as making the context Unknown unless
+// --context is also given" exactly.
+var kubectlSchema = CommandSchema{
+	Name:       "kubectl",
+	Provenance: kubectlProvenance,
+	Flags: map[string]FlagSpec{
+		"--context":    literal1,
+		"--kubeconfig": {Arity: ArityOne, Operand: PathRead},
+		"-n":           literal1, "--namespace": literal1,
+		"-o": literal1, "--output": literal1,
+		"--as": literal1, "--as-group": literal1, "--as-uid": literal1,
+		"-s": literal1, "--server": literal1,
+		"--cluster": literal1,
+		"--token":   literal1, "--user": literal1, "--username": literal1, "--password": literal1,
+		"-v": literal1, "--v": literal1,
+	},
+	UnknownFlag:  UnknownFlagInsufficient,
+	EndOfOptions: true,
+	Interpreter:  "kubectl",
+	Subcommands:  kubectlSubcommands(),
+}
+
+// kubectlSubcommands builds the dispatch table from the class lists so each
+// verb's classification is visible in one place (bdSubcommands' own
+// precedent).
+func kubectlSubcommands() map[string]CommandSchema {
+	m := map[string]CommandSchema{}
+	for _, v := range []string{
+		"get", "describe", "logs", "top", "explain", "version",
+		"api-resources", "api-versions", "cluster-info",
+	} {
+		m[v] = kubectlRemoteVerb(v, "read")
+	}
+	m["diff"] = kubectlManifestVerb("diff", "read", false)
+	for _, v := range []string{
+		"edit", "scale", "label", "annotate", "set", "expose", "run",
+		"cordon", "uncordon", "drain", "taint",
+	} {
+		m[v] = kubectlRemoteVerb(v, "mutation")
+	}
+	for _, v := range []string{"apply", "create", "delete", "replace", "patch"} {
+		m[v] = kubectlManifestVerb(v, "mutation", true)
+	}
+	m["rollout"] = kubectlRolloutSchema()
+	m["config"] = kubectlConfigSchema()
+	for _, v := range []string{"exec", "port-forward", "attach", "debug", "proxy"} {
+		m[v] = kubectlExecClassVerb(v)
+	}
+	m["cp"] = kubectlCpSchema
+	return m
+}
+
+// kubectlRemoteVerb is one FLAT kubectl leaf whose whole effect is the
+// implicit per-context, per-class EffectRemote: every positional is an inert
+// Literal (a resource type, a name, a label selector — none of this schema's
+// verbs write anything the graph can name beyond the remote effect itself),
+// and every flag is UnknownFlagInert, mirroring bdRemote's own justification
+// ("Mutation subcommands are Unknown whatever their flags... a flag cannot
+// make a consent-requiring write need MORE than consent"): here the argument
+// transfers because the classification is COARSE (read/mutation/exec, not
+// per-flag), so an unmodeled flag (`-o wide`, `--show-labels`, ...) cannot
+// change which class already governs the verdict. Target is left "" — the
+// value is overwritten unconditionally by kubectlInterpreter's context stamp,
+// so an empty starting value is the SAFE fallback (Unknown) if that stamping
+// were ever somehow skipped.
+func kubectlRemoteVerb(name, operation string) CommandSchema {
+	return CommandSchema{
+		Name:       name,
+		Provenance: kubectlProvenance,
+		Flags:      map[string]FlagSpec{},
+		Positionals: PositionalSpec{
+			Rest: Literal,
+		},
+		ImplicitEffects: []ImplicitEffect{
+			{Role: Remote(operation), RemoteFamily: "kubectl"},
+		},
+		Stdin:        StdinNever,
+		Stdout:       StdoutContent,
+		UnknownFlag:  UnknownFlagInert,
+		EndOfOptions: true,
+	}
+}
+
+// kubectlManifestVerb is kubectlRemoteVerb's sibling for the verbs that also
+// accept a manifest operand: `-f FILE`/`--filename FILE` and `-k DIR`/
+// `--kustomize DIR` are real PathRead effects (kubectl reads and applies
+// their CONTENT; `apply -f -`'s stdin special case lives in
+// kubectlManifestInterpreter, interpreter_kubectl.go, since the generic
+// StdinToken convention only ever fires for a POSITIONAL path operand — see
+// that type's own doc comment). dryRunCapable wires kubectl's OWN
+// `--dry-run='none'|'server'|'client'` enum (verified against `kubectl apply
+// --help` / `kubectl delete --help`: no bare `--dry-run` spelling exists,
+// always `=value`) as three EXACT flag-spelling keys rather than one
+// value-taking flag, because the schema's transform mechanism keys on FLAG
+// SPELLING, not flag VALUE — `--dry-run=client` alone carries
+// Transform:{Kind: TransformDryRun} (cmddesc/transform.go's remoteMutationOps
+// now includes "mutation", slice 3y), marking the EffectRemote DryRun exactly
+// like gitPushSchema's own `-n`/`--dry-run`; `--dry-run=server` still
+// contacts the API server for admission/validation (kubectl's own
+// documented semantics: "submit server-side request without persisting the
+// resource") so it stays an ORDINARY, un-marked "mutation" — slice 3w's
+// dry-run precedent, applied to a third Operation vocabulary.
+func kubectlManifestVerb(name, operation string, dryRunCapable bool) CommandSchema {
+	flags := map[string]FlagSpec{
+		"-f": {Arity: ArityOne, Operand: PathRead}, "--filename": {Arity: ArityOne, Operand: PathRead},
+		"-k": {Arity: ArityOne, Operand: PathRead}, "--kustomize": {Arity: ArityOne, Operand: PathRead},
+	}
+	if dryRunCapable {
+		flags["--dry-run=client"] = FlagSpec{Transform: EffectTransform{Kind: TransformDryRun}}
+		flags["--dry-run=server"] = FlagSpec{}
+		flags["--dry-run=none"] = FlagSpec{}
+	}
+	return CommandSchema{
+		Name:       name,
+		Provenance: kubectlProvenance,
+		Flags:      flags,
+		Positionals: PositionalSpec{
+			Rest: Literal,
+		},
+		ImplicitEffects: []ImplicitEffect{
+			{Role: Remote(operation), RemoteFamily: "kubectl"},
+		},
+		// Stdin stays StdinNever here: `-f -` is handled by
+		// kubectlManifestInterpreter's own special case, not the generic
+		// StdinWhenNoPathOperands convention (a manifest verb's positionals
+		// are resource-type/name Literals, not path operands, so that
+		// convention does not apply to this family regardless).
+		Stdin:        StdinNever,
+		Stdout:       StdoutContent,
+		UnknownFlag:  UnknownFlagInert,
+		EndOfOptions: true,
+		Interpreter:  "kubectl-manifest",
+	}
+}
+
+// kubectlRolloutSchema: `kubectl rollout SUBVERB` is itself a nested
+// subcommand table (status/history/undo/pause/resume/restart). The brief
+// classifies "rollout (all verbs)" as mutation UNIFORMLY, including
+// status/history (which are, in isolation, reads) — a deliberate
+// simplification (documented, not a mistake): splitting rollout's own
+// sub-verbs by read/mutation would need a THIRD level of per-verb data this
+// slice's scope does not ask for, and folding status/history into "mutation"
+// is the SAFE direction (a context that allows only "read" would then
+// Forbid/Unknown a rollout status it could otherwise have Permitted — never
+// the reverse).
+func kubectlRolloutSchema() CommandSchema {
+	sub := map[string]CommandSchema{}
+	for _, v := range []string{"status", "history", "undo", "pause", "resume", "restart"} {
+		sub[v] = kubectlRemoteVerb(v, "mutation")
+	}
+	return CommandSchema{
+		Name:         "rollout",
+		Provenance:   kubectlProvenance,
+		Flags:        map[string]FlagSpec{},
+		UnknownFlag:  UnknownFlagInsufficient,
+		EndOfOptions: true,
+		Subcommands:  sub,
+	}
+}
+
+// kubectlConfigSchema: `kubectl config SUBVERB` per the brief's own split —
+// view/get-contexts/get-clusters/get-users/current-context read the
+// kubeconfig FILE (not the cluster), use-context/set-context/set-cluster/
+// set-credentials/set/unset/delete-context/delete-cluster/delete-user/
+// rename-context write it. Every sub-verb's own flags/positionals are
+// modeled as inert Literals (bdNested's own precedent for a nested table
+// whose leaves are all "the verb's whole effect is the implicit remote
+// operation") — WHAT a `set-context` call actually changes is not modeled,
+// only THAT it is a mutation-class kubeconfig write.
+func kubectlConfigSchema() CommandSchema {
+	sub := map[string]CommandSchema{}
+	for _, v := range []string{"view", "get-contexts", "get-clusters", "get-users", "current-context"} {
+		sub[v] = kubectlRemoteVerb(v, "read")
+	}
+	for _, v := range []string{
+		"use-context", "set-context", "set-cluster", "set-credentials", "set",
+		"unset", "delete-context", "delete-cluster", "delete-user", "rename-context",
+	} {
+		sub[v] = kubectlRemoteVerb(v, "mutation")
+	}
+	return CommandSchema{
+		Name:         "config",
+		Provenance:   kubectlProvenance,
+		Flags:        map[string]FlagSpec{},
+		UnknownFlag:  UnknownFlagInsufficient,
+		EndOfOptions: true,
+		Subcommands:  sub,
+	}
+}
+
+// kubectlExecClassVerb models exec/port-forward/attach/debug/proxy — every
+// one starts an interactive/streaming session INSIDE the cluster (a
+// container's shell, a forwarded port, a debug pod) whose actual content this
+// schema cannot see. It declares TWO implicit effects, both unconditional
+// (no WhenNoPositionals/WhenFlags guard, go's own install/get precedent):
+// a Remote("exec") effect (so the class is visible in the graph and judged
+// per context/class like everything else — a config that already forbids
+// "exec" for this context Forbids it outright), AND an Unmodeled effect
+// (Role: Unmodeled, interpreter.go's own fail-closed default case), which
+// UNCONDITIONALLY marks the whole invocation insufficient regardless of what
+// the first effect says — "the leaf is insufficient/Unknown" per the brief,
+// because the actual argv run INSIDE the container (`exec ... -- sh`) is not
+// itself recursed into as a real child: doing so would hand it to the LOCAL
+// registry, which would wrongly judge remote container code as if it were a
+// local command. Modeling that properly (a genuinely remote child scope) is
+// a documented follow-up, not attempted this slice.
+func kubectlExecClassVerb(name string) CommandSchema {
+	return CommandSchema{
+		Name:         name,
+		Provenance:   kubectlProvenance,
+		Flags:        map[string]FlagSpec{},
+		UnknownFlag:  UnknownFlagInert,
+		EndOfOptions: true,
+		ImplicitEffects: []ImplicitEffect{
+			{Role: Remote("exec"), RemoteFamily: "kubectl"},
+			{Role: Unmodeled, Target: name + "'s remote container/session content is not modeled"},
+		},
+	}
+}
+
+// kubectlCpSchema: `kubectl cp` is interpreted entirely by
+// kubectlCpInterpreter (interpreter_kubectl.go) — its two positionals
+// (source, destination) are classified LOCAL vs REMOTE by their own text
+// (kubectl's `[namespace/]pod:path` colon convention), which no
+// PositionalSpec/OperandRole shape can express, so Positionals/
+// ImplicitEffects here are unused (the custom interpreter builds effects
+// directly).
+var kubectlCpSchema = CommandSchema{
+	Name:       "cp",
+	Provenance: kubectlProvenance,
+	Flags: map[string]FlagSpec{
+		"-c": literal1, "--container": literal1,
+		"--no-preserve": inert,
+		"--retries":     literal1,
+	},
+	UnknownFlag:  UnknownFlagInsufficient,
+	EndOfOptions: true,
+	Interpreter:  "kubectl-cp",
+}

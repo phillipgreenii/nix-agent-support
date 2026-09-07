@@ -1,0 +1,4 @@
+flowchart LR
+    n0["command: kubectl --context dev apply -f /nix/store/x<br/>- path:read /nix/store/x [arg 1]<br/>- remote:mutation dev {kubectl} [implicit]<br/>- stdio:stdout content<br/>mark=permitted"]
+    n1[/"file: /nix/store/x"/]
+    n0 -->|"reads: read"| n1

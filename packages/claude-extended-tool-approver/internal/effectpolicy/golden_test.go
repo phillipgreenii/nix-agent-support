@@ -167,6 +167,42 @@ var goldenRemoteLifecycle = map[string]map[string]string{
 	"bd_dolt_killall_reject_configured": {"dolt": "reject"},
 }
 
+// goldenKubeContexts is goldenRemoteLifecycle's sibling for kubectl's
+// per-context policy (slice 3y, tc-lc8f item 4f; tc-vn5z item 3): a case
+// name that has an entry here gets that map as its Request.KubeContexts.
+// Every kubectl golden case below shares ONE configuration — {"dev": read
+// + mutation + exec, "prod": read only} — matching the operator ruling's own
+// worked example ("a "dev" cluster which would allow most anythkng vs a
+// "prod" which could be more restricted") — so this is a single shared
+// value, not a per-case table, but kept as a map keyed by name (rather than
+// a bare package var referenced directly) for the same reason
+// goldenRemoteLifecycle is a side table: TestAgreement reads it by case name
+// too, and a case that carries no kubectl command gets nil (no
+// configuration), matching how RemoteLifecycle is threaded.
+var goldenKubeContextsConfig = map[string]evalcontract.KubeContextRule{
+	"dev":  {Allow: []string{"read", "mutation", "exec"}},
+	"prod": {Allow: []string{"read"}},
+}
+
+var goldenKubeContexts = func() map[string]map[string]evalcontract.KubeContextRule {
+	m := map[string]map[string]evalcontract.KubeContextRule{}
+	for _, name := range []string{
+		"kubectl_dev_get", "kubectl_prod_get",
+		"kubectl_dev_apply", "kubectl_prod_apply_reject",
+		"kubectl_prod_delete_reject", "kubectl_dev_delete",
+		"kubectl_no_context_get", "kubectl_unlisted_context_get",
+		"kubectl_dev_exec_abstain",
+		"kubectl_prod_apply_dry_run_client", "kubectl_prod_apply_dry_run_server_reject",
+		"kubectl_dev_apply_nix_store",
+		"kubectl_dev_cp_ssh_key",
+		"kubectl_dev_frobnicate",
+		"kubectl_server_flag_no_context",
+	} {
+		m[name] = goldenKubeContextsConfig
+	}
+	return m
+}()
+
 var goldenCases = []goldenCase{
 	{"cat_readme", "cat README.md", evalcontract.Approve, nil},
 	// /nix/store is zoned read-only by string prefix, so this case is
@@ -778,6 +814,51 @@ var goldenCases = []goldenCase{
 	{"go_clean_modcache", "go clean -modcache", evalcontract.Approve, nil},
 	{"go_frobnicate", "go frobnicate", evalcontract.Abstain, nil},
 	{"go_test_redirect_nix_store", "go test ./... > /nix/store/x", evalcontract.Reject, nil},
+
+	// slice 3y (tc-lc8f item 4f; tc-vn5z item 3): kubectl subcommand schema
+	// plus the per-kube-context operator policy. Every case here carries
+	// goldenKubeContexts's shared configuration ({"dev": read+mutation+exec,
+	// "prod": read only}), matching the operator ruling's own worked
+	// example. Two verdicts differ from what the brief speculated in
+	// advance (recorded per its own "do not force, record any actual
+	// difference"):
+	//
+	//   - kubectl_dev_apply_nix_store: the brief guessed "Reject?" for
+	//     `apply -f /nix/store/x`; the actual verdict is APPROVE — /nix/store
+	//     is a READ-ONLY zone (patheval's own zone table), not a reject
+	//     zone, and apply's -f operand is a PathRead (the manifest's
+	//     CONTENT), never a write, so nothing here forbids it.
+	//   - kubectl_dev_cp_ssh_key: the brief guessed "Reject: local secret
+	//     write" for `cp pod:/etc/x ~/.ssh/id_rsa`; the actual verdict is
+	//     ABSTAIN. This spike has NO policy equivalent to
+	//     NoReadOfSecretPath for a WRITE-class path effect (NoWriteToRead
+	//     OnlyPath judges only patheval's ZONE, never secretpath.IsSecret;
+	//     DeleteAccess is the only write-side policy that consults
+	//     secretpath, and only for Access==AccessDelete, not
+	//     AccessTruncate) — a genuine, pre-existing modeling gap this slice
+	//     did not introduce and is out of scope to close here. Compounding
+	//     that: under THIS fixture, HOME is itself a t.TempDir() (under a
+	//     temp root), so patheval's /tmp/** zone check shadows whatever
+	//     ~/.ssh's own zone would otherwise be — the SAME fixture artifact
+	//     slice 3x's go_clean_modcache golden already documents. So the
+	//     local destination write is classified an ordinary writable path
+	//     here, and the only signal left is kubectl cp's own unconditional
+	//     "not modeled" insufficiency (Abstain, not Reject).
+	{"kubectl_dev_get", "kubectl --context dev get pods", evalcontract.Approve, nil},
+	{"kubectl_prod_get", "kubectl --context prod get pods", evalcontract.Approve, nil},
+	{"kubectl_dev_apply", "kubectl --context dev apply -f deploy.yaml", evalcontract.Approve, nil},
+	{"kubectl_prod_apply_reject", "kubectl --context prod apply -f deploy.yaml", evalcontract.Reject, nil},
+	{"kubectl_prod_delete_reject", "kubectl --context prod delete pod x", evalcontract.Reject, nil},
+	{"kubectl_dev_delete", "kubectl --context dev delete pod x", evalcontract.Approve, nil},
+	{"kubectl_no_context_get", "kubectl get pods", evalcontract.Abstain, nil},
+	{"kubectl_unlisted_context_get", "kubectl --context staging get pods", evalcontract.Abstain, nil},
+	{"kubectl_dev_exec_abstain", "kubectl --context dev exec -it pod -- sh", evalcontract.Abstain, nil},
+	{"kubectl_prod_apply_dry_run_client", "kubectl --context prod apply --dry-run=client -f deploy.yaml", evalcontract.Approve, nil},
+	{"kubectl_prod_apply_dry_run_server_reject", "kubectl --context prod apply --dry-run=server -f deploy.yaml", evalcontract.Reject, nil},
+	{"kubectl_dev_apply_nix_store", "kubectl --context dev apply -f /nix/store/x", evalcontract.Approve, nil},
+	{"kubectl_dev_cp_ssh_key", "kubectl --context dev cp pod:/etc/x ~/.ssh/id_rsa", evalcontract.Abstain, nil},
+	{"kubectl_dev_frobnicate", "kubectl --context dev frobnicate", evalcontract.Abstain, nil},
+	{"kubectl_server_flag_no_context", "kubectl --server https://x get pods", evalcontract.Abstain, nil},
 }
 
 func TestGolden(t *testing.T) {
@@ -785,7 +866,7 @@ func TestGolden(t *testing.T) {
 	reg := cmddesc.DefaultRegistry()
 	for _, tc := range goldenCases {
 		t.Run(tc.name, func(t *testing.T) {
-			resp := Evaluate(evalcontract.Request{Command: tc.command, CWD: root, ProjectRoot: root, VettedHosts: tc.vetted, RemoteLifecycle: goldenRemoteLifecycle[tc.name]}, reg, DefaultPolicies(), DefaultGraphPolicies())
+			resp := Evaluate(evalcontract.Request{Command: tc.command, CWD: root, ProjectRoot: root, VettedHosts: tc.vetted, RemoteLifecycle: goldenRemoteLifecycle[tc.name], KubeContexts: goldenKubeContexts[tc.name]}, reg, DefaultPolicies(), DefaultGraphPolicies())
 			if resp.Decision != tc.want {
 				t.Errorf("decision = %s, want %s (reason: %s)", resp.Decision, tc.want, resp.Reason)
 			}

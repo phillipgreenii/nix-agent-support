@@ -7,7 +7,19 @@ package cmddesc
 // mutates must be added here, or dry-run will fail OPEN and leave it
 // unmarked — which is why every Operation this slice's schemas can produce
 // ("push", "force-push", "delete-ref") is listed.
-var remoteMutationOps = map[string]bool{"push": true, "force-push": true, "delete-ref": true}
+//
+// "mutation" (slice 3y, tc-lc8f item 4f; tc-vn5z item 3) is kubectl's own
+// Operation spelling for its whole mutating-verb class (registry_breadth.go's
+// kubectlManifestVerb) — DISTINCT from bd's "mutate" (a different family,
+// Effect.Family=="" vs "kubectl") but the SAME shape: a `--dry-run=client`
+// marks it DryRun via this exact mechanism (kubectl's own manifest-verb
+// schemas register "--dry-run=client" with Transform:{Kind: TransformDryRun},
+// mirroring gitPushSchema's "-n"/"--dry-run"), and effectpolicy.
+// KubeContextPolicy (not RemoteMutation, which excludes Family!="" effects)
+// judges a DryRun-marked "mutation" as if it were a "read" — nothing actually
+// changes the cluster, the same dry-run-needs-only-read-permission reasoning
+// slice 3w established for git push.
+var remoteMutationOps = map[string]bool{"push": true, "force-push": true, "delete-ref": true, "mutation": true}
 
 // applyTransform rewrites effects under t by effect shape alone. It reports
 // false for a Kind it does not know so the caller fails closed instead of

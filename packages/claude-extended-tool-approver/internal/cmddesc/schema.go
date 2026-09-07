@@ -497,6 +497,15 @@ type ImplicitEffect struct {
 	WhenNoPositionals     bool
 	WhenNoRestPositionals bool
 	WhenFlags             []string
+	// RemoteFamily sets Effect.Family on a KindRemote implicit effect (slice
+	// 3y, tc-lc8f item 4f; tc-vn5z item 3): empty (the default) keeps every
+	// PRE-EXISTING KindRemote implicit effect (git's default-remote push, bd/
+	// dolt) routed to effectpolicy.RemoteMutation exactly as before this
+	// field existed. "kubectl" routes instead to effectpolicy.
+	// KubeContextPolicy — see Effect.Family's own doc comment for why a
+	// SEPARATE policy is needed rather than widening RemoteMutation's fixed
+	// per-Operation table.
+	RemoteFamily string
 }
 
 // CommandSchema is the schema VALUE for one command. Provenance records the

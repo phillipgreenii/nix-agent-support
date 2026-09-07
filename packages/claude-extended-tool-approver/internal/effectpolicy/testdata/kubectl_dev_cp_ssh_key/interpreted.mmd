@@ -1,0 +1,4 @@
+flowchart LR
+    n0["command: kubectl --context dev cp pod:/etc/x ~/.ssh/id_rsa<br/>- path:truncate ~/.ssh/id_rsa [arg 1]<br/>- remote:exec dev {kubectl}<br/>mark=insufficient: kubectl cp's remote pod:path operand and container-runtime semantics are not modeled (documented follow-up)"]
+    n1[/"file: ~/.ssh/id_rsa"/]
+    n0 -->|"writes: truncate"| n1

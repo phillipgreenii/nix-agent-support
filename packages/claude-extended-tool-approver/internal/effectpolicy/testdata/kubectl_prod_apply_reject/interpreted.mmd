@@ -1,0 +1,4 @@
+flowchart LR
+    n0["command: kubectl --context prod apply -f deploy.yaml<br/>- path:read deploy.yaml [arg 1]<br/>- remote:mutation prod {kubectl} [implicit]<br/>- stdio:stdout content<br/>mark=forbidden: remote:mutation prod {kubectl} [implicit]: kube-context-policy (kube context #quot;prod#quot; does not allow mutation (operator configuration, tc-vn5z))"]
+    n1[/"file: deploy.yaml"/]
+    n0 -->|"reads: read"| n1

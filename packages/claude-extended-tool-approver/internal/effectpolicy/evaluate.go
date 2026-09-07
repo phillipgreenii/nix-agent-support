@@ -66,7 +66,14 @@ func Evaluate(req evalcontract.Request, reg cmddesc.Registry, policies []Policy,
 	if root == "" {
 		root = patheval.DetectProjectRoot(req.CWD)
 	}
-	pctx := PolicyContext{PathEval: patheval.NewWithCWD(root, req.CWD), CWD: req.CWD, VettedHosts: req.VettedHosts, RemoteLifecycle: req.RemoteLifecycle}
+	pctx := PolicyContext{
+		PathEval:                patheval.NewWithCWD(root, req.CWD),
+		CWD:                     req.CWD,
+		VettedHosts:             req.VettedHosts,
+		RemoteLifecycle:         req.RemoteLifecycle,
+		KubeContexts:            req.KubeContexts,
+		KubeContextDefaultAllow: req.KubeContextDefaultAllow,
+	}
 	ctx := cmddesc.Context{CWD: req.CWD, Env: req.Env}
 
 	resp := evalcontract.Response{

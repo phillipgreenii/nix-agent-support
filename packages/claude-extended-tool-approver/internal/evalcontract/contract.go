@@ -28,14 +28,41 @@ import "github.com/phillipgreenii/claude-extended-tool-approver/internal/effectg
 // dolt-specific boolean, since the same shape can carry a future target's
 // lifecycle preference without a new field. nil configures nothing, so the
 // policy's own default governs (see effectpolicy.RemoteMutation).
+//
+// KubeContexts/KubeContextDefaultAllow are OPERATOR CONFIGURATION for
+// kubectl's own per-kube-context policy (slice 3y, tc-lc8f item 4f; tc-vn5z
+// item 3 — operator ruling, Phillip 2026-09-07, verbatim: "kubectl should be
+// configured to vary per context. ie, there could be a "dev" cluster which
+// would allow most anythkng vs a "prod" which could be more restricted.").
+// KubeContexts is keyed by context NAME (as given to `kubectl --context
+// NAME`); each entry's Allow lists the EffectRemote Operation classes
+// ("read", "mutation", "exec") permitted for that context. A context absent
+// from this map falls back to KubeContextDefaultAllow (nil by default,
+// i.e. no class allowed — Unknown/Abstain for every class, the conservative
+// reading the ruling's own "restricted... could be more restricted" implies
+// for an UNCONFIGURED context, as distinct from one deliberately configured
+// narrow like "prod"). Like RemoteLifecycle, this is this spike's stand-in
+// for a future rules.json binding — the production wiring is a follow-up,
+// not this slice — mirroring its own "data on the request" pattern (slice
+// 3u) rather than a kubectl-specific struct elsewhere.
 type Request struct {
-	Command         string
-	Dialect         string
-	CWD             string
-	ProjectRoot     string
-	Env             map[string]string
-	VettedHosts     []string
-	RemoteLifecycle map[string]string
+	Command                 string
+	Dialect                 string
+	CWD                     string
+	ProjectRoot             string
+	Env                     map[string]string
+	VettedHosts             []string
+	RemoteLifecycle         map[string]string
+	KubeContexts            map[string]KubeContextRule
+	KubeContextDefaultAllow []string
+}
+
+// KubeContextRule is one kube context's operator-configured allow-list (see
+// Request.KubeContexts's doc comment). Allow names the EffectRemote
+// Operation classes ("read", "mutation", "exec") permitted for an
+// invocation naming this context.
+type KubeContextRule struct {
+	Allow []string
 }
 
 // Decision is the verdict vocabulary. Ask exists in the vocabulary but nothing

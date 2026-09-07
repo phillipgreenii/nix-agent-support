@@ -59,6 +59,9 @@ func DefaultRegistry() Registry {
 		// slice 3x: go subcommand schema (test/generate/run/build/vet/fmt/
 		// list/env/version/mod/clean/install/get) and TrustedCheckoutExec.
 		goSchema,
+		// slice 3y: kubectl subcommand schema and the per-kube-context
+		// operator policy (KubeContextPolicy).
+		kubectlSchema,
 	)
 }
 

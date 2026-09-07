@@ -9,10 +9,12 @@
 package effectpolicy
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmddesc"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/deletable"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/evalcontract"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/patheval"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/secretpath"
 )
@@ -56,12 +58,17 @@ type Finding struct {
 // matches subdomains only (the leading dot is what stops `notexample.com`
 // from matching `example.com`). RemoteLifecycle is operator configuration for
 // an EffectRemote target's lifecycle-verb class (see evalcontract.Request's
-// doc comment); RemoteMutation is its only reader.
+// doc comment); RemoteMutation is its only reader. KubeContexts/
+// KubeContextDefaultAllow are operator configuration for kubectl's
+// per-context policy (see evalcontract.Request's doc comment); KubeContextPolicy
+// is their only reader.
 type PolicyContext struct {
-	PathEval        *patheval.PathEvaluator
-	CWD             string
-	VettedHosts     []string
-	RemoteLifecycle map[string]string
+	PathEval                *patheval.PathEvaluator
+	CWD                     string
+	VettedHosts             []string
+	RemoteLifecycle         map[string]string
+	KubeContexts            map[string]evalcontract.KubeContextRule
+	KubeContextDefaultAllow []string
 }
 
 // RemoteLifecycleClass returns the operator-configured verdict class for a
@@ -69,6 +76,33 @@ type PolicyContext struct {
 // nothing for it (RemoteLifecycle nil or the target absent).
 func (c PolicyContext) RemoteLifecycleClass(target string) string {
 	return c.RemoteLifecycle[target]
+}
+
+// kubeAllows reports whether allow (an Operation-class allow-list) names op.
+func kubeAllows(allow []string, op string) bool {
+	for _, a := range allow {
+		if a == op {
+			return true
+		}
+	}
+	return false
+}
+
+// KubeContextAllows reports whether Operation class op is permitted for kube
+// context name: an explicit KubeContexts entry's own Allow list when name is
+// configured, else KubeContextDefaultAllow.
+func (c PolicyContext) KubeContextAllows(name, op string) bool {
+	if rule, known := c.KubeContexts[name]; known {
+		return kubeAllows(rule.Allow, op)
+	}
+	return kubeAllows(c.KubeContextDefaultAllow, op)
+}
+
+// KubeContextKnown reports whether name has an explicit KubeContexts entry
+// (as opposed to falling back to KubeContextDefaultAllow).
+func (c PolicyContext) KubeContextKnown(name string) bool {
+	_, known := c.KubeContexts[name]
+	return known
 }
 
 // HostVetted reports whether host matches any VettedHosts entry under the
@@ -115,6 +149,7 @@ func DefaultPolicies() []Policy {
 		NoReadOfUnreadablePath{},
 		NetworkAccess{},
 		RemoteMutation{},
+		KubeContextPolicy{},
 		StdioIsLocal{},
 		ProgramInterpreted{},
 		EnvAssignment{},
@@ -625,6 +660,18 @@ func (NetworkAccess) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, bool) 
 //     into this policy.
 //
 //   - anything else is outside this vocabulary and fails closed to Unknown.
+//
+// EXCLUDES any EffectRemote whose Family is non-empty (slice 3y, tc-lc8f
+// item 4f; tc-vn5z item 3): "kubectl" (and any future context-bearing
+// remote family) is judged by a SEPARATE policy, KubeContextPolicy below,
+// because its Operation vocabulary ("read"/"mutation"/"exec") is judged PER
+// KUBE CONTEXT, not by this policy's fixed per-Operation table — see
+// Effect.Family's own doc comment. Without this exclusion RemoteMutation
+// would ALSO judge a kubectl effect unconditionally (its "read" case is an
+// unconditional Permitted, exactly the blanket read-permission the
+// operator's ruling forbids for kubectl), and the two policies' findings
+// would combine worst-of on the SAME effect (judgeNode's fold) rather than
+// KubeContextPolicy owning the verdict alone.
 type RemoteMutation struct{}
 
 // Name implements Policy.
@@ -632,7 +679,7 @@ func (RemoteMutation) Name() string { return "remote-mutation" }
 
 // Judge implements Policy.
 func (RemoteMutation) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, bool) {
-	if e.Kind != cmddesc.EffectRemote {
+	if e.Kind != cmddesc.EffectRemote || e.Family != "" {
 		return Finding{}, false
 	}
 	if e.Dynamic {
@@ -666,6 +713,71 @@ func (RemoteMutation) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, bool)
 	default:
 		return Finding{Verdict: Unknown, Reason: "unrecognised remote operation " + e.Operation}, true
 	}
+}
+
+// KubeContextPolicy judges every EffectRemote effect whose Family is
+// "kubectl" (registry_breadth.go's kubectl schema family, slice 3y; tc-lc8f
+// item 4f, tc-vn5z item 3) — deliberately a SEPARATE policy from
+// RemoteMutation, which explicitly EXCLUDES Family != "" effects (see its own
+// doc comment), because kubectl's Operation vocabulary ("read", "mutation",
+// "exec") is judged PER KUBE CONTEXT, not by a fixed Operation-to-verdict
+// table: RemoteMutation's own "read"/"mutate" cases are UNCONDITIONAL (a
+// git/bd read is always Permitted, a bd write is always Unknown), which is
+// exactly what the operator's ruling on kubectl forbids.
+//
+// Operator ruling (Phillip, 2026-09-07, verbatim, recorded on bead tc-vn5z):
+// "kubectl should be configured to vary per context. ie, there could be a
+// "dev" cluster which would allow most anythkng vs a "prod" which could be
+// more restricted." Normalized: kubectl reads are NOT permitted
+// unconditionally; the policy varies per kube CONTEXT from OPERATOR
+// CONFIGURATION (evalcontract.Request.KubeContexts/KubeContextDefaultAllow,
+// this spike's stand-in for a future rules.json binding — mirroring
+// RemoteLifecycle's own "data on the request" pattern, slice 3u): a context
+// listed there allows only the Operation classes named in its Allow list; an
+// unlisted context falls back to KubeContextDefaultAllow (empty by default,
+// i.e. Unknown for every class). When the context cannot be determined
+// STATICALLY from the command (no --context given at all, or its value is a
+// runtime expansion — cmddesc's kubectlInterpreter's own doc comment covers
+// how e.Resource/e.Dynamic get set), the verdict is Unknown/Abstain — never
+// a blanket read permission, per the ruling's own worked example.
+//
+// A DryRun-marked "mutation" (kubectl's own `--dry-run=client`, cmddesc's
+// TransformDryRun, extended by slice 3y to include "mutation" in
+// remoteMutationOps) is judged as if it were a "read": nothing actually
+// changes the cluster, so it needs only the SAME per-context permission a
+// genuine read would (slice 3w's dry-run precedent, applied here to a third
+// Operation vocabulary). `--dry-run=server` is NOT marked (kubectl itself
+// still contacts the API server to run admission/validation), so it stays
+// judged as an ordinary, un-marked "mutation" — unchanged from a real
+// mutation.
+type KubeContextPolicy struct{}
+
+// Name implements Policy.
+func (KubeContextPolicy) Name() string { return "kube-context-policy" }
+
+// Judge implements Policy.
+func (KubeContextPolicy) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, bool) {
+	if e.Kind != cmddesc.EffectRemote || e.Family != "kubectl" {
+		return Finding{}, false
+	}
+	if e.Dynamic || e.Resource == "" {
+		return Finding{Verdict: Unknown, Reason: "kube context is not statically known from the command (tc-vn5z)"}, true
+	}
+	op := e.Operation
+	if op == "mutation" && e.DryRun {
+		op = "read"
+	}
+	context := e.Resource
+	if ctx.KubeContextKnown(context) {
+		if ctx.KubeContextAllows(context, op) {
+			return Finding{Verdict: Permitted, Reason: fmt.Sprintf("kube context %q allows %s (operator configuration, tc-vn5z)", context, op)}, true
+		}
+		return Finding{Verdict: Forbidden, Reason: fmt.Sprintf("kube context %q does not allow %s (operator configuration, tc-vn5z)", context, op)}, true
+	}
+	if ctx.KubeContextAllows(context, op) {
+		return Finding{Verdict: Permitted, Reason: fmt.Sprintf("kube context %q is not configured; operator default allows %s (tc-vn5z)", context, op)}, true
+	}
+	return Finding{Verdict: Unknown, Reason: fmt.Sprintf("kube context %q is not configured (default: needs consent, tc-vn5z)", context)}, true
 }
 
 // NoReadOfUnreadablePath has one concern: patheval READABILITY of a read path
