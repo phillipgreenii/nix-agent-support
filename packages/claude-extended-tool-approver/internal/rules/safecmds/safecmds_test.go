@@ -1861,6 +1861,31 @@ func TestSafecmds_ContainedClaude_Approve(t *testing.T) {
 	}
 }
 
+func TestSafecmds_IntegrateBranchSupport_Approve(t *testing.T) {
+	pe := patheval.New("/home/user/project")
+	r := New(pe)
+	tests := []struct {
+		name    string
+		command string
+	}{
+		{"plain", "integrate-branch-support"},
+		{"facts flag", "integrate-branch-support --facts"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := &hookio.HookInput{
+				ToolName:  "Bash",
+				CWD:       "/home/user/project",
+				ToolInput: mustJSON(map[string]string{"command": tt.command}),
+			}
+			got := hookio.Verdict(r.Evaluate(input))
+			if got.Decision != hookio.Approve {
+				t.Errorf("%s: got %s, want approve", tt.command, got.Decision)
+			}
+		})
+	}
+}
+
 func TestSafecmds_Unzip(t *testing.T) {
 	pe := patheval.New("/home/user/project")
 	r := New(pe)

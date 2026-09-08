@@ -74,6 +74,17 @@ var alwaysSafe = map[string]bool{
 	"claude-extended-tool-approver": true, "claude-pretool-hook": true,
 	"shellcheck": true, "colima": true, "contained-claude": true,
 	"my-code-review-support-cli": true,
+	// integrate-branch-support (tc-v666, per tc-18vu's analysis): a repo-local
+	// read-only reporting CLI, the same class as the other support-CLI entries
+	// immediately above. It takes no positional args and only one flag
+	// (--facts, plus the framework-injected --help/--version); any other input
+	// is a hard usage error. Internally it only calls read-only git plumbing
+	// (git rev-parse --is-inside-work-tree, git config --get, …) and prints
+	// either a KEY=value fact block or a JSON strategy-advisory object — it has
+	// no mutation surface at all (cannot land, push, or write anything). Since
+	// alwaysSafe approval is basename-only, this single entry covers both
+	// `integrate-branch-support` and `integrate-branch-support --facts`.
+	"integrate-branch-support": true,
 	// read (pg2-lpcpn): the shell builtin has NO file-operand form — it only
 	// ever reads from stdin or a file descriptor via -u, never an arbitrary
 	// named file — so unlike base64/paste below it belongs here unconditionally,
