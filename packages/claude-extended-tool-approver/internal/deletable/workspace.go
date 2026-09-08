@@ -146,6 +146,25 @@ type Kind struct {
 	// Commands names command schemas whose effects act on this kind's
 	// classified paths (informational; see the package design note).
 	Commands []string
+	// Secrecy is this kind's opinion on whether a root-relative path is
+	// NON-SECRET (tc-lc8f item 3z; see deletable.go's "# NON-SECRET
+	// declarations" doc comment for the two operator rulings and why this
+	// facet exists here, in the project specification, rather than in a
+	// secret-detection policy). nil (the default for every kind but git in
+	// this slice) means the kind expresses no opinion on secrecy at all.
+	//
+	// A non-nil Secrecy is asked the SAME (root, rel, abs, isDir) shape
+	// Classify is, and there is only ONE opinion it may express: ok=true
+	// means "declared non-secret", with reason naming why. ok=false means
+	// NO OPINION for this specific path — e.g. git's own declaration when
+	// the path is untracked — never "this path IS secret"; a kind has no
+	// way to assert secrecy through this facet, only to vouch against it.
+	// NonSecretWith's walk therefore has no Protected-style override to
+	// check for first (unlike Resolve/Category): it simply returns the
+	// FIRST ok=true opinion found, innermost candidate first, and treats
+	// every ok=false or nil-Secrecy candidate as silent — continuing
+	// outward exactly as Resolve treats CatSilent.
+	Secrecy func(root, rel, abs string, isDir bool) (ok bool, reason string)
 }
 
 // DefaultKinds returns the built-in declarations in registry order: temp,
@@ -220,6 +239,33 @@ var gitKind = Kind{
 		return CatKeep
 	},
 	Commands: []string{"git clean"},
+	// Secrecy (tc-lc8f item 3z; deletable.go's "# NON-SECRET declarations"
+	// doc comment carries the two operator rulings behind this): "tracked in
+	// the index and not gitignored" is non-secret — secrets are never
+	// committed, so an ignored file (`.env`, say) keeps ordinary secret
+	// matching regardless of what this declares. Ignored(root, abs) is the
+	// SAME lexical gitignore matcher gitKind's own Classify above already
+	// uses; it costs nothing extra to consult here and it is what makes
+	// this declaration honor "not gitignored" literally even for the rare
+	// force-added (`git add -f`) tracked-but-ignored file, rather than
+	// relying on git ls-files to have already excluded it (plain `git
+	// ls-files`, with no `-i`/`-o`, does NOT filter by .gitignore at all —
+	// it lists whatever is in the index, ignored or not).
+	//
+	// rel == "." (the repository root itself) is deliberately given no
+	// opinion: "the repo root is non-secret" is not a meaningful
+	// declaration and this facet only ever narrows a `secrets` PATH
+	// COMPONENT match, which the root itself can never be.
+	Secrecy: func(root, rel, abs string, isDir bool) (bool, string) {
+		if rel == "." || Ignored(root, abs) {
+			return false, ""
+		}
+		tracked, err := gitTrackedProbe(root, rel, isDir)
+		if err != nil || !tracked {
+			return false, ""
+		}
+		return true, "tracked by git and not ignored: " + rel + " (repository at " + root + ")"
+	},
 }
 
 // goKind: a Go module (go.mod). The module tree itself declares nothing —
@@ -362,26 +408,13 @@ type Resolution struct {
 // kinds per the algorithm in this file's header.
 func Resolve(kinds []Kind, abs string) Resolution {
 	abs = filepath.Clean(abs)
-	cands := candidates(kinds, abs)
+	cands, isDir := sortedCandidates(kinds, abs)
 	if len(cands) == 0 {
 		return Resolution{Category: CatSilent}
 	}
-	sort.SliceStable(cands, func(i, j int) bool {
-		if len(cands[i].root) != len(cands[j].root) {
-			return len(cands[i].root) > len(cands[j].root)
-		}
-		return cands[i].order < cands[j].order
-	})
-	isDir := false
-	if info, err := os.Stat(abs); err == nil && info.IsDir() {
-		isDir = true
-	}
 	var first *Resolution
 	for _, c := range cands {
-		rel := "."
-		if abs != c.root {
-			rel = filepath.ToSlash(strings.TrimPrefix(abs, c.root+"/"))
-		}
+		rel := relTo(abs, c.root)
 		cat := c.kind.categorize(c.root, rel, abs, isDir)
 		if cat == CatProtected {
 			return Resolution{Category: CatProtected, Kind: c.kind.Name, Root: c.root}
@@ -394,6 +427,65 @@ func Resolve(kinds []Kind, abs string) Resolution {
 		return *first
 	}
 	return Resolution{Category: CatSilent}
+}
+
+// NonSecretWith walks abs's candidates in the SAME innermost-first order as
+// Resolve (see sortedCandidates), asking each candidate's Secrecy func
+// (nil-safe) for an opinion, and returns the FIRST non-secret opinion
+// found. See Kind.Secrecy's doc comment for why there is no Protected-style
+// override to check for first: NON-SECRET is the only opinion any kind
+// expresses through this facet, so a candidate with no opinion (Secrecy
+// nil, or Secrecy answering ok=false for this path) is silently skipped and
+// the walk continues outward exactly as Resolve treats CatSilent.
+//
+// deletable.go's NonSecret/NonSecretWithKinds are the entry points most
+// callers use (they also resolve a cwd-relative/`~`-expanded path string
+// via a *patheval.PathEvaluator first); this is the kinds-only core, kept
+// in this file beside Resolve because it operates purely on Kind
+// declarations over an already-resolved abs path, exactly like Resolve
+// does.
+func NonSecretWith(kinds []Kind, abs string) (bool, string) {
+	abs = filepath.Clean(abs)
+	cands, isDir := sortedCandidates(kinds, abs)
+	for _, c := range cands {
+		if c.kind.Secrecy == nil {
+			continue
+		}
+		rel := relTo(abs, c.root)
+		if ok, reason := c.kind.Secrecy(c.root, rel, abs, isDir); ok {
+			return true, reason
+		}
+	}
+	return false, ""
+}
+
+// sortedCandidates collects abs's (root, kind) candidates and sorts them
+// deepest-root-first (registry order as the tie-break between equal
+// depths) — the shared ordering Resolve and NonSecretWith both walk — and
+// reports whether abs itself is a directory, computed once for both
+// callers' categorize/Secrecy calls.
+func sortedCandidates(kinds []Kind, abs string) (cands []candidate, isDir bool) {
+	cands = candidates(kinds, abs)
+	sort.SliceStable(cands, func(i, j int) bool {
+		if len(cands[i].root) != len(cands[j].root) {
+			return len(cands[i].root) > len(cands[j].root)
+		}
+		return cands[i].order < cands[j].order
+	})
+	if info, err := os.Stat(abs); err == nil && info.IsDir() {
+		isDir = true
+	}
+	return cands, isDir
+}
+
+// relTo returns abs's slash-separated path relative to root ("." when abs
+// equals root), the same computation Resolve and NonSecretWith each need
+// for every candidate they visit.
+func relTo(abs, root string) string {
+	if abs == root {
+		return "."
+	}
+	return filepath.ToSlash(strings.TrimPrefix(abs, root+"/"))
 }
 
 // candidates lists every (root, kind) abs lies under.

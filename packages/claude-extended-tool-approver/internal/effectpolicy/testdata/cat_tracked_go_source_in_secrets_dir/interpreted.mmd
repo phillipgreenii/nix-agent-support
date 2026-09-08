@@ -1,0 +1,4 @@
+flowchart LR
+    n0["command: cat internal/rules/secrets/secrets.go<br/>- path:read internal/rules/secrets/secrets.go [arg 0]<br/>- stdio:stdout content<br/>mark=permitted"]
+    n1[/"file: internal/rules/secrets/secrets.go"/]
+    n0 -->|"reads: read"| n1

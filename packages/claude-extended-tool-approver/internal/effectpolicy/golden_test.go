@@ -122,6 +122,52 @@ func fixture(t *testing.T) (root, home string) {
 		}
 	})
 	t.Cleanup(restoreWorktreeProbe)
+
+	// NON-SECRET declaration coverage (tc-lc8f item 3z; slice 3z):
+	// internal/rules/secrets/{secrets.go,id_rsa} and the
+	// internal/rules/secrets DIRECTORY are declared TRACKED by the fake
+	// git-tracked probe below (deletable.SetGitTrackedProbe, the identical
+	// injection-seam pattern the worktree-state fake above uses, and for
+	// the same reason: this fixture's `.git` is a plain directory, never a
+	// real repository, and must not start a real git process).
+	// config/secrets/token and secrets/.env are left OFF the fake's tracked
+	// list (untracked), so they keep the ordinary secret verdict —
+	// secrets/.env is WellKnownSecret regardless (the `.env` basename), so
+	// it is unaffected by tracked-ness either way; config/secrets/token is
+	// the case that actually exercises the untracked branch.
+	// internal/deletable's own gittracked_test.go covers the real git
+	// behaviour this fake stands in for, against real throwaway repositories.
+	if err := os.MkdirAll(filepath.Join(root, "internal", "rules", "secrets"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "internal", "rules", "secrets", "secrets.go"), []byte("package secrets\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "internal", "rules", "secrets", "id_rsa"), []byte("not a real key\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "config", "secrets"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "config", "secrets", "token"), []byte("t\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "secrets"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "secrets", ".env"), []byte("S=1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	restoreGitTrackedProbe := deletable.SetGitTrackedProbe(func(root, rel string, isDir bool) (bool, error) {
+		switch rel {
+		case "internal/rules/secrets/secrets.go", "internal/rules/secrets", "internal/rules/secrets/id_rsa":
+			return true, nil
+		default:
+			return false, nil
+		}
+	})
+	t.Cleanup(restoreGitTrackedProbe)
+
 	home = t.TempDir()
 	t.Setenv("HOME", home)
 	for _, v := range []string{"WORKSPACE_ROOT", "CETA_EXTRA_READWRITE_ROOTS", "CETA_EXTRA_READONLY_ROOTS", "CETA_DENIED_ROOTS", "XDG_DATA_HOME"} {
@@ -814,6 +860,45 @@ var goldenCases = []goldenCase{
 	{"go_clean_modcache", "go clean -modcache", evalcontract.Approve, nil},
 	{"go_frobnicate", "go frobnicate", evalcontract.Abstain, nil},
 	{"go_test_redirect_nix_store", "go test ./... > /nix/store/x", evalcontract.Reject, nil},
+
+	// Non-secret workspace-declaration goldens (tc-lc8f item 3z; slice 3z):
+	// fixes the regression slice 3x's per-package PathRead introduced —
+	// goTestSchema emits a PathRead for every `go test` package operand
+	// (registry_breadth.go), so `go test ./internal/rules/secrets/...`
+	// newly reached NoReadOfSecretPath and Forbade the bare `secrets` path
+	// component, contradicting the 2026-09-07 ruling "go test ... are
+	// fine". See deletable.go's "# NON-SECRET declarations" doc comment for
+	// the two operator rulings this fixes it with (the git kind declares a
+	// TRACKED, non-ignored path non-secret — a project-specification
+	// mechanism, not an in-git-repo relaxation inside the secret policy).
+	// fixture()'s fake git-tracked probe declares
+	// internal/rules/secrets/{secrets.go,id_rsa} and the
+	// internal/rules/secrets DIRECTORY tracked; config/secrets/token and
+	// secrets/.env are left untracked.
+	{"go_test_secrets_dotdotdot", "go test ./internal/rules/secrets/...", evalcontract.Approve, nil},
+	{"cat_tracked_go_source_in_secrets_dir", "cat internal/rules/secrets/secrets.go", evalcontract.Approve, nil},
+	{"cat_untracked_secrets_dir_file", "cat config/secrets/token", evalcontract.Reject, nil},
+	// cat_untracked_dotenv_in_secrets_dir: `.env` is WellKnownSecret by
+	// basename (secretpath.Classify), never merely GenericSecretsDir, so it
+	// stays Reject regardless of any project declaration — proving the
+	// declaration narrows ONLY the bare `secrets` component, exactly as the
+	// brief requires ("well-known secret basenames stay secret regardless
+	// of any declaration").
+	{"cat_untracked_dotenv_in_secrets_dir", "cat secrets/.env", evalcontract.Reject, nil},
+	// cat_tracked_id_rsa_in_secrets_dir: the brief speculated a tracked
+	// "id_rsa" basename under a secrets/ component would stay Reject
+	// because "WellKnownSecret basename wins over the declaration" — but
+	// secretpath's WellKnownSecret match for "id_rsa" comes ONLY from the
+	// `.ssh`/`.gnupg` DIRECTORY component (secretDirs), never from the bare
+	// basename alone (secretBasenames has no "id_rsa" entry), so
+	// "internal/rules/secrets/id_rsa" (no `.ssh` component) classifies as
+	// GenericSecretsDir only. Declared TRACKED here, the git declaration
+	// DOES relax it: the ACTUAL verdict is Approve, not the brief's
+	// speculative Reject — recorded here rather than forced, per the
+	// brief's own "do not force, record any actual difference" instruction.
+	{"cat_tracked_id_rsa_in_secrets_dir", "cat internal/rules/secrets/id_rsa", evalcontract.Approve, nil},
+	{"grep_untracked_secrets_dir", "grep -r x secrets/", evalcontract.Reject, nil},
+	{"ls_tracked_secrets_dir", "ls internal/rules/secrets", evalcontract.Approve, nil},
 
 	// slice 3y (tc-lc8f item 4f; tc-vn5z item 3): kubectl subcommand schema
 	// plus the per-kube-context operator policy. Every case here carries

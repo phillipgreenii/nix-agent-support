@@ -1,0 +1,4 @@
+flowchart LR
+    n0["command: cat secrets/.env<br/>- path:read secrets/.env [arg 0]<br/>- stdio:stdout content<br/>mark=forbidden: path:read secrets/.env [arg 0]: no-read-of-secret-path (secret path)"]
+    n1[/"file: secrets/.env"/]
+    n0 -->|"reads: read"| n1

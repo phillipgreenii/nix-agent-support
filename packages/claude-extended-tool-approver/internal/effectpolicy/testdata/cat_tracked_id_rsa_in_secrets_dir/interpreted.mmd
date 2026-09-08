@@ -1,0 +1,4 @@
+flowchart LR
+    n0["command: cat internal/rules/secrets/id_rsa<br/>- path:read internal/rules/secrets/id_rsa [arg 0]<br/>- stdio:stdout content<br/>mark=permitted"]
+    n1[/"file: internal/rules/secrets/id_rsa"/]
+    n0 -->|"reads: read"| n1

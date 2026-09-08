@@ -1,0 +1,4 @@
+flowchart LR
+    n0["command: grep -r x secrets/<br/>- path:read secrets/ [arg 2]<br/>- stdio:stdout content<br/>mark=forbidden: path:read secrets/ [arg 2]: no-read-of-secret-path (secret path)"]
+    n1[/"file: secrets/"/]
+    n0 -->|"reads: read"| n1

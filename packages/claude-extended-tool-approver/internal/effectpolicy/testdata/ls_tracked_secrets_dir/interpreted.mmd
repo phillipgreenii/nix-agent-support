@@ -1,0 +1,4 @@
+flowchart LR
+    n0["command: ls internal/rules/secrets<br/>- path:read internal/rules/secrets [arg 0]<br/>- stdio:stdout metadata<br/>mark=permitted"]
+    n1[/"file: internal/rules/secrets"/]
+    n0 -->|"reads: read"| n1

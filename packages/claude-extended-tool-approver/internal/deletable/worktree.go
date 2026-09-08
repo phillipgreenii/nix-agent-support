@@ -169,6 +169,88 @@ func (e *worktreeProbeError) Error() string {
 
 func (e *worktreeProbeError) Unwrap() error { return e.err }
 
+// GIT-TRACKED PROBE (tc-lc8f item 3z; deletable.go's "# NON-SECRET
+// declarations" doc comment carries the two operator rulings this
+// implements) — gitKind.Secrecy's mechanism (workspace.go): "tracked in the
+// index" for the git kind's NON-SECRET declaration, following the exact
+// same injection-seam shape as ProbeWorktreeState/SetWorktreeStateProbe
+// above (worktreeStateProbe), for the identical reason: the golden/
+// agreement harness's fixture `.git` is a plain directory, never a real
+// repository, and must not start a real git process; this package's own
+// unit tests substitute a fake for the same reason production code must
+// not touch a real repo just to exercise a deterministic scenario.
+
+// gitTrackedProbe is the injection seam: production leaves it at
+// realGitTracked; tests substitute a fake via SetGitTrackedProbe.
+var gitTrackedProbe = realGitTracked
+
+// SetGitTrackedProbe substitutes fn as the git-tracked probe for the
+// duration of a test and returns a restore func, mirroring
+// SetWorktreeStateProbe's contract exactly. Exported so both this
+// package's own tests (against real throwaway repositories) and
+// internal/effectpolicy's golden/agreement harness can install a
+// deterministic fake without a second exported surface.
+func SetGitTrackedProbe(fn func(root, rel string, isDir bool) (bool, error)) (restore func()) {
+	prev := gitTrackedProbe
+	gitTrackedProbe = fn
+	return func() { gitTrackedProbe = prev }
+}
+
+// realGitTracked reports whether rel (root-relative, slash-separated) is
+// tracked in root's git index, run hermetically (hermeticGitEnviron):
+//
+//   - a FILE operand (isDir false): `git -C root ls-files --error-unmatch
+//     -- rel`. Exit 0 means tracked. `--error-unmatch` makes git exit 1
+//     specifically when rel names no tracked file — an ORDINARY, expected
+//     outcome ("not tracked"), not a probe failure, and is reported as
+//     (false, nil).
+//   - a DIRECTORY operand (isDir true): `git -C root ls-files -- rel`
+//     (no `--error-unmatch`, which git rejects for a directory pathspec
+//     with no per-entry match semantics anyway) — non-empty output means
+//     at least one file under rel is tracked.
+//
+// Any OTHER failure (git not on PATH, root not actually a git repository
+// despite the workspace declaration's marker match, a killed process) is
+// returned as a genuine error, distinct from "exit 1, not tracked" — so
+// gitKind.Secrecy's caller (NonSecretWith) can tell "confidently untracked"
+// apart from "the question could not be asked" and treat the latter as NO
+// OPINION rather than accidentally as "not tracked". This is exactly the
+// property realWorktreeState's own doc comment states for its non-zero
+// exit: "never treated as clean" there, "never treated as untracked" here.
+func realGitTracked(root, rel string, isDir bool) (bool, error) {
+	args := []string{"-C", root, "ls-files"}
+	if !isDir {
+		args = append(args, "--error-unmatch")
+	}
+	args = append(args, "--", rel)
+	cmd := exec.Command("git", args...)
+	cmd.Env = hermeticGitEnviron()
+	out, err := cmd.Output()
+	if err != nil {
+		if ee, ok := err.(*exec.ExitError); ok && ee.ExitCode() == 1 {
+			return false, nil
+		}
+		return false, &gitTrackedProbeError{root: root, rel: rel, err: err}
+	}
+	if isDir {
+		return strings.TrimSpace(string(out)) != "", nil
+	}
+	return true, nil
+}
+
+// gitTrackedProbeError carries enough context for a policy Reason string
+// without leaking full git output, mirroring worktreeProbeError.
+type gitTrackedProbeError struct {
+	root, rel string
+	err       error
+}
+
+func (e *gitTrackedProbeError) Error() string {
+	return "git ls-files -C " + e.root + " -- " + e.rel + ": " + e.err.Error()
+}
+
+func (e *gitTrackedProbeError) Unwrap() error { return e.err }
+
 // IsWorktreeRoot reports whether abs is a git worktree root by the
 // RELIABLE, location-independent signal: a `.git` entry directly under abs
 // that is a regular FILE (not a directory) whose content begins with

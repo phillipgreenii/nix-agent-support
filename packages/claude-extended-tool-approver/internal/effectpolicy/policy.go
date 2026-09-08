@@ -564,16 +564,70 @@ func (NoReadOfSecretPath) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, b
 // the raw text or on patheval's resolution of it. It is shared by the
 // node-level secret policy and the graph-level flow policy so both name a
 // secret the same way.
+//
+// tc-lc8f item 3z (deletable.go's "# NON-SECRET declarations" doc comment
+// carries the operator rulings): a GenericSecretsDir match (the bare,
+// role-describing `secrets` path component — secretpath.Classify) is no
+// longer forbidden UNCONDITIONALLY. It is forbidden unless the project's
+// own workspace declaration (deletable.NonSecret) vouches for the path as
+// non-secret. A WellKnownSecret match (a specific credential store or file
+// — `.ssh`/`.gnupg`, the credential basenames, `*.pem`/`*.key`) is
+// unaffected: it stays forbidden regardless of any project declaration,
+// exactly as before this slice.
 func secretRead(p string, ctx PolicyContext) (string, bool) {
-	if secretpath.IsSecret(p) {
-		return "secret path", true
+	if reason, secret := classifiedSecretRead(p, ctx, ""); secret {
+		return reason, true
 	}
 	if ctx.PathEval != nil {
-		if resolved := ctx.PathEval.ResolvePath(p); resolved != "" && secretpath.IsSecret(resolved) {
-			return "secret path (resolved)", true
+		if resolved := ctx.PathEval.ResolvePath(p); resolved != "" {
+			if reason, secret := classifiedSecretRead(resolved, ctx, " (resolved)"); secret {
+				return reason, true
+			}
 		}
 	}
 	return "", false
+}
+
+// classifiedSecretRead applies secretpath.Classify to candidate and decides
+// whether it is a secret read: WellKnownSecret is unconditionally forbidden
+// (secretRead's doc explains why); GenericSecretsDir is forbidden UNLESS
+// deletable.NonSecret declares the path non-secret. suffix is appended to
+// the reason text (secretRead's pre-existing "(resolved)" annotation for
+// the second, symlink-resolved check).
+//
+// candidate is mapped through stripGoPackagePattern before it is handed to
+// deletable.NonSecret (never before secretpath.Classify — Classify matches
+// the `secrets` component in "./internal/rules/secrets/..." exactly as
+// well as in the stripped form, so stripping earlier would buy nothing and
+// would change what every OTHER caller of Classify sees): a `go
+// test`/`go build`/... package-pattern operand names a directory in Go's
+// own package-pattern SYNTAX, not in a form patheval/deletable's path
+// machinery or a `git ls-files` probe can resolve directly.
+func classifiedSecretRead(candidate string, ctx PolicyContext, suffix string) (string, bool) {
+	switch secretpath.Classify(candidate) {
+	case secretpath.WellKnownSecret:
+		return "secret path" + suffix, true
+	case secretpath.GenericSecretsDir:
+		if nonSecret, _ := deletable.NonSecret(ctx.PathEval, stripGoPackagePattern(candidate)); nonSecret {
+			return "", false
+		}
+		return "secret path" + suffix, true
+	default:
+		return "", false
+	}
+}
+
+// stripGoPackagePattern maps a Go package-pattern operand's "/..." suffix
+// (e.g. "./internal/rules/secrets/..." -> "./internal/rules/secrets") to
+// the directory it names. Deliberately done HERE, in the policy layer, not
+// in cmddesc (which would have to know this is a secrecy concern rather
+// than a generic path fact) or in deletable (whose Kind declarations are
+// go-agnostic by design — see deletable.go's doc comment): this mapping is
+// specific to how ONE tool family's operand SYNTAX maps onto a path, which
+// is a policy-layer judgment call, not a project-specification concern nor
+// a cmddesc parsing concern.
+func stripGoPackagePattern(path string) string {
+	return strings.TrimSuffix(path, "/...")
 }
 
 // NetworkAccess judges net effects against the vetted-host list: a dynamic
