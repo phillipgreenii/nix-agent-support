@@ -138,6 +138,10 @@ func TestSafecmds_AlwaysSafe_Approve(t *testing.T) {
 		"test -f foo",
 		"true",
 		"false",
+		// ":" (tc-72gq): the POSIX/bash null-command builtin — same risk class
+		// as true/false (zero filesystem/network access), added to alwaysSafe
+		// alongside them.
+		":",
 		"printf '%s' foo",
 		// uptime: bare, no args — read-only system info, no filesystem access
 		// (grouped in alwaysSafe alongside date/uname/hostname).

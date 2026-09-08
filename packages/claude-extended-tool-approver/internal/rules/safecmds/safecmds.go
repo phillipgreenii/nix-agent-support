@@ -12,7 +12,7 @@ import (
 )
 
 var alwaysSafe = map[string]bool{
-	"echo": true, "true": true, "false": true, "printf": true,
+	"echo": true, "true": true, "false": true, ":": true, "printf": true,
 	"cut": true, "df": true, "ps": true, "tr": true, "where": true, "pgrep": true,
 	"sleep": true, "tree": true,
 	// "test" ("[") is deliberately NOT here — see the pg2-4k7yd doc on
