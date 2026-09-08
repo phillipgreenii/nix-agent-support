@@ -284,26 +284,33 @@ decide:
 
 ```bash
 case "$(basename "$CC")" in
-phillipgreenii-nix-agent-support | phillipg-nix-ziprecruiter)
+phillipgreenii-nix-agent-support | nix-agent-support | phillipg-nix-ziprecruiter)
   (cd "$WT" && nix flake check)
   ;;
 esac
 ```
 
-**Known trap — a shorter shorthand is not the match value.** Plenty of prose
-elsewhere (ADR titles, plan docs, even this workspace's own agent-rules text)
-casually calls the first repo `nix-agent-support`, dropping the
-`phillipgreenii-` prefix. That shorthand is **not** what `basename "$CC"`
-prints for that repo and **MUST NOT** be substituted for the literal pattern
-above. Bead `pg2-5hww2` recorded exactly this failure: a lander agent recalled
-the pattern as `nix-agent-support`, "concluded" the repo's real basename
-(`phillipgreenii-nix-agent-support`) didn't match, and silently skipped this
-MUST-run gate — even though the two quoted literals in the `case` above are
-correct and always have been. If your own reasoning about whether this repo
-"matches" produces any string other than a verbatim copy of one of the two
-`case` literals above, that reasoning is wrong; re-read the block above rather
-than trust recollection, or just run it and observe which branch (if any)
-executes.
+**Known trap — a shorter shorthand used to silently miss the match.** Plenty
+of prose elsewhere (ADR titles, plan docs, even this workspace's own
+agent-rules text, and the root `CLAUDE.md` itself) casually calls the first
+repo `nix-agent-support`, dropping the `phillipgreenii-` prefix — and on at
+least one real machine that shorthand IS the canonical clone's actual
+directory basename (no `phillipgreenii-` prefix in the checkout path at all).
+Bead `pg2-5hww2` recorded a lander agent recalling the pattern as
+`nix-agent-support` from memory, "concluding" the repo's real basename
+(`phillipgreenii-nix-agent-support`) didn't match, and silently skipping this
+MUST-run gate — even though the two quoted literals in the `case` at the time
+were correct for the machine that block was written on. Bead `tc-04y5` then
+found the deeper problem: on a machine whose canonical checkout is literally
+named `nix-agent-support` (no prefix), the literal match never fires for
+_any_ reasoning path, careful or not — the case pattern itself didn't cover
+that real basename. The `case` above now lists `nix-agent-support` as a third
+literal for exactly that reason: it is not a "shorthand exception", it is a
+real, observed directory basename this gate MUST also match on. If your own
+reasoning about whether this repo "matches" produces any string other than a
+verbatim copy of one of the three `case` literals above, that reasoning is
+wrong; re-read the block above rather than trust recollection, or just run it
+and observe which branch (if any) executes.
 
 Match on `basename "$CC"` — the canonical clone's directory name, the same
 identifier this workspace's own `pn-workspace.toml` and root `CLAUDE.md` repo-label
@@ -509,7 +516,8 @@ exist, and prescribes a `git rebase --continue` that exits 128.
   `--all-files` run), and MUST NOT skip it on the reasoning that FF-2a will
   also run for the two named repos — FF-1b's hook set and FF-2a's `checks.*`
   derivations check different things, and neither substitutes for the other.
-- When the repo being landed is `phillipgreenii-nix-agent-support` or
+- When the repo being landed is `phillipgreenii-nix-agent-support` (or its
+  unprefixed local-checkout basename `nix-agent-support`) or
   `phillipg-nix-ziprecruiter` (identified by `basename "$CC"`), FF-2a MUST run a
   full `nix flake check` against the rebased `<WT>` and MUST halt and report
   `stopped:flake-check-failed` on any non-zero exit, rather than proceed to
