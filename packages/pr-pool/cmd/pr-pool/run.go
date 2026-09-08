@@ -591,22 +591,24 @@ func countEnabledRoles(rs roles.RoleSet) int {
 // entry here fired (or was scheduled to fire) this pass. See
 // core.TickSnapshot.Sources for the Rejected freedom-boundary note.
 //
-// rpt is THIS pass's own discover.ProduceReport (Task 4.1):
-// LastTick/Failure both carry the SAME per-pass scope — present only for a
-// source this pass actually attempted, so a source Task 1.3's cadence
-// gating skipped this pass simply carries neither field this call, rather
-// than replaying stale history (the identical limitation LastTick's own
-// doc already states, extended consistently to Failure). Every source
-// here is "pull" (Type/Mode, statusSources' own doc): no push query type
-// exists in this codebase today.
-func sourceReportsFor(sources query.SourceSet, rpt discover.ProduceReport) []core.SourceReport {
+// rpt is THIS pass's own discover.ProduceReport (Task 4.1), read here only
+// for Failure: a source Task 1.3's cadence gating skipped this pass simply
+// carries no Failure entry, its documented per-pass scope. lastTick is
+// instead the caller's Orchestrator.LastTick() — the merged-forward fire
+// history, NOT rpt.LastTick — because unlike Failure, a source's LastTick
+// must NOT revert to the zero value on a pass that skipped it (pg2-bzb8i):
+// see SourceReport.LastTick's own doc for why a per-pass-only view left the
+// operator with no durable positive confirmation a source had ever run.
+// Every source here is "pull" (Type/Mode, statusSources' own doc): no push
+// query type exists in this codebase today.
+func sourceReportsFor(sources query.SourceSet, rpt discover.ProduceReport, lastTick map[string]time.Time) []core.SourceReport {
 	if len(sources) == 0 {
 		return nil
 	}
 	out := make([]core.SourceReport, len(sources))
 	for i, s := range sources {
 		sr := core.SourceReport{Name: s.Name, Type: "pull"}
-		if lt, ok := rpt.LastTick[s.Name]; ok {
+		if lt, ok := lastTick[s.Name]; ok {
 			sr.LastTick = lt
 		}
 		if f, ok := rpt.Failure[s.Name]; ok {
@@ -715,7 +717,7 @@ func runOneTick(ctx context.Context, cfg config.Config, o *orchestrator.Orchestr
 		q.Expire()
 		now := time.Now()
 		svc.PublishTick(core.TickSnapshot{
-			Sources:    sourceReportsFor(cfg.Queries, rpt),
+			Sources:    sourceReportsFor(cfg.Queries, rpt, o.LastTick()),
 			Config:     resolvedConfigFor(cfg, core.RunModeLongRunning),
 			RunMode:    core.RunModeLongRunning,
 			Version:    version,
@@ -846,7 +848,7 @@ func runRunUntilIdle(only, disable []string) int {
 		q.Expire()
 		now := time.Now()
 		svc.PublishTick(core.TickSnapshot{
-			Sources:    sourceReportsFor(pr.cfg.Queries, rpt),
+			Sources:    sourceReportsFor(pr.cfg.Queries, rpt, pr.o.LastTick()),
 			Config:     resolvedConfigFor(pr.cfg, core.RunModeDrainAndExit),
 			RunMode:    core.RunModeDrainAndExit,
 			Version:    version,

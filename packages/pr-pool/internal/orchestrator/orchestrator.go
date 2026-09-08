@@ -174,6 +174,28 @@ func (o *Orchestrator) ProduceTick(ctx context.Context, q *eventqueue.Queue) (di
 	return rpt, err
 }
 
+// LastTick returns a snapshot copy of this Orchestrator's own per-source
+// merged-forward fire history (the lastTick field's doc above) — the real
+// last time each source successfully fired across every tick this
+// Orchestrator has driven, not merely the most recent ProduceTick call's own
+// per-pass ProduceReport.LastTick (pg2-bzb8i). cmd/pr-pool's
+// sourceReportsFor reads this so a status reply's SourceReport.LastTick
+// keeps showing a source's real last-fire time on a tick that cadence
+// gating skipped for that source, rather than reverting to the zero value —
+// a `tui` poll (every ~1s by default) lands on far more ticks than it does
+// on the one tick that happens to actually fire a slower-cadenced source, so
+// a per-pass-only view left the operator with no durable positive
+// confirmation a source had ever run at all. A copy is returned (never the
+// live map) so a caller cannot mutate this Orchestrator's own persisted
+// history.
+func (o *Orchestrator) LastTick() map[string]time.Time {
+	out := make(map[string]time.Time, len(o.lastTick))
+	for name, t := range o.lastTick {
+		out[name] = t
+	}
+	return out
+}
+
 // RunOne dispatches a single self-contained EVENT through one role and then
 // closes that one session (the drain's pass-level teardownAll is not involved).
 // It is the single-bead entry behind `pr-pool run-role`: smoke-test one role

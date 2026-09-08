@@ -532,15 +532,17 @@ func TestResolvedConfigFor_countsActiveRolesAndQueries(t *testing.T) {
 // TestSourceReportsFor_oneReportPerActiveSource proves sourceReportsFor
 // reflects cfg.Queries verbatim — the already-post-selector active subset —
 // and that an empty set produces nil, not an empty non-nil slice. Task 4.1
-// widens the assertion to cover Type (always "pull") and the per-pass
-// LastTick/Failure threading from the caller's own discover.ProduceReport.
+// widens the assertion to cover Type (always "pull") and the LastTick/
+// Failure threading: LastTick comes from the caller's own merged-forward
+// lastTick map (Orchestrator.LastTick, pg2-bzb8i), Failure from this pass's
+// own discover.ProduceReport.
 func TestSourceReportsFor_oneReportPerActiveSource(t *testing.T) {
 	now := time.Date(2026, 9, 1, 0, 5, 0, 0, time.UTC)
 	rpt := discover.ProduceReport{
-		LastTick: map[string]time.Time{"beads-ready": now},
-		Failure:  map[string]discover.FailureInfo{"e2e-source": {Count: 2, NextEligible: now}},
+		Failure: map[string]discover.FailureInfo{"e2e-source": {Count: 2, NextEligible: now}},
 	}
-	got := sourceReportsFor(query.SourceSet{{Name: "beads-ready"}, {Name: "e2e-source"}}, rpt)
+	lastTick := map[string]time.Time{"beads-ready": now}
+	got := sourceReportsFor(query.SourceSet{{Name: "beads-ready"}, {Name: "e2e-source"}}, rpt, lastTick)
 	want := []core.SourceReport{
 		{Name: "beads-ready", Type: "pull", LastTick: now},
 		{Name: "e2e-source", Type: "pull", Failure: &core.FailureInfo{Count: 2, NextEligible: now}},
@@ -549,8 +551,27 @@ func TestSourceReportsFor_oneReportPerActiveSource(t *testing.T) {
 		t.Fatalf("sourceReportsFor = %+v, want %+v", got, want)
 	}
 
-	if got := sourceReportsFor(nil, discover.ProduceReport{}); got != nil {
+	if got := sourceReportsFor(nil, discover.ProduceReport{}, nil); got != nil {
 		t.Fatalf("sourceReportsFor(nil) = %+v, want nil", got)
+	}
+}
+
+// TestSourceReportsFor_lastTickSurvivesAPassThatSkippedTheSource is
+// pg2-bzb8i's own regression test: a source whose cadence gated it off THIS
+// pass (so rpt itself carries no LastTick at all — Task 4.1 already dropped
+// that field from ProduceReport's own per-pass relevance here) still
+// reports the real time it last fired, read from the caller's persisted
+// lastTick map, instead of reverting to the zero value ("-"/idle in the
+// TUI) the way a per-pass-only view previously did on nearly every poll.
+func TestSourceReportsFor_lastTickSurvivesAPassThatSkippedTheSource(t *testing.T) {
+	firedAt := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	rpt := discover.ProduceReport{} // this pass fired nothing for beads-ready
+	lastTick := map[string]time.Time{"beads-ready": firedAt}
+
+	got := sourceReportsFor(query.SourceSet{{Name: "beads-ready"}}, rpt, lastTick)
+	want := []core.SourceReport{{Name: "beads-ready", Type: "pull", LastTick: firedAt}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("sourceReportsFor = %+v, want %+v (LastTick must survive a pass that skipped this source)", got, want)
 	}
 }
 

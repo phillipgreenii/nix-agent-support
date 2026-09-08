@@ -1177,9 +1177,11 @@ func statusListeners(declared []roles.Role, excludedRoles []string, counts map[s
 // ever push. `enabled` is always true for a source: unlike a role, a query
 // carries no config-level enable/disable flag — the only way a configured
 // source is inactive this run is selector exclusion, `excluded` alone.
-// `lastTick`/`failure` are per-pass (THIS pass's ProduceReport only, the
-// same scope LastTick's own doc already states) — a cadence-gated-off pass
-// simply omits them rather than replaying stale history.
+// `lastTick` is the source's real last-fire time regardless of which pass
+// fired it (SourceReport.LastTick's own doc, pg2-bzb8i) — a cadence-gated-off
+// pass still carries it forward. `failure` stays per-pass (THIS pass's
+// ProduceReport only) — a cadence-gated-off pass simply omits it rather than
+// replaying stale failure history.
 //
 // `rejected` (the prior, unused field) is REMOVED per the schema-change
 // note — it was never part of the frozen tree and nothing rendered it.

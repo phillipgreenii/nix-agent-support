@@ -63,16 +63,26 @@ type SourceReport struct {
 	// live "push" query. The field exists for schema generality (spec §5's
 	// corr-6 precedent), not because this run ever produces one.
 	Type string
-	// LastTick is when THIS pass fired this source's query (cmd/pr-pool's
-	// sourceReportsFor threads it in from discover.ProduceReport.LastTick).
-	// The zero value means this pass did not fire it (never attempted, or
-	// Task 1.3's cadence gating skipped it) — statusSources omits the wire
-	// field entirely rather than rendering a zero-value instant.
+	// LastTick is the last time this source's query actually fired, full
+	// stop — NOT scoped to this one pass (cmd/pr-pool's sourceReportsFor
+	// threads it in from orchestrator.Orchestrator.LastTick's own
+	// merged-forward fire history, not the bare per-pass
+	// discover.ProduceReport.LastTick). pg2-bzb8i: a per-pass-only view
+	// reverted to the zero value on nearly every poll for a source whose
+	// own cadence is longer than the tick interval, leaving the operator no
+	// durable positive confirmation the source had ever run — only whatever
+	// they could infer from OTHER state changing elsewhere on screen. The
+	// zero value now means this source has never fired at all since this
+	// daemon process started — statusSources omits the wire field entirely
+	// rather than rendering a zero-value instant.
 	LastTick time.Time
 	// Failure is this pass's pull-source failure-backoff state (INV-FAIL-3),
 	// or nil when this pass did not observe a failure for this source
-	// (succeeded, not due, or never attempted). Same per-pass scope as
-	// LastTick above.
+	// (succeeded, not due, or never attempted) — deliberately still scoped
+	// to THIS pass, unlike LastTick above: a source that is failing now
+	// should not keep showing a stale failure once it starts succeeding
+	// again, the opposite of LastTick's own "keep the last real answer"
+	// goal.
 	Failure *FailureInfo
 }
 

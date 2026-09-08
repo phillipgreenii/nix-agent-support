@@ -206,6 +206,50 @@ func TestProduceTick_thenDispatch_matchesBuiltinRoles(t *testing.T) {
 	}
 }
 
+// TestOrchestrator_LastTick_mergesForwardWithoutErasingPriorEntries is
+// pg2-bzb8i's regression coverage for the new LastTick() accessor: a
+// ProduceTick call records THIS pass's own real fire time for every
+// built-in source it actually attempts, while a name it never touches at
+// all (seeded here as if a previous, unrelated pass had recorded it) keeps
+// its prior entry untouched — ProduceTick's merge loop (unchanged by this
+// bead) only ever ADDS entries present in its own pass's ProduceReport,
+// never clears an absent one, which is exactly the persistence
+// cmd/pr-pool's sourceReportsFor now relies on so a source's LastTick
+// survives a later pass that cadence-gates it off (see LastTick's own doc).
+func TestOrchestrator_LastTick_mergesForwardWithoutErasingPriorEntries(t *testing.T) {
+	cfg := fastCfg()
+	bd := &dtest.ScriptBD{Ready: map[string]string{"feedback": "[]", "worker": "[]"}}
+	o := newOrch(&dtest.FakeCC{}, bd, cfg)
+	ctx := context.Background()
+	q := newTestQueue(t)
+
+	stalePriorFire := time.Unix(1_700_000_000, 0)
+	o.lastTick = map[string]time.Time{"other-source": stalePriorFire}
+
+	before := time.Now()
+	if _, err := o.ProduceTick(ctx, q); err != nil {
+		t.Fatal(err)
+	}
+
+	got := o.LastTick()
+	if !got["other-source"].Equal(stalePriorFire) {
+		t.Fatalf("LastTick()[other-source] = %v, want the preserved prior fire %v -- a pass that never touches a source must not erase its history", got["other-source"], stalePriorFire)
+	}
+	if got["feedback-source"].Before(before) {
+		t.Fatalf("LastTick()[feedback-source] = %v, want this pass's own real fire time (>= %v)", got["feedback-source"], before)
+	}
+	if got["worker-source"].Before(before) {
+		t.Fatalf("LastTick()[worker-source] = %v, want this pass's own real fire time (>= %v)", got["worker-source"], before)
+	}
+
+	// The returned map is an independent copy -- mutating it must not
+	// corrupt the Orchestrator's own persisted history.
+	got["other-source"] = time.Time{}
+	if !o.lastTick["other-source"].Equal(stalePriorFire) {
+		t.Fatalf("mutating LastTick()'s result corrupted the Orchestrator's own state: got %v", o.lastTick["other-source"])
+	}
+}
+
 // TestNewListener_perHandlerSerialFIFO_onePerDispatchCall locks in the
 // structural replacement for the retired per-role Cap: a Listener's head
 // advances by exactly one accepted event per Dispatch() call, regardless of how
