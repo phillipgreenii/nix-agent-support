@@ -1,5 +1,5 @@
 flowchart LR
-    n0["command: ssh otherhost cat /var/log/syslog<br/>- stdio:stdin content<br/>- stdio:stdout content<br/>- net:outbound otherhost [arg 0]<br/>mark=insufficient: net:outbound otherhost [arg 0]: network-access (host is not vetted)<br/>graph: no-content-flow-to-unvetted-network: unknown (content flows to unvetted host otherhost)"]
+    n0["command: ssh otherhost cat /var/log/syslog<br/>- stdio:stdin content<br/>- stdio:stdout content<br/>- net:outbound otherhost {ssh} [arg 0]<br/>mark=insufficient: net:outbound otherhost {ssh} [arg 0]: network-access (host is not vetted)<br/>graph: no-content-flow-to-unvetted-network: unknown (content flows to unvetted host otherhost)"]
     subgraph sg_s0["ssh otherhost"]
         n1["command: cat /var/log/syslog<br/>- path:read /var/log/syslog {remote:otherhost} [arg 0]<br/>- stdio:stdout content<br/>mark=permitted"]
         n2[/"file: /var/log/syslog"/]

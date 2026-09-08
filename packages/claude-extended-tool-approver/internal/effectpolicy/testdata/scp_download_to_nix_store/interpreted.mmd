@@ -1,5 +1,5 @@
 flowchart LR
-    n0["command: scp host:/etc/passwd /nix/store/x<br/>- path:read /etc/passwd {remote:host} [arg 0]<br/>- net:outbound host [arg 0]<br/>- path:truncate /nix/store/x [arg 1]<br/>mark=forbidden: path:truncate /nix/store/x [arg 1]: no-write-to-read-only-path (write to read-only zone)<br/>graph: no-content-flow-to-unvetted-network: unknown (content flows to unvetted host host)"]
+    n0["command: scp host:/etc/passwd /nix/store/x<br/>- path:read /etc/passwd {remote:host} [arg 0]<br/>- net:outbound host {scp} [arg 0]<br/>- path:truncate /nix/store/x [arg 1]<br/>mark=forbidden: path:truncate /nix/store/x [arg 1]: no-write-to-read-only-path (write to read-only zone)<br/>graph: no-content-flow-to-unvetted-network: unknown (content flows to unvetted host host)"]
     n1[/"file: /etc/passwd"/]
     n2[/"file: /nix/store/x"/]
     n0 -->|"reads: read"| n1

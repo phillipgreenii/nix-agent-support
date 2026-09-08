@@ -1,5 +1,5 @@
 flowchart LR
-    n0["command: ssh host rm -rf /<br/>- stdio:stdin content<br/>- stdio:stdout content<br/>- net:outbound host [arg 0]<br/>mark=insufficient: net:outbound host [arg 0]: network-access (host is not vetted)<br/>graph: no-content-flow-to-unvetted-network: unknown (content flows to unvetted host host)"]
+    n0["command: ssh host rm -rf /<br/>- stdio:stdin content<br/>- stdio:stdout content<br/>- net:outbound host {ssh} [arg 0]<br/>mark=insufficient: net:outbound host {ssh} [arg 0]: network-access (host is not vetted)<br/>graph: no-content-flow-to-unvetted-network: unknown (content flows to unvetted host host)"]
     subgraph sg_s0["ssh host"]
         n1["command: rm -rf /<br/>- path:delete / {remote:host} [arg 1]<br/>mark=insufficient: path:delete / {remote:host} [arg 1]: delete-access (remote path on host: no local classification)"]
         n2[/"file: /"/]

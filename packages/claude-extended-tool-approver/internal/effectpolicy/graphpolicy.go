@@ -34,9 +34,14 @@ func DefaultGraphPolicies() []GraphPolicy {
 // reads on the upstream nodes and on the sink itself (`-d @file`, `-T
 // file`). A secret read anywhere on that path is Forbidden on the sink
 // ("secret content flows to network"); otherwise an insufficient upstream
-// node is Unknown; otherwise a vetted sink host is Unknown ("upload of local
-// content to a vetted host requires consent" — still Abstain in this slice);
-// otherwise Unknown ("content flows to unvetted host").
+// node is Unknown; otherwise an unvetted sink host is Unknown ("content
+// flows to unvetted host"); otherwise a vetted sink host is Unknown ("upload
+// of local content to a vetted host requires consent") UNLESS every outbound
+// net effect on the sink is an ssh or scp connection (Effect.NetProducer,
+// slice 3ao, tc-8og1 item 4a; tc-hjtb Q2 — moved in lockstep with
+// NetworkAccess's identical Q1 loosening), in which case this policy
+// contributes no finding at all and the sink's Decision is governed by the
+// ordinary node-level policies alone.
 //
 // A REMOTE-scope path read (Effect.Remote != "", slice 3aa, tc-lc8f item 4g;
 // tc-vn5z item 4 — e.g. an `ssh host 'cat ~/.ssh/id_rsa'` child, whose own
@@ -121,10 +126,30 @@ func (NoContentFlowToUnvettedNetwork) judgeSink(g *effectgraph.Graph, sink *effe
 	if insufficient != nil {
 		return GraphFinding{NodeID: sink.ID, Verdict: Unknown, Reason: fmt.Sprintf("upstream node %s (%s) is insufficient", insufficient.ID, insufficient.Label)}, true
 	}
+	allVettedConnections := true
 	for _, h := range hosts {
 		if h.Dynamic || !ctx.HostVetted(h.Host) {
 			return GraphFinding{NodeID: sink.ID, Verdict: Unknown, Reason: "content flows to unvetted host " + h.Host}, true
 		}
+		if !isVettedConnectionProducer(h.NetProducer) {
+			allVettedConnections = false
+		}
+	}
+	if allVettedConnections {
+		// slice 3ao, tc-8og1 item 4a; tc-hjtb Q2 (verbatim: "Yes, move in
+		// lockstep with Q1's scope"): every outbound net effect on this
+		// sink is an ssh/scp connection to a vetted host, so this policy's
+		// OWN "requires consent" branch — the SAME lockstep NetworkAccess's
+		// Judge moved for the identical scope — no longer applies; there is
+		// no finding here, and the sink's Decision is governed entirely by
+		// whatever the ordinary node-level path/net policies found (a
+		// Forbidden secret read above already returned earlier in this
+		// function; a categorized-path or uncategorized-path finding on the
+		// content actually flowing is untouched). A sink with even ONE
+		// non-ssh/scp outbound effect (curl, or any future producer) still
+		// falls through to the Unknown branch below, so a curl upload to a
+		// vetted host keeps requiring consent exactly as before this slice.
+		return GraphFinding{}, false
 	}
 	return GraphFinding{NodeID: sink.ID, Verdict: Unknown, Reason: "upload of local content to a vetted host requires consent"}, true
 }

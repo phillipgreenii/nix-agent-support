@@ -264,6 +264,38 @@ type Effect struct {
 	Direction NetDirection
 	Method    string
 
+	// NetProducer names WHICH CLIENT PROGRAM produced this EffectNet
+	// connection (slice 3ao, tc-8og1 item 4a; tc-hjtb Q1/Q2). It exists
+	// because the operator's "Permit outbound connections to a vetted host"
+	// ruling (tc-dpfl) was discovered, mid-implementation, to be generic
+	// over EVERY EffectNet producer — ssh/scp's defensively-conservative
+	// "the connection COULD carry local content out" marking and curl's own
+	// CONFIRMED upload (`-d`/`-T`/`--data`, interpreter_curl.go) both set
+	// Direction: NetOutbound, and nothing on Effect told
+	// effectpolicy.NetworkAccess apart which one it was looking at — a
+	// blanket fix would have silently flipped curl_post_vetted
+	// (golden_test.go) from Abstain to Approve, a real behavior change never
+	// discussed in tc-dpfl. The operator ruled on tc-hjtb (verbatim,
+	// 2026-09-08): Q1 "ssh/scp only — add a producer-distinguishing field",
+	// Q2 "Yes, move [NoContentFlowToUnvettedNetwork] in lockstep with Q1's
+	// scope" — i.e. via this SAME field, not curl uploads generally. "" (the
+	// zero value — curl, and any future EffectNet producer that does not set
+	// this) keeps the ORIGINAL treatment: NetworkAccess's Outbound+Vetted
+	// branch stays Unknown ("upload to a vetted host requires consent") and
+	// NoContentFlowToUnvettedNetwork's parallel branch is unaffected. Only
+	// "ssh" (interpreter_ssh.go's sshConnection) and "scp"
+	// (interpreter_scp.go's scpInterpreter, one per distinct remote host)
+	// set this, and only those two values move NetworkAccess's Outbound
+	// branch to Permitted for a vetted host — see
+	// effectpolicy.isVettedConnectionProducer, the one place this
+	// vocabulary is enumerated, so a THIRD producer added later fails
+	// closed (Unknown) until deliberately added there too, exactly like
+	// Effect.Family's own routing. Kept as a generic open string (not a
+	// bool) for the same reason Family is: a future connection-only,
+	// never-uploading producer can join the same routing without a new
+	// field.
+	NetProducer string
+
 	// EffectStdio fields. Metadata is true when only metadata (not content)
 	// flows on the stream.
 	Stream   StdioStream
@@ -343,6 +375,9 @@ func (e Effect) String() string {
 		fmt.Fprintf(&b, ":%s %s", e.Direction, e.Host)
 		if e.Method != "" {
 			b.WriteString(" " + e.Method)
+		}
+		if e.NetProducer != "" {
+			fmt.Fprintf(&b, " {%s}", e.NetProducer)
 		}
 		if e.Dynamic {
 			b.WriteString(" (dynamic)")

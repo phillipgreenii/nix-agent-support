@@ -1,5 +1,5 @@
 flowchart LR
-    n0["command: scp -r host:/var/log ./logs<br/>- path:read /var/log {remote:host} [arg 1]<br/>- net:outbound host [arg 1]<br/>- path:truncate ./logs [arg 2]<br/>mark=insufficient: path:read /var/log {remote:host} [arg 1]: no-read-of-unreadable-path (remote path on host: no local classification)<br/>graph: no-content-flow-to-unvetted-network: unknown (content flows to unvetted host host)"]
+    n0["command: scp -r host:/var/log ./logs<br/>- path:read /var/log {remote:host} [arg 1]<br/>- net:outbound host {scp} [arg 1]<br/>- path:truncate ./logs [arg 2]<br/>mark=insufficient: path:read /var/log {remote:host} [arg 1]: no-read-of-unreadable-path (remote path on host: no local classification)<br/>graph: no-content-flow-to-unvetted-network: unknown (content flows to unvetted host host)"]
     n1[/"file: /var/log"/]
     n2[/"file: ./logs"/]
     n0 -->|"reads: read"| n1

@@ -80,6 +80,11 @@ func (st *interpState) sshConnection(hostOp pendingOp, remoteWords []pendingOp) 
 	st.effects = append(st.effects, Effect{
 		Kind: EffectNet, Direction: NetOutbound, Host: host, Dynamic: dynamic,
 		Source: fmt.Sprintf("arg %d", hostOp.idx),
+		// NetProducer (slice 3ao, tc-8og1 item 4a; tc-hjtb Q1): marks this
+		// connection as ssh's own, so effectpolicy.NetworkAccess can Permit
+		// it for a vetted host without loosening curl's own EffectNet
+		// producer — see Effect.NetProducer's own doc comment.
+		NetProducer: "ssh",
 	})
 	if len(remoteWords) == 0 {
 		st.fail("ssh: no remote command given (interactive session)")

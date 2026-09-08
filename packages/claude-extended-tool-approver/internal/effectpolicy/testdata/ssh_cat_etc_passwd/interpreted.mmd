@@ -1,5 +1,5 @@
 flowchart LR
-    n0["command: ssh host cat /etc/passwd<br/>- stdio:stdin content<br/>- stdio:stdout content<br/>- net:outbound host [arg 0]<br/>mark=insufficient: net:outbound host [arg 0]: network-access (host is not vetted)<br/>graph: no-content-flow-to-unvetted-network: unknown (upstream node n1 (cat /etc/passwd) is insufficient)"]
+    n0["command: ssh host cat /etc/passwd<br/>- stdio:stdin content<br/>- stdio:stdout content<br/>- net:outbound host {ssh} [arg 0]<br/>mark=insufficient: net:outbound host {ssh} [arg 0]: network-access (host is not vetted)<br/>graph: no-content-flow-to-unvetted-network: unknown (upstream node n1 (cat /etc/passwd) is insufficient)"]
     subgraph sg_s0["ssh host"]
         n1["command: cat /etc/passwd<br/>- path:read /etc/passwd {remote:host} [arg 0]<br/>- stdio:stdout content<br/>mark=insufficient: path:read /etc/passwd {remote:host} [arg 0]: no-read-of-unreadable-path (remote path on host: no local classification)"]
         n2[/"file: /etc/passwd"/]

@@ -99,6 +99,10 @@ func (scpInterpreter) Interpret(leaf cmdparse.ParsedCommand, schema CommandSchem
 		st.effects = append(st.effects, Effect{
 			Kind: EffectNet, Direction: NetOutbound, Host: host,
 			Source: fmt.Sprintf("arg %d", idx),
+			// NetProducer (slice 3ao, tc-8og1 item 4a; tc-hjtb Q1): marks
+			// this connection as scp's own, mirroring sshConnection's
+			// identical marking — see Effect.NetProducer's own doc comment.
+			NetProducer: "scp",
 		})
 	}
 

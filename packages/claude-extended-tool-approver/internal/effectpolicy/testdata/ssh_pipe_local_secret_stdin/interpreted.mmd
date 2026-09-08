@@ -1,6 +1,6 @@
 flowchart LR
     n0["command: cat ~/.ssh/id_rsa<br/>- path:read ~/.ssh/id_rsa [arg 0]<br/>- stdio:stdout content<br/>mark=forbidden: path:read ~/.ssh/id_rsa [arg 0]: no-read-of-secret-path (secret path)"]
-    n1["command: ssh host 'cat #gt; /tmp/x'<br/>- stdio:stdin content<br/>- stdio:stdout content<br/>- net:outbound host [arg 0]<br/>mark=forbidden: no-content-flow-to-unvetted-network: forbidden (secret content flows to network: path:read ~/.ssh/id_rsa [arg 0] on node n0 (secret path))<br/>graph: no-content-flow-to-unvetted-network: forbidden (secret content flows to network: path:read ~/.ssh/id_rsa [arg 0] on node n0 (secret path))"]
+    n1["command: ssh host 'cat #gt; /tmp/x'<br/>- stdio:stdin content<br/>- stdio:stdout content<br/>- net:outbound host {ssh} [arg 0]<br/>mark=forbidden: no-content-flow-to-unvetted-network: forbidden (secret content flows to network: path:read ~/.ssh/id_rsa [arg 0] on node n0 (secret path))<br/>graph: no-content-flow-to-unvetted-network: forbidden (secret content flows to network: path:read ~/.ssh/id_rsa [arg 0] on node n0 (secret path))"]
     n2[/"file: ~/.ssh/id_rsa"/]
     subgraph sg_s0["ssh host"]
         n3["command: cat #gt; /tmp/x<br/>- stdio:stdin content<br/>- stdio:stdout content<br/>- path:truncate /tmp/x {remote:host} [redirect #gt;]<br/>mark=insufficient: path:truncate /tmp/x {remote:host} [redirect #gt;]: no-write-to-read-only-path (remote path on host: no local classification)"]

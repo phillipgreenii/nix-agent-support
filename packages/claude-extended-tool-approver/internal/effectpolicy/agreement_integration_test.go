@@ -730,6 +730,62 @@ var knownSpikeLooser = map[string]spikeLooserEntry{
 			"tokens are opaque to interpretVerbDispatch (per its own contract) and do not " +
 			"change the verdict.",
 	},
+	// ssh_var_log_vetted_categorized_read_only / scp_var_log_vetted_categorized_read_only
+	// (slice 3ao, tc-8og1 item 4a; tc-hjtb): the operator's own vetted-host
+	// worked example — "ssh host <read of a categorized read-only path> can
+	// Approve" (tc-dpfl). Root-caused in PRODUCTION: internal/rules/ssh/
+	// ssh.go's Rule is a config-driven mechanism that Abstains (returns
+	// notApplicable, ErrNotApplicable) on EVERY command when its injected
+	// configrules.SshConfig is the zero value (New's own doc comment: "an
+	// empty config makes the rule Abstain on every command"). This harness's
+	// buildLiveEngine fixture (agreement_integration_test.go) writes ONLY
+	// liveCurlConfig (`{"curl":{...}}`) to the fixture HOME's rules.json —
+	// no `ssh` block at all — so setup.NewEngineForCWD constructs the ssh
+	// rule with a ZERO SshConfig, r.configured is false, and the rule falls
+	// through unconditionally for this exact command, exactly as it does
+	// for every OTHER ssh/scp golden in this table (all of which also read
+	// live=noopinion). Even a NON-zero SshConfig would not help here:
+	// production's read-only classification (evaluateSSH) allowlists the
+	// remote COMMAND NAME (ReadonlyCommands/ReadonlySubcommands), not the
+	// PATH it reads — it has no per-host, per-path categorization mechanism
+	// at all, so there is no live equivalent of PolicyContext.RemotePaths
+	// to configure even in principle. The spike Approves only because it
+	// independently combines two ruled, spike-only mechanisms:
+	// NetworkAccess.Judge's new ssh/scp-only vetted-connection Permit (this
+	// slice, tc-hjtb Q1, ruled verbatim "ssh/scp only — add a
+	// producer-distinguishing field") and PolicyContext.RemotePaths'
+	// pre-existing per-host categorized-path Permit (slice 3aa/3am, tc-vn5z
+	// item 4) — both genuinely NEW spike capabilities, not a gap in an
+	// existing production rule (the same class of finding
+	// kubectl_dev_apply's own entry above records for KubeContextPolicy).
+	// scp's row shares the identical cause (its LOCAL destination write,
+	// ./syslog, is an ordinary non-secret CWD write contributing no
+	// independent cap).
+	"ssh_var_log_vetted_categorized_read_only": {
+		Class: "looser-than-abstain",
+		Cause: "production's ssh rule (internal/rules/ssh/ssh.go) Abstains unconditionally " +
+			"when its injected SshConfig is zero-valued (New's own doc comment), and this " +
+			"harness's buildLiveEngine fixture writes only a `curl` rules.json block, no " +
+			"`ssh` block — so the rule falls through to NoOpinion for this exact command, same " +
+			"as every other ssh/scp golden here. Even configured, production's read-only " +
+			"classification allowlists the remote COMMAND NAME, not a per-host PATH category — " +
+			"it has no equivalent of PolicyContext.RemotePaths at all. The spike Approves only " +
+			"by combining two ruled, spike-only mechanisms: NetworkAccess.Judge's new " +
+			"ssh/scp-only vetted-connection Permit (this slice, tc-hjtb Q1) and RemotePaths' " +
+			"pre-existing per-host categorized-path Permit (slice 3aa, tc-vn5z item 4) — new " +
+			"spike capability, not an existing-rule gap.",
+	},
+	"scp_var_log_vetted_categorized_read_only": {
+		Class: "looser-than-abstain",
+		Cause: "same root cause as ssh_var_log_vetted_categorized_read_only — production's ssh " +
+			"rule (which also governs scp) is unconfigured in this fixture (zero SshConfig) and " +
+			"falls through to NoOpinion, and even configured has no per-host path-category " +
+			"mechanism to match RemotePaths against. The spike Approves only by combining the " +
+			"same two ruled, spike-only mechanisms (NetworkAccess.Judge's ssh/scp-only " +
+			"vetted-connection Permit, tc-hjtb Q1/Q2, plus RemotePaths' categorized read-only " +
+			"entry). scp's LOCAL destination write (./syslog) is an ordinary non-secret CWD " +
+			"write and contributes no independent cap.",
+	},
 }
 
 // TestAgreement drives every case in goldenAgreementCases and

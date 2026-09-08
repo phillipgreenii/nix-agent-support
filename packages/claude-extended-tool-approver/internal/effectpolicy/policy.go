@@ -1146,10 +1146,35 @@ func classifiedSecretWrite(candidate string, access cmddesc.PathAccess, ctx Poli
 	}
 }
 
+// isVettedConnectionProducer reports whether producer (Effect.NetProducer)
+// is one of the two EffectNet producers the tc-hjtb ruling scoped the
+// vetted-host outbound Permit to: ssh and scp. Any other value — including
+// "" (curl, and any future EffectNet producer) — is NOT one of these, so
+// NetworkAccess's Outbound+Vetted branch stays Unknown for it. This is the
+// ONE place that vocabulary is enumerated; see Effect.NetProducer's own doc
+// comment for why (a third producer added later fails closed until it is
+// added here deliberately).
+func isVettedConnectionProducer(producer string) bool {
+	return producer == "ssh" || producer == "scp"
+}
+
 // NetworkAccess judges net effects against the vetted-host list: a dynamic
-// host is Unknown; content flowing IN from a vetted host is Permitted;
-// content flowing OUT is Unknown even to a vetted host (an upload needs
-// explicit consent in this slice); an unvetted host is Unknown. It never
+// host is Unknown; content flowing IN from a vetted host is Permitted; an
+// unvetted host is Unknown. Content flowing OUT is Unknown even to a vetted
+// host (an upload needs explicit consent in this slice) — EXCEPT an ssh or
+// scp connection (Effect.NetProducer, slice 3ao, tc-8og1 item 4a; tc-hjtb
+// Q1), which is Permitted once the host is vetted: the operator ruled
+// (tc-dpfl, verbatim) "Yes, Permit for vetted hosts" for ssh/scp
+// specifically, because ssh/scp's own outbound marking is a defensively
+// conservative "this connection COULD carry local content out" (it has no
+// confirmed upload the way curl's `-d`/`-T` does — see
+// sshInterpreter.sshConnection's and scpInterpreter's own doc comments), so
+// the CONNECTION itself is not the thing needing consent; whatever content
+// actually flows across it is still judged by the ordinary path/graph
+// policies (remotePathGuard, NoContentFlowToUnvettedNetwork below). tc-hjtb
+// Q1 was explicit that this does NOT extend to curl or any other EffectNet
+// producer — curl's confirmed upload to a vetted host stays Unknown
+// (curl_post_vetted, golden_test.go, must never flip to Approve). It never
 // returns Forbidden — an unvetted host is not known-bad.
 type NetworkAccess struct{}
 
@@ -1168,6 +1193,9 @@ func (NetworkAccess) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, bool) 
 		return Finding{Verdict: Unknown, Reason: "host is not vetted"}, true
 	}
 	if e.Direction == cmddesc.NetOutbound {
+		if isVettedConnectionProducer(e.NetProducer) {
+			return Finding{Verdict: Permitted, Reason: "vetted host, " + e.NetProducer + " connection permitted"}, true
+		}
 		return Finding{Verdict: Unknown, Reason: "upload to a vetted host requires consent"}, true
 	}
 	return Finding{Verdict: Permitted, Reason: "vetted host"}, true
