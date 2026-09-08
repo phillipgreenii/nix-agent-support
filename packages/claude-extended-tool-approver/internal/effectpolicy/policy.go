@@ -148,21 +148,22 @@ type Policy interface {
 // fold in evaluate.go for why an unjudged effect can no longer ride to
 // MarkPermitted for free.
 //
-// The four PATH policies (NoWriteToReadOnlyPath, DeleteAccess,
-// NoReadOfSecretPath, NoReadOfUnreadablePath) are wrapped in remotePathGuard
-// (slice 3aa, tc-lc8f item 4g; tc-vn5z item 4): a single guard, applied here
-// ONCE rather than copy-pasted into each policy's own Judge, that makes
-// every one of them abstain by default on a REMOTE-scope path effect
-// (Effect.Remote != "") unless the operator's categorized-path hook
-// (PolicyContext.RemotePaths) supplies an override — see remotePathGuard's
-// own doc comment. No other policy touches EffectPath, so no other entry
-// needs wrapping.
+// The five PATH policies (NoWriteToReadOnlyPath, DeleteAccess,
+// NoReadOfSecretPath, NoReadOfUnreadablePath, NoWriteToSecretPath) are
+// wrapped in remotePathGuard (slice 3aa, tc-lc8f item 4g; tc-vn5z item 4): a
+// single guard, applied here ONCE rather than copy-pasted into each policy's
+// own Judge, that makes every one of them abstain by default on a
+// REMOTE-scope path effect (Effect.Remote != "") unless the operator's
+// categorized-path hook (PolicyContext.RemotePaths) supplies an override —
+// see remotePathGuard's own doc comment. No other policy touches EffectPath,
+// so no other entry needs wrapping.
 func DefaultPolicies() []Policy {
 	return []Policy{
 		remotePathGuard{NoWriteToReadOnlyPath{}},
 		remotePathGuard{DeleteAccess{}},
 		remotePathGuard{NoReadOfSecretPath{}},
 		remotePathGuard{NoReadOfUnreadablePath{}},
+		remotePathGuard{NoWriteToSecretPath{}},
 		NetworkAccess{},
 		RemoteMutation{},
 		KubeContextPolicy{},
@@ -189,7 +190,7 @@ func DefaultPolicies() []Policy {
 // real verdict — see remotePathCategoryFinding for how a category maps to
 // one.
 //
-// This is implemented ONCE, here, rather than inside each of the four path
+// This is implemented ONCE, here, rather than inside each of the five path
 // policies' own Judge methods: every one of them would otherwise need the
 // identical Remote/RemotePaths check inserted at the same point, which is
 // exactly the kind of copy-paste this spike's "data first, one place per
@@ -727,6 +728,114 @@ func classifiedSecretRead(candidate string, ctx PolicyContext, suffix string) (s
 // a cmddesc parsing concern.
 func stripGoPackagePattern(path string) string {
 	return strings.TrimSuffix(path, "/...")
+}
+
+// NoWriteToSecretPath is the WRITE-side counterpart of NoReadOfSecretPath
+// (slice 3ab, tc-lc8f item 4h; tc-vn5z item 5): a write-class path effect
+// (create, modify, or truncate — Access.IsWrite() minus AccessDelete, the
+// same carve-out NoWriteToReadOnlyPath documents on its own doc comment)
+// whose target is a WELL-KNOWN secret store is Forbidden, exactly as
+// unconditionally as a READ of the same path already is.
+//
+// Deletes are carved out for the identical reason NoWriteToReadOnlyPath
+// carves them out: DeleteAccess already judges every AccessDelete path
+// effect, including its own secretRead check (its doc comment's ladder step
+// 4), so a delete effect must get EXACTLY ONE finding rather than two
+// policies silently agreeing (or, worse, disagreeing on the reason text).
+//
+// The GenericSecretsDir/WellKnownSecret split mirrors secretRead's own
+// split (slice 3z, tc-lc8f item 3z: "Tracked-by-git means non-secret") but
+// is NOT a verbatim copy of its verdicts: a WellKnownSecret match (a
+// specific credential store or file — .ssh/.gnupg, the credential
+// basenames, *.pem/*.key) stays unconditionally Forbidden, matching the
+// read side exactly, because writing into (or truncating, or overwriting) a
+// named credential store is exactly as disqualifying as reading it — either
+// way the operator's key material is being touched by an agent action nobody
+// reviewed. A bare GenericSecretsDir match (the role-describing "secrets"
+// path component with no project declaration vouching for it), however, is
+// Unknown here rather than Forbidden: unlike a read, which IRREVERSIBLY
+// discloses whatever is already there, a write to an unproven
+// "secrets"-named location has not yet disclosed or destroyed anything — it
+// is exactly the "needs consent" shape this policy set already gives an
+// ordinary ambiguous write (NoWriteToReadOnlyPath's own "zone unknown" case,
+// DeleteAccess's "writable, not deletable" case), not the irrevocable-harm
+// shape a secret read or a well-known-secret write is. When
+// deletable.NonSecret vouches for the path (a tracked, non-gitignored file —
+// the SAME declaration secretRead already consults), this policy does not
+// apply at all, and an unrelated write policy (NoWriteToReadOnlyPath) is
+// free to reach its own, ordinary zone-based verdict.
+type NoWriteToSecretPath struct{}
+
+// Name implements Policy.
+func (NoWriteToSecretPath) Name() string { return "no-write-to-secret-path" }
+
+// Judge implements Policy.
+func (NoWriteToSecretPath) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, bool) {
+	if e.Kind != cmddesc.EffectPath || !e.Access.IsWrite() || e.Access == cmddesc.AccessDelete {
+		return Finding{}, false
+	}
+	if e.Dynamic {
+		return Finding{Verdict: Unknown, Reason: "path is a runtime expansion"}, true
+	}
+	return secretWrite(e.Path, ctx)
+}
+
+// secretWrite reports the Finding a write to a statically known path
+// deserves, on the raw path text or on patheval's resolution of it —
+// mirroring secretRead's own raw-then-resolved two-pass shape exactly (see
+// secretRead's doc comment) so a symlinked secret store is caught the same
+// way whichever access class touches it. ok is false when neither the raw
+// nor the resolved path is any kind of secret path at all, letting the
+// write fall through to whichever other write policy (NoWriteToReadOnlyPath)
+// has an opinion.
+//
+// This is a SEPARATE helper from secretRead/classifiedSecretRead, not a
+// parameterisation of them: NoReadOfSecretPath and DeleteAccess both already
+// depend on secretRead's exact (string, bool) "is this secret" signature,
+// and the write side's GenericSecretsDir tier needs a DIFFERENT verdict
+// (Unknown, not Forbidden — see NoWriteToSecretPath's own doc comment for
+// why), not merely a different reason string. Duplicating the two-pass
+// control flow here keeps both read- and write-side helpers simple single-
+// purpose functions rather than growing secretRead an extra parameter only
+// the write side needs.
+func secretWrite(p string, ctx PolicyContext) (Finding, bool) {
+	if f, ok := classifiedSecretWrite(p, ctx, ""); ok {
+		return f, true
+	}
+	if ctx.PathEval != nil {
+		if resolved := ctx.PathEval.ResolvePath(p); resolved != "" {
+			if f, ok := classifiedSecretWrite(resolved, ctx, " (resolved)"); ok {
+				return f, true
+			}
+		}
+	}
+	return Finding{}, false
+}
+
+// classifiedSecretWrite applies secretpath.Classify to candidate and decides
+// the write-side Finding: WellKnownSecret is unconditionally Forbidden
+// (candidate is a specific named credential store, exactly like the read
+// side); GenericSecretsDir is Unknown UNLESS deletable.NonSecret declares
+// the path non-secret, in which case this policy has no opinion (ok false)
+// and an ordinary write policy decides. suffix is appended to the reason
+// text (secretWrite's "(resolved)" annotation for the symlink-resolved
+// pass), matching classifiedSecretRead's own convention.
+//
+// candidate is mapped through stripGoPackagePattern before it is handed to
+// deletable.NonSecret, for the identical reason classifiedSecretRead does —
+// see that function's doc comment.
+func classifiedSecretWrite(candidate string, ctx PolicyContext, suffix string) (Finding, bool) {
+	switch secretpath.Classify(candidate) {
+	case secretpath.WellKnownSecret:
+		return Finding{Verdict: Forbidden, Reason: "write to secret path" + suffix}, true
+	case secretpath.GenericSecretsDir:
+		if nonSecret, _ := deletable.NonSecret(ctx.PathEval, stripGoPackagePattern(candidate)); nonSecret {
+			return Finding{}, false
+		}
+		return Finding{Verdict: Unknown, Reason: "write to a path named \"secrets\"" + suffix + " needs consent (no project declaration vouches for it as non-secret)"}, true
+	default:
+		return Finding{}, false
+	}
 }
 
 // NetworkAccess judges net effects against the vetted-host list: a dynamic

@@ -1,0 +1,4 @@
+flowchart LR
+    n0["command: sed -i 's/a/b/' ~/.ssh/config<br/>- program:sed #quot;s/a/b/#quot;<br/>- path:modify ~/.ssh/config [arg 2]<br/>- stdio:stdout content<br/>mark=forbidden: path:modify ~/.ssh/config [arg 2]: no-write-to-secret-path (write to secret path)"]
+    n1[/"file: ~/.ssh/config"/]
+    n0 -->|"writes: modify"| n1
