@@ -155,6 +155,49 @@ func TestLegendModal_ContainsAllGlyphs(t *testing.T) {
 	}
 }
 
+func TestLegendModal_DescriptionColumnAligns(t *testing.T) {
+	rows := legendRows()
+	if len(rows) != len(legendEntries) {
+		t.Fatalf("legendRows() produced %d rows, want %d (one per legendEntries)", len(rows), len(legendEntries))
+	}
+
+	// Every row's Right field is "<padded label><description>". Recover
+	// each row's label+padding prefix by trimming its own (unpadded)
+	// description text back off, then compare the rendered width of that
+	// prefix across rows -- regardless of how long any individual row's
+	// label is, its description must start at the same column as every
+	// other row's.
+	wantOffset := -1
+	for i, r := range rows {
+		e := legendEntries[i]
+		if !strings.HasSuffix(r.Right, e.Description) {
+			t.Fatalf("row %d (label %q) does not end with its own description %q: %q", i, e.Label, e.Description, r.Right)
+		}
+		labelCol := strings.TrimSuffix(r.Right, e.Description)
+		offset := lipgloss.Width(labelCol)
+		if wantOffset == -1 {
+			wantOffset = offset
+			continue
+		}
+		if offset != wantOffset {
+			t.Errorf("row %d (label %q) description starts at column %d, want %d (same as row 0) -- got %q", i, e.Label, offset, wantOffset, r.Right)
+		}
+	}
+
+	// Guard against a regression back to a gap hardcoded smaller than the
+	// actual longest label (this repo's original bug: "cooling N s" and
+	// "failing ×N" overran a gap sized for shorter labels like "paused").
+	longest := 0
+	for _, e := range legendEntries {
+		if w := lipgloss.Width(e.Label); w > longest {
+			longest = w
+		}
+	}
+	if wantOffset <= longest {
+		t.Errorf("description column offset %d does not clear the longest label width %d", wantOffset, longest)
+	}
+}
+
 func TestHelpModal_RendersGivenRows(t *testing.T) {
 	rows := []HelpRow{
 		{Keys: "down | j", Description: "Cursor down"},
