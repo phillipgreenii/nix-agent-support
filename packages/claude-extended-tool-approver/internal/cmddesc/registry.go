@@ -62,9 +62,11 @@ func DefaultRegistry() Registry {
 		// slice 3y: kubectl subcommand schema and the per-kube-context
 		// operator policy (KubeContextPolicy).
 		kubectlSchema,
-		// slice 3aa: ssh's own EffectNet-plus-remote-scoped-child schema
-		// (scp is deliberately deferred — see sshSchema's own doc comment).
+		// slice 3aa: ssh's own EffectNet-plus-remote-scoped-child schema.
 		sshSchema,
+		// slice 3ad: scp's own bespoke per-operand local/remote dispatch —
+		// see scpSchema/scpInterpreter's doc comments (interpreter_scp.go).
+		scpSchema,
 	)
 }
 

@@ -81,6 +81,13 @@ var interpreters = map[string]Interpreter{
 	// positionals become one shell-dialect ChildInvocation tagged REMOTE) —
 	// see interpreter_ssh.go.
 	"ssh": sshInterpreter{},
+	// slice 3ad (tc-lc8f item 4i; tc-vn5z item 4 follow-up): scp's own
+	// bespoke dispatch — EVERY positional operand is classified local or
+	// remote by its own text, the LAST one is the destination, a remote
+	// operand's path effect is stamped Remote directly (no child scope), and
+	// one EffectNet is emitted per distinct remote host — see
+	// interpreter_scp.go.
+	"scp": scpInterpreter{},
 }
 
 // LookupInterpreter resolves a schema's Interpreter name. The empty name

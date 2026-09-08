@@ -176,8 +176,10 @@ func DefaultPolicies() []Policy {
 }
 
 // remotePathGuard wraps a PATH policy so a path effect that lives in a
-// REMOTE scope (Effect.Remote != "", stamped by effectgraph's builder — see
-// cmddesc.Effect.Remote's own doc comment) abstains by default, per the
+// REMOTE scope (Effect.Remote != "", stamped by effectgraph's builder OR
+// directly by an interpreter that mixes local and remote operands on ONE
+// leaf — slice 3ad's scp is the latter; see cmddesc.Effect.Remote's own doc
+// comment for both producers) abstains by default, per the
 // operator ruling on tc-vn5z (slice 3aa, tc-lc8f item 4g): "for ssh, abstain
 // for paths should be thr default." It defers entirely to the wrapped
 // policy for a non-remote effect, or for any effect the wrapped policy does

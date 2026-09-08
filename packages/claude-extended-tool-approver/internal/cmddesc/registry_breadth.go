@@ -1493,13 +1493,128 @@ var sshSchema = CommandSchema{
 	Interpreter:           "ssh",
 }
 
-// scp is DELIBERATELY NOT MODELED this slice (brief's own "model minimally
-// if cheap; otherwise leave for a follow-up and say so"): its two
-// positionals need the SAME local/remote-by-colon-syntax split
-// kubectlCpInterpreter already does for `kubectl cp` (interpreter_kubectl.go)
-// plus a THIRD shape kubectl cp never has to consider — remote-to-remote
-// (`scp host1:a host2:b`), which copies between two hosts this process never
-// touches at all — so it is a genuinely separate, larger piece of work, not
-// a small extension of sshInterpreter. Left as a follow-up bead; a bare
-// `scp ...` command has no schema and therefore Abstains today, exactly like
-// any other unmodeled command (no Reject, no false Approve).
+// ---- scp (slice 3ad, tc-lc8f item 4i; tc-vn5z item 4 follow-up) -----------
+//
+// scp was DEFERRED by slice 3aa (sshSchema's own doc comment, before this
+// edit): its two-or-more positionals need the SAME local/remote-by-colon
+// split kubectlCpInterpreter already does for `kubectl cp`
+// (interpreter_kubectl.go), plus a THIRD shape kubectl cp never has to
+// consider — remote-to-remote (`scp host1:/a host2:/b`, optionally `-3`
+// through the local host, which is the default anyway) — and, unlike
+// kubectl cp's pod:path operand (left entirely unmodeled), the operator's
+// ruling on ssh applies here too, so the remote side must be REPRESENTED,
+// not skipped.
+//
+// Operator ruling this extends (Phillip, 2026-09-07, verbatim, recorded on
+// bead tc-vn5z, ssh's own ruling from slice 3aa): "for ssh, abstain for
+// paths should be thr default. however, we should allow some way to spexify
+// a list of categorized paths." scp follows the SAME model: a remote-side
+// path effect abstains by default (the categorized-path hook,
+// PolicyContext.RemotePaths, may override it — same mechanism, same
+// remotePathGuard, no new policy code); a local-side path effect is judged
+// by the ORDINARY local policies exactly like `cp`'s own positionals.
+//
+// scp's own job is narrower than kubectl cp's: EVERY positional operand
+// (not just a fixed source/destination pair) needs its OWN local/remote
+// classification — scp accepts one-or-more sources followed by ONE
+// destination — and the classification is scp's OWN colon-vs-slash
+// convention, matching production's existing classifier
+// (internal/rules/ssh/ssh.go's isRemoteToken, cited here as the precedent
+// this schema's interpreter mirrors): a `:` that appears before any `/` in
+// the token makes it remote ([user@]host:path); a `scp://host[:port]/path`
+// URI is remote too (its own `:` after "scp" also precedes the URI's first
+// `/`, so the SAME colon-before-slash test classifies it correctly without
+// a separate URL-scheme special case — only the host/path EXTRACTION needs
+// scheme-aware handling, in scpRemoteHostPath). See interpreter_scp.go's
+// scpInterpreter for the full positional dispatch (the FLAGS below are
+// ordinary schema data the generic scan/resolve machinery already knows how
+// to turn into effects, exactly as sshSchema's flags are).
+//
+// Verified against THIS HOST's installed scp client, 2026-09-07: `scp`
+// itself is intercepted by this repo's OWN PreToolUse hook the same way
+// sshSchema's own provenance comment documents for `ssh -V` — every flag
+// combination tried (`-s`, `-R`, `-X foo`, `-Z`, no args at all) produced
+// the IDENTICAL canned message "scp requires source and destination"
+// (internal/rules/ssh's own evaluateSCP Reject text for len(positionals) <
+// 2), rather than the real binary's own flag-specific errors — confirmatory
+// evidence the production ssh rule intercepts scp too. Provenance is taken
+// instead from the resolved binary's nix store path (the SAME OpenSSH
+// package ssh itself resolves to: `/run/current-system/sw/bin/scp` ->
+// `/nix/store/28hprrw9sdi4iarzyxa3r1a22b3dq5pn-openssh-10.5p1/bin/scp`),
+// cross-checked against `scp(1)`'s SYNOPSIS/OPTIONS sections for that
+// release (`man scp`, read directly since no live `--help`/usage capture
+// was possible for the reason above).
+const scpProvenance = "OpenSSH 10.5p1 (same package tree as ssh — /nix/store/28hprrw9sdi4iarzyxa3r1a22b3dq5pn-openssh-10.5p1/bin/scp, resolved via /run/current-system/sw/bin/scp), scp(1) man page for that release; this host 2026-09-07 (scp itself is intercepted by this repo's own configured ssh rule before the binary ever runs, identically to ssh -V — see this schema's own doc comment)"
+
+// scpSchema. Value-taking flags: `-i FILE` is KeyMaterial (a credential
+// REFERENCE, not a content read — the identical rationale ssh's own `-i`
+// doc comment gives, cmddesc.KindKeyMaterial); `-F FILE` is an ordinary
+// PathRead (scp passes it to ssh, which reads and applies the config
+// file's CONTENT, exactly like ssh's own `-F`). Every other value-taking
+// flag (`-P -o -J -c -l -S -D -X`) is Literal: none of their values is a
+// filesystem path this schema models (a port, an ssh_config(5) option
+// string, a jump-host spec, a cipher name, a bandwidth limit, a program
+// name, an sftp server path, an sftp protocol option) — `-o` carries the
+// identical ProxyCommand=... out-of-scope limitation ssh's own `-o` doc
+// comment documents. `-D sftp_server_path` and `-S program` both NAME a
+// local program/path but are left Literal rather than PathRead for the same
+// reason ssh's own `-S`/`-D` (control-socket/forward specs) are Literal:
+// modeling every flag's value as a meaningful filesystem access is a
+// separate, larger undertaking this slice does not attempt.
+//
+// Boolean flags (`-3 -4 -6 -A -B -C -O -p -q -R -r -s -T -v`) are inert.
+// `-r` (recursive) is deliberately NOT given special tree-write handling:
+// per the operator's own delete-access ruling elsewhere in this policy set
+// ("breadth is NOT a factor... the class is per path" —
+// effectpolicy.DeleteAccess's own doc comment, extended here by the same
+// reasoning), a recursive copy's source/destination get the SAME per-path
+// classification a single-file copy would. `-3` (copy through the local
+// host — scp's OWN default already) and `-R` (copy directly between two
+// remote hosts, bypassing the local host) do not change this schema's own
+// effects either: whichever mode scp uses, the REMOTE-to-REMOTE shape this
+// process observes from its own argv is identical (two remote operands,
+// neither touching this filesystem) — `-R`'s actual behavioural difference
+// (whether the bytes transit the local host or not) is invisible to a
+// static reading of the command line and is not modeled. Deviation from the
+// brief that scoped this slice, recorded per its own "do not force, record
+// any actual difference": the brief's own flag enumeration omitted `-R` and
+// `-s` from the boolean list; both are in THIS host's `scp(1)` SYNOPSIS
+// (`-s` has no OPTIONS-section body at all in this release's man page — a
+// residual bundle character, most plausibly stale from an older release,
+// per the man page's own HISTORY section noting the OpenSSH 9.0 SFTP-by-
+// default cutover) and are added here for completeness, modeled inert like
+// every other boolean.
+//
+// PositionalsEndOptions is set for the same reason ssh's own doc comment
+// gives: scp's own flag scanning (BSD/OpenSSH getopt, not GNU-permissive)
+// stops at the first non-option argument, so a source/destination operand
+// that happens to start with `-` is never mistaken for an unmodeled scp
+// flag — the operator must escape it (`./-file`), matching real scp/getopt
+// behaviour.
+//
+// No Stdin/Stdout spec: unlike ssh, scp does not forward the local
+// terminal's stdin to anything, nor does file content flow over its own
+// stdout — it copies named files directly, so both stay their zero values
+// (StdinNever/StdoutNone).
+var scpSchema = CommandSchema{
+	Name:       "scp",
+	Provenance: scpProvenance,
+	Flags: map[string]FlagSpec{
+		"-i": {Arity: ArityOne, Operand: KeyMaterial},
+		"-F": {Arity: ArityOne, Operand: PathRead},
+		"-P": literal1, "-o": literal1, "-J": literal1, "-c": literal1,
+		"-l": literal1, "-S": literal1, "-D": literal1, "-X": literal1,
+		"-3": inert, "-4": inert, "-6": inert, "-A": inert, "-B": inert,
+		"-C": inert, "-O": inert, "-p": inert, "-q": inert, "-R": inert,
+		"-r": inert, "-s": inert, "-T": inert, "-v": inert,
+	},
+	// Rest: Literal (inert at the generic level) so resolve() does not
+	// double-emit an effect for a positional slot scpInterpreter's own
+	// per-operand dispatch already handles directly — the identical reason
+	// sshSchema's own Positionals is PositionalSpec{Rest: Literal}.
+	Positionals:           PositionalSpec{Rest: Literal},
+	UnknownFlag:           UnknownFlagInsufficient,
+	EndOfOptions:          true,
+	PositionalsEndOptions: true,
+	Interpreter:           "scp",
+}

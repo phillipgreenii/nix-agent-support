@@ -1,0 +1,6 @@
+flowchart LR
+    n0["command: scp -i ~/.ssh/id_rsa README.md host:/tmp/<br/>- key-material: ~/.ssh/id_rsa [arg 1]<br/>- path:read README.md [arg 2]<br/>- path:truncate /tmp/ {remote:host} [arg 3]<br/>- net:outbound host [arg 3]<br/>mark=insufficient: key-material: ~/.ssh/id_rsa [arg 1]: no policy judges this effect<br/>graph: no-content-flow-to-unvetted-network: unknown (content flows to unvetted host host)"]
+    n1[/"file: README.md"/]
+    n2[/"file: /tmp/"/]
+    n0 -->|"reads: read"| n1
+    n0 -->|"writes: truncate"| n2

@@ -202,12 +202,24 @@ type Effect struct {
 	// Remote is the host a PATH effect's target lives on, when the leaf that
 	// produced it is inside a REMOTE scope (slice 3aa, tc-lc8f item 4g;
 	// tc-vn5z item 4 — an `ssh HOST CMD` child, and anything nested inside
-	// it). "" (the default) means the path is local. It is set ONLY on
-	// EffectPath effects, ONLY by effectgraph's builder (never by a schema
-	// or interpreter — cmddesc has no notion of "scope"), which stamps every
-	// EffectPath on a node whose scope descends from a remote child
-	// invocation with that child's host, so a path policy can tell "this
-	// filesystem path is not this process's local filesystem" without
+	// it), OR when the effect names a remote operand directly on a leaf that
+	// is not itself scoped remote at all (slice 3ad, tc-lc8f item 4i; tc-vn5z
+	// item 4 follow-up — scp's `[user@]host:path`/`scp://host/path`
+	// operands, which sit on the SAME local `scp` node as an ordinary local
+	// path operand, so there is no remote CHILD/scope to stamp through).
+	// "" (the default) means the path is local. There are exactly two
+	// producers: effectgraph's builder (cmddesc has no notion of "scope"),
+	// which stamps every EffectPath on a node whose scope descends from a
+	// remote child invocation with that child's host — see build.go's
+	// interpret, the "Remote-scope stamping" comment; and cmddesc's own
+	// scpInterpreter (interpreter_scp.go), which sets it DIRECTLY on the one
+	// operand effect it already knows is remote, since a single scp leaf can
+	// mix local and remote operands and the builder's scope-wide stamp would
+	// be all-or-nothing. The builder's own stamping loop only OVERWRITES an
+	// effect's Remote when the NODE's scope itself is remote (scpInterpreter's
+	// node never is), so the two producers never race or double-stamp one
+	// effect. Either way, a path policy can tell "this filesystem path is not
+	// this process's local filesystem" from the effect alone, without
 	// walking the graph itself. See internal/effectpolicy/policy.go's
 	// remotePathGuard, the ONE place that reads this field.
 	Remote string

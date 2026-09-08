@@ -1,0 +1,6 @@
+flowchart LR
+    n0["command: scp #quot;$F#quot; host:/tmp/<br/>- path:read $F (dynamic) [arg 0]<br/>- path:truncate /tmp/ {remote:host} [arg 1]<br/>- net:outbound host [arg 1]<br/>mark=insufficient: path:read $F (dynamic) [arg 0]: no-read-of-secret-path (path is a runtime expansion)<br/>graph: no-content-flow-to-unvetted-network: unknown (content flows to unvetted host host)"]
+    n1[/"file: $F (dynamic)"/]
+    n2[/"file: /tmp/"/]
+    n0 -->|"reads: read"| n1
+    n0 -->|"writes: truncate"| n2

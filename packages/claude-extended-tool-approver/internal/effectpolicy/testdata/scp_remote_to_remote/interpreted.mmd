@@ -1,0 +1,6 @@
+flowchart LR
+    n0["command: scp a:/x b:/y<br/>- path:read /x {remote:a} [arg 0]<br/>- net:outbound a [arg 0]<br/>- path:truncate /y {remote:b} [arg 1]<br/>- net:outbound b [arg 1]<br/>mark=insufficient: path:read /x {remote:a} [arg 0]: no-read-of-unreadable-path (remote path on a: no local classification)<br/>graph: no-content-flow-to-unvetted-network: unknown (content flows to unvetted host a)"]
+    n1[/"file: /x"/]
+    n2[/"file: /y"/]
+    n0 -->|"reads: read"| n1
+    n0 -->|"writes: truncate"| n2
