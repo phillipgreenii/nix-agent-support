@@ -1,0 +1,8 @@
+flowchart LR
+    n0["command: export PATH=#quot;$(dirname /usr/local/bin/go)/bin:$PATH#quot;<br/>- env:set PATH<br/>mark=insufficient: env:set PATH: env-assignment (ask variable; value did not match a modeled hermetic-approval shape)"]
+    n1{{"env: PATH"}}
+    subgraph sg_s0["$(dirname /usr/local/bin/go)"]
+        n2["command: dirname /usr/local/bin/go<br/>- opaque (no schema for dirname)<br/>mark=insufficient: no schema for dirname"]
+    end
+    n2 -->|"substitution: $(dirname /usr/local/bin/go)"| n0
+    n0 -->|"assign: PATH=#quot;$(dirname /usr/local/bin/go)/bin:$PATH#quot;"| n1

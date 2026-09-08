@@ -321,7 +321,20 @@ func (b *builder) interpret(i int, reg cmddesc.Registry, ctx cmddesc.Context, ch
 	var effects []cmddesc.Effect
 	var children []cmddesc.ChildInvocation
 	for _, e := range leaf.EnvVars {
-		effects = append(effects, cmddesc.Effect{Kind: cmddesc.EffectEnv, EnvName: e.Name, EnvSet: true})
+		// EnvValue/EnvExpansion/EnvCleared (slice 3an, tc-8og1 item 5): carry
+		// the assignment's value onto the effect so
+		// effectpolicy.EnvAssignment can judge it, not just the NAME — see
+		// cmddesc.Effect's own doc comment for the full provenance.
+		// leaf.EnvCleared is the LEAF's fact (env -i wraps this leaf), copied
+		// onto every EffectEnv the leaf produces.
+		effects = append(effects, cmddesc.Effect{
+			Kind:         cmddesc.EffectEnv,
+			EnvName:      e.Name,
+			EnvSet:       true,
+			EnvValue:     e.Value,
+			EnvExpansion: e.Expansion,
+			EnvCleared:   leaf.EnvCleared,
+		})
 	}
 
 	switch {

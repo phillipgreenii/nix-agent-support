@@ -1,0 +1,4 @@
+flowchart LR
+    n0["command: HOME=$(mktemp -d) cat README.md"]
+    n1{{"env: HOME"}}
+    n0 -->|"assign: HOME=$(mktemp -d)"| n1

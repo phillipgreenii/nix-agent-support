@@ -3,6 +3,8 @@ package cmddesc
 import (
 	"fmt"
 	"strings"
+
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmdparse"
 )
 
 // EffectKind enumerates the effect vocabulary a policy can judge.
@@ -231,6 +233,29 @@ type Effect struct {
 	// EffectEnv fields. EnvSet is true for an assignment, false for a read.
 	EnvName string
 	EnvSet  bool
+
+	// EnvValue, EnvExpansion and EnvCleared (slice 3an, tc-8og1 item 5;
+	// tc-ife3 item 5) carry the ASSIGNMENT'S value, exactly as
+	// cmdparse.EnvAssignment classified it, so effectpolicy.EnvAssignment can
+	// port internal/rules/envvars.go's hermetic-env-value approval logic
+	// (preservesCallerValue / isHermeticEnvReplacement /
+	// isHermeticHomeReplacement's mktemp -d idiom) instead of judging the
+	// NAME alone. EnvValue is cmdparse.EnvAssignment.Value verbatim (the
+	// live engine's own input to LiteralAssignmentValueText); EnvExpansion
+	// is that same assignment's Expansion census; EnvCleared is the LEAF's
+	// own EnvCleared (true under `env -i`/`env --ignore-environment`), not a
+	// per-assignment fact — it is copied onto every EffectEnv the leaf
+	// produces because a policy sees one Effect at a time and has no other
+	// way to learn it. All three are the zero value for a read (EnvSet ==
+	// false) and for export's own KindEnvAssign operand role
+	// (interpreter.go's envAssign, reached only for a bare `export NAME`
+	// that marks an existing variable exported — cmdparse.liftAssignmentArgs
+	// already lifts every literal `NAME=VALUE` export argument into the
+	// leaf's EnvVars before cmddesc ever sees it, so envAssign never has a
+	// VALUE token to carry here).
+	EnvValue     string
+	EnvExpansion cmdparse.ExpansionKind
+	EnvCleared   bool
 
 	// EffectNet fields. Dynamic (shared with the path fields) is true when the
 	// URL is a runtime expansion, in which case Host holds the raw text. Method

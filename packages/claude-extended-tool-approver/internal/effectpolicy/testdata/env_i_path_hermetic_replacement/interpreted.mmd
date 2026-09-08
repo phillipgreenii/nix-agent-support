@@ -1,0 +1,6 @@
+flowchart LR
+    n0["command: env -i PATH=/usr/bin:/bin cat README.md<br/>- env:set PATH<br/>- path:read README.md [arg 0]<br/>- stdio:stdout content<br/>mark=permitted"]
+    n1{{"env: PATH"}}
+    n2[/"file: README.md"/]
+    n0 -->|"assign: PATH=/usr/bin:/bin"| n1
+    n0 -->|"reads: read"| n2

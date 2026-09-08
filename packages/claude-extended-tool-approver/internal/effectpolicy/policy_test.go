@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmddesc"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmdparse"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/evalcontract"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/patheval"
 )
@@ -246,6 +247,58 @@ func TestEnvAssignmentPolicy(t *testing.T) {
 	}
 	if _, applies := (EnvAssignment{}).Judge(cmddesc.Effect{Kind: cmddesc.EffectPath, Path: "x"}, PolicyContext{}); applies {
 		t.Error("applied to a path effect")
+	}
+}
+
+// TestEnvAssignmentPolicy_ValueModeling (slice 3an, tc-8og1 item 5; tc-ife3
+// item 5) exercises the three ported hermetic-value-approval predicates
+// directly against cmddesc.Effect's new EnvValue/EnvExpansion/EnvCleared
+// fields — see EnvAssignment's own doc comment for exactly what was ported
+// from internal/rules/envvars.go and what was deliberately left out.
+func TestEnvAssignmentPolicy_ValueModeling(t *testing.T) {
+	env := func(name, value string, expansion cmdparse.ExpansionKind, cleared bool) cmddesc.Effect {
+		return cmddesc.Effect{
+			Kind: cmddesc.EffectEnv, EnvName: name, EnvSet: true,
+			EnvValue: value, EnvExpansion: expansion, EnvCleared: cleared,
+		}
+	}
+	cases := []struct {
+		name    string
+		e       cmddesc.Effect
+		verdict FindingVerdict
+	}{
+		// preservesCallerValue's EXTEND shape: self-reference preserved, only
+		// static absolute components added — Permitted.
+		{"PATH extend, append", env("PATH", "$PATH:/nix/store/x/bin", cmdparse.ExpansionVarRef, false), Permitted},
+		{"PATH extend, prepend", env("PATH", "/nix/store/x/bin:$PATH", cmdparse.ExpansionVarRef, false), Permitted},
+		{"PATH extend, brace form", env("PATH", "${PATH}:/nix/store/x/bin", cmdparse.ExpansionVarRef, false), Permitted},
+		{"HOME extend degenerate no-op", env("HOME", "$HOME", cmdparse.ExpansionVarRef, false), Permitted},
+		// Not the extend shape: a REPLACEMENT (no self-reference) stays Unknown.
+		{"PATH replacement no env -i", env("PATH", "/replaced", cmdparse.ExpansionNone, false), Unknown},
+		// Extend shape, but a non-self component is not a static absolute
+		// path (an ambient $VAR, e.g. $PWD/bin) — stays Unknown, matching
+		// envvars.go's own coherence ruling (pg2-553z3, KEEP STRICT).
+		{"PATH extend with ambient var component", env("PATH", "$PWD/bin:$PATH", cmdparse.ExpansionUnknown, false), Unknown},
+		// Extend shape, but the added component embeds a substitution — this
+		// slice's own conservative exclusion (pg2-kzqw2 not ported).
+		{"PATH extend with substitution component", env("PATH", "$(dirname /a/b)/bin:$PATH", cmdparse.ExpansionUnknown, false), Unknown},
+		// isHermeticEnvReplacement: env -i + static replacement — Permitted;
+		// without EnvCleared the identical value stays Unknown.
+		{"PATH replacement under env -i", env("PATH", "/usr/bin:/bin", cmdparse.ExpansionNone, true), Permitted},
+		{"HOME replacement under env -i", env("HOME", "/tmp", cmdparse.ExpansionNone, true), Permitted},
+		{"PATH replacement, env -i but relative component", env("PATH", "relative/bin", cmdparse.ExpansionNone, true), Unknown},
+		{"PATH replacement, env -i but empty component (CWD hazard)", env("PATH", "/usr/bin:", cmdparse.ExpansionNone, true), Unknown},
+		// isHermeticHomeReplacement's mktemp -d idiom — Permitted; PATH is
+		// out of scope for this HOME-only relief even with the same value
+		// shape.
+		{"HOME mktemp -d fresh", env("HOME", "$(mktemp -d)", cmdparse.ExpansionSafeCmd, false), Permitted},
+		{"PATH mktemp -d is not a HOME-only relief", env("PATH", "$(mktemp -d)", cmdparse.ExpansionSafeCmd, false), Unknown},
+	}
+	for _, tc := range cases {
+		f, applies := EnvAssignment{}.Judge(tc.e, PolicyContext{})
+		if !applies || f.Verdict != tc.verdict {
+			t.Errorf("%s: applies=%v verdict=%s (%s), want %s", tc.name, applies, f.Verdict, f.Reason, tc.verdict)
+		}
 	}
 }
 

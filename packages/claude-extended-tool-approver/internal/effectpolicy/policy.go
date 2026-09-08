@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmddesc"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmdparse"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/deletable"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/evalcontract"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/patheval"
@@ -437,21 +438,68 @@ var (
 // be reachable only in theory today (see the EnvAssignment doc trailer
 // below), but checked defensively since Effect already carries the field.
 // Otherwise a set is classified by its statically known NAME against the
-// three data sets above: an injector name is Forbidden; an injector-ask or
-// ask name is Unknown, because the live rule's answer for these names
-// depends on a VALUE judgement (preservesCallerValue, the hermetic-HOME
-// relief) this slice does not model at all — Unknown/Abstain is the honest
-// mapping for "the live rule would ask a human here", not a guess in either
-// direction; any other static name is outside this slice's vocabulary of
-// known-bad names and is Permitted.
+// three data sets above: an injector name is Forbidden; an injector-ask name
+// is Unknown unconditionally (envvars.go's injectorAskVars split is itself
+// value-independent — see that map's own doc — so there is no value relief
+// to port here); an ask name (PATH, HOME) tries the hermetic-value reliefs
+// below FIRST and only falls back to Unknown when none apply; any other
+// static name is outside this slice's vocabulary of known-bad names and is
+// Permitted.
 //
-// Accepted gap, explicit by design: VALUES are not modeled. Every Set of an
-// ask-class NAME (PATH, HOME) is Unknown regardless of value, even the
-// extend-shaped value (`PATH="$PATH:/nix/store/…/bin"`) the live rule would
-// Approve after inspecting it — the live rule's relief is strictly more
-// permissive here, which makes this an accepted spike-stricter divergence
-// (see testdata/agreement.txt), never a safety gap: this policy never
-// silently Approves an ask/injector-ask name.
+// # Value modeling (slice 3an, tc-8og1 item 5; tc-ife3 item 5, RULED
+// 2026-09-08: "Port the value-relief logic now")
+//
+// Ported from internal/rules/envvars.go — the LIVE engine's env-var guard —
+// by COPY, not import, for the same reason envInjectorVars/
+// envInjectorAskVars/envAskVars above already are (see their own doc
+// comment): a policy here never sees a cmdparse.ParsedCommand, so it cannot
+// reuse a rule built around one. Three of envvars.go's Approve predicates
+// are ported, each by its CORE shape only:
+//
+//   - envPreservesCallerValue mirrors preservesCallerValue's EXTEND shape
+//     (pg2-0q99a): the value keeps the caller's own value ($NAME/${NAME}) as
+//     one whole ':'-separated component, and every OTHER component is a
+//     literal static absolute path.
+//   - envHermeticReplacement mirrors isHermeticEnvReplacement (pg2-d71my):
+//     under a leaf's own `env -i`/`env --ignore-environment` (EnvCleared),
+//     a REPLACEMENT value is safe when every ':'-component is a literal
+//     static absolute path — there is no caller value left to preserve, so
+//     this is a different, independent shape from the one above.
+//   - envFreshHomeTempDir mirrors isHermeticHomeReplacement's `mktemp -d`
+//     idiom ONLY (pg2-d71my), via cmdparse.IsFreshTempDirAssignment — the
+//     one self-contained idiom of that predicate's three (see its own doc
+//     in incommandvars.go); HOME only, matching the live rule's own scope.
+//
+// Deliberately NOT ported — each is a LATER, narrower widening layered onto
+// the base logic above by a separate operator ruling, and each needs
+// leaf-wide context (an earlier leaf's own assignments, or the root
+// expression's later leaves) that a single Effect does not carry; porting
+// them is a follow-up, not part of this slice:
+//
+//   - pg2-qhhil's in-command-assigned-$VAR component widening;
+//   - pg2-kzqw2's certified-safe-substitution component widening (any value
+//     carrying an embedded command/process substitution is conservatively
+//     EXCLUDED from all three predicates here — see envPreservesCallerValue
+//     and envHermeticReplacement's own doc — rather than partially modeled);
+//   - pg2-7sqk8's consumption-scoped relief (mechanisms 1/2) — moot here in
+//     any case: that relief exists ONLY to work around envvars.go's
+//     first-match-wins CHAIN (an early decisive Approve there short-circuits
+//     every later rule for the same LEAF), which this spike's per-effect,
+//     fail-closed NODE fold does not share — approving one EffectEnv finding
+//     can never suppress another effect's own finding on the same node, so
+//     condition 3 of envvars.go's own Approve contract (assignmentIsWholeLeaf)
+//     has no analogue to port either;
+//   - pg2-sir2l's HOME rm+mkdir/bare-mkdir freshness widening, and its
+//     separate tightening of HOME's OWN unclassified fallback from Ask to
+//     Reject — that fallback tightening is a different ruling than this
+//     one (this slice only ADDS Approve cases; the pre-existing Unknown
+//     fallback for everything else is intentionally left unchanged).
+//
+// A value that fails every ported predicate falls to the SAME Unknown this
+// policy already returned before this slice — an accepted, narrower
+// spike-stricter divergence (see testdata/agreement.txt), never a safety
+// gap: this policy still never silently Approves an ask name on a value it
+// could not verify.
 //
 // Investigated-and-not-built note on Dynamic NAMEs: a NAME effect.Dynamic
 // bit is not populated anywhere today (internal/cmddesc/effect.go's Dynamic
@@ -481,6 +529,105 @@ type EnvAssignment struct{}
 // Name implements Policy.
 func (EnvAssignment) Name() string { return "env-assignment" }
 
+// envIsStaticAbsolutePath mirrors internal/rules/envvars.go's
+// isStaticAbsolutePath: a literal ':'-delimited PATH/HOME component is safe
+// only if it starts with '/' and contains nothing that could introduce an
+// expansion, re-quote the value, or corrupt a downstream reason string. An
+// EMPTY component (the CWD hazard: an empty PATH entry means "current
+// directory" to the shell) is rejected by the leading-'/' requirement, same
+// as envvars.go.
+func envIsStaticAbsolutePath(component string) bool {
+	if !strings.HasPrefix(component, "/") {
+		return false
+	}
+	for i := 0; i < len(component); i++ {
+		switch c := component[i]; {
+		case c == '$' || c == '`' || c == '"' || c == '\'' || c == '\\':
+			return false
+		case c < 0x20 || c == 0x7f:
+			return false
+		}
+	}
+	return true
+}
+
+// envValueHasSubstitution reports whether value embeds any top-level
+// command/process substitution — the conservative gate this port uses in
+// place of envvars.go's splitPathValueComponents (pg2-kzqw2's
+// substitution-boundary-aware split, deliberately not ported — see
+// EnvAssignment's own doc comment). A value with ANY substitution is
+// excluded from every predicate below rather than partially modeled: a
+// naive strings.Split(value, ":") on a value like `$(date +%H:%M)` could
+// otherwise mistake the substitution body's OWN ':' for a component
+// boundary. This can only make the port MISS a value production would
+// Approve (a false negative, landing on the pre-existing Unknown), never
+// approve something it should not.
+func envValueHasSubstitution(value string) bool {
+	return len(cmdparse.EnumerateSubstitutions(value)) > 0
+}
+
+// envPreservesCallerValue mirrors internal/rules/envvars.go's
+// preservesCallerValue CORE shape (pg2-0q99a's EXTEND form) only — see
+// EnvAssignment's own doc comment for what is deliberately not ported.
+func envPreservesCallerValue(name, value string, expansion cmdparse.ExpansionKind) bool {
+	if expansion != cmdparse.ExpansionVarRef && expansion != cmdparse.ExpansionUnknown {
+		return false
+	}
+	if envValueHasSubstitution(value) {
+		return false
+	}
+	literal, ok := cmdparse.LiteralAssignmentValueText(value)
+	if !ok {
+		return false
+	}
+	selfRef, braceRef := "$"+name, "${"+name+"}"
+	preserved := false
+	for _, component := range strings.Split(literal, ":") {
+		switch {
+		case component == selfRef || component == braceRef:
+			preserved = true
+		case envIsStaticAbsolutePath(component):
+			// an ordinary static absolute path component: acceptable.
+		default:
+			return false
+		}
+	}
+	return preserved
+}
+
+// envHermeticReplacement mirrors internal/rules/envvars.go's
+// isHermeticEnvReplacement: under a leaf's own `env -i`/
+// `env --ignore-environment` (the caller checks EnvCleared before calling
+// this), a REPLACEMENT value is safe when every ':'-delimited component
+// (or the whole value, for a non-list-shaped value like a bare HOME) is a
+// literal static absolute path — there is no caller value left to preserve,
+// so this is independent of envPreservesCallerValue's self-reference check.
+func envHermeticReplacement(value string) bool {
+	if envValueHasSubstitution(value) {
+		return false
+	}
+	literal, ok := cmdparse.LiteralAssignmentValueText(value)
+	if !ok || literal == "" {
+		return false
+	}
+	for _, component := range strings.Split(literal, ":") {
+		if !envIsStaticAbsolutePath(component) {
+			return false
+		}
+	}
+	return true
+}
+
+// envFreshHomeTempDir mirrors internal/rules/envvars.go's
+// isHermeticHomeReplacement's `mktemp -d` idiom ONLY
+// (cmdparse.IsFreshTempDirAssignment) — HOME=$(mktemp -d), a fresh,
+// session-unique directory nothing could have pre-staged content in. The
+// rm+mkdir/bare-mkdir widening (pg2-sir2l) is deliberately not ported — see
+// EnvAssignment's own doc comment.
+func envFreshHomeTempDir(value string, expansion cmdparse.ExpansionKind) bool {
+	return cmdparse.IsFreshTempDirAssignment(cmdparse.EnvAssignment{Value: value, Expansion: expansion})
+}
+
 // Judge implements Policy.
 func (EnvAssignment) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, bool) {
 	if e.Kind != cmddesc.EffectEnv {
@@ -498,7 +645,16 @@ func (EnvAssignment) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, bool) 
 	case envInjectorAskVars[e.EnvName]:
 		return Finding{Verdict: Unknown, Reason: "injector-ask variable; live rule's verdict depends on value, which this slice does not model"}, true
 	case envAskVars[e.EnvName]:
-		return Finding{Verdict: Unknown, Reason: "ask variable; live rule's verdict depends on value, which this slice does not model"}, true
+		if envPreservesCallerValue(e.EnvName, e.EnvValue, e.EnvExpansion) {
+			return Finding{Verdict: Permitted, Reason: "sensitive env var preserves the caller's value and adds only static absolute paths (ported from envvars.go's preservesCallerValue core shape)"}, true
+		}
+		if e.EnvCleared && envHermeticReplacement(e.EnvValue) {
+			return Finding{Verdict: Permitted, Reason: "sensitive env var is a static replacement under a hermetic env -i invocation (ported from envvars.go's isHermeticEnvReplacement)"}, true
+		}
+		if e.EnvName == "HOME" && envFreshHomeTempDir(e.EnvValue, e.EnvExpansion) {
+			return Finding{Verdict: Permitted, Reason: "HOME replacement is grounded in a mktemp -d fresh temp dir (ported from envvars.go's isHermeticHomeReplacement mktemp -d idiom)"}, true
+		}
+		return Finding{Verdict: Unknown, Reason: "ask variable; value did not match a modeled hermetic-approval shape"}, true
 	default:
 		return Finding{Verdict: Permitted, Reason: "static name outside the known-bad vocabulary"}, true
 	}

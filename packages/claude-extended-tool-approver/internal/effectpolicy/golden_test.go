@@ -783,17 +783,38 @@ var goldenCases = []goldenCase{
 	// sets copied from internal/rules/envvars.go (policy.go's EnvAssignment
 	// doc comment carries the full provenance): an injector name (LD_PRELOAD
 	// et al.) is Forbidden regardless of position (export or a leading
-	// prefix assignment); an ask name (PATH, HOME) is Unknown, since the
-	// live rule's Approve for these depends on a value judgement this slice
-	// does not model; any other static name stays Permitted. Values are not
-	// modeled at all — `export PATH=/tmp/bin:$PATH` is a benign PATH
-	// extension the live rule would likely Approve, but the spike Abstains
-	// on the NAME alone, an accepted spike-stricter divergence.
-	{"export_path_extend", "export PATH=/tmp/bin:$PATH", evalcontract.Abstain, nil},
+	// prefix assignment); an ask name (PATH, HOME) tries the ported
+	// hermetic-value reliefs (slice 3an) before falling back to Unknown; any
+	// other static name stays Permitted.
+	//
+	// slice 3an (tc-8og1 item 5; tc-ife3 item 5, RULED "port the value-relief
+	// logic now"): `export PATH=/tmp/bin:$PATH` is envvars.go's own EXTEND
+	// shape — `$PATH` preserved as one whole ':'-component, `/tmp/bin` a
+	// static absolute path — so this case now Approves (was Abstain; this is
+	// the row this slice's own port closes, see testdata/agreement.txt).
+	{"export_path_extend", "export PATH=/tmp/bin:$PATH", evalcontract.Approve, nil},
 	{"export_ld_preload", "export LD_PRELOAD=/tmp/x.so", evalcontract.Reject, nil},
 	{"ld_preload_prefix_cat_readme", "LD_PRELOAD=/tmp/x.so cat README.md", evalcontract.Reject, nil},
 	{"home_prefix_cat_readme", "HOME=/tmp/h cat README.md", evalcontract.Abstain, nil},
 	{"foo_prefix_cat_readme", "FOO=bar cat README.md", evalcontract.Approve, nil},
+	// env_i_path_hermetic_replacement: envvars.go's isHermeticEnvReplacement
+	// shape (pg2-d71my) — under `env -i` there is no caller PATH left to
+	// preserve, so a STATIC absolute-path REPLACEMENT is safe on its own.
+	{"env_i_path_hermetic_replacement", "env -i PATH=/usr/bin:/bin cat README.md", evalcontract.Approve, nil},
+	// home_mktemp_d_fresh: isHermeticHomeReplacement's mktemp -d idiom
+	// (pg2-d71my) — a freshly created, session-unique directory nothing
+	// could have pre-staged content in.
+	{"home_mktemp_d_fresh", "HOME=$(mktemp -d) cat README.md", evalcontract.Approve, nil},
+	// export_path_extend_substitution_component: the SAME extend shape as
+	// export_path_extend, but the static component is replaced with a
+	// command substitution (`$(dirname /usr/local/bin/go)/bin`) — the live
+	// rule's pg2-kzqw2 relief would Approve this (a certified-safe
+	// substitution body), but this slice deliberately does not port that
+	// widening (see EnvAssignment's own doc comment): any embedded
+	// substitution conservatively excludes the value from every ported
+	// predicate, so this stays Abstain, an accepted spike-stricter
+	// divergence rather than a new looser row.
+	{"export_path_extend_substitution_component", `export PATH="$(dirname /usr/local/bin/go)/bin:$PATH"`, evalcontract.Abstain, nil},
 	// `export "$NAME"=x`: the double-quoted `"$NAME"` is a live expansion of
 	// the ASSIGNMENT'S NAME half, so cmdparse does not lift it into the
 	// leaf's EnvVars (that lift only recognises a literal `identifier=value`

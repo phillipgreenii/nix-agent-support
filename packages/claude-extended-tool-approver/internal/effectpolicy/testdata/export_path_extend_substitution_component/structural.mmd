@@ -1,0 +1,8 @@
+flowchart LR
+    n0["command: export PATH=#quot;$(dirname /usr/local/bin/go)/bin:$PATH#quot;"]
+    n1{{"env: PATH"}}
+    subgraph sg_s0["$(dirname /usr/local/bin/go)"]
+        n2["command: dirname /usr/local/bin/go"]
+    end
+    n2 -->|"substitution: $(dirname /usr/local/bin/go)"| n0
+    n0 -->|"assign: PATH=#quot;$(dirname /usr/local/bin/go)/bin:$PATH#quot;"| n1
