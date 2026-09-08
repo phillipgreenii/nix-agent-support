@@ -154,9 +154,10 @@ func (m *Model) drillBreadcrumb() string {
 }
 
 // renderDrillDown composes screenDrillDown's full-screen detail view: the
-// breadcrumb, the drilled row's own fields, and the Config section
-// (resolvedConfig's legacy-scalar fields, Step 4) [design: Task 4.7 Files;
-// Task 4.7 Step 4].
+// breadcrumb, the drilled row's own fields, the Config section
+// (resolvedConfig's legacy-scalar fields, Step 4), and a trailing
+// keybinding hint naming "[" / "]" sibling-stepping (pg2-az4xe) [design:
+// Task 4.7 Files; Task 4.7 Step 4].
 //
 // Width clipping (pg2-wp7k6): the composed output is run through
 // render.Block/render.EffectiveWidth before returning, matching the pattern
@@ -170,8 +171,23 @@ func (m *Model) renderDrillDown() string {
 	b.WriteString(m.drillDetail())
 	b.WriteString("\n")
 	b.WriteString(renderConfigSection(resolvedConfigView{}))
+	b.WriteString("\n")
+	b.WriteString(drillDownHint)
 	return render.Block(b.String(), render.EffectiveWidth(m.width))
 }
+
+// drillDownHint is screenDrillDown's own on-screen affordance for the "[" /
+// "]" sibling-stepping keys (keybindings.go's handlePrevSibling/
+// handleNextSibling). Before this, the keys worked but nothing on this
+// screen said so -- the operator only discovered them via the [?] help
+// modal, which already lists them through the Bindings table
+// (keybindings.go) -- a discoverability gap fixed here purely cosmetically,
+// with no change to stepSibling itself (pg2-az4xe). Mirrors this file's
+// sibling render/pane files' own footer-hint convention (e.g. model.go's
+// renderFooter left column, render.Modal's built-in "[esc] close   [↑↓]
+// scroll" footerHint) -- a plain "[key] description" text line, not a new
+// UI pattern.
+const drillDownHint = "[ / ] prev/next sibling"
 
 // drillDetail renders the currently drilled row's own fields -- reusing
 // panes.go's own health-text functions (listenerHealthText/

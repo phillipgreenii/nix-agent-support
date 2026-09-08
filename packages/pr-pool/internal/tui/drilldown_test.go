@@ -247,6 +247,41 @@ func TestEnterDrillDown_OnlyFiresFromScreenMain(t *testing.T) {
 	}
 }
 
+// TestRenderDrillDown_ShowsSiblingSteppingHint covers pg2-az4xe: the "[" /
+// "]" sibling-stepping keys (stepSibling above) work on screenDrillDown but
+// had no on-screen affordance -- the operator only discovered them via the
+// [?] help modal. renderDrillDown must now surface the hint directly on
+// the drill-down screen itself, for both focusable row kinds.
+func TestRenderDrillDown_ShowsSiblingSteppingHint(t *testing.T) {
+	t.Run("listener", func(t *testing.T) {
+		m := newTestModel(nil)
+		m.width, m.height = 80, 24
+		m.screen = screenDrillDown
+		m.drillKind = rowListener
+		m.reply = StatusReply{Listeners: []Listener{{Role: "reviewer"}}}
+
+		got := m.renderDrillDown()
+
+		if !strings.Contains(got, "[ / ]") {
+			t.Fatalf("renderDrillDown() = %q, want it to surface a \"[ / ]\" sibling-stepping hint", got)
+		}
+	})
+
+	t.Run("source", func(t *testing.T) {
+		m := newTestModel(nil)
+		m.width, m.height = 80, 24
+		m.screen = screenDrillDown
+		m.drillKind = rowSource
+		m.reply = StatusReply{Sources: []Source{{Name: "src-one"}}}
+
+		got := m.renderDrillDown()
+
+		if !strings.Contains(got, "[ / ]") {
+			t.Fatalf("renderDrillDown() = %q, want it to surface a \"[ / ]\" sibling-stepping hint", got)
+		}
+	})
+}
+
 // TestRenderConfigSection_LegacyFieldsPlusNote covers Task 4.7 Step 4's
 // acceptance bar directly: the Config section renders the legacy-scalar
 // fields (today always empty -- StatusReply does not decode
