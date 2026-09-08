@@ -164,6 +164,16 @@
           pg-connector-issue-beads = final.callPackage ./packages/pg-connector/pg-connector-issue-beads.nix {
             inherit (goBuilders) mkGoApp;
           };
+          # pg-connector-issue-jira: the issue capability's second Tier-2
+          # backend, backing a real external Jira integration (bead
+          # pg2-2j5ac.17.1) — another mkGoApp call over the SAME
+          # packages/pg-connector module (shared src + gomod2nixToml) as the
+          # pg-connector-issue-beads entry above, building the standalone
+          # scriptout-only binary from
+          # packages/pg-connector/pg-connector-issue-jira.nix.
+          pg-connector-issue-jira = final.callPackage ./packages/pg-connector/pg-connector-issue-jira.nix {
+            inherit (goBuilders) mkGoApp;
+          };
           # pg-connector-scm-git: the scm capability's local-git Tier-2
           # backend (bead pg2-2j5ac.6) — another mkGoApp call over the SAME
           # packages/pg-connector module (shared src + gomod2nixToml) as the
@@ -1635,6 +1645,21 @@
                       and (.ops | index("capabilities")) != null
                     ' >/dev/null || {
                       echo "FAIL: pg-connector-issue-beads capabilities response malformed: $resp" >&2
+                      exit 1
+                    }
+                    touch $out
+                  '';
+
+              test-pg-connector-issue-jira-capabilities =
+                pkgs.runCommand "pg-connector-issue-jira-capabilities" { nativeBuildInputs = [ pkgs.jq ]; }
+                  ''
+                    resp=$(echo '{"op":"capabilities"}' | ${pkgs.pg-connector-issue-jira}/bin/pg-connector-issue-jira)
+                    echo "$resp" | jq -e '
+                      .protocolVersion == 1
+                      and (.schemaVersions.issue | type) == "number"
+                      and (.ops | index("capabilities")) != null
+                    ' >/dev/null || {
+                      echo "FAIL: pg-connector-issue-jira capabilities response malformed: $resp" >&2
                       exit 1
                     }
                     touch $out
@@ -4194,6 +4219,7 @@
               pg-connector-pr-github
               pg-connector-ci-github-actions
               pg-connector-issue-beads
+              pg-connector-issue-jira
               pg-connector-scm-git
               pg-ccaudit
               integrate-branch-support
