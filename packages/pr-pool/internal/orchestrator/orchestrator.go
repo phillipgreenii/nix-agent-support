@@ -198,7 +198,7 @@ func (o *Orchestrator) RunOne(ctx context.Context, role roles.Role, ev event.Eve
 	}()
 	pre, preOK := o.snapshotIDs(ctx)
 	res, err := o.workOneWithID(ctx, d, externalID)
-	o.emitResult(ctx, d.Role, d.Item.ID, o.buildResult(ctx, d.Role, d, pre, preOK, res, err))
+	o.emitResult(ctx, d.Role, d.Item.ID, o.buildResult(ctx, d.Role, d, pre, preOK, res, err), err)
 	return err
 }
 
@@ -249,13 +249,34 @@ func (o *Orchestrator) buildResult(ctx context.Context, role roles.Role, d disco
 // emitResult writes the dispatch report to the event log (when configured) and the
 // human-readable drain summary; on the run-role smoke path (Log == nil) it prints to
 // stdout so the operator still sees what happened.
-func (o *Orchestrator) emitResult(_ context.Context, role roles.Role, beadID string, res report.Result) {
-	slog.Info("dispatch result", "role", role.Name, "bead", beadID, "actions", res.Actions)
+//
+// dispatchErr is the error workOne/workOneWithID actually returned (nil on
+// success). Before pg2-an65v this was accepted by every caller only to decide
+// branching (errors.Is(err, executor.ErrBusy) etc.) and then discarded — a
+// launch failure (e.g. isolation.Ensure()/ccpool.Ensure() failing) surfaced
+// here as nothing but the bare verb the executor applied (escalated/
+// unclaimed/...), with the actual underlying error message never logged
+// anywhere. Investigating pg2-an65v required reproducing the failure by hand
+// because neither the CLI log nor events.jsonl recorded it. Now a non-nil
+// dispatchErr is logged at "warn" (not "info") with its message, both on the
+// slog line and (when configured) as the event log's "error" field, so a
+// future launch-failure spree is diagnosable from the log alone.
+func (o *Orchestrator) emitResult(_ context.Context, role roles.Role, beadID string, res report.Result, dispatchErr error) {
+	if dispatchErr != nil {
+		slog.Warn("dispatch result", "role", role.Name, "bead", beadID, "actions", res.Actions, "err", dispatchErr)
+	} else {
+		slog.Info("dispatch result", "role", role.Name, "bead", beadID, "actions", res.Actions)
+	}
 	if o.Log != nil {
 		fields := res.Fields()
 		fields["role"] = role.Name
 		fields["bead"] = beadID
-		if err := o.Log.Emit("info", "dispatch", "dispatch result", fields); err != nil {
+		level := "info"
+		if dispatchErr != nil {
+			level = "warn"
+			fields["error"] = dispatchErr.Error()
+		}
+		if err := o.Log.Emit(level, "dispatch", "dispatch result", fields); err != nil {
 			slog.Warn("event log emit failed", "err", err)
 		}
 		return

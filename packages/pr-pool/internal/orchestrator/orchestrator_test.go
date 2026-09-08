@@ -1,9 +1,13 @@
 package orchestrator
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,12 +18,35 @@ import (
 	"github.com/phillipgreenii/pr-pool/internal/discover"
 	"github.com/phillipgreenii/pr-pool/internal/dtest"
 	"github.com/phillipgreenii/pr-pool/internal/event"
+	"github.com/phillipgreenii/pr-pool/internal/eventlog"
 	"github.com/phillipgreenii/pr-pool/internal/eventqueue"
 	"github.com/phillipgreenii/pr-pool/internal/item"
 	"github.com/phillipgreenii/pr-pool/internal/query"
 	"github.com/phillipgreenii/pr-pool/internal/roles"
 	"github.com/phillipgreenii/pr-pool/internal/usage"
 )
+
+// readEventLog returns the parsed JSONL records written to path. Mirrors
+// internal/executor/ccpool_test.go's helper of the same name (unexported,
+// so each package that needs it keeps its own copy).
+func readEventLog(t *testing.T, path string) []map[string]any {
+	t.Helper()
+	f, err := os.Open(path)
+	if err != nil {
+		return nil // no file ⇒ no records emitted
+	}
+	defer func() { _ = f.Close() }()
+	var recs []map[string]any
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		var m map[string]any
+		if err := json.Unmarshal(sc.Bytes(), &m); err != nil {
+			t.Fatalf("invalid JSONL line %q: %v", sc.Text(), err)
+		}
+		recs = append(recs, m)
+	}
+	return recs
+}
 
 // evOf wraps a dispatch context's role+item into the self-contained event
 // RunOne now consumes (design Q-meta). Test-only shim so the existing
@@ -484,6 +511,52 @@ func TestStuckBead_launchFailDoesNotClearLabel(t *testing.T) {
 	}
 	if dtest.HasUpdate(bd, "update zr-w --remove-label pool-launch-fail") {
 		t.Errorf("a launch failure must NOT clear pool-launch-fail; updates=%v", bd.Updates)
+	}
+}
+
+// TestRunOne_launchFailureSurfacesRealErrorInEventLog is a regression pin for
+// pg2-an65v's secondary (defense-in-depth) fix: before it, emitResult accepted
+// dispatchErr only to decide branching (errors.Is(err, executor.ErrBusy) in
+// the queue-bridge path) and then discarded it entirely -- a launch failure's
+// event-log record carried nothing but the bare verb the executor applied
+// (escalated/unclaimed/...), never the underlying error message. Diagnosing
+// pg2-an65v's 100%-failure-rate incident required reproducing the failure by
+// hand because neither the CLI log nor events.jsonl recorded WHY dispatch
+// failed. Now a failed dispatch's "dispatch" record must carry level "warn"
+// (not "info") and an "error" field holding dispatchErr's message.
+func TestRunOne_launchFailureSurfacesRealErrorInEventLog(t *testing.T) {
+	cfg := fastCfg()
+	logPath := filepath.Join(t.TempDir(), "events.jsonl")
+	lw, err := eventlog.New(logPath)
+	if err != nil {
+		t.Fatalf("eventlog.New: %v", err)
+	}
+	bd := &dtest.ScriptBD{Show: map[string]string{"zr-w": `{"id":"zr-w","status":"open","labels":[]}`}}
+	cc := &dtest.FakeCC{EnsureErr: errors.New("ccpool new: did not reach ready")}
+	o := newOrch(cc, bd, cfg)
+	o.Log = lw
+	d := discover.DispatchContext{Role: workerRole(o), Item: item.Item{ID: "zr-w"}}
+	if err := runOne(o, context.Background(), d); err == nil {
+		t.Fatal("ensure failure should return an error")
+	}
+
+	var rec map[string]any
+	for _, r := range readEventLog(t, logPath) {
+		if r["kind"] == "dispatch" {
+			rec = r
+		}
+	}
+	if rec == nil {
+		t.Fatalf("expected a dispatch record in the event log; got %v", readEventLog(t, logPath))
+	}
+	if lvl, _ := rec["level"].(string); lvl != "warn" {
+		t.Errorf("dispatch record level = %q, want %q on a failed dispatch", lvl, "warn")
+	}
+	errMsg, _ := rec["error"].(string)
+	if errMsg == "" {
+		t.Errorf("dispatch record must carry an \"error\" field with the underlying failure; rec=%v", rec)
+	} else if !strings.Contains(errMsg, "did not reach ready") {
+		t.Errorf("dispatch record error field = %q, want it to contain the underlying ensure error", errMsg)
 	}
 }
 

@@ -173,6 +173,6 @@ func (l *roleListener) Offer(o eventqueue.Offering) eventqueue.OfferResult {
 	if errors.Is(err, executor.ErrBusy) {
 		return eventqueue.OfferResult{Accepted: false, Decline: eventqueue.DeclineBusy}
 	}
-	l.o.emitResult(l.ctx, l.role, d.Item.ID, l.o.buildResult(l.ctx, l.role, d, pre, preOK, res, err))
+	l.o.emitResult(l.ctx, l.role, d.Item.ID, l.o.buildResult(l.ctx, l.role, d, pre, preOK, res, err), err)
 	return eventqueue.OfferResult{Accepted: true, Decline: eventqueue.DeclineNone}
 }
