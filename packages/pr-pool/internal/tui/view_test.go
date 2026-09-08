@@ -169,14 +169,18 @@ func TestSixScreenBanner_At80x24AndHeight10(t *testing.T) {
 	// focusedPane) and renders in full (5 lines: border+header+2 rows+
 	// border); Sources (dropOrder 5, 4 lines) survives; Activity
 	// (dropOrder 3) and Queues (dropOrder 4) are dropped to make room. Total
-	// output is 12 lines -- MORE than the requested height 10, because the
+	// output is 13 lines -- MORE than the requested height 10, because the
 	// fill zone's renderFill closure (model.go's renderMain, the
 	// `p == m.focusedPane` branch) returns its own fixed-size content and
 	// ignores the bodyHeight budget entirely, so layoutZones' padOrExtend
 	// (which only ever pads, never truncates) cannot bring it back down to
 	// exactly 10. That is a discovered fact about Task 4.6's renderMain, not
 	// something this test invents around or fixes (Contract §8, "Out of
-	// scope").
+	// scope"). The count moved from 12 to 13 lines under pg2-xp415: the
+	// pinned header itself grew from 2 lines to 3 (health leads its own
+	// line, the version pair moved to a second line, gates/config trail on
+	// a third) -- a pinned zone getting taller shrinks the fill zone's
+	// budget by exactly that much, it does not change which zones survive.
 	t.Run("main screen's exact height-10 survivor set", func(t *testing.T) {
 		m := sixScreenMainFixture()
 		m.width, m.height = 80, 10
@@ -193,8 +197,8 @@ func TestSixScreenBanner_At80x24AndHeight10(t *testing.T) {
 			}
 		}
 		lines := strings.Split(out, "\n")
-		if len(lines) != 12 {
-			t.Errorf("line count = %d, want the discovered survivor total of 12; got:\n%s", len(lines), out)
+		if len(lines) != 13 {
+			t.Errorf("line count = %d, want the discovered survivor total of 13; got:\n%s", len(lines), out)
 		}
 	})
 }
@@ -364,12 +368,14 @@ func TestViewNoPhantomBlankRowsBetweenZones(t *testing.T) {
 //
 // Discovered fixture: one listener (the default focused/fill pane, whose
 // own fixed content is header+2 rows+border = 4 lines) plus one source (a
-// non-focused, dropOrder-5 pane whose own box is also 4 lines). At height 7,
-// the pinned zones (header 2 + footer 1 = 3) leave a 4-line budget the
-// Sources pane alone would consume entirely (leaving 0 for the fill zone),
-// so the drop search removes Sources outright; the survivors' own natural
-// total (2 + 4 + 1 = 7) then lands exactly on the requested height, with no
-// blank line standing in for the dropped pane.
+// non-focused, dropOrder-5 pane whose own box is also 4 lines). At height 8,
+// the pinned zones (header 3 + footer 1 = 4, per pg2-xp415's header now
+// spreading health/identity/uptime, the version pair, and gates/config
+// across three lines instead of two) leave a 4-line budget the Sources pane
+// alone would consume entirely (leaving 0 for the fill zone), so the drop
+// search removes Sources outright; the survivors' own natural total
+// (3 + 1 + 4 = 8) then lands exactly on the requested height, with no blank
+// line standing in for the dropped pane.
 func TestLayoutZones_DroppedZoneContributesZeroLinesAtExactHeight(t *testing.T) {
 	m := NewModel(Options{}, render.NewTheme(false))
 	m.screen = screenMain
@@ -378,16 +384,16 @@ func TestLayoutZones_DroppedZoneContributesZeroLinesAtExactHeight(t *testing.T) 
 		Listeners: []Listener{{Role: "reviewer", Enabled: true}},
 		Sources:   []Source{{Name: "gh-prs", Enabled: true, LastTick: time.Now()}},
 	}
-	m.width, m.height = 80, 7
+	m.width, m.height = 80, 8
 
 	out := m.View()
 	if strings.Contains(out, "Sources") {
-		t.Fatalf("Sources pane should have dropped under height pressure at height 7; got:\n%s", out)
+		t.Fatalf("Sources pane should have dropped under height pressure at height 8; got:\n%s", out)
 	}
 
 	lines := strings.Split(out, "\n")
-	if len(lines) != 7 {
-		t.Fatalf("line count = %d, want exactly 7 (the dropped zone must contribute zero lines, not a blank placeholder); got:\n%s", len(lines), out)
+	if len(lines) != 8 {
+		t.Fatalf("line count = %d, want exactly 8 (the dropped zone must contribute zero lines, not a blank placeholder); got:\n%s", len(lines), out)
 	}
 	for i, l := range lines {
 		if l == "" {

@@ -152,10 +152,68 @@ func TestRenderHeader_TinyTierDropsVersionAndConfig(t *testing.T) {
 	if strings.Contains(got, "config:") {
 		t.Errorf("Tiny header should drop the config path; got:\n%s", got)
 	}
-	if strings.Contains(got, "9.9.9 · core") {
+	if strings.Contains(got, "client v9.9.9") {
 		t.Errorf("Tiny header should drop the version pair; got:\n%s", got)
 	}
 	if !strings.Contains(got, "pr-pool") || !strings.Contains(got, "gates:") {
 		t.Errorf("Tiny header dropped too much; got:\n%s", got)
+	}
+}
+
+// TestRenderHeader_DefaultTierLeadsWithHealthAndGroupsFields pins pg2-xp415's
+// layout fix: at Narrow/Wide, the header spreads the SAME fields (health,
+// identity/state/uptime, the client/core version pair, gates, config path)
+// across three lines instead of one dense line -- health leads on line 1
+// (the "is the core healthy" signal an operator needs at a glance), the
+// version pair is its own secondary line, and gates/config trail on a
+// tertiary line. This is a layout-only change: no field present before is
+// missing now, and vice versa.
+func TestRenderHeader_DefaultTierLeadsWithHealthAndGroupsFields(t *testing.T) {
+	theme := render.NewTheme(false)
+	d := topZoneData{
+		clientVersion: "dev",
+		reply: StatusReply{
+			Core: CoreInfo{
+				State:      "started",
+				Version:    "0.0.0-8a00aeb8",
+				ConfigPath: "/Volumes/ziprecruiter/pristine/.pr-pool/config.toml",
+				StartedAt:  time.Now().Add(-4 * time.Minute),
+			},
+		},
+		width: 120,
+		theme: theme,
+	}
+	got := renderHeader(d)
+	lines := strings.Split(got, "\n")
+	if len(lines) != 3 {
+		t.Fatalf("expected a 3-line header at the default tier; got %d lines:\n%s", len(lines), got)
+	}
+
+	// Line 1: health leads, then identity/state/uptime -- no version pair,
+	// no gates, no config path competing for attention here.
+	if !strings.HasPrefix(strings.TrimLeft(lines[0], " "), "[ok] pr-pool") {
+		t.Errorf("line 1 must lead with the health signal; got %q", lines[0])
+	}
+	if !strings.Contains(lines[0], "core: started") || !strings.Contains(lines[0], "up 0h04m") {
+		t.Errorf("line 1 must still carry core state and uptime; got %q", lines[0])
+	}
+	if strings.Contains(lines[0], "config:") || strings.Contains(lines[0], "gates:") {
+		t.Errorf("line 1 must not also carry gates/config; got %q", lines[0])
+	}
+
+	// Line 2: the version pair, moved off line 1 and unambiguously labeled
+	// (previously "core: started vdev · core v..." conflated the client
+	// version with the core's own state/version).
+	if !strings.Contains(lines[1], "client vdev") || !strings.Contains(lines[1], "core v0.0.0-8a00aeb8") {
+		t.Errorf("line 2 must carry the client/core version pair; got %q", lines[1])
+	}
+
+	// Line 3: gates + config path, both still present (same data, just
+	// relocated/de-emphasized -- not dropped).
+	if !strings.Contains(lines[2], "gates: quota[.] cicd[.]") {
+		t.Errorf("line 3 must carry the gates summary; got %q", lines[2])
+	}
+	if !strings.Contains(lines[2], "config: ") || !strings.Contains(lines[2], "/Volumes/ziprecruiter/pristine/.pr-pool/config.toml") {
+		t.Errorf("line 3 must still carry the full config path; got %q", lines[2])
 	}
 }

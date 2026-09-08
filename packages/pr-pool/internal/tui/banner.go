@@ -8,6 +8,7 @@ package tui
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/phillipgreenii/pr-pool/internal/core"
@@ -78,9 +79,13 @@ func renderPausedBanner(text string, width int, theme render.Theme) string {
 
 // renderHeader composes the non-paused header: identity, the client/core
 // version pair, uptime, and the gates summary line -- adapted per tier
-// (Wide/Narrow drop nothing from this two-line shape; Tiny drops the
-// version pair and config path, per the design's own Tiny mockup)
-// [design: Task 4.6 Files (banner.go); §4.3 Tier mockups].
+// (Wide/Narrow drop nothing, but spread it across three lines instead of
+// two, per pg2-xp415: the pool health signal leads on its own line so "is
+// the core healthy" reads at a glance, versions move to their own
+// secondary line, and gates/config trail on a tertiary line with the
+// config path visually de-emphasized -- Tiny is unchanged, still dropping
+// the version pair and config path, per the design's own Tiny mockup)
+// [design: Task 4.6 Files (banner.go); §4.3 Tier mockups; pg2-xp415].
 func renderHeader(d topZoneData) string {
 	tier := render.Tier(d.width)
 	ci := d.reply.Core
@@ -105,20 +110,29 @@ func renderHeader(d topZoneData) string {
 		d.theme,
 	)
 
-	var line1, line2 string
+	var lines []string
 	switch tier {
 	case render.TierTiny:
-		line1 = fmt.Sprintf(" pr-pool  core: %s       up %s", coreStateLabel(ci.State), uptime)
-		line2 = " gates: " + gatesSummary(d.reply.Gates)
+		lines = []string{
+			fmt.Sprintf(" pr-pool  core: %s       up %s", coreStateLabel(ci.State), uptime),
+			" gates: " + gatesSummary(d.reply.Gates),
+		}
 	default:
-		line1 = fmt.Sprintf(
-			" pr-pool          core: %s v%s · core v%s   up %s   [%s]",
-			coreStateLabel(ci.State), d.clientVersion, coreVersion, uptime, health,
-		)
-		line2 = " gates: " + gatesSummary(d.reply.Gates) + "     config: " + configPath
+		lines = []string{
+			// Line 1: the at-a-glance health signal, leading -- everything
+			// an operator needs to answer "is the core healthy" without
+			// reading further.
+			fmt.Sprintf(" [%s] pr-pool · core: %s · up %s", health, coreStateLabel(ci.State), uptime),
+			// Line 2: version detail, secondary to health/uptime.
+			fmt.Sprintf(" client v%s · core v%s", d.clientVersion, coreVersion),
+			// Line 3: gates + config path, tertiary -- the config path is
+			// muted so it competes least for attention (it's the longest,
+			// least actionable field on the banner).
+			" gates: " + gatesSummary(d.reply.Gates) + "   config: " + d.theme.Muted.Render(configPath),
+		}
 	}
 
-	out := line1 + "\n" + line2
+	out := strings.Join(lines, "\n")
 	return render.Block(out, render.EffectiveWidth(d.width))
 }
 
