@@ -58,6 +58,21 @@ func lastPollClock(asOf, now time.Time) string {
 // Files (liveness.go); §5 (empty-state precedence's UNMATCHED marker); §8
 // (version hint)]. Returns "" when nothing warrants a line -- the caller
 // omits the zone entirely rather than adding an empty one.
+//
+// The UNMATCHED hint names the actual unmatched type(s) (bead pg2-1l6jw):
+// the count alone was not actionable -- an operator watching the banner had
+// no way to tell WHICH configured binding needed a role without also
+// running `pr-pool status --json` and reading unmatchedBindings by hand.
+// reply.UnmatchedBindings already carries exactly the detail this hint
+// needs (each entry is a declared event `type`, e.g. "bead.new" -- source
+// and event kind are conventionally one dot-joined string in this system,
+// not a separate struct field, so there is nothing further to unpack). This
+// mirrors status_cmd.go's renderStatusText, which has always listed each
+// UNMATCHED BINDINGS entry by name in the CLI's human-readable output --
+// the live TUI just hadn't caught up. Joined with "," and passed through
+// textsafe.Sanitize as one string, matching drillDetail's own
+// renderListenerDetail precedent for rendering a []string of type names
+// (Binds), rather than inventing a new list-rendering convention here.
 func attentionLine(reply StatusReply, clientVersion string, theme render.Theme) string {
 	var hints []string
 	if reply.Core.Version != "" && clientVersion != "" && clientVersion != "dev" &&
@@ -65,7 +80,8 @@ func attentionLine(reply StatusReply, clientVersion string, theme render.Theme) 
 		hints = append(hints, "core version differs from this TUI build — restart after a rebuild if outdated")
 	}
 	if n := len(reply.UnmatchedBindings); n > 0 {
-		hints = append(hints, fmt.Sprintf("UNMATCHED: %d binding(s) matched no configured role", n))
+		names := textsafe.Sanitize(strings.Join(reply.UnmatchedBindings, ","))
+		hints = append(hints, fmt.Sprintf("UNMATCHED: %d binding(s) matched no configured role (%s)", n, names))
 	}
 	if len(hints) == 0 {
 		return ""

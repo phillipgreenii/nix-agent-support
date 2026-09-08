@@ -58,6 +58,28 @@ func TestAttentionLine_VersionMismatchAndUnmatchedBindings(t *testing.T) {
 	}
 }
 
+// TestAttentionLine_UnmatchedBindingsNamesTheBindings is pg2-1l6jw's own
+// regression test: the prior banner surfaced only a count ("UNMATCHED: 1
+// binding(s) matched no configured role"), which was not actionable -- an
+// operator had no way to tell WHICH binding needed a role without also
+// running `pr-pool status --json` by hand. The line must now name every
+// unmatched type, not just say how many there are.
+func TestAttentionLine_UnmatchedBindingsNamesTheBindings(t *testing.T) {
+	theme := render.NewTheme(false)
+
+	got := attentionLine(StatusReply{UnmatchedBindings: []string{"bead.new", "github.pr_opened"}}, "dev", theme)
+	for _, want := range []string{"bead.new", "github.pr_opened"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("attentionLine unmatched bindings = %q, want it to name %q", got, want)
+		}
+	}
+	// The count is still useful for a quick glance -- the fix adds detail,
+	// it does not remove the existing summary.
+	if !strings.Contains(got, "2 binding(s)") {
+		t.Errorf("attentionLine unmatched bindings = %q, want the count to remain", got)
+	}
+}
+
 func TestPollErrorZone_SuppressedOnErrBusy(t *testing.T) {
 	theme := render.NewTheme(false)
 
