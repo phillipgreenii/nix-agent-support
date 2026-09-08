@@ -278,6 +278,20 @@ func renderPaneBoxPlain(title string, rows []string, emptyMsg string) string {
 	return paneFrame(title, lines)
 }
 
+// formatPaneRow lays out cells at their declared column widths, truncating
+// (never wrapping) any cell that overflows its column [pg2-8iy1m].
+// lipgloss's Style.Width() word-wraps content wider than the width given
+// rather than only padding it -- so a Role/Bind-list/Source-name/Registry-ID
+// value at or beyond its column's budget (all unbounded, operator-supplied
+// strings) split that one cell across multiple physical lines, which both
+// broke that row's own box border (the continuation lines carried no
+// leading "│ "/trailing " │") and pushed every following row out of column
+// alignment with the header. Truncating each cell to its column width first
+// (render.Line, ANSI/width-aware, matching modalLeftColumnWidth's and
+// legendRows' dynamic-width fixes for the same fixed-width-column shape,
+// pg2-y6sy5/pg2-58ecs) guarantees every rendered row stays exactly one
+// physical line with columns starting at the same offset, at the cost of an
+// ellipsis on the rare overflowing value instead of a corrupted pane.
 func formatPaneRow(cells []string, widths []int) string {
 	parts := make([]string, len(cells))
 	for i, c := range cells {
@@ -286,7 +300,7 @@ func formatPaneRow(cells []string, widths []int) string {
 			w = widths[i]
 		}
 		if w > 0 {
-			parts[i] = lipgloss.NewStyle().Width(w).Render(c)
+			parts[i] = lipgloss.NewStyle().Width(w).Render(render.Line(c, w))
 		} else {
 			parts[i] = c
 		}
@@ -300,6 +314,15 @@ func formatPaneRow(cells []string, widths []int) string {
 // [design: Task 4.6 Files]; the terminal-width clip that matters for a
 // real terminal is applied once, at the top of the zone ladder
 // (zones.go's concatZones -> render.Block), not per-pane here.
+//
+// The top border's dash count is `inner - title width` (not `- 1`)
+// [pg2-8iy1m]: every content/bottom line totals `inner + 4` columns
+// ("│ " + inner + " │", "└" + (inner+2) + "┘"), so the top border -- "┌ " +
+// title + " " + dashes + "┐" = title_width + dashes + 4 -- needs
+// dashes = inner - title_width to reach that same total. The previous
+// "- 1" made the top border exactly one column narrower than every other
+// line of the box on every single render, regardless of overflow -- the
+// box's own frame didn't align with itself.
 func paneFrame(title string, lines []string) string {
 	inner := lipgloss.Width(title) + 2
 	for _, l := range lines {
@@ -308,7 +331,7 @@ func paneFrame(title string, lines []string) string {
 		}
 	}
 	var b strings.Builder
-	b.WriteString("┌ " + title + " " + strings.Repeat("─", max(0, inner-lipgloss.Width(title)-1)) + "┐\n")
+	b.WriteString("┌ " + title + " " + strings.Repeat("─", max(0, inner-lipgloss.Width(title))) + "┐\n")
 	for _, l := range lines {
 		pad := inner - lipgloss.Width(l)
 		if pad < 0 {

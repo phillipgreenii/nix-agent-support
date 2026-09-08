@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/lipgloss"
+
 	"github.com/phillipgreenii/pr-pool/internal/tui/render"
 )
 
@@ -148,6 +150,90 @@ func TestPanes_ThreeTierMockups(t *testing.T) {
 			}
 		}
 	})
+}
+
+// TestFormatPaneRow_OverflowingCellTruncatesInsteadOfWrapping guards
+// against lipgloss's Style.Width() word-wrapping a cell wider than its
+// column instead of only padding it -- the same fixed-width-column shape
+// already fixed for render.Modal's Left column (pg2-y6sy5) and legendRows'
+// description column (pg2-58ecs), found recurring in panes.go's own row
+// layout (pg2-8iy1m). Before the fix, an overflowing first cell split into
+// multiple physical lines, so the row's HEALTH/DLVD cells landed on their
+// own line with no leading column gap at all instead of one space after
+// the (truncated) first cell.
+func TestFormatPaneRow_OverflowingCellTruncatesInsteadOfWrapping(t *testing.T) {
+	headers := []string{"ROLE", "HEALTH", "DLVD"}
+	widths := []int{10, 14, 6}
+
+	got := formatPaneRow([]string{"a-very-long-role-name-that-overflows", "ok", "3"}, widths)
+
+	if strings.Contains(got, "\n") {
+		t.Fatalf("formatPaneRow must render exactly one physical line; got:\n%q", got)
+	}
+	if !strings.Contains(got, "…") {
+		t.Errorf("overflowing cell should be truncated with an ellipsis; got %q", got)
+	}
+	if !strings.Contains(got, "ok") || !strings.Contains(got, "3") {
+		t.Errorf("HEALTH/DLVD cells must still appear on the same line; got %q", got)
+	}
+
+	// The header row (whose cells all fit) and the overflowing data row
+	// must render at the exact same total width -- that is what "columns
+	// align within a pane" means for a fixed-width table.
+	header := formatPaneRow(headers, widths)
+	if hw, gw := lipgloss.Width(header), lipgloss.Width(got); hw != gw {
+		t.Errorf("overflowing row width %d must match header row width %d (columns misaligned)", gw, hw)
+	}
+}
+
+// TestRenderListenersPane_OverflowingRoleKeepsBoxWellFormed is the
+// higher-level acceptance bar for the same fix: rendered through the real
+// pane box (paneFrame), every physical line -- top border, header, every
+// data row, bottom border -- must be the same visual width, and a
+// pathologically long Role must not blow up the number of physical lines
+// the box occupies (one per listener, not one-plus-per-listener from a
+// mid-cell word-wrap) [pg2-8iy1m].
+func TestRenderListenersPane_OverflowingRoleKeepsBoxWellFormed(t *testing.T) {
+	theme := render.NewTheme(false)
+	listeners := []Listener{
+		{Role: "short", Enabled: true, Delivered: 1, Declined: 2},
+		{Role: "a-very-long-role-name-that-overflows-its-column", Enabled: true, Delivered: 3, Declined: 4},
+	}
+
+	got := renderListenersPane(listeners, render.TierTiny, theme, "(none)", "Listeners")
+	lines := strings.Split(got, "\n")
+
+	// top border + header + 2 data rows + bottom border.
+	if want := 5; len(lines) != want {
+		t.Fatalf("expected %d physical lines (no mid-row wrap), got %d; got:\n%s", want, len(lines), got)
+	}
+	width := lipgloss.Width(lines[0])
+	for i, l := range lines {
+		if w := lipgloss.Width(l); w != width {
+			t.Errorf("line %d (%q) has width %d, want %d (every line of the box must align); got:\n%s", i, l, w, width, got)
+		}
+	}
+}
+
+// TestPaneFrame_TopBorderMatchesContentWidth guards paneFrame's own border
+// math directly, with no overflow involved: the top border line ("┌ Title
+// ─...─┐") must render at the exact same visual width as every content
+// line and the bottom border ("│ ... │" / "└─...─┘") [pg2-8iy1m]. Before
+// the fix the dash-count formula was one column short, so the top border
+// was narrower than the rest of the box on every render -- the pane's own
+// frame didn't align with itself, independent of any cell overflow.
+func TestPaneFrame_TopBorderMatchesContentWidth(t *testing.T) {
+	got := paneFrame("Queues", []string{"TYPE   DEPTH", "pr.new 2"})
+	lines := strings.Split(got, "\n")
+	if len(lines) != 4 {
+		t.Fatalf("expected 4 physical lines (top, 2 content, bottom), got %d; got:\n%s", len(lines), got)
+	}
+	want := lipgloss.Width(lines[1]) // a content line's width is the reference.
+	for i, l := range lines {
+		if w := lipgloss.Width(l); w != want {
+			t.Errorf("line %d (%q) has width %d, want %d matching the box's content width; got:\n%s", i, l, w, want, got)
+		}
+	}
 }
 
 // TestRenderRegistryPane_OmittedEntirelyWhenEmpty pins v1's own carried
