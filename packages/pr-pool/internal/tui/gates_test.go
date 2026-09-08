@@ -218,7 +218,9 @@ func TestResumeAllGates_ResumesInsideGatesModal(t *testing.T) {
 // TestRenderGatesModal_ListsBothGatesByName: the gates modal must name
 // BOTH of INV-LIFE-2's two OR-effective gates, by their ADR-0026-safe
 // hyphenated display names, with state/since/owner -- even one never
-// observed by the core.
+// observed by the core. The never-observed gate (cicd-down here) renders
+// as "not set" [pg2-y6sy5], not the ambiguous "clear since - (owner: -)"
+// this test used to assert.
 func TestRenderGatesModal_ListsBothGatesByName(t *testing.T) {
 	m := newTestModel(nil)
 	m.width, m.height = 80, 24
@@ -229,10 +231,60 @@ func TestRenderGatesModal_ListsBothGatesByName(t *testing.T) {
 	m.activeModal = ModalGates
 
 	got := m.renderGatesModal()
-	for _, want := range []string{"quota-paused", "cicd-down", "SET", "clear", "operator", "resume all"} {
+	for _, want := range []string{"quota-paused", "cicd-down", "SET", "not set", "operator", "resume all"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("gates modal missing %q; got:\n%s", want, got)
 		}
+	}
+}
+
+// TestRenderGatesModal_LongNameGetsGuaranteedGap is pg2-y6sy5's regression
+// test for the fixed-width column collision this modal shared with the
+// legend column pg2-58ecs already fixed: "quota-paused" is exactly as wide
+// as render.Modal's fixed 12-column Left field, so it used to receive ZERO
+// padding there and run straight into the status text with no space at
+// all ("quota-pausedSET since ..."). Assert a real gap survives after the
+// longest gate name regardless of render.Modal's own fixed-width column.
+func TestRenderGatesModal_LongNameGetsGuaranteedGap(t *testing.T) {
+	m := newTestModel(nil)
+	m.width, m.height = 80, 24
+	m.reply = StatusReply{Gates: []Gate{
+		{Name: core.GateQuotaPaused, Set: true, Mtime: time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC), Owner: "operator"},
+		{Name: core.GateCICDDown, Set: true, Mtime: time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC), Owner: "automation"},
+	}}
+	m.activeModal = ModalGates
+
+	got := m.renderGatesModal()
+	idx := strings.Index(got, "quota-paused")
+	if idx == -1 {
+		t.Fatalf("gates modal missing the long gate name %q; got:\n%s", "quota-paused", got)
+	}
+	next := idx + len("quota-paused")
+	if next >= len(got) || got[next] != ' ' {
+		t.Errorf("no guaranteed gap directly after the long gate name %q (next byte = %q); got:\n%s",
+			"quota-paused", string(got[next]), got)
+	}
+}
+
+// TestRenderGatesModal_NotSetIsUnambiguous is pg2-y6sy5's regression test
+// for the not-set-case wording: a gate the core has never observed must
+// render as the plain, unambiguous "not set" -- never the placeholder-dash
+// text "clear since - (owner: -)" that reads as malformed data.
+func TestRenderGatesModal_NotSetIsUnambiguous(t *testing.T) {
+	m := newTestModel(nil)
+	m.width, m.height = 80, 24
+	m.reply = StatusReply{Gates: []Gate{
+		{Name: core.GateQuotaPaused, Set: false},
+		// cicd_down deliberately absent -- never observed at all.
+	}}
+	m.activeModal = ModalGates
+
+	got := m.renderGatesModal()
+	if !strings.Contains(got, "not set") {
+		t.Errorf("an unset/never-observed gate should render unambiguous \"not set\" text; got:\n%s", got)
+	}
+	if strings.Contains(got, "clear since") || strings.Contains(got, "owner: -") {
+		t.Errorf("gates modal still renders the ambiguous placeholder-dash text; got:\n%s", got)
 	}
 }
 

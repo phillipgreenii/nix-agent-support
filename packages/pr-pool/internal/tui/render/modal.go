@@ -19,6 +19,41 @@ type HelpRow struct {
 	Description string
 }
 
+// modalLeftColumnMinWidth is the floor for Modal's Left column -- "most key
+// combos fit" was the original fixed budget (HelpModal's own historical
+// rationale for 12).
+const modalLeftColumnMinWidth = 12
+
+// modalLeftColumnGap is the minimum number of columns guaranteed between
+// the widest Left value actually being rendered and the Right column that
+// follows it.
+const modalLeftColumnGap = 2
+
+// modalLeftColumnWidth sizes Modal's Left column from the rows actually
+// being rendered, rather than the fixed 12 the column used to be pinned
+// to unconditionally [pg2-y6sy5]. lipgloss's Style.Width() word-wraps (and
+// can silently clip) content wider than the width given -- it is not a
+// pure padding floor -- so a fixed Width(12) truncated/collided with any
+// Left value at or beyond 12 columns instead of merely under-padding it:
+// "quota-paused" (exactly 12 columns) received ZERO gap and ran straight
+// into the next field ("quota-pausedclear since - (owner: -)"), while
+// "cicd-down" (9 columns) happened to get a 3-column gap incidentally.
+// Computing the width from every row (not just the currently-visible
+// slice, so the column doesn't shift as the operator scrolls) guarantees
+// modalLeftColumnGap columns of real separation regardless of any
+// individual Left value's length -- the same dynamic-width approach
+// legendRows (below) already established for the legend's description
+// column (pg2-58ecs).
+func modalLeftColumnWidth(rows []ModalRow) int {
+	width := modalLeftColumnMinWidth
+	for _, r := range rows {
+		if w := lipgloss.Width(r.Left) + modalLeftColumnGap; w > width {
+			width = w
+		}
+	}
+	return width
+}
+
 // Modal renders a centered, bordered, scrollable popup. The popup occupies
 // the full screen as a "full-screen takeover" frame; the bordered box sits
 // centered inside.
@@ -110,16 +145,18 @@ func Modal(title string, rows []ModalRow, extraFooter string, width, height, scr
 		hasMoreBelow = end < len(rows)
 	}
 
+	leftColWidth := modalLeftColumnWidth(rows)
 	var visibleRows []string
 	if hasMoreAbove {
 		visibleRows = append(visibleRows, fmt.Sprintf("↑ %d more", scroll))
 	}
 	for i := scroll; i < end; i++ {
 		r := rows[i]
-		// Left column right-padded so right column starts at a fixed offset.
-		// Left budget: 12 cols (most key combos fit; longer ones still render but
-		// shift the right column).
-		leftCol := lipgloss.NewStyle().Width(12).Render(r.Left)
+		// Left column right-padded so right column starts at a fixed offset,
+		// sized by modalLeftColumnWidth (computed from ALL rows, not just this
+		// visible slice, so the column doesn't shift width as the operator
+		// scrolls).
+		leftCol := lipgloss.NewStyle().Width(leftColWidth).Render(r.Left)
 		visibleRows = append(visibleRows, leftCol+r.Right)
 	}
 	if hasMoreBelow {

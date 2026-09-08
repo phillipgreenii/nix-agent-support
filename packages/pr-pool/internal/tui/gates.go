@@ -166,6 +166,16 @@ func (m *Model) setGate(name string, set bool) {
 // state/since/owner, regardless of whether the core has ever reported
 // either [design: Task 4.8 Files]. R = resume-all is named in the modal's
 // own footer.
+//
+// The Left column's guaranteed gap from the status text in Right is
+// render.Modal's own job now [pg2-y6sy5]: it used to pad Left to a fixed
+// 12 columns, which happens to equal len("quota-paused") exactly, so that
+// name received ZERO padding and ran straight into the status text with no
+// gap at all ("quota-pausedclear since - (owner: -)"). render.Modal now
+// sizes that column from the actual Left values in play (mirroring
+// legendRows' dynamic-width pattern, pg2-58ecs's fix for the same
+// fixed-width-column collision shape), so callers here need not pad
+// displayName themselves.
 func (m *Model) renderGatesModal() string {
 	rows := []render.ModalRow{
 		m.gateModalRow("quota-paused", core.GateQuotaPaused),
@@ -174,26 +184,35 @@ func (m *Model) renderGatesModal() string {
 	return render.Modal("Gates", rows, "[R] resume all", m.width, m.height, m.modalScrollOffset)
 }
 
-// gateModalRow renders one gate's state/since/owner line. displayName is
-// the ADR-0026-safe, hyphenated form the operator-facing docs use;
+// gateModalRow renders one gate's name/state/since/owner line. displayName
+// is the ADR-0026-safe, hyphenated form the operator-facing docs use;
 // wireName is the underscored wire name reply.go's Gate.Name actually
 // carries (core.GateQuotaPaused / core.GateCICDDown).
+//
+// A gate that has never been observed by the core, or has been observed
+// and is currently clear, is rendered as the unambiguous "not set" --
+// never "clear since - (owner: -)": composeStatusReply's statusGates only
+// ever populates mtime/owner while a gate is actually SET (an unset gate
+// has no mtime, and no writer sets Owner at all today), so the dashes in
+// that placeholder text carried no information distinguishing "never
+// observed" from "observed and cleared" -- both looked like malformed data
+// rather than a plain "not set" fact [pg2-y6sy5].
 func (m *Model) gateModalRow(displayName, wireName string) render.ModalRow {
 	g, _ := m.gate(wireName)
-	state := "clear"
+	right := "not set"
 	if g.Set {
-		state = "SET"
-	}
-	since := "-"
-	if !g.Mtime.IsZero() {
-		since = g.Mtime.Format(time.RFC3339)
-	}
-	owner := g.Owner
-	if owner == "" {
-		owner = "-"
+		since := "-"
+		if !g.Mtime.IsZero() {
+			since = g.Mtime.Format(time.RFC3339)
+		}
+		owner := g.Owner
+		if owner == "" {
+			owner = "-"
+		}
+		right = fmt.Sprintf("SET since %s (owner: %s)", since, owner)
 	}
 	return render.ModalRow{
 		Left:  displayName,
-		Right: fmt.Sprintf("%-5s since %s (owner: %s)", state, since, owner),
+		Right: right,
 	}
 }
