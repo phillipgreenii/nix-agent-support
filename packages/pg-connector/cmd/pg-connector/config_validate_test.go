@@ -150,11 +150,15 @@ func TestFanOutConfigValidate_DegradedOnCapabilitiesProtocolVersionMismatch(t *t
 
 func TestCheckSchemaVersions_UnknownCapability_IsNotAMismatch(t *testing.T) {
 	// A capability key this build doesn't recognize (e.g. a future
-	// attention/search-only plugin) is skipped, not flagged — this build
-	// has no opinion on a capability it doesn't itself know about.
+	// standalone plugin capability schema.CurrentSchemaVersions has no
+	// entry for yet) is skipped, not flagged — this build has no opinion
+	// on a capability it doesn't itself know about. "attention" is no
+	// longer a usable stand-in for "unknown" here — pg2-2j5ac.15.1 gave it
+	// its own CurrentSchemaVersions entry, so a genuinely-unrecognized
+	// fictional key is used instead.
 	resp := &scriptout.CapabilitiesResponse{
 		ProtocolVersion: scriptout.ProtocolVersion,
-		SchemaVersions:  map[string]int{"attention": 42},
+		SchemaVersions:  map[string]int{"not-a-real-capability": 42},
 	}
 	if err := checkSchemaVersions(resp); err != nil {
 		t.Fatalf("checkSchemaVersions: expected nil for an unrecognized capability, got %v", err)

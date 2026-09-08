@@ -2,10 +2,13 @@ package main
 
 import (
 	"fmt"
+	"go/parser"
+	"go/token"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -181,6 +184,206 @@ func TestSomething() {
 	}
 	if len(violations) != 0 {
 		t.Fatalf("evaluateCompositionBoundary flagged a _test.go file, which the design's own carve-out excludes: %v", violations)
+	}
+}
+
+// dfWordSegmentRE matches a df-<word> path segment (e.g. df-survey,
+// df-attention, df-categorize) anywhere in an import path — either at the
+// very start of the path or immediately after a "/" separator, so it never
+// matches a token that merely CONTAINS "df-" mid-word (e.g. it would not
+// match "asdf-word").
+var dfWordSegmentRE = regexp.MustCompile(`(^|/)df-[\w-]+`)
+
+// attentionZeroImportTargets returns the file paths within moduleRoot that
+// the attention capability's zero-import dependency-direction guard scans:
+// pkg/schema/attention.go itself, plus every file under
+// pkg/provider/attention/ — the attention capability's shape/interface
+// package MUST have zero imports of, or references to, any
+// daily-focus/df-survey package or type. Either path is skipped, not an
+// error, if it does not exist (e.g. a synthetic fixture exercising only
+// one of the two).
+func attentionZeroImportTargets(moduleRoot string) ([]string, error) {
+	var targets []string
+
+	schemaFile := filepath.Join(moduleRoot, "pkg", "schema", "attention.go")
+	if _, err := os.Stat(schemaFile); err == nil {
+		targets = append(targets, schemaFile)
+	}
+
+	providerDir := filepath.Join(moduleRoot, "pkg", "provider", "attention")
+	if _, err := os.Stat(providerDir); err == nil {
+		err := filepath.WalkDir(providerDir, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if !d.IsDir() && strings.HasSuffix(d.Name(), ".go") {
+				targets = append(targets, path)
+			}
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return targets, nil
+}
+
+// evaluateAttentionZeroImport parses every target file
+// (attentionZeroImportTargets) and returns one violation string per import
+// whose path either contains the substring "daily-focus" or matches a
+// df-<word> path segment (e.g. df-survey, df-attention, df-categorize).
+//
+// This mechanizes the SECOND half of the module's own dependency-direction
+// CI check: evaluateCompositionBoundary above enforces only the
+// composition-boundary/exec-scan half (no exec.Command/os/exec of
+// pg-connector or a sibling backend binary) — it does not scan for
+// daily-focus/df-survey imports at all. This function is net-new work, not
+// a restatement of that existing guard.
+func evaluateAttentionZeroImport(moduleRoot string) ([]string, error) {
+	targets, err := attentionZeroImportTargets(moduleRoot)
+	if err != nil {
+		return nil, err
+	}
+
+	fset := token.NewFileSet()
+	var violations []string
+	for _, path := range targets {
+		rel, err := filepath.Rel(moduleRoot, path)
+		if err != nil {
+			return nil, err
+		}
+		rel = filepath.ToSlash(rel)
+
+		file, err := parser.ParseFile(fset, path, nil, parser.ImportsOnly)
+		if err != nil {
+			return nil, fmt.Errorf("parse %s: %w", path, err)
+		}
+		for _, imp := range file.Imports {
+			importPath, err := strconv.Unquote(imp.Path.Value)
+			if err != nil {
+				continue
+			}
+			if strings.Contains(importPath, "daily-focus") || dfWordSegmentRE.MatchString(importPath) {
+				violations = append(violations, fmt.Sprintf(
+					"%s: imports %q — the attention capability's shape/interface package MUST have zero imports of, or references to, any daily-focus/df-survey package or type",
+					rel, importPath,
+				))
+			}
+		}
+	}
+	return violations, nil
+}
+
+// TestAttentionZeroImport is the module's own attention zero-import
+// dependency-direction check: pkg/schema/attention.go and every file under
+// pkg/provider/attention/ have zero imports of, or references to, any
+// daily-focus/df-survey package or type. Against the current, real tree
+// this passes vacuously (no such package exists yet to import) — the
+// fixture tests below prove evaluateAttentionZeroImport actually rejects a
+// real violation rather than only ever passing vacuously.
+func TestAttentionZeroImport(t *testing.T) {
+	moduleRoot, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatalf("resolve module root: %v", err)
+	}
+	violations, err := evaluateAttentionZeroImport(moduleRoot)
+	if err != nil {
+		t.Fatalf("evaluateAttentionZeroImport: %v", err)
+	}
+	for _, v := range violations {
+		t.Error(v)
+	}
+}
+
+// TestAttentionZeroImport_DetectsDailyFocusSubstring is a test-of-a-test:
+// it writes a synthetic, never-committed pkg/provider/attention file
+// importing a package whose path contains "daily-focus", and asserts
+// evaluateAttentionZeroImport rejects it.
+func TestAttentionZeroImport_DetectsDailyFocusSubstring(t *testing.T) {
+	dir := t.TempDir()
+	src := `package attention
+
+import (
+	"context"
+
+	"github.com/example/daily-focus/pkg/survey"
+)
+
+func doThing(ctx context.Context) survey.Item { return survey.Item{} }
+`
+	writeCompositionFixture(t, dir, "pkg/provider/attention/iface.go", src)
+
+	violations, err := evaluateAttentionZeroImport(dir)
+	if err != nil {
+		t.Fatalf("evaluateAttentionZeroImport: %v", err)
+	}
+	assertContainsViolation(t, violations, "daily-focus")
+}
+
+// TestAttentionZeroImport_DetectsDfWordSegment is the same test-of-a-test
+// shape for the OTHER half of the rule: an import path matching a
+// df-<word> path segment (e.g. df-survey), not containing "daily-focus" at
+// all.
+func TestAttentionZeroImport_DetectsDfWordSegment(t *testing.T) {
+	dir := t.TempDir()
+	src := `package attention
+
+import "github.com/example/df-survey/pkg/types"
+
+var _ = types.Foo{}
+`
+	writeCompositionFixture(t, dir, "pkg/provider/attention/dispatch.go", src)
+
+	violations, err := evaluateAttentionZeroImport(dir)
+	if err != nil {
+		t.Fatalf("evaluateAttentionZeroImport: %v", err)
+	}
+	assertContainsViolation(t, violations, "df-survey")
+}
+
+// TestAttentionZeroImport_ScansSchemaFileToo proves the check actually
+// walks pkg/schema/attention.go itself, not only pkg/provider/attention/.
+func TestAttentionZeroImport_ScansSchemaFileToo(t *testing.T) {
+	dir := t.TempDir()
+	src := `package schema
+
+import "github.com/example/daily-focus/pkg/survey"
+
+var _ = survey.Item{}
+`
+	writeCompositionFixture(t, dir, "pkg/schema/attention.go", src)
+
+	violations, err := evaluateAttentionZeroImport(dir)
+	if err != nil {
+		t.Fatalf("evaluateAttentionZeroImport: %v", err)
+	}
+	assertContainsViolation(t, violations, "daily-focus")
+}
+
+// TestAttentionZeroImport_AllowsCleanImports guards against the opposite
+// failure mode (a checker that flags everything): an ordinary import of
+// this module's own shared schema package must produce zero violations.
+func TestAttentionZeroImport_AllowsCleanImports(t *testing.T) {
+	dir := t.TempDir()
+	src := `package attention
+
+import (
+	"context"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
+)
+
+func doThing(ctx context.Context) schema.AttentionItem { return schema.AttentionItem{} }
+`
+	writeCompositionFixture(t, dir, "pkg/provider/attention/iface.go", src)
+
+	violations, err := evaluateAttentionZeroImport(dir)
+	if err != nil {
+		t.Fatalf("evaluateAttentionZeroImport: %v", err)
+	}
+	if len(violations) != 0 {
+		t.Fatalf("evaluateAttentionZeroImport flagged clean imports: %v", violations)
 	}
 }
 

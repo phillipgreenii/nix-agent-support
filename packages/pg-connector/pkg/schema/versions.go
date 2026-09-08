@@ -23,12 +23,13 @@ package schema
 // wired in four separate places — one generic map, one generic loop.
 //
 // A capability key a backend declares that isn't present here (e.g. a
-// future attention/search-only plugin this build doesn't yet know about)
-// is not a mismatch by omission — the caller skips keys it has no opinion
-// on rather than treating "unknown to me" as "wrong."
+// future search-only plugin, or any other capability this build doesn't
+// yet know about) is not a mismatch by omission — the caller skips keys
+// it has no opinion on rather than treating "unknown to me" as "wrong."
 var CurrentSchemaVersions = map[string]int{
-	"pr":    PRSchemaVersion,
-	"ci":    CISchemaVersion,
-	"scm":   ScmSchemaVersion,
-	"issue": IssueSchemaVersion,
+	"pr":        PRSchemaVersion,
+	"ci":        CISchemaVersion,
+	"scm":       ScmSchemaVersion,
+	"issue":     IssueSchemaVersion,
+	"attention": AttentionSchemaVersion,
 }

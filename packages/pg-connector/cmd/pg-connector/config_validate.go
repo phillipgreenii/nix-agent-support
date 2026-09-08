@@ -88,10 +88,12 @@ func configValidateOne(ctx context.Context, backend string) SourceResult {
 // depending on Go's randomized map iteration order.
 //
 // A capability key resp declares that schema.CurrentSchemaVersions doesn't
-// recognize (e.g. a future attention/search-only backend this build
-// doesn't yet know about) is skipped, not treated as a mismatch — this
-// build simply has no opinion on a capability it doesn't itself know
-// about.
+// recognize (e.g. a future search-only backend built against a newer
+// schema.CurrentSchemaVersions than this build's own) is skipped, not
+// treated as a mismatch — this build simply has no opinion on a
+// capability it doesn't itself know about. "attention" is no longer such
+// an example capability as of pg2-2j5ac.15.1: it now has its own
+// CurrentSchemaVersions entry, so a mismatch on it IS detected.
 func checkSchemaVersions(resp *scriptout.CapabilitiesResponse) error {
 	if resp == nil {
 		return nil
