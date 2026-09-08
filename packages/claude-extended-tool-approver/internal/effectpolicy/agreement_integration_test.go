@@ -528,6 +528,46 @@ var knownSpikeLooser = map[string]spikeLooserEntry{
 			"class for \"dev\" — the same new per-context configuration, not a production gap in " +
 			"path handling.",
 	},
+	// git_rm_dotenv_tracked / git_mv_dotenv_tracked (tc-8og1 item 2, slice
+	// 3af): 3ab's corpus root-cause found `git rm <path>/.env` Rejecting
+	// because gitRmSchema models every positional PathModify, not
+	// PathDelete (tc-z806 ruling: "git rm can be consider the same as edit
+	// because the value can be retrieved from the git history"), and
+	// NoWriteToSecretPath (policy.go) Forbade a WellKnownSecret write
+	// unconditionally regardless of access class. This slice's fix extends
+	// deletable.NonSecret's tracked-and-not-gitignored declaration (slice
+	// 3z, already applied to reads) to the ONE write access class the
+	// tc-z806 ruling itself calls history-recoverable: AccessModify. Both
+	// rows here have their source (and, for the mv case, destination)
+	// declared TRACKED and not gitignored by the fixture's fake git-tracked
+	// probe (golden_test.go's trackedenv/.env), so the write is no longer
+	// Forbidden and the leaf falls through to an ordinary Permitted
+	// zone-based write verdict — Approve overall. Production has NO
+	// analogous tracked-content relaxation on the write side at all (its
+	// secrets.go rule Forbids/Asks a well-known secret path unconditionally
+	// regardless of git status), so live stays ask/secrets while the spike
+	// now Approves: looser-than-reject, registered rather than hidden. The
+	// untracked siblings (git_rm_dotenv_gitignored, git_mv_dotenv_gitignored)
+	// are deliberately UNCHANGED (spike-stricter, no register entry needed)
+	// — see NoWriteToSecretPath's "AccessModify carve-out" doc comment for
+	// why the untracked branch was not also loosened to Unknown.
+	"git_rm_dotenv_tracked": {
+		Class: "looser-than-reject",
+		Cause: "tc-8og1 item 2 (slice 3af): a TRACKED, not-gitignored `.env` git-rm'd is now " +
+			"Approved because NoWriteToSecretPath's classifiedSecretWrite consults " +
+			"deletable.NonSecret for a WellKnownSecret AccessModify effect (mirroring the " +
+			"read-side relaxation slice 3z already applies) and the fixture declares " +
+			"trackedenv/.env tracked; production's secrets.go has no write-side tracked-content " +
+			"relaxation at all, so it stays ask/secrets regardless of git status.",
+	},
+	"git_mv_dotenv_tracked": {
+		Class: "looser-than-reject",
+		Cause: "same root cause as git_rm_dotenv_tracked: gitMvSchema models both the source " +
+			"and destination positional as PathModify, and the fixture declares both " +
+			"trackedenv/.env and trackedenv/.env.bak tracked, so neither positional's " +
+			"WellKnownSecret match is Forbidden any more; production has no equivalent " +
+			"relaxation and stays ask/secrets.",
+	},
 }
 
 // TestAgreement drives every case in goldenAgreementCases and

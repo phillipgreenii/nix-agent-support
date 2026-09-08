@@ -50,7 +50,12 @@ func fixture(t *testing.T) (root, home string) {
 	}
 	// `/build/` is ANCHORED so that gradleproj/build below is NOT gitignored
 	// and its deletability comes from the gradle declaration alone.
-	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte("*.log\n/build/\n.env\n"), 0o644); err != nil {
+	// `!/trackedenv/.env` (tc-8og1 item 2, slice 3af) un-ignores exactly ONE
+	// `.env` so the fixture can carry a TRACKED, non-gitignored `.env` for
+	// the git-rm/git-mv dotenv-verdict-table goldens below, without changing
+	// the root `.env`'s own gitignored status (rm_dotenv_gitignored, and the
+	// new git-rm/git-mv "_gitignored" siblings, still see it ignored).
+	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte("*.log\n/build/\n.env\n!/trackedenv/.env\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	// Workspace declarations (tc-z806.3): a gradle project inside the git
@@ -67,6 +72,23 @@ func fixture(t *testing.T) (root, home string) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(root, ".env"), []byte("S=1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// trackedenv/.env (tc-8og1 item 2, slice 3af): a `.env` that IS tracked
+	// by git and NOT gitignored (the `!/trackedenv/.env` negation above),
+	// for the git-rm/git-mv dotenv-verdict-table goldens — WellKnownSecret
+	// (basename) but deletable.NonSecret vouches for it via the git kind's
+	// Secrecy declaration (slice 3z), which NoWriteToSecretPath's AccessModify
+	// carve-out (policy.go) now consults. trackedenv/.env.bak is declared
+	// tracked in the same fake probe below WITHOUT being created on disk —
+	// a git-mv destination need not already exist for the policy layer's
+	// purely lexical judgement, and the fixture models "the whole rename is
+	// of tracked, history-recoverable content" rather than the transient
+	// reality that only the source is tracked before the mv runs.
+	if err := os.MkdirAll(filepath.Join(root, "trackedenv"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "trackedenv", ".env"), []byte("S=1\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Mkdir(filepath.Join(root, "build"), 0o755); err != nil {
@@ -181,6 +203,11 @@ func fixture(t *testing.T) (root, home string) {
 	restoreGitTrackedProbe := deletable.SetGitTrackedProbe(func(root, rel string, isDir bool) (bool, error) {
 		switch rel {
 		case "internal/rules/secrets/secrets.go", "internal/rules/secrets", "internal/rules/secrets/id_rsa":
+			return true, nil
+		// trackedenv/.env and trackedenv/.env.bak (tc-8og1 item 2, slice
+		// 3af): the git-rm/git-mv dotenv-verdict-table goldens' TRACKED
+		// side — see the fixture's trackedenv/.env creation comment above.
+		case "trackedenv/.env", "trackedenv/.env.bak":
 			return true, nil
 		default:
 			return false, nil
@@ -355,6 +382,17 @@ var goldenCases = []goldenCase{
 	// yes) but secretpath classifies `.env` WellKnownSecret, and DeleteAccess
 	// checks protections before deletability: Reject, not Approve.
 	{"rm_dotenv_gitignored", "rm .env", evalcontract.Reject, nil},
+	// rm_dotenv_tracked (tc-8og1 item 2, slice 3af; first row of the
+	// dotenv-verdict-table, see the git-rm/git-mv cases below for the rest):
+	// plain `rm` of trackedenv/.env — TRACKED and not gitignored — still
+	// Rejects. DeleteAccess's ladder step 4 calls secretRead, which is
+	// UNCHANGED by this slice: only NoWriteToSecretPath's AccessModify path
+	// (a git-rm/git-mv positional) consults deletable.NonSecret for a
+	// WellKnownSecret match. This is exactly the tc-z806 ruling's own
+	// distinction ("rm is different from git rm") — a plain rm's content is
+	// NOT recoverable from git history the way a tracked git-rm's is, so
+	// tracked-ness must not (and, per this row, does not) rescue a plain rm.
+	{"rm_dotenv_tracked", "rm trackedenv/.env", evalcontract.Reject, nil},
 	// Workspace declarations (tc-z806.3): gradleproj/build is NOT gitignored
 	// (the fixture anchors `/build/`), so its Approve comes from the gradle
 	// kind alone; gradleproj/src is gradle-silent and git says Keep; .git is
@@ -782,6 +820,38 @@ var goldenCases = []goldenCase{
 	{"git_mv_readme_other", "git mv README.md other.md", evalcontract.Approve, nil},
 	{"git_mv_readme_nix_store", "git mv README.md /nix/store/x", evalcontract.Reject, nil},
 	{"git_mv_too_few", "git mv README.md", evalcontract.Abstain, nil},
+
+	// dotenv-verdict-table (tc-8og1 item 2, slice 3af): 3ab's corpus
+	// root-cause found `git rm <path>/.env` Rejecting because gitRmSchema
+	// models every positional PathModify (tc-z806: "git rm can be consider
+	// the same as edit because the value can be retrieved from the git
+	// history"), and NoWriteToSecretPath unconditionally Forbade a
+	// WellKnownSecret write regardless of access class. Fix (policy.go's
+	// classifiedSecretWrite): a WellKnownSecret AccessModify effect now
+	// consults deletable.NonSecret (the SAME tracked-and-not-gitignored
+	// declaration slice 3z already applies to reads), exactly the class of
+	// write the tc-z806 ruling itself says is history-recoverable. The full
+	// tracked/untracked x rm/git-rm/git-mv matrix (rm's two rows are above,
+	// by rm_dotenv_gitignored and rm_dotenv_tracked):
+	//
+	//	verb     | untracked (gitignored) | tracked (not gitignored)
+	//	rm       | Reject                 | Reject   (unaffected: rm is not git rm)
+	//	git rm   | Reject (unchanged)     | Approve  (NEW, this slice's fix)
+	//	git mv   | Reject (unchanged)     | Approve  (NEW, this slice's fix)
+	//
+	// The untracked column stays Reject rather than relaxing to Abstain —
+	// see NoWriteToSecretPath's doc comment ("AccessModify carve-out") for
+	// why: the policy layer cannot distinguish a git-rm/git-mv Modify effect
+	// from an ordinary in-place edit's (sed -i, say) identical PathModify
+	// access class, and the existing sed_i_ssh_config golden below
+	// (untracked, WellKnownSecret, AccessModify -> Reject) would silently
+	// flip to Abstain if the untracked branch were loosened too — a
+	// regression against a settled, unrelated golden that this slice's
+	// corpus finding does not call for.
+	{"git_rm_dotenv_gitignored", "git rm .env", evalcontract.Reject, nil},
+	{"git_rm_dotenv_tracked", "git rm trackedenv/.env", evalcontract.Approve, nil},
+	{"git_mv_dotenv_gitignored", "git mv .env .env.bak", evalcontract.Reject, nil},
+	{"git_mv_dotenv_tracked", "git mv trackedenv/.env trackedenv/.env.bak", evalcontract.Approve, nil},
 
 	// slice 3n: registry breadth (bd, trivial inert, jq/yq, gofmt) — see
 	// cmddesc/registry_breadth.go. bd: reads Approve (remote read of the

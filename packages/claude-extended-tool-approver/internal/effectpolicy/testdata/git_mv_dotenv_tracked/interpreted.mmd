@@ -1,0 +1,8 @@
+flowchart LR
+    n0["command: git mv trackedenv/.env trackedenv/.env.bak<br/>- path:modify trackedenv/.env [arg 0]<br/>- path:modify trackedenv/.env.bak [arg 1]<br/>- path:modify .git [implicit]<br/>mark=permitted"]
+    n1[/"file: trackedenv/.env"/]
+    n2[/"file: trackedenv/.env.bak"/]
+    n3[/"file: .git"/]
+    n0 -->|"writes: modify"| n1
+    n0 -->|"writes: modify"| n2
+    n0 -->|"writes: modify"| n3

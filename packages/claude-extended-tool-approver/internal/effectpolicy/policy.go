@@ -794,7 +794,8 @@ func stripGoPackagePattern(path string) string {
 // (create, modify, or truncate — Access.IsWrite() minus AccessDelete, the
 // same carve-out NoWriteToReadOnlyPath documents on its own doc comment)
 // whose target is a WELL-KNOWN secret store is Forbidden, exactly as
-// unconditionally as a READ of the same path already is.
+// unconditionally as a READ of the same path already is — EXCEPT for the
+// AccessModify carve-out documented below (slice 3af).
 //
 // Deletes are carved out for the identical reason NoWriteToReadOnlyPath
 // carves them out: DeleteAccess already judges every AccessDelete path
@@ -806,23 +807,60 @@ func stripGoPackagePattern(path string) string {
 // split (slice 3z, tc-lc8f item 3z: "Tracked-by-git means non-secret") but
 // is NOT a verbatim copy of its verdicts: a WellKnownSecret match (a
 // specific credential store or file — .ssh/.gnupg, the credential
-// basenames, *.pem/*.key) stays unconditionally Forbidden, matching the
-// read side exactly, because writing into (or truncating, or overwriting) a
-// named credential store is exactly as disqualifying as reading it — either
-// way the operator's key material is being touched by an agent action nobody
-// reviewed. A bare GenericSecretsDir match (the role-describing "secrets"
-// path component with no project declaration vouching for it), however, is
-// Unknown here rather than Forbidden: unlike a read, which IRREVERSIBLY
-// discloses whatever is already there, a write to an unproven
-// "secrets"-named location has not yet disclosed or destroyed anything — it
-// is exactly the "needs consent" shape this policy set already gives an
-// ordinary ambiguous write (NoWriteToReadOnlyPath's own "zone unknown" case,
-// DeleteAccess's "writable, not deletable" case), not the irrevocable-harm
-// shape a secret read or a well-known-secret write is. When
-// deletable.NonSecret vouches for the path (a tracked, non-gitignored file —
-// the SAME declaration secretRead already consults), this policy does not
-// apply at all, and an unrelated write policy (NoWriteToReadOnlyPath) is
-// free to reach its own, ordinary zone-based verdict.
+// basenames, *.pem/*.key) stays unconditionally Forbidden for AccessCreate
+// and AccessTruncate, matching the read side exactly, because writing NEW
+// content into (or truncating) a named credential store is exactly as
+// disqualifying as reading it — either way the operator's key material is
+// being touched by an agent action nobody reviewed. A bare GenericSecretsDir
+// match (the role-describing "secrets" path component with no project
+// declaration vouching for it), however, is Unknown here rather than
+// Forbidden: unlike a read, which IRREVERSIBLY discloses whatever is
+// already there, a write to an unproven "secrets"-named location has not
+// yet disclosed or destroyed anything — it is exactly the "needs consent"
+// shape this policy set already gives an ordinary ambiguous write
+// (NoWriteToReadOnlyPath's own "zone unknown" case, DeleteAccess's
+// "writable, not deletable" case), not the irrevocable-harm shape a secret
+// read or a well-known-secret write is. When deletable.NonSecret vouches
+// for the path (a tracked, non-gitignored file — the SAME declaration
+// secretRead already consults), this policy does not apply at all, and an
+// unrelated write policy (NoWriteToReadOnlyPath) is free to reach its own,
+// ordinary zone-based verdict.
+//
+// # AccessModify carve-out (tc-8og1 item 2, slice 3af)
+//
+// 3ab's corpus root-cause found `git rm <path>/.env` Rejecting: gitRmSchema
+// (registry.go) models every git-rm/git-mv positional as PathModify, not
+// PathDelete, per the tc-z806 operator ruling "git rm can be considered the
+// same as edit because the value can be retrieved from git history" — but
+// this policy still Forbade a WellKnownSecret PathModify unconditionally,
+// so a TRACKED `.env` (whose content is, by that same ruling, recoverable
+// from history — exactly the reasoning tc-z806 gave for demoting git rm
+// from PathDelete to PathModify in the first place) could never be
+// git-rm'd or git-mv'd. deletable.NonSecret already answers "is this path's
+// content recoverable/non-secret because git tracks it" for the read side
+// (slice 3z); AccessModify is the one write access class the tc-z806
+// ruling itself says shares that recoverability property, so this is the
+// SAME declaration, applied to the ONE access class the ruling covers.
+//
+// The carve-out is deliberately narrower than "AccessModify + WellKnownSecret
+// is always Unknown-by-default like GenericSecretsDir": it only ADDS an
+// escape hatch when deletable.NonSecret returns true (tracked, not
+// gitignored); an UNTRACKED WellKnownSecret modify stays Forbidden, exactly
+// as before this slice. Generalising the untracked branch to Unknown too
+// was considered and rejected: the policy layer has no way to tell "this
+// Modify effect came from git rm/mv" from "this Modify effect came from an
+// ordinary in-place edit" (Effect carries no command provenance, by this
+// spike's own "nothing branches on a command name" design) — sed's -i is
+// modeled as the identical PathModify access class (registry_breadth.go),
+// and the existing golden `sed_i_ssh_config` ("sed -i 's/a/b/' ~/.ssh/config"
+// -> Reject) exercises exactly that case: ~/.ssh/config is WellKnownSecret,
+// AccessModify, and untracked (no git workspace at $HOME in the fixture).
+// Loosening untracked-Modify to Unknown would flip that existing Reject to
+// Abstain — a real regression against an unrelated, already-settled golden,
+// not something this slice's corpus finding calls for. So: tracked ->
+// Approve (this slice's fix); untracked -> unchanged Forbidden (deliberately
+// NOT touched). See golden_test.go's dotenv-verdict-table comment for the
+// full tracked/untracked x rm/git-rm/git-mv matrix this produces.
 type NoWriteToSecretPath struct{}
 
 // Name implements Policy.
@@ -836,7 +874,7 @@ func (NoWriteToSecretPath) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, 
 	if e.Dynamic {
 		return Finding{Verdict: Unknown, Reason: "path is a runtime expansion"}, true
 	}
-	return secretWrite(e.Path, ctx)
+	return secretWrite(e.Path, e.Access, ctx)
 }
 
 // secretWrite reports the Finding a write to a statically known path
@@ -846,7 +884,9 @@ func (NoWriteToSecretPath) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, 
 // way whichever access class touches it. ok is false when neither the raw
 // nor the resolved path is any kind of secret path at all, letting the
 // write fall through to whichever other write policy (NoWriteToReadOnlyPath)
-// has an opinion.
+// has an opinion. access is threaded through so classifiedSecretWrite can
+// apply the AccessModify carve-out (NoWriteToSecretPath's own doc comment,
+// "AccessModify carve-out" section) only to the one access class it covers.
 //
 // This is a SEPARATE helper from secretRead/classifiedSecretRead, not a
 // parameterisation of them: NoReadOfSecretPath and DeleteAccess both already
@@ -857,13 +897,13 @@ func (NoWriteToSecretPath) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, 
 // control flow here keeps both read- and write-side helpers simple single-
 // purpose functions rather than growing secretRead an extra parameter only
 // the write side needs.
-func secretWrite(p string, ctx PolicyContext) (Finding, bool) {
-	if f, ok := classifiedSecretWrite(p, ctx, ""); ok {
+func secretWrite(p string, access cmddesc.PathAccess, ctx PolicyContext) (Finding, bool) {
+	if f, ok := classifiedSecretWrite(p, access, ctx, ""); ok {
 		return f, true
 	}
 	if ctx.PathEval != nil {
 		if resolved := ctx.PathEval.ResolvePath(p); resolved != "" {
-			if f, ok := classifiedSecretWrite(resolved, ctx, " (resolved)"); ok {
+			if f, ok := classifiedSecretWrite(resolved, access, ctx, " (resolved)"); ok {
 				return f, true
 			}
 		}
@@ -872,20 +912,28 @@ func secretWrite(p string, ctx PolicyContext) (Finding, bool) {
 }
 
 // classifiedSecretWrite applies secretpath.Classify to candidate and decides
-// the write-side Finding: WellKnownSecret is unconditionally Forbidden
-// (candidate is a specific named credential store, exactly like the read
-// side); GenericSecretsDir is Unknown UNLESS deletable.NonSecret declares
-// the path non-secret, in which case this policy has no opinion (ok false)
-// and an ordinary write policy decides. suffix is appended to the reason
-// text (secretWrite's "(resolved)" annotation for the symlink-resolved
-// pass), matching classifiedSecretRead's own convention.
+// the write-side Finding: WellKnownSecret is Forbidden UNLESS access is
+// AccessModify AND deletable.NonSecret declares the path non-secret (the
+// tc-8og1 item 2 carve-out — NoWriteToSecretPath's own doc comment has the
+// full ruling and why the untracked branch of AccessModify is deliberately
+// left Forbidden rather than relaxed to Unknown); GenericSecretsDir is
+// Unknown UNLESS deletable.NonSecret declares the path non-secret,
+// regardless of access class, in which case this policy has no opinion (ok
+// false) and an ordinary write policy decides. suffix is appended to the
+// reason text (secretWrite's "(resolved)" annotation for the symlink-
+// resolved pass), matching classifiedSecretRead's own convention.
 //
 // candidate is mapped through stripGoPackagePattern before it is handed to
 // deletable.NonSecret, for the identical reason classifiedSecretRead does —
 // see that function's doc comment.
-func classifiedSecretWrite(candidate string, ctx PolicyContext, suffix string) (Finding, bool) {
+func classifiedSecretWrite(candidate string, access cmddesc.PathAccess, ctx PolicyContext, suffix string) (Finding, bool) {
 	switch secretpath.Classify(candidate) {
 	case secretpath.WellKnownSecret:
+		if access == cmddesc.AccessModify {
+			if nonSecret, _ := deletable.NonSecret(ctx.PathEval, stripGoPackagePattern(candidate)); nonSecret {
+				return Finding{}, false
+			}
+		}
 		return Finding{Verdict: Forbidden, Reason: "write to secret path" + suffix}, true
 	case secretpath.GenericSecretsDir:
 		if nonSecret, _ := deletable.NonSecret(ctx.PathEval, stripGoPackagePattern(candidate)); nonSecret {
