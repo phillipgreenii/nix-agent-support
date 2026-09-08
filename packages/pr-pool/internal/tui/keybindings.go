@@ -25,12 +25,13 @@ type Binding struct {
 // Bindings is the canonical, ordered keybinding list. Order matters: first
 // match wins in dispatch, and rows render in this order in the help modal.
 //
-// tab/shift+tab remain deliberate no-op placeholders: Task 4.6 delivered
-// only the RENDERING side of pane focus (Model.focusedPane), not the
-// keybinding that moves it -- that wiring is a later packet's concern. The
-// KEY is fully covered here (this packet's own acceptance bar), but there
-// is nothing for it to DO yet. enter/[/] now delegate to drilldown.go's
-// Model.enterDrillDown/stepSibling (Task 4.7).
+// tab/shift+tab delegate to Model.stepFocus (below), which cycles
+// Model.focusedPane through the four zone-ladder panes -- pg2-ctqpj's fix:
+// Task 4.6 had delivered only the RENDERING side of pane focus, leaving
+// these two keys dead (no screen ever showed anything but the Listeners
+// pane focused, and Enter could therefore only ever drill into Listeners).
+// enter/[/] delegate to drilldown.go's Model.enterDrillDown/stepSibling
+// (Task 4.7).
 var Bindings = []Binding{
 	{Keys: []string{"P"}, Description: "Toggle the quota gate (no optimistic flip)", Handle: (*Model).handleToggleQuotaGate},
 	{Keys: []string{"g"}, Description: "Gates modal", Handle: handleOpenGatesModal},
@@ -77,11 +78,31 @@ func handleOpenHelp(m *Model) tea.Cmd {
 	return nil
 }
 
-// handleFocusNext / handleFocusPrev step the pane focus cycle (the design's
-// tab/shift+tab row). Task 4.6 has not yet defined any focusable panes;
-// today these are no-op placeholders -- see the Bindings doc comment.
-func handleFocusNext(m *Model) tea.Cmd { return nil }
-func handleFocusPrev(m *Model) tea.Cmd { return nil }
+// handleFocusNext / handleFocusPrev implement the design's tab/shift+tab
+// row: delegate to Model.stepFocus (below), which itself no-ops outside
+// screenMain -- the same "only fires from the one screen it can affect"
+// guard enterDrillDown (drilldown.go) and stepSibling (drilldown.go) each
+// already apply for their own screens.
+func handleFocusNext(m *Model) tea.Cmd { return m.stepFocus(1) }
+func handleFocusPrev(m *Model) tea.Cmd { return m.stepFocus(-1) }
+
+// stepFocus moves m.focusedPane to the next (delta +1) or previous (delta
+// -1) of the four zone-ladder panes (model.go's paneListeners/paneQueues/
+// paneSources/paneRegistry, in that order -- the same order renderMain's
+// own zone loop uses), wrapping at either end rather than clamping: unlike
+// stepSibling's row stepping (ux-12, drilldown.go), the design gives pane
+// focus no "past the end" edge to stop at -- it is a ring, not a list.
+// Pane focus is only ever rendered on screenMain (renderPaneContent's own
+// "(focused)" title suffix), so moving it anywhere else would change state
+// with no observable effect; a no-op there instead matches
+// enterDrillDown's identical screenMain-only guard.
+func (m *Model) stepFocus(delta int) tea.Cmd {
+	if m.screen != screenMain {
+		return nil
+	}
+	m.focusedPane = ((m.focusedPane+delta)%paneCount + paneCount) % paneCount
+	return nil
+}
 
 // handleEnterDrillDown implements the design's enter row: delegates to
 // Model.enterDrillDown (drilldown.go, Task 4.7), which itself no-ops

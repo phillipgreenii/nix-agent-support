@@ -172,22 +172,28 @@ type Model struct {
 	// focusedPane selects which of the Listeners/Queues/Sources/Registry
 	// panes is the zone ladder's one FILL zone (zones.go's drop-order
 	// table: "Fill (the focused pane)") -- the other three are non-fill,
-	// non-pinned "unfocused panes" zones. Its zero value (paneListeners)
-	// is a deliberate default: keybindings.go's tab/shift+tab handlers are
-	// still no-op placeholders (Task 4.8's own doc there), so this field
-	// is not yet mutated by any keypress -- that wiring is a later
-	// packet's concern; Task 4.6's own scope is making the RENDERING side
-	// of "there is a focused pane" real [design: Task 4.6 Interfaces].
+	// non-pinned "unfocused panes" zones. Its zero value (paneListeners) is
+	// screenMain's own starting focus. keybindings.go's tab/shift+tab
+	// handlers (Model.stepFocus, pg2-ctqpj) cycle this field through all
+	// four panes, wrapping at either end -- Enter then targets whichever
+	// pane is currently focused (enterDrillDown, drilldown.go), which is
+	// exactly how an operator reaches Queues/Registry too (both no-op on
+	// Enter, per comp-6, but ARE reachable via tab so that fact is
+	// observable rather than merely documented).
 	focusedPane int
 }
 
 // Pane identifies one of the four zone-ladder panes this packet renders --
-// see Model.focusedPane's doc.
+// see Model.focusedPane's doc. paneCount is a sentinel (never a real pane
+// id) naming how many of them stepFocus (keybindings.go) cycles through --
+// declared here, beside the enum it counts, rather than as a magic 4 at the
+// call site.
 const (
 	paneListeners int = iota
 	paneQueues
 	paneSources
 	paneRegistry
+	paneCount
 )
 
 // NewModel constructs a Model in its pre-first-poll state (screenLoading).

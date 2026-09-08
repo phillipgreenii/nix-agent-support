@@ -162,6 +162,125 @@ func TestOpenModal_SwitchingModalsKeepsTheOriginalPriorScreen(t *testing.T) {
 	}
 }
 
+// TestStepFocus_CyclesAllFourPanesAndWraps is pg2-ctqpj's own red-first
+// test: before the fix, handleFocusNext/handleFocusPrev were literal
+// no-ops (`return nil`), so m.focusedPane could never leave its zero value
+// (paneListeners) -- Enter could therefore only ever drill into Listeners,
+// which is exactly the live bug report's "operator could not select
+// anything else ... stuck on one path." tab must visit all four panes in
+// the same order renderMain's own zone loop uses (Listeners, Queues,
+// Sources, Registry) and wrap rather than clamp -- pane focus is a ring,
+// unlike stepSibling's row clamp (ux-12).
+func TestStepFocus_CyclesAllFourPanesAndWraps(t *testing.T) {
+	m := newTestModel(nil)
+	m.screen = screenMain
+	if m.focusedPane != paneListeners {
+		t.Fatalf("focusedPane = %v before any tab, want the documented zero-value default paneListeners", m.focusedPane)
+	}
+
+	wantForward := []int{paneQueues, paneSources, paneRegistry, paneListeners}
+	for _, want := range wantForward {
+		_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+		if cmd != nil {
+			t.Errorf("tab returned a non-nil cmd, want nil")
+		}
+		if m.focusedPane != want {
+			t.Fatalf("focusedPane after tab = %v, want %v", m.focusedPane, want)
+		}
+	}
+
+	wantBackward := []int{paneRegistry, paneSources, paneQueues, paneListeners}
+	for _, want := range wantBackward {
+		_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+		if cmd != nil {
+			t.Errorf("shift+tab returned a non-nil cmd, want nil")
+		}
+		if m.focusedPane != want {
+			t.Fatalf("focusedPane after shift+tab = %v, want %v", m.focusedPane, want)
+		}
+	}
+}
+
+// TestStepFocus_NoopOutsideScreenMain: pane focus is only ever rendered on
+// screenMain (renderPaneContent's "(focused)" title suffix) -- tab/
+// shift+tab must not silently mutate focusedPane while a modal or
+// drill-down is open, mirroring enterDrillDown's identical
+// screenMain-only guard.
+func TestStepFocus_NoopOutsideScreenMain(t *testing.T) {
+	for _, s := range []screen{screenNoCore, screenQuiescing, screenModal, screenDrillDown, screenLoading} {
+		m := newTestModel(nil)
+		m.screen = s
+		m.focusedPane = paneSources
+
+		_, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+		if m.focusedPane != paneSources {
+			t.Errorf("starting from %v: tab changed focusedPane to %v, want unchanged paneSources", s, m.focusedPane)
+		}
+		_, _ = m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+		if m.focusedPane != paneSources {
+			t.Errorf("starting from %v: shift+tab changed focusedPane to %v, want unchanged paneSources", s, m.focusedPane)
+		}
+	}
+}
+
+// TestOperatorRepro_EnterThenTabThenShiftTab replays the exact key
+// sequence from the live walkthrough report (pg2-ctqpj): Enter drills into
+// the focused Listeners row, then the operator tries tab and shift+tab to
+// select something else. Before the fix this sequence left the operator
+// stuck: tab/shift+tab were unconditional no-ops, so returning to
+// screenMain (esc) never actually changed which pane Enter would drill
+// into next. After the fix: tab/shift+tab still correctly no-op WHILE
+// still in drill-down (pane focus has no meaning there), but once back on
+// screenMain they move focusedPane, so a second Enter reaches a DIFFERENT
+// row (Sources, not Listeners) -- the operator is no longer stuck on one
+// path.
+func TestOperatorRepro_EnterThenTabThenShiftTab(t *testing.T) {
+	m := newTestModel(nil)
+	m.screen = screenMain
+	m.focusedPane = paneListeners
+	m.reply = StatusReply{
+		Listeners: []Listener{{Role: "feedback"}},
+		Sources:   []Source{{Name: "queue-src"}},
+	}
+
+	// Enter: drills into Listeners -> feedback (matches the report).
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(*Model)
+	if m.screen != screenDrillDown || m.drillKind != rowListener {
+		t.Fatalf("after enter: screen/drillKind = %v/%v, want screenDrillDown/rowListener", m.screen, m.drillKind)
+	}
+
+	// tab / shift+tab while still drilled in: no-op (screenMain-only), and
+	// crucially must NOT leave the operator any more stuck than before --
+	// no panic, no unintended screen change.
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = updated.(*Model)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	m = updated.(*Model)
+	if m.screen != screenDrillDown || m.focusedPane != paneListeners {
+		t.Fatalf("after tab/shift+tab inside drill-down: screen/focusedPane = %v/%v, want unchanged screenDrillDown/paneListeners", m.screen, m.focusedPane)
+	}
+
+	// esc back to main, then tab twice: Listeners -> Queues -> Sources.
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = updated.(*Model)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = updated.(*Model)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = updated.(*Model)
+	if m.focusedPane != paneSources {
+		t.Fatalf("focusedPane after esc+tab+tab = %v, want paneSources (no longer stuck on Listeners)", m.focusedPane)
+	}
+
+	// A second Enter now reaches Sources, not Listeners: the operator can
+	// select something else.
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(*Model)
+	if m.screen != screenDrillDown || m.drillKind != rowSource {
+		t.Fatalf("after second enter: screen/drillKind = %v/%v, want screenDrillDown/rowSource", m.screen, m.drillKind)
+	}
+}
+
 // TestNoMatchingBinding_IsANoop: a key with no Bindings row is silently
 // ignored (Update's own fall-through), never a panic.
 func TestNoMatchingBinding_IsANoop(t *testing.T) {
