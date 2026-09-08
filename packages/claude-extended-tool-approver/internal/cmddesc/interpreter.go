@@ -127,6 +127,12 @@ func (GenericInterpreter) Interpret(leaf cmdparse.ParsedCommand, schema CommandS
 	if len(schema.Subcommands) > 0 {
 		return interpretSubcommand(leaf, schema, ctx)
 	}
+	// slice 3aj (tc-8og1 item 3 sub-slice 4; tc-vn5z Q4): a build-tool
+	// verb-dispatch wrapper (just, npm run, devbox run) — see
+	// interpretVerbDispatch's own doc comment (interpreter_subcommand.go).
+	if schema.VerbFamily != "" {
+		return interpretVerbDispatch(leaf, schema, ctx)
+	}
 	st := scan(leaf, schema, ctx)
 	st.finish()
 	return st.result()

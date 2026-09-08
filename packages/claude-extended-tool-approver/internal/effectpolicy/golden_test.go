@@ -112,6 +112,25 @@ func fixture(t *testing.T) (root, home string) {
 	if err := os.Mkdir(filepath.Join(root, "sub"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	// Build-tool family verb-dispatch coverage (tc-8og1 item 3 sub-slice 4,
+	// slice 3aj): a justfile, package.json and devbox.json at the fixture
+	// root, each declaring a "build" verb (so a golden can prove the SAME
+	// verb name reaches deletable.DiscoveredVerbs independently per tool,
+	// Family-scoped) and NOT declaring a "deploy" verb (so a golden can
+	// prove an operator-declared-but-undiscovered verb still abstains, per
+	// Q3's ruling). None of these three Kinds opine on path classification
+	// (slice 3ag's own TestJustNpmDevboxKindsSilentOnPathClassification
+	// regression guard), so adding them here cannot change any OTHER
+	// golden's verdict.
+	if err := os.WriteFile(filepath.Join(root, "justfile"), []byte("build:\n    go build ./...\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "package.json"), []byte(`{"name":"fixture","scripts":{"build":"tsc"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "devbox.json"), []byte(`{"packages":[],"shell":{"scripts":{"build":"go build ./..."}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	// Worktree-state coverage (tc-lc8f item 4a): four SLOTS directly under a
 	// `.worktrees` dir (the git kind's convention) — clean/dirty/ignored-only/
 	// notaworktree. None of these directories are real git worktrees (the
@@ -312,6 +331,24 @@ var goldenRemotePaths = map[string]map[string][]evalcontract.RemotePathRule{
 	"scp_var_log_categorized_read_only": {
 		"host": {{Prefix: "/var/log", Category: "read-only"}},
 	},
+}
+
+// goldenBuildToolVerbs is goldenKubeContexts's/goldenRemotePaths's sibling
+// for the build-tool family's verb-scoped approval hook (tc-8og1 item 3
+// sub-slice 4, slice 3aj; tc-vn5z Q1-Q5, ruled 2026-09-08): a case name that
+// has an entry here gets that slice as its Request.BuildToolVerbs — the
+// operator ELIGIBILITY declaration judgeBuildToolVerb (slice 3ai) requires
+// IN ADDITION to deletable.DiscoveredVerbs' own independent confirmation
+// (Q3's ruling) before a project-tied verb Permits. A case name absent here
+// gets nil, matching the ruling's own safe default: an operator-undeclared
+// verb always abstains, whatever the fixture's own
+// justfile/package.json/devbox.json defines.
+var goldenBuildToolVerbs = map[string][]evalcontract.VerbScopedApproval{
+	"just_build_declared_confirmed":       {{Tool: "just", Verb: "build"}},
+	"just_deploy_declared_not_discovered": {{Tool: "just", Verb: "deploy"}},
+	"just_trailing_args_opaque_declared":  {{Tool: "just", Verb: "build"}},
+	"npm_run_build_declared_confirmed":    {{Tool: "npm", Verb: "build"}},
+	"devbox_run_build_declared_confirmed": {{Tool: "devbox", Verb: "build"}},
 }
 
 var goldenCases = []goldenCase{
@@ -1307,6 +1344,57 @@ var goldenCases = []goldenCase{
 	// treefmt_clear_cache_unmodeled: -c/--clear-cache is also deliberately
 	// absent (no declared deletable Kind for treefmt's own evaluation cache).
 	{"treefmt_clear_cache_unmodeled", "treefmt --clear-cache", evalcontract.Abstain, nil},
+
+	// Build-tool family verb-dispatch wrappers (slice 3aj, tc-8og1 item 3
+	// sub-slice 4; tc-vn5z Q4, ruled 2026-09-08): the cmddesc schema/
+	// descriptor plumbing (justSchema/npmRunSchema/devboxRunSchema,
+	// interpretVerbDispatch) that makes 3ai's judgeBuildToolVerb branch
+	// (added but UNREACHABLE by any real schema in slice 3ai) actually
+	// fire. Every Approve below requires BOTH an operator BuildToolVerbs
+	// declaration (goldenBuildToolVerbs above) AND deletable.DiscoveredVerbs
+	// independently finding the verb in the fixture's own
+	// justfile/package.json/devbox.json (golden_test.go's fixture()) — per
+	// Q3's ruling, neither alone is sufficient.
+	{"just_bare", "just", evalcontract.Approve, nil},
+	// just_build_undeclared: the fixture's justfile DOES define "build", but
+	// no operator BuildToolVerbs entry names it — Q3's "operator data governs
+	// eligibility" half of the ladder is missing, so this abstains even
+	// though workspace discovery alone would vouch for it.
+	{"just_build_undeclared", "just build", evalcontract.Abstain, nil},
+	{"just_build_declared_confirmed", "just build", evalcontract.Approve, nil},
+	// just_deploy_declared_not_discovered: the OPPOSITE gap — operator
+	// declares "deploy" eligible, but the fixture's justfile has no such
+	// recipe, so deletable.DiscoveredVerbs finds nothing and this abstains
+	// too ("abstain, never guess", judgeBuildToolVerb's own doc comment).
+	{"just_deploy_declared_not_discovered", "just deploy", evalcontract.Abstain, nil},
+	// just_dynamic_verb_abstain: a runtime-expanded verb token is captured
+	// as a Dynamic EffectExec (interpretVerbDispatch) — judgeBuildToolVerb's
+	// own FIRST check abstains on it regardless of any BuildToolVerbs
+	// configuration, so this case deliberately configures none.
+	{"just_dynamic_verb_abstain", `just "$V"`, evalcontract.Abstain, nil},
+	// just_trailing_args_opaque_declared: proves a trailing, flag-shaped
+	// argument after the verb (interpretVerbDispatch's own "everything
+	// after the verb is opaque" contract) does not stop the SAME
+	// declared+discovered verb from Approving.
+	{"just_trailing_args_opaque_declared", "just build --prod", evalcontract.Approve, nil},
+	// just_unknown_flag_insufficient: an unmodeled GLOBAL flag before the
+	// verb (scanGlobal's own unknown-flag handling, reused unchanged from
+	// interpretSubcommand) fails the whole invocation closed.
+	{"just_unknown_flag_insufficient", "just --frobnicate build", evalcontract.Abstain, nil},
+
+	{"npm_run_build_declared_confirmed", "npm run build", evalcontract.Approve, nil},
+	// npm_run_bare: `npm run` alone lists the package's scripts — no verb
+	// dispatch, StdoutMetadata only.
+	{"npm_run_bare", "npm run", evalcontract.Approve, nil},
+	// npm_install_unmodeled: npmSchema deliberately models only the "run"
+	// subcommand (not this slice's job to cover npm's full CLI) — any other
+	// subcommand stays an unmodeled subcommand, Insufficient.
+	{"npm_install_unmodeled", "npm install", evalcontract.Abstain, nil},
+
+	// devboxRunSchema is NOT verified against a live devbox binary (not
+	// installed on this host) — see devboxSchema's own doc comment
+	// (registry_breadth.go).
+	{"devbox_run_build_declared_confirmed", "devbox run build", evalcontract.Approve, nil},
 }
 
 func TestGolden(t *testing.T) {
@@ -1314,7 +1402,7 @@ func TestGolden(t *testing.T) {
 	reg := cmddesc.DefaultRegistry()
 	for _, tc := range goldenCases {
 		t.Run(tc.name, func(t *testing.T) {
-			resp := Evaluate(evalcontract.Request{Command: tc.command, CWD: root, ProjectRoot: root, VettedHosts: tc.vetted, RemoteLifecycle: goldenRemoteLifecycle[tc.name], KubeContexts: goldenKubeContexts[tc.name], RemotePaths: goldenRemotePaths[tc.name]}, reg, DefaultPolicies(), DefaultGraphPolicies())
+			resp := Evaluate(evalcontract.Request{Command: tc.command, CWD: root, ProjectRoot: root, VettedHosts: tc.vetted, RemoteLifecycle: goldenRemoteLifecycle[tc.name], KubeContexts: goldenKubeContexts[tc.name], RemotePaths: goldenRemotePaths[tc.name], BuildToolVerbs: goldenBuildToolVerbs[tc.name]}, reg, DefaultPolicies(), DefaultGraphPolicies())
 			if resp.Decision != tc.want {
 				t.Errorf("decision = %s, want %s (reason: %s)", resp.Decision, tc.want, resp.Reason)
 			}

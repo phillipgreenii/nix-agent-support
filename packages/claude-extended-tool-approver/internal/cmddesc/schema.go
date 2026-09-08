@@ -563,4 +563,27 @@ type CommandSchema struct {
 	// than consumed (yq's implicit `eval`, slice 3n). Empty means an
 	// unknown key is an unmodeled subcommand (git's shape).
 	DefaultSubcommand string
+	// VerbFamily is the ARGV-SHAPED build-tool VERB-DISPATCH shape (tc-8og1
+	// item 3 sub-slice 4; tc-vn5z Q4, ruled 2026-09-08: "reuse interpreter_
+	// subcommand.go's recursion... for argv-shaped children"). Non-empty
+	// makes GenericInterpreter.Interpret route through interpretVerbDispatch
+	// (interpreter_subcommand.go) instead of the ordinary flag-table scan —
+	// see that function's own doc comment for the full contract. It names
+	// the build-tool FAMILY stamped onto the resulting EffectExec
+	// (Effect.Family) — matching evalcontract.VerbScopedApproval.Tool and
+	// deletable.Kind.Name (slice 3ag), e.g. "just", "npm", "devbox" — which
+	// is why a SUBCOMMAND schema that dispatches through this shape (npm's
+	// "run", devbox's "run") sets VerbFamily to the TOOL's name, not its
+	// own Name field ("run" would not match npmKind.Name).
+	//
+	// Mutually exclusive with Subcommands: GenericInterpreter.Interpret
+	// checks Subcommands FIRST, so a schema with both set would silently
+	// get Subcommands' behavior only — this package never constructs one.
+	// Unlike Subcommands (which repurposes Positionals/ImplicitEffects/
+	// Stdin/Stdout to a CHILD schema), a VerbFamily schema has no child
+	// schema to hand those fields to, so they keep their ordinary,
+	// top-level meaning here: they describe THIS schema's own
+	// bare-invocation case — no verb positional at all (`just` alone, `npm
+	// run` alone) — which interpretVerbDispatch falls back to.
+	VerbFamily string
 }

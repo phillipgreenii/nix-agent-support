@@ -1,6 +1,7 @@
 package cmddesc
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmdparse"
@@ -83,6 +84,73 @@ func interpretSubcommand(leaf cmdparse.ParsedCommand, schema CommandSchema, ctx 
 		Sufficient:    st.insuff == "" && sub.Sufficient,
 		Insufficiency: insufficiency,
 	}
+}
+
+// interpretVerbDispatch implements the BUILD-TOOL VERB-DISPATCH shape
+// (CommandSchema.VerbFamily; tc-8og1 item 3 sub-slice 4; tc-vn5z Q4, ruled
+// 2026-09-08): a WRAPPER whose child is spelled as a single ARGV-SHAPED verb
+// positional — `just <verb> [args...]`, `npm run <verb> [-- args...]`,
+// `devbox run <verb> [-- args...]` (the three targets slice 3ag's workspace
+// verb-discovery facet covers). It reuses scanGlobal UNCHANGED — the SAME
+// "scan the global-option table, stop at the first positional" shape
+// interpretSubcommand already uses — per Q4's ruling ("reuse interpreter_
+// subcommand.go's recursion... for argv-shaped children"). Where
+// interpretSubcommand looks the positional up in a STATIC
+// map[string]CommandSchema (Subcommands) and recurses into a further
+// schema, this dispatch does not: the verb name is OPEN, project-defined
+// data (there is no fixed per-verb schema to recurse into — the verb's
+// BODY is opaque, defined by a justfile recipe/package.json script/
+// devbox.json script this package cannot see the contents of), so
+// interpretation stops at CAPTURING the verb itself as a single EffectExec
+// naming (Family, Operation) — the two fields effectpolicy.
+// judgeBuildToolVerb (slice 3ai) already reads, and the SAME two fields
+// deletable.DiscoveredVerbs (slice 3ag) / evalcontract.VerbScopedApproval
+// (slice 3ai) compare it against.
+//
+// EVERYTHING after the verb positional — further tokens, even ones shaped
+// like flags (`just deploy --prod`, `npm run test -- --grep=x`) — is INERT
+// to this model: it is an argument to the verb's own opaque body, which
+// this package has no visibility into, exactly like KindLiteral. No further
+// flag/path/program interpretation is attempted on it, which is WHY
+// scanGlobal (not the ordinary interleaved scan()) is the right tool to
+// reuse: scanGlobal stops scanning at the first positional instead of
+// continuing to look for MORE flags afterward, so a recipe's own
+// `--prod`-shaped argument is never mistaken for an unmodeled flag of the
+// WRAPPER and never makes the whole invocation Insufficient.
+//
+// A live-expansion verb token is captured as a DYNAMIC EffectExec (Family
+// set, Operation empty) rather than failing the interpretation closed — the
+// SAME "well-understood shape, unknown value" treatment every other Dynamic
+// effect in this package gets (a dynamic path, a dynamic chdir target):
+// judgeBuildToolVerb's own first check (e.Dynamic -> Unknown) exists
+// specifically to consume this. The interpretation stays Sufficient either
+// way: what changes is the EFFECT's own Dynamic/Operation fields, not
+// whether the model understood the shape — mirrors how a dynamic path
+// operand stays Sufficient elsewhere in this package.
+//
+// No verb positional at all (a bare `just`, or `npm run` alone) does NOT
+// dispatch: the schema's OWN top-level Positionals/ImplicitEffects/Stdin/
+// Stdout describe that case instead (those fields are otherwise UNUSED by a
+// VerbFamily-shaped schema, exactly like Subcommands' own documented
+// convention of repurposing them to the subcommand — see VerbFamily's own
+// doc comment, schema.go) — see justSchema/npmRunSchema's own doc comments
+// (registry_breadth.go) for the worked bare-invocation cases.
+func interpretVerbDispatch(leaf cmdparse.ParsedCommand, schema CommandSchema, ctx Context) Interpretation {
+	st, verbIdx := scanGlobal(leaf, schema, ctx)
+	if !st.scanned {
+		return st.result()
+	}
+	if verbIdx < 0 {
+		st.finish()
+		return st.result()
+	}
+	source := fmt.Sprintf("arg %d", verbIdx)
+	if leaf.ArgIsLiveExpansion(verbIdx) {
+		st.effects = append(st.effects, Effect{Kind: EffectExec, Family: schema.VerbFamily, Dynamic: true, Source: source})
+		return st.result()
+	}
+	st.effects = append(st.effects, Effect{Kind: EffectExec, Family: schema.VerbFamily, Operation: leaf.Args[verbIdx], Source: source})
+	return st.result()
 }
 
 // scanGlobal scans schema.Flags exactly like scan() does — bundling, glued

@@ -606,6 +606,80 @@ var knownSpikeLooser = map[string]spikeLooserEntry{
 			"positional into an inert filename hint (Literal, no path effect at all), so there " +
 			"is nothing for any path policy to judge and the node is vacuously Approved.",
 	},
+	// just_bare / just_build_declared_confirmed / just_trailing_args_opaque_declared /
+	// npm_run_build_declared_confirmed / npm_run_bare / devbox_run_build_declared_confirmed
+	// (slice 3aj, tc-8og1 item 3 sub-slice 4): production's own buildtools
+	// rule DELIBERATELY EXCLUDES "just" from baseApprovedTools ("a recipe
+	// dispatcher's behavior is defined per-repo" — internal/rules/
+	// buildtools/buildtools.go's own comment, TestBuildtools_EmptyConfig_
+	// JustAbstains) and grants it nothing under an EMPTY consumer
+	// verbScopedApprovals config (this harness's live engine, buildLiveEngine,
+	// carries no consumer config) — the same is true for "npm"/"devbox":
+	// safecmds' own hasSubcommands table lists "npm" only for its
+	// help-request detector, never as an approved write command, and
+	// buildtools.go's baseApprovedTools has neither "npm" nor "devbox" —
+	// so every one of these six commands reaches chain exhaustion
+	// (NoOpinion) in production today, empirically confirmed by this row's
+	// own "live=noopinion" column, regardless of what it touches. The
+	// spike's new justSchema/npmRunSchema/devboxRunSchema (interpretVerbDispatch,
+	// slice 3aj) resolve these six invocations to a Permitted EffectExec —
+	// judgeBuildToolVerb (slice 3ai) approves ONLY because BOTH an operator
+	// BuildToolVerbs declaration AND deletable.DiscoveredVerbs (slice 3ag)
+	// independently confirm the verb, or (just_bare/npm_run_bare) there is
+	// no effect at all to judge (a bare listing) — which
+	// Evaluate folds to Approve. This is the SAME shape as the go-family's
+	// own looser rows (slice 3x) and treefmt's (slice 3ah): the spike is
+	// more permissive here only because it genuinely MODELS the tool where
+	// production has no opinion at all (or, for "just", deliberately
+	// declines to have one absent consumer config), not because any policy
+	// was loosened.
+	"just_bare": {
+		Class: "looser-than-abstain",
+		Cause: "production's buildtools rule deliberately excludes \"just\" absent consumer " +
+			"config, so it reaches chain exhaustion (NoOpinion); the spike's bare-invocation " +
+			"fallback (justSchema's own top-level Stdout: StdoutMetadata) emits no effect at " +
+			"all — nothing to judge, vacuously Approved.",
+	},
+	"just_build_declared_confirmed": {
+		Class: "looser-than-abstain",
+		Cause: "production's buildtools rule deliberately excludes \"just\" absent consumer " +
+			"config (TestBuildtools_EmptyConfig_JustAbstains), reaching NoOpinion; the spike " +
+			"Permits only because BOTH an operator BuildToolVerbs declaration AND " +
+			"deletable.DiscoveredVerbs independently confirm the \"build\" recipe in the " +
+			"fixture's own justfile (Q3's ruling) — production has no equivalent mechanism " +
+			"under an empty config.",
+	},
+	"just_trailing_args_opaque_declared": {
+		Class: "looser-than-abstain",
+		Cause: "same root cause as just_build_declared_confirmed — the trailing --prod token " +
+			"is opaque to interpretVerbDispatch (per its own contract) and does not change the " +
+			"verdict.",
+	},
+	"npm_run_build_declared_confirmed": {
+		Class: "looser-than-abstain",
+		Cause: "production's safecmds rule lists \"npm\" only for help-request detection " +
+			"(hasSubcommands), never as an approved write command, and buildtools.go's " +
+			"baseApprovedTools has no \"npm\" entry — chain exhaustion, NoOpinion. The spike " +
+			"Permits only because BOTH an operator BuildToolVerbs declaration AND " +
+			"deletable.DiscoveredVerbs independently confirm the \"build\" script in the " +
+			"fixture's own package.json.",
+	},
+	"npm_run_bare": {
+		Class: "looser-than-abstain",
+		Cause: "same production gap as npm_run_build_declared_confirmed; `npm run` alone lists " +
+			"scripts (npmRunSchema's own bare-invocation fallback) — no effect at all to judge, " +
+			"vacuously Approved.",
+	},
+	"devbox_run_build_declared_confirmed": {
+		Class: "looser-than-abstain",
+		Cause: "production's buildtools.go has no \"devbox\" entry in baseApprovedTools (only " +
+			"in allowedFlags, its per-tool FLAG table, not the approval gate) and grants it " +
+			"nothing under an empty consumer verbScopedApprovals config — chain exhaustion, " +
+			"NoOpinion. The spike Permits only because BOTH an operator BuildToolVerbs " +
+			"declaration AND deletable.DiscoveredVerbs independently confirm the \"build\" " +
+			"script in the fixture's own devbox.json (devboxRunSchema is NOT verified live — " +
+			"devbox is not installed on this host, see its own doc comment).",
+	},
 }
 
 // TestAgreement drives every case in goldenAgreementCases and
@@ -648,6 +722,7 @@ func TestAgreement(t *testing.T) {
 			RemoteLifecycle: goldenRemoteLifecycle[tc.name],
 			KubeContexts:    goldenKubeContexts[tc.name],
 			RemotePaths:     goldenRemotePaths[tc.name],
+			BuildToolVerbs:  goldenBuildToolVerbs[tc.name],
 		}, reg, DefaultPolicies(), DefaultGraphPolicies())
 		liveResult := evaluateLive(live, root, tc.command)
 

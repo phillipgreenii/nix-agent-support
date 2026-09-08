@@ -1732,3 +1732,220 @@ var scpSchema = CommandSchema{
 	PositionalsEndOptions: true,
 	Interpreter:           "scp",
 }
+
+// ---- build-tool family: verb-dispatch wrappers (slice 3aj, tc-8og1 item 3
+// sub-slice 4; tc-vn5z Q4, ruled 2026-09-08) ---------------------------------
+//
+// just/npm run/devbox run: WRAPPER commands whose real effect depends on
+// WHICH VERB (recipe/script) they are told to run — the three targets
+// slice 3ag's workspace verb-discovery facet covers (justfile recipes,
+// package.json scripts, devbox.json shell.scripts). Each schema below sets
+// VerbFamily (schema.go) to route through interpretVerbDispatch
+// (interpreter_subcommand.go) instead of the ordinary flag-table scan: the
+// verb positional becomes an EffectExec{Family, Operation}, judged by
+// effectpolicy.TrustedCheckoutExec's judgeBuildToolVerb (slice 3ai) against
+// operator-declared evalcontract.Request.BuildToolVerbs AND
+// deletable.DiscoveredVerbs (slice 3ag) — BOTH must agree, per Q3's ruling,
+// before a verb Permits.
+//
+// Everything AFTER the verb positional is opaque to this model — an
+// argument to the verb's own body, which this package cannot see the
+// contents of — so none of these schemas attempts to further interpret
+// trailing tokens, even ones shaped like flags (`just deploy --prod`, `npm
+// run test -- --grep=x`); see interpretVerbDispatch's own doc comment for
+// why scanGlobal (which stops at the first positional) is the right tool
+// for this, unlike the ordinary interleaved scan().
+//
+// nix (nix run's installable-reference child) and a name-lookup child
+// shape are DELIBERATELY OUT OF SCOPE here — tc-8og1 item 3 sub-slice 5's
+// job ("nix run installable vetting"), per Q4's own ruling. Nothing below
+// forecloses it: a future nix schema can set its own VerbFamily/whatever
+// new descriptor sub-slice 5 needs without touching this file's three
+// schemas.
+
+// justSchema: `just [OPTIONS] [ARGUMENTS]...` — verified against this
+// host's installed just v1.51.0 (`just --version`, `just --help`,
+// 2026-09-08). just's own synopsis is broader than this schema models:
+// ARGUMENTS may mix `NAME=VALUE` variable OVERRIDES with one or more recipe
+// names to run in SEQUENCE (`just foo=bar build test` sets foo, then runs
+// build, then test). This schema deliberately models only the simple,
+// single-verb-dispatch shape — the first positional is treated as THE
+// verb. A leading override token (`foo=bar`) is not specially detected: it
+// is captured as Operation="foo=bar", which simply never matches any
+// operator-declared (Tool, Verb) pair or any deletable.DiscoveredVerbs
+// entry (both require an EXACT name match), so judgeBuildToolVerb always
+// abstains on it — a false NEGATIVE (a missed verb capture when overrides
+// precede the real recipe name), never a false positive, the same
+// fail-safe direction slice 3ag's justfileVerbs already documents for its
+// own known limitations. A SECOND/THIRD chained recipe name (`build test`
+// above) is likewise not separately captured or judged — out of scope for
+// this slice's "make Family/Operation reachable" job.
+//
+// Bare `just` (zero positionals) does NOT dispatch: real `just` alone
+// lists the justfile's recipes (equivalent to `--list`) — modeled here via
+// the schema's own top-level Stdout (StdoutMetadata) and Stdin
+// (StdinNever), which interpretVerbDispatch falls back to when no verb
+// positional is found (and which also covers `just --help`/`just
+// --version`/`just -n`, none of which dispatch a recipe either).
+//
+// Global flags modeled below are boolean/inert or single-literal-value
+// ones that provably cannot redirect WHICH justfile or working directory
+// verb discovery resolves against. `--set VARIABLE VALUE` is the
+// flag-spelled override form (ArityN, both inert — same non-detection
+// rationale as the positional override form above).
+//
+// DELIBERATELY ABSENT (each makes the WHOLE invocation Insufficient rather
+// than silently inert or misread), each a distinct trust boundary this
+// slice does not cover:
+//   - -f/--justfile FILE, -d/--working-directory DIR, --justfile-name
+//     NAME, --ceiling DIR: each can point verb discovery at a DIFFERENT
+//     justfile than the one deletable.DiscoveredVerbs would find by
+//     walking CWD's ancestors — modeling them would need this schema to
+//     feed that alternate path back into DiscoveredVerbs, out of scope
+//     here.
+//   - -c/--command, --shell, --shell-arg, --shell-command, -e/--edit: each
+//     names or invokes an ARBITRARY external program verbatim off the
+//     command line — the same unvetted-execution-wrapper shape as go
+//     test's -exec / go build's -toolexec (registry_breadth.go's own
+//     comments on those).
+//   - --choose, --chooser, --list/-l, --show/-s, --summary, --usage,
+//     --variables, --groups, --changelog, --man, --completions, --dump,
+//     --evaluate, --json, --fmt, --init: introspection/formatting MODES
+//     that do not dispatch a recipe at all — a genuinely different
+//     invocation shape this slice does not model (unlike treefmtSchema,
+//     whose entire CLI IS one shape); left for a future slice if agent
+//     usage shows they matter.
+var justSchema = CommandSchema{
+	Name:       "just",
+	Provenance: "just 1.51.0 (this host, just --version / just --help), 2026-09-08",
+	VerbFamily: "just",
+	Flags: map[string]FlagSpec{
+		"-n": inert, "--dry-run": inert,
+		"-q": inert, "--quiet": inert,
+		"-v": inert, "--verbose": inert,
+		"-h": inert, "--help": inert,
+		"-V": inert, "--version": inert,
+		"--yes":           inert,
+		"--unstable":      inert,
+		"--no-deps":       inert,
+		"--no-dotenv":     inert,
+		"--explain":       inert,
+		"--highlight":     inert,
+		"--no-highlight":  inert,
+		"--allow-missing": inert,
+		"--color":         literal1,
+		"--command-color": literal1,
+		"--alias-style":   literal1,
+		"--set":           {Arity: ArityN, Operands: []OperandRole{Literal, Literal}},
+	},
+	Stdin:        StdinNever,
+	Stdout:       StdoutMetadata,
+	UnknownFlag:  UnknownFlagInsufficient,
+	EndOfOptions: true,
+}
+
+// npmSchema: `npm <command> [args]` — subcommand dispatch; this slice only
+// models the "run" subcommand's verb-dispatch shape (`npm run <verb>`, the
+// target slice 3ag's npmKind covers). Every OTHER npm subcommand (install,
+// ci, test, start, publish, ...) is DELIBERATELY ABSENT — falls through to
+// interpretSubcommand's own "unmodeled subcommand" Insufficiency, exactly
+// like goSchema's own doc/tool/work precedent — not this slice's job
+// (`npm test`/`npm start` as their OWN verb-dispatch shortcuts, a plausible
+// future extension, are likewise out of scope: the brief names "npm run
+// <verb>" specifically). npm's own global config flags (--prefix,
+// --registry, ...) can appear before "run" too; leaving Flags empty here
+// means any of them also makes the invocation Insufficient, the same
+// conservative direction.
+//
+// Verified against this host's installed npm 11.17.0 (`npm --version`,
+// `npm help run`, `npm run --help`), 2026-09-08.
+var npmSchema = CommandSchema{
+	Name:         "npm",
+	Provenance:   "npm 11.17.0 (this host, npm --version / npm help run), 2026-09-08",
+	Flags:        map[string]FlagSpec{},
+	UnknownFlag:  UnknownFlagInsufficient,
+	EndOfOptions: true,
+	Subcommands: map[string]CommandSchema{
+		"run": npmRunSchema,
+	},
+}
+
+// npmRunSchema: `npm run <command> [-- <args>]` (npm help run's own
+// synopsis) — the SUBCOMMAND schema npmSchema.Subcommands["run"] dispatches
+// to via the ordinary interpretSubcommand recursion; its OWN Interpret call
+// then routes through interpretVerbDispatch (VerbFamily: "npm", NOT "run"
+// — see VerbFamily's own doc comment, schema.go: it must match
+// npmKind.Name/evalcontract.VerbScopedApproval.Tool, not the dispatching
+// subcommand key). Positional arguments after <command> (and everything
+// after a literal `--`) are passed to the script verbatim — opaque to this
+// model, per interpretVerbDispatch's own contract.
+//
+// Bare `npm run` (zero positionals) lists the package's scripts —
+// StdoutMetadata, the same bare-invocation fallback shape as justSchema.
+//
+// Flags modeled are npm run's OWN documented options (`npm run --help`,
+// this host): -w/--workspace NAME (repeatable, literal), --workspaces,
+// --include-workspace-root, --if-present, --ignore-scripts,
+// --foreground-scripts (all boolean/inert). --script-shell SHELL is
+// DELIBERATELY ABSENT: it substitutes the interpreter that runs the
+// script, an arbitrary external program named on the command line — the
+// same unvetted-execution-wrapper shape justSchema's --shell exclusion
+// documents.
+var npmRunSchema = CommandSchema{
+	Name:       "run",
+	Provenance: "npm 11.17.0 (this host, npm help run / npm run --help), 2026-09-08",
+	VerbFamily: "npm",
+	Flags: map[string]FlagSpec{
+		"-w": literal1, "--workspace": literal1,
+		"--workspaces":             inert,
+		"--include-workspace-root": inert,
+		"--if-present":             inert,
+		"--ignore-scripts":         inert,
+		"--foreground-scripts":     inert,
+	},
+	Stdin:        StdinNever,
+	Stdout:       StdoutMetadata,
+	UnknownFlag:  UnknownFlagInsufficient,
+	EndOfOptions: true,
+}
+
+// devboxSchema: `devbox <command> [args]` — subcommand dispatch; this
+// slice only models "run" (`devbox run <script>`, the target slice 3ag's
+// devboxKind covers), the same scope decision npmSchema makes for npm.
+//
+// NOT VERIFIED LIVE: devbox is not installed on this host (2026-09-08,
+// `which devbox` finds nothing) — modeled conservatively from devbox.json's
+// well-documented `shell.scripts`/`devbox run <script>` CLI shape (the
+// same shape slice 3ag's devboxVerbs already parses from devbox.json)
+// rather than a live `devbox --help` capture. Flags are therefore left
+// minimal/empty here deliberately — narrower coverage than justSchema's/
+// npmSchema's, not a missing case: an unmodeled devbox flag still fails
+// closed to Insufficient, never guesses.
+var devboxSchema = CommandSchema{
+	Name:         "devbox",
+	Provenance:   "NOT VERIFIED LIVE (devbox not installed on this host, 2026-09-08); modeled from devbox.json's documented shell.scripts / `devbox run` CLI shape",
+	Flags:        map[string]FlagSpec{},
+	UnknownFlag:  UnknownFlagInsufficient,
+	EndOfOptions: true,
+	Subcommands: map[string]CommandSchema{
+		"run": devboxRunSchema,
+	},
+}
+
+// devboxRunSchema: `devbox run [flags] <script> [-- args]` — VerbFamily:
+// "devbox" (matching devboxKind.Name), the same npmRunSchema shape. Only
+// `-q`/`--quiet` is modeled (a documented, unambiguously inert devbox
+// global flag); everything else is deliberately left unmodeled given the
+// no-live-verification caveat above (devboxSchema's own doc comment).
+var devboxRunSchema = CommandSchema{
+	Name:       "run",
+	Provenance: "NOT VERIFIED LIVE (devbox not installed on this host, 2026-09-08)",
+	VerbFamily: "devbox",
+	Flags: map[string]FlagSpec{
+		"-q": inert, "--quiet": inert,
+	},
+	Stdin:        StdinNever,
+	Stdout:       StdoutMetadata,
+	UnknownFlag:  UnknownFlagInsufficient,
+	EndOfOptions: true,
+}

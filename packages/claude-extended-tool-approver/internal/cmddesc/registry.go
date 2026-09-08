@@ -70,6 +70,10 @@ func DefaultRegistry() Registry {
 		// slice 3ah (tc-8og1 item 3 sub-slice 2): treefmt, the formatter
 		// multiplexer — see treefmtSchema's own doc comment.
 		treefmtSchema,
+		// slice 3aj (tc-8og1 item 3 sub-slice 4): the build-tool family's
+		// verb-dispatch wrappers — see registry_breadth.go's
+		// justSchema/npmSchema/devboxSchema doc comments.
+		justSchema, npmSchema, devboxSchema,
 	)
 }
 
