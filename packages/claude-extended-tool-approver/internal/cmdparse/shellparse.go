@@ -2192,6 +2192,214 @@ func soleSimpleCommandLeaf(text string) (ParsedCommand, bool) {
 }
 
 // ============================================================================
+// tc-o1g9: the BOUNDED "||"-FALLBACK compound-body classifier.
+//
+// soleSimpleCommandLeaf above deliberately refuses anything but a sole
+// *syntax.CallExpr — a `||`/`&&` compound is a *syntax.BinaryCmd, so it never
+// even reaches soleSimpleCommandLeaf's own leaf inspection. That refusal is
+// pg2-whumr/ADR 0048's Reject floor (commandSubstitutionFloor in
+// internal/engine/engine.go) operating exactly as designed: it exists
+// precisely so a dangerous command cannot hide behind an always-succeeding
+// fallback (`rm -rf / || true`).
+//
+// This bead's operator ruling (tc-o1g9, 2026-09-08, via /unblock-human-beads,
+// verbatim: "generalize to any already-modeled-safe leaf + any bounded
+// literal fallback ... any already-safecmds-modeled reader/leaf ... joined
+// by || to a BOUNDED literal fallback ... any literal string echo ... the
+// test/[ ] && echo X || echo Y ternary form is IN SCOPE") approved a NARROW,
+// STRUCTURAL exception to that floor: a body that is EXACTLY
+//
+//	<reader/leaf already recognized by classifySubstitutionCommand>
+//	  [with an input redirect and/or a discard-only write redirect] || <bounded literal echo>
+//
+// or its ternary form
+//
+//	<test/[ ] leaf already recognized by classifySubstitutionCommand>
+//	  && <bounded literal echo> || <bounded literal echo>
+//
+// is recognized here and its clearance is derived from the SAME union
+// ClassifySubstitutionBody already applies to a sole leaf — never a
+// hand-rolled, more permissive rule for the compound case. The gaming risk
+// the floor protects against is unaffected: the READER/TEST side still goes
+// through classifySubstitutionCommand exactly as if it stood alone (so `rm`
+// is refused here exactly as it is for a sole leaf — `rm -rf / || true`
+// still floors), and the FALLBACK side must be a bare, argument-literal
+// `echo` — never another command, so nothing can be "hidden" behind it.
+// ============================================================================
+
+// boundedFallbackShape reports whether text is the bounded
+// "<already-modeled reader/leaf> || <bounded literal echo>" shape (or its
+// "TEST && echo X || echo Y" ternary form) this bead's operator ruling
+// approved, and if so its combined SubstitutionClearance.
+//
+// The second return is a MATCH flag, not a safety verdict: ok=false means
+// "this is not the shape at all", so the caller (ClassifySubstitutionBody)
+// falls through to its existing SubstitutionRefused — this function only
+// ever WIDENS from that baseline for bodies it positively recognizes, and
+// even a recognized body's own clearance can still be SubstitutionRefused
+// (e.g. the reader names a deny-listed secret path).
+//
+// Deliberately NOT recognized here, and left refused exactly as before:
+//
+//   - `[[ ... ]]` (a *syntax.TestClause, a structurally different node than
+//     the CallExpr `test`/`[` spellings) — it needs its own operand-safety
+//     model, which is its own bead, not a rushed extension of this one.
+//   - A fallback command other than `echo` (`true`, `:`, …) — flagged in
+//     this bead's own corpus measurement as a sibling pattern, deliberately
+//     NOT folded in here because the operator's ruling names `echo`
+//     specifically.
+//   - A reader not already recognized by classifySubstitutionCommand
+//     (e.g. `kubectl get ...`) — extending that recognition is its own
+//     addition with its own required audit (see e.g. gitReadSubcommands'
+//     admission-test doc in parser.go), not something this shape-matcher
+//     can do implicitly.
+//   - Any body carrying a NESTED command/process substitution anywhere
+//     (containsSubstitution) — opaque to this static seam exactly as it is
+//     to soleSimpleCommandLeaf.
+func boundedFallbackShape(text string) (SubstitutionClearance, bool) {
+	p, _ := parserPool.Get().(*syntax.Parser)
+	file, err := p.Parse(strings.NewReader(text), "command")
+	parserPool.Put(p)
+	if err != nil || file == nil || len(file.Stmts) != 1 {
+		return SubstitutionRefused, false
+	}
+	if containsSubstitution(file) {
+		return SubstitutionRefused, false
+	}
+	st := file.Stmts[0]
+	if st.Negated || st.Background || st.Coprocess || st.Disown || len(st.Redirs) > 0 {
+		return SubstitutionRefused, false
+	}
+	outer, ok := st.Cmd.(*syntax.BinaryCmd)
+	if !ok || outer.Op != syntax.OrStmt {
+		return SubstitutionRefused, false
+	}
+	if !isBoundedLiteralEcho(outer.Y) {
+		return SubstitutionRefused, false
+	}
+
+	// Ternary form: (TEST && echo X) || echo Y. outer.X's own Cmd is itself
+	// a BinaryCmd ("&&") whose left side must be an already-modeled
+	// test/[ leaf and whose right side must be another bounded literal echo.
+	if and, ok := outer.X.Cmd.(*syntax.BinaryCmd); ok && and.Op == syntax.AndStmt {
+		if outer.X.Negated || outer.X.Background || outer.X.Coprocess || outer.X.Disown || len(outer.X.Redirs) > 0 {
+			return SubstitutionRefused, false
+		}
+		if !isBoundedLiteralEcho(and.Y) {
+			return SubstitutionRefused, false
+		}
+		testClearance, ok := readerLeafClearance(text, and.X)
+		if !ok {
+			return SubstitutionRefused, false
+		}
+		return minClearance(testClearance, SubstitutionCleared), true
+	}
+
+	// Bare form: <reader> || echo <literal...>.
+	readerClearance, ok := readerLeafClearance(text, outer.X)
+	if !ok {
+		return SubstitutionRefused, false
+	}
+	return minClearance(readerClearance, SubstitutionCleared), true
+}
+
+// readerLeafClearance classifies st — one side of a boundedFallbackShape
+// compound — as a single already-modeled reader/test leaf, applying EXACTLY
+// the union ClassifySubstitutionBody's own non-heredoc branch applies to a
+// sole leaf (classifySubstitutionCommand over the leaf's own tokens, folded
+// with its redirections): the compound shape's reader is held to the
+// IDENTICAL standard the existing single-leaf floor already enforces, not a
+// hand-rolled parallel one that could quietly diverge from it.
+//
+// The bool return is a SHAPE match (single simple-command leaf, no heredoc)
+// — the SubstitutionClearance value itself can still be SubstitutionRefused
+// for a shape-matching leaf classifySubstitutionCommand does not vouch for
+// (e.g. `rm -rf /`), which is exactly how `rm -rf / || true` keeps denying:
+// `rm` shape-matches (ok=true) but classifies SubstitutionRefused, and
+// minClearance in the caller keeps the whole body refused.
+func readerLeafClearance(text string, st *syntax.Stmt) (SubstitutionClearance, bool) {
+	if st.Negated || st.Background || st.Coprocess || st.Disown {
+		return SubstitutionRefused, false
+	}
+	call, ok := st.Cmd.(*syntax.CallExpr)
+	if !ok || len(call.Assigns) > 0 || len(call.Args) == 0 {
+		return SubstitutionRefused, false
+	}
+	lw := &lowering{src: text, pipeSeq: -1}
+	lw.lowerCall(st, call, 0, 0, 0)
+	if len(lw.leaves) != 1 || len(lw.dataLeaves) != 0 {
+		return SubstitutionRefused, false
+	}
+	leaf := lw.leaves[0]
+	if leaf.HasHeredoc {
+		// A heredoc-bearing reader on the LEFT of a "||" fallback is out of
+		// scope for this bead: the heredoc admission path
+		// (heredocClearedForSubstitution) was built and measured for the
+		// SOLE-leaf case only, and folding it into a compound here would be
+		// an unmeasured extension of a DIFFERENT operator ruling (pg2-phtl3).
+		return SubstitutionRefused, false
+	}
+	tokens := append([]string{leaf.Executable}, leaf.Args...)
+	return minClearance(classifySubstitutionCommand(tokens), redirectClearanceForBoundedFallback(leaf.Redirections)), true
+}
+
+// isBoundedLiteralEcho reports whether st is exactly `echo <literal...>` —
+// the BOUNDED LITERAL FALLBACK the operator's ruling approved generalizing
+// from digit-or-empty to "any literal string". Every argument must carry NO
+// expansion of any kind (no parameter reference, no command/process
+// substitution, no arithmetic expansion, no extended glob), so the fallback
+// can only ever echo text FIXED AT PARSE TIME — never a value this static
+// seam has not, and structurally cannot, verify.
+func isBoundedLiteralEcho(st *syntax.Stmt) bool {
+	if st.Negated || st.Background || st.Coprocess || st.Disown || len(st.Redirs) > 0 {
+		return false
+	}
+	call, ok := st.Cmd.(*syntax.CallExpr)
+	if !ok || len(call.Assigns) > 0 || len(call.Args) == 0 {
+		return false
+	}
+	nameParts := call.Args[0].Parts
+	if len(nameParts) != 1 {
+		return false
+	}
+	nameLit, ok := nameParts[0].(*syntax.Lit)
+	if !ok || nameLit.Value != "echo" {
+		return false
+	}
+	for _, w := range call.Args[1:] {
+		if !isLiteralOnlyWord(w) {
+			return false
+		}
+	}
+	return true
+}
+
+// isLiteralOnlyWord reports whether w carries no expansion of any kind:
+// every part is a bare literal, a single-quoted span (always literal by
+// construction), or a double-quoted span whose OWN parts are all bare
+// literals (no parameter/command/arithmetic expansion surviving inside the
+// quotes either).
+func isLiteralOnlyWord(w *syntax.Word) bool {
+	for _, part := range w.Parts {
+		switch v := part.(type) {
+		case *syntax.Lit:
+			continue
+		case *syntax.SglQuoted:
+			continue
+		case *syntax.DblQuoted:
+			for _, inner := range v.Parts {
+				if _, ok := inner.(*syntax.Lit); !ok {
+					return false
+				}
+			}
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// ============================================================================
 // The env-assignment VALUE classifier, over the seam (ADR 0039 step 5's
 // `classifyExpansion` item, brought forward by the pg2-hed0a P0).
 //

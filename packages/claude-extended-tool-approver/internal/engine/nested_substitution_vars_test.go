@@ -105,31 +105,37 @@ func TestIntegration_NestedSubstitutionInCommandLiteralResolves(t *testing.T) {
 }
 
 // TestIntegration_NestedSubstitutionOrCombinatorInnerLeafResolves is tc-ltr4's SECOND
-// report (`S=<path>; echo "done: $(cat $S/full2.done 2>/dev/null || echo running)"`),
-// and it is asserted differently from the shapes above ON PURPOSE.
+// report (`S=<path>; echo "done: $(cat $S/full2.done 2>/dev/null || echo running)"`).
 //
-// The substitution BODY here is `cat ... || echo running` — TWO leaves joined by `||`,
-// not a sole simple command. internal/cmdparse/parser.go's ClassifySubstitutionBody
-// (via soleSimpleCommandLeaf) classifies ANY non-sole-simple-command body
-// SubstitutionRefused, and engine.go's foldSubstitutionScan floors a Refused body's
-// contribution to commandSubstitutionFloor's decisive verdict UNCONDITIONALLY (ADR
-// 0048 / operator ruling pg2-gwp57's "both gates" requirement, now Reject rather than
-// Ask per pg2-kxmpe, 2026-08-28: recursion approving a Refused body must never leak an
-// Approve through). That floor is INDEPENDENT of variable resolution —
-// it fires for `cat /literal/path || echo running` exactly as it fires for
-// `cat $S/full2.done || echo running` — so this bead's fix does not and MUST NOT move
-// this command's outer verdict to Approve; doing so would require loosening the
-// static-allowlist admission criteria for `||`-bearing substitution bodies, a DIFFERENT,
-// unruled widening this bead does not authorize.
+// UPDATED BY tc-o1g9 (2026-09-08). This test used to pin the ADR 0048 "both gates"
+// floor REFUSING this exact shape — `cat ... 2>/dev/null || echo running` is TWO
+// leaves joined by `||`, and internal/cmdparse/parser.go's ClassifySubstitutionBody
+// (via soleSimpleCommandLeaf) used to classify ANY non-sole-simple-command body
+// SubstitutionRefused regardless of what either leaf was, so engine.go's
+// foldSubstitutionScan floored it to a decisive Reject unconditionally (operator
+// ruling pg2-gwp57/pg2-kxmpe, ADR 0048). At the time this test was written, THAT was
+// deliberate: "this bead's fix does not and MUST NOT move this command's outer
+// verdict to Approve; doing so would require loosening the static-allowlist
+// admission criteria for `||`-bearing substitution bodies, a DIFFERENT, unruled
+// widening this bead does not authorize."
 //
-// What tc-5h6e's fix DOES change, and what this test actually pins, is the INNER
-// leaf's own judgment: cat's own reason for not clearing must no longer be the
-// unresolved-variable refusal ("has a dynamically-expanded path arg") — that leaf now
-// resolves $S and is judged safe on its own — so the ONLY thing left holding the outer
-// verdict at Reject is the ADR 0048 floor's own reason text, not a residual variable-
-// resolution failure. A regression that reintroduced the propagation gap would still
-// show "reject" here (masked by the ADR 0048 floor), which is exactly why the reason
-// text, not just the Decision, is asserted.
+// tc-o1g9 IS that ruling. The operator explicitly approved widening
+// ClassifySubstitutionBody (boundedFallbackShape in internal/cmdparse/shellparse.go)
+// to recognize exactly this bounded shape — an already-safecmds-modeled reader/leaf
+// (here `cat`, already on fileReaderSubstitutions), optionally with a redirect
+// (`2>/dev/null`, explicitly named safe by tc-o1g9), joined by `||` to a bounded
+// literal echo fallback (`echo running`) — so this command's body no longer
+// classifies SubstitutionRefused, the ADR 0048 floor no longer applies to it, and
+// the leaf's own (now var-resolved, per tc-5h6e) verdict is authoritative. The
+// outer verdict is therefore Approve, matching the CONTROL below rather than
+// diverging from it.
+//
+// What THIS test still pins, unchanged from before tc-o1g9: that tc-5h6e's
+// variable-resolution fix reaches the `cat` leaf INSIDE the `||` combinator, not
+// only a sole-leaf substitution body — proven by the Reason no longer citing an
+// unresolved variable. Before tc-5h6e that citation would have masked whether the
+// combinator shape was ALSO refusing it; now that both fixes are landed, the outer
+// Decision itself confirms neither one is masking anything.
 func TestIntegration_NestedSubstitutionOrCombinatorInnerLeafResolves(t *testing.T) {
 	t.Setenv("WORKSPACE_ROOT", "/Users/testuser/workspace")
 	projectRoot := "/Users/testuser/workspace/my-project"
@@ -138,26 +144,20 @@ func TestIntegration_NestedSubstitutionOrCombinatorInnerLeafResolves(t *testing.
 
 	cmd := `S=` + projectRoot + `; echo "done: $(cat $S/full2.done 2>/dev/null || echo running)"`
 	got := eng.EvaluateHook(&hookio.HookInput{ToolName: "Bash", CWD: cwd, ToolInput: makeBashJSON(cmd)})
-	// pg2-kxmpe (2026-08-28) flips the ADR 0048 floor's own Decision from Ask to
-	// Reject — this test's Decision expectation moves with it; the point being
-	// pinned here (variable resolution vs. combinator-shape refusal) is unaffected.
-	if got.Decision != hookio.Reject {
-		t.Fatalf("%q got %v (%s: %s); want Reject — the ADR 0048 \"both gates\" floor for a non-sole-simple-command substitution body is unrelated to this bead and must still apply",
+	if got.Decision != hookio.Approve {
+		t.Fatalf("%q got %v (%s: %s); want Approve — tc-o1g9's bounded-fallback widen recognizes `cat ... 2>/dev/null || echo running` and the ADR 0048 floor no longer applies to it",
 			cmd, got.Decision, got.Module, got.Reason)
 	}
 	if strings.Contains(got.Reason, "dynamically-expanded") {
-		t.Errorf("%q reason %q still cites an unresolved variable; tc-5h6e's propagation fix should have resolved $S for the inner `cat` leaf, leaving only the ADR 0048 floor's own reason",
-			cmd, got.Reason)
-	}
-	if !strings.Contains(got.Reason, "could not be verified safe by either the static allowlist or full rule-chain recursion") {
-		t.Errorf("%q reason %q does not name the ADR 0048 floor; want confirmation THAT mechanism (not variable resolution) is what still holds this at Reject",
+		t.Errorf("%q reason %q still cites an unresolved variable; tc-5h6e's propagation fix should have resolved $S for the inner `cat` leaf",
 			cmd, got.Reason)
 	}
 
 	// CONTROL: the identical body WITHOUT the `||` combinator — a sole simple command —
-	// is not subject to the ADR 0048 floor at all, and DOES reach Approve once $S
-	// resolves. This is what proves the Reject above is caused by the combinator shape,
-	// not by some OTHER thing this bead's fix failed to reach.
+	// was never subject to the ADR 0048 floor and reaches Approve once $S resolves.
+	// Both this test's shape and the control now agree, which is the relation
+	// tc-o1g9 asserts: the `||` combinator alone must no longer hold a body back
+	// once every leaf in it is independently safe.
 	controlCmd := `S=` + projectRoot + `; echo "done: $(cat $S/README.md)"`
 	controlGot := eng.EvaluateHook(&hookio.HookInput{ToolName: "Bash", CWD: cwd, ToolInput: makeBashJSON(controlCmd)})
 	if controlGot.Decision != hookio.Approve {
@@ -320,5 +320,70 @@ func TestIntegration_NestedSubstitutionRedirectionTargetResolves(t *testing.T) {
 	unsafeGot := eng.EvaluateHook(&hookio.HookInput{ToolName: "Bash", CWD: cwd, ToolInput: makeBashJSON(unsafeCmd)})
 	if unsafeGot.Decision == hookio.Approve {
 		t.Errorf("%q got Approve (%s: %s); a resolved-but-unsafe redirection target must not be approved", unsafeCmd, unsafeGot.Module, unsafeGot.Reason)
+	}
+}
+
+// TestIntegration_BoundedFallbackWidenEndToEnd (tc-o1g9) drives the operator-approved
+// "<already-modeled reader> || <bounded literal echo>" widen through the REAL,
+// fully-composed hook path (EvaluateHook), not just cmdparse's static classifier —
+// confirming the ADR 0048 floor no longer masks a genuinely-safe compound body end to
+// end, while the exact gaming shape that floor exists to stop (`rm -rf / || true`)
+// still denies through the same full chain.
+func TestIntegration_BoundedFallbackWidenEndToEnd(t *testing.T) {
+	t.Setenv("WORKSPACE_ROOT", "/Users/testuser/workspace")
+	projectRoot := "/Users/testuser/workspace/my-project"
+	cwd := projectRoot
+	eng := buildFullEngine(projectRoot, cwd)
+
+	approves := []struct {
+		name string
+		cmd  string
+	}{
+		{
+			"wc -l < literal-path 2>/dev/null || echo 0 (the bead's own first example, literal path)",
+			`echo "$(wc -l < ` + projectRoot + `/go.mod 2>/dev/null || echo 0)"`,
+		},
+		{
+			"stat -c %Y literal-path 2>/dev/null || echo 0 (the bead's own second example, literal path)",
+			`echo "$(stat -c %Y ` + projectRoot + `/go.mod 2>/dev/null || echo 0)"`,
+		},
+		{
+			"ternary test/[ ] form: [ -f path ] && echo yes || echo no",
+			`echo "$([ -f ` + projectRoot + `/go.mod ] && echo yes || echo no)"`,
+		},
+	}
+	for _, tt := range approves {
+		t.Run(tt.name, func(t *testing.T) {
+			got := eng.EvaluateHook(&hookio.HookInput{ToolName: "Bash", CWD: cwd, ToolInput: makeBashJSON(tt.cmd)})
+			if got.Decision != hookio.Approve {
+				t.Errorf("%q got %v (%s: %s); want Approve end to end", tt.cmd, got.Decision, got.Module, got.Reason)
+			}
+		})
+	}
+
+	denies := []struct {
+		name string
+		cmd  string
+	}{
+		{
+			"rm -rf / || true still denies end to end through the full chain",
+			`echo "$(rm -rf / || true)"`,
+		},
+		{
+			"rm -rf / || echo 0 still denies end to end (echo fallback does not launder it)",
+			`echo "$(rm -rf / || echo 0)"`,
+		},
+		{
+			"a reader over a genuinely unreadable secret path is not blanket-approved by the widen",
+			`echo "$(cat /etc/shadow 2>/dev/null || echo 0)"`,
+		},
+	}
+	for _, tt := range denies {
+		t.Run(tt.name, func(t *testing.T) {
+			got := eng.EvaluateHook(&hookio.HookInput{ToolName: "Bash", CWD: cwd, ToolInput: makeBashJSON(tt.cmd)})
+			if got.Decision == hookio.Approve {
+				t.Errorf("%q got Approve (%s: %s); this shape must stay out of scope for tc-o1g9's widen", tt.cmd, got.Module, got.Reason)
+			}
+		})
 	}
 }

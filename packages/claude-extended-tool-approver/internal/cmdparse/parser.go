@@ -455,6 +455,23 @@ var fileReaderSubstitutions = map[string]bool{
 	// widening treats as path-shaped too, conservatively) DELEGATES rather than
 	// being blanket-cleared — see TestClassifySubstitutionBody_Pg2Giq2vPsPgrepAdditions.
 	"pgrep": true,
+	// tc-o1g9 addition. `stat` is trusted UNCONDITIONALLY at command position by
+	// `internal/rules/safecmds`' browsingCmds, exactly the same trust class as `ls`
+	// immediately above (a metadata-only reader, not a content reader), and it
+	// belongs HERE rather than in safeCmdSubstitutions for the same reason `ls` does:
+	// its sole operand is the path being stat'd, so that operand must still clear
+	// readerArgsClearance/patheval rather than being blanket-cleared. `stat` has no
+	// write spelling on either GNU coreutils or macOS/BSD `stat(1)` — every flag
+	// (`-c`/`--format`, `-f`/`--file-system`, `-L`/`--dereference`, `-t`/`--terse`)
+	// controls what is PRINTED, never what is modified — so, like `ls`, it needs no
+	// substitutionWriteFlags supplement. Added because the bounded `||`-fallback
+	// shape this bead admits (boundedFallbackShape in shellparse.go) names `stat` as
+	// one of its own two headline examples (`stat -c %Y $S/race.log 2>/dev/null ||
+	// echo 0`) and the corpus measurement recorded on this bead confirms live rows
+	// use it — without this entry, classifySubstitutionCommand would refuse that
+	// leaf on its command name alone before the compound shape ever gets a chance to
+	// look at it.
+	"stat": true,
 }
 
 // substitutionWriteFlags SUPPLEMENTS the shared MutatingFlags vocabulary
@@ -1209,6 +1226,16 @@ func IsSafeSubstitutionBody(cmdStr string) bool {
 func ClassifySubstitutionBody(cmdStr string) SubstitutionClearance {
 	leaf, ok := soleSimpleCommandLeaf(cmdStr)
 	if !ok {
+		// tc-o1g9: a body that is not a SOLE simple command may still be the
+		// bounded "<safe reader/leaf> || <bounded literal fallback>" (or its
+		// "TEST && echo X || echo Y" ternary form) shape the operator
+		// approved widening the pg2-whumr/ADR 0048 floor for — see
+		// boundedFallbackShape's own doc (shellparse.go) for the exact shape
+		// and why it does not reopen the `rm -rf / || true` gaming risk that
+		// floor exists to close.
+		if clearance, matched := boundedFallbackShape(cmdStr); matched {
+			return clearance
+		}
 		return SubstitutionRefused
 	}
 	if leaf.Executable == "" {
@@ -1439,6 +1466,51 @@ func HeredocReaderCleared(leaf ParsedCommand) bool {
 func redirectClearance(redirs []hookio.Redirection) SubstitutionClearance {
 	clearance := SubstitutionCleared
 	for _, rd := range redirs {
+		if rd.Kind.IsWrite() || secretpath.IsSecret(rd.Path) {
+			return SubstitutionRefused
+		}
+		if LooksLikePath(rd.Path) {
+			clearance = SubstitutionDelegated
+		}
+	}
+	return clearance
+}
+
+// redirectClearanceForBoundedFallback is redirectClearance's UNION, ADAPTED
+// ONLY for boundedFallbackShape's reader/test leaf (tc-o1g9). It is a
+// deliberate, narrowly-scoped EXCEPTION to redirectClearance's blanket
+// write-direction refusal, not a relaxation of that function itself —
+// redirectClearance is unchanged and still governs the plain sole-leaf
+// substitution floor exactly as before.
+//
+// The exception: a write-direction redirect to a device
+// hookio.IsSafeRedirectTarget already vouches for (`/dev/null`,
+// `/dev/stdout`, `/dev/stderr`, `/dev/tty`, `/dev/fd/<n>`) does not
+// disqualify here. `2>/dev/null` is not a hypothetical — it is PART OF the
+// bounded shape this bead's own acceptance criteria name explicitly
+// ("<reader> [2>/dev/null] || <fallback>"), and every sampled corpus row
+// (tc-o1g9's comment thread) carries it: `wc -l < $SP/bdprof.tsv
+// 2>/dev/null || echo 0`, `stat -c %Y $S/race.log 2>/dev/null || echo 0`.
+// Discarding stderr to `/dev/null` writes nothing anywhere observable — it
+// is the same "captures nothing" reasoning hookio.IsSafeRedirectTarget's own
+// doc states for its other two callers (the engine's redirection evaluator
+// and the gitdir rule's copy-out detector) — so refusing it here would
+// refuse the bead's own named target shape outright and defeat the widen
+// this function exists for.
+//
+// Every OTHER write-direction redirect (a real file target on any
+// descriptor) is refused exactly as redirectClearance refuses it. This is
+// scoped to the compound bounded-fallback shape ONLY, deliberately not
+// folded into redirectClearance itself: widening the shared function would
+// ALSO relax the plain sole-leaf floor (`$(stat -c %Y f 2>/dev/null)` alone,
+// no `||`), which is a real, separate, unmeasured widening this bead's
+// operator sign-off was never asked about.
+func redirectClearanceForBoundedFallback(redirs []hookio.Redirection) SubstitutionClearance {
+	clearance := SubstitutionCleared
+	for _, rd := range redirs {
+		if rd.Kind.IsWrite() && hookio.IsSafeRedirectTarget(rd.Path) {
+			continue
+		}
 		if rd.Kind.IsWrite() || secretpath.IsSecret(rd.Path) {
 			return SubstitutionRefused
 		}
