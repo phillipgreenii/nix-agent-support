@@ -4242,6 +4242,23 @@
                 }
               }/. $out/
             '';
+            # pg-connector SOURCE as a realized store path, mirroring pg-pr-src
+            # above for the same cross-repo gomod2nix Pattern-B reason (bead
+            # pg2-wtjz / phillipg-nix-repo-base ADR 0008 §Decision.4): a
+            # hermetic build in a consuming repo cannot see this sibling repo,
+            # so we hand it the source as a store path it copies into its
+            # build sandbox. This is the WHOLE pg-connector module tree
+            # (go.mod + go.sum + gomod2nix.toml + cmd/pkg) — NOT a built
+            # binary.
+            pg-connector-src = pkgs.runCommand "pg-connector-src" { } ''
+              mkdir -p $out
+              cp -R ${
+                lib.fileset.toSource {
+                  root = ./packages/pg-connector;
+                  fileset = lib.fileset.fromSource (lib.sources.cleanSource ./packages/pg-connector);
+                }
+              }/. $out/
+            '';
             # fix-lint + install-pre-commit-hooks REMOVED — pre-commit module
             # auto-contributes both (bead pg2-7vhvn).
             # pa-monitor-codegen wraps the gen-proto.sh script with
