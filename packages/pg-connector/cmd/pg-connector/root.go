@@ -103,6 +103,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newIssueCmd())
 	root.AddCommand(newScmCmd())
 	root.AddCommand(newAttentionCmd())
+	root.AddCommand(newSearchCmd())
 	addOutputFlag(root)
 	return root
 }
