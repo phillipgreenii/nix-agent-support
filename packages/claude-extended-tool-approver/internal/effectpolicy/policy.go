@@ -75,6 +75,11 @@ type PolicyContext struct {
 	// see evalcontract.Request.RemotePaths's doc comment. remotePathGuard is
 	// the only reader.
 	RemotePaths map[string][]evalcontract.RemotePathRule
+	// BuildToolVerbs is OPERATOR CONFIGURATION for the build-tool family
+	// (tc-8og1 item 3 sub-slice 3; tc-vn5z Q1-Q5) — see
+	// evalcontract.Request.BuildToolVerbs's and VerbScopedApproval's own
+	// doc comments. TrustedCheckoutExec is the only reader.
+	BuildToolVerbs []evalcontract.VerbScopedApproval
 }
 
 // RemoteLifecycleClass returns the operator-configured verdict class for a
@@ -1211,6 +1216,31 @@ func (NoReadOfUnreadablePath) Judge(e cmddesc.Effect, ctx PolicyContext) (Findin
 // before any policy sees an effect — "parsed" (its flags and target are
 // visible in the interpreted graph) but always Abstain, exactly per the
 // ruling's "abstain on it", regardless of what this policy would say.
+//
+// # Build-tool family routing (tc-8og1 item 3 sub-slice 3; tc-vn5z Q1-Q5,
+// # ruled 2026-09-08)
+//
+// A build-tool-family verb (just/npm/devbox/... — cmddesc's own schema for
+// them is tc-8og1 item 3 sub-slice 4, NOT this slice) is expected to
+// produce an EffectExec with Effect.Family set to the tool's basename and
+// Effect.Operation set to the invoked verb — the SAME two generic,
+// per-kind-reusable fields EffectRemote's own kubectl routing already
+// established (Family="kubectl" routes to KubeContextPolicy instead of
+// RemoteMutation's fixed table; see cmddesc.Effect.Family's own doc
+// comment, "kept as a generic string ... so a future ... family can reuse
+// the same routing without a new field"). Per Q2's ruling (Phillip,
+// 2026-09-08, verbatim on tc-vn5z): "there should be a spec for build
+// tools ... leaning toward extending TrustedCheckoutExec's marker list" —
+// answering "does a project-tied verb's EffectExec route through the
+// EXISTING TrustedCheckoutExec ... or a new per-tool policy?" with "extend
+// the existing policy ... one policy for every EffectExec regardless of
+// producing tool" — this is handled IN PLACE below (judgeBuildToolVerb),
+// not by a sibling policy type, unlike the kubectl/RemoteMutation split.
+// No cmddesc schema stamps Family/Operation onto a real EffectExec yet
+// (that is sub-slice 4), so this branch has no live golden/corpus trigger
+// in this slice — proven only by policy_test.go's direct Judge() calls,
+// the same "building block, no behavior change yet" shape slice 3ag's
+// workspace verb-discovery facet already established.
 type TrustedCheckoutExec struct{}
 
 // Name implements Policy.
@@ -1228,8 +1258,83 @@ func (TrustedCheckoutExec) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, 
 	if abs == "" {
 		return Finding{Verdict: Unknown, Reason: "working directory does not resolve"}, true
 	}
+	if e.Family != "" {
+		return judgeBuildToolVerb(e, abs, ctx)
+	}
 	if deletable.InsideMarkerWorkspace(deletable.DefaultKinds(), []string{"git", "go"}, abs) {
 		return Finding{Verdict: Permitted, Reason: "CWD is inside a recognised git/go workspace (ADR 0053's \"executing trusted checkout code\")"}, true
 	}
 	return Finding{Verdict: Unknown, Reason: "CWD is not inside any recognised git/go workspace"}, true
+}
+
+// judgeBuildToolVerb judges a build-tool-family EffectExec — see
+// TrustedCheckoutExec's own doc comment, "Build-tool family routing"
+// section, for the Family/Operation contract and provenance. e.Family
+// names the tool basename (e.g. "just"); e.Operation names the invoked
+// verb (e.g. "check"). A dynamic verb (a runtime expansion — Dynamic is
+// shared across effect kinds exactly like the path/net effects already
+// use it) is Unknown, mirroring NetworkAccess/KubeContextPolicy's own
+// "dynamic input -> Unknown" first check. Otherwise: no matching
+// PolicyContext.BuildToolVerbs entry for (Family, Operation) is Unknown
+// ("not operator-declared"); a matching entry whose Class is neither ""
+// nor evalcontract.VerbClassProjectTied is Unknown ("not yet judged by
+// this policy" — VerbScopedApproval's own doc comment); a matching
+// project-tied entry is Permitted ONLY when deletable.DiscoveredVerbs
+// (slice 3ag) independently finds Operation among the verbs a Kind named
+// Family discovers at or above abs — otherwise Unknown ("operator
+// declared it, but the workspace's own files do not currently define it —
+// abstain, never guess", per Q3's ruling and this slice's own brief).
+func judgeBuildToolVerb(e cmddesc.Effect, abs string, ctx PolicyContext) (Finding, bool) {
+	if e.Dynamic {
+		return Finding{Verdict: Unknown, Reason: "verb is a runtime expansion"}, true
+	}
+	entry, found := findVerbScopedApproval(ctx.BuildToolVerbs, e.Family, e.Operation)
+	if !found {
+		return Finding{Verdict: Unknown, Reason: fmt.Sprintf("no operator declaration for %s verb %q", e.Family, e.Operation)}, true
+	}
+	class := entry.Class
+	if class == "" {
+		class = evalcontract.VerbClassProjectTied
+	}
+	if class != evalcontract.VerbClassProjectTied {
+		return Finding{Verdict: Unknown, Reason: fmt.Sprintf("verb class %q is not yet judged by this policy", class)}, true
+	}
+	if workspaceVouchesForVerb(deletable.DefaultKinds(), abs, e.Family, e.Operation) {
+		return Finding{Verdict: Permitted, Reason: fmt.Sprintf("workspace's own %s declaration defines %q as a project-tied verb", e.Family, e.Operation)}, true
+	}
+	return Finding{Verdict: Unknown, Reason: fmt.Sprintf("%s verb %q is operator-declared project-tied, but no %s file at or above CWD defines it — abstaining rather than guessing", e.Family, e.Operation, e.Family)}, true
+}
+
+// findVerbScopedApproval returns the first BuildToolVerbs entry matching
+// (tool, verb) exactly, or ok=false when none does.
+func findVerbScopedApproval(entries []evalcontract.VerbScopedApproval, tool, verb string) (entry evalcontract.VerbScopedApproval, ok bool) {
+	for _, e := range entries {
+		if e.Tool == tool && e.Verb == verb {
+			return e, true
+		}
+	}
+	return evalcontract.VerbScopedApproval{}, false
+}
+
+// workspaceVouchesForVerb reports whether deletable.DiscoveredVerbs finds
+// verb among the verbs a Kind named tool discovers at or above abs — the
+// "WORKSPACE vouches ... literally defined in-project" check Q3's ruling
+// calls for. An empty verb never matches (no operator entry should ever
+// have an empty Verb reach here in practice, but this keeps the function
+// total and fail-safe on its own).
+func workspaceVouchesForVerb(kinds []deletable.Kind, abs, tool, verb string) bool {
+	if verb == "" {
+		return false
+	}
+	for _, vs := range deletable.DiscoveredVerbs(kinds, abs) {
+		if vs.Kind != tool {
+			continue
+		}
+		for _, v := range vs.Verbs {
+			if v == verb {
+				return true
+			}
+		}
+	}
+	return false
 }

@@ -60,6 +60,19 @@ import "github.com/phillipgreenii/claude-extended-tool-approver/internal/effectg
 // KubeContexts's own "data on the request, production wiring is a
 // follow-up" pattern. nil (the default) configures nothing, so every
 // remote path effect on every host abstains, per the ruling's own default.
+//
+// BuildToolVerbs is OPERATOR CONFIGURATION for the build-tool family
+// (just/npm/devbox/nix/prek/... — tc-8og1 item 3, sub-slice 3 of 5;
+// tc-vn5z Q1-Q5, ruled 2026-09-08). See VerbScopedApproval's own doc
+// comment for the class/child design those rulings settled. nil (the
+// default) approves nothing: every build-tool-family EffectExec
+// (Effect.Family != "") abstains, the safe base default — mirroring
+// RemoteLifecycle/KubeContexts/RemotePaths's own "data on the request,
+// production wiring is a follow-up" pattern exactly. The reader is
+// effectpolicy.TrustedCheckoutExec, extended in place per Q2's ruling
+// ("leaning toward extending TrustedCheckoutExec's marker list ... one
+// policy for every EffectExec regardless of producing tool") rather than a
+// new per-family policy.
 type Request struct {
 	Command                 string
 	Dialect                 string
@@ -71,6 +84,82 @@ type Request struct {
 	KubeContexts            map[string]KubeContextRule
 	KubeContextDefaultAllow []string
 	RemotePaths             map[string][]RemotePathRule
+	BuildToolVerbs          []VerbScopedApproval
+}
+
+// VerbClassProjectTied is VerbScopedApproval's default Class, and the only
+// class effectpolicy.TrustedCheckoutExec judges as of this slice — see
+// VerbScopedApproval's own doc comment.
+const VerbClassProjectTied = "project-tied"
+
+// VerbScopedApproval is one entry of Request.BuildToolVerbs. It mirrors
+// production's internal/rules/configrules.VerbScopedApproval{Tool, Verb}
+// shape EXACTLY (same field names, same "approve Tool only for a specific
+// first subcommand" starting point — Q5's own ruling text names it
+// "VerbScopedApproval" for that reason) but is a SEPARATE, spike-local
+// type, not an alias or reuse of the production one: the spike does not
+// import internal/rules/configrules (that package is wired into
+// internal/setup.RuleChain, production's live path, and per tc-8og1's own
+// "CONSTRAINT on ALL work from this bead" this spike is explicitly NOT
+// wired into RuleChain). A future production rules.json binding —
+// literally extending the real configrules.VerbScopedApproval — is a
+// follow-up, not this slice, exactly like RemoteLifecycle/KubeContexts/
+// RemotePaths's own "production wiring is a follow-up" pattern before it.
+//
+// Class and Child are the two fields Q5 ruled additive over the existing
+// {Tool, Verb} shape (Phillip, 2026-09-08, verbatim on tc-vn5z): "add
+// optional class/child fields to each existing verbScopedApprovals entry,
+// default class='project-tied' ... per ADR 0033's additive-only
+// invariant."
+//
+//   - Class selects the verb's trust-source vocabulary. "" (the zero
+//     value) and VerbClassProjectTied ("project-tied") mean the SAME
+//     thing, per the ruling's own default, and are the ONLY class this
+//     slice's policy (effectpolicy.TrustedCheckoutExec) judges: an entry
+//     names a (Tool, Verb) pair as ELIGIBLE for project-tied treatment,
+//     but the actual Permitted verdict additionally requires
+//     deletable.DiscoveredVerbs (slice 3ag) to independently find Verb
+//     literally defined in the invoking project's own Tool-named kind —
+//     per Q3's ruling (Phillip, 2026-09-08, verbatim on tc-vn5z):
+//     "WORKSPACE vouches only for verbs literally defined in-project;
+//     operator data (rules.json) governs everything reached by
+//     reference." An operator's entry is therefore not sufficient on its
+//     own to approve — it is the ELIGIBILITY gate ("Tool is a build-tool-
+//     family tool I want judged this way"), never a substitute for live
+//     discovery, and never guessed at when discovery disagrees.
+//   - Any OTHER Class value (a future "wrapper", Q2/Q4 territory — tc-8og1
+//     item 3 sub-slice 4, "cmddesc child-expression descriptor") is
+//     recognised as DATA here but not yet judged by any policy: Q2's
+//     ruling (Phillip, 2026-09-08, verbatim on tc-vn5z) is "there should
+//     be a spec for build tools ... if we have an example of a needed
+//     extension, we can discuss it then" — i.e. don't pre-design bespoke
+//     per-tool/per-class policies. An unrecognised Class therefore makes
+//     TrustedCheckoutExec abstain (Unknown), never Permitted and never
+//     Forbidden — the same fail-safe direction as an effect kind no
+//     policy applies to.
+//
+// Child is RESERVED for tc-8og1 item 3 sub-slice 4 (Q4: "a new RoleKind
+// for 'installable reference'/'opaque-body-by-name' children, or does
+// interpreter_subcommand.go's recursion already cover them") to describe
+// how a WRAPPER verb's child command is spelled. No policy in this slice
+// constructs or reads a VerbChild value.
+type VerbScopedApproval struct {
+	Tool  string
+	Verb  string
+	Class string
+	Child *VerbChild
+}
+
+// VerbChild is RESERVED DATA for a wrapper verb's child-expression
+// descriptor (tc-8og1 item 3 sub-slice 4, Q4). Kind and ArgSeparator
+// mirror the shape proposed in tc-vn5z's 2026-09-07 design note verbatim
+// ("child: { kind: \"installable\", argSeparator: \"--\" }"), so that
+// later slice's schema work has a stable field name to target without
+// another additive migration. Not yet ruled on, and not consumed by any
+// policy in this slice.
+type VerbChild struct {
+	Kind         string
+	ArgSeparator string
 }
 
 // RemotePathRule is one categorized-path override entry (see Request.

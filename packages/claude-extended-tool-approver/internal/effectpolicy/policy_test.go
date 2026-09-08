@@ -271,6 +271,60 @@ func TestTrustedCheckoutExecPolicy(t *testing.T) {
 	}
 }
 
+// TestTrustedCheckoutExecPolicy_BuildToolFamily (tc-8og1 item 3 sub-slice
+// 3; tc-vn5z Q1-Q5, ruled 2026-09-08) exercises judgeBuildToolVerb's own
+// ladder: a Family!="" EffectExec is routed here, not the git/go
+// marker-workspace branch, and Permitted requires BOTH an operator
+// BuildToolVerbs declaration AND independent confirmation from
+// deletable.DiscoveredVerbs (slice 3ag) that the verb is literally
+// defined in-project — either alone abstains (Unknown), per Q3's "abstain
+// otherwise, never guess".
+//
+// The "no BuildToolVerbs entries at all" case is this slice's migration-
+// safety proof (the "5. SIZING" plan's own "needs a migration-safety test
+// like TestBuildtools_EmptyConfig_JustAbstains's sibling" — production's
+// analogue in internal/rules/buildtools/buildtools_test.go): an
+// absent/empty operator config must leave the safe abstain default
+// unchanged, exactly like RemoteLifecycle/KubeContexts/RemotePaths before
+// it.
+func TestTrustedCheckoutExecPolicy_BuildToolFamily(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "justfile"), []byte("check:\n    echo ok\n\nbuild:\n    echo build\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	noJustfile := t.TempDir()
+
+	exec := func(tool, verb string, dynamic bool) cmddesc.Effect {
+		return cmddesc.Effect{Kind: cmddesc.EffectExec, Family: tool, Operation: verb, Dynamic: dynamic}
+	}
+	justCheck := []evalcontract.VerbScopedApproval{{Tool: "just", Verb: "check"}}
+
+	cases := []struct {
+		name    string
+		e       cmddesc.Effect
+		ctx     PolicyContext
+		verdict FindingVerdict
+	}{
+		{"dynamic verb", exec("just", "$V", true), PolicyContext{CWD: root, BuildToolVerbs: justCheck}, Unknown},
+		{"no BuildToolVerbs configured at all (migration safety)", exec("just", "check", false), PolicyContext{CWD: root}, Unknown},
+		{"unrelated tool configured, this one absent", exec("just", "check", false), PolicyContext{CWD: root, BuildToolVerbs: []evalcontract.VerbScopedApproval{{Tool: "npm", Verb: "build"}}}, Unknown},
+		{"verb not declared for this tool", exec("just", "build", false), PolicyContext{CWD: root, BuildToolVerbs: justCheck}, Unknown},
+		{"declared but workspace has no justfile", exec("just", "check", false), PolicyContext{CWD: noJustfile, BuildToolVerbs: justCheck}, Unknown},
+		{"declared and default class, workspace confirms: permitted", exec("just", "check", false), PolicyContext{CWD: root, BuildToolVerbs: justCheck}, Permitted},
+		{"declared with explicit class=project-tied, workspace confirms: permitted", exec("just", "check", false), PolicyContext{CWD: root, BuildToolVerbs: []evalcontract.VerbScopedApproval{{Tool: "just", Verb: "check", Class: evalcontract.VerbClassProjectTied}}}, Permitted},
+		{"declared with an unrecognised/future class: not yet judged", exec("just", "check", false), PolicyContext{CWD: root, BuildToolVerbs: []evalcontract.VerbScopedApproval{{Tool: "just", Verb: "check", Class: "wrapper"}}}, Unknown},
+	}
+	for _, tc := range cases {
+		f, applies := (TrustedCheckoutExec{}).Judge(tc.e, tc.ctx)
+		if !applies || f.Verdict != tc.verdict {
+			t.Errorf("%s: applies=%v verdict=%s (%s), want %s", tc.name, applies, f.Verdict, f.Reason, tc.verdict)
+		}
+	}
+	// Family=="" is untouched by this branch — the pre-existing git/go
+	// marker-workspace ladder still governs, proven by
+	// TestTrustedCheckoutExecPolicy above; not re-asserted here.
+}
+
 // TestRemotePathGuard (slice 3aa, tc-lc8f item 4g; tc-vn5z item 4): a PATH
 // effect tagged Remote abstains by default under every one of the four
 // wrapped policies, even where the LOCAL verdict would have been Forbidden

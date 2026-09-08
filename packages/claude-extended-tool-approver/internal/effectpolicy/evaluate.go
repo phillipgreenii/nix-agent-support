@@ -74,6 +74,7 @@ func Evaluate(req evalcontract.Request, reg cmddesc.Registry, policies []Policy,
 		KubeContexts:            req.KubeContexts,
 		KubeContextDefaultAllow: req.KubeContextDefaultAllow,
 		RemotePaths:             req.RemotePaths,
+		BuildToolVerbs:          req.BuildToolVerbs,
 	}
 	ctx := cmddesc.Context{CWD: req.CWD, Env: req.Env}
 
