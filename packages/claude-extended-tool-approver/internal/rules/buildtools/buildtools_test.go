@@ -768,6 +768,77 @@ func TestBuildtools_JustVerbScoped_AllowedFlagsStillApprove(t *testing.T) {
 	}
 }
 
+// --- pn-workspace-rules `pnwf` helper verb scoping (tc-qed8) ---
+//
+// `pnwf` is the pn-workspace-rules preflight/resolve helper invoked by the
+// pnwf-runner subagent (`pn-workspace-sync`/`pn-workspace-update` work-cycles).
+// tc-yjx0 found 18 historical decision rows (9 `pnwf resolve --set` + 9
+// `pnwf fork-preflight <set>`), all outcome=approved (auto=15, user=3), abstaining
+// under the current rule engine because no rule module mentions `pnwf` anywhere
+// (zero grep hits repo-wide before this change). Scoping decision (tc-yjx0):
+// approve exactly these two verbs via the existing buildtools verb-scoped
+// mechanism — NOT a blanket `monorepo.approvedCommands` "pnwf" allow (which would
+// approve every pnwf subcommand, including unevaluated ones like `pnwf push`/
+// `pnwf land-plan`), and NOT new agent_type-scoped rule logic (no rule module
+// today decides on hookio.HookInput.AgentType; disproportionate new surface for
+// two narrow, read-mostly workspace-preflight helpers).
+//
+// pnwfBuildtoolsConfig mirrors the two entries added to the homelab consumer's
+// buildtools.verbScopedApprovals (`homelab/development/agent-support/ceta/
+// rules.example.json`, confirmed nix-rendered via `xdg.configFile` in
+// `homelab/infrastructure/machines/monorepod/home-module.nix` — NOT
+// hand-maintained at `~/.config/claude-extended-tool-approver/rules.json`,
+// which is a read-only /nix/store symlink). It lives here as test DATA, per the
+// same pattern as justBuildtoolsConfig above, so the base binary keeps no
+// consumer literals.
+func pnwfBuildtoolsConfig() configrules.BuildtoolsConfig {
+	return configrules.BuildtoolsConfig{
+		VerbScopedApprovals: []configrules.VerbScopedApproval{
+			{Tool: "pnwf", Verb: "resolve"},
+			{Tool: "pnwf", Verb: "fork-preflight"},
+		},
+	}
+}
+
+// TestBuildtools_PnwfVerbScoped_ApprovedVerbs covers the exact command shapes
+// observed in the 18 resolved rows (tc-yjx0), plus the --repos-flag variant seen
+// on other fork-preflight invocations — the verb is always the first token, so a
+// trailing flag cannot affect resolution.
+func TestBuildtools_PnwfVerbScoped_ApprovedVerbs(t *testing.T) {
+	r := New(testPE(), pnwfBuildtoolsConfig())
+	for _, cmd := range []string{
+		"pnwf resolve --set",
+		"cd /home/tcadmin/workspace/.workforests/pn-workspace-sync && pnwf resolve --set",
+		"cd /home/tcadmin/workspace/.workforests/pn-workspace-update && pnwf resolve --set",
+		"pnwf fork-preflight pn-workspace-sync",
+		"cd /home/tcadmin/workspace && pnwf fork-preflight pn-workspace-sync",
+		"pnwf fork-preflight wf-tc-wmnf --repos homelab,nix-agent-support",
+	} {
+		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
+		if got := hookio.Verdict(r.Evaluate(input)); got.Decision != hookio.Approve {
+			t.Errorf("cmd %q: got %s, want approve (verb-scoped pnwf helper)", cmd, got.Decision)
+		}
+	}
+}
+
+// TestBuildtools_PnwfVerbScoped_OtherSubcommandsAbstain is the negative case the
+// bead requires: an un-evaluated pnwf subcommand falls through this rule
+// (verb-scoped approval is a per-verb allowlist, not a blanket pnwf allow) and
+// still abstains absent any other rule module mentioning pnwf.
+func TestBuildtools_PnwfVerbScoped_OtherSubcommandsAbstain(t *testing.T) {
+	r := New(testPE(), pnwfBuildtoolsConfig())
+	for _, cmd := range []string{
+		"pnwf push",
+		"pnwf land-plan pn-workspace-sync",
+		"pnwf rm pn-workspace-sync",
+	} {
+		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
+		if got := hookio.Verdict(r.Evaluate(input)); got.Decision != hookio.NoOpinion {
+			t.Errorf("cmd %q: got %s, want abstain (verb not in pnwf's verbScopedApprovals)", cmd, got.Decision)
+		}
+	}
+}
+
 // TestBuildtools_AllowedFlags_AbsentEntryIsUnchanged is the compatibility guard
 // the bead requires: a tool with NO allowedFlags entry keeps the exact
 // pre-tc-080p behavior, INCLUDING the glued hole. Strictness is opt-in per tool,
