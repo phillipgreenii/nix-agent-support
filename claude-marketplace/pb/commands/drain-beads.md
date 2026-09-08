@@ -335,7 +335,9 @@ proceeding on currently loaded text (direct interactive invocation).`)
    Its own agent file explicitly leaves isolation/landing/cleanup/claim-hygiene "environment
    conventions" to whoever dispatches it, so the brief ALSO carries the UNCURATED PATH's
    commit-then-gate ordering constraint unchanged (timeouts / `run_in_background` for builds
-   only, never for git commits; commit BEFORE running any standalone gate). Do NOT also
+   only, never for git commits; commit BEFORE running any standalone gate) AND its
+   no-unauthorized-network-contact constraint unchanged (MUST NOT open network connections to
+   hosts outside the isolated worktree/repo on its own initiative). Do NOT also
    paraphrase report-content requirements into the brief — its own procedure (step 4) already
    states directly how to run a validation command that outlives a turn and what its report
    must contain if it ends before that resolves.
@@ -354,8 +356,12 @@ proceeding on currently loaded text (direct interactive invocation).`)
      is safe: drain never LANDS anything until the orchestrator VALIDATES and
      LANDS it in steps 5–6, so a gate that turns red after the commit is
      handled by amending that commit or parking the bead, never by having
-     withheld the commit — bead `tc-xhq6`); report fully in ONE turn (no
-     waiting/monitoring across turns).
+     withheld the commit — bead `tc-xhq6`); MUST NOT open network connections
+     (SSH, HTTP/curl to internal infra, etc.) to hosts OUTSIDE the isolated
+     worktree/repo on its own initiative — if verifying a live-host fact seems
+     necessary, say so in the report and let the orchestrator decide whether to
+     authorize it, rather than doing it unilaterally (bead `tc-h6ty`); report
+     fully in ONE turn (no waiting/monitoring across turns).
    - **if it backgrounds a command, IT must stay in its own execution — keep
      calling tools — until that command resolves, using a `Monitor` call with
      an until-loop to detect completion; it MUST NOT send a final response
