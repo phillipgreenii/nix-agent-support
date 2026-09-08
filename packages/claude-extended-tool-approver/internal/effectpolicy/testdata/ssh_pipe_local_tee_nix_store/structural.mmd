@@ -1,0 +1,4 @@
+flowchart LR
+    n0["command: ssh host cat /etc/passwd"]
+    n1["command: tee /nix/store/x"]
+    n0 -->|"pipe"| n1

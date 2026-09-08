@@ -65,6 +65,16 @@ type builder struct {
 	// single request-CWD evaluator judges the right file; a leaf at the base
 	// CWD keeps its paths as written.
 	baseCWD string
+	// scopeRemote maps a scope ID to the host it is REMOTE on (slice 3aa,
+	// tc-lc8f item 4g; tc-vn5z item 4), "" meaning local — a scope absent
+	// from this map (including the top-level "" scope) reads as local via
+	// Go's zero-value map lookup, so no entry is ever needed for an
+	// ordinary local scope. newScope populates every scope it creates
+	// (inheriting the parent's value); child overrides the entry when its
+	// ChildInvocation names a DIFFERENT remote host (ssh's own case).
+	// interpret reads it to stamp Effect.Remote on every EffectPath a node
+	// in that scope produces.
+	scopeRemote map[string]string
 }
 
 // cwdState is the working directory in force for one (scope, subshell)
@@ -77,7 +87,7 @@ type cwdState struct {
 }
 
 func newBuilder() *builder {
-	return &builder{files: map[string]string{}, envs: map[string]string{}, execDialect: map[string]string{}}
+	return &builder{files: map[string]string{}, envs: map[string]string{}, execDialect: map[string]string{}, scopeRemote: map[string]string{}}
 }
 
 func (b *builder) add(n Node) string {
@@ -110,13 +120,21 @@ func (b *builder) env(scope, name string) string {
 	return id
 }
 
+// newScope creates a scope nested under parent, INHERITING parent's Remote
+// tag (slice 3aa) so anything nested inside a remote child — a `bash -c`
+// the remote command runs, a substitution inside it — stays remote without
+// every call site having to know or re-pass the host. A scope that is
+// ITSELF a different remote child (build.child, when its ChildInvocation
+// names a host) overrides the inherited value afterward.
 func (b *builder) newScope(parent, label string) string {
 	id := fmt.Sprintf("s%d", b.scopeSeq)
 	b.scopeSeq++
 	if parent != "" {
 		id = parent + "/" + id
 	}
-	b.g.Scopes = append(b.g.Scopes, Scope{ID: id, Parent: parent, Label: label})
+	remote := b.scopeRemote[parent]
+	b.g.Scopes = append(b.g.Scopes, Scope{ID: id, Parent: parent, Label: label, Remote: remote})
+	b.scopeRemote[id] = remote
 	return id
 }
 
@@ -338,6 +356,24 @@ func (b *builder) interpret(i int, reg cmddesc.Registry, ctx cmddesc.Context, ch
 		effects = append(effects, redirectionEffect(r.Path, r.Operator, r.Kind.IsWrite(), r.Kind.IsReadWrite(), r.LiveExpansion, r.Append))
 	}
 
+	// Remote-scope stamping (slice 3aa, tc-lc8f item 4g; tc-vn5z item 4): a
+	// node whose scope descends from a remote child invocation (ssh's own
+	// remote command) has every EffectPath it produces — from its own
+	// interpretation AND from its redirections, so `ssh host 'cat f > g'`
+	// tags g too — marked Remote with that host, so a path policy can tell
+	// "this is not this process's local filesystem" from the effect alone,
+	// without walking the graph itself. Nothing here branches on a command
+	// name: the tag comes from the SCOPE, which cmddesc's ssh interpreter
+	// established by naming ChildInvocation.Remote (interpreter_ssh.go);
+	// every other schema leaves it "" and this loop is a no-op for them.
+	if remote := b.scopeRemote[scope]; remote != "" {
+		for j := range effects {
+			if effects[j].Kind == cmddesc.EffectPath {
+				effects[j].Remote = remote
+			}
+		}
+	}
+
 	// Working-directory threading (see interpretRange): re-base relative
 	// path effects against this leaf's effective CWD when it differs from
 	// the request's, or make them Dynamic when that CWD is unknown.
@@ -435,6 +471,15 @@ func (b *builder) child(parentID, parentScope string, c cmddesc.ChildInvocation,
 	}
 
 	scope := b.newScope(parentScope, c.Source)
+	if c.Remote != "" {
+		// Override the inherited value (newScope already recorded the
+		// parent's own, "" for an ordinary top-level ssh): this child
+		// invocation names ITS OWN remote host (slice 3aa), which every
+		// scope nested inside it (interpretRange, recursively) then
+		// inherits in turn via the SAME newScope call above.
+		b.scopeRemote[scope] = c.Remote
+		b.g.Scopes[len(b.g.Scopes)-1].Remote = c.Remote
+	}
 	start := len(b.g.Nodes)
 	b.leaves(leaves, scope)
 	end := len(b.g.Nodes)

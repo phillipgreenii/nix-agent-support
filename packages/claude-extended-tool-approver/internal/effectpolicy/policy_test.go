@@ -270,3 +270,94 @@ func TestTrustedCheckoutExecPolicy(t *testing.T) {
 		t.Error("applied to a path effect")
 	}
 }
+
+// TestRemotePathGuard (slice 3aa, tc-lc8f item 4g; tc-vn5z item 4): a PATH
+// effect tagged Remote abstains by default under every one of the four
+// wrapped policies, even where the LOCAL verdict would have been Forbidden
+// (a secret, a read-only zone) or Permitted (an ordinary writable path) —
+// the guard overrides the wrapped policy's own verdict unconditionally once
+// it applies. The categorized-path hook (PolicyContext.RemotePaths)
+// overrides that default per RemotePathRule's own proposed taxonomy; an
+// unmatched host/prefix, or an unrecognised category, falls back to the
+// ordinary abstain. A non-remote effect is untouched (regression: the
+// wrapped policy's own verdict rides straight through).
+func TestRemotePathGuard(t *testing.T) {
+	root, home := fixture(t)
+	pe := patheval.NewWithCWD(root, root)
+	baseCtx := PolicyContext{PathEval: pe, CWD: root}
+
+	read := func(p, remote string) cmddesc.Effect {
+		return cmddesc.Effect{Kind: cmddesc.EffectPath, Access: cmddesc.AccessRead, Path: p, Remote: remote}
+	}
+	write := func(p, remote string) cmddesc.Effect {
+		return cmddesc.Effect{Kind: cmddesc.EffectPath, Access: cmddesc.AccessTruncate, Path: p, Remote: remote}
+	}
+	del := func(p, remote string) cmddesc.Effect {
+		return cmddesc.Effect{Kind: cmddesc.EffectPath, Access: cmddesc.AccessDelete, Path: p, Remote: remote}
+	}
+
+	// Local (non-remote) effects are UNCHANGED by the wrap: a secret read is
+	// still Forbidden, a read-only-zone write is still Forbidden.
+	if f, applies := (remotePathGuard{NoReadOfSecretPath{}}).Judge(read(filepath.Join(home, ".ssh", "id_rsa"), ""), baseCtx); !applies || f.Verdict != Forbidden {
+		t.Errorf("local secret read: applies=%v verdict=%s, want Forbidden", applies, f.Verdict)
+	}
+	if f, applies := (remotePathGuard{NoWriteToReadOnlyPath{}}).Judge(write("/nix/store/x", ""), baseCtx); !applies || f.Verdict != Forbidden {
+		t.Errorf("local read-only-zone write: applies=%v verdict=%s, want Forbidden", applies, f.Verdict)
+	}
+
+	// Remote effects abstain by DEFAULT, even where the local verdict would
+	// have been Forbidden or Permitted.
+	remoteCases := []struct {
+		name   string
+		policy Policy
+		e      cmddesc.Effect
+	}{
+		{"remote secret read no longer forbidden", NoReadOfSecretPath{}, read(filepath.Join(home, ".ssh", "id_rsa"), "host")},
+		{"remote read-only-zone write no longer forbidden", NoWriteToReadOnlyPath{}, write("/nix/store/x", "host")},
+		{"remote ordinary read no longer permitted", NoReadOfUnreadablePath{}, read("README.md", "host")},
+		{"remote delete-of-root no longer forbidden", DeleteAccess{}, del("/", "host")},
+	}
+	for _, tc := range remoteCases {
+		f, applies := (remotePathGuard{tc.policy}).Judge(tc.e, baseCtx)
+		if !applies || f.Verdict != Unknown {
+			t.Errorf("%s: applies=%v verdict=%s (%s), want Unknown", tc.name, applies, f.Verdict, f.Reason)
+		}
+	}
+
+	// The categorized-path hook overrides the default per host+prefix,
+	// first match wins; a non-matching host/prefix or an unrecognised
+	// category falls back to the ordinary abstain.
+	hookCtx := baseCtx
+	hookCtx.RemotePaths = map[string][]evalcontract.RemotePathRule{
+		"host": {
+			{Prefix: "/var/log", Category: "read-only"},
+			{Prefix: "/srv/data", Category: "writable"},
+			{Prefix: "/srv/scratch", Category: "deletable"},
+			{Prefix: "/srv/locked", Category: "protected"},
+			{Prefix: "/srv/mystery", Category: "not-a-real-category"},
+		},
+	}
+	hookCases := []struct {
+		name    string
+		policy  Policy
+		e       cmddesc.Effect
+		verdict FindingVerdict
+	}{
+		{"read-only: read permitted", NoReadOfUnreadablePath{}, read("/var/log/syslog", "host"), Permitted},
+		{"read-only: write forbidden", NoWriteToReadOnlyPath{}, write("/var/log/syslog", "host"), Forbidden},
+		{"writable: write permitted", NoWriteToReadOnlyPath{}, write("/srv/data/x", "host"), Permitted},
+		{"writable: delete needs consent", DeleteAccess{}, del("/srv/data/x", "host"), Unknown},
+		{"deletable: delete permitted", DeleteAccess{}, del("/srv/scratch/x", "host"), Permitted},
+		{"protected: read forbidden", NoReadOfUnreadablePath{}, read("/srv/locked/x", "host"), Forbidden},
+		{"protected: write forbidden", NoWriteToReadOnlyPath{}, write("/srv/locked/x", "host"), Forbidden},
+		{"unrecognised category falls back to abstain", NoReadOfUnreadablePath{}, read("/srv/mystery/x", "host"), Unknown},
+		{"non-matching prefix falls back to abstain", NoReadOfUnreadablePath{}, read("/var/lib/other", "host"), Unknown},
+		{"non-matching host falls back to abstain", NoReadOfUnreadablePath{}, read("/var/log/syslog", "otherhost"), Unknown},
+	}
+	for _, tc := range hookCases {
+		f, applies := (remotePathGuard{tc.policy}).Judge(tc.e, hookCtx)
+		if !applies || f.Verdict != tc.verdict {
+			t.Errorf("%s: applies=%v verdict=%s (%s), want %s", tc.name, applies, f.Verdict, f.Reason, tc.verdict)
+		}
+	}
+}

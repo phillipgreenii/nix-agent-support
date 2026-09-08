@@ -29,6 +29,17 @@ type ChildInvocation struct {
 	Argv        []string
 	ArgvDynamic []bool
 	Source      string
+	// Remote is the host this child invocation runs ON, when it is a REMOTE
+	// child (slice 3aa, tc-lc8f item 4g; tc-vn5z item 4 — ssh's own remote
+	// command). "" (the default, every pre-existing producer) means an
+	// ordinary LOCAL child (`bash -c`, an xargs/find argv). The graph
+	// builder (effectgraph/build.go) reads this to tag the new scope — and
+	// every scope nested inside it, transitively — REMOTE, which is what
+	// lets a path policy abstain on a path it cannot locally classify
+	// without walking the graph itself (see cmddesc.Effect.Remote's doc
+	// comment). Set by sshInterpreter (interpreter_ssh.go); no other
+	// producer in this slice sets it.
+	Remote string
 }
 
 // Interpretation is what an Interpreter produces for one leaf: its effects,
@@ -65,6 +76,11 @@ var interpreters = map[string]Interpreter{
 	"kubectl":          kubectlInterpreter{},
 	"kubectl-manifest": kubectlManifestInterpreter{},
 	"kubectl-cp":       kubectlCpInterpreter{},
+	// slice 3aa (tc-lc8f item 4g; tc-vn5z item 4): ssh's own bespoke
+	// dispatch (the host operand becomes an EffectNet; the REST of the
+	// positionals become one shell-dialect ChildInvocation tagged REMOTE) —
+	// see interpreter_ssh.go.
+	"ssh": sshInterpreter{},
 }
 
 // LookupInterpreter resolves a schema's Interpreter name. The empty name
@@ -282,6 +298,8 @@ func (st *interpState) operand(op pendingOp, role OperandRole) {
 		st.envAssign(op, source, live)
 	case role.Kind == KindChdir:
 		st.chdir(op.tok, live, source)
+	case role.Kind == KindKeyMaterial:
+		st.effects = append(st.effects, Effect{Kind: EffectKeyMaterial, Path: op.tok, Dynamic: live, Source: source})
 	case role.Kind == KindLiteral, role.Kind == KindMessage:
 		// Inert: no effect. A live expansion in a literal slot is still inert —
 		// its value cannot change what the command touches.

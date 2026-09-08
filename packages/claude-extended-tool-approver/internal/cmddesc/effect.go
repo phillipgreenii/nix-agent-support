@@ -47,6 +47,21 @@ const (
 	// free-text fields) carry the human-readable explanation; no new struct
 	// field was needed.
 	EffectExec
+	// EffectKeyMaterial is a REFERENCE (by path) to a credential file used to
+	// authenticate a remote connection — ssh/scp's `-i FILE` (slice 3aa,
+	// tc-lc8f item 4g; tc-vn5z item 4). It is deliberately distinct from
+	// EffectPath: the file's CONTENT is never read/disclosed anywhere this
+	// model can observe (it is handed to the local client's own key-exchange
+	// machinery), so treating it as an ordinary read would make
+	// NoReadOfSecretPath (internal/effectpolicy/policy.go) Forbid every
+	// `-i ~/.ssh/id_rsa` invocation outright, which conflates "reference a
+	// key to authenticate with" with "disclose a secret's bytes". No policy
+	// in DefaultPolicies judges this kind (deliberately — see
+	// cmddesc.KindKeyMaterial's own doc comment), so judgeNode's fail-closed
+	// fold (effectpolicy/evaluate.go) always treats it as "no policy judges
+	// this effect": Insufficient/Abstain, never Approve or Reject, until a
+	// future slice reviews key-material references deliberately.
+	EffectKeyMaterial
 )
 
 // String returns the deterministic kind name.
@@ -70,6 +85,8 @@ func (k EffectKind) String() string {
 		return "chdir"
 	case EffectExec:
 		return "exec"
+	case EffectKeyMaterial:
+		return "key-material"
 	default:
 		return "effect-invalid"
 	}
@@ -182,6 +199,19 @@ type Effect struct {
 	Source         string
 	FromPositional bool
 
+	// Remote is the host a PATH effect's target lives on, when the leaf that
+	// produced it is inside a REMOTE scope (slice 3aa, tc-lc8f item 4g;
+	// tc-vn5z item 4 — an `ssh HOST CMD` child, and anything nested inside
+	// it). "" (the default) means the path is local. It is set ONLY on
+	// EffectPath effects, ONLY by effectgraph's builder (never by a schema
+	// or interpreter — cmddesc has no notion of "scope"), which stamps every
+	// EffectPath on a node whose scope descends from a remote child
+	// invocation with that child's host, so a path policy can tell "this
+	// filesystem path is not this process's local filesystem" without
+	// walking the graph itself. See internal/effectpolicy/policy.go's
+	// remotePathGuard, the ONE place that reads this field.
+	Remote string
+
 	// EffectProgram fields.
 	Program string
 	Dialect string
@@ -258,6 +288,9 @@ func (e Effect) String() string {
 		if e.Dynamic {
 			b.WriteString(" (dynamic)")
 		}
+		if e.Remote != "" {
+			fmt.Fprintf(&b, " {remote:%s}", e.Remote)
+		}
 		if e.Source != "" {
 			fmt.Fprintf(&b, " [%s]", e.Source)
 		}
@@ -312,6 +345,14 @@ func (e Effect) String() string {
 	case EffectExec:
 		if e.Source != "" {
 			fmt.Fprintf(&b, ": %s", e.Source)
+		}
+	case EffectKeyMaterial:
+		fmt.Fprintf(&b, ": %s", e.Path)
+		if e.Dynamic {
+			b.WriteString(" (dynamic)")
+		}
+		if e.Source != "" {
+			fmt.Fprintf(&b, " [%s]", e.Source)
 		}
 	}
 	if e.Detail != "" {

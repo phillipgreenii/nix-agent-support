@@ -69,6 +69,12 @@ type PolicyContext struct {
 	RemoteLifecycle         map[string]string
 	KubeContexts            map[string]evalcontract.KubeContextRule
 	KubeContextDefaultAllow []string
+	// RemotePaths is OPERATOR CONFIGURATION for the categorized-path
+	// override hook a remote-scope path effect consults before the
+	// remote-abstain default (slice 3aa, tc-lc8f item 4g; tc-vn5z item 4) —
+	// see evalcontract.Request.RemotePaths's doc comment. remotePathGuard is
+	// the only reader.
+	RemotePaths map[string][]evalcontract.RemotePathRule
 }
 
 // RemoteLifecycleClass returns the operator-configured verdict class for a
@@ -141,12 +147,22 @@ type Policy interface {
 // are no longer effect kinds "no policy judges" — see judgeNode's fail-closed
 // fold in evaluate.go for why an unjudged effect can no longer ride to
 // MarkPermitted for free.
+//
+// The four PATH policies (NoWriteToReadOnlyPath, DeleteAccess,
+// NoReadOfSecretPath, NoReadOfUnreadablePath) are wrapped in remotePathGuard
+// (slice 3aa, tc-lc8f item 4g; tc-vn5z item 4): a single guard, applied here
+// ONCE rather than copy-pasted into each policy's own Judge, that makes
+// every one of them abstain by default on a REMOTE-scope path effect
+// (Effect.Remote != "") unless the operator's categorized-path hook
+// (PolicyContext.RemotePaths) supplies an override — see remotePathGuard's
+// own doc comment. No other policy touches EffectPath, so no other entry
+// needs wrapping.
 func DefaultPolicies() []Policy {
 	return []Policy{
-		NoWriteToReadOnlyPath{},
-		DeleteAccess{},
-		NoReadOfSecretPath{},
-		NoReadOfUnreadablePath{},
+		remotePathGuard{NoWriteToReadOnlyPath{}},
+		remotePathGuard{DeleteAccess{}},
+		remotePathGuard{NoReadOfSecretPath{}},
+		remotePathGuard{NoReadOfUnreadablePath{}},
 		NetworkAccess{},
 		RemoteMutation{},
 		KubeContextPolicy{},
@@ -155,6 +171,89 @@ func DefaultPolicies() []Policy {
 		EnvAssignment{},
 		ChdirScoped{},
 		TrustedCheckoutExec{},
+	}
+}
+
+// remotePathGuard wraps a PATH policy so a path effect that lives in a
+// REMOTE scope (Effect.Remote != "", stamped by effectgraph's builder — see
+// cmddesc.Effect.Remote's own doc comment) abstains by default, per the
+// operator ruling on tc-vn5z (slice 3aa, tc-lc8f item 4g): "for ssh, abstain
+// for paths should be thr default." It defers entirely to the wrapped
+// policy for a non-remote effect, or for any effect the wrapped policy does
+// not apply to at all (ok == false) — the guard adds no NEW applicability,
+// it only overrides the VERDICT once the wrapped policy already says it
+// applies. Before falling back to the abstain default, it consults
+// PolicyContext.RemotePaths (evalcontract.Request.RemotePaths's own doc
+// comment carries the design proposal and its provenance) so an operator
+// who has explicitly categorized a path on a given host CAN still reach a
+// real verdict — see remotePathCategoryFinding for how a category maps to
+// one.
+//
+// This is implemented ONCE, here, rather than inside each of the four path
+// policies' own Judge methods: every one of them would otherwise need the
+// identical Remote/RemotePaths check inserted at the same point, which is
+// exactly the kind of copy-paste this spike's "data first, one place per
+// concern" convention exists to avoid.
+type remotePathGuard struct{ inner Policy }
+
+// Name implements Policy.
+func (g remotePathGuard) Name() string { return g.inner.Name() }
+
+// Judge implements Policy.
+func (g remotePathGuard) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, bool) {
+	finding, ok := g.inner.Judge(e, ctx)
+	if !ok || e.Kind != cmddesc.EffectPath || e.Remote == "" {
+		return finding, ok
+	}
+	if override, matched := remotePathOverride(e, ctx); matched {
+		return override, true
+	}
+	return Finding{Verdict: Unknown, Reason: "remote path on " + e.Remote + ": no local classification"}, true
+}
+
+// remotePathOverride reports the Finding an operator-configured
+// RemotePathRule dictates for e, if one matches: RemotePaths[e.Remote],
+// consulted in ORDER, first PREFIX match wins (mirroring patheval's own
+// longest-listed-first, first-match-wins zone convention). matched is false
+// when no host entry, or no matching prefix, or an unrecognised Category
+// (fail closed to the ordinary abstain default — see RemotePathRule's own
+// doc comment).
+func remotePathOverride(e cmddesc.Effect, ctx PolicyContext) (Finding, bool) {
+	for _, rule := range ctx.RemotePaths[e.Remote] {
+		if rule.Prefix == "" || !strings.HasPrefix(e.Path, rule.Prefix) {
+			continue
+		}
+		if f, ok := remotePathCategoryFinding(rule.Category, e.Access); ok {
+			return f, true
+		}
+	}
+	return Finding{}, false
+}
+
+// remotePathCategoryFinding maps one RemotePathRule.Category to the Finding
+// for a path effect of the given access class — the PROPOSED taxonomy
+// RemotePathRule's own doc comment describes, mirroring internal/deletable's
+// local Protected/Deletable/Writable classification and patheval's
+// read/write zones rather than inventing a new shape. ok is false for an
+// unrecognised category (fail closed, never guessed at).
+func remotePathCategoryFinding(category string, access cmddesc.PathAccess) (Finding, bool) {
+	switch category {
+	case "protected", "secret":
+		return Finding{Verdict: Forbidden, Reason: "remote path categorized " + category}, true
+	case "read-only":
+		if access == cmddesc.AccessRead {
+			return Finding{Verdict: Permitted, Reason: "remote path categorized read-only"}, true
+		}
+		return Finding{Verdict: Forbidden, Reason: "write to a remote path categorized read-only"}, true
+	case "writable":
+		if access == cmddesc.AccessDelete {
+			return Finding{Verdict: Unknown, Reason: "delete of a remote path categorized writable needs consent"}, true
+		}
+		return Finding{Verdict: Permitted, Reason: "remote path categorized writable"}, true
+	case "deletable":
+		return Finding{Verdict: Permitted, Reason: "remote path categorized deletable"}, true
+	default:
+		return Finding{}, false
 	}
 }
 

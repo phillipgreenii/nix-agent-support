@@ -95,6 +95,20 @@ const (
 	// git/go workspace, never by command name. See registry_breadth.go's
 	// goTestSchema/goBuildSchema for the worked case.
 	KindExec
+	// KindKeyMaterial is an operand naming a CREDENTIAL FILE referenced BY
+	// PATH to authenticate a remote connection (ssh/scp's `-i FILE`; slice
+	// 3aa, tc-lc8f item 4g; tc-vn5z item 4) — deliberately NOT KindPathRead:
+	// the command does not read and disclose the file's CONTENT anywhere
+	// this model can see (it is handed to the local ssh client's own TLS/
+	// key-exchange machinery), so routing it through the ordinary read
+	// effect would make NoReadOfSecretPath (internal/effectpolicy/policy.go)
+	// Forbid every `ssh -i ~/.ssh/id_rsa host ...` invocation outright — a
+	// key REFERENCE is not the same hazard as a `cat ~/.ssh/id_rsa`. No
+	// policy in this slice judges the resulting EffectKeyMaterial (see its
+	// own doc comment in effect.go), so it always abstains rather than
+	// either approving or rejecting — the conservative middle ground until
+	// a future slice reviews it deliberately.
+	KindKeyMaterial
 )
 
 // String returns the deterministic role name used in labels and reasons.
@@ -128,6 +142,8 @@ func (k RoleKind) String() string {
 		return "chdir"
 	case KindExec:
 		return "exec"
+	case KindKeyMaterial:
+		return "key-material"
 	default:
 		return "role-invalid"
 	}
@@ -159,6 +175,7 @@ var (
 	Unmodeled    = OperandRole{Kind: KindUnmodeled}
 	Chdir        = OperandRole{Kind: KindChdir}
 	Exec         = OperandRole{Kind: KindExec}
+	KeyMaterial  = OperandRole{Kind: KindKeyMaterial}
 )
 
 // Program returns the operand role for program text in the named dialect.

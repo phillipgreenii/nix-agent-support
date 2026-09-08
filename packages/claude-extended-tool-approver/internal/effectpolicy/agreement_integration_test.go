@@ -569,6 +569,7 @@ func TestAgreement(t *testing.T) {
 			// is the same pattern for kubectl's per-context configuration.
 			RemoteLifecycle: goldenRemoteLifecycle[tc.name],
 			KubeContexts:    goldenKubeContexts[tc.name],
+			RemotePaths:     goldenRemotePaths[tc.name],
 		}, reg, DefaultPolicies(), DefaultGraphPolicies())
 		liveResult := evaluateLive(live, root, tc.command)
 

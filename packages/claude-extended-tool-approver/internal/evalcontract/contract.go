@@ -45,6 +45,21 @@ import "github.com/phillipgreenii/claude-extended-tool-approver/internal/effectg
 // for a future rules.json binding — the production wiring is a follow-up,
 // not this slice — mirroring its own "data on the request" pattern (slice
 // 3u) rather than a kubectl-specific struct elsewhere.
+// RemotePaths is OPERATOR CONFIGURATION for the categorized-path override
+// hook a REMOTE-scope path effect consults before falling back to the
+// default abstain (slice 3aa, tc-lc8f item 4g; tc-vn5z item 4 — operator
+// ruling, Phillip 2026-09-07, verbatim: "for ssh, abstain for paths should
+// be thr default. however, we should allow some way to spexify a list of
+// categorized paths."). Keyed by host (as ssh's own EffectNet/Effect.Remote
+// name it — see cmddesc's sshInterpreter), each entry is an ORDERED list of
+// prefix rules consulted in order, first match wins (RemotePathRule's own
+// doc comment). This is this spike's stand-in for a future rules.json
+// binding — the shape itself is NOT yet ruled on; see the design proposal
+// appended to bead tc-vn5z's notes by this slice, and
+// effectpolicy.remotePathGuard, the one reader — mirroring RemoteLifecycle/
+// KubeContexts's own "data on the request, production wiring is a
+// follow-up" pattern. nil (the default) configures nothing, so every
+// remote path effect on every host abstains, per the ruling's own default.
 type Request struct {
 	Command                 string
 	Dialect                 string
@@ -55,6 +70,29 @@ type Request struct {
 	RemoteLifecycle         map[string]string
 	KubeContexts            map[string]KubeContextRule
 	KubeContextDefaultAllow []string
+	RemotePaths             map[string][]RemotePathRule
+}
+
+// RemotePathRule is one categorized-path override entry (see Request.
+// RemotePaths's doc comment): a path on a configured host whose PREFIX
+// matches Prefix is classified Category instead of abstaining. Category is
+// an OPEN vocabulary mirroring internal/deletable's local classification
+// shape (Classify's Protected/Deletable/Writable, patheval's read/write
+// zones) rather than a bespoke one, since the operator ruling's own
+// "categorized paths" wording implies reusing a familiar taxonomy, not
+// inventing a new one: "read-only" (read permitted, write/delete
+// forbidden), "writable" (read/write permitted, delete needs consent —
+// DeleteAccess's own local "writable but not deletable" shape), "deletable"
+// (read/write/delete all permitted — the path is disposable), "protected"
+// (every access class forbidden), "secret" (every access class forbidden,
+// the WellKnownSecret-equivalent for a remote path). An unrecognised
+// Category value is treated exactly like no match at all (fail closed to
+// the ordinary remote-abstain default), never guessed at. This shape is a
+// PROPOSAL, not yet operator-ruled — see the design note appended to bead
+// tc-vn5z by this slice.
+type RemotePathRule struct {
+	Prefix   string
+	Category string
 }
 
 // KubeContextRule is one kube context's operator-configured allow-list (see

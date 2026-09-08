@@ -1391,3 +1391,115 @@ var kubectlCpSchema = CommandSchema{
 	EndOfOptions: true,
 	Interpreter:  "kubectl-cp",
 }
+
+// ---- ssh (slice 3aa, tc-lc8f item 4g; tc-vn5z item 4) ---------------------
+//
+// Operator ruling (Phillip, 2026-09-07, verbatim, recorded on bead tc-vn5z):
+// "for ssh, abstain for paths should be thr default. however, we should
+// allow some way to spexify a list of categorized paths." Normalized: (a)
+// every PATH effect that lives in a REMOTE scope (this schema's own remote
+// command child, and anything nested inside it — a `bash -c` the remote
+// command itself runs, an xargs/find argv it reconstructs) abstains by
+// default, regardless of which policy would otherwise judge it — see
+// effectpolicy.remotePathGuard, the single guard that implements this ONCE
+// for every path policy. (b) A per-host CATEGORIZED-path override is a
+// REQUIRED future capability whose rules.json shape is not yet ruled on;
+// this slice implements only the HOOK (evalcontract.Request.RemotePaths /
+// PolicyContext.RemotePaths) the guard consults before falling back to (a).
+//
+// This schema's own job is narrower: turn ssh's own argv into (1) an
+// EffectNet describing the CONNECTION itself (judged by the existing
+// VettedHosts-driven NetworkAccess policy — production's per-host allowlist,
+// internal/rules/ssh's AllowedUsers/read-only-command tables, is the
+// analogue) and (2) — when a remote command was given — ONE "shell"-dialect
+// ChildInvocation tagged Remote: host, so effectgraph's builder gives it (and
+// anything nested inside it) the remote scope (a) above needs. See
+// interpreter_ssh.go's sshInterpreter for how the positionals split into
+// these two things; the FLAGS below are ordinary schema data the generic
+// scan/resolve machinery already knows how to turn into effects.
+//
+// Verified against THIS HOST's installed ssh client, 2026-09-07: `ssh -V`
+// itself is intercepted by this repo's OWN PreToolUse hook (a configured
+// production internal/rules/ssh rule Rejects "ssh with no host" before the
+// binary ever runs — confirmatory evidence the production rule is live on
+// this machine), so provenance is taken instead from the resolved binary's
+// nix store path: `/run/current-system/sw/bin/ssh` ->
+// `/nix/store/28hprrw9sdi4iarzyxa3r1a22b3dq5pn-openssh-10.5p1/bin/ssh`
+// (openssh-10.5p1), cross-checked against `ssh(1)`'s documented option
+// table for that release (no live `--help`/`-V` capture was possible on
+// this host for the reason above).
+const sshProvenance = "OpenSSH 10.5p1 (openssh-10.5p1, /nix/store/28hprrw9sdi4iarzyxa3r1a22b3dq5pn-openssh-10.5p1/bin/ssh, resolved via /run/current-system/sw/bin/ssh), ssh(1) option table for that release; this host 2026-09-07 (ssh -V itself is intercepted by this repo's own configured ssh rule, \"ssh with no host\" — see this schema's own doc comment)"
+
+// sshSchema. Value-taking flags: `-i FILE` is KeyMaterial (a credential
+// REFERENCE, not a content read — see cmddesc.KindKeyMaterial's own doc
+// comment for why NoReadOfSecretPath must never see it as an ordinary read);
+// `-F FILE` is an ordinary PathRead (ssh reads and applies the config
+// file's CONTENT); `-E FILE` is a PathTruncate (ssh's own `-E` truncates and
+// writes a debug log to it, per ssh(1)). Every other value-taking flag
+// (`-p -l -o -J -L -R -D -W -b -c -m -I -Q -S -w -B -e`) is Literal: none of
+// their values is a filesystem path THIS schema models (a port, a user
+// name, a forward spec, a cipher/MAC/kex-algorithm name, an escape
+// character) — `-o` in particular can carry `ProxyCommand=...`, which could
+// itself run an arbitrary LOCAL command, but that is a documented,
+// out-of-scope limitation this slice does not attempt (matching kubectl's
+// own `-o`/`--output` precedent of leaving a flag's value opaque when
+// modeling its full semantics is a separate, larger undertaking).
+//
+// Boolean flags (`-4 -6 -A -a -C -f -G -g -K -k -M -N -n -q -s -T -t -V -v
+// -X -x -Y -y`) are inert. `-n` (redirect stdin from /dev/null) is
+// deliberately NOT given a TransformNone-style special case despite
+// actually suppressing ssh's stdin forwarding: the brief's own flag
+// classification lists it among the inert booleans, and modeling its
+// interaction with Stdin below is a documented simplification, not an
+// oversight — a false "still consumes stdin" costs an extra Abstain
+// (Unknown upstream node), never a missed Forbidden.
+//
+// PositionalsEndOptions is set: the FIRST positional (HOST) ends ssh's own
+// flag scanning, so a remote command word that happens to start with `-`
+// (`ssh host -rf /`) is never mistaken for an unmodeled ssh flag — the same
+// getopt `+`/POSIXLY_CORRECT convention xargs/a wrapper needs
+// (PositionalSpec's own doc comment).
+//
+// Stdin: StdinAlways — ssh forwards the LOCAL terminal/stdin to the remote
+// command by default (suppressed only by `-n`, modeled inert above), which
+// is exactly the shape NoContentFlowToUnvettedNetwork's upstream Flow-edge
+// walk needs to catch `cat ~/.ssh/id_rsa | ssh host 'cat > file'` piping a
+// LOCAL secret into the connection (see sshInterpreter's sshConnection doc
+// comment on why Direction is Outbound for the same reason). Stdout:
+// StdoutContent — the remote command's output returns over the same
+// connection and may itself flow onward (`ssh host cat x | tee y`).
+var sshSchema = CommandSchema{
+	Name:       "ssh",
+	Provenance: sshProvenance,
+	Flags: map[string]FlagSpec{
+		"-i": {Arity: ArityOne, Operand: KeyMaterial},
+		"-F": {Arity: ArityOne, Operand: PathRead},
+		"-E": {Arity: ArityOne, Operand: PathTruncate},
+		"-p": literal1, "-l": literal1, "-o": literal1, "-J": literal1,
+		"-L": literal1, "-R": literal1, "-D": literal1, "-W": literal1,
+		"-b": literal1, "-c": literal1, "-m": literal1, "-I": literal1,
+		"-Q": literal1, "-S": literal1, "-w": literal1, "-B": literal1, "-e": literal1,
+		"-4": inert, "-6": inert, "-A": inert, "-a": inert, "-C": inert, "-f": inert,
+		"-G": inert, "-g": inert, "-K": inert, "-k": inert, "-M": inert, "-N": inert,
+		"-n": inert, "-q": inert, "-s": inert, "-T": inert, "-t": inert, "-V": inert,
+		"-v": inert, "-X": inert, "-x": inert, "-Y": inert, "-y": inert,
+	},
+	Positionals:           PositionalSpec{Rest: Literal},
+	Stdin:                 StdinAlways,
+	Stdout:                StdoutContent,
+	UnknownFlag:           UnknownFlagInsufficient,
+	EndOfOptions:          true,
+	PositionalsEndOptions: true,
+	Interpreter:           "ssh",
+}
+
+// scp is DELIBERATELY NOT MODELED this slice (brief's own "model minimally
+// if cheap; otherwise leave for a follow-up and say so"): its two
+// positionals need the SAME local/remote-by-colon-syntax split
+// kubectlCpInterpreter already does for `kubectl cp` (interpreter_kubectl.go)
+// plus a THIRD shape kubectl cp never has to consider — remote-to-remote
+// (`scp host1:a host2:b`), which copies between two hosts this process never
+// touches at all — so it is a genuinely separate, larger piece of work, not
+// a small extension of sshInterpreter. Left as a follow-up bead; a bare
+// `scp ...` command has no schema and therefore Abstains today, exactly like
+// any other unmodeled command (no Reject, no false Approve).

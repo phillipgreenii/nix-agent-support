@@ -171,11 +171,19 @@ type Edge struct {
 }
 
 // Scope is one substitution recursion level; Parent is the enclosing scope
-// ("" for a top-level substitution).
+// ("" for a top-level substitution). Remote is the host a REMOTE child
+// invocation's scope runs on (slice 3aa, tc-lc8f item 4g; tc-vn5z item 4 —
+// ssh's own remote command); "" means local. A scope inherits its parent's
+// Remote by default (build.go's newScope), so anything nested inside a
+// remote scope — a `bash -c` the remote command itself runs, an xargs/find
+// argv it reconstructs, a command substitution — stays tagged the SAME
+// host, transitively, until a DIFFERENT remote child (a second, nested
+// `ssh`) overrides it.
 type Scope struct {
 	ID     string
 	Parent string
 	Label  string
+	Remote string
 }
 
 // Graph is the effect graph model. Node IDs are assigned `n<i>` in slice

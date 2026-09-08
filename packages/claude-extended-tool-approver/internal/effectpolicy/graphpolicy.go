@@ -36,7 +36,28 @@ func DefaultGraphPolicies() []GraphPolicy {
 // ("secret content flows to network"); otherwise an insufficient upstream
 // node is Unknown; otherwise a vetted sink host is Unknown ("upload of local
 // content to a vetted host requires consent" — still Abstain in this slice);
-// otherwise Unknown ("content flows to unvetted host"). A sink with no
+// otherwise Unknown ("content flows to unvetted host").
+//
+// A REMOTE-scope path read (Effect.Remote != "", slice 3aa, tc-lc8f item 4g;
+// tc-vn5z item 4 — e.g. an `ssh host 'cat ~/.ssh/id_rsa'` child, whose own
+// "child stdout->stdout" flow edge makes the remote leaf an upstream node of
+// ssh's own outbound connection sink) is treated like a Dynamic one here,
+// for the SAME reason effectpolicy.remotePathGuard exists at the node level:
+// this process has no local basis to classify a path on a FOREIGN
+// filesystem as secret or not, so calling secretRead on its raw text would
+// silently reapply the operator's "abstain for [ssh] paths by default"
+// ruling's opposite — a false-positive Forbidden from a path string that
+// merely LOOKS like a local secret path. consumesContent still becomes
+// true (the remote read is genuine content, just not one this policy can
+// itself classify), so the ordinary vetted-host ladder below still applies
+// and the sink still lands on Unknown rather than silently approving. This
+// is a SECOND site needing the ruling's treatment beyond the four
+// node-level policies remotePathGuard wraps (found empirically while
+// building slice 3aa's goldens: ssh_cat_ssh_key rejected here before this
+// fix, contradicting the ruling) — the two are not unified into one guard
+// because this policy walks a different effect SET (every node's, not one
+// effect argument at a time) and returns a GraphFinding, not a Finding, so
+// remotePathGuard's Policy-shaped wrapper does not fit it structurally. A sink with no
 // upstream flow, no path read and no stdin consumption carries only literal
 // content and gets no finding. The policy has no command knowledge: it reads
 // effects and edges only.
@@ -80,7 +101,7 @@ func (NoContentFlowToUnvettedNetwork) judgeSink(g *effectgraph.Graph, sink *effe
 			switch {
 			case e.Kind == cmddesc.EffectPath && e.Access == cmddesc.AccessRead:
 				consumesContent = true
-				if e.Dynamic {
+				if e.Dynamic || e.Remote != "" {
 					continue
 				}
 				if reason, secret := secretRead(e.Path, ctx); secret {
