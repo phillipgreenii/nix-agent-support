@@ -1277,6 +1277,36 @@ var goldenCases = []goldenCase{
 	// golden diff even though the top-level Decision does not change.
 	{"scp_var_log_uncategorized", "scp host:/var/log/syslog ./syslog", evalcontract.Abstain, nil},
 	{"scp_var_log_categorized_read_only", "scp host:/var/log/syslog ./syslog", evalcontract.Abstain, nil},
+
+	// treefmt (slice 3ah, tc-8og1 item 3 sub-slice 2): the formatter
+	// multiplexer — see treefmtSchema's own doc comment (registry_breadth.go)
+	// for the full CLI-surface rationale. All verdicts below are RECORDED
+	// (matched against the fixture's actual zoning), not forced in advance.
+	{"treefmt_bare", "treefmt", evalcontract.Approve, nil},
+	{"treefmt_readme", "treefmt README.md", evalcontract.Approve, nil},
+	// treefmt_dotenv: the root .env is WellKnownSecret AND gitignored
+	// (untracked) — unlike trackedenv/.env (tc-8og1 item 2's carve-out only
+	// applies to a git-TRACKED secret-named path), so this PathModify must
+	// still Reject.
+	{"treefmt_dotenv", "treefmt .env", evalcontract.Reject, nil},
+	// treefmt_cpu_profile_nix_store: --cpu-profile writes a pprof file to a
+	// read-only zone (gofmtSchema's own -cpuprofile precedent).
+	{"treefmt_cpu_profile_nix_store", "treefmt --cpu-profile /nix/store/x README.md", evalcontract.Reject, nil},
+	// treefmt_init: -i/--init creates treefmt.toml in the CWD (implicit
+	// PathCreate, WhenFlags-gated).
+	{"treefmt_init", "treefmt --init", evalcontract.Approve, nil},
+	// treefmt_stdin: under --stdin, the positional is a filename HINT
+	// (RestOverride to Literal) — no path is actually opened for read or
+	// write, so there is nothing for any path policy to judge.
+	{"treefmt_stdin", "treefmt --stdin README.md", evalcontract.Approve, nil},
+	// treefmt_tree_root_unmodeled: --tree-root is DELIBERATELY ABSENT from
+	// Flags (it relocates what "." and every relative path resolve against,
+	// which this slice does not resolve) — the whole invocation fails closed
+	// to Insufficient, the same convention as go build's own -C.
+	{"treefmt_tree_root_unmodeled", "treefmt --tree-root /tmp README.md", evalcontract.Abstain, nil},
+	// treefmt_clear_cache_unmodeled: -c/--clear-cache is also deliberately
+	// absent (no declared deletable Kind for treefmt's own evaluation cache).
+	{"treefmt_clear_cache_unmodeled", "treefmt --clear-cache", evalcontract.Abstain, nil},
 }
 
 func TestGolden(t *testing.T) {

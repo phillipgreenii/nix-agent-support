@@ -67,6 +67,9 @@ func DefaultRegistry() Registry {
 		// slice 3ad: scp's own bespoke per-operand local/remote dispatch —
 		// see scpSchema/scpInterpreter's doc comments (interpreter_scp.go).
 		scpSchema,
+		// slice 3ah (tc-8og1 item 3 sub-slice 2): treefmt, the formatter
+		// multiplexer — see treefmtSchema's own doc comment.
+		treefmtSchema,
 	)
 }
 

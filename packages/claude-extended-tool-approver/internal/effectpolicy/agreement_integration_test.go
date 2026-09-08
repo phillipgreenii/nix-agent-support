@@ -568,6 +568,44 @@ var knownSpikeLooser = map[string]spikeLooserEntry{
 			"WellKnownSecret match is Forbidden any more; production has no equivalent " +
 			"relaxation and stays ask/secrets.",
 	},
+	// treefmt_bare / treefmt_readme / treefmt_init / treefmt_stdin (slice
+	// 3ah, tc-8og1 item 3 sub-slice 2): production has NO rule anywhere in
+	// setup.RuleChain that recognises the basename "treefmt" (grepped
+	// internal/rules/ and internal/setup* — no match), so every treefmt
+	// invocation reaches chain exhaustion (NoOpinion) in production today,
+	// regardless of what it touches. The spike's new treefmtSchema
+	// (registry_breadth.go) resolves these four invocations to ordinary
+	// PathModify/PathCreate effects against writable, non-secret zones in
+	// the fixture (the whole-tree implicit rewrite, an explicit tracked
+	// operand, --init's treefmt.toml create, and --stdin's no-op-on-disk
+	// filename hint respectively), which NoWriteToReadOnlyPath/
+	// NoWriteToSecretPath/DeleteAccess all Permit — Evaluate folds that to
+	// Approve. This is the SAME shape as the go-family's own looser rows
+	// (slice 3x): the spike is more permissive here only because it
+	// genuinely MODELS the tool where production has no opinion at all, not
+	// because any policy was loosened.
+	"treefmt_bare": {
+		Class: "looser-than-abstain",
+		Cause: "no production rule recognises \"treefmt\"; the spike's implicit whole-tree " +
+			"PathModify of \".\" resolves to a plain writable-zone write and Approves.",
+	},
+	"treefmt_readme": {
+		Class: "looser-than-abstain",
+		Cause: "no production rule recognises \"treefmt\"; the spike's PathModify of the " +
+			"tracked, non-secret README.md operand resolves to a plain writable-zone write " +
+			"and Approves.",
+	},
+	"treefmt_init": {
+		Class: "looser-than-abstain",
+		Cause: "no production rule recognises \"treefmt\"; --init's implicit PathCreate of " +
+			"treefmt.toml in the CWD resolves to a plain writable-zone create and Approves.",
+	},
+	"treefmt_stdin": {
+		Class: "looser-than-abstain",
+		Cause: "no production rule recognises \"treefmt\"; --stdin's RestOverride turns the " +
+			"positional into an inert filename hint (Literal, no path effect at all), so there " +
+			"is nothing for any path policy to judge and the node is vacuously Approved.",
+	},
 }
 
 // TestAgreement drives every case in goldenAgreementCases and

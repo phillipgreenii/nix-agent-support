@@ -1,0 +1,6 @@
+flowchart LR
+    n0["command: treefmt --init<br/>- path:modify . [implicit]<br/>- path:create treefmt.toml [implicit]<br/>- stdio:stdout metadata<br/>mark=permitted"]
+    n1[/"file: ."/]
+    n2[/"file: treefmt.toml"/]
+    n0 -->|"writes: modify"| n1
+    n0 -->|"writes: create"| n2

@@ -532,6 +532,120 @@ var gofmtSchema = CommandSchema{
 	EndOfOptions: false,
 }
 
+// treefmtSchema: `treefmt [paths...] [flags]` — the formatter multiplexer
+// this repo's own pre-commit/nix-fmt workflow invokes (flake.nix's
+// treefmt-nix input; CLAUDE.md's "Use `nix fmt` for formatting Nix files").
+// tc-8og1 item 3 sub-slice 2 of 5 (build-tool family design, ruled on
+// tc-vn5z Q1-Q5, 2026-09-08): a "data-first cmddesc schema" case, not one of
+// the three live-static-parsing targets (justfile/package.json/devbox.json,
+// slice 3ag) — treefmt has its own vetted binary and CLI, so it schematizes
+// directly like gofmt/yq above rather than needing project-file discovery.
+//
+// Every configured formatter runs IN PLACE, UNCONDITIONALLY: this version
+// has no --check/--dry-run flag — `--fail-on-change` still performs the
+// rewrite and only exits nonzero if the rewrite actually changed something
+// (verified live: `treefmt --help`'s own flag description, "Exit with error
+// if any changes were made"). That makes treefmt's path operands closer to
+// goFmtVerbSchema's own precedent ("go fmt": `Positionals.Rest: PathModify`
+// unconditionally, "not PathRead" per its doc comment, because it too has no
+// gating flag) than to gofmtSchema's/yqSchema's flag-gated
+// `TransformInPlace` shape (`-w`/`-i`), which needs an explicit opt-in flag
+// treefmt does not have.
+//
+// Path operands (Rest) are PathModify — an over-approximation in the safe
+// direction: a given path only actually changes if some CONFIGURED
+// formatter's include glob matches it (unknowable from argv alone; this
+// slice does not parse treefmt.toml/flake.nix's treefmt-nix block), the same
+// documented over-approximation yqSchema's `-i` takes for "the first file
+// operand" and gofmtSchema's `-w` takes for every operand regardless of
+// whether reformatting was actually needed.
+//
+// With ZERO path operands, treefmt walks the WHOLE tree from `--tree-root`
+// (defaults to the git/jj worktree root, else the config file's own
+// directory) and can rewrite any tracked file a configured formatter
+// claims — modeled as an implicit PathModify of "." WhenNoPositionals,
+// mirroring goFmtVerbSchema's own "go fmt" (no packages) implicit effect.
+//
+// `--stdin` is treefmt's editor-integration mode: the single positional
+// becomes a FILENAME HINT used only to pick a formatter, actual content is
+// read from stdin and the formatted result is written to STDOUT — the named
+// path is never opened for read or write. Modeled via RestOverride (the
+// same mechanism gitBranchSchema's `--list`/gitConfigSchema's `--get` use to
+// swap Rest's role under a flag): under `--stdin`, Rest becomes Literal
+// instead of PathModify. Accepted, documented gap: `--stdin` with ZERO
+// positionals (not a real usage this schema has seen documented) still
+// falls through to the ordinary WhenNoPositionals whole-tree implicit
+// effect rather than being special-cased — real usage always pairs
+// `--stdin` with exactly one filename-hint positional.
+//
+// `--cpu-profile FILE` writes a pprof profile (PathTruncate — gofmtSchema's
+// own `-cpuprofile` precedent). `-i`/`--init` creates a NEW treefmt.toml in
+// the CURRENT directory (implicit PathCreate of "treefmt.toml", gated
+// WhenFlags). `--config-file FILE` only READS an alternate config path
+// (PathRead).
+//
+// DELIBERATELY ABSENT from Flags (so their presence makes the WHOLE
+// invocation Insufficient rather than being silently inert or guessed at —
+// the same convention goBuildSchema's own `-C`/`-toolexec`/`-overlay`
+// omissions and bdSchema's own `-C` use): `--tree-root`/`--tree-root-file`/
+// `-C`/`--working-dir` each relocate what "." or a relative path operand
+// actually resolves to, which this slice does not resolve; `--tree-root-cmd`
+// additionally names an ARBITRARY COMMAND treefmt shells out to first to
+// determine the root — an unvetted execution wrapper, the same shape as `go
+// test`'s `-exec`; `-c`/`--clear-cache` resets treefmt's OWN evaluation
+// cache, a directory this spike has no declared deletable Kind for (unlike
+// GOCACHE/GOMODCACHE's goKind roots) — accurately modeling a cache-clear
+// would need a new Kind, out of scope for this registry-entry-only slice.
+//
+// Sub-slice 2 of tc-8og1 item 3's 5-slice order (workspace verb-discovery
+// facet [3ag, done], treefmt schema [this slice], request/rules.json
+// wiring, cmddesc child-expression descriptor, nix run installable vetting):
+// nothing here is wired into evalcontext.Request or a rules.json approval
+// policy yet — TrustedCheckoutExec/DeleteAccess/NoWriteToReadOnlyPath/
+// NoWriteToSecretPath already judge the PathModify/PathCreate/PathTruncate/
+// PathRead effects this schema emits via their existing, command-name-blind
+// path-access machinery, the same as any other producer of those roles.
+//
+// Verified against this host's installed treefmt v2.6.0
+// (/nix/store/rma6wcl0qzq86fhsns9f6sahni4y5rx2-treefmt-2.6.0/bin/treefmt
+// --version, --help — this repo's own treefmt-nix flake input tracks a
+// close version, flake.nix's treefmt-nix input), 2026-09-08.
+var treefmtSchema = CommandSchema{
+	Name:       "treefmt",
+	Provenance: "treefmt v2.6.0 (this host, treefmt --version / --help), 2026-09-08",
+	Flags: map[string]FlagSpec{
+		"--allow-missing-formatter": inert,
+		"--ci":                      inert,
+		"--completion":              literal1,
+		"--config-file":             {Arity: ArityOne, Operand: PathRead},
+		"--cpu-profile":             {Arity: ArityOne, Operand: PathTruncate},
+		"--excludes":                literal1,
+		"--fail-on-change":          inert,
+		"-f":                        literal1, "--formatters": literal1,
+		"-h": inert, "--help": inert,
+		"-i": inert, "--init": inert,
+		"--no-cache": inert,
+		"-u":         literal1, "--on-unmatched": literal1,
+		"-q": inert, "--quiet": inert,
+		"--stdin": inert,
+		"-v":      inert, "--verbose": inert,
+		"--version": inert,
+		"--walk":    literal1,
+	},
+	Positionals: PositionalSpec{
+		Rest:         PathModify,
+		RestOverride: RestOverride{Flags: []string{"--stdin"}, Role: Literal},
+	},
+	ImplicitEffects: []ImplicitEffect{
+		{Role: PathModify, Target: ".", WhenNoPositionals: true},
+		{Role: PathCreate, Target: "treefmt.toml", WhenFlags: []string{"-i", "--init"}},
+	},
+	Stdin:        StdinNever,
+	Stdout:       StdoutMetadata,
+	UnknownFlag:  UnknownFlagInsufficient,
+	EndOfOptions: true,
+}
+
 // ---- find (slice 3q) ---------------------------------------------------------
 
 // findSchema: interpreter-dispatched to findInterpreter (interpreter_find.go),
