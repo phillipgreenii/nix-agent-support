@@ -10,12 +10,15 @@
 // their runs (the design's explicit "runs concatenates" merge strategy for
 // the CI fan-out (INV-OUT-1)) — and uses the fan-out exit-code scheme
 // (0/2/3) via outcome.go's FanOutOutcome.ExitCode. "ci logs" and
-// "ci rerun-failed" are TARGETED ops (resolve to the one backend registered
-// under connector.ci, mirroring pr.go's own targeted-op dispatch) and use
-// the targeted exit-code scheme (0/4/1) via outcome.go's TargetedExitCode
-// (INV-EXIT-1). This file calls the dispatcher/fan-out helpers and
-// hands their raw per-call result/error to outcome.go; it never decides the
-// exit code itself.
+// "ci rerun-failed" are TARGETED, id-keyed ops dispatched via
+// dispatch.go's DispatchTargeted, which implements this docket's
+// multi-instance resolution policy across every backend registered under
+// connector.ci (try each in registration order, stopping at the first
+// non-not_found answer) — mirroring pr.go's own targeted-op dispatch —
+// and use the targeted exit-code scheme (0/4/1) via outcome.go's
+// TargetedExitCode (INV-EXIT-1). This file calls the dispatcher/fan-out
+// helpers and hands their raw per-call result/error to outcome.go; it
+// never decides the exit code itself.
 package main
 
 import (
@@ -118,14 +121,14 @@ func newCiListCmd() *cobra.Command {
 func newCiLogsCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "logs <run-id>",
-		Short: "Get the raw logs for a CI run (targeted; resolves to the one registered ci backend)",
+		Short: "Get the raw logs for a CI run (targeted, id-keyed; multi-instance resolution across every registered ci backend)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			reg, err := LoadRegistry()
 			if err != nil {
 				return reportCiTargetedOutcome(cmd, nil, err, humanizeCiLogs)
 			}
-			resp, dispatchErr := Dispatch(cmd.Context(), reg, "ci", "get_logs", map[string]string{"run_id": args[0]})
+			resp, dispatchErr := DispatchTargeted(cmd.Context(), reg, "ci", "get_logs", map[string]string{"run_id": args[0]})
 			return reportCiTargetedOutcome(cmd, resp, dispatchErr, humanizeCiLogs)
 		},
 	}
@@ -134,7 +137,7 @@ func newCiLogsCmd() *cobra.Command {
 func newCiRerunFailedCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "rerun-failed <pr-id>",
-		Short: "Rerun a PR's failed CI runs (targeted; resolves to the one registered ci backend)",
+		Short: "Rerun a PR's failed CI runs (targeted, id-keyed; multi-instance resolution across every registered ci backend)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			humanize := func(json.RawMessage) (string, error) {
@@ -144,7 +147,7 @@ func newCiRerunFailedCmd() *cobra.Command {
 			if err != nil {
 				return reportCiTargetedOutcome(cmd, nil, err, humanize)
 			}
-			resp, dispatchErr := Dispatch(cmd.Context(), reg, "ci", "rerun_failed", map[string]string{"pr_id": args[0]})
+			resp, dispatchErr := DispatchTargeted(cmd.Context(), reg, "ci", "rerun_failed", map[string]string{"pr_id": args[0]})
 			return reportCiTargetedOutcome(cmd, resp, dispatchErr, humanize)
 		},
 	}

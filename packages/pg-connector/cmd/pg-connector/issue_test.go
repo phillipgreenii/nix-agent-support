@@ -324,3 +324,45 @@ func TestRun_IssueShow_NoBackendRegistered_IsGenericFailure(t *testing.T) {
 		t.Fatalf("resp.Error = %+v, want a message naming the no-backend-registered failure", resp.Error)
 	}
 }
+
+// TestRun_IssueCreate_AmbiguousMultipleBackends_IsGenericFailure is the
+// regression this packet's own acceptance criteria requires: issue create
+// is the one id-less write routed through the same dispatch path as the
+// 8 id-keyed ops (show/comment/transition/get_logs/rerun_failed/show/
+// categorize/feedback_set) — the multi-instance try-each resolution
+// policy is scoped to id-keyed ops only, by this phase's own operator
+// ruling, so create must be BYTE-FOR-BYTE unchanged at N > 1: it stays
+// on Dispatch (never DispatchTargeted), keeps hard-failing with the
+// exact pre-existing error message and CLI exit code, and never
+// attempts a fan-out/try-each across the two registered backends. This
+// is the same generic exit-1 CLI failure path
+// TestRun_CiLogs_AmbiguousMultipleBackends_IsGenericFailure used to
+// assert for ci logs before this packet's change — that assertion moved
+// to ci logs' own new multi-backend resolution tests in ci_test.go; this
+// test keeps it alive for create, the one op it still applies to.
+func TestRun_IssueCreate_AmbiguousMultipleBackends_IsGenericFailure(t *testing.T) {
+	dir := t.TempDir()
+	cfg := dir + "/config.yaml"
+	if err := os.WriteFile(cfg, []byte("connector:\n  issue:\n    - backend-issue-create-a\n    - backend-issue-create-b\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	t.Setenv("PG_PR_CONFIG", cfg)
+
+	// Deliberately no fake backend binaries are written for
+	// backend-issue-create-a/-b: Dispatch's hard-fail-at-N>1 check must
+	// reject this registration before ever attempting to exec either
+	// one, exactly as it always has — mirroring the pre-existing (now
+	// superseded for ci logs) ambiguous-backends test's own fixture
+	// style.
+	stdout, _, code := executePr(t, []string{"issue", "create", "--title", "new issue"})
+	if code != 1 {
+		t.Fatalf("exit code = %d, want 1 (unchanged generic CLI failure); stdout=%s", code, stdout)
+	}
+	var resp scriptout.Response
+	if err := json.Unmarshal([]byte(stdout), &resp); err != nil {
+		t.Fatalf("stdout is not a JSON envelope: %v; stdout=%q", err, stdout)
+	}
+	if resp.Error == nil || !strings.Contains(resp.Error.Message, "backends registered") {
+		t.Fatalf("resp.Error = %+v, want the same ambiguous-registration message Dispatch has always produced", resp.Error)
+	}
+}

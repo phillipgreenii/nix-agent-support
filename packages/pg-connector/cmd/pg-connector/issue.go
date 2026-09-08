@@ -4,11 +4,19 @@
 // identical structure. pg-connector remains the only user-facing CLI
 // surface — issue is one of its verb groups, never a separate binary.
 //
-// Each of these four verbs is a targeted op (resolves to the one backend
-// registered under connector.issue) and uses the Tier-1 targeted-op
-// exit-code scheme (0/4/1) via outcome.go's TargetedExitCode — this file
-// calls the dispatcher and hands TargetedExitCode the raw per-call
-// result/error it got back; it never decides the exit code itself.
+// Each of these four verbs is a targeted op and uses the Tier-1
+// targeted-op exit-code scheme (0/4/1) via outcome.go's TargetedExitCode —
+// this file calls the dispatcher and hands TargetedExitCode the raw
+// per-call result/error it got back; it never decides the exit code
+// itself. show/comment/transition are id-keyed and dispatch via
+// dispatch.go's DispatchTargeted, which implements this docket's
+// multi-instance resolution policy across every backend registered under
+// connector.issue (try each in registration order, stopping at the first
+// non-not_found answer). create is the one id-less write in this
+// docket's scope and stays on Dispatch itself, which keeps hard-failing
+// at N > 1 registered backends exactly as before — the multi-instance
+// resolution policy is scoped to id-keyed ops only, by this phase's own
+// operator ruling.
 //
 // transition's --state value is a plain string, never validated here
 // against a fixed set: valid target-state values are declared per-backend
@@ -50,7 +58,7 @@ func newIssueShowCmd() *cobra.Command {
 			if err != nil {
 				return reportIssueTargetedOutcome(cmd, nil, err, humanizeIssueShow)
 			}
-			resp, dispatchErr := Dispatch(cmd.Context(), reg, "issue", "show", map[string]string{"id": args[0]})
+			resp, dispatchErr := DispatchTargeted(cmd.Context(), reg, "issue", "show", map[string]string{"id": args[0]})
 			return reportIssueTargetedOutcome(cmd, resp, dispatchErr, humanizeIssueShow)
 		},
 	}
@@ -68,6 +76,11 @@ func newIssueCreateCmd() *cobra.Command {
 			if err != nil {
 				return reportIssueTargetedOutcome(cmd, nil, err, humanizeIssueCreate)
 			}
+			// create is the id-less write in this docket's scope [bead
+			// pg2-2j5ac.17.2]: it stays on Dispatch, not
+			// DispatchTargeted, so it keeps hard-failing at N > 1
+			// registered backends exactly as before the multi-instance
+			// resolution policy was introduced.
 			resp, dispatchErr := Dispatch(cmd.Context(), reg, "issue", "create", map[string]any{
 				"title":       title,
 				"priority":    priority,
@@ -103,7 +116,7 @@ func newIssueCommentCmd() *cobra.Command {
 			if err != nil {
 				return reportIssueTargetedOutcome(cmd, nil, err, humanize)
 			}
-			resp, dispatchErr := Dispatch(cmd.Context(), reg, "issue", "comment", map[string]string{
+			resp, dispatchErr := DispatchTargeted(cmd.Context(), reg, "issue", "comment", map[string]string{
 				"id":   args[0],
 				"body": body,
 			})
@@ -129,7 +142,7 @@ func newIssueTransitionCmd() *cobra.Command {
 			if err != nil {
 				return reportIssueTargetedOutcome(cmd, nil, err, humanize)
 			}
-			resp, dispatchErr := Dispatch(cmd.Context(), reg, "issue", "transition", map[string]string{
+			resp, dispatchErr := DispatchTargeted(cmd.Context(), reg, "issue", "transition", map[string]string{
 				"id":           args[0],
 				"target_state": state,
 			})

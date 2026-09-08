@@ -4,9 +4,12 @@
 // CLI surface — pr is one of its verb groups, never a separate binary
 // (interfaces.md's INTF-CLI).
 //
-// Each of these three verbs is a targeted op (resolves to the one backend
-// registered under connector.pr) and uses the Tier-1 targeted-op exit-code
-// scheme (0/4/1) via outcome.go's TargetedExitCode — this file calls the
+// Each of these three verbs is a targeted, id-keyed op dispatched via
+// dispatch.go's DispatchTargeted, which implements this docket's
+// multi-instance resolution policy across every backend registered under
+// connector.pr (try each in registration order, stopping at the first
+// non-not_found answer), and uses the Tier-1 targeted-op exit-code scheme
+// (0/4/1) via outcome.go's TargetedExitCode — this file calls the
 // dispatcher and hands TargetedExitCode the raw per-call result/error it
 // got back; it never decides the exit code itself (INV-EXIT-1).
 package main
@@ -42,7 +45,7 @@ func newPrShowCmd() *cobra.Command {
 			if err != nil {
 				return reportPrTargetedOutcome(cmd, nil, err, humanizePRShow)
 			}
-			resp, dispatchErr := Dispatch(cmd.Context(), reg, "pr", "show", map[string]string{"id": args[0]})
+			resp, dispatchErr := DispatchTargeted(cmd.Context(), reg, "pr", "show", map[string]string{"id": args[0]})
 			return reportPrTargetedOutcome(cmd, resp, dispatchErr, humanizePRShow)
 		},
 	}
@@ -59,7 +62,7 @@ func newPrCategorizeCmd() *cobra.Command {
 			if err != nil {
 				return reportPrTargetedOutcome(cmd, nil, err, humanizePRCategorize)
 			}
-			resp, dispatchErr := Dispatch(cmd.Context(), reg, "pr", "categorize", map[string]string{
+			resp, dispatchErr := DispatchTargeted(cmd.Context(), reg, "pr", "categorize", map[string]string{
 				"id":       args[0],
 				"category": category,
 			})
@@ -86,7 +89,7 @@ func newPrFeedbackSetCmd() *cobra.Command {
 			if err != nil {
 				return reportPrTargetedOutcome(cmd, nil, err, humanizePRFeedbackSet)
 			}
-			resp, dispatchErr := Dispatch(cmd.Context(), reg, "pr", "feedback_set", map[string]string{
+			resp, dispatchErr := DispatchTargeted(cmd.Context(), reg, "pr", "feedback_set", map[string]string{
 				"id":          args[0],
 				"comment_id":  args[1],
 				"disposition": string(d),

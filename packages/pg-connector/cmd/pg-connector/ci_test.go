@@ -284,28 +284,124 @@ func TestRun_CiRerunFailed_HumanOutput(t *testing.T) {
 	}
 }
 
-func TestRun_CiLogs_AmbiguousMultipleBackends_IsGenericFailure(t *testing.T) {
-	// Targeted-op backend resolution needs exactly one registered backend
-	// (mirroring Dispatch's own convention for connector.pr) — with two
-	// backends registered under connector.ci, "ci logs"/"ci rerun-failed"
-	// cannot resolve unambiguously, so this is the generic exit-1 CLI
-	// failure path, never one of the targeted-op taxonomy codes.
-	writeCiConfigFor(t, "backend-ci-a", "backend-ci-b")
+// TestRun_CiLogs_MultipleBackends_FirstTriedSucceeds replaces the former
+// TestRun_CiLogs_AmbiguousMultipleBackends_IsGenericFailure: "ci logs" is
+// one of this docket's named id-keyed ops, so with two backends
+// registered under connector.ci it no longer hard-fails — it tries each
+// in registration order and returns the first non-not_found answer. Both
+// fakes answer get_logs successfully with DIFFERENT log bytes; the
+// outcome must be the FIRST-registered backend's (backend-ci-multi-a),
+// proving registration order is honored.
+func TestRun_CiLogs_MultipleBackends_FirstTriedSucceeds(t *testing.T) {
+	encodedA := base64.StdEncoding.EncodeToString([]byte("log output A"))
+	encodedB := base64.StdEncoding.EncodeToString([]byte("log output B"))
+	writeOpAwareFakeBackend(t, "backend-ci-multi-a", map[string]string{
+		"get_logs": `{"protocolVersion":1,"schemaVersion":1,"result":"` + encodedA + `"}`,
+	}, `{}`)
+	writeOpAwareFakeBackend(t, "backend-ci-multi-b", map[string]string{
+		"get_logs": `{"protocolVersion":1,"schemaVersion":1,"result":"` + encodedB + `"}`,
+	}, `{}`)
+	writeCiConfigFor(t, "backend-ci-multi-a", "backend-ci-multi-b")
+
+	stdout, _, code := executePr(t, []string{"ci", "logs", "run-1"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
+	}
+	var resp scriptout.Response
+	if err := json.Unmarshal([]byte(stdout), &resp); err != nil {
+		t.Fatalf("decode response: %v (stdout=%s)", err, stdout)
+	}
+	var logs []byte
+	if err := scriptout.Decode(resp.Result, &logs); err != nil {
+		t.Fatalf("decode logs: %v", err)
+	}
+	if string(logs) != "log output A" {
+		t.Fatalf("logs = %q, want the FIRST-registered backend's answer %q", logs, "log output A")
+	}
+}
+
+// TestRun_CiLogs_MultipleBackends_FirstNotFound_SecondSucceeds covers the
+// resolution policy's second branch: the first-tried backend answers
+// not_found, so resolution tries the next registered backend and returns
+// its non-not_found answer.
+func TestRun_CiLogs_MultipleBackends_FirstNotFound_SecondSucceeds(t *testing.T) {
+	encoded := base64.StdEncoding.EncodeToString([]byte("log output from second"))
+	writeOpAwareFakeBackend(t, "backend-ci-multi-notfound", map[string]string{
+		"get_logs": `{"protocolVersion":1,"schemaVersion":1,"error":{"code":"not_found","message":"run run-1 not found"}}`,
+	}, `{}`)
+	writeOpAwareFakeBackend(t, "backend-ci-multi-second", map[string]string{
+		"get_logs": `{"protocolVersion":1,"schemaVersion":1,"result":"` + encoded + `"}`,
+	}, `{}`)
+	writeCiConfigFor(t, "backend-ci-multi-notfound", "backend-ci-multi-second")
+
+	stdout, _, code := executePr(t, []string{"ci", "logs", "run-1"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
+	}
+	var resp scriptout.Response
+	if err := json.Unmarshal([]byte(stdout), &resp); err != nil {
+		t.Fatalf("decode response: %v (stdout=%s)", err, stdout)
+	}
+	var logs []byte
+	if err := scriptout.Decode(resp.Result, &logs); err != nil {
+		t.Fatalf("decode logs: %v", err)
+	}
+	if string(logs) != "log output from second" {
+		t.Fatalf("logs = %q, want the SECOND backend's answer after the first's not_found", logs)
+	}
+}
+
+// TestRun_CiLogs_MultipleBackends_AllNotFound covers the resolution
+// policy's third branch: every registered backend answers not_found, so the
+// aggregate targeted-op result is not_found (CLI exit 4) — the same
+// well-formed-negative-answer taxonomy a single-backend not_found already
+// uses (TestRun_CiLogs_NotFound_Exit4 above), not a broken call.
+func TestRun_CiLogs_MultipleBackends_AllNotFound(t *testing.T) {
+	writeOpAwareFakeBackend(t, "backend-ci-multi-nf-a", map[string]string{
+		"get_logs": `{"protocolVersion":1,"schemaVersion":1,"error":{"code":"not_found","message":"run run-1 not found in a"}}`,
+	}, `{}`)
+	writeOpAwareFakeBackend(t, "backend-ci-multi-nf-b", map[string]string{
+		"get_logs": `{"protocolVersion":1,"schemaVersion":1,"error":{"code":"not_found","message":"run run-1 not found in b"}}`,
+	}, `{}`)
+	writeCiConfigFor(t, "backend-ci-multi-nf-a", "backend-ci-multi-nf-b")
+
+	stdout, _, code := executePr(t, []string{"ci", "logs", "run-1"})
+	if code != 4 {
+		t.Fatalf("exit code = %d, want 4; stdout=%s", code, stdout)
+	}
+	var resp scriptout.Response
+	if err := json.Unmarshal([]byte(stdout), &resp); err != nil {
+		t.Fatalf("decode response: %v (stdout=%s)", err, stdout)
+	}
+	if resp.Error == nil || resp.Error.Code != "not_found" {
+		t.Fatalf("resp.Error = %+v", resp.Error)
+	}
+}
+
+// TestRun_CiLogs_MultipleBackends_FirstError_ShortCircuits covers the
+// resolution policy's short-circuit rule: a non-not_found error from the
+// first-tried backend (here, unauthenticated) is returned immediately,
+// without ever trying the second backend — proven by the second
+// backend's own success response NOT appearing in the outcome.
+func TestRun_CiLogs_MultipleBackends_FirstError_ShortCircuits(t *testing.T) {
+	encoded := base64.StdEncoding.EncodeToString([]byte("should never be returned"))
+	writeOpAwareFakeBackend(t, "backend-ci-multi-err-a", map[string]string{
+		"get_logs": `{"protocolVersion":1,"schemaVersion":1,"error":{"code":"unauthenticated","message":"bad token"}}`,
+	}, `{}`)
+	writeOpAwareFakeBackend(t, "backend-ci-multi-err-b", map[string]string{
+		"get_logs": `{"protocolVersion":1,"schemaVersion":1,"result":"` + encoded + `"}`,
+	}, `{}`)
+	writeCiConfigFor(t, "backend-ci-multi-err-a", "backend-ci-multi-err-b")
 
 	stdout, _, code := executePr(t, []string{"ci", "logs", "run-1"})
 	if code != 1 {
-		t.Fatalf("exit code = %d, want 1", code)
+		t.Fatalf("exit code = %d, want 1 (non-not_found error is the generic failure code); stdout=%s", code, stdout)
 	}
-	// Regression for bug pg2-njx27's "ambiguous registry resolution"
-	// case: this Tier-1 failure (Dispatch's own disambiguation, before
-	// ever reaching a backend) must still produce a JSON error envelope
-	// on stdout, not an empty stdout with the message only as stderr
-	// prose.
 	var resp scriptout.Response
 	if err := json.Unmarshal([]byte(stdout), &resp); err != nil {
-		t.Fatalf("stdout is not a JSON envelope: %v; stdout=%q", err, stdout)
+		t.Fatalf("decode response: %v (stdout=%s)", err, stdout)
 	}
-	if resp.Error == nil || !strings.Contains(resp.Error.Message, "backends registered") {
-		t.Fatalf("resp.Error = %+v, want a message naming the ambiguous-registration failure", resp.Error)
+	if resp.Error == nil || resp.Error.Code != "unauthenticated" {
+		t.Fatalf("resp.Error = %+v, want the first backend's unauthenticated error, never swallowed to fall through to the second", resp.Error)
 	}
 }
