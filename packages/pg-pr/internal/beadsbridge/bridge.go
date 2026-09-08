@@ -416,7 +416,7 @@ func renderCycleDescription(key string, s *store.FeedbackSummary, predecessorID 
 	fmt.Fprintf(&b, "Unaddressed reviewer feedback on %s.\n", key)
 	if s == nil {
 		// No summary available (legacy event): say so rather than implying zero.
-		b.WriteString("\nFeedback breakdown unavailable for this event; run `pg-pr feedback list` for the current items.\n")
+		b.WriteString("\nFeedback breakdown unavailable for this event; run `pg-connector pr show <pr-id>` for the current items.\n")
 	} else {
 		b.WriteString("\n" + renderCycleNote(s) + "\n")
 	}
