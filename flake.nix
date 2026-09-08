@@ -427,6 +427,105 @@
           pass_filenames = true;
           require_serial = true;
         };
+
+        # pg2-m146l: prevent main's own history from being rewritten via a
+        # direct `git rebase` again. Operator decision 2026-09-07 (bead
+        # pg2-m146l comments): main's local reflog showed
+        # "rebase (finish): refs/heads/main onto <sha>" -- main was rebased
+        # directly instead of landed via this workspace's ff-merge-to-main
+        # discipline (CLAUDE.md R-1..R-9), rewriting commit hashes and
+        # breaking a plain `git rebase main` from every branch based on
+        # pre-rewrite main (spurious conflicts replaying an old-hash commit
+        # against its new-hash equivalent). Operator ruled: leave the
+        # rewritten history as-is (already ~20 commits deep), do not
+        # restore it, but add a preventive guard so it cannot happen again.
+        #
+        # git's native `pre-rebase` hook (githooks(5)) is invoked just
+        # before `git rebase` starts and can abort it by exiting non-zero --
+        # exactly the mechanism for "reject the rebase before it rewrites
+        # anything", and it is a first-class stage in this repo's existing
+        # hook-delivery mechanism: `pre-commit.nix`'s `install_stages` is
+        # the union of every enabled hook's `stages`, git-hooks.nix's own
+        # `supportedHooksLib.supportedHooks` already lists "pre-rebase", and
+        # `prek install -t pre-rebase` (confirmed against this repo's pinned
+        # prek, 0.3.11-class) installs a real shim for it -- no new
+        # delivery mechanism needed, just a new hook in this same
+        # `extraHooks` attrset alongside `run-unit-tests`, which the
+        # existing `nix run .#install-pre-commit-hooks` / devShell-entry
+        # flow (and its `correctRelativeHooksPath`/`absolutizeHookConfigPath`
+        # hardening in phillipg-nix-repo-base's pre-commit.nix, which scans
+        # every stage's shim generically) already installs and keeps
+        # worktree-safe.
+        #
+        # ARGUMENT PLUMBING (confirmed empirically, since prek's hook-impl
+        # does NOT forward git's raw pre-rebase positional args to the
+        # underlying hook `entry` -- it passes zero args): pre-commit/prek
+        # instead exposes them as env vars, `PRE_COMMIT_PRE_REBASE_UPSTREAM`
+        # ($1, the upstream being rebased onto) and
+        # `PRE_COMMIT_PRE_REBASE_BRANCH` ($2, the branch being rebased --
+        # set ONLY for the explicit two-arg `git rebase <upstream>
+        # <branch>` form; unset for the far more common "rebase whatever is
+        # currently checked out" form). Per githooks(5), the branch actually
+        # being REWRITTEN is $2 when given, else the current branch -- so
+        # `git rebase main` from a FEATURE branch (rewriting the feature
+        # branch by replaying it onto main) is a normal, allowed operation
+        # and must NOT be blocked; only rebasing the PRIMARY branch itself
+        # (checked out and rebased directly, or explicitly named as the
+        # two-arg `<branch>`) rewrites main's own history and must be
+        # refused. Verified live for both single-arg and explicit two-arg
+        # invocations, blocking exactly the main-rewriting case and
+        # allowing every other combination.
+        #
+        # Primary-branch resolution mirrors `resolve_primary_branch` in
+        # packages/integrate-branch-support/integrate-branch-support/integrate-branch-support.bash
+        # (git config `pgii-integrate-branch.primaryBranch` -> `origin/HEAD`
+        # -> "main") but is INLINED rather than shelling out to that
+        # package's own binary, for the same self-containment reason
+        # `check-git-identity` above is built standalone: a git hook's
+        # `entry` must not depend on another package's binary being
+        # resolvable on PATH at hook-fire time.
+        prevent-main-rebase = {
+          enable = true;
+          name = "prevent-main-rebase";
+          description = "refuse a direct `git rebase` of the primary branch (main) -- landing is ff-merge-to-main only (pg2-m146l)";
+          entry = "${
+            pkgs.writeShellApplication {
+              name = "prevent-main-rebase-hook";
+              runtimeInputs = [ pkgs.git ];
+              text = ''
+                # The branch actually being REWRITTEN: the explicit two-arg
+                # form's branch (PRE_COMMIT_PRE_REBASE_BRANCH) if given,
+                # else whatever is currently checked out. Empty on a
+                # detached HEAD with no explicit branch -- can't be the
+                # primary branch, so it is allowed through untouched
+                # (matches git's own pre-rebase.sample: "we do not
+                # interrupt rebasing detached HEAD").
+                branch="''${PRE_COMMIT_PRE_REBASE_BRANCH:-}"
+                if [ -z "$branch" ]; then
+                  branch="$(git symbolic-ref --short -q HEAD || true)"
+                fi
+
+                primary="$(git config --get pgii-integrate-branch.primaryBranch 2>/dev/null || true)"
+                if [ -z "$primary" ]; then
+                  origin_head="$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null || true)"
+                  primary="''${origin_head#origin/}"
+                fi
+                [ -z "$primary" ] && primary="main"
+
+                if [ -n "$branch" ] && [ "$branch" = "$primary" ]; then
+                  echo "prevent-main-rebase: refusing to rebase '$primary' directly (upstream: ''${PRE_COMMIT_PRE_REBASE_UPSTREAM:-<unknown>})." >&2
+                  echo "This repo lands via ff-merge-to-main (CLAUDE.md R-1..R-9 / the integrate-branch skill), never a direct rebase of '$primary'. Bypass ONLY with explicit operator authorization -- never silently (pg2-m146l)." >&2
+                  exit 1
+                fi
+                exit 0
+              '';
+            }
+          }/bin/prevent-main-rebase-hook";
+          language = "system";
+          pass_filenames = false;
+          always_run = true;
+          stages = [ "pre-rebase" ];
+        };
       };
 
       perSystem =
