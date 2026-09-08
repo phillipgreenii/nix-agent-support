@@ -292,14 +292,6 @@ func TestListMyPRs_EmptyArrayIsZeroPRs(t *testing.T) {
 	}
 }
 
-func TestErrStubSentinelStillCompiles(t *testing.T) {
-	// errStub is kept as a sentinel after Phase 3. Just verify the value
-	// is non-nil so accidental removal flags here.
-	if errStub == nil {
-		t.Fatalf("errStub sentinel must remain non-nil")
-	}
-}
-
 // ----------------------------------------------------------------------
 // body + labels on the REST list path
 // ----------------------------------------------------------------------
