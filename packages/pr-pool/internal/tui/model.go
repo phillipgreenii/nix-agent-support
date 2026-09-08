@@ -371,7 +371,7 @@ func (m *Model) View() string {
 	}
 	switch m.screen {
 	case screenNoCore:
-		return noCoreMessage(m.discoveryPath, m.lastErr, m.theme, m.width)
+		return noCoreMessage(m.discoveryPath, m.lastErr, m.theme, m.width, m.height)
 	case screenQuiescing:
 		return "pr-pool: quiescing (core.state != \"started\")"
 	case screenModal:

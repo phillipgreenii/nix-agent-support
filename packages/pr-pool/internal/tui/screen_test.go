@@ -135,7 +135,7 @@ func TestNoCoreMessage_SanitizesBeforeComposing(t *testing.T) {
 	dirtyErr := errors.New("dial unix \x1b[31msocket\x1b[0m: connection refused")
 	dirtyPath := "/tmp/\x1b[1mpr-pool\x1b[0m/discovery.json"
 
-	got := noCoreMessage(dirtyPath, dirtyErr, render.NewTheme(false), 80)
+	got := noCoreMessage(dirtyPath, dirtyErr, render.NewTheme(false), 80, 0)
 
 	if strings.Contains(got, "\x1b") {
 		t.Fatalf("noCoreMessage output still contains a raw ESC byte: %q", got)
@@ -154,7 +154,7 @@ func TestNoCoreMessage_SanitizesBeforeComposing(t *testing.T) {
 // systemd/launchd detection), the auto-reconnect note, and a press-q line.
 func TestNoCoreMessage_ShapeMatchesDaemonOfflinePrecedent(t *testing.T) {
 	err := fmt.Errorf("tui: poll: %w", core.ErrNoRunningCore)
-	got := noCoreMessage("/var/pr-pool/discovery.json", err, render.NewTheme(false), 80)
+	got := noCoreMessage("/var/pr-pool/discovery.json", err, render.NewTheme(false), 80, 0)
 
 	for _, want := range []string{
 		"No core running",
@@ -171,4 +171,42 @@ func TestNoCoreMessage_ShapeMatchesDaemonOfflinePrecedent(t *testing.T) {
 	if !strings.Contains(got, core.ErrNoRunningCore.Error()) {
 		t.Errorf("noCoreMessage does not carry the underlying error verbatim; got:\n%s", got)
 	}
+}
+
+// TestNoCoreMessage_FillsRequestedHeight is pg2-3ll1n's own regression test:
+// screenNoCore's message (a fixed ~16 lines) previously rendered short of
+// a taller terminal, unlike every other screen (screenMain via
+// layoutZones+padOrExtend, screenModal via render.Modal's lipgloss.Place),
+// which fill their own height by construction. Mirrors zones_test.go's own
+// TestLayoutZones_NormalCaseExactHeight exact-line-count style, since
+// noCoreMessage now reuses that same padOrExtend helper directly.
+func TestNoCoreMessage_FillsRequestedHeight(t *testing.T) {
+	err := fmt.Errorf("tui: poll: %w", core.ErrNoRunningCore)
+
+	t.Run("pads short content up to a taller terminal", func(t *testing.T) {
+		got := noCoreMessage("/var/pr-pool/discovery.json", err, render.NewTheme(false), 80, 40)
+		gotLines := strings.Split(got, "\n")
+		if len(gotLines) != 40 {
+			t.Fatalf("noCoreMessage returned %d lines, want exactly 40 (padded to fill the terminal); got:\n%s", len(gotLines), got)
+		}
+		if !strings.Contains(got, "No core running") {
+			t.Errorf("padding must not drop the message content; got:\n%s", got)
+		}
+	})
+
+	t.Run("never truncates when content already exceeds the requested height", func(t *testing.T) {
+		got := noCoreMessage("/var/pr-pool/discovery.json", err, render.NewTheme(false), 80, 3)
+		natural := noCoreMessage("/var/pr-pool/discovery.json", err, render.NewTheme(false), 80, 0)
+		if got != natural {
+			t.Errorf("a height smaller than the natural content must not truncate it; got:\n%s\nwant (unpadded):\n%s", got, natural)
+		}
+	})
+
+	t.Run("height<=0 is a no-op, matching padOrExtend's own contract", func(t *testing.T) {
+		got := noCoreMessage("/var/pr-pool/discovery.json", err, render.NewTheme(false), 80, 0)
+		gotLines := strings.Split(got, "\n")
+		if len(gotLines) >= 40 {
+			t.Errorf("height<=0 should leave the message at its natural size, not pad it; got %d lines", len(gotLines))
+		}
+	})
 }

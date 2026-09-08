@@ -281,14 +281,23 @@ func TestView_ZeroWidthAlwaysRendersLoading(t *testing.T) {
 
 // TestView_NoCoreScreenRendersNoCoreMessage confirms the no-core screen
 // routes through noCoreMessage (content is nocore_test.go's own concern via
-// screen_test.go).
+// screen_test.go), and -- pg2-3ll1n -- that the routed call is given
+// m.height so the rendered output fills the terminal fullscreen the same
+// way every other screen already does (screen_test.go's own
+// TestNoCoreMessage_FillsRequestedHeight covers noCoreMessage's height-fill
+// contract directly; this test is the end-to-end wiring check that View()
+// actually forwards m.height rather than dropping it).
 func TestView_NoCoreScreenRendersNoCoreMessage(t *testing.T) {
 	m := newTestModel(nil)
 	m.width, m.height = 80, 24
 	m.screen = screenNoCore
 	m.lastErr = fmt.Errorf("tui: poll: %w", core.ErrNoRunningCore)
-	if got := m.View(); !strings.Contains(got, "No core running") {
+	got := m.View()
+	if !strings.Contains(got, "No core running") {
 		t.Fatalf("View() on screenNoCore = %q, want it to route through noCoreMessage", got)
+	}
+	if gotLines := strings.Split(got, "\n"); len(gotLines) != m.height {
+		t.Errorf("View() on screenNoCore returned %d lines, want exactly m.height=%d (fullscreen, like every other screen); got:\n%s", len(gotLines), m.height, got)
 	}
 }
 

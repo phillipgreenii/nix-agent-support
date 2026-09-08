@@ -26,7 +26,19 @@ import (
 // renderHeader) -- the remedy line ("or supervise it as a long-running
 // daemon (the pr-pool-daemon service, if configured).", 85 columns)
 // otherwise exceeds narrow widths unconditionally.
-func noCoreMessage(discoveryPath string, err error, theme render.Theme, width int) string {
+//
+// Height fill (pg2-3ll1n): the width-clipped message is then padded to
+// `height` lines via padOrExtend (zones.go) -- the SAME unexported helper
+// screenMain's own layoutZones already uses to fill the terminal, rather
+// than a new fullscreen mechanism invented for this one screen. Every
+// other screen fills the terminal by construction: screenMain via
+// layoutZones+padOrExtend, screenModal via render.Modal's
+// lipgloss.Place(width, height, ...). screenNoCore's fixed-line message was
+// the one screen left short of that -- passing height<=0 (e.g. from a test
+// that only cares about content) is a no-op, matching padOrExtend's own
+// contract, so this never truncates and never disturbs the existing
+// content-focused callers.
+func noCoreMessage(discoveryPath string, err error, theme render.Theme, width, height int) string {
 	errText := "(no error recorded)"
 	if err != nil {
 		errText = err.Error()
@@ -53,5 +65,6 @@ func noCoreMessage(discoveryPath string, err error, theme render.Theme, width in
 		"",
 		"Press q to quit.",
 	}
-	return render.Block(strings.Join(lines, "\n"), render.EffectiveWidth(width))
+	out := render.Block(strings.Join(lines, "\n"), render.EffectiveWidth(width))
+	return padOrExtend(out, height)
 }
