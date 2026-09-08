@@ -87,10 +87,47 @@ type Request struct {
 	BuildToolVerbs          []VerbScopedApproval
 }
 
-// VerbClassProjectTied is VerbScopedApproval's default Class, and the only
-// class effectpolicy.TrustedCheckoutExec judges as of this slice — see
-// VerbScopedApproval's own doc comment.
+// VerbClassProjectTied is VerbScopedApproval's default Class — see
+// VerbScopedApproval's own doc comment. It requires deletable.
+// DiscoveredVerbs' independent, live confirmation IN ADDITION to this
+// declaration (Q3's ruling); it is NEVER sufficient by itself.
 const VerbClassProjectTied = "project-tied"
+
+// VerbClassInstallableReference is VerbScopedApproval's SECOND judged class
+// (tc-8og1 item 3 sub-slice 5, the final sub-slice of the build-tool family
+// design; tc-vn5z Q1-Q4, ruled 2026-09-08) — added for `nix run`'s
+// installable-reference child (Q4's own named example of a shape
+// interpreter_subcommand.go's recursion alone cannot fully judge). Unlike
+// VerbClassProjectTied, this class is sufficient BY ITSELF: it never
+// requires deletable.DiscoveredVerbs confirmation, because Q1's ruling
+// deliberately reserves flake.nix apps to operator rules.json data — "can't
+// be safely lexically scanned" — so no live-discovery mechanism for a Nix
+// installable exists, or ever will under Q1 as ruled, to independently
+// confirm one. Per Q3's ruling ("operator data governs everything reached
+// by reference"), a flake installable — even a LOCAL one (`.`, `.#foo`) —
+// is reached BY REFERENCE (attribute-path resolution requires evaluating
+// the flake, unlike a justfile recipe header's plain, un-evaluated text),
+// so the operator's own declaration is the WHOLE trust mechanism, not an
+// eligibility gate a second, independent source must also confirm.
+//
+// Scoped narrowly and DELIBERATELY (this sub-slice's own choice, not an
+// operator ruling — see effectpolicy's own classifier, evalcontract package
+// has no direct access to it, this comment records the POLICY, not the
+// mechanics): only a LOCAL flake reference — the literal current-directory
+// flakeref "." or a "."-relative attribute selector on it (".#<attr>",
+// which may itself carry a "^<output>" output selector) — is ever judged
+// Permitted under this class, regardless of what Verb string the operator
+// declares. A remote/registry-resolved installable (`nixpkgs#hello`,
+// `github:owner/repo#app`, `git+https://...`, a bare registry id, an
+// absolute or relative PATH reference outside the bare "."/".#attr" pair,
+// a raw /nix/store path) is DELIBERATELY left Unknown even when an operator
+// declares it under this class — see effectpolicy's own local/non-local
+// classifier (policy.go) for the full rationale and the documented
+// follow-up this narrowing leaves for a later slice: vetting a REMOTE
+// installable's trust (an unpinned flake registry lookup, an arbitrary
+// git/GitHub fetch) is a materially different, higher-stakes risk this
+// slice does not attempt to model or rule on.
+const VerbClassInstallableReference = "installable-reference"
 
 // VerbScopedApproval is one entry of Request.BuildToolVerbs. It mirrors
 // production's internal/rules/configrules.VerbScopedApproval{Tool, Verb}
@@ -127,15 +164,21 @@ const VerbClassProjectTied = "project-tied"
 //     own to approve — it is the ELIGIBILITY gate ("Tool is a build-tool-
 //     family tool I want judged this way"), never a substitute for live
 //     discovery, and never guessed at when discovery disagrees.
-//   - Any OTHER Class value (a future "wrapper", Q2/Q4 territory — tc-8og1
-//     item 3 sub-slice 4, "cmddesc child-expression descriptor") is
-//     recognised as DATA here but not yet judged by any policy: Q2's
-//     ruling (Phillip, 2026-09-08, verbatim on tc-vn5z) is "there should
-//     be a spec for build tools ... if we have an example of a needed
-//     extension, we can discuss it then" — i.e. don't pre-design bespoke
-//     per-tool/per-class policies. An unrecognised Class therefore makes
-//     TrustedCheckoutExec abstain (Unknown), never Permitted and never
-//     Forbidden — the same fail-safe direction as an effect kind no
+//   - VerbClassInstallableReference ("installable-reference") is the
+//     SECOND class judged, added by tc-8og1 item 3 sub-slice 5 (the final
+//     sub-slice) for `nix run`'s installable child — see its own doc
+//     comment for the full contract. Unlike VerbClassProjectTied, an
+//     operator's declaration under this class IS sufficient by itself
+//     (no independent discovery exists or is expected to, per Q1).
+//   - Any OTHER Class value (still reserved, e.g. a future "wrapper" shape
+//     for a child this policy does not yet judge) is recognised as DATA
+//     here but not yet judged by any policy: Q2's ruling (Phillip,
+//     2026-09-08, verbatim on tc-vn5z) is "there should be a spec for
+//     build tools ... if we have an example of a needed extension, we can
+//     discuss it then" — i.e. don't pre-design bespoke per-tool/per-class
+//     policies ahead of a concrete need. An unrecognised Class therefore
+//     makes TrustedCheckoutExec abstain (Unknown), never Permitted and
+//     never Forbidden — the same fail-safe direction as an effect kind no
 //     policy applies to.
 //
 // Child is RESERVED for tc-8og1 item 3 sub-slice 4 (Q4: "a new RoleKind

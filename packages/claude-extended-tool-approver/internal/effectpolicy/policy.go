@@ -1241,6 +1241,12 @@ func (NoReadOfUnreadablePath) Judge(e cmddesc.Effect, ctx PolicyContext) (Findin
 // in this slice — proven only by policy_test.go's direct Judge() calls,
 // the same "building block, no behavior change yet" shape slice 3ag's
 // workspace verb-discovery facet already established.
+//
+// Sub-slice 5 (slice 3ak, the FINAL sub-slice of the build-tool family
+// design) adds judgeBuildToolVerb's second judged Class,
+// evalcontract.VerbClassInstallableReference, for `nix run`'s installable
+// child — see that constant's own doc comment (evalcontract/contract.go)
+// and judgeBuildToolVerb's own doc comment below for the full contract.
 type TrustedCheckoutExec struct{}
 
 // Name implements Policy.
@@ -1276,14 +1282,26 @@ func (TrustedCheckoutExec) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, 
 // use it) is Unknown, mirroring NetworkAccess/KubeContextPolicy's own
 // "dynamic input -> Unknown" first check. Otherwise: no matching
 // PolicyContext.BuildToolVerbs entry for (Family, Operation) is Unknown
-// ("not operator-declared"); a matching entry whose Class is neither ""
-// nor evalcontract.VerbClassProjectTied is Unknown ("not yet judged by
-// this policy" — VerbScopedApproval's own doc comment); a matching
-// project-tied entry is Permitted ONLY when deletable.DiscoveredVerbs
-// (slice 3ag) independently finds Operation among the verbs a Kind named
-// Family discovers at or above abs — otherwise Unknown ("operator
-// declared it, but the workspace's own files do not currently define it —
-// abstain, never guess", per Q3's ruling and this slice's own brief).
+// ("not operator-declared"). A matching entry's Class then selects one of
+// two judged ladders (evalcontract.VerbScopedApproval's own doc comment
+// has the full class vocabulary):
+//
+//   - "" / evalcontract.VerbClassProjectTied: Permitted ONLY when
+//     deletable.DiscoveredVerbs (slice 3ag) independently finds Operation
+//     among the verbs a Kind named Family discovers at or above abs —
+//     otherwise Unknown ("operator declared it, but the workspace's own
+//     files do not currently define it — abstain, never guess", per Q3's
+//     ruling and this slice's own brief).
+//   - evalcontract.VerbClassInstallableReference (tc-8og1 item 3 sub-slice
+//     5): Permitted when, and ONLY when, Operation is itself shaped like a
+//     LOCAL flake reference (isLocalFlakeInstallable) — the operator's
+//     declaration is sufficient by itself here (no independent discovery
+//     exists for a Nix installable, per Q1), but a non-local reference
+//     (a remote/registry-resolved installable) stays Unknown even when
+//     declared — see evalcontract.VerbClassInstallableReference's own doc
+//     comment for why.
+//
+// Any OTHER Class value is Unknown ("not yet judged by this policy").
 func judgeBuildToolVerb(e cmddesc.Effect, abs string, ctx PolicyContext) (Finding, bool) {
 	if e.Dynamic {
 		return Finding{Verdict: Unknown, Reason: "verb is a runtime expansion"}, true
@@ -1296,13 +1314,52 @@ func judgeBuildToolVerb(e cmddesc.Effect, abs string, ctx PolicyContext) (Findin
 	if class == "" {
 		class = evalcontract.VerbClassProjectTied
 	}
-	if class != evalcontract.VerbClassProjectTied {
+	switch class {
+	case evalcontract.VerbClassProjectTied:
+		if workspaceVouchesForVerb(deletable.DefaultKinds(), abs, e.Family, e.Operation) {
+			return Finding{Verdict: Permitted, Reason: fmt.Sprintf("workspace's own %s declaration defines %q as a project-tied verb", e.Family, e.Operation)}, true
+		}
+		return Finding{Verdict: Unknown, Reason: fmt.Sprintf("%s verb %q is operator-declared project-tied, but no %s file at or above CWD defines it — abstaining rather than guessing", e.Family, e.Operation, e.Family)}, true
+	case evalcontract.VerbClassInstallableReference:
+		if isLocalFlakeInstallable(e.Operation) {
+			return Finding{Verdict: Permitted, Reason: fmt.Sprintf("operator declared %s installable %q vetted (a local flake reference — no independent workspace confirmation exists for flake.nix apps, per Q1's ruling, so the declaration alone governs)", e.Family, e.Operation)}, true
+		}
+		return Finding{Verdict: Unknown, Reason: fmt.Sprintf("%s installable %q is not a local flake reference (only \".\" and \".#<attr>\" are modeled by this policy); a remote or registry-resolved installable is deliberately out of scope even when operator-declared", e.Family, e.Operation)}, true
+	default:
 		return Finding{Verdict: Unknown, Reason: fmt.Sprintf("verb class %q is not yet judged by this policy", class)}, true
 	}
-	if workspaceVouchesForVerb(deletable.DefaultKinds(), abs, e.Family, e.Operation) {
-		return Finding{Verdict: Permitted, Reason: fmt.Sprintf("workspace's own %s declaration defines %q as a project-tied verb", e.Family, e.Operation)}, true
+}
+
+// isLocalFlakeInstallable reports whether s — a `nix run` installable
+// operand, captured verbatim as Effect.Operation (tc-8og1 item 3 sub-slice
+// 5) — is one of the two flake-reference spellings
+// evalcontract.VerbClassInstallableReference judges: the bare
+// current-directory flakeref "." (nix's own default when no installable is
+// given at all — see cmddesc's nixRunSchema.DefaultVerb doc comment) or a
+// "."-relative attribute selector on it, ".#<attr>" (attr may itself carry
+// a "^<output>" output selector, e.g. ".#foo^bin" — this function does not
+// parse further than the "."/".#"" prefix; the full attr/output text is
+// compared verbatim against the operator's declared Verb string by
+// findVerbScopedApproval's exact-match lookup, upstream of this call).
+//
+// Every OTHER syntactically valid nix installable is deliberately treated
+// as NOT local, even where a human might call some of them "local enough":
+// a relative/absolute PATH flakeref ("./sub", "../sib", "path:...", "/abs")
+// — these could point at a flake OUTSIDE the current project tree, or
+// require path-arithmetic this function does not attempt; an INDIRECT
+// flakeref (a bare registry id like "nixpkgs" or "blender-bin", with or
+// without "#attr") — resolved through the (mutable, operator/global)
+// flake registry, not project content; a URL-schemed flakeref (github:,
+// gitlab:, sourcehut:, git+https:, git+ssh:, tarball:, flake:...) — an
+// explicit remote fetch; or a raw /nix/store path. See
+// evalcontract.VerbClassInstallableReference's own doc comment for why
+// this scope is deliberately narrow (a documented follow-up, not a gap
+// found and left unaddressed by accident).
+func isLocalFlakeInstallable(s string) bool {
+	if s == "." {
+		return true
 	}
-	return Finding{Verdict: Unknown, Reason: fmt.Sprintf("%s verb %q is operator-declared project-tied, but no %s file at or above CWD defines it — abstaining rather than guessing", e.Family, e.Operation, e.Family)}, true
+	return strings.HasPrefix(s, ".#")
 }
 
 // findVerbScopedApproval returns the first BuildToolVerbs entry matching

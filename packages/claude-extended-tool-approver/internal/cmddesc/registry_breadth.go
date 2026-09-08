@@ -1949,3 +1949,127 @@ var devboxRunSchema = CommandSchema{
 	UnknownFlag:  UnknownFlagInsufficient,
 	EndOfOptions: true,
 }
+
+// ---- nix run: the installable-reference wrapper (slice 3ak, tc-8og1 item 3
+// sub-slice 5 of 5, the FINAL sub-slice of the build-tool family design;
+// tc-vn5z Q1-Q4, ruled 2026-09-08) -------------------------------------------
+//
+// `nix run <installable> [args...]` — the shape Q4's ruling named
+// explicitly as needing NEW descriptor work beyond interpreter_subcommand.go's
+// plain argv recursion ("installable-reference" child), because an
+// installable is a FLAKE REFERENCE (`.`, `.#foo`, `nixpkgs#hello`,
+// `github:owner/repo#app`, ...), not a simple project-defined verb NAME the
+// way a justfile recipe or a package.json script is.
+//
+// WHAT TURNED OUT TO NEED NEW WORK, AND WHAT DID NOT (recorded here because
+// it differs from what the brief anticipated): CAPTURING the installable
+// text needs NO new cmddesc machinery at all — `nix run <installable>` is,
+// argv-shape-wise, IDENTICAL to `just <verb>`: one opaque positional token
+// after the wrapper's own global flags, everything after it inert. The
+// EXISTING VerbFamily/interpretVerbDispatch recursion (slice 3aj) captures
+// it verbatim as Effect.Operation without modification. What DID need new
+// work: (1) DefaultVerb (schema.go, interpreter_subcommand.go) — nix run's
+// BARE form does not merely list things the way just/npm run/devbox run's
+// bare forms do; it still EXECUTES (`nix run` alone behaves exactly like
+// `nix run .`, verified live against this host's nix, see
+// nixRunSchema.DefaultVerb's own comment below) — a genuine gap in the
+// verb-dispatch recursion, since every prior VerbFamily schema's bare form
+// was safe-by-construction; (2) classifying the CAPTURED installable text as
+// a local vs. non-local flake reference — this is NOT a cmddesc/
+// interpretation-layer concern (the text is captured as-is regardless), it
+// is a POLICY-layer concern (effectpolicy.judgeBuildToolVerb's new
+// VerbClassInstallableReference branch, evalcontract/contract.go), because
+// deciding what "trusted" means for a given installable spelling is exactly
+// the operator-declared-eligibility question the rest of the build-tool
+// family policy already lives in, not a parsing concern this package should
+// own.
+//
+// nixSchema only models the "run" subcommand (the target this sub-slice's
+// job names); every other nix subcommand (build, develop, shell, flake,
+// eval, ...) is DELIBERATELY ABSENT — falls through to interpretSubcommand's
+// own "unmodeled subcommand" Insufficiency, the SAME scope decision
+// npmSchema/devboxSchema make for their own tool's much larger CLI surface.
+// `nix build`/`nix flake check`/`nix eval` etc. are read-plus-daemon-side-
+// store-writes territory (tc-vn5z's own 2026-09-07 design note, item 3) —
+// a DIFFERENT effect shape from a wrapper's verb dispatch, and explicitly
+// named there as a gap this sub-slice does not close (no declared
+// deletable.Kind for the Nix store exists either). `nix shell ... -c <cmd>`
+// is ALSO deliberately out of scope: production's own internal/rules/nix
+// already handles it by a DIFFERENT mechanism entirely (recursively
+// evaluating the inner `-c` command as a shell-dialect child, the same
+// shape `nix develop -c`/`nix-shell --run` use) — not installable vetting
+// at all, since `nix shell`'s installable only provisions a PATH, it is not
+// itself executed. Folding it into this slice would conflate two distinct
+// trust questions; a future slice can add it without touching anything
+// here.
+//
+// Verified against this host's installed nix (Nix) 2.34.8 (`nix --version`,
+// `nix run --help`), 2026-09-08.
+var nixSchema = CommandSchema{
+	Name:       "nix",
+	Provenance: "nix (Nix) 2.34.8 (this host, nix --version / nix run --help), 2026-09-08",
+	// Deliberately EMPTY, like npmSchema's own top-level table: nix's global
+	// flags (-L/--print-build-logs, -v/--verbose, --debug, --offline,
+	// --refresh, --option, --arg/--argstr/--expr/--file, ...) can appear
+	// BEFORE the subcommand, and several of them (--expr/--file reinterpret
+	// what "installable" even MEANS; --offline/--refresh change fetch
+	// behaviour) are exactly the trust-relevant surface this sub-slice does
+	// not model — any of them makes the whole invocation Insufficient, the
+	// conservative direction.
+	Flags:        map[string]FlagSpec{},
+	UnknownFlag:  UnknownFlagInsufficient,
+	EndOfOptions: true,
+	Subcommands: map[string]CommandSchema{
+		"run": nixRunSchema,
+	},
+}
+
+// nixRunSchema: `nix run [option...] installable args...` (nix run --help's
+// own synopsis, this host's nix 2.34.8) — VerbFamily: "nix" (matching
+// evalcontract.VerbScopedApproval.Tool). Positional 0 after nix run's own
+// (here: zero) modeled flags is the INSTALLABLE, captured verbatim as
+// Effect.Operation by interpretVerbDispatch (slice 3aj), unmodified —
+// classifying it as local/non-local happens at the POLICY layer (see this
+// file's own "---- nix run ----" section doc comment above).
+//
+// DefaultVerb: "." — `nix run` with ZERO positional arguments resolves and
+// EXECUTES the current directory's own flake default app/package, exactly
+// as if `.` had been given explicitly (nix run --help's own "Run the
+// default app from the current directory" example; confirmed live,
+// 2026-09-08: `nix run` alone in a directory with no flake.nix fails
+// immediately with "could not find a flake.nix file", proving installable
+// resolution — not a safe listing — is what actually happens). This is WHY
+// nixRunSchema needs DefaultVerb where justSchema/npmRunSchema/
+// devboxRunSchema do not: their bare forms only LIST recipes/scripts (an
+// inert introspection, safely left to the ordinary top-level
+// Stdout/ImplicitEffects fallback); nix run's bare form is not analogous.
+//
+// Deliberately EMPTY Flags, the SAME conservative choice as the parent
+// nixSchema and for the SAME reason: essentially every documented `nix run`
+// flag either changes what "installable" resolves to (--impure allows
+// mutable/impure evaluation; --override-input/--override-flake/
+// --inputs-from redirect a flake input or registry entry to something
+// else; --expr/--file reinterpret installables as attribute paths against
+// arbitrary Nix expression text) or changes fetch/trust behaviour
+// (--offline/--refresh/--repair) — none of them is a case this sub-slice's
+// deliberately narrow scope (bare `.`/`.#attr` local references only, see
+// evalcontract.VerbClassInstallableReference's own doc comment) can vouch
+// for safely; any of them fails the whole invocation closed.
+//
+// Stdin/Stdout are deliberately left StdinNever/StdoutNone (the zero
+// values) rather than StdoutMetadata: unlike just/npm run/devbox run's bare
+// listing (whose stdout genuinely IS just names — safe metadata),
+// nix run's stdout — bare OR with an explicit installable — is whatever
+// the EXECUTED PROGRAM writes, unknowable statically and not bounded to
+// metadata. This schema declares no stdio effect at all for either shape,
+// matching interpretVerbDispatch's own explicit-verb path (which likewise
+// never calls stdio() — see its own doc comment).
+var nixRunSchema = CommandSchema{
+	Name:         "run",
+	Provenance:   "nix (Nix) 2.34.8 (this host, nix run --help), 2026-09-08",
+	VerbFamily:   "nix",
+	DefaultVerb:  ".",
+	Flags:        map[string]FlagSpec{},
+	UnknownFlag:  UnknownFlagInsufficient,
+	EndOfOptions: true,
+}

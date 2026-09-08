@@ -680,6 +680,56 @@ var knownSpikeLooser = map[string]spikeLooserEntry{
 			"script in the fixture's own devbox.json (devboxRunSchema is NOT verified live — " +
 			"devbox is not installed on this host, see its own doc comment).",
 	},
+	// nix_run_bare_declared / nix_run_dot_declared / nix_run_dot_attr_declared /
+	// nix_run_trailing_args_opaque_declared (slice 3ak, tc-8og1 item 3
+	// sub-slice 5, the FINAL sub-slice of the build-tool family design):
+	// production's own internal/rules/nix/nix.go DELIBERATELY EXCLUDES
+	// "run" from its nixApproved map — its own code comment states why:
+	// "'nix run' executes an arbitrary flake package with no safe inner
+	// command to evaluate. Returning Abstain defers to Claude Code's
+	// built-in permission prompt." In practice evaluateNix returns
+	// NotApplicable for "run" (falls through nixApproved's lookup) rather
+	// than an explicit Abstain, letting RuleChain continue; no other
+	// production rule recognises "nix run ..." at all, so every one of
+	// these four reaches chain exhaustion (NoOpinion), empirically
+	// confirmed by this row's own "live=noopinion" column. The spike
+	// Permits ONLY when BOTH an operator explicitly declares this EXACT
+	// installable string vetted under evalcontract.
+	// VerbClassInstallableReference AND effectpolicy's own classifier
+	// (isLocalFlakeInstallable) confirms it is a LOCAL flake reference
+	// (never a remote/registry-resolved one, even when declared — see
+	// nix_run_remote_declared_still_abstains, registered separately below
+	// as both-undecided, NOT looser, since it still abstains) — a
+	// narrower, more deliberate condition than production's blanket
+	// refusal to ever approve "nix run", not a loosening of any existing
+	// policy. This is the SAME shape as every prior build-tool-family
+	// looser row (slices 3ah/3aj): the spike is more permissive here only
+	// because it genuinely MODELS a case production has no opinion on,
+	// gated behind an explicit operator opt-in production has no
+	// equivalent mechanism for at all.
+	"nix_run_bare_declared": {
+		Class: "looser-than-abstain",
+		Cause: "production's nix rule deliberately excludes \"run\" from nixApproved, reaching " +
+			"NoOpinion. The spike Permits only because the operator explicitly declared the " +
+			"implicit default installable \".\" vetted under VerbClassInstallableReference, and " +
+			"effectpolicy's own classifier confirms \".\" is local.",
+	},
+	"nix_run_dot_declared": {
+		Class: "looser-than-abstain",
+		Cause: "same root cause as nix_run_bare_declared — this is the explicit spelling of the " +
+			"same installable.",
+	},
+	"nix_run_dot_attr_declared": {
+		Class: "looser-than-abstain",
+		Cause: "same root cause as nix_run_bare_declared, for the local attrpath selector " +
+			"\".#build\" instead of the bare default installable.",
+	},
+	"nix_run_trailing_args_opaque_declared": {
+		Class: "looser-than-abstain",
+		Cause: "same root cause as nix_run_dot_attr_declared — the trailing `-- --verbose` " +
+			"tokens are opaque to interpretVerbDispatch (per its own contract) and do not " +
+			"change the verdict.",
+	},
 }
 
 // TestAgreement drives every case in goldenAgreementCases and

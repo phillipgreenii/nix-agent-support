@@ -135,6 +135,17 @@ func interpretSubcommand(leaf cmdparse.ParsedCommand, schema CommandSchema, ctx 
 // convention of repurposing them to the subcommand — see VerbFamily's own
 // doc comment, schema.go) — see justSchema/npmRunSchema's own doc comments
 // (registry_breadth.go) for the worked bare-invocation cases.
+//
+// UNLESS schema.DefaultVerb is set (tc-8og1 item 3 sub-slice 5; tc-vn5z Q4):
+// nix run is a wrapper whose bare form does NOT merely introspect — it
+// still DISPATCHES, to a schema-declared default verb (see DefaultVerb's own
+// doc comment, schema.go) — so after the ordinary top-level fallback runs
+// (st.finish(), unchanged), an additional EffectExec captures that implicit
+// default the SAME way an explicit verb positional would, so it reaches
+// effectpolicy.judgeBuildToolVerb (and, for a genuinely dynamic bare
+// invocation, there is none to be dynamic about — DefaultVerb is
+// schema-declared text, never argv-derived, so no live-expansion check
+// applies to it).
 func interpretVerbDispatch(leaf cmdparse.ParsedCommand, schema CommandSchema, ctx Context) Interpretation {
 	st, verbIdx := scanGlobal(leaf, schema, ctx)
 	if !st.scanned {
@@ -142,6 +153,9 @@ func interpretVerbDispatch(leaf cmdparse.ParsedCommand, schema CommandSchema, ct
 	}
 	if verbIdx < 0 {
 		st.finish()
+		if schema.DefaultVerb != "" {
+			st.effects = append(st.effects, Effect{Kind: EffectExec, Family: schema.VerbFamily, Operation: schema.DefaultVerb, Source: "implicit"})
+		}
 		return st.result()
 	}
 	source := fmt.Sprintf("arg %d", verbIdx)

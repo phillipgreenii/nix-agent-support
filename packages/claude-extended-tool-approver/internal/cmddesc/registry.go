@@ -74,6 +74,10 @@ func DefaultRegistry() Registry {
 		// verb-dispatch wrappers — see registry_breadth.go's
 		// justSchema/npmSchema/devboxSchema doc comments.
 		justSchema, npmSchema, devboxSchema,
+		// slice 3ak (tc-8og1 item 3 sub-slice 5, final): nix run's
+		// installable-reference verb-dispatch shape — see
+		// registry_breadth.go's nixSchema/nixRunSchema doc comments.
+		nixSchema,
 	)
 }
 

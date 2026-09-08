@@ -584,6 +584,32 @@ type CommandSchema struct {
 	// schema to hand those fields to, so they keep their ordinary,
 	// top-level meaning here: they describe THIS schema's own
 	// bare-invocation case — no verb positional at all (`just` alone, `npm
-	// run` alone) — which interpretVerbDispatch falls back to.
+	// run` alone) — which interpretVerbDispatch falls back to, UNLESS
+	// DefaultVerb overrides that fallback (see its own doc comment).
 	VerbFamily string
+	// DefaultVerb is a VerbFamily schema's verb-dispatch shape for a tool
+	// whose BARE invocation (no verb positional at all) still DISPATCHES —
+	// unlike just/npm run/devbox run, whose bare form only LISTS available
+	// recipes/scripts (a safe, inert introspection covered by the schema's
+	// ordinary top-level Stdout/ImplicitEffects fallback, see VerbFamily's
+	// own doc comment). tc-8og1 item 3 sub-slice 5 (nix run installable
+	// vetting; tc-vn5z Q4): `nix run` with ZERO positional arguments is
+	// documented, and verified live against this host's installed nix (Nix)
+	// 2.34.8 (2026-09-08, `nix run --help`'s own synopsis plus an empty-
+	// directory smoke test — `nix run` alone in a directory with no
+	// flake.nix fails with "could not find a flake.nix file", proving the
+	// installable resolution is attempted immediately, not merely listed),
+	// to behave EXACTLY like `nix run .` — it resolves and executes the
+	// CURRENT directory's own flake default app/package. Empty (the zero
+	// value, every pre-existing VerbFamily schema) preserves
+	// interpretVerbDispatch's original "no verb positional -> fall back to
+	// the schema's own top-level fields" behaviour unchanged. Non-empty
+	// makes interpretVerbDispatch additionally emit an EffectExec{Family:
+	// VerbFamily, Operation: DefaultVerb, Source: "implicit"} — ON TOP OF,
+	// not instead of, the schema's own top-level fields (which run first,
+	// via the ordinary finish() pass, exactly as they would with
+	// DefaultVerb absent) — so a future DefaultVerb schema that ALSO wants
+	// an ordinary implicit path/stdio effect on its bare form is not
+	// precluded from having one.
+	DefaultVerb string
 }

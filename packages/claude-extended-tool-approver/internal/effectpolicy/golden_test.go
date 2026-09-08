@@ -349,6 +349,17 @@ var goldenBuildToolVerbs = map[string][]evalcontract.VerbScopedApproval{
 	"just_trailing_args_opaque_declared":  {{Tool: "just", Verb: "build"}},
 	"npm_run_build_declared_confirmed":    {{Tool: "npm", Verb: "build"}},
 	"devbox_run_build_declared_confirmed": {{Tool: "devbox", Verb: "build"}},
+	// nix run installable vetting (slice 3ak, tc-8og1 item 3 sub-slice 5,
+	// the final sub-slice): Class: VerbClassInstallableReference — unlike
+	// the project-tied entries above, no fixture file backs these; the
+	// operator declaration alone governs (see
+	// evalcontract.VerbClassInstallableReference's own doc comment).
+	"nix_run_bare_declared":                    {{Tool: "nix", Verb: ".", Class: evalcontract.VerbClassInstallableReference}},
+	"nix_run_dot_declared":                     {{Tool: "nix", Verb: ".", Class: evalcontract.VerbClassInstallableReference}},
+	"nix_run_dot_attr_declared":                {{Tool: "nix", Verb: ".#build", Class: evalcontract.VerbClassInstallableReference}},
+	"nix_run_trailing_args_opaque_declared":    {{Tool: "nix", Verb: ".#build", Class: evalcontract.VerbClassInstallableReference}},
+	"nix_run_remote_declared_still_abstains":   {{Tool: "nix", Verb: "nixpkgs#hello", Class: evalcontract.VerbClassInstallableReference}},
+	"nix_run_dot_project_tied_never_confirmed": {{Tool: "nix", Verb: "."}},
 }
 
 var goldenCases = []goldenCase{
@@ -1395,6 +1406,54 @@ var goldenCases = []goldenCase{
 	// installed on this host) — see devboxSchema's own doc comment
 	// (registry_breadth.go).
 	{"devbox_run_build_declared_confirmed", "devbox run build", evalcontract.Approve, nil},
+
+	// nix run installable vetting (slice 3ak, tc-8og1 item 3 sub-slice 5,
+	// the FINAL sub-slice of the build-tool family design; tc-vn5z Q1-Q4).
+	// Unlike the just/npm/devbox cases above, no fixture file is needed —
+	// evalcontract.VerbClassInstallableReference never consults
+	// deletable.DiscoveredVerbs (see its own doc comment); the operator
+	// declaration in goldenBuildToolVerbs alone governs.
+	//
+	// nix_run_bare_declared: bare `nix run` dispatches the implicit
+	// default installable "." (nixRunSchema.DefaultVerb, verified live —
+	// see its own doc comment) — the operator declares "." vetted.
+	{"nix_run_bare_declared", "nix run", evalcontract.Approve, nil},
+	{"nix_run_bare_undeclared", "nix run", evalcontract.Abstain, nil},
+	// nix_run_dot_declared: the explicit spelling of the same installable
+	// as nix_run_bare_declared — proves both spellings reach the same verdict.
+	{"nix_run_dot_declared", "nix run .", evalcontract.Approve, nil},
+	{"nix_run_dot_attr_declared", "nix run .#build", evalcontract.Approve, nil},
+	{"nix_run_dot_attr_undeclared", "nix run .#build", evalcontract.Abstain, nil},
+	// nix_run_trailing_args_opaque_declared: a trailing `-- --verbose` after
+	// the installable (interpretVerbDispatch's own "everything after the
+	// verb is opaque" contract) does not change the verdict.
+	{"nix_run_trailing_args_opaque_declared", "nix run .#build -- --verbose", evalcontract.Approve, nil},
+	// nix_run_remote_declared_still_abstains: the operator declares this
+	// EXACT installable string vetted, but it is not a LOCAL flake
+	// reference — the class's own local-only guardrail still abstains,
+	// proving the narrowing is enforced in code, not merely left unused.
+	{"nix_run_remote_declared_still_abstains", "nix run nixpkgs#hello", evalcontract.Abstain, nil},
+	{"nix_run_remote_undeclared", "nix run github:owner/repo#app", evalcontract.Abstain, nil},
+	// nix_run_dot_project_tied_never_confirmed: declared under the DEFAULT
+	// class (VerbClassProjectTied, since Class is left "") instead of
+	// VerbClassInstallableReference — proves that class can never Permit a
+	// nix verb: no nixKind.Verbs facet exists in deletable
+	// (deliberately, per Q1), so deletable.DiscoveredVerbs can never
+	// independently confirm it, whatever the operator declares.
+	{"nix_run_dot_project_tied_never_confirmed", "nix run .", evalcontract.Abstain, nil},
+	// nix_run_dynamic_installable_abstain: a runtime-expanded installable
+	// token is captured as a Dynamic EffectExec — judgeBuildToolVerb's own
+	// FIRST check abstains on it regardless of any BuildToolVerbs
+	// configuration, so this case deliberately configures none.
+	{"nix_run_dynamic_installable_abstain", `nix run "$INSTALLABLE"`, evalcontract.Abstain, nil},
+	// nix_run_unmodeled_flag_insufficient: nixRunSchema deliberately models
+	// zero flags (see its own doc comment) — any flag before the
+	// installable fails the whole invocation closed.
+	{"nix_run_unmodeled_flag_insufficient", "nix run --impure .#build", evalcontract.Abstain, nil},
+	// nix_build_unmodeled: nixSchema deliberately models only the "run"
+	// subcommand (not this slice's job to cover nix's full CLI) — any
+	// other subcommand stays an unmodeled subcommand, Insufficient.
+	{"nix_build_unmodeled", "nix build .#foo", evalcontract.Abstain, nil},
 }
 
 func TestGolden(t *testing.T) {

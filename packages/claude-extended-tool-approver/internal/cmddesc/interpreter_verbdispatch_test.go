@@ -137,3 +137,78 @@ func TestVerbDispatch_DevboxRun(t *testing.T) {
 		t.Errorf("got %+v, want effects %+v", got, want)
 	}
 }
+
+// TestVerbDispatch_NixRun (tc-8og1 item 3 sub-slice 5; tc-vn5z Q4) covers
+// nixRunSchema's own verb-dispatch shape — the installable positional is
+// captured the SAME way just/npm/devbox capture a verb (no new capture
+// machinery needed, see registry_breadth.go's own "---- nix run ----"
+// doc comment) — plus the ONE genuinely new piece this sub-slice added,
+// DefaultVerb: unlike every prior VerbFamily schema, a BARE `nix run`
+// (zero positionals) still dispatches, to the schema-declared default "."
+// (nix run's own documented/verified-live current-directory default),
+// rather than falling back to a safe, effect-less listing.
+func TestVerbDispatch_NixRun(t *testing.T) {
+	reg := DefaultRegistry()
+	schema, ok := reg.Lookup("nix")
+	if !ok {
+		t.Fatal("nix not registered")
+	}
+	in, ok := LookupInterpreter(schema.Interpreter)
+	if !ok {
+		t.Fatal("no interpreter resolved for nix")
+	}
+
+	t.Run("bare nix run dispatches the implicit default installable, not a safe listing", func(t *testing.T) {
+		got := in.Interpret(leaf(t, "nix run"), schema, Context{})
+		want := []Effect{{Kind: EffectExec, Family: "nix", Operation: ".", Source: "implicit"}}
+		if !got.Sufficient || !reflect.DeepEqual(got.Effects, want) {
+			t.Errorf("got %+v, want effects %+v", got, want)
+		}
+	})
+
+	t.Run("explicit installable captured verbatim as Operation", func(t *testing.T) {
+		got := in.Interpret(leaf(t, "nix run .#build"), schema, Context{})
+		want := []Effect{{Kind: EffectExec, Family: "nix", Operation: ".#build", Source: "arg 0"}}
+		if !got.Sufficient || !reflect.DeepEqual(got.Effects, want) {
+			t.Errorf("got %+v, want effects %+v", got, want)
+		}
+	})
+
+	t.Run("a remote/registry installable is captured the same way — classification is a policy concern, not this layer's", func(t *testing.T) {
+		got := in.Interpret(leaf(t, "nix run nixpkgs#hello"), schema, Context{})
+		want := []Effect{{Kind: EffectExec, Family: "nix", Operation: "nixpkgs#hello", Source: "arg 0"}}
+		if !got.Sufficient || !reflect.DeepEqual(got.Effects, want) {
+			t.Errorf("got %+v, want effects %+v", got, want)
+		}
+	})
+
+	t.Run("trailing args after -- are opaque", func(t *testing.T) {
+		got := in.Interpret(leaf(t, "nix run .#build -- --verbose"), schema, Context{})
+		want := []Effect{{Kind: EffectExec, Family: "nix", Operation: ".#build", Source: "arg 0"}}
+		if !got.Sufficient || !reflect.DeepEqual(got.Effects, want) {
+			t.Errorf("got %+v, want effects %+v", got, want)
+		}
+	})
+
+	t.Run("any flag before the installable fails closed — nixRunSchema deliberately models zero flags", func(t *testing.T) {
+		got := in.Interpret(leaf(t, "nix run --impure .#build"), schema, Context{})
+		if got.Sufficient {
+			t.Errorf("got Sufficient=true, want --impure (unmodeled) to fail the interpretation closed: %+v", got)
+		}
+	})
+
+	t.Run("dynamic installable captured as a Dynamic EffectExec, still Sufficient", func(t *testing.T) {
+		got := in.Interpret(leaf(t, `nix run "$INSTALLABLE"`), schema, Context{})
+		want := []Effect{{Kind: EffectExec, Family: "nix", Dynamic: true, Source: "arg 0"}}
+		if !got.Sufficient || !reflect.DeepEqual(got.Effects, want) {
+			t.Errorf("got %+v, want effects %+v", got, want)
+		}
+	})
+
+	t.Run("an unmodeled nix subcommand stays unmodeled (not this slice's job)", func(t *testing.T) {
+		got := in.Interpret(leaf(t, "nix build .#foo"), schema, Context{})
+		if got.Sufficient {
+			t.Errorf("got Sufficient=true for nix build, want unmodeled subcommand insufficiency: %+v", got)
+		}
+	})
+}

@@ -325,6 +325,57 @@ func TestTrustedCheckoutExecPolicy_BuildToolFamily(t *testing.T) {
 	// TestTrustedCheckoutExecPolicy above; not re-asserted here.
 }
 
+// TestTrustedCheckoutExecPolicy_InstallableReference (tc-8og1 item 3
+// sub-slice 5, the final sub-slice; tc-vn5z Q1-Q4) exercises
+// judgeBuildToolVerb's second judged class, evalcontract.
+// VerbClassInstallableReference: unlike VerbClassProjectTied (proven by
+// TestTrustedCheckoutExecPolicy_BuildToolFamily above), an operator's
+// declaration is sufficient BY ITSELF here — no deletable.DiscoveredVerbs
+// confirmation is consulted or possible (no nixKind.Verbs facet exists,
+// deliberately, per Q1) — but ONLY for an installable this policy
+// classifies as LOCAL ("." or ".#<attr>"); a remote/registry-resolved
+// installable stays Unknown even when explicitly declared under this
+// class, proving the local-only guardrail is enforced in CODE, not merely
+// left to operator discipline.
+func TestTrustedCheckoutExecPolicy_InstallableReference(t *testing.T) {
+	// Deliberately NO nix-related marker file anywhere: this class never
+	// consults deletable.DiscoveredVerbs, so an empty CWD (no justfile/
+	// package.json/devbox.json/flake.nix at all) must still permit a
+	// declared local installable.
+	root := t.TempDir()
+
+	exec := func(verb string, dynamic bool) cmddesc.Effect {
+		return cmddesc.Effect{Kind: cmddesc.EffectExec, Family: "nix", Operation: verb, Dynamic: dynamic}
+	}
+	installable := func(verb string) []evalcontract.VerbScopedApproval {
+		return []evalcontract.VerbScopedApproval{{Tool: "nix", Verb: verb, Class: evalcontract.VerbClassInstallableReference}}
+	}
+
+	cases := []struct {
+		name    string
+		e       cmddesc.Effect
+		ctx     PolicyContext
+		verdict FindingVerdict
+	}{
+		{"declared local \".\": permitted, no discovery needed", exec(".", false), PolicyContext{CWD: root, BuildToolVerbs: installable(".")}, Permitted},
+		{"declared local \".#build\": permitted", exec(".#build", false), PolicyContext{CWD: root, BuildToolVerbs: installable(".#build")}, Permitted},
+		{"declared local \".#foo^bin\" (output selector): permitted", exec(".#foo^bin", false), PolicyContext{CWD: root, BuildToolVerbs: installable(".#foo^bin")}, Permitted},
+		{"undeclared local \".\": unknown (no operator declaration)", exec(".", false), PolicyContext{CWD: root}, Unknown},
+		{"declared but a DIFFERENT installable string: unknown", exec(".#build", false), PolicyContext{CWD: root, BuildToolVerbs: installable(".#deploy")}, Unknown},
+		{"declared remote registry ref \"nixpkgs#hello\": still unknown — not local", exec("nixpkgs#hello", false), PolicyContext{CWD: root, BuildToolVerbs: installable("nixpkgs#hello")}, Unknown},
+		{"declared remote github ref: still unknown — not local", exec("github:owner/repo#app", false), PolicyContext{CWD: root, BuildToolVerbs: installable("github:owner/repo#app")}, Unknown},
+		{"declared relative path ref \"./sub#foo\": still unknown — deliberately out of the narrow local scope", exec("./sub#foo", false), PolicyContext{CWD: root, BuildToolVerbs: installable("./sub#foo")}, Unknown},
+		{"dynamic installable: unknown regardless of declaration", exec("$INSTALLABLE", true), PolicyContext{CWD: root, BuildToolVerbs: installable(".")}, Unknown},
+		{"no BuildToolVerbs configured at all (migration safety)", exec(".", false), PolicyContext{CWD: root}, Unknown},
+	}
+	for _, tc := range cases {
+		f, applies := (TrustedCheckoutExec{}).Judge(tc.e, tc.ctx)
+		if !applies || f.Verdict != tc.verdict {
+			t.Errorf("%s: applies=%v verdict=%s (%s), want %s", tc.name, applies, f.Verdict, f.Reason, tc.verdict)
+		}
+	}
+}
+
 // TestRemotePathGuard (slice 3aa, tc-lc8f item 4g; tc-vn5z item 4): a PATH
 // effect tagged Remote abstains by default under every one of the four
 // wrapped policies, even where the LOCAL verdict would have been Forbidden
