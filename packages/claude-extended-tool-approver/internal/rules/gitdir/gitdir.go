@@ -176,6 +176,41 @@
 // path (threaded through bashAccessLeaves' note closure) was
 // credential-bearing before deciding Ask vs. Abstain.
 //
+// # PERSISTENT-SPELLING WORKTREE/GIT-DIR REDIRECTS (tc-mzr5)
+//
+// GIT_DIR/GIT_WORK_TREE/… and --git-dir/--work-tree redirect the effective
+// repository for ONE invocation. Four other spellings persist the identical
+// redirection into `.git/config` or a worktree registration, so every LATER
+// git command inherits it with no env var or flag in sight — the shape
+// tc-7mqr found live in this repo's own canonical clone (an undetermined
+// writer set `core.worktree` in `.git/config` to a workforest path, so every
+// subsequent `git` invocation against the canonical clone silently operated
+// on the workforest's files instead):
+//
+//   - `git config core.worktree <path>` (any --global/--system/--local/
+//     --worktree scope spelling) — writes core.worktree in the invocation's
+//     own resolved config file.
+//   - `git config --file <path> … core.worktree <value>` — writes it into an
+//     ARBITRARY file, bypassing repo resolution entirely.
+//   - `git init --separate-git-dir=<path>` (or the space-separated form) —
+//     relocates the repository's OWN administrative directory.
+//   - `git worktree add`/`git worktree move` — creates or relocates a linked
+//     worktree at a caller-chosen path.
+//
+// gitWorktreeRedirectTarget recognises all four (see its own doc and its
+// three per-shape helpers) and Evaluate treats a match exactly like
+// envVarRedirect: dirWrite, subject to the SAME tempFixtureCarveOutApplies
+// relaxation, folding in both the invocation's own effective directory and
+// the shape's own target path as participants (see that function's
+// gitPorcelain branch) — "every repo-locating operand must independently
+// resolve under a temp root" applies here precisely as it already does to
+// GIT_DIR/--git-dir/--work-tree. Every OTHER git subcommand is unaffected;
+// in particular `git worktree remove/list/prune/repair` are deliberately NOT
+// matched (see gitWorktreeSubcommandTarget's doc), and the operator ruling
+// authorizing this (tc-mzr5, 2026-09-08) explicitly keeps the pre-existing
+// GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE/GIT_COMMON_DIR/GIT_OBJECT_DIRECTORY
+// refusal itself out of scope — that question is tracked separately (tc-j0aa).
+//
 // SYNTACTIC ROLE, not bare text. A git-metadata path token is a violation only
 // when it is a path the command actually OPERATES ON. The rule therefore parses
 // the command and inspects operands by role, following
@@ -280,7 +315,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		} else {
 			rootLeaves = cmdparse.RootLeavesOf(input)
 		}
-		if dir, matched, credentialCopyOut, envVarRedirect := bashAccessLeaves(leaves, scope, rootLeaves); matched {
+		if dir, matched, credentialCopyOut, envVarRedirect, worktreeRedirect := bashAccessLeaves(leaves, scope, rootLeaves); matched {
 			if dir == dirWrite && tempFixtureCarveOutApplies(leaves, input.CWD) {
 				// pg2-yoqsr R1-R6: every repo-locating operand this leaf carries
 				// resolves under a temporary root, so this is the disposable-
@@ -290,7 +325,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 				// after it decide, unchanged from today's non-.git traffic.
 				return hookio.NotApplicable()
 			}
-			return r.verdict(dir, credentialCopyOut, envVarRedirect)
+			return r.verdict(dir, credentialCopyOut, envVarRedirect, worktreeRedirect)
 		}
 	case "Read":
 		path, err := input.FilePath()
@@ -298,7 +333,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 			return hookio.RuleResult{}, fmt.Errorf("git-directory: read file_path: %w", err)
 		}
 		if isGitMetadataPath(path) {
-			return r.verdict(dirRead, false, false)
+			return r.verdict(dirRead, false, false, false)
 		}
 	case "Write", "Edit", "MultiEdit", "Delete":
 		path, err := input.FilePath()
@@ -312,7 +347,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 				// root is a disposable fixture, not a real repository.
 				return hookio.NotApplicable()
 			}
-			return r.verdict(dirWrite, false, false)
+			return r.verdict(dirWrite, false, false, false)
 		}
 	case "Glob", "Grep":
 		path, err := input.SearchPath()
@@ -320,7 +355,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 			return hookio.RuleResult{}, fmt.Errorf("git-directory: read search path: %w", err)
 		}
 		if isGitMetadataPath(path) {
-			return r.verdict(dirRead, false, false)
+			return r.verdict(dirRead, false, false, false)
 		}
 	}
 	// No .git path anywhere in this call: not this rule's business, and the generic
@@ -362,13 +397,28 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 // The four callers that pass dirRead/dirCopyOut/the Read/Write/Glob/Grep
 // dirWrite case pass a constant false since none of them can reach this
 // shape (it is Bash-only: the env var binding is a shell construct).
-func (r *Rule) verdict(d direction, credentialCopyOut bool, envVarRedirect bool) (hookio.RuleResult, error) {
+//
+// worktreeRedirect (tc-mzr5) is consulted ONLY in the dirWrite case,
+// alongside envVarRedirect, to pick a reason for the PERSISTENT-SPELLING
+// counterpart of the same hazard: a leaf matched by gitWorktreeRedirectTarget
+// (`git config core.worktree`/`git config --file <path> … core.worktree`/
+// `git init --separate-git-dir`/`git worktree add`/`git worktree move`). Like
+// envVarRedirect, this affects ONLY the Reason text — the decision is still a
+// hard Reject, still relaxed only by tempFixtureCarveOutApplies — and it
+// matters for the identical reason: the generic write-refusal reason below
+// ("modify it through git metadata under .git/ directly") is misleading for a
+// shape that never touches `.git/` bytes directly at all, only through `git`
+// itself. The four callers that pass dirRead/dirCopyOut/the Read/Write/Glob/
+// Grep dirWrite case pass a constant false since none of them can reach this
+// shape either (it is Bash-only, and specific to a `git` invocation).
+func (r *Rule) verdict(d direction, credentialCopyOut bool, envVarRedirect bool, worktreeRedirect bool) (hookio.RuleResult, error) {
 	switch d {
 	case dirWrite:
 		reason := "refusing to write git metadata under .git/ directly — modify it through git commands only " +
 			"(permitted only when the effective git directory resolves under a temporary root — see " +
 			"docs/adr/0059-ceta-temp-repo-carve-out.md in phillipgreenii-nix-agent-support)"
-		if envVarRedirect {
+		switch {
+		case envVarRedirect:
 			reason = "refusing to redirect git's effective repository via GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE/" +
 				"GIT_COMMON_DIR/GIT_OBJECT_DIRECTORY — refused regardless of the git subcommand that follows, " +
 				"even a read like `git status`, `git worktree list` or `git config --get` " +
@@ -376,6 +426,16 @@ func (r *Rule) verdict(d direction, credentialCopyOut bool, envVarRedirect bool)
 				"docs/adr/0059-ceta-temp-repo-carve-out.md in phillipgreenii-nix-agent-support); " +
 				"to point git at a specific directory without tripping this guard, use `git -C <path> <subcommand>` " +
 				"instead of the env-var redirect"
+		case worktreeRedirect:
+			reason = "refusing to redirect a repository's worktree/git-directory location via a persistent " +
+				"spelling — `git config core.worktree`, `git config --file <path> … core.worktree`, " +
+				"`git init --separate-git-dir`, or `git worktree add`/`git worktree move` — the same hazard " +
+				"GIT_DIR/GIT_WORK_TREE/--git-dir/--work-tree refuse, by a spelling that PERSISTS the " +
+				"redirection in .git/config or a worktree registration rather than lasting only one " +
+				"invocation (tc-mzr5, same incident class as tc-7mqr) " +
+				"(permitted only when every repo-locating operand this command carries resolves under a " +
+				"temporary root — see docs/adr/0059-ceta-temp-repo-carve-out.md in " +
+				"phillipgreenii-nix-agent-support)"
 		}
 		return hookio.RuleResult{
 			Decision: hookio.Reject,
@@ -408,13 +468,14 @@ func (r *Rule) verdict(d direction, credentialCopyOut bool, envVarRedirect bool)
 // pipeScope fall back to lazily parsing scopeText on first use — exactly this
 // function's behaviour before ADR 0039 step 3.
 //
-// The third and fourth values bashAccessLeaves returns (credentialCopyOut,
-// pg2-pcm1m; envVarRedirect, pg2-uejmb) are deliberately dropped here: every
-// existing caller of bashAccess wants only the direction/matched pair, and
-// Evaluate — the one caller that needs either flag to pick verdict()'s
-// dirCopyOut/dirWrite reason — calls bashAccessLeaves directly instead.
+// The third, fourth and fifth values bashAccessLeaves returns
+// (credentialCopyOut, pg2-pcm1m; envVarRedirect, pg2-uejmb; worktreeRedirect,
+// tc-mzr5) are deliberately dropped here: every existing caller of bashAccess
+// wants only the direction/matched pair, and Evaluate — the one caller that
+// needs any of the three to pick verdict()'s dirCopyOut/dirWrite reason —
+// calls bashAccessLeaves directly instead.
 func bashAccess(leafText, scopeText string) (direction, bool) {
-	dir, matched, _, _ := bashAccessLeaves(cmdparse.Parse(leafText), scopeText, nil)
+	dir, matched, _, _, _ := bashAccessLeaves(cmdparse.Parse(leafText), scopeText, nil)
 	return dir, matched
 }
 
@@ -443,8 +504,15 @@ func bashAccess(leafText, scopeText string) (direction, bool) {
 // to let verdict() choose a more specific dirWrite reason for that shape —
 // see verdict's own doc — and does not affect dir/matched/credentialCopyOut
 // at all.
-func bashAccessLeaves(leaves []cmdparse.ParsedCommand, scopeText string, rootLeaves []cmdparse.ParsedCommand) (direction, bool, bool, bool) {
-	dir, matched, credentialCopyOut, envVarRedirect := dirRead, false, false, false
+//
+// The fifth return, worktreeRedirect (tc-mzr5), is true iff a gitPorcelain
+// leaf matched gitWorktreeRedirectTarget — one of the four persistent
+// spellings documented in the package doc's "PERSISTENT-SPELLING WORKTREE/
+// GIT-DIR REDIRECTS" section. Like envVarRedirect it exists only to let
+// verdict() choose a more specific dirWrite reason and does not affect
+// dir/matched/credentialCopyOut/envVarRedirect.
+func bashAccessLeaves(leaves []cmdparse.ParsedCommand, scopeText string, rootLeaves []cmdparse.ParsedCommand) (direction, bool, bool, bool, bool) {
+	dir, matched, credentialCopyOut, envVarRedirect, worktreeRedirect := dirRead, false, false, false, false
 	note := func(d direction, path string) {
 		dir = worse(dir, d)
 		matched = true
@@ -458,7 +526,11 @@ func bashAccessLeaves(leaves []cmdparse.ParsedCommand, scopeText string, rootLea
 		// own ARGUMENTS are never a violation and the dedicated `git` rule judges
 		// them. Scoped to the operands only: a redirection or an assignment on the
 		// same leaf (`git status > .git/foo`) is NOT a git-mediated access and is
-		// still checked below.
+		// still checked below. EXCEPT for gitWorktreeRedirectTarget's four shapes
+		// (tc-mzr5, checked in the `else` arm just below): those ARE git's own
+		// arguments, but they persist the identical GIT_DIR/--work-tree hazard into
+		// `.git/config` or a worktree registration, which is a decision this rule —
+		// not the dedicated `git` rule — already owns for the env-var/flag spelling.
 		gitPorcelain := false
 		if base, _ := cmdparse.EffectiveExec(pc); base == "git" {
 			gitPorcelain = true
@@ -480,6 +552,19 @@ func bashAccessLeaves(leaves []cmdparse.ParsedCommand, scopeText string, rootLea
 					note(commandDirection(pc, func(s string) bool { return s == tok }, pipes), tok)
 				}
 			}
+		} else if _, redirectMatched := gitWorktreeRedirectTarget(pc.Args); redirectMatched {
+			// tc-mzr5: a persistent-spelling redirect of the repository's
+			// worktree/git-directory location — see gitWorktreeRedirectTarget's own
+			// doc for the four shapes. Treated as dirWrite exactly like the
+			// pre-existing GIT_DIR/GIT_WORK_TREE env-var redirect just below: it does
+			// not itself overwrite `.git/` bytes, but it redirects every SUBSEQUENT
+			// git operation onto a caller-chosen location — the identical hazard by
+			// a persistent spelling rather than a one-shot env var/flag. The target
+			// path itself is not needed here (only whether this leaf matched); the
+			// carve-out re-derives and resolves it in tempFixtureCarveOutApplies.
+			dir = worse(dir, dirWrite)
+			matched = true
+			worktreeRedirect = true
 		}
 		for _, rd := range pc.Redirections {
 			if !isGitMetadataPath(rd.Path) {
@@ -518,7 +603,7 @@ func bashAccessLeaves(leaves []cmdparse.ParsedCommand, scopeText string, rootLea
 			}
 		}
 	}
-	return dir, matched, credentialCopyOut, envVarRedirect
+	return dir, matched, credentialCopyOut, envVarRedirect, worktreeRedirect
 }
 
 // tempFixtureCarveOutApplies implements pg2-yoqsr's R1-R6 temp-root
@@ -543,7 +628,14 @@ func bashAccessLeaves(leaves []cmdparse.ParsedCommand, scopeText string, rootLea
 //     (see cmdparse's unwrapCommand), so `env GIT_DIR=... git -C ... init` —
 //     this bead's own reproduction shape — reaches this exactly like the
 //     native `GIT_DIR=... git -C ... init` spelling: no separate unwrapping
-//     belongs here.
+//     belongs here;
+//   - tc-mzr5: for a `git` leaf matching gitWorktreeRedirectTarget's four
+//     persistent-spelling shapes, BOTH the leaf's own effective directory
+//     (leafCwd — the repo/config file the write lands in or against, since
+//     none of these four shapes carries an env var that could outrank it the
+//     way GIT_DIR outranks `-C`) AND the shape's own target path (the
+//     `core.worktree` value or `--file` target, the `--separate-git-dir`
+//     value, or the worktree add/move destination).
 //
 // MIXED REAL+TEMP — the R2 regression this bead exists to keep refused,
 // `GIT_DIR=<real-canonical>/.git git -C <tmpdir> config ...` — fails this on
@@ -571,6 +663,16 @@ func tempFixtureCarveOutApplies(leaves []cmdparse.ParsedCommand, cwd string) boo
 			}
 			for _, v := range workTrees {
 				add(leafCwd, v)
+			}
+			if target, matched := gitWorktreeRedirectTarget(pc.Args); matched {
+				// tc-mzr5: unlike GIT_DIR/--git-dir/--work-tree above, none of the
+				// four persistent-spelling shapes carries an env var that could
+				// outrank leafCwd for repo location, so leafCwd itself must be an
+				// explicit participant here — a write landing in a REAL checkout's
+				// config must stay refused even when the shape's own target
+				// happens to be a temp path, and vice versa.
+				add(cwd, leafCwd)
+				add(leafCwd, target)
 			}
 		} else {
 			tokens, _ := pathOperands(pc)
@@ -600,6 +702,190 @@ func tempFixtureCarveOutApplies(leaves []cmdparse.ParsedCommand, cwd string) boo
 		}
 	}
 	return true
+}
+
+// gitWorktreeRedirectTarget detects tc-mzr5's four PERSISTENT-SPELLING
+// redirect hazards on a `git` invocation — see the package doc's
+// "PERSISTENT-SPELLING WORKTREE/GIT-DIR REDIRECTS" section for why they are
+// grouped with GIT_DIR/GIT_WORK_TREE/--git-dir/--work-tree as one hazard
+// class. args is the argv AFTER the `git` executable itself — the same slice
+// cmdparse.EffectiveExec/cmdparse.GitInvocation already take, and both of
+// this function's two callers (bashAccessLeaves' detection arm,
+// tempFixtureCarveOutApplies' participant-gathering arm) pass pc.Args
+// directly, exactly as the pre-existing GitDirWorkTreeOperands call does.
+//
+// The returned target is the ONE operand whose temp-root membership decides
+// the carve-out for whichever shape matched — see
+// gitConfigCoreWorktreeWriteTarget, gitInitSeparateGitDirTarget and
+// gitWorktreeSubcommandTarget's own docs for which operand that is, per
+// shape, and why. Every other git subcommand — including a bare `.git`-path
+// OPERAND to `git` itself, which the "SYNTACTIC ROLE, not bare text" policy
+// above leaves for the dedicated `git` rule to judge — returns matched=false,
+// unchanged from before this bead.
+func gitWorktreeRedirectTarget(args []string) (target string, matched bool) {
+	_, subcmd, rest := cmdparse.GitInvocation(args)
+	switch subcmd {
+	case "config":
+		return gitConfigCoreWorktreeWriteTarget(rest)
+	case "init":
+		return gitInitSeparateGitDirTarget(rest)
+	case "worktree":
+		return gitWorktreeSubcommandTarget(rest)
+	}
+	return "", false
+}
+
+// gitConfigCoreWorktreeWriteTarget implements tc-mzr5 shapes 1 and 2: a
+// `git config` invocation that WRITES the `core.worktree` key, either in the
+// invocation's own resolved config file (shape 1: `git config core.worktree
+// <path>`, in any --global/--system/--local/--worktree scope spelling — none
+// of those flags is treated specially, since none changes whether this is a
+// core.worktree write, only WHICH file it lands in, and that file is exactly
+// what tempFixtureCarveOutApplies' own leafCwd participant already covers)
+// or an explicit `--file`/`-f` target (shape 2: `git config --file <path> …
+// core.worktree <value>`). rest is cmdparse.GitInvocation's own `rest` for a
+// `git config` invocation — the argv AFTER the "config" subcommand token.
+//
+// THE RETURNED TARGET is the operand whose temp-root membership decides the
+// carve-out for THIS shape specifically: shape 2's `--file <path>` names the
+// file the write actually lands in — an ARBITRARY file, not necessarily
+// anything git would otherwise have resolved to — so THAT path is what must
+// resolve under a temp root, not the value being written. Shape 1 has no
+// such explicit file, so the VALUE (the path core.worktree would be set to)
+// is returned instead. Either way, gitWorktreeRedirectTarget's caller in
+// tempFixtureCarveOutApplies folds in the invocation's own effective
+// directory (leafCwd) as a SECOND, independent participant, so a write
+// landing in a real checkout's config stays refused even when the
+// value/--file path here happens to be a temp one.
+//
+// A BARE READ (`git config core.worktree`, `git config --get core.worktree`,
+// `git config --file <path> --get core.worktree`) is NOT matched: none of
+// them name a VALUE operand after the key, which is the same operand-count
+// signal internal/rules/git's own configIsRead/configWriteIndicated use for
+// the general case — reimplemented here in miniature rather than imported,
+// because a rule package must not import another rule's package (see this
+// file's package doc, "cmdparse ... a rule may not import another rule's
+// package") and because this bead's own vocabulary is narrower: only the
+// `core.worktree` key, only a SET. `--unset`/`--unset-all core.worktree` are
+// also NOT matched — neither names a value operand to check the temp-root
+// carve-out against, and tc-mzr5's own ruling names only the SET spellings;
+// an unset of core.worktree is a separate, unaddressed gap, not a regression
+// this bead introduces.
+func gitConfigCoreWorktreeWriteTarget(rest []string) (target string, matched bool) {
+	var fileFlagValue string
+	hasFile := false
+	var operands []string
+	i := 0
+	for i < len(rest) {
+		a := rest[i]
+		switch {
+		case a == "--file" || a == "-f":
+			if i+1 < len(rest) {
+				fileFlagValue, hasFile = rest[i+1], true
+			}
+			i += 2
+		case strings.HasPrefix(a, "--file="):
+			fileFlagValue, hasFile = strings.TrimPrefix(a, "--file="), true
+			i++
+		case a == "--type" || a == "-t" || a == "--comment":
+			i += 2 // a separated value-taking flag: skip the flag AND its value
+		case strings.HasPrefix(a, "-"):
+			i++ // a boolean scope/format flag: --global/--system/--local/--worktree/…
+		default:
+			operands = append(operands, a)
+			i++
+		}
+	}
+	if len(operands) == 0 {
+		return "", false
+	}
+	keyIdx := 0
+	if operands[0] == "set" {
+		keyIdx = 1 // git 2.54's `git config set <key> <value>` subcommand form
+	}
+	if keyIdx >= len(operands) || strings.ToLower(operands[keyIdx]) != "core.worktree" {
+		return "", false
+	}
+	if keyIdx+1 >= len(operands) {
+		return "", false // a bare key, or --unset/--unset-all: no value written
+	}
+	if hasFile {
+		return fileFlagValue, true
+	}
+	return operands[keyIdx+1], true
+}
+
+// gitInitSeparateGitDirTarget implements tc-mzr5 shape 3: `git init
+// --separate-git-dir=<path>` and the space-separated `--separate-git-dir
+// <path>` form (git accepts both). rest is cmdparse.GitInvocation's own
+// `rest` for a `git init` invocation — the argv AFTER the "init" subcommand
+// token. The returned target is the separate git-directory path itself: it
+// is where init would actually create/relocate the repository's
+// administrative files — the same "where does the write land" question
+// shapes 1/2's --file target answers for `git config`.
+func gitInitSeparateGitDirTarget(rest []string) (target string, matched bool) {
+	for i, a := range rest {
+		if strings.HasPrefix(a, "--separate-git-dir=") {
+			return strings.TrimPrefix(a, "--separate-git-dir="), true
+		}
+		if a == "--separate-git-dir" {
+			if i+1 < len(rest) {
+				return rest[i+1], true
+			}
+			return "", false
+		}
+	}
+	return "", false
+}
+
+// gitWorktreeSubcommandTarget implements tc-mzr5 shape 4: `git worktree add`
+// and `git worktree move`, whose target is the NEW location a worktree is
+// created at (add) or relocated to (move). rest is cmdparse.GitInvocation's
+// own `rest` for a `git worktree` invocation — the argv AFTER the "worktree"
+// subcommand token, so rest[0] is worktree's OWN subcommand (add/move/
+// remove/list/prune/repair).
+//
+// SCOPED TO add/move DELIBERATELY, not every worktree subcommand: list/
+// prune/repair take no path operand that redirects anything, and remove's
+// operand REMOVES an existing worktree REGISTRATION rather than creating or
+// relocating one — a materially different hazard tc-mzr5's own ruling does
+// not name. internal/rules/git's own TestGit_Worktree_Approve continues to
+// approve list/prune/repair/remove/add/move at ITS rule's scope; this
+// function does not change that test or that rule — gitdir simply now
+// intercepts add/move FIRST, earlier in setup.RuleChain.
+func gitWorktreeSubcommandTarget(rest []string) (target string, matched bool) {
+	if len(rest) == 0 {
+		return "", false
+	}
+	switch rest[0] {
+	case "add":
+		args := rest[1:]
+		for i := 0; i < len(args); i++ {
+			a := args[i]
+			switch {
+			case a == "-b" || a == "-B":
+				i++ // a branch-name VALUE, not a path — skip it along with the flag
+			case strings.HasPrefix(a, "-"):
+				// a boolean flag: -f/--force, --detach, --checkout, --no-checkout,
+				// --lock, --orphan, -q/--quiet, --guess-remote, …
+			default:
+				return a, true // the new worktree's own path
+			}
+		}
+		return "", false
+	case "move":
+		var operands []string
+		for _, a := range rest[1:] {
+			if !strings.HasPrefix(a, "-") {
+				operands = append(operands, a)
+			}
+		}
+		if len(operands) >= 2 {
+			return operands[len(operands)-1], true // the destination
+		}
+		return "", false
+	}
+	return "", false
 }
 
 // bindingDirection resolves the direction of a git-metadata path bound to the
