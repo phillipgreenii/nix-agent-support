@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -32,25 +33,56 @@ var allowedSharedLayout = map[string]bool{
 // gap the design doc's Appendix A "Wire protocol and testing" flagged.
 var allowedSharedLayoutPrefixes = []string{"pkg/provider/", "pkg/scriptout/"}
 
+// mainPackageClause matches a Go source file's package clause declaring
+// "package main" as the first non-blank statement on its own line. Go
+// requires the package clause to be the first token in the file (after
+// only comments/blank lines), so this anchored, multiline match is a
+// sufficient (not merely heuristic) test — no other placement of the
+// literal text "package main" is a valid Go source file.
+var mainPackageClause = regexp.MustCompile(`(?m)^package\s+main\s*$`)
+
+// isPackageMain reports whether the .go file at path declares "package
+// main". A read failure reports false (fail closed: an unreadable file is
+// treated as NOT main, so it still gets flagged rather than silently
+// waved through).
+func isPackageMain(path string) bool {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	return mainPackageClause.Match(data)
+}
+
 // evaluateLayoutConvention walks moduleRoot and returns one violation string
 // per .go file whose package sits outside both the shared surface above and
 // a backend's own cmd/<binary>/ isolation boundary.
 //
-// A path under cmd/ is fine ONLY when it is (a) directly in cmd/<binary>/
-// itself — that binary's own package main, never importable by another
-// backend regardless of what it exports, since nothing outside this module
-// ever imports a package main; or (b) nested under a cmd/<binary>/internal/
-// tree at any depth — Go's internal/ visibility rule is compiler-enforced
-// per import-path text (layout_convention_test.go).
+// A path under cmd/ is fine when it is (a) directly in cmd/<binary>/ itself
+// — that binary's own package main, never importable by another backend
+// regardless of what it exports, since nothing outside this module ever
+// imports a package main; (b) nested under a cmd/<binary>/internal/ tree at
+// any depth — Go's internal/ visibility rule is compiler-enforced per
+// import-path text (layout_convention_test.go); or (c) any OTHER nesting
+// depth under cmd/<binary>/ whose .go file itself declares "package main" —
+// a standalone one-shot tool binary nested deeper than cmd/<binary>/ itself
+// (e.g. cmd/pg-connector-pr-github/migrate-disposition/main.go, ADR 0063's
+// cutover tool) is, by the same reasoning as (a), never importable by a
+// sibling backend: Go's compiler refuses to import a package main from
+// anywhere, at any nesting depth, so the "importable by sibling backends"
+// risk this whole check exists to catch (see below) simply does not apply
+// to it. (a) is really a special case of (c) restricted to depth 0; both
+// are handled by the same isPackageMain check below, kept as two separate
+// branches only so the depth-0 case need not pay for a file read.
 //
-// Any OTHER non-internal subdirectory under a backend's own cmd/<binary>/ —
-// e.g. cmd/pg-connector-pr-github/util/ — is a real gap: Go's internal/
-// visibility rule is the ONLY mechanism this module relies on to stop one
-// backend importing another's private code, and a plain (non-internal,
-// non-main) package underneath a backend's cmd/<binary>/ carries none of
-// that protection, so it is importable by any sibling backend that chooses
-// to. That is the exact gap this function closes over the original (looser)
-// "any path under cmd/ is fine" rule.
+// Any OTHER non-internal, non-main subdirectory under a backend's own
+// cmd/<binary>/ — e.g. cmd/pg-connector-pr-github/util/ exporting a helper
+// — is a real gap: Go's internal/ visibility rule is the ONLY mechanism
+// this module relies on to stop one backend importing another's private
+// code, and a plain (non-internal, non-main) package underneath a
+// backend's cmd/<binary>/ carries none of that protection, so it is
+// importable by any sibling backend that chooses to. That is the exact gap
+// this function closes over the original (looser) "any path under cmd/ is
+// fine" rule.
 func evaluateLayoutConvention(moduleRoot string) ([]string, error) {
 	var violations []string
 	err := filepath.WalkDir(moduleRoot, func(path string, d fs.DirEntry, err error) error {
@@ -97,8 +129,18 @@ func evaluateLayoutConvention(moduleRoot string) ([]string, error) {
 					return nil
 				}
 			}
+			if isPackageMain(path) {
+				// A standalone one-shot tool's own package main, nested
+				// deeper than cmd/<binary>/ itself (e.g.
+				// cmd/pg-connector-pr-github/migrate-disposition/main.go)
+				// — never importable by a sibling backend regardless of
+				// nesting depth, for the same reason depth-0
+				// cmd/<binary>/main.go is fine (see this function's own
+				// doc comment, case (c)).
+				return nil
+			}
 			violations = append(violations, fmt.Sprintf(
-				"%s: package %q is a non-internal package under a backend's cmd/ tree and is therefore importable by sibling backends — move it under this binary's own cmd/<binary>/internal/",
+				"%s: package %q is a non-internal, non-main package under a backend's cmd/ tree and is therefore importable by sibling backends — move it under this binary's own cmd/<binary>/internal/, or make it its own package main if it is a standalone tool",
 				rel, relDir,
 			))
 			return nil
@@ -186,5 +228,55 @@ func TestBackendLayoutConvention_RejectsNonInternalCmdPackage(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("evaluateLayoutConvention did not flag %s as a violation; got: %v", wantOffender, violations)
+	}
+}
+
+// TestBackendLayoutConvention_AllowsNestedPackageMainTool proves
+// evaluateLayoutConvention's case (c) (see its own doc comment): a
+// standalone one-shot tool nested deeper than cmd/<binary>/ itself — e.g.
+// this module's real cmd/pg-connector-pr-github/migrate-disposition/main.go
+// — is allowed when its .go file actually declares "package main" (never
+// importable by a sibling backend, exactly like depth-0 cmd/<binary>/
+// main.go), while a non-main package at that SAME nesting depth is still
+// rejected — proving this case does not loosen the check for the real gap
+// TestBackendLayoutConvention_RejectsNonInternalCmdPackage guards.
+func TestBackendLayoutConvention_AllowsNestedPackageMainTool(t *testing.T) {
+	root := t.TempDir()
+
+	writeFile := func(rel, content string) {
+		full := filepath.Join(root, rel)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatalf("mkdir for %s: %v", rel, err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s: %v", rel, err)
+		}
+	}
+
+	// Allowed: a standalone tool's own package main, nested one level
+	// deeper than cmd/<binary>/ itself.
+	writeFile("cmd/pg-connector-fake-backend/migrate-fake/main.go", "package main\n\nfunc main() {}\n")
+	// Still REJECTED at the identical nesting depth: a non-main package
+	// carries none of package main's "never importable" property.
+	writeFile("cmd/pg-connector-fake-backend/util/helper.go", "package util\n\nfunc Helper() {}\n")
+
+	violations, err := evaluateLayoutConvention(root)
+	if err != nil {
+		t.Fatalf("evaluateLayoutConvention: %v", err)
+	}
+
+	const allowedTool = "cmd/pg-connector-fake-backend/migrate-fake/main.go"
+	const stillRejected = "cmd/pg-connector-fake-backend/util/helper.go"
+	foundRejected := false
+	for _, v := range violations {
+		if strings.HasPrefix(v, allowedTool+":") {
+			t.Errorf("evaluateLayoutConvention flagged a nested package-main tool as a violation: %s", v)
+		}
+		if strings.HasPrefix(v, stillRejected+":") {
+			foundRejected = true
+		}
+	}
+	if !foundRejected {
+		t.Fatalf("evaluateLayoutConvention did not flag %s as a violation at the same nesting depth; got: %v", stillRejected, violations)
 	}
 }
