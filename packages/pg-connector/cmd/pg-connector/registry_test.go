@@ -381,6 +381,256 @@ func TestLoadRegistryFromEnv_NoConfigFound(t *testing.T) {
 	}
 }
 
+func TestRegistry_AttentionSources_AbsentKeyReturnsEmpty(t *testing.T) {
+	reg, err := parseRegistry([]byte(`connector: {}`), "test.yaml")
+	if err != nil {
+		t.Fatalf("parseRegistry: %v", err)
+	}
+	sources, err := reg.AttentionSources()
+	if err != nil || len(sources) != 0 {
+		t.Fatalf("AttentionSources() = %v, %v", sources, err)
+	}
+}
+
+func TestRegistry_SearchSources_AbsentKeyReturnsEmpty(t *testing.T) {
+	reg, err := parseRegistry([]byte(`connector: {}`), "test.yaml")
+	if err != nil {
+		t.Fatalf("parseRegistry: %v", err)
+	}
+	sources, err := reg.SearchSources()
+	if err != nil || len(sources) != 0 {
+		t.Fatalf("SearchSources() = %v, %v", sources, err)
+	}
+}
+
+func TestRegistry_AttentionSources_ExplicitlyEmptyListIsRejected(t *testing.T) {
+	reg, err := parseRegistry([]byte(`
+attention:
+  sources: []
+`), "test.yaml")
+	if err != nil {
+		t.Fatalf("parseRegistry: %v", err)
+	}
+	if _, err := reg.AttentionSources(); err == nil {
+		t.Fatal("expected an error for an explicitly-empty attention.sources list")
+	}
+}
+
+func TestRegistry_SearchSources_ExplicitlyEmptyListIsRejected(t *testing.T) {
+	reg, err := parseRegistry([]byte(`
+search:
+  sources: []
+`), "test.yaml")
+	if err != nil {
+		t.Fatalf("parseRegistry: %v", err)
+	}
+	if _, err := reg.SearchSources(); err == nil {
+		t.Fatal("expected an error for an explicitly-empty search.sources list")
+	}
+}
+
+func TestRegistry_AttentionSources_PopulatedList(t *testing.T) {
+	reg, err := parseRegistry([]byte(`
+attention:
+  sources:
+    - pg-connector-pr-github
+    - pg-connector-attention-zr-stale-review
+`), "test.yaml")
+	if err != nil {
+		t.Fatalf("parseRegistry: %v", err)
+	}
+	sources, err := reg.AttentionSources()
+	if err != nil {
+		t.Fatalf("AttentionSources: %v", err)
+	}
+	if len(sources) != 2 || sources[0] != "pg-connector-pr-github" || sources[1] != "pg-connector-attention-zr-stale-review" {
+		t.Fatalf("sources = %+v", sources)
+	}
+}
+
+func TestRegistry_SearchSources_PopulatedList(t *testing.T) {
+	reg, err := parseRegistry([]byte(`
+search:
+  sources:
+    - pg-connector-pr-github
+    - pg-connector-issue-jira
+`), "test.yaml")
+	if err != nil {
+		t.Fatalf("parseRegistry: %v", err)
+	}
+	sources, err := reg.SearchSources()
+	if err != nil {
+		t.Fatalf("SearchSources: %v", err)
+	}
+	if len(sources) != 2 || sources[0] != "pg-connector-pr-github" || sources[1] != "pg-connector-issue-jira" {
+		t.Fatalf("sources = %+v", sources)
+	}
+}
+
+func TestRegistry_AttentionSources_RejectsInvalidEntry(t *testing.T) {
+	reg, err := parseRegistry([]byte(`
+attention:
+  sources:
+    - ../evil
+`), "test.yaml")
+	if err != nil {
+		t.Fatalf("parseRegistry: %v", err)
+	}
+	if _, err := reg.AttentionSources(); err == nil {
+		t.Fatal("expected an error for a backend name containing a path separator")
+	}
+}
+
+func TestRegistry_SearchSources_RejectsEmptyNameEntry(t *testing.T) {
+	reg, err := parseRegistry([]byte(`
+search:
+  sources:
+    - ""
+`), "test.yaml")
+	if err != nil {
+		t.Fatalf("parseRegistry: %v", err)
+	}
+	if _, err := reg.SearchSources(); err == nil {
+		t.Fatal("expected an error for an empty backend name")
+	}
+}
+
+func TestRegistry_AttentionSources_RejectsDuplicateEntry(t *testing.T) {
+	reg, err := parseRegistry([]byte(`
+attention:
+  sources:
+    - pg-connector-pr-github
+    - pg-connector-pr-github
+`), "test.yaml")
+	if err != nil {
+		t.Fatalf("parseRegistry: %v", err)
+	}
+	if _, err := reg.AttentionSources(); err == nil {
+		t.Fatal("expected an error for a duplicate backend name in one list")
+	}
+}
+
+func TestRegistry_SearchSources_RejectsDuplicateEntry(t *testing.T) {
+	reg, err := parseRegistry([]byte(`
+search:
+  sources:
+    - pg-connector-issue-jira
+    - pg-connector-issue-jira
+`), "test.yaml")
+	if err != nil {
+		t.Fatalf("parseRegistry: %v", err)
+	}
+	if _, err := reg.SearchSources(); err == nil {
+		t.Fatal("expected an error for a duplicate backend name in one list")
+	}
+}
+
+func TestRegistry_AttentionSources_SharedNameWithConnectorTypeSucceeds(t *testing.T) {
+	// Cross-registration is explicitly authorized: a backend implementing
+	// list_attention alongside its normal entity-type ops may appear under
+	// both connector.<type> and attention.sources with no error.
+	reg, err := parseRegistry([]byte(`
+connector:
+  pr:
+    - pg-connector-pr-github
+attention:
+  sources:
+    - pg-connector-pr-github
+`), "test.yaml")
+	if err != nil {
+		t.Fatalf("parseRegistry: %v", err)
+	}
+	prBackends, err := reg.List("pr")
+	if err != nil {
+		t.Fatalf("List(pr): %v", err)
+	}
+	if len(prBackends) != 1 || prBackends[0] != "pg-connector-pr-github" {
+		t.Fatalf("prBackends = %+v", prBackends)
+	}
+	attentionSources, err := reg.AttentionSources()
+	if err != nil {
+		t.Fatalf("AttentionSources: %v", err)
+	}
+	if len(attentionSources) != 1 || attentionSources[0] != "pg-connector-pr-github" {
+		t.Fatalf("attentionSources = %+v", attentionSources)
+	}
+}
+
+func TestRegistry_SearchSources_SharedNameWithConnectorTypeSucceeds(t *testing.T) {
+	reg, err := parseRegistry([]byte(`
+connector:
+  issue:
+    - pg-connector-issue-jira
+search:
+  sources:
+    - pg-connector-issue-jira
+`), "test.yaml")
+	if err != nil {
+		t.Fatalf("parseRegistry: %v", err)
+	}
+	issueBackends, err := reg.List("issue")
+	if err != nil {
+		t.Fatalf("List(issue): %v", err)
+	}
+	if len(issueBackends) != 1 || issueBackends[0] != "pg-connector-issue-jira" {
+		t.Fatalf("issueBackends = %+v", issueBackends)
+	}
+	searchSources, err := reg.SearchSources()
+	if err != nil {
+		t.Fatalf("SearchSources: %v", err)
+	}
+	if len(searchSources) != 1 || searchSources[0] != "pg-connector-issue-jira" {
+		t.Fatalf("searchSources = %+v", searchSources)
+	}
+}
+
+func TestRegistry_AttentionSourcesAndSearchSources_AreIndependentTopLevelKeys(t *testing.T) {
+	// attention.sources/search.sources are siblings of connector:, never
+	// nested inside it. AllBackends()'s existing behavior (connector.<type>
+	// only) stays unchanged by this packet.
+	reg, err := parseRegistry([]byte(`
+connector:
+  pr:
+    - pg-connector-pr-github
+attention:
+  sources:
+    - pg-connector-attention-zr-stale-review
+search:
+  sources:
+    - pg-connector-issue-jira
+`), "test.yaml")
+	if err != nil {
+		t.Fatalf("parseRegistry: %v", err)
+	}
+	all, err := reg.AllBackends()
+	if err != nil {
+		t.Fatalf("AllBackends: %v", err)
+	}
+	if len(all) != 1 || all[0] != "pg-connector-pr-github" {
+		t.Fatalf("AllBackends = %+v, want only the connector.pr entry (attention/search sources not enumerated)", all)
+	}
+}
+
+func TestRegistry_AttentionSources_TypoedSourcesSubKeyTreatedAsAbsent(t *testing.T) {
+	// A mistyped sub-key under attention: (e.g. "souce" for "sources")
+	// decodes to an empty Sources list today — the same "no entry"
+	// behavior an absent attention: key already produces — rather than
+	// being rejected. Tightening that is a separate, unscoped concern
+	// [Binding decisions].
+	reg, err := parseRegistry([]byte(`
+attention:
+  souce:
+    - pg-connector-pr-github
+`), "test.yaml")
+	if err != nil {
+		t.Fatalf("parseRegistry: %v", err)
+	}
+	sources, err := reg.AttentionSources()
+	if err != nil || len(sources) != 0 {
+		t.Fatalf("AttentionSources() = %v, %v", sources, err)
+	}
+}
+
 func TestRegistryCandidates_UsesPgPrDirectory(t *testing.T) {
 	// The env-var name AND the on-disk directory name carry over from
 	// pg-pr unchanged: pg-connector reads the SAME config.yaml pg-pr does.
