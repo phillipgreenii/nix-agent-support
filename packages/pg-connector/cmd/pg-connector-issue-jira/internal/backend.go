@@ -18,16 +18,19 @@
 //     is only used for auth-status's specific states, not `issue`) — see
 //     classifyPJIRAErrorMessage.
 //
-// Create/Comment/Transition are NOT implemented against a real op: this is
-// a documented, escalated gap, not new code with a style precedent to
-// follow — see writeNotSupportedErr's own doc comment below for why, and
-// pg2-2j5ac.17.1's bd comment for the full escalation record.
+// Create/Comment/Transition were escalated (pg2-2j5ac.17.1's bd comment)
+// when pjira had no write op at all — that gap is now closed: pg2-7p4mr's
+// children landed `pjira create`/`pjira transition`/`pjira comment` (see
+// each method's own doc comment below for the verified CLI/JSON shape),
+// and this file implements all three for real rather than the documented
+// scriptout.ErrUnavailable stub the escalation originally left in place.
 package internal
 
 import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"strings"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider"
@@ -40,12 +43,25 @@ import (
 // implementation.
 type Backend struct {
 	runner Runner
+	// getenv resolves EnvProject for Create. Optional — nil means
+	// os.Getenv (the production default via New); tests inject a fixed
+	// lookup so resolution never depends on this process's real
+	// environment, mirroring CLIRunner's own Getenv field.
+	getenv func(string) string
 }
 
 // New returns a Backend wrapping the given Runner. Production wiring passes
 // NewCLIRunner(); tests inject a fake Runner.
 func New(r Runner) *Backend {
 	return &Backend{runner: r}
+}
+
+// getenvFunc returns b.getenv, defaulting to os.Getenv when unset.
+func (b *Backend) getenvFunc() func(string) string {
+	if b.getenv != nil {
+		return b.getenv
+	}
+	return os.Getenv
 }
 
 // Compile-time check that Backend satisfies the issue capability's
@@ -173,9 +189,26 @@ func toSchemaIssue(iss *pjiraIssue) *schema.Issue {
 // AuthStatus check) is classified as unauthenticated — the taxonomy's
 // closest fit, since scriptout has no separate "forbidden" sentinel.
 // Anything else falls back to ErrUnavailable.
+//
+// One case is deliberately distinguished from that fallback:
+// Client.Transition's own "no transition to state %q available" message
+// [verified against phillipg-nix-repo-base's modules/jira/pkg/pjira/
+// client.go] means the issue exists and pjira/Jira itself are reachable,
+// but the CALLER supplied a targetState this issue's current workflow has
+// no transition to — a caller-input problem, not a backend-availability
+// one, matching pkg/provider/issue/iface.go's own Transition doc comment
+// ("A well-formed rejection of an unrecognized targetState is this
+// method's own error to report") and this docket's own multi-instance
+// targeted-op resolution policy, which enumerates
+// not_found/unauthenticated/unavailable/unknown_op/version_mismatch/
+// invalid_argument as its short-circuit set: a target state that matches
+// no available transition should be a distinct, clearly-classified error,
+// not folded into unavailable's catch-all.
 func classifyPJIRAErrorMessage(msg string) error {
 	lower := strings.ToLower(msg)
 	switch {
+	case strings.Contains(lower, "no transition to state") && strings.Contains(lower, "available"):
+		return scriptout.WrapError(scriptout.ErrInvalidArgument, msg)
 	case strings.Contains(lower, "not found") && !strings.Contains(lower, "executable"):
 		return scriptout.WrapError(scriptout.ErrNotFound, msg)
 	case strings.Contains(lower, "401") || strings.Contains(lower, "unauthorized") ||
@@ -210,73 +243,127 @@ func (b *Backend) Show(ctx context.Context, id string) (*schema.Issue, error) {
 	return toSchemaIssue(iss), nil
 }
 
-// writeNotSupportedErr is returned by every write method below (Create/
-// Comment/Transition).
-//
-// This is a DOCUMENTED, ESCALATED GAP, not a bug in this backend's own
-// code and not something a later reader should "fix" by inventing a
-// plausible-looking pjira subcommand that does not exist. Verified live
-// against the real pjira binary on this machine's PATH (2026-09-08,
-// `pjira --help` and each subcommand's own --help) and independently
-// confirmed by its own source
-// (phillipg-nix-repo-base/modules/jira/cmd/pjira/main.go's NewRootCmd
-// registers exactly `issue`, `search`, and `auth-status` — no create/
-// comment/transition command exists anywhere in that binary): the generic
-// Jira CLI this packet's own binding decisions commit to exec'ing for
-// every issue.Provider method (mirroring
-// cmd/pg-connector-issue-beads/internal/runner.go's identical CLI-exec-seam
-// convention) has NO write capability today, and phillipg-nix-repo-base's
-// own maintainers have not built one yet — this is a real, current state
-// of that external tool, not an oversight in this backend's own code.
-//
-// Resolving this requires an operator decision this packet's implementer
-// must not make unilaterally (extend pjira with write support first;
-// explicitly authorize a first-party direct-REST write path for this
-// backend only, which would deviate from this packet's own CLI-exec
-// binding decision; or accept this backend as read-only for now) — see the
-// escalation note recorded as a comment on bead pg2-2j5ac.17.1. Until that
-// lands, these methods validate their inputs (matching every sibling
-// backend's own convention) and then report the gap through the wire
-// taxonomy's closest fit (unavailable) rather than silently pretending to
-// succeed or fabricating a CLI invocation that would misclassify a genuine
-// future failure.
-func writeNotSupportedErr(op string) error {
-	return scriptout.WrapError(scriptout.ErrUnavailable,
-		"issue-jira: "+op+": not supported — the resolved Jira CLI (pjira) has no write "+
-			"operation as of 2026-09-08 (design non-goal; see pg2-2j5ac.17.1 escalation note)")
+// pjiraCreateResult is `pjira create`'s own stdout shape (verified against
+// phillipg-nix-repo-base's modules/jira/cmd/pjira/main.go's newCreateCmd:
+// "writes {key,url} JSON"). Unlike pjiraIssue, this is deliberately NOT
+// the full issue shape — Jira's own create endpoint
+// (Client.CreateIssue/POST /rest/api/3/issue) returns only the new key
+// (URL is derived client-side from it), never the resolved
+// status/issuetype/labels a caller would need for a well-formed
+// schema.Issue — so Create fetches the created issue's actual state via a
+// follow-up Show(ctx, key) call rather than fabricating Title/State/etc.
+// from input (which could drift from what Jira actually stored, e.g. a
+// project-specific default workflow status).
+type pjiraCreateResult struct {
+	Key string `json:"key"`
 }
 
-// Create implements issue.Provider.Create. NOT implemented against a real
-// op — see writeNotSupportedErr's doc comment.
+// decodePJIRACreateResult decodes `pjira create`'s stdout, applying the
+// same "empty key is a decode failure, never a silent zero-value success"
+// guard as decodePJIRAIssue.
+func decodePJIRACreateResult(raw string) (*pjiraCreateResult, error) {
+	var res pjiraCreateResult
+	if err := json.Unmarshal([]byte(raw), &res); err != nil {
+		return nil, err
+	}
+	if res.Key == "" {
+		return nil, errors.New("pjira: decoded create result has empty key")
+	}
+	return &res, nil
+}
+
+// Create implements issue.Provider.Create via `pjira create --project
+// <PROJECT> --type <TYPE> --summary <TITLE> [--description <DESC>]`,
+// followed by Show(ctx, key) to return the created issue's actual state
+// [see pjiraCreateResult's doc comment for why the create call alone
+// cannot answer issue.Provider.Create's full *schema.Issue return type].
+//
+// Title is this method's own required field (issue.IssueInput's doc
+// comment: "all omitempty except Title"); Jira's create endpoint ALSO
+// requires an issue type and a target project on every call, with no
+// ambient default for either pjira itself resolves — IssueType is this
+// backend's own additional required field (a caller-input problem, hence
+// ErrInvalidArgument: distinct Jira project schemes have no single safe
+// default type this backend could invent), while Project has no
+// caller-supplied field at all on issue.IssueInput (it carries no Project
+// field — only bd's Tracker/workspace concept does, per
+// cmd/pg-connector-issue-beads), so it is resolved from this backend's own
+// configuration (ResolveProject/EnvProject) instead — a configuration
+// problem the caller cannot fix by changing their input, hence
+// ErrUnavailable, mirroring ErrWorkspaceNotConfigured's identical
+// classification in the sibling beads backend.
 func (b *Backend) Create(ctx context.Context, input issue.IssueInput) (*schema.Issue, error) {
-	if strings.TrimSpace(input.Title) == "" {
+	title := strings.TrimSpace(input.Title)
+	if title == "" {
 		return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, "issue: title required")
 	}
-	return nil, writeNotSupportedErr("create")
+	issueType := strings.TrimSpace(input.IssueType)
+	if issueType == "" {
+		return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, "issue: issue_type required (Jira requires an issue type per project, with no safe cross-project default)")
+	}
+	project, err := ResolveProject(b.getenvFunc())
+	if err != nil {
+		return nil, scriptout.WrapError(scriptout.ErrUnavailable, err.Error())
+	}
+
+	args := []string{"create", "--project", project, "--type", issueType, "--summary", title}
+	if desc := strings.TrimSpace(input.Description); desc != "" {
+		args = append(args, "--description", desc)
+	}
+	out, runErr := b.runner.Run(ctx, args...)
+	if runErr != nil {
+		return nil, classifyPJIRAErrorMessage(runErr.Error())
+	}
+	created, decodeErr := decodePJIRACreateResult(out)
+	if decodeErr != nil {
+		return nil, scriptout.WrapError(scriptout.ErrUnavailable, "pjira: decode create result: "+decodeErr.Error())
+	}
+	return b.Show(ctx, created.Key)
 }
 
-// Comment implements issue.Provider.Comment. NOT implemented against a
-// real op — see writeNotSupportedErr's doc comment.
+// Comment implements issue.Provider.Comment via `pjira comment <KEY>
+// <BODY>` (verified against phillipg-nix-repo-base's
+// modules/jira/cmd/pjira/main.go's newCommentCmd: "writes {key,id} JSON").
+// Like cmd/pg-connector-issue-beads/internal/backend.go's own
+// Comment/Transition [carry-over basis], this discards the echoed
+// payload — success is decided from the exec's own exit code (via
+// b.runner.Run's error return), never from parsing stdout, mirroring
+// bd.go's b.run doc comment on why Comment/Transition need no positive
+// payload confirmation.
 func (b *Backend) Comment(ctx context.Context, id, body string) error {
-	if strings.TrimSpace(id) == "" {
+	id = strings.TrimSpace(id)
+	if id == "" {
 		return scriptout.WrapError(scriptout.ErrInvalidArgument, "issue: id required")
 	}
-	if strings.TrimSpace(body) == "" {
+	body = strings.TrimSpace(body)
+	if body == "" {
 		return scriptout.WrapError(scriptout.ErrInvalidArgument, "issue: comment body required")
 	}
-	return writeNotSupportedErr("comment")
+	if _, err := b.runner.Run(ctx, "comment", "--", id, body); err != nil {
+		return classifyPJIRAErrorMessage(err.Error())
+	}
+	return nil
 }
 
-// Transition implements issue.Provider.Transition. NOT implemented against
-// a real op — see writeNotSupportedErr's doc comment.
+// Transition implements issue.Provider.Transition via `pjira transition
+// <KEY> <TO>` (verified against phillipg-nix-repo-base's
+// modules/jira/cmd/pjira/main.go's newTransitionCmd: "writes {key,to}
+// JSON"). An unrecognized targetState is a distinct, clearly-classified
+// error — see classifyPJIRAErrorMessage's doc comment for the "no
+// transition to state" case Client.Transition returns for exactly this.
 func (b *Backend) Transition(ctx context.Context, id, targetState string) error {
-	if strings.TrimSpace(id) == "" {
+	id = strings.TrimSpace(id)
+	if id == "" {
 		return scriptout.WrapError(scriptout.ErrInvalidArgument, "issue: id required")
 	}
-	if strings.TrimSpace(targetState) == "" {
+	targetState = strings.TrimSpace(targetState)
+	if targetState == "" {
 		return scriptout.WrapError(scriptout.ErrInvalidArgument, "issue: target_state required")
 	}
-	return writeNotSupportedErr("transition")
+	if _, err := b.runner.Run(ctx, "transition", "--", id, targetState); err != nil {
+		return classifyPJIRAErrorMessage(err.Error())
+	}
+	return nil
 }
 
 // CheckAuth implements the optional pkg/provider.AuthChecker capability via

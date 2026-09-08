@@ -18,8 +18,11 @@
 // doc comment states each backend "resolves its own credentials entirely
 // on its own," without pinning a workspace concept, and this backend's
 // own discovery (verified against the real pjira binary/source, see
-// backend.go's doc comment) is that no such scoping is needed: a single
-// ambient Jira Cloud site is sufficient.
+// backend.go's doc comment) is that no such TENANT scoping is needed: a
+// single ambient Jira Cloud site is sufficient. Create alone needs a
+// DIFFERENT, narrower scoping value — a target project key, since `pjira
+// create --project` is required with no ambient default of its own —
+// resolved via EnvProject/ResolveProject below.
 package internal
 
 import (
@@ -83,6 +86,44 @@ func ResolveBinary(getenv func(string) string) string {
 		return bin
 	}
 	return defaultBinary
+}
+
+// EnvProject is the env var Create resolves the target Jira project key
+// from — the "Workspace/instance-scoping convention" this packet's binding
+// decisions reserve for exactly this case: `pjira create --project` is a
+// REQUIRED flag with no ambient default of its own (verified against
+// phillipg-nix-repo-base's modules/jira/cmd/pjira/main.go's newCreateCmd:
+// unlike `issue`/`search`/`transition`/`comment`, which address an
+// already-tenant-scoped issue key, `create` has no issue key yet to scope
+// from, and pjira's own config.go resolves a base_url/email tenant but no
+// per-project default). Unlike EnvBinary (this file) or
+// cmd/pg-connector-issue-beads/internal/runner.go's EnvWorkspaceDir, there
+// is deliberately no second, CLI-native fallback to check: pjira itself
+// resolves no such value, so ResolveProject either resolves this one var
+// or refuses outright.
+const EnvProject = "PG_CONNECTOR_ISSUE_JIRA_PROJECT"
+
+// ErrProjectNotConfigured is returned by ResolveProject when EnvProject is
+// unset. Refusing outright — rather than guessing a project or omitting
+// --project and letting pjira's own generic flag-validation error stand in
+// — gives Create a clear, classifiable configuration error up front,
+// mirroring ResolveWorkspaceDir's identical "refuse rather than silently
+// fall back to something unrelated" discipline in the sibling beads
+// backend.
+var ErrProjectNotConfigured = errors.New(
+	"issue-jira: create: no target Jira project configured; set $" + EnvProject +
+		" to the project key new issues should be created under (pjira's own create op has no ambient default project to fall back to)",
+)
+
+// ResolveProject resolves the Jira project key Create passes to `pjira
+// create --project`, using getenv (production passes os.Getenv; tests
+// inject a fixed lookup so resolution never depends on this process's real
+// environment).
+func ResolveProject(getenv func(string) string) (string, error) {
+	if p := strings.TrimSpace(getenv(EnvProject)); p != "" {
+		return p, nil
+	}
+	return "", ErrProjectNotConfigured
 }
 
 // CLIRunner is the default Runner. It execs the resolved Jira CLI binary

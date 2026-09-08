@@ -218,7 +218,7 @@ func TestBackend_Show_EmptyKey_IsUnavailable(t *testing.T) {
 }
 
 // ----------------------------------------------------------------------
-// Create / Comment / Transition — documented gap (writeNotSupportedErr)
+// Create
 // ----------------------------------------------------------------------
 
 func TestBackend_Create_MissingTitle(t *testing.T) {
@@ -233,26 +233,119 @@ func TestBackend_Create_MissingTitle(t *testing.T) {
 	}
 }
 
-// TestBackend_Create_ReportsNotSupported locks in the documented gap: with
-// a valid input, Create must still fail (pjira has no write op), but as a
-// well-formed, classifiable ErrUnavailable — never a silent/fabricated
-// success and never an unwrapped plain error.
-func TestBackend_Create_ReportsNotSupported(t *testing.T) {
+// TestBackend_Create_MissingIssueType locks in this backend's own
+// additional required field: Jira's create endpoint requires an issue type
+// per project with no safe cross-project default, unlike issue.IssueInput's
+// own (omitempty) IssueType.
+func TestBackend_Create_MissingIssueType(t *testing.T) {
 	fr := &fakeRunner{}
 	b := New(fr)
 	_, err := b.Create(context.Background(), issue.IssueInput{Title: "valid title"})
 	if len(fr.calls) != 0 {
-		t.Fatalf("expected no pjira invocation (no write op to call), got %v", fr.calls)
+		t.Fatalf("expected no pjira invocation for an invalid call, got %v", fr.calls)
+	}
+	if !errors.Is(err, scriptout.ErrInvalidArgument) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrInvalidArgument)", err)
+	}
+}
+
+// TestBackend_Create_ProjectNotConfigured proves Create refuses outright,
+// as a classifiable ErrUnavailable, when $PG_CONNECTOR_ISSUE_JIRA_PROJECT
+// is unset — mirroring ErrWorkspaceNotConfigured's identical
+// "refuse rather than silently fall back" discipline in the sibling beads
+// backend.
+func TestBackend_Create_ProjectNotConfigured(t *testing.T) {
+	fr := &fakeRunner{}
+	b := &Backend{runner: fr, getenv: fakeEnv(nil)}
+	_, err := b.Create(context.Background(), issue.IssueInput{Title: "valid title", IssueType: "Task"})
+	if len(fr.calls) != 0 {
+		t.Fatalf("expected no pjira invocation when no project is configured, got %v", fr.calls)
 	}
 	if !errors.Is(err, scriptout.ErrUnavailable) {
 		t.Fatalf("err = %v, want wrapping ErrUnavailable", err)
 	}
 }
 
+// TestBackend_Create_Success proves Create execs `pjira create --project
+// ... --type ... --summary ...`, decodes the {key,url} result, and then
+// fetches the created issue's actual state via a follow-up Show call
+// (pjira's own create endpoint does not itself return status/labels/etc).
+func TestBackend_Create_Success(t *testing.T) {
+	var calls [][]string
+	fr := &fakeRunner{handle: func(args []string) (string, error) {
+		calls = append(calls, args)
+		if args[0] == "create" {
+			return `{"key":"PROJ-2","url":"https://example.atlassian.net/browse/PROJ-2"}`, nil
+		}
+		if args[0] == "issue" {
+			return `{"key":"PROJ-2","summary":"a new issue","status":"To Do","issuetype":"Task",` +
+				`"url":"https://example.atlassian.net/browse/PROJ-2","project":"PROJ"}`, nil
+		}
+		t.Fatalf("unexpected op: %v", args)
+		return "", nil
+	}}
+	b := &Backend{runner: fr, getenv: fakeEnv(map[string]string{EnvProject: "PROJ"})}
+
+	got, err := b.Create(context.Background(), issue.IssueInput{
+		Title:       "a new issue",
+		IssueType:   "Task",
+		Description: "a description",
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if got.ID != "PROJ-2" || got.Title != "a new issue" || got.State != "To Do" {
+		t.Fatalf("got %+v", got)
+	}
+	if got.Tracker != "PROJ" {
+		t.Fatalf("Tracker = %q, want PROJ", got.Tracker)
+	}
+	if len(calls) != 2 || calls[0][0] != "create" || calls[1][0] != "issue" {
+		t.Fatalf("expected a create call followed by a Show(issue) call, got %v", calls)
+	}
+	if !argsEndWith(calls[0], "--project", "PROJ", "--type", "Task", "--summary", "a new issue", "--description", "a description") {
+		t.Fatalf("unexpected create args: %v", calls[0])
+	}
+}
+
+// TestBackend_Create_RunFailure_IsClassified proves a pjira create failure
+// (e.g. an unauthenticated tenant) classifies through the same
+// classifyPJIRAErrorMessage taxonomy as Show, rather than a bespoke path.
+func TestBackend_Create_RunFailure_IsClassified(t *testing.T) {
+	fr := &fakeRunner{handle: func(args []string) (string, error) {
+		return "", errors.New("pjira create ...: exit status 1: pjira: create issue: unauthenticated")
+	}}
+	b := &Backend{runner: fr, getenv: fakeEnv(map[string]string{EnvProject: "PROJ"})}
+	_, err := b.Create(context.Background(), issue.IssueInput{Title: "t", IssueType: "Task"})
+	if !errors.Is(err, scriptout.ErrUnauthenticated) {
+		t.Fatalf("err = %v, want wrapping ErrUnauthenticated", err)
+	}
+}
+
+// TestBackend_Create_MalformedResult_IsUnavailable proves a well-formed
+// exit-0 pjira create response missing its key never silently succeeds.
+func TestBackend_Create_MalformedResult_IsUnavailable(t *testing.T) {
+	fr := &fakeRunner{handle: func(args []string) (string, error) {
+		return `{"url":"https://example.atlassian.net/browse/PROJ-2"}`, nil
+	}}
+	b := &Backend{runner: fr, getenv: fakeEnv(map[string]string{EnvProject: "PROJ"})}
+	_, err := b.Create(context.Background(), issue.IssueInput{Title: "t", IssueType: "Task"})
+	if !errors.Is(err, scriptout.ErrUnavailable) {
+		t.Fatalf("err = %v, want wrapping ErrUnavailable", err)
+	}
+}
+
+// ----------------------------------------------------------------------
+// Comment
+// ----------------------------------------------------------------------
+
 func TestBackend_Comment_EmptyID(t *testing.T) {
 	fr := &fakeRunner{}
 	b := New(fr)
 	err := b.Comment(context.Background(), "  ", "hello")
+	if len(fr.calls) != 0 {
+		t.Fatalf("expected no pjira invocation for an invalid call, got %v", fr.calls)
+	}
 	if !errors.Is(err, scriptout.ErrInvalidArgument) {
 		t.Fatalf("err = %v, want errors.Is(err, ErrInvalidArgument)", err)
 	}
@@ -262,27 +355,57 @@ func TestBackend_Comment_EmptyBody(t *testing.T) {
 	fr := &fakeRunner{}
 	b := New(fr)
 	err := b.Comment(context.Background(), "PROJ-1", "  ")
+	if len(fr.calls) != 0 {
+		t.Fatalf("expected no pjira invocation for an invalid call, got %v", fr.calls)
+	}
 	if !errors.Is(err, scriptout.ErrInvalidArgument) {
 		t.Fatalf("err = %v, want errors.Is(err, ErrInvalidArgument)", err)
 	}
 }
 
-func TestBackend_Comment_ReportsNotSupported(t *testing.T) {
-	fr := &fakeRunner{}
+// TestBackend_Comment_Success proves Comment execs `pjira comment <KEY>
+// <BODY>` with a defense-in-depth "--" terminator ahead of both
+// positionals, mirroring Show's identical precedent.
+func TestBackend_Comment_Success(t *testing.T) {
+	fr := &fakeRunner{handle: func(args []string) (string, error) {
+		if args[0] != "comment" {
+			t.Fatalf("unexpected op: %v", args)
+		}
+		return `{"key":"PROJ-1","id":"10042"}`, nil
+	}}
 	b := New(fr)
-	err := b.Comment(context.Background(), "PROJ-1", "a comment")
-	if len(fr.calls) != 0 {
-		t.Fatalf("expected no pjira invocation (no write op to call), got %v", fr.calls)
+	if err := b.Comment(context.Background(), "PROJ-1", "a comment"); err != nil {
+		t.Fatalf("Comment: %v", err)
 	}
-	if !errors.Is(err, scriptout.ErrUnavailable) {
-		t.Fatalf("err = %v, want wrapping ErrUnavailable", err)
+	if !argsEndWith(fr.calls[0], "--", "PROJ-1", "a comment") {
+		t.Fatalf("expected id/body as literal positionals after a \"--\" terminator, got %v", fr.calls[0])
 	}
 }
+
+// TestBackend_Comment_NotFound_IsClassified proves Comment classifies a
+// not-found issue key the same way Show does.
+func TestBackend_Comment_NotFound_IsClassified(t *testing.T) {
+	fr := &fakeRunner{handle: func(args []string) (string, error) {
+		return "", errors.New("pjira comment -- PROJ-999 hi: exit status 1: pjira: issue PROJ-999 not found")
+	}}
+	b := New(fr)
+	err := b.Comment(context.Background(), "PROJ-999", "hi")
+	if !errors.Is(err, scriptout.ErrNotFound) {
+		t.Fatalf("err = %v, want wrapping ErrNotFound", err)
+	}
+}
+
+// ----------------------------------------------------------------------
+// Transition
+// ----------------------------------------------------------------------
 
 func TestBackend_Transition_EmptyID(t *testing.T) {
 	fr := &fakeRunner{}
 	b := New(fr)
 	err := b.Transition(context.Background(), "  ", "Done")
+	if len(fr.calls) != 0 {
+		t.Fatalf("expected no pjira invocation for an invalid call, got %v", fr.calls)
+	}
 	if !errors.Is(err, scriptout.ErrInvalidArgument) {
 		t.Fatalf("err = %v, want errors.Is(err, ErrInvalidArgument)", err)
 	}
@@ -292,20 +415,63 @@ func TestBackend_Transition_EmptyTargetState(t *testing.T) {
 	fr := &fakeRunner{}
 	b := New(fr)
 	err := b.Transition(context.Background(), "PROJ-1", "  ")
+	if len(fr.calls) != 0 {
+		t.Fatalf("expected no pjira invocation for an invalid call, got %v", fr.calls)
+	}
 	if !errors.Is(err, scriptout.ErrInvalidArgument) {
 		t.Fatalf("err = %v, want errors.Is(err, ErrInvalidArgument)", err)
 	}
 }
 
-func TestBackend_Transition_ReportsNotSupported(t *testing.T) {
-	fr := &fakeRunner{}
+// TestBackend_Transition_Success proves Transition execs `pjira transition
+// <KEY> <TO>` with the same "--" defense-in-depth as Comment/Show.
+func TestBackend_Transition_Success(t *testing.T) {
+	fr := &fakeRunner{handle: func(args []string) (string, error) {
+		if args[0] != "transition" {
+			t.Fatalf("unexpected op: %v", args)
+		}
+		return `{"key":"PROJ-1","to":"Done"}`, nil
+	}}
 	b := New(fr)
-	err := b.Transition(context.Background(), "PROJ-1", "Done")
-	if len(fr.calls) != 0 {
-		t.Fatalf("expected no pjira invocation (no write op to call), got %v", fr.calls)
+	if err := b.Transition(context.Background(), "PROJ-1", "Done"); err != nil {
+		t.Fatalf("Transition: %v", err)
 	}
-	if !errors.Is(err, scriptout.ErrUnavailable) {
-		t.Fatalf("err = %v, want wrapping ErrUnavailable", err)
+	if !argsEndWith(fr.calls[0], "--", "PROJ-1", "Done") {
+		t.Fatalf("expected id/target as literal positionals after a \"--\" terminator, got %v", fr.calls[0])
+	}
+}
+
+// TestBackend_Transition_UnknownTargetState is the packet's design-required
+// test proving an unrecognized targetState classifies as a DISTINCT,
+// clearly-classified error (ErrInvalidArgument, a caller-input problem) —
+// never folded into the issue's own not-found classification, mirroring
+// Client.Transition's own real "no transition to state %q available"
+// message — see classifyPJIRAErrorMessage's own doc comment for the full
+// rationale.
+func TestBackend_Transition_UnknownTargetState(t *testing.T) {
+	fr := &fakeRunner{handle: func(args []string) (string, error) {
+		return "", errors.New(`pjira transition -- PROJ-1 Bogus: exit status 1: pjira: transition PROJ-1: no transition to state "Bogus" available`)
+	}}
+	b := New(fr)
+	err := b.Transition(context.Background(), "PROJ-1", "Bogus")
+	if !errors.Is(err, scriptout.ErrInvalidArgument) {
+		t.Fatalf("err = %v, want wrapping ErrInvalidArgument", err)
+	}
+	if errors.Is(err, scriptout.ErrNotFound) {
+		t.Fatalf("err = %v, must not be classified as ErrNotFound (the issue exists; the target state doesn't)", err)
+	}
+}
+
+// TestBackend_Transition_NotFound_IsClassified proves Transition classifies
+// a not-found issue key the same way Show does.
+func TestBackend_Transition_NotFound_IsClassified(t *testing.T) {
+	fr := &fakeRunner{handle: func(args []string) (string, error) {
+		return "", errors.New("pjira transition -- PROJ-999 Done: exit status 1: pjira: issue PROJ-999 not found")
+	}}
+	b := New(fr)
+	err := b.Transition(context.Background(), "PROJ-999", "Done")
+	if !errors.Is(err, scriptout.ErrNotFound) {
+		t.Fatalf("err = %v, want wrapping ErrNotFound", err)
 	}
 }
 

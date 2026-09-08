@@ -45,6 +45,34 @@ func TestResolveBinary_BlankEnvTreatedAsUnset(t *testing.T) {
 }
 
 // ----------------------------------------------------------------------
+// ResolveProject
+// ----------------------------------------------------------------------
+
+func TestResolveProject_Unset(t *testing.T) {
+	_, err := ResolveProject(fakeEnv(nil))
+	if !errors.Is(err, ErrProjectNotConfigured) {
+		t.Fatalf("err = %v, want ErrProjectNotConfigured", err)
+	}
+}
+
+func TestResolveProject_BlankTreatedAsUnset(t *testing.T) {
+	_, err := ResolveProject(fakeEnv(map[string]string{EnvProject: "   "}))
+	if !errors.Is(err, ErrProjectNotConfigured) {
+		t.Fatalf("err = %v, want ErrProjectNotConfigured", err)
+	}
+}
+
+func TestResolveProject_FromEnv(t *testing.T) {
+	got, err := ResolveProject(fakeEnv(map[string]string{EnvProject: "PROJ"}))
+	if err != nil {
+		t.Fatalf("ResolveProject: %v", err)
+	}
+	if got != "PROJ" {
+		t.Fatalf("got %q, want PROJ", got)
+	}
+}
+
+// ----------------------------------------------------------------------
 // CLIRunner
 // ----------------------------------------------------------------------
 
