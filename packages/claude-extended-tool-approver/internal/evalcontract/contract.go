@@ -53,13 +53,26 @@ import "github.com/phillipgreenii/claude-extended-tool-approver/internal/effectg
 // categorized paths."). Keyed by host (as ssh's own EffectNet/Effect.Remote
 // name it — see cmddesc's sshInterpreter), each entry is an ORDERED list of
 // prefix rules consulted in order, first match wins (RemotePathRule's own
-// doc comment). This is this spike's stand-in for a future rules.json
-// binding — the shape itself is NOT yet ruled on; see the design proposal
-// appended to bead tc-vn5z's notes by this slice, and
-// effectpolicy.remotePathGuard, the one reader — mirroring RemoteLifecycle/
-// KubeContexts's own "data on the request, production wiring is a
-// follow-up" pattern. nil (the default) configures nothing, so every
-// remote path effect on every host abstains, per the ruling's own default.
+// doc comment).
+//
+// The map also recognises RemoteHostWildcard as a key: a "wildcard/default
+// entry applying to any host not otherwise listed" (Phillip, 2026-09-08,
+// verbatim ruling on tc-vn5z item 4b, recorded via /unblock-human-beads),
+// consulted only when RemotePaths[host] itself either has no entry at all
+// or its own rules produce no match for the effect — a per-host entry, when
+// present and matching, ALWAYS wins over the wildcard for the identical
+// effect (slice 3am's own conservative call: ordinary override semantics,
+// specific beats general — this precedence was not itself spelled out by
+// the ruling, which answered only "should a cross-host default exist at
+// all"). effectpolicy.remotePathGuard is the one reader of both.
+//
+// This is this spike's stand-in for a future rules.json binding — the shape
+// itself is RULED (tc-vn5z item 4b) but the production wiring is a
+// follow-up, not this slice; see effectpolicy.remotePathGuard, the one
+// reader — mirroring RemoteLifecycle/KubeContexts's own "data on the
+// request, production wiring is a follow-up" pattern. nil (the default)
+// configures nothing, so every remote path effect on every host abstains,
+// per the ruling's own default.
 //
 // BuildToolVerbs is OPERATOR CONFIGURATION for the build-tool family
 // (just/npm/devbox/nix/prek/... — tc-8og1 item 3, sub-slice 3 of 5;
@@ -86,6 +99,22 @@ type Request struct {
 	RemotePaths             map[string][]RemotePathRule
 	BuildToolVerbs          []VerbScopedApproval
 }
+
+// RemoteHostWildcard is the RemotePaths map key that names the
+// wildcard/default entry — the categorized-path list applied to any host
+// with no per-host entry of its own, or whose per-host entry does not match
+// the effect (see Request.RemotePaths's doc comment for the precedence
+// rule). Ruled 2026-09-08 (Phillip, verbatim, via /unblock-human-beads on
+// tc-vn5z item 4b): "the per-host categorized-path list gains a
+// wildcard/default entry applying to any host not otherwise listed ... in
+// addition to per-host entries." "*" is used rather than the empty string
+// because "" already carries a DIFFERENT, established meaning one field
+// over in this same package — PolicyContext.HostVetted's own doc comment:
+// "An empty host never matches" for VettedHosts — and reusing it here for
+// the opposite meaning ("matches every host") in a sibling field would be
+// the kind of same-package, opposite-sense overload this spike's
+// conventions elsewhere go out of their way to avoid.
+const RemoteHostWildcard = "*"
 
 // VerbClassProjectTied is VerbScopedApproval's default Class — see
 // VerbScopedApproval's own doc comment. It requires deletable.
@@ -206,22 +235,53 @@ type VerbChild struct {
 }
 
 // RemotePathRule is one categorized-path override entry (see Request.
-// RemotePaths's doc comment): a path on a configured host whose PREFIX
-// matches Prefix is classified Category instead of abstaining. Category is
-// an OPEN vocabulary mirroring internal/deletable's local classification
-// shape (Classify's Protected/Deletable/Writable, patheval's read/write
-// zones) rather than a bespoke one, since the operator ruling's own
-// "categorized paths" wording implies reusing a familiar taxonomy, not
-// inventing a new one: "read-only" (read permitted, write/delete
-// forbidden), "writable" (read/write permitted, delete needs consent —
-// DeleteAccess's own local "writable but not deletable" shape), "deletable"
-// (read/write/delete all permitted — the path is disposable), "protected"
-// (every access class forbidden), "secret" (every access class forbidden,
-// the WellKnownSecret-equivalent for a remote path). An unrecognised
-// Category value is treated exactly like no match at all (fail closed to
-// the ordinary remote-abstain default), never guessed at. This shape is a
-// PROPOSAL, not yet operator-ruled — see the design note appended to bead
-// tc-vn5z by this slice.
+// RemotePaths's doc comment): a path on a configured host (or under the
+// RemoteHostWildcard entry) whose PREFIX matches Prefix is classified
+// Category instead of abstaining. Category is an OPEN vocabulary mirroring
+// internal/deletable's local classification shape (Classify's
+// Protected/Deletable/Writable, patheval's read/write zones) rather than a
+// bespoke one, since the operator ruling's own "categorized paths" wording
+// implies reusing a familiar taxonomy, not inventing a new one: "read-only"
+// (read permitted, write/delete forbidden), "writable" (read/write
+// permitted, delete needs consent — DeleteAccess's own local "writable but
+// not deletable" shape), "deletable" (read/write/delete all permitted — the
+// path is disposable), "protected" (every access class forbidden), "secret"
+// (every access class forbidden, the WellKnownSecret-equivalent for a
+// remote path). An unrecognised Category value is treated exactly like no
+// match at all (fail closed to the ordinary remote-abstain default), never
+// guessed at.
+//
+// "protected" vs "secret" (tc-vn5z item 4b part 2, ruled 2026-09-08,
+// Phillip, verbatim: "Keep protected/secret distinct (Recommended)" —
+// mirrors internal/deletable's existing local taxonomy exactly, one
+// vocabulary reused everywhere): the two names are kept as genuinely
+// SEPARATE, non-interchangeable Category values, matching internal/
+// deletable's own split between a STRUCTURAL declaration (deletable.
+// Category's Protected — "must not be removed", deletable.go, e.g. .git,
+// .ssh/, .gnupg/ as a whole) and a CONTENT-secrecy declaration (secretpath.
+// Kind's WellKnownSecret/GenericSecretsDir — "must not be disclosed", the
+// concern NoReadOfSecretPath/NoWriteToSecretPath judge). "protected" here is
+// the remote-path analogue of the former; "secret" is the analogue of the
+// latter (specifically WellKnownSecret — the unconditional arm, since a
+// remote path has no local git-tracked-ness this policy can consult the way
+// deletable.NonSecret does for a LOCAL GenericSecretsDir path).
+//
+// The two names are NOT given different operational SEVERITY here (both
+// currently forbid every access class identically) — that finer distinction
+// (e.g. mirroring NoWriteToSecretPath's AccessModify carve-out for a
+// tracked-and-therefore-recoverable secret, which "protected" has no
+// equivalent of) is a genuinely UNRULED sub-question tc-vn5z item 4b did not
+// itself settle (its own 2026-09-07 design note flagged this exact gap:
+// "this proposal keeps them distinct only because the local taxonomy does,
+// not because ssh needs the difference"). Per this slice's own brief
+// ("stop only on something genuinely unruled and consequential"), this is
+// unruled but NOT consequential: an operator who wants "secret" to ever
+// Approve or Unknown anything is already free to use a different Category
+// ("read-only"/"writable"/"deletable") for that path instead — nothing here
+// forces "protected" and "secret" to converge in behavior forever, only
+// documents that this slice makes the conservative, safest call (identical
+// Forbidden-everywhere verdicts) rather than inventing an unruled write-side
+// carve-out with no remote-side "tracked by git" signal to ground it in.
 type RemotePathRule struct {
 	Prefix   string
 	Category string

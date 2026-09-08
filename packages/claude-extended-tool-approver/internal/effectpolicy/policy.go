@@ -71,8 +71,9 @@ type PolicyContext struct {
 	KubeContextDefaultAllow []string
 	// RemotePaths is OPERATOR CONFIGURATION for the categorized-path
 	// override hook a remote-scope path effect consults before the
-	// remote-abstain default (slice 3aa, tc-lc8f item 4g; tc-vn5z item 4) —
-	// see evalcontract.Request.RemotePaths's doc comment. remotePathGuard is
+	// remote-abstain default (slice 3aa, tc-lc8f item 4g; tc-vn5z item 4;
+	// wildcard/default entry added slice 3am, tc-vn5z item 4b) — see
+	// evalcontract.Request.RemotePaths's doc comment. remotePathGuard is
 	// the only reader.
 	RemotePaths map[string][]evalcontract.RemotePathRule
 	// BuildToolVerbs is OPERATOR CONFIGURATION for the build-tool family
@@ -202,6 +203,14 @@ func DefaultPolicies() []Policy {
 // identical Remote/RemotePaths check inserted at the same point, which is
 // exactly the kind of copy-paste this spike's "data first, one place per
 // concern" convention exists to avoid.
+//
+// Slice 3am (tc-vn5z item 4b) extended remotePathOverride's lookup with a
+// wildcard/default fallback (evalcontract.RemoteHostWildcard) — see that
+// function's own doc comment for the precedence rule — without changing
+// this guard's own shape at all: the guard still asks remotePathOverride
+// exactly one question ("does anything override the abstain default for
+// this effect") and does not itself know whether the answer came from a
+// host-specific or a wildcard entry.
 type remotePathGuard struct{ inner Policy }
 
 // Name implements Policy.
@@ -220,14 +229,37 @@ func (g remotePathGuard) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, bo
 }
 
 // remotePathOverride reports the Finding an operator-configured
-// RemotePathRule dictates for e, if one matches: RemotePaths[e.Remote],
-// consulted in ORDER, first PREFIX match wins (mirroring patheval's own
-// longest-listed-first, first-match-wins zone convention). matched is false
-// when no host entry, or no matching prefix, or an unrecognised Category
-// (fail closed to the ordinary abstain default — see RemotePathRule's own
-// doc comment).
+// RemotePathRule dictates for e, if one matches: RemotePaths[e.Remote] is
+// consulted FIRST, in order, first PREFIX match wins (mirroring patheval's
+// own longest-listed-first, first-match-wins zone convention). Only when
+// that host-specific list produces no match at all — no entry for the host,
+// or an entry whose rules never match this effect — does
+// RemotePaths[evalcontract.RemoteHostWildcard] get a turn, under the SAME
+// first-match-wins rule (tc-vn5z item 4b, ruled 2026-09-08: "the per-host
+// categorized-path list gains a wildcard/default entry applying to any host
+// not otherwise listed ... in addition to per-host entries"). This
+// precedence — a specific host ALWAYS wins over the wildcard for the same
+// effect — is this slice's own conservative call for a sub-question the
+// ruling did not itself spell out (see evalcontract.RemoteHostWildcard's
+// doc comment): it is the ordinary "more specific configuration overrides a
+// default" reading, the same direction every other override/default pair in
+// this package already takes (e.g. KubeContexts vs KubeContextDefaultAllow).
+// matched is false when neither list matches at all (fail closed to the
+// ordinary abstain default — see RemotePathRule's own doc comment).
 func remotePathOverride(e cmddesc.Effect, ctx PolicyContext) (Finding, bool) {
-	for _, rule := range ctx.RemotePaths[e.Remote] {
+	if f, matched := matchRemotePathRules(ctx.RemotePaths[e.Remote], e); matched {
+		return f, true
+	}
+	return matchRemotePathRules(ctx.RemotePaths[evalcontract.RemoteHostWildcard], e)
+}
+
+// matchRemotePathRules walks one host's (or the wildcard's) ordered
+// RemotePathRule list for e, first PREFIX match wins, and reports the
+// Finding remotePathCategoryFinding maps its Category to. Shared by
+// remotePathOverride's two lookups (host-specific, then wildcard) so the
+// matching loop itself is written once.
+func matchRemotePathRules(rules []evalcontract.RemotePathRule, e cmddesc.Effect) (Finding, bool) {
+	for _, rule := range rules {
 		if rule.Prefix == "" || !strings.HasPrefix(e.Path, rule.Prefix) {
 			continue
 		}
@@ -239,11 +271,19 @@ func remotePathOverride(e cmddesc.Effect, ctx PolicyContext) (Finding, bool) {
 }
 
 // remotePathCategoryFinding maps one RemotePathRule.Category to the Finding
-// for a path effect of the given access class — the PROPOSED taxonomy
-// RemotePathRule's own doc comment describes, mirroring internal/deletable's
-// local Protected/Deletable/Writable classification and patheval's
-// read/write zones rather than inventing a new shape. ok is false for an
-// unrecognised category (fail closed, never guessed at).
+// for a path effect of the given access class — the RULED taxonomy
+// RemotePathRule's own doc comment describes (tc-vn5z item 4b, ruled
+// 2026-09-08), mirroring internal/deletable's local Protected/Deletable/
+// Writable classification and patheval's read/write zones rather than
+// inventing a new shape. ok is false for an unrecognised category (fail
+// closed, never guessed at).
+//
+// "protected" and "secret" are two distinct Category strings (per the
+// ruling) but currently produce the IDENTICAL Finding — see RemotePathRule's
+// own doc comment for why that is this slice's deliberate, conservative
+// choice on a sub-question the ruling left open, not an oversight: a future
+// slice MAY diverge them (e.g. an AccessModify carve-out mirroring
+// NoWriteToSecretPath's) once a concrete need is brought back for a ruling.
 func remotePathCategoryFinding(category string, access cmddesc.PathAccess) (Finding, bool) {
 	switch category {
 	case "protected", "secret":

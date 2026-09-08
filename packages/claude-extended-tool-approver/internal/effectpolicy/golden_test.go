@@ -324,12 +324,27 @@ var goldenKubeContexts = func() map[string]map[string]evalcontract.KubeContextRu
 // own comments) — every other case (ssh, scp, or neither) gets nil,
 // matching the ruling's own "abstain by default" for every path this table
 // leaves unconfigured.
+//
+// The wildcard/default entry (evalcontract.RemoteHostWildcard, slice 3am,
+// tc-vn5z item 4b) is proven by two more cases below:
+// ssh_var_log_wildcard_categorized_read_only (an UNLISTED host falls back
+// to the wildcard's own categorized-path list) and
+// ssh_var_log_host_overrides_wildcard (a host WITH its own entry ignores a
+// wildcard entry for the identical prefix — this slice's own precedence
+// call, see evalcontract.RemoteHostWildcard's doc comment).
 var goldenRemotePaths = map[string]map[string][]evalcontract.RemotePathRule{
 	"ssh_var_log_categorized_read_only": {
 		"host": {{Prefix: "/var/log", Category: "read-only"}},
 	},
 	"scp_var_log_categorized_read_only": {
 		"host": {{Prefix: "/var/log", Category: "read-only"}},
+	},
+	"ssh_var_log_wildcard_categorized_read_only": {
+		evalcontract.RemoteHostWildcard: {{Prefix: "/var/log", Category: "read-only"}},
+	},
+	"ssh_var_log_host_overrides_wildcard": {
+		"host":                          {{Prefix: "/var/log", Category: "protected"}},
+		evalcontract.RemoteHostWildcard: {{Prefix: "/var/log", Category: "read-only"}},
 	},
 }
 
@@ -1261,6 +1276,27 @@ var goldenCases = []goldenCase{
 	// does not change.
 	{"ssh_var_log_uncategorized", "ssh host cat /var/log/syslog", evalcontract.Abstain, nil},
 	{"ssh_var_log_categorized_read_only", "ssh host cat /var/log/syslog", evalcontract.Abstain, nil},
+	// ssh_var_log_wildcard_categorized_read_only (slice 3am, tc-vn5z item
+	// 4b): "otherhost" has NO entry of its own in goldenRemotePaths — only
+	// the RemoteHostWildcard ("*") entry does — so the categorized-path hook
+	// still fires via the wildcard fallback. Same top-level Abstain as the
+	// per-host case above (the outbound-net-never-Permitted reason
+	// documented there), but the CHILD `cat` leaf's own node mark moves from
+	// Insufficient to Permitted exactly like the per-host case, visible in
+	// interpreted.mmd.
+	{"ssh_var_log_wildcard_categorized_read_only", "ssh otherhost cat /var/log/syslog", evalcontract.Abstain, nil},
+	// ssh_var_log_host_overrides_wildcard (slice 3am, tc-vn5z item 4b's own
+	// precedence sub-question, this slice's conservative call): "host" HAS
+	// its own entry ({"/var/log": "protected"}) in addition to the wildcard
+	// entry for the identical prefix ({"/var/log": "read-only"}). The
+	// host-specific entry wins — the leaf Forbids (protected), not Permits
+	// (what the wildcard alone would have said) — which this time DOES
+	// change the top-level Decision, to Reject: a Forbidden effect anywhere
+	// forces Reject regardless of the outbound-net Unknown. This is the
+	// clearest possible proof that specific-host beats wildcard: had the
+	// wildcard won instead, this case would read Abstain, identical to
+	// ssh_var_log_categorized_read_only above.
+	{"ssh_var_log_host_overrides_wildcard", "ssh host cat /var/log/syslog", evalcontract.Reject, nil},
 	// ssh_pipe_local_secret_stdin: sshSchema's Stdin: StdinAlways lets
 	// NoContentFlowToUnvettedNetwork see a LOCAL secret piped into ssh's
 	// stdin as content reaching its (outbound) network sink, exactly like

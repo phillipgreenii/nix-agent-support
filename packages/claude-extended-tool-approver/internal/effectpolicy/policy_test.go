@@ -465,4 +465,41 @@ func TestRemotePathGuard(t *testing.T) {
 			t.Errorf("%s: applies=%v verdict=%s (%s), want %s", tc.name, applies, f.Verdict, f.Reason, tc.verdict)
 		}
 	}
+
+	// The wildcard/default entry (evalcontract.RemoteHostWildcard, slice
+	// 3am, tc-vn5z item 4b) applies to any host with no per-host entry of
+	// its own (or whose per-host entry doesn't match); a host-specific
+	// entry, when present and matching, ALWAYS wins over the wildcard for
+	// the SAME effect — this slice's own conservative call for the
+	// precedence question the ruling left open (normal override semantics:
+	// specific beats general). Kept in a SEPARATE context from hookCtx
+	// above so this table cannot change any of hookCases' own assertions
+	// (in particular "non-matching host falls back to abstain").
+	wildcardCtx := baseCtx
+	wildcardCtx.RemotePaths = map[string][]evalcontract.RemotePathRule{
+		"host": {
+			{Prefix: "/var/log", Category: "protected"},
+		},
+		evalcontract.RemoteHostWildcard: {
+			{Prefix: "/var/log", Category: "read-only"},
+			{Prefix: "/var/tmp", Category: "deletable"},
+		},
+	}
+	wildcardCases := []struct {
+		name    string
+		policy  Policy
+		e       cmddesc.Effect
+		verdict FindingVerdict
+	}{
+		{"wildcard: unlisted host reads via wildcard read-only", NoReadOfUnreadablePath{}, read("/var/log/syslog", "otherhost"), Permitted},
+		{"wildcard: unlisted host delete via wildcard deletable", DeleteAccess{}, del("/var/tmp/x", "otherhost"), Permitted},
+		{"wildcard: unlisted host, unmatched prefix still abstains", NoReadOfUnreadablePath{}, read("/etc/passwd", "otherhost"), Unknown},
+		{"host-specific entry overrides the wildcard for the same host+prefix", NoReadOfUnreadablePath{}, read("/var/log/syslog", "host"), Forbidden},
+	}
+	for _, tc := range wildcardCases {
+		f, applies := (remotePathGuard{tc.policy}).Judge(tc.e, wildcardCtx)
+		if !applies || f.Verdict != tc.verdict {
+			t.Errorf("%s: applies=%v verdict=%s (%s), want %s", tc.name, applies, f.Verdict, f.Reason, tc.verdict)
+		}
+	}
 }
