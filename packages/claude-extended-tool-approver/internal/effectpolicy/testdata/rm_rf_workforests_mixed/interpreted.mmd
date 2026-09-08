@@ -1,0 +1,4 @@
+flowchart LR
+    n0["command: rm -rf .workforests/mixed<br/>- path:delete .workforests/mixed [arg 1]<br/>mark=insufficient: path:delete .workforests/mixed [arg 1]: delete-access (workforest set member states could not be determined, or a member is not all-clean: <ROOT>/.workforests/mixed)"]
+    n1[/"file: .workforests/mixed"/]
+    n0 -->|"writes: delete"| n1

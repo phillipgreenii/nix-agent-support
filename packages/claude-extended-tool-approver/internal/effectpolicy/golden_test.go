@@ -92,16 +92,36 @@ func fixture(t *testing.T) (root, home string) {
 	}
 	// Worktree-state coverage (tc-lc8f item 4a): four SLOTS directly under a
 	// `.worktrees` dir (the git kind's convention) — clean/dirty/ignored-only/
-	// notaworktree — plus a pn workspace with two more slots under its
-	// (default) workforests_dir. None of these directories are real git
-	// worktrees (the fixture's own `.git` is a plain directory, not a real
-	// repository, so there is nothing for `git worktree add` to attach to
-	// here) — deletable.SetWorktreeStateProbe below substitutes a fake keyed
-	// on the slot's basename, so this fixture (and every test that calls it)
-	// never starts a real git process for these paths. internal/deletable's
-	// own worktree_test.go covers the real git behaviour these fakes stand in
+	// notaworktree. None of these directories are real git worktrees (the
+	// fixture's own `.git` is a plain directory, not a real repository, so
+	// there is nothing for `git worktree add` to attach to here) —
+	// deletable.SetWorktreeStateProbe below substitutes a fake keyed on the
+	// slot's basename, so this fixture (and every test that calls it) never
+	// starts a real git process for these paths. internal/deletable's own
+	// worktree_test.go covers the real git behaviour these fakes stand in
 	// for, against real throwaway repositories.
-	for _, d := range []string{".worktrees/clean", ".worktrees/dirty", ".worktrees/ignored-only", ".worktrees/notaworktree", ".workforests/clean", ".workforests/dirty"} {
+	//
+	// pn workforest SET coverage (tc-8og1 item 1): a pn workforest set
+	// coordinates one worktree PER REPO, nested one level deeper than the
+	// git kind's `.worktrees/<branch>` convention — the SET CONTAINER itself
+	// is `.workforests/<set>`, and each member repo's own worktree slot is
+	// `.workforests/<set>/<repo>` (depth 2 under the default workforests_dir,
+	// matching pnWorkforestsDir's default). Three sets exercise the
+	// worst-of-members combining rule (deletable.ProbeWorkforestSetState):
+	// "clean" (single clean member -> the set itself Approves), "dirty"
+	// (single dirty member -> the set itself Rejects), and "mixed" (one
+	// clean + one clean-but-ignored member, no dirty member -> the set
+	// itself Abstains). The member basenames below ("clean", "dirty",
+	// "ignored-only") are exactly the basenames the fake probe already keys
+	// on for the `.worktrees/*` slots above, reused here so one fake serves
+	// both fixtures.
+	for _, d := range []string{
+		".worktrees/clean", ".worktrees/dirty", ".worktrees/ignored-only", ".worktrees/notaworktree",
+		".workforests/clean/clean",
+		".workforests/dirty/dirty",
+		".workforests/mixed/clean",
+		".workforests/mixed/ignored-only",
+	} {
 		if err := os.MkdirAll(filepath.Join(root, filepath.FromSlash(d)), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -364,8 +384,31 @@ var goldenCases = []goldenCase{
 	// is enough to route through worktree-state judgment even without the
 	// `.git` FILE marker.
 	{"rm_rf_worktree_notaworktree", "rm -rf .worktrees/notaworktree", evalcontract.Abstain, nil},
+
+	// pn workforest set depth (tc-8og1 item 1): BOTH depths now route
+	// through worktree-state judgment, not pnKind's blanket Protected.
+	// Depth 2 (the per-repo slot itself, `.workforests/<set>/<repo>`) is
+	// judged individually, by deletable.ProbeWorktreeState — identical to a
+	// `.worktrees/<branch>` slot above, just one directory level deeper.
+	{"rm_rf_workforests_clean_repo", "rm -rf .workforests/clean/clean", evalcontract.Approve, nil},
+	{"rm_rf_workforests_dirty_repo", "rm -rf .workforests/dirty/dirty", evalcontract.Reject, nil},
+	// Depth 1 (the SET CONTAINER itself, `.workforests/<set>`) is judged by
+	// the WORST state among its member slots (deletable.
+	// ProbeWorkforestSetState), never by ProbeWorktreeState directly (the
+	// container has no `.git` of its own) and never by pnKind's blanket
+	// Protected declaration (workspace.go) either. "clean" has one clean
+	// member -> Approve; "dirty" has one dirty member -> Reject (this pair
+	// keeps the pre-existing golden names and verdicts from before this
+	// slice, when depth 1 was — incorrectly — treated as a single slot
+	// rather than a set container: the verdict is unchanged, only the
+	// MECHANISM behind it is, since a single-member all-clean/any-dirty set
+	// happens to agree with what judging that one member directly would
+	// have said). "mixed" has one clean member and one clean-but-ignored
+	// member, no dirty member -> Abstain — the case a single-slot fixture
+	// could never exercise, because a slot has no members of its own.
 	{"rm_rf_workforests_clean", "rm -rf .workforests/clean", evalcontract.Approve, nil},
 	{"rm_rf_workforests_dirty", "rm -rf .workforests/dirty", evalcontract.Reject, nil},
+	{"rm_rf_workforests_mixed", "rm -rf .workforests/mixed", evalcontract.Abstain, nil},
 
 	// cp: trailing destination, -n, -t, secret source, too few operands.
 	{"cp_readme_copy", "cp README.md copy.md", evalcontract.Approve, nil},

@@ -528,24 +528,33 @@ func (NoWriteToReadOnlyPath) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding
 //     item 4a — see below)                  -> judged by worktree STATE, not
 //     the Protected category: clean -> Permitted, dirty -> Forbidden, clean
 //     but ignored files present -> Unknown, state undeterminable -> Unknown
-//  7. deletable.Classify (workspace
+//  7. the path IS a pn workforest SET
+//     CONTAINER (deletable.
+//     IsWorkforestSetContainer, tc-8og1
+//     item 1 — see below)                    -> judged by the WORST state
+//     among its member worktree slots: any member dirty -> Forbidden, every
+//     member clean -> Permitted, otherwise -> Unknown
+//  8. deletable.Classify (workspace
 //     declarations, tc-z806.3):
 //     Protected (.git, .worktrees, a pn
-//     workforest set, ~/.ssh)               -> Forbidden
+//     workforest set's own workforests_dir
+//     entry not itself a set container,
+//     ~/.ssh)                                -> Forbidden
 //     Deletable (gitignored, build/ of a
 //     gradle project, ~/.cache, go's build
 //     cache, a temp root)                   -> Permitted, even where the
 //     zone is unknown: a declaration that a path is disposable vouches for
 //     removing it
-//  8. zone unknown, no declaration          -> Unknown   (not known writable)
-//  9. writable, not deletable              -> Unknown   ("needs consent")
+//  9. zone unknown, no declaration          -> Unknown   (not known writable)
+//
+// 10. writable, not deletable              -> Unknown   ("needs consent")
 //
 // Step 3 includes denyRead deliberately: the ruling says protections above
 // this rule win, and a path the operator has marked unreadable is protected
 // whether or not it is also marked unwritable — refusing to remove it is the
 // fail-safe reading. Step 4 uses the same secretRead helper the read-side
 // policies use, so a secret is named the same way whichever access class
-// touches it. Step 5 runs BEFORE steps 6/7, so a declared-deletable cache
+// touches it. Step 5 runs BEFORE steps 6/7/8, so a declared-deletable cache
 // that sits in a read-only zone (go's module cache under patheval's
 // `~/go/pkg`) is still Forbidden — the zone is the older, narrower decision
 // and wins, and a worktree sitting in a read-only zone is never approved
@@ -558,11 +567,23 @@ func (NoWriteToReadOnlyPath) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding
 // SUPERSEDES slice 3l's unconditional Protected on a `.worktrees` entry (git
 // kind) and a pn workspace's workforests_dir entry (pn kind) — but ONLY for
 // the worktree ROOT ITSELF, as a unit: `.git/` (always a directory for the
-// primary/canonical clone) stays Protected via step 7 exactly as before, and
+// primary/canonical clone) stays Protected via step 8 exactly as before, and
 // so does any path INSIDE a worktree that is not the worktree's own root
-// (deletable.AtWorktreeRoot's doc comment). Step 6 runs BEFORE step 7 so a
+// (deletable.AtWorktreeRoot's doc comment). Step 6 runs BEFORE steps 7/8 so a
 // worktree root's fate is decided by its state, never by the blanket
 // category deletable.Classify would otherwise assign it.
+//
+// Step 7 (workforest set state, tc-8og1 item 1) extends step 6's ruling to a
+// pn workforest SET CONTAINER — `<workforests_dir>/<set>`, one level above
+// the per-repo worktree slots step 6 already judges
+// (`<workforests_dir>/<set>/<repo>`, two levels under workforests_dir; see
+// deletable.IsDeclaredWorktreeSlot's doc comment for the depth history). A
+// set container has no `.git` of its own to probe (each MEMBER repo does),
+// so it is judged by the worst state among its members instead
+// (deletable.ProbeWorkforestSetState) rather than by ProbeWorktreeState
+// directly — never treated as a slot in its own right, and never falling
+// through to step 8's blanket Protected declaration on the workforests_dir
+// entry.
 //
 // "By default" in the ruling means a consumer rule ABOVE this policy may
 // widen (a project that declares its build/ disposable) or narrow; this
@@ -598,8 +619,13 @@ func (DeleteAccess) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, bool) {
 	if access == patheval.PathReject || access == patheval.PathReadOnly {
 		return Finding{Verdict: Forbidden, Reason: "delete of " + access.String() + " zone"}, true
 	}
-	if abs := ctx.PathEval.ResolvePath(e.Path); abs != "" && deletable.AtWorktreeRoot(abs) {
-		return worktreeRemovalFinding(abs)
+	if abs := ctx.PathEval.ResolvePath(e.Path); abs != "" {
+		if deletable.AtWorktreeRoot(abs) {
+			return worktreeRemovalFinding(abs)
+		}
+		if deletable.IsWorkforestSetContainer(abs) {
+			return workforestSetRemovalFinding(abs)
+		}
 	}
 	class, why := deletable.Classify(ctx.PathEval, e.Path)
 	switch class {
@@ -631,6 +657,37 @@ func worktreeRemovalFinding(abs string) (Finding, bool) {
 		return Finding{Verdict: Unknown, Reason: "worktree root is clean but has ignored files: " + abs}, true
 	default:
 		reason := "worktree state could not be determined: " + abs
+		if err != nil {
+			reason += " (" + err.Error() + ")"
+		}
+		return Finding{Verdict: Unknown, Reason: reason}, true
+	}
+}
+
+// workforestSetRemovalFinding maps deletable.ProbeWorkforestSetState(abs) —
+// the WORST WorktreeState among a pn workforest set container's own member
+// slots — to a Finding, per the SAME operator ruling worktreeRemovalFinding
+// applies to a single slot (tc-8og1 item 1, extending tc-vn5z's "removing a
+// worktree is fine, assuming it osnt dirty" to a set of them): any member
+// dirty -> Forbidden (Reject), every member clean -> Permitted (Approve),
+// otherwise (a mix, an ignored-only member, an undeterminable member, or no
+// members at all) -> Unknown (Abstain). ProbeWorkforestSetState never
+// returns WorktreeCleanIgnored itself (its own doc comment folds that case
+// into WorktreeUnknown), so that branch here is unreachable in practice but
+// kept for the same reason worktreeRemovalFinding keeps it: a Finding
+// mapping should not silently miscategorize a WorktreeState value it wasn't
+// specifically told to expect.
+func workforestSetRemovalFinding(abs string) (Finding, bool) {
+	state, err := deletable.ProbeWorkforestSetState(abs)
+	switch state {
+	case deletable.WorktreeClean:
+		return Finding{Verdict: Permitted, Reason: "workforest set is clean (every member worktree is clean): " + abs}, true
+	case deletable.WorktreeDirty:
+		return Finding{Verdict: Forbidden, Reason: "workforest set has a dirty member worktree: " + abs}, true
+	case deletable.WorktreeCleanIgnored:
+		return Finding{Verdict: Unknown, Reason: "workforest set has a clean-but-ignored member worktree: " + abs}, true
+	default:
+		reason := "workforest set member states could not be determined, or a member is not all-clean: " + abs
 		if err != nil {
 			reason += " (" + err.Error() + ")"
 		}

@@ -1,6 +1,7 @@
 package deletable
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -273,15 +274,30 @@ func IsWorktreeRoot(abs string) bool {
 }
 
 // IsDeclaredWorktreeSlot reports whether abs is a direct child of a
-// `.worktrees` directory (the git kind's convention, workspace.go) or of a
-// pn workspace's declared workforests_dir (the pn kind's convention,
-// pnWorkforestsDir) — the LOCATION-level signal from slice 3l, independent
-// of whether abs currently has the .git FILE marker IsWorktreeRoot checks.
-// A slot that is not (or is no longer) an actual worktree still routes
-// through worktree-state judgment rather than silently falling back to a
-// blanket Protected/Deletable verdict — ProbeWorktreeState reports
-// WorktreeUnknown for it, same as for any other path git does not
-// recognize as a repository.
+// `.worktrees` directory (the git kind's convention, workspace.go) — a
+// single repo's own worktree root, one level deep — OR a direct child of a
+// pn workforest SET CONTAINER (IsWorkforestSetContainer), i.e.
+// `<workforests_dir>/<set>/<repo>`, TWO levels under a pn workspace's
+// declared workforests_dir. The LOCATION-level signal from slice 3l,
+// independent of whether abs currently has the .git FILE marker
+// IsWorktreeRoot checks. A slot that is not (or is no longer) an actual
+// worktree still routes through worktree-state judgment rather than
+// silently falling back to a blanket Protected/Deletable verdict —
+// ProbeWorktreeState reports WorktreeUnknown for it, same as for any other
+// path git does not recognize as a repository.
+//
+// pn workforest depth (tc-8og1 item 1): a pn workforest SET coordinates one
+// git worktree per repo, nested one level DEEPER than the git kind's
+// `.worktrees/<branch>` convention — `<workforests_dir>/<set>/<repo>`, not
+// `<workforests_dir>/<set>` — because a set is itself a container of
+// multiple repos' worktrees, not a single worktree. Before this slice, only
+// the depth-1 path (`<workforests_dir>/<set>`) was recognized as "the slot",
+// so a real per-repo worktree at depth 2 fell through to pnKind's
+// unconditional Protected declaration (workspace.go) instead of
+// worktree-state judgment — 5 corpus rejects in slice 3ac's `git worktree
+// remove <workforests_dir>/<set>/<repo>` root-cause. The depth-1 path is now
+// the SET CONTAINER itself (IsWorkforestSetContainer, below), judged by the
+// worst state of its member slots, not treated as a slot in its own right.
 func IsDeclaredWorktreeSlot(abs string) bool {
 	parent := filepath.Dir(abs)
 	if parent == abs {
@@ -289,6 +305,24 @@ func IsDeclaredWorktreeSlot(abs string) bool {
 	}
 	if filepath.Base(parent) == ".worktrees" {
 		return true
+	}
+	return IsWorkforestSetContainer(parent)
+}
+
+// IsWorkforestSetContainer reports whether abs is a pn workforest SET's own
+// container directory — `<workforests_dir>/<set>`, a direct child of a pn
+// workspace's declared workforests_dir (pnWorkforestsDir) — as distinct from
+// one of the set's own per-repo worktree SLOTS nested one level deeper
+// (`<workforests_dir>/<set>/<repo>`, what IsDeclaredWorktreeSlot recognizes
+// above). A set container is never itself a git worktree (it has no `.git`
+// of its own; each member repo does), so it is never judged by
+// ProbeWorktreeState directly — ProbeWorkforestSetState judges it by the
+// WORST state among its member slots instead (see that function's doc
+// comment for the combining rule).
+func IsWorkforestSetContainer(abs string) bool {
+	parent := filepath.Dir(abs)
+	if parent == abs {
+		return false
 	}
 	grandparent := filepath.Dir(parent)
 	if grandparent == parent {
@@ -298,6 +332,60 @@ func IsDeclaredWorktreeSlot(abs string) bool {
 		return false
 	}
 	return filepath.Base(parent) == pnWorkforestsDir(grandparent)
+}
+
+// ProbeWorkforestSetState reports a workforest SET CONTAINER's aggregate
+// WorktreeState from the states of its direct member subdirectories (each
+// probed individually via ProbeWorktreeState, the SAME probe — and, under
+// test, the SAME injection seam — a member slot is judged by on its own),
+// per the operator ruling recorded on tc-8og1 item 1: "any dirty member =>
+// Reject, all clean => Approve, else Abstain".
+//
+// Combining rule, expressed in WorktreeState terms so the caller can reuse
+// the exact same Finding mapping worktreeRemovalFinding already applies to
+// a single slot (effectpolicy/policy.go):
+//
+//   - Any member WorktreeDirty       -> WorktreeDirty       (Reject)
+//   - Every member WorktreeClean     -> WorktreeClean        (Approve)
+//   - Otherwise (a mix, a member
+//     WorktreeCleanIgnored, a member
+//     whose own state could not be
+//     determined, or no members at
+//     all found)                     -> WorktreeUnknown      (Abstain)
+//
+// A non-directory entry directly under abs (e.g. a stray file) is not a
+// member and is skipped; the container is not itself probed with
+// ProbeWorktreeState (it has no `.git` of its own to run `git status`
+// against). abs must already be resolved (as ProbeWorktreeState requires of
+// its own argument); the caller (DeleteAccess) has already confirmed
+// IsWorkforestSetContainer(abs) before calling this.
+func ProbeWorkforestSetState(abs string) (WorktreeState, error) {
+	entries, err := os.ReadDir(abs)
+	if err != nil {
+		return WorktreeUnknown, err
+	}
+	sawMember := false
+	mixed := false
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		sawMember = true
+		state, _ := ProbeWorktreeState(filepath.Join(abs, entry.Name()))
+		if state == WorktreeDirty {
+			return WorktreeDirty, nil
+		}
+		if state != WorktreeClean {
+			mixed = true
+		}
+	}
+	if !sawMember {
+		return WorktreeUnknown, fmt.Errorf("workforest set container has no member directories: %s", abs)
+	}
+	if mixed {
+		return WorktreeUnknown, nil
+	}
+	return WorktreeClean, nil
 }
 
 // AtWorktreeRoot reports whether abs must be judged by worktree state
@@ -314,9 +402,11 @@ func IsDeclaredWorktreeSlot(abs string) bool {
 // the primary clone; the entry name `.git`, not a directory CONTAINING one,
 // so IsWorktreeRoot(".git") asks for "./.git/.git" and is false), the
 // `.worktrees` container directory itself (its own parent is not named
-// `.worktrees`), and any path nested two or more levels inside a worktree —
-// falls through to the pre-existing deletable.Classify/Resolve path
-// unchanged (item 2 of this slice's brief: only the worktree ROOT, as a
+// `.worktrees`), a pn workforest SET CONTAINER (IsWorkforestSetContainer —
+// judged separately, by DeleteAccess, via ProbeWorkforestSetState; tc-8og1
+// item 1), and any path nested two or more levels inside a single-repo
+// worktree — falls through to the pre-existing deletable.Classify/Resolve
+// path unchanged (item 2 of slice 3t's brief: only the worktree ROOT, as a
 // unit, is affected).
 func AtWorktreeRoot(abs string) bool {
 	return IsWorktreeRoot(abs) || IsDeclaredWorktreeSlot(abs)
