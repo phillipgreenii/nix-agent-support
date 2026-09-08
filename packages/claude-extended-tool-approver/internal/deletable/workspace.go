@@ -165,13 +165,19 @@ type Kind struct {
 	// every ok=false or nil-Secrecy candidate as silent — continuing
 	// outward exactly as Resolve treats CatSilent.
 	Secrecy func(root, rel, abs string, isDir bool) (ok bool, reason string)
+	// Verbs is this kind's WORKSPACE VERB-DISCOVERY facet (tc-8og1 item 3,
+	// the build-tool family design; see verbs.go's package-level doc
+	// comment for the full ruling and rationale). nil (the default) means
+	// the kind discovers no verbs at all. See verbs.go's Kind.Verbs doc
+	// comment for the calling contract.
+	Verbs func(root string) []string
 }
 
 // DefaultKinds returns the built-in declarations in registry order: temp,
-// home, git, go, gradle, pn. Order matters only as the tie-break between two
-// candidates with the SAME root depth.
+// home, git, go, gradle, pn, just, npm, devbox. Order matters only as the
+// tie-break between two candidates with the SAME root depth.
 func DefaultKinds() []Kind {
-	return []Kind{tempKind, homeKind, gitKind, goKind, gradleKind, pnKind}
+	return []Kind{tempKind, homeKind, gitKind, goKind, gradleKind, pnKind, justKind, npmKind, devboxKind}
 }
 
 // tempKind: everything under a temp root (temproot.Roots: $TMPDIR,
