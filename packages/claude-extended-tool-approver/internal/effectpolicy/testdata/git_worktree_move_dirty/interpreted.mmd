@@ -1,0 +1,6 @@
+flowchart LR
+    n0["command: git worktree move .worktrees/dirty .worktrees/moved<br/>- path:delete .worktrees/dirty [arg 0]<br/>- path:create .worktrees/moved [arg 1]<br/>- stdio:stdout metadata<br/>mark=forbidden: path:delete .worktrees/dirty [arg 0]: delete-access (worktree root is dirty (tracked modifications, staged changes, or untracked files): <ROOT>/.worktrees/dirty)"]
+    n1[/"file: .worktrees/dirty"/]
+    n2[/"file: .worktrees/moved"/]
+    n0 -->|"writes: delete"| n1
+    n0 -->|"writes: create"| n2

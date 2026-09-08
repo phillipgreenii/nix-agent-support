@@ -1,0 +1,4 @@
+flowchart LR
+    n0["command: git worktree remove .worktrees/ignored-only<br/>- path:delete .worktrees/ignored-only [arg 0]<br/>- stdio:stdout metadata<br/>mark=insufficient: path:delete .worktrees/ignored-only [arg 0]: delete-access (worktree root is clean but has ignored files: <ROOT>/.worktrees/ignored-only)"]
+    n1[/"file: .worktrees/ignored-only"/]
+    n0 -->|"writes: delete"| n1

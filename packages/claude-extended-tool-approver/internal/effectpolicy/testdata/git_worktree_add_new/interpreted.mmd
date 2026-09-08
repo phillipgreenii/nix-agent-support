@@ -1,0 +1,4 @@
+flowchart LR
+    n0["command: git worktree add .worktrees/new feature<br/>- path:create .worktrees/new [arg 0]<br/>- stdio:stdout metadata<br/>mark=permitted"]
+    n1[/"file: .worktrees/new"/]
+    n0 -->|"writes: create"| n1

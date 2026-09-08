@@ -200,8 +200,9 @@ func TestGoCleanCacheFlags(t *testing.T) {
 }
 
 // TestGoUnmodeledSubcommand: an unregistered go subcommand fails exactly
-// like git's own unmodeled subcommands (worktree add/remove/prune) — no
-// special code for "doc"/"tool"/"work", the absent map key is enough.
+// like git's own unmodeled subcommands (worktree frobnicate, since slice 3ac
+// modeled add/remove/prune/move/lock/unlock/repair) — no special code for
+// "doc"/"tool"/"work", the absent map key is enough.
 func TestGoUnmodeledSubcommand(t *testing.T) {
 	reg := DefaultRegistry()
 	goSchema, ok := reg.Lookup("go")

@@ -1,0 +1,6 @@
+flowchart LR
+    n0["command: git worktree move .worktrees/clean .worktrees/moved<br/>- path:delete .worktrees/clean [arg 0]<br/>- path:create .worktrees/moved [arg 1]<br/>- stdio:stdout metadata<br/>mark=permitted"]
+    n1[/"file: .worktrees/clean"/]
+    n2[/"file: .worktrees/moved"/]
+    n0 -->|"writes: delete"| n1
+    n0 -->|"writes: create"| n2

@@ -304,9 +304,9 @@ func TestKubectlCpLocalRemoteSplit(t *testing.T) {
 }
 
 // TestKubectlUnmodeledSubcommandFallback mirrors go's own doc/tool/work and
-// git's worktree add/remove/prune precedent: an unlisted verb needs no
-// schema at all — interpretSubcommand's (here, kubectlInterpreter's own
-// mirror of it) existing "unmodeled subcommand" fallback already abstains.
+// git's worktree frobnicate precedent: an unlisted verb needs no schema at
+// all — interpretSubcommand's (here, kubectlInterpreter's own mirror of it)
+// existing "unmodeled subcommand" fallback already abstains.
 func TestKubectlUnmodeledSubcommandFallback(t *testing.T) {
 	reg := DefaultRegistry()
 	schema, _ := reg.Lookup("kubectl")

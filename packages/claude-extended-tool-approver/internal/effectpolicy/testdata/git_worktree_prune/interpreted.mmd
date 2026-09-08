@@ -1,0 +1,4 @@
+flowchart LR
+    n0["command: git worktree prune<br/>- path:read .git/worktrees [implicit]<br/>- stdio:stdout metadata<br/>mark=permitted"]
+    n1[/"file: .git/worktrees"/]
+    n0 -->|"reads: read"| n1

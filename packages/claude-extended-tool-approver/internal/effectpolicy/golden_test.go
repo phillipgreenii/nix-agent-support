@@ -680,9 +680,28 @@ var goldenCases = []goldenCase{
 	{"git_branch_foo", "git branch foo", evalcontract.Abstain, nil},
 	{"git_branch_list_pattern", "git branch --list maint-1", evalcontract.Approve, nil},
 
-	// git worktree: nested Subcommands — only "list" is modeled.
+	// git worktree: nested Subcommands, slice 3ac (tc-lc8f item 4h; tc-vn5z
+	// item 5) — remove/add/move/prune/lock/unlock/repair are now modeled
+	// alongside list, so the tool's own worktree verbs are judged by the
+	// SAME worktree-state ladder as a plain `rm -rf <worktree-root>` (see
+	// gitWorktreeRemoveSchema's doc comment). The fixture's `.worktrees/
+	// {clean,dirty,ignored-only}` and its fake worktree-state probe are the
+	// SAME ones rm_rf_worktree_* above already uses.
 	{"git_worktree_list", "git worktree list", evalcontract.Approve, nil},
-	{"git_worktree_add", "git worktree add ../x", evalcontract.Abstain, nil},
+	{"git_worktree_remove_clean", "git worktree remove .worktrees/clean", evalcontract.Approve, nil},
+	{"git_worktree_remove_force_dirty", "git worktree remove --force .worktrees/dirty", evalcontract.Reject, nil},
+	{"git_worktree_remove_dirty", "git worktree remove .worktrees/dirty", evalcontract.Reject, nil},
+	{"git_worktree_remove_ignored_only", "git worktree remove .worktrees/ignored-only", evalcontract.Abstain, nil},
+	{"git_worktree_prune", "git worktree prune", evalcontract.Approve, nil},
+	{"git_worktree_prune_dry_run", "git worktree prune -n", evalcontract.Approve, nil},
+	{"git_worktree_add_new", "git worktree add .worktrees/new feature", evalcontract.Approve, nil},
+	{"git_worktree_add_branch", "git worktree add -b feat .worktrees/new", evalcontract.Approve, nil},
+	{"git_worktree_add_nix_store", "git worktree add /nix/store/x", evalcontract.Reject, nil},
+	{"git_worktree_add_dynamic", `git worktree add "$D"`, evalcontract.Abstain, nil},
+	{"git_worktree_add_ssh_key", "git worktree add ~/.ssh/x", evalcontract.Reject, nil},
+	{"git_worktree_move_clean", "git worktree move .worktrees/clean .worktrees/moved", evalcontract.Approve, nil},
+	{"git_worktree_move_dirty", "git worktree move .worktrees/dirty .worktrees/moved", evalcontract.Reject, nil},
+	{"git_worktree_frobnicate", "git worktree frobnicate", evalcontract.Abstain, nil},
 
 	// git config: --get* reads (its key is a flag value, not a positional);
 	// any bare positional is Unmodeled (a write) UNLESS --get/--get-all/

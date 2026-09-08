@@ -714,12 +714,26 @@ var gitBranchSchema = CommandSchema{
 	EndOfOptions: true,
 }
 
-// gitWorktreeListSchema/gitWorktreeSchema: `worktree` dispatches through a
-// SECOND, nested Subcommands map (interpretSubcommand recurses on the same
-// code path for any depth) — only `list` is modeled; `add`/`remove`/`prune`
-// are absent from the map entirely, so they hit interpretSubcommand's own
-// "unmodeled subcommand" failure with no new code. Flags verified against
-// this host's `git worktree -h` / `git worktree list -h`.
+// gitWorktreeListSchema/gitWorktreeSchema and the seven sibling worktree
+// subcommand schemas below: `worktree` dispatches through a SECOND, nested
+// Subcommands map (interpretSubcommand recurses on the same code path for
+// any depth). Slice 3ac (tc-lc8f item 4h; tc-vn5z item 5; follow-up flagged
+// by slice 3t's rm_rf_worktree_* goldens): the tool's OWN worktree verbs are
+// now modeled so DeleteAccess's worktree-state ladder (internal/deletable/
+// worktree.go, internal/effectpolicy/policy.go's worktreeRemovalFinding)
+// judges `git worktree remove`/`move`'s delete-shaped operand EXACTLY like a
+// plain `rm -rf <worktree-root>` — slice 3l's own principle that "the tool's
+// own command and a plain rm -rf are seen to share ONE classification."
+// Flags verified against this host's git 2.54.0: `git worktree -h` (lists
+// every subcommand's synopsis) plus each subcommand's own `-h`.
+//
+// `-f`/`--force` on remove/add/move is modeled INERT throughout, not as a
+// transform: real git refuses a DIRTY worktree removal without --force (and
+// a LOCKED one needs --force TWICE — git-worktree(1), not shown in the `-h`
+// synopsis), but this spike's ruling (tc-vn5z, quoted on gitWorktreeRemoveSchema
+// below) judges the INTENT the same way regardless of whether git itself
+// would have refused: Reject on dirty is the answer whether or not --force
+// was spelled, so the flag cannot change the verdict and needs no transform.
 var gitWorktreeListSchema = CommandSchema{
 	Name:       "list",
 	Provenance: "git version 2.54.0, git worktree list -h",
@@ -734,6 +748,187 @@ var gitWorktreeListSchema = CommandSchema{
 	EndOfOptions: true,
 }
 
+// gitWorktreeRemoveSchema: `git worktree remove [-f] <worktree>`. The single
+// positional is a PathDelete — exactly the same access class a plain `rm -rf
+// <worktree-root>` gets — so it reaches DeleteAccess's own worktree-root
+// branch (deletable.AtWorktreeRoot) unchanged: clean -> Approve, dirty ->
+// Reject, clean-but-ignored -> Abstain, undeterminable -> Abstain. Per the
+// operator ruling (Phillip, 2026-09-07, verbatim, recorded on bead tc-vn5z):
+// "removing a worktree is fine, assuming it osnt dirty. well, a completely
+// clean one can be approved. use rejext if there are dirtt workspace.
+// abstain for if clean but ignored files exist." See this file's own doc
+// comment above for why `-f`/`--force` (including doubled, for a locked
+// worktree) does not change the verdict.
+var gitWorktreeRemoveSchema = CommandSchema{
+	Name:       "remove",
+	Provenance: "git version 2.54.0, git worktree remove -h",
+	Flags: map[string]FlagSpec{
+		"-f": inert, "--force": inert,
+	},
+	Positionals:  PositionalSpec{Rest: PathDelete, MinRest: 1},
+	Stdin:        StdinNever,
+	Stdout:       StdoutMetadata,
+	UnknownFlag:  UnknownFlagInsufficient,
+	EndOfOptions: true,
+}
+
+// gitWorktreePruneSchema: `git worktree prune [-n] [-v] [--expire TIME]`
+// removes registration METADATA (under `.git/worktrees`) for worktrees whose
+// directory is already gone from disk — it deletes nothing that still
+// EXISTS. Modeled as an always-on implicit PathRead of ".git/worktrees"
+// (the same "metadata, not content" treatment gitLogSchema's implicit
+// PathRead of ".git" already gets — see that schema's own doc comment) with
+// NO delete effect at all: this is deliberately the "prune deletes nothing
+// on disk that still exists" reading from the brief, decided here rather
+// than modeling it as a PathModify/PathDelete of `.git/worktrees` (which
+// would either sail through as an ordinary write like git add/commit/rm/mv's
+// own implicit ".git" PathModify already does — NoWriteToReadOnlyPath never
+// consults deletable.Classify/Protected for a non-delete write, only
+// DeleteAccess does — or, modeled as a delete, would hit DeleteAccess's
+// Protected branch for `.git` and Reject a routine housekeeping op the
+// operator's own ff-merge/cleanup skills run regularly). `-n`/`--dry-run` is
+// modeled plain inert (not TransformDryRun): the verdict is identical either
+// way, so no transform is needed to prove it.
+var gitWorktreePruneSchema = CommandSchema{
+	Name:       "prune",
+	Provenance: "git version 2.54.0, git worktree prune -h",
+	Flags: map[string]FlagSpec{
+		"-n": inert, "--dry-run": inert,
+		"-v": inert, "--verbose": inert,
+		"--expire": literal1,
+	},
+	ImplicitEffects: []ImplicitEffect{
+		{Role: PathRead, Target: ".git/worktrees"},
+	},
+	Stdin:        StdinNever,
+	Stdout:       StdoutMetadata,
+	UnknownFlag:  UnknownFlagInsufficient,
+	EndOfOptions: true,
+}
+
+// gitWorktreeAddSchema: `git worktree add [-f] [--detach] [--checkout]
+// [--lock [--reason TEXT]] [--orphan] [(-b|-B) BRANCH] <path> [<commit-ish>]`.
+// The leading positional is a PathCreate (the new worktree directory) — the
+// same access class mkdirSchema's own positional gets, so it reaches
+// NoWriteToReadOnlyPath/NoWriteToSecretPath's ordinary write ladder
+// unchanged: a path under this project's own `.worktrees` slot convention or
+// a pn workforests_dir resolves inside the project's read-write zone ->
+// Approve; a path under `/nix/store` -> Reject (read-only zone); a path
+// under `~/.ssh` -> Reject via NoWriteToSecretPath (slice 3ab's
+// WellKnownSecret, unconditional regardless of access class); a dynamic path
+// -> Abstain. The optional trailing <commit-ish> is Literal (a revision
+// name, inert) via Rest. `-b`/`-B <branch>` (create/create-or-reset a
+// branch) is likewise Literal — a branch NAME is inert, not a path — via
+// literal1. Deliberately NO implicit effect targets `.git/worktrees`: the
+// registration write there is git's own bookkeeping for a routine op, the
+// same choice gitWorktreePruneSchema's own doc comment makes and for the
+// same reason (a Protected-Reject on `.git` would be wrong for housekeeping
+// this spike's own precedent already treats leniently — see that doc
+// comment for why git add/commit/rm/mv's OWN implicit ".git" PathModify does
+// not trip Protected either, since NoWriteToReadOnlyPath never consults it).
+var gitWorktreeAddSchema = CommandSchema{
+	Name:       "add",
+	Provenance: "git version 2.54.0, git worktree add -h",
+	Flags: map[string]FlagSpec{
+		"-f": inert, "--force": inert,
+		"-d": inert, "--detach": inert,
+		"--checkout": inert,
+		"--lock":     inert,
+		"--reason":   literal1,
+		"--orphan":   inert,
+		"-b":         literal1, "-B": literal1,
+		"-q": inert, "--quiet": inert,
+		"--track":          inert,
+		"--guess-remote":   inert,
+		"--relative-paths": inert,
+	},
+	Positionals: PositionalSpec{
+		Leading: []OperandRole{PathCreate},
+		Rest:    Literal,
+	},
+	Stdin:        StdinNever,
+	Stdout:       StdoutMetadata,
+	UnknownFlag:  UnknownFlagInsufficient,
+	EndOfOptions: true,
+}
+
+// gitWorktreeLockSchema/gitWorktreeUnlockSchema/gitWorktreeRepairSchema:
+// `git worktree lock [--reason TEXT] <worktree>`, `git worktree unlock
+// <worktree>`, `git worktree repair [<path>...]` — none of these touch the
+// worktree's own file CONTENT or create/delete anything on disk; they only
+// inspect a worktree's registration (lock/unlock toggle a `locked` marker
+// file under `.git/worktrees/<name>`, repair fixes up stale back-references)
+// — the brief's "reads or metadata-only => Approve" reading. Modeled as an
+// ordinary PathRead of the worktree operand(s), the same "metadata, not
+// content" treatment this file's prune/list schemas already get, rather
+// than a PathModify targeting `.git/worktrees` (which would be an unindexed
+// precision this slice does not need: no golden here depends on lock/unlock/
+// repair's own metadata write being distinguished from a read).
+var gitWorktreeLockSchema = CommandSchema{
+	Name:       "lock",
+	Provenance: "git version 2.54.0, git worktree lock -h",
+	Flags: map[string]FlagSpec{
+		"--reason": literal1,
+	},
+	Positionals:  PositionalSpec{Rest: PathRead, MinRest: 1},
+	Stdin:        StdinNever,
+	Stdout:       StdoutNone,
+	UnknownFlag:  UnknownFlagInsufficient,
+	EndOfOptions: true,
+}
+
+var gitWorktreeUnlockSchema = CommandSchema{
+	Name:         "unlock",
+	Provenance:   "git version 2.54.0, git worktree unlock -h",
+	Flags:        map[string]FlagSpec{},
+	Positionals:  PositionalSpec{Rest: PathRead, MinRest: 1},
+	Stdin:        StdinNever,
+	Stdout:       StdoutNone,
+	UnknownFlag:  UnknownFlagInsufficient,
+	EndOfOptions: true,
+}
+
+var gitWorktreeRepairSchema = CommandSchema{
+	Name:       "repair",
+	Provenance: "git version 2.54.0, git worktree repair -h",
+	Flags: map[string]FlagSpec{
+		"--relative-paths": inert,
+	},
+	Positionals:  PositionalSpec{Rest: PathRead},
+	Stdin:        StdinNever,
+	Stdout:       StdoutMetadata,
+	UnknownFlag:  UnknownFlagInsufficient,
+	EndOfOptions: true,
+}
+
+// gitWorktreeMoveSchema: `git worktree move [-f] <worktree> <new-path>`.
+// tc-z806's "rm is different from git rm" ruling does not apply here (that
+// ruling is specific to git rm's own tracked-content recoverability) — a
+// worktree move is judged as exactly what it is: the OLD path stops existing
+// (PathDelete, reaching the SAME worktree-state ladder as `git worktree
+// remove`/`rm -rf`) and the NEW path is created (PathCreate, reaching the
+// same write ladder as `git worktree add`). Leading (not Rest) pins both
+// positionals to their exact roles; any THIRD positional is Unmodeled
+// (fails closed) rather than silently swallowed as Literal, since real git
+// never accepts one. Exactly two positionals are required (MinRest is
+// implied by Leading's own length check in resolveRoles).
+var gitWorktreeMoveSchema = CommandSchema{
+	Name:       "move",
+	Provenance: "git version 2.54.0, git worktree move -h",
+	Flags: map[string]FlagSpec{
+		"-f": inert, "--force": inert,
+		"--relative-paths": inert,
+	},
+	Positionals: PositionalSpec{
+		Leading: []OperandRole{PathDelete, PathCreate},
+		Rest:    Unmodeled,
+	},
+	Stdin:        StdinNever,
+	Stdout:       StdoutMetadata,
+	UnknownFlag:  UnknownFlagInsufficient,
+	EndOfOptions: true,
+}
+
 var gitWorktreeSchema = CommandSchema{
 	Name:         "worktree",
 	Provenance:   "git version 2.54.0, git worktree -h",
@@ -741,7 +936,14 @@ var gitWorktreeSchema = CommandSchema{
 	UnknownFlag:  UnknownFlagInsufficient,
 	EndOfOptions: true,
 	Subcommands: map[string]CommandSchema{
-		"list": gitWorktreeListSchema,
+		"list":   gitWorktreeListSchema,
+		"remove": gitWorktreeRemoveSchema,
+		"prune":  gitWorktreePruneSchema,
+		"add":    gitWorktreeAddSchema,
+		"lock":   gitWorktreeLockSchema,
+		"unlock": gitWorktreeUnlockSchema,
+		"repair": gitWorktreeRepairSchema,
+		"move":   gitWorktreeMoveSchema,
 	},
 }
 
