@@ -714,6 +714,23 @@ var goldenCases = []goldenCase{
 	// echo: all positionals Literal; the literal TEXT is Stdout content, so a
 	// pipe to curl -d @- still reaches the content-flow graph policy.
 	{"echo_redirect_copy", "echo hi > copy.md", evalcontract.Approve, nil},
+	// echo_redirect_readme / echo_redirect_dotenv (tc-8og1 item 7, the Claude
+	// Code adapter's own goldens live in internal/claudecodeadapter, but
+	// these two pin the SHELL-EQUIVALENT baseline they are checked against —
+	// see that package's adapter_test.go, which asserts a Write HookInput to
+	// each of these same two fixture paths reaches the IDENTICAL Decision as
+	// the matching case here, proving the adapter's one-node graph is judged
+	// by the exact same policy fold as a shell redirect touching the same
+	// path): a plain truncating redirect (`>`, matching the Write tool's own
+	// AccessTruncate — see claudecodeadapter.fileToolAccess) to an ORDINARY
+	// tracked path (README.md) Approves, and the identical redirect to the
+	// fixture's WellKnownSecret `.env` (gitignored, untracked — the same
+	// `.env` rm_dotenv_gitignored/git_rm_dotenv_gitignored already exercise
+	// on the delete/modify side) Rejects, exactly as a read of that path
+	// already does (cat_ssh_key et al.) and as echo_redirect_aws_credentials
+	// already does for a different WellKnownSecret arm.
+	{"echo_redirect_readme", "echo x > README.md", evalcontract.Approve, nil},
+	{"echo_redirect_dotenv", "echo x > .env", evalcontract.Reject, nil},
 	{"echo_redirect_dynamic", `echo hi > "$OUT"`, evalcontract.Abstain, nil},
 	// echo_redirect_aws_credentials: slice 3ab (tc-lc8f item 4h; tc-vn5z
 	// item 5) — "credentials" is generic by itself (secretpath's M3), but

@@ -1,0 +1,5 @@
+flowchart LR
+    n0["command: echo x #gt; .env<br/>- stdio:stdout content<br/>- path:truncate .env [redirect #gt;]<br/>mark=forbidden: path:truncate .env [redirect #gt;]: no-write-to-secret-path (write to secret path)"]
+    n1[/"file: .env"/]
+    n0 -->|"redirect-out: #gt;"| n1
+    n0 -->|"writes: truncate"| n1

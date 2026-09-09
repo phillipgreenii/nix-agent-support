@@ -62,11 +62,31 @@ func Evaluate(req evalcontract.Request, reg cmddesc.Registry, policies []Policy,
 		return evalcontract.Response{Decision: evalcontract.Abstain, Reason: reason}
 	}
 
+	ctx := cmddesc.Context{CWD: req.CWD, Env: req.Env}
+	structural := effectgraph.BuildStructural(sp)
+	interpreted := effectgraph.BuildInterpreted(sp, reg, ctx)
+
+	return EvaluateGraph(structural, interpreted, policies, graphPolicies, BuildPolicyContext(req))
+}
+
+// BuildPolicyContext derives a PolicyContext from a Request: the
+// PathEvaluator (rooted at req.ProjectRoot, or patheval.DetectProjectRoot's
+// guess from req.CWD when ProjectRoot is empty) plus every operator-
+// configuration field PolicyContext carries straight through from the
+// identically-named Request field. Evaluate itself calls this; it is
+// exported so a caller that builds its OWN graph — never going through
+// Evaluate's cmdparse.ParseShell(req.Command) step at all — still gets the
+// IDENTICAL PolicyContext construction Evaluate uses, rather than a second,
+// possibly-drifting copy of this logic. See EvaluateGraph's own doc comment
+// for the adapter this exists for (tc-8og1 item 7, the Claude Code
+// Write/Edit adapter): it has a Request-shaped bag of operator configuration
+// but no Command to parse, so it calls this directly.
+func BuildPolicyContext(req evalcontract.Request) PolicyContext {
 	root := req.ProjectRoot
 	if root == "" {
 		root = patheval.DetectProjectRoot(req.CWD)
 	}
-	pctx := PolicyContext{
+	return PolicyContext{
 		PathEval:                patheval.NewWithCWD(root, req.CWD),
 		CWD:                     req.CWD,
 		VettedHosts:             req.VettedHosts,
@@ -76,12 +96,28 @@ func Evaluate(req evalcontract.Request, reg cmddesc.Registry, policies []Policy,
 		RemotePaths:             req.RemotePaths,
 		BuildToolVerbs:          req.BuildToolVerbs,
 	}
-	ctx := cmddesc.Context{CWD: req.CWD, Env: req.Env}
+}
 
-	resp := evalcontract.Response{
-		Structural:  effectgraph.BuildStructural(sp),
-		Interpreted: effectgraph.BuildInterpreted(sp, reg, ctx),
-	}
+// EvaluateGraph is Evaluate's shared back half, split out (tc-8og1 item 7)
+// so a caller that builds its OWN structural/interpreted graph pair —
+// never parsing shell text at all — is judged through the EXACT SAME
+// node-fold / graph-policy / decision-fold code Evaluate itself uses for a
+// parsed shell command's graph, rather than a second, parallel
+// implementation that could silently drift from this one.
+//
+// This is the mechanism that makes file policies (NoWriteToSecretPath,
+// NoWriteToReadOnlyPath, DeleteAccess, ...) SINGLE-SOURCED between a shell
+// command and Claude Code's own Write/Edit tool calls: the Claude Code
+// adapter package (internal/claudecodeadapter) builds a ONE-NODE graph
+// directly from a Write/Edit HookInput — one cmddesc.Effect naming the
+// tool's file_path, no cmdparse involved since there is no shell text to
+// parse — and hands it to THIS function, the identical entry point a
+// `cat`/`echo`/`sed -i` command's multi-node graph is folded through. A
+// policy therefore cannot tell, and does not care, whether the EffectPath
+// it is judging came from a real shell redirect or from a structured tool
+// call; there is exactly one path-policy implementation for both.
+func EvaluateGraph(structural, interpreted effectgraph.Graph, policies []Policy, graphPolicies []GraphPolicy, pctx PolicyContext) evalcontract.Response {
+	resp := evalcontract.Response{Structural: structural, Interpreted: interpreted}
 	g := &resp.Interpreted
 
 	for i := range g.Nodes {
