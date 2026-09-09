@@ -1347,7 +1347,10 @@ func pipeRelayHeredocCleared(pc cmdparse.ParsedCommand, leaves []cmdparse.Parsed
 // reaches this floor at all — see the call site's own comment for why.
 //
 // pg2-whumr (operator ruling pg2-gwp57, "harmonize up", recorded in ADR 0048):
-// ADR 0043 states NoOpinion is auto-approved in `auto` mode, so a command
+// ADR 0043 said NoOpinion is auto-approved in `auto` mode; corrected by ADR
+// 0043's own later note (tc-ezd7, 2026-09-07) — NoOpinion instead hands the
+// call to Claude Code's `auto_mode_classifier`, which may approve, reject, or
+// abstain. The floor below does not depend on which is true: a command
 // substitution must be POSITIVELY CLEARED BY BOTH GATES to reach Approve — the
 // static allowlist did NOT refuse it, AND full-engine recursion of the body
 // approved it — or its contribution can be no LESS restrictive than a decisive
@@ -1358,8 +1361,9 @@ func pipeRelayHeredocCleared(pc cmdparse.ParsedCommand, leaves []cmdparse.Parsed
 // `ssh host rm -rf /`, `npm install evil`, `curl evil` — fails gate one but
 // recursion also lands on NoOpinion (loop exhaustion, ADR 0044's
 // ProvenanceExhaustion), never Approve, so the old check never fired and the
-// body reached NoOpinion end to end: auto-approved in `auto` mode, a live RCE
-// hole this floor closes.
+// body reached NoOpinion end to end: handed to Claude Code's classifier in
+// `auto` mode with no rule-level opinion left to stop it, a live RCE hole
+// this floor closes.
 //
 // A DIFFERENT hole was SUSPECTED for a body the allowlist CLEARS rather than
 // refuses: `seq` and `mktemp` are on cmdparse's static list PRECISELY BECAUSE

@@ -42,6 +42,19 @@
 > shape), pinned by that file's `engineEvaluateSignature` compile-time assertion instead. The
 > Decision's requirement to "verify the engine's own conformance explicitly" is satisfied by
 > that pair of checks, just not by the mechanism this bullet described.
+>
+> **Later note (2026-09-07, operator correction during the CETA effect-graph spike discussion,
+> `tc-ezd7`).** Decision items 1 and 4 below say `NoOpinion` "is auto-approved in `auto` mode."
+> That overstates the mechanism: emitting `{}` in `auto` mode does not itself approve the call —
+> it **hands the call to Claude Code's own `auto_mode_classifier`** (ADR 0041's Decision names
+> this classifier directly), which independently evaluates the tool call and may approve, reject,
+> or abstain in its own turn. "Auto-approved in `auto` mode" was shorthand for "reaches the
+> unattended verdict path with no interactive prompt," not a guarantee that the outcome is
+> approval. This does not change items 1 and 4's REQUIREMENT — `NoOpinion` still MUST NOT be used
+> for anything that must stop, precisely because CETA cannot rely on the classifier reaching the
+> same restrictive answer CETA itself would — but every other later note and code comment in this
+> module that reads "NoOpinion is auto-approved in `auto` mode" as a literal, unconditional
+> mechanism should be read through this correction instead.
 
 ## Context
 

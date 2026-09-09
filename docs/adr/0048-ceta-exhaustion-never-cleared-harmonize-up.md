@@ -12,6 +12,16 @@
 > replay-gate measurement; the LANDING decision (whether the measured residual prompt volume
 > is acceptable now, or should wait on `pg2-1019a`/`pg2-x9452`'s pipeline relief) is left to
 > the orchestrator/operator and is NOT settled by this note.
+>
+> **Later note (2026-09-07, operator correction during the CETA effect-graph spike discussion,
+> `tc-ezd7`).** The Context below says "ADR 0043 states `NoOpinion` is auto-approved in auto
+> mode" — ADR 0043 has since been corrected (see its own later note of the same date): emitting
+> `{}` in `auto` mode does not itself approve the call, it hands the call to Claude Code's own
+> `auto_mode_classifier`, which may approve, reject, or abstain independently. The observed
+> outcome recorded here — `echo $(bash -c "rm -rf /")` "was PERMITTED" — is unaffected; that is
+> what the classifier in fact did when consulted on this measurement. Only the causal claim
+> ("auto-approved" as an automatic, unconditional consequence of `NoOpinion`) is corrected; the
+> live hole and this ADR's Decision stand exactly as written.
 
 ## Context
 
