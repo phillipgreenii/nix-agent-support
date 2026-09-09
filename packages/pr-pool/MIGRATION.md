@@ -224,15 +224,15 @@ reason — see `default.nix`).
 
 ## Hazard: gate file paths are now configured by default (Task 1.2b, `INV-LIFE-2`)
 
-Before Task 1.2b, `Config.QuotaPaused`/`Config.CICDDown` defaulted to `""` — no gate could ever
-be set unless an operator explicitly pointed `PR_POOL_QUOTA_PAUSED`/`PR_POOL_CICD_DOWN` (or,
-now, `[pool].quota_paused_path`/`cicd_down_path`) at a real path themselves. As of this change,
-`Config.Load()` fills either still-empty field with `<LogDir>/gates/{quota-paused,cicd-down}`
+Before Task 1.2b, `Config.OperatorPaused`/`Config.CICDDown` defaulted to `""` — no gate could ever
+be set unless an operator explicitly pointed `PR_POOL_OPERATOR_PAUSED`/`PR_POOL_CICD_DOWN` (or,
+now, `[pool].operator_paused_path`/`cicd_down_path`) at a real path themselves. As of this change,
+`Config.Load()` fills either still-empty field with `<LogDir>/gates/{operator-paused,cicd-down}`
 (after the repo-TOML layer, so an existing `[pool]`/env override still wins).
 
 **What this means for an existing deployment:** `<LogDir>` (the standard XDG state path, or
 `PR_POOL_LOG_DIR`) is now a live gate location even for a pool that never configured one. A
-**stray file** already sitting at `<LogDir>/gates/quota-paused` or `<LogDir>/gates/cicd-down` —
+**stray file** already sitting at `<LogDir>/gates/operator-paused` or `<LogDir>/gates/cicd-down` —
 left over from an unrelated process, a manual experiment, a copy/paste of another pool's state
 directory — now **gates a pool that previously could not be gated at all**. Check for one before
 upgrading if `<LogDir>` is shared or was ever used for something else:
@@ -274,7 +274,7 @@ one source had an error," never "did not run."
 subcommand directly.
 
 A new `daemon` submodule (`enable`, `repoRoot`, `beadsPrefix`, `configText`,
-`gates.{quotaPausedPath,cicdDownPath}`) drives a second, long-running systemd unit
+`gates.{operatorPausedPath,cicdDownPath}`) drives a second, long-running systemd unit
 (`pr-pool-daemon`) running `pr-pool run` — the daemon core, producing and dispatching on a fixed
 poll interval until SIGINT/SIGTERM, as opposed to `periodicDrain`'s timer-triggered one-shot pass.
 **`periodicDrain.enable` and `daemon.enable` are mutually exclusive** and asserted so: both are
@@ -288,8 +288,8 @@ On darwin, the HM module's `systemd.user.services` is a no-op (darwin has no sys
 darwin deployment that wants the timer-driven form still needs its own launchd timer wiring, or
 should use `daemon` instead.
 
-The `daemon` submodule's `gates.quotaPausedPath`/`gates.cicdDownPath` set
-`PR_POOL_QUOTA_PAUSED`/`PR_POOL_CICD_DOWN` for that unit only; leaving them `null` (the default)
+The `daemon` submodule's `gates.operatorPausedPath`/`gates.cicdDownPath` set
+`PR_POOL_OPERATOR_PAUSED`/`PR_POOL_CICD_DOWN` for that unit only; leaving them `null` (the default)
 falls back to `Config.Load()`'s own default gate paths under `<PR_POOL_LOG_DIR>/gates/` — see
 "Hazard: gate file paths are now configured by default (Task 1.2b, `INV-LIFE-2`)" above, which
 applies equally to a daemon deployment: a stray file already sitting at that default path now

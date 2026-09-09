@@ -52,7 +52,7 @@ func TestExampleTOML_gateKeysDocumented(t *testing.T) {
 	out := ExampleTOML()
 	for _, want := range []string{
 		"config --show",
-		"# quota_paused_path =",
+		"# operator_paused_path =",
 		"# cicd_down_path =",
 	} {
 		if !strings.Contains(out, want) {

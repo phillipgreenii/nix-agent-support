@@ -997,7 +997,7 @@ sequenceDiagram
 
 ### `USECASE-GATE-POOL` — pause and resume the pool via a global gate <!-- uuid: a2668c8c-fd26-4849-a7f5-a5068355cb1a -->
 
-**Actor:** `ACTOR-OP` (a human operator for `quota-paused`; an automation actor for `cicd-down`).
+**Actor:** `ACTOR-OP` (a human operator for `operator-paused`; an automation actor for `cicd-down`).
 **Level:** user-goal.
 **Preconditions:** none — a gate is file-backed and MAY be set or cleared whether or not a core is
 currently running.
@@ -1007,7 +1007,7 @@ touching configuration, so an operator (or an automation signal) can halt the sy
 _Requires:_ `INV-LIFE-2`, `INV-LIFE-1` (reachability in both run modes).
 _Includes:_ `USECASE-DEBUG-RUN` (reading whether a running core is halted or quiescent).
 
-**Flow.** `pause [<gate>]` sets a named gate (default `quota-paused`); `resume [<gate>]` clears one
+**Flow.** `pause [<gate>]` sets a named gate (default `operator-paused`); `resume [<gate>]` clears one
 gate, and `resume --all` clears every gate outstanding. Setting or clearing succeeds **whether or not
 a core is currently running** — the command acts on the gate's own persisted state, never on a live
 core — so a gate set before the next start is still honoured at that start. While **any** gate is set
@@ -1016,7 +1016,7 @@ completion, and expiry keeps advancing (`INV-LIFE-2`). This differs from a **run
 (`STORY-OP-3`) in **kind**, not degree: a selector is scoped to one run and never outlives it, while a
 gate is global and persists across runs until explicitly cleared.
 
-**Two gates, OR-effective.** `quota-paused` is the operator's own; `cicd-down` belongs to an
+**Two gates, OR-effective.** `operator-paused` is the operator's own; `cicd-down` belongs to an
 automation actor, and every surface reporting gate state labels an automation-owned gate as such,
 because it MAY re-assert the gate on its own initiative.
 

@@ -31,7 +31,7 @@
     "deduped": { "review-requested": 1 }
   },
   "gates": [
-    { "name": "quota_paused", "set": false },
+    { "name": "operator_paused", "set": false },
     {
       "name": "cicd_down",
       "set": true,

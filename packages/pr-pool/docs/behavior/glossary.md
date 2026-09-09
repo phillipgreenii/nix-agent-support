@@ -16,9 +16,9 @@ their own terms in a downstream deployment set.
   sources/handlers for a **single run** and never outlives it — a selector is scoped to one run and
   changes no persisted state; a gate is scoped to nothing narrower than the whole deployment and
   outlives every run until explicitly cleared. The two named gates, **OR-effective**, are
-  `quota-paused` (the operator's own) and `cicd-down` (an automation actor's, and labeled as such on
+  `operator-paused` (the operator's own) and `cicd-down` (an automation actor's, and labeled as such on
   every surface).
-- **Gate owner** — the field that carries that labeling per gate: `"operator"` for `quota-paused` or
+- **Gate owner** — the field that carries that labeling per gate: `"operator"` for `operator-paused` or
   `"automation"` for `cicd-down`. Realizes `INV-LIFE-2`'s requirement that every surface reporting
   gate state label an automation-owned gate as such, because it MAY re-assert itself on its own
   initiative in a way the human-owned gate never does.

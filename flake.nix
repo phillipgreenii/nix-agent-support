@@ -2102,7 +2102,7 @@
                                         default = "";
                                       };
                                       gates = {
-                                        quotaPausedPath = lib.mkOption {
+                                        operatorPausedPath = lib.mkOption {
                                           type = lib.types.nullOr lib.types.str;
                                           default = null;
                                         };
@@ -2153,7 +2153,7 @@
                       repoRoot = "/repo";
                       configText = baseConfigText;
                       gates = {
-                        quotaPausedPath = "/state/gates/quota-paused";
+                        operatorPausedPath = "/state/gates/operator-paused";
                         cicdDownPath = "/state/gates/cicd-down";
                       };
                     };
@@ -2186,7 +2186,7 @@
                 # Daemon unit: the bare "run" subcommand.
                 assert lib.hasSuffix " run" daemonService.ExecStart;
                 # Gate env vars present on the daemon unit when configured.
-                assert lib.elem "PR_POOL_QUOTA_PAUSED=/state/gates/quota-paused" daemonService.Environment;
+                assert lib.elem "PR_POOL_OPERATOR_PAUSED=/state/gates/operator-paused" daemonService.Environment;
                 assert lib.elem "PR_POOL_CICD_DOWN=/state/gates/cicd-down" daemonService.Environment;
                 # Mutual-exclusion assertion fires when both are enabled.
                 assert firedAssertion != null;

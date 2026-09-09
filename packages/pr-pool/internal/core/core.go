@@ -806,13 +806,13 @@ const (
 	ResumeReplySchema   = "cli.resume-reply"
 )
 
-// GateQuotaPaused / GateCICDDown are the two named gates INV-LIFE-2 defines,
+// GateOperatorPaused / GateCICDDown are the two named gates INV-LIFE-2 defines,
 // spelled to match the wire-level vocabulary the drive loop's own gate
-// observation already uses (cmd/pr-pool's gateTickKeyQuotaPaused /
+// observation already uses (cmd/pr-pool's gateTickKeyOperatorPaused /
 // gateTickKeyCICDDown, and this package's own status_test.go literal
-// "quota_paused") — the SAME two gates cmd/pr-pool/gates_cmd.go's
+// "operator_paused") — the SAME two gates cmd/pr-pool/gates_cmd.go's
 // file-direct pause/resume subcommands manage under their own,
-// differently-spelled CLI vocabulary (gateQuotaPaused = "quota-paused" /
+// differently-spelled CLI vocabulary (gateOperatorPaused = "operator-paused" /
 // gateCICDDown = "cicd-down"). This package never imports that one (no
 // cross-package reach, Task 3.5 Contract), so the two vocabularies are kept
 // in sync by convention and tests, not a shared constant.
@@ -824,15 +824,15 @@ const (
 // doc comment for the full rationale. Kept, unremoved, for backward
 // compatibility.
 const (
-	GateQuotaPaused = "quota_paused"
-	GateCICDDown    = "cicd_down"
+	GateOperatorPaused = "operator_paused"
+	GateCICDDown       = "cicd_down"
 )
 
 // defaultGate is the gate a pause/resume request names when it omits
 // "gate" — the SAME default cmd/pr-pool's file-direct `pause [<gate>]` /
 // `resume [<gate>]` subcommands use (gates_cmd.go: "Omitting a gate name...
-// defaults to quota-paused").
-const defaultGate = GateQuotaPaused
+// defaults to operator-paused").
+const defaultGate = GateOperatorPaused
 
 // handlePause runs the `pause` socket verb (Task 3.9): idempotent — pausing
 // an already-paused gate is a no-op SUCCESS that MUST NOT rewrite the

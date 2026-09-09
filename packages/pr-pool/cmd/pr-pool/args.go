@@ -78,7 +78,7 @@ Subcommands:
                           the log dir, on the interval PR_POOL_TUI_INTERVAL sets (below). Unlike
                           every other operator subcommand, it NEVER fails on "no running core": it
                           renders a no-core screen and keeps polling instead (ADR 0036).
-  pause [<gate>]          set gate <gate> (default quota-paused) directly on its file-backed state
+  pause [<gate>]          set gate <gate> (default operator-paused) directly on its file-backed state
                           (INV-LIFE-2): exits 0 even with NO core running, reporting that the change
                           takes effect at the next start (a currently running "run" picks it up on
                           its next tick). FILE-DIRECT: unlike every operator subcommand above,
@@ -86,7 +86,7 @@ Subcommands:
                           verb-named-subcommand-is-a-socket-client symmetry that push-inject/
                           ingest-event/self-status follow. A socket-level pause/resume verb also
                           exists (Phase 3) for a client already holding a connection.
-  resume [<gate>] | --all clear gate <gate> (default quota-paused), or every outstanding gate at once
+  resume [<gate>] | --all clear gate <gate> (default operator-paused), or every outstanding gate at once
                           with --all; a bare "resume" clears ONLY the default gate, so an
                           automation-owned gate (cicd-down) is never cleared by accident.
                           "resume --all <gate>" (both at once) is a usage error. Same FILE-DIRECT,
@@ -131,7 +131,7 @@ Pool-wide settings come from PR_POOL_* environment variables:
                            parse as a duration is a usage error naming the bad value.
   PR_POOL_LOG_DIR          event-log/state directory: gates/, events.jsonl, the discovery record
                            (default: the XDG state dir, e.g. ~/.local/state/pr-pool)
-  PR_POOL_QUOTA_PAUSED     quota-paused gate file path override (default <PR_POOL_LOG_DIR>/gates/quota-paused)
+  PR_POOL_OPERATOR_PAUSED  operator-paused gate file path override (default <PR_POOL_LOG_DIR>/gates/operator-paused)
   PR_POOL_CICD_DOWN        cicd-down gate file path override (default <PR_POOL_LOG_DIR>/gates/cicd-down)
   PR_POOL_ONLY             comma-separated run-scoped allow-list, each entry role:<name> or
                            query:<name> (DEC-CLI-1); unioned with any --only flags on
@@ -196,7 +196,7 @@ type routeResult struct {
 	configMode string   // "print-defaults" | "show" (routeConfig only)
 	// gate / allGates are routePause/routeResume's TYPED fields (Task 1.2b): the
 	// gate name (already validated against the two known gates, defaulted to
-	// quota-paused when omitted) and, for routeResume only, whether --all was
+	// operator-paused when omitted) and, for routeResume only, whether --all was
 	// given. Parsed here in route()'s helpers, never re-parsed from .rest.
 	gate     string
 	allGates bool
@@ -403,9 +403,9 @@ func parseConfigArgs(args []string) routeResult {
 }
 
 // parsePauseArgs validates `pause [<gate>]` (Task 1.2b, INV-LIFE-2). Pure: no
-// I/O, no config load — the gate identity (quota-paused, cicd-down) is a fixed
+// I/O, no config load — the gate identity (operator-paused, cicd-down) is a fixed
 // CLI-level fact, not something config resolves, so validating it here costs
-// nothing config-dependent. An omitted gate defaults to quota-paused
+// nothing config-dependent. An omitted gate defaults to operator-paused
 // (interfaces.md's "Operator pause/resume"); an unknown gate name or a
 // dash-prefixed token is a usage error, matching every other subcommand's
 // fail-fast-on-bad-input contract (pg2-52rn).
@@ -422,9 +422,9 @@ func parsePauseArgs(args []string) routeResult {
 		}
 	}
 	if gate == "" {
-		gate = gateQuotaPaused
+		gate = gateOperatorPaused
 	} else if !validGate(gate) {
-		return routeResult{kind: routeUsageErr, msg: fmt.Sprintf("pause: unknown gate %q (want %s or %s)", gate, gateQuotaPaused, gateCICDDown)}
+		return routeResult{kind: routeUsageErr, msg: fmt.Sprintf("pause: unknown gate %q (want %s or %s)", gate, gateOperatorPaused, gateCICDDown)}
 	}
 	return routeResult{kind: routePause, gate: gate}
 }
@@ -454,9 +454,9 @@ func parseResumeArgs(args []string) routeResult {
 	}
 	if !allGates {
 		if gate == "" {
-			gate = gateQuotaPaused
+			gate = gateOperatorPaused
 		} else if !validGate(gate) {
-			return routeResult{kind: routeUsageErr, msg: fmt.Sprintf("resume: unknown gate %q (want %s or %s)", gate, gateQuotaPaused, gateCICDDown)}
+			return routeResult{kind: routeUsageErr, msg: fmt.Sprintf("resume: unknown gate %q (want %s or %s)", gate, gateOperatorPaused, gateCICDDown)}
 		}
 	}
 	return routeResult{kind: routeResume, gate: gate, allGates: allGates}

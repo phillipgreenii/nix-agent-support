@@ -48,9 +48,9 @@ func TestRenderConfigShow_includesDispatchScalars(t *testing.T) {
 func TestRenderConfigShow_gatesPathsStateMtime(t *testing.T) {
 	dir := t.TempDir()
 	cfg := config.Default()
-	cfg.QuotaPaused = filepath.Join(dir, "quota-paused")
+	cfg.OperatorPaused = filepath.Join(dir, "operator-paused")
 	cfg.CICDDown = filepath.Join(dir, "cicd-down")
-	if err := os.WriteFile(cfg.QuotaPaused, []byte("paused\n"), 0o644); err != nil {
+	if err := os.WriteFile(cfg.OperatorPaused, []byte("paused\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -58,13 +58,13 @@ func TestRenderConfigShow_gatesPathsStateMtime(t *testing.T) {
 	renderConfigShow(&b, cfg)
 	out := b.String()
 
-	for _, want := range []string{cfg.QuotaPaused, cfg.CICDDown, "paused since", "not paused"} {
+	for _, want := range []string{cfg.OperatorPaused, cfg.CICDDown, "paused since", "not paused"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in:\n%s", want, out)
 		}
 	}
 	// The mtime string itself must be present (RFC3339), not just the label.
-	fi, err := os.Stat(cfg.QuotaPaused)
+	fi, err := os.Stat(cfg.OperatorPaused)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,9 +121,9 @@ func TestRenderConfigShowJSON_includesDispatchScalars(t *testing.T) {
 func TestRenderConfigShowJSON_gatesPathsStateMtime(t *testing.T) {
 	dir := t.TempDir()
 	cfg := config.Default()
-	cfg.QuotaPaused = filepath.Join(dir, "quota-paused")
+	cfg.OperatorPaused = filepath.Join(dir, "operator-paused")
 	cfg.CICDDown = filepath.Join(dir, "cicd-down")
-	if err := os.WriteFile(cfg.QuotaPaused, []byte("paused\n"), 0o644); err != nil {
+	if err := os.WriteFile(cfg.OperatorPaused, []byte("paused\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -134,15 +134,15 @@ func TestRenderConfigShowJSON_gatesPathsStateMtime(t *testing.T) {
 	if err := json.Unmarshal(b.Bytes(), &got); err != nil {
 		t.Fatalf("output is not one JSON object: %v\n%s", err, b.String())
 	}
-	if got.Gates.QuotaPaused.Path != cfg.QuotaPaused || !got.Gates.QuotaPaused.Paused {
-		t.Errorf("quotaPaused gate = %+v, want path=%q paused=true", got.Gates.QuotaPaused, cfg.QuotaPaused)
+	if got.Gates.OperatorPaused.Path != cfg.OperatorPaused || !got.Gates.OperatorPaused.Paused {
+		t.Errorf("operatorPaused gate = %+v, want path=%q paused=true", got.Gates.OperatorPaused, cfg.OperatorPaused)
 	}
-	fi, err := os.Stat(cfg.QuotaPaused)
+	fi, err := os.Stat(cfg.OperatorPaused)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := fi.ModTime().Format(time.RFC3339); got.Gates.QuotaPaused.Since != want {
-		t.Errorf("quotaPaused since = %q, want %q", got.Gates.QuotaPaused.Since, want)
+	if want := fi.ModTime().Format(time.RFC3339); got.Gates.OperatorPaused.Since != want {
+		t.Errorf("operatorPaused since = %q, want %q", got.Gates.OperatorPaused.Since, want)
 	}
 	if got.Gates.CICDDown.Path != cfg.CICDDown || got.Gates.CICDDown.Paused || got.Gates.CICDDown.Since != "" {
 		t.Errorf("cicdDown gate = %+v, want path=%q paused=false since=\"\"", got.Gates.CICDDown, cfg.CICDDown)

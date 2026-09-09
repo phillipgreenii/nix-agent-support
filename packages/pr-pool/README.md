@@ -29,8 +29,8 @@ instead. Bare `pr-pool` (no subcommand) requires an explicit subcommand.
 | `push-inject <json>`                    | inject one operator-supplied event into the **running** core (text, or JSON with `--json`)                                                                                                                                                                                           |
 | `status`                                | inspect the **running** core: resolved config, live deliveries, per-`type` queue depths, plus gates/mode/listeners/sources/unmatched bindings/recent activity (text, or JSON with `--json`)                                                                                          |
 | `tui [--socket <path>] [--token <tok>]` | continuous-interactive view: polls `status`'s activity ring and offers `pause`/`resume` from the same screen — never a third affordance. No `--json` (it is a terminal UI). **Never fails on "no running core"**: it renders a no-core screen and keeps polling instead (`ADR 0036`) |
-| `pause [<gate>]`                        | set gate `<gate>` (default `quota-paused`) directly on its file-backed state (`INV-LIFE-2`) — see [below](#pause--resume--operator-gate-control)                                                                                                                                     |
-| `resume [<gate>] \| --all`              | clear gate `<gate>` (default `quota-paused`), or every outstanding gate with `--all` — see [below](#pause--resume--operator-gate-control)                                                                                                                                            |
+| `pause [<gate>]`                        | set gate `<gate>` (default `operator-paused`) directly on its file-backed state (`INV-LIFE-2`) — see [below](#pause--resume--operator-gate-control)                                                                                                                                  |
+| `resume [<gate>] \| --all`              | clear gate `<gate>` (default `operator-paused`), or every outstanding gate with `--all` — see [below](#pause--resume--operator-gate-control)                                                                                                                                         |
 | `version`                               | print the version and exit                                                                                                                                                                                                                                                           |
 | `help`                                  | print help and exit                                                                                                                                                                                                                                                                  |
 
@@ -108,8 +108,8 @@ pr-pool resume [<gate> | --all]
 `pause`/`resume` set or clear a global **gate** (`INV-LIFE-2`) directly on its **file-backed
 state**: while a gate is set, the core suspends event production and new dispatch (accepted
 work still runs to completion, and expiry still advances). There are exactly two named gates,
-`quota-paused` (the operator's own) and `cicd-down` (an automation actor's); omitting `<gate>`
-defaults to `quota-paused`, and clearing **every** outstanding gate requires an explicit
+`operator-paused` (the operator's own) and `cicd-down` (an automation actor's); omitting `<gate>`
+defaults to `operator-paused`, and clearing **every** outstanding gate requires an explicit
 `resume --all` — a bare `resume` clears only the default gate, so an automation-owned gate is
 never cleared by accident. `resume --all <gate>` (both at once) is a usage error (exit `2`).
 
@@ -128,7 +128,7 @@ verb-named-subcommand-is-a-socket-client symmetry that `push-inject`/`ingest-eve
 client already holding a connection to a running core; both paths act on the same file-backed
 state, so they can never disagree about what outlives the call.
 
-Re-pausing an already-set gate is idempotent-visible (`already paused (quota-paused since
+Re-pausing an already-set gate is idempotent-visible (`already paused (operator-paused since
 14:03)`) and never resets the original mtime. `pr-pool config --show` prints each gate's path,
 whether it is set, and its "paused since" mtime when it is.
 
@@ -224,7 +224,7 @@ configured via env (use `config.toml`). See `internal/config` for the full set.
 - `PR_POOL_TUI_INTERVAL` — `tui`'s poll interval, floor-clamped to `250ms` (default `1s`). Precedence:
   a CLI flag (none exists yet) wins over this env var, which wins over the built-in default; a value
   that fails to parse as a duration is a usage error naming the bad value.
-- `PR_POOL_QUOTA_PAUSED` — `quota-paused` gate file path override (default `<PR_POOL_LOG_DIR>/gates/quota-paused`)
+- `PR_POOL_OPERATOR_PAUSED` — `operator-paused` gate file path override (default `<PR_POOL_LOG_DIR>/gates/operator-paused`)
 - `PR_POOL_CICD_DOWN` — `cicd-down` gate file path override (default `<PR_POOL_LOG_DIR>/gates/cicd-down`). Superseded (bead `pg2-h410q`) — see the `pause`/`resume` section above.
 - `PR_POOL_TEST_MODE` — set to `1` by `run-role`/`run-query` for the duration of that one smoke
   test, so a participant it dispatches (or a command-backed source it shells out to) knows a test
@@ -268,16 +268,16 @@ turnkey deployment modes on top of the `package`/`enable` options — enabling b
 assertion failure, since they are independent pr-pool cores that would race on the same
 `PR_POOL_LOG_DIR` (`events.jsonl`, the discovery record, the push-ingest socket):
 
-| Submodule       | systemd unit(s)                         | Runs                                                                      | Shape                                                                                     |
-| --------------- | --------------------------------------- | ------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| `periodicDrain` | `pr-pool-drain` service + timer         | `pr-pool run-until-idle` on a fixed `interval` (default `5m`), then exits | `enable`, `interval`, `repoRoot`, `beadsPrefix`, `configText`                             |
-| `daemon`        | `pr-pool-daemon` service (long-running) | `pr-pool run`, until SIGINT/SIGTERM                                       | `enable`, `repoRoot`, `beadsPrefix`, `configText`, `gates.{quotaPausedPath,cicdDownPath}` |
+| Submodule       | systemd unit(s)                         | Runs                                                                      | Shape                                                                                        |
+| --------------- | --------------------------------------- | ------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `periodicDrain` | `pr-pool-drain` service + timer         | `pr-pool run-until-idle` on a fixed `interval` (default `5m`), then exits | `enable`, `interval`, `repoRoot`, `beadsPrefix`, `configText`                                |
+| `daemon`        | `pr-pool-daemon` service (long-running) | `pr-pool run`, until SIGINT/SIGTERM                                       | `enable`, `repoRoot`, `beadsPrefix`, `configText`, `gates.{operatorPausedPath,cicdDownPath}` |
 
 Both submodules render `configText` into the Nix store and point `PR_POOL_CONFIG` at it — fully
 declarative, no machine-local `.pr-pool/config.toml` bootstrap step. `daemon`'s
-`gates.quotaPausedPath`/`gates.cicdDownPath` set `PR_POOL_QUOTA_PAUSED`/`PR_POOL_CICD_DOWN` for
+`gates.operatorPausedPath`/`gates.cicdDownPath` set `PR_POOL_OPERATOR_PAUSED`/`PR_POOL_CICD_DOWN` for
 that unit only; left `null` (the default), the gate paths fall back to `Config.Load()`'s own
-default (`<PR_POOL_LOG_DIR>/gates/{quota-paused,cicd-down}`) — see `MIGRATION.md`'s gates-default-on
+default (`<PR_POOL_LOG_DIR>/gates/{operator-paused,cicd-down}`) — see `MIGRATION.md`'s gates-default-on
 hazard note.
 
 `systemd.user.services`/`systemd.user.timers` are a **darwin no-op** (darwin has no systemd), so

@@ -63,8 +63,8 @@ in
           ) "export PR_POOL_BEADS_PREFIX=${lib.escapeShellArg daemonCfg.beadsPrefix}"}
           export PR_POOL_CONFIG=${pkgs.writeText "pr-pool-daemon-config.toml" daemonCfg.configText}
           ${lib.optionalString (
-            daemonCfg.gates.quotaPausedPath != null
-          ) "export PR_POOL_QUOTA_PAUSED=${lib.escapeShellArg daemonCfg.gates.quotaPausedPath}"}
+            daemonCfg.gates.operatorPausedPath != null
+          ) "export PR_POOL_OPERATOR_PAUSED=${lib.escapeShellArg daemonCfg.gates.operatorPausedPath}"}
           ${lib.optionalString (
             daemonCfg.gates.cicdDownPath != null
           ) "export PR_POOL_CICD_DOWN=${lib.escapeShellArg daemonCfg.gates.cicdDownPath}"}

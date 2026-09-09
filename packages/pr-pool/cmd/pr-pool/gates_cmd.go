@@ -11,10 +11,10 @@ import (
 	"github.com/phillipgreenii/pr-pool/internal/config"
 )
 
-// gateQuotaPaused / gateCICDDown are the two named gates INV-LIFE-2 defines
-// (docs/behavior/invariants.md's "Gate identity"): quota-paused is ACTOR-OP's
+// gateOperatorPaused / gateCICDDown are the two named gates INV-LIFE-2 defines
+// (docs/behavior/invariants.md's "Gate identity"): operator-paused is ACTOR-OP's
 // own to set and clear; cicd-down belongs to an automation actor. Omitting a
-// gate name to `pause`/`resume` defaults to quota-paused.
+// gate name to `pause`/`resume` defaults to operator-paused.
 //
 // gateCICDDown is SUPERSEDED (bead pg2-h410q): it was added 2026-08-31
 // (commit 325edc35) as a stopgap for "an automation actor" to signal CI
@@ -31,21 +31,21 @@ import (
 // CLI, config, wire, TUI, and docs/behavior/invariants.md's formal two-gate
 // text) was left out of that bead's scope.
 const (
-	gateQuotaPaused = "quota-paused"
-	gateCICDDown    = "cicd-down"
+	gateOperatorPaused = "operator-paused"
+	gateCICDDown       = "cicd-down"
 )
 
 // validGate reports whether name is one of the two named gates.
 func validGate(name string) bool {
-	return name == gateQuotaPaused || name == gateCICDDown
+	return name == gateOperatorPaused || name == gateCICDDown
 }
 
 // gatePath resolves an already-validated gate name to its file path.
-func gatePath(gate, quotaPaused, cicdDown string) string {
+func gatePath(gate, operatorPaused, cicdDown string) string {
 	if gate == gateCICDDown {
 		return cicdDown
 	}
-	return quotaPaused
+	return operatorPaused
 }
 
 // runPause implements `pr-pool pause [<gate>]` against the real process
@@ -71,8 +71,8 @@ func runResume(gate string, allGates bool) int {
 // also what makes the "exits 0 even with no core running" MUST possible:
 // nothing here Discovers or Dials a core (ADR 0036 / core.ErrNoRunningCore).
 func pauseGate(stdout, stderr io.Writer, gate string) int {
-	quotaPaused, cicdDown := config.GatePaths()
-	path := gatePath(gate, quotaPaused, cicdDown)
+	operatorPaused, cicdDown := config.GatePaths()
+	path := gatePath(gate, operatorPaused, cicdDown)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		fmt.Fprintln(stderr, "pause:", err)
 		return exitGeneric
@@ -99,11 +99,11 @@ func pauseGate(stdout, stderr io.Writer, gate string) int {
 // file-direct, no-core-required, never-Discover/Dial mechanics as pauseGate;
 // see its doc comment for why config.GatePaths() and not config.Load().
 func resumeGate(stdout, stderr io.Writer, gate string, allGates bool) int {
-	quotaPaused, cicdDown := config.GatePaths()
+	operatorPaused, cicdDown := config.GatePaths()
 	if allGates {
 		var cleared []string
 		for _, g := range []struct{ name, path string }{
-			{gateQuotaPaused, quotaPaused},
+			{gateOperatorPaused, operatorPaused},
 			{gateCICDDown, cicdDown},
 		} {
 			removed, err := removeGateFile(g.path)
@@ -122,7 +122,7 @@ func resumeGate(stdout, stderr io.Writer, gate string, allGates bool) int {
 		}
 		return exitOK
 	}
-	path := gatePath(gate, quotaPaused, cicdDown)
+	path := gatePath(gate, operatorPaused, cicdDown)
 	removed, err := removeGateFile(path)
 	if err != nil {
 		fmt.Fprintln(stderr, "resume:", err)

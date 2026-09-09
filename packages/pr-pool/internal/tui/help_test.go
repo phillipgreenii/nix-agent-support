@@ -77,7 +77,7 @@ func TestRenderModal_LegendAndGatesRouteToTheirOwnContent(t *testing.T) {
 	}
 
 	m.activeModal = ModalGates
-	if got := m.renderModal(); !strings.Contains(got, "quota-paused") {
+	if got := m.renderModal(); !strings.Contains(got, "operator-paused") {
 		t.Errorf("ModalGates renderModal() = %q, want it to route through renderGatesModal", got)
 	}
 

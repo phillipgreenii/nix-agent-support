@@ -140,11 +140,12 @@ func TestModal_ClipsToWidthHeight(t *testing.T) {
 
 func TestModal_LeftColumnGuaranteesGapForLongLeftValues(t *testing.T) {
 	// "exactly12chr" (12 columns) reproduces this repo's original bug shape
-	// (pg2-y6sy5, the gates modal's "quota-paused" row): a Left value
-	// exactly as wide as the historical fixed-12 Left column received ZERO
-	// padding there and ran straight into Right with no gap at all
-	// ("quota-pausedclear since ..."). A shorter Left value on another row
-	// must still line up with the same guaranteed gap.
+	// (pg2-y6sy5, the gates modal's row for this gate's old name
+	// "quota-paused"): a Left value exactly as wide as the historical
+	// fixed-12 Left column received ZERO padding there and ran straight
+	// into Right with no gap at all ("quota-pausedclear since ..."). A
+	// shorter Left value on another row must still line up with the same
+	// guaranteed gap.
 	rows := []ModalRow{
 		{Left: "exactly12chr", Right: "STATUS-LONG"},
 		{Left: "short", Right: "STATUS-SHORT"},

@@ -350,7 +350,7 @@ func TestServeStatus_ComposesLiveState(t *testing.T) {
 	if _, err := svc.Register("review", KindHandler); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
-	svc.ObserveGateFromSocketVerb(time.Now(), "quota_paused", GateInfo{Set: true, Owner: "ops"})
+	svc.ObserveGateFromSocketVerb(time.Now(), "operator_paused", GateInfo{Set: true, Owner: "ops"})
 	now := time.Now()
 	svc.PublishTick(TickSnapshot{
 		RunMode:    RunModeLongRunning,
@@ -377,12 +377,12 @@ func TestServeStatus_ComposesLiveState(t *testing.T) {
 	foundGate := false
 	for _, g := range gates {
 		gm := g.(map[string]any)
-		if gm["name"] == "quota_paused" && gm["set"] == true && gm["owner"] == "ops" {
+		if gm["name"] == "operator_paused" && gm["set"] == true && gm["owner"] == "ops" {
 			foundGate = true
 		}
 	}
 	if !foundGate {
-		t.Fatalf("gates = %v, want quota_paused set by ObserveGateFromSocketVerb", gates)
+		t.Fatalf("gates = %v, want operator_paused set by ObserveGateFromSocketVerb", gates)
 	}
 	listeners, _ := reply["listeners"].([]any)
 	if len(listeners) != 1 || listeners[0].(map[string]any)["role"] != "review" {
@@ -541,7 +541,7 @@ func TestServeStatus_InterleavedReadOnlyInvariance(t *testing.T) {
 // --- Task 3.9: socket pause/resume verbs ------------------------------------
 
 // pauseRequest / resumeRequest are minimal, schema-valid requests: gate
-// omitted, so the handler resolves defaultGate (quota_paused).
+// omitted, so the handler resolves defaultGate (operator_paused).
 const (
 	pauseRequest  = `{"schemaVersion":"1"}`
 	resumeRequest = `{"schemaVersion":"1"}`
@@ -587,8 +587,8 @@ func TestSocketPauseIdempotent(t *testing.T) {
 	if err := conformance.Check(PauseReplySchema, reply); err != nil {
 		t.Fatalf("reply failed cli.pause-reply schema: %v", err)
 	}
-	if reply["gate"] != GateQuotaPaused {
-		t.Fatalf("gate = %v, want the default %q", reply["gate"], GateQuotaPaused)
+	if reply["gate"] != GateOperatorPaused {
+		t.Fatalf("gate = %v, want the default %q", reply["gate"], GateOperatorPaused)
 	}
 	if reply["set"] != true {
 		t.Fatalf("set = %v, want true", reply["set"])
@@ -643,8 +643,8 @@ func TestSocketResumeIdempotent(t *testing.T) {
 		t.Fatalf("set = %v, want false after resuming a paused gate", reply2["set"])
 	}
 	gates, _ := svc.GateSnapshot()
-	if got := gates[GateQuotaPaused]; got.Set {
-		t.Fatalf("quota_paused = %+v, want cleared after resume", got)
+	if got := gates[GateOperatorPaused]; got.Set {
+		t.Fatalf("operator_paused = %+v, want cleared after resume", got)
 	}
 }
 
@@ -698,23 +698,23 @@ func TestGateDeletedExternallyDuringToggle(t *testing.T) {
 	svc := startedServiceForStatus(t, nil)
 
 	tickBefore := time.Now()
-	svc.ObserveGateFromTick(tickBefore, map[string]GateInfo{GateQuotaPaused: {Set: false}}) // drive loop's poll: gate file absent at this instant
+	svc.ObserveGateFromTick(tickBefore, map[string]GateInfo{GateOperatorPaused: {Set: false}}) // drive loop's poll: gate file absent at this instant
 
 	reply, code := servePause(t, svc, pauseRequest) // the socket pause verb runs strictly after that poll
 	if code != conformance.ExitOK {
 		t.Fatalf("pause exit = %d, want 0; reply=%v", code, reply)
 	}
 	gates, _ := svc.GateSnapshot()
-	if got := gates[GateQuotaPaused]; !got.Set {
-		t.Fatalf("quota_paused = %+v, want Set=true after the socket pause verb", got)
+	if got := gates[GateOperatorPaused]; !got.Set {
+		t.Fatalf("operator_paused = %+v, want Set=true after the socket pause verb", got)
 	}
 
 	// A stale straggler tick observation, stamped BEFORE the pause, must not
 	// clobber it even though ObserveGateFromTick overwrites perGate wholesale.
-	svc.ObserveGateFromTick(tickBefore, map[string]GateInfo{GateQuotaPaused: {Set: false}})
+	svc.ObserveGateFromTick(tickBefore, map[string]GateInfo{GateOperatorPaused: {Set: false}})
 	gates, _ = svc.GateSnapshot()
-	if got := gates[GateQuotaPaused]; !got.Set {
-		t.Fatalf("quota_paused = %+v, want the pause to survive a stale (older-timestamped) tick observation", got)
+	if got := gates[GateOperatorPaused]; !got.Set {
+		t.Fatalf("operator_paused = %+v, want the pause to survive a stale (older-timestamped) tick observation", got)
 	}
 }
 
@@ -740,7 +740,7 @@ func TestThreeWayGateRace(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for i := 0; i < iterations; i++ {
-			svc.ObserveGateFromTick(time.Now(), map[string]GateInfo{GateQuotaPaused: {Set: i%2 == 0}})
+			svc.ObserveGateFromTick(time.Now(), map[string]GateInfo{GateOperatorPaused: {Set: i%2 == 0}})
 		}
 	}()
 
@@ -891,7 +891,7 @@ func TestServeStatus_ThreeWayConcurrency(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for i := 0; i < 100; i++ {
-			svc.ObserveGateFromSocketVerb(time.Now(), "quota_paused", GateInfo{Set: i%2 == 0})
+			svc.ObserveGateFromSocketVerb(time.Now(), "operator_paused", GateInfo{Set: i%2 == 0})
 		}
 	}()
 

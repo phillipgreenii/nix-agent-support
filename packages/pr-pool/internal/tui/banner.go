@@ -170,12 +170,12 @@ func coreStateLabel(state string) string {
 }
 
 // gatesSummary renders both of INV-LIFE-2's named gates as a compact
-// checkbox pair -- "quota[.] cicd[.]" when clear, "quota[X]" when set --
+// checkbox pair -- "oper[.] cicd[.]" when clear, "oper[X]" when set --
 // matching the design's own Wide/Narrow/Tiny mockups (§4.3) exactly.
 func gatesSummary(gates []Gate) string {
 	return fmt.Sprintf(
-		"quota[%s] cicd[%s]",
-		gateCheckbox(gates, core.GateQuotaPaused),
+		"oper[%s] cicd[%s]",
+		gateCheckbox(gates, core.GateOperatorPaused),
 		gateCheckbox(gates, core.GateCICDDown),
 	)
 }

@@ -10,36 +10,36 @@ import (
 	"github.com/phillipgreenii/pr-pool/internal/core"
 )
 
-// TestToggleQuotaGate_NoOptimisticFlip is the packet's own red-first test
+// TestToggleOperatorGate_NoOptimisticFlip is the packet's own red-first test
 // [design: Task 4.8 Step 1]: pressing P must never change the rendered
 // gate state until a gateToggleResultMsg actually arrives. Simulating a
 // "slow/never-arriving RPC" is exactly "the RPC's tea.Cmd is never
-// invoked" -- if handleToggleQuotaGate flipped the gate synchronously
+// invoked" -- if handleToggleOperatorGate flipped the gate synchronously
 // (the optimistic-flip bug this test guards against), it would show up
 // immediately, with no Cmd execution required at all.
-func TestToggleQuotaGate_NoOptimisticFlip(t *testing.T) {
+func TestToggleOperatorGate_NoOptimisticFlip(t *testing.T) {
 	m := newTestModel(&stubPoller{
 		toggle: func(context.Context, string) (string, error) {
 			return "paused", nil
 		},
 	})
-	m.reply = StatusReply{Gates: []Gate{{Name: core.GateQuotaPaused, Set: false}}}
+	m.reply = StatusReply{Gates: []Gate{{Name: core.GateOperatorPaused, Set: false}}}
 
-	cmd := m.handleToggleQuotaGate()
+	cmd := m.handleToggleOperatorGate()
 	if cmd == nil {
-		t.Fatal("handleToggleQuotaGate returned a nil cmd")
+		t.Fatal("handleToggleOperatorGate returned a nil cmd")
 	}
 	if !m.gateTogglePending {
 		t.Error("gateTogglePending = false right after P, want true (pending indicator)")
 	}
-	if m.gateSet(core.GateQuotaPaused) {
-		t.Fatal("quota_paused flipped to true before any gateToggleResultMsg arrived -- optimistic flip")
+	if m.gateSet(core.GateOperatorPaused) {
+		t.Fatal("operator_paused flipped to true before any gateToggleResultMsg arrived -- optimistic flip")
 	}
 
 	// The RPC "never arrives" in this branch of the test: cmd() is simply
 	// never invoked. Nothing changes the pre-toggle state on its own.
-	if m.gateSet(core.GateQuotaPaused) {
-		t.Fatal("quota_paused state changed with no gateToggleResultMsg delivered")
+	if m.gateSet(core.GateOperatorPaused) {
+		t.Fatal("operator_paused state changed with no gateToggleResultMsg delivered")
 	}
 
 	// Now the reply DOES arrive -- Update's gateToggleResultMsg case is the
@@ -51,18 +51,18 @@ func TestToggleQuotaGate_NoOptimisticFlip(t *testing.T) {
 	}
 	updated, _ := m.Update(res)
 	mm := updated.(*Model)
-	if !mm.gateSet(core.GateQuotaPaused) {
-		t.Error("quota_paused still clear after a successful \"paused\" result")
+	if !mm.gateSet(core.GateOperatorPaused) {
+		t.Error("operator_paused still clear after a successful \"paused\" result")
 	}
 	if mm.gateTogglePending {
 		t.Error("gateTogglePending still true after the result arrived")
 	}
 }
 
-// TestToggleQuotaGate_UsesResumeWhenAlreadyPaused: P is a TOGGLE, not
-// always-pause -- when quota_paused is already set, pressing it must send
+// TestToggleOperatorGate_UsesResumeWhenAlreadyPaused: P is a TOGGLE, not
+// always-pause -- when operator_paused is already set, pressing it must send
 // core.SubcommandResume, not another pause.
-func TestToggleQuotaGate_UsesResumeWhenAlreadyPaused(t *testing.T) {
+func TestToggleOperatorGate_UsesResumeWhenAlreadyPaused(t *testing.T) {
 	var gotVerb string
 	m := newTestModel(&stubPoller{
 		toggle: func(_ context.Context, verb string) (string, error) {
@@ -70,11 +70,11 @@ func TestToggleQuotaGate_UsesResumeWhenAlreadyPaused(t *testing.T) {
 			return "resumed", nil
 		},
 	})
-	m.reply = StatusReply{Gates: []Gate{{Name: core.GateQuotaPaused, Set: true}}}
+	m.reply = StatusReply{Gates: []Gate{{Name: core.GateOperatorPaused, Set: true}}}
 
-	cmd := m.handleToggleQuotaGate()
+	cmd := m.handleToggleOperatorGate()
 	if cmd == nil {
-		t.Fatal("handleToggleQuotaGate returned a nil cmd")
+		t.Fatal("handleToggleOperatorGate returned a nil cmd")
 	}
 	_ = cmd()
 	if gotVerb != core.SubcommandResume {
@@ -82,14 +82,14 @@ func TestToggleQuotaGate_UsesResumeWhenAlreadyPaused(t *testing.T) {
 	}
 }
 
-// TestToggleQuotaGate_HandleNeverReachesRawClient documents Acceptance
-// Criterion 2 structurally: handleToggleQuotaGate is defined entirely in
+// TestToggleOperatorGate_HandleNeverReachesRawClient documents Acceptance
+// Criterion 2 structurally: handleToggleOperatorGate is defined entirely in
 // terms of m.poller.ToggleGate (via startGateToggle) -- there is no
 // *core.Client field on Model at all for it to reach for instead. This
 // test exercises that path end to end so a future change reintroducing a
 // raw client call would have to touch (and be caught changing) exactly
 // this flow.
-func TestToggleQuotaGate_HandleNeverReachesRawClient(t *testing.T) {
+func TestToggleOperatorGate_HandleNeverReachesRawClient(t *testing.T) {
 	called := false
 	m := newTestModel(&stubPoller{
 		toggle: func(context.Context, string) (string, error) {
@@ -97,10 +97,10 @@ func TestToggleQuotaGate_HandleNeverReachesRawClient(t *testing.T) {
 			return "paused", nil
 		},
 	})
-	cmd := m.handleToggleQuotaGate()
+	cmd := m.handleToggleOperatorGate()
 	_ = cmd()
 	if !called {
-		t.Fatal("handleToggleQuotaGate's cmd never invoked Poller.ToggleGate")
+		t.Fatal("handleToggleOperatorGate's cmd never invoked Poller.ToggleGate")
 	}
 }
 
@@ -113,9 +113,9 @@ func TestGateToggle_FailureFlash(t *testing.T) {
 			return "", errors.New("dial: no running core")
 		},
 	})
-	m.reply = StatusReply{Gates: []Gate{{Name: core.GateQuotaPaused, Set: false}}}
+	m.reply = StatusReply{Gates: []Gate{{Name: core.GateOperatorPaused, Set: false}}}
 
-	cmd := m.handleToggleQuotaGate()
+	cmd := m.handleToggleOperatorGate()
 	msg := cmd()
 	res := msg.(gateToggleResultMsg)
 
@@ -125,8 +125,8 @@ func TestGateToggle_FailureFlash(t *testing.T) {
 	if mm.gateTogglePending {
 		t.Error("gateTogglePending still true after a failed toggle")
 	}
-	if mm.gateSet(core.GateQuotaPaused) {
-		t.Error("quota_paused changed after a FAILED toggle -- state must stay put")
+	if mm.gateSet(core.GateOperatorPaused) {
+		t.Error("operator_paused changed after a FAILED toggle -- state must stay put")
 	}
 	if mm.flash == "" || mm.flashLevel != FlashWarn {
 		t.Errorf("flash = %q level=%v, want a non-empty FlashWarn flash naming the failure", mm.flash, mm.flashLevel)
@@ -140,7 +140,7 @@ func TestGateToggle_FailureFlash(t *testing.T) {
 }
 
 // TestGateToggle_SuccessFlashNamesEffectiveAggregate is the design's own
-// worked example: clearing quota_paused while cicd_down remains set must
+// worked example: clearing operator_paused while cicd_down remains set must
 // flash that the pool is STILL paused, not imply it resumed.
 func TestGateToggle_SuccessFlashNamesEffectiveAggregate(t *testing.T) {
 	m := newTestModel(&stubPoller{
@@ -149,17 +149,17 @@ func TestGateToggle_SuccessFlashNamesEffectiveAggregate(t *testing.T) {
 		},
 	})
 	m.reply = StatusReply{Gates: []Gate{
-		{Name: core.GateQuotaPaused, Set: true},
+		{Name: core.GateOperatorPaused, Set: true},
 		{Name: core.GateCICDDown, Set: true},
 	}}
 
-	cmd := m.handleToggleQuotaGate()
+	cmd := m.handleToggleOperatorGate()
 	msg := cmd().(gateToggleResultMsg)
 	updated, _ := m.Update(msg)
 	mm := updated.(*Model)
 
-	if mm.gateSet(core.GateQuotaPaused) {
-		t.Error("quota_paused should be clear after a \"resumed\" result")
+	if mm.gateSet(core.GateOperatorPaused) {
+		t.Error("operator_paused should be clear after a \"resumed\" result")
 	}
 	if !strings.Contains(mm.flash, "cicd-down") {
 		t.Errorf("flash %q should name cicd-down as the reason the pool is STILL paused", mm.flash)
@@ -225,13 +225,13 @@ func TestRenderGatesModal_ListsBothGatesByName(t *testing.T) {
 	m := newTestModel(nil)
 	m.width, m.height = 80, 24
 	m.reply = StatusReply{Gates: []Gate{
-		{Name: core.GateQuotaPaused, Set: true, Mtime: time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC), Owner: "operator"},
+		{Name: core.GateOperatorPaused, Set: true, Mtime: time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC), Owner: "operator"},
 		// cicd_down deliberately absent -- never observed yet.
 	}}
 	m.activeModal = ModalGates
 
 	got := m.renderGatesModal()
-	for _, want := range []string{"quota-paused", "cicd-down", "SET", "not set", "operator", "resume all"} {
+	for _, want := range []string{"operator-paused", "cicd-down", "SET", "not set", "operator", "resume all"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("gates modal missing %q; got:\n%s", want, got)
 		}
@@ -240,29 +240,30 @@ func TestRenderGatesModal_ListsBothGatesByName(t *testing.T) {
 
 // TestRenderGatesModal_LongNameGetsGuaranteedGap is pg2-y6sy5's regression
 // test for the fixed-width column collision this modal shared with the
-// legend column pg2-58ecs already fixed: "quota-paused" is exactly as wide
-// as render.Modal's fixed 12-column Left field, so it used to receive ZERO
-// padding there and run straight into the status text with no space at
-// all ("quota-pausedSET since ..."). Assert a real gap survives after the
-// longest gate name regardless of render.Modal's own fixed-width column.
+// legend column pg2-58ecs already fixed: this gate's old name "quota-paused"
+// was exactly as wide as render.Modal's fixed 12-column Left field, so it
+// used to receive ZERO padding there and run straight into the status text
+// with no space at all ("quota-pausedSET since ..."). Assert a real gap
+// survives after the longest gate name (now "operator-paused", wider still)
+// regardless of render.Modal's own fixed-width column.
 func TestRenderGatesModal_LongNameGetsGuaranteedGap(t *testing.T) {
 	m := newTestModel(nil)
 	m.width, m.height = 80, 24
 	m.reply = StatusReply{Gates: []Gate{
-		{Name: core.GateQuotaPaused, Set: true, Mtime: time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC), Owner: "operator"},
+		{Name: core.GateOperatorPaused, Set: true, Mtime: time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC), Owner: "operator"},
 		{Name: core.GateCICDDown, Set: true, Mtime: time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC), Owner: "automation"},
 	}}
 	m.activeModal = ModalGates
 
 	got := m.renderGatesModal()
-	idx := strings.Index(got, "quota-paused")
+	idx := strings.Index(got, "operator-paused")
 	if idx == -1 {
-		t.Fatalf("gates modal missing the long gate name %q; got:\n%s", "quota-paused", got)
+		t.Fatalf("gates modal missing the long gate name %q; got:\n%s", "operator-paused", got)
 	}
-	next := idx + len("quota-paused")
+	next := idx + len("operator-paused")
 	if next >= len(got) || got[next] != ' ' {
 		t.Errorf("no guaranteed gap directly after the long gate name %q (next byte = %q); got:\n%s",
-			"quota-paused", string(got[next]), got)
+			"operator-paused", string(got[next]), got)
 	}
 }
 
@@ -274,7 +275,7 @@ func TestRenderGatesModal_NotSetIsUnambiguous(t *testing.T) {
 	m := newTestModel(nil)
 	m.width, m.height = 80, 24
 	m.reply = StatusReply{Gates: []Gate{
-		{Name: core.GateQuotaPaused, Set: false},
+		{Name: core.GateOperatorPaused, Set: false},
 		// cicd_down deliberately absent -- never observed at all.
 	}}
 	m.activeModal = ModalGates
@@ -296,7 +297,7 @@ func TestRenderGatesModal_NotSetIsUnambiguous(t *testing.T) {
 func TestAsOfRaceGuard(t *testing.T) {
 	m := newTestModel(nil)
 	m.screen = screenMain
-	m.reply = StatusReply{Gates: []Gate{{Name: core.GateQuotaPaused, Set: false}}}
+	m.reply = StatusReply{Gates: []Gate{{Name: core.GateOperatorPaused, Set: false}}}
 
 	toggleStart := time.Now()
 	m.gateToggleStartedAt = toggleStart
@@ -307,11 +308,11 @@ func TestAsOfRaceGuard(t *testing.T) {
 	stale := StatusReply{
 		AsOf:  toggleStart.Add(-time.Second),
 		Core:  CoreInfo{State: coreStateStarted},
-		Gates: []Gate{{Name: core.GateQuotaPaused, Set: true}},
+		Gates: []Gate{{Name: core.GateOperatorPaused, Set: true}},
 	}
 	updated, _ := m.Update(pollResultMsg{reply: stale})
 	mm := updated.(*Model)
-	if mm.gateSet(core.GateQuotaPaused) {
+	if mm.gateSet(core.GateOperatorPaused) {
 		t.Fatal("a stale (pre-toggle) poll result overwrote the pending gate state")
 	}
 	if mm.screen != screenMain {
@@ -321,7 +322,7 @@ func TestAsOfRaceGuard(t *testing.T) {
 	// The toggle itself settles.
 	updated, _ = mm.Update(gateToggleResultMsg{effective: "resumed"})
 	mm = updated.(*Model)
-	if mm.gateSet(core.GateQuotaPaused) {
+	if mm.gateSet(core.GateOperatorPaused) {
 		t.Fatal("gate still set after a successful resume result")
 	}
 
@@ -330,11 +331,11 @@ func TestAsOfRaceGuard(t *testing.T) {
 	fresh := StatusReply{
 		AsOf:  toggleStart.Add(time.Second),
 		Core:  CoreInfo{State: coreStateStarted},
-		Gates: []Gate{{Name: core.GateQuotaPaused, Set: true}},
+		Gates: []Gate{{Name: core.GateOperatorPaused, Set: true}},
 	}
 	updated, _ = mm.Update(pollResultMsg{reply: fresh})
 	mm = updated.(*Model)
-	if !mm.gateSet(core.GateQuotaPaused) {
+	if !mm.gateSet(core.GateOperatorPaused) {
 		t.Fatal("a fresh (post-toggle) poll result was not applied")
 	}
 	if mm.screen != screenMain {

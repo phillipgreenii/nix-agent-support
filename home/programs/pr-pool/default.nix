@@ -20,7 +20,7 @@ let
       beadsPrefix,
       configText,
       configFileName,
-      quotaPausedPath ? null,
+      operatorPausedPath ? null,
       cicdDownPath ? null,
     }:
     [
@@ -30,7 +30,7 @@ let
     ++ [
       "PR_POOL_CONFIG=${pkgs.writeText configFileName configText}"
     ]
-    ++ lib.optional (quotaPausedPath != null) "PR_POOL_QUOTA_PAUSED=${quotaPausedPath}"
+    ++ lib.optional (operatorPausedPath != null) "PR_POOL_OPERATOR_PAUSED=${operatorPausedPath}"
     ++ lib.optional (cicdDownPath != null) "PR_POOL_CICD_DOWN=${cicdDownPath}";
 in
 {
@@ -117,13 +117,13 @@ in
         description = "The pr-pool `config.toml` content — see `periodicDrain.configText`.";
       };
       gates = {
-        quotaPausedPath = lib.mkOption {
+        operatorPausedPath = lib.mkOption {
           type = lib.types.nullOr lib.types.str;
           default = null;
           description = ''
-            PR_POOL_QUOTA_PAUSED override: the `quota-paused` gate file path
+            PR_POOL_OPERATOR_PAUSED override: the `operator-paused` gate file path
             (`INV-LIFE-2`). `null` leaves `Config.Load()`'s own default
-            (`<PR_POOL_LOG_DIR>/gates/quota-paused`) in effect — note that
+            (`<PR_POOL_LOG_DIR>/gates/operator-paused`) in effect — note that
             default is now live even when unset here (Task 1.2b): a stray
             file already at that path gates a daemon that previously could
             not be gated, and gate files are never swept.
@@ -136,7 +136,7 @@ in
             PR_POOL_CICD_DOWN override: the `cicd-down` gate file path
             (`INV-LIFE-2`). `null` leaves `Config.Load()`'s own default
             (`<PR_POOL_LOG_DIR>/gates/cicd-down`) in effect — same
-            gates-default-on hazard as `quotaPausedPath` above.
+            gates-default-on hazard as `operatorPausedPath` above.
           '';
         };
       };
@@ -217,7 +217,7 @@ in
                 beadsPrefix = cfg.daemon.beadsPrefix;
                 configText = cfg.daemon.configText;
                 configFileName = "pr-pool-daemon-config.toml";
-                quotaPausedPath = cfg.daemon.gates.quotaPausedPath;
+                operatorPausedPath = cfg.daemon.gates.operatorPausedPath;
                 cicdDownPath = cfg.daemon.gates.cicdDownPath;
               };
             };

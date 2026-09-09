@@ -38,13 +38,13 @@ func prPoolModuleRoot(t *testing.T) string {
 // isolateGateEnv points every gate-path input this process's environment
 // could otherwise supply at deterministic, isolated values (unit tests MUST
 // be isolated) — a fresh LogDir under t.TempDir(), and no repo-local/XDG
-// config file — so config.GatePaths() resolves to <tmp>/gates/{quota-paused,
+// config file — so config.GatePaths() resolves to <tmp>/gates/{operator-paused,
 // cicd-down} regardless of the host machine's real XDG state.
 func isolateGateEnv(t *testing.T) string {
 	t.Helper()
 	logDir := t.TempDir()
 	t.Setenv("PR_POOL_LOG_DIR", logDir)
-	t.Setenv("PR_POOL_QUOTA_PAUSED", "")
+	t.Setenv("PR_POOL_OPERATOR_PAUSED", "")
 	t.Setenv("PR_POOL_CICD_DOWN", "")
 	t.Setenv("PR_POOL_CONFIG", filepath.Join(t.TempDir(), "absent.toml"))
 	return logDir
@@ -53,14 +53,14 @@ func isolateGateEnv(t *testing.T) string {
 func TestPauseGate_createsFileExitsZero(t *testing.T) {
 	logDir := isolateGateEnv(t)
 	var stdout, stderr bytes.Buffer
-	if code := pauseGate(&stdout, &stderr, gateQuotaPaused); code != exitOK {
+	if code := pauseGate(&stdout, &stderr, gateOperatorPaused); code != exitOK {
 		t.Fatalf("pauseGate exit = %d, want 0; stderr:\n%s", code, stderr.String())
 	}
-	path := filepath.Join(logDir, "gates", "quota-paused")
+	path := filepath.Join(logDir, "gates", "operator-paused")
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("gate file %q must exist after pause: %v", path, err)
 	}
-	if !strings.Contains(stdout.String(), gateQuotaPaused) || !strings.Contains(stdout.String(), "since") {
+	if !strings.Contains(stdout.String(), gateOperatorPaused) || !strings.Contains(stdout.String(), "since") {
 		t.Errorf("pause output must name the gate and report a set time; got %q", stdout.String())
 	}
 }
@@ -86,20 +86,20 @@ func TestPauseGate_mkdirAllGatesDir(t *testing.T) {
 func TestPauseGate_rePausePreservesMtime(t *testing.T) {
 	isolateGateEnv(t)
 	var out1, out2, stderr bytes.Buffer
-	if code := pauseGate(&out1, &stderr, gateQuotaPaused); code != exitOK {
+	if code := pauseGate(&out1, &stderr, gateOperatorPaused); code != exitOK {
 		t.Fatalf("first pause exit = %d", code)
 	}
-	quotaPaused, _ := config.GatePaths()
-	fi1, err := os.Stat(quotaPaused)
+	operatorPaused, _ := config.GatePaths()
+	fi1, err := os.Stat(operatorPaused)
 	if err != nil {
 		t.Fatal(err)
 	}
 	mtime1 := fi1.ModTime()
 
-	if code := pauseGate(&out2, &stderr, gateQuotaPaused); code != exitOK {
+	if code := pauseGate(&out2, &stderr, gateOperatorPaused); code != exitOK {
 		t.Fatalf("second pause exit = %d", code)
 	}
-	fi2, err := os.Stat(quotaPaused)
+	fi2, err := os.Stat(operatorPaused)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +125,7 @@ func TestPauseGate_succeedsWhenConfigFailsLoad(t *testing.T) {
 		t.Fatal("premise: malformed config must fail Load()")
 	}
 	var stdout, stderr bytes.Buffer
-	if code := pauseGate(&stdout, &stderr, gateQuotaPaused); code != exitOK {
+	if code := pauseGate(&stdout, &stderr, gateOperatorPaused); code != exitOK {
 		t.Fatalf("pauseGate exit = %d, want 0 even though Load() fails; stderr:\n%s", code, stderr.String())
 	}
 }
@@ -133,39 +133,39 @@ func TestPauseGate_succeedsWhenConfigFailsLoad(t *testing.T) {
 func TestResumeGate_clearsGate(t *testing.T) {
 	isolateGateEnv(t)
 	var stdout, stderr bytes.Buffer
-	if code := pauseGate(&stdout, &stderr, gateQuotaPaused); code != exitOK {
+	if code := pauseGate(&stdout, &stderr, gateOperatorPaused); code != exitOK {
 		t.Fatalf("pause exit = %d", code)
 	}
-	quotaPaused, _ := config.GatePaths()
+	operatorPaused, _ := config.GatePaths()
 	stdout.Reset()
-	if code := resumeGate(&stdout, &stderr, gateQuotaPaused, false); code != exitOK {
+	if code := resumeGate(&stdout, &stderr, gateOperatorPaused, false); code != exitOK {
 		t.Fatalf("resume exit = %d, want 0; stderr:\n%s", code, stderr.String())
 	}
-	if _, err := os.Stat(quotaPaused); !os.IsNotExist(err) {
+	if _, err := os.Stat(operatorPaused); !os.IsNotExist(err) {
 		t.Errorf("gate file must be gone after resume, got err=%v", err)
 	}
-	if !strings.Contains(stdout.String(), gateQuotaPaused) {
+	if !strings.Contains(stdout.String(), gateOperatorPaused) {
 		t.Errorf("resume output must name the gate; got %q", stdout.String())
 	}
 }
 
-// A bare resume clears ONLY the default gate (quota-paused); cicd-down (an
+// A bare resume clears ONLY the default gate (operator-paused); cicd-down (an
 // automation-owned gate) is untouched.
 func TestResumeGate_bareResumeClearsOnlyDefaultGate(t *testing.T) {
 	isolateGateEnv(t)
 	var buf, stderr bytes.Buffer
-	if code := pauseGate(&buf, &stderr, gateQuotaPaused); code != exitOK {
-		t.Fatalf("pause quota-paused exit = %d", code)
+	if code := pauseGate(&buf, &stderr, gateOperatorPaused); code != exitOK {
+		t.Fatalf("pause operator-paused exit = %d", code)
 	}
 	if code := pauseGate(&buf, &stderr, gateCICDDown); code != exitOK {
 		t.Fatalf("pause cicd-down exit = %d", code)
 	}
-	if code := resumeGate(&buf, &stderr, gateQuotaPaused, false); code != exitOK {
+	if code := resumeGate(&buf, &stderr, gateOperatorPaused, false); code != exitOK {
 		t.Fatalf("resume exit = %d", code)
 	}
-	quotaPaused, cicdDown := config.GatePaths()
-	if _, err := os.Stat(quotaPaused); !os.IsNotExist(err) {
-		t.Errorf("quota-paused must be cleared, got err=%v", err)
+	operatorPaused, cicdDown := config.GatePaths()
+	if _, err := os.Stat(operatorPaused); !os.IsNotExist(err) {
+		t.Errorf("operator-paused must be cleared, got err=%v", err)
 	}
 	if _, err := os.Stat(cicdDown); err != nil {
 		t.Errorf("cicd-down must survive a bare resume (not the default gate), got err=%v", err)
@@ -175,8 +175,8 @@ func TestResumeGate_bareResumeClearsOnlyDefaultGate(t *testing.T) {
 func TestResumeGate_allClearsBothGates(t *testing.T) {
 	isolateGateEnv(t)
 	var buf, stderr bytes.Buffer
-	if code := pauseGate(&buf, &stderr, gateQuotaPaused); code != exitOK {
-		t.Fatalf("pause quota-paused exit = %d", code)
+	if code := pauseGate(&buf, &stderr, gateOperatorPaused); code != exitOK {
+		t.Fatalf("pause operator-paused exit = %d", code)
 	}
 	if code := pauseGate(&buf, &stderr, gateCICDDown); code != exitOK {
 		t.Fatalf("pause cicd-down exit = %d", code)
@@ -185,9 +185,9 @@ func TestResumeGate_allClearsBothGates(t *testing.T) {
 	if code := resumeGate(&buf, &stderr, "", true); code != exitOK {
 		t.Fatalf("resume --all exit = %d, want 0; stderr:\n%s", code, stderr.String())
 	}
-	quotaPaused, cicdDown := config.GatePaths()
-	if _, err := os.Stat(quotaPaused); !os.IsNotExist(err) {
-		t.Errorf("quota-paused must be cleared by --all, got err=%v", err)
+	operatorPaused, cicdDown := config.GatePaths()
+	if _, err := os.Stat(operatorPaused); !os.IsNotExist(err) {
+		t.Errorf("operator-paused must be cleared by --all, got err=%v", err)
 	}
 	if _, err := os.Stat(cicdDown); !os.IsNotExist(err) {
 		t.Errorf("cicd-down must be cleared by --all, got err=%v", err)
@@ -197,7 +197,7 @@ func TestResumeGate_allClearsBothGates(t *testing.T) {
 func TestResumeGate_alreadyResumedIsExitZero(t *testing.T) {
 	isolateGateEnv(t)
 	var stdout, stderr bytes.Buffer
-	if code := resumeGate(&stdout, &stderr, gateQuotaPaused, false); code != exitOK {
+	if code := resumeGate(&stdout, &stderr, gateOperatorPaused, false); code != exitOK {
 		t.Fatalf("resume of an unset gate exit = %d, want 0", code)
 	}
 	if !strings.Contains(stdout.String(), "already resumed") {
@@ -230,7 +230,7 @@ func TestRoute_pauseResume(t *testing.T) {
 // break the verb-named-subcommand-is-a-socket-client symmetry.
 func TestHelpText_gateEnvVarsAndFileDirectNote(t *testing.T) {
 	for _, want := range []string{
-		"PR_POOL_QUOTA_PAUSED",
+		"PR_POOL_OPERATOR_PAUSED",
 		"PR_POOL_CICD_DOWN",
 		"PR_POOL_LOG_DIR",
 		"FILE-DIRECT",

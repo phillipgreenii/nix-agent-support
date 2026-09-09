@@ -48,7 +48,7 @@ func (m *Model) renderProblemsModal() string {
 	rows = append(rows, m.unmatchedBindingRows()...)
 	rows = append(
 		rows,
-		m.gateModalRow("quota-paused", core.GateQuotaPaused),
+		m.gateModalRow("operator-paused", core.GateOperatorPaused),
 		m.gateModalRow("cicd-down", core.GateCICDDown),
 	)
 	rows = append(rows, m.recentErrorLogRows()...)

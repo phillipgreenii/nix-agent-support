@@ -662,7 +662,7 @@ func TestGateFileInfo_unsetWhenPathEmptyOrAbsent(t *testing.T) {
 		t.Fatalf("gateFileInfo(%q) = %+v, want unset (file absent)", missing, got)
 	}
 
-	present := dir + "/quota-paused"
+	present := dir + "/operator-paused"
 	if err := os.WriteFile(present, nil, 0o644); err != nil {
 		t.Fatalf("write gate file: %v", err)
 	}
@@ -681,19 +681,19 @@ func TestGateFileInfo_unsetWhenPathEmptyOrAbsent(t *testing.T) {
 
 // TestCurrentGateFiles_namesBothFileDirectGates proves currentGateFiles
 // reports both file-direct gates (Task 1.2b, ADR 0036) under the fixed
-// gateTickKeyQuotaPaused/gateTickKeyCICDDown keys svc.ObserveGateFromTick's caller and,
+// gateTickKeyOperatorPaused/gateTickKeyCICDDown keys svc.ObserveGateFromTick's caller and,
 // eventually, Task 3.9's socket verbs must agree on.
 func TestCurrentGateFiles_namesBothFileDirectGates(t *testing.T) {
 	dir := t.TempDir()
-	quota := dir + "/quota-paused"
-	if err := os.WriteFile(quota, nil, 0o644); err != nil {
+	operatorPaused := dir + "/operator-paused"
+	if err := os.WriteFile(operatorPaused, nil, 0o644); err != nil {
 		t.Fatalf("write gate file: %v", err)
 	}
-	cfg := config.Config{QuotaPaused: quota, CICDDown: dir + "/cicd-down-absent"}
+	cfg := config.Config{OperatorPaused: operatorPaused, CICDDown: dir + "/cicd-down-absent"}
 
 	gates := currentGateFiles(cfg)
-	if got := gates[gateTickKeyQuotaPaused]; !got.Set {
-		t.Fatalf("gates[%q] = %+v, want Set=true", gateTickKeyQuotaPaused, got)
+	if got := gates[gateTickKeyOperatorPaused]; !got.Set {
+		t.Fatalf("gates[%q] = %+v, want Set=true", gateTickKeyOperatorPaused, got)
 	}
 	if got := gates[gateTickKeyCICDDown]; got.Set {
 		t.Fatalf("gates[%q] = %+v, want unset (file absent)", gateTickKeyCICDDown, got)
@@ -706,7 +706,7 @@ func TestCurrentGateFiles_namesBothFileDirectGates(t *testing.T) {
 // and returns its path.
 func writeGateFile(t *testing.T) string {
 	t.Helper()
-	p := filepath.Join(t.TempDir(), "quota-paused")
+	p := filepath.Join(t.TempDir(), "operator-paused")
 	if err := os.WriteFile(p, []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -717,15 +717,15 @@ func TestRunUntilIdleGated_reachableAnswersIngestNoDispatch(t *testing.T) {
 	cmd := &fakeCommander{}
 	logDir := shortDir(t)
 	cfg := config.Config{
-		LogDir:      logDir,
-		QuotaPaused: writeGateFile(t),
+		LogDir:         logDir,
+		OperatorPaused: writeGateFile(t),
 		Roles: roles.RoleSet{
 			{Name: "r1", Enabled: true, Type: "command", Binds: []string{"t1"}, Command: &roles.CommandConfig{Argv: []string{"r1-cmd"}}},
 		},
 	}
 	o := &orchestrator.Orchestrator{Cfg: cfg, Cmd: cmd, BD: &dtest.ScriptBD{}, CC: &dtest.FakeCC{}}
 	if !o.Gated() {
-		t.Fatal("precondition: cfg must be gated (QuotaPaused sentinel present)")
+		t.Fatal("precondition: cfg must be gated (OperatorPaused sentinel present)")
 	}
 
 	done := make(chan int, 1)
@@ -789,7 +789,7 @@ func TestRunOneTick_gatedStillExpiresDueEvent(t *testing.T) {
 		t.Fatalf("precondition: depth = %d, want 1", depth)
 	}
 
-	cfg := config.Config{QuotaPaused: writeGateFile(t)}
+	cfg := config.Config{OperatorPaused: writeGateFile(t)}
 	o := &orchestrator.Orchestrator{Cfg: cfg}
 	if !o.Gated() {
 		t.Fatal("precondition: must be gated")
@@ -816,7 +816,7 @@ func TestRunOneTick_gateNoticeOncePerTransition(t *testing.T) {
 	if err != nil {
 		t.Fatalf("eventqueue.New: %v", err)
 	}
-	gatedCfg := config.Config{QuotaPaused: writeGateFile(t)}
+	gatedCfg := config.Config{OperatorPaused: writeGateFile(t)}
 	gatedO := &orchestrator.Orchestrator{Cfg: gatedCfg}
 	ungatedO := &orchestrator.Orchestrator{}
 

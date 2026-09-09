@@ -515,7 +515,7 @@ DEC-CLI-2`).
   (`INV-EVT-*`); no new delivery semantics. It is **distinct from** `ingest-event` (a manager→core
   callback) and from the one-shot handler smoke test, which tears down.
 - **Operator pause/resume.** `pause [<gate>]` / `resume [<gate>]` set or clear a named **gate**
-  (`INV-LIFE-2`); omitting `<gate>` defaults to `quota-paused`, and clearing **every** outstanding gate
+  (`INV-LIFE-2`); omitting `<gate>` defaults to `operator-paused`, and clearing **every** outstanding gate
   requires an explicit `resume --all` — a bare `resume` clears only the default gate, so an
   automation-owned gate is never cleared by accident. Both act **directly on the gate's file-backed
   state** and **MUST succeed even with no core running** (exit `0`, reporting that the change takes

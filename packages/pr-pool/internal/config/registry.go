@@ -56,13 +56,13 @@ type poolTOML struct {
 	// one event of a marked type at a time, across every bound handler, until
 	// it is released. Absent/empty: marks nothing (unchanged from today).
 	SerializeTypes []string `toml:"serialize_types"`
-	// QuotaPausedPath / CICDDownPath override the two INV-LIFE-2 gate file
-	// paths `pause`/`resume` act on. Absent: PR_POOL_QUOTA_PAUSED /
-	// PR_POOL_CICD_DOWN env, then <LogDir>/gates/{quota-paused,cicd-down}
+	// OperatorPausedPath / CICDDownPath override the two INV-LIFE-2 gate file
+	// paths `pause`/`resume` act on. Absent: PR_POOL_OPERATOR_PAUSED /
+	// PR_POOL_CICD_DOWN env, then <LogDir>/gates/{operator-paused,cicd-down}
 	// (config.Load()'s post-repo-TOML fill; config.GatePaths() resolves the
 	// identical precedence without Load()).
-	QuotaPausedPath string `toml:"quota_paused_path"`
-	CICDDownPath    string `toml:"cicd_down_path"`
+	OperatorPausedPath string `toml:"operator_paused_path"`
+	CICDDownPath       string `toml:"cicd_down_path"`
 }
 
 type budgetTOML struct {
@@ -219,13 +219,13 @@ func (r *Registry) decodeRoleSet(path, configDir string, c *Config) (roles.RoleS
 	if shape.Pool.WorktreeDir != "" {
 		c.WorktreeDir = shape.Pool.WorktreeDir
 	}
-	// [pool].quota_paused_path / cicd_down_path overlay after the env overlay in
+	// [pool].operator_paused_path / cicd_down_path overlay after the env overlay in
 	// Load() the same way worktree_dir does — config (repo) wins over
-	// PR_POOL_QUOTA_PAUSED / PR_POOL_CICD_DOWN (env), which already won over
+	// PR_POOL_OPERATOR_PAUSED / PR_POOL_CICD_DOWN (env), which already won over
 	// Default()'s "". An absent key leaves the env/default value intact; Load()
 	// fills either still-empty field from <LogDir>/gates/... AFTER this returns.
-	if shape.Pool.QuotaPausedPath != "" {
-		c.QuotaPaused = shape.Pool.QuotaPausedPath
+	if shape.Pool.OperatorPausedPath != "" {
+		c.OperatorPaused = shape.Pool.OperatorPausedPath
 	}
 	if shape.Pool.CICDDownPath != "" {
 		c.CICDDown = shape.Pool.CICDDownPath

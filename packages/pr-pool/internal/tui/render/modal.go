@@ -35,9 +35,10 @@ const modalLeftColumnGap = 2
 // can silently clip) content wider than the width given -- it is not a
 // pure padding floor -- so a fixed Width(12) truncated/collided with any
 // Left value at or beyond 12 columns instead of merely under-padding it:
-// "quota-paused" (exactly 12 columns) received ZERO gap and ran straight
-// into the next field ("quota-pausedclear since - (owner: -)"), while
-// "cicd-down" (9 columns) happened to get a 3-column gap incidentally.
+// the gate's old name "quota-paused" (exactly 12 columns) received ZERO gap
+// and ran straight into the next field ("quota-pausedclear since - (owner:
+// -)"), while "cicd-down" (9 columns) happened to get a 3-column gap
+// incidentally.
 // Computing the width from every row (not just the currently-visible
 // slice, so the column doesn't shift as the operator scrolls) guarantees
 // modalLeftColumnGap columns of real separation regardless of any

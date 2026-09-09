@@ -39,7 +39,7 @@ func TestBanner_MutuallyExclusiveHeaderVsPaused(t *testing.T) {
 			clientVersion: "1.2.3",
 			reply: StatusReply{
 				Core:  CoreInfo{State: "started", Version: "1.2.3"},
-				Gates: []Gate{{Name: core.GateQuotaPaused, Set: true}},
+				Gates: []Gate{{Name: core.GateOperatorPaused, Set: true}},
 			},
 			width: 120,
 			theme: theme,
@@ -90,7 +90,7 @@ func TestBanner_MutuallyExclusiveHeaderVsPaused(t *testing.T) {
 	t.Run("N in flight reflects the reply's deliveries count", func(t *testing.T) {
 		got := renderTopZone(topZoneData{
 			reply: StatusReply{
-				Gates:      []Gate{{Name: core.GateQuotaPaused, Set: true}},
+				Gates:      []Gate{{Name: core.GateOperatorPaused, Set: true}},
 				Deliveries: []Delivery{{ID: "d1"}},
 			},
 			width: 120,
@@ -102,15 +102,15 @@ func TestBanner_MutuallyExclusiveHeaderVsPaused(t *testing.T) {
 	})
 }
 
-// TestGatesSummary_ChecksboxReflectsSetState pins the compact "quota[.]
+// TestGatesSummary_ChecksboxReflectsSetState pins the compact "oper[.]
 // cicd[.]" grammar the header/mockups use, and its "X" transition when a
 // gate is set.
 func TestGatesSummary_ChecksboxReflectsSetState(t *testing.T) {
-	if got, want := gatesSummary(nil), "quota[.] cicd[.]"; got != want {
+	if got, want := gatesSummary(nil), "oper[.] cicd[.]"; got != want {
 		t.Errorf("gatesSummary(nil) = %q, want %q", got, want)
 	}
-	got := gatesSummary([]Gate{{Name: core.GateQuotaPaused, Set: true}, {Name: core.GateCICDDown, Set: false}})
-	if want := "quota[X] cicd[.]"; got != want {
+	got := gatesSummary([]Gate{{Name: core.GateOperatorPaused, Set: true}, {Name: core.GateCICDDown, Set: false}})
+	if want := "oper[X] cicd[.]"; got != want {
 		t.Errorf("gatesSummary = %q, want %q", got, want)
 	}
 }
@@ -124,9 +124,9 @@ func TestAnyGateSet_ORsBothNamedGates(t *testing.T) {
 		want  bool
 	}{
 		{"none", nil, false},
-		{"quota only", []Gate{{Name: core.GateQuotaPaused, Set: true}}, true},
+		{"operator only", []Gate{{Name: core.GateOperatorPaused, Set: true}}, true},
 		{"cicd only", []Gate{{Name: core.GateCICDDown, Set: true}}, true},
-		{"both clear", []Gate{{Name: core.GateQuotaPaused}, {Name: core.GateCICDDown}}, false},
+		{"both clear", []Gate{{Name: core.GateOperatorPaused}, {Name: core.GateCICDDown}}, false},
 	}
 	for _, c := range cases {
 		if got := anyGateSet(c.gates); got != c.want {
@@ -210,7 +210,7 @@ func TestRenderHeader_DefaultTierLeadsWithHealthAndGroupsFields(t *testing.T) {
 
 	// Line 3: gates + config path, both still present (same data, just
 	// relocated/de-emphasized -- not dropped).
-	if !strings.Contains(lines[2], "gates: quota[.] cicd[.]") {
+	if !strings.Contains(lines[2], "gates: oper[.] cicd[.]") {
 		t.Errorf("line 3 must carry the gates summary; got %q", lines[2])
 	}
 	if !strings.Contains(lines[2], "config: ") || !strings.Contains(lines[2], "/Volumes/ziprecruiter/pristine/.pr-pool/config.toml") {

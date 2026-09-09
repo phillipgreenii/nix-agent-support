@@ -596,13 +596,13 @@ func prepareRun(ctx context.Context, sel runSelectors) (preparedRun, int) {
 	return preparedRun{cfg: cfg, o: o, cleanup: cleanup, declaredRoles: declaredRoles, excluded: excluded}, exitOK
 }
 
-// gateTickKeyQuotaPaused / gateTickKeyCICDDown are the two file-direct gate names (Task
+// gateTickKeyOperatorPaused / gateTickKeyCICDDown are the two file-direct gate names (Task
 // 1.2b, ADR 0036) this run's config declares — the map keys
 // currentGateFiles/svc.ObserveGateFromTick use, one per
-// config.Config.QuotaPaused/CICDDown gate-file path.
+// config.Config.OperatorPaused/CICDDown gate-file path.
 const (
-	gateTickKeyQuotaPaused = "quota_paused"
-	gateTickKeyCICDDown    = "cicd_down"
+	gateTickKeyOperatorPaused = "operator_paused"
+	gateTickKeyCICDDown       = "cicd_down"
 )
 
 // gateFileInfo stats path and reports whether the gate is currently set
@@ -627,8 +627,8 @@ func gateFileInfo(path string) core.GateInfo {
 // same gate-file state).
 func currentGateFiles(cfg config.Config) map[string]core.GateInfo {
 	return map[string]core.GateInfo{
-		gateTickKeyQuotaPaused: gateFileInfo(cfg.QuotaPaused),
-		gateTickKeyCICDDown:    gateFileInfo(cfg.CICDDown),
+		gateTickKeyOperatorPaused: gateFileInfo(cfg.OperatorPaused),
+		gateTickKeyCICDDown:       gateFileInfo(cfg.CICDDown),
 	}
 }
 
@@ -703,12 +703,12 @@ func resolvedConfigFor(cfg config.Config, runMode string) core.ResolvedConfig {
 
 // gateNotice returns the operator-facing stderr notice for the currently
 // active gate (INV-LIFE-2's "Gate identity"): which of the two named gates is
-// set (quota-paused, OP's own; cicd-down, an automation actor's — labeled as
+// set (operator-paused, OP's own; cicd-down, an automation actor's — labeled as
 // such because that actor MAY re-assert it on its own initiative, e.g. every
 // failed health check, unlike a human operator's own gate), that gate file's
 // mtime (when it was set), and the remedy to clear it. Returns "" when
 // neither gate file is present — mirrors Orchestrator.gated()'s OR-effective
-// check and its QuotaPaused-then-CICDDown precedence when, unusually, both
+// check and its OperatorPaused-then-CICDDown precedence when, unusually, both
 // are set at once (an ordering choice this packet is free to make: the design
 // only requires the report name ONE active gate, not enumerate every set
 // one).
@@ -717,7 +717,7 @@ func gateNotice(cfg config.Config) string {
 		name, path, owner, remedy string
 	}
 	candidates := []gate{
-		{"quota-paused", cfg.QuotaPaused, "operator", "remove the PR_POOL_QUOTA_PAUSED file to resume"},
+		{"operator-paused", cfg.OperatorPaused, "operator", "remove the PR_POOL_OPERATOR_PAUSED file to resume"},
 		{"cicd-down", cfg.CICDDown, "automation", "the automation actor clears the PR_POOL_CICD_DOWN file once CI/CD is healthy again; it may re-assert it on the next failed health check"},
 	}
 	for _, g := range candidates {

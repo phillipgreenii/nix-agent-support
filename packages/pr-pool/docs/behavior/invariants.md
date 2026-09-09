@@ -356,7 +356,7 @@ sequenceDiagram
   idle predicate a suspended dispatch can never satisfy.
 
   **Gate identity.** There are exactly **two** named gates, **OR-effective** — the core is halted while
-  **either** is set: `quota-paused`, which is `ACTOR-OP`'s own to set and clear, and `cicd-down`, which
+  **either** is set: `operator-paused`, which is `ACTOR-OP`'s own to set and clear, and `cicd-down`, which
   belongs to an **automation actor** rather than the human operator. Every surface that reports gate
   state **MUST label an automation-owned gate as such**, because an automation actor **MAY re-assert**
   a gate it owns on its own initiative (e.g. on every failed health check) in a way a human operator's

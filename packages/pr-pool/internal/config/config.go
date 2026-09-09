@@ -1,6 +1,6 @@
 // Package config holds pr-pool's runtime configuration. Pool scalars layer
 // Default() -> PR_POOL_* env -> [pool] TOML (the config file wins for the keys it
-// sets: self_login, worktree_dir, budget, quota_paused_path, cicd_down_path) —
+// sets: self_login, worktree_dir, budget, operator_paused_path, cicd_down_path) —
 // [pool] wins over PR_POOL_* env, which wins over the built-in default. Roles
 // come from the [[role]] array in <RepoRoot>/.pr-pool/config.toml (or
 // PR_POOL_CONFIG), or the built-in default set when no config file is present.
@@ -61,11 +61,11 @@ type Config struct {
 	// (the default) marks nothing, so an existing deployment's dispatch is
 	// unchanged.
 	SerializeTypes []string
-	// QuotaPaused / CICDDown are the two named INV-LIFE-2 gate file paths (Gate
-	// identity: quota-paused is ACTOR-OP's own; cicd-down belongs to an
-	// automation actor). Load() fills both with <LogDir>/gates/{quota-paused,
+	// OperatorPaused / CICDDown are the two named INV-LIFE-2 gate file paths (Gate
+	// identity: operator-paused is ACTOR-OP's own; cicd-down belongs to an
+	// automation actor). Load() fills both with <LogDir>/gates/{operator-paused,
 	// cicd-down} AFTER the repo-TOML layer and only when still empty, so the
-	// precedence is [pool] key (quota_paused_path / cicd_down_path) > PR_POOL_*
+	// precedence is [pool] key (operator_paused_path / cicd_down_path) > PR_POOL_*
 	// env > this default. GatePaths() resolves the identical precedence WITHOUT
 	// calling Load() — see its doc comment for why pause/resume need that.
 	//
@@ -74,7 +74,7 @@ type Config struct {
 	// recipe (MIGRATION.md) for new CI-health integrations; the field itself
 	// is kept, unremoved, for backward compatibility — see
 	// cmd/pr-pool/gates_cmd.go's gateCICDDown doc comment.
-	QuotaPaused    string
+	OperatorPaused string
 	CICDDown       string
 	Effort         string
 	Model          string
@@ -240,7 +240,7 @@ func Default() Config {
 		// ready work" behavior.
 		PullFailureBackoff: backoff.Default(),
 		PullFailureRetries: 0,
-		QuotaPaused:        "",
+		OperatorPaused:     "",
 		CICDDown:           "",
 		Effort:             "max",
 		Model:              "",
@@ -285,7 +285,7 @@ func Load() (Config, error) {
 	c.WorktreeDir = envStr("PR_POOL_WORKTREE_DIR", c.WorktreeDir)
 	c.MaxWait = envSecs("PR_POOL_MAX_WAIT", c.MaxWait)
 	c.PollInterval = envSecs("PR_POOL_POLL_INTERVAL", c.PollInterval)
-	c.QuotaPaused = envStr("PR_POOL_QUOTA_PAUSED", c.QuotaPaused)
+	c.OperatorPaused = envStr("PR_POOL_OPERATOR_PAUSED", c.OperatorPaused)
 	c.CICDDown = envStr("PR_POOL_CICD_DOWN", c.CICDDown)
 	c.Effort = envStr("PR_POOL_EFFORT", c.Effort)
 	c.Model = envStr("PR_POOL_MODEL", c.Model)
@@ -334,12 +334,12 @@ func Load() (Config, error) {
 		slog.Info("no pr-pool config found; using built-in roles", "path", path)
 	}
 	// Gate file defaults (INV-LIFE-2), filled AFTER the repo-TOML layer above (so
-	// [pool].quota_paused_path / cicd_down_path, if present, already won) and
+	// [pool].operator_paused_path / cicd_down_path, if present, already won) and
 	// only when still empty (env, if set, already won over Default()'s "").
 	// GatePaths() below resolves this identical precedence for pause/resume,
 	// which must never call Load() — keep the two in agreement.
-	if c.QuotaPaused == "" {
-		c.QuotaPaused = filepath.Join(c.LogDir, "gates", "quota-paused")
+	if c.OperatorPaused == "" {
+		c.OperatorPaused = filepath.Join(c.LogDir, "gates", "operator-paused")
 	}
 	if c.CICDDown == "" {
 		c.CICDDown = filepath.Join(c.LogDir, "gates", "cicd-down")
@@ -680,10 +680,10 @@ func LogDir() string {
 	return envStr("PR_POOL_LOG_DIR", Default().LogDir)
 }
 
-// GatePaths resolves the two INV-LIFE-2 gate file paths (quota-paused,
+// GatePaths resolves the two INV-LIFE-2 gate file paths (operator-paused,
 // cicd-down) with the SAME precedence Load() fills them with — [pool] key
-// (quota_paused_path / cicd_down_path, read directly from the repo config file
-// when it parses) > PR_POOL_* env > <LogDir>/gates/{quota-paused,cicd-down} —
+// (operator_paused_path / cicd_down_path, read directly from the repo config file
+// when it parses) > PR_POOL_* env > <LogDir>/gates/{operator-paused,cicd-down} —
 // but WITHOUT loading, parsing role/query wiring, or calling Validate().
 //
 // It exists so `pause`/`resume` never call Load(): Validate() hard-fails on an
@@ -697,13 +697,13 @@ func LogDir() string {
 // back to the env/default resolution SILENTLY rather than erroring — mirroring
 // LogDir()'s own "must not be able to fail on unrelated config" contract, which
 // this function is the gate-path sibling of.
-func GatePaths() (quotaPaused, cicdDown string) {
+func GatePaths() (operatorPaused, cicdDown string) {
 	// Mirror Default()'s "" -> env overlay exactly (config.go's own Load() does
 	// this in two separate steps too — env first, against a "" base, THEN a
 	// still-empty fill below): envStr treats an env var explicitly SET to ""
 	// the same as unset, since the base is also "", so either reading falls
 	// through to the pool-key overlay and then the LogDir-based fill below.
-	quotaPaused = envStr("PR_POOL_QUOTA_PAUSED", "")
+	operatorPaused = envStr("PR_POOL_OPERATOR_PAUSED", "")
 	cicdDown = envStr("PR_POOL_CICD_DOWN", "")
 
 	cwd, _ := os.Getwd()
@@ -712,8 +712,8 @@ func GatePaths() (quotaPaused, cicdDown string) {
 	if body, err := os.ReadFile(path); err == nil {
 		var shape fileShape
 		if _, err := toml.Decode(string(body), &shape); err == nil {
-			if shape.Pool.QuotaPausedPath != "" {
-				quotaPaused = shape.Pool.QuotaPausedPath
+			if shape.Pool.OperatorPausedPath != "" {
+				operatorPaused = shape.Pool.OperatorPausedPath
 			}
 			if shape.Pool.CICDDownPath != "" {
 				cicdDown = shape.Pool.CICDDownPath
@@ -726,13 +726,13 @@ func GatePaths() (quotaPaused, cicdDown string) {
 	// "must not depend on a readable/valid config file" contract).
 
 	logDir := LogDir()
-	if quotaPaused == "" {
-		quotaPaused = filepath.Join(logDir, "gates", "quota-paused")
+	if operatorPaused == "" {
+		operatorPaused = filepath.Join(logDir, "gates", "operator-paused")
 	}
 	if cicdDown == "" {
 		cicdDown = filepath.Join(logDir, "gates", "cicd-down")
 	}
-	return quotaPaused, cicdDown
+	return operatorPaused, cicdDown
 }
 
 func stateHome() string {

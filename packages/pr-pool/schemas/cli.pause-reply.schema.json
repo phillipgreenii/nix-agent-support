@@ -6,7 +6,7 @@
   "required": ["schemaVersion", "gate", "set"],
   "properties": {
     "schemaVersion": { "const": "1" },
-    "gate": { "type": "string", "enum": ["quota_paused", "cicd_down"] },
+    "gate": { "type": "string", "enum": ["operator_paused", "cicd_down"] },
     "set": { "type": "boolean" },
     "mtime": { "type": "string" }
   }

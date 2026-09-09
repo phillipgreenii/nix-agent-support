@@ -17,15 +17,15 @@ func TestGateStateNewerObservationWins(t *testing.T) {
 	newer := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
 	older := newer.Add(-time.Minute)
 
-	svc.ObserveGateFromSocketVerb(newer, "quota_paused", GateInfo{Set: true, Owner: "operator"})
-	svc.ObserveGateFromTick(older, map[string]GateInfo{"quota_paused": {Set: false}})
+	svc.ObserveGateFromSocketVerb(newer, "operator_paused", GateInfo{Set: true, Owner: "operator"})
+	svc.ObserveGateFromTick(older, map[string]GateInfo{"operator_paused": {Set: false}})
 
 	gates, observedAt := svc.GateSnapshot()
 	if !observedAt.Equal(newer) {
 		t.Fatalf("gatesObservedAt = %v, want unchanged at the socket verb's %v", observedAt, newer)
 	}
-	if got := gates["quota_paused"]; !got.Set {
-		t.Fatalf("quota_paused = %+v, want the socket verb's Set=true to survive the older drive-loop write", got)
+	if got := gates["operator_paused"]; !got.Set {
+		t.Fatalf("operator_paused = %+v, want the socket verb's Set=true to survive the older drive-loop write", got)
 	}
 }
 
@@ -70,15 +70,15 @@ func TestSocketPauseReflectsImmediately(t *testing.T) {
 func TestFileDirectPauseLagsUntilNextTick(t *testing.T) {
 	var svc Service
 	priorTick := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
-	svc.ObserveGateFromTick(priorTick, map[string]GateInfo{"quota_paused": {Set: false}})
+	svc.ObserveGateFromTick(priorTick, map[string]GateInfo{"operator_paused": {Set: false}})
 
 	// A file-direct pause happens here, out-of-band — nothing calls into svc.
 
 	// An immediate status read still sees the PRIOR (unset) state, stamped
 	// with the stale priorTick observation time.
 	gates, observedAt := svc.GateSnapshot()
-	if got := gates["quota_paused"]; got.Set {
-		t.Fatalf("quota_paused = %+v, want the prior unset state until the next tick observes the file", got)
+	if got := gates["operator_paused"]; got.Set {
+		t.Fatalf("operator_paused = %+v, want the prior unset state until the next tick observes the file", got)
 	}
 	if !observedAt.Equal(priorTick) {
 		t.Fatalf("gatesObservedAt = %v, want the stale %v (unrefreshed until the next tick)", observedAt, priorTick)
@@ -86,11 +86,11 @@ func TestFileDirectPauseLagsUntilNextTick(t *testing.T) {
 
 	// The next drive-loop tick reads the gate file and observes it set.
 	nextTick := priorTick.Add(10 * time.Second)
-	svc.ObserveGateFromTick(nextTick, map[string]GateInfo{"quota_paused": {Set: true, Mtime: nextTick.Add(-5 * time.Second)}})
+	svc.ObserveGateFromTick(nextTick, map[string]GateInfo{"operator_paused": {Set: true, Mtime: nextTick.Add(-5 * time.Second)}})
 
 	gates, observedAt = svc.GateSnapshot()
-	if got := gates["quota_paused"]; !got.Set {
-		t.Fatalf("quota_paused = %+v, want it to flip to set at the next tick", got)
+	if got := gates["operator_paused"]; !got.Set {
+		t.Fatalf("operator_paused = %+v, want it to flip to set at the next tick", got)
 	}
 	if !observedAt.Equal(nextTick) {
 		t.Fatalf("gatesObservedAt = %v, want the fresh %v", observedAt, nextTick)
@@ -159,14 +159,14 @@ func TestPublishTick_currentTickRoundTrips(t *testing.T) {
 func TestGateSnapshot_returnsIndependentCopy(t *testing.T) {
 	var svc Service
 	now := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
-	svc.ObserveGateFromSocketVerb(now, "quota_paused", GateInfo{Set: true})
+	svc.ObserveGateFromSocketVerb(now, "operator_paused", GateInfo{Set: true})
 
 	gates, _ := svc.GateSnapshot()
-	gates["quota_paused"] = GateInfo{Set: false}
+	gates["operator_paused"] = GateInfo{Set: false}
 
 	gates2, _ := svc.GateSnapshot()
-	if got := gates2["quota_paused"]; !got.Set {
-		t.Fatalf("quota_paused = %+v, want the caller's mutation of the returned map to not affect the cache", got)
+	if got := gates2["operator_paused"]; !got.Set {
+		t.Fatalf("operator_paused = %+v, want the caller's mutation of the returned map to not affect the cache", got)
 	}
 }
 

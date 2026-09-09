@@ -206,7 +206,7 @@ var negativeMatrix = map[string][]negativeCase{
 		{"delivery carries the removed state field", `{"schemaVersion":"1","deliveries":[{"id":"h","handler":"r","event":"e","state":"running"}],"queues":[],"config":{"sources":0,"handlers":0}}`},
 		{"queue depth wrong type", `{"schemaVersion":"1","deliveries":[],"queues":[{"type":"t","depth":"3"}],"config":{"sources":0,"handlers":0}}`},
 		{"core carries an unknown field", `{"schemaVersion":"1","deliveries":[],"queues":[],"config":{"sources":0,"handlers":0},"core":{"state":"started","pid":1,"extra":"x"}}`},
-		{"gate missing set", `{"schemaVersion":"1","deliveries":[],"queues":[],"config":{"sources":0,"handlers":0},"gates":[{"name":"quota_paused"}]}`},
+		{"gate missing set", `{"schemaVersion":"1","deliveries":[],"queues":[],"config":{"sources":0,"handlers":0},"gates":[{"name":"operator_paused"}]}`},
 		{"activity entry missing outcome", `{"schemaVersion":"1","deliveries":[],"queues":[],"config":{"sources":0,"handlers":0},"activity":[{"seq":1,"startedAt":"2026-09-01T00:00:00Z","type":"t"}]}`},
 		{"activityDropped wrong type", `{"schemaVersion":"1","deliveries":[],"queues":[],"config":{"sources":0,"handlers":0},"activityDropped":"yes"}`},
 		// Task 4.1 (operator-widened scope): the new listeners[].backoff shape
@@ -254,8 +254,8 @@ var negativeMatrix = map[string][]negativeCase{
 		{"gate wrong type", `{"schemaVersion":"1","gate":5}`},
 	},
 	"cli.pause-reply": {
-		{"missing set", `{"schemaVersion":"1","gate":"quota_paused"}`},
-		{"set wrong type", `{"schemaVersion":"1","gate":"quota_paused","set":"yes"}`},
+		{"missing set", `{"schemaVersion":"1","gate":"operator_paused"}`},
+		{"set wrong type", `{"schemaVersion":"1","gate":"operator_paused","set":"yes"}`},
 		{"gate out of enum", `{"schemaVersion":"1","gate":"bogus-gate","set":true}`},
 	},
 	"cli.resume": {
@@ -264,8 +264,8 @@ var negativeMatrix = map[string][]negativeCase{
 		{"gate wrong type", `{"schemaVersion":"1","gate":5}`},
 	},
 	"cli.resume-reply": {
-		{"missing set", `{"schemaVersion":"1","gate":"quota_paused"}`},
-		{"set wrong type", `{"schemaVersion":"1","gate":"quota_paused","set":"no"}`},
+		{"missing set", `{"schemaVersion":"1","gate":"operator_paused"}`},
+		{"set wrong type", `{"schemaVersion":"1","gate":"operator_paused","set":"no"}`},
 		{"gate out of enum", `{"schemaVersion":"1","gate":"bogus-gate","set":false}`},
 	},
 }

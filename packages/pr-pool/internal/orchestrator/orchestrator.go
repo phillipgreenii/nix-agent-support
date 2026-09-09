@@ -130,7 +130,7 @@ func (o *Orchestrator) commander() query.Commander {
 }
 
 // Gated reports whether dispatch is currently paused by an operator-managed
-// gate file (PR_POOL_QUOTA_PAUSED / PR_POOL_CICD_DOWN). A gated caller MUST NOT
+// gate file (PR_POOL_OPERATOR_PAUSED / PR_POOL_CICD_DOWN). A gated caller MUST NOT
 // register listeners or run a producer tick — no sessions are created, so
 // nothing needs tearing down either.
 func (o *Orchestrator) Gated() bool { return o.gated() }
@@ -212,7 +212,7 @@ func (o *Orchestrator) LastTick() map[string]time.Time {
 // against one bead without running discovery. Per the design's context-vs-event
 // resolution (Q-meta), run-role accepts an EVENT (self-contained, replayable)
 // and DERIVES the ephemeral DispatchContext here at dispatch. Unlike DrainOnce it
-// does NOT consult the quota/CICD gates and does NOT reap stray pr-pool-*
+// does NOT consult the operator/CICD gates and does NOT reap stray pr-pool-*
 // sessions — it is a manual, intentional single dispatch where the operator is
 // in control.
 func (o *Orchestrator) RunOne(ctx context.Context, role roles.Role, ev event.Event) error {
@@ -444,7 +444,7 @@ func (o *Orchestrator) sessionStateByID(ctx context.Context, externalID string) 
 }
 
 func (o *Orchestrator) gated() bool {
-	if o.Cfg.QuotaPaused != "" && fileExists(o.Cfg.QuotaPaused) {
+	if o.Cfg.OperatorPaused != "" && fileExists(o.Cfg.OperatorPaused) {
 		return true
 	}
 	if o.Cfg.CICDDown != "" && fileExists(o.Cfg.CICDDown) {

@@ -69,7 +69,7 @@ func renderConfigShow(w io.Writer, cfg config.Config) {
 		_, _ = fmt.Fprintf(w, "  - %-14s emits=%v%s\n", s.Name, emits, stub)
 	}
 	_, _ = fmt.Fprintln(w, "gates (INV-LIFE-2):")
-	_, _ = fmt.Fprintf(w, "  quota-paused: %s\n", gateShowLine(cfg.QuotaPaused))
+	_, _ = fmt.Fprintf(w, "  operator-paused: %s\n", gateShowLine(cfg.OperatorPaused))
 	_, _ = fmt.Fprintf(w, "  cicd-down:    %s\n", gateShowLine(cfg.CICDDown))
 	_, _ = fmt.Fprintln(w, "dispatch (workers):")
 	_, _ = fmt.Fprintf(w, "  permission-mode: %s\n", cfg.PermissionMode)
@@ -165,8 +165,8 @@ func renderConfigShowJSON(w io.Writer, cfg config.Config) {
 		Roles:      make([]configShowRole, 0, len(cfg.Roles)),
 		Queries:    make([]configShowQuery, 0, len(cfg.Queries)),
 		Gates: configShowGates{
-			QuotaPaused: gateShowJSON(cfg.QuotaPaused),
-			CICDDown:    gateShowJSON(cfg.CICDDown),
+			OperatorPaused: gateShowJSON(cfg.OperatorPaused),
+			CICDDown:       gateShowJSON(cfg.CICDDown),
 		},
 		Dispatch: configShowDispatch{
 			PermissionMode: cfg.PermissionMode,
@@ -231,8 +231,8 @@ type configShowQuery struct {
 }
 
 type configShowGates struct {
-	QuotaPaused configShowGate `json:"quotaPaused"`
-	CICDDown    configShowGate `json:"cicdDown"`
+	OperatorPaused configShowGate `json:"operatorPaused"`
+	CICDDown       configShowGate `json:"cicdDown"`
 }
 
 // configShowGate is one gate's `--json` row (INV-LIFE-2): Since is the RFC3339

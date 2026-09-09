@@ -285,20 +285,20 @@ func TestNewListener_perHandlerSerialFIFO_onePerDispatchCall(t *testing.T) {
 	}
 }
 
-// TestGated_quotaPausedAndCICDDown locks the Gated() predicate `run` /
+// TestGated_operatorPausedAndCICDDown locks the Gated() predicate `run` /
 // `run-until-idle` consult before registering any Listener or running a
 // producer tick (the exported form of the retired DrainOnce's own gate check).
-func TestGated_quotaPausedAndCICDDown(t *testing.T) {
+func TestGated_operatorPausedAndCICDDown(t *testing.T) {
 	o := newOrch(&dtest.FakeCC{}, &dtest.ScriptBD{}, fastCfg())
 	if o.Gated() {
 		t.Fatal("an ungated config must report Gated() == false")
 	}
 	f, _ := writeTemp(t)
-	o.Cfg.QuotaPaused = f
+	o.Cfg.OperatorPaused = f
 	if !o.Gated() {
-		t.Fatal("QuotaPaused sentinel present must report Gated() == true")
+		t.Fatal("OperatorPaused sentinel present must report Gated() == true")
 	}
-	o.Cfg.QuotaPaused = ""
+	o.Cfg.OperatorPaused = ""
 	o.Cfg.CICDDown = f
 	if !o.Gated() {
 		t.Fatal("CICDDown sentinel present must report Gated() == true")

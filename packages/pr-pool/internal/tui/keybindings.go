@@ -33,7 +33,7 @@ type Binding struct {
 // enter/[/] delegate to drilldown.go's Model.enterDrillDown/stepSibling
 // (Task 4.7).
 var Bindings = []Binding{
-	{Keys: []string{"P"}, Description: "Toggle the quota gate (no optimistic flip)", Handle: (*Model).handleToggleQuotaGate},
+	{Keys: []string{"P"}, Description: "Pause or resume the whole pool (waits for confirmation)", Handle: (*Model).handleToggleOperatorGate},
 	{Keys: []string{"g"}, Description: "Gates modal", Handle: handleOpenGatesModal},
 	{Keys: []string{"l"}, Description: "Legend", Handle: handleOpenLegend},
 	{Keys: []string{"!"}, Description: "Problems (aggregated diagnostics)", Handle: handleOpenProblems},

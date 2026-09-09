@@ -543,20 +543,20 @@ func TestLoad_worktreeDir_envWhenConfigOmitsKey(t *testing.T) {
 	}
 }
 
-// QuotaPaused/CICDDown (INV-LIFE-2, Task 1.2b) layer Default() ("") ->
-// PR_POOL_QUOTA_PAUSED/PR_POOL_CICD_DOWN (env) -> [pool].quota_paused_path/
+// OperatorPaused/CICDDown (INV-LIFE-2, Task 1.2b) layer Default() ("") ->
+// PR_POOL_OPERATOR_PAUSED/PR_POOL_CICD_DOWN (env) -> [pool].operator_paused_path/
 // cicd_down_path (config, repo), filled AFTER the repo-TOML layer. Config is
 // the highest priority, mirroring WorktreeDir's own precedence.
 func TestLoad_gatePaths_configWinsOverEnv(t *testing.T) {
-	t.Setenv("PR_POOL_QUOTA_PAUSED", "/env/quota-paused")
+	t.Setenv("PR_POOL_OPERATOR_PAUSED", "/env/operator-paused")
 	t.Setenv("PR_POOL_CICD_DOWN", "/env/cicd-down")
-	writeCfg(t, "[pool]\nquota_paused_path = \"/config/quota-paused\"\ncicd_down_path = \"/config/cicd-down\"\n")
+	writeCfg(t, "[pool]\noperator_paused_path = \"/config/operator-paused\"\ncicd_down_path = \"/config/cicd-down\"\n")
 	c, err := Load()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.QuotaPaused != "/config/quota-paused" {
-		t.Errorf("QuotaPaused = %q, want /config/quota-paused ([pool].quota_paused_path must override the env var)", c.QuotaPaused)
+	if c.OperatorPaused != "/config/operator-paused" {
+		t.Errorf("OperatorPaused = %q, want /config/operator-paused ([pool].operator_paused_path must override the env var)", c.OperatorPaused)
 	}
 	if c.CICDDown != "/config/cicd-down" {
 		t.Errorf("CICDDown = %q, want /config/cicd-down ([pool].cicd_down_path must override the env var)", c.CICDDown)
@@ -565,15 +565,15 @@ func TestLoad_gatePaths_configWinsOverEnv(t *testing.T) {
 
 // A [pool] table that omits the gate keys must NOT clobber the env values.
 func TestLoad_gatePaths_envWhenConfigOmitsKeys(t *testing.T) {
-	t.Setenv("PR_POOL_QUOTA_PAUSED", "/env/quota-paused")
+	t.Setenv("PR_POOL_OPERATOR_PAUSED", "/env/operator-paused")
 	t.Setenv("PR_POOL_CICD_DOWN", "/env/cicd-down")
 	writeCfg(t, "[pool]\nself_login = \"someone\"\n")
 	c, err := Load()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.QuotaPaused != "/env/quota-paused" {
-		t.Errorf("QuotaPaused = %q, want /env/quota-paused (absent [pool].quota_paused_path must not override the env var)", c.QuotaPaused)
+	if c.OperatorPaused != "/env/operator-paused" {
+		t.Errorf("OperatorPaused = %q, want /env/operator-paused (absent [pool].operator_paused_path must not override the env var)", c.OperatorPaused)
 	}
 	if c.CICDDown != "/env/cicd-down" {
 		t.Errorf("CICDDown = %q, want /env/cicd-down (absent [pool].cicd_down_path must not override the env var)", c.CICDDown)
@@ -581,7 +581,7 @@ func TestLoad_gatePaths_envWhenConfigOmitsKeys(t *testing.T) {
 }
 
 // With neither env nor [pool] key set, both gate paths default to
-// <LogDir>/gates/{quota-paused,cicd-down} — filled AFTER the repo-TOML layer,
+// <LogDir>/gates/{operator-paused,cicd-down} — filled AFTER the repo-TOML layer,
 // so PR_POOL_LOG_DIR moves them exactly the way it moves LogDir itself.
 func TestLoad_gatePaths_defaultUnderLogDir(t *testing.T) {
 	absentConfig(t)
@@ -590,8 +590,8 @@ func TestLoad_gatePaths_defaultUnderLogDir(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := "/override/dir/gates/quota-paused"; c.QuotaPaused != want {
-		t.Errorf("QuotaPaused = %q, want %q", c.QuotaPaused, want)
+	if want := "/override/dir/gates/operator-paused"; c.OperatorPaused != want {
+		t.Errorf("OperatorPaused = %q, want %q", c.OperatorPaused, want)
 	}
 	if want := "/override/dir/gates/cicd-down"; c.CICDDown != want {
 		t.Errorf("CICDDown = %q, want %q", c.CICDDown, want)
@@ -1057,15 +1057,15 @@ func TestConfig_Meter_returnsConfiguredProvider(t *testing.T) {
 // file parses cleanly.
 func TestGatePaths_agreesWithLoad(t *testing.T) {
 	absentGlobalConfig(t)
-	writeCfg(t, "[pool]\nquota_paused_path = \"/config/quota-paused\"\n")
+	writeCfg(t, "[pool]\noperator_paused_path = \"/config/operator-paused\"\n")
 	t.Setenv("PR_POOL_CICD_DOWN", "/env/cicd-down")
 	c, err := Load()
 	if err != nil {
 		t.Fatal(err)
 	}
 	qp, cd := GatePaths()
-	if qp != c.QuotaPaused {
-		t.Errorf("GatePaths quotaPaused = %q, Load = %q, want equal", qp, c.QuotaPaused)
+	if qp != c.OperatorPaused {
+		t.Errorf("GatePaths operatorPaused = %q, Load = %q, want equal", qp, c.OperatorPaused)
 	}
 	if cd != c.CICDDown {
 		t.Errorf("GatePaths cicdDown = %q, Load = %q, want equal", cd, c.CICDDown)
@@ -1099,8 +1099,8 @@ format = "jsonl"
 	}
 	t.Setenv("PR_POOL_LOG_DIR", "/override/dir")
 	qp, cd := GatePaths()
-	if want := "/override/dir/gates/quota-paused"; qp != want {
-		t.Errorf("GatePaths quotaPaused = %q, want %q (must resolve even though Load() fails)", qp, want)
+	if want := "/override/dir/gates/operator-paused"; qp != want {
+		t.Errorf("GatePaths operatorPaused = %q, want %q (must resolve even though Load() fails)", qp, want)
 	}
 	if want := "/override/dir/gates/cicd-down"; cd != want {
 		t.Errorf("GatePaths cicdDown = %q, want %q", cd, want)
@@ -1118,8 +1118,8 @@ func TestGatePaths_worksWhenConfigIsMalformed(t *testing.T) {
 	}
 	t.Setenv("PR_POOL_LOG_DIR", "/override/dir")
 	qp, cd := GatePaths()
-	if want := "/override/dir/gates/quota-paused"; qp != want {
-		t.Errorf("GatePaths quotaPaused = %q, want %q", qp, want)
+	if want := "/override/dir/gates/operator-paused"; qp != want {
+		t.Errorf("GatePaths operatorPaused = %q, want %q", qp, want)
 	}
 	if want := "/override/dir/gates/cicd-down"; cd != want {
 		t.Errorf("GatePaths cicdDown = %q, want %q", cd, want)
@@ -1131,8 +1131,8 @@ func TestGatePaths_respectsLogDirEnv(t *testing.T) {
 	absentConfig(t)
 	t.Setenv("XDG_STATE_HOME", "/xdg/state")
 	qp, cd := GatePaths()
-	if want := "/xdg/state/pr-pool/gates/quota-paused"; qp != want {
-		t.Errorf("quotaPaused = %q, want %q", qp, want)
+	if want := "/xdg/state/pr-pool/gates/operator-paused"; qp != want {
+		t.Errorf("operatorPaused = %q, want %q", qp, want)
 	}
 	if want := "/xdg/state/pr-pool/gates/cicd-down"; cd != want {
 		t.Errorf("cicdDown = %q, want %q", cd, want)
@@ -1182,7 +1182,7 @@ subset = ["source_failures"]
 }
 
 // TestLoad_monitorSubsets_appliesWithoutRolesOrQueries proves [[monitor]] is a
-// pool-level key like [pool].worktree_dir/quota_paused_path — it applies even
+// pool-level key like [pool].worktree_dir/operator_paused_path — it applies even
 // when the file declares no [[role]]/[[query]], which otherwise makes Load()
 // fall back to the built-in role+query set entirely (decodeRoleSet's "pool-only
 // / empty => built-ins" early return). MonitorSubsets must NOT be swallowed by

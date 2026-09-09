@@ -44,11 +44,11 @@ const exampleHeader = `# pr-pool configuration — repo-local at <RepoRoot>/.pr-
 #
 # Gate file paths (INV-LIFE-2; "pr-pool pause"/"pr-pool resume" act on these
 # directly, file-direct, without a running core) default to
-# <LogDir>/gates/{quota-paused,cicd-down} — run 'pr-pool config --show' to see the
+# <LogDir>/gates/{operator-paused,cicd-down} — run 'pr-pool config --show' to see the
 # actual resolved paths for THIS environment (LogDir varies with XDG_STATE_HOME /
-# PR_POOL_LOG_DIR). Override with [pool].quota_paused_path / cicd_down_path
+# PR_POOL_LOG_DIR). Override with [pool].operator_paused_path / cicd_down_path
 # (uncomment and set an absolute path), e.g.:
-# quota_paused_path = "/home/example/.local/state/pr-pool/gates/quota-paused"
+# operator_paused_path = "/home/example/.local/state/pr-pool/gates/operator-paused"
 # cicd_down_path = "/home/example/.local/state/pr-pool/gates/cicd-down"
 #
 # Monitoring sinks (INTF-MON, optional; no built-in default): a [[monitor]]

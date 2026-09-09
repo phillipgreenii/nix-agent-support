@@ -165,7 +165,7 @@ func TestE2E_RunUntilIdlePushInject_RealBinary(t *testing.T) {
 	t.Setenv("PR_POOL_LOG_DIR", logDir)
 	// Hermetic: never let a real operator's XDG-global budget config leak in.
 	t.Setenv("PR_POOL_GLOBAL_CONFIG", filepath.Join(t.TempDir(), "no-such-global-config.toml"))
-	t.Setenv("PR_POOL_QUOTA_PAUSED", "")
+	t.Setenv("PR_POOL_OPERATOR_PAUSED", "")
 	t.Setenv("PR_POOL_CICD_DOWN", "")
 	// Cleared so push-inject is forced through REAL cross-process discovery
 	// (core.Discover reading the record run-until-idle publishes under

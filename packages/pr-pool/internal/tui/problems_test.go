@@ -105,12 +105,12 @@ func TestRenderProblemsModal_ListsBothGatesByName(t *testing.T) {
 	m := newTestModel(nil)
 	m.width, m.height = 80, 24
 	m.reply = StatusReply{Gates: []Gate{
-		{Name: core.GateQuotaPaused, Set: true, Owner: "operator"},
+		{Name: core.GateOperatorPaused, Set: true, Owner: "operator"},
 		// cicd_down deliberately absent -- never observed yet.
 	}}
 
 	got := m.renderProblemsModal()
-	for _, want := range []string{"quota-paused", "cicd-down", "SET", "not set", "operator"} {
+	for _, want := range []string{"operator-paused", "cicd-down", "SET", "not set", "operator"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("Problems modal missing %q; got:\n%s", want, got)
 		}
@@ -178,16 +178,16 @@ func TestProblemsModalFooter_EmptyCacheDirOmitsPathLine(t *testing.T) {
 func TestRenderProblemsModal_AdditiveNotReplacement(t *testing.T) {
 	m := newTestModel(nil)
 	m.width, m.height = 80, 24
-	m.reply = StatusReply{Gates: []Gate{{Name: core.GateQuotaPaused, Set: true, Owner: "operator"}}}
+	m.reply = StatusReply{Gates: []Gate{{Name: core.GateOperatorPaused, Set: true, Owner: "operator"}}}
 
 	gates := m.renderGatesModal()
 	problems := m.renderProblemsModal()
 
-	if !strings.Contains(gates, "quota-paused") {
-		t.Fatalf("renderGatesModal() no longer lists quota-paused; got:\n%s", gates)
+	if !strings.Contains(gates, "operator-paused") {
+		t.Fatalf("renderGatesModal() no longer lists operator-paused; got:\n%s", gates)
 	}
-	if !strings.Contains(problems, "quota-paused") {
-		t.Fatalf("renderProblemsModal() does not list quota-paused; got:\n%s", problems)
+	if !strings.Contains(problems, "operator-paused") {
+		t.Fatalf("renderProblemsModal() does not list operator-paused; got:\n%s", problems)
 	}
 	if strings.Contains(gates, "Problems") {
 		t.Errorf("renderGatesModal() unexpectedly carries the Problems modal's own title; got:\n%s", gates)

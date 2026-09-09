@@ -30,8 +30,8 @@ type gateToggleResultMsg struct {
 	err       error
 }
 
-// handleToggleQuotaGate implements the P key [design: Task 4.8 Files]: a
-// command-pattern toggle of the quota_paused gate ONLY -- never
+// handleToggleOperatorGate implements the P key [design: Task 4.8 Files]: a
+// command-pattern toggle of the operator_paused gate ONLY -- never
 // cicd_down, which is automation-owned (see handleResumeAllGates's own
 // doc for why the socket verb cannot reach it anyway). It calls
 // m.poller.ToggleGate(ctx, verb), never a raw *core.Client, via
@@ -41,9 +41,9 @@ type gateToggleResultMsg struct {
 // resolves which verb to send and stamps the pending indicator: it never
 // itself changes m.reply's gate state. That happens in exactly one place,
 // applyGateToggleResult, and only once the RPC has actually replied.
-func (m *Model) handleToggleQuotaGate() tea.Cmd {
+func (m *Model) handleToggleOperatorGate() tea.Cmd {
 	verb := core.SubcommandPause
-	if m.gateSet(core.GateQuotaPaused) {
+	if m.gateSet(core.GateOperatorPaused) {
 		verb = core.SubcommandResume
 	}
 	return m.startGateToggle(verb)
@@ -54,10 +54,10 @@ func (m *Model) handleToggleQuotaGate() tea.Cmd {
 // while the Gates modal is open. "All" is bounded by what Poller.ToggleGate can actually
 // reach (Task 4.4 Interfaces, internal/core/core.go's handleGateToggle):
 // the socket resume verb's request carries no "gate" field at all, so it
-// always targets the DEFAULT gate (quota_paused) -- cicd_down is
+// always targets the DEFAULT gate (operator_paused) -- cicd_down is
 // automation-owned and has no operator-facing socket verb to clear it
 // through in the first place. Resuming "all" the operator can affect and
-// resuming the quota gate are therefore the same RPC today.
+// resuming the operator gate are therefore the same RPC today.
 func handleResumeAllGates(m *Model) tea.Cmd {
 	if m.activeModal != ModalGates {
 		return nil
@@ -94,39 +94,39 @@ func (m *Model) startGateToggle(verb string) tea.Cmd {
 //
 // On success: this is the ONE place allowed to change the rendered gate
 // state (the no-optimistic-flip contract's other half) -- it applies
-// `effective` to the quota_paused gate locally so the operator sees the
+// `effective` to the operator_paused gate locally so the operator sees the
 // new state immediately rather than waiting for the next poll tick, and
 // flashes the resulting EFFECTIVE aggregate, not just the toggled gate:
-// clearing quota_paused while cicd_down remains set must not imply the
+// clearing operator_paused while cicd_down remains set must not imply the
 // pool resumed [design: Task 4.8 (worked flash example)].
 func (m *Model) applyGateToggleResult(msg gateToggleResultMsg) tea.Cmd {
 	m.gateTogglePending = false
 	if msg.err != nil {
 		m.errorLogger.LogString("gate toggle failed: " + msg.err.Error())
-		m.setFlash("quota gate toggle failed: "+msg.err.Error(), FlashWarn)
+		m.setFlash("operator gate toggle failed: "+msg.err.Error(), FlashWarn)
 		return m.flashClearCmd()
 	}
-	m.setGate(core.GateQuotaPaused, msg.effective == "paused")
-	m.setFlash(m.quotaGateFlashText(msg.effective), FlashInfo)
+	m.setGate(core.GateOperatorPaused, msg.effective == "paused")
+	m.setFlash(m.operatorGateFlashText(msg.effective), FlashInfo)
 	return m.flashClearCmd()
 }
 
-// quotaGateFlashText names the resulting EFFECTIVE aggregate, not just the
+// operatorGateFlashText names the resulting EFFECTIVE aggregate, not just the
 // toggled gate [design: Task 4.8 (worked flash example)]: clearing
-// quota_paused while cicd_down remains set still leaves the pool paused
+// operator_paused while cicd_down remains set still leaves the pool paused
 // overall (INV-LIFE-2's OR-effective semantics), and the flash says so
 // rather than implying the pool resumed.
-func (m *Model) quotaGateFlashText(effective string) string {
+func (m *Model) operatorGateFlashText(effective string) string {
 	if effective == "paused" {
-		return "quota gate paused — pool now PAUSED"
+		return "operator gate paused — pool now PAUSED"
 	}
 	if m.gateSet(core.GateCICDDown) {
-		return "quota gate cleared — still PAUSED by cicd-down"
+		return "operator gate cleared — still PAUSED by cicd-down"
 	}
-	return "quota gate cleared — pool now RESUMED"
+	return "operator gate cleared — pool now RESUMED"
 }
 
-// gate looks up the named gate (core.GateQuotaPaused / core.GateCICDDown)
+// gate looks up the named gate (core.GateOperatorPaused / core.GateCICDDown)
 // in the last-polled reply, reporting whether it has ever actually been
 // observed. A gate absent from m.reply.Gates (never yet observed by the
 // core) reports the zero value, ok=false.
@@ -162,23 +162,24 @@ func (m *Model) setGate(name string, set bool) {
 }
 
 // renderGatesModal lists BOTH of INV-LIFE-2's two OR-effective named gates
-// (quota-paused, cicd-down -- ADR 0026's hyphenated display form) with
+// (operator-paused, cicd-down -- ADR 0026's hyphenated display form) with
 // state/since/owner, regardless of whether the core has ever reported
 // either [design: Task 4.8 Files]. R = resume-all is named in the modal's
 // own footer.
 //
 // The Left column's guaranteed gap from the status text in Right is
 // render.Modal's own job now [pg2-y6sy5]: it used to pad Left to a fixed
-// 12 columns, which happens to equal len("quota-paused") exactly, so that
-// name received ZERO padding and ran straight into the status text with no
-// gap at all ("quota-pausedclear since - (owner: -)"). render.Modal now
-// sizes that column from the actual Left values in play (mirroring
+// 12 columns, which happened to equal len("quota-paused") -- this gate's
+// old name -- exactly, so that name received ZERO padding and ran straight
+// into the status text with no gap at all ("quota-pausedclear since -
+// (owner: -)"). render.Modal now sizes that column from the actual Left
+// values in play (mirroring
 // legendRows' dynamic-width pattern, pg2-58ecs's fix for the same
 // fixed-width-column collision shape), so callers here need not pad
 // displayName themselves.
 func (m *Model) renderGatesModal() string {
 	rows := []render.ModalRow{
-		m.gateModalRow("quota-paused", core.GateQuotaPaused),
+		m.gateModalRow("operator-paused", core.GateOperatorPaused),
 		m.gateModalRow("cicd-down", core.GateCICDDown),
 	}
 	return render.Modal("Gates", rows, "[R] resume all", m.width, m.height, m.modalScrollOffset)
@@ -187,7 +188,7 @@ func (m *Model) renderGatesModal() string {
 // gateModalRow renders one gate's name/state/since/owner line. displayName
 // is the ADR-0026-safe, hyphenated form the operator-facing docs use;
 // wireName is the underscored wire name reply.go's Gate.Name actually
-// carries (core.GateQuotaPaused / core.GateCICDDown).
+// carries (core.GateOperatorPaused / core.GateCICDDown).
 //
 // A gate that has never been observed by the core, or has been observed
 // and is currently clear, is rendered as the unambiguous "not set" --
