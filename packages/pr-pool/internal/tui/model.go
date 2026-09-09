@@ -475,7 +475,7 @@ func (m *Model) renderPaneContent(p int, gated bool, now time.Time) string {
 	switch p {
 	case paneListeners:
 		es := resolveEmptyState(false, false, len(m.reply.Listeners) == 0)
-		content := renderListenersPane(m.reply.Listeners, tier, m.theme, emptyStateText(es, "(no listeners configured)"), title)
+		content := renderListenersPane(m.reply.Listeners, tier, m.theme, emptyStateText(es, "(no listeners configured)"), title, m.reply.UnmatchedBindings)
 		return dimIfPaused(content, gated, m.theme)
 	case paneQueues:
 		es := resolveEmptyState(false, gated, len(m.reply.Queues) == 0)

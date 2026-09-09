@@ -54,10 +54,11 @@ func lastPollClock(asOf, now time.Time) string {
 // attentionLine surfaces droppable, non-ok facts above the panes (dropOrder
 // 1 -- the FIRST zone to drop under height pressure): a version mismatch
 // between this TUI build and the core's reported version, and an UNMATCHED
-// marker when the reply's unmatchedBindings is non-empty [design: Task 4.6
-// Files (liveness.go); §5 (empty-state precedence's UNMATCHED marker); §8
-// (version hint)]. Returns "" when nothing warrants a line -- the caller
-// omits the zone entirely rather than adding an empty one.
+// marker when the reply's unmatchedBindings has entries with no single
+// listener-row "partner" [design: Task 4.6 Files (liveness.go); §5
+// (empty-state precedence's UNMATCHED marker); §8 (version hint)]. Returns
+// "" when nothing warrants a line -- the caller omits the zone entirely
+// rather than adding an empty one.
 //
 // The UNMATCHED hint names the actual unmatched type(s) (bead pg2-1l6jw):
 // the count alone was not actionable -- an operator watching the banner had
@@ -73,15 +74,31 @@ func lastPollClock(asOf, now time.Time) string {
 // textsafe.Sanitize as one string, matching drillDetail's own
 // renderListenerDetail precedent for rendering a []string of type names
 // (Binds), rather than inventing a new list-rendering convention here.
+//
+// UnmatchedBindings names every bound type this run's queue has never once
+// enqueued (eventqueue.Queue.UnmatchedBindings) -- that alone, NOT a
+// misconfigured/unbound role. The prior wording ("matched no configured
+// role") read as a config error and was wrong: every entry here is, by
+// construction, a type SOME configured binding already declares (Bindings.
+// Declares would otherwise have rejected the event outright, per
+// bindings.go's own doc) -- it simply hasn't fired yet this run. Reworded
+// to "not seen yet this run" [pg2-7ezqt] to state that plainly.
+//
+// unmatchedPartners (panes.go) also reassigns a type with exactly one
+// listener-row partner OFF this banner and onto that row's own inline
+// marker instead [pg2-7ezqt] -- this line reports only the complementary
+// set: types with no such single-row mapping (bound by no row, or by more
+// than one, so no one row could own the marker unambiguously).
 func attentionLine(reply StatusReply, clientVersion string, theme render.Theme) string {
 	var hints []string
 	if reply.Core.Version != "" && clientVersion != "" && clientVersion != "dev" &&
 		reply.Core.Version != clientVersion {
 		hints = append(hints, "core version differs from this TUI build — restart after a rebuild if outdated")
 	}
-	if n := len(reply.UnmatchedBindings); n > 0 {
-		names := textsafe.Sanitize(strings.Join(reply.UnmatchedBindings, ","))
-		hints = append(hints, fmt.Sprintf("UNMATCHED: %d binding(s) matched no configured role (%s)", n, names))
+	bannered, _ := unmatchedPartners(reply.UnmatchedBindings, reply.Listeners)
+	if n := len(bannered); n > 0 {
+		names := textsafe.Sanitize(strings.Join(bannered, ","))
+		hints = append(hints, fmt.Sprintf("UNMATCHED: %d binding(s) not seen yet this run (%s)", n, names))
 	}
 	if len(hints) == 0 {
 		return ""

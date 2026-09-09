@@ -200,7 +200,7 @@ func TestRenderListenersPane_OverflowingRoleKeepsBoxWellFormed(t *testing.T) {
 		{Role: "a-very-long-role-name-that-overflows-its-column", Enabled: true, Delivered: 3, Declined: 4},
 	}
 
-	got := renderListenersPane(listeners, render.TierTiny, theme, "(none)", "Listeners")
+	got := renderListenersPane(listeners, render.TierTiny, theme, "(none)", "Listeners", nil)
 	lines := strings.Split(got, "\n")
 
 	// top border + header + 2 data rows + bottom border.
@@ -234,6 +234,119 @@ func TestPaneFrame_TopBorderMatchesContentWidth(t *testing.T) {
 			t.Errorf("line %d (%q) has width %d, want %d matching the box's content width; got:\n%s", i, l, w, want, got)
 		}
 	}
+}
+
+// TestUnmatchedPartners_SingleRowVsAmbiguous is pg2-7ezqt's own acceptance
+// bar for the partition itself: a type bound by exactly one listener row is
+// that row's partner (perRow); a type bound by zero rows or by two-or-more
+// rows has no single partner and stays in bannered instead.
+func TestUnmatchedPartners_SingleRowVsAmbiguous(t *testing.T) {
+	listeners := []Listener{
+		{Role: "reviewer", Binds: []string{"pr.new", "shared.type"}},
+		{Role: "triager", Binds: []string{"bead.new", "shared.type"}},
+	}
+
+	t.Run("zero matching rows stays bannered", func(t *testing.T) {
+		bannered, perRow := unmatchedPartners([]string{"nobody.binds.this"}, listeners)
+		if len(bannered) != 1 || bannered[0] != "nobody.binds.this" {
+			t.Errorf("bannered = %v, want [\"nobody.binds.this\"]", bannered)
+		}
+		if len(perRow) != 0 {
+			t.Errorf("perRow = %v, want empty (no single-row partner)", perRow)
+		}
+	})
+
+	t.Run("exactly one matching row becomes that row's partner", func(t *testing.T) {
+		bannered, perRow := unmatchedPartners([]string{"pr.new"}, listeners)
+		if len(bannered) != 0 {
+			t.Errorf("bannered = %v, want empty (moved inline)", bannered)
+		}
+		if got := perRow[0]; len(got) != 1 || got[0] != "pr.new" {
+			t.Errorf("perRow[0] = %v, want [\"pr.new\"] (reviewer is the sole partner)", got)
+		}
+	})
+
+	t.Run("two matching rows is ambiguous and stays bannered", func(t *testing.T) {
+		bannered, perRow := unmatchedPartners([]string{"shared.type"}, listeners)
+		if len(bannered) != 1 || bannered[0] != "shared.type" {
+			t.Errorf("bannered = %v, want [\"shared.type\"] (no single row owns it)", bannered)
+		}
+		if len(perRow) != 0 {
+			t.Errorf("perRow = %v, want empty", perRow)
+		}
+	})
+
+	t.Run("a duplicate Binds entry within one row does not inflate its count past 1", func(t *testing.T) {
+		dup := []Listener{{Role: "reviewer", Binds: []string{"pr.new", "pr.new"}}}
+		bannered, perRow := unmatchedPartners([]string{"pr.new"}, dup)
+		if len(bannered) != 0 {
+			t.Errorf("bannered = %v, want empty (still a single row despite the duplicate bind)", bannered)
+		}
+		if got := perRow[0]; len(got) != 1 || got[0] != "pr.new" {
+			t.Errorf("perRow[0] = %v, want [\"pr.new\"]", got)
+		}
+	})
+
+	t.Run("no unmatched bindings returns nothing", func(t *testing.T) {
+		bannered, perRow := unmatchedPartners(nil, listeners)
+		if bannered != nil || perRow != nil {
+			t.Errorf("unmatchedPartners(nil, ...) = (%v, %v), want (nil, nil)", bannered, perRow)
+		}
+	})
+}
+
+// TestRenderListenersPane_InlineUnmatchedMarker is pg2-7ezqt's own
+// acceptance bar for the row-level rendering: a listener row whose bound
+// type has exactly one row partner shows an inline marker naming that
+// type, and a type with no single-row partner (mapped to zero or 2+ rows)
+// leaves every row unmarked -- it is reported only via the banner
+// (liveness.go's attentionLine), never rendered here.
+func TestRenderListenersPane_InlineUnmatchedMarker(t *testing.T) {
+	theme := render.NewTheme(false)
+
+	t.Run("single-row partner renders the marker on its own row only", func(t *testing.T) {
+		listeners := []Listener{
+			{Role: "reviewer", Enabled: true, Binds: []string{"pr.new"}},
+			{Role: "triager", Enabled: true, Binds: []string{"bead.new"}},
+		}
+		got := renderListenersPane(listeners, render.TierWide, theme, "(none)", "Listeners", []string{"pr.new"})
+		lines := strings.Split(got, "\n")
+
+		var reviewerLine, triagerLine string
+		for _, l := range lines {
+			if strings.Contains(l, "reviewer") {
+				reviewerLine = l
+			}
+			if strings.Contains(l, "triager") {
+				triagerLine = l
+			}
+		}
+		if !strings.Contains(reviewerLine, "not seen yet this run") || !strings.Contains(reviewerLine, "pr.new") {
+			t.Errorf("reviewer row = %q, want it to carry the inline unmatched marker naming pr.new", reviewerLine)
+		}
+		if strings.Contains(triagerLine, "not seen yet this run") {
+			t.Errorf("triager row = %q, want no marker (its own bind, bead.new, is not unmatched)", triagerLine)
+		}
+	})
+
+	t.Run("a type with no single-row partner marks no row", func(t *testing.T) {
+		listeners := []Listener{
+			{Role: "reviewer", Enabled: true, Binds: []string{"pr.new"}},
+			{Role: "triager", Enabled: true, Binds: []string{"pr.new"}},
+		}
+		got := renderListenersPane(listeners, render.TierWide, theme, "(none)", "Listeners", []string{"pr.new"})
+		if strings.Contains(got, "not seen yet this run") {
+			t.Errorf("ambiguous (2-row) unmatched type must not render an inline marker anywhere; got:\n%s", got)
+		}
+	})
+
+	t.Run("nil unmatchedBindings renders no marker", func(t *testing.T) {
+		listeners := []Listener{{Role: "reviewer", Enabled: true, Binds: []string{"pr.new"}}}
+		got := renderListenersPane(listeners, render.TierWide, theme, "(none)", "Listeners", nil)
+		if strings.Contains(got, "not seen yet this run") {
+			t.Errorf("nil unmatchedBindings must render no marker; got:\n%s", got)
+		}
+	})
 }
 
 // TestRenderRegistryPane_OmittedEntirelyWhenEmpty pins v1's own carried

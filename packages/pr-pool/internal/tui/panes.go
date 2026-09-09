@@ -133,12 +133,79 @@ func formatMinutes(d time.Duration) string {
 
 // --- Pane renderers [design: Task 4.6 Files (panes.go); §4.3 Tier mockups] ---
 
+// unmatchedPartners partitions unmatchedBindings (reply.UnmatchedBindings --
+// every bound TYPE this run's queue has never once enqueued, per
+// eventqueue.Queue.UnmatchedBindings) against listeners' own Binds lists
+// [pg2-7ezqt]: a type bound by exactly ONE listener row is that row's
+// "partner", and moves inline onto it via perRow rather than staying only in
+// the attention-line banner (liveness.go's attentionLine, which reports the
+// complementary set via bannered). A type bound by zero rows (no configured
+// role declares it any more -- config drift) or by two-or-more rows (which
+// one would own the marker?) has no single partner and stays banner-only.
+//
+// A duplicate entry within one listener's own Binds is deliberately
+// deduplicated (the inner seen set) before counting, so a config quirk that
+// lists the same type twice under one role does not inflate that type's row
+// count past 1 and wrongly evict it to the banner.
+func unmatchedPartners(unmatchedBindings []string, listeners []Listener) (bannered []string, perRow map[int][]string) {
+	if len(unmatchedBindings) == 0 {
+		return nil, nil
+	}
+	unmatchedSet := make(map[string]bool, len(unmatchedBindings))
+	for _, t := range unmatchedBindings {
+		unmatchedSet[t] = true
+	}
+	counts := make(map[string]int, len(unmatchedBindings))
+	rowOf := make(map[string]int, len(unmatchedBindings))
+	for i, l := range listeners {
+		seen := make(map[string]bool, len(l.Binds))
+		for _, b := range l.Binds {
+			if !unmatchedSet[b] || seen[b] {
+				continue
+			}
+			seen[b] = true
+			counts[b]++
+			rowOf[b] = i
+		}
+	}
+	perRow = make(map[int][]string)
+	for _, t := range unmatchedBindings {
+		if counts[t] == 1 {
+			row := rowOf[t]
+			perRow[row] = append(perRow[row], t)
+		} else {
+			bannered = append(bannered, t)
+		}
+	}
+	return bannered, perRow
+}
+
+// unmatchedRowMarker renders the inline marker appended to a Listener row
+// that owns one or more "partner" unmatched types (unmatchedPartners' own
+// perRow) [pg2-7ezqt]. Wording deliberately mirrors attentionLine's own
+// reworded phrase ("not seen yet this run", never "matched no configured
+// role") -- the fact is the same in both places, so the words describing it
+// must match. types is joined the same way attentionLine already joins its
+// own names (","), then sanitized: an operator-configured event type is as
+// untrusted as any other reply field reaching this render path.
+func unmatchedRowMarker(types []string, theme render.Theme) string {
+	names := textsafe.Sanitize(strings.Join(types, ","))
+	return theme.Cooling.Render("! not seen yet this run: " + names)
+}
+
 // renderListenersPane renders the Listeners pane. Column set narrows with
 // tier: Wide keeps BINDS; Narrow drops it; Tiny further drops DECL (the
 // design's own Tiny mockup shows only ROLE/HEALTH/DLVD). title lets the
 // caller append "(focused)" when this pane is the zone ladder's fill zone
 // (matching the Tiny mockup's own "Listeners (focused)" heading).
-func renderListenersPane(listeners []Listener, tier int, theme render.Theme, emptyMsg, title string) string {
+//
+// unmatchedBindings is reply.UnmatchedBindings, threaded in so a row whose
+// bound type maps to exactly one row (its "partner", unmatchedPartners
+// above) can carry the inline marker [pg2-7ezqt] -- an extra trailing cell
+// appended only to rows that need it, past the declared headers/widths;
+// formatPaneRow already renders any cell index beyond len(widths) unstyled
+// and unclipped, so this needs no header/width changes for any tier.
+func renderListenersPane(listeners []Listener, tier int, theme render.Theme, emptyMsg, title string, unmatchedBindings []string) string {
 	var headers []string
 	var widths []int
 	switch tier {
@@ -150,21 +217,27 @@ func renderListenersPane(listeners []Listener, tier int, theme render.Theme, emp
 		headers, widths = []string{"ROLE", "HEALTH", "DLVD"}, []int{10, 14, 6}
 	}
 
+	_, perRow := unmatchedPartners(unmatchedBindings, listeners)
 	rows := make([][]string, 0, len(listeners))
-	for _, l := range listeners {
+	for i, l := range listeners {
 		role := textsafe.Sanitize(l.Role)
 		health := listenerHealthText(l, theme)
 		dlvd := fmt.Sprintf("%d", l.Delivered)
 		decl := fmt.Sprintf("%d", l.Declined)
+		var row []string
 		switch tier {
 		case render.TierWide:
 			binds := textsafe.Sanitize(strings.Join(l.Binds, ","))
-			rows = append(rows, []string{role, binds, health, dlvd, decl})
+			row = []string{role, binds, health, dlvd, decl}
 		case render.TierNarrow:
-			rows = append(rows, []string{role, health, dlvd, decl})
+			row = []string{role, health, dlvd, decl}
 		default:
-			rows = append(rows, []string{role, health, dlvd})
+			row = []string{role, health, dlvd}
 		}
+		if types := perRow[i]; len(types) > 0 {
+			row = append(row, unmatchedRowMarker(types, theme))
+		}
+		rows = append(rows, row)
 	}
 	return renderPaneBox(title, headers, widths, rows, emptyMsg)
 }

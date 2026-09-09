@@ -80,6 +80,64 @@ func TestAttentionLine_UnmatchedBindingsNamesTheBindings(t *testing.T) {
 	}
 }
 
+// TestAttentionLine_WordingDoesNotImplyMisconfiguration is pg2-7ezqt's own
+// regression test: the prior banner text ("matched no configured role")
+// read as a config error when it does not mean that -- every entry in
+// UnmatchedBindings is, by construction, a type SOME configured binding
+// already declares (bindings.go's own Declares doc); it just hasn't fired
+// this run. The new wording must say that instead and must not resurrect
+// the old phrase.
+func TestAttentionLine_WordingDoesNotImplyMisconfiguration(t *testing.T) {
+	theme := render.NewTheme(false)
+
+	got := attentionLine(StatusReply{UnmatchedBindings: []string{"bead.new"}}, "dev", theme)
+	if strings.Contains(got, "no configured role") {
+		t.Errorf("attentionLine = %q, must not imply a misconfiguration (\"no configured role\")", got)
+	}
+	if !strings.Contains(got, "not seen yet this run") {
+		t.Errorf("attentionLine = %q, want the reworded \"not seen yet this run\" phrasing", got)
+	}
+}
+
+// TestAttentionLine_SingleRowPartnerMovesOffTheBanner is pg2-7ezqt's own
+// acceptance bar for the banner/row split: an unmatched type bound by
+// exactly one listener row moves inline onto that row (panes.go's
+// unmatchedPartners) and is no longer named in the banner; a type with no
+// such single-row partner (bound by zero or by 2+ rows) still is.
+func TestAttentionLine_SingleRowPartnerMovesOffTheBanner(t *testing.T) {
+	theme := render.NewTheme(false)
+	reply := StatusReply{
+		UnmatchedBindings: []string{"bead.new", "orphan.type"},
+		Listeners:         []Listener{{Role: "triager", Binds: []string{"bead.new"}}},
+	}
+
+	got := attentionLine(reply, "dev", theme)
+	if strings.Contains(got, "bead.new") {
+		t.Errorf("attentionLine = %q, want bead.new omitted (it has a single-row partner, rendered inline instead)", got)
+	}
+	if !strings.Contains(got, "orphan.type") {
+		t.Errorf("attentionLine = %q, want orphan.type still named (no listener row binds it)", got)
+	}
+	if !strings.Contains(got, "1 binding(s)") {
+		t.Errorf("attentionLine = %q, want the count to reflect only the still-bannered entry", got)
+	}
+}
+
+// TestAttentionLine_AllUnmatchedBindingsHaveSingleRowPartners covers the
+// edge where EVERY unmatched type has moved inline: the banner must render
+// no UNMATCHED hint at all, not an empty/zero-count one.
+func TestAttentionLine_AllUnmatchedBindingsHaveSingleRowPartners(t *testing.T) {
+	theme := render.NewTheme(false)
+	reply := StatusReply{
+		UnmatchedBindings: []string{"bead.new"},
+		Listeners:         []Listener{{Role: "triager", Binds: []string{"bead.new"}}},
+	}
+
+	if got := attentionLine(reply, "dev", theme); strings.Contains(got, "UNMATCHED") {
+		t.Errorf("attentionLine = %q, want no UNMATCHED hint once every entry has moved inline", got)
+	}
+}
+
 func TestPollErrorZone_SuppressedOnErrBusy(t *testing.T) {
 	theme := render.NewTheme(false)
 

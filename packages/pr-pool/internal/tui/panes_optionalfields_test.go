@@ -30,7 +30,7 @@ func TestPanes_OptionalFieldAbsenceRendersCleanly(t *testing.T) {
 	t.Run("listener with Backoff == nil never renders cooling, at every tier", func(t *testing.T) {
 		listeners := []Listener{{Role: "reviewer", Enabled: true, Backoff: nil}}
 		for _, tier := range []int{render.TierWide, render.TierNarrow, render.TierTiny} {
-			got := renderListenersPane(listeners, tier, theme, "(no listeners configured)", "Listeners")
+			got := renderListenersPane(listeners, tier, theme, "(no listeners configured)", "Listeners", nil)
 			if strings.Contains(got, "cooling") {
 				t.Errorf("tier=%d: nil Backoff still rendered a cooling indicator; got:\n%s", tier, got)
 			}
@@ -54,7 +54,7 @@ func TestPanes_OptionalFieldAbsenceRendersCleanly(t *testing.T) {
 
 	t.Run("control case: a SET Backoff/Failure still renders its own indicator", func(t *testing.T) {
 		cooling := &Backoff{NextEligible: time.Now().Add(30 * time.Second)}
-		got := renderListenersPane([]Listener{{Role: "triager", Enabled: true, Backoff: cooling}}, render.TierWide, theme, "", "Listeners")
+		got := renderListenersPane([]Listener{{Role: "triager", Enabled: true, Backoff: cooling}}, render.TierWide, theme, "", "Listeners", nil)
 		if !strings.Contains(got, "cooling") {
 			t.Errorf("a set Backoff should still render the cooling indicator (control case); got:\n%s", got)
 		}
