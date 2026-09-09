@@ -420,8 +420,17 @@ changed>` / `pre-commit run --files …`, never `--all-files`, which re-runs
    making the commit if `.pre-commit-config.yaml` exists — ONLY THEN run any
    gate the commit did not already cover (`nix flake check` / `pn workspace
 build` for nix repos, and the repo's tests, including a slow full suite
-   backgrounded to outlive a bounded turn); NOT claim/close the bead, NOT
-   land/merge, NOT touch any other worktree, NOT create gates; and CLASSIFY the
+   backgrounded to outlive a bounded turn); and NOT do ANY of the following —
+   these bd/pb verbs are orchestrator-only, exhaustively, no exceptions: NOT
+   `bd claim` or `bd close` the bead itself, NOT `bd create` any new bead
+   (ordinary issue, follow-up, or otherwise — filing ANY bead is out of
+   scope), NOT `bd dep` or `pb gate create` any dependency or gate, NOT
+   land/merge anything, NOT touch any other worktree. (A DELEGATE-step
+   subagent, briefed only with "do NOT create beads/gates," nonetheless ran
+   `bd close` on its own bead and `bd create` ×2 for ordinary follow-up beads,
+   reasoning that a vague "gates" phrase didn't cover them — bead `tc-eidt`,
+   incident `tc-6zps`; the list above is deliberately exhaustive so there is
+   no gap left for a subagent's own judgment to route around.) CLASSIFY the
    outcome as one of the four statuses below (the `also include:` bullet below
    carries the gate-evidence and repos-touched requirements).
    - `done` — implemented, all gates PASS, and every acceptance criterion is
@@ -455,7 +464,10 @@ build` for nix repos, and the repo's tests, including a slow full suite
 
 5. **VALIDATE** from the report: the pre-apply gates MUST show a clear PASS for
    either `done` or `done-pending-apply-verification`. If a gate fails, or the
-   status is `stuck` → STUCK.
+   status is `stuck` → STUCK. If the report itself claims it closed the bead,
+   created a bead, or created a dependency/gate, that claim is ITSELF a
+   brief-violation to flag (orchestrator-only verbs — see step 4), regardless
+   of what else the report says (bead `tc-eidt`, incident `tc-6zps`).
 
 6. **LAND via a dedicated LANDER SUBAGENT** — dispatched synchronously, ONE at a
    time, never in parallel with another land and never fanned out. Landing must
