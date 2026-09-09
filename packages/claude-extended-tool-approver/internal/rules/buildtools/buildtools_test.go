@@ -531,6 +531,109 @@ func TestBuildtools_JustVerbScoped_MutatingRecipesAbstain(t *testing.T) {
 	}
 }
 
+// --- tc-mgb6: target-aware deploy/terraform verb scoping ---
+//
+// productionDeployTerraformVerbs mirrors the ACTUAL homelab consumer config
+// (development/agent-support/ceta/rules.example.json) as it stood when
+// tc-mgb6 was filed: `just`'s deploy/terraform-family verbs verb-scoped with
+// NO Dirs at all. justBuildtoolsConfig() above deliberately EXCLUDES these
+// verbs and pins the desired "must abstain" outcome directly — that fixture
+// was never wrong, so it cannot prove the tc-mgb6 fix. This one reproduces
+// the actual defect shape instead.
+func productionDeployTerraformVerbs(dirs []string) []configrules.VerbScopedApproval {
+	verbs := []string{
+		"deploy", "deploy-manual", "deploy-remote", "deploy-self",
+		"deploy-swarm", "undeploy", "terraform", "terraform-infra",
+	}
+	out := make([]configrules.VerbScopedApproval, 0, len(verbs))
+	for _, v := range verbs {
+		out = append(out, configrules.VerbScopedApproval{Tool: "just", Verb: v, Dirs: dirs})
+	}
+	return out
+}
+
+func deployTerraformBuildtoolsConfig(dirs []string) configrules.BuildtoolsConfig {
+	cfg := justBuildtoolsConfig()
+	cfg.VerbScopedApprovals = append(cfg.VerbScopedApprovals, productionDeployTerraformVerbs(dirs)...)
+	return cfg
+}
+
+// TestBuildtools_DeployTerraform_NoDirs_NeverApprove is the tc-mgb6 regression
+// pin: a bare verb-scoped entry for a target-sensitive verb — no Dirs
+// declared at all, the config shape rules.example.json actually had — MUST
+// NOT approve ANY target, including the routine k3s cluster deploy it used
+// to wrongly approve identically to a Proxmox-host-level `terraform apply`.
+func TestBuildtools_DeployTerraform_NoDirs_NeverApprove(t *testing.T) {
+	r := New(testPE(), deployTerraformBuildtoolsConfig(nil))
+	for _, cmd := range []string{
+		"just deploy kinfra",
+		"just -f infrastructure/k3s/kinfra/justfile deploy kinfra",
+		"just terraform apply",
+		"just -d infrastructure/machines/monorepod terraform apply",
+		"just deploy-manual",
+		"just undeploy",
+	} {
+		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
+		if got := hookio.Verdict(r.Evaluate(input)); got.Decision != hookio.NoOpinion {
+			t.Errorf("cmd %q with no Dirs vetted: got %s, want abstain (tc-mgb6)", cmd, got.Decision)
+		}
+	}
+}
+
+// TestBuildtools_DeployTerraform_DirsScoping is tc-mgb6's ruled outcome once a
+// consumer vets a known-safe target: a k3s cluster app deploy under the
+// vetted Dirs prefix approves, while monorepod's own Proxmox-host-level
+// `terraform apply` — outside that prefix — still abstains. Both the
+// -f/-d-flagged and the plain cd-then-run forms (the latter simulated by
+// setting CWD directly, as the engine hands this leaf an already
+// cd-advanced cwd — pg2-opclh) are covered, for consistency between the two
+// shapes tc-mgb6's own repro used.
+func TestBuildtools_DeployTerraform_DirsScoping(t *testing.T) {
+	r := New(testPE(), deployTerraformBuildtoolsConfig([]string{"infrastructure/k3s/"}))
+
+	approve := []struct{ cwd, cmd string }{
+		{"", "just -f infrastructure/k3s/kinfra/justfile deploy kinfra"},
+		{"", "just -f=infrastructure/k3s/kinfra/justfile deploy kinfra"},
+		{"/repo/infrastructure/k3s/kinfra", "just deploy kinfra"},
+		{"", "just -d infrastructure/k3s/kinfra terraform apply"},
+	}
+	for _, tc := range approve {
+		input := &hookio.HookInput{CWD: tc.cwd, ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": tc.cmd})}
+		if got := hookio.Verdict(r.Evaluate(input)); got.Decision != hookio.Approve {
+			t.Errorf("cwd=%q cmd %q: got %s, want approve (vetted k3s target)", tc.cwd, tc.cmd, got.Decision)
+		}
+	}
+
+	abstain := []struct{ cwd, cmd string }{
+		{"", "just -d infrastructure/machines/monorepod terraform apply"},
+		{"/repo/infrastructure/machines/monorepod", "just terraform apply"},
+		{"", "just -f infrastructure/machines/monorepod/justfile terraform apply"},
+	}
+	for _, tc := range abstain {
+		input := &hookio.HookInput{CWD: tc.cwd, ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": tc.cmd})}
+		if got := hookio.Verdict(r.Evaluate(input)); got.Decision != hookio.NoOpinion {
+			t.Errorf("cwd=%q cmd %q: got %s, want abstain (unvetted target)", tc.cwd, tc.cmd, got.Decision)
+		}
+	}
+}
+
+// TestBuildtools_NonSensitiveVerb_NoDirsStillUniversal pins that adding Dirs
+// support did not change the default for a verb OUTSIDE targetSensitiveVerbs:
+// an entry with no Dirs at all still approves from any target, exactly as
+// before this field existed.
+func TestBuildtools_NonSensitiveVerb_NoDirsStillUniversal(t *testing.T) {
+	r := New(testPE(), justBuildtoolsConfig())
+	for _, cmd := range []string{
+		"just check",
+		"cd /repo/infrastructure/machines/monorepod && just check",
+	} {
+		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
+		if got := hookio.Verdict(r.Evaluate(input)); got.Decision != hookio.Approve {
+			t.Errorf("cmd %q: got %s, want approve (non-sensitive verb, no Dirs = universal)", cmd, got.Decision)
+		}
+	}
+}
+
 // TestBuildtools_JustVerbScoped_ValueFlagResolvesVerb is the tc-xjoe fix for what
 // TestBuildtools_JustVerbScoped_FlagWithValueAbstains used to PIN as a limitation:
 // with buildtools.valueFlags declaring `just`'s -f/--justfile and

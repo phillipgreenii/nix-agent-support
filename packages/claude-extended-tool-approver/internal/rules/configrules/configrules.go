@@ -261,6 +261,34 @@ type BuildtoolsConfig struct {
 type VerbScopedApproval struct {
 	Tool string `json:"tool"`
 	Verb string `json:"verb"`
+	// Dirs restricts this approval to an invocation whose resolved justfile/
+	// working directory falls under one of these project-root-relative
+	// directory prefixes — the directory that `just`'s -f/--justfile (the
+	// justfile's parent dir) or -d/--working-directory names, falling back to
+	// the leaf's own cwd when neither flag is present. Normalized the same way
+	// BuildtoolsConfig.ApprovedScriptDirs is (a leading/trailing "/" trimmed,
+	// exactly one trailing "/" appended), so a prefix can never cross a
+	// directory-name boundary (".../k3s" must not match a sibling
+	// ".../k3s-evil").
+	//
+	// Empty (the default) means NO directory has been vetted for this entry.
+	// For most verbs (build, test, lint, …) that is harmless and this field
+	// need not be set at all — those verbs stay approved from any target,
+	// exactly as before this field existed. But for a TARGET-SENSITIVE verb
+	// name (buildtools.targetSensitiveVerbs — deploy and its siblings,
+	// terraform and its siblings) empty Dirs means the entry can NEVER
+	// approve: tc-mgb6's operator ruling ("make it target-aware") is that a
+	// deploy/terraform verb-name allowlist entry MUST be restricted to a
+	// known-safe justfile/target, and one that has not been given an explicit
+	// Dirs list MUST fall back to Abstain rather than auto-allow every
+	// justfile that happens to name a recipe "deploy" or "terraform" — the
+	// tc-mgb6 defect was exactly that bare declaration approving
+	// infrastructure/machines/monorepod's own Proxmox-host-level `terraform
+	// apply` identically to a routine k3s cluster app deploy
+	// (infrastructure/k3s/kinfra/justfile). A consumer restores the routine
+	// case by declaring Dirs explicitly, e.g.
+	// `{"tool":"just","verb":"deploy","dirs":["infrastructure/k3s/"]}`.
+	Dirs []string `json:"dirs"`
 }
 
 // DefaultPath returns the XDG rules.json location:

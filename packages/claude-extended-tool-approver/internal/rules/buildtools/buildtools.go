@@ -43,7 +43,12 @@ type Rule struct {
 	approvedScripts    map[string]bool
 	approvedScriptDirs []string                   // project-root-relative prefixes, each ending "/"
 	verbScoped         map[string]map[string]bool // tool -> approved first-subcommand set
-	valueFlags         map[string]map[string]int  // tool -> flag -> tokens consumed
+	// verbScopedDirs is tool -> verb -> the UNION of every VerbScopedApproval
+	// entry's Dirs for that pair, each already normalized by
+	// normalizeScriptDirs. A (tool,verb) absent here has no vetted directory at
+	// all; see targetSensitiveVerbs and verbApprovesTarget for what that means.
+	verbScopedDirs map[string]map[string][]string
+	valueFlags     map[string]map[string]int // tool -> flag -> tokens consumed
 	// allowedFlags is tool -> flag -> true. The PRESENCE of a tool key (even with
 	// an empty set) puts that tool in STRICT flag checking; see flagPolicy.
 	allowedFlags map[string]map[string]bool
@@ -78,6 +83,7 @@ func New(pe *patheval.PathEvaluator, cfg configrules.BuildtoolsConfig) *Rule {
 		approvedScripts:    toSet(cfg.ApprovedScripts),
 		approvedScriptDirs: normalizeScriptDirs(cfg.ApprovedScriptDirs),
 		verbScoped:         map[string]map[string]bool{},
+		verbScopedDirs:     map[string]map[string][]string{},
 		valueFlags:         map[string]map[string]int{},
 		allowedFlags:       map[string]map[string]bool{},
 	}
@@ -86,6 +92,14 @@ func New(pe *patheval.PathEvaluator, cfg configrules.BuildtoolsConfig) *Rule {
 			r.verbScoped[vs.Tool] = map[string]bool{}
 		}
 		r.verbScoped[vs.Tool][vs.Verb] = true
+		if len(vs.Dirs) > 0 {
+			if r.verbScopedDirs[vs.Tool] == nil {
+				r.verbScopedDirs[vs.Tool] = map[string][]string{}
+			}
+			r.verbScopedDirs[vs.Tool][vs.Verb] = append(
+				r.verbScopedDirs[vs.Tool][vs.Verb], normalizeScriptDirs(vs.Dirs)...,
+			)
+		}
 	}
 	for tool, specs := range cfg.ValueFlags {
 		for _, spec := range specs {
@@ -246,11 +260,23 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		// Consumer-configured verb-scoped approvals (additive over the base).
 		if verbs := r.verbScoped[basename]; verbs != nil {
 			if sub := firstSubcommand(pc.Args, r.flagPolicyFor(basename)); sub != "" && verbs[sub] {
-				return hookio.RuleResult{
-					Decision: hookio.Approve,
-					Reason:   "approved verb-scoped tool: " + basename + " " + sub,
-					Module:   r.Name(),
-				}, nil
+				// tc-mgb6: a verb match alone is not enough for a TARGET-SENSITIVE
+				// verb (deploy/terraform and siblings) — the justfile/working
+				// directory the recipe actually runs from must also be vetted. See
+				// verbApprovesTarget and VerbScopedApproval.Dirs' doc for the full
+				// rule; a verb that is not target-sensitive and carries no Dirs is
+				// approved unconditionally here, exactly as before this field
+				// existed.
+				if r.verbApprovesTarget(basename, sub, r.resolveTargetDir(basename, pc.Args, cwd)) {
+					return hookio.RuleResult{
+						Decision: hookio.Approve,
+						Reason:   "approved verb-scoped tool: " + basename + " " + sub,
+						Module:   r.Name(),
+					}, nil
+				}
+				// Verb matched but its target is not (yet) vetted: fall through
+				// rather than Approve. This leaf still isn't Rejected — a later
+				// rule, or the chain's own abstain floor, decides from here.
 			}
 		}
 		if r.approvedScripts[basename] {
@@ -461,4 +487,167 @@ func firstSubcommand(args []string, p flagPolicy) string {
 		i += n
 	}
 	return ""
+}
+
+// --- tc-mgb6: target-aware deploy/terraform verb scoping ---
+
+// targetSensitiveVerbs names, per tool, the verb spellings that MUST NOT
+// approve from an unvetted justfile/target — tc-mgb6's operator ruling
+// ("make it target-aware"). A homelab-style consumer's rules.json declares
+// "deploy"/"terraform" (and these siblings) as bare VerbScopedApprovals
+// entries with no Dirs; the tc-mgb6 defect was exactly that bare declaration
+// auto-approving EVERY justfile's "deploy"/"terraform" recipe alike,
+// including infrastructure/machines/monorepod's own Proxmox-host-level
+// `terraform apply`, identically to a routine k3s cluster app deploy
+// (infrastructure/k3s/kinfra/justfile).
+//
+// Listing a verb here does not by itself narrow anything for a consumer who
+// has already vetted a target — VerbScopedApproval.Dirs is what re-widens a
+// specific target once vetted; see its doc. It only changes what an ENTRY
+// WITH NO Dirs AT ALL means for these particular spellings: never approve,
+// rather than approve everywhere (verbApprovesTarget).
+//
+// Keyed by tool because these verb spellings are a `just` convention here,
+// not a universal one — a different tool's "deploy" verb is unaffected unless
+// a future consumer's entry for it is added here too. The exact set is the
+// one enumerated in tc-mgb6's root-cause paragraph: "deploy" and "terraform"
+// plus their named siblings "deploy-manual", "deploy-remote", "deploy-self",
+// "deploy-swarm", "terraform-infra", "undeploy".
+var targetSensitiveVerbs = map[string]map[string]bool{
+	"just": {
+		"deploy": true, "deploy-manual": true, "deploy-remote": true,
+		"deploy-self": true, "deploy-swarm": true, "undeploy": true,
+		"terraform": true, "terraform-infra": true,
+	},
+}
+
+// verbApprovesTarget decides, for an ALREADY-MATCHED (tool,verb) verb-scoped
+// approval, whether targetDir (see resolveTargetDir) is one this entry may
+// approve from.
+//
+// No Dirs declared for (tool,verb): a target-sensitive verb (targetSensitiveVerbs)
+// has NOTHING vetted, so it can never approve here — the fail-safe direction
+// tc-mgb6 requires. Any other verb is unrestricted, exactly as this rule
+// behaved before Dirs existed. Dirs declared: targetDir must fall under one
+// of them regardless of sensitivity — a consumer MAY opt an ordinary verb
+// into directory scoping too, harmlessly.
+func (r *Rule) verbApprovesTarget(tool, verb, targetDir string) bool {
+	dirs := r.verbScopedDirs[tool][verb]
+	if len(dirs) == 0 {
+		return !targetSensitiveVerbs[tool][verb]
+	}
+	return underAnyPrefix(targetDir, dirs)
+}
+
+// underAnyPrefix reports whether dir (already normalized/slash-terminated by
+// normalizeJustDir) has one of prefixes (already normalized by
+// normalizeScriptDirs) as a prefix.
+func underAnyPrefix(dir string, prefixes []string) bool {
+	for _, p := range prefixes {
+		if strings.HasPrefix(dir, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// justTargetDir scans a `just` invocation's argv for the two flags whose
+// value identifies the justfile to run (-f/--justfile) or the working
+// directory to run it from (-d/--working-directory) — the same two flags
+// BuildtoolsConfig.ValueFlags' doc names as safe to declare for value-flag
+// skipping (tc-xjoe). This reads the SAME pair for what they point AT rather
+// than skipping over them, which is what tc-mgb6's target-aware scoping
+// needs. isFile reports which of the two matched (true for -f/--justfile,
+// whose value is a FILE and must still have its parent directory taken by the
+// caller); found reports whether either was present at all.
+func justTargetDir(args []string) (value string, isFile, found bool) {
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if a == "" || a[0] != '-' {
+			continue
+		}
+		name := a
+		v, haveValue := "", false
+		// Glued form (-f=path / --justfile=path): reuse cmdparse.GluedFlagValue
+		// rather than a bespoke split, so this shares the same quote-unwrap and
+		// malformed-value handling as every other glued-flag reader in this
+		// codebase (pg2-52eod). A malformed value is treated as NOT found — the
+		// caller then falls back to cwd, which is the fail-safe side (almost
+		// certainly still won't match a vetted Dirs prefix).
+		if val, ok, malformed := cmdparse.GluedFlagValue(a); ok && !malformed {
+			if eq := strings.IndexByte(a, '='); eq >= 0 {
+				name = a[:eq]
+			}
+			v, haveValue = val, true
+		}
+		switch name {
+		case "-f", "--justfile":
+			if !haveValue {
+				if i+1 >= len(args) {
+					continue
+				}
+				v = args[i+1]
+			}
+			return v, true, true
+		case "-d", "--working-directory":
+			if !haveValue {
+				if i+1 >= len(args) {
+					continue
+				}
+				v = args[i+1]
+			}
+			return v, false, true
+		}
+	}
+	return "", false, false
+}
+
+// resolveTargetDir is the directory a `just` invocation's matched verb will
+// actually run from: -f/--justfile's value's parent directory, or
+// -d/--working-directory's value directly, falling back to cwd when neither
+// is present (which is what `just` itself does) or when tool is not "just" at
+// all (the -f/-d convention is just-specific; another tool's Dirs match
+// against its own cwd only).
+func (r *Rule) resolveTargetDir(tool string, args []string, cwd string) string {
+	rawDir := cwd
+	if tool == "just" {
+		if v, isFile, found := justTargetDir(args); found {
+			if isFile {
+				rawDir = filepath.Dir(v)
+			} else {
+				rawDir = v
+			}
+		}
+	}
+	projectRoot := ""
+	if r.pe != nil {
+		projectRoot = r.pe.ProjectRoot()
+	}
+	return normalizeJustDir(rawDir, projectRoot, cwd)
+}
+
+// normalizeJustDir resolves dir (relative to cwd when not already absolute)
+// to a project-root-relative, slash-separated, slash-TERMINATED path — the
+// same shape normalizeScriptDirs puts VerbScopedApproval.Dirs entries in, so
+// underAnyPrefix can compare them directly. An absolute dir outside
+// projectRoot, or an empty projectRoot (no path-evaluator context), is
+// returned as a plain slash-separated path instead: it cannot start with any
+// project-root-relative prefix, which is the fail-safe (Abstain) direction —
+// mirroring cmdparse.NormalizeExecutable's own project-root containment check
+// (that helper is not reused directly here because its "no '/' at all"
+// special case is an executable-PATH-search convention that does not apply to
+// a directory value).
+func normalizeJustDir(dir, projectRoot, cwd string) string {
+	if !filepath.IsAbs(dir) {
+		dir = filepath.Join(cwd, dir)
+	}
+	dir = filepath.Clean(dir)
+	projectRoot = filepath.Clean(projectRoot)
+	if projectRoot != "" && projectRoot != "." && (dir == projectRoot || strings.HasPrefix(dir+"/", projectRoot+"/")) {
+		if rel, err := filepath.Rel(projectRoot, dir); err == nil && rel != ".." &&
+			!strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return filepath.ToSlash(rel) + "/"
+		}
+	}
+	return filepath.ToSlash(dir) + "/"
 }

@@ -218,6 +218,34 @@ func TestLoad_ParsesVerbScopedApprovals(t *testing.T) {
 	}
 }
 
+// TestLoad_ParsesVerbScopedApprovalsDirs proves the tc-mgb6 `dirs` field
+// parses and defaults to empty (not present) when a consumer's entry omits it
+// — the shape today's homelab rules.example.json actually has for its
+// deploy/terraform entries, which is exactly the config the buildtools rule
+// must treat as "nothing vetted" for a target-sensitive verb.
+func TestLoad_ParsesVerbScopedApprovalsDirs(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "rules.json")
+	body := `{"buildtools":{"verbScopedApprovals":[` +
+		`{"tool":"just","verb":"deploy","dirs":["infrastructure/k3s/"]},` +
+		`{"tool":"just","verb":"terraform"}` +
+		`]}}`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := Load(path)
+	vs := cfg.Buildtools.VerbScopedApprovals
+	if len(vs) != 2 {
+		t.Fatalf("VerbScopedApprovals = %+v, want 2 entries", vs)
+	}
+	if vs[0].Verb != "deploy" || len(vs[0].Dirs) != 1 || vs[0].Dirs[0] != "infrastructure/k3s/" {
+		t.Errorf("deploy entry = %+v, want Dirs [infrastructure/k3s/]", vs[0])
+	}
+	if vs[1].Verb != "terraform" || len(vs[1].Dirs) != 0 {
+		t.Errorf("terraform entry = %+v, want empty Dirs (nothing vetted)", vs[1])
+	}
+}
+
 // TestLoad_ParsesBuildtoolsFlagFields proves the two flag fields parse from JSON,
 // and — the part that matters for tc-080p — that an EMPTY allowedFlags list is
 // preserved as a present key. The buildtools rule keys strict flag checking on
