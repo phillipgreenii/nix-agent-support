@@ -92,6 +92,13 @@ func TestGitDir_Bash(t *testing.T) {
 		// false-positive fix MUST NOT have been a blanket removal of the guard.
 		{"pg2-24sc9 floor: rm -rf .git/hooks", "rm -rf .git/hooks", hookio.Reject, true},
 		{"pg2-24sc9 floor: truncating redirect onto .git/config", "echo x > .git/config", hookio.Reject, true},
+		// pg2-hh1lw floor: corpus row 132723's exact hook-bypass shape — a Bash
+		// redirect (append, then truncate) targeting .git/info/exclude — MUST still
+		// deny. This is the reproduction named in the bead's own "Reproduce"/
+		// "Verifying the fix" sections, pinned as its own regression test rather
+		// than relying only on the pre-existing .git/config coverage above.
+		{"pg2-hh1lw floor: hook-bypass append into .git/info/exclude (row 132723)", "echo \".pre-commit-config.yaml\" >> .git/info/exclude", hookio.Reject, true},
+		{"pg2-hh1lw floor: truncating redirect onto .git/info/exclude", "echo \".pre-commit-config.yaml\" > .git/info/exclude", hookio.Reject, true},
 		// The exclusion-flag set is named flag-by-flag rather than "any flag's
 		// value", precisely so a destructive operand that happens to follow a flag
 		// is still caught.
