@@ -328,10 +328,10 @@ state:
   documents them itself in its `capabilities` response.
 - For `pg-connector-issue-beads` a query expression is the full `bd` argument vector after the
   binary; the backend appends `--json --limit 0` and permits only `ready` and `list` as the first
-  token. `bd ready` has no title filter, and `--type` is restricted to bd's built-in set plus
-  `merge-request`, so cycle and review beads (plain `task`s) are selected by label here and
-  narrowed by title prefix in the adapter (section 6.1), exactly the two filters today's `jq`
-  pipelines apply.
+  token. `bd ready` has no title filter, and `--type` accepts bd's built-in types plus the
+  workspace's configured `types.custom` list (which is how `merge-request` exists); cycle and
+  review beads are plain `task`s, so they are selected by label here and narrowed by title prefix
+  in the adapter (section 6.1), exactly the two filters today's `jq` pipelines apply.
 - A backend block MUST NOT carry a secret. Credentials stay where the design of record's section
   4.6 puts them, in each backend's own environment chain. The umbrella MUST NOT log request bodies,
   or MUST redact `config` if it ever does. The `request.schema.json` conformance schema gains
@@ -625,7 +625,10 @@ separately.
 - The built-in review prompt's `pg-pr review submit`, ZR's `modules/zm/pr-pool/review-prompt.txt`,
   and the `Bash(pg-pr:*)` allowed-tools grant: rewritten to `pg-connector pr review submit` in the
   phase that ships that verb.
-- `packages/pr-pool/default.nix`'s wrapper puts `pg-pr` on pr-pool's PATH; removed in phase 10.
+- `packages/pr-pool/default.nix`'s wrapper puts `pg-pr` on pr-pool's PATH. It stays there through
+  phase 10, because `pr create`, `pr update`, `pr merge`, `pr automerge`, `review`, `comment`, and
+  `worktree` remain pg-pr's only implementation until the write-verb phase; it is removed with the
+  module under the removal criterion.
 
 ### 6.4 Phase 3 stanzas
 
@@ -640,9 +643,14 @@ queries and their four command roles retire with `df-categorize` and `df-feedbac
 
 - `packages/pr-pool` has zero Go changes attributable to this design other than deleting the
   ACL half of `reconcile`, `prpoolacl`, and the `pg-pr config show` fallback.
-- A grep for a literal `pg-pr` invocation returns zero hits across both repositories' roots
-  `claude-marketplace/**`, `modules/**`, `home/**`, and `packages/**`, excluding `packages/pg-pr`
-  itself, this document, ADRs, and historical prose.
+- At phase 10, a grep for a literal invocation of a RETIRING verb (`pg-pr sync`, `changes`, `open`,
+  `migrate`, `feedback`, `pr hide`, `pr unhide`, `pr wip`, `pr list`, `pr view`, `pr ready`, and
+  `pr create --wip`) returns zero hits across both repositories' roots `claude-marketplace/**`,
+  `modules/**`, `home/**`, and `packages/**`, excluding `packages/pg-pr` itself, this document,
+  ADRs, and historical prose. Invocations of surviving verbs (`pr create`, `pr update`, `pr merge`,
+  `pr automerge`, `review`, `comment`, `worktree`, `auth`, `config show`) are rewritten in the
+  write-verb phase, and the unqualified zero-hit grep is the design of record's removal-criterion
+  item 2, evaluated at module deletion, not here.
 - ZR's rendered config declares at least one `[[role]]` (the known silent-fallback trap) and passes
   `pr-pool config --show` with every backing command resolvable.
 - `pr-pool-source-pg-connector` has golden tests for each of its three subcommands against a
@@ -785,8 +793,11 @@ requests into the ledger by metadata and cycles by exact title, and seeds the la
 SHA from the newest review-pr bead's `metadata.head_sha`.
 
 **Bead shapes.** These MUST match what the ccpool prompts and the pr-pool sources read today, so
-that no prompt changes and no source selects a different set of beads in phase 1. Any later change
-to a shape MUST land with the sources and prompts that read it, in one phase. pg-desk drops the
+that no source selects a different set of beads in phase 1 and no prompt change is required for
+selection parity. The ZR feedback prompt's wording about "feedback children" is already stale
+against pg-pr, which mints none, and is corrected in phase 10 together with the skill rewrite
+below. Any later change to a shape MUST land with the sources and prompts that read it, in one
+phase. pg-desk drops the
 anchor's `sync_error` and `ci_only_attempts` metadata keys, which nothing reads from the bead, and
 adds `repo`, `pr_number`, and `branch` metadata to new cycles, which today's title-keyed cycles
 lack, so future adoption can use one rule.
@@ -811,10 +822,12 @@ Rules, ported from pg-pr's reconcile logic and pr-pool's ACL:
   because the PR left a query. An already-closed anchor is never reopened. Because the review-request
   rule below covers nearly every open PR, nearly every open PR ends up with an anchor in practice;
   D8 is satisfied by construction, not by scarcity.
-- **Feedback cycle**: for PRs the operator owns, when unaddressed feedback exists (comments and
-  threads whose disposition is neither `will-fix`, `wont-fix`, nor `no-action`), ensure one open
-  cycle keyed by title and deduplicated by `fbsum`, with the rendered summary as its description.
-  This closes the split epic's hazard H2.
+- **Feedback cycle**: for every PR with unaddressed feedback (comments and threads whose
+  disposition is neither `will-fix`, `wont-fix`, nor `no-action`), ensure one open cycle keyed by
+  title and deduplicated by `fbsum`, with the rendered summary as its description, carrying the
+  `mine` label only when the PR's ownership acts as mine. This is pg-pr's exact behavior: team
+  PRs get unlabeled cycles that no source selects, and the `feedback` source picks up the `mine`
+  ones. This closes the split epic's hazard H2.
 - **Review request**: ported verbatim from pr-pool's ACL, which projects the AGENT review queue,
   not the operator's: for every PR with ownership `mine` or `co-owned`, draft included, and for
   every team PR that is not a draft, ensure one review-pr bead. When the head advances past the
@@ -1084,23 +1097,29 @@ re-enabling `pg-pr-sync` remains a fix-forward option during the window.
   `services.pg-desk-serve`, renders pg-desk config, and adds `pg-desk` and the adapter to the
   package list; phase 10 rewrites `modules/zm/default.nix`'s queries and roles, sets
   `[pool].self_login`, enables `programs.pr-pool.daemon`, deletes `darwin/services/pg-pr-sync`
-  including its fingerprint-poll alert rule, removes `pg-pr` from the package list, and rewrites
-  every ZR call site of a retiring verb: `modules/zr-refactor/rc-publish/rc-publish.sh` (`pr list`,
-  `pr wip on`, `pr view`) and its bats test, `claude-marketplace/zr-refactor/commands/{work,retire,status}.md`,
+  including its fingerprint-poll alert rule, and rewrites every ZR call site of a RETIRING verb:
+  `modules/zr-refactor/rc-publish/rc-publish.sh` (`pr list`, `pr wip on`, `pr view`; its `pr create`
+  call survives) and its bats test, `claude-marketplace/zr-refactor/commands/{work,retire,status}.md`,
   `claude-marketplace/zr-refactor/skills/zr-refactor/SKILL.md`,
   `claude-marketplace/daily-focus/commands/close.md`, the `pg-pr` permission entries in
-  `modules/claude-code/settings.local.json`, and the two agent memory files that teach draft
-  promotion and `pg-pr pr wip`.
-- agent-support call sites rewritten in phase 10: every `pg-pr` invocation under
-  `claude-marketplace/pg-pr/**` (`check-my-pr`, `pg-pr-workflow`, `pg-pr-write-pr-description`,
-  `pg-pr-process-feedback`, and the rest) and `claude-marketplace/integrate-branch/skills/pull-request/SKILL.md`.
+  `modules/claude-code/settings.local.json`, and the agent memory files that teach draft promotion,
+  `pg-pr pr wip`, and the pg-pr daemon feedback workflow (four files). `pg-pr` STAYS in the ZR
+  package list through phase 10, because its surviving verbs have no other implementation yet; it
+  leaves with the module under the removal criterion.
+- agent-support call sites rewritten in phase 10, retiring verbs only: `check-my-pr`'s `sync`,
+  `pg-pr-workflow`'s `sync`, `pr wip`, and `pr view`, `pg-pr-write-pr-description`'s `pr wip`,
+  `pg-pr-watch-my-prs`'s `sync`, all of `pg-pr-process-feedback`, and the `pr list` call in
+  `claude-marketplace/integrate-branch/skills/pull-request/SKILL.md`. Sites that use only surviving
+  verbs (`pg-pr-review-team-pr`, the `pr create`/`update`/`merge`/`automerge` calls) wait for the
+  write-verb phase.
 
 **Acceptance criteria**
 
 - The Grafana JSON's seven URLs and datasource are byte-identical before and after cutover; the
   repointed flake check passes against `pg-desk`'s golden.
-- `rc-publish.sh` and its bats test pass with no `pg-pr` on PATH.
-- The section 6 grep AC holds for both repositories.
+- `rc-publish.sh` and its bats test pass against a `pg-pr` stub that rejects `pr list`, `pr wip`,
+  and `pr view` and accepts `pr create`.
+- The section 6 retiring-verb grep AC holds for both repositories.
 
 ### 9.5 Phases
 
@@ -1157,8 +1176,9 @@ is deleted only with the module (section 9.3).
   adapter is a separate component instead.
 - **Hardened `sh` and `jq` stanzas.** Five hand-maintained programs in nix strings, and the failure
   semantics live in shell. The adapter's translations are tested code.
-- **Per-item feedback child beads.** pg-pr does not mint them today and the feedback prompt does not
-  need them; pinning a new child shape would force a prompt rewrite for no consumer.
+- **Per-item feedback child beads.** pg-pr does not mint them today; the feedback prompt's
+  child-bead wording is already stale and is corrected with the skill rewrite. Pinning a new child
+  shape would force a second prompt rewrite for no consumer.
 
 ## 11. Open items for operator review
 
