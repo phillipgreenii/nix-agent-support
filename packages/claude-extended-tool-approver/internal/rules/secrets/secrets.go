@@ -46,17 +46,28 @@
 //     repo-scoped: a `.env` inside a repo is the most common real credential file
 //     an agent reads, so making it config-only would silently retire a live
 //     control.
-//  3. THE BARE `secrets` COMPONENT STAYS LEXICAL BUT IS SKIPPED INSIDE A GIT
-//     REPOSITORY, FOR READS ONLY ON THE DIRECT-TOOL ROUTE (see lexicalHit and,
-//     for why the Bash route cannot honor this direction split, bashRef).
-//     Operator rationale, verbatim: "anything that is in a git repo is not
-//     secret. if someone does have secrets in a repo, then they can explicitly
-//     set those paths in the config" — and the escape hatch is real, because
-//     LoadSandboxFilesystemConfig already merges the PROJECT-level
-//     .claude/settings.json. A NARROWER exception on top of this (pg2-n4i7n):
-//     a `.go`/`_test.go` file under the component is skipped on BOTH reads and
-//     writes, because it is source code rather than credential data — see
-//     isGoSourceInRepo. It does not widen the write guard for anything else.
+//  3. THE BARE `secrets` COMPONENT IS NOT AN ASK SIGNAL AT ALL — REMOVED
+//     ENTIRELY (operator ruling, 2026-09-09, pg2-s39l5, superseding both the
+//     git-repo read relaxation this decision used to describe and pg2-n4i7n's
+//     narrower Go-source exception on top of it — neither is reachable any
+//     more). Ruling, verbatim: "remove the ASK-tier bare path-substring
+//     'secrets' check entirely — it flags the tool's own source, not real
+//     secrets." A directory or file NAMED "secrets" says nothing about WHAT is
+//     stored there — unlike `.ssh`, `.gnupg`, or a named credential basename —
+//     and the asklog kept surfacing it against this very rule's own source
+//     (secrets.go/secrets_test.go, pg2-pmk9q/pg2-kfyv2) and other
+//     role-describing "secrets" trees holding no credential content at all.
+//     secretpath.GenericSecretsDir is still a reportable Kind — Classify still
+//     tells a caller a bare `secrets` component was seen — but lexicalHit never
+//     treats it as a hit; see its doc comment. A REAL credential store that
+//     happens to sit under a directory named "secrets" is still caught, just by
+//     a MORE SPECIFIC arm: WellKnownSecret (`secrets/.ssh/id_rsa`,
+//     `secrets/id_rsa.pem`) or the CONFIG-DRIVEN deny-list (configRef, decision
+//     1 above). A "secrets" tree whose contents are NOT independently
+//     recognized (`deploy/secrets/token`, `secrets/prod.env`) no longer Asks
+//     either, on EITHER direction — covering such a tree now needs an explicit
+//     sandbox.filesystem.denyRead/denyWrite entry, exactly like any other
+//     credential store decision 1 already requires config for.
 //  4. EXTENSION ARMS ARE OUT OF THIS RULE — no `*.p12`, `*.pfx`, `*.keystore`,
 //     `service-account*.json` — on false-positive grounds: a repo full of test
 //     fixtures named `*.pem` is common. `*.pem`/`*.key` themselves WERE this
@@ -81,40 +92,16 @@
 //     below. Nothing else about the "bd"/"git"/"gh" message-arg handling
 //     changes.
 //
-// Decision 3 fixes pg2-pmk9q BY CONSTRUCTION and more broadly than that bead's own
-// sanctioned option: any project with an `internal/…/secrets/` package is covered,
-// not just this one. It carries ONE deliberate coverage reduction, made by the
-// operator with the guard's text in front of them: `deploy/secrets/token` inside a
-// repo no longer Asks on a read, and covering such a tree becomes a project-level
-// denyRead entry.
-//
-// READS AND WRITES STAY DISTINGUISHED ONLY ON THE DIRECT-TOOL ROUTE (Write / Edit
-// / MultiEdit / Delete, where Check computes a real per-call isWrite) — there a
-// write under a `secrets/` component is NOT relaxed, in or out of a repo, because
-// the read relaxation is broader than the alternatives that were rejected, and a
-// write is the act that cannot be undone by prompting later. ON THE BASH ROUTE
-// THAT DISTINCTION DOES NOT EXIST: bashRef always evaluates the relaxation with
-// isWrite hardcoded to false (Bash read/write intent is ambiguous per-argument),
-// so a Bash write-shaped command (`rm`, `> file`, `| tee`) gets the identical
-// relaxation a Bash read gets. That is INTENTIONAL, confirmed by the operator's
-// 2026-08-17 ruling on pg2-ifbfa: the in-repo "not secret" judgment was meant to
-// cover Bash writes too, not just Bash reads — it is not a gap this rule needs to
-// close. See bashRef's comment for the mechanism and lexicalHit's for the
-// resulting condition.
-//
-// ONE NARROW EXCEPTION to "a write under a `secrets/` component is NOT relaxed":
-// a Go SOURCE file (".go", including "_test.go") under that component, inside a
-// git repository, is relaxed on BOTH directions (pg2-n4i7n — see
-// isGoSourceInRepo). The bare `secrets` component is a ROLE-DESCRIBING directory
-// name a Go package tree can hold innocently — this rule's OWN module,
-// internal/rules/secrets/, is exactly such a tree — and a .go file is source
-// code, never credential DATA, so classifying it as one on the write side was
-// always the wrong call; it just took until pg2-kfyv2's asklog evidence (every
-// Edit to secrets.go/secrets_test.go across ≥8 worktrees, Asked and always
-// approved) to surface it. The exception is keyed on the EXTENSION alone, not on
-// the directory, so it does not widen pg2-ifbfa's guard for any other file: a
-// genuine credential store's non-.go contents (secrets/prod.env,
-// deploy/secrets/token) still Ask on write exactly as before.
+// Decision 3 SUPERSEDES pg2-pmk9q's read-only, git-repo-scoped relaxation
+// (2026-08-13) and pg2-n4i7n's narrower Go-source write exemption layered on top
+// of it — both are now moot, since the bare `secrets` component never Asks in
+// either direction, in or out of a repo, for any file extension. It also
+// supersedes pg2-ifbfa's write-side guard for a "secrets"-named tree holding
+// nothing else independently recognizable (formerly pinned by
+// TestRule_EditingAGenuineCredentialFileStillAsks in secrets_test.go, now folded
+// into the "never Asks" coverage there). Nothing about decisions 1, 2 or 4
+// changes: a WellKnownSecret match and the config-driven deny-list still apply
+// exactly as before, on both reads and writes.
 package secrets
 
 import (
@@ -283,11 +270,6 @@ type candidateMatch func(string) (secretRef, bool)
 // directly. Keeping the named form raw also keeps it working with a nil
 // evaluator, which is a supported configuration here (see resolve).
 //
-// The in-repo relaxation does need an absolutized form, so it asks CleanPath for
-// one INSIDE inGitRepo rather than absolutizing the candidate everyone else sees.
-// That keeps this property: with a nil evaluator the lexical arms still match on
-// the raw string, and the relaxation simply never fires (inGitRepo fails closed).
-//
 // A RESOLVED PATH IS CLASSIFIED WHEREVER IT LANDS — there is no check that it
 // stays inside the project root, the workspace, or any other known zone. That is
 // deliberate, and it is the point: the shape most worth catching is a link out of
@@ -311,10 +293,10 @@ func (r *Rule) pathRef(path string, isWrite bool) (secretRef, bool) {
 	if path == "" {
 		return secretRef{}, false
 	}
-	if r.lexicalHit(path, isWrite) {
+	if r.lexicalHit(path) {
 		return secretRef{named: path}, true
 	}
-	if ref, ok := r.resolvedForm(path, isWrite); ok {
+	if ref, ok := r.resolvedForm(path); ok {
 		return ref, true
 	}
 	if r.denyListed(path, isWrite) {
@@ -365,25 +347,12 @@ func (r *Rule) pathRef(path string, isWrite bool) (secretRef, bool) {
 // entirely wrong, absolute path).
 func (r *Rule) bashRef(leaves []cmdparse.ParsedCommand, vars map[string]string) (ref secretRef, found bool, malformed bool) {
 	// Bash read/write intent is ambiguous per-argument, so every candidate is
-	// judged as a READ — the direction the beads are about, and the one that
-	// governs the in-repo relaxation.
-	//
-	// SO THE "READ ONLY" HALF OF THE IN-REPO RELAXATION IS VACUOUS ON THIS ROUTE.
-	// `isWrite` is never true for a Bash command, so `write >= read` is trivially
-	// satisfied and the relaxation reaches WRITE-SHAPED commands exactly as it reaches
-	// reads. TestRule_WriteNeverLessRestrictiveThanRead cannot see this: it supplies
-	// `isWrite` directly, so it proves the rule HONOURS the parameter, not that any Bash
-	// caller ever sets it. MEASURED through internal/setup's replay harness on
-	// `<repo>/internal/rules/secrets/secrets.go` with cwd inside a git worktree —
-	// `rm`, `> `, and `| tee` all moved ask -> approve alongside `cat`. THIS IS
-	// INTENTIONAL, not a gap: the operator's 2026-08-17 ruling on pg2-ifbfa
-	// confirmed the in-repo "not secret" judgment covers Bash writes too (the
-	// package comment's decision 3 and lexicalHit's doc now say so directly —
-	// they used to claim READ ONLY unconditionally, which was wrong for this
-	// route; pg2-ifbfa corrected them).
-	//
-	// The GUARD THAT DOES HOLD on this route is the repo test itself: outside any git
-	// working tree the arm still fires, so `~/secrets/prod.env` keeps its Ask either way.
+	// judged as a READ for the CONFIG arm (configRef/denyListed) — the only
+	// place `isWrite` still matters on this route, now that lexicalHit's
+	// GenericSecretsDir relaxation (and the read/write split it needed) is gone
+	// entirely (pg2-s39l5). A deny-listed path is still screened correctly:
+	// denyRead-only coverage is the intended, narrower behavior for a Bash
+	// command whose direction cannot be determined from the argument alone.
 	const isWrite = false
 	// shellCScriptCache is shared by all three passes below (pg2-k1c91). Each
 	// pass independently needs to descend into any `bash`/`sh -c` leaf's
@@ -401,14 +370,14 @@ func (r *Rule) bashRef(leaves []cmdparse.ParsedCommand, vars map[string]string) 
 	// so it is deterministic per COMMAND, not per candidateMatch — every pass would
 	// report the same malformed verdict for the same cmd. The first pass that finds
 	// EITHER a match OR a malformed value short-circuits the remaining passes.
-	if ref, found, malformed := firstSecretRefIn(cache, leaves, maxShellUnwrap, r.lexicalRef(isWrite, vars)); found || malformed {
+	if ref, found, malformed := firstSecretRefIn(cache, leaves, maxShellUnwrap, r.lexicalRef(vars)); found || malformed {
 		return ref, found, malformed
 	}
 	if r.pe == nil {
 		return secretRef{}, false, false
 	}
 	resolveBudget := maxResolutions
-	if ref, found, malformed := firstSecretRefIn(cache, leaves, maxShellUnwrap, r.resolvedRef(&resolveBudget, isWrite, vars)); found || malformed {
+	if ref, found, malformed := firstSecretRefIn(cache, leaves, maxShellUnwrap, r.resolvedRef(&resolveBudget, vars)); found || malformed {
 		return ref, found, malformed
 	}
 	denyBudget := maxResolutions
@@ -480,20 +449,19 @@ func (c *shellCScriptCache) parse(script string) []cmdparse.ParsedCommand {
 // command's own earlier text binds to a literal value, the candidate with
 // that binding substituted in (pg2-q5ogr).
 //
-// WHY THIS WAS MISSING. lexicalHit's in-repo relaxation (decision 3, see the
-// package doc) asks r.inGitRepo(path), which asks r.pe.CleanPath(path) — and
-// CleanPath can only expand a REAL environment variable or `~`
-// (patheval.cleanPath's os.ExpandEnv only ever sees the CETA PROCESS's own
-// environment; CETA receives no environment from the shell it is judging at
-// all). It has no way to see a shell-LOCAL binding written down in the SAME
-// command, so `P=packages/claude-extended-tool-approver; git ls-tree … --
-// $P/internal/rules/secrets/` reached lexicalHit with the literal text
-// `$P/internal/rules/secrets/`; CleanPath returned "" (unexpanded variable
-// pattern), inGitRepo failed closed to false, and the relaxation never got a
-// chance to fire even though $P's own bound value plainly resolves inside the
-// repo. Every OTHER candidate shape (a literal path, a path already
-// symlink-resolved by resolvedRef) never hit this at all — only a candidate
-// that is itself an unexpanded shell-variable reference did.
+// WHY THIS WAS NEEDED (historical motivation; the mechanism still matters even
+// though the specific bug it fixed, decision 3's now-removed in-repo
+// relaxation, is gone — pg2-s39l5). A bare candidate string can be a shell
+// variable reference the ENGINE already knows the bound value of
+// (hookio.HookInput.InCommandVars / cmdparse.ExpandInCommand, pg2-wq3ki) — e.g.
+// `P=~/.ssh; cat $P/id_rsa` binds `$P` to a real path THIS SAME command's own
+// earlier text assigns. Without expanding it first, lexicalHit would see only
+// the literal, un-substituted text `$P/id_rsa`, which secretpath.Classify does
+// not recognize as anything — a false Abstain on a plainly WellKnownSecret
+// path (`~/.ssh/id_rsa`) once $P's binding is applied. Every OTHER candidate
+// shape (a literal path, a path already symlink-resolved by resolvedRef) is
+// unaffected — only a candidate that is itself an unexpanded shell-variable
+// reference needs this.
 //
 // THE FIX REUSES THE EXISTING SEAM RATHER THAN BUILDING A NEW ONE.
 // hookio.HookInput.InCommandVars / cmdparse.ExpandInCommand (pg2-wq3ki)
@@ -510,24 +478,11 @@ func (c *shellCScriptCache) parse(script string) []cmdparse.ParsedCommand {
 // engine found no qualifying assignment) is completely unaffected.
 //
 // EVERY ONE OF bashRef's THREE PASSES NEEDS THIS, not just this lexical one —
-// see expandCandidate's doc. The first cut of this fix touched only this
-// function, on the reasoning that resolvedRef and configRef "already fail
-// closed on a candidate CleanPath cannot expand". That reasoning was wrong,
-// proven by TestRule_VarBoundInRepoPathArgumentRelaxed failing against it:
-// patheval.cleanPath calls os.ExpandEnv FIRST, and os.ExpandEnv does not
-// leave an unknown `$NAME` unexpanded — it substitutes the EMPTY string (per
-// os.Expand's own contract for a name the mapping function does not
-// recognize), so `$P/secrets/token` with no real "P" environment variable
-// becomes the ABSOLUTE path "/secrets/token", which resolvedRef's symlink
-// pass then classified as GenericSecretsDir and, finding it outside any git
-// repository (it is not the fixture's tree at all), refused to relax — a
-// false Ask reached through a DIFFERENT candidate string than the one this
-// pass correctly declined to match. Substituting the SAME real value before
-// every pass removes the mangled intermediate string entirely.
-func (r *Rule) lexicalRef(isWrite bool, vars map[string]string) candidateMatch {
+// see expandCandidate's doc.
+func (r *Rule) lexicalRef(vars map[string]string) candidateMatch {
 	return func(path string) (secretRef, bool) {
 		candidate := expandCandidate(path, vars)
-		if !r.lexicalHit(candidate, isWrite) {
+		if !r.lexicalHit(candidate) {
 			return secretRef{}, false
 		}
 		if candidate != path {
@@ -540,104 +495,33 @@ func (r *Rule) lexicalRef(isWrite bool, vars map[string]string) candidateMatch {
 	}
 }
 
-// lexicalHit applies secretpath's classification and then TWO relaxations of a
-// match on the bare, role-describing `secrets` component: the operator-ruled one
-// (dropped for a READ of a path inside a git repository — see the package
-// comment's decision 3) and the Go-source one (dropped for a ".go"/"_test.go"
-// path inside a git repository, on EITHER direction — pg2-n4i7n, see
-// isGoSourceInRepo). The Go-source check runs first and, when it fires, skips the
-// read/write branch entirely — a .go file is source, never credential data,
-// regardless of which access direction touched it.
+// lexicalHit applies secretpath's classification, counting only a
+// WellKnownSecret match as a hit.
 //
-// For every OTHER GenericSecretsDir match, TWO CONDITIONS gate the read
-// relaxation, both necessary — but the first only BINDS where its caller passes a
-// real, per-call `isWrite`:
+// secretpath.GenericSecretsDir — the bare, ROLE-DESCRIBING `secrets` path
+// component alone, with no other recognized signal — is DELIBERATELY EXCLUDED,
+// by the operator's 2026-09-09 ruling on pg2-s39l5 (see the package comment's
+// decision 3). It used to gate an Ask that a git-repo read relaxed (pg2-pmk9q)
+// and a Go-source file exempted on both directions (pg2-n4i7n) — both of those
+// mechanisms are now gone rather than gated, because the asklog kept surfacing
+// the bare component against this very rule's own source
+// (secrets.go/secrets_test.go) and other role-describing "secrets" trees with
+// no credential content at all: "secrets" alone says nothing about WHAT is
+// stored there, unlike `.ssh`, `.gnupg`, or a named credential basename.
 //
-//   - READ ONLY ON THE DIRECT-TOOL ROUTE (Write/Edit/MultiEdit/Delete, via
-//     Check). A write under a `secrets/` component is never relaxed there. This
-//     is the guard pg2-pmk9q pinned and the ruling explicitly kept: the read
-//     relaxation is the broad one, so keeping the directions distinguished is what
-//     bounds it. A write that turns out to have been to a real credential store
-//     cannot be taken back by prompting afterwards. ON THE BASH ROUTE THIS
-//     CONDITION IS VACUOUS: bashRef always calls lexicalHit with isWrite=false,
-//     so a Bash write-shaped command is relaxed exactly like a Bash read. That is
-//     INTENTIONAL — the operator's 2026-08-17 ruling on pg2-ifbfa confirmed the
-//     in-repo relaxation was meant to cover Bash writes too — not a gap in this
-//     function.
-//   - GenericSecretsDir ONLY. secretpath.Classify reports the STRONGEST arm that
-//     matched, so `<repo>/secrets/.ssh/id_rsa` and `<repo>/secrets/.env` come back
-//     WellKnownSecret and keep asking. The relaxation can only ever discard the
-//     weakest evidence there is.
+// A real credential store that happens to sit under a directory named
+// "secrets" is still caught — just by a MORE SPECIFIC arm: WellKnownSecret
+// (`secrets/.ssh/id_rsa`, `secrets/id_rsa.pem`) or the CONFIG-DRIVEN deny-list
+// (configRef). Only the WEAKEST, name-alone signal is dropped. A "secrets"
+// tree whose contents are NOT independently recognized (`deploy/secrets/token`,
+// `secrets/prod.env`) no longer Asks either, on EITHER direction — covering
+// such a tree now needs an explicit sandbox.filesystem.denyRead/denyWrite
+// entry, exactly like any other credential store already needed one for.
 //
-// It is the only place this rule consults the filesystem outside a resolution, and
-// it does so only when the generic arm matched — never on the majority path where
-// nothing matched at all.
-func (r *Rule) lexicalHit(path string, isWrite bool) bool {
-	switch secretpath.Classify(path) {
-	case secretpath.WellKnownSecret:
-		return true
-	case secretpath.GenericSecretsDir:
-		if r.isGoSourceInRepo(path) {
-			return false
-		}
-		return isWrite || !r.inGitRepo(path)
-	default:
-		return false
-	}
-}
-
-// isGoSourceInRepo reports whether path is itself Go SOURCE — a ".go" file,
-// which covers both ordinary and "_test.go" files, since the latter is a
-// suffix of the former — sitting inside a git working tree (pg2-n4i7n).
-//
-// It is checked BEFORE the read/write branch below, so it exempts a Go
-// source file on BOTH directions of access, unlike decision 3's read-only
-// relaxation. That is deliberate and narrower than it looks: the exemption
-// is keyed on the FILE EXTENSION, not on "any file under a secrets/
-// component", so it fixes exactly the false positive this bead is about —
-// this rule's own module, internal/rules/secrets/secrets.go and
-// secrets_test.go, prompting on every Edit because the bare `secrets`
-// component matches GenericSecretsDir and isWrite is hardcoded true on the
-// direct-tool route — WITHOUT reopening pg2-ifbfa's genuine credential-file
-// write guard: a non-.go path under the same component (secrets/prod.env,
-// deploy/secrets/token) still Asks on write exactly as before, because this
-// check declines for it and falls through to the unchanged isWrite||…
-// expression.
-//
-// Nothing here names this repo or this rule's own path specifically, so any
-// project's "secrets" package tree is covered the same way decision 3
-// already covers reads project-wide.
-//
-// It fails closed the same way inGitRepo does: outside a git working tree
-// (or with a nil evaluator) it returns false, leaving the `secrets` arm
-// firing exactly as it did before this exemption existed.
-func (r *Rule) isGoSourceInRepo(path string) bool {
-	if filepath.Ext(path) != ".go" {
-		return false
-	}
-	return r.inGitRepo(path)
-}
-
-// inGitRepo reports whether path lies inside a git working tree, asked of the
-// path's NAMED form (env/`~`/cwd-relative expansion, no symlink resolution) — the
-// same normalization every other named-form question in this rule uses. The
-// resolved form gets its own separate lexicalHit call from resolvedForm, so a link
-// out of a repo into a real `secrets/` store is still classified on where it LANDS.
-//
-// IT FAILS CLOSED in both of its failure modes. A nil evaluator (a supported
-// configuration — see resolve) and a path CleanPath cannot expand both report
-// false, i.e. "not in a repo", which leaves the `secrets` arm FIRING. The
-// relaxation only ever removes a prompt, so an unanswerable question must cost an
-// Ask, never silence.
-func (r *Rule) inGitRepo(path string) bool {
-	if r.pe == nil {
-		return false
-	}
-	cleaned := r.pe.CleanPath(path)
-	if cleaned == "" {
-		return false
-	}
-	return patheval.InGitRepo(cleaned)
+// This function no longer needs `isWrite` or the filesystem at all: unlike
+// before pg2-s39l5, it is now a pure function of secretpath.Classify.
+func (r *Rule) lexicalHit(path string) bool {
+	return secretpath.Classify(path) == secretpath.WellKnownSecret
 }
 
 // resolvedRef builds the resolving candidate test for one Evaluate, spending from
@@ -665,7 +549,7 @@ func (r *Rule) inGitRepo(path string) bool {
 // stays the ORIGINAL, unexpanded path — what the call actually wrote — so the
 // substitution is invisible in the reason text unless resolve() ALSO finds a
 // further symlink indirection worth reporting.
-func (r *Rule) resolvedRef(budget *int, isWrite bool, vars map[string]string) candidateMatch {
+func (r *Rule) resolvedRef(budget *int, vars map[string]string) candidateMatch {
 	return func(path string) (secretRef, bool) {
 		candidate := expandCandidate(path, vars)
 		if *budget <= 0 || !isPathShaped(candidate) {
@@ -673,7 +557,7 @@ func (r *Rule) resolvedRef(budget *int, isWrite bool, vars map[string]string) ca
 		}
 		*budget--
 		resolved := r.resolve(candidate)
-		if resolved == "" || !r.lexicalHit(resolved, isWrite) {
+		if resolved == "" || !r.lexicalHit(resolved) {
 			return secretRef{}, false
 		}
 		return secretRef{named: path, resolved: resolved}, true
@@ -681,9 +565,9 @@ func (r *Rule) resolvedRef(budget *int, isWrite bool, vars map[string]string) ca
 }
 
 // resolvedForm tests the symlink-resolved form of path.
-func (r *Rule) resolvedForm(path string, isWrite bool) (secretRef, bool) {
+func (r *Rule) resolvedForm(path string) (secretRef, bool) {
 	resolved := r.resolve(path)
-	if resolved == "" || !r.lexicalHit(resolved, isWrite) {
+	if resolved == "" || !r.lexicalHit(resolved) {
 		return secretRef{}, false
 	}
 	return secretRef{named: path, resolved: resolved}, true

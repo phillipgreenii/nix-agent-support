@@ -41,7 +41,7 @@ func TestRule(t *testing.T) {
 		{"cat claude credentials", bashInput("cat ~/.claude/.credentials"), hookio.Ask},
 		{"cat linux credentials json", bashInput("cat ~/.claude/.credentials.json"), hookio.Ask},
 		{"cat bare dotenv", bashInput("cat .env"), hookio.Ask},
-		{"cat secrets json", bashInput("cat secrets/svc/prod.json"), hookio.Ask},
+		{"cat a real secret json under secrets/", bashInput("cat secrets/svc/prod-token.json"), hookio.Ask},
 		{"head ssh config", bashInput("head -n 5 ~/.ssh/config"), hookio.Ask},
 		// grep whose FILE arg is a secret (pattern is not) → Ask
 		{"grep into ssh config", bashInput("grep Host ~/.ssh/config"), hookio.Ask},
@@ -82,7 +82,7 @@ func TestRule(t *testing.T) {
 		// argument (here a pg2-ia640.1 M4 "*.pem" match) must still Ask.
 		{"yq filter over a real secret FILE (M4 pem) still Asks", bashInput("yq '.key' server.pem"), hookio.Ask},
 		// stdin redirect read of a secret must not bypass the check
-		{"cat stdin-redirect from secrets", bashInput("cat < secrets/prod.json"), hookio.Ask},
+		{"cat stdin-redirect from a real secret under secrets/", bashInput("cat < secrets/svc/prod-token.json"), hookio.Ask},
 		// sh/bash -c '<inner>' must not bypass the check
 		{"bash -c cat dotenv", bashInput("bash -c 'cat .env'"), hookio.Ask},
 		{"sh -c cat credentials", bashInput("sh -c \"cat ~/.claude/.credentials\""), hookio.Ask},
@@ -91,7 +91,7 @@ func TestRule(t *testing.T) {
 		// scanned (pg2-ia640.4).
 		{"bash -lc cat dotenv", bashInput("bash -lc 'cat .env'"), hookio.Ask},
 		{"bash -ilc cat credentials", bashInput("bash -ilc 'cat ~/.claude/.credentials'"), hookio.Ask},
-		{"sh -ilc cat secrets json", bashInput("sh -ilc 'cat secrets/prod.json'"), hookio.Ask},
+		{"sh -ilc cat a real secret json under secrets/", bashInput("sh -ilc 'cat secrets/svc/prod-token.json'"), hookio.Ask},
 		// env exec-prefix is unwrapped by cmdparse, so the combined-flag wrapper
 		// inside it is still scanned (regression guard for the env path).
 		{"env bash -lc cat dotenv", bashInput("env bash -lc 'cat .env'"), hookio.Ask},
@@ -163,10 +163,10 @@ func TestRule(t *testing.T) {
 		{"git grep -f .env READS .env as the pattern file", bashInput("git grep -f .env file.log"), hookio.Ask},
 		// REGRESSION GUARDS: the pattern-exemption must not suppress a REAL
 		// secret FILE argument to `git grep` — mirrors the bare-grep regression
-		// controls above (M1 `secrets/` component and M4 `.pem` suffix).
-		{"git grep into a secrets/ FILE still Asks", bashInput("git grep TODO secrets/prod.env"), hookio.Ask},
+		// controls above (M1 `.ssh` component and M4 `.pem` suffix).
+		{"git grep into a secrets/ FILE still Asks", bashInput("git grep TODO secrets/.ssh/id_rsa"), hookio.Ask},
 		{"git grep into a .pem FILE (M4) still Asks", bashInput("git grep foo server.pem"), hookio.Ask},
-		{"git -C dir grep into a secrets/ FILE still Asks", bashInput("git -C /repo grep TODO secrets/prod.env"), hookio.Ask},
+		{"git -C dir grep into a secrets/ FILE still Asks", bashInput("git -C /repo grep TODO secrets/.ssh/id_rsa"), hookio.Ask},
 		// SCOPE BOUNDARY: a git subcommand other than "grep" must be completely
 		// unaffected by gitGrepArgs — the carve-out is scoped to the literal
 		// "grep" token, deliberately NOT generalized to git's OTHER
@@ -192,7 +192,7 @@ func TestRule(t *testing.T) {
 		{"git commit -F path still Asks", bashInput("git commit -F ~/.ssh/id_rsa"), hookio.Ask},
 		{"git commit --file path still Asks", bashInput("git commit --file ~/.ssh/id_rsa"), hookio.Ask},
 		{"gh pr create --body-file path still Asks", bashInput("gh pr create --body-file ~/.ssh/id_rsa"), hookio.Ask},
-		{"bd comment --file path still Asks", bashInput("bd comment x --file secrets/notes.txt"), hookio.Ask},
+		{"bd comment --file path still Asks", bashInput("bd comment x --file secrets/id_rsa.pem"), hookio.Ask},
 		// `-m` is BOOLEAN outside gitMessageSubcommands, so the token after it is a
 		// real pathspec there (git checkout -m = --merge).
 		{"git checkout -m pathspec still Asks", bashInput("git checkout -m ~/.ssh/config"), hookio.Ask},
@@ -201,10 +201,10 @@ func TestRule(t *testing.T) {
 		{"git commit -- -m path still Asks", bashInput("git commit -- -m ~/.ssh/id_rsa"), hookio.Ask},
 		// Only the BODY positional of `bd comment <id> <body>` is dropped.
 		{"bd comment id positional still Asks", bashInput("bd comment ~/.ssh/id_rsa body"), hookio.Ask},
-		{"bd -C dir value still Asks", bashInput("bd -C secrets/wt comment x body"), hookio.Ask},
+		{"bd -C dir value still Asks", bashInput("bd -C secrets/.ssh comment x body"), hookio.Ask},
 		// Getting the FILE'S CONTENT into a message is a different construct, and
 		// each is still checked: a redirection, and a shell -c wrapper.
-		{"bd comment with stdin redirect still Asks", bashInput("bd comment x body < secrets/x"), hookio.Ask},
+		{"bd comment with stdin redirect still Asks", bashInput("bd comment x body < secrets/id_rsa.pem"), hookio.Ask},
 
 		// tc-3bmy: bb ANTI-BYPASS guards. bb genuinely has NO path-taking
 		// argument anywhere in its CLI (verified against bb --help, bb help -a,
@@ -215,12 +215,12 @@ func TestRule(t *testing.T) {
 		// SkipBBProseArgs DOES have: only the enumerated positional/field slot
 		// is dropped, and a path-shaped value in every OTHER position still
 		// Asks.
-		{"bb non-prose subcommand keeps a path argument", bashInput("bb show task-abc secrets/prod.yaml"), hookio.Ask},
+		{"bb non-prose subcommand keeps a path argument", bashInput("bb show task-abc secrets/id_rsa.pem"), hookio.Ask},
 		{"bb note id positional still Asks", bashInput("bb note ~/.ssh/id_rsa body"), hookio.Ask},
 		{"bb comment add with a flag before target-id keeps every positional", bashInput("bb comment add --author a ~/.ssh/id_rsa body"), hookio.Ask},
 		{"bb --set on a non-prose field still Asks", bashInput("bb task update task-abc --set body.owner=~/.ssh/id_rsa"), hookio.Ask},
 		{"bb put -- --set body.title=path still Asks", bashInput("bb put -- --set body.title=~/.ssh/id_rsa"), hookio.Ask},
-		{"bb note with stdin redirect still Asks", bashInput("bb note x body < secrets/x"), hookio.Ask},
+		{"bb note with stdin redirect still Asks", bashInput("bb note x body < secrets/id_rsa.pem"), hookio.Ask},
 		{"bash -lc inside a bd comment body still Asks", bashInput(`bd comment x "$(echo hi)" && bash -lc 'cat ~/.ssh/id_rsa'`), hookio.Ask},
 
 		// Bash without a secret path → Abstain (defer to rest of chain)
@@ -237,7 +237,7 @@ func TestRule(t *testing.T) {
 		{"Edit normal file", fileInput("Edit", "src/app.go"), hookio.NoOpinion},
 
 		// Search tools
-		{"Grep in secrets dir", searchInput("Grep", "password", "secrets/"), hookio.Ask},
+		{"Grep in a WellKnownSecret dir", searchInput("Grep", "password", "secrets/.ssh/"), hookio.Ask},
 		{"Grep normal dir", searchInput("Grep", "TODO", "internal/"), hookio.NoOpinion},
 		{"Glob no path", searchInput("Glob", "**/*.go", ""), hookio.NoOpinion},
 
@@ -319,7 +319,7 @@ func TestRule_GluedQuoteParity(t *testing.T) {
 		// Secret-shaped but not deny-listed: classification hinges on the LAST
 		// segment (basename) or the WHOLE string (no "/" at all) — exactly the
 		// arms a boundary quote corrupts.
-		{"cat", "--file", "secrets/notes.txt", hookio.Ask},
+		{"cat", "--file", ".ssh/notes.txt", hookio.Ask},
 		{"cat", "--file", ".env", hookio.Ask},
 		{"cat", "--file", "auth.json", hookio.Ask},
 	}
@@ -814,7 +814,7 @@ func TestRule_NilEvaluator_NamedFormStillRuns(t *testing.T) {
 		// Named form — unchanged by the nil evaluator.
 		{"Read ssh key", fileInput("Read", "~/.ssh/id_rsa"), hookio.Ask},
 		{"cat dotenv", bashInput("cat .env"), hookio.Ask},
-		{"Grep secrets dir", searchInput("Grep", "password", "secrets/"), hookio.Ask},
+		{"Grep in a WellKnownSecret dir", searchInput("Grep", "password", ".ssh/"), hookio.Ask},
 		{"Read normal file", fileInput("Read", "internal/main.go"), hookio.NoOpinion},
 		// Resolved form — unavailable without an evaluator, so it degrades to the
 		// pre-pass behavior (Abstain) rather than panicking.
@@ -846,9 +846,9 @@ func TestRule_BareWordNotResolved_Abstain(t *testing.T) {
 		t.Errorf("kubectl get secrets = %v, want abstain (reason %q)", got.Decision, got.Reason)
 	}
 	// The same directory named path-shaped IS a hit — via the named form, since
-	// `./secrets/prod.json` is already lexically secret.
-	if got := hookio.Verdict(r.Evaluate(bashInput("cat ./secrets/prod.json"))); got.Decision != hookio.Ask {
-		t.Errorf("cat ./secrets/prod.json = %v, want ask (reason %q)", got.Decision, got.Reason)
+	// `./secrets/id_rsa.pem` is already lexically secret (M4's `.pem` suffix).
+	if got := hookio.Verdict(r.Evaluate(bashInput("cat ./secrets/id_rsa.pem"))); got.Decision != hookio.Ask {
+		t.Errorf("cat ./secrets/id_rsa.pem = %v, want ask (reason %q)", got.Decision, got.Reason)
 	}
 }
 
@@ -883,23 +883,33 @@ func TestRule_ResolutionBudgetBounded(t *testing.T) {
 }
 
 // ===========================================================================
-// pg2-pmk9q — the IN-REPO relaxation of the bare `secrets` component.
+// pg2-s39l5 — the bare `secrets` component is not an Ask signal at all.
+//
+// Formerly pg2-pmk9q's IN-REPO, READ-ONLY relaxation of the same component,
+// and pg2-n4i7n's narrower Go-source exception on top of it. Both are
+// superseded (see the package doc's decision 3): the fixture below still
+// holds every shape those rulings distinguished, but the removal no longer
+// depends on the repo/direction/extension axes they cared about, so the table
+// that consumes it now expects the SAME verdict for every row regardless of
+// where it sits.
 // ===========================================================================
 
-// repoScopeFixture builds one tree holding every shape the pg2-pmk9q ruling
-// distinguishes, so the matching and non-matching cases are adjacent in one place
-// and cannot drift apart:
+// repoScopeFixture builds one tree holding a variety of `secrets`-adjacent
+// shapes — in a repo, in a worktree, outside any repo, this rule's own .go
+// source, and paths that ALSO match a more specific WellKnownSecret arm — so
+// the "never Asks" and "still Asks" cases are adjacent in one place and cannot
+// drift apart:
 //
-//	<root>/secrets/prod.env             a credential store OUTSIDE any repo
+//	<root>/secrets/prod.env             a bare-component path OUTSIDE any repo
 //	<root>/repo/.git/                   repo marker (directory form)
 //	<root>/repo/internal/rules/secrets/secrets.go       the reported false positive
 //	<root>/repo/internal/rules/secrets/secrets_test.go  same false positive, "_test.go"
-//	<root>/repo/deploy/secrets/token    the operator-OVERRIDDEN guard
-//	<root>/repo/.env                    repo-blind `.env` arm
+//	<root>/repo/deploy/secrets/token    a bare-component path INSIDE a repo
+//	<root>/repo/.env                    repo-blind `.env` arm (unaffected)
 //	<root>/repo/secrets/.ssh/id_rsa     both arms match; the stronger must win
-//	<root>/repo/config/api-token.json   repo-blind basename arm
+//	<root>/repo/config/api-token.json   repo-blind basename arm (unaffected)
 //	<root>/wt/.git                      repo marker (FILE form — a git worktree)
-//	<root>/wt/secrets/token             same relaxation, reached via a worktree
+//	<root>/wt/secrets/token             same bare component, reached via a worktree
 func repoScopeFixture(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
@@ -955,84 +965,65 @@ func repoScopeFixture(t *testing.T) string {
 	return root
 }
 
-// The pg2-pmk9q ruling, pinned in both directions. A READ under a bare `secrets/`
-// component INSIDE a git repository stops prompting; every other shape keeps the
-// verdict it had.
-//
-// pg2-n4i7n's Go-source exception is pinned HERE too (the "this rule's own
-// source tree" rows below): unlike every other GenericSecretsDir match, a
-// ".go"/"_test.go" path is exempted on BOTH directions, not read-only, because
-// it is source code rather than credential data. See isGoSourceInRepo.
-//
-// GUARD 2 IS DELIBERATELY OVERRIDDEN HERE. pg2-pmk9q pinned
-// `deploy/secrets/token` as a NON-NEGOTIABLE regression guard that must keep
-// Asking. The operator OVERRODE it on 2026-08-13, with the guard's text in front of
-// them: a `deploy/` tree is inside a repo, so under the new model the read abstains
-// and covering such a tree becomes a project-level `.claude/settings.json` denyRead
-// entry (which patheval.LoadSandboxFilesystemConfig already merges). This is the
-// ONE coverage reduction in the ruling. The row below asserts the OVERRIDDEN
-// behaviour on purpose — it is not a stale expectation, and re-tightening it needs
-// a new ruling, not a test edit.
-func TestRule_GenericSecretsComponentSkippedInsideAGitRepo(t *testing.T) {
+// The pg2-s39l5 acceptance criterion, pinned in every shape the retired
+// pg2-pmk9q/pg2-n4i7n rulings used to distinguish: a bare `secrets` path
+// component alone NEVER Asks — not read-only, not repo-scoped, not
+// extension-scoped. `deploy/secrets/token` OUTSIDE any repo is no longer a
+// regression guard that must keep Asking (pg2-pmk9q's "guard 2" is gone, not
+// merely overridden): covering such a tree now needs an explicit
+// sandbox.filesystem.denyRead/denyWrite entry, exactly like every other
+// credential store decision 1 already requires config for.
+func TestRule_GenericSecretsComponentNeverAsks(t *testing.T) {
 	root := repoScopeFixture(t)
 	project := t.TempDir()
 	r := New(patheval.NewWithCWD(project, project))
 	tests := []struct {
 		name string
 		path string
-		read hookio.Decision
-		// write is the SAME path via a write tool. Reads and writes MUST stay
-		// distinguished (pg2-pmk9q guard 3) for every OTHER GenericSecretsDir
-		// match, and that relaxation is read-only. The Go-source rows below are
-		// the ONE exception (pg2-n4i7n): a ".go"/"_test.go" path is exempted on
-		// BOTH directions, so read and write agree there instead of diverging.
-		write hookio.Decision
+		want hookio.Decision
 	}{
-		// RELAXED — the reported false positive, and the general case it subsumes.
-		// pg2-n4i7n: exempted on BOTH directions, unlike every other row here —
-		// a .go/_test.go file is source, never credential data.
-		{"this rule's own source tree (secrets.go)", filepath.Join(root, "repo", "internal", "rules", "secrets", "secrets.go"), hookio.NoOpinion, hookio.NoOpinion},
-		{"this rule's own test source (secrets_test.go, pg2-n4i7n)", filepath.Join(root, "repo", "internal", "rules", "secrets", "secrets_test.go"), hookio.NoOpinion, hookio.NoOpinion},
-		{"deploy/secrets/token (guard 2, operator-OVERRIDDEN)", filepath.Join(root, "deploy", "secrets", "token"), hookio.Ask, hookio.Ask},
-		{"in-repo deploy/secrets/token", filepath.Join(root, "repo", "deploy", "secrets", "token"), hookio.NoOpinion, hookio.Ask},
-		{"in-WORKTREE secrets/token (.git is a FILE)", filepath.Join(root, "wt", "secrets", "token"), hookio.NoOpinion, hookio.Ask},
+		// NEVER ASKS — the bare `secrets` component alone, in every shape this
+		// fixture holds: this rule's own .go/_test.go source, in a repo, in a
+		// worktree, and outside any repo.
+		{"this rule's own source tree (secrets.go)", filepath.Join(root, "repo", "internal", "rules", "secrets", "secrets.go"), hookio.NoOpinion},
+		{"this rule's own test source (secrets_test.go)", filepath.Join(root, "repo", "internal", "rules", "secrets", "secrets_test.go"), hookio.NoOpinion},
+		{"deploy/secrets/token outside a repo", filepath.Join(root, "deploy", "secrets", "token"), hookio.NoOpinion},
+		{"in-repo deploy/secrets/token", filepath.Join(root, "repo", "deploy", "secrets", "token"), hookio.NoOpinion},
+		{"in-WORKTREE secrets/token (.git is a FILE)", filepath.Join(root, "wt", "secrets", "token"), hookio.NoOpinion},
+		{"~/secrets/prod.env outside a repo", filepath.Join(root, "secrets", "prod.env"), hookio.NoOpinion},
 
-		// NOT RELAXED, adjacent — GUARD 1: outside any repo the arm still fires.
-		{"guard 1: ~/secrets/prod.env outside a repo", filepath.Join(root, "secrets", "prod.env"), hookio.Ask, hookio.Ask},
+		// UNAFFECTED — the SPECIFIC arms this removal must not touch. A `.env`
+		// in a repo is the most common real credential file an agent reads, and
+		// `.ssh` / `*token*.json` name a specific credential store or file, so
+		// none of them is scoped by the retired repo test either.
+		{"repo .env stays lexical and repo-blind", filepath.Join(root, "repo", ".env"), hookio.Ask},
+		{"in-repo secrets/.ssh/id_rsa — stronger arm wins", filepath.Join(root, "repo", "secrets", ".ssh", "id_rsa"), hookio.Ask},
+		{"in-repo api-token.json basename arm", filepath.Join(root, "repo", "config", "api-token.json"), hookio.Ask},
 
-		// NOT RELAXED — the repo-BLIND arms (ruling decisions 2 and 3's bound). A
-		// `.env` in a repo is the most common real credential file an agent reads,
-		// and `.ssh` / `*token*.json` name a specific credential store or file, so
-		// none of them is scoped by the repo test.
-		{"repo .env stays lexical and repo-blind", filepath.Join(root, "repo", ".env"), hookio.Ask, hookio.Ask},
-		{"in-repo secrets/.ssh/id_rsa — stronger arm wins", filepath.Join(root, "repo", "secrets", ".ssh", "id_rsa"), hookio.Ask, hookio.Ask},
-		{"in-repo api-token.json basename arm", filepath.Join(root, "repo", "config", "api-token.json"), hookio.Ask, hookio.Ask},
-
-		// Ordinary in-repo source is untouched in either direction.
-		{"ordinary in-repo file", filepath.Join(root, "repo", "README.md"), hookio.NoOpinion, hookio.NoOpinion},
+		// Ordinary in-repo source is untouched.
+		{"ordinary in-repo file", filepath.Join(root, "repo", "README.md"), hookio.NoOpinion},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			for label, input := range map[string]*hookio.HookInput{
 				"Bash cat": bashInput("cat " + tt.path),
 				"Read":     fileInput("Read", tt.path),
+				"Write":    fileInput("Write", tt.path),
 			} {
-				if got := hookio.Verdict(r.Evaluate(input)); got.Decision != tt.read {
-					t.Errorf("%s %s = %v, want %v (reason %q)", label, tt.path, got.Decision, tt.read, got.Reason)
+				if got := hookio.Verdict(r.Evaluate(input)); got.Decision != tt.want {
+					t.Errorf("%s %s = %v, want %v (reason %q)", label, tt.path, got.Decision, tt.want, got.Reason)
 				}
-			}
-			if got := hookio.Verdict(r.Evaluate(fileInput("Write", tt.path))); got.Decision != tt.write {
-				t.Errorf("Write %s = %v, want %v (reason %q)", tt.path, got.Decision, tt.write, got.Reason)
 			}
 		})
 	}
 }
 
-// GUARD 3, stated as a RELATION rather than as the table's hardcoded pair: a WRITE
-// to a path is never LESS restrictive than a READ of the same path. That is the
-// property the ruling requires ("reads and writes MUST stay distinguished"), and it
-// is what a table of verdicts cannot keep — a later retuning that relaxed writes to
-// match reads would leave every row of the table passing.
+// A general regression guard, stated as a RELATION rather than a hardcoded
+// pair: a WRITE to a path is never LESS restrictive than a READ of the same
+// path. Every GenericSecretsDir-only row above now has read == write
+// trivially, but the relation stays worth pinning for the WellKnownSecret
+// rows, where denyListed's read/write split (IsDenyRead vs IsDenyWrite) COULD
+// diverge if either config list were edited independently.
 //
 // hookio.Decision is ordered by restrictiveness, so the relation is
 // `write >= read`, one-directional on purpose: equal is fine (most paths), weaker
@@ -1061,12 +1052,13 @@ func TestRule_WriteNeverLessRestrictiveThanRead(t *testing.T) {
 	}
 }
 
-// The relaxation FAILS CLOSED when the repo question cannot be answered. A nil
-// evaluator is a supported configuration (it makes the rule cwd-independent — see
-// resolve), and with it there is no cwd to expand a path against, so the `secrets`
-// arm must keep FIRING rather than silently relaxing. The relaxation only ever
-// removes a prompt, so an unanswerable question must cost an Ask, never silence.
-func TestRule_InRepoRelaxationFailsClosedWithoutAnEvaluator(t *testing.T) {
+// UNLIKE the retired in-repo relaxation (which asked the evaluator a
+// filesystem question and had to fail CLOSED to Ask when it had none),
+// lexicalHit's GenericSecretsDir exclusion is now a pure function of
+// secretpath.Classify — it needs no evaluator at all. This pins that a nil
+// evaluator does NOT bring the bare `secrets` component back as an Ask
+// signal.
+func TestRule_GenericSecretsComponentNeverAsksWithoutAnEvaluator(t *testing.T) {
 	root := repoScopeFixture(t)
 	r := New(nil)
 	for _, p := range []string{
@@ -1074,68 +1066,44 @@ func TestRule_InRepoRelaxationFailsClosedWithoutAnEvaluator(t *testing.T) {
 		filepath.Join(root, "repo", "internal", "rules", "secrets", "secrets_test.go"),
 		filepath.Join(root, "repo", "deploy", "secrets", "token"),
 	} {
-		if got := hookio.Verdict(r.Evaluate(fileInput("Read", p))); got.Decision != hookio.Ask {
-			t.Errorf("nil evaluator, Read %s = %v, want ask — the relaxation must fail closed (reason %q)", p, got.Decision, got.Reason)
+		if got := hookio.Verdict(r.Evaluate(fileInput("Read", p))); got.Decision != hookio.NoOpinion {
+			t.Errorf("nil evaluator, Read %s = %v, want abstain — the removal does not depend on an evaluator (reason %q)", p, got.Decision, got.Reason)
 		}
 	}
 }
 
 // ===========================================================================
-// pg2-q5ogr — a shell-variable-BOUND in-repo path argument gets the SAME
-// in-repo relaxation a literal spelling of the identical path already gets.
+// pg2-q5ogr — a shell-variable-BOUND path argument is classified from its
+// BOUND VALUE, not its unexpanded literal text.
+//
+// Originally motivated by decision 3's now-removed in-repo relaxation (a
+// bound $P resolving inside a git repo had to be classified from its real
+// value for that relaxation to fire at all — see lexicalRef's doc). That
+// specific motivation is gone with the relaxation (pg2-s39l5), but the
+// underlying mechanism still matters for WellKnownSecret matches: a bound
+// $NAME can just as easily resolve to `~/.ssh/id_rsa` as to anything else,
+// and the classification must see the real value.
 // ===========================================================================
 
-// TestRule_VarBoundInRepoPathArgumentRelaxed is the bead's own live-repro
-// shape, reproduced as a unit test:
-//
-//	P=packages/claude-extended-tool-approver; git ls-tree -r --name-only main -- $P/internal/rules/secrets/
-//
-// reached "ask" on the pre-fix binary even though $P's own bound value
-// resolves inside the repo, because lexicalHit's in-repo relaxation asked
-// r.pe.CleanPath("$P/internal/rules/secrets/") — which cannot expand a
-// shell-LOCAL binding (CETA receives no environment at all) — got "" back
-// (unexpanded-variable pattern), and inGitRepo failed closed. See
-// lexicalRef's doc for the fix.
-//
-// The command text mirrors the bead's repro, substituting repoScopeFixture's
-// own worktree row (its doc calls "<root>/wt/secrets/token" "the SAME
-// relaxation, reached via a worktree") for the bead's literal packages/…
-// path, so the precondition that the target both matches GenericSecretsDir
-// and sits inside a git working tree is the fixture's own, already-verified
-// guarantee rather than a fresh one. InCommandVars is set directly rather
-// than fed as a compound "P=…; git …" command, matching the established
-// convention (see safecmds_test.go's TestSafecmds_InCommandLiteralRelief_*):
-// the ENGINE only ever hands a rule the ONE leaf being judged, with
-// InCommandVars already computed from the OTHER leaves and attached to that
-// single-leaf synthetic HookInput.
-func TestRule_VarBoundInRepoPathArgumentRelaxed(t *testing.T) {
-	root := repoScopeFixture(t)
+// TestRule_VarBoundPathArgumentExpandedBeforeClassification proves the
+// candidate is classified from $P's BOUND VALUE, not its unexpanded literal
+// text: `$P/id_rsa` alone matches nothing (no recognized component or
+// basename), but once $P is known to be bound to ".ssh" the SAME command
+// reaches a genuine WellKnownSecret path and Asks. InCommandVars is set
+// directly rather than fed as a compound "P=…; git …" command, matching the
+// established convention (see safecmds_test.go's
+// TestSafecmds_InCommandLiteralRelief_*): the ENGINE only ever hands a rule
+// the ONE leaf being judged, with InCommandVars already computed from the
+// OTHER leaves and attached to that single-leaf synthetic HookInput.
+func TestRule_VarBoundPathArgumentExpandedBeforeClassification(t *testing.T) {
 	project := t.TempDir()
 	r := New(patheval.NewWithCWD(project, project))
 
-	input := bashInput(`git ls-tree -r --name-only main -- $P/secrets/token`)
-	input.InCommandVars = map[string]string{"P": filepath.Join(root, "wt")}
-
-	if got := hookio.Verdict(r.Evaluate(input)); got.Decision != hookio.NoOpinion {
-		t.Errorf("$P bound in-repo, `git ls-tree -- $P/secrets/token` = %v, want abstain (NoOpinion) — the in-repo relaxation must resolve the bound value (reason %q)", got.Decision, got.Reason)
-	}
-}
-
-// TestRule_VarBoundOutsideRepoPathArgumentStillAsks is the required negative
-// case: a shell variable that resolves to a path OUTSIDE any git repository
-// must not be relaxed just because it is spelled through a variable — the
-// bug this bead fixes must not become "any $VAR-prefixed secrets path is
-// approved unconditionally".
-func TestRule_VarBoundOutsideRepoPathArgumentStillAsks(t *testing.T) {
-	root := repoScopeFixture(t)
-	project := t.TempDir()
-	r := New(patheval.NewWithCWD(project, project))
-
-	input := bashInput(`git ls-tree -r --name-only main -- $P/secrets/prod.env`)
-	input.InCommandVars = map[string]string{"P": root}
+	input := bashInput(`git ls-tree -r --name-only main -- $P/id_rsa`)
+	input.InCommandVars = map[string]string{"P": ".ssh"}
 
 	if got := hookio.Verdict(r.Evaluate(input)); got.Decision != hookio.Ask {
-		t.Errorf("$P bound OUTSIDE a repo, `git ls-tree -- $P/secrets/prod.env` = %v, want ask — resolving outside the repo must not be relaxed (reason %q)", got.Decision, got.Reason)
+		t.Errorf("$P bound to .ssh, `git ls-tree -- $P/id_rsa` = %v, want ask — the bound value, not the unexpanded text, must be classified (reason %q)", got.Decision, got.Reason)
 	}
 }
 
@@ -1144,15 +1112,17 @@ func TestRule_VarBoundOutsideRepoPathArgumentStillAsks(t *testing.T) {
 // binding for the name at all (the ordinary case — no assignment anywhere in
 // the command, or the engine simply never threaded one), a $VAR-prefixed
 // candidate is tested exactly as it was before this bead — as its own
-// unexpanded literal text, which the in-repo relaxation cannot resolve and so
-// fails closed to Ask.
+// unexpanded literal text, which secretpath.Classify does not recognize
+// (`$P/id_rsa` has no "/"-separated component or basename any arm matches),
+// so this falls back to abstaining rather than picking up a false Ask from
+// the unexpanded spelling.
 func TestRule_VarBoundNoInCommandBindingUnaffected(t *testing.T) {
 	project := t.TempDir()
 	r := New(patheval.NewWithCWD(project, project))
 
-	got := hookio.Verdict(r.Evaluate(bashInput(`git ls-tree -r --name-only main -- $P/secrets/token`)))
-	if got.Decision != hookio.Ask {
-		t.Errorf("no InCommandVars binding for $P = %v, want ask — an unresolvable variable must keep the pre-fix fail-safe verdict (reason %q)", got.Decision, got.Reason)
+	got := hookio.Verdict(r.Evaluate(bashInput(`git ls-tree -r --name-only main -- $P/id_rsa`)))
+	if got.Decision != hookio.NoOpinion {
+		t.Errorf("no InCommandVars binding for $P = %v, want abstain — an unresolvable variable falls back to its own unrecognized literal text (reason %q)", got.Decision, got.Reason)
 	}
 }
 
@@ -1189,33 +1159,36 @@ func TestRule_ReadingThisRulesOwnSourceNoLongerPrompts(t *testing.T) {
 			t.Errorf("%s = %v, want abstain — reading the secrets rule's own source must not prompt (reason %q)", label, got.Decision, got.Reason)
 		}
 	}
-	// A WRITE to the same file was NOT relaxed by pg2-pmk9q's read-only guard 3
-	// — but IS relaxed by pg2-n4i7n's narrower Go-source exception
-	// (isGoSourceInRepo), which fires on BOTH directions. See
-	// TestRule_EditingThisRulesOwnGoSourceNoLongerAsks for the full acceptance
-	// coverage (Write/Edit/MultiEdit/Delete, plus secrets_test.go).
+	// A WRITE to the same file is now abstained too — pg2-s39l5 removed the
+	// bare `secrets` component as an Ask signal on BOTH directions, which
+	// subsumes what pg2-n4i7n's narrower Go-source exception used to carve out
+	// on its own. See TestRule_EditingThisRulesOwnGoSourceNoLongerAsks for the
+	// full acceptance coverage (Write/Edit/MultiEdit/Delete, plus
+	// secrets_test.go).
 	if got := hookio.Verdict(r.Evaluate(fileInput("Write", self))); got.Decision != hookio.NoOpinion {
-		t.Errorf("Write %s = %v, want abstain — a Go source file under this rule module is exempted on both directions (pg2-n4i7n, reason %q)", self, got.Decision, got.Reason)
+		t.Errorf("Write %s = %v, want abstain — the bare secrets component is not an Ask signal on either direction (pg2-s39l5, reason %q)", self, got.Decision, got.Reason)
 	}
 }
 
 // ===========================================================================
-// pg2-n4i7n — a Go SOURCE file under this rule's own module is not credential
-// DATA, so it is exempted from the `secrets` component match on BOTH
-// directions, not read-only like pg2-pmk9q's general relaxation.
+// Formerly pg2-n4i7n's narrower Go-source exception (write-only relief for a
+// ".go"/"_test.go" path under a `secrets` component). pg2-s39l5 subsumes it:
+// the bare component is no longer an Ask signal on EITHER direction for ANY
+// file, so this rule's own source keeps passing for the broader reason.
 // ===========================================================================
 
 // TestRule_EditingThisRulesOwnGoSourceNoLongerAsks is the literal acceptance
-// criterion of pg2-n4i7n (pg2-kfyv2's asklog evidence: every Edit to
-// secrets.go/secrets_test.go across ≥8 worktrees, Asked and always approved),
-// proven against the REAL files rather than only a fixture that merely
-// resembles them — the same "test the actual reported path" discipline
-// TestRule_ReadingThisRulesOwnSourceNoLongerPrompts already applies to reads.
+// criterion of the reported false positive (pg2-kfyv2's asklog evidence:
+// every Edit to secrets.go/secrets_test.go across ≥8 worktrees, Asked and
+// always approved), proven against the REAL files rather than only a fixture
+// that merely resembles them — the same "test the actual reported path"
+// discipline TestRule_ReadingThisRulesOwnSourceNoLongerPrompts already
+// applies to reads.
 //
 // It SKIPS when the checkout is not a git working tree for the same reason
 // that test does: the nix build sandbox copies the source WITHOUT `.git`, so
-// repoScopeFixture (via TestRule_GenericSecretsComponentSkippedInsideAGitRepo)
-// carries the unconditional guarantee instead.
+// repoScopeFixture (via TestRule_GenericSecretsComponentNeverAsks) carries the
+// unconditional guarantee instead.
 func TestRule_EditingThisRulesOwnGoSourceNoLongerAsks(t *testing.T) {
 	for _, name := range []string{"secrets.go", "secrets_test.go"} {
 		t.Run(name, func(t *testing.T) {
@@ -1224,7 +1197,7 @@ func TestRule_EditingThisRulesOwnGoSourceNoLongerAsks(t *testing.T) {
 				t.Fatal(err)
 			}
 			if got := secretpath.Classify(self); got != secretpath.GenericSecretsDir {
-				t.Fatalf("precondition: Classify(%s) = %v, want GenericSecretsDir — this path must still match the arm being exempted, or the test proves nothing", self, got)
+				t.Fatalf("precondition: Classify(%s) = %v, want GenericSecretsDir — this path must still match the arm being excluded, or the test proves nothing", self, got)
 			}
 			if !patheval.InGitRepo(self) {
 				t.Skipf("checkout at %s is not a git working tree (nix build sandbox); repoScopeFixture carries this guarantee unconditionally", self)
@@ -1235,37 +1208,9 @@ func TestRule_EditingThisRulesOwnGoSourceNoLongerAsks(t *testing.T) {
 				t.Run(tool, func(t *testing.T) {
 					got := hookio.Verdict(r.Evaluate(fileInput(tool, self)))
 					if got.Decision != hookio.NoOpinion {
-						t.Errorf("%s %s = %v, want abstain — a Go source file under this rule module must not Ask on write (pg2-n4i7n, reason %q)", tool, self, got.Decision, got.Reason)
+						t.Errorf("%s %s = %v, want abstain — the bare secrets component is not an Ask signal on write either (pg2-s39l5, reason %q)", tool, self, got.Decision, got.Reason)
 					}
 				})
-			}
-		})
-	}
-}
-
-// TestRule_EditingAGenuineCredentialFileStillAsks is the pg2-ifbfa regression
-// guard this bead must not reopen: the Go-source exemption above is keyed on
-// the FILE EXTENSION, not on "any file under a secrets/ component", so a
-// non-.go path under the identical component — a real credential store's
-// contents — must still Ask on write exactly as before.
-func TestRule_EditingAGenuineCredentialFileStillAsks(t *testing.T) {
-	root := repoScopeFixture(t)
-	project := t.TempDir()
-	r := New(patheval.NewWithCWD(project, project))
-	for _, tt := range []struct {
-		name string
-		path string
-	}{
-		{"in-repo deploy/secrets/token", filepath.Join(root, "repo", "deploy", "secrets", "token")},
-		{"in-repo secrets/.ssh/id_rsa", filepath.Join(root, "repo", "secrets", ".ssh", "id_rsa")},
-		{"in-WORKTREE secrets/token", filepath.Join(root, "wt", "secrets", "token")},
-		{"outside any repo, secrets/prod.env", filepath.Join(root, "secrets", "prod.env")},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			for _, tool := range []string{"Write", "Edit", "MultiEdit", "Delete"} {
-				if got := hookio.Verdict(r.Evaluate(fileInput(tool, tt.path))); got.Decision != hookio.Ask {
-					t.Errorf("%s %s = %v, want ask — the genuine credential-file write guard (pg2-ifbfa) must not be reopened by the Go-source exemption (reason %q)", tool, tt.path, got.Decision, got.Reason)
-				}
 			}
 		})
 	}
