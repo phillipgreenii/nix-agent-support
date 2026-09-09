@@ -6,6 +6,9 @@ import (
 	"testing"
 )
 
+// TestEnvWithoutGHToken exercises the general strip-token behavior; the
+// enterprise/target-var and git-dir-family regressions have their own
+// dedicated tests below since they cover distinct, unrelated leak vectors.
 func TestEnvWithoutGHToken(t *testing.T) {
 	in := []string{
 		"PATH=/usr/bin",
@@ -20,6 +23,7 @@ func TestEnvWithoutGHToken(t *testing.T) {
 			t.Errorf("envWithoutGHToken left token entry: %q", kv)
 		}
 	}
+	// Non-token entries must survive.
 	want := map[string]bool{"PATH=/usr/bin": false, "HOME=/home/me": false, "LANG=en_US.UTF-8": false}
 	for _, kv := range out {
 		if _, ok := want[kv]; ok {
@@ -130,6 +134,43 @@ func TestGHAuthTokenCommand_ExcludesEnterpriseAndTargetVars(t *testing.T) {
 	}
 }
 
+// TestGHAuthTokenCommand_ExcludesLeakedGitDirFamily is the token-resolver
+// half of bead pg2-5xn2j's regression, ported to this backend:
+// ghAuthTokenCommand has the same os.Environ()-passthrough shape as
+// ghexec.go's choke point, so it must be scrubbed the same way even though
+// `gh auth token` is account-scoped rather than repository-scoped.
+// leakedGitDirFamily/assertNoLeakedGitDirFamily live in ghexec_test.go
+// (same package) since ghexec_test.go's own choke-point test needs them
+// too.
+func TestGHAuthTokenCommand_ExcludesLeakedGitDirFamily(t *testing.T) {
+	for _, kv := range leakedGitDirFamily {
+		k, v, _ := strings.Cut(kv, "=")
+		t.Setenv(k, v)
+	}
+
+	cmd := ghAuthTokenCommand(context.Background())
+
+	assertNoLeakedGitDirFamily(t, cmd.Env)
+}
+
+// TestGHAuthTokenCommand_StripsAmbientGHToken proves the resolver's own `gh
+// auth token` exec never forwards an inherited GH_TOKEN/GITHUB_TOKEN — the
+// reason this backend's ghCLITokenSource strips them (auth.go/token.go's
+// doc comments): a leaked ambient token would make `gh auth token` just
+// echo it back instead of consulting the stored (keychain) credential.
+func TestGHAuthTokenCommand_StripsAmbientGHToken(t *testing.T) {
+	t.Setenv("GH_TOKEN", "ambient-gh")
+	t.Setenv("GITHUB_TOKEN", "ambient-github")
+
+	cmd := ghAuthTokenCommand(context.Background())
+
+	for _, kv := range cmd.Env {
+		if strings.HasPrefix(kv, "GH_TOKEN=") || strings.HasPrefix(kv, "GITHUB_TOKEN=") {
+			t.Errorf("ghAuthTokenCommand leaked ambient token entry into its own env: %q", kv)
+		}
+	}
+}
+
 // TestGHCLITokenSource_Token_SurfacesStderrOnFailure is the regression test
 // for bead pg2-y23d4 #32: Token() used to call .Output() and return only
 // "gh auth token: exit status N", discarding gh's actual stderr — so every
@@ -146,6 +187,58 @@ func TestGHCLITokenSource_Token_SurfacesStderrOnFailure(t *testing.T) {
 	if !strings.Contains(err.Error(), "SAML enforcement") {
 		t.Errorf("Token() error does not surface gh's stderr, got: %v", err)
 	}
+}
+
+func TestEnvTokenSource(t *testing.T) {
+	t.Run("set returns value", func(t *testing.T) {
+		t.Setenv("GH_TOKEN", "x")
+		src := envTokenSource{vars: []string{"GH_TOKEN", "GITHUB_TOKEN"}}
+		tok, err := src.Token(context.Background())
+		if err != nil {
+			t.Fatalf("Token: %v", err)
+		}
+		if tok != "x" {
+			t.Errorf("Token = %q, want x", tok)
+		}
+	})
+	t.Run("empty returns empty no error", func(t *testing.T) {
+		t.Setenv("GH_TOKEN", "")
+		t.Setenv("GITHUB_TOKEN", "")
+		src := envTokenSource{vars: []string{"GH_TOKEN", "GITHUB_TOKEN"}}
+		tok, err := src.Token(context.Background())
+		if err != nil {
+			t.Fatalf("Token: %v", err)
+		}
+		if tok != "" {
+			t.Errorf("Token = %q, want empty", tok)
+		}
+	})
+	t.Run("second var used when first is empty", func(t *testing.T) {
+		t.Setenv("GH_TOKEN", "")
+		t.Setenv("GITHUB_TOKEN", "fallback")
+		src := envTokenSource{vars: []string{"GH_TOKEN", "GITHUB_TOKEN"}}
+		tok, err := src.Token(context.Background())
+		if err != nil {
+			t.Fatalf("Token: %v", err)
+		}
+		if tok != "fallback" {
+			t.Errorf("Token = %q, want fallback", tok)
+		}
+	})
+}
+
+// fakeTokenSource is a TokenSource stub used by the chain tests here and by
+// ghexec_test.go's CLI-level tests; it records whether it was consulted so
+// chain/short-circuit behavior can be asserted.
+type fakeTokenSource struct {
+	tok    string
+	err    error
+	called bool
+}
+
+func (f *fakeTokenSource) Token(_ context.Context) (string, error) {
+	f.called = true
+	return f.tok, f.err
 }
 
 func TestChainTokenSource(t *testing.T) {
@@ -187,4 +280,36 @@ func TestChainTokenSource(t *testing.T) {
 			t.Error("downstream source not consulted on env miss")
 		}
 	})
+
+	t.Run("downstream error surfaces when no source yields a token", func(t *testing.T) {
+		t.Setenv("GH_TOKEN", "")
+		t.Setenv("GITHUB_TOKEN", "")
+		chain := chainTokenSource{sources: []TokenSource{
+			envTokenSource{vars: []string{"GH_TOKEN", "GITHUB_TOKEN"}},
+			&fakeTokenSource{tok: ""},
+		}}
+		_, err := chain.Token(context.Background())
+		if err == nil {
+			t.Fatal("want error when no source yields a token")
+		}
+	})
+}
+
+// TestDefaultTokenSource_HonorsEnvBeforeGH proves defaultTokenSource wires
+// the env source ahead of the gh CLI source, matching its doc comment
+// ("honors an existing GH_TOKEN/GITHUB_TOKEN, else reads gh's stored
+// credential"): with GH_TOKEN set, the gh CLI must never be consulted, so
+// this must resolve without gh on PATH at all.
+func TestDefaultTokenSource_HonorsEnvBeforeGH(t *testing.T) {
+	t.Setenv("PATH", t.TempDir()) // no gh anywhere on PATH
+	t.Setenv("GH_TOKEN", "envtok")
+	t.Setenv("GITHUB_TOKEN", "")
+
+	tok, err := defaultTokenSource().Token(context.Background())
+	if err != nil {
+		t.Fatalf("Token: %v", err)
+	}
+	if tok != "envtok" {
+		t.Errorf("Token = %q, want envtok", tok)
+	}
 }
