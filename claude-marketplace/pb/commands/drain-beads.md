@@ -203,10 +203,24 @@ proceeding on currently loaded text (direct interactive invocation).`)
    then re-run the atomic claim above. Bound the two checks to a SHARED budget
    of 3 consecutive container-guard releases (a hit on either check counts)
    within one CLAIM invocation; a 4th hit without making progress means the
-   guard itself isn't resolving the hazard (e.g. every ready bead at this
-   priority is a container) — stop retrying and route to STUCK, reporting the
-   bead id and whichever check fired (the note verbatim for check 1, the
-   child ids and statuses for check 2), rather than looping (P-4: a blocked
+   guard itself isn't resolving the hazard — most often a non-`epic` container
+   that OUTRANKS every other ready bead on priority, so it re-wins the atomic
+   claim's tie-break every single pass (provenance: `tc-ipgw`, live instance
+   `tc-w5rib.1` — a P1 container whose only live children were `human`-labeled
+   sat above every P2 ready bead and re-won the claim 4 times running). **D-9**
+   forbids the two mechanisms that would normally pull a bead out of this race
+   (a `--blocked-by` edge onto its own child, a `--defer`), so before routing
+   to STUCK, take the one D-9-compliant lever left: demote the container's own
+   priority to match its children's (read it off the check-2 listing, or run
+   that query now if only check 1 fired) — `bd update <id> --priority <n>
+   --actor "ID"`. This is neither a blocking edge nor a defer, is
+   non-destructive and reversible, and stops the container from dominating the
+   same priority tie next pass. Release it (as above) and return to CLAIM —
+   this alone resolves the common case without ever reaching STUCK. Only if
+   the SAME container exhausts this guard AGAIN after its priority was already
+   demoted does this route to STUCK, reporting the bead id, whichever check
+   fired (the note verbatim for check 1, the child ids and statuses for check
+   2), and the priority already applied, rather than looping (P-4: a blocked
    precondition MUST bound its repeats and name the escalation). A bead
    surfaced to STUCK this way is a candidate for having the container-note
    marker added to its `notes` by whoever resolves it, so the same parent does
