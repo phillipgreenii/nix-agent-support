@@ -34,6 +34,11 @@ const coreStateStarted = "started"
 // "a modal is open" state; ModalKind, Task 4.8's own addition, says WHICH
 // one). Mirrors pa-monitor's own ModalKind (packages/pa-monitor/internal/
 // tui/model.go), with ModalGates added for this package's gates modal.
+//
+// ModalProblems (bead pg2-5l2he) is the aggregated problems/diagnostics
+// view: a superset/detail modal, additive to every mechanism above --
+// nothing here replaces the banner (banner.go), the Gates modal, the
+// Legend modal, or per-row drilldown.
 type ModalKind int
 
 const (
@@ -41,6 +46,7 @@ const (
 	ModalHelp
 	ModalLegend
 	ModalGates
+	ModalProblems
 )
 
 // Options configures Run, the exported entry point cmd/pr-pool/tui_cmd.go
@@ -541,7 +547,7 @@ func unfocusedPaneDropOrder(p int) int {
 // model.go's sibling files already establish for the footer's left column.
 func (m *Model) renderFooter(now time.Time) string {
 	w := render.EffectiveWidth(m.width)
-	left := " [tab] pane  [enter] details  [g] gates  [l] legend  [?] help  [q] quit"
+	left := " [tab] pane  [enter] details  [g] gates  [l] legend  [!] problems  [?] help  [q] quit"
 	if flash := m.flashText(w); flash != "" {
 		left = " " + flash
 	}

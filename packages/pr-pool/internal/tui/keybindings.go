@@ -36,6 +36,7 @@ var Bindings = []Binding{
 	{Keys: []string{"P"}, Description: "Toggle the quota gate (no optimistic flip)", Handle: (*Model).handleToggleQuotaGate},
 	{Keys: []string{"g"}, Description: "Gates modal", Handle: handleOpenGatesModal},
 	{Keys: []string{"l"}, Description: "Legend", Handle: handleOpenLegend},
+	{Keys: []string{"!"}, Description: "Problems (aggregated diagnostics)", Handle: handleOpenProblems},
 	{Keys: []string{"?"}, Description: "Help", Handle: handleOpenHelp},
 	{Keys: []string{"tab"}, Description: "Focus next pane", Handle: handleFocusNext},
 	{Keys: []string{"shift+tab"}, Description: "Focus previous pane", Handle: handleFocusPrev},
@@ -75,6 +76,18 @@ func handleOpenLegend(m *Model) tea.Cmd {
 
 func handleOpenHelp(m *Model) tea.Cmd {
 	m.openModal(ModalHelp)
+	return nil
+}
+
+// handleOpenProblems implements the "!" key (bead pg2-5l2he): opens the
+// aggregated problems/diagnostics modal (problems.go's renderProblemsModal).
+// "!" is chosen to mirror attentionLine's own "! " marker (liveness.go) --
+// the same glyph the banner already uses to flag that something needs
+// attention now names the key that shows the full detail behind it. Additive
+// only, per openModal's own shared contract: it does not touch the banner,
+// the Gates modal, the Legend modal, or drilldown.
+func handleOpenProblems(m *Model) tea.Cmd {
+	m.openModal(ModalProblems)
 	return nil
 }
 

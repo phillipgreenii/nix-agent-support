@@ -39,6 +39,8 @@ func (m *Model) renderModal() string {
 		return render.LegendModal(m.width, m.height, m.modalScrollOffset)
 	case ModalGates:
 		return m.renderGatesModal()
+	case ModalProblems:
+		return m.renderProblemsModal()
 	default:
 		return ""
 	}
