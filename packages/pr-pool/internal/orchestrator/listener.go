@@ -11,7 +11,45 @@ import (
 	"github.com/phillipgreenii/pr-pool/internal/eventqueue"
 	"github.com/phillipgreenii/pr-pool/internal/executor"
 	"github.com/phillipgreenii/pr-pool/internal/roles"
+	"github.com/phillipgreenii/pr-pool/internal/watchdog"
 )
+
+// ResourceLimitObserver is notified when one Offer's dispatch ends because
+// the role hit its OWN resource ceiling — the glossary's "resource-limit"
+// outcome (`packages/pr-pool/docs/behavior/glossary.md`'s "Outcomes"
+// section): "a capacity or quota ceiling was reached... not a defect, and
+// the handler will be able again once the ceiling lifts." Today the only
+// producer is the budget watchdog's hard stop (watchdog.ErrBudgetExceeded,
+// internal/watchdog) racing a ccpool role's wait (executor's
+// workerWaitWithWatchdog). Offer observes this INLINE, before it returns
+// its (accepted) OfferResult — the same synchronous dispatch-reply path
+// Offer already reports every other outcome through (its own doc: "no
+// deferred/async form on this bridge"), never the async session-status
+// callback internal/core dropped 2026-07-28 (that package's own doc) — so
+// this hook does not reopen that decision, nor the internal/metrics
+// post-accept scope-cut (metrics.go's package doc): it is a separate,
+// ring-only signal cmd/pr-pool/run.go's activityObserver wires into
+// internal/activity.Ring, not a metrics counter.
+//
+// (Realization note, `packages/pr-pool/docs/behavior/README.md`'s
+// "Realization gaps" register: the generic contract's INV-FAIL-1 states a
+// post-accept outcome is surfaced only "on the handler's own surface,"
+// never back to the core. roleListener IS the INTF-HANDLER boundary from
+// the queue's own point of view, so this hook is a recorded gap against
+// that invariant — the SAME kind of gap the register already carries for
+// INV-WORKFLOW-1 (buildResult's created/closed/handed-back), not a new
+// exception invented here.)
+type ResourceLimitObserver interface {
+	// OnResourceLimit fires once per dispatch whose handler-side outcome
+	// was a resource-limit hit. eventID is the accepted event's own ID —
+	// the SAME id eventqueue.Observer.OnAccept receives moments later for
+	// this identical accept (both derive from this one synchronous Offer
+	// call) — so a consumer can correlate this signal with, and override,
+	// the eventqueue's own default "delivered" recording for that accept.
+	// evtType is the event's Type, matching every other per-event Observer
+	// hook in this codebase (e.g. eventqueue.Observer.OnDispatchFailure).
+	OnResourceLimit(eventID, evtType string)
+}
 
 // roleListener implements eventqueue.BackoffListener (INV-FAIL-2, Task 1.3):
 // a compile-time check that a future signature drift on either interface
@@ -68,6 +106,13 @@ type roleListener struct {
 	// test) disables the check: Offer never consults it and behaves exactly
 	// as before this field existed.
 	reg *core.Registry
+	// resourceLimitObs is notified of a resource-limit hit (this bead,
+	// pg2-fm2gw) — captured once at construction from o.ResourceLimitObserver,
+	// the same capture-at-construction pattern reg/poolDefault use. nil (the
+	// default, and every pre-this-bead test) disables the notification
+	// entirely: Offer still runs the identical errors.Is check but skips the
+	// call, matching this package's behavior before this field existed.
+	resourceLimitObs ResourceLimitObserver
 }
 
 // NewListener returns the eventqueue.Listener for role, run under ctx — the
@@ -79,8 +124,12 @@ type roleListener struct {
 // Task 1.3) at construction, the same way bootCore threads cfg.RetryBackoff
 // into eventqueue.WithRetryBackoff. o.Registry (Task 2.3) is captured the
 // same way: a nil o.Registry disables the availability check entirely.
+// o.ResourceLimitObserver (this bead, pg2-fm2gw) is captured identically.
 func (o *Orchestrator) NewListener(ctx context.Context, role roles.Role) eventqueue.Listener {
-	return &roleListener{o: o, role: role, ctx: ctx, poolDefault: o.Cfg.RetryBackoff, reg: o.Registry}
+	return &roleListener{
+		o: o, role: role, ctx: ctx, poolDefault: o.Cfg.RetryBackoff,
+		reg: o.Registry, resourceLimitObs: o.ResourceLimitObserver,
+	}
 }
 
 func (l *roleListener) ID() string { return l.role.Name }
@@ -162,6 +211,17 @@ func (l *roleListener) Matches(evt eventqueue.Event) bool {
 //     completing — so it is reported as a decline, not run through the
 //     normal buildResult/emitResult completed-dispatch accounting (nothing
 //     meaningful happened to the bead for the caller to record).
+//
+// This bead (pg2-fm2gw) adds a THIRD, post-accept signal, checked after the
+// two pre-accept declines above: a budget hard-stop
+// (watchdog.ErrBudgetExceeded, surfaced through executor's
+// waitFailureResult/workerWaitWithWatchdog exactly as it already was before
+// this bead) is a genuine ACCEPT, never a decline — the dispatch ran to
+// completion inline, same as any other outcome — so it still returns
+// Accepted=true below. l.resourceLimitObs (nil unless o.ResourceLimitObserver
+// is set) is notified BEFORE emitResult, purely so a consumer's own
+// correlation state (cmd/pr-pool/run.go's activityObserver) is updated
+// before anything else can observe this event id's outcome.
 func (l *roleListener) Offer(o eventqueue.Offering) eventqueue.OfferResult {
 	if l.reg != nil && !l.reg.Available(l.role.Name) {
 		return eventqueue.OfferResult{Accepted: false, Decline: eventqueue.DeclineUnavailable}
@@ -172,6 +232,9 @@ func (l *roleListener) Offer(o eventqueue.Offering) eventqueue.OfferResult {
 	res, err := l.o.workOne(l.ctx, d)
 	if errors.Is(err, executor.ErrBusy) {
 		return eventqueue.OfferResult{Accepted: false, Decline: eventqueue.DeclineBusy}
+	}
+	if errors.Is(err, watchdog.ErrBudgetExceeded) && l.resourceLimitObs != nil {
+		l.resourceLimitObs.OnResourceLimit(evt.ID, evt.Type)
 	}
 	l.o.emitResult(l.ctx, l.role, d.Item.ID, l.o.buildResult(l.ctx, l.role, d, pre, preOK, res, err), err)
 	return eventqueue.OfferResult{Accepted: true, Decline: eventqueue.DeclineNone}

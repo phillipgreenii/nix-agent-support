@@ -81,6 +81,65 @@ func TestPanes_DerivedHealthTwoAxes(t *testing.T) {
 	})
 }
 
+// TestRenderActivityOutcome_BudgetEscalationStylesDistinctlyFromOtherOutcomes
+// is this bead's (pg2-fm2gw) acceptance criterion 3, at the unit level:
+// outcomeBudgetEscalation renders wrapped in theme.Cooling (matching the
+// same style listenerHealthText already uses for a listener's own
+// transient backoff state -- see renderActivityOutcome's own doc for why),
+// while every other outcome -- "delivered" included -- renders PLAIN, with
+// no styling added, exactly as before this bead. Compared against
+// theme.Cooling.Render(...) directly (never a raw ANSI string), the same
+// convention render/theme_test.go and empty_state_test.go's
+// TestDimIfPaused_NeverSuppressesConfigDerivedContent already use, because
+// Render()'s literal escape-code output depends on the ambient
+// color-profile detection of the test process.
+func TestRenderActivityOutcome_BudgetEscalationStylesDistinctlyFromOtherOutcomes(t *testing.T) {
+	theme := render.NewTheme(true) // color: styling actually applies
+
+	got := renderActivityOutcome("budget_escalation", theme)
+	want := theme.Cooling.Render("budget_escalation")
+	if got != want {
+		t.Errorf("renderActivityOutcome(budget_escalation) = %q, want the Cooling-wrapped text %q", got, want)
+	}
+
+	for _, other := range []string{"delivered", "missed", "declined", "dispatch_failed", "deduped"} {
+		if got := renderActivityOutcome(other, theme); got != other {
+			t.Errorf("renderActivityOutcome(%q) = %q, want it unstyled (%q) -- only budget_escalation gets a style", other, got, other)
+		}
+	}
+
+	// The bead's own acceptance bar: distinct from the operator-pause
+	// gate's own rendering (banner.go's renderPausedBanner), never merely
+	// distinct from other Activity outcomes. theme.Cooling and theme.Paused
+	// are deliberately different color tokens, so the two renders can never
+	// coincide even before considering renderPausedBanner's own additional
+	// Reverse(true)/full-width-banner treatment.
+	pausedRendering := theme.Paused.Reverse(true).Render("PAUSED — dispatch halted · 0 in flight")
+	if got == pausedRendering {
+		t.Errorf("budget_escalation's rendering must never equal the operator-pause banner's rendering")
+	}
+}
+
+// TestRenderActivityPane_BudgetEscalationEntryCarriesTheStyledOutcome is
+// the pane-level acceptance bar: a real ActivityEntry carrying
+// Outcome:"budget_escalation" renders through renderActivityPane with the
+// SAME styled text renderActivityOutcome alone produces, and the plain
+// event Type text survives verbatim alongside it (styling wraps, it does
+// not replace or truncate -- matching TestDimIfPaused's own convention).
+func TestRenderActivityPane_BudgetEscalationEntryCarriesTheStyledOutcome(t *testing.T) {
+	theme := render.NewTheme(true)
+	entries := []ActivityEntry{{Seq: 1, StartedAt: time.Now(), Type: "worker-ready", Outcome: "budget_escalation"}}
+
+	got := renderActivityPane(entries, false, "(none)", theme)
+
+	if !strings.Contains(got, "worker-ready") {
+		t.Errorf("renderActivityPane lost the entry's Type; got:\n%s", got)
+	}
+	if !strings.Contains(got, theme.Cooling.Render("budget_escalation")) {
+		t.Errorf("renderActivityPane did not render the styled budget_escalation outcome; got:\n%s", got)
+	}
+}
+
 // TestPanes_ThreeTierMockups is this packet's own acceptance bar: Wide/
 // Narrow/Tiny tier renders show the correct column SET and pane SET per
 // the design's own mockups (§4.3) -- column/pane SET comparisons, never

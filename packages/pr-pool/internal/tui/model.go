@@ -457,7 +457,7 @@ func (m *Model) renderMain() string {
 // yet." otherwise when empty [design: Task 4.6 Step 6].
 func (m *Model) renderActivityZoneContent(gated bool) string {
 	es := resolveEmptyState(false, gated, len(m.reply.Activity) == 0)
-	return renderActivityPane(m.reply.Activity, m.reply.ActivityDropped, emptyStateText(es, "No activity yet."))
+	return renderActivityPane(m.reply.Activity, m.reply.ActivityDropped, emptyStateText(es, "No activity yet."), m.theme)
 }
 
 // renderPaneContent renders one of the four Listeners/Queues/Sources/

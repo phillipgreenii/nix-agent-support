@@ -91,6 +91,16 @@ type Orchestrator struct {
 	// true; NewListener merely captures the *reference*, read live at each
 	// Offer call, not a snapshot taken at construction time.
 	Registry *core.Registry
+	// ResourceLimitObserver is notified when a role's dispatch ends because
+	// the component hit its OWN resource ceiling — the glossary's
+	// "resource-limit" outcome (this bead, pg2-fm2gw; see
+	// ResourceLimitObserver's own doc in listener.go for the full story and
+	// its realization-gap note). nil (the default, and every pre-this-bead
+	// test) disables the notification entirely — NewListener captures this
+	// field the same way it captures Registry, so it must be set BEFORE any
+	// NewListener call whose Offer should notify it. cmd/pr-pool's bootCore
+	// is the one production site that wires a live activityObserver in here.
+	ResourceLimitObserver ResourceLimitObserver
 	// lastTick is the per-source next-fire substrate ProduceTick threads into
 	// discover.ProduceWithCadence (Task 1.3, discover.Cadence.LastTick): an
 	// Orchestrator OUTLIVES a single Produce call across `run`'s whole ticker

@@ -485,6 +485,79 @@ func TestActivityObserver_OnDispatchFailureAppendsEntry(t *testing.T) {
 	}
 }
 
+// TestActivityObserver_OnResourceLimitThenOnAcceptRendersBudgetEscalation is
+// this bead's (pg2-fm2gw) required RED test for acceptance criterion 2: the
+// Activity Ring records a "budget_escalation" event sourced from
+// roleListener.Offer's new hook. It replays the SAME call ordering
+// production sees for one accepted-but-resource-limited dispatch —
+// OnEnqueue (queued), then OnResourceLimit (fired inline from Offer, before
+// Offer returns), then OnAccept (fired moments later by the queue's own
+// Dispatch phase 3 for the identical eventID) — and asserts exactly ONE
+// ring entry results, carrying "budget_escalation", never the default
+// "delivered" OnAccept alone would produce.
+func TestActivityObserver_OnResourceLimitThenOnAcceptRendersBudgetEscalation(t *testing.T) {
+	ring := activity.New(4)
+	a := newActivityObserver(ring)
+
+	a.OnEnqueue(eventqueue.Event{ID: "evt-1", Type: "review-requested"})
+	a.OnResourceLimit("evt-1", "review-requested")
+	a.OnAccept("evt-1", "worker")
+
+	buf := make([]activity.Entry, 4)
+	n, _ := ring.Read(0, buf)
+	if n != 1 {
+		t.Fatalf("ring entries = %d, want exactly 1 (OnResourceLimit must SUPPRESS the default delivered entry, not add a second one); entries=%+v", n, buf[:n])
+	}
+	if buf[0].Type != "review-requested" || buf[0].Outcome != "budget_escalation" {
+		t.Fatalf("entry = %+v, want {Type: review-requested, Outcome: budget_escalation}", buf[0])
+	}
+}
+
+// TestActivityObserver_OnResourceLimitWithoutPriorOnEnqueueStillRecovers
+// proves OnResourceLimit's own doc's upsert claim: even when the pending
+// entry was never seeded by OnEnqueue (an edge case the doc calls out —
+// e.g. a pending entry the activityPendingTypesCap FIFO already evicted),
+// OnResourceLimit still records the right Type (it carries its own evtType
+// argument, unlike OnAccept) and the subsequent OnAccept still renders
+// "budget_escalation".
+func TestActivityObserver_OnResourceLimitWithoutPriorOnEnqueueStillRecovers(t *testing.T) {
+	ring := activity.New(4)
+	a := newActivityObserver(ring)
+
+	a.OnResourceLimit("evt-2", "worker-ready") // no OnEnqueue("evt-2", ...) at all
+	a.OnAccept("evt-2", "worker")
+
+	buf := make([]activity.Entry, 4)
+	n, _ := ring.Read(0, buf)
+	if n != 1 {
+		t.Fatalf("ring entries = %d, want 1", n)
+	}
+	if buf[0].Type != "worker-ready" || buf[0].Outcome != "budget_escalation" {
+		t.Fatalf("entry = %+v, want {Type: worker-ready, Outcome: budget_escalation}", buf[0])
+	}
+}
+
+// TestActivityObserver_OnAcceptWithoutOnResourceLimitStillRendersDelivered
+// is the negative control: an ordinary accept with NO OnResourceLimit call
+// at all must render "delivered" exactly as before this bead — the new
+// suppression path must never fire uninvited.
+func TestActivityObserver_OnAcceptWithoutOnResourceLimitStillRendersDelivered(t *testing.T) {
+	ring := activity.New(4)
+	a := newActivityObserver(ring)
+
+	a.OnEnqueue(eventqueue.Event{ID: "evt-3", Type: "review-requested"})
+	a.OnAccept("evt-3", "worker")
+
+	buf := make([]activity.Entry, 4)
+	n, _ := ring.Read(0, buf)
+	if n != 1 {
+		t.Fatalf("ring entries = %d, want 1", n)
+	}
+	if buf[0].Type != "review-requested" || buf[0].Outcome != "delivered" {
+		t.Fatalf("entry = %+v, want {Type: review-requested, Outcome: delivered}", buf[0])
+	}
+}
+
 // TestResolvedConfigFor_drainAndExitOmitsPollInterval is the run-mode gating
 // test [design: Task 3.5 Step 7]: "drain-and-exit" omits PollInterval
 // (Task 3.8's eventual tickIntervalMs) from the composed view entirely — a

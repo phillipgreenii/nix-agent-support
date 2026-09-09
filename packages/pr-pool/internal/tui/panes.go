@@ -304,14 +304,25 @@ func renderRegistryPane(registry []Registration, width int, emptyMsg, title stri
 	return renderPaneBox(title, headers, widths, rows, emptyMsg, width)
 }
 
+// outcomeBudgetEscalation is the Activity Ring's own "resource-limit"
+// outcome verb (internal/activity/ring.go's ADR-0026 vocabulary; this bead,
+// pg2-fm2gw): a component hitting its OWN resource ceiling
+// (`packages/pr-pool/docs/behavior/glossary.md`'s "resource-limit" — "not a
+// defect, and the handler will be able again once the ceiling lifts").
+const outcomeBudgetEscalation = "budget_escalation"
+
 // renderActivityPane renders the full-width Activity row: one line per
 // entry, oldest-first per the ring's own Read order reversed here so the
 // newest entry renders first (matching the mockup's own top-to-bottom
 // recency). ActivityEntry (reply.go, Task 4.4) carries only
 // Seq/StartedAt/Type/Outcome -- no role/binding fields exist to render the
 // mockup's fuller line, so this renders exactly what the frozen wire shape
-// carries.
-func renderActivityPane(activity []ActivityEntry, dropped bool, emptyMsg string) string {
+// carries. theme (this bead) styles ONLY the budget_escalation outcome
+// distinctly from every other outcome in this same pane -- see
+// renderActivityOutcome's own doc for why, and for how that reads distinctly
+// from the operator-pause gate's own rendering (banner.go's
+// renderPausedBanner).
+func renderActivityPane(activity []ActivityEntry, dropped bool, emptyMsg string, theme render.Theme) string {
 	rows := make([]string, 0, len(activity)+1)
 	if dropped {
 		rows = append(rows, "(older entries dropped -- ring capacity exceeded)")
@@ -324,11 +335,33 @@ func renderActivityPane(activity []ActivityEntry, dropped bool, emptyMsg string)
 		}
 		line := fmt.Sprintf("%s  %-10s", ts, textsafe.Sanitize(a.Type))
 		if a.Outcome != "" {
-			line += " → " + textsafe.Sanitize(a.Outcome)
+			line += " → " + renderActivityOutcome(a.Outcome, theme)
 		}
 		rows = append(rows, line)
 	}
 	return renderPaneBoxPlain("Activity", rows, emptyMsg)
+}
+
+// renderActivityOutcome renders one Activity entry's Outcome text (this
+// bead, pg2-fm2gw), styled distinctly for outcomeBudgetEscalation so a
+// component's OWN resource-limit hit reads visually differently from every
+// OTHER outcome in the SAME pane -- and, more to this bead's own acceptance
+// criterion, differently from the operator-pause gate's own rendering
+// (banner.go's renderPausedBanner: theme.Paused, reverse video, on a pinned
+// full-width banner, never an inline pane row). theme.Cooling is the SAME
+// style listenerHealthText already uses for a listener's own transient
+// backoff/cooldown state above -- the identical "temporarily unable, will
+// recover on its own" semantics glossary.md's "resource-limit" entry states
+// -- deliberately a DIFFERENT color token than theme.Paused, so the two
+// conditions this bead must keep distinct (a component's own transient
+// state vs a deliberate operator action) never share a style. Every other
+// outcome renders plain (unstyled), unchanged from before this bead.
+func renderActivityOutcome(outcome string, theme render.Theme) string {
+	text := textsafe.Sanitize(outcome)
+	if outcome == outcomeBudgetEscalation {
+		return theme.Cooling.Render(text)
+	}
+	return text
 }
 
 // renderPaneBox renders a bordered box with a title, a column header row,

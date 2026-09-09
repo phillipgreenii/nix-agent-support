@@ -109,6 +109,17 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 	// state for Task 3.8's status verb to read live and directly; this
 	// function's own job stops at constructing it and keeping it fed.
 	ring := activity.New(cfg.ActivityRingSize)
+	// activityObs is the SAME instance wired both as one of the queue's
+	// eventqueue.Observer fan-out arms below AND as o.ResourceLimitObserver
+	// (this bead, pg2-fm2gw) — it must be the identical instance so
+	// roleListener.Offer's inline OnResourceLimit call and the queue's own
+	// later OnAccept call land in the SAME correlation map (see
+	// activityObserver's own doc). o.ResourceLimitObserver is assigned here,
+	// well before the role-registration loop below calls o.NewListener,
+	// which captures it onto each roleListener at construction (the same
+	// capture-at-construction pattern o.Registry already uses).
+	activityObs := newActivityObserver(ring)
+	o.ResourceLimitObserver = activityObs
 	// listenerCounts is Task 4.1 Step 5's per-role delivered/declined tally
 	// (core.ListenerCounts): pre-populated for every DECLARED role (not
 	// only the enabled ones) so a lookup in statusListeners always hits,
@@ -120,7 +131,7 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 	for _, r := range declaredRoles {
 		listenerCounts[r.Name] = &core.ListenerCounts{}
 	}
-	q, err = eventqueue.New(store, eventqueue.WithRetryBackoff(cfg.RetryBackoff), eventqueue.WithObserver(fanOutObserver{emitter, fanOutObserver{newActivityObserver(ring), newListenerCountObserver(listenerCounts)}}), eventqueue.WithSerializeTypes(cfg.SerializeTypes...))
+	q, err = eventqueue.New(store, eventqueue.WithRetryBackoff(cfg.RetryBackoff), eventqueue.WithObserver(fanOutObserver{emitter, fanOutObserver{activityObs, newListenerCountObserver(listenerCounts)}}), eventqueue.WithSerializeTypes(cfg.SerializeTypes...))
 	if err != nil {
 		_ = store.Close()
 		return nil, nil, nil, nil, fmt.Errorf("construct event queue: %w", err)
@@ -320,28 +331,32 @@ const activityPendingTypesCap = 4096
 
 // activityObserver implements eventqueue.Observer by translating queue
 // lifecycle signals into activity.Entry records on a *activity.Ring (Task
-// 3.4).
+// 3.4). It also implements orchestrator.ResourceLimitObserver (this bead,
+// pg2-fm2gw) — see OnResourceLimit's own doc below.
 //
 // Repo-verified discrepancy (this task's curation flag): Entry.Outcome's
 // declared vocabulary ("delivered"|"missed"|"rejected"|"declined"|"deduped"|
 // "needs_input"|"budget_escalation") is wider than what eventqueue.Observer
 // alone can produce. "rejected" comes only from
-// core.IngestObserver.OnUnknownTypeRejected; "needs_input" and
-// "budget_escalation" would come from roleListener.Offer's internal report,
-// which exposes no such hook on any interface today; "deduped" is returned
-// directly from Enqueue's caller, never through an Observer callback. Wiring
-// those additional hooks is explicitly left to a later phase (or a
-// consciously separate task) rather than done here — this task's Files
-// section names only eventqueue.Observer and cmd/pr-pool/run.go, not
-// core.IngestObserver or a new roleListener.Offer hook. So this adapter
-// covers exactly the four outcomes eventqueue.Observer alone carries (a
-// fourth, dispatch_failed, joined the other three at bead pg2-icm3u once
-// OnDispatchFailure existed to source it from):
+// core.IngestObserver.OnUnknownTypeRejected; "needs_input" would come from
+// roleListener.Offer's internal report, which exposes no such hook on any
+// interface today; "deduped" is returned directly from Enqueue's caller,
+// never through an Observer callback. "budget_escalation" WAS the same kind
+// of gap — Offer's internal report exposed no hook for it either — until
+// this bead added orchestrator.ResourceLimitObserver and wired OnResourceLimit
+// below; wiring "needs_input" the same way is left to a later phase (or a
+// consciously separate task), unchanged by this bead. So this adapter now
+// covers five outcomes sourced from eventqueue.Observer (a fourth,
+// dispatch_failed, joined the first three at bead pg2-icm3u once
+// OnDispatchFailure existed to source it from) plus one, budget_escalation,
+// sourced from the separate ResourceLimitObserver hook instead:
 //
-//	delivered      ≈ OnAccept
-//	missed         ≈ OnUnconsumedExpired
-//	declined       ≈ OnDeclined
-//	dispatch_failed ≈ OnDispatchFailure
+//	delivered        ≈ OnAccept (unless OnResourceLimit already claimed this eventID — see below)
+//	missed           ≈ OnUnconsumedExpired
+//	declined         ≈ OnDeclined
+//	dispatch_failed  ≈ OnDispatchFailure
+//	deduped          ≈ OnDeduped
+//	budget_escalation ≈ OnResourceLimit (orchestrator.ResourceLimitObserver, not eventqueue.Observer)
 //
 // OnAccept(eventID, listenerID string) carries no event TYPE — queue.go's
 // own Dispatch has it at the call site (p.evt.Type) but does not thread it
@@ -354,16 +369,31 @@ const activityPendingTypesCap = 4096
 // event that is only ever declined-then-expired (retireLocked's
 // OnUnconsumedExpired call carries Type directly and needs no lookup, but
 // never removes this map's entry either) cannot grow it without bound.
+//
+// pendingActivity widens that same per-eventID entry (rather than adding a
+// second, separately-capped correlation structure) to also carry whether
+// THIS accept's own outcome is a resource-limit hit: OnResourceLimit sets it
+// INLINE, from inside roleListener.Offer, strictly before Offer returns and
+// so strictly before Dispatch's own OnAccept fires for the identical
+// eventID (both derive from the one synchronous Offer call — see
+// orchestrator.ResourceLimitObserver's own doc) — so OnAccept can render
+// "budget_escalation" instead of "delivered" for that one accept with no
+// race.
+type pendingActivity struct {
+	typ           string
+	resourceLimit bool
+}
+
 type activityObserver struct {
 	ring *activity.Ring
 
 	mu      sync.Mutex
-	pending map[string]string // eventID -> Type
-	order   []string          // insertion order, for FIFO eviction
+	pending map[string]pendingActivity // eventID -> {Type, resource-limit flag}
+	order   []string                   // insertion order, for FIFO eviction
 }
 
 func newActivityObserver(ring *activity.Ring) *activityObserver {
-	return &activityObserver{ring: ring, pending: make(map[string]string)}
+	return &activityObserver{ring: ring, pending: make(map[string]pendingActivity)}
 }
 
 func (a *activityObserver) OnEnqueue(evt eventqueue.Event) {
@@ -374,7 +404,7 @@ func (a *activityObserver) OnEnqueue(evt eventqueue.Event) {
 			a.order = a.order[1:]
 			delete(a.pending, oldest)
 		}
-		a.pending[evt.ID] = evt.Type
+		a.pending[evt.ID] = pendingActivity{typ: evt.Type}
 		a.order = append(a.order, evt.ID)
 	}
 	a.mu.Unlock()
@@ -382,9 +412,39 @@ func (a *activityObserver) OnEnqueue(evt eventqueue.Event) {
 
 func (a *activityObserver) OnAccept(eventID, _ string) {
 	a.mu.Lock()
-	t := a.pending[eventID]
+	p := a.pending[eventID]
 	a.mu.Unlock()
-	a.ring.Append(activity.Entry{Type: t, Outcome: "delivered"})
+	outcome := "delivered"
+	if p.resourceLimit {
+		outcome = "budget_escalation"
+	}
+	a.ring.Append(activity.Entry{Type: p.typ, Outcome: outcome})
+}
+
+// OnResourceLimit implements orchestrator.ResourceLimitObserver (this bead,
+// pg2-fm2gw): roleListener.Offer calls it inline, before Offer returns, when
+// this dispatch's own outcome was a resource-limit hit (the budget
+// watchdog's hard stop) rather than a plain completion. It flags the
+// pending entry so the OnAccept notification that always follows a moment
+// later for the SAME eventID (Offer's return is unconditionally Accepted
+// here) renders "budget_escalation" — the Activity Ring's own pre-existing
+// (ADR 0026) vocabulary slot for a component's own resource-limit hit
+// (`packages/pr-pool/docs/behavior/glossary.md`'s "resource-limit"),
+// previously wired to nothing (see this type's own doc above). It upserts
+// rather than requiring a prior OnEnqueue hit, so a pending entry evicted by
+// activityPendingTypesCap's FIFO cap before this fires still renders
+// correctly (just without the FIFO-eviction protection a normal entry gets —
+// an accepted imperfection matching this map's existing eviction tolerance).
+// This does NOT touch internal/metrics — the operator scope-cut (that
+// package's own doc, 2026-07-28) stays exactly as narrow as before; this is
+// a separate, ring-only signal.
+func (a *activityObserver) OnResourceLimit(eventID, evtType string) {
+	a.mu.Lock()
+	p := a.pending[eventID]
+	p.typ = evtType
+	p.resourceLimit = true
+	a.pending[eventID] = p
+	a.mu.Unlock()
 }
 
 func (a *activityObserver) OnUnconsumedExpired(evtType string) {
