@@ -334,6 +334,11 @@ func baseline(t *testing.T, bead, desc string, got, wantObserved any) {
 
 // pending records a check we cannot make until observability exists, then SKIPS.
 // MUST be the last call in a test so it never short-circuits a live assert.
+// Not yet called by any Task 5 phase gate below (tc-t3wx: this file only started
+// linting once the `contract` build tag got real coverage) — kept as harness API
+// for a future gate that needs it, not dead code to delete.
+//
+//nolint:unused // scaffolding helper for a not-yet-written contract test
 func pending(t *testing.T, desc, obsNeeded string) {
 	t.Helper()
 	t.Skipf("OUTCOME=pending test=%q desc=%q needs=%q", t.Name(), desc, obsNeeded)
@@ -390,12 +395,12 @@ func (sb *sandbox) waitForStreaming(name string, budget time.Duration) {
 // scaffoldFails (classified) rather than failing opaquely.
 func (sb *sandbox) mustNew(name string) {
 	sb.t.Helper()
-	out, code := sb.ccp("new", name)
+	_, code := sb.ccp("new", name)
 	if code == 0 {
 		return
 	}
 	time.Sleep(2 * time.Second)
-	out, code = sb.ccp("new", name)
+	out, code := sb.ccp("new", name)
 	if code != 0 {
 		scaffoldFail(sb.t, "new %q failed twice (transient real-claude/env issue, e.g. rate/usage limit): exit=%d %s", name, code, out)
 	}

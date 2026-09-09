@@ -695,6 +695,78 @@
                   };
                 };
 
+              # Registered non-unit Go test-kind build tags — mirrors
+              # phillipg-nix-repo-base's pg-test-runner `nonUnitLabels` registry
+              # (that repo's CLAUDE.md "Go tests" section,
+              # modules/pg-test-runner/config.nix): integration, smoke, contract,
+              # hostile. `goLint`/mkGoLint above run `golangci-lint run --config
+              # <cfg> ./...` with NO build tags, and .golangci.yml sets none
+              # either, so EVERY test file behind one of these tags is silently
+              # excluded from every `<module>-golangci` check (bead tc-t3wx).
+              #
+              # DECISION (tc-t3wx, chosen over (a) widening every existing
+              # `<module>-golangci` check's scope or (c) exemption-only): add a
+              # SEPARATE companion `<module>-golangci-tagged` check per module
+              # known to carry build-tagged test files (`goLintTagged` below),
+              # so tagged files get real lint coverage without changing the
+              # existing checks' scope or risking a batch of newly-surfaced
+              # pre-existing findings turning unrelated checks red at once.
+              # `goLintTagged` passes the FULL set below as `--build-tags`
+              # (golangci-lint config `run.build-tags`, additive — mirrors
+              # `go test -tags {allLabels}` in the pg-test-runner design), so
+              # ONE companion check per module covers every tag it currently
+              # carries AND any new tag added to this list later, rather than
+              # one check per (module, tag) pair.
+              #
+              # ACCEPTANCE (tc-t3wx): a module below `taggedGoLintModules` /
+              # `patternBTaggedGoLints` has a companion check, so its tagged
+              # files are linted. A module NOT listed there
+              # (`pa-monitor-decorator-scope`, `claude-transcript`,
+              # `pg-ccaudit` as of tc-t3wx) is a DELIBERATE exemption: verified
+              # 2026-08-31 via `grep -rln '^//go:build' packages/<module>` to
+              # carry no build-tag test files. Before adding a build-tag
+              # carrier to one of those modules (or a new module), grep it and
+              # either add it to `taggedGoLintModules`/`patternBTaggedGoLints`
+              # or record here why not — so a future new tag is a decision,
+              # not a silent gap. If `nonUnitGoBuildTags` itself grows (a new
+              # tag registered in nix-repo-base's pg-test-runner), update this
+              # list too; the companion checks pick up a new registered tag
+              # automatically, but an unregistered one still lints as nothing.
+              nonUnitGoBuildTags = [
+                "contract"
+                "hostile"
+                "integration"
+                "smoke"
+              ];
+
+              # golangci-lint config for the `-tagged` companion checks: the
+              # base .golangci.yml (read live, so it never drifts from the
+              # untagged checks' linter settings) plus a `run.build-tags` block
+              # naming every registered non-unit tag. `.golangci.yml` sets no
+              # `run:` key today, so appending one is valid YAML; if that ever
+              # changes this generator must be revisited.
+              goLintTaggedConfig = pkgs.writeText "golangci-tagged.yml" (
+                builtins.readFile ./.golangci.yml
+                + "\nrun:\n  build-tags:\n"
+                + lib.concatMapStrings (t: "    - ${t}\n") nonUnitGoBuildTags
+              );
+
+              goLintTagged =
+                {
+                  module,
+                  modRoot ? null,
+                  src ? (./packages + "/${module}"),
+                }:
+                {
+                  name = "${module}-golangci-tagged";
+                  value = pkgs._agentSupportGoBuilders.mkGoLint {
+                    pname = "${module}-tagged";
+                    inherit src modRoot;
+                    gomod2nixToml = ./packages + "/${module}/gomod2nix.toml";
+                    config = goLintTaggedConfig;
+                  };
+                };
+
               # Pattern A (no local `replace`): flat src at the module dir. One
               # entry per go.mod module without a sibling replace.
               simpleGoLintModules = [
@@ -705,6 +777,14 @@
                 "claude-transcript"
                 "pg-ccaudit"
                 "pg-connector"
+              ];
+
+              # Subset of simpleGoLintModules with build-tagged test files
+              # today (see the ACCEPTANCE note above `nonUnitGoBuildTags`).
+              taggedGoLintModules = [
+                "pg-pr"
+                "pb"
+                "claude-extended-tool-approver"
               ];
 
               # Pattern B (local `replace => ../sibling`): root the fileset at
@@ -741,6 +821,48 @@
                     fileset = lib.fileset.unions [
                       # ./docs holds behavior docs, not build inputs — mirror
                       # pr-pool/default.nix and exclude it from the digest.
+                      (lib.fileset.difference ./packages/pr-pool ./packages/pr-pool/docs)
+                      ./packages/ccpool
+                      ./packages/claude-transcript
+                    ];
+                  };
+                })
+              ];
+
+              # `-tagged` companions for all three Pattern-B modules — every
+              # one of them carries build-tagged test files today (ccpool:
+              # contract/integration; pa-monitor: hostile/integration;
+              # pr-pool: integration/smoke). Same src/modRoot as patternBGoLints
+              # above so the tagged check lints the identical module tree.
+              patternBTaggedGoLints = [
+                (goLintTagged {
+                  module = "ccpool";
+                  modRoot = "ccpool";
+                  src = lib.fileset.toSource {
+                    root = ./packages;
+                    fileset = lib.fileset.unions [
+                      ./packages/ccpool
+                      ./packages/claude-transcript
+                    ];
+                  };
+                })
+                (goLintTagged {
+                  module = "pa-monitor";
+                  modRoot = "pa-monitor";
+                  src = lib.fileset.toSource {
+                    root = ./packages;
+                    fileset = lib.fileset.unions [
+                      ./packages/pa-monitor
+                      ./packages/claude-transcript
+                    ];
+                  };
+                })
+                (goLintTagged {
+                  module = "pr-pool";
+                  modRoot = "pr-pool";
+                  src = lib.fileset.toSource {
+                    root = ./packages;
+                    fileset = lib.fileset.unions [
                       (lib.fileset.difference ./packages/pr-pool ./packages/pr-pool/docs)
                       ./packages/ccpool
                       ./packages/claude-transcript
@@ -4190,7 +4312,14 @@
             # <module>-golangci for each of the seven Pattern-A modules plus
             # the three Pattern-B (local-replace) modules.
             // lib.listToAttrs (map (module: goLint { inherit module; }) simpleGoLintModules)
-            // lib.listToAttrs patternBGoLints;
+            // lib.listToAttrs patternBGoLints
+            # Six `-golangci-tagged` companion gates (tc-t3wx): one per module
+            # carrying build-tagged (integration/hostile/contract/smoke) test
+            # files, linting them via nonUnitGoBuildTags — see the ACCEPTANCE
+            # note above `nonUnitGoBuildTags` for which modules are exempt and
+            # why.
+            // lib.listToAttrs (map (module: goLintTagged { inherit module; }) taggedGoLintModules)
+            // lib.listToAttrs patternBTaggedGoLints;
 
           packages = {
             # This repo's own Claude Code marketplace, bundled into the store with
