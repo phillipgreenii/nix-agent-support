@@ -398,6 +398,89 @@ func TestPathSafety_WriteAgentConfig_EncodesNoVerdict(t *testing.T) {
 	}
 }
 
+// TestPathSafety_WriteAgentConfig_AllPermissionModes_Abstain is pg2-9dmrk's
+// regression pin: the operator ruling (2026-09-09) that CETA MUST NOT return
+// allow for a Write/Edit of exactly .claude/settings.local.json or
+// .claude/rules.md, IN EVERY permission_mode. Corpus rows 132474
+// (settings.local.json) and 273301 (rules.md) both hook_decision=allow,
+// outcome=denied — the rarest, highest-severity hook_decision/outcome
+// combination in the whole dataset.
+//
+// isAgentConfigWrite (and therefore this branch's terminal NoOpinion) does not
+// read input.PermissionMode at all — the check is unconditional — so this test
+// exists to PIN that structural fact against a future regression that adds
+// mode-conditional logic here, using the same mode set
+// primarycommit/primarypush already enumerate for the identical purpose
+// (internal/rules/primarycommit/primarycommit_test.go, internal/rules/
+// primarypush/dirresolve_test.go): the six real Claude Code permission modes
+// plus "" for a hook event that omits the field entirely.
+func TestPathSafety_WriteAgentConfig_AllPermissionModes_Abstain(t *testing.T) {
+	const project = "/home/user/project"
+	modes := []string{"default", "plan", "acceptEdits", "dontAsk", "auto", "bypassPermissions", ""}
+	paths := []struct {
+		name string
+		path string
+	}{
+		{"settings.local.json (row 132474)", project + "/.claude/settings.local.json"},
+		{"rules.md (row 273301)", project + "/.claude/rules.md"},
+	}
+	tools := []string{"Write", "Edit", "MultiEdit", "Delete"}
+
+	pe := patheval.New(project)
+	r := New(pe)
+	for _, p := range paths {
+		for _, tool := range tools {
+			for _, mode := range modes {
+				t.Run(p.name+"/"+tool+"/mode="+mode, func(t *testing.T) {
+					input := &hookio.HookInput{
+						ToolName:       tool,
+						ToolInput:      mustJSON(map[string]string{"file_path": p.path, "content": "x"}),
+						CWD:            project,
+						PermissionMode: mode,
+					}
+					got := hookio.Verdict(r.Evaluate(input))
+					if got.Decision == hookio.Approve {
+						t.Fatalf("%s %s permission_mode=%q: got allow, want abstain (pg2-9dmrk: CETA must never bare-allow this write)", tool, p.path, mode)
+					}
+					if got.Decision != hookio.NoOpinion {
+						t.Errorf("%s %s permission_mode=%q: got %s (%s), want abstain specifically", tool, p.path, mode, got.Decision, got.Reason)
+					}
+				})
+			}
+		}
+	}
+}
+
+// TestPathSafety_ReadAgentConfig_AllPermissionModes_StillApprove is the read-side
+// counterpart to the pin above: reads of the same two exact paths stay
+// allow/approved regardless of permission_mode (ADR 0041 covers writes only).
+func TestPathSafety_ReadAgentConfig_AllPermissionModes_StillApprove(t *testing.T) {
+	const project = "/home/user/project"
+	modes := []string{"default", "plan", "acceptEdits", "dontAsk", "auto", "bypassPermissions", ""}
+	paths := []string{
+		project + "/.claude/settings.local.json",
+		project + "/.claude/rules.md",
+	}
+	pe := patheval.New(project)
+	r := New(pe)
+	for _, p := range paths {
+		for _, mode := range modes {
+			t.Run(p+"/mode="+mode, func(t *testing.T) {
+				input := &hookio.HookInput{
+					ToolName:       "Read",
+					ToolInput:      mustJSON(map[string]string{"file_path": p}),
+					CWD:            project,
+					PermissionMode: mode,
+				}
+				got := hookio.Verdict(r.Evaluate(input))
+				if got.Decision != hookio.Approve {
+					t.Errorf("Read %s permission_mode=%q: got %s (%s), want approve — reads are unaffected by ADR 0041", p, mode, got.Decision, got.Reason)
+				}
+			})
+		}
+	}
+}
+
 // Blast radius: everything under `.claude/` that is agent DATA or a per-artifact
 // subdirectory stays approved. ADR 0041's Context names "the memory directories,
 // skills, plugins, and transcripts" as the collateral that made a subtree-wide
