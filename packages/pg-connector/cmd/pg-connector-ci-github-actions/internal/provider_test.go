@@ -554,6 +554,118 @@ func TestRerunFailed_OnlyRerunsNewestMatch(t *testing.T) {
 	}
 }
 
+// TestListRuns_LiveReadIsNeverStale is this packet's baseline for the
+// AsOf/Stale contract (bead pg2-4aoeg, mirroring
+// pkg/provider/pr.Provider.Show's own bead pg2-681xo): a successful live
+// gh call must always report Stale=false with a non-empty AsOf, regardless
+// of whether a cache is wired in.
+func TestListRuns_LiveReadIsNeverStale(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["run list"] = []byte(sampleRunList)
+	p := NewWithCache(gh, &fakePR{repo: "foo/bar", branch: "feat/x"}, newTestRunStore(t), newTestRunListCache(t))
+
+	runs, err := p.ListRuns(context.Background(), "foo/bar#42")
+	if err != nil {
+		t.Fatalf("ListRuns: %v", err)
+	}
+	if len(runs) == 0 {
+		t.Fatal("expected at least one run")
+	}
+	for _, r := range runs {
+		if r.Stale {
+			t.Errorf("run %s: Stale = true, want false for a live read", r.ID)
+		}
+		if r.AsOf == "" {
+			t.Errorf("run %s: AsOf is empty, want a non-empty as-of time for a live read", r.ID)
+		}
+	}
+}
+
+// TestListRuns_ServesStaleCacheDuringSimulatedOutage is this bead's
+// (pg2-4aoeg) required acceptance-criteria proof: at least one ci
+// connector implementation must serve cached data with Stale=true during a
+// simulated upstream outage instead of erroring. It first performs a live
+// ListRuns call to populate the cache, then simulates GitHub Actions going
+// unreachable (the SAME "run list" call now failing) and asserts ListRuns
+// serves the previously-fetched runs back — unchanged except Stale forced
+// true and AsOf rewritten to the ORIGINAL live read's own as-of time, never
+// re-stamped to "now" (the moment of the failed attempt) — instead of
+// propagating the gh failure.
+func TestListRuns_ServesStaleCacheDuringSimulatedOutage(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["run list"] = []byte(sampleRunList)
+	p := NewWithCache(gh, &fakePR{repo: "foo/bar", branch: "feat/x"}, newTestRunStore(t), newTestRunListCache(t))
+
+	fresh, err := p.ListRuns(context.Background(), "foo/bar#42")
+	if err != nil {
+		t.Fatalf("first (live) ListRuns: %v", err)
+	}
+	if len(fresh) == 0 {
+		t.Fatal("expected at least one run from the live read")
+	}
+
+	// Simulate a degraded/unreachable upstream: the SAME "run list" call
+	// that just succeeded now fails outright.
+	gh.errs["run list"] = errors.New("boom: network unreachable")
+
+	stale, err := p.ListRuns(context.Background(), "foo/bar#42")
+	if err != nil {
+		t.Fatalf("ListRuns during simulated outage: %v (want cached data, not an error)", err)
+	}
+	if len(stale) != len(fresh) {
+		t.Fatalf("stale runs = %d, want %d (the cached copy)", len(stale), len(fresh))
+	}
+	for i, r := range stale {
+		if !r.Stale {
+			t.Errorf("run %s: Stale = false, want true when served from cache during a simulated outage", r.ID)
+		}
+		if r.AsOf != fresh[i].AsOf {
+			t.Errorf("run %s: AsOf = %q, want the ORIGINAL live read's as-of time %q, not re-stamped to the failed attempt's own time", r.ID, r.AsOf, fresh[i].AsOf)
+		}
+		if r.ID != fresh[i].ID || r.Conclusion != fresh[i].Conclusion {
+			t.Errorf("run %d: cached data drifted from the original live read: got %+v, want %+v", i, r, fresh[i])
+		}
+	}
+}
+
+// TestListRuns_OutageWithNoCachedData_StillErrors proves staleFallback
+// never fabricates an answer: a PR that has never had a successful
+// ListRuns call in this environment has nothing cached to fall back to, so
+// an outage on the very first call still propagates the error, exactly as
+// it did before bead pg2-4aoeg.
+func TestListRuns_OutageWithNoCachedData_StillErrors(t *testing.T) {
+	gh := newFakeGH()
+	gh.errs["run list"] = errors.New("boom: network unreachable")
+	p := NewWithCache(gh, &fakePR{repo: "foo/bar", branch: "feat/x"}, newTestRunStore(t), newTestRunListCache(t))
+
+	if _, err := p.ListRuns(context.Background(), "foo/bar#42"); err == nil {
+		t.Fatal("expected an error: nothing was ever cached for this PR to fall back to")
+	}
+}
+
+// TestListRuns_NotFoundDuringOutage_DoesNotUseCache proves a definitive
+// not_found answer from the live gh call is never treated as a caching
+// opportunity, even when a cached copy exists: a not_found means the run
+// list itself is bad (e.g. the branch/PR genuinely has none), not that
+// GitHub Actions is merely unreachable, so it must still propagate as
+// not_found rather than being masked by a stale success.
+func TestListRuns_NotFoundDuringOutage_DoesNotUseCache(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["run list"] = []byte(sampleRunList)
+	p := NewWithCache(gh, &fakePR{repo: "foo/bar", branch: "feat/x"}, newTestRunStore(t), newTestRunListCache(t))
+
+	if _, err := p.ListRuns(context.Background(), "foo/bar#42"); err != nil {
+		t.Fatalf("first (live) ListRuns: %v", err)
+	}
+
+	gh.errs["run list"] = errors.New("failed to get run: HTTP 404: Not Found (https://api.github.com/repos/foo/bar/actions/runs)")
+
+	_, err := p.ListRuns(context.Background(), "foo/bar#42")
+	if !errors.Is(err, scriptout.ErrNotFound) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrNotFound) — a not_found answer must not be masked by a cached success", err)
+	}
+}
+
 func TestListRuns_HeadSHAPropagated(t *testing.T) {
 	gh := newFakeGH()
 	gh.responses["run list"] = []byte(sampleRunList)

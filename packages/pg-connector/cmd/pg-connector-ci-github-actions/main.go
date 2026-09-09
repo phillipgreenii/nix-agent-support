@@ -36,8 +36,12 @@ func main() {
 // this backend's own small run_id->repo correlation store — internal/
 // run_store.go — that GetLogs needs to resolve gh's `--repo`
 // [operator ruling, Phillip, 2026-09-06, on pg2-f327j; supersedes this
-// comment's prior "no local store" claim]) and its op-dispatch table, then
-// hands the table to the Tier-1 core's generic serve loop.
+// comment's prior "no local store" claim] — and its own last-known-good
+// ListRuns result cache — internal/run_list_cache.go, bead pg2-4aoeg — that
+// lets ListRuns keep serving a PR's cached CI runs, flagged
+// schema.CIRun.Stale=true, when GitHub Actions itself is degraded or
+// unreachable) and its op-dispatch table, then hands the table to the
+// Tier-1 core's generic serve loop.
 func run() int {
 	backend := internal.New()
 	return scriptout.ServeLoop(newDispatchTable(backend))

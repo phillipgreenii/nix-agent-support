@@ -36,7 +36,16 @@ import (
 // capability's own schema.CIRun result type.
 type Provider interface {
 	// ListRuns returns every CI run this backend knows about for the PR
-	// identified by prID (interfaces.md's op catalog).
+	// identified by prID (interfaces.md's op catalog). Each returned
+	// schema.CIRun MUST carry its own AsOf/Stale pair (bead pg2-4aoeg,
+	// mirroring pkg/provider/pr.Provider.Show's own established contract,
+	// bead pg2-681xo): AsOf is this read's own as-of time, and Stale is
+	// this Provider's own as-of/stale determination — true only when this
+	// read served (rather than freshly fetched) a cached copy of the
+	// underlying CI run facts that has aged past this Provider's own
+	// staleness bound, because the upstream CI system was degraded or
+	// unreachable for this call. A Provider with no such cache always
+	// returns Stale false with AsOf set to the read's own call time.
 	ListRuns(ctx context.Context, prID string) ([]schema.CIRun, error)
 
 	// GetLogs returns the raw log bytes for the CI run identified by runID.

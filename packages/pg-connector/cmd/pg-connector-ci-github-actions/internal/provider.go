@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-ci-github-actions/internal/github"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider"
@@ -54,9 +55,10 @@ type ghRunner interface {
 // same category as the sibling pg-connector-pr-github backend's own
 // store.go.
 type Backend struct {
-	gh   ghRunner
-	pr   PRResolver
-	runs *RunStore
+	gh    ghRunner
+	pr    PRResolver
+	runs  *RunStore
+	cache *RunListCache
 }
 
 // New returns a Backend wired for production: the token-protected gh CLI
@@ -64,17 +66,29 @@ type Backend struct {
 // the PRResolver (resolver.go), which resolves a PR id directly against
 // GitHub — never by shelling out to pg-connector or any other backend
 // binary (INV-REG-1) — plus this backend's own run_id->repo correlation
-// store (run_store.go) at its default, XDG_STATE_HOME-honouring path.
+// store (run_store.go) and its own last-known-good ListRuns result cache
+// (run_list_cache.go, bead pg2-4aoeg), each at its default,
+// XDG_STATE_HOME-honouring path.
 func New() *Backend {
 	gh := github.NewCLI()
-	return &Backend{gh: gh, pr: newGHPRResolver(gh), runs: NewRunStore(DefaultRunStorePath())}
+	return NewWithCache(gh, newGHPRResolver(gh), NewRunStore(DefaultRunStorePath()), NewRunListCache(DefaultRunListCachePath()))
 }
 
-// NewWithDeps constructs a Backend with injected dependencies — used by
-// tests to avoid spawning real `gh`/`pg-connector` subprocesses and to
-// control the run_id->repo store's contents directly.
+// NewWithDeps constructs a Backend with injected dependencies and no
+// run-list cache (cache is nil, so ListRuns behaves exactly as it did
+// before bead pg2-4aoeg: a live gh failure always propagates, never served
+// from a stale copy) — used by the many existing tests that predate the
+// cache and have no opinion on it. A test exercising the AsOf/Stale
+// contract itself uses NewWithCache below instead.
 func NewWithDeps(gh ghRunner, pr PRResolver, runs *RunStore) *Backend {
-	return &Backend{gh: gh, pr: pr, runs: runs}
+	return NewWithCache(gh, pr, runs, nil)
+}
+
+// NewWithCache constructs a Backend with injected dependencies including a
+// run-list cache (nil is valid and means "no caching," matching
+// NewWithDeps' own contract above).
+func NewWithCache(gh ghRunner, pr PRResolver, runs *RunStore, cache *RunListCache) *Backend {
+	return &Backend{gh: gh, pr: pr, runs: runs, cache: cache}
 }
 
 // Compile-time checks that Backend satisfies both the ci capability's
@@ -144,6 +158,17 @@ func (b *Backend) ListRuns(ctx context.Context, prID string) ([]schema.CIRun, er
 // this backend's own run_id->repo store (run_store.go) so a later GetLogs
 // call for one of these run IDs can resolve the `--repo` gh's `run view
 // --log` needs [operator ruling, Phillip, 2026-09-06, on pg2-f327j].
+//
+// Bead pg2-4aoeg widened this method with the ci capability's AsOf/Stale
+// contract (pkg/provider/ci/iface.go's ListRuns doc comment): every live,
+// successfully-fetched run is stamped with this call's own as-of time and
+// Stale=false, then persisted into this backend's own RunListCache
+// (run_list_cache.go) as this PR's new last-known-good result. If the live
+// gh call itself fails instead, staleFallback below decides whether that
+// failure is a caching opportunity (GitHub Actions degraded/unreachable,
+// as opposed to a definitive not_found/unauthenticated answer) and, if so,
+// serves the cached result — flagged Stale=true — instead of propagating
+// the error.
 func (b *Backend) listRunsByBranch(ctx context.Context, prID, repo, branch string) ([]schema.CIRun, error) {
 	if err := validateRepo(repo); err != nil {
 		return nil, scriptout.WrapError(scriptout.ErrUnavailable, err.Error())
@@ -160,7 +185,11 @@ func (b *Backend) listRunsByBranch(ctx context.Context, prID, repo, branch strin
 		"--limit", "100",
 	)
 	if err != nil {
-		return nil, classifyGHError(err)
+		ghErr := classifyGHError(err)
+		if stale, ok := b.staleFallback(prID, ghErr); ok {
+			return stale, nil
+		}
+		return nil, ghErr
 	}
 	if len(bytes.TrimSpace(raw)) == 0 {
 		return nil, nil
@@ -169,15 +198,64 @@ func (b *Backend) listRunsByBranch(ctx context.Context, prID, repo, branch strin
 	if err := json.Unmarshal(raw, &runs); err != nil {
 		return nil, scriptout.WrapError(scriptout.ErrUnavailable, fmt.Sprintf("pg-connector-ci-github-actions: parse runs JSON: %v", err))
 	}
+	asOf := time.Now().UTC()
 	out := make([]schema.CIRun, 0, len(runs))
 	for _, r := range runs {
 		cr := r.toSchema(prID)
+		cr.AsOf = asOf.Format(time.RFC3339)
+		cr.Stale = false
 		if err := b.runs.SetRepo(cr.ID, repo); err != nil {
 			return nil, scriptout.WrapError(scriptout.ErrUnavailable, fmt.Sprintf("pg-connector-ci-github-actions: persist run %s's repo: %v", cr.ID, err))
 		}
 		out = append(out, cr)
 	}
+	if b.cache != nil {
+		if err := b.cache.Set(prID, out, asOf); err != nil {
+			return nil, scriptout.WrapError(scriptout.ErrUnavailable, fmt.Sprintf("pg-connector-ci-github-actions: persist run-list cache for %s: %v", prID, err))
+		}
+	}
 	return out, nil
+}
+
+// staleFallback implements the ci capability's own half of the
+// as-of/staleness contract (pkg/provider/ci/iface.go's ListRuns doc
+// comment, bead pg2-4aoeg, mirroring pkg/provider/pr.Provider.Show's
+// established one from bead pg2-681xo): when listRunsByBranch's own live
+// `gh run list` call has just failed with ghErr, staleFallback decides
+// whether that failure is a caching opportunity and, if so, returns prID's
+// cached runs (ok true) instead of leaving the caller to propagate ghErr.
+//
+// A definitive not_found or unauthenticated answer means the PR/repo
+// itself is bad, or this backend's own credentials are the problem — never
+// "GitHub Actions is merely degraded/unreachable right now" — so neither is
+// a caching opportunity: ok is false and the caller must still propagate
+// ghErr unchanged. Every OTHER classifyGHError outcome (its own
+// "everything else" bucket, matching scriptout's codeForError fallback of
+// "unavailable" for a plain, unwrapped error) is exactly the
+// degraded/unreachable-upstream case this cache exists to answer.
+//
+// ok is also false whenever there is nothing cached to serve — a fresh
+// environment's first ListRuns call for prID that fails has no
+// last-known-good copy to fall back to, so the caller still propagates
+// ghErr rather than fabricating a stale answer with nothing behind it.
+func (b *Backend) staleFallback(prID string, ghErr error) ([]schema.CIRun, bool) {
+	if b.cache == nil {
+		return nil, false
+	}
+	if errors.Is(ghErr, scriptout.ErrNotFound) || errors.Is(ghErr, scriptout.ErrUnauthenticated) {
+		return nil, false
+	}
+	cached, asOf, ok, err := b.cache.Get(prID)
+	if err != nil || !ok {
+		return nil, false
+	}
+	out := make([]schema.CIRun, len(cached))
+	for i, r := range cached {
+		r.AsOf = asOf.Format(time.RFC3339)
+		r.Stale = true
+		out[i] = r
+	}
+	return out, true
 }
 
 // GetLogs implements ci.Provider.GetLogs. Unlike ghactions.go's own
