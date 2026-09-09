@@ -199,13 +199,20 @@ func unmatchedRowMarker(types []string, theme render.Theme) string {
 // caller append "(focused)" when this pane is the zone ladder's fill zone
 // (matching the Tiny mockup's own "Listeners (focused)" heading).
 //
+// width is the available terminal width (typically
+// render.EffectiveWidth(m.width)), threaded through to renderPaneBox so
+// its columns can widen past the tier's declared minimums instead of
+// always truncating to them [pg2-hlpuv]. width <= 0 is unbounded --
+// widths are never capped below their natural content size (see
+// paneColumnWidths).
+//
 // unmatchedBindings is reply.UnmatchedBindings, threaded in so a row whose
 // bound type maps to exactly one row (its "partner", unmatchedPartners
 // above) can carry the inline marker [pg2-7ezqt] -- an extra trailing cell
 // appended only to rows that need it, past the declared headers/widths;
 // formatPaneRow already renders any cell index beyond len(widths) unstyled
 // and unclipped, so this needs no header/width changes for any tier.
-func renderListenersPane(listeners []Listener, tier int, theme render.Theme, emptyMsg, title string, unmatchedBindings []string) string {
+func renderListenersPane(listeners []Listener, tier, width int, theme render.Theme, emptyMsg, title string, unmatchedBindings []string) string {
 	var headers []string
 	var widths []int
 	switch tier {
@@ -239,24 +246,26 @@ func renderListenersPane(listeners []Listener, tier int, theme render.Theme, emp
 		}
 		rows = append(rows, row)
 	}
-	return renderPaneBox(title, headers, widths, rows, emptyMsg)
+	return renderPaneBox(title, headers, widths, rows, emptyMsg, width)
 }
 
 // renderQueuesPane renders the Queues pane: TYPE/DEPTH, unchanged across
-// tiers.
-func renderQueuesPane(queues []Queue, emptyMsg, title string) string {
+// tiers. width is the available terminal width, see renderListenersPane's
+// doc [pg2-hlpuv].
+func renderQueuesPane(queues []Queue, width int, emptyMsg, title string) string {
 	headers := []string{"TYPE", "DEPTH"}
 	widths := []int{18, 8}
 	rows := make([][]string, 0, len(queues))
 	for _, q := range queues {
 		rows = append(rows, []string{textsafe.Sanitize(q.Type), fmt.Sprintf("%d", q.Depth)})
 	}
-	return renderPaneBox(title, headers, widths, rows, emptyMsg)
+	return renderPaneBox(title, headers, widths, rows, emptyMsg, width)
 }
 
 // renderSourcesPane renders the Sources pane: SOURCE/LAST TICK/STATE,
-// unchanged across tiers ("Sources", never "QUERY" -- ux-13).
-func renderSourcesPane(sources []Source, tickIntervalMs int64, now time.Time, theme render.Theme, emptyMsg, title string) string {
+// unchanged across tiers ("Sources", never "QUERY" -- ux-13). width is the
+// available terminal width, see renderListenersPane's doc [pg2-hlpuv].
+func renderSourcesPane(sources []Source, tickIntervalMs int64, now time.Time, width int, theme render.Theme, emptyMsg, title string) string {
 	headers := []string{"SOURCE", "LAST TICK", "STATE"}
 	widths := []int{12, 10, 16}
 	rows := make([][]string, 0, len(sources))
@@ -271,7 +280,7 @@ func renderSourcesPane(sources []Source, tickIntervalMs int64, now time.Time, th
 			sourceHealthText(s, tickIntervalMs, now, theme),
 		})
 	}
-	return renderPaneBox(title, headers, widths, rows, emptyMsg)
+	return renderPaneBox(title, headers, widths, rows, emptyMsg, width)
 }
 
 // renderRegistryPane renders the Registry pane: ID/KIND/STATE. Rendered
@@ -279,8 +288,9 @@ func renderSourcesPane(sources []Source, tickIntervalMs int64, now time.Time, th
 // accepted so a caller CAN show a placeholder (matching the Wide/Narrow
 // mockups' "(no participants registered)"), but the sibling composing
 // this into the zone ladder (model.go) is free to omit the zone entirely
-// instead.
-func renderRegistryPane(registry []Registration, emptyMsg, title string) string {
+// instead. width is the available terminal width, see renderListenersPane's
+// doc [pg2-hlpuv].
+func renderRegistryPane(registry []Registration, width int, emptyMsg, title string) string {
 	headers := []string{"ID", "KIND", "STATE"}
 	widths := []int{16, 10, 10}
 	rows := make([][]string, 0, len(registry))
@@ -291,7 +301,7 @@ func renderRegistryPane(registry []Registration, emptyMsg, title string) string 
 			textsafe.Sanitize(r.State),
 		})
 	}
-	return renderPaneBox(title, headers, widths, rows, emptyMsg)
+	return renderPaneBox(title, headers, widths, rows, emptyMsg, width)
 }
 
 // renderActivityPane renders the full-width Activity row: one line per
@@ -321,24 +331,130 @@ func renderActivityPane(activity []ActivityEntry, dropped bool, emptyMsg string)
 	return renderPaneBoxPlain("Activity", rows, emptyMsg)
 }
 
-// renderPaneBox renders a bordered box with a title, a fixed-width column
-// header row, and one row per data row. Each cell is padded to its column
-// width via lipgloss (ANSI/width-aware, so a themed/colored health cell
-// still aligns). len(rows) == 0 renders emptyMsg as the sole content line
+// renderPaneBox renders a bordered box with a title, a column header row,
+// and one row per data row. Each cell is padded to its column width via
+// lipgloss (ANSI/width-aware, so a themed/colored health cell still
+// aligns). len(rows) == 0 renders emptyMsg as the sole content line
 // instead of the header row.
-func renderPaneBox(title string, headers []string, widths []int, rows [][]string, emptyMsg string) string {
+//
+// staticWidths are the tier's own declared MINIMUM widths (what every
+// column was unconditionally fixed at before pg2-hlpuv); budget is the
+// available terminal width. The actual widths a row renders at are
+// resolved by paneColumnWidths, which widens columns past staticWidths
+// when budget allows -- renderPaneBox itself no longer chooses widths,
+// only gathers the row data and hands the decision off.
+func renderPaneBox(title string, headers []string, staticWidths []int, rows [][]string, emptyMsg string, budget int) string {
 	var lines []string
 	if len(rows) == 0 {
 		if emptyMsg != "" {
 			lines = append(lines, emptyMsg)
 		}
 	} else {
+		widths := paneColumnWidths(headers, rows, staticWidths, budget)
 		lines = append(lines, formatPaneRow(headers, widths))
 		for _, r := range rows {
 			lines = append(lines, formatPaneRow(r, widths))
 		}
 	}
 	return paneFrame(title, lines)
+}
+
+// paneBoxOverhead is how many columns paneFrame's own border/padding add
+// to a content line beyond the joined cell widths themselves: "│ " (2)
+// on the left, " │" (2) on the right.
+const paneBoxOverhead = 4
+
+// paneColumnWidths chooses the actual per-column widths one pane box's
+// row(s) render at [pg2-hlpuv]. Before this function existed, every
+// caller was frozen at the tier's declared staticWidths regardless of the
+// terminal's real size -- a long Role/Source-name/Registry-ID value
+// always got ellipsis-truncated by formatPaneRow even when the terminal
+// had plenty of free space to show it in full. This consciously
+// supersedes that choice (paneFrame's own doc, below, names it as a
+// deliberate "Task 4.6" decision) rather than treating it as a bugfix on
+// an oversight.
+//
+// Each column's NATURAL width -- the widest of its header and every cell
+// actually being rendered (ANSI/width-aware via lipgloss.Width), floored
+// at its staticWidths minimum -- becomes that column's rendered width as
+// long as the whole row still fits budget: every column's natural width,
+// plus the (n-1) inter-column spaces formatPaneRow's strings.Join adds,
+// plus paneBoxOverhead. budget <= 0 (no terminal width known -- every
+// direct caller in this package's own tests before real terminal
+// geometry exists) is treated as unbounded, so natural widths always
+// render uncapped; this is also why callers whose content already fits
+// staticWidths render byte-identical output whether or not a budget is
+// given -- natural width equals the static width whenever nothing
+// overflows it.
+//
+// When the natural row does NOT fit budget, this function never
+// truncates content itself -- it only picks smaller widths. It grows
+// each column from its staticWidths floor toward its natural width one
+// column at a time (round-robin, so no single column monopolizes
+// whatever spare room exists) until budget is exhausted, or falls back
+// to staticWidths verbatim when there is no spare room at all (budget
+// does not even cover the static minimums) -- exactly matching this
+// package's pre-pg2-hlpuv behavior in that case. Any column whose chosen
+// width still falls short of its natural width is truncated by
+// formatPaneRow when the row is actually rendered, exactly as it always
+// was [pg2-8iy1m]: that fix's guard (truncate a cell to its column width
+// before lipgloss pads/renders it, so an overflowing value never wraps
+// across physical lines and corrupts the box's borders) is unconditional
+// in formatPaneRow regardless of how the width it was given got chosen,
+// so it is preserved here verbatim for the case where the terminal
+// genuinely lacks room.
+func paneColumnWidths(headers []string, rows [][]string, staticWidths []int, budget int) []int {
+	n := len(staticWidths)
+	natural := make([]int, n)
+	copy(natural, staticWidths)
+	for i := 0; i < n && i < len(headers); i++ {
+		if w := lipgloss.Width(headers[i]); w > natural[i] {
+			natural[i] = w
+		}
+	}
+	for _, r := range rows {
+		for i := 0; i < n && i < len(r); i++ {
+			if w := lipgloss.Width(r[i]); w > natural[i] {
+				natural[i] = w
+			}
+		}
+	}
+
+	if budget <= 0 {
+		return natural
+	}
+
+	sumWidths := func(ws []int) int {
+		total := 0
+		for _, w := range ws {
+			total += w
+		}
+		return total
+	}
+	available := budget - paneBoxOverhead - (n - 1)
+	if sumWidths(natural) <= available {
+		return natural
+	}
+	if available <= sumWidths(staticWidths) {
+		return append([]int(nil), staticWidths...)
+	}
+
+	widths := append([]int(nil), staticWidths...)
+	remaining := available - sumWidths(staticWidths)
+	for remaining > 0 {
+		grew := false
+		for i := 0; i < n && remaining > 0; i++ {
+			if widths[i] < natural[i] {
+				widths[i]++
+				remaining--
+				grew = true
+			}
+		}
+		if !grew {
+			break
+		}
+	}
+	return widths
 }
 
 // renderPaneBoxPlain is renderPaneBox's un-columned sibling for the
@@ -386,7 +502,18 @@ func formatPaneRow(cells []string, widths []int) string {
 // STACKED (not side-by-side) in this packet's zone-ladder wiring
 // [design: Task 4.6 Files]; the terminal-width clip that matters for a
 // real terminal is applied once, at the top of the zone ladder
-// (zones.go's concatZones -> render.Block), not per-pane here.
+// (zones.go's concatZones -> render.Block), not per-pane here. That
+// remains true after pg2-hlpuv: paneFrame itself still never stretches a
+// box wider than its own content, and still never re-clips per pane.
+// What changed is what counts as "its own content" -- paneColumnWidths
+// (above) now lets a row's columns grow toward their natural,
+// untruncated size when the terminal has room, so a box arriving here
+// can legitimately be much wider than the tier's old fixed minimums.
+// Task 4.6 originally treated "content-sized, clip-only, never padded
+// up" as covering column width too (deliberately never widening a
+// column to use free terminal space); pg2-hlpuv consciously supersedes
+// that half of the choice while leaving paneFrame's own box-sizing
+// mechanism untouched.
 //
 // The top border's dash count is `inner - title width` (not `- 1`)
 // [pg2-8iy1m]: every content/bottom line totals `inner + 4` columns

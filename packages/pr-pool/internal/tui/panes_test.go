@@ -193,6 +193,14 @@ func TestFormatPaneRow_OverflowingCellTruncatesInsteadOfWrapping(t *testing.T) {
 // pathologically long Role must not blow up the number of physical lines
 // the box occupies (one per listener, not one-plus-per-listener from a
 // mid-cell word-wrap) [pg2-8iy1m].
+//
+// width=40 is deliberately too narrow to fit the long Role's natural
+// width even after pg2-hlpuv's column-widening (paneColumnWidths widens
+// the ROLE column from its 10-column static floor toward 40's available
+// room, but nowhere near the Role's full 48 columns) -- this test keeps
+// exercising the genuine "terminal lacks room" case pg2-8iy1m's guard
+// covers. TestRenderListenersPane_WidensColumnsWhenRoomAllows (below) is
+// pg2-hlpuv's own new acceptance bar for the opposite case.
 func TestRenderListenersPane_OverflowingRoleKeepsBoxWellFormed(t *testing.T) {
 	theme := render.NewTheme(false)
 	listeners := []Listener{
@@ -200,7 +208,7 @@ func TestRenderListenersPane_OverflowingRoleKeepsBoxWellFormed(t *testing.T) {
 		{Role: "a-very-long-role-name-that-overflows-its-column", Enabled: true, Delivered: 3, Declined: 4},
 	}
 
-	got := renderListenersPane(listeners, render.TierTiny, theme, "(none)", "Listeners", nil)
+	got := renderListenersPane(listeners, render.TierTiny, 40, theme, "(none)", "Listeners", nil)
 	lines := strings.Split(got, "\n")
 
 	// top border + header + 2 data rows + bottom border.
@@ -212,6 +220,55 @@ func TestRenderListenersPane_OverflowingRoleKeepsBoxWellFormed(t *testing.T) {
 		if w := lipgloss.Width(l); w != width {
 			t.Errorf("line %d (%q) has width %d, want %d (every line of the box must align); got:\n%s", i, l, w, width, got)
 		}
+	}
+	if !strings.Contains(got, "…") {
+		t.Errorf("terminal genuinely lacks room for the full Role -- it must still be ellipsis-truncated (pg2-8iy1m); got:\n%s", got)
+	}
+}
+
+// TestRenderListenersPane_WidensColumnsWhenRoomAllows is pg2-hlpuv's own
+// acceptance bar: a Role/name that would have been ellipsis-truncated
+// under the tier's old fixed column widths must render IN FULL, with no
+// "…", once the terminal has enough free space to show it -- and must
+// fall back to truncating it (pg2-8iy1m's guard, unchanged) once the
+// terminal genuinely does not, at every one of the three tiers.
+func TestRenderListenersPane_WidensColumnsWhenRoomAllows(t *testing.T) {
+	theme := render.NewTheme(false)
+	const longRole = "a-very-long-role-name-that-overflows-its-column"
+	listeners := []Listener{{Role: longRole, Enabled: true, Delivered: 3, Declined: 4}}
+
+	for _, tier := range []int{render.TierTiny, render.TierNarrow, render.TierWide} {
+		t.Run("ample width shows the full role", func(t *testing.T) {
+			got := renderListenersPane(listeners, tier, 200, theme, "(none)", "Listeners", nil)
+			if !strings.Contains(got, longRole) {
+				t.Errorf("tier=%d width=200: expected the full role name un-truncated; got:\n%s", tier, got)
+			}
+			if strings.Contains(got, "…") {
+				t.Errorf("tier=%d width=200: role should not be truncated when there is ample room; got:\n%s", tier, got)
+			}
+		})
+		t.Run("narrow width still truncates (pg2-8iy1m preserved)", func(t *testing.T) {
+			got := renderListenersPane(listeners, tier, 30, theme, "(none)", "Listeners", nil)
+			if strings.Contains(got, longRole) {
+				t.Errorf("tier=%d width=30: expected the role to be truncated, not shown in full; got:\n%s", tier, got)
+			}
+			if !strings.Contains(got, "…") {
+				t.Errorf("tier=%d width=30: expected an ellipsis-truncated role; got:\n%s", tier, got)
+			}
+			// top border + header + 1 data row + bottom border, all the
+			// same width -- no mid-row wrap from the truncated cell
+			// [pg2-8iy1m].
+			lines := strings.Split(got, "\n")
+			if want := 4; len(lines) != want {
+				t.Fatalf("tier=%d width=30: expected %d physical lines (no mid-row wrap), got %d; got:\n%s", tier, want, len(lines), got)
+			}
+			boxWidth := lipgloss.Width(lines[0])
+			for i, l := range lines {
+				if w := lipgloss.Width(l); w != boxWidth {
+					t.Errorf("tier=%d width=30: line %d (%q) has width %d, want %d (every line of the box must align); got:\n%s", tier, i, l, w, boxWidth, got)
+				}
+			}
+		})
 	}
 }
 
@@ -309,7 +366,7 @@ func TestRenderListenersPane_InlineUnmatchedMarker(t *testing.T) {
 			{Role: "reviewer", Enabled: true, Binds: []string{"pr.new"}},
 			{Role: "triager", Enabled: true, Binds: []string{"bead.new"}},
 		}
-		got := renderListenersPane(listeners, render.TierWide, theme, "(none)", "Listeners", []string{"pr.new"})
+		got := renderListenersPane(listeners, render.TierWide, 0, theme, "(none)", "Listeners", []string{"pr.new"})
 		lines := strings.Split(got, "\n")
 
 		var reviewerLine, triagerLine string
@@ -334,7 +391,7 @@ func TestRenderListenersPane_InlineUnmatchedMarker(t *testing.T) {
 			{Role: "reviewer", Enabled: true, Binds: []string{"pr.new"}},
 			{Role: "triager", Enabled: true, Binds: []string{"pr.new"}},
 		}
-		got := renderListenersPane(listeners, render.TierWide, theme, "(none)", "Listeners", []string{"pr.new"})
+		got := renderListenersPane(listeners, render.TierWide, 0, theme, "(none)", "Listeners", []string{"pr.new"})
 		if strings.Contains(got, "not seen yet this run") {
 			t.Errorf("ambiguous (2-row) unmatched type must not render an inline marker anywhere; got:\n%s", got)
 		}
@@ -342,7 +399,7 @@ func TestRenderListenersPane_InlineUnmatchedMarker(t *testing.T) {
 
 	t.Run("nil unmatchedBindings renders no marker", func(t *testing.T) {
 		listeners := []Listener{{Role: "reviewer", Enabled: true, Binds: []string{"pr.new"}}}
-		got := renderListenersPane(listeners, render.TierWide, theme, "(none)", "Listeners", nil)
+		got := renderListenersPane(listeners, render.TierWide, 0, theme, "(none)", "Listeners", nil)
 		if strings.Contains(got, "not seen yet this run") {
 			t.Errorf("nil unmatchedBindings must render no marker; got:\n%s", got)
 		}
@@ -362,5 +419,91 @@ func TestRenderRegistryPane_OmittedEntirelyWhenEmpty(t *testing.T) {
 	got := m.View()
 	if strings.Contains(got, "Registry") {
 		t.Errorf("empty Registry should be omitted entirely; got:\n%s", got)
+	}
+}
+
+// TestView_WidensPaneContentAcrossAllThreeTiers is pg2-hlpuv's own
+// acceptance bar exercised through the REAL m.View() pipeline (rather than
+// calling a pane renderer directly): a long Source name that overflows
+// the Sources pane's static SOURCE column (12) must render in full, with
+// no ellipsis, once the terminal is wide enough to fit the whole row --
+// and must still fall back to an ellipsis-truncated name at a terminal
+// that genuinely lacks the room, at each of the three render tiers
+// (Tiny <80, Narrow 80-119, Wide >=120) [design: Task 4.6 Validation;
+// pg2-hlpuv Acceptance Criteria].
+//
+// longName is 40 columns: Sources' own [SOURCE(12) LAST TICK(10)
+// STATE(16)] static row plus the box's border/separator overhead totals
+// 66 columns needed to show it whole. That comfortably fits at width=90
+// (Narrow) and width=120 (Wide), but not at width=60 (Tiny) -- exercising
+// both halves of the acceptance bar (shows in full where there's room;
+// still truncates where there genuinely isn't) at real terminal widths,
+// not just via an explicit tier constant.
+func TestView_WidensPaneContentAcrossAllThreeTiers(t *testing.T) {
+	const longName = "github-org-pull-requests-watcher-source"
+	reply := StatusReply{
+		Core:    CoreInfo{State: coreStateStarted},
+		Sources: []Source{{Name: longName, Enabled: true, LastTick: time.Now()}},
+	}
+
+	cases := []struct {
+		width        int
+		tierName     string
+		wantFullName bool
+	}{
+		{60, "Tiny", false},
+		{90, "Narrow", true},
+		{120, "Wide", true},
+	}
+	for _, c := range cases {
+		t.Run(c.tierName, func(t *testing.T) {
+			m := newTestModel(nil)
+			m.width, m.height = c.width, 30
+			m.screen = screenMain
+			m.reply = reply
+			got := m.View()
+
+			// Isolate the Sources box's own lines -- the footer is
+			// independently subject to the zone ladder's own global
+			// width clip (zones.go's concatZones -> render.Block), which
+			// can add its own unrelated ellipsis at a narrow terminal;
+			// this test is only about the Sources pane's OWN column
+			// widening, not the footer.
+			var box []string
+			inBox := false
+			for _, l := range strings.Split(got, "\n") {
+				if strings.Contains(l, "┌ Sources") {
+					inBox = true
+				}
+				if inBox {
+					box = append(box, l)
+				}
+				if inBox && strings.HasPrefix(strings.TrimSpace(l), "└") {
+					break
+				}
+			}
+			boxText := strings.Join(box, "\n")
+			if boxText == "" {
+				t.Fatalf("width=%d (%s): could not locate the Sources box in the rendered view; got:\n%s", c.width, c.tierName, got)
+			}
+
+			hasFullName := strings.Contains(boxText, longName)
+			hasEllipsis := strings.Contains(boxText, "…")
+			if c.wantFullName {
+				if !hasFullName {
+					t.Errorf("width=%d (%s): expected the full source name un-truncated; got Sources box:\n%s", c.width, c.tierName, boxText)
+				}
+				if hasEllipsis {
+					t.Errorf("width=%d (%s): expected no truncation -- there is ample room; got Sources box:\n%s", c.width, c.tierName, boxText)
+				}
+			} else {
+				if hasFullName {
+					t.Errorf("width=%d (%s): expected the source name to be truncated, not shown in full; got Sources box:\n%s", c.width, c.tierName, boxText)
+				}
+				if !hasEllipsis {
+					t.Errorf("width=%d (%s): expected an ellipsis-truncated source name (pg2-8iy1m preserved); got Sources box:\n%s", c.width, c.tierName, boxText)
+				}
+			}
+		})
 	}
 }

@@ -30,7 +30,7 @@ func TestPanes_OptionalFieldAbsenceRendersCleanly(t *testing.T) {
 	t.Run("listener with Backoff == nil never renders cooling, at every tier", func(t *testing.T) {
 		listeners := []Listener{{Role: "reviewer", Enabled: true, Backoff: nil}}
 		for _, tier := range []int{render.TierWide, render.TierNarrow, render.TierTiny} {
-			got := renderListenersPane(listeners, tier, theme, "(no listeners configured)", "Listeners", nil)
+			got := renderListenersPane(listeners, tier, 0, theme, "(no listeners configured)", "Listeners", nil)
 			if strings.Contains(got, "cooling") {
 				t.Errorf("tier=%d: nil Backoff still rendered a cooling indicator; got:\n%s", tier, got)
 			}
@@ -43,7 +43,7 @@ func TestPanes_OptionalFieldAbsenceRendersCleanly(t *testing.T) {
 	t.Run("source with Failure == nil never renders failing", func(t *testing.T) {
 		now := time.Now()
 		sources := []Source{{Name: "gh-prs", Enabled: true, LastTick: now, Failure: nil}}
-		got := renderSourcesPane(sources, 1000, now, theme, "(no sources configured)", "Sources")
+		got := renderSourcesPane(sources, 1000, now, 0, theme, "(no sources configured)", "Sources")
 		if strings.Contains(got, "failing") {
 			t.Errorf("nil Failure still rendered a failing indicator; got:\n%s", got)
 		}
@@ -54,14 +54,14 @@ func TestPanes_OptionalFieldAbsenceRendersCleanly(t *testing.T) {
 
 	t.Run("control case: a SET Backoff/Failure still renders its own indicator", func(t *testing.T) {
 		cooling := &Backoff{NextEligible: time.Now().Add(30 * time.Second)}
-		got := renderListenersPane([]Listener{{Role: "triager", Enabled: true, Backoff: cooling}}, render.TierWide, theme, "", "Listeners", nil)
+		got := renderListenersPane([]Listener{{Role: "triager", Enabled: true, Backoff: cooling}}, render.TierWide, 0, theme, "", "Listeners", nil)
 		if !strings.Contains(got, "cooling") {
 			t.Errorf("a set Backoff should still render the cooling indicator (control case); got:\n%s", got)
 		}
 
 		now := time.Now()
 		failing := &Failure{Count: 3}
-		got2 := renderSourcesPane([]Source{{Name: "flaky", Enabled: true, LastTick: now, Failure: failing}}, 1000, now, theme, "", "Sources")
+		got2 := renderSourcesPane([]Source{{Name: "flaky", Enabled: true, LastTick: now, Failure: failing}}, 1000, now, 0, theme, "", "Sources")
 		if !strings.Contains(got2, "failing") {
 			t.Errorf("a set Failure should still render the failing indicator (control case); got:\n%s", got2)
 		}

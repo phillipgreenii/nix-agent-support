@@ -468,6 +468,12 @@ func (m *Model) renderActivityZoneContent(gated bool) string {
 // 4.6 Step 6; §5 Derived health].
 func (m *Model) renderPaneContent(p int, gated bool, now time.Time) string {
 	tier := render.Tier(m.width)
+	// width is the pane box's own available budget: panes are stacked
+	// vertically (zones.go), never side-by-side, so each one may use the
+	// full terminal width for itself -- threaded into the renderers so
+	// their columns can widen past the tier's declared minimums instead
+	// of always truncating to them [pg2-hlpuv].
+	width := render.EffectiveWidth(m.width)
 	title := paneTitle(p)
 	if p == m.focusedPane {
 		title += " (focused)"
@@ -475,18 +481,18 @@ func (m *Model) renderPaneContent(p int, gated bool, now time.Time) string {
 	switch p {
 	case paneListeners:
 		es := resolveEmptyState(false, false, len(m.reply.Listeners) == 0)
-		content := renderListenersPane(m.reply.Listeners, tier, m.theme, emptyStateText(es, "(no listeners configured)"), title, m.reply.UnmatchedBindings)
+		content := renderListenersPane(m.reply.Listeners, tier, width, m.theme, emptyStateText(es, "(no listeners configured)"), title, m.reply.UnmatchedBindings)
 		return dimIfPaused(content, gated, m.theme)
 	case paneQueues:
 		es := resolveEmptyState(false, gated, len(m.reply.Queues) == 0)
-		return renderQueuesPane(m.reply.Queues, emptyStateText(es, "No events queued."), title)
+		return renderQueuesPane(m.reply.Queues, width, emptyStateText(es, "No events queued."), title)
 	case paneSources:
 		es := resolveEmptyState(false, false, len(m.reply.Sources) == 0)
-		content := renderSourcesPane(m.reply.Sources, m.reply.TickIntervalMs, now, m.theme, emptyStateText(es, "(no sources configured)"), title)
+		content := renderSourcesPane(m.reply.Sources, m.reply.TickIntervalMs, now, width, m.theme, emptyStateText(es, "(no sources configured)"), title)
 		return dimIfPaused(content, gated, m.theme)
 	case paneRegistry:
 		es := resolveEmptyState(false, false, len(m.reply.Registry) == 0)
-		content := renderRegistryPane(m.reply.Registry, emptyStateText(es, "(no participants registered)"), title)
+		content := renderRegistryPane(m.reply.Registry, width, emptyStateText(es, "(no participants registered)"), title)
 		return dimIfPaused(content, gated, m.theme)
 	default:
 		return ""
