@@ -29,7 +29,6 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hooktypes"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/secretpath"
 )
@@ -2355,64 +2354,20 @@ func Parse(command string) []ParsedCommand {
 	return ParseShell(command).Leaves
 }
 
-// LeavesOf returns a Bash HookInput's already-parsed leaf structure — ADR 0039
-// step 3's replacement for the pattern `cmdStr, err := input.BashCommand();
-// parsed := cmdparse.Parse(cmdStr)` that every rule module used to spell for
-// itself. That pattern re-derived structure the engine had already computed:
-// engine.EvaluateExpression parses the whole expression once, then used to
-// re-serialise ONE leaf's `Raw` into a synthetic `ToolInput` JSON string
-// (`mustBashJSON`) purely so each rule could unmarshal it back out and re-parse
-// it — root cause 3 of ADR 0039's Context, restated at the rule boundary
-// instead of the engine-to-seam one.
-//
-// When the engine threaded the leaf's structure onto input.ParsedLeaf (see that
-// field's doc), this returns it directly — no parse call at all. When it did
-// not — a direct unit-test call, or the real top-level Bash input at
-// EvaluateHook's entry point before EvaluateExpression has split it into
-// leaves — this falls back to parsing BashCommand(), i.e. EXACTLY what every
-// call site did before this function existed, so no existing caller's
-// behaviour changes.
-//
-// The error is BashCommand()'s: a genuine failure (wrong tool, malformed
-// ToolInput), never cmdparse's own "unparseable" — Parse already discards that
-// distinction at this same boundary (see Parse's own doc), and this function
-// makes the identical choice for the threaded path.
-func LeavesOf(input *hookio.HookInput) ([]ParsedCommand, error) {
-	if leaves, ok := input.ParsedLeaf.([]ParsedCommand); ok {
-		return leaves, nil
-	}
-	cmd, err := input.BashCommand()
-	if err != nil {
-		return nil, err
-	}
-	return Parse(cmd), nil
-}
-
-// RootLeavesOf is LeavesOf's sibling for hookio.HookInput.RootExpression: the
-// full expression's already-parsed leaf set, threaded onto input.ParsedRoot by
-// engine.EvaluateExpression alongside RootExpression itself (see that field's
-// doc). A rule needing the SIBLING leaves — the same scope RootExpression
-// exists to recover — reads them through here instead of re-parsing
-// RootExpression itself, which is what git's `expressionScope` and gitdir's
-// `pipeScope` did before this function existed.
-//
-// Falls back to parsing RootExpression when the engine did not thread it (a
-// direct unit-test call), and returns nil when RootExpression is itself empty
-// — the same "no expression, no leaves" answer every existing caller's own
-// `if input.RootExpression == ""` guard already gave, restated here so callers
-// that used to guard for it themselves no longer have to.
-func RootLeavesOf(input *hookio.HookInput) []ParsedCommand {
-	if input == nil {
-		return nil
-	}
-	if leaves, ok := input.ParsedRoot.([]ParsedCommand); ok {
-		return leaves
-	}
-	if input.RootExpression == "" {
-		return nil
-	}
-	return Parse(input.RootExpression)
-}
+// LeavesOf and RootLeavesOf (ADR 0039 step 3's rule-facing accessors for
+// hookio.HookInput.ParsedLeaf/ParsedRoot) used to be defined here. They moved
+// to internal/hookio (slice 3ap of the effect-graph spike, tc-8og1) — this
+// package's only reason to import internal/hookio at all was `*hookio.HookInput`,
+// their shared parameter type, and package hookio needs to import cmdparse (for
+// ParsedCommand) to let HookInput.ParsedLeaf/ParsedRoot and
+// hookio.Evaluator.EvaluateStructure's `leaves` parameter carry the concrete
+// `[]cmdparse.ParsedCommand` type instead of `any` — which cmdparse importing
+// hookio back would have cycled. Relocating the two functions (rather than the
+// type they close over) removed cmdparse's hookio import entirely, breaking the
+// cycle in the direction that lets the concrete type exist at all. See
+// hookio.LeavesOf/hookio.RootLeavesOf for the current definitions; every call
+// site in internal/engine and internal/rules/* now reads `hookio.LeavesOf`/
+// `hookio.RootLeavesOf` instead of `cmdparse.LeavesOf`/`cmdparse.RootLeavesOf`.
 
 // DELETED, and the deletion is a coverage claim: `segment`, `assignPipelineIDs`,
 // `splitCompound`, `tokenize`, and the ENTIRE `resolveLoops` family —

@@ -308,7 +308,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 	case "Bash":
 		// ADR 0039 step 3: leaves is the SAME structure
 		// `cmdparse.Parse(cmdStr)` used to derive from a fresh
-		// `input.BashCommand()` read, obtained here through cmdparse.LeavesOf so
+		// `input.BashCommand()` read, obtained here through hookio.LeavesOf so
 		// the engine's already-parsed leaf (threaded onto input.ParsedLeaf) is
 		// reused instead of re-parsed. This is also now the ONE place that reads
 		// the Bash command at all: the old unconditional `input.BashCommand()`
@@ -316,7 +316,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		// longer carries a ToolInput JSON string to read it FROM (mustBashJSON
 		// is deleted) — BashCommand() is called lazily, below, only on the path
 		// that genuinely still needs the raw text.
-		leaves, err := cmdparse.LeavesOf(input)
+		leaves, err := hookio.LeavesOf(input)
 		if err != nil {
 			// THE SPLIT ADR 0043's Consequences require. This used to `break` into
 			// the shared final return below, so ONE Abstain literal carried two
@@ -347,7 +347,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 			// second parse of the identical text.
 			rootLeaves = leaves
 		} else {
-			rootLeaves = cmdparse.RootLeavesOf(input)
+			rootLeaves = hookio.RootLeavesOf(input)
 		}
 		if dir, matched, credentialCopyOut, envVarRedirect, worktreeRedirect := bashAccessLeaves(leaves, scope, rootLeaves); matched {
 			if dir == dirWrite && tempFixtureCarveOutApplies(leaves, input.CWD) {
@@ -528,8 +528,8 @@ func bashAccess(leafText, scopeText string) (direction, bool) {
 
 // bashAccessLeaves is bashAccess's core, over an ALREADY-PARSED leaf set —
 // ADR 0039 step 3's entry point for Evaluate, which has already parsed both
-// the leaf (via cmdparse.LeavesOf) and, when available, the root expression's
-// leaves (rootLeaves, via cmdparse.RootLeavesOf) once each. rootLeaves is
+// the leaf (via hookio.LeavesOf) and, when available, the root expression's
+// leaves (rootLeaves, via hookio.RootLeavesOf) once each. rootLeaves is
 // forwarded to newPipeScope so pipeScope.sinkDirection need not re-parse
 // scopeText either; nil is a legitimate value (a direct caller with no
 // pre-parsed root) and simply falls back to pipeScope's own lazy parse.
@@ -1574,7 +1574,7 @@ func readOrCapture(pc cmdparse.ParsedCommand, pipes *pipeScope) direction {
 // expression eagerly for an answer almost nobody asks for would make the cost
 // quadratic in a compound's leaf count. ADR 0039 step 3 removes even that cost
 // for the common case: Evaluate has ALREADY parsed the root expression once
-// (through cmdparse.RootLeavesOf, which reads the engine's threaded
+// (through hookio.RootLeavesOf, which reads the engine's threaded
 // ParsedRoot), so newPipeScope accepts those leaves directly and this type
 // merely CACHES what its caller supplies rather than deferring a parse call
 // that would otherwise never happen.

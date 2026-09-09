@@ -68,7 +68,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 	if input.ToolName != "Bash" {
 		return hookio.NotApplicable()
 	}
-	parsed, err := cmdparse.LeavesOf(input)
+	parsed, err := hookio.LeavesOf(input)
 	if err != nil {
 		return hookio.RuleResult{}, fmt.Errorf("nix: read bash command: %w", err)
 	}

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmdparse"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
 )
 
@@ -60,7 +61,7 @@ func (m *mockEvaluator) EvaluateExpression(expr string, stack []hookio.StackFram
 	return m.defaultResult
 }
 
-func (m *mockEvaluator) EvaluateStructure(source string, leaves any, stack []hookio.StackFrame, origin *hookio.HookInput) hookio.RuleResult {
+func (m *mockEvaluator) EvaluateStructure(source string, leaves []cmdparse.ParsedCommand, stack []hookio.StackFrame, origin *hookio.HookInput) hookio.RuleResult {
 	return m.EvaluateExpression(source, stack, origin)
 }
 

@@ -18,18 +18,26 @@ package cmdparse
 //     carry an opaque "vouched-for" type. Opacifying that parameter would
 //     directly contradict I7's own text ("the expression entry point takes a
 //     `string`").
-//  2. hookio.Evaluator's interface (the seam through which every rule reaches
-//     the engine) lives in package `hookio`, which cmdparse already imports
-//     (for `*hookio.HookInput`, `LeavesOf`/`RootLeavesOf`'s parameter — no
-//     longer for `Redirection`, which moved to the zero-dependency
-//     `internal/hooktypes` in the effect-graph spike's slice 3r) — so hookio
-//     CANNOT import cmdparse back without a cycle. That is the EXACT reason
-//     `EvaluateStructure`'s own `leaves` parameter is typed `any` rather than
-//     `[]cmdparse.ParsedCommand` (see that method's doc, pg2-m1i6r). The same
-//     constraint blocks giving EvaluateExpression's `expr` parameter a
-//     cmdparse-defined opaque type at the interface boundary.
-//  3. Separately from the interface-cycle problem, `ParsedCommand` itself
-//     (the value `EvaluateStructure`'s `leaves` already carries as `any`) has
+//  2. HISTORICAL, RESOLVED as of the effect-graph spike's slice 3ap
+//     (tc-8og1): hookio.Evaluator's interface (the seam through which every
+//     rule reaches the engine) lives in package `hookio`, which cmdparse USED
+//     TO import (for `*hookio.HookInput`, `LeavesOf`/`RootLeavesOf`'s
+//     parameter — no longer for `Redirection`, which moved to the
+//     zero-dependency `internal/hooktypes` in the effect-graph spike's slice
+//     3r), so hookio COULD NOT import cmdparse back without a cycle at the
+//     time this guard was written. That was the EXACT reason
+//     `EvaluateStructure`'s own `leaves` parameter was typed `any` rather
+//     than `[]cmdparse.ParsedCommand` (pg2-m1i6r). Slice 3ap relocated
+//     `LeavesOf`/`RootLeavesOf` INTO hookio itself, removing cmdparse's only
+//     import of hookio; hookio now imports cmdparse, and `leaves` is
+//     concretely `[]cmdparse.ParsedCommand`. This reason no longer applies —
+//     it is kept here only as the historical record of why the AST-CHECK
+//     FALLBACK below was chosen; THE DECISION itself still stands on reason 1
+//     alone (I7 forces EvaluateExpression's `expr` to stay a plain `string`
+//     regardless of any interface-cycle question).
+//  3. Separately from the (now-resolved) interface-cycle problem, `ParsedCommand`
+//     itself (the value `EvaluateStructure`'s `leaves` carries, concretely
+//     `[]cmdparse.ParsedCommand` since slice 3ap) has
 //     fully EXPORTED fields and is constructed via ordinary struct-literal
 //     syntax across roughly nineteen already-landed rule packages and their
 //     test suites — see docker.go's `resolveInnerCommand`, safecmds.go's

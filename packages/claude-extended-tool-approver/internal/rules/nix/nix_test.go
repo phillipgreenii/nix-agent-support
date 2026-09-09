@@ -271,12 +271,11 @@ func (m *mockEvaluator) EvaluateExpression(expr string, stack []hookio.StackFram
 // fixtures' inner commands carry a shell metacharacter, so re-quoting them
 // for the multi-arg case (innerCommandStructure's quoteJoin) round-trips to
 // the exact same Executable/Args the old bare-string join produced.
-func (m *mockEvaluator) EvaluateStructure(source string, leaves any, stack []hookio.StackFrame, origin *hookio.HookInput) hookio.RuleResult {
-	parsed, ok := leaves.([]cmdparse.ParsedCommand)
-	if !ok || len(parsed) != 1 {
+func (m *mockEvaluator) EvaluateStructure(source string, leaves []cmdparse.ParsedCommand, stack []hookio.StackFrame, origin *hookio.HookInput) hookio.RuleResult {
+	if len(leaves) != 1 {
 		return m.defaultResult
 	}
-	key := strings.TrimSpace(strings.Join(append([]string{parsed[0].Executable}, parsed[0].Args...), " "))
+	key := strings.TrimSpace(strings.Join(append([]string{leaves[0].Executable}, leaves[0].Args...), " "))
 	if r, ok := m.results[key]; ok {
 		return r
 	}
@@ -367,12 +366,10 @@ func (c *captureEvaluator) EvaluateExpression(_ string, _ []hookio.StackFrame, _
 	return hookio.RuleResult{Decision: hookio.Reject, Reason: "captureEvaluator: EvaluateExpression was called; nix.go must use EvaluateStructure"}
 }
 
-func (c *captureEvaluator) EvaluateStructure(source string, leaves any, _ []hookio.StackFrame, _ *hookio.HookInput) hookio.RuleResult {
+func (c *captureEvaluator) EvaluateStructure(source string, leaves []cmdparse.ParsedCommand, _ []hookio.StackFrame, _ *hookio.HookInput) hookio.RuleResult {
 	c.sawCall = true
 	c.gotSource = source
-	if parsed, ok := leaves.([]cmdparse.ParsedCommand); ok {
-		c.gotLeaves = parsed
-	}
+	c.gotLeaves = leaves
 	return c.result
 }
 

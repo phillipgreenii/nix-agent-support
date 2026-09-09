@@ -18,7 +18,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmdparse"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/patheval"
 )
@@ -35,12 +34,12 @@ type attrApproveRule struct {
 func (r *attrApproveRule) Name() string { return r.name }
 
 func (r *attrApproveRule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
-	// cmdparse.LeavesOf, not a bare input.BashCommand()+cmdparse.Parse round
+	// hookio.LeavesOf, not a bare input.BashCommand()+cmdparse.Parse round
 	// trip: ADR 0039 step 3 deleted mustBashJSON, so a synthetic per-leaf
 	// HookInput no longer carries a ToolInput JSON string to read a command
 	// out of — this mock mirrors the same migration every production rule
 	// module went through.
-	parsed, err := cmdparse.LeavesOf(input)
+	parsed, err := hookio.LeavesOf(input)
 	if err != nil {
 		return hookio.NotApplicable()
 	}

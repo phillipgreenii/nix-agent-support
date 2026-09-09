@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmdparse"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
 )
 
@@ -364,7 +363,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 	if input.ToolName != "Bash" {
 		return hookio.NotApplicable()
 	}
-	parsed, err := cmdparse.LeavesOf(input)
+	parsed, err := hookio.LeavesOf(input)
 	if err != nil {
 		return hookio.RuleResult{}, fmt.Errorf("config-rules: read bash command: %w", err)
 	}

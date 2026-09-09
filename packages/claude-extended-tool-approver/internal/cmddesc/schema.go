@@ -6,16 +6,18 @@
 // generic interpreter reads only the schema, and a new command is only a new
 // registry entry.
 //
-// Known import cycle to fix later: this package imports internal/cmdparse for
-// ParsedCommand, and cmdparse imports internal/hookio for *hookio.HookInput (the
-// parameter of LeavesOf/RootLeavesOf), so hookio is reached TRANSITIVELY. No
-// package in the spike imports internal/hookio directly (a guard test in
-// internal/effectpolicy enforces that). This package no longer reaches hookio
-// for any TYPE it names — ParsedCommand.Redirections is
-// []internal/hooktypes.Redirection, a zero-dependency leaf package, as of the
-// effect-graph spike's slice 3r — so the only remaining edge is cmdparse's
-// HookInput parameter, a separate follow-up (the any-typed HookInput fields
-// ParsedLeaf/ParsedRoot/Evaluator.EvaluateStructure's leaves).
+// Import cycle RESOLVED as of the effect-graph spike's slice 3ap (tc-8og1):
+// this package imports internal/cmdparse for ParsedCommand. cmdparse used to
+// also import internal/hookio for *hookio.HookInput (the parameter of
+// LeavesOf/RootLeavesOf), which reached hookio TRANSITIVELY through this
+// package's own cmdparse import — slice 3ap relocated LeavesOf/RootLeavesOf
+// into hookio itself, removing that import, so cmdparse (and everything that
+// imports it, this package included) no longer reaches internal/hookio at
+// all, directly or transitively. No package in the spike imports
+// internal/hookio directly (a guard test in internal/effectpolicy enforces
+// that) — this package no longer reaches hookio for any TYPE it names either:
+// ParsedCommand.Redirections is []internal/hooktypes.Redirection, a
+// zero-dependency leaf package, as of the effect-graph spike's slice 3r.
 package cmddesc
 
 import "fmt"

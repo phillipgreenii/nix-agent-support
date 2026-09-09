@@ -98,7 +98,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 			return r.reject(root, path, input.CWD, eval), nil
 		}
 	case "Bash":
-		leaves, err := cmdparse.LeavesOf(input)
+		leaves, err := hookio.LeavesOf(input)
 		if err != nil {
 			return hookio.RuleResult{}, fmt.Errorf("denied-roots: read bash command: %w", err)
 		}

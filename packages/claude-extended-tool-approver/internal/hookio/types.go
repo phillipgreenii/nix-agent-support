@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmdparse"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hooktypes"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/patheval"
 )
@@ -562,26 +563,28 @@ type HookInput struct {
 	// the SAME computation every rule used to perform for itself after
 	// unmarshalling ToolInput, just made ONCE and shared.
 	//
-	// It is `any` rather than `[]cmdparse.ParsedCommand` because `cmdparse`
-	// imports this package (for `*HookInput` itself, the parameter of
+	// It was `any` rather than `[]cmdparse.ParsedCommand` because `cmdparse`
+	// used to import this package (for `*HookInput` itself, the parameter of
 	// `LeavesOf`/`RootLeavesOf`), so this package importing `cmdparse` back
-	// would cycle. (Redirection used to be the reason too, before it moved to
-	// internal/hooktypes — slice 3r of the effect-graph spike — but the
-	// HookInput edge remains, so the cycle concern still holds.)
-	// `cmdparse.LeavesOf` is the ONE place that performs the type
-	// assertion, so a rule never asserts the type itself — mirroring how
-	// `RuleErrorSink` and `Evaluator` above decouple the engine from a
-	// concrete type without an import cycle.
+	// would have cycled. (Redirection used to be a second reason, before it
+	// moved to internal/hooktypes — slice 3r of the effect-graph spike.)
+	// Slice 3ap relocated `LeavesOf`/`RootLeavesOf` INTO this package instead
+	// — they are now `hookio.LeavesOf`/`hookio.RootLeavesOf` — which removed
+	// cmdparse's only import of hookio and let this package import cmdparse
+	// freely, so the field carries the concrete type directly.
+	// `hookio.LeavesOf` is the ONE place that reads it (a rule never asserts
+	// the type itself), mirroring how `RuleErrorSink` and `Evaluator` above
+	// decouple the engine from a concrete type without an import cycle.
 	//
 	// nil for a rule invoked outside EvaluateExpression (a direct unit-test
 	// call, or the real top-level Bash input at EvaluateHook's entry point
-	// before it is split into leaves) — cmdparse.LeavesOf falls back to
+	// before it is split into leaves) — hookio.LeavesOf falls back to
 	// parsing BashCommand() in that case, unchanged from every caller's
 	// behaviour before this field existed.
 	//
 	// `json:"-"`: engine-derived provenance, never something a hook payload
 	// may assert, matching RootExpression/InCommandVars.
-	ParsedLeaf any `json:"-"`
+	ParsedLeaf []cmdparse.ParsedCommand `json:"-"`
 
 	// ParsedRoot is ParsedLeaf's sibling for RootExpression: the FULL
 	// expression's already-parsed leaf set — the very `sp.Leaves` slice
@@ -590,18 +593,19 @@ type HookInput struct {
 	// re-derive by re-parsing that same string (git's `expressionScope` and
 	// gitdir's `pipeScope` both did exactly that before this field existed).
 	//
-	// Same `any`-for-no-import-cycle reasoning as ParsedLeaf; read it through
-	// `cmdparse.RootLeavesOf`, never by asserting the type directly. Same
-	// nil-is-safe fallback too: nil here (a direct call, or RootExpression
-	// itself empty) makes RootLeavesOf re-parse RootExpression exactly as
-	// every existing caller did.
+	// Same former-`any`-for-import-cycle history as ParsedLeaf (see that
+	// field's doc for the slice 3ap relocation that resolved it); read it
+	// through `hookio.RootLeavesOf`, never by asserting the type directly.
+	// Same nil-is-safe fallback too: nil here (a direct call, or
+	// RootExpression itself empty) makes RootLeavesOf re-parse RootExpression
+	// exactly as every existing caller did.
 	//
 	// Kept FIELD-FOR-FIELD alongside ParsedLeaf on both synthetic HookInputs
 	// the engine builds (the executable-bearing leaf and the
 	// assignment-only leaf) for the same reason RootExpression/InCommandVars
 	// already are: a field present on one path and absent on the other is a
 	// difference no test asserts and no author expects.
-	ParsedRoot any `json:"-"`
+	ParsedRoot []cmdparse.ParsedCommand `json:"-"`
 }
 
 type BashToolInput struct {
@@ -736,14 +740,16 @@ type Evaluator interface {
 	// safecmds, nix, kubectl) are separate, later beads' work.
 	//
 	// leaves is the caller's already-lowered subtree — the SAME kind of value
-	// HookInput.ParsedLeaf/ParsedRoot carry, and typed `any` here for the
-	// IDENTICAL import-direction reason those two fields are (see ParsedLeaf's
-	// doc): cmdparse imports hookio for `*HookInput` itself, so hookio
-	// importing cmdparse back would cycle.
+	// HookInput.ParsedLeaf/ParsedRoot carry, and typed []cmdparse.ParsedCommand
+	// here for the IDENTICAL reason those two fields now are (see ParsedLeaf's
+	// doc): this package imports cmdparse (slice 3ap of the effect-graph spike
+	// relocated LeavesOf/RootLeavesOf here, which removed cmdparse's only
+	// import of hookio and broke the cycle that used to force `any` at this
+	// boundary too).
 	// A caller builds this value from its own cmdparse import — e.g. a
 	// cmdparse.Substitution's own Leaves field, or a []cmdparse.ParsedCommand
 	// slice taken from ParsedRoot — never a re-parse and never text; the
-	// implementation asserts it back to []cmdparse.ParsedCommand.
+	// concrete type means the implementation no longer needs to assert it.
 	//
 	// source is the EXACT source slice leaves was lowered from (I12) — needed
 	// for the cycle-detection key, exactly as EvaluateExpression's own expr
@@ -759,5 +765,5 @@ type Evaluator interface {
 	// identically regardless of which entry point produced the inner
 	// verdict — a rule migrating from EvaluateExpression to this method
 	// changes no downstream handling of the result.
-	EvaluateStructure(source string, leaves any, stack []StackFrame, origin *HookInput) RuleResult
+	EvaluateStructure(source string, leaves []cmdparse.ParsedCommand, stack []StackFrame, origin *HookInput) RuleResult
 }

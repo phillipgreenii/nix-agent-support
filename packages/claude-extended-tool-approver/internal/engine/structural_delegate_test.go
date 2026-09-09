@@ -197,25 +197,30 @@ func TestEvaluateStructure_FoldMatchesFromRecursion(t *testing.T) {
 	})
 }
 
-// TestEvaluateStructure_WrongLeavesTypeFailsClosed pins the defensive branch
-// for a caller that passes something other than []cmdparse.ParsedCommand
-// through the `any` slot hookio.Evaluator's interface method requires (I13's
-// interface-level widening exists only because cmdparse cannot be imported
-// from hookio — see that method's own doc). It MUST NOT panic and MUST NOT
-// approve.
-func TestEvaluateStructure_WrongLeavesTypeFailsClosed(t *testing.T) {
+// TestEvaluateStructure_EmptyLeavesFailsClosed pins the defensive branch for a
+// caller that passes no leaves at all. Before slice 3ap of the effect-graph
+// spike relocated cmdparse.LeavesOf/RootLeavesOf into hookio (letting hookio
+// import cmdparse, so hookio.Evaluator.EvaluateStructure's `leaves` parameter
+// could be concretely typed []cmdparse.ParsedCommand instead of `any`), this
+// test also covered a WRONG dynamic type reaching the `any` slot — that case
+// is now a compile error at every call site instead of a runtime one, so
+// there is nothing left to pin here except nil/empty. It MUST NOT panic and
+// MUST NOT approve.
+func TestEvaluateStructure_EmptyLeavesFailsClosed(t *testing.T) {
 	e := New(&mockRule{name: "approve", decision: hookio.Approve, reason: "ok"})
 	origin := &hookio.HookInput{ToolName: "Bash", CWD: "/tmp"}
 
-	got := e.EvaluateStructure("echo hello", "not-a-leaf-slice", nil, origin)
-	if got.Decision != hookio.NoOpinion {
-		t.Errorf("Decision = %v, want Abstain (defensive floor on an unexpected leaves type)", got.Decision)
-	}
-
-	// nil leaves is the same case (no dynamic type to assert), and MUST land on
-	// the identical defensive floor rather than panicking on a nil slice.
+	// nil leaves MUST land on the defensive floor rather than panicking or,
+	// worse, evaluating an empty command as vacuously approved.
 	gotNil := e.EvaluateStructure("echo hello", nil, nil, origin)
 	if gotNil.Decision != hookio.NoOpinion {
 		t.Errorf("Decision = %v, want Abstain (nil leaves must fail closed, not panic)", gotNil.Decision)
+	}
+
+	// An explicitly empty (non-nil) slice is the same case in substance —
+	// zero leaves either way — and MUST land on the identical floor.
+	gotEmpty := e.EvaluateStructure("echo hello", []cmdparse.ParsedCommand{}, nil, origin)
+	if gotEmpty.Decision != hookio.NoOpinion {
+		t.Errorf("Decision = %v, want Abstain (empty leaves must fail closed, not panic)", gotEmpty.Decision)
 	}
 }

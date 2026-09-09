@@ -216,7 +216,7 @@ func (e *Engine) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 			// BashCommand()+CommandComment path for a caller that invoked Evaluate
 			// directly (a unit test, or any future non-engine caller) without
 			// threading ParsedLeaf at all.
-			if leaves, ok := input.ParsedLeaf.([]cmdparse.ParsedCommand); ok {
+			if leaves := input.ParsedLeaf; leaves != nil {
 				for _, leaf := range leaves {
 					if leaf.Comment != "" {
 						result.Reason = result.Reason + " (note: " + leaf.Comment + ")"
@@ -358,12 +358,13 @@ func (e *Engine) EvaluateExpression(expr string, stack []hookio.StackFrame, orig
 // (`:291-294`): the counterpart to EvaluateExpression above for a caller that
 // already HOLDS parsed structure and must not turn it back into a command
 // STRING just to re-enter this seam. It satisfies hookio.Evaluator's method
-// of the same name — see that interface's doc for the full contract and for
-// why `leaves` is typed `any` there (and, for the identical import-direction
-// reason, here too: this file is internal/engine, which imports cmdparse
-// freely, but the parameter's static type must match the interface method it
-// implements exactly, so it stays `any` here as well and is asserted back to
-// []cmdparse.ParsedCommand below).
+// of the same name — see that interface's doc for the full contract. `leaves`
+// is typed []cmdparse.ParsedCommand there and here (matching, as an
+// implementation's signature must); before slice 3ap of the effect-graph
+// spike relocated cmdparse.LeavesOf/RootLeavesOf into hookio (removing
+// cmdparse's only import of hookio) it had to be `any` at the interface
+// boundary and was asserted back to []cmdparse.ParsedCommand here — see
+// git history / hookio.Evaluator's own doc for that now-resolved cycle.
 //
 // It is ADDITIVE and, as of the bead that introduces it (pg2-m1i6r), unused
 // by any rule: no caller is migrated onto it here, and none of the four rule
@@ -382,29 +383,30 @@ func (e *Engine) EvaluateExpression(expr string, stack []hookio.StackFrame, orig
 // the returned bare RuleResult behaves identically regardless of which entry
 // point produced it.
 //
-// A `leaves` value that does not assert to []cmdparse.ParsedCommand — which
-// cannot happen from any caller in this tree today, since nothing calls this
-// method yet, but the interface widens the static type to `any` for every
-// FUTURE caller too — fails CLOSED: NoOpinion, never Approve, exactly as
-// evaluateRedirections and heredocFloor already do for their own "cannot
-// evaluate this" branches.
-func (e *Engine) EvaluateStructure(source string, leaves any, stack []hookio.StackFrame, origin *hookio.HookInput) hookio.RuleResult {
+// A nil or empty `leaves` — never sent by any caller in this tree today
+// (each caller of the structural delegate parses its own inner text first
+// and fails closed itself, before calling this method at all, e.g. assume's
+// structuralExecCommand) but reachable from any FUTURE caller — fails
+// CLOSED: NoOpinion, never Approve, exactly as evaluateRedirections and
+// heredocFloor already do for their own "cannot evaluate this" branches.
+// Nothing asserts a type here any more: leaves is concretely
+// []cmdparse.ParsedCommand, so the only defensive check left is emptiness.
+func (e *Engine) EvaluateStructure(source string, leaves []cmdparse.ParsedCommand, stack []hookio.StackFrame, origin *hookio.HookInput) hookio.RuleResult {
 	normalized := normalizeExpression(source)
 	if cyc, hit := detectCycle(normalized, stack); hit {
 		return cyc
 	}
-	parsed, ok := leaves.([]cmdparse.ParsedCommand)
-	if !ok {
+	if len(leaves) == 0 {
 		return hookio.RuleResult{
 			Decision: hookio.NoOpinion,
-			Reason:   "structural delegate received leaves of an unexpected type (deferred to claude-code)",
+			Reason:   "structural delegate received no leaves (deferred to claude-code)",
 			Module:   "engine",
 		}
 	}
 	// outerVars/outerTempDirVars nil for the same reason as EvaluateExpression's own
 	// entry point above: no caller of this structural delegate is a substitution
 	// lexically nested inside an enclosing expression either.
-	return e.evaluateParsed(source, cmdparse.ShellParse{Leaves: parsed}, normalized, stack, origin, nil, nil)
+	return e.evaluateParsed(source, cmdparse.ShellParse{Leaves: leaves}, normalized, stack, origin, nil, nil)
 }
 
 // detectCycle is EvaluateExpression's cycle check, factored out so
@@ -1748,7 +1750,7 @@ func parsedLeafFor(pc cmdparse.ParsedCommand) []cmdparse.ParsedCommand {
 // re-parse it themselves — the engine-to-rule boundary re-serialising
 // structure back to text. hookio.HookInput.ParsedLeaf/ParsedRoot now carry the
 // already-computed cmdparse.ParsedCommand structure directly; see those
-// fields' doc and cmdparse.LeavesOf/RootLeavesOf, the rule-side accessors that
+// fields' doc and hookio.LeavesOf/RootLeavesOf, the rule-side accessors that
 // replace `cmdStr, _ := input.BashCommand(); cmdparse.Parse(cmdStr)`.
 
 func (e *Engine) evaluateRedirections(redirs []hooktypes.Redirection, override *patheval.PathEvaluator, vars map[string]string) hookio.RuleResult {

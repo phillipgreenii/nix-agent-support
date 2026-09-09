@@ -3,12 +3,14 @@
 // CLI, a test) uses to ask for a decision. It deliberately does not import
 // internal/hookio; Decision is a new type, not an alias of the hook's.
 //
-// Known import cycle to fix later: effectgraph reaches internal/hookio
-// transitively through cmdparse, which imports hookio for *hookio.HookInput
-// (LeavesOf/RootLeavesOf's parameter) — not, as of the effect-graph spike's
-// slice 3r, for any type this package or effectgraph names: Redirection moved
-// out of hookio into the zero-dependency internal/hooktypes. The HookInput edge
-// is a separate follow-up, tied to HookInput.ParsedLeaf/ParsedRoot being `any`.
+// Import cycle RESOLVED as of the effect-graph spike's slice 3ap (tc-8og1):
+// effectgraph used to reach internal/hookio transitively through cmdparse,
+// which imported hookio for *hookio.HookInput (LeavesOf/RootLeavesOf's
+// parameter). Slice 3ap relocated LeavesOf/RootLeavesOf into hookio itself,
+// removing that import, so effectgraph's own cmdparse import no longer
+// reaches internal/hookio transitively either — not, as of the effect-graph
+// spike's slice 3r, for any type this package or effectgraph names either:
+// Redirection moved out of hookio into the zero-dependency internal/hooktypes.
 package evalcontract
 
 import "github.com/phillipgreenii/claude-extended-tool-approver/internal/effectgraph"

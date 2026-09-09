@@ -168,7 +168,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 	if input.ToolName != "Bash" {
 		return hookio.NotApplicable()
 	}
-	leaves, err := cmdparse.LeavesOf(input)
+	leaves, err := hookio.LeavesOf(input)
 	if err != nil {
 		// Genuine failure: the tool IS Bash, so this rule governs the input.
 		return hookio.RuleResult{}, fmt.Errorf("primary-commit: read bash command: %w", err)
@@ -195,8 +195,8 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 	// used to make on every ErrDirNotExist. A direct (non-engine) caller with
 	// no ParsedRoot falls back to parsing scope itself, preserving this rule's
 	// pre-existing behaviour for that case exactly.
-	rootLeaves, ok := input.ParsedRoot.([]cmdparse.ParsedCommand)
-	if !ok {
+	rootLeaves := input.ParsedRoot
+	if rootLeaves == nil {
 		rootLeaves = cmdparse.Parse(scope)
 	}
 	for i, pc := range leaves {

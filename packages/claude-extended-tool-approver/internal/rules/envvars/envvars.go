@@ -1158,8 +1158,8 @@ func downstreamConsumerExists(rootLeaves []cmdparse.ParsedCommand, at int) bool 
 // consumer keeps its own copy rather than exporting one for a single caller, per
 // isMultiStagePipelineLeaf's own doc above).
 //
-// Under the engine, `leaves` (from cmdparse.LeavesOf) is the ONE leaf the rule was
-// handed and input.RootExpression is the whole compound; cmdparse.RootLeavesOf reads
+// Under the engine, `leaves` (from hookio.LeavesOf) is the ONE leaf the rule was
+// handed and input.RootExpression is the whole compound; hookio.RootLeavesOf reads
 // the engine's already-threaded input.ParsedRoot. A DIRECT caller (a unit test) has
 // no RootExpression at all, and `leaves` is already Parse's output for the WHOLE
 // command it was given — exactly the fallback every sibling seam applies, and (for
@@ -1183,7 +1183,7 @@ func envvarsRootScope(input *hookio.HookInput, leaves []cmdparse.ParsedCommand, 
 	if i < 0 || i >= len(leaves) {
 		return leaves, i
 	}
-	root := cmdparse.RootLeavesOf(input)
+	root := hookio.RootLeavesOf(input)
 	pc := leaves[i]
 	for j, l := range root {
 		if l.Raw == pc.Raw && l.PipelineID == pc.PipelineID && l.PipelineIndex == pc.PipelineIndex {
@@ -1197,7 +1197,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 	if input.ToolName != "Bash" {
 		return hookio.NotApplicable()
 	}
-	parsed, err := cmdparse.LeavesOf(input)
+	parsed, err := hookio.LeavesOf(input)
 	if err != nil {
 		return hookio.RuleResult{}, fmt.Errorf("env-vars: read bash command: %w", err)
 	}

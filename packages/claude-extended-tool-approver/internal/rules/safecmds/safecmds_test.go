@@ -35,7 +35,7 @@ func (m *mockEvaluator) EvaluateExpression(expr string, stack []hookio.StackFram
 // method — the one safecmds' xargs sh/bash -c branch actually calls — reusing
 // EvaluateExpression's map lookup keyed on `source` (the exact -c script
 // text), same idiom as internal/rules/docker's mockEvaluator.
-func (m *mockEvaluator) EvaluateStructure(source string, leaves any, stack []hookio.StackFrame, origin *hookio.HookInput) hookio.RuleResult {
+func (m *mockEvaluator) EvaluateStructure(source string, leaves []cmdparse.ParsedCommand, stack []hookio.StackFrame, origin *hookio.HookInput) hookio.RuleResult {
 	return m.EvaluateExpression(source, stack, origin)
 }
 
@@ -54,7 +54,7 @@ func (c *capturingEvaluator) EvaluateExpression(expr string, stack []hookio.Stac
 	return c.result
 }
 
-func (c *capturingEvaluator) EvaluateStructure(source string, leaves any, stack []hookio.StackFrame, origin *hookio.HookInput) hookio.RuleResult {
+func (c *capturingEvaluator) EvaluateStructure(source string, leaves []cmdparse.ParsedCommand, stack []hookio.StackFrame, origin *hookio.HookInput) hookio.RuleResult {
 	c.lastSource = source
 	c.lastLeaves = leaves
 	return c.result

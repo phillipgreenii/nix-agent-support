@@ -67,7 +67,7 @@ func TestConfigRules_ApprovedCommandWithEnvVars_Abstains(t *testing.T) {
 // introduces: the engine no longer hands a rule a synthetic `ToolInput` JSON
 // string to read a command out of (mustBashJSON is deleted) — it threads the
 // already-parsed leaf directly through hookio.HookInput.ParsedLeaf, and this
-// rule now reads it via cmdparse.LeavesOf.
+// rule now reads it via hookio.LeavesOf.
 //
 // TestConfigRules_ApprovedCommandWithEnvVars_Abstains above still exercises
 // the OTHER path — a hand-built HookInput with only ToolInput set, which

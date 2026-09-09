@@ -11,16 +11,19 @@ import (
 )
 
 // TestNoDirectHookioImport: none of the four spike packages imports
-// internal/hookio directly (the port must stay hook-independent). The
-// transitive reach through cmdparse is a known cycle to fix later and is not
-// what this guards. As of the effect-graph spike's slice 3r, that transitive
-// reach is narrower than it used to be: Redirection (the value type
+// internal/hookio directly (the port must stay hook-independent). This guard
+// only checks DIRECT imports; a transitive reach through cmdparse used to
+// exist and is not what this test itself proves absent. As of the
+// effect-graph spike's slice 3r, that transitive reach was already narrower
+// than it used to be: Redirection (the value type
 // cmdparse.ParsedCommand.Redirections used to hold FROM hookio) moved to the
-// zero-dependency internal/hooktypes, so none of the four packages reaches
-// hookio for any TYPE it names anymore. The remaining edge is cmdparse's own
+// zero-dependency internal/hooktypes, so none of the four packages reached
+// hookio for any TYPE it named. The one remaining edge — cmdparse's own
 // import of hookio for `*hookio.HookInput` (LeavesOf/RootLeavesOf's
-// parameter) — a separate follow-up tied to HookInput.ParsedLeaf/ParsedRoot
-// being `any`, not something this guard (or hooktypes existing) fixes.
+// parameter) — is RESOLVED as of slice 3ap (tc-8og1): LeavesOf/RootLeavesOf
+// moved INTO hookio, removing cmdparse's only import of hookio, so as of this
+// slice the four packages no longer reach internal/hookio transitively
+// either, not just directly.
 //
 // EXCLUSION: any file named "*_integration_test.go" is skipped. That suffix
 // is this repo's existing tagged-suite convention (README.md's "Two test

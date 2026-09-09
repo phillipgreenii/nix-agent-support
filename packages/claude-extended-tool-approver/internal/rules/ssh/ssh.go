@@ -124,7 +124,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 	if !r.configured {
 		return r.notApplicable()
 	}
-	parsed, err := cmdparse.LeavesOf(input)
+	parsed, err := hookio.LeavesOf(input)
 	if err != nil {
 		// Genuine failure, not "not mine": the tool is Bash and this rule IS
 		// configured, so it does govern the input and merely could not read it.
@@ -371,7 +371,7 @@ func (r *Rule) evaluateSSH(positionals []string) hookio.RuleResult {
 	//     arguments], the arguments will be appended to the command, separated by
 	//     spaces, before it is sent to the server to be executed." That is
 	//     `strings.Join(remote, " ")` over ssh's OWN argv — already reduced to
-	//     words by the LOCAL shell the same way cmdparse.LeavesOf unquotes it —
+	//     words by the LOCAL shell the same way hookio.LeavesOf unquotes it —
 	//     which ssh then hands to the remote login shell (`$SHELL -c <string>`)
 	//     for an INDEPENDENT re-parse. The quoting distinction this join appears
 	//     to erase is the SAME distinction the real ssh protocol erases before the

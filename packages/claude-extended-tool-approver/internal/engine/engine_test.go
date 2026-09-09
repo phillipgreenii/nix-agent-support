@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmdparse"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/patheval"
 )
@@ -175,10 +174,10 @@ func (m *conditionalMockRule) Name() string { return "conditional" }
 // sentinel "not mine, keep going", so under ADR 0043 they are ErrNotApplicable. The
 // assertions in this file are unchanged by that mapping.
 func (m *conditionalMockRule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
-	// cmdparse.LeavesOf, not a bare input.BashCommand()+cmdparse.Parse round
+	// hookio.LeavesOf, not a bare input.BashCommand()+cmdparse.Parse round
 	// trip — see attrApproveRule's identical comment in
 	// approve_attribution_test.go.
-	parsed, err := cmdparse.LeavesOf(input)
+	parsed, err := hookio.LeavesOf(input)
 	if err != nil {
 		return hookio.NotApplicable()
 	}
@@ -292,13 +291,13 @@ func (m *envAssignmentMockRule) Name() string { return "env-assignment-mock" }
 
 // Evaluate: same NoOpinion-means-not-applicable mapping as conditionalMockRule.
 func (m *envAssignmentMockRule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
-	// cmdparse.LeavesOf, not a bare input.BashCommand()+cmdparse.Parse round
+	// hookio.LeavesOf, not a bare input.BashCommand()+cmdparse.Parse round
 	// trip — see attrApproveRule's identical comment in
 	// approve_attribution_test.go. `seen` now records each governing leaf's
 	// own Raw rather than the whole synthetic command string BashCommand()
 	// used to hand back; for every case this test exercises there is exactly
 	// one leaf per Evaluate call, so the recorded value is unchanged.
-	leaves, err := cmdparse.LeavesOf(input)
+	leaves, err := hookio.LeavesOf(input)
 	if err != nil {
 		return hookio.NotApplicable()
 	}

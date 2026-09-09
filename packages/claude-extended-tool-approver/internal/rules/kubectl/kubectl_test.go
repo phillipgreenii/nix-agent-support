@@ -300,13 +300,12 @@ func (m *mockEvaluator) EvaluateExpression(expr string, stack []hookio.StackFram
 // is what keeps every existing table row below passing unchanged: none of
 // their fixture commands carries an inner argument whose reconstruction
 // would differ from its pre-migration plain-text spelling.
-func (m *mockEvaluator) EvaluateStructure(source string, leaves any, stack []hookio.StackFrame, origin *hookio.HookInput) hookio.RuleResult {
-	parsed, ok := leaves.([]cmdparse.ParsedCommand)
-	if !ok {
+func (m *mockEvaluator) EvaluateStructure(source string, leaves []cmdparse.ParsedCommand, stack []hookio.StackFrame, origin *hookio.HookInput) hookio.RuleResult {
+	if leaves == nil {
 		return m.defaultResult
 	}
 	var tokens []string
-	for _, pc := range parsed {
+	for _, pc := range leaves {
 		if pc.Executable == "" {
 			continue
 		}

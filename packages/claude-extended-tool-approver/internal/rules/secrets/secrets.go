@@ -185,7 +185,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 			return r.decide(ref, false), nil
 		}
 	case "Bash":
-		leaves, err := cmdparse.LeavesOf(input)
+		leaves, err := hookio.LeavesOf(input)
 		if err != nil {
 			return hookio.RuleResult{}, fmt.Errorf("secrets: read bash command: %w", err)
 		}
@@ -717,7 +717,7 @@ func firstSecretRef(cache *shellCScriptCache, cmd string, depth int, match candi
 // rather than a text `cmd` to re-parse — ADR 0039 step 3's fix for the
 // OUTERMOST call: bashRef used to hand this function the same round-tripped
 // command text three times (once per candidateMatch pass), each re-parsing
-// identically. bashRef now parses once (through cmdparse.LeavesOf, which
+// identically. bashRef now parses once (through hookio.LeavesOf, which
 // reads the engine's already-threaded structure when available) and calls
 // this directly.
 //

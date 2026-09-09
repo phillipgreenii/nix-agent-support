@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmdparse"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/configrules"
 )
@@ -68,7 +67,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 	if !r.configured {
 		return r.notApplicable()
 	}
-	parsed, err := cmdparse.LeavesOf(input)
+	parsed, err := hookio.LeavesOf(input)
 	if err != nil {
 		// Genuine failure: the tool is Bash and the rule IS configured, so it
 		// governs this input and merely could not read it.

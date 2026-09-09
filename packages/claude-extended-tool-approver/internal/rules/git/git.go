@@ -97,7 +97,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 	if input.ToolName != "Bash" {
 		return hookio.NotApplicable()
 	}
-	parsed, err := cmdparse.LeavesOf(input)
+	parsed, err := hookio.LeavesOf(input)
 	if err != nil {
 		return hookio.RuleResult{}, fmt.Errorf("git: read bash command: %w", err)
 	}
@@ -2374,7 +2374,7 @@ func expressionScope(input *hookio.HookInput, leaves []cmdparse.ParsedCommand, b
 	// very text EvaluateExpression split into leaves), and RootLeavesOf reads
 	// that threaded result instead of re-parsing the same string here — see
 	// hookio.HookInput.ParsedRoot's doc.
-	root := cmdparse.RootLeavesOf(input)
+	root := hookio.RootLeavesOf(input)
 	// The LAST match, not the first — over-approximation 5 in visibleEnvVars' list.
 	at := -1
 	for j := range root {

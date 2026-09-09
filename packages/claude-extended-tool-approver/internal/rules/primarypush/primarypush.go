@@ -92,7 +92,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 	if input.ToolName != "Bash" {
 		return hookio.NotApplicable()
 	}
-	leaves, err := cmdparse.LeavesOf(input)
+	leaves, err := hookio.LeavesOf(input)
 	if err != nil {
 		// Genuine failure: the tool IS Bash, so this rule governs the input.
 		return hookio.RuleResult{}, fmt.Errorf("primary-push: read bash command: %w", err)
