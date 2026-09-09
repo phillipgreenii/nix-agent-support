@@ -462,7 +462,32 @@ build` for nix repos, and the repo's tests, including a slow full suite
    `needs-more-repos`, re-ISOLATE as a `pn-workspace-rules:fork-workforest` set and
    re-dispatch.
 
-5. **VALIDATE** from the report: the pre-apply gates MUST show a clear PASS for
+   **Stall-phrase check — run on EVERY report from a dispatched subagent, this
+   step's or LAND's (step 6), BEFORE trusting its content** (bead `tc-33p4`,
+   following `tc-wklt`'s brief-wording fix above, which alone proved
+   insufficient: the exact stall — a subagent ending its turn instead of
+   continuing to block on its own backgrounded work — recurred TWICE in one
+   drain session even with that wording live, each time requiring the
+   orchestrator to notice the stall itself by reading the prose closely and
+   manually resend a correction via `SendMessage`, after which the agent
+   completed correctly). Scan the report text for a stall-indicating phrase — a
+   heuristic pattern-match, not an exhaustive enumeration — e.g. "I'll wait",
+   "once it resolves", "when the notification arrives", "I'll resume once",
+   "I'll continue once", or similar phrasing suggesting the agent ended its turn
+   expecting an external notification rather than continuing to call tools. A
+   match MUST NOT be treated as final: immediately (same turn, before doing
+   anything else with the report) resend a correction via `SendMessage` to that
+   SAME agent, addressed by its id/name, telling it there is no notification
+   mechanism for a dispatched subagent and it MUST keep calling tools — a
+   `Monitor` until-loop — until the work genuinely resolves (the identical
+   correction the DELEGATE brief above already gives it up front). MUST NOT
+   proceed to VALIDATE (step 5) below, or record a LAND verdict (step 6), on a
+   stalled report — wait for a SUBSEQUENT report, and that report is only
+   final once it carries concrete evidence (exit codes, command output, a
+   verified SHA) backing its classification, with no stall phrasing of its own.
+
+5. **VALIDATE** from the report (first applying the stall-phrase check above —
+   a stalled report is never validated as-is): the pre-apply gates MUST show a clear PASS for
    either `done` or `done-pending-apply-verification`. If a gate fails, or the
    status is `stuck` → STUCK. If the report itself claims it closed the bead,
    created a bead, or created a dependency/gate, that claim is ITSELF a
@@ -550,6 +575,12 @@ build` for nix repos, and the repo's tests, including a slow full suite
    - return a structured report: `outcome` (`landed` | `pr-opened` |
      `pr-updated` | `stopped:<reason>`), the landed/pushed SHA per repo (tip
      of `drain/<id>`, never a re-read of primary), and PR number + URL.
+
+   Apply the DELEGATE step's stall-phrase check (step 4) to the lander's report
+   before anything below — a lander is itself a dispatched subagent and is
+   exactly as prone to this stall as an implementation subagent (bead
+   `tc-33p4`). A match means resend the correction and wait for a subsequent
+   report; do not verify or record a stalled one.
 
    VERIFY the verdict with ONE observation before recording — the report is a
    subagent's prose, not evidence:
