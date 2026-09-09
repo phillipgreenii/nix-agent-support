@@ -1247,3 +1247,53 @@ func TestLoad_monitorSubsets_absentLeavesNil(t *testing.T) {
 		t.Errorf("MonitorSubsets = %v, want nil when no [[monitor]] is declared", c.MonitorSubsets)
 	}
 }
+
+// TestLoad_connectorCIHealthRecipeLoads pins MIGRATION.md's "per-connector CI
+// health (pg-connector) as a command source" worked example (bead pg2-h410q)
+// to an actual Load(): the recipe is documentation, not built-in code (like
+// the github-issues/jira-issues examples it sits alongside), so nothing else
+// exercises it — a doc that silently rotted as the config surface evolved
+// would otherwise go unnoticed until an operator copy-pasted it. This is the
+// EXACT TOML MIGRATION.md prints; keep the two in sync.
+func TestLoad_connectorCIHealthRecipeLoads(t *testing.T) {
+	writeCfg(t, `
+[[query]]
+name = "connector-ci-github-actions"
+emits = ["ci.health"]
+type = "command"
+[query.command]
+argv = [
+  "sh", "-c",
+  "set -o pipefail; pg-connector ci list 'my-org/my-repo#123' | jq -c --arg provider github-actions '(.runs // [] | map(select(.provider == $provider))) as $runs | (.sources // [] | map(select(.source == $provider))) as $srcs | if ($runs | any(.stale)) or ($srcs | any(.status == \"degraded\")) then error(\"pg-connector ci: \" + $provider + \" is stale or degraded\") else [] end'"
+]
+format = "json"
+
+[[role]]
+name = "ci-health-sink"
+type = "command"
+enabled = false
+binds = ["ci.health"]
+[role.command]
+argv = ["true"]
+`)
+	c, err := Load()
+	if err != nil {
+		t.Fatalf("the documented connector-ci-health recipe must Load() cleanly: %v", err)
+	}
+	if len(c.Queries) != 1 || c.Queries[0].Name != "connector-ci-github-actions" {
+		t.Fatalf("connector-ci query not decoded: %+v", c.Queries)
+	}
+	cq, ok := c.Queries[0].Query.(query.CommandQuery)
+	if !ok {
+		t.Fatalf("connector-ci query decoded as %T, want query.CommandQuery", c.Queries[0].Query)
+	}
+	if len(cq.Argv) != 3 || cq.Argv[0] != "sh" || cq.Argv[1] != "-c" {
+		t.Fatalf("connector-ci argv not decoded as sh -c <pipeline>: %+v", cq.Argv)
+	}
+	if len(c.Roles) != 1 || c.Roles[0].Name != "ci-health-sink" || c.Roles[0].Enabled {
+		t.Fatalf("ci-health-sink role not decoded as a disabled sink: %+v", c.Roles)
+	}
+	if err := c.Validate(); err != nil {
+		t.Fatalf("the documented recipe must also pass Validate(): %v", err)
+	}
+}

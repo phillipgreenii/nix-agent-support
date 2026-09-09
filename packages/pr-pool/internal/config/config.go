@@ -68,6 +68,12 @@ type Config struct {
 	// precedence is [pool] key (quota_paused_path / cicd_down_path) > PR_POOL_*
 	// env > this default. GatePaths() resolves the identical precedence WITHOUT
 	// calling Load() — see its doc comment for why pause/resume need that.
+	//
+	// CICDDown is SUPERSEDED (bead pg2-h410q): no producer for this gate has
+	// ever existed. Prefer pr-pool's per-connector CI health command-source
+	// recipe (MIGRATION.md) for new CI-health integrations; the field itself
+	// is kept, unremoved, for backward compatibility — see
+	// cmd/pr-pool/gates_cmd.go's gateCICDDown doc comment.
 	QuotaPaused    string
 	CICDDown       string
 	Effort         string

@@ -816,6 +816,13 @@ const (
 // gateCICDDown = "cicd-down"). This package never imports that one (no
 // cross-package reach, Task 3.5 Contract), so the two vocabularies are kept
 // in sync by convention and tests, not a shared constant.
+//
+// GateCICDDown is SUPERSEDED (bead pg2-h410q) by pr-pool's per-connector CI
+// health command-source recipe (MIGRATION.md), which consumes pg-connector's
+// ci capability's own AsOf/Stale contract (bead pg2-4aoeg) instead of one
+// global, never-produced gate; see cmd/pr-pool/gates_cmd.go's gateCICDDown
+// doc comment for the full rationale. Kept, unremoved, for backward
+// compatibility.
 const (
 	GateQuotaPaused = "quota_paused"
 	GateCICDDown    = "cicd_down"

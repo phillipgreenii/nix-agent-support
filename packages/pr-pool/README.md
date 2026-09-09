@@ -113,6 +113,12 @@ defaults to `quota-paused`, and clearing **every** outstanding gate requires an 
 `resume --all` — a bare `resume` clears only the default gate, so an automation-owned gate is
 never cleared by accident. `resume --all <gate>` (both at once) is a usage error (exit `2`).
 
+`cicd-down` is **superseded** (bead `pg2-h410q`; no producer was ever built for it — see
+`MIGRATION.md`'s "`cicd-down` gate: superseded, kept for backward compatibility"). It still works
+exactly as documented here, but a new deployment wanting CI-health-driven behavior should prefer
+`MIGRATION.md`'s per-connector `command`-source worked example, which surfaces `pg-connector`'s
+own AsOf/Stale contract per connector instead of one blunt global gate with no writer.
+
 **FILE-DIRECT**: unlike every other operator subcommand, `pause`/`resume` **never Discover or
 Dial** a core — they act on the gate file's existence directly and **succeed even with no core
 running** (exit `0`), reporting that the change takes effect at the next start (a currently
@@ -174,6 +180,11 @@ Roles and queries are typed tagged unions discriminated by a `type` field:
   The built-in feedback/worker/review defaults (`pr-pool config
 --print-defaults`) are themselves the worked beads-ready -> command example:
   each is now printed as a `command` block shelling to `bd ready | jq ...`.
+  `MIGRATION.md` also carries a worked example (not a migration) wiring a
+  `command` source to `pg-connector`'s `ci` capability as a per-connector CI
+  health probe (bead `pg2-h410q`) — it surfaces through the same Sources pane
+  `failing ×N`/`stale <duration>` rendering every other source uses, no core
+  or TUI change required.
 
 A `ccpool` role's behavior is set by code-owned enums: `completion`
 (`close-only` | `close-or-handback`), `on_failure` (`unclaim` | `add-human`),
@@ -214,7 +225,7 @@ configured via env (use `config.toml`). See `internal/config` for the full set.
   a CLI flag (none exists yet) wins over this env var, which wins over the built-in default; a value
   that fails to parse as a duration is a usage error naming the bad value.
 - `PR_POOL_QUOTA_PAUSED` — `quota-paused` gate file path override (default `<PR_POOL_LOG_DIR>/gates/quota-paused`)
-- `PR_POOL_CICD_DOWN` — `cicd-down` gate file path override (default `<PR_POOL_LOG_DIR>/gates/cicd-down`)
+- `PR_POOL_CICD_DOWN` — `cicd-down` gate file path override (default `<PR_POOL_LOG_DIR>/gates/cicd-down`). Superseded (bead `pg2-h410q`) — see the `pause`/`resume` section above.
 - `PR_POOL_TEST_MODE` — set to `1` by `run-role`/`run-query` for the duration of that one smoke
   test, so a participant it dispatches (or a command-backed source it shells out to) knows a test
   is in flight; advisory only. Not meant to be set by an operator directly.

@@ -15,6 +15,21 @@ import (
 // (docs/behavior/invariants.md's "Gate identity"): quota-paused is ACTOR-OP's
 // own to set and clear; cicd-down belongs to an automation actor. Omitting a
 // gate name to `pause`/`resume` defaults to quota-paused.
+//
+// gateCICDDown is SUPERSEDED (bead pg2-h410q): it was added 2026-08-31
+// (commit 325edc35) as a stopgap for "an automation actor" to signal CI
+// trouble, but no producer was ever built for it — nothing writes or clears
+// this file anywhere in this codebase. Once pg-connector's ci capability
+// gained a per-connector AsOf/Stale contract (bead pg2-4aoeg), pr-pool grew a
+// real, per-connector, non-binary CI health signal that consumes it (see
+// MIGRATION.md's "per-connector CI health ... as a command source" worked
+// example) — that is the recommended integration for new CI-health-driven
+// behavior. gateCICDDown itself is kept, unremoved, for backward
+// compatibility with anything already scripted against it; see
+// MIGRATION.md's "cicd-down gate: superseded, kept for backward
+// compatibility" for the full rationale and why a full removal (spanning the
+// CLI, config, wire, TUI, and docs/behavior/invariants.md's formal two-gate
+// text) was left out of that bead's scope.
 const (
 	gateQuotaPaused = "quota-paused"
 	gateCICDDown    = "cicd-down"

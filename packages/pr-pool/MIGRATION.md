@@ -294,3 +294,98 @@ falls back to `Config.Load()`'s own default gate paths under `<PR_POOL_LOG_DIR>/
 "Hazard: gate file paths are now configured by default (Task 1.2b, `INV-LIFE-2`)" above, which
 applies equally to a daemon deployment: a stray file already sitting at that default path now
 gates a daemon that previously could not be gated, and gate files are never swept.
+
+## Worked example: per-connector CI health (`pg-connector`) as a `command` source (bead `pg2-h410q`)
+
+This is not a migration off a removed type — it is a NEW worked example, added the same way the
+four migrations above were: as an equivalent `command` block, because `command` is still the one
+source type that keeps `GOAL-MIN-1`'s boundary (`docs/behavior/invariants.md`; "adding a source
+type must not require changing Core" — see "Why" above). pg-connector's own `ci` capability
+(`packages/pg-connector/pkg/schema/ci.go`) carries a per-run `as_of`/`stale` pair — bead
+`pg2-4aoeg`'s AsOf/Stale contract, mirroring `pkg/provider/pr.Provider.Show`'s own — which is
+true PER RUN, independent of `pg-connector ci list`'s own CLI exit code: a backend that served a
+last-known-good cached run list because the real CI system was degraded still answers with
+`sources[].status = "succeeded"` and exit `0` (`ci.go`'s own doc comment: "a list_runs call that
+returns stale runs is still exit 0, never folded into a sixth error/exit code"). So a `command`
+source that only looked at the exit code would miss exactly the case this contract exists for —
+the recipe below inspects the JSON body instead, via `jq`, matching this doc's own translation
+convention.
+
+The result is a pure **health probe**, not a work source: it emits no items on a healthy tick
+(`Run()` returns zero events, same as `BeadsReady` finding nothing ready) and instead surfaces
+degradation the way `internal/discover.runAndEnqueue` already surfaces any other query failure —
+by making `Run()` return an error, which `internal/tui/panes.go`'s existing
+`sourceHealthText` (`disabled > excluded > failing > stale > idle > ok`) renders as `failing ×N`
+in the Sources pane, no TUI or wire-protocol change required. A connector whose command source
+stops ticking altogether (e.g. the process pausing production) still falls through to that same
+function's tick-cadence `stale <duration>` rendering — the pre-existing, unrelated meaning of
+"stale" in this codebase (a source whose polling has gone quiet), which this recipe does not
+touch.
+
+```toml
+[[query]]
+name = "connector-ci-github-actions"   # one query per CONNECTOR you track separately
+emits = ["ci.health"]
+type = "command"
+[query.command]
+argv = [
+  "sh", "-c",
+  "set -o pipefail; pg-connector ci list 'my-org/my-repo#123' | jq -c --arg provider github-actions '(.runs // [] | map(select(.provider == $provider))) as $runs | (.sources // [] | map(select(.source == $provider))) as $srcs | if ($runs | any(.stale)) or ($srcs | any(.status == \"degraded\")) then error(\"pg-connector ci: \" + $provider + \" is stale or degraded\") else [] end'"
+]
+format = "json"
+
+# "ci.health" is declared here purely to satisfy the config's own orphan-producer
+# check (Config.Validate's "query %q emits event type %q that no role binds") — the
+# probe above never actually emits an item of this type (it emits [] when healthy and
+# a Run() error when not), so this role in practice never dispatches. Its own backing
+# command still must resolve (INV-WORKFLOW-1 check 5 does not exempt disabled roles),
+# so `true` (present on every PATH this flake's wrapper builds, including the minimal
+# one "Testing the minimal-PATH case" above describes) is used rather than inventing
+# a real handler for an event that is not meant to carry work.
+[[role]]
+name = "ci-health-sink"
+type = "command"
+enabled = false
+binds = ["ci.health"]
+[role.command]
+argv = ["true"]
+```
+
+Replace `my-org/my-repo#123` with the PR id (`<owner>/<repo>#<number>`, the same convention
+`pg-connector-ci-github-actions`'s own resolver parses — see that backend's `resolver.go`) whose
+CI you want this connector's health judged by, and `github-actions` with the connector/provider
+name you registered under `connector.ci` (`pg-connector config --show` lists what is
+registered). Declare one `[[query]]`/jq-filter pair **per connector** you want a separate Sources
+pane row for — this is the "per-Source/connector" granularity `pg2-h410q` asked for: `pg-connector
+ci list` already fans out across every registered backend and returns one `sources[]` row and a
+`provider`-tagged run per backend in a single call, so filtering that one call's JSON by
+`$provider` is cheaper than shelling out once per connector.
+
+A real deployment tracking a live, changing set of open PRs (rather than one fixed `pr-id`) can
+replace the fixed positional argument with a small loop over `pg-pr pr list --json` (the same seam
+`internal/prpoolacl.ReadPRList` already reads, and the same `<repo>#<number>` id shape
+`internal/prpoolacl.prKey` already builds) feeding `pg-connector ci list` once per open PR, then
+folding every call's `runs`/`sources` together before the same staleness/degraded check above —
+left as a deployment-specific extension (like the Jira example above, this only matters once a
+deploying flake has real repos/PRs to name) rather than expanded inline here.
+
+## `cicd-down` gate: superseded, kept for backward compatibility (bead `pg2-h410q`)
+
+The `cicd-down` gate (`INV-LIFE-2`'s "Gate identity"; `cmd/pr-pool/gates_cmd.go`) was added
+2026-08-31 (commit `325edc35`) as a stopgap for "an automation actor" to signal CI trouble, but no
+producer was ever built — nothing in this codebase, nor (as far as this repo can see) any
+deploying flake, has ever written or cleared that file. The worked example immediately above gives
+pr-pool a real, per-connector, non-binary CI health signal sourced from `pg-connector`'s own
+AsOf/Stale contract, which is what `cicd-down` was always meant to eventually consume — so
+`cicd-down` is **superseded**: prefer the per-connector `command` source above for any new CI
+health integration.
+
+`cicd-down` is **not removed**. It stays wired exactly as it always was (`pause`/`resume
+cicd-down`, `PR_POOL_CICD_DOWN`, `[pool].cicd_down_path`, the daemon submodule's
+`gates.cicdDownPath`, the TUI's gate modal/banner, `INV-LIFE-2`'s two-gate identity) — an operator
+or automation actor that already scripted against it keeps working unchanged. Retiring the gate
+mechanism itself (its CLI verbs, config surface, wire fields, and `docs/behavior/invariants.md`'s
+formal "exactly two named gates" text) is a larger, separately-scoped change than this bead's
+acceptance criteria required, and was deliberately left undone here rather than half-removed
+across the ~15 Go files (and the `home/programs/pr-pool`/`darwin/modules/pr-pool` Nix options) that
+reference it.
