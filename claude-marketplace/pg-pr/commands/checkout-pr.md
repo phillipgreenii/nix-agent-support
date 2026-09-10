@@ -18,8 +18,13 @@ amend the changes without disturbing your current workspace.
 
 1. Resolve the PR if it isn't already a number:
    ```bash
-   pg-pr pr view <PR_IDENTIFIER> --json
+   REPO=$(pg-connector scm branch detect | jq -r '.result.repo')
+   pg-connector pr show "$REPO#<PR_IDENTIFIER>" | jq '.result'
    ```
+   (`pg-connector pr show` is a targeted, id-keyed op — `<owner/repo>#<number>`
+   — with no cwd auto-detect of its own, unlike the now-retired pg-pr view
+   command; `pg-connector scm branch detect` supplies the repo half of that
+   id.)
 2. Create the worktree:
    ```bash
    pg-pr worktree add <PR_NUMBER>

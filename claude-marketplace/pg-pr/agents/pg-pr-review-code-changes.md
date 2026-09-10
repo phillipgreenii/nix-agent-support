@@ -27,7 +27,8 @@ Inputs are passed in the prompt by the orchestrator. Expect:
 
 1. Get changed files:
    ```bash
-   pg-pr pr files --base <BASE_REF> --json
+   REPO=$(pg-connector scm branch detect | jq -r '.result.repo')
+   pg-connector pr files "$REPO#<PR_NUMBER>" | jq '.result'
    ```
 2. For each file, fetch the diff:
    ```bash
@@ -87,7 +88,7 @@ reviews time out, so search accordingly:
 - Search with `rg` or `git grep` — not a recursive `grep` across the tree.
 - Scope each search to the PR's changed files or their directories rather than
   the whole repo. You already know the changed paths from
-  `pg-pr pr files --base <BASE_REF> --json`; pass them as the search path:
+  `pg-connector pr files <REPO>#<PR_NUMBER>`; pass them as the search path:
 
   ```bash
   # search only the changed directories

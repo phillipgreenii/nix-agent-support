@@ -28,7 +28,8 @@ name, or omitted (uses the current branch's PR).
 ### Step 1: Resolve PR
 
 ```bash
-pg-pr pr view <PR_IDENTIFIER> --json
+REPO=$(pg-connector scm branch detect | jq -r '.result.repo')
+pg-connector pr show "$REPO#<PR_IDENTIFIER>" | jq '.result'
 ```
 
 Capture `number`, `state`, `author`. If no argument was provided and
@@ -48,7 +49,7 @@ the PR is no longer open.
 ### Step 3: Gather comments
 
 ```bash
-pg-pr pr view <NUMBER> --json    # confirms state
+pg-connector pr show "$REPO#<NUMBER>" | jq '.result'    # confirms state
 # Phase 3 will land 'pg-pr feedback gather' which materialises
 # feedback beads. Until then, fetch comments via gh and stage them
 # manually if needed.

@@ -12,7 +12,12 @@ This skill is the rule carrier for any PR-related work driven by the
 
 Prefer `pg-pr` over ad-hoc `gh` invocations for anything PR-related:
 
-- Discover: `pg-pr pr view <n>`, `pg-pr pr files`, `pg-pr pr commits`
+- Discover (PR facts only): `pg-connector pr show <owner/repo>#<n>`,
+  `pg-connector pr files <owner/repo>#<n>`,
+  `pg-connector pr commits <owner/repo>#<n>` — resolve `<owner/repo>` via
+  `pg-connector scm branch detect` when not already known. Every result is
+  wrapped in `{protocolVersion, schemaVersion, result}`; pipe through
+  `jq '.result'` rather than reading the bare payload `pg-pr` used to print.
 - Worktree: `pg-pr worktree add|remove|list <n>`
 - Sync: `pg-pr sync` (refreshes merge-request beads)
 - Create/update: `pg-pr pr create`, `pg-pr pr update <n>`

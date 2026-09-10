@@ -21,12 +21,18 @@ Inputs are passed in the prompt by the orchestrator. Expect:
 
 1. Get commits:
    ```bash
-   pg-pr pr commits --base <BASE_REF> --json
+   REPO=$(pg-connector scm branch detect | jq -r '.result.repo')
+   pg-connector pr commits "$REPO#<PR_NUMBER>" | jq '.result'
    ```
+   Note: each commit's `message` field is the headline/subject line only —
+   the retired `pg-pr pr commits --base <BASE_REF> --json` also exposed a
+   separate multi-line `body`, which `pg-connector pr commits` does not
+   carry. Judge atomicity from subjects and the diff itself when body text
+   would have mattered.
 2. Review commit message format and atomicity.
 3. Get PR metadata:
    ```bash
-   pg-pr pr view <PR_NUMBER> --json
+   pg-connector pr show "$REPO#<PR_NUMBER>" | jq '.result'
    ```
 4. Review PR title, description, scope.
 5. Output JSON of the form:

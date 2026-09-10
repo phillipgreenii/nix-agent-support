@@ -40,9 +40,17 @@ Inputs are passed in the prompt by the orchestrator. Expect:
 ## Workflow
 
 1. **Extract ticket IDs** from branch (`username.TICKET-ID.desc`),
-   commits (via `pg-pr pr commits --base <BASE_REF> --json`), and PR
-   description (via `pg-pr pr view <PR_NUMBER> --json`). A valid
-   ticket matches `[A-Z]+-\d+`.
+   commits (via `pg-connector pr commits <REPO>#<PR_NUMBER>`, `<REPO>`
+   resolved from `pg-connector scm branch detect | jq -r '.result.repo'`),
+   and PR description (via `pg-connector pr show <REPO>#<PR_NUMBER>`; both
+   results are wrapped — read `.result.commits[].message` /
+   `.result.body`). A valid ticket matches `[A-Z]+-\d+`.
+
+   Note: `pg-connector pr commits`'s `message` field carries only the
+   commit's headline/subject line, not the full multi-line body the
+   retired `pg-pr pr commits --base <BASE_REF> --json` exposed — a ticket
+   ID mentioned only in a commit body (not its subject, the branch name, or
+   the PR description) will not surface here.
 
    If no tickets found, return:
 

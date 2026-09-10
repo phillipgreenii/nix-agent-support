@@ -35,7 +35,7 @@ Always run, in this order:
 
 ```bash
 # 1. Existing PR body (only if updating a description).
-pg-pr pr view <pr> --repo <owner/name> --json
+pg-connector pr show <owner/name>#<pr> | jq '.result'
 
 # 2. Changed files with add/delete counts.
 pg-pr pr files --base origin/main --json
@@ -44,11 +44,21 @@ pg-pr pr files --base origin/main --json
 pg-pr pr commits --base origin/main --json
 ```
 
-- `pr view --json`'s `identity.body` is the PR's existing description.
-  When updating a description, treat it as the starting point — preserve
-  any hand-authored sections that look intentional (e.g. a "Notes for
-  reviewer" block). Title generation only ever runs at PR creation, so
-  this step doesn't apply there.
+- `pg-connector pr show`'s `.result.body` is the PR's existing description
+  (pg-connector wraps every result in a `{protocolVersion, schemaVersion,
+result}` envelope — `jq '.result'`, not the bare payload the retired
+  pg-pr view command used to print). When updating a description, treat it
+  as the starting point — preserve any hand-authored sections that look
+  intentional (e.g. a "Notes for reviewer" block). Title generation only
+  ever runs at PR creation, so this step doesn't apply there.
+- Steps 2/3 stay on `pg-pr pr files|commits`, deliberately not
+  `pg-connector pr files|commits`: both modes above need the diff/commits
+  of the **local** branch against `--base`, not GitHub's already-pushed
+  record of an existing PR — "Creating a new PR" has no PR id yet to target
+  a connector call at, and "Updating" is describing what's about to be
+  pushed, not what GitHub already has on record. `pg-connector pr
+files|commits` are id-keyed, targeted ops with no local-diff mode, so
+  there is no drop-in replacement for this local-diff use here.
 - `pr files --json` returns `{"files": [{path, additions, deletions,
 binary}, ...]}`. Use it to see the shape and area of the change.
 - `pr commits --json` returns `{"commits": [{sha, subject, body,
@@ -81,7 +91,7 @@ is `develop`), pass a different `--base`.
 
 **Tone:** matter-of-fact, present tense, technical. Match the
 repository's other recent PRs if you can see them via `gh pr list` or
-`pg-pr pr view` on adjacent PRs.
+`pg-connector pr show` on adjacent PRs.
 
 ## What NOT to do (either skill)
 
